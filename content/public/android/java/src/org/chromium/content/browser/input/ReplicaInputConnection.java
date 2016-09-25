@@ -81,6 +81,18 @@ public class ReplicaInputConnection
         public Handler getHandler() {
             return mHandler;
         }
+
+        @Override
+        public void onWindowFocusChanged(boolean gainFocus) {}
+
+        @Override
+        public void onViewFocusChanged(boolean gainFocus) {}
+
+        @Override
+        public void onViewAttachedToWindow() {}
+
+        @Override
+        public void onViewDetachedFromWindow() {}
     }
 
     @VisibleForTesting
@@ -103,7 +115,8 @@ public class ReplicaInputConnection
 
     @Override
     public void updateStateOnUiThread(String text, int selectionStart, int selectionEnd,
-            int compositionStart, int compositionEnd, boolean singleLine, boolean isNonImeChange) {
+            int compositionStart, int compositionEnd, boolean singleLine, boolean isNonImeChange,
+            boolean inBatchEditMode) {
         if (DEBUG_LOGS) {
             Log.w(TAG, "updateState [%s] [%s %s] [%s %s] [%b] [%b]", text, selectionStart,
                     selectionEnd, compositionStart, compositionEnd, singleLine, isNonImeChange);

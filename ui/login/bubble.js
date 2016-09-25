@@ -19,22 +19,22 @@ cr.define('cr.ui', function() {
    * Bubble key codes.
    * @enum {number}
    */
-  var KeyCodes = {
-    TAB: 'U+0009',
+  var Keys = {
+    TAB: 'Tab',
     ENTER: 'Enter',
-    ESC: 'U+001B',
-    SPACE: 'U+0020'
+    ESC: 'Escape',
+    SPACE: ' '
   };
 
   /**
    * Bubble attachment side.
-   * @enum {string}
+   * @enum {number}
    */
   Bubble.Attachment = {
-    RIGHT: 'bubble-right',
-    LEFT: 'bubble-left',
-    TOP: 'bubble-top',
-    BOTTOM: 'bubble-bottom'
+    RIGHT: 0,
+    LEFT: 1,
+    TOP: 2,
+    BOTTOM: 3
   };
 
   Bubble.prototype = {
@@ -61,6 +61,10 @@ cr.define('cr.ui', function() {
       this.selfClickHandler_ = this.handleSelfClick_.bind(this);
       this.ownerDocument.addEventListener('click',
                                           this.handleDocClick_.bind(this));
+      // Set useCapture to true because scroll event does not bubble.
+      this.ownerDocument.addEventListener('scroll',
+                                          this.handleScroll_.bind(this),
+                                          true);
       this.ownerDocument.addEventListener('keydown',
                                           this.docKeyDownHandler_);
       window.addEventListener('blur', this.handleWindowBlur_.bind(this));
@@ -130,26 +134,13 @@ cr.define('cr.ui', function() {
     },
 
     /**
-     * Sets the attachment of the bubble.
-     * @param {!Attachment} attachment Bubble attachment.
-     */
-    setAttachment_: function(attachment) {
-      for (var k in Bubble.Attachment) {
-        var v = Bubble.Attachment[k];
-        this.classList.toggle(v, v == attachment);
-      }
-    },
-
-    /**
      * Shows the bubble for given anchor element.
      * @param {!Object} pos Bubble position (left, top, right, bottom in px).
-     * @param {!Attachment} attachment Bubble attachment (on which side of the
-     *     specified position it should be displayed).
      * @param {HTMLElement} opt_content Content to show in bubble.
      *     If not specified, bubble element content is shown.
      * @private
      */
-    showContentAt_: function(pos, attachment, opt_content) {
+    showContentAt_: function(pos, opt_content) {
       this.style.top = this.style.left = this.style.right = this.style.bottom =
           'auto';
       for (var k in pos) {
@@ -160,7 +151,6 @@ cr.define('cr.ui', function() {
         this.innerHTML = '';
         this.appendChild(opt_content);
       }
-      this.setAttachment_(attachment);
       this.hidden = false;
       this.classList.remove('faded');
     },
@@ -199,6 +189,7 @@ cr.define('cr.ui', function() {
 
       if (opt_padding == undefined)
         opt_padding = DEFAULT_PADDING;
+      opt_padding += 10;
 
       var origin = cr.ui.login.DisplayManager.getPosition(el);
       var offset = opt_offset == undefined ?
@@ -248,7 +239,7 @@ cr.define('cr.ui', function() {
       }
 
       this.anchor_ = el;
-      this.showContentAt_(pos, attachment, opt_content);
+      this.showContentAt_(pos, opt_content);
     },
 
     /**
@@ -301,6 +292,15 @@ cr.define('cr.ui', function() {
     },
 
     /**
+     * Handler of scroll event.
+     * @private
+     */
+    handleScroll_: function(e) {
+      if (!this.hidden)
+        this.hide();
+    },
+
+    /**
      * Handler of document click event.
      * @private
      */
@@ -327,20 +327,20 @@ cr.define('cr.ui', function() {
       }
       // Artificial tab-cycle.
 
-      if (e.keyIdentifier == KeyCodes.TAB && e.shiftKey == true &&
+      if (e.key == Keys.TAB && e.shiftKey == true &&
           e.target == this.firstBubbleElement_) {
         this.lastBubbleElement_.focus();
         e.preventDefault();
       }
-      if (e.keyIdentifier == KeyCodes.TAB && e.shiftKey == false &&
+      if (e.key == Keys.TAB && e.shiftKey == false &&
           e.target == this.lastBubbleElement_) {
         this.firstBubbleElement_.focus();
         e.preventDefault();
       }
       // Close bubble on ESC or on hitting spacebar or Enter at close-button.
-      if (e.keyIdentifier == KeyCodes.ESC ||
-          ((e.keyIdentifier == KeyCodes.ENTER ||
-            e.keyIdentifier == KeyCodes.SPACE) &&
+      if (e.key == Keys.ESC ||
+          ((e.key == Keys.ENTER ||
+            e.key == Keys.SPACE) &&
              e.target && e.target.classList.contains('close-button')))
         this.hide();
     },

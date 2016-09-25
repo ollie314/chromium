@@ -7,13 +7,17 @@ import("//mojo/public/tools/bindings/mojom.gni")
 mojom("interfaces") {
   sources = [
     "audio_decoder.mojom",
+    "audio_output.mojom",
+    "audio_parameters.mojom",
     "content_decryption_module.mojom",
     "decryptor.mojom",
     "demuxer_stream.mojom",
+    "media_service.mojom",
     "media_types.mojom",
     "output_protection.mojom",
     "renderer.mojom",
     "service_factory.mojom",
+    "video_decoder.mojom",
   ]
 
   if (is_chromeos) {
@@ -24,7 +28,24 @@ mojom("interfaces") {
     sources += [ "provision_fetcher.mojom" ]
   }
 
-  deps = [
-    "//ui/mojo/geometry:interfaces",
+  public_deps = [
+    "//mojo/common:common_custom_types",
+    "//services/shell/public/interfaces",
+    "//ui/gfx/geometry/mojo",
+    "//url/mojo:url_mojom_gurl",
+  ]
+
+  use_new_wrapper_types = false
+}
+
+mojom("image_capture") {
+  sources = [
+    "image_capture.mojom",
+  ]
+}
+
+mojom("remoting") {
+  sources = [
+    "remoting.mojom",
   ]
 }

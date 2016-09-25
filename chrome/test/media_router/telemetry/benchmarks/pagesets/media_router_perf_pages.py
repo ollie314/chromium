@@ -2,12 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import utils
+
 from telemetry import page
 from telemetry import story
 from benchmarks.pagesets import media_router_page
 from telemetry.core import exceptions
 from telemetry.page import shared_page_state
 
+SESSION_TIME = 300  # 5 minutes
 
 class SharedState(shared_page_state.SharedPageState):
   """Shared state that restarts the browser for every single story."""
@@ -31,19 +34,14 @@ class CastDialogPage(media_router_page.CastPage):
         shared_page_state_class=shared_page_state_class)
 
   def RunPageInteractions(self, action_runner):
-     # Wait for 5s after Chrome is opened in order to get consistent results.
+    # Wait for 5s after Chrome is opened in order to get consistent results.
     action_runner.Wait(5)
     with action_runner.CreateInteraction('LaunchDialog'):
-      action_runner.ExecuteJavaScript('collectPerfData();')
-      self._WaitForResult(
-          action_runner,
-          lambda: action_runner.EvaluateJavaScript('initialized'),
-          'Failed to initialize')
-
+      # Open dialog
       action_runner.TapElement(selector='#start_session_button')
       action_runner.Wait(5)
+      # Close media router dialog
       for tab in action_runner.tab.browser.tabs:
-        # Close media router dialog
         if tab.url == 'chrome://media-router/':
           self.CloseDialog(tab)
 
@@ -58,8 +56,11 @@ class CastIdlePage(CastDialogPage):
         shared_page_state_class=SharedState)
 
   def RunPageInteractions(self, action_runner):
-    super(CastIdlePage, self).RunPageInteractions(action_runner)
-    action_runner.Wait(15)
+    # Wait for 5s after Chrome is opened in order to get consistent results.
+    action_runner.Wait(5)
+    with action_runner.CreateInteraction('Idle'):
+      action_runner.ExecuteJavaScript('collectPerfData();')
+      action_runner.Wait(SESSION_TIME)
 
 
 class CastFlingingPage(media_router_page.CastPage):
@@ -72,15 +73,17 @@ class CastFlingingPage(media_router_page.CastPage):
         shared_page_state_class=SharedState)
 
   def RunPageInteractions(self, action_runner):
-     # Wait for 5s after Chrome is opened in order to get consistent results.
+    sink_name = self._GetDeviceName()
+    # Wait for 5s after Chrome is opened in order to get consistent results.
     action_runner.Wait(5)
     with action_runner.CreateInteraction('flinging'):
-      action_runner.ExecuteJavaScript('collectPerfData();')
 
       self._WaitForResult(
           action_runner,
           lambda: action_runner.EvaluateJavaScript('initialized'),
-          'Failed to initialize')
+          'Failed to initialize',
+          timeout=30)
+      self.CloseExistingRoute(action_runner, sink_name)
 
       # Start session
       action_runner.TapElement(selector='#start_session_button')
@@ -89,12 +92,11 @@ class CastFlingingPage(media_router_page.CastPage):
           lambda: len(action_runner.tab.browser.tabs) >= 2,
           'MR dialog never showed up.')
 
-      # Wait for 2s to make sure the dialog is fully loaded.
-      action_runner.Wait(2)
       for tab in action_runner.tab.browser.tabs:
         # Choose sink
         if tab.url == 'chrome://media-router/':
-          self.ChooseSink(tab, self._GetDeviceName())
+          self.WaitUntilDialogLoaded(action_runner, tab)
+          self.ChooseSink(tab, sink_name)
 
       self._WaitForResult(
         action_runner,
@@ -103,27 +105,72 @@ class CastFlingingPage(media_router_page.CastPage):
          timeout=10)
 
       # Load Media
-      # TODO: use local video instead of the public one.
       self.ExecuteAsyncJavaScript(
           action_runner,
-          'loadMedia("http://easyhtml5video.com/images/happyfit2.mp4");',
+          'loadMedia("%s");' % utils.GetInternalVideoURL(),
           lambda: action_runner.EvaluateJavaScript('currentMedia'),
-          'Failed to load media')
+          'Failed to load media',
+          timeout=120)
 
-      action_runner.Wait(20)
+      action_runner.Wait(5)
+      action_runner.ExecuteJavaScript('collectPerfData();')
+      action_runner.Wait(SESSION_TIME)
       # Stop session
       self.ExecuteAsyncJavaScript(
           action_runner,
           'stopSession();',
           lambda: not action_runner.EvaluateJavaScript('currentSession'),
-          'Failed to stop session')
+          'Failed to stop session',
+          timeout=30)
+
+
+class CastMirroringPage(media_router_page.CastPage):
+  """Cast page to mirror a tab to Chromecast device."""
+
+  def __init__(self, page_set):
+    super(CastMirroringPage, self).__init__(
+        page_set=page_set,
+        url='file://mirroring.html',
+        shared_page_state_class=SharedState)
+
+  def RunPageInteractions(self, action_runner):
+    sink_name = self._GetDeviceName()
+    # Wait for 5s after Chrome is opened in order to get consistent results.
+    action_runner.Wait(5)
+    with action_runner.CreateInteraction('mirroring'):
+      self.CloseExistingRoute(action_runner, sink_name)
+
+      # Start session
+      action_runner.TapElement(selector='#start_session_button')
+      self._WaitForResult(
+          action_runner,
+          lambda: len(action_runner.tab.browser.tabs) >= 2,
+          'MR dialog never showed up.')
+
+      for tab in action_runner.tab.browser.tabs:
+        # Choose sink
+        if tab.url == 'chrome://media-router/':
+          self.WaitUntilDialogLoaded(action_runner, tab)
+          self.ChooseSink(tab, sink_name)
+
+      # Wait for 5s to make sure the route is created.
+      action_runner.Wait(5)
+      action_runner.TapElement(selector='#start_session_button')
+      action_runner.Wait(2)
+      for tab in action_runner.tab.browser.tabs:
+        if tab.url == 'chrome://media-router/':
+          if not self.CheckIfExistingRoute(tab, sink_name):
+            raise page.page_test.Failure('Failed to start mirroring session.')
+      action_runner.ExecuteJavaScript('collectPerfData();')
+      action_runner.Wait(SESSION_TIME)
+      self.CloseExistingRoute(action_runner, sink_name)
 
 
 class MediaRouterDialogPageSet(story.StorySet):
   """Pageset for media router dialog latency tests."""
 
   def __init__(self):
-    super(MediaRouterDailogPageSet, self).__init__(
+    super(MediaRouterDialogPageSet, self).__init__(
         cloud_storage_bucket=story.PARTNER_BUCKET)
     self.AddStory(CastDialogPage(self))
 
@@ -136,3 +183,13 @@ class MediaRouterCPUMemoryPageSet(story.StorySet):
         cloud_storage_bucket=story.PARTNER_BUCKET)
     self.AddStory(CastIdlePage(self))
     self.AddStory(CastFlingingPage(self))
+    self.AddStory(CastMirroringPage(self))
+
+
+class CPUMemoryPageSet(story.StorySet):
+  """Pageset to get baseline CPU and memory usage."""
+
+  def __init__(self):
+    super(CPUMemoryPageSet, self).__init__(
+        cloud_storage_bucket=story.PARTNER_BUCKET)
+    self.AddStory(CastIdlePage(self))

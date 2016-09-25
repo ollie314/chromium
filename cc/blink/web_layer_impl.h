@@ -19,13 +19,14 @@
 #include "third_party/WebKit/public/platform/WebColor.h"
 #include "third_party/WebKit/public/platform/WebDoublePoint.h"
 #include "third_party/WebKit/public/platform/WebFloatPoint.h"
+#include "third_party/WebKit/public/platform/WebFloatSize.h"
 #include "third_party/WebKit/public/platform/WebLayer.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
-#include "third_party/skia/include/utils/SkMatrix44.h"
+#include "third_party/skia/include/core/SkMatrix44.h"
 
 namespace blink {
 struct WebFloatRect;
@@ -44,18 +45,18 @@ class Layer;
 
 namespace cc_blink {
 
-class WebLayerImpl : public blink::WebLayer {
+class CC_BLINK_EXPORT WebLayerImpl : public NON_EXPORTED_BASE(blink::WebLayer) {
  public:
-  CC_BLINK_EXPORT WebLayerImpl();
-  CC_BLINK_EXPORT explicit WebLayerImpl(scoped_refptr<cc::Layer>);
+  WebLayerImpl();
+  explicit WebLayerImpl(scoped_refptr<cc::Layer>);
   ~WebLayerImpl() override;
 
-  CC_BLINK_EXPORT cc::Layer* layer() const;
+  cc::Layer* layer() const;
 
   // If set to true, content opaqueness cannot be changed using setOpaque.
   // However, it can still be modified using SetContentsOpaque on the
   // cc::Layer.
-  CC_BLINK_EXPORT void SetContentsOpaqueIsFixed(bool fixed);
+  void SetContentsOpaqueIsFixed(bool fixed);
 
   // WebLayer implementation.
   int id() const override;
@@ -96,9 +97,9 @@ class WebLayerImpl : public blink::WebLayer {
   void setBackgroundColor(blink::WebColor color) override;
   blink::WebColor backgroundColor() const override;
   void setFilters(const cc::FilterOperations& filters) override;
+  void setFiltersOrigin(const blink::WebFloatPoint& origin) override;
   void setBackgroundFilters(const cc::FilterOperations& filters) override;
   bool hasActiveAnimationForTesting() override;
-  void setForceRenderSurface(bool force) override;
   void setScrollPositionDouble(blink::WebDoublePoint position) override;
   blink::WebDoublePoint scrollPositionDouble() const override;
   void setScrollClipLayer(blink::WebLayer* clip_layer) override;
@@ -123,14 +124,19 @@ class WebLayerImpl : public blink::WebLayer {
   void setPositionConstraint(
       const blink::WebLayerPositionConstraint& constraint) override;
   blink::WebLayerPositionConstraint positionConstraint() const override;
+  void setStickyPositionConstraint(
+      const blink::WebLayerStickyPositionConstraint& constraint) override;
+  blink::WebLayerStickyPositionConstraint stickyPositionConstraint()
+      const override;
   void setScrollClient(blink::WebLayerScrollClient* client) override;
   void setLayerClient(cc::LayerClient* client) override;
   const cc::Layer* ccLayer() const override;
   cc::Layer* ccLayer() override;
-  void setElementId(uint64_t id) override;
-  uint64_t elementId() const override;
+  void setElementId(const cc::ElementId&) override;
+  cc::ElementId elementId() const override;
   void setCompositorMutableProperties(uint32_t properties) override;
   uint32_t compositorMutableProperties() const override;
+  void setHasWillChangeTransformHint(bool has_will_change) override;
 
   void setScrollParent(blink::WebLayer* parent) override;
   void setClipParent(blink::WebLayer* parent) override;

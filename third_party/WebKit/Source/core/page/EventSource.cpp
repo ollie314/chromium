@@ -43,6 +43,7 @@
 #include "core/events/MessageEvent.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
@@ -55,6 +56,7 @@
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/WebURLRequest.h"
 #include "wtf/text/StringBuilder.h"
+#include <memory>
 
 namespace blink {
 
@@ -66,7 +68,7 @@ inline EventSource::EventSource(ExecutionContext* context, const KURL& url, cons
     , m_url(url)
     , m_currentURL(url)
     , m_withCredentials(eventSourceInit.withCredentials())
-    , m_state(CONNECTING)
+    , m_state(kConnecting)
     , m_connectTimer(this, &EventSource::connectTimerFired)
     , m_reconnectDelay(defaultReconnectDelay)
 {
@@ -74,6 +76,11 @@ inline EventSource::EventSource(ExecutionContext* context, const KURL& url, cons
 
 EventSource* EventSource::create(ExecutionContext* context, const String& url, const EventSourceInit& eventSourceInit, ExceptionState& exceptionState)
 {
+    if (context->isDocument())
+        UseCounter::count(toDocument(context), UseCounter::EventSourceDocument);
+    else
+        UseCounter::count(context, UseCounter::EventSourceWorker);
+
     if (url.isEmpty()) {
         exceptionState.throwDOMException(SyntaxError, "Cannot open an EventSource to an empty URL.");
         return nullptr;
@@ -101,23 +108,23 @@ EventSource* EventSource::create(ExecutionContext* context, const String& url, c
 
 EventSource::~EventSource()
 {
-    ASSERT(m_state == CLOSED);
-    ASSERT(!m_loader);
+    DCHECK_EQ(kClosed, m_state);
+    DCHECK(!m_loader);
 }
 
 void EventSource::scheduleInitialConnect()
 {
-    ASSERT(m_state == CONNECTING);
-    ASSERT(!m_loader);
+    DCHECK_EQ(kConnecting, m_state);
+    DCHECK(!m_loader);
 
     m_connectTimer.startOneShot(0, BLINK_FROM_HERE);
 }
 
 void EventSource::connect()
 {
-    ASSERT(m_state == CONNECTING);
-    ASSERT(!m_loader);
-    ASSERT(getExecutionContext());
+    DCHECK_EQ(kConnecting, m_state);
+    DCHECK(!m_loader);
+    DCHECK(getExecutionContext());
 
     ExecutionContext& executionContext = *this->getExecutionContext();
     ResourceRequest request(m_currentURL);
@@ -158,18 +165,18 @@ void EventSource::networkRequestEnded()
 
     m_loader = nullptr;
 
-    if (m_state != CLOSED)
+    if (m_state != kClosed)
         scheduleReconnect();
 }
 
 void EventSource::scheduleReconnect()
 {
-    m_state = CONNECTING;
+    m_state = kConnecting;
     m_connectTimer.startOneShot(m_reconnectDelay / 1000.0, BLINK_FROM_HERE);
     dispatchEvent(Event::create(EventTypeNames::error));
 }
 
-void EventSource::connectTimerFired(Timer<EventSource>*)
+void EventSource::connectTimerFired(TimerBase*)
 {
     connect();
 }
@@ -191,8 +198,8 @@ EventSource::State EventSource::readyState() const
 
 void EventSource::close()
 {
-    if (m_state == CLOSED) {
-        ASSERT(!m_loader);
+    if (m_state == kClosed) {
+        DCHECK(!m_loader);
         return;
     }
     if (m_parser)
@@ -208,7 +215,7 @@ void EventSource::close()
         m_loader = nullptr;
     }
 
-    m_state = CLOSED;
+    m_state = kClosed;
 }
 
 const AtomicString& EventSource::interfaceName() const
@@ -221,11 +228,11 @@ ExecutionContext* EventSource::getExecutionContext() const
     return ActiveDOMObject::getExecutionContext();
 }
 
-void EventSource::didReceiveResponse(unsigned long, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
+void EventSource::didReceiveResponse(unsigned long, const ResourceResponse& response, std::unique_ptr<WebDataConsumerHandle> handle)
 {
     ASSERT_UNUSED(handle, !handle);
-    ASSERT(m_state == CONNECTING);
-    ASSERT(m_loader);
+    DCHECK_EQ(kConnecting, m_state);
+    DCHECK(m_loader);
 
     m_currentURL = response.url();
     m_eventStreamOrigin = SecurityOrigin::create(response.url())->toString();
@@ -238,9 +245,9 @@ void EventSource::didReceiveResponse(unsigned long, const ResourceResponse& resp
         responseIsValid = charset.isEmpty() || equalIgnoringCase(charset, "UTF-8");
         if (!responseIsValid) {
             StringBuilder message;
-            message.appendLiteral("EventSource's response has a charset (\"");
+            message.append("EventSource's response has a charset (\"");
             message.append(charset);
-            message.appendLiteral("\") that is not UTF-8. Aborting the connection.");
+            message.append("\") that is not UTF-8. Aborting the connection.");
             // FIXME: We are missing the source line.
             getExecutionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, message.toString()));
         }
@@ -248,16 +255,16 @@ void EventSource::didReceiveResponse(unsigned long, const ResourceResponse& resp
         // To keep the signal-to-noise ratio low, we only log 200-response with an invalid MIME type.
         if (statusCode == 200 && !mimeTypeIsValid) {
             StringBuilder message;
-            message.appendLiteral("EventSource's response has a MIME type (\"");
+            message.append("EventSource's response has a MIME type (\"");
             message.append(response.mimeType());
-            message.appendLiteral("\") that is not \"text/event-stream\". Aborting the connection.");
+            message.append("\") that is not \"text/event-stream\". Aborting the connection.");
             // FIXME: We are missing the source line.
             getExecutionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, message.toString()));
         }
     }
 
     if (responseIsValid) {
-        m_state = OPEN;
+        m_state = kOpen;
         AtomicString lastEventId;
         if (m_parser) {
             // The new parser takes over the event ID.
@@ -273,34 +280,34 @@ void EventSource::didReceiveResponse(unsigned long, const ResourceResponse& resp
 
 void EventSource::didReceiveData(const char* data, unsigned length)
 {
-    ASSERT(m_state == OPEN);
-    ASSERT(m_loader);
-    ASSERT(m_parser);
+    DCHECK_EQ(kOpen, m_state);
+    DCHECK(m_loader);
+    DCHECK(m_parser);
 
     m_parser->addBytes(data, length);
 }
 
 void EventSource::didFinishLoading(unsigned long, double)
 {
-    ASSERT(m_state == OPEN);
-    ASSERT(m_loader);
+    DCHECK_EQ(kOpen, m_state);
+    DCHECK(m_loader);
 
     networkRequestEnded();
 }
 
 void EventSource::didFail(const ResourceError& error)
 {
-    ASSERT(m_state != CLOSED);
-    ASSERT(m_loader);
+    DCHECK_NE(kClosed, m_state);
+    DCHECK(m_loader);
 
     if (error.isCancellation())
-        m_state = CLOSED;
+        m_state = kClosed;
     networkRequestEnded();
 }
 
 void EventSource::didFailAccessControlCheck(const ResourceError& error)
 {
-    ASSERT(m_loader);
+    DCHECK(m_loader);
 
     String message = "EventSource cannot load " + error.failingURL() + ". " + error.localizedDescription();
     getExecutionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, message));
@@ -310,7 +317,7 @@ void EventSource::didFailAccessControlCheck(const ResourceError& error)
 
 void EventSource::didFailRedirectCheck()
 {
-    ASSERT(m_loader);
+    DCHECK(m_loader);
 
     abortConnectionAttempt();
 }
@@ -318,7 +325,7 @@ void EventSource::didFailRedirectCheck()
 void EventSource::onMessageEvent(const AtomicString& eventType, const String& data, const AtomicString& lastEventId)
 {
     MessageEvent* e = MessageEvent::create();
-    e->initMessageEvent(eventType, false, false, SerializedScriptValueFactory::instance().create(data), m_eventStreamOrigin, lastEventId, 0, nullptr);
+    e->initMessageEvent(eventType, false, false, SerializedScriptValue::serialize(data), m_eventStreamOrigin, lastEventId, 0, nullptr);
 
     InspectorInstrumentation::willDispatchEventSourceEvent(getExecutionContext(), this, eventType, lastEventId, data);
     dispatchEvent(e);
@@ -331,10 +338,10 @@ void EventSource::onReconnectionTimeSet(unsigned long long reconnectionTime)
 
 void EventSource::abortConnectionAttempt()
 {
-    ASSERT(m_state == CONNECTING);
+    DCHECK_EQ(kConnecting, m_state);
 
     m_loader = nullptr;
-    m_state = CLOSED;
+    m_state = kClosed;
     networkRequestEnded();
 
     dispatchEvent(Event::create(EventTypeNames::error));
@@ -347,12 +354,13 @@ void EventSource::stop()
 
 bool EventSource::hasPendingActivity() const
 {
-    return m_state != CLOSED;
+    return m_state != kClosed;
 }
 
 DEFINE_TRACE(EventSource)
 {
     visitor->trace(m_parser);
+    visitor->trace(m_loader);
     EventTargetWithInlineData::trace(visitor);
     ActiveDOMObject::trace(visitor);
     EventSourceParser::Client::trace(visitor);

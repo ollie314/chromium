@@ -11,7 +11,7 @@ class AbortsPageLoadMetricsObserverTest
     : public page_load_metrics::PageLoadMetricsObserverTestHarness {
  protected:
   void RegisterObservers(page_load_metrics::PageLoadTracker* tracker) override {
-    tracker->AddObserver(base::WrapUnique(new AbortsPageLoadMetricsObserver()));
+    tracker->AddObserver(base::MakeUnique<AbortsPageLoadMetricsObserver>());
   }
 
   void SimulateTimingWithoutPaint() {
@@ -21,12 +21,49 @@ class AbortsPageLoadMetricsObserverTest
   }
 };
 
-TEST_F(AbortsPageLoadMetricsObserverTest, UnknownNavigationBeforeCommit) {
+TEST_F(AbortsPageLoadMetricsObserverTest, NewNavigationBeforeCommit) {
   StartNavigation(GURL("https://www.google.com"));
   // Simulate the user performing another navigation before commit.
   NavigateAndCommit(GURL("https://www.example.com"));
   histogram_tester().ExpectTotalCount(
-      internal::kHistogramAbortUnknownNavigationBeforeCommit, 1);
+      internal::kHistogramAbortNewNavigationBeforeCommit, 1);
+}
+
+TEST_F(AbortsPageLoadMetricsObserverTest, ReloadBeforeCommit) {
+  StartNavigation(GURL("https://www.google.com"));
+  // Simulate the user performing another navigation before commit.
+  NavigateWithPageTransitionAndCommit(GURL("https://www.example.com"),
+                                      ui::PAGE_TRANSITION_RELOAD);
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortReloadBeforeCommit, 1);
+}
+
+TEST_F(AbortsPageLoadMetricsObserverTest, ForwardBackBeforeCommit) {
+  StartNavigation(GURL("https://www.google.com"));
+  // Simulate the user performing another navigation before commit.
+  NavigateWithPageTransitionAndCommit(GURL("https://www.example.com"),
+                                      ui::PAGE_TRANSITION_FORWARD_BACK);
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortForwardBackBeforeCommit, 1);
+}
+
+TEST_F(AbortsPageLoadMetricsObserverTest,
+       NewProvisionalNavigationBeforeCommit) {
+  StartNavigation(GURL("https://www.google.com"));
+  StartNavigation(GURL("https://www.example.com"));
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortNewNavigationBeforeCommit, 1);
+}
+
+TEST_F(AbortsPageLoadMetricsObserverTest,
+       NewNavigationBeforeCommitNonTrackedPageLoad) {
+  StartNavigation(GURL("https://www.google.com"));
+  // Simulate the user performing another navigation before commit. Navigate to
+  // an untracked URL, to verify that we still log abort metrics even if the new
+  // navigation isn't tracked.
+  NavigateAndCommit(GURL("about:blank"));
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortNewNavigationBeforeCommit, 1);
 }
 
 TEST_F(AbortsPageLoadMetricsObserverTest, NewNavigationBeforePaint) {
@@ -36,6 +73,40 @@ TEST_F(AbortsPageLoadMetricsObserverTest, NewNavigationBeforePaint) {
   NavigateAndCommit(GURL("https://www.example.com"));
   histogram_tester().ExpectTotalCount(
       internal::kHistogramAbortNewNavigationBeforePaint, 1);
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortReloadBeforePaint, 0);
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortForwardBackBeforePaint, 0);
+}
+
+TEST_F(AbortsPageLoadMetricsObserverTest, ReloadBeforePaint) {
+  NavigateAndCommit(GURL("https://www.example.com"));
+  SimulateTimingWithoutPaint();
+  // Simulate the user performing a reload navigation before paint.
+  NavigateWithPageTransitionAndCommit(GURL("https://www.google.com"),
+                                      ui::PAGE_TRANSITION_RELOAD);
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortReloadBeforePaint, 1);
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortNewNavigationBeforePaint, 0);
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortForwardBackBeforePaint, 0);
+}
+
+TEST_F(AbortsPageLoadMetricsObserverTest, ForwardBackBeforePaint) {
+  NavigateAndCommit(GURL("https://www.example.com"));
+  SimulateTimingWithoutPaint();
+  // Simulate the user performing a forward/back navigation before paint.
+  NavigateWithPageTransitionAndCommit(
+      GURL("https://www.google.com"),
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_TYPED |
+                                ui::PAGE_TRANSITION_FORWARD_BACK));
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortForwardBackBeforePaint, 1);
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortNewNavigationBeforePaint, 0);
+  histogram_tester().ExpectTotalCount(
+      internal::kHistogramAbortReloadBeforePaint, 0);
 }
 
 TEST_F(AbortsPageLoadMetricsObserverTest, StopBeforeCommit) {
@@ -125,8 +196,6 @@ TEST_F(AbortsPageLoadMetricsObserverTest,
                                       1);
 }
 
-// TODO(bmcquade): add tests for reload, back/forward, and other aborts.
-
 TEST_F(AbortsPageLoadMetricsObserverTest, NoAbortNewNavigationFromAboutURL) {
   NavigateAndCommit(GURL("about:blank"));
   NavigateAndCommit(GURL("https://www.example.com"));
@@ -152,7 +221,18 @@ TEST_F(AbortsPageLoadMetricsObserverTest, NoAbortNewNavigationAfterPaint) {
   PopulateRequiredTimingFields(&timing);
   NavigateAndCommit(GURL("https://www.google.com"));
   SimulateTimingUpdate(timing);
+
+  // The test cannot assume that abort time will be > first_paint
+  // (1 micro-sec). If the system clock is low resolution, PageLoadTracker's
+  // abort time may be <= first_paint. In that case the histogram will be
+  // logged. Thus both 0 and 1 counts of histograms are considered good.
+
   NavigateAndCommit(GURL("https://www.example.com"));
-  histogram_tester().ExpectTotalCount(
-      internal::kHistogramAbortNewNavigationBeforePaint, 0);
+
+  base::HistogramTester::CountsMap counts_map =
+      histogram_tester().GetTotalCountsForPrefix(
+          internal::kHistogramAbortNewNavigationBeforePaint);
+
+  EXPECT_TRUE(counts_map.empty() ||
+              (counts_map.size() == 1 && counts_map.begin()->second == 1));
 }

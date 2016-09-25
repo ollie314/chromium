@@ -36,7 +36,7 @@
 
 namespace blink {
 
-static inline SVGCursorElement* resourceReferencedByCursorElement(const String& url, TreeScope& treeScope)
+static inline SVGCursorElement* resourceReferencedByCursorElement(const String& url, const TreeScope& treeScope)
 {
     Element* element = SVGURIReference::targetElementFromIRIString(url, treeScope);
     return isSVGCursorElement(element) ? toSVGCursorElement(element) : nullptr;
@@ -68,35 +68,16 @@ String CSSCursorImageValue::customCSSText() const
     return result.toString();
 }
 
-bool CSSCursorImageValue::updateIfSVGCursorIsUsed(Element* element)
+SVGCursorElement* CSSCursorImageValue::getSVGCursorElement(Element* element) const
 {
     if (!element || !element->isSVGElement())
-        return false;
+        return nullptr;
 
-    if (!isSVGCursor())
-        return false;
+    if (!hasFragmentInURL())
+        return nullptr;
 
     String url = toCSSImageValue(m_imageValue.get())->url();
-    if (SVGCursorElement* cursorElement = resourceReferencedByCursorElement(url, element->treeScope())) {
-        // FIXME: This will override hot spot specified in CSS, which is probably incorrect.
-        SVGLengthContext lengthContext(0);
-        m_hotSpotSpecified = true;
-        float x = roundf(cursorElement->x()->currentValue()->value(lengthContext));
-        m_hotSpot.setX(static_cast<int>(x));
-
-        float y = roundf(cursorElement->y()->currentValue()->value(lengthContext));
-        m_hotSpot.setY(static_cast<int>(y));
-
-        if (cachedImageURL() != element->document().completeURL(cursorElement->href()->currentValue()->value()))
-            clearImageResource();
-
-        SVGElement* svgElement = toSVGElement(element);
-        svgElement->setCursorImageValue(this);
-        cursorElement->addClient(svgElement);
-        return true;
-    }
-
-    return false;
+    return resourceReferencedByCursorElement(url, element->treeScope());
 }
 
 bool CSSCursorImageValue::isCachePending(float deviceScaleFactor) const
@@ -116,7 +97,7 @@ StyleImage* CSSCursorImageValue::cachedImage(float deviceScaleFactor) const
     return m_cachedImage.get();
 }
 
-StyleImage* CSSCursorImageValue::cacheImage(Document* document, float deviceScaleFactor)
+StyleImage* CSSCursorImageValue::cacheImage(const Document& document, float deviceScaleFactor)
 {
     if (m_imageValue->isImageSetValue())
         return toCSSImageSetValue(*m_imageValue).cacheImage(document, deviceScaleFactor);
@@ -127,11 +108,12 @@ StyleImage* CSSCursorImageValue::cacheImage(Document* document, float deviceScal
         // For SVG images we need to lazily substitute in the correct URL. Rather than attempt
         // to change the URL of the CSSImageValue (which would then change behavior like cssText),
         // we create an alternate CSSImageValue to use.
-        if (isSVGCursor() && document) {
+        if (hasFragmentInURL()) {
             CSSImageValue* imageValue = toCSSImageValue(m_imageValue.get());
             // FIXME: This will fail if the <cursor> element is in a shadow DOM (bug 59827)
-            if (SVGCursorElement* cursorElement = resourceReferencedByCursorElement(imageValue->url(), *document)) {
-                CSSImageValue* svgImageValue = CSSImageValue::create(document->completeURL(cursorElement->href()->currentValue()->value()));
+            if (SVGCursorElement* cursorElement = resourceReferencedByCursorElement(imageValue->url(), document)) {
+                CSSImageValue* svgImageValue = CSSImageValue::create(document.completeURL(cursorElement->href()->currentValue()->value()));
+                svgImageValue->setReferrer(imageValue->referrer());
                 m_cachedImage = svgImageValue->cacheImage(document);
                 return m_cachedImage.get();
             }
@@ -146,7 +128,7 @@ StyleImage* CSSCursorImageValue::cacheImage(Document* document, float deviceScal
     return nullptr;
 }
 
-bool CSSCursorImageValue::isSVGCursor() const
+bool CSSCursorImageValue::hasFragmentInURL() const
 {
     if (m_imageValue->isImageValue()) {
         CSSImageValue* imageValue = toCSSImageValue(m_imageValue.get());
@@ -156,14 +138,14 @@ bool CSSCursorImageValue::isSVGCursor() const
     return false;
 }
 
-String CSSCursorImageValue::cachedImageURL()
+String CSSCursorImageValue::cachedImageURL() const
 {
     if (!m_cachedImage || !m_cachedImage->isImageResource())
         return String();
     return toStyleFetchedImage(m_cachedImage)->cachedImage()->url().getString();
 }
 
-void CSSCursorImageValue::clearImageResource()
+void CSSCursorImageValue::clearImageResource() const
 {
     m_cachedImage = nullptr;
     m_isCachePending = true;

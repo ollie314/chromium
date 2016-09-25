@@ -59,14 +59,6 @@ const std::string INNER_FRAME_WITH_FOCUS_HTML =
     "<body><input id='box'></input></body></html>\"></iframe>"
     "</body></html>";
 
-const std::string TWO_SECOND_BEFORE_UNLOAD_HTML =
-    "<html><head><title>twosecondbeforeunload</title></head><body>"
-    "<script>window.onbeforeunload=function(e){"
-      "var start = new Date().getTime();"
-      "while(new Date().getTime() - start < 2000){}"
-      "return 'foo';"
-    "}</script></body></html>";
-
 const std::string INFINITE_UNLOAD_HTML =
     "<html><head><title>infiniteunload</title></head><body>"
     "<script>window.onunload=function(e){while(true){}}</script>"
@@ -161,7 +153,8 @@ class UnloadTest : public InProcessBrowserTest {
   // page without waiting for the first load to complete.
   void NavigateToNolistenersFileTwiceAsync() {
     GURL url(net::URLRequestMockHTTPJob::GetMockUrl("title2.html"));
-    ui_test_utils::NavigateToURLWithDisposition(browser(), url, CURRENT_TAB, 0);
+    ui_test_utils::NavigateToURLWithDisposition(
+        browser(), url, WindowOpenDisposition::CURRENT_TAB, 0);
     ui_test_utils::NavigateToURL(browser(), url);
     CheckTitle("Title Of Awesomeness");
   }
@@ -323,11 +316,11 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseWithInnerFocusedFrame) {
   window_observer.Wait();
 }
 
-// Tests closing the browser with a beforeunload handler that takes
-// two seconds to run.
-IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseTwoSecondBeforeUnload) {
-  LoadUrlAndQuitBrowser(TWO_SECOND_BEFORE_UNLOAD_HTML,
-                        "twosecondbeforeunload");
+// Tests closing the browser with a beforeunload handler that takes forever
+// by running an infinite loop.
+IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseInfiniteBeforeUnload) {
+  LoadUrlAndQuitBrowser(INFINITE_BEFORE_UNLOAD_HTML,
+                        "infinitebeforeunload");
 }
 
 // Tests closing the browser on a page with an unload listener registered where
@@ -410,7 +403,7 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseTabWhenOtherTabHasListener) {
       content::NotificationService::AllSources());
   content::SimulateMouseClick(
       browser()->tab_strip_model()->GetActiveWebContents(), 0,
-      blink::WebMouseEvent::ButtonLeft);
+      blink::WebMouseEvent::Button::Left);
   observer.Wait();
   load_stop_observer.Wait();
   CheckTitle("popup");
@@ -446,7 +439,7 @@ class FastUnloadTest : public UnloadTest {
 
   void NavigateToPageInNewTab(const char* name) {
     ui_test_utils::NavigateToURLWithDisposition(
-        browser(), GetUrl(name), NEW_FOREGROUND_TAB,
+        browser(), GetUrl(name), WindowOpenDisposition::NEW_FOREGROUND_TAB,
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
     CheckTitle(name);
   }

@@ -44,6 +44,38 @@ const char kHostOs_Help[] =
     "  - \"mac\"\n"
     "  - \"win\"\n";
 
+const char kInvoker[] = "invoker";
+const char kInvoker_HelpShort[] =
+    "invoker: [string] The invoking scope inside a template.";
+const char kInvoker_Help[] =
+    "invoker: [string] The invoking scope inside a template.\n"
+    "\n"
+    "  Inside a template invocation, this variable refers to the scope of\n"
+    "  the invoker of the template. Outside of template invocations, this\n"
+    "  variable is undefined.\n"
+    "\n"
+    "  All of the variables defined inside the template invocation are\n"
+    "  accessible as members of the \"invoker\" scope. This is the way that\n"
+    "  templates read values set by the callers.\n"
+    "\n"
+    "  This is often used with \"defined\" to see if a value is set on the\n"
+    "  invoking scope.\n"
+    "\n"
+    "  See \"gn help template\" for more examples.\n"
+    "\n"
+    "Example\n"
+    "\n"
+    "  template(\"my_template\") {\n"
+    "    print(invoker.sources)       # Prints [ \"a.cc\", \"b.cc\" ]\n"
+    "    print(defined(invoker.foo))  # Prints false.\n"
+    "    print(defined(invoker.bar))  # Prints true.\n"
+    "  }\n"
+    "\n"
+    "  my_template(\"doom_melon\") {\n"
+    "    sources = [ \"a.cc\", \"b.cc\" ]\n"
+    "    bar = 123\n"
+    "  }\n";
+
 const char kTargetCpu[] = "target_cpu";
 const char kTargetCpu_HelpShort[] =
     "target_cpu: [string] The desired cpu architecture for the build.";
@@ -52,13 +84,13 @@ const char kTargetCpu_Help[] =
     "\n"
     "  This value should be used to indicate the desired architecture for\n"
     "  the primary objects of the build. It will match the cpu architecture\n"
-    "  of the default toolchain.\n"
+    "  of the default toolchain, but not necessarily the current toolchain.\n"
     "\n"
     "  In many cases, this is the same as \"host_cpu\", but in the case\n"
-    "  of cross-compiles, this can be set to something different. This \n"
-    "  value is different from \"current_cpu\" in that it can be referenced\n"
-    "  from inside any toolchain. This value can also be ignored if it is\n"
-    "  not needed or meaningful for a project.\n"
+    "  of cross-compiles, this can be set to something different. This\n"
+    "  value is different from \"current_cpu\" in that it does not change\n"
+    "  based on the current toolchain. When writing rules, \"current_cpu\"\n"
+    "  should be used rather than \"target_cpu\" most of the time.\n"
     "\n"
     "  This value is not used internally by GN for any purpose, so it\n"
     "  may be set to whatever value is needed for the build.\n"
@@ -75,6 +107,47 @@ const char kTargetCpu_Help[] =
     "  - \"arm\"\n"
     "  - \"arm64\"\n"
     "  - \"mipsel\"\n";
+
+const char kTargetName[] = "target_name";
+const char kTargetName_HelpShort[] =
+    "target_name: [string] The name of the current target.";
+const char kTargetName_Help[] =
+    "target_name: [string] The name of the current target.\n"
+    "\n"
+    "  Inside a target or template invocation, this variable refers to the\n"
+    "  name given to the target or template invocation. Outside of these,\n"
+    "  this variable is undefined.\n"
+    "\n"
+    "  This is most often used in template definitions to name targets\n"
+    "  defined in the template based on the name of the invocation. This\n"
+    "  is necessary both to ensure generated targets have unique names and\n"
+    "  to generate a target with the exact name of the invocation that\n"
+    "  other targets can depend on.\n"
+    "\n"
+    "  Be aware that this value will always reflect the innermost scope. So\n"
+    "  when defining a target inside a template, target_name will refer to\n"
+    "  the target rather than the template invocation. To get the name of the\n"
+    "  template invocation in this case, you should save target_name to a\n"
+    "  temporary variable outside of any target definitions.\n"
+    "\n"
+    "  See \"gn help template\" for more examples.\n"
+    "\n"
+    "Example\n"
+    "\n"
+    "  executable(\"doom_melon\") {\n"
+    "    print(target_name)    # Prints \"doom_melon\".\n"
+    "  }\n"
+    "\n"
+    "  template(\"my_template\") {\n"
+    "    print(target_name)    # Prints \"space_ray\" when invoked below.\n"
+    "\n"
+    "    executable(target_name + \"_impl\") {\n"
+    "      print(target_name)  # Prints \"space_ray_impl\".\n"
+    "    }\n"
+    "  }\n"
+    "\n"
+    "  my_template(\"space_ray\") {\n"
+    "  }\n";
 
 const char kTargetOs[] = "target_os";
 const char kTargetOs_HelpShort[] =
@@ -535,6 +608,38 @@ const char kBundleResourcesDir_Help[] =
     "\n"
     "  See \"gn help bundle_root_dir\" for examples.\n";
 
+const char kBundleDepsFilter[] = "bundle_deps_filter";
+const char kBundleDepsFilter_HelpShort[] =
+    "bundle_deps_filter: [label list] A list of labels that are filtered out.";
+const char kBundleDepsFilter_Help[] =
+    "bundle_deps_filter: [label list] A list of labels that are filtered out.\n"
+    "\n"
+    "  A list of target labels.\n"
+    "\n"
+    "  This list contains target label patterns that should be filtered out\n"
+    "  when creating the bundle. Any target matching one of those label will\n"
+    "  be removed from the dependencies of the create_bundle target.\n"
+    "\n"
+    "  This is mostly useful when creating application extension bundle as\n"
+    "  the application extension has access to runtime resources from the\n"
+    "  application bundle and thus do not require a second copy.\n"
+    "\n"
+    "  See \"gn help create_bundle\" for more information.\n"
+    "\n"
+    "Example\n"
+    "\n"
+    "  create_bundle(\"today_extension\") {\n"
+    "    deps = [\n"
+    "      \"//base\"\n"
+    "    ]\n"
+    "    bundle_root_dir = \"$root_out_dir/today_extension.appex\"\n"
+    "    bundle_deps_filter = [\n"
+    "      # The extension uses //base but does not use any function calling\n"
+    "      # into third_party/icu and thus does not need the icudtl.dat file.\n"
+    "      \"//third_party/icu:icudata\",\n"
+    "    ]\n"
+    "  }\n";
+
 const char kBundleExecutableDir[] = "bundle_executable_dir";
 const char kBundleExecutableDir_HelpShort[] =
     "bundle_executable_dir: "
@@ -648,6 +753,54 @@ const char kCheckIncludes_Help[] =
     "    ...\n"
     "  }\n";
 
+const char kCodeSigningArgs[] = "code_signing_args";
+const char kCodeSigningArgs_HelpShort[] =
+    "code_signing_args: [string list] Arguments passed to code signing script.";
+const char kCodeSigningArgs_Help[] =
+    "code_signing_args: [string list] Arguments passed to code signing "
+        "script.\n"
+    "\n"
+    "  For create_bundle targets, code_signing_args is the list of arguments\n"
+    "  to pass to the code signing script. Typically you would use source\n"
+    "  expansion (see \"gn help source_expansion\") to insert the source file\n"
+    "  names.\n"
+    "\n"
+    "  See also \"gn help create_bundle\".\n";
+
+const char kCodeSigningScript[] = "code_signing_script";
+const char kCodeSigningScript_HelpShort[] =
+    "code_signing_script: [file name] Script for code signing.";
+const char kCodeSigningScript_Help[] =
+    "code_signing_script: [file name] Script for code signing."
+    "\n"
+    "  An absolute or buildfile-relative file name of a Python script to run\n"
+    "  for a create_bundle target to perform code signing step.\n"
+    "\n"
+    "  See also \"gn help create_bundle\".\n";
+
+const char kCodeSigningSources[] = "code_signing_sources";
+const char kCodeSigningSources_HelpShort[] =
+    "code_signing_sources: [file list] Sources for code signing step.";
+const char kCodeSigningSources_Help[] =
+    "code_signing_sources: [file list] Sources for code signing step.\n"
+    "\n"
+    "  A list of files used as input for code signing script step of a\n"
+    "  create_bundle target. Non-absolute paths will be resolved relative to\n"
+    "  the current build file.\n"
+    "\n"
+    "  See also \"gn help create_bundle\".\n";
+
+const char kCodeSigningOutputs[] = "code_signing_outputs";
+const char kCodeSigningOutputs_HelpShort[] =
+    "code_signing_outputs: [file list] Output files for code signing step.";
+const char kCodeSigningOutputs_Help[] =
+    "code_signing_outputs: [file list] Output files for code signing step.\n"
+    "\n"
+    "  Outputs from the code signing step of a create_bundle target. Must\n"
+    "  refer to files in the build directory.\n"
+    "\n"
+    "  See also \"gn help create_bundle\".\n";
+
 const char kCompleteStaticLib[] = "complete_static_lib";
 const char kCompleteStaticLib_HelpShort[] =
     "complete_static_lib: [boolean] Links all deps into a static library.";
@@ -664,9 +817,16 @@ const char kCompleteStaticLib_Help[] =
     "  In some cases the static library might be the final desired output.\n"
     "  For example, you may be producing a static library for distribution to\n"
     "  third parties. In this case, the static library should include code\n"
-    "  for all dependencies in one complete package. Since GN does not unpack\n"
-    "  static libraries to forward their contents up the dependency chain,\n"
-    "  it is an error for complete static libraries to depend on other static\n"
+    "  for all dependencies in one complete package. However, complete static\n"
+    "  libraries themselves are never linked into other complete static\n"
+    "  libraries. All complete static libraries are for distribution and\n"
+    "  linking them in would cause code duplication in this case. If the\n"
+    "  static library is not for distribution, it should not be complete.\n"
+    "\n"
+    "  GN treats non-complete static libraries as source sets when they are\n"
+    "  linked into complete static libraries. This is done because some tools\n"
+    "  like AR do not handle dependent static libraries properly. This makes\n"
+    "  it easier to write \"alink\" rules.\n"
     "\n"
     "  In rare cases it makes sense to list a header in more than one\n"
     "  target if it could be considered conceptually a member of both.\n"
@@ -756,7 +916,7 @@ const char kConfigs_Help[] =
 
 const char kConsole[] = "console";
 const char kConsole_HelpShort[] =
-    "console [boolean]: Run this action in the console pool.";
+    "console: [boolean] Run this action in the console pool.";
 const char kConsole_Help[] =
     "console: Run this action in the console pool.\n"
     "\n"
@@ -800,10 +960,13 @@ const char kData_Help[] =
     "  generated files both in the \"outputs\" list as well as the \"data\"\n"
     "  list.\n"
     "\n"
-    "  By convention, directories are be listed with a trailing slash:\n"
+    "  By convention, directories are listed with a trailing slash:\n"
     "    data = [ \"test/data/\" ]\n"
     "  However, no verification is done on these so GN doesn't enforce this.\n"
     "  The paths are just rebased and passed along when requested.\n"
+    "\n"
+    "  Note: On iOS and OS X, create_bundle targets will not be recursed\n"
+    "  into when gathering data. See \"gn help create_bundle\" for details.\n"
     "\n"
     "  See \"gn help runtime_deps\" for how these are used.\n";
 
@@ -821,6 +984,10 @@ const char kDataDeps_Help[] =
     "\n"
     "  This is normally used for things like plugins or helper programs that\n"
     "  a target needs at runtime.\n"
+    "\n"
+    "  Note: On iOS and OS X, create_bundle targets will not be recursed\n"
+    "  into when gathering data_deps. See \"gn help create_bundle\" for\n"
+    "  details.\n"
     "\n"
     "  See also \"gn help deps\" and \"gn help data\".\n"
     "\n"
@@ -858,13 +1025,23 @@ const char kDepfile_Help[] =
     "  the dependencies of the input. Empty or unset means that the script\n"
     "  doesn't generate the files.\n"
     "\n"
+    "  A depfile should be used only when a target depends on files that are\n"
+    "  not already specified by a target's inputs and sources. Likewise,\n"
+    "  depfiles should specify only those dependencies not already included\n"
+    "  in sources or inputs.\n"
+    "\n"
     "  The .d file should go in the target output directory. If you have more\n"
     "  than one source file that the script is being run over, you can use\n"
     "  the output file expansions described in \"gn help action_foreach\" to\n"
     "  name the .d file according to the input."
     "\n"
-    "  The format is that of a Makefile, and all of the paths should be\n"
-    "  relative to the root build directory.\n"
+    "  The format is that of a Makefile and all paths must be relative to the\n"
+    "  root build directory. Only one output may be listed and it must match\n"
+    "  the first output of the action.\n"
+    "\n"
+    "  Although depfiles are created by an action, they should not be listed\n"
+    "  in the action's \"outputs\" unless another target will use the file as\n"
+    "  an input.\n"
     "\n"
     "Example\n"
     "\n"
@@ -972,7 +1149,7 @@ const char kInputs_Help[] =
     "\n"
     "  The problem happens if a file is ever removed because the inputs are\n"
     "  not listed on the command line to the script. Because the script\n"
-    "  hasn't changed and all inputs are up-to-date, the script will not\n"
+    "  hasn't changed and all inputs are up to date, the script will not\n"
     "  re-run and you will get a stale build. Instead, either list all\n"
     "  inputs on the command line to the script, or if there are many, create\n"
     "  a separate list file that the script reads. As long as this file is\n"
@@ -986,13 +1163,11 @@ const char kInputs_Help[] =
     "  files in a target are compiled. So if you depend on generated headers,\n"
     "  you do not typically need to list them in the inputs section.\n"
     "\n"
-    "  Inputs for binary targets will be treated as order-only dependencies,\n"
-    "  meaning that they will be forced up-to-date before compiling or\n"
-    "  any files in the target, but changes in the inputs will not\n"
-    "  necessarily force the target to compile. This is because it is\n"
-    "  expected that the compiler will report the precise list of input\n"
-    "  dependencies required to recompile each file once the initial build\n"
-    "  is done.\n"
+    "  Inputs for binary targets will be treated as implicit dependencies,\n"
+    "  meaning that changes in any of the inputs will force all sources in\n"
+    "  the target to be recompiled. If an input only applies to a subset of\n"
+    "  source files, you may want to split those into a separate target to\n"
+    "  avoid unnecessary recompiles.\n"
     "\n"
     "Example\n"
     "\n"
@@ -1319,6 +1494,19 @@ const char kPrecompiledSource_Help[] =
     "  using \"msvc\"-style precompiled headers. It will be implicitly added\n"
     "  to the sources of the target. See \"gn help precompiled_header\".\n";
 
+const char kProductType[] = "product_type";
+const char kProductType_HelpShort[] =
+    "product_type: [string] Product type for Xcode projects.";
+const char kProductType_Help[] =
+    "product_type: Product type for Xcode projects.\n"
+    "\n"
+    "  Correspond to the type of the product of a create_bundle target. Only\n"
+    "  meaningful to Xcode (used as part of the Xcode project generation).\n"
+    "\n"
+    "  When generating Xcode project files, only create_bundle target with\n"
+    "  a non-empty product_type will have a corresponding target in Xcode\n"
+    "  project.\n";
+
 const char kPublic[] = "public";
 const char kPublic_HelpShort[] =
     "public: [file list] Declare public header files for a target.";
@@ -1640,6 +1828,7 @@ const VariableInfoMap& GetBuiltinVariables() {
     INSERT_VARIABLE(DefaultToolchain)
     INSERT_VARIABLE(HostCpu)
     INSERT_VARIABLE(HostOs)
+    INSERT_VARIABLE(Invoker)
     INSERT_VARIABLE(PythonPath)
     INSERT_VARIABLE(RootBuildDir)
     INSERT_VARIABLE(RootGenDir)
@@ -1647,6 +1836,7 @@ const VariableInfoMap& GetBuiltinVariables() {
     INSERT_VARIABLE(TargetCpu)
     INSERT_VARIABLE(TargetOs)
     INSERT_VARIABLE(TargetGenDir)
+    INSERT_VARIABLE(TargetName)
     INSERT_VARIABLE(TargetOutDir)
   }
   return info_map;
@@ -1663,6 +1853,7 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(AssertNoDeps)
     INSERT_VARIABLE(BundleRootDir)
     INSERT_VARIABLE(BundleResourcesDir)
+    INSERT_VARIABLE(BundleDepsFilter)
     INSERT_VARIABLE(BundleExecutableDir)
     INSERT_VARIABLE(BundlePlugInsDir)
     INSERT_VARIABLE(Cflags)
@@ -1671,6 +1862,10 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(CflagsObjC)
     INSERT_VARIABLE(CflagsObjCC)
     INSERT_VARIABLE(CheckIncludes)
+    INSERT_VARIABLE(CodeSigningArgs)
+    INSERT_VARIABLE(CodeSigningScript)
+    INSERT_VARIABLE(CodeSigningSources)
+    INSERT_VARIABLE(CodeSigningOutputs)
     INSERT_VARIABLE(CompleteStaticLib)
     INSERT_VARIABLE(Configs)
     INSERT_VARIABLE(Console)
@@ -1691,6 +1886,7 @@ const VariableInfoMap& GetTargetVariables() {
     INSERT_VARIABLE(Outputs)
     INSERT_VARIABLE(PrecompiledHeader)
     INSERT_VARIABLE(PrecompiledSource)
+    INSERT_VARIABLE(ProductType)
     INSERT_VARIABLE(Public)
     INSERT_VARIABLE(PublicConfigs)
     INSERT_VARIABLE(PublicDeps)

@@ -19,27 +19,25 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_mutable_config_values.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_client_config_parser.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_creator.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_util.h"
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
-#include "net/base/url_util.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
+#include "net/log/net_log_source_type.h"
 #include "net/proxy/proxy_server.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
-
-#if defined(USE_GOOGLE_API_KEYS)
-#include "google_apis/google_api_keys.h"
-#endif
 
 namespace data_reduction_proxy {
 
@@ -68,21 +66,16 @@ const char kUMAConfigServiceAuthExpired[] =
 const uint32_t kMaxBackgroundFetchIntervalSeconds = 6 * 60 * 60;  // 6 hours.
 #endif
 
-#if defined(USE_GOOGLE_API_KEYS)
-// Used in all Data Reduction Proxy URLs to specify API Key.
-const char kApiKeyName[] = "key";
-#endif
-
 // This is the default backoff policy used to communicate with the Data
 // Reduction Proxy configuration service.
 const net::BackoffEntry::Policy kDefaultBackoffPolicy = {
-    0,               // num_errors_to_ignore
-    1 * 1000,        // initial_delay_ms
-    4,               // multiply_factor
-    0.10,            // jitter_factor,
-    30 * 60 * 1000,  // maximum_backoff_ms
-    -1,              // entry_lifetime_ms
-    true,            // always_use_initial_delay
+    0,                // num_errors_to_ignore
+    30 * 1000,        // initial_delay_ms
+    4,                // multiply_factor
+    0.25,             // jitter_factor,
+    128 * 60 * 1000,  // maximum_backoff_ms
+    -1,               // entry_lifetime_ms
+    true,             // always_use_initial_delay
 };
 
 // Extracts the list of Data Reduction Proxy servers to use for HTTP requests.
@@ -92,23 +85,12 @@ std::vector<net::ProxyServer> GetProxiesForHTTP(
   for (const auto& server : proxy_config.http_proxy_servers()) {
     if (server.scheme() != ProxyServer_ProxyScheme_UNSPECIFIED) {
       proxies.push_back(net::ProxyServer(
-          config_parser::SchemeFromProxyScheme(server.scheme()),
+          protobuf_parser::SchemeFromProxyScheme(server.scheme()),
           net::HostPortPair(server.host(), server.port())));
     }
   }
 
   return proxies;
-}
-
-GURL AddApiKeyToUrl(const GURL& url) {
-  GURL new_url = url;
-#if defined(USE_GOOGLE_API_KEYS)
-  std::string api_key = google_apis::GetAPIKey();
-  if (google_apis::HasKeysConfigured() && !api_key.empty()) {
-    new_url = net::AppendOrReplaceQueryParameter(url, kApiKeyName, api_key);
-  }
-#endif
-  return net::AppendOrReplaceQueryParameter(new_url, "alt", "proto");
 }
 
 void RecordAuthExpiredHistogram(bool auth_expired) {
@@ -148,6 +130,7 @@ DataReductionProxyConfigServiceClient::DataReductionProxyConfigServiceClient(
     DataReductionProxyMutableConfigValues* config_values,
     DataReductionProxyConfig* config,
     DataReductionProxyEventCreator* event_creator,
+    DataReductionProxyIOData* io_data,
     net::NetLog* net_log,
     ConfigStorer config_storer)
     : params_(std::move(params)),
@@ -155,10 +138,11 @@ DataReductionProxyConfigServiceClient::DataReductionProxyConfigServiceClient(
       config_values_(config_values),
       config_(config),
       event_creator_(event_creator),
+      io_data_(io_data),
       net_log_(net_log),
       config_storer_(config_storer),
       backoff_entry_(&backoff_policy),
-      config_service_url_(AddApiKeyToUrl(params::GetConfigServiceURL())),
+      config_service_url_(util::AddApiKeyToUrl(params::GetConfigServiceURL())),
       enabled_(false),
       remote_config_applied_(false),
       url_request_context_getter_(nullptr),
@@ -171,6 +155,7 @@ DataReductionProxyConfigServiceClient::DataReductionProxyConfigServiceClient(
   DCHECK(config_values);
   DCHECK(config);
   DCHECK(event_creator);
+  DCHECK(io_data);
   DCHECK(net_log);
   DCHECK(config_service_url_.is_valid());
   // Constructed on the UI thread, but should be checked on the IO thread.
@@ -233,14 +218,15 @@ void DataReductionProxyConfigServiceClient::RetrieveConfig() {
   if (!enabled_)
     return;
 
-  bound_net_log_ = net::BoundNetLog::Make(
-      net_log_, net::NetLog::SOURCE_DATA_REDUCTION_PROXY);
+  net_log_with_source_ = net::NetLogWithSource::Make(
+      net_log_, net::NetLogSourceType::DATA_REDUCTION_PROXY);
   // Strip off query string parameters
   GURL::Replacements replacements;
   replacements.ClearQuery();
   GURL base_config_service_url =
       config_service_url_.ReplaceComponents(replacements);
-  event_creator_->BeginConfigRequest(bound_net_log_, base_config_service_url);
+  event_creator_->BeginConfigRequest(net_log_with_source_,
+                                     base_config_service_url);
   config_fetch_start_time_ = base::TimeTicks::Now();
 
   RetrieveRemoteConfig();
@@ -367,6 +353,15 @@ void DataReductionProxyConfigServiceClient::RetrieveRemoteConfig() {
   const std::string& session_key = request_options_->GetSecureSession();
   if (!session_key.empty())
     request.set_session_key(request_options_->GetSecureSession());
+  data_reduction_proxy::VersionInfo* version_info =
+      request.mutable_version_info();
+  uint32_t build;
+  uint32_t patch;
+  util::GetChromiumBuildAndPatchAsInts(util::ChromiumVersion(), &build, &patch);
+  version_info->set_client(util::GetStringForClient(io_data_->client()));
+  version_info->set_build(build);
+  version_info->set_patch(patch);
+  version_info->set_channel(io_data_->channel());
   request.SerializeToString(&serialized_request);
   std::unique_ptr<net::URLFetcher> fetcher =
       GetURLFetcherForConfig(config_service_url_, serialized_request);
@@ -387,6 +382,7 @@ void DataReductionProxyConfigServiceClient::InvalidateConfig() {
   config_storer_.Run(std::string());
   request_options_->Invalidate();
   config_values_->Invalidate();
+  io_data_->SetPingbackReportingFraction(0.0f);
   config_->ReloadConfig();
 }
 
@@ -401,9 +397,9 @@ DataReductionProxyConfigServiceClient::GetURLFetcherForConfig(
   fetcher->SetUploadData("application/x-protobuf", request_body);
   DCHECK(url_request_context_getter_);
   fetcher->SetRequestContext(url_request_context_getter_);
-  // Configure max retries to be at most kMaxRetries times for 5xx errors.
+  // |fetcher| should not retry on 5xx errors since the server may already be
+  // overloaded. Spurious 5xx errors are still retried on exponential backoff.
   static const int kMaxRetries = 5;
-  fetcher->SetMaxRetriesOn5xx(kMaxRetries);
   fetcher->SetAutomaticallyRetryOnNetworkChanges(kMaxRetries);
   return fetcher;
 }
@@ -434,7 +430,7 @@ void DataReductionProxyConfigServiceClient::HandleResponse(
   if (succeeded) {
     proxies = GetProxiesForHTTP(config.proxy_config());
     refresh_duration =
-        config_parser::DurationToTimeDelta(config.refresh_duration());
+        protobuf_parser::DurationToTimeDelta(config.refresh_duration());
 
     DCHECK(!config_fetch_start_time_.is_null());
     base::TimeDelta configuration_fetch_latency =
@@ -457,7 +453,7 @@ void DataReductionProxyConfigServiceClient::HandleResponse(
       succeeded, refresh_duration, GetBackoffEntry()->GetTimeUntilRelease());
 
   SetConfigRefreshTimer(next_config_refresh_time);
-  event_creator_->EndConfigRequest(bound_net_log_, status.error(),
+  event_creator_->EndConfigRequest(net_log_with_source_, status.error(),
                                    response_code,
                                    GetBackoffEntry()->failure_count(), proxies,
                                    refresh_duration, next_config_refresh_time);
@@ -466,6 +462,15 @@ void DataReductionProxyConfigServiceClient::HandleResponse(
 bool DataReductionProxyConfigServiceClient::ParseAndApplyProxyConfig(
     const ClientConfig& config) {
   DCHECK(thread_checker_.CalledOnValidThread());
+  float reporting_fraction = 0.0f;
+  if (config.has_pageload_metrics_config() &&
+      config.pageload_metrics_config().has_reporting_fraction()) {
+    reporting_fraction = config.pageload_metrics_config().reporting_fraction();
+  }
+  DCHECK_LE(0.0f, reporting_fraction);
+  DCHECK_GE(1.0f, reporting_fraction);
+  io_data_->SetPingbackReportingFraction(reporting_fraction);
+
   if (!config.has_proxy_config())
     return false;
 
@@ -476,14 +481,6 @@ bool DataReductionProxyConfigServiceClient::ParseAndApplyProxyConfig(
     return false;
 
   request_options_->SetSecureSession(config.session_key());
-  // If QUIC is enabled, the scheme of the first proxy (if it is HTTPS) would
-  // be changed to QUIC.
-  if (proxies[0].scheme() == net::ProxyServer::SCHEME_HTTPS && params_ &&
-      params_->quic_enabled()) {
-    proxies[0] = net::ProxyServer(net::ProxyServer::SCHEME_QUIC,
-                                  proxies[0].host_port_pair());
-    DCHECK_EQ(net::ProxyServer::SCHEME_QUIC, proxies[0].scheme());
-  }
   config_values_->UpdateValues(proxies);
   config_->ReloadConfig();
   remote_config_applied_ = true;

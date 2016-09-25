@@ -108,12 +108,14 @@ std::string GetDomainReliabilityProtocol(
   switch (connection_info) {
     case net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN:
       return "";
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP1:
+    case net::HttpResponseInfo::CONNECTION_INFO_HTTP0_9:
+    case net::HttpResponseInfo::CONNECTION_INFO_HTTP1_0:
+    case net::HttpResponseInfo::CONNECTION_INFO_HTTP1_1:
       return ssl_info_populated ? "HTTPS" : "HTTP";
     case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_SPDY2:
-    case net::HttpResponseInfo::CONNECTION_INFO_SPDY3:
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP2_14:
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP2_15:
+    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_SPDY3:
+    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_HTTP2_14:
+    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_HTTP2_15:
     case net::HttpResponseInfo::CONNECTION_INFO_HTTP2:
       return "SPDY";
     case net::HttpResponseInfo::CONNECTION_INFO_QUIC1_SPDY3:
@@ -152,7 +154,7 @@ void GetUploadResultFromResponseDetails(
 
   if (net_error == net::OK &&
       http_response_code == 503 &&
-      retry_after != base::TimeDelta()) {
+      !retry_after.is_zero()) {
     result->status = DomainReliabilityUploader::UploadResult::RETRY_AFTER;
     result->retry_after = retry_after;
     return;
@@ -228,8 +230,8 @@ ActualTime::~ActualTime() {}
 base::Time ActualTime::Now() { return base::Time::Now(); }
 base::TimeTicks ActualTime::NowTicks() { return base::TimeTicks::Now(); }
 
-scoped_ptr<MockableTime::Timer> ActualTime::CreateTimer() {
-  return scoped_ptr<MockableTime::Timer>(new ActualTimer());
+std::unique_ptr<MockableTime::Timer> ActualTime::CreateTimer() {
+  return std::unique_ptr<MockableTime::Timer>(new ActualTimer());
 }
 
 }  // namespace domain_reliability

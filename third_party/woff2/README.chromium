@@ -1,6 +1,6 @@
 Name: woff2
 URL: https://github.com/google/woff2
-Version: 4e698b8c6c5e070d53c340db9ddf160e21070ede
+Version: a15a8ab86b934cf436f8fac4a8a11ddf8b59d792
 License: Apache 2.0
 License File: LICENSE
 Security Critical: yes
@@ -13,4 +13,3 @@ Local Modifications:
 
 - BUILD.gn: Added.
 - woff2.gyp: Added.
-- src/port.h: Include <assert.h>.

@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "components/quirks/quirks_manager.h"
-#include "components/quirks/switches.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -23,10 +21,6 @@ const char kFakeIccData[] = {0x00, 0x00, 0x08, 0x90, 0x20, 0x20,
 class DeviceQuirksPolicyTest : public policy::DevicePolicyCrosBrowserTest {
  public:
   DeviceQuirksPolicyTest() {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(quirks::switches::kEnableQuirksClient);
-  }
 
   void SetUpInProcessBrowserTestFixture() override {
     InstallOwnerKey();
@@ -54,13 +48,13 @@ class DeviceQuirksPolicyTest : public policy::DevicePolicyCrosBrowserTest {
 
  protected:
   void RefreshPolicyAndWaitDeviceSettingsUpdated() {
+    base::RunLoop run_loop;
     std::unique_ptr<CrosSettings::ObserverSubscription> observer =
         CrosSettings::Get()->AddSettingsObserver(
-            kDeviceQuirksDownloadEnabled,
-            base::MessageLoop::current()->QuitWhenIdleClosure());
+            kDeviceQuirksDownloadEnabled, run_loop.QuitWhenIdleClosure());
 
     RefreshDevicePolicy();
-    base::MessageLoop::current()->Run();
+    run_loop.Run();
   }
 
   // Query QuirksManager for icc file, then run msg loop to wait for callback.

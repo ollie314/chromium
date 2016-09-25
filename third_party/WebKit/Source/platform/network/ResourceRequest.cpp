@@ -28,15 +28,32 @@
 
 #include "platform/HTTPNames.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "platform/network/NetworkUtils.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "public/platform/Platform.h"
 #include "public/platform/WebAddressSpace.h"
 #include "public/platform/WebCachePolicy.h"
 #include "public/platform/WebURLRequest.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
 double ResourceRequest::s_defaultTimeoutInterval = INT_MAX;
+
+ResourceRequest::ResourceRequest()
+{
+    initialize(KURL());
+}
+
+ResourceRequest::ResourceRequest(const String& urlString)
+{
+    initialize(KURL(ParsedURLString, urlString));
+}
+
+ResourceRequest::ResourceRequest(const KURL& url)
+{
+    initialize(url);
+}
 
 ResourceRequest::ResourceRequest(CrossThreadResourceRequestData* data)
     : ResourceRequest()
@@ -49,7 +66,7 @@ ResourceRequest::ResourceRequest(CrossThreadResourceRequestData* data)
     setHTTPMethod(AtomicString(data->m_httpMethod));
     setPriority(data->m_priority, data->m_intraPriorityValue);
 
-    m_httpHeaderFields.adopt(data->m_httpHeaders.release());
+    m_httpHeaderFields.adopt(std::move(data->m_httpHeaders));
 
     setHTTPBody(data->m_httpBody);
     setAttachedCredential(data->m_attachedCredential);
@@ -75,12 +92,16 @@ ResourceRequest::ResourceRequest(CrossThreadResourceRequestData* data)
     m_uiStartTime = data->m_uiStartTime;
     m_isExternalRequest = data->m_isExternalRequest;
     m_inputPerfMetricReportPolicy = data->m_inputPerfMetricReportPolicy;
-    m_followedRedirect = data->m_followedRedirect;
+    m_redirectStatus = data->m_redirectStatus;
 }
 
-PassOwnPtr<CrossThreadResourceRequestData> ResourceRequest::copyData() const
+ResourceRequest::ResourceRequest(const ResourceRequest&) = default;
+
+ResourceRequest& ResourceRequest::operator=(const ResourceRequest&) = default;
+
+std::unique_ptr<CrossThreadResourceRequestData> ResourceRequest::copyData() const
 {
-    OwnPtr<CrossThreadResourceRequestData> data = adoptPtr(new CrossThreadResourceRequestData());
+    std::unique_ptr<CrossThreadResourceRequestData> data = wrapUnique(new CrossThreadResourceRequestData());
     data->m_url = url().copy();
     data->m_cachePolicy = getCachePolicy();
     data->m_timeoutInterval = timeoutInterval();
@@ -117,8 +138,8 @@ PassOwnPtr<CrossThreadResourceRequestData> ResourceRequest::copyData() const
     data->m_uiStartTime = m_uiStartTime;
     data->m_isExternalRequest = m_isExternalRequest;
     data->m_inputPerfMetricReportPolicy = m_inputPerfMetricReportPolicy;
-    data->m_followedRedirect = m_followedRedirect;
-    return data.release();
+    data->m_redirectStatus = m_redirectStatus;
+    return data;
 }
 
 bool ResourceRequest::isEmpty() const
@@ -232,7 +253,7 @@ void ResourceRequest::clearHTTPReferrer()
     m_didSetHTTPReferrer = false;
 }
 
-void ResourceRequest::setHTTPOrigin(PassRefPtr<SecurityOrigin> origin)
+void ResourceRequest::setHTTPOrigin(const SecurityOrigin* origin)
 {
     setHTTPHeaderField(HTTPNames::Origin, origin->toAtomicString());
     if (origin->hasSuborigin())
@@ -245,7 +266,7 @@ void ResourceRequest::clearHTTPOrigin()
     m_httpHeaderFields.remove(HTTPNames::Suborigin);
 }
 
-void ResourceRequest::addHTTPOriginIfNeeded(PassRefPtr<SecurityOrigin> origin)
+void ResourceRequest::addHTTPOriginIfNeeded(const SecurityOrigin* origin)
 {
     if (!httpOrigin().isEmpty())
         return; // Request already has an Origin header.
@@ -266,7 +287,7 @@ void ResourceRequest::addHTTPOriginIfNeeded(PassRefPtr<SecurityOrigin> origin)
     if (originString.isEmpty()) {
         // If we don't know what origin header to attach, we attach the value
         // for an empty origin.
-        setHTTPOrigin(SecurityOrigin::createUnique());
+        setHTTPOrigin(SecurityOrigin::createUnique().get());
         return;
     }
     setHTTPOrigin(origin);
@@ -351,7 +372,7 @@ void ResourceRequest::setExternalRequestStateFromRequestorAddressSpace(WebAddres
     }
 
     WebAddressSpace targetSpace = WebAddressSpacePublic;
-    if (Platform::current()->isReservedIPAddress(m_url.host()))
+    if (NetworkUtils::isReservedIPAddress(m_url.host()))
         targetSpace = WebAddressSpacePrivate;
     if (SecurityOrigin::create(m_url)->isLocalhost())
         targetSpace = WebAddressSpaceLocal;
@@ -407,7 +428,7 @@ void ResourceRequest::initialize(const KURL& url)
     m_hasUserGesture = false;
     m_downloadToFile = false;
     m_useStreamOnResponse = false;
-    m_skipServiceWorker = false;
+    m_skipServiceWorker = WebURLRequest::SkipServiceWorker::None;
     m_shouldResetAppCache = false;
     m_priority = ResourceLoadPriorityLowest;
     m_intraPriorityValue = 0;
@@ -426,7 +447,7 @@ void ResourceRequest::initialize(const KURL& url)
     m_uiStartTime = 0;
     m_isExternalRequest = false;
     m_inputPerfMetricReportPolicy = InputToLoadPerfMetricReportPolicy::NoReport;
-    m_followedRedirect = false;
+    m_redirectStatus = RedirectStatus::NoRedirect;
     m_requestorOrigin = SecurityOrigin::createUnique();
 }
 

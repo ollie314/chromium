@@ -29,6 +29,7 @@
 
 #include "modules/accessibility/AXMediaControls.h"
 
+#include "core/layout/LayoutObject.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "platform/text/PlatformLocale.h"
 
@@ -141,7 +142,7 @@ String AccessibilityMediaControl::description(AXNameFrom nameFrom, AXDescription
 
 bool AccessibilityMediaControl::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
-    if (!m_layoutObject || !m_layoutObject->style() || m_layoutObject->style()->visibility() != VISIBLE || controlType() == MediaTimelineContainer)
+    if (!m_layoutObject || !m_layoutObject->style() || m_layoutObject->style()->visibility() != EVisibility::Visible || controlType() == MediaTimelineContainer)
         return true;
 
     return accessibilityIsIgnoredByDefault(ignoredReasons);
@@ -162,7 +163,6 @@ AccessibilityRole AccessibilityMediaControl::roleValue() const
 
     case MediaTimelineContainer:
         return GroupRole;
-
     default:
         break;
     }
@@ -250,7 +250,7 @@ AXObject* AccessibilityMediaTimeDisplay::create(LayoutObject* layoutObject, AXOb
 
 bool AccessibilityMediaTimeDisplay::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
-    if (!m_layoutObject || !m_layoutObject->style() || m_layoutObject->style()->visibility() != VISIBLE)
+    if (!m_layoutObject || !m_layoutObject->style() || m_layoutObject->style()->visibility() != EVisibility::Visible)
         return true;
 
     if (!m_layoutObject->style()->width().value())

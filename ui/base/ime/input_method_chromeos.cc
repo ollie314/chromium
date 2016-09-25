@@ -180,12 +180,13 @@ void InputMethodChromeOS::OnCaretBoundsChanged(const TextInputClient* client) {
 
   const gfx::Rect caret_rect = client->GetCaretBounds();
 
-  // Pepper doesn't support composition bounds, so fall back to caret bounds to
-  // avoid a bad user experience (the IME window moved to upper left corner).
   gfx::Rect composition_head;
   if (client->HasCompositionText())
     client->GetCompositionCharacterBounds(0, &composition_head);
-  else
+
+  // Pepper doesn't support composition bounds, so fall back to caret bounds to
+  // avoid a bad user experience (the IME window moved to upper left corner).
+  if (composition_head.IsEmpty())
     composition_head = caret_rect;
   candidate_window->SetCursorBounds(caret_rect, composition_head);
 
@@ -228,15 +229,6 @@ void InputMethodChromeOS::OnCaretBoundsChanged(const TextInputClient* client) {
 void InputMethodChromeOS::CancelComposition(const TextInputClient* client) {
   if (IsNonPasswordInputFieldFocused() && IsTextInputClientFocused(client))
     ResetContext();
-}
-
-void InputMethodChromeOS::OnInputLocaleChanged() {
-  // Not supported.
-}
-
-std::string InputMethodChromeOS::GetInputLocale() {
-  // Not supported.
-  return "";
 }
 
 bool InputMethodChromeOS::IsCandidatePopupOpen() const {
@@ -455,6 +447,11 @@ void InputMethodChromeOS::CommitText(const std::string& text) {
   const base::string16 utf16_text = base::UTF8ToUTF16(text);
   if (utf16_text.empty())
     return;
+
+  if (!CanComposeInline()) {
+    // Hides the candidate window for preedit text.
+    UpdateCompositionText(CompositionText(), 0, false);
+  }
 
   // Append the text to the buffer, because commit signal might be fired
   // multiple times when processing a key event.

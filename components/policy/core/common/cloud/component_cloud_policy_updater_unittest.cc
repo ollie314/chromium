@@ -7,6 +7,7 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/values.h"
@@ -19,12 +20,12 @@
 #include "components/policy/core/common/policy_bundle.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/policy/proto/chrome_extension_policy.pb.h"
+#include "components/policy/proto/device_management_backend.pb.h"
 #include "crypto/sha2.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "policy/proto/chrome_extension_policy.pb.h"
-#include "policy/proto/device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -69,16 +70,16 @@ class ComponentCloudPolicyUpdaterTest : public testing::Test {
   void SetUp() override;
   void TearDown() override;
 
-  scoped_ptr<em::PolicyFetchResponse> CreateResponse();
+  std::unique_ptr<em::PolicyFetchResponse> CreateResponse();
 
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   base::ScopedTempDir temp_dir_;
-  scoped_ptr<ResourceCache> cache_;
-  scoped_ptr<ComponentCloudPolicyStore> store_;
+  std::unique_ptr<ResourceCache> cache_;
+  std::unique_ptr<ComponentCloudPolicyStore> store_;
   MockComponentCloudPolicyStoreDelegate store_delegate_;
   net::TestURLFetcherFactory fetcher_factory_;
-  scoped_ptr<ExternalPolicyDataFetcherBackend> fetcher_backend_;
-  scoped_ptr<ComponentCloudPolicyUpdater> updater_;
+  std::unique_ptr<ExternalPolicyDataFetcherBackend> fetcher_backend_;
+  std::unique_ptr<ComponentCloudPolicyUpdater> updater_;
   ComponentPolicyBuilder builder_;
   PolicyBundle expected_bundle_;
 };
@@ -86,7 +87,7 @@ class ComponentCloudPolicyUpdaterTest : public testing::Test {
 void ComponentCloudPolicyUpdaterTest::SetUp() {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   task_runner_ = new base::TestSimpleTaskRunner();
-  cache_.reset(new ResourceCache(temp_dir_.path(), task_runner_));
+  cache_.reset(new ResourceCache(temp_dir_.GetPath(), task_runner_));
   store_.reset(new ComponentCloudPolicyStore(&store_delegate_, cache_.get()));
   store_->SetCredentials(ComponentPolicyBuilder::kFakeUsername,
                          ComponentPolicyBuilder::kFakeToken);
@@ -108,18 +109,12 @@ void ComponentCloudPolicyUpdaterTest::SetUp() {
 
   PolicyNamespace ns(POLICY_DOMAIN_EXTENSIONS, kTestExtension);
   PolicyMap& policy = expected_bundle_.Get(ns);
-  policy.Set("Name",
-             POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER,
+  policy.Set("Name", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
              POLICY_SOURCE_CLOUD,
-             new base::StringValue("disabled"),
-             NULL);
-  policy.Set("Second",
-             POLICY_LEVEL_RECOMMENDED,
-             POLICY_SCOPE_USER,
-             POLICY_SOURCE_CLOUD,
-             new base::StringValue("maybe"),
-             NULL);
+             base::MakeUnique<base::StringValue>("disabled"), nullptr);
+  policy.Set("Second", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_USER,
+             POLICY_SOURCE_CLOUD, base::MakeUnique<base::StringValue>("maybe"),
+             nullptr);
 }
 
 void ComponentCloudPolicyUpdaterTest::TearDown() {
@@ -127,10 +122,10 @@ void ComponentCloudPolicyUpdaterTest::TearDown() {
   task_runner_->RunUntilIdle();
 }
 
-scoped_ptr<em::PolicyFetchResponse>
-    ComponentCloudPolicyUpdaterTest::CreateResponse() {
+std::unique_ptr<em::PolicyFetchResponse>
+ComponentCloudPolicyUpdaterTest::CreateResponse() {
   builder_.Build();
-  return make_scoped_ptr(new em::PolicyFetchResponse(builder_.policy()));
+  return base::MakeUnique<em::PolicyFetchResponse>(builder_.policy());
 }
 
 TEST_F(ComponentCloudPolicyUpdaterTest, FetchAndCache) {

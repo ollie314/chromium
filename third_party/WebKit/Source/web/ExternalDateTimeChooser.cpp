@@ -25,9 +25,9 @@
 
 #include "web/ExternalDateTimeChooser.h"
 
-#if !ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 #include "core/InputTypeNames.h"
 #include "core/html/forms/DateTimeChooserClient.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "public/web/WebDateTimeChooserCompletion.h"
 #include "public/web/WebDateTimeChooserParams.h"
 #include "public/web/WebViewClient.h"
@@ -78,6 +78,7 @@ DEFINE_TRACE(ExternalDateTimeChooser)
 ExternalDateTimeChooser::ExternalDateTimeChooser(DateTimeChooserClient* client)
     : m_client(client)
 {
+    DCHECK(!RuntimeEnabledFeatures::inputMultipleFieldsUIEnabled());
     DCHECK(client);
 }
 
@@ -177,5 +178,3 @@ AXObject* ExternalDateTimeChooser::rootAXObject()
 }
 
 } // namespace blink
-
-#endif

@@ -85,7 +85,7 @@ bool SegregatedPrefStore::GetValue(const std::string& key,
 }
 
 void SegregatedPrefStore::SetValue(const std::string& key,
-                                   scoped_ptr<base::Value> value,
+                                   std::unique_ptr<base::Value> value,
                                    uint32_t flags) {
   StoreForKey(key)->SetValue(key, std::move(value), flags);
 }
@@ -105,7 +105,7 @@ void SegregatedPrefStore::ReportValueChanged(const std::string& key,
 }
 
 void SegregatedPrefStore::SetValueSilently(const std::string& key,
-                                           scoped_ptr<base::Value> value,
+                                           std::unique_ptr<base::Value> value,
                                            uint32_t flags) {
   StoreForKey(key)->SetValueSilently(key, std::move(value), flags);
 }
@@ -166,14 +166,16 @@ SegregatedPrefStore::~SegregatedPrefStore() {
 }
 
 PersistentPrefStore* SegregatedPrefStore::StoreForKey(const std::string& key) {
-  return (ContainsKey(selected_preference_names_, key)
+  return (base::ContainsKey(selected_preference_names_, key)
               ? selected_pref_store_
-              : default_pref_store_).get();
+              : default_pref_store_)
+      .get();
 }
 
 const PersistentPrefStore* SegregatedPrefStore::StoreForKey(
     const std::string& key) const {
-  return (ContainsKey(selected_preference_names_, key)
+  return (base::ContainsKey(selected_preference_names_, key)
               ? selected_pref_store_
-              : default_pref_store_).get();
+              : default_pref_store_)
+      .get();
 }

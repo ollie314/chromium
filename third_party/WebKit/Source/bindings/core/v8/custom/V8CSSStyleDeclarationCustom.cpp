@@ -38,6 +38,7 @@
 #include "core/css/CSSStyleDeclaration.h"
 #include "core/css/CSSValue.h"
 #include "core/css/parser/CSSParser.h"
+#include "core/dom/custom/CEReactionsScope.h"
 #include "core/events/EventTarget.h"
 #include "wtf/ASCIICType.h"
 #include "wtf/PassRefPtr.h"
@@ -130,17 +131,18 @@ static CSSPropertyID parseCSSPropertyID(const String& propertyName)
 // Example: 'backgroundPositionY' -> 'background-position-y'
 //
 // Also, certain prefixes such as 'css-' are stripped.
-static CSSPropertyID cssPropertyInfo(v8::Local<v8::String> v8PropertyName)
+static CSSPropertyID cssPropertyInfo(const AtomicString& name)
 {
-    String propertyName = toCoreString(v8PropertyName);
     typedef HashMap<String, CSSPropertyID> CSSPropertyIDMap;
     DEFINE_STATIC_LOCAL(CSSPropertyIDMap, map, ());
-    CSSPropertyIDMap::iterator iter = map.find(propertyName);
+    CSSPropertyIDMap::iterator iter = map.find(name);
     if (iter != map.end())
         return iter->value;
 
-    CSSPropertyID unresolvedProperty = parseCSSPropertyID(propertyName);
-    map.add(propertyName, unresolvedProperty);
+    CSSPropertyID unresolvedProperty = parseCSSPropertyID(name);
+    if (unresolvedProperty == CSSPropertyVariable)
+        unresolvedProperty = CSSPropertyInvalid;
+    map.add(name, unresolvedProperty);
     ASSERT(!unresolvedProperty || CSSPropertyMetadata::isEnabledProperty(unresolvedProperty));
     return unresolvedProperty;
 }
@@ -166,30 +168,27 @@ void V8CSSStyleDeclaration::namedPropertyEnumeratorCustom(const v8::PropertyCall
     for (unsigned i = 0; i < propertyNamesLength; ++i) {
         String key = propertyNames.at(i);
         ASSERT(!key.isNull());
-        v8::Local<v8::Integer> index = v8::Integer::New(info.GetIsolate(), i);
-        if (!v8CallBoolean(properties->Set(context, index, v8String(info.GetIsolate(), key))))
+        if (!v8CallBoolean(properties->CreateDataProperty(context, i, v8String(info.GetIsolate(), key))))
             return;
     }
 
     v8SetReturnValue(info, properties);
 }
 
-void V8CSSStyleDeclaration::namedPropertyQueryCustom(v8::Local<v8::Name> v8Name, const v8::PropertyCallbackInfo<v8::Integer>& info)
+void V8CSSStyleDeclaration::namedPropertyQueryCustom(const AtomicString& name, const v8::PropertyCallbackInfo<v8::Integer>& info)
 {
-    if (!v8Name->IsString())
-        return;
     // NOTE: cssPropertyInfo lookups incur several mallocs.
     // Successful lookups have the same cost the first time, but are cached.
-    if (cssPropertyInfo(v8Name.As<v8::String>())) {
+    if (cssPropertyInfo(name)) {
         v8SetReturnValueInt(info, 0);
         return;
     }
 }
 
-void V8CSSStyleDeclaration::namedPropertyGetterCustom(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
+void V8CSSStyleDeclaration::namedPropertyGetterCustom(const AtomicString& name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
     // Search the style declaration.
-    CSSPropertyID unresolvedProperty = cssPropertyInfo(name.As<v8::String>());
+    CSSPropertyID unresolvedProperty = cssPropertyInfo(name);
 
     // Do not handle non-property names.
     if (!unresolvedProperty)
@@ -197,8 +196,7 @@ void V8CSSStyleDeclaration::namedPropertyGetterCustom(v8::Local<v8::Name> name, 
     CSSPropertyID resolvedProperty = resolveCSSPropertyID(unresolvedProperty);
 
     CSSStyleDeclaration* impl = V8CSSStyleDeclaration::toImpl(info.Holder());
-    // TODO(leviw): This API doesn't support custom properties.
-    CSSValue* cssValue = impl->getPropertyCSSValueInternal(resolvedProperty);
+    const CSSValue* cssValue = impl->getPropertyCSSValueInternal(resolvedProperty);
     if (cssValue) {
         v8SetReturnValueStringOrNull(info, cssValue->cssText(), info.GetIsolate());
         return;
@@ -208,22 +206,18 @@ void V8CSSStyleDeclaration::namedPropertyGetterCustom(v8::Local<v8::Name> name, 
     v8SetReturnValueString(info, result, info.GetIsolate());
 }
 
-void V8CSSStyleDeclaration::namedPropertySetterCustom(v8::Local<v8::Name> name, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
+void V8CSSStyleDeclaration::namedPropertySetterCustom(const AtomicString& name, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (!name->IsString())
-        return;
     CSSStyleDeclaration* impl = V8CSSStyleDeclaration::toImpl(info.Holder());
-    CSSPropertyID unresolvedProperty = cssPropertyInfo(name.As<v8::String>());
+    CSSPropertyID unresolvedProperty = cssPropertyInfo(name);
     if (!unresolvedProperty)
         return;
 
+    CEReactionsScope ceReactionsScope;
+
     TOSTRING_VOID(V8StringResource<TreatNullAsNullString>, propertyValue, value);
     ExceptionState exceptionState(ExceptionState::SetterContext, getPropertyName(resolveCSSPropertyID(unresolvedProperty)), "CSSStyleDeclaration", info.Holder(), info.GetIsolate());
-    // TODO(leviw): This API doesn't support custom properties.
     impl->setPropertyInternal(unresolvedProperty, String(), propertyValue, false, exceptionState);
-
-    if (exceptionState.throwIfNeeded())
-        return;
 
     v8SetReturnValue(info, value);
 }

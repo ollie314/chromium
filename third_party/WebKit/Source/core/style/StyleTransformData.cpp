@@ -29,7 +29,12 @@ namespace blink {
 StyleTransformData::StyleTransformData()
     : m_operations(ComputedStyle::initialTransform())
     , m_origin(ComputedStyle::initialTransformOrigin())
-    , m_motion(nullptr, ComputedStyle::initialMotionOffset(), ComputedStyle::initialMotionRotation())
+    , m_motion(
+        ComputedStyle::initialOffsetAnchor(),
+        ComputedStyle::initialOffsetPosition(),
+        nullptr,
+        ComputedStyle::initialOffsetDistance(),
+        ComputedStyle::initialOffsetRotation())
 {
 }
 

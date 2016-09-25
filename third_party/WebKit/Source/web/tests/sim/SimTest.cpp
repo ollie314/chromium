@@ -7,6 +7,8 @@
 #include "core/dom/Document.h"
 #include "platform/LayoutTestSupport.h"
 #include "platform/scroll/ScrollbarTheme.h"
+#include "platform/testing/UnitTestHelpers.h"
+#include "public/platform/WebSecurityOrigin.h"
 #include "public/web/WebCache.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebViewImpl.h"
@@ -31,6 +33,9 @@ SimTest::SimTest()
 
 SimTest::~SimTest()
 {
+    // Pump the message loop to process the load event.
+    testing::runPendingTasks();
+
     Document::setThreadedParsingEnabledForTesting(true);
     LayoutTestSupport::setMockThemeEnabledForTest(false);
     ScrollbarTheme::setMockScrollbarsEnabled(false);
@@ -40,8 +45,8 @@ SimTest::~SimTest()
 void SimTest::loadURL(const String& url)
 {
     WebURLRequest request;
-    request.initialize();
     request.setURL(KURL(ParsedURLString, url));
+    request.setRequestorOrigin(WebSecurityOrigin::createUnique());
     webView().mainFrameImpl()->loadRequest(request);
 }
 
@@ -52,7 +57,7 @@ Document& SimTest::document()
 
 WebViewImpl& SimTest::webView()
 {
-    return *m_webViewHelper.webViewImpl();
+    return *m_webViewHelper.webView();
 }
 
 const SimWebViewClient& SimTest::webViewClient() const

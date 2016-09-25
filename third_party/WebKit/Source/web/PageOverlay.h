@@ -33,33 +33,26 @@
 #include "platform/graphics/GraphicsLayerClient.h"
 #include "platform/graphics/paint/DisplayItemClient.h"
 #include "web/WebExport.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
 class GraphicsContext;
-class WebPageOverlay;
 class WebViewImpl;
 
 // Manages a layer that is overlaid on a WebView's content.
-// Clients can paint by implementing WebPageOverlay.
-//
-// With Slimming Paint, internal clients can extract a GraphicsContext to add
-// to the PaintController owned by the GraphicsLayer
 class WEB_EXPORT PageOverlay : public GraphicsLayerClient, public DisplayItemClient {
 public:
-    class Delegate : public GarbageCollectedFinalized<Delegate> {
+    class Delegate {
     public:
-        DEFINE_INLINE_VIRTUAL_TRACE() { }
+        virtual ~Delegate() { }
 
         // Paints page overlay contents.
         virtual void paintPageOverlay(const PageOverlay&, GraphicsContext&, const WebSize& webViewSize) const = 0;
-        virtual ~Delegate() { }
     };
 
-    static PassOwnPtr<PageOverlay> create(WebViewImpl*, PageOverlay::Delegate*);
+    static std::unique_ptr<PageOverlay> create(WebViewImpl*, std::unique_ptr<PageOverlay::Delegate>);
 
     ~PageOverlay();
 
@@ -78,11 +71,11 @@ public:
     String debugName(const GraphicsLayer*) const override;
 
 private:
-    PageOverlay(WebViewImpl*, PageOverlay::Delegate*);
+    PageOverlay(WebViewImpl*, std::unique_ptr<PageOverlay::Delegate>);
 
     WebViewImpl* m_viewImpl;
-    Persistent<PageOverlay::Delegate> m_delegate;
-    OwnPtr<GraphicsLayer> m_layer;
+    std::unique_ptr<PageOverlay::Delegate> m_delegate;
+    std::unique_ptr<GraphicsLayer> m_layer;
 };
 
 } // namespace blink

@@ -18,7 +18,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/drive/chromeos/change_list_loader.h"
 #include "components/drive/chromeos/drive_test_util.h"
 #include "components/drive/chromeos/fake_free_disk_space_getter.h"
@@ -126,13 +126,13 @@ class FileSystemTest : public testing::Test {
   }
 
   void SetUpResourceMetadataAndFileSystem() {
-    const base::FilePath metadata_dir = temp_dir_.path().AppendASCII("meta");
+    const base::FilePath metadata_dir = temp_dir_.GetPath().AppendASCII("meta");
     ASSERT_TRUE(base::CreateDirectory(metadata_dir));
     metadata_storage_.reset(new internal::ResourceMetadataStorage(
         metadata_dir, base::ThreadTaskRunnerHandle::Get().get()));
     ASSERT_TRUE(metadata_storage_->Initialize());
 
-    const base::FilePath cache_dir = temp_dir_.path().AppendASCII("files");
+    const base::FilePath cache_dir = temp_dir_.GetPath().AppendASCII("files");
     ASSERT_TRUE(base::CreateDirectory(cache_dir));
     cache_.reset(new internal::FileCache(
         metadata_storage_.get(),
@@ -146,9 +146,9 @@ class FileSystemTest : public testing::Test {
         base::ThreadTaskRunnerHandle::Get()));
     ASSERT_EQ(FILE_ERROR_OK, resource_metadata_->Initialize());
 
-    const base::FilePath temp_file_dir = temp_dir_.path().AppendASCII("tmp");
+    const base::FilePath temp_file_dir = temp_dir_.GetPath().AppendASCII("tmp");
     ASSERT_TRUE(base::CreateDirectory(temp_file_dir));
-    file_task_runner_ = content::BrowserThread::GetMessageLoopProxyForThread(
+    file_task_runner_ = content::BrowserThread::GetTaskRunnerForThread(
         content::BrowserThread::FILE);
     file_system_.reset(new FileSystem(
         pref_service_.get(), logger_.get(), cache_.get(), scheduler_.get(),
@@ -226,14 +226,14 @@ class FileSystemTest : public testing::Test {
     // Destroy the existing resource metadata to close DB.
     resource_metadata_.reset();
 
-    const base::FilePath metadata_dir = temp_dir_.path().AppendASCII("meta");
+    const base::FilePath metadata_dir = temp_dir_.GetPath().AppendASCII("meta");
     ASSERT_TRUE(base::CreateDirectory(metadata_dir));
     std::unique_ptr<internal::ResourceMetadataStorage,
                     test_util::DestroyHelperForTests>
         metadata_storage(new internal::ResourceMetadataStorage(
             metadata_dir, base::ThreadTaskRunnerHandle::Get().get()));
 
-    const base::FilePath cache_dir = temp_dir_.path().AppendASCII("files");
+    const base::FilePath cache_dir = temp_dir_.GetPath().AppendASCII("files");
     std::unique_ptr<internal::FileCache, test_util::DestroyHelperForTests>
         cache(new internal::FileCache(metadata_storage.get(), cache_dir,
                                       base::ThreadTaskRunnerHandle::Get().get(),
@@ -725,7 +725,7 @@ TEST_F(FileSystemTest, LoadFileSystemFromUpToDateCache) {
   EXPECT_TRUE(ReadDirectorySync(util::GetDriveMyDriveRootPath()));
 
   // SetUpTestFileSystem and FakeDriveService have the same
-  // changestamp (i.e. the local metadata is up-to-date), so no request for
+  // changestamp (i.e. the local metadata is up to date), so no request for
   // new resource list (i.e., call to GetResourceList) should happen.
   EXPECT_EQ(0, fake_drive_service_->file_list_load_count());
 

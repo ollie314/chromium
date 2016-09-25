@@ -13,7 +13,6 @@ import android.text.TextUtils;
 
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.banners.AppBannerManager;
 import org.chromium.chrome.browser.contextmenu.ChromeContextMenuPopulator;
 import org.chromium.chrome.browser.contextmenu.ContextMenuPopulator;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationDelegateImpl;
@@ -55,7 +54,7 @@ public class CustomTabDelegateFactory extends TabDelegateFactory {
 
         @Override
         public boolean startActivityIfNeeded(Intent intent) {
-            boolean isExternalProtocol = !UrlUtilities.isAcceptedScheme(intent.getDataString());
+            boolean isExternalProtocol = !UrlUtilities.isAcceptedScheme(intent.toUri(0));
             boolean hasDefaultHandler = hasDefaultHandler(intent);
             try {
                 // For a URL chrome can handle and there is no default set, handle it ourselves.
@@ -196,7 +195,7 @@ public class CustomTabDelegateFactory extends TabDelegateFactory {
     }
 
     @Override
-    public AppBannerManager createAppBannerManager(Tab tab) {
-        return null;
+    public boolean canShowAppBanners(Tab tab) {
+        return false;
     }
 }

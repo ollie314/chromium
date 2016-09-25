@@ -12,6 +12,7 @@
 #include "modules/serviceworkers/ExtendableEvent.h"
 #include "modules/serviceworkers/FetchEventInit.h"
 #include "modules/serviceworkers/RespondWithObserver.h"
+#include "modules/serviceworkers/WaitUntilObserver.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -26,9 +27,8 @@ class RespondWithObserver;
 class MODULES_EXPORT FetchEvent final : public ExtendableEvent {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static FetchEvent* create();
-    static FetchEvent* create(const AtomicString& type, const FetchEventInit&);
-    static FetchEvent* create(const AtomicString& type, const FetchEventInit&, RespondWithObserver*);
+    static FetchEvent* create(ScriptState*, const AtomicString& type, const FetchEventInit&);
+    static FetchEvent* create(ScriptState*, const AtomicString& type, const FetchEventInit&, RespondWithObserver*, WaitUntilObserver*);
 
     Request* request() const;
     String clientId() const;
@@ -41,8 +41,7 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
 protected:
-    FetchEvent();
-    FetchEvent(const AtomicString& type, const FetchEventInit&, RespondWithObserver*);
+    FetchEvent(ScriptState*, const AtomicString& type, const FetchEventInit&, RespondWithObserver*, WaitUntilObserver*);
 
 private:
     Member<RespondWithObserver> m_observer;

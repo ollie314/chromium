@@ -41,6 +41,10 @@ namespace version_info {
 enum class Channel;
 }
 
+namespace url {
+class Origin;
+}
+
 class ChromeContentBrowserClient : public content::ContentBrowserClient {
  public:
   ChromeContentBrowserClient();
@@ -78,22 +82,19 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool ShouldUseProcessPerSite(content::BrowserContext* browser_context,
                                const GURL& effective_url) override;
   bool DoesSiteRequireDedicatedProcess(content::BrowserContext* browser_context,
-                                       const GURL& effective_url) override;
+                                       const GURL& effective_site_url) override;
   bool ShouldLockToOrigin(content::BrowserContext* browser_context,
                           const GURL& effective_site_url) override;
   void GetAdditionalWebUISchemes(
       std::vector<std::string>* additional_schemes) override;
-  void GetAdditionalWebUIHostsToIgnoreParititionCheck(
-      std::vector<std::string>* hosts) override;
   bool LogWebUIUrl(const GURL& web_ui_url) const override;
   bool IsHandledURL(const GURL& url) override;
   bool CanCommitURL(content::RenderProcessHost* process_host,
                     const GURL& url) override;
-  bool IsIllegalOrigin(content::ResourceContext* resource_context,
-                       int child_process_id,
-                       const GURL& origin) override;
   bool ShouldAllowOpenURL(content::SiteInstance* site_instance,
                           const GURL& url) override;
+  void OverrideOpenURLParams(content::SiteInstance* site_instance,
+                             content::OpenURLParams* params) override;
   bool IsSuitableHost(content::RenderProcessHost* process_host,
                       const GURL& site_url) override;
   bool MayReuseHost(content::RenderProcessHost* process_host) override;
@@ -177,8 +178,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       bool overridable,
       bool strict_enforcement,
       bool expired_previous_decision,
-      const base::Callback<void(bool)>& callback,
-      content::CertificateRequestResultType* request) override;
+      const base::Callback<void(content::CertificateRequestResultType)>&
+          callback) override;
   void SelectClientCertificate(
       content::WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
@@ -197,6 +198,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                        WindowContainerType container_type,
                        const GURL& target_url,
                        const content::Referrer& referrer,
+                       const std::string& frame_name,
                        WindowOpenDisposition disposition,
                        const blink::WebWindowFeatures& features,
                        bool user_gesture,
@@ -210,28 +212,39 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   content::SpeechRecognitionManagerDelegate*
   CreateSpeechRecognitionManagerDelegate() override;
   net::NetLog* GetNetLog() override;
-  content::AccessTokenStore* CreateAccessTokenStore() override;
-  bool IsFastShutdownPossible() override;
   void OverrideWebkitPrefs(content::RenderViewHost* rvh,
                            content::WebPreferences* prefs) override;
   void BrowserURLHandlerCreated(content::BrowserURLHandler* handler) override;
   void ClearCache(content::RenderFrameHost* rfh) override;
   void ClearCookies(content::RenderFrameHost* rfh) override;
+  void ClearSiteData(content::BrowserContext* browser_context,
+                     const url::Origin& origin,
+                     bool remove_cookies,
+                     bool remove_storage,
+                     bool remove_cache,
+                     const base::Closure& callback) override;
   base::FilePath GetDefaultDownloadDirectory() override;
   std::string GetDefaultDownloadName() override;
   base::FilePath GetShaderDiskCacheDirectory() override;
   void DidCreatePpapiPlugin(content::BrowserPpapiHost* browser_host) override;
   content::BrowserPpapiHost* GetExternalBrowserPpapiHost(
       int plugin_process_id) override;
+  gpu::GpuChannelEstablishFactory* GetGpuChannelEstablishFactory() override;
   bool AllowPepperSocketAPI(
       content::BrowserContext* browser_context,
       const GURL& url,
       bool private_api,
       const content::SocketPermissionRequest* params) override;
+  bool IsPepperVpnProviderAPIAllowed(content::BrowserContext* browser_context,
+                                     const GURL& url) override;
+  std::unique_ptr<content::VpnServiceProxy> GetVpnServiceProxy(
+      content::BrowserContext* browser_context) override;
   ui::SelectFilePolicy* CreateSelectFilePolicy(
       content::WebContents* web_contents) override;
   void GetAdditionalAllowedSchemesForFileSystem(
       std::vector<std::string>* additional_schemes) override;
+  void GetSchemesBypassingSecureContextCheckWhitelist(
+      std::set<std::string>* schemes) override;
   void GetURLRequestAutoMountHandlers(
       std::vector<storage::URLRequestAutoMountHandler>* handlers) override;
   void GetAdditionalFileSystemBackends(
@@ -269,18 +282,25 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       int sandbox_type) const override;
   bool IsWin32kLockdownEnabledForMimeType(
       const std::string& mime_type) const override;
-  bool ShouldUseWindowsPrefetchArgument() const override;
 #endif
-  void RegisterFrameMojoShellServices(
-      content::ServiceRegistry* registry,
+  void ExposeInterfacesToRenderer(
+      shell::InterfaceRegistry* registry,
+      content::RenderProcessHost* render_process_host) override;
+  void ExposeInterfacesToMediaService(
+      shell::InterfaceRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
-  void RegisterRenderFrameMojoServices(
-      content::ServiceRegistry* registry,
+  void RegisterRenderFrameMojoInterfaces(
+      shell::InterfaceRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
+  void ExposeInterfacesToGpuProcess(
+      shell::InterfaceRegistry* registry,
+      content::GpuProcessHost* render_process_host) override;
   void RegisterInProcessMojoApplications(
       StaticMojoApplicationMap* apps) override;
   void RegisterOutOfProcessMojoApplications(
       OutOfProcessMojoApplicationMap* apps) override;
+  std::unique_ptr<base::Value> GetServiceManifestOverlay(
+      const std::string& name) override;
   void OpenURL(content::BrowserContext* browser_context,
                const content::OpenURLParams& params,
                const base::Callback<void(content::WebContents*)>& callback)

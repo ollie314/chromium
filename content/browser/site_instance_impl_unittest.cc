@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_vector.h"
+#include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/browsing_instance.h"
@@ -121,23 +122,22 @@ class SiteInstanceTest : public testing::Test {
     // calls StoragePartitionImplMap::PostCreateInitialization(), which posts
     // a task to the IO thread to create the AppCacheDatabase. Since the
     // message loop is not running, the AppCacheDatabase ends up getting
-    // created when DrainMessageLoops() gets called at the end of a test case.
+    // created when DrainMessageLoop() gets called at the end of a test case.
     // Immediately after, the test case ends and the AppCacheDatabase gets
-    // scheduled for deletion. Here, call DrainMessageLoops() again so the
+    // scheduled for deletion. Here, call DrainMessageLoop() again so the
     // AppCacheDatabase actually gets deleted.
-    DrainMessageLoops();
+    DrainMessageLoop();
   }
 
   void set_privileged_process_id(int process_id) {
     browser_client_.set_privileged_process_id(process_id);
   }
 
-  void DrainMessageLoops() {
+  void DrainMessageLoop() {
     // We don't just do this in TearDown() because we create TestBrowserContext
     // objects in each test, which will be destructed before
     // TearDown() is called.
-    base::MessageLoop::current()->RunUntilIdle();
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   SiteInstanceTestBrowserClient* browser_client() { return &browser_client_; }
@@ -205,7 +205,7 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
 
   // Make sure that we flush any messages related to the above WebContentsImpl
   // destruction.
-  DrainMessageLoops();
+  DrainMessageLoop();
 
   EXPECT_EQ(1, browser_client()->GetAndClearSiteInstanceDeleteCount());
   EXPECT_EQ(1, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
@@ -243,7 +243,7 @@ TEST_F(SiteInstanceTest, CloneNavigationEntry) {
   EXPECT_EQ(1, browser_client()->GetAndClearSiteInstanceDeleteCount());
   EXPECT_EQ(1, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 // Test to ensure GetProcess returns and creates processes correctly.
@@ -263,7 +263,7 @@ TEST_F(SiteInstanceTest, GetProcess) {
   EXPECT_TRUE(host2.get() != nullptr);
   EXPECT_NE(host1.get(), host2.get());
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 // Test to ensure SetSite and site() work properly.
@@ -277,7 +277,7 @@ TEST_F(SiteInstanceTest, SetSite) {
 
   EXPECT_TRUE(instance->HasSite());
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 // Test to ensure GetSiteForURL properly returns sites for URLs.
@@ -289,12 +289,38 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
   EXPECT_EQ("http", site_url.scheme());
   EXPECT_EQ("google.com", site_url.host());
 
-  // Ports are irrlevant.
+  // Ports are irrelevant.
   test_url = GURL("https://www.google.com:8080");
   site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("https://google.com"), site_url);
 
-  // Hostnames without TLDs are ok.
+  // Punycode is canonicalized.
+  test_url = GURL("http://☃snowperson☃.net:333/");
+  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  EXPECT_EQ(GURL("http://xn--snowperson-di0gka.net"), site_url);
+
+  // Username and password are stripped out.
+  test_url = GURL("ftp://username:password@ftp.chromium.org/files/README");
+  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  EXPECT_EQ(GURL("ftp://chromium.org"), site_url);
+
+  // Literal IP addresses of any flavor are okay.
+  test_url = GURL("http://127.0.0.1/a.html");
+  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  EXPECT_EQ(GURL("http://127.0.0.1"), site_url);
+  EXPECT_EQ("127.0.0.1", site_url.host());
+
+  test_url = GURL("http://2130706433/a.html");
+  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  EXPECT_EQ(GURL("http://127.0.0.1"), site_url);
+  EXPECT_EQ("127.0.0.1", site_url.host());
+
+  test_url = GURL("http://[::1]:2/page.html");
+  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  EXPECT_EQ(GURL("http://[::1]"), site_url);
+  EXPECT_EQ("[::1]", site_url.host());
+
+  // Hostnames without TLDs are okay.
   test_url = GURL("http://foo/a.html");
   site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("http://foo"), site_url);
@@ -327,6 +353,25 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
   EXPECT_EQ("javascript", site_url.scheme());
   EXPECT_FALSE(site_url.has_host());
 
+  // Blob URLs extract the site from the origin.
+  test_url = GURL(
+      "blob:gopher://www.ftp.chromium.org/"
+      "4d4ff040-6d61-4446-86d3-13ca07ec9ab9");
+  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  EXPECT_EQ(GURL("gopher://chromium.org"), site_url);
+
+  // Private domains are preserved, appspot being such a site.
+  test_url = GURL(
+      "blob:http://www.example.appspot.com:44/"
+      "4d4ff040-6d61-4446-86d3-13ca07ec9ab9");
+  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  EXPECT_EQ(GURL("http://example.appspot.com"), site_url);
+
+  // The site of filesystem URLs is determined by the inner URL.
+  test_url = GURL("filesystem:http://www.google.com/foo/bar.html?foo#bar");
+  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  EXPECT_EQ(GURL("http://google.com"), site_url);
+
   // Guest URLs are special and need to have the path in the site as well,
   // since it affects the StoragePartition configuration.
   std::string guest_url(kGuestScheme);
@@ -335,7 +380,7 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
   site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(test_url, site_url);
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 // Test of distinguishing URLs from different sites.  Most of this logic is
@@ -376,7 +421,7 @@ TEST_F(SiteInstanceTest, IsSameWebSite) {
   EXPECT_FALSE(SiteInstance::IsSameWebSite(nullptr, url_blank, url_foo_https));
   EXPECT_FALSE(SiteInstance::IsSameWebSite(nullptr, url_blank, url_foo_port));
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 // Test to ensure that there is only one SiteInstance per site in a given
@@ -448,7 +493,7 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSite) {
   // browsing_instances will be deleted when their SiteInstances are deleted.
   // The processes will be unregistered when the RPH scoped_ptrs go away.
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 // Test to ensure that there is only one RenderProcessHost per site for an
@@ -528,7 +573,7 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSiteInBrowserContext) {
   // browsing_instances will be deleted when their SiteInstances are deleted.
   // The processes will be unregistered when the RPH scoped_ptrs go away.
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 static scoped_refptr<SiteInstanceImpl> CreateSiteInstance(
@@ -594,7 +639,7 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
     EXPECT_NE(webui1_instance->GetProcess(), hosts[i]);
   }
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 
   // Disable the process limit override.
   RenderProcessHost::SetMaxRendererProcessCount(0u);
@@ -656,7 +701,7 @@ TEST_F(SiteInstanceTest, HasWrongProcessForURL) {
   EXPECT_TRUE(
       webui_instance2->HasWrongProcessForURL(GURL("http://google.com")));
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 // Test to ensure that HasWrongProcessForURL behaves properly even when
@@ -688,7 +733,7 @@ TEST_F(SiteInstanceTest, HasWrongProcessForURLInSitePerProcess) {
 
   EXPECT_TRUE(instance->HasWrongProcessForURL(GURL("chrome://gpu")));
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 // Test that we do not reuse a process in process-per-site mode if it has the
@@ -728,7 +773,7 @@ TEST_F(SiteInstanceTest, ProcessPerSiteWithWrongBindings) {
   EXPECT_TRUE(instance2->HasProcess());
   EXPECT_NE(host.get(), host2.get());
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 // Test that we do not register processes with empty sites for process-per-site
@@ -749,7 +794,7 @@ TEST_F(SiteInstanceTest, NoProcessPerSiteForEmptySite) {
   EXPECT_FALSE(RenderProcessHostImpl::GetProcessHostForSite(
       browser_context.get(), GURL()));
 
-  DrainMessageLoops();
+  DrainMessageLoop();
 }
 
 TEST_F(SiteInstanceTest, DefaultSubframeSiteInstance) {

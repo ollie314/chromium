@@ -5,11 +5,11 @@
 #ifndef DictionaryTest_h
 #define DictionaryTest_h
 
+#include "bindings/core/v8/DoubleOrString.h"
 #include "bindings/core/v8/Nullable.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/dom/Element.h"
 #include "platform/heap/Handle.h"
 #include "wtf/HashMap.h"
@@ -19,6 +19,7 @@ namespace blink {
 
 class InternalDictionary;
 class InternalDictionaryDerived;
+class InternalDictionaryDerivedDerived;
 
 class DictionaryTest : public GarbageCollectedFinalized<DictionaryTest>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
@@ -39,6 +40,9 @@ public:
 
     void setDerived(const InternalDictionaryDerived&);
     void getDerived(InternalDictionaryDerived&);
+
+    void setDerivedDerived(const InternalDictionaryDerivedDerived&);
+    void getDerivedDerived(InternalDictionaryDerivedDerived&);
 
     String stringFromIterable(ExecutionContext*, Dictionary iterable, ExceptionState&) const;
 
@@ -83,6 +87,7 @@ private:
     Member<EventTarget> m_eventTargetOrNullMember;
     String m_derivedStringMember;
     String m_derivedStringMemberWithDefault;
+    String m_derivedDerivedStringMember;
     bool m_requiredBooleanMember;
     Nullable<HashMap<String, String>> m_dictionaryMemberProperties;
 };

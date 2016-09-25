@@ -22,7 +22,6 @@ enum class VectorIconId;
 
 namespace views {
 class BubbleDialogDelegateView;
-class InkDropDelegate;
 }
 
 // Represents an icon on the omnibox that shows a bubble when clicked.
@@ -54,30 +53,33 @@ class BubbleIconView : public views::InkDropHostView,
   // Invoked prior to executing the command.
   virtual void OnExecuting(ExecuteSource execute_source) = 0;
 
+  // Invoked after the icon is pressed.
+  virtual void OnPressed(bool activated) {}
+
   // views::View:
   void GetAccessibleState(ui::AXViewState* state) override;
-  bool GetTooltipText(const gfx::Point& p, base::string16* tooltip) const
-      override;
+  bool GetTooltipText(const gfx::Point& p,
+                      base::string16* tooltip) const override;
   gfx::Size GetPreferredSize() const override;
   void Layout() override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
+  bool OnKeyReleased(const ui::KeyEvent& event) override;
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
   void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
   void AddInkDropLayer(ui::Layer* ink_drop_layer) override;
   void RemoveInkDropLayer(ui::Layer* ink_drop_layer) override;
-  std::unique_ptr<views::InkDropHover> CreateInkDropHover() const override;
   SkColor GetInkDropBaseColor() const override;
+  bool ShouldShowInkDropForFocus() const override;
 
   // ui::EventHandler:
   void OnGestureEvent(ui::GestureEvent* event) override;
 
   // views::WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
-  void OnWidgetVisibilityChanged(views::Widget* widget,
-                                 bool visible) override;
+  void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;
 
  protected:
   // Calls OnExecuting and runs |command_id_| with a valid |command_updater_|.
@@ -86,14 +88,8 @@ class BubbleIconView : public views::InkDropHostView,
   // Returns the bubble instance for the icon.
   virtual views::BubbleDialogDelegateView* GetBubble() const = 0;
 
-  // Gets the given vector icon in the correct color and size based on |active|
-  // and whether Chrome's in material design mode.
+  // Gets the given vector icon in the correct color and size based on |active|.
   virtual gfx::VectorIconId GetVectorIcon() const;
-
-  // Sets the image using a PNG from the resource bundle. Returns true if an
-  // image was set, or false if the icon should use a vector asset. This only
-  // exists for non-MD mode. TODO(estade): remove it.
-  virtual bool SetRasterIcon();
 
   // views::View:
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
@@ -126,9 +122,6 @@ class BubbleIconView : public views::InkDropHostView,
   // pressed event. If this is true then the mouse released event is ignored to
   // prevent the bubble from reshowing.
   bool suppress_mouse_released_action_;
-
-  // Animation delegate for the ink drop ripple effect.
-  std::unique_ptr<views::InkDropDelegate> ink_drop_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(BubbleIconView);
 };

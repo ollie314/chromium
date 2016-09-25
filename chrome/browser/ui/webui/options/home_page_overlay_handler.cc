@@ -38,7 +38,7 @@ void HomePageOverlayHandler::RegisterMessages() {
 void HomePageOverlayHandler::InitializeHandler() {
   Profile* profile = Profile::FromWebUI(web_ui());
   autocomplete_controller_.reset(new AutocompleteController(
-      base::WrapUnique(new ChromeAutocompleteProviderClient(profile)), this,
+      base::MakeUnique<ChromeAutocompleteProviderClient>(profile), this,
       AutocompleteClassifier::kDefaultOmniboxProviders));
 }
 
@@ -64,7 +64,7 @@ void HomePageOverlayHandler::OnResultChanged(bool default_match_changed) {
   const AutocompleteResult& result = autocomplete_controller_->result();
   base::ListValue suggestions;
   OptionsUI::ProcessAutocompleteSuggestions(result, &suggestions);
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "HomePageOverlay.updateAutocompleteSuggestions", suggestions);
 }
 

@@ -29,24 +29,10 @@
 #include "ui/gfx/win/direct_write.h"
 
 namespace content {
-namespace {
-
-// Windows-only skia sandbox support
-// These are used for GDI-path rendering.
-void SkiaPreCacheFont(const LOGFONT& logfont) {
-  RenderThread* render_thread = RenderThread::Get();
-  if (render_thread) {
-    render_thread->PreCacheFont(logfont);
-  }
-}
-
-}  // namespace
 
 RendererMainPlatformDelegate::RendererMainPlatformDelegate(
     const MainFunctionParams& parameters)
-        : parameters_(parameters),
-          sandbox_test_module_(NULL) {
-}
+    : parameters_(parameters) {}
 
 RendererMainPlatformDelegate::~RendererMainPlatformDelegate() {
 }
@@ -58,7 +44,6 @@ void RendererMainPlatformDelegate::PlatformInitialize() {
   // malicious code if the renderer gets compromised.
   bool no_sandbox = command_line.HasSwitch(switches::kNoSandbox);
 
-  bool use_direct_write = gfx::win::ShouldUseDirectWrite();
   if (!no_sandbox) {
     // ICU DateFormat class (used in base/time_format.cc) needs to get the
     // Olson timezone ID by accessing the registry keys under
@@ -68,13 +53,8 @@ void RendererMainPlatformDelegate::PlatformInitialize() {
     // is disabled, we don't have to make this dummy call.
     std::unique_ptr<icu::TimeZone> zone(icu::TimeZone::createDefault());
 
-    if (use_direct_write) {
-      InitializeDWriteFontProxy();
-    } else {
-      SkTypeface_SetEnsureLOGFONTAccessibleProc(SkiaPreCacheFont);
-    }
+    InitializeDWriteFontProxy();
   }
-  blink::WebFontRendering::setUseDirectWrite(use_direct_write);
   // TODO(robliao): This should use WebScreenInfo. See http://crbug.com/604555.
   blink::WebFontRendering::setDeviceScaleFactor(display::win::GetDPIScale());
 }

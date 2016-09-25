@@ -16,7 +16,6 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/bluetooth_chooser.h"
 #include "content/public/browser/invalidate_type.h"
-#include "content/public/browser/navigation_type.h"
 #include "content/public/common/media_stream_request.h"
 #include "content/public/common/security_style.h"
 #include "content/public/common/window_container_type.h"
@@ -59,6 +58,10 @@ namespace gfx {
 class Point;
 class Rect;
 class Size;
+}
+
+namespace net {
+class X509Certificate;
 }
 
 namespace url {
@@ -140,10 +143,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Request the delegate to close this web contents, and do whatever cleanup
   // it needs to do.
   virtual void CloseContents(WebContents* source) {}
-
-  // Informs the delegate that the underlying RenderViewHost has been swapped
-  // out so it can perform any cleanup necessary.
-  virtual void SwappedOut(WebContents* source) {}
 
   // Request the delegate to move this WebContents to the specified position
   // in screen coordinates.
@@ -345,7 +344,7 @@ class CONTENT_EXPORT WebContentsDelegate {
       const std::vector<ColorSuggestion>& suggestions);
 
   // Called when a file selection is to be done.
-  virtual void RunFileChooser(WebContents* web_contents,
+  virtual void RunFileChooser(RenderFrameHost* render_frame_host,
                               const FileChooserParams& params) {}
 
   // Request to enumerate a directory.  This is equivalent to running the file
@@ -522,7 +521,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Displays platform-specific (OS) dialog with the certificate details.
   virtual void ShowCertificateViewerInDevTools(
       WebContents* web_contents,
-      int cert_id);
+      scoped_refptr<net::X509Certificate> certificate);
 
   // Called when the active render widget is forwarding a RemoteChannel
   // compositor proto.  This is used in Blimp mode.

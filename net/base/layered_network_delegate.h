@@ -13,6 +13,7 @@
 #include "net/base/completion_callback.h"
 #include "net/base/network_delegate.h"
 #include "net/cookies/canonical_cookie.h"
+#include "net/proxy/proxy_retry_info.h"
 
 class GURL;
 
@@ -42,14 +43,15 @@ class NET_EXPORT LayeredNetworkDelegate : public NetworkDelegate {
   int OnBeforeURLRequest(URLRequest* request,
                          const CompletionCallback& callback,
                          GURL* new_url) final;
-  int OnBeforeSendHeaders(URLRequest* request,
-                          const CompletionCallback& callback,
-                          HttpRequestHeaders* headers) final;
-  void OnBeforeSendProxyHeaders(URLRequest* request,
-                                const ProxyInfo& proxy_info,
-                                HttpRequestHeaders* headers) final;
-  void OnSendHeaders(URLRequest* request,
-                     const HttpRequestHeaders& headers) final;
+  int OnBeforeStartTransaction(URLRequest* request,
+                               const CompletionCallback& callback,
+                               HttpRequestHeaders* headers) final;
+  void OnBeforeSendHeaders(URLRequest* request,
+                           const ProxyInfo& proxy_info,
+                           const ProxyRetryInfoMap& proxy_retry_info,
+                           HttpRequestHeaders* headers) final;
+  void OnStartTransaction(URLRequest* request,
+                          const HttpRequestHeaders& headers) final;
   int OnHeadersReceived(
       URLRequest* request,
       const CompletionCallback& callback,
@@ -57,11 +59,12 @@ class NET_EXPORT LayeredNetworkDelegate : public NetworkDelegate {
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
       GURL* allowed_unsafe_redirect_url) final;
   void OnBeforeRedirect(URLRequest* request, const GURL& new_location) final;
-  void OnResponseStarted(URLRequest* request) final;
+
+  void OnResponseStarted(URLRequest* request, int net_error) final;
   void OnNetworkBytesReceived(URLRequest* request,
                               int64_t bytes_received) final;
   void OnNetworkBytesSent(URLRequest* request, int64_t bytes_sent) final;
-  void OnCompleted(URLRequest* request, bool started) final;
+  void OnCompleted(URLRequest* request, bool started, int net_error) final;
   void OnURLRequestDestroyed(URLRequest* request) final;
   void OnPACScriptError(int line_number, const base::string16& error) final;
   AuthRequiredResponse OnAuthRequired(URLRequest* request,
@@ -89,16 +92,19 @@ class NET_EXPORT LayeredNetworkDelegate : public NetworkDelegate {
                                           const CompletionCallback& callback,
                                           GURL* new_url);
 
-  virtual void OnBeforeSendHeadersInternal(URLRequest* request,
-                                           const CompletionCallback& callback,
-                                           HttpRequestHeaders* headers);
+  virtual void OnBeforeStartTransactionInternal(
+      URLRequest* request,
+      const CompletionCallback& callback,
+      HttpRequestHeaders* headers);
 
-  virtual void OnBeforeSendProxyHeadersInternal(URLRequest* request,
-                                                const ProxyInfo& proxy_info,
-                                                HttpRequestHeaders* headers);
+  virtual void OnBeforeSendHeadersInternal(
+      URLRequest* request,
+      const ProxyInfo& proxy_info,
+      const ProxyRetryInfoMap& proxy_retry_info,
+      HttpRequestHeaders* headers);
 
-  virtual void OnSendHeadersInternal(URLRequest* request,
-                                     const HttpRequestHeaders& headers);
+  virtual void OnStartTransactionInternal(URLRequest* request,
+                                          const HttpRequestHeaders& headers);
 
   virtual void OnHeadersReceivedInternal(
       URLRequest* request,

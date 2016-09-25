@@ -8,7 +8,7 @@
 
 #include "base/mac/foundation_util.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -23,6 +23,8 @@
 #include "chrome/browser/ui/omnibox/chrome_omnibox_client.h"
 #include "chrome/browser/ui/omnibox/clipboard_utils.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
+#include "components/grit/components_scaled_resources.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
@@ -37,12 +39,16 @@
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/clipboard_util_mac.h"
 #import "ui/base/cocoa/cocoa_base_utils.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/geometry/rect.h"
+
+// TODO(ellyjones): Remove this when the deployment target is 10.9 or later.
+extern NSString* const NSAccessibilityPriorityKey;
 
 using content::WebContents;
 
@@ -72,6 +78,9 @@ using content::WebContents;
 // things work on other platforms.
 
 namespace {
+const int kOmniboxLargeFontSizeDelta = 9;
+const int kOmniboxNormalFontSizeDelta = 1;
+const int kOmniboxSmallMaterialFontSizeDelta = -1;
 
 // TODO(shess): This is ugly, find a better way.  Using it right now
 // so that I can crib from gtk and still be able to see that I'm using
@@ -86,29 +95,22 @@ NSColor* ColorWithRGBBytes(int rr, int gg, int bb) {
                                    alpha:1.0];
 }
 
-NSColor* HostTextColor(bool inDarkMode) {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return [NSColor blackColor];
-  }
-  return inDarkMode ? [NSColor whiteColor] : [NSColor blackColor];
+NSColor* HostTextColor(bool in_dark_mode) {
+  return in_dark_mode ? [NSColor whiteColor] : [NSColor blackColor];
 }
-NSColor* SecureSchemeColor(bool inDarkMode) {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return ColorWithRGBBytes(0x07, 0x95, 0x00);
-  }
-  return inDarkMode ? [NSColor colorWithCalibratedWhite:1 alpha:0.5] :
-                      skia::SkColorToCalibratedNSColor(gfx::kGoogleGreen700);
+NSColor* SecureSchemeColor(bool in_dark_mode) {
+  return in_dark_mode ? skia::SkColorToSRGBNSColor(SK_ColorWHITE)
+                      : skia::SkColorToSRGBNSColor(gfx::kGoogleGreen700);
 }
-NSColor* SecurityWarningSchemeColor(bool inDarkMode) {
-  return inDarkMode ? [NSColor colorWithCalibratedWhite:1 alpha:0.5] :
-                      skia::SkColorToCalibratedNSColor(gfx::kGoogleYellow700);
+NSColor* SecurityWarningSchemeColor(bool in_dark_mode) {
+  return in_dark_mode
+      ? skia::SkColorToSRGBNSColor(SkColorSetA(SK_ColorWHITE, 0x7F))
+      : skia::SkColorToSRGBNSColor(gfx::kGoogleYellow700);
 }
-NSColor* SecurityErrorSchemeColor(bool inDarkMode) {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return ColorWithRGBBytes(0xa2, 0x00, 0x00);
-  }
-  return inDarkMode ? [NSColor colorWithCalibratedWhite:1 alpha:0.5] :
-                      skia::SkColorToCalibratedNSColor(gfx::kGoogleRed700);
+NSColor* SecurityErrorSchemeColor(bool in_dark_mode) {
+  return in_dark_mode
+      ? skia::SkColorToSRGBNSColor(SkColorSetA(SK_ColorWHITE, 0x7F))
+      : skia::SkColorToSRGBNSColor(gfx::kGoogleRed700);
 }
 
 const char kOmniboxViewMacStateKey[] = "OmniboxViewMacState";
@@ -134,6 +136,7 @@ void StoreStateToTab(WebContents* tab,
                      OmniboxViewMacState* state) {
   tab->SetUserData(kOmniboxViewMacStateKey, state);
 }
+
 const OmniboxViewMacState* GetStateFromTab(const WebContents* tab) {
   return static_cast<OmniboxViewMacState*>(
       tab->GetUserData(&kOmniboxViewMacStateKey));
@@ -159,13 +162,32 @@ NSColor* OmniboxViewMac::SuggestTextColor() {
   return [NSColor colorWithCalibratedWhite:0.0 alpha:0.5];
 }
 
+//static
+SkColor OmniboxViewMac::BaseTextColorSkia(bool in_dark_mode) {
+  return in_dark_mode ? SkColorSetA(SK_ColorWHITE, 0x7F)
+                      : SkColorSetA(SK_ColorBLACK, 0x7F);
+}
+
 // static
-NSColor* OmniboxViewMac::BaseTextColor(bool inDarkMode) {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return [NSColor darkGrayColor];
+NSColor* OmniboxViewMac::BaseTextColor(bool in_dark_mode) {
+  return skia::SkColorToSRGBNSColor(BaseTextColorSkia(in_dark_mode));
+}
+
+// static
+NSColor* OmniboxViewMac::GetSecureTextColor(
+    security_state::SecurityStateModel::SecurityLevel security_level,
+    bool in_dark_mode) {
+  if (security_level == security_state::SecurityStateModel::EV_SECURE ||
+      security_level == security_state::SecurityStateModel::SECURE) {
+    return SecureSchemeColor(in_dark_mode);
   }
-  return inDarkMode ? [NSColor colorWithCalibratedWhite:1 alpha:0.5]
-                    : [NSColor colorWithCalibratedWhite:0 alpha:0.5];
+
+  if (security_level == security_state::SecurityStateModel::SECURITY_ERROR)
+    return SecurityErrorSchemeColor(in_dark_mode);
+
+  DCHECK_EQ(security_state::SecurityStateModel::SECURITY_WARNING,
+            security_level);
+  return SecurityWarningSchemeColor(in_dark_mode);
 }
 
 OmniboxViewMac::OmniboxViewMac(OmniboxEditController* controller,
@@ -179,7 +201,6 @@ OmniboxViewMac::OmniboxViewMac(OmniboxEditController* controller,
       popup_view_(new OmniboxPopupViewMac(this, model(), field)),
       field_(field),
       saved_temporary_selection_(NSMakeRange(0, 0)),
-      selection_before_change_(NSMakeRange(0, 0)),
       marked_range_before_change_(NSMakeRange(0, 0)),
       delete_was_pressed_(false),
       delete_at_end_pressed_(false),
@@ -249,10 +270,6 @@ void OmniboxViewMac::ResetTabState(WebContents* web_contents) {
 
 void OmniboxViewMac::Update() {
   if (model()->UpdatePermanentText()) {
-    // Something visibly changed.  Re-enable URL replacement.
-    controller()->GetToolbarModel()->set_url_replacement_enabled(true);
-    model()->UpdatePermanentText();
-
     const bool was_select_all = IsSelectAll();
     NSTextView* text_view =
         base::mac::ObjCCastStrict<NSTextView>([field_ currentEditor]);
@@ -353,18 +370,15 @@ void OmniboxViewMac::SetWindowTextAndCaretPos(const base::string16& text,
     TextChanged();
 }
 
-void OmniboxViewMac::SetForcedQuery() {
+void OmniboxViewMac::EnterKeywordModeForDefaultSearchProvider() {
   // We need to do this first, else |SetSelectedRange()| won't work.
   FocusLocation(true);
 
-  const base::string16 current_text(GetText());
-  const size_t start = current_text.find_first_not_of(base::kWhitespaceUTF16);
-  if (start == base::string16::npos || (current_text[start] != '?')) {
-    SetUserText(base::ASCIIToUTF16("?"));
-  } else {
-    NSRange range = NSMakeRange(start + 1, current_text.size() - start - 1);
-    [[field_ currentEditor] setSelectedRange:range];
-  }
+  // Transition the user into keyword mode using their default search provider.
+  // Select their query if they typed one.
+  model()->EnterKeywordModeForDefaultSearchProvider(
+      KeywordModeEntryMethod::KEYBOARD_SHORTCUT);
+  SelectAll(false);
 }
 
 bool OmniboxViewMac::IsSelectAll() const {
@@ -519,7 +533,7 @@ void OmniboxViewMac::EmphasizeURLComponents() {
 void OmniboxViewMac::ApplyTextStyle(
     NSMutableAttributedString* attributedString) {
   [attributedString addAttribute:NSFontAttributeName
-                           value:GetFieldFont(gfx::Font::NORMAL)
+                           value:GetNormalFieldFont()
                            range:NSMakeRange(0, [attributedString length])];
 
   // Make a paragraph style locking in the standard line height as the maximum,
@@ -530,6 +544,11 @@ void OmniboxViewMac::ApplyTextStyle(
   [paragraph_style setMaximumLineHeight:line_height];
   [paragraph_style setMinimumLineHeight:line_height];
   [paragraph_style setLineBreakMode:NSLineBreakByTruncatingTail];
+  // If this is a URL, set the top-level paragraph direction to LTR (avoids RTL
+  // characters from making the URL render from right to left, as per RFC 3987
+  // Section 4.1).
+  if (model()->CurrentTextIsURL())
+    [paragraph_style setBaseWritingDirection:NSWritingDirectionLeftToRight];
   [attributedString addAttribute:NSParagraphStyleAttributeName
                            value:paragraph_style
                            range:NSMakeRange(0, [attributedString length])];
@@ -539,8 +558,11 @@ void OmniboxViewMac::ApplyTextAttributes(
     const base::string16& display_text,
     NSMutableAttributedString* attributedString) {
   NSUInteger as_length = [attributedString length];
+  if (as_length == 0) {
+    return;
+  }
   NSRange as_entire_string = NSMakeRange(0, as_length);
-  bool inDarkMode = [[field_ window] inIncognitoModeWithSystemTheme];
+  bool in_dark_mode = [[field_ window] inIncognitoModeWithSystemTheme];
 
   ApplyTextStyle(attributedString);
 
@@ -548,6 +570,10 @@ void OmniboxViewMac::ApplyTextAttributes(
   // This works for IDNs too, despite the "en_US".
   [attributedString addAttribute:@"NSLanguage"
                            value:@"en_US_POSIX"
+                           range:as_entire_string];
+
+  [attributedString addAttribute:NSForegroundColorAttributeName
+                           value:HostTextColor(in_dark_mode)
                            range:as_entire_string];
 
   url::Component scheme, host;
@@ -559,12 +585,12 @@ void OmniboxViewMac::ApplyTextAttributes(
   if (model()->CurrentTextIsURL() &&
       (host.is_nonempty() || grey_out_url)) {
     [attributedString addAttribute:NSForegroundColorAttributeName
-                             value:BaseTextColor(inDarkMode)
+                             value:BaseTextColor(in_dark_mode)
                              range:as_entire_string];
 
     if (!grey_out_url) {
       [attributedString addAttribute:NSForegroundColorAttributeName
-                               value:HostTextColor(inDarkMode)
+                               value:HostTextColor(in_dark_mode)
                                range:ComponentToNSRange(host)];
     }
   }
@@ -579,27 +605,16 @@ void OmniboxViewMac::ApplyTextAttributes(
   if (!model()->user_input_in_progress() && model()->CurrentTextIsURL() &&
       scheme.is_nonempty() &&
       (security_level != security_state::SecurityStateModel::NONE)) {
-    NSColor* color;
-    if (security_level == security_state::SecurityStateModel::EV_SECURE ||
-        security_level == security_state::SecurityStateModel::SECURE) {
-      color = SecureSchemeColor(inDarkMode);
-    } else if (security_level ==
-               security_state::SecurityStateModel::SECURITY_ERROR) {
-      color = SecurityErrorSchemeColor(inDarkMode);
+    if (security_level == security_state::SecurityStateModel::SECURITY_ERROR) {
       // Add a strikethrough through the scheme.
       [attributedString addAttribute:NSStrikethroughStyleAttributeName
                  value:[NSNumber numberWithInt:NSUnderlineStyleSingle]
                  range:ComponentToNSRange(scheme)];
-    } else if (security_level ==
-               security_state::SecurityStateModel::SECURITY_WARNING) {
-      color = SecurityWarningSchemeColor(inDarkMode);
-    } else {
-      NOTREACHED();
-      color = BaseTextColor(inDarkMode);
     }
-    [attributedString addAttribute:NSForegroundColorAttributeName
-                             value:color
-                             range:ComponentToNSRange(scheme)];
+    [attributedString
+        addAttribute:NSForegroundColorAttributeName
+               value:GetSecureTextColor(security_level, in_dark_mode)
+               range:ComponentToNSRange(scheme)];
   }
 }
 
@@ -632,6 +647,8 @@ bool OmniboxViewMac::OnInlineAutocompleteTextMaybeChanged(
   model()->OnChanged();
   [field_ clearUndoChain];
 
+  AnnounceAutocompleteForScreenReader(display_text);
+
   return true;
 }
 
@@ -654,8 +671,7 @@ void OmniboxViewMac::OnBeforePossibleChange() {
   // We should only arrive here when the field is focused.
   DCHECK(IsFirstResponder());
 
-  selection_before_change_ = GetSelectedRange();
-  text_before_change_ = GetText();
+  GetState(&state_before_change_);
   marked_range_before_change_ = GetMarkedRange();
 }
 
@@ -663,37 +679,17 @@ bool OmniboxViewMac::OnAfterPossibleChange(bool allow_keyword_ui_change) {
   // We should only arrive here when the field is focused.
   DCHECK(IsFirstResponder());
 
-  const NSRange new_selection(GetSelectedRange());
-  const base::string16 new_text(GetText());
-  const size_t length = new_text.length();
+  State new_state;
+  GetState(&new_state);
+  OmniboxView::StateChanges state_changes =
+      GetStateChanges(state_before_change_, new_state);
 
-  const bool selection_differs =
-      (new_selection.length || selection_before_change_.length) &&
-      !NSEqualRanges(new_selection, selection_before_change_);
-  const bool at_end_of_edit = (length == new_selection.location);
-  const bool text_differs = (new_text != text_before_change_) ||
-      !NSEqualRanges(marked_range_before_change_, GetMarkedRange());
-
-  // When the user has deleted text, we don't allow inline
-  // autocomplete.  This is assumed if the text has gotten shorter AND
-  // the selection has shifted towards the front of the text.  During
-  // normal typing the text will almost always be shorter (as the new
-  // input replaces the autocomplete suggestion), but in that case the
-  // selection point will have moved towards the end of the text.
-  // TODO(shess): In our implementation, we can catch -deleteBackward:
-  // and other methods to provide positive knowledge that a delete
-  // occurred, rather than intuiting it from context.  Consider whether
-  // that would be a stronger approach.
-  const bool just_deleted_text =
-      (length < text_before_change_.length() &&
-       new_selection.location <= selection_before_change_.location);
+  const bool at_end_of_edit = (new_state.text.length() == new_state.sel_end);
 
   delete_at_end_pressed_ = false;
 
   const bool something_changed = model()->OnAfterPossibleChange(
-      text_before_change_, new_text, new_selection.location,
-      NSMaxRange(new_selection), selection_differs, text_differs,
-      just_deleted_text, allow_keyword_ui_change && !IsImeComposing());
+      state_changes, allow_keyword_ui_change && !IsImeComposing());
 
   if (delete_was_pressed_ && at_end_of_edit)
     delete_at_end_pressed_ = true;
@@ -841,7 +837,7 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
   if ((cmd == @selector(insertTab:) ||
       cmd == @selector(insertTabIgnoringFieldEditor:)) &&
       model()->is_keyword_hint()) {
-    return model()->AcceptKeyword(ENTERED_KEYWORD_MODE_VIA_TAB);
+    return model()->AcceptKeyword(KeywordModeEntryMethod::TAB);
   }
 
   // |-noop:| is sent when the user presses Cmd+Return. Override the no-op
@@ -864,7 +860,7 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
 
   // Option-Return
   if (cmd == @selector(insertNewlineIgnoringFieldEditor:)) {
-    model()->AcceptInput(NEW_FOREGROUND_TAB, false);
+    model()->AcceptInput(WindowOpenDisposition::NEW_FOREGROUND_TAB, false);
     return true;
   }
 
@@ -901,7 +897,8 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
 
 void OmniboxViewMac::OnSetFocus(bool control_down) {
   model()->OnSetFocus(control_down);
-  controller()->OnSetFocus();
+  // Update the keyword and search hint states.
+  controller()->OnChanged();
 }
 
 void OmniboxViewMac::OnKillFocus() {
@@ -918,11 +915,6 @@ void OmniboxViewMac::OnMouseDown(NSInteger button_number) {
     model()->SetCaretVisibility(true);
 }
 
-bool OmniboxViewMac::ShouldSelectAllOnMouseDown() {
-  return !controller()->GetToolbarModel()->WouldPerformSearchTermReplacement(
-      false);
-}
-
 bool OmniboxViewMac::CanCopy() {
   const NSRange selection = GetSelectedRange();
   return selection.length > 0;
@@ -935,15 +927,11 @@ base::scoped_nsobject<NSPasteboardItem> OmniboxViewMac::CreatePasteboardItem() {
   base::string16 text = base::SysNSStringToUTF16(
       [[field_ stringValue] substringWithRange:selection]);
 
-  // Copy the URL unless this is the search URL and it's being replaced by the
-  // Extended Instant API.
+  // Copy the URL.
   GURL url;
   bool write_url = false;
-  if (!controller()->GetToolbarModel()->WouldPerformSearchTermReplacement(
-      false)) {
-    model()->AdjustTextForCopy(selection.location, IsSelectAll(), &text, &url,
-                               &write_url);
-  }
+  model()->AdjustTextForCopy(selection.location, IsSelectAll(), &text, &url,
+                             &write_url);
 
   if (IsSelectAll())
     UMA_HISTOGRAM_COUNTS(OmniboxEditModel::kCutOrCopyAllTextHistogram, 1);
@@ -961,11 +949,6 @@ void OmniboxViewMac::CopyToPasteboard(NSPasteboard* pboard) {
   [pboard clearContents];
   base::scoped_nsobject<NSPasteboardItem> item(CreatePasteboardItem());
   [pboard writeObjects:@[ item.get() ]];
-}
-
-void OmniboxViewMac::ShowURL() {
-  DCHECK(ShouldEnableShowURL());
-  OmniboxView::ShowURL();
 }
 
 void OmniboxViewMac::OnPaste() {
@@ -993,19 +976,11 @@ void OmniboxViewMac::OnPaste() {
     // Force a Paste operation to trigger the text_changed code in
     // OnAfterPossibleChange(), even if identical contents are pasted
     // into the text box.
-    text_before_change_.clear();
+    state_before_change_.text.clear();
 
     [editor replaceCharactersInRange:selectedRange withString:s];
     [editor didChangeText];
   }
-}
-
-// TODO(dominich): Move to OmniboxView base class? Currently this is defined on
-// the AutocompleteTextFieldObserver but the logic is shared between all
-// platforms. Some refactor might be necessary to simplify this. Or at least
-// this method could call the OmniboxView version.
-bool OmniboxViewMac::ShouldEnableShowURL() {
-  return controller()->GetToolbarModel()->WouldReplaceURL();
 }
 
 bool OmniboxViewMac::CanPasteAndGo() {
@@ -1079,26 +1054,40 @@ void OmniboxViewMac::FocusLocation(bool select_all) {
 }
 
 // static
-NSFont* OmniboxViewMac::GetFieldFont(int style) {
-  // This value should be kept in sync with InstantPage::InitializeFonts.
+NSFont* OmniboxViewMac::GetNormalFieldFont() {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  return rb.GetFontList(ui::ResourceBundle::BaseFont).Derive(1, style)
-      .GetPrimaryFont().GetNativeFont();
-}
-
-NSFont* OmniboxViewMac::GetLargeFont(int style) {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  return rb.GetFontList(ui::ResourceBundle::LargeFont)
-      .Derive(1, style)
-      .GetPrimaryFont()
+  return rb
+      .GetFontWithDelta(kOmniboxNormalFontSizeDelta, gfx::Font::NORMAL,
+                        gfx::Font::Weight::NORMAL)
       .GetNativeFont();
 }
 
-NSFont* OmniboxViewMac::GetSmallFont(int style) {
+NSFont* OmniboxViewMac::GetBoldFieldFont() {
+  // Request a bold font, then make it larger. ResourceBundle will do the
+  // opposite which makes a large system normal font a non-system bold font.
+  // That gives a different baseline to making the non-system bold font larger.
+  // And while the omnibox locks the baseline in ApplyTextStyle(),
+  // OmniboxPopupCellData does not.
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  return rb.GetFontList(ui::ResourceBundle::SmallFont)
-      .Derive(1, style)
-      .GetPrimaryFont()
+  return rb
+      .GetFontWithDelta(0, gfx::Font::NORMAL, gfx::Font::Weight::BOLD)
+      .Derive(kOmniboxNormalFontSizeDelta, gfx::Font::NORMAL,
+              gfx::Font::Weight::BOLD)
+      .GetNativeFont();
+}
+
+NSFont* OmniboxViewMac::GetLargeFont() {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return rb
+      .GetFontWithDelta(kOmniboxLargeFontSizeDelta, gfx::Font::NORMAL,
+                        gfx::Font::Weight::NORMAL)
+      .GetNativeFont();
+}
+
+NSFont* OmniboxViewMac::GetSmallFont() {
+  return ui::ResourceBundle::GetSharedInstance()
+      .GetFontWithDelta(kOmniboxSmallMaterialFontSizeDelta, gfx::Font::NORMAL,
+                        gfx::Font::Weight::NORMAL)
       .GetNativeFont();
 }
 
@@ -1114,4 +1103,19 @@ NSUInteger OmniboxViewMac::GetTextLength() const {
 bool OmniboxViewMac::IsCaretAtEnd() const {
   const NSRange selection = GetSelectedRange();
   return NSMaxRange(selection) == GetTextLength();
+}
+
+void OmniboxViewMac::AnnounceAutocompleteForScreenReader(
+    const base::string16& display_text) {
+  NSString* announcement =
+      l10n_util::GetNSStringF(IDS_ANNOUNCEMENT_COMPLETION_AVAILABLE_MAC,
+                              display_text);
+  NSDictionary* notification_info = @{
+      NSAccessibilityAnnouncementKey : announcement,
+      NSAccessibilityPriorityKey :     @(NSAccessibilityPriorityHigh)
+  };
+  NSAccessibilityPostNotificationWithUserInfo(
+      [field_ window],
+      NSAccessibilityAnnouncementRequestedNotification,
+      notification_info);
 }

@@ -37,7 +37,7 @@
 #include "bindings/core/v8/ScriptPromiseProperty.h"
 #include "core/CSSPropertyNames.h"
 #include "core/CoreExport.h"
-#include "core/animation/AnimationEffect.h"
+#include "core/animation/AnimationEffectReadOnly.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/dom/DOMException.h"
 #include "core/events/EventTarget.h"
@@ -45,6 +45,7 @@
 #include "platform/animation/CompositorAnimationPlayerClient.h"
 #include "platform/heap/Handle.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -61,6 +62,7 @@ class CORE_EXPORT Animation final
     , public CompositorAnimationPlayerClient {
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(Animation);
+    USING_PRE_FINALIZER(Animation, dispose);
 public:
     enum AnimationPlayState {
         Unset,
@@ -71,7 +73,7 @@ public:
         Finished
     };
 
-    static Animation* create(AnimationEffect*, AnimationTimeline*);
+    static Animation* create(AnimationEffectReadOnly*, AnimationTimeline*);
     ~Animation();
     void dispose();
 
@@ -132,9 +134,9 @@ public:
     void setStartTime(double);
     void setStartTimeInternal(double);
 
-    const AnimationEffect* effect() const { return m_content.get(); }
-    AnimationEffect* effect() { return m_content.get(); }
-    void setEffect(AnimationEffect*);
+    const AnimationEffectReadOnly* effect() const { return m_content.get(); }
+    AnimationEffectReadOnly* effect() { return m_content.get(); }
+    void setEffect(AnimationEffectReadOnly*);
 
     void setId(const String& id) { m_id = id; }
     const String& id() const { return m_id; }
@@ -180,14 +182,16 @@ public:
     bool effectSuppressed() const { return m_effectSuppressed; }
     void setEffectSuppressed(bool);
 
+    void invalidateKeyframeEffect();
+
     DECLARE_VIRTUAL_TRACE();
 
 protected:
     DispatchEventResult dispatchEventInternal(Event*) override;
-    bool addEventListenerInternal(const AtomicString& eventType, EventListener*, const EventListenerOptions&) override;
+    void addedEventListener(const AtomicString& eventType, RegisteredEventListener&) override;
 
 private:
-    Animation(ExecutionContext*, AnimationTimeline&, AnimationEffect*);
+    Animation(ExecutionContext*, AnimationTimeline&, AnimationEffectReadOnly*);
 
     void clearOutdated();
 
@@ -228,7 +232,7 @@ private:
     Member<AnimationPromise> m_finishedPromise;
     Member<AnimationPromise> m_readyPromise;
 
-    Member<AnimationEffect> m_content;
+    Member<AnimationEffectReadOnly> m_content;
     Member<AnimationTimeline> m_timeline;
 
     // Reflects all pausing, including via pauseForTesting().
@@ -294,11 +298,12 @@ private:
     // This mirrors the known compositor state. It is created when a compositor
     // animation is started. Updated once the start time is known and each time
     // modifications are pushed to the compositor.
-    OwnPtr<CompositorState> m_compositorState;
+    std::unique_ptr<CompositorState> m_compositorState;
     bool m_compositorPending;
     int m_compositorGroup;
 
-    OwnPtr<CompositorAnimationPlayer> m_compositorPlayer;
+    std::unique_ptr<CompositorAnimationPlayer> m_compositorPlayer;
+    bool m_preFinalizerRegistered;
 
     bool m_currentTimePending;
     bool m_stateIsBeingUpdated;

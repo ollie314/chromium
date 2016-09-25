@@ -31,11 +31,9 @@
 #ifndef FullscreenController_h
 #define FullscreenController_h
 
-#include "core/layout/LayoutFullScreen.h"
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
@@ -48,15 +46,17 @@ class FullscreenController final : public GarbageCollected<FullscreenController>
 public:
     static FullscreenController* create(WebViewImpl*);
 
-    void didEnterFullScreen();
-    void didExitFullScreen();
+    void didEnterFullscreen();
+    void didExitFullscreen();
 
-    void enterFullScreenForElement(Element*);
-    void exitFullScreenForElement(Element*);
+    void enterFullscreenForElement(Element*);
+    void exitFullscreenForElement(Element*);
 
-    bool isFullscreen() { return m_fullScreenFrame; }
+    bool isFullscreen() { return m_fullscreenFrame; }
 
     void updateSize();
+
+    void didUpdateLayout();
 
     DECLARE_TRACE();
 
@@ -72,14 +72,15 @@ private:
     float m_exitFullscreenPageScaleFactor;
     IntSize m_exitFullscreenScrollOffset;
     FloatPoint m_exitFullscreenVisualViewportOffset;
+    bool m_needsScrollAndScaleRestore;
 
     // If set, the WebView is transitioning to fullscreen for this element.
-    Member<Element> m_provisionalFullScreenElement;
+    Member<Element> m_provisionalFullscreenElement;
 
     // If set, the WebView is in fullscreen mode for an element in this frame.
-    Member<LocalFrame> m_fullScreenFrame;
+    Member<LocalFrame> m_fullscreenFrame;
 
-    bool m_isCancelingFullScreen;
+    bool m_isCancelingFullscreen;
 };
 
 } // namespace blink

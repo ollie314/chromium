@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.preferences.website;
 
+import org.chromium.base.Callback;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.content_public.browser.WebContents;
@@ -17,22 +18,6 @@ import java.util.List;
  */
 public abstract class WebsitePreferenceBridge {
     private static final String LOG_TAG = "WebsiteSettingsUtils";
-
-    /**
-     * Interface for an object that listens to local storage info is ready callback.
-     */
-    public interface LocalStorageInfoReadyCallback {
-        @CalledByNative("LocalStorageInfoReadyCallback")
-        public void onLocalStorageInfoReady(HashMap map);
-    }
-
-    /**
-     * Interface for an object that listens to storage info is ready callback.
-     */
-    public interface StorageInfoReadyCallback {
-        @CalledByNative("StorageInfoReadyCallback")
-        public void onStorageInfoReady(ArrayList array);
-    }
 
     /**
      * Interface for an object that listens to storage info is cleared callback.
@@ -100,19 +85,6 @@ public abstract class WebsitePreferenceBridge {
         list.add(new MidiInfo(origin, embedder, false));
     }
 
-    public static List<CookieInfo> getCookieInfo() {
-        boolean managedOnly = PrefServiceBridge.getInstance().isAcceptCookiesManaged();
-        ArrayList<CookieInfo> list = new ArrayList<CookieInfo>();
-        nativeGetCookieOrigins(list, managedOnly);
-        return list;
-    }
-
-    @CalledByNative
-    private static void insertCookieInfoIntoList(
-            ArrayList<CookieInfo> list, String origin, String embedder) {
-        list.add(new CookieInfo(origin, embedder, false));
-    }
-
     @CalledByNative
     private static Object createStorageInfoList() {
         return new ArrayList<StorageInfo>();
@@ -132,8 +104,9 @@ public abstract class WebsitePreferenceBridge {
     @SuppressWarnings("unchecked")
     @CalledByNative
     private static void insertLocalStorageInfoIntoMap(
-            HashMap map, String origin, String fullOrigin, long size) {
-        ((HashMap<String, LocalStorageInfo>) map).put(origin, new LocalStorageInfo(origin, size));
+            HashMap map, String origin, String fullOrigin, long size, boolean important) {
+        ((HashMap<String, LocalStorageInfo>) map)
+                .put(origin, new LocalStorageInfo(origin, size, important));
     }
 
     /**
@@ -239,11 +212,11 @@ public abstract class WebsitePreferenceBridge {
         return managedExceptions;
     }
 
-    public static void fetchLocalStorageInfo(LocalStorageInfoReadyCallback callback) {
+    public static void fetchLocalStorageInfo(Callback<HashMap> callback) {
         nativeFetchLocalStorageInfo(callback);
     }
 
-    public static void fetchStorageInfo(StorageInfoReadyCallback callback) {
+    public static void fetchStorageInfo(Callback<ArrayList> callback) {
         nativeFetchStorageInfo(callback);
     }
 
@@ -258,12 +231,34 @@ public abstract class WebsitePreferenceBridge {
     }
 
     /**
+     * Returns the list of all USB device permissions.
+     *
+     * There will be one UsbInfo instance for each granted permission. That
+     * means that if two origin/embedder pairs have permission for the same
+     * device there will be two UsbInfo instances.
+     */
+    public static List<UsbInfo> getUsbInfo() {
+        ArrayList<UsbInfo> list = new ArrayList<UsbInfo>();
+        nativeGetUsbOrigins(list);
+        return list;
+    }
+
+    /**
      * Inserts fullscreen information into a list.
      */
     @CalledByNative
     private static void insertFullscreenInfoIntoList(
             ArrayList<FullscreenInfo> list, String origin, String embedder) {
         list.add(new FullscreenInfo(origin, embedder, false));
+    }
+
+    /**
+     * Inserts USB device information into a list.
+     */
+    @CalledByNative
+    private static void insertUsbInfoIntoList(
+            ArrayList<UsbInfo> list, String origin, String embedder, String name, String object) {
+        list.add(new UsbInfo(origin, embedder, name, object));
     }
 
     private static native void nativeGetGeolocationOrigins(Object list, boolean managedOnly);
@@ -284,9 +279,9 @@ public abstract class WebsitePreferenceBridge {
             String origin, String embedder, int value, boolean isIncognito);
     private static native void nativeGetNotificationOrigins(Object list);
     static native int nativeGetNotificationSettingForOrigin(
-            String origin, String embedder, boolean isIncognito);
+            String origin, boolean isIncognito);
     static native void nativeSetNotificationSettingForOrigin(
-            String origin, String embedder, int value, boolean isIncognito);
+            String origin, int value, boolean isIncognito);
     private static native void nativeGetProtectedMediaIdentifierOrigins(Object list);
     static native int nativeGetProtectedMediaIdentifierSettingForOrigin(
             String origin, String embedder, boolean isIncognito);
@@ -302,11 +297,6 @@ public abstract class WebsitePreferenceBridge {
             String origin, int value, boolean isIncognito);
     static native void nativeSetCameraSettingForOrigin(
             String origin, int value, boolean isIncognito);
-    private static native void nativeGetCookieOrigins(Object list, boolean managedOnly);
-    static native int nativeGetCookieSettingForOrigin(
-            String origin, String embedder, boolean isIncognito);
-    static native void nativeSetCookieSettingForOrigin(
-            String origin, String embedder, int setting, boolean isIncognito);
     static native void nativeClearCookieData(String path);
     static native void nativeClearLocalStorageData(String path);
     static native void nativeClearStorageData(String origin, int type, Object callback);
@@ -319,4 +309,6 @@ public abstract class WebsitePreferenceBridge {
             String origin, String embedder, boolean isIncognito);
     static native void nativeSetFullscreenSettingForOrigin(
             String origin, String embedder, int value, boolean isIncognito);
+    static native void nativeGetUsbOrigins(Object list);
+    static native void nativeRevokeUsbPermission(String origin, String embedder, String object);
 }

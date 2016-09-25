@@ -22,12 +22,9 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #include "platform/animation/AnimationTranslationUtil.h"
 
 #include "platform/animation/CompositorTransformOperations.h"
-#include "platform/graphics/filters/FilterOperations.h"
-#include "platform/graphics/filters/SkiaImageFilterBuilder.h"
 #include "platform/transforms/InterpolatedTransformOperation.h"
 #include "platform/transforms/Matrix3DTransformOperation.h"
 #include "platform/transforms/MatrixTransformOperation.h"
@@ -111,11 +108,6 @@ void toCompositorTransformOperations(const TransformOperations& transformOperati
             break;
         } // switch
     } // for each operation
-}
-
-void toCompositorFilterOperations(const FilterOperations& inOperations, CompositorFilterOperations* outOperations)
-{
-    SkiaImageFilterBuilder::buildFilterOperations(inOperations, outOperations);
 }
 
 } // namespace blink

@@ -44,6 +44,7 @@
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "wtf/AutoReset.h"
 
 namespace blink {
 SelectionController* SelectionController::create(LocalFrame& frame)
@@ -84,7 +85,7 @@ DispatchEventResult dispatchSelectStart(Node* node)
 
 VisibleSelectionInFlatTree expandSelectionToRespectUserSelectAll(Node* targetNode, const VisibleSelectionInFlatTree& selection)
 {
-    Node* rootUserSelectAll = EditingInFlatTreeStrategy::rootUserSelectAllForNode(targetNode);
+    Node* const rootUserSelectAll = EditingInFlatTreeStrategy::rootUserSelectAllForNode(targetNode);
     if (!rootUserSelectAll)
         return selection;
 
@@ -123,13 +124,13 @@ bool SelectionController::handleMousePressEventSingleClick(const MouseEventWithH
 {
     TRACE_EVENT0("blink", "SelectionController::handleMousePressEventSingleClick");
 
-    m_frame->document()->updateLayoutIgnorePendingStylesheets();
+    DCHECK(!m_frame->document()->needsLayoutTreeUpdate());
     Node* innerNode = event.innerNode();
     if (!(innerNode && innerNode->layoutObject() && m_mouseDownMayStartSelect))
         return false;
 
-    // Extend the selection if the Shift key is down, unless the click is in a link.
-    bool extendSelection = event.event().shiftKey() && !event.isOverLink();
+    // Extend the selection if the Shift key is down, unless the click is in a link or image.
+    bool extendSelection = isExtendingSelection(event);
 
     // Don't restart the selection when the mouse is pressed on an
     // existing selection so we can allow for text dragging.
@@ -149,7 +150,7 @@ bool SelectionController::handleMousePressEventSingleClick(const MouseEventWithH
     VisibleSelectionInFlatTree newSelection = selection().visibleSelection<EditingInFlatTreeStrategy>();
     TextGranularity granularity = CharacterGranularity;
 
-    if (extendSelection && newSelection.isCaretOrRange()) {
+    if (extendSelection && !newSelection.isNone()) {
         const VisibleSelectionInFlatTree selectionInUserSelectAll(expandSelectionToRespectUserSelectAll(innerNode, VisibleSelectionInFlatTree(createVisiblePosition(pos))));
         if (selectionInUserSelectAll.isRange()) {
             if (selectionInUserSelectAll.start().compareTo(newSelection.start()) < 0)
@@ -197,7 +198,11 @@ void SelectionController::updateSelectionForMouseDrag(const HitTestResult& hitTe
     if (!target)
         return;
 
-    PositionWithAffinity rawTargetPosition = selection().selection().positionRespectingEditingBoundary(hitTestResult.localPoint(), target);
+    // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+    // needs to be audited.  See http://crbug.com/590369 for more details.
+    m_frame->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
+    const PositionWithAffinity& rawTargetPosition = positionRespectingEditingBoundary(selection().selection().start(), hitTestResult.localPoint(), target);
     VisiblePositionInFlatTree targetPosition = createVisiblePosition(fromPositionInDOMTree<EditingInFlatTreeStrategy>(rawTargetPosition));
     // Don't modify the selection if we're not on a node.
     if (targetPosition.isNull())
@@ -233,8 +238,9 @@ void SelectionController::updateSelectionForMouseDrag(const HitTestResult& hitTe
 
     if (RuntimeEnabledFeatures::userSelectAllEnabled()) {
         // TODO(yosin) Should we use |Strategy::rootUserSelectAllForNode()|?
-        Node* rootUserSelectAllForMousePressNode = EditingInFlatTreeStrategy::rootUserSelectAllForNode(mousePressNode);
-        if (rootUserSelectAllForMousePressNode && rootUserSelectAllForMousePressNode == EditingInFlatTreeStrategy::rootUserSelectAllForNode(target)) {
+        Node* const rootUserSelectAllForMousePressNode = EditingInFlatTreeStrategy::rootUserSelectAllForNode(mousePressNode);
+        Node* const rootUserSelectAllForTarget = EditingInFlatTreeStrategy::rootUserSelectAllForNode(target);
+        if (rootUserSelectAllForMousePressNode && rootUserSelectAllForMousePressNode == rootUserSelectAllForTarget) {
             newSelection.setBase(mostBackwardCaretPosition(PositionInFlatTree::beforeNode(rootUserSelectAllForMousePressNode), CanCrossEditingBoundary));
             newSelection.setExtent(mostForwardCaretPosition(PositionInFlatTree::afterNode(rootUserSelectAllForMousePressNode), CanCrossEditingBoundary));
         } else {
@@ -246,7 +252,6 @@ void SelectionController::updateSelectionForMouseDrag(const HitTestResult& hitTe
                     newSelection.setBase(mostForwardCaretPosition(PositionInFlatTree::afterNode(rootUserSelectAllForMousePressNode), CanCrossEditingBoundary));
             }
 
-            Node* rootUserSelectAllForTarget = EditingInFlatTreeStrategy::rootUserSelectAllForNode(target);
             if (rootUserSelectAllForTarget && mousePressNode->layoutObject() && toPositionInFlatTree(target->layoutObject()->positionForPoint(hitTestResult.localPoint()).position()).compareTo(toPositionInFlatTree(mousePressNode->layoutObject()->positionForPoint(dragStartPos).position())) < 0)
                 newSelection.setExtent(mostBackwardCaretPosition(PositionInFlatTree::beforeNode(rootUserSelectAllForTarget), CanCrossEditingBoundary));
             else if (rootUserSelectAllForTarget && mousePressNode->layoutObject())
@@ -273,7 +278,11 @@ bool SelectionController::updateSelectionForMouseDownDispatchingSelectStart(Node
     if (dispatchSelectStart(targetNode) != DispatchEventResult::NotCanceled)
         return false;
 
-    if (!selection.isValidFor(*m_frame->document()))
+    // |dispatchSelectStart()| can change document hosted by |m_frame|.
+    if (!this->selection().isAvailable())
+        return false;
+
+    if (!selection.isValidFor(this->selection().document()))
         return false;
 
     if (selection.isRange()) {
@@ -299,9 +308,9 @@ void SelectionController::selectClosestWordFromHitTestResult(const HitTestResult
     // Special-case image local offset to always be zero, to avoid triggering
     // LayoutReplaced::positionFromPoint's advancement of the position at the
     // mid-point of the the image (which was intended for mouse-drag selection
-    // and isn't desirable for long-press).
+    // and isn't desirable for touch).
     HitTestResult adjustedHitTestResult = result;
-    if (selectInputEventType == SelectInputEventType::GestureLongPress && result.image())
+    if (selectInputEventType == SelectInputEventType::Touch && result.image())
         adjustedHitTestResult.setNodeAndPosition(result.innerNode(), LayoutPoint(0, 0));
 
     const VisiblePositionInFlatTree& pos = visiblePositionOfHitTestResult(adjustedHitTestResult);
@@ -310,12 +319,15 @@ void SelectionController::selectClosestWordFromHitTestResult(const HitTestResult
         newSelection.expandUsingGranularity(WordGranularity);
     }
 
-    if (selectInputEventType == SelectInputEventType::GestureLongPress) {
+    if (selectInputEventType == SelectInputEventType::Touch) {
         // If node doesn't have text except space, tab or line break, do not
         // select that 'empty' area.
         EphemeralRangeInFlatTree range(newSelection.start(), newSelection.end());
-        const String& str = plainText(range, TextIteratorEmitsObjectReplacementCharacter);
+        const String& str = plainText(range, hasEditableStyle(*innerNode) ? TextIteratorEmitsObjectReplacementCharacter : TextIteratorDefaultBehavior);
         if (str.isEmpty() || str.simplifyWhiteSpace().containsOnlyWhitespace())
+            return;
+
+        if (newSelection.rootEditableElement() && pos.deepEquivalent() == VisiblePositionInFlatTree::lastPositionInNode(newSelection.rootEditableElement()).deepEquivalent())
             return;
     }
 
@@ -358,7 +370,9 @@ void SelectionController::selectClosestWordFromMouseEvent(const MouseEventWithHi
 
     AppendTrailingWhitespace appendTrailingWhitespace = (result.event().clickCount() == 2 && m_frame->editor().isSelectTrailingWhitespaceEnabled()) ? AppendTrailingWhitespace::ShouldAppend : AppendTrailingWhitespace::DontAppend;
 
-    return selectClosestWordFromHitTestResult(result.hitTestResult(), appendTrailingWhitespace, SelectInputEventType::Mouse);
+    DCHECK(!m_frame->document()->needsLayoutTreeUpdate());
+
+    return selectClosestWordFromHitTestResult(result.hitTestResult(), appendTrailingWhitespace, result.event().fromTouch() ? SelectInputEventType::Touch : SelectInputEventType::Mouse);
 }
 
 void SelectionController::selectClosestMisspellingFromMouseEvent(const MouseEventWithHitTestResults& result)
@@ -394,10 +408,13 @@ bool SelectionController::handleMousePressEventDoubleClick(const MouseEventWithH
 {
     TRACE_EVENT0("blink", "SelectionController::handleMousePressEventDoubleClick");
 
+    if (!selection().isAvailable())
+        return false;
+
     if (!m_mouseDownAllowsMultiClick)
         return handleMousePressEventSingleClick(event);
 
-    if (event.event().button() != LeftButton)
+    if (event.event().pointerProperties().button != WebPointerProperties::Button::Left)
         return false;
 
     if (selection().isRange()) {
@@ -417,10 +434,15 @@ bool SelectionController::handleMousePressEventTripleClick(const MouseEventWithH
 {
     TRACE_EVENT0("blink", "SelectionController::handleMousePressEventTripleClick");
 
+    if (!selection().isAvailable()) {
+        // editing/shadow/doubleclick-on-meter-in-shadow-crash.html reach here.
+        return false;
+    }
+
     if (!m_mouseDownAllowsMultiClick)
         return handleMousePressEventSingleClick(event);
 
-    if (event.event().button() != LeftButton)
+    if (event.event().pointerProperties().button != WebPointerProperties::Button::Left)
         return false;
 
     Node* innerNode = event.innerNode();
@@ -444,6 +466,12 @@ void SelectionController::handleMousePressEvent(const MouseEventWithHitTestResul
     m_mouseDownMayStartSelect = (canMouseDownStartSelect(event.innerNode()) || isLinkSelection(event))
         && !event.scrollbar();
     m_mouseDownWasSingleClickInSelection = false;
+    if (!selection().isAvailable()) {
+        // "gesture-tap-frame-removed.html" reaches here.
+        m_mouseDownAllowsMultiClick = !event.event().fromTouch();
+        return;
+    }
+
     // Avoid double-tap touch gesture confusion by restricting multi-click side
     // effects, e.g., word selection, to editable regions.
     m_mouseDownAllowsMultiClick = !event.event().fromTouch() || selection().hasEditableStyle();
@@ -451,6 +479,8 @@ void SelectionController::handleMousePressEvent(const MouseEventWithHitTestResul
 
 void SelectionController::handleMouseDraggedEvent(const MouseEventWithHitTestResults& event, const IntPoint& mouseDownPos, const LayoutPoint& dragStartPos, Node* mousePressNode, const IntPoint& lastKnownMousePosition)
 {
+    if (!selection().isAvailable())
+        return;
     if (m_selectionState != SelectionState::ExtendedSelection) {
         HitTestRequest request(HitTestRequest::ReadOnly | HitTestRequest::Active);
         HitTestResult result(request, mouseDownPos);
@@ -478,6 +508,9 @@ void SelectionController::updateSelectionForMouseDrag(Node* mousePressNode, cons
 
 bool SelectionController::handleMouseReleaseEvent(const MouseEventWithHitTestResults& event, const LayoutPoint& dragStartPos)
 {
+    if (!selection().isAvailable())
+        return false;
+
     bool handled = false;
     m_mouseDownMayStartSelect = false;
     // Clear the selection if the mouse didn't move after the last mouse
@@ -487,11 +520,15 @@ bool SelectionController::handleMouseReleaseEvent(const MouseEventWithHitTestRes
     if (m_mouseDownWasSingleClickInSelection && m_selectionState != SelectionState::ExtendedSelection
         && dragStartPos == event.event().position()
         && selection().isRange()
-        && event.event().button() != RightButton) {
+        && event.event().pointerProperties().button != WebPointerProperties::Button::Right) {
+        // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+        // needs to be audited.  See http://crbug.com/590369 for more details.
+        m_frame->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
         VisibleSelectionInFlatTree newSelection;
         Node* node = event.innerNode();
         bool caretBrowsing = m_frame->settings() && m_frame->settings()->caretBrowsingEnabled();
-        if (node && node->layoutObject() && (caretBrowsing || node->hasEditableStyle())) {
+        if (node && node->layoutObject() && (caretBrowsing || hasEditableStyle(*node))) {
             const VisiblePositionInFlatTree pos = visiblePositionOfHitTestResult(event.hitTestResult());
             newSelection = VisibleSelectionInFlatTree(pos);
         }
@@ -505,7 +542,7 @@ bool SelectionController::handleMouseReleaseEvent(const MouseEventWithHitTestRes
 
     selection().selectFrameElementInParentIfFullySelected();
 
-    if (event.event().button() == MiddleButton && !event.isOverLink()) {
+    if (event.event().pointerProperties().button == WebPointerProperties::Button::Middle && !event.isOverLink()) {
         // Ignore handled, since we want to paste to where the caret was placed anyway.
         handled = handlePasteGlobalSelection(event.event()) || handled;
     }
@@ -546,20 +583,42 @@ bool SelectionController::handlePasteGlobalSelection(const PlatformMouseEvent& m
 
 bool SelectionController::handleGestureLongPress(const PlatformGestureEvent& gestureEvent, const HitTestResult& hitTestResult)
 {
+    if (!selection().isAvailable())
+        return false;
     if (hitTestResult.isLiveLink())
         return false;
 
     Node* innerNode = hitTestResult.innerNode();
-    bool innerNodeIsSelectable = innerNode && (innerNode->isContentEditable() || innerNode->isTextNode() || innerNode->canStartSelection());
+    innerNode->document().updateStyleAndLayoutTree();
+    bool innerNodeIsSelectable = innerNode && (hasEditableStyle(*innerNode) || innerNode->canStartSelection());
     if (!innerNodeIsSelectable)
         return false;
 
-    selectClosestWordFromHitTestResult(hitTestResult, AppendTrailingWhitespace::DontAppend, SelectInputEventType::GestureLongPress);
+    selectClosestWordFromHitTestResult(hitTestResult, AppendTrailingWhitespace::DontAppend, SelectInputEventType::Touch);
+    if (!selection().isAvailable()) {
+        // "editing/selection/longpress-selection-in-iframe-removed-crash.html"
+        // reach here.
+        return false;
+    }
     return selection().isRange();
+}
+
+static bool hitTestResultIsMisspelled(const HitTestResult& result)
+{
+    Node* innerNode = result.innerNode();
+    if (!innerNode || !innerNode->layoutObject())
+        return false;
+    VisiblePosition pos = createVisiblePosition(innerNode->layoutObject()->positionForPoint(result.localPoint()));
+    if (pos.isNull())
+        return false;
+    return innerNode->document().markers().markersInRange(
+        EphemeralRange(pos.deepEquivalent().parentAnchoredEquivalent()), DocumentMarker::MisspellingMarkers()).size() > 0;
 }
 
 void SelectionController::sendContextMenuEvent(const MouseEventWithHitTestResults& mev, const LayoutPoint& position)
 {
+    if (!selection().isAvailable())
+        return;
     if (selection().contains(position)
         || mev.scrollbar()
         // FIXME: In the editable case, word selection sometimes selects content that isn't underneath the mouse.
@@ -569,9 +628,9 @@ void SelectionController::sendContextMenuEvent(const MouseEventWithHitTestResult
         return;
 
     // Context menu events are always allowed to perform a selection.
-    TemporaryChange<bool> mouseDownMayStartSelectChange(m_mouseDownMayStartSelect, true);
+    AutoReset<bool> mouseDownMayStartSelectChange(&m_mouseDownMayStartSelect, true);
 
-    if (mev.hitTestResult().isMisspelled())
+    if (hitTestResultIsMisspelled(mev.hitTestResult()))
         return selectClosestMisspellingFromMouseEvent(mev);
 
     if (!m_frame->editor().behavior().shouldSelectOnContextualMenuClick())
@@ -589,6 +648,10 @@ void SelectionController::passMousePressEventToSubframe(const MouseEventWithHitT
     IntPoint p = m_frame->view()->rootFrameToContents(mev.event().position());
     if (!selection().contains(p))
         return;
+
+    // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+    // needs to be audited.  See http://crbug.com/590369 for more details.
+    m_frame->document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
     const VisiblePositionInFlatTree& visiblePos = visiblePositionOfHitTestResult(mev.hitTestResult());
     VisibleSelectionInFlatTree newSelection(visiblePos);
@@ -633,6 +696,12 @@ FrameSelection& SelectionController::selection() const
 bool isLinkSelection(const MouseEventWithHitTestResults& event)
 {
     return event.event().altKey() && event.isOverLink();
+}
+
+bool isExtendingSelection(const MouseEventWithHitTestResults& event)
+{
+    bool isMouseDownOnLinkOrImage = event.isOverLink() || event.hitTestResult().image();
+    return event.event().shiftKey() && !isMouseDownOnLinkOrImage;
 }
 
 } // namespace blink

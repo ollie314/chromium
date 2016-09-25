@@ -4,18 +4,8 @@
 
 // This features file defines permissions for extension APIs implemented
 // under src/extensions.
-
-// See extensions/common/features/* to understand this file, in particular
-// feature.h, simple_feature.h, and base_feature_provider.h.
-
-// To add a new whitelisted ID, SHA-1 it and force it to uppercase. In Bash:
-//
-// $ echo -n "aaaabbbbccccddddeeeeffffgggghhhh" | \
-// sha1sum | tr '[:lower:]' '[:upper:]'
-// 9A0417016F345C934A1A88F55CA17C05014EEEBA  -
-//
-// Google employees: please update http://go/chrome-api-whitelist to map
-// hashes back to ids.
+// See chrome/common/extensions/api/_features.md to understand this file, as
+// well as feature.h, simple_feature.h, and base_feature_provider.h.
 
 // If you add a new platform_app permission please update the "stubs_app" test:
 // chrome/test/data/extensions/api_test/stubs_app/manifest.json
@@ -150,7 +140,9 @@
       "81986D4F846CEDDDB962643FA501D1780DD441BB",  // http://crbug.com/407693
       "89715614FAA2B4C2853802D70261D2A9D0756FC8",  // http://crbug.com/455986
       "61FF4757F9420B62B19BA5C96084649339DB31F5",  // http://crbug.com/587613
-      "F3013F58BED982D1BC75943792FF877E5D458672"   // http://crbug.com/587613
+      "F3013F58BED982D1BC75943792FF877E5D458672",  // http://crbug.com/587613
+      "1B7734733E207CCE5C33BFAA544CA89634BF881F",  // http://crbug.com/587613
+      "2F6F6FDB84E0290ABAB7A9D7571EB344821E5F12"   // http://crbug.com/610452
     ]
   },
   "cast": {
@@ -166,6 +158,11 @@
       "C17CD9E6868D7B9C67926E0EC612EA25C768418F",  // http://crbug.com/457908
       "226CF815E39A363090A1E547D53063472B8279FA"   // http://crbug.com/574889
     ]
+  },
+  "clipboard": {
+    "channel": "dev",
+    "extension_types": ["platform_app"],
+    "platforms": ["chromeos"]
   },
   "declarativeWebRequest": {
       "channel": "beta",
@@ -281,7 +278,8 @@
       "4F25792AF1AA7483936DE29C07806F203C7170A0",  // http://crbug.com/407693
       "BD8781D757D830FC2E85470A1B6E8A718B7EE0D9",  // http://crbug.com/407693
       "4AC2B6C63C6480D150DFDA13E4A5956EB1D0DDBB",  // http://crbug.com/407693
-      "81986D4F846CEDDDB962643FA501D1780DD441BB"   // http://crbug.com/407693
+      "81986D4F846CEDDDB962643FA501D1780DD441BB",  // http://crbug.com/407693
+      "2F6F6FDB84E0290ABAB7A9D7571EB344821E5F12"   // http://crbug.com/610452
     ]
   },
   "power": {

@@ -41,11 +41,9 @@ TEST_F(PolicyProviderTest, DefaultGeolocationContentSetting) {
       profile.GetTestingPrefService();
   PolicyProvider provider(prefs);
 
-  Rules rules;
-
   std::unique_ptr<RuleIterator> rule_iterator(provider.GetRuleIterator(
       CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string(), false));
-  EXPECT_FALSE(rule_iterator->HasNext());
+  EXPECT_FALSE(rule_iterator);
 
   // Change the managed value of the default geolocation setting
   prefs->SetManagedPref(prefs::kManagedDefaultGeolocationSetting,
@@ -53,6 +51,7 @@ TEST_F(PolicyProviderTest, DefaultGeolocationContentSetting) {
 
   rule_iterator = provider.GetRuleIterator(CONTENT_SETTINGS_TYPE_GEOLOCATION,
                                            std::string(), false);
+  ASSERT_TRUE(rule_iterator);
   EXPECT_TRUE(rule_iterator->HasNext());
   Rule rule = rule_iterator->Next();
   EXPECT_FALSE(rule_iterator->HasNext());
@@ -123,7 +122,7 @@ TEST_F(PolicyProviderTest, GettingManagedContentSettings) {
       profile.GetTestingPrefService();
 
   base::ListValue* value = new base::ListValue();
-  value->Append(new base::StringValue("[*.]google.com"));
+  value->AppendString("[*.]google.com");
   prefs->SetManagedPref(prefs::kManagedImagesBlockedForUrls,
                         value);
 
@@ -179,7 +178,7 @@ TEST_F(PolicyProviderTest, ResourceIdentifier) {
       profile.GetTestingPrefService();
 
   base::ListValue* value = new base::ListValue();
-  value->Append(new base::StringValue("[*.]google.com"));
+  value->AppendString("[*.]google.com");
   prefs->SetManagedPref(prefs::kManagedPluginsAllowedForUrls,
                         value);
 
@@ -226,8 +225,7 @@ TEST_F(PolicyProviderTest, AutoSelectCertificateList) {
   std::string pattern_str("\"pattern\":\"[*.]google.com\"");
   std::string filter_str("\"filter\":{\"ISSUER\":{\"CN\":\"issuer name\"}}");
   base::ListValue* value = new base::ListValue();
-  value->Append(
-      new base::StringValue("{" + pattern_str + "," + filter_str + "}"));
+  value->AppendString("{" + pattern_str + "," + filter_str + "}");
   prefs->SetManagedPref(prefs::kManagedAutoSelectCertificateForUrls,
                         value);
   GURL youtube_url("https://www.youtube.com");

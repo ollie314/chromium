@@ -13,7 +13,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/sequenced_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 
 // TODO(tzik): Merge this file to media/base/bind_to_current_loop.h.
 
@@ -65,6 +65,13 @@ class CallbackHolder {
 
 template <typename>
 struct RelayToTaskRunnerHelper;
+
+template <>
+struct RelayToTaskRunnerHelper<void()> {
+  static void Run(CallbackHolder<void()>* holder) {
+    holder->task_runner()->PostTask(holder->from_here(), holder->callback());
+  }
+};
 
 template <typename... Args>
 struct RelayToTaskRunnerHelper<void(Args...)> {

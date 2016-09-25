@@ -20,6 +20,26 @@ class PixelExpectations(GpuTestExpectations):
     self.Fail('Pixel.WebGLGreenTriangleES3',
               ['mac', ('intel', 0x116)], bug=540531)
 
-    # TODO(ccameron): Remove suppression after rebaseline.
+    # TODO(ccameron) fix these on Mac Retina
     self.Fail('Pixel.CSS3DBlueBox', ['mac'], bug=533690)
     self.Fail('Pixel.CSS3DBlueBoxES3', ['mac'], bug=533690)
+
+    # TODO(vmiura) check / generate reference images for Android devices
+    self.Fail('Pixel.SolidColorBackground', ['mac', 'android'], bug=624256)
+
+    # TODO(erikchen) check / generate reference images.
+    self.Fail('Pixel.CSSFilterEffects', ['mac'], bug=581526)
+    self.Fail('Pixel.CSSFilterEffects.NoOverlays', ['mac'], bug=581526)
+
+    # TODO(xidachen) check / generate reference images
+    self.Fail('Pixel.OffscreenCanvasWebGLRedBoxWorker', bug=563852)
+    self.Fail('Pixel.OffscreenCanvasWebGLRedBoxWorkerES3', ['mac'], bug=563852)
+
+    self.Fail('Pixel.OffscreenCanvasAccelerated2D', bug=563852)
+    self.Fail('Pixel.OffscreenCanvasAccelerated2DES3', ['mac'], bug=563852)
+    self.Fail('Pixel.OffscreenCanvasAccelerated2DWorker', bug=563852)
+    self.Fail('Pixel.OffscreenCanvasAccelerated2DWorkerES3', ['mac'],
+        bug=563852)
+
+    # TODO(kbr): flakily timing out on this configuration.
+    self.Flaky('*', ['linux', 'intel', 'debug'], bug=648369)

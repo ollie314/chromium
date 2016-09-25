@@ -16,7 +16,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/devtools/device/usb/android_rsa.h"
 #include "chrome/browser/devtools/device/usb/android_usb_socket.h"
 #include "content/public/browser/browser_thread.h"
@@ -77,7 +77,7 @@ void CountAndroidDevices(const base::Callback<void(int)>& callback,
                          const UsbDevices& devices) {
   int device_count = 0;
   for (const scoped_refptr<UsbDevice>& device : devices) {
-    const UsbConfigDescriptor* config = device->GetActiveConfiguration();
+    const UsbConfigDescriptor* config = device->active_configuration();
     if (config) {
       for (const UsbInterfaceDescriptor& iface : config->interfaces) {
         if (IsAndroidInterface(iface)) {
@@ -215,7 +215,7 @@ void OpenAndroidDevice(AndroidUsbDevices* devices,
     return;
   }
 
-  const UsbConfigDescriptor* config = device->GetActiveConfiguration();
+  const UsbConfigDescriptor* config = device->active_configuration();
   if (!config) {
     barrier.Run();
     return;
@@ -259,7 +259,7 @@ void OpenAndroidDevices(
       base::Bind(&RespondOnUIThread, callback, devices, caller_task_runner));
 
   for (const scoped_refptr<UsbDevice>& device : usb_devices) {
-    const UsbConfigDescriptor* config = device->GetActiveConfiguration();
+    const UsbConfigDescriptor* config = device->active_configuration();
     if (!config) {
       barrier.Run();
       continue;
@@ -360,8 +360,8 @@ void AndroidUsbDevice::InitOnCallerThread() {
   if (task_runner_)
     return;
   task_runner_ = base::ThreadTaskRunnerHandle::Get();
-  Queue(base::WrapUnique(new AdbMessage(AdbMessage::kCommandCNXN, kVersion,
-                                        kMaxPayload, kHostConnectMessage)));
+  Queue(base::MakeUnique<AdbMessage>(AdbMessage::kCommandCNXN, kVersion,
+                                     kMaxPayload, kHostConnectMessage));
   ReadHeader();
 }
 
@@ -577,20 +577,20 @@ void AndroidUsbDevice::HandleIncoming(std::unique_ptr<AdbMessage> message) {
       {
       DCHECK_EQ(message->arg0, static_cast<uint32_t>(AdbMessage::kAuthToken));
         if (signature_sent_) {
-          Queue(base::WrapUnique(new AdbMessage(
+          Queue(base::MakeUnique<AdbMessage>(
               AdbMessage::kCommandAUTH, AdbMessage::kAuthRSAPublicKey, 0,
-              AndroidRSAPublicKey(rsa_key_.get()))));
+              AndroidRSAPublicKey(rsa_key_.get())));
         } else {
           signature_sent_ = true;
           std::string signature = AndroidRSASign(rsa_key_.get(), message->body);
           if (!signature.empty()) {
-            Queue(base::WrapUnique(new AdbMessage(AdbMessage::kCommandAUTH,
-                                                  AdbMessage::kAuthSignature, 0,
-                                                  signature)));
+            Queue(base::MakeUnique<AdbMessage>(AdbMessage::kCommandAUTH,
+                                               AdbMessage::kAuthSignature, 0,
+                                               signature));
           } else {
-            Queue(base::WrapUnique(new AdbMessage(
+            Queue(base::MakeUnique<AdbMessage>(
                 AdbMessage::kCommandAUTH, AdbMessage::kAuthRSAPublicKey, 0,
-                AndroidRSAPublicKey(rsa_key_.get()))));
+                AndroidRSAPublicKey(rsa_key_.get())));
           }
         }
       }

@@ -5,7 +5,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/base_switches.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/api/instance_id/instance_id_api.h"
@@ -24,25 +23,12 @@ using extensions::ResultCatcher;
 
 namespace extensions {
 
-namespace {
-
-std::unique_ptr<KeyedService> BuildFakeGCMProfileService(
-    content::BrowserContext* context) {
-  std::unique_ptr<gcm::FakeGCMProfileService> service(
-      new gcm::FakeGCMProfileService(Profile::FromBrowserContext(context)));
-  service->SetDriverForTesting(new instance_id::FakeGCMDriverForInstanceID());
-  return std::move(service);
-}
-
-}  // namespace
-
 class InstanceIDApiTest : public ExtensionApiTest {
  public:
   InstanceIDApiTest();
 
  protected:
   void SetUpOnMainThread() override;
-  void SetUpCommandLine(base::CommandLine* command_line) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InstanceIDApiTest);
@@ -53,17 +39,9 @@ InstanceIDApiTest::InstanceIDApiTest() {
 
 void InstanceIDApiTest::SetUpOnMainThread() {
   gcm::GCMProfileServiceFactory::GetInstance()->SetTestingFactory(
-      browser()->profile(), &BuildFakeGCMProfileService);
+      browser()->profile(), &gcm::FakeGCMProfileService::Build);
 
   ExtensionApiTest::SetUpOnMainThread();
-}
-
-void InstanceIDApiTest::SetUpCommandLine(base::CommandLine* command_line) {
-  ExtensionApiTest::SetUpCommandLine(command_line);
-
-  // Makes sure InstanceID is enabled for testing.
-  command_line->AppendSwitchASCII(
-       switches::kForceFieldTrials, "InstanceID/Enabled/");
 }
 
 IN_PROC_BROWSER_TEST_F(InstanceIDApiTest, GetID) {

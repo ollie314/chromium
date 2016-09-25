@@ -8,7 +8,7 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/api/chrome_device_permissions_prompt.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -23,6 +23,7 @@
 #include "ui/views/controls/table/table_view.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/window/dialog_client_view.h"
 
 using device::UsbDevice;
 using extensions::DevicePermissionsPrompt;
@@ -115,6 +116,7 @@ DevicePermissionsDialogView::DevicePermissionsDialogView(
                                      table_columns,
                                      views::TEXT_ONLY,
                                      !prompt_->multiple());
+  table_view_->SetObserver(this);
 
   views::View* table_parent = table_view_->CreateParentIfNecessary();
   AddChildView(table_parent);
@@ -147,6 +149,12 @@ base::string16 DevicePermissionsDialogView::GetDialogButtonLabel(
   return views::DialogDelegateView::GetDialogButtonLabel(button);
 }
 
+bool DevicePermissionsDialogView::IsDialogButtonEnabled(
+    ui::DialogButton button) const {
+  return button != ui::DIALOG_BUTTON_OK ||
+         !table_view_->selection_model().empty();
+}
+
 ui::ModalType DevicePermissionsDialogView::GetModalType() const {
   return ui::MODAL_TYPE_CHILD;
 }
@@ -159,7 +167,11 @@ gfx::Size DevicePermissionsDialogView::GetPreferredSize() const {
   return gfx::Size(500, 250);
 }
 
-void ChromeDevicePermissionsPrompt::ShowDialog() {
+void DevicePermissionsDialogView::OnSelectionChanged() {
+  GetDialogClientView()->UpdateDialogButtons();
+}
+
+void ChromeDevicePermissionsPrompt::ShowDialogViews() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   web_modal::WebContentsModalDialogManager* manager =

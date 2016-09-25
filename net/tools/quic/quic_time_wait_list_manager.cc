@@ -12,15 +12,15 @@
 #include "base/macros.h"
 #include "base/stl_util.h"
 #include "net/base/ip_endpoint.h"
-#include "net/quic/crypto/crypto_protocol.h"
-#include "net/quic/crypto/quic_decrypter.h"
-#include "net/quic/crypto/quic_encrypter.h"
-#include "net/quic/quic_clock.h"
-#include "net/quic/quic_flags.h"
-#include "net/quic/quic_framer.h"
-#include "net/quic/quic_protocol.h"
-#include "net/quic/quic_utils.h"
-#include "net/tools/quic/quic_server_session_base.h"
+#include "net/quic/core/crypto/crypto_protocol.h"
+#include "net/quic/core/crypto/quic_decrypter.h"
+#include "net/quic/core/crypto/quic_encrypter.h"
+#include "net/quic/core/quic_clock.h"
+#include "net/quic/core/quic_flags.h"
+#include "net/quic/core/quic_framer.h"
+#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_server_session_base.h"
+#include "net/quic/core/quic_utils.h"
 
 using base::StringPiece;
 
@@ -76,12 +76,13 @@ class QuicTimeWaitListManager::QueuedPacket {
 
 QuicTimeWaitListManager::QuicTimeWaitListManager(
     QuicPacketWriter* writer,
-    QuicServerSessionVisitor* visitor,
-    QuicConnectionHelperInterface* helper)
+    QuicServerSessionBase::Visitor* visitor,
+    QuicConnectionHelperInterface* helper,
+    QuicAlarmFactory* alarm_factory)
     : time_wait_period_(
           QuicTime::Delta::FromSeconds(FLAGS_quic_time_wait_list_seconds)),
       connection_id_clean_up_alarm_(
-          helper->CreateAlarm(new ConnectionIdCleanUpAlarm(this))),
+          alarm_factory->CreateAlarm(new ConnectionIdCleanUpAlarm(this))),
       clock_(helper->GetClock()),
       writer_(writer),
       visitor_(visitor) {
@@ -90,18 +91,14 @@ QuicTimeWaitListManager::QuicTimeWaitListManager(
 
 QuicTimeWaitListManager::~QuicTimeWaitListManager() {
   connection_id_clean_up_alarm_->Cancel();
-  STLDeleteElements(&pending_packets_queue_);
-  for (ConnectionIdMap::iterator it = connection_id_map_.begin();
-       it != connection_id_map_.end(); ++it) {
-    STLDeleteElements(&it->second.termination_packets);
-  }
+  base::STLDeleteElements(&pending_packets_queue_);
 }
 
 void QuicTimeWaitListManager::AddConnectionIdToTimeWait(
     QuicConnectionId connection_id,
     QuicVersion version,
     bool connection_rejected_statelessly,
-    std::vector<QuicEncryptedPacket*>* termination_packets) {
+    std::vector<std::unique_ptr<QuicEncryptedPacket>>* termination_packets) {
   if (connection_rejected_statelessly) {
     DCHECK(termination_packets != nullptr && !termination_packets->empty())
         << "Connections that were rejected statelessly must "
@@ -112,7 +109,6 @@ void QuicTimeWaitListManager::AddConnectionIdToTimeWait(
   const bool new_connection_id = it == connection_id_map_.end();
   if (!new_connection_id) {  // Replace record if it is reinserted.
     num_packets = it->second.num_packets;
-    STLDeleteElements(&it->second.termination_packets);
     connection_id_map_.erase(it);
   }
   TrimTimeWaitListIfNeeded();
@@ -123,7 +119,7 @@ void QuicTimeWaitListManager::AddConnectionIdToTimeWait(
   if (termination_packets != nullptr) {
     data.termination_packets.swap(*termination_packets);
   }
-  connection_id_map_.insert(std::make_pair(connection_id, data));
+  connection_id_map_.emplace(std::make_pair(connection_id, std::move(data)));
   if (new_connection_id) {
     visitor_->OnConnectionAddedToTimeWaitList(connection_id);
   }
@@ -131,7 +127,7 @@ void QuicTimeWaitListManager::AddConnectionIdToTimeWait(
 
 bool QuicTimeWaitListManager::IsConnectionIdInTimeWait(
     QuicConnectionId connection_id) const {
-  return ContainsKey(connection_id_map_, connection_id);
+  return base::ContainsKey(connection_id_map_, connection_id);
 }
 
 QuicVersion QuicTimeWaitListManager::GetQuicVersionFromConnectionId(
@@ -177,7 +173,7 @@ void QuicTimeWaitListManager::ProcessPacket(
       DVLOG(3) << "Time wait list sending previous stateless reject response "
                << "for connection " << connection_id;
     }
-    for (QuicEncryptedPacket* packet : connection_data->termination_packets) {
+    for (const auto& packet : connection_data->termination_packets) {
       QueuedPacket* queued_packet =
           new QueuedPacket(server_address, client_address, packet->Clone());
       // Takes ownership of the packet.
@@ -265,15 +261,13 @@ bool QuicTimeWaitListManager::WriteToWire(QueuedPacket* queued_packet) {
 }
 
 void QuicTimeWaitListManager::SetConnectionIdCleanUpAlarm() {
-  connection_id_clean_up_alarm_->Cancel();
   QuicTime::Delta next_alarm_interval = QuicTime::Delta::Zero();
   if (!connection_id_map_.empty()) {
     QuicTime oldest_connection_id =
         connection_id_map_.begin()->second.time_added;
     QuicTime now = clock_->ApproximateNow();
-    if (now.Subtract(oldest_connection_id) < time_wait_period_) {
-      next_alarm_interval =
-          oldest_connection_id.Add(time_wait_period_).Subtract(now);
+    if (now - oldest_connection_id < time_wait_period_) {
+      next_alarm_interval = oldest_connection_id + time_wait_period_ - now;
     } else {
       LOG(ERROR) << "ConnectionId lingered for longer than time_wait_period_";
     }
@@ -282,8 +276,8 @@ void QuicTimeWaitListManager::SetConnectionIdCleanUpAlarm() {
     next_alarm_interval = time_wait_period_;
   }
 
-  connection_id_clean_up_alarm_->Set(
-      clock_->ApproximateNow().Add(next_alarm_interval));
+  connection_id_clean_up_alarm_->Update(
+      clock_->ApproximateNow() + next_alarm_interval, QuicTime::Delta::Zero());
 }
 
 bool QuicTimeWaitListManager::MaybeExpireOldestConnection(
@@ -298,16 +292,13 @@ bool QuicTimeWaitListManager::MaybeExpireOldestConnection(
     return false;
   }
   // This connection_id has lived its age, retire it now.
-  const QuicConnectionId connection_id = it->first;
-  STLDeleteElements(&it->second.termination_packets);
   connection_id_map_.erase(it);
-  visitor_->OnConnectionRemovedFromTimeWaitList(connection_id);
   return true;
 }
 
 void QuicTimeWaitListManager::CleanUpOldConnectionIds() {
   QuicTime now = clock_->ApproximateNow();
-  QuicTime expiration = now.Subtract(time_wait_period_);
+  QuicTime expiration = now - time_wait_period_;
 
   while (MaybeExpireOldestConnection(expiration)) {
   }
@@ -336,7 +327,7 @@ QuicTimeWaitListManager::ConnectionIdData::ConnectionIdData(
       connection_rejected_statelessly(connection_rejected_statelessly) {}
 
 QuicTimeWaitListManager::ConnectionIdData::ConnectionIdData(
-    const ConnectionIdData& other) = default;
+    ConnectionIdData&& other) = default;
 
 QuicTimeWaitListManager::ConnectionIdData::~ConnectionIdData() {}
 

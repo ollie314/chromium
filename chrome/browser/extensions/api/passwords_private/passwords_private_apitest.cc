@@ -8,7 +8,6 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ptr_util.h"
 #include "base/observer_list.h"
 #include "base/strings/utf_string_conversions.h"
@@ -37,6 +36,8 @@ api::passwords_private::PasswordUiEntry CreateEntry(size_t num) {
   std::stringstream ss;
   ss << "http://test" << num << ".com";
   entry.login_pair.origin_url = ss.str();
+  ss << "/login";
+  entry.link_url = ss.str();
   ss.clear();
   ss << "testName" << num;
   entry.login_pair.username = ss.str();
@@ -44,10 +45,14 @@ api::passwords_private::PasswordUiEntry CreateEntry(size_t num) {
   return entry;
 }
 
-std::string CreateException(size_t num) {
+api::passwords_private::ExceptionPair CreateException(size_t num) {
+  api::passwords_private::ExceptionPair exception;
   std::stringstream ss;
   ss << "http://exception" << num << ".com";
-  return ss.str();
+  exception.exception_url = ss.str();
+  ss << "/login";
+  exception.link_url = ss.str();
+  return exception;
 }
 
 // A test PasswordsPrivateDelegate implementation which uses mock data.
@@ -72,6 +77,11 @@ class TestDelegate : public PasswordsPrivateDelegate {
       router->OnSavedPasswordsListChanged(current_entries_);
   }
 
+  const std::vector<api::passwords_private::PasswordUiEntry>*
+  GetSavedPasswordsList() const override {
+    return &current_entries_;
+  }
+
   void SendPasswordExceptionsList() override {
     PasswordsPrivateEventRouter* router =
         PasswordsPrivateEventRouterFactory::GetForProfile(profile_);
@@ -79,9 +89,14 @@ class TestDelegate : public PasswordsPrivateDelegate {
       router->OnPasswordExceptionsListChanged(current_exceptions_);
   }
 
+  const std::vector<api::passwords_private::ExceptionPair>*
+  GetPasswordExceptionsList() const override {
+    return &current_exceptions_;
+  }
+
   void RemoveSavedPassword(
       const std::string& origin_url, const std::string& username) override {
-    if (!current_entries_.size())
+    if (current_entries_.empty())
       return;
 
     // Since this is just mock data, remove the first entry regardless of
@@ -91,7 +106,7 @@ class TestDelegate : public PasswordsPrivateDelegate {
   }
 
   void RemovePasswordException(const std::string& exception_url) override {
-    if (!current_exceptions_.size())
+    if (current_exceptions_.empty())
       return;
 
     // Since this is just mock data, remove the first entry regardless of
@@ -120,7 +135,7 @@ class TestDelegate : public PasswordsPrivateDelegate {
   // observers are added, this delegate can send the current lists without
   // having to request them from |password_manager_presenter_| again.
   std::vector<api::passwords_private::PasswordUiEntry> current_entries_;
-  std::vector<std::string> current_exceptions_;
+  std::vector<api::passwords_private::ExceptionPair> current_exceptions_;
   Profile* profile_;
 };
 
@@ -183,6 +198,14 @@ IN_PROC_BROWSER_TEST_F(PasswordsPrivateApiTest, RemovePasswordException) {
 
 IN_PROC_BROWSER_TEST_F(PasswordsPrivateApiTest, RequestPlaintextPassword) {
   EXPECT_TRUE(RunPasswordsSubtest("requestPlaintextPassword")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(PasswordsPrivateApiTest, GetSavedPasswordList) {
+  EXPECT_TRUE(RunPasswordsSubtest("getSavedPasswordList")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(PasswordsPrivateApiTest, GetPasswordExceptionList) {
+  EXPECT_TRUE(RunPasswordsSubtest("getPasswordExceptionList")) << message_;
 }
 
 }  // namespace extensions

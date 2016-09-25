@@ -6,12 +6,32 @@
 #define CHROME_BROWSER_PAGE_LOAD_METRICS_OBSERVERS_FROM_GWS_PAGE_LOAD_METRICS_OBSERVER_H_
 
 #include "base/macros.h"
-#include "components/page_load_metrics/browser/page_load_metrics_observer.h"
+#include "base/optional.h"
+#include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
 #include "url/gurl.h"
 
 namespace internal {
 // Exposed for tests.
+extern const char kHistogramFromGWSDomContentLoaded[];
+extern const char kHistogramFromGWSLoad[];
+extern const char kHistogramFromGWSFirstPaint[];
 extern const char kHistogramFromGWSFirstTextPaint[];
+extern const char kHistogramFromGWSFirstImagePaint[];
+extern const char kHistogramFromGWSFirstContentfulPaint[];
+extern const char kHistogramFromGWSParseStartToFirstContentfulPaint[];
+extern const char kHistogramFromGWSParseDuration[];
+extern const char kHistogramFromGWSParseStart[];
+extern const char kHistogramFromGWSAbortStopBeforePaint[];
+extern const char kHistogramFromGWSAbortStopBeforeInteraction[];
+extern const char kHistogramFromGWSAbortStopBeforeCommit[];
+extern const char kHistogramFromGWSAbortCloseBeforePaint[];
+extern const char kHistogramFromGWSAbortCloseBeforeInteraction[];
+extern const char kHistogramFromGWSAbortCloseBeforeCommit[];
+extern const char kHistogramFromGWSAbortNewNavigationBeforeCommit[];
+extern const char kHistogramFromGWSAbortNewNavigationBeforePaint[];
+extern const char kHistogramFromGWSAbortNewNavigationBeforeInteraction[];
+extern const char kHistogramFromGWSAbortReloadBeforeInteraction[];
+
 }  // namespace internal
 
 // FromGWSPageLoadMetricsLogger is a peer class to
@@ -23,25 +43,58 @@ extern const char kHistogramFromGWSFirstTextPaint[];
 // the code more unit testable.
 class FromGWSPageLoadMetricsLogger {
  public:
-  FromGWSPageLoadMetricsLogger() {}
+  FromGWSPageLoadMetricsLogger();
 
-  void set_previously_committed_url(const GURL& url) {
-    previously_committed_url_ = url;
-  }
+  void SetPreviouslyCommittedUrl(const GURL& url);
+  void SetProvisionalUrl(const GURL& url);
 
   void set_navigation_initiated_via_link(bool navigation_initiated_via_link) {
     navigation_initiated_via_link_ = navigation_initiated_via_link;
   }
 
+  void SetNavigationStart(const base::TimeTicks navigation_start) {
+    // Should be invoked at most once
+    DCHECK(navigation_start_.is_null());
+    navigation_start_ = navigation_start;
+  }
+
   // Invoked when metrics for the given page are complete.
   void OnComplete(const page_load_metrics::PageLoadTiming& timing,
                   const page_load_metrics::PageLoadExtraInfo& extra_info);
+  void OnFailedProvisionalLoad(
+      const page_load_metrics::FailedProvisionalLoadInfo& failed_load_info,
+      const page_load_metrics::PageLoadExtraInfo& extra_info);
+
+  void OnDomContentLoadedEventStart(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info);
+  void OnLoadEventStart(const page_load_metrics::PageLoadTiming& timing,
+                        const page_load_metrics::PageLoadExtraInfo& extra_info);
+  void OnFirstPaint(const page_load_metrics::PageLoadTiming& timing,
+                    const page_load_metrics::PageLoadExtraInfo& extra_info);
+  void OnFirstTextPaint(const page_load_metrics::PageLoadTiming& timing,
+                        const page_load_metrics::PageLoadExtraInfo& extra_info);
+  void OnFirstImagePaint(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info);
+  void OnFirstContentfulPaint(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info);
+  void OnParseStart(const page_load_metrics::PageLoadTiming& timing,
+                    const page_load_metrics::PageLoadExtraInfo& extra_info);
+  void OnParseStop(const page_load_metrics::PageLoadTiming& timing,
+                   const page_load_metrics::PageLoadExtraInfo& extra_info);
+  void OnUserInput(const blink::WebInputEvent& event);
 
   // The methods below are public only for testing.
   static bool IsGoogleSearchHostname(base::StringPiece host);
   static bool IsGoogleSearchResultUrl(const GURL& url);
-  static bool IsGoogleRedirectorUrl(const GURL& url);
   static bool IsGoogleSearchRedirectorUrl(const GURL& url);
+  bool ShouldLogFailedProvisionalLoadMetrics();
+  bool ShouldLogPostCommitMetrics(const GURL& url);
+  bool ShouldLogForegroundEventAfterCommit(
+      const base::Optional<base::TimeDelta>& event,
+      const page_load_metrics::PageLoadExtraInfo& info);
 
   // Whether the given query string contains the given component. The query
   // parameter should contain the query string of a URL (the portion following
@@ -58,21 +111,24 @@ class FromGWSPageLoadMetricsLogger {
   static bool QueryContainsComponentPrefix(const base::StringPiece query,
                                            const base::StringPiece component);
 
-  // Whether metrics should be logged based on state provided via setters and
-  // the given committed_url.
-  bool ShouldLogMetrics(const GURL& committed_url) const;
-
  private:
-  GURL previously_committed_url_;
+  bool previously_committed_url_is_search_results_ = false;
+  bool previously_committed_url_is_search_redirector_ = false;
   bool navigation_initiated_via_link_ = false;
+  bool provisional_url_has_search_hostname_ = false;
+
+  // The state of if first paint is triggered.
+  bool first_paint_triggered_ = false;
+
+  base::TimeTicks navigation_start_;
+
+  // The time of first user interaction after paint from navigation start.
+  base::Optional<base::TimeDelta> first_user_interaction_after_paint_;
 
   // Common helper for QueryContainsComponent and QueryContainsComponentPrefix.
   static bool QueryContainsComponentHelper(const base::StringPiece query,
                                            const base::StringPiece component,
                                            bool component_is_prefix);
-
-  void LogMetrics(const page_load_metrics::PageLoadTiming& timing,
-                  const page_load_metrics::PageLoadExtraInfo& extra_info);
 
   DISALLOW_COPY_AND_ASSIGN(FromGWSPageLoadMetricsLogger);
 };
@@ -81,13 +137,46 @@ class FromGWSPageLoadMetricsObserver
     : public page_load_metrics::PageLoadMetricsObserver {
  public:
   FromGWSPageLoadMetricsObserver();
+
   // page_load_metrics::PageLoadMetricsObserver implementation:
   void OnStart(content::NavigationHandle* navigation_handle,
-               const GURL& currently_committed_url) override;
+               const GURL& currently_committed_url,
+               bool started_in_foreground) override;
   void OnCommit(content::NavigationHandle* navigation_handle) override;
+
+  void OnDomContentLoadedEventStart(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  void OnLoadEventStart(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  void OnFirstPaint(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  void OnFirstTextPaint(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  void OnFirstImagePaint(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  void OnFirstContentfulPaint(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  void OnParseStart(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  void OnParseStop(
+      const page_load_metrics::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+
   void OnComplete(
       const page_load_metrics::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  void OnFailedProvisionalLoad(
+      const page_load_metrics::FailedProvisionalLoadInfo& failed_load_info,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+
+  void OnUserInput(const blink::WebInputEvent& event) override;
 
  private:
   FromGWSPageLoadMetricsLogger logger_;

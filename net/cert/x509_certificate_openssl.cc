@@ -23,7 +23,7 @@
 #include "base/strings/string_util.h"
 #include "crypto/openssl_util.h"
 #include "crypto/scoped_openssl_types.h"
-#include "net/base/ip_address_number.h"
+#include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
 #include "net/cert/x509_util_openssl.h"
 
@@ -125,8 +125,8 @@ void ParseSubjectAltName(X509Certificate::OSCertHandle cert,
       if (!ip_addr)
         continue;
       int ip_addr_len = name->d.iPAddress->length;
-      if (ip_addr_len != static_cast<int>(kIPv4AddressSize) &&
-          ip_addr_len != static_cast<int>(kIPv6AddressSize)) {
+      if (ip_addr_len != static_cast<int>(IPAddress::kIPv4AddressSize) &&
+          ip_addr_len != static_cast<int>(IPAddress::kIPv6AddressSize)) {
         // http://www.ietf.org/rfc/rfc3280.txt requires subjectAltName iPAddress
         // to have 4 or 16 bytes, whereas in a name constraint it includes a
         // net mask hence 8 or 32 bytes. Logging to help diagnose any mixup.
@@ -180,7 +180,8 @@ void sk_X509_NAME_free_all(STACK_OF(X509_NAME)* sk) {
 X509Certificate::OSCertHandle X509Certificate::DupOSCertHandle(
     OSCertHandle cert_handle) {
   DCHECK(cert_handle);
-  return X509_up_ref(cert_handle);
+  X509_up_ref(cert_handle);
+  return cert_handle;
 }
 
 // static
@@ -193,8 +194,6 @@ void X509Certificate::FreeOSCertHandle(OSCertHandle cert_handle) {
 
 void X509Certificate::Initialize() {
   crypto::EnsureOpenSSLInit();
-  fingerprint_ = CalculateFingerprint(cert_handle_);
-  ca_fingerprint_ = CalculateCAFingerprint(intermediate_ca_certs_);
 
   ASN1_INTEGER* serial_num = X509_get_serialNumber(cert_handle_);
   if (serial_num) {
@@ -223,16 +222,6 @@ void X509Certificate::ResetCertStore() {
 }
 
 // static
-SHA1HashValue X509Certificate::CalculateFingerprint(OSCertHandle cert) {
-  SHA1HashValue sha1;
-  unsigned int sha1_size = static_cast<unsigned int>(sizeof(sha1.data));
-  int ret = X509_digest(cert, EVP_sha1(), sha1.data, &sha1_size);
-  CHECK(ret);
-  CHECK_EQ(sha1_size, sizeof(sha1.data));
-  return sha1;
-}
-
-// static
 SHA256HashValue X509Certificate::CalculateFingerprint256(OSCertHandle cert) {
   SHA256HashValue sha256;
   unsigned int sha256_size = static_cast<unsigned int>(sizeof(sha256.data));
@@ -243,22 +232,22 @@ SHA256HashValue X509Certificate::CalculateFingerprint256(OSCertHandle cert) {
 }
 
 // static
-SHA1HashValue X509Certificate::CalculateCAFingerprint(
+SHA256HashValue X509Certificate::CalculateCAFingerprint256(
     const OSCertHandles& intermediates) {
-  SHA1HashValue sha1;
-  memset(sha1.data, 0, sizeof(sha1.data));
+  SHA256HashValue sha256;
+  memset(sha256.data, 0, sizeof(sha256.data));
 
-  SHA_CTX sha1_ctx;
-  SHA1_Init(&sha1_ctx);
+  SHA256_CTX sha256_ctx;
+  SHA256_Init(&sha256_ctx);
   base::StringPiece der;
   for (size_t i = 0; i < intermediates.size(); ++i) {
     if (!x509_util::GetDER(intermediates[i], &der))
-      return sha1;
-    SHA1_Update(&sha1_ctx, der.data(), der.length());
+      return sha256;
+    SHA256_Update(&sha256_ctx, der.data(), der.length());
   }
-  SHA1_Final(sha1.data, &sha1_ctx);
+  SHA256_Final(sha256.data, &sha256_ctx);
 
-  return sha1;
+  return sha256;
 }
 
 // static
@@ -456,9 +445,9 @@ bool X509Certificate::IsSelfSigned(OSCertHandle cert_handle) {
   crypto::ScopedEVP_PKEY scoped_key(X509_get_pubkey(cert_handle));
   if (!scoped_key)
     return false;
-
-  // NOTE: X509_verify() returns 1 in case of success, 0 or -1 on error.
-  return X509_verify(cert_handle, scoped_key.get()) == 1;
+  if (!X509_verify(cert_handle, scoped_key.get()))
+    return false;
+  return X509_check_issued(cert_handle, cert_handle) == X509_V_OK;
 }
 
 }  // namespace net

@@ -32,28 +32,12 @@
     ImplementedAs=DOMURL,
     RaisesException=Constructor,
 ] interface URL {
-    // TODO(philipj): Implement domainToASCII() and domainToUnicode().
+    // TODO(foolip): Implement domainToASCII() and domainToUnicode().
     // crbug.com/493908
     // static USVString domainToASCII(USVString domain);
     // static USVString domainToUnicode(USVString domain);
 
-    // TODO(philipj): This should be in a partial interface definition:
-    // File API
-    // https://w3c.github.io/FileAPI/#creating-revoking
-    // TODO(philipj): The return type should not be nullable.
-    [RaisesException, CallWith=ExecutionContext] static DOMString? createObjectURL(Blob blob);
-    [CallWith=ExecutionContext] static void revokeObjectURL(DOMString url);
-
-    // TODO(sof): 'stringifier' entails an enumerable toString(),
-    //   http://heycam.github.io/webidl/#es-stringifier
-    // something URL currently doesn't provide. Switch it over to being
-    // enumerable (http://crbug.com/306606).
-    //
-    // Until that time, do not use 'stringifier'.
-    // stringifier attribute USVString href;
-    attribute USVString href;
-    [NotEnumerable, ImplementedAs=href] USVString toString();
-
+    stringifier attribute USVString href;
     readonly attribute USVString origin;
 
     attribute USVString protocol;
@@ -67,4 +51,3 @@
     readonly attribute URLSearchParams searchParams;
     attribute USVString hash;
 };
-

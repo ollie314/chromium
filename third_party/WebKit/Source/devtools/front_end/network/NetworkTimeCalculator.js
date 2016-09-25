@@ -63,9 +63,9 @@ WebInspector.NetworkTimeCalculator = function(startAtZero)
     this._window = null;
 }
 
-/** @enum {string} */
+/** @enum {symbol} */
 WebInspector.NetworkTimeCalculator.Events = {
-    BoundariesChanged: "BoundariesChanged"
+    BoundariesChanged: Symbol("BoundariesChanged")
 }
 
 /** @type {!WebInspector.UIStringFormat} */
@@ -124,7 +124,7 @@ WebInspector.NetworkTimeCalculator.prototype = {
      * @param {number=} precision
      * @return {string}
      */
-    formatTime: function(value, precision)
+    formatValue: function(value, precision)
     {
         return Number.secondsToString(value, !!precision);
     },
@@ -385,7 +385,7 @@ WebInspector.NetworkTransferTimeCalculator.prototype = {
      * @param {number=} precision
      * @return {string}
      */
-    formatTime: function(value, precision)
+    formatValue: function(value, precision)
     {
         return Number.secondsToString(value - this.zeroTime(), !!precision);
     },
@@ -429,7 +429,7 @@ WebInspector.NetworkTransferDurationCalculator.prototype = {
      * @param {number=} precision
      * @return {string}
      */
-    formatTime: function(value, precision)
+    formatValue: function(value, precision)
     {
         return Number.secondsToString(value, !!precision);
     },

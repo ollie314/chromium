@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
+#include "gpu/command_buffer/client/shared_memory_limits.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "ppapi/c/pp_errors.h"
@@ -16,8 +17,9 @@ namespace ppapi {
 PPB_Graphics3D_Shared::PPB_Graphics3D_Shared(PP_Instance instance)
     : Resource(OBJECT_IS_IMPL, instance) {}
 
-PPB_Graphics3D_Shared::PPB_Graphics3D_Shared(const HostResource& host_resource)
-    : Resource(OBJECT_IS_PROXY, host_resource) {}
+PPB_Graphics3D_Shared::PPB_Graphics3D_Shared(const HostResource& host_resource,
+                                             const gfx::Size& size)
+    : Resource(OBJECT_IS_PROXY, host_resource), size_(size) {}
 
 PPB_Graphics3D_Shared::~PPB_Graphics3D_Shared() {
   // Make sure that GLES2 implementation has already been destroyed.
@@ -50,18 +52,20 @@ int32_t PPB_Graphics3D_Shared::ResizeBuffers(int32_t width, int32_t height) {
     return PP_ERROR_BADARGUMENT;
 
   gles2_impl()->ResizeCHROMIUM(width, height, 1.f, true);
+  size_ = gfx::Size(width, height);
   // TODO(alokp): Check if resize succeeded and return appropriate error code.
   return PP_OK;
 }
 
 int32_t PPB_Graphics3D_Shared::SwapBuffers(
     scoped_refptr<TrackedCallback> callback) {
-  return SwapBuffersWithSyncToken(callback, gpu::SyncToken());
+  return SwapBuffersWithSyncToken(callback, gpu::SyncToken(), size_);
 }
 
 int32_t PPB_Graphics3D_Shared::SwapBuffersWithSyncToken(
     scoped_refptr<TrackedCallback> callback,
-    const gpu::SyncToken& sync_token) {
+    const gpu::SyncToken& sync_token,
+    const gfx::Size& size) {
   if (HasPendingSwap()) {
     Log(PP_LOGLEVEL_ERROR,
         "PPB_Graphics3D.SwapBuffers: Plugin attempted swap "
@@ -71,7 +75,7 @@ int32_t PPB_Graphics3D_Shared::SwapBuffersWithSyncToken(
   }
 
   swap_callback_ = callback;
-  return DoSwapBuffers(sync_token);
+  return DoSwapBuffers(sync_token, size);
 }
 
 int32_t PPB_Graphics3D_Shared::GetAttribMaxValue(int32_t attribute,
@@ -143,10 +147,9 @@ bool PPB_Graphics3D_Shared::CreateGLES2Impl(
       GetGpuControl()));
 
   if (!gles2_impl_->Initialize(
-           transfer_buffer_size,
-           kMinTransferBufferSize,
-           std::max(kMaxTransferBufferSize, transfer_buffer_size),
-           gpu::gles2::GLES2Implementation::kNoLimit)) {
+          transfer_buffer_size, kMinTransferBufferSize,
+          std::max(kMaxTransferBufferSize, transfer_buffer_size),
+          gpu::SharedMemoryLimits::kNoLimit)) {
     return false;
   }
 

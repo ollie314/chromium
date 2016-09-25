@@ -19,8 +19,10 @@ import android.widget.TextView;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
+import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.sync.ui.PassphraseCreationDialogFragment;
 import org.chromium.chrome.browser.sync.ui.PassphraseDialogFragment;
@@ -28,15 +30,15 @@ import org.chromium.chrome.browser.sync.ui.PassphraseTypeDialogFragment;
 import org.chromium.chrome.browser.sync.ui.SyncCustomizationFragment;
 import org.chromium.chrome.test.util.ActivityUtils;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.sync.AndroidSyncSettings;
-import org.chromium.sync.ModelType;
-import org.chromium.sync.PassphraseType;
+import org.chromium.components.sync.AndroidSyncSettings;
+import org.chromium.components.sync.ModelType;
+import org.chromium.components.sync.PassphraseType;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -45,6 +47,7 @@ import java.util.concurrent.Callable;
  * Tests for SyncCustomizationFragment.
  */
 @SuppressLint("UseSparseArrays")
+@RetryOnFailure  // crbug.com/637448
 public class SyncCustomizationFragmentTest extends SyncTestBase {
     private static final String TAG = "SyncCustomizationFragmentTest";
 
@@ -103,7 +106,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testSyncSwitch() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         SyncTestUtil.waitForSyncActive();
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         final SwitchPreference syncSwitch = getSyncSwitch(fragment);
@@ -124,7 +127,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testOpeningSettingsDoesntEnableSync() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         stopSync();
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         closeFragment(fragment);
@@ -137,7 +140,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testOpeningSettingsDoesntStartBackend() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         stopSync();
         startSyncCustomizationFragment();
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
@@ -152,19 +155,19 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testDefaultControlStatesWithSyncOffThenOn() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         stopSync();
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         assertDefaultSyncOffState(fragment);
         togglePreference(getSyncSwitch(fragment));
-        waitForBackendInitialized();
+        SyncTestUtil.waitForBackendInitialized();
         assertDefaultSyncOnState(fragment);
     }
 
     @SmallTest
     @Feature({"Sync"})
     public void testDefaultControlStatesWithSyncOnThenOff() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         SyncTestUtil.waitForSyncActive();
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         assertDefaultSyncOnState(fragment);
@@ -175,7 +178,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testSyncEverythingAndDataTypes() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         SyncTestUtil.waitForSyncActive();
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         SwitchPreference syncEverything = getSyncEverything(fragment);
@@ -200,7 +203,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testSettingDataTypes() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         SyncTestUtil.waitForSyncActive();
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         SwitchPreference syncEverything = getSyncEverything(fragment);
@@ -214,8 +217,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         }
 
         Set<Integer> expectedTypes = new HashSet<Integer>(dataTypes.keySet());
-        // TODO(zea): update this once preferences are supported.
-        expectedTypes.remove(ModelType.PREFERENCES);
+        expectedTypes.add(ModelType.PREFERENCES);
         expectedTypes.add(ModelType.PRIORITY_PREFERENCES);
         assertDataTypesAre(expectedTypes);
         togglePreference(dataTypes.get(ModelType.AUTOFILL));
@@ -232,7 +234,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testPaymentsIntegrationChecked() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
 
         setPaymentsIntegrationEnabled(true);
 
@@ -249,7 +251,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testPaymentsIntegrationUnchecked() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
 
         setPaymentsIntegrationEnabled(false);
 
@@ -268,7 +270,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testPaymentsIntegrationCheckboxDisablesPaymentsIntegration() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
 
         setPaymentsIntegrationEnabled(true);
 
@@ -288,7 +290,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testPaymentsIntegrationCheckboxEnablesPaymentsIntegration() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
 
         setPaymentsIntegrationEnabled(false);
 
@@ -307,8 +309,60 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
 
     @SmallTest
     @Feature({"Sync"})
+    public void testPaymentsIntegrationCheckboxClearsServerAutofillCreditCards() throws Exception {
+        setUpTestAccountAndSignIn();
+
+        setPaymentsIntegrationEnabled(true);
+
+        assertFalse("There should be no server cards", hasServerAutofillCreditCards());
+        addServerAutofillCreditCard();
+        assertTrue("There should be server cards", hasServerAutofillCreditCards());
+
+        SyncCustomizationFragment fragment = startSyncCustomizationFragment();
+        assertDefaultSyncOnState(fragment);
+        SwitchPreference syncEverything = getSyncEverything(fragment);
+        togglePreference(syncEverything);
+
+        CheckBoxPreference paymentsIntegration = (CheckBoxPreference) fragment.findPreference(
+                SyncCustomizationFragment.PREFERENCE_PAYMENTS_INTEGRATION);
+        togglePreference(paymentsIntegration);
+
+        closeFragment(fragment);
+        assertPaymentsIntegrationEnabled(false);
+
+        assertFalse("There should be no server cards remaining", hasServerAutofillCreditCards());
+    }
+
+    @SmallTest
+    @Feature({"Sync"})
+    public void testSyncSwitchClearsServerAutofillCreditCards() throws Exception {
+        setUpTestAccountAndSignIn();
+
+        setPaymentsIntegrationEnabled(true);
+
+        assertFalse("There should be no server cards", hasServerAutofillCreditCards());
+        addServerAutofillCreditCard();
+        assertTrue("There should be server cards", hasServerAutofillCreditCards());
+
+        assertTrue(AndroidSyncSettings.isChromeSyncEnabled(mContext));
+        SyncCustomizationFragment fragment = startSyncCustomizationFragment();
+        assertDefaultSyncOnState(fragment);
+        SwitchPreference syncSwitch = getSyncSwitch(fragment);
+        assertTrue(syncSwitch.isChecked());
+        assertTrue(AndroidSyncSettings.isChromeSyncEnabled(mContext));
+        togglePreference(syncSwitch);
+        assertFalse(syncSwitch.isChecked());
+        assertFalse(AndroidSyncSettings.isChromeSyncEnabled(mContext));
+
+        closeFragment(fragment);
+
+        assertFalse("There should be no server cards remaining", hasServerAutofillCreditCards());
+    }
+
+    @SmallTest
+    @Feature({"Sync"})
     public void testPaymentsIntegrationDisabledByAutofillSyncCheckbox() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
 
         setPaymentsIntegrationEnabled(true);
 
@@ -333,7 +387,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testPaymentsIntegrationEnabledByAutofillSyncCheckbox() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
 
         setPaymentsIntegrationEnabled(false);
 
@@ -355,6 +409,42 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         closeFragment(fragment);
         assertPaymentsIntegrationEnabled(true);
     }
+
+    @SmallTest
+    @Feature({"Sync"})
+    public void testPaymentsIntegrationEnabledBySyncEverything() throws Exception {
+        setUpTestAccountAndSignIn();
+        setPaymentsIntegrationEnabled(false);
+        disableDataType(ModelType.AUTOFILL);
+
+        // Get the UI elements.
+        SyncCustomizationFragment fragment = startSyncCustomizationFragment();
+        SwitchPreference syncEverything = getSyncEverything(fragment);
+        CheckBoxPreference syncAutofill = (CheckBoxPreference) fragment.findPreference(
+                SyncCustomizationFragment.PREFERENCE_SYNC_AUTOFILL);
+        CheckBoxPreference paymentsIntegration = (CheckBoxPreference) fragment.findPreference(
+                SyncCustomizationFragment.PREFERENCE_PAYMENTS_INTEGRATION);
+
+        // All three are unchecked and payments is disabled.
+        assertFalse(syncEverything.isChecked());
+        assertFalse(syncAutofill.isChecked());
+        assertTrue(syncAutofill.isEnabled());
+        assertFalse(paymentsIntegration.isChecked());
+        assertFalse(paymentsIntegration.isEnabled());
+
+        // All three are checked after toggling sync everything.
+        togglePreference(syncEverything);
+        assertTrue(syncEverything.isChecked());
+        assertTrue(syncAutofill.isChecked());
+        assertFalse(syncAutofill.isEnabled());
+        assertTrue(paymentsIntegration.isChecked());
+        assertFalse(paymentsIntegration.isEnabled());
+
+        // Closing the fragment enabled payments integration.
+        closeFragment(fragment);
+        assertPaymentsIntegrationEnabled(true);
+    }
+
     /**
      * Test that choosing a passphrase type while sync is off doesn't crash.
      *
@@ -363,7 +453,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testChoosePassphraseTypeWhenSyncIsOff() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         SyncTestUtil.waitForSyncActive();
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         Preference encryption = getEncryption(fragment);
@@ -387,7 +477,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testEnterPassphraseWhenSyncIsOff() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         SyncTestUtil.waitForSyncActive();
         final SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         stopSync();
@@ -408,7 +498,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     public void testPassphraseDialogDismissed() throws Exception {
         final FakeProfileSyncService pss = overrideProfileSyncService();
 
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         SyncTestUtil.waitForSyncActive();
         // Trigger PassphraseDialogFragment to be shown when taping on Encryption.
         pss.setPassphraseRequiredForDecryption(true);
@@ -439,7 +529,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     @SmallTest
     @Feature({"Sync"})
     public void testPassphraseCreation() throws Exception {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         SyncTestUtil.waitForSyncActive();
         final SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
@@ -459,33 +549,43 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         assertNull(confirmPassphrase.getError());
         clickButton(okButton);
         assertTrue(pcdf.isResumed());
-        assertNotNull(confirmPassphrase.getError());
+        assertNotNull(enterPassphrase.getError());
+        assertNull(confirmPassphrase.getError());
 
         // Error if you try to submit with only the first box filled.
         clearError(confirmPassphrase);
         setText(enterPassphrase, "foo");
         clickButton(okButton);
         assertTrue(pcdf.isResumed());
+        assertNull(enterPassphrase.getError());
         assertNotNull(confirmPassphrase.getError());
 
-        // Error if you try to submit with only the second box filled.
+        // Remove first box should only show empty error message
         setText(enterPassphrase, "");
+        clickButton(okButton);
+        assertNotNull(enterPassphrase.getError());
+        assertNull(confirmPassphrase.getError());
+
+        // Error if you try to submit with only the second box filled.
         clearError(confirmPassphrase);
         setText(confirmPassphrase, "foo");
         clickButton(okButton);
         assertTrue(pcdf.isResumed());
+        assertNull(enterPassphrase.getError());
         assertNotNull(confirmPassphrase.getError());
 
         // No error if text doesn't match without button press.
         setText(enterPassphrase, "foo");
         clearError(confirmPassphrase);
         setText(confirmPassphrase, "bar");
+        assertNull(enterPassphrase.getError());
         assertNull(confirmPassphrase.getError());
 
         // Error if you try to submit unmatching text.
         clearError(confirmPassphrase);
         clickButton(okButton);
         assertTrue(pcdf.isResumed());
+        assertNull(enterPassphrase.getError());
         assertNotNull(confirmPassphrase.getError());
 
         // Success if text matches.
@@ -610,10 +710,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
             public void run() {
                 Set<Integer> actualDataTypes = mProfileSyncService.getPreferredDataTypes();
                 assertTrue(actualDataTypes.containsAll(enabledDataTypes));
-                // There is no Set.containsNone(), sadly.
-                for (Integer disabledDataType : disabledDataTypes) {
-                    assertFalse(actualDataTypes.contains(disabledDataType));
-                }
+                assertTrue(Collections.disjoint(disabledDataTypes, actualDataTypes));
             }
         });
     }
@@ -636,14 +733,31 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         });
     }
 
-    private void waitForBackendInitialized() throws InterruptedException {
-        CriteriaHelper.pollUiThread(new Criteria(
-                "Timed out waiting for sync's backend to be initialized.") {
+    private void addServerAutofillCreditCard() throws Exception {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
-            public boolean isSatisfied() {
-                return mProfileSyncService.isBackendInitialized();
+            public void run() {
+                boolean isLocal = false;
+                PersonalDataManager.getInstance().addServerCreditCardForTest(new CreditCard("",
+                        "https://example.com", isLocal, false, "Jon Doe", "4111111111111111",
+                        "1111", "11", "20", "visa", 0, "" /* billingAddressId */,
+                        "025eb937c022489eb8dc78cbaa969218" /* serverId */));
             }
-        }, SyncTestUtil.TIMEOUT_MS, SyncTestUtil.INTERVAL_MS);
+        });
+    }
+
+    private boolean hasServerAutofillCreditCards() throws Exception {
+        return ThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {
+            @Override
+            public Boolean call() {
+                List<CreditCard> cards =
+                        PersonalDataManager.getInstance().getCreditCardsForSettings();
+                for (int i = 0; i < cards.size(); i++) {
+                    if (!cards.get(i).getIsLocal()) return true;
+                }
+                return false;
+            }
+        }).booleanValue();
     }
 
     // UI interaction convenience methods.

@@ -20,14 +20,14 @@
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "cc/resources/shared_bitmap_manager.h"
-#include "content/common/gpu_process_launch_causes.h"
+#include "content/common/cache_storage/cache_storage_types.h"
 #include "content/common/host_discardable_shared_memory_manager.h"
 #include "content/common/host_shared_bitmap_manager.h"
+#include "content/common/render_message_filter.mojom.h"
+#include "content/public/browser/browser_associated_interface.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "gpu/config/gpu_info.h"
 #include "ipc/message_filter.h"
-#include "media/audio/audio_parameters.h"
-#include "media/base/channel_layout.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/gpu_memory_buffer.h"
@@ -39,7 +39,6 @@
 #endif
 
 #if defined(OS_MACOSX)
-#include <IOSurface/IOSurface.h>
 #include "content/common/mac/font_loader.h"
 #endif
 
@@ -51,10 +50,6 @@ class GURL;
 struct FontDescriptor;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_CreateWindow_Reply;
-
-namespace blink {
-struct WebScreenInfo;
-}
 
 namespace base {
 class ProcessMetrics;
@@ -71,58 +66,56 @@ struct SyncToken;
 }
 
 namespace media {
-class AudioManager;
 struct MediaLogEvent;
 }
 
 namespace net {
+class IOBuffer;
 class KeygenHandler;
 class URLRequestContext;
 class URLRequestContextGetter;
 }
 
+namespace url {
+class Origin;
+}
+
 namespace content {
 class BrowserContext;
+class CacheStorageContextImpl;
+class CacheStorageCacheHandle;
 class DOMStorageContextWrapper;
 class MediaInternals;
 class RenderWidgetHelper;
 class ResourceContext;
 class ResourceDispatcherHostImpl;
-struct Referrer;
 
 // This class filters out incoming IPC messages for the renderer process on the
 // IPC thread.
-class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
+class CONTENT_EXPORT RenderMessageFilter
+    : public BrowserMessageFilter,
+      public BrowserAssociatedInterface<mojom::RenderMessageFilter>,
+      public mojom::RenderMessageFilter {
  public:
   // Create the filter.
   RenderMessageFilter(int render_process_id,
                       BrowserContext* browser_context,
                       net::URLRequestContextGetter* request_context,
                       RenderWidgetHelper* render_widget_helper,
-                      media::AudioManager* audio_manager,
                       MediaInternals* media_internals,
-                      DOMStorageContextWrapper* dom_storage_context);
+                      DOMStorageContextWrapper* dom_storage_context,
+                      CacheStorageContextImpl* cache_storage_context);
 
   // BrowserMessageFilter methods:
   bool OnMessageReceived(const IPC::Message& message) override;
   void OnDestruct() const override;
   void OverrideThreadForMessage(const IPC::Message& message,
                                 BrowserThread::ID* thread) override;
-  base::TaskRunner* OverrideTaskRunnerForMessage(
-      const IPC::Message& message) override;
 
   int render_process_id() const { return render_process_id_; }
 
  protected:
   ~RenderMessageFilter() override;
-
-  // This method will be overridden by TestSaveImageFromDataURL class for test.
-  virtual void DownloadUrl(int render_view_id,
-                           int render_frame_id,
-                           const GURL& url,
-                           const Referrer& referrer,
-                           const base::string16& suggested_name,
-                           const bool use_prompt) const;
 
  private:
   friend class BrowserThread;
@@ -140,31 +133,13 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
   // Messages for OOP font loading.
   void OnLoadFont(const FontDescriptor& font, IPC::Message* reply_msg);
   void SendLoadFontReply(IPC::Message* reply, FontLoader::Result* result);
-#elif defined(OS_WIN)
-  void OnPreCacheFontCharacters(const LOGFONT& log_font,
-                                const base::string16& characters);
 #endif
 
-  void OnGenerateRoutingID(int* route_id);
-  void OnDownloadUrl(int render_view_id,
-                     int render_frame_id,
-                     const GURL& url,
-                     const Referrer& referrer,
-                     const base::string16& suggested_name);
-  void OnSaveImageFromDataURL(int render_view_id,
-                              int render_frame_id,
-                              const std::string& url_str);
-
-  void OnGetAudioHardwareConfig(media::AudioParameters* input_params,
-                                media::AudioParameters* output_params);
-
-#if defined(OS_WIN)
-  // Used to look up the monitor color profile.
-  void OnGetMonitorColorProfile(std::vector<char>* profile);
-#endif
+  // mojom::RenderMessageFilter:
+  void GenerateRoutingID(const GenerateRoutingIDCallback& routing_id) override;
 
   // Message handlers called on the browser IO thread:
-  void OnEstablishGpuChannel(CauseForGpuLaunch, IPC::Message* reply);
+  void OnEstablishGpuChannel(IPC::Message* reply);
   void OnHasGpuProcess(IPC::Message* reply);
   // Helper callbacks for the message handlers.
   void EstablishChannelCallback(std::unique_ptr<IPC::Message> reply,
@@ -202,9 +177,29 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
   void DeletedDiscardableSharedMemoryOnFileThread(DiscardableSharedMemoryId id);
   void OnDeletedDiscardableSharedMemory(DiscardableSharedMemoryId id);
 
+#if defined(OS_LINUX)
+  void SetThreadPriorityOnFileThread(base::PlatformThreadId ns_tid,
+                                     base::ThreadPriority priority);
+  void OnSetThreadPriority(base::PlatformThreadId ns_tid,
+                           base::ThreadPriority priority);
+#endif
+
   void OnCacheableMetadataAvailable(const GURL& url,
                                     base::Time expected_response_time,
                                     const std::vector<char>& data);
+  void OnCacheableMetadataAvailableForCacheStorage(
+      const GURL& url,
+      base::Time expected_response_time,
+      const std::vector<char>& data,
+      const url::Origin& cache_storage_origin,
+      const std::string& cache_storage_cache_name);
+  void OnCacheStorageOpenCallback(
+      const GURL& url,
+      base::Time expected_response_time,
+      scoped_refptr<net::IOBuffer> buf,
+      int buf_len,
+      std::unique_ptr<CacheStorageCacheHandle> cache_handle,
+      CacheStorageError error);
   void OnKeygen(uint32_t key_size_index,
                 const std::string& challenge_string,
                 const GURL& url,
@@ -252,8 +247,8 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
   int gpu_process_id_;
   int render_process_id_;
 
-  media::AudioManager* audio_manager_;
   MediaInternals* media_internals_;
+  CacheStorageContextImpl* cache_storage_context_;
 
   base::WeakPtrFactory<RenderMessageFilter> weak_ptr_factory_;
 

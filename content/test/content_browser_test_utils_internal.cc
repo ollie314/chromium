@@ -13,7 +13,7 @@
 
 #include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "cc/surfaces/surface.h"
 #include "cc/surfaces/surface_manager.h"
 #include "content/browser/compositor/surface_utils.h"
@@ -24,8 +24,12 @@
 #include "content/browser/frame_host/render_widget_host_view_child_frame.h"
 #include "content/browser/renderer_host/delegated_frame_host.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
+#include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/resource_throttle.h"
+#include "content/public/common/file_chooser_file_info.h"
+#include "content/public/common/file_chooser_params.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
@@ -34,30 +38,6 @@
 #include "net/url_request/url_request.h"
 
 namespace content {
-
-namespace {
-
-// Helper class used by the TestNavigationManager to pause navigations.
-class TestNavigationManagerThrottle : public NavigationThrottle {
- public:
-  TestNavigationManagerThrottle(NavigationHandle* handle,
-                                base::Closure on_will_start_request_closure)
-      : NavigationThrottle(handle),
-        on_will_start_request_closure_(on_will_start_request_closure) {}
-  ~TestNavigationManagerThrottle() override {}
-
- private:
-  // NavigationThrottle implementation.
-  NavigationThrottle::ThrottleCheckResult WillStartRequest() override {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            on_will_start_request_closure_);
-    return NavigationThrottle::DEFER;
-  }
-
-  base::Closure on_will_start_request_closure_;
-};
-
-}  // namespace
 
 void NavigateFrameToURL(FrameTreeNode* node, const GURL& url) {
   TestFrameNavigationObserver observer(node);
@@ -73,6 +53,10 @@ void SetShouldProceedOnBeforeUnload(Shell* shell, bool proceed) {
       static_cast<ShellJavaScriptDialogManager*>(
           shell->GetJavaScriptDialogManager(shell->web_contents()));
   manager->set_should_proceed_on_beforeunload(proceed);
+}
+
+RenderFrameHost* ConvertToRenderFrameHost(FrameTreeNode* frame_tree_node) {
+  return frame_tree_node->current_frame_host();
 }
 
 FrameTreeVisualizer::FrameTreeVisualizer() {
@@ -359,64 +343,32 @@ void NavigationStallDelegate::RequestBeginning(
     throttles->push_back(new HttpRequestStallThrottle);
 }
 
-TestNavigationManager::TestNavigationManager(WebContents* web_contents,
-                                             const GURL& url)
-    : WebContentsObserver(web_contents),
-      url_(url),
-      navigation_paused_(false),
-      handle_(nullptr),
-      weak_factory_(this) {}
+FileChooserDelegate::FileChooserDelegate(const base::FilePath& file)
+      : file_(file), file_chosen_(false) {}
 
-TestNavigationManager::~TestNavigationManager() {}
+void FileChooserDelegate::RunFileChooser(RenderFrameHost* render_frame_host,
+                                         const FileChooserParams& params) {
+  // Send the selected file to the renderer process.
+  FileChooserFileInfo file_info;
+  file_info.file_path = file_;
+  std::vector<FileChooserFileInfo> files;
+  files.push_back(file_info);
+  render_frame_host->FilesSelectedInChooser(files, FileChooserParams::Open);
 
-void TestNavigationManager::WaitForWillStartRequest() {
-  if (navigation_paused_)
-    return;
-  loop_runner_ = new MessageLoopRunner();
-  loop_runner_->Run();
-  loop_runner_ = nullptr;
+  file_chosen_ = true;
 }
 
-void TestNavigationManager::ResumeNavigation() {
-  if (!navigation_paused_ || !handle_)
-    return;
-  navigation_paused_ = false;
-  handle_->Resume();
-}
+FrameTestNavigationManager::FrameTestNavigationManager(
+    int filtering_frame_tree_node_id,
+    WebContents* web_contents,
+    const GURL& url)
+    : TestNavigationManager(web_contents, url),
+      filtering_frame_tree_node_id_(filtering_frame_tree_node_id) {}
 
-void TestNavigationManager::WaitForNavigationFinished() {
-  if (!handle_)
-    return;
-  loop_runner_ = new MessageLoopRunner();
-  loop_runner_->Run();
-  loop_runner_ = nullptr;
-}
-
-void TestNavigationManager::DidStartNavigation(NavigationHandle* handle) {
-  if (handle_ || handle->GetURL() != url_)
-    return;
-
-  handle_ = handle;
-  std::unique_ptr<NavigationThrottle> throttle(
-      new TestNavigationManagerThrottle(
-          handle_, base::Bind(&TestNavigationManager::OnWillStartRequest,
-                              weak_factory_.GetWeakPtr())));
-  handle_->RegisterThrottleForTesting(std::move(throttle));
-}
-
-void TestNavigationManager::DidFinishNavigation(NavigationHandle* handle) {
-  if (handle != handle_)
-    return;
-  handle_ = nullptr;
-  navigation_paused_ = false;
-  if (loop_runner_)
-    loop_runner_->Quit();
-}
-
-void TestNavigationManager::OnWillStartRequest() {
-  navigation_paused_ = true;
-  if (loop_runner_)
-    loop_runner_->Quit();
+bool FrameTestNavigationManager::ShouldMonitorNavigation(
+    NavigationHandle* handle) {
+  return TestNavigationManager::ShouldMonitorNavigation(handle) &&
+         handle->GetFrameTreeNodeId() == filtering_frame_tree_node_id_;
 }
 
 }  // namespace content

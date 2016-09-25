@@ -8,20 +8,20 @@
 
 #include "base/lazy_instance.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/guest_view/browser/guest_view_event.h"
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "components/guest_view/common/guest_view_constants.h"
 #include "components/guest_view/common/guest_view_messages.h"
-#include "components/ui/zoom/page_zoom.h"
-#include "components/ui/zoom/zoom_controller.h"
+#include "components/zoom/page_zoom.h"
+#include "components/zoom/zoom_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/browser_plugin_guest_mode.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/url_constants.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
@@ -195,7 +195,7 @@ void GuestViewBase::Init(const base::DictionaryValue& create_params,
     return;
   }
 
-  scoped_ptr<base::DictionaryValue> params(create_params.DeepCopy());
+  std::unique_ptr<base::DictionaryValue> params(create_params.DeepCopy());
   CreateWebContents(create_params,
                     base::Bind(&GuestViewBase::CompleteInit,
                                weak_ptr_factory_.GetWeakPtr(),
@@ -217,7 +217,7 @@ void GuestViewBase::InitWithWebContents(
   // in DidNavigateMainFrame, but since ZoomController always resets to default
   // zoom mode on this event, GuestViewBase would need to do so after
   // ZoomController::DidNavigateMainFrame has completed.
-  ui_zoom::ZoomController::CreateForWebContents(guest_web_contents);
+  zoom::ZoomController::CreateForWebContents(guest_web_contents);
 
   // At this point, we have just created the guest WebContents, we need to add
   // an observer to the owner WebContents. This observer will be responsible
@@ -239,8 +239,7 @@ void GuestViewBase::InitWithWebContents(
     SetUpSizing(create_params);
 
   // Observe guest zoom changes.
-  auto zoom_controller =
-      ui_zoom::ZoomController::FromWebContents(web_contents());
+  auto* zoom_controller = zoom::ZoomController::FromWebContents(web_contents());
   zoom_controller->AddObserver(this);
 
   // Give the derived class an opportunity to perform additional initialization.
@@ -261,13 +260,13 @@ void GuestViewBase::DispatchOnResizeEvent(const gfx::Size& old_size,
     return;
 
   // Dispatch the onResize event.
-  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> args(new base::DictionaryValue());
   args->SetInteger(kOldWidth, old_size.width());
   args->SetInteger(kOldHeight, old_size.height());
   args->SetInteger(kNewWidth, new_size.width());
   args->SetInteger(kNewHeight, new_size.height());
   DispatchEventToGuestProxy(
-      make_scoped_ptr(new GuestViewEvent(kEventResize, std::move(args))));
+      base::MakeUnique<GuestViewEvent>(kEventResize, std::move(args)));
 }
 
 gfx::Size GuestViewBase::GetDefaultSize() const {
@@ -353,7 +352,7 @@ GuestViewBase* GuestViewBase::FromWebContents(const WebContents* web_contents) {
 // static
 GuestViewBase* GuestViewBase::From(int owner_process_id,
                                    int guest_instance_id) {
-  auto host = content::RenderProcessHost::FromID(owner_process_id);
+  auto* host = content::RenderProcessHost::FromID(owner_process_id);
   if (!host)
     return nullptr;
 
@@ -394,7 +393,7 @@ void GuestViewBase::SetContextMenuPosition(const gfx::Point& position) {}
 
 WebContents* GuestViewBase::CreateNewGuestWindow(
     const WebContents::CreateParams& create_params) {
-  auto guest_manager = GuestViewManager::FromBrowserContext(browser_context());
+  auto* guest_manager = GuestViewManager::FromBrowserContext(browser_context());
   return guest_manager->CreateGuestWithWebContentsParams(
       GetViewType(),
       owner_web_contents(),
@@ -477,6 +476,8 @@ void GuestViewBase::Destroy() {
   // the statements in this function.
   StopTrackingEmbedderZoomLevel();
   owner_web_contents_ = nullptr;
+
+  element_instance_id_ = kInstanceIDNone;
 
   DCHECK(web_contents());
 
@@ -623,9 +624,9 @@ void GuestViewBase::ContentsMouseEvent(WebContents* source,
 }
 
 void GuestViewBase::ContentsZoomChange(bool zoom_in) {
-  ui_zoom::PageZoom::Zoom(
-      embedder_web_contents(),
-      zoom_in ? content::PAGE_ZOOM_IN : content::PAGE_ZOOM_OUT);
+  zoom::PageZoom::Zoom(embedder_web_contents(), zoom_in
+                                                    ? content::PAGE_ZOOM_IN
+                                                    : content::PAGE_ZOOM_OUT);
 }
 
 void GuestViewBase::HandleKeyboardEvent(
@@ -664,12 +665,13 @@ void GuestViewBase::ResizeDueToAutoResize(WebContents* web_contents,
   guest_host_->GuestResizeDueToAutoResize(new_size);
 }
 
-void GuestViewBase::RunFileChooser(WebContents* web_contents,
+void GuestViewBase::RunFileChooser(content::RenderFrameHost* render_frame_host,
                                    const content::FileChooserParams& params) {
   if (!attached() || !embedder_web_contents()->GetDelegate())
     return;
 
-  embedder_web_contents()->GetDelegate()->RunFileChooser(web_contents, params);
+  embedder_web_contents()->GetDelegate()->RunFileChooser(render_frame_host,
+                                                         params);
 }
 
 bool GuestViewBase::ShouldFocusPageAfterCrash() {
@@ -725,11 +727,11 @@ void GuestViewBase::FindReply(WebContents* source,
 }
 
 void GuestViewBase::OnZoomChanged(
-    const ui_zoom::ZoomController::ZoomChangedEventData& data) {
+    const zoom::ZoomController::ZoomChangedEventData& data) {
   if (data.web_contents == embedder_web_contents()) {
     // The embedder's zoom level has changed.
-    auto guest_zoom_controller =
-        ui_zoom::ZoomController::FromWebContents(web_contents());
+    auto* guest_zoom_controller =
+        zoom::ZoomController::FromWebContents(web_contents());
     if (content::ZoomValuesEqual(data.new_zoom_level,
                                  guest_zoom_controller->GetZoomLevel())) {
       return;
@@ -747,11 +749,11 @@ void GuestViewBase::OnZoomChanged(
 }
 
 void GuestViewBase::DispatchEventToGuestProxy(
-    scoped_ptr<GuestViewEvent> event) {
+    std::unique_ptr<GuestViewEvent> event) {
   event->Dispatch(this, guest_instance_id_);
 }
 
-void GuestViewBase::DispatchEventToView(scoped_ptr<GuestViewEvent> event) {
+void GuestViewBase::DispatchEventToView(std::unique_ptr<GuestViewEvent> event) {
   if (!attached() &&
       (!CanRunInDetachedState() || !can_owner_receive_events())) {
     pending_events_.push_back(std::move(event));
@@ -765,14 +767,15 @@ void GuestViewBase::SendQueuedEvents() {
   if (!attached())
     return;
   while (!pending_events_.empty()) {
-    scoped_ptr<GuestViewEvent> event_ptr = std::move(pending_events_.front());
+    std::unique_ptr<GuestViewEvent> event_ptr =
+        std::move(pending_events_.front());
     pending_events_.pop_front();
     event_ptr->Dispatch(this, view_instance_id_);
   }
 }
 
 void GuestViewBase::CompleteInit(
-    scoped_ptr<base::DictionaryValue> create_params,
+    std::unique_ptr<base::DictionaryValue> create_params,
     const WebContentsCreatedCallback& callback,
     WebContents* guest_web_contents) {
   if (!guest_web_contents) {
@@ -791,7 +794,7 @@ double GuestViewBase::GetEmbedderZoomFactor() const {
     return 1.0;
 
   return content::ZoomLevelToZoomFactor(
-      ui_zoom::ZoomController::GetZoomLevelForWebContents(
+      zoom::ZoomController::GetZoomLevelForWebContents(
           embedder_web_contents()));
 }
 
@@ -844,12 +847,12 @@ void GuestViewBase::SetUpSizing(const base::DictionaryValue& params) {
 }
 
 void GuestViewBase::SetGuestZoomLevelToMatchEmbedder() {
-  auto embedder_zoom_controller =
-      ui_zoom::ZoomController::FromWebContents(owner_web_contents());
+  auto* embedder_zoom_controller =
+      zoom::ZoomController::FromWebContents(owner_web_contents());
   if (!embedder_zoom_controller)
     return;
 
-  ui_zoom::ZoomController::FromWebContents(web_contents())
+  zoom::ZoomController::FromWebContents(web_contents())
       ->SetZoomLevel(embedder_zoom_controller->GetZoomLevel());
 }
 
@@ -857,8 +860,8 @@ void GuestViewBase::StartTrackingEmbedderZoomLevel() {
   if (!ZoomPropagatesFromEmbedderToGuest())
     return;
 
-  auto embedder_zoom_controller =
-      ui_zoom::ZoomController::FromWebContents(owner_web_contents());
+  auto* embedder_zoom_controller =
+      zoom::ZoomController::FromWebContents(owner_web_contents());
   // Chrome Apps do not have a ZoomController.
   if (!embedder_zoom_controller)
     return;
@@ -873,8 +876,8 @@ void GuestViewBase::StopTrackingEmbedderZoomLevel() {
   if (!attached() || !ZoomPropagatesFromEmbedderToGuest())
     return;
 
-  auto embedder_zoom_controller =
-      ui_zoom::ZoomController::FromWebContents(owner_web_contents());
+  auto* embedder_zoom_controller =
+      zoom::ZoomController::FromWebContents(owner_web_contents());
   // Chrome Apps do not have a ZoomController.
   if (!embedder_zoom_controller)
     return;

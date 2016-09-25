@@ -11,7 +11,8 @@
 
 #include "base/memory/ref_counted.h"
 #include "cc/base/cc_export.h"
-#include "skia/ext/refptr.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -38,23 +39,26 @@ class CC_EXPORT UIResourceBitmap {
   bool GetOpaque() const { return opaque_; }
   void SetOpaque(bool opaque) { opaque_ = opaque; }
 
+  // Draw the UIResourceBitmap onto the provided |canvas| using the style
+  // information specified by |paint|.
+  void DrawToCanvas(SkCanvas* canvas, SkPaint* paint);
+
   // User must ensure that |skbitmap| is immutable.  The SkBitmap Format should
   // be 32-bit RGBA or 8-bit ALPHA.
   explicit UIResourceBitmap(const SkBitmap& skbitmap);
   UIResourceBitmap(const gfx::Size& size, bool is_opaque);
-  UIResourceBitmap(const skia::RefPtr<SkPixelRef>& pixel_ref,
-                   const gfx::Size& size);
+  UIResourceBitmap(sk_sp<SkPixelRef> pixel_ref, const gfx::Size& size);
   UIResourceBitmap(const UIResourceBitmap& other);
   ~UIResourceBitmap();
 
  private:
   friend class AutoLockUIResourceBitmap;
 
-  void Create(const skia::RefPtr<SkPixelRef>& pixel_ref,
+  void Create(sk_sp<SkPixelRef> pixel_ref,
               const gfx::Size& size,
               UIResourceFormat format);
 
-  skia::RefPtr<SkPixelRef> pixel_ref_;
+  sk_sp<SkPixelRef> pixel_ref_;
   UIResourceFormat format_;
   gfx::Size size_;
   bool opaque_;

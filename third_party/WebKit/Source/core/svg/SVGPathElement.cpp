@@ -20,7 +20,7 @@
 
 #include "core/svg/SVGPathElement.h"
 
-#include "core/css/CSSValuePool.h"
+#include "core/css/CSSPrimitiveValue.h"
 #include "core/dom/StyleChangeReason.h"
 #include "core/layout/svg/LayoutSVGPath.h"
 #include "core/svg/SVGMPathElement.h"
@@ -70,6 +70,11 @@ DEFINE_TRACE(SVGPathElement)
 
 DEFINE_NODE_FACTORY(SVGPathElement)
 
+Path SVGPathElement::attributePath() const
+{
+    return m_path->currentValue()->stylePath()->path();
+}
+
 const StylePath* SVGPathElement::stylePath() const
 {
     if (LayoutObject* layoutObject = this->layoutObject()) {
@@ -103,20 +108,20 @@ Path SVGPathElement::asPath() const
 
 float SVGPathElement::getTotalLength()
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     return SVGPathQuery(pathByteStream()).getTotalLength();
 }
 
 SVGPointTearOff* SVGPathElement::getPointAtLength(float length)
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     FloatPoint point = SVGPathQuery(pathByteStream()).getPointAtLength(length);
     return SVGPointTearOff::create(SVGPoint::create(point), 0, PropertyIsNotAnimVal);
 }
 
 unsigned SVGPathElement::getPathSegAtLength(float length)
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     return SVGPathQuery(pathByteStream()).getPathSegIndexAtLength(length);
 }
 
@@ -173,7 +178,7 @@ void SVGPathElement::collectStyleForPresentationAttribute(const QualifiedName& n
 
         CSSPathValue* pathValue = path->currentValue()->pathValue();
         if (pathValue->stylePath()->byteStream().isEmpty()) {
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyD, cssValuePool().createIdentifierValue(CSSValueNone));
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyD, CSSPrimitiveValue::createIdentifier(CSSValueNone));
             return;
         }
         addPropertyToPresentationAttributeStyle(style, CSSPropertyD, pathValue);
@@ -205,6 +210,14 @@ void SVGPathElement::removedFrom(ContainerNode* rootParent)
 {
     SVGGeometryElement::removedFrom(rootParent);
     invalidateMPathDependencies();
+}
+
+FloatRect SVGPathElement::getBBox()
+{
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+
+    // We want the exact bounds.
+    return SVGPathElement::asPath().boundingRect(Path::BoundsType::Exact);
 }
 
 } // namespace blink

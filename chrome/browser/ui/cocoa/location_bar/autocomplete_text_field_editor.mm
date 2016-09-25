@@ -84,10 +84,9 @@ BOOL ThePasteboardIsTooDamnBig() {
   }
 
   bool inDarkMode = [[self window] inIncognitoModeWithSystemTheme];
-  // Draw a light insertion point for MD Incognito.
+  // Draw a white insertion point for MD Incognito.
   NSColor* insertionPointColor =
-      inDarkMode ? [NSColor colorWithCalibratedWhite:1 alpha:0.75]
-                 : [NSColor blackColor];
+      inDarkMode ? [NSColor whiteColor] : [NSColor blackColor];
   [self setInsertionPointColor:insertionPointColor];
 
   NSColor* textSelectionColor = [NSColor selectedTextBackgroundColor];
@@ -167,12 +166,6 @@ BOOL ThePasteboardIsTooDamnBig() {
 - (void)cut:(id)sender {
   [self copy:sender];
   [self delete:nil];
-}
-
-- (void)showURL:(id)sender {
-  AutocompleteTextFieldObserver* observer = [self observer];
-  DCHECK(observer);
-  observer->ShowURL();
 }
 
 // This class assumes that the delegate is an AutocompleteTextField.
@@ -309,16 +302,6 @@ BOOL ThePasteboardIsTooDamnBig() {
 
     [menu addItem:[NSMenuItem separatorItem]];
 
-    // Display a "Show URL" option if search term replacement is active.
-    if (observer->ShouldEnableShowURL()) {
-      NSString* showURLLabel =
-          l10n_util::GetNSStringWithFixup(IDS_SHOW_URL_MAC);
-      DCHECK([showURLLabel length]);
-      [menu addItemWithTitle:showURLLabel
-                      action:@selector(showURL:)
-               keyEquivalent:@""];
-    }
-
     NSString* searchEngineLabel =
         l10n_util::GetNSStringWithFixup(IDS_EDIT_SEARCH_ENGINES);
     DCHECK([searchEngineLabel length]);
@@ -341,7 +324,8 @@ BOOL ThePasteboardIsTooDamnBig() {
     // responder dance between the field and the field editor is a little
     // weird.)
     [[BrowserWindowController browserWindowControllerForView:field]
-        lockBarVisibilityForOwner:field withAnimation:YES delay:NO];
+        lockBarVisibilityForOwner:field
+                    withAnimation:YES];
   }
   return doAccept;
 }
@@ -354,7 +338,8 @@ BOOL ThePasteboardIsTooDamnBig() {
   if (doResign && field) {
     // Give the text field ownership of the visibility lock.
     [[BrowserWindowController browserWindowControllerForView:field]
-        releaseBarVisibilityForOwner:field withAnimation:YES delay:YES];
+        releaseBarVisibilityForOwner:field
+                       withAnimation:YES];
 
     AutocompleteTextFieldObserver* observer = [self observer];
     if (observer)
@@ -490,6 +475,24 @@ BOOL ThePasteboardIsTooDamnBig() {
 
   DCHECK(interpretingKeyEvents_);
   interpretingKeyEvents_ = NO;
+
+  // -[NSTextView interpretKeyEvents:] invalidates the existing layout.
+  //
+  // observer->OnDidChange() calls OmniboxViewMac::ApplyTextStyle, which
+  // invalidates the existing layout again, but in a slightly different way.
+  // Details unclear.
+  //
+  // On older versions of macOS, this results in a single call to -[NSTextView
+  // drawRect:] on the next frame, which paints the correct contents.
+  //
+  // On macOS 10.12 dp4, for unknown reasons, this causes two calls to
+  // -[NSTextView drawRect:] across two(!) frames. The first call to
+  // -[NSTextView drawRect:] draws no text, which causes a flicker in the
+  // omnibox. Forcing a layout ensures that drawRect: is only called once, and
+  // is drawn with the correct contents.
+  // https://crbug.com/634318.
+  [self.layoutManager
+      ensureLayoutForCharacterRange:NSMakeRange(0, self.textStorage.length)];
 }
 
 - (BOOL)shouldChangeTextInRange:(NSRange)affectedCharRange
@@ -568,11 +571,6 @@ BOOL ThePasteboardIsTooDamnBig() {
     AutocompleteTextFieldObserver* observer = [self observer];
     DCHECK(observer);
     return observer->CanPasteAndGo();
-  }
-  if ([item action] == @selector(showURL:)) {
-    AutocompleteTextFieldObserver* observer = [self observer];
-    DCHECK(observer);
-    return observer->ShouldEnableShowURL();
   }
   return [super validateMenuItem:item];
 }

@@ -34,24 +34,25 @@
 #include "core/editing/VisiblePosition.h"
 #include "core/frame/LocalFrame.h"
 #include "platform/geometry/FloatRect.h"
+#include "platform/heap/SelfKeepAlive.h"
 #include "public/platform/WebFileSystemType.h"
 #include "public/web/WebLocalFrame.h"
 #include "web/FrameLoaderClientImpl.h"
 #include "web/UserMediaClientImpl.h"
 #include "web/WebExport.h"
 #include "web/WebFrameImplBase.h"
+#include "web/WebFrameWidgetBase.h"
 #include "wtf/Compiler.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/RefCounted.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
 class ChromePrintContext;
-class GeolocationClientProxy;
 class IntSize;
 class KURL;
 class Range;
+class ScrollableArea;
 class SharedWorkerRepositoryClientImpl;
 class TextFinder;
 class WebAutofillClient;
@@ -59,7 +60,6 @@ class WebDataSourceImpl;
 class WebDevToolsAgentImpl;
 class WebDevToolsFrontendImpl;
 class WebFrameClient;
-class WebFrameWidget;
 class WebNode;
 class WebPerformance;
 class WebPlugin;
@@ -96,7 +96,6 @@ public:
     WebView* view() const override;
     WebDocument document() const override;
     WebPerformance performance() const override;
-    bool dispatchBeforeUnloadEvent() override;
     void dispatchUnloadEvent() override;
     void executeScript(const WebScriptSource&) override;
     void executeScriptInIsolatedWorld(
@@ -140,18 +139,17 @@ public:
     void dispatchWillSendRequest(WebURLRequest&) override;
     WebURLLoader* createAssociatedURLLoader(const WebURLLoaderOptions&) override;
     unsigned unloadListenerCount() const override;
-    void insertText(const WebString&) override;
     void setMarkedText(const WebString&, unsigned location, unsigned length) override;
     void unmarkText() override;
     bool hasMarkedText() const override;
     WebRange markedRange() const override;
     bool firstRectForCharacterRange(unsigned location, unsigned length, WebRect&) const override;
     size_t characterIndexForPoint(const WebPoint&) const override;
-    bool executeCommand(const WebString&, const WebNode& = WebNode()) override;
-    bool executeCommand(const WebString&, const WebString& value, const WebNode& = WebNode()) override;
+    bool executeCommand(const WebString&) override;
+    bool executeCommand(const WebString&, const WebString& value) override;
     bool isCommandEnabled(const WebString&) const override;
-    void enableContinuousSpellChecking(bool) override;
-    bool isContinuousSpellCheckingEnabled() const override;
+    void enableSpellChecking(bool) override;
+    bool isSpellCheckingEnabled() const override;
     void requestTextChecking(const WebElement&) override;
     void replaceMisspelledRange(const WebString&) override;
     void removeSpellingMarkers() override;
@@ -162,6 +160,7 @@ public:
     bool selectWordAroundCaret() override;
     void selectRange(const WebPoint& base, const WebPoint& extent) override;
     void selectRange(const WebRange&) override;
+    WebString rangeAsText(const WebRange&) override;
     void moveRangeSelectionExtent(const WebPoint&) override;
     void moveRangeSelection(const WebPoint& base, const WebPoint& extent, WebFrame::TextGranularity = CharacterGranularity) override;
     void moveCaretSelection(const WebPoint&) override;
@@ -179,7 +178,7 @@ public:
     bool isPageBoxVisible(int pageIndex) override;
     void pageSizeAndMarginsInPixels(
         int pageIndex,
-        WebSize& pageSize,
+        WebDoubleSize& pageSize,
         int& marginTop,
         int& marginRight,
         int& marginBottom,
@@ -203,11 +202,9 @@ public:
     WebAutofillClient* autofillClient() override;
     void setDevToolsAgentClient(WebDevToolsAgentClient*) override;
     WebDevToolsAgent* devToolsAgent() override;
-    void setFrameOwnerProperties(const WebFrameOwnerProperties&) override;
     WebLocalFrameImpl* localRoot() override;
-    WebLocalFrame* traversePreviousLocal(bool wrap) const override;
-    WebLocalFrame* traverseNextLocal(bool wrap) const override;
-    void sendPings(const WebNode& contextNode, const WebURL& destinationURL) override;
+    void sendPings(const WebURL& destinationURL) override;
+    bool dispatchBeforeUnloadEvent(bool) override;
     WebURLRequest requestFromHistoryItem(const WebHistoryItem&, WebCachePolicy) const override;
     WebURLRequest requestForReload(WebFrameLoadType, const WebURL&) const override;
     void load(const WebURLRequest&, WebFrameLoadType, const WebHistoryItem&,
@@ -217,7 +214,6 @@ public:
         const WebURL& baseURL, const WebURL& unreachableURL, bool replace, WebFrameLoadType,
         const WebHistoryItem&, WebHistoryLoadType, bool isClientRedirect) override;
     bool isLoading() const override;
-    bool isResourceLoadInProgress() const override;
     bool isNavigationScheduledWithin(double interval) const override;
     void setCommittedFirstRealLoad() override;
     void sendOrientationChangeEvent() override;
@@ -228,21 +224,24 @@ public:
     void didCallAddSearchProvider() override;
     void didCallIsSearchProviderInstalled() override;
     void replaceSelection(const WebString&) override;
+    void requestFind(int identifier, const WebString& searchText,
+        const WebFindOptions&) override;
     bool find(
         int identifier, const WebString& searchText, const WebFindOptions&,
-        bool wrapWithinFrame, WebRect* selectionRect, bool* activeNow = nullptr) override;
-    void stopFinding(bool clearSelection) override;
-    void scopeStringMatches(
-        int identifier, const WebString& searchText, const WebFindOptions&,
-        bool reset) override;
-    void cancelPendingScopingEffort() override;
+        bool wrapWithinFrame, bool* activeNow = nullptr) override;
+    void stopFinding(StopFindAction) override;
     void increaseMatchCount(int count, int identifier) override;
-    void resetMatchCount() override;
     int findMatchMarkersVersion() const override;
     WebFloatRect activeFindMatchRect() override;
     void findMatchRects(WebVector<WebFloatRect>&) override;
     int selectNearestFindMatch(const WebFloatPoint&, WebRect* selectionRect) override;
+    float distanceToNearestFindMatch(const WebFloatPoint&) override;
     void setTickmarks(const WebVector<WebRect>&) override;
+    WebFrameWidgetBase* frameWidget() const override;
+    void copyImageAt(const WebPoint&) override;
+    void saveImageAt(const WebPoint&) override;
+    void clearActiveFindMatch() override;
+    void usageCountChromeLoadTimes(const WebString& metric) override;
 
     // WebFrameImplBase methods:
     void initializeCoreFrame(FrameHost*, FrameOwner*, const AtomicString& name, const AtomicString& uniqueName) override;
@@ -252,7 +251,7 @@ public:
     void willDetachParent();
 
     static WebLocalFrameImpl* create(WebTreeScopeType, WebFrameClient*, WebFrame* opener);
-    static WebLocalFrameImpl* createProvisional(WebFrameClient*, WebRemoteFrame*, WebSandboxFlags, const WebFrameOwnerProperties&);
+    static WebLocalFrameImpl* createProvisional(WebFrameClient*, WebRemoteFrame*, WebSandboxFlags);
     ~WebLocalFrameImpl() override;
 
     LocalFrame* createChildFrame(const FrameLoadRequest&, const AtomicString& name, HTMLFrameOwnerElement*);
@@ -271,8 +270,8 @@ public:
 
     // If the frame hosts a PluginDocument, this method returns the WebPluginContainerImpl
     // that hosts the plugin. If the provided node is a plugin, then it runs its
-    // WebPluginContainerImpl.
-    static WebPluginContainerImpl* pluginContainerFromNode(LocalFrame*, const WebNode&);
+    // WebPluginContainerImpl. Otherwise, uses the currently focused element (if any).
+    static WebPluginContainerImpl* currentPluginContainer(LocalFrame*, Node* = nullptr);
 
     WebViewImpl* viewImpl() const;
 
@@ -284,15 +283,6 @@ public:
     // may return 0 if there is no corresponding data source.
     WebDataSourceImpl* dataSourceImpl() const;
     WebDataSourceImpl* provisionalDataSourceImpl() const;
-
-    // Returns which frame has an active match. This function should only be
-    // called on the main frame, as it is the only frame keeping track. Returned
-    // value can be 0 if no frame has an active match.
-    WebLocalFrameImpl* activeMatchFrame() const;
-
-    // Returns the active match in the current frame. Could be a null range if
-    // the local frame has no active match.
-    Range* activeMatch() const;
 
     // When a Find operation ends, we want to set the selection to what was active
     // and set focus to the first focusable node we find (starting with the first
@@ -320,6 +310,7 @@ public:
 
     static void selectWordAroundPosition(LocalFrame*, VisiblePosition);
 
+    TextFinder* textFinder() const;
     // Returns the text finder object if it already exists.
     // Otherwise creates it and then returns.
     TextFinder& ensureTextFinder();
@@ -327,12 +318,15 @@ public:
     // Returns a hit-tested VisiblePosition for the given point
     VisiblePosition visiblePositionForViewportPoint(const WebPoint&);
 
-    void setFrameWidget(WebFrameWidget*);
-    WebFrameWidget* frameWidget() const;
+    void setFrameWidget(WebFrameWidgetBase*);
 
     // DevTools front-end bindings.
     void setDevToolsFrontend(WebDevToolsFrontendImpl* frontend) { m_webDevToolsFrontend = frontend; }
     WebDevToolsFrontendImpl* devToolsFrontend() { return m_webDevToolsFrontend; }
+
+    WebNode contextMenuNode() const { return m_contextMenuNode.get(); }
+    void setContextMenuNode(Node* node) { m_contextMenuNode = node; }
+    void clearContextMenuNode() { m_contextMenuNode.clear(); }
 
     DECLARE_TRACE();
 
@@ -354,8 +348,13 @@ private:
 
     void loadJavaScriptURL(const KURL&);
 
+    HitTestResult hitTestResultForVisualViewportPos(const IntPoint&);
+
     WebPlugin* focusedPluginIfInputMethodSupported();
     ScrollableArea* layoutViewportScrollableArea() const;
+
+    // Returns true if the frame is focused.
+    bool isFocused() const;
 
     Member<FrameLoaderClientImpl> m_frameLoaderClientImpl;
 
@@ -367,14 +366,14 @@ private:
     Member<WebDevToolsAgentImpl> m_devToolsAgent;
 
     // This is set if the frame is the root of a local frame tree, and requires a widget for layout.
-    WebFrameWidget* m_frameWidget;
+    WebFrameWidgetBase* m_frameWidget;
 
     WebFrameClient* m_client;
     WebAutofillClient* m_autofillClient;
     WebContentSettingsClient* m_contentSettingsClient;
-    OwnPtr<SharedWorkerRepositoryClientImpl> m_sharedWorkerRepositoryClient;
+    std::unique_ptr<SharedWorkerRepositoryClientImpl> m_sharedWorkerRepositoryClient;
 
-    // Will be initialized after first call to find() or scopeStringMatches().
+    // Will be initialized after first call to ensureTextFinder().
     Member<TextFinder> m_textFinder;
 
     // Valid between calls to BeginPrint() and EndPrint(). Containts the print
@@ -385,11 +384,9 @@ private:
     IntSize m_inputEventsOffsetForEmulation;
     float m_inputEventsScaleFactorForEmulation;
 
-    UserMediaClientImpl m_userMediaClientImpl;
-
-    Member<GeolocationClientProxy> m_geolocationClientProxy;
-
     WebDevToolsFrontendImpl* m_webDevToolsFrontend;
+
+    Member<Node> m_contextMenuNode;
 
     // Oilpan: WebLocalFrameImpl must remain alive until close() is called.
     // Accomplish that by keeping a self-referential Persistent<>. It is

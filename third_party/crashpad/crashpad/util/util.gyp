@@ -92,6 +92,8 @@
         'misc/initialization_state.h',
         'misc/initialization_state_dcheck.cc',
         'misc/initialization_state_dcheck.h',
+        'misc/metrics.cc',
+        'misc/metrics.h',
         'misc/pdb_structures.cc',
         'misc/pdb_structures.h',
         'misc/random_string.cc',
@@ -265,6 +267,11 @@
             4201,  # nonstandard extension used : nameless struct/union.
             4577,  # 'noexcept' used with no exception handling mode specified
           ],
+          'direct_dependent_settings': {
+            'msvs_disabled_warnings': [
+              4577,  # 'noexcept' used with no exception handling mode specified
+            ],
+          },
           'conditions': [
             ['target_arch=="ia32"', {
               'msvs_settings': {

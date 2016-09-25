@@ -28,22 +28,26 @@
 #define Image_h
 
 #include "platform/PlatformExport.h"
+#include "platform/SharedBuffer.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/Color.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/graphics/ImageAnimationPolicy.h"
 #include "platform/graphics/ImageObserver.h"
 #include "platform/graphics/ImageOrientation.h"
-#include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "wtf/Assertions.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
+#include "wtf/ThreadSafeRefCounted.h"
 #include "wtf/text/WTFString.h"
 
 class SkBitmap;
+class SkCanvas;
 class SkImage;
+class SkMatrix;
+class SkPaint;
 
 namespace blink {
 
@@ -52,10 +56,9 @@ class FloatRect;
 class FloatSize;
 class GraphicsContext;
 class Length;
-class SharedBuffer;
 class Image;
 
-class PLATFORM_EXPORT Image : public RefCounted<Image> {
+class PLATFORM_EXPORT Image : public ThreadSafeRefCounted<Image> {
     friend class GeneratedImage;
     friend class CrossfadeGeneratedImage;
     friend class GradientGeneratedImage;
@@ -99,20 +102,23 @@ public:
     int height() const { return size().height(); }
     virtual bool getHotSpot(IntPoint&) const { return false; }
 
-    bool setData(PassRefPtr<SharedBuffer> data, bool allDataReceived);
-    virtual bool dataChanged(bool /*allDataReceived*/) { return false; }
+    enum SizeAvailability {
+        SizeAvailable,
+        SizeUnavailable
+    };
+    virtual SizeAvailability setData(PassRefPtr<SharedBuffer> data, bool allDataReceived);
+    virtual SizeAvailability dataChanged(bool /*allDataReceived*/) { return SizeUnavailable; }
 
     virtual String filenameExtension() const { return String(); } // null string if unknown
 
-    virtual void destroyDecodedData(bool destroyAll) = 0;
+    virtual void destroyDecodedData() = 0;
 
-    SharedBuffer* data() { return m_encodedImageData.get(); }
+    virtual PassRefPtr<SharedBuffer> data() { return m_encodedImageData; }
 
     // Animation begins whenever someone draws the image, so startAnimation() is not normally called.
     // It will automatically pause once all observers no longer want to render the image anywhere.
     enum CatchUpAnimation { DoNotCatchUp, CatchUp };
     virtual void startAnimation(CatchUpAnimation = CatchUp) { }
-    virtual void stopAnimation() {}
     virtual void resetAnimation() {}
 
     // True if this image can potentially animate.
@@ -136,7 +142,7 @@ public:
 
     enum TileRule { StretchTile, RoundTile, SpaceTile, RepeatTile };
 
-    virtual PassRefPtr<SkImage> imageForCurrentFrame() = 0;
+    virtual sk_sp<SkImage> imageForCurrentFrame() = 0;
     virtual PassRefPtr<Image> imageForDefaultFrame();
 
     virtual void drawPattern(GraphicsContext&, const FloatRect&,
@@ -149,6 +155,19 @@ public:
     };
 
     virtual void draw(SkCanvas*, const SkPaint&, const FloatRect& dstRect, const FloatRect& srcRect, RespectImageOrientationEnum, ImageClampingMode) = 0;
+
+    virtual bool applyShader(SkPaint&, const SkMatrix& localMatrix);
+
+    // Compute the tile which contains a given point (assuming a repeating tile grid).
+    // The point and returned value are in destination grid space.
+    static FloatRect computeTileContaining(const FloatPoint&, const FloatSize& tileSize,
+        const FloatPoint& tilePhase, const FloatSize& tileSpacing);
+
+    // Compute the image subset which gets mapped onto dest, when the whole image is drawn into
+    // tile.  Assumes the tile contains dest.  The tile rect is in destination grid space while
+    // the return value is in image coordinate space.
+    static FloatRect computeSubsetForTile(const FloatRect& tile, const FloatRect& dest,
+        const FloatSize& imageSize);
 
 protected:
     Image(ImageObserver* = 0);

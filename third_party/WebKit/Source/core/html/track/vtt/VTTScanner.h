@@ -31,8 +31,8 @@
 #define VTTScanner_h
 
 #include "core/CoreExport.h"
-#include "platform/ParsingUtilities.h"
 #include "wtf/Allocator.h"
+#include "wtf/text/ParsingUtilities.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -216,19 +216,19 @@ inline VTTScanner::Run VTTScanner::collectUntil()
 
 inline void VTTScanner::seekTo(Position position)
 {
-    ASSERT(position <= end());
+    DCHECK_LE(position, end());
     m_data.characters8 = position;
 }
 
 inline UChar VTTScanner::currentChar() const
 {
-    ASSERT(getPosition() < end());
+    DCHECK_LT(getPosition(), end());
     return m_is8Bit ? *m_data.characters8 : *m_data.characters16;
 }
 
 inline void VTTScanner::advance(unsigned amount)
 {
-    ASSERT(getPosition() < end());
+    DCHECK_LT(getPosition(), end());
     if (m_is8Bit)
         m_data.characters8 += amount;
     else

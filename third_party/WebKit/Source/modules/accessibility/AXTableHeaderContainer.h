@@ -37,6 +37,7 @@ namespace blink {
 class AXObjectCacheImpl;
 
 class AXTableHeaderContainer final : public AXMockObject {
+    WTF_MAKE_NONCOPYABLE(AXTableHeaderContainer);
 
 private:
     explicit AXTableHeaderContainer(AXObjectCacheImpl&);
@@ -49,11 +50,7 @@ public:
 
     void addChildren() override;
 
-    LayoutRect elementRect() const override;
-
 private:
-    LayoutRect m_headerRect;
-
     bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 };
 

@@ -26,21 +26,24 @@ class ChromeLauncherController;
 // This is a LauncherItemController for abstract app windows. There is one
 // instance per app, per launcher id. For apps with multiple windows, each item
 // controller keeps track of all windows associated with the app and their
-// activation order. Instances are owned by ash::ShelfItemDelegateManager.
+// activation order. Instances are owned by ash::ShelfModel.
 //
-// Tests are in chrome_launcher_controller_browsertest.cc
+// Tests are in chrome_launcher_controller_impl_browsertest.cc
 class AppWindowLauncherItemController : public LauncherItemController,
                                         public aura::WindowObserver {
  public:
+  using WindowList = std::list<ui::BaseWindow*>;
+
   ~AppWindowLauncherItemController() override;
 
   void AddWindow(ui::BaseWindow* window);
-
-  void RemoveWindowForNativeWindow(aura::Window* window);
+  void RemoveWindow(ui::BaseWindow* window);
 
   void SetActiveWindow(aura::Window* window);
+  ui::BaseWindow* GetAppWindow(aura::Window* window);
 
-  const std::string& app_shelf_id() const { return app_shelf_id_; }
+  const std::string& app_id() const { return app_id_; }
+  const std::string& launch_id() const { return launch_id_; }
 
   // LauncherItemController overrides:
   bool IsOpen() const override;
@@ -50,7 +53,7 @@ class AppWindowLauncherItemController : public LauncherItemController,
       ash::LaunchSource source) override;
   ChromeLauncherAppMenuItems GetApplicationList(int event_flags) override;
   ash::ShelfItemDelegate::PerformedAction ItemSelected(
-      const ui::Event& eent) override;
+      const ui::Event& event) override;
   base::string16 GetTitle() override;
   bool IsDraggable() override;
   bool CanPin() const override;
@@ -68,12 +71,12 @@ class AppWindowLauncherItemController : public LauncherItemController,
   // Activates the window at position |index|.
   void ActivateIndexedApp(size_t index);
 
- protected:
-  using WindowList = std::list<ui::BaseWindow*>;
+  const WindowList& windows() const { return windows_; }
 
+ protected:
   AppWindowLauncherItemController(Type type,
-                                  const std::string& app_shelf_id,
                                   const std::string& app_id,
+                                  const std::string& launch_id,
                                   ChromeLauncherController* controller);
 
   // Called when app window is removed from controller.
@@ -91,8 +94,6 @@ class AppWindowLauncherItemController : public LauncherItemController,
   ash::ShelfItemDelegate::PerformedAction ActivateOrAdvanceToNextAppWindow(
       ui::BaseWindow* window_to_show);
 
-  const WindowList& windows() { return windows_; }
-
  private:
   WindowList::iterator GetFromNativeWindow(aura::Window* window);
 
@@ -102,9 +103,13 @@ class AppWindowLauncherItemController : public LauncherItemController,
   // Pointer to the most recently active app window
   ui::BaseWindow* last_active_window_ = nullptr;
 
-  // The launcher id associated with this set of windows. There is one
-  // AppLauncherItemController for each |app_shelf_id_|.
-  const std::string app_shelf_id_;
+  // The application id associated with this set of windows.
+  const std::string app_id_;
+
+  // An id that can be passed to an app when launched in order to support
+  // multiple shelf items per app. This id is used together with the app_id to
+  // uniquely identify each shelf item that has the same app_id.
+  const std::string launch_id_;
 
   // Scoped list of observed windows (for removal on destruction)
   ScopedObserver<aura::Window, aura::WindowObserver> observed_windows_;

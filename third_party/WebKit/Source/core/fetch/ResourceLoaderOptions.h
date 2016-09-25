@@ -32,6 +32,7 @@
 #define ResourceLoaderOptions_h
 
 #include "core/fetch/FetchInitiatorInfo.h"
+#include "core/fetch/IntegrityMetadata.h"
 #include "platform/CrossThreadCopier.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "wtf/Allocator.h"
@@ -136,6 +137,8 @@ public:
     SynchronousPolicy synchronousPolicy;
     CORSEnabled corsEnabled; // If the resource is loaded out-of-origin, whether or not to use CORS.
     RefPtr<SecurityOrigin> securityOrigin;
+    String contentSecurityPolicyNonce;
+    IntegrityMetadataSet integrityMetadata;
 };
 
 // Encode AtomicString (in FetchInitiatorInfo) as String to cross threads.
@@ -150,7 +153,11 @@ struct CrossThreadResourceLoaderOptionsData {
         , requestInitiatorContext(options.requestInitiatorContext)
         , synchronousPolicy(options.synchronousPolicy)
         , corsEnabled(options.corsEnabled)
-        , securityOrigin(options.securityOrigin ? options.securityOrigin->isolatedCopy() : nullptr) { }
+        , securityOrigin(options.securityOrigin ? options.securityOrigin->isolatedCopy() : nullptr)
+        , contentSecurityPolicyNonce(options.contentSecurityPolicyNonce)
+        , integrityMetadata(options.integrityMetadata)
+    {
+    }
 
     operator ResourceLoaderOptions() const
     {
@@ -164,6 +171,8 @@ struct CrossThreadResourceLoaderOptionsData {
         options.synchronousPolicy = synchronousPolicy;
         options.corsEnabled = corsEnabled;
         options.securityOrigin = securityOrigin;
+        options.contentSecurityPolicyNonce = contentSecurityPolicyNonce;
+        options.integrityMetadata = integrityMetadata;
         return options;
     }
 
@@ -176,6 +185,8 @@ struct CrossThreadResourceLoaderOptionsData {
     SynchronousPolicy synchronousPolicy;
     CORSEnabled corsEnabled;
     RefPtr<SecurityOrigin> securityOrigin;
+    String contentSecurityPolicyNonce;
+    IntegrityMetadataSet integrityMetadata;
 };
 
 template <>

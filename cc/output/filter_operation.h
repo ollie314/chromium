@@ -9,7 +9,6 @@
 
 #include "base/logging.h"
 #include "cc/base/cc_export.h"
-#include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -50,6 +49,8 @@ class CC_EXPORT FilterOperation {
     FILTER_TYPE_LAST = ALPHA_THRESHOLD
   };
 
+  FilterOperation();
+
   FilterOperation(const FilterOperation& other);
 
   ~FilterOperation();
@@ -77,7 +78,7 @@ class CC_EXPORT FilterOperation {
     return drop_shadow_color_;
   }
 
-  skia::RefPtr<SkImageFilter> image_filter() const {
+  const sk_sp<SkImageFilter>& image_filter() const {
     DCHECK_EQ(type_, REFERENCE);
     return image_filter_;
   }
@@ -148,8 +149,8 @@ class CC_EXPORT FilterOperation {
   }
 
   static FilterOperation CreateReferenceFilter(
-      const skia::RefPtr<SkImageFilter>& image_filter) {
-    return FilterOperation(REFERENCE, image_filter);
+      sk_sp<SkImageFilter> image_filter) {
+    return FilterOperation(REFERENCE, std::move(image_filter));
   }
 
   static FilterOperation CreateSaturatingBrightnessFilter(float amount) {
@@ -197,9 +198,9 @@ class CC_EXPORT FilterOperation {
     drop_shadow_color_ = color;
   }
 
-  void set_image_filter(const skia::RefPtr<SkImageFilter>& image_filter) {
+  void set_image_filter(sk_sp<SkImageFilter> image_filter) {
     DCHECK_EQ(type_, REFERENCE);
-    image_filter_ = image_filter;
+    image_filter_ = std::move(image_filter);
   }
 
   void set_matrix(const SkScalar matrix[20]) {
@@ -232,7 +233,11 @@ class CC_EXPORT FilterOperation {
 
   // Maps "forward" to determine which pixels in a destination rect are affected
   // by pixels in the source rect.
-  gfx::Rect MapRect(const gfx::Rect& rect) const;
+  gfx::Rect MapRect(const gfx::Rect& rect, const SkMatrix& matrix) const;
+
+  // Maps "backward" to determine which pixels in the source affect the pixels
+  // in the destination rect.
+  gfx::Rect MapRectReverse(const gfx::Rect& rect, const SkMatrix& matrix) const;
 
  private:
   FilterOperation(FilterType type, float amount);
@@ -246,8 +251,7 @@ class CC_EXPORT FilterOperation {
 
   FilterOperation(FilterType type, float amount, int inset);
 
-  FilterOperation(FilterType type,
-                  const skia::RefPtr<SkImageFilter>& image_filter);
+  FilterOperation(FilterType type, sk_sp<SkImageFilter> image_filter);
 
   FilterOperation(FilterType type,
                   const SkRegion& region,
@@ -259,7 +263,7 @@ class CC_EXPORT FilterOperation {
   float outer_threshold_;
   gfx::Point drop_shadow_offset_;
   SkColor drop_shadow_color_;
-  skia::RefPtr<SkImageFilter> image_filter_;
+  sk_sp<SkImageFilter> image_filter_;
   SkScalar matrix_[20];
   int zoom_inset_;
   SkRegion region_;

@@ -137,9 +137,8 @@ MojoResult DataPipeProducerDispatcher::WriteData(const void* elements,
   if (*num_bytes == 0)
     return MOJO_RESULT_OK;  // Nothing to do.
 
-  bool all_or_none = flags & MOJO_WRITE_DATA_FLAG_ALL_OR_NONE;
-  uint32_t min_num_bytes_to_write = all_or_none ? *num_bytes : 0;
-  if (min_num_bytes_to_write > options_.capacity_num_bytes) {
+  if ((flags & MOJO_WRITE_DATA_FLAG_ALL_OR_NONE) &&
+      (*num_bytes > available_capacity_)) {
     // Don't return "should wait" since you can't wait for a specified amount of
     // data.
     return MOJO_RESULT_OUT_OF_RANGE;
@@ -403,6 +402,7 @@ DataPipeProducerDispatcher::Deserialize(const void* data,
     dispatcher->available_capacity_ = state->available_capacity;
     dispatcher->peer_closed_ = state->flags & kFlagPeerClosed;
     dispatcher->InitializeNoLock();
+    dispatcher->UpdateSignalsStateNoLock();
   }
 
   return dispatcher;
@@ -496,16 +496,12 @@ void DataPipeProducerDispatcher::UpdateSignalsStateNoLock() {
   size_t previous_capacity = available_capacity_;
 
   ports::PortStatus port_status;
-  if (node_controller_->node()->GetStatus(control_port_, &port_status) !=
-          ports::OK ||
-      !port_status.receiving_messages) {
+  int rv = node_controller_->node()->GetStatus(control_port_, &port_status);
+  if (rv != ports::OK || !port_status.receiving_messages) {
     DVLOG(1) << "Data pipe producer " << pipe_id_ << " is aware of peer closure"
              << " [control_port=" << control_port_.name() << "]";
-
     peer_closed_ = true;
-  }
-
-  if (port_status.has_messages && !in_transit_) {
+  } else if (rv == ports::OK && port_status.has_messages && !in_transit_) {
     ports::ScopedMessage message;
     do {
       int rv = node_controller_->node()->GetMessageIf(control_port_, nullptr,
@@ -513,10 +509,14 @@ void DataPipeProducerDispatcher::UpdateSignalsStateNoLock() {
       if (rv != ports::OK)
         peer_closed_ = true;
       if (message) {
-        PortsMessage* ports_message = static_cast<PortsMessage*>(message.get());
+        if (message->num_payload_bytes() < sizeof(DataPipeControlMessage)) {
+          peer_closed_ = true;
+          break;
+        }
+
         const DataPipeControlMessage* m =
             static_cast<const DataPipeControlMessage*>(
-                ports_message->payload_bytes());
+                message->payload_bytes());
 
         if (m->command != DataPipeCommand::DATA_WAS_READ) {
           DLOG(ERROR) << "Unexpected message from consumer.";

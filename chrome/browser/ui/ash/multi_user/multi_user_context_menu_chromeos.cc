@@ -4,9 +4,9 @@
 
 #include "chrome/browser/ui/ash/multi_user/multi_user_context_menu.h"
 
-#include "ash/multi_profile_uma.h"
-#include "ash/session/session_state_delegate.h"
-#include "ash/shell.h"
+#include "ash/common/multi_profile_uma.h"
+#include "ash/common/session/session_state_delegate.h"
+#include "ash/common/wm_shell.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/macros.h"
@@ -40,10 +40,6 @@ class MultiUserContextMenuChromeos : public ui::SimpleMenuModel,
   // SimpleMenuModel::Delegate:
   bool IsCommandIdChecked(int command_id) const override { return false; }
   bool IsCommandIdEnabled(int command_id) const override { return true; }
-  bool GetAcceleratorForCommandId(int command_id,
-                                  ui::Accelerator* accelerator) override {
-    return false;
-  }
   void ExecuteCommand(int command_id, int event_flags) override;
 
  private:
@@ -69,7 +65,7 @@ std::unique_ptr<ui::MenuModel> CreateMultiUserContextMenu(
     aura::Window* window) {
   std::unique_ptr<ui::MenuModel> model;
   ash::SessionStateDelegate* delegate =
-      ash::Shell::GetInstance()->session_state_delegate();
+      ash::WmShell::Get()->GetSessionStateDelegate();
   if (!delegate)
     return model;
 
@@ -118,8 +114,8 @@ void ExecuteVisitDesktopCommand(int command_id, aura::Window* window) {
       // When running the multi user mode on Chrome OS, windows can "visit"
       // another user's desktop.
       const AccountId account_id =
-          ash::Shell::GetInstance()
-              ->session_state_delegate()
+          ash::WmShell::Get()
+              ->GetSessionStateDelegate()
               ->GetUserInfo(IDC_VISIT_DESKTOP_OF_LRU_USER_2 == command_id ? 1
                                                                           : 2)
               ->GetAccountId();

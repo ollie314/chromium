@@ -9,11 +9,14 @@
 #include "base/macros.h"
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "components/sync_driver/sync_error_controller.h"
+#include "components/sync/driver/sync_error_controller.h"
 
 class GlobalErrorService;
 class LoginUIService;
+
+namespace browser_sync {
 class ProfileSyncService;
+}  // namespace browser_sync
 
 // Shows sync errors on the wrench menu using a bubble view and a menu item.
 class SyncGlobalError : public GlobalErrorWithStandardBubble,
@@ -23,7 +26,7 @@ class SyncGlobalError : public GlobalErrorWithStandardBubble,
   SyncGlobalError(GlobalErrorService* global_error_service,
                   LoginUIService* login_ui_service,
                   SyncErrorController* error_controller,
-                  ProfileSyncService* profile_sync_service);
+                  browser_sync::ProfileSyncService* profile_sync_service);
   ~SyncGlobalError() override;
 
   // KeyedService:
@@ -59,7 +62,7 @@ class SyncGlobalError : public GlobalErrorWithStandardBubble,
   // ProfileSyncService this SyncGlobalError depends on.
   SyncErrorController* error_controller_;
 
-  const ProfileSyncService* sync_service_;
+  const browser_sync::ProfileSyncService* sync_service_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncGlobalError);
 };

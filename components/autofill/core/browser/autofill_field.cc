@@ -11,7 +11,6 @@
 #include "base/i18n/string_search.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -199,12 +198,16 @@ bool FillExpirationMonthSelectControl(const base::string16& value,
   if (!StringToInt(value, &month) || month <= 0 || month > 12)
     return false;
 
-  // We trim the whitespace from the select values before attempting to convert
-  // them to months.
+  // We trim the whitespace and a specific prefix used in AngularJS from the
+  // select values before attempting to convert them to months.
   std::vector<base::string16> trimmed_values(field->option_values.size());
-  for (size_t i = 0; i < field->option_values.size(); ++i)
+  const base::string16 kNumberPrefix = ASCIIToUTF16("number:");
+  for (size_t i = 0; i < field->option_values.size(); ++i) {
     base::TrimWhitespace(field->option_values[i], base::TRIM_ALL,
                          &trimmed_values[i]);
+    base::ReplaceFirstSubstringAfterOffset(&trimmed_values[i], 0, kNumberPrefix,
+                                           ASCIIToUTF16(""));
+  }
 
   if (trimmed_values.size() == 12) {
     // The select presumable only contains the year's months.
@@ -372,23 +375,22 @@ bool FillSelectControl(const AutofillType& type,
 }
 
 // Fills in the month control |field| with |value|.  |value| should be a date
-// formatted as MM/YYYY.  If it isn't, filling will fail.
+// formatted as MM/YYYY.  If it isn't, the field doesn't get filled.
 bool FillMonthControl(const base::string16& value, FormFieldData* field) {
   // Autofill formats a combined date as month/year.
   std::vector<base::string16> pieces = base::SplitString(
-      value, base::ASCIIToUTF16("/"),
-      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+      value, ASCIIToUTF16("/"), base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (pieces.size() != 2)
     return false;
 
   // HTML5 input="month" is formatted as year-month.
   base::string16 month = pieces[0];
   base::string16 year = pieces[1];
-  if ((month.size() != 1 && month.size() != 2) || year.size() != 4)
+  if ((month.length() != 1 && month.length() != 2) || year.length() != 4)
     return false;
 
   // HTML5 input="month" expects zero-padded months.
-  if (month.size() == 1)
+  if (month.length() == 1)
     month = ASCIIToUTF16("0") + month;
 
   field->value = year + ASCIIToUTF16("-") + month;
@@ -437,15 +439,91 @@ bool FillStateText(const base::string16& value, FormFieldData* field) {
   return false;
 }
 
-std::string Hash32Bit(const std::string& str) {
-  std::string hash_bin = base::SHA1HashString(str);
-  DCHECK_EQ(base::kSHA1Length, hash_bin.length());
+// Fills the expiration year |value| into the |field|. Uses the |field_type|
+// and the |field|'s max_length attribute to determine if the |value| needs to
+// be truncated.
+void FillExpirationYearInput(base::string16 value,
+                             ServerFieldType field_type,
+                             FormFieldData* field) {
+  // If the |field_type| requires only 2 digits, keep only the last 2 digits of
+  // |value|.
+  if (field_type == CREDIT_CARD_EXP_2_DIGIT_YEAR && value.length() > 2)
+    value = value.substr(value.length() - 2, 2);
 
-  uint32_t hash32 = ((hash_bin[0] & 0xFF) << 24) |
-                    ((hash_bin[1] & 0xFF) << 16) | ((hash_bin[2] & 0xFF) << 8) |
-                    (hash_bin[3] & 0xFF);
+  if (field->max_length == 0 || field->max_length >= value.size()) {
+    // No length restrictions, fill the year value directly.
+    field->value = value;
+  } else {
+    // Truncate the front of |value| to keep only the number of characters equal
+    // to the |field|'s max length.
+    field->value =
+        value.substr(value.length() - field->max_length, field->max_length);
+  }
+}
 
-  return base::UintToString(hash32);
+// Returns whether the expiration date |value| was filled into the |field|.
+// Uses the |field|'s max_length attribute to determine if the |value| needs to
+// be truncated. |value| should be a date formatted as either MM/YY or MM/YYYY.
+// If it isn't, the field doesn't get filled.
+bool FillExpirationDateInput(const base::string16 &value,
+                             FormFieldData* field) {
+  const base::string16 kSeparator = ASCIIToUTF16("/");
+  // Autofill formats a combined date as month/year.
+  std::vector<base::string16> pieces = base::SplitString(
+      value, kSeparator, base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
+  if (pieces.size() != 2)
+    return false;
+
+  base::string16 month = pieces[0];
+  base::string16 year = pieces[1];
+  if (month.length() != 2 || (year.length() != 2 && year.length() != 4))
+    return false;
+
+  switch (field->max_length) {
+    case 1:
+    case 2:
+    case 3:
+      return false;
+    case 4:
+      // Field likely expects MMYY
+      if (year.length() != 2) {
+        // Shorten year to 2 characters from 4
+        year = year.substr(2);
+      }
+
+      field->value = month + year;
+      break;
+    case 5:
+      // Field likely expects MM/YY
+      if (year.length() != 2) {
+        // Shorten year to 2 characters
+        year = year.substr(2);
+        field->value = month + kSeparator + year;
+      } else {
+        field->value = value;
+      }
+      break;
+    case 6:
+    case 7:
+      if (year.length() != 4) {
+        // Will normalize 2-digit years to the 4-digit version.
+        year = ASCIIToUTF16("20") + year;
+      }
+
+      if (field->max_length == 6) {
+        // Field likely expects MMYYYY
+        field->value = month + year;
+      } else {
+        // Field likely expects MM/YYYY
+        field->value = month + kSeparator + year;
+      }
+      break;
+    default:
+      // Includes the case where max_length is not specified (0).
+      field->value = month + kSeparator + year;
+  }
+
+  return true;
 }
 
 base::string16 RemoveWhitespace(const base::string16& value) {
@@ -464,7 +542,8 @@ AutofillField::AutofillField()
       phone_part_(IGNORED),
       credit_card_number_offset_(0),
       previously_autofilled_(false),
-      generation_type_(AutofillUploadContents::Field::NO_GENERATION) {}
+      generation_type_(AutofillUploadContents::Field::NO_GENERATION),
+      form_classifier_outcome_(AutofillUploadContents::Field::NO_OUTCOME) {}
 
 AutofillField::AutofillField(const FormFieldData& field,
                              const base::string16& unique_name)
@@ -478,7 +557,8 @@ AutofillField::AutofillField(const FormFieldData& field,
       credit_card_number_offset_(0),
       previously_autofilled_(false),
       parseable_name_(field.name),
-      generation_type_(AutofillUploadContents::Field::NO_GENERATION) {}
+      generation_type_(AutofillUploadContents::Field::NO_GENERATION),
+      form_classifier_outcome_(AutofillUploadContents::Field::NO_OUTCOME) {}
 
 AutofillField::~AutofillField() {}
 
@@ -551,10 +631,12 @@ bool AutofillField::IsEmpty() const {
   return value.empty();
 }
 
-std::string AutofillField::FieldSignature() const {
-  std::string field_name = base::UTF16ToUTF8(name);
-  std::string field_string = field_name + "&" + form_control_type;
-  return Hash32Bit(field_string);
+FieldSignature AutofillField::GetFieldSignature() const {
+  return CalculateFieldSignatureByNameAndType(name, form_control_type);
+}
+
+std::string AutofillField::FieldSignatureAsStr() const {
+  return base::UintToString(GetFieldSignature());
 }
 
 bool AutofillField::IsFieldFillable() const {
@@ -591,6 +673,15 @@ bool AutofillField::FillFormField(const AutofillField& field,
     return true;
   } else if (type.GetStorableType() == ADDRESS_HOME_STATE) {
     return FillStateText(value, field_data);
+  } else if (field_data->form_control_type == "text" &&
+             (type.GetStorableType() == CREDIT_CARD_EXP_2_DIGIT_YEAR ||
+              type.GetStorableType() == CREDIT_CARD_EXP_4_DIGIT_YEAR)) {
+    FillExpirationYearInput(value, type.GetStorableType(), field_data);
+    return true;
+  } else if (field_data->form_control_type == "text" &&
+             (type.GetStorableType() == CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR ||
+              type.GetStorableType() == CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR)) {
+    return FillExpirationDateInput(value, field_data);
   }
 
   field_data->value = value;

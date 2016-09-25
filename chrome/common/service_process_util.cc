@@ -32,10 +32,6 @@
 #include "google_apis/gaia/gaia_switches.h"
 #include "ui/base/ui_base_switches.h"
 
-#if defined(OS_WIN)
-#include "components/startup_metric_utils/common/pre_read_field_trial_utils_win.h"
-#endif  // defined(OS_WIN)
-
 #if !defined(OS_MACOSX)
 
 namespace {
@@ -82,13 +78,13 @@ ServiceProcessRunningState GetServiceProcessRunningState(
   if (service_version_out)
     *service_version_out = version;
 
-  Version service_version(version);
+  base::Version service_version(version);
   // If the version string is invalid, treat it like an older version.
   if (!service_version.IsValid())
     return SERVICE_OLDER_VERSION_RUNNING;
 
   // Get the version of the currently *running* instance of Chrome.
-  Version running_version(version_info::GetVersionNumber());
+  base::Version running_version(version_info::GetVersionNumber());
   if (!running_version.IsValid()) {
     NOTREACHED() << "Failed to parse version info";
     // Our own version is invalid. This is an error case. Pretend that we
@@ -168,8 +164,7 @@ std::unique_ptr<base::CommandLine> CreateServiceProcessCommandLine() {
                                   switches::kServiceProcess);
 
 #if defined(OS_WIN)
-  if (startup_metric_utils::GetPreReadOptions().use_prefetch_argument)
-    command_line->AppendArg(switches::kPrefetchArgumentOther);
+  command_line->AppendArg(switches::kPrefetchArgumentOther);
 #endif  // defined(OS_WIN)
 
   static const char* const kSwitchesToCopy[] = {

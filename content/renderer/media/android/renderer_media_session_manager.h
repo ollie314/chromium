@@ -10,6 +10,7 @@
 
 #include "base/id_map.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "content/common/content_export.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "third_party/WebKit/public/platform/modules/mediasession/WebMediaSession.h"
@@ -36,13 +37,17 @@ class CONTENT_EXPORT RendererMediaSessionManager : public RenderFrameObserver {
   void Deactivate(
       int session_id,
       std::unique_ptr<blink::WebMediaSessionDeactivateCallback> callback);
-  void SetMetadata(int session_id, const MediaMetadata& metadata);
+  void SetMetadata(
+      int session_id, const base::Optional<MediaMetadata>& metadata);
 
   void OnDidActivate(int request_id, bool success);
   void OnDidDeactivate(int request_id);
 
  private:
   friend class WebMediaSessionTest;
+
+  // RenderFrameObserver implementation.
+  void OnDestruct() override;
 
   std::map<int, WebMediaSessionAndroid*> sessions_;
   int next_session_id_;

@@ -34,7 +34,6 @@
 #include "core/page/PagePopup.h"
 #include "public/web/WebPagePopup.h"
 #include "web/PageWidgetDelegate.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/RefCounted.h"
 
 namespace blink {
@@ -43,7 +42,6 @@ class GraphicsLayer;
 class Page;
 class PagePopupChromeClient;
 class PagePopupClient;
-class PlatformKeyboardEvent;
 class WebLayerTreeView;
 class WebLayer;
 class WebViewImpl;
@@ -60,7 +58,6 @@ class WebPagePopupImpl final
 public:
     ~WebPagePopupImpl() override;
     bool initialize(WebViewImpl*, PagePopupClient*);
-    WebInputEventResult handleKeyEvent(const PlatformKeyboardEvent&);
     void closePopup();
     WebWidgetClient* widgetClient() const { return m_widgetClient; }
     bool hasSamePopupClient(WebPagePopupImpl* other) { return other && m_popupClient == other->m_popupClient; }
@@ -70,6 +67,9 @@ public:
     WebPoint positionRelativeToOwner() override;
     void postMessage(const String& message) override;
     void cancel();
+
+    // PageWidgetEventHandler functions.
+    WebInputEventResult handleKeyEvent(const WebKeyboardEvent&) override;
 
 private:
     // WebWidget functions
@@ -85,7 +85,6 @@ private:
     bool isAcceleratedCompositingActive() const override { return m_isAcceleratedCompositingActive; }
 
     // PageWidgetEventHandler functions
-    WebInputEventResult handleKeyEvent(const WebKeyboardEvent&) override;
     WebInputEventResult handleCharEvent(const WebKeyboardEvent&) override;
     WebInputEventResult handleGestureEvent(const WebGestureEvent&) override;
     void handleMouseDown(LocalFrame& mainFrame, const WebMouseEvent&) override;
@@ -103,8 +102,9 @@ private:
     void setRootGraphicsLayer(GraphicsLayer*);
     void setIsAcceleratedCompositingActive(bool enter);
 
+    WebRect windowRectInScreen() const;
+
     WebWidgetClient* m_widgetClient;
-    WebRect m_windowRectInScreen;
     WebViewImpl* m_webView;
     Persistent<Page> m_page;
     Persistent<PagePopupChromeClient> m_chromeClient;

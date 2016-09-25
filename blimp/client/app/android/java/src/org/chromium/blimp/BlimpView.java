@@ -5,6 +5,7 @@
 package org.chromium.blimp;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.graphics.Point;
 import android.os.Build;
 import android.util.AttributeSet;
@@ -12,17 +13,21 @@ import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.View;
 import android.view.WindowManager;
 
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.blimp.session.BlimpClientSession;
+import org.chromium.ui.UiUtils;
 
 /**
  * A {@link View} that will visually represent the Blimp rendered content.  This {@link View} starts
  * a native compositor.
  */
-@JNINamespace("blimp::client")
-public class BlimpView extends SurfaceView implements SurfaceHolder.Callback {
+@JNINamespace("blimp::client::app")
+public class BlimpView
+        extends SurfaceView implements SurfaceHolder.Callback, View.OnLayoutChangeListener {
     private long mNativeBlimpViewPtr;
 
     /**
@@ -34,6 +39,7 @@ public class BlimpView extends SurfaceView implements SurfaceHolder.Callback {
         super(context, attrs);
         setFocusable(true);
         setFocusableInTouchMode(true);
+        addOnLayoutChangeListener(this);
     }
 
     /**
@@ -57,6 +63,7 @@ public class BlimpView extends SurfaceView implements SurfaceHolder.Callback {
         mNativeBlimpViewPtr = nativeInit(blimpClientSession, physicalSize.x, physicalSize.y,
                 displaySize.x, displaySize.y, deviceScaleFactor);
         getHolder().addCallback(this);
+        setBackgroundColor(Color.WHITE);
         setVisibility(VISIBLE);
     }
 
@@ -72,21 +79,13 @@ public class BlimpView extends SurfaceView implements SurfaceHolder.Callback {
         }
     }
 
-    /**
-     * Triggers a redraw of the native compositor, pushing a new frame.
-     */
-    public void setNeedsComposite() {
+    // View.OnLayoutChangeListener implementation.
+    @Override
+    public void onLayoutChange(View v, int left, int top, int right, int bottom, int oldLeft,
+            int oldTop, int oldRight, int oldBottom) {
         if (mNativeBlimpViewPtr == 0) return;
-        nativeSetNeedsComposite(mNativeBlimpViewPtr);
-    }
-
-    /**
-     * Toggles whether or not the native compositor draws to this {@link View} or not.
-     * @param visible Whether or not the compositor should draw or not.
-     */
-    public void setCompositorVisibility(boolean visible) {
-        if (mNativeBlimpViewPtr == 0) return;
-        nativeSetVisibility(mNativeBlimpViewPtr, visible);
+        nativeOnContentAreaSizeChanged(mNativeBlimpViewPtr, right - left, bottom - top,
+                getContext().getResources().getDisplayMetrics().density);
     }
 
     // View overrides.
@@ -95,6 +94,10 @@ public class BlimpView extends SurfaceView implements SurfaceHolder.Callback {
         if (mNativeBlimpViewPtr == 0) return false;
 
         int eventAction = event.getActionMasked();
+
+        // Close the IME. It might be open for typing URL into toolbar.
+        // TODO(shaktisahu): Detect if the IME was open and return immediately (crbug/606977)
+        UiUtils.hideKeyboard(this);
 
         if (!isValidTouchEventActionForNative(eventAction)) return false;
 
@@ -172,16 +175,23 @@ public class BlimpView extends SurfaceView implements SurfaceHolder.Callback {
                 || eventAction == MotionEvent.ACTION_POINTER_UP;
     }
 
+    @CalledByNative
+    public void onSwapBuffersCompleted() {
+        if (getBackground() == null) return;
+
+        setBackgroundResource(0);
+    }
+
     // Native Methods
     private native long nativeInit(BlimpClientSession blimpClientSession, int physicalWidth,
             int physicalHeight, int displayWidth, int displayHeight, float dpToPixel);
     private native void nativeDestroy(long nativeBlimpView);
-    private native void nativeSetNeedsComposite(long nativeBlimpView);
+    private native void nativeOnContentAreaSizeChanged(
+            long nativeBlimpView, int width, int height, float dpToPx);
     private native void nativeOnSurfaceChanged(
             long nativeBlimpView, int format, int width, int height, Surface surface);
     private native void nativeOnSurfaceCreated(long nativeBlimpView);
     private native void nativeOnSurfaceDestroyed(long nativeBlimpView);
-    private native void nativeSetVisibility(long nativeBlimpView, boolean visible);
     private native boolean nativeOnTouchEvent(
             long nativeBlimpView, MotionEvent event,
             long timeMs, int action, int pointerCount, int historySize, int actionIndex,

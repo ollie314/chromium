@@ -45,14 +45,20 @@
 #include "core/loader/DocumentLoader.h"
 #include "platform/SerializedResource.h"
 #include "platform/SharedBuffer.h"
+#include "platform/TraceEvent.h"
 #include "platform/mhtml/MHTMLArchive.h"
 #include "platform/mhtml/MHTMLParser.h"
+#include "platform/network/ResourceRequest.h"
+#include "platform/network/ResourceResponse.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
+#include "public/platform/WebURLResponse.h"
 #include "public/platform/WebVector.h"
+#include "public/web/WebDataSource.h"
 #include "public/web/WebDocument.h"
 #include "public/web/WebFrame.h"
+#include "public/web/WebFrameSerializerCacheControlPolicy.h"
 #include "public/web/WebFrameSerializerClient.h"
 #include "web/WebFrameSerializerImpl.h"
 #include "web/WebLocalFrameImpl.h"
@@ -74,7 +80,8 @@ public:
     explicit MHTMLFrameSerializerDelegate(WebFrameSerializer::MHTMLPartsGenerationDelegate&);
     bool shouldIgnoreAttribute(const Attribute&) override;
     bool rewriteLink(const Element&, String& rewrittenLink) override;
-    bool shouldSkipResource(const KURL&) override;
+    bool shouldSkipResourceWithURL(const KURL&) override;
+    bool shouldSkipResource(const Resource&) override;
 
 private:
     WebFrameSerializer::MHTMLPartsGenerationDelegate& m_webDelegate;
@@ -131,17 +138,60 @@ bool MHTMLFrameSerializerDelegate::rewriteLink(
     return false;
 }
 
-bool MHTMLFrameSerializerDelegate::shouldSkipResource(const KURL& url)
+bool MHTMLFrameSerializerDelegate::shouldSkipResourceWithURL(const KURL& url)
 {
     return m_webDelegate.shouldSkipResource(url);
+}
+
+bool MHTMLFrameSerializerDelegate::shouldSkipResource(const Resource& resource)
+{
+    return m_webDelegate.cacheControlPolicy() == WebFrameSerializerCacheControlPolicy::SkipAnyFrameOrResourceMarkedNoStore
+        && resource.hasCacheControlNoStoreHeader();
+}
+
+bool cacheControlNoStoreHeaderPresent(const WebLocalFrameImpl& webLocalFrameImpl)
+{
+    const ResourceResponse& response = webLocalFrameImpl.dataSource()->response().toResourceResponse();
+    if (response.cacheControlContainsNoStore())
+        return true;
+
+    const ResourceRequest& request = webLocalFrameImpl.dataSource()->request().toResourceRequest();
+    return request.cacheControlContainsNoStore();
+}
+
+bool frameShouldBeSerializedAsMHTML(WebLocalFrame* frame, WebFrameSerializerCacheControlPolicy cacheControlPolicy)
+{
+    WebLocalFrameImpl* webLocalFrameImpl = toWebLocalFrameImpl(frame);
+    DCHECK(webLocalFrameImpl);
+
+    if (cacheControlPolicy == WebFrameSerializerCacheControlPolicy::None)
+        return true;
+
+    bool needToCheckNoStore = cacheControlPolicy == WebFrameSerializerCacheControlPolicy::SkipAnyFrameOrResourceMarkedNoStore
+        || (!frame->parent() && cacheControlPolicy == WebFrameSerializerCacheControlPolicy::FailForNoStoreMainFrame);
+
+    if (!needToCheckNoStore)
+        return true;
+
+    return !cacheControlNoStoreHeaderPresent(*webLocalFrameImpl);
 }
 
 } // namespace
 
 WebData WebFrameSerializer::generateMHTMLHeader(
-    const WebString& boundary, WebLocalFrame* frame)
+    const WebString& boundary, WebLocalFrame* frame, MHTMLPartsGenerationDelegate* delegate)
 {
-    Document* document = toWebLocalFrameImpl(frame)->frame()->document();
+    TRACE_EVENT0("page-serialization", "WebFrameSerializer::generateMHTMLHeader");
+    DCHECK(frame);
+    DCHECK(delegate);
+
+    if (!frameShouldBeSerializedAsMHTML(frame, delegate->cacheControlPolicy()))
+        return WebData();
+
+    WebLocalFrameImpl* webLocalFrameImpl = toWebLocalFrameImpl(frame);
+    DCHECK(webLocalFrameImpl);
+
+    Document* document = webLocalFrameImpl->frame()->document();
 
     RefPtr<SharedBuffer> buffer = SharedBuffer::create();
     MHTMLArchive::generateMHTMLHeader(
@@ -151,23 +201,29 @@ WebData WebFrameSerializer::generateMHTMLHeader(
 }
 
 WebData WebFrameSerializer::generateMHTMLParts(
-    const WebString& boundary, WebLocalFrame* webFrame, bool useBinaryEncoding,
-    MHTMLPartsGenerationDelegate* webDelegate)
+    const WebString& boundary, WebLocalFrame* webFrame, MHTMLPartsGenerationDelegate* webDelegate)
 {
+    TRACE_EVENT0("page-serialization", "WebFrameSerializer::generateMHTMLParts");
     DCHECK(webFrame);
     DCHECK(webDelegate);
 
+    if (!frameShouldBeSerializedAsMHTML(webFrame, webDelegate->cacheControlPolicy()))
+        return WebData();
+
     // Translate arguments from public to internal blink APIs.
     LocalFrame* frame = toWebLocalFrameImpl(webFrame)->frame();
-    MHTMLArchive::EncodingPolicy encodingPolicy = useBinaryEncoding
+    MHTMLArchive::EncodingPolicy encodingPolicy = webDelegate->useBinaryEncoding()
         ? MHTMLArchive::EncodingPolicy::UseBinaryEncoding
         : MHTMLArchive::EncodingPolicy::UseDefaultEncoding;
 
     // Serialize.
     Vector<SerializedResource> resources;
+    TRACE_EVENT_BEGIN0("page-serialization", "WebFrameSerializer::generateMHTMLParts serializing");
     MHTMLFrameSerializerDelegate coreDelegate(*webDelegate);
     FrameSerializer serializer(resources, coreDelegate);
     serializer.serializeFrame(*frame);
+    TRACE_EVENT_END1("page-serialization", "WebFrameSerializer::generateMHTMLParts serializing",
+        "resource count", static_cast<unsigned long long>(resources.size()));
 
     // Get Content-ID for the frame being serialized.
     String frameContentID = webDelegate->getContentID(webFrame);
@@ -176,6 +232,7 @@ WebData WebFrameSerializer::generateMHTMLParts(
     RefPtr<SharedBuffer> output = SharedBuffer::create();
     bool isFirstResource = true;
     for (const SerializedResource& resource : resources) {
+        TRACE_EVENT0("page-serialization", "WebFrameSerializer::generateMHTMLParts encoding");
         // Frame is the 1st resource (see FrameSerializer::serializeFrame doc
         // comment). Frames get a Content-ID header.
         String contentID = isFirstResource ? frameContentID : String();
@@ -190,6 +247,7 @@ WebData WebFrameSerializer::generateMHTMLParts(
 
 WebData WebFrameSerializer::generateMHTMLFooter(const WebString& boundary)
 {
+    TRACE_EVENT0("page-serialization", "WebFrameSerializer::generateMHTMLFooter");
     RefPtr<SharedBuffer> buffer = SharedBuffer::create();
     MHTMLArchive::generateMHTMLFooter(boundary, *buffer);
     return buffer.release();

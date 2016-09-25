@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "tools/gn/build_settings.h"
 #include "tools/gn/err.h"
 #include "tools/gn/filesystem_utils.h"
@@ -99,9 +99,11 @@ SourceFile Loader::BuildFileForLabel(const Label& label) {
 // -----------------------------------------------------------------------------
 
 LoaderImpl::LoaderImpl(const BuildSettings* build_settings)
-    : main_loop_(base::MessageLoop::current()),
-      pending_loads_(0),
-      build_settings_(build_settings) {
+    : pending_loads_(0), build_settings_(build_settings) {
+  // There may not be an active TaskRunner at this point. When that's the case,
+  // the calling code is expected to call set_task_runner().
+  if (base::ThreadTaskRunnerHandle::IsSet())
+    task_runner_ = base::ThreadTaskRunnerHandle::Get();
 }
 
 LoaderImpl::~LoaderImpl() {
@@ -211,7 +213,7 @@ void LoaderImpl::ScheduleLoadFile(const Settings* settings,
   pending_loads_++;
   if (!AsyncLoadFile(origin, settings->build_settings(), file,
                      base::Bind(&LoaderImpl::BackgroundLoadFile, this,
-                                settings, file),
+                                settings, file, origin),
                      &err)) {
     g_scheduler->FailWithError(err);
     DecrementPendingLoads();
@@ -235,10 +237,11 @@ void LoaderImpl::ScheduleLoadBuildConfig(
 
 void LoaderImpl::BackgroundLoadFile(const Settings* settings,
                                     const SourceFile& file_name,
+                                    const LocationRange& origin,
                                     const ParseNode* root) {
   if (!root) {
-    main_loop_->PostTask(FROM_HERE,
-        base::Bind(&LoaderImpl::DecrementPendingLoads, this));
+    task_runner_->PostTask(
+        FROM_HERE, base::Bind(&LoaderImpl::DecrementPendingLoads, this));
     return;
   }
 
@@ -260,21 +263,25 @@ void LoaderImpl::BackgroundLoadFile(const Settings* settings,
 
   Err err;
   root->Execute(&our_scope, &err);
-  if (err.has_error())
-    g_scheduler->FailWithError(err);
+  if (!err.has_error())
+    our_scope.CheckForUnusedVars(&err);
 
-  if (!our_scope.CheckForUnusedVars(&err))
+  if (err.has_error()) {
+    if (!origin.is_null())
+      err.AppendSubErr(Err(origin, "which caused the file to be included."));
     g_scheduler->FailWithError(err);
+  }
+
 
   // Pass all of the items that were defined off to the builder.
-  for (auto& item : collected_items) {
+  for (auto*& item : collected_items) {
     settings->build_settings()->ItemDefined(base::WrapUnique(item));
     item = nullptr;
   }
 
   trace.Done();
 
-  main_loop_->PostTask(FROM_HERE, base::Bind(&LoaderImpl::DidLoadFile, this));
+  task_runner_->PostTask(FROM_HERE, base::Bind(&LoaderImpl::DidLoadFile, this));
 }
 
 void LoaderImpl::BackgroundLoadBuildConfig(
@@ -282,8 +289,8 @@ void LoaderImpl::BackgroundLoadBuildConfig(
     const Scope::KeyValueMap& toolchain_overrides,
     const ParseNode* root) {
   if (!root) {
-    main_loop_->PostTask(FROM_HERE,
-        base::Bind(&LoaderImpl::DecrementPendingLoads, this));
+    task_runner_->PostTask(
+        FROM_HERE, base::Bind(&LoaderImpl::DecrementPendingLoads, this));
     return;
   }
 
@@ -332,9 +339,9 @@ void LoaderImpl::BackgroundLoadBuildConfig(
     }
   }
 
-  main_loop_->PostTask(FROM_HERE,
-      base::Bind(&LoaderImpl::DidLoadBuildConfig, this,
-                 settings->toolchain_label()));
+  task_runner_->PostTask(FROM_HERE,
+                         base::Bind(&LoaderImpl::DidLoadBuildConfig, this,
+                                    settings->toolchain_label()));
 }
 
 void LoaderImpl::DidLoadFile() {

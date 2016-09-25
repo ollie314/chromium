@@ -10,9 +10,12 @@
 
 #include "base/macros.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#import "ui/events/cocoa/cocoa_event_utils.h"
+#include "ui/events/event.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/events/keycodes/keyboard_codes.h"
+#import "ui/events/test/cocoa_test_event_utils.h"
 
 using blink::WebKeyboardEvent;
 using blink::WebInputEvent;
@@ -248,6 +251,133 @@ TEST(WebInputEventBuilderMacTest, SystemKeyEvents) {
   EXPECT_TRUE(webEvent.isSystemKey);
 }
 
+// Test generating |windowsKeyCode| from |NSEvent| 'keydown'/'keyup', US
+// keyboard and InputSource.
+TEST(WebInputEventBuilderMacTest, USAlnumNSEventToKeyCode) {
+  struct DomKeyTestCase {
+    int mac_key_code;
+    unichar character;
+    unichar shift_character;
+    ui::KeyboardCode key_code;
+  } table[] = {
+      {kVK_ANSI_0, '0', ')', ui::VKEY_0}, {kVK_ANSI_1, '1', '!', ui::VKEY_1},
+      {kVK_ANSI_2, '2', '@', ui::VKEY_2}, {kVK_ANSI_3, '3', '#', ui::VKEY_3},
+      {kVK_ANSI_4, '4', '$', ui::VKEY_4}, {kVK_ANSI_5, '5', '%', ui::VKEY_5},
+      {kVK_ANSI_6, '6', '^', ui::VKEY_6}, {kVK_ANSI_7, '7', '&', ui::VKEY_7},
+      {kVK_ANSI_8, '8', '*', ui::VKEY_8}, {kVK_ANSI_9, '9', '(', ui::VKEY_9},
+      {kVK_ANSI_A, 'a', 'A', ui::VKEY_A}, {kVK_ANSI_B, 'b', 'B', ui::VKEY_B},
+      {kVK_ANSI_C, 'c', 'C', ui::VKEY_C}, {kVK_ANSI_D, 'd', 'D', ui::VKEY_D},
+      {kVK_ANSI_E, 'e', 'E', ui::VKEY_E}, {kVK_ANSI_F, 'f', 'F', ui::VKEY_F},
+      {kVK_ANSI_G, 'g', 'G', ui::VKEY_G}, {kVK_ANSI_H, 'h', 'H', ui::VKEY_H},
+      {kVK_ANSI_I, 'i', 'I', ui::VKEY_I}, {kVK_ANSI_J, 'j', 'J', ui::VKEY_J},
+      {kVK_ANSI_K, 'k', 'K', ui::VKEY_K}, {kVK_ANSI_L, 'l', 'L', ui::VKEY_L},
+      {kVK_ANSI_M, 'm', 'M', ui::VKEY_M}, {kVK_ANSI_N, 'n', 'N', ui::VKEY_N},
+      {kVK_ANSI_O, 'o', 'O', ui::VKEY_O}, {kVK_ANSI_P, 'p', 'P', ui::VKEY_P},
+      {kVK_ANSI_Q, 'q', 'Q', ui::VKEY_Q}, {kVK_ANSI_R, 'r', 'R', ui::VKEY_R},
+      {kVK_ANSI_S, 's', 'S', ui::VKEY_S}, {kVK_ANSI_T, 't', 'T', ui::VKEY_T},
+      {kVK_ANSI_U, 'u', 'U', ui::VKEY_U}, {kVK_ANSI_V, 'v', 'V', ui::VKEY_V},
+      {kVK_ANSI_W, 'w', 'W', ui::VKEY_W}, {kVK_ANSI_X, 'x', 'X', ui::VKEY_X},
+      {kVK_ANSI_Y, 'y', 'Y', ui::VKEY_Y}, {kVK_ANSI_Z, 'z', 'Z', ui::VKEY_Z}};
+
+  for (const DomKeyTestCase& entry : table) {
+    // Test without modifiers.
+    NSEvent* mac_event =
+        BuildFakeKeyEvent(entry.mac_key_code, entry.character, 0, NSKeyDown);
+    WebKeyboardEvent web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(entry.key_code, web_event.windowsKeyCode);
+    mac_event =
+        BuildFakeKeyEvent(entry.mac_key_code, entry.character, 0, NSKeyUp);
+    web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(entry.key_code, web_event.windowsKeyCode);
+    // Test with Shift.
+    mac_event = BuildFakeKeyEvent(entry.mac_key_code, entry.shift_character,
+                                  NSShiftKeyMask, NSKeyDown);
+    web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(entry.key_code, web_event.windowsKeyCode);
+    mac_event = BuildFakeKeyEvent(entry.mac_key_code, entry.shift_character,
+                                  NSShiftKeyMask, NSKeyUp);
+    web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(entry.key_code, web_event.windowsKeyCode);
+  }
+}
+
+// Test generating |windowsKeyCode| from |NSEvent| 'keydown'/'keyup', JIS
+// keyboard and InputSource.
+TEST(WebInputEventBuilderMacTest, JISNumNSEventToKeyCode) {
+  struct DomKeyTestCase {
+    int mac_key_code;
+    unichar character;
+    unichar shift_character;
+    ui::KeyboardCode key_code;
+  } table[] = {
+      {kVK_ANSI_0, '0', '0', ui::VKEY_0},  {kVK_ANSI_1, '1', '!', ui::VKEY_1},
+      {kVK_ANSI_2, '2', '\"', ui::VKEY_2}, {kVK_ANSI_3, '3', '#', ui::VKEY_3},
+      {kVK_ANSI_4, '4', '$', ui::VKEY_4},  {kVK_ANSI_5, '5', '%', ui::VKEY_5},
+      {kVK_ANSI_6, '6', '&', ui::VKEY_6},  {kVK_ANSI_7, '7', '\'', ui::VKEY_7},
+      {kVK_ANSI_8, '8', '(', ui::VKEY_8},  {kVK_ANSI_9, '9', ')', ui::VKEY_9}};
+
+  for (const DomKeyTestCase& entry : table) {
+    // Test without modifiers.
+    NSEvent* mac_event =
+        BuildFakeKeyEvent(entry.mac_key_code, entry.character, 0, NSKeyDown);
+    WebKeyboardEvent web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(entry.key_code, web_event.windowsKeyCode);
+    mac_event =
+        BuildFakeKeyEvent(entry.mac_key_code, entry.character, 0, NSKeyUp);
+    web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(entry.key_code, web_event.windowsKeyCode);
+    // Test with Shift.
+    mac_event = BuildFakeKeyEvent(entry.mac_key_code, entry.shift_character,
+                                  NSShiftKeyMask, NSKeyDown);
+    web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(entry.key_code, web_event.windowsKeyCode);
+    mac_event = BuildFakeKeyEvent(entry.mac_key_code, entry.shift_character,
+                                  NSShiftKeyMask, NSKeyUp);
+    web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(entry.key_code, web_event.windowsKeyCode);
+  }
+}
+
+// Test generating |windowsKeyCode| from |NSEvent| 'keydown'/'keyup',
+// US keyboard and Dvorak InputSource.
+TEST(WebInputEventBuilderMacTest, USDvorakAlnumNSEventToKeyCode) {
+  struct DomKeyTestCase {
+    int mac_key_code;
+    unichar character;
+    ui::KeyboardCode key_code;
+  } table[] = {
+      {kVK_ANSI_0, '0', ui::VKEY_0}, {kVK_ANSI_1, '1', ui::VKEY_1},
+      {kVK_ANSI_2, '2', ui::VKEY_2}, {kVK_ANSI_3, '3', ui::VKEY_3},
+      {kVK_ANSI_4, '4', ui::VKEY_4}, {kVK_ANSI_5, '5', ui::VKEY_5},
+      {kVK_ANSI_6, '6', ui::VKEY_6}, {kVK_ANSI_7, '7', ui::VKEY_7},
+      {kVK_ANSI_8, '8', ui::VKEY_8}, {kVK_ANSI_9, '9', ui::VKEY_9},
+      {kVK_ANSI_A, 'a', ui::VKEY_A}, {kVK_ANSI_B, 'x', ui::VKEY_X},
+      {kVK_ANSI_C, 'j', ui::VKEY_J}, {kVK_ANSI_D, 'e', ui::VKEY_E},
+      {kVK_ANSI_E, '.', ui::VKEY_OEM_PERIOD}, {kVK_ANSI_F, 'u', ui::VKEY_U},
+      {kVK_ANSI_G, 'i', ui::VKEY_I}, {kVK_ANSI_H, 'd', ui::VKEY_D},
+      {kVK_ANSI_I, 'c', ui::VKEY_C}, {kVK_ANSI_J, 'h', ui::VKEY_H},
+      {kVK_ANSI_K, 't', ui::VKEY_T}, {kVK_ANSI_L, 'n', ui::VKEY_N},
+      {kVK_ANSI_M, 'm', ui::VKEY_M}, {kVK_ANSI_N, 'b', ui::VKEY_B},
+      {kVK_ANSI_O, 'r', ui::VKEY_R}, {kVK_ANSI_P, 'l', ui::VKEY_L},
+      {kVK_ANSI_Q, '\'', ui::VKEY_OEM_7}, {kVK_ANSI_R, 'p', ui::VKEY_P},
+      {kVK_ANSI_S, 'o', ui::VKEY_O}, {kVK_ANSI_T, 'y', ui::VKEY_Y},
+      {kVK_ANSI_U, 'g', ui::VKEY_G}, {kVK_ANSI_V, 'k', ui::VKEY_K},
+      {kVK_ANSI_W, ',', ui::VKEY_OEM_COMMA}, {kVK_ANSI_X, 'q', ui::VKEY_Q},
+      {kVK_ANSI_Y, 'f', ui::VKEY_F}, {kVK_ANSI_Z, ';', ui::VKEY_OEM_1}};
+
+  for (const DomKeyTestCase& entry : table) {
+    // Test without modifiers.
+    NSEvent* mac_event =
+        BuildFakeKeyEvent(entry.mac_key_code, entry.character, 0, NSKeyDown);
+    WebKeyboardEvent web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(entry.key_code, web_event.windowsKeyCode);
+    mac_event =
+        BuildFakeKeyEvent(entry.mac_key_code, entry.character, 0, NSKeyUp);
+    web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(entry.key_code, web_event.windowsKeyCode);
+  }
+}
+
 // Test conversion from key combination with Control to DomKey.
 // TODO(chongz): Move DomKey tests for all platforms into one place.
 // http://crbug.com/587589
@@ -431,4 +561,56 @@ TEST(WebInputEventBuilderMacTest, DomKeyFlagsChanged) {
     WebKeyboardEvent web_event = WebKeyboardEventBuilder::Build(mac_event);
     EXPECT_EQ(entry.dom_key, web_event.domKey) << entry.mac_key_code;
   }
+}
+
+TEST(WebInputEventBuilderMacTest, ContextMenuKey) {
+  // Context menu is not defined but shows up as 0x6E.
+  const int kVK_ContextMenu = 0x6E;
+
+  const NSEventType kEventTypeToTest[] = {NSKeyDown, NSKeyUp};
+  for (auto flags : kEventTypeToTest) {
+    NSEvent* mac_event = BuildFakeKeyEvent(kVK_ContextMenu, 0, 0, flags);
+    WebKeyboardEvent web_event = WebKeyboardEventBuilder::Build(mac_event);
+    EXPECT_EQ(ui::DomKey::CONTEXT_MENU, web_event.domKey);
+    EXPECT_EQ(ui::VKEY_APPS, web_event.windowsKeyCode);
+  }
+}
+
+// Flaky - https://crbug.com/640457
+// Test that a ui::Event and blink::WebInputEvent made from the same NSEvent
+// have the same values for comparable fields.
+TEST(WebInputEventBuilderMacTest, DISABLED_ScrollWheelMatchesUIEvent) {
+  CGFloat delta_x = 123;
+  CGFloat delta_y = 321;
+  NSPoint location = NSMakePoint(11, 22);
+
+  // WebMouseWheelEventBuilder requires a non-nil view to map coordinates. So
+  // create a dummy window, but don't show it. It will be released when closed.
+  NSWindow* window =
+      [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100)
+                                  styleMask:NSBorderlessWindowMask
+                                    backing:NSBackingStoreBuffered
+                                      defer:NO];
+
+  NSEvent* mac_event = cocoa_test_event_utils::TestScrollEvent(
+      location, window, delta_x, delta_y);
+
+  blink::WebMouseWheelEvent web_event =
+      content::WebMouseWheelEventBuilder::Build(mac_event,
+                                                [window contentView]);
+  ui::MouseWheelEvent ui_event(mac_event);
+
+  EXPECT_EQ(delta_x * ui::kScrollbarPixelsPerCocoaTick, web_event.deltaX);
+  EXPECT_EQ(web_event.deltaX, ui_event.x_offset());
+
+  EXPECT_EQ(delta_y * ui::kScrollbarPixelsPerCocoaTick, web_event.deltaY);
+  EXPECT_EQ(web_event.deltaY, ui_event.y_offset());
+
+  EXPECT_EQ(11, web_event.x);
+  EXPECT_EQ(web_event.x, ui_event.x());
+
+  // Both ui:: and blink:: events use an origin at the top-left.
+  EXPECT_EQ(100 - 22, web_event.y);
+  EXPECT_EQ(web_event.y, ui_event.y());
+  [window close];
 }

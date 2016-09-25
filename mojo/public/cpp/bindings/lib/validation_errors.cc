@@ -4,6 +4,9 @@
 
 #include "mojo/public/cpp/bindings/lib/validation_errors.h"
 
+#include "base/strings/stringprintf.h"
+#include "mojo/public/cpp/bindings/message.h"
+
 namespace mojo {
 namespace internal {
 namespace {
@@ -50,24 +53,56 @@ const char* ValidationErrorToString(ValidationError error) {
       return "VALIDATION_ERROR_UNKNOWN_UNION_TAG";
     case VALIDATION_ERROR_UNKNOWN_ENUM_VALUE:
       return "VALIDATION_ERROR_UNKNOWN_ENUM_VALUE";
+    case VALIDATION_ERROR_DESERIALIZATION_FAILED:
+      return "VALIDATION_ERROR_DESERIALIZATION_FAILED";
+    case VALIDATION_ERROR_MAX_RECURSION_DEPTH:
+      return "VALIDATION_ERROR_MAX_RECURSION_DEPTH";
   }
 
   return "Unknown error";
 }
 
-void ReportValidationError(ValidationError error, const char* description) {
+void ReportValidationError(ValidationContext* context,
+                           ValidationError error,
+                           const char* description) {
   if (g_validation_error_observer) {
     g_validation_error_observer->set_last_error(error);
-  } else if (description) {
+    return;
+  }
+
+  if (description) {
     LOG(ERROR) << "Invalid message: " << ValidationErrorToString(error) << " ("
                << description << ")";
+    if (context->message()) {
+      context->message()->NotifyBadMessage(
+          base::StringPrintf("Validation failed for %s [%s (%s)]",
+                             context->description().data(),
+                             ValidationErrorToString(error), description));
+    }
   } else {
     LOG(ERROR) << "Invalid message: " << ValidationErrorToString(error);
+    if (context->message()) {
+      context->message()->NotifyBadMessage(
+          base::StringPrintf("Validation failed for %s [%s]",
+                             context->description().data(),
+                             ValidationErrorToString(error)));
+    }
   }
 }
 
+void ReportValidationErrorForMessage(
+    mojo::Message* message,
+    ValidationError error,
+    const char* description) {
+  ValidationContext validation_context(
+      message->data(), message->data_num_bytes(),
+      message->handles()->size(), message,
+      description);
+  ReportValidationError(&validation_context, error);
+}
+
 ValidationErrorObserverForTesting::ValidationErrorObserverForTesting(
-    const Callback<void()>& callback)
+    const base::Closure& callback)
     : last_error_(VALIDATION_ERROR_NONE), callback_(callback) {
   DCHECK(!g_validation_error_observer);
   g_validation_error_observer = this;

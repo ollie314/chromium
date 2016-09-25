@@ -2,8 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.page import page_test
-from telemetry.timeline import tracing_category_filter
+from telemetry.page import legacy_page_test
+from telemetry.timeline import chrome_trace_category_filter
 from telemetry.web_perf import timeline_based_measurement
 from telemetry.web_perf.metrics import smoothness
 
@@ -28,7 +28,7 @@ class _CustomResultsWrapper(timeline_based_measurement.ResultsWrapperInterface):
     self._results.AddValue(value)
 
 
-class Smoothness(page_test.PageTest):
+class Smoothness(legacy_page_test.LegacyPageTest):
 
   def __init__(self, needs_browser_restart_after_each_page=False):
     super(Smoothness, self).__init__(needs_browser_restart_after_each_page)
@@ -46,7 +46,7 @@ class Smoothness(page_test.PageTest):
     # the ref builds are updated. crbug.com/386847
     custom_categories = [
         'webkit.console', 'blink.console', 'benchmark', 'trace_event_overhead']
-    category_filter = tracing_category_filter.TracingCategoryFilter(
+    category_filter = chrome_trace_category_filter.ChromeTraceCategoryFilter(
         ','.join(custom_categories))
 
     options = timeline_based_measurement.Options(category_filter)

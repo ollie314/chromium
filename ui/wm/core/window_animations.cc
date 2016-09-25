@@ -34,7 +34,6 @@
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/geometry/vector3d_f.h"
 #include "ui/gfx/interpolated_transform.h"
-#include "ui/gfx/screen.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/core/wm_core_switches.h"
 #include "ui/wm/public/animation_host.h"
@@ -85,7 +84,7 @@ class HidingWindowAnimationObserverBase : public aura::WindowObserver {
   // activation change does not put the window above the animating
   // layer.
   void DetachAndRecreateLayers() {
-    layer_owner_ = RecreateLayers(window_);
+    layer_owner_ = RecreateLayers(window_, nullptr);
     if (window_->parent()) {
       const aura::Window::Windows& transient_children =
           GetTransientChildren(window_);
@@ -96,7 +95,7 @@ class HidingWindowAnimationObserverBase : public aura::WindowObserver {
       DCHECK(iter != window_->parent()->children().end());
       aura::Window* topmost_transient_child = NULL;
       for (++iter; iter != window_->parent()->children().end(); ++iter) {
-        if (ContainsValue(transient_children, *iter))
+        if (base::ContainsValue(transient_children, *iter))
           topmost_transient_child = *iter;
       }
       if (topmost_transient_child) {
@@ -104,6 +103,11 @@ class HidingWindowAnimationObserverBase : public aura::WindowObserver {
             layer_owner_->root(), topmost_transient_child->layer());
       }
     }
+    // Reset the transform for the |window_|. Because the animation may have
+    // changed the transform, when recreating the layers we need to reset the
+    // transform otherwise the recreated layer has the transform installed
+    // for the animation.
+    window_->layer()->SetTransform(gfx::Transform());
   }
 
  protected:

@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "media/base/video_frame_metadata.h"
 #include "media/base/video_types.h"
+#include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
@@ -66,14 +68,8 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
     // meaningful name and handle it appropriately in all cases.
     STORAGE_DMABUFS = 5,  // Each plane is stored into a DmaBuf.
 #endif
-#if defined(VIDEO_HOLE)
-    // Indicates protected media that needs to be directly rendered to hw. It
-    // is, in principle, platform independent, see http://crbug.com/323157 and
-    // https://groups.google.com/a/google.com/d/topic/chrome-gpu/eIM1RwarUmk/discussion
-    STORAGE_HOLE = 6,
-#endif
-    STORAGE_GPU_MEMORY_BUFFERS = 7,
-    STORAGE_MOJO_SHARED_BUFFER = 8,
+    STORAGE_GPU_MEMORY_BUFFERS = 6,
+    STORAGE_MOJO_SHARED_BUFFER = 7,
     STORAGE_LAST = STORAGE_MOJO_SHARED_BUFFER,
   };
 
@@ -123,26 +119,12 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
       const gfx::Size& natural_size,
       base::TimeDelta timestamp);
 
-  // Wraps a native texture of the given parameters with a VideoFrame.
-  // The backing of the VideoFrame is held in the mailbox held by
-  // |mailbox_holder|, and |mailbox_holder_release_cb| will be called with
-  // a sync token as the argument when the VideoFrame is to be destroyed.
-  static scoped_refptr<VideoFrame> WrapNativeTexture(
-      VideoPixelFormat format,
-      const gpu::MailboxHolder& mailbox_holder,
-      const ReleaseMailboxCB& mailbox_holder_release_cb,
-      const gfx::Size& coded_size,
-      const gfx::Rect& visible_rect,
-      const gfx::Size& natural_size,
-      base::TimeDelta timestamp);
-
-  // Wraps a set of native textures representing YUV data with a VideoFrame.
+  // Wraps a set of native textures with a VideoFrame.
   // |mailbox_holders_release_cb| will be called with a sync token as the
   // argument when the VideoFrame is to be destroyed.
-  static scoped_refptr<VideoFrame> WrapYUV420NativeTextures(
-      const gpu::MailboxHolder& y_mailbox_holder,
-      const gpu::MailboxHolder& u_mailbox_holder,
-      const gpu::MailboxHolder& v_mailbox_holder,
+  static scoped_refptr<VideoFrame> WrapNativeTextures(
+      VideoPixelFormat format,
+      const gpu::MailboxHolder (&mailbox_holder)[kMaxPlanes],
       const ReleaseMailboxCB& mailbox_holders_release_cb,
       const gfx::Size& coded_size,
       const gfx::Rect& visible_rect,
@@ -207,6 +189,23 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
       const gfx::GpuMemoryBufferHandle& v_handle,
       base::TimeDelta timestamp);
 
+  // Wraps external YUVA data of the given parameters with a VideoFrame.
+  // The returned VideoFrame does not own the data passed in.
+  static scoped_refptr<VideoFrame> WrapExternalYuvaData(
+      VideoPixelFormat format,
+      const gfx::Size& coded_size,
+      const gfx::Rect& visible_rect,
+      const gfx::Size& natural_size,
+      int32_t y_stride,
+      int32_t u_stride,
+      int32_t v_stride,
+      int32_t a_stride,
+      uint8_t* y_data,
+      uint8_t* u_data,
+      uint8_t* v_data,
+      uint8_t* a_data,
+      base::TimeDelta timestamp);
+
 #if defined(OS_LINUX)
   // Wraps provided dmabufs
   // (https://www.kernel.org/doc/Documentation/dma-buf-sharing.txt) with a
@@ -268,11 +267,6 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   static scoped_refptr<VideoFrame> CreateTransparentFrame(
       const gfx::Size& size);
 
-#if defined(VIDEO_HOLE)
-  // Allocates a hole frame.
-  static scoped_refptr<VideoFrame> CreateHoleFrame(const gfx::Size& size);
-#endif  // defined(VIDEO_HOLE)
-
   static size_t NumPlanes(VideoPixelFormat format);
 
   // Returns the required allocation size for a (tightly packed) frame of the
@@ -317,6 +311,10 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   // Returns true if |frame| has textures with any StorageType and should not be
   // accessed via data(), visible_data() etc.
   bool HasTextures() const;
+
+  // Returns the color space of this frame's content.
+  gfx::ColorSpace ColorSpace() const;
+  void set_color_space(const gfx::ColorSpace& color_space);
 
   VideoPixelFormat format() const { return format_; }
   StorageType storage_type() const { return storage_type_; }
@@ -414,6 +412,10 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
 
   // Returns a human-readable string describing |*this|.
   std::string AsHumanReadableString();
+
+  // Unique identifier for this video frame; generated at construction time and
+  // guaranteed to be unique within a single process.
+  int unique_id() const { return unique_id_; }
 
  protected:
   friend class base::RefCountedThreadSafe<VideoFrame>;
@@ -527,8 +529,9 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   int32_t strides_[kMaxPlanes];
 
   // Array of data pointers to each plane.
-  // TODO(mcasas): we don't know on ctor if we own |data_| or not. After
-  // refactoring VideoFrame, change to scoped_ptr<uint8_t, AlignedFreeDeleter>.
+  // TODO(mcasas): we don't know on ctor if we own |data_| or not. Change
+  // to std::unique_ptr<uint8_t, AlignedFreeDeleter> after refactoring
+  // VideoFrame.
   uint8_t* data_[kMaxPlanes];
 
   // Native texture mailboxes, if this is a IsTexture() frame.
@@ -561,6 +564,11 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
   gpu::SyncToken release_sync_token_;
 
   VideoFrameMetadata metadata_;
+
+  // Generated at construction time.
+  const int unique_id_;
+
+  gfx::ColorSpace color_space_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(VideoFrame);
 };

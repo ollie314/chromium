@@ -98,8 +98,6 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   void AllowBindings(int binding_flags) override;
   void ClearFocusedElement() override;
   bool IsFocusedElementEditable() override;
-  void CopyImageAt(int x, int y) override;
-  void SaveImageAt(int x, int y) override;
   void DirectoryEnumerationFinished(
       int request_id,
       const std::vector<base::FilePath>& files) override;
@@ -110,19 +108,31 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
                          int screen_y,
                          blink::WebDragOperation operation) override;
   void DragSourceSystemDragEnded() override;
+  // |drop_data| must have been filtered. The embedder should call
+  // FilterDropData before passing the drop data to RVHI.
   void DragTargetDragEnter(const DropData& drop_data,
                            const gfx::Point& client_pt,
                            const gfx::Point& screen_pt,
                            blink::WebDragOperationsMask operations_allowed,
                            int key_modifiers) override;
+  void DragTargetDragEnterWithMetaData(
+      const std::vector<DropData::Metadata>& metadata,
+      const gfx::Point& client_pt,
+      const gfx::Point& screen_pt,
+      blink::WebDragOperationsMask operations_allowed,
+      int key_modifiers) override;
   void DragTargetDragOver(const gfx::Point& client_pt,
                           const gfx::Point& screen_pt,
                           blink::WebDragOperationsMask operations_allowed,
                           int key_modifiers) override;
   void DragTargetDragLeave() override;
-  void DragTargetDrop(const gfx::Point& client_pt,
+  // |drop_data| must have been filtered. The embedder should call
+  // FilterDropData before passing the drop data to RVHI.
+  void DragTargetDrop(const DropData& drop_data,
+                      const gfx::Point& client_pt,
                       const gfx::Point& screen_pt,
                       int key_modifiers) override;
+  void FilterDropData(DropData* drop_data) override;
   void EnableAutoResize(const gfx::Size& min_size,
                         const gfx::Size& max_size) override;
   void DisableAutoResize(const gfx::Size& new_size) override;
@@ -133,9 +143,6 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   void ExecutePluginActionAtLocation(
       const gfx::Point& location,
       const blink::WebPluginAction& action) override;
-  void FilesSelectedInChooser(
-      const std::vector<FileChooserFileInfo>& files,
-      FileChooserParams::Mode permissions) override;
   RenderViewHostDelegate* GetDelegate() const override;
   int GetEnabledBindings() const override;
   SiteInstanceImpl* GetSiteInstance() const override;
@@ -183,8 +190,8 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   }
 
   // Tracks whether this RenderViewHost is in an active state (rather than
-  // pending swap out, pending deletion, or swapped out), according to its main
-  // frame RenderFrameHost.
+  // pending swap out or swapped out), according to its main frame
+  // RenderFrameHost.
   bool is_active() const { return is_active_; }
   void set_is_active(bool is_active) { is_active_ = is_active; }
 
@@ -209,12 +216,6 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   // Tells the renderer view to focus the first (last if reverse is true) node.
   void SetInitialFocus(bool reverse);
 
-  // Notifies the RenderViewHost that its load state changed.
-  void LoadStateChanged(const GURL& url,
-                        const net::LoadStateWithParam& load_state,
-                        uint64_t upload_position,
-                        uint64_t upload_size);
-
   bool SuddenTerminationAllowed() const;
   void set_sudden_termination_allowed(bool enabled) {
     sudden_termination_allowed_ = enabled;
@@ -234,6 +235,10 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   // Creates a full screen RenderWidget.
   void CreateNewFullscreenWidget(int32_t route_id);
 
+  // Send RenderViewReady to observers once the process is launched, but not
+  // re-entrantly.
+  void PostRenderViewReady();
+
   // TODO(creis): Remove after debugging https:/crbug.com/575245.
   int main_frame_routing_id() const {
     return main_frame_routing_id_;
@@ -242,10 +247,6 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   void set_main_frame_routing_id(int routing_id) {
     main_frame_routing_id_ = routing_id;
   }
-
-  void OnTextSurroundingSelectionResponse(const base::string16& content,
-                                          size_t start_offset,
-                                          size_t end_offset);
 
   // Increases the refcounting on this RVH. This is done by the FrameTree on
   // creation of a RenderFrameHost or RenderFrameProxyHost.
@@ -302,7 +303,6 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
                             const gfx::Rect& node_bounds_in_viewport);
   void OnClosePageACK();
   void OnDidZoomURL(double zoom_level, const GURL& url);
-  void OnRunFileChooser(const FileChooserParams& params);
   void OnFocusedNodeTouched(bool editable);
   void OnFocus();
 
@@ -319,9 +319,6 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest,
                            NavigateMainFrameToChildSite);
 
-  // Send RenderViewReady to observers once the process is launched, but not
-  // re-entrantly.
-  void PostRenderViewReady();
   void RenderViewReady();
 
   // TODO(creis): Move to a private namespace on RenderFrameHostImpl.
@@ -335,15 +332,11 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   // See https://crbug.com/304341.
   WebPreferences ComputeWebkitPrefs();
 
-  // Returns whether the current RenderProcessHost has read access to the files
-  // reported in |state|.
-  bool CanAccessFilesOfPageState(const PageState& state) const;
-
-  // Grants the current RenderProcessHost read access to any file listed in
-  // |validated_state|.  It is important that the PageState has been validated
-  // upon receipt from the renderer process to prevent it from forging access to
-  // files without the user's consent.
-  void GrantFileAccessFromPageState(const PageState& validated_state);
+  // 1. Grants permissions to URL (if any)
+  // 2. Grants permissions to filenames
+  // 3. Grants permissions to file system files.
+  // 4. Register the files with the IsolatedContext.
+  void GrantFileAccessFromDropData(DropData* drop_data);
 
   // The RenderWidgetHost.
   std::unique_ptr<RenderWidgetHostImpl> render_widget_host_;
@@ -392,9 +385,6 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
 
   // The termination status of the last render view that terminated.
   base::TerminationStatus render_view_termination_status_;
-
-  // Set to true if we requested the on screen keyboard to be displayed.
-  bool virtual_keyboard_requested_;
 
   // True if the current focused element is editable.
   bool is_focused_element_editable_;

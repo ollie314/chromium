@@ -65,6 +65,10 @@ class ScreenLocker : public AuthStatusConsumer {
   void OnAuthFailure(const chromeos::AuthFailure& error) override;
   void OnAuthSuccess(const UserContext& user_context) override;
 
+  // Called when an account password (not PIN/quick unlock) has been used to
+  // unlock the device.
+  void OnPasswordAuthSuccess(const UserContext& user_context);
+
   // Does actual unlocking once authentication is successful and all blocking
   // animations are done.
   void UnlockOnLoginSuccess();
@@ -127,6 +131,11 @@ class ScreenLocker : public AuthStatusConsumer {
   friend class test::WebUIScreenLockerTester;
   friend class ScreenLockerDelegate;
 
+  // Track whether the user used pin or password to unlock the lock screen.
+  // Values corrospond to UMA histograms, do not modify, or add or delete other
+  // than directly before AUTH_COUNT.
+  enum UnlockType { AUTH_PASSWORD = 0, AUTH_PIN, AUTH_COUNT };
+
   struct AuthenticationParametersCapture {
     UserContext user_context;
   };
@@ -142,11 +151,11 @@ class ScreenLocker : public AuthStatusConsumer {
   // Called when screen locker is safe to delete.
   static void ScheduleDeletion();
 
-  // Returns true if |username| is found among logged in users.
-  bool IsUserLoggedIn(const std::string& username);
+  // Returns true if |account_id| is found among logged in users.
+  bool IsUserLoggedIn(const AccountId& account_id) const;
 
   // Looks up user in unlock user list.
-  const user_manager::User* FindUnlockUser(const std::string& user_id);
+  const user_manager::User* FindUnlockUser(const AccountId& account_id);
 
   // ScreenLockerDelegate instance in use.
   std::unique_ptr<ScreenLockerDelegate> delegate_;
@@ -163,23 +172,26 @@ class ScreenLocker : public AuthStatusConsumer {
   // True if the screen is locked, or false otherwise.  This changes
   // from false to true, but will never change from true to
   // false. Instead, ScreenLocker object gets deleted when unlocked.
-  bool locked_;
+  bool locked_ = false;
 
   // Reference to the single instance of the screen locker object.
   // This is used to make sure there is only one screen locker instance.
   static ScreenLocker* screen_locker_;
 
   // The time when the screen locker object is created.
-  base::Time start_time_;
+  base::Time start_time_ = base::Time::Now();
   // The time when the authentication is started.
   base::Time authentication_start_time_;
 
   // Delegate to forward all login status events to.
   // Tests can use this to receive login status events.
-  AuthStatusConsumer* auth_status_consumer_;
+  AuthStatusConsumer* auth_status_consumer_ = nullptr;
 
   // Number of bad login attempts in a row.
-  int incorrect_passwords_count_;
+  int incorrect_passwords_count_ = 0;
+
+  // Whether the last password entered was a pin or not.
+  bool is_pin_attempt_ = false;
 
   // Copy of parameters passed to last call of OnLoginSuccess for usage in
   // UnlockOnLoginSuccess().

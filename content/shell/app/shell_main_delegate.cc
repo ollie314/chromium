@@ -39,8 +39,8 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/ui_base_switches.h"
+#include "ui/display/display_switches.h"
 #include "ui/events/event_switches.h"
-#include "ui/gfx/switches.h"
 #include "ui/gl/gl_switches.h"
 
 #include "ipc/ipc_message.h"  // For IPC_MESSAGE_LOG_ENABLED.
@@ -162,13 +162,15 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
       return true;
     }
 #endif
+    command_line.AppendSwitch(cc::switches::kEnableGpuBenchmarking);
     command_line.AppendSwitch(switches::kProcessPerTab);
     command_line.AppendSwitch(switches::kEnableLogging);
     command_line.AppendSwitch(switches::kAllowFileAccessFromFiles);
     // only default to osmesa if the flag isn't already specified.
-    if (!command_line.HasSwitch(switches::kUseGL)) {
+    if (!command_line.HasSwitch(switches::kUseGpuInTests) &&
+        !command_line.HasSwitch(switches::kUseGL)) {
       command_line.AppendSwitchASCII(switches::kUseGL,
-                                     gfx::kGLImplementationOSMesaName);
+                                     gl::kGLImplementationOSMesaName);
     }
     command_line.AppendSwitch(switches::kSkipGpuDataLoading);
     command_line.AppendSwitchASCII(switches::kTouchEvents,
@@ -203,6 +205,11 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
                                    "MAP *.test 127.0.0.1");
 
     command_line.AppendSwitch(switches::kEnablePartialRaster);
+
+    if (!command_line.HasSwitch(switches::kForceGpuRasterization) &&
+        !command_line.HasSwitch(switches::kEnableGpuRasterization)) {
+      command_line.AppendSwitch(switches::kDisableGpuRasterization);
+    }
 
     // Unless/until WebM files are added to the media layout tests, we need to
     // avoid removing MP4/H264/AAC so that layout tests can run on Android.

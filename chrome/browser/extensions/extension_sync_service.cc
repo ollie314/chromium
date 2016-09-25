@@ -14,11 +14,14 @@
 #include "chrome/browser/extensions/extension_sync_service_factory.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/launch_util.h"
+#include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "chrome/common/web_application_info.h"
+#include "components/sync/api/sync_change.h"
+#include "components/sync/api/sync_error_factory.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -30,8 +33,6 @@
 #include "extensions/common/image_util.h"
 #include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "sync/api/sync_change.h"
-#include "sync/api/sync_error_factory.h"
 
 #if defined(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_service.h"
@@ -65,17 +66,18 @@ void OnWebApplicationInfoLoaded(
 
 // Returns the pref value for "all urls enabled" for the given extension id.
 ExtensionSyncData::OptionalBoolean GetAllowedOnAllUrlsOptionalBoolean(
-    const std::string& extension_id,
+    const Extension& extension,
     content::BrowserContext* context) {
-  bool allowed_on_all_urls =
-      extensions::util::AllowedScriptingOnAllUrls(extension_id, context);
+  extensions::ScriptingPermissionsModifier permissions_modifier(context,
+                                                                &extension);
+  bool allowed_on_all_urls = permissions_modifier.IsAllowedOnAllUrls();
   // If the extension is not allowed on all urls (which is not the default),
   // then we have to sync the preference.
   if (!allowed_on_all_urls)
     return ExtensionSyncData::BOOLEAN_FALSE;
 
   // If the user has explicitly set a value, then we sync it.
-  if (extensions::util::HasSetAllowedScriptingOnAllUrls(extension_id, context))
+  if (permissions_modifier.HasSetAllowedOnAllUrls())
     return ExtensionSyncData::BOOLEAN_TRUE;
 
   // Otherwise, unset.
@@ -105,7 +107,7 @@ syncer::SyncDataList ToSyncerSyncDataList(
   return result;
 }
 
-static_assert(Extension::DISABLE_REASON_LAST == (1 << 15),
+static_assert(Extension::DISABLE_REASON_LAST == (1 << 16),
               "Please consider whether your new disable reason should be"
               " syncable, and if so update this bitmask accordingly!");
 const int kKnownSyncableDisableReasons =
@@ -279,19 +281,22 @@ ExtensionSyncData ExtensionSyncService::CreateSyncData(
   bool remote_install =
       extension_prefs->HasDisableReason(id, Extension::DISABLE_REMOTE_INSTALL);
   ExtensionSyncData::OptionalBoolean allowed_on_all_url =
-      GetAllowedOnAllUrlsOptionalBoolean(id, profile_);
+      GetAllowedOnAllUrlsOptionalBoolean(extension, profile_);
+  bool installed_by_custodian =
+      extensions::util::WasInstalledByCustodian(id, profile_);
   AppSorting* app_sorting = ExtensionSystem::Get(profile_)->app_sorting();
 
   ExtensionSyncData result = extension.is_app()
       ? ExtensionSyncData(
             extension, enabled, disable_reasons, incognito_enabled,
             remote_install, allowed_on_all_url,
+            installed_by_custodian,
             app_sorting->GetAppLaunchOrdinal(id),
             app_sorting->GetPageOrdinal(id),
             extensions::GetLaunchTypePrefValue(extension_prefs, id))
       : ExtensionSyncData(
             extension, enabled, disable_reasons, incognito_enabled,
-            remote_install, allowed_on_all_url);
+            remote_install, allowed_on_all_url, installed_by_custodian);
 
   // If there's a pending update, send the new version to sync instead of the
   // installed one.
@@ -314,6 +319,11 @@ void ExtensionSyncService::ApplySyncData(
   // Ignore any pref change notifications etc. while we're applying incoming
   // sync data, so that we don't end up notifying ourselves.
   base::AutoReset<bool> ignore_updates(&ignore_updates_, true);
+
+  // Note: this may cause an existing version of the extension to be reloaded.
+  extensions::util::SetWasInstalledByCustodian(
+      extension_sync_data.id(), profile_,
+      extension_sync_data.installed_by_custodian());
 
   syncer::ModelType type = extension_sync_data.is_app() ? syncer::APPS
                                                         : syncer::EXTENSIONS;
@@ -463,8 +473,9 @@ void ExtensionSyncService::ApplySyncData(
   if (extension_sync_data.all_urls_enabled() !=
           ExtensionSyncData::BOOLEAN_UNSET) {
     bool allowed = extension_sync_data.all_urls_enabled() ==
-        ExtensionSyncData::BOOLEAN_TRUE;
-    extensions::util::SetAllowedScriptingOnAllUrls(id, profile_, allowed);
+                   ExtensionSyncData::BOOLEAN_TRUE;
+    extensions::ScriptingPermissionsModifier::SetAllowedOnAllUrlsForSync(
+        allowed, profile_, id);
   }
 
   // Set app-specific data.
@@ -503,8 +514,7 @@ void ExtensionSyncService::ApplySyncData(
             extension_sync_data.update_url(),
             extension_sync_data.version(),
             ShouldAllowInstall,
-            extension_sync_data.remote_install(),
-            extension_sync_data.installed_by_custodian())) {
+            extension_sync_data.remote_install())) {
       LOG(WARNING) << "Could not add pending extension for " << id;
       // This means that the extension is already pending installation, with a
       // non-INTERNAL location.  Add to pending_sync_data, even though it will

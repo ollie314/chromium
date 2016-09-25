@@ -17,17 +17,19 @@ import android.os.UserManager;
 import android.speech.RecognizerIntent;
 import android.text.TextUtils;
 
-import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CommandLine;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.FieldTrialList;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.ChromeSwitches;
-import org.chromium.chrome.browser.ChromeVersionInfo;
+import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
-import org.chromium.chrome.browser.preferences.DocumentModeManager;
-import org.chromium.sync.signin.AccountManagerHelper;
+import org.chromium.chrome.browser.tabmodel.DocumentModeAssassin;
+import org.chromium.chrome.browser.webapps.ChromeWebApkHost;
+import org.chromium.components.sync.signin.AccountManagerHelper;
 import org.chromium.ui.base.DeviceFormFactor;
 
 import java.util.List;
@@ -113,14 +115,7 @@ public class FeatureUtilities {
      * @return Whether Chrome should be running on document mode.
      */
     public static boolean isDocumentMode(Context context) {
-        if (sDocumentModeDisabled == null && CommandLine.isInitialized()) {
-            initResetListener();
-            sDocumentModeDisabled = CommandLine.getInstance().hasSwitch(
-                    ChromeSwitches.DISABLE_DOCUMENT_MODE);
-        }
-        return isDocumentModeEligible(context)
-                && !DocumentModeManager.getInstance(context).isOptedOutOfDocumentMode()
-                && (sDocumentModeDisabled == null || !sDocumentModeDisabled.booleanValue());
+        return isDocumentModeEligible(context) && !DocumentModeAssassin.isOptedOutOfDocumentMode();
     }
 
     /**
@@ -139,14 +134,6 @@ public class FeatureUtilities {
     }
 
     /**
-     * Records the current document mode state with native-side feature utilities.
-     * @param enabled Whether the document mode is enabled.
-     */
-    public static void setDocumentModeEnabled(boolean enabled) {
-        nativeSetDocumentModeEnabled(enabled);
-    }
-
-    /**
      * Records the current custom tab visibility state with native-side feature utilities.
      * @param visible Whether a custom tab is visible.
      */
@@ -162,45 +149,8 @@ public class FeatureUtilities {
         nativeSetIsInMultiWindowMode(isInMultiWindowMode);
     }
 
-    /**
-     * Check whether tab switching is enabled for the current context.
-     * Note that this may return false if native library is not yet ready.
-     * @param context The context
-     * @return Whether tab switching is enabled for the current context.
-     */
-    public static boolean isTabSwitchingEnabled(Context context) {
-        return !isDocumentMode(context) || isTabSwitchingEnabledInDocumentModeInternal();
-    }
-
-    /**
-     * Check whether tab switching is enabled in document mode.
-     * Note that this may return false if native library is not yet ready.
-     * @return Whether tab switching is enabled in document mode.
-     */
-    public static boolean isTabSwitchingEnabledInDocumentMode(Context context) {
-        return isDocumentMode(context) && isTabSwitchingEnabledInDocumentModeInternal();
-    }
-
-    private static boolean isTabSwitchingEnabledInDocumentModeInternal() {
-        return CommandLine.getInstance().hasSwitch(
-                ChromeSwitches.ENABLE_TAB_SWITCHER_IN_DOCUMENT_MODE);
-    }
-
-    private static void initResetListener() {
-        if (sResetListener != null) return;
-
-        sResetListener = new CommandLine.ResetListener() {
-            @Override
-            public void onCommandLineReset() {
-                sDocumentModeDisabled = null;
-            }
-        };
-        CommandLine.addResetListener(sResetListener);
-    }
-
     private static boolean isHerbDisallowed(Context context) {
-        return isDocumentMode(context) || ChromeVersionInfo.isStableBuild()
-                || ChromeVersionInfo.isBetaBuild() || DeviceFormFactor.isTablet(context);
+        return isDocumentMode(context);
     }
 
     /**
@@ -208,7 +158,7 @@ public class FeatureUtilities {
      *         and its related switches.
      */
     public static String getHerbFlavor() {
-        Context context = ApplicationStatus.getApplicationContext();
+        Context context = ContextUtils.getApplicationContext();
         if (isHerbDisallowed(context)) return ChromeSwitches.HERB_FLAVOR_DISABLED;
 
         if (!sIsHerbFlavorCached) {
@@ -233,15 +183,18 @@ public class FeatureUtilities {
     /**
      * Caches flags that must take effect on startup but are set via native code.
      */
-    public static void cacheNativeFlags() {
+    public static void cacheNativeFlags(ChromeApplication application) {
         cacheHerbFlavor();
+        InstantAppsHandler.getInstance(application).cacheInstantAppsEnabled(
+                application.getApplicationContext());
+        ChromeWebApkHost.cacheEnabledStateForNextLaunch();
     }
 
     /**
      * Caches which flavor of Herb the user prefers from native.
      */
     private static void cacheHerbFlavor() {
-        Context context = ApplicationStatus.getApplicationContext();
+        Context context = ContextUtils.getApplicationContext();
         if (isHerbDisallowed(context)) return;
 
         String oldFlavor = getHerbFlavor();
@@ -289,8 +242,13 @@ public class FeatureUtilities {
         }
     }
 
-    private static native void nativeSetDocumentModeEnabled(boolean enabled);
+    /**
+     * @return True if tab model merging for Android N+ is enabled.
+     */
+    public static boolean isTabModelMergingEnabled() {
+        return Build.VERSION.SDK_INT > Build.VERSION_CODES.M;
+    }
+
     private static native void nativeSetCustomTabVisible(boolean visible);
     private static native void nativeSetIsInMultiWindowMode(boolean isInMultiWindowMode);
-    public static native void nativeSetSqlMmapDisabledByDefault();
 }

@@ -11,7 +11,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "ui/display/types/display_snapshot.h"
 #include "ui/display/types/native_display_delegate.h"
 #include "ui/display/types/native_display_observer.h"
@@ -22,6 +22,7 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_surface.h"
+#include "ui/gl/init/gl_factory.h"
 #include "ui/ozone/demo/gl_renderer.h"
 #include "ui/ozone/demo/software_renderer.h"
 #include "ui/ozone/demo/surfaceless_gl_renderer.h"
@@ -42,12 +43,12 @@ const char kWindowSize[] = "window-size";
 
 class DemoWindow;
 
-scoped_refptr<gfx::GLSurface> CreateGLSurface(gfx::AcceleratedWidget widget) {
-  scoped_refptr<gfx::GLSurface> surface;
+scoped_refptr<gl::GLSurface> CreateGLSurface(gfx::AcceleratedWidget widget) {
+  scoped_refptr<gl::GLSurface> surface;
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableSurfaceless))
-    surface = gfx::GLSurface::CreateSurfacelessViewGLSurface(widget);
+    surface = gl::init::CreateSurfacelessViewGLSurface(widget);
   if (!surface)
-    surface = gfx::GLSurface::CreateViewGLSurface(widget);
+    surface = gl::init::CreateViewGLSurface(widget);
   return surface;
 }
 
@@ -197,8 +198,7 @@ RendererFactory::~RendererFactory() {
 
 bool RendererFactory::Initialize() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (!command_line->HasSwitch(kDisableGpu) &&
-      gfx::GLSurface::InitializeOneOff() &&
+  if (!command_line->HasSwitch(kDisableGpu) && gl::init::InitializeGLOneOff() &&
       gpu_helper_.Initialize(base::ThreadTaskRunnerHandle::Get(),
                              base::ThreadTaskRunnerHandle::Get())) {
     type_ = GL;
@@ -214,17 +214,19 @@ std::unique_ptr<ui::Renderer> RendererFactory::CreateRenderer(
     const gfx::Size& size) {
   switch (type_) {
     case GL: {
-      scoped_refptr<gfx::GLSurface> surface = CreateGLSurface(widget);
+      scoped_refptr<gl::GLSurface> surface = CreateGLSurface(widget);
       if (!surface)
         LOG(FATAL) << "Failed to create GL surface";
+      if (!surface->SupportsAsyncSwap())
+        LOG(FATAL) << "GL surface must support SwapBuffersAsync";
       if (surface->IsSurfaceless())
-        return base::WrapUnique(
-            new ui::SurfacelessGlRenderer(widget, surface, size));
+        return base::MakeUnique<ui::SurfacelessGlRenderer>(widget, surface,
+                                                           size);
       else
-        return base::WrapUnique(new ui::GlRenderer(widget, surface, size));
+        return base::MakeUnique<ui::GlRenderer>(widget, surface, size);
     }
     case SOFTWARE:
-      return base::WrapUnique(new ui::SoftwareRenderer(widget, size));
+      return base::MakeUnique<ui::SoftwareRenderer>(widget, size);
   }
 
   return nullptr;

@@ -23,16 +23,16 @@
 #include "chrome/browser/ui/toolbar/recent_tabs_sub_menu_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
-#include "components/sync_driver/local_device_info_provider_mock.h"
-#include "components/sync_driver/sync_client.h"
-#include "components/sync_driver/sync_prefs.h"
+#include "components/browser_sync/profile_sync_service.h"
+#include "components/sync/api/fake_sync_change_processor.h"
+#include "components/sync/api/sync_error_factory_mock.h"
+#include "components/sync/device_info/local_device_info_provider_mock.h"
+#include "components/sync/driver/sync_client.h"
+#include "components/sync/driver/sync_prefs.h"
 #include "components/sync_sessions/fake_sync_sessions_client.h"
 #include "components/sync_sessions/sessions_sync_manager.h"
-#include "grit/theme_resources.h"
-#include "sync/api/fake_sync_change_processor.h"
-#include "sync/api/sync_error_factory_mock.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
@@ -49,11 +49,11 @@ class MockAppMenuModel : public AppMenuModel {
   MOCK_METHOD2(ExecuteCommand, void(int command_id, int event_flags));
 };
 
-class DummyRouter : public browser_sync::LocalSessionEventRouter {
+class DummyRouter : public sync_sessions::LocalSessionEventRouter {
  public:
   ~DummyRouter() override {}
   void StartRoutingTo(
-      browser_sync::LocalSessionEventHandler* handler) override {}
+      sync_sessions::LocalSessionEventHandler* handler) override {}
   void Stop() override {}
 };
 
@@ -77,12 +77,12 @@ class AppMenuControllerTest : public CocoaProfileTest {
     fake_model_.reset(new MockAppMenuModel);
 
     sync_prefs_.reset(new sync_driver::SyncPrefs(profile()->GetPrefs()));
-    manager_.reset(new browser_sync::SessionsSyncManager(
+    manager_.reset(new sync_sessions::SessionsSyncManager(
         ProfileSyncServiceFactory::GetForProfile(profile())
             ->GetSyncClient()
             ->GetSyncSessionsClient(),
         sync_prefs_.get(), local_device_.get(),
-        std::unique_ptr<browser_sync::LocalSessionEventRouter>(
+        std::unique_ptr<sync_sessions::LocalSessionEventRouter>(
             new DummyRouter()),
         base::Closure(), base::Closure()));
     manager_->MergeDataAndStartSyncing(
@@ -97,7 +97,7 @@ class AppMenuControllerTest : public CocoaProfileTest {
     helper->ExportToSessionsSyncManager(manager_.get());
   }
 
-  sync_driver::OpenTabsUIDelegate* GetOpenTabsDelegate() {
+  sync_sessions::OpenTabsUIDelegate* GetOpenTabsDelegate() {
     return manager_.get();
   }
 
@@ -118,7 +118,7 @@ class AppMenuControllerTest : public CocoaProfileTest {
 
  private:
   std::unique_ptr<sync_driver::SyncPrefs> sync_prefs_;
-  std::unique_ptr<browser_sync::SessionsSyncManager> manager_;
+  std::unique_ptr<sync_sessions::SessionsSyncManager> manager_;
   std::unique_ptr<sync_driver::LocalDeviceInfoProviderMock> local_device_;
 };
 

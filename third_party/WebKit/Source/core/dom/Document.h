@@ -31,13 +31,10 @@
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "core/CoreExport.h"
-#include "core/animation/AnimationClock.h"
 #include "core/dom/ContainerNode.h"
 #include "core/dom/DocumentEncodingData.h"
 #include "core/dom/DocumentInit.h"
 #include "core/dom/DocumentLifecycle.h"
-#include "core/dom/DocumentLifecycleNotifier.h"
-#include "core/dom/DocumentLifecycleObserver.h"
 #include "core/dom/DocumentTiming.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/MutationObserver.h"
@@ -45,29 +42,26 @@
 #include "core/dom/TreeScope.h"
 #include "core/dom/UserActionElementSet.h"
 #include "core/dom/ViewportDescription.h"
-#include "core/dom/custom/CustomElement.h"
+#include "core/dom/custom/V0CustomElement.h"
 #include "core/fetch/ClientHintsPreferences.h"
 #include "core/frame/DOMTimerCoordinator.h"
-#include "core/frame/LocalDOMWindow.h"
-#include "core/frame/OriginsUsingFeatures.h"
-#include "core/frame/VisualViewport.h"
-#include "core/html/CollectionType.h"
+#include "core/frame/HostsUsingFeatures.h"
 #include "core/html/parser/ParserSynchronizationPolicy.h"
 #include "core/page/PageVisibilityState.h"
 #include "platform/Length.h"
 #include "platform/Timer.h"
-#include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/ReferrerPolicy.h"
 #include "public/platform/WebFocusType.h"
+#include "public/platform/WebInsecureRequestPolicy.h"
 #include "wtf/HashSet.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
+#include <memory>
 
 namespace blink {
 
-class AnimationTimeline;
+class AnimationClock;
+class DocumentTimeline;
 class AXObjectCache;
 class Attr;
 class CDATASection;
@@ -77,13 +71,14 @@ class CancellableTaskFactory;
 class CanvasFontCache;
 class CanvasRenderingContext2D;
 class CanvasRenderingContext2DOrWebGLRenderingContext;
+class CharacterData;
 class ChromeClient;
 class CompositorPendingAnimations;
 class Comment;
 class ConsoleMessage;
 class ContextFeatures;
-class CustomElementMicrotaskRunQueue;
-class CustomElementRegistrationContext;
+class V0CustomElementMicrotaskRunQueue;
+class V0CustomElementRegistrationContext;
 class DOMImplementation;
 class DOMWindow;
 class DocumentFragment;
@@ -93,7 +88,6 @@ class DocumentNameCollection;
 class DocumentParser;
 class DocumentState;
 class DocumentType;
-class DocumentVisibilityObserver;
 class Element;
 class ElementDataCache;
 class ElementRegistrationOptions;
@@ -121,15 +115,17 @@ class HTMLHeadElement;
 class HTMLImportLoader;
 class HTMLImportsController;
 class HTMLLinkElement;
-class HTMLScriptElement;
+class HTMLScriptElementOrSVGScriptElement;
 class HitTestRequest;
 class IdleRequestCallback;
 class IdleRequestOptions;
 class InputDeviceCapabilities;
 class IntersectionObserverController;
 class LayoutPoint;
+class LayoutView;
 class LayoutViewItem;
 class LiveNodeListBase;
+class LocalDOMWindow;
 class Locale;
 class LocalFrame;
 class Location;
@@ -144,21 +140,25 @@ class OriginAccessEntry;
 class Page;
 class PlatformMouseEvent;
 class ProcessingInstruction;
+class PropertyRegistry;
 class QualifiedName;
 class Range;
-class LayoutView;
+class ResizeObserverController;
 class ResourceFetcher;
+class RootScrollerController;
 class SVGDocumentExtensions;
 class SVGUseElement;
 class ScriptRunner;
 class ScriptableDocumentParser;
 class ScriptedAnimationController;
 class ScriptedIdleTaskController;
+class ScrollStateCallback;
 class SecurityOrigin;
 class SegmentedString;
 class SelectorQueryCache;
 class SerializedScriptValue;
 class Settings;
+class SnapCoordinator;
 class StyleEngine;
 class StyleResolver;
 class StyleSheet;
@@ -170,6 +170,7 @@ class TouchList;
 class TransformSource;
 class TreeWalker;
 class VisitedLinkState;
+class VisualViewport;
 class WebGLRenderingContext;
 enum class SelectionBehaviorOnFocus;
 struct AnnotatedRegionValue;
@@ -215,11 +216,31 @@ enum ShadowCascadeOrder {
     ShadowCascadeV1
 };
 
+enum CreateElementFlags {
+    CreatedByParser = 1 << 0,
+    // Synchronous custom elements flag:
+    // https://dom.spec.whatwg.org/#concept-create-element
+    // TODO(kojii): Remove these flags, add an option not to queue upgrade, and
+    // let parser/DOM methods to upgrade synchronously when necessary.
+    SynchronousCustomElements = 0 << 1,
+    AsynchronousCustomElements = 1 << 1,
+
+    // Aliases by callers.
+    // Clone a node: https://dom.spec.whatwg.org/#concept-node-clone
+    CreatedByCloneNode = AsynchronousCustomElements,
+    CreatedByImportNode = CreatedByCloneNode,
+    // https://dom.spec.whatwg.org/#dom-document-createelement
+    CreatedByCreateElement = SynchronousCustomElements,
+    // https://html.spec.whatwg.org/#create-an-element-for-the-token
+    CreatedByFragmentParser = CreatedByParser | AsynchronousCustomElements,
+};
+
 using DocumentClassFlags = unsigned char;
 
-class CORE_EXPORT Document : public ContainerNode, public TreeScope, public SecurityContext, public ExecutionContext, public Supplementable<Document>, public DocumentLifecycleNotifier {
+class CORE_EXPORT Document : public ContainerNode, public TreeScope, public SecurityContext, public ExecutionContext, public Supplementable<Document> {
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(Document);
+    friend class Settings;
 public:
     static Document* create(const DocumentInit& initializer = DocumentInit())
     {
@@ -260,10 +281,10 @@ public:
     DEFINE_ATTRIBUTE_EVENT_LISTENER(selectstart);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(wheel);
 
-    bool shouldMergeWithLegacyDescription(ViewportDescription::Type);
-    bool shouldOverrideLegacyDescription(ViewportDescription::Type);
+    bool shouldMergeWithLegacyDescription(ViewportDescription::Type) const;
+    bool shouldOverrideLegacyDescription(ViewportDescription::Type) const;
     void setViewportDescription(const ViewportDescription&);
-    const ViewportDescription& viewportDescription() const { return m_viewportDescription; }
+    ViewportDescription viewportDescription() const;
     Length viewportDefaultMinWidth() const { return m_viewportDefaultMinWidth; }
 
     String outgoingReferrer() const override;
@@ -293,13 +314,12 @@ public:
     Attr* createAttributeNS(const AtomicString& namespaceURI, const AtomicString& qualifiedName, ExceptionState&, bool shouldIgnoreNamespaceChecks = false);
     Node* importNode(Node* importedNode, bool deep, ExceptionState&);
     Element* createElementNS(const AtomicString& namespaceURI, const AtomicString& qualifiedName, ExceptionState&);
-    Element* createElement(const QualifiedName&, bool createdByParser);
+    Element* createElement(const QualifiedName&, CreateElementFlags);
 
     Element* elementFromPoint(int x, int y) const;
     HeapVector<Member<Element>> elementsFromPoint(int x, int y) const;
     Range* caretRangeFromPoint(int x, int y);
     Element* scrollingElement();
-    VisualViewport* visualViewport();
 
     String readyState() const;
 
@@ -335,6 +355,11 @@ public:
     PageVisibilityState pageVisibilityState() const;
     bool hidden() const;
     void didChangeVisibilityState();
+
+    // If the document is "prefetch only", it will not be fully contstructed,
+    // and should never be displayed. Only a few resources will be loaded and
+    // scanned, in order to warm up caches.
+    bool isPrefetchOnly() const;
 
     Node* adoptNode(Node* source, ExceptionState&);
 
@@ -374,11 +399,11 @@ public:
 
     bool sawElementsInKnownNamespaces() const { return m_sawElementsInKnownNamespaces; }
 
-    bool isRenderingReady() const { return haveImportsLoaded() && haveStylesheetsLoaded(); }
-    bool isScriptExecutionReady() const { return isRenderingReady(); }
+    bool isRenderingReady() const { return haveImportsLoaded() && haveRenderBlockingStylesheetsLoaded(); }
+    bool isScriptExecutionReady() const { return haveImportsLoaded() && haveScriptBlockingStylesheetsLoaded(); }
 
     // This is a DOM function.
-    StyleSheetList* styleSheets();
+    StyleSheetList& styleSheets();
 
     StyleEngine& styleEngine() { DCHECK(m_styleEngine.get()); return *m_styleEngine.get(); }
 
@@ -421,18 +446,18 @@ public:
     bool needsLayoutTreeUpdateForNode(const Node&) const;
     // Update ComputedStyles and attach LayoutObjects if necessary, but don't
     // lay out.
-    void updateLayoutTree();
-    // Same as updateLayoutTree() except ignoring pending stylesheets.
-    void updateLayoutTreeIgnorePendingStylesheets();
-    void updateLayoutTreeForNode(Node*);
-    void updateLayout();
+    void updateStyleAndLayoutTree();
+    // Same as updateStyleAndLayoutTree() except ignoring pending stylesheets.
+    void updateStyleAndLayoutTreeIgnorePendingStylesheets();
+    void updateStyleAndLayoutTreeForNode(const Node*);
+    void updateStyleAndLayout();
     void layoutUpdated();
     enum RunPostLayoutTasks {
         RunPostLayoutTasksAsyhnchronously,
         RunPostLayoutTasksSynchronously,
     };
-    void updateLayoutIgnorePendingStylesheets(RunPostLayoutTasks = RunPostLayoutTasksAsyhnchronously);
-    void updateLayoutIgnorePendingStylesheetsForNode(Node*);
+    void updateStyleAndLayoutIgnorePendingStylesheets(RunPostLayoutTasks = RunPostLayoutTasksAsyhnchronously);
+    void updateStyleAndLayoutIgnorePendingStylesheetsForNode(Node*);
     PassRefPtr<ComputedStyle> styleForElementIgnoringPendingStylesheets(Element*);
     PassRefPtr<ComputedStyle> styleForPage(int pageIndex);
 
@@ -443,12 +468,21 @@ public:
     // pixels per inch. pageSize, marginTop, marginRight, marginBottom,
     // marginLeft must be initialized to the default values that are used if
     // auto is specified.
-    void pageSizeAndMarginsInPixels(int pageIndex, IntSize& pageSize, int& marginTop, int& marginRight, int& marginBottom, int& marginLeft);
+    void pageSizeAndMarginsInPixels(int pageIndex, DoubleSize& pageSize, int& marginTop, int& marginRight, int& marginBottom, int& marginLeft);
 
-    ResourceFetcher* fetcher() { return m_fetcher.get(); }
+    ResourceFetcher* fetcher() const { return m_fetcher.get(); }
 
-    void attach(const AttachContext& = AttachContext()) override;
-    void detach(const AttachContext& = AttachContext()) override;
+    void initialize();
+    virtual void shutdown();
+
+    void attachLayoutTree(const AttachContext& = AttachContext()) override
+    {
+        NOTREACHED();
+    }
+    void detachLayoutTree(const AttachContext& = AttachContext()) override
+    {
+        NOTREACHED();
+    }
 
     // If you have a Document, use layoutView() instead which is faster.
     void layoutObject() const = delete;
@@ -510,7 +544,7 @@ public:
     const KURL& baseURL() const { return m_baseURL; }
     void setBaseURLOverride(const KURL&);
     const KURL& baseURLOverride() const { return m_baseURLOverride; }
-    const KURL& baseElementURL() const { return m_baseElementURL; }
+    KURL validBaseElementURL() const;
     const AtomicString& baseTarget() const { return m_baseTarget; }
     void processBaseElement();
 
@@ -634,12 +668,13 @@ public:
     void attachRange(Range*);
     void detachRange(Range*);
 
-    void updateRangesAfterChildrenChanged(ContainerNode*);
-    void updateRangesAfterNodeMovedToAnotherDocument(const Node&);
+    void didMoveTreeToNewDocument(const Node& root);
     // nodeChildrenWillBeRemoved is used when removing all node children at once.
     void nodeChildrenWillBeRemoved(ContainerNode&);
     // nodeWillBeRemoved is only safe when removing one node at a time.
     void nodeWillBeRemoved(Node&);
+    // Called just before a destructive update to some CharacterData.
+    void dataWillChange(const CharacterData&);
     bool canAcceptChild(const Node& newChild, const Node* oldChild, ExceptionState&) const;
 
     void didInsertText(Node*, unsigned offset, unsigned length);
@@ -654,7 +689,7 @@ public:
     void setWindowAttributeEventListener(const AtomicString& eventType, EventListener*);
     EventListener* getWindowAttributeEventListener(const AtomicString& eventType);
 
-    static void registerEventFactory(PassOwnPtr<EventFactoryBase>);
+    static void registerEventFactory(std::unique_ptr<EventFactoryBase>);
     static Event* createEvent(ExecutionContext*, const String& eventType, ExceptionState&);
 
     // keep track of what types of event listeners are registered, so we don't
@@ -688,12 +723,14 @@ public:
     IntersectionObserverController& ensureIntersectionObserverController();
     NodeIntersectionObserverData& ensureIntersectionObserverData();
 
-    void updateViewportDescription();
-    void processReferrerPolicy(const String& policy);
+    ResizeObserverController* resizeObserverController() const { return m_resizeObserverController; }
+    ResizeObserverController& ensureResizeObserverController();
 
-    // Returns the owning element in the parent document.
-    // Returns nullptr if this is the top level document.
-    HTMLFrameOwnerElement* ownerElement() const;
+    void updateViewportDescription();
+
+    // Returns the owning element in the parent document. Returns nullptr if
+    // this is the top level document or the owner is remote.
+    HTMLFrameOwnerElement* localOwner() const;
 
     // Returns true if this document belongs to a frame that the parent document
     // made invisible (for instance by setting as style display:none).
@@ -757,6 +794,7 @@ public:
     HTMLBodyElement* firstBodyElement() const;
 
     void setBody(HTMLElement*, ExceptionState&);
+    void willInsertBody();
 
     HTMLHeadElement* head() const;
 
@@ -789,12 +827,12 @@ public:
 
     ScriptRunner* scriptRunner() { return m_scriptRunner.get(); }
 
-    HTMLScriptElement* currentScript() const { return !m_currentScriptStack.isEmpty() ? m_currentScriptStack.last().get() : nullptr; }
-    HTMLScriptElement* currentScriptForBinding() const;
-    void pushCurrentScript(HTMLScriptElement*);
+    Element* currentScript() const { return !m_currentScriptStack.isEmpty() ? m_currentScriptStack.last().get() : nullptr; }
+    void currentScriptForBinding(HTMLScriptElementOrSVGScriptElement&) const;
+    void pushCurrentScript(Element*);
     void popCurrentScript();
 
-    void setTransformSource(PassOwnPtr<TransformSource>);
+    void setTransformSource(std::unique_ptr<TransformSource>);
     TransformSource* transformSource() const { return m_transformSource.get(); }
 
     void incDOMTreeVersion() { DCHECK(m_lifecycle.stateAllowsTreeMutations()); m_domTreeVersion = ++s_globalTreeVersion; }
@@ -828,8 +866,8 @@ public:
     void parseDNSPrefetchControlHeader(const String&);
 
     // FIXME(crbug.com/305497): This should be removed once LocalDOMWindow is an ExecutionContext.
-    void postTask(const WebTraceLocation&, PassOwnPtr<ExecutionContextTask>) override; // Executes the task on context's thread asynchronously.
-    void postInspectorTask(const WebTraceLocation&, PassOwnPtr<ExecutionContextTask>);
+    void postTask(const WebTraceLocation&, std::unique_ptr<ExecutionContextTask>, const String& taskNameForInstrumentation = emptyString()) override; // Executes the task on context's thread asynchronously.
+    void postInspectorTask(const WebTraceLocation&, std::unique_ptr<ExecutionContextTask>);
 
     void tasksWereSuspended() final;
     void tasksWereResumed() final;
@@ -861,7 +899,7 @@ public:
 
     bool isSecureTransitionTo(const KURL&) const;
 
-    bool allowInlineEventHandlers(Node*, EventListener*, const String& contextURL, const WTF::OrdinalNumber& contextLine);
+    bool allowInlineEventHandler(Node*, EventListener*, const String& contextURL, const WTF::OrdinalNumber& contextLine);
     bool allowExecutingScripts(Node*);
 
     void enforceSandboxFlags(SandboxFlags mask) override;
@@ -901,7 +939,8 @@ public:
     // Only one event for a target/event type combination will be dispatched per frame.
     void enqueueUniqueAnimationFrameEvent(Event*);
     void enqueueMediaQueryChangeListeners(HeapVector<Member<MediaQueryListListener>>&);
-    void enqueueVisualViewportChangedEvent();
+    void enqueueVisualViewportScrollEvent();
+    void enqueueVisualViewportResizeEvent();
 
     void dispatchEventsForPrinting();
 
@@ -931,7 +970,7 @@ public:
     void cancelIdleCallback(int id);
 
     EventTarget* errorEventTarget() final;
-    void logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtr<ScriptCallStack>) final;
+    void exceptionThrown(ErrorEvent*) final;
 
     void initDNSPrefetch();
 
@@ -941,9 +980,9 @@ public:
 
     Element* createElement(const AtomicString& localName, const AtomicString& typeExtension, ExceptionState&);
     Element* createElementNS(const AtomicString& namespaceURI, const AtomicString& qualifiedName, const AtomicString& typeExtension, ExceptionState&);
-    ScriptValue registerElement(ScriptState*, const AtomicString& name, const ElementRegistrationOptions&, ExceptionState&, CustomElement::NameSet validNames = CustomElement::StandardNames);
-    CustomElementRegistrationContext* registrationContext() { return m_registrationContext.get(); }
-    CustomElementMicrotaskRunQueue* customElementMicrotaskRunQueue();
+    ScriptValue registerElement(ScriptState*, const AtomicString& name, const ElementRegistrationOptions&, ExceptionState&, V0CustomElement::NameSet validNames = V0CustomElement::StandardNames);
+    V0CustomElementRegistrationContext* registrationContext() { return m_registrationContext.get(); }
+    V0CustomElementMicrotaskRunQueue* customElementMicrotaskRunQueue();
 
     void setImportsController(HTMLImportsController*);
     HTMLImportsController* importsController() const { return m_importsController; }
@@ -969,7 +1008,7 @@ public:
     Locale& getCachedLocale(const AtomicString& locale = nullAtom);
 
     AnimationClock& animationClock();
-    AnimationTimeline& timeline() const { return *m_timeline; }
+    DocumentTimeline& timeline() const { return *m_timeline; }
     CompositorPendingAnimations& compositorPendingAnimations() { return *m_compositorPendingAnimations; }
 
     void addToTopLayer(Element*, const Element* before = nullptr);
@@ -983,20 +1022,18 @@ public:
     Document* templateDocumentHost() { return m_templateDocumentHost; }
 
     // TODO(thestig): Rename these and related functions, since we can call them
-    // for labels and input fields outside of forms as well.
+    // for controls outside of forms as well.
     void didAssociateFormControl(Element*);
-    void removeFormAssociation(Element*);
 
     void addConsoleMessage(ConsoleMessage*) final;
 
-    LocalDOMWindow* executingWindow() final;
+    LocalDOMWindow* executingWindow() const final;
     LocalFrame* executingFrame();
 
     DocumentLifecycle& lifecycle() { return m_lifecycle; }
     bool isActive() const { return m_lifecycle.isActive(); }
     bool isDetached() const { return m_lifecycle.state() >= DocumentLifecycle::Stopping; }
     bool isStopped() const { return m_lifecycle.state() == DocumentLifecycle::Stopped; }
-    bool isDisposed() const { return m_lifecycle.state() == DocumentLifecycle::Disposed; }
 
     enum HttpRefreshType {
         HttpRefreshFromHeader,
@@ -1010,12 +1047,11 @@ public:
     bool hasViewportUnits() const { return m_hasViewportUnits; }
     void notifyResizeForViewportUnits();
 
-    void registerVisibilityObserver(DocumentVisibilityObserver*);
-    void unregisterVisibilityObserver(DocumentVisibilityObserver*);
-
     void updateStyleInvalidationIfNeeded();
 
     DECLARE_VIRTUAL_TRACE();
+
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
     bool hasSVGFilterElementsRequiringLayerUpdate() const { return m_layerUpdateSVGFilterElements.size(); }
 
@@ -1028,7 +1064,7 @@ public:
     v8::Local<v8::Object> wrap(v8::Isolate*, v8::Local<v8::Object> creationContext) override;
     v8::Local<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Local<v8::Object> wrapper) override WARN_UNUSED_RETURN;
 
-    OriginsUsingFeatures::Value& originsUsingFeaturesValue() { return m_originsUsingFeaturesValue; }
+    HostsUsingFeatures::Value& HostsUsingFeaturesValue() { return m_hostsUsingFeaturesValue; }
 
     NthIndexCache* nthIndexCache() const { return m_nthIndexCache; }
 
@@ -1052,18 +1088,26 @@ public:
     }
     int nodeCount() const { return m_nodeCount; }
 
-    using WeakDocumentSet = HeapHashSet<WeakMember<Document>>;
-    static WeakDocumentSet& liveDocumentSet();
+    SnapCoordinator* snapCoordinator();
 
-    WebTaskRunner* loadingTaskRunner() const;
-    WebTaskRunner* timerTaskRunner() const;
-
-    void enforceStrictMixedContentChecking();
+    void enforceInsecureRequestPolicy(WebInsecureRequestPolicy);
 
     bool mayContainV0Shadow() const { return m_mayContainV0Shadow; }
 
     ShadowCascadeOrder shadowCascadeOrder() const { return m_shadowCascadeOrder; }
     void setShadowCascadeOrder(ShadowCascadeOrder);
+
+    bool containsV1ShadowTree() const { return m_shadowCascadeOrder == ShadowCascadeOrder::ShadowCascadeV1; }
+
+    Element* rootScroller() const;
+    void setRootScroller(Element*, ExceptionState&);
+    RootScrollerController* rootScrollerController() const { return m_rootScrollerController.get(); }
+
+    bool isInMainFrame() const;
+
+    void onVisibilityMaybeChanged(bool visible);
+
+    PropertyRegistry* propertyRegistry();
 
 protected:
     Document(const DocumentInit&, DocumentClassFlags = DefaultDocumentClass);
@@ -1111,6 +1155,8 @@ private:
 
     void detachParser();
 
+    void beginLifecycleUpdatesIfRenderingReady();
+
     bool isDocument() const final { return true; }
 
     void childrenChanged(const ChildrenChange&) override;
@@ -1120,38 +1166,37 @@ private:
     bool childTypeAllowed(NodeType) const final;
     Node* cloneNode(bool deep) final;
     void cloneDataFromDocument(const Document&);
-    bool isSecureContextImpl(String* errorMessage, const SecureContextCheck priviligeContextCheck) const;
+    bool isSecureContextImpl(const SecureContextCheck priviligeContextCheck) const;
 
     ShadowCascadeOrder m_shadowCascadeOrder = ShadowCascadeNone;
 
     const KURL& virtualURL() const final; // Same as url(), but needed for ExecutionContext to implement it without a performance loss for direct calls.
     KURL virtualCompleteURL(const String&) const final; // Same as completeURL() for the same reason as above.
 
-    void reportBlockedScriptExecutionToInspector(const String& directiveText) final;
-
     void updateTitle(const String&);
-    void updateFocusAppearanceTimerFired(Timer<Document>*);
+    void updateFocusAppearanceTimerFired(TimerBase*);
     void updateBaseURL();
 
     void executeScriptsWaitingForResources();
 
-    void loadEventDelayTimerFired(Timer<Document>*);
-    void pluginLoadingTimerFired(Timer<Document>*);
+    void loadEventDelayTimerFired(TimerBase*);
+    void pluginLoadingTimerFired(TimerBase*);
 
     void addListenerType(ListenerType listenerType) { m_listenerTypes |= listenerType; }
     void addMutationEventListenerTypeIfEnabled(ListenerType);
 
-    void didAssociateFormControlsTimerFired(Timer<Document>*);
+    void didAssociateFormControlsTimerFired(TimerBase*);
 
     void clearFocusedElementSoon();
-    void clearFocusedElementTimerFired(Timer<Document>*);
+    void clearFocusedElementTimerFired(TimerBase*);
 
-    bool haveStylesheetsLoaded() const;
+    bool haveScriptBlockingStylesheetsLoaded() const;
+    bool haveRenderBlockingStylesheetsLoaded() const;
     void styleResolverMayHaveChanged();
 
     void setHoverNode(Node*);
 
-    using EventFactorySet = HashSet<OwnPtr<EventFactoryBase>>;
+    using EventFactorySet = HashSet<std::unique_ptr<EventFactoryBase>>;
     static EventFactorySet& eventFactories();
 
     void setNthIndexCache(NthIndexCache* nthIndexCache) { DCHECK(!m_nthIndexCache || !nthIndexCache); m_nthIndexCache = nthIndexCache; }
@@ -1170,9 +1215,6 @@ private:
 
     Member<LocalFrame> m_frame;
     Member<LocalDOMWindow> m_domWindow;
-    // TODO(Oilpan): when we get rid of the transition types change the
-    // HTMLImportsController to not be a DocumentSupplement since it is
-    // redundant with oilpan.
     Member<HTMLImportsController> m_importsController;
 
     Member<ResourceFetcher> m_fetcher;
@@ -1187,7 +1229,7 @@ private:
     KURL m_baseURLOverride; // An alternative base URL that takes precedence over m_baseURL (but not m_baseElementURL).
     KURL m_baseElementURL; // The URL set by the <base> element.
     KURL m_cookieURL; // The URL to use for cookie access.
-    OwnPtr<OriginAccessEntry> m_accessEntryFromURL;
+    std::unique_ptr<OriginAccessEntry> m_accessEntryFromURL;
 
     AtomicString m_baseTarget;
 
@@ -1206,7 +1248,7 @@ private:
     CompatibilityMode m_compatibilityMode;
     bool m_compatibilityModeLocked; // This is cheaper than making setCompatibilityMode virtual.
 
-    OwnPtr<CancellableTaskFactory> m_executeScriptsWaitingForResourcesTask;
+    std::unique_ptr<CancellableTaskFactory> m_executeScriptsWaitingForResourcesTask;
 
     bool m_hasAutofocused;
     Timer<Document> m_clearFocusedElementTimer;
@@ -1217,6 +1259,7 @@ private:
     Member<Element> m_activeHoverElement;
     Member<Element> m_documentElement;
     UserActionElementSet m_userActionElements;
+    Member<RootScrollerController> m_rootScrollerController;
 
     uint64_t m_domTreeVersion;
     static uint64_t s_globalTreeVersion;
@@ -1270,9 +1313,9 @@ private:
 
     Member<ScriptRunner> m_scriptRunner;
 
-    HeapVector<Member<HTMLScriptElement>> m_currentScriptStack;
+    HeapVector<Member<Element>> m_currentScriptStack;
 
-    OwnPtr<TransformSource> m_transformSource;
+    std::unique_ptr<TransformSource> m_transformSource;
 
     String m_xmlEncoding;
     String m_xmlVersion;
@@ -1298,7 +1341,7 @@ private:
     bool m_hasAnnotatedRegions;
     bool m_annotatedRegionsDirty;
 
-    OwnPtr<SelectorQueryCache> m_selectorQueryCache;
+    std::unique_ptr<SelectorQueryCache> m_selectorQueryCache;
 
     // It is safe to keep a raw, untraced pointer to this stack-allocated
     // cache object: it is set upon the cache object being allocated on
@@ -1342,28 +1385,27 @@ private:
 
     Member<ScriptedAnimationController> m_scriptedAnimationController;
     Member<ScriptedIdleTaskController> m_scriptedIdleTaskController;
-    Member<MainThreadTaskRunner> m_taskRunner;
+    std::unique_ptr<MainThreadTaskRunner> m_taskRunner;
     Member<TextAutosizer> m_textAutosizer;
 
-    Member<CustomElementRegistrationContext> m_registrationContext;
-    Member<CustomElementMicrotaskRunQueue> m_customElementMicrotaskRunQueue;
+    Member<V0CustomElementRegistrationContext> m_registrationContext;
+    Member<V0CustomElementMicrotaskRunQueue> m_customElementMicrotaskRunQueue;
 
-    void elementDataCacheClearTimerFired(Timer<Document>*);
+    void elementDataCacheClearTimerFired(TimerBase*);
     Timer<Document> m_elementDataCacheClearTimer;
 
     Member<ElementDataCache> m_elementDataCache;
 
-    using LocaleIdentifierToLocaleMap = HashMap<AtomicString, OwnPtr<Locale>>;
+    using LocaleIdentifierToLocaleMap = HashMap<AtomicString, std::unique_ptr<Locale>>;
     LocaleIdentifierToLocaleMap m_localeCache;
 
-    Member<AnimationTimeline> m_timeline;
+    Member<DocumentTimeline> m_timeline;
     Member<CompositorPendingAnimations> m_compositorPendingAnimations;
 
     Member<Document> m_templateDocument;
     Member<Document> m_templateDocumentHost;
 
     Timer<Document> m_didAssociateFormControlsTimer;
-    HeapHashSet<Member<Element>> m_associatedFormControls;
 
     HeapHashSet<Member<SVGUseElement>> m_useElementsNeedingUpdate;
     HeapHashSet<Member<Element>> m_layerUpdateSVGFilterElements;
@@ -1372,12 +1414,9 @@ private:
 
     bool m_hasViewportUnits;
 
-    using DocumentVisibilityObserverSet = HeapHashSet<WeakMember<DocumentVisibilityObserver>>;
-    DocumentVisibilityObserverSet m_visibilityObservers;
-
     ParserSynchronizationPolicy m_parserSyncPolicy;
 
-    OriginsUsingFeatures::Value m_originsUsingFeaturesValue;
+    HostsUsingFeatures::Value m_hostsUsingFeaturesValue;
 
     ClientHintsPreferences m_clientHintsPreferences;
 
@@ -1385,15 +1424,25 @@ private:
 
     Member<IntersectionObserverController> m_intersectionObserverController;
     Member<NodeIntersectionObserverData> m_intersectionObserverData;
+    Member<ResizeObserverController> m_resizeObserverController;
 
     int m_nodeCount;
 
     bool m_mayContainV0Shadow = false;
+
+    Member<SnapCoordinator> m_snapCoordinator;
+
+    bool m_visibilityWasLogged;
+
+    Member<PropertyRegistry> m_propertyRegistry;
+
+    // m_defaultSettings will be used only if the document does not have a frame.
+    mutable std::unique_ptr<Settings> m_defaultSettings;
 };
 
 extern template class CORE_EXTERN_TEMPLATE_EXPORT Supplement<Document>;
 
-inline bool Document::shouldOverrideLegacyDescription(ViewportDescription::Type origin)
+inline bool Document::shouldOverrideLegacyDescription(ViewportDescription::Type origin) const
 {
     // The different (legacy) meta tags have different priorities based on the type
     // regardless of which order they appear in the DOM. The priority is given by the

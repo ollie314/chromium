@@ -6,46 +6,34 @@
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_SESSIONS_HELPER_H_
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "components/sessions/core/session_types.h"
+#include "components/sync/syncable/nigori_util.h"
 #include "components/sync_sessions/synced_session.h"
-#include "sync/syncable/nigori_util.h"
 
 class GURL;
 
 namespace sessions_helper {
 
-typedef std::vector<const sync_driver::SyncedSession*> SyncedSessionVector;
-typedef sync_driver::SyncedSession::SyncedWindowMap SessionWindowMap;
-
-// Wrapper around a SyncedWindowMap that will automatically delete the
-// SessionWindow pointers it holds.
-class ScopedWindowMap {
- public:
-  ScopedWindowMap();
-  explicit ScopedWindowMap(SessionWindowMap* windows);
-  ~ScopedWindowMap();
-
-  const SessionWindowMap* Get() const;
-  SessionWindowMap* GetMutable();
-  void Reset(SessionWindowMap* windows);
- private:
-  SessionWindowMap windows_;
-};
+using SyncedSessionVector = std::vector<const sync_sessions::SyncedSession*>;
+using SessionWindowMap = std::map<SessionID::id_type, sessions::SessionWindow*>;
+using ScopedWindowMap =
+    std::map<SessionID::id_type, std::unique_ptr<sessions::SessionWindow>>;
 
 // Copies the local session windows of profile |index| to |local_windows|.
 // Returns true if successful.
-bool GetLocalWindows(int index, SessionWindowMap* local_windows);
+bool GetLocalWindows(int index, ScopedWindowMap* local_windows);
 
 // Creates and verifies the creation of a new window for profile |index| with
 // one tab displaying |url|. Copies the SessionWindow associated with the new
 // window to |local_windows|. Returns true if successful.
 bool OpenTabAndGetLocalWindows(int index,
                                const GURL& url,
-                               SessionWindowMap* local_windows);
+                               ScopedWindowMap* local_windows);
 
 // Checks that window count and foreign session count are 0.
 bool CheckInitialState(int index);
@@ -63,8 +51,8 @@ bool GetSessionData(int index, SyncedSessionVector* sessions);
 
 // Compares a foreign session based on the first session window.
 // Returns true based on the comparison of the session windows.
-bool CompareSyncedSessions(const sync_driver::SyncedSession* lhs,
-                           const sync_driver::SyncedSession* rhs);
+bool CompareSyncedSessions(const sync_sessions::SyncedSession* lhs,
+                           const sync_sessions::SyncedSession* rhs);
 
 // Sort a SyncedSession vector using our custom SyncedSession comparator.
 void SortSyncedSessions(SyncedSessionVector* sessions);
@@ -82,8 +70,8 @@ bool NavigationEquals(const sessions::SerializedNavigationEntry& expected,
 //    3. number of tab navigations per tab,
 //    4. actual tab navigations contents
 // - false otherwise.
-bool WindowsMatch(const SessionWindowMap& win1,
-                  const SessionWindowMap& win2);
+bool WindowsMatch(const ScopedWindowMap& win1, const ScopedWindowMap& win2);
+bool WindowsMatch(const SessionWindowMap& win1, const ScopedWindowMap& win2);
 
 // Retrieves the foreign sessions for a particular profile and compares them
 // with a reference SessionWindow list.
@@ -117,7 +105,7 @@ bool ModelAssociatorHasTabWithUrl(int index, const GURL& url);
 
 // Stores a pointer to the local session for a given profile in |session|.
 // Returns true on success, false on failure.
-bool GetLocalSession(int index, const sync_driver::SyncedSession** session);
+bool GetLocalSession(int index, const sync_sessions::SyncedSession** session);
 
 // Deletes the foreign session with tag |session_tag| from the profile specified
 // by |index|. This will affect all synced clients.

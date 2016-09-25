@@ -11,7 +11,7 @@
 #include "base/json/json_writer.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/webui/media_router/media_router_dialog_controller_impl.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
@@ -152,7 +153,8 @@ void MediaRouterIntegrationBrowserTest::OpenTestPageInNewTab(
     base::FilePath::StringPieceType file_name) {
   base::FilePath full_path = GetResourceFile(file_name);
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), net::FilePathToFileURL(full_path), NEW_FOREGROUND_TAB,
+      browser(), net::FilePathToFileURL(full_path),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 }
 
@@ -172,7 +174,9 @@ void MediaRouterIntegrationBrowserTest::ChooseSink(
   content::WebContents* dialog_contents = GetMRDialog(web_contents);
   std::string script = base::StringPrintf(
       kChooseSinkScript, sink_name.c_str());
-  ASSERT_TRUE(content::ExecuteScript(dialog_contents, script));
+  // Execute javascript to choose sink, but don't wait until it finishes.
+  dialog_contents->GetMainFrame()->ExecuteJavaScriptWithUserGestureForTests(
+      base::UTF8ToUTF16(script));
 }
 
 void MediaRouterIntegrationBrowserTest::CheckStartFailed(
@@ -502,6 +506,10 @@ IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
   ExecuteJavaScriptAPI(web_contents, kCheckSessionScript);
   std::string session_id(GetStartedConnectionId(web_contents));
 
+  // Wait a few seconds for MediaRouter to receive updates containing the
+  // created route.
+  Wait(base::TimeDelta::FromSeconds(3));
+
   OpenTestPageInNewTab(FILE_PATH_LITERAL("basic_test.html"));
   content::WebContents* new_web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -532,6 +540,10 @@ IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
   ExecuteJavaScriptAPI(web_contents, kCheckSessionScript);
   std::string session_id(GetStartedConnectionId(web_contents));
 
+  // Wait a few seconds for MediaRouter to receive updates containing the
+  // created route.
+  Wait(base::TimeDelta::FromSeconds(3));
+
   SetTestData(FILE_PATH_LITERAL("fail_reconnect_session.json"));
   OpenTestPage(FILE_PATH_LITERAL("fail_reconnect_session.html"));
   content::WebContents* new_web_contents =
@@ -558,6 +570,41 @@ IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
   EXPECT_TRUE(controller->IsShowingMediaRouterDialog());
   controller->HideMediaRouterDialog();
   CheckStartFailed(web_contents, "AbortError", "Dialog closed.");
+}
+
+IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
+                       MANUAL_Fail_StartCancelledNoSinks) {
+  SetTestData(FILE_PATH_LITERAL("no_sinks.json"));
+  OpenTestPage(FILE_PATH_LITERAL("basic_test.html"));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(web_contents);
+  content::TestNavigationObserver test_navigation_observer(web_contents, 1);
+  StartSession(web_contents);
+
+  MediaRouterDialogControllerImpl* controller =
+      MediaRouterDialogControllerImpl::GetOrCreateForWebContents(web_contents);
+  EXPECT_TRUE(controller->IsShowingMediaRouterDialog());
+  controller->HideMediaRouterDialog();
+  CheckStartFailed(web_contents, "NotFoundError", "No screens found.");
+}
+
+IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
+                       MANUAL_Fail_StartCancelledNoSupportedSinks) {
+  SetTestData(FILE_PATH_LITERAL("no_supported_sinks.json"));
+  OpenTestPage(FILE_PATH_LITERAL("basic_test.html"));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(web_contents);
+  content::TestNavigationObserver test_navigation_observer(web_contents, 1);
+  StartSession(web_contents);
+
+  MediaRouterDialogControllerImpl* controller =
+      MediaRouterDialogControllerImpl::GetOrCreateForWebContents(web_contents);
+  EXPECT_TRUE(controller->IsShowingMediaRouterDialog());
+  WaitUntilSinkDiscoveredOnUI();
+  controller->HideMediaRouterDialog();
+  CheckStartFailed(web_contents, "NotFoundError", "No screens found.");
 }
 
 }  // namespace media_router

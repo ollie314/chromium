@@ -15,16 +15,20 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/android/jni_weak_ref.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "chrome/browser/android/preferences/important_sites_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browsing_data/browsing_data_counter_utils.h"
+#include "chrome/browser/browsing_data/browsing_data_filter_builder.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
+#include "chrome/browser/browsing_data/registrable_domain_filter_builder.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/net/prediction_options.h"
@@ -33,9 +37,14 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/android/android_about_app_info.h"
+#include "chrome/common/channel_info.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/locale_settings.h"
-#include "components/browsing_data_ui/history_notice_utils.h"
+#include "components/browser_sync/profile_sync_service.h"
+#include "components/browsing_data/core/browsing_data_utils.h"
+#include "components/browsing_data/core/history_notice_utils.h"
+#include "components/browsing_data/core/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
@@ -50,7 +59,6 @@
 #include "components/version_info/version_info.h"
 #include "components/web_resource/web_resource_pref_names.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/user_metrics.h"
 #include "jni/PrefServiceBridge_jni.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -58,11 +66,14 @@ using base::android::AttachCurrentThread;
 using base::android::CheckException;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
+using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 using base::android::ScopedJavaGlobalRef;
 using content::BrowserThread;
 
 namespace {
+
+const size_t kMaxImportantSites = 5;
 
 Profile* GetOriginalProfile() {
   return ProfileManager::GetActiveUserProfile()->GetOriginalProfile();
@@ -147,12 +158,9 @@ static void SetContentSettingEnabled(JNIEnv* env,
                                      jboolean allow) {
   // Before we migrate functions over to this central function, we must verify
   // that the new category supports ALLOW/BLOCK pairs and, if not, handle them.
-  // IMAGES is included to allow migrating the setting back for users who had
-  // disabled images in M44 (see https://crbug.com/505844).
-  // TODO(bauerb): Remove this when the migration code is removed.
   DCHECK(content_settings_type == CONTENT_SETTINGS_TYPE_JAVASCRIPT ||
-         content_settings_type == CONTENT_SETTINGS_TYPE_POPUPS ||
-         content_settings_type == CONTENT_SETTINGS_TYPE_IMAGES);
+         content_settings_type == CONTENT_SETTINGS_TYPE_POPUPS);
+
   HostContentSettingsMap* host_content_settings_map =
       HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
   host_content_settings_map->SetDefaultContentSetting(
@@ -185,12 +193,9 @@ static void GetContentSettingsExceptions(JNIEnv* env,
       static_cast<ContentSettingsType>(content_settings_type), "", &entries);
   for (size_t i = 0; i < entries.size(); ++i) {
     Java_PrefServiceBridge_addContentSettingExceptionToList(
-        env, list,
-        content_settings_type,
-        ConvertUTF8ToJavaString(
-            env, entries[i].primary_pattern.ToString()).obj(),
-        entries[i].setting,
-        ConvertUTF8ToJavaString(env, entries[i].source).obj());
+        env, list, content_settings_type,
+        ConvertUTF8ToJavaString(env, entries[i].primary_pattern.ToString()),
+        entries[i].setting, ConvertUTF8ToJavaString(env, entries[i].source));
   }
 }
 
@@ -202,6 +207,11 @@ static jboolean GetAcceptCookiesEnabled(JNIEnv* env,
 static jboolean GetAcceptCookiesManaged(JNIEnv* env,
                                         const JavaParamRef<jobject>& obj) {
   return IsContentSettingManaged(CONTENT_SETTINGS_TYPE_COOKIES);
+}
+
+static jboolean GetAutoplayEnabled(JNIEnv* env,
+                                   const JavaParamRef<jobject>& obj) {
+  return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_AUTOPLAY);
 }
 
 static jboolean GetBackgroundSyncEnabled(JNIEnv* env,
@@ -289,11 +299,6 @@ static jboolean GetTranslateManaged(JNIEnv* env,
   return GetPrefService()->IsManagedPreference(prefs::kEnableTranslate);
 }
 
-static jboolean GetAutoDetectEncodingEnabled(JNIEnv* env,
-                                             const JavaParamRef<jobject>& obj) {
-  return GetPrefService()->GetBoolean(prefs::kWebKitUsesUniversalDetector);
-}
-
 static jboolean GetSearchSuggestEnabled(JNIEnv* env,
                                         const JavaParamRef<jobject>& obj) {
   return GetPrefService()->GetBoolean(prefs::kSearchSuggestEnabled);
@@ -352,6 +357,12 @@ static jboolean GetProtectedMediaIdentifierEnabled(
 static jboolean GetNotificationsEnabled(JNIEnv* env,
                                         const JavaParamRef<jobject>& obj) {
   return GetBooleanForContentSetting(CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
+}
+
+static jboolean GetNotificationsVibrateEnabled(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  return GetPrefService()->GetBoolean(prefs::kNotificationsVibrateEnabled);
 }
 
 static jboolean GetAllowLocationEnabled(JNIEnv* env,
@@ -437,6 +448,12 @@ static jboolean GetFullscreenManaged(JNIEnv* env,
 
 static jboolean GetFullscreenAllowed(JNIEnv* env,
                                      const JavaParamRef<jobject>& obj) {
+  // In the simplified fullscreen case, fullscreen is always allowed.
+  // TODO(mgiuca): Remove this pref once all data associated with it is deleted
+  // (https://crbug.com/591896).
+  if (base::FeatureList::IsEnabled(features::kSimplifiedFullscreenUI))
+    return true;
+
   HostContentSettingsMap* content_settings =
       HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
   return content_settings->GetDefaultContentSetting(
@@ -463,31 +480,57 @@ static jboolean HasSetMetricsReporting(JNIEnv* env,
 }
 
 static void SetClickedUpdateMenuItem(JNIEnv* env,
-                                       const JavaParamRef<jobject>& obj,
-                                       jboolean clicked) {
+                                     const JavaParamRef<jobject>& obj,
+                                     jboolean clicked) {
   GetPrefService()->SetBoolean(prefs::kClickedUpdateMenuItem, clicked);
 }
 
 static jboolean GetClickedUpdateMenuItem(JNIEnv* env,
-                                       const JavaParamRef<jobject>& obj) {
+                                         const JavaParamRef<jobject>& obj) {
   return GetPrefService()->GetBoolean(prefs::kClickedUpdateMenuItem);
+}
+
+static void SetLatestVersionWhenClickedUpdateMenuItem(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& version) {
+  GetPrefService()->SetString(
+      prefs::kLatestVersionWhenClickedUpdateMenuItem,
+      ConvertJavaStringToUTF8(env, version));
+}
+
+static ScopedJavaLocalRef<jstring> GetLatestVersionWhenClickedUpdateMenuItem(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  return ConvertUTF8ToJavaString(
+      env, GetPrefService()->GetString(
+          prefs::kLatestVersionWhenClickedUpdateMenuItem));
 }
 
 namespace {
 
-// Redirects a BrowsingDataRemover completion callback back into Java.
+// Merges |task_count| BrowsingDataRemover completion callbacks and redirects
+// them back into Java.
 class ClearBrowsingDataObserver : public BrowsingDataRemover::Observer {
  public:
   // |obj| is expected to be the object passed into ClearBrowsingData(); e.g. a
   // ChromePreference.
   ClearBrowsingDataObserver(JNIEnv* env,
                             jobject obj,
-                            BrowsingDataRemover* browsing_data_remover)
-      : weak_chrome_native_preferences_(env, obj), observer_(this) {
+                            BrowsingDataRemover* browsing_data_remover,
+                            int task_count)
+      : task_count_(task_count),
+        weak_chrome_native_preferences_(env, obj),
+        observer_(this) {
+    DCHECK_GT(task_count, 0);
     observer_.Add(browsing_data_remover);
   }
 
   void OnBrowsingDataRemoverDone() override {
+    DCHECK(task_count_);
+    if (--task_count_)
+      return;
+
     // We delete ourselves when done.
     std::unique_ptr<ClearBrowsingDataObserver> auto_delete(this);
 
@@ -496,10 +539,11 @@ class ClearBrowsingDataObserver : public BrowsingDataRemover::Observer {
       return;
 
     Java_PrefServiceBridge_browsingDataCleared(
-        env, weak_chrome_native_preferences_.get(env).obj());
+        env, weak_chrome_native_preferences_.get(env));
   }
 
  private:
+  int task_count_;
   JavaObjectWeakGlobalRef weak_chrome_native_preferences_;
   ScopedObserver<BrowsingDataRemover, BrowsingDataRemover::Observer> observer_;
 };
@@ -511,15 +555,15 @@ static jboolean GetBrowsingDataDeletionPreference(
     const JavaParamRef<jobject>& obj,
     jint data_type) {
   DCHECK_GE(data_type, 0);
-  DCHECK_LT(data_type, BrowsingDataType::NUM_TYPES);
+  DCHECK_LT(data_type, browsing_data::NUM_TYPES);
 
   // If there is no corresponding preference for this |data_type|, pretend
   // that it's set to false.
   // TODO(msramek): Consider defining native-side preferences for all Java UI
   // data types for consistency.
   std::string pref;
-  if (!GetDeletionPreferenceFromDataType(
-      static_cast<BrowsingDataType>(data_type), &pref)) {
+  if (!browsing_data::GetDeletionPreferenceFromDataType(
+          static_cast<browsing_data::BrowsingDataType>(data_type), &pref)) {
     return false;
   }
 
@@ -532,11 +576,11 @@ static void SetBrowsingDataDeletionPreference(
     jint data_type,
     jboolean value) {
   DCHECK_GE(data_type, 0);
-  DCHECK_LT(data_type, BrowsingDataType::NUM_TYPES);
+  DCHECK_LT(data_type, browsing_data::NUM_TYPES);
 
   std::string pref;
-  if (!GetDeletionPreferenceFromDataType(
-      static_cast<BrowsingDataType>(data_type), &pref)) {
+  if (!browsing_data::GetDeletionPreferenceFromDataType(
+          static_cast<browsing_data::BrowsingDataType>(data_type), &pref)) {
     return;
   }
 
@@ -546,7 +590,7 @@ static void SetBrowsingDataDeletionPreference(
 static jint GetBrowsingDataDeletionTimePeriod(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
-  return GetPrefService()->GetInteger(prefs::kDeleteTimePeriod);
+  return GetPrefService()->GetInteger(browsing_data::prefs::kDeleteTimePeriod);
 }
 
 static void SetBrowsingDataDeletionTimePeriod(
@@ -554,55 +598,109 @@ static void SetBrowsingDataDeletionTimePeriod(
     const JavaParamRef<jobject>& obj,
     jint time_period) {
   DCHECK_GE(time_period, 0);
-  DCHECK_LE(time_period, BrowsingDataRemover::TIME_PERIOD_LAST);
-  GetPrefService()->SetInteger(prefs::kDeleteTimePeriod, time_period);
+  DCHECK_LE(time_period, browsing_data::TIME_PERIOD_LAST);
+  GetPrefService()->SetInteger(browsing_data::prefs::kDeleteTimePeriod,
+                               time_period);
 }
 
-static void ClearBrowsingData(JNIEnv* env,
-                              const JavaParamRef<jobject>& obj,
-                              const JavaParamRef<jintArray>& data_types,
-                              jint time_period) {
+static void ClearBrowsingData(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jintArray>& data_types,
+    jint time_period,
+    const JavaParamRef<jobjectArray>& jexcluding_domains,
+    const JavaParamRef<jintArray>& jexcluding_domain_reasons,
+    const JavaParamRef<jobjectArray>& jignoring_domains,
+    const JavaParamRef<jintArray>& jignoring_domain_reasons) {
   BrowsingDataRemover* browsing_data_remover =
       BrowsingDataRemoverFactory::GetForBrowserContext(GetOriginalProfile());
-  // ClearBrowsingDataObserver deletes itself when |browsing_data_remover| is
-  // done.
-  new ClearBrowsingDataObserver(env, obj, browsing_data_remover);
 
   std::vector<int> data_types_vector;
   base::android::JavaIntArrayToIntVector(env, data_types, &data_types_vector);
 
   int remove_mask = 0;
   for (const int data_type : data_types_vector) {
-    switch (static_cast<BrowsingDataType>(data_type)) {
-      case HISTORY:
+    switch (static_cast<browsing_data::BrowsingDataType>(data_type)) {
+      case browsing_data::HISTORY:
         remove_mask |= BrowsingDataRemover::REMOVE_HISTORY;
         break;
-      case CACHE:
+      case browsing_data::CACHE:
         remove_mask |= BrowsingDataRemover::REMOVE_CACHE;
         break;
-      case COOKIES:
+      case browsing_data::COOKIES:
         remove_mask |= BrowsingDataRemover::REMOVE_COOKIES;
         remove_mask |= BrowsingDataRemover::REMOVE_SITE_DATA;
         break;
-      case PASSWORDS:
+      case browsing_data::PASSWORDS:
         remove_mask |= BrowsingDataRemover::REMOVE_PASSWORDS;
         break;
-      case FORM_DATA:
+      case browsing_data::FORM_DATA:
         remove_mask |= BrowsingDataRemover::REMOVE_FORM_DATA;
         break;
-      case BOOKMARKS:
+      case browsing_data::BOOKMARKS:
         // Bookmarks are deleted separately on the Java side.
         NOTREACHED();
         break;
-      case NUM_TYPES:
+      case browsing_data::NUM_TYPES:
         NOTREACHED();
     }
   }
+  std::vector<std::string> excluding_domains;
+  std::vector<int32_t> excluding_domain_reasons;
+  std::vector<std::string> ignoring_domains;
+  std::vector<int32_t> ignoring_domain_reasons;
+  base::android::AppendJavaStringArrayToStringVector(
+      env, jexcluding_domains.obj(), &excluding_domains);
+  base::android::JavaIntArrayToIntVector(env, jexcluding_domain_reasons.obj(),
+                                         &excluding_domain_reasons);
+  base::android::AppendJavaStringArrayToStringVector(
+      env, jignoring_domains.obj(), &ignoring_domains);
+  base::android::JavaIntArrayToIntVector(env, jignoring_domain_reasons.obj(),
+                                         &ignoring_domain_reasons);
+  std::unique_ptr<RegistrableDomainFilterBuilder> filter_builder(
+      new RegistrableDomainFilterBuilder(BrowsingDataFilterBuilder::BLACKLIST));
+  for (const std::string& domain : excluding_domains) {
+    filter_builder->AddRegisterableDomain(domain);
+  }
 
-  browsing_data_remover->Remove(
-      BrowsingDataRemover::Period(
-          static_cast<BrowsingDataRemover::TimePeriod>(time_period)),
-      remove_mask, BrowsingDataHelper::UNPROTECTED_WEB);
+  if (!excluding_domains.empty()) {
+    ImportantSitesUtil::RecordBlacklistedAndIgnoredImportantSites(
+        GetOriginalProfile(), excluding_domains, excluding_domain_reasons,
+        ignoring_domains, ignoring_domain_reasons);
+  }
+
+  // Delete the filterable types with a filter, and the rest completely.
+  // TODO(msramek): This is only necessary until the filter is implemented in
+  // all data storage backends.
+  int filterable_mask = remove_mask & BrowsingDataRemover::FILTERABLE_DATATYPES;
+  int nonfilterable_mask =
+      remove_mask & ~BrowsingDataRemover::FILTERABLE_DATATYPES;
+
+  // ClearBrowsingDataObserver deletes itself when |browsing_data_remover| is
+  // done with both removal tasks.
+  ClearBrowsingDataObserver* observer = new ClearBrowsingDataObserver(
+      env, obj, browsing_data_remover, 2 /* tasks_count */);
+
+  if (filterable_mask) {
+    browsing_data_remover->RemoveWithFilterAndReply(
+        BrowsingDataRemover::Period(
+            static_cast<browsing_data::TimePeriod>(time_period)),
+        filterable_mask, BrowsingDataHelper::UNPROTECTED_WEB,
+        std::move(filter_builder), observer);
+  } else {
+    // Make sure |observer| doesn't wait for the filtered task.
+    observer->OnBrowsingDataRemoverDone();
+  }
+
+  if (nonfilterable_mask) {
+    browsing_data_remover->RemoveAndReply(
+        BrowsingDataRemover::Period(
+            static_cast<browsing_data::TimePeriod>(time_period)),
+        nonfilterable_mask, BrowsingDataHelper::UNPROTECTED_WEB, observer);
+  } else {
+    // Make sure |observer| doesn't wait for the non-filtered task.
+    observer->OnBrowsingDataRemoverDone();
+  }
 }
 
 static jboolean CanDeleteBrowsingHistory(JNIEnv* env,
@@ -610,10 +708,56 @@ static jboolean CanDeleteBrowsingHistory(JNIEnv* env,
   return GetPrefService()->GetBoolean(prefs::kAllowDeletingBrowserHistory);
 }
 
+static void FetchImportantSites(JNIEnv* env,
+                                const JavaParamRef<jclass>& clazz,
+                                const JavaParamRef<jobject>& java_callback) {
+  std::vector<ImportantSitesUtil::ImportantDomainInfo> important_sites =
+      ImportantSitesUtil::GetImportantRegisterableDomains(GetOriginalProfile(),
+                                                          kMaxImportantSites);
+
+  std::vector<std::string> important_domains;
+  std::vector<int32_t> important_domain_reasons;
+  std::vector<std::string> important_domain_examples;
+  for (const ImportantSitesUtil::ImportantDomainInfo& info : important_sites) {
+    important_domains.push_back(info.registerable_domain);
+    important_domain_reasons.push_back(info.reason_bitfield);
+    important_domain_examples.push_back(info.example_origin.spec());
+  }
+
+  ScopedJavaLocalRef<jobjectArray> java_domains =
+      base::android::ToJavaArrayOfStrings(env, important_domains);
+  ScopedJavaLocalRef<jintArray> java_reasons =
+      base::android::ToJavaIntArray(env, important_domain_reasons);
+  ScopedJavaLocalRef<jobjectArray> java_origins =
+      base::android::ToJavaArrayOfStrings(env, important_domain_examples);
+
+  Java_ImportantSitesCallback_onImportantRegisterableDomainsReady(
+      env, java_callback.obj(), java_domains.obj(), java_origins.obj(),
+      java_reasons.obj());
+}
+
+// This value should not change during a sessions, as it's used for UMA metrics.
+static jint GetMaxImportantSites(JNIEnv* env,
+                                 const JavaParamRef<jclass>& clazz) {
+  return kMaxImportantSites;
+}
+
+static void MarkOriginAsImportantForTesting(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz,
+    const JavaParamRef<jstring>& jorigin) {
+  GURL origin(base::android::ConvertJavaStringToUTF8(jorigin));
+  CHECK(origin.is_valid());
+  ImportantSitesUtil::MarkOriginAsImportantForTesting(GetOriginalProfile(),
+                                                      origin);
+}
+
 static void ShowNoticeAboutOtherFormsOfBrowsingHistory(
     ScopedJavaGlobalRef<jobject>* listener,
     bool show) {
   JNIEnv* env = AttachCurrentThread();
+  UMA_HISTOGRAM_BOOLEAN(
+      "History.ClearBrowsingData.HistoryNoticeShownInFooterWhenUpdated", show);
   if (!show)
     return;
   Java_OtherFormsOfBrowsingHistoryListener_showNoticeAboutOtherFormsOfBrowsingHistory(
@@ -635,18 +779,29 @@ static void RequestInfoAboutOtherFormsOfBrowsingHistory(
     const JavaParamRef<jobject>& obj,
     const JavaParamRef<jobject>& listener) {
   // The permanent notice in the footer.
-  browsing_data_ui::ShouldShowNoticeAboutOtherFormsOfBrowsingHistory(
+  browsing_data::ShouldShowNoticeAboutOtherFormsOfBrowsingHistory(
       ProfileSyncServiceFactory::GetForProfile(GetOriginalProfile()),
       WebHistoryServiceFactory::GetForProfile(GetOriginalProfile()),
       base::Bind(&ShowNoticeAboutOtherFormsOfBrowsingHistory,
                  base::Owned(new ScopedJavaGlobalRef<jobject>(env, listener))));
 
   // The one-time notice in the dialog.
-  browsing_data_ui::ShouldPopupDialogAboutOtherFormsOfBrowsingHistory(
+  browsing_data::ShouldPopupDialogAboutOtherFormsOfBrowsingHistory(
       ProfileSyncServiceFactory::GetForProfile(GetOriginalProfile()),
       WebHistoryServiceFactory::GetForProfile(GetOriginalProfile()),
+      chrome::GetChannel(),
       base::Bind(&EnableDialogAboutOtherFormsOfBrowsingHistory,
                  base::Owned(new ScopedJavaGlobalRef<jobject>(env, listener))));
+}
+
+static void SetAutoplayEnabled(JNIEnv* env,
+                               const JavaParamRef<jobject>& obj,
+                               jboolean allow) {
+  HostContentSettingsMap* host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(GetOriginalProfile());
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_AUTOPLAY,
+      allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
 }
 
 static void SetAllowCookiesEnabled(JNIEnv* env,
@@ -750,11 +905,23 @@ static void SetNotificationsEnabled(JNIEnv* env,
       allow ? CONTENT_SETTING_ASK : CONTENT_SETTING_BLOCK);
 }
 
-static void SetCrashReporting(JNIEnv* env,
-                              const JavaParamRef<jobject>& obj,
-                              jboolean reporting) {
+static void SetNotificationsVibrateEnabled(JNIEnv* env,
+                                           const JavaParamRef<jobject>& obj,
+                                           jboolean enabled) {
+  GetPrefService()->SetBoolean(prefs::kNotificationsVibrateEnabled, enabled);
+}
+
+static void SetCrashReportingEnabled(JNIEnv* env,
+                                     const JavaParamRef<jobject>& obj,
+                                     jboolean reporting) {
   PrefService* local_state = g_browser_process->local_state();
   local_state->SetBoolean(prefs::kCrashReportingEnabled, reporting);
+}
+
+static jboolean IsCrashReportingEnabled(JNIEnv* env,
+                                  const JavaParamRef<jobject>& obj) {
+  PrefService* local_state = g_browser_process->local_state();
+  return local_state->GetBoolean(prefs::kCrashReportingEnabled);
 }
 
 static jboolean CanPrefetchAndPrerender(JNIEnv* env,
@@ -787,13 +954,6 @@ static void SetTranslateEnabled(JNIEnv* env,
                                 const JavaParamRef<jobject>& obj,
                                 jboolean enabled) {
   GetPrefService()->SetBoolean(prefs::kEnableTranslate, enabled);
-}
-
-static void SetAutoDetectEncodingEnabled(JNIEnv* env,
-                                         const JavaParamRef<jobject>& obj,
-                                         jboolean enabled) {
-  content::RecordAction(base::UserMetricsAction("AutoDetectChange"));
-  GetPrefService()->SetBoolean(prefs::kWebKitUsesUniversalDetector, enabled);
 }
 
 static void ResetTranslateDefaults(JNIEnv* env,
@@ -895,29 +1055,11 @@ static void SetNetworkPredictionEnabled(JNIEnv* env,
               : chrome_browser_net::NETWORK_PREDICTION_NEVER);
 }
 
-static jboolean ObsoleteNetworkPredictionEnabledHasUserSetting(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  return GetPrefService()->GetUserPrefValue(
-      prefs::kNetworkPredictionEnabled) != NULL;
-}
-
 static jboolean ObsoleteNetworkPredictionOptionsHasUserSetting(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   return GetPrefService()->GetUserPrefValue(
       prefs::kNetworkPredictionOptions) != NULL;
-}
-
-static jboolean ObsoleteGetNetworkPredictionEnabledUserPrefValue(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  const base::Value* network_prediction_enabled =
-      GetPrefService()->GetUserPrefValue(prefs::kNetworkPredictionEnabled);
-  DCHECK(network_prediction_enabled);
-  bool value = false;
-  DCHECK(network_prediction_enabled->GetAsBoolean(&value));
-  return value;
 }
 
 static void SetResolveNavigationErrorEnabled(JNIEnv* env,
@@ -961,8 +1103,8 @@ static ScopedJavaLocalRef<jobject> GetAboutVersionStrings(
   application.append(version_info::GetVersionNumber());
 
   return Java_PrefServiceBridge_createAboutVersionStrings(
-      env, ConvertUTF8ToJavaString(env, application).obj(),
-      ConvertUTF8ToJavaString(env, os_version).obj());
+      env, ConvertUTF8ToJavaString(env, application),
+      ConvertUTF8ToJavaString(env, os_version));
 }
 
 static ScopedJavaLocalRef<jstring> GetSupervisedUserCustodianName(
@@ -1018,6 +1160,9 @@ bool PrefServiceBridge::RegisterPrefServiceBridge(JNIEnv* env) {
 }
 
 // static
+// This logic should be kept in sync with prependToAcceptLanguagesIfNecessary in
+// chrome/android/java/src/org/chromium/chrome/browser/
+//     physicalweb/PwsClientImpl.java
 void PrefServiceBridge::PrependToAcceptLanguagesIfNecessary(
     const std::string& locale,
     std::string* accept_languages) {
@@ -1043,6 +1188,9 @@ void PrefServiceBridge::PrependToAcceptLanguagesIfNecessary(
     std::vector<std::string> parts;
     parts.push_back(language_region);
     // If language is not in the accept languages list, also add language code.
+    // This will work with the IDS_ACCEPT_LANGUAGE localized strings bundled
+    // with Chrome but may fail on arbitrary lists of language tags due to
+    // differences in case and whitespace.
     if (accept_languages->find(language + ",") == std::string::npos &&
         !std::equal(language.rbegin(), language.rend(),
                     accept_languages->rbegin())) {

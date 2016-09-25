@@ -15,6 +15,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -205,8 +206,10 @@ SkCanvasVideoRendererTest::SkCanvasVideoRendererTest()
 SkCanvasVideoRendererTest::~SkCanvasVideoRendererTest() {}
 
 void SkCanvasVideoRendererTest::PaintWithoutFrame(SkCanvas* canvas) {
-  renderer_.Paint(nullptr, canvas, kNaturalRect, 0xFF,
-                  SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_0, Context3D());
+  SkPaint paint;
+  paint.setFilterQuality(kLow_SkFilterQuality);
+  renderer_.Paint(nullptr, canvas, kNaturalRect, paint, VIDEO_ROTATION_0,
+                  Context3D());
 }
 
 void SkCanvasVideoRendererTest::Paint(
@@ -237,7 +240,10 @@ void SkCanvasVideoRendererTest::PaintRotated(
       media::FillYUV(video_frame.get(), 29, 255, 107);
       break;
   }
-  renderer_.Paint(video_frame, canvas, dest_rect, 0xFF, mode, video_rotation,
+  SkPaint paint;
+  paint.setXfermodeMode(mode);
+  paint.setFilterQuality(kLow_SkFilterQuality);
+  renderer_.Paint(video_frame, canvas, dest_rect, paint, video_rotation,
                   Context3D());
 }
 
@@ -305,7 +311,7 @@ TEST_F(SkCanvasVideoRendererTest, Smaller) {
 
 TEST_F(SkCanvasVideoRendererTest, NoTimestamp) {
   VideoFrame* video_frame = natural_frame().get();
-  video_frame->set_timestamp(media::kNoTimestamp());
+  video_frame->set_timestamp(media::kNoTimestamp);
   Paint(video_frame, target_canvas(), kRed);
   EXPECT_EQ(SK_ColorRED, GetColor(target_canvas()));
 }
@@ -413,7 +419,6 @@ TEST_F(SkCanvasVideoRendererTest, Video_Translate_Rotation_90) {
   SkCanvas canvas(AllocBitmap(kWidth, kHeight));
   FillCanvas(&canvas, SK_ColorMAGENTA);
 
-  const gfx::Rect crop_rect = cropped_frame()->visible_rect();
   PaintRotated(cropped_frame(), &canvas,
                gfx::RectF(kWidth / 2, kHeight / 2, kWidth / 2, kHeight / 2),
                kNone, SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_90);
@@ -519,9 +524,8 @@ void MailboxHoldersReleased(const gpu::SyncToken& sync_token) {}
 // Test that SkCanvasVideoRendererTest::Paint doesn't crash when GrContext is
 // abandoned.
 TEST_F(SkCanvasVideoRendererTest, ContextLost) {
-  skia::RefPtr<const GrGLInterface> null_interface =
-      skia::AdoptRef(GrGLCreateNullInterface());
-  auto gr_context = skia::AdoptRef(GrContext::Create(
+  sk_sp<const GrGLInterface> null_interface(GrGLCreateNullInterface());
+  sk_sp<GrContext> gr_context(GrContext::Create(
       kOpenGL_GrBackend,
       reinterpret_cast<GrBackendContext>(null_interface.get())));
   gr_context->abandonContext();
@@ -531,13 +535,15 @@ TEST_F(SkCanvasVideoRendererTest, ContextLost) {
   TestGLES2Interface gles2;
   Context3D context_3d(&gles2, gr_context.get());
   gfx::Size size(kWidth, kHeight);
-  gpu::MailboxHolder mailbox(gpu::Mailbox::Generate(), gpu::SyncToken(),
-                             GL_TEXTURE_RECTANGLE_ARB);
-  auto video_frame = VideoFrame::WrapNativeTexture(
-      PIXEL_FORMAT_UYVY, mailbox, base::Bind(MailboxHoldersReleased), size,
-      gfx::Rect(size), size, kNoTimestamp());
+  gpu::MailboxHolder holders[VideoFrame::kMaxPlanes] = {gpu::MailboxHolder(
+      gpu::Mailbox::Generate(), gpu::SyncToken(), GL_TEXTURE_RECTANGLE_ARB)};
+  auto video_frame = VideoFrame::WrapNativeTextures(
+      PIXEL_FORMAT_UYVY, holders, base::Bind(MailboxHoldersReleased), size,
+      gfx::Rect(size), size, kNoTimestamp);
 
-  renderer_.Paint(video_frame, &canvas, kNaturalRect, 0xFF,
-                  SkXfermode::kSrcOver_Mode, VIDEO_ROTATION_90, context_3d);
+  SkPaint paint;
+  paint.setFilterQuality(kLow_SkFilterQuality);
+  renderer_.Paint(video_frame, &canvas, kNaturalRect, paint, VIDEO_ROTATION_90,
+                  context_3d);
 }
 }  // namespace media

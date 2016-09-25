@@ -7,10 +7,12 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
+
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "components/gcm_driver/gcm_driver.h"
@@ -47,16 +49,16 @@ InstanceID::Result GCMClientResultToInstanceIDResult(
 }  // namespace
 
 // static
-scoped_ptr<InstanceID> InstanceID::Create(const std::string& app_id,
-                                          gcm::InstanceIDHandler* handler) {
-  return make_scoped_ptr(new InstanceIDImpl(app_id, handler));
+std::unique_ptr<InstanceID> InstanceID::CreateInternal(
+    const std::string& app_id,
+    gcm::GCMDriver* gcm_driver) {
+  return base::WrapUnique(new InstanceIDImpl(app_id, gcm_driver));
 }
 
 InstanceIDImpl::InstanceIDImpl(const std::string& app_id,
-                               gcm::InstanceIDHandler* handler)
-    : InstanceID(app_id), handler_(handler), weak_ptr_factory_(this) {
-  DCHECK(handler_);
-  handler_->GetInstanceIDData(
+                               gcm::GCMDriver* gcm_driver)
+    : InstanceID(app_id, gcm_driver), weak_ptr_factory_(this) {
+  Handler()->GetInstanceIDData(
       app_id, base::Bind(&InstanceIDImpl::GetInstanceIDDataCompleted,
                          weak_ptr_factory_.GetWeakPtr()));
 }
@@ -127,14 +129,14 @@ void InstanceIDImpl::DoGetToken(
     const GetTokenCallback& callback) {
   EnsureIDGenerated();
 
-  handler_->GetToken(app_id(), authorized_entity, scope, options,
-                     base::Bind(&InstanceIDImpl::OnGetTokenCompleted,
-                                weak_ptr_factory_.GetWeakPtr(), callback));
+  Handler()->GetToken(app_id(), authorized_entity, scope, options,
+                      base::Bind(&InstanceIDImpl::OnGetTokenCompleted,
+                                 weak_ptr_factory_.GetWeakPtr(), callback));
 }
 
-void InstanceIDImpl::DeleteToken(const std::string& authorized_entity,
-                                 const std::string& scope,
-                                 const DeleteTokenCallback& callback) {
+void InstanceIDImpl::DeleteTokenImpl(const std::string& authorized_entity,
+                                     const std::string& scope,
+                                     const DeleteTokenCallback& callback) {
   DCHECK(!authorized_entity.empty());
   DCHECK(!scope.empty());
 
@@ -161,12 +163,12 @@ void InstanceIDImpl::DoDeleteToken(
     return;
   }
 
-  handler_->DeleteToken(app_id(), authorized_entity, scope,
+  Handler()->DeleteToken(app_id(), authorized_entity, scope,
                         base::Bind(&InstanceIDImpl::OnDeleteTokenCompleted,
                                    weak_ptr_factory_.GetWeakPtr(), callback));
 }
 
-void InstanceIDImpl::DeleteID(const DeleteIDCallback& callback) {
+void InstanceIDImpl::DeleteIDImpl(const DeleteIDCallback& callback) {
   if (!delayed_task_controller_.CanRunTaskWithoutDelay()) {
     delayed_task_controller_.AddTask(
         base::Bind(&InstanceIDImpl::DoDeleteID,
@@ -185,11 +187,11 @@ void InstanceIDImpl::DoDeleteID(const DeleteIDCallback& callback) {
     return;
   }
 
-  handler_->DeleteAllTokensForApp(
+  Handler()->DeleteAllTokensForApp(
       app_id(), base::Bind(&InstanceIDImpl::OnDeleteIDCompleted,
                            weak_ptr_factory_.GetWeakPtr(), callback));
 
-  handler_->RemoveInstanceIDData(app_id());
+  Handler()->RemoveInstanceIDData(app_id());
 
   id_.clear();
   creation_time_ = base::Time();
@@ -262,8 +264,15 @@ void InstanceIDImpl::EnsureIDGenerated() {
   creation_time_ = base::Time::Now();
 
   // Save to the persistent store.
-  handler_->AddInstanceIDData(
+  Handler()->AddInstanceIDData(
       app_id(), id_, base::Int64ToString(creation_time_.ToInternalValue()));
+}
+
+gcm::InstanceIDHandler* InstanceIDImpl::Handler() {
+  gcm::InstanceIDHandler* handler =
+      gcm_driver()->GetInstanceIDHandlerInternal();
+  DCHECK(handler);
+  return handler;
 }
 
 }  // namespace instance_id

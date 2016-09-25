@@ -33,12 +33,10 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/input/EventHandler.h"
-#include "core/layout/LayoutView.h"
 #include "core/layout/compositing/PaintLayerCompositor.h"
 #include "core/page/AutoscrollController.h"
 #include "core/page/Page.h"
 #include "core/paint/TransformRecorder.h"
-#include "platform/Logging.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/ClipRecorder.h"
 #include "platform/graphics/paint/CullRect.h"
@@ -80,16 +78,15 @@ static void paintInternal(Page& page, WebCanvas* canvas,
 
         AffineTransform scale;
         scale.scale(scaleFactor);
-        TransformRecorder scaleRecorder(paintContext, root, scale);
+        TransformRecorder scaleRecorder(paintContext, pictureBuilder, scale);
 
         IntRect dirtyRect(rect);
         FrameView* view = root.view();
         if (view) {
-            ClipRecorder clipRecorder(paintContext, root, DisplayItem::PageWidgetDelegateClip, LayoutRect(dirtyRect));
-
+            ClipRecorder clipRecorder(paintContext, pictureBuilder, DisplayItem::kPageWidgetDelegateClip, dirtyRect);
             view->paint(paintContext, globalPaintFlags, CullRect(dirtyRect));
-        } else if (!DrawingRecorder::useCachedDrawingIfPossible(paintContext, root, DisplayItem::PageWidgetDelegateBackgroundFallback)) {
-            DrawingRecorder drawingRecorder(paintContext, root, DisplayItem::PageWidgetDelegateBackgroundFallback, dirtyRect);
+        } else {
+            DrawingRecorder drawingRecorder(paintContext, pictureBuilder, DisplayItem::kPageWidgetDelegateBackgroundFallback, dirtyRect);
             paintContext.fillRect(dirtyRect, Color::white);
         }
     }
@@ -110,6 +107,23 @@ void PageWidgetDelegate::paintIgnoringCompositing(Page& page, WebCanvas* canvas,
 
 WebInputEventResult PageWidgetDelegate::handleInputEvent(PageWidgetEventHandler& handler, const WebInputEvent& event, LocalFrame* root)
 {
+    if (event.modifiers & WebInputEvent::IsTouchAccessibility
+        && WebInputEvent::isMouseEventType(event.type)) {
+        PlatformMouseEventBuilder pme(root->view(), static_cast<const WebMouseEvent&>(event));
+
+        IntPoint docPoint(root->view()->rootFrameToContents(pme.position()));
+        HitTestResult result = root->eventHandler().hitTestResultAtPoint(docPoint, HitTestRequest::ReadOnly | HitTestRequest::Active);
+        result.setToShadowHostIfInUserAgentShadowRoot();
+        if (result.innerNodeFrame()) {
+            Document* document = result.innerNodeFrame()->document();
+            if (document) {
+                AXObjectCache* cache = document->existingAXObjectCache();
+                if (cache)
+                    cache->onTouchAccessibilityHover(result.roundedPointInInnerNodeFrame());
+            }
+        }
+    }
+
     switch (event.type) {
 
     // FIXME: WebKit seems to always return false on mouse events processing
@@ -215,50 +229,6 @@ WebInputEventResult PageWidgetEventHandler::handleMouseWheel(LocalFrame& mainFra
 WebInputEventResult PageWidgetEventHandler::handleTouchEvent(LocalFrame& mainFrame, const WebTouchEvent& event)
 {
     return mainFrame.eventHandler().handleTouchEvent(PlatformTouchEventBuilder(mainFrame.view(), event));
-}
-
-#define WEBINPUT_EVENT_CASE(type) case WebInputEvent::type: return #type;
-
-const char* PageWidgetEventHandler::inputTypeToName(WebInputEvent::Type type)
-{
-    switch (type) {
-        WEBINPUT_EVENT_CASE(MouseDown)
-        WEBINPUT_EVENT_CASE(MouseUp)
-        WEBINPUT_EVENT_CASE(MouseMove)
-        WEBINPUT_EVENT_CASE(MouseEnter)
-        WEBINPUT_EVENT_CASE(MouseLeave)
-        WEBINPUT_EVENT_CASE(ContextMenu)
-        WEBINPUT_EVENT_CASE(MouseWheel)
-        WEBINPUT_EVENT_CASE(RawKeyDown)
-        WEBINPUT_EVENT_CASE(KeyDown)
-        WEBINPUT_EVENT_CASE(KeyUp)
-        WEBINPUT_EVENT_CASE(Char)
-        WEBINPUT_EVENT_CASE(GestureScrollBegin)
-        WEBINPUT_EVENT_CASE(GestureScrollEnd)
-        WEBINPUT_EVENT_CASE(GestureScrollUpdate)
-        WEBINPUT_EVENT_CASE(GestureFlingStart)
-        WEBINPUT_EVENT_CASE(GestureFlingCancel)
-        WEBINPUT_EVENT_CASE(GestureShowPress)
-        WEBINPUT_EVENT_CASE(GestureTap)
-        WEBINPUT_EVENT_CASE(GestureTapUnconfirmed)
-        WEBINPUT_EVENT_CASE(GestureTapDown)
-        WEBINPUT_EVENT_CASE(GestureTapCancel)
-        WEBINPUT_EVENT_CASE(GestureDoubleTap)
-        WEBINPUT_EVENT_CASE(GestureTwoFingerTap)
-        WEBINPUT_EVENT_CASE(GestureLongPress)
-        WEBINPUT_EVENT_CASE(GestureLongTap)
-        WEBINPUT_EVENT_CASE(GesturePinchBegin)
-        WEBINPUT_EVENT_CASE(GesturePinchEnd)
-        WEBINPUT_EVENT_CASE(GesturePinchUpdate)
-        WEBINPUT_EVENT_CASE(TouchStart)
-        WEBINPUT_EVENT_CASE(TouchMove)
-        WEBINPUT_EVENT_CASE(TouchEnd)
-        WEBINPUT_EVENT_CASE(TouchCancel)
-        WEBINPUT_EVENT_CASE(TouchScrollStarted)
-    default:
-        NOTREACHED();
-        return "";
-    }
 }
 
 } // namespace blink

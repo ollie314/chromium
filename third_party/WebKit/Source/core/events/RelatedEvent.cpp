@@ -10,11 +10,6 @@ RelatedEvent::~RelatedEvent()
 {
 }
 
-RelatedEvent* RelatedEvent::create()
-{
-    return new RelatedEvent;
-}
-
 RelatedEvent* RelatedEvent::create(const AtomicString& type, bool canBubble, bool cancelable, EventTarget* relatedTarget)
 {
     return new RelatedEvent(type, canBubble, cancelable, relatedTarget);
@@ -25,12 +20,8 @@ RelatedEvent* RelatedEvent::create(const AtomicString& type, const RelatedEventI
     return new RelatedEvent(type, initializer);
 }
 
-RelatedEvent::RelatedEvent()
-{
-}
-
 RelatedEvent::RelatedEvent(const AtomicString& type, bool canBubble, bool cancelable, EventTarget* relatedTarget)
-    : Event(type, canBubble, cancelable, relatedTarget)
+    : Event(type, canBubble, cancelable)
     , m_relatedTarget(relatedTarget)
 {
 }

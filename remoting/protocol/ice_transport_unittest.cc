@@ -13,7 +13,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "remoting/base/url_request.h"
@@ -95,7 +95,7 @@ class IceTransportTest : public testing::Test {
     host_message_pipe_.reset();
     client_transport_.reset();
     host_transport_.reset();
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void ProcessTransportInfo(std::unique_ptr<IceTransport>* target_transport,
@@ -118,9 +118,9 @@ class IceTransportTest : public testing::Test {
     jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
 
     host_transport_.reset(new IceTransport(
-        new TransportContext(
-            nullptr, base::WrapUnique(new ChromiumPortAllocatorFactory()),
-            nullptr, network_settings_, TransportRole::SERVER),
+        new TransportContext(nullptr,
+                             base::MakeUnique<ChromiumPortAllocatorFactory>(),
+                             nullptr, network_settings_, TransportRole::SERVER),
         &host_event_handler_));
     if (!host_authenticator_) {
       host_authenticator_.reset(new FakeAuthenticator(
@@ -128,9 +128,9 @@ class IceTransportTest : public testing::Test {
     }
 
     client_transport_.reset(new IceTransport(
-        new TransportContext(
-            nullptr, base::WrapUnique(new ChromiumPortAllocatorFactory()),
-            nullptr, network_settings_, TransportRole::CLIENT),
+        new TransportContext(nullptr,
+                             base::MakeUnique<ChromiumPortAllocatorFactory>(),
+                             nullptr, network_settings_, TransportRole::CLIENT),
         &client_event_handler_));
     if (!client_authenticator_) {
       client_authenticator_.reset(new FakeAuthenticator(

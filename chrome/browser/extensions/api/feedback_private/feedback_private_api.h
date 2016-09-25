@@ -8,6 +8,7 @@
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/common/extensions/api/feedback_private.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
+#include "extensions/browser/extension_function.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace extensions {
@@ -49,7 +50,7 @@ class FeedbackPrivateAPI : public BrowserContextKeyedAPI {
 };
 
 // Feedback strings.
-class FeedbackPrivateGetStringsFunction : public ChromeSyncExtensionFunction {
+class FeedbackPrivateGetStringsFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getStrings",
                              FEEDBACKPRIVATE_GETSTRINGS)
@@ -62,21 +63,21 @@ class FeedbackPrivateGetStringsFunction : public ChromeSyncExtensionFunction {
  protected:
   ~FeedbackPrivateGetStringsFunction() override {}
 
-  // SyncExtensionFunction overrides.
-  bool RunSync() override;
+  // ExtensionFunction:
+  ResponseAction Run() override;
 
  private:
   static base::Closure* test_callback_;
 };
 
-class FeedbackPrivateGetUserEmailFunction : public ChromeSyncExtensionFunction {
+class FeedbackPrivateGetUserEmailFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getUserEmail",
                              FEEDBACKPRIVATE_GETUSEREMAIL);
 
  protected:
   ~FeedbackPrivateGetUserEmailFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
 class FeedbackPrivateGetSystemInformationFunction
@@ -106,6 +107,17 @@ class FeedbackPrivateSendFeedbackFunction
 
  private:
   void OnCompleted(bool success);
+};
+
+class FeedbackPrivateLogSrtPromptResultFunction
+    : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("feedbackPrivate.logSrtPromptResult",
+                             FEEDBACKPRIVATE_LOGSRTPROMPTRESULT);
+
+ protected:
+  ~FeedbackPrivateLogSrtPromptResultFunction() override {}
+  AsyncExtensionFunction::ResponseAction Run() override;
 };
 
 }  // namespace extensions

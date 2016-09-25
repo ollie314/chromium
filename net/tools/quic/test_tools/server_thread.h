@@ -5,10 +5,12 @@
 #ifndef NET_TOOLS_QUIC_TEST_TOOLS_SERVER_THREAD_H_
 #define NET_TOOLS_QUIC_TEST_TOOLS_SERVER_THREAD_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/threading/simple_thread.h"
 #include "net/base/ip_endpoint.h"
-#include "net/quic/quic_config.h"
+#include "net/quic/core/quic_config.h"
 #include "net/tools/quic/quic_server.h"
 
 namespace net {

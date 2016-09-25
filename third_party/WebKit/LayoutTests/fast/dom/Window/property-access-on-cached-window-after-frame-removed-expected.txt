@@ -1,6 +1,6 @@
-CONSOLE WARNING: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
-CONSOLE WARNING: 'webkitIndexedDB' is deprecated. Please use 'indexedDB' instead.
-CONSOLE WARNING: 'Performance.onwebkitresourcetimingbufferfull' is deprecated. Please use 'Performance.onresourcetimingbufferfull' instead.
+CONSOLE WARNING: line 98: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
+CONSOLE WARNING: line 98: 'webkitIndexedDB' is deprecated. Please use 'indexedDB' instead.
+CONSOLE WARNING: line 98: 'Performance.onwebkitresourcetimingbufferfull' is deprecated. Please use 'Performance.onresourcetimingbufferfull' instead.
 Tests property access on a cached DOMWindow after the associated frame is no longer in a web page. Test should not crash and properties should be set to sane defaults.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -51,10 +51,10 @@ PASS childWindow.navigator.doNotTrack is null
 PASS childWindow.navigator.hardwareConcurrency is window.navigator.hardwareConcurrency
 PASS childWindow.navigator.language is window.navigator.language
 PASS childWindow.navigator.maxTouchPoints is 0
+PASS childWindow.navigator.mediaDevices.ondevicechange is null
 PASS childWindow.navigator.onLine is window.navigator.onLine
 PASS childWindow.navigator.platform is window.navigator.platform
 FAIL childWindow.navigator.presentation.defaultRequest should be null. Threw exception TypeError: Cannot read property 'defaultRequest' of null
-FAIL childWindow.navigator.presentation.receiver.onconnectionavailable should be null. Threw exception TypeError: Cannot read property 'receiver' of null
 PASS childWindow.navigator.product is window.navigator.product
 PASS childWindow.navigator.productSub is window.navigator.productSub
 FAIL childWindow.navigator.serviceWorker.controller should be null. Threw exception TypeError: Cannot read property 'controller' of null
@@ -69,8 +69,7 @@ PASS childWindow.onabort is null
 PASS childWindow.onanimationend is null
 PASS childWindow.onanimationiteration is null
 PASS childWindow.onanimationstart is null
-PASS childWindow.onautocomplete is null
-PASS childWindow.onautocompleteerror is null
+PASS childWindow.onauxclick is null
 PASS childWindow.onbeforeunload is null
 PASS childWindow.onblur is null
 PASS childWindow.oncancel is null
@@ -124,6 +123,14 @@ PASS childWindow.onpageshow is null
 PASS childWindow.onpause is null
 PASS childWindow.onplay is null
 PASS childWindow.onplaying is null
+PASS childWindow.onpointercancel is null
+PASS childWindow.onpointerdown is null
+PASS childWindow.onpointerenter is null
+PASS childWindow.onpointerleave is null
+PASS childWindow.onpointermove is null
+PASS childWindow.onpointerout is null
+PASS childWindow.onpointerover is null
+PASS childWindow.onpointerup is null
 PASS childWindow.onpopstate is null
 PASS childWindow.onprogress is null
 PASS childWindow.onratechange is null
@@ -164,6 +171,7 @@ PASS childWindow.pageYOffset is 0
 PASS childWindow.performance.navigation.redirectCount is 0
 PASS childWindow.performance.navigation.type is 0
 PASS childWindow.performance.onframetimingbufferfull is null
+PASS childWindow.performance.onlongtasktimingbufferfull is null
 PASS childWindow.performance.onresourcetimingbufferfull is null
 PASS childWindow.performance.onwebkitresourcetimingbufferfull is null
 PASS childWindow.performance.timing.connectEnd is 0
@@ -215,6 +223,13 @@ PASS childWindow.status is ''
 PASS childWindow.statusbar.visible is false
 PASS childWindow.styleMedia.type is ''
 PASS childWindow.toolbar.visible is false
+FAIL childWindow.visualViewport.clientHeight should be 0. Threw exception TypeError: Cannot read property 'clientHeight' of null
+FAIL childWindow.visualViewport.clientWidth should be 0. Threw exception TypeError: Cannot read property 'clientWidth' of null
+FAIL childWindow.visualViewport.pageX should be 0. Threw exception TypeError: Cannot read property 'pageX' of null
+FAIL childWindow.visualViewport.pageY should be 0. Threw exception TypeError: Cannot read property 'pageY' of null
+FAIL childWindow.visualViewport.scale should be 0. Threw exception TypeError: Cannot read property 'scale' of null
+FAIL childWindow.visualViewport.scrollLeft should be 0. Threw exception TypeError: Cannot read property 'scrollLeft' of null
+FAIL childWindow.visualViewport.scrollTop should be 0. Threw exception TypeError: Cannot read property 'scrollTop' of null
 PASS successfullyParsed is true
 
 TEST COMPLETE

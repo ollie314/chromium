@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 #include <algorithm>
-#include <list>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +20,7 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/sequenced_task_runner_helpers.h"
@@ -46,6 +47,7 @@
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/net_internals_resources.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
@@ -63,7 +65,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "grit/net_internals_resources.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/dns/host_cache.h"
@@ -163,8 +164,7 @@ bool Base64StringToHashes(const std::string& hashes_str,
 net::HttpNetworkSession* GetHttpNetworkSession(
     net::URLRequestContext* context) {
   if (!context->http_transaction_factory())
-    return NULL;
-
+    return nullptr;
   return context->http_transaction_factory()->GetSession();
 }
 
@@ -175,6 +175,7 @@ content::WebUIDataSource* CreateNetInternalsHTMLSource() {
   source->SetDefaultResource(IDR_NET_INTERNALS_INDEX_HTML);
   source->AddResourcePath("index.js", IDR_NET_INTERNALS_INDEX_JS);
   source->SetJsonPath("strings.js");
+  source->DisableI18nAndUseGzipForAllPaths();
   return source;
 }
 
@@ -198,9 +199,9 @@ class NetInternalsMessageHandler
   void RegisterMessages() override;
 
   // Calls g_browser.receive in the renderer, passing in |command| and |arg|.
-  // Takes ownership of |arg|.  If the renderer is displaying a log file, the
-  // message will be ignored.
-  void SendJavascriptCommand(const std::string& command, base::Value* arg);
+  // If the renderer is displaying a log file, the message will be ignored.
+  void SendJavascriptCommand(const std::string& command,
+                             std::unique_ptr<base::Value> arg);
 
   // Javascript message handlers.
   void OnRendererReady(const base::ListValue* list);
@@ -238,8 +239,6 @@ class NetInternalsMessageHandler
 
   // This is the "real" message handler, which lives on the IO thread.
   scoped_refptr<IOThreadImpl> proxy_;
-
-  base::WeakPtr<prerender::PrerenderManager> prerender_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(NetInternalsMessageHandler);
 };
@@ -310,24 +309,24 @@ class NetInternalsMessageHandler::IOThreadImpl
   void OnAddEntry(const net::NetLog::Entry& entry) override;
 
   // Helper that calls g_browser.receive in the renderer, passing in |command|
-  // and |arg|.  Takes ownership of |arg|.  If the renderer is displaying a log
-  // file, the message will be ignored.  Note that this can be called from any
-  // thread.
-  void SendJavascriptCommand(const std::string& command, base::Value* arg);
+  // and |arg|.  If the renderer is displaying a log file, the message will be
+  // ignored.  Note that this can be called from any thread.
+  void SendJavascriptCommand(const std::string& command,
+                             std::unique_ptr<base::Value> arg);
 
  private:
   friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
   friend class base::DeleteHelper<IOThreadImpl>;
 
-  typedef std::list<scoped_refptr<net::URLRequestContextGetter> >
-      ContextGetterList;
+  using ContextGetterList =
+      std::vector<scoped_refptr<net::URLRequestContextGetter>>;
 
   ~IOThreadImpl() override;
 
   // Adds |entry| to the queue of pending log entries to be sent to the page via
   // Javascript.  Must be called on the IO Thread.  Also creates a delayed task
   // that will call PostPendingEntries, if there isn't one already.
-  void AddEntryToQueue(base::Value* entry);
+  void AddEntryToQueue(std::unique_ptr<base::Value> entry);
 
   // Sends all pending entries to the page via Javascript, and clears the list
   // of pending entries.  Sending multiple entries at once results in a
@@ -387,11 +386,11 @@ class NetInternalsMessageHandler::IOThreadImpl
 NetInternalsMessageHandler::NetInternalsMessageHandler() {}
 
 NetInternalsMessageHandler::~NetInternalsMessageHandler() {
-  if (proxy_.get()) {
-    proxy_.get()->OnWebUIDeleted();
+  if (proxy_) {
+    proxy_->OnWebUIDeleted();
     // Notify the handler on the IO thread that the renderer is gone.
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                            base::Bind(&IOThreadImpl::Detach, proxy_.get()));
+                            base::Bind(&IOThreadImpl::Detach, proxy_));
   }
 }
 
@@ -408,14 +407,6 @@ void NetInternalsMessageHandler::RegisterMessages() {
 #if defined(ENABLE_EXTENSIONS)
   proxy_->AddRequestContextGetter(profile->GetRequestContextForExtensions());
 #endif
-
-  prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(profile);
-  if (prerender_manager) {
-    prerender_manager_ = prerender_manager->AsWeakPtr();
-  } else {
-    prerender_manager_ = base::WeakPtr<prerender::PrerenderManager>();
-  }
 
   web_ui()->RegisterMessageCallback(
       "notifyReady",
@@ -509,17 +500,15 @@ void NetInternalsMessageHandler::RegisterMessages() {
 
 void NetInternalsMessageHandler::SendJavascriptCommand(
     const std::string& command,
-    base::Value* arg) {
+    std::unique_ptr<base::Value> arg) {
   std::unique_ptr<base::Value> command_value(new base::StringValue(command));
-  std::unique_ptr<base::Value> value(arg);
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (value.get()) {
-    web_ui()->CallJavascriptFunction("g_browser.receive",
-                                     *command_value.get(),
-                                     *value.get());
+  if (arg) {
+    web_ui()->CallJavascriptFunctionUnsafe("g_browser.receive",
+                                           *command_value.get(), *arg.get());
   } else {
-    web_ui()->CallJavascriptFunction("g_browser.receive",
-                                     *command_value.get());
+    web_ui()->CallJavascriptFunctionUnsafe("g_browser.receive",
+                                           *command_value.get());
   }
 }
 
@@ -539,25 +528,28 @@ void NetInternalsMessageHandler::OnClearBrowserCache(
 }
 
 void NetInternalsMessageHandler::OnGetPrerenderInfo(
-    const base::ListValue* list) {
+    const base::ListValue* /* list */) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  base::DictionaryValue* value = NULL;
-  prerender::PrerenderManager* prerender_manager = prerender_manager_.get();
-  if (!prerender_manager) {
-    value = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> value;
+
+  prerender::PrerenderManager* prerender_manager =
+      prerender::PrerenderManagerFactory::GetForBrowserContext(
+          Profile::FromWebUI(web_ui()));
+  if (prerender_manager) {
+    value = prerender_manager->GetAsValue();
+  } else {
+    value.reset(new base::DictionaryValue());
     value->SetBoolean("enabled", false);
     value->SetBoolean("omnibox_enabled", false);
-  } else {
-    value = prerender_manager->GetAsValue();
   }
-  SendJavascriptCommand("receivedPrerenderInfo", value);
+  SendJavascriptCommand("receivedPrerenderInfo", std::move(value));
 }
 
 void NetInternalsMessageHandler::OnGetHistoricNetworkStats(
     const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::Value* historic_network_info = NULL;
+  std::unique_ptr<base::Value> historic_network_info;
   Profile* profile = Profile::FromWebUI(web_ui());
   DataReductionProxyChromeSettings* data_reduction_proxy_settings =
         DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile);
@@ -569,13 +561,14 @@ void NetInternalsMessageHandler::OnGetHistoricNetworkStats(
     historic_network_info =
         compression_stats->HistoricNetworkStatsInfoToValue();
   }
-  SendJavascriptCommand("receivedHistoricNetworkStats", historic_network_info);
+  SendJavascriptCommand("receivedHistoricNetworkStats",
+                        std::move(historic_network_info));
 }
 
 void NetInternalsMessageHandler::OnGetExtensionInfo(
     const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::ListValue* extension_list = new base::ListValue();
+  auto extension_list = base::MakeUnique<base::ListValue>();
 #if defined(ENABLE_EXTENSIONS)
   Profile* profile = Profile::FromWebUI(web_ui());
   extensions::ExtensionSystem* extension_system =
@@ -586,17 +579,18 @@ void NetInternalsMessageHandler::OnGetExtensionInfo(
       std::unique_ptr<const extensions::ExtensionSet> extensions(
           extensions::ExtensionRegistry::Get(profile)
               ->GenerateInstalledExtensionsSet());
-      for (extensions::ExtensionSet::const_iterator it = extensions->begin();
-           it != extensions->end(); ++it) {
-        base::DictionaryValue* extension_info = new base::DictionaryValue();
-        bool enabled = extension_service->IsExtensionEnabled((*it)->id());
-        extensions::GetExtensionBasicInfo(it->get(), enabled, extension_info);
-        extension_list->Append(extension_info);
+      for (const auto& extension : *extensions) {
+        std::unique_ptr<base::DictionaryValue> extension_info(
+            new base::DictionaryValue());
+        bool enabled = extension_service->IsExtensionEnabled(extension->id());
+        extensions::GetExtensionBasicInfo(extension.get(), enabled,
+                                          extension_info.get());
+        extension_list->Append(std::move(extension_info));
       }
     }
   }
 #endif
-  SendJavascriptCommand("receivedExtensionInfo", extension_list);
+  SendJavascriptCommand("receivedExtensionInfo", std::move(extension_list));
 }
 
 void NetInternalsMessageHandler::OnGetDataReductionProxyInfo(
@@ -606,11 +600,13 @@ void NetInternalsMessageHandler::OnGetDataReductionProxyInfo(
   DataReductionProxyChromeSettings* data_reduction_proxy_settings =
       DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile);
   data_reduction_proxy::DataReductionProxyEventStore* event_store =
-      (data_reduction_proxy_settings == nullptr) ? nullptr :
-          data_reduction_proxy_settings->GetEventStore();
-  SendJavascriptCommand(
-      "receivedDataReductionProxyInfo",
-      (event_store == nullptr) ? nullptr : event_store->GetSummaryValue());
+      data_reduction_proxy_settings
+          ? data_reduction_proxy_settings->GetEventStore()
+          : nullptr;
+  std::unique_ptr<base::Value> value;
+  if (event_store)
+    value = event_store->GetSummaryValue();
+  SendJavascriptCommand("receivedDataReductionProxyInfo", std::move(value));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -651,7 +647,7 @@ void NetInternalsMessageHandler::IOThreadImpl::CallbackHelper(
   // thread. |list_copy| will be deleted when the task is destroyed. The called
   // |method| cannot take ownership of |list_copy|.
   base::ListValue* list_copy =
-      (list && list->GetSize()) ? list->DeepCopy() : NULL;
+      (list && list->GetSize()) ? list->DeepCopy() : nullptr;
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -739,16 +735,12 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSQuery(
   // |list| should be: [<domain to query>].
   std::string domain;
   CHECK(list->GetString(0, &domain));
-  base::DictionaryValue* result = new base::DictionaryValue();
+  auto result = base::MakeUnique<base::DictionaryValue>();
 
-  if (!base::IsStringASCII(domain)) {
-    result->SetString("error", "non-ASCII domain name");
-  } else {
+  if (base::IsStringASCII(domain)) {
     net::TransportSecurityState* transport_security_state =
         GetMainContext()->transport_security_state();
-    if (!transport_security_state) {
-      result->SetString("error", "no TransportSecurityState active");
-    } else {
+    if (transport_security_state) {
       net::TransportSecurityState::STSState static_sts_state;
       net::TransportSecurityState::PKPState static_pkp_state;
       const bool found_static = transport_security_state->GetStaticDomainState(
@@ -809,10 +801,14 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSQuery(
 
       result->SetBoolean(
           "result", found_static || found_sts_dynamic || found_pkp_dynamic);
+    } else {
+      result->SetString("error", "no TransportSecurityState active");
     }
+  } else {
+    result->SetString("error", "non-ASCII domain name");
   }
 
-  SendJavascriptCommand("receivedHSTSResult", result);
+  SendJavascriptCommand("receivedHSTSResult", std::move(result));
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnHSTSAdd(
@@ -875,18 +871,17 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetSessionNetworkStats(
   net::HttpNetworkSession* http_network_session =
       GetHttpNetworkSession(context);
 
-  base::Value* network_info = NULL;
+  std::unique_ptr<base::Value> network_info;
   if (http_network_session) {
     // TODO(mmenke):  This cast is ugly.  Can we get rid of it, or, better,
     // remove DRP data from net-internals entirely?
     data_reduction_proxy::DataReductionProxyNetworkDelegate* net_delegate =
         static_cast<data_reduction_proxy::DataReductionProxyNetworkDelegate*>(
             context->network_delegate());
-    if (net_delegate) {
+    if (net_delegate)
       network_info = net_delegate->SessionNetworkStatsInfoToValue();
-    }
   }
-  SendJavascriptCommand("receivedSessionNetworkStats", network_info);
+  SendJavascriptCommand("receivedSessionNetworkStats", std::move(network_info));
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnFlushSocketPools(
@@ -914,13 +909,13 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetServiceProviders(
     const base::ListValue* list) {
   DCHECK(!list);
 
-  base::DictionaryValue* service_providers = new base::DictionaryValue();
+  auto service_providers = base::MakeUnique<base::DictionaryValue>();
 
   WinsockLayeredServiceProviderList layered_providers;
   GetWinsockLayeredServiceProviders(&layered_providers);
-  base::ListValue* layered_provider_list = new base::ListValue();
+  auto layered_provider_list = base::MakeUnique<base::ListValue>();
   for (size_t i = 0; i < layered_providers.size(); ++i) {
-    base::DictionaryValue* service_dict = new base::DictionaryValue();
+    auto service_dict = base::MakeUnique<base::DictionaryValue>();
     service_dict->SetString("name", layered_providers[i].name);
     service_dict->SetInteger("version", layered_providers[i].version);
     service_dict->SetInteger("chain_length", layered_providers[i].chain_length);
@@ -929,25 +924,26 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetServiceProviders(
         layered_providers[i].socket_protocol);
     service_dict->SetString("path", layered_providers[i].path);
 
-    layered_provider_list->Append(service_dict);
+    layered_provider_list->Append(std::move(service_dict));
   }
-  service_providers->Set("service_providers", layered_provider_list);
+  service_providers->Set("service_providers", std::move(layered_provider_list));
 
   WinsockNamespaceProviderList namespace_providers;
   GetWinsockNamespaceProviders(&namespace_providers);
-  base::ListValue* namespace_list = new base::ListValue;
+  auto namespace_list = base::MakeUnique<base::ListValue>();
   for (size_t i = 0; i < namespace_providers.size(); ++i) {
-    base::DictionaryValue* namespace_dict = new base::DictionaryValue();
+    auto namespace_dict = base::MakeUnique<base::DictionaryValue>();
     namespace_dict->SetString("name", namespace_providers[i].name);
     namespace_dict->SetBoolean("active", namespace_providers[i].active);
     namespace_dict->SetInteger("version", namespace_providers[i].version);
     namespace_dict->SetInteger("type", namespace_providers[i].type);
 
-    namespace_list->Append(namespace_dict);
+    namespace_list->Append(std::move(namespace_dict));
   }
-  service_providers->Set("namespace_providers", namespace_list);
+  service_providers->Set("namespace_providers", std::move(namespace_list));
 
-  SendJavascriptCommand("receivedServiceProviders", service_providers);
+  SendJavascriptCommand("receivedServiceProviders",
+                        std::move(service_providers));
 }
 #endif
 
@@ -962,7 +958,8 @@ void NetInternalsMessageHandler::ImportONCFileToNSSDB(
 
   if (!user) {
     std::string error = "User not found.";
-    SendJavascriptCommand("receivedONCFileParse", new base::StringValue(error));
+    SendJavascriptCommand("receivedONCFileParse",
+                          base::MakeUnique<base::StringValue>(error));
     return;
   }
 
@@ -986,7 +983,7 @@ void NetInternalsMessageHandler::ImportONCFileToNSSDB(
     error += network_error;
 
   chromeos::onc::CertificateImporterImpl cert_importer(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO), nssdb);
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO), nssdb);
   cert_importer.ImportCertificates(
       certificates,
       onc_source,
@@ -1003,7 +1000,8 @@ void NetInternalsMessageHandler::OnCertificatesImported(
   if (!success)
     error += "Some certificates couldn't be imported. ";
 
-  SendJavascriptCommand("receivedONCFileParse", new base::StringValue(error));
+  SendJavascriptCommand("receivedONCFileParse",
+                        base::MakeUnique<base::StringValue>(error));
 }
 
 void NetInternalsMessageHandler::OnImportONCFile(
@@ -1025,8 +1023,9 @@ void NetInternalsMessageHandler::OnImportONCFile(
 void NetInternalsMessageHandler::OnStoreDebugLogs(const base::ListValue* list) {
   DCHECK(list);
 
-  SendJavascriptCommand("receivedStoreDebugLogs",
-                        new base::StringValue("Creating log file..."));
+  SendJavascriptCommand(
+      "receivedStoreDebugLogs",
+      base::MakeUnique<base::StringValue>("Creating log file..."));
   Profile* profile = Profile::FromWebUI(web_ui());
   const DownloadPrefs* const prefs = DownloadPrefs::FromBrowserContext(profile);
   base::FilePath path = prefs->DownloadPath();
@@ -1047,7 +1046,7 @@ void NetInternalsMessageHandler::OnStoreDebugLogsCompleted(
   else
     status = "Failed to create log file";
   SendJavascriptCommand("receivedStoreDebugLogs",
-                        new base::StringValue(status));
+                        base::MakeUnique<base::StringValue>(status));
 }
 
 void NetInternalsMessageHandler::OnSetNetworkDebugMode(
@@ -1067,13 +1066,11 @@ void NetInternalsMessageHandler::OnSetNetworkDebugMode(
 void NetInternalsMessageHandler::OnSetNetworkDebugModeCompleted(
     const std::string& subsystem,
     bool succeeded) {
-  std::string status;
-  if (succeeded)
-    status = "Debug mode is changed to " + subsystem;
-  else
-    status = "Failed to change debug mode to " + subsystem;
+  std::string status = succeeded ? "Debug mode is changed to "
+                                 : "Failed to change debug mode to ";
+  status += subsystem;
   SendJavascriptCommand("receivedSetNetworkDebugMode",
-                        new base::StringValue(status));
+                        base::MakeUnique<base::StringValue>(status));
 }
 #endif  // defined(OS_CHROMEOS)
 
@@ -1102,60 +1099,53 @@ void NetInternalsMessageHandler::IOThreadImpl::OnSetCaptureMode(
 // can be called from ANY THREAD.
 void NetInternalsMessageHandler::IOThreadImpl::OnAddEntry(
     const net::NetLog::Entry& entry) {
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&IOThreadImpl::AddEntryToQueue, this, entry.ToValue()));
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(&IOThreadImpl::AddEntryToQueue, this,
+                                     base::Passed(entry.ToValue())));
 }
 
 // Note that this can be called from ANY THREAD.
 void NetInternalsMessageHandler::IOThreadImpl::SendJavascriptCommand(
     const std::string& command,
-    base::Value* arg) {
+    std::unique_ptr<base::Value> arg) {
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    if (handler_.get() && !was_webui_deleted_) {
+    if (handler_ && !was_webui_deleted_) {
       // We check |handler_| in case it was deleted on the UI thread earlier
       // while we were running on the IO thread.
-      handler_->SendJavascriptCommand(command, arg);
-    } else {
-      delete arg;
+      handler_->SendJavascriptCommand(command, std::move(arg));
     }
     return;
   }
 
-  if (!BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&IOThreadImpl::SendJavascriptCommand, this, command, arg))) {
-    // Failed posting the task, avoid leaking.
-    delete arg;
-  }
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::Bind(&IOThreadImpl::SendJavascriptCommand, this,
+                                     command, base::Passed(&arg)));
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::AddEntryToQueue(
-    base::Value* entry) {
+    std::unique_ptr<base::Value> entry) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (!pending_entries_.get()) {
+  if (!pending_entries_) {
     pending_entries_.reset(new base::ListValue());
     BrowserThread::PostDelayedTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&IOThreadImpl::PostPendingEntries, this),
         base::TimeDelta::FromMilliseconds(kNetLogEventDelayMilliseconds));
   }
-  pending_entries_->Append(entry);
+  pending_entries_->Append(std::move(entry));
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::PostPendingEntries() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (pending_entries_.get())
-    SendJavascriptCommand("receivedLogEntries", pending_entries_.release());
+  if (pending_entries_)
+    SendJavascriptCommand("receivedLogEntries", std::move(pending_entries_));
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::PrePopulateEventList() {
   // Using a set removes any duplicates.
   std::set<net::URLRequestContext*> contexts;
-  for (ContextGetterList::const_iterator getter = context_getters_.begin();
-       getter != context_getters_.end(); ++getter) {
-    contexts.insert((*getter)->GetURLRequestContext());
-  }
+  for (const auto& getter : context_getters_)
+    contexts.insert(getter->GetURLRequestContext());
   contexts.insert(io_thread_->globals()->proxy_script_fetcher_context.get());
   contexts.insert(io_thread_->globals()->system_request_context.get());
 
@@ -1165,9 +1155,8 @@ void NetInternalsMessageHandler::IOThreadImpl::PrePopulateEventList() {
 
 void NetInternalsMessageHandler::IOThreadImpl::SendNetInfo(int info_sources) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  SendJavascriptCommand(
-      "receivedNetInfo",
-      net::GetNetInfo(GetMainContext(), info_sources).release());
+  SendJavascriptCommand("receivedNetInfo",
+                        net::GetNetInfo(GetMainContext(), info_sources));
 }
 
 }  // namespace

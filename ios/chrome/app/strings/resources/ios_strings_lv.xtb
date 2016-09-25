@@ -1,14 +1,15 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="lv">
-<translation id="1008557486741366299">Vēlāk</translation>
 <translation id="1047726139967079566">Saglabāt šo lapu kā grāmatzīmi...</translation>
 <translation id="1172898394251786223">Nākamais lauks</translation>
 <translation id="2320166752086256636">Paslēpt tastatūru</translation>
 <translation id="2467815441875554965">Kontekstuālā meklēšana</translation>
+<translation id="2572712655377361602">Ierīces politikas dēļ tika bloķēta piekļuve jūsu fotoattēliem.</translation>
 <translation id="2704606927547763573">Nokopēts</translation>
 <translation id="2747003861858887689">Iepriekšējais lauks</translation>
 <translation id="2780046210906776326">Nav e-pasta kontu</translation>
+<translation id="3172213052701798825">Google Smart Lock parolēm</translation>
 <translation id="3244271242291266297">MM</translation>
 <translation id="3252394070589632019"><ph name="VALUE" />, <ph name="ADDITIONAL_INFO" />, <ph name="INDEX" />. no <ph name="NUM_SUGGESTIONS" /></translation>
 <translation id="3335947283844343239">Vēlreiz atvērt aizvērto cilni</translation>
@@ -19,7 +20,9 @@
 <translation id="4399225372525667111">Chrome nevar apstiprināt, ka šīs vietnes URL ir pareizs.</translation>
 <translation id="4728558894243024398">Platforma</translation>
 <translation id="473775607612524610">Atjaunināt</translation>
+<translation id="4875622588773761625">Vai vēlaties, lai <ph name="PASSWORD_MANAGER_BRAND" /> atjauninātu jūsu paroli šai vietnei?</translation>
 <translation id="5317780077021120954">Saglabāt</translation>
+<translation id="6039694632319341016">Vai vēlaties, lai <ph name="PASSWORD_MANAGER_BRAND" /> atjauninātu lietotāja <ph name="USERNAME" /> paroli šai vietnei?</translation>
 <translation id="605721222689873409">GG</translation>
 <translation id="6149061208933997199">Izmantot paroli</translation>
 <translation id="6196207969502475924">Balss meklēšana</translation>

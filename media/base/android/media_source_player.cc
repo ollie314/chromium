@@ -15,9 +15,12 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "media/base/android/audio_decoder_job.h"
 #include "media/base/android/media_player_manager.h"
@@ -31,14 +34,12 @@ MediaSourcePlayer::MediaSourcePlayer(
     int player_id,
     MediaPlayerManager* manager,
     const OnDecoderResourcesReleasedCB& on_decoder_resources_released_cb,
-    scoped_ptr<DemuxerAndroid> demuxer,
-    const GURL& frame_url,
-    int media_session_id)
+    std::unique_ptr<DemuxerAndroid> demuxer,
+    const GURL& frame_url)
     : MediaPlayerAndroid(player_id,
                          manager,
                          on_decoder_resources_released_cb,
-                         frame_url,
-                         media_session_id),
+                         frame_url),
       demuxer_(std::move(demuxer)),
       pending_event_(NO_EVENT_PENDING),
       playing_(false),
@@ -68,6 +69,7 @@ MediaSourcePlayer::MediaSourcePlayer(
                  weak_factory_.GetWeakPtr())));
 
   demuxer_->Initialize(this);
+  interpolator_.SetPlaybackRate(1.0);
   interpolator_.SetUpperBound(base::TimeDelta());
   weak_this_ = weak_factory_.GetWeakPtr();
 }
@@ -86,7 +88,7 @@ MediaSourcePlayer::~MediaSourcePlayer() {
   }
 }
 
-void MediaSourcePlayer::SetVideoSurface(gfx::ScopedJavaSurface surface) {
+void MediaSourcePlayer::SetVideoSurface(gl::ScopedJavaSurface surface) {
   DVLOG(1) << __FUNCTION__;
   if (!video_decoder_job_->SetVideoSurface(std::move(surface)))
     return;
@@ -101,7 +103,7 @@ void MediaSourcePlayer::ScheduleSeekEventAndStopDecoding(
 
   pending_seek_ = false;
 
-  interpolator_.SetBounds(seek_time, seek_time);
+  interpolator_.SetBounds(seek_time, seek_time, default_tick_clock_.NowTicks());
 
   if (audio_decoder_job_->is_decoding())
     audio_decoder_job_->StopDecode();
@@ -249,7 +251,7 @@ void MediaSourcePlayer::StartInternal() {
   // related info should all be cleared.
   is_waiting_for_key_ = false;
   key_added_while_decode_pending_ = false;
-  AttachListener(NULL);
+  AttachListener(nullptr);
 
   SetPendingEvent(PREFETCH_REQUEST_EVENT_PENDING);
   ProcessPendingEvents();
@@ -356,17 +358,18 @@ void MediaSourcePlayer::OnDemuxerSeekDone(
   // I-frame later than the requested one due to data removal or GC. Update
   // player clock to the actual seek target.
   if (doing_browser_seek_) {
-    DCHECK(actual_browser_seek_time != kNoTimestamp());
+    DCHECK(actual_browser_seek_time != kNoTimestamp);
     base::TimeDelta seek_time = actual_browser_seek_time;
     // A browser seek must not jump into the past. Ideally, it seeks to the
     // requested time, but it might jump into the future.
     DCHECK(seek_time >= GetCurrentTime());
     DVLOG(1) << __FUNCTION__ << " : setting clock to actual browser seek time: "
              << seek_time.InSecondsF();
-    interpolator_.SetBounds(seek_time, seek_time);
+    interpolator_.SetBounds(seek_time, seek_time,
+                            default_tick_clock_.NowTicks());
     audio_decoder_job_->SetBaseTimestamp(seek_time);
   } else {
-    DCHECK(actual_browser_seek_time == kNoTimestamp());
+    DCHECK(actual_browser_seek_time == kNoTimestamp);
   }
 
   base::TimeDelta current_time = GetCurrentTime();
@@ -390,11 +393,10 @@ void MediaSourcePlayer::OnDemuxerSeekDone(
 void MediaSourcePlayer::UpdateTimestamps(
     base::TimeDelta current_presentation_timestamp,
     base::TimeDelta max_presentation_timestamp) {
+  base::TimeTicks now_ticks = default_tick_clock_.NowTicks();
   interpolator_.SetBounds(current_presentation_timestamp,
-                          max_presentation_timestamp);
-  manager()->OnTimeUpdate(player_id(),
-                          GetCurrentTime(),
-                          base::TimeTicks::Now());
+                          max_presentation_timestamp, now_ticks);
+  manager()->OnTimeUpdate(player_id(), GetCurrentTime(), now_ticks);
 }
 
 void MediaSourcePlayer::ProcessPendingEvents() {
@@ -505,7 +507,7 @@ void MediaSourcePlayer::MediaDecoderCallback(
   }
 
   // Increment frame counts for UMA.
-  if (current_presentation_timestamp != kNoTimestamp()) {
+  if (current_presentation_timestamp != kNoTimestamp) {
     FrameStatistics& frame_stats = is_audio ? media_stat_->audio_frame_stats()
                                             : media_stat_->video_frame_stats();
     frame_stats.IncrementFrameCount();
@@ -527,7 +529,7 @@ void MediaSourcePlayer::MediaDecoderCallback(
   }
 
   if ((status == MEDIA_CODEC_OK || status == MEDIA_CODEC_INPUT_END_OF_STREAM) &&
-      is_clock_manager && current_presentation_timestamp != kNoTimestamp()) {
+      is_clock_manager && current_presentation_timestamp != kNoTimestamp) {
     UpdateTimestamps(current_presentation_timestamp,
                      max_presentation_timestamp);
   }
@@ -600,7 +602,7 @@ void MediaSourcePlayer::MediaDecoderCallback(
     // If we have a valid timestamp, start the starvation callback. Otherwise,
     // reset the |start_time_ticks_| so that the next frame will not suffer
     // from the decoding delay caused by the current frame.
-    if (current_presentation_timestamp != kNoTimestamp())
+    if (current_presentation_timestamp != kNoTimestamp)
       StartStarvationCallback(current_presentation_timestamp,
                               max_presentation_timestamp);
     else
@@ -734,7 +736,7 @@ void MediaSourcePlayer::StartStarvationCallback(
 
   decoder_starvation_callback_.Reset(
       base::Bind(&MediaSourcePlayer::OnDecoderStarved, weak_this_));
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, decoder_starvation_callback_.callback(), timeout);
 }
 

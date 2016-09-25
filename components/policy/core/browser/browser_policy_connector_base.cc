@@ -12,7 +12,7 @@
 #include "components/policy/core/common/configuration_policy_provider.h"
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/core/common/policy_service_impl.h"
-#include "policy/policy_constants.h"
+#include "components/policy/policy_constants.h"
 
 namespace policy {
 
@@ -121,12 +121,12 @@ void BrowserPolicyConnectorBase::SetPolicyProviderForTesting(
 }
 
 void BrowserPolicyConnectorBase::AddPolicyProvider(
-    scoped_ptr<ConfigurationPolicyProvider> provider) {
+    std::unique_ptr<ConfigurationPolicyProvider> provider) {
   policy_providers_.push_back(provider.release());
 }
 
 void BrowserPolicyConnectorBase::SetPlatformPolicyProvider(
-    scoped_ptr<ConfigurationPolicyProvider> provider) {
+    std::unique_ptr<ConfigurationPolicyProvider> provider) {
   CHECK(!platform_policy_provider_);
   platform_policy_provider_ = provider.get();
   AddPolicyProvider(std::move(provider));

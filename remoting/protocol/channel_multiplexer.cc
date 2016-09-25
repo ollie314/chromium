@@ -16,7 +16,7 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
 #include "remoting/protocol/message_serialization.h"
 #include "remoting/protocol/p2p_stream_socket.h"
@@ -145,7 +145,7 @@ ChannelMultiplexer::MuxChannel::MuxChannel(
 ChannelMultiplexer::MuxChannel::~MuxChannel() {
   // Socket must be destroyed before the channel.
   DCHECK(!socket_);
-  STLDeleteElements(&pending_packets_);
+  base::STLDeleteElements(&pending_packets_);
 }
 
 std::unique_ptr<P2PStreamSocket>
@@ -310,7 +310,7 @@ ChannelMultiplexer::ChannelMultiplexer(StreamChannelFactory* factory,
 
 ChannelMultiplexer::~ChannelMultiplexer() {
   DCHECK(pending_channels_.empty());
-  STLDeleteValues(&channels_);
+  base::STLDeleteValues(&channels_);
 
   // Cancel creation of the base channel if it hasn't finished.
   if (base_channel_factory_)

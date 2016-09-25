@@ -21,6 +21,7 @@
 #include "content/browser/ssl/ssl_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_type.h"
+#include "content/public/browser/reload_type.h"
 
 struct FrameHostMsg_DidCommitProvisionalLoad_Params;
 
@@ -42,7 +43,6 @@ class CONTENT_EXPORT NavigationControllerImpl
   // NavigationController implementation:
   WebContents* GetWebContents() const override;
   BrowserContext* GetBrowserContext() const override;
-  void SetBrowserContext(BrowserContext* browser_context) override;
   void Restore(int selected_navigation,
                RestoreType type,
                std::vector<std::unique_ptr<NavigationEntry>>* entries) override;
@@ -155,10 +155,10 @@ class CONTENT_EXPORT NavigationControllerImpl
   // so that we know to load URLs that were pending as "lazy" loads.
   void SetActive(bool is_active);
 
-  // Returns true if the given URL would be an in-page navigation (i.e. only the
-  // reference fragment is different) from the last committed URL in the
-  // specified frame. If there is no last committed entry, then nothing will be
-  // in-page.
+  // Returns true if the given URL would be an in-page navigation (e.g., if the
+  // reference fragment is different, or after a pushState) from the last
+  // committed URL in the specified frame. If there is no last committed entry,
+  // then nothing will be in-page.
   //
   // Special note: if the URLs are the same, it does NOT automatically count as
   // an in-page navigation. Neither does an input URL that has no ref, even if
@@ -170,11 +170,12 @@ class CONTENT_EXPORT NavigationControllerImpl
   // The situation is made murkier by history.replaceState(), which could
   // provide the same URL as part of an in-page navigation, not a reload. So
   // we need to let the (untrustworthy) renderer resolve the ambiguity, but
-  // only when the URLs are on the same origin.
-  bool IsURLInPageNavigation(
-      const GURL& url,
-      bool renderer_says_in_page,
-      RenderFrameHost* rfh) const;
+  // only when the URLs are on the same origin. We rely on |origin|, which
+  // matters in cases like about:blank that otherwise look cross-origin.
+  bool IsURLInPageNavigation(const GURL& url,
+                             const url::Origin& origin,
+                             bool renderer_says_in_page,
+                             RenderFrameHost* rfh) const;
 
   // Sets the SessionStorageNamespace for the given |partition_id|. This is
   // used during initialization of a new NavigationController to allow
@@ -284,16 +285,19 @@ class CONTENT_EXPORT NavigationControllerImpl
   void RendererDidNavigateToNewPage(
       RenderFrameHostImpl* rfh,
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
+      bool is_in_page,
       bool replace_entry);
   void RendererDidNavigateToExistingPage(
       RenderFrameHostImpl* rfh,
-      const FrameHostMsg_DidCommitProvisionalLoad_Params& params);
+      const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
+      bool is_in_page);
   void RendererDidNavigateToSamePage(
       RenderFrameHostImpl* rfh,
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params);
   void RendererDidNavigateNewSubframe(
       RenderFrameHostImpl* rfh,
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
+      bool is_in_page,
       bool replace_entry);
   bool RendererDidNavigateAutoSubframe(
       RenderFrameHostImpl* rfh,
@@ -344,10 +348,6 @@ class CONTENT_EXPORT NavigationControllerImpl
   // RenderView.  Callers must ensure that |CanPruneAllButLastCommitted| returns
   // true before calling this.
   void PruneAllButLastCommittedInternal();
-
-  // Returns true if the navigation is likley to be automatic rather than
-  // user-initiated.
-  bool IsLikelyAutoNavigation(base::TimeTicks now);
 
   // Inserts up to |max_index| entries from |source| into this. This does NOT
   // adjust any of the members that reference entries_

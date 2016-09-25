@@ -26,6 +26,7 @@ class CC_EXPORT PaintedScrollbarLayer : public ScrollbarLayerInterface,
       int scroll_layer_id);
 
   bool OpacityCanAnimateOnImplThread() const override;
+  bool AlwaysUseActiveTreeOpacity() const override;
   ScrollbarLayerInterface* ToScrollbarLayer() override;
 
   // ScrollbarLayerInterface
@@ -70,9 +71,6 @@ class CC_EXPORT PaintedScrollbarLayer : public ScrollbarLayerInterface,
     SetNeedsPushProperties();
     return true;
   }
-
-  int MaxTextureSize();
-  float ClampScaleToMaxTextureSize(float scale);
 
   UIResourceBitmap RasterizeScrollbarPart(const gfx::Rect& layer_rect,
                                           const gfx::Rect& content_rect,

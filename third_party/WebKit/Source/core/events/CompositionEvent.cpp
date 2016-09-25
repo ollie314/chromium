@@ -33,7 +33,7 @@ CompositionEvent::CompositionEvent()
 }
 
 CompositionEvent::CompositionEvent(const AtomicString& type, AbstractView* view, const String& data)
-    : UIEvent(type, true, true, view, 0, InputDeviceCapabilities::doesntFireTouchEventsSourceCapabilities())
+    : UIEvent(type, true, true, ComposedMode::Composed, view, 0, InputDeviceCapabilities::doesntFireTouchEventsSourceCapabilities())
     , m_data(data)
 {
 }
@@ -51,7 +51,7 @@ CompositionEvent::~CompositionEvent()
 
 void CompositionEvent::initCompositionEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view, const String& data)
 {
-    if (dispatched())
+    if (isBeingDispatched())
         return;
 
     initUIEvent(type, canBubble, cancelable, view, 0);

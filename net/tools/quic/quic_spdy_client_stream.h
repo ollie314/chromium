@@ -11,8 +11,8 @@
 
 #include "base/macros.h"
 #include "base/strings/string_piece.h"
-#include "net/quic/quic_protocol.h"
-#include "net/quic/quic_spdy_stream.h"
+#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_spdy_stream.h"
 #include "net/spdy/spdy_framer.h"
 
 namespace net {
@@ -34,12 +34,24 @@ class QuicSpdyClientStream : public QuicSpdyStream {
   // Override the base class to parse and store headers.
   void OnInitialHeadersComplete(bool fin, size_t frame_len) override;
 
+  // Override the base class to parse and store headers.
+  void OnInitialHeadersComplete(bool fin,
+                                size_t frame_len,
+                                const QuicHeaderList& header_list) override;
+
   // Override the base class to parse and store trailers.
-  void OnTrailingHeadersComplete(bool fin, size_t frame_len) override;
+  void OnTrailingHeadersComplete(bool fin,
+                                 size_t frame_len,
+                                 const QuicHeaderList& header_list) override;
 
   // Override the base class to handle creation of the push stream.
   void OnPromiseHeadersComplete(QuicStreamId promised_stream_id,
                                 size_t frame_len) override;
+
+  // Override the base class to handle creation of the push stream.
+  void OnPromiseHeaderList(QuicStreamId promised_id,
+                           size_t frame_len,
+                           const QuicHeaderList& header_list) override;
 
   // ReliableQuicStream implementation called by the session when there's
   // data for us.
@@ -47,9 +59,7 @@ class QuicSpdyClientStream : public QuicSpdyStream {
 
   // Serializes the headers and body, sends it to the server, and
   // returns the number of bytes sent.
-  size_t SendRequest(const SpdyHeaderBlock& headers,
-                     base::StringPiece body,
-                     bool fin);
+  size_t SendRequest(SpdyHeaderBlock headers, base::StringPiece body, bool fin);
 
   // Returns the response data.
   const std::string& data() { return data_; }

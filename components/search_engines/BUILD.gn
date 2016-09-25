@@ -11,10 +11,6 @@ static_library("search_engines") {
     "default_search_manager.h",
     "default_search_pref_migration.cc",
     "default_search_pref_migration.h",
-    "desktop_search_redirection_infobar_delegate.cc",
-    "desktop_search_redirection_infobar_delegate.h",
-    "desktop_search_utils.cc",
-    "desktop_search_utils.h",
     "keyword_table.cc",
     "keyword_table.h",
     "keyword_web_data_service.cc",
@@ -72,13 +68,12 @@ static_library("search_engines") {
     "//components/prefs",
     "//components/rappor",
     "//components/strings",
-    "//components/sync_driver",
+    "//components/sync",
     "//components/url_formatter",
     "//components/webdata/common",
     "//google_apis",
     "//net",
     "//sql",
-    "//sync",
     "//third_party/libxml",
     "//ui/base",
     "//ui/gfx",
@@ -92,13 +87,13 @@ static_library("search_engines") {
       "default_search_policy_handler.h",
     ]
     deps += [
-      "//components/policy",
-      "//components/policy:policy_component",
+      "//components/policy:generated",
+      "//components/policy/core/browser",
     ]
   }
 }
 
-source_set("test_support") {
+static_library("test_support") {
   testonly = true
   sources = [
     "default_search_pref_test_util.cc",
@@ -119,7 +114,6 @@ source_set("unit_tests") {
   sources = [
     "default_search_manager_unittest.cc",
     "default_search_pref_migration_unittest.cc",
-    "desktop_search_utils_unittest.cc",
     "keyword_table_unittest.cc",
     "search_engine_data_type_controller_unittest.cc",
     "search_host_to_urls_map_unittest.cc",
@@ -132,14 +126,15 @@ source_set("unit_tests") {
     ":prepopulated_engines",
     ":test_support",
     "//base",
+    "//base/test:test_support",
     "//components/google/core/browser",
     "//components/pref_registry:test_support",
     "//components/prefs",
-    "//components/sync_driver:test_support",
+    "//components/sync:test_support_sync_api",
+    "//components/sync:test_support_sync_driver",
     "//components/syncable_prefs:test_support",
     "//components/webdata/common",
     "//sql",
-    "//sync:test_support_sync_api",
     "//testing/gmock",
     "//testing/gtest",
     "//url",
@@ -149,8 +144,8 @@ source_set("unit_tests") {
     sources += [ "default_search_policy_handler_unittest.cc" ]
 
     deps += [
-      "//components/policy",
-      "//components/policy:policy_component_test_support",
+      "//components/policy:generated",
+      "//components/policy/core/browser:test_support",
     ]
   }
 }

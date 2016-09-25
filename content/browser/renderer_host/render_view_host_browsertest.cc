@@ -87,11 +87,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostTest, BaseURLParam) {
   EXPECT_EQ(1, observer.navigation_count());
 
   // But should be set to the original page when reading MHTML.
-  base::FilePath content_test_data_dir;
-  ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &content_test_data_dir));
-  test_url = net::FilePathToFileURL(
-      content_test_data_dir.AppendASCII("google.mht"));
-  NavigateToURL(shell(), test_url);
+  NavigateToURL(shell(), GetTestUrl(nullptr, "google.mht"));
   EXPECT_EQ("http://www.google.com/", observer.base_url().spec());
 }
 
@@ -108,7 +104,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostTest, BasicRenderFrameHost) {
   EXPECT_TRUE(old_root->current_frame_host());
 
   ShellAddedObserver new_shell_observer;
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), "window.open();"));
+  EXPECT_TRUE(ExecuteScript(shell(), "window.open();"));
   Shell* new_shell = new_shell_observer.GetShell();
   FrameTreeNode* new_root = static_cast<WebContentsImpl*>(
       new_shell->web_contents())->GetFrameTree()->root();
@@ -126,7 +122,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostTest, IsFocusedElementEditable) {
 
   RenderViewHost* rvh = shell()->web_contents()->GetRenderViewHost();
   EXPECT_FALSE(rvh->IsFocusedElementEditable());
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), "focus_textfield();"));
+  EXPECT_TRUE(ExecuteScript(shell(), "focus_textfield();"));
   EXPECT_TRUE(rvh->IsFocusedElementEditable());
 }
 
@@ -145,7 +141,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostTest, MAYBE_ReleaseSessionOnCloseACK) {
   // Make a new Shell, a seperate tab with it's own session namespace and
   // have it start loading a url but still be in progress.
   ShellAddedObserver new_shell_observer;
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), "window.open();"));
+  EXPECT_TRUE(ExecuteScript(shell(), "window.open();"));
   Shell* new_shell = new_shell_observer.GetShell();
   new_shell->LoadURL(test_url);
   RenderViewHost* rvh = new_shell->web_contents()->GetRenderViewHost();

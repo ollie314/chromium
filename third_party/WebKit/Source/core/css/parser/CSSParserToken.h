@@ -7,8 +7,8 @@
 
 #include "core/CoreExport.h"
 #include "core/css/CSSPrimitiveValue.h"
-#include "core/css/parser/CSSParserString.h"
 #include "wtf/Allocator.h"
+#include "wtf/text/StringView.h"
 
 namespace blink {
 
@@ -74,62 +74,30 @@ public:
     };
 
     CSSParserToken(CSSParserTokenType, BlockType = NotBlock);
-    CSSParserToken(CSSParserTokenType, CSSParserString, BlockType = NotBlock);
+    CSSParserToken(CSSParserTokenType, StringView, BlockType = NotBlock);
 
     CSSParserToken(CSSParserTokenType, UChar); // for DelimiterToken
     CSSParserToken(CSSParserTokenType, double, NumericValueType, NumericSign); // for NumberToken
     CSSParserToken(CSSParserTokenType, UChar32, UChar32); // for UnicodeRangeToken
 
-    CSSParserToken(HashTokenType, CSSParserString);
+    CSSParserToken(HashTokenType, StringView);
 
-    bool operator==(const CSSParserToken& other) const
-    {
-        if (m_type != other.m_type)
-            return false;
-        switch (m_type) {
-        case DelimiterToken:
-            return delimiter() == other.delimiter();
-        case HashToken:
-            if (m_hashTokenType != other.m_hashTokenType)
-                return false;
-            // fallthrough
-        case IdentToken:
-        case FunctionToken:
-        case StringToken:
-        case UrlToken:
-            return m_valueDataCharRaw == other.m_valueDataCharRaw && m_valueLength == other.m_valueLength && m_valueIs8Bit == other.m_valueIs8Bit;
-        case NumberToken:
-            if (m_numericSign != other.m_numericSign)
-                return false;
-            // fallthrough
-        case DimensionToken:
-            if (m_valueDataCharRaw != other.m_valueDataCharRaw || m_valueLength != other.m_valueLength || m_valueIs8Bit != other.m_valueIs8Bit)
-                return false;
-            // fallthrough
-        case PercentageToken:
-            return m_numericValue == other.m_numericValue && m_numericValueType == other.m_numericValueType;
-        case UnicodeRangeToken:
-            return m_unicodeRange.start == other.m_unicodeRange.start && m_unicodeRange.end == other.m_unicodeRange.end;
-        default:
-            return true;
-        }
-    }
+    bool operator==(const CSSParserToken& other) const;
+    bool operator!=(const CSSParserToken& other) const { return !(*this == other); }
 
     // Converts NumberToken to DimensionToken.
-    void convertToDimensionWithUnit(CSSParserString);
+    void convertToDimensionWithUnit(StringView);
 
     // Converts NumberToken to PercentageToken.
     void convertToPercentage();
 
     CSSParserTokenType type() const { return static_cast<CSSParserTokenType>(m_type); }
-    CSSParserString value() const
+    StringView value() const
     {
-        CSSParserString ret;
-        ret.initRaw(m_valueDataCharRaw, m_valueLength, m_valueIs8Bit);
-        return ret;
+        if (m_valueIs8Bit)
+            return StringView(reinterpret_cast<const LChar*>(m_valueDataCharRaw), m_valueLength);
+        return StringView(reinterpret_cast<const UChar*>(m_valueDataCharRaw), m_valueLength);
     }
-    template<unsigned matchLength>
-    bool valueEqualsIgnoringASCIICase(const char (&match)[matchLength]) const { return value().equalIgnoringASCIICase<matchLength>(match); }
 
     UChar delimiter() const;
     NumericSign numericSign() const;
@@ -149,14 +117,14 @@ public:
 
     void serialize(StringBuilder&) const;
 
-    CSSParserToken copyWithUpdatedString(const CSSParserString&) const;
+    CSSParserToken copyWithUpdatedString(const StringView&) const;
 
 private:
-    void initValueFromCSSParserString(const CSSParserString& value)
+    void initValueFromStringView(StringView string)
     {
-        m_valueLength = value.m_length;
-        m_valueIs8Bit = value.m_is8Bit;
-        m_valueDataCharRaw = value.m_data.charactersRaw;
+        m_valueLength = string.length();
+        m_valueIs8Bit = string.is8Bit();
+        m_valueDataCharRaw = string.bytes();
     }
     unsigned m_type : 6; // CSSParserTokenType
     unsigned m_blockType : 2; // BlockType
@@ -164,7 +132,9 @@ private:
     unsigned m_numericSign : 2; // NumericSign
     unsigned m_unit : 7; // CSSPrimitiveValue::UnitType
 
-    // m_value... is an unpacked CSSParserString so that we can pack it
+    bool valueDataCharRawEqual(const CSSParserToken& other) const;
+
+    // m_value... is an unpacked StringView so that we can pack it
     // tightly with the rest of this object for a smaller object size.
     bool m_valueIs8Bit : 1;
     unsigned m_valueLength;

@@ -8,10 +8,10 @@
 
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/appcache/appcache_interceptor.h"
@@ -21,26 +21,26 @@
 #include "content/browser/loader/resource_loader_delegate.h"
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/service_worker/service_worker_request_handler.h"
+#include "content/browser/service_worker/service_worker_response_info.h"
 #include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "content/browser/ssl/ssl_manager.h"
 #include "content/browser/ssl/ssl_policy.h"
-#include "content/common/ssl_status_serialization.h"
-#include "content/public/browser/cert_store.h"
-#include "content/public/browser/resource_context.h"
 #include "content/public/browser/resource_dispatcher_host_login_delegate.h"
-#include "content/public/browser/signed_certificate_timestamp_store.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/resource_response.h"
-#include "content/public/common/security_style.h"
+#include "content/public/common/resource_type.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
+#include "net/nqe/effective_connection_type.h"
+#include "net/nqe/network_quality_estimator.h"
 #include "net/ssl/client_cert_store.h"
 #include "net/ssl/ssl_platform_key.h"
 #include "net/ssl/ssl_private_key.h"
 #include "net/url_request/redirect_info.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
 
 using base::TimeDelta;
@@ -49,40 +49,8 @@ using base::TimeTicks;
 namespace content {
 namespace {
 
-void StoreSignedCertificateTimestamps(
-    const net::SignedCertificateTimestampAndStatusList& sct_list,
-    int process_id,
-    SignedCertificateTimestampIDStatusList* sct_ids) {
-  SignedCertificateTimestampStore* sct_store(
-      SignedCertificateTimestampStore::GetInstance());
-
-  for (auto iter = sct_list.begin(); iter != sct_list.end(); ++iter) {
-    const int sct_id(sct_store->Store(iter->sct.get(), process_id));
-    sct_ids->push_back(
-        SignedCertificateTimestampIDAndStatus(sct_id, iter->status));
-  }
-}
-
-void GetSSLStatusForRequest(const GURL& url,
-                            const net::SSLInfo& ssl_info,
-                            int child_id,
-                            CertStore* cert_store,
-                            SSLStatus* ssl_status) {
-  DCHECK(ssl_info.cert);
-  int cert_id = cert_store->StoreCert(ssl_info.cert.get(), child_id);
-
-  SignedCertificateTimestampIDStatusList signed_certificate_timestamp_ids;
-  StoreSignedCertificateTimestamps(ssl_info.signed_certificate_timestamps,
-                                   child_id, &signed_certificate_timestamp_ids);
-
-  *ssl_status = SSLStatus(SSLPolicy::GetSecurityStyleForResource(
-                              url, cert_id, ssl_info.cert_status),
-                          cert_id, signed_certificate_timestamp_ids, ssl_info);
-}
-
 void PopulateResourceResponse(ResourceRequestInfoImpl* info,
                               net::URLRequest* request,
-                              CertStore* cert_store,
                               ResourceResponse* response) {
   response->head.request_time = request->request_time();
   response->head.response_time = request->response_time();
@@ -92,21 +60,35 @@ void PopulateResourceResponse(ResourceRequestInfoImpl* info,
   request->GetMimeType(&response->head.mime_type);
   net::HttpResponseInfo response_info = request->response_info();
   response->head.was_fetched_via_spdy = response_info.was_fetched_via_spdy;
-  response->head.was_npn_negotiated = response_info.was_npn_negotiated;
-  response->head.npn_negotiated_protocol =
-      response_info.npn_negotiated_protocol;
+  response->head.was_alpn_negotiated = response_info.was_alpn_negotiated;
+  response->head.alpn_negotiated_protocol =
+      response_info.alpn_negotiated_protocol;
   response->head.connection_info = response_info.connection_info;
   response->head.was_fetched_via_proxy = request->was_fetched_via_proxy();
   response->head.proxy_server = response_info.proxy_server;
-  response->head.socket_address = request->GetSocketAddress();
+  response->head.socket_address = response_info.socket_address;
   const content::ResourceRequestInfo* request_info =
       content::ResourceRequestInfo::ForRequest(request);
   if (request_info)
     response->head.is_using_lofi = request_info->IsUsingLoFi();
-  if (ServiceWorkerRequestHandler* handler =
-          ServiceWorkerRequestHandler::GetHandler(request)) {
-    handler->GetExtraResponseInfo(&response->head);
+
+  response->head.effective_connection_type =
+      net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
+
+  if (info->GetResourceType() == RESOURCE_TYPE_MAIN_FRAME) {
+    DCHECK(info->IsMainFrame());
+    net::NetworkQualityEstimator* estimator =
+        request->context()->network_quality_estimator();
+    if (estimator) {
+      response->head.effective_connection_type =
+          estimator->GetEffectiveConnectionType();
+    }
   }
+
+  const ServiceWorkerResponseInfo* service_worker_info =
+      ServiceWorkerResponseInfo::ForRequest(request);
+  if (service_worker_info)
+    service_worker_info->GetExtraResponseInfo(&response->head);
   AppCacheInterceptor::GetExtraResponseInfo(
       request, &response->head.appcache_id,
       &response->head.appcache_manifest_url);
@@ -114,18 +96,37 @@ void PopulateResourceResponse(ResourceRequestInfoImpl* info,
     request->GetLoadTimingInfo(&response->head.load_timing);
 
   if (request->ssl_info().cert.get()) {
-    SSLStatus ssl_status;
-    GetSSLStatusForRequest(request->url(), request->ssl_info(),
-                           info->GetChildID(), cert_store, &ssl_status);
-    response->head.security_info = SerializeSecurityInfo(ssl_status);
     response->head.has_major_certificate_errors =
-        net::IsCertStatusError(ssl_status.cert_status) &&
-        !net::IsCertStatusMinorError(ssl_status.cert_status);
+        net::IsCertStatusError(request->ssl_info().cert_status) &&
+        !net::IsCertStatusMinorError(request->ssl_info().cert_status);
+    if (info->ShouldReportRawHeaders()) {
+      // Only pass these members when the network panel of the DevTools is open,
+      // i.e. ShouldReportRawHeaders() is set. These data are used to populate
+      // the requests in the security panel too.
+      response->head.cert_status = request->ssl_info().cert_status;
+      response->head.ssl_connection_status =
+          request->ssl_info().connection_status;
+      response->head.ssl_key_exchange_group =
+          request->ssl_info().key_exchange_group;
+      response->head.signed_certificate_timestamps =
+          request->ssl_info().signed_certificate_timestamps;
+      std::string encoded;
+      bool rv = net::X509Certificate::GetDEREncoded(
+          request->ssl_info().cert->os_cert_handle(), &encoded);
+      DCHECK(rv);
+      response->head.certificate.push_back(encoded);
+      for (auto& cert :
+               request->ssl_info().cert->GetIntermediateCertificates()) {
+        rv = net::X509Certificate::GetDEREncoded(cert, &encoded);
+        DCHECK(rv);
+        response->head.certificate.push_back(encoded);
+      }
+    }
   } else {
     // We should not have any SSL state.
     DCHECK(!request->ssl_info().cert_status);
     DCHECK_EQ(request->ssl_info().security_bits, -1);
-    DCHECK_EQ(request->ssl_info().key_exchange_info, 0);
+    DCHECK_EQ(request->ssl_info().key_exchange_group, 0);
     DCHECK(!request->ssl_info().connection_status);
   }
 }
@@ -134,7 +135,6 @@ void PopulateResourceResponse(ResourceRequestInfoImpl* info,
 
 ResourceLoader::ResourceLoader(std::unique_ptr<net::URLRequest> request,
                                std::unique_ptr<ResourceHandler> handler,
-                               CertStore* cert_store,
                                ResourceLoaderDelegate* delegate)
     : deferred_stage_(DEFERRED_NONE),
       request_(std::move(request)),
@@ -144,7 +144,6 @@ ResourceLoader::ResourceLoader(std::unique_ptr<net::URLRequest> request,
       times_cancelled_before_request_start_(0),
       started_request_(false),
       times_cancelled_after_request_start_(0),
-      cert_store_(cert_store),
       weak_ptr_factory_(this) {
   request_->set_delegate(this);
   handler_->SetController(this);
@@ -205,7 +204,6 @@ void ResourceLoader::MarkAsTransferring(
   CHECK(IsResourceTypeFrame(GetRequestInfo()->GetResourceType()))
       << "Can only transfer for navigations";
   is_transferring_ = true;
-  transferring_response_ = response;
 
   int child_id = GetRequestInfo()->GetChildID();
   AppCacheInterceptor::PrepareForCrossSiteTransfer(request(), child_id);
@@ -223,7 +221,6 @@ void ResourceLoader::CompleteTransfer() {
   DCHECK(DEFERRED_READ == deferred_stage_ ||
          DEFERRED_RESPONSE_COMPLETE == deferred_stage_);
   DCHECK(is_transferring_);
-  DCHECK(transferring_response_);
 
   // In some cases, a process transfer doesn't really happen and the
   // request is resumed in the original process. Real transfers to a new process
@@ -237,7 +234,6 @@ void ResourceLoader::CompleteTransfer() {
     handler->MaybeCompleteCrossSiteTransferInOldProcess(child_id);
 
   is_transferring_ = false;
-  transferring_response_ = nullptr;
   GetRequestInfo()->cross_site_handler()->ResumeResponse();
 }
 
@@ -271,8 +267,6 @@ void ResourceLoader::OnReceivedRedirect(net::URLRequest* unused,
     return;
   }
 
-  delegate_->DidReceiveRedirect(this, redirect_info.new_url);
-
   if (delegate_->HandleExternalProtocol(this, redirect_info.new_url)) {
     // The request is complete so we can remove it.
     CancelAndIgnore();
@@ -280,7 +274,8 @@ void ResourceLoader::OnReceivedRedirect(net::URLRequest* unused,
   }
 
   scoped_refptr<ResourceResponse> response = new ResourceResponse();
-  PopulateResourceResponse(info, request_.get(), cert_store_, response.get());
+  PopulateResourceResponse(info, request_.get(), response.get());
+  delegate_->DidReceiveRedirect(this, redirect_info.new_url, response.get());
   if (!handler_->OnRequestRedirected(redirect_info, response.get(), defer)) {
     Cancel();
   } else if (*defer) {
@@ -321,8 +316,7 @@ void ResourceLoader::OnCertificateRequested(
   DCHECK(!ssl_client_auth_handler_)
       << "OnCertificateRequested called with ssl_client_auth_handler pending";
   ssl_client_auth_handler_.reset(new SSLClientAuthHandler(
-      GetRequestInfo()->GetContext()->CreateClientCertStore(), request_.get(),
-      cert_info, this));
+      delegate_->CreateClientCertStore(this), request_.get(), cert_info, this));
   ssl_client_auth_handler_->SelectCertificate();
 }
 
@@ -334,21 +328,6 @@ void ResourceLoader::OnSSLCertificateError(net::URLRequest* request,
   SSLManager::OnSSLCertificateError(
       weak_ptr_factory_.GetWeakPtr(), info->GetResourceType(), request_->url(),
       info->GetWebContentsGetterForRequest(), ssl_info, fatal);
-}
-
-void ResourceLoader::OnBeforeNetworkStart(net::URLRequest* unused,
-                                          bool* defer) {
-  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
-               "ResourceLoader::OnBeforeNetworkStart");
-  DCHECK_EQ(request_.get(), unused);
-
-  // Give the handler a chance to delay the URLRequest from using the network.
-  if (!handler_->OnBeforeNetworkStart(request_->url(), defer)) {
-    Cancel();
-    return;
-  } else if (*defer) {
-    deferred_stage_ = DEFERRED_NETWORK_START;
-  }
 }
 
 void ResourceLoader::OnResponseStarted(net::URLRequest* unused) {
@@ -467,9 +446,6 @@ void ResourceLoader::Resume() {
     case DEFERRED_START:
       StartRequestInternal();
       break;
-    case DEFERRED_NETWORK_START:
-      request_->ResumeNetworkStart();
-      break;
     case DEFERRED_REDIRECT:
       request_->FollowDeferredRedirect();
       break;
@@ -558,7 +534,7 @@ void ResourceLoader::CancelRequestInternal(int error, bool from_renderer) {
 void ResourceLoader::CompleteResponseStarted() {
   ResourceRequestInfoImpl* info = GetRequestInfo();
   scoped_refptr<ResourceResponse> response = new ResourceResponse();
-  PopulateResourceResponse(info, request_.get(), cert_store_, response.get());
+  PopulateResourceResponse(info, request_.get(), response.get());
 
   delegate_->DidReceiveResponse(this);
 
@@ -671,17 +647,6 @@ void ResourceLoader::ResponseCompleted() {
 
   DVLOG(1) << "ResponseCompleted: " << request_->url().spec();
   RecordHistograms();
-  ResourceRequestInfoImpl* info = GetRequestInfo();
-
-  std::string security_info;
-  const net::SSLInfo& ssl_info = request_->ssl_info();
-  if (ssl_info.cert.get() != NULL) {
-    SSLStatus ssl_status;
-    GetSSLStatusForRequest(request_->url(), ssl_info, info->GetChildID(),
-                           cert_store_, &ssl_status);
-
-    security_info = SerializeSecurityInfo(ssl_status);
-  }
 
   bool defer = false;
   {
@@ -689,7 +654,7 @@ void ResourceLoader::ResponseCompleted() {
     tracked_objects::ScopedTracker tracking_profile(
         FROM_HERE_WITH_EXPLICIT_FUNCTION("475761 OnResponseCompleted()"));
 
-    handler_->OnResponseCompleted(request_->status(), security_info, &defer);
+    handler_->OnResponseCompleted(request_->status(), &defer);
   }
   if (defer) {
     // The handler is not ready to die yet.  We will call DidFinishLoading when
@@ -708,13 +673,19 @@ void ResourceLoader::CallDidFinishLoading() {
 }
 
 void ResourceLoader::RecordHistograms() {
-  if (request_->response_info().network_accessed) {
-    UMA_HISTOGRAM_ENUMERATION("Net.HttpResponseInfo.ConnectionInfo",
-                              request_->response_info().connection_info,
-                              net::HttpResponseInfo::NUM_OF_CONNECTION_INFOS);
-  }
-
   ResourceRequestInfoImpl* info = GetRequestInfo();
+  if (request_->response_info().network_accessed) {
+    if (info->GetResourceType() == RESOURCE_TYPE_MAIN_FRAME) {
+      UMA_HISTOGRAM_ENUMERATION("Net.HttpResponseInfo.ConnectionInfo.MainFrame",
+                                request_->response_info().connection_info,
+                                net::HttpResponseInfo::NUM_OF_CONNECTION_INFOS);
+    } else {
+      UMA_HISTOGRAM_ENUMERATION(
+          "Net.HttpResponseInfo.ConnectionInfo.SubResource",
+          request_->response_info().connection_info,
+          net::HttpResponseInfo::NUM_OF_CONNECTION_INFOS);
+    }
+  }
 
   if (info->GetResourceType() == RESOURCE_TYPE_PREFETCH) {
     PrefetchStatus status = STATUS_UNDEFINED;
@@ -743,6 +714,9 @@ void ResourceLoader::RecordHistograms() {
     }
 
     UMA_HISTOGRAM_ENUMERATION("Net.Prefetch.Pattern", status, STATUS_MAX);
+  } else if (request_->response_info().unused_since_prefetch) {
+    TimeDelta total_time = base::TimeTicks::Now() - request_->creation_time();
+    UMA_HISTOGRAM_TIMES("Net.Prefetch.TimeSpentOnPrefetchHit", total_time);
   }
 }
 

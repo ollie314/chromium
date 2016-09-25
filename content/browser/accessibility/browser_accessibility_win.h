@@ -66,6 +66,7 @@ BrowserAccessibilityWin
     COM_INTERFACE_ENTRY2(IDispatch, IAccessible2)
     COM_INTERFACE_ENTRY(IAccessible)
     COM_INTERFACE_ENTRY(IAccessible2)
+    COM_INTERFACE_ENTRY(IAccessibleAction)
     COM_INTERFACE_ENTRY(IAccessibleApplication)
     COM_INTERFACE_ENTRY(IAccessibleEx)
     COM_INTERFACE_ENTRY(IAccessibleHyperlink)
@@ -244,7 +245,7 @@ BrowserAccessibilityWin
                     LONG* position_in_group) override;
 
   //
-  // IAccessibleEx methods not implemented.
+  // IAccessible2 methods not implemented.
   //
   CONTENT_EXPORT STDMETHODIMP get_extendedRole(BSTR* extended_role) override;
   CONTENT_EXPORT STDMETHODIMP
@@ -751,6 +752,11 @@ BrowserAccessibilityWin
   // an output parameter to a COM interface, never use it otherwise.
   BrowserAccessibilityWin* NewReference();
 
+  // Returns a list of IA2 attributes indicating the offsets in the text of a
+  // leaf object, such as a text field or static text, where spelling errors are
+  // present.
+  std::map<int, std::vector<base::string16>> GetSpellingAttributes() const;
+
   // Many MSAA methods take a var_id parameter indicating that the operation
   // should be performed on a particular child ID, rather than this object.
   // This method tries to figure out the target object from |var_id| and
@@ -880,16 +886,27 @@ BrowserAccessibilityWin
   // or a menu list option with a parent of type menu list popup.
   bool IsListBoxOptionOrMenuListOption();
 
-  // Given an int list attribute containing the ids of related elements,
-  // add a new IAccessibleRelation for this object with the given type name.
-  void AddRelations(ui::AXIntListAttribute src_attr,
-                    const base::string16& iaccessiblerelation_type);
+  // For adding / removing IA2 relations.
+
+  void AddRelation(const base::string16& relation_type, int target_id);
+  void AddBidirectionalRelations(const base::string16& relation_type,
+                                 const base::string16& reverse_relation_type,
+                                 ui::AXIntListAttribute attribute);
+  // Clears all the forward relations from this object to any other object and
+  // the associated  reverse relations on the other objects, but leaves any
+  // reverse relations on this object alone.
+  void ClearOwnRelations();
+  void RemoveBidirectionalRelationsOfType(
+      const base::string16& relation_type,
+      const base::string16& reverse_relation_type);
+  void RemoveTargetFromRelation(const base::string16& relation_type,
+                                int target_id);
 
   // Updates object attributes of IA2 with html attributes.
   void UpdateRequiredAttributes();
 
-  // Updates the IA2 text style attributes.
-  void UpdateTextAttributes();
+  // Fire a Windows-specific accessibility event notification on this node.
+  void FireNativeEvent(LONG win_event_type) const;
 
   struct WinAttributes {
     WinAttributes();
@@ -922,8 +939,10 @@ BrowserAccessibilityWin
     // |hyperlinks_|.
     std::map<int32_t, int32_t> hyperlink_offset_to_index;
 
-    // The id of a BrowserAccessibilityWin for each hyperlink.
-    // TODO(nektar): Replace object IDs with child indices.
+    // The unique id of a BrowserAccessibilityWin for each hyperlink.
+    // TODO(nektar): Replace object IDs with child indices if we decide that
+    // we are not implementing IA2 hyperlinks for anything other than IA2
+    // Hypertext.
     std::vector<int32_t> hyperlinks;
   };
 

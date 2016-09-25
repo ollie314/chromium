@@ -259,6 +259,7 @@ class NATIVE_THEME_EXPORT NativeTheme {
     kColorId_ButtonHighlightColor,
     kColorId_ButtonHoverColor,
     kColorId_ButtonHoverBackgroundColor,
+    kColorId_ButtonPressedShade,
     kColorId_BlueButtonEnabledColor,
     kColorId_BlueButtonDisabledColor,
     kColorId_BlueButtonPressedColor,
@@ -324,9 +325,6 @@ class NATIVE_THEME_EXPORT NativeTheme {
     kColorId_ResultsTableNormalDimmedText,
     kColorId_ResultsTableHoveredDimmedText,
     kColorId_ResultsTableSelectedDimmedText,
-    kColorId_ResultsTableNormalHeadline,
-    kColorId_ResultsTableHoveredHeadline,
-    kColorId_ResultsTableSelectedHeadline,
     kColorId_ResultsTableNormalUrl,
     kColorId_ResultsTableHoveredUrl,
     kColorId_ResultsTableSelectedUrl,
@@ -344,6 +342,10 @@ class NATIVE_THEME_EXPORT NativeTheme {
     kColorId_ThrobberSpinningColor,
     kColorId_ThrobberWaitingColor,
     kColorId_ThrobberLightColor,
+    // Colors for icons that alert, e.g. upgrade reminders.
+    kColorId_AlertSeverityLow,
+    kColorId_AlertSeverityMedium,
+    kColorId_AlertSeverityHigh,
     // TODO(benrg): move other hardcoded colors here.
 
     kColorId_NumColors,

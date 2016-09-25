@@ -35,11 +35,13 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -49,9 +51,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
-#include "grit/browser_resources.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/template_expressions.h"
@@ -270,19 +269,18 @@ base::RefCountedMemory* NTPResourceCache::GetNewTabCSS(WindowType win_type) {
 void NTPResourceCache::Observe(int type,
                                const content::NotificationSource& source,
                                const content::NotificationDetails& details) {
+  DCHECK_EQ(chrome::NOTIFICATION_BROWSER_THEME_CHANGED, type);
+
   // Invalidate the cache.
-  if (chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type)
-    Invalidate();
-  else
-    NOTREACHED();
+  Invalidate();
 }
 
 void NTPResourceCache::OnPreferenceChanged() {
   // A change occurred to one of the preferences we care about, so flush the
   // cache.
-  new_tab_incognito_html_ = NULL;
-  new_tab_html_ = NULL;
-  new_tab_css_ = NULL;
+  new_tab_incognito_html_ = nullptr;
+  new_tab_html_ = nullptr;
+  new_tab_css_ = nullptr;
 }
 
 // TODO(dbeam): why must Invalidate() and OnPreferenceChanged() both exist?

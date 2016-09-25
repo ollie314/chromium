@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -42,6 +43,8 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/safe_browsing/file_type_policies.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
@@ -51,6 +54,7 @@
 #include "content/public/browser/page_navigator.h"
 #include "net/base/filename_util.h"
 #include "net/base/mime_util.h"
+#include "ui/base/l10n/l10n_util.h"
 
 #if BUILDFLAG(ANDROID_JAVA_UI)
 #include "chrome/browser/android/download/chrome_download_manager_overwrite_infobar_delegate.h"
@@ -73,6 +77,7 @@
 using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
+using safe_browsing::DownloadFileType;
 using safe_browsing::DownloadProtectionService;
 
 namespace {
@@ -176,6 +181,16 @@ std::string GetMimeType(const base::FilePath& path) {
   net::GetMimeTypeFromFile(path, &mime_type);
   return mime_type;
 }
+
+// Reason for why danger type is DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE.
+// Used by "Download.DangerousFile.Reason" UMA metric.
+// Do not change the ordering or remove items.
+enum DangerousFileReason {
+  SB_NOT_AVAILABLE = 0,
+  SB_RETURNS_UNKOWN = 1,
+  SB_RETURNS_SAFE = 2,
+  DANGEROUS_FILE_REASON_MAX
+};
 
 }  // namespace
 
@@ -308,7 +323,7 @@ bool ChromeDownloadManagerDelegate::IsDownloadReadyForCompletion(
     // Begin the safe browsing download protection check.
     DownloadProtectionService* service = GetDownloadProtectionService();
     if (service) {
-      DVLOG(2) << __FUNCTION__ << "() Start SB download check for download = "
+      DVLOG(2) << __func__ << "() Start SB download check for download = "
                << item->DebugString(false);
       state = new SafeBrowsingState();
       state->set_callback(internal_complete_callback);
@@ -325,14 +340,16 @@ bool ChromeDownloadManagerDelegate::IsDownloadReadyForCompletion(
     // we need to restore the danger state.
     content::DownloadDangerType danger_type = item->GetDangerType();
     if (DownloadItemModel(item).GetDangerLevel() !=
-            download_util::NOT_DANGEROUS &&
+            DownloadFileType::NOT_DANGEROUS &&
         (danger_type == content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS ||
          danger_type ==
              content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT)) {
-      DVLOG(2) << __FUNCTION__
+      DVLOG(2) << __func__
                << "() SB service disabled. Marking download as DANGEROUS FILE";
       item->OnContentCheckCompleted(
           content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE);
+      UMA_HISTOGRAM_ENUMERATION("Download.DangerousFile.Reason",
+                                SB_NOT_AVAILABLE, DANGEROUS_FILE_REASON_MAX);
       content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
                                        internal_complete_callback);
       return false;
@@ -431,6 +448,20 @@ void ChromeDownloadManagerDelegate::ChooseSavePath(
       callback);
 }
 
+void ChromeDownloadManagerDelegate::SanitizeSavePackageResourceName(
+    base::FilePath* filename) {
+  safe_browsing::FileTypePolicies* file_type_policies =
+      safe_browsing::FileTypePolicies::GetInstance();
+
+  if (file_type_policies->GetFileDangerLevel(*filename) ==
+      safe_browsing::DownloadFileType::NOT_DANGEROUS)
+    return;
+
+  base::FilePath default_filename = base::FilePath::FromUTF8Unsafe(
+      l10n_util::GetStringUTF8(IDS_DEFAULT_DOWNLOAD_FILENAME));
+  *filename = filename->AddExtension(default_filename.BaseName().value());
+}
+
 void ChromeDownloadManagerDelegate::OpenDownloadUsingPlatformHandler(
     DownloadItem* download) {
   base::FilePath platform_path(
@@ -464,10 +495,8 @@ void ChromeDownloadManagerDelegate::OpenDownload(DownloadItem* download) {
   }
   content::OpenURLParams params(
       net::FilePathToFileURL(download->GetTargetFilePath()),
-      content::Referrer(),
-      NEW_FOREGROUND_TAB,
-      ui::PAGE_TRANSITION_LINK,
-      false);
+      content::Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui::PAGE_TRANSITION_LINK, false);
 
   if (download->GetMimeType() == "application/x-x509-user-cert")
     chrome::ShowSettingsSubPage(browser, "certificates");
@@ -589,7 +618,7 @@ void ChromeDownloadManagerDelegate::PromptUserForDownloadPath(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 #if BUILDFLAG(ANDROID_JAVA_UI)
   chrome::android::ChromeDownloadManagerOverwriteInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(download->GetWebContents()),
+      InfoBarService::FromWebContents(download->GetWebContents()), download,
       suggested_path, callback);
 #else
   DownloadFilePicker::ShowFilePicker(download, suggested_path, callback);
@@ -625,7 +654,7 @@ void ChromeDownloadManagerDelegate::CheckDownloadUrl(
   if (service) {
     bool is_content_check_supported =
         service->IsSupportedDownload(*download, suggested_path);
-    DVLOG(2) << __FUNCTION__ << "() Start SB URL check for download = "
+    DVLOG(2) << __func__ << "() Start SB URL check for download = "
              << download->DebugString(false);
     service->CheckDownloadUrl(*download,
                               base::Bind(&CheckDownloadUrlDone,
@@ -655,7 +684,7 @@ void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
   if (!item || (item->GetState() != DownloadItem::IN_PROGRESS))
     return;
 
-  DVLOG(2) << __FUNCTION__ << "() download = " << item->DebugString(false)
+  DVLOG(2) << __func__ << "() download = " << item->DebugString(false)
            << " verdict = " << result;
   // We only mark the content as being dangerous if the download's safety state
   // has not been set to DANGEROUS yet.  We don't want to show two warnings.
@@ -668,16 +697,23 @@ void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
       case DownloadProtectionService::UNKNOWN:
         // The check failed or was inconclusive.
         if (DownloadItemModel(item).GetDangerLevel() !=
-            download_util::NOT_DANGEROUS)
+            DownloadFileType::NOT_DANGEROUS) {
           danger_type = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE;
+          UMA_HISTOGRAM_ENUMERATION("Download.DangerousFile.Reason",
+                                    SB_RETURNS_UNKOWN,
+                                    DANGEROUS_FILE_REASON_MAX);
+        }
         break;
       case DownloadProtectionService::SAFE:
         // If this file type require explicit consent, then set the danger type
         // to DANGEROUS_FILE so that the user be required to manually vet
         // whether the download is intended or not.
         if (DownloadItemModel(item).GetDangerLevel() ==
-            download_util::DANGEROUS)
+            DownloadFileType::DANGEROUS) {
           danger_type = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE;
+          UMA_HISTOGRAM_ENUMERATION("Download.DangerousFile.Reason",
+                                    SB_RETURNS_SAFE, DANGEROUS_FILE_REASON_MAX);
+        }
         break;
       case DownloadProtectionService::DANGEROUS:
         danger_type = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT;
@@ -711,7 +747,7 @@ void ChromeDownloadManagerDelegate::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
 #if defined(ENABLE_EXTENSIONS)
-  DCHECK(type == extensions::NOTIFICATION_CRX_INSTALLER_DONE);
+  DCHECK_EQ(extensions::NOTIFICATION_CRX_INSTALLER_DONE, type);
 
   registrar_.Remove(this, extensions::NOTIFICATION_CRX_INSTALLER_DONE, source);
 

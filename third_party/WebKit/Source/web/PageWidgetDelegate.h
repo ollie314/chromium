@@ -35,7 +35,6 @@
 #include "public/web/WebInputEvent.h"
 #include "public/web/WebWidget.h"
 #include "web/WebExport.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
@@ -60,8 +59,6 @@ public:
     virtual WebInputEventResult handleGestureEvent(const WebGestureEvent&) = 0;
     virtual WebInputEventResult handleTouchEvent(LocalFrame& mainFrame, const WebTouchEvent&);
     virtual ~PageWidgetEventHandler() { }
-protected:
-    const char* inputTypeToName(WebInputEvent::Type);
 };
 
 

@@ -8,11 +8,12 @@
 #include <array>
 #include <functional>
 #include <list>
+#include <memory>
 #include <string>
 
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -48,7 +49,7 @@ TEST(FetcherPoolTest, AddDelete) {
   // It also tests IsAvailable.
   base::MessageLoop loop;
   MockURLFetcherDelegate delegate;
-  scoped_ptr<URLFetcher> url_fetcher(
+  std::unique_ptr<URLFetcher> url_fetcher(
       new FakeURLFetcher(GURL("http://a.com"), &delegate, "irrelevant", HTTP_OK,
                          URLRequestStatus::SUCCESS));
   URLFetcher* url_fetcher_ptr = url_fetcher.get();
@@ -62,7 +63,7 @@ TEST(FetcherPoolTest, AddDelete) {
   EXPECT_FALSE(pool.IsEmpty());
   EXPECT_CALL(delegate, OnURLFetchComplete(url_fetcher_ptr));
 
-  loop.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   pool.Delete(*url_fetcher_ptr);
   EXPECT_TRUE(pool.IsEmpty());
@@ -73,7 +74,7 @@ TEST(FetcherPoolTest, Delete) {
   const size_t kSize = 42;
   base::MessageLoop loop;
   MockURLFetcherDelegate delegate;
-  scoped_ptr<URLFetcher> url_fetcher(
+  std::unique_ptr<URLFetcher> url_fetcher(
       new FakeURLFetcher(GURL("http://a.com"), &delegate, "irrelevant", HTTP_OK,
                          URLRequestStatus::SUCCESS));
   URLFetcher* url_fetcher_ptr = url_fetcher.get();
@@ -86,7 +87,7 @@ TEST(FetcherPoolTest, Delete) {
   EXPECT_TRUE(pool.IsEmpty());
 
   EXPECT_CALL(delegate, OnURLFetchComplete(_)).Times(0);
-  loop.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST(FetcherPoolTest, ParallelURLFetchers) {
@@ -100,7 +101,7 @@ TEST(FetcherPoolTest, ParallelURLFetchers) {
   EXPECT_CALL(delegate, OnURLFetchComplete(_)).Times(0);
   int num_requests_in_flight = 0;
   for (const auto& url : urls) {
-    scoped_ptr<URLFetcher> url_fetcher(
+    std::unique_ptr<URLFetcher> url_fetcher(
         new FakeURLFetcher(GURL(url), &delegate, "irrelevant", HTTP_OK,
                            URLRequestStatus::SUCCESS));
     num_requests_in_flight++;
@@ -116,7 +117,7 @@ TEST(FetcherPoolTest, ParallelURLFetchers) {
         pool.Delete(*fetcher);
       }));
 
-  loop.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(pool.IsEmpty());
   EXPECT_TRUE(pool.IsAvailable());
@@ -130,7 +131,7 @@ TEST(FetcherPoolTest, DeleteAll) {
   std::string urls[] = {"http://a.com", "http://b.com", "http://c.com"};
   EXPECT_CALL(delegate, OnURLFetchComplete(_)).Times(0);
   for (const auto& url : urls) {
-    scoped_ptr<URLFetcher> url_fetcher(
+    std::unique_ptr<URLFetcher> url_fetcher(
         new FakeURLFetcher(GURL(url), &delegate, "irrelevant", HTTP_OK,
                            URLRequestStatus::SUCCESS));
     url_fetcher->Start();
@@ -139,7 +140,7 @@ TEST(FetcherPoolTest, DeleteAll) {
 
   pool.DeleteAll();
 
-  loop.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(pool.IsEmpty());
   EXPECT_TRUE(pool.IsAvailable());
@@ -150,7 +151,7 @@ TEST(FetcherPoolTest, DeleteAll) {
 TEST(FetcherPoolTest, AddTooManyURLFetchers) {
   MockURLFetcherDelegate delegate;
   FetcherPool<URLFetcher> pool(0);
-  scoped_ptr<URLFetcher> url_fetcher(
+  std::unique_ptr<URLFetcher> url_fetcher(
       new FakeURLFetcher(GURL("http://queso.es"), &delegate, "irrelevant",
                          HTTP_OK, URLRequestStatus::SUCCESS));
   EXPECT_DEBUG_DEATH(pool.Add(std::move(url_fetcher)),
@@ -159,7 +160,7 @@ TEST(FetcherPoolTest, AddTooManyURLFetchers) {
 
 TEST(FetcherPoolTest, AddNullURLFetcher) {
   FetcherPool<URLFetcher> pool(1);
-  scoped_ptr<URLFetcher> null_ptr;
+  std::unique_ptr<URLFetcher> null_ptr;
   EXPECT_DEBUG_DEATH(pool.Add(std::move(null_ptr)), "cannot be null");
 }
 
@@ -185,7 +186,7 @@ TEST(FetcherPoolTest, ExampleUsage) {
   std::function<void()> start_next_batch = [&pending_urls, &pool, &delegate]() {
     while (!pending_urls.empty() && pool.IsAvailable()) {
       // Called CreateAndStartUrlFetcher in the documentation.
-      scoped_ptr<URLFetcher> fetcher(
+      std::unique_ptr<URLFetcher> fetcher(
           new FakeURLFetcher(GURL(pending_urls.front()), &delegate,
                              "irrelevant", HTTP_OK, URLRequestStatus::SUCCESS));
       fetcher->Start();
@@ -208,7 +209,7 @@ TEST(FetcherPoolTest, ExampleUsage) {
   EXPECT_FALSE(pool.IsEmpty());
   EXPECT_FALSE(pool.IsAvailable());
 
-  loop.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(pool.IsEmpty());
   EXPECT_TRUE(pool.IsAvailable());

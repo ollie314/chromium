@@ -33,11 +33,12 @@
 #include "core/XLinkNames.h"
 #include "core/XMLNSNames.h"
 #include "core/XMLNames.h"
+#include "core/dom/Document.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/frame/UseCounter.h"
-#include "core/html/HTMLDocument.h"
 #include "core/html/HTMLFormElement.h"
+#include "core/html/HTMLTemplateElement.h"
 #include "core/html/parser/AtomicHTMLToken.h"
 #include "core/html/parser/HTMLDocumentParser.h"
 #include "core/html/parser/HTMLParserIdioms.h"
@@ -46,6 +47,7 @@
 #include "core/html/parser/HTMLTokenizer.h"
 #include "platform/text/PlatformLocale.h"
 #include "wtf/text/CharacterNames.h"
+#include <memory>
 
 namespace blink {
 
@@ -130,12 +132,6 @@ static bool isNonAnchorFormattingTag(const AtomicString& tagName)
 static bool isFormattingTag(const AtomicString& tagName)
 {
     return tagName == aTag || isNonAnchorFormattingTag(tagName);
-}
-
-static HTMLFormElement* closestFormAncestor(Element& element)
-{
-    ASSERT(isMainThread());
-    return Traversal<HTMLFormElement>::firstAncestorOrSelf(element);
 }
 
 class HTMLTreeBuilder::CharacterTokenBuffer {
@@ -266,12 +262,12 @@ private:
     unsigned m_end;
 };
 
-HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser, HTMLDocument* document, ParserContentPolicy parserContentPolicy, bool, const HTMLParserOptions& options)
+HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser, Document& document, ParserContentPolicy parserContentPolicy, const HTMLParserOptions& options)
     : m_framesetOk(true)
 #if ENABLE(ASSERT)
     , m_isAttached(true)
 #endif
-    , m_tree(document, parserContentPolicy)
+    , m_tree(parser->reentryPermit(), document, parserContentPolicy)
     , m_insertionMode(InitialMode)
     , m_originalInsertionMode(InitialMode)
     , m_shouldSkipLeadingNewline(false)
@@ -281,24 +277,13 @@ HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser, HTMLDocument* docum
 {
 }
 
-// FIXME: Member variables should be grouped into self-initializing structs to
-// minimize code duplication between these constructors.
 HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser, DocumentFragment* fragment, Element* contextElement, ParserContentPolicy parserContentPolicy, const HTMLParserOptions& options)
-    : m_framesetOk(true)
-#if ENABLE(ASSERT)
-    , m_isAttached(true)
-#endif
-    , m_fragmentContext(fragment, contextElement)
-    , m_tree(fragment, parserContentPolicy)
-    , m_insertionMode(InitialMode)
-    , m_originalInsertionMode(InitialMode)
-    , m_shouldSkipLeadingNewline(false)
-    , m_parser(parser)
-    , m_scriptToProcessStartPosition(uninitializedPositionValue1())
-    , m_options(options)
+    : HTMLTreeBuilder(parser, fragment->document(), parserContentPolicy, options)
 {
     ASSERT(isMainThread());
     ASSERT(contextElement);
+    m_tree.initFragmentParsing(fragment, contextElement);
+    m_fragmentContext.init(fragment, contextElement);
 
     // Steps 4.2-4.6 of the HTML5 Fragment Case parsing algorithm:
     // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-end.html#fragment-case
@@ -310,11 +295,24 @@ HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser, DocumentFragment* f
         m_templateInsertionModes.append(TemplateContentsMode);
 
     resetInsertionModeAppropriately();
-    m_tree.setForm(closestFormAncestor(*contextElement));
 }
 
 HTMLTreeBuilder::~HTMLTreeBuilder()
 {
+}
+
+void HTMLTreeBuilder::FragmentParsingContext::init(DocumentFragment* fragment, Element* contextElement)
+{
+    DCHECK(fragment);
+    DCHECK(!fragment->hasChildren());
+    m_fragment = fragment;
+    m_contextElementStackItem = HTMLStackItem::create(contextElement, HTMLStackItem::ItemForContextElement);
+}
+
+DEFINE_TRACE(HTMLTreeBuilder::FragmentParsingContext)
+{
+    visitor->trace(m_fragment);
+    visitor->trace(m_contextElementStackItem);
 }
 
 DEFINE_TRACE(HTMLTreeBuilder)
@@ -328,35 +326,14 @@ DEFINE_TRACE(HTMLTreeBuilder)
 void HTMLTreeBuilder::detach()
 {
 #if ENABLE(ASSERT)
-    // This call makes little sense in fragment mode, but for consistency
-    // DocumentParser expects detach() to always be called before it's destroyed.
+    // This call makes little sense in fragment mode, but for
+    // consistency DocumentParser expects detach() to always be called
+    // before it's destroyed.
     m_isAttached = false;
 #endif
     // HTMLConstructionSite might be on the callstack when detach() is called
     // otherwise we'd just call m_tree.clear() here instead.
     m_tree.detach();
-}
-
-HTMLTreeBuilder::FragmentParsingContext::FragmentParsingContext()
-    : m_fragment(nullptr)
-{
-}
-
-HTMLTreeBuilder::FragmentParsingContext::FragmentParsingContext(DocumentFragment* fragment, Element* contextElement)
-    : m_fragment(fragment)
-{
-    ASSERT(!fragment->hasChildren());
-    m_contextElementStackItem = HTMLStackItem::create(contextElement, HTMLStackItem::ItemForContextElement);
-}
-
-HTMLTreeBuilder::FragmentParsingContext::~FragmentParsingContext()
-{
-}
-
-DEFINE_TRACE(HTMLTreeBuilder::FragmentParsingContext)
-{
-    visitor->trace(m_fragment);
-    visitor->trace(m_contextElementStackItem);
 }
 
 Element* HTMLTreeBuilder::takeScriptToProcess(TextPosition& scriptStartPosition)
@@ -528,7 +505,7 @@ static void adjustSVGTagNameCase(AtomicHTMLToken* token)
     static PrefixedNameToQualifiedNameMap* caseMap = 0;
     if (!caseMap) {
         caseMap = new PrefixedNameToQualifiedNameMap;
-        OwnPtr<const SVGQualifiedName*[]> svgTags = SVGNames::getSVGTags();
+        std::unique_ptr<const SVGQualifiedName*[]> svgTags = SVGNames::getSVGTags();
         mapLoweredLocalNameToName(caseMap, svgTags.get(), SVGNames::SVGTagsCount);
     }
 
@@ -538,13 +515,13 @@ static void adjustSVGTagNameCase(AtomicHTMLToken* token)
     token->setName(casedName.localName());
 }
 
-template<PassOwnPtr<const QualifiedName*[]> getAttrs(), unsigned length>
+template<std::unique_ptr<const QualifiedName*[]> getAttrs(), unsigned length>
 static void adjustAttributes(AtomicHTMLToken* token)
 {
     static PrefixedNameToQualifiedNameMap* caseMap = 0;
     if (!caseMap) {
         caseMap = new PrefixedNameToQualifiedNameMap;
-        OwnPtr<const QualifiedName*[]> attrs = getAttrs();
+        std::unique_ptr<const QualifiedName*[]> attrs = getAttrs();
         mapLoweredLocalNameToName(caseMap, attrs.get(), length);
     }
 
@@ -583,10 +560,10 @@ static void adjustForeignAttributes(AtomicHTMLToken* token)
     if (!map) {
         map = new PrefixedNameToQualifiedNameMap;
 
-        OwnPtr<const QualifiedName*[]> attrs = XLinkNames::getXLinkAttrs();
+        std::unique_ptr<const QualifiedName*[]> attrs = XLinkNames::getXLinkAttrs();
         addNamesWithPrefix(map, xlinkAtom, attrs.get(), XLinkNames::XLinkAttrsCount);
 
-        OwnPtr<const QualifiedName*[]> xmlAttrs = XMLNames::getXMLAttrs();
+        std::unique_ptr<const QualifiedName*[]> xmlAttrs = XMLNames::getXMLAttrs();
         addNamesWithPrefix(map, xmlAtom, xmlAttrs.get(), XMLNames::XMLAttrsCount);
 
         map->add(WTF::xmlnsAtom, XMLNSNames::xmlnsAttr);
@@ -643,7 +620,12 @@ void HTMLTreeBuilder::processStartTagForInBody(AtomicHTMLToken* token)
         m_tree.openElements()->bodyElement()->remove(ASSERT_NO_EXCEPTION);
         m_tree.openElements()->popUntil(m_tree.openElements()->bodyElement());
         m_tree.openElements()->popHTMLBodyElement();
-        ASSERT(m_tree.openElements()->top() == m_tree.openElements()->htmlElement());
+
+        // Note: in the fragment case the root is a DocumentFragment instead of
+        // a proper html element which is a quirk in Blink's implementation.
+        DCHECK(!isParsingTemplateContents());
+        DCHECK(!isParsingFragment() || toDocumentFragment(m_tree.openElements()->topNode()));
+        DCHECK(isParsingFragment() || m_tree.openElements()->top() == m_tree.openElements()->htmlElement());
         m_tree.insertHTMLElement(token);
         setInsertionMode(InFramesetMode);
         return;
@@ -692,7 +674,7 @@ void HTMLTreeBuilder::processStartTagForInBody(AtomicHTMLToken* token)
         return;
     }
     if (token->name() == formTag) {
-        if (m_tree.form()) {
+        if (m_tree.isFormElementPointerNonNull() && !isParsingTemplateContents()) {
             parseError(token);
             return;
         }
@@ -929,6 +911,7 @@ void HTMLTreeBuilder::processTemplateStartTag(AtomicHTMLToken* token)
 {
     m_tree.activeFormattingElements()->appendMarker();
     m_tree.insertHTMLElement(token);
+    m_framesetOk = false;
     m_templateInsertionModes.append(TemplateContentsMode);
     setInsertionMode(TemplateContentsMode);
 }
@@ -1056,7 +1039,7 @@ void HTMLTreeBuilder::processStartTagForInTable(AtomicHTMLToken* token)
     }
     if (token->name() == formTag) {
         parseError(token);
-        if (m_tree.form())
+        if (m_tree.isFormElementPointerNonNull() && !isParsingTemplateContents())
             return;
         m_tree.insertHTMLFormElement(token, true);
         m_tree.openElements()->pop();
@@ -1808,7 +1791,7 @@ void HTMLTreeBuilder::processEndTagForInBody(AtomicHTMLToken* token)
         m_tree.openElements()->popUntilPopped(token->name());
         return;
     }
-    if (token->name() == formTag) {
+    if (token->name() == formTag && !isParsingTemplateContents()) {
         Element* node = m_tree.takeForm();
         if (!node || !m_tree.openElements()->inScope(node)) {
             parseError(token);
@@ -2113,9 +2096,8 @@ void HTMLTreeBuilder::processEndTag(AtomicHTMLToken* token)
         processToken(token);
         break;
     case TextMode:
-        if (token->name() == scriptTag) {
+        if (token->name() == scriptTag && m_tree.currentStackItem()->hasTagName(scriptTag)) {
             // Pause ourselves so that parsing stops until the script can be processed by the caller.
-            ASSERT(m_tree.currentStackItem()->hasTagName(scriptTag));
             if (scriptingContentIsAllowed(m_tree.getParserContentPolicy()))
                 m_scriptToProcess = m_tree.currentElement();
             m_tree.openElements()->pop();
@@ -2134,7 +2116,7 @@ void HTMLTreeBuilder::processEndTag(AtomicHTMLToken* token)
     case InFramesetMode:
         ASSERT(getInsertionMode() == InFramesetMode);
         if (token->name() == framesetTag) {
-            bool ignoreFramesetForFragmentParsing  = m_tree.currentIsRootNode();
+            bool ignoreFramesetForFragmentParsing = m_tree.currentIsRootNode();
             ignoreFramesetForFragmentParsing = ignoreFramesetForFragmentParsing || m_tree.openElements()->hasTemplateInHTMLScope();
             if (ignoreFramesetForFragmentParsing) {
                 ASSERT(isParsingFragmentOrTemplateContents());
@@ -2824,5 +2806,39 @@ void HTMLTreeBuilder::finished()
 void HTMLTreeBuilder::parseError(AtomicHTMLToken*)
 {
 }
+
+#ifndef NDEBUG
+const char* HTMLTreeBuilder::toString(HTMLTreeBuilder::InsertionMode mode)
+{
+    switch (mode) {
+#define DEFINE_STRINGIFY(mode) case mode: return #mode;
+        DEFINE_STRINGIFY(InitialMode)
+        DEFINE_STRINGIFY(BeforeHTMLMode)
+        DEFINE_STRINGIFY(BeforeHeadMode)
+        DEFINE_STRINGIFY(InHeadMode)
+        DEFINE_STRINGIFY(InHeadNoscriptMode)
+        DEFINE_STRINGIFY(AfterHeadMode)
+        DEFINE_STRINGIFY(TemplateContentsMode)
+        DEFINE_STRINGIFY(InBodyMode)
+        DEFINE_STRINGIFY(TextMode)
+        DEFINE_STRINGIFY(InTableMode)
+        DEFINE_STRINGIFY(InTableTextMode)
+        DEFINE_STRINGIFY(InCaptionMode)
+        DEFINE_STRINGIFY(InColumnGroupMode)
+        DEFINE_STRINGIFY(InTableBodyMode)
+        DEFINE_STRINGIFY(InRowMode)
+        DEFINE_STRINGIFY(InCellMode)
+        DEFINE_STRINGIFY(InSelectMode)
+        DEFINE_STRINGIFY(InSelectInTableMode)
+        DEFINE_STRINGIFY(AfterBodyMode)
+        DEFINE_STRINGIFY(InFramesetMode)
+        DEFINE_STRINGIFY(AfterFramesetMode)
+        DEFINE_STRINGIFY(AfterAfterBodyMode)
+        DEFINE_STRINGIFY(AfterAfterFramesetMode)
+#undef DEFINE_STRINGIFY
+    }
+    return "<unknown>";
+}
+#endif
 
 } // namespace blink

@@ -30,12 +30,14 @@
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8ArrayBuffer.h"
+#include "bindings/core/v8/V8PrivateProperty.h"
+#include <memory>
 
 namespace blink {
 
 static inline bool isValidSource(EventTarget* source)
 {
-    return !source || source->toDOMWindow() || source->toMessagePort();
+    return !source || source->toLocalDOMWindow() || source->toMessagePort();
 }
 
 MessageEvent::MessageEvent()
@@ -58,7 +60,7 @@ MessageEvent::MessageEvent(const AtomicString& type, const MessageEventInit& ini
         m_source = initializer.source();
     if (initializer.hasPorts())
         m_ports = new MessagePortArray(initializer.ports());
-    ASSERT(isValidSource(m_source.get()));
+    DCHECK(isValidSource(m_source.get()));
 }
 
 MessageEvent::MessageEvent(const String& origin, const String& lastEventId, EventTarget* source, MessagePortArray* ports, const String& suborigin)
@@ -69,7 +71,7 @@ MessageEvent::MessageEvent(const String& origin, const String& lastEventId, Even
     , m_source(source)
     , m_ports(ports)
 {
-    ASSERT(isValidSource(m_source.get()));
+    DCHECK(isValidSource(m_source.get()));
 }
 
 MessageEvent::MessageEvent(PassRefPtr<SerializedScriptValue> data, const String& origin, const String& lastEventId, EventTarget* source, MessagePortArray* ports, const String& suborigin)
@@ -83,22 +85,22 @@ MessageEvent::MessageEvent(PassRefPtr<SerializedScriptValue> data, const String&
 {
     if (m_dataAsSerializedScriptValue)
         m_dataAsSerializedScriptValue->registerMemoryAllocatedWithCurrentScriptContext();
-    ASSERT(isValidSource(m_source.get()));
+    DCHECK(isValidSource(m_source.get()));
 }
 
-MessageEvent::MessageEvent(PassRefPtr<SerializedScriptValue> data, const String& origin, const String& lastEventId, EventTarget* source, PassOwnPtr<MessagePortChannelArray> channels, const String& suborigin)
+MessageEvent::MessageEvent(PassRefPtr<SerializedScriptValue> data, const String& origin, const String& lastEventId, EventTarget* source, std::unique_ptr<MessagePortChannelArray> channels, const String& suborigin)
     : Event(EventTypeNames::message, false, false)
     , m_dataType(DataTypeSerializedScriptValue)
     , m_dataAsSerializedScriptValue(data)
     , m_origin(origin)
     , m_lastEventId(lastEventId)
     , m_source(source)
-    , m_channels(channels)
+    , m_channels(std::move(channels))
     , m_suborigin(suborigin)
 {
     if (m_dataAsSerializedScriptValue)
         m_dataAsSerializedScriptValue->registerMemoryAllocatedWithCurrentScriptContext();
-    ASSERT(isValidSource(m_source.get()));
+    DCHECK(isValidSource(m_source.get()));
 }
 
 MessageEvent::MessageEvent(const String& data, const String& origin, const String& suborigin)
@@ -140,7 +142,7 @@ MessageEvent* MessageEvent::create(const AtomicString& type, const MessageEventI
 
 void MessageEvent::initMessageEvent(const AtomicString& type, bool canBubble, bool cancelable, ScriptValue data, const String& origin, const String& lastEventId, DOMWindow* source, MessagePortArray* ports)
 {
-    if (dispatched())
+    if (isBeingDispatched())
         return;
 
     initEvent(type, canBubble, cancelable);
@@ -156,7 +158,7 @@ void MessageEvent::initMessageEvent(const AtomicString& type, bool canBubble, bo
 
 void MessageEvent::initMessageEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<SerializedScriptValue> data, const String& origin, const String& lastEventId, DOMWindow* source, MessagePortArray* ports)
 {
-    if (dispatched())
+    if (isBeingDispatched())
         return;
 
     initEvent(type, canBubble, cancelable);
@@ -200,7 +202,7 @@ MessagePortArray MessageEvent::ports() const
 
 void MessageEvent::entangleMessagePorts(ExecutionContext* context)
 {
-    m_ports = MessagePort::entanglePorts(*context, m_channels.release());
+    m_ports = MessagePort::entanglePorts(*context, std::move(m_channels));
 }
 
 DEFINE_TRACE(MessageEvent)
@@ -218,18 +220,18 @@ v8::Local<v8::Object> MessageEvent::associateWithWrapper(v8::Isolate* isolate, c
 
     // Ensures a wrapper is created for the data to return now so that V8 knows how
     // much memory is used via the wrapper. To keep the wrapper alive, it's set to
-    // the wrapper of the MessageEvent as a hidden value.
+    // the wrapper of the MessageEvent as a private value.
     switch (getDataType()) {
     case MessageEvent::DataTypeScriptValue:
     case MessageEvent::DataTypeSerializedScriptValue:
         break;
     case MessageEvent::DataTypeString:
-        V8HiddenValue::setHiddenValue(ScriptState::current(isolate), wrapper, V8HiddenValue::stringData(isolate), v8String(isolate, dataAsString()));
+        V8PrivateProperty::getMessageEventCachedData(isolate).set(isolate->GetCurrentContext(), wrapper, v8String(isolate, dataAsString()));
         break;
     case MessageEvent::DataTypeBlob:
         break;
     case MessageEvent::DataTypeArrayBuffer:
-        V8HiddenValue::setHiddenValue(ScriptState::current(isolate), wrapper, V8HiddenValue::arrayBufferData(isolate), toV8(dataAsArrayBuffer(), wrapper, isolate));
+        V8PrivateProperty::getMessageEventCachedData(isolate).set(isolate->GetCurrentContext(), wrapper, toV8(dataAsArrayBuffer(), wrapper, isolate));
         break;
     }
 

@@ -29,6 +29,7 @@ public:
         , m_layoutType(NoLayout)
         , m_recomputeOverflow(false)
         , m_propertySpecificDifferences(0)
+        , m_scrollAnchorDisablingPropertyChanged(false)
     { }
 
     bool hasDifference() const { return m_paintInvalidationType || m_layoutType || m_propertySpecificDifferences; }
@@ -45,13 +46,13 @@ public:
     bool needsPaintInvalidationObject() const { return m_paintInvalidationType == PaintInvalidationObject; }
     void setNeedsPaintInvalidationObject()
     {
-        ASSERT(!needsPaintInvalidationLayer());
+        ASSERT(!needsPaintInvalidationSubtree());
         m_paintInvalidationType = PaintInvalidationObject;
     }
 
-    // The layer and its descendant layers need to issue paint invalidations.
-    bool needsPaintInvalidationLayer() const { return m_paintInvalidationType == PaintInvalidationLayer; }
-    void setNeedsPaintInvalidationLayer() { m_paintInvalidationType = PaintInvalidationLayer; }
+    // The object and its descendants need to issue paint invalidations.
+    bool needsPaintInvalidationSubtree() const { return m_paintInvalidationType == PaintInvalidationSubtree; }
+    void setNeedsPaintInvalidationSubtree() { m_paintInvalidationType = PaintInvalidationSubtree; }
 
     bool needsLayout() const { return m_layoutType != NoLayout; }
     void clearNeedsLayout() { m_layoutType = NoLayout; }
@@ -88,11 +89,14 @@ public:
     bool textDecorationOrColorChanged() const { return m_propertySpecificDifferences & TextDecorationOrColorChanged; }
     void setTextDecorationOrColorChanged() { m_propertySpecificDifferences |= TextDecorationOrColorChanged; }
 
+    bool scrollAnchorDisablingPropertyChanged() const { return m_scrollAnchorDisablingPropertyChanged; }
+    void setScrollAnchorDisablingPropertyChanged() { m_scrollAnchorDisablingPropertyChanged = true; }
+
 private:
     enum PaintInvalidationType {
         NoPaintInvalidation = 0,
         PaintInvalidationObject,
-        PaintInvalidationLayer
+        PaintInvalidationSubtree
     };
     unsigned m_paintInvalidationType : 2;
 
@@ -104,6 +108,7 @@ private:
     unsigned m_layoutType : 2;
     unsigned m_recomputeOverflow : 1;
     unsigned m_propertySpecificDifferences : 6;
+    unsigned m_scrollAnchorDisablingPropertyChanged : 1;
 };
 
 } // namespace blink

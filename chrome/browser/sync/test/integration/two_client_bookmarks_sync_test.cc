@@ -4,6 +4,9 @@
 
 #include <stddef.h>
 
+#include <memory>
+#include <utility>
+
 #include "base/macros.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
@@ -13,16 +16,17 @@
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
-#include "chrome/browser/sync/test/integration/passwords_helper.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "components/bookmarks/browser/bookmark_node.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
-#include "policy/policy_constants.h"
-#include "sync/internal_api/public/sessions/sync_session_snapshot.h"
+#include "components/policy/policy_constants.h"
+#include "components/sync/driver/sync_service.h"
+#include "components/sync/engine/cycle/sync_cycle_snapshot.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/base/layout.h"
 
@@ -59,8 +63,6 @@ using bookmarks_helper::SetFavicon;
 using bookmarks_helper::SetTitle;
 using bookmarks_helper::SetURL;
 using bookmarks_helper::SortChildren;
-using passwords_helper::SetDecryptionPassphrase;
-using passwords_helper::SetEncryptionPassphrase;
 using sync_integration_test_util::AwaitCommitActivityCompletion;
 using sync_integration_test_util::AwaitPassphraseAccepted;
 using sync_integration_test_util::AwaitPassphraseRequired;
@@ -956,7 +958,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, SC_ReverseTheOrderOf10BMs) {
 // Test Scribe ID - 371954.
 // flaky on Windows: http://crbug.com/412169
 #if defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_SC_MovingBMsFromBMBarToBMFolder DISABLED_SC_MovingBMsFromBMBarToBMFolder
+#define MAYBE_SC_MovingBMsFromBMBarToBMFolder \
+  DISABLED_SC_MovingBMsFromBMBarToBMFolder
 #else
 #define MAYBE_SC_MovingBMsFromBMBarToBMFolder SC_MovingBMsFromBMBarToBMFolder
 #endif
@@ -989,7 +992,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
 // Test Scribe ID - 371957.
 // flaky on Windows and Mac: http://crbug.com/412169
 #if defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_SC_MovingBMsFromBMFoldToBMBar DISABLED_SC_MovingBMsFromBMFoldToBMBar
+#define MAYBE_SC_MovingBMsFromBMFoldToBMBar \
+  DISABLED_SC_MovingBMsFromBMFoldToBMBar
 #else
 #define MAYBE_SC_MovingBMsFromBMFoldToBMBar SC_MovingBMsFromBMFoldToBMBar
 #endif
@@ -1715,7 +1719,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, DisableSync) {
 
   ASSERT_TRUE(GetClient(1)->DisableSyncForAllDatatypes());
   ASSERT_TRUE(AddFolder(0, IndexedFolderName(0)) != NULL);
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService(0)));
   ASSERT_FALSE(AllModelsMatch());
 
   ASSERT_TRUE(AddFolder(1, IndexedFolderName(1)) != NULL);
@@ -1762,7 +1766,7 @@ IN_PROC_BROWSER_TEST_F(LegacyTwoClientBookmarksSyncTest, MC_DeleteBookmark) {
   ASSERT_TRUE(AddURL(0, GetBookmarkBarNode(0), 0, "bar", bar_url) != NULL);
   ASSERT_TRUE(AddURL(0, GetOtherNode(0), 0, "other", other_url) != NULL);
 
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService(0)));
 
   ASSERT_TRUE(HasNodeWithURL(0, bar_url));
   ASSERT_TRUE(HasNodeWithURL(0, other_url));
@@ -1770,7 +1774,7 @@ IN_PROC_BROWSER_TEST_F(LegacyTwoClientBookmarksSyncTest, MC_DeleteBookmark) {
   ASSERT_FALSE(HasNodeWithURL(1, other_url));
 
   Remove(0, GetBookmarkBarNode(0), 0);
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService(0)));
 
   ASSERT_FALSE(HasNodeWithURL(0, bar_url));
   ASSERT_TRUE(HasNodeWithURL(0, other_url));
@@ -1998,13 +2002,14 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
 
   // Set a passphrase and enable encryption on Client 0. Client 1 will not
   // understand the bookmark updates.
-  SetEncryptionPassphrase(0, kValidPassphrase, ProfileSyncService::EXPLICIT);
-  ASSERT_TRUE(AwaitPassphraseAccepted(GetSyncService((0))));
+  GetSyncService(0)->SetEncryptionPassphrase(
+      kValidPassphrase, sync_driver::SyncService::EXPLICIT);
+  ASSERT_TRUE(AwaitPassphraseAccepted(GetSyncService(0)));
   ASSERT_TRUE(EnableEncryption(0));
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(IsEncryptionComplete(0));
   ASSERT_TRUE(IsEncryptionComplete(1));
-  ASSERT_TRUE(GetSyncService((1))->IsPassphraseRequired());
+  ASSERT_TRUE(GetSyncService(1)->IsPassphraseRequired());
 
   // Client 1 adds bookmarks between the first two and between the second two.
   ASSERT_TRUE(AddURL(0, 1, IndexedURLTitle(3), GURL(IndexedURL(3))) != NULL);
@@ -2013,20 +2018,18 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
   EXPECT_FALSE(AllModelsMatch());
 
   // Set the passphrase. Everything should resolve.
-  ASSERT_TRUE(AwaitPassphraseRequired(GetSyncService((1))));
-  ASSERT_TRUE(SetDecryptionPassphrase(1, kValidPassphrase));
-  ASSERT_TRUE(AwaitPassphraseAccepted(GetSyncService((1))));
+  ASSERT_TRUE(AwaitPassphraseRequired(GetSyncService(1)));
+  ASSERT_TRUE(GetSyncService(1)->SetDecryptionPassphrase(kValidPassphrase));
+  ASSERT_TRUE(AwaitPassphraseAccepted(GetSyncService(1)));
   ASSERT_TRUE(AwaitQuiescence());
   EXPECT_TRUE(AllModelsMatch());
-  ASSERT_EQ(0,
-            GetClient(1)->GetLastSessionSnapshot().num_encryption_conflicts());
+  ASSERT_EQ(0, GetClient(1)->GetLastCycleSnapshot().num_encryption_conflicts());
 
   // Ensure everything is syncing normally by appending a final bookmark.
   ASSERT_TRUE(AddURL(1, 5, IndexedURLTitle(5), GURL(IndexedURL(5))) != NULL);
   ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
   EXPECT_TRUE(AllModelsMatch());
-  ASSERT_EQ(0,
-            GetClient(1)->GetLastSessionSnapshot().num_encryption_conflicts());
+  ASSERT_EQ(0, GetClient(1)->GetLastCycleSnapshot().num_encryption_conflicts());
 }
 
 // Deliberately racy rearranging of bookmarks to test that our conflict resolver
@@ -2118,7 +2121,6 @@ IN_PROC_BROWSER_TEST_F(LegacyTwoClientBookmarksSyncTest,
 
 IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
                        BookmarkAllNodesRemovedEvent) {
-
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(AllModelsMatchVerifier());
 
@@ -2205,15 +2207,15 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, ManagedBookmarks) {
 
   // Set the ManagedBookmarks policy for the first Profile,
   // which will add one new managed bookmark.
-  base::DictionaryValue* bookmark = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> bookmark(new base::DictionaryValue());
   bookmark->SetString("name", "Managed bookmark");
   bookmark->SetString("url", "youtube.com");
-  base::ListValue* list = new base::ListValue();
-  list->Append(bookmark);
+  std::unique_ptr<base::ListValue> list(new base::ListValue());
+  list->Append(std::move(bookmark));
   policy::PolicyMap policy;
-  policy.Set(policy::key::kManagedBookmarks,
-             policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-             policy::POLICY_SOURCE_CLOUD, list, nullptr);
+  policy.Set(policy::key::kManagedBookmarks, policy::POLICY_LEVEL_MANDATORY,
+             policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+             std::move(list), nullptr);
   policy_provider_.UpdateChromePolicy(policy);
   base::RunLoop().RunUntilIdle();
 

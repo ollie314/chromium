@@ -25,7 +25,6 @@
 
 #include "core/html/shadow/DateTimeNumericFieldElement.h"
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
 #include "core/events/KeyboardEvent.h"
@@ -58,9 +57,9 @@ DateTimeNumericFieldElement::DateTimeNumericFieldElement(Document& document, Fie
     , m_value(0)
     , m_hasValue(false)
 {
-    ASSERT(m_step.step);
-    ASSERT(m_range.minimum <= m_range.maximum);
-    ASSERT(m_hardLimits.minimum <= m_hardLimits.maximum);
+    DCHECK_NE(m_step.step, 0);
+    DCHECK_LE(m_range.minimum, m_range.maximum);
+    DCHECK_LE(m_hardLimits.minimum, m_hardLimits.maximum);
 
     // We show a direction-neutral string such as "--" as a placeholder. It
     // should follow the direction of numeric values.
@@ -114,7 +113,7 @@ String DateTimeNumericFieldElement::formatValue(int value) const
 
 void DateTimeNumericFieldElement::handleKeyboardEvent(KeyboardEvent* keyboardEvent)
 {
-    ASSERT(!isDisabled());
+    DCHECK(!isDisabled());
     if (keyboardEvent->type() != EventTypeNames::keypress)
         return;
 
@@ -133,9 +132,9 @@ void DateTimeNumericFieldElement::handleKeyboardEvent(KeyboardEvent* keyboardEve
     }
     m_typeAheadBuffer.append(number);
     int newValue = typeAheadValue();
-    if (newValue >= m_hardLimits.minimum)
+    if (newValue >= m_hardLimits.minimum) {
         setValueAsInteger(newValue, DispatchEvent);
-    else {
+    } else {
         m_hasValue = false;
         updateVisibleValue(DispatchEvent);
     }
@@ -242,5 +241,3 @@ int DateTimeNumericFieldElement::roundUp(int n) const
 }
 
 } // namespace blink
-
-#endif

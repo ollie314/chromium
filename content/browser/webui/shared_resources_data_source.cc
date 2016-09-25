@@ -7,18 +7,21 @@
 #include <stddef.h>
 
 #include "base/containers/hash_tables.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
-#include "base/threading/thread_restrictions.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
-#include "net/base/mime_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/resources/grit/webui_resources.h"
 #include "ui/resources/grit/webui_resources_map.h"
+
+#if defined(OS_WIN)
+#include "base/strings/utf_string_conversions.h"
+#endif
 
 namespace content {
 
@@ -80,8 +83,7 @@ std::string SharedResourcesDataSource::GetSource() const {
 
 void SharedResourcesDataSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const ResourceRequestInfo::WebContentsGetter& wc_getter,
     const URLDataSource::GotDataCallback& callback) {
   const ResourcesMap& resources_map = GetResourcesMap();
   auto it = resources_map.find(path);
@@ -104,13 +106,48 @@ void SharedResourcesDataSource::StartDataRequest(
 
 std::string SharedResourcesDataSource::GetMimeType(
     const std::string& path) const {
-  // Requests should not block on the disk!  On POSIX this goes to disk.
-  // http://code.google.com/p/chromium/issues/detail?id=59849
+  if (path.empty())
+    return "text/html";
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
-  std::string mime_type;
-  net::GetMimeTypeFromFile(base::FilePath().AppendASCII(path), &mime_type);
-  return mime_type;
+#if defined(OS_WIN)
+  base::FilePath file(base::UTF8ToWide(path));
+  std::string extension = base::WideToUTF8(file.FinalExtension());
+#else
+  base::FilePath file(path);
+  std::string extension = file.FinalExtension();
+#endif
+
+  if (!extension.empty())
+    extension.erase(0, 1);
+
+  if (extension == "html")
+    return "text/html";
+
+  if (extension == "css")
+    return "text/css";
+
+  if (extension == "js")
+    return "application/javascript";
+
+  if (extension == "png")
+    return "image/png";
+
+  if (extension == "gif")
+    return "image/gif";
+
+  if (extension == "svg")
+    return "image/svg+xml";
+
+  if (extension == "woff2")
+    return "application/font-woff2";
+
+  NOTREACHED() << path;
+  return "text/plain";
+}
+
+base::MessageLoop* SharedResourcesDataSource::MessageLoopForRequestPath(
+    const std::string& path) const {
+  return nullptr;
 }
 
 std::string
@@ -122,8 +159,10 @@ SharedResourcesDataSource::GetAccessControlAllowOriginForOrigin(
   // back.
   std::string allowed_origin_prefix = kChromeUIScheme;
   allowed_origin_prefix += "://";
-  if (origin.find(allowed_origin_prefix) != 0)
+  if (!base::StartsWith(origin, allowed_origin_prefix,
+                        base::CompareCase::SENSITIVE)) {
     return "null";
+  }
   return origin;
 }
 

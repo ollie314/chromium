@@ -10,7 +10,7 @@
 #include "base/callback.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ime/linux/linux_input_method_context_factory.h"
-#include "ui/events/linux/text_edit_key_bindings_delegate_auralinux.h"
+#include "ui/base/ime/linux/text_edit_key_bindings_delegate_auralinux.h"
 #include "ui/gfx/linux_font_delegate.h"
 #include "ui/shell_dialogs/shell_dialog_linux.h"
 #include "ui/views/controls/button/button.h"
@@ -84,11 +84,8 @@ class VIEWS_EXPORT LinuxUI : public ui::LinuxInputMethodContextFactory,
   // unconditionally.
   virtual void MaterialDesignControllerReady() = 0;
 
-  // Returns a themed image per theme_provider.h
-  virtual gfx::Image GetThemeImageNamed(int id) const = 0;
   virtual bool GetTint(int id, color_utils::HSL* tint) const = 0;
   virtual bool GetColor(int id, SkColor* color) const = 0;
-  virtual bool HasCustomImage(int id) const = 0;
 
   // Returns the preferences that we pass to WebKit.
   virtual SkColor GetFocusRingColor() const = 0;

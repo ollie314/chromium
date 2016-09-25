@@ -28,23 +28,16 @@
 #include "core/layout/LayoutImage.h"
 
 #include "core/HTMLNames.h"
-#include "core/editing/FrameSelection.h"
 #include "core/fetch/ImageResource.h"
-#include "core/fetch/ResourceLoader.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLAreaElement.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/HTMLInputElement.h"
-#include "core/html/HTMLMapElement.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/TextRunConstructor.h"
-#include "core/page/Page.h"
 #include "core/paint/ImagePainter.h"
 #include "core/svg/graphics/SVGImage.h"
-#include "platform/fonts/Font.h"
-#include "platform/fonts/FontCache.h"
 
 namespace blink {
 
@@ -159,7 +152,7 @@ void LayoutImage::invalidatePaintAndMarkForLayoutIfNeeded()
     // FIXME: We only need to recompute the containing block's preferred size if the containing block's size
     // depends on the image's size (i.e., the container uses shrink-to-fit sizing).
     // There's no easy way to detect that shrink-to-fit is needed, always force a layout.
-    bool containingBlockNeedsToRecomputePreferredSize = style()->logicalWidth().hasPercent() || style()->logicalMaxWidth().hasPercent()  || style()->logicalMinWidth().hasPercent();
+    bool containingBlockNeedsToRecomputePreferredSize = style()->logicalWidth().isPercentOrCalc() || style()->logicalMaxWidth().isPercentOrCalc()  || style()->logicalMinWidth().isPercentOrCalc();
 
     if (imageSourceHasChangedSize && (!imageSizeIsConstrained || containingBlockNeedsToRecomputePreferredSize)) {
         setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::SizeChanged);
@@ -206,8 +199,7 @@ void LayoutImage::areaElementFocusChanged(HTMLAreaElement* areaElement)
 {
     ASSERT(areaElement->imageElement() == node());
 
-    Path path = areaElement->computePath(this);
-    if (path.isEmpty())
+    if (areaElement->getPath(this).isEmpty())
         return;
 
     invalidatePaintAndMarkForLayoutIfNeeded();
@@ -218,14 +210,14 @@ bool LayoutImage::boxShadowShouldBeAppliedToBackground(BackgroundBleedAvoidance 
     if (!LayoutBoxModelObject::boxShadowShouldBeAppliedToBackground(bleedAvoidance))
         return false;
 
-    return !const_cast<LayoutImage*>(this)->boxDecorationBackgroundIsKnownToBeObscured();
+    return !const_cast<LayoutImage*>(this)->backgroundIsKnownToBeObscured();
 }
 
 bool LayoutImage::foregroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect, unsigned) const
 {
     if (!m_imageResource->hasImage() || m_imageResource->errorOccurred())
         return false;
-    if (m_imageResource->cachedImage() && !m_imageResource->cachedImage()->isLoaded())
+    if (!m_imageResource->cachedImage() || !m_imageResource->cachedImage()->isLoaded())
         return false;
     if (!contentBoxRect().contains(localRect))
         return false;
@@ -243,8 +235,6 @@ bool LayoutImage::foregroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect,
     ObjectFit objectFit = style()->getObjectFit();
     if (objectFit != ObjectFitFill && objectFit != ObjectFitCover)
         return false;
-    if (!m_imageResource->cachedImage())
-        return false;
     // Check for image with alpha.
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage", "data", InspectorPaintImageEvent::data(this, *m_imageResource->cachedImage()));
     return m_imageResource->cachedImage()->getImage()->currentFrameKnownToBeOpaque(Image::PreCacheMetadata);
@@ -252,7 +242,7 @@ bool LayoutImage::foregroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect,
 
 bool LayoutImage::computeBackgroundIsKnownToBeObscured() const
 {
-    if (!hasBackground())
+    if (!styleRef().hasBackground())
         return false;
 
     LayoutRect paintedExtent;

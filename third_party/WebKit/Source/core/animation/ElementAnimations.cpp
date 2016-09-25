@@ -30,8 +30,6 @@
 
 #include "core/animation/ElementAnimations.h"
 
-#include "core/layout/LayoutObject.h"
-
 namespace blink {
 
 ElementAnimations::ElementAnimations()
@@ -47,9 +45,9 @@ void ElementAnimations::updateAnimationFlags(ComputedStyle& style)
 {
     for (const auto& entry : m_animations) {
         const Animation& animation = *entry.key;
-        ASSERT(animation.effect());
+        DCHECK(animation.effect());
         // FIXME: Needs to consider AnimationGroup once added.
-        ASSERT(animation.effect()->isKeyframeEffect());
+        DCHECK(animation.effect()->isKeyframeEffect());
         const KeyframeEffect& effect = *toKeyframeEffect(animation.effect());
         if (effect.isCurrent()) {
             if (effect.affects(PropertyHandle(CSSPropertyOpacity)))
@@ -59,7 +57,7 @@ void ElementAnimations::updateAnimationFlags(ComputedStyle& style)
                 || effect.affects(PropertyHandle(CSSPropertyScale))
                 || effect.affects(PropertyHandle(CSSPropertyTranslate)))
                 style.setHasCurrentTransformAnimation(true);
-            if (effect.affects(PropertyHandle(CSSPropertyWebkitFilter)))
+            if (effect.affects(PropertyHandle(CSSPropertyFilter)))
                 style.setHasCurrentFilterAnimation(true);
             if (effect.affects(PropertyHandle(CSSPropertyBackdropFilter)))
                 style.setHasCurrentBackdropFilterAnimation(true);
@@ -71,7 +69,7 @@ void ElementAnimations::updateAnimationFlags(ComputedStyle& style)
     if (style.hasCurrentTransformAnimation())
         style.setIsRunningTransformAnimationOnCompositor(m_animationStack.hasActiveAnimationsOnCompositor(CSSPropertyTransform));
     if (style.hasCurrentFilterAnimation())
-        style.setIsRunningFilterAnimationOnCompositor(m_animationStack.hasActiveAnimationsOnCompositor(CSSPropertyWebkitFilter));
+        style.setIsRunningFilterAnimationOnCompositor(m_animationStack.hasActiveAnimationsOnCompositor(CSSPropertyFilter));
     if (style.hasCurrentBackdropFilterAnimation())
         style.setIsRunningBackdropFilterAnimationOnCompositor(m_animationStack.hasActiveAnimationsOnCompositor(CSSPropertyBackdropFilter));
 }
@@ -92,7 +90,7 @@ DEFINE_TRACE(ElementAnimations)
 
 const ComputedStyle* ElementAnimations::baseComputedStyle() const
 {
-#if !ENABLE(ASSERT)
+#if !DCHECK_IS_ON()
     if (isAnimationStyleChange())
         return m_baseComputedStyle.get();
 #endif
@@ -105,9 +103,9 @@ void ElementAnimations::updateBaseComputedStyle(const ComputedStyle* computedSty
         m_baseComputedStyle = nullptr;
         return;
     }
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     if (m_baseComputedStyle && computedStyle)
-        ASSERT(*m_baseComputedStyle == *computedStyle);
+        DCHECK(*m_baseComputedStyle == *computedStyle);
 #endif
     m_baseComputedStyle = ComputedStyle::clone(*computedStyle);
 }

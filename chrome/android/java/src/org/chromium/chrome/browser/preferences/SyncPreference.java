@@ -6,34 +6,83 @@ package org.chromium.chrome.browser.preferences;
 import android.accounts.Account;
 import android.content.Context;
 import android.content.res.Resources;
+import android.graphics.PorterDuff;
+import android.graphics.drawable.Drawable;
 import android.preference.Preference;
 import android.util.AttributeSet;
 
+import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.BuildInfo;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.childaccounts.ChildAccountService;
 import org.chromium.chrome.browser.sync.GoogleServiceAuthError;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
-import org.chromium.sync.AndroidSyncSettings;
-import org.chromium.sync.signin.ChromeSigninController;
+import org.chromium.components.sync.AndroidSyncSettings;
+import org.chromium.components.sync.ProtocolErrorClientAction;
+import org.chromium.components.sync.signin.ChromeSigninController;
 
 /**
  * A preference that displays the current sync account and status (enabled, error, needs passphrase,
- * etc)."
+ * etc).
  */
 public class SyncPreference extends Preference {
     public SyncPreference(Context context, AttributeSet attrs) {
         super(context, attrs);
-        updateSyncSummary();
+        updateSyncSummaryAndIcon();
     }
 
     /**
-     * Updates the summary for this preference to reflect the current state of syncing.
+     * Updates the summary and icon for this preference to reflect the current state of syncing.
      */
-    public void updateSyncSummary() {
+    public void updateSyncSummaryAndIcon() {
         setSummary(getSyncStatusSummary(getContext()));
+
+        if (SyncPreference.showSyncErrorIcon(getContext())) {
+            setIcon(ApiCompatibilityUtils.getDrawable(
+                    getContext().getResources(), R.drawable.sync_error));
+        } else {
+            // Sets preference icon and tints it to blue.
+            Drawable icon = ApiCompatibilityUtils.getDrawable(
+                    getContext().getResources(), R.drawable.permission_background_sync);
+            icon.setColorFilter(ApiCompatibilityUtils.getColor(
+                                        getContext().getResources(), R.color.light_active_color),
+                    PorterDuff.Mode.SRC_IN);
+            setIcon(icon);
+        }
     }
 
-    private static String getSyncStatusSummary(Context context) {
+    /**
+     * Checks if sync error icon should be shown. Show sync error icon if sync is off because
+     * of error, passphrase required or disabled in Android.
+     */
+    static boolean showSyncErrorIcon(Context context) {
+        if (!AndroidSyncSettings.isMasterSyncEnabled(context)) {
+            return true;
+        }
+
+        ProfileSyncService profileSyncService = ProfileSyncService.get();
+        if (profileSyncService != null) {
+            if (profileSyncService.hasUnrecoverableError()) {
+                return true;
+            }
+
+            if (profileSyncService.getAuthError() != GoogleServiceAuthError.State.NONE) {
+                return true;
+            }
+
+            if (profileSyncService.isSyncActive()
+                    && profileSyncService.isPassphraseRequiredForDecryption()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Return a short summary of the current sync status.
+     */
+    static String getSyncStatusSummary(Context context) {
         if (!ChromeSigninController.get(context).isSignedIn()) return "";
 
         ProfileSyncService profileSyncService = ProfileSyncService.get();
@@ -55,13 +104,20 @@ public class SyncPreference extends Preference {
             return res.getString(profileSyncService.getAuthError().getMessage());
         }
 
-        // TODO(crbug/557784): Surface IDS_SYNC_UPGRADE_CLIENT string when we require the user
-        // to upgrade
+        if (profileSyncService.getProtocolErrorClientAction()
+                == ProtocolErrorClientAction.UPGRADE_CLIENT) {
+            return res.getString(
+                    R.string.sync_error_upgrade_client, BuildInfo.getPackageLabel(context));
+        }
+
+        if (profileSyncService.hasUnrecoverableError()) {
+            return res.getString(R.string.sync_error_generic);
+        }
 
         boolean syncEnabled = AndroidSyncSettings.isSyncEnabled(context);
 
         if (syncEnabled) {
-            if (!profileSyncService.isBackendInitialized()) {
+            if (!profileSyncService.isSyncActive()) {
                 return res.getString(R.string.sync_setup_progress);
             }
 

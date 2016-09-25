@@ -9,6 +9,7 @@
 #include "cc/input/top_controls_manager.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/layer_tree_impl.h"
+#include "cc/trees/scroll_node.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
@@ -36,6 +37,9 @@ Viewport::ScrollResult Viewport::ScrollBy(const gfx::Vector2dF& delta,
                                           const gfx::Point& viewport_point,
                                           bool is_direct_manipulation,
                                           bool affect_top_controls) {
+  if (!OuterScrollLayer())
+    return ScrollResult();
+
   gfx::Vector2dF content_delta = delta;
 
   if (affect_top_controls && ShouldTopControlsConsumeScroll(delta))
@@ -73,7 +77,11 @@ bool Viewport::ShouldAnimateViewport(const gfx::Vector2dF& viewport_delta,
   return max_dim_viewport_delta > max_dim_pending_delta;
 }
 
-gfx::Vector2dF Viewport::ScrollAnimated(const gfx::Vector2dF& delta) {
+gfx::Vector2dF Viewport::ScrollAnimated(const gfx::Vector2dF& delta,
+                                        base::TimeDelta delayed_by) {
+  if (!OuterScrollLayer())
+    return gfx::Vector2dF(0, 0);
+
   ScrollTree& scroll_tree =
       host_impl_->active_tree()->property_trees()->scroll_tree;
 
@@ -104,10 +112,12 @@ gfx::Vector2dF Viewport::ScrollAnimated(const gfx::Vector2dF& delta) {
   bool will_animate = false;
   if (ShouldAnimateViewport(inner_delta, outer_delta)) {
     scroll_tree.ScrollBy(outer_node, outer_delta, host_impl_->active_tree());
-    will_animate = host_impl_->ScrollAnimationCreate(inner_node, inner_delta);
+    will_animate =
+        host_impl_->ScrollAnimationCreate(inner_node, inner_delta, delayed_by);
   } else {
     scroll_tree.ScrollBy(inner_node, inner_delta, host_impl_->active_tree());
-    will_animate = host_impl_->ScrollAnimationCreate(outer_node, outer_delta);
+    will_animate =
+        host_impl_->ScrollAnimationCreate(outer_node, outer_delta, delayed_by);
   }
 
   if (will_animate) {

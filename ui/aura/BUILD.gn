@@ -57,6 +57,8 @@ component("aura") {
     "client/window_tree_client.h",
     "env.cc",
     "env.h",
+    "env_input_state_controller.cc",
+    "env_input_state_controller.h",
     "env_observer.h",
     "input_state_lookup.cc",
     "input_state_lookup.h",
@@ -77,7 +79,6 @@ component("aura") {
     "window_observer.h",
     "window_targeter.cc",
     "window_targeter.h",
-    "window_tracker.cc",
     "window_tracker.h",
     "window_tree_host.cc",
     "window_tree_host.h",
@@ -100,6 +101,7 @@ component("aura") {
     "//ui/base",
     "//ui/base/ime",
     "//ui/compositor",
+    "//ui/display",
     "//ui/events",
     "//ui/events:events_base",
     "//ui/events/platform",
@@ -116,6 +118,7 @@ component("aura") {
     deps += [
       "//ui/events:events_base",
       "//ui/events/devices",
+      "//ui/events/devices/x11",
       "//ui/events/platform/x11",
       "//ui/gfx/x",
     ]
@@ -147,7 +150,7 @@ component("aura") {
   }
 }
 
-source_set("test_support") {
+static_library("test_support") {
   testonly = true
   sources = [
     "test/aura_test_base.cc",
@@ -159,6 +162,8 @@ source_set("test_support") {
     "test/env_test_helper.h",
     "test/event_generator_delegate_aura.cc",
     "test/event_generator_delegate_aura.h",
+    "test/input_method_glue.cc",
+    "test/input_method_glue.h",
     "test/test_cursor_client.cc",
     "test/test_cursor_client.h",
     "test/test_focus_client.cc",
@@ -190,6 +195,7 @@ source_set("test_support") {
     "//ui/base:test_support",
     "//ui/base/ime",
     "//ui/compositor:test_support",
+    "//ui/display",
     "//ui/events",
     "//ui/events:events_base",
     "//ui/events:test_support",
@@ -231,6 +237,8 @@ executable("demo") {
     "//base",
     "//base:i18n",
     "//build/config/sanitizers:deps",
+    "//build/win:default_exe_manifest",
+    "//cc/surfaces",
     "//skia",
     "//third_party/icu",
     "//ui/base",
@@ -240,7 +248,7 @@ executable("demo") {
     "//ui/events",
     "//ui/gfx",
     "//ui/gfx/geometry",
-    "//ui/gl",
+    "//ui/gl/init",
   ]
 
   if (use_x11) {
@@ -254,6 +262,7 @@ test("aura_unittests") {
     "test/run_all_unittests.cc",
     "window_event_dispatcher_unittest.cc",
     "window_targeter_unittest.cc",
+    "window_tree_host_unittest.cc",
     "window_unittest.cc",
   ]
 
@@ -264,6 +273,7 @@ test("aura_unittests") {
     "//testing/gtest",
     "//ui/base:test_support",
     "//ui/compositor:test_support",
+    "//ui/display:test_support",
     "//ui/events:gesture_detection",
     "//ui/events:test_support",
     "//ui/gfx",

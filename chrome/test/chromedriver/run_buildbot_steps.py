@@ -355,7 +355,7 @@ def _MaybeUpdateLatestRelease(version):
   latest_release_fname = 'LATEST_RELEASE'
   latest_release_url = '%s/%s' % (GS_CHROMEDRIVER_BUCKET, latest_release_fname)
 
-  # Check if LATEST_RELEASE is up-to-date.
+  # Check if LATEST_RELEASE is up to date.
   latest_released_version = _GetWebPageContent(
       '%s/%s' % (GS_CHROMEDRIVER_RELEASE_URL, latest_release_fname))
   if version == latest_released_version:
@@ -449,7 +449,7 @@ def main():
   options, _ = parser.parse_args()
 
   bitness = '32'
-  if util.IsLinux() and platform_module.architecture()[0] == '64bit':
+  if util.Is64Bit():
     bitness = '64'
   platform = '%s%s' % (util.GetPlatformName(), bitness)
   if options.android_packages:

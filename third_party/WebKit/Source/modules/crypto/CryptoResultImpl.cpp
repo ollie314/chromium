@@ -39,7 +39,6 @@
 #include "bindings/modules/v8/V8CryptoKey.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/DOMArrayBuffer.h"
-#include "core/dom/DOMError.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/ExecutionContext.h"
 #include "modules/crypto/CryptoKey.h"
@@ -192,7 +191,7 @@ void CryptoResultImpl::completeWithJson(const char* utf8Data, unsigned length)
     ScriptState* scriptState = m_resolver->getScriptState();
     ScriptState::Scope scope(scriptState);
 
-    v8::Local<v8::String> jsonString = v8AtomicString(scriptState->isolate(), utf8Data, length);
+    v8::Local<v8::String> jsonString = v8StringFromUtf8(scriptState->isolate(), utf8Data, length);
 
     v8::TryCatch exceptionCatcher(scriptState->isolate());
     v8::Local<v8::Value> jsonDictionary;

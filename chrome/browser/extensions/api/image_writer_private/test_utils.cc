@@ -7,6 +7,9 @@
 #include <string.h>
 #include <utility>
 
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 
 #if defined(OS_CHROMEOS)
@@ -36,14 +39,15 @@ class ImageWriterFakeImageBurnerClient
   void BurnImage(const std::string& from_path,
                  const std::string& to_path,
                  const ErrorCallback& error_callback) override {
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-        base::Bind(burn_progress_update_handler_, to_path, 0, 100));
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-        base::Bind(burn_progress_update_handler_, to_path, 50, 100));
-    base::MessageLoop::current()->PostTask(FROM_HERE,
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(burn_progress_update_handler_, to_path, 0, 100));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(burn_progress_update_handler_, to_path, 50, 100));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
         base::Bind(burn_progress_update_handler_, to_path, 100, 100));
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-        base::Bind(burn_finished_handler_, to_path, true, ""));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(burn_finished_handler_, to_path, true, ""));
   }
 
  private:
@@ -66,7 +70,8 @@ FakeDiskMountManager::~FakeDiskMountManager() {}
 void FakeDiskMountManager::UnmountDeviceRecursively(
     const std::string& device_path,
     const UnmountDeviceRecursivelyCallbackType& callback) {
-  base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(callback, true));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                base::Bind(callback, true));
 }
 #endif
 
@@ -155,10 +160,10 @@ void ImageWriterTestUtils::SetUp() {
 
 void ImageWriterTestUtils::SetUp(bool is_browser_test) {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(),
-                                             &test_image_path_));
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(),
-                                             &test_device_path_));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &test_image_path_));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &test_device_path_));
 
   ASSERT_TRUE(FillFile(test_image_path_, kImagePattern, kTestFileSize));
   ASSERT_TRUE(FillFile(test_device_path_, kDevicePattern, kTestFileSize));
@@ -212,7 +217,7 @@ void ImageWriterTestUtils::TearDown() {
 }
 
 const base::FilePath& ImageWriterTestUtils::GetTempDir() {
-  return temp_dir_.path();
+  return temp_dir_.GetPath();
 }
 
 const base::FilePath& ImageWriterTestUtils::GetImagePath() {

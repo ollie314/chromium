@@ -9,7 +9,6 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
@@ -30,12 +29,9 @@ namespace utils = extensions::api_test_utils;
 
 namespace extensions {
 
-ApiUnitTest::ApiUnitTest()
-    : notification_service_(content::NotificationService::Create()) {
-}
+ApiUnitTest::ApiUnitTest() {}
 
-ApiUnitTest::~ApiUnitTest() {
-}
+ApiUnitTest::~ApiUnitTest() {}
 
 void ApiUnitTest::SetUp() {
   ExtensionsTest::SetUp();
@@ -71,19 +67,19 @@ void ApiUnitTest::CreateBackgroundPage() {
   }
 }
 
-scoped_ptr<base::Value> ApiUnitTest::RunFunctionAndReturnValue(
+std::unique_ptr<base::Value> ApiUnitTest::RunFunctionAndReturnValue(
     UIThreadExtensionFunction* function,
     const std::string& args) {
   function->set_extension(extension());
   if (contents_)
     function->SetRenderFrameHost(contents_->GetMainFrame());
-  return scoped_ptr<base::Value>(utils::RunFunctionAndReturnSingleResult(
+  return std::unique_ptr<base::Value>(utils::RunFunctionAndReturnSingleResult(
       function, args, browser_context()));
 }
 
-scoped_ptr<base::DictionaryValue> ApiUnitTest::RunFunctionAndReturnDictionary(
-    UIThreadExtensionFunction* function,
-    const std::string& args) {
+std::unique_ptr<base::DictionaryValue>
+ApiUnitTest::RunFunctionAndReturnDictionary(UIThreadExtensionFunction* function,
+                                            const std::string& args) {
   base::Value* value = RunFunctionAndReturnValue(function, args).release();
   base::DictionaryValue* dict = NULL;
 
@@ -93,10 +89,10 @@ scoped_ptr<base::DictionaryValue> ApiUnitTest::RunFunctionAndReturnDictionary(
   // We expect to either have successfuly retrieved a dictionary from the value,
   // or the value to have been NULL.
   EXPECT_TRUE(dict || !value);
-  return scoped_ptr<base::DictionaryValue>(dict);
+  return std::unique_ptr<base::DictionaryValue>(dict);
 }
 
-scoped_ptr<base::ListValue> ApiUnitTest::RunFunctionAndReturnList(
+std::unique_ptr<base::ListValue> ApiUnitTest::RunFunctionAndReturnList(
     UIThreadExtensionFunction* function,
     const std::string& args) {
   base::Value* value = RunFunctionAndReturnValue(function, args).release();
@@ -108,7 +104,7 @@ scoped_ptr<base::ListValue> ApiUnitTest::RunFunctionAndReturnList(
   // We expect to either have successfuly retrieved a list from the value,
   // or the value to have been NULL.
   EXPECT_TRUE(list || !value);
-  return scoped_ptr<base::ListValue>(list);
+  return std::unique_ptr<base::ListValue>(list);
 }
 
 std::string ApiUnitTest::RunFunctionAndReturnError(

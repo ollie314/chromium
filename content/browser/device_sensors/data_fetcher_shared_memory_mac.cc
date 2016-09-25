@@ -7,7 +7,8 @@
 #include <stdint.h>
 
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "content/browser/device_sensors/ambient_light_mac.h"
 #include "third_party/sudden_motion_sensor/sudden_motion_sensor_mac.h"
 
@@ -141,7 +142,7 @@ DataFetcherSharedMemory::~DataFetcherSharedMemory() {
 }
 
 void DataFetcherSharedMemory::Fetch(unsigned consumer_bitmask) {
-  DCHECK(base::MessageLoop::current() == GetPollingMessageLoop());
+  DCHECK(GetPollingMessageLoop()->task_runner()->BelongsToCurrentThread());
   DCHECK(consumer_bitmask & CONSUMER_TYPE_ORIENTATION ||
          consumer_bitmask & CONSUMER_TYPE_MOTION ||
          consumer_bitmask & CONSUMER_TYPE_LIGHT);
@@ -159,7 +160,7 @@ DataFetcherSharedMemory::FetcherType DataFetcherSharedMemory::GetType() const {
 }
 
 bool DataFetcherSharedMemory::Start(ConsumerType consumer_type, void* buffer) {
-  DCHECK(base::MessageLoop::current() == GetPollingMessageLoop());
+  DCHECK(GetPollingMessageLoop()->task_runner()->BelongsToCurrentThread());
   DCHECK(buffer);
 
   switch (consumer_type) {
@@ -204,8 +205,15 @@ bool DataFetcherSharedMemory::Start(ConsumerType consumer_type, void* buffer) {
       return sudden_motion_sensor_available;
     }
     case CONSUMER_TYPE_ORIENTATION_ABSOLUTE: {
-      NOTIMPLEMENTED();
-      break;
+      orientation_absolute_buffer_ =
+          static_cast<DeviceOrientationHardwareBuffer*>(buffer);
+      // Absolute device orientation not available on Mac, let the
+      // implementation fire an all-null event to signal this to blink.
+      orientation_absolute_buffer_->seqlock.WriteBegin();
+      orientation_absolute_buffer_->data.absolute = true;
+      orientation_absolute_buffer_->data.allAvailableSensorsAreActive = true;
+      orientation_absolute_buffer_->seqlock.WriteEnd();
+      return false;
     }
     case CONSUMER_TYPE_LIGHT: {
       if (!ambient_light_sensor_)
@@ -228,7 +236,7 @@ bool DataFetcherSharedMemory::Start(ConsumerType consumer_type, void* buffer) {
 }
 
 bool DataFetcherSharedMemory::Stop(ConsumerType consumer_type) {
-  DCHECK(base::MessageLoop::current() == GetPollingMessageLoop());
+  DCHECK(GetPollingMessageLoop()->task_runner()->BelongsToCurrentThread());
 
   switch (consumer_type) {
     case CONSUMER_TYPE_MOTION:
@@ -248,8 +256,13 @@ bool DataFetcherSharedMemory::Stop(ConsumerType consumer_type) {
       }
       return true;
     case CONSUMER_TYPE_ORIENTATION_ABSOLUTE:
-      NOTIMPLEMENTED();
-      break;
+      if (orientation_absolute_buffer_) {
+        orientation_absolute_buffer_->seqlock.WriteBegin();
+        orientation_absolute_buffer_->data.allAvailableSensorsAreActive = false;
+        orientation_absolute_buffer_->seqlock.WriteEnd();
+        orientation_absolute_buffer_ = nullptr;
+      }
+      return true;
     case CONSUMER_TYPE_LIGHT:
       if (light_buffer_) {
         light_buffer_->seqlock.WriteBegin();

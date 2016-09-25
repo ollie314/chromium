@@ -8,31 +8,24 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.Build;
-import android.preference.PreferenceManager;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.view.View;
 
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.DisabledTest;
-import org.chromium.base.test.util.MinAndroidSdkLevel;
-import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
+import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.ShortcutSource;
-import org.chromium.chrome.browser.document.DocumentActivity;
-import org.chromium.chrome.browser.preferences.DocumentModeManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabIdManager;
 import org.chromium.chrome.test.MultiActivityTestBase;
 import org.chromium.chrome.test.util.ActivityUtils;
 import org.chromium.chrome.test.util.ApplicationTestUtils;
-import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.browser.TabLoadObserver;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -49,6 +42,7 @@ import org.chromium.content_public.common.ScreenOrientationValues;
  * FLAG_ACTIVITY_NEW_DOCUMENT mechanism.  Moreover, we don't have access to the task list pre-L so
  * we have to assume that any non-running WebappActivities are not listed in Android's Overview.
  */
+@RetryOnFailure
 public class WebappModeTest extends MultiActivityTestBase {
     private static final String WEBAPP_1_ID = "webapp_id_1";
     private static final String WEBAPP_1_URL = UrlUtils.encodeHtmlDataUri(
@@ -78,10 +72,10 @@ public class WebappModeTest extends MultiActivityTestBase {
             intent.putExtra(ShortcutHelper.EXTRA_MAC, mac);
         }
 
-        WebappInfo webappInfo = WebappInfo.create(id, url, icon, title, null,
-                ScreenOrientationValues.PORTRAIT, ShortcutSource.UNKNOWN,
+        WebappInfo webappInfo = WebappInfo.create(id, url, null, icon, title, null,
+                WebDisplayMode.Standalone, ScreenOrientationValues.PORTRAIT, ShortcutSource.UNKNOWN,
                 ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING,
-                ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING, false);
+                ShortcutHelper.MANIFEST_COLOR_INVALID_OR_MISSING, false, null);
         webappInfo.setWebappIntentExtras(intent);
 
         return intent;
@@ -165,8 +159,7 @@ public class WebappModeTest extends MultiActivityTestBase {
      */
     @MediumTest
     public void testWebappTabIdsProperlyAssigned() throws Exception {
-        Context context = getInstrumentation().getTargetContext();
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
         SharedPreferences.Editor editor = prefs.edit();
         editor.putInt(TabIdManager.PREF_NEXT_ID, 11684);
         editor.apply();
@@ -225,8 +218,7 @@ public class WebappModeTest extends MultiActivityTestBase {
             @Override
             public boolean isSatisfied() {
                 Activity lastActivity = ApplicationStatus.getLastTrackedFocusedActivity();
-                return lastActivity instanceof ChromeTabbedActivity
-                        || lastActivity instanceof DocumentActivity;
+                return lastActivity instanceof ChromeTabbedActivity;
             }
         });
         ChromeActivity chromeActivity =
@@ -244,59 +236,19 @@ public class WebappModeTest extends MultiActivityTestBase {
     }
 
     /**
-     * Tests that WebappActivities handle window.open() properly in document mode.
-     */
-    @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP)
-    @Restriction(ChromeRestriction.RESTRICTION_TYPE_PHONE)
-    @DisabledTest
-    public void testWebappHandlesWindowOpenInDocumentMode() throws Exception {
-        triggerWindowOpenAndWaitForDocumentLoad(ONCLICK_LINK, true);
-    }
-
-    /**
      * Tests that WebappActivities handle window.open() properly in tabbed mode.
      */
-    @CommandLineFlags.Add(ChromeSwitches.DISABLE_DOCUMENT_MODE)
     @MediumTest
     public void testWebappHandlesWindowOpenInTabbedMode() throws Exception {
         triggerWindowOpenAndWaitForLoad(ChromeTabbedActivity.class, ONCLICK_LINK, true);
     }
 
     /**
-     * Tests that WebappActivities handle suppressed window.open() properly in document mode.
-     */
-    @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP)
-    @Restriction(ChromeRestriction.RESTRICTION_TYPE_PHONE)
-    @DisabledTest
-    public void testWebappHandlesSuppressedWindowOpenInDocumentMode() throws Exception {
-        triggerWindowOpenAndWaitForDocumentLoad(HREF_NO_REFERRER_LINK, false);
-    }
-
-    /**
      * Tests that WebappActivities handle suppressed window.open() properly in tabbed mode.
      */
-    @CommandLineFlags.Add(ChromeSwitches.DISABLE_DOCUMENT_MODE)
     @MediumTest
     public void testWebappHandlesSuppressedWindowOpenInTabbedMode() throws Exception {
         triggerWindowOpenAndWaitForLoad(ChromeTabbedActivity.class, HREF_NO_REFERRER_LINK, false);
-    }
-
-    private void triggerWindowOpenAndWaitForDocumentLoad(
-            String linkHtml, boolean checkContents) throws Exception {
-        // We default to tabbed mode. To have the WebappActivity launch a DocumentActivity,
-        // we have to explicitly override that default here.
-        DocumentModeManager documentModeManager = DocumentModeManager.getInstance(
-                getInstrumentation().getTargetContext());
-        boolean previouslyOptedOut = documentModeManager.isOptedOutOfDocumentMode();
-        documentModeManager.setOptedOutState(DocumentModeManager.OPT_OUT_PROMO_DISMISSED);
-        try {
-            triggerWindowOpenAndWaitForLoad(DocumentActivity.class, linkHtml, checkContents);
-        } finally {
-            if (previouslyOptedOut) {
-                documentModeManager.setOptedOutState(
-                        DocumentModeManager.OPTED_OUT_OF_DOCUMENT_MODE);
-            }
-        }
     }
 
     private <T extends ChromeActivity> void triggerWindowOpenAndWaitForLoad(

@@ -5,8 +5,6 @@
 #ifndef UI_AURA_WINDOW_EVENT_DISPATCHER_H_
 #define UI_AURA_WINDOW_EVENT_DISPATCHER_H_
 
-#include <stdint.h>
-
 #include <memory>
 #include <vector>
 
@@ -45,6 +43,7 @@ class TouchEvent;
 
 namespace aura {
 class TestScreen;
+class EnvInputStateController;
 class WindowTargeter;
 class WindowTreeHost;
 
@@ -197,8 +196,7 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
   bool CanDispatchToConsumer(ui::GestureConsumer* consumer) override;
   void DispatchGestureEvent(ui::GestureConsumer* raw_input_consumer,
                             ui::GestureEvent* event) override;
-  void DispatchCancelTouchEvent(ui::GestureConsumer* raw_input_consumer,
-                                ui::TouchEvent* event) override;
+  void DispatchSyntheticTouchEvent(ui::TouchEvent* event) override;
 
   // Overridden from WindowObserver:
   void OnWindowDestroying(Window* window) override;
@@ -247,9 +245,6 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
 
   WindowTreeHost* host_;
 
-  // Touch ids that are currently down.
-  uint32_t touch_ids_down_;
-
   Window* mouse_pressed_handler_;
   Window* mouse_moved_handler_;
   Window* event_dispatch_target_;
@@ -272,6 +267,8 @@ class AURA_EXPORT WindowEventDispatcher : public ui::EventProcessor,
   ScopedObserver<aura::Window, aura::WindowObserver> observer_manager_;
 
   bool transform_events_;
+
+  std::unique_ptr<EnvInputStateController> env_controller_;
 
   // Used to schedule reposting an event.
   base::WeakPtrFactory<WindowEventDispatcher> repost_event_factory_;

@@ -61,13 +61,14 @@ class GpuRasterizationValidator(cloud_storage_test_base.ValidatorBase):
                                    test_rect[2], test_rect[3])
 
     self._ValidateScreenshotSamples(
+        tab,
         page.display_name,
         screenshot,
         page.expectations,
         device_pixel_ratio)
 
 
-class GpuRasterization(cloud_storage_test_base.TestBase):
+class GpuRasterization(cloud_storage_test_base.CloudStorageTestBase):
   """Tests that GPU rasterization produces valid content"""
   test = GpuRasterizationValidator
 

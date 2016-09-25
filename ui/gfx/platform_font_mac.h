@@ -21,8 +21,11 @@ class PlatformFontMac : public PlatformFont {
                   int font_size);
 
   // Overridden from PlatformFont:
-  Font DeriveFont(int size_delta, int style) const override;
+  Font DeriveFont(int size_delta,
+                  int style,
+                  Font::Weight weight) const override;
   int GetHeight() override;
+  Font::Weight GetWeight() const override;
   int GetBaseline() override;
   int GetCapHeight() override;
   int GetExpectedTextWidth(int length) override;
@@ -34,7 +37,17 @@ class PlatformFontMac : public PlatformFont {
   NativeFont GetNativeFont() const override;
 
  private:
-  PlatformFontMac(const std::string& font_name, int font_size, int font_style);
+  PlatformFontMac(const std::string& font_name,
+                  int font_size,
+                  int font_style,
+                  Font::Weight font_weight);
+
+  PlatformFontMac(NativeFont font,
+                  const std::string& font_name,
+                  int font_size,
+                  int font_style,
+                  Font::Weight font_weight);
+
   ~PlatformFontMac() override;
 
   // Calculates and caches the font metrics and inits |render_params_|.
@@ -48,9 +61,10 @@ class PlatformFontMac : public PlatformFont {
 
   // The name/size/style trio that specify the font. Initialized in the
   // constructors.
-  std::string font_name_;  // Corresponds to -[NSFont fontFamily].
-  int font_size_;
-  int font_style_;
+  const std::string font_name_;  // Corresponds to -[NSFont fontFamily].
+  const int font_size_;
+  const int font_style_;
+  const Font::Weight font_weight_;
 
   // Cached metrics, generated in CalculateMetrics().
   int height_;

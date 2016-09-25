@@ -22,6 +22,7 @@
 #include "base/metrics/statistics_recorder.h"
 #include "base/pickle.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/gtest_util.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -56,7 +57,7 @@ class HistogramTest : public testing::TestWithParam<bool> {
 
   void InitializeStatisticsRecorder() {
     DCHECK(!statistics_recorder_);
-    statistics_recorder_.reset(new StatisticsRecorder());
+    statistics_recorder_ = StatisticsRecorder::CreateTemporaryForTesting();
   }
 
   void UninitializeStatisticsRecorder() {
@@ -147,7 +148,7 @@ TEST_P(HistogramTest, NameMatchTest) {
   EXPECT_EQ(2, samples->GetCount(10));
 }
 
-// Check that delta calculations work correct.
+// Check that delta calculations work correctly.
 TEST_P(HistogramTest, DeltaTest) {
   HistogramBase* histogram =
       Histogram::FactoryGet("DeltaHistogram", 1, 64, 8,
@@ -174,6 +175,32 @@ TEST_P(HistogramTest, DeltaTest) {
 
   samples = histogram->SnapshotDelta();
   EXPECT_EQ(0, samples->TotalCount());
+}
+
+// Check that final-delta calculations work correctly.
+TEST_P(HistogramTest, FinalDeltaTest) {
+  HistogramBase* histogram =
+      Histogram::FactoryGet("FinalDeltaHistogram", 1, 64, 8,
+                            HistogramBase::kNoFlags);
+  histogram->Add(1);
+  histogram->Add(10);
+  histogram->Add(50);
+
+  std::unique_ptr<HistogramSamples> samples = histogram->SnapshotDelta();
+  EXPECT_EQ(3, samples->TotalCount());
+  EXPECT_EQ(1, samples->GetCount(1));
+  EXPECT_EQ(1, samples->GetCount(10));
+  EXPECT_EQ(1, samples->GetCount(50));
+  EXPECT_EQ(samples->TotalCount(), samples->redundant_count());
+
+  histogram->Add(2);
+  histogram->Add(50);
+
+  samples = histogram->SnapshotFinalDelta();
+  EXPECT_EQ(2, samples->TotalCount());
+  EXPECT_EQ(1, samples->GetCount(2));
+  EXPECT_EQ(1, samples->GetCount(50));
+  EXPECT_EQ(samples->TotalCount(), samples->redundant_count());
 }
 
 TEST_P(HistogramTest, ExponentialRangesTest) {
@@ -675,7 +702,6 @@ TEST_P(HistogramTest, FactoryTime) {
           << "ns each.";
 }
 
-#if GTEST_HAS_DEATH_TEST
 // For Histogram, LinearHistogram and CustomHistogram, the minimum for a
 // declared range is 1, while the maximum is (HistogramBase::kSampleType_MAX -
 // 1). But we accept ranges exceeding those limits, and silently clamped to
@@ -709,17 +735,18 @@ TEST(HistogramDeathTest, BadRangesTest) {
 
   // CustomHistogram does not accepts kSampleType_MAX as range.
   custom_ranges.push_back(HistogramBase::kSampleType_MAX);
-  EXPECT_DEATH(CustomHistogram::FactoryGet("BadRangesCustom2", custom_ranges,
-                                           HistogramBase::kNoFlags),
+  EXPECT_DEATH_IF_SUPPORTED(
+      CustomHistogram::FactoryGet("BadRangesCustom2", custom_ranges,
+                                  HistogramBase::kNoFlags),
                "");
 
   // CustomHistogram needs at least 1 valid range.
   custom_ranges.clear();
   custom_ranges.push_back(0);
-  EXPECT_DEATH(CustomHistogram::FactoryGet("BadRangesCustom3", custom_ranges,
-                                           HistogramBase::kNoFlags),
+  EXPECT_DEATH_IF_SUPPORTED(
+      CustomHistogram::FactoryGet("BadRangesCustom3", custom_ranges,
+                                  HistogramBase::kNoFlags),
                "");
 }
-#endif
 
 }  // namespace base

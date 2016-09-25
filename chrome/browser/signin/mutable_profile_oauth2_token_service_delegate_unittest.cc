@@ -4,9 +4,16 @@
 
 #include "chrome/browser/signin/mutable_profile_oauth2_token_service_delegate.h"
 
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
+#include "components/os_crypt/os_crypt_mocker.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/prefs/testing_pref_service.h"
@@ -24,10 +31,6 @@
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-#if defined(OS_MACOSX)
-#include "components/os_crypt/os_crypt.h"
-#endif
 
 // Defining constant here to handle backward compatiblity tests, but this
 // constant is no longer used in current versions of chrome.
@@ -51,9 +54,7 @@ class MutableProfileOAuth2TokenServiceDelegateTest
         end_batch_changes_(0) {}
 
   void SetUp() override {
-#if defined(OS_MACOSX)
-    OSCrypt::UseMockKeychain(true);
-#endif
+    OSCryptMocker::SetUpWithSingleton();
 
     factory_.SetFakeResponse(GaiaUrls::GetInstance()->oauth2_revoke_url(), "",
                              net::HTTP_OK, net::URLRequestStatus::SUCCESS);
@@ -78,6 +79,7 @@ class MutableProfileOAuth2TokenServiceDelegateTest
   void TearDown() override {
     oauth2_service_delegate_->RemoveObserver(this);
     oauth2_service_delegate_->Shutdown();
+    OSCryptMocker::TearDown();
   }
 
   void AddAuthTokenManually(const std::string& service,
@@ -540,11 +542,11 @@ TEST_F(MutableProfileOAuth2TokenServiceDelegateTest, GaiaIdMigration) {
     ListPrefUpdate update(&pref_service_,
                           AccountTrackerService::kAccountInfoPref);
     update->Clear();
-    base::DictionaryValue* dict = new base::DictionaryValue();
-    update->Append(dict);
+    auto dict = base::MakeUnique<base::DictionaryValue>();
     dict->SetString("account_id", base::UTF8ToUTF16(email));
     dict->SetString("email", base::UTF8ToUTF16(email));
     dict->SetString("gaia", base::UTF8ToUTF16(gaia_id));
+    update->Append(std::move(dict));
     account_tracker_service_.Shutdown();
     account_tracker_service_.Initialize(client_.get());
 
@@ -599,16 +601,16 @@ TEST_F(MutableProfileOAuth2TokenServiceDelegateTest,
     ListPrefUpdate update(&pref_service_,
                           AccountTrackerService::kAccountInfoPref);
     update->Clear();
-    base::DictionaryValue* dict = new base::DictionaryValue();
-    update->Append(dict);
+    auto dict = base::MakeUnique<base::DictionaryValue>();
     dict->SetString("account_id", base::UTF8ToUTF16(email1));
     dict->SetString("email", base::UTF8ToUTF16(email1));
     dict->SetString("gaia", base::UTF8ToUTF16(gaia_id1));
-    dict = new base::DictionaryValue();
-    update->Append(dict);
+    update->Append(std::move(dict));
+    dict = base::MakeUnique<base::DictionaryValue>();
     dict->SetString("account_id", base::UTF8ToUTF16(email2));
     dict->SetString("email", base::UTF8ToUTF16(email2));
     dict->SetString("gaia", base::UTF8ToUTF16(gaia_id2));
+    update->Append(std::move(dict));
     account_tracker_service_.Shutdown();
     account_tracker_service_.Initialize(client_.get());
 

@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/id_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -20,12 +21,11 @@
 #include "base/time/time.h"
 #include "content/child/webmessageportchannel_impl.h"
 #include "content/common/service_worker/service_worker_types.h"
-#include "content/public/common/service_worker_event_status.mojom.h"
 #include "ipc/ipc_listener.h"
 #include "services/shell/public/interfaces/interface_provider.mojom.h"
-#include "third_party/WebKit/public/platform/WebGeofencingEventType.h"
 #include "third_party/WebKit/public/platform/WebMessagePortChannel.h"
 #include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerError.h"
+#include "third_party/WebKit/public/platform/modules/serviceworker/service_worker_event_status.mojom.h"
 #include "third_party/WebKit/public/web/modules/serviceworker/WebServiceWorkerContextClient.h"
 #include "third_party/WebKit/public/web/modules/serviceworker/WebServiceWorkerContextProxy.h"
 #include "v8/include/v8.h"
@@ -38,7 +38,6 @@ class TaskRunner;
 }
 
 namespace blink {
-struct WebCircularGeofencingRegion;
 class WebDataSource;
 struct WebServiceWorkerClientQueryOptions;
 class WebServiceWorkerContextProxy;
@@ -65,7 +64,9 @@ class WebServiceWorkerRegistrationImpl;
 class ServiceWorkerContextClient
     : public blink::WebServiceWorkerContextClient {
  public:
-  using SyncCallback = mojo::Callback<void(mojom::ServiceWorkerEventStatus)>;
+  using SyncCallback =
+      base::Callback<void(blink::mojom::ServiceWorkerEventStatus,
+                          base::Time /* dispatch_event_time */)>;
 
   // Returns a thread-specific client instance.  This does NOT create a
   // new instance.
@@ -83,11 +84,10 @@ class ServiceWorkerContextClient
                          int embedded_worker_id,
                          const IPC::Message& message);
 
-  // Called some time after the worker has started. Attempts to use the
-  // ServiceRegistry to connect to services before this method is called are
-  // queued up and will resolve after this method is called.
-  void BindServiceRegistry(shell::mojom::InterfaceProviderRequest services,
-                           shell::mojom::InterfaceProviderPtr exposed_services);
+  // Called some time after the worker has started.
+  void BindInterfaceProviders(
+      shell::mojom::InterfaceProviderRequest request,
+      shell::mojom::InterfaceProviderPtr remote_interfaces);
 
   // WebServiceWorkerContextClient overrides.
   blink::WebURL scope() const override;
@@ -106,6 +106,7 @@ class ServiceWorkerContextClient
   // Called on the main thread.
   void workerContextFailedToStart() override;
   void workerScriptLoaded() override;
+  bool hasAssociatedRegistration() override;
 
   void workerContextStarted(
       blink::WebServiceWorkerContextProxy* proxy) override;
@@ -126,28 +127,40 @@ class ServiceWorkerContextClient
                            int call_id,
                            const blink::WebString& message,
                            const blink::WebString& state) override;
+  blink::WebDevToolsAgentClient::WebKitClientMessageLoop*
+  createDevToolsMessageLoop() override;
   void didHandleActivateEvent(int request_id,
-                              blink::WebServiceWorkerEventResult) override;
+                              blink::WebServiceWorkerEventResult,
+                              double dispatch_event_time) override;
   void didHandleExtendableMessageEvent(
       int request_id,
-      blink::WebServiceWorkerEventResult result) override;
-  void didHandleInstallEvent(
-      int request_id,
-      blink::WebServiceWorkerEventResult result) override;
-  void didHandleFetchEvent(int request_id) override;
-  void didHandleFetchEvent(
-      int request_id,
-      const blink::WebServiceWorkerResponse& response) override;
+      blink::WebServiceWorkerEventResult result,
+      double dispatch_event_time) override;
+  void didHandleInstallEvent(int request_id,
+                             blink::WebServiceWorkerEventResult result,
+                             double event_dispatch_time) override;
+  void respondToFetchEvent(int response_id,
+                           double event_dispatch_time) override;
+  void respondToFetchEvent(int response_id,
+                           const blink::WebServiceWorkerResponse& response,
+                           double event_dispatch_time) override;
+  void didHandleFetchEvent(int event_finish_id,
+                           blink::WebServiceWorkerEventResult result,
+                           double dispatch_event_time) override;
   void didHandleNotificationClickEvent(
       int request_id,
-      blink::WebServiceWorkerEventResult result) override;
+      blink::WebServiceWorkerEventResult result,
+      double dispatch_event_time) override;
   void didHandleNotificationCloseEvent(
       int request_id,
-      blink::WebServiceWorkerEventResult result) override;
+      blink::WebServiceWorkerEventResult result,
+      double dispatch_event_time) override;
   void didHandlePushEvent(int request_id,
-                          blink::WebServiceWorkerEventResult result) override;
+                          blink::WebServiceWorkerEventResult result,
+                          double dispatch_event_time) override;
   void didHandleSyncEvent(int request_id,
-                          blink::WebServiceWorkerEventResult result) override;
+                          blink::WebServiceWorkerEventResult result,
+                          double dispatch_event_time) override;
 
   // Called on the main thread.
   blink::WebServiceWorkerNetworkProvider* createServiceWorkerNetworkProvider(
@@ -197,21 +210,19 @@ class ServiceWorkerContextClient
       int request_id,
       const ServiceWorkerMsg_ExtendableMessageEvent_Params& params);
   void OnInstallEvent(int request_id);
-  void OnFetchEvent(int request_id, const ServiceWorkerFetchRequest& request);
+  void OnFetchEvent(int response_id,
+                    int event_finish_id,
+                    const ServiceWorkerFetchRequest& request);
   void OnNotificationClickEvent(
       int request_id,
-      int64_t persistent_notification_id,
+      const std::string& notification_id,
       const PlatformNotificationData& notification_data,
       int action_index);
   void OnPushEvent(int request_id, const PushEventPayload& payload);
   void OnNotificationCloseEvent(
       int request_id,
-      int64_t persistent_notification_id,
+      const std::string& notification_id,
       const PlatformNotificationData& notification_data);
-  void OnGeofencingEvent(int request_id,
-                         blink::WebGeofencingEventType event_type,
-                         const std::string& region_id,
-                         const blink::WebCircularGeofencingRegion& region);
 
   void OnDidGetClient(int request_id, const ServiceWorkerClientInfo& client);
   void OnDidGetClients(

@@ -39,7 +39,6 @@
 #include "wtf/CurrentTime.h"
 #include "wtf/DateMath.h"
 #include "wtf/MathExtras.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -71,7 +70,7 @@ double MonthInputType::valueAsDate() const
     if (!parseToDateComponents(element().value(), &date))
         return DateComponents::invalidMilliseconds();
     double msec = date.millisecondsSinceEpoch();
-    ASSERT(std::isfinite(msec));
+    DCHECK(std::isfinite(msec));
     return msec;
 }
 
@@ -88,7 +87,7 @@ Decimal MonthInputType::defaultValueForStepUp() const
     DateComponents date;
     date.setMillisecondsSinceEpochForMonth(convertToLocalTime(currentTimeMS()));
     double months = date.monthsSinceEpoch();
-    ASSERT(std::isfinite(months));
+    DCHECK(std::isfinite(months));
     return Decimal::fromDouble(months);
 }
 
@@ -105,20 +104,20 @@ Decimal MonthInputType::parseToNumber(const String& src, const Decimal& defaultV
     if (!parseToDateComponents(src, &date))
         return defaultValue;
     double months = date.monthsSinceEpoch();
-    ASSERT(std::isfinite(months));
+    DCHECK(std::isfinite(months));
     return Decimal::fromDouble(months);
 }
 
 bool MonthInputType::parseToDateComponentsInternal(const String& string, DateComponents* out) const
 {
-    ASSERT(out);
+    DCHECK(out);
     unsigned end;
     return out->parseMonth(string, 0, end) && end == string.length();
 }
 
 bool MonthInputType::setMillisecondToDateComponents(double value, DateComponents* date) const
 {
-    ASSERT(date);
+    DCHECK(date);
     return date->setMonthsSinceEpoch(value);
 }
 
@@ -133,7 +132,6 @@ void MonthInputType::warnIfValueIsInvalid(const String& value) const
         addWarningToConsole("The specified value %s does not conform to the required format.  The format is \"yyyy-MM\" where yyyy is year in four or more digits, and MM is 01-12.", value);
 }
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 String MonthInputType::formatDateTimeFieldsState(const DateTimeFieldsState& dateTimeFieldsState) const
 {
     if (!dateTimeFieldsState.hasMonth() || !dateTimeFieldsState.hasYear())
@@ -157,5 +155,5 @@ bool MonthInputType::isValidFormat(bool hasYear, bool hasMonth, bool hasWeek, bo
 {
     return hasYear && hasMonth;
 }
-#endif
+
 } // namespace blink

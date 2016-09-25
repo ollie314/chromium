@@ -11,6 +11,8 @@
 #include "public/platform/WebDataConsumerHandle.h"
 #include "wtf/Forward.h"
 #include "wtf/PassRefPtr.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -61,13 +63,8 @@ public:
         virtual PassRefPtr<EncodedFormData> drainAsFormData() { return nullptr; }
     };
 
-    // TODO(yhirano): obtainReader() is currently non-virtual override, and
-    // will be changed into virtual override when we can use unique_ptr in
-    // Blink.
-    PassOwnPtr<Reader> obtainReader(Client* client) { return adoptPtr(obtainReaderInternal(client)); }
-
-private:
-    Reader* obtainReaderInternal(Client*) override = 0;
+    std::unique_ptr<WebDataConsumerHandle::Reader> obtainReader(Client*) final;
+    virtual std::unique_ptr<Reader> obtainFetchDataReader(Client*) = 0;
 };
 
 } // namespace blink

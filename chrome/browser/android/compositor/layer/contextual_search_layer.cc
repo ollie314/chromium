@@ -11,7 +11,6 @@
 #include "cc/resources/scoped_ui_resource.h"
 #include "chrome/browser/android/compositor/layer/crushed_sprite_layer.h"
 #include "content/public/browser/android/compositor.h"
-#include "content/public/browser/android/content_view_core.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/android/resources/crushed_sprite_resource.h"
 #include "ui/android/resources/resource_manager.h"
@@ -39,28 +38,6 @@ scoped_refptr<ContextualSearchLayer> ContextualSearchLayer::Create(
   return make_scoped_refptr(new ContextualSearchLayer(resource_manager));
 }
 
-scoped_refptr<cc::Layer> ContextualSearchLayer::GetIconLayer() {
-  // Search Provider Icon Sprite (Animated)
-  if (search_provider_icon_sprite_visible_) {
-    if (search_provider_icon_sprite_->layer()->parent() != layer_) {
-      layer_->AddChild(search_provider_icon_sprite_->layer().get());
-    }
-    search_provider_icon_sprite_->DrawSpriteFrame(
-        resource_manager_,
-        panel_icon_resource_id_,
-        search_provider_icon_sprite_metadata_resource_id_,
-        search_provider_icon_sprite_completion_percentage_);
-  } else {
-    if (search_provider_icon_sprite_->layer().get() &&
-        search_provider_icon_sprite_->layer()->parent()) {
-      search_provider_icon_sprite_->layer()->RemoveFromParent();
-    }
-    return nullptr;
-  }
-
-  return search_provider_icon_sprite_->layer();
-}
-
 void ContextualSearchLayer::SetProperties(
     int panel_shadow_resource_id,
     int search_context_resource_id,
@@ -77,7 +54,7 @@ void ContextualSearchLayer::SetProperties(
     int peek_promo_ripple_resource_id,
     int peek_promo_text_resource_id,
     float dp_to_px,
-    content::ContentViewCore* content_view_core,
+    const scoped_refptr<cc::Layer>& content_layer,
     bool search_promo_visible,
     float search_promo_height,
     float search_promo_opacity,
@@ -95,13 +72,17 @@ void ContextualSearchLayer::SetProperties(
     float search_bar_height,
     float search_context_opacity,
     float search_term_opacity,
-    float search_caption_opacity,
+    float search_caption_animation_percentage,
+    bool search_caption_visible,
     bool search_bar_border_visible,
     float search_bar_border_height,
     bool search_bar_shadow_visible,
     float search_bar_shadow_opacity,
     bool search_provider_icon_sprite_visible,
     float search_provider_icon_sprite_completion_percentage,
+    bool thumbnail_visible,
+    float thumbnail_visibility_percentage,
+    int thumbnail_size,
     float arrow_icon_opacity,
     float arrow_icon_rotation,
     float close_icon_opacity,
@@ -109,12 +90,6 @@ void ContextualSearchLayer::SetProperties(
     float progress_bar_height,
     float progress_bar_opacity,
     int progress_bar_completion) {
-
-  search_provider_icon_sprite_visible_ = search_provider_icon_sprite_visible;
-  search_provider_icon_sprite_metadata_resource_id_ =
-      search_provider_icon_sprite_metadata_resource_id;
-  search_provider_icon_sprite_completion_percentage_ =
-      search_provider_icon_sprite_completion_percentage;
 
   // Grabs the dynamic Search Context resource.
   ui::ResourceManager::Resource* search_context_resource =
@@ -145,7 +120,7 @@ void ContextualSearchLayer::SetProperties(
   // -----------------------------------------------------------------
   OverlayPanelLayer::SetProperties(
       dp_to_px,
-      content_view_core,
+      content_layer,
       content_view_top,
       search_panel_x,
       search_panel_y,
@@ -275,36 +250,48 @@ void ContextualSearchLayer::SetProperties(
   // -----------------------------------------------------------------
   // Search Caption Text
   // -----------------------------------------------------------------
-  if (search_caption_opacity != 0.f && search_caption_.get()) {
+  // We don't want to load the resource if it won't ever be used, and since
+  // captions are still rare, we only load if visible.
+  ui::ResourceManager::Resource* search_caption_resource = nullptr;
+  if (search_caption_visible) {
+    // Grabs the dynamic Search Caption resource so we can get a snapshot.
+    search_caption_resource = resource_manager_->GetResource(
+        ui::ANDROID_RESOURCE_TYPE_DYNAMIC, search_caption_resource_id);
+  }
+  // Once a valid snapshot is available, the caller will set the animation
+  // percentage so the caption can actually be seen by the user.
+  if (search_caption_visible && search_caption_animation_percentage != 0.f
+      && search_caption_.get()) {
     if (search_caption_->parent() != text_container_) {
       AddBarTextLayer(search_caption_);
     }
-    // Grabs the dynamic Search Caption resource.
-    ui::ResourceManager::Resource* search_caption_resource =
-        resource_manager_->GetResource(ui::ANDROID_RESOURCE_TYPE_DYNAMIC,
-                                       search_caption_resource_id);
-    // Calculate position of the Caption, and the main bar text.
-    // Without a caption the bar text is not moved from it's default centered
-    // position. When there is a Caption interpolate its position between the
-    // default and adjusted (moved up by the size of the caption and margin).
-    float bar_text_height = bar_text_->bounds().height();
-    float search_caption_height = search_caption_resource->size.height();
-    float text_margin = floor(bar_text_height / 10);
-    float search_caption_top =
-        search_bar_top + bar_text_height + text_margin * 2;
-    // Get the current centered position set up by the OverlayPanelLayer.
-    float bar_text_top_centered = bar_text_->position().y();
-    float bar_text_adjust = search_caption_height + text_margin;
-    float bar_text_top = bar_text_top_centered -
-                            bar_text_adjust * search_caption_opacity / 2;
-    // Move the main bar text up.
-    bar_text_->SetPosition(gfx::PointF(0.f, bar_text_top));
-    // Add the caption
-    search_caption_->SetUIResourceId(
-        search_caption_resource->ui_resource->id());
-    search_caption_->SetBounds(search_caption_resource->size);
-    search_caption_->SetPosition(gfx::PointF(0.f, search_caption_top));
-    search_caption_->SetOpacity(search_caption_opacity);
+    if (search_caption_resource) {
+        // Calculate position of the Caption, and the main bar text.
+        // Without a caption the bar text is not moved from it's default
+        // centered position. When there is a Caption interpolate its
+        // position between the default and adjusted (moved up by the
+        // size of the caption and margin).
+        float bar_text_height = bar_text_->bounds().height();
+        float search_caption_height = search_caption_resource->size.height();
+        float text_margin = floor(
+            (search_bar_height - bar_text_height - search_caption_height) / 5);
+        float search_caption_top =
+            search_bar_top + bar_text_height + text_margin * 2;
+        // Get the current centered position set up by the OverlayPanelLayer.
+        float bar_text_top_centered = bar_text_->position().y();
+        float bar_text_adjust = search_caption_height + text_margin;
+        float bar_text_top =
+            bar_text_top_centered -
+            bar_text_adjust * search_caption_animation_percentage / 2;
+        // Move the main bar text up.
+        bar_text_->SetPosition(gfx::PointF(0.f, bar_text_top));
+        // Add the caption
+        search_caption_->SetUIResourceId(
+            search_caption_resource->ui_resource->id());
+        search_caption_->SetBounds(search_caption_resource->size);
+        search_caption_->SetPosition(gfx::PointF(0.f, search_caption_top));
+        search_caption_->SetOpacity(search_caption_animation_percentage);
+    }
   } else if (search_caption_.get() && search_caption_->parent()) {
     search_caption_->RemoveFromParent();
   }
@@ -442,13 +429,162 @@ void ContextualSearchLayer::SetProperties(
     if (progress_bar_.get() && progress_bar_->parent())
       progress_bar_->RemoveFromParent();
   }
+
+  // ---------------------------------------------------------------------------
+  // Icon Layer
+  // ---------------------------------------------------------------------------
+  thumbnail_size_ = thumbnail_size;
+  SetupIconLayer(search_provider_icon_sprite_visible,
+                 search_provider_icon_sprite_metadata_resource_id,
+                 search_provider_icon_sprite_completion_percentage,
+                 thumbnail_visible,
+                 thumbnail_visibility_percentage);
+}
+
+scoped_refptr<cc::Layer> ContextualSearchLayer::GetIconLayer() {
+  return icon_layer_;
+}
+
+void ContextualSearchLayer::SetupIconLayer(
+    bool search_provider_icon_sprite_visible,
+    int search_provider_icon_sprite_metadata_resource_id,
+    float search_provider_icon_sprite_completion_percentage,
+    bool thumbnail_visible,
+    float thumbnail_visibility_percentage) {
+  icon_layer_->SetBounds(gfx::Size(thumbnail_size_, thumbnail_size_));
+  icon_layer_->SetMasksToBounds(true);
+
+  // Thumbnail
+  if (thumbnail_visible) {
+    if (thumbnail_layer_->parent() != icon_layer_)
+          icon_layer_->AddChild(thumbnail_layer_);
+
+    thumbnail_layer_->SetOpacity(thumbnail_visibility_percentage);
+
+    // When animating, the thumbnail and icon sprite slide through
+    // |icon_layer_|. This effect is achieved by changing the y-offset
+    // for each child layer.
+    // If the thumbnail has a height less than |thumbnail_size_|, it will have
+    // a top margin that needs to be accounted for while running the
+    // animation. The final |thumbnail_y_offset| should be equal to
+    // |thumbnail_top_margin_|.
+    float thumbnail_y_offset =
+        (thumbnail_size_ * (1.f - thumbnail_visibility_percentage))
+        + thumbnail_top_margin_;
+    thumbnail_layer_->SetPosition(
+        gfx::PointF(thumbnail_side_margin_, thumbnail_y_offset));
+  } else if (thumbnail_layer_->parent()) {
+    thumbnail_layer_->RemoveFromParent();
+  }
+
+  // Search Provider Icon Sprite
+  if (search_provider_icon_sprite_visible) {
+    if (search_provider_icon_sprite_->layer()->parent() != icon_layer_)
+      icon_layer_->AddChild(search_provider_icon_sprite_->layer().get());
+
+    search_provider_icon_sprite_->DrawSpriteFrame(
+        resource_manager_,
+        panel_icon_resource_id_,
+        search_provider_icon_sprite_metadata_resource_id,
+        search_provider_icon_sprite_completion_percentage);
+
+    search_provider_icon_sprite_->layer()->SetOpacity(
+        1.f - thumbnail_visibility_percentage);
+
+    float icon_y_offset =
+        -(thumbnail_size_ * thumbnail_visibility_percentage);
+    search_provider_icon_sprite_->layer()->SetPosition(
+        gfx::PointF(0.f, icon_y_offset));
+
+  } else if (search_provider_icon_sprite_->layer().get() &&
+      search_provider_icon_sprite_->layer()->parent()) {
+    search_provider_icon_sprite_->layer()->RemoveFromParent();
+  }
+}
+
+void ContextualSearchLayer::SetThumbnail(const SkBitmap* thumbnail) {
+  // Determine the scaled thumbnail width and height. If both the height and
+  // width of |thumbnail| are larger than |thumbnail_size_|, the thumbnail will
+  // be scaled down by a call to Layer::SetBounds() below.
+  int min_dimension = std::min(thumbnail->width(), thumbnail->height());
+  int scaled_thumbnail_width = thumbnail->width();
+  int scaled_thumbnail_height = thumbnail->height();
+  if (min_dimension > thumbnail_size_) {
+    scaled_thumbnail_width =
+        scaled_thumbnail_width * thumbnail_size_ / min_dimension;
+    scaled_thumbnail_height =
+        scaled_thumbnail_height * thumbnail_size_ / min_dimension;
+  }
+
+  // Determine the UV transform coordinates. This will crop the thumbnail.
+  // (0, 0) is the default top left corner. (1, 1) is the default bottom
+  // right corner.
+  float top_left_x = 0;
+  float top_left_y = 0;
+  float bottom_right_x = 1;
+  float bottom_right_y = 1;
+
+  if (scaled_thumbnail_width > thumbnail_size_) {
+    // Crop an even amount on the left and right sides of the thumbnail.
+    float top_left_x_px = (scaled_thumbnail_width - thumbnail_size_) / 2.f;
+    float bottom_right_x_px = top_left_x_px + thumbnail_size_;
+
+    top_left_x = top_left_x_px / scaled_thumbnail_width;
+    bottom_right_x = bottom_right_x_px / scaled_thumbnail_width;
+  } else if (scaled_thumbnail_height > thumbnail_size_) {
+    // Crop an even amount on the top and bottom of the thumbnail.
+    float top_left_y_px = (scaled_thumbnail_height - thumbnail_size_) / 2.f;
+    float bottom_right_y_px = top_left_y_px + thumbnail_size_;
+
+    top_left_y = top_left_y_px / scaled_thumbnail_height;
+    bottom_right_y = bottom_right_y_px / scaled_thumbnail_height;
+  }
+
+  // If the original |thumbnail| height or width is smaller than
+  // |thumbnail_size_| determine the side and top margins needed to center
+  // the thumbnail.
+  thumbnail_side_margin_ = 0;
+  thumbnail_top_margin_ = 0;
+
+  if (scaled_thumbnail_width < thumbnail_size_) {
+    thumbnail_side_margin_ = (thumbnail_size_ - scaled_thumbnail_width) / 2.f;
+  }
+
+  if (scaled_thumbnail_height < thumbnail_size_) {
+    thumbnail_top_margin_ = (thumbnail_size_ - scaled_thumbnail_height) / 2.f;
+  }
+
+  // Determine the layer bounds. This will down scale the thumbnail if
+  // necessary and ensure it is displayed at |thumbnail_size_|. If
+  // either the original |thumbnail| height or width is smaller than
+  // |thumbnail_size_|, the thumbnail will not be scaled.
+  int layer_width = std::min(thumbnail_size_, scaled_thumbnail_width);
+  int layer_height = std::min(thumbnail_size_, scaled_thumbnail_height);
+
+  // UIResourceLayer requires an immutable copy of the input |thumbnail|.
+  SkBitmap thumbnail_copy;
+  if (thumbnail->isImmutable()) {
+    thumbnail_copy = *thumbnail;
+  } else {
+    thumbnail->copyTo(&thumbnail_copy);
+    thumbnail_copy.setImmutable();
+  }
+
+  thumbnail_layer_->SetBitmap(thumbnail_copy);
+  thumbnail_layer_->SetBounds(gfx::Size(layer_width, layer_height));
+  thumbnail_layer_->SetPosition(
+      gfx::PointF(thumbnail_side_margin_, thumbnail_top_margin_));
+  thumbnail_layer_->SetUV(gfx::PointF(top_left_x, top_left_y),
+                          gfx::PointF(bottom_right_x, bottom_right_y));
 }
 
 ContextualSearchLayer::ContextualSearchLayer(
     ui::ResourceManager* resource_manager)
     : OverlayPanelLayer(resource_manager),
       search_context_(cc::UIResourceLayer::Create()),
+      icon_layer_(cc::Layer::Create()),
       search_provider_icon_sprite_(CrushedSpriteLayer::Create()),
+      thumbnail_layer_(cc::UIResourceLayer::Create()),
       arrow_icon_(cc::UIResourceLayer::Create()),
       search_promo_(cc::UIResourceLayer::Create()),
       search_promo_container_(cc::SolidColorLayer::Create()),
@@ -491,6 +627,13 @@ ContextualSearchLayer::ContextualSearchLayer(
   // Progress Bar
   progress_bar_->SetIsDrawable(true);
   progress_bar_->SetFillCenter(true);
+
+  // Icon
+  icon_layer_->SetIsDrawable(true);
+  layer_->AddChild(icon_layer_);
+
+  // Thumbnail
+  thumbnail_layer_->SetIsDrawable(true);
 }
 
 ContextualSearchLayer::~ContextualSearchLayer() {

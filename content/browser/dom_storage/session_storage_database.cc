@@ -4,16 +4,19 @@
 
 #include "content/browser/dom_storage/session_storage_database.h"
 
+#include <inttypes.h>
 #include <stddef.h>
 
 #include <vector>
 
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "third_party/leveldatabase/env_chromium.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 #include "third_party/leveldatabase/src/include/leveldb/iterator.h"
@@ -295,7 +298,8 @@ bool SessionStorageDatabase::ReadNamespacesAndOrigins(
   std::string current_namespace_id;
   for (it->Next(); it->Valid(); it->Next()) {
     std::string key = it->key().ToString();
-    if (key.find(namespace_prefix) != 0) {
+    if (!base::StartsWith(key, namespace_prefix,
+                          base::CompareCase::SENSITIVE)) {
       // Iterated past the "namespace-" keys.
       break;
     }
@@ -323,6 +327,37 @@ bool SessionStorageDatabase::ReadNamespacesAndOrigins(
   }
   db_->ReleaseSnapshot(options.snapshot);
   return true;
+}
+
+void SessionStorageDatabase::OnMemoryDump(
+    base::trace_event::ProcessMemoryDump* pmd) {
+  std::string db_memory_usage;
+  {
+    base::AutoLock lock(db_lock_);
+    if (!db_)
+      return;
+
+    bool res =
+        db_->GetProperty("leveldb.approximate-memory-usage", &db_memory_usage);
+    DCHECK(res);
+  }
+
+  uint64_t size;
+  bool res = base::StringToUint64(db_memory_usage, &size);
+  DCHECK(res);
+
+  auto* mad = pmd->CreateAllocatorDump(
+      base::StringPrintf("dom_storage/session_storage_0x%" PRIXPTR,
+                         reinterpret_cast<uintptr_t>(this)));
+  mad->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
+                 base::trace_event::MemoryAllocatorDump::kUnitsBytes, size);
+
+  // Memory is allocated from system allocator (malloc).
+  const char* system_allocator_name =
+      base::trace_event::MemoryDumpManager::GetInstance()
+          ->system_allocator_pool_name();
+  if (system_allocator_name)
+    pmd->AddSuballocation(mad->guid(), system_allocator_name);
 }
 
 bool SessionStorageDatabase::LazyOpen(bool create_if_needed) {
@@ -463,7 +498,8 @@ bool SessionStorageDatabase::GetAreasInNamespace(
   // Skip the dummy entry "namespace-<namespaceid>-" and iterate the origins.
   for (it->Next(); it->Valid(); it->Next()) {
     std::string key = it->key().ToString();
-    if (key.find(namespace_start_key) != 0) {
+    if (!base::StartsWith(key, namespace_start_key,
+                          base::CompareCase::SENSITIVE)) {
       // Iterated past the origins for this namespace.
       break;
     }
@@ -515,7 +551,7 @@ bool SessionStorageDatabase::DeleteAreaHelper(
   if (!it->Valid())
     return true;
   std::string key = it->key().ToString();
-  if (key.find(namespace_start_key) != 0)
+  if (!base::StartsWith(key, namespace_start_key, base::CompareCase::SENSITIVE))
     batch->Delete(namespace_start_key);
   return true;
 }
@@ -574,7 +610,7 @@ bool SessionStorageDatabase::ReadMap(const std::string& map_id,
   // Skip the dummy entry "map-<mapid>-".
   for (it->Next(); it->Valid(); it->Next()) {
     std::string key = it->key().ToString();
-    if (key.find(map_start_key) != 0) {
+    if (!base::StartsWith(key, map_start_key, base::CompareCase::SENSITIVE)) {
       // Iterated past the keys in this map.
       break;
     }

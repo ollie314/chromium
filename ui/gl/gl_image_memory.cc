@@ -36,23 +36,24 @@ bool ValidInternalFormat(unsigned internalformat) {
   }
 }
 
-bool ValidFormat(BufferFormat format) {
+bool ValidFormat(gfx::BufferFormat format) {
   switch (format) {
-    case BufferFormat::ATC:
-    case BufferFormat::ATCIA:
-    case BufferFormat::DXT1:
-    case BufferFormat::DXT5:
-    case BufferFormat::ETC1:
-    case BufferFormat::R_8:
-    case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBX_8888:
-    case BufferFormat::RGBA_8888:
-    case BufferFormat::BGRX_8888:
-    case BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::ATC:
+    case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::DXT1:
+    case gfx::BufferFormat::DXT5:
+    case gfx::BufferFormat::ETC1:
+    case gfx::BufferFormat::R_8:
+    case gfx::BufferFormat::BGR_565:
+    case gfx::BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::RGBX_8888:
+    case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::BGRA_8888:
       return true;
-    case BufferFormat::YUV_420:
-    case BufferFormat::YUV_420_BIPLANAR:
-    case BufferFormat::UYVY_422:
+    case gfx::BufferFormat::YVU_420:
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
+    case gfx::BufferFormat::UYVY_422:
       return false;
   }
 
@@ -60,24 +61,25 @@ bool ValidFormat(BufferFormat format) {
   return false;
 }
 
-bool IsCompressedFormat(BufferFormat format) {
+bool IsCompressedFormat(gfx::BufferFormat format) {
   switch (format) {
-    case BufferFormat::ATC:
-    case BufferFormat::ATCIA:
-    case BufferFormat::DXT1:
-    case BufferFormat::DXT5:
-    case BufferFormat::ETC1:
+    case gfx::BufferFormat::ATC:
+    case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::DXT1:
+    case gfx::BufferFormat::DXT5:
+    case gfx::BufferFormat::ETC1:
       return true;
-    case BufferFormat::R_8:
-    case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBX_8888:
-    case BufferFormat::RGBA_8888:
-    case BufferFormat::BGRX_8888:
-    case BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::R_8:
+    case gfx::BufferFormat::BGR_565:
+    case gfx::BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::RGBX_8888:
+    case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::BGRA_8888:
       return false;
-    case BufferFormat::YUV_420:
-    case BufferFormat::YUV_420_BIPLANAR:
-    case BufferFormat::UYVY_422:
+    case gfx::BufferFormat::YVU_420:
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
+    case gfx::BufferFormat::UYVY_422:
       NOTREACHED();
       return false;
   }
@@ -86,31 +88,32 @@ bool IsCompressedFormat(BufferFormat format) {
   return false;
 }
 
-GLenum TextureFormat(BufferFormat format) {
+GLenum TextureFormat(gfx::BufferFormat format) {
   switch (format) {
-    case BufferFormat::ATC:
+    case gfx::BufferFormat::ATC:
       return GL_ATC_RGB_AMD;
-    case BufferFormat::ATCIA:
+    case gfx::BufferFormat::ATCIA:
       return GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD;
-    case BufferFormat::DXT1:
+    case gfx::BufferFormat::DXT1:
       return GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
-    case BufferFormat::DXT5:
+    case gfx::BufferFormat::DXT5:
       return GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
-    case BufferFormat::ETC1:
+    case gfx::BufferFormat::ETC1:
       return GL_ETC1_RGB8_OES;
-    case BufferFormat::R_8:
+    case gfx::BufferFormat::R_8:
       return GL_RED;
-    case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::RGBA_8888:
       return GL_RGBA;
-    case BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::BGRA_8888:
       return GL_BGRA_EXT;
-    case BufferFormat::RGBX_8888:
-    case BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::BGR_565:
+    case gfx::BufferFormat::RGBX_8888:
+    case gfx::BufferFormat::BGRX_8888:
       return GL_RGB;
-    case BufferFormat::YUV_420:
-    case BufferFormat::YUV_420_BIPLANAR:
-    case BufferFormat::UYVY_422:
+    case gfx::BufferFormat::YVU_420:
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
+    case gfx::BufferFormat::UYVY_422:
       NOTREACHED();
       return 0;
   }
@@ -119,25 +122,26 @@ GLenum TextureFormat(BufferFormat format) {
   return 0;
 }
 
-GLenum DataFormat(BufferFormat format) {
+GLenum DataFormat(gfx::BufferFormat format) {
   switch (format) {
-    case BufferFormat::RGBX_8888:
+    case gfx::BufferFormat::RGBX_8888:
       return GL_RGBA;
-    case BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::BGRX_8888:
       return GL_BGRA_EXT;
-    case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBA_8888:
-    case BufferFormat::BGRA_8888:
-    case BufferFormat::R_8:
-    case BufferFormat::ATC:
-    case BufferFormat::ATCIA:
-    case BufferFormat::DXT1:
-    case BufferFormat::DXT5:
-    case BufferFormat::ETC1:
+    case gfx::BufferFormat::BGR_565:
+    case gfx::BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::R_8:
+    case gfx::BufferFormat::ATC:
+    case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::DXT1:
+    case gfx::BufferFormat::DXT5:
+    case gfx::BufferFormat::ETC1:
       return TextureFormat(format);
-    case BufferFormat::YUV_420:
-    case BufferFormat::YUV_420_BIPLANAR:
-    case BufferFormat::UYVY_422:
+    case gfx::BufferFormat::YVU_420:
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
+    case gfx::BufferFormat::UYVY_422:
       NOTREACHED();
       return 0;
   }
@@ -146,24 +150,26 @@ GLenum DataFormat(BufferFormat format) {
   return 0;
 }
 
-GLenum DataType(BufferFormat format) {
+GLenum DataType(gfx::BufferFormat format) {
   switch (format) {
-    case BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::BGR_565:
+      return GL_UNSIGNED_SHORT_5_6_5_REV;
+    case gfx::BufferFormat::RGBA_4444:
       return GL_UNSIGNED_SHORT_4_4_4_4;
-    case BufferFormat::RGBX_8888:
-    case BufferFormat::RGBA_8888:
-    case BufferFormat::BGRX_8888:
-    case BufferFormat::BGRA_8888:
-    case BufferFormat::R_8:
+    case gfx::BufferFormat::RGBX_8888:
+    case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::R_8:
       return GL_UNSIGNED_BYTE;
-    case BufferFormat::ATC:
-    case BufferFormat::ATCIA:
-    case BufferFormat::DXT1:
-    case BufferFormat::DXT5:
-    case BufferFormat::ETC1:
-    case BufferFormat::YUV_420:
-    case BufferFormat::YUV_420_BIPLANAR:
-    case BufferFormat::UYVY_422:
+    case gfx::BufferFormat::ATC:
+    case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::DXT1:
+    case gfx::BufferFormat::DXT5:
+    case gfx::BufferFormat::ETC1:
+    case gfx::BufferFormat::YVU_420:
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
+    case gfx::BufferFormat::UYVY_422:
       NOTREACHED();
       return 0;
   }
@@ -172,25 +178,26 @@ GLenum DataType(BufferFormat format) {
   return 0;
 }
 
-GLint DataRowLength(size_t stride, BufferFormat format) {
+GLint DataRowLength(size_t stride, gfx::BufferFormat format) {
   switch (format) {
-    case BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::BGR_565:
+    case gfx::BufferFormat::RGBA_4444:
       return base::checked_cast<GLint>(stride) / 2;
-    case BufferFormat::RGBX_8888:
-    case BufferFormat::RGBA_8888:
-    case BufferFormat::BGRX_8888:
-    case BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::RGBX_8888:
+    case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::BGRA_8888:
       return base::checked_cast<GLint>(stride) / 4;
-    case BufferFormat::R_8:
+    case gfx::BufferFormat::R_8:
       return base::checked_cast<GLint>(stride);
-    case BufferFormat::ATC:
-    case BufferFormat::ATCIA:
-    case BufferFormat::DXT1:
-    case BufferFormat::DXT5:
-    case BufferFormat::ETC1:
-    case BufferFormat::YUV_420:
-    case BufferFormat::YUV_420_BIPLANAR:
-    case BufferFormat::UYVY_422:
+    case gfx::BufferFormat::ATC:
+    case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::DXT1:
+    case gfx::BufferFormat::DXT5:
+    case gfx::BufferFormat::ETC1:
+    case gfx::BufferFormat::YVU_420:
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
+    case gfx::BufferFormat::UYVY_422:
       NOTREACHED();
       return 0;
   }
@@ -201,7 +208,6 @@ GLint DataRowLength(size_t stride, BufferFormat format) {
 
 template <typename F>
 std::unique_ptr<uint8_t[]> GLES2RGBData(const gfx::Size& size,
-                                        BufferFormat format,
                                         size_t stride,
                                         const uint8_t* data,
                                         F const& data_to_rgb,
@@ -230,8 +236,40 @@ std::unique_ptr<uint8_t[]> GLES2RGBData(const gfx::Size& size,
   return gles2_rgb_data;
 }
 
+std::unique_ptr<uint8_t[]> GLES2RGB565Data(const gfx::Size& size,
+                                           size_t stride,
+                                           const uint8_t* data,
+                                           GLenum* data_format,
+                                           GLenum* data_type,
+                                           GLint* data_row_length) {
+  TRACE_EVENT2("gpu", "GLES2RGB565Data", "width", size.width(), "height",
+               size.height());
+
+  // Four-byte row alignment as specified by glPixelStorei with argument
+  // GL_UNPACK_ALIGNMENT set to 4.
+  size_t gles2_rgb_data_stride = (size.width() * 2 + 3) & ~3;
+  std::unique_ptr<uint8_t[]> gles2_rgb_data(
+      new uint8_t[gles2_rgb_data_stride * size.height()]);
+
+  for (int y = 0; y < size.height(); ++y) {
+    for (int x = 0; x < size.width(); ++x) {
+      const uint16_t* src =
+          reinterpret_cast<const uint16_t*>(&data[y * stride + x * 2]);
+      uint16_t* dst = reinterpret_cast<uint16_t*>(
+          &gles2_rgb_data[y * gles2_rgb_data_stride + x * 2]);
+      *dst = (((*src & 0x1f) >> 0) << 11) | (((*src & 0x7e0) >> 5) << 5) |
+             (((*src & 0xf800) >> 11) << 5);
+    }
+  }
+
+  *data_format = GL_RGB;
+  *data_type = GL_UNSIGNED_SHORT_5_6_5;
+  *data_row_length = size.width();
+  return gles2_rgb_data;
+}
+
 std::unique_ptr<uint8_t[]> GLES2Data(const gfx::Size& size,
-                                     BufferFormat format,
+                                     gfx::BufferFormat format,
                                      size_t stride,
                                      const uint8_t* data,
                                      GLenum* data_format,
@@ -241,28 +279,33 @@ std::unique_ptr<uint8_t[]> GLES2Data(const gfx::Size& size,
                size.height());
 
   switch (format) {
-    case BufferFormat::RGBX_8888:
-      return GLES2RGBData(size, format, stride,
-                          data, [](const uint8_t* src, uint8_t* dst) {
+    case gfx::BufferFormat::RGBX_8888:
+      return GLES2RGBData(size, stride, data,
+                          [](const uint8_t* src, uint8_t* dst) {
                             dst[0] = src[0];
                             dst[1] = src[1];
                             dst[2] = src[2];
-                          }, data_format, data_type, data_row_length);
-    case BufferFormat::BGRX_8888:
-      return GLES2RGBData(size, format, stride,
-                          data, [](const uint8_t* src, uint8_t* dst) {
+                          },
+                          data_format, data_type, data_row_length);
+    case gfx::BufferFormat::BGR_565:
+      return GLES2RGB565Data(size, stride, data, data_format, data_type,
+                             data_row_length);
+    case gfx::BufferFormat::BGRX_8888:
+      return GLES2RGBData(size, stride, data,
+                          [](const uint8_t* src, uint8_t* dst) {
                             dst[0] = src[2];
                             dst[1] = src[1];
                             dst[2] = src[0];
-                          }, data_format, data_type, data_row_length);
-    case BufferFormat::RGBA_4444:
-    case BufferFormat::RGBA_8888:
-    case BufferFormat::BGRA_8888:
-    case BufferFormat::R_8: {
+                          },
+                          data_format, data_type, data_row_length);
+    case gfx::BufferFormat::RGBA_4444:
+    case gfx::BufferFormat::RGBA_8888:
+    case gfx::BufferFormat::BGRA_8888:
+    case gfx::BufferFormat::R_8: {
       size_t gles2_data_stride =
           RowSizeForBufferFormat(size.width(), format, 0);
       if (stride == gles2_data_stride ||
-          gfx::g_driver_gl.ext.b_GL_EXT_unpack_subimage)
+          g_driver_gl.ext.b_GL_EXT_unpack_subimage)
         return nullptr;  // No data conversion needed
 
       std::unique_ptr<uint8_t[]> gles2_data(
@@ -274,15 +317,15 @@ std::unique_ptr<uint8_t[]> GLES2Data(const gfx::Size& size,
       *data_row_length = size.width();
       return gles2_data;
     }
-    case BufferFormat::ATC:
-    case BufferFormat::ATCIA:
-    case BufferFormat::DXT1:
-    case BufferFormat::DXT5:
-    case BufferFormat::ETC1:
+    case gfx::BufferFormat::ATC:
+    case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::DXT1:
+    case gfx::BufferFormat::DXT5:
+    case gfx::BufferFormat::ETC1:
       return nullptr;  // No data conversion needed
-    case BufferFormat::YUV_420:
-    case BufferFormat::YUV_420_BIPLANAR:
-    case BufferFormat::UYVY_422:
+    case gfx::BufferFormat::YVU_420:
+    case gfx::BufferFormat::YUV_420_BIPLANAR:
+    case gfx::BufferFormat::UYVY_422:
       NOTREACHED();
       return nullptr;
   }
@@ -297,7 +340,7 @@ GLImageMemory::GLImageMemory(const gfx::Size& size, unsigned internalformat)
     : size_(size),
       internalformat_(internalformat),
       memory_(nullptr),
-      format_(BufferFormat::RGBA_8888),
+      format_(gfx::BufferFormat::RGBA_8888),
       stride_(0) {}
 
 GLImageMemory::~GLImageMemory() {
@@ -305,7 +348,7 @@ GLImageMemory::~GLImageMemory() {
 }
 
 bool GLImageMemory::Initialize(const unsigned char* memory,
-                               BufferFormat format,
+                               gfx::BufferFormat format,
                                size_t stride) {
   if (!ValidInternalFormat(internalformat_)) {
     LOG(ERROR) << "Invalid internalformat: " << internalformat_;
@@ -367,7 +410,7 @@ bool GLImageMemory::CopyTexImage(unsigned target) {
     GLint data_row_length = DataRowLength(stride_, format_);
     std::unique_ptr<uint8_t[]> gles2_data;
 
-    if (gfx::GLContext::GetCurrent()->GetVersionInfo()->is_es) {
+    if (GLContext::GetCurrent()->GetVersionInfo()->is_es) {
       gles2_data = GLES2Data(size_, format_, stride_, memory_, &data_format,
                              &data_type, &data_row_length);
     }
@@ -417,7 +460,7 @@ bool GLImageMemory::CopyTexSubImage(unsigned target,
     GLint data_row_length = DataRowLength(stride_, format_);
     std::unique_ptr<uint8_t[]> gles2_data;
 
-    if (gfx::GLContext::GetCurrent()->GetVersionInfo()->is_es) {
+    if (GLContext::GetCurrent()->GetVersionInfo()->is_es) {
       gles2_data = GLES2Data(rect.size(), format_, stride_, data, &data_format,
                              &data_type, &data_row_length);
     }
@@ -445,7 +488,7 @@ bool GLImageMemory::ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
 }
 
 // static
-unsigned GLImageMemory::GetInternalFormatForTesting(BufferFormat format) {
+unsigned GLImageMemory::GetInternalFormatForTesting(gfx::BufferFormat format) {
   DCHECK(ValidFormat(format));
   return TextureFormat(format);
 }

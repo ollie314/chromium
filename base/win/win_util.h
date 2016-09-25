@@ -66,6 +66,11 @@ inline uint32_t HandleToUint32(HANDLE h) {
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(h));
 }
 
+inline HANDLE Uint32ToHandle(uint32_t h) {
+  return reinterpret_cast<HANDLE>(
+      static_cast<uintptr_t>(static_cast<int32_t>(h)));
+}
+
 BASE_EXPORT void GetNonClientMetrics(NONCLIENTMETRICS_XP* metrics);
 
 // Returns the string representing the current user sid.
@@ -149,14 +154,6 @@ BASE_EXPORT bool IsKeyboardPresentOnSlate(std::string* reason);
     offsetof(struct_name, member) + \
     (sizeof static_cast<struct_name*>(NULL)->member)
 
-// Displays the on screen keyboard on Windows 8 and above. Returns true on
-// success.
-BASE_EXPORT bool DisplayVirtualKeyboard();
-
-// Dismisses the on screen keyboard if it is being displayed on Windows 8 and.
-// above. Returns true on success.
-BASE_EXPORT bool DismissVirtualKeyboard();
-
 // Returns true if the machine is enrolled to a domain.
 BASE_EXPORT bool IsEnrolledToDomain();
 
@@ -183,6 +180,9 @@ BASE_EXPORT bool GetLoadedModulesSnapshot(HANDLE process,
 // disable pen flick gestures for the given HWND.
 BASE_EXPORT void EnableFlicks(HWND hwnd);
 BASE_EXPORT void DisableFlicks(HWND hwnd);
+
+// Returns true if the process is per monitor DPI aware.
+BASE_EXPORT bool IsProcessPerMonitorDpiAware();
 
 }  // namespace win
 }  // namespace base

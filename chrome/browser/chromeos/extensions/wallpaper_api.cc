@@ -8,14 +8,15 @@
 #include <utility>
 #include <vector>
 
-#include "ash/desktop_background/desktop_background_controller.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
+#include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
+#include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -153,11 +154,11 @@ void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
       wallpaper::kThumbnailWallpaperSubDir, wallpaper_files_id_,
       params_->details.filename);
 
-  sequence_token_ = BrowserThread::GetBlockingPool()->GetNamedSequenceToken(
-      wallpaper::kWallpaperSequenceTokenName);
   scoped_refptr<base::SequencedTaskRunner> task_runner =
-      BrowserThread::GetBlockingPool()->
-          GetSequencedTaskRunnerWithShutdownBehavior(sequence_token_,
+      BrowserThread::GetBlockingPool()
+          ->GetSequencedTaskRunnerWithShutdownBehavior(
+              BrowserThread::GetBlockingPool()->GetNamedSequenceToken(
+                  wallpaper::kWallpaperSequenceTokenName),
               base::SequencedWorkerPool::BLOCK_SHUTDOWN);
   wallpaper::WallpaperLayout layout = wallpaper_api_util::GetLayoutEnum(
       extensions::api::wallpaper::ToString(params_->details.layout));
@@ -171,9 +172,11 @@ void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
       user_manager::User::CUSTOMIZED, image, update_wallpaper);
   unsafe_wallpaper_decoder_ = NULL;
 
-  // Save current extenion name. It will be displayed in the component
+  // Save current extension name. It will be displayed in the component
   // wallpaper picker app. If current extension is the component wallpaper
   // picker, set an empty string.
+  // TODO(xdai): This preference is unused now. For compatiblity concern, we
+  // need to keep it until it's safe to clean it up.
   Profile* profile = Profile::FromBrowserContext(browser_context());
   if (extension()->id() == extension_misc::kWallpaperManagerId) {
     profile->GetPrefs()->SetString(prefs::kCurrentWallpaperAppName,
@@ -201,8 +204,7 @@ void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
 void WallpaperSetWallpaperFunction::GenerateThumbnail(
     const base::FilePath& thumbnail_path,
     std::unique_ptr<gfx::ImageSkia> image) {
-  DCHECK(BrowserThread::GetBlockingPool()->IsRunningSequenceOnCurrentThread(
-      sequence_token_));
+  wallpaper::AssertCalledOnWallpaperSequence();
   if (!base::PathExists(thumbnail_path.DirName()))
     base::CreateDirectory(thumbnail_path.DirName());
 
@@ -225,15 +227,17 @@ void WallpaperSetWallpaperFunction::GenerateThumbnail(
 void WallpaperSetWallpaperFunction::ThumbnailGenerated(
     base::RefCountedBytes* original_data,
     base::RefCountedBytes* thumbnail_data) {
-  BinaryValue* original_result = BinaryValue::CreateWithCopiedBuffer(
-      reinterpret_cast<const char*>(original_data->front()),
-      original_data->size());
-  BinaryValue* thumbnail_result = BinaryValue::CreateWithCopiedBuffer(
-      reinterpret_cast<const char*>(thumbnail_data->front()),
-      thumbnail_data->size());
+  std::unique_ptr<BinaryValue> original_result =
+      BinaryValue::CreateWithCopiedBuffer(
+          reinterpret_cast<const char*>(original_data->front()),
+          original_data->size());
+  std::unique_ptr<BinaryValue> thumbnail_result =
+      BinaryValue::CreateWithCopiedBuffer(
+          reinterpret_cast<const char*>(thumbnail_data->front()),
+          thumbnail_data->size());
 
   if (params_->details.thumbnail) {
-    SetResult(thumbnail_result);
+    SetResult(thumbnail_result->CreateDeepCopy());
     SendResponse(true);
   }
 
@@ -244,11 +248,21 @@ void WallpaperSetWallpaperFunction::ThumbnailGenerated(
     extensions::EventRouter* event_router =
         extensions::EventRouter::Get(profile);
     std::unique_ptr<base::ListValue> event_args(new base::ListValue());
-    event_args->Append(original_result);
-    event_args->Append(thumbnail_result);
+    event_args->Append(original_result->DeepCopy());
+    event_args->Append(thumbnail_result->DeepCopy());
     event_args->Append(new base::StringValue(
         extensions::api::wallpaper::ToString(params_->details.layout)));
-    event_args->Append(new base::StringValue(extension()->name()));
+    // Setting wallpaper from right click menu in 'Files' app is a feature that
+    // was implemented in crbug.com/578935. Since 'Files' app is a built-in v1
+    // app in ChromeOS, we should treat it slightly differently with other third
+    // party apps: the wallpaper set by the 'Files' app should still be syncable
+    // and it should not appear in the wallpaper grid in the Wallpaper Picker.
+    // But we should not display the 'wallpaper-set-by-mesage' since it might
+    // introduce confusion as shown in crbug.com/599407.
+    event_args->Append(new base::StringValue(
+        (extension()->id() == file_manager::kFileManagerAppId)
+            ? std::string()
+            : extension()->name()));
     std::unique_ptr<extensions::Event> event(new extensions::Event(
         extensions::events::WALLPAPER_PRIVATE_ON_WALLPAPER_CHANGED_BY_3RD_PARTY,
         extensions::api::wallpaper_private::OnWallpaperChangedBy3rdParty::

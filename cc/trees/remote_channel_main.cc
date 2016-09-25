@@ -12,7 +12,7 @@
 #include "cc/proto/compositor_message_to_impl.pb.h"
 #include "cc/proto/compositor_message_to_main.pb.h"
 #include "cc/proto/gfx_conversions.h"
-#include "cc/trees/layer_tree_host.h"
+#include "cc/trees/layer_tree_host_in_process.h"
 #include "cc/trees/proxy_main.h"
 
 namespace cc {
@@ -33,6 +33,7 @@ RemoteChannelMain::RemoteChannelMain(RemoteProtoChannel* remote_proto_channel,
       task_runner_provider_(task_runner_provider),
       initialized_(false),
       weak_factory_(this) {
+  TRACE_EVENT0("cc.remote", "RemoteChannelMain::RemoteChannelMain");
   DCHECK(remote_proto_channel_);
   DCHECK(proxy_main_);
   DCHECK(task_runner_provider_);
@@ -41,6 +42,7 @@ RemoteChannelMain::RemoteChannelMain(RemoteProtoChannel* remote_proto_channel,
 }
 
 RemoteChannelMain::~RemoteChannelMain() {
+  TRACE_EVENT0("cc.remote", "~RemoteChannelMain::RemoteChannelMain");
   DCHECK(task_runner_provider_->IsMainThread());
   DCHECK(!initialized_);
 
@@ -49,6 +51,7 @@ RemoteChannelMain::~RemoteChannelMain() {
 
 void RemoteChannelMain::OnProtoReceived(
     std::unique_ptr<proto::CompositorMessage> proto) {
+  TRACE_EVENT0("cc.remote", "RemoteChannelMain::OnProtoReceived");
   DCHECK(task_runner_provider_->IsMainThread());
   DCHECK(proto->has_to_main());
 
@@ -60,23 +63,26 @@ void RemoteChannelMain::UpdateTopControlsStateOnImpl(
     TopControlsState current,
     bool animate) {}
 
-void RemoteChannelMain::InitializeOutputSurfaceOnImpl(
-    OutputSurface* output_surface) {
+void RemoteChannelMain::InitializeCompositorFrameSinkOnImpl(
+    CompositorFrameSink*) {
   NOTREACHED() << "Should not be called on the server LayerTreeHost";
 }
 
-void RemoteChannelMain::MainThreadHasStoppedFlingingOnImpl() {
-  proto::CompositorMessage proto;
-  proto::CompositorMessageToImpl* to_impl_proto = proto.mutable_to_impl();
-  to_impl_proto->set_message_type(
-      proto::CompositorMessageToImpl::MAIN_THREAD_HAS_STOPPED_FLINGING_ON_IMPL);
+void RemoteChannelMain::InitializeMutatorOnImpl(
+    std::unique_ptr<LayerTreeMutator> mutator) {
+  // TODO(vollick): add support for CompositorWorker.
+  NOTIMPLEMENTED();
+}
 
-  SendMessageProto(proto);
+void RemoteChannelMain::MainThreadHasStoppedFlingingOnImpl() {
+  NOTIMPLEMENTED();
 }
 
 void RemoteChannelMain::SetInputThrottledUntilCommitOnImpl(bool is_throttled) {}
 
 void RemoteChannelMain::SetDeferCommitsOnImpl(bool defer_commits) {
+  TRACE_EVENT1("cc.remote", "RemoteChannelMain::SetDeferCommitsOnImpl",
+               "defer_commits", defer_commits);
   proto::CompositorMessage proto;
   proto::CompositorMessageToImpl* to_impl_proto = proto.mutable_to_impl();
   to_impl_proto->set_message_type(
@@ -89,15 +95,11 @@ void RemoteChannelMain::SetDeferCommitsOnImpl(bool defer_commits) {
   SendMessageProto(proto);
 }
 
-void RemoteChannelMain::FinishAllRenderingOnImpl(CompletionEvent* completion) {
-  completion->Signal();
-}
-
 void RemoteChannelMain::SetVisibleOnImpl(bool visible) {
   NOTIMPLEMENTED() << "Visibility is not controlled by the server";
 }
 
-void RemoteChannelMain::ReleaseOutputSurfaceOnImpl(
+void RemoteChannelMain::ReleaseCompositorFrameSinkOnImpl(
     CompletionEvent* completion) {
   NOTREACHED() << "Should not be called on the server LayerTreeHost";
   completion->Signal();
@@ -113,6 +115,7 @@ void RemoteChannelMain::MainFrameWillHappenOnImplForTesting(
 }
 
 void RemoteChannelMain::SetNeedsRedrawOnImpl(const gfx::Rect& damage_rect) {
+  TRACE_EVENT0("cc.remote", "RemoteChannelMain::SetNeedsRedrawOnImpl");
   proto::CompositorMessage proto;
   proto::CompositorMessageToImpl* to_impl_proto = proto.mutable_to_impl();
   to_impl_proto->set_message_type(
@@ -131,6 +134,7 @@ void RemoteChannelMain::SetNeedsRedrawOnImpl(const gfx::Rect& damage_rect) {
 }
 
 void RemoteChannelMain::SetNeedsCommitOnImpl() {
+  TRACE_EVENT0("cc.remote", "RemoteChannelMain::SetNeedsCommitOnImpl");
   proto::CompositorMessage proto;
   proto::CompositorMessageToImpl* to_impl_proto = proto.mutable_to_impl();
   to_impl_proto->set_message_type(
@@ -142,7 +146,10 @@ void RemoteChannelMain::SetNeedsCommitOnImpl() {
 
 void RemoteChannelMain::BeginMainFrameAbortedOnImpl(
     CommitEarlyOutReason reason,
-    base::TimeTicks main_thread_start_time) {
+    base::TimeTicks main_thread_start_time,
+    std::vector<std::unique_ptr<SwapPromise>> swap_promises) {
+  TRACE_EVENT1("cc.remote", "RemoteChannelMain::BeginMainFrameAbortedOnImpl",
+               "reason", CommitEarlyOutReasonToString(reason));
   proto::CompositorMessage proto;
   proto::CompositorMessageToImpl* to_impl_proto = proto.mutable_to_impl();
   to_impl_proto->set_message_type(
@@ -155,24 +162,44 @@ void RemoteChannelMain::BeginMainFrameAbortedOnImpl(
   VLOG(1) << "Sending BeginMainFrameAborted message to client with reason: "
           << CommitEarlyOutReasonToString(reason);
   SendMessageProto(proto);
+
+  // Notify swap promises that commit had no updates. In the local compositor
+  // case this goes to the impl thread to be queued up in case we have an
+  // activation pending but that never happens for remote compositor.
+  for (const auto& swap_promise : swap_promises)
+    swap_promise->DidNotSwap(SwapPromise::COMMIT_NO_UPDATE);
 }
 
-void RemoteChannelMain::StartCommitOnImpl(
+void RemoteChannelMain::NotifyReadyToCommitOnImpl(
     CompletionEvent* completion,
-    LayerTreeHost* layer_tree_host,
+    LayerTreeHostInProcess* layer_tree_host,
     base::TimeTicks main_thread_start_time,
     bool hold_commit_for_activation) {
+  TRACE_EVENT0("cc.remote", "RemoteChannelMain::NotifyReadyToCommitOnImpl");
   proto::CompositorMessage proto;
   proto::CompositorMessageToImpl* to_impl_proto = proto.mutable_to_impl();
   to_impl_proto->set_message_type(proto::CompositorMessageToImpl::START_COMMIT);
   proto::StartCommit* start_commit_message =
       to_impl_proto->mutable_start_commit_message();
+  std::vector<std::unique_ptr<SwapPromise>> swap_promises;
   layer_tree_host->ToProtobufForCommit(
-      start_commit_message->mutable_layer_tree_host());
+      start_commit_message->mutable_layer_tree_host(), &swap_promises);
 
   VLOG(1) << "Sending commit message to client. Commit bytes size: "
           << proto.ByteSize();
   SendMessageProto(proto);
+
+  // Activate the swap promises after the commit is queued.
+  // In the threaded compositor, activation implies that the pending tree on the
+  // impl thread has been activated. While the impl thread for the remote
+  // compositor is on the client, the embedder still expects to receive these
+  // events in order to drive decisions that depend on impl frame production.
+  // So we dispatch these events after a commit message is sent to the client.
+  // Sending the commit message implies that a visual update has been queued for
+  // the client, which is the closest we can come to offering an indicator akin
+  // to an impl frame queued for display.
+  for (const auto& swap_promise : swap_promises)
+    swap_promise->DidActivate();
 
   // In order to avoid incurring the overhead for the client to send us a
   // message for when a frame to be committed is drawn we inform the embedder
@@ -192,43 +219,29 @@ void RemoteChannelMain::StartCommitOnImpl(
 }
 
 void RemoteChannelMain::SynchronouslyInitializeImpl(
-    LayerTreeHost* layer_tree_host,
-    std::unique_ptr<BeginFrameSource> external_begin_frame_source) {
+    LayerTreeHostInProcess* layer_tree_host) {
+  TRACE_EVENT0("cc.remote", "RemoteChannelMain::SynchronouslyInitializeImpl");
   DCHECK(!initialized_);
 
-  proto::CompositorMessage proto;
-  proto::CompositorMessageToImpl* to_impl_proto = proto.mutable_to_impl();
-  to_impl_proto->set_message_type(
-      proto::CompositorMessageToImpl::INITIALIZE_IMPL);
-  proto::InitializeImpl* initialize_impl_proto =
-      to_impl_proto->mutable_initialize_impl_message();
-  proto::LayerTreeSettings* settings_proto =
-      initialize_impl_proto->mutable_layer_tree_settings();
-  layer_tree_host->settings().ToProtobuf(settings_proto);
-
-  VLOG(1) << "Sending initialize message to client";
-  SendMessageProto(proto);
   initialized_ = true;
 }
 
 void RemoteChannelMain::SynchronouslyCloseImpl() {
+  TRACE_EVENT0("cc.remote", "RemoteChannelMain::SynchronouslyCloseImpl");
   DCHECK(initialized_);
-  proto::CompositorMessage proto;
-  proto::CompositorMessageToImpl* to_impl_proto = proto.mutable_to_impl();
-  to_impl_proto->set_message_type(proto::CompositorMessageToImpl::CLOSE_IMPL);
 
-  VLOG(1) << "Sending close message to client.";
-  SendMessageProto(proto);
   initialized_ = false;
 }
 
 void RemoteChannelMain::SendMessageProto(
     const proto::CompositorMessage& proto) {
+  TRACE_EVENT0("cc.remote", "RemoteChannelMain::SendMessageProto");
   remote_proto_channel_->SendCompositorProto(proto);
 }
 
 void RemoteChannelMain::HandleProto(
     const proto::CompositorMessageToMain& proto) {
+  TRACE_EVENT0("cc.remote", "RemoteChannelMain::HandleProto");
   DCHECK(proto.has_message_type());
 
   switch (proto.message_type()) {
@@ -236,6 +249,7 @@ void RemoteChannelMain::HandleProto(
       NOTIMPLEMENTED() << "Ignoring message proto of unknown type";
       break;
     case proto::CompositorMessageToMain::BEGIN_MAIN_FRAME: {
+      TRACE_EVENT0("cc.remote", "RemoteChannelMain::BeginMainFrame");
       VLOG(1) << "Received BeginMainFrame request from client.";
       const proto::BeginMainFrame& begin_main_frame_message =
           proto.begin_main_frame_message();

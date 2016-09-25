@@ -94,8 +94,8 @@ GpuMemoryBufferImplSharedMemory::CreateFromHandle(
 
   return base::WrapUnique(new GpuMemoryBufferImplSharedMemory(
       handle.id, size, format, callback,
-      base::WrapUnique(new base::SharedMemory(handle.handle, false)),
-      handle.offset, handle.stride));
+      base::MakeUnique<base::SharedMemory>(handle.handle, false), handle.offset,
+      handle.stride));
 }
 
 // static
@@ -133,13 +133,14 @@ bool GpuMemoryBufferImplSharedMemory::IsSizeValidForFormat(
       // by the block size.
       return size.width() % 4 == 0 && size.height() % 4 == 0;
     case gfx::BufferFormat::R_8:
+    case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBA_8888:
     case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
       return true;
-    case gfx::BufferFormat::YUV_420:
+    case gfx::BufferFormat::YVU_420:
     case gfx::BufferFormat::YUV_420_BIPLANAR: {
       size_t num_planes = gfx::NumberOfPlanesForBufferFormat(format);
       for (size_t i = 0; i < num_planes; ++i) {

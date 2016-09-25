@@ -7,14 +7,16 @@
 #include "platform/SharedBuffer.h"
 #include "platform/image-decoders/ImageDecoderTestHelpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
 namespace {
 
-PassOwnPtr<ImageDecoder> createDecoder()
+std::unique_ptr<ImageDecoder> createDecoder()
 {
-    return adoptPtr(new BMPImageDecoder(ImageDecoder::AlphaNotPremultiplied, ImageDecoder::GammaAndColorProfileApplied, ImageDecoder::noDecodedImageByteLimit));
+    return wrapUnique(new BMPImageDecoder(ImageDecoder::AlphaNotPremultiplied, ImageDecoder::GammaAndColorProfileApplied, ImageDecoder::noDecodedImageByteLimit));
 }
 
 } // anonymous namespace
@@ -25,7 +27,7 @@ TEST(BMPImageDecoderTest, isSizeAvailable)
     RefPtr<SharedBuffer> data = readFile(bmpFile);
     ASSERT_TRUE(data.get());
 
-    OwnPtr<ImageDecoder> decoder = createDecoder();
+    std::unique_ptr<ImageDecoder> decoder = createDecoder();
     decoder->setData(data.get(), true);
     EXPECT_TRUE(decoder->isSizeAvailable());
     EXPECT_EQ(256, decoder->size().width());
@@ -38,7 +40,7 @@ TEST(BMPImageDecoderTest, parseAndDecode)
     RefPtr<SharedBuffer> data = readFile(bmpFile);
     ASSERT_TRUE(data.get());
 
-    OwnPtr<ImageDecoder> decoder = createDecoder();
+    std::unique_ptr<ImageDecoder> decoder = createDecoder();
     decoder->setData(data.get(), true);
 
     ImageFrame* frame = decoder->frameBufferAtIndex(0);
@@ -56,12 +58,23 @@ TEST(BMPImageDecoderTest, emptyImage)
     RefPtr<SharedBuffer> data = readFile(bmpFile);
     ASSERT_TRUE(data.get());
 
-    OwnPtr<ImageDecoder> decoder = createDecoder();
+    std::unique_ptr<ImageDecoder> decoder = createDecoder();
     decoder->setData(data.get(), true);
 
     ImageFrame* frame = decoder->frameBufferAtIndex(0);
     ASSERT_TRUE(frame);
     EXPECT_EQ(ImageFrame::FrameEmpty, frame->getStatus());
+    EXPECT_TRUE(decoder->failed());
+}
+
+TEST(BMPImageDecoderTest, int32MinHeight)
+{
+    const char* bmpFile = "/LayoutTests/fast/images/resources/1xint32_min.bmp"; // 0xINT32_MIN
+    RefPtr<SharedBuffer> data = readFile(bmpFile);
+    std::unique_ptr<ImageDecoder> decoder = createDecoder();
+    // Test when not all data is received.
+    decoder->setData(data.get(), false);
+    EXPECT_FALSE(decoder->isSizeAvailable());
     EXPECT_TRUE(decoder->failed());
 }
 

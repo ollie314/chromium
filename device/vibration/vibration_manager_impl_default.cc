@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "device/vibration/vibration_manager_impl.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 
@@ -14,27 +15,22 @@ namespace {
 
 class VibrationManagerEmptyImpl : public VibrationManager {
  public:
-  void Vibrate(int64_t milliseconds) override {}
-  void Cancel() override {}
-
- private:
-  friend VibrationManagerImpl;
-
-  explicit VibrationManagerEmptyImpl(
-      mojo::InterfaceRequest<VibrationManager> request)
-      : binding_(this, std::move(request)) {}
+  VibrationManagerEmptyImpl() {}
   ~VibrationManagerEmptyImpl() override {}
 
-  // The binding between this object and the other end of the pipe.
-  mojo::StrongBinding<VibrationManager> binding_;
+  void Vibrate(int64_t milliseconds, const VibrateCallback& callback) override {
+    callback.Run();
+  }
+
+  void Cancel(const CancelCallback& callback) override { callback.Run(); }
 };
 
 }  // namespace
 
 // static
-void VibrationManagerImpl::Create(
-    mojo::InterfaceRequest<VibrationManager> request) {
-  new VibrationManagerEmptyImpl(std::move(request));
+void VibrationManagerImpl::Create(VibrationManagerRequest request) {
+  mojo::MakeStrongBinding(base::MakeUnique<VibrationManagerEmptyImpl>(),
+                          std::move(request));
 }
 
 }  // namespace device

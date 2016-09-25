@@ -27,7 +27,7 @@ from core import perf_benchmark
 
 from telemetry import page as page_module
 from telemetry import story
-from telemetry.page import page_test
+from telemetry.page import legacy_page_test
 from telemetry.value import scalar
 
 from metrics import memory
@@ -35,7 +35,7 @@ from metrics import power
 
 import page_sets
 
-from telemetry.timeline import tracing_category_filter
+from telemetry.timeline import chrome_trace_category_filter
 from telemetry.web_perf import timeline_based_measurement
 
 
@@ -43,7 +43,7 @@ IDB_CATEGORY = 'IndexedDB'
 TIMELINE_REQUIRED_CATEGORY = 'blink.console'
 
 
-class _IndexedDbMeasurement(page_test.PageTest):
+class _IndexedDbMeasurement(legacy_page_test.LegacyPageTest):
 
   def __init__(self):
     super(_IndexedDbMeasurement, self).__init__()
@@ -122,7 +122,7 @@ class IndexedDbTracing(perf_benchmark.PerfBenchmark):
   page_set = page_sets.IndexedDBEndurePageSet
 
   def CreateTimelineBasedMeasurementOptions(self):
-    cat_filter = tracing_category_filter.CreateMinimalOverheadFilter()
+    cat_filter = chrome_trace_category_filter.ChromeTraceCategoryFilter()
     cat_filter.AddIncludedCategory(IDB_CATEGORY)
     cat_filter.AddIncludedCategory(TIMELINE_REQUIRED_CATEGORY)
 

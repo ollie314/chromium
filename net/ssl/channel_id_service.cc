@@ -23,17 +23,13 @@
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "crypto/ec_private_key.h"
 #include "net/base/net_errors.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
 #include "url/gurl.h"
-
-#if !defined(USE_OPENSSL)
-#include <private/pprthred.h>  // PR_DetachThread
-#endif
 
 namespace net {
 
@@ -146,16 +142,6 @@ class ChannelIDServiceWorker {
     int error = ERR_FAILED;
     std::unique_ptr<ChannelIDStore::ChannelID> channel_id =
         GenerateChannelID(server_identifier_, &error);
-#if !defined(USE_OPENSSL)
-    // Detach the thread from NSPR.
-    // Calling NSS functions attaches the thread to NSPR, which stores
-    // the NSPR thread ID in thread-specific data.
-    // The threads in our thread pool terminate after we have called
-    // PR_Cleanup. Unless we detach them from NSPR, net_unittests gets
-    // segfaults on shutdown when the threads' thread-specific data
-    // destructors run.
-    PR_DetachThread();
-#endif
     origin_task_runner_->PostTask(
         FROM_HERE, base::Bind(callback_, server_identifier_, error,
                               base::Passed(&channel_id)));
@@ -206,7 +192,7 @@ class ChannelIDServiceJob {
          i != requests.end(); i++) {
       std::unique_ptr<crypto::ECPrivateKey> key_copy;
       if (key)
-        key_copy.reset(key->Copy());
+        key_copy = key->Copy();
       (*i)->Post(error, std::move(key_copy));
     }
   }
@@ -299,7 +285,7 @@ ChannelIDService::ChannelIDService(
       weak_ptr_factory_(this) {}
 
 ChannelIDService::~ChannelIDService() {
-  STLDeleteValues(&inflight_);
+  base::STLDeleteValues(&inflight_);
 }
 
 // static
@@ -317,7 +303,7 @@ int ChannelIDService::GetOrCreateChannelID(
     std::unique_ptr<crypto::ECPrivateKey>* key,
     const CompletionCallback& callback,
     Request* out_req) {
-  DVLOG(1) << __FUNCTION__ << " " << host;
+  DVLOG(1) << __func__ << " " << host;
   DCHECK(CalledOnValidThread());
   base::TimeTicks request_start = base::TimeTicks::Now();
 
@@ -372,7 +358,7 @@ int ChannelIDService::GetChannelID(const std::string& host,
                                    std::unique_ptr<crypto::ECPrivateKey>* key,
                                    const CompletionCallback& callback,
                                    Request* out_req) {
-  DVLOG(1) << __FUNCTION__ << " " << host;
+  DVLOG(1) << __func__ << " " << host;
   DCHECK(CalledOnValidThread());
   base::TimeTicks request_start = base::TimeTicks::Now();
 
@@ -453,7 +439,7 @@ void ChannelIDService::GeneratedChannelID(
 
   std::unique_ptr<crypto::ECPrivateKey> key;
   if (error == OK) {
-    key.reset(channel_id->key()->Copy());
+    key = channel_id->key()->Copy();
     channel_id_store_->SetChannelID(std::move(channel_id));
   }
   HandleResult(error, server_identifier, std::move(key));

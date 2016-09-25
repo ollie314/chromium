@@ -7,9 +7,8 @@
 #include "core/dom/ElementRareData.h"
 #include "core/dom/IntersectionObserver.h"
 #include "core/frame/FrameView.h"
+#include "core/frame/LocalFrame.h"
 #include "core/layout/LayoutBox.h"
-#include "core/layout/LayoutPart.h"
-#include "core/layout/LayoutText.h"
 #include "core/layout/LayoutView.h"
 #include "core/paint/PaintLayer.h"
 
@@ -42,7 +41,7 @@ void IntersectionObservation::initializeTargetRect(LayoutRect& rect) const
     DCHECK(m_target);
     LayoutObject* targetLayoutObject = target()->layoutObject();
     DCHECK(targetLayoutObject && targetLayoutObject->isBoxModelObject());
-    rect = toLayoutBoxModelObject(targetLayoutObject)->visualOverflowRect();
+    rect = LayoutRect(toLayoutBoxModelObject(targetLayoutObject)->borderBoundingBox());
 }
 
 void IntersectionObservation::initializeRootRect(LayoutRect& rect) const
@@ -62,14 +61,17 @@ void IntersectionObservation::clipToRoot(IntersectionGeometry& geometry) const
     // Map and clip rect into root element coordinates.
     // TODO(szager): the writing mode flipping needs a test.
     DCHECK(m_target);
-    LayoutObject* rootLayoutObject = m_observer->rootLayoutObject();
+    LayoutBox* rootLayoutObject = toLayoutBox(m_observer->rootLayoutObject());
     LayoutObject* targetLayoutObject = target()->layoutObject();
 
-    geometry.doesIntersect = targetLayoutObject->mapToVisualRectInAncestorSpace(toLayoutBoxModelObject(rootLayoutObject), geometry.intersectionRect, EdgeInclusive);
+    geometry.doesIntersect = targetLayoutObject->mapToVisualRectInAncestorSpace(rootLayoutObject, geometry.intersectionRect, EdgeInclusive);
+    if (rootLayoutObject->hasOverflowClip())
+        geometry.intersectionRect.move(-rootLayoutObject->scrolledContentOffset());
+
     if (!geometry.doesIntersect)
         return;
     LayoutRect rootClipRect(geometry.rootRect);
-    toLayoutBox(rootLayoutObject)->flipForWritingMode(rootClipRect);
+    rootLayoutObject->flipForWritingMode(rootClipRect);
     geometry.doesIntersect &= geometry.intersectionRect.inclusiveIntersect(rootClipRect);
 }
 
@@ -94,7 +96,7 @@ void IntersectionObservation::mapTargetRectToTargetFrameCoordinates(LayoutRect& 
 {
     LayoutObject& targetLayoutObject = *target()->layoutObject();
     Document& targetDocument = target()->document();
-    LayoutSize scrollPosition = LayoutSize(toIntSize(targetDocument.view()->scrollPosition()));
+    LayoutSize scrollPosition = LayoutSize(targetDocument.view()->scrollOffset());
     mapRectUpToDocument(rect, targetLayoutObject, targetDocument);
     rect.move(-scrollPosition);
 }
@@ -103,7 +105,7 @@ void IntersectionObservation::mapRootRectToRootFrameCoordinates(LayoutRect& rect
 {
     LayoutObject& rootLayoutObject = *m_observer->rootLayoutObject();
     Document& rootDocument = rootLayoutObject.document();
-    LayoutSize scrollPosition = LayoutSize(toIntSize(rootDocument.view()->scrollPosition()));
+    LayoutSize scrollPosition = LayoutSize(rootDocument.view()->scrollOffset());
     mapRectUpToDocument(rect, rootLayoutObject, rootLayoutObject.document());
     rect.move(-scrollPosition);
 }
@@ -112,7 +114,7 @@ void IntersectionObservation::mapRootRectToTargetFrameCoordinates(LayoutRect& re
 {
     LayoutObject& rootLayoutObject = *m_observer->rootLayoutObject();
     Document& targetDocument = target()->document();
-    LayoutSize scrollPosition = LayoutSize(toIntSize(targetDocument.view()->scrollPosition()));
+    LayoutSize scrollPosition = LayoutSize(targetDocument.view()->scrollOffset());
 
     if (&targetDocument == &rootLayoutObject.document())
         mapRectUpToDocument(rect, rootLayoutObject, targetDocument);
@@ -144,26 +146,27 @@ bool IntersectionObservation::computeGeometry(IntersectionGeometry& geometry) co
     // effectively means "if the previous observed state was that root and target were
     // intersecting, then generate a notification indicating that they are no longer
     // intersecting."  This happens, for example, when root or target is removed from the
-    // DOM tree and not reinserted before the next frame is generated.
+    // DOM tree and not reinserted before the next frame is generated, or display:none
+    // is set on the root or target.
     Element* targetElement = target();
     if (!targetElement)
         return false;
-    if (!targetElement->inShadowIncludingDocument())
+    if (!targetElement->isConnected())
         return true;
     DCHECK(m_observer);
     Element* rootElement = m_observer->root();
-    if (rootElement && !rootElement->inShadowIncludingDocument())
+    if (rootElement && !rootElement->isConnected())
         return true;
 
     LayoutObject* rootLayoutObject = m_observer->rootLayoutObject();
     if (!rootLayoutObject || !rootLayoutObject->isBoxModelObject())
-        return false;
+        return true;
     // TODO(szager): Support SVG
     LayoutObject* targetLayoutObject = targetElement->layoutObject();
     if (!targetLayoutObject)
-        return false;
+        return true;
     if (!targetLayoutObject->isBoxModelObject() && !targetLayoutObject->isText())
-        return false;
+        return true;
     if (!isContainingBlockChainDescendant(targetLayoutObject, rootLayoutObject))
         return true;
 

@@ -111,9 +111,6 @@ abstract class OverlayPanelBase {
      */
     private float mBasePageTargetY = 0.f;
 
-    /** Whether the Panel is showing. */
-    private boolean mIsShowing;
-
     /** The current context. */
     protected final Context mContext;
 
@@ -162,15 +159,18 @@ abstract class OverlayPanelBase {
     protected abstract void onClosed(StateChangeReason reason);
 
     /**
-     * @return The absolute amount in DP that the top controls have shifted off screen.
-     */
-    protected abstract float getTopControlsOffsetDp();
-
-    /**
      * TODO(mdjones): This method should be removed from this class.
      * @return The resource id that contains how large the top controls are.
      */
     protected abstract int getControlContainerHeightResource();
+
+    /**
+     * Handles when the Panel's container view size changes.
+     * @param width The new width of the Panel's container view.
+     * @param height The new height of the Panel's container view.
+     * @param previousWidth The previous width of the Panel's container view.
+     */
+    protected abstract void handleSizeChanged(float width, float height, float previousWidth);
 
     // ============================================================================================
     // Layout Integration
@@ -178,6 +178,7 @@ abstract class OverlayPanelBase {
 
     private float mLayoutWidth;
     private float mLayoutHeight;
+    private float mLayoutYOffset;
 
     private float mMaximumWidth;
     private float mMaximumHeight;
@@ -186,43 +187,46 @@ abstract class OverlayPanelBase {
     private boolean mOverrideIsFullWidthSizePanelForTesting;
 
     /**
-     * Called when the size of the view has changed.
+     * Called when the layout has changed.
      *
      * @param width  The new width in dp.
-     * @param height The new width in dp.
+     * @param height The new height in dp.
+     * @param visibleViewportOffsetY The Y offset of the content in dp.
      */
-    public void onSizeChanged(float width, float height) {
+    public void onLayoutChanged(float width, float height, float visibleViewportOffsetY) {
+        if (width == mLayoutWidth && height == mLayoutHeight
+                && visibleViewportOffsetY == mLayoutYOffset) {
+            return;
+        }
+
+        float previousLayoutWidth = mLayoutWidth;
+
         mLayoutWidth = width;
         mLayoutHeight = height;
+        mLayoutYOffset = visibleViewportOffsetY;
 
         mMaximumWidth = calculateOverlayPanelWidth();
         mMaximumHeight = getPanelHeightFromState(PanelState.MAXIMIZED);
 
-        // If the panel is closed, the height and offsets aren't changing. In a few tests, we get
-        // calls to onSizeChanged() when the panel isn't fully initialized, which causes the tests
-        // to fail if we try to call setPanelHeight().
-        if (mPanelState != PanelState.UNDEFINED && mPanelState != PanelState.CLOSED) {
-            setPanelHeight(getPanelHeightFromState(getPanelState()));
-            mOffsetX = calculateOverlayPanelX();
-            mOffsetY = calculateOverlayPanelY();
-        }
+        handleSizeChanged(width, height, previousLayoutWidth);
     }
 
     /**
      * @return Whether the Panel is in full width size.
      */
     protected boolean isFullWidthSizePanel() {
-        if (mOverrideIsFullWidthSizePanelForTesting) {
-            return mIsFullWidthSizePanelForTesting;
-        }
-        return getFullscreenWidth() <= SMALL_PANEL_WIDTH_THRESHOLD_DP;
+        return doesMatchFullWidthCriteria(getFullscreenWidth());
     }
 
     /**
-     * @return Whether the narrow version of the Panel is supported, in any orientation.
+     * @param containerWidth The width of the panel's container.
+     * @return Whether the given width matches the criteria required for a full width Panel.
      */
-    protected boolean isNarrowSizePanelSupported() {
-        return !isFullWidthSizePanel() || getTabHeight() > SMALL_PANEL_WIDTH_THRESHOLD_DP;
+    protected boolean doesMatchFullWidthCriteria(float containerWidth) {
+        if (mOverrideIsFullWidthSizePanelForTesting) {
+            return mIsFullWidthSizePanelForTesting;
+        }
+        return containerWidth <= SMALL_PANEL_WIDTH_THRESHOLD_DP;
     }
 
     /**
@@ -255,32 +259,18 @@ abstract class OverlayPanelBase {
     }
 
     /**
-     * @param y The y coordinate.
-     * @return The Y coordinate relative the fullscreen height.
-     */
-    public float getFullscreenY(float y) {
-        return y + (mToolbarHeight - getTopControlsOffsetDp()) / mPxToDp;
-    }
-
-    /**
      * @return Whether the Panel is showing.
      */
     public boolean isShowing() {
-        return mIsShowing;
+        return mHeight > 0;
     }
 
     /**
-     * @return Whether the Overlay Panel is opened. That is, whether it is EXPANDED or MAXIMIZED.
+     * @return Whether the Overlay Panel is opened. That is, whether the current height is greater
+     * than the peeking height.
      */
     public boolean isPanelOpened() {
-        return mHeight > mBarHeightPeeking;
-    }
-
-    /**
-     * Starts showing the Panel.
-     */
-    protected void startShowing() {
-        mIsShowing = true;
+        return mHeight > getBarContainerHeight();
     }
 
     /**
@@ -294,9 +284,7 @@ abstract class OverlayPanelBase {
      * @return The height of the tab the panel is displayed on top of.
      */
     public float getTabHeight() {
-        // NOTE(mdjones): This value will always be the same for a particular orientation; it is
-        // the content height + visible toolbar height.
-        return mLayoutHeight + (getToolbarHeight() - getTopControlsOffsetDp());
+        return mLayoutHeight;
     }
 
     /**
@@ -485,8 +473,8 @@ abstract class OverlayPanelBase {
     // Base Page states
     // --------------------------------------------------------------------------------------------
 
-    private float mBasePageY;
-    private float mBasePageBrightness;
+    private float mBasePageY = 0.0f;
+    private float mBasePageBrightness = 1.0f;
 
     /**
      * @return The vertical offset of the base page.
@@ -583,7 +571,7 @@ abstract class OverlayPanelBase {
      */
     protected void setPanelState(PanelState state, StateChangeReason reason) {
         if (state == PanelState.CLOSED) {
-            mIsShowing = false;
+            mHeight = 0;
             onClosed(reason);
         }
 
@@ -695,8 +683,6 @@ abstract class OverlayPanelBase {
      * Initializes the UI state.
      */
     protected void initializeUiState() {
-        mIsShowing = false;
-
         mPxToDp = 1.f / mContext.getResources().getDisplayMetrics().density;
 
         mToolbarHeight = mContext.getResources().getDimension(
@@ -1104,15 +1090,10 @@ abstract class OverlayPanelBase {
         // always return zero to ensure the Base Page remains in the same position.
         if (!isFullWidthSizePanel()) return 0.f;
 
-        // Start with the desired offset.
-        float offset = calculateBasePageDesiredOffset();
+        // Start with the desired offset taking viewport offset into consideration and make sure
+        // the result is <= 0 so the page moves up and not down.
+        float offset = Math.min(calculateBasePageDesiredOffset() - mLayoutYOffset, 0.0f);
 
-        // Make sure offset is negative to prevent Base Page from moving down,
-        // because there's nothing to render above the Page.
-        offset = Math.min(offset, 0.f);
-        // If visible, the Toolbar will be hidden. Therefore, we need to adjust
-        // the offset to account for this difference.
-        offset -= (mToolbarHeight - getTopControlsOffsetDp());
         // Make sure the offset is not greater than the expanded height, because
         // there's nothing to render below the Page.
         offset = Math.max(offset, -getExpandedHeight());

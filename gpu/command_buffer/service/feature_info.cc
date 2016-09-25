@@ -80,6 +80,34 @@ class StringSet {
   std::set<std::string> string_set_;
 };
 
+class ScopedPixelUnpackBufferOverride {
+ public:
+  explicit ScopedPixelUnpackBufferOverride(
+      bool is_es3_capable,
+      ContextType context_type,
+      GLuint binding_override)
+      : orig_binding_(-1) {
+    if (!(context_type == CONTEXT_TYPE_WEBGL1 ||
+          context_type == CONTEXT_TYPE_OPENGLES2) && is_es3_capable) {
+      GLint orig_binding;
+      glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &orig_binding);
+      if (static_cast<GLuint>(orig_binding) != binding_override) {
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, binding_override);
+        orig_binding_ = orig_binding;
+      }
+    }
+  }
+
+  ~ScopedPixelUnpackBufferOverride() {
+    if (orig_binding_ != -1) {
+      glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(orig_binding_));
+    }
+  }
+
+ private:
+    GLint orig_binding_;
+};
+
 }  // anonymous namespace.
 
 FeatureInfo::FeatureFlags::FeatureFlags()
@@ -89,8 +117,10 @@ FeatureInfo::FeatureFlags::FeatureFlags()
       multisampled_render_to_texture(false),
       use_img_for_multisampled_render_to_texture(false),
       chromium_screen_space_antialiasing(false),
+      use_chromium_screen_space_antialiasing_via_shaders(false),
       oes_standard_derivatives(false),
       oes_egl_image_external(false),
+      nv_egl_stream_consumer_external(false),
       oes_depth24(false),
       oes_compressed_etc1_rgb8_texture(false),
       packed_depth24_stencil8(false),
@@ -130,12 +160,13 @@ FeatureInfo::FeatureFlags::FeatureFlags()
       ext_texture_rg(false),
       chromium_image_ycbcr_420v(false),
       chromium_image_ycbcr_422(false),
-      enable_subscribe_uniform(false),
       emulate_primitive_restart_fixed_index(false),
       ext_render_buffer_format_bgra8888(false),
       ext_multisample_compatibility(false),
       ext_blend_func_extended(false),
-      ext_read_format_bgra(false) {}
+      ext_read_format_bgra(false),
+      desktop_srgb_support(false),
+      arb_es3_compatibility(false) {}
 
 FeatureInfo::FeatureInfo() {
   InitializeBasicState(base::CommandLine::InitializedForCurrentProcess()
@@ -167,9 +198,6 @@ void FeatureInfo::InitializeBasicState(const base::CommandLine* command_line) {
 
   feature_flags_.is_swiftshader =
       (command_line->GetSwitchValueASCII(switches::kUseGL) == "swiftshader");
-
-  feature_flags_.enable_subscribe_uniform =
-      command_line->HasSwitch(switches::kEnableSubscribeUniformExtension);
 
   enable_unsafe_es3_apis_switch_ =
       command_line->HasSwitch(switches::kEnableUnsafeES3APIs);
@@ -209,6 +237,10 @@ bool FeatureInfo::InitializeForTesting(
 
 bool FeatureInfo::InitializeForTesting() {
   return Initialize(CONTEXT_TYPE_OPENGLES2, DisallowedFeatures());
+}
+
+bool FeatureInfo::InitializeForTesting(ContextType context_type) {
+  return Initialize(context_type, DisallowedFeatures());
 }
 
 bool IsGL_REDSupportedOnFBOs() {
@@ -309,15 +341,20 @@ void FeatureInfo::EnableOESTextureHalfFloatLinear() {
 
 void FeatureInfo::InitializeFeatures() {
   // Figure out what extensions to turn on.
-  StringSet extensions(gfx::GetGLExtensionsFromCurrentContext());
+  StringSet extensions(gl::GetGLExtensionsFromCurrentContext());
 
   const char* version_str =
       reinterpret_cast<const char*>(glGetString(GL_VERSION));
   const char* renderer_str =
       reinterpret_cast<const char*>(glGetString(GL_RENDERER));
 
-  gl_version_info_.reset(new gfx::GLVersionInfo(
-      version_str, renderer_str, extensions.GetImpl()));
+  gl_version_info_.reset(
+      new gl::GLVersionInfo(version_str, renderer_str, extensions.GetImpl()));
+
+  // TODO(kainino): This call to IsES3Capable is sort of a hack to get some
+  // mocked tests working.
+  ScopedPixelUnpackBufferOverride scoped_pbo_override(
+      IsES3Capable(), context_type_, 0);
 
   AddExtensionString("GL_ANGLE_translated_shader_source");
   AddExtensionString("GL_CHROMIUM_async_pixel_transfers");
@@ -325,6 +362,7 @@ void FeatureInfo::InitializeFeatures() {
   AddExtensionString("GL_CHROMIUM_command_buffer_query");
   AddExtensionString("GL_CHROMIUM_command_buffer_latency_query");
   AddExtensionString("GL_CHROMIUM_copy_texture");
+  AddExtensionString("GL_CHROMIUM_deschedule");
   AddExtensionString("GL_CHROMIUM_get_error_query");
   AddExtensionString("GL_CHROMIUM_lose_context");
   AddExtensionString("GL_CHROMIUM_pixel_transfer_buffer_object");
@@ -342,10 +380,6 @@ void FeatureInfo::InitializeFeatures() {
   // UNPACK_ROW_LENGTH, UNPACK_SKIP_ROWS, and UNPACK_SKIP_PIXELS are enabled,
   // but there is no need to add them to pixel_store validtor.
   AddExtensionString("GL_EXT_unpack_subimage");
-
-  if (feature_flags_.enable_subscribe_uniform) {
-    AddExtensionString("GL_CHROMIUM_subscribe_uniform");
-  }
 
   // OES_vertex_array_object is emulated if not present natively,
   // so the extension string is always exposed.
@@ -477,8 +511,11 @@ void FeatureInfo::InitializeFeatures() {
       (extensions.Contains("GL_ARB_depth_texture") ||
        extensions.Contains("GL_OES_depth_texture") ||
        extensions.Contains("GL_ANGLE_depth_texture") ||
-       gl_version_info_->is_es3 ||
        gl_version_info_->is_desktop_core_profile)) {
+    // Note that we don't expose depth_texture extenion on top of ES3 if
+    // the depth_texture extension isn't exposed by the ES3 driver.
+    // This is because depth textures are filterable under linear mode in
+    // ES2 + extension, but not in core ES3.
     enable_depth_texture = true;
     feature_flags_.angle_depth_texture =
         extensions.Contains("GL_ANGLE_depth_texture");
@@ -519,6 +556,7 @@ void FeatureInfo::InitializeFeatures() {
       // is ES2 where GL_DEPTH_STENCIL_ATTACHMENT isn't accepted, it is still
       // OK.
       validators_.attachment.AddValue(GL_DEPTH_STENCIL_ATTACHMENT);
+      validators_.attachment_query.AddValue(GL_DEPTH_STENCIL_ATTACHMENT);
     }
   }
 
@@ -539,53 +577,106 @@ void FeatureInfo::InitializeFeatures() {
 
   if (gl_version_info_->is_es3 ||
       extensions.Contains("GL_OES_element_index_uint") ||
-      gfx::HasDesktopGLFeatures()) {
+      gl::HasDesktopGLFeatures()) {
     AddExtensionString("GL_OES_element_index_uint");
     validators_.index_type.AddValue(GL_UNSIGNED_INT);
   }
 
+  if (gl_version_info_->IsAtLeastGL(3, 2) ||
+      (gl_version_info_->IsAtLeastGL(2, 0) &&
+       (extensions.Contains("GL_EXT_framebuffer_sRGB") ||
+        extensions.Contains("GL_ARB_framebuffer_sRGB")))) {
+    feature_flags_.desktop_srgb_support = true;
+  }
   // With EXT_sRGB, unsized SRGB_EXT and SRGB_ALPHA_EXT are accepted by the
   // <format> and <internalformat> parameter of TexImage2D. GLES3 adds support
   // for SRGB Textures but the accepted internal formats for TexImage2D are only
   // sized formats GL_SRGB8 and GL_SRGB8_ALPHA8. Also, SRGB_EXT isn't a valid
   // <format> in this case. So, even with GLES3 explicitly check for
   // GL_EXT_sRGB.
-  if (((gl_version_info_->is_es3 || extensions.Contains("GL_OES_rgb8_rgba8")) &&
-       extensions.Contains("GL_EXT_sRGB")) ||
-      gfx::HasDesktopGLFeatures()) {
+  if ((((gl_version_info_->is_es3 ||
+         extensions.Contains("GL_OES_rgb8_rgba8")) &&
+        extensions.Contains("GL_EXT_sRGB")) ||
+       feature_flags_.desktop_srgb_support) &&
+       IsWebGL1OrES2Context()) {
     AddExtensionString("GL_EXT_sRGB");
     validators_.texture_internal_format.AddValue(GL_SRGB_EXT);
     validators_.texture_internal_format.AddValue(GL_SRGB_ALPHA_EXT);
     validators_.texture_format.AddValue(GL_SRGB_EXT);
     validators_.texture_format.AddValue(GL_SRGB_ALPHA_EXT);
     validators_.render_buffer_format.AddValue(GL_SRGB8_ALPHA8_EXT);
-    validators_.frame_buffer_parameter.AddValue(
+    validators_.framebuffer_parameter.AddValue(
         GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT);
+    validators_.texture_unsized_internal_format.AddValue(GL_SRGB_EXT);
     validators_.texture_unsized_internal_format.AddValue(GL_SRGB_ALPHA_EXT);
   }
 
-  bool enable_texture_format_bgra8888 = false;
-  bool enable_read_format_bgra = false;
-  bool enable_render_buffer_bgra = false;
-  bool enable_immutable_texture_format_bgra_on_es3 =
-      extensions.Contains("GL_APPLE_texture_format_BGRA8888");
+  // On desktop, GL_EXT_texture_sRGB is required regardless of GL version,
+  // since the sRGB formats in OpenGL 3.0 Core do not support S3TC.
+  // TODO(kainino): Support GL_EXT_texture_compression_s3tc_srgb once ratified.
+  if ((gl_version_info_->is_es && extensions.Contains("GL_NV_sRGB_formats")) ||
+      (!gl_version_info_->is_es &&
+       extensions.Contains("GL_EXT_texture_sRGB") &&
+       extensions.Contains("GL_EXT_texture_compression_s3tc"))) {
+    AddExtensionString("GL_EXT_texture_compression_s3tc_srgb");
 
-  // Check if we should allow GL_EXT_texture_format_BGRA8888
-  if (extensions.Contains("GL_EXT_texture_format_BGRA8888") ||
-      enable_immutable_texture_format_bgra_on_es3 ||
-      !gl_version_info_->is_es) {
-    enable_texture_format_bgra8888 = true;
+    validators_.compressed_texture_format.AddValue(
+        GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);
+    validators_.compressed_texture_format.AddValue(
+        GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT);
+    validators_.compressed_texture_format.AddValue(
+        GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT);
+    validators_.compressed_texture_format.AddValue(
+        GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT);
+
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_SRGB_S3TC_DXT1_EXT);
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT);
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT);
+    validators_.texture_internal_format_storage.AddValue(
+        GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT);
   }
 
-  // Only desktop GL extension GL_EXT_bgra or ANGLE guarantee that we can
-  // allocate a renderbuffer with this format.
-  if (extensions.Contains("GL_EXT_bgra") || gl_version_info_->is_angle) {
-    enable_render_buffer_bgra = true;
-  }
+  // Note: Only APPLE_texture_format_BGRA8888 extension allows BGRA8_EXT in
+  // ES3's glTexStorage2D, whereas EXT_texture_format_BGRA8888 doesn't provide
+  // that compatibility. So if EXT_texture_format_BGRA8888 (but not
+  // APPLE_texture_format_BGRA8888) is present on an underlying ES3 context, we
+  // have to choose which one of BGRA vs texture storage we expose.
+  // When creating ES2 contexts, we prefer support BGRA to texture storage, so
+  // we disable texture storage if only EXT_texture_format_BGRA8888 is present.
+  // If neither is present, we expose texture storage.
+  // When creating ES3 contexts, we do need to expose texture storage, so we
+  // disable BGRA if we have to.
+  bool has_apple_bgra = extensions.Contains("GL_APPLE_texture_format_BGRA8888");
+  bool has_ext_bgra = extensions.Contains("GL_EXT_texture_format_BGRA8888");
+  bool has_bgra = has_ext_bgra || has_apple_bgra || !gl_version_info_->is_es;
 
-  if (extensions.Contains("GL_EXT_read_format_bgra") ||
-      extensions.Contains("GL_EXT_bgra")) {
-    enable_read_format_bgra = true;
+  bool has_ext_texture_storage = extensions.Contains("GL_EXT_texture_storage");
+  bool has_arb_texture_storage = extensions.Contains("GL_ARB_texture_storage");
+  bool has_texture_storage =
+      !workarounds_.disable_texture_storage &&
+      (has_ext_texture_storage || has_arb_texture_storage ||
+       gl_version_info_->is_es3 || gl_version_info_->IsAtLeastGL(4, 2));
+
+  bool enable_texture_format_bgra8888 = has_bgra;
+  bool enable_texture_storage = has_texture_storage;
+
+  bool texture_storage_incompatible_with_bgra =
+      gl_version_info_->is_es3 && !has_ext_texture_storage && !has_apple_bgra;
+  if (texture_storage_incompatible_with_bgra &&
+      enable_texture_format_bgra8888 && enable_texture_storage) {
+    switch (context_type_) {
+      case CONTEXT_TYPE_OPENGLES2:
+      case CONTEXT_TYPE_WEBGL1:
+        enable_texture_storage = false;
+        break;
+      case CONTEXT_TYPE_OPENGLES3:
+      case CONTEXT_TYPE_WEBGL2:
+        enable_texture_format_bgra8888 = false;
+        break;
+    }
   }
 
   if (enable_texture_format_bgra8888) {
@@ -596,11 +687,37 @@ void FeatureInfo::InitializeFeatures() {
     validators_.texture_unsized_internal_format.AddValue(GL_BGRA_EXT);
   }
 
+  // On desktop, all devices support BGRA render buffers (note that on desktop
+  // BGRA internal formats are converted to RGBA in the API implementation).
+  // For ES, there is no extension that exposes BGRA renderbuffers, however
+  // Angle does support these.
+  bool enable_render_buffer_bgra =
+      gl_version_info_->is_angle || !gl_version_info_->is_es;
+
+  if (enable_render_buffer_bgra) {
+    feature_flags_.ext_render_buffer_format_bgra8888 = true;
+    AddExtensionString("GL_CHROMIUM_renderbuffer_format_BGRA8888");
+    validators_.render_buffer_format.AddValue(GL_BGRA8_EXT);
+  }
+
+  // On desktop, all devices support BGRA readback since OpenGL 2.0, which we
+  // require. On ES, support is indicated by the GL_EXT_read_format_bgra
+  // extension.
+  bool enable_read_format_bgra =
+      extensions.Contains("GL_EXT_read_format_bgra") ||
+      !gl_version_info_->is_es;
+
   if (enable_read_format_bgra) {
     feature_flags_.ext_read_format_bgra = true;
     AddExtensionString("GL_EXT_read_format_bgra");
     validators_.read_pixel_format.AddValue(GL_BGRA_EXT);
   }
+
+  // GL_ARB_ES3_compatibility adds support for some ES3 texture formats that are
+  // not supported in desktop GL
+  feature_flags_.arb_es3_compatibility =
+      extensions.Contains("GL_ARB_ES3_compatibility") &&
+      !gl_version_info_->is_es;
 
   // glGetInteger64v for timestamps is implemented on the client side in a way
   // that it does not depend on a driver-level implementation of
@@ -614,13 +731,7 @@ void FeatureInfo::InitializeFeatures() {
     AddExtensionString("GL_EXT_disjoint_timer_query");
   }
 
-  if (enable_render_buffer_bgra) {
-    feature_flags_.ext_render_buffer_format_bgra8888 = true;
-    AddExtensionString("GL_CHROMIUM_renderbuffer_format_BGRA8888");
-    validators_.render_buffer_format.AddValue(GL_BGRA8_EXT);
-  }
-
-  if (extensions.Contains("GL_OES_rgb8_rgba8") || gfx::HasDesktopGLFeatures()) {
+  if (extensions.Contains("GL_OES_rgb8_rgba8") || gl::HasDesktopGLFeatures()) {
     AddExtensionString("GL_OES_rgb8_rgba8");
     validators_.render_buffer_format.AddValue(GL_RGB8_OES);
     validators_.render_buffer_format.AddValue(GL_RGBA8_OES);
@@ -816,8 +927,8 @@ void FeatureInfo::InitializeFeatures() {
         gl_version_info_->is_es3 || gl_version_info_->is_desktop_core_profile;
     if (ext_has_multisample) {
       feature_flags_.chromium_framebuffer_multisample = true;
-      validators_.frame_buffer_target.AddValue(GL_READ_FRAMEBUFFER_EXT);
-      validators_.frame_buffer_target.AddValue(GL_DRAW_FRAMEBUFFER_EXT);
+      validators_.framebuffer_target.AddValue(GL_READ_FRAMEBUFFER_EXT);
+      validators_.framebuffer_target.AddValue(GL_DRAW_FRAMEBUFFER_EXT);
       validators_.g_l_state.AddValue(GL_READ_FRAMEBUFFER_BINDING_EXT);
       validators_.g_l_state.AddValue(GL_MAX_SAMPLES_EXT);
       validators_.render_buffer_parameter.AddValue(GL_RENDERBUFFER_SAMPLES_EXT);
@@ -825,21 +936,19 @@ void FeatureInfo::InitializeFeatures() {
     }
   }
 
-  if (!workarounds_.disable_multisampled_render_to_texture) {
-    if (extensions.Contains("GL_EXT_multisampled_render_to_texture")) {
-      feature_flags_.multisampled_render_to_texture = true;
-    } else if (extensions.Contains("GL_IMG_multisampled_render_to_texture")) {
-      feature_flags_.multisampled_render_to_texture = true;
-      feature_flags_.use_img_for_multisampled_render_to_texture = true;
-    }
-    if (feature_flags_.multisampled_render_to_texture) {
-      validators_.render_buffer_parameter.AddValue(
-          GL_RENDERBUFFER_SAMPLES_EXT);
-      validators_.g_l_state.AddValue(GL_MAX_SAMPLES_EXT);
-      validators_.frame_buffer_parameter.AddValue(
-          GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_SAMPLES_EXT);
-      AddExtensionString("GL_EXT_multisampled_render_to_texture");
-    }
+  if (extensions.Contains("GL_EXT_multisampled_render_to_texture")) {
+    feature_flags_.multisampled_render_to_texture = true;
+  } else if (extensions.Contains("GL_IMG_multisampled_render_to_texture")) {
+    feature_flags_.multisampled_render_to_texture = true;
+    feature_flags_.use_img_for_multisampled_render_to_texture = true;
+  }
+  if (feature_flags_.multisampled_render_to_texture) {
+    validators_.render_buffer_parameter.AddValue(
+        GL_RENDERBUFFER_SAMPLES_EXT);
+    validators_.g_l_state.AddValue(GL_MAX_SAMPLES_EXT);
+    validators_.framebuffer_parameter.AddValue(
+        GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_SAMPLES_EXT);
+    AddExtensionString("GL_EXT_multisampled_render_to_texture");
   }
 
   if (!gl_version_info_->is_es ||
@@ -853,9 +962,20 @@ void FeatureInfo::InitializeFeatures() {
   if (extensions.Contains("GL_INTEL_framebuffer_CMAA")) {
     feature_flags_.chromium_screen_space_antialiasing = true;
     AddExtensionString("GL_CHROMIUM_screen_space_antialiasing");
+  } else if (!workarounds_.disable_framebuffer_cmaa &&
+             (gl_version_info_->IsAtLeastGLES(3, 1) ||
+              (gl_version_info_->IsAtLeastGL(3, 0) &&
+               extensions.Contains("GL_ARB_shading_language_420pack") &&
+               extensions.Contains("GL_ARB_texture_gather") &&
+               extensions.Contains("GL_ARB_explicit_uniform_location") &&
+               extensions.Contains("GL_ARB_explicit_attrib_location") &&
+               extensions.Contains("GL_ARB_shader_image_load_store")))) {
+    feature_flags_.chromium_screen_space_antialiasing = true;
+    feature_flags_.use_chromium_screen_space_antialiasing_via_shaders = true;
+    AddExtensionString("GL_CHROMIUM_screen_space_antialiasing");
   }
 
-  if (extensions.Contains("GL_OES_depth24") || gfx::HasDesktopGLFeatures() ||
+  if (extensions.Contains("GL_OES_depth24") || gl::HasDesktopGLFeatures() ||
       gl_version_info_->is_es3) {
     AddExtensionString("GL_OES_depth24");
     feature_flags_.oes_depth24 = true;
@@ -864,7 +984,7 @@ void FeatureInfo::InitializeFeatures() {
 
   if (gl_version_info_->is_es3 ||
       extensions.Contains("GL_OES_standard_derivatives") ||
-      gfx::HasDesktopGLFeatures()) {
+      gl::HasDesktopGLFeatures()) {
     AddExtensionString("GL_OES_standard_derivatives");
     feature_flags_.oes_standard_derivatives = true;
     validators_.hint_target.AddValue(GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES);
@@ -874,6 +994,14 @@ void FeatureInfo::InitializeFeatures() {
   if (extensions.Contains("GL_OES_EGL_image_external")) {
     AddExtensionString("GL_OES_EGL_image_external");
     feature_flags_.oes_egl_image_external = true;
+  }
+  if (extensions.Contains("GL_NV_EGL_stream_consumer_external")) {
+    AddExtensionString("GL_NV_EGL_stream_consumer_external");
+    feature_flags_.nv_egl_stream_consumer_external = true;
+  }
+
+  if (feature_flags_.oes_egl_image_external ||
+      feature_flags_.nv_egl_stream_consumer_external) {
     validators_.texture_bind_target.AddValue(GL_TEXTURE_EXTERNAL_OES);
     validators_.get_tex_param_target.AddValue(GL_TEXTURE_EXTERNAL_OES);
     validators_.texture_parameter.AddValue(GL_REQUIRED_TEXTURE_IMAGE_UNITS_OES);
@@ -885,6 +1013,13 @@ void FeatureInfo::InitializeFeatures() {
     feature_flags_.oes_compressed_etc1_rgb8_texture = true;
     validators_.compressed_texture_format.AddValue(GL_ETC1_RGB8_OES);
     validators_.texture_internal_format_storage.AddValue(GL_ETC1_RGB8_OES);
+  }
+
+  // TODO(kainino): Once we have a way to query whether ANGLE is exposing
+  // native support for ETC2 textures, require that here.
+  if (gl_version_info_->is_es3) {
+    AddExtensionString("GL_CHROMIUM_compressed_texture_es3_0");
+    validators_.UpdateES30CompressedTextureFormats();
   }
 
   if (extensions.Contains("GL_AMD_compressed_ATC_texture")) {
@@ -925,11 +1060,10 @@ void FeatureInfo::InitializeFeatures() {
         GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG);
   }
 
-  // Ideally we would only expose this extension on Mac OS X, to
-  // support GL_CHROMIUM_iosurface and the compositor. We don't want
-  // applications to start using it; they should use ordinary non-
-  // power-of-two textures. However, for unit testing purposes we
-  // expose it on all supported platforms.
+  // Ideally we would only expose this extension on Mac OS X, to support
+  // IOSurface backed textures. We don't want applications to start using it;
+  // they should use ordinary non-power-of-two textures. However, for unit
+  // testing purposes we expose it on all supported platforms.
   if (extensions.Contains("GL_ARB_texture_rectangle") ||
       gl_version_info_->is_desktop_core_profile) {
     AddExtensionString("GL_ARB_texture_rectangle");
@@ -944,8 +1078,9 @@ void FeatureInfo::InitializeFeatures() {
   }
 
 #if defined(OS_MACOSX)
-  if (gfx::GetGLImplementation() != gfx::kGLImplementationOSMesaGL) {
-    AddExtensionString("GL_CHROMIUM_iosurface");
+  // TODO(dcastagna): Determine ycbcr_420v_image on CrOS at runtime
+  // querying minigbm. crbug.com/646148
+  if (gl::GetGLImplementation() != gl::kGLImplementationOSMesaGL) {
     AddExtensionString("GL_CHROMIUM_ycbcr_420v_image");
     feature_flags_.chromium_image_ycbcr_420v = true;
   }
@@ -965,22 +1100,7 @@ void FeatureInfo::InitializeFeatures() {
     validators_.texture_parameter.AddValue(GL_TEXTURE_USAGE_ANGLE);
   }
 
-  // Note: Only APPLE_texture_format_BGRA8888 extension allows BGRA8_EXT in
-  // ES3's glTexStorage2D. We prefer support BGRA to texture storage.
-  // So we don't expose GL_EXT_texture_storage when ES3 +
-  // GL_EXT_texture_format_BGRA8888 because we fail the GL_BGRA8 requirement.
-  // However we expose GL_EXT_texture_storage when just ES3 because we don't
-  // claim to handle GL_BGRA8.
-  bool support_texture_storage_on_es3 =
-      (gl_version_info_->is_es3 &&
-       enable_immutable_texture_format_bgra_on_es3) ||
-      (gl_version_info_->is_es3 &&
-       !enable_texture_format_bgra8888);
-  if (!workarounds_.disable_texture_storage &&
-      (extensions.Contains("GL_EXT_texture_storage") ||
-       extensions.Contains("GL_ARB_texture_storage") ||
-       support_texture_storage_on_es3 ||
-       gl_version_info_->IsAtLeastGL(4, 2))) {
+  if (enable_texture_storage) {
     feature_flags_.ext_texture_storage = true;
     AddExtensionString("GL_EXT_texture_storage");
     validators_.texture_parameter.AddValue(GL_TEXTURE_IMMUTABLE_FORMAT_EXT);
@@ -1006,6 +1126,9 @@ void FeatureInfo::InitializeFeatures() {
     }
   }
 
+  bool have_occlusion_query =
+      gl_version_info_->IsAtLeastGLES(3, 0) ||
+      gl_version_info_->IsAtLeastGL(3, 3);
   bool have_ext_occlusion_query_boolean =
       extensions.Contains("GL_EXT_occlusion_query_boolean");
   bool have_arb_occlusion_query2 =
@@ -1013,13 +1136,18 @@ void FeatureInfo::InitializeFeatures() {
   bool have_arb_occlusion_query =
       extensions.Contains("GL_ARB_occlusion_query");
 
-  if (have_ext_occlusion_query_boolean ||
+  if (have_occlusion_query ||
+      have_ext_occlusion_query_boolean ||
       have_arb_occlusion_query2 ||
       have_arb_occlusion_query) {
-    AddExtensionString("GL_EXT_occlusion_query_boolean");
+    if (context_type_ == CONTEXT_TYPE_OPENGLES2) {
+      AddExtensionString("GL_EXT_occlusion_query_boolean");
+    }
     feature_flags_.occlusion_query_boolean = true;
     feature_flags_.use_arb_occlusion_query2_for_occlusion_query_boolean =
-        !have_ext_occlusion_query_boolean && have_arb_occlusion_query2;
+        !have_ext_occlusion_query_boolean && (have_arb_occlusion_query2 ||
+        (gl_version_info_->IsAtLeastGL(3, 3) &&
+         gl_version_info_->IsLowerThanGL(4, 3)));
     feature_flags_.use_arb_occlusion_query_for_occlusion_query_boolean =
         !have_ext_occlusion_query_boolean && have_arb_occlusion_query &&
         !have_arb_occlusion_query2;
@@ -1063,6 +1191,7 @@ void FeatureInfo::InitializeFeatures() {
          i < static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + max_color_attachments);
          ++i) {
       validators_.attachment.AddValue(i);
+      validators_.attachment_query.AddValue(i);
     }
     static_assert(GL_COLOR_ATTACHMENT0_EXT == GL_COLOR_ATTACHMENT0,
                   "GL_COLOR_ATTACHMENT0_EXT should equal GL_COLOR_ATTACHMENT0");
@@ -1078,9 +1207,8 @@ void FeatureInfo::InitializeFeatures() {
     }
   }
 
-  if (gl_version_info_->is_es3 ||
-      extensions.Contains("GL_EXT_blend_minmax") ||
-      gfx::HasDesktopGLFeatures()) {
+  if (gl_version_info_->is_es3 || extensions.Contains("GL_EXT_blend_minmax") ||
+      gl::HasDesktopGLFeatures()) {
     AddExtensionString("GL_EXT_blend_minmax");
     validators_.equation.AddValue(GL_MIN_EXT);
     validators_.equation.AddValue(GL_MAX_EXT);
@@ -1089,18 +1217,18 @@ void FeatureInfo::InitializeFeatures() {
   }
 
   // TODO(dshwang): GLES3 supports gl_FragDepth, not gl_FragDepthEXT.
-  if (extensions.Contains("GL_EXT_frag_depth") || gfx::HasDesktopGLFeatures()) {
+  if (extensions.Contains("GL_EXT_frag_depth") || gl::HasDesktopGLFeatures()) {
     AddExtensionString("GL_EXT_frag_depth");
     feature_flags_.ext_frag_depth = true;
   }
 
   if (extensions.Contains("GL_EXT_shader_texture_lod") ||
-      gfx::HasDesktopGLFeatures()) {
+      gl::HasDesktopGLFeatures()) {
     AddExtensionString("GL_EXT_shader_texture_lod");
     feature_flags_.ext_shader_texture_lod = true;
   }
 
-  bool ui_gl_fence_works = gfx::GLFence::IsSupported();
+  bool ui_gl_fence_works = gl::GLFence::IsSupported();
   UMA_HISTOGRAM_BOOLEAN("GPU.FenceSupport", ui_gl_fence_works);
 
   feature_flags_.map_buffer_range =
@@ -1231,6 +1359,7 @@ void FeatureInfo::InitializeFeatures() {
       (gl_version_info_->IsAtLeastGL(3, 2) &&
        extensions.Contains("GL_ARB_blend_func_extended"));
   if (!disable_shader_translator_ &&
+      !workarounds_.get_frag_data_info_bug &&
       ((gl_version_info_->IsAtLeastGL(3, 2) &&
         has_opengl_dual_source_blending) ||
        (gl_version_info_->IsAtLeastGLES(3, 0) &&
@@ -1258,7 +1387,7 @@ void FeatureInfo::InitializeFeatures() {
 
 #if !defined(OS_MACOSX)
   if (workarounds_.ignore_egl_sync_failures) {
-    gfx::GLFenceEGL::SetIgnoreFailures();
+    gl::GLFenceEGL::SetIgnoreFailures();
   }
 #endif
 
@@ -1277,8 +1406,10 @@ void FeatureInfo::InitializeFeatures() {
 bool FeatureInfo::IsES3Capable() const {
   if (!enable_unsafe_es3_apis_switch_)
     return false;
+  if (workarounds_.disable_texture_storage)
+    return false;
   if (gl_version_info_)
-    return gl_version_info_->IsES3Capable();
+    return gl_version_info_->is_es3_capable;
   return false;
 }
 
@@ -1309,6 +1440,12 @@ void FeatureInfo::EnableES3Validators() {
   };
   if (max_color_attachments < kTotalColorAttachmentEnums) {
     validators_.attachment.RemoveValues(
+        kColorAttachments + max_color_attachments,
+        kTotalColorAttachmentEnums - max_color_attachments);
+    validators_.attachment_query.RemoveValues(
+        kColorAttachments + max_color_attachments,
+        kTotalColorAttachmentEnums - max_color_attachments);
+    validators_.read_buffer.RemoveValues(
         kColorAttachments + max_color_attachments,
         kTotalColorAttachmentEnums - max_color_attachments);
   }
@@ -1351,6 +1488,36 @@ bool FeatureInfo::IsWebGLContext() const {
       return true;
     case CONTEXT_TYPE_OPENGLES2:
     case CONTEXT_TYPE_OPENGLES3:
+      return false;
+  }
+
+  NOTREACHED();
+  return false;
+}
+
+bool FeatureInfo::IsWebGL1OrES2Context() const {
+  // Switch statement to cause a compile-time error if we miss a case.
+  switch (context_type_) {
+    case CONTEXT_TYPE_WEBGL1:
+    case CONTEXT_TYPE_OPENGLES2:
+      return true;
+    case CONTEXT_TYPE_WEBGL2:
+    case CONTEXT_TYPE_OPENGLES3:
+      return false;
+  }
+
+  NOTREACHED();
+  return false;
+}
+
+bool FeatureInfo::IsWebGL2OrES3Context() const {
+  // Switch statement to cause a compile-time error if we miss a case.
+  switch (context_type_) {
+    case CONTEXT_TYPE_WEBGL2:
+    case CONTEXT_TYPE_OPENGLES3:
+      return true;
+    case CONTEXT_TYPE_WEBGL1:
+    case CONTEXT_TYPE_OPENGLES2:
       return false;
   }
 

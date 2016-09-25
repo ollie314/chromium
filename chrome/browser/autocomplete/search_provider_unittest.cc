@@ -31,7 +31,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/google/core/browser/google_switches.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
@@ -52,7 +52,7 @@
 #include "components/search_engines/template_url_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/sync_driver/pref_names.h"
+#include "components/sync/driver/pref_names.h"
 #include "components/variations/entropy_provider.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -220,16 +220,6 @@ class SearchProviderTest : public testing::Test,
   // Be sure and wrap calls to this in ASSERT_NO_FATAL_FAILURE.
   void FinishDefaultSuggestQuery();
 
-  // Runs SearchProvider on |input|, for which the suggest server replies
-  // with |json|, and expects that the resulting matches' contents equals
-  // that in |matches|.  An empty entry in |matches| means no match should
-  // be returned in that position.  Reports any errors with a message that
-  // includes |error_description|.
-  void ForcedQueryTestHelper(const std::string& input,
-                             const std::string& json,
-                             const std::string matches[3],
-                             const std::string& error_description);
-
   // Verifies that |matches| and |expected_matches| agree on the first
   // |num_expected_matches|, displaying an error message that includes
   // |description| for any disagreement.
@@ -295,8 +285,7 @@ void SearchProviderTest::SetUp() {
   data.suggestions_url = "http://defaultturl2/{searchTerms}";
   data.instant_url = "http://does/not/exist?strk=1";
   data.search_terms_replacement_key = "strk";
-  default_t_url_ = new TemplateURL(data);
-  turl_model->Add(default_t_url_);
+  default_t_url_ = turl_model->Add(base::MakeUnique<TemplateURL>(data));
   turl_model->SetUserSelectedDefaultSearchProvider(default_t_url_);
   TemplateURLID default_provider_id = default_t_url_->id();
   ASSERT_NE(0, default_provider_id);
@@ -309,8 +298,7 @@ void SearchProviderTest::SetUp() {
   data.SetKeyword(ASCIIToUTF16("k"));
   data.SetURL("http://keyword/{searchTerms}");
   data.suggestions_url = "http://suggest_keyword/{searchTerms}";
-  keyword_t_url_ = new TemplateURL(data);
-  turl_model->Add(keyword_t_url_);
+  keyword_t_url_ = turl_model->Add(base::MakeUnique<TemplateURL>(data));
   ASSERT_NE(0, keyword_t_url_->id());
 
   // Add a page and search term for keyword_t_url_.
@@ -493,34 +481,6 @@ void SearchProviderTest::FinishDefaultSuggestQuery() {
   default_fetcher->delegate()->OnURLFetchComplete(default_fetcher);
 }
 
-void SearchProviderTest::ForcedQueryTestHelper(
-    const std::string& input,
-    const std::string& json,
-    const std::string expected_matches[3],
-    const std::string& error_description) {
-  // Send the query twice in order to have a synchronous pass after the first
-  // response is received.  This is necessary because SearchProvider doesn't
-  // allow an asynchronous response to change the default match.
-  for (size_t i = 0; i < 2; ++i) {
-    QueryForInputAndWaitForFetcherResponses(
-        ASCIIToUTF16(input), false, json, std::string());
-  }
-
-  const ACMatches& matches = provider_->matches();
-  ASSERT_LE(matches.size(), 3u);
-  size_t i = 0;
-  // Ensure that the returned matches equal the expectations.
-  for (; i < matches.size(); ++i) {
-    EXPECT_EQ(ASCIIToUTF16(expected_matches[i]), matches[i].contents) <<
-        error_description;
-  }
-  // Ensure that no expected matches are missing.
-  for (; i < 3u; ++i) {
-    EXPECT_EQ(std::string(), expected_matches[i]) <<
-        "Case #" << i << ": " << error_description;
-  }
-}
-
 void SearchProviderTest::CheckMatches(const std::string& description,
                                       const size_t num_expected_matches,
                                       const ExpectedMatch expected_matches[],
@@ -548,7 +508,7 @@ void SearchProviderTest::ResetFieldTrialList() {
   // a DCHECK.
   field_trial_list_.reset();
   field_trial_list_.reset(new base::FieldTrialList(
-      new metrics::SHA1EntropyProvider("foo")));
+      base::MakeUnique<metrics::SHA1EntropyProvider>("foo")));
   variations::testing::ClearAllVariationParams();
 }
 
@@ -806,54 +766,6 @@ TEST_F(SearchProviderTest, DontAutocompleteURLLikeTerms) {
   EXPECT_GT(wyt_match.relevance, term_match.relevance);
   EXPECT_TRUE(wyt_match.allowed_to_be_default_match);
   EXPECT_TRUE(term_match.allowed_to_be_default_match);
-}
-
-TEST_F(SearchProviderTest, DontGiveNavsuggestionsInForcedQueryMode) {
-  const std::string kEmptyMatch;
-  struct {
-    const std::string json;
-    const std::string matches_in_default_mode[3];
-    const std::string matches_in_forced_query_mode[3];
-  } cases[] = {
-    // Without suggested relevance scores.
-    { "[\"a\",[\"http://a1.com\", \"a2\"],[],[],"
-       "{\"google:suggesttype\":[\"NAVIGATION\", \"QUERY\"]}]",
-      { "a", "a1.com", "a2" },
-      { "a", "a2", kEmptyMatch } },
-
-    // With suggested relevance scores in a situation where navsuggest would
-    // go second.
-    { "[\"a\",[\"http://a1.com\", \"a2\"],[],[],"
-       "{\"google:suggesttype\":[\"NAVIGATION\", \"QUERY\"],"
-        "\"google:suggestrelevance\":[1250, 1200]}]",
-      { "a", "a1.com", "a2" },
-      { "a", "a2", kEmptyMatch } },
-
-    // With suggested relevance scores in a situation where navsuggest
-    // would go first.
-    { "[\"a\",[\"http://a1.com\", \"a2\"],[],[],"
-       "{\"google:suggesttype\":[\"NAVIGATION\", \"QUERY\"],"
-        "\"google:suggestrelevance\":[1350, 1250]}]",
-      { "a1.com", "a", "a2" },
-      { "a", "a2", kEmptyMatch } },
-
-    // With suggested relevance scores in a situation where navsuggest
-    // would go first only because verbatim has been demoted.
-    { "[\"a\",[\"http://a1.com\", \"a2\"],[],[],"
-       "{\"google:suggesttype\":[\"NAVIGATION\", \"QUERY\"],"
-        "\"google:suggestrelevance\":[1450, 1400],"
-        "\"google:verbatimrelevance\":1350}]",
-      { "a1.com", "a2", "a" },
-      { "a2", "a", kEmptyMatch } },
-  };
-
-  for (size_t i = 0; i < arraysize(cases); ++i) {
-    ForcedQueryTestHelper("a", cases[i].json, cases[i].matches_in_default_mode,
-                           "regular input with json=" + cases[i].json);
-    ForcedQueryTestHelper("?a", cases[i].json,
-                          cases[i].matches_in_forced_query_mode,
-                          "forced query input with json=" + cases[i].json);
-  }
 }
 
 // A multiword search with one visit should not autocomplete until multiple
@@ -1247,8 +1159,7 @@ TEST_F(SearchProviderTest, CommandLineOverrides) {
   data.SetShortName(ASCIIToUTF16("default"));
   data.SetKeyword(data.short_name());
   data.SetURL("{google:baseURL}{searchTerms}");
-  default_t_url_ = new TemplateURL(data);
-  turl_model->Add(default_t_url_);
+  default_t_url_ = turl_model->Add(base::MakeUnique<TemplateURL>(data));
   turl_model->SetUserSelectedDefaultSearchProvider(default_t_url_);
 
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
@@ -2210,6 +2121,21 @@ TEST_F(SearchProviderTest, DontInlineAutocompleteAsynchronously) {
       { { "ab", true }, { "ab1", true }, { "ab2", false },
         kEmptyExpectedMatch } },
 
+    // If a suggestion is equivalent to the verbatim suggestion, it should be
+    // collapsed into one.  Furthermore, it should be allowed to be the default
+    // match even if it was not previously displayed inlined.  This test is
+    // mainly for checking the first_async_matches.
+    { "[\"a\",[\"A\"],[],[],"
+       "{\"google:verbatimrelevance\":9000, "
+        "\"google:suggestrelevance\":[9001]}]",
+      { { "A", true }, kEmptyExpectedMatch, kEmptyExpectedMatch,
+        kEmptyExpectedMatch },
+      { { "ab", true }, { "A", false }, kEmptyExpectedMatch,
+        kEmptyExpectedMatch },
+      std::string(),
+      { { "ab", true }, { "A", false }, kEmptyExpectedMatch,
+        kEmptyExpectedMatch } },
+
     // Note: it's possible that the suggest server returns a suggestion with
     // an inline autocompletion (that as usual we delay in allowing it to
     // be displayed as an inline autocompletion until the next keystroke),
@@ -2733,15 +2659,6 @@ TEST_F(SearchProviderTest, NavigationInline) {
                      "https://abc.com/path/file.htm?q=x#foo",
                                "c.com/path/file.htm?q=x#foo",     true, false },
 
-    // Forced query input should inline and retain the "?" prefix.
-    { "?http://www.ab",  "http://www.abc.com",
-                        "?http://www.abc.com", "c.com",       true, false },
-    { "?www.ab",         "http://www.abc.com",
-                               "?www.abc.com", "c.com",       true, false },
-    { "?ab",             "http://www.abc.com",
-                               "?www.abc.com", "c.com",       true, false },
-    { "?abc.com",        "http://www.abc.com",
-                               "?www.abc.com", std::string(), true, true },
   };
 
   for (size_t i = 0; i < arraysize(cases); ++i) {
@@ -3342,7 +3259,7 @@ TEST_F(SearchProviderTest, CanSendURL) {
   profile_.GetPrefs()->SetBoolean(sync_driver::prefs::kSyncTabs, true);
 
   // Tab sync is encrypted.
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(&profile_);
   syncer::ModelTypeSet encrypted_types = service->GetEncryptedDataTypes();
   encrypted_types.Put(syncer::SESSIONS);
@@ -3462,8 +3379,7 @@ TEST_F(SearchProviderTest, SuggestQueryUsesToken) {
   data.SetURL("http://example/{searchTerms}{google:sessionToken}");
   data.suggestions_url =
       "http://suggest/?q={searchTerms}&{google:sessionToken}";
-  default_t_url_ = new TemplateURL(data);
-  turl_model->Add(default_t_url_);
+  default_t_url_ = turl_model->Add(base::MakeUnique<TemplateURL>(data));
   turl_model->SetUserSelectedDefaultSearchProvider(default_t_url_);
 
   base::string16 term = term1_.substr(0, term1_.length() - 1);

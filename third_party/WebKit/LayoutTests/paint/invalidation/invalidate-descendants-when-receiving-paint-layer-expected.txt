@@ -1,50 +1,42 @@
 {
+  "name": "Content Root Layer",
   "bounds": [800, 600],
   "children": [
     {
+      "name": "LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "paintInvalidations": [
-        {
-          "object": "LayoutBlockFlow DIV id='child'",
-          "reason": "layer"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='target'",
-          "reason": "layer"
-        }
-      ],
       "children": [
         {
-          "position": [8, 8]
+          "name": "LayoutBlockFlow (positioned) DIV",
+          "position": [8, 8],
+          "contentsOpaque": true
         },
         {
+          "name": "Squashing Containment Layer",
           "shouldFlattenTransform": false,
           "children": [
             {
+              "name": "LayoutBlockFlow (relative positioned) DIV",
               "position": [8, 8],
               "bounds": [784, 52],
               "drawsContent": true,
               "paintInvalidations": [
                 {
-                  "object": "LayoutBlockFlow (relative positioned) DIV",
-                  "rect": [0, 52, 784, 49],
-                  "reason": "incremental"
-                },
-                {
                   "object": "LayoutBlockFlow DIV id='child'",
                   "rect": [1, 1, 100, 100],
-                  "reason": "layer"
+                  "reason": "subtree"
                 },
                 {
                   "object": "LayoutBlockFlow DIV id='target'",
-                  "rect": [1, 1, 100, 100],
-                  "reason": "layer"
+                  "rect": [1, 1, 50, 50],
+                  "reason": "subtree"
                 }
               ]
             },
             {
+              "name": "Squashing Layer (first squashed layer: LayoutBlockFlow DIV id='target')",
               "position": [9, 9],
               "bounds": [100, 100],
               "drawsContent": true,
@@ -52,18 +44,44 @@
                 {
                   "object": "LayoutBlockFlow DIV id='child'",
                   "rect": [0, 0, 100, 100],
-                  "reason": "location change"
+                  "reason": "subtree"
                 },
                 {
                   "object": "LayoutBlockFlow DIV id='target'",
-                  "rect": [0, 0, 100, 100],
-                  "reason": "location change"
+                  "rect": [0, 0, 50, 50],
+                  "reason": "subtree"
                 }
               ]
             }
           ]
         }
       ]
+    }
+  ],
+  "objectPaintInvalidations": [
+    {
+      "object": "LayoutBlockFlow DIV id='target'",
+      "reason": "subtree"
+    },
+    {
+      "object": "LayoutBlockFlow DIV id='child'",
+      "reason": "subtree"
+    },
+    {
+      "object": "LayoutBlockFlow DIV id='target'",
+      "reason": "subtree"
+    },
+    {
+      "object": "LayoutBlockFlow DIV id='child'",
+      "reason": "subtree"
+    },
+    {
+      "object": "LayoutBlockFlow DIV id='target'",
+      "reason": "subtree"
+    },
+    {
+      "object": "LayoutBlockFlow DIV id='child'",
+      "reason": "subtree"
     }
   ]
 }

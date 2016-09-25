@@ -4,8 +4,9 @@
 
 #include "remoting/host/setup/me2me_native_messaging_host_main.h"
 
-#include <stdint.h>
-
+#include <cstdint>
+#include <memory>
+#include <string>
 #include <utility>
 
 #include "base/at_exit.h"
@@ -18,14 +19,18 @@
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "net/url_request/url_fetcher.h"
+#include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/breakpad.h"
 #include "remoting/base/url_request_context_getter.h"
+#include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/logging.h"
+#include "remoting/host/native_messaging/native_messaging_pipe.h"
 #include "remoting/host/native_messaging/pipe_messaging_channel.h"
 #include "remoting/host/pairing_registry_delegate.h"
 #include "remoting/host/setup/gaia_oauth_client.h"
 #include "remoting/host/setup/me2me_native_messaging_host.h"
+#include "remoting/host/switches.h"
 #include "remoting/host/usage_stats_consent.h"
 
 #if defined(OS_MACOSX)
@@ -34,8 +39,8 @@
 
 #if defined(OS_WIN)
 #include "base/win/registry.h"
-#include "base/win/windows_version.h"
 #include "remoting/host/pairing_registry_delegate_win.h"
+#include "remoting/host/win/elevation_helpers.h"
 #endif  // defined(OS_WIN)
 
 #if defined(OS_LINUX)
@@ -44,35 +49,7 @@
 
 using remoting::protocol::PairingRegistry;
 
-namespace {
-
-const char kParentWindowSwitchName[] = "parent-window";
-
-}  // namespace
-
 namespace remoting {
-
-#if defined(OS_WIN)
-bool IsProcessElevated() {
-  // Conceptually, all processes running on a pre-VISTA version of Windows can
-  // be considered "elevated".
-  if (base::win::GetVersion() < base::win::VERSION_VISTA)
-    return true;
-
-  HANDLE process_token;
-  OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &process_token);
-
-  base::win::ScopedHandle scoped_process_token(process_token);
-
-  // Unlike TOKEN_ELEVATION_TYPE which returns TokenElevationTypeDefault when
-  // UAC is turned off, TOKEN_ELEVATION will tell you the process is elevated.
-  DWORD size;
-  TOKEN_ELEVATION elevation;
-  GetTokenInformation(process_token, TokenElevation,
-                      &elevation, sizeof(elevation), &size);
-  return elevation.TokenIsElevated != 0;
-}
-#endif  // defined(OS_WIN)
 
 int StartMe2MeNativeMessagingHost() {
 #if defined(OS_MACOSX)
@@ -96,9 +73,10 @@ int StartMe2MeNativeMessagingHost() {
   // Initialize Breakpad as early as possible. On Mac the command-line needs to
   // be initialized first, so that the preference for crash-reporting can be
   // looked up in the config file.
-  if (IsUsageStatsAllowed()) {
-    InitializeCrashReporting();
-  }
+  // TODO(nicholss): Commenting out Breakpad. See crbug.com/637884
+  // if (IsUsageStatsAllowed()) {
+  //   InitializeCrashReporting();
+  // }
 #endif  // defined(REMOTING_ENABLE_BREAKPAD)
 
   // Mac OS X requires that the main thread be a UI message loop in order to
@@ -139,7 +117,7 @@ int StartMe2MeNativeMessagingHost() {
 #if defined(OS_WIN)
   needs_elevation = !IsProcessElevated();
 
-  if (command_line->HasSwitch(kElevatingSwitchName)) {
+  if (command_line->HasSwitch(kElevateSwitchName)) {
     DCHECK(!needs_elevation);
 
     // The "elevate" switch is always accompanied by the "input" and "output"
@@ -256,16 +234,27 @@ int StartMe2MeNativeMessagingHost() {
       CreatePairingRegistry(io_thread.task_runner());
 #endif  // !defined(OS_WIN)
 
+  std::unique_ptr<NativeMessagingPipe> native_messaging_pipe(
+      new NativeMessagingPipe());
+
   // Set up the native messaging channel.
   std::unique_ptr<extensions::NativeMessagingChannel> channel(
       new PipeMessagingChannel(std::move(read_file), std::move(write_file)));
 
+  std::unique_ptr<ChromotingHostContext> context =
+      ChromotingHostContext::Create(new remoting::AutoThreadTaskRunner(
+          message_loop.task_runner(), run_loop.QuitClosure()));
+
   // Create the native messaging host.
-  std::unique_ptr<Me2MeNativeMessagingHost> host(new Me2MeNativeMessagingHost(
-      needs_elevation, static_cast<intptr_t>(native_view_handle),
-      std::move(channel), daemon_controller, pairing_registry,
-      std::move(oauth_client)));
-  host->Start(run_loop.QuitClosure());
+  std::unique_ptr<extensions::NativeMessageHost> host(
+      new Me2MeNativeMessagingHost(needs_elevation,
+                                   static_cast<intptr_t>(native_view_handle),
+                                   std::move(context), daemon_controller,
+                                   pairing_registry, std::move(oauth_client)));
+
+  host->Start(native_messaging_pipe.get());
+
+  native_messaging_pipe->Start(std::move(host), std::move(channel));
 
   // Run the loop until channel is alive.
   run_loop.Run();

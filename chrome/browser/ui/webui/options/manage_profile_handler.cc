@@ -35,7 +35,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -46,11 +46,6 @@
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
-
-#if defined(ENABLE_SETTINGS_APP)
-#include "chrome/browser/ui/app_list/app_list_service.h"
-#include "content/public/browser/web_contents.h"
-#endif
 
 namespace options {
 
@@ -81,7 +76,7 @@ ManageProfileHandler::ManageProfileHandler()
 }
 
 ManageProfileHandler::~ManageProfileHandler() {
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(Profile::FromWebUI(web_ui()));
   // Sync may be disabled in tests.
   if (service)
@@ -128,6 +123,8 @@ void ManageProfileHandler::GetLocalizedValues(
   RegisterStrings(localized_strings, resources, arraysize(resources));
   RegisterTitle(localized_strings, "manageProfile", IDS_PROFILES_MANAGE_TITLE);
   RegisterTitle(localized_strings, "createProfile", IDS_PROFILES_CREATE_TITLE);
+  RegisterTitle(localized_strings, "disconnectAccount",
+      IDS_DISCONNECT_ACCOUNT_TITLE);
 
   base::string16 supervised_user_dashboard_url =
       base::ASCIIToUTF16(chrome::kLegacySupervisedUserManagementURL);
@@ -154,7 +151,7 @@ void ManageProfileHandler::InitializeHandler() {
       prefs::kSupervisedUserCreationAllowed,
       base::Bind(&ManageProfileHandler::OnCreateSupervisedUserPrefChange,
                  base::Unretained(this)));
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile);
   // Sync may be disabled for tests.
   if (service)
@@ -185,11 +182,6 @@ void ManageProfileHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("profileIconSelectionChanged",
       base::Bind(&ManageProfileHandler::ProfileIconSelectionChanged,
                  base::Unretained(this)));
-#if defined(ENABLE_SETTINGS_APP)
-  web_ui()->RegisterMessageCallback("switchAppListProfile",
-      base::Bind(&ManageProfileHandler::SwitchAppListProfile,
-                 base::Unretained(this)));
-#endif
   web_ui()->RegisterMessageCallback("addProfileShortcut",
       base::Bind(&ManageProfileHandler::AddProfileShortcut,
                  base::Unretained(this)));
@@ -296,7 +288,7 @@ void ManageProfileHandler::RequestNewProfileDefaults(
   profile_info.SetString("iconURL",
       profiles::GetDefaultAvatarIconUrl(icon_index));
 
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "ManageProfileOverlay.receiveNewProfileDefaults", profile_info);
 }
 
@@ -332,7 +324,7 @@ void ManageProfileHandler::SendProfileIconsAndNames(
     default_name_list.AppendString(storage.ChooseNameForNewProfile(i));
   }
 
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "ManageProfileOverlay.receiveDefaultProfileIconsAndNames", mode,
       image_url_list, default_name_list);
 }
@@ -345,7 +337,7 @@ void ManageProfileHandler::SendExistingProfileNames() {
   for (const ProfileAttributesEntry* entry : entries)
     profile_name_dict.SetBoolean(base::UTF16ToUTF8(entry->GetName()), true);
 
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "ManageProfileOverlay.receiveExistingProfileNames", profile_name_dict);
 }
 
@@ -353,7 +345,7 @@ void ManageProfileHandler::ShowDisconnectManagedProfileDialog(
     const base::ListValue* args) {
   base::DictionaryValue replacements;
   GenerateSignedinUserSpecificStrings(&replacements);
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "ManageProfileOverlay.showDisconnectManagedProfileDialog", replacements);
 }
 
@@ -413,26 +405,6 @@ void ManageProfileHandler::SetProfileIconAndName(const base::ListValue* args) {
   profiles::UpdateProfileName(profile, new_profile_name);
 }
 
-#if defined(ENABLE_SETTINGS_APP)
-void ManageProfileHandler::SwitchAppListProfile(const base::ListValue* args) {
-  DCHECK(args);
-  DCHECK(profiles::IsMultipleProfilesEnabled());
-
-  const base::Value* file_path_value;
-  base::FilePath profile_file_path;
-  if (!args->Get(0, &file_path_value) ||
-      !base::GetValueAsFilePath(*file_path_value, &profile_file_path))
-    return;
-
-  AppListService* app_list_service = AppListService::Get();
-  app_list_service->SetProfilePath(profile_file_path);
-  app_list_service->Show();
-
-  // Close the settings app, since it will now be for the wrong profile.
-  web_ui()->GetWebContents()->Close();
-}
-#endif  // defined(ENABLE_SETTINGS_APP)
-
 void ManageProfileHandler::ProfileIconSelectionChanged(
     const base::ListValue* args) {
   DCHECK(args);
@@ -465,8 +437,8 @@ void ManageProfileHandler::ProfileIconSelectionChanged(
 
   base::StringValue gaia_name_value(gaia_name);
   base::StringValue mode_value(kManageProfileIdentifier);
-  web_ui()->CallJavascriptFunction("ManageProfileOverlay.setProfileName",
-                                   gaia_name_value, mode_value);
+  web_ui()->CallJavascriptFunctionUnsafe("ManageProfileOverlay.setProfileName",
+                                         gaia_name_value, mode_value);
 }
 
 void ManageProfileHandler::RequestHasProfileShortcuts(
@@ -502,8 +474,8 @@ void ManageProfileHandler::RequestCreateProfileUpdate(
       SigninManagerFactory::GetForProfile(profile);
   base::string16 username =
       base::UTF8ToUTF16(manager->GetAuthenticatedAccountInfo().email);
-  ProfileSyncService* service =
-     ProfileSyncServiceFactory::GetForProfile(profile);
+  browser_sync::ProfileSyncService* service =
+      ProfileSyncServiceFactory::GetForProfile(profile);
   GoogleServiceAuthError::State state = GoogleServiceAuthError::NONE;
 
   // |service| might be null if Sync is disabled from the command line.
@@ -515,9 +487,9 @@ void ManageProfileHandler::RequestCreateProfileUpdate(
                     state == GoogleServiceAuthError::USER_NOT_SIGNED_UP ||
                     state == GoogleServiceAuthError::ACCOUNT_DELETED ||
                     state == GoogleServiceAuthError::ACCOUNT_DISABLED);
-  web_ui()->CallJavascriptFunction("CreateProfileOverlay.updateSignedInStatus",
-                                   base::StringValue(username),
-                                   base::FundamentalValue(has_error));
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "CreateProfileOverlay.updateSignedInStatus", base::StringValue(username),
+      base::FundamentalValue(has_error));
 
   OnCreateSupervisedUserPrefChange();
 }
@@ -526,7 +498,7 @@ void ManageProfileHandler::OnCreateSupervisedUserPrefChange() {
   PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
   base::FundamentalValue allowed(
       prefs->GetBoolean(prefs::kSupervisedUserCreationAllowed));
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "CreateProfileOverlay.updateSupervisedUsersAllowed", allowed);
 }
 
@@ -534,7 +506,7 @@ void ManageProfileHandler::OnHasProfileShortcuts(bool has_shortcuts) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   const base::FundamentalValue has_shortcuts_value(has_shortcuts);
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "ManageProfileOverlay.receiveHasProfileShortcuts", has_shortcuts_value);
 }
 

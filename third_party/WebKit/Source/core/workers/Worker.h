@@ -11,10 +11,11 @@ namespace blink {
 
 class ExceptionState;
 class ExecutionContext;
-class InProcessWorkerGlobalScopeProxy;
+class InProcessWorkerMessagingProxy;
 
 class CORE_EXPORT Worker final : public InProcessWorkerBase {
     DEFINE_WRAPPERTYPEINFO();
+    USING_GARBAGE_COLLECTED_MIXIN(Worker);
 public:
     static Worker* create(ExecutionContext*, const String& url, ExceptionState&);
     ~Worker() override;
@@ -22,7 +23,7 @@ public:
 protected:
     explicit Worker(ExecutionContext*);
 
-    InProcessWorkerGlobalScopeProxy* createInProcessWorkerGlobalScopeProxy(ExecutionContext*) override;
+    InProcessWorkerMessagingProxy* createInProcessWorkerMessagingProxy(ExecutionContext*) override;
     const AtomicString& interfaceName() const override;
 };
 

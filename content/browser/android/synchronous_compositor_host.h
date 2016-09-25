@@ -8,55 +8,78 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "cc/output/compositor_frame.h"
-#include "content/browser/android/synchronous_compositor_base.h"
+#include "content/common/input/input_event_ack_state.h"
+#include "content/public/browser/android/synchronous_compositor.h"
 #include "ui/gfx/geometry/scroll_offset.h"
 #include "ui/gfx/geometry/size_f.h"
 
 namespace IPC {
+class Message;
 class Sender;
+}
+
+namespace blink {
+class WebInputEvent;
+}
+
+namespace cc {
+struct BeginFrameArgs;
+}
+
+namespace ui {
+class WindowAndroid;
+struct DidOverscrollParams;
 }
 
 namespace content {
 
 class RenderWidgetHostViewAndroid;
 class SynchronousCompositorClient;
-struct DidOverscrollParams;
-struct SyncCompositorCommonBrowserParams;
+class SynchronousCompositorObserver;
+class WebContents;
 struct SyncCompositorCommonRendererParams;
 
-class SynchronousCompositorHost : public SynchronousCompositorBase {
+class SynchronousCompositorHost : public SynchronousCompositor {
  public:
+  static std::unique_ptr<SynchronousCompositorHost> Create(
+      RenderWidgetHostViewAndroid* rwhva,
+      WebContents* web_contents);
+
   ~SynchronousCompositorHost() override;
 
   // SynchronousCompositor overrides.
   SynchronousCompositor::Frame DemandDrawHw(
-      const gfx::Size& surface_size,
-      const gfx::Transform& transform,
-      const gfx::Rect& viewport,
-      const gfx::Rect& clip,
+      const gfx::Size& viewport_size,
+      const gfx::Rect& viewport_rect_for_tile_priority,
+      const gfx::Transform& transform_for_tile_priority) override;
+  void DemandDrawHwAsync(
+      const gfx::Size& viewport_size,
       const gfx::Rect& viewport_rect_for_tile_priority,
       const gfx::Transform& transform_for_tile_priority) override;
   bool DemandDrawSw(SkCanvas* canvas) override;
-  void ReturnResources(uint32_t output_surface_id,
-                       const cc::CompositorFrameAck& frame_ack) override;
+  void ReturnResources(uint32_t compositor_frame_sink_id,
+                       const cc::ReturnedResourceArray& resources) override;
   void SetMemoryPolicy(size_t bytes_limit) override;
   void DidChangeRootLayerScrollOffset(
       const gfx::ScrollOffset& root_offset) override;
   void SynchronouslyZoomBy(float zoom_delta, const gfx::Point& anchor) override;
-  void SetIsActive(bool is_active) override;
   void OnComputeScroll(base::TimeTicks animation_time) override;
 
-  // SynchronousCompositorBase overrides.
-  InputEventAckState HandleInputEvent(
-      const blink::WebInputEvent& input_event) override;
-  void DidOverscroll(const DidOverscrollParams& over_scroll_params) override;
-  void BeginFrame(const cc::BeginFrameArgs& args) override;
-  bool OnMessageReceived(const IPC::Message& message) override;
-  void DidBecomeCurrent() override;
+  void DidOverscroll(const ui::DidOverscrollParams& over_scroll_params);
+  void DidSendBeginFrame(ui::WindowAndroid* window_android);
+  bool OnMessageReceived(const IPC::Message& message);
+
+  // Called by SynchronousCompositorObserver.
+  int routing_id() const { return routing_id_; }
+  void ProcessCommonParams(const SyncCompositorCommonRendererParams& params);
+
+  SynchronousCompositorClient* client() { return client_; }
 
  private:
   class ScopedSendZeroMemory;
@@ -66,46 +89,38 @@ class SynchronousCompositorHost : public SynchronousCompositorBase {
 
   SynchronousCompositorHost(RenderWidgetHostViewAndroid* rwhva,
                             SynchronousCompositorClient* client,
-                            bool async_input,
                             bool use_in_proc_software_draw);
-  void PopulateCommonParams(SyncCompositorCommonBrowserParams* params);
-  void ProcessCommonParams(const SyncCompositorCommonRendererParams& params);
-  void UpdateNeedsBeginFrames();
-  void UpdateFrameMetaData(const cc::CompositorFrameMetadata& frame_metadata);
-  void OnOverScroll(const SyncCompositorCommonRendererParams& params,
-                    const DidOverscrollParams& over_scroll_params);
-  void SendAsyncCompositorStateIfNeeded();
-  void UpdateStateTask();
+  void UpdateFrameMetaData(cc::CompositorFrameMetadata frame_metadata);
+  void CompositorFrameSinkCreated();
   bool DemandDrawSwInProc(SkCanvas* canvas);
   void SetSoftwareDrawSharedMemoryIfNeeded(size_t stride, size_t buffer_size);
   void SendZeroMemory();
+  SynchronousCompositor::Frame ProcessHardwareFrame(
+      uint32_t compositor_frame_sink_id,
+      cc::CompositorFrame compositor_frame);
+  bool DemandDrawHwReceiveFrame(const IPC::Message& message);
 
   RenderWidgetHostViewAndroid* const rwhva_;
   SynchronousCompositorClient* const client_;
   const scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
+  const int process_id_;
   const int routing_id_;
+  SynchronousCompositorObserver* const rph_observer_;
   IPC::Sender* const sender_;
-  const bool async_input_;
   const bool use_in_process_zero_copy_software_draw_;
 
-  bool is_active_;
   size_t bytes_limit_;
-  uint32_t output_surface_id_from_last_draw_;
-  cc::ReturnedResourceArray returned_resources_;
   std::unique_ptr<SharedMemoryWithSize> software_draw_shm_;
 
   // Updated by both renderer and browser.
   gfx::ScrollOffset root_scroll_offset_;
-  bool root_scroll_offset_updated_by_browser_;
 
   // From renderer.
   uint32_t renderer_param_version_;
   bool need_animate_scroll_;
   uint32_t need_invalidate_count_;
-  bool need_begin_frame_;
   uint32_t did_activate_pending_tree_count_;
 
-  base::WeakPtrFactory<SynchronousCompositorHost> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(SynchronousCompositorHost);
 };
 

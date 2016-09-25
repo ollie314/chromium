@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/base64url.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -44,9 +45,9 @@ const char kDeviceSoftwarePackage[] = "com.google.chrome.cryptauth";
 }  // namespace
 
 CryptAuthEnrollmentManager::CryptAuthEnrollmentManager(
-    scoped_ptr<base::Clock> clock,
-    scoped_ptr<CryptAuthEnrollerFactory> enroller_factory,
-    scoped_ptr<SecureMessageDelegate> secure_message_delegate,
+    std::unique_ptr<base::Clock> clock,
+    std::unique_ptr<CryptAuthEnrollerFactory> enroller_factory,
+    std::unique_ptr<SecureMessageDelegate> secure_message_delegate,
     const cryptauth::GcmDeviceInfo& device_info,
     CryptAuthGCMManager* gcm_manager,
     PrefService* pref_service)
@@ -157,11 +158,12 @@ void CryptAuthEnrollmentManager::OnEnrollmentFinished(bool success) {
   FOR_EACH_OBSERVER(Observer, observers_, OnEnrollmentFinished(success));
 }
 
-scoped_ptr<SyncScheduler> CryptAuthEnrollmentManager::CreateSyncScheduler() {
-  return make_scoped_ptr(new SyncSchedulerImpl(
+std::unique_ptr<SyncScheduler>
+CryptAuthEnrollmentManager::CreateSyncScheduler() {
+  return base::MakeUnique<SyncSchedulerImpl>(
       this, base::TimeDelta::FromDays(kEnrollmentRefreshPeriodDays),
       base::TimeDelta::FromMinutes(kEnrollmentBaseRecoveryPeriodMinutes),
-      kEnrollmentMaxJitterRatio, "CryptAuth Enrollment"));
+      kEnrollmentMaxJitterRatio, "CryptAuth Enrollment");
 }
 
 std::string CryptAuthEnrollmentManager::GetUserPublicKey() {
@@ -227,7 +229,7 @@ void CryptAuthEnrollmentManager::OnReenrollMessage() {
 }
 
 void CryptAuthEnrollmentManager::OnSyncRequested(
-    scoped_ptr<SyncScheduler::SyncRequest> sync_request) {
+    std::unique_ptr<SyncScheduler::SyncRequest> sync_request) {
   FOR_EACH_OBSERVER(Observer, observers_, OnEnrollmentStarted());
 
   sync_request_ = std::move(sync_request);

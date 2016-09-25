@@ -43,13 +43,16 @@ const char kInvalidCallbackIdError[] = "Invalid callbackId";
 AppBindings::AppBindings(Dispatcher* dispatcher, ScriptContext* context)
     : ObjectBackedNativeHandler(context),
       dispatcher_(dispatcher) {
-  RouteFunction("GetIsInstalled",
+  RouteFunction(
+      "GetIsInstalled", "app.getIsInstalled",
       base::Bind(&AppBindings::GetIsInstalled, base::Unretained(this)));
-  RouteFunction("GetDetails",
-      base::Bind(&AppBindings::GetDetails, base::Unretained(this)));
-  RouteFunction("GetInstallState",
+  RouteFunction("GetDetails", "app.getDetails",
+                base::Bind(&AppBindings::GetDetails, base::Unretained(this)));
+  RouteFunction(
+      "GetInstallState", "app.installState",
       base::Bind(&AppBindings::GetInstallState, base::Unretained(this)));
-  RouteFunction("GetRunningState",
+  RouteFunction(
+      "GetRunningState", "app.runningState",
       base::Bind(&AppBindings::GetRunningState, base::Unretained(this)));
 }
 
@@ -164,6 +167,9 @@ bool AppBindings::OnMessageReceived(const IPC::Message& message) {
 
 void AppBindings::OnAppInstallStateResponse(
     const std::string& state, int callback_id) {
+  if (!is_valid())
+    return;
+
   v8::Isolate* isolate = context()->isolate();
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(context()->v8_context());

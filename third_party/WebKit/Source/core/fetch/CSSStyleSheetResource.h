@@ -55,10 +55,7 @@ public:
     StyleSheetContents* restoreParsedStyleSheet(const CSSParserContext&);
     void saveParsedStyleSheet(StyleSheetContents*);
 
-protected:
-    bool isSafeToUnlock() const override;
-    void destroyDecodedDataIfPossible() override;
-    void destroyDecodedDataForFailedRevalidation() override { destroyDecodedDataIfPossible(); }
+    void appendData(const char* data, size_t length) override;
 
 private:
     class CSSStyleSheetResourceFactory : public ResourceFactory {
@@ -74,12 +71,18 @@ private:
     CSSStyleSheetResource(const ResourceRequest&, const ResourceLoaderOptions&, const String& charset);
 
     bool canUseSheet(MIMETypeCheck) const;
-    void removedFromMemoryCache() override;
     void checkNotify() override;
+
+    void setParsedStyleSheetCache(StyleSheetContents*);
+
+    void destroyDecodedDataIfPossible() override;
+    void destroyDecodedDataForFailedRevalidation() override { destroyDecodedDataIfPossible(); }
 
     String m_decodedSheetText;
 
     Member<StyleSheetContents> m_parsedStyleSheetCache;
+
+    bool m_didNotifyFirstData;
 };
 
 DEFINE_RESOURCE_TYPE_CASTS(CSSStyleSheet);

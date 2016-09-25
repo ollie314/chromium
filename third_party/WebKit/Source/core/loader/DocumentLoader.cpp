@@ -40,7 +40,6 @@
 #include "core/fetch/ImageResource.h"
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceFetcher.h"
-#include "core/fetch/ResourceLoader.h"
 #include "core/fetch/ScriptResource.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/LocalDOMWindow.h"
@@ -56,12 +55,12 @@
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/LinkLoader.h"
+#include "core/loader/NetworkHintsInterface.h"
 #include "core/loader/ProgressTracker.h"
 #include "core/loader/appcache/ApplicationCacheHost.h"
 #include "core/page/FrameTree.h"
 #include "core/page/Page.h"
 #include "platform/HTTPNames.h"
-#include "platform/Logging.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/mhtml/ArchiveResource.h"
 #include "platform/network/ContentSecurityPolicyResponseHeaders.h"
@@ -70,10 +69,12 @@
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityPolicy.h"
 #include "public/platform/Platform.h"
+#include "public/platform/WebDocumentSubresourceFilter.h"
 #include "public/platform/WebMimeRegistry.h"
 #include "wtf/Assertions.h"
-#include "wtf/TemporaryChange.h"
+#include "wtf/AutoReset.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
@@ -103,6 +104,7 @@ DocumentLoader::DocumentLoader(LocalFrame* frame, const ResourceRequest& req, co
     , m_request(req)
     , m_isClientRedirect(false)
     , m_replacesCurrentHistoryItem(false)
+    , m_dataReceived(false)
     , m_navigationType(NavigationTypeOther)
     , m_documentLoadTiming(*this)
     , m_timeOfLastDataReceived(0.0)
@@ -121,16 +123,11 @@ FrameLoader* DocumentLoader::frameLoader() const
     return &m_frame->loader();
 }
 
-ResourceLoader* DocumentLoader::mainResourceLoader() const
-{
-    return m_mainResource ? m_mainResource->loader() : nullptr;
-}
-
 DocumentLoader::~DocumentLoader()
 {
-    ASSERT(!m_frame);
-    ASSERT(!m_mainResource);
-    ASSERT(!m_applicationCacheHost);
+    DCHECK(!m_frame);
+    DCHECK(!m_mainResource);
+    DCHECK(!m_applicationCacheHost);
 }
 
 DEFINE_TRACE(DocumentLoader)
@@ -142,6 +139,7 @@ DEFINE_TRACE(DocumentLoader)
     visitor->trace(m_documentLoadTiming);
     visitor->trace(m_applicationCacheHost);
     visitor->trace(m_contentSecurityPolicy);
+    RawResourceClient::trace(visitor);
 }
 
 unsigned long DocumentLoader::mainResourceIdentifier() const
@@ -162,6 +160,11 @@ const ResourceRequest& DocumentLoader::request() const
 const KURL& DocumentLoader::url() const
 {
     return m_request.url();
+}
+
+void DocumentLoader::setSubresourceFilter(std::unique_ptr<WebDocumentSubresourceFilter> subresourceFilter)
+{
+    m_subresourceFilter = std::move(subresourceFilter);
 }
 
 Resource* DocumentLoader::startPreload(Resource::Type type, FetchRequest& request)
@@ -189,16 +192,33 @@ Resource* DocumentLoader::startPreload(Resource::Type type, FetchRequest& reques
     case Resource::ImportResource:
         resource = RawResource::fetchImport(request, fetcher());
         break;
-    case Resource::LinkPreload:
+    case Resource::Raw:
         resource = RawResource::fetch(request, fetcher());
         break;
     default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
 
     if (resource)
         fetcher()->preloadStarted(resource);
     return resource;
+}
+
+void DocumentLoader::didRedirect(const KURL& oldURL, const KURL& newURL)
+{
+    timing().addRedirect(oldURL, newURL);
+
+    // If a redirection happens during a back/forward navigation, don't restore
+    // any state from the old HistoryItem.
+    // There is a provisional history item for back/forward navigation only.
+    // In the other case, clearing it is a no-op.
+    DCHECK(frameLoader());
+    frameLoader()->clearProvisionalHistoryItem();
+}
+
+void DocumentLoader::dispatchLinkHeaderPreloads(ViewportDescriptionWrapper* viewport, LinkLoader::MediaPreloadPolicy mediaPolicy)
+{
+    LinkLoader::loadLinksFromHeader(response().httpHeaderField(HTTPNames::Link), response().url(), m_frame->document(), NetworkHintsInterfaceImpl(), LinkLoader::OnlyLoadResources, mediaPolicy, viewport);
 }
 
 void DocumentLoader::didChangePerformanceTiming()
@@ -211,7 +231,7 @@ void DocumentLoader::didChangePerformanceTiming()
 void DocumentLoader::didObserveLoadingBehavior(WebLoadingBehaviorFlag behavior)
 {
     if (frame() && frame()->isMainFrame()) {
-        ASSERT(m_state >= Committed);
+        DCHECK_GE(m_state, Committed);
         frameLoader()->client()->didObserveLoadingBehavior(behavior);
     }
 }
@@ -246,8 +266,8 @@ void DocumentLoader::commitIfReady()
 
 void DocumentLoader::notifyFinished(Resource* resource)
 {
-    ASSERT_UNUSED(resource, m_mainResource == resource);
-    ASSERT(m_mainResource);
+    DCHECK_EQ(m_mainResource, resource);
+    DCHECK(m_mainResource);
 
     if (!m_mainResource->errorOccurred() && !m_mainResource->wasCanceled()) {
         finishedLoading(m_mainResource->loadFinishTime());
@@ -263,7 +283,9 @@ void DocumentLoader::notifyFinished(Resource* resource)
 
 void DocumentLoader::finishedLoading(double finishTime)
 {
-    ASSERT(!m_frame->page()->defersLoading() || InspectorInstrumentation::isDebuggerPaused(m_frame));
+    DCHECK(m_frame->loader().stateMachine()->creatingInitialEmptyDocument()
+        || !m_frame->page()->defersLoading()
+        || InspectorInstrumentation::isDebuggerPaused(m_frame));
 
     double responseEndTime = finishTime;
     if (!responseEndTime)
@@ -295,8 +317,8 @@ void DocumentLoader::finishedLoading(double finishTime)
 
 void DocumentLoader::redirectReceived(Resource* resource, ResourceRequest& request, const ResourceResponse& redirectResponse)
 {
-    ASSERT_UNUSED(resource, resource == m_mainResource);
-    ASSERT(!redirectResponse.isNull());
+    DCHECK_EQ(resource, m_mainResource);
+    DCHECK(!redirectResponse.isNull());
     m_request = request;
 
     // If the redirecting url is not allowed to display content from the target origin,
@@ -313,17 +335,17 @@ void DocumentLoader::redirectReceived(Resource* resource, ResourceRequest& reque
         return;
     }
 
-    ASSERT(timing().fetchStart());
-    timing().addRedirect(redirectResponse.url(), requestURL);
+    DCHECK(timing().fetchStart());
     appendRedirect(requestURL);
-    frameLoader()->receivedMainResourceRedirect(requestURL);
+    didRedirect(redirectResponse.url(), requestURL);
+    frameLoader()->client()->dispatchDidReceiveServerRedirectForProvisionalLoad();
 }
 
-static bool canShowMIMEType(const String& mimeType, Page* page)
+static bool canShowMIMEType(const String& mimeType, LocalFrame* frame)
 {
     if (Platform::current()->mimeRegistry()->supportsMIMEType(mimeType) == WebMimeRegistry::IsSupported)
         return true;
-    PluginData* pluginData = page->pluginData();
+    PluginData* pluginData = frame->pluginData();
     return !mimeType.isEmpty() && pluginData && pluginData->supportsMimeType(mimeType);
 }
 
@@ -345,30 +367,39 @@ bool DocumentLoader::shouldContinueForResponse() const
         return false;
     }
 
-    if (!canShowMIMEType(m_response.mimeType(), m_frame->page()))
+    if (!canShowMIMEType(m_response.mimeType(), m_frame))
         return false;
     return true;
 }
 
 void DocumentLoader::cancelLoadAfterXFrameOptionsOrCSPDenied(const ResourceResponse& response)
 {
-    InspectorInstrumentation::continueAfterXFrameOptionsDenied(m_frame, this, mainResourceIdentifier(), response);
+    InspectorInstrumentation::continueAfterXFrameOptionsDenied(m_frame, this, mainResourceIdentifier(), response, m_mainResource.get());
 
     setWasBlockedAfterXFrameOptionsOrCSP();
 
-    // Pretend that this was an empty HTTP 200 response.
+    // Pretend that this was an empty HTTP 200 response.  Don't reuse the
+    // original URL for the empty page (https://crbug.com/622385).
+    //
+    // TODO(mkwst):  Remove this once XFO moves to the browser.
+    // https://crbug.com/555418.
     clearMainResourceHandle();
-    m_response = ResourceResponse(blankURL(), "text/html", 0, nullAtom, String());
+    KURL blockedURL = SecurityOrigin::urlWithUniqueSecurityOrigin();
+    m_originalRequest.setURL(blockedURL);
+    m_request.setURL(blockedURL);
+    m_redirectChain.removeLast();
+    appendRedirect(blockedURL);
+    m_response = ResourceResponse(blockedURL, "text/html", 0, nullAtom, String());
     finishedLoading(monotonicallyIncreasingTime());
 
     return;
 }
 
-void DocumentLoader::responseReceived(Resource* resource, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
+void DocumentLoader::responseReceived(Resource* resource, const ResourceResponse& response, std::unique_ptr<WebDataConsumerHandle> handle)
 {
-    ASSERT_UNUSED(resource, m_mainResource == resource);
-    ASSERT_UNUSED(handle, !handle);
-    ASSERT(frame());
+    DCHECK_EQ(m_mainResource, resource);
+    DCHECK(!handle);
+    DCHECK(frame());
 
     m_applicationCacheHost->didReceiveResponseForMainResource(response);
 
@@ -393,8 +424,7 @@ void DocumentLoader::responseReceived(Resource* resource, const ResourceResponse
             String content = it->value;
             if (frameLoader()->shouldInterruptLoadForXFrameOptions(content, response.url(), mainResourceIdentifier())) {
                 String message = "Refused to display '" + response.url().elidedString() + "' in a frame because it set 'X-Frame-Options' to '" + content + "'.";
-                ConsoleMessage* consoleMessage = ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, message);
-                consoleMessage->setRequestIdentifier(mainResourceIdentifier());
+                ConsoleMessage* consoleMessage = ConsoleMessage::createForRequest(SecurityMessageSource, ErrorMessageLevel, message, response.url(), mainResourceIdentifier());
                 frame()->document()->addConsoleMessage(consoleMessage);
 
                 cancelLoadAfterXFrameOptionsOrCSPDenied(response);
@@ -403,7 +433,7 @@ void DocumentLoader::responseReceived(Resource* resource, const ResourceResponse
         }
     }
 
-    ASSERT(!m_frame->page()->defersLoading());
+    DCHECK(!m_frame->page()->defersLoading());
 
     m_response = response;
 
@@ -411,7 +441,7 @@ void DocumentLoader::responseReceived(Resource* resource, const ResourceResponse
         m_mainResource->setDataBufferingPolicy(BufferData);
 
     if (!shouldContinueForResponse()) {
-        InspectorInstrumentation::continueWithPolicyIgnore(m_frame, this, m_mainResource->identifier(), m_response);
+        InspectorInstrumentation::continueWithPolicyIgnore(m_frame, this, m_mainResource->identifier(), m_response, m_mainResource.get());
         m_fetcher->stopFetching();
         return;
     }
@@ -428,7 +458,7 @@ void DocumentLoader::ensureWriter(const AtomicString& mimeType, const KURL& over
     if (m_writer)
         return;
 
-    const AtomicString& encoding = m_frame->host()->overrideEncoding().isNull() ? response().textEncodingName() : m_frame->host()->overrideEncoding();
+    const AtomicString& encoding = response().textEncodingName();
 
     // Prepare a DocumentInit before clearing the frame, because it may need to
     // inherit an aliased security context.
@@ -445,27 +475,20 @@ void DocumentLoader::ensureWriter(const AtomicString& mimeType, const KURL& over
     DocumentInit init(owner, url(), m_frame);
     init.withNewRegistrationContext();
     m_frame->loader().clear();
-    ASSERT(m_frame->page());
+    DCHECK(m_frame->page());
 
     ParserSynchronizationPolicy parsingPolicy = AllowAsynchronousParsing;
     if ((m_substituteData.isValid() && m_substituteData.forceSynchronousLoad()) || !Document::threadedParsingEnabledForTesting())
         parsingPolicy = ForceSynchronousParsing;
 
-    m_writer = createWriterFor(init, mimeType, encoding, false, parsingPolicy);
+    m_writer = createWriterFor(init, mimeType, encoding, false, parsingPolicy, overridingURL);
     m_writer->setDocumentWasLoadedAsPartOfNavigation();
-
-    // This should be set before receivedFirstData().
-    if (!overridingURL.isEmpty())
-        m_frame->document()->setBaseURLOverride(overridingURL);
-
-    // Call receivedFirstData() exactly once per load.
-    frameLoader()->receivedFirstData();
     m_frame->document()->maybeHandleHttpRefresh(m_response.httpHeaderField(HTTPNames::Refresh), Document::HttpRefreshFromHeader);
 }
 
 void DocumentLoader::commitData(const char* bytes, size_t length)
 {
-    ASSERT(m_state < MainResourceDone);
+    DCHECK_LT(m_state, MainResourceDone);
     ensureWriter(m_response.mimeType());
 
     // This can happen if document.close() is called by an event handler while
@@ -474,18 +497,18 @@ void DocumentLoader::commitData(const char* bytes, size_t length)
         return;
 
     if (length)
-        m_state = DataReceived;
+        m_dataReceived = true;
 
     m_writer->addData(bytes, length);
 }
 
 void DocumentLoader::dataReceived(Resource* resource, const char* data, size_t length)
 {
-    ASSERT(data);
-    ASSERT(length);
-    ASSERT_UNUSED(resource, resource == m_mainResource);
-    ASSERT(!m_response.isNull());
-    ASSERT(!m_frame->page()->defersLoading());
+    DCHECK(data);
+    DCHECK(length);
+    DCHECK_EQ(resource, m_mainResource);
+    DCHECK(!m_response.isNull());
+    DCHECK(!m_frame->page()->defersLoading());
 
     if (m_inDataReceived) {
         // If this function is reentered, defer processing of the additional
@@ -499,7 +522,7 @@ void DocumentLoader::dataReceived(Resource* resource, const char* data, size_t l
         return;
     }
 
-    TemporaryChange<bool> reentrancyProtector(m_inDataReceived, true);
+    AutoReset<bool> reentrancyProtector(&m_inDataReceived, true);
     processData(data, length);
 
     // Process data received in reentrant invocations. Note that the
@@ -545,7 +568,7 @@ void DocumentLoader::appendRedirect(const KURL& url)
 
 void DocumentLoader::detachFromFrame()
 {
-    ASSERT(m_frame);
+    DCHECK(m_frame);
 
     // It never makes sense to have a document loader that is detached from its
     // frame have any loads active, so go ahead and kill all the loads.
@@ -578,7 +601,7 @@ bool DocumentLoader::maybeCreateArchive()
     if (!isArchiveMIMEType(m_response.mimeType()))
         return false;
 
-    ASSERT(m_mainResource);
+    DCHECK(m_mainResource);
     ArchiveResource* mainResource = m_fetcher->createArchive(m_mainResource.get());
     if (!mainResource)
         return false;
@@ -619,60 +642,68 @@ bool DocumentLoader::maybeLoadEmpty()
 void DocumentLoader::startLoadingMainResource()
 {
     timing().markNavigationStart();
-    ASSERT(!m_mainResource);
-    ASSERT(m_state == NotStarted);
+    DCHECK(!m_mainResource);
+    DCHECK_EQ(m_state, NotStarted);
     m_state = Provisional;
 
     if (maybeLoadEmpty())
         return;
 
-    ASSERT(timing().navigationStart());
-    ASSERT(!timing().fetchStart());
-    timing().markFetchStart();
+    DCHECK(timing().navigationStart());
 
-    m_applicationCacheHost->willStartLoadingMainResource(m_request);
+    // PlzNavigate:
+    // The fetch has already started in the browser. Don't mark it again.
+    if (!m_frame->settings()->browserSideNavigationEnabled()) {
+        DCHECK(!timing().fetchStart());
+        timing().markFetchStart();
+    }
 
     DEFINE_STATIC_LOCAL(ResourceLoaderOptions, mainResourceLoadOptions,
         (DoNotBufferData, AllowStoredCredentials, ClientRequestedCredentials, CheckContentSecurityPolicy, DocumentContext));
     FetchRequest fetchRequest(m_request, FetchInitiatorTypeNames::document, mainResourceLoadOptions);
     m_mainResource = RawResource::fetchMainResource(fetchRequest, fetcher(), m_substituteData);
     if (!m_mainResource) {
-        m_request = ResourceRequest();
-        // If the load was aborted by clearing m_request, it's possible the ApplicationCacheHost
-        // is now in a state where starting an empty load will be inconsistent. Replace it with
-        // a new ApplicationCacheHost.
-        if (m_applicationCacheHost)
-            m_applicationCacheHost->detachFromDocumentLoader();
-        m_applicationCacheHost = ApplicationCacheHost::create(this);
+        m_request = ResourceRequest(blankURL());
         maybeLoadEmpty();
         return;
     }
-    // A bunch of headers are set when the underlying ResourceLoader is created, and m_request needs to include those.
+    // A bunch of headers are set when the underlying resource load begins, and m_request needs to include those.
     // Even when using a cached resource, we may make some modification to the request, e.g. adding the referer header.
-    m_request = mainResourceLoader() ? m_mainResource->resourceRequest() : fetchRequest.resourceRequest();
+    m_request = m_mainResource->isLoading() ? m_mainResource->resourceRequest() : fetchRequest.resourceRequest();
     m_mainResource->addClient(this);
 }
 
 void DocumentLoader::endWriting(DocumentWriter* writer)
 {
-    ASSERT_UNUSED(writer, m_writer == writer);
+    DCHECK_EQ(m_writer, writer);
     m_writer->end();
     m_writer.clear();
 }
 
-DocumentWriter* DocumentLoader::createWriterFor(const DocumentInit& init, const AtomicString& mimeType, const AtomicString& encoding, bool dispatch, ParserSynchronizationPolicy parsingPolicy)
+DocumentWriter* DocumentLoader::createWriterFor(const DocumentInit& init, const AtomicString& mimeType, const AtomicString& encoding, bool dispatchWindowObjectAvailable, ParserSynchronizationPolicy parsingPolicy, const KURL& overridingURL)
 {
     LocalFrame* frame = init.frame();
 
-    ASSERT(!frame->document() || !frame->document()->isActive());
-    ASSERT(frame->tree().childCount() == 0);
+    DCHECK(!frame->document() || !frame->document()->isActive());
+    DCHECK_EQ(frame->tree().childCount(), 0u);
 
     if (!init.shouldReuseDefaultView())
         frame->setDOMWindow(LocalDOMWindow::create(*frame));
 
     Document* document = frame->localDOMWindow()->installNewDocument(mimeType, init);
 
-    frame->loader().didBeginDocument(dispatch);
+    // This should be set before receivedFirstData().
+    if (!overridingURL.isEmpty())
+        frame->document()->setBaseURLOverride(overridingURL);
+
+    frame->loader().didInstallNewDocument(dispatchWindowObjectAvailable);
+
+    // This must be called before DocumentWriter is created, otherwise HTML parser
+    // will use stale values from HTMLParserOption.
+    if (!dispatchWindowObjectAvailable)
+        frame->loader().receivedFirstData();
+
+    frame->loader().didBeginDocument();
 
     return DocumentWriter::create(document, parsingPolicy, mimeType, encoding);
 }

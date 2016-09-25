@@ -11,8 +11,8 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/ui/views/website_settings/chosen_object_view_observer.h"
-#include "chrome/browser/ui/views/website_settings/permission_selector_view_observer.h"
+#include "chrome/browser/ui/views/website_settings/chosen_object_row_observer.h"
+#include "chrome/browser/ui/views/website_settings/permission_selector_row_observer.h"
 #include "chrome/browser/ui/website_settings/website_settings_ui.h"
 #include "components/security_state/security_state_model.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -28,6 +28,10 @@ class Profile;
 
 namespace content {
 class WebContents;
+}
+
+namespace net {
+class X509Certificate;
 }
 
 namespace test {
@@ -51,8 +55,8 @@ enum : int {
 
 // The views implementation of the website settings UI.
 class WebsiteSettingsPopupView : public content::WebContentsObserver,
-                                 public PermissionSelectorViewObserver,
-                                 public ChosenObjectViewObserver,
+                                 public PermissionSelectorRowObserver,
+                                 public ChosenObjectRowObserver,
                                  public views::BubbleDialogDelegateView,
                                  public views::ButtonListener,
                                  public views::LinkListener,
@@ -85,12 +89,13 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
 
   // WebContentsObserver implementation.
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
+  void WebContentsDestroyed() override;
 
-  // PermissionSelectorViewObserver implementation.
+  // PermissionSelectorRowObserver implementation.
   void OnPermissionChanged(
       const WebsiteSettingsUI::PermissionInfo& permission) override;
 
-  // ChosenObjectViewObserver implementation.
+  // ChosenObjectRowObserver implementation.
   void OnChosenObjectDeleted(
       const WebsiteSettingsUI::ChosenObjectInfo& info) override;
 
@@ -141,10 +146,6 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
   // Whether DevTools is disabled for the relevant profile.
   bool is_devtools_disabled_;
 
-  // The web contents of the current tab. The popup can't live longer than a
-  // tab.
-  content::WebContents* web_contents_;
-
   // The presenter that controls the Website Settings UI.
   std::unique_ptr<WebsiteSettings> presenter_;
 
@@ -165,9 +166,8 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
   // of the site settings view.
   views::View* permissions_content_;
 
-  // The ID of the certificate provided by the site. If the site does not
-  // provide a certificate then |cert_id_| is 0.
-  int cert_id_;
+  // The certificate provided by the site, if one exists.
+  scoped_refptr<net::X509Certificate> certificate_;
 
   // The link to open the site settings page that provides full control over
   // the origin's permissions.

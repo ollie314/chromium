@@ -14,8 +14,8 @@
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_decoration.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
+#include "chrome/grit/theme_resources.h"
 #import "extensions/common/feature_switch.h"
-#include "grit/theme_resources.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #import "ui/base/cocoa/appkit_utils.h"
 #import "ui/base/cocoa/nsview_additions.h"
@@ -31,12 +31,24 @@ const CGFloat kCornerRadius = 3.0;
 
 // How far to inset the left- and right-hand decorations from the field's
 // bounds.
-const CGFloat kLeftDecorationXOffset = 5.0;
 const CGFloat kRightDecorationXOffset = 5.0;
+CGFloat LeftDecorationXOffset() {
+  const CGFloat kLeftDecorationXOffset = 5.0;
+  const CGFloat kLeftMaterialDecorationXOffset = 6.0;
+  return ui::MaterialDesignController::IsModeMaterial()
+             ? kLeftMaterialDecorationXOffset
+             : kLeftDecorationXOffset;
+}
 
 // The amount of padding on either side reserved for drawing
 // decorations.  [Views has |kItemPadding| == 3.]
-const CGFloat kDecorationHorizontalPad = 3.0;
+CGFloat DecorationsHorizontalPad() {
+  const CGFloat kDecorationHorizontalPad = 3.0;
+  const CGFloat kMaterialDecorationHorizontalPad = 4.0;
+  return ui::MaterialDesignController::IsModeMaterial()
+      ? kMaterialDecorationHorizontalPad
+      : kDecorationHorizontalPad;
+}
 
 const ui::NinePartImageIds kPopupBorderImageIds =
     IMAGE_GRID(IDR_OMNIBOX_POPUP_BORDER_AND_SHADOW);
@@ -71,6 +83,7 @@ void CalculatePositionsHelper(
   // The initial padding depends on whether the first visible decoration is
   // a button or not.
   bool is_first_visible_decoration = true;
+  const CGFloat kDecorationHorizontalPad = DecorationsHorizontalPad();
 
   for (size_t i = 0; i < all_decorations.size(); ++i) {
     if (all_decorations[i]->IsVisible()) {
@@ -134,7 +147,7 @@ size_t CalculatePositionsInFrame(
 
   // Layout |left_decorations| against the LHS.
   CalculatePositionsHelper(frame, left_decorations, NSMinXEdge,
-                           kLeftDecorationXOffset, decorations,
+                           LeftDecorationXOffset(), decorations,
                            decoration_frames, &frame);
   DCHECK_EQ(decorations->size(), decoration_frames->size());
 
@@ -248,8 +261,11 @@ size_t CalculatePositionsInFrame(
   // Material Design spec. It turns out this adjustment is equal to the single
   // pixel line width (so 1 on non-Retina, 0.5 on Retina). Make this adjustment
   // after computing decoration positions because the decorations are already
-  // correctly positioned.
+  // correctly positioned. The spec also calls for positioning the text 1pt to
+  // the right of its default position.
   if (ui::MaterialDesignController::IsModeMaterial()) {
+    textFrame.origin.x += 1;
+    textFrame.size.width -= 1;
     textFrame.origin.y -= singlePixelLineWidth_;
   }
 
@@ -269,6 +285,7 @@ size_t CalculatePositionsInFrame(
 
   // Determine the left-most extent for the i-beam cursor.
   CGFloat minX = NSMinX(textFrame);
+  const CGFloat kDecorationHorizontalPad = DecorationsHorizontalPad();
   for (size_t index = left_count; index--; ) {
     if (decorations[index]->AcceptsMousePress())
       break;
@@ -314,10 +331,6 @@ size_t CalculatePositionsInFrame(
 
   // Compute the border's bezier path.
   NSRect pathRect = NSInsetRect(frame, insetSize, insetSize);
-  // In dark mode, make room for a shadow beneath the bottom edge.
-  if (inDarkMode && isModeMaterial) {
-    pathRect.size.height -= singlePixelLineWidth_;
-  }
   NSBezierPath* path =
       [NSBezierPath bezierPathWithRoundedRect:pathRect
                                       xRadius:kCornerRadius
@@ -338,54 +351,13 @@ size_t CalculatePositionsInFrame(
   // Draw the border.
   if (isModeMaterial) {
     if (!inDarkMode) {
-      [[NSColor colorWithCalibratedWhite:168 / 255. alpha:1] set];
-      [path stroke];
+      const CGFloat kNormalStrokeGray = 168 / 255.;
+      [[NSColor colorWithCalibratedWhite:kNormalStrokeGray alpha:1] set];
     } else {
-      // In dark mode the top, middle, and bottom portions of the stroke are
-      // drawn in different colors.
-      {
-        gfx::ScopedNSGraphicsContextSaveGState saveState;
-        [[NSColor colorWithCalibratedWhite:52 / 255. alpha:1] set];
-        [NSBezierPath clipRect:NSMakeRect(NSMinX(frame), NSMaxY(frame) - 2,
-                                          NSWidth(frame), 2)];
-        [path stroke];
-      }
-      {
-        gfx::ScopedNSGraphicsContextSaveGState saveState;
-        [[NSColor colorWithCalibratedWhite:61 / 255. alpha:1] set];
-        [NSBezierPath clipRect:NSMakeRect(NSMinX(frame), NSMinY(frame) + 3,
-                                          NSWidth(frame), NSHeight(frame) - 5)];
-        [path stroke];
-      }
-      {
-        gfx::ScopedNSGraphicsContextSaveGState saveState;
-        [[NSColor colorWithCalibratedWhite:71 / 255. alpha:1] set];
-        [NSBezierPath clipRect:NSMakeRect(NSMinX(frame), NSMinY(frame),
-                                          NSWidth(frame), 3)];
-        [path stroke];
-      }
-
-      // Draw a highlight beneath the top edge, and a shadow beneath the bottom
-      // edge.
-      {
-        gfx::ScopedNSGraphicsContextSaveGState saveState;
-        [NSBezierPath setDefaultLineWidth:singlePixelLineWidth_];
-
-        [[NSColor colorWithCalibratedWhite:120 / 255. alpha:1] set];
-        NSPoint origin = NSMakePoint(NSMinX(pathRect) + 3,
-                                     NSMinY(pathRect) + singlePixelLineWidth_);
-        NSPoint destination =
-            NSMakePoint(NSMaxX(pathRect) - 3,
-                        NSMinY(pathRect) + singlePixelLineWidth_);
-        [NSBezierPath strokeLineFromPoint:origin
-                                  toPoint:destination];
-
-        origin.y = destination.y = NSMaxY(pathRect) + singlePixelLineWidth_;
-        [[NSColor colorWithCalibratedWhite:69 / 255. alpha:1] set];
-        [NSBezierPath strokeLineFromPoint:origin
-                                  toPoint:destination];
-      }
+      const CGFloat k30PercentAlpha = 0.3;
+      [[NSColor colorWithCalibratedWhite:0 alpha:k30PercentAlpha] set];
     }
+    [path stroke];
   } else {
     ui::DrawNinePartImage(frame,
                           isPopupMode_ ? kPopupBorderImageIds
@@ -412,10 +384,15 @@ size_t CalculatePositionsInFrame(
 
     CGFloat alphaComponent = 0.5 / singlePixelLineWidth_;
     if (isModeMaterial && inDarkMode) {
-      alphaComponent = 1;
+      // Special focus color for Material Incognito.
+      [[NSColor colorWithSRGBRed:123 / 255.
+                           green:170 / 255.
+                            blue:247 / 255.
+                           alpha:1] set];
+    } else {
+      [[[NSColor keyboardFocusIndicatorColor]
+          colorWithAlphaComponent:alphaComponent] set];
     }
-    [[[NSColor keyboardFocusIndicatorColor]
-        colorWithAlphaComponent:alphaComponent] set];
     [path stroke];
   }
 }
@@ -429,6 +406,7 @@ size_t CalculatePositionsInFrame(
                             &decorations, &decorationFrames, &workingFrame);
 
   // Draw the decorations.
+  const CGFloat kDecorationHorizontalPad = DecorationsHorizontalPad();
   for (size_t i = 0; i < decorations.size(); ++i) {
     if (decorations[i]) {
       NSRect background_frame = NSInsetRect(
@@ -446,13 +424,44 @@ size_t CalculatePositionsInFrame(
   [super drawInteriorWithFrame:cellFrame inView:controlView];
 }
 
+- (BOOL)canDropAtLocationInWindow:(NSPoint)location
+                           ofView:(AutocompleteTextField*)controlView {
+  NSRect cellFrame = [controlView bounds];
+  const NSPoint locationInView =
+      [controlView convertPoint:location fromView:nil];
+
+  // If we have decorations, the drop can't occur at their horizontal padding.
+  if (!leftDecorations_.empty() && locationInView.x < LeftDecorationXOffset())
+    return false;
+
+  if (!rightDecorations_.empty() &&
+      locationInView.x > NSWidth(cellFrame) - kRightDecorationXOffset) {
+    return false;
+  }
+
+  LocationBarDecoration* decoration =
+      [self decorationForLocationInWindow:location
+                                   inRect:cellFrame
+                                   ofView:controlView];
+  return !decoration;
+}
+
 - (LocationBarDecoration*)decorationForEvent:(NSEvent*)theEvent
                                       inRect:(NSRect)cellFrame
                                       ofView:(AutocompleteTextField*)controlView
 {
+  return [self decorationForLocationInWindow:[theEvent locationInWindow]
+                                      inRect:cellFrame
+                                      ofView:controlView];
+}
+
+- (LocationBarDecoration*)decorationForLocationInWindow:(NSPoint)location
+                                                 inRect:(NSRect)cellFrame
+                                                 ofView:(AutocompleteTextField*)
+                                                            controlView {
   const BOOL flipped = [controlView isFlipped];
-  const NSPoint location =
-      [controlView convertPoint:[theEvent locationInWindow] fromView:nil];
+  const NSPoint locationInView =
+      [controlView convertPoint:location fromView:nil];
 
   std::vector<LocationBarDecoration*> decorations;
   std::vector<NSRect> decorationFrames;
@@ -461,7 +470,7 @@ size_t CalculatePositionsInFrame(
                             &decorations, &decorationFrames, &textFrame);
 
   for (size_t i = 0; i < decorations.size(); ++i) {
-    if (NSMouseInRect(location, decorationFrames[i], flipped))
+    if (NSMouseInRect(locationInView, decorationFrames[i], flipped))
       return decorations[i];
   }
 
@@ -683,12 +692,15 @@ static NSString* UnusedLegalNameForNewDropFile(NSURL* saveLocation,
   NSPasteboard* pboard = [NSPasteboard pasteboardWithName:NSDragPboard];
   NSFileManager* fileManager = [NSFileManager defaultManager];
 
-  if (![pboard containsURLData])
+  if (![pboard containsURLDataConvertingTextToURL:YES])
     return NULL;
 
   NSArray *urls = NULL;
   NSArray* titles = NULL;
-  [pboard getURLs:&urls andTitles:&titles convertingFilenames:YES];
+  [pboard getURLs:&urls
+                andTitles:&titles
+      convertingFilenames:YES
+      convertingTextToURL:YES];
 
   NSString* urlStr = [urls objectAtIndex:0];
   NSString* nameStr = [titles objectAtIndex:0];

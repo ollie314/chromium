@@ -25,7 +25,6 @@
 
 #include "core/html/shadow/DateTimeEditElement.h"
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/HTMLNames.h"
 #include "core/dom/Document.h"
@@ -348,11 +347,11 @@ bool DateTimeEditBuilder::shouldHourFieldDisabled() const
 
     if (m_dateValue.getType() == DateComponents::Time)
         return false;
-    ASSERT(m_dateValue.getType() == DateComponents::DateTimeLocal);
+    DCHECK_EQ(m_dateValue.getType(), DateComponents::DateTimeLocal);
 
     if (shouldDayOfMonthFieldDisabled()) {
-        ASSERT(m_parameters.minimum.fullYear() == m_parameters.maximum.fullYear());
-        ASSERT(m_parameters.minimum.month() == m_parameters.maximum.month());
+        DCHECK_EQ(m_parameters.minimum.fullYear(), m_parameters.maximum.fullYear());
+        DCHECK_EQ(m_parameters.minimum.month(), m_parameters.maximum.month());
         return false;
     }
 
@@ -401,7 +400,7 @@ bool DateTimeEditBuilder::shouldYearFieldDisabled() const
 void DateTimeEditBuilder::visitLiteral(const String& text)
 {
     DEFINE_STATIC_LOCAL(AtomicString, textPseudoId, ("-webkit-datetime-edit-text"));
-    ASSERT(text.length());
+    DCHECK_GT(text.length(), 0u);
     HTMLDivElement* element = HTMLDivElement::create(editElement().document());
     element->setShadowPseudoId(textPseudoId);
     if (m_parameters.locale.isRTL() && text.length()) {
@@ -423,9 +422,9 @@ DateTimeNumericFieldElement::Step DateTimeEditBuilder::createStep(double msPerFi
     const Decimal msPerFieldUnitDecimal(static_cast<int>(msPerFieldUnit));
     const Decimal msPerFieldSizeDecimal(static_cast<int>(msPerFieldSize));
     Decimal stepMilliseconds = stepRange().step();
-    ASSERT(!msPerFieldUnitDecimal.isZero());
-    ASSERT(!msPerFieldSizeDecimal.isZero());
-    ASSERT(!stepMilliseconds.isZero());
+    DCHECK(!msPerFieldUnitDecimal.isZero());
+    DCHECK(!msPerFieldSizeDecimal.isZero());
+    DCHECK(!stepMilliseconds.isZero());
 
     DateTimeNumericFieldElement::Step step(1, 0);
 
@@ -465,7 +464,7 @@ DEFINE_TRACE(DateTimeEditElement)
 
 inline Element* DateTimeEditElement::fieldsWrapperElement() const
 {
-    ASSERT(firstChild());
+    DCHECK(firstChild());
     return toElement(firstChild());
 }
 
@@ -568,7 +567,7 @@ void DateTimeEditElement::focusByOwner(Element* oldFocusedElement)
     if (oldFocusedElement && oldFocusedElement->isDateTimeFieldElement()) {
         DateTimeFieldElement* oldFocusedField = static_cast<DateTimeFieldElement*>(oldFocusedElement);
         size_t index = fieldIndexOf(*oldFocusedField);
-        document().updateLayoutTreeForNode(oldFocusedField);
+        document().updateStyleAndLayoutTreeForNode(oldFocusedField);
         if (index != invalidFieldIndex && oldFocusedField->isFocusable()) {
             oldFocusedField->focus();
             return;
@@ -600,7 +599,7 @@ void DateTimeEditElement::fieldValueChanged()
 
 bool DateTimeEditElement::focusOnNextFocusableField(size_t startIndex)
 {
-    document().updateLayoutTreeIgnorePendingStylesheets();
+    document().updateStyleAndLayoutTreeIgnorePendingStylesheets();
     for (size_t fieldIndex = startIndex; fieldIndex < m_fields.size(); ++fieldIndex) {
         if (m_fields[fieldIndex]->isFocusable()) {
             m_fields[fieldIndex]->focus();
@@ -623,7 +622,7 @@ bool DateTimeEditElement::focusOnPreviousField(const DateTimeFieldElement& field
     const size_t startFieldIndex = fieldIndexOf(field);
     if (startFieldIndex == invalidFieldIndex)
         return false;
-    document().updateLayoutTreeIgnorePendingStylesheets();
+    document().updateStyleAndLayoutTreeIgnorePendingStylesheets();
     size_t fieldIndex = startFieldIndex;
     while (fieldIndex > 0) {
         --fieldIndex;
@@ -765,7 +764,7 @@ bool DateTimeEditElement::hasFocusedField()
 
 void DateTimeEditElement::setOnlyYearMonthDay(const DateComponents& date)
 {
-    ASSERT(date.getType() == DateComponents::Date);
+    DCHECK_EQ(date.getType(), DateComponents::Date);
 
     if (!m_editControlOwner)
         return;
@@ -814,5 +813,3 @@ DateTimeFieldsState DateTimeEditElement::valueAsDateTimeFieldsState() const
 }
 
 } // namespace blink
-
-#endif

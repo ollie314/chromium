@@ -15,8 +15,8 @@
 #include "base/macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
-#include "cc/blink/context_provider_web_context.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/renderer/pepper/pepper_video_decoder_host.h"
 #include "content/renderer/render_thread_impl.h"
@@ -61,7 +61,7 @@ bool IsCodecSupported(media::VideoCodec codec) {
 // YUV->RGB converter class using a shader and FBO.
 class VideoDecoderShim::YUVConverter {
  public:
-  YUVConverter(const scoped_refptr<cc_blink::ContextProviderWebContext>&);
+  YUVConverter(scoped_refptr<ContextProviderCommandBuffer>);
   ~YUVConverter();
   bool Initialize();
   void Convert(const scoped_refptr<media::VideoFrame>& frame, GLuint tex_out);
@@ -72,7 +72,7 @@ class VideoDecoderShim::YUVConverter {
   GLuint CreateProgram(const char* name, GLuint vshader, GLuint fshader);
   GLuint CreateTexture();
 
-  scoped_refptr<cc_blink::ContextProviderWebContext> context_provider_;
+  scoped_refptr<ContextProviderCommandBuffer> context_provider_;
   gpu::gles2::GLES2Interface* gl_;
   GLuint frame_buffer_;
   GLuint vertex_buffer_;
@@ -102,8 +102,8 @@ class VideoDecoderShim::YUVConverter {
 };
 
 VideoDecoderShim::YUVConverter::YUVConverter(
-    const scoped_refptr<cc_blink::ContextProviderWebContext>& context_provider)
-    : context_provider_(context_provider),
+    scoped_refptr<ContextProviderCommandBuffer> context_provider)
+    : context_provider_(std::move(context_provider)),
       gl_(context_provider_->ContextGL()),
       frame_buffer_(0),
       vertex_buffer_(0),
@@ -316,7 +316,7 @@ GLuint VideoDecoderShim::YUVConverter::CreateShader() {
 
 bool VideoDecoderShim::YUVConverter::Initialize() {
   // If texture_rg extension is not available, use slower GL_LUMINANCE.
-  if (context_provider_->ContextCapabilities().gpu.texture_rg) {
+  if (context_provider_->ContextCapabilities().texture_rg) {
     internal_format_ = GL_RED_EXT;
     format_ = GL_RED_EXT;
   } else {
@@ -324,8 +324,7 @@ bool VideoDecoderShim::YUVConverter::Initialize() {
     format_ = GL_LUMINANCE;
   }
 
-  if (context_provider_->ContextCapabilities().gpu.max_texture_image_units <
-      4) {
+  if (context_provider_->ContextCapabilities().max_texture_image_units < 4) {
     // We support YUVA textures and require 4 texture units in the fragment
     // stage.
     return false;

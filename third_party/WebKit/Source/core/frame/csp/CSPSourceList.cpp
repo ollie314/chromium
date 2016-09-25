@@ -6,11 +6,12 @@
 
 #include "core/frame/csp/CSPSource.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
-#include "platform/ParsingUtilities.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "wtf/HashSet.h"
 #include "wtf/text/Base64.h"
+#include "wtf/text/ParsingUtilities.h"
+#include "wtf/text/StringToNumber.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -21,7 +22,7 @@ static bool isSourceListNone(const UChar* begin, const UChar* end)
 
     const UChar* position = begin;
     skipWhile<UChar, isSourceCharacter>(position, end);
-    if (!equalIgnoringCase("'none'", begin, position - begin))
+    if (!equalIgnoringCase("'none'", StringView(begin, position - begin)))
         return false;
 
     skipWhile<UChar, isASCIISpace>(position, end);
@@ -39,21 +40,23 @@ CSPSourceList::CSPSourceList(ContentSecurityPolicy* policy, const String& direct
     , m_allowInline(false)
     , m_allowEval(false)
     , m_allowDynamic(false)
+    , m_allowHashedAttributes(false)
     , m_hashAlgorithmsUsed(0)
 {
 }
 
-bool CSPSourceList::matches(const KURL& url, ContentSecurityPolicy::RedirectStatus redirectStatus) const
+bool CSPSourceList::matches(const KURL& url, ResourceRequest::RedirectStatus redirectStatus) const
 {
-    // The CSP spec specifically states that data:, blob:, and filesystem URLs
-    // should not be captured by a '*" source
-    // (http://www.w3.org/TR/CSP2/#source-list-guid-matching). Thus, in the
-    // case of a full wildcard, data:, blob:, and filesystem: URLs are
+    // The CSP spec specifically states that only http:, https:, ws: and wss: should
+    // be captured by a '*" source.
+    // (https://w3c.github.io/webappsec-csp/#match-url-to-source-expression). Thus,
+    // in the case of a full wildcard, URLs with any other schemes are
     // explicitly checked for in the source list before allowing them through.
     if (m_allowStar) {
-        if (url.protocolIs("blob") || url.protocolIs("data") || url.protocolIs("filesystem"))
-            return hasSourceMatchInList(url, redirectStatus);
-        return true;
+        if (url.protocolIsInHTTPFamily() || url.protocolIs("ws") || url.protocolIs("wss"))
+            return true;
+
+        return hasSourceMatchInList(url, redirectStatus);
     }
 
     KURL effectiveURL = m_policy->selfMatchesInnerURL() && SecurityOrigin::shouldUseInnerURL(url) ? SecurityOrigin::extractInnerURL(url) : url;
@@ -87,6 +90,11 @@ bool CSPSourceList::allowNonce(const String& nonce) const
 bool CSPSourceList::allowHash(const CSPHashValue& hashValue) const
 {
     return m_hashes.contains(hashValue);
+}
+
+bool CSPSourceList::allowHashedAttributes() const
+{
+    return m_allowHashedAttributes;
 }
 
 uint8_t CSPSourceList::hashAlgorithmsUsed() const
@@ -147,7 +155,9 @@ bool CSPSourceList::parseSource(const UChar* begin, const UChar* end, String& sc
     if (begin == end)
         return false;
 
-    if (equalIgnoringCase("'none'", begin, end - begin))
+    StringView token(begin, end - begin);
+
+    if (equalIgnoringCase("'none'", token))
         return false;
 
     if (end - begin == 1 && *begin == '*') {
@@ -155,23 +165,28 @@ bool CSPSourceList::parseSource(const UChar* begin, const UChar* end, String& sc
         return true;
     }
 
-    if (equalIgnoringCase("'self'", begin, end - begin)) {
+    if (equalIgnoringCase("'self'", token)) {
         addSourceSelf();
         return true;
     }
 
-    if (equalIgnoringCase("'unsafe-inline'", begin, end - begin)) {
+    if (equalIgnoringCase("'unsafe-inline'", token)) {
         addSourceUnsafeInline();
         return true;
     }
 
-    if (equalIgnoringCase("'unsafe-eval'", begin, end - begin)) {
+    if (equalIgnoringCase("'unsafe-eval'", token)) {
         addSourceUnsafeEval();
         return true;
     }
 
-    if (equalIgnoringCase("'unsafe-dynamic'", begin, end - begin)) {
-        addSourceUnsafeDynamic();
+    if (equalIgnoringCase("'strict-dynamic'", token)) {
+        addSourceStrictDynamic();
+        return true;
+    }
+
+    if (equalIgnoringCase("'unsafe-hashed-attributes'", token)) {
+        addSourceUnsafeHashedAttributes();
         return true;
     }
 
@@ -274,12 +289,13 @@ bool CSPSourceList::parseSource(const UChar* begin, const UChar* end, String& sc
 bool CSPSourceList::parseNonce(const UChar* begin, const UChar* end, String& nonce)
 {
     size_t nonceLength = end - begin;
-    const char* prefix = "'nonce-";
+    StringView prefix("'nonce-");
 
-    if (nonceLength <= strlen(prefix) || !equalIgnoringCase(prefix, begin, strlen(prefix)))
+    // TODO(esprehn): Should be StringView(begin, nonceLength).startsWith(prefix).
+    if (nonceLength <= prefix.length() || !equalIgnoringCase(prefix, StringView(begin, prefix.length())))
         return true;
 
-    const UChar* position = begin + strlen(prefix);
+    const UChar* position = begin + prefix.length();
     const UChar* nonceBegin = position;
 
     ASSERT(position < end);
@@ -315,13 +331,14 @@ bool CSPSourceList::parseHash(const UChar* begin, const UChar* end, DigestValue&
         { "'sha-512-", ContentSecurityPolicyHashAlgorithmSha512 }
     };
 
-    String prefix;
+    StringView prefix;
     hashAlgorithm = ContentSecurityPolicyHashAlgorithmNone;
     size_t hashLength = end - begin;
 
     for (const auto& algorithm : kSupportedPrefixes) {
-        if (hashLength > strlen(algorithm.prefix) && equalIgnoringCase(algorithm.prefix, begin, strlen(algorithm.prefix))) {
-            prefix = algorithm.prefix;
+        prefix = algorithm.prefix;
+        // TODO(esprehn): Should be StringView(begin, end - begin).startsWith(prefix).
+        if (hashLength > prefix.length() && equalIgnoringCase(prefix, StringView(begin, prefix.length()))) {
             hashAlgorithm = algorithm.type;
             break;
         }
@@ -492,9 +509,14 @@ void CSPSourceList::addSourceUnsafeEval()
     m_allowEval = true;
 }
 
-void CSPSourceList::addSourceUnsafeDynamic()
+void CSPSourceList::addSourceStrictDynamic()
 {
     m_allowDynamic = true;
+}
+
+void CSPSourceList::addSourceUnsafeHashedAttributes()
+{
+    m_allowHashedAttributes = true;
 }
 
 void CSPSourceList::addSourceNonce(const String& nonce)
@@ -508,7 +530,7 @@ void CSPSourceList::addSourceHash(const ContentSecurityPolicyHashAlgorithm& algo
     m_hashAlgorithmsUsed |= algorithm;
 }
 
-bool CSPSourceList::hasSourceMatchInList(const KURL& url, ContentSecurityPolicy::RedirectStatus redirectStatus) const
+bool CSPSourceList::hasSourceMatchInList(const KURL& url, ResourceRequest::RedirectStatus redirectStatus) const
 {
     for (size_t i = 0; i < m_list.size(); ++i) {
         if (m_list[i]->matches(url, redirectStatus))

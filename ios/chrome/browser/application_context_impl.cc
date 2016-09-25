@@ -28,6 +28,7 @@
 #include "components/metrics_services_manager/metrics_services_manager.h"
 #include "components/net_log/chrome_net_log.h"
 #include "components/network_time/network_time_tracker.h"
+#include "components/physical_web/data_source/physical_web_data_source.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/translate/core/browser/translate_download_manager.h"
@@ -43,9 +44,11 @@
 #include "ios/chrome/browser/ios_chrome_io_thread.h"
 #include "ios/chrome/browser/metrics/ios_chrome_metrics_services_manager_client.h"
 #include "ios/chrome/browser/net/crl_set_fetcher.h"
+#include "ios/chrome/browser/physical_web/create_physical_web_data_source.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/prefs/browser_prefs.h"
 #include "ios/chrome/browser/prefs/ios_chrome_pref_service_factory.h"
+#include "ios/chrome/browser/services/gcm/ios_chrome_gcm_profile_service_factory.h"
 #include "ios/chrome/browser/update_client/ios_chrome_update_query_params_delegate.h"
 #include "ios/chrome/browser/web_resource/web_resource_util.h"
 #include "ios/chrome/common/channel_info.h"
@@ -88,9 +91,6 @@ void ApplicationContextImpl::RegisterPrefs(PrefRegistrySimple* registry) {
                                 false);
   registry->RegisterBooleanPref(prefs::kLastSessionExitedCleanly, true);
   registry->RegisterBooleanPref(prefs::kMetricsReportingWifiOnly, true);
-  registry->RegisterBooleanPref(prefs::kLastSessionUsedWKWebViewControlGroup,
-                                false);
-  registry->RegisterBooleanPref(prefs::kDroppedSafeBrowsingCookies, false);
 }
 
 void ApplicationContextImpl::PreCreateThreads() {
@@ -105,12 +105,13 @@ void ApplicationContextImpl::PreMainMessageLoopRun() {
 
 void ApplicationContextImpl::StartTearDown() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  // We need to destroy the MetricsServicesManager before the IO thread gets
-  // destroyed, since the destructor can call the URLFetcher destructor, which
-  // does a PostDelayedTask operation on the IO thread. (The IO thread will
-  // handle that URLFetcher operation before going away.)
+  // We need to destroy the MetricsServicesManager and NetworkTimeTracker before
+  // the IO thread gets destroyed, since the destructor can call the URLFetcher
+  // destructor, which does a PostDelayedTask operation on the IO thread. (The
+  // IO thread will handle that URLFetcher operation before going away.)
 
   metrics_services_manager_.reset();
+  network_time_tracker_.reset();
 
   // Need to clear browser states before the IO thread.
   chrome_browser_state_manager_.reset();
@@ -222,8 +223,9 @@ ApplicationContextImpl::GetMetricsServicesManager() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!metrics_services_manager_) {
     metrics_services_manager_.reset(
-        new metrics_services_manager::MetricsServicesManager(base::WrapUnique(
-            new IOSChromeMetricsServicesManagerClient(GetLocalState()))));
+        new metrics_services_manager::MetricsServicesManager(
+            base::MakeUnique<IOSChromeMetricsServicesManagerClient>(
+                GetLocalState())));
   }
   return metrics_services_manager_.get();
 }
@@ -254,7 +256,8 @@ ApplicationContextImpl::GetNetworkTimeTracker() {
   if (!network_time_tracker_) {
     network_time_tracker_.reset(new network_time::NetworkTimeTracker(
         base::WrapUnique(new base::DefaultClock),
-        base::WrapUnique(new base::DefaultTickClock), GetLocalState()));
+        base::WrapUnique(new base::DefaultTickClock), GetLocalState(),
+        GetSystemURLRequestContext()));
   }
   return network_time_tracker_.get();
 }
@@ -271,12 +274,6 @@ gcm::GCMDriver* ApplicationContextImpl::GetGCMDriver() {
     CreateGCMDriver();
   DCHECK(gcm_driver_);
   return gcm_driver_.get();
-}
-
-web_resource::PromoResourceService*
-ApplicationContextImpl::GetPromoResourceService() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return nullptr;
 }
 
 component_updater::ComponentUpdateService*
@@ -299,6 +296,15 @@ CRLSetFetcher* ApplicationContextImpl::GetCRLSetFetcher() {
     crl_set_fetcher_ = new CRLSetFetcher;
   }
   return crl_set_fetcher_.get();
+}
+
+PhysicalWebDataSource* ApplicationContextImpl::GetPhysicalWebDataSource() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (!physical_web_data_source_) {
+    physical_web_data_source_ = CreateIOSChromePhysicalWebDataSource();
+    DCHECK(physical_web_data_source_);
+  }
+  return physical_web_data_source_.get();
 }
 
 void ApplicationContextImpl::SetApplicationLocale(const std::string& locale) {
@@ -342,6 +348,7 @@ void ApplicationContextImpl::CreateGCMDriver() {
 
   base::FilePath store_path;
   CHECK(PathService::Get(ios::DIR_GLOBAL_GCM_STORE, &store_path));
+
   base::SequencedWorkerPool* worker_pool = web::WebThread::GetBlockingPool();
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner(
       worker_pool->GetSequencedTaskRunnerWithShutdownBehavior(
@@ -351,6 +358,7 @@ void ApplicationContextImpl::CreateGCMDriver() {
   gcm_driver_ = gcm::CreateGCMDriverDesktop(
       base::WrapUnique(new gcm::GCMClientFactory), GetLocalState(), store_path,
       GetSystemURLRequestContext(), ::GetChannel(),
+      IOSChromeGCMProfileServiceFactory::GetProductCategoryForSubtypes(),
       web::WebThread::GetTaskRunnerForThread(web::WebThread::UI),
       web::WebThread::GetTaskRunnerForThread(web::WebThread::IO),
       blocking_task_runner);

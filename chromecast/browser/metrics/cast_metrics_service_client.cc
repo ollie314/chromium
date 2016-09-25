@@ -10,7 +10,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chromecast/base/cast_sys_info_util.h"
 #include "chromecast/base/chromecast_switches.h"
@@ -22,6 +22,7 @@
 #include "chromecast/browser/metrics/cast_stability_metrics_provider.h"
 #include "chromecast/public/cast_sys_info.h"
 #include "components/metrics/client_info.h"
+#include "components/metrics/enabled_state_provider.h"
 #include "components/metrics/gpu/gpu_metrics_provider.h"
 #include "components/metrics/metrics_provider.h"
 #include "components/metrics/metrics_service.h"
@@ -115,9 +116,6 @@ void CastMetricsServiceClient::SetMetricsClientId(
 #endif
 }
 
-void CastMetricsServiceClient::OnRecordingDisabled() {
-}
-
 void CastMetricsServiceClient::StoreClientInfo(
     const ::metrics::ClientInfo& client_info) {
   const std::string& client_id = client_info.client_id;
@@ -169,7 +167,7 @@ bool CastMetricsServiceClient::IsOffTheRecordSessionActive() {
 
 int32_t CastMetricsServiceClient::GetProduct() {
   // Chromecast currently uses the same product identifier as Chrome.
-  return ::metrics::ChromeUserMetricsExtension::CHROME;
+  return ::metrics::ChromeUserMetricsExtension::CAST;
 }
 
 std::string CastMetricsServiceClient::GetApplicationLocale() {
@@ -260,6 +258,10 @@ base::TimeDelta CastMetricsServiceClient::GetStandardUploadInterval() {
   return base::TimeDelta::FromMinutes(kStandardUploadIntervalMinutes);
 }
 
+bool CastMetricsServiceClient::IsConsentGiven() {
+  return pref_service_->GetBoolean(prefs::kOptInStats);
+}
+
 void CastMetricsServiceClient::EnableMetricsService(bool enabled) {
   if (!task_runner_->BelongsToCurrentThread()) {
     task_runner_->PostTask(
@@ -326,9 +328,7 @@ void CastMetricsServiceClient::Initialize(CastService* cast_service) {
   cast_service_ = cast_service;
 
   metrics_state_manager_ = ::metrics::MetricsStateManager::Create(
-      pref_service_,
-      base::Bind(&CastMetricsServiceClient::IsReportingEnabled,
-                 base::Unretained(this)),
+      pref_service_, this,
       base::Bind(&CastMetricsServiceClient::StoreClientInfo,
                  base::Unretained(this)),
       base::Bind(&CastMetricsServiceClient::LoadClientInfo,
@@ -408,10 +408,6 @@ void CastMetricsServiceClient::Finalize() {
   platform_metrics_ = nullptr;
 #endif  // defined(OS_LINUX)
   metrics_service_->Stop();
-}
-
-bool CastMetricsServiceClient::IsReportingEnabled() {
-  return pref_service_->GetBoolean(prefs::kOptInStats);
 }
 
 }  // namespace metrics

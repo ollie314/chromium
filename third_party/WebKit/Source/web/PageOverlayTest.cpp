@@ -5,7 +5,6 @@
 #include "web/PageOverlay.h"
 
 #include "core/frame/FrameView.h"
-#include "core/layout/LayoutView.h"
 #include "platform/graphics/Color.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
@@ -23,6 +22,7 @@
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebViewImpl.h"
 #include "web/tests/FrameTestHelpers.h"
+#include <memory>
 
 using testing::_;
 using testing::AtLeast;
@@ -53,10 +53,10 @@ public:
 
     void paintPageOverlay(const PageOverlay& pageOverlay, GraphicsContext& graphicsContext, const WebSize& size) const override
     {
-        if (DrawingRecorder::useCachedDrawingIfPossible(graphicsContext, pageOverlay, DisplayItem::PageOverlay))
+        if (DrawingRecorder::useCachedDrawingIfPossible(graphicsContext, pageOverlay, DisplayItem::kPageOverlay))
             return;
         FloatRect rect(0, 0, size.width, size.height);
-        DrawingRecorder drawingRecorder(graphicsContext, pageOverlay, DisplayItem::PageOverlay, rect);
+        DrawingRecorder drawingRecorder(graphicsContext, pageOverlay, DisplayItem::kPageOverlay, rect);
         graphicsContext.fillRect(rect, m_color);
     }
 
@@ -71,18 +71,18 @@ protected:
     void initialize(CompositingMode compositingMode)
     {
         m_helper.initialize(
-            false /* enableJavascript */, nullptr /* webFrameClient */, nullptr /* webViewClient */,
+            false /* enableJavascript */, nullptr /* webFrameClient */, nullptr /* webViewClient */, nullptr /* webWidgetClient */,
             compositingMode == AcceleratedCompositing ? enableAcceleratedCompositing : disableAcceleratedCompositing);
         webViewImpl()->resize(WebSize(viewportWidth, viewportHeight));
         webViewImpl()->updateAllLifecyclePhases();
         ASSERT_EQ(compositingMode == AcceleratedCompositing, webViewImpl()->isAcceleratedCompositingActive());
     }
 
-    WebViewImpl* webViewImpl() const { return m_helper.webViewImpl(); }
+    WebViewImpl* webViewImpl() const { return m_helper.webView(); }
 
-    PassOwnPtr<PageOverlay> createSolidYellowOverlay()
+    std::unique_ptr<PageOverlay> createSolidYellowOverlay()
     {
-        return PageOverlay::create(webViewImpl(), new SolidColorOverlay(SK_ColorYELLOW));
+        return PageOverlay::create(webViewImpl(), wrapUnique(new SolidColorOverlay(SK_ColorYELLOW)));
     }
 
     template <typename OverlayType>
@@ -112,7 +112,7 @@ TEST_F(PageOverlayTest, PageOverlay_AcceleratedCompositing)
     initialize(AcceleratedCompositing);
     webViewImpl()->layerTreeView()->setViewportSize(WebSize(viewportWidth, viewportHeight));
 
-    OwnPtr<PageOverlay> pageOverlay = createSolidYellowOverlay();
+    std::unique_ptr<PageOverlay> pageOverlay = createSolidYellowOverlay();
     pageOverlay->update();
     webViewImpl()->updateAllLifecyclePhases();
 
@@ -142,7 +142,7 @@ TEST_F(PageOverlayTest, PageOverlay_AcceleratedCompositing)
 TEST_F(PageOverlayTest, PageOverlay_VisualRect)
 {
     initialize(AcceleratedCompositing);
-    OwnPtr<PageOverlay> pageOverlay = createSolidYellowOverlay();
+    std::unique_ptr<PageOverlay> pageOverlay = createSolidYellowOverlay();
     pageOverlay->update();
     webViewImpl()->updateAllLifecyclePhases();
     EXPECT_EQ(LayoutRect(0, 0, viewportWidth, viewportHeight), pageOverlay->visualRect());

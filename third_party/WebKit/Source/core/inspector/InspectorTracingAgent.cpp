@@ -24,8 +24,7 @@ const char devtoolsMetadataEventCategory[] = TRACE_DISABLED_BY_DEFAULT("devtools
 }
 
 InspectorTracingAgent::InspectorTracingAgent(Client* client, InspectorWorkerAgent* workerAgent, InspectedFrames* inspectedFrames)
-    : InspectorBaseAgent<InspectorTracingAgent, protocol::Frontend::Tracing>("Tracing")
-    , m_layerTreeId(0)
+    : m_layerTreeId(0)
     , m_client(client)
     , m_workerAgent(workerAgent)
     , m_inspectedFrames(inspectedFrames)
@@ -43,37 +42,56 @@ void InspectorTracingAgent::restore()
 {
     emitMetadataEvents();
 }
-void InspectorTracingAgent::start(ErrorString* errorString,
+
+void InspectorTracingAgent::frameStartedLoading(LocalFrame* frame)
+{
+    if (frame != m_inspectedFrames->root() || frame->loader().loadType() != FrameLoadTypeReload)
+        return;
+    m_client->showReloadingBlanket();
+}
+
+void InspectorTracingAgent::frameStoppedLoading(LocalFrame* frame)
+{
+    if (frame != m_inspectedFrames->root())
+        m_client->hideReloadingBlanket();
+}
+
+void InspectorTracingAgent::start(
     const Maybe<String>& categories,
     const Maybe<String>& options,
     const Maybe<double>& bufferUsageReportingInterval,
     const Maybe<String>& transferMode,
     const Maybe<protocol::Tracing::TraceConfig>& config,
-    PassOwnPtr<StartCallback> callback)
+    std::unique_ptr<StartCallback> callback)
 {
-    ASSERT(sessionId().isEmpty());
+    DCHECK(!isStarted());
     if (config.isJust()) {
-        *errorString =
-            "Using trace config on renderer targets is not supported yet.";
+        callback->sendFailure("Using trace config on renderer targets is not supported yet.");
         return;
     }
 
+    m_instrumentingAgents->addInspectorTracingAgent(this);
     m_state->setString(TracingAgentState::sessionId, IdentifiersFactory::createIdentifier());
     m_client->enableTracing(categories.fromMaybe(String()));
     emitMetadataEvents();
     callback->sendSuccess();
 }
 
-void InspectorTracingAgent::end(ErrorString* errorString, PassOwnPtr<EndCallback> callback)
+void InspectorTracingAgent::end(std::unique_ptr<EndCallback> callback)
 {
     m_client->disableTracing();
-    resetSessionId();
+    innerDisable();
     callback->sendSuccess();
 }
 
-String InspectorTracingAgent::sessionId()
+bool InspectorTracingAgent::isStarted() const
 {
-    String16 result;
+    return !sessionId().isEmpty();
+}
+
+String InspectorTracingAgent::sessionId() const
+{
+    String result;
     if (m_state)
         m_state->getString(TracingAgentState::sessionId, &result);
     return result;
@@ -93,13 +111,21 @@ void InspectorTracingAgent::setLayerTreeId(int layerTreeId)
     TRACE_EVENT_INSTANT1(devtoolsMetadataEventCategory, "SetLayerTreeId", TRACE_EVENT_SCOPE_THREAD, "data", InspectorSetLayerTreeId::data(sessionId(), m_layerTreeId));
 }
 
-void InspectorTracingAgent::disable(ErrorString*)
+void InspectorTracingAgent::rootLayerCleared()
 {
-    resetSessionId();
+    if (isStarted())
+        m_client->hideReloadingBlanket();
 }
 
-void InspectorTracingAgent::resetSessionId()
+void InspectorTracingAgent::disable(ErrorString*)
 {
+    innerDisable();
+}
+
+void InspectorTracingAgent::innerDisable()
+{
+    m_client->hideReloadingBlanket();
+    m_instrumentingAgents->removeInspectorTracingAgent(this);
     m_state->remove(TracingAgentState::sessionId);
     m_workerAgent->setTracingSessionId(String());
 }

@@ -77,7 +77,7 @@ void InsertParagraphSeparatorCommand::calculateStyleBeforeInsertion(const Positi
     // It is only important to set a style to apply later if we're at the boundaries of
     // a paragraph. Otherwise, content that is moved as part of the work of the command
     // will lend their styles to the new paragraph without any extra work needed.
-    VisiblePosition visiblePos = createVisiblePosition(pos, VP_DEFAULT_AFFINITY);
+    VisiblePosition visiblePos = createVisiblePositionDeprecated(pos, VP_DEFAULT_AFFINITY);
     if (!isStartOfParagraph(visiblePos) && !isEndOfParagraph(visiblePos))
         return;
 
@@ -173,7 +173,7 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
     Element* startBlock = enclosingBlock(insertionPosition.parentAnchoredEquivalent().computeContainerNode());
     Node* listChildNode = enclosingListChild(insertionPosition.parentAnchoredEquivalent().computeContainerNode());
     HTMLElement* listChild = listChildNode && listChildNode->isHTMLElement() ? toHTMLElement(listChildNode) : 0;
-    Position canonicalPos = createVisiblePosition(insertionPosition).deepEquivalent();
+    Position canonicalPos = createVisiblePositionDeprecated(insertionPosition).deepEquivalent();
     if (!startBlock
         || !startBlock->nonShadowBoundaryParentNode()
         || isTableCell(startBlock)
@@ -201,7 +201,7 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
         // move to another place.
         listChild = toHTMLElement(enclosingAnchorElement(originalInsertionPosition));
     }
-    VisiblePosition visiblePos = createVisiblePosition(insertionPosition, affinity);
+    VisiblePosition visiblePos = createVisiblePositionDeprecated(insertionPosition, affinity);
     calculateStyleBeforeInsertion(insertionPosition);
 
     //---------------------------------------------------------------------
@@ -218,7 +218,7 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
 
     // Create block to be inserted.
     Element* blockToInsert = nullptr;
-    if (startBlock->isRootEditableElement()) {
+    if (isRootEditableElement(*startBlock)) {
         blockToInsert = createDefaultParagraphElement(document());
         nestNewBlock = true;
     } else if (shouldUseDefaultParagraphElement(startBlock)) {
@@ -284,7 +284,7 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
         if (editingState->isAborted())
             return;
 
-        setEndingSelection(VisibleSelection(firstPositionInNode(parent), TextAffinity::Downstream, endingSelection().isDirectional()));
+        setEndingSelection(VisibleSelection(Position::firstPositionInNode(parent), TextAffinity::Downstream, endingSelection().isDirectional()));
         return;
     }
 
@@ -360,7 +360,7 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
         insertNodeAt(br, insertionPosition, editingState);
         if (editingState->isAborted())
             return;
-        insertionPosition = positionInParentAfterNode(*br);
+        insertionPosition = Position::inParentAfterNode(*br);
         // If the insertion point is a break element, there is nothing else
         // we need to do.
         if (visiblePos.deepEquivalent().anchorNode()->layoutObject()->isBR()) {
@@ -376,7 +376,7 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
     // At this point, the insertionPosition's node could be a container, and we want to make sure we include
     // all of the correct nodes when building the ancestor list.  So this needs to be the deepest representation of the position
     // before we walk the DOM tree.
-    insertionPosition = positionOutsideTabSpan(createVisiblePosition(insertionPosition).deepEquivalent());
+    insertionPosition = positionOutsideTabSpan(createVisiblePositionDeprecated(insertionPosition).deepEquivalent());
 
     // If the returned position lies either at the end or at the start of an element that is ignored by editing
     // we should move to its upstream or downstream position.
@@ -394,7 +394,7 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
     // after the preserved newline, causing the newline to be turned into a nbsp.
     if (leadingWhitespace.isNotNull() && leadingWhitespace.anchorNode()->isTextNode()) {
         Text* textNode = toText(leadingWhitespace.anchorNode());
-        DCHECK(!textNode->layoutObject() || textNode->layoutObject()->style()->collapseWhiteSpace());
+        DCHECK(!textNode->layoutObject() || textNode->layoutObject()->style()->collapseWhiteSpace()) << textNode;
         replaceTextInNodePreservingMarkers(textNode, leadingWhitespace.computeOffsetInContainerNode(), 1, nonBreakingSpaceString());
     }
 
@@ -406,9 +406,9 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
         bool atEnd = static_cast<unsigned>(textOffset) >= textNode->length();
         if (textOffset > 0 && !atEnd) {
             splitTextNode(textNode, textOffset);
-            positionAfterSplit = firstPositionInNode(textNode);
+            positionAfterSplit = Position::firstPositionInNode(textNode);
             insertionPosition = Position(textNode->previousSibling(), textOffset);
-            visiblePos = createVisiblePosition(insertionPosition);
+            visiblePos = createVisiblePositionDeprecated(insertionPosition);
         }
     }
 
@@ -431,7 +431,7 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
     if (editingState->isAborted())
         return;
 
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     // If the paragraph separator was inserted at the end of a paragraph, an empty line must be
     // created.  All of the nodes, starting at visiblePos, are about to be added to the new paragraph
@@ -443,7 +443,7 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
     }
 
     // Move the start node and the siblings of the start node.
-    if (createVisiblePosition(insertionPosition).deepEquivalent() != createVisiblePosition(positionBeforeNode(blockToInsert)).deepEquivalent()) {
+    if (createVisiblePositionDeprecated(insertionPosition).deepEquivalent() != VisiblePosition::beforeNode(blockToInsert).deepEquivalent()) {
         Node* n;
         if (insertionPosition.computeContainerNode() == startBlock) {
             n = insertionPosition.computeNodeAfterPosition();
@@ -455,8 +455,8 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
                 splitTreeToNode(splitTo, startBlock);
 
             for (n = startBlock->firstChild(); n; n = n->nextSibling()) {
-                VisiblePosition beforeNodePosition = createVisiblePosition(positionBeforeNode(n));
-                if (!beforeNodePosition.isNull() && comparePositions(createVisiblePosition(insertionPosition), beforeNodePosition) <= 0)
+                VisiblePosition beforeNodePosition = VisiblePosition::beforeNode(n);
+                if (!beforeNodePosition.isNull() && comparePositions(createVisiblePositionDeprecated(insertionPosition), beforeNodePosition) <= 0)
                     break;
             }
         }
@@ -468,19 +468,19 @@ void InsertParagraphSeparatorCommand::doApply(EditingState* editingState)
 
     // Handle whitespace that occurs after the split
     if (positionAfterSplit.isNotNull()) {
-        document().updateLayoutIgnorePendingStylesheets();
+        document().updateStyleAndLayoutIgnorePendingStylesheets();
         // TODO(yosin) |isRenderedCharacter()| should be removed, and we should
         // use |VisiblePosition::characterAfter()|.
         if (!isRenderedCharacter(positionAfterSplit)) {
             // Clear out all whitespace and insert one non-breaking space
-            DCHECK(!positionAfterSplit.computeContainerNode()->layoutObject() || positionAfterSplit.computeContainerNode()->layoutObject()->style()->collapseWhiteSpace());
+            DCHECK(!positionAfterSplit.computeContainerNode()->layoutObject() || positionAfterSplit.computeContainerNode()->layoutObject()->style()->collapseWhiteSpace()) << positionAfterSplit;
             deleteInsignificantTextDownstream(positionAfterSplit);
             if (positionAfterSplit.anchorNode()->isTextNode())
                 insertTextIntoNode(toText(positionAfterSplit.computeContainerNode()), 0, nonBreakingSpaceString());
         }
     }
 
-    setEndingSelection(VisibleSelection(firstPositionInNode(blockToInsert), TextAffinity::Downstream, endingSelection().isDirectional()));
+    setEndingSelection(VisibleSelection(Position::firstPositionInNode(blockToInsert), TextAffinity::Downstream, endingSelection().isDirectional()));
     applyStyleAfterInsertion(startBlock, editingState);
 }
 

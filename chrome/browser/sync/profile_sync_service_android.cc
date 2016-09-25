@@ -26,27 +26,29 @@
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/sync_driver/about_sync_util.h"
-#include "components/sync_driver/pref_names.h"
-#include "components/sync_driver/sync_prefs.h"
+#include "components/strings/grit/components_strings.h"
+#include "components/sync/core/network_resources.h"
+#include "components/sync/core/read_transaction.h"
+#include "components/sync/driver/about_sync_util.h"
+#include "components/sync/driver/pref_names.h"
+#include "components/sync/driver/sync_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "google/cacheinvalidation/types.pb.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "grit/components_strings.h"
 #include "jni/ProfileSyncService_jni.h"
-#include "sync/internal_api/public/network_resources.h"
-#include "sync/internal_api/public/read_transaction.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using base::android::AttachCurrentThread;
 using base::android::CheckException;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
+using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
+using browser_sync::ProfileSyncService;
 using content::BrowserThread;
 
 namespace {
@@ -66,9 +68,7 @@ void NativeGetAllNodesCallback(
 
   ScopedJavaLocalRef<jstring> java_json_string =
       ConvertUTF8ToJavaString(env, json_string);
-  Java_ProfileSyncService_onGetAllNodesResult(env,
-                                              callback.obj(),
-                                              java_json_string.obj());
+  Java_ProfileSyncService_onGetAllNodesResult(env, callback, java_json_string);
 }
 
 ScopedJavaLocalRef<jintArray> ModelTypeSetToJavaIntArray(
@@ -84,17 +84,17 @@ ScopedJavaLocalRef<jintArray> ModelTypeSetToJavaIntArray(
 }  // namespace
 
 ProfileSyncServiceAndroid::ProfileSyncServiceAndroid(JNIEnv* env, jobject obj)
-    : profile_(NULL),
-      sync_service_(NULL),
+    : profile_(nullptr),
+      sync_service_(nullptr),
       weak_java_profile_sync_service_(env, obj) {
-  if (g_browser_process == NULL ||
-      g_browser_process->profile_manager() == NULL) {
+  if (g_browser_process == nullptr ||
+      g_browser_process->profile_manager() == nullptr) {
     NOTREACHED() << "Browser process or profile manager not initialized";
     return;
   }
 
   profile_ = ProfileManager::GetActiveUserProfile();
-  if (profile_ == NULL) {
+  if (profile_ == nullptr) {
     NOTREACHED() << "Sync Init: Profile not found.";
     return;
   }
@@ -129,14 +129,14 @@ void ProfileSyncServiceAndroid::OnStateChanged() {
   // Notify the java world that our sync state has changed.
   JNIEnv* env = AttachCurrentThread();
   Java_ProfileSyncService_syncStateChanged(
-      env, weak_java_profile_sync_service_.get(env).obj());
+      env, weak_java_profile_sync_service_.get(env));
 }
 
 bool ProfileSyncServiceAndroid::IsSyncAllowedByAndroid() const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   return Java_ProfileSyncService_isMasterSyncEnabled(
-      env, weak_java_profile_sync_service_.get(env).obj());
+      env, weak_java_profile_sync_service_.get(env));
 }
 
 // Pure ProfileSyncService calls.
@@ -186,7 +186,11 @@ void ProfileSyncServiceAndroid::SetSetupInProgress(
     const JavaParamRef<jobject>& obj,
     jboolean in_progress) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  sync_service_->SetSetupInProgress(in_progress);
+  if (in_progress) {
+    sync_blocker_ = sync_service_->GetSetupInProgressHandle();
+  } else {
+    sync_blocker_.reset();
+  }
 }
 
 jboolean ProfileSyncServiceAndroid::IsFirstSetupComplete(
@@ -287,7 +291,7 @@ jint ProfileSyncServiceAndroid::GetPassphraseType(
     JNIEnv* env,
     const JavaParamRef<jobject>&) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  return sync_service_->GetPassphraseType();
+  return static_cast<unsigned>(sync_service_->GetPassphraseType());
 }
 
 void ProfileSyncServiceAndroid::SetEncryptionPassphrase(
@@ -362,6 +366,15 @@ jboolean ProfileSyncServiceAndroid::HasUnrecoverableError(
     const JavaParamRef<jobject>&) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return sync_service_->HasUnrecoverableError();
+}
+
+jint ProfileSyncServiceAndroid::GetProtocolErrorClientAction(
+    JNIEnv* env,
+    const JavaParamRef<jobject>&) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  syncer::SyncStatus status;
+  sync_service_->QueryDetailedSyncStatus(&status);
+  return status.sync_protocol_error.action;
 }
 
 // Pure SyncPrefs calls.

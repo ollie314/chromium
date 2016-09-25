@@ -13,7 +13,13 @@ Polymer({
   behaviors: [WebUIListenerBehavior],
 
   properties: {
-    feedbackInfo_: String,
+    // TODO(dpapad): Evaluate whether this needs to be synced across different
+    // settings tabs.
+    /** @private */
+    clearingInProgress_: {
+      type: Boolean,
+      value: false,
+    },
   },
 
   /** @private {!settings.ResetBrowserProxy} */
@@ -23,17 +29,13 @@ Polymer({
   ready: function() {
     this.browserProxy_ = settings.ResetBrowserProxyImpl.getInstance();
 
-    this.addEventListener('iron-overlay-canceled', function() {
+    this.addEventListener('cancel', function() {
       this.browserProxy_.onHideResetProfileDialog();
-    }.bind(this));
-
-    this.addWebUIListener('feedback-info-changed', function(feedbackInfo) {
-      this.feedbackInfo_ = feedbackInfo;
     }.bind(this));
   },
 
   open: function() {
-    this.$.dialog.open();
+    this.$.dialog.showModal();
     this.browserProxy_.onShowResetProfileDialog();
   },
 
@@ -44,20 +46,21 @@ Polymer({
 
   /** @private */
   onResetTap_: function() {
-    this.$.resetSpinner.active = true;
+    this.clearingInProgress_ = true;
     this.browserProxy_.performResetProfileSettings(
         this.$.sendSettings.checked).then(function() {
-      this.$.resetSpinner.active = false;
-      this.$.dialog.close();
-      this.dispatchEvent(new CustomEvent('reset-done'));
+      this.clearingInProgress_ = false;
+      if (this.$.dialog.open)
+        this.$.dialog.close();
+      this.fire('reset-done');
     }.bind(this));
   },
 
-  /** @private */
-  onSendSettingsChange_: function() {
-    // TODO(dpapad): Update how settings info is surfaced when final mocks
-    // exist.
-    this.$.settings.hidden = !this.$.sendSettings.checked;
-    this.$.dialog.center();
+  /**
+   * Displays the settings that will be reported in a new tab.
+   * @private
+   */
+  onShowReportedSettingsTap_: function() {
+    this.browserProxy_.showReportedSettings();
   },
 });

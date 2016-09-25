@@ -69,31 +69,33 @@
 
     // the user agent
     [LogActivity=GetterOnly] readonly attribute Navigator navigator;
-    [RuntimeEnabled=ApplicationCache, LogActivity=GetterOnly] readonly attribute ApplicationCache applicationCache;
+    [LogActivity=GetterOnly] readonly attribute ApplicationCache applicationCache;
 
     // user prompts
-    [Measure] void alert();
-    [Measure] void alert(DOMString message);
-    [Measure] boolean confirm(optional DOMString message = "");
-    [Measure] DOMString? prompt(optional DOMString message = "", optional DOMString defaultValue = "");
-    [Measure] void print();
+    [Measure, CallWith=ScriptState] void alert();
+    [Measure, CallWith=ScriptState] void alert(DOMString message);
+    [Measure, CallWith=ScriptState] boolean confirm(optional DOMString message = "");
+    [Measure, CallWith=ScriptState] DOMString? prompt(optional DOMString message = "", optional DOMString defaultValue = "");
+    [Measure, CallWith=ScriptState] void print();
 
     [MeasureAs=UnprefixedRequestAnimationFrame] long requestAnimationFrame(FrameRequestCallback callback);
     void cancelAnimationFrame(long handle);
 
-    [Measure, RuntimeEnabled=RequestIdleCallback] long requestIdleCallback(IdleRequestCallback callback, optional IdleRequestOptions options);
-    [RuntimeEnabled=RequestIdleCallback] void cancelIdleCallback(long handle);
+    [Measure] long requestIdleCallback(IdleRequestCallback callback, optional IdleRequestOptions options);
+    void cancelIdleCallback(long handle);
 
     [DoNotCheckSecurity, Custom, RaisesException] void postMessage(any message, DOMString targetOrigin, optional sequence<Transferable> transfer);
 
     // Custom elements
     // http://w3c.github.io/webcomponents/spec/custom/#custom-elements-api
-    [RuntimeEnabled=CustomElementsV1] readonly attribute CustomElementsRegistry customElements;
+    [RuntimeEnabled=CustomElementsV1, CallWith=ScriptState] readonly attribute CustomElementRegistry customElements;
 
     // HTML obsolete features
     // https://html.spec.whatwg.org/#Window-partial
     [MeasureAs=WindowCaptureEvents] void captureEvents();
     [MeasureAs=WindowReleaseEvents] void releaseEvents();
+
+    [Replaceable, SameObject] readonly attribute External external;
 
     // CSS Object Model (CSSOM)
     // http://dev.w3.org/csswg/cssom/#extensions-to-the-window-interface
@@ -127,6 +129,10 @@
     [RuntimeEnabled=CSSOMSmoothScroll] void scrollBy(optional ScrollToOptions options);
     void scrollBy(unrestricted double x, unrestricted double y);
 
+    // Visual Viewport API
+    // https://github.com/WICG/ViewportAPI
+    [RuntimeEnabled=VisualViewportAPI, Replaceable, SameObject] readonly attribute VisualViewport? visualViewport;
+
     // client
     [Replaceable] readonly attribute long screenX;
     [Replaceable] readonly attribute long screenY;
@@ -140,7 +146,9 @@
 
     // Console API
     // https://console.spec.whatwg.org/#console-interface
-    [Replaceable] readonly attribute Console console;
+    // [Replaceable] readonly attribute Console console;
+    // Console is installed by v8 inspector when context is created
+    // and is left commented here just for documentation.
 
     // Non-standard APIs
     [MeasureAs=WindowClientInformation, Replaceable] readonly attribute Navigator clientInformation;

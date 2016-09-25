@@ -5,6 +5,8 @@
 #ifndef MEDIA_RENDERERS_DEFAULT_RENDERER_FACTORY_H_
 #define MEDIA_RENDERERS_DEFAULT_RENDERER_FACTORY_H_
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
@@ -14,7 +16,6 @@
 namespace media {
 
 class AudioDecoder;
-class AudioHardwareConfig;
 class AudioRendererSink;
 class DecoderFactory;
 class GpuVideoAcceleratorFactories;
@@ -29,11 +30,10 @@ class MEDIA_EXPORT DefaultRendererFactory : public RendererFactory {
 
   DefaultRendererFactory(const scoped_refptr<MediaLog>& media_log,
                          DecoderFactory* decoder_factory,
-                         const GetGpuFactoriesCB& get_gpu_factories_cb,
-                         const AudioHardwareConfig& audio_hardware_config);
+                         const GetGpuFactoriesCB& get_gpu_factories_cb);
   ~DefaultRendererFactory() final;
 
-  scoped_ptr<Renderer> CreateRenderer(
+  std::unique_ptr<Renderer> CreateRenderer(
       const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
       const scoped_refptr<base::TaskRunner>& worker_task_runner,
       AudioRendererSink* audio_renderer_sink,
@@ -56,8 +56,6 @@ class MEDIA_EXPORT DefaultRendererFactory : public RendererFactory {
 
   // Creates factories for supporting video accelerators. May be null.
   GetGpuFactoriesCB get_gpu_factories_cb_;
-
-  const AudioHardwareConfig& audio_hardware_config_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultRendererFactory);
 };

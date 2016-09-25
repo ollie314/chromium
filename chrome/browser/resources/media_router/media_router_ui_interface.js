@@ -27,6 +27,15 @@ cr.define('media_router.ui', function() {
   }
 
   /**
+   * Handles the search response by forwarding |sinkId| to the container.
+   *
+   * @param {string} sinkId The ID of the sink found by search.
+   */
+  function receiveSearchResult(sinkId) {
+    container.onReceiveSearchResult(sinkId);
+  }
+
+  /**
    * Sets the cast mode list.
    *
    * @param {!Array<!media_router.CastMode>} castModeList
@@ -88,20 +97,17 @@ cr.define('media_router.ui', function() {
    *            showDomain: boolean
    *          },
    *          routes: !Array<!media_router.Route>,
-   *          castModes: !Array<!media_router.CastMode>,
-   *          isOffTheRecord: boolean}} data
+   *          castModes: !Array<!media_router.CastMode>}} data
    * Parameters in data:
    *   deviceMissingUrl - url to be opened on "Device missing?" clicked.
    *   sinksAndIdentity - list of sinks to be displayed and user identity.
    *   routes - list of routes that are associated with the sinks.
    *   castModes - list of available cast modes.
-   *   isOffTheRecord - whether or not the browser is currently incognito.
    */
   function setInitialData(data) {
     container.deviceMissingUrl = data['deviceMissingUrl'];
     container.castModeList = data['castModes'];
     this.setSinkListAndIdentity(data['sinksAndIdentity']);
-    container.isOffTheRecord = data['isOffTheRecord'];
     container.routeList = data['routes'];
     container.maybeShowRouteDetailsOnOpen();
     media_router.browserApi.onInitialDataReceived();
@@ -141,8 +147,8 @@ cr.define('media_router.ui', function() {
    *   showDomain - true if the user domain should be shown.
    */
   function setSinkListAndIdentity(data) {
-    container.allSinks = data['sinks'];
     container.showDomain = data['showDomain'];
+    container.allSinks = data['sinks'];
     header.userEmail = data['userEmail'];
     header.showEmail = data['showEmail'];
   }
@@ -158,6 +164,7 @@ cr.define('media_router.ui', function() {
 
   return {
     onCreateRouteResponseReceived: onCreateRouteResponseReceived,
+    receiveSearchResult: receiveSearchResult,
     setCastModeList: setCastModeList,
     setElements: setElements,
     setFirstRunFlowData: setFirstRunFlowData,
@@ -193,6 +200,19 @@ cr.define('media_router.browserApi', function() {
   function actOnIssue(issueId, actionType, helpPageId) {
     chrome.send('actOnIssue', [{issueId: issueId, actionType: actionType,
                                 helpPageId: helpPageId}]);
+  }
+
+  /**
+   * Modifies |route| by changing its source to the one identified by
+   * |selectedCastMode|.
+   *
+   * @param {!media_router.Route} route The route being modified.
+   * @param {number} selectedCastMode The value of the cast mode the user
+   *   selected.
+   */
+  function changeRouteSource(route, selectedCastMode) {
+    chrome.send('requestRoute',
+                [{sinkId: route.sinkId, selectedCastMode: selectedCastMode}]);
   }
 
   /**
@@ -356,9 +376,31 @@ cr.define('media_router.browserApi', function() {
                 [{sinkId: sinkId, selectedCastMode: selectedCastMode}]);
   }
 
+  /**
+   * Requests that the media router search all providers for a sink matching
+   * |searchCriteria| that can be used with the media source associated with the
+   * cast mode |selectedCastMode|. If such a sink is found, a route is also
+   * created between the sink and the media source.
+   *
+   * @param {string} sinkId Sink ID of the pseudo sink generating the request.
+   * @param {string} searchCriteria Search criteria for the route providers.
+   * @param {string} domain User's current hosted domain.
+   * @param {number} selectedCastMode The value of the cast mode to be used with
+   *   the sink.
+   */
+  function searchSinksAndCreateRoute(
+      sinkId, searchCriteria, domain, selectedCastMode) {
+    chrome.send('searchSinksAndCreateRoute',
+                [{sinkId: sinkId,
+                  searchCriteria: searchCriteria,
+                  domain: domain,
+                  selectedCastMode: selectedCastMode}]);
+  }
+
   return {
     acknowledgeFirstRunFlow: acknowledgeFirstRunFlow,
     actOnIssue: actOnIssue,
+    changeRouteSource: changeRouteSource,
     closeDialog: closeDialog,
     closeRoute: closeRoute,
     joinRoute: joinRoute,
@@ -377,5 +419,6 @@ cr.define('media_router.browserApi', function() {
     reportTimeToInitialActionClose: reportTimeToInitialActionClose,
     requestInitialData: requestInitialData,
     requestRoute: requestRoute,
+    searchSinksAndCreateRoute: searchSinksAndCreateRoute,
   };
 });

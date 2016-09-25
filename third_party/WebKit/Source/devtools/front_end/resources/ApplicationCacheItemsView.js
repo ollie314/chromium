@@ -25,11 +25,11 @@
 
 /**
  * @constructor
- * @extends {WebInspector.VBox}
+ * @extends {WebInspector.SimpleView}
  */
 WebInspector.ApplicationCacheItemsView = function(model, frameId)
 {
-    WebInspector.VBox.call(this);
+    WebInspector.SimpleView.call(this, WebInspector.UIString("AppCache"));
 
     this._model = model;
 
@@ -62,9 +62,10 @@ WebInspector.ApplicationCacheItemsView = function(model, frameId)
 
 WebInspector.ApplicationCacheItemsView.prototype = {
     /**
+     * @override
      * @return {!Array.<!WebInspector.ToolbarItem>}
      */
-    toolbarItems: function()
+    syncToolbarItems: function()
     {
         return [
             this._deleteButton,
@@ -206,15 +207,15 @@ WebInspector.ApplicationCacheItemsView.prototype = {
         }
         function localeCompare(field, resource1, resource2)
         {
-             return sortDirection * (resource1[field] + "").localeCompare(resource2[field] + "");
+            return sortDirection * (resource1[field] + "").localeCompare(resource2[field] + "");
         }
 
         var comparator;
         switch (parseInt(this._dataGrid.sortColumnIdentifier(), 10)) {
-            case 0: comparator = localeCompare.bind(null, "name"); break;
-            case 1: comparator = localeCompare.bind(null, "type"); break;
-            case 2: comparator = numberCompare.bind(null, "size"); break;
-            default: localeCompare.bind(null, "resource"); // FIXME: comparator = ?
+        case 0: comparator = localeCompare.bind(null, "name"); break;
+        case 1: comparator = localeCompare.bind(null, "type"); break;
+        case 2: comparator = numberCompare.bind(null, "size"); break;
+        default: localeCompare.bind(null, "resource"); // FIXME: comparator = ?
         }
 
         this._resources.sort(comparator);
@@ -257,6 +258,6 @@ WebInspector.ApplicationCacheItemsView.prototype = {
         // this._update();
     },
 
-    __proto__: WebInspector.VBox.prototype
+    __proto__: WebInspector.SimpleView.prototype
 }
 

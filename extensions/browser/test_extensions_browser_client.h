@@ -35,7 +35,7 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
   void set_extension_system_factory(ExtensionSystemProvider* factory) {
     extension_system_factory_ = factory;
   }
-  void set_extension_cache(scoped_ptr<ExtensionCache> extension_cache) {
+  void set_extension_cache(std::unique_ptr<ExtensionCache> extension_cache) {
     extension_cache_ = std::move(extension_cache);
   }
 
@@ -85,25 +85,24 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
       content::BrowserContext* context,
       std::vector<ExtensionPrefsObserver*>* observers) const override;
   ProcessManagerDelegate* GetProcessManagerDelegate() const override;
-  scoped_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate() override;
+  std::unique_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate() override;
   bool DidVersionUpdate(content::BrowserContext* context) override;
   void PermitExternalProtocolHandler() override;
   bool IsRunningInForcedAppMode() override;
   bool IsLoggedInAsPublicAccount() override;
-  ApiActivityMonitor* GetApiActivityMonitor(
-      content::BrowserContext* context) override;
   ExtensionSystemProvider* GetExtensionSystemFactory() override;
   void RegisterExtensionFunctions(
       ExtensionFunctionRegistry* registry) const override;
   void RegisterMojoServices(content::RenderFrameHost* render_frame_host,
                             const Extension* extension) const override;
-  scoped_ptr<RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
+  std::unique_ptr<RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
       content::BrowserContext* context) const override;
   const ComponentExtensionResourceManager*
   GetComponentExtensionResourceManager() override;
-  void BroadcastEventToRenderers(events::HistogramValue histogram_value,
-                                 const std::string& event_name,
-                                 scoped_ptr<base::ListValue> args) override;
+  void BroadcastEventToRenderers(
+      events::HistogramValue histogram_value,
+      const std::string& event_name,
+      std::unique_ptr<base::ListValue> args) override;
   net::NetLog* GetNetLog() override;
   ExtensionCache* GetExtensionCache() override;
   bool IsBackgroundUpdateAllowed() override;
@@ -112,6 +111,10 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
       content::WebContents* web_contents) override;
   scoped_refptr<update_client::UpdateClient> CreateUpdateClient(
       content::BrowserContext* context) override;
+
+  ExtensionSystemProvider* extension_system_factory() {
+    return extension_system_factory_;
+  }
 
  private:
   content::BrowserContext* main_context_;       // Not owned.
@@ -123,7 +126,7 @@ class TestExtensionsBrowserClient : public ExtensionsBrowserClient {
   // Not owned, defaults to NULL.
   ExtensionSystemProvider* extension_system_factory_;
 
-  scoped_ptr<ExtensionCache> extension_cache_;
+  std::unique_ptr<ExtensionCache> extension_cache_;
 
   base::Callback<update_client::UpdateClient*(void)> update_client_factory_;
 

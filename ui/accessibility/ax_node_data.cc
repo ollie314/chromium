@@ -60,7 +60,8 @@ typename std::vector<std::pair<FirstType, SecondType>>::const_iterator
 AXNodeData::AXNodeData()
     : id(-1),
       role(AX_ROLE_UNKNOWN),
-      state(0xFFFFFFFF) {
+      state(0xFFFFFFFF),
+      offset_container_id(-1) {
 }
 
 AXNodeData::~AXNodeData() {
@@ -78,6 +79,7 @@ AXNodeData::AXNodeData(const AXNodeData& other) {
   html_attributes = other.html_attributes;
   child_ids = other.child_ids;
   location = other.location;
+  offset_container_id = other.offset_container_id;
   if (other.transform)
     transform.reset(new gfx::Transform(*other.transform));
 }
@@ -94,8 +96,11 @@ AXNodeData& AXNodeData::operator=(AXNodeData other) {
   html_attributes = other.html_attributes;
   child_ids = other.child_ids;
   location = other.location;
+  offset_container_id = other.offset_container_id;
   if (other.transform)
     transform.reset(new gfx::Transform(*other.transform));
+  else
+    transform.reset(nullptr);
   return *this;
 }
 
@@ -343,6 +348,9 @@ std::string AXNodeData::ToString() const {
                    IntToString(location.width()) + ", " +
                    IntToString(location.height()) + ")";
 
+  if (offset_container_id != -1)
+    result += " offset_container_id=" + IntToString(offset_container_id);
+
   if (transform && !transform->IsIdentity())
     result += " transform=" + transform->ToString();
 
@@ -436,12 +444,46 @@ std::string AXNodeData::ToString() const {
       case AX_ATTR_ACTIVEDESCENDANT_ID:
         result += " activedescendant=" + value;
         break;
+      case AX_ATTR_MEMBER_OF_ID:
+        result += " member_of_id=" + value;
+        break;
+      case AX_ATTR_NEXT_ON_LINE_ID:
+        result += " next_on_line_id=" + value;
+        break;
+      case AX_ATTR_PREVIOUS_ON_LINE_ID:
+        result += " previous_on_line_id=" + value;
+        break;
       case AX_ATTR_CHILD_TREE_ID:
         result += " child_tree_id=" + value;
         break;
       case AX_ATTR_COLOR_VALUE:
         result += base::StringPrintf(" color_value=&%X",
                                      int_attributes[i].second);
+        break;
+      case AX_ATTR_ARIA_CURRENT_STATE:
+        switch (int_attributes[i].second) {
+          case AX_ARIA_CURRENT_STATE_FALSE:
+            result += " aria_current_state=false";
+            break;
+          case AX_ARIA_CURRENT_STATE_TRUE:
+            result += " aria_current_state=true";
+            break;
+          case AX_ARIA_CURRENT_STATE_PAGE:
+            result += " aria_current_state=page";
+            break;
+          case AX_ARIA_CURRENT_STATE_STEP:
+            result += " aria_current_state=step";
+            break;
+          case AX_ARIA_CURRENT_STATE_LOCATION:
+            result += " aria_current_state=location";
+            break;
+          case AX_ARIA_CURRENT_STATE_DATE:
+            result += " aria_current_state=date";
+            break;
+          case AX_ARIA_CURRENT_STATE_TIME:
+            result += " aria_current_state=time";
+            break;
+        }
         break;
       case AX_ATTR_BACKGROUND_COLOR:
         result += base::StringPrintf(" background_color=&%X",
@@ -467,7 +509,7 @@ std::string AXNodeData::ToString() const {
         }
         break;
       case AX_ATTR_TEXT_STYLE: {
-        unsigned int text_style = int_attributes[i].second;
+        auto text_style = static_cast<AXTextStyle>(int_attributes[i].second);
         if (text_style == AX_TEXT_STYLE_NONE)
           break;
         std::string text_style_value(" text_style=");
@@ -650,8 +692,36 @@ std::string AXNodeData::ToString() const {
       case AX_ATTR_LABELLEDBY_IDS:
         result += " labelledby_ids=" + IntVectorToString(values);
         break;
-      case AX_ATTR_LINE_BREAKS:
-        result += " line_breaks=" + IntVectorToString(values);
+      case AX_ATTR_MARKER_TYPES: {
+        std::string types_str;
+        for (size_t i = 0; i < values.size(); ++i) {
+          auto type = static_cast<AXMarkerType>(values[i]);
+          if (type == AX_MARKER_TYPE_NONE)
+            continue;
+
+          if (i > 0)
+            types_str += ',';
+
+          if (type & AX_MARKER_TYPE_SPELLING)
+            types_str += "spelling&";
+          if (type & AX_MARKER_TYPE_GRAMMAR)
+            types_str += "grammar&";
+          if (type & AX_MARKER_TYPE_TEXT_MATCH)
+            types_str += "text_match&";
+
+          if (!types_str.empty())
+            types_str = types_str.substr(0, types_str.size() - 1);
+        }
+
+        if (!types_str.empty())
+          result += " marker_types=" + types_str;
+        break;
+      }
+      case AX_ATTR_MARKER_STARTS:
+        result += " marker_starts=" + IntVectorToString(values);
+        break;
+      case AX_ATTR_MARKER_ENDS:
+        result += " marker_ends=" + IntVectorToString(values);
         break;
       case AX_ATTR_CELL_IDS:
         result += " cell_ids=" + IntVectorToString(values);
@@ -661,6 +731,9 @@ std::string AXNodeData::ToString() const {
         break;
       case AX_ATTR_CHARACTER_OFFSETS:
         result += " character_offsets=" + IntVectorToString(values);
+        break;
+      case AX_ATTR_CACHED_LINE_STARTS:
+        result += " cached_line_start_offsets=" + IntVectorToString(values);
         break;
       case AX_ATTR_WORD_STARTS:
         result += " word_starts=" + IntVectorToString(values);
@@ -677,15 +750,6 @@ std::string AXNodeData::ToString() const {
     result += " child_ids=" + IntVectorToString(child_ids);
 
   return result;
-}
-
-bool AXNodeData::IsRoot() const {
-  return (role == AX_ROLE_ROOT_WEB_AREA ||
-          role == AX_ROLE_DESKTOP);
-}
-
-void AXNodeData::SetRoot() {
-  role = AX_ROLE_ROOT_WEB_AREA;
 }
 
 }  // namespace ui

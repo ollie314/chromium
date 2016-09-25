@@ -15,7 +15,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "google_apis/gcm/base/encryptor.h"
@@ -78,8 +78,10 @@ void FakeGCMClient::Initialize(
     const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
     const scoped_refptr<net::URLRequestContextGetter>&
         url_request_context_getter,
-    scoped_ptr<Encryptor> encryptor,
+    std::unique_ptr<Encryptor> encryptor,
     Delegate* delegate) {
+  product_category_for_subtypes_ =
+      chrome_build_info.product_category_for_subtypes;
   delegate_ = delegate;
 }
 
@@ -194,8 +196,7 @@ void FakeGCMClient::RemoveAccountMapping(const std::string& account_id) {
 void FakeGCMClient::SetLastTokenFetchTime(const base::Time& time) {
 }
 
-void FakeGCMClient::UpdateHeartbeatTimer(scoped_ptr<base::Timer> timer) {
-}
+void FakeGCMClient::UpdateHeartbeatTimer(std::unique_ptr<base::Timer> timer) {}
 
 void FakeGCMClient::AddInstanceIDData(const std::string& app_id,
                                       const std::string& instance_id,

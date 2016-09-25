@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 
 // This is a helper utility for Bind()ing callbacks to a given TaskRunner.
 // The typical use is when |a| (of class |A|) wants to hand a callback such as
@@ -56,6 +56,14 @@ base::internal::PassedWrapper<ScopedVector<T>> TrampolineForward(
 
 template <typename Sig>
 struct BindToTaskRunnerTrampoline;
+
+template <>
+struct BindToTaskRunnerTrampoline<void()> {
+  static void Run(const scoped_refptr<base::TaskRunner>& task_runner,
+                  const base::Closure& cb) {
+    task_runner->PostTask(FROM_HERE, cb);
+  }
+};
 
 template <typename... Args>
 struct BindToTaskRunnerTrampoline<void(Args...)> {

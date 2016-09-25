@@ -29,6 +29,7 @@
 #include "core/svg/SVGPointList.h"
 #include "core/svg/SVGString.h"
 #include "core/svg/SVGTransformList.h"
+#include "core/svg/properties/SVGAnimatedProperty.h"
 
 namespace blink {
 
@@ -143,74 +144,30 @@ SVGPropertyBase* SVGAnimatedTypeAnimator::createPropertyForAnimation(const Strin
     return nullptr;
 }
 
-SVGPropertyBase* SVGAnimatedTypeAnimator::constructFromString(const String& value)
+SVGPropertyBase* SVGAnimatedTypeAnimator::createAnimatedValueFromString(const String& value)
 {
     return createPropertyForAnimation(value);
 }
 
 void SVGAnimatedTypeAnimator::calculateFromAndToValues(Member<SVGPropertyBase>& from, Member<SVGPropertyBase>& to, const String& fromString, const String& toString)
 {
-    from = constructFromString(fromString);
-    to = constructFromString(toString);
+    from = createAnimatedValueFromString(fromString);
+    to = createAnimatedValueFromString(toString);
 }
 
 void SVGAnimatedTypeAnimator::calculateFromAndByValues(Member<SVGPropertyBase>& from, Member<SVGPropertyBase>& to, const String& fromString, const String& byString)
 {
-    from = constructFromString(fromString);
-    to = constructFromString(byString);
-    // FIXME(oilpan): Below .get() should be removed after transition types are gone.
-    to->add(from.get(), m_contextElement);
+    from = createAnimatedValueFromString(fromString);
+    to = createAnimatedValueFromString(byString);
+    to->add(from, m_contextElement);
 }
 
-namespace {
-
-void setAnimatedValueOnAllTargetProperties(const SVGElementInstances& list, const QualifiedName& attributeName, SVGPropertyBase* value)
+SVGPropertyBase* SVGAnimatedTypeAnimator::createAnimatedValue()
 {
-    for (SVGElement* elementInstance : list) {
-        if (SVGAnimatedPropertyBase* animatedProperty = elementInstance->propertyFromAttribute(attributeName))
-            animatedProperty->setAnimatedValue(value);
-    }
-}
-
-} // namespace
-
-SVGPropertyBase* SVGAnimatedTypeAnimator::resetAnimation(const SVGElementInstances& list)
-{
-    ASSERT(isAnimatingSVGDom());
+    DCHECK(isAnimatingSVGDom());
     SVGPropertyBase* animatedValue = m_animatedProperty->createAnimatedValue();
-    ASSERT(animatedValue->type() == m_type);
-    setAnimatedValueOnAllTargetProperties(list, m_animatedProperty->attributeName(), animatedValue);
-
+    DCHECK_EQ(animatedValue->type(), m_type);
     return animatedValue;
-}
-
-SVGPropertyBase* SVGAnimatedTypeAnimator::startAnimValAnimation(const SVGElementInstances& list)
-{
-    ASSERT(isAnimatingSVGDom());
-    SVGElement::InstanceUpdateBlocker blocker(m_contextElement);
-
-    return resetAnimation(list);
-}
-
-void SVGAnimatedTypeAnimator::stopAnimValAnimation(const SVGElementInstances& list)
-{
-    if (!isAnimatingSVGDom())
-        return;
-
-    ASSERT(m_contextElement);
-    SVGElement::InstanceUpdateBlocker blocker(m_contextElement);
-
-    for (SVGElement* elementInstance : list) {
-        if (SVGAnimatedPropertyBase* animatedProperty = elementInstance->propertyFromAttribute(m_animatedProperty->attributeName()))
-            animatedProperty->animationEnded();
-    }
-}
-
-SVGPropertyBase* SVGAnimatedTypeAnimator::resetAnimValToBaseVal(const SVGElementInstances& list)
-{
-    SVGElement::InstanceUpdateBlocker blocker(m_contextElement);
-
-    return resetAnimation(list);
 }
 
 class ParsePropertyFromString {

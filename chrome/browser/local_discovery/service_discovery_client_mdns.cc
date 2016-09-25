@@ -12,9 +12,9 @@
 
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/local_discovery/service_discovery_client_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/dns/mdns_client.h"
@@ -326,8 +326,7 @@ class LocalDomainResolverProxy : public ProxyBase<LocalDomainResolver> {
 }  // namespace
 
 ServiceDiscoveryClientMdns::ServiceDiscoveryClientMdns()
-    : mdns_runner_(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)),
+    : mdns_runner_(BrowserThread::GetTaskRunnerForThread(BrowserThread::IO)),
       restart_attempts_(0),
       need_dalay_mdns_tasks_(true),
       weak_ptr_factory_(this) {

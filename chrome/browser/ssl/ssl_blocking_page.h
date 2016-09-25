@@ -17,6 +17,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_cert_reporter.h"
 #include "components/certificate_reporting/error_report.h"
+#include "content/public/browser/certificate_request_result_type.h"
 #include "net/ssl/ssl_info.h"
 #include "url/gurl.h"
 
@@ -35,7 +36,6 @@ class SSLErrorUI;
 }
 
 class CertReportHelper;
-class ChromeControllerClient;
 class SSLUITest;
 
 // This class is responsible for showing/hiding the interstitial page that is
@@ -59,7 +59,8 @@ class SSLBlockingPage : public SecurityInterstitialPage {
                   int options_mask,
                   const base::Time& time_triggered,
                   std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
-                  const base::Callback<void(bool)>& callback);
+                  const base::Callback<
+                      void(content::CertificateRequestResultType)>& callback);
 
   // InterstitialPageDelegate method:
   InterstitialPageDelegate::TypeID GetTypeForTesting() const override;
@@ -86,12 +87,11 @@ class SSLBlockingPage : public SecurityInterstitialPage {
   bool ShouldCreateNewNavigation() const override;
   void PopulateInterstitialStrings(
       base::DictionaryValue* load_time_data) override;
-  void AfterShow() override;
 
  private:
   void NotifyDenyCertificate();
 
-  base::Callback<void(bool)> callback_;
+  base::Callback<void(content::CertificateRequestResultType)> callback_;
   const net::SSLInfo ssl_info_;
   const bool overridable_;  // The UI allows the user to override the error.
 
@@ -99,7 +99,6 @@ class SSLBlockingPage : public SecurityInterstitialPage {
   // expired.
   const bool expired_but_previously_allowed_;
 
-  std::unique_ptr<ChromeControllerClient> controller_;
   std::unique_ptr<security_interstitials::SSLErrorUI> ssl_error_ui_;
   std::unique_ptr<CertReportHelper> cert_report_helper_;
 

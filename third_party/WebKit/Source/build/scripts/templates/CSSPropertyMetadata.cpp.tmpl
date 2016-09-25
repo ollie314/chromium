@@ -48,7 +48,7 @@ bool CSSPropertyMetadata::isEnabledProperty(CSSPropertyID unresolvedProperty)
         return enabledProperties->test(property - {{first_enum_value}});
 
     if (unresolvedProperty == CSSPropertyVariable)
-        return RuntimeEnabledFeatures::cssVariablesEnabled();
+        return true;
     ASSERT(unresolvedProperty == CSSPropertyApplyAtRule);
     return RuntimeEnabledFeatures::cssApplyAtRulesEnabled();
 }
@@ -60,6 +60,11 @@ void CSSPropertyMetadata::filterEnabledCSSPropertiesIntoVector(const CSSProperty
         if (isEnabledProperty(property))
             outVector.append(property);
     }
+}
+
+bool CSSPropertyMetadata::isDescriptorOnly(CSSPropertyID property)
+{
+    return property >= {{descriptors[0].property_id}} && property <= {{descriptors[-1].property_id}};
 }
 
 } // namespace blink

@@ -1,5 +1,30 @@
 {
+  "manifest_version":  1,
   "name": "exe:content_renderer",
   "display_name": "Content Renderer",
-  "capabilities": { "mojo:mus": [ "mus::mojom::Gpu" ] }
+  "capabilities": {
+    "provided": {
+      "all_interfaces": [ "*" ],
+      "browser": [
+        "content::mojom::EmbeddedWorkerSetup",
+        "content::mojom::FrameFactory",
+        "content::mojom::TestMojoService",
+        "IPC::mojom::ChannelBootstrap",
+        "mojom::ResourceUsageReporter",
+        "web_cache::mojom::WebCache"
+      ]
+    },
+    "required": {
+      // Remove this once http://crbug.com/632818 is fixed.
+      "exe:content_browser": {
+        "classes":  [ "web" ]
+      },
+      "mojo:ui": {
+        "interfaces": [
+          "ui::mojom::Gpu",
+          "ui::mojom::GpuService"
+        ]
+      }
+    }
+  }
 }

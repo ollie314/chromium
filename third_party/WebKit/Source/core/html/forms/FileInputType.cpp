@@ -40,7 +40,6 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/text/PlatformLocale.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/WTFString.h"
 
@@ -50,7 +49,8 @@ using blink::WebLocalizedString;
 using namespace HTMLNames;
 
 inline FileInputType::FileInputType(HTMLInputElement& element)
-    : BaseClickableWithKeyInputType(element)
+    : InputType(element)
+    , KeyboardClickableInputTypeView(element)
     , m_fileList(FileList::create())
 {
 }
@@ -63,7 +63,13 @@ InputType* FileInputType::create(HTMLInputElement& element)
 DEFINE_TRACE(FileInputType)
 {
     visitor->trace(m_fileList);
-    BaseClickableWithKeyInputType::trace(visitor);
+    KeyboardClickableInputTypeView::trace(visitor);
+    InputType::trace(visitor);
+}
+
+InputTypeView* FileInputType::createView()
+{
+    return this;
 }
 
 Vector<FileChooserFileInfo> FileInputType::filesFromFormControlState(const FormControlState& state)
@@ -218,7 +224,7 @@ FileList* FileInputType::createFileList(const Vector<FileChooserFileInfo>& files
                 rootPath = directoryName(rootPath);
         }
         rootPath = directoryName(rootPath);
-        ASSERT(rootPath.length());
+        DCHECK(rootPath.length());
         int rootLength = rootPath.length();
         if (rootPath[rootLength - 1] != '\\' && rootPath[rootLength - 1] != '/')
             rootLength += 1;
@@ -251,7 +257,7 @@ void FileInputType::countUsage()
 
 void FileInputType::createShadowSubtree()
 {
-    ASSERT(element().shadow());
+    DCHECK(element().shadow());
     HTMLInputElement* button = HTMLInputElement::create(element().document(), 0, false);
     button->setType(InputTypeNames::button);
     button->setAttribute(valueAttr, AtomicString(locale().queryString(element().multiple() ? WebLocalizedString::FileButtonChooseMultipleFilesLabel : WebLocalizedString::FileButtonChooseFileLabel)));
@@ -261,14 +267,14 @@ void FileInputType::createShadowSubtree()
 
 void FileInputType::disabledAttributeChanged()
 {
-    ASSERT(element().shadow());
+    DCHECK(element().shadow());
     if (Element* button = toElement(element().userAgentShadowRoot()->firstChild()))
         button->setBooleanAttribute(disabledAttr, element().isDisabledFormControl());
 }
 
 void FileInputType::multipleAttributeChanged()
 {
-    ASSERT(element().shadow());
+    DCHECK(element().shadow());
     if (Element* button = toElement(element().userAgentShadowRoot()->firstChild()))
         button->setAttribute(valueAttr, AtomicString(locale().queryString(element().multiple() ? WebLocalizedString::FileButtonChooseMultipleFilesLabel : WebLocalizedString::FileButtonChooseFileLabel)));
 }
@@ -311,34 +317,30 @@ void FileInputType::filesChosen(const Vector<FileChooserFileInfo>& files)
     setFiles(createFileList(files, element().fastHasAttribute(webkitdirectoryAttr)));
 }
 
-void FileInputType::receiveDropForDirectoryUpload(const Vector<String>& paths)
+void FileInputType::setFilesFromDirectory(const String& path)
 {
     if (ChromeClient* chromeClient = this->chromeClient()) {
         FileChooserSettings settings;
         HTMLInputElement& input = element();
         settings.allowsDirectoryUpload = true;
         settings.allowsMultipleFiles = true;
-        settings.selectedFiles.append(paths[0]);
+        settings.selectedFiles.append(path);
         settings.acceptMIMETypes = input.acceptMIMETypes();
         settings.acceptFileExtensions = input.acceptFileExtensions();
         chromeClient->enumerateChosenDirectory(newFileChooser(settings));
     }
 }
 
-bool FileInputType::receiveDroppedFiles(const DragData* dragData)
+void FileInputType::setFilesFromPaths(const Vector<String>& paths)
 {
-    Vector<String> paths;
-    dragData->asFilePaths(paths);
     if (paths.isEmpty())
-        return false;
+        return;
 
     HTMLInputElement& input = element();
     if (input.fastHasAttribute(webkitdirectoryAttr)) {
-        receiveDropForDirectoryUpload(paths);
-        return true;
+        setFilesFromDirectory(paths[0]);
+        return;
     }
-
-    m_droppedFileSystemId = dragData->droppedFileSystemId();
 
     Vector<FileChooserFileInfo> files;
     for (unsigned i = 0; i < paths.size(); ++i)
@@ -351,6 +353,19 @@ bool FileInputType::receiveDroppedFiles(const DragData* dragData)
         firstFileOnly.append(files[0]);
         filesChosen(firstFileOnly);
     }
+}
+
+bool FileInputType::receiveDroppedFiles(const DragData* dragData)
+{
+    Vector<String> paths;
+    dragData->asFilePaths(paths);
+    if (paths.isEmpty())
+        return false;
+
+    if (!element().fastHasAttribute(webkitdirectoryAttr)) {
+        m_droppedFileSystemId = dragData->droppedFileSystemId();
+    }
+    setFilesFromPaths(paths);
     return true;
 }
 
@@ -359,7 +374,7 @@ String FileInputType::droppedFileSystemId()
     return m_droppedFileSystemId;
 }
 
-String FileInputType::defaultToolTip() const
+String FileInputType::defaultToolTip(const InputTypeView&) const
 {
     FileList* fileList = m_fileList.get();
     unsigned listSize = fileList->length();

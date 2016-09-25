@@ -32,12 +32,10 @@
 #include "core/events/Event.h"
 #include "core/events/EventListener.h"
 #include "core/events/EventSender.h"
-#include "core/frame/Deprecation.h"
 #include "core/svg/SVGDocumentExtensions.h"
 #include "core/svg/SVGSVGElement.h"
 #include "core/svg/SVGURIReference.h"
 #include "core/svg/animation/SMILTimeContainer.h"
-#include "platform/FloatConversion.h"
 #include "platform/heap/Handle.h"
 #include "wtf/MathExtras.h"
 #include "wtf/StdLibExtras.h"
@@ -222,7 +220,7 @@ void SVGSMILElement::buildPendingResource()
 {
     clearResourceAndEventBaseReferences();
 
-    if (!inShadowIncludingDocument()) {
+    if (!isConnected()) {
         // Reset the target element if we are no longer in the document.
         setTargetElement(nullptr);
         return;
@@ -237,7 +235,7 @@ void SVGSMILElement::buildPendingResource()
         target = SVGURIReference::targetElementFromIRIString(href, treeScope(), &id);
     SVGElement* svgTarget = target && target->isSVGElement() ? toSVGElement(target) : nullptr;
 
-    if (svgTarget && !svgTarget->inShadowIncludingDocument())
+    if (svgTarget && !svgTarget->isConnected())
         svgTarget = nullptr;
 
     if (svgTarget != targetElement())
@@ -313,10 +311,12 @@ Node::InsertionNotificationRequest SVGSMILElement::insertedInto(ContainerNode* r
 {
     SVGElement::insertedInto(rootParent);
 
-    if (!rootParent->inShadowIncludingDocument())
+    if (!rootParent->isConnected())
         return InsertionDone;
 
-    Deprecation::countDeprecation(document(), UseCounter::SVGSMILElementInDocument);
+    UseCounter::count(document(), UseCounter::SVGSMILElementInDocument);
+    if (document().isLoadCompleted())
+        UseCounter::count(&document(), UseCounter::SVGSMILElementInsertedAfterLoad);
 
     setAttributeName(constructQualifiedName(this, fastGetAttribute(SVGNames::attributeNameAttr)));
     SVGSVGElement* owner = ownerSVGElement();
@@ -344,7 +344,7 @@ Node::InsertionNotificationRequest SVGSMILElement::insertedInto(ContainerNode* r
 
 void SVGSMILElement::removedFrom(ContainerNode* rootParent)
 {
-    if (rootParent->inShadowIncludingDocument()) {
+    if (rootParent->isConnected()) {
         clearResourceAndEventBaseReferences();
         clearConditions();
         setTargetElement(nullptr);
@@ -472,12 +472,15 @@ bool SVGSMILElement::parseCondition(const String& value, BeginOrEnd beginOrEnd)
     } else if (nameString == "begin" || nameString == "end") {
         if (baseID.isEmpty())
             return false;
+        UseCounter::count(&document(), UseCounter::SVGSMILBeginOrEndSyncbaseValue);
         type = Condition::Syncbase;
     } else if (nameString.startsWith("accesskey(")) {
         // FIXME: accesskey() support.
         type = Condition::AccessKey;
-    } else
+    } else {
+        UseCounter::count(&document(), UseCounter::SVGSMILBeginOrEndEventValue);
         type = Condition::EventBase;
+    }
 
     m_conditions.append(Condition::create(type, beginOrEnd, baseID, nameString, offset, repeat));
 
@@ -517,7 +520,7 @@ void SVGSMILElement::parseAttribute(const QualifiedName& name, const AtomicStrin
             parseBeginOrEnd(fastGetAttribute(SVGNames::endAttr), End);
         }
         parseBeginOrEnd(value.getString(), Begin);
-        if (inShadowIncludingDocument())
+        if (isConnected())
             connectSyncBaseConditions();
     } else if (name == SVGNames::endAttr) {
         if (!m_conditions.isEmpty()) {
@@ -525,7 +528,7 @@ void SVGSMILElement::parseAttribute(const QualifiedName& name, const AtomicStrin
             parseBeginOrEnd(fastGetAttribute(SVGNames::beginAttr), Begin);
         }
         parseBeginOrEnd(value.getString(), End);
-        if (inShadowIncludingDocument())
+        if (isConnected())
             connectSyncBaseConditions();
     } else if (name == SVGNames::onbeginAttr) {
         setAttributeEventListener(EventTypeNames::beginEvent, createAttributeEventListener(this, name, value, eventParameterName()));
@@ -559,7 +562,7 @@ void SVGSMILElement::svgAttributeChanged(const QualifiedName& attrName)
         if (m_targetElement)
             clearAnimatedType();
     } else if (attrName == SVGNames::beginAttr || attrName == SVGNames::endAttr) {
-        if (inShadowIncludingDocument()) {
+        if (isConnected()) {
             connectEventBaseConditions();
             if (attrName == SVGNames::beginAttr)
                 beginListChanged(elapsed());
@@ -1080,11 +1083,11 @@ float SVGSMILElement::calculateAnimationPercentAndRepeat(SMILTime elapsed, unsig
         percent = percent - floor(percent);
         if (percent < std::numeric_limits<float>::epsilon() || 1 - percent < std::numeric_limits<float>::epsilon())
             return 1.0f;
-        return narrowPrecisionToFloat(percent);
+        return clampTo<float>(percent);
     }
     repeat = static_cast<unsigned>(activeTime.value() / simpleDuration.value());
     SMILTime simpleTime = fmod(activeTime.value(), simpleDuration.value());
-    return narrowPrecisionToFloat(simpleTime.value() / simpleDuration.value());
+    return clampTo<float>(simpleTime.value() / simpleDuration.value());
 }
 
 SMILTime SVGSMILElement::calculateNextProgressTime(SMILTime elapsed) const
@@ -1119,9 +1122,8 @@ bool SVGSMILElement::isContributing(SMILTime elapsed) const
     return (m_activeState == Active && (fill() == FillFreeze || elapsed <= m_interval.begin + repeatingDuration())) || m_activeState == Frozen;
 }
 
-bool SVGSMILElement::progress(SMILTime elapsed, SVGSMILElement* resultElement, bool seekToTime)
+bool SVGSMILElement::progress(SMILTime elapsed, bool seekToTime)
 {
-    ASSERT(resultElement);
     ASSERT(m_timeContainer);
     ASSERT(m_isWaitingForFirstInterval || m_interval.begin.isFinite());
 
@@ -1136,15 +1138,9 @@ bool SVGSMILElement::progress(SMILTime elapsed, SVGSMILElement* resultElement, b
 
     if (elapsed < m_interval.begin) {
         ASSERT(m_activeState != Active);
-        bool isFrozen = (m_activeState == Frozen);
-        if (isFrozen) {
-            if (this == resultElement)
-                resetAnimatedType();
-            updateAnimation(m_lastPercent, m_lastRepeat, resultElement);
-        }
         m_nextProgressTime = m_interval.begin;
         // If the animation is frozen, it's still contributing.
-        return isFrozen;
+        return m_activeState == Frozen;
     }
 
     m_previousIntervalBegin = m_interval.begin;
@@ -1172,10 +1168,6 @@ bool SVGSMILElement::progress(SMILTime elapsed, SVGSMILElement* resultElement, b
     m_activeState = determineActiveState(elapsed);
     bool animationIsContributing = isContributing(elapsed);
 
-    // Only reset the animated type to the base value once for the lowest priority animation that animates and contributes to a particular element/attribute pair.
-    if (this == resultElement && animationIsContributing)
-        resetAnimatedType();
-
     if (animationIsContributing) {
         if (oldActiveState == Inactive || restartedInterval == DidRestartInterval) {
             smilBeginEventSender().dispatchEventSoon(this);
@@ -1185,7 +1177,6 @@ bool SVGSMILElement::progress(SMILTime elapsed, SVGSMILElement* resultElement, b
         if (repeat && repeat != m_lastRepeat)
             dispatchRepeatEvents(repeat);
 
-        updateAnimation(percent, repeat, resultElement);
         m_lastPercent = percent;
         m_lastRepeat = repeat;
     }
@@ -1193,8 +1184,6 @@ bool SVGSMILElement::progress(SMILTime elapsed, SVGSMILElement* resultElement, b
     if ((oldActiveState == Active && m_activeState != Active) || restartedInterval == DidRestartInterval) {
         smilEndEventSender().dispatchEventSoon(this);
         endedActiveInterval();
-        if (!animationIsContributing && this == resultElement)
-            clearAnimatedType();
     }
 
     // Triggering all the pending events if the animation timeline is changed.
@@ -1222,8 +1211,11 @@ void SVGSMILElement::notifyDependentsIntervalChanged()
     ASSERT(m_interval.begin.isFinite());
     // |loopBreaker| is used to avoid infinite recursions which may be caused from:
     // |notifyDependentsIntervalChanged| -> |createInstanceTimesFromSyncbase| -> |add{Begin,End}Time| -> |{begin,end}TimeChanged| -> |notifyDependentsIntervalChanged|
-    // |loopBreaker| is defined as a Persistent<HeapHashSet<Member<SVGSMILElement>>>. This won't cause leaks because it is guaranteed to be empty after the root |notifyDependentsIntervalChanged| has exited.
-    DEFINE_STATIC_LOCAL(HeapHashSet<Member<SVGSMILElement>>, loopBreaker, (new HeapHashSet<Member<SVGSMILElement>>));
+    //
+    // As the set here records SVGSMILElements on the stack, it is acceptable to
+    // use a HashSet of untraced heap references -- any conservative GC which
+    // strikes before unwinding will find these elements on the stack.
+    DEFINE_STATIC_LOCAL(HashSet<UntracedMember<SVGSMILElement>>, loopBreaker, ());
     if (!loopBreaker.add(this).isNewEntry)
         return;
 

@@ -2,43 +2,52 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <Cocoa/Cocoa.h>
-#include <mach/mach_time.h>
+#import "ui/events/test/cocoa_test_event_utils.h"
+
 #include <stdint.h>
 
+#include "base/mac/scoped_cftyperef.h"
+#include "base/time/time.h"
+#include "ui/events/base_event_utils.h"
 #import "ui/events/keycodes/keyboard_code_conversion_mac.h"
-#include "ui/events/test/cocoa_test_event_utils.h"
 
 namespace cocoa_test_event_utils {
 
-namespace {
-
-// From
-// http://stackoverflow.com/questions/1597383/cgeventtimestamp-to-nsdate
-// Which credits Apple sample code for this routine.
-uint64_t UpTimeInNanoseconds(void) {
-  uint64_t time;
-  uint64_t timeNano;
-  static mach_timebase_info_data_t sTimebaseInfo;
-
-  time = mach_absolute_time();
-
-  // Convert to nanoseconds.
-
-  // If this is the first time we've run, get the timebase.
-  // We can use denom == 0 to indicate that sTimebaseInfo is
-  // uninitialised because it makes no sense to have a zero
-  // denominator is a fraction.
-  if (sTimebaseInfo.denom == 0) {
-    (void) mach_timebase_info(&sTimebaseInfo);
-  }
-
-  // This could overflow; for testing needs we probably don't care.
-  timeNano = time * sTimebaseInfo.numer / sTimebaseInfo.denom;
-  return timeNano;
+CGPoint ScreenPointFromWindow(NSPoint window_point, NSWindow* window) {
+  NSRect window_rect = NSMakeRect(window_point.x, window_point.y, 0, 0);
+  NSPoint screen_point = window
+                             ? [window convertRectToScreen:window_rect].origin
+                             : window_rect.origin;
+  CGFloat primary_screen_height =
+      NSHeight([[[NSScreen screens] firstObject] frame]);
+  screen_point.y = primary_screen_height - screen_point.y;
+  return NSPointToCGPoint(screen_point);
 }
 
-}  // namespace
+NSEvent* AttachWindowToCGEvent(CGEventRef event, NSWindow* window) {
+  // These CGEventFields were made public in the 10.7 SDK, but don't help to
+  // populate the -[NSEvent window] pointer when creating an event with
+  // +[NSEvent eventWithCGEvent:]. Set that separately, using reflection.
+  CGEventSetIntegerValueField(event, kCGMouseEventWindowUnderMousePointer,
+                              [window windowNumber]);
+  CGEventSetIntegerValueField(
+      event, kCGMouseEventWindowUnderMousePointerThatCanHandleThisEvent,
+      [window windowNumber]);
+
+  // CGEventTimestamp is nanoseconds since system startup as a 64-bit integer.
+  // Use EventTimeForNow() so that it can be mocked for tests.
+  CGEventTimestamp timestamp =
+      (ui::EventTimeForNow() - base::TimeTicks()).InMicroseconds() *
+      base::Time::kNanosecondsPerMicrosecond;
+  CGEventSetTimestamp(event, timestamp);
+
+  NSEvent* ns_event = [NSEvent eventWithCGEvent:event];
+  DCHECK_EQ(nil, [ns_event window]);  // Verify assumptions.
+  [ns_event setValue:window forKey:@"_window"];
+  DCHECK_EQ(window, [ns_event window]);
+
+  return ns_event;
+}
 
 NSEvent* MouseEventAtPoint(NSPoint point, NSEventType type,
                            NSUInteger modifiers) {
@@ -61,7 +70,7 @@ NSEvent* MouseEventAtPoint(NSPoint point, NSEventType type,
   return [NSEvent mouseEventWithType:type
                             location:point
                        modifierFlags:modifiers
-                           timestamp:0
+                           timestamp:TimeIntervalSinceSystemStartup()
                         windowNumber:0
                              context:nil
                          eventNumber:0
@@ -80,7 +89,7 @@ NSEvent* MouseEventAtPointInWindow(NSPoint point,
   return [NSEvent mouseEventWithType:type
                             location:point
                        modifierFlags:0
-                           timestamp:0
+                           timestamp:TimeIntervalSinceSystemStartup()
                         windowNumber:[window windowNumber]
                              context:nil
                          eventNumber:0
@@ -126,6 +135,20 @@ std::pair<NSEvent*, NSEvent*> RightMouseClickInView(NSView* view,
   return std::make_pair(down, up);
 }
 
+NSEvent* TestScrollEvent(NSPoint location,
+                         NSWindow* window,
+                         CGFloat delta_x,
+                         CGFloat delta_y) {
+  const uint32_t wheel_count = 2;
+  int32_t wheel1 = static_cast<int>(delta_y);
+  int32_t wheel2 = static_cast<int>(delta_x);
+  CGScrollEventUnit units = kCGScrollEventUnitLine;
+  base::ScopedCFTypeRef<CGEventRef> scroll(CGEventCreateScrollWheelEvent(
+      nullptr, units, wheel_count, wheel1, wheel2));
+  CGEventSetLocation(scroll, ScreenPointFromWindow(location, window));
+  return AttachWindowToCGEvent(scroll, window);
+}
+
 NSEvent* KeyEventWithCharacter(unichar c) {
   return KeyEventWithKeyCode(0, c, NSKeyDown, 0);
 }
@@ -142,7 +165,7 @@ NSEvent* KeyEventWithKeyCode(unsigned short key_code,
   return [NSEvent keyEventWithType:event_type
                           location:NSZeroPoint
                      modifierFlags:modifiers
-                         timestamp:0
+                         timestamp:TimeIntervalSinceSystemStartup()
                       windowNumber:0
                            context:nil
                         characters:chars
@@ -155,7 +178,7 @@ static NSEvent* EnterExitEventWithType(NSEventType event_type) {
   return [NSEvent enterExitEventWithType:event_type
                                 location:NSZeroPoint
                            modifierFlags:0
-                               timestamp:0
+                               timestamp:TimeIntervalSinceSystemStartup()
                             windowNumber:0
                                  context:nil
                              eventNumber:0
@@ -175,7 +198,7 @@ NSEvent* OtherEventWithType(NSEventType event_type) {
   return [NSEvent otherEventWithType:event_type
                             location:NSZeroPoint
                        modifierFlags:0
-                           timestamp:0
+                           timestamp:TimeIntervalSinceSystemStartup()
                         windowNumber:0
                              context:nil
                              subtype:0
@@ -184,7 +207,8 @@ NSEvent* OtherEventWithType(NSEventType event_type) {
 }
 
 NSTimeInterval TimeIntervalSinceSystemStartup() {
-  return UpTimeInNanoseconds() / 1000000000.0;
+  base::TimeDelta time_elapsed = ui::EventTimeForNow() - base::TimeTicks();
+  return time_elapsed.InSecondsF();
 }
 
 NSEvent* SynthesizeKeyEvent(NSWindow* window,
@@ -202,6 +226,12 @@ NSEvent* SynthesizeKeyEvent(NSWindow* window,
   // Clear caps regardless -- MacKeyCodeForWindowsKeyCode doesn't implement
   // logic to support it.
   flags &= ~NSAlphaShiftKeyMask;
+
+  // Call sites may generate unicode character events with an undefined
+  // keycode. Since it's not feasible to determine the correct keycode for
+  // each unicode character, we use a dummy keycode corresponding to key 'A'.
+  if (dom_key.IsCharacter() && keycode == ui::VKEY_UNKNOWN)
+    keycode = ui::VKEY_A;
 
   unichar character;
   unichar shifted_character;

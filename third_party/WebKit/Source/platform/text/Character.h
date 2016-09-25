@@ -36,6 +36,7 @@
 #include "platform/text/TextDirection.h"
 #include "platform/text/TextPath.h"
 #include "platform/text/TextRun.h"
+#include "wtf/ASCIICType.h"
 #include "wtf/Allocator.h"
 #include "wtf/HashSet.h"
 #include "wtf/text/CharacterNames.h"
@@ -80,6 +81,16 @@ public:
 
     static bool isUprightInMixedVertical(UChar32 character);
 
+    // https://html.spec.whatwg.org/multipage/scripting.html#prod-potentialcustomelementname
+    static bool isPotentialCustomElementName8BitChar(LChar ch)
+    {
+        return isASCIILower(ch)
+            || isASCIIDigit(ch)
+            || ch == '-' || ch == '.' || ch == '_' || ch == 0xb7
+            || (0xc0 <= ch && ch != 0xd7 && ch != 0xf7);
+    }
+    static bool isPotentialCustomElementNameChar(UChar32 character);
+
     static bool treatAsSpace(UChar32 c)
     {
         return c == spaceCharacter
@@ -93,10 +104,16 @@ public:
             || c == zeroWidthNonJoinerCharacter
             || c == zeroWidthJoinerCharacter;
     }
-    static bool treatAsZeroWidthSpaceInComplexScript(UChar32 c)
+    static bool legacyTreatAsZeroWidthSpaceInComplexScript(UChar32 c)
     {
         return c < 0x20 // ASCII Control Characters
             || (c >= 0x7F && c < 0xA0) // ASCII Delete .. No-break spaceCharacter
+            || treatAsZeroWidthSpaceInComplexScript(c);
+    }
+    static bool treatAsZeroWidthSpaceInComplexScript(UChar32 c)
+    {
+        return c == formFeedCharacter
+            || c == carriageReturnCharacter
             || c == softHyphenCharacter
             || c == zeroWidthSpaceCharacter
             || (c >= leftToRightMarkCharacter && c <= rightToLeftMarkCharacter)
@@ -112,6 +129,9 @@ public:
         return u_hasBinaryProperty(c, UCHAR_GRAPHEME_EXTEND);
     }
 
+    // Returns true if the character has a Emoji property.
+    // See http://www.unicode.org/Public/emoji/3.0/emoji-data.txt
+    static bool isEmoji(UChar32);
     // Default presentation style according to:
     // http://www.unicode.org/reports/tr51/#Presentation_Style
     static bool isEmojiTextDefault(UChar32);

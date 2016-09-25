@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <tuple>
 #include <vector>
 
 #include "content/common/p2p_messages.h"
@@ -57,7 +58,7 @@ class FakeSocket : public net::StreamSocket {
   bool IsConnectedAndIdle() const override;
   int GetPeerAddress(net::IPEndPoint* address) const override;
   int GetLocalAddress(net::IPEndPoint* address) const override;
-  const net::BoundNetLog& NetLog() const override;
+  const net::NetLogWithSource& NetLog() const override;
   void SetSubresourceSpeculation() override;
   void SetOmniboxSpeculation() override;
   bool WasEverUsed() const override;
@@ -89,7 +90,7 @@ class FakeSocket : public net::StreamSocket {
   net::IPEndPoint peer_address_;
   net::IPEndPoint local_address_;
 
-  net::BoundNetLog net_log_;
+  net::NetLogWithSource net_log_;
 };
 
 void CreateRandomPacket(std::vector<char>* packet);
@@ -108,7 +109,7 @@ MATCHER_P(MatchPacketMessage, packet_content, "") {
     return false;
   P2PMsg_OnDataReceived::Param params;
   P2PMsg_OnDataReceived::Read(arg, &params);
-  return base::get<2>(params) == packet_content;
+  return std::get<2>(params) == packet_content;
 }
 
 MATCHER_P(MatchIncomingSocketMessage, address, "") {
@@ -117,7 +118,7 @@ MATCHER_P(MatchIncomingSocketMessage, address, "") {
   P2PMsg_OnIncomingTcpConnection::Param params;
   P2PMsg_OnIncomingTcpConnection::Read(
       arg, &params);
-  return base::get<1>(params) == address;
+  return std::get<1>(params) == address;
 }
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_P2P_SOCKET_HOST_TEST_UTILS_H_

@@ -40,7 +40,7 @@ SVGComputedStyle::SVGComputedStyle()
     stops = initialStyle->stops;
     misc = initialStyle->misc;
     inheritedResources = initialStyle->inheritedResources;
-    layout = initialStyle->layout;
+    geometry = initialStyle->geometry;
     resources = initialStyle->resources;
 
     setBitDefaults();
@@ -55,7 +55,7 @@ SVGComputedStyle::SVGComputedStyle(CreateInitialType)
     stops.init();
     misc.init();
     inheritedResources.init();
-    layout.init();
+    geometry.init();
     resources.init();
 }
 
@@ -67,7 +67,7 @@ SVGComputedStyle::SVGComputedStyle(const SVGComputedStyle& other)
     stops = other.stops;
     misc = other.misc;
     inheritedResources = other.inheritedResources;
-    layout = other.layout;
+    geometry = other.geometry;
     resources = other.resources;
 
     svg_inherited_flags = other.svg_inherited_flags;
@@ -80,23 +80,25 @@ SVGComputedStyle::~SVGComputedStyle()
 
 bool SVGComputedStyle::operator==(const SVGComputedStyle& other) const
 {
-    return fill == other.fill
-        && stroke == other.stroke
-        && stops == other.stops
-        && misc == other.misc
-        && inheritedResources == other.inheritedResources
-        && layout == other.layout
-        && resources == other.resources
-        && svg_inherited_flags == other.svg_inherited_flags
-        && svg_noninherited_flags == other.svg_noninherited_flags;
+    return inheritedEqual(other)
+        && nonInheritedEqual(other);
 }
 
-bool SVGComputedStyle::inheritedNotEqual(const SVGComputedStyle* other) const
+bool SVGComputedStyle::inheritedEqual(const SVGComputedStyle& other) const
 {
-    return fill != other->fill
-        || stroke != other->stroke
-        || inheritedResources != other->inheritedResources
-        || svg_inherited_flags != other->svg_inherited_flags;
+    return fill == other.fill
+        && stroke == other.stroke
+        && inheritedResources == other.inheritedResources
+        && svg_inherited_flags == other.svg_inherited_flags;
+}
+
+bool SVGComputedStyle::nonInheritedEqual(const SVGComputedStyle& other) const
+{
+    return stops == other.stops
+        && misc == other.misc
+        && geometry == other.geometry
+        && resources == other.resources
+        && svg_noninherited_flags == other.svg_noninherited_flags;
 }
 
 void SVGComputedStyle::inheritFrom(const SVGComputedStyle* svgInheritParent)
@@ -116,7 +118,7 @@ void SVGComputedStyle::copyNonInheritedFromCached(const SVGComputedStyle* other)
     svg_noninherited_flags = other->svg_noninherited_flags;
     stops = other->stops;
     misc = other->misc;
-    layout = other->layout;
+    geometry = other->geometry;
     resources = other->resources;
 }
 
@@ -185,8 +187,8 @@ bool SVGComputedStyle::diffNeedsLayoutAndPaintInvalidation(const SVGComputedStyl
             return true;
     }
 
-    // The StyleLayoutData properties require a re-layout.
-    if (layout.get() != other->layout.get() && *layout != *other->layout)
+    // The geometry properties require a re-layout.
+    if (geometry.get() != other->geometry.get() && *geometry != *other->geometry)
         return true;
 
     return false;

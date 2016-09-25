@@ -15,21 +15,20 @@
 
 class EncodeDecodeTest : public BaseTest {
  public:
-  void TestAssembleToStreamDisassemble(std::string file,
-                                       size_t expected_encoded_lenth) const;
+  void TestAssembleToStreamDisassemble(const std::string& file,
+                                       size_t expected_encoded_length) const;
 };
 
 void EncodeDecodeTest::TestAssembleToStreamDisassemble(
-    std::string file,
-    size_t expected_encoded_lenth) const {
-  const void* original_buffer = file.c_str();
+    const std::string& file,
+    size_t expected_encoded_length) const {
+  const uint8_t* original_buffer =
+      reinterpret_cast<const uint8_t*>(file.data());
   size_t original_length = file.length();
 
   std::unique_ptr<courgette::AssemblyProgram> program;
-  const courgette::Status parse_status =
-      courgette::ParseDetectedExecutable(original_buffer,
-                                         original_length,
-                                         &program);
+  const courgette::Status parse_status = courgette::ParseDetectedExecutable(
+      original_buffer, original_length, &program);
   EXPECT_EQ(courgette::C_OK, parse_status);
 
   std::unique_ptr<courgette::EncodedProgram> encoded;
@@ -52,7 +51,7 @@ void EncodeDecodeTest::TestAssembleToStreamDisassemble(
   const void* buffer = sink.Buffer();
   size_t length = sink.Length();
 
-  EXPECT_EQ(expected_encoded_lenth, length);
+  EXPECT_EQ(expected_encoded_length, length);
 
   courgette::SourceStreamSet sources;
   bool can_get_source_streams = sources.Init(buffer, length);
@@ -83,17 +82,17 @@ TEST_F(EncodeDecodeTest, PE) {
 
 TEST_F(EncodeDecodeTest, PE64) {
   std::string file = FileContents("chrome64_1.exe");
-  TestAssembleToStreamDisassemble(file, 809635);
+  TestAssembleToStreamDisassemble(file, 810090);
 }
 
 TEST_F(EncodeDecodeTest, Elf_Small) {
   std::string file = FileContents("elf-32-1");
-  TestAssembleToStreamDisassemble(file, 136218);
+  TestAssembleToStreamDisassemble(file, 136201);
 }
 
 TEST_F(EncodeDecodeTest, Elf_HighBSS) {
   std::string file = FileContents("elf-32-high-bss");
-  TestAssembleToStreamDisassemble(file, 7312);
+  TestAssembleToStreamDisassemble(file, 7308);
 }
 
 TEST_F(EncodeDecodeTest, Elf_Arm) {

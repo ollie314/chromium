@@ -36,21 +36,17 @@ bool DocumentFullscreen::fullscreenEnabled(Document& document)
 
 Element* DocumentFullscreen::fullscreenElement(Document& document)
 {
-    if (Fullscreen* fullscreen = Fullscreen::fromIfExists(document))
-        return fullscreen->fullscreenElement();
-    return 0;
+    return Fullscreen::fullscreenElementFrom(document);
 }
 
 void DocumentFullscreen::exitFullscreen(Document& document)
 {
-    Fullscreen::from(document).exitFullscreen();
+    Fullscreen::exitFullscreen(document);
 }
 
-Element* DocumentFullscreen::webkitCurrentFullScreenElement(Document& document)
+Element* DocumentFullscreen::currentFullScreenElement(Document& document)
 {
-    if (Fullscreen* fullscreen = Fullscreen::fromIfExists(document))
-        return fullscreen->webkitCurrentFullScreenElement();
-    return 0;
+    return Fullscreen::currentFullScreenElementFrom(document);
 }
 
 } // namespace blink

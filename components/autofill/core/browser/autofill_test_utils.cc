@@ -14,10 +14,11 @@
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
+#include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
-#include "components/os_crypt/os_crypt.h"
+#include "components/os_crypt/os_crypt_mocker.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/pref_service_factory.h"
@@ -30,12 +31,6 @@ using base::ASCIIToUTF16;
 
 namespace autofill {
 namespace test {
-
-namespace {
-
-const char kSettingsOrigin[] = "Chrome settings";
-
-}  // namespace
 
 std::unique_ptr<PrefService> PrefServiceForTesting() {
   scoped_refptr<user_prefs::PrefRegistrySyncable> registry(
@@ -315,9 +310,11 @@ void SetCreditCardInfo(CreditCard* credit_card,
 
 void DisableSystemServices(PrefService* prefs) {
   // Use a mock Keychain rather than the OS one to store credit card data.
-#if defined(OS_MACOSX)
-  OSCrypt::UseMockKeychain(true);
-#endif  // defined(OS_MACOSX)
+  OSCryptMocker::SetUpWithSingleton();
+}
+
+void ReenableSystemServices() {
+  OSCryptMocker::TearDown();
 }
 
 void SetServerCreditCards(AutofillTable* table,
@@ -343,33 +340,30 @@ void FillUploadField(AutofillUploadContents::Field* field,
                      unsigned signature,
                      const char* name,
                      const char* control_type,
-                     const char* label,
                      const char* autocomplete,
-                     unsigned autofill_type) {
+                     unsigned autofill_type,
+                     const char* css_classes) {
   field->set_signature(signature);
   if (name)
     field->set_name(name);
   if (control_type)
     field->set_type(control_type);
-  if (label)
-    field->set_label(label);
   if (autocomplete)
     field->set_autocomplete(autocomplete);
   field->set_autofill_type(autofill_type);
+  if (css_classes)
+    field->set_css_classes(css_classes);
 }
 
 void FillQueryField(AutofillQueryContents::Form::Field* field,
                     unsigned signature,
                     const char* name,
-                    const char* control_type,
-                    const char* label) {
+                    const char* control_type) {
   field->set_signature(signature);
   if (name)
     field->set_name(name);
   if (control_type)
     field->set_type(control_type);
-  if (label)
-    field->set_label(label);
 }
 
 }  // namespace test

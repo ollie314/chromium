@@ -35,13 +35,12 @@
 #include "core/fetch/RawResource.h"
 #include "core/fetch/ResourceOwner.h"
 #include "platform/heap/Handle.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
-class CustomElementSyncMicrotaskQueue;
+class V0CustomElementSyncMicrotaskQueue;
 class Document;
 class DocumentWriter;
 class HTMLImportChild;
@@ -89,7 +88,7 @@ public:
     // Called by Document::didRemoveAllPendingStylesheet.
     void didRemoveAllPendingStylesheet();
 
-    CustomElementSyncMicrotaskQueue* microtaskQueue() const;
+    V0CustomElementSyncMicrotaskQueue* microtaskQueue() const;
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -97,7 +96,7 @@ private:
     HTMLImportLoader(HTMLImportsController*);
 
     // RawResourceClient
-    void responseReceived(Resource*, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
+    void responseReceived(Resource*, const ResourceResponse&, std::unique_ptr<WebDataConsumerHandle>) override;
     void dataReceived(Resource*, const char* data, size_t length) override;
     void notifyFinished(Resource*) override;
     String debugName() const override { return "HTMLImportLoader"; }
@@ -121,7 +120,7 @@ private:
     State m_state;
     Member<Document> m_document;
     Member<DocumentWriter> m_writer;
-    Member<CustomElementSyncMicrotaskQueue> m_microtaskQueue;
+    Member<V0CustomElementSyncMicrotaskQueue> m_microtaskQueue;
 };
 
 } // namespace blink

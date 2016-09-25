@@ -14,21 +14,28 @@
 namespace blink {
 
 class CSSParserTokenRange;
+class CSSPendingSubstitutionValue;
 class CSSVariableData;
 class CSSVariableReferenceValue;
+class PropertyRegistry;
 class StyleResolverState;
 class StyleVariableData;
 
 class CSSVariableResolver {
+    STACK_ALLOCATED();
 public:
-    static void resolveVariableDefinitions(StyleVariableData*);
-    static void resolveAndApplyVariableReferences(StyleResolverState&, CSSPropertyID, const CSSVariableReferenceValue&);
+    static void resolveVariableDefinitions(const StyleResolverState&);
 
     // Shorthand properties are not supported.
-    static CSSValue* resolveVariableReferences(StyleVariableData*, CSSPropertyID, const CSSVariableReferenceValue&);
+    static const CSSValue* resolveVariableReferences(const StyleResolverState&, CSSPropertyID, const CSSValue&);
+
+    DECLARE_TRACE();
 
 private:
-    CSSVariableResolver(StyleVariableData*);
+    CSSVariableResolver(const StyleResolverState&);
+
+    static const CSSValue* resolvePendingSubstitutions(const StyleResolverState&, CSSPropertyID, const CSSPendingSubstitutionValue&);
+    static const CSSValue* resolveVariableReferences(const StyleResolverState&, CSSPropertyID, const CSSVariableReferenceValue&);
 
     // These return false if we encounter a reference to an invalid variable with no fallback
 
@@ -48,7 +55,9 @@ private:
     // Resolves the CSSVariableData from a custom property declaration
     PassRefPtr<CSSVariableData> resolveCustomProperty(AtomicString name, const CSSVariableData&);
 
+    const StyleResolverState& m_styleResolverState;
     StyleVariableData* m_styleVariableData;
+    Member<const PropertyRegistry> m_registry;
     HashSet<AtomicString> m_variablesSeen;
     // Resolution doesn't finish when a cycle is detected. Fallbacks still
     // need to be tracked for additional cycles, and invalidation only

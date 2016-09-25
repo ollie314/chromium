@@ -13,10 +13,11 @@
 #if defined(USE_ALSA)
 #include "media/audio/alsa/audio_manager_alsa.h"
 #endif
-#include "media/audio/audio_parameters.h"
+#include "media/audio/audio_device_description.h"
 #include "media/audio/pulse/pulse_input.h"
 #include "media/audio/pulse/pulse_output.h"
 #include "media/audio/pulse/pulse_util.h"
+#include "media/base/audio_parameters.h"
 #include "media/base/channel_layout.h"
 
 #if defined(DLOPEN_PULSEAUDIO)
@@ -57,7 +58,8 @@ AudioManagerPulse::AudioManagerPulse(
       input_mainloop_(NULL),
       input_context_(NULL),
       devices_(NULL),
-      native_input_sample_rate_(0) {
+      native_input_sample_rate_(0),
+      native_channel_count_(0) {
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
 }
 
@@ -114,11 +116,8 @@ void AudioManagerPulse::GetAudioDeviceNames(
   WaitForOperationCompletion(input_mainloop_, operation);
 
   // Prepend the default device if the list is not empty.
-  if (!device_names->empty()) {
-    device_names->push_front(
-        AudioDeviceName(AudioManager::GetDefaultDeviceName(),
-                        AudioManagerBase::kDefaultDeviceId));
-  }
+  if (!device_names->empty())
+    device_names->push_front(AudioDeviceName::CreateDefault());
 }
 
 void AudioManagerPulse::GetAudioInputDeviceNames(
@@ -138,34 +137,41 @@ AudioParameters AudioManagerPulse::GetInputStreamParameters(
       user_buffer_size : kDefaultInputBufferSize;
 
   // TODO(xians): add support for querying native channel layout for pulse.
+  UpdateNativeAudioHardwareInfo();
   return AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY,
-                         CHANNEL_LAYOUT_STEREO, GetNativeSampleRate(), 16,
+                         CHANNEL_LAYOUT_STEREO, native_input_sample_rate_, 16,
                          buffer_size);
 }
 
 AudioOutputStream* AudioManagerPulse::MakeLinearOutputStream(
-    const AudioParameters& params) {
+    const AudioParameters& params,
+    const LogCallback& log_callback) {
   DCHECK_EQ(AudioParameters::AUDIO_PCM_LINEAR, params.format());
-  return MakeOutputStream(params, AudioManagerBase::kDefaultDeviceId);
+  return MakeOutputStream(params, AudioDeviceDescription::kDefaultDeviceId);
 }
 
 AudioOutputStream* AudioManagerPulse::MakeLowLatencyOutputStream(
     const AudioParameters& params,
-    const std::string& device_id) {
+    const std::string& device_id,
+    const LogCallback& log_callback) {
   DCHECK_EQ(AudioParameters::AUDIO_PCM_LOW_LATENCY, params.format());
-  return MakeOutputStream(
-      params,
-      device_id.empty() ? AudioManagerBase::kDefaultDeviceId : device_id);
+  return MakeOutputStream(params, device_id.empty()
+                                      ? AudioDeviceDescription::kDefaultDeviceId
+                                      : device_id);
 }
 
 AudioInputStream* AudioManagerPulse::MakeLinearInputStream(
-    const AudioParameters& params, const std::string& device_id) {
+    const AudioParameters& params,
+    const std::string& device_id,
+    const LogCallback& log_callback) {
   DCHECK_EQ(AudioParameters::AUDIO_PCM_LINEAR, params.format());
   return MakeInputStream(params, device_id);
 }
 
 AudioInputStream* AudioManagerPulse::MakeLowLatencyInputStream(
-    const AudioParameters& params, const std::string& device_id) {
+    const AudioParameters& params,
+    const std::string& device_id,
+    const LogCallback& log_callback) {
   DCHECK_EQ(AudioParameters::AUDIO_PCM_LOW_LATENCY, params.format());
   return MakeInputStream(params, device_id);
 }
@@ -176,10 +182,15 @@ AudioParameters AudioManagerPulse::GetPreferredOutputStreamParameters(
   // TODO(tommi): Support |output_device_id|.
   VLOG_IF(0, !output_device_id.empty()) << "Not implemented!";
 
-  ChannelLayout channel_layout = CHANNEL_LAYOUT_STEREO;
   int buffer_size = kMinimumOutputBufferSize;
   int bits_per_sample = 16;
-  int sample_rate = GetNativeSampleRate();
+
+  // Query native parameters where applicable; Pulse does not require these to
+  // be respected though, so prefer the input parameters for channel count.
+  UpdateNativeAudioHardwareInfo();
+  int sample_rate = native_input_sample_rate_;
+  ChannelLayout channel_layout = GuessChannelLayout(native_channel_count_);
+
   if (input_params.IsValid()) {
     bits_per_sample = input_params.bits_per_sample();
     channel_layout = input_params.channel_layout();
@@ -209,15 +220,13 @@ AudioInputStream* AudioManagerPulse::MakeInputStream(
                                    input_mainloop_, input_context_);
 }
 
-int AudioManagerPulse::GetNativeSampleRate() {
+void AudioManagerPulse::UpdateNativeAudioHardwareInfo() {
   DCHECK(input_mainloop_);
   DCHECK(input_context_);
   AutoPulseLock auto_lock(input_mainloop_);
   pa_operation* operation = pa_context_get_server_info(
-      input_context_, SampleRateInfoCallback, this);
+      input_context_, AudioHardwareInfoCallback, this);
   WaitForOperationCompletion(input_mainloop_, operation);
-
-  return native_input_sample_rate_;
 }
 
 bool AudioManagerPulse::InitPulse() {
@@ -332,12 +341,13 @@ void AudioManagerPulse::OutputDevicesInfoCallback(pa_context* context,
                                                info->name));
 }
 
-void AudioManagerPulse::SampleRateInfoCallback(pa_context* context,
-                                               const pa_server_info* info,
-                                               void* user_data) {
+void AudioManagerPulse::AudioHardwareInfoCallback(pa_context* context,
+                                                  const pa_server_info* info,
+                                                  void* user_data) {
   AudioManagerPulse* manager = reinterpret_cast<AudioManagerPulse*>(user_data);
 
   manager->native_input_sample_rate_ = info->sample_spec.rate;
+  manager->native_channel_count_ = info->sample_spec.channels;
   pa_threaded_mainloop_signal(manager->input_mainloop_, 0);
 }
 

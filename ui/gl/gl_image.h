@@ -68,6 +68,9 @@ class GL_EXPORT GLImage : public base::RefCounted<GLImage> {
                                     const gfx::Rect& bounds_rect,
                                     const gfx::RectF& crop_rect) = 0;
 
+  // Flush any preceding rendering for the image.
+  virtual void Flush() = 0;
+
   // Dumps information about the memory backing the GLImage to a dump named
   // |dump_name|.
   virtual void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
@@ -84,6 +87,13 @@ class GL_EXPORT GLImage : public base::RefCounted<GLImage> {
   // GLImage API. Theoretically, when Apple fixes their drivers, this can be
   // removed. https://crbug.com/581777#c36
   virtual bool EmulatingRGB() const;
+
+  // An identifier for subclasses. Necessary for safe downcasting.
+  enum class Type {
+    NONE,
+    IOSURFACE
+  };
+  virtual Type GetType() const;
 
  protected:
   virtual ~GLImage() {}

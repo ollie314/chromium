@@ -24,15 +24,12 @@
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #include "components/translate/content/renderer/translate_helper.h"
-#include "content/public/common/ssl_status.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/constants.h"
-#include "net/base/url_util.h"
-#include "net/ssl/ssl_cipher_suite_names.h"
-#include "net/ssl/ssl_connection_status_flags.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/WebKit/public/platform/WebImage.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/platform/modules/app_banner/WebAppBannerPromptReply.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -57,7 +54,6 @@ using blink::WebFrameContentDumper;
 using blink::WebLocalFrame;
 using blink::WebNode;
 using blink::WebString;
-using content::SSLStatus;
 using content::RenderFrame;
 
 // Maximum number of characters in the document to index.
@@ -161,8 +157,9 @@ bool ChromeRenderFrameObserver::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void ChromeRenderFrameObserver::OnSetIsPrerendering(bool is_prerendering) {
-  if (is_prerendering) {
+void ChromeRenderFrameObserver::OnSetIsPrerendering(
+    prerender::PrerenderMode mode) {
+  if (mode != prerender::NO_PRERENDER) {
     // If the PrerenderHelper for this frame already exists, don't create it. It
     // can already be created for subframes during handling of
     // RenderFrameCreated, if the parent frame was prerendering at time of
@@ -172,15 +169,17 @@ void ChromeRenderFrameObserver::OnSetIsPrerendering(bool is_prerendering) {
 
     // The PrerenderHelper will destroy itself either after recording histograms
     // or on destruction of the RenderView.
-    new prerender::PrerenderHelper(render_frame());
+    new prerender::PrerenderHelper(render_frame(), mode);
   }
 }
 
 void ChromeRenderFrameObserver::OnRequestReloadImageForContextNode() {
-  WebNode context_node = render_frame()->GetContextMenuNode();
-  if (!context_node.isNull() && context_node.isElementNode() &&
-      render_frame()->GetWebFrame()) {
-    render_frame()->GetWebFrame()->reloadImage(context_node);
+  WebLocalFrame* frame = render_frame()->GetWebFrame();
+  // TODO(dglazkov): This code is clearly in the wrong place. Need
+  // to investigate what it is doing and fix (http://crbug.com/606164).
+  WebNode context_node = frame->contextMenuNode();
+  if (!context_node.isNull() && context_node.isElementNode()) {
+    frame->reloadImage(context_node);
   }
 }
 
@@ -188,7 +187,7 @@ void ChromeRenderFrameObserver::OnRequestThumbnailForContextNode(
     int thumbnail_min_area_pixels,
     const gfx::Size& thumbnail_max_size_pixels,
     int callback_id) {
-  WebNode context_node = render_frame()->GetContextMenuNode();
+  WebNode context_node = render_frame()->GetWebFrame()->contextMenuNode();
   SkBitmap thumbnail;
   gfx::Size original_size;
   if (!context_node.isNull() && context_node.isElementNode()) {
@@ -226,7 +225,7 @@ void ChromeRenderFrameObserver::OnPrintNodeUnderContextMenu() {
   printing::PrintWebViewHelper* helper =
       printing::PrintWebViewHelper::Get(render_frame()->GetRenderView());
   if (helper)
-    helper->PrintNode(render_frame()->GetContextMenuNode());
+    helper->PrintNode(render_frame()->GetWebFrame()->contextMenuNode());
 #endif
 }
 
@@ -239,56 +238,6 @@ void ChromeRenderFrameObserver::OnSetClientSidePhishingDetection(
                                                               nullptr)
           : nullptr;
 #endif
-}
-
-void ChromeRenderFrameObserver::DidFinishDocumentLoad() {
-  // If the navigation is to a localhost URL (and the flag is set to
-  // allow localhost SSL misconfigurations), print a warning to the
-  // console telling the developer to check their SSL configuration
-  // before going to production.
-  bool allow_localhost = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kAllowInsecureLocalhost);
-  WebDataSource* ds = render_frame()->GetWebFrame()->dataSource();
-
-  SSLStatus ssl_status = render_frame()->GetRenderView()->GetSSLStatusOfFrame(
-      render_frame()->GetWebFrame());
-
-  if (allow_localhost) {
-    bool is_cert_error = net::IsCertStatusError(ssl_status.cert_status) &&
-                         !net::IsCertStatusMinorError(ssl_status.cert_status);
-    bool is_localhost = net::IsLocalhost(GURL(ds->request().url()).host());
-
-    if (is_cert_error && is_localhost) {
-      render_frame()->GetWebFrame()->addMessageToConsole(
-          blink::WebConsoleMessage(
-              blink::WebConsoleMessage::LevelWarning,
-              base::ASCIIToUTF16(
-                  "This site does not have a valid SSL "
-                  "certificate! Without SSL, your site's and "
-                  "visitors' data is vulnerable to theft and "
-                  "tampering. Get a valid SSL certificate before"
-                  " releasing your website to the public.")));
-    }
-  }
-
-  // DHE is deprecated and will be removed in M52. See https://crbug.com/598109.
-  // TODO(davidben): Remove this logic when DHE is removed.
-  uint16_t cipher_suite =
-      net::SSLConnectionStatusToCipherSuite(ssl_status.connection_status);
-  const char* key_exchange;
-  const char* unused;
-  bool is_aead_unused;
-  net::SSLCipherSuiteToStrings(&key_exchange, &unused, &unused, &is_aead_unused,
-                               cipher_suite);
-  if (strcmp(key_exchange, "DHE_RSA") == 0) {
-    render_frame()->GetWebFrame()->addMessageToConsole(blink::WebConsoleMessage(
-        blink::WebConsoleMessage::LevelWarning,
-        base::ASCIIToUTF16("This site requires a DHE-based SSL cipher suite. "
-                           "These are deprecated and will be removed in M52, "
-                           "around July 2016. See "
-                           "https://www.chromestatus.com/feature/"
-                           "5752033759985664 for more details.")));
-  }
 }
 
 void ChromeRenderFrameObserver::OnAppBannerPromptRequest(
@@ -324,8 +273,7 @@ void ChromeRenderFrameObserver::DidFinishLoad() {
   GURL osdd_url = frame->document().openSearchDescriptionURL();
   if (!osdd_url.is_empty()) {
     Send(new ChromeViewHostMsg_PageHasOSDD(
-        routing_id(), frame->document().url(), osdd_url,
-        search_provider::AUTODETECTED_PROVIDER));
+        routing_id(), frame->document().url(), osdd_url));
   }
 }
 
@@ -418,4 +366,8 @@ void ChromeRenderFrameObserver::DidMeaningfulLayout(
     default:
       break;
   }
+}
+
+void ChromeRenderFrameObserver::OnDestruct() {
+  delete this;
 }

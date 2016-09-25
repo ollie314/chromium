@@ -37,7 +37,13 @@ enum OpenOperationResult {
 };
 
 // Type of item that is the target of the OpenItem() call.
-enum OpenItemType { OPEN_FILE, OPEN_FOLDER };
+enum OpenItemType {
+  OPEN_FILE,
+  OPEN_FOLDER,
+#if defined(OS_LINUX)
+  SHOW_ITEM_IN_FOLDER
+#endif
+};
 
 // Callback used with OpenFile and OpenFolder.
 typedef base::Callback<void(OpenOperationResult)> OpenOperationCallback;
@@ -100,9 +106,6 @@ bool IsVisible(gfx::NativeView view);
 bool IsSwipeTrackingFromScrollEventsEnabled();
 #endif
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
-bool RegisterPlatformUtil(JNIEnv* env);
-#endif
 }  // namespace platform_util
 
 #endif  // CHROME_BROWSER_PLATFORM_UTIL_H_

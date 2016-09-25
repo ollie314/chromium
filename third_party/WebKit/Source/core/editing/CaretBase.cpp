@@ -33,13 +33,19 @@
 #include "core/layout/LayoutView.h"
 #include "core/layout/api/LayoutBlockItem.h"
 #include "core/layout/api/LayoutItem.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/paint/PaintInfo.h"
+#include "core/paint/PaintLayer.h"
 #include "platform/graphics/GraphicsContext.h"
+#include "platform/graphics/GraphicsLayer.h"
+#include "platform/graphics/paint/DrawingRecorder.h"
 
 namespace blink {
 
-CaretBase::CaretBase(CaretVisibility visibility)
-    : m_caretVisibility(visibility)
+CaretBase::CaretBase() = default;
+CaretBase::~CaretBase() = default;
+
+DEFINE_TRACE(CaretBase)
 {
 }
 
@@ -64,6 +70,11 @@ LayoutBlock* CaretBase::caretLayoutObject(Node* node)
 
     // if caretNode is a block and caret is inside it then caret should be painted by that block
     bool paintedByBlock = layoutObject->isLayoutBlock() && caretRendersInsideNode(node);
+    // TODO(yoichio): This function is called at least
+    // DocumentLifeCycle::LayoutClean but caretRendersInsideNode above can
+    // layout. Thus |node->layoutObject()| can be changed then this is bad
+    // design. We should make caret painting algorithm clean.
+    CHECK_EQ(layoutObject, node->layoutObject()) << "Layout tree should not changed";
     return paintedByBlock ? toLayoutBlock(layoutObject) : layoutObject->containingBlock();
 }
 
@@ -90,12 +101,12 @@ static void mapCaretRectToCaretPainter(LayoutItem caretLayoutItem, LayoutBlockIt
         caretRect = LayoutRect();
 }
 
-bool CaretBase::updateCaretRect(const PositionWithAffinity& caretPosition)
+void CaretBase::updateCaretRect(const PositionWithAffinity& caretPosition)
 {
     m_caretLocalRect = LayoutRect();
 
     if (caretPosition.position().isNull())
-        return false;
+        return;
 
     DCHECK(caretPosition.position().anchorNode()->layoutObject());
 
@@ -108,13 +119,11 @@ bool CaretBase::updateCaretRect(const PositionWithAffinity& caretPosition)
     LayoutBlockItem caretPainterItem = LayoutBlockItem(caretLayoutObject(caretPosition.position().anchorNode()));
 
     mapCaretRectToCaretPainter(LayoutItem(layoutObject), caretPainterItem, m_caretLocalRect);
-
-    return true;
 }
 
-bool CaretBase::updateCaretRect(const VisiblePosition& caretPosition)
+void CaretBase::updateCaretRect(const VisiblePosition& caretPosition)
 {
-    return updateCaretRect(caretPosition.toPositionWithAffinity());
+    updateCaretRect(caretPosition.toPositionWithAffinity());
 }
 
 IntRect CaretBase::absoluteBoundsForLocalRect(Node* node, const LayoutRect& rect) const
@@ -128,10 +137,13 @@ IntRect CaretBase::absoluteBoundsForLocalRect(Node* node, const LayoutRect& rect
     return caretPainter->localToAbsoluteQuad(FloatRect(localRect)).enclosingBoundingBox();
 }
 
+// TODO(yoichio): |node| is FrameSelection::m_previousCaretNode and this is bad
+// design. We should use only previous layoutObject or Rectangle to invalidate
+// old caret.
 void CaretBase::invalidateLocalCaretRect(Node* node, const LayoutRect& rect)
 {
-    LayoutBlockItem caretPainter = LayoutBlockItem(caretLayoutObject(node));
-    if (!caretPainter)
+    LayoutBlock* caretLayoutBlock = caretLayoutObject(node);
+    if (!caretLayoutBlock)
         return;
 
     // FIXME: Need to over-paint 1 pixel to workaround some rounding problems.
@@ -139,12 +151,10 @@ void CaretBase::invalidateLocalCaretRect(Node* node, const LayoutRect& rect)
     LayoutRect inflatedRect = rect;
     inflatedRect.inflate(LayoutUnit(1));
 
-    // FIXME: We should use mapLocalToAncestor() since we know we're not un-rooted.
-    mapCaretRectToCaretPainter(LayoutItem(node->layoutObject()), caretPainter, inflatedRect);
-
     // FIXME: We should not allow paint invalidation out of paint invalidation state. crbug.com/457415
     DisablePaintInvalidationStateAsserts disabler;
-    caretPainter.invalidatePaintRectangle(inflatedRect);
+
+    m_visualRect = node->layoutObject()->invalidatePaintRectangle(inflatedRect, this);
 }
 
 bool CaretBase::shouldRepaintCaret(Node& node) const
@@ -152,52 +162,53 @@ bool CaretBase::shouldRepaintCaret(Node& node) const
     // If PositionAnchorType::BeforeAnchor or PositionAnchorType::AfterAnchor,
     // carets need to be repainted not only when the node is contentEditable but
     // also when its parentNode() is contentEditable.
-    return node.isContentEditable() || (node.parentNode() && node.parentNode()->isContentEditable());
+    node.document().updateStyleAndLayoutTree();
+    return hasEditableStyle(node) || (node.parentNode() && hasEditableStyle(*node.parentNode()));
 }
 
-bool CaretBase::shouldRepaintCaret(const LayoutView* view) const
+bool CaretBase::shouldRepaintCaret(const LayoutViewItem view) const
 {
     DCHECK(view);
-    if (FrameView* frameView = view->frameView()) {
+    if (FrameView* frameView = view.frameView()) {
         LocalFrame& frame = frameView->frame(); // The frame where the selection started
         return frame.settings() && frame.settings()->caretBrowsingEnabled();
     }
     return false;
 }
 
-void CaretBase::invalidateCaretRect(Node* node, bool caretRectChanged)
+void CaretBase::invalidateCaretRect(Node* node)
 {
-    if (caretRectChanged)
-        return;
-
-    if (LayoutView* view = node->document().layoutView()) {
-        if (node->isContentEditable(Node::UserSelectAllIsAlwaysNonEditable) || shouldRepaintCaret(view))
+    if (LayoutViewItem view = node->document().layoutViewItem()) {
+        node->document().updateStyleAndLayoutTree();
+        if (hasEditableStyle(*node) || shouldRepaintCaret(view))
             invalidateLocalCaretRect(node, localCaretRectWithoutUpdate());
     }
 }
 
-void CaretBase::paintCaret(Node* node, GraphicsContext& context, const LayoutPoint& paintOffset) const
+void CaretBase::paintCaret(Node* node, GraphicsContext& context, const LayoutPoint& paintOffset, DisplayItem::Type displayItemType) const
 {
-    if (m_caretVisibility == CaretVisibility::Hidden)
+    if (DrawingRecorder::useCachedDrawingIfPossible(context, *this, displayItemType))
         return;
 
     LayoutRect drawingRect = localCaretRectWithoutUpdate();
     if (LayoutBlock* layoutObject = caretLayoutObject(node))
         layoutObject->flipForWritingMode(drawingRect);
-    drawingRect.moveBy(roundedIntPoint(paintOffset));
+    drawingRect.moveBy(paintOffset);
 
-    Color caretColor = Color::black;
+    const Color caretColor = node->layoutObject()->resolveColor(CSSPropertyColor);
+    IntRect paintRect = pixelSnappedIntRect(drawingRect);
+    DrawingRecorder drawingRecorder(context, *this, DisplayItem::kCaret, paintRect);
+    context.fillRect(paintRect, caretColor);
+}
 
-    Element* element;
-    if (node->isElementNode())
-        element = toElement(node);
-    else
-        element = node->parentElement();
+String CaretBase::debugName() const
+{
+    return "Caret";
+}
 
-    if (element && element->layoutObject())
-        caretColor = element->layoutObject()->resolveColor(CSSPropertyColor);
-
-    context.fillRect(FloatRect(drawingRect), caretColor);
+LayoutRect CaretBase::visualRect() const
+{
+    return m_visualRect;
 }
 
 } // namespace blink

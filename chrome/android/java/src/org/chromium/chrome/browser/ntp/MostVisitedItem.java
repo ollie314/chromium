@@ -28,7 +28,7 @@ public class MostVisitedItem implements OnCreateContextMenuListener,
          * Navigates to a most visited page in the existing tab.
          * @param item The most visited item to open.
          */
-        void open(MostVisitedItem item);
+        void openMostVisitedItem(MostVisitedItem item);
 
         /**
          * Allows the manager to add context menu items for a given MostVisitedItem.
@@ -53,6 +53,7 @@ public class MostVisitedItem implements OnCreateContextMenuListener,
     private boolean mOfflineAvailable;
     private int mIndex;
     private int mTileType;
+    private int mSource;
     private View mView;
 
     /**
@@ -66,9 +67,10 @@ public class MostVisitedItem implements OnCreateContextMenuListener,
      *                          visited item. Empty otherwise.
      * @param offlineAvailable Whether there is an offline copy of the URL available.
      * @param index The index of this item in the list of most visited items.
+     * @param source The {@link MostVisitedSource} that generated this item.
      */
     public MostVisitedItem(MostVisitedItemManager manager, String title, String url,
-            String whitelistIconPath, boolean offlineAvailable, int index) {
+            String whitelistIconPath, boolean offlineAvailable, int index, int source) {
         mManager = manager;
         mTitle = title;
         mUrl = url;
@@ -76,6 +78,7 @@ public class MostVisitedItem implements OnCreateContextMenuListener,
         mOfflineAvailable = offlineAvailable;
         mIndex = index;
         mTileType = MostVisitedTileType.NONE;
+        mSource = source;
     }
 
     /**
@@ -154,6 +157,14 @@ public class MostVisitedItem implements OnCreateContextMenuListener,
         mTileType = type;
     }
 
+    /**
+     * @return The source of this item.  Used for metrics tracking. Valid values are listed in
+     * {@link MostVisitedSource}.
+     */
+    public int getSource() {
+        return mSource;
+    }
+
     @Override
     public void onCreateContextMenu(ContextMenu menu, View v, ContextMenuInfo menuInfo) {
         mManager.onCreateContextMenu(menu, this);
@@ -166,6 +177,6 @@ public class MostVisitedItem implements OnCreateContextMenuListener,
 
     @Override
     public void onClick(View v) {
-        mManager.open(this);
+        mManager.openMostVisitedItem(this);
     }
 }

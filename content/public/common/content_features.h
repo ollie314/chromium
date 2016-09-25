@@ -17,26 +17,52 @@ namespace features {
 // All features in alphabetical order. The features should be documented
 // alongside the definition of their values in the .cc file.
 CONTENT_EXPORT extern const base::Feature kBrotliEncoding;
+CONTENT_EXPORT extern const base::Feature kCanvas2DImageChromium;
 CONTENT_EXPORT extern const base::Feature kCredentialManagementAPI;
-CONTENT_EXPORT extern const base::Feature kDownloadResumption;
+CONTENT_EXPORT extern const base::Feature kDefaultEnableGpuRasterization;
 CONTENT_EXPORT extern const base::Feature kDocumentWriteEvaluator;
-CONTENT_EXPORT extern const base::Feature kExperimentalFramework;
-CONTENT_EXPORT extern const base::Feature kNewMediaPlaybackUi;
+CONTENT_EXPORT extern const base::Feature kFeaturePolicy;
+CONTENT_EXPORT extern const base::Feature kFontCacheScaling;
+CONTENT_EXPORT extern const base::Feature
+    kFramebustingNeedsSameOriginOrUserGesture;
+CONTENT_EXPORT extern const base::Feature kGamepadExtensions;
 CONTENT_EXPORT extern const base::Feature kMediaDocumentDownloadButton;
+CONTENT_EXPORT extern const base::Feature kMemoryCoordinator;
+CONTENT_EXPORT extern const base::Feature kNewMediaPlaybackUi;
+CONTENT_EXPORT extern const base::Feature kNonValidatingReloadOnNormalReload;
 CONTENT_EXPORT extern const base::Feature kNonValidatingReloadOnRefreshContent;
-CONTENT_EXPORT extern const base::Feature kOptimizeIPCForSmallResource;
+CONTENT_EXPORT extern const base::Feature kOptimizeLoadingIPCForSmallResources;
+CONTENT_EXPORT extern const base::Feature kOriginTrials;
+CONTENT_EXPORT extern const base::Feature kParseHTMLOnMainThread;
+CONTENT_EXPORT extern const base::Feature kPassiveDocumentEventListeners;
+CONTENT_EXPORT extern const base::Feature kPassiveEventListenersDueToFling;
+CONTENT_EXPORT extern const base::Feature kPepper3DImageChromium;
+CONTENT_EXPORT extern const base::Feature kPointerEvents;
+CONTENT_EXPORT extern const base::Feature kPointerEventV1SpecCapturing;
+CONTENT_EXPORT extern const base::Feature kRafAlignedInputEvents;
 CONTENT_EXPORT extern const base::Feature kRenderingPipelineThrottling;
 CONTENT_EXPORT extern const base::Feature kScrollAnchoring;
+CONTENT_EXPORT extern const base::Feature kSpeculativeLaunchServiceWorker;
 CONTENT_EXPORT extern const base::Feature kStaleWhileRevalidate;
+CONTENT_EXPORT extern const base::Feature kTimerThrottlingForHiddenFrames;
 CONTENT_EXPORT extern const base::Feature kTokenBinding;
-CONTENT_EXPORT extern const base::Feature kWebFontsIntervention;
+CONTENT_EXPORT extern const base::Feature kTouchpadAndWheelScrollLatching;
+CONTENT_EXPORT extern const base::Feature kWebGLImageChromium;
 CONTENT_EXPORT extern const base::Feature kWebRtcEcdsaDefault;
 CONTENT_EXPORT extern const base::Feature kWebUsb;
+CONTENT_EXPORT
+extern const base::Feature kSendBeaconThrowForBlobWithNonSimpleType;
 
 #if defined(OS_ANDROID)
+CONTENT_EXPORT extern const base::Feature kAutoplayMutedVideos;
 CONTENT_EXPORT extern const base::Feature kImeThread;
 CONTENT_EXPORT extern const base::Feature kSeccompSandboxAndroid;
+CONTENT_EXPORT extern const base::Feature kWebPayments;
 #endif  // defined(OS_ANDROID)
+
+#if defined(OS_WIN)
+CONTENT_EXPORT extern const base::Feature kWinSboxDisableExtensionPoints;
+#endif  // defined(OS_WIN)
 
 // DON'T ADD RANDOM STUFF HERE. Put it in the main section above in
 // alphabetical order, or in one of the ifdefs (also in order in each section).

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/time/time.h"
 #include "pdf/document_loader.h"
 #include "pdf/pdf_engine.h"
@@ -84,20 +85,29 @@ class PDFiumEngine : public PDFEngine,
   int GetNamedDestinationPage(const std::string& destination) override;
   int GetMostVisiblePage() override;
   pp::Rect GetPageRect(int index) override;
+  pp::Rect GetPageBoundsRect(int index) override;
   pp::Rect GetPageContentsRect(int index) override;
   pp::Rect GetPageScreenRect(int page_index) const override;
-  int GetVerticalScrollbarYPosition() override { return position_.y(); }
+  int GetVerticalScrollbarYPosition() override;
   void SetGrayscale(bool grayscale) override;
   void OnCallback(int id) override;
-  std::string GetPageAsJSON(int index) override;
+  int GetCharCount(int page_index) override;
+  pp::FloatRect GetCharBounds(int page_index, int char_index) override;
+  uint32_t GetCharUnicode(int page_index, int char_index) override;
+  void GetTextRunInfo(int page_index,
+                      int start_char_index,
+                      uint32_t* out_len,
+                      double* out_font_size,
+                      pp::FloatRect* out_bounds) override;
   bool GetPrintScaling() override;
   int GetCopiesToPrint() override;
   int GetDuplexType() override;
   bool GetPageSizeAndUniformity(pp::Size* size) override;
   void AppendBlankPages(int num_pages) override;
   void AppendPage(PDFEngine* engine, int index) override;
-  pp::Point GetScrollPosition() override;
+#if defined(PDF_ENABLE_XFA)
   void SetScrollPosition(const pp::Point& position) override;
+#endif
   bool IsProgressiveLoad() override;
   std::string GetMetadata(const std::string& key) override;
 
@@ -204,15 +214,12 @@ class PDFiumEngine : public PDFEngine,
   void LoadDocument();
 
   // Try loading the document. Returns true if the document is successfully
-  // loaded or is already loaded otherwise it will return false. If
-  // |with_password| is set to true, the document will be loaded with
-  // |password|. If the document could not be loaded and needs a password,
-  // |needs_password| will be set to true.
-  bool TryLoadingDoc(bool with_password,
-                     const std::string& password,
-                     bool* needs_password);
+  // loaded or is already loaded otherwise it will return false. If there is a
+  // password, then |password| is non-empty. If the document could not be loaded
+  // and needs a password, |needs_password| will be set to true.
+  bool TryLoadingDoc(const std::string& password, bool* needs_password);
 
-  // Ask the user for the document password and then continue loading the
+  // Asks the user for the document password and then continue loading the
   // document.
   void GetPasswordAndLoad();
 
@@ -221,26 +228,32 @@ class PDFiumEngine : public PDFEngine,
                              const pp::Var& password);
 
   // Continues loading the document when the password has been retrieved, or if
-  // there is no password.
-  void ContinueLoadingDocument(bool has_password,
-                               const std::string& password);
+  // there is no password. If there is no password, then |password| is empty.
+  void ContinueLoadingDocument(const std::string& password);
 
-  // Finish loading the document and notify the client that the document has
-  // been loaded. This should only be run after |doc_| has been loaded and the
-  // document is fully downloaded. If this has been run once, it will result in
-  // a no-op.
+  // Finishes loading the document. Recalculate the document size if there were
+  // pages that were not previously available.
+  // Also notifies the client that the document has been loaded.
+  // This should only be called after |doc_| has been loaded and the document is
+  // fully downloaded.
+  // If this has been run once, it will not notify the client again.
   void FinishLoadingDocument();
 
   // Loads information about the pages in the document and calculate the
   // document size.
   void LoadPageInfo(bool reload);
 
-  // Calculate which pages should be displayed right now.
+  // Calculates which pages should be displayed right now.
   void CalculateVisiblePages();
 
   // Returns true iff the given page index is visible.  CalculateVisiblePages
   // must have been called first.
   bool IsPageVisible(int index) const;
+
+  // Internal interface that caches the page index requested by PDFium to get
+  // scrolled to. The cache is to be be used during the interval the PDF
+  // plugin has not finished handling the scroll request.
+  void ScrollToPage(int page);
 
   // Checks if a page is now available, and if so marks it as such and returns
   // true.  Otherwise, it will return false and will add the index to the given
@@ -507,7 +520,7 @@ class PDFiumEngine : public PDFEngine,
   static void Form_GotoPage(IPDF_JSPLATFORM* param, int page_number);
   static int Form_Browse(IPDF_JSPLATFORM* param, void* file_path, int length);
 
-#ifdef PDF_USE_XFA
+#if defined(PDF_ENABLE_XFA)
   static void Form_EmailTo(FPDF_FORMFILLINFO* param,
                            FPDF_FILEHANDLER* file_handler,
                            FPDF_WIDESTRING to,
@@ -569,7 +582,7 @@ class PDFiumEngine : public PDFEngine,
   static int Form_GetLanguage(FPDF_FORMFILLINFO* param,
                               void* language,
                               int length);
-#endif  // PDF_USE_XFA
+#endif  // defined(PDF_ENABLE_XFA)
 
   // IFSDK_PAUSE callbacks
   static FPDF_BOOL Pause_NeedToPauseNow(IFSDK_PAUSE* param);
@@ -664,12 +677,16 @@ class PDFiumEngine : public PDFEngine,
   std::map<int, std::pair<int, TimerCallback> > timers_;
   int next_timer_id_;
 
-  // Holds the page index of the last page that the mouse clicked on.
+  // Holds the zero-based page index of the last page that the mouse clicked on.
   int last_page_mouse_down_;
 
-  // Holds the page index of the most visible page; refreshed by calling
-  // CalculateVisiblePages()
+  // Holds the zero-based page index of the most visible page; refreshed by
+  // calling CalculateVisiblePages()
   int most_visible_page_;
+
+  // Holds the page index requested by PDFium while the scroll operation
+  // is being handled (asynchronously).
+  base::Optional<int> in_flight_visible_page_;
 
   // Set to true after FORM_DoDocumentJSAction/FORM_DoDocumentOpenAction have
   // been called. Only after that can we call FORM_DoPageAAction.
@@ -681,6 +698,9 @@ class PDFiumEngine : public PDFEngine,
 
   // Whether to render in grayscale or in color.
   bool render_grayscale_;
+
+  // Whether to render PDF annotations.
+  bool render_annots_;
 
   // The link currently under the cursor.
   std::string link_under_cursor_;
@@ -719,9 +739,9 @@ class ScopedUnsupportedFeature {
  public:
   explicit ScopedUnsupportedFeature(PDFiumEngine* engine);
   ~ScopedUnsupportedFeature();
+
  private:
-  PDFiumEngine* engine_;
-  PDFiumEngine* old_engine_;
+  PDFiumEngine* const old_engine_;
 };
 
 class PDFiumEngineExports : public PDFEngineExports {
@@ -735,6 +755,10 @@ class PDFiumEngineExports : public PDFEngineExports {
                          int page_number,
                          const RenderingSettings& settings,
                          HDC dc) override;
+  void SetPDFEnsureTypefaceCharactersAccessible(
+      PDFEnsureTypefaceCharactersAccessible func) override;
+
+  void SetPDFUseGDIPrinting(bool enable) override;
 #endif  // defined(OS_WIN)
   bool RenderPDFPageToBitmap(const void* pdf_buffer,
                              int pdf_buffer_size,

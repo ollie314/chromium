@@ -43,6 +43,7 @@ class MediaQuerySet;
 class CORE_EXPORT MediaQueryList final : public EventTargetWithInlineData, public ActiveScriptWrappable, public ActiveDOMObject {
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(MediaQueryList);
+    WTF_MAKE_NONCOPYABLE(MediaQueryList);
 public:
     static MediaQueryList* create(ExecutionContext*, MediaQueryMatcher*, MediaQuerySet*);
     ~MediaQueryList() override;
@@ -66,7 +67,7 @@ public:
 
     DECLARE_VIRTUAL_TRACE();
 
-    // From ActiveScriptWrappable
+    // From ScriptWrappable
     bool hasPendingActivity() const final;
 
     // From ActiveDOMObject

@@ -6,18 +6,21 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_input.h"
@@ -271,7 +274,7 @@ class AutocompleteProviderTest : public testing::Test {
   void ResetControllerWithType(int type);
 
   base::MessageLoop message_loop_;
-  scoped_ptr<AutocompleteController> controller_;
+  std::unique_ptr<AutocompleteController> controller_;
   // Owned by |controller_|.
   AutocompleteProviderClientWithClosure* client_;
   // Used to ensure that |client_| ownership has been passed to |controller_|
@@ -285,7 +288,7 @@ AutocompleteProviderTest::AutocompleteProviderTest()
     : client_(new AutocompleteProviderClientWithClosure()),
       client_owned_(false) {
   client_->set_template_url_service(
-      make_scoped_ptr(new TemplateURLService(nullptr, 0)));
+      base::MakeUnique<TemplateURLService>(nullptr, 0));
 }
 
 AutocompleteProviderTest::~AutocompleteProviderTest() {
@@ -299,12 +302,12 @@ void AutocompleteProviderTest::RegisterTemplateURL(
   data.SetURL(template_url);
   data.SetShortName(keyword);
   data.SetKeyword(keyword);
-  TemplateURL* default_t_url = new TemplateURL(data);
   TemplateURLService* turl_model = client_->GetTemplateURLService();
-  turl_model->Add(default_t_url);
-  turl_model->SetUserSelectedDefaultSearchProvider(default_t_url);
+  TemplateURL* default_turl =
+      turl_model->Add(base::MakeUnique<TemplateURL>(data));
+  turl_model->SetUserSelectedDefaultSearchProvider(default_turl);
   turl_model->Load();
-  TemplateURLID default_provider_id = default_t_url->id();
+  TemplateURLID default_provider_id = default_turl->id();
   ASSERT_NE(0, default_provider_id);
 }
 
@@ -364,11 +367,11 @@ void AutocompleteProviderTest::ResetControllerWithKeywordAndSearchProviders() {
   data.SetShortName(base::ASCIIToUTF16("default"));
   data.SetKeyword(base::ASCIIToUTF16("default"));
   data.SetURL("http://defaultturl/{searchTerms}");
-  TemplateURL* default_t_url = new TemplateURL(data);
   TemplateURLService* turl_model = client_->GetTemplateURLService();
-  turl_model->Add(default_t_url);
-  turl_model->SetUserSelectedDefaultSearchProvider(default_t_url);
-  TemplateURLID default_provider_id = default_t_url->id();
+  TemplateURL* default_turl =
+      turl_model->Add(base::MakeUnique<TemplateURL>(data));
+  turl_model->SetUserSelectedDefaultSearchProvider(default_turl);
+  TemplateURLID default_provider_id = default_turl->id();
   ASSERT_NE(0, default_provider_id);
 
   // Create another TemplateURL for KeywordProvider.
@@ -376,9 +379,9 @@ void AutocompleteProviderTest::ResetControllerWithKeywordAndSearchProviders() {
   data2.SetShortName(base::ASCIIToUTF16("k"));
   data2.SetKeyword(base::ASCIIToUTF16("k"));
   data2.SetURL("http://keyword/{searchTerms}");
-  TemplateURL* keyword_t_url = new TemplateURL(data2);
-  turl_model->Add(keyword_t_url);
-  ASSERT_NE(0, keyword_t_url->id());
+  TemplateURL* keyword_turl =
+      turl_model->Add(base::MakeUnique<TemplateURL>(data2));
+  ASSERT_NE(0, keyword_turl->id());
 
   ResetControllerWithType(AutocompleteProvider::TYPE_KEYWORD |
                           AutocompleteProvider::TYPE_SEARCH);
@@ -392,26 +395,24 @@ void AutocompleteProviderTest::ResetControllerWithKeywordProvider() {
   data.SetShortName(base::ASCIIToUTF16("foo.com"));
   data.SetKeyword(base::ASCIIToUTF16("foo.com"));
   data.SetURL("http://foo.com/{searchTerms}");
-  TemplateURL* keyword_t_url = new TemplateURL(data);
-  turl_model->Add(keyword_t_url);
-  ASSERT_NE(0, keyword_t_url->id());
+  TemplateURL* keyword_turl =
+      turl_model->Add(base::MakeUnique<TemplateURL>(data));
+  ASSERT_NE(0, keyword_turl->id());
 
   // Make a TemplateURL for KeywordProvider that a shorter version of the
   // first.
   data.SetShortName(base::ASCIIToUTF16("f"));
   data.SetKeyword(base::ASCIIToUTF16("f"));
   data.SetURL("http://f.com/{searchTerms}");
-  keyword_t_url = new TemplateURL(data);
-  turl_model->Add(keyword_t_url);
-  ASSERT_NE(0, keyword_t_url->id());
+  keyword_turl = turl_model->Add(base::MakeUnique<TemplateURL>(data));
+  ASSERT_NE(0, keyword_turl->id());
 
   // Create another TemplateURL for KeywordProvider.
   data.SetShortName(base::ASCIIToUTF16("bar.com"));
   data.SetKeyword(base::ASCIIToUTF16("bar.com"));
   data.SetURL("http://bar.com/{searchTerms}");
-  keyword_t_url = new TemplateURL(data);
-  turl_model->Add(keyword_t_url);
-  ASSERT_NE(0, keyword_t_url->id());
+  keyword_turl = turl_model->Add(base::MakeUnique<TemplateURL>(data));
+  ASSERT_NE(0, keyword_turl->id());
 
   ResetControllerWithType(AutocompleteProvider::TYPE_KEYWORD);
 }
@@ -419,7 +420,7 @@ void AutocompleteProviderTest::ResetControllerWithKeywordProvider() {
 void AutocompleteProviderTest::ResetControllerWithType(int type) {
   EXPECT_FALSE(client_owned_);
   controller_.reset(
-      new AutocompleteController(make_scoped_ptr(client_), nullptr, type));
+      new AutocompleteController(base::WrapUnique(client_), nullptr, type));
   client_owned_ = true;
 }
 
@@ -495,7 +496,7 @@ void AutocompleteProviderTest::RunQuery(const std::string& query,
   if (!controller_->done())
     // The message loop will terminate when all autocomplete input has been
     // collected.
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
 }
 
 void AutocompleteProviderTest::RunExactKeymatchTest(

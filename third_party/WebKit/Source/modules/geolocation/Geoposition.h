@@ -30,6 +30,7 @@
 #include "modules/EventModules.h"
 #include "modules/geolocation/Coordinates.h"
 #include "platform/heap/Handle.h"
+#include "wtf/Assertions.h"
 
 namespace blink {
 
@@ -47,14 +48,14 @@ public:
     }
 
     DOMTimeStamp timestamp() const { return m_timestamp; }
-    Coordinates* coords() const { return m_coordinates.get(); }
+    Coordinates* coords() const { return m_coordinates; }
 
 private:
     Geoposition(Coordinates* coordinates, DOMTimeStamp timestamp)
         : m_coordinates(coordinates)
         , m_timestamp(timestamp)
     {
-        ASSERT(m_coordinates);
+        DCHECK(m_coordinates);
     }
 
     Member<Coordinates> m_coordinates;

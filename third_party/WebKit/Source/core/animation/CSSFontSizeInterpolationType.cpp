@@ -4,21 +4,42 @@
 
 #include "core/animation/CSSFontSizeInterpolationType.h"
 
-#include "core/animation/CSSLengthInterpolationType.h"
+#include "core/animation/LengthInterpolationFunctions.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/resolver/StyleResolverState.h"
 #include "platform/LengthFunctions.h"
 #include "platform/fonts/FontDescription.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
 namespace {
 
+class IsMonospaceChecker : public InterpolationType::ConversionChecker {
+public:
+    static std::unique_ptr<IsMonospaceChecker> create(bool isMonospace)
+    {
+        return wrapUnique(new IsMonospaceChecker(isMonospace));
+    }
+private:
+    IsMonospaceChecker(bool isMonospace)
+        : m_isMonospace(isMonospace)
+    { }
+
+    bool isValid(const InterpolationEnvironment& environment, const InterpolationValue&) const final
+    {
+        return m_isMonospace == environment.state().style()->getFontDescription().isMonospace();
+    }
+
+    const bool m_isMonospace;
+};
+
 class InheritedFontSizeChecker : public InterpolationType::ConversionChecker {
 public:
-    static PassOwnPtr<InheritedFontSizeChecker> create(const FontDescription::Size& inheritedFontSize)
+    static std::unique_ptr<InheritedFontSizeChecker> create(const FontDescription::Size& inheritedFontSize)
     {
-        return adoptPtr(new InheritedFontSizeChecker(inheritedFontSize));
+        return wrapUnique(new InheritedFontSizeChecker(inheritedFontSize));
     }
 
 private:
@@ -36,21 +57,22 @@ private:
 
 InterpolationValue convertFontSize(float size)
 {
-    return InterpolationValue(CSSLengthInterpolationType::createInterpolablePixels(size));
+    return InterpolationValue(LengthInterpolationFunctions::createInterpolablePixels(size));
 }
 
-InterpolationValue maybeConvertKeyword(CSSValueID valueID, const StyleResolverState& state, InterpolationType::ConversionCheckers* conversionCheckers)
+InterpolationValue maybeConvertKeyword(CSSValueID valueID, const StyleResolverState& state, InterpolationType::ConversionCheckers& conversionCheckers)
 {
     if (FontSize::isValidValueID(valueID)) {
-        // TODO(alancutter): Be responsive to changes in isMonospace().
-        return convertFontSize(state.fontBuilder().fontSizeForKeyword(FontSize::keywordSize(valueID), state.style()->getFontDescription().isMonospace()));
+        bool isMonospace = state.style()->getFontDescription().isMonospace();
+        conversionCheckers.append(IsMonospaceChecker::create(isMonospace));
+        return convertFontSize(state.fontBuilder().fontSizeForKeyword(FontSize::keywordSize(valueID), isMonospace));
     }
 
     if (valueID != CSSValueSmaller && valueID != CSSValueLarger)
         return nullptr;
 
     const FontDescription::Size& inheritedFontSize = state.parentFontDescription().getSize();
-    conversionCheckers->append(InheritedFontSizeChecker::create(inheritedFontSize));
+    conversionCheckers.append(InheritedFontSizeChecker::create(inheritedFontSize));
     if (valueID == CSSValueSmaller)
         return convertFontSize(FontDescription::smallerSize(inheritedFontSize).value);
     return convertFontSize(FontDescription::largerSize(inheritedFontSize).value);
@@ -60,12 +82,12 @@ InterpolationValue maybeConvertKeyword(CSSValueID valueID, const StyleResolverSt
 
 InterpolationValue CSSFontSizeInterpolationType::maybeConvertNeutral(const InterpolationValue&, ConversionCheckers&) const
 {
-    return InterpolationValue(CSSLengthInterpolationType::createNeutralInterpolableValue());
+    return InterpolationValue(LengthInterpolationFunctions::createNeutralInterpolableValue());
 }
 
-InterpolationValue CSSFontSizeInterpolationType::maybeConvertInitial(const StyleResolverState& state) const
+InterpolationValue CSSFontSizeInterpolationType::maybeConvertInitial(const StyleResolverState& state, ConversionCheckers& conversionCheckers) const
 {
-    return maybeConvertKeyword(FontSize::initialValueID(), state, nullptr);
+    return maybeConvertKeyword(FontSize::initialValueID(), state, conversionCheckers);
 }
 
 InterpolationValue CSSFontSizeInterpolationType::maybeConvertInherit(const StyleResolverState& state, ConversionCheckers& conversionCheckers) const
@@ -77,14 +99,14 @@ InterpolationValue CSSFontSizeInterpolationType::maybeConvertInherit(const Style
 
 InterpolationValue CSSFontSizeInterpolationType::maybeConvertValue(const CSSValue& value, const StyleResolverState& state, ConversionCheckers& conversionCheckers) const
 {
-    OwnPtr<InterpolableValue> result = CSSLengthInterpolationType::maybeConvertCSSValue(value).interpolableValue.release();
+    std::unique_ptr<InterpolableValue> result = LengthInterpolationFunctions::maybeConvertCSSValue(value).interpolableValue;
     if (result)
-        return InterpolationValue(result.release());
+        return InterpolationValue(std::move(result));
 
     if (!value.isPrimitiveValue() || !toCSSPrimitiveValue(value).isValueID())
         return nullptr;
 
-    return maybeConvertKeyword(toCSSPrimitiveValue(value).getValueID(), state, &conversionCheckers);
+    return maybeConvertKeyword(toCSSPrimitiveValue(value).getValueID(), state, conversionCheckers);
 }
 
 InterpolationValue CSSFontSizeInterpolationType::maybeConvertUnderlyingValue(const InterpolationEnvironment& environment) const
@@ -95,9 +117,9 @@ InterpolationValue CSSFontSizeInterpolationType::maybeConvertUnderlyingValue(con
 void CSSFontSizeInterpolationType::apply(const InterpolableValue& interpolableValue, const NonInterpolableValue*, InterpolationEnvironment& environment) const
 {
     const FontDescription& parentFont = environment.state().parentFontDescription();
-    Length fontSizeLength = CSSLengthInterpolationType::resolveInterpolableLength(interpolableValue, nullptr, environment.state().fontSizeConversionData(), ValueRangeNonNegative);
+    Length fontSizeLength = LengthInterpolationFunctions::createLength(interpolableValue, nullptr, environment.state().fontSizeConversionData(), ValueRangeNonNegative);
     float fontSize = floatValueForLength(fontSizeLength, parentFont.getSize().value);
-    environment.state().fontBuilder().setSize(FontDescription::Size(0, fontSize, !fontSizeLength.hasPercent() || parentFont.isAbsoluteSize()));
+    environment.state().fontBuilder().setSize(FontDescription::Size(0, fontSize, !fontSizeLength.isPercentOrCalc() || parentFont.isAbsoluteSize()));
 }
 
 } // namespace blink

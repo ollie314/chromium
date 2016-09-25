@@ -4,9 +4,14 @@
 
 #include "chrome/browser/ui/ash/app_list/app_list_controller_ash.h"
 
+#include "ash/common/shelf/shelf_delegate.h"
+#include "ash/common/wm_shell.h"
 #include "ash/metrics/task_switch_metrics_recorder.h"
 #include "ash/shell.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_util.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "extensions/common/extension.h"
@@ -34,24 +39,28 @@ gfx::Rect AppListControllerDelegateAsh::GetAppListBounds() {
   return gfx::Rect();
 }
 
-bool AppListControllerDelegateAsh::IsAppPinned(
-    const std::string& extension_id) {
-  return ChromeLauncherController::instance()->IsAppPinned(extension_id);
+bool AppListControllerDelegateAsh::IsAppPinned(const std::string& app_id) {
+  return ash::WmShell::Get()->shelf_delegate()->IsAppPinned(app_id);
 }
 
-void AppListControllerDelegateAsh::PinApp(const std::string& extension_id) {
-  ChromeLauncherController::instance()->PinAppWithID(extension_id);
+bool AppListControllerDelegateAsh::IsAppOpen(const std::string& app_id) const {
+  ash::ShelfID id =
+      ash::WmShell::Get()->shelf_delegate()->GetShelfIDForAppID(app_id);
+  return id && ChromeLauncherController::instance()->IsOpen(id);
 }
 
-void AppListControllerDelegateAsh::UnpinApp(const std::string& extension_id) {
-  ChromeLauncherController::instance()->UnpinAppWithID(extension_id);
+void AppListControllerDelegateAsh::PinApp(const std::string& app_id) {
+  ash::WmShell::Get()->shelf_delegate()->PinAppWithID(app_id);
+}
+
+void AppListControllerDelegateAsh::UnpinApp(const std::string& app_id) {
+  ash::WmShell::Get()->shelf_delegate()->UnpinAppWithID(app_id);
 }
 
 AppListControllerDelegate::Pinnable AppListControllerDelegateAsh::GetPinnable(
-    const std::string& extension_id) {
-  return ChromeLauncherController::instance()->CanPin(extension_id)
-             ? PIN_EDITABLE
-             : PIN_FIXED;
+    const std::string& app_id) {
+  return GetPinnableForAppID(
+      app_id, ChromeLauncherController::instance()->GetProfile());
 }
 
 void AppListControllerDelegateAsh::OnShowChildDialog() {
@@ -79,9 +88,9 @@ void AppListControllerDelegateAsh::DoCreateShortcutsFlow(
 void AppListControllerDelegateAsh::CreateNewWindow(Profile* profile,
                                                    bool incognito) {
   if (incognito)
-    ChromeLauncherController::instance()->CreateNewIncognitoWindow();
+    chrome::NewEmptyWindow(profile->GetOffTheRecordProfile());
   else
-    ChromeLauncherController::instance()->CreateNewWindow();
+    chrome::NewEmptyWindow(profile);
 }
 
 void AppListControllerDelegateAsh::OpenURL(Profile* profile,
@@ -98,10 +107,13 @@ void AppListControllerDelegateAsh::ActivateApp(
     const extensions::Extension* extension,
     AppListSource source,
     int event_flags) {
-  ash::Shell::GetInstance()
-      ->metrics()
-      ->task_switch_metrics_recorder()
-      .OnTaskSwitch(ash::TaskSwitchMetricsRecorder::APP_LIST);
+  // TODO(mfomitchev): Figure this out for Mustash - crbug.com/616581
+  if (ash::Shell::HasInstance()) {
+    ash::Shell::GetInstance()
+        ->metrics()
+        ->task_switch_metrics_recorder()
+        .OnTaskSwitch(ash::TaskSwitchSource::APP_LIST);
+  }
 
   // Platform apps treat activations as a launch. The app can decide whether to
   // show a new window or focus an existing window as it sees fit.

@@ -9,34 +9,34 @@ namespace blink {
 String Timing::fillModeString(FillMode fillMode)
 {
     switch (fillMode) {
-    case Timing::FillModeNone:
+    case FillMode::NONE:
         return "none";
-    case Timing::FillModeForwards:
+    case FillMode::FORWARDS:
         return "forwards";
-    case Timing::FillModeBackwards:
+    case FillMode::BACKWARDS:
         return "backwards";
-    case Timing::FillModeBoth:
+    case FillMode::BOTH:
         return "both";
-    case Timing::FillModeAuto:
+    case FillMode::AUTO:
         return "auto";
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return "none";
 }
 
 String Timing::playbackDirectionString(PlaybackDirection playbackDirection)
 {
     switch (playbackDirection) {
-    case Timing::PlaybackDirectionNormal:
+    case PlaybackDirection::NORMAL:
         return "normal";
-    case Timing::PlaybackDirectionReverse:
+    case PlaybackDirection::REVERSE:
         return "reverse";
-    case Timing::PlaybackDirectionAlternate:
+    case PlaybackDirection::ALTERNATE_NORMAL:
         return "alternate";
-    case Timing::PlaybackDirectionAlternateReverse:
+    case PlaybackDirection::ALTERNATE_REVERSE:
         return "alternate-reverse";
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return "normal";
 }
 

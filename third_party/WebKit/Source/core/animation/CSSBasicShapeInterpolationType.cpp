@@ -10,6 +10,8 @@
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/style/BasicShapes.h"
 #include "core/style/DataEquivalency.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -17,9 +19,9 @@ namespace {
 
 class UnderlyingCompatibilityChecker : public InterpolationType::ConversionChecker {
 public:
-    static PassOwnPtr<UnderlyingCompatibilityChecker> create(PassRefPtr<NonInterpolableValue> underlyingNonInterpolableValue)
+    static std::unique_ptr<UnderlyingCompatibilityChecker> create(PassRefPtr<NonInterpolableValue> underlyingNonInterpolableValue)
     {
-        return adoptPtr(new UnderlyingCompatibilityChecker(underlyingNonInterpolableValue));
+        return wrapUnique(new UnderlyingCompatibilityChecker(std::move(underlyingNonInterpolableValue)));
     }
 
 private:
@@ -37,9 +39,9 @@ private:
 
 class InheritedShapeChecker : public InterpolationType::ConversionChecker {
 public:
-    static PassOwnPtr<InheritedShapeChecker> create(CSSPropertyID property, PassRefPtr<BasicShape> inheritedShape)
+    static std::unique_ptr<InheritedShapeChecker> create(CSSPropertyID property, PassRefPtr<BasicShape> inheritedShape)
     {
-        return adoptPtr(new InheritedShapeChecker(property, inheritedShape));
+        return wrapUnique(new InheritedShapeChecker(property, std::move(inheritedShape)));
     }
 
 private:
@@ -67,7 +69,7 @@ InterpolationValue CSSBasicShapeInterpolationType::maybeConvertNeutral(const Int
     return InterpolationValue(BasicShapeInterpolationFunctions::createNeutralValue(*underlying.nonInterpolableValue), nonInterpolableValue);
 }
 
-InterpolationValue CSSBasicShapeInterpolationType::maybeConvertInitial(const StyleResolverState&) const
+InterpolationValue CSSBasicShapeInterpolationType::maybeConvertInitial(const StyleResolverState&, ConversionCheckers&) const
 {
     return BasicShapeInterpolationFunctions::maybeConvertBasicShape(
         BasicShapePropertyFunctions::getInitialBasicShape(cssProperty()), 1);
@@ -89,14 +91,14 @@ InterpolationValue CSSBasicShapeInterpolationType::maybeConvertValue(const CSSVa
     const CSSValueList& list = toCSSValueList(value);
     if (list.length() != 1)
         return nullptr;
-    return BasicShapeInterpolationFunctions::maybeConvertCSSValue(*list.item(0));
+    return BasicShapeInterpolationFunctions::maybeConvertCSSValue(list.item(0));
 }
 
-PairwiseInterpolationValue CSSBasicShapeInterpolationType::mergeSingleConversions(InterpolationValue&& start, InterpolationValue&& end) const
+PairwiseInterpolationValue CSSBasicShapeInterpolationType::maybeMergeSingles(InterpolationValue&& start, InterpolationValue&& end) const
 {
     if (!BasicShapeInterpolationFunctions::shapesAreCompatible(*start.nonInterpolableValue, *end.nonInterpolableValue))
         return nullptr;
-    return PairwiseInterpolationValue(start.interpolableValue.release(), end.interpolableValue.release(), start.nonInterpolableValue.release());
+    return PairwiseInterpolationValue(std::move(start.interpolableValue), std::move(end.interpolableValue), start.nonInterpolableValue.release());
 }
 
 InterpolationValue CSSBasicShapeInterpolationType::maybeConvertUnderlyingValue(const InterpolationEnvironment& environment) const

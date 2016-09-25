@@ -10,7 +10,7 @@
 #include "base/run_loop.h"
 #include "base/scoped_observer.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser.h"
@@ -73,16 +73,6 @@ class TestResourceDispatcherHostDelegate
         bypassed_cache_ = true;
     }
   }
-
-  void DownloadStarting(
-      net::URLRequest* request,
-      content::ResourceContext* resource_context,
-      int child_id,
-      int route_id,
-      int request_id,
-      bool is_content_initiated,
-      bool must_download,
-      ScopedVector<content::ResourceThrottle>* throttles) override {}
 
  private:
   GURL url_;
@@ -218,7 +208,8 @@ IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest, ReloadBypassingCache) {
   {
     PendingTaskWaiter waiter(web_contents(), this);
     ui_test_utils::NavigateToURLWithDisposition(
-        browser(), url, CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
+        browser(), url, WindowOpenDisposition::CURRENT_TAB,
+        ui_test_utils::BROWSER_TEST_NONE);
     waiter.Wait();
   }
   ASSERT_TRUE(delegate->was_requested());
@@ -232,7 +223,8 @@ IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest, ReloadBypassingCache) {
   {
     PendingTaskWaiter waiter(web_contents(), this);
     ui_test_utils::NavigateToURLWithDisposition(
-        browser(), url, CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
+        browser(), url, WindowOpenDisposition::CURRENT_TAB,
+        ui_test_utils::BROWSER_TEST_NONE);
     waiter.Wait();
   }
   EXPECT_FALSE(delegate->bypassed_cache());

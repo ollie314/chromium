@@ -28,8 +28,6 @@
 #include "content/public/browser/download_url_parameters.h"
 #include "content/public/common/content_features.h"
 #include "content/public/test/mock_download_item.h"
-#include "content/public/test/mock_download_item.h"
-#include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/web_contents_tester.h"
@@ -246,12 +244,6 @@ class DownloadItemTest : public testing::Test {
  public:
   DownloadItemTest()
       : delegate_(), next_download_id_(DownloadItem::kInvalidId + 1) {
-    base::FeatureList::ClearInstanceForTesting();
-    std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-    feature_list->InitializeFromCommandLine(features::kDownloadResumption.name,
-                                            std::string());
-    base::FeatureList::SetInstance(std::move(feature_list));
-
     create_info_.reset(new DownloadCreateInfo());
     create_info_->save_info =
         std::unique_ptr<DownloadSaveInfo>(new DownloadSaveInfo());
@@ -262,13 +254,14 @@ class DownloadItemTest : public testing::Test {
 
   ~DownloadItemTest() {
     RunAllPendingInMessageLoops();
-    STLDeleteElements(&allocated_downloads_);
+    base::STLDeleteElements(&allocated_downloads_);
   }
 
   DownloadItemImpl* CreateDownloadItemWithCreateInfo(
       std::unique_ptr<DownloadCreateInfo> info) {
-    DownloadItemImpl* download = new DownloadItemImpl(
-        &delegate_, next_download_id_++, *(info.get()), net::BoundNetLog());
+    DownloadItemImpl* download =
+        new DownloadItemImpl(&delegate_, next_download_id_++, *(info.get()),
+                             net::NetLogWithSource());
     allocated_downloads_.insert(download);
     return download;
   }
@@ -280,7 +273,7 @@ class DownloadItemTest : public testing::Test {
     create_info_->download_id = ++next_download_id_;
     DownloadItemImpl* download =
         new DownloadItemImpl(&delegate_, create_info_->download_id,
-                             *create_info_, net::BoundNetLog());
+                             *create_info_, net::NetLogWithSource());
     allocated_downloads_.insert(download);
     return download;
   }
@@ -402,12 +395,12 @@ class DownloadItemTest : public testing::Test {
   BrowserContext* browser_context() { return &browser_context_; }
 
  private:
+  TestBrowserThreadBundle thread_bundle_;
   StrictMock<MockDelegate> delegate_;
   std::set<DownloadItem*> allocated_downloads_;
   std::unique_ptr<DownloadCreateInfo> create_info_;
   uint32_t next_download_id_ = DownloadItem::kInvalidId + 1;
   TestBrowserContext browser_context_;
-  TestBrowserThreadBundle thread_bundle_;
 };
 
 // Tests to ensure calls that change a DownloadItem generate an update to
@@ -1317,10 +1310,12 @@ TEST_F(DownloadItemTest, EnabledActionsForNormalDownload) {
 }
 
 TEST_F(DownloadItemTest, EnabledActionsForTemporaryDownload) {
+  // A download created with a non-empty FilePath is considered a temporary
+  // download.
+  create_info()->save_info->file_path = base::FilePath(kDummyTargetPath);
   DownloadItemImpl* item = CreateDownloadItem();
   MockDownloadFile* download_file =
       DoIntermediateRename(item, DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS);
-  item->SetIsTemporary(true);
 
   // InProgress Temporary
   ASSERT_EQ(DownloadItem::IN_PROGRESS, item->GetState());

@@ -5,8 +5,8 @@
 #ifndef REMOTING_HOST_CLIENT_SESSION_H_
 #define REMOTING_HOST_CLIENT_SESSION_H_
 
-#include <stdint.h>
-
+#include <cstdint>
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -17,6 +17,7 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "remoting/host/client_session_control.h"
+#include "remoting/host/client_session_details.h"
 #include "remoting/host/host_extension_session_manager.h"
 #include "remoting/host/remote_input_filter.h"
 #include "remoting/protocol/clipboard_echo_filter.h"
@@ -29,6 +30,7 @@
 #include "remoting/protocol/input_stub.h"
 #include "remoting/protocol/mouse_input_filter.h"
 #include "remoting/protocol/pairing_registry.h"
+#include "remoting/protocol/video_stream.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 
 namespace base {
@@ -37,7 +39,7 @@ class SingleThreadTaskRunner;
 
 namespace remoting {
 
-class AudioPump;
+class AudioStream;
 class DesktopEnvironment;
 class DesktopEnvironmentFactory;
 class InputInjector;
@@ -53,7 +55,9 @@ class VideoLayout;
 class ClientSession : public base::NonThreadSafe,
                       public protocol::HostStub,
                       public protocol::ConnectionToClient::EventHandler,
-                      public ClientSessionControl {
+                      public protocol::VideoStream::Observer,
+                      public ClientSessionControl,
+                      public ClientSessionDetails {
  public:
   // Callback interface for passing events to the ChromotingHost.
   class EventHandler {
@@ -89,7 +93,6 @@ class ClientSession : public base::NonThreadSafe,
   // |event_handler| and |desktop_environment_factory| must outlive |this|.
   // All |HostExtension|s in |extensions| must outlive |this|.
   ClientSession(EventHandler* event_handler,
-                scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
                 std::unique_ptr<protocol::ConnectionToClient> connection,
                 DesktopEnvironmentFactory* desktop_environment_factory,
                 const base::TimeDelta& max_duration,
@@ -115,7 +118,7 @@ class ClientSession : public base::NonThreadSafe,
       protocol::ConnectionToClient* connection) override;
   void OnConnectionAuthenticated(
       protocol::ConnectionToClient* connection) override;
-  void CreateVideoStreams(protocol::ConnectionToClient* connection) override;
+  void CreateMediaStreams(protocol::ConnectionToClient* connection) override;
   void OnConnectionChannelsConnected(
       protocol::ConnectionToClient* connection) override;
   void OnConnectionClosed(protocol::ConnectionToClient* connection,
@@ -132,6 +135,10 @@ class ClientSession : public base::NonThreadSafe,
   void OnLocalMouseMoved(const webrtc::DesktopVector& position) override;
   void SetDisableInputs(bool disable_inputs) override;
 
+  // ClientSessionDetails interface.
+  uint32_t desktop_session_id() const override;
+  ClientSessionControl* session_control() override;
+
   protocol::ConnectionToClient* connection() const { return connection_.get(); }
 
   bool is_authenticated() { return is_authenticated_; }
@@ -144,8 +151,10 @@ class ClientSession : public base::NonThreadSafe,
   // Creates a proxy for sending clipboard events to the client.
   std::unique_ptr<protocol::ClipboardStub> CreateClipboardProxy();
 
-  void OnScreenSizeChanged(const webrtc::DesktopSize& size,
-                           const webrtc::DesktopVector& dpi);
+  // protocol::VideoStream::Observer implementation.
+  void OnVideoSizeChanged(protocol::VideoStream* stream,
+                          const webrtc::DesktopSize& size,
+                          const webrtc::DesktopVector& dpi) override;
 
   EventHandler* event_handler_;
 
@@ -194,11 +203,9 @@ class ClientSession : public base::NonThreadSafe,
   // is reached.
   base::OneShotTimer max_duration_timer_;
 
-  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
-
   // Objects responsible for sending video, audio and mouse shape.
-  std::unique_ptr<AudioPump> audio_pump_;
   std::unique_ptr<protocol::VideoStream> video_stream_;
+  std::unique_ptr<protocol::AudioStream> audio_stream_;
   std::unique_ptr<MouseShapePump> mouse_shape_pump_;
 
   // The set of all capabilities supported by the client.

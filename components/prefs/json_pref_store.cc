@@ -22,6 +22,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/task_runner_util.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/default_clock.h"
 #include "base/values.h"
@@ -33,7 +34,7 @@ struct JsonPrefStore::ReadResult {
   ReadResult();
   ~ReadResult();
 
-  scoped_ptr<base::Value> value;
+  std::unique_ptr<base::Value> value;
   PrefReadError error;
   bool no_dir;
 
@@ -109,7 +110,7 @@ void RecordJsonDataSizeHistogram(const base::FilePath& path, size_t size) {
   histogram->Add(static_cast<int>(size) / 1024);
 }
 
-scoped_ptr<JsonPrefStore::ReadResult> ReadPrefsFromDisk(
+std::unique_ptr<JsonPrefStore::ReadResult> ReadPrefsFromDisk(
     const base::FilePath& path,
     const base::FilePath& alternate_path) {
   if (!base::PathExists(path) && !alternate_path.empty() &&
@@ -119,7 +120,7 @@ scoped_ptr<JsonPrefStore::ReadResult> ReadPrefsFromDisk(
 
   int error_code;
   std::string error_msg;
-  scoped_ptr<JsonPrefStore::ReadResult> read_result(
+  std::unique_ptr<JsonPrefStore::ReadResult> read_result(
       new JsonPrefStore::ReadResult);
   JSONFileValueDeserializer deserializer(path);
   read_result->value = deserializer.Deserialize(&error_code, &error_msg);
@@ -149,7 +150,7 @@ scoped_refptr<base::SequencedTaskRunner> JsonPrefStore::GetTaskRunnerForFile(
 JsonPrefStore::JsonPrefStore(
     const base::FilePath& pref_filename,
     const scoped_refptr<base::SequencedTaskRunner>& sequenced_task_runner,
-    scoped_ptr<PrefFilter> pref_filter)
+    std::unique_ptr<PrefFilter> pref_filter)
     : JsonPrefStore(pref_filename,
                     base::FilePath(),
                     sequenced_task_runner,
@@ -159,7 +160,7 @@ JsonPrefStore::JsonPrefStore(
     const base::FilePath& pref_filename,
     const base::FilePath& pref_alternate_filename,
     const scoped_refptr<base::SequencedTaskRunner>& sequenced_task_runner,
-    scoped_ptr<PrefFilter> pref_filter)
+    std::unique_ptr<PrefFilter> pref_filter)
     : path_(pref_filename),
       alternate_path_(pref_alternate_filename),
       sequenced_task_runner_(sequenced_task_runner),
@@ -171,6 +172,8 @@ JsonPrefStore::JsonPrefStore(
       filtering_in_progress_(false),
       pending_lossy_write_(false),
       read_error_(PREF_READ_ERROR_NONE),
+      has_pending_successful_write_reply_(false),
+      has_pending_write_callback_(false),
       write_count_histogram_(writer_.commit_interval(), path_) {
   DCHECK(!path_.empty());
 }
@@ -220,7 +223,7 @@ bool JsonPrefStore::GetMutableValue(const std::string& key,
 }
 
 void JsonPrefStore::SetValue(const std::string& key,
-                             scoped_ptr<base::Value> value,
+                             std::unique_ptr<base::Value> value,
                              uint32_t flags) {
   DCHECK(CalledOnValidThread());
 
@@ -234,7 +237,7 @@ void JsonPrefStore::SetValue(const std::string& key,
 }
 
 void JsonPrefStore::SetValueSilently(const std::string& key,
-                                     scoped_ptr<base::Value> value,
+                                     std::unique_ptr<base::Value> value,
                                      uint32_t flags) {
   DCHECK(CalledOnValidThread());
 
@@ -323,23 +326,82 @@ void JsonPrefStore::ReportValueChanged(const std::string& key, uint32_t flags) {
   ScheduleWrite(flags);
 }
 
-void JsonPrefStore::RegisterOnNextSuccessfulWriteCallback(
-    const base::Closure& on_next_successful_write) {
+void JsonPrefStore::RunOrScheduleNextSuccessfulWriteCallback(
+    bool write_success) {
   DCHECK(CalledOnValidThread());
 
-  writer_.RegisterOnNextSuccessfulWriteCallback(on_next_successful_write);
+  has_pending_write_callback_ = false;
+  if (has_pending_successful_write_reply_) {
+    has_pending_successful_write_reply_ = false;
+    if (write_success) {
+      on_next_successful_write_reply_.Run();
+    } else {
+      RegisterOnNextSuccessfulWriteReply(on_next_successful_write_reply_);
+    }
+  }
+}
+
+// static
+void JsonPrefStore::PostWriteCallback(
+    const base::Callback<void(bool success)>& on_next_write_reply,
+    const base::Callback<void(bool success)>& on_next_write_callback,
+    scoped_refptr<base::SequencedTaskRunner> reply_task_runner,
+    bool write_success) {
+  if (!on_next_write_callback.is_null())
+    on_next_write_callback.Run(write_success);
+
+  // We can't run |on_next_write_reply| on the current thread. Bounce back to
+  // the |reply_task_runner| which is the correct sequenced thread.
+  reply_task_runner->PostTask(FROM_HERE,
+                              base::Bind(on_next_write_reply, write_success));
+}
+
+void JsonPrefStore::RegisterOnNextSuccessfulWriteReply(
+    const base::Closure& on_next_successful_write_reply) {
+  DCHECK(CalledOnValidThread());
+  DCHECK(!has_pending_successful_write_reply_);
+
+  has_pending_successful_write_reply_ = true;
+  on_next_successful_write_reply_ = on_next_successful_write_reply;
+
+  // If there already is a pending callback, avoid erasing it; the reply will
+  // be used as we set |on_next_successful_write_reply_|. Otherwise, setup a
+  // reply with an  empty callback.
+  if (!has_pending_write_callback_) {
+    writer_.RegisterOnNextWriteCallback(base::Bind(
+        &PostWriteCallback,
+        base::Bind(&JsonPrefStore::RunOrScheduleNextSuccessfulWriteCallback,
+                   AsWeakPtr()),
+        base::Callback<void(bool success)>(),
+        base::SequencedTaskRunnerHandle::Get()));
+  }
+}
+
+void JsonPrefStore::RegisterOnNextWriteSynchronousCallback(
+    const base::Callback<void(bool success)>& on_next_write_callback) {
+  DCHECK(CalledOnValidThread());
+  DCHECK(!has_pending_write_callback_);
+
+  has_pending_write_callback_ = true;
+
+  writer_.RegisterOnNextWriteCallback(base::Bind(
+      &PostWriteCallback,
+      base::Bind(&JsonPrefStore::RunOrScheduleNextSuccessfulWriteCallback,
+                 AsWeakPtr()),
+      on_next_write_callback, base::SequencedTaskRunnerHandle::Get()));
 }
 
 void JsonPrefStore::ClearMutableValues() {
   NOTIMPLEMENTED();
 }
 
-void JsonPrefStore::OnFileRead(scoped_ptr<ReadResult> read_result) {
+void JsonPrefStore::OnFileRead(std::unique_ptr<ReadResult> read_result) {
   DCHECK(CalledOnValidThread());
 
   DCHECK(read_result);
 
-  scoped_ptr<base::DictionaryValue> unfiltered_prefs(new base::DictionaryValue);
+  std::unique_ptr<base::DictionaryValue> unfiltered_prefs(
+      new base::DictionaryValue);
 
   read_error_ = read_result->error;
 
@@ -411,9 +473,10 @@ bool JsonPrefStore::SerializeData(std::string* output) {
   return serializer.Serialize(*prefs_);
 }
 
-void JsonPrefStore::FinalizeFileRead(bool initialization_successful,
-                                     scoped_ptr<base::DictionaryValue> prefs,
-                                     bool schedule_write) {
+void JsonPrefStore::FinalizeFileRead(
+    bool initialization_successful,
+    std::unique_ptr<base::DictionaryValue> prefs,
+    bool schedule_write) {
   DCHECK(CalledOnValidThread());
 
   filtering_in_progress_ = false;
@@ -460,23 +523,22 @@ const int32_t
 JsonPrefStore::WriteCountHistogram::WriteCountHistogram(
     const base::TimeDelta& commit_interval,
     const base::FilePath& path)
-    : WriteCountHistogram(commit_interval,
-                          path,
-                          scoped_ptr<base::Clock>(new base::DefaultClock)) {
-}
+    : WriteCountHistogram(
+          commit_interval,
+          path,
+          std::unique_ptr<base::Clock>(new base::DefaultClock)) {}
 
 JsonPrefStore::WriteCountHistogram::WriteCountHistogram(
     const base::TimeDelta& commit_interval,
     const base::FilePath& path,
-    scoped_ptr<base::Clock> clock)
+    std::unique_ptr<base::Clock> clock)
     : commit_interval_(commit_interval),
       path_(path),
       clock_(clock.release()),
       report_interval_(
           base::TimeDelta::FromMinutes(kHistogramWriteReportIntervalMins)),
       last_report_time_(clock_->Now()),
-      writes_since_last_report_(0) {
-}
+      writes_since_last_report_(0) {}
 
 JsonPrefStore::WriteCountHistogram::~WriteCountHistogram() {
   ReportOutstandingWrites();

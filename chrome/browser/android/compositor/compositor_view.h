@@ -57,10 +57,8 @@ class CompositorView : public content::CompositorClient,
  public:
   CompositorView(JNIEnv* env,
                  jobject obj,
-                 jint empty_background_color,
                  jboolean low_mem_device,
                  ui::WindowAndroid* window_android,
-                 LayerTitleCache* layer_title_cache,
                  TabContentManager* tab_content_manager);
 
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& object);
@@ -82,29 +80,6 @@ class CompositorView : public content::CompositorClient,
                          jfloat visible_x_offset,
                          jfloat visible_y_offset,
                          jfloat dp_to_pixel);
-  void UpdateToolbarLayer(JNIEnv* env,
-                          const base::android::JavaParamRef<jobject>& object,
-                          jint toolbar_resource_id,
-                          jint toolbar_background_color,
-                          jint url_bar_resource_id,
-                          jfloat url_bar_alpha,
-                          jfloat top_offset,
-                          jfloat brightness,
-                          bool visible,
-                          bool show_shadow);
-  void UpdateProgressBar(JNIEnv* env,
-                         const base::android::JavaParamRef<jobject>& object,
-                         jint progress_bar_x,
-                         jint progress_bar_y,
-                         jint progress_bar_width,
-                         jint progress_bar_height,
-                         jint progress_bar_color,
-                         jint progress_bar_background_x,
-                         jint progress_bar_background_y,
-                         jint progress_bar_background_width,
-                         jint progress_bar_background_height,
-                         jint progress_bar_background_color);
-
   void SurfaceCreated(JNIEnv* env,
                       const base::android::JavaParamRef<jobject>& object);
   void SurfaceDestroyed(JNIEnv* env,
@@ -141,11 +116,9 @@ class CompositorView : public content::CompositorClient,
 
   base::android::ScopedJavaGlobalRef<jobject> obj_;
   std::unique_ptr<content::Compositor> compositor_;
-  LayerTitleCache* layer_title_cache_;
   TabContentManager* tab_content_manager_;
 
   scoped_refptr<cc::SolidColorLayer> root_layer_;
-  scoped_refptr<ToolbarLayer> toolbar_layer_;
   SceneLayer* scene_layer_;
   scoped_refptr<cc::Layer> scene_layer_layer_;
 
@@ -153,7 +126,6 @@ class CompositorView : public content::CompositorClient,
   int content_width_;
   int content_height_;
   bool overlay_video_mode_;
-  SkColor empty_background_color_;
 
   base::WeakPtrFactory<CompositorView> weak_factory_;
 

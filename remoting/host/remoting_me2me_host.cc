@@ -5,8 +5,8 @@
 // This file implements a standalone host process for Me2Me.
 
 #include <stddef.h>
-#include <stdint.h>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -20,12 +20,14 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringize_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "components/policy/policy_constants.h"
 #include "ipc/attachment_broker_unprivileged.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -36,7 +38,6 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/ssl_server_socket.h"
 #include "net/url_request/url_fetcher.h"
-#include "policy/policy_constants.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/base/breakpad.h"
 #include "remoting/base/chromium_url_request.h"
@@ -61,6 +62,7 @@
 #include "remoting/host/host_event_logger.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/host_main.h"
+#include "remoting/host/host_power_save_blocker.h"
 #include "remoting/host/host_status_logger.h"
 #include "remoting/host/input_injector.h"
 #include "remoting/host/ipc_desktop_environment.h"
@@ -71,8 +73,8 @@
 #include "remoting/host/pairing_registry_delegate.h"
 #include "remoting/host/pin_hash.h"
 #include "remoting/host/policy_watcher.h"
-#include "remoting/host/security_key/gnubby_auth_handler.h"
-#include "remoting/host/security_key/gnubby_extension.h"
+#include "remoting/host/security_key/security_key_auth_handler.h"
+#include "remoting/host/security_key/security_key_extension.h"
 #include "remoting/host/service_urls.h"
 #include "remoting/host/shutdown_watchdog.h"
 #include "remoting/host/signaling_connector.h"
@@ -150,7 +152,7 @@ const char kStdinConfigPath[] = "-";
 const char kAudioPipeSwitchName[] = "audio-pipe-name";
 
 // The command line switch used to pass name of the unix domain socket used to
-// listen for gnubby requests.
+// listen for security key requests.
 const char kAuthSocknameSwitchName[] = "ssh-auth-sockname";
 #endif  // defined(OS_LINUX)
 
@@ -333,7 +335,7 @@ class HostProcess : public ConfigWatcher::Delegate,
 
 #if defined(OS_LINUX)
   // Watch for certificate changes and kill the host when changes occur
-  scoped_ptr<CertificateWatcher> cert_watcher_;
+  std::unique_ptr<CertificateWatcher> cert_watcher_;
 #endif
 
   // XMPP server/remoting bot configuration (initialized from the command line).
@@ -373,8 +375,8 @@ class HostProcess : public ConfigWatcher::Delegate,
 
   bool curtain_required_ = false;
   ThirdPartyAuthConfig third_party_auth_config_;
-  bool gnubby_auth_policy_enabled_ = false;
-  bool gnubby_extension_supported_ = false;
+  bool security_key_auth_policy_enabled_ = false;
+  bool security_key_extension_supported_ = false;
 
   // Boolean to change flow, where necessary, if we're
   // capturing a window instead of the entire desktop.
@@ -401,6 +403,7 @@ class HostProcess : public ConfigWatcher::Delegate,
       host_change_notification_listener_;
   std::unique_ptr<HostStatusLogger> host_status_logger_;
   std::unique_ptr<HostEventLogger> host_event_logger_;
+  std::unique_ptr<HostPowerSaveBlocker> power_save_blocker_;
 
   std::unique_ptr<ChromotingHost> host_;
 
@@ -473,15 +476,14 @@ bool HostProcess::InitWithCommandLine(const base::CommandLine* cmd_line) {
 #endif  // defined(OS_POSIX)
 
   // Connect to the daemon process.
-  daemon_channel_ = IPC::ChannelProxy::Create(channel_handle,
-                                              IPC::Channel::MODE_CLIENT,
-                                              this,
-                                              context_->network_task_runner());
-
+  daemon_channel_.reset(
+      new IPC::ChannelProxy(this, context_->network_task_runner()));
   IPC::AttachmentBrokerUnprivileged::CreateBrokerIfNeeded();
   IPC::AttachmentBroker* broker = IPC::AttachmentBroker::GetGlobal();
   if (broker && !broker->IsPrivilegedBroker())
     broker->RegisterBrokerCommunicationChannel(daemon_channel_.get());
+  daemon_channel_->Init(channel_handle, IPC::Channel::MODE_CLIENT,
+                        /*create_pipe_now=*/true);
 
 #else  // !defined(REMOTING_MULTI_PROCESS)
   if (cmd_line->HasSwitch(kHostConfigSwitchName)) {
@@ -815,13 +817,18 @@ void HostProcess::StartOnUiThread() {
         context_->audio_task_runner(), audio_pipe_name);
   }
 
-  base::FilePath gnubby_socket_name = base::CommandLine::ForCurrentProcess()->
-      GetSwitchValuePath(kAuthSocknameSwitchName);
-  if (!gnubby_socket_name.empty()) {
-    remoting::GnubbyAuthHandler::SetGnubbySocketName(gnubby_socket_name);
-    gnubby_extension_supported_ = true;
+  base::FilePath security_key_socket_name =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+          kAuthSocknameSwitchName);
+  if (!security_key_socket_name.empty()) {
+    remoting::SecurityKeyAuthHandler::SetSecurityKeySocketName(
+        security_key_socket_name);
+    security_key_extension_supported_ = true;
   }
-#endif  // defined(OS_LINUX)
+#elif defined(OS_WIN)
+  // TODO(joedow): Remove the conditional once this is supported on OSX.
+  security_key_extension_supported_ = true;
+#endif  // defined(OS_WIN)
 
   // Create a desktop environment factory appropriate to the build type &
   // platform.
@@ -862,8 +869,9 @@ void HostProcess::ShutdownOnUiThread() {
 
 #if defined(REMOTING_MULTI_PROCESS)
   IPC::AttachmentBroker* broker = IPC::AttachmentBroker::GetGlobal();
-  if (broker && !broker->IsPrivilegedBroker())
+  if (broker && !broker->IsPrivilegedBroker()) {
     broker->DeregisterBrokerCommunicationChannel(daemon_channel_.get());
+  }
   daemon_channel_.reset();
 #endif  // defined(REMOTING_MULTI_PROCESS)
 
@@ -1312,14 +1320,14 @@ bool HostProcess::OnGnubbyAuthPolicyUpdate(base::DictionaryValue* policies) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   if (!policies->GetBoolean(policy::key::kRemoteAccessHostAllowGnubbyAuth,
-                            &gnubby_auth_policy_enabled_)) {
+                            &security_key_auth_policy_enabled_)) {
     return false;
   }
 
-  if (gnubby_auth_policy_enabled_) {
-    HOST_LOG << "Policy enables gnubby auth.";
+  if (security_key_auth_policy_enabled_) {
+    HOST_LOG << "Policy enables security key auth.";
   } else {
-    HOST_LOG << "Policy disables gnubby auth.";
+    HOST_LOG << "Policy disables security key auth.";
   }
 
   return true;
@@ -1429,9 +1437,9 @@ void HostProcess::StartHost() {
   scoped_refptr<protocol::TransportContext> transport_context =
       new protocol::TransportContext(
           signal_strategy_.get(),
-          base::WrapUnique(new protocol::ChromiumPortAllocatorFactory()),
-          base::WrapUnique(new ChromiumUrlRequestFactory(
-              context_->url_request_context_getter())),
+          base::MakeUnique<protocol::ChromiumPortAllocatorFactory>(),
+          base::MakeUnique<ChromiumUrlRequestFactory>(
+              context_->url_request_context_getter()),
           network_settings, protocol::TransportRole::SERVER);
   transport_context->set_ice_config_url(
       ServiceUrls::GetInstance()->ice_config_url());
@@ -1453,8 +1461,9 @@ void HostProcess::StartHost() {
                                  context_->audio_task_runner(),
                                  context_->video_encode_task_runner()));
 
-  if (gnubby_auth_policy_enabled_ && gnubby_extension_supported_) {
-    host_->AddExtension(base::WrapUnique(new GnubbyExtension()));
+  if (security_key_auth_policy_enabled_ && security_key_extension_supported_) {
+    host_->AddExtension(
+        base::MakeUnique<SecurityKeyExtension>(context_->file_task_runner()));
   }
 
   // TODO(simonmorris): Get the maximum session duration from a policy.
@@ -1468,6 +1477,11 @@ void HostProcess::StartHost() {
   host_status_logger_.reset(new HostStatusLogger(
       host_->AsWeakPtr(), ServerLogEntry::ME2ME,
       signal_strategy_.get(), directory_bot_jid_));
+
+  power_save_blocker_.reset(new HostPowerSaveBlocker(
+      host_->AsWeakPtr(),
+      context_->ui_task_runner(),
+      context_->file_task_runner()));
 
   // Set up reporting the host status notifications.
 #if defined(REMOTING_MULTI_PROCESS)
@@ -1532,6 +1546,7 @@ void HostProcess::GoOffline(const std::string& host_offline_reason) {
   host_.reset();
   host_event_logger_.reset();
   host_status_logger_.reset();
+  power_save_blocker_.reset();
   host_change_notification_listener_.reset();
 
   // Before shutting down HostSignalingManager, send the |host_offline_reason|
@@ -1653,7 +1668,7 @@ int HostProcessMain() {
   new HostProcess(std::move(context), &exit_code, &shutdown_watchdog);
 
   // Run the main (also UI) message loop until the host no longer needs it.
-  message_loop.Run();
+  base::RunLoop().Run();
 
   return exit_code;
 }

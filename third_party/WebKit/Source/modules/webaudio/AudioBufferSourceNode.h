@@ -30,14 +30,15 @@
 #include "modules/webaudio/AudioScheduledSourceNode.h"
 #include "modules/webaudio/PannerNode.h"
 #include "platform/audio/AudioBus.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Threading.h"
+#include <memory>
 
 namespace blink {
 
-class AbstractAudioContext;
+class AudioBufferSourceOptions;
+class BaseAudioContext;
 
 // AudioBufferSourceNode is an AudioNode representing an audio source from an in-memory audio asset represented by an AudioBuffer.
 // It generally will be used for short sounds which require a high degree of scheduling flexibility (can playback in rhythmically perfect ways).
@@ -103,8 +104,8 @@ private:
     Persistent<AudioBuffer> m_buffer;
 
     // Pointers for the buffer and destination.
-    OwnPtr<const float*[]> m_sourceChannels;
-    OwnPtr<float*[]> m_destinationChannels;
+    std::unique_ptr<const float*[]> m_sourceChannels;
+    std::unique_ptr<float*[]> m_destinationChannels;
 
     RefPtr<AudioParamHandler> m_playbackRate;
     RefPtr<AudioParamHandler> m_detune;
@@ -141,7 +142,8 @@ private:
 class AudioBufferSourceNode final : public AudioScheduledSourceNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static AudioBufferSourceNode* create(AbstractAudioContext&, float sampleRate);
+    static AudioBufferSourceNode* create(BaseAudioContext&, ExceptionState&);
+    static AudioBufferSourceNode* create(BaseAudioContext*, AudioBufferSourceOptions&, ExceptionState&);
     DECLARE_VIRTUAL_TRACE();
     AudioBufferSourceHandler& audioBufferSourceHandler() const;
 
@@ -162,7 +164,7 @@ public:
     void start(double when, double grainOffset, double grainDuration, ExceptionState&);
 
 private:
-    AudioBufferSourceNode(AbstractAudioContext&, float sampleRate);
+    AudioBufferSourceNode(BaseAudioContext&);
 
     Member<AudioParam> m_playbackRate;
     Member<AudioParam> m_detune;

@@ -19,10 +19,13 @@
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_activity_monitor.h"
+#include "net/base/network_change_notifier.h"
 #include "net/base/sockaddr_storage.h"
 #include "net/base/winsock_init.h"
 #include "net/base/winsock_util.h"
 #include "net/log/net_log.h"
+#include "net/log/net_log_event_type.h"
+#include "net/log/net_log_source_type.h"
 #include "net/socket/socket_descriptor.h"
 #include "net/udp/udp_net_log_parameters.h"
 
@@ -254,11 +257,11 @@ UDPSocketWin::UDPSocketWin(DatagramSocket::BindType bind_type,
       read_iobuffer_len_(0),
       write_iobuffer_len_(0),
       recv_from_address_(NULL),
-      net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_UDP_SOCKET)),
+      net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::UDP_SOCKET)),
       qos_handle_(NULL),
       qos_flow_id_(0) {
   EnsureWinsockInit();
-  net_log_.BeginEvent(NetLog::TYPE_SOCKET_ALIVE,
+  net_log_.BeginEvent(NetLogEventType::SOCKET_ALIVE,
                       source.ToEventParametersCallback());
   if (bind_type == DatagramSocket::RANDOM_BIND)
     DCHECK(!rand_int_cb.is_null());
@@ -266,7 +269,7 @@ UDPSocketWin::UDPSocketWin(DatagramSocket::BindType bind_type,
 
 UDPSocketWin::~UDPSocketWin() {
   Close();
-  net_log_.EndEvent(NetLog::TYPE_SOCKET_ALIVE);
+  net_log_.EndEvent(NetLogEventType::SOCKET_ALIVE);
 }
 
 int UDPSocketWin::Open(AddressFamily address_family) {
@@ -354,8 +357,10 @@ int UDPSocketWin::GetLocalAddress(IPEndPoint* address) const {
     if (!local_address->FromSockAddr(storage.addr, storage.addr_len))
       return ERR_ADDRESS_INVALID;
     local_address_.reset(local_address.release());
-    net_log_.AddEvent(NetLog::TYPE_UDP_LOCAL_ADDRESS,
-                      CreateNetLogUDPConnectCallback(local_address_.get()));
+    net_log_.AddEvent(NetLogEventType::UDP_LOCAL_ADDRESS,
+                      CreateNetLogUDPConnectCallback(
+                          local_address_.get(),
+                          NetworkChangeNotifier::kInvalidNetworkHandle));
   }
 
   *address = *local_address_;
@@ -392,7 +397,7 @@ int UDPSocketWin::RecvFrom(IOBuffer* buf,
 int UDPSocketWin::Write(IOBuffer* buf,
                         int buf_len,
                         const CompletionCallback& callback) {
-  return SendToOrWrite(buf, buf_len, NULL, callback);
+  return SendToOrWrite(buf, buf_len, remote_address_.get(), callback);
 }
 
 int UDPSocketWin::SendTo(IOBuffer* buf,
@@ -426,10 +431,12 @@ int UDPSocketWin::SendToOrWrite(IOBuffer* buf,
 
 int UDPSocketWin::Connect(const IPEndPoint& address) {
   DCHECK_NE(socket_, INVALID_SOCKET);
-  net_log_.BeginEvent(NetLog::TYPE_UDP_CONNECT,
-                      CreateNetLogUDPConnectCallback(&address));
+  net_log_.BeginEvent(
+      NetLogEventType::UDP_CONNECT,
+      CreateNetLogUDPConnectCallback(
+          &address, NetworkChangeNotifier::kInvalidNetworkHandle));
   int rv = InternalConnect(address);
-  net_log_.EndEventWithNetErrorCode(NetLog::TYPE_UDP_CONNECT, rv);
+  net_log_.EndEventWithNetErrorCode(NetLogEventType::UDP_CONNECT, rv);
   is_connected_ = (rv == OK);
   return rv;
 }
@@ -531,6 +538,19 @@ int UDPSocketWin::SetSendBufferSize(int32_t size) {
   UMA_HISTOGRAM_CUSTOM_COUNTS("Net.SocketUnchangeableSendBuffer",
                               actual_size, 1000, 1000000, 50);
   return ERR_SOCKET_SEND_BUFFER_SIZE_UNCHANGEABLE;
+}
+
+int UDPSocketWin::SetDoNotFragment() {
+  DCHECK_NE(socket_, INVALID_SOCKET);
+  DCHECK(CalledOnValidThread());
+
+  if (addr_family_ == AF_INET6)
+    return OK;
+
+  DWORD val = 1;
+  int rv = setsockopt(socket_, IPPROTO_IP, IP_DONTFRAGMENT,
+                      reinterpret_cast<const char*>(&val), sizeof(val));
+  return rv == 0 ? OK : MapSystemError(WSAGetLastError());
 }
 
 int UDPSocketWin::AllowAddressReuse() {
@@ -683,13 +703,14 @@ void UDPSocketWin::LogRead(int result,
                            const char* bytes,
                            const IPEndPoint* address) const {
   if (result < 0) {
-    net_log_.AddEventWithNetErrorCode(NetLog::TYPE_UDP_RECEIVE_ERROR, result);
+    net_log_.AddEventWithNetErrorCode(NetLogEventType::UDP_RECEIVE_ERROR,
+                                      result);
     return;
   }
 
   if (net_log_.IsCapturing()) {
     net_log_.AddEvent(
-        NetLog::TYPE_UDP_BYTES_RECEIVED,
+        NetLogEventType::UDP_BYTES_RECEIVED,
         CreateNetLogUDPDataTranferCallback(result, bytes, address));
   }
 
@@ -700,13 +721,13 @@ void UDPSocketWin::LogWrite(int result,
                             const char* bytes,
                             const IPEndPoint* address) const {
   if (result < 0) {
-    net_log_.AddEventWithNetErrorCode(NetLog::TYPE_UDP_SEND_ERROR, result);
+    net_log_.AddEventWithNetErrorCode(NetLogEventType::UDP_SEND_ERROR, result);
     return;
   }
 
   if (net_log_.IsCapturing()) {
     net_log_.AddEvent(
-        NetLog::TYPE_UDP_BYTES_SENT,
+        NetLogEventType::UDP_BYTES_SENT,
         CreateNetLogUDPDataTranferCallback(result, bytes, address));
   }
 

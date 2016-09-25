@@ -11,11 +11,8 @@
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
-#include "chrome/grit/generated_resources.h"
 #include "extensions/browser/extension_registry.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/strings/grit/ui_strings.h"
 
 // NOTE(koz): Linux doesn't use the thick shadowed border, so we add padding
 // here.
@@ -157,14 +154,6 @@ void ExclusiveAccessBubble::ExitExclusiveAccess() {
   manager_->ExitExclusiveAccess();
 }
 
-void ExclusiveAccessBubble::Accept() {
-  manager_->OnAcceptExclusiveAccessPermission();
-}
-
-void ExclusiveAccessBubble::Cancel() {
-  manager_->OnDenyExclusiveAccessPermission();
-}
-
 base::string16 ExclusiveAccessBubble::GetCurrentMessageText() const {
   return exclusive_access_bubble::GetLabelTextForType(
       bubble_type_, url_,
@@ -181,11 +170,6 @@ base::string16 ExclusiveAccessBubble::GetCurrentAllowButtonText() const {
 
 base::string16 ExclusiveAccessBubble::GetInstructionText(
     const base::string16& accelerator) const {
-  if (!ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled()) {
-    return l10n_util::GetStringFUTF16(IDS_FULLSCREEN_PRESS_ESC_TO_EXIT_SENTENCE,
-                                      accelerator);
-  }
-
   return exclusive_access_bubble::GetInstructionTextForType(bubble_type_,
                                                             accelerator);
 }

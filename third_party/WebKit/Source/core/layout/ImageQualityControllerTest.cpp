@@ -8,7 +8,10 @@
 #include "core/layout/LayoutTestHelper.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/PaintController.h"
+#include "platform/scheduler/test/fake_web_task_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -25,6 +28,7 @@ private:
     void TearDown() override
     {
     }
+
     ImageQualityController* m_controller;
 };
 
@@ -51,9 +55,9 @@ public:
     bool maybeAnimated() override { return true; }
     bool currentFrameKnownToBeOpaque(MetadataMode = UseCurrentMetadata) override { return false; }
     IntSize size() const override { return IntSize(); }
-    void destroyDecodedData(bool) override { }
+    void destroyDecodedData() override { }
     void draw(SkCanvas*, const SkPaint&, const FloatRect& dstRect, const FloatRect& srcRect, RespectImageOrientationEnum, ImageClampingMode) override { }
-    PassRefPtr<SkImage> imageForCurrentFrame() override { return nullptr; }
+    sk_sp<SkImage> imageForCurrentFrame() override { return nullptr; }
 };
 
 TEST_F(ImageQualityControllerTest, ImageMaybeAnimated)
@@ -70,11 +74,11 @@ public:
     bool maybeAnimated() override { return true; }
     bool currentFrameKnownToBeOpaque(MetadataMode = UseCurrentMetadata) override { return false; }
     IntSize size() const override { return IntSize(); }
-    void destroyDecodedData(bool) override { }
+    void destroyDecodedData() override { }
     void draw(SkCanvas*, const SkPaint&, const FloatRect& dstRect, const FloatRect& srcRect, RespectImageOrientationEnum, ImageClampingMode) override { }
 
     bool isBitmapImage() const override { return true; }
-    PassRefPtr<SkImage> imageForCurrentFrame() override { return nullptr; }
+    sk_sp<SkImage> imageForCurrentFrame() override { return nullptr; }
 };
 
 TEST_F(ImageQualityControllerTest, LowQualityFilterForContrast)
@@ -91,11 +95,11 @@ public:
     bool maybeAnimated() override { return true; }
     bool currentFrameKnownToBeOpaque(MetadataMode = UseCurrentMetadata) override { return false; }
     IntSize size() const override { return IntSize(1, 1); }
-    void destroyDecodedData(bool) override { }
+    void destroyDecodedData() override { }
     void draw(SkCanvas*, const SkPaint&, const FloatRect& dstRect, const FloatRect& srcRect, RespectImageOrientationEnum, ImageClampingMode) override { }
 
     bool isBitmapImage() const override { return true; }
-    PassRefPtr<SkImage> imageForCurrentFrame() override { return nullptr; }
+    sk_sp<SkImage> imageForCurrentFrame() override { return nullptr; }
 };
 
 TEST_F(ImageQualityControllerTest, MediumQualityFilterForUnscaledImage)
@@ -107,30 +111,49 @@ TEST_F(ImageQualityControllerTest, MediumQualityFilterForUnscaledImage)
     EXPECT_EQ(InterpolationMedium, controller()->chooseInterpolationQuality(*img, testImage.get(), testImage.get(), LayoutSize(1, 1)));
 }
 
-class MockTimer : public Timer<ImageQualityController> {
-    typedef void (ImageQualityController::*TimerFiredFunction)(Timer*);
+// TODO(alexclarke): Remove this when possible.
+class MockTimer : public TaskRunnerTimer<ImageQualityController> {
 public:
-    MockTimer(ImageQualityController* o, TimerFiredFunction f)
-    : Timer<ImageQualityController>(o, f)
+    using TimerFiredFunction = typename TaskRunnerTimer<ImageQualityController>::TimerFiredFunction;
+
+    static std::unique_ptr<MockTimer> create(ImageQualityController* o, TimerFiredFunction f)
     {
+        auto taskRunner = WTF::wrapUnique(new scheduler::FakeWebTaskRunner);
+        return WTF::wrapUnique(new MockTimer(std::move(taskRunner), o, f));
     }
 
     void fire()
     {
-        this->Timer<ImageQualityController>::fired();
+        fired();
         stop();
     }
+
+    void setTime(double newTime)
+    {
+        m_taskRunner->setTime(newTime);
+    }
+
+private:
+    MockTimer(std::unique_ptr<scheduler::FakeWebTaskRunner> taskRunner, ImageQualityController* o, TimerFiredFunction f)
+        : TaskRunnerTimer(taskRunner.get(), o, f)
+        , m_taskRunner(std::move(taskRunner))
+    {
+    }
+
+    std::unique_ptr<scheduler::FakeWebTaskRunner> m_taskRunner;
+
+    DISALLOW_COPY_AND_ASSIGN(MockTimer);
 };
 
 TEST_F(ImageQualityControllerTest, LowQualityFilterForResizingImage)
 {
-    MockTimer* mockTimer = new MockTimer(controller(), &ImageQualityController::highQualityRepaintTimerFired);
-    controller()->setTimer(mockTimer);
+    MockTimer* mockTimer = MockTimer::create(controller(), &ImageQualityController::highQualityRepaintTimerFired).release();
+    controller()->setTimer(wrapUnique(mockTimer));
     setBodyInnerHTML("<img src='myimage'></img>");
     LayoutImage* img = toLayoutImage(document().body()->firstChild()->layoutObject());
 
     RefPtr<TestImageLowQuality> testImage = adoptRef(new TestImageLowQuality);
-    OwnPtr<PaintController> paintController = PaintController::create();
+    std::unique_ptr<PaintController> paintController = PaintController::create();
     GraphicsContext context(*paintController);
 
     // Paint once. This will kick off a timer to see if we resize it during that timer's execution.
@@ -149,14 +172,14 @@ TEST_F(ImageQualityControllerTest, LowQualityFilterForResizingImage)
 
 TEST_F(ImageQualityControllerTest, MediumQualityFilterForNotAnimatedWhileAnotherAnimates)
 {
-    MockTimer* mockTimer = new MockTimer(controller(), &ImageQualityController::highQualityRepaintTimerFired);
-    controller()->setTimer(mockTimer);
+    MockTimer* mockTimer = MockTimer::create(controller(), &ImageQualityController::highQualityRepaintTimerFired).release();
+    controller()->setTimer(wrapUnique(mockTimer));
     setBodyInnerHTML("<img id='myAnimatingImage' src='myimage'></img> <img id='myNonAnimatingImage' src='myimage2'></img>");
     LayoutImage* animatingImage = toLayoutImage(document().getElementById("myAnimatingImage")->layoutObject());
     LayoutImage* nonAnimatingImage = toLayoutImage(document().getElementById("myNonAnimatingImage")->layoutObject());
 
     RefPtr<TestImageLowQuality> testImage = adoptRef(new TestImageLowQuality);
-    OwnPtr<PaintController> paintController = PaintController::create();
+    std::unique_ptr<PaintController> paintController = PaintController::create();
     GraphicsContext context(*paintController);
 
     // Paint once. This will kick off a timer to see if we resize it during that timer's execution.
@@ -179,8 +202,8 @@ TEST_F(ImageQualityControllerTest, MediumQualityFilterForNotAnimatedWhileAnother
 
 TEST_F(ImageQualityControllerTest, DontKickTheAnimationTimerWhenPaintingAtTheSameSize)
 {
-    MockTimer* mockTimer = new MockTimer(controller(), &ImageQualityController::highQualityRepaintTimerFired);
-    controller()->setTimer(mockTimer);
+    MockTimer* mockTimer = MockTimer::create(controller(), &ImageQualityController::highQualityRepaintTimerFired).release();
+    controller()->setTimer(wrapUnique(mockTimer));
     setBodyInnerHTML("<img src='myimage'></img>");
     LayoutImage* img = toLayoutImage(document().body()->firstChild()->layoutObject());
 
@@ -201,6 +224,34 @@ TEST_F(ImageQualityControllerTest, DontKickTheAnimationTimerWhenPaintingAtTheSam
     EXPECT_EQ(InterpolationLow, controller()->chooseInterpolationQuality(*img, testImage.get(), testImage.get(), LayoutSize(4, 4)));
     // Check that the timer was not kicked. It should not have been, since the image was painted at the same size as last time.
     EXPECT_FALSE(mockTimer->isActive());
+}
+
+TEST_F(ImageQualityControllerTest, DontRestartTimerUnlessAdvanced)
+{
+    MockTimer* mockTimer = MockTimer::create(controller(), &ImageQualityController::highQualityRepaintTimerFired).release();
+    controller()->setTimer(wrapUnique(mockTimer));
+    setBodyInnerHTML("<img src='myimage'></img>");
+    LayoutImage* img = toLayoutImage(document().body()->firstChild()->layoutObject());
+
+    RefPtr<TestImageLowQuality> testImage = adoptRef(new TestImageLowQuality);
+
+    // Paint once. This will kick off a timer to see if we resize it during that timer's execution.
+    mockTimer->setTime(0.1);
+    EXPECT_FALSE(controller()->shouldPaintAtLowQuality(*img, testImage.get(), testImage.get(), LayoutSize(2, 2), 0.1));
+    EXPECT_EQ(ImageQualityController::cLowQualityTimeThreshold, mockTimer->nextFireInterval());
+
+    // Go into low-quality mode now that the size changed.
+    double nextTime = 0.1 + ImageQualityController::cTimerRestartThreshold / 2.0;
+    mockTimer->setTime(nextTime);
+    EXPECT_EQ(true, controller()->shouldPaintAtLowQuality(*img, testImage.get(), testImage.get(), LayoutSize(3, 3), nextTime));
+    // The fire interval has decreased, because we have not restarted the timer.
+    EXPECT_EQ(ImageQualityController::cLowQualityTimeThreshold - ImageQualityController::cTimerRestartThreshold / 2.0, mockTimer->nextFireInterval());
+
+    // This animation is far enough in the future to make the timer restart, since it is half over.
+    nextTime = 0.1 + ImageQualityController::cTimerRestartThreshold + 0.01;
+    EXPECT_EQ(true, controller()->shouldPaintAtLowQuality(*img, testImage.get(), testImage.get(), LayoutSize(4, 4), nextTime));
+    // Now the timer has restarted, leading to a larger fire interval.
+    EXPECT_EQ(ImageQualityController::cLowQualityTimeThreshold, mockTimer->nextFireInterval());
 }
 
 #endif

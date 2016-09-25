@@ -34,10 +34,9 @@
 #include "core/dom/DocumentInit.h"
 #include "core/dom/DocumentType.h"
 #include "core/dom/Element.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/dom/Text.h"
 #include "core/dom/XMLDocument.h"
-#include "core/dom/custom/CustomElementRegistrationContext.h"
+#include "core/dom/custom/V0CustomElementRegistrationContext.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLDocument.h"
@@ -88,7 +87,7 @@ XMLDocument* DOMImplementation::createDocument(const AtomicString& namespaceURI,
         doc = XMLDocument::create(init);
     }
 
-    doc->setSecurityOrigin(document().getSecurityOrigin()->isolatedCopy());
+    doc->setSecurityOrigin(document().getSecurityOrigin());
     doc->setContextFeatures(document().contextFeatures());
 
     Node* documentElement = nullptr;
@@ -210,7 +209,7 @@ HTMLDocument* DOMImplementation::createHTMLDocument(const String& title)
         headElement->appendChild(titleElement);
         titleElement->appendChild(d->createTextNode(title), ASSERT_NO_EXCEPTION);
     }
-    d->setSecurityOrigin(document().getSecurityOrigin()->isolatedCopy());
+    d->setSecurityOrigin(document().getSecurityOrigin());
     d->setContextFeatures(document().contextFeatures());
     return d;
 }
@@ -226,9 +225,17 @@ Document* DOMImplementation::createDocument(const String& type, const DocumentIn
     if (type == "application/xhtml+xml")
         return XMLDocument::createXHTML(init);
 
-    PluginData* pluginData = 0;
-    if (init.frame() && init.frame()->page() && init.frame()->loader().allowPlugins(NotAboutToInstantiatePlugin))
-        pluginData = init.frame()->page()->pluginData();
+    PluginData* pluginData = nullptr;
+    if (init.frame() && init.frame()->page() && init.frame()->loader().allowPlugins(NotAboutToInstantiatePlugin)) {
+        // If the document is being created for the main frame, init.frame()->tree().top()->securityContext() returns nullptr.
+        // For that reason, the origin must be retrieved directly from init.url().
+        if (init.frame()->isMainFrame()) {
+            RefPtr<SecurityOrigin> origin = SecurityOrigin::create(init.url());
+            pluginData = init.frame()->page()->pluginData(origin.get());
+        } else {
+            pluginData = init.frame()->page()->pluginData(init.frame()->tree().top()->securityContext()->getSecurityOrigin());
+        }
+    }
 
     // PDF is one image type for which a plugin can override built-in support.
     // We do not want QuickTime to take over all image types, obviously.

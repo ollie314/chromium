@@ -12,23 +12,27 @@ namespace leveldb {
 class Slice;
 class Status;
 
-// Builds a mojo DatabaseError from a leveldb::Status object.
-DatabaseError LeveldbStatusToError(const leveldb::Status& s);
+// Builds a mojo mojom::DatabaseError from a leveldb::Status object.
+mojom::DatabaseError LeveldbStatusToError(const leveldb::Status& s);
 
 // Creates a leveldb Status object form a database error and two optional
 // messages. A mojoification of the various static leveldb::Status
 // constructors.
-leveldb::Status DatabaseErrorToStatus(DatabaseError e,
+leveldb::Status DatabaseErrorToStatus(mojom::DatabaseError e,
                                       const Slice& msg,
                                       const Slice& msg2);
 
 // Builds a Slice pointing to the data inside |a|. This is not a type-converter
 // as it is not a copy operation; the returned Slice points into |a| and must
 // outlive |a|.
-leveldb::Slice GetSliceFor(const mojo::Array<uint8_t>& a);
+leveldb::Slice GetSliceFor(const std::vector<uint8_t>& a);
 
-// Copies the data that |s| points to into a mojo::Array.
-mojo::Array<uint8_t> GetArrayFor(const leveldb::Slice& s);
+// Copies the data that |s| points to into a std::vector.
+std::vector<uint8_t> GetVectorFor(const leveldb::Slice& s);
+
+std::string Uint8VectorToStdString(const std::vector<uint8_t>& input);
+
+std::vector<uint8_t> StdStringToUint8Vector(const std::string& input);
 
 }  // namespace leveldb
 

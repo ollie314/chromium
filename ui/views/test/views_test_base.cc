@@ -6,23 +6,60 @@
 
 #include <utility>
 
+#include "base/environment.h"
 #include "base/run_loop.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/test/material_design_controller_test_api.h"
+#include "ui/views/test/platform_test_helper.h"
+
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#include "ui/base/x/x11_util_internal.h"
+#endif
 
 namespace views {
 
+namespace {
+
+bool InitializeVisuals() {
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+  static int depth = 0;
+  static bool has_compositing_manager = false;
+
+  if (depth > 0)
+    return has_compositing_manager;
+
+  // testing/xvfb.py runs xvfb and xcompmgr.
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
+  has_compositing_manager = env->HasVar("_CHROMIUM_INSIDE_XVFB");
+  ui::ChooseVisualForWindow(has_compositing_manager, NULL, &depth);
+
+  if (has_compositing_manager)
+    EXPECT_EQ(32, depth);
+
+  return has_compositing_manager;
+#else
+  return false;
+#endif
+}
+
+}  // namespace
+
 ViewsTestBase::ViewsTestBase()
     : setup_called_(false),
-      teardown_called_(false) {
-}
+      teardown_called_(false),
+      has_compositing_manager_(InitializeVisuals()) {}
 
 ViewsTestBase::~ViewsTestBase() {
   CHECK(setup_called_)
       << "You have overridden SetUp but never called super class's SetUp";
   CHECK(teardown_called_)
       << "You have overridden TearDown but never called super class's TearDown";
+}
+
+// static
+bool ViewsTestBase::IsMus() {
+  return PlatformTestHelper::IsMus();
 }
 
 void ViewsTestBase::SetUp() {
@@ -62,17 +99,12 @@ Widget::InitParams ViewsTestBase::CreateParams(
   return params;
 }
 
-void ViewsTestBase::DisableNativeWidgetMus() {
-  ViewsDelegate::GetInstance()->set_native_widget_factory(
-      ViewsDelegate::NativeWidgetFactory());
-}
-
 gfx::NativeWindow ViewsTestBase::GetContext() {
   return test_helper_->GetContext();
 }
 
-bool ViewsTestBase::IsMus() const {
-  return test_helper_->IsMus();
+bool ViewsTestBase::HasCompositingManager() const {
+  return has_compositing_manager_;
 }
 
 }  // namespace views

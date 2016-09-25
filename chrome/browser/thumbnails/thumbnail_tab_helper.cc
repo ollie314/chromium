@@ -20,7 +20,6 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/size_conversions.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/scrollbar_size.h"
 #include "ui/gfx/skbitmap_operations.h"
 
@@ -111,11 +110,7 @@ void ThumbnailTabHelper::NavigationStopped() {
 
 void ThumbnailTabHelper::UpdateThumbnailIfNecessary() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  // Ignore thumbnail update requests if one is already in progress. This can
-  // happen at the end of thumbnail generation when
-  // CleanUpFromThumbnailGeneration() calls DecrementCapturerCount(), triggering
-  // a call to content::WebContentsImpl::WasHidden() which eventually calls
-  // ThumbnailTabHelper::UpdateThumbnailIfNecessary().
+  // Ignore thumbnail update requests if one is already in progress.
   if (thumbnailing_context_) {
     return;
   }
@@ -142,10 +137,6 @@ void ThumbnailTabHelper::UpdateThumbnailIfNecessary() {
     return;
   }
 
-  // Prevent the web contents from disappearing before the async thumbnail
-  // generation code executes. See https://crbug.com/530707 .
-  web_contents()->IncrementCapturerCount(gfx::Size());
-
   AsyncProcessThumbnail(thumbnail_service);
 }
 
@@ -163,7 +154,6 @@ void ThumbnailTabHelper::AsyncProcessThumbnail(
   // Clip the pixels that will commonly hold a scrollbar, which looks bad in
   // thumbnails.
   int scrollbar_size = gfx::scrollbar_size();
-  gfx::Size copy_size;
   copy_rect.Inset(0, 0, scrollbar_size, scrollbar_size);
 
   if (copy_rect.IsEmpty()) {
@@ -217,12 +207,6 @@ void ThumbnailTabHelper::ProcessCapturedBitmap(
 }
 
 void ThumbnailTabHelper::CleanUpFromThumbnailGeneration() {
-  if (web_contents()) {
-    // Balance the call to IncrementCapturerCount() made in
-    // UpdateThumbnailIfNecessary().
-    web_contents()->DecrementCapturerCount();
-  }
-
   // Make a note that thumbnail generation is complete.
   thumbnailing_context_ = nullptr;
 }

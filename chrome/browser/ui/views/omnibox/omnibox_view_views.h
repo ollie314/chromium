@@ -88,9 +88,8 @@ class OmniboxViewViews
   void Update() override;
   base::string16 GetText() const override;
   void SetUserText(const base::string16& text,
-                   const base::string16& display_text,
                    bool update_popup) override;
-  void SetForcedQuery() override;
+  void EnterKeywordModeForDefaultSearchProvider() override;
   void GetSelectionBounds(base::string16::size_type* start,
                           base::string16::size_type* end) const override;
   void SelectAll(bool reversed) override;
@@ -104,6 +103,7 @@ class OmniboxViewViews
   void OnPaint(gfx::Canvas* canvas) override;
   void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
   void ExecuteCommand(int command_id, int event_flags) override;
+  ui::TextInputType GetTextInputType() const override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, CloseOmniboxPopupOnTextDrag);
@@ -163,14 +163,12 @@ class OmniboxViewViews
   void EmphasizeURLComponents() override;
 
   // views::Textfield:
-  bool OnKeyReleased(const ui::KeyEvent& event) override;
   bool IsItemForCommandIdDynamic(int command_id) const override;
   base::string16 GetLabelForCommandId(int command_id) const override;
   const char* GetClassName() const override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
-  bool OnKeyPressed(const ui::KeyEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   void AboutToRequestFocusFromTabTraversal(bool reverse) override;
   bool SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) override;
@@ -180,6 +178,8 @@ class OmniboxViewViews
   bool IsCommandIdEnabled(int command_id) const override;
   base::string16 GetSelectionClipboardText() const override;
   void DoInsertChar(base::char16 ch) override;
+  bool IsTextEditCommandEnabled(ui::TextEditCommand command) const override;
+  void ExecuteTextEditCommand(ui::TextEditCommand command) override;
 
   // chromeos::input_method::InputMethodManager::CandidateWindowObserver:
 #if defined(OS_CHROMEOS)
@@ -223,8 +223,7 @@ class OmniboxViewViews
   gfx::Range saved_selection_for_focus_change_;
 
   // Tracking state before and after a possible change.
-  base::string16 text_before_change_;
-  gfx::Range sel_before_change_;
+  State state_before_change_;
   bool ime_composing_before_change_;
 
   // Was the delete key pressed with an empty selection at the end of the edit?

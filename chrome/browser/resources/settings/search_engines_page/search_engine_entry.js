@@ -24,7 +24,7 @@ Polymer({
     },
   },
 
-  /** @private {!settings.SearchEnginesBrowserProxy} */
+  /** @private {settings.SearchEnginesBrowserProxy} */
   browserProxy_: null,
 
   /** @override */
@@ -55,7 +55,7 @@ Polymer({
       // Register listener to detect when the dialog is closed. Flip the boolean
       // once closed to force a restamp next time it is shown such that the
       // previous dialog's contents are cleared.
-      dialog.addEventListener('iron-overlay-closed', function() {
+      dialog.addEventListener('close', function() {
         this.showEditSearchEngineDialog_ = false;
       }.bind(this));
     }.bind(this));
@@ -70,5 +70,15 @@ Polymer({
   /** @private */
   closePopupMenu_: function() {
     this.$$('iron-dropdown').close();
+  },
+
+  /**
+   * @param {?string} url The icon URL if available.
+   * @return {string} A set of icon URLs.
+   * @private
+   */
+  getIconSet_: function(url) {
+    // Force default icon, if no |engine.iconURL| is available.
+    return cr.icon.getFavicon(url || '');
   },
 });

@@ -8,7 +8,7 @@
 #include <stddef.h>
 
 #include "base/macros.h"
-#include "net/quic/quic_protocol.h"
+#include "net/quic/core/quic_protocol.h"
 
 namespace net {
 class QuicPacketCreator;
@@ -29,21 +29,16 @@ class QuicPacketCreatorPeer {
       QuicPacketNumberLength packet_number_length);
   static QuicPacketNumberLength GetPacketNumberLength(
       QuicPacketCreator* creator);
-  static void SetNextPacketNumberLength(
-      QuicPacketCreator* creator,
-      QuicPacketNumberLength next_packet_number_length);
-  static QuicPacketNumberLength NextPacketNumberLength(
-      QuicPacketCreator* creator);
   static void SetPacketNumber(QuicPacketCreator* creator, QuicPacketNumber s);
   static void FillPacketHeader(QuicPacketCreator* creator,
                                QuicPacketHeader* header);
-  static size_t CreateStreamFrame(QuicPacketCreator* creator,
-                                  QuicStreamId id,
-                                  QuicIOVector iov,
-                                  size_t iov_offset,
-                                  QuicStreamOffset offset,
-                                  bool fin,
-                                  QuicFrame* frame);
+  static void CreateStreamFrame(QuicPacketCreator* creator,
+                                QuicStreamId id,
+                                QuicIOVector iov,
+                                size_t iov_offset,
+                                QuicStreamOffset offset,
+                                bool fin,
+                                QuicFrame* frame);
   static SerializedPacket SerializeAllFrames(QuicPacketCreator* creator,
                                              const QuicFrames& frames,
                                              char* buffer,

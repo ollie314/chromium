@@ -6,13 +6,16 @@
 
 #include "base/command_line.h"
 #include "base/files/file.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/files/memory_mapped_file.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/persistent_histogram_allocator.h"
 #include "base/metrics/persistent_memory_allocator.h"
+#include "base/strings/string_piece.h"
 #include "base/task_runner.h"
 #include "base/time/time.h"
 #include "components/metrics/metrics_pref_names.h"
@@ -20,40 +23,87 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 
-
 namespace metrics {
 
-// This structure stores all the information about the files being monitored
+namespace {
+
+// These structures provide values used to define how files are opened and
+// accessed. It obviates the need for multiple code-paths within several of
+// the methods.
+struct SourceOptions {
+  // The flags to be used to open a file on disk.
+  int file_open_flags;
+
+  // The access mode to be used when mapping a file into memory.
+  base::MemoryMappedFile::Access memory_mapped_access;
+
+  // Indicates if the file is to be accessed read-only.
+  bool is_read_only;
+};
+
+enum : int {
+  // Opening a file typically requires at least these flags.
+  STD_OPEN = base::File::FLAG_OPEN | base::File::FLAG_READ,
+};
+
+constexpr SourceOptions kSourceOptions[] = {
+  // SOURCE_HISTOGRAMS_ATOMIC_FILE
+  {
+    // Ensure that no other process reads this at the same time.
+    STD_OPEN | base::File::FLAG_EXCLUSIVE_READ,
+    base::MemoryMappedFile::READ_ONLY,
+    true
+  },
+  // SOURCE_HISTOGRAMS_ATOMIC_DIR
+  {
+    // Ensure that no other process reads this at the same time.
+    STD_OPEN | base::File::FLAG_EXCLUSIVE_READ,
+    base::MemoryMappedFile::READ_ONLY,
+    true
+  },
+  // SOURCE_HISTOGRAMS_ACTIVE_FILE
+  {
+    // Allow writing (updated "logged" values) to the file.
+    STD_OPEN | base::File::FLAG_WRITE,
+    base::MemoryMappedFile::READ_WRITE,
+    false
+  }
+};
+
+}  // namespace
+
+// This structure stores all the information about the sources being monitored
 // and their current reporting state.
-struct FileMetricsProvider::FileInfo {
-  FileInfo(FileType file_type) : type(file_type) {}
-  ~FileInfo() {}
+struct FileMetricsProvider::SourceInfo {
+  SourceInfo(SourceType source_type) : type(source_type) {}
+  ~SourceInfo() {}
 
-  // How to access this file (atomic/active).
-  const FileType type;
+  // How to access this source (file/dir, atomic/active).
+  const SourceType type;
 
-  // Where on disk the file is located.
+  // Where on disk the directory is located. This will only be populated when
+  // a directory is being monitored.
+  base::FilePath directory;
+
+  // Where on disk the file is located. If a directory is being monitored,
+  // this will be updated for whatever file is being read.
   base::FilePath path;
 
   // Name used inside prefs to persistent metadata.
   std::string prefs_key;
 
-  // The last-seen time of this file to detect change.
+  // The last-seen time of this source to detect change.
   base::Time last_seen;
 
   // Indicates if the data has been read out or not.
   bool read_complete = false;
 
-  // Once a file has been recognized as needing to be read, it is |mapped|
-  // into memory. If that file is "atomic" then the data from that file
-  // will be copied to |data| and the mapped file released. If the file is
-  // "active", it remains mapped and nothing is copied to local memory.
-  std::vector<uint8_t> data;
-  scoped_ptr<base::MemoryMappedFile> mapped;
-  scoped_ptr<base::PersistentHistogramAllocator> allocator;
+  // Once a file has been recognized as needing to be read, it is mapped
+  // into memory and assigned to an |allocator| object.
+  std::unique_ptr<base::PersistentHistogramAllocator> allocator;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(FileInfo);
+  DISALLOW_COPY_AND_ASSIGN(SourceInfo);
 };
 
 FileMetricsProvider::FileMetricsProvider(
@@ -66,24 +116,45 @@ FileMetricsProvider::FileMetricsProvider(
 
 FileMetricsProvider::~FileMetricsProvider() {}
 
-void FileMetricsProvider::RegisterFile(const base::FilePath& path,
-                                       FileType type,
-                                       const base::StringPiece prefs_key) {
+void FileMetricsProvider::RegisterSource(const base::FilePath& path,
+                                         SourceType type,
+                                         SourceAssociation source_association,
+                                         const base::StringPiece prefs_key) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  scoped_ptr<FileInfo> file(new FileInfo(type));
-  file->path = path;
-  file->prefs_key = prefs_key.as_string();
+  // Ensure that kSourceOptions has been filled for this type.
+  DCHECK_GT(arraysize(kSourceOptions), static_cast<size_t>(type));
+
+  std::unique_ptr<SourceInfo> source(new SourceInfo(type));
+  source->prefs_key = prefs_key.as_string();
+
+  switch (source->type) {
+    case SOURCE_HISTOGRAMS_ATOMIC_FILE:
+    case SOURCE_HISTOGRAMS_ACTIVE_FILE:
+      source->path = path;
+      break;
+    case SOURCE_HISTOGRAMS_ATOMIC_DIR:
+      source->directory = path;
+      break;
+  }
 
   // |prefs_key| may be empty if the caller does not wish to persist the
   // state across instances of the program.
   if (pref_service_ && !prefs_key.empty()) {
-    file->last_seen = base::Time::FromInternalValue(
+    source->last_seen = base::Time::FromInternalValue(
         pref_service_->GetInt64(metrics::prefs::kMetricsLastSeenPrefix +
-                                file->prefs_key));
+                                source->prefs_key));
   }
 
-  files_to_check_.push_back(std::move(file));
+  switch (source_association) {
+    case ASSOCIATE_CURRENT_RUN:
+      sources_to_check_.push_back(std::move(source));
+      break;
+    case ASSOCIATE_PREVIOUS_RUN:
+      DCHECK_EQ(SOURCE_HISTOGRAMS_ATOMIC_FILE, source->type);
+      sources_for_previous_run_.push_back(std::move(source));
+      break;
+  }
 }
 
 // static
@@ -94,208 +165,388 @@ void FileMetricsProvider::RegisterPrefs(PrefRegistrySimple* prefs,
 }
 
 // static
-void FileMetricsProvider::CheckAndMapNewMetricFilesOnTaskRunner(
-    FileMetricsProvider::FileInfoList* files) {
-  // This method has all state information passed in |files| and is intended
+bool FileMetricsProvider::LocateNextFileInDirectory(SourceInfo* source) {
+  DCHECK_EQ(SOURCE_HISTOGRAMS_ATOMIC_DIR, source->type);
+  DCHECK(!source->directory.empty());
+
+  // Open the directory and find all the files, remembering the oldest that
+  // has not been read. They can be removed and/or ignored if they're older
+  // than the last-check time.
+  base::Time oldest_file_time = base::Time::Now();
+  base::FilePath oldest_file_path;
+  base::FilePath file_path;
+  int file_count = 0;
+  int delete_count = 0;
+  base::FileEnumerator file_iter(source->directory, /*recursive=*/false,
+                                 base::FileEnumerator::FILES);
+  for (file_path = file_iter.Next(); !file_path.empty();
+       file_path = file_iter.Next()) {
+    base::FileEnumerator::FileInfo file_info = file_iter.GetInfo();
+
+    // Ignore directories and zero-sized files.
+    if (file_info.IsDirectory() || file_info.GetSize() == 0)
+      continue;
+
+    // Ignore temporary files.
+    base::FilePath::CharType first_character =
+        file_path.BaseName().value().front();
+    if (first_character == FILE_PATH_LITERAL('.') ||
+        first_character == FILE_PATH_LITERAL('_')) {
+      continue;
+    }
+
+    // Ignore non-PMA (Persistent Memory Allocator) files.
+    if (file_path.Extension() !=
+        base::PersistentMemoryAllocator::kFileExtension) {
+      continue;
+    }
+
+    // Process real files.
+    base::Time modified = file_info.GetLastModifiedTime();
+    if (modified > source->last_seen) {
+      // This file hasn't been read. Remember it if it is older than others.
+      if (modified < oldest_file_time) {
+        oldest_file_path = std::move(file_path);
+        oldest_file_time = modified;
+      }
+      ++file_count;
+    } else {
+      // This file has been read. Try to delete it. Ignore any errors because
+      // the file may be un-removeable by this process. It could, for example,
+      // have been created by a privileged process like setup.exe. Even if it
+      // is not removed, it will continue to be ignored bacuse of the older
+      // modification time.
+      base::DeleteFile(file_path, /*recursive=*/false);
+      ++delete_count;
+    }
+  }
+
+  UMA_HISTOGRAM_COUNTS_100("UMA.FileMetricsProvider.DirectoryFiles",
+                           file_count);
+  UMA_HISTOGRAM_COUNTS_100("UMA.FileMetricsProvider.DeletedFiles",
+                           delete_count);
+
+  // Stop now if there are no files to read.
+  if (oldest_file_path.empty())
+    return false;
+
+  // Set the active file to be the oldest modified file that has not yet
+  // been read.
+  source->path = std::move(oldest_file_path);
+  return true;
+}
+
+// static
+void FileMetricsProvider::CheckAndMergeMetricSourcesOnTaskRunner(
+    SourceInfoList* sources) {
+  // This method has all state information passed in |sources| and is intended
   // to run on a worker thread rather than the UI thread.
-  for (scoped_ptr<FileInfo>& file : *files) {
-    AccessResult result = CheckAndMapNewMetrics(file.get());
+  for (std::unique_ptr<SourceInfo>& source : *sources) {
+    AccessResult result = CheckAndMapMetricSource(source.get());
+
     // Some results are not reported in order to keep the dashboard clean.
     if (result != ACCESS_RESULT_DOESNT_EXIST &&
         result != ACCESS_RESULT_NOT_MODIFIED) {
       UMA_HISTOGRAM_ENUMERATION(
           "UMA.FileMetricsProvider.AccessResult", result, ACCESS_RESULT_MAX);
     }
+
+    // Mapping was successful. Merge it.
+    if (result == ACCESS_RESULT_SUCCESS) {
+      MergeHistogramDeltasFromSource(source.get());
+      DCHECK(source->read_complete);
+    }
+
+    // Different source types require different post-processing.
+    switch (source->type) {
+      case SOURCE_HISTOGRAMS_ATOMIC_FILE:
+      case SOURCE_HISTOGRAMS_ATOMIC_DIR:
+        // Done with this file so delete the allocator and its owned file.
+        source->allocator.reset();
+        // Remove the file if has been recorded. This prevents them from
+        // accumulating or also being recorded by different instances of
+        // the browser.
+        if (result == ACCESS_RESULT_SUCCESS ||
+            result == ACCESS_RESULT_NOT_MODIFIED) {
+          base::DeleteFile(source->path, /*recursive=*/false);
+        }
+        break;
+      case SOURCE_HISTOGRAMS_ACTIVE_FILE:
+        // Keep the allocator open so it doesn't have to be re-mapped each
+        // time. This also allows the contents to be merged on-demand.
+        break;
+    }
   }
 }
 
-// This method has all state information passed in |file| and is intended
+// This method has all state information passed in |source| and is intended
 // to run on a worker thread rather than the UI thread.
 // static
-FileMetricsProvider::AccessResult FileMetricsProvider::CheckAndMapNewMetrics(
-    FileMetricsProvider::FileInfo* file) {
-  DCHECK(!file->mapped);
-  DCHECK(file->data.empty());
+FileMetricsProvider::AccessResult FileMetricsProvider::CheckAndMapMetricSource(
+    SourceInfo* source) {
+  DCHECK(!source->allocator);
+  source->read_complete = false;
 
+  // If the source is a directory, look for files within it.
+  if (!source->directory.empty() && !LocateNextFileInDirectory(source))
+    return ACCESS_RESULT_DOESNT_EXIST;
+
+  // Do basic validation on the file metadata.
   base::File::Info info;
-  if (!base::GetFileInfo(file->path, &info))
+  if (!base::GetFileInfo(source->path, &info))
     return ACCESS_RESULT_DOESNT_EXIST;
 
   if (info.is_directory || info.size == 0)
     return ACCESS_RESULT_INVALID_FILE;
 
-  if (file->last_seen >= info.last_modified)
+  if (source->last_seen >= info.last_modified)
     return ACCESS_RESULT_NOT_MODIFIED;
 
-  // A new file of metrics has been found. Map it into memory.
-  // TODO(bcwhite): Make this open read/write when supported for "active".
-  file->mapped.reset(new base::MemoryMappedFile());
-  if (!file->mapped->Initialize(file->path)) {
-    file->mapped.reset();
+  // A new file of metrics has been found.
+  base::File file(source->path, kSourceOptions[source->type].file_open_flags);
+  if (!file.IsValid())
+    return ACCESS_RESULT_NO_OPEN;
+
+  std::unique_ptr<base::MemoryMappedFile> mapped(new base::MemoryMappedFile());
+  if (!mapped->Initialize(std::move(file),
+                          kSourceOptions[source->type].memory_mapped_access)) {
     return ACCESS_RESULT_SYSTEM_MAP_FAILURE;
   }
 
   // Ensure any problems below don't occur repeatedly.
-  file->last_seen = info.last_modified;
+  source->last_seen = info.last_modified;
 
   // Test the validity of the file contents.
-  if (!base::FilePersistentMemoryAllocator::IsFileAcceptable(*file->mapped))
+  const bool read_only = kSourceOptions[source->type].is_read_only;
+  if (!base::FilePersistentMemoryAllocator::IsFileAcceptable(*mapped,
+                                                             read_only)) {
     return ACCESS_RESULT_INVALID_CONTENTS;
-
-  // For an "atomic" file, immediately copy the data into local memory and
-  // release the file so that it is not held open.
-  if (file->type == FILE_HISTOGRAMS_ATOMIC) {
-    file->data.assign(file->mapped->data(),
-                      file->mapped->data() + file->mapped->length());
-    file->mapped.reset();
   }
 
-  file->read_complete = false;
+  // Create an allocator for the mapped file. Ownership passes to the allocator.
+  source->allocator.reset(new base::PersistentHistogramAllocator(
+      base::MakeUnique<base::FilePersistentMemoryAllocator>(
+          std::move(mapped), 0, 0, base::StringPiece(), read_only)));
+
   return ACCESS_RESULT_SUCCESS;
 }
 
-void FileMetricsProvider::ScheduleFilesCheck() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (files_to_check_.empty())
-    return;
-
-  // Create an independent list of files for checking. This will be Owned()
-  // by the reply call given to the task-runner, to be deleted when that call
-  // has returned. It is also passed Unretained() to the task itself, safe
-  // because that must complete before the reply runs.
-  FileInfoList* check_list = new FileInfoList();
-  std::swap(files_to_check_, *check_list);
-  task_runner_->PostTaskAndReply(
-      FROM_HERE,
-      base::Bind(&FileMetricsProvider::CheckAndMapNewMetricFilesOnTaskRunner,
-                 base::Unretained(check_list)),
-      base::Bind(&FileMetricsProvider::RecordFilesChecked,
-                 weak_factory_.GetWeakPtr(), base::Owned(check_list)));
-}
-
-void FileMetricsProvider::RecordHistogramSnapshotsFromFile(
-    base::HistogramSnapshotManager* snapshot_manager,
-    FileInfo* file) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+// static
+void FileMetricsProvider::MergeHistogramDeltasFromSource(SourceInfo* source) {
+  DCHECK(source->allocator);
   base::PersistentHistogramAllocator::Iterator histogram_iter(
-      file->allocator.get());
+      source->allocator.get());
 
+  const bool read_only = kSourceOptions[source->type].is_read_only;
   int histogram_count = 0;
   while (true) {
-    scoped_ptr<base::HistogramBase> histogram = histogram_iter.GetNext();
+    std::unique_ptr<base::HistogramBase> histogram = histogram_iter.GetNext();
     if (!histogram)
       break;
-    if (file->type == FILE_HISTOGRAMS_ATOMIC)
-      snapshot_manager->PrepareAbsoluteTakingOwnership(std::move(histogram));
-    else
-      snapshot_manager->PrepareDeltaTakingOwnership(std::move(histogram));
+    if (read_only) {
+      source->allocator->MergeHistogramFinalDeltaToStatisticsRecorder(
+          histogram.get());
+    } else {
+      source->allocator->MergeHistogramDeltaToStatisticsRecorder(
+          histogram.get());
+    }
     ++histogram_count;
   }
 
+  source->read_complete = true;
   DVLOG(1) << "Reported " << histogram_count << " histograms from "
-           << file->path.value();
+           << source->path.value();
 }
 
-void FileMetricsProvider::CreateAllocatorForFile(FileInfo* file) {
-  DCHECK(!file->allocator);
+// static
+void FileMetricsProvider::RecordHistogramSnapshotsFromSource(
+    base::HistogramSnapshotManager* snapshot_manager,
+    SourceInfo* source) {
+  DCHECK_EQ(SOURCE_HISTOGRAMS_ATOMIC_FILE, source->type);
 
-  // File data was validated earlier. Files are not considered "untrusted"
-  // as some processes might be (e.g. Renderer) so there's no need to check
-  // again to try to thwart some malicious actor that may have modified the
-  // data between then and now.
-  if (file->mapped) {
-    DCHECK(file->data.empty());
-    // TODO(bcwhite): Make this do read/write when supported for "active".
-    file->allocator.reset(new base::PersistentHistogramAllocator(
-        make_scoped_ptr(new base::FilePersistentMemoryAllocator(
-            std::move(file->mapped), 0, ""))));
-  } else {
-    DCHECK(!file->mapped);
-    file->allocator.reset(new base::PersistentHistogramAllocator(
-        make_scoped_ptr(new base::PersistentMemoryAllocator(
-            &file->data[0], file->data.size(), 0, 0, "", true))));
+  base::PersistentHistogramAllocator::Iterator histogram_iter(
+      source->allocator.get());
+
+  int histogram_count = 0;
+  while (true) {
+    std::unique_ptr<base::HistogramBase> histogram = histogram_iter.GetNext();
+    if (!histogram)
+      break;
+    snapshot_manager->PrepareFinalDelta(histogram.get());
+    ++histogram_count;
   }
+
+  source->read_complete = true;
+  DVLOG(1) << "Reported " << histogram_count << " histograms from "
+           << source->path.value();
 }
 
-void FileMetricsProvider::RecordFilesChecked(FileInfoList* checked) {
+void FileMetricsProvider::ScheduleSourcesCheck() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (sources_to_check_.empty())
+    return;
+
+  // Create an independent list of sources for checking. This will be Owned()
+  // by the reply call given to the task-runner, to be deleted when that call
+  // has returned. It is also passed Unretained() to the task itself, safe
+  // because that must complete before the reply runs.
+  SourceInfoList* check_list = new SourceInfoList();
+  std::swap(sources_to_check_, *check_list);
+  task_runner_->PostTaskAndReply(
+      FROM_HERE,
+      base::Bind(&FileMetricsProvider::CheckAndMergeMetricSourcesOnTaskRunner,
+                 base::Unretained(check_list)),
+      base::Bind(&FileMetricsProvider::RecordSourcesChecked,
+                 weak_factory_.GetWeakPtr(), base::Owned(check_list)));
+}
+
+void FileMetricsProvider::RecordSourcesChecked(SourceInfoList* checked) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  // Move each processed file to either the "to-read" list (for processing) or
-  // the "to-check" list (for future checking).
+  // Sources that still have an allocator at this point are read/write "active"
+  // files that may need their contents merged on-demand. If there is no
+  // allocator (not a read/write file) but a read was done on the task-runner,
+  // try again immediately to see if more is available (in a directory of
+  // files). Otherwise, remember the source for checking again at a later time.
+  bool did_read = false;
   for (auto iter = checked->begin(); iter != checked->end();) {
     auto temp = iter++;
-    const FileInfo* file = temp->get();
-    if (file->mapped || !file->data.empty())
-      files_to_read_.splice(files_to_read_.end(), *checked, temp);
+    SourceInfo* source = temp->get();
+    if (source->read_complete) {
+      RecordSourceAsRead(source);
+      did_read = true;
+    }
+    if (source->allocator)
+      sources_mapped_.splice(sources_mapped_.end(), *checked, temp);
     else
-      files_to_check_.splice(files_to_check_.end(), *checked, temp);
+      sources_to_check_.splice(sources_to_check_.end(), *checked, temp);
   }
+
+  // If a read was done, schedule another one immediately. In the case of a
+  // directory of files, this ensures that all entries get processed. It's
+  // done here instead of as a loop in CheckAndMergeMetricSourcesOnTaskRunner
+  // so that (a) it gives the disk a rest and (b) testing of individual reads
+  // is possible.
+  if (did_read)
+    ScheduleSourcesCheck();
 }
 
-void FileMetricsProvider::RecordFileAsSeen(FileInfo* file) {
+void FileMetricsProvider::DeleteFileAsync(const base::FilePath& path) {
+  task_runner_->PostTask(FROM_HERE,
+                         base::Bind(base::IgnoreResult(&base::DeleteFile),
+                                    path, /*recursive=*/false));
+}
+
+void FileMetricsProvider::RecordSourceAsRead(SourceInfo* source) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  file->read_complete = true;
-  if (pref_service_ && !file->prefs_key.empty()) {
-    pref_service_->SetInt64(metrics::prefs::kMetricsLastSeenPrefix +
-                            file->prefs_key,
-                            file->last_seen.ToInternalValue());
+  // Persistently record the "last seen" timestamp of the source file to
+  // ensure that the file is never read again unless it is modified again.
+  if (pref_service_ && !source->prefs_key.empty()) {
+    pref_service_->SetInt64(
+        metrics::prefs::kMetricsLastSeenPrefix + source->prefs_key,
+        source->last_seen.ToInternalValue());
   }
 }
 
 void FileMetricsProvider::OnDidCreateMetricsLog() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  // Move finished metric files back to list of monitored files.
-  for (auto iter = files_to_read_.begin(); iter != files_to_read_.end();) {
-    auto temp = iter++;
-    FileInfo* file = temp->get();
-
-    // Atomic files are read once and then ignored unless they change.
-    if (file->type == FILE_HISTOGRAMS_ATOMIC && file->read_complete) {
-      DCHECK(!file->mapped);
-      file->allocator.reset();
-      file->data.clear();
-    }
-
-    if (!file->allocator && !file->mapped && file->data.empty())
-      files_to_check_.splice(files_to_check_.end(), files_to_read_, temp);
-  }
-
   // Schedule a check to see if there are new metrics to load. If so, they
   // will be reported during the next collection run after this one. The
   // check is run off of the worker-pool so as to not cause delays on the
   // main UI thread (which is currently where metric collection is done).
-  ScheduleFilesCheck();
+  ScheduleSourcesCheck();
+
+  // Clear any data for initial metrics since they're always reported
+  // before the first call to this method. It couldn't be released after
+  // being reported in RecordInitialHistogramSnapshots because the data
+  // will continue to be used by the caller after that method returns. Once
+  // here, though, all actions to be done on the data have been completed.
+  for (const std::unique_ptr<SourceInfo>& source : sources_for_previous_run_)
+    DeleteFileAsync(source->path);
+  sources_for_previous_run_.clear();
 }
 
-void FileMetricsProvider::RecordHistogramSnapshots(
+bool FileMetricsProvider::HasInitialStabilityMetrics() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  // Measure the total time spent checking all sources as well as the time
+  // per individual file. This method is called during startup and thus blocks
+  // the initial showing of the browser window so it's important to know the
+  // total delay.
+  SCOPED_UMA_HISTOGRAM_TIMER("UMA.FileMetricsProvider.InitialCheckTime.Total");
+
+  // Check all sources for previous run to see if they need to be read.
+  for (auto iter = sources_for_previous_run_.begin();
+       iter != sources_for_previous_run_.end();) {
+    SCOPED_UMA_HISTOGRAM_TIMER("UMA.FileMetricsProvider.InitialCheckTime.File");
+
+    auto temp = iter++;
+    SourceInfo* source = temp->get();
+
+    // This would normally be done on a background I/O thread but there
+    // hasn't been a chance to run any at the time this method is called.
+    // Do the check in-line.
+    AccessResult result = CheckAndMapMetricSource(source);
+    UMA_HISTOGRAM_ENUMERATION("UMA.FileMetricsProvider.InitialAccessResult",
+                              result, ACCESS_RESULT_MAX);
+
+    // If it couldn't be accessed, remove it from the list. There is only ever
+    // one chance to record it so no point keeping it around for later. Also
+    // mark it as having been read since uploading it with a future browser
+    // run would associate it with the then-previous run which would no longer
+    // be the run from which it came.
+    if (result != ACCESS_RESULT_SUCCESS) {
+      DCHECK(!source->allocator);
+      RecordSourceAsRead(source);
+      DeleteFileAsync(source->path);
+      sources_for_previous_run_.erase(temp);
+    }
+  }
+
+  return !sources_for_previous_run_.empty();
+}
+
+void FileMetricsProvider::MergeHistogramDeltas() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  // Measure the total time spent processing all sources as well as the time
+  // per individual file. This method is called on the UI thread so it's
+  // important to know how much total "jank" may be introduced.
+  SCOPED_UMA_HISTOGRAM_TIMER("UMA.FileMetricsProvider.SnapshotTime.Total");
+
+  for (std::unique_ptr<SourceInfo>& source : sources_mapped_) {
+    SCOPED_UMA_HISTOGRAM_TIMER("UMA.FileMetricsProvider.SnapshotTime.File");
+    MergeHistogramDeltasFromSource(source.get());
+  }
+}
+
+void FileMetricsProvider::RecordInitialHistogramSnapshots(
     base::HistogramSnapshotManager* snapshot_manager) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  for (scoped_ptr<FileInfo>& file : files_to_read_) {
-    // Skip this file if the data has already been read.
-    if (file->read_complete)
-      continue;
+  // Measure the total time spent processing all sources as well as the time
+  // per individual file. This method is called during startup and thus blocks
+  // the initial showing of the browser window so it's important to know the
+  // total delay.
+  SCOPED_UMA_HISTOGRAM_TIMER(
+      "UMA.FileMetricsProvider.InitialSnapshotTime.Total");
 
-    // If the file is mapped or loaded then it needs to have an allocator
-    // attached to it in order to read histograms out of it.
-    if (file->mapped || !file->data.empty())
-      CreateAllocatorForFile(file.get());
+  for (const std::unique_ptr<SourceInfo>& source : sources_for_previous_run_) {
+    SCOPED_UMA_HISTOGRAM_TIMER(
+        "UMA.FileMetricsProvider.InitialSnapshotTime.File");
 
-    // A file should not be under "files to read" unless it has an allocator
-    // or is memory-mapped (at which point it will have received an allocator
-    // above). However, if this method gets called twice before the scheduled-
-    // files-check has a chance to clean up, this may trigger. This also
-    // catches the case where creating an allocator from the file has failed.
-    if (!file->allocator)
-      continue;
+    // The source needs to have an allocator attached to it in order to read
+    // histograms out of it.
+    DCHECK(!source->read_complete);
+    DCHECK(source->allocator);
 
-    // Dump all histograms contained within the file to the snapshot-manager.
-    RecordHistogramSnapshotsFromFile(snapshot_manager, file.get());
+    // Dump all histograms contained within the source to the snapshot-manager.
+    RecordHistogramSnapshotsFromSource(snapshot_manager, source.get());
 
     // Update the last-seen time so it isn't read again unless it changes.
-    RecordFileAsSeen(file.get());
+    RecordSourceAsRead(source.get());
   }
 }
 

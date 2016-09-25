@@ -35,7 +35,7 @@
 #include "core/html/ValidityState.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/inspector/ConsoleMessage.h"
-#include "core/layout/LayoutBox.h"
+#include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/page/Page.h"
 #include "core/page/ValidationMessageClient.h"
@@ -179,7 +179,7 @@ void HTMLFormControlElement::disabledAttributeChanged()
     pseudoStateChanged(CSSSelector::PseudoEnabled);
     if (layoutObject())
         LayoutTheme::theme().controlStateChanged(*layoutObject(), EnabledControlState);
-    if (isDisabledFormControl() && treeScope().adjustedFocusedElement() == this) {
+    if (isDisabledFormControl() && adjustedFocusedElementInTreeScope() == this) {
         // We might want to call blur(), but it's dangerous to dispatch events
         // here.
         document().setNeedsFocusedElementCheck();
@@ -235,15 +235,15 @@ static bool shouldAutofocusOnAttach(const HTMLFormControlElement* element)
     return true;
 }
 
-void HTMLFormControlElement::attach(const AttachContext& context)
+void HTMLFormControlElement::attachLayoutTree(const AttachContext& context)
 {
-    HTMLElement::attach(context);
+    HTMLElement::attachLayoutTree(context);
 
     if (!layoutObject())
         return;
 
     // The call to updateFromElement() needs to go after the call through
-    // to the base class's attach() because that can sometimes do a close
+    // to the base class's attachLayoutTree() because that can sometimes do a close
     // on the layoutObject.
     layoutObject()->updateFromElement();
 
@@ -269,7 +269,7 @@ Node::InsertionNotificationRequest HTMLFormControlElement::insertedInto(Containe
     fieldSetAncestorsSetNeedsValidityCheck(insertionPoint);
 
     // Trigger for elements outside of forms.
-    if (!formOwner() && insertionPoint->inShadowIncludingDocument())
+    if (!formOwner() && insertionPoint->isConnected())
         document().didAssociateFormControl(this);
 
     return InsertionDone;
@@ -285,7 +285,6 @@ void HTMLFormControlElement::removedFrom(ContainerNode* insertionPoint)
     setNeedsWillValidateCheck();
     HTMLElement::removedFrom(insertionPoint);
     FormAssociatedElement::removedFrom(insertionPoint);
-    document().removeFormAssociation(this);
 }
 
 void HTMLFormControlElement::willChangeForm()
@@ -300,7 +299,7 @@ void HTMLFormControlElement::didChangeForm()
 {
     FormAssociatedElement::didChangeForm();
     formOwnerSetNeedsValidityCheck();
-    if (formOwner() && inShadowIncludingDocument() && canBeSuccessfulSubmitButton())
+    if (formOwner() && isConnected() && canBeSuccessfulSubmitButton())
         formOwner()->invalidateDefaultButtonStyle();
 }
 
@@ -357,6 +356,11 @@ bool HTMLFormControlElement::isDisabledFormControl() const
     if (m_ancestorDisabledState == AncestorDisabledStateUnknown)
         updateAncestorDisabledState();
     return m_ancestorDisabledState == AncestorDisabledStateDisabled;
+}
+
+bool HTMLFormControlElement::matchesEnabledPseudoClass() const
+{
+    return !isDisabledFormControl();
 }
 
 bool HTMLFormControlElement::isRequired() const
@@ -445,7 +449,7 @@ bool HTMLFormControlElement::willValidate() const
         // If the following assertion fails, setNeedsWillValidateCheck() is not
         // called correctly when something which changes recalcWillValidate() result
         // is updated.
-        ASSERT(m_willValidate == recalcWillValidate());
+        DCHECK_EQ(m_willValidate, recalcWillValidate());
     }
     return m_willValidate;
 }
@@ -458,6 +462,13 @@ void HTMLFormControlElement::setNeedsWillValidateCheck()
         return;
     m_willValidateInitialized = true;
     m_willValidate = newWillValidate;
+    // Needs to force setNeedsValidityCheck() to invalidate validity state of
+    // FORM/FIELDSET. If this element updates willValidate twice and
+    // isValidElement() is not called between them, the second call of this
+    // function still has m_validityIsDirty==true, which means
+    // setNeedsValidityCheck() doesn't invalidate validity state of
+    // FORM/FIELDSET.
+    m_validityIsDirty = false;
     setNeedsValidityCheck();
     // No need to trigger style recalculation here because
     // setNeedsValidityCheck() does it in the right away. This relies on
@@ -527,13 +538,15 @@ ValidationMessageClient* HTMLFormControlElement::validationMessageClient() const
 
 bool HTMLFormControlElement::checkValidity(HeapVector<Member<HTMLFormControlElement>>* unhandledInvalidControls, CheckValidityEventBehavior eventBehavior)
 {
+    if (!willValidate())
+        return true;
     if (isValidElement())
         return true;
     if (eventBehavior != CheckValidityDispatchInvalidEvent)
         return false;
     Document* originalDocument = &document();
     DispatchEventResult dispatchResult = dispatchEvent(Event::createCancelable(EventTypeNames::invalid));
-    if (dispatchResult == DispatchEventResult::NotCanceled && unhandledInvalidControls && inShadowIncludingDocument() && originalDocument == document())
+    if (dispatchResult == DispatchEventResult::NotCanceled && unhandledInvalidControls && isConnected() && originalDocument == document())
         unhandledInvalidControls->append(this);
     return false;
 }
@@ -551,11 +564,11 @@ bool HTMLFormControlElement::reportValidity()
     bool isValid = checkValidity(&unhandledInvalidControls, CheckValidityDispatchInvalidEvent);
     if (isValid || unhandledInvalidControls.isEmpty())
         return isValid;
-    ASSERT(unhandledInvalidControls.size() == 1);
-    ASSERT(unhandledInvalidControls[0].get() == this);
+    DCHECK_EQ(unhandledInvalidControls.size(), 1u);
+    DCHECK_EQ(unhandledInvalidControls[0].get(), this);
     // Update layout now before calling isFocusable(), which has
     // !layoutObject()->needsLayout() assertion.
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     if (isFocusable()) {
         showValidationMessage();
         return false;
@@ -581,7 +594,7 @@ bool HTMLFormControlElement::isValidElement()
     } else {
         // If the following assertion fails, setNeedsValidityCheck() is not
         // called correctly when something which changes validity is updated.
-        ASSERT(m_isValid == (!willValidate() || valid()));
+        DCHECK_EQ(m_isValid, (!willValidate() || valid()));
     }
     return m_isValid;
 }

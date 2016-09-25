@@ -28,17 +28,18 @@
 
 #include "core/fetch/FetchRequest.h"
 #include "core/fetch/IntegrityMetadata.h"
-#include "core/fetch/ResourceClientOrObserverWalker.h"
+#include "core/fetch/ResourceClientWalker.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "platform/MIMETypeRegistry.h"
 #include "platform/SharedBuffer.h"
-#include "public/platform/WebProcessMemoryDump.h"
+#include "platform/web_memory_allocator_dump.h"
+#include "platform/web_process_memory_dump.h"
 
 namespace blink {
 
 ScriptResource* ScriptResource::fetch(FetchRequest& request, ResourceFetcher* fetcher)
 {
-    ASSERT(request.resourceRequest().frameType() == WebURLRequest::FrameTypeNone);
+    DCHECK_EQ(request.resourceRequest().frameType(), WebURLRequest::FrameTypeNone);
     request.mutableResourceRequest().setRequestContext(WebURLRequest::RequestContextScript);
     ScriptResource* resource = toScriptResource(fetcher->requestResource(request, ScriptResourceFactory()));
     if (resource && !request.integrityMetadata().isEmpty())
@@ -58,14 +59,14 @@ ScriptResource::~ScriptResource()
 
 void ScriptResource::didAddClient(ResourceClient* client)
 {
-    ASSERT(ScriptResourceClient::isExpectedType(client));
+    DCHECK(ScriptResourceClient::isExpectedType(client));
     Resource::didAddClient(client);
 }
 
 void ScriptResource::appendData(const char* data, size_t length)
 {
     Resource::appendData(data, length);
-    ResourceClientWalker<ScriptResourceClient> walker(m_clients);
+    ResourceClientWalker<ScriptResourceClient> walker(clients());
     while (ScriptResourceClient* client = walker.next())
         client->notifyAppendData(this);
 }
@@ -75,23 +76,22 @@ void ScriptResource::onMemoryDump(WebMemoryDumpLevelOfDetail levelOfDetail, WebP
     Resource::onMemoryDump(levelOfDetail, memoryDump);
     const String name = getMemoryDumpName() + "/decoded_script";
     auto dump = memoryDump->createMemoryAllocatorDump(name);
-    dump->addScalar("size", "bytes", m_script.currentSizeInBytes());
+    dump->addScalar("size", "bytes", m_script.charactersSizeInBytes());
     memoryDump->addSuballocation(dump->guid(), String(WTF::Partitions::kAllocatedObjectPoolName));
 }
 
-const CompressibleString& ScriptResource::script()
+const String& ScriptResource::script()
 {
-    ASSERT(!isPurgeable());
-    ASSERT(isLoaded());
+    DCHECK(isLoaded());
 
-    if (m_script.isNull() && m_data) {
+    if (m_script.isNull() && data()) {
         String script = decodedText();
-        m_data.clear();
+        clearData();
         // We lie a it here and claim that script counts as encoded data (even though it's really decoded data).
         // That's because the MemoryCache thinks that it can clear out decoded data by calling destroyDecodedData(),
         // but we can't destroy script in destroyDecodedData because that's our only copy of the data!
-        setEncodedSize(script.sizeInBytes());
-        m_script = CompressibleString(script.impl());
+        setEncodedSize(script.charactersSizeInBytes());
+        m_script = AtomicString(script);
     }
 
     return m_script;
@@ -99,17 +99,17 @@ const CompressibleString& ScriptResource::script()
 
 void ScriptResource::destroyDecodedDataForFailedRevalidation()
 {
-    m_script = CompressibleString();
+    m_script = AtomicString();
 }
 
 bool ScriptResource::mimeTypeAllowedByNosniff() const
 {
-    return parseContentTypeOptionsHeader(m_response.httpHeaderField(HTTPNames::X_Content_Type_Options)) != ContentTypeOptionsNosniff || MIMETypeRegistry::isSupportedJavaScriptMIMEType(httpContentType());
+    return parseContentTypeOptionsHeader(response().httpHeaderField(HTTPNames::X_Content_Type_Options)) != ContentTypeOptionsNosniff || MIMETypeRegistry::isSupportedJavaScriptMIMEType(httpContentType());
 }
 
 void ScriptResource::setIntegrityDisposition(ScriptIntegrityDisposition disposition)
 {
-    ASSERT(disposition != ScriptIntegrityDisposition::NotChecked);
+    DCHECK_NE(disposition, ScriptIntegrityDisposition::NotChecked);
     m_integrityDisposition = disposition;
 }
 bool ScriptResource::mustRefetchDueToIntegrityMetadata(const FetchRequest& request) const

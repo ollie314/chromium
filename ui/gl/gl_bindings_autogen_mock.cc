@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -12,7 +12,7 @@
 
 #include "ui/gl/gl_mock.h"
 
-namespace gfx {
+namespace gl {
 
 // This is called mainly to prevent the compiler combining the code of mock
 // functions with identical contents, so that their function pointers will be
@@ -63,6 +63,12 @@ MockGLInterface::Mock_glBeginTransformFeedback(GLenum primitiveMode) {
 }
 
 void GL_BINDING_CALL
+MockGLInterface::Mock_glBeginTransformFeedbackEXT(GLenum primitiveMode) {
+  MakeFunctionUnique("glBeginTransformFeedbackEXT");
+  interface_->BeginTransformFeedback(primitiveMode);
+}
+
+void GL_BINDING_CALL
 MockGLInterface::Mock_glBindAttribLocation(GLuint program,
                                            GLuint index,
                                            const char* name) {
@@ -83,12 +89,29 @@ void GL_BINDING_CALL MockGLInterface::Mock_glBindBufferBase(GLenum target,
   interface_->BindBufferBase(target, index, buffer);
 }
 
+void GL_BINDING_CALL MockGLInterface::Mock_glBindBufferBaseEXT(GLenum target,
+                                                               GLuint index,
+                                                               GLuint buffer) {
+  MakeFunctionUnique("glBindBufferBaseEXT");
+  interface_->BindBufferBase(target, index, buffer);
+}
+
 void GL_BINDING_CALL MockGLInterface::Mock_glBindBufferRange(GLenum target,
                                                              GLuint index,
                                                              GLuint buffer,
                                                              GLintptr offset,
                                                              GLsizeiptr size) {
   MakeFunctionUnique("glBindBufferRange");
+  interface_->BindBufferRange(target, index, buffer, offset, size);
+}
+
+void GL_BINDING_CALL
+MockGLInterface::Mock_glBindBufferRangeEXT(GLenum target,
+                                           GLuint index,
+                                           GLuint buffer,
+                                           GLintptr offset,
+                                           GLsizeiptr size) {
+  MakeFunctionUnique("glBindBufferRangeEXT");
   interface_->BindBufferRange(target, index, buffer, offset, size);
 }
 
@@ -192,6 +215,14 @@ void GL_BINDING_CALL
 MockGLInterface::Mock_glBindTransformFeedback(GLenum target, GLuint id) {
   MakeFunctionUnique("glBindTransformFeedback");
   interface_->BindTransformFeedback(target, id);
+}
+
+void GL_BINDING_CALL
+MockGLInterface::Mock_glBindUniformLocationCHROMIUM(GLuint program,
+                                                    GLint location,
+                                                    const char* name) {
+  MakeFunctionUnique("glBindUniformLocationCHROMIUM");
+  interface_->BindUniformLocationCHROMIUM(program, location, name);
 }
 
 void GL_BINDING_CALL MockGLInterface::Mock_glBindVertexArray(GLuint array) {
@@ -410,6 +441,13 @@ void GL_BINDING_CALL MockGLInterface::Mock_glCompileShader(GLuint shader) {
 }
 
 void GL_BINDING_CALL
+MockGLInterface::Mock_glCompressedCopyTextureCHROMIUM(GLuint sourceId,
+                                                      GLuint destId) {
+  MakeFunctionUnique("glCompressedCopyTextureCHROMIUM");
+  interface_->CompressedCopyTextureCHROMIUM(sourceId, destId);
+}
+
+void GL_BINDING_CALL
 MockGLInterface::Mock_glCompressedTexImage2D(GLenum target,
                                              GLint level,
                                              GLenum internalformat,
@@ -482,6 +520,24 @@ MockGLInterface::Mock_glCopyBufferSubData(GLenum readTarget,
                                 writeOffset, size);
 }
 
+void GL_BINDING_CALL MockGLInterface::Mock_glCopySubTextureCHROMIUM(
+    GLuint sourceId,
+    GLuint destId,
+    GLint xoffset,
+    GLint yoffset,
+    GLint x,
+    GLint y,
+    GLsizei width,
+    GLsizei height,
+    GLboolean unpackFlipY,
+    GLboolean unpackPremultiplyAlpha,
+    GLboolean unpackUnmultiplyAlpha) {
+  MakeFunctionUnique("glCopySubTextureCHROMIUM");
+  interface_->CopySubTextureCHROMIUM(
+      sourceId, destId, xoffset, yoffset, x, y, width, height, unpackFlipY,
+      unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
+}
+
 void GL_BINDING_CALL
 MockGLInterface::Mock_glCopyTexImage2D(GLenum target,
                                        GLint level,
@@ -521,6 +577,20 @@ void GL_BINDING_CALL MockGLInterface::Mock_glCopyTexSubImage3D(GLenum target,
   MakeFunctionUnique("glCopyTexSubImage3D");
   interface_->CopyTexSubImage3D(target, level, xoffset, yoffset, zoffset, x, y,
                                 width, height);
+}
+
+void GL_BINDING_CALL
+MockGLInterface::Mock_glCopyTextureCHROMIUM(GLuint sourceId,
+                                            GLuint destId,
+                                            GLint internalFormat,
+                                            GLenum destType,
+                                            GLboolean unpackFlipY,
+                                            GLboolean unpackPremultiplyAlpha,
+                                            GLboolean unpackUnmultiplyAlpha) {
+  MakeFunctionUnique("glCopyTextureCHROMIUM");
+  interface_->CopyTextureCHROMIUM(sourceId, destId, internalFormat, destType,
+                                  unpackFlipY, unpackPremultiplyAlpha,
+                                  unpackUnmultiplyAlpha);
 }
 
 void GL_BINDING_CALL MockGLInterface::Mock_glCoverFillPathInstancedNV(
@@ -902,6 +972,11 @@ void GL_BINDING_CALL MockGLInterface::Mock_glEndQueryEXT(GLenum target) {
 
 void GL_BINDING_CALL MockGLInterface::Mock_glEndTransformFeedback(void) {
   MakeFunctionUnique("glEndTransformFeedback");
+  interface_->EndTransformFeedback();
+}
+
+void GL_BINDING_CALL MockGLInterface::Mock_glEndTransformFeedbackEXT(void) {
+  MakeFunctionUnique("glEndTransformFeedbackEXT");
   interface_->EndTransformFeedback();
 }
 
@@ -1636,6 +1711,19 @@ MockGLInterface::Mock_glGetTransformFeedbackVarying(GLuint program,
                                                     GLenum* type,
                                                     char* name) {
   MakeFunctionUnique("glGetTransformFeedbackVarying");
+  interface_->GetTransformFeedbackVarying(program, index, bufSize, length, size,
+                                          type, name);
+}
+
+void GL_BINDING_CALL
+MockGLInterface::Mock_glGetTransformFeedbackVaryingEXT(GLuint program,
+                                                       GLuint index,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLsizei* size,
+                                                       GLenum* type,
+                                                       char* name) {
+  MakeFunctionUnique("glGetTransformFeedbackVaryingEXT");
   interface_->GetTransformFeedbackVarying(program, index, bufSize, length, size,
                                           type, name);
 }
@@ -2483,6 +2571,15 @@ MockGLInterface::Mock_glTransformFeedbackVaryings(GLuint program,
   interface_->TransformFeedbackVaryings(program, count, varyings, bufferMode);
 }
 
+void GL_BINDING_CALL MockGLInterface::Mock_glTransformFeedbackVaryingsEXT(
+    GLuint program,
+    GLsizei count,
+    const char* const* varyings,
+    GLenum bufferMode) {
+  MakeFunctionUnique("glTransformFeedbackVaryingsEXT");
+  interface_->TransformFeedbackVaryings(program, count, varyings, bufferMode);
+}
+
 void GL_BINDING_CALL MockGLInterface::Mock_glUniform1f(GLint location,
                                                        GLfloat x) {
   MakeFunctionUnique("glUniform1f");
@@ -2925,14 +3022,20 @@ void* GL_BINDING_CALL MockGLInterface::GetGLProcAddress(const char* name) {
     return reinterpret_cast<void*>(Mock_glBeginQueryEXT);
   if (strcmp(name, "glBeginTransformFeedback") == 0)
     return reinterpret_cast<void*>(Mock_glBeginTransformFeedback);
+  if (strcmp(name, "glBeginTransformFeedbackEXT") == 0)
+    return reinterpret_cast<void*>(Mock_glBeginTransformFeedbackEXT);
   if (strcmp(name, "glBindAttribLocation") == 0)
     return reinterpret_cast<void*>(Mock_glBindAttribLocation);
   if (strcmp(name, "glBindBuffer") == 0)
     return reinterpret_cast<void*>(Mock_glBindBuffer);
   if (strcmp(name, "glBindBufferBase") == 0)
     return reinterpret_cast<void*>(Mock_glBindBufferBase);
+  if (strcmp(name, "glBindBufferBaseEXT") == 0)
+    return reinterpret_cast<void*>(Mock_glBindBufferBaseEXT);
   if (strcmp(name, "glBindBufferRange") == 0)
     return reinterpret_cast<void*>(Mock_glBindBufferRange);
+  if (strcmp(name, "glBindBufferRangeEXT") == 0)
+    return reinterpret_cast<void*>(Mock_glBindBufferRangeEXT);
   if (strcmp(name, "glBindFragDataLocation") == 0)
     return reinterpret_cast<void*>(Mock_glBindFragDataLocation);
   if (strcmp(name, "glBindFragDataLocationEXT") == 0)
@@ -2959,6 +3062,8 @@ void* GL_BINDING_CALL MockGLInterface::GetGLProcAddress(const char* name) {
     return reinterpret_cast<void*>(Mock_glBindTexture);
   if (strcmp(name, "glBindTransformFeedback") == 0)
     return reinterpret_cast<void*>(Mock_glBindTransformFeedback);
+  if (strcmp(name, "glBindUniformLocationCHROMIUM") == 0)
+    return reinterpret_cast<void*>(Mock_glBindUniformLocationCHROMIUM);
   if (strcmp(name, "glBindVertexArray") == 0)
     return reinterpret_cast<void*>(Mock_glBindVertexArray);
   if (strcmp(name, "glBindVertexArrayAPPLE") == 0)
@@ -3017,6 +3122,8 @@ void* GL_BINDING_CALL MockGLInterface::GetGLProcAddress(const char* name) {
     return reinterpret_cast<void*>(Mock_glColorMask);
   if (strcmp(name, "glCompileShader") == 0)
     return reinterpret_cast<void*>(Mock_glCompileShader);
+  if (strcmp(name, "glCompressedCopyTextureCHROMIUM") == 0)
+    return reinterpret_cast<void*>(Mock_glCompressedCopyTextureCHROMIUM);
   if (strcmp(name, "glCompressedTexImage2D") == 0)
     return reinterpret_cast<void*>(Mock_glCompressedTexImage2D);
   if (strcmp(name, "glCompressedTexImage3D") == 0)
@@ -3027,12 +3134,16 @@ void* GL_BINDING_CALL MockGLInterface::GetGLProcAddress(const char* name) {
     return reinterpret_cast<void*>(Mock_glCompressedTexSubImage3D);
   if (strcmp(name, "glCopyBufferSubData") == 0)
     return reinterpret_cast<void*>(Mock_glCopyBufferSubData);
+  if (strcmp(name, "glCopySubTextureCHROMIUM") == 0)
+    return reinterpret_cast<void*>(Mock_glCopySubTextureCHROMIUM);
   if (strcmp(name, "glCopyTexImage2D") == 0)
     return reinterpret_cast<void*>(Mock_glCopyTexImage2D);
   if (strcmp(name, "glCopyTexSubImage2D") == 0)
     return reinterpret_cast<void*>(Mock_glCopyTexSubImage2D);
   if (strcmp(name, "glCopyTexSubImage3D") == 0)
     return reinterpret_cast<void*>(Mock_glCopyTexSubImage3D);
+  if (strcmp(name, "glCopyTextureCHROMIUM") == 0)
+    return reinterpret_cast<void*>(Mock_glCopyTextureCHROMIUM);
   if (strcmp(name, "glCoverFillPathInstancedNV") == 0)
     return reinterpret_cast<void*>(Mock_glCoverFillPathInstancedNV);
   if (strcmp(name, "glCoverFillPathNV") == 0)
@@ -3147,6 +3258,8 @@ void* GL_BINDING_CALL MockGLInterface::GetGLProcAddress(const char* name) {
     return reinterpret_cast<void*>(Mock_glEndQueryEXT);
   if (strcmp(name, "glEndTransformFeedback") == 0)
     return reinterpret_cast<void*>(Mock_glEndTransformFeedback);
+  if (strcmp(name, "glEndTransformFeedbackEXT") == 0)
+    return reinterpret_cast<void*>(Mock_glEndTransformFeedbackEXT);
   if (strcmp(name, "glFenceSync") == 0)
     return reinterpret_cast<void*>(Mock_glFenceSync);
   if (strcmp(name, "glFinish") == 0)
@@ -3340,6 +3453,8 @@ void* GL_BINDING_CALL MockGLInterface::GetGLProcAddress(const char* name) {
     return reinterpret_cast<void*>(Mock_glGetTexParameteriv);
   if (strcmp(name, "glGetTransformFeedbackVarying") == 0)
     return reinterpret_cast<void*>(Mock_glGetTransformFeedbackVarying);
+  if (strcmp(name, "glGetTransformFeedbackVaryingEXT") == 0)
+    return reinterpret_cast<void*>(Mock_glGetTransformFeedbackVaryingEXT);
   if (strcmp(name, "glGetTranslatedShaderSourceANGLE") == 0)
     return reinterpret_cast<void*>(Mock_glGetTranslatedShaderSourceANGLE);
   if (strcmp(name, "glGetUniformBlockIndex") == 0)
@@ -3561,6 +3676,8 @@ void* GL_BINDING_CALL MockGLInterface::GetGLProcAddress(const char* name) {
     return reinterpret_cast<void*>(Mock_glTexSubImage3D);
   if (strcmp(name, "glTransformFeedbackVaryings") == 0)
     return reinterpret_cast<void*>(Mock_glTransformFeedbackVaryings);
+  if (strcmp(name, "glTransformFeedbackVaryingsEXT") == 0)
+    return reinterpret_cast<void*>(Mock_glTransformFeedbackVaryingsEXT);
   if (strcmp(name, "glUniform1f") == 0)
     return reinterpret_cast<void*>(Mock_glUniform1f);
   if (strcmp(name, "glUniform1fv") == 0)
@@ -3678,4 +3795,4 @@ void* GL_BINDING_CALL MockGLInterface::GetGLProcAddress(const char* name) {
   return reinterpret_cast<void*>(&MockInvalidFunction);
 }
 
-}  // namespace gfx
+}  // namespace gl

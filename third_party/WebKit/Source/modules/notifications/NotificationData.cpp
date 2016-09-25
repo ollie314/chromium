@@ -10,7 +10,7 @@
 #include "core/dom/ExecutionContext.h"
 #include "modules/notifications/Notification.h"
 #include "modules/notifications/NotificationOptions.h"
-#include "modules/vibration/NavigatorVibration.h"
+#include "modules/vibration/VibrationController.h"
 #include "public/platform/WebURL.h"
 #include "wtf/CurrentTime.h"
 
@@ -59,20 +59,26 @@ WebNotificationData createWebNotificationData(ExecutionContext* executionContext
     webData.body = options.body();
     webData.tag = options.tag();
 
+    if (options.hasImage() && !options.image().isEmpty())
+        webData.image = completeURL(executionContext, options.image());
+
     if (options.hasIcon() && !options.icon().isEmpty())
         webData.icon = completeURL(executionContext, options.icon());
 
     if (options.hasBadge() && !options.badge().isEmpty())
         webData.badge = completeURL(executionContext, options.badge());
 
-    webData.vibrate = NavigatorVibration::sanitizeVibrationPattern(options.vibrate());
+    webData.vibrate = VibrationController::sanitizeVibrationPattern(options.vibrate());
     webData.timestamp = options.hasTimestamp() ? static_cast<double>(options.timestamp()) : WTF::currentTimeMS();
     webData.renotify = options.renotify();
     webData.silent = options.silent();
     webData.requireInteraction = options.requireInteraction();
 
     if (options.hasData()) {
-        RefPtr<SerializedScriptValue> serializedScriptValue = SerializedScriptValueFactory::instance().create(options.data().isolate(), options.data(), nullptr, exceptionState);
+        const ScriptValue& data = options.data();
+        v8::Isolate* isolate = data.isolate();
+        DCHECK(isolate->InContext());
+        RefPtr<SerializedScriptValue> serializedScriptValue = SerializedScriptValue::serialize(isolate, data.v8Value(), nullptr, nullptr, exceptionState);
         if (exceptionState.hadException())
             return WebNotificationData();
 

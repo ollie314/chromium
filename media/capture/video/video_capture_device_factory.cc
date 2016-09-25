@@ -15,7 +15,8 @@
 namespace media {
 
 // static
-scoped_ptr<VideoCaptureDeviceFactory> VideoCaptureDeviceFactory::CreateFactory(
+std::unique_ptr<VideoCaptureDeviceFactory>
+VideoCaptureDeviceFactory::CreateFactory(
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
   const base::CommandLine* command_line =
       base::CommandLine::ForCurrentProcess();
@@ -23,16 +24,16 @@ scoped_ptr<VideoCaptureDeviceFactory> VideoCaptureDeviceFactory::CreateFactory(
   // present, otherwise use the normal, platform-dependent, device factory.
   if (command_line->HasSwitch(switches::kUseFakeDeviceForMediaStream)) {
     if (command_line->HasSwitch(switches::kUseFileForFakeVideoCapture)) {
-      return scoped_ptr<VideoCaptureDeviceFactory>(
+      return std::unique_ptr<VideoCaptureDeviceFactory>(
           new media::FileVideoCaptureDeviceFactory());
     } else {
-      return scoped_ptr<VideoCaptureDeviceFactory>(
+      return std::unique_ptr<VideoCaptureDeviceFactory>(
           new media::FakeVideoCaptureDeviceFactory());
     }
   } else {
     // |ui_task_runner| is needed for the Linux ChromeOS factory to retrieve
     // screen rotations.
-    return scoped_ptr<VideoCaptureDeviceFactory>(
+    return std::unique_ptr<VideoCaptureDeviceFactory>(
         CreateVideoCaptureDeviceFactory(ui_task_runner));
   }
 }
@@ -41,17 +42,17 @@ VideoCaptureDeviceFactory::VideoCaptureDeviceFactory() {
   thread_checker_.DetachFromThread();
 }
 
-VideoCaptureDeviceFactory::~VideoCaptureDeviceFactory() {
-}
+VideoCaptureDeviceFactory::~VideoCaptureDeviceFactory() {}
 
-void VideoCaptureDeviceFactory::EnumerateDeviceNames(const base::Callback<
-    void(scoped_ptr<media::VideoCaptureDevice::Names>)>& callback) {
+void VideoCaptureDeviceFactory::EnumerateDeviceDescriptors(
+    const base::Callback<void(std::unique_ptr<VideoCaptureDeviceDescriptors>)>&
+        callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
-  scoped_ptr<VideoCaptureDevice::Names> device_names(
-      new VideoCaptureDevice::Names());
-  GetDeviceNames(device_names.get());
-  callback.Run(std::move(device_names));
+  std::unique_ptr<VideoCaptureDeviceDescriptors> device_descriptors(
+      new VideoCaptureDeviceDescriptors());
+  GetDeviceDescriptors(device_descriptors.get());
+  callback.Run(std::move(device_descriptors));
 }
 
 #if !defined(OS_MACOSX) && !defined(OS_LINUX) && !defined(OS_ANDROID) && \

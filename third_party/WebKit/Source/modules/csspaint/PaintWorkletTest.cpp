@@ -13,18 +13,9 @@
 #include "modules/csspaint/PaintWorkletGlobalScope.h"
 #include "modules/csspaint/WindowPaintWorklet.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/OwnPtr.h"
+#include <memory>
 
 namespace blink {
-
-namespace {
-
-static void clearHandle(const v8::WeakCallbackInfo<ScopedPersistent<v8::Function>>& data)
-{
-    data.GetParameter()->clear();
-}
-
-} // namespace
 
 class PaintWorkletTest : public testing::Test {
 public:
@@ -35,16 +26,16 @@ public:
 
     PaintWorklet* paintWorklet()
     {
-        return WindowPaintWorklet::from(*m_page->frame().localDOMWindow()).paintWorklet(&m_page->document());
+        return WindowPaintWorklet::from(*m_page->frame().localDOMWindow()).paintWorklet();
     }
 
 protected:
-    OwnPtr<DummyPageHolder> m_page;
+    std::unique_ptr<DummyPageHolder> m_page;
 };
 
 TEST_F(PaintWorkletTest, GarbageCollectionOfCSSPaintDefinition)
 {
-    PaintWorkletGlobalScope* globalScope = toPaintWorkletGlobalScope(paintWorklet()->workletGlobalScope());
+    PaintWorkletGlobalScope* globalScope = paintWorklet()->workletGlobalScopeProxy();
     globalScope->scriptController()->evaluate(ScriptSourceCode("registerPaint('foo', class { paint() { } });"));
 
     CSSPaintDefinition* definition = globalScope->findDefinition("foo");
@@ -58,21 +49,21 @@ TEST_F(PaintWorkletTest, GarbageCollectionOfCSSPaintDefinition)
     {
         v8::HandleScope handleScope(isolate);
         handle.set(isolate, definition->paintFunctionForTesting(isolate));
-        handle.setWeak(&handle, clearHandle);
+        handle.setPhantom();
     }
     ASSERT(!handle.isEmpty());
     ASSERT(handle.isWeak());
 
     // Run a GC, persistent shouldn't have been collected yet.
-    ThreadHeap::collectAllGarbage();
+    ThreadState::current()-> collectAllGarbage();
     V8GCController::collectAllGarbageForTesting(isolate);
     ASSERT(!handle.isEmpty());
 
     // Delete the page & associated objects.
-    m_page.clear();
+    m_page.reset();
 
     // Run a GC, the persistent should have been collected.
-    ThreadHeap::collectAllGarbage();
+    ThreadState::current()-> collectAllGarbage();
     V8GCController::collectAllGarbageForTesting(isolate);
     ASSERT(handle.isEmpty());
 }

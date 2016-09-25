@@ -34,6 +34,7 @@
 #include "core/InputTypeNames.h"
 #include "core/dom/Document.h"
 #include "core/events/Event.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/FormData.h"
 #include "core/html/HTMLFormControlElement.h"
 #include "core/html/HTMLFormElement.h"
@@ -44,6 +45,7 @@
 #include "platform/heap/Handle.h"
 #include "platform/network/EncodedFormData.h"
 #include "platform/network/FormDataEncoder.h"
+#include "public/platform/WebInsecureRequestPolicy.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/TextEncoding.h"
@@ -71,7 +73,7 @@ static void appendMailtoPostFormDataToURL(KURL& url, const EncodedFormData& data
 
     Vector<char> bodyData;
     bodyData.append("body=", 5);
-    FormDataEncoder::encodeStringAsFormData(bodyData, body.utf8());
+    FormDataEncoder::encodeStringAsFormData(bodyData, body.utf8(), FormDataEncoder::NormalizeCRLF);
     body = String(bodyData.data(), bodyData.size()).replace('+', "%20");
 
     StringBuilder query;
@@ -127,7 +129,7 @@ String FormSubmission::Attributes::methodString(SubmitMethod method)
     case DialogMethod:
         return "dialog";
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return emptyString();
 }
 
@@ -160,19 +162,9 @@ inline FormSubmission::FormSubmission(const String& result)
 {
 }
 
-FormSubmission* FormSubmission::create(HTMLFormElement* form, const Attributes& attributes, Event* event)
+FormSubmission* FormSubmission::create(HTMLFormElement* form, const Attributes& attributes, Event* event, HTMLFormControlElement* submitButton)
 {
-    ASSERT(form);
-
-    HTMLFormControlElement* submitButton = 0;
-    if (event && event->target()) {
-        for (Node* node = event->target()->toNode(); node; node = node->parentOrShadowHostNode()) {
-            if (node->isElementNode() && toElement(node)->isFormControlElement()) {
-                submitButton = toHTMLFormControlElement(node);
-                break;
-            }
-        }
-    }
+    DCHECK(form);
 
     FormSubmission::Attributes copiedAttributes;
     copiedAttributes.copyFrom(attributes);
@@ -196,6 +188,14 @@ FormSubmission* FormSubmission::create(HTMLFormElement* form, const Attributes& 
 
     Document& document = form->document();
     KURL actionURL = document.completeURL(copiedAttributes.action().isEmpty() ? document.url().getString() : copiedAttributes.action());
+
+    if (document.getInsecureRequestPolicy() & kUpgradeInsecureRequests && actionURL.protocolIs("http")) {
+        UseCounter::count(document, UseCounter::UpgradeInsecureRequestsUpgradedRequest);
+        actionURL.setProtocol("https");
+        if (actionURL.port() == 80)
+            actionURL.setPort(443);
+    }
+
     bool isMailtoForm = actionURL.protocolIs("mailto");
     bool isMultiPartForm = false;
     AtomicString encodingType = copiedAttributes.encodingType();
@@ -210,10 +210,12 @@ FormSubmission* FormSubmission::create(HTMLFormElement* form, const Attributes& 
     WTF::TextEncoding dataEncoding = isMailtoForm ? UTF8Encoding() : FormDataEncoder::encodingFromAcceptCharset(copiedAttributes.acceptCharset(), document.encoding());
     FormData* domFormData = FormData::create(dataEncoding.encodingForFormSubmission());
 
+    if (submitButton)
+        submitButton->setActivatedSubmit(true);
     bool containsPasswordData = false;
     for (unsigned i = 0; i < form->associatedElements().size(); ++i) {
         FormAssociatedElement* control = form->associatedElements()[i];
-        ASSERT(control);
+        DCHECK(control);
         HTMLElement& element = toHTMLElement(*control);
         if (!element.isDisabledFormControl())
             control->appendToFormData(*domFormData);
@@ -223,6 +225,8 @@ FormSubmission* FormSubmission::create(HTMLFormElement* form, const Attributes& 
                 containsPasswordData = true;
         }
     }
+    if (submitButton)
+        submitButton->setActivatedSubmit(false);
 
     RefPtr<EncodedFormData> formData;
     String boundary;
@@ -261,8 +265,10 @@ KURL FormSubmission::requestURL() const
     return requestURL;
 }
 
-void FormSubmission::populateFrameLoadRequest(FrameLoadRequest& frameRequest)
+FrameLoadRequest FormSubmission::createFrameLoadRequest(Document* originDocument)
 {
+    FrameLoadRequest frameRequest(originDocument);
+
     if (!m_target.isEmpty())
         frameRequest.setFrameName(m_target);
 
@@ -278,6 +284,11 @@ void FormSubmission::populateFrameLoadRequest(FrameLoadRequest& frameRequest)
     }
 
     frameRequest.resourceRequest().setURL(requestURL());
+
+    frameRequest.setTriggeringEvent(m_event);
+    frameRequest.setForm(m_form);
+
+    return frameRequest;
 }
 
 } // namespace blink

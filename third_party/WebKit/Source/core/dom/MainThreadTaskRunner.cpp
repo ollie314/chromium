@@ -29,7 +29,7 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/ExecutionContextTask.h"
 #include "core/inspector/InspectorInstrumentation.h"
-#include "platform/ThreadSafeFunctional.h"
+#include "platform/CrossThreadFunctional.h"
 #include "public/platform/Platform.h"
 #include "wtf/Assertions.h"
 
@@ -39,6 +39,9 @@ MainThreadTaskRunner::MainThreadTaskRunner(ExecutionContext* context)
     : m_context(context)
     , m_pendingTasksTimer(this, &MainThreadTaskRunner::pendingTasksTimerFired)
     , m_suspended(false)
+    , m_weakFactory(this)
+    // Bind a WeakPtr now to avoid data races creating a WeakPtr inside postTask.
+    , m_weakPtr(m_weakFactory.createWeakPtr())
 {
 }
 
@@ -46,36 +49,38 @@ MainThreadTaskRunner::~MainThreadTaskRunner()
 {
 }
 
-DEFINE_TRACE(MainThreadTaskRunner)
+void MainThreadTaskRunner::postTaskInternal(const WebTraceLocation& location, std::unique_ptr<ExecutionContextTask> task, bool isInspectorTask, bool instrumenting)
 {
-    visitor->trace(m_context);
-}
-
-void MainThreadTaskRunner::postTaskInternal(const WebTraceLocation& location, PassOwnPtr<ExecutionContextTask> task, bool isInspectorTask)
-{
-    Platform::current()->mainThread()->getWebTaskRunner()->postTask(location, threadSafeBind(
+    Platform::current()->mainThread()->getWebTaskRunner()->postTask(location, crossThreadBind(
         &MainThreadTaskRunner::perform,
-        CrossThreadWeakPersistentThisPointer<MainThreadTaskRunner>(this),
-        task,
-        isInspectorTask));
+        m_weakPtr,
+        passed(std::move(task)),
+        isInspectorTask,
+        instrumenting));
 }
 
-void MainThreadTaskRunner::postTask(const WebTraceLocation& location, PassOwnPtr<ExecutionContextTask> task)
+void MainThreadTaskRunner::postTask(const WebTraceLocation& location, std::unique_ptr<ExecutionContextTask> task, const String& taskNameForInstrumentation)
 {
-    if (!task->taskNameForInstrumentation().isEmpty())
-        InspectorInstrumentation::asyncTaskScheduled(m_context, task->taskNameForInstrumentation(), task.get());
-    postTaskInternal(location, task, false);
+    if (!taskNameForInstrumentation.isEmpty())
+        InspectorInstrumentation::asyncTaskScheduled(m_context, taskNameForInstrumentation, task.get());
+    const bool instrumenting = !taskNameForInstrumentation.isEmpty();
+    postTaskInternal(location, std::move(task), false, instrumenting);
 }
 
-void MainThreadTaskRunner::postInspectorTask(const WebTraceLocation& location, PassOwnPtr<ExecutionContextTask> task)
+void MainThreadTaskRunner::postInspectorTask(const WebTraceLocation& location, std::unique_ptr<ExecutionContextTask> task)
 {
-    postTaskInternal(location, task, true);
+    postTaskInternal(location, std::move(task), true, false);
 }
 
-void MainThreadTaskRunner::perform(PassOwnPtr<ExecutionContextTask> task, bool isInspectorTask)
+void MainThreadTaskRunner::perform(std::unique_ptr<ExecutionContextTask> task, bool isInspectorTask, bool instrumenting)
 {
+    // If the owner m_context is about to be swept then it
+    // is no longer safe to access.
+    if (ThreadHeap::willObjectBeLazilySwept(m_context.get()))
+        return;
+
     if (!isInspectorTask && (m_context->tasksNeedSuspension() || !m_pendingTasks.isEmpty())) {
-        m_pendingTasks.append(task);
+        m_pendingTasks.append(make_pair(std::move(task), instrumenting));
         return;
     }
 
@@ -99,12 +104,17 @@ void MainThreadTaskRunner::resume()
     m_suspended = false;
 }
 
-void MainThreadTaskRunner::pendingTasksTimerFired(Timer<MainThreadTaskRunner>*)
+void MainThreadTaskRunner::pendingTasksTimerFired(TimerBase*)
 {
+    // If the owner m_context is about to be swept then it
+    // is no longer safe to access.
+    if (ThreadHeap::willObjectBeLazilySwept(m_context.get()))
+        return;
+
     while (!m_pendingTasks.isEmpty()) {
-        OwnPtr<ExecutionContextTask> task = m_pendingTasks[0].release();
+        std::unique_ptr<ExecutionContextTask> task = std::move(m_pendingTasks[0].first);
+        const bool instrumenting = m_pendingTasks[0].second;
         m_pendingTasks.remove(0);
-        const bool instrumenting = !task->taskNameForInstrumentation().isEmpty();
         InspectorInstrumentation::AsyncTask asyncTask(m_context, task.get(), instrumenting);
         task->performTask(m_context);
     }

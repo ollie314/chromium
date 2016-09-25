@@ -4,8 +4,11 @@
 
 #include "chrome/browser/ui/webui/settings/settings_manage_profile_handler.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -26,7 +29,6 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
@@ -69,22 +71,26 @@ void ManageProfileHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
+void ManageProfileHandler::OnJavascriptAllowed() {
+  observer_.Add(
+      &g_browser_process->profile_manager()->GetProfileAttributesStorage());
+}
+
+void ManageProfileHandler::OnJavascriptDisallowed() {
+  observer_.RemoveAll();
+}
+
 void ManageProfileHandler::OnProfileAvatarChanged(
     const base::FilePath& profile_path) {
   // This is necessary to send the potentially updated GAIA photo.
-  web_ui()->CallJavascriptFunction("cr.webUIListenerCallback",
-                                   base::StringValue("available-icons-changed"),
-                                   *GetAvailableIcons());
+  CallJavascriptFunction("cr.webUIListenerCallback",
+                         base::StringValue("available-icons-changed"),
+                         *GetAvailableIcons());
 }
 
 void ManageProfileHandler::HandleGetAvailableIcons(
     const base::ListValue* args) {
-  // This is also used as a signal that the page has loaded and is ready to
-  // observe profile avatar changes.
-  if (!observer_.IsObservingSources()) {
-    observer_.Add(
-        &g_browser_process->profile_manager()->GetProfileAttributesStorage());
-  }
+  AllowJavascript();
 
   profiles::UpdateGaiaProfileInfoIfNeeded(profile_);
 
@@ -95,24 +101,24 @@ void ManageProfileHandler::HandleGetAvailableIcons(
 }
 
 std::unique_ptr<base::ListValue> ManageProfileHandler::GetAvailableIcons() {
-  std::unique_ptr<base::ListValue> image_url_list(new base::ListValue());
+  std::unique_ptr<base::ListValue> image_url_list(
+      profiles::GetDefaultProfileAvatarIconsAndLabels());
 
-  // First add the GAIA picture if it is available.
+  // Add the GAIA picture to the beginning of the list if it is available.
   ProfileAttributesEntry* entry;
   if (g_browser_process->profile_manager()->GetProfileAttributesStorage().
           GetProfileAttributesWithPath(profile_->GetPath(), &entry)) {
     const gfx::Image* icon = entry->GetGAIAPicture();
     if (icon) {
+      auto gaia_picture_info = base::MakeUnique<base::DictionaryValue>();
       gfx::Image icon2 = profiles::GetAvatarIconForWebUI(*icon, true);
       gaia_picture_url_ = webui::GetBitmapDataUrl(icon2.AsBitmap());
-      image_url_list->AppendString(gaia_picture_url_);
+      gaia_picture_info->SetString("url", gaia_picture_url_);
+      gaia_picture_info->SetString(
+          "label",
+          l10n_util::GetStringUTF16(IDS_SETTINGS_CHANGE_PICTURE_PROFILE_PHOTO));
+      image_url_list->Insert(0, std::move(gaia_picture_info));
     }
-  }
-
-  // Next add the default avatar icons and names.
-  for (size_t i = 0; i < profiles::GetDefaultAvatarIconCount(); i++) {
-    std::string url = profiles::GetDefaultAvatarIconUrl(i);
-    image_url_list->AppendString(url);
   }
 
   return image_url_list;
@@ -193,9 +199,8 @@ void ManageProfileHandler::OnHasProfileShortcuts(bool has_shortcuts) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   const base::FundamentalValue has_shortcuts_value(has_shortcuts);
-  web_ui()->CallJavascriptFunction(
-      "settings.SyncPrivateApi.receiveHasProfileShortcuts",
-      has_shortcuts_value);
+  CallJavascriptFunction("settings.SyncPrivateApi.receiveHasProfileShortcuts",
+                         has_shortcuts_value);
 }
 
 void ManageProfileHandler::HandleAddProfileShortcut(

@@ -134,7 +134,9 @@ GURL GetURLFromCanonicalCookie(const net::CanonicalCookie& cookie) {
   const std::string scheme =
       cookie.IsSecure() ? url::kHttpsScheme : url::kHttpScheme;
   const std::string host =
-      domain_key.find('.') != 0 ? domain_key : domain_key.substr(1);
+      base::StartsWith(domain_key, ".", base::CompareCase::SENSITIVE)
+          ? domain_key.substr(1)
+          : domain_key;
   return GURL(scheme + url::kStandardSchemeSeparator + host + "/");
 }
 
@@ -161,8 +163,8 @@ void AppendToTabIdList(Browser* browser, base::ListValue* tab_ids) {
   DCHECK(tab_ids);
   TabStripModel* tab_strip = browser->tab_strip_model();
   for (int i = 0; i < tab_strip->count(); ++i) {
-    tab_ids->Append(new base::FundamentalValue(
-        ExtensionTabUtil::GetTabId(tab_strip->GetWebContentsAt(i))));
+    tab_ids->AppendInteger(
+        ExtensionTabUtil::GetTabId(tab_strip->GetWebContentsAt(i)));
   }
 }
 

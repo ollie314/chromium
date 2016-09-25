@@ -40,7 +40,6 @@ struct ServiceWorkerObjectInfo;
 struct ServiceWorkerRegistrationInfo;
 struct ServiceWorkerRegistrationObjectInfo;
 struct ServiceWorkerVersionAttributes;
-struct TransferredMessagePort;
 
 class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
  public:
@@ -52,7 +51,7 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
   void Init(ServiceWorkerContextWrapper* context_wrapper);
 
   // BrowserMessageFilter implementation
-  void OnFilterAdded(IPC::Sender* sender) override;
+  void OnFilterAdded(IPC::Channel* channel) override;
   void OnFilterRemoved() override;
   void OnDestruct() const override;
   bool OnMessageReceived(const IPC::Message& message) override;
@@ -117,9 +116,12 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
                                  int provider_id);
   void OnProviderCreated(int provider_id,
                          int route_id,
-                         ServiceWorkerProviderType provider_type);
+                         ServiceWorkerProviderType provider_type,
+                         bool is_parent_frame_secure);
   void OnProviderDestroyed(int provider_id);
-  void OnSetHostedVersionId(int provider_id, int64_t version_id);
+  void OnSetHostedVersionId(int provider_id,
+                            int64_t version_id,
+                            int embedded_worker_id);
   void OnWorkerReadyForInspection(int embedded_worker_id);
   void OnWorkerScriptLoaded(int embedded_worker_id);
   void OnWorkerThreadStarted(int embedded_worker_id,
@@ -141,12 +143,11 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
   void OnDecrementServiceWorkerRefCount(int handle_id);
   void OnIncrementRegistrationRefCount(int registration_handle_id);
   void OnDecrementRegistrationRefCount(int registration_handle_id);
-  void OnPostMessageToWorker(
-      int handle_id,
-      int provider_id,
-      const base::string16& message,
-      const url::Origin& source_origin,
-      const std::vector<TransferredMessagePort>& sent_message_ports);
+  void OnPostMessageToWorker(int handle_id,
+                             int provider_id,
+                             const base::string16& message,
+                             const url::Origin& source_origin,
+                             const std::vector<int>& sent_message_ports);
 
   void OnTerminateWorker(int handle_id);
 
@@ -154,7 +155,7 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
       scoped_refptr<ServiceWorkerVersion> worker,
       const base::string16& message,
       const url::Origin& source_origin,
-      const std::vector<TransferredMessagePort>& sent_message_ports,
+      const std::vector<int>& sent_message_ports,
       ServiceWorkerProviderHost* sender_provider_host,
       const StatusCallback& callback);
   template <typename SourceInfo>
@@ -162,19 +163,19 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
       scoped_refptr<ServiceWorkerVersion> worker,
       const base::string16& message,
       const url::Origin& source_origin,
-      const std::vector<TransferredMessagePort>& sent_message_ports,
+      const std::vector<int>& sent_message_ports,
       const StatusCallback& callback,
       const SourceInfo& source_info);
   void DispatchExtendableMessageEventAfterStartWorker(
       scoped_refptr<ServiceWorkerVersion> worker,
       const base::string16& message,
       const url::Origin& source_origin,
-      const std::vector<TransferredMessagePort>& sent_message_ports,
+      const std::vector<int>& sent_message_ports,
       const ExtendableMessageEventSource& source,
       const StatusCallback& callback);
   template <typename SourceInfo>
   void DidFailToDispatchExtendableMessageEvent(
-      const std::vector<TransferredMessagePort>& sent_message_ports,
+      const std::vector<int>& sent_message_ports,
       const SourceInfo& source_info,
       const StatusCallback& callback,
       ServiceWorkerStatusCode status);
@@ -212,7 +213,7 @@ class CONTENT_EXPORT ServiceWorkerDispatcherHost : public BrowserMessageFilter {
       int provider_id,
       int request_id,
       ServiceWorkerStatusCode status,
-      const scoped_refptr<ServiceWorkerRegistration>& registration);
+      scoped_refptr<ServiceWorkerRegistration> registration);
   void GetRegistrationsComplete(
       int thread_id,
       int provider_id,

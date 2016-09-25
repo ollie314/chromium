@@ -7,9 +7,9 @@
 #include <stdint.h>
 
 #include <cstddef>
+#include <memory>
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/pickle.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
@@ -17,8 +17,8 @@
 #include "base/time/time.h"
 #include "components/sessions/core/serialized_navigation_driver.h"
 #include "components/sessions/core/serialized_navigation_entry_test_helper.h"
-#include "sync/protocol/session_specifics.pb.h"
-#include "sync/util/time.h"
+#include "components/sync/base/time.h"
+#include "components/sync/protocol/session_specifics.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
@@ -60,7 +60,8 @@ TEST(SerializedNavigationEntryTest, DefaultInitializer) {
   EXPECT_EQ(GURL(), navigation.virtual_url());
   EXPECT_TRUE(navigation.title().empty());
   EXPECT_EQ(std::string(), navigation.encoded_page_state());
-  EXPECT_EQ(ui::PAGE_TRANSITION_TYPED, navigation.transition_type());
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      navigation.transition_type(), ui::PAGE_TRANSITION_TYPED));
   EXPECT_FALSE(navigation.has_post_data());
   EXPECT_EQ(-1, navigation.post_id());
   EXPECT_EQ(GURL(), navigation.original_request_url());
@@ -87,7 +88,8 @@ TEST(SerializedNavigationEntryTest, FromSyncData) {
   EXPECT_EQ(test_data::kReferrerPolicy, navigation.referrer_policy());
   EXPECT_EQ(test_data::kVirtualURL, navigation.virtual_url());
   EXPECT_EQ(test_data::kTitle, navigation.title());
-  EXPECT_EQ(test_data::kTransitionType, navigation.transition_type());
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      navigation.transition_type(), test_data::kTransitionType));
   EXPECT_FALSE(navigation.has_post_data());
   EXPECT_EQ(-1, navigation.post_id());
   EXPECT_EQ(GURL(), navigation.original_request_url());
@@ -119,7 +121,8 @@ TEST(SerializedNavigationEntryTest, Pickle) {
   EXPECT_EQ(test_data::kReferrerPolicy, new_navigation.referrer_policy());
   EXPECT_EQ(test_data::kVirtualURL, new_navigation.virtual_url());
   EXPECT_EQ(test_data::kTitle, new_navigation.title());
-  EXPECT_EQ(test_data::kTransitionType, new_navigation.transition_type());
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      new_navigation.transition_type(), test_data::kTransitionType));
   EXPECT_EQ(test_data::kHasPostData, new_navigation.has_post_data());
   EXPECT_EQ(test_data::kOriginalRequestURL,
             new_navigation.original_request_url());
@@ -196,7 +199,7 @@ TEST(SerializedNavigationEntryTest, TransitionTypes) {
       SerializedNavigationEntryTestHelper::CreateNavigationForTest();
 
   for (uint32_t core_type = ui::PAGE_TRANSITION_LINK;
-       core_type != ui::PAGE_TRANSITION_LAST_CORE; ++core_type) {
+       core_type < ui::PAGE_TRANSITION_LAST_CORE; ++core_type) {
     // Because qualifier is a uint32_t, left shifting will eventually overflow
     // and hit zero again. SERVER_REDIRECT, as the last qualifier and also
     // in place of the sign bit, is therefore the last transition before
@@ -216,7 +219,8 @@ TEST(SerializedNavigationEntryTest, TransitionTypes) {
       const ui::PageTransition constructed_transition =
           constructed_nav.transition_type();
 
-      EXPECT_EQ(transition, constructed_transition);
+      EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+          constructed_transition, transition));
     }
   }
 }

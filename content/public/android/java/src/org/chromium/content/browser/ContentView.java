@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.view.DragEvent;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -137,17 +138,17 @@ public class ContentView extends FrameLayout
     }
 
     @Override
-    public boolean dispatchKeyEventPreIme(KeyEvent event) {
-        return mContentViewCore.dispatchKeyEventPreIme(event);
-    }
-
-    @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (isFocused()) {
             return mContentViewCore.dispatchKeyEvent(event);
         } else {
             return super.dispatchKeyEvent(event);
         }
+    }
+
+    @Override
+    public boolean onDragEvent(DragEvent event) {
+        return mContentViewCore.onDragEvent(event);
     }
 
     @Override
@@ -322,11 +323,6 @@ public class ContentView extends FrameLayout
     }
 
     @Override
-    public boolean super_dispatchKeyEventPreIme(KeyEvent event) {
-        return super.dispatchKeyEventPreIme(event);
-    }
-
-    @Override
     public boolean super_dispatchKeyEvent(KeyEvent event) {
         return super.dispatchKeyEvent(event);
     }
@@ -357,7 +353,7 @@ public class ContentView extends FrameLayout
 
         @Override
         public void onProvideVirtualStructure(final ViewStructure structure) {
-            mContentViewCore.onProvideVirtualStructure(structure);
+            mContentViewCore.onProvideVirtualStructure(structure, false);
         }
     }
 }

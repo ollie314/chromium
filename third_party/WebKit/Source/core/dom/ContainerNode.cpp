@@ -47,11 +47,12 @@
 #include "core/html/HTMLTagCollection.h"
 #include "core/html/RadioNodeList.h"
 #include "core/inspector/InspectorInstrumentation.h"
+#include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutText.h"
 #include "core/layout/LayoutTheme.h"
-#include "core/layout/LayoutView.h"
 #include "core/layout/line/InlineTextBox.h"
+#include "core/layout/line/RootInlineBox.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/ScriptForbiddenScope.h"
 
@@ -62,7 +63,9 @@ using namespace HTMLNames;
 static void dispatchChildInsertionEvents(Node&);
 static void dispatchChildRemovalEvents(Node&);
 
-static void collectChildrenAndRemoveFromOldParent(Node& node, NodeVector& nodes, ExceptionState& exceptionState)
+// This dispatches various events; DOM mutation events, blur events, IFRAME
+// unload events, etc.
+static inline void collectChildrenAndRemoveFromOldParent(Node& node, NodeVector& nodes, ExceptionState& exceptionState)
 {
     if (node.isDocumentFragment()) {
         DocumentFragment& fragment = toDocumentFragment(node);
@@ -89,6 +92,7 @@ ContainerNode::~ContainerNode()
     DCHECK(needsAttach());
 }
 
+DISABLE_CFI_PERF
 bool ContainerNode::isChildTypeAllowed(const Node& child) const
 {
     if (!child.isDocumentFragment())
@@ -108,6 +112,7 @@ bool ContainerNode::containsConsideringHostElements(const Node& newChild) const
     return newChild.contains(this);
 }
 
+DISABLE_CFI_PERF
 bool ContainerNode::checkAcceptChild(const Node* newChild, const Node* oldChild, ExceptionState& exceptionState) const
 {
     // Not mentioned in spec: throw NotFoundError if newChild is null
@@ -140,7 +145,11 @@ bool ContainerNode::checkAcceptChildGuaranteedNodeTypes(const Node& newChild, co
 {
     if (isDocumentNode())
         return toDocument(this)->canAcceptChild(newChild, oldChild, exceptionState);
-    if (newChild.containsIncludingHostElements(*this)) {
+    // Skip containsIncludingHostElements() if !newChild.parentNode() &&
+    // isConnected(). |newChild| typically has no parentNode(), and it means
+    // it's !isConnected(). In such case, the contains check for connected
+    // |this| is unnecessary.
+    if (newChild.isContainerNode() && (newChild.isDocumentNode() || newChild.parentNode() || !isConnected()) && newChild.containsIncludingHostElements(*this)) {
         exceptionState.throwDOMException(HierarchyRequestError, "The new child element contains the parent.");
         return false;
     }
@@ -151,19 +160,92 @@ bool ContainerNode::checkAcceptChildGuaranteedNodeTypes(const Node& newChild, co
     return true;
 }
 
+bool ContainerNode::collectChildrenAndRemoveFromOldParentWithCheck(const Node* next, const Node* oldChild, Node& newChild, NodeVector& newChildren, ExceptionState& exceptionState) const
+{
+    collectChildrenAndRemoveFromOldParent(newChild, newChildren, exceptionState);
+    if (exceptionState.hadException() || newChildren.isEmpty())
+        return false;
+
+    // We need this extra check because collectChildrenAndRemoveFromOldParent()
+    // can fire various events.
+    for (const auto& child : newChildren) {
+        if (child->parentNode()) {
+            // A new child was added to another parent before adding to this
+            // node.  Firefox and Edge don't throw in this case.
+            return false;
+        }
+        if (!checkAcceptChildGuaranteedNodeTypes(*child, oldChild, exceptionState))
+            return false;
+    }
+    if (next && next->parentNode() != this) {
+        exceptionState.throwDOMException(NotFoundError, "The node before which the new node is to be inserted is not a child of this node.");
+        return false;
+    }
+    return true;
+}
+
+template <typename Functor>
+void ContainerNode::insertNodeVector(const NodeVector& targets, Node* next, const Functor& mutator)
+{
+    InspectorInstrumentation::willInsertDOMNode(this);
+    NodeVector postInsertionNotificationTargets;
+    {
+        EventDispatchForbiddenScope assertNoEventDispatch;
+        ScriptForbiddenScope forbidScript;
+        for (const auto& targetNode : targets) {
+            DCHECK(targetNode);
+            DCHECK(!targetNode->parentNode());
+            Node& child = *targetNode;
+            mutator(*this, child, next);
+            ChildListMutationScope(*this).childAdded(child);
+            if (document().containsV1ShadowTree())
+                child.checkSlotChangeAfterInserted();
+            InspectorInstrumentation::didInsertDOMNode(&child);
+            notifyNodeInsertedInternal(child, postInsertionNotificationTargets);
+        }
+    }
+    for (const auto& targetNode : targets)
+        childrenChanged(ChildrenChange::forInsertion(*targetNode, ChildrenChangeSourceAPI));
+    for (const auto& descendant : postInsertionNotificationTargets) {
+        if (descendant->isConnected())
+            descendant->didNotifySubtreeInsertionsToDocument();
+    }
+    for (const auto& targetNode : targets) {
+        if (targetNode->parentNode() == this)
+            dispatchChildInsertionEvents(*targetNode);
+    }
+    dispatchSubtreeModifiedEvent();
+}
+
+class ContainerNode::AdoptAndInsertBefore {
+public:
+    inline void operator()(ContainerNode& container, Node& child, Node* next) const
+    {
+        DCHECK(next);
+        DCHECK_EQ(next->parentNode(), &container);
+        container.treeScope().adoptIfNeeded(child);
+        container.insertBeforeCommon(*next, child);
+    }
+};
+
+class ContainerNode::AdoptAndAppendChild {
+public:
+    inline void operator()(ContainerNode& container, Node& child, Node*) const
+    {
+        container.treeScope().adoptIfNeeded(child);
+        container.appendChildCommon(child);
+    }
+};
+
 Node* ContainerNode::insertBefore(Node* newChild, Node* refChild, ExceptionState& exceptionState)
 {
     // insertBefore(node, 0) is equivalent to appendChild(node)
-    if (!refChild) {
+    if (!refChild)
         return appendChild(newChild, exceptionState);
-    }
 
     // Make sure adding the new child is OK.
-    if (!checkAcceptChild(newChild, 0, exceptionState)) {
-        if (exceptionState.hadException())
-            return nullptr;
+    if (!checkAcceptChild(newChild, 0, exceptionState))
         return newChild;
-    }
     DCHECK(newChild);
 
     // NotFoundError: Raised if refChild is not a child of this node
@@ -176,59 +258,21 @@ Node* ContainerNode::insertBefore(Node* newChild, Node* refChild, ExceptionState
     if (refChild->previousSibling() == newChild || refChild == newChild)
         return newChild;
 
-    Node* next = refChild;
-
     NodeVector targets;
-    collectChildrenAndRemoveFromOldParent(*newChild, targets, exceptionState);
-    if (exceptionState.hadException())
-        return nullptr;
-    if (targets.isEmpty())
+    if (!collectChildrenAndRemoveFromOldParentWithCheck(refChild, nullptr, *newChild, targets, exceptionState))
         return newChild;
-
-    // We need this extra check because collectChildrenAndRemoveFromOldParent() can fire mutation events.
-    if (!checkAcceptChildGuaranteedNodeTypes(*newChild, nullptr, exceptionState)) {
-        if (exceptionState.hadException())
-            return nullptr;
-        return newChild;
-    }
-
-    InspectorInstrumentation::willInsertDOMNode(this);
 
     ChildListMutationScope mutation(*this);
-    for (const auto& targetNode : targets) {
-        DCHECK(targetNode);
-        Node& child = *targetNode;
-
-        // Due to arbitrary code running in response to a DOM mutation event it's
-        // possible that "next" is no longer a child of "this".
-        // It's also possible that "child" has been inserted elsewhere.
-        // In either of those cases, we'll just stop.
-        if (next->parentNode() != this)
-            break;
-        if (child.parentNode())
-            break;
-
-        {
-            EventDispatchForbiddenScope assertNoEventDispatch;
-            ScriptForbiddenScope forbidScript;
-
-            treeScope().adoptIfNeeded(child);
-            insertBeforeCommon(*next, child);
-        }
-
-        updateTreeAfterInsertion(child);
-    }
-
-    dispatchSubtreeModifiedEvent();
-
+    insertNodeVector(targets, refChild, AdoptAndInsertBefore());
     return newChild;
 }
 
 void ContainerNode::insertBeforeCommon(Node& nextChild, Node& newChild)
 {
-    EventDispatchForbiddenScope assertNoEventDispatch;
-    ScriptForbiddenScope forbidScript;
-
+#if DCHECK_IS_ON()
+    DCHECK(EventDispatchForbiddenScope::isEventDispatchForbidden());
+#endif
+    DCHECK(ScriptForbiddenScope::isScriptForbidden());
     DCHECK(!newChild.parentNode()); // Use insertBefore if you need to handle reparenting (and want DOM mutation events).
     DCHECK(!newChild.nextSibling());
     DCHECK(!newChild.previousSibling());
@@ -252,15 +296,18 @@ void ContainerNode::insertBeforeCommon(Node& nextChild, Node& newChild)
 
 void ContainerNode::appendChildCommon(Node& child)
 {
-    child.setParentOrShadowHostNode(this);
+#if DCHECK_IS_ON()
+    DCHECK(EventDispatchForbiddenScope::isEventDispatchForbidden());
+#endif
+    DCHECK(ScriptForbiddenScope::isScriptForbidden());
 
+    child.setParentOrShadowHostNode(this);
     if (m_lastChild) {
         child.setPreviousSibling(m_lastChild);
         m_lastChild->setNextSibling(&child);
     } else {
         setFirstChild(&child);
     }
-
     setLastChild(&child);
 }
 
@@ -302,8 +349,7 @@ void ContainerNode::parserInsertBefore(Node* newChild, Node& nextChild)
         EventDispatchForbiddenScope assertNoEventDispatch;
         ScriptForbiddenScope forbidScript;
 
-        treeScope().adoptIfNeeded(*newChild);
-        insertBeforeCommon(nextChild, *newChild);
+        AdoptAndInsertBefore()(*this, *newChild, &nextChild);
         DCHECK_EQ(newChild->connectedSubframeCount(), 0u);
         ChildListMutationScope(*this).childAdded(*newChild);
     }
@@ -321,84 +367,40 @@ Node* ContainerNode::replaceChild(Node* newChild, Node* oldChild, ExceptionState
         return nullptr;
     }
 
-    Node* child = oldChild;
-
     // Make sure replacing the old child with the new is OK.
-    if (!checkAcceptChild(newChild, child, exceptionState)) {
-        if (exceptionState.hadException())
-            return nullptr;
-        return child;
-    }
+    if (!checkAcceptChild(newChild, oldChild, exceptionState))
+        return oldChild;
 
     // NotFoundError: Raised if oldChild is not a child of this node.
-    if (child->parentNode() != this) {
+    if (oldChild->parentNode() != this) {
         exceptionState.throwDOMException(NotFoundError, "The node to be replaced is not a child of this node.");
         return nullptr;
     }
 
     ChildListMutationScope mutation(*this);
-
-    Node* next = child->nextSibling();
+    Node* next = oldChild->nextSibling();
 
     // Remove the node we're replacing.
-    removeChild(child, exceptionState);
+    removeChild(oldChild, exceptionState);
     if (exceptionState.hadException())
         return nullptr;
 
     if (next && (next->previousSibling() == newChild || next == newChild)) // nothing to do
-        return child;
+        return oldChild;
 
     // Does this one more time because removeChild() fires a MutationEvent.
-    if (!checkAcceptChild(newChild, child, exceptionState)) {
-        if (exceptionState.hadException())
-            return nullptr;
-        return child;
-    }
+    if (!checkAcceptChild(newChild, oldChild, exceptionState))
+        return oldChild;
 
     NodeVector targets;
-    collectChildrenAndRemoveFromOldParent(*newChild, targets, exceptionState);
-    if (exceptionState.hadException())
-        return nullptr;
+    if (!collectChildrenAndRemoveFromOldParentWithCheck(next, oldChild, *newChild, targets, exceptionState))
+        return oldChild;
 
-    // Does this yet another check because collectChildrenAndRemoveFromOldParent() fires a MutationEvent.
-    if (!checkAcceptChild(newChild, child, exceptionState)) {
-        if (exceptionState.hadException())
-            return nullptr;
-        return child;
-    }
-
-    InspectorInstrumentation::willInsertDOMNode(this);
-
-    // Add the new child(ren).
-    for (const auto& targetNode : targets) {
-        DCHECK(targetNode);
-        Node& child = *targetNode;
-
-        // Due to arbitrary code running in response to a DOM mutation event it's
-        // possible that "next" is no longer a child of "this".
-        // It's also possible that "child" has been inserted elsewhere.
-        // In either of those cases, we'll just stop.
-        if (next && next->parentNode() != this)
-            break;
-        if (child.parentNode())
-            break;
-
-        treeScope().adoptIfNeeded(child);
-
-        // Add child before "next".
-        {
-            EventDispatchForbiddenScope assertNoEventDispatch;
-            if (next)
-                insertBeforeCommon(*next, child);
-            else
-                appendChildCommon(child);
-        }
-
-        updateTreeAfterInsertion(child);
-    }
-
-    dispatchSubtreeModifiedEvent();
-    return child;
+    if (next)
+        insertNodeVector(targets, next, AdoptAndInsertBefore());
+    else
+        insertNodeVector(targets, nullptr, AdoptAndAppendChild());
+    return oldChild;
 }
 
 void ContainerNode::willRemoveChild(Node& child)
@@ -444,6 +446,13 @@ DEFINE_TRACE(ContainerNode)
     visitor->trace(m_firstChild);
     visitor->trace(m_lastChild);
     Node::trace(visitor);
+}
+
+DEFINE_TRACE_WRAPPERS(ContainerNode)
+{
+    visitor->traceWrappers(m_firstChild);
+    visitor->traceWrappers(m_lastChild);
+    Node::traceWrappers(visitor);
 }
 
 Node* ContainerNode::removeChild(Node* oldChild, ExceptionState& exceptionState)
@@ -499,7 +508,7 @@ void ContainerNode::removeBetween(Node* previousChild, Node* nextChild, Node& ol
     AttachContext context;
     context.clearInvalidation = true;
     if (!oldChild.needsAttach())
-        oldChild.detach(context);
+        oldChild.detachLayoutTree(context);
 
     if (nextChild)
         nextChild->setPreviousSibling(previousChild);
@@ -582,7 +591,7 @@ void ContainerNode::removeChildren(SubtreeModificationAction action)
             }
         }
 
-        ChildrenChange change = {AllChildrenRemoved, nullptr, nullptr, ChildrenChangeSourceAPI};
+        ChildrenChange change = {AllChildrenRemoved, nullptr, nullptr, nullptr, ChildrenChangeSourceAPI};
         childrenChanged(change);
     }
 
@@ -592,59 +601,20 @@ void ContainerNode::removeChildren(SubtreeModificationAction action)
 
 Node* ContainerNode::appendChild(Node* newChild, ExceptionState& exceptionState)
 {
-
     // Make sure adding the new child is ok
-    if (!checkAcceptChild(newChild, 0, exceptionState)) {
-        if (exceptionState.hadException())
-            return nullptr;
+    if (!checkAcceptChild(newChild, 0, exceptionState))
         return newChild;
-    }
     DCHECK(newChild);
 
     if (newChild == m_lastChild) // nothing to do
         return newChild;
 
     NodeVector targets;
-    collectChildrenAndRemoveFromOldParent(*newChild, targets, exceptionState);
-    if (exceptionState.hadException())
-        return nullptr;
-
-    if (targets.isEmpty())
+    if (!collectChildrenAndRemoveFromOldParentWithCheck(nullptr, nullptr, *newChild, targets, exceptionState))
         return newChild;
 
-    // We need this extra check because collectChildrenAndRemoveFromOldParent() can fire mutation events.
-    if (!checkAcceptChildGuaranteedNodeTypes(*newChild, nullptr, exceptionState)) {
-        if (exceptionState.hadException())
-            return nullptr;
-        return newChild;
-    }
-
-    InspectorInstrumentation::willInsertDOMNode(this);
-
-    // Now actually add the child(ren).
     ChildListMutationScope mutation(*this);
-    for (const auto& targetNode : targets) {
-        DCHECK(targetNode);
-        Node& child = *targetNode;
-
-        // If the child has a parent again, just stop what we're doing, because
-        // that means someone is doing something with DOM mutation -- can't re-parent
-        // a child that already has a parent.
-        if (child.parentNode())
-            break;
-
-        {
-            EventDispatchForbiddenScope assertNoEventDispatch;
-            ScriptForbiddenScope forbidScript;
-
-            treeScope().adoptIfNeeded(child);
-            appendChildCommon(child);
-        }
-
-        updateTreeAfterInsertion(child);
-    }
-
-    dispatchSubtreeModifiedEvent();
+    insertNodeVector(targets, nullptr, AdoptAndAppendChild());
     return newChild;
 }
 
@@ -670,8 +640,7 @@ void ContainerNode::parserAppendChild(Node* newChild)
         EventDispatchForbiddenScope assertNoEventDispatch;
         ScriptForbiddenScope forbidScript;
 
-        treeScope().adoptIfNeeded(*newChild);
-        appendChildCommon(*newChild);
+        AdoptAndAppendChild()(*this, *newChild, nullptr);
         DCHECK_EQ(newChild->connectedSubframeCount(), 0u);
         ChildListMutationScope(*this).childAdded(*newChild);
     }
@@ -679,12 +648,16 @@ void ContainerNode::parserAppendChild(Node* newChild)
     notifyNodeInserted(*newChild, ChildrenChangeSourceParser);
 }
 
+DISABLE_CFI_PERF
 void ContainerNode::notifyNodeInserted(Node& root, ChildrenChangeSource source)
 {
 #if DCHECK_IS_ON()
     DCHECK(!EventDispatchForbiddenScope::isEventDispatchForbidden());
 #endif
     DCHECK(!root.isShadowRoot());
+
+    if (document().containsV1ShadowTree())
+        root.checkSlotChangeAfterInserted();
 
     InspectorInstrumentation::didInsertDOMNode(&root);
 
@@ -694,11 +667,12 @@ void ContainerNode::notifyNodeInserted(Node& root, ChildrenChangeSource source)
     childrenChanged(ChildrenChange::forInsertion(root, source));
 
     for (const auto& targetNode : postInsertionNotificationTargets) {
-        if (targetNode->inShadowIncludingDocument())
+        if (targetNode->isConnected())
             targetNode->didNotifySubtreeInsertionsToDocument();
     }
 }
 
+DISABLE_CFI_PERF
 void ContainerNode::notifyNodeInsertedInternal(Node& root, NodeVector& postInsertionNotificationTargets)
 {
     EventDispatchForbiddenScope assertNoEventDispatch;
@@ -707,7 +681,7 @@ void ContainerNode::notifyNodeInsertedInternal(Node& root, NodeVector& postInser
     for (Node& node : NodeTraversal::inclusiveDescendantsOf(root)) {
         // As an optimization we don't notify leaf nodes when when inserting
         // into detached subtrees that are not in a shadow tree.
-        if (!inShadowIncludingDocument() && !isInShadowTree() && !node.isContainerNode())
+        if (!isConnected() && !isInShadowTree() && !node.isContainerNode())
             continue;
         if (Node::InsertionShouldCallDidNotifySubtreeInsertions == node.insertedInto(this))
             postInsertionNotificationTargets.append(&node);
@@ -733,7 +707,8 @@ void ContainerNode::notifyNodeRemoved(Node& root)
     }
 }
 
-void ContainerNode::attach(const AttachContext& context)
+DISABLE_CFI_PERF
+void ContainerNode::attachLayoutTree(const AttachContext& context)
 {
     AttachContext childrenContext(context);
     childrenContext.resolvedStyle = nullptr;
@@ -743,31 +718,29 @@ void ContainerNode::attach(const AttachContext& context)
         DCHECK(child->needsAttach() || childAttachedAllowedWhenAttachingChildren(this));
 #endif
         if (child->needsAttach())
-            child->attach(childrenContext);
+            child->attachLayoutTree(childrenContext);
     }
 
     clearChildNeedsStyleRecalc();
-    Node::attach(context);
+    Node::attachLayoutTree(context);
 }
 
-void ContainerNode::detach(const AttachContext& context)
+void ContainerNode::detachLayoutTree(const AttachContext& context)
 {
     AttachContext childrenContext(context);
     childrenContext.resolvedStyle = nullptr;
     childrenContext.clearInvalidation = true;
 
     for (Node* child = firstChild(); child; child = child->nextSibling())
-        child->detach(childrenContext);
+        child->detachLayoutTree(childrenContext);
 
     setChildNeedsStyleRecalc();
-    Node::detach(context);
+    Node::detachLayoutTree(context);
 }
 
 void ContainerNode::childrenChanged(const ChildrenChange& change)
 {
     document().incDOMTreeVersion();
-    if (!change.byParser && change.type != TextChanged)
-        document().updateRangesAfterChildrenChanged(this);
     invalidateNodeListCachesInAncestors();
     if (change.isChildInsertion() && !childNeedsStyleRecalc()) {
         setChildNeedsStyleRecalc();
@@ -853,7 +826,7 @@ static inline LayoutObject* endOfContinuations(LayoutObject* layoutObject)
     LayoutObject* prev = nullptr;
     LayoutObject* cur = layoutObject;
 
-    if (!cur->isLayoutInline() && !cur->isLayoutBlock())
+    if (!cur->isLayoutInline() && !cur->isLayoutBlockFlow())
         return nullptr;
 
     while (cur) {
@@ -861,7 +834,7 @@ static inline LayoutObject* endOfContinuations(LayoutObject* layoutObject)
         if (cur->isLayoutInline())
             cur = toLayoutInline(cur)->continuation();
         else
-            cur = toLayoutBlock(cur)->continuation();
+            cur = toLayoutBlockFlow(cur)->continuation();
     }
 
     return prev;
@@ -917,7 +890,7 @@ bool ContainerNode::getLowerRightCorner(FloatPoint& point) const
             point = FloatPoint();
             if (o->isText()) {
                 LayoutText* text = toLayoutText(o);
-                IntRect linesBox = text->linesBoundingBox();
+                IntRect linesBox = enclosingIntRect(text->linesBoundingBox());
                 if (!linesBox.maxX() && !linesBox.maxY())
                     continue;
                 point.moveBy(linesBox.maxXMaxYCorner());
@@ -985,7 +958,7 @@ void ContainerNode::setFocus(bool received)
     // <input type="date"> the same way as author shadow.
     if (ShadowRoot* root = containingShadowRoot()) {
         if (root->type() != ShadowRootType::UserAgent)
-            shadowHost()->setFocus(received);
+            ownerShadowHost()->setFocus(received);
     }
 
     // If this is an author shadow host and indirectly focused (has focused element within
@@ -1019,17 +992,49 @@ void ContainerNode::setActive(bool down)
 
     Node::setActive(down);
 
-    // FIXME: Why does this not need to handle the display: none transition like :hover does?
-    if (layoutObject()) {
-        if (computedStyle()->affectedByActive()) {
-            StyleChangeType changeType = computedStyle()->hasPseudoStyle(PseudoIdFirstLetter) ? SubtreeStyleChange : LocalStyleChange;
-            setNeedsStyleRecalc(changeType, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Active));
-        }
+    if (!layoutObject()) {
         if (isElementNode() && toElement(this)->childrenOrSiblingsAffectedByActive())
             toElement(this)->pseudoStateChanged(CSSSelector::PseudoActive);
-
-        LayoutTheme::theme().controlStateChanged(*layoutObject(), PressedControlState);
+        else
+            setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Active));
+        return;
     }
+
+    if (computedStyle()->affectedByActive()) {
+        StyleChangeType changeType = computedStyle()->hasPseudoStyle(PseudoIdFirstLetter) ? SubtreeStyleChange : LocalStyleChange;
+        setNeedsStyleRecalc(changeType, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Active));
+    }
+    if (isElementNode() && toElement(this)->childrenOrSiblingsAffectedByActive())
+        toElement(this)->pseudoStateChanged(CSSSelector::PseudoActive);
+
+    LayoutTheme::theme().controlStateChanged(*layoutObject(), PressedControlState);
+}
+
+void ContainerNode::setDragged(bool newValue)
+{
+    if (newValue == isDragged())
+        return;
+
+    Node::setDragged(newValue);
+
+    // If :-webkit-drag sets display: none we lose our dragging but still need
+    // to recalc our style.
+    if (!layoutObject()) {
+        if (newValue)
+            return;
+        if (isElementNode() && toElement(this)->childrenOrSiblingsAffectedByDrag())
+            toElement(this)->pseudoStateChanged(CSSSelector::PseudoDrag);
+        else
+            setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Drag));
+        return;
+    }
+
+    if (computedStyle()->affectedByDrag()) {
+        StyleChangeType changeType = computedStyle()->hasPseudoStyle(PseudoIdFirstLetter) ? SubtreeStyleChange : LocalStyleChange;
+        setNeedsStyleRecalc(changeType, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Drag));
+    }
+    if (isElementNode() && toElement(this)->childrenOrSiblingsAffectedByDrag())
+        toElement(this)->pseudoStateChanged(CSSSelector::PseudoDrag);
 }
 
 void ContainerNode::setHovered(bool over)
@@ -1068,8 +1073,7 @@ HTMLCollection* ContainerNode::children()
 unsigned ContainerNode::countChildren() const
 {
     unsigned count = 0;
-    Node* n;
-    for (n = firstChild(); n; n = n->nextSibling())
+    for (Node* node = firstChild(); node; node = node->nextSibling())
         count++;
     return count;
 }
@@ -1120,7 +1124,7 @@ static void dispatchChildInsertionEvents(Node& child)
         c->dispatchScopedEvent(MutationEvent::create(EventTypeNames::DOMNodeInserted, true, c->parentNode()));
 
     // dispatch the DOMNodeInsertedIntoDocument event to all descendants
-    if (c->inShadowIncludingDocument() && document->hasListenerType(Document::DOMNODEINSERTEDINTODOCUMENT_LISTENER)) {
+    if (c->isConnected() && document->hasListenerType(Document::DOMNODEINSERTEDINTODOCUMENT_LISTENER)) {
         for (; c; c = NodeTraversal::next(*c, &child))
             c->dispatchScopedEvent(MutationEvent::create(EventTypeNames::DOMNodeInsertedIntoDocument, false));
     }
@@ -1149,20 +1153,11 @@ static void dispatchChildRemovalEvents(Node& child)
     }
 
     // Dispatch the DOMNodeRemovedFromDocument event to all descendants.
-    if (c->inShadowIncludingDocument() && document->hasListenerType(Document::DOMNODEREMOVEDFROMDOCUMENT_LISTENER)) {
+    if (c->isConnected() && document->hasListenerType(Document::DOMNODEREMOVEDFROMDOCUMENT_LISTENER)) {
         NodeChildRemovalTracker scope(child);
         for (; c; c = NodeTraversal::next(*c, &child))
             c->dispatchScopedEvent(MutationEvent::create(EventTypeNames::DOMNodeRemovedFromDocument, false));
     }
-}
-
-void ContainerNode::updateTreeAfterInsertion(Node& child)
-{
-    ChildListMutationScope(*this).childAdded(child);
-
-    notifyNodeInserted(child);
-
-    dispatchChildInsertionEvents(child);
 }
 
 bool ContainerNode::hasRestyleFlagInternal(DynamicRestyleFlags mask) const
@@ -1181,7 +1176,7 @@ void ContainerNode::setRestyleFlag(DynamicRestyleFlags mask)
     ensureRareData().setRestyleFlag(mask);
 }
 
-void ContainerNode::recalcChildStyle(StyleRecalcChange change)
+void ContainerNode::recalcDescendantStyles(StyleRecalcChange change)
 {
     DCHECK(document().inStyleRecalc());
     DCHECK(change >= UpdatePseudoElements || childNeedsStyleRecalc());
@@ -1209,75 +1204,56 @@ void ContainerNode::recalcChildStyle(StyleRecalcChange change)
     }
 }
 
-void ContainerNode::checkForSiblingStyleChanges(SiblingCheckType changeType, Node* nodeBeforeChange, Node* nodeAfterChange)
+void ContainerNode::checkForSiblingStyleChanges(SiblingCheckType changeType, Element* changedElement, Node* nodeBeforeChange, Node* nodeAfterChange)
 {
     if (!inActiveDocument() || document().hasPendingForcedStyleRecalc() || getStyleChangeType() >= SubtreeStyleChange)
         return;
 
-    // Forward positional selectors include nth-child, nth-of-type, first-of-type and only-of-type.
-    // The indirect adjacent selector is the ~ selector.
-    // Backward positional selectors include nth-last-child, nth-last-of-type, last-of-type and only-of-type.
-    // We have to invalidate everything following the insertion point in the forward and indirect adjacent case,
-    // and everything before the insertion point in the backward case.
-    // |afterChange| is 0 in the parser callback case, so we won't do any work for the forward case if we don't have to.
-    // For performance reasons we just mark the parent node as changed, since we don't want to make childrenChanged O(n^2) by crawling all our kids
-    // here. recalcStyle will then force a walk of the children when it sees that this has happened.
-    if (((childrenAffectedByForwardPositionalRules() || childrenAffectedByIndirectAdjacentRules()) && nodeAfterChange)
-        || (childrenAffectedByBackwardPositionalRules() && nodeBeforeChange)) {
-        setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::SiblingSelector));
+    if (!hasRestyleFlag(ChildrenAffectedByStructuralRules))
+        return;
+
+    Element* elementAfterChange = !nodeAfterChange || nodeAfterChange->isElementNode() ? toElement(nodeAfterChange) : ElementTraversal::nextSibling(*nodeAfterChange);
+    Element* elementBeforeChange = !nodeBeforeChange || nodeBeforeChange->isElementNode() ? toElement(nodeBeforeChange) : ElementTraversal::previousSibling(*nodeBeforeChange);
+
+    // TODO(rune@opera.com): move this code into StyleEngine and collect the
+    // various invalidation sets into a single InvalidationLists object and
+    // schedule with a single scheduleInvalidationSetsForNode for efficiency.
+
+    // Forward positional selectors include :nth-child, :nth-of-type,
+    // :first-of-type, and only-of-type. Backward positional selectors include
+    // :nth-last-child, :nth-last-of-type, :last-of-type, and :only-of-type.
+    if ((childrenAffectedByForwardPositionalRules() && elementAfterChange)
+        || (childrenAffectedByBackwardPositionalRules() && elementBeforeChange)) {
+        document().styleEngine().scheduleNthPseudoInvalidations(*this);
+    }
+
+    if (childrenAffectedByFirstChildRules() && !elementBeforeChange && elementAfterChange && elementAfterChange->affectedByFirstChildRules()) {
+        DCHECK_NE(changeType, FinishedParsingChildren);
+        elementAfterChange->pseudoStateChanged(CSSSelector::PseudoFirstChild);
+        elementAfterChange->pseudoStateChanged(CSSSelector::PseudoOnlyChild);
+    }
+
+    if (childrenAffectedByLastChildRules() && !elementAfterChange && elementBeforeChange && elementBeforeChange->affectedByLastChildRules()) {
+        elementBeforeChange->pseudoStateChanged(CSSSelector::PseudoLastChild);
+        elementBeforeChange->pseudoStateChanged(CSSSelector::PseudoOnlyChild);
+    }
+
+    // For ~ and + combinators, succeeding siblings may need style invalidation
+    // after an element is inserted or removed.
+
+    if (!elementAfterChange)
+        return;
+
+    if (!childrenAffectedByIndirectAdjacentRules() && !childrenAffectedByDirectAdjacentRules())
+        return;
+
+    if (changeType == SiblingElementInserted) {
+        document().styleEngine().scheduleInvalidationsForInsertedSibling(elementBeforeChange, *changedElement);
         return;
     }
 
-    // :first-child. In the parser callback case, we don't have to check anything, since we were right the first time.
-    // In the DOM case, we only need to do something if |afterChange| is not 0.
-    // |afterChange| is 0 in the parser case, so it works out that we'll skip this block.
-    if (childrenAffectedByFirstChildRules() && nodeAfterChange) {
-        DCHECK_NE(changeType, FinishedParsingChildren);
-        // Find our new first child element.
-        Element* firstChildElement = ElementTraversal::firstChild(*this);
-
-        // Find the first element after the change.
-        Element* elementAfterChange = nodeAfterChange->isElementNode() ? toElement(nodeAfterChange) : ElementTraversal::nextSibling(*nodeAfterChange);
-
-        // This is the element insertion as first child element case.
-        if (changeType == SiblingElementInserted && elementAfterChange && firstChildElement != elementAfterChange
-            && (!nodeBeforeChange || !nodeBeforeChange->isElementNode()) && elementAfterChange->affectedByFirstChildRules()) {
-            elementAfterChange->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::SiblingSelector));
-        }
-
-        // This is the first child element removal case.
-        if (changeType == SiblingElementRemoved && firstChildElement == elementAfterChange && firstChildElement && firstChildElement->affectedByFirstChildRules())
-            firstChildElement->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::SiblingSelector));
-    }
-
-    // :last-child. In the parser callback case, we don't have to check anything, since we were right the first time.
-    // In the DOM case, we only need to do something if |afterChange| is not 0.
-    if (childrenAffectedByLastChildRules() && nodeBeforeChange) {
-        // Find our new last child element.
-        Element* lastChildElement = ElementTraversal::lastChild(*this);
-
-        // Find the last element before the change.
-        Element* elementBeforeChange = nodeBeforeChange->isElementNode() ? toElement(nodeBeforeChange) : ElementTraversal::previousSibling(*nodeBeforeChange);
-
-        // This is the element insertion as last child element case.
-        if (changeType == SiblingElementInserted && elementBeforeChange && lastChildElement != elementBeforeChange
-            && (!nodeAfterChange || !nodeAfterChange->isElementNode()) && elementBeforeChange->affectedByLastChildRules()) {
-            elementBeforeChange->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::SiblingSelector));
-        }
-
-        // This is the last child element removal case. The parser callback case is similar to node removal as well in that we need to change the last child
-        // to match now.
-        if ((changeType == SiblingElementRemoved || changeType == FinishedParsingChildren) && lastChildElement == elementBeforeChange && lastChildElement && lastChildElement->affectedByLastChildRules())
-            lastChildElement->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::SiblingSelector));
-    }
-
-    // The + selector. We need to invalidate the first element following the change. It is the only possible element
-    // that could be affected by this DOM change.
-    if (childrenAffectedByDirectAdjacentRules() && nodeAfterChange) {
-        Element* elementAfterChange = nodeAfterChange->isElementNode() ? toElement(nodeAfterChange) : ElementTraversal::nextSibling(*nodeAfterChange);
-        for (unsigned i = document().styleEngine().maxDirectAdjacentSelectors(); i && elementAfterChange; --i, elementAfterChange = ElementTraversal::nextSibling(*elementAfterChange))
-            elementAfterChange->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::SiblingSelector));
-    }
+    DCHECK(changeType == SiblingElementRemoved);
+    document().styleEngine().scheduleInvalidationsForRemovedSibling(elementBeforeChange, *changedElement, *elementAfterChange);
 }
 
 void ContainerNode::invalidateNodeListCachesInAncestors(const QualifiedName* attrName, Element* attributeOwnerElement)
@@ -1345,7 +1321,7 @@ Element* ContainerNode::getElementById(const AtomicString& id) const
     if (isInTreeScope()) {
         // Fast path if we are in a tree scope: call getElementById() on tree scope
         // and check if the matching element is in our subtree.
-        Element* element = treeScope().getElementById(id);
+        Element* element = containingTreeScope().getElementById(id);
         if (!element)
             return nullptr;
         if (element->isDescendantOf(this))

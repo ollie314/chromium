@@ -32,7 +32,7 @@ public:
     const AtomicString& interfaceName() const override;
     ExecutionContext* getExecutionContext() const override;
 
-    // ActiveScriptWrappable implementation.
+    // ScriptWrappable implementation.
     bool hasPendingActivity() const final;
 
     ScriptPromise start(ScriptState*);
@@ -47,7 +47,7 @@ public:
 
 protected:
     // EventTarget implementation.
-    bool addEventListenerInternal(const AtomicString& eventType, EventListener*, const EventListenerOptions&) override;
+    void addedEventListener(const AtomicString& eventType, RegisteredEventListener&) override;
 
 private:
     PresentationRequest(ExecutionContext*, const KURL&);

@@ -7,7 +7,8 @@
 #include "core/frame/FrameView.h"
 #include "core/layout/LayoutBoxModelObject.h"
 #include "core/layout/LayoutTestHelper.h"
-#include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutViewItem.h"
+#include "core/page/scrolling/TopDocumentRootScrollerController.h"
 #include "core/paint/PaintLayer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -50,12 +51,10 @@ private:
     {
         RenderingTest::SetUp();
         enableCompositing();
-        GraphicsLayer::setDrawDebugRedFillForTesting(false);
     }
 
     void TearDown() override
     {
-        GraphicsLayer::setDrawDebugRedFillForTesting(true);
         RenderingTest::TearDown();
     }
 };
@@ -104,8 +103,8 @@ TEST_F(CompositedLayerMappingTest, TallLayerWholeDocumentInterestRect)
     PaintLayer* paintLayer = toLayoutBoxModelObject(element->layoutObject())->layer();
     ASSERT_TRUE(paintLayer->graphicsLayerBacking());
     ASSERT_TRUE(paintLayer->compositedLayerMapping());
-    // recomputeInterestRect computes the interest rect; computeInterestRect applies the extra setting to paint everything.
-    EXPECT_RECT_EQ(IntRect(0, 0, 200, 4592), recomputeInterestRect(paintLayer->graphicsLayerBacking()));
+    // Clipping is disabled in recomputeInterestRect.
+    EXPECT_RECT_EQ(IntRect(0, 0, 200, 10000), recomputeInterestRect(paintLayer->graphicsLayerBacking()));
     EXPECT_RECT_EQ(IntRect(0, 0, 200, 10000), computeInterestRect(paintLayer->compositedLayerMapping(), paintLayer->graphicsLayerBacking(), IntRect()));
 }
 
@@ -113,13 +112,11 @@ TEST_F(CompositedLayerMappingTest, VerticalRightLeftWritingModeDocument)
 {
     setBodyInnerHTML("<style>html,body { margin: 0px } html { -webkit-writing-mode: vertical-rl}</style> <div id='target' style='width: 10000px; height: 200px;'></div>");
 
-    document().settings()->setMainFrameClipsContent(false);
-
     document().view()->updateAllLifecyclePhases();
     document().view()->setScrollPosition(DoublePoint(-5000, 0), ProgrammaticScroll);
     document().view()->updateAllLifecyclePhases();
 
-    PaintLayer* paintLayer = document().layoutView()->layer();
+    PaintLayer* paintLayer = document().layoutViewItem().layer();
     ASSERT_TRUE(paintLayer->graphicsLayerBacking());
     ASSERT_TRUE(paintLayer->compositedLayerMapping());
     // A scroll by -5000px is equivalent to a scroll by (10000 - 5000 - 800)px = 4200px in non-RTL mode. Expanding
@@ -379,7 +376,7 @@ TEST_F(CompositedLayerMappingTest, InterestRectChangedEnoughToRepaintScrollScena
 
 TEST_F(CompositedLayerMappingTest, InterestRectChangeOnViewportScroll)
 {
-    if (document().frame()->settings()->rootLayerScrolls())
+    if (RuntimeEnabledFeatures::rootLayerScrollingEnabled())
         return;
 
     setBodyInnerHTML(
@@ -390,7 +387,7 @@ TEST_F(CompositedLayerMappingTest, InterestRectChangeOnViewportScroll)
         "<div id='div' style='width: 100px; height: 10000px'>Text</div>");
 
     document().view()->updateAllLifecyclePhases();
-    GraphicsLayer* rootScrollingLayer = document().layoutView()->layer()->graphicsLayerBackingForScrolling();
+    GraphicsLayer* rootScrollingLayer = document().layoutViewItem().layer()->graphicsLayerBackingForScrolling();
     EXPECT_RECT_EQ(IntRect(0, 0, 800, 4600), previousInterestRect(rootScrollingLayer));
 
     document().view()->setScrollPosition(IntPoint(0, 300), ProgrammaticScroll);
@@ -421,6 +418,26 @@ TEST_F(CompositedLayerMappingTest, InterestRectChangeOnViewportScroll)
     document().view()->updateAllLifecyclePhases();
     EXPECT_RECT_EQ(IntRect(0, 0, 800, 6600), recomputeInterestRect(rootScrollingLayer));
     EXPECT_RECT_EQ(IntRect(0, 0, 800, 6600), previousInterestRect(rootScrollingLayer));
+}
+
+TEST_F(CompositedLayerMappingTest, InterestRectChangeOnShrunkenViewport)
+{
+    setBodyInnerHTML(
+        "<style>"
+        "  ::-webkit-scrollbar { width: 0; height: 0; }"
+        "  body { margin: 0; }"
+        "</style>"
+        "<div id='div' style='width: 100px; height: 10000px'>Text</div>");
+
+    document().view()->updateAllLifecyclePhases();
+    GraphicsLayer* rootScrollingLayer = document().layoutViewItem().layer()->graphicsLayerBackingForScrolling();
+    EXPECT_RECT_EQ(IntRect(0, 0, 800, 4600), previousInterestRect(rootScrollingLayer));
+
+    document().view()->setFrameRect(IntRect(0, 0, 800, 60));
+    document().view()->updateAllLifecyclePhases();
+    // Repaint required, so interest rect should be updated to shrunken size.
+    EXPECT_RECT_EQ(IntRect(0, 0, 800, 4060), recomputeInterestRect(rootScrollingLayer));
+    EXPECT_RECT_EQ(IntRect(0, 0, 800, 4060), previousInterestRect(rootScrollingLayer));
 }
 
 TEST_F(CompositedLayerMappingTest, InterestRectChangeOnScroll)
@@ -471,7 +488,7 @@ TEST_F(CompositedLayerMappingTest, InterestRectChangeOnScroll)
     EXPECT_RECT_EQ(IntRect(0, 0, 400, 6600), previousInterestRect(scrollingLayer));
 }
 
-TEST_F(CompositedLayerMappingTest, InterestRectShouldNotChangeOnPaintInvalidation)
+TEST_F(CompositedLayerMappingTest, InterestRectShouldChangeOnPaintInvalidation)
 {
     document().frame()->settings()->setPreferCompositingToLCDTextEnabled(true);
 
@@ -496,21 +513,23 @@ TEST_F(CompositedLayerMappingTest, InterestRectShouldNotChangeOnPaintInvalidatio
     EXPECT_RECT_EQ(IntRect(0, 5400, 400, 4600), recomputeInterestRect(scrollingLayer));
     EXPECT_RECT_EQ(IntRect(0, 1400, 400, 8600), previousInterestRect(scrollingLayer));
 
-    // Paint invalidation and repaint should not change previous paint interest rect.
+    // Paint invalidation and repaint should change previous paint interest rect.
     document().getElementById("content")->setTextContent("Change");
     document().view()->updateAllLifecyclePhases();
     EXPECT_RECT_EQ(IntRect(0, 5400, 400, 4600), recomputeInterestRect(scrollingLayer));
-    EXPECT_RECT_EQ(IntRect(0, 1400, 400, 8600), previousInterestRect(scrollingLayer));
+    EXPECT_RECT_EQ(IntRect(0, 5400, 400, 4600), previousInterestRect(scrollingLayer));
 }
 
 TEST_F(CompositedLayerMappingTest, InterestRectOfSquashingLayerWithNegativeOverflow)
 {
     setBodyInnerHTML(
-        "<style>body { margin: 0 }</style>"
+        "<style>body { margin: 0; font-size: 16px; }</style>"
         "<div style='position: absolute; top: -500px; width: 200px; height: 700px; will-change: transform'></div>"
-        "<div id='squashed' style='position: absolute; top: 190px'>"
-        "  <div style='width: 100px; height: 100px; text-indent: -10000px'>text</div>"
+        "<div id='squashed' style='position: absolute; top: 190px;'>"
+        "  <div id='inside' style='width: 100px; height: 100px; text-indent: -10000px'>text</div>"
         "</div>");
+
+    EXPECT_EQ(document().getElementById("inside")->layoutBox()->visualOverflowRect().size().height(), 100);
 
     CompositedLayerMapping* groupedMapping = document().getElementById("squashed")->layoutBox()->layer()->groupedMapping();
     // The squashing layer is at (-10000, 190, 10100, 100) in viewport coordinates.
@@ -574,8 +593,8 @@ TEST_F(CompositedLayerMappingTest, InterestRectOfScrolledIframe)
     frameDocument.view()->setScrollPosition(DoublePoint(0.0, 7500.0), ProgrammaticScroll);
     document().view()->updateAllLifecyclePhases();
 
-    ASSERT_TRUE(frameDocument.view()->layoutView()->hasLayer());
-    EXPECT_RECT_EQ(IntRect(0, 3500, 500, 4500), recomputeInterestRect(frameDocument.view()->layoutView()->enclosingLayer()->graphicsLayerBacking()));
+    ASSERT_TRUE(frameDocument.view()->layoutViewItem().hasLayer());
+    EXPECT_RECT_EQ(IntRect(0, 3500, 500, 4500), recomputeInterestRect(frameDocument.view()->layoutViewItem().enclosingLayer()->graphicsLayerBacking()));
 }
 
 TEST_F(CompositedLayerMappingTest, InterestRectOfIframeWithContentBoxOffset)
@@ -596,9 +615,9 @@ TEST_F(CompositedLayerMappingTest, InterestRectOfIframeWithContentBoxOffset)
     frameDocument.view()->setScrollPosition(DoublePoint(0.0, 3000.0), ProgrammaticScroll);
     document().view()->updateAllLifecyclePhases();
 
-    ASSERT_TRUE(frameDocument.view()->layoutView()->hasLayer());
+    ASSERT_TRUE(frameDocument.view()->layoutViewItem().hasLayer());
     // The width is 485 pixels due to the size of the scrollbar.
-    EXPECT_RECT_EQ(IntRect(0, 0, 500, 7500), recomputeInterestRect(frameDocument.view()->layoutView()->enclosingLayer()->graphicsLayerBacking()));
+    EXPECT_RECT_EQ(IntRect(0, 0, 500, 7500), recomputeInterestRect(frameDocument.view()->layoutViewItem().enclosingLayer()->graphicsLayerBacking()));
 }
 
 TEST_F(CompositedLayerMappingTest, ScrollingContentsAndForegroundLayerPaintingPhase)
@@ -624,6 +643,153 @@ TEST_F(CompositedLayerMappingTest, ScrollingContentsAndForegroundLayerPaintingPh
     ASSERT_TRUE(mapping->scrollingContentsLayer());
     EXPECT_EQ(static_cast<GraphicsLayerPaintingPhase>(GraphicsLayerPaintOverflowContents | GraphicsLayerPaintCompositedScroll | GraphicsLayerPaintForeground), mapping->scrollingContentsLayer()->paintingPhase());
     EXPECT_FALSE(mapping->foregroundLayer());
+}
+
+TEST_F(CompositedLayerMappingTest, BackgroundPaintedIntoGraphicsLayerIfNotCompositedScrolling)
+{
+    document().frame()->settings()->setPreferCompositingToLCDTextEnabled(true);
+    setBodyInnerHTML(
+        "<div id='container' style='overflow: scroll; width: 300px; height: 300px; border-radius: 5px; background: white; will-change: transform;'>"
+        "    <div style='background-color: blue; width: 2000px; height: 2000px;'></div>"
+        "</div>");
+
+    PaintLayer* layer = toLayoutBlock(getLayoutObjectByElementId("container"))->layer();
+    EXPECT_TRUE(layer->canPaintBackgroundOntoScrollingContentsLayer());
+
+    // We currently don't use composited scrolling when the container has a border-radius
+    // so even though we can paint the background onto the scrolling contents layer we
+    // don't have a scrolling contents layer to paint into in this case.
+    CompositedLayerMapping* mapping = layer->compositedLayerMapping();
+    EXPECT_FALSE(mapping->hasScrollingLayer());
+    EXPECT_FALSE(mapping->backgroundPaintsOntoScrollingContentsLayer());
+}
+
+// Make sure that clipping layers are removed or their masking bit turned off
+// when they're an ancestor of the root scroller element.
+TEST_F(CompositedLayerMappingTest, RootScrollerAncestorsNotClipped)
+{
+    NonThrowableExceptionState nonThrow;
+
+    TopDocumentRootScrollerController& rootScrollerController =
+        document().frameHost()->globalRootScrollerController();
+
+    setBodyInnerHTML(
+        // The container DIV is composited with scrolling contents and a
+        // non-composited parent that clips it.
+        "<div id='clip' style='overflow: hidden; width: 200px; height: 200px; position: absolute; left: 0px; top: 0px;'>"
+        "    <div id='container' style='transform: translateZ(0); overflow: scroll; width: 300px; height: 300px'>"
+        "        <div style='width: 2000px; height: 2000px;'>lorem ipsum</div>"
+        "        <div id='innerScroller' style='width: 800px; height: 600px; left: 0px; top: 0px; position: absolute; overflow: scroll'>"
+        "            <div style='height: 2000px; width: 2000px'></div>"
+        "        </div>"
+        "    </div>"
+        "</div>"
+
+        // The container DIV is composited with scrolling contents and a
+        // composited parent that clips it.
+        "<div id='clip2' style='transform: translateZ(0); position: absolute; left: 0px; top: 0px; overflow: hidden; width: 200px; height: 200px'>"
+        "    <div id='container2' style='transform: translateZ(0); overflow: scroll; width: 300px; height: 300px'>"
+        "        <div style='width: 2000px; height: 2000px;'>lorem ipsum</div>"
+        "        <div id='innerScroller2' style='width: 800px; height: 600px; left: 0px; top: 0px; position: absolute; overflow: scroll'>"
+        "            <div style='height: 2000px; width: 2000px'></div>"
+        "        </div>"
+        "    </div>"
+        "</div>"
+
+        // The container DIV is composited without scrolling contents but
+        // composited children that it clips.
+        "<div id='container3' style='translateZ(0); position: absolute; left: 0px; top: 0px; z-index: 1; overflow: hidden; width: 300px; height: 300px'>"
+        "    <div style='transform: translateZ(0); z-index: -1; width: 2000px; height: 2000px;'>lorem ipsum</div>"
+        "        <div id='innerScroller3' style='width: 800px; height: 600px; left: 0px; top: 0px; position: absolute; overflow: scroll'>"
+        "            <div style='height: 2000px; width: 2000px'></div>"
+        "        </div>"
+        "</div>"
+        );
+
+    CompositedLayerMapping* mapping = toLayoutBlock(getLayoutObjectByElementId("container"))->layer()->compositedLayerMapping();
+    CompositedLayerMapping* mapping2 = toLayoutBlock(getLayoutObjectByElementId("container2"))->layer()->compositedLayerMapping();
+    CompositedLayerMapping* mapping3 = toLayoutBlock(getLayoutObjectByElementId("container3"))->layer()->compositedLayerMapping();
+    Element* innerScroller = document().getElementById("innerScroller");
+    Element* innerScroller2 = document().getElementById("innerScroller2");
+    Element* innerScroller3 = document().getElementById("innerScroller3");
+
+    ASSERT_TRUE(mapping);
+    ASSERT_TRUE(mapping2);
+    ASSERT_TRUE(mapping3);
+    ASSERT_TRUE(innerScroller);
+    ASSERT_TRUE(innerScroller2);
+    ASSERT_TRUE(innerScroller3);
+
+    // Since there's no need to composite the clip and we prefer LCD text, the
+    // mapping should create an ancestorClippingLayer.
+    ASSERT_TRUE(mapping->scrollingLayer());
+    ASSERT_TRUE(mapping->ancestorClippingLayer());
+
+    // Since the clip has a transform it should be composited so there's no
+    // need for an ancestor clipping layer.
+    ASSERT_TRUE(mapping2->scrollingLayer());
+
+    // The third <div> should have a clipping layer since it's composited and clips
+    // composited children.
+    ASSERT_TRUE(mapping3->clippingLayer());
+
+    // All scrolling and clipping layers should have masksToBounds set on them.
+    {
+        EXPECT_TRUE(mapping->scrollingLayer()->platformLayer()->masksToBounds());
+        EXPECT_TRUE(mapping->ancestorClippingLayer()->platformLayer()->masksToBounds());
+        EXPECT_TRUE(mapping2->scrollingLayer()->platformLayer()->masksToBounds());
+        EXPECT_TRUE(mapping3->clippingLayer()->platformLayer()->masksToBounds());
+    }
+
+    // Set the inner scroller in the first container as the root scroller. Its
+    // clipping layer should be removed and the scrolling layer should not
+    // mask.
+    {
+        document().setRootScroller(innerScroller, nonThrow);
+        document().view()->updateAllLifecyclePhases();
+        ASSERT_EQ(innerScroller, rootScrollerController.globalRootScroller());
+
+        EXPECT_FALSE(mapping->ancestorClippingLayer());
+        EXPECT_FALSE(mapping->scrollingLayer()->platformLayer()->masksToBounds());
+    }
+
+    // Set the inner scroller in the second container as the root scroller. Its
+    // scrolling layer should no longer mask. The clipping and scrolling layers
+    // on the first container should now reset back.
+    {
+        document().setRootScroller(innerScroller2, nonThrow);
+        document().view()->updateAllLifecyclePhases();
+        ASSERT_EQ(innerScroller2, rootScrollerController.globalRootScroller());
+
+        EXPECT_TRUE(mapping->ancestorClippingLayer());
+        EXPECT_TRUE(mapping->ancestorClippingLayer()->platformLayer()->masksToBounds());
+        EXPECT_TRUE(mapping->scrollingLayer()->platformLayer()->masksToBounds());
+
+        EXPECT_FALSE(mapping2->scrollingLayer()->platformLayer()->masksToBounds());
+    }
+
+    // Set the inner scroller in the third container as the root scroller. Its
+    // clipping layer should be removed.
+    {
+        document().setRootScroller(innerScroller3, nonThrow);
+        document().view()->updateAllLifecyclePhases();
+        ASSERT_EQ(innerScroller3, rootScrollerController.globalRootScroller());
+
+        EXPECT_TRUE(mapping2->scrollingLayer()->platformLayer()->masksToBounds());
+
+        EXPECT_FALSE(mapping3->clippingLayer());
+    }
+
+    // Unset the root scroller. The clipping layer on the third container should
+    // be restored.
+    {
+        document().setRootScroller(nullptr, nonThrow);
+        document().view()->updateAllLifecyclePhases();
+        ASSERT_EQ(document().documentElement(), rootScrollerController.globalRootScroller());
+
+        EXPECT_TRUE(mapping3->clippingLayer());
+        EXPECT_TRUE(mapping3->clippingLayer()->platformLayer()->masksToBounds());
+    }
 }
 
 } // namespace blink

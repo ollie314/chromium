@@ -7,6 +7,8 @@
 #include "core/css/resolver/StyleBuilderConverter.h"
 #include "platform/transforms/RotateTransformOperation.h"
 #include "platform/transforms/Rotation.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -24,25 +26,25 @@ public:
 
     PassRefPtr<CSSRotateNonInterpolableValue> composite(const CSSRotateNonInterpolableValue& other, double otherProgress)
     {
-        ASSERT(m_isSingle && !m_isStartAdditive);
+        DCHECK(m_isSingle && !m_isStartAdditive);
         if (other.m_isSingle) {
-            ASSERT(otherProgress == 0);
-            ASSERT(other.isAdditive());
+            DCHECK_EQ(otherProgress, 0);
+            DCHECK(other.isAdditive());
             return create(Rotation::add(rotation(), other.rotation()));
         }
 
-        ASSERT(other.m_isStartAdditive || other.m_isEndAdditive);
+        DCHECK(other.m_isStartAdditive || other.m_isEndAdditive);
         Rotation start = other.m_isStartAdditive ? Rotation::add(rotation(), other.m_start) : other.m_start;
         Rotation end = other.m_isEndAdditive ? Rotation::add(rotation(), other.m_end) : other.m_end;
         return create(Rotation::slerp(start, end, otherProgress));
     }
 
-    void setSingleAdditive() { ASSERT(m_isSingle); m_isStartAdditive = true; }
+    void setSingleAdditive() { DCHECK(m_isSingle); m_isStartAdditive = true; }
 
     Rotation slerpedRotation(double progress) const
     {
-        ASSERT(!m_isStartAdditive && !m_isEndAdditive);
-        ASSERT(!m_isSingle || progress == 0);
+        DCHECK(!m_isStartAdditive && !m_isEndAdditive);
+        DCHECK(!m_isSingle || progress == 0);
         if (progress == 0)
             return m_start;
         if (progress == 1)
@@ -61,8 +63,8 @@ private:
         , m_isEndAdditive(isEndAdditive)
     { }
 
-    const Rotation& rotation() const { ASSERT(m_isSingle); return m_start; }
-    bool isAdditive() const { ASSERT(m_isSingle); return m_isStartAdditive; }
+    const Rotation& rotation() const { DCHECK(m_isSingle); return m_start; }
+    bool isAdditive() const { DCHECK(m_isSingle); return m_isStartAdditive; }
 
     bool m_isSingle;
     Rotation m_start;
@@ -90,9 +92,9 @@ InterpolationValue convertRotation(const Rotation& rotation)
 
 class InheritedRotationChecker : public InterpolationType::ConversionChecker {
 public:
-    static PassOwnPtr<InheritedRotationChecker> create(const Rotation& inheritedRotation)
+    static std::unique_ptr<InheritedRotationChecker> create(const Rotation& inheritedRotation)
     {
-        return adoptPtr(new InheritedRotationChecker(inheritedRotation));
+        return wrapUnique(new InheritedRotationChecker(inheritedRotation));
     }
 
     bool isValid(const InterpolationEnvironment& environment, const InterpolationValue& underlying) const final
@@ -116,7 +118,7 @@ InterpolationValue CSSRotateInterpolationType::maybeConvertNeutral(const Interpo
     return convertRotation(Rotation());
 }
 
-InterpolationValue CSSRotateInterpolationType::maybeConvertInitial(const StyleResolverState&) const
+InterpolationValue CSSRotateInterpolationType::maybeConvertInitial(const StyleResolverState&, ConversionCheckers&) const
 {
     return convertRotation(getRotation(ComputedStyle::initialStyle()));
 }
@@ -143,7 +145,7 @@ InterpolationValue CSSRotateInterpolationType::maybeConvertSingle(const Property
     return result;
 }
 
-PairwiseInterpolationValue CSSRotateInterpolationType::mergeSingleConversions(InterpolationValue&& start, InterpolationValue&& end) const
+PairwiseInterpolationValue CSSRotateInterpolationType::maybeMergeSingles(InterpolationValue&& start, InterpolationValue&& end) const
 {
     return PairwiseInterpolationValue(
         InterpolableNumber::create(0),

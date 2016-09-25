@@ -9,7 +9,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/macros.h"
-#include "blimp/client/feature/navigation_feature.h"
+#include "blimp/client/core/contents/navigation_feature.h"
 
 class GURL;
 class SkBitmap;
@@ -48,7 +48,7 @@ class Toolbar : public NavigationFeature::NavigationFeatureDelegate {
   void OnPageLoadStatusUpdate(int tab_id, bool completed) override;
 
  private:
-  virtual ~Toolbar();
+  ~Toolbar() override;
 
   // A bridge to the network layer which does the work of (de)serializing the
   // outgoing and incoming navigation messages from the engine. Toolbar does not

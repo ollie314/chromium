@@ -25,6 +25,7 @@
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/threading/thread.h"
@@ -34,9 +35,15 @@
 #include "chrome/common/mac/app_mode_common.h"
 #include "chrome/common/mac/app_shim_messages.h"
 #include "chrome/grit/generated_resources.h"
+#include "ipc/ipc_channel_mojo.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_message.h"
+#include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/named_platform_handle.h"
+#include "mojo/edk/embedder/named_platform_handle_utils.h"
+#include "mojo/edk/embedder/scoped_ipc_support.h"
+#include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -188,8 +195,7 @@ void AppShimController::Init() {
   SetUpMenu();
 
   // Chrome will relaunch shims when relaunching apps.
-  if (base::mac::IsOSLionOrLater())
-    [NSApp disableRelaunchOnLogin];
+  [NSApp disableRelaunchOnLogin];
 
   // The user_data_dir for shims actually contains the app_data_path.
   // I.e. <user_data_dir>/<profile_dir>/Web Applications/_crx_extensionid/
@@ -213,9 +219,12 @@ void AppShimController::Init() {
 
 void AppShimController::CreateChannelAndSendLaunchApp(
     const base::FilePath& socket_path) {
-  IPC::ChannelHandle handle(socket_path.value());
-  channel_ = IPC::ChannelProxy::Create(handle, IPC::Channel::MODE_NAMED_CLIENT,
-                                       this, g_io_thread->task_runner().get());
+  channel_ = IPC::ChannelProxy::Create(
+      IPC::ChannelMojo::CreateClientFactory(
+          mojo::edk::ConnectToPeerProcess(mojo::edk::CreateClientHandle(
+              mojo::edk::NamedPlatformHandle(socket_path.value()))),
+          g_io_thread->task_runner().get()),
+      this, g_io_thread->task_runner().get());
 
   bool launched_by_chrome = base::CommandLine::ForCurrentProcess()->HasSwitch(
       app_mode::kLaunchedByChromeProcessId);
@@ -630,6 +639,9 @@ int ChromeAppModeStart_v4(const app_mode::ChromeAppModeInfo* info) {
   io_thread->StartWithOptions(io_thread_options);
   g_io_thread = io_thread;
 
+  mojo::edk::Init();
+  mojo::edk::ScopedIPCSupport ipc_support(io_thread->task_runner());
+
   // Find already running instances of Chrome.
   pid_t pid = -1;
   std::string chrome_process_id =
@@ -648,7 +660,6 @@ int ChromeAppModeStart_v4(const app_mode::ChromeAppModeInfo* info) {
 
   AppShimController controller;
   base::MessageLoopForUI main_message_loop;
-  main_message_loop.set_thread_name("MainThread");
   base::PlatformThread::SetName("CrAppShimMain");
 
   // In tests, launching Chrome does nothing, and we won't get a ping response,
@@ -688,22 +699,20 @@ int ChromeAppModeStart_v4(const app_mode::ChromeAppModeInfo* info) {
     [ReplyEventHandler pingProcess:psn
                            andCall:on_ping_chrome_reply];
 
-    main_message_loop.PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&AppShimController::OnPingChromeTimeout,
-                   base::Unretained(&controller)),
+    main_message_loop.task_runner()->PostDelayedTask(
+        FROM_HERE, base::Bind(&AppShimController::OnPingChromeTimeout,
+                              base::Unretained(&controller)),
         base::TimeDelta::FromSeconds(kPingChromeTimeoutSeconds));
   } else {
     // Chrome already running. Proceed to init. This could still fail if Chrome
     // is still starting up or shutting down, but the process will exit quickly,
     // which is preferable to waiting for the Apple Event to timeout after one
     // minute.
-    main_message_loop.PostTask(
+    main_message_loop.task_runner()->PostTask(
         FROM_HERE,
-        base::Bind(&AppShimController::Init,
-                   base::Unretained(&controller)));
+        base::Bind(&AppShimController::Init, base::Unretained(&controller)));
   }
 
-  main_message_loop.Run();
+  base::RunLoop().Run();
   return 0;
 }

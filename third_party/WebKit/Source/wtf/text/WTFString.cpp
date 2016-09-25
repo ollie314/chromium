@@ -76,12 +76,12 @@ String::String(const char* characters)
 {
 }
 
-void String::append(const String& string)
+void String::append(const StringView& string)
 {
     if (string.isEmpty())
         return;
     if (!m_impl) {
-        m_impl = string.m_impl;
+        m_impl = string.toString().releaseImpl();
         return;
     }
 
@@ -90,7 +90,7 @@ void String::append(const String& string)
     // case where exactly one String is pointing at this StringImpl, but even
     // then it's going to require a call into the allocator every single time.
 
-    if (m_impl->is8Bit() && string.m_impl->is8Bit()) {
+    if (m_impl->is8Bit() && string.is8Bit()) {
         LChar* data;
         RELEASE_ASSERT(string.length() <= std::numeric_limits<unsigned>::max() - m_impl->length());
         RefPtr<StringImpl> newImpl = StringImpl::createUninitialized(m_impl->length() + string.length(), data);
@@ -109,10 +109,10 @@ void String::append(const String& string)
     else
         StringImpl::copyChars(data, m_impl->characters16(), m_impl->length());
 
-    if (string.impl()->is8Bit())
-        StringImpl::copyChars(data + m_impl->length(), string.impl()->characters8(), string.impl()->length());
+    if (string.is8Bit())
+        StringImpl::copyChars(data + m_impl->length(), string.characters8(), string.length());
     else
-        StringImpl::copyChars(data + m_impl->length(), string.impl()->characters16(), string.impl()->length());
+        StringImpl::copyChars(data + m_impl->length(), string.characters16(), string.length());
 
     m_impl = newImpl.release();
 }
@@ -161,82 +161,6 @@ int codePointCompareIgnoringASCIICase(const String& a, const char* b)
     return codePointCompareIgnoringASCIICase(a.impl(), reinterpret_cast<const LChar*>(b));
 }
 
-void String::insert(const String& string, unsigned position)
-{
-    if (string.isEmpty()) {
-        if (string.isNull())
-            return;
-        if (isNull())
-            m_impl = string.impl();
-        return;
-    }
-
-    if (string.is8Bit())
-        insert(string.impl()->characters8(), string.length(), position);
-    else
-        insert(string.impl()->characters16(), string.length(), position);
-}
-
-void String::append(const LChar* charactersToAppend, unsigned lengthToAppend)
-{
-    if (!m_impl) {
-        if (!charactersToAppend)
-            return;
-        m_impl = StringImpl::create(charactersToAppend, lengthToAppend);
-        return;
-    }
-
-    if (!lengthToAppend)
-        return;
-
-    ASSERT(charactersToAppend);
-
-    unsigned strLength = m_impl->length();
-
-    if (m_impl->is8Bit()) {
-        RELEASE_ASSERT(lengthToAppend <= std::numeric_limits<unsigned>::max() - strLength);
-        LChar* data;
-        RefPtr<StringImpl> newImpl = StringImpl::createUninitialized(strLength + lengthToAppend, data);
-        StringImpl::copyChars(data, m_impl->characters8(), strLength);
-        StringImpl::copyChars(data + strLength, charactersToAppend, lengthToAppend);
-        m_impl = newImpl.release();
-        return;
-    }
-
-    RELEASE_ASSERT(lengthToAppend <= std::numeric_limits<unsigned>::max() - strLength);
-    UChar* data;
-    RefPtr<StringImpl> newImpl = StringImpl::createUninitialized(length() + lengthToAppend, data);
-    StringImpl::copyChars(data, m_impl->characters16(), strLength);
-    StringImpl::copyChars(data + strLength, charactersToAppend, lengthToAppend);
-    m_impl = newImpl.release();
-}
-
-void String::append(const UChar* charactersToAppend, unsigned lengthToAppend)
-{
-    if (!m_impl) {
-        if (!charactersToAppend)
-            return;
-        m_impl = StringImpl::create(charactersToAppend, lengthToAppend);
-        return;
-    }
-
-    if (!lengthToAppend)
-        return;
-
-    unsigned strLength = m_impl->length();
-
-    ASSERT(charactersToAppend);
-    RELEASE_ASSERT(lengthToAppend <= std::numeric_limits<unsigned>::max() - strLength);
-    UChar* data;
-    RefPtr<StringImpl> newImpl = StringImpl::createUninitialized(strLength + lengthToAppend, data);
-    if (m_impl->is8Bit())
-        StringImpl::copyChars(data, characters8(), strLength);
-    else
-        StringImpl::copyChars(data, characters16(), strLength);
-    StringImpl::copyChars(data + strLength, charactersToAppend, lengthToAppend);
-    m_impl = newImpl.release();
-}
-
 template<typename CharType>
 PassRefPtr<StringImpl> insertInternal(PassRefPtr<StringImpl> impl, const CharType* charactersToInsert, unsigned lengthToInsert, unsigned position)
 {
@@ -263,24 +187,29 @@ PassRefPtr<StringImpl> insertInternal(PassRefPtr<StringImpl> impl, const CharTyp
     return newImpl.release();
 }
 
-void String::insert(const UChar* charactersToInsert, unsigned lengthToInsert, unsigned position)
+void String::insert(const StringView& string, unsigned position)
 {
-    if (position >= length()) {
-        append(charactersToInsert, lengthToInsert);
+    if (string.isEmpty()) {
+        if (string.isNull())
+            return;
+        if (isNull())
+            m_impl = string.toString().releaseImpl();
         return;
     }
-    ASSERT(m_impl);
-    m_impl = insertInternal(m_impl.release(), charactersToInsert, lengthToInsert, position);
-}
 
-void String::insert(const LChar* charactersToInsert, unsigned lengthToInsert, unsigned position)
-{
     if (position >= length()) {
-        append(charactersToInsert, lengthToInsert);
+        if (string.is8Bit())
+            append(string);
+        else
+            append(string);
         return;
     }
-    ASSERT(m_impl);
-    m_impl = insertInternal(m_impl.release(), charactersToInsert, lengthToInsert, position);
+
+    DCHECK(m_impl);
+    if (string.is8Bit())
+        m_impl = insertInternal(m_impl.release(), string.characters8(), string.length(), position);
+    else
+        m_impl = insertInternal(m_impl.release(), string.characters16(), string.length(), position);
 }
 
 UChar32 String::characterStartingAt(unsigned i) const
@@ -292,57 +221,26 @@ UChar32 String::characterStartingAt(unsigned i) const
 
 void String::ensure16Bit()
 {
-    unsigned length = this->length();
-    if (!length || !is8Bit())
+    if (isNull())
         return;
-    m_impl = make16BitFrom8BitSource(m_impl->characters8(), length).impl();
+    if (!is8Bit())
+        return;
+    if (unsigned length = this->length())
+        m_impl = make16BitFrom8BitSource(m_impl->characters8(), length).releaseImpl();
+    else
+        m_impl = StringImpl::empty16Bit();
 }
 
-void String::truncate(unsigned position)
+void String::truncate(unsigned length)
 {
-    if (position >= length())
-        return;
-    if (m_impl->is8Bit()) {
-        LChar* data;
-        RefPtr<StringImpl> newImpl = StringImpl::createUninitialized(position, data);
-        memcpy(data, m_impl->characters8(), position * sizeof(LChar));
-        m_impl = newImpl.release();
-    } else {
-        UChar* data;
-        RefPtr<StringImpl> newImpl = StringImpl::createUninitialized(position, data);
-        memcpy(data, m_impl->characters16(), position * sizeof(UChar));
-        m_impl = newImpl.release();
-    }
+    if (m_impl)
+        m_impl = m_impl->truncate(length);
 }
 
-template <typename CharacterType>
-inline void String::removeInternal(const CharacterType* characters, unsigned position, int lengthToRemove)
+void String::remove(unsigned start, unsigned lengthToRemove)
 {
-    CharacterType* data;
-    RefPtr<StringImpl> newImpl = StringImpl::createUninitialized(length() - lengthToRemove, data);
-    memcpy(data, characters, position * sizeof(CharacterType));
-    memcpy(data + position, characters + position + lengthToRemove,
-        (length() - lengthToRemove - position) * sizeof(CharacterType));
-
-    m_impl = newImpl.release();
-}
-
-void String::remove(unsigned position, int lengthToRemove)
-{
-    if (lengthToRemove <= 0)
-        return;
-    if (position >= length())
-        return;
-    if (static_cast<unsigned>(lengthToRemove) > length() - position)
-        lengthToRemove = length() - position;
-
-    if (is8Bit()) {
-        removeInternal(characters8(), position, lengthToRemove);
-
-        return;
-    }
-
-    removeInternal(characters16(), position, lengthToRemove);
+    if (m_impl)
+        m_impl = m_impl->remove(start, lengthToRemove);
 }
 
 String String::substring(unsigned pos, unsigned len) const
@@ -422,32 +320,6 @@ String String::foldCase() const
     return m_impl->foldCase();
 }
 
-Vector<UChar> String::charactersWithNullTermination() const
-{
-    if (!m_impl)
-        return Vector<UChar>();
-
-    Vector<UChar> result;
-    result.reserveInitialCapacity(length() + 1);
-    appendTo(result);
-    result.append('\0');
-    return result;
-}
-
-unsigned String::copyTo(UChar* buffer, unsigned pos, unsigned maxLength) const
-{
-    unsigned length = this->length();
-    RELEASE_ASSERT(pos <= length);
-    unsigned numCharacters = std::min(length - pos, maxLength);
-    if (!numCharacters)
-        return 0;
-    if (is8Bit())
-        StringImpl::copyChars(buffer, characters8() + pos, numCharacters);
-    else
-        StringImpl::copyChars(buffer, characters16() + pos, numCharacters);
-    return numCharacters;
-}
-
 String String::format(const char *format, ...)
 {
     va_list args;
@@ -523,10 +395,10 @@ String String::number(unsigned long long number)
     return integerToString(number);
 }
 
-String String::number(double number, unsigned precision, TrailingZerosTruncatingPolicy trailingZerosTruncatingPolicy)
+String String::number(double number, unsigned precision)
 {
     NumberToStringBuffer buffer;
-    return String(numberToFixedPrecisionString(number, precision, buffer, trailingZerosTruncatingPolicy == TruncateTrailingZeros));
+    return String(numberToFixedPrecisionString(number, precision, buffer));
 }
 
 String String::numberToStringECMAScript(double number)
@@ -650,17 +522,7 @@ String String::isolatedCopy() const
 
 bool String::isSafeToSendToAnotherThread() const
 {
-    if (!impl())
-        return true;
-    if (impl()->isStatic())
-        return true;
-    // AtomicStrings are not safe to send between threads as ~StringImpl()
-    // will try to remove them from the wrong AtomicStringTable.
-    if (impl()->isAtomic())
-        return false;
-    if (impl()->hasOneRef())
-        return true;
-    return false;
+    return !m_impl || m_impl->isSafeToSendToAnotherThread();
 }
 
 void String::split(const String& separator, bool allowEmptyEntries, Vector<String>& result) const
@@ -918,277 +780,6 @@ String String::fromUTF8WithLatin1Fallback(const LChar* string, size_t size)
     if (!utf8)
         return String(string, size);
     return utf8;
-}
-
-// String Operations
-
-static bool isCharacterAllowedInBase(UChar c, int base)
-{
-    if (c > 0x7F)
-        return false;
-    if (isASCIIDigit(c))
-        return c - '0' < base;
-    if (isASCIIAlpha(c)) {
-        if (base > 36)
-            base = 36;
-        return (c >= 'a' && c < 'a' + base - 10)
-            || (c >= 'A' && c < 'A' + base - 10);
-    }
-    return false;
-}
-
-template <typename IntegralType, typename CharType>
-static inline IntegralType toIntegralType(const CharType* data, size_t length, bool* ok, int base)
-{
-    static const IntegralType integralMax = std::numeric_limits<IntegralType>::max();
-    static const bool isSigned = std::numeric_limits<IntegralType>::is_signed;
-    const IntegralType maxMultiplier = integralMax / base;
-
-    IntegralType value = 0;
-    bool isOk = false;
-    bool isNegative = false;
-
-    if (!data)
-        goto bye;
-
-    // skip leading whitespace
-    while (length && isSpaceOrNewline(*data)) {
-        --length;
-        ++data;
-    }
-
-    if (isSigned && length && *data == '-') {
-        --length;
-        ++data;
-        isNegative = true;
-    } else if (length && *data == '+') {
-        --length;
-        ++data;
-    }
-
-    if (!length || !isCharacterAllowedInBase(*data, base))
-        goto bye;
-
-    while (length && isCharacterAllowedInBase(*data, base)) {
-        --length;
-        IntegralType digitValue;
-        CharType c = *data;
-        if (isASCIIDigit(c))
-            digitValue = c - '0';
-        else if (c >= 'a')
-            digitValue = c - 'a' + 10;
-        else
-            digitValue = c - 'A' + 10;
-
-        if (value > maxMultiplier || (value == maxMultiplier && digitValue > (integralMax % base) + isNegative))
-            goto bye;
-
-        value = base * value + digitValue;
-        ++data;
-    }
-
-#if COMPILER(MSVC)
-#pragma warning(push, 0)
-#pragma warning(disable:4146)
-#endif
-
-    if (isNegative)
-        value = -value;
-
-#if COMPILER(MSVC)
-#pragma warning(pop)
-#endif
-
-    // skip trailing space
-    while (length && isSpaceOrNewline(*data)) {
-        --length;
-        ++data;
-    }
-
-    if (!length)
-        isOk = true;
-bye:
-    if (ok)
-        *ok = isOk;
-    return isOk ? value : 0;
-}
-
-template <typename CharType>
-static unsigned lengthOfCharactersAsInteger(const CharType* data, size_t length)
-{
-    size_t i = 0;
-
-    // Allow leading spaces.
-    for (; i != length; ++i) {
-        if (!isSpaceOrNewline(data[i]))
-            break;
-    }
-
-    // Allow sign.
-    if (i != length && (data[i] == '+' || data[i] == '-'))
-        ++i;
-
-    // Allow digits.
-    for (; i != length; ++i) {
-        if (!isASCIIDigit(data[i]))
-            break;
-    }
-
-    return i;
-}
-
-int charactersToIntStrict(const LChar* data, size_t length, bool* ok, int base)
-{
-    return toIntegralType<int, LChar>(data, length, ok, base);
-}
-
-int charactersToIntStrict(const UChar* data, size_t length, bool* ok, int base)
-{
-    return toIntegralType<int, UChar>(data, length, ok, base);
-}
-
-unsigned charactersToUIntStrict(const LChar* data, size_t length, bool* ok, int base)
-{
-    return toIntegralType<unsigned, LChar>(data, length, ok, base);
-}
-
-unsigned charactersToUIntStrict(const UChar* data, size_t length, bool* ok, int base)
-{
-    return toIntegralType<unsigned, UChar>(data, length, ok, base);
-}
-
-int64_t charactersToInt64Strict(const LChar* data, size_t length, bool* ok, int base)
-{
-    return toIntegralType<int64_t, LChar>(data, length, ok, base);
-}
-
-int64_t charactersToInt64Strict(const UChar* data, size_t length, bool* ok, int base)
-{
-    return toIntegralType<int64_t, UChar>(data, length, ok, base);
-}
-
-uint64_t charactersToUInt64Strict(const LChar* data, size_t length, bool* ok, int base)
-{
-    return toIntegralType<uint64_t, LChar>(data, length, ok, base);
-}
-
-uint64_t charactersToUInt64Strict(const UChar* data, size_t length, bool* ok, int base)
-{
-    return toIntegralType<uint64_t, UChar>(data, length, ok, base);
-}
-
-int charactersToInt(const LChar* data, size_t length, bool* ok)
-{
-    return toIntegralType<int, LChar>(data, lengthOfCharactersAsInteger<LChar>(data, length), ok, 10);
-}
-
-int charactersToInt(const UChar* data, size_t length, bool* ok)
-{
-    return toIntegralType<int, UChar>(data, lengthOfCharactersAsInteger(data, length), ok, 10);
-}
-
-unsigned charactersToUInt(const LChar* data, size_t length, bool* ok)
-{
-    return toIntegralType<unsigned, LChar>(data, lengthOfCharactersAsInteger<LChar>(data, length), ok, 10);
-}
-
-unsigned charactersToUInt(const UChar* data, size_t length, bool* ok)
-{
-    return toIntegralType<unsigned, UChar>(data, lengthOfCharactersAsInteger<UChar>(data, length), ok, 10);
-}
-
-int64_t charactersToInt64(const LChar* data, size_t length, bool* ok)
-{
-    return toIntegralType<int64_t, LChar>(data, lengthOfCharactersAsInteger<LChar>(data, length), ok, 10);
-}
-
-int64_t charactersToInt64(const UChar* data, size_t length, bool* ok)
-{
-    return toIntegralType<int64_t, UChar>(data, lengthOfCharactersAsInteger<UChar>(data, length), ok, 10);
-}
-
-uint64_t charactersToUInt64(const LChar* data, size_t length, bool* ok)
-{
-    return toIntegralType<uint64_t, LChar>(data, lengthOfCharactersAsInteger<LChar>(data, length), ok, 10);
-}
-
-uint64_t charactersToUInt64(const UChar* data, size_t length, bool* ok)
-{
-    return toIntegralType<uint64_t, UChar>(data, lengthOfCharactersAsInteger<UChar>(data, length), ok, 10);
-}
-
-enum TrailingJunkPolicy { DisallowTrailingJunk, AllowTrailingJunk };
-
-template <typename CharType, TrailingJunkPolicy policy>
-static inline double toDoubleType(const CharType* data, size_t length, bool* ok, size_t& parsedLength)
-{
-    size_t leadingSpacesLength = 0;
-    while (leadingSpacesLength < length && isASCIISpace(data[leadingSpacesLength]))
-        ++leadingSpacesLength;
-
-    double number = parseDouble(data + leadingSpacesLength, length - leadingSpacesLength, parsedLength);
-    if (!parsedLength) {
-        if (ok)
-            *ok = false;
-        return 0.0;
-    }
-
-    parsedLength += leadingSpacesLength;
-    if (ok)
-        *ok = policy == AllowTrailingJunk || parsedLength == length;
-    return number;
-}
-
-double charactersToDouble(const LChar* data, size_t length, bool* ok)
-{
-    size_t parsedLength;
-    return toDoubleType<LChar, DisallowTrailingJunk>(data, length, ok, parsedLength);
-}
-
-double charactersToDouble(const UChar* data, size_t length, bool* ok)
-{
-    size_t parsedLength;
-    return toDoubleType<UChar, DisallowTrailingJunk>(data, length, ok, parsedLength);
-}
-
-double charactersToDouble(const LChar* data, size_t length, size_t& parsedLength)
-{
-    return toDoubleType<LChar, AllowTrailingJunk>(data, length, nullptr, parsedLength);
-}
-
-double charactersToDouble(const UChar* data, size_t length, size_t& parsedLength)
-{
-    return toDoubleType<UChar, AllowTrailingJunk>(data, length, nullptr, parsedLength);
-}
-
-float charactersToFloat(const LChar* data, size_t length, bool* ok)
-{
-    // FIXME: This will return ok even when the string fits into a double but
-    // not a float.
-    size_t parsedLength;
-    return static_cast<float>(toDoubleType<LChar, DisallowTrailingJunk>(data, length, ok, parsedLength));
-}
-
-float charactersToFloat(const UChar* data, size_t length, bool* ok)
-{
-    // FIXME: This will return ok even when the string fits into a double but
-    // not a float.
-    size_t parsedLength;
-    return static_cast<float>(toDoubleType<UChar, DisallowTrailingJunk>(data, length, ok, parsedLength));
-}
-
-float charactersToFloat(const LChar* data, size_t length, size_t& parsedLength)
-{
-    // FIXME: This will return ok even when the string fits into a double but
-    // not a float.
-    return static_cast<float>(toDoubleType<LChar, AllowTrailingJunk>(data, length, 0, parsedLength));
-}
-
-float charactersToFloat(const UChar* data, size_t length, size_t& parsedLength)
-{
-    // FIXME: This will return ok even when the string fits into a double but
-    // not a float.
-    return static_cast<float>(toDoubleType<UChar, AllowTrailingJunk>(data, length, 0, parsedLength));
 }
 
 const String& emptyString()

@@ -15,7 +15,7 @@ class LocationBarViewMac;
 @class ZoomBubbleController;
 class ZoomDecorationTest;
 
-namespace ui_zoom {
+namespace zoom {
 class ZoomController;
 }
 
@@ -29,7 +29,7 @@ class ZoomDecoration : public ImageDecoration,
 
   // Called when this decoration should show or hide itself in its most current
   // state. Returns whether any updates were made.
-  bool UpdateIfNecessary(ui_zoom::ZoomController* zoom_controller,
+  bool UpdateIfNecessary(zoom::ZoomController* zoom_controller,
                          bool default_zoom_changed,
                          bool location_bar_is_dark);
 
@@ -48,9 +48,12 @@ class ZoomDecoration : public ImageDecoration,
 
   // Show and update UI associated with the zoom decoration.
   // Virtual and protected for testing.
-  virtual void ShowAndUpdateUI(ui_zoom::ZoomController* zoom_controller,
+  virtual void ShowAndUpdateUI(zoom::ZoomController* zoom_controller,
                                NSString* tooltip_string,
                                bool location_bar_is_dark);
+
+  // Overridden from LocationBarDecoration:
+  gfx::VectorIconId GetMaterialVectorIconId() const override;
 
  private:
   friend ZoomDecorationTest;
@@ -78,6 +81,8 @@ class ZoomDecoration : public ImageDecoration,
 
   // The string to show for a tooltip.
   base::scoped_nsobject<NSString> tooltip_;
+
+  gfx::VectorIconId vector_icon_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ZoomDecoration);
 };

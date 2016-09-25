@@ -16,8 +16,8 @@
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "sync/internal_api/public/engine/model_safe_worker.h"
-#include "sync/internal_api/public/sessions/sync_session_snapshot.h"
+#include "components/sync/engine/cycle/sync_cycle_snapshot.h"
+#include "components/sync/engine/model_safe_worker.h"
 
 using passwords_helper::AddLogin;
 using passwords_helper::AllProfilesContainSamePasswordForms;
@@ -31,8 +31,6 @@ using passwords_helper::GetVerifierPasswordCount;
 using passwords_helper::GetVerifierPasswordStore;
 using passwords_helper::RemoveLogin;
 using passwords_helper::RemoveLogins;
-using passwords_helper::SetDecryptionPassphrase;
-using passwords_helper::SetEncryptionPassphrase;
 using passwords_helper::UpdateLogin;
 using sync_integration_test_util::AwaitPassphraseAccepted;
 using sync_integration_test_util::AwaitPassphraseRequired;
@@ -83,12 +81,13 @@ IN_PROC_BROWSER_TEST_F(TwoClientPasswordsSyncTest,
                        E2E_ENABLED(SetPassphraseAndAddPassword)) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
-  SetEncryptionPassphrase(0, kValidPassphrase, ProfileSyncService::EXPLICIT);
-  ASSERT_TRUE(AwaitPassphraseAccepted(GetSyncService((0))));
+  GetSyncService(0)->SetEncryptionPassphrase(
+      kValidPassphrase, browser_sync::ProfileSyncService::EXPLICIT);
+  ASSERT_TRUE(AwaitPassphraseAccepted(GetSyncService(0)));
 
-  ASSERT_TRUE(AwaitPassphraseRequired(GetSyncService((1))));
-  ASSERT_TRUE(SetDecryptionPassphrase(1, kValidPassphrase));
-  ASSERT_TRUE(AwaitPassphraseAccepted(GetSyncService((1))));
+  ASSERT_TRUE(AwaitPassphraseRequired(GetSyncService(1)));
+  ASSERT_TRUE(GetSyncService(1)->SetDecryptionPassphrase(kValidPassphrase));
+  ASSERT_TRUE(AwaitPassphraseAccepted(GetSyncService(1)));
 
   PasswordForm form = CreateTestPasswordForm(0);
   AddLogin(GetPasswordStore(0), form);
@@ -148,21 +147,22 @@ IN_PROC_BROWSER_TEST_F(TwoClientPasswordsSyncTest,
   ASSERT_TRUE(SetupClients());
 
   ASSERT_TRUE(GetClient(0)->SetupSync());
-  SetEncryptionPassphrase(0, kValidPassphrase, ProfileSyncService::EXPLICIT);
+  GetSyncService(0)->SetEncryptionPassphrase(
+      kValidPassphrase, browser_sync::ProfileSyncService::EXPLICIT);
   ASSERT_TRUE(AwaitPassphraseAccepted(GetSyncService(0)));
 
   // When client 1 hits a passphrase required state, we can infer that
   // client 0's passphrase has been committed. to the server.
-  GetClient(1)->SetupSync();
+  ASSERT_FALSE(GetClient(1)->SetupSync());
   ASSERT_TRUE(AwaitPassphraseRequired(GetSyncService(1)));
 
   // Get client 1 out of the passphrase required state.
-  ASSERT_TRUE(SetDecryptionPassphrase(1, kValidPassphrase));
+  ASSERT_TRUE(GetSyncService(1)->SetDecryptionPassphrase(kValidPassphrase));
   ASSERT_TRUE(AwaitPassphraseAccepted(GetSyncService(1)));
 
-  // For some reason, the tests won't pass unless these flags are set.
-  GetSyncService(1)->SetFirstSetupComplete();
-  GetSyncService(1)->SetSetupInProgress(false);
+  // We must mark the setup complete now, since we just entered the passphrase
+  // and the previous SetupSync() call failed.
+  GetClient(1)->FinishSyncSetup();
 
   // Move around some passwords to make sure it's all working.
   PasswordForm form0 = CreateTestPasswordForm(0);

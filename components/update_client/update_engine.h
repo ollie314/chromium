@@ -6,6 +6,7 @@
 #define COMPONENTS_UPDATE_CLIENT_UPDATE_ENGINE_H_
 
 #include <list>
+#include <memory>
 #include <queue>
 #include <set>
 #include <string>
@@ -14,7 +15,6 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "components/update_client/action.h"
 #include "components/update_client/component_patcher_operation.h"
@@ -25,6 +25,7 @@
 #include "components/update_client/update_client.h"
 
 namespace base {
+class TimeTicks;
 class SequencedTaskRunner;
 class SingleThreadTaskRunner;
 }  // namespace base
@@ -89,7 +90,7 @@ class UpdateEngine {
   // effect of rejecting the update call if the update call occurs before
   // a certain time, which is negotiated with the server as part of the
   // update protocol. See the comments for X-Retry-After header.
-  base::Time throttle_updates_until_;
+  base::TimeTicks throttle_updates_until_;
 
   DISALLOW_COPY_AND_ASSIGN(UpdateEngine);
 };
@@ -113,6 +114,9 @@ struct UpdateContext {
 
   // True if this update has been initiated by the user.
   bool is_foreground;
+
+  // True if the component updates are enabled in this context.
+  const bool enabled_component_updates;
 
   // Contains the ids of all CRXs in this context.
   const std::vector<std::string> ids;
@@ -140,7 +144,7 @@ struct UpdateContext {
 
   PingManager* ping_manager;  // Not owned by this class.
 
-  scoped_ptr<Action> current_action;
+  std::unique_ptr<Action> current_action;
 
   // TODO(sorin): use a map instead of vector.
   std::vector<CrxUpdateItem*> update_items;

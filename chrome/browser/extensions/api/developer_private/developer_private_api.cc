@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/install_verifier.h"
+#include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
@@ -641,8 +643,14 @@ DeveloperPrivateUpdateExtensionConfigurationFunction::Run() {
         extension->id(), *update.error_collection);
   }
   if (update.run_on_all_urls) {
-    util::SetAllowedScriptingOnAllUrls(
-        extension->id(), browser_context(), *update.run_on_all_urls);
+    ScriptingPermissionsModifier modifier(browser_context(), extension);
+    if (!modifier.CanAffectExtension(
+            extension->permissions_data()->active_permissions()) &&
+        !modifier.HasAffectedExtension()) {
+      return RespondNow(
+          Error("Cannot modify all urls of extension: " + extension->id()));
+    }
+    modifier.SetAllowedOnAllUrls(*update.run_on_all_urls);
   }
   if (update.show_action_button) {
     ExtensionActionAPI::Get(browser_context())->SetBrowserActionVisibility(
@@ -967,7 +975,7 @@ void DeveloperPrivateLoadDirectoryFunction::Load() {
 
   // TODO(grv) : The unpacked installer should fire an event when complete
   // and return the extension_id.
-  SetResult(new base::StringValue("-1"));
+  SetResult(base::MakeUnique<base::StringValue>("-1"));
   SendResponse(true);
 }
 
@@ -1141,7 +1149,8 @@ ExtensionFunction::ResponseAction DeveloperPrivateChoosePathFunction::Run() {
 
 void DeveloperPrivateChoosePathFunction::FileSelected(
     const base::FilePath& path) {
-  Respond(OneArgument(new base::StringValue(path.LossyDisplayName())));
+  Respond(OneArgument(
+      base::MakeUnique<base::StringValue>(path.LossyDisplayName())));
   Release();
 }
 
@@ -1154,9 +1163,10 @@ void DeveloperPrivateChoosePathFunction::FileSelectionCanceled() {
 
 DeveloperPrivateChoosePathFunction::~DeveloperPrivateChoosePathFunction() {}
 
-bool DeveloperPrivateIsProfileManagedFunction::RunSync() {
-  SetResult(new base::FundamentalValue(GetProfile()->IsSupervised()));
-  return true;
+ExtensionFunction::ResponseAction
+DeveloperPrivateIsProfileManagedFunction::Run() {
+  return RespondNow(OneArgument(base::MakeUnique<base::FundamentalValue>(
+      Profile::FromBrowserContext(browser_context())->IsSupervised())));
 }
 
 DeveloperPrivateIsProfileManagedFunction::

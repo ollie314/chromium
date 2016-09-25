@@ -28,10 +28,10 @@
 
 #include "platform/audio/FFTFrame.h"
 #include "platform/audio/VectorMath.h"
-#include "platform/Logging.h"
 #include "wtf/MathExtras.h"
-#include "wtf/OwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include <complex>
+#include <memory>
 
 #ifndef NDEBUG
 #include <stdio.h>
@@ -49,9 +49,9 @@ void FFTFrame::doPaddedFFT(const float* data, size_t dataSize)
     doFFT(paddedResponse.data());
 }
 
-PassOwnPtr<FFTFrame> FFTFrame::createInterpolatedFrame(const FFTFrame& frame1, const FFTFrame& frame2, double x)
+std::unique_ptr<FFTFrame> FFTFrame::createInterpolatedFrame(const FFTFrame& frame1, const FFTFrame& frame2, double x)
 {
-    OwnPtr<FFTFrame> newFrame = adoptPtr(new FFTFrame(frame1.fftSize()));
+    std::unique_ptr<FFTFrame> newFrame = wrapUnique(new FFTFrame(frame1.fftSize()));
 
     newFrame->interpolateFrequencyComponents(frame1, frame2, x);
 
@@ -64,7 +64,7 @@ PassOwnPtr<FFTFrame> FFTFrame::createInterpolatedFrame(const FFTFrame& frame1, c
     // Put back into frequency domain.
     newFrame->doFFT(buffer.data());
 
-    return newFrame.release();
+    return newFrame;
 }
 
 void FFTFrame::interpolateFrequencyComponents(const FFTFrame& frame1, const FFTFrame& frame2, double interp)

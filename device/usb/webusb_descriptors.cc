@@ -294,7 +294,8 @@ void OnReadWebUsbAllowedOriginsHeader(
     return;
   }
 
-  uint16_t new_length = buffer->data()[2] | (buffer->data()[3] << 8);
+  const uint8_t* data = reinterpret_cast<uint8_t*>(buffer->data());
+  uint16_t new_length = data[2] | (data[3] << 8);
   scoped_refptr<IOBufferWithSize> new_buffer = new IOBufferWithSize(new_length);
   device_handle->ControlTransfer(
       USB_DIRECTION_INBOUND, UsbDeviceHandle::VENDOR, UsbDeviceHandle::DEVICE,
@@ -351,7 +352,8 @@ void OnReadBosDescriptorHeader(scoped_refptr<UsbDeviceHandle> device_handle,
     return;
   }
 
-  uint16_t new_length = buffer->data()[2] | (buffer->data()[3] << 8);
+  const uint8_t* data = reinterpret_cast<uint8_t*>(buffer->data());
+  uint16_t new_length = data[2] | (data[3] << 8);
   scoped_refptr<IOBufferWithSize> new_buffer = new IOBufferWithSize(new_length);
   device_handle->ControlTransfer(
       USB_DIRECTION_INBOUND, UsbDeviceHandle::STANDARD, UsbDeviceHandle::DEVICE,
@@ -535,7 +537,7 @@ bool ParseWebUsbUrlDescriptor(const std::vector<uint8_t>& bytes, GURL* output) {
 
   // Validate that the length is consistent and fits within the buffer.
   uint8_t length = bytes[0];
-  if (length < kDescriptorMinLength || length < bytes.size() ||
+  if (length < kDescriptorMinLength || length > bytes.size() ||
       bytes[1] != kDescriptorType) {
     return false;
   }
@@ -578,15 +580,15 @@ bool FindInWebUsbAllowedOrigins(
   if (!allowed_origins)
     return false;
 
-  if (ContainsValue(allowed_origins->origins, origin))
+  if (base::ContainsValue(allowed_origins->origins, origin))
     return true;
 
   for (const auto& config : allowed_origins->configurations) {
-    if (ContainsValue(config.origins, origin))
+    if (base::ContainsValue(config.origins, origin))
       return true;
 
     for (const auto& function : config.functions) {
-      if (ContainsValue(function.origins, origin))
+      if (base::ContainsValue(function.origins, origin))
         return true;
     }
   }

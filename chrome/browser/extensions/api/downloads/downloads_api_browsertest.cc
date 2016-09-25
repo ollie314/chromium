@@ -46,6 +46,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
 #include "content/public/test/download_test_observer.h"
+#include "content/public/test/test_download_request_handler.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/notification_types.h"
 #include "net/base/data_url.h"
@@ -94,12 +95,10 @@ class DownloadsEventsListener : public content::NotificationObserver {
     registrar_.Remove(this,
                       extensions::NOTIFICATION_EXTENSION_DOWNLOADS_EVENT,
                       content::NotificationService::AllSources());
-    STLDeleteElements(&events_);
+    base::STLDeleteElements(&events_);
   }
 
-  void ClearEvents() {
-    STLDeleteElements(&events_);
-  }
+  void ClearEvents() { base::STLDeleteElements(&events_); }
 
   class Event {
    public:
@@ -207,7 +206,7 @@ class DownloadsEventsListener : public content::NotificationObserver {
     waiting_for_.reset(new Event(profile, event_name, json_args, base::Time()));
     for (std::deque<Event*>::const_iterator iter = events_.begin();
          iter != events_.end(); ++iter) {
-      if ((*iter)->Satisfies(*waiting_for_.get())) {
+      if ((*iter)->Satisfies(*waiting_for_)) {
         return true;
       }
     }
@@ -315,12 +314,6 @@ class DownloadExtensionTest : public ExtensionApiTest {
 
   // InProcessBrowserTest
   void SetUpOnMainThread() override {
-    base::FeatureList::ClearInstanceForTesting();
-    std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-    feature_list->InitializeFromCommandLine(
-        features::kDownloadResumption.name, std::string());
-    base::FeatureList::SetInstance(std::move(feature_list));
-
     ExtensionApiTest::SetUpOnMainThread();
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
@@ -387,7 +380,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
 
   std::string GetFilename(const char* path) {
     std::string result =
-      downloads_directory_.path().AppendASCII(path).AsUTF8Unsafe();
+        downloads_directory_.GetPath().AppendASCII(path).AsUTF8Unsafe();
 #if defined(OS_WIN)
     for (std::string::size_type next = result.find("\\");
          next != std::string::npos;
@@ -427,15 +420,10 @@ class DownloadExtensionTest : public ExtensionApiTest {
     url_chain.push_back(GURL());
     for (size_t i = 0; i < count; ++i) {
       DownloadItem* item = GetOnRecordManager()->CreateDownloadItem(
-          base::GenerateGUID(),
-          content::DownloadItem::kInvalidId + 1 + i,
+          base::GenerateGUID(), content::DownloadItem::kInvalidId + 1 + i,
           downloads_directory().Append(history_info[i].filename),
-          downloads_directory().Append(history_info[i].filename),
-          url_chain,
-          GURL(),
-          GURL(),
-          GURL(),
-          std::string(),
+          downloads_directory().Append(history_info[i].filename), url_chain,
+          GURL(), GURL(), GURL(), GURL(), std::string(),
           std::string(),  // mime_type, original_mime_type
           current,
           current,  // start_time, end_time
@@ -509,7 +497,8 @@ class DownloadExtensionTest : public ExtensionApiTest {
         CreateDownloadObserver(1));
     GURL finish_url(net::URLRequestSlowDownloadJob::kFinishDownloadUrl);
     ui_test_utils::NavigateToURLWithDisposition(
-        current_browser(), finish_url, NEW_FOREGROUND_TAB,
+        current_browser(), finish_url,
+        WindowOpenDisposition::NEW_FOREGROUND_TAB,
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
     observer->WaitForFinished();
     EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::COMPLETE));
@@ -581,7 +570,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
   }
 
   const base::FilePath& downloads_directory() {
-    return downloads_directory_.path();
+    return downloads_directory_.GetPath();
   }
 
   DownloadsEventsListener* events_listener() { return events_listener_.get(); }
@@ -602,8 +591,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
   void CreateAndSetDownloadsDirectory() {
     ASSERT_TRUE(downloads_directory_.CreateUniqueTempDir());
     current_browser()->profile()->GetPrefs()->SetFilePath(
-        prefs::kDownloadDefaultDirectory,
-        downloads_directory_.path());
+        prefs::kDownloadDefaultDirectory, downloads_directory_.GetPath());
   }
 
   base::ScopedTempDir downloads_directory_;
@@ -718,7 +706,9 @@ class HTML5FileWriter {
     }
     // Invoke the fileapi to copy it into the sandboxed filesystem.
     bool result = false;
-    base::WaitableEvent done_event(true, false);
+    base::WaitableEvent done_event(
+        base::WaitableEvent::ResetPolicy::MANUAL,
+        base::WaitableEvent::InitialState::NOT_SIGNALED);
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&CreateFileForTestingOnIOThread,
@@ -1094,6 +1084,34 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result->GetAsList(&result_list));
   ASSERT_EQ(1UL, result_list->GetSize());
 }
+
+#if !defined(OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
+                       DownloadsShowFunction) {
+  ScopedCancellingItem item(CreateSlowTestDownload());
+  ASSERT_TRUE(item.get());
+
+  RunFunction(new DownloadsShowFunction(), DownloadItemIdAsArgList(item.get()));
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
+                       DownloadsShowDefaultFolderFunction) {
+  ScopedCancellingItem item(CreateSlowTestDownload());
+  ASSERT_TRUE(item.get());
+
+  RunFunction(new DownloadsShowDefaultFolderFunction(),
+              DownloadItemIdAsArgList(item.get()));
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
+                       DownloadsDragFunction) {
+  ScopedCancellingItem item(CreateSlowTestDownload());
+  ASSERT_TRUE(item.get());
+
+  RunFunction(new DownloadsDragFunction(), DownloadItemIdAsArgList(item.get()));
+}
+#endif
+
 
 // Test the |filenameRegex| parameter for search().
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
@@ -1518,6 +1536,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(item);
   ScopedCancellingItem canceller(item);
   ASSERT_EQ(download_url, item->GetOriginalUrl().spec());
+  ASSERT_EQ(GetExtensionURL(), item->GetSiteUrl().spec());
 
   ASSERT_TRUE(WaitFor(downloads::OnCreated::kEventName,
                       base::StringPrintf(
@@ -1525,8 +1544,61 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                           "  \"incognito\": false,"
                           "  \"mime\": \"text/plain\","
                           "  \"paused\": false,"
+                          "  \"finalUrl\": \"%s\","
                           "  \"url\": \"%s\"}]",
+                          download_url.c_str(),
                           download_url.c_str())));
+  ASSERT_TRUE(
+      WaitFor(downloads::OnChanged::kEventName,
+              base::StringPrintf("[{\"id\": %d,"
+                                 "  \"filename\": {"
+                                 "    \"previous\": \"\","
+                                 "    \"current\": \"%s\"}}]",
+                                 result_id, GetFilename("slow.txt").c_str())));
+  ASSERT_TRUE(WaitFor(downloads::OnChanged::kEventName,
+                      base::StringPrintf(
+                          "[{\"id\": %d,"
+                          "  \"state\": {"
+                          "    \"previous\": \"in_progress\","
+                          "    \"current\": \"complete\"}}]",
+                          result_id)));
+}
+
+// Test that we can start a download that gets redirected and that the correct
+// sequence of events is fired for it.
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
+                       DownloadExtensionTest_Download_Redirect) {
+  LoadExtension("downloads_split");
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  GURL download_final_url(embedded_test_server()->GetURL("/slow?0"));
+  GURL download_url(embedded_test_server()->GetURL(
+      "/server-redirect?" + download_final_url.spec()));
+
+  GoOnTheRecord();
+
+  // Start downloading a file.
+  std::unique_ptr<base::Value> result(RunFunctionAndReturnResult(
+      new DownloadsDownloadFunction(),
+      base::StringPrintf("[{\"url\": \"%s\"}]", download_url.spec().c_str())));
+  ASSERT_TRUE(result.get());
+  int result_id = -1;
+  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
+  ASSERT_TRUE(item);
+  ScopedCancellingItem canceller(item);
+  ASSERT_EQ(download_url, item->GetOriginalUrl());
+  ASSERT_EQ(GetExtensionURL(), item->GetSiteUrl().spec());
+
+  ASSERT_TRUE(WaitFor(downloads::OnCreated::kEventName,
+                      base::StringPrintf(
+                          "[{\"danger\": \"safe\","
+                          "  \"incognito\": false,"
+                          "  \"mime\": \"text/plain\","
+                          "  \"paused\": false,"
+                          "  \"finalUrl\": \"%s\","
+                          "  \"url\": \"%s\"}]",
+                          download_final_url.spec().c_str(),
+                          download_url.spec().c_str())));
   ASSERT_TRUE(
       WaitFor(downloads::OnChanged::kEventName,
               base::StringPrintf("[{\"id\": %d,"
@@ -1586,6 +1658,51 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                           "    \"current\": \"complete\","
                           "    \"previous\": \"in_progress\"}}]",
                           result_id)));
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
+                       DownloadExtensionTest_Download_InterruptAndResume) {
+  LoadExtension("downloads_split");
+  content::TestDownloadRequestHandler download_request_handler;
+  download_request_handler.StartServing(
+      content::TestDownloadRequestHandler::Parameters::
+          WithSingleInterruption());
+  GURL download_url = download_request_handler.url();
+
+  // Start downloading a file.
+  std::unique_ptr<base::Value> result(RunFunctionAndReturnResult(
+      new DownloadsDownloadFunction(),
+      base::StringPrintf("[{\"url\": \"%s\"}]", download_url.spec().c_str())));
+  ASSERT_TRUE(result.get());
+  int result_id = -1;
+  ASSERT_TRUE(result->GetAsInteger(&result_id));
+  DownloadItem* item = GetCurrentManager()->GetDownload(result_id);
+  ASSERT_TRUE(item);
+  ScopedCancellingItem canceller(item);
+  ASSERT_EQ(download_url, item->GetOriginalUrl());
+  EXPECT_EQ(GetExtensionURL(), item->GetSiteUrl().spec());
+
+  ASSERT_TRUE(WaitFor(downloads::OnChanged::kEventName,
+                      base::StringPrintf("[{\"id\":%d,"
+                                         "  \"state\": {"
+                                         "    \"current\": \"interrupted\","
+                                         "    \"previous\": \"in_progress\"}}]",
+                                         result_id)));
+
+  EXPECT_TRUE(RunFunction(new DownloadsResumeFunction(),
+                          DownloadItemIdAsArgList(item)));
+  ASSERT_TRUE(WaitFor(downloads::OnChanged::kEventName,
+                      base::StringPrintf("[{\"id\":%d,"
+                                         "  \"state\": {"
+                                         "    \"current\": \"in_progress\","
+                                         "    \"previous\": \"interrupted\"}}]",
+                                         result_id)));
+  ASSERT_TRUE(WaitFor(downloads::OnChanged::kEventName,
+                      base::StringPrintf("[{\"id\":%d,"
+                                         "  \"state\": {"
+                                         "    \"current\": \"complete\","
+                                         "    \"previous\": \"in_progress\"}}]",
+                                         result_id)));
 }
 
 #if defined(OS_WIN)
@@ -3918,8 +4035,7 @@ IN_PROC_BROWSER_TEST_F(
     ui_test_utils::NavigateToURLWithDisposition(
         current_browser(),
         GURL(net::URLRequestSlowDownloadJob::kUnknownSizeUrl),
-        CURRENT_TAB,
-        ui_test_utils::BROWSER_TEST_NONE);
+        WindowOpenDisposition::CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
     observer->WaitForFinished();
     EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::IN_PROGRESS));
     DownloadManager::DownloadVector items;
@@ -3958,7 +4074,7 @@ IN_PROC_BROWSER_TEST_F(
   ui_test_utils::NavigateToURLWithDisposition(
       current_browser(),
       GURL(net::URLRequestSlowDownloadJob::kErrorDownloadUrl),
-      NEW_BACKGROUND_TAB,
+      WindowOpenDisposition::NEW_BACKGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   // Errors caught before filename determination are delayed until after

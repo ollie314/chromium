@@ -4,7 +4,7 @@
 
 ## Identifying unlabeled network bugs on the tracker
 
-* Look at new uncomfirmed bugs since noon PST on the last triager's rotation.
+* Look at new unconfirmed bugs since noon PST on the last triager's rotation.
   [Use this issue tracker
   query](https://code.google.com/p/chromium/issues/list?can=2&q=status%3Aunconfirmed&sort=-id&num=1000).
 
@@ -58,7 +58,7 @@ For each alert that fires, determine if it's a real alert and file a bug if so.
     * Query: component=Internals>Network
     * Subscription options: Notify Immediately
 
-* Look through uncomfirmed and untriaged component=Internals>Network bugs,
+* Look through unconfirmed and untriaged component=Internals>Network bugs,
   prioritizing those updated within the last week. [Use this issue tracker
   query](https://bugs.chromium.org/p/chromium/issues/list?can=2&q=component%3DInternals%3ENetwork+status%3AUnconfirmed,Untriaged+-label:Needs-Feedback&sort=-modified).
 
@@ -130,9 +130,10 @@ For each alert that fires, determine if it's a real alert and file a bug if so.
 1. Go to [go/chromecrash](https://goto.google.com/chromecrash).
 
 2. For each platform, look through the releases for which releases to
-   investigate.  As per bug-triage.txt, this should be the most recent canary,
-   the previous canary (if the most recent is less than a day old), and any of
-   dev/beta/stable that were released in the last couple of days.
+   investigate.  As per [bug-triage.md](bug-triage.md), this should be the most
+   recent canary, the previous canary (if the most recent is less than a day
+   old), and any of dev/beta/stable that were released in the last couple of
+   days.
 
 3. For each release, in the "Process Type" frame, click on "browser".
 

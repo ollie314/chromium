@@ -25,7 +25,7 @@ int64_t GetSoftQuotaForOrigin(const GURL& origin,
                               int64_t global_quota) {
   double quota_per_point =
       global_quota /
-      std::max(kExpectedEngagementSites * SiteEngagementScore::kMaxPoints,
+      std::max(kExpectedEngagementSites * SiteEngagementService::GetMaxPoints(),
                static_cast<double>(total_engagement_points));
 
   return score * quota_per_point;
@@ -65,7 +65,7 @@ GURL DoCalculateEvictionOrigin(
         usage.second -
         GetSoftQuotaForOrigin(origin, score_provider->GetScore(origin),
                               total_engagement_points, global_quota);
-    if (overuse > max_overuse && !ContainsKey(exceptions, origin)) {
+    if (overuse > max_overuse && !base::ContainsKey(exceptions, origin)) {
       max_overuse = overuse;
       origin_to_evict = origin;
     }

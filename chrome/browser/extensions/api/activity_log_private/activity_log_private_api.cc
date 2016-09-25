@@ -174,7 +174,8 @@ void ActivityLogPrivateGetExtensionActivitiesFunction::OnLookupCompleted(
   SendResponse(true);
 }
 
-bool ActivityLogPrivateDeleteActivitiesFunction::RunAsync() {
+ExtensionFunction::ResponseAction
+ActivityLogPrivateDeleteActivitiesFunction::Run() {
   std::unique_ptr<activity_log_private::DeleteActivities::Params> params(
       activity_log_private::DeleteActivities::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -187,37 +188,35 @@ bool ActivityLogPrivateDeleteActivitiesFunction::RunAsync() {
       action_ids.push_back(value);
   }
 
-  ActivityLog* activity_log = ActivityLog::GetInstance(GetProfile());
+  ActivityLog* activity_log = ActivityLog::GetInstance(browser_context());
   DCHECK(activity_log);
   activity_log->RemoveActions(action_ids);
-  return true;
+  return RespondNow(NoArguments());
 }
 
-bool ActivityLogPrivateDeleteDatabaseFunction::RunAsync() {
-  ActivityLog* activity_log = ActivityLog::GetInstance(GetProfile());
+ExtensionFunction::ResponseAction
+ActivityLogPrivateDeleteDatabaseFunction::Run() {
+  ActivityLog* activity_log = ActivityLog::GetInstance(browser_context());
   DCHECK(activity_log);
   activity_log->DeleteDatabase();
-  return true;
+  return RespondNow(NoArguments());
 }
 
-bool ActivityLogPrivateDeleteUrlsFunction::RunAsync() {
+ExtensionFunction::ResponseAction ActivityLogPrivateDeleteUrlsFunction::Run() {
   std::unique_ptr<activity_log_private::DeleteUrls::Params> params(
       activity_log_private::DeleteUrls::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   // Put the arguments in the right format.
   std::vector<GURL> gurls;
-  std::vector<std::string> urls = *params->urls.get();
-  for (std::vector<std::string>::iterator it = urls.begin();
-       it != urls.end();
-       ++it) {
-    gurls.push_back(GURL(*it));
-  }
+  const std::vector<std::string>& urls = *params->urls;
+  for (const std::string& url : urls)
+    gurls.push_back(GURL(url));
 
-  ActivityLog* activity_log = ActivityLog::GetInstance(GetProfile());
+  ActivityLog* activity_log = ActivityLog::GetInstance(browser_context());
   DCHECK(activity_log);
   activity_log->RemoveURLs(gurls);
-  return true;
+  return RespondNow(NoArguments());
 }
 
 }  // namespace extensions

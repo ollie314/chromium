@@ -9,7 +9,7 @@
 #include "build/build_config.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/public/common/ssl_status.h"
+#include "content/public/browser/ssl_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::ASCIIToUTF16;
@@ -67,12 +67,26 @@ TEST_F(NavigationEntryTest, NavigationEntryURLs) {
   entry1_->SetURL(GURL("http://www.google.com"));
   EXPECT_EQ(GURL("http://www.google.com"), entry1_->GetURL());
   EXPECT_EQ(GURL("http://www.google.com"), entry1_->GetVirtualURL());
-  EXPECT_EQ(ASCIIToUTF16("www.google.com"),
+  EXPECT_EQ(ASCIIToUTF16("www.google.com"), entry1_->GetTitleForDisplay());
+
+  // Setting URL with RTL characters causes it to be wrapped in an LTR
+  // embedding.
+  entry1_->SetURL(GURL("http://www.xn--rgba6eo.com"));
+  EXPECT_EQ(base::WideToUTF16(L"\x202a"
+                              L"www.\x062c\x0648\x062c\x0644"
+                              L".com\x202c"),
             entry1_->GetTitleForDisplay());
 
   // file:/// URLs should only show the filename.
   entry1_->SetURL(GURL("file:///foo/bar baz.txt"));
   EXPECT_EQ(ASCIIToUTF16("bar baz.txt"), entry1_->GetTitleForDisplay());
+
+  // file:/// URLs should *not* be wrapped in an LTR embedding.
+  entry1_->SetURL(GURL("file:///foo/%D8%A7%D8%A8 %D8%AC%D8%AF.txt"));
+  EXPECT_EQ(base::WideToUTF16(L"\x0627\x0628"
+                              L" \x062c\x062f"
+                              L".txt"),
+            entry1_->GetTitleForDisplay());
 
   // For file:/// URLs, make sure that slashes after the filename are ignored.
   // Regression test for https://crbug.com/503003.
@@ -125,7 +139,7 @@ TEST_F(NavigationEntryTest, NavigationEntrySSLStatus) {
   // Default (unknown)
   EXPECT_EQ(SECURITY_STYLE_UNKNOWN, entry1_->GetSSL().security_style);
   EXPECT_EQ(SECURITY_STYLE_UNKNOWN, entry2_->GetSSL().security_style);
-  EXPECT_EQ(0, entry1_->GetSSL().cert_id);
+  EXPECT_FALSE(!!entry1_->GetSSL().certificate);
   EXPECT_EQ(0U, entry1_->GetSSL().cert_status);
   EXPECT_EQ(-1, entry1_->GetSSL().security_bits);
   int content_status = entry1_->GetSSL().content_status;
@@ -173,10 +187,13 @@ TEST_F(NavigationEntryTest, NavigationEntryAccessors) {
   EXPECT_EQ(2, entry2_->GetPageID());
 
   // Transition type
-  EXPECT_EQ(ui::PAGE_TRANSITION_LINK, entry1_->GetTransitionType());
-  EXPECT_EQ(ui::PAGE_TRANSITION_TYPED, entry2_->GetTransitionType());
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      entry1_->GetTransitionType(), ui::PAGE_TRANSITION_LINK));
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      entry2_->GetTransitionType(), ui::PAGE_TRANSITION_TYPED));
   entry2_->SetTransitionType(ui::PAGE_TRANSITION_RELOAD);
-  EXPECT_EQ(ui::PAGE_TRANSITION_RELOAD, entry2_->GetTransitionType());
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      entry2_->GetTransitionType(), ui::PAGE_TRANSITION_RELOAD));
 
   // Is renderer initiated
   EXPECT_FALSE(entry1_->is_renderer_initiated());
@@ -191,14 +208,12 @@ TEST_F(NavigationEntryTest, NavigationEntryAccessors) {
   EXPECT_TRUE(entry2_->GetHasPostData());
 
   // Restored
-  EXPECT_EQ(NavigationEntryImpl::RESTORE_NONE, entry1_->restore_type());
+  EXPECT_EQ(RestoreType::NONE, entry1_->restore_type());
   EXPECT_FALSE(entry1_->IsRestored());
-  EXPECT_EQ(NavigationEntryImpl::RESTORE_NONE, entry2_->restore_type());
+  EXPECT_EQ(RestoreType::NONE, entry2_->restore_type());
   EXPECT_FALSE(entry2_->IsRestored());
-  entry2_->set_restore_type(
-      NavigationEntryImpl::RESTORE_LAST_SESSION_EXITED_CLEANLY);
-  EXPECT_EQ(NavigationEntryImpl::RESTORE_LAST_SESSION_EXITED_CLEANLY,
-            entry2_->restore_type());
+  entry2_->set_restore_type(RestoreType::LAST_SESSION_EXITED_CLEANLY);
+  EXPECT_EQ(RestoreType::LAST_SESSION_EXITED_CLEANLY, entry2_->restore_type());
   EXPECT_TRUE(entry2_->IsRestored());
 
   // Original URL
@@ -213,18 +228,15 @@ TEST_F(NavigationEntryTest, NavigationEntryAccessors) {
   entry2_->SetIsOverridingUserAgent(true);
   EXPECT_TRUE(entry2_->GetIsOverridingUserAgent());
 
-  // Browser initiated post data
-  EXPECT_EQ(NULL, entry1_->GetBrowserInitiatedPostData());
-  EXPECT_EQ(NULL, entry2_->GetBrowserInitiatedPostData());
+  // Post data
+  EXPECT_FALSE(entry1_->GetPostData());
+  EXPECT_FALSE(entry2_->GetPostData());
   const int length = 11;
-  const unsigned char* raw_data =
-      reinterpret_cast<const unsigned char*>("post\n\n\0data");
-  std::vector<unsigned char> post_data_vector(raw_data, raw_data+length);
-  scoped_refptr<base::RefCountedBytes> post_data =
-      base::RefCountedBytes::TakeVector(&post_data_vector);
-  entry2_->SetBrowserInitiatedPostData(post_data.get());
-  EXPECT_EQ(post_data->front(),
-      entry2_->GetBrowserInitiatedPostData()->front());
+  const char* raw_data = "post\n\n\0data";
+  scoped_refptr<ResourceRequestBody> post_data =
+      ResourceRequestBody::CreateFromBytes(raw_data, length);
+  entry2_->SetPostData(post_data);
+  EXPECT_EQ(post_data, entry2_->GetPostData());
 }
 
 // Test basic Clone behavior.
@@ -242,7 +254,8 @@ TEST_F(NavigationEntryTest, NavigationEntryClone) {
   EXPECT_EQ(entry2_->GetTitle(), clone->GetTitle());
 
   // Value set after constructor.
-  EXPECT_EQ(entry2_->GetTransitionType(), clone->GetTransitionType());
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      clone->GetTransitionType(), entry2_->GetTransitionType()));
 
   // Value not copied due to ResetForCommit.
   EXPECT_NE(entry2_->should_replace_entry(), clone->should_replace_entry());

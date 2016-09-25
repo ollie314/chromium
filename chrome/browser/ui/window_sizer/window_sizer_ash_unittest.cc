@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/scoped_target_root_window.h"
+#include "ash/common/scoped_root_window_for_new_windows.h"
+#include "ash/common/wm/window_positioner.h"
+#include "ash/common/wm/window_resizer.h"
+#include "ash/common/wm/window_state.h"
+#include "ash/common/wm_shell.h"
+#include "ash/common/wm_window.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/test_shell_delegate.h"
-#include "ash/wm/window_positioner.h"
-#include "ash/wm/window_resizer.h"
-#include "ash/wm/window_state.h"
 #include "ash/wm/window_state_aura.h"
-#include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/ash/ash_util.h"
@@ -26,7 +26,8 @@
 #include "ui/aura/env.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window_event_dispatcher.h"
-#include "ui/gfx/screen.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/wm/public/activation_client.h"
 
 typedef ash::test::AshTestBase WindowSizerAshTest;
@@ -50,17 +51,9 @@ std::unique_ptr<Browser> CreateTestBrowser(aura::Window* window,
 
 }  // namespace
 
-// On desktop linux aura, we currently don't use the ash frame, breaking some
-// tests which expect ash sizes: http://crbug.com/303862
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#define MAYBE_DefaultSizeCase DISABLED_DefaultSizeCase
-#else
-#define MAYBE_DefaultSizeCase DefaultSizeCase
-#endif
-
 // Test that the window is sized appropriately for the first run experience
 // where the default window bounds calculation is invoked.
-TEST_F(WindowSizerAshTest, MAYBE_DefaultSizeCase) {
+TEST_F(WindowSizerAshTest, DefaultSizeCase) {
 #if defined(OS_WIN)
   base::CommandLine::ForCurrentProcess()->AppendSwitch(switches::kOpenAsh);
 #endif
@@ -417,16 +410,8 @@ TEST_F(WindowSizerAshTest, LastWindowOffscreenWithNonAggressiveRepositioning) {
   }
 }
 
-// On desktop linux aura, we currently don't use the ash frame, breaking some
-// tests which expect ash sizes: http://crbug.com/303862
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#define MAYBE_PlaceNewWindows DISABLED_PlaceNewWindows
-#else
-#define MAYBE_PlaceNewWindows PlaceNewWindows
-#endif
-
 // Test the placement of newly created windows.
-TEST_F(WindowSizerAshTest, MAYBE_PlaceNewWindows) {
+TEST_F(WindowSizerAshTest, PlaceNewWindows) {
   // Create a browser to pass into the GetWindowBounds function.
   std::unique_ptr<TestingProfile> profile(new TestingProfile());
   // Creating a popup handler here to make sure it does not interfere with the
@@ -491,18 +476,10 @@ TEST_F(WindowSizerAshTest, MAYBE_PlaceNewWindows) {
   }
 }
 
-// On desktop linux aura, we currently don't use the ash frame, breaking some
-// tests which expect ash sizes: http://crbug.com/303862
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#define MAYBE_PlaceNewBrowserWindowOnEmptyDesktop DISABLED_PlaceNewBrowserWindowOnEmptyDesktop
-#else
-#define MAYBE_PlaceNewBrowserWindowOnEmptyDesktop PlaceNewBrowserWindowOnEmptyDesktop
-#endif
-
 // Test the placement of newly created windows on an empty desktop.
 // This test supplements "PlaceNewWindows" by testing the creation of a newly
 // created browser window on an empty desktop.
-TEST_F(WindowSizerAshTest, MAYBE_PlaceNewBrowserWindowOnEmptyDesktop) {
+TEST_F(WindowSizerAshTest, PlaceNewBrowserWindowOnEmptyDesktop) {
   // Create a browser to pass into the GetWindowBoundsAndShowState function.
   std::unique_ptr<TestingProfile> profile(new TestingProfile());
   Browser::CreateParams native_params(profile.get());
@@ -583,11 +560,8 @@ TEST_F(WindowSizerAshTest, MAYBE_PlaceNewBrowserWindowOnEmptyDesktop) {
 TEST_F(WindowSizerAshTest, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
   UpdateDisplay("1600x1200,1600x1200");
   gfx::Rect primary_bounds =
-      gfx::Screen::GetScreen()->GetPrimaryDisplay().bounds();
+      display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
   gfx::Rect secondary_bounds = ash::ScreenUtil::GetSecondaryDisplay().bounds();
-
-  ash::Shell::GetInstance()->set_target_root_window(
-      ash::Shell::GetPrimaryRootWindow());
 
   std::unique_ptr<TestingProfile> profile(new TestingProfile());
 
@@ -633,8 +607,8 @@ TEST_F(WindowSizerAshTest, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
   // Move the window to the right side of the secondary display and create a new
   // window. It should be opened then on the secondary display.
   {
-    gfx::Display second_display =
-        gfx::Screen::GetScreen()->GetDisplayNearestPoint(
+    display::Display second_display =
+        display::Screen::GetScreen()->GetDisplayNearestPoint(
             gfx::Point(1600 + 100, 10));
     browser_window->GetNativeWindow()->SetBoundsInScreen(
         gfx::Rect(secondary_bounds.CenterPoint().x() - 100, 10, 200, 200),
@@ -674,16 +648,8 @@ TEST_F(WindowSizerAshTest, MAYBE_PlaceNewWindowsOnMultipleDisplays) {
   }
 }
 
-// On desktop linux aura, we currently don't use the ash frame, breaking some
-// tests which expect ash sizes: http://crbug.com/303862
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#define MAYBE_TestShowState DISABLED_TestShowState
-#else
-#define MAYBE_TestShowState TestShowState
-#endif
-
 // Test that the show state is properly returned for non default cases.
-TEST_F(WindowSizerAshTest, MAYBE_TestShowState) {
+TEST_F(WindowSizerAshTest, TestShowState) {
   std::unique_ptr<TestingProfile> profile(new TestingProfile());
 
   // Creating a browser & window to play with.
@@ -822,7 +788,7 @@ TEST_F(WindowSizerAshTest, DefaultStateBecomesMaximized) {
       chrome::CreateBrowserWithTestWindowForParams(&native_params));
 
   gfx::Rect display_bounds =
-      gfx::Screen::GetScreen()->GetPrimaryDisplay().bounds();
+      display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
   gfx::Rect specified_bounds = display_bounds;
 
   // Make a window bigger than the display work area.
@@ -854,24 +820,20 @@ TEST_F(WindowSizerAshTest, DefaultBoundsInTargetDisplay) {
   if (!SupportsMultipleDisplays() || !chrome::ShouldOpenAshOnStartup())
     return;
   UpdateDisplay("500x500,600x600");
+
+  // By default windows are placed on the primary display.
+  ash::WmWindow* first_root = ash::WmShell::Get()->GetAllRootWindows()[0];
+  EXPECT_EQ(first_root, ash::WmShell::Get()->GetRootWindowForNewWindows());
+  gfx::Rect bounds;
+  ui::WindowShowState show_state;
+  WindowSizer::GetBrowserWindowBoundsAndShowState(std::string(), gfx::Rect(),
+                                                  NULL, &bounds, &show_state);
+  EXPECT_TRUE(first_root->GetBoundsInScreen().Contains(bounds));
+
   {
-    aura::Window* first_root =
-        ash::Shell::GetAllRootWindows()[0];
-    ash::ScopedTargetRootWindow tmp(first_root);
-    gfx::Rect bounds;
-    ui::WindowShowState show_state;
-    WindowSizer::GetBrowserWindowBoundsAndShowState(
-        std::string(),
-        gfx::Rect(),
-        NULL,
-        &bounds,
-        &show_state);
-    EXPECT_TRUE(first_root->GetBoundsInScreen().Contains(bounds));
-  }
-  {
-    aura::Window* second_root =
-        ash::Shell::GetAllRootWindows()[1];
-    ash::ScopedTargetRootWindow tmp(second_root);
+    // When the second display is active new windows are placed there.
+    ash::WmWindow* second_root = ash::WmShell::Get()->GetAllRootWindows()[1];
+    ash::ScopedRootWindowForNewWindows tmp(second_root);
     gfx::Rect bounds;
     ui::WindowShowState show_state;
     WindowSizer::GetBrowserWindowBoundsAndShowState(

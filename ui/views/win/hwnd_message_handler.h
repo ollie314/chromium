@@ -8,11 +8,13 @@
 #include <windows.h>
 
 #include <stddef.h>
+#include <map>
 #include <memory>
 #include <set>
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
@@ -56,6 +58,11 @@ class WindowsSessionChangeObserver;
 // from happening.
 const int WM_NCUAHDRAWCAPTION = 0xAE;
 const int WM_NCUAHDRAWFRAME = 0xAF;
+
+// The HWNDMessageHandler sends this message to itself on
+// WM_WINDOWPOSCHANGING. It's used to inform the client if a
+// WM_WINDOWPOSCHANGED won't be received.
+const int WM_WINDOWSIZINGFINISHED = WM_USER;
 
 // IsMsgHandled() and BEGIN_SAFE_MSG_MAP_EX are a modified version of
 // BEGIN_MSG_MAP_EX. The main difference is it uses a WeakPtrFactory member
@@ -209,6 +216,7 @@ class VIEWS_EXPORT HWNDMessageHandler :
 
  private:
   typedef std::set<DWORD> TouchIDs;
+  enum class DwmFrameState { OFF, ON };
 
   // Overridden from WindowImpl:
   HICON GetDefaultWindowIcon() const override;
@@ -312,6 +320,10 @@ class VIEWS_EXPORT HWNDMessageHandler :
 
   bool HasSystemFrame() const;
 
+  // Adds or removes the frame extension into client area with
+  // DwmExtendFrameIntoClientArea.
+  void SetDwmFrameExtension(DwmFrameState state);
+
   // Message Handlers ----------------------------------------------------------
 
   BEGIN_SAFE_MSG_MAP_EX(weak_factory_)
@@ -327,6 +339,9 @@ class VIEWS_EXPORT HWNDMessageHandler :
 
     // Vista and newer
     CR_MESSAGE_HANDLER_EX(WM_DWMCOMPOSITIONCHANGED, OnDwmCompositionChanged)
+
+    // Win 8.1 and newer
+    CR_MESSAGE_HANDLER_EX(WM_DPICHANGED, OnDpiChanged)
 
     // Non-atlcrack.h handlers
     CR_MESSAGE_HANDLER_EX(WM_GETOBJECT, OnGetObject)
@@ -362,6 +377,8 @@ class VIEWS_EXPORT HWNDMessageHandler :
 
     // Touch Events.
     CR_MESSAGE_HANDLER_EX(WM_TOUCH, OnTouchEvent)
+
+    CR_MESSAGE_HANDLER_EX(WM_WINDOWSIZINGFINISHED, OnWindowSizingFinished)
 
     // Uses the general handler macro since the specific handler macro
     // MSG_WM_NCACTIVATE would convert WPARAM type to BOOL type. The high
@@ -420,6 +437,7 @@ class VIEWS_EXPORT HWNDMessageHandler :
   LRESULT OnCreate(CREATESTRUCT* create_struct);
   void OnDestroy();
   void OnDisplayChange(UINT bits_per_pixel, const gfx::Size& screen_size);
+  LRESULT OnDpiChanged(UINT msg, WPARAM w_param, LPARAM l_param);
   LRESULT OnDwmCompositionChanged(UINT msg, WPARAM w_param, LPARAM l_param);
   void OnEnterMenuLoop(BOOL from_track_popup_menu);
   void OnEnterSizeMove();
@@ -459,6 +477,7 @@ class VIEWS_EXPORT HWNDMessageHandler :
   LRESULT OnTouchEvent(UINT message, WPARAM w_param, LPARAM l_param);
   void OnWindowPosChanging(WINDOWPOS* window_pos);
   void OnWindowPosChanged(WINDOWPOS* window_pos);
+  LRESULT OnWindowSizingFinished(UINT message, WPARAM w_param, LPARAM l_param);
 
   // Receives Windows Session Change notifications.
   void OnSessionChange(WPARAM status_code);
@@ -497,13 +516,11 @@ class VIEWS_EXPORT HWNDMessageHandler :
   // Generates a touch event and adds it to the |touch_events| parameter.
   // |point| is the point where the touch was initiated.
   // |id| is the event id associated with the touch event.
-  // |event_time| is the current time used for latency calculation.
-  // |time_stamp| is the time delta associated with the message.
+  // |time_stamp| is the time stamp associated with the message.
   void GenerateTouchEvent(ui::EventType event_type,
                           const gfx::Point& point,
                           unsigned int id,
-                          base::TimeTicks event_time,
-                          base::TimeDelta time_stamp,
+                          base::TimeTicks time_stamp,
                           TouchEvents* touch_events);
 
   // Handles WM_NCLBUTTONDOWN and WM_NCMOUSEMOVE messages on the caption.
@@ -516,6 +533,16 @@ class VIEWS_EXPORT HWNDMessageHandler :
   // please refer to the SetBounds() function.
   void SetBoundsInternal(const gfx::Rect& bounds_in_pixels,
                          bool force_size_changed);
+
+  // Checks if there is a full screen window on the same monitor as the
+  // |window| which is becoming active. If yes then we reduce the size of the
+  // fullscreen window by 1 px to ensure that maximized windows on the same
+  // monitor don't draw over the taskbar.
+  void CheckAndHandleBackgroundFullscreenOnMonitor(HWND window);
+
+  // Provides functionality to reduce the bounds of the fullscreen window by 1
+  // px on activation loss to a window on the same monitor.
+  void OnBackgroundFullscreen();
 
   HWNDMessageHandlerDelegate* delegate_;
 
@@ -542,6 +569,9 @@ class VIEWS_EXPORT HWNDMessageHandler :
 
   // The icon created from the bitmap image of the app icon.
   base::win::ScopedHICON app_icon_;
+
+  // The current DPI.
+  int dpi_;
 
   // Event handling ------------------------------------------------------------
 
@@ -587,9 +617,6 @@ class VIEWS_EXPORT HWNDMessageHandler :
   // Generates touch-ids for touch-events.
   ui::SequentialIDGenerator id_generator_;
 
-  // Indicates if the window needs the WS_VSCROLL and WS_HSCROLL styles.
-  bool needs_scroll_styles_;
-
   // Set to true if we are in the context of a sizing operation.
   bool in_size_loop_;
 
@@ -623,8 +650,12 @@ class VIEWS_EXPORT HWNDMessageHandler :
   bool dwm_transition_desired_;
 
   // True if HandleWindowSizeChanging has been called in the delegate, but not
-  // HandleWindowSizeChanged.
+  // HandleClientSizeChanged.
   bool sent_window_size_changing_;
+
+  // This is used to keep track of whether a WM_WINDOWPOSCHANGED has
+  // been received after the WM_WINDOWPOSCHANGING.
+  uint32_t current_window_size_message_ = 0;
 
   // Manages observation of Windows Session Change messages.
   std::unique_ptr<WindowsSessionChangeObserver>
@@ -650,6 +681,12 @@ class VIEWS_EXPORT HWNDMessageHandler :
   // Set to true if the window is a background fullscreen window, i.e a
   // fullscreen window which lost activation. Defaults to false.
   bool background_fullscreen_hack_;
+
+  // This is a map of the HMONITOR to full screeen window instance. It is safe
+  // to keep a raw pointer to the HWNDMessageHandler instance as we track the
+  // window destruction and ensure that the map is cleaned up.
+  using FullscreenWindowMonitorMap = std::map<HMONITOR, HWNDMessageHandler*>;
+  static base::LazyInstance<FullscreenWindowMonitorMap> fullscreen_monitor_map_;
 
   // The WeakPtrFactories below must occur last in the class definition so they
   // get destroyed last.

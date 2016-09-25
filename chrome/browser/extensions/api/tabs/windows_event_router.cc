@@ -117,11 +117,10 @@ bool WillDispatchWindowFocusedEvent(
 
   if (cant_cross_incognito || !visible_to_listener) {
     event->event_args->Clear();
-    event->event_args->Append(
-        new base::FundamentalValue(extension_misc::kUnknownWindowId));
+    event->event_args->AppendInteger(extension_misc::kUnknownWindowId);
   } else {
     event->event_args->Clear();
-    event->event_args->Append(new base::FundamentalValue(window_id));
+    event->event_args->AppendInteger(window_id);
   }
   return true;
 }
@@ -160,7 +159,7 @@ WindowsEventRouter::WindowsEventRouter(Profile* profile)
 }
 
 WindowsEventRouter::~WindowsEventRouter() {
-#if !defined(OS_MACOSX)
+#if defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
   views::WidgetFocusManager::GetInstance()->RemoveFocusChangeListener(this);
 #endif
 }
@@ -196,9 +195,7 @@ void WindowsEventRouter::OnWindowControllerAdded(
     return;
 
   std::unique_ptr<base::ListValue> args(new base::ListValue());
-  base::DictionaryValue* window_dictionary =
-      window_controller->CreateWindowValue();
-  args->Append(window_dictionary);
+  args->Append(window_controller->CreateWindowValue());
   DispatchEvent(events::WINDOWS_ON_CREATED, windows::OnCreated::kEventName,
                 window_controller, std::move(args));
 }
@@ -212,12 +209,12 @@ void WindowsEventRouter::OnWindowControllerRemoved(
 
   int window_id = window_controller->GetWindowId();
   std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->Append(new base::FundamentalValue(window_id));
+  args->AppendInteger(window_id);
   DispatchEvent(events::WINDOWS_ON_REMOVED, windows::OnRemoved::kEventName,
                 window_controller, std::move(args));
 }
 
-#if !defined(OS_MACOSX)
+#if defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
 void WindowsEventRouter::OnNativeFocusChanged(gfx::NativeView focused_now) {
   if (!focused_now)
     OnActiveWindowChanged(nullptr);
@@ -229,10 +226,8 @@ void WindowsEventRouter::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
 #if defined(OS_MACOSX)
-  if (chrome::NOTIFICATION_NO_KEY_WINDOW == type) {
-    OnActiveWindowChanged(nullptr);
-    return;
-  }
+  DCHECK_EQ(chrome::NOTIFICATION_NO_KEY_WINDOW, type);
+  OnActiveWindowChanged(nullptr);
 #endif
 }
 
@@ -257,9 +252,9 @@ void WindowsEventRouter::OnActiveWindowChanged(
   if (!HasEventListener(windows::OnFocusChanged::kEventName))
     return;
 
-  std::unique_ptr<Event> event(new Event(
+  std::unique_ptr<Event> event = base::MakeUnique<Event>(
       events::WINDOWS_ON_FOCUS_CHANGED, windows::OnFocusChanged::kEventName,
-      base::WrapUnique(new base::ListValue())));
+      base::MakeUnique<base::ListValue>());
   event->will_dispatch_callback =
       base::Bind(&WillDispatchWindowFocusedEvent, window_controller);
   EventRouter::Get(profile_)->BroadcastEvent(std::move(event));
@@ -269,8 +264,8 @@ void WindowsEventRouter::DispatchEvent(events::HistogramValue histogram_value,
                                        const std::string& event_name,
                                        WindowController* window_controller,
                                        std::unique_ptr<base::ListValue> args) {
-  std::unique_ptr<Event> event(
-      new Event(histogram_value, event_name, std::move(args)));
+  std::unique_ptr<Event> event =
+      base::MakeUnique<Event>(histogram_value, event_name, std::move(args));
   event->restrict_to_browser_context = window_controller->profile();
   event->will_dispatch_callback =
       base::Bind(&WillDispatchWindowEvent, window_controller);
@@ -283,7 +278,7 @@ bool WindowsEventRouter::HasEventListener(const std::string& event_name) {
 
 void WindowsEventRouter::AddAppWindow(extensions::AppWindow* app_window) {
   std::unique_ptr<AppWindowController> controller(new AppWindowController(
-      app_window, base::WrapUnique(new AppBaseWindow(app_window)), profile_));
+      app_window, base::MakeUnique<AppBaseWindow>(app_window), profile_));
   app_windows_[app_window->session_id().id()] = std::move(controller);
 }
 

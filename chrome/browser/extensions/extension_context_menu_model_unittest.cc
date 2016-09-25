@@ -26,7 +26,8 @@
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/crx_file/id_util.h"
-#include "content/public/test/test_web_contents_factory.h"
+#include "content/public/common/browser_side_navigation_policy.h"
+#include "content/public/test/browser_side_navigation_test_utils.h"
 #include "content/public/test/web_contents_tester.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/extension_registry.h"
@@ -68,9 +69,9 @@ class MenuBuilder {
   ~MenuBuilder() {}
 
   std::unique_ptr<ExtensionContextMenuModel> BuildMenu() {
-    return base::WrapUnique(new ExtensionContextMenuModel(
+    return base::MakeUnique<ExtensionContextMenuModel>(
         extension_.get(), browser_, ExtensionContextMenuModel::VISIBLE,
-        nullptr));
+        nullptr);
   }
 
   void AddContextItem(MenuItem::Context context) {
@@ -134,6 +135,9 @@ class ExtensionContextMenuModelTest : public ExtensionServiceTestBase {
 
   Browser* GetBrowser();
 
+  void SetUp() override;
+  void TearDown() override;
+
  private:
   std::unique_ptr<TestBrowserWindow> test_window_;
   std::unique_ptr<Browser> browser_;
@@ -159,8 +163,9 @@ const Extension* ExtensionContextMenuModelTest::AddExtensionWithHostPermission(
   DictionaryBuilder manifest;
   manifest.Set("name", name)
       .Set("version", "1")
-      .Set("manifest_version", 2)
-      .Set(action_key, DictionaryBuilder().Build());
+      .Set("manifest_version", 2);
+  if (action_key)
+    manifest.Set(action_key, DictionaryBuilder().Build());
   if (!host_permission.empty())
     manifest.Set("permissions", ListBuilder().Append(host_permission).Build());
   scoped_refptr<const Extension> extension =
@@ -183,6 +188,18 @@ Browser* ExtensionContextMenuModelTest::GetBrowser() {
     browser_.reset(new Browser(params));
   }
   return browser_.get();
+}
+
+void ExtensionContextMenuModelTest::SetUp() {
+  ExtensionServiceTestBase::SetUp();
+  if (content::IsBrowserSideNavigationEnabled())
+    content::BrowserSideNavigationSetUp();
+}
+
+void ExtensionContextMenuModelTest::TearDown() {
+  if (content::IsBrowserSideNavigationEnabled())
+    content::BrowserSideNavigationTearDown();
+  ExtensionServiceTestBase::TearDown();
 }
 
 // Tests that applicable menu items are disabled when a ManagementPolicy
@@ -325,9 +342,10 @@ TEST_F(ExtensionContextMenuModelTest, ExtensionItemTest) {
 // context menu without the toolbar redesign.
 TEST_F(ExtensionContextMenuModelTest, ExtensionContextMenuShowAndHideLegacy) {
   // Start with the toolbar redesign disabled.
-  std::unique_ptr<FeatureSwitch::ScopedOverride> toolbar_redesign_override(
-      new FeatureSwitch::ScopedOverride(
-          FeatureSwitch::extension_action_redesign(), false));
+  FeatureSwitch::ScopedOverride enable_media_router(
+      extensions::FeatureSwitch::media_router(), false);
+  FeatureSwitch::ScopedOverride toolbar_redesign_override(
+      FeatureSwitch::extension_action_redesign(), false);
 
   InitializeEmptyExtensionService();
   Browser* browser = GetBrowser();
@@ -504,17 +522,17 @@ TEST_F(ExtensionContextMenuModelTest, TestPageAccessSubmenu) {
   const GURL kOtherUrl("http://www.google.com/");
 
   // Add a web contents to the browser.
-  content::TestWebContentsFactory factory;
-  content::WebContents* contents = factory.CreateWebContents(profile());
+  std::unique_ptr<content::WebContents> contents(
+      content::WebContentsTester::CreateTestWebContents(profile(), nullptr));
   Browser* browser = GetBrowser();
-  browser->tab_strip_model()->AppendWebContents(contents, true);
-  EXPECT_EQ(browser->tab_strip_model()->GetActiveWebContents(), contents);
+  browser->tab_strip_model()->AppendWebContents(contents.get(), true);
+  EXPECT_EQ(browser->tab_strip_model()->GetActiveWebContents(), contents.get());
   content::WebContentsTester* web_contents_tester =
-      content::WebContentsTester::For(contents);
+      content::WebContentsTester::For(contents.get());
   web_contents_tester->NavigateAndCommit(kActiveUrl);
 
   ExtensionActionRunner* action_runner =
-      ExtensionActionRunner::GetForWebContents(contents);
+      ExtensionActionRunner::GetForWebContents(contents.get());
   ASSERT_TRUE(action_runner);
 
   // Pretend the extension wants to run.
@@ -655,6 +673,45 @@ TEST_F(ExtensionContextMenuModelTest, TestPageAccessSubmenu) {
       ExtensionContextMenuModel::VISIBLE, nullptr);
   EXPECT_EQ(-1, feature_disabled_menu.GetIndexOfCommandId(
                     ExtensionContextMenuModel::PAGE_ACCESS_SUBMENU));
+}
+
+TEST_F(ExtensionContextMenuModelTest, TestInspectPopupPresence) {
+  std::unique_ptr<FeatureSwitch::ScopedOverride> toolbar_redesign_override(
+      new FeatureSwitch::ScopedOverride(
+          FeatureSwitch::extension_action_redesign(), true));
+
+  InitializeEmptyExtensionService();
+  {
+    const Extension* page_action = AddExtension(
+        "page_action", manifest_keys::kPageAction, Manifest::INTERNAL);
+    ASSERT_TRUE(page_action);
+    ExtensionContextMenuModel menu(page_action, GetBrowser(),
+                                   ExtensionContextMenuModel::VISIBLE, nullptr);
+    int inspect_popup_index =
+        menu.GetIndexOfCommandId(ExtensionContextMenuModel::INSPECT_POPUP);
+    EXPECT_GE(0, inspect_popup_index);
+  }
+  {
+    const Extension* browser_action = AddExtension(
+        "browser_action", manifest_keys::kBrowserAction, Manifest::INTERNAL);
+    ExtensionContextMenuModel menu(browser_action, GetBrowser(),
+                                   ExtensionContextMenuModel::VISIBLE, nullptr);
+    int inspect_popup_index =
+        menu.GetIndexOfCommandId(ExtensionContextMenuModel::INSPECT_POPUP);
+    EXPECT_GE(0, inspect_popup_index);
+  }
+  {
+    // With the extension toolbar redesign, an extension with no specified
+    // action has one synthesized. However, there will never be a popup to
+    // inspect, so we shouldn't add a menu item.
+    const Extension* no_action = AddExtension(
+        "no_action", nullptr, Manifest::INTERNAL);
+    ExtensionContextMenuModel menu(no_action, GetBrowser(),
+                                   ExtensionContextMenuModel::VISIBLE, nullptr);
+    int inspect_popup_index =
+        menu.GetIndexOfCommandId(ExtensionContextMenuModel::INSPECT_POPUP);
+    EXPECT_EQ(-1, inspect_popup_index);
+  }
 }
 
 }  // namespace extensions

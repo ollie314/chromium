@@ -35,13 +35,17 @@
 
 namespace blink {
 
+// TODO(sashab): Move this into a private class on ComputedStyle, and remove
+// all methods on it, merging them into copy/creation methods on ComputedStyle
+// instead. Keep the allocation logic, only allocating a new object if needed.
 class CORE_EXPORT SVGComputedStyle : public RefCounted<SVGComputedStyle> {
 public:
     static PassRefPtr<SVGComputedStyle> create() { return adoptRef(new SVGComputedStyle); }
     PassRefPtr<SVGComputedStyle> copy() const { return adoptRef(new SVGComputedStyle(*this));}
     ~SVGComputedStyle();
 
-    bool inheritedNotEqual(const SVGComputedStyle*) const;
+    bool inheritedEqual(const SVGComputedStyle&) const;
+    bool nonInheritedEqual(const SVGComputedStyle&) const;
     void inheritFrom(const SVGComputedStyle*);
     void copyNonInheritedFromCached(const SVGComputedStyle*);
 
@@ -83,8 +87,6 @@ public:
     static float initialFloodOpacity() { return 1; }
     static Color initialFloodColor() { return Color(0, 0, 0); }
     static Color initialLightingColor() { return Color(255, 255, 255); }
-    static const AtomicString& initialClipperResource() { return nullAtom; }
-    static const AtomicString& initialFilterResource() { return nullAtom; }
     static const AtomicString& initialMaskerResource() { return nullAtom; }
     static const AtomicString& initialMarkerStartResource() { return nullAtom; }
     static const AtomicString& initialMarkerMidResource() { return nullAtom; }
@@ -97,8 +99,8 @@ public:
     static Length initialX() { return Length(Fixed); }
     static Length initialY() { return Length(Fixed); }
     static Length initialR() { return Length(Fixed); }
-    static Length initialRx() { return Length(Fixed); }
-    static Length initialRy() { return Length(Fixed); }
+    static Length initialRx() { return Length(Auto); }
+    static Length initialRy() { return Length(Auto); }
 
     // SVG CSS Property setters
     void setAlignmentBaseline(EAlignmentBaseline val) { svg_noninherited_flags.f.alignmentBaseline = val; }
@@ -119,43 +121,43 @@ public:
     void setPaintOrder(EPaintOrder val) { svg_inherited_flags.paintOrder = (int)val; }
     void setD(PassRefPtr<StylePath> d)
     {
-        if (!(layout->d == d))
-            layout.access()->d = d;
+        if (!(geometry->d == d))
+            geometry.access()->d = d;
     }
     void setCx(const Length& obj)
     {
-        if (!(layout->cx == obj))
-            layout.access()->cx = obj;
+        if (!(geometry->cx == obj))
+            geometry.access()->cx = obj;
     }
     void setCy(const Length& obj)
     {
-        if (!(layout->cy == obj))
-            layout.access()->cy = obj;
+        if (!(geometry->cy == obj))
+            geometry.access()->cy = obj;
     }
     void setX(const Length& obj)
     {
-        if (!(layout->x == obj))
-            layout.access()->x = obj;
+        if (!(geometry->x == obj))
+            geometry.access()->x = obj;
     }
     void setY(const Length& obj)
     {
-        if (!(layout->y == obj))
-            layout.access()->y = obj;
+        if (!(geometry->y == obj))
+            geometry.access()->y = obj;
     }
     void setR(const Length& obj)
     {
-        if (!(layout->r == obj))
-            layout.access()->r = obj;
+        if (!(geometry->r == obj))
+            geometry.access()->r = obj;
     }
     void setRx(const Length& obj)
     {
-        if (!(layout->rx == obj))
-            layout.access()->rx = obj;
+        if (!(geometry->rx == obj))
+            geometry.access()->rx = obj;
     }
     void setRy(const Length& obj)
     {
-        if (!(layout->ry == obj))
-            layout.access()->ry = obj;
+        if (!(geometry->ry == obj))
+            geometry.access()->ry = obj;
     }
     void setFillOpacity(float obj)
     {
@@ -270,18 +272,6 @@ public:
     }
 
     // Setters for non-inherited resources
-    void setClipperResource(const AtomicString& obj)
-    {
-        if (!(resources->clipper == obj))
-            resources.access()->clipper = obj;
-    }
-
-    void setFilterResource(const AtomicString& obj)
-    {
-        if (!(resources->filter == obj))
-            resources.access()->filter = obj;
-    }
-
     void setMaskerResource(const AtomicString& obj)
     {
         if (!(resources->masker == obj))
@@ -340,16 +330,14 @@ public:
     const Color& floodColor() const { return misc->floodColor; }
     const Color& lightingColor() const { return misc->lightingColor; }
     const Length& baselineShiftValue() const { return misc->baselineShiftValue; }
-    StylePath* d() const { return layout->d.get(); }
-    const Length& cx() const { return layout->cx; }
-    const Length& cy() const { return layout->cy; }
-    const Length& x() const { return layout->x; }
-    const Length& y() const { return layout->y; }
-    const Length& r() const { return layout->r; }
-    const Length& rx() const { return layout->rx; }
-    const Length& ry() const { return layout->ry; }
-    const AtomicString& clipperResource() const { return resources->clipper; }
-    const AtomicString& filterResource() const { return resources->filter; }
+    StylePath* d() const { return geometry->d.get(); }
+    const Length& cx() const { return geometry->cx; }
+    const Length& cy() const { return geometry->cy; }
+    const Length& x() const { return geometry->x; }
+    const Length& y() const { return geometry->y; }
+    const Length& r() const { return geometry->r; }
+    const Length& rx() const { return geometry->rx; }
+    const Length& ry() const { return geometry->ry; }
     const AtomicString& maskerResource() const { return resources->masker; }
     const AtomicString& markerStartResource() const { return inheritedResources->markerStart; }
     const AtomicString& markerMidResource() const { return inheritedResources->markerMid; }
@@ -382,9 +370,7 @@ public:
     }
 
     // convenience
-    bool hasClipper() const { return !clipperResource().isEmpty(); }
     bool hasMasker() const { return !maskerResource().isEmpty(); }
-    bool hasFilter() const { return !filterResource().isEmpty(); }
     bool hasMarkers() const { return !markerStartResource().isEmpty() || !markerMidResource().isEmpty() || !markerEndResource().isEmpty(); }
     bool hasStroke() const { return strokePaintType() != SVG_PAINTTYPE_NONE; }
     bool hasVisibleStroke() const { return hasStroke() && !strokeWidth().isZero(); }
@@ -455,7 +441,7 @@ protected:
     // non-inherited attributes
     DataRef<StyleStopData> stops;
     DataRef<StyleMiscData> misc;
-    DataRef<StyleLayoutData> layout;
+    DataRef<StyleGeometryData> geometry;
     DataRef<StyleResourceData> resources;
 
 private:

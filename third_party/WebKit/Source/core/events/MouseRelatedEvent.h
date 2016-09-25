@@ -45,10 +45,10 @@ public:
     int screenX() const { return m_screenLocation.x(); }
     int screenY() const { return m_screenLocation.y(); }
     const IntPoint& screenLocation() const { return m_screenLocation; }
-    int clientX() const { return m_clientLocation.x(); }
-    int clientY() const { return m_clientLocation.y(); }
-    int movementX() const { return m_movementDelta.x(); }
-    int movementY() const { return m_movementDelta.y(); }
+    int clientX() const { return m_clientLocation.x().toInt(); }
+    int clientY() const { return m_clientLocation.y().toInt(); }
+    int movementX() const { return m_movementDelta.x().toInt(); }
+    int movementY() const { return m_movementDelta.y().toInt(); }
     const LayoutPoint& clientLocation() const { return m_clientLocation; }
     int layerX();
     int layerY();
@@ -71,7 +71,7 @@ protected:
     MouseRelatedEvent();
     // TODO(lanwei): Will make this argument non-optional and all the callers need to provide
     // sourceCapabilities even when it is null, see https://crbug.com/476530.
-    MouseRelatedEvent(const AtomicString& type, bool canBubble, bool cancelable, EventTarget* relatedTarget,
+    MouseRelatedEvent(const AtomicString& type, bool canBubble, bool cancelable,
         AbstractView*, int detail, const IntPoint& screenLocation,
         const IntPoint& rootFrameLocation, const IntPoint& movementDelta, PlatformEvent::Modifiers,
         double platformTimeStamp, PositionType, InputDeviceCapabilities* sourceCapabilities = nullptr);

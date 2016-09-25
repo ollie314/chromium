@@ -9,7 +9,10 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/native_app_window.h"
@@ -27,9 +30,9 @@
 #include "ui/base/cursor/image_cursors.h"
 #include "ui/base/ime/input_method_initializer.h"
 #include "ui/base/user_activity/user_activity_detector.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/screen.h"
 #include "ui/wm/core/base_focus_rules.h"
 #include "ui/wm/core/compound_event_filter.h"
 #include "ui/wm/core/cursor_manager.h"
@@ -100,7 +103,7 @@ class ShellNativeCursorManager : public wm::NativeCursorManager {
   ~ShellNativeCursorManager() override {}
 
   // wm::NativeCursorManager overrides.
-  void SetDisplay(const gfx::Display& display,
+  void SetDisplay(const display::Display& display,
                   wm::NativeCursorManagerDelegate* delegate) override {
     if (image_cursors_->SetDisplay(display, display.device_scale_factor()))
       SetCursor(delegate->GetCursor(), delegate);
@@ -150,7 +153,7 @@ class ShellNativeCursorManager : public wm::NativeCursorManager {
 
   aura::WindowTreeHost* host_;  // Not owned.
 
-  scoped_ptr<ui::ImageCursors> image_cursors_;
+  std::unique_ptr<ui::ImageCursors> image_cursors_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellNativeCursorManager);
 };
@@ -182,8 +185,8 @@ ShellDesktopControllerAura::ShellDesktopControllerAura()
   display_configurator_->Init(
       ui::OzonePlatform::GetInstance()->CreateNativeDisplayDelegate(), false);
 #elif defined(USE_X11)
-  display_configurator_->Init(
-      base::WrapUnique(new ui::NativeDisplayDelegateX11()), false);
+  display_configurator_->Init(base::MakeUnique<ui::NativeDisplayDelegateX11>(),
+                              false);
 #endif
   display_configurator_->ForceInitialConfigure(0);
   display_configurator_->AddObserver(this);
@@ -264,7 +267,7 @@ void ShellDesktopControllerAura::OnHostCloseRequested(
     const aura::WindowTreeHost* host) {
   DCHECK_EQ(host_.get(), host);
   CloseAppWindows();
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
@@ -283,9 +286,10 @@ void ShellDesktopControllerAura::InitWindowManager() {
   host_->window()->SetLayoutManager(new FillLayout);
 
   cursor_manager_.reset(
-      new wm::CursorManager(scoped_ptr<wm::NativeCursorManager>(
+      new wm::CursorManager(std::unique_ptr<wm::NativeCursorManager>(
           new ShellNativeCursorManager(host_.get()))));
-  cursor_manager_->SetDisplay(gfx::Screen::GetScreen()->GetPrimaryDisplay());
+  cursor_manager_->SetDisplay(
+      display::Screen::GetScreen()->GetPrimaryDisplay());
   cursor_manager_->SetCursor(ui::kCursorPointer);
   aura::client::SetCursorClient(host_->window(), cursor_manager_.get());
 
@@ -313,7 +317,7 @@ void ShellDesktopControllerAura::CreateRootWindow() {
     size = gfx::Size(1920, 1080);
 
   screen_.reset(new ShellScreen(size));
-  gfx::Screen::SetScreenInstance(screen_.get());
+  display::Screen::SetScreenInstance(screen_.get());
   // TODO(mukai): Set up input method.
 
   host_.reset(screen_->CreateHostForPrimaryDisplay());

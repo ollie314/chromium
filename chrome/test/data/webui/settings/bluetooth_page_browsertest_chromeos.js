@@ -19,9 +19,6 @@ SettingsBluetoothPageBrowserTest.prototype = {
   __proto__: SettingsPageBrowserTest.prototype,
 
   /** @override */
-  browsePreload: 'chrome://md-settings/advanced',
-
-  /** @override */
   extraLibraries: PolymerTest.getLibraries(ROOT_PATH).concat([
     '../fake_chrome_event.js',
     'fake_bluetooth.js',
@@ -62,6 +59,7 @@ TEST_F('SettingsBluetoothPageBrowserTest', 'MAYBE_Bluetooth', function() {
   // comment at the top of mocha_adapter.js.
   var self = this;
 
+  self.toggleAdvanced();
   var advanced = self.getPage('advanced');
   assertTrue(!!advanced);
   advanced.set('pageVisibility.bluetooth', true);
@@ -139,6 +137,11 @@ TEST_F('SettingsBluetoothPageBrowserTest', 'MAYBE_Bluetooth', function() {
       // should be hidden.
       self.bluetoothApi_.setDevicesForTest(fakeDevices_);
       Polymer.dom.flush();
+      assertEquals(bluetooth.deviceList.length, 4);
+      var devicesIronList = bluetooth.$$('#deviceList iron-list');
+      assertTrue(!!devicesIronList);
+      devicesIronList.notifyResize();
+      Polymer.dom.flush();
       expectTrue(noDevices.hidden);
       // Confirm that there are two paired devices in the list.
       var devices = deviceList.querySelectorAll('bluetooth-device-list-item');
@@ -160,35 +163,33 @@ TEST_F('SettingsBluetoothPageBrowserTest', 'MAYBE_Bluetooth', function() {
       MockInteractions.tap(bluetooth.$$('.primary-button'));
       Polymer.dom.flush();
       // Ensure the dialog appears.
-      var dialog = bluetooth.$.deviceDialog;
+      var dialog = bluetooth.$$('#deviceDialog');
       assertTrue(!!dialog);
-      assertTrue(dialog.opened);
-      var addDialog = bluetooth.$$('settings-bluetooth-add-device-dialog');
-      assertTrue(!!addDialog);
+      assertTrue(dialog.$.dialog.open);
+      assertEquals(dialog.deviceList.length, 4);
+
       // Ensure the dialog has the expected devices.
-      var devicesDiv = addDialog.$.dialogDeviceList;
-      var devices = devicesDiv.querySelectorAll('bluetooth-device-list-item');
-      assertEquals(2, devices.length);
+      var devicesIronList = dialog.$$('#dialogDeviceList iron-list');
+      assertTrue(!!devicesIronList);
+      devicesIronList.notifyResize();
+      Polymer.dom.flush();
+      var devices =
+          devicesIronList.querySelectorAll('bluetooth-device-list-item');
+      assertEquals(devices.length, 2);
 
       // Select a device.
       MockInteractions.tap(devices[0].$$('div'));
       Polymer.dom.flush();
       // Ensure the pairing dialog is shown.
-      var pairDialog = bluetooth.$$('settings-bluetooth-pair-device-dialog');
-      assertTrue(!!pairDialog);
-      // Ensure the device is connected to.
+      assertTrue(!!dialog.$$('#pairing'));
+
+      // Ensure the device wass connected to.
       expectEquals(1, self.bluetoothPrivateApi_.connectedDevices_.size);
-      var deviceAddress =
-          self.bluetoothPrivateApi_.connectedDevices_.keys().next().value;
 
       // Close the dialog.
-      MockInteractions.tap(pairDialog.$.close);
+      dialog.close();
       Polymer.dom.flush();
-      expectFalse(dialog.opened);
-      var response = self.bluetoothPrivateApi_.pairingResponses_[deviceAddress];
-      assertTrue(!!response);
-      expectEquals(chrome.bluetoothPrivate.PairingResponse.CANCEL,
-                   response.response);
+      assertFalse(dialog.$.dialog.open);
     });
   });
 

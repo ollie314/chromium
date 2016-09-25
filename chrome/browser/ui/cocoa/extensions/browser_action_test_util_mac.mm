@@ -26,7 +26,6 @@
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/common/chrome_constants.h"
-#include "grit/theme_resources.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -119,14 +118,6 @@ int BrowserActionTestUtil::NumberOfBrowserActions() {
 
 int BrowserActionTestUtil::VisibleBrowserActions() {
   return [GetController(browser_, test_helper_.get()) visibleButtonCount];
-}
-
-bool BrowserActionTestUtil::IsChevronShowing() {
-  BrowserActionsController* controller =
-      GetController(browser_, test_helper_.get());
-  // The magic "18" comes from kChevronWidth in browser_actions_controller.mm.
-  return ![controller chevronIsHidden] &&
-         NSWidth([[controller containerView] animationEndFrame]) >= 18;
 }
 
 void BrowserActionTestUtil::InspectPopup(int index) {

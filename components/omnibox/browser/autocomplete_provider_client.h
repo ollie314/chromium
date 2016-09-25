@@ -22,6 +22,7 @@ class AutocompleteSchemeClassifier;
 class GURL;
 class InMemoryURLIndex;
 class KeywordProvider;
+class PhysicalWebDataSource;
 class PrefService;
 class ShortcutsBackend;
 
@@ -59,8 +60,9 @@ class AutocompleteProviderClient {
   virtual const SearchTermsData& GetSearchTermsData() const = 0;
   virtual scoped_refptr<ShortcutsBackend> GetShortcutsBackend() = 0;
   virtual scoped_refptr<ShortcutsBackend> GetShortcutsBackendIfExists() = 0;
-  virtual scoped_ptr<KeywordExtensionsDelegate> GetKeywordExtensionsDelegate(
-      KeywordProvider* keyword_provider) = 0;
+  virtual std::unique_ptr<KeywordExtensionsDelegate>
+  GetKeywordExtensionsDelegate(KeywordProvider* keyword_provider) = 0;
+  virtual PhysicalWebDataSource* GetPhysicalWebDataSource() = 0;
 
   // The value to use for Accept-Languages HTTP header when making an HTTP
   // request.

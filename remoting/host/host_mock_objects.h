@@ -5,21 +5,24 @@
 #ifndef REMOTING_HOST_HOST_MOCK_OBJECTS_H_
 #define REMOTING_HOST_HOST_MOCK_OBJECTS_H_
 
+#include <cstdint>
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "net/base/ip_endpoint.h"
-#include "remoting/codec/video_encoder.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/client_session.h"
 #include "remoting/host/client_session_control.h"
+#include "remoting/host/client_session_details.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/host_status_observer.h"
 #include "remoting/host/input_injector.h"
 #include "remoting/host/screen_controls.h"
 #include "remoting/host/screen_resolution.h"
-#include "remoting/host/security_key/gnubby_auth_handler.h"
+#include "remoting/host/security_key/security_key_auth_handler.h"
 #include "remoting/proto/control.pb.h"
+#include "remoting/proto/event.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
 #include "third_party/webrtc/modules/desktop_capture/mouse_cursor_monitor.h"
@@ -43,6 +46,7 @@ class MockDesktopEnvironment : public DesktopEnvironment {
   MOCK_METHOD0(CreateMouseCursorMonitorPtr, webrtc::MouseCursorMonitor*());
   MOCK_CONST_METHOD0(GetCapabilities, std::string());
   MOCK_METHOD1(SetCapabilities, void(const std::string&));
+  MOCK_CONST_METHOD0(GetDesktopSessionId, uint32_t());
 
   // DesktopEnvironment implementation.
   std::unique_ptr<AudioCapturer> CreateAudioCapturer() override;
@@ -66,6 +70,18 @@ class MockClientSessionControl : public ClientSessionControl {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockClientSessionControl);
+};
+
+class MockClientSessionDetails : public ClientSessionDetails {
+ public:
+  MockClientSessionDetails();
+  ~MockClientSessionDetails() override;
+
+  MOCK_METHOD0(session_control, ClientSessionControl*());
+  MOCK_CONST_METHOD0(desktop_session_id, uint32_t());
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockClientSessionDetails);
 };
 
 class MockClientSessionEventHandler : public ClientSession::EventHandler {
@@ -139,12 +155,12 @@ class MockHostStatusObserver : public HostStatusObserver {
   MOCK_METHOD0(OnShutdown, void());
 };
 
-class MockGnubbyAuthHandler : public GnubbyAuthHandler {
+class MockSecurityKeyAuthHandler : public SecurityKeyAuthHandler {
  public:
-  MockGnubbyAuthHandler();
-  ~MockGnubbyAuthHandler() override;
+  MockSecurityKeyAuthHandler();
+  ~MockSecurityKeyAuthHandler() override;
 
-  MOCK_METHOD0(CreateGnubbyConnection, void());
+  MOCK_METHOD0(CreateSecurityKeyConnection, void());
   MOCK_CONST_METHOD1(IsValidConnectionId, bool(int connection_id));
   MOCK_METHOD2(SendClientResponse,
                void(int connection_id, const std::string& response));
@@ -153,13 +169,13 @@ class MockGnubbyAuthHandler : public GnubbyAuthHandler {
   MOCK_METHOD1(SetRequestTimeoutForTest, void(base::TimeDelta timeout));
 
   void SetSendMessageCallback(
-      const GnubbyAuthHandler::SendMessageCallback& callback) override;
-  const GnubbyAuthHandler::SendMessageCallback& GetSendMessageCallback();
+      const SecurityKeyAuthHandler::SendMessageCallback& callback) override;
+  const SecurityKeyAuthHandler::SendMessageCallback& GetSendMessageCallback();
 
  private:
-  GnubbyAuthHandler::SendMessageCallback callback_;
+  SecurityKeyAuthHandler::SendMessageCallback callback_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockGnubbyAuthHandler);
+  DISALLOW_COPY_AND_ASSIGN(MockSecurityKeyAuthHandler);
 };
 
 class MockMouseCursorMonitor : public webrtc::MouseCursorMonitor {

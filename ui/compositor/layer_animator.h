@@ -26,8 +26,8 @@ namespace cc {
 class Animation;
 class AnimationPlayer;
 class AnimationTimeline;
+class ElementAnimations;
 class Layer;
-class LayerAnimationController;
 }
 
 namespace gfx {
@@ -121,8 +121,6 @@ class COMPOSITOR_EXPORT LayerAnimator
   // Detach AnimationPlayer from Layer and AnimationTimeline
   void ResetCompositor(Compositor* compositor);
 
-  // Whether this animator has animations waiting to get sent to cc::LAC.
-  bool HasPendingThreadedAnimationsForTesting() const;
   cc::AnimationPlayer* GetAnimationPlayerForTesting() const;
 
   // Sets the animation preemption strategy. This determines the behaviour if
@@ -408,10 +406,10 @@ class COMPOSITOR_EXPORT LayerAnimator
   // aborted.
   base::ObserverList<LayerAnimationObserver> observers_;
 
-  // We store a state of LayerAnimationController here to save it in
+  // We store a state of ElementAnimations here to save it in
   // ResetCompositor/SetCompositor scope.
   // TODO(loyso): Remove it. crbug.com/592873.
-  scoped_refptr<cc::LayerAnimationController> animation_controller_state_;
+  scoped_refptr<cc::ElementAnimations> element_animations_state_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerAnimator);
 };

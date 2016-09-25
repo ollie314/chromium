@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -20,13 +21,11 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/vsync_provider.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_export.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_surface_overlay.h"
 
-namespace gfx {
-
-// Get default EGL display for GLSurfaceEGL (differs by platform).
-EGLNativeDisplayType GetPlatformDefaultEGLNativeDisplay();
+namespace gl {
 
 // If adding a new type, also add it to EGLDisplayType in
 // tools/metrics/histograms/histograms.xml. Don't remove or reorder entries.
@@ -56,9 +55,9 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   EGLConfig GetConfig() override;
   GLSurface::Format GetFormat() override;
 
-  static bool InitializeOneOff();
+  static bool InitializeOneOff(EGLNativeDisplayType native_display);
   static EGLDisplay GetHardwareDisplay();
-  static EGLDisplay InitializeDisplay();
+  static EGLDisplay InitializeDisplay(EGLNativeDisplayType native_display);
   static EGLNativeDisplayType GetNativeDisplay();
 
   // These aren't particularly tied to surfaces, but since we already
@@ -97,22 +96,27 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL {
   gfx::SwapResult SwapBuffers() override;
   gfx::Size GetSize() override;
   EGLSurface GetHandle() override;
+  bool SupportsSwapBuffersWithDamage() override;
   bool SupportsPostSubBuffer() override;
+  gfx::SwapResult SwapBuffersWithDamage(int x,
+                                        int y,
+                                        int width,
+                                        int height) override;
   gfx::SwapResult PostSubBuffer(int x, int y, int width, int height) override;
   bool SupportsCommitOverlayPlanes() override;
   gfx::SwapResult CommitOverlayPlanes() override;
-  VSyncProvider* GetVSyncProvider() override;
+  gfx::VSyncProvider* GetVSyncProvider() override;
   bool ScheduleOverlayPlane(int z_order,
-                            OverlayTransform transform,
-                            gl::GLImage* image,
-                            const Rect& bounds_rect,
-                            const RectF& crop_rect) override;
+                            gfx::OverlayTransform transform,
+                            GLImage* image,
+                            const gfx::Rect& bounds_rect,
+                            const gfx::RectF& crop_rect) override;
   bool FlipsVertically() const override;
   bool BuffersFlipped() const override;
 
-  // Create a NativeViewGLSurfaceEGL with an externally provided VSyncProvider.
-  // Takes ownership of the VSyncProvider.
-  virtual bool Initialize(std::unique_ptr<VSyncProvider> sync_provider);
+  // Create a NativeViewGLSurfaceEGL with an externally provided
+  // gfx::VSyncProvider. Takes ownership of the gfx::VSyncProvider.
+  virtual bool Initialize(std::unique_ptr<gfx::VSyncProvider> sync_provider);
 
   // Takes care of the platform dependant bits, of any, for creating the window.
   virtual bool InitializeNativeWindow();
@@ -130,12 +134,14 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL {
   // Commit the |pending_overlays_| and clear the vector. Returns false if any
   // fail to be committed.
   bool CommitAndClearPendingOverlays();
+  void UpdateSwapInterval();
 
   EGLSurface surface_;
   bool supports_post_sub_buffer_;
+  bool supports_swap_buffer_with_damage_;
   bool flips_vertically_;
 
-  std::unique_ptr<VSyncProvider> vsync_provider_;
+  std::unique_ptr<gfx::VSyncProvider> vsync_provider_;
 
   int swap_interval_;
 
@@ -210,6 +216,6 @@ class GL_EXPORT SurfacelessEGL : public GLSurfaceEGL {
   DISALLOW_COPY_AND_ASSIGN(SurfacelessEGL);
 };
 
-}  // namespace gfx
+}  // namespace gl
 
 #endif  // UI_GL_GL_SURFACE_EGL_H_

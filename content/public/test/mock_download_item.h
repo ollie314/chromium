@@ -57,6 +57,7 @@ class MockDownloadItem : public DownloadItem {
   MOCK_CONST_METHOD0(GetUrlChain, const std::vector<GURL>&());
   MOCK_CONST_METHOD0(GetOriginalUrl, const GURL&());
   MOCK_CONST_METHOD0(GetReferrerUrl, const GURL&());
+  MOCK_CONST_METHOD0(GetSiteUrl, const GURL&());
   MOCK_CONST_METHOD0(GetTabUrl, const GURL&());
   MOCK_CONST_METHOD0(GetTabReferrerUrl, const GURL&());
   MOCK_CONST_METHOD0(GetSuggestedFilename, std::string());
@@ -99,7 +100,6 @@ class MockDownloadItem : public DownloadItem {
   MOCK_CONST_METHOD0(GetWebContents, WebContents*());
   MOCK_METHOD1(OnContentCheckCompleted, void(DownloadDangerType));
   MOCK_METHOD1(SetOpenWhenComplete, void(bool));
-  MOCK_METHOD1(SetIsTemporary, void(bool));
   MOCK_METHOD1(SetOpened, void(bool));
   MOCK_METHOD1(SetDisplayName, void(const base::FilePath&));
   MOCK_CONST_METHOD1(DebugString, std::string(bool));

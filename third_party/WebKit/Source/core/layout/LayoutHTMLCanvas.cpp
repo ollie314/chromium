@@ -30,6 +30,7 @@
 #include "core/html/HTMLCanvasElement.h"
 #include "core/layout/LayoutView.h"
 #include "core/page/Page.h"
+#include "core/paint/HTMLCanvasPaintInvalidator.h"
 #include "core/paint/HTMLCanvasPainter.h"
 
 namespace blink {
@@ -71,23 +72,21 @@ void LayoutHTMLCanvas::canvasSizeChanged()
     LayoutSize oldSize = size();
     updateLogicalWidth();
     updateLogicalHeight();
-    if (oldSize == size())
+    if (oldSize == size() && !hasOverrideLogicalContentWidth() && !hasOverrideLogicalContentHeight()) {
+        // If we have an override size, then we're probably a flex item, and the
+        // check above is insufficient because updateLogical{Width,Height} just
+        // used the override size. We actually have to mark ourselves as needing
+        // layout so the flex algorithm can run and compute our size correctly.
         return;
+    }
 
     if (!selfNeedsLayout())
         setNeedsLayout(LayoutInvalidationReason::SizeChanged);
 }
 
-PaintInvalidationReason LayoutHTMLCanvas::invalidatePaintIfNeeded(const PaintInvalidationState& paintInvalidationState)
+PaintInvalidationReason LayoutHTMLCanvas::invalidatePaintIfNeeded(const PaintInvalidatorContext& context) const
 {
-    PaintInvalidationReason reason = LayoutBox::invalidatePaintIfNeeded(paintInvalidationState);
-    HTMLCanvasElement* element = toHTMLCanvasElement(node());
-    if (element->isDirty()) {
-        element->doDeferredPaintInvalidation();
-        if (reason < PaintInvalidationRectangle)
-            reason = PaintInvalidationRectangle;
-    }
-    return reason;
+    return HTMLCanvasPaintInvalidator(*this, context).invalidatePaintIfNeeded();
 }
 
 CompositingReasons LayoutHTMLCanvas::additionalCompositingReasons() const

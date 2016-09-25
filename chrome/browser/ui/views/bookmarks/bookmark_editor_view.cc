@@ -20,14 +20,14 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_fixer.h"
 #include "components/user_prefs/user_prefs.h"
-#include "grit/components_strings.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/event.h"
 #include "ui/views/background.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -64,7 +64,7 @@ BookmarkEditorView::BookmarkEditorView(
       title_tf_(NULL),
       parent_(parent),
       details_(details),
-      bb_model_(BookmarkModelFactory::GetForProfile(profile)),
+      bb_model_(BookmarkModelFactory::GetForBrowserContext(profile)),
       running_menu_for_root_(false),
       show_tree_(configuration == SHOW_TREE) {
   DCHECK(profile);
@@ -190,7 +190,7 @@ bool BookmarkEditorView::IsCommandIdEnabled(int command_id) const {
 
 bool BookmarkEditorView::GetAcceleratorForCommandId(
     int command_id,
-    ui::Accelerator* accelerator) {
+    ui::Accelerator* accelerator) const {
   return GetWidget()->GetAccelerator(command_id, accelerator);
 }
 
@@ -244,8 +244,9 @@ void BookmarkEditorView::ShowContextMenuForView(
        tree_model_->GetRoot());
 
   context_menu_runner_.reset(new views::MenuRunner(
-      GetMenuModel(),
-      views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU));
+      GetMenuModel(), views::MenuRunner::HAS_MNEMONICS |
+                          views::MenuRunner::CONTEXT_MENU |
+                          views::MenuRunner::ASYNC));
 
   if (context_menu_runner_->RunMenuAt(source->GetWidget()->GetTopLevelWidget(),
                                       NULL,
@@ -331,9 +332,9 @@ void BookmarkEditorView::Init() {
     tree_view_->SetRootShown(false);
     tree_view_->set_context_menu_controller(this);
 
-    new_folder_button_.reset(new views::LabelButton(this,
+    new_folder_button_.reset(views::MdTextButton::CreateSecondaryUiButton(
+        this,
         l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_NEW_FOLDER_BUTTON)));
-    new_folder_button_->SetStyle(views::Button::STYLE_BUTTON);
     new_folder_button_->set_owned_by_client();
     new_folder_button_->SetEnabled(false);
   }

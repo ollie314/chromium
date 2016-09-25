@@ -34,23 +34,29 @@ InspectorTest.createWorkspace = function(ignoreEvents)
 }
 
 InspectorTest._mockTargetId = 1;
+InspectorTest._pageCapabilities =
+    WebInspector.Target.Capability.Browser | WebInspector.Target.Capability.DOM |
+    WebInspector.Target.Capability.JS | WebInspector.Target.Capability.Log |
+    WebInspector.Target.Capability.Network | WebInspector.Target.Capability.Worker;
 
-InspectorTest.createMockTarget = function(id, debuggerModelConstructor)
+InspectorTest.createMockTarget = function(id, debuggerModelConstructor, capabilities)
 {
+    capabilities = capabilities || InspectorTest._pageCapabilities;
     var MockTarget = function(name, connection, callback)
     {
-        WebInspector.Target.call(this, InspectorTest.testTargetManager, name, WebInspector.Target.Type.Page, connection, null, callback);
+        WebInspector.Target.call(this, InspectorTest.testTargetManager, name, capabilities, connection, null, callback);
+        this._inspectedURL = InspectorTest.mainTarget.inspectedURL();
         this.consoleModel = new WebInspector.ConsoleModel(this);
         this.networkManager = new WebInspector.NetworkManager(this);
-        this.resourceTreeModel = new WebInspector.ResourceTreeModel(this);
-        this.resourceTreeModel._inspectedPageURL = InspectorTest.resourceTreeModel._inspectedPageURL;
+        this.runtimeModel = new WebInspector.RuntimeModel(this);
+        this.securityOriginManager = WebInspector.SecurityOriginManager.fromTarget(this);
+        this.resourceTreeModel = new WebInspector.ResourceTreeModel(this, this.networkManager, this.securityOriginManager);
         this.resourceTreeModel._cachedResourcesProcessed = true;
         this.resourceTreeModel._frameAttached("42", 0);
-        this.runtimeModel = new WebInspector.RuntimeModel(this);
         this.debuggerModel = debuggerModelConstructor ? new debuggerModelConstructor(this) : new WebInspector.DebuggerModel(this);
         this._modelByConstructor.set(WebInspector.DebuggerModel, this.debuggerModel);
         this.domModel = new WebInspector.DOMModel(this);
-        this.cssModel = new WebInspector.CSSModel(this);
+        this.cssModel = new WebInspector.CSSModel(this, this.domModel);
     }
 
     MockTarget.prototype = {
@@ -113,14 +119,14 @@ InspectorTest.waitForWorkspaceUISourceCodeRemovedEvent = function(callback, coun
 
 InspectorTest.addMockUISourceCodeToWorkspace = function(url, type, content)
 {
-    var mockContentProvider = new WebInspector.StaticContentProvider(type, content);
-    InspectorTest.testNetworkProject.addFileForURL(url, mockContentProvider);
+    var mockContentProvider = WebInspector.StaticContentProvider.fromString(url, type, content);
+    InspectorTest.testNetworkProject.addFile(mockContentProvider, null, false);
 }
 
 InspectorTest.addMockUISourceCodeViaNetwork = function(url, type, content, target)
 {
-    var mockContentProvider = new WebInspector.StaticContentProvider(type, content);
-    InspectorTest.testNetworkProject._createFile(url, mockContentProvider, target.resourceTreeModel.mainFrame, false, true);
+    var mockContentProvider = WebInspector.StaticContentProvider.fromString(url, type, content);
+    InspectorTest.testNetworkProject.addFile(mockContentProvider, target.resourceTreeModel.mainFrame, false);
 }
 
 InspectorTest._defaultWorkspaceEventHandler = function(event)
@@ -131,7 +137,7 @@ InspectorTest._defaultWorkspaceEventHandler = function(event)
         return;
     if (uiSourceCode.project().type() === WebInspector.projectTypes.Service)
         return;
-    InspectorTest.addResult("Workspace event: " + event.type + ": " + uiSourceCode.url() + ".");
+    InspectorTest.addResult(`Workspace event: ${event.type.toString()}: ${uiSourceCode.url()}.`);
 }
 
 InspectorTest.uiSourceCodeURL = function(uiSourceCode)

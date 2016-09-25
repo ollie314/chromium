@@ -11,6 +11,8 @@
 #include "chrome/renderer/chrome_mock_render_thread.h"
 #include "content/public/test/render_view_test.h"
 
+class ChromeContentRendererClient;
+
 namespace autofill {
 class AutofillAgent;
 class TestPasswordAutofillAgent;
@@ -34,8 +36,16 @@ class ChromeRenderViewTest : public content::RenderViewTest {
   content::ContentBrowserClient* CreateContentBrowserClient() override;
   content::ContentRendererClient* CreateContentRendererClient() override;
 
+  // Called from SetUp(). Override to register mojo interfaces.
+  virtual void RegisterMainFrameRemoteInterfaces();
+
+  // Initializes commonly needed global state and renderer client parts.
+  // Use when overriding CreateContentRendererClient.
+  void InitChromeContentRendererClient(ChromeContentRendererClient* client);
+
   void EnableUserGestureSimulationForAutofill();
   void DisableUserGestureSimulationForAutofill();
+  void WaitForAutofillDidAssociateFormControl();
 
 #if defined(ENABLE_EXTENSIONS)
   std::unique_ptr<extensions::DispatcherDelegate>

@@ -12,10 +12,12 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/format_macros.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "base/pickle.h"
 #include "base/strings/string16.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "ui/accessibility/ax_view_state.h"
@@ -25,6 +27,7 @@
 #include "ui/base/ime/input_method_base.h"
 #include "ui/base/ime/input_method_delegate.h"
 #include "ui/base/ime/input_method_factory.h"
+#include "ui/base/ime/text_edit_commands.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_switches_util.h"
@@ -51,7 +54,7 @@
 #endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#include "ui/events/linux/text_edit_key_bindings_delegate_auralinux.h"
+#include "ui/base/ime/linux/text_edit_key_bindings_delegate_auralinux.h"
 #endif
 
 #if defined(USE_X11)
@@ -80,8 +83,6 @@ class MockInputMethod : public ui::InputMethodBase {
   void OnTextInputTypeChanged(const ui::TextInputClient* client) override;
   void OnCaretBoundsChanged(const ui::TextInputClient* client) override {}
   void CancelComposition(const ui::TextInputClient* client) override;
-  void OnInputLocaleChanged() override {}
-  std::string GetInputLocale() override;
   bool IsCandidatePopupOpen() const override;
   void ShowImeIfNeeded() override {}
 
@@ -145,6 +146,16 @@ bool MockInputMethod::OnUntranslatedIMEMessage(const base::NativeEvent& event,
 }
 
 void MockInputMethod::DispatchKeyEvent(ui::KeyEvent* key) {
+// On Mac, emulate InputMethodMac behavior for character events. Composition
+// still needs to be mocked, since it's not possible to generate test events
+// which trigger the appropriate NSResponder action messages for composition.
+#if defined(OS_MACOSX)
+  if (key->is_char()) {
+    ignore_result(DispatchKeyEventPostIME(key));
+    return;
+  }
+#endif
+
   // Checks whether the key event is from EventGenerator on Windows which will
   // generate key event for WM_CHAR.
   // The MockInputMethod will insert char on WM_KEYDOWN so ignore WM_CHAR here.
@@ -198,10 +209,6 @@ void MockInputMethod::CancelComposition(const ui::TextInputClient* client) {
   }
 }
 
-std::string MockInputMethod::GetInputLocale() {
-  return "en-US";
-}
-
 bool MockInputMethod::IsCandidatePopupOpen() const {
   return false;
 }
@@ -253,29 +260,6 @@ class TestTextfield : public views::Textfield {
        key_received_(false),
        weak_ptr_factory_(this) {}
 
-  bool OnKeyPressed(const ui::KeyEvent& e) override {
-    key_received_ = true;
-
-    // Since OnKeyPressed() might destroy |this|, get a weak pointer and
-    // verify it isn't null before writing the bool value to key_handled_.
-    base::WeakPtr<TestTextfield> textfield(weak_ptr_factory_.GetWeakPtr());
-    bool key = views::Textfield::OnKeyPressed(e);
-
-    if (!textfield)
-      return key;
-
-    key_handled_ = key;
-
-    return key_handled_;
-  }
-
-  bool OnKeyReleased(const ui::KeyEvent& e) override {
-    key_received_ = true;
-    key_handled_ = views::Textfield::OnKeyReleased(e);
-    EXPECT_FALSE(key_handled_);  // Textfield doesn't override OnKeyReleased.
-    return key_handled_;
-  }
-
   // ui::TextInputClient overrides:
   void InsertChar(const ui::KeyEvent& e) override {
     views::Textfield::InsertChar(e);
@@ -292,6 +276,25 @@ class TestTextfield : public views::Textfield {
   void clear() { key_received_ = key_handled_ = false; }
 
  private:
+  // views::View override:
+  void OnKeyEvent(ui::KeyEvent* event) override {
+    key_received_ = true;
+
+    // Since Textfield::OnKeyPressed() might destroy |this|, get a weak pointer
+    // and verify it isn't null before writing the bool value to key_handled_.
+    base::WeakPtr<TestTextfield> textfield(weak_ptr_factory_.GetWeakPtr());
+    views::View::OnKeyEvent(event);
+
+    if (!textfield)
+      return;
+
+    key_handled_ = event->handled();
+
+    // Currently, Textfield::OnKeyReleased always returns false.
+    if (event->type() == ui::ET_KEY_RELEASED)
+      EXPECT_FALSE(key_handled_);
+  }
+
   bool key_handled_;
   bool key_received_;
 
@@ -304,7 +307,7 @@ class TestTextfield : public views::Textfield {
 class GestureEventForTest : public ui::GestureEvent {
  public:
   GestureEventForTest(int x, int y, ui::GestureEventDetails details)
-      : GestureEvent(x, y, 0, base::TimeDelta(), details) {}
+      : GestureEvent(x, y, 0, base::TimeTicks(), details) {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GestureEventForTest);
@@ -324,7 +327,8 @@ class TextfieldDestroyerController : public views::TextfieldController {
   // views::TextfieldController:
   bool HandleKeyEvent(views::Textfield* sender,
                       const ui::KeyEvent& key_event) override {
-    target_->OnBlur();
+    if (target_)
+      target_->OnBlur();
     target_.reset();
     return false;
   }
@@ -365,6 +369,9 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
   void TearDown() override {
     if (widget_)
       widget_->Close();
+    // Clear kill buffer used for "Yank" text editing command so that no state
+    // persists between tests.
+    TextfieldModel::ClearKillBuffer();
     ViewsTestBase::TearDown();
   }
 
@@ -438,7 +445,7 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
     textfield_->RequestFocus();
 
     event_generator_.reset(
-        new ui::test::EventGenerator(GetContext(), widget_->GetNativeWindow()));
+        new ui::test::EventGenerator(widget_->GetNativeWindow()));
   }
   ui::MenuModel* GetContextMenuModel() {
     test_api_->UpdateContextMenu();
@@ -507,27 +514,37 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
       SendKeyEvent(code);
     } else {
       // For unicode characters, assume they come from IME rather than the
-      // keyboard. So they are dispatched directly to the input method.
+      // keyboard. So they are dispatched directly to the input method. But on
+      // Mac, key events don't pass through InputMethod. Hence they are
+      // dispatched regularly.
       ui::KeyEvent event(ch, ui::VKEY_UNKNOWN, ui::EF_NONE);
+#if defined(OS_MACOSX)
+      event_generator_->Dispatch(&event);
+#else
       input_method_->DispatchKeyEvent(&event);
+#endif
     }
   }
 
-  // Sends a platform-specific move (and select) to start of line.
+  // Sends a platform-specific move (and select) to the logical start of line.
+  // Eg. this should move (and select) to the right end of line for RTL text.
   void SendHomeEvent(bool shift) {
     if (TestingNativeMac()) {
-      // Use Cmd+Left on native Mac. An RTL-agnostic "end" doesn't have a
-      // default key-binding on Mac.
-      SendKeyEvent(ui::VKEY_LEFT, shift /* shift */, true /* command */);
+      // [NSResponder moveToBeginningOfLine:] is the correct way to do this on
+      // Mac, but that doesn't have a default key binding. Since
+      // views::Textfield doesn't currently support multiple lines, the same
+      // effect can be achieved by Cmd+Up which maps to
+      // [NSResponder moveToBeginningOfDocument:].
+      SendKeyEvent(ui::VKEY_UP, shift /* shift */, true /* command */);
       return;
     }
     SendKeyEvent(ui::VKEY_HOME, shift /* shift */, false /* control */);
   }
 
-  // Sends a platform-specific move (and select) to end of line.
+  // Sends a platform-specific move (and select) to the logical end of line.
   void SendEndEvent(bool shift) {
     if (TestingNativeMac()) {
-      SendKeyEvent(ui::VKEY_RIGHT, shift, true);  // Cmd+Right.
+      SendKeyEvent(ui::VKEY_DOWN, shift, true);  // Cmd+Down.
       return;
     }
     SendKeyEvent(ui::VKEY_END, shift, false);
@@ -756,7 +773,7 @@ TEST_F(TextfieldTest, KeysWithModifiersTest) {
   SendKeyPress(ui::VKEY_T, shift);
   SendKeyPress(ui::VKEY_E, shift | altgr);
   SendKeyPress(ui::VKEY_X, 0);
-  SendKeyPress(ui::VKEY_T, ctrl);
+  SendKeyPress(ui::VKEY_T, ctrl);  // This causes transpose on Mac.
   SendKeyPress(ui::VKEY_1, alt);
   SendKeyPress(ui::VKEY_2, command);
   SendKeyPress(ui::VKEY_3, 0);
@@ -769,7 +786,7 @@ TEST_F(TextfieldTest, KeysWithModifiersTest) {
   if (TestingNativeCrOs())
     EXPECT_STR_EQ("TeTEx34", textfield_->text());
   else if (TestingNativeMac())
-    EXPECT_STR_EQ("TheTEx134", textfield_->text());
+    EXPECT_STR_EQ("TheTxE134", textfield_->text());
   else
     EXPECT_STR_EQ("TeTEx234", textfield_->text());
 }
@@ -806,7 +823,212 @@ TEST_F(TextfieldTest, ControlAndSelectTest) {
   SendEndEvent(true);
   EXPECT_STR_EQ("two three", textfield_->GetSelectedText());
   SendHomeEvent(true);
+
+// On Mac, the existing selection should be extended.
+#if defined(OS_MACOSX)
+  EXPECT_STR_EQ("ZERO two three", textfield_->GetSelectedText());
+#else
   EXPECT_STR_EQ("ZERO ", textfield_->GetSelectedText());
+#endif
+}
+
+TEST_F(TextfieldTest, WordSelection) {
+  InitTextfield();
+  textfield_->SetText(ASCIIToUTF16("12 34567 89"));
+
+  // Place the cursor after "5".
+  textfield_->SetSelectionRange(gfx::Range(6));
+
+  // Select word towards right.
+  SendWordEvent(ui::VKEY_RIGHT, true);
+  EXPECT_STR_EQ("67", textfield_->GetSelectedText());
+  SendWordEvent(ui::VKEY_RIGHT, true);
+  EXPECT_STR_EQ("67 89", textfield_->GetSelectedText());
+
+  // Select word towards left.
+  SendWordEvent(ui::VKEY_LEFT, true);
+  EXPECT_STR_EQ("67 ", textfield_->GetSelectedText());
+  SendWordEvent(ui::VKEY_LEFT, true);
+
+// On Mac, the selection should reduce to a caret when the selection direction
+// changes for a word selection.
+#if defined(OS_MACOSX)
+  EXPECT_EQ(gfx::Range(6), textfield_->GetSelectedRange());
+#else
+  EXPECT_STR_EQ("345", textfield_->GetSelectedText());
+  EXPECT_EQ(gfx::Range(6, 3), textfield_->GetSelectedRange());
+#endif
+
+  SendWordEvent(ui::VKEY_LEFT, true);
+#if defined(OS_MACOSX)
+  EXPECT_STR_EQ("345", textfield_->GetSelectedText());
+#else
+  EXPECT_STR_EQ("12 345", textfield_->GetSelectedText());
+#endif
+  EXPECT_TRUE(textfield_->GetSelectedRange().is_reversed());
+
+  SendWordEvent(ui::VKEY_LEFT, true);
+  EXPECT_STR_EQ("12 345", textfield_->GetSelectedText());
+}
+
+TEST_F(TextfieldTest, LineSelection) {
+  InitTextfield();
+  textfield_->SetText(ASCIIToUTF16("12 34567 89"));
+
+  // Place the cursor after "5".
+  textfield_->SetSelectionRange(gfx::Range(6));
+
+  // Select line towards right.
+  SendEndEvent(true);
+  EXPECT_STR_EQ("67 89", textfield_->GetSelectedText());
+
+  // Select line towards left. On Mac, the existing selection should be extended
+  // to cover the whole line.
+  SendHomeEvent(true);
+#if defined(OS_MACOSX)
+  EXPECT_EQ(textfield_->text(), textfield_->GetSelectedText());
+#else
+  EXPECT_STR_EQ("12 345", textfield_->GetSelectedText());
+#endif
+  EXPECT_TRUE(textfield_->GetSelectedRange().is_reversed());
+
+  // Select line towards right.
+  SendEndEvent(true);
+#if defined(OS_MACOSX)
+  EXPECT_EQ(textfield_->text(), textfield_->GetSelectedText());
+#else
+  EXPECT_STR_EQ("67 89", textfield_->GetSelectedText());
+#endif
+  EXPECT_FALSE(textfield_->GetSelectedRange().is_reversed());
+}
+
+TEST_F(TextfieldTest, MoveUpDownAndModifySelection) {
+  InitTextfield();
+  textfield_->SetText(ASCIIToUTF16("12 34567 89"));
+  textfield_->SetSelectionRange(gfx::Range(6));
+
+  // Up/Down keys won't be handled except on Mac where they map to move
+  // commands.
+  SendKeyEvent(ui::VKEY_UP);
+  EXPECT_TRUE(textfield_->key_received());
+#if defined(OS_MACOSX)
+  EXPECT_TRUE(textfield_->key_handled());
+  EXPECT_EQ(gfx::Range(0), textfield_->GetSelectedRange());
+#else
+  EXPECT_FALSE(textfield_->key_handled());
+#endif
+  textfield_->clear();
+
+  SendKeyEvent(ui::VKEY_DOWN);
+  EXPECT_TRUE(textfield_->key_received());
+#if defined(OS_MACOSX)
+  EXPECT_TRUE(textfield_->key_handled());
+  EXPECT_EQ(gfx::Range(11), textfield_->GetSelectedRange());
+#else
+  EXPECT_FALSE(textfield_->key_handled());
+#endif
+  textfield_->clear();
+
+  textfield_->SetSelectionRange(gfx::Range(6));
+
+  // Shift+[Up/Down] on Mac should execute the command
+  // MOVE_[UP/DOWN]_AND_MODIFY_SELECTION. On other platforms, textfield won't
+  // handle these events.
+  SendKeyEvent(ui::VKEY_UP, true /* shift */, false /* command */);
+  EXPECT_TRUE(textfield_->key_received());
+#if defined(OS_MACOSX)
+  EXPECT_TRUE(textfield_->key_handled());
+  EXPECT_EQ(gfx::Range(6, 0), textfield_->GetSelectedRange());
+#else
+  EXPECT_FALSE(textfield_->key_handled());
+#endif
+  textfield_->clear();
+
+  SendKeyEvent(ui::VKEY_DOWN, true /* shift */, false /* command */);
+  EXPECT_TRUE(textfield_->key_received());
+#if defined(OS_MACOSX)
+  EXPECT_TRUE(textfield_->key_handled());
+  EXPECT_EQ(gfx::Range(6, 11), textfield_->GetSelectedRange());
+#else
+  EXPECT_FALSE(textfield_->key_handled());
+#endif
+  textfield_->clear();
+}
+
+TEST_F(TextfieldTest, MovePageUpDownAndModifySelection) {
+  InitTextfield();
+
+// MOVE_PAGE_[UP/DOWN] and the associated selection commands should only be
+// enabled on Mac.
+#if defined(OS_MACOSX)
+  textfield_->SetText(ASCIIToUTF16("12 34567 89"));
+  textfield_->SetSelectionRange(gfx::Range(6));
+
+  EXPECT_TRUE(
+      textfield_->IsTextEditCommandEnabled(ui::TextEditCommand::MOVE_PAGE_UP));
+  EXPECT_TRUE(textfield_->IsTextEditCommandEnabled(
+      ui::TextEditCommand::MOVE_PAGE_DOWN));
+  EXPECT_TRUE(textfield_->IsTextEditCommandEnabled(
+      ui::TextEditCommand::MOVE_PAGE_UP_AND_MODIFY_SELECTION));
+  EXPECT_TRUE(textfield_->IsTextEditCommandEnabled(
+      ui::TextEditCommand::MOVE_PAGE_DOWN_AND_MODIFY_SELECTION));
+
+  test_api_->ExecuteTextEditCommand(ui::TextEditCommand::MOVE_PAGE_UP);
+  EXPECT_EQ(gfx::Range(0), textfield_->GetSelectedRange());
+
+  test_api_->ExecuteTextEditCommand(ui::TextEditCommand::MOVE_PAGE_DOWN);
+  EXPECT_EQ(gfx::Range(11), textfield_->GetSelectedRange());
+
+  textfield_->SetSelectionRange(gfx::Range(6));
+  test_api_->ExecuteTextEditCommand(
+      ui::TextEditCommand::MOVE_PAGE_UP_AND_MODIFY_SELECTION);
+  EXPECT_EQ(gfx::Range(6, 0), textfield_->GetSelectedRange());
+
+  test_api_->ExecuteTextEditCommand(
+      ui::TextEditCommand::MOVE_PAGE_DOWN_AND_MODIFY_SELECTION);
+  EXPECT_EQ(gfx::Range(6, 11), textfield_->GetSelectedRange());
+#else
+  EXPECT_FALSE(
+      textfield_->IsTextEditCommandEnabled(ui::TextEditCommand::MOVE_PAGE_UP));
+  EXPECT_FALSE(textfield_->IsTextEditCommandEnabled(
+      ui::TextEditCommand::MOVE_PAGE_DOWN));
+  EXPECT_FALSE(textfield_->IsTextEditCommandEnabled(
+      ui::TextEditCommand::MOVE_PAGE_UP_AND_MODIFY_SELECTION));
+  EXPECT_FALSE(textfield_->IsTextEditCommandEnabled(
+      ui::TextEditCommand::MOVE_PAGE_DOWN_AND_MODIFY_SELECTION));
+#endif
+}
+
+TEST_F(TextfieldTest, MoveParagraphForwardBackwardAndModifySelection) {
+  InitTextfield();
+  textfield_->SetText(ASCIIToUTF16("12 34567 89"));
+  textfield_->SetSelectionRange(gfx::Range(6));
+
+  test_api_->ExecuteTextEditCommand(
+      ui::TextEditCommand::MOVE_PARAGRAPH_FORWARD_AND_MODIFY_SELECTION);
+  EXPECT_EQ(gfx::Range(6, 11), textfield_->GetSelectedRange());
+
+  test_api_->ExecuteTextEditCommand(
+      ui::TextEditCommand::MOVE_PARAGRAPH_BACKWARD_AND_MODIFY_SELECTION);
+// On Mac, the selection should reduce to a caret when the selection direction
+// is reversed for MOVE_PARAGRAPH_[FORWARD/BACKWARD]_AND_MODIFY_SELECTION.
+#if defined(OS_MACOSX)
+  EXPECT_EQ(gfx::Range(6), textfield_->GetSelectedRange());
+#else
+  EXPECT_EQ(gfx::Range(6, 0), textfield_->GetSelectedRange());
+#endif
+
+  test_api_->ExecuteTextEditCommand(
+      ui::TextEditCommand::MOVE_PARAGRAPH_BACKWARD_AND_MODIFY_SELECTION);
+  EXPECT_EQ(gfx::Range(6, 0), textfield_->GetSelectedRange());
+
+  test_api_->ExecuteTextEditCommand(
+      ui::TextEditCommand::MOVE_PARAGRAPH_FORWARD_AND_MODIFY_SELECTION);
+#if defined(OS_MACOSX)
+  EXPECT_EQ(gfx::Range(6), textfield_->GetSelectedRange());
+#else
+  EXPECT_EQ(gfx::Range(6, 11), textfield_->GetSelectedRange());
+#endif
 }
 
 TEST_F(TextfieldTest, InsertionDeletionTest) {
@@ -867,6 +1089,33 @@ TEST_F(TextfieldTest, InsertionDeletionTest) {
 #endif
 }
 
+// Test that deletion operations behave correctly with an active selection.
+TEST_F(TextfieldTest, DeletionWithSelection) {
+  struct {
+    ui::KeyboardCode key;
+    bool shift;
+  } cases[] = {
+      {ui::VKEY_BACK, false},
+      {ui::VKEY_BACK, true},
+      {ui::VKEY_DELETE, false},
+      {ui::VKEY_DELETE, true},
+  };
+
+  InitTextfield();
+  // [Ctrl] ([Alt] on Mac) + [Delete]/[Backspace] should delete the active
+  // selection, regardless of [Shift].
+  for (size_t i = 0; i < arraysize(cases); ++i) {
+    SCOPED_TRACE(base::StringPrintf("Testing cases[%" PRIuS "]", i));
+    textfield_->SetText(ASCIIToUTF16("one two three"));
+    textfield_->SelectRange(gfx::Range(2, 6));
+    // Make selection as - on|e tw|o three.
+    SendWordEvent(cases[i].key, cases[i].shift);
+    // Verify state is on|o three.
+    EXPECT_STR_EQ("ono three", textfield_->text());
+    EXPECT_EQ(gfx::Range(2), textfield_->GetSelectedRange());
+  }
+}
+
 TEST_F(TextfieldTest, PasswordTest) {
   InitTextfield();
   textfield_->SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
@@ -903,6 +1152,31 @@ TEST_F(TextfieldTest, PasswordTest) {
   SendAlternatePaste();
   EXPECT_STR_EQ("foo", GetClipboardText(ui::CLIPBOARD_TYPE_COPY_PASTE));
   EXPECT_STR_EQ("foofoofoo", textfield_->text());
+}
+
+// Check that text insertion works appropriately for password and read-only
+// textfields.
+TEST_F(TextfieldTest, TextInputType_InsertionTest) {
+  InitTextfield();
+  textfield_->SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
+  EXPECT_EQ(ui::TEXT_INPUT_TYPE_PASSWORD, textfield_->GetTextInputType());
+
+  SendKeyEvent(ui::VKEY_A);
+  SendKeyEvent(kHebrewLetterSamekh);
+  SendKeyEvent(ui::VKEY_B);
+
+  EXPECT_EQ(WideToUTF16(L"a\x05E1"
+                        L"b"),
+            textfield_->text());
+
+  textfield_->SetReadOnly(true);
+  EXPECT_EQ(ui::TEXT_INPUT_TYPE_NONE, textfield_->GetTextInputType());
+  SendKeyEvent(ui::VKEY_C);
+
+  // No text should be inserted for read only textfields.
+  EXPECT_EQ(WideToUTF16(L"a\x05E1"
+                        L"b"),
+            textfield_->text());
 }
 
 TEST_F(TextfieldTest, TextInputType) {
@@ -963,7 +1237,7 @@ TEST_F(TextfieldTest, OnKeyPress) {
   EXPECT_TRUE(textfield_->key_handled());
   textfield_->clear();
 
-  // F20, up/down key won't be handled.
+  // F20 key won't be handled.
   SendKeyEvent(ui::VKEY_F20);
 #if defined(OS_MACOSX)
   // On Mac, key combinations that don't map to editing commands are forwarded
@@ -972,16 +1246,6 @@ TEST_F(TextfieldTest, OnKeyPress) {
 #else
   EXPECT_TRUE(textfield_->key_received());
 #endif
-  EXPECT_FALSE(textfield_->key_handled());
-  textfield_->clear();
-
-  SendKeyEvent(ui::VKEY_UP);
-  EXPECT_TRUE(textfield_->key_received());
-  EXPECT_FALSE(textfield_->key_handled());
-  textfield_->clear();
-
-  SendKeyEvent(ui::VKEY_DOWN);
-  EXPECT_TRUE(textfield_->key_received());
   EXPECT_FALSE(textfield_->key_handled());
   textfield_->clear();
 }
@@ -1753,8 +2017,9 @@ TEST_F(TextfieldTest, UndoRedoTest) {
 }
 
 // Most platforms support Ctrl+Y as an alternative to Ctrl+Shift+Z, but on Mac
-// that is bound to "Show full history", so is not mapped as an editing
-// command. So, on Mac, send Cmd+Shift+Z.
+// Ctrl+Y is bound to "Yank" and Cmd+Y is bound to "Show full history". So, on
+// Mac, Cmd+Shift+Z is sent for the tests above and the Ctrl+Y test below is
+// skipped.
 #if !defined(OS_MACOSX)
 
 // Test that Ctrl+Y works for Redo, as well as Ctrl+Shift+Z.
@@ -1773,6 +2038,69 @@ TEST_F(TextfieldTest, RedoWithCtrlY) {
 }
 
 #endif  // !defined(OS_MACOSX)
+
+// Non-Mac platforms don't have a key binding for Yank. Since this test is only
+// run on Mac, it uses some Mac specific key bindings.
+#if defined(OS_MACOSX)
+
+TEST_F(TextfieldTest, Yank) {
+  InitTextfields(2);
+  textfield_->SetText(ASCIIToUTF16("abcdef"));
+  textfield_->SelectRange(gfx::Range(2, 4));
+
+  // Press Ctrl+Y to yank.
+  SendKeyPress(ui::VKEY_Y, ui::EF_CONTROL_DOWN);
+
+  // Initially the kill buffer should be empty. Hence yanking should delete the
+  // selected text.
+  EXPECT_STR_EQ("abef", textfield_->text());
+  EXPECT_EQ(gfx::Range(2), textfield_->GetSelectedRange());
+
+  // Press Ctrl+K to delete to end of paragraph. This should place the deleted
+  // text in the kill buffer.
+  SendKeyPress(ui::VKEY_K, ui::EF_CONTROL_DOWN);
+
+  EXPECT_STR_EQ("ab", textfield_->text());
+  EXPECT_EQ(gfx::Range(2), textfield_->GetSelectedRange());
+
+  // Yank twice.
+  SendKeyPress(ui::VKEY_Y, ui::EF_CONTROL_DOWN);
+  SendKeyPress(ui::VKEY_Y, ui::EF_CONTROL_DOWN);
+  EXPECT_STR_EQ("abefef", textfield_->text());
+  EXPECT_EQ(gfx::Range(6), textfield_->GetSelectedRange());
+
+  // Verify pressing backspace does not modify the kill buffer.
+  SendKeyEvent(ui::VKEY_BACK);
+  SendKeyPress(ui::VKEY_Y, ui::EF_CONTROL_DOWN);
+  EXPECT_STR_EQ("abefeef", textfield_->text());
+  EXPECT_EQ(gfx::Range(7), textfield_->GetSelectedRange());
+
+  // Move focus to next textfield.
+  widget_->GetFocusManager()->AdvanceFocus(false);
+  EXPECT_EQ(2, GetFocusedView()->id());
+  Textfield* textfield2 = static_cast<Textfield*>(GetFocusedView());
+  EXPECT_TRUE(textfield2->text().empty());
+
+  // Verify yanked text persists across multiple textfields and that yanking
+  // into a password textfield works.
+  textfield2->SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
+  SendKeyPress(ui::VKEY_Y, ui::EF_CONTROL_DOWN);
+  EXPECT_STR_EQ("ef", textfield2->text());
+  EXPECT_EQ(gfx::Range(2), textfield2->GetSelectedRange());
+
+  // Verify deletion in a password textfield does not modify the kill buffer.
+  textfield2->SetText(ASCIIToUTF16("hello"));
+  textfield2->SelectRange(gfx::Range(0));
+  SendKeyPress(ui::VKEY_K, ui::EF_CONTROL_DOWN);
+  EXPECT_TRUE(textfield2->text().empty());
+
+  textfield_->RequestFocus();
+  textfield_->SelectRange(gfx::Range(0));
+  SendKeyPress(ui::VKEY_Y, ui::EF_CONTROL_DOWN);
+  EXPECT_STR_EQ("efabefeef", textfield_->text());
+}
+
+#endif  // defined(OS_MACOSX)
 
 TEST_F(TextfieldTest, CutCopyPaste) {
   InitTextfield();
@@ -1805,6 +2133,17 @@ TEST_F(TextfieldTest, CutCopyPaste) {
   EXPECT_STR_EQ("123", GetClipboardText(ui::CLIPBOARD_TYPE_COPY_PASTE));
   EXPECT_STR_EQ("", textfield_->text());
   EXPECT_EQ(ui::CLIPBOARD_TYPE_COPY_PASTE, GetAndResetCopiedToClipboard());
+
+  // Reset clipboard text.
+  SetClipboardText(ui::CLIPBOARD_TYPE_COPY_PASTE, "");
+
+  // Ensure [Shift]+[Delete] is a no-op in case there is no selection.
+  textfield_->SetText(ASCIIToUTF16("123"));
+  textfield_->SelectRange(gfx::Range(0));
+  SendAlternateCut();
+  EXPECT_STR_EQ("", GetClipboardText(ui::CLIPBOARD_TYPE_COPY_PASTE));
+  EXPECT_STR_EQ("123", textfield_->text());
+  EXPECT_EQ(ui::CLIPBOARD_TYPE_LAST, GetAndResetCopiedToClipboard());
 
   // Ensure IDS_APP_COPY copies.
   textfield_->SetText(ASCIIToUTF16("789"));
@@ -2217,7 +2556,6 @@ TEST_F(TextfieldTest, GetCompositionCharacterBounds_ComplexText) {
 
   // Make sure GetCompositionCharacterBounds never fails for index.
   gfx::Rect rects[kUtf16CharsCount];
-  gfx::Rect prev_cursor = GetCursorBounds();
   for (uint32_t i = 0; i < kUtf16CharsCount; ++i)
     EXPECT_TRUE(client->GetCompositionCharacterBounds(i, &rects[i]));
 
@@ -2395,6 +2733,46 @@ TEST_F(TextfieldTest, DISABLED_SelectionClipboard) {
   EXPECT_STR_EQ("other", GetClipboardText(ui::CLIPBOARD_TYPE_SELECTION));
   EXPECT_EQ(ui::CLIPBOARD_TYPE_LAST, GetAndResetCopiedToClipboard());
 }
+
+// Verify that the selection clipboard is not updated for selections on a
+// password textfield. Disabled due to http://crbug.com/396477.
+TEST_F(TextfieldTest, DISABLED_SelectionClipboard_Password) {
+  InitTextfields(2);
+  textfield_->SetText(ASCIIToUTF16("abcd"));
+
+  // Select-all should update the selection clipboard for a non-password
+  // textfield.
+  SendKeyEvent(ui::VKEY_A, false, true);
+  EXPECT_EQ(gfx::Range(0, 4), textfield_->GetSelectedRange());
+  EXPECT_STR_EQ("abcd", GetClipboardText(ui::CLIPBOARD_TYPE_SELECTION));
+  EXPECT_EQ(ui::CLIPBOARD_TYPE_SELECTION, GetAndResetCopiedToClipboard());
+
+  // Move focus to the next textfield.
+  widget_->GetFocusManager()->AdvanceFocus(false);
+  EXPECT_EQ(2, GetFocusedView()->id());
+  Textfield* textfield2 = static_cast<Textfield*>(GetFocusedView());
+
+  // Select-all should not modify the selection clipboard for a password
+  // textfield.
+  textfield2->SetText(ASCIIToUTF16("1234"));
+  textfield2->SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
+  SendKeyEvent(ui::VKEY_A, false, true);
+  EXPECT_EQ(gfx::Range(0, 4), textfield2->GetSelectedRange());
+  EXPECT_STR_EQ("abcd", GetClipboardText(ui::CLIPBOARD_TYPE_SELECTION));
+  EXPECT_EQ(ui::CLIPBOARD_TYPE_LAST, GetAndResetCopiedToClipboard());
+
+  // Shift-Left/Right should not modify the selection clipboard for a password
+  // textfield.
+  SendKeyEvent(ui::VKEY_LEFT, true, false);
+  EXPECT_EQ(gfx::Range(0, 3), textfield2->GetSelectedRange());
+  EXPECT_STR_EQ("abcd", GetClipboardText(ui::CLIPBOARD_TYPE_SELECTION));
+  EXPECT_EQ(ui::CLIPBOARD_TYPE_LAST, GetAndResetCopiedToClipboard());
+
+  SendKeyEvent(ui::VKEY_RIGHT, true, false);
+  EXPECT_EQ(gfx::Range(0, 4), textfield2->GetSelectedRange());
+  EXPECT_STR_EQ("abcd", GetClipboardText(ui::CLIPBOARD_TYPE_SELECTION));
+  EXPECT_EQ(ui::CLIPBOARD_TYPE_LAST, GetAndResetCopiedToClipboard());
+}
 #endif
 
 // Long_Press gesture in Textfield can initiate a drag and drop now.
@@ -2546,11 +2924,11 @@ TEST_F(TextfieldTouchSelectionTest, TouchSelectionInUnfocusableTextfield) {
 
   // Make textfield unfocusable and tap on it. Touch text selection should not
   // get activated.
-  textfield_->SetFocusable(false);
+  textfield_->SetFocusBehavior(View::FocusBehavior::NEVER);
   Tap(touch_point);
   EXPECT_FALSE(textfield_->HasFocus());
   EXPECT_FALSE(test_api_->touch_selection_controller());
-  textfield_->SetFocusable(true);
+  textfield_->SetFocusBehavior(View::FocusBehavior::ALWAYS);
 }
 
 // No touch on desktop Mac. Tracked in http://crbug.com/445520.

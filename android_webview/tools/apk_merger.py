@@ -7,23 +7,24 @@
 
 """
 
-import os
-import sys
-import shutil
-import zipfile
-import filecmp
-import tempfile
 import argparse
-import subprocess
+import collections
+import filecmp
+import os
+import pprint
 import re
+import shutil
+import sys
+import tempfile
+import zipfile
 
 SRC_DIR = os.path.join(os.path.dirname(__file__), '..', '..')
 SRC_DIR = os.path.abspath(SRC_DIR)
 BUILD_ANDROID_GYP_DIR = os.path.join(SRC_DIR, 'build/android/gyp')
 sys.path.append(BUILD_ANDROID_GYP_DIR)
 
-import finalize_apk
-from util import build_utils
+import finalize_apk # pylint: disable=import-error
+from util import build_utils # pylint: disable=import-error
 
 class ApkMergeFailure(Exception):
   pass
@@ -77,24 +78,37 @@ def GetDiffFiles(dcmp, base_dir):
   return copy_files
 
 
-def CheckFilesExpected(actual_files, expected_files):
+def CheckFilesExpected(actual_files, expected_files, component_build):
   """ Check that the lists of actual and expected files are the same. """
-  file_set = set()
-  for file_name in actual_files:
-    base_name = os.path.basename(file_name)
-    if base_name not in expected_files:
-      raise ApkMergeFailure('Found unexpected file named %s.' %
-                            file_name)
-    if base_name in file_set:
-      raise ApkMergeFailure('Duplicate file %s to add to APK!' %
-                            file_name)
-    file_set.add(base_name)
+  actual_file_names = collections.defaultdict(int)
+  for f in actual_files:
+    actual_file_names[os.path.basename(f)] += 1
+  actual_file_set = set(actual_file_names.iterkeys())
+  expected_file_set = set(expected_files.iterkeys())
 
-  if len(file_set) != len(expected_files):
-    raise ApkMergeFailure('Missing expected files to add to APK!')
+  unexpected_file_set = actual_file_set.difference(expected_file_set)
+  if component_build:
+    unexpected_file_set = set(
+        f for f in unexpected_file_set if not f.endswith('.so'))
+  missing_file_set = expected_file_set.difference(actual_file_set)
+  duplicate_file_set = set(
+      f for f, n in actual_file_names.iteritems() if n > 1)
 
+  errors = []
+  if unexpected_file_set:
+    errors.append(
+        '  unexpected files: %s' % pprint.pformat(unexpected_file_set))
+  if missing_file_set:
+    errors.append('  missing files: %s' % pprint.pformat(missing_file_set))
+  if duplicate_file_set:
+    errors.append('  duplicate files: %s' % pprint.pformat(duplicate_file_set))
 
-def AddDiffFiles(diff_files, tmp_dir_32, tmp_apk, expected_files):
+  if errors:
+    raise ApkMergeFailure(
+        "Files don't match expectations:\n%s" % '\n'.join(errors))
+
+def AddDiffFiles(diff_files, tmp_dir_32, tmp_apk, expected_files,
+                 component_build, uncompress_shared_libraries):
   """ Insert files only present in 32-bit APK into 64-bit APK (tmp_apk). """
   old_dir = os.getcwd()
   # Move into 32-bit directory to make sure the files we insert have correct
@@ -102,9 +116,16 @@ def AddDiffFiles(diff_files, tmp_dir_32, tmp_apk, expected_files):
   os.chdir(tmp_dir_32)
   try:
     for diff_file in diff_files:
-      extra_flags = expected_files[os.path.basename(diff_file)]
-      build_utils.CheckOutput(['zip', '-r', '-X', '--no-dir-entries',
-                              tmp_apk, diff_file] + extra_flags)
+      if component_build and diff_file.endswith('.so'):
+        extra_flags = []
+        if uncompress_shared_libraries:
+          extra_flags = ['-0']
+      else:
+        extra_flags = expected_files[os.path.basename(diff_file)]
+      build_utils.CheckOutput(
+          [
+              'zip', '-r', '-X', '--no-dir-entries', tmp_apk, diff_file
+          ] + extra_flags)
   except build_utils.CalledProcessError as e:
     raise ApkMergeFailure(
         'Failed to add file %s to APK: %s' % (diff_file, e.output))
@@ -126,11 +147,11 @@ def SignAndAlignApk(tmp_apk, signed_tmp_apk, new_apk, zipalign_path,
                     page_align_shared_libraries):
   try:
     finalize_apk.JarSigner(
-      keystore_path,
-      key_name,
-      key_password,
-      tmp_apk,
-      signed_tmp_apk)
+        keystore_path,
+        key_name,
+        key_password,
+        tmp_apk,
+        signed_tmp_apk)
   except build_utils.CalledProcessError as e:
     raise ApkMergeFailure('Failed to sign APK: ' + e.output)
 
@@ -160,39 +181,16 @@ def GetSecondaryAbi(apk_zipfile, shared_library):
     raise ApkMergeFailure('Failed to find secondary abi')
   return ret
 
-
-def MergeBinaries(apk, out_apk, secondary_abi_out_dir, shared_library):
-  shutil.copyfile(apk, out_apk)
-  # Remove existing signatures
-  subprocess.check_call(['zip', '-d', out_apk, 'META-INF/*.SF',
-                         'META-INF/*.RSA'])
-  with zipfile.ZipFile(out_apk, 'a') as apk_zip:
-    secondary_abi = GetSecondaryAbi(apk_zip, shared_library)
-    build_utils.AddToZipHermetic(
-        apk_zip,
-        'lib/%s/%s' % (secondary_abi, shared_library),
-        src_path = os.path.join(secondary_abi_out_dir, shared_library),
-        compress = False)
-    build_utils.AddToZipHermetic(
-        apk_zip,
-        'assets/%s' % 'snapshot_blob_64.bin',
-        src_path = os.path.join(secondary_abi_out_dir, 'snapshot_blob.bin'),
-        compress = False)
-    build_utils.AddToZipHermetic(
-        apk_zip,
-        'assets/%s' % 'natives_blob_64.bin',
-        src_path = os.path.join(secondary_abi_out_dir, 'natives_blob.bin'),
-        compress = False)
-
-
 def MergeApk(args, tmp_apk, tmp_dir_32, tmp_dir_64):
   # Expected files to copy from 32- to 64-bit APK together with an extra flag
   # setting the compression level of the file
-  expected_files = {'snapshot_blob_32.bin': ['-0'],
-                    'natives_blob_32.bin': ['-0'],
-                    args.shared_library: []}
+  expected_files = {'snapshot_blob_32.bin': ['-0']}
+  if args.shared_library:
+    expected_files[args.shared_library] = []
 
-  if args.uncompress_shared_libraries:
+  if args.debug:
+    expected_files['gdbserver'] = []
+  if args.uncompress_shared_libraries and args.shared_library:
     expected_files[args.shared_library] += ['-0']
 
   shutil.copyfile(args.apk_64bit, tmp_apk)
@@ -201,20 +199,25 @@ def MergeApk(args, tmp_apk, tmp_dir_32, tmp_dir_64):
   UnpackApk(args.apk_64bit, tmp_dir_64)
   UnpackApk(args.apk_32bit, tmp_dir_32)
 
+  ignores = ['META-INF', 'AndroidManifest.xml']
+  if args.ignore_classes_dex:
+    ignores += ['classes.dex', 'classes2.dex']
+
   dcmp = filecmp.dircmp(
       tmp_dir_64,
       tmp_dir_32,
-      ignore=['META-INF', 'AndroidManifest.xml'])
+      ignore=ignores)
 
   diff_files = GetDiffFiles(dcmp, tmp_dir_32)
 
   # Check that diff_files match exactly those files we want to insert into
   # the 64-bit APK.
-  CheckFilesExpected(diff_files, expected_files)
+  CheckFilesExpected(diff_files, expected_files, args.component_build)
 
   RemoveMetafiles(tmp_apk)
 
-  AddDiffFiles(diff_files, tmp_dir_32, tmp_apk, expected_files)
+  AddDiffFiles(diff_files, tmp_dir_32, tmp_apk, expected_files,
+               args.component_build, args.uncompress_shared_libraries)
 
 
 def main():
@@ -222,17 +225,20 @@ def main():
       description='Merge a 32-bit APK into a 64-bit APK')
   # Using type=os.path.abspath converts file paths to absolute paths so that
   # we can change working directory without affecting these paths
-  parser.add_argument('--apk_32bit', type=os.path.abspath)
-  parser.add_argument('--apk_64bit', type=os.path.abspath)
-  parser.add_argument('--secondary_abi_out_dir', type=os.path.abspath)
+  parser.add_argument('--apk_32bit', required=True, type=os.path.abspath)
+  parser.add_argument('--apk_64bit', required=True, type=os.path.abspath)
   parser.add_argument('--out_apk', required=True, type=os.path.abspath)
   parser.add_argument('--zipalign_path', required=True, type=os.path.abspath)
   parser.add_argument('--keystore_path', required=True, type=os.path.abspath)
   parser.add_argument('--key_name', required=True)
   parser.add_argument('--key_password', required=True)
-  parser.add_argument('--shared_library', required=True)
+  parser.add_argument('--shared_library')
   parser.add_argument('--page-align-shared-libraries', action='store_true')
   parser.add_argument('--uncompress-shared-libraries', action='store_true')
+  parser.add_argument('--debug', action='store_true')
+  # This option shall only used in debug build, see http://crbug.com/631494.
+  parser.add_argument('--ignore-classes-dex', action='store_true')
+  parser.add_argument('--component-build', action='store_true')
   args = parser.parse_args()
 
   tmp_dir = tempfile.mkdtemp()
@@ -243,17 +249,14 @@ def main():
   new_apk = args.out_apk
 
   try:
-    # Currently we only support merge 64-bit binaries to 32bit APK.
-    if args.secondary_abi_out_dir:
-      if not args.apk_32bit:
-        raise ExceptionApkMergeFailure('--apk_32bit should be specified')
-      MergeBinaries(args.apk_32bit,
-                    tmp_apk,
-                    args.secondary_abi_out_dir,
-                    args.shared_library)
-    else:
-      MergeApk(args, tmp_apk, tmp_dir_32, tmp_dir_64)
+    if args.component_build and args.shared_library:
+      raise ApkMergeFailure('--component-build and shared-library shouldn\'t'
+                            ' be specified at same time.')
+    if not args.component_build and not args.shared_library:
+      raise ApkMergeFailure('Either --component-build or shared-library should'
+                            ' be specified.')
 
+    MergeApk(args, tmp_apk, tmp_dir_32, tmp_dir_64)
 
     SignAndAlignApk(tmp_apk, signed_tmp_apk, new_apk, args.zipalign_path,
                     args.keystore_path, args.key_name, args.key_password,

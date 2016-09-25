@@ -10,7 +10,7 @@
 #include <string>
 
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_shutdown.h"
@@ -40,11 +40,15 @@ namespace {
 // any navigation that can be considered to be the start of a new task distinct
 // from what had previously occurred in that tab).
 bool ShouldForgetOpenersForTransition(ui::PageTransition transition) {
-  return transition == ui::PAGE_TRANSITION_TYPED ||
-      transition == ui::PAGE_TRANSITION_AUTO_BOOKMARK ||
-      transition == ui::PAGE_TRANSITION_GENERATED ||
-      transition == ui::PAGE_TRANSITION_KEYWORD ||
-      transition == ui::PAGE_TRANSITION_AUTO_TOPLEVEL;
+  return ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_TYPED) ||
+         ui::PageTransitionCoreTypeIs(transition,
+                                      ui::PAGE_TRANSITION_AUTO_BOOKMARK) ||
+         ui::PageTransitionCoreTypeIs(transition,
+                                      ui::PAGE_TRANSITION_GENERATED) ||
+         ui::PageTransitionCoreTypeIs(transition,
+                                      ui::PAGE_TRANSITION_KEYWORD) ||
+         ui::PageTransitionCoreTypeIs(transition,
+                                      ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
 }
 
 // CloseTracker is used when closing a set of WebContents. It listens for
@@ -241,7 +245,7 @@ TabStripModel::TabStripModel(TabStripModelDelegate* delegate, Profile* profile)
 }
 
 TabStripModel::~TabStripModel() {
-  STLDeleteElements(&contents_data_);
+  base::STLDeleteElements(&contents_data_);
   order_controller_.reset();
 }
 
@@ -316,7 +320,7 @@ void TabStripModel::InsertWebContentsAt(int index,
   selection_model_.IncrementFrom(index);
 
   FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
-                    TabInsertedAt(contents, index, active));
+                    TabInsertedAt(this, contents, index, active));
   if (active) {
     ui::ListSelectionModel new_model;
     new_model.Copy(selection_model_);
@@ -654,8 +658,8 @@ void TabStripModel::SetTabPinned(int index, bool pinned) {
   }
 
   FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
-                    TabPinnedStateChanged(contents_data_[index]->web_contents(),
-                                          index));
+                    TabPinnedStateChanged(
+                        this, contents_data_[index]->web_contents(), index));
 }
 
 bool TabStripModel::IsTabPinned(int index) const {
@@ -739,7 +743,8 @@ void TabStripModel::AddWebContents(WebContents* contents,
   // closed we'll jump back to the parent tab.
   bool inherit_group = (add_types & ADD_INHERIT_GROUP) == ADD_INHERIT_GROUP;
 
-  if (transition == ui::PAGE_TRANSITION_LINK &&
+  if (ui::PageTransitionTypeIncludingQualifiersIs(transition,
+                                                  ui::PAGE_TRANSITION_LINK) &&
       (add_types & ADD_FORCE_INDEX) == 0) {
     // We assume tabs opened via link clicks are part of the same task as their
     // parent.  Note that when |force_index| is true (e.g. when the user
@@ -756,7 +761,9 @@ void TabStripModel::AddWebContents(WebContents* contents,
       index = count();
   }
 
-  if (transition == ui::PAGE_TRANSITION_TYPED && index == count()) {
+  if (ui::PageTransitionTypeIncludingQualifiersIs(transition,
+                                                  ui::PAGE_TRANSITION_TYPED) &&
+      index == count()) {
     // Also, any tab opened at the end of the TabStrip with a "TYPED"
     // transition inherit group as well. This covers the cases where the user
     // creates a New Tab (e.g. Ctrl+T, or clicks the New Tab button), or types
@@ -770,7 +777,8 @@ void TabStripModel::AddWebContents(WebContents* contents,
   // Reset the index, just in case insert ended up moving it on us.
   index = GetIndexOfWebContents(contents);
 
-  if (inherit_group && transition == ui::PAGE_TRANSITION_TYPED)
+  if (inherit_group && ui::PageTransitionTypeIncludingQualifiersIs(
+                           transition, ui::PAGE_TRANSITION_TYPED))
     contents_data_[index]->set_reset_group_on_select(true);
 
   // TODO(sky): figure out why this is here and not in InsertWebContentsAt. When
@@ -785,7 +793,8 @@ void TabStripModel::AddWebContents(WebContents* contents,
   // new background tab.
   if (WebContents* old_contents = GetActiveWebContents()) {
     if ((add_types & ADD_ACTIVE) == 0) {
-      ResizeWebContents(contents, old_contents->GetContainerBounds().size());
+      ResizeWebContents(
+          contents, gfx::Rect(old_contents->GetContainerBounds().size()));
     }
   }
 }
@@ -1021,20 +1030,15 @@ std::vector<int> TabStripModel::GetIndicesClosedByCommand(
   DCHECK(ContainsIndex(index));
   DCHECK(id == CommandCloseTabsToRight || id == CommandCloseOtherTabs);
   bool is_selected = IsTabSelected(index);
-  int start;
+  int last_unclosed_tab = -1;
   if (id == CommandCloseTabsToRight) {
-    if (is_selected) {
-      start = selection_model_.selected_indices()[
-          selection_model_.selected_indices().size() - 1] + 1;
-    } else {
-      start = index + 1;
-    }
-  } else {
-    start = 0;
+    last_unclosed_tab =
+        is_selected ? selection_model_.selected_indices().back() : index;
   }
+
   // NOTE: callers expect the vector to be sorted in descending order.
   std::vector<int> indices;
-  for (int i = count() - 1; i >= start; --i) {
+  for (int i = count() - 1; i > last_unclosed_tab; --i) {
     if (i != index && !IsTabPinned(i) && (!is_selected || !IsTabSelected(i)))
       indices.push_back(i);
   }

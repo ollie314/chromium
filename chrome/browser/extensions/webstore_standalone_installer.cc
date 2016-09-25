@@ -29,15 +29,6 @@ using content::WebContents;
 
 namespace extensions {
 
-const char kInvalidWebstoreItemId[] = "Invalid Chrome Web Store item ID";
-const char kWebstoreRequestError[] =
-    "Could not fetch data from the Chrome Web Store";
-const char kInvalidWebstoreResponseError[] = "Invalid Chrome Web Store reponse";
-const char kInvalidManifestError[] = "Invalid manifest";
-const char kUserCancelledError[] = "User cancelled install";
-const char kExtensionIsBlacklisted[] = "Extension is blacklisted";
-const char kInstallInProgressError[] = "An install is already in progress";
-
 WebstoreStandaloneInstaller::WebstoreStandaloneInstaller(
     const std::string& webstore_item_id,
     Profile* profile,
@@ -58,7 +49,8 @@ void WebstoreStandaloneInstaller::BeginInstall() {
   AddRef();
 
   if (!crx_file::id_util::IdIsValid(id_)) {
-    CompleteInstall(webstore_install::INVALID_ID, kInvalidWebstoreItemId);
+    CompleteInstall(webstore_install::INVALID_ID,
+                    webstore_install::kInvalidWebstoreItemId);
     return;
   }
 
@@ -113,7 +105,7 @@ bool WebstoreStandaloneInstaller::EnsureUniqueInstall(
       tracker->GetActiveInstall(id_);
   if (existing_install_data) {
     *reason = webstore_install::INSTALL_IN_PROGRESS;
-    *error = kInstallInProgressError;
+    *error = webstore_install::kInstallInProgressError;
     return false;
   }
 
@@ -173,7 +165,7 @@ void WebstoreStandaloneInstaller::OnManifestParsed() {
 
 std::unique_ptr<ExtensionInstallPrompt>
 WebstoreStandaloneInstaller::CreateInstallUI() {
-  return base::WrapUnique(new ExtensionInstallPrompt(GetWebContents()));
+  return base::MakeUnique<ExtensionInstallPrompt>(GetWebContents());
 }
 
 std::unique_ptr<WebstoreInstaller::Approval>
@@ -181,8 +173,7 @@ WebstoreStandaloneInstaller::CreateApproval() const {
   std::unique_ptr<WebstoreInstaller::Approval> approval(
       WebstoreInstaller::Approval::CreateWithNoInstallPrompt(
           profile_, id_,
-          std::unique_ptr<base::DictionaryValue>(manifest_.get()->DeepCopy()),
-          true));
+          std::unique_ptr<base::DictionaryValue>(manifest_->DeepCopy()), true));
   approval->skip_post_install_ui = !ShouldShowPostInstallUI();
   approval->use_app_installed_bubble = ShouldShowAppInstalledBubble();
   approval->installing_icon = gfx::ImageSkia::CreateFrom1xBitmap(icon_);
@@ -192,7 +183,8 @@ WebstoreStandaloneInstaller::CreateApproval() const {
 void WebstoreStandaloneInstaller::OnInstallPromptDone(
     ExtensionInstallPrompt::Result result) {
   if (result == ExtensionInstallPrompt::Result::USER_CANCELED) {
-    CompleteInstall(webstore_install::USER_CANCELLED, kUserCancelledError);
+    CompleteInstall(webstore_install::USER_CANCELLED,
+                    webstore_install::kUserCancelledError);
     return;
   }
 
@@ -218,7 +210,7 @@ void WebstoreStandaloneInstaller::OnInstallPromptDone(
     if (ExtensionPrefs::Get(profile_)->IsExtensionBlacklisted(id_)) {
       // Don't install a blacklisted extension.
       install_result = webstore_install::BLACKLISTED;
-      install_message = kExtensionIsBlacklisted;
+      install_message = webstore_install::kExtensionIsBlacklisted;
     } else if (!extension_service->IsExtensionEnabled(id_)) {
       // If the extension is installed but disabled, and not blacklisted,
       // enable it.
@@ -240,7 +232,7 @@ void WebstoreStandaloneInstaller::OnInstallPromptDone(
 void WebstoreStandaloneInstaller::OnWebstoreRequestFailure() {
   OnWebStoreDataFetcherDone();
   CompleteInstall(webstore_install::WEBSTORE_REQUEST_ERROR,
-                  kWebstoreRequestError);
+                  webstore_install::kWebstoreRequestError);
 }
 
 void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
@@ -271,7 +263,7 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
       !webstore_data->GetDouble(kAverageRatingKey, &average_rating_) ||
       !webstore_data->GetInteger(kRatingCountKey, &rating_count_)) {
     CompleteInstall(webstore_install::INVALID_WEBSTORE_RESPONSE,
-                    kInvalidWebstoreResponseError);
+                    webstore_install::kInvalidWebstoreResponseError);
     return;
   }
 
@@ -282,7 +274,7 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
   if (average_rating_ < ExtensionInstallPrompt::kMinExtensionRating ||
       average_rating_ > ExtensionInstallPrompt::kMaxExtensionRating) {
     CompleteInstall(webstore_install::INVALID_WEBSTORE_RESPONSE,
-                    kInvalidWebstoreResponseError);
+                    webstore_install::kInvalidWebstoreResponseError);
     return;
   }
 
@@ -293,7 +285,7 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
       !webstore_data->GetString(
           kLocalizedDescriptionKey, &localized_description_))) {
     CompleteInstall(webstore_install::INVALID_WEBSTORE_RESPONSE,
-                    kInvalidWebstoreResponseError);
+                    webstore_install::kInvalidWebstoreResponseError);
     return;
   }
 
@@ -303,14 +295,14 @@ void WebstoreStandaloneInstaller::OnWebstoreResponseParseSuccess(
     std::string icon_url_string;
     if (!webstore_data->GetString(kIconUrlKey, &icon_url_string)) {
       CompleteInstall(webstore_install::INVALID_WEBSTORE_RESPONSE,
-                      kInvalidWebstoreResponseError);
+                      webstore_install::kInvalidWebstoreResponseError);
       return;
     }
     icon_url = GURL(extension_urls::GetWebstoreLaunchURL()).Resolve(
         icon_url_string);
     if (!icon_url.is_valid()) {
       CompleteInstall(webstore_install::INVALID_WEBSTORE_RESPONSE,
-                      kInvalidWebstoreResponseError);
+                      webstore_install::kInvalidWebstoreResponseError);
       return;
     }
   }
@@ -403,7 +395,8 @@ void WebstoreStandaloneInstaller::ShowInstallUI() {
   scoped_refptr<const Extension> localized_extension =
       GetLocalizedExtensionForDisplay();
   if (!localized_extension.get()) {
-    CompleteInstall(webstore_install::INVALID_MANIFEST, kInvalidManifestError);
+    CompleteInstall(webstore_install::INVALID_MANIFEST,
+                    webstore_install::kInvalidManifestError);
     return;
   }
 

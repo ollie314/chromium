@@ -5,25 +5,27 @@
 #include "components/wifi_sync/wifi_credential_syncable_service.h"
 
 #include <stdint.h>
+
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "base/tracked_objects.h"
+#include "components/sync/api/attachments/attachment_id.h"
+#include "components/sync/api/fake_sync_change_processor.h"
+#include "components/sync/api/sync_change.h"
+#include "components/sync/api/sync_data.h"
+#include "components/sync/api/sync_error.h"
+#include "components/sync/api/sync_error_factory_mock.h"
+#include "components/sync/core/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/protocol/sync.pb.h"
 #include "components/wifi_sync/wifi_config_delegate.h"
 #include "components/wifi_sync/wifi_credential.h"
 #include "components/wifi_sync/wifi_security_class.h"
-#include "sync/api/attachments/attachment_id.h"
-#include "sync/api/fake_sync_change_processor.h"
-#include "sync/api/sync_change.h"
-#include "sync/api/sync_data.h"
-#include "sync/api/sync_error.h"
-#include "sync/api/sync_error_factory_mock.h"
-#include "sync/internal_api/public/attachments/attachment_service_proxy_for_test.h"
-#include "sync/protocol/sync.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace wifi_sync {
@@ -67,7 +69,7 @@ class WifiCredentialSyncableServiceTest : public testing::Test {
       : config_delegate_(new FakeWifiConfigDelegate()),
         change_processor_(nullptr) {
     syncable_service_.reset(
-        new WifiCredentialSyncableService(make_scoped_ptr(config_delegate_)));
+        new WifiCredentialSyncableService(base::WrapUnique(config_delegate_)));
   }
 
   // Wrappers for methods in WifiCredentialSyncableService.
@@ -97,7 +99,7 @@ class WifiCredentialSyncableServiceTest : public testing::Test {
   WifiCredential MakeCredential(const std::string& ssid,
                                 WifiSecurityClass security_class,
                                 const std::string& passphrase) {
-    scoped_ptr<WifiCredential> credential = WifiCredential::Create(
+    std::unique_ptr<WifiCredential> credential = WifiCredential::Create(
         WifiCredential::MakeSsidBytesForTest(ssid), security_class, passphrase);
     CHECK(credential);
     return *credential;
@@ -139,17 +141,16 @@ class WifiCredentialSyncableServiceTest : public testing::Test {
   }
 
   void StartSyncing() {
-    scoped_ptr<FakeSyncChangeProcessor> change_processor(
+    std::unique_ptr<FakeSyncChangeProcessor> change_processor(
         new FakeSyncChangeProcessor());
     change_processor_ = change_processor.get();
     syncable_service_->MergeDataAndStartSyncing(
         syncer::WIFI_CREDENTIALS, syncer::SyncDataList(),
-        std::move(change_processor),
-        make_scoped_ptr(new SyncErrorFactoryMock()));
+        std::move(change_processor), base::MakeUnique<SyncErrorFactoryMock>());
   }
 
  private:
-  scoped_ptr<WifiCredentialSyncableService> syncable_service_;
+  std::unique_ptr<WifiCredentialSyncableService> syncable_service_;
   FakeWifiConfigDelegate* config_delegate_;    // Owned by |syncable_service_|
   FakeSyncChangeProcessor* change_processor_;  // Owned by |syncable_service_|
 

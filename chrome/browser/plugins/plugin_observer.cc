@@ -9,7 +9,8 @@
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/debug/crash_logging.h"
-#include "base/metrics/histogram.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -23,6 +24,8 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
+#include "components/component_updater/component_updater_service.h"
 #include "components/content_settings/content/common/content_settings_messages.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
@@ -36,7 +39,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/webplugininfo.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/vector_icons_public.h"
 
@@ -164,7 +166,7 @@ ReloadPluginInfoBarDelegate::ReloadPluginInfoBarDelegate(
     : controller_(controller),
       message_(message) {}
 
-ReloadPluginInfoBarDelegate::~ReloadPluginInfoBarDelegate(){ }
+ReloadPluginInfoBarDelegate::~ReloadPluginInfoBarDelegate() {}
 
 infobars::InfoBarDelegate::InfoBarIdentifier
 ReloadPluginInfoBarDelegate::GetIdentifier() const {
@@ -255,6 +257,54 @@ class PluginObserver::PluginPlaceholderHost : public PluginInstallerObserver {
 };
 #endif  // defined(ENABLE_PLUGIN_INSTALLATION)
 
+class PluginObserver::ComponentObserver
+    : public update_client::UpdateClient::Observer {
+ public:
+  using Events = update_client::UpdateClient::Observer::Events;
+  ComponentObserver(PluginObserver* observer,
+                    int routing_id,
+                    const std::string& component_id)
+      : observer_(observer),
+        routing_id_(routing_id),
+        component_id_(component_id) {
+    g_browser_process->component_updater()->AddObserver(this);
+  }
+
+  ~ComponentObserver() override {
+    g_browser_process->component_updater()->RemoveObserver(this);
+  }
+
+  void OnEvent(Events event, const std::string& id) override {
+    if (id != component_id_)
+      return;
+    switch (event) {
+      case Events::COMPONENT_UPDATED:
+        observer_->Send(
+            new ChromeViewMsg_PluginComponentUpdateSuccess(routing_id_));
+        observer_->RemoveComponentObserver(routing_id_);
+        break;
+      case Events::COMPONENT_UPDATE_FOUND:
+        observer_->Send(
+            new ChromeViewMsg_PluginComponentUpdateDownloading(routing_id_));
+        break;
+      case Events::COMPONENT_NOT_UPDATED:
+        observer_->Send(
+            new ChromeViewMsg_PluginComponentUpdateFailure(routing_id_));
+        observer_->RemoveComponentObserver(routing_id_);
+        break;
+      default:
+        // No message to send.
+        break;
+    }
+  }
+
+ private:
+  PluginObserver* observer_;
+  int routing_id_;
+  std::string component_id_;
+  DISALLOW_COPY_AND_ASSIGN(ComponentObserver);
+};
+
 PluginObserver::PluginObserver(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       weak_ptr_factory_(this) {
@@ -262,7 +312,7 @@ PluginObserver::PluginObserver(content::WebContents* web_contents)
 
 PluginObserver::~PluginObserver() {
 #if defined(ENABLE_PLUGIN_INSTALLATION)
-  STLDeleteValues(&plugin_placeholders_);
+  base::STLDeleteValues(&plugin_placeholders_);
 #endif
 }
 
@@ -321,12 +371,16 @@ bool PluginObserver::OnMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(PluginObserver, message)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_BlockedOutdatedPlugin,
                         OnBlockedOutdatedPlugin)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_BlockedComponentUpdatedPlugin,
+                        OnBlockedComponentUpdatedPlugin)
 #if defined(ENABLE_PLUGIN_INSTALLATION)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RemovePluginPlaceholderHost,
                         OnRemovePluginPlaceholderHost)
 #endif
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_OpenAboutPlugins,
                         OnOpenAboutPlugins)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ShowFlashPermissionBubble,
+                        OnShowFlashPermissionBubble)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_CouldNotLoadPlugin,
                         OnCouldNotLoadPlugin)
 
@@ -359,6 +413,22 @@ void PluginObserver::OnBlockedOutdatedPlugin(int placeholder_id,
 #endif  // defined(ENABLE_PLUGIN_INSTALLATION)
 }
 
+void PluginObserver::OnBlockedComponentUpdatedPlugin(
+    int placeholder_id,
+    const std::string& identifier) {
+  component_observers_[placeholder_id] =
+      base::MakeUnique<ComponentObserver>(this, placeholder_id, identifier);
+  g_browser_process->component_updater()->GetOnDemandUpdater().OnDemandUpdate(
+      identifier,
+      component_updater::ComponentUpdateService::CompletionCallback());
+}
+
+void PluginObserver::RemoveComponentObserver(int placeholder_id) {
+  auto it = component_observers_.find(placeholder_id);
+  DCHECK(it != component_observers_.end());
+  component_observers_.erase(it);
+}
+
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 void PluginObserver::OnRemovePluginPlaceholderHost(int placeholder_id) {
   std::map<int, PluginPlaceholderHost*>::iterator it =
@@ -373,13 +443,18 @@ void PluginObserver::OnRemovePluginPlaceholderHost(int placeholder_id) {
 #endif  // defined(ENABLE_PLUGIN_INSTALLATION)
 
 void PluginObserver::OnOpenAboutPlugins() {
-  web_contents()->OpenURL(OpenURLParams(
-      GURL(chrome::kChromeUIPluginsURL),
-      content::Referrer::SanitizeForRequest(
-          GURL(chrome::kChromeUIPluginsURL),
-          content::Referrer(web_contents()->GetURL(),
-                            blink::WebReferrerPolicyDefault)),
-      NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_AUTO_BOOKMARK, false));
+  web_contents()->OpenURL(
+      OpenURLParams(GURL(chrome::kChromeUIPluginsURL),
+                    content::Referrer::SanitizeForRequest(
+                        GURL(chrome::kChromeUIPluginsURL),
+                        content::Referrer(web_contents()->GetURL(),
+                                          blink::WebReferrerPolicyDefault)),
+                    WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                    ui::PAGE_TRANSITION_AUTO_BOOKMARK, false));
+}
+
+void PluginObserver::OnShowFlashPermissionBubble() {
+  // TODO(tommycli): Show a permission bubble for the associated tab.
 }
 
 void PluginObserver::OnCouldNotLoadPlugin(const base::FilePath& plugin_path) {

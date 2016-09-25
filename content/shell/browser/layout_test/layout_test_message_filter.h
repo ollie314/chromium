@@ -63,7 +63,7 @@ class LayoutTestMessageFilter : public BrowserMessageFilter {
   void OnSimulateWebNotificationClose(const std::string& title, bool by_user);
   void OnSetPushMessagingPermission(const GURL& origin, bool allowed);
   void OnClearPushMessagingPermissions();
-  void OnAcceptAllCookies(bool accept);
+  void OnBlockThirdPartyCookies(bool block);
   void OnDeleteAllCookies();
   void OnSetPermission(const std::string& name,
                        blink::mojom::PermissionStatus status,
@@ -72,6 +72,7 @@ class LayoutTestMessageFilter : public BrowserMessageFilter {
   void OnResetPermissions();
   void OnLayoutTestRuntimeFlagsChanged(
       const base::DictionaryValue& changed_layout_test_runtime_flags);
+  void OnTestFinishedInSecondaryRenderer();
 
   int render_process_id_;
 

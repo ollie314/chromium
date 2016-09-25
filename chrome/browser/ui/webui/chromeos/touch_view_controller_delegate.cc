@@ -4,17 +4,17 @@
 
 #include "chrome/browser/ui/webui/chromeos/touch_view_controller_delegate.h"
 
-#include "ash/shell.h"
-#include "ash/wm/maximize_mode/maximize_mode_controller.h"
+#include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
+#include "ash/common/wm_shell.h"
 
 namespace chromeos {
 
 TouchViewControllerDelegate::TouchViewControllerDelegate() {
-  ash::Shell::GetInstance()->AddShellObserver(this);
+  ash::WmShell::Get()->AddShellObserver(this);
 }
 
 TouchViewControllerDelegate::~TouchViewControllerDelegate() {
-  ash::Shell::GetInstance()->RemoveShellObserver(this);
+  ash::WmShell::Get()->RemoveShellObserver(this);
 }
 
 void TouchViewControllerDelegate::AddObserver(Observer* observer) {
@@ -26,8 +26,9 @@ void TouchViewControllerDelegate::RemoveObserver(Observer* observer) {
 }
 
 bool TouchViewControllerDelegate::IsMaximizeModeEnabled() const {
-  return ash::Shell::GetInstance()->maximize_mode_controller()->
-      IsMaximizeModeWindowManagerEnabled();
+  return ash::WmShell::Get()
+      ->maximize_mode_controller()
+      ->IsMaximizeModeWindowManagerEnabled();
 }
 
 void TouchViewControllerDelegate::OnMaximizeModeStarted() {

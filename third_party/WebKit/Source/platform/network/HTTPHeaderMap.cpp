@@ -30,6 +30,9 @@
 
 #include "platform/network/HTTPHeaderMap.h"
 
+#include "wtf/PtrUtil.h"
+#include <memory>
+
 namespace blink {
 
 HTTPHeaderMap::HTTPHeaderMap()
@@ -40,19 +43,19 @@ HTTPHeaderMap::~HTTPHeaderMap()
 {
 }
 
-PassOwnPtr<CrossThreadHTTPHeaderMapData> HTTPHeaderMap::copyData() const
+std::unique_ptr<CrossThreadHTTPHeaderMapData> HTTPHeaderMap::copyData() const
 {
-    OwnPtr<CrossThreadHTTPHeaderMapData> data = adoptPtr(new CrossThreadHTTPHeaderMapData());
+    std::unique_ptr<CrossThreadHTTPHeaderMapData> data = wrapUnique(new CrossThreadHTTPHeaderMapData());
     data->reserveInitialCapacity(size());
 
     HTTPHeaderMap::const_iterator endIt = end();
     for (HTTPHeaderMap::const_iterator it = begin(); it != endIt; ++it)
         data->uncheckedAppend(std::make_pair(it->key.getString().isolatedCopy(), it->value.getString().isolatedCopy()));
 
-    return data.release();
+    return data;
 }
 
-void HTTPHeaderMap::adopt(PassOwnPtr<CrossThreadHTTPHeaderMapData> data)
+void HTTPHeaderMap::adopt(std::unique_ptr<CrossThreadHTTPHeaderMapData> data)
 {
     clear();
     size_t dataSize = data->size();

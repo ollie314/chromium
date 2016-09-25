@@ -6,10 +6,11 @@
 
 #include "base/at_exit.h"
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/device_event_log/device_event_log.h"
 
@@ -55,8 +56,8 @@ void HidService::GetDevices(const GetDevicesCallback& callback) {
     for (const auto& map_entry : devices_) {
       devices.push_back(map_entry.second);
     }
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::Bind(callback, devices));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback, devices));
   } else {
     pending_enumerations_.push_back(callback);
   }
@@ -90,7 +91,7 @@ HidService::~HidService() {
 
 void HidService::AddDevice(scoped_refptr<HidDeviceInfo> device_info) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!ContainsKey(devices_, device_info->device_id())) {
+  if (!base::ContainsKey(devices_, device_info->device_id())) {
     devices_[device_info->device_id()] = device_info;
 
     HID_LOG(USER) << "HID device "

@@ -8,15 +8,16 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "content/browser/renderer_host/input/input_ack_handler.h"
 #include "content/browser/renderer_host/input/input_router_client.h"
 #include "content/browser/renderer_host/input/input_router_impl.h"
-#include "content/common/input/web_input_event_traits.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
 #include "ipc/ipc_sender.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/perf/perf_test.h"
+#include "ui/events/blink/web_input_event_traits.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
 using base::TimeDelta;
@@ -86,9 +87,11 @@ class NullInputRouterClient : public InputRouterClient {
   void DecrementInFlightEventCount() override {}
   void OnHasTouchEventHandlers(bool has_handlers) override {}
   void DidFlush() override {}
-  void DidOverscroll(const DidOverscrollParams& params) override {}
+  void DidOverscroll(const ui::DidOverscrollParams& params) override {}
   void DidStopFlinging() override {}
-  void ForwardGestureEvent(const blink::WebGestureEvent& event) override {}
+  void ForwardGestureEventWithLatencyInfo(
+      const blink::WebGestureEvent& event,
+      const ui::LatencyInfo& latency_info) override {}
 };
 
 class NullIPCSender : public IPC::Sender {
@@ -221,7 +224,7 @@ class InputRouterImplPerfTest : public testing::Test {
   }
 
   void TearDown() override {
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
 
     input_router_.reset();
     ack_handler_.reset();
@@ -241,7 +244,7 @@ class InputRouterImplPerfTest : public testing::Test {
 
   void SendEventAckIfNecessary(const blink::WebInputEvent& event,
                                InputEventAckState ack_result) {
-    if (!WebInputEventTraits::ShouldBlockEventStream(event))
+    if (!ui::WebInputEventTraits::ShouldBlockEventStream(event))
       return;
     InputEventAck ack(event.type, ack_result);
     InputHostMsg_HandleInputEvent_ACK response(0, ack);

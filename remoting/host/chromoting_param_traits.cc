@@ -13,6 +13,13 @@
 namespace IPC {
 
 // static
+void ParamTraits<webrtc::DesktopVector>::GetSize(base::PickleSizer* s,
+                                                 const param_type& p) {
+  GetParamSize(s, p.x());
+  GetParamSize(s, p.y());
+}
+
+// static
 void ParamTraits<webrtc::DesktopVector>::Write(base::Pickle* m,
                                                const webrtc::DesktopVector& p) {
   m->WriteInt(p.x());
@@ -38,6 +45,13 @@ void ParamTraits<webrtc::DesktopVector>::Log(const webrtc::DesktopVector& p,
 }
 
 // static
+void ParamTraits<webrtc::DesktopSize>::GetSize(base::PickleSizer* s,
+                                               const param_type& p) {
+  GetParamSize(s, p.width());
+  GetParamSize(s, p.height());
+}
+
+// static
 void ParamTraits<webrtc::DesktopSize>::Write(base::Pickle* m,
                                              const webrtc::DesktopSize& p) {
   m->WriteInt(p.width());
@@ -60,6 +74,15 @@ void ParamTraits<webrtc::DesktopSize>::Log(const webrtc::DesktopSize& p,
                                            std::string* l) {
   l->append(base::StringPrintf("webrtc::DesktopSize(%d, %d)",
                                p.width(), p.height()));
+}
+
+// static
+void ParamTraits<webrtc::DesktopRect>::GetSize(base::PickleSizer* s,
+                                               const param_type& p) {
+  GetParamSize(s, p.left());
+  GetParamSize(s, p.top());
+  GetParamSize(s, p.right());
+  GetParamSize(s, p.bottom());
 }
 
 // static
@@ -187,56 +210,6 @@ void ParamTraits<remoting::ScreenResolution>::Log(
   l->append(base::StringPrintf("webrtc::ScreenResolution(%d, %d, %d, %d)",
                                p.dimensions().width(), p.dimensions().height(),
                                p.dpi().x(), p.dpi().y()));
-}
-
-// static
-void ParamTraits<net::IPAddress>::Write(base::Pickle* m, const param_type& p) {
-  WriteParam(m, p.bytes());
-}
-
-// static
-bool ParamTraits<net::IPAddress>::Read(const base::Pickle* m,
-                                       base::PickleIterator* iter,
-                                       param_type* p) {
-  std::vector<uint8_t> bytes;
-  if (!ReadParam(m, iter, &bytes))
-    return false;
-
-  net::IPAddress address(bytes);
-  if (address.empty() || address.IsValid()) {
-    *p = address;
-    return true;
-  }
-  return false;
-}
-
-// static
-void ParamTraits<net::IPAddress>::Log(const param_type& p, std::string* l) {
-  l->append("IPAddress:" + (p.empty() ? "(empty)" : p.ToString()));
-}
-
-// static
-void ParamTraits<net::IPEndPoint>::Write(base::Pickle* m, const param_type& p) {
-  WriteParam(m, p.address());
-  WriteParam(m, p.port());
-}
-
-// static
-bool ParamTraits<net::IPEndPoint>::Read(const base::Pickle* m,
-                                        base::PickleIterator* iter,
-                                        param_type* p) {
-  net::IPAddress address;
-  uint16_t port;
-  if (!ReadParam(m, iter, &address) || !ReadParam(m, iter, &port))
-    return false;
-
-  *p = net::IPEndPoint(address, port);
-  return true;
-}
-
-// static
-void ParamTraits<net::IPEndPoint>::Log(const param_type& p, std::string* l) {
-  l->append("IPEndPoint: " + p.ToString());
 }
 
 }  // namespace IPC

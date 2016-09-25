@@ -19,6 +19,7 @@
 
 #include "core/layout/svg/SVGTextLayoutAttributesBuilder.h"
 
+#include "core/layout/api/LineLayoutSVGInlineText.h"
 #include "core/layout/svg/LayoutSVGInline.h"
 #include "core/layout/svg/LayoutSVGInlineText.h"
 #include "core/layout/svg/LayoutSVGText.h"
@@ -30,19 +31,17 @@ namespace {
 
 void updateLayoutAttributes(LayoutSVGInlineText& text, unsigned& valueListPosition, const SVGCharacterDataMap& allCharactersMap)
 {
-    SVGTextLayoutAttributes& attributes = *text.layoutAttributes();
-    attributes.clear();
+    SVGCharacterDataMap& characterDataMap = text.characterDataMap();
+    characterDataMap.clear();
 
-    const Vector<SVGTextMetrics>& metricsList = text.metricsList();
-    auto metricsEnd = metricsList.end();
-    unsigned currentPosition = 0;
-    for (auto metrics = metricsList.begin(); metrics != metricsEnd; currentPosition += metrics->length(), ++metrics) {
-        if (metrics->isEmpty())
+    LineLayoutSVGInlineText textLineLayout(&text);
+    for (SVGInlineTextMetricsIterator iterator(textLineLayout); !iterator.isAtEnd(); iterator.next()) {
+        if (iterator.metrics().isEmpty())
             continue;
 
         auto it = allCharactersMap.find(valueListPosition + 1);
         if (it != allCharactersMap.end())
-            attributes.characterDataMap().set(currentPosition + 1, it->value);
+            characterDataMap.set(iterator.characterOffset() + 1, it->value);
 
         // Increase the position in the value/attribute list with one for each
         // "character unit" (that will be displayed.)
@@ -147,9 +146,9 @@ void SVGTextLayoutAttributesBuilder::buildCharacterDataMap(LayoutSVGText& textRo
 
     // Handle x/y default attributes.
     SVGCharacterData& data = m_characterDataMap.add(1, SVGCharacterData()).storedValue->value;
-    if (SVGTextLayoutAttributes::isEmptyValue(data.x))
+    if (!data.hasX())
         data.x = 0;
-    if (SVGTextLayoutAttributes::isEmptyValue(data.y))
+    if (!data.hasY())
         data.y = 0;
 }
 

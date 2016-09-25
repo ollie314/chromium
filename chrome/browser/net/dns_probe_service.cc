@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
@@ -22,7 +22,6 @@ using base::StringToInt;
 using error_page::DnsProbeStatus;
 using net::DnsClient;
 using net::DnsConfig;
-using net::ParseIPLiteralToNumber;
 using net::NetworkChangeNotifier;
 
 namespace chrome_browser_net {

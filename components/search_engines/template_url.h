@@ -7,16 +7,17 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
+#include "components/search_engines/search_engine_type.h"
 #include "components/search_engines/template_url_data.h"
 #include "components/search_engines/template_url_id.h"
 #include "ui/gfx/geometry/size.h"
@@ -82,20 +83,20 @@ class TemplateURLRef {
       // parameters.
       // TODO(donnd): Remove base_page_url and selection parameters once
       // they are logged from the HTTP header.
-      ContextualSearchParams(const int version,
+      ContextualSearchParams(int version,
                              const std::string& selection,
                              const std::string& base_page_url,
-                             const bool resolve);
+                             int now_on_tap_version);
       // TODO(donnd): Delete constructor once Clank, iOS, and tests no
       // longer depend on it.
-      ContextualSearchParams(const int version,
-                             const size_t start,
-                             const size_t end,
+      ContextualSearchParams(int version,
+                             size_t start,
+                             size_t end,
                              const std::string& selection,
                              const std::string& content,
                              const std::string& base_page_url,
                              const std::string& encoding,
-                             const bool resolve);
+                             int now_on_tap_version);
       ContextualSearchParams(const ContextualSearchParams& other);
       ~ContextualSearchParams();
 
@@ -120,10 +121,9 @@ class TemplateURLRef {
       // The encoding of content.
       std::string encoding;
 
-      // If true, the server will generate a search term based on the user
-      // selection and context.  Otherwise the user selection will be used as-is
-      // as the search term.
-      bool resolve;
+      // The version of Now on Tap data to request.
+      // A value of 0 indicates no data needed.
+      int now_on_tap_version;
     };
 
     // The search terms (query).
@@ -467,6 +467,8 @@ class TemplateURLRef {
   mutable std::string search_term_key_;
   mutable size_t search_term_position_in_path_;
   mutable url::Parsed::ComponentType search_term_key_location_;
+  mutable std::string search_term_value_prefix_;
+  mutable std::string search_term_value_suffix_;
 
   mutable PostParams post_params_;
 
@@ -496,15 +498,15 @@ class TemplateURL {
     NORMAL_CONTROLLED_BY_EXTENSION,
     // The keyword associated with an extension that uses the Omnibox API.
     OMNIBOX_API_EXTENSION,
+    // Installed only on this device. Should not be synced.
+    LOCAL,
   };
 
   // An AssociatedExtensionInfo represents information about the extension that
   // added the search engine.
   struct AssociatedExtensionInfo {
-    AssociatedExtensionInfo(Type type, const std::string& extension_id);
+    explicit AssociatedExtensionInfo(const std::string& extension_id);
     ~AssociatedExtensionInfo();
-
-    Type type;
 
     std::string extension_id;
 
@@ -516,7 +518,7 @@ class TemplateURL {
     base::Time install_time;
   };
 
-  explicit TemplateURL(const TemplateURLData& data);
+  explicit TemplateURL(const TemplateURLData& data, Type type = NORMAL);
   ~TemplateURL();
 
   // Generates a suitable keyword for the specified url, which must be valid.
@@ -610,9 +612,15 @@ class TemplateURL {
     return contextual_search_url_ref_;
   }
 
+  Type type() const { return type_; }
+  // TODO(ianwen): remove set_type() once RestoreExtensionInfoIfNecessary() no
+  // longer needs it.
+  void set_type(Type type) { type_ = type; }
+
   // This setter shouldn't be used except by TemplateURLService and
   // TemplateURLServiceClient implementations.
-  void set_extension_info(scoped_ptr<AssociatedExtensionInfo> extension_info) {
+  void set_extension_info(
+      std::unique_ptr<AssociatedExtensionInfo> extension_info) {
     extension_info_ = std::move(extension_info);
   }
 
@@ -634,12 +642,15 @@ class TemplateURL {
   bool HasSameKeywordAs(const TemplateURLData& other,
                         const SearchTermsData& search_terms_data) const;
 
-  Type GetType() const;
-
   // Returns the id of the extension that added this search engine. Only call
   // this for TemplateURLs of type NORMAL_CONTROLLED_BY_EXTENSION or
   // OMNIBOX_API_EXTENSION.
   std::string GetExtensionId() const;
+
+  // Returns the type of this search engine, or SEARCH_ENGINE_OTHER if no
+  // engines match.
+  SearchEngineType GetEngineType(
+      const SearchTermsData& search_terms_data) const;
 
   // Use the alternate URLs and the search URL to match the provided |url|
   // and extract |search_terms| from it. Returns false and an empty
@@ -744,7 +755,12 @@ class TemplateURL {
   TemplateURLRef image_url_ref_;
   TemplateURLRef new_tab_url_ref_;
   TemplateURLRef contextual_search_url_ref_;
-  scoped_ptr<AssociatedExtensionInfo> extension_info_;
+  std::unique_ptr<AssociatedExtensionInfo> extension_info_;
+
+  Type type_;
+
+  // Caches the computed engine type across successive calls to GetEngineType().
+  mutable SearchEngineType engine_type_;
 
   // TODO(sky): Add date last parsed OSD file.
 

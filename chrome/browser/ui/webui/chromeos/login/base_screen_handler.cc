@@ -12,7 +12,6 @@
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "components/login/localized_values_builder.h"
 #include "content/public/browser/web_ui.h"
-#include "ui/base/l10n/l10n_util.h"
 
 namespace chromeos {
 
@@ -44,7 +43,7 @@ void BaseScreenHandler::InitializeBase() {
 }
 
 void BaseScreenHandler::GetLocalizedStrings(base::DictionaryValue* dict) {
-  auto builder = base::WrapUnique(new ::login::LocalizedValuesBuilder(dict));
+  auto builder = base::MakeUnique<::login::LocalizedValuesBuilder>(dict);
   DeclareLocalizedValues(builder.get());
   GetAdditionalParameters(dict);
 }
@@ -69,7 +68,7 @@ void BaseScreenHandler::GetAdditionalParameters(base::DictionaryValue* dict) {
 }
 
 void BaseScreenHandler::CallJS(const std::string& method) {
-  web_ui()->CallJavascriptFunction(FullMethodPath(method));
+  web_ui()->CallJavascriptFunctionUnsafe(FullMethodPath(method));
 }
 
 void BaseScreenHandler::ShowScreen(OobeScreen screen) {
@@ -84,7 +83,8 @@ void BaseScreenHandler::ShowScreenWithData(OobeScreen screen,
   screen_params.SetString("id", GetOobeScreenName(screen));
   if (data)
     screen_params.SetWithoutPathExpansion("data", data->DeepCopy());
-  web_ui()->CallJavascriptFunction("cr.ui.Oobe.showScreen", screen_params);
+  web_ui()->CallJavascriptFunctionUnsafe("cr.ui.Oobe.showScreen",
+                                         screen_params);
 }
 
 OobeScreen BaseScreenHandler::GetCurrentScreen() const {

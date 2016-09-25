@@ -23,7 +23,7 @@ struct BrowserPluginHostMsg_ResizeGuest_Params;
 struct FrameMsg_BuffersSwapped_Params;
 
 namespace cc {
-struct SurfaceId;
+class SurfaceId;
 struct SurfaceSequence;
 }
 
@@ -118,9 +118,11 @@ class CONTENT_EXPORT BrowserPlugin :
       const blink::WebVector<blink::WebCompositionUnderline>& underlines,
       int selectionStart,
       int selectionEnd) override;
-  bool confirmComposition(
-      const blink::WebString& text,
-      blink::WebWidget::ConfirmCompositionBehavior selectionBehavior) override;
+  bool commitText(const blink::WebString& text,
+                  int relative_cursor_pos) override;
+  bool finishComposingText(
+      blink::WebWidget::ConfirmCompositionBehavior selection_behavior) override;
+
   void extendSelectionAndDelete(int before, int after) override;
 
   // MouseLockDispatcher::LockTarget implementation.

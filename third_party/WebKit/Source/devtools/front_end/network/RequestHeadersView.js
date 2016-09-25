@@ -44,8 +44,11 @@ WebInspector.RequestHeadersView = function(request)
     this._showRequestHeadersText = false;
     this._showResponseHeadersText = false;
 
-    var root = new TreeOutline(true);
-    root.element.classList.add("outline-disclosure");
+    var root = new TreeOutlineInShadow();
+    root.registerRequiredCSS("network/requestHeadersTree.css");
+    root.element.classList.add("request-headers-tree");
+    root.setFocusable(false);
+    root.makeDense();
     root.expandTreeElementsWhenArrowing = true;
     this.element.appendChild(root.element);
 
@@ -123,8 +126,10 @@ WebInspector.RequestHeadersView.prototype = {
             }
         }
         var div = createElementWithClass("div", className);
+        if (value === "")
+            div.classList.add("empty-value");
         if (errorDecoding)
-            div.createChild("span", "error-message").textContent = WebInspector.UIString("(unable to decode value)");
+            div.createChild("span", "header-decode-error").textContent = WebInspector.UIString("(unable to decode value)");
         else
             div.textContent = value;
         return div;
@@ -225,14 +230,18 @@ WebInspector.RequestHeadersView.prototype = {
 
         for (var i = 0; i < params.length; ++i) {
             var paramNameValue = createDocumentFragment();
-            var name = this._formatParameter(params[i].name + ":", "header-name", this._decodeRequestParameters);
-            var value = this._formatParameter(params[i].value, "header-value source-code", this._decodeRequestParameters);
-            paramNameValue.appendChild(name);
-            paramNameValue.appendChild(value);
+            if (params[i].name !== "") {
+                var name = this._formatParameter(params[i].name + ":", "header-name", this._decodeRequestParameters);
+                var value = this._formatParameter(params[i].value, "header-value source-code", this._decodeRequestParameters);
+                paramNameValue.appendChild(name);
+                paramNameValue.appendChild(value);
+            } else {
+                paramNameValue.appendChild(this._formatParameter(WebInspector.UIString("(empty)"), "empty-request-header", this._decodeRequestParameters));
+            }
 
-            var parmTreeElement = new TreeElement(paramNameValue);
-            parmTreeElement.selectable = false;
-            paramsTreeElement.appendChild(parmTreeElement);
+            var paramTreeElement = new TreeElement(paramNameValue);
+            paramTreeElement.selectable = false;
+            paramsTreeElement.appendChild(paramTreeElement);
         }
     },
 
@@ -364,7 +373,10 @@ WebInspector.RequestHeadersView.prototype = {
                 statusText += " " + WebInspector.UIString("(from ServiceWorker)");
                 statusTextElement.classList.add("status-from-cache");
             } else if (this._request.cached()) {
-                statusText += " " + WebInspector.UIString("(from cache)");
+                if (this._request.cachedInMemory())
+                    statusText += " " + WebInspector.UIString("(from memory cache)");
+                else
+                    statusText += " " + WebInspector.UIString("(from disk cache)");
                 statusTextElement.classList.add("status-from-cache");
             }
             statusTextElement.textContent = statusText;

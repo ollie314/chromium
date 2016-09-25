@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/renderer/p2p/empty_network_manager.h"
 #include "media/base/media_permission.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -223,9 +223,9 @@ TEST_F(FilteringNetworkManagerTest, MultipleRoutesNotRequested) {
       // StartUpdating() is called, should receive callback as the multiple
       // routes is not requested.
       {START_UPDATING, SIGNAL_ENUMERATION_BLOCKED},
-      // Further network signal shouldn't trigger callback in
-      // ENUMERATION_BLOCKED mode.
-      {MOCK_NETWORKS_CHANGED, NO_SIGNAL},
+      // Further network signal should trigger callback, since the default
+      // network could have changed.
+      {MOCK_NETWORKS_CHANGED, SIGNAL_ENUMERATION_BLOCKED},
       // New StartUpdating() should trigger callback.
       {START_UPDATING, SIGNAL_ENUMERATION_BLOCKED},
       {STOP_UPDATING, NO_SIGNAL},
@@ -249,8 +249,9 @@ TEST_F(FilteringNetworkManagerTest, BlockMultipleRoutesByStartUpdating) {
       // Once StartUpdating() is called, signal network changed event with
       // ENUMERATION_BLOCKED.
       {START_UPDATING, SIGNAL_ENUMERATION_BLOCKED},
-      // Further network signal shouldn't trigger callback.
-      {MOCK_NETWORKS_CHANGED, NO_SIGNAL},
+      // Further network signal should trigger callback, since the default
+      // network could have changed.
+      {MOCK_NETWORKS_CHANGED, SIGNAL_ENUMERATION_BLOCKED},
       // New StartUpdating() should trigger callback.
       {START_UPDATING, SIGNAL_ENUMERATION_BLOCKED},
       {STOP_UPDATING, NO_SIGNAL},
@@ -269,11 +270,32 @@ TEST_F(FilteringNetworkManagerTest, BlockMultipleRoutesByPermissionsDenied) {
 
   TestEntry tests[] = {
       {START_UPDATING, NO_SIGNAL},
-      {MIC_DENIED, NO_SIGNAL},
-      // Once camera is denied, no need to wait for networkchanged event from
-      // network_manager_.
-      {CAMERA_DENIED, SIGNAL_ENUMERATION_BLOCKED},
       {MOCK_NETWORKS_CHANGED, NO_SIGNAL},
+      {MIC_DENIED, NO_SIGNAL},
+      // The last permission check being denied should immediately trigger the
+      // networks changed signal, since we already have an updated network list.
+      {CAMERA_DENIED, SIGNAL_ENUMERATION_BLOCKED},
+      {START_UPDATING, SIGNAL_ENUMERATION_BLOCKED},
+      {STOP_UPDATING, NO_SIGNAL},
+      {STOP_UPDATING, NO_SIGNAL},
+      {MOCK_NETWORKS_CHANGED, NO_SIGNAL},
+  };
+
+  RunTests(tests, arraysize(tests));
+}
+
+// Test that after permissions have been denied, a network change signal from
+// the internal NetworkManager is still needed before signaling a network
+// change outwards. This is because even if network enumeration is blocked,
+// we still want to give time to obtain the default IP addresses.
+TEST_F(FilteringNetworkManagerTest, BlockMultipleRoutesByNetworksChanged) {
+  SetupNetworkManager(true);
+
+  TestEntry tests[] = {
+      {START_UPDATING, NO_SIGNAL},
+      {MIC_DENIED, NO_SIGNAL},
+      {CAMERA_DENIED, NO_SIGNAL},
+      {MOCK_NETWORKS_CHANGED, SIGNAL_ENUMERATION_BLOCKED},
       {START_UPDATING, SIGNAL_ENUMERATION_BLOCKED},
       {STOP_UPDATING, NO_SIGNAL},
       {STOP_UPDATING, NO_SIGNAL},

@@ -47,9 +47,9 @@ WebInspector.ActionRegistry.prototype = {
     {
         var extensions = [];
         actionIds.forEach(function(actionId) {
-           var action = this._actionsById.get(actionId);
-           if (action)
-               extensions.push(action._extension);
+            var action = this._actionsById.get(actionId);
+            if (action)
+                extensions.push(action._extension);
         }, this);
         return context.applicableExtensions(extensions).valuesArray().map(extensionToAction.bind(this));
 
@@ -60,19 +60,17 @@ WebInspector.ActionRegistry.prototype = {
          */
         function extensionToAction(extension)
         {
-            return this.action(extension.descriptor()["actionId"]);
+            return /** @type {!WebInspector.Action} */(this.action(extension.descriptor()["actionId"]));
         }
     },
 
     /**
      * @param {string} actionId
-     * @return {!WebInspector.Action}
+     * @return {?WebInspector.Action}
      */
     action: function(actionId)
     {
-        var action = this._actionsById.get(actionId);
-        console.assert(action, "No action found for actionId '" + actionId + "'");
-        return /** @type {!WebInspector.Action} */ (action);
+        return this._actionsById.get(actionId) || null;
     }
 }
 
@@ -89,9 +87,10 @@ WebInspector.Action = function(extension)
     this._toggled = false;
 }
 
+/** @enum {symbol} */
 WebInspector.Action.Events = {
-    Enabled: "Enabled",
-    Toggled: "Toggled"
+    Enabled: Symbol("Enabled"),
+    Toggled: Symbol("Toggled")
 }
 
 WebInspector.Action.prototype = {
@@ -108,7 +107,7 @@ WebInspector.Action.prototype = {
      */
     execute: function()
     {
-        return this._extension.instancePromise().then(handleAction.bind(this));
+        return this._extension.instance().then(handleAction.bind(this));
 
         /**
          * @param {!Object} actionDelegate
@@ -172,7 +171,7 @@ WebInspector.Action.prototype = {
      */
     title: function()
     {
-        var title = this._extension.title(WebInspector.platform());
+        var title = this._extension.title();
         var options = this._extension.descriptor()["options"];
         if (options) {
             for (var pair of options) {

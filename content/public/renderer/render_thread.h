@@ -40,7 +40,6 @@ namespace content {
 
 class RenderThreadObserver;
 class ResourceDispatcherDelegate;
-class ServiceRegistry;
 
 class CONTENT_EXPORT RenderThread : virtual public ChildThread {
  public:
@@ -54,8 +53,7 @@ class CONTENT_EXPORT RenderThread : virtual public ChildThread {
   virtual IPC::SyncChannel* GetChannel() = 0;
   virtual std::string GetLocale() = 0;
   virtual IPC::SyncMessageFilter* GetSyncMessageFilter() = 0;
-  virtual scoped_refptr<base::SingleThreadTaskRunner>
-  GetIOMessageLoopProxy() = 0;
+  virtual scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() = 0;
 
   // Called to add or remove a listener for a particular message routing ID.
   // These methods normally get delegated to a MessageRouter.
@@ -108,9 +106,6 @@ class CONTENT_EXPORT RenderThread : virtual public ChildThread {
 
   // Gets the shutdown event for the process.
   virtual base::WaitableEvent* GetShutdownEvent() = 0;
-
-  // Returns the ServiceRegistry for this thread. Never returns nullptr.
-  virtual ServiceRegistry* GetServiceRegistry() = 0;
 };
 
 }  // namespace content

@@ -134,18 +134,6 @@ class WebUILoginView : public views::View,
                                   content::MediaStreamType type) override;
   bool PreHandleGestureEvent(content::WebContents* source,
                              const blink::WebGestureEvent& event) override;
-  // TODO(jdufault): Remove LoadProgressChanged, SwappedOut, BeforeUnloadFired,
-  // RendererUnresponsive, RendererResponsive, DidNavigateMainFramePostCommit
-  // overrides once crbug.com/452599 is resolved.
-  void LoadProgressChanged(content::WebContents* source,
-                           double progress) override;
-  void SwappedOut(content::WebContents* source) override;
-  void BeforeUnloadFired(content::WebContents* tab,
-                         bool proceed,
-                         bool* proceed_to_fire_unload) override;
-  void RendererUnresponsive(content::WebContents* source) override;
-  void RendererResponsive(content::WebContents* source) override;
-  void DidNavigateMainFramePostCommit(content::WebContents* source) override;
 
   // Performs series of actions when login prompt is considered
   // to be ready and visible.
@@ -173,6 +161,17 @@ class WebUILoginView : public views::View,
 
   // True to forward keyboard event.
   bool forward_keyboard_event_;
+
+  // A FocusTraversable for StatusAreaWidget that uses
+  // |status_area_widget_host_| as placeholder in WebUiLoginView's focus chain.
+  class StatusAreaFocusTraversable;
+  std::unique_ptr<StatusAreaFocusTraversable> status_area_focus_traversable_;
+  views::View* status_area_widget_host_ = nullptr;
+
+  // A FocusTraversable for WebUILoginView that loops back at the end of its
+  // focus chain.
+  class CycleFocusTraversable;
+  std::unique_ptr<CycleFocusTraversable> cycle_focus_traversable_;
 
   base::ObserverList<web_modal::ModalDialogHostObserver> observer_list_;
 

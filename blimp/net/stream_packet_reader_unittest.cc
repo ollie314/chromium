@@ -3,10 +3,14 @@
 // found in the LICENSE file.
 
 #include <stddef.h>
+#include <memory>
 #include <string>
 
+#include "base/at_exit.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/sys_byteorder.h"
+#include "blimp/net/blimp_stats.h"
 #include "blimp/net/common.h"
 #include "blimp/net/stream_packet_reader.h"
 #include "blimp/net/test_common.h"
@@ -38,9 +42,14 @@ class StreamPacketReaderTest : public testing::Test {
 
   ~StreamPacketReaderTest() override {}
 
+  void SetUp() override {
+    ASSERT_EQ(0, BlimpStats::GetInstance()->Get(BlimpStats::BYTES_RECEIVED));
+  }
+
   void ReadPacket() { data_reader_.ReadPacket(buffer_, callback_.callback()); }
 
  protected:
+  base::ShadowingAtExitManager at_exit_manager;
   base::MessageLoop message_loop_;
   scoped_refptr<net::GrowableIOBuffer> buffer_;
   std::string test_msg_;
@@ -156,9 +165,13 @@ TEST_F(StreamPacketReaderTest, ReadMultipleMessagesSync) {
 
   ReadPacket();
   ASSERT_EQ(static_cast<int>(test_msg_.size()), callback_.WaitForResult());
+  EXPECT_EQ(static_cast<int>(test_msg_.size()),
+            BlimpStats::GetInstance()->Get(BlimpStats::BYTES_RECEIVED));
 
   ReadPacket();
   ASSERT_EQ(static_cast<int>(test_msg2.size()), callback_.WaitForResult());
+  EXPECT_EQ(static_cast<int>(test_msg_.size() + test_msg2.size()),
+            BlimpStats::GetInstance()->Get(BlimpStats::BYTES_RECEIVED));
 
   EXPECT_TRUE(BufferStartsWith(buffer_.get(), test_msg2.size(), test_msg2));
   EXPECT_FALSE(callback_.have_result());
@@ -277,6 +290,58 @@ TEST_F(StreamPacketReaderTest, ReadPayloadErrorSync) {
 
   ReadPacket();
   EXPECT_EQ(net::ERR_FAILED, callback_.WaitForResult());
+}
+
+// Verify EOF handling during synchronous header reads.
+TEST_F(StreamPacketReaderTest, ReadHeaderEOFSync) {
+  net::CompletionCallback cb;
+  EXPECT_CALL(socket_, Read(NotNull(), kPacketHeaderSizeBytes, _))
+      .WillOnce(Return(0));
+  ReadPacket();
+  EXPECT_EQ(net::ERR_CONNECTION_CLOSED, callback_.WaitForResult());
+}
+
+// Verify EOF handling during synchronous payload reads.
+TEST_F(StreamPacketReaderTest, ReadPayloadEOFSync) {
+  net::CompletionCallback cb;
+
+  EXPECT_CALL(socket_, Read(NotNull(), kPacketHeaderSizeBytes, _))
+      .WillOnce(DoAll(FillBufferFromString<0>(EncodeHeader(test_msg_.size())),
+                      Return(kPacketHeaderSizeBytes)));
+  EXPECT_CALL(socket_, Read(NotNull(), test_msg_.size(), _))
+      .WillOnce(Return(0));
+
+  ReadPacket();
+  EXPECT_EQ(net::ERR_CONNECTION_CLOSED, callback_.WaitForResult());
+}
+
+// Verify EOF handling during asynchronous header reads.
+TEST_F(StreamPacketReaderTest, ReadHeaderEOFAsync) {
+  net::CompletionCallback cb;
+  net::TestCompletionCallback test_cb;
+
+  EXPECT_CALL(socket_, Read(NotNull(), kPacketHeaderSizeBytes, _))
+      .WillOnce(DoAll(FillBufferFromString<0>(EncodeHeader(test_msg_.size())),
+                      SaveArg<2>(&cb), Return(net::ERR_IO_PENDING)));
+
+  ReadPacket();
+  cb.Run(0);
+  EXPECT_EQ(net::ERR_CONNECTION_CLOSED, callback_.WaitForResult());
+}
+
+// Verify EOF handling during asynchronous payload reads.
+TEST_F(StreamPacketReaderTest, ReadPayloadEOFAsync) {
+  net::CompletionCallback cb;
+
+  EXPECT_CALL(socket_, Read(NotNull(), kPacketHeaderSizeBytes, _))
+      .WillOnce(DoAll(FillBufferFromString<0>(EncodeHeader(test_msg_.size())),
+                      Return(kPacketHeaderSizeBytes)));
+  EXPECT_CALL(socket_, Read(NotNull(), test_msg_.size(), _))
+      .WillOnce(DoAll(SaveArg<2>(&cb), Return(net::ERR_IO_PENDING)));
+
+  ReadPacket();
+  cb.Run(0);
+  EXPECT_EQ(net::ERR_CONNECTION_CLOSED, callback_.WaitForResult());
 }
 
 // Verify that async header read errors are reported correctly.

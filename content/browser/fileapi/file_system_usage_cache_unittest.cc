@@ -12,7 +12,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using storage::FileSystemUsageCache;
@@ -28,7 +28,7 @@ class FileSystemUsageCacheTest : public testing::Test {
 
  protected:
   base::FilePath GetUsageFilePath() {
-    return data_dir_.path().Append(FileSystemUsageCache::kUsageFileName);
+    return data_dir_.GetPath().Append(FileSystemUsageCache::kUsageFileName);
   }
 
   FileSystemUsageCache* usage_cache() {

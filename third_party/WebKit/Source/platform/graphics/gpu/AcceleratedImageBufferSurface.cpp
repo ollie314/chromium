@@ -30,24 +30,23 @@
 
 #include "platform/graphics/gpu/AcceleratedImageBufferSurface.h"
 
-#include "public/platform/Platform.h"
-#include "public/platform/WebGraphicsContext3DProvider.h"
+#include "platform/graphics/gpu/SharedGpuContext.h"
+#include "platform/graphics/skia/SkiaUtils.h"
 #include "skia/ext/texture_handle.h"
 #include "third_party/skia/include/gpu/GrContext.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
 
-AcceleratedImageBufferSurface::AcceleratedImageBufferSurface(const IntSize& size, OpacityMode opacityMode)
-    : ImageBufferSurface(size, opacityMode)
+AcceleratedImageBufferSurface::AcceleratedImageBufferSurface(const IntSize& size, OpacityMode opacityMode, sk_sp<SkColorSpace> colorSpace)
+    : ImageBufferSurface(size, opacityMode, colorSpace)
 {
-    m_contextProvider = adoptPtr(Platform::current()->createSharedOffscreenGraphicsContext3DProvider());
-    if (!m_contextProvider)
+    if (!SharedGpuContext::isValid())
         return;
-    GrContext* grContext = m_contextProvider->grContext();
-    if (!grContext)
-        return;
+    GrContext* grContext = SharedGpuContext::gr();
+    m_contextId = SharedGpuContext::contextId();
+    CHECK(grContext);
 
     SkAlphaType alphaType = (Opaque == opacityMode) ? kOpaque_SkAlphaType : kPremul_SkAlphaType;
     SkImageInfo info = SkImageInfo::MakeN32(size.width(), size.height(), alphaType);
@@ -59,12 +58,17 @@ AcceleratedImageBufferSurface::AcceleratedImageBufferSurface(const IntSize& size
     clear();
 }
 
-PassRefPtr<SkImage> AcceleratedImageBufferSurface::newImageSnapshot(AccelerationHint, SnapshotReason)
+bool AcceleratedImageBufferSurface::isValid() const
 {
-    return adoptRef(m_surface->newImageSnapshot());
+    return m_surface && SharedGpuContext::isValid() && m_contextId == SharedGpuContext::contextId();
 }
 
-Platform3DObject AcceleratedImageBufferSurface::getBackingTextureHandleForOverwrite()
+sk_sp<SkImage> AcceleratedImageBufferSurface::newImageSnapshot(AccelerationHint, SnapshotReason)
+{
+    return m_surface->makeImageSnapshot();
+}
+
+GLuint AcceleratedImageBufferSurface::getBackingTextureHandleForOverwrite()
 {
     if (!m_surface)
         return 0;

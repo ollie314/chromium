@@ -6,7 +6,9 @@
 #define MEDIA_BASE_ANDROID_MEDIA_SOURCE_PLAYER_H_
 
 #include <jni.h>
+
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -14,7 +16,6 @@
 #include "base/callback.h"
 #include "base/cancelable_callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
 #include "base/time/default_tick_clock.h"
@@ -44,13 +45,12 @@ class MEDIA_EXPORT MediaSourcePlayer : public MediaPlayerAndroid,
       int player_id,
       MediaPlayerManager* manager,
       const OnDecoderResourcesReleasedCB& on_decoder_resources_released_cb,
-      scoped_ptr<DemuxerAndroid> demuxer,
-      const GURL& frame_url,
-      int media_session_id);
+      std::unique_ptr<DemuxerAndroid> demuxer,
+      const GURL& frame_url);
   ~MediaSourcePlayer() override;
 
   // MediaPlayerAndroid implementation.
-  void SetVideoSurface(gfx::ScopedJavaSurface surface) override;
+  void SetVideoSurface(gl::ScopedJavaSurface surface) override;
   void Start() override;
   void Pause(bool is_media_related_action) override;
   void SeekTo(base::TimeDelta timestamp) override;
@@ -193,7 +193,7 @@ class MEDIA_EXPORT MediaSourcePlayer : public MediaPlayerAndroid,
   // creating the decoders identified by |audio| and |video|.
   void RetryDecoderCreation(bool audio, bool video);
 
-  scoped_ptr<DemuxerAndroid> demuxer_;
+  std::unique_ptr<DemuxerAndroid> demuxer_;
 
   // Pending event that the player needs to do.
   unsigned pending_event_;
@@ -232,8 +232,8 @@ class MEDIA_EXPORT MediaSourcePlayer : public MediaPlayerAndroid,
   base::TimeDelta pending_seek_time_;
 
   // Decoder jobs.
-  scoped_ptr<AudioDecoderJob, MediaDecoderJob::Deleter> audio_decoder_job_;
-  scoped_ptr<VideoDecoderJob, MediaDecoderJob::Deleter> video_decoder_job_;
+  std::unique_ptr<AudioDecoderJob, MediaDecoderJob::Deleter> audio_decoder_job_;
+  std::unique_ptr<VideoDecoderJob, MediaDecoderJob::Deleter> video_decoder_job_;
 
   // Track the most recent preroll target. Decoder re-creation needs this to
   // resume any in-progress preroll.
@@ -274,7 +274,7 @@ class MEDIA_EXPORT MediaSourcePlayer : public MediaPlayerAndroid,
 
   // Gathers and reports playback quality statistics to UMA.
   // Use pointer to enable replacement of this object for tests.
-  scoped_ptr<MediaStatistics> media_stat_;
+  std::unique_ptr<MediaStatistics> media_stat_;
 
   // Weak pointer passed to media decoder jobs for callbacks.
   base::WeakPtr<MediaSourcePlayer> weak_this_;

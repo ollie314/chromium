@@ -10,15 +10,14 @@
 #include "components/dom_distiller/core/feedback_reporter.h"
 #include "content/public/browser/user_metrics.h"
 #include "mojo/public/cpp/bindings/string.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace dom_distiller {
 
 DistillerJavaScriptServiceImpl::DistillerJavaScriptServiceImpl(
     content::RenderFrameHost* render_frame_host,
-    DistillerUIHandle* distiller_ui_handle,
-    mojo::InterfaceRequest<DistillerJavaScriptService> request)
-    : binding_(this, std::move(request)),
-      render_frame_host_(render_frame_host),
+    DistillerUIHandle* distiller_ui_handle)
+    : render_frame_host_(render_frame_host),
       distiller_ui_handle_(distiller_ui_handle) {}
 
 DistillerJavaScriptServiceImpl::~DistillerJavaScriptServiceImpl() {}
@@ -65,10 +64,10 @@ void DistillerJavaScriptServiceImpl::HandleDistillerOpenSettingsCall() {
 void CreateDistillerJavaScriptService(
     content::RenderFrameHost* render_frame_host,
     DistillerUIHandle* distiller_ui_handle,
-    mojo::InterfaceRequest<DistillerJavaScriptService> request) {
-  // This is strongly bound and owned by the pipe.
-  new DistillerJavaScriptServiceImpl(render_frame_host, distiller_ui_handle,
-                                     std::move(request));
+    mojo::InterfaceRequest<mojom::DistillerJavaScriptService> request) {
+  mojo::MakeStrongBinding(base::MakeUnique<DistillerJavaScriptServiceImpl>(
+                              render_frame_host, distiller_ui_handle),
+                          std::move(request));
 }
 
 }  // namespace dom_distiller

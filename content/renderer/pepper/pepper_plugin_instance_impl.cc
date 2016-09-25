@@ -11,14 +11,14 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_offset_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -28,6 +28,7 @@
 #include "content/common/frame_messages.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/renderer/media/audio_device_factory.h"
 #include "content/renderer/pepper/content_decryptor_delegate.h"
 #include "content/renderer/pepper/event_conversion.h"
 #include "content/renderer/pepper/fullscreen_container.h"
@@ -35,6 +36,7 @@
 #include "content/renderer/pepper/host_dispatcher_wrapper.h"
 #include "content/renderer/pepper/host_globals.h"
 #include "content/renderer/pepper/message_channel.h"
+#include "content/renderer/pepper/pepper_audio_controller.h"
 #include "content/renderer/pepper/pepper_browser_connection.h"
 #include "content/renderer/pepper/pepper_compositor_host.h"
 #include "content/renderer/pepper/pepper_file_ref_renderer_host.h"
@@ -59,7 +61,6 @@
 #include "content/renderer/render_widget.h"
 #include "content/renderer/render_widget_fullscreen_pepper.h"
 #include "content/renderer/sad_plugin.h"
-#include "media/base/audio_hardware_config.h"
 #include "ppapi/c/dev/ppp_text_input_dev.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/ppb_audio_config.h"
@@ -119,6 +120,7 @@
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "ui/events/blink/blink_event_util.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/range/range.h"
@@ -177,6 +179,7 @@ using blink::WebURLResponse;
 using blink::WebUserGestureIndicator;
 using blink::WebUserGestureToken;
 using blink::WebView;
+using blink::WebWidget;
 
 namespace content {
 
@@ -295,8 +298,7 @@ bool SecurityOriginForInstance(PP_Instance instance_id,
   if (!instance)
     return false;
 
-  WebElement plugin_element = instance->container()->element();
-  *security_origin = plugin_element.document().getSecurityOrigin();
+  *security_origin = instance->container()->document().getSecurityOrigin();
   return true;
 }
 
@@ -406,8 +408,8 @@ void PepperPluginInstanceImpl::ExternalDocumentLoader::ReplayReceivedData(
     WebURLLoaderClient* document_loader) {
   for (std::list<std::string>::iterator it = data_.begin(); it != data_.end();
        ++it) {
-    document_loader->didReceiveData(
-        NULL, it->c_str(), it->length(), 0 /* encoded_data_length */);
+    document_loader->didReceiveData(NULL, it->c_str(), it->length(),
+                                    0 /* encoded_data_length */, it->length());
   }
   if (finished_loading_) {
     document_loader->didFinishLoading(
@@ -424,7 +426,8 @@ void PepperPluginInstanceImpl::ExternalDocumentLoader::didReceiveData(
     WebURLLoader* loader,
     const char* data,
     int data_length,
-    int encoded_data_length) {
+    int encoded_data_length,
+    int encoded_body_length) {
   data_.push_back(std::string(data, data_length));
 }
 
@@ -479,11 +482,13 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       module_(module),
       instance_interface_(instance_interface),
       pp_instance_(0),
+      graphics2d_translation_(0, 0),
+      graphics2d_scale_(1.f),
       container_(container),
       layer_bound_to_fullscreen_(false),
       layer_is_hardware_(false),
       plugin_url_(plugin_url),
-      document_url_(container ? GURL(container->element().document().url())
+      document_url_(container ? GURL(container->document().url())
                               : GURL()),
       is_flash_plugin_(module->name() == kFlashPluginName),
       has_been_clicked_(false),
@@ -527,6 +532,7 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       isolate_(v8::Isolate::GetCurrent()),
       is_deleted_(false),
       initialized_(false),
+      audio_controller_(new PepperAudioController(this)),
       view_change_weak_ptr_factory_(this),
       weak_factory_(this) {
   pp_instance_ = HostGlobals::Get()->AddInstance(this);
@@ -534,32 +540,12 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
   memset(&current_print_settings_, 0, sizeof(current_print_settings_));
   module_->InstanceCreated(this);
 
-  if (render_frame) {  // NULL in tests
-    render_frame->render_view()->PepperInstanceCreated(this);
-    // Bind a callback now so that we can inform the RenderViewImpl when we are
-    // destroyed. This works around a temporary problem stemming from work to
-    // move parts of RenderViewImpl in to RenderFrameImpl (see
-    // crbug.com/245126). If destruction happens in this order:
-    //  1) RenderFrameImpl
-    //  2) PepperPluginInstanceImpl
-    //  3) RenderViewImpl
-    // Then after 1), the PepperPluginInstanceImpl doesn't have any way to talk
-    // to the RenderViewImpl. But when the instance is destroyed, it still
-    // needs to inform the RenderViewImpl that it has gone away, otherwise
-    // between (2) and (3), the RenderViewImpl will still have the dead
-    // instance in its active set, and so might make calls on the deleted
-    // instance. See crbug.com/343576 for more information. Once the plugin
-    // calls move entirely from RenderViewImpl in to RenderFrameImpl, this
-    // can be a little bit simplified by instead making a direct call on
-    // RenderFrameImpl in the destructor (but only if render_frame_ is valid).
-    instance_deleted_callback_ =
-        base::Bind(&RenderViewImpl::PepperInstanceDeleted,
-                   render_frame->render_view()->AsWeakPtr(),
-                   base::Unretained(this));
+  if (render_frame_) {  // NULL in tests or if the frame has been destroyed.
+    render_frame_->PepperInstanceCreated(this);
     view_data_.is_page_visible = !render_frame_->GetRenderWidget()->is_hidden();
 
     // Set the initial focus.
-    SetContentAreaFocus(render_frame_->render_view()->has_focus());
+    SetContentAreaFocus(render_frame_->GetRenderWidget()->has_focus());
 
     if (!module_->IsProxied()) {
       PepperBrowserConnection* browser_connection =
@@ -603,8 +589,10 @@ PepperPluginInstanceImpl::~PepperPluginInstanceImpl() {
   if (TrackedCallback::IsPending(lock_mouse_callback_))
     lock_mouse_callback_->Abort();
 
-  if (!instance_deleted_callback_.is_null())
-    instance_deleted_callback_.Run();
+  audio_controller_->OnPepperInstanceDeleted();
+
+  if (render_frame_)
+    render_frame_->PepperInstanceDeleted(this);
 
   if (!module_->IsProxied() && render_frame_) {
     PepperBrowserConnection* browser_connection =
@@ -645,17 +633,12 @@ v8::Local<v8::Context> PepperPluginInstanceImpl::GetMainWorldContext() {
   if (!container_)
     return v8::Local<v8::Context>();
 
-  if (container_->element().isNull())
+  WebLocalFrame* frame = container_->document().frame();
+
+  if (!frame)
     return v8::Local<v8::Context>();
 
-  if (container_->element().document().isNull())
-    return v8::Local<v8::Context>();
-
-  if (!container_->element().document().frame())
-    return v8::Local<v8::Context>();
-
-  v8::Local<v8::Context> context =
-      container_->element().document().frame()->mainWorldScriptContext();
+  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
   DCHECK(context->GetIsolate() == isolate_);
   return context;
 }
@@ -707,7 +690,7 @@ void PepperPluginInstanceImpl::Delete() {
 
   // Force-unbind any Graphics. In the case of Graphics2D, if the plugin
   // leaks the graphics 2D, it may actually get cleaned up after our
-  // destruction, so we need its pointers to be up-to-date.
+  // destruction, so we need its pointers to be up to date.
   BindGraphics(pp_instance(), 0);
   container_ = NULL;
 }
@@ -779,20 +762,61 @@ void PepperPluginInstanceImpl::ScrollRect(int dx,
   }
 }
 
-void PepperPluginInstanceImpl::CommitBackingTexture() {
+void PepperPluginInstanceImpl::CommitTextureMailbox(
+    const cc::TextureMailbox& texture_mailbox) {
+  if (committed_texture_.IsValid() && !IsTextureInUse(committed_texture_)) {
+    committed_texture_graphics_3d_->ReturnFrontBuffer(
+        committed_texture_.mailbox(), committed_texture_consumed_sync_token_,
+        false);
+  }
+
+  committed_texture_ = texture_mailbox;
+  committed_texture_graphics_3d_ = bound_graphics_3d_;
+  committed_texture_consumed_sync_token_ = gpu::SyncToken();
+
   if (!texture_layer_) {
     UpdateLayer(true);
     return;
   }
 
-  gpu::Mailbox mailbox;
-  gpu::SyncToken sync_token;
-  bound_graphics_3d_->GetBackingMailbox(&mailbox, &sync_token);
-  DCHECK(!mailbox.IsZero());
-  DCHECK(sync_token.HasData());
-  texture_layer_->SetTextureMailboxWithoutReleaseCallback(
-      cc::TextureMailbox(mailbox, sync_token, GL_TEXTURE_2D));
+  PassCommittedTextureToTextureLayer();
   texture_layer_->SetNeedsDisplay();
+}
+
+void PepperPluginInstanceImpl::PassCommittedTextureToTextureLayer() {
+  DCHECK(bound_graphics_3d_);
+
+  if (!committed_texture_.IsValid())
+    return;
+
+  std::unique_ptr<cc::SingleReleaseCallback> callback(
+      cc::SingleReleaseCallback::Create(base::Bind(
+          &PepperPluginInstanceImpl::FinishedConsumingCommittedTexture,
+          weak_factory_.GetWeakPtr(), committed_texture_,
+          committed_texture_graphics_3d_)));
+
+  IncrementTextureReferenceCount(committed_texture_);
+  texture_layer_->SetTextureMailbox(committed_texture_, std::move(callback));
+}
+
+void PepperPluginInstanceImpl::FinishedConsumingCommittedTexture(
+    const cc::TextureMailbox& texture_mailbox,
+    scoped_refptr<PPB_Graphics3D_Impl> graphics_3d,
+    const gpu::SyncToken& sync_token,
+    bool is_lost) {
+  bool removed = DecrementTextureReferenceCount(texture_mailbox);
+  bool is_committed_texture =
+      committed_texture_.mailbox() == texture_mailbox.mailbox();
+
+  if (is_committed_texture && !is_lost) {
+    committed_texture_consumed_sync_token_ = sync_token;
+    return;
+  }
+
+  if (removed && !is_committed_texture) {
+    graphics_3d->ReturnFrontBuffer(texture_mailbox.mailbox(), sync_token,
+                                   is_lost);
+  }
 }
 
 void PepperPluginInstanceImpl::InstanceCrashed() {
@@ -866,6 +890,14 @@ bool PepperPluginInstanceImpl::Initialize(
     if (message_channel_)
       message_channel_->Start();
   }
+
+  if (success &&
+      render_frame_ &&
+      render_frame_->render_accessibility() &&
+      LoadPdfInterface()) {
+    plugin_pdf_interface_->EnableAccessibility(pp_instance());
+  }
+
   initialized_ = success;
   return success;
 }
@@ -884,7 +916,7 @@ bool PepperPluginInstanceImpl::HandleDocumentLoad(
 
   if (module()->is_crashed()) {
     // Don't create a resource for a crashed plugin.
-    container()->element().document().frame()->stopLoading();
+    container()->document().frame()->stopLoading();
     return false;
   }
 
@@ -1239,8 +1271,7 @@ PP_Var PepperPluginInstanceImpl::GetInstanceObject(v8::Isolate* isolate) {
 void PepperPluginInstanceImpl::ViewChanged(
     const gfx::Rect& window,
     const gfx::Rect& clip,
-    const gfx::Rect& unobscured,
-    const std::vector<gfx::Rect>& cut_outs_rects) {
+    const gfx::Rect& unobscured) {
   // WebKit can give weird (x,y) positions for empty clip rects (since the
   // position technically doesn't matter). But we want to make these
   // consistent since this is given to the plugin, so force everything to 0
@@ -1250,8 +1281,6 @@ void PepperPluginInstanceImpl::ViewChanged(
     new_clip = clip;
 
   unobscured_rect_ = unobscured;
-
-  cut_outs_rects_ = cut_outs_rects;
 
   view_data_.rect = PP_FromGfxRect(window);
   view_data_.clip_rect = PP_FromGfxRect(clip);
@@ -1267,15 +1296,14 @@ void PepperPluginInstanceImpl::ViewChanged(
   view_data_.css_scale *= viewport_to_dip_scale_;
   view_data_.device_scale /= viewport_to_dip_scale_;
 
-  gfx::Size scroll_offset =
-      container_->element().document().frame()->scrollOffset();
+  gfx::Size scroll_offset = gfx::ScaleToRoundedSize(
+      container_->document().frame()->scrollOffset(), viewport_to_dip_scale_);
+
   view_data_.scroll_offset = PP_MakePoint(scroll_offset.width(),
                                           scroll_offset.height());
 
   if (desired_fullscreen_state_ || view_data_.is_fullscreen) {
-    WebElement element = container_->element();
-    WebDocument document = element.document();
-    bool is_fullscreen_element = (element == document.fullScreenElement());
+    bool is_fullscreen_element = container_->isFullscreenElement();
     if (!view_data_.is_fullscreen && desired_fullscreen_state_ &&
         render_frame()->GetRenderWidget()->is_fullscreen_granted() &&
         is_fullscreen_element) {
@@ -1446,12 +1474,13 @@ bool PepperPluginInstanceImpl::StartFind(const base::string16& search_text,
                                         PP_FromBool(case_sensitive)));
 }
 
-void PepperPluginInstanceImpl::SelectFindResult(bool forward) {
+void PepperPluginInstanceImpl::SelectFindResult(bool forward, int identifier) {
   // Keep a reference on the stack. See NOTE above.
   scoped_refptr<PepperPluginInstanceImpl> ref(this);
-  if (LoadFindInterface())
-    plugin_find_interface_->SelectFindResult(pp_instance(),
-                                             PP_FromBool(forward));
+  if (!LoadFindInterface())
+    return;
+  find_identifier_ = identifier;
+  plugin_find_interface_->SelectFindResult(pp_instance(), PP_FromBool(forward));
 }
 
 void PepperPluginInstanceImpl::StopFind() {
@@ -1544,6 +1573,15 @@ bool PepperPluginInstanceImpl::LoadTextInputInterface() {
   return !!plugin_textinput_interface_;
 }
 
+void PepperPluginInstanceImpl::SetGraphics2DTransform(
+    const float& scale,
+    const gfx::PointF& translation) {
+  graphics2d_scale_ = scale;
+  graphics2d_translation_ = translation;
+
+  UpdateLayerTransform();
+}
+
 void PepperPluginInstanceImpl::UpdateLayerTransform() {
   if (!bound_graphics_2d_platform_ || !texture_layer_) {
     // Currently the transform is only applied for Graphics2D.
@@ -1563,11 +1601,24 @@ void PepperPluginInstanceImpl::UpdateLayerTransform() {
   gfx::Size plugin_size_in_dip(view_data_.rect.size.width,
                                view_data_.rect.size.height);
 
+  // Adding the SetLayerTransform from Graphics2D to the UV.
+  // If graphics2d_scale_ is 1.f and graphics2d_translation_ is 0 then UV will
+  // be top_left (0,0) and lower_right (plugin_size_in_dip.width() /
+  // graphics_2d_size_in_dip.width(), plugin_size_in_dip.height() /
+  // graphics_2d_size_in_dip.height())
+  gfx::PointF top_left =
+      gfx::PointF(-graphics2d_translation_.x() / graphics2d_scale_,
+                  -graphics2d_translation_.y() / graphics2d_scale_);
+  gfx::PointF lower_right =
+      gfx::PointF((1 / graphics2d_scale_) * plugin_size_in_dip.width() -
+                      graphics2d_translation_.x() / graphics2d_scale_,
+                  (1 / graphics2d_scale_) * plugin_size_in_dip.height() -
+                      graphics2d_translation_.y() / graphics2d_scale_);
   texture_layer_->SetUV(
-      gfx::PointF(0.0f, 0.0f),
-      gfx::PointF(
-          plugin_size_in_dip.width() / graphics_2d_size_in_dip.width(),
-          plugin_size_in_dip.height() / graphics_2d_size_in_dip.height()));
+      gfx::PointF(top_left.x() / graphics_2d_size_in_dip.width(),
+                  top_left.y() / graphics_2d_size_in_dip.height()),
+      gfx::PointF(lower_right.x() / graphics_2d_size_in_dip.width(),
+                  lower_right.y() / graphics_2d_size_in_dip.height()));
 }
 
 bool PepperPluginInstanceImpl::PluginHasFocus() const {
@@ -1575,7 +1626,7 @@ bool PepperPluginInstanceImpl::PluginHasFocus() const {
 }
 
 void PepperPluginInstanceImpl::SendFocusChangeNotification() {
-  // Keep a reference on the stack. RenderViewImpl::PepperFocusChanged may
+  // Keep a reference on the stack. RenderFrameImpl::PepperFocusChanged may
   // remove the <embed> from the DOM, which will make the PepperWebPluginImpl
   // drop its reference, usually the last one. This is similar to possible
   // plugin behavior described at the NOTE above Delete().
@@ -1585,7 +1636,7 @@ void PepperPluginInstanceImpl::SendFocusChangeNotification() {
     return;
 
   bool has_focus = PluginHasFocus();
-  render_frame_->render_view()->PepperFocusChanged(this, has_focus);
+  render_frame_->PepperFocusChanged(this, has_focus);
 
   // instance_interface_ may have been cleared in Delete() if the
   // PepperWebPluginImpl is destroyed.
@@ -1633,6 +1684,16 @@ void PepperPluginInstanceImpl::SendDidChangeView() {
   // Don't send DidChangeView to crashed plugins.
   if (module()->is_crashed())
     return;
+
+  if (bound_compositor_)
+    bound_compositor_->set_viewport_to_dip_scale(viewport_to_dip_scale_);
+
+  if (bound_graphics_2d_platform_)
+    bound_graphics_2d_platform_->set_viewport_to_dip_scale(
+        viewport_to_dip_scale_);
+
+  module_->renderer_ppapi_host()->set_viewport_to_dip_scale(
+      viewport_to_dip_scale_);
 
   // During the first view update, initialize the throttler.
   if (!sent_initial_did_change_view_) {
@@ -1911,9 +1972,9 @@ bool PepperPluginInstanceImpl::SetFullscreen(bool fullscreen) {
     // so we will tweak plugin's attributes to support the expected behavior.
     KeepSizeAttributesBeforeFullscreen();
     SetSizeAttributesForFullscreen();
-    container_->element().requestFullScreen();
+    container_->requestFullscreen();
   } else {
-    container_->element().document().cancelFullScreen();
+    container_->cancelFullscreen();
   }
   return true;
 }
@@ -1955,7 +2016,7 @@ bool PepperPluginInstanceImpl::IsViewAccelerated() {
   if (!container_)
     return false;
 
-  WebDocument document = container_->element().document();
+  WebDocument document = container_->document();
   WebLocalFrame* frame = document.frame();
   if (!frame)
     return false;
@@ -1993,12 +2054,7 @@ void PepperPluginInstanceImpl::UpdateLayer(bool force_creation) {
   if (!container_)
     return;
 
-  gpu::Mailbox mailbox;
-  gpu::SyncToken sync_token;
-  if (bound_graphics_3d_.get()) {
-    bound_graphics_3d_->GetBackingMailbox(&mailbox, &sync_token);
-  }
-  bool want_3d_layer = !mailbox.IsZero() && sync_token.HasData();
+  bool want_3d_layer = !!bound_graphics_3d_.get();
   bool want_2d_layer = !!bound_graphics_2d_platform_;
   bool want_texture_layer = want_3d_layer || want_2d_layer;
   bool want_compositor_layer = !!bound_compositor_;
@@ -2037,8 +2093,8 @@ void PepperPluginInstanceImpl::UpdateLayer(bool force_creation) {
       DCHECK(bound_graphics_3d_.get());
       texture_layer_ = cc::TextureLayer::CreateForMailbox(NULL);
       opaque = bound_graphics_3d_->IsOpaque();
-      texture_layer_->SetTextureMailboxWithoutReleaseCallback(
-          cc::TextureMailbox(mailbox, sync_token, GL_TEXTURE_2D));
+
+      PassCommittedTextureToTextureLayer();
     } else {
       DCHECK(bound_graphics_2d_platform_);
       texture_layer_ = cc::TextureLayer::CreateForMailbox(this);
@@ -2064,6 +2120,9 @@ void PepperPluginInstanceImpl::UpdateLayer(bool force_creation) {
     } else {
       container_->setWebLayer(web_layer_.get());
     }
+    if (is_flash_plugin_) {
+      web_layer_->ccLayer()->SetMayContainVideo(true);
+    }
   }
 
   layer_bound_to_fullscreen_ = !!fullscreen_container_;
@@ -2073,15 +2132,21 @@ void PepperPluginInstanceImpl::UpdateLayer(bool force_creation) {
 
 bool PepperPluginInstanceImpl::PrepareTextureMailbox(
     cc::TextureMailbox* mailbox,
-    std::unique_ptr<cc::SingleReleaseCallback>* release_callback,
-    bool use_shared_memory) {
+    std::unique_ptr<cc::SingleReleaseCallback>* release_callback) {
   if (!bound_graphics_2d_platform_)
     return false;
   return bound_graphics_2d_platform_->PrepareTextureMailbox(mailbox,
                                                             release_callback);
 }
 
-void PepperPluginInstanceImpl::OnDestruct() { render_frame_ = NULL; }
+void PepperPluginInstanceImpl::AccessibilityModeChanged() {
+  if (render_frame_->render_accessibility() && LoadPdfInterface())
+    plugin_pdf_interface_->EnableAccessibility(pp_instance());
+}
+
+void PepperPluginInstanceImpl::OnDestruct() {
+  render_frame_ = nullptr;
+}
 
 void PepperPluginInstanceImpl::OnThrottleStateChange() {
   SendDidChangeView();
@@ -2140,8 +2205,9 @@ void PepperPluginInstanceImpl::HandleMouseLockedInputEvent(
 
 void PepperPluginInstanceImpl::SimulateInputEvent(
     const InputEventData& input_event) {
-  WebView* web_view = container()->element().document().frame()->view();
-  if (!web_view) {
+  WebWidget* widget =
+      container()->document().frame()->localRoot()->frameWidget();
+  if (!widget) {
     NOTREACHED();
     return;
   }
@@ -2157,7 +2223,7 @@ void PepperPluginInstanceImpl::SimulateInputEvent(
   for (std::vector<std::unique_ptr<WebInputEvent>>::iterator it =
            events.begin();
        it != events.end(); ++it) {
-    web_view->handleInputEvent(*it->get());
+    widget->handleInputEvent(*it->get());
   }
 }
 
@@ -2175,7 +2241,7 @@ bool PepperPluginInstanceImpl::SimulateIMEEvent(
     case PP_INPUTEVENT_TYPE_IME_TEXT:
       if (!render_frame_)
         return false;
-      render_frame_->SimulateImeConfirmComposition(
+      render_frame_->SimulateImeCommitText(
           base::UTF8ToUTF16(input_event.character_text), gfx::Range());
       break;
     default:
@@ -2286,12 +2352,15 @@ PP_Bool PepperPluginInstanceImpl::BindGraphics(PP_Instance instance,
   if (compositor) {
     if (compositor->BindToInstance(this)) {
       bound_compositor_ = compositor;
+      bound_compositor_->set_viewport_to_dip_scale(viewport_to_dip_scale_);
       UpdateLayer(true);
       return PP_TRUE;
     }
   } else if (graphics_2d) {
     if (graphics_2d->BindToInstance(this)) {
       bound_graphics_2d_platform_ = graphics_2d;
+      bound_graphics_2d_platform_->set_viewport_to_dip_scale(
+          viewport_to_dip_scale_);
       UpdateLayer(true);
       return PP_TRUE;
     }
@@ -2328,7 +2397,7 @@ PP_Var PepperPluginInstanceImpl::GetWindowObject(PP_Instance instance) {
   RecordFlashJavaScriptUse();
   V8VarConverter converter(pp_instance_, V8VarConverter::kAllowObjectVars);
   PepperTryCatchVar try_catch(this, &converter, NULL);
-  WebLocalFrame* frame = container_->element().document().frame();
+  WebLocalFrame* frame = container_->document().frame();
   if (!frame) {
     try_catch.SetException("No frame exists for window object.");
     return PP_MakeUndefined();
@@ -2371,7 +2440,7 @@ PP_Var PepperPluginInstanceImpl::ExecuteScript(PP_Instance instance,
   if (try_catch.HasException())
     return PP_MakeUndefined();
 
-  WebLocalFrame* frame = container_->element().document().frame();
+  WebLocalFrame* frame = container_->document().frame();
   if (!frame) {
     try_catch.SetException("No frame to execute script in.");
     return PP_MakeUndefined();
@@ -2403,14 +2472,24 @@ PP_Var PepperPluginInstanceImpl::ExecuteScript(PP_Instance instance,
 
 uint32_t PepperPluginInstanceImpl::GetAudioHardwareOutputSampleRate(
     PP_Instance instance) {
-  RenderThreadImpl* thread = RenderThreadImpl::current();
-  return thread->GetAudioHardwareConfig()->GetOutputSampleRate();
+  return render_frame()
+             ? AudioDeviceFactory::GetOutputDeviceInfo(
+                   render_frame()->GetRoutingID(), 0 /* session_id */,
+                   std::string() /* device_id */, url::Origin(document_url()))
+                   .output_params()
+                   .sample_rate()
+             : 0;
 }
 
 uint32_t PepperPluginInstanceImpl::GetAudioHardwareOutputBufferSize(
     PP_Instance instance) {
-  RenderThreadImpl* thread = RenderThreadImpl::current();
-  return thread->GetAudioHardwareConfig()->GetOutputBufferSize();
+  return render_frame()
+             ? AudioDeviceFactory::GetOutputDeviceInfo(
+                   render_frame()->GetRoutingID(), 0 /* session_id */,
+                   std::string() /* device_id */, url::Origin(document_url()))
+                   .output_params()
+                   .frames_per_buffer()
+             : 0;
 }
 
 PP_Var PepperPluginInstanceImpl::GetDefaultCharSet(PP_Instance instance) {
@@ -2452,8 +2531,9 @@ void PepperPluginInstanceImpl::SessionMessage(PP_Instance instance,
                                               PP_CdmMessageType message_type,
                                               PP_Var message_var,
                                               PP_Var legacy_destination_url) {
-  content_decryptor_delegate_->OnSessionMessage(
-      session_id_var, message_type, message_var, legacy_destination_url);
+  // |legacy_destination_url| is obsolete.
+  content_decryptor_delegate_->OnSessionMessage(session_id_var, message_type,
+                                                message_var);
 }
 
 void PepperPluginInstanceImpl::SessionKeysChange(
@@ -2485,8 +2565,7 @@ void PepperPluginInstanceImpl::LegacySessionError(
     PP_CdmExceptionCode exception_code,
     uint32_t system_code,
     PP_Var error_description_var) {
-  content_decryptor_delegate_->OnLegacySessionError(
-      session_id_var, exception_code, system_code, error_description_var);
+  // Obsolete.
 }
 
 void PepperPluginInstanceImpl::DeliverBlock(
@@ -2580,10 +2659,12 @@ void PepperPluginInstanceImpl::SetTickmarks(PP_Instance instance,
   blink::WebVector<blink::WebRect> tickmarks_converted(
       static_cast<size_t>(count));
   for (uint32_t i = 0; i < count; ++i) {
-    tickmarks_converted[i] = blink::WebRect(tickmarks[i].point.x,
-                                            tickmarks[i].point.y,
-                                            tickmarks[i].size.width,
-                                            tickmarks[i].size.height);
+    gfx::RectF tickmark(tickmarks[i].point.x,
+                        tickmarks[i].point.y,
+                        tickmarks[i].size.width,
+                        tickmarks[i].size.height);
+    tickmark.Scale(1 / viewport_to_dip_scale_);
+    tickmarks_converted[i] = blink::WebRect(gfx::ToEnclosedRect(tickmark));
   }
   blink::WebLocalFrame* frame = render_frame_->GetWebFrame();
   frame->setTickmarks(tickmarks_converted);
@@ -2710,10 +2791,10 @@ PP_Bool PepperPluginInstanceImpl::SetCursor(PP_Instance instance,
   custom_cursor->hotSpot.x = hot_spot->x;
   custom_cursor->hotSpot.y = hot_spot->y;
 
-  const SkBitmap* bitmap = image_data->GetMappedBitmap();
+  SkBitmap bitmap(image_data->GetMappedBitmap());
   // Make a deep copy, so that the cursor remains valid even after the original
   // image data gets freed.
-  if (!bitmap->copyTo(&custom_cursor->customImage.getSkBitmap())) {
+  if (!bitmap.copyTo(&custom_cursor->customImage.getSkBitmap())) {
     return PP_FALSE;
   }
 
@@ -2817,8 +2898,7 @@ PP_Var PepperPluginInstanceImpl::ResolveRelativeToDocument(
   if (!relative_string)
     return PP_MakeNull();
 
-  WebElement plugin_element = container()->element();
-  GURL document_url = plugin_element.document().baseURL();
+  GURL document_url = container()->document().baseURL();
   return ppapi::PPB_URLUtil_Shared::GenerateURLReturn(
       document_url.Resolve(relative_string->value()), components);
 }
@@ -2857,7 +2937,7 @@ PP_Bool PepperPluginInstanceImpl::DocumentCanAccessDocument(
 PP_Var PepperPluginInstanceImpl::GetDocumentURL(
     PP_Instance instance,
     PP_URLComponents_Dev* components) {
-  blink::WebDocument document = container()->element().document();
+  blink::WebDocument document = container()->document();
   return ppapi::PPB_URLUtil_Shared::GenerateURLReturn(document.url(),
                                                       components);
 }
@@ -2871,7 +2951,7 @@ PP_Var PepperPluginInstanceImpl::GetPluginInstanceURL(
 PP_Var PepperPluginInstanceImpl::GetPluginReferrerURL(
     PP_Instance instance,
     PP_URLComponents_Dev* components) {
-  blink::WebDocument document = container()->element().document();
+  blink::WebDocument document = container()->document();
   if (!full_frame_)
     return ppapi::PPB_URLUtil_Shared::GenerateURLReturn(document.url(),
                                                         components);
@@ -2898,7 +2978,7 @@ PP_ExternalPluginResult PepperPluginInstanceImpl::ResetAsProxied(
   original_instance_interface_.reset(instance_interface_.release());
 
   base::Callback<const void*(const char*)> get_plugin_interface_func =
-      base::Bind(&PluginModule::GetPluginInterface, module_.get());
+      base::Bind(&PluginModule::GetPluginInterface, module_);
   PPP_Instance_Combined* ppp_instance_combined =
       PPP_Instance_Combined::Create(get_plugin_interface_func);
   if (!ppp_instance_combined) {
@@ -2956,8 +3036,8 @@ bool PepperPluginInstanceImpl::IsValidInstanceOf(PluginModule* module) {
   return module == module_.get() || module == original_module_.get();
 }
 
-RenderView* PepperPluginInstanceImpl::GetRenderView() {
-  return render_frame_ ? render_frame_->render_view() : NULL;
+RenderFrame* PepperPluginInstanceImpl::GetRenderFrame() {
+  return render_frame_;
 }
 
 blink::WebPluginContainer* PepperPluginInstanceImpl::GetContainer() {
@@ -3048,7 +3128,7 @@ void PepperPluginInstanceImpl::DoSetCursor(WebCursorInfo* cursor) {
 }
 
 bool PepperPluginInstanceImpl::IsFullPagePlugin() {
-  WebLocalFrame* frame = container()->element().document().frame();
+  WebLocalFrame* frame = container()->document().frame();
   return frame->view()->mainFrame()->isWebLocalFrame() &&
          frame->view()->mainFrame()->document().isPluginDocument();
 }
@@ -3113,7 +3193,7 @@ int32_t PepperPluginInstanceImpl::Navigate(
   if (!container_)
     return PP_ERROR_FAILED;
 
-  WebDocument document = container_->element().document();
+  WebDocument document = container_->document();
   WebLocalFrame* frame = document.frame();
   if (!frame)
     return PP_ERROR_FAILED;
@@ -3172,7 +3252,7 @@ void PepperPluginInstanceImpl::SetEmbedProperty(PP_Var key, PP_Var value) {
 bool PepperPluginInstanceImpl::CanAccessMainFrame() const {
   if (!container_)
     return false;
-  blink::WebDocument containing_document = container_->element().document();
+  blink::WebDocument containing_document = container_->document();
 
   if (!containing_document.frame() || !containing_document.frame()->view() ||
       !containing_document.frame()->view()->mainFrame()) {
@@ -3327,6 +3407,49 @@ void PepperPluginInstanceImpl::ConvertDIPToViewport(gfx::Rect* rect) const {
   rect->set_y(rect->y() / viewport_to_dip_scale_);
   rect->set_width(rect->width() / viewport_to_dip_scale_);
   rect->set_height(rect->height() / viewport_to_dip_scale_);
+}
+
+void PepperPluginInstanceImpl::IncrementTextureReferenceCount(
+    const cc::TextureMailbox& mailbox) {
+  auto it =
+      std::find_if(texture_ref_counts_.begin(), texture_ref_counts_.end(),
+                   [&mailbox](const TextureMailboxRefCount& ref_count) {
+                     return ref_count.first.mailbox() == mailbox.mailbox();
+                   });
+  if (it == texture_ref_counts_.end()) {
+    texture_ref_counts_.push_back(std::make_pair(mailbox, 1));
+    return;
+  }
+
+  it->second++;
+}
+
+bool PepperPluginInstanceImpl::DecrementTextureReferenceCount(
+    const cc::TextureMailbox& mailbox) {
+  auto it =
+      std::find_if(texture_ref_counts_.begin(), texture_ref_counts_.end(),
+                   [&mailbox](const TextureMailboxRefCount& ref_count) {
+                     return ref_count.first.mailbox() == mailbox.mailbox();
+                   });
+  DCHECK(it != texture_ref_counts_.end());
+
+  if (it->second == 1) {
+    texture_ref_counts_.erase(it);
+    return true;
+  }
+
+  it->second--;
+  return false;
+}
+
+bool PepperPluginInstanceImpl::IsTextureInUse(
+    const cc::TextureMailbox& mailbox) const {
+  auto it =
+      std::find_if(texture_ref_counts_.begin(), texture_ref_counts_.end(),
+                   [&mailbox](const TextureMailboxRefCount& ref_count) {
+                     return ref_count.first.mailbox() == mailbox.mailbox();
+                   });
+  return it != texture_ref_counts_.end();
 }
 
 }  // namespace content

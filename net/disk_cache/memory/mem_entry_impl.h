@@ -9,9 +9,9 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "base/containers/hash_tables.h"
 #include "base/containers/linked_list.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -133,7 +133,7 @@ class NET_EXPORT_PRIVATE MemEntryImpl final
                MemEntryImpl* parent,
                net::NetLog* net_log);
 
-  typedef base::hash_map<int, MemEntryImpl*> EntryMap;
+  using EntryMap = std::unordered_map<int, MemEntryImpl*>;
 
   static const int kNumStreams = 3;
 
@@ -179,7 +179,7 @@ class NET_EXPORT_PRIVATE MemEntryImpl final
   MemBackendImpl* backend_;   // Back pointer to the cache.
   bool doomed_;               // True if this entry was removed from the cache.
 
-  net::BoundNetLog net_log_;
+  net::NetLogWithSource net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(MemEntryImpl);
 };

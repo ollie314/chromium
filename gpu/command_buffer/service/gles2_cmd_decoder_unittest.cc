@@ -33,7 +33,7 @@
 #define GL_DEPTH24_STENCIL8 0x88F0
 #endif
 
-using ::gfx::MockGLInterface;
+using ::gl::MockGLInterface;
 using ::testing::_;
 using ::testing::AtLeast;
 using ::testing::DoAll;
@@ -106,6 +106,12 @@ TEST_P(GLES3DecoderTest, Basic) {
   EXPECT_TRUE(decoder_->unsafe_es3_apis_enabled());
   EXPECT_TRUE(feature_info()->validators()->texture_bind_target.IsValid(
       GL_TEXTURE_3D));
+}
+
+TEST_P(GLES2DecoderTest, InvalidCommand) {
+  cmd::Noop cmd;
+  cmd.header.Init(gles2::kNumCommands, 1);
+  EXPECT_EQ(error::kUnknownCommand, ExecuteImmediateCmd(cmd, 0));
 }
 
 TEST_P(GLES2DecoderTest, GetIntegervCached) {
@@ -285,7 +291,7 @@ TEST_P(GLES2DecoderTest, IsTexture) {
 
 TEST_P(GLES3DecoderTest, GetInternalformativValidArgsSamples) {
   const GLint kNumSampleCounts = 8;
-  typedef cmds::GetInternalformativ::Result Result;
+  typedef GetInternalformativ::Result Result;
   Result* result = static_cast<Result*>(shared_memory_address_);
   EXPECT_CALL(*gl_, GetInternalformativ(GL_RENDERBUFFER, GL_RGBA8,
                                         GL_NUM_SAMPLE_COUNTS, 1, _))
@@ -297,7 +303,7 @@ TEST_P(GLES3DecoderTest, GetInternalformativValidArgsSamples) {
       .Times(1)
       .RetiresOnSaturation();
   result->size = 0;
-  cmds::GetInternalformativ cmd;
+  GetInternalformativ cmd;
   cmd.Init(GL_RENDERBUFFER, GL_RGBA8, GL_SAMPLES,
            shared_memory_id_, shared_memory_offset_);
   decoder_->set_unsafe_es3_apis_enabled(true);
@@ -310,14 +316,14 @@ TEST_P(GLES3DecoderTest, GetInternalformativValidArgsSamples) {
 
 TEST_P(GLES3DecoderTest, GetInternalformativValidArgsNumSampleCounts) {
   const GLint kNumSampleCounts = 8;
-  typedef cmds::GetInternalformativ::Result Result;
+  typedef GetInternalformativ::Result Result;
   Result* result = static_cast<Result*>(shared_memory_address_);
   EXPECT_CALL(*gl_, GetInternalformativ(GL_RENDERBUFFER, GL_RGBA8,
                                         GL_NUM_SAMPLE_COUNTS, 1, _))
       .WillOnce(SetArgPointee<4>(kNumSampleCounts))
       .RetiresOnSaturation();
   result->size = 0;
-  cmds::GetInternalformativ cmd;
+  GetInternalformativ cmd;
   cmd.Init(GL_RENDERBUFFER, GL_RGBA8, GL_NUM_SAMPLE_COUNTS,
            shared_memory_id_, shared_memory_offset_);
   decoder_->set_unsafe_es3_apis_enabled(true);
@@ -330,9 +336,9 @@ TEST_P(GLES3DecoderTest, GetInternalformativValidArgsNumSampleCounts) {
 }
 
 TEST_P(GLES3DecoderTest, ClientWaitSyncValid) {
-  typedef cmds::ClientWaitSync::Result Result;
+  typedef ClientWaitSync::Result Result;
   Result* result = static_cast<Result*>(shared_memory_address_);
-  cmds::ClientWaitSync cmd;
+  ClientWaitSync cmd;
   cmd.Init(client_sync_id_, GL_SYNC_FLUSH_COMMANDS_BIT, 0,
            shared_memory_id_, shared_memory_offset_);
   EXPECT_CALL(*gl_,
@@ -350,9 +356,9 @@ TEST_P(GLES3DecoderTest, ClientWaitSyncValid) {
 }
 
 TEST_P(GLES2DecoderTest, ClientWaitSyncNonZeroTimeoutValid) {
-  typedef cmds::ClientWaitSync::Result Result;
+  typedef ClientWaitSync::Result Result;
   Result* result = static_cast<Result*>(shared_memory_address_);
-  cmds::ClientWaitSync cmd;
+  ClientWaitSync cmd;
   const GLuint64 kTimeout = 0xABCDEF0123456789;
   cmd.Init(client_sync_id_, GL_SYNC_FLUSH_COMMANDS_BIT, kTimeout,
            shared_memory_id_, shared_memory_offset_);
@@ -371,9 +377,9 @@ TEST_P(GLES2DecoderTest, ClientWaitSyncNonZeroTimeoutValid) {
 }
 
 TEST_P(GLES2DecoderTest, ClientWaitSyncInvalidSyncFails) {
-  typedef cmds::ClientWaitSync::Result Result;
+  typedef ClientWaitSync::Result Result;
   Result* result = static_cast<Result*>(shared_memory_address_);
-  cmds::ClientWaitSync cmd;
+  ClientWaitSync cmd;
   decoder_->set_unsafe_es3_apis_enabled(true);
   cmd.Init(kInvalidClientId, GL_SYNC_FLUSH_COMMANDS_BIT, 0,
            shared_memory_id_, shared_memory_offset_);
@@ -384,9 +390,9 @@ TEST_P(GLES2DecoderTest, ClientWaitSyncInvalidSyncFails) {
 }
 
 TEST_P(GLES2DecoderTest, ClientWaitSyncResultNotInitFails) {
-  typedef cmds::ClientWaitSync::Result Result;
+  typedef ClientWaitSync::Result Result;
   Result* result = static_cast<Result*>(shared_memory_address_);
-  cmds::ClientWaitSync cmd;
+  ClientWaitSync cmd;
   decoder_->set_unsafe_es3_apis_enabled(true);
   cmd.Init(client_sync_id_, GL_SYNC_FLUSH_COMMANDS_BIT, 0,
            shared_memory_id_, shared_memory_offset_);
@@ -395,9 +401,9 @@ TEST_P(GLES2DecoderTest, ClientWaitSyncResultNotInitFails) {
 }
 
 TEST_P(GLES2DecoderTest, ClientWaitSyncBadSharedMemoryFails) {
-  typedef cmds::ClientWaitSync::Result Result;
+  typedef ClientWaitSync::Result Result;
   Result* result = static_cast<Result*>(shared_memory_address_);
-  cmds::ClientWaitSync cmd;
+  ClientWaitSync cmd;
   decoder_->set_unsafe_es3_apis_enabled(true);
   *result = GL_WAIT_FAILED;
   cmd.Init(client_sync_id_, GL_SYNC_FLUSH_COMMANDS_BIT, 0,
@@ -417,7 +423,7 @@ TEST_P(GLES2DecoderTest, WaitSyncValidArgs) {
       .Times(1)
       .RetiresOnSaturation();
 
-  cmds::WaitSync cmd;
+  WaitSync cmd;
   cmd.Init(client_sync_id_, 0, kTimeout);
   decoder_->set_unsafe_es3_apis_enabled(true);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
@@ -468,6 +474,44 @@ TEST_P(GLES2DecoderTest, RequestExtensionCHROMIUMBadBucket) {
 TEST_P(GLES2DecoderTest, BeginQueryEXTDisabled) {
   // Test something fails if off.
 }
+
+TEST_P(GLES2DecoderTest, GenQueriesEXTImmediateValidArgs) {
+  GenQueriesEXTImmediate* cmd =
+      GetImmediateAs<GenQueriesEXTImmediate>();
+  GLuint temp = kNewClientId;
+  cmd->Init(1, &temp);
+  EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  QueryManager* query_manager = decoder_->GetQueryManager();
+  ASSERT_TRUE(query_manager != NULL);
+  EXPECT_TRUE(query_manager->IsValidQuery(kNewClientId));
+}
+
+TEST_P(GLES2DecoderTest, GenQueriesEXTImmediateDuplicateOrNullIds) {
+  GenQueriesEXTImmediate* cmd =
+      GetImmediateAs<GenQueriesEXTImmediate>();
+  GLuint temp[3] = {kNewClientId, kNewClientId + 1, kNewClientId};
+  cmd->Init(3, temp);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  QueryManager* query_manager = decoder_->GetQueryManager();
+  ASSERT_TRUE(query_manager != NULL);
+  EXPECT_FALSE(query_manager->IsValidQuery(kNewClientId));
+  EXPECT_FALSE(query_manager->IsValidQuery(kNewClientId + 1));
+  GLuint null_id[2] = {kNewClientId, 0};
+  cmd->Init(2, null_id);
+  EXPECT_EQ(error::kInvalidArguments,
+            ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_FALSE(query_manager->IsValidQuery(kNewClientId));
+}
+
+TEST_P(GLES2DecoderTest, GenQueriesEXTImmediateInvalidArgs) {
+  GenQueriesEXTImmediate* cmd =
+      GetImmediateAs<GenQueriesEXTImmediate>();
+  cmd->Init(1, &client_query_id_);
+  EXPECT_EQ(error::kInvalidArguments,
+            ExecuteImmediateCmd(*cmd, sizeof(&client_query_id_)));
+}
+
 
 TEST_P(GLES2DecoderManualInitTest, BeginEndQueryEXT) {
   InitState init;
@@ -567,7 +611,7 @@ const QueryType kQueryTypes[] = {
 const GLsync kGlSync = reinterpret_cast<GLsync>(0xdeadbeef);
 
 static void ExecuteGenerateQueryCmd(GLES2DecoderTestBase* test,
-                                    ::gfx::MockGLInterface* gl,
+                                    ::gl::MockGLInterface* gl,
                                     GLenum target,
                                     GLuint client_id,
                                     GLuint service_id) {
@@ -580,8 +624,8 @@ static void ExecuteGenerateQueryCmd(GLES2DecoderTestBase* test,
 }
 
 static error::Error ExecuteBeginQueryCmd(GLES2DecoderTestBase* test,
-                                         ::gfx::MockGLInterface* gl,
-                                         ::gfx::GPUTimingFake* timing_queries,
+                                         ::gl::MockGLInterface* gl,
+                                         ::gl::GPUTimingFake* timing_queries,
                                          GLenum target,
                                          GLuint client_id,
                                          GLuint service_id,
@@ -601,7 +645,7 @@ static error::Error ExecuteBeginQueryCmd(GLES2DecoderTestBase* test,
 }
 
 static error::Error ExecuteEndQueryCmd(GLES2DecoderTestBase* test,
-                                       ::gfx::MockGLInterface* gl,
+                                       ::gl::MockGLInterface* gl,
                                        GLenum target,
                                        uint32_t submit_count) {
   if (GL_ANY_SAMPLES_PASSED_EXT == target) {
@@ -629,8 +673,8 @@ static error::Error ExecuteEndQueryCmd(GLES2DecoderTestBase* test,
 }
 
 static error::Error ExecuteQueryCounterCmd(GLES2DecoderTestBase* test,
-                                           ::gfx::MockGLInterface* gl,
-                                           ::gfx::GPUTimingFake* timing_queries,
+                                           ::gl::MockGLInterface* gl,
+                                           ::gl::GPUTimingFake* timing_queries,
                                            GLenum target,
                                            GLuint client_id,
                                            GLuint service_id,
@@ -651,7 +695,7 @@ static error::Error ExecuteQueryCounterCmd(GLES2DecoderTestBase* test,
 }
 
 static bool ProcessQuery(GLES2DecoderTestBase* test,
-                         ::gfx::MockGLInterface* gl,
+                         ::gl::MockGLInterface* gl,
                          GLenum target,
                          GLuint service_id) {
   if (GL_ANY_SAMPLES_PASSED_EXT == target) {
@@ -694,8 +738,8 @@ static void CheckBeginEndQueryBadMemoryFails(GLES2DecoderTestBase* test,
   init.request_alpha = true;
   init.bind_generates_resource = true;
   test->InitDecoder(init);
-  ::testing::StrictMock< ::gfx::MockGLInterface>* gl = test->GetGLMock();
-  ::gfx::GPUTimingFake gpu_timing_queries;
+  ::testing::StrictMock<::gl::MockGLInterface>* gl = test->GetGLMock();
+  ::gl::GPUTimingFake gpu_timing_queries;
 
   ExecuteGenerateQueryCmd(test, gl, query_type.type,
                           client_id, service_id);
@@ -768,8 +812,8 @@ TEST_P(GLES2DecoderManualInitTest, QueryReuseTest) {
     init.request_alpha = true;
     init.bind_generates_resource = true;
     InitDecoder(init);
-    ::testing::StrictMock< ::gfx::MockGLInterface>* gl = GetGLMock();
-    ::gfx::GPUTimingFake gpu_timing_queries;
+    ::testing::StrictMock<::gl::MockGLInterface>* gl = GetGLMock();
+    ::gl::GPUTimingFake gpu_timing_queries;
 
     ExecuteGenerateQueryCmd(this, gl, query_type.type,
                             kNewClientId, kNewServiceId);
@@ -882,6 +926,25 @@ TEST_P(GLES2DecoderTest, BeginEndQueryEXTGetErrorQueryCHROMIUM) {
   EXPECT_FALSE(query->IsPending());
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE),
             static_cast<GLenum>(sync->result));
+}
+
+TEST_P(GLES2DecoderTest, SetDisjointValueSync) {
+  SetDisjointValueSyncCHROMIUM cmd;
+
+  cmd.Init(static_cast<uint32_t>(-1), 0u);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteCmd(cmd));
+
+  cmd.Init(kInvalidSharedMemoryId, 0u);
+  EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
+
+  cmd.Init(kSharedMemoryId, kSharedBufferSize);
+  EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
+
+  cmd.Init(kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+
+  cmd.Init(kSharedMemoryId, kSharedMemoryOffset);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteCmd(cmd));
 }
 
 TEST_P(GLES2DecoderManualInitTest, BeginEndQueryEXTCommandsCompletedCHROMIUM) {
@@ -1210,6 +1273,7 @@ TEST_P(GLES2DecoderManualInitTest, MemoryTrackerTexStorage2DEXT) {
       new SizeOnlyMemoryTracker();
   set_memory_tracker(memory_tracker.get());
   InitState init;
+  init.extensions = "GL_EXT_texture_storage";
   init.bind_generates_resource = true;
   InitDecoder(init);
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
@@ -1387,7 +1451,7 @@ TEST_P(GLES2DecoderManualInitTest, ImmutableCopyTexImage2D) {
 TEST_P(GLES2DecoderTest, LoseContextCHROMIUMGuilty) {
   EXPECT_CALL(*mock_decoder_, MarkContextLost(error::kInnocent))
       .Times(1);
-  cmds::LoseContextCHROMIUM cmd;
+  LoseContextCHROMIUM cmd;
   cmd.Init(GL_GUILTY_CONTEXT_RESET_ARB, GL_INNOCENT_CONTEXT_RESET_ARB);
   EXPECT_EQ(error::kLostContext, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
@@ -1398,7 +1462,7 @@ TEST_P(GLES2DecoderTest, LoseContextCHROMIUMGuilty) {
 TEST_P(GLES2DecoderTest, LoseContextCHROMIUMUnkown) {
   EXPECT_CALL(*mock_decoder_, MarkContextLost(error::kUnknown))
       .Times(1);
-  cmds::LoseContextCHROMIUM cmd;
+  LoseContextCHROMIUM cmd;
   cmd.Init(GL_UNKNOWN_CONTEXT_RESET_ARB, GL_UNKNOWN_CONTEXT_RESET_ARB);
   EXPECT_EQ(error::kLostContext, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
@@ -1409,7 +1473,7 @@ TEST_P(GLES2DecoderTest, LoseContextCHROMIUMUnkown) {
 TEST_P(GLES2DecoderTest, LoseContextCHROMIUMInvalidArgs0_0) {
   EXPECT_CALL(*mock_decoder_, MarkContextLost(_))
       .Times(0);
-  cmds::LoseContextCHROMIUM cmd;
+  LoseContextCHROMIUM cmd;
   cmd.Init(GL_NONE, GL_GUILTY_CONTEXT_RESET_ARB);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
@@ -1418,10 +1482,71 @@ TEST_P(GLES2DecoderTest, LoseContextCHROMIUMInvalidArgs0_0) {
 TEST_P(GLES2DecoderTest, LoseContextCHROMIUMInvalidArgs1_0) {
   EXPECT_CALL(*mock_decoder_, MarkContextLost(_))
       .Times(0);
-  cmds::LoseContextCHROMIUM cmd;
+  LoseContextCHROMIUM cmd;
   cmd.Init(GL_GUILTY_CONTEXT_RESET_ARB, GL_NONE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, TransformFeedbackStates) {
+  BeginTransformFeedback begin_cmd;
+  begin_cmd.Init(GL_POINTS);
+  EndTransformFeedback end_cmd;
+  end_cmd.Init();
+  PauseTransformFeedback pause_cmd;
+  pause_cmd.Init();
+  ResumeTransformFeedback resume_cmd;
+  resume_cmd.Init();
+
+  // Before Begin: Pause, Resume, and End is invalid.
+  EXPECT_EQ(error::kNoError, ExecuteCmd(end_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  EXPECT_EQ(error::kNoError, ExecuteCmd(pause_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  EXPECT_EQ(error::kNoError, ExecuteCmd(resume_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  // Begin
+  EXPECT_CALL(*gl_, BeginTransformFeedback(GL_POINTS))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_EQ(error::kNoError, ExecuteCmd(begin_cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  // Begin again is invalid.
+  EXPECT_EQ(error::kNoError, ExecuteCmd(begin_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  // Before Pause: Resume is invalid.
+  EXPECT_EQ(error::kNoError, ExecuteCmd(resume_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  // Pause
+  EXPECT_CALL(*gl_, PauseTransformFeedback())
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_EQ(error::kNoError, ExecuteCmd(pause_cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  // Pause again is invalid.
+  EXPECT_EQ(error::kNoError, ExecuteCmd(pause_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  // Resume
+  EXPECT_CALL(*gl_, ResumeTransformFeedback())
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_EQ(error::kNoError, ExecuteCmd(resume_cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  // End
+  EXPECT_CALL(*gl_, EndTransformFeedback())
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_EQ(error::kNoError, ExecuteCmd(end_cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
 class GLES2DecoderDoCommandsTest : public GLES2DecoderTest {
@@ -1442,6 +1567,56 @@ class GLES2DecoderDoCommandsTest : public GLES2DecoderTest {
   Enable cmds_[3];
   int entries_per_cmd_;
 };
+
+TEST_P(GLES3DecoderTest, BindTransformFeedbackValidArgs) {
+  EXPECT_CALL(*gl_, BindTransformFeedback(GL_TRANSFORM_FEEDBACK,
+                                          kServiceTransformFeedbackId));
+  SpecializedSetup<BindTransformFeedback, 0>(true);
+  BindTransformFeedback cmd;
+  cmd.Init(GL_TRANSFORM_FEEDBACK, client_transformfeedback_id_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, DeleteTransformFeedbacksImmediateInvalidArgs) {
+  DeleteTransformFeedbacksImmediate& cmd =
+      *GetImmediateAs<DeleteTransformFeedbacksImmediate>();
+  SpecializedSetup<DeleteTransformFeedbacksImmediate, 0>(false);
+  GLuint temp = kInvalidClientId;
+  cmd.Init(1, &temp);
+  EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, sizeof(temp)));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, GetIntegeri_vValidArgs) {
+  EXPECT_CALL(*gl_, GetIntegeri_v(_, _, _)).Times(0);
+  typedef GetIntegeri_v::Result Result;
+  Result* result = static_cast<Result*>(shared_memory_address_);
+  result->size = 0;
+  GetIntegeri_v cmd;
+  cmd.Init(GL_TRANSFORM_FEEDBACK_BUFFER_BINDING, 2, shared_memory_id_,
+           shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(decoder_->GetGLES2Util()->GLGetNumValuesReturned(
+                GL_TRANSFORM_FEEDBACK_BUFFER_BINDING),
+            result->GetNumResults());
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, GetInteger64i_vValidArgs) {
+  EXPECT_CALL(*gl_, GetInteger64i_v(_, _, _)).Times(0);
+  typedef GetInteger64i_v::Result Result;
+  Result* result = static_cast<Result*>(shared_memory_address_);
+  result->size = 0;
+  GetInteger64i_v cmd;
+  cmd.Init(GL_UNIFORM_BUFFER_SIZE, 2, shared_memory_id_,
+           shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(decoder_->GetGLES2Util()->GLGetNumValuesReturned(
+                GL_UNIFORM_BUFFER_SIZE),
+            result->GetNumResults());
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
 
 // Test that processing with 0 entries does nothing.
 TEST_P(GLES2DecoderDoCommandsTest, DoCommandsOneOfZero) {
@@ -1522,6 +1697,89 @@ TEST_P(GLES2DecoderDoCommandsTest, DoCommandsBadArgSize) {
   EXPECT_EQ(entries_per_cmd_ + cmds_[1].header.size, num_processed);
 }
 
+class GLES2DecoderDescheduleUntilFinishedTest : public GLES2DecoderTest {
+ public:
+  GLES2DecoderDescheduleUntilFinishedTest() {
+  }
+
+  void SetUp() override {
+    InitState init;
+    init.gl_version = "4.4";
+    init.extensions += " GL_ARB_compatibility GL_ARB_sync";
+    InitDecoder(init);
+
+    GetDecoder()->SetDescheduleUntilFinishedCallback(
+        base::Bind(&GLES2DecoderDescheduleUntilFinishedTest::
+                       DescheduleUntilFinishedCallback,
+                   base::Unretained(this)));
+    GetDecoder()->SetRescheduleAfterFinishedCallback(
+        base::Bind(&GLES2DecoderDescheduleUntilFinishedTest::
+                       RescheduleAfterFinishedCallback,
+                   base::Unretained(this)));
+
+    EXPECT_CALL(*gl_, FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0))
+        .Times(2)
+        .WillOnce(Return(sync_service_id_))
+        .WillOnce(Return(sync_service_id2_))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, IsSync(sync_service_id_)).WillRepeatedly(Return(GL_TRUE));
+    EXPECT_CALL(*gl_, Flush()).Times(2).RetiresOnSaturation();
+    EXPECT_CALL(*gl_, DeleteSync(sync_service_id_))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, DeleteSync(sync_service_id2_))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+
+  void DescheduleUntilFinishedCallback() {
+    deschedule_until_finished_callback_count_++;
+  }
+  void RescheduleAfterFinishedCallback() {
+    reschedule_after_finished_callback_count_++;
+  }
+
+ protected:
+  int deschedule_until_finished_callback_count_ = 0;
+  int reschedule_after_finished_callback_count_ = 0;
+  GLsync sync_service_id_ = reinterpret_cast<GLsync>(0x15);
+  GLsync sync_service_id2_ = reinterpret_cast<GLsync>(0x15);
+};
+
+TEST_P(GLES2DecoderDescheduleUntilFinishedTest, AlreadySignalled) {
+  EXPECT_CALL(*gl_, ClientWaitSync(sync_service_id_, 0, 0))
+      .Times(1)
+      .WillOnce(Return(GL_ALREADY_SIGNALED))
+      .RetiresOnSaturation();
+
+  DescheduleUntilFinishedCHROMIUM cmd;
+  cmd.Init();
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(0, deschedule_until_finished_callback_count_);
+  EXPECT_EQ(0, reschedule_after_finished_callback_count_);
+
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(0, deschedule_until_finished_callback_count_);
+  EXPECT_EQ(0, reschedule_after_finished_callback_count_);
+}
+
+TEST_P(GLES2DecoderDescheduleUntilFinishedTest, NotYetSignalled) {
+  EXPECT_CALL(*gl_, ClientWaitSync(sync_service_id_, 0, 0))
+      .Times(1)
+      .WillOnce(Return(GL_TIMEOUT_EXPIRED))
+      .RetiresOnSaturation();
+
+  DescheduleUntilFinishedCHROMIUM cmd;
+  cmd.Init();
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(0, deschedule_until_finished_callback_count_);
+  EXPECT_EQ(0, reschedule_after_finished_callback_count_);
+
+  EXPECT_EQ(error::kDeferLaterCommands, ExecuteCmd(cmd));
+  EXPECT_EQ(1, deschedule_until_finished_callback_count_);
+  EXPECT_EQ(0, reschedule_after_finished_callback_count_);
+}
+
 void GLES3DecoderWithESSL3ShaderTest::SetUp() {
   base::CommandLine command_line(0, nullptr);
   command_line.AppendSwitch(switches::kEnableUnsafeES3APIs);
@@ -1544,6 +1802,10 @@ INSTANTIATE_TEST_CASE_P(Service,
                         ::testing::Bool());
 
 INSTANTIATE_TEST_CASE_P(Service, GLES2DecoderDoCommandsTest, ::testing::Bool());
+
+INSTANTIATE_TEST_CASE_P(Service,
+                        GLES2DecoderDescheduleUntilFinishedTest,
+                        ::testing::Bool());
 
 INSTANTIATE_TEST_CASE_P(Service, GLES3DecoderTest, ::testing::Bool());
 

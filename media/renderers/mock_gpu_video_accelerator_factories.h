@@ -8,9 +8,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "media/renderers/gpu_video_accelerator_factories.h"
 #include "media/video/video_decode_accelerator.h"
@@ -41,6 +42,7 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
                     std::vector<gpu::Mailbox>* texture_mailboxes,
                     uint32_t texture_target));
   MOCK_METHOD1(DeleteTexture, void(uint32_t texture_id));
+  MOCK_METHOD0(CreateSyncToken, gpu::SyncToken());
   MOCK_METHOD1(WaitSyncToken, void(const gpu::SyncToken& sync_token));
   MOCK_METHOD0(GetTaskRunner, scoped_refptr<base::SingleThreadTaskRunner>());
   MOCK_METHOD0(GetVideoDecodeAcceleratorCapabilities,
@@ -48,7 +50,7 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
   MOCK_METHOD0(GetVideoEncodeAcceleratorSupportedProfiles,
                VideoEncodeAccelerator::SupportedProfiles());
 
-  scoped_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBuffer(
+  std::unique_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBuffer(
       const gfx::Size& size,
       gfx::BufferFormat format,
       gfx::BufferUsage usage) override;
@@ -59,7 +61,7 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
     return video_frame_output_format_;
   };
 
-  scoped_ptr<GpuVideoAcceleratorFactories::ScopedGLContextLock>
+  std::unique_ptr<GpuVideoAcceleratorFactories::ScopedGLContextLock>
   GetGLContextLock() override;
 
   void SetVideoFrameOutputFormat(
@@ -73,11 +75,13 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
 
   void SetGpuMemoryBuffersInUseByMacOSWindowServer(bool in_use);
 
-  scoped_ptr<base::SharedMemory> CreateSharedMemory(size_t size) override;
+  std::unique_ptr<base::SharedMemory> CreateSharedMemory(size_t size) override;
 
-  scoped_ptr<VideoDecodeAccelerator> CreateVideoDecodeAccelerator() override;
+  std::unique_ptr<VideoDecodeAccelerator> CreateVideoDecodeAccelerator()
+      override;
 
-  scoped_ptr<VideoEncodeAccelerator> CreateVideoEncodeAccelerator() override;
+  std::unique_ptr<VideoEncodeAccelerator> CreateVideoEncodeAccelerator()
+      override;
 
   gpu::gles2::GLES2Interface* GetGLES2Interface() { return gles2_; }
 

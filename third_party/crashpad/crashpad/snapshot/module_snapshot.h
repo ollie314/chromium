@@ -19,14 +19,14 @@
 #include <sys/types.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
+#include "snapshot/memory_snapshot.h"
 #include "util/misc/uuid.h"
 #include "util/numeric/checked_range.h"
-#include "snapshot/memory_snapshot.h"
 
 namespace crashpad {
 
@@ -44,7 +44,7 @@ class UserMinidumpStream {
 
  private:
   //! \brief The memory representing the custom minidump stream.
-  scoped_ptr<MemorySnapshot> memory_;
+  std::unique_ptr<MemorySnapshot> memory_;
 
   //! \brief The stream type that the minidump stream will be tagged with.
   uint32_t stream_type_;
@@ -152,8 +152,8 @@ class ModuleSnapshot {
   //!
   //! On Windows, this references the PDB file, which contains symbol
   //! information held separately from the module itself. On other platforms,
-  //! this is normally just be the basename of the module, because the debug
-  //! info file’s name is not relevant even in split-debug scenarios.
+  //! this is normally the basename of the module, because the debug info file’s
+  //! name is not relevant even in split-debug scenarios.
   //!
   //! \sa UUIDAndAge()
   virtual std::string DebugFileName() const = 0;

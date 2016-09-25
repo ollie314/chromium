@@ -10,13 +10,20 @@
 /** @typedef {{username: string, profilePath: string}} */
 var SignedInUser;
 
-/** @typedef {{name: string, filePath: string, isSupervised: boolean}} */
+/**
+ * @typedef {{name: string,
+ *            filePath: string,
+ *            isSupervised: boolean,
+ *            custodianUsername: string,
+ *            showConfirmation: boolean}}
+ */
 var ProfileInfo;
 
-/** @typedef {{id: string,
- *             name: string,
- *             iconURL: string,
- *             onCurrentDevice: boolean}}
+/**
+ * @typedef {{id: string,
+ *            name: string,
+ *            iconURL: string,
+ *            onCurrentDevice: boolean}}
  */
 var SupervisedUser;
 
@@ -47,10 +54,9 @@ cr.define('signin', function() {
     },
 
     /**
-     * Gets the list of existing supervised users.
      * @param {string} profilePath Profile Path of the custodian.
-     * @return {Promise} A promise for the requested data.
-     * @private
+     * @return {!Promise<!Array<!SupervisedUser>>} The list of existing
+     *     supervised users.
      */
     getExistingSupervisedUsers: function(profilePath) {
       assertNotReached();
@@ -62,11 +68,13 @@ cr.define('signin', function() {
      * @param {string} profileIconUrl URL of the selected icon of the new
      *     profile.
      * @param {boolean} isSupervised True if the new profile is supervised.
+     * @param {string} supervisedUserId ID of the supervised user to be
+     *     imported.
      * @param {string} custodianProfilePath Profile path of the custodian if
      *     the new profile is supervised.
      */
     createProfile: function(profileName, profileIconUrl, isSupervised,
-        custodianProfilePath) {
+        supervisedUserId, custodianProfilePath) {
       assertNotReached();
     },
 
@@ -74,6 +82,13 @@ cr.define('signin', function() {
      * Cancels creation of the new profile.
      */
     cancelCreateProfile: function() {
+      assertNotReached();
+    },
+
+    /**
+     * Cancels loading supervised users.
+     */
+    cancelLoadingSupervisedUsers: function() {
       assertNotReached();
     },
 
@@ -102,6 +117,30 @@ cr.define('signin', function() {
     openUrlInLastActiveProfileBrowser: function(url) {
       assertNotReached();
     },
+
+    /**
+     * Switches to the profile with the given path.
+     * @param {string} profilePath Path to the profile to switch to.
+     */
+    switchToProfile: function(profilePath) {
+      assertNotReached();
+    },
+
+    /**
+     * @return {!Promise<boolean>} Whether all (non-supervised and non-child)
+     *     profiles are locked.
+     */
+    areAllProfilesLocked: function() {
+      assertNotReached();
+    },
+
+    /**
+     * Authenticates the custodian profile with the given email address.
+     * @param {string} emailAddress Email address of the custodian profile.
+     */
+    authenticateCustodian: function(emailAddress) {
+      assertNotReached();
+    }
   };
 
   /**
@@ -137,15 +176,20 @@ cr.define('signin', function() {
 
     /** @override */
     createProfile: function(profileName, profileIconUrl, isSupervised,
-        custodianProfilePath) {
+        supervisedUserId, custodianProfilePath) {
       chrome.send('createProfile',
-                  [profileName, profileIconUrl, false, isSupervised, '',
-                   custodianProfilePath]);
+                  [profileName, profileIconUrl, false, isSupervised,
+                   supervisedUserId, custodianProfilePath]);
     },
 
     /** @override */
     cancelCreateProfile: function() {
       chrome.send('cancelCreateProfile');
+    },
+
+    /** @override */
+    cancelLoadingSupervisedUsers: function() {
+      chrome.send('cancelLoadingSupervisedUsers');
     },
 
     /** @override */
@@ -162,6 +206,21 @@ cr.define('signin', function() {
     openUrlInLastActiveProfileBrowser: function(url) {
       chrome.send('openUrlInLastActiveProfileBrowser', [url]);
     },
+
+    /** @override */
+    switchToProfile: function(profilePath) {
+      chrome.send('switchToProfile', [profilePath]);
+    },
+
+    /** @override */
+    areAllProfilesLocked: function() {
+      return cr.sendWithPromise('areAllProfilesLocked');
+    },
+
+    /** @override */
+    authenticateCustodian: function(emailAddress) {
+      chrome.send('authenticateCustodian', [emailAddress]);
+    }
   };
 
   return {

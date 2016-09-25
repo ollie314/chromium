@@ -32,7 +32,7 @@
 #define KeyframeEffectModel_h
 
 #include "core/CoreExport.h"
-#include "core/animation/AnimationEffect.h"
+#include "core/animation/AnimationEffectReadOnly.h"
 #include "core/animation/EffectModel.h"
 #include "core/animation/InterpolationEffect.h"
 #include "core/animation/PropertyHandle.h"
@@ -44,6 +44,7 @@
 #include "wtf/HashSet.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
@@ -83,7 +84,7 @@ public:
         return m_keyframeGroups->get(property)->keyframes();
     }
 
-    using KeyframeGroupMap = HashMap<PropertyHandle, OwnPtr<PropertySpecificKeyframeGroup>>;
+    using KeyframeGroupMap = HashMap<PropertyHandle, std::unique_ptr<PropertySpecificKeyframeGroup>>;
     const KeyframeGroupMap& getPropertySpecificKeyframeGroups() const
     {
         ensureKeyframeGroups();
@@ -104,14 +105,9 @@ public:
         return m_hasSyntheticKeyframes;
     }
 
-    // FIXME: This is a hack used to resolve CSSValues to AnimatableValues while we have a valid handle on an element.
-    // This should be removed once AnimatableValues are obsolete.
-    void forceConversionsToAnimatableValues(Element&, const ComputedStyle* baseStyle);
-    bool snapshotNeutralCompositorKeyframes(Element&, const ComputedStyle& oldStyle, const ComputedStyle& newStyle);
-    bool snapshotAllCompositorKeyframes(Element&, const ComputedStyle* baseStyle);
-
-    template<typename T>
-    inline void forEachInterpolation(const T& callback) { m_interpolationEffect.forEachInterpolation(callback); }
+    bool needsCompositorKeyframesSnapshot() const { return m_needsCompositorKeyframesSnapshot; }
+    bool snapshotNeutralCompositorKeyframes(Element&, const ComputedStyle& oldStyle, const ComputedStyle& newStyle, const ComputedStyle* parentStyle) const;
+    bool snapshotAllCompositorKeyframes(Element&, const ComputedStyle& baseStyle, const ComputedStyle* parentStyle) const;
 
     static KeyframeVector normalizedKeyframesForInspector(const KeyframeVector& keyframes) { return normalizedKeyframes(keyframes); }
 
@@ -130,6 +126,7 @@ protected:
         , m_lastIterationDuration(0)
         , m_defaultKeyframeEasing(defaultKeyframeEasing)
         , m_hasSyntheticKeyframes(false)
+        , m_needsCompositorKeyframesSnapshot(true)
     {
     }
 
@@ -137,13 +134,13 @@ protected:
 
     // Lazily computes the groups of property-specific keyframes.
     void ensureKeyframeGroups() const;
-    void ensureInterpolationEffectPopulated(Element* = nullptr, const ComputedStyle* baseStyle = nullptr) const;
+    void ensureInterpolationEffectPopulated() const;
 
     KeyframeVector m_keyframes;
     // The spec describes filtering the normalized keyframes at sampling time
     // to get the 'property-specific keyframes'. For efficiency, we cache the
     // property-specific lists.
-    mutable OwnPtr<KeyframeGroupMap> m_keyframeGroups;
+    mutable std::unique_ptr<KeyframeGroupMap> m_keyframeGroups;
     mutable InterpolationEffect m_interpolationEffect;
     mutable int m_lastIteration;
     mutable double m_lastFraction;
@@ -151,6 +148,7 @@ protected:
     RefPtr<TimingFunction> m_defaultKeyframeEasing;
 
     mutable bool m_hasSyntheticKeyframes;
+    mutable bool m_needsCompositorKeyframesSnapshot;
 
     friend class KeyframeEffectModelTest;
 };
@@ -162,12 +160,12 @@ public:
     using KeyframeVector = Vector<RefPtr<Keyframe>>;
     static KeyframeEffectModel<Keyframe>* create(const KeyframeVector& keyframes, PassRefPtr<TimingFunction> defaultKeyframeEasing = nullptr)
     {
-        return new KeyframeEffectModel(keyframes, defaultKeyframeEasing);
+        return new KeyframeEffectModel(keyframes, std::move(defaultKeyframeEasing));
     }
 
 private:
     KeyframeEffectModel(const KeyframeVector& keyframes, PassRefPtr<TimingFunction> defaultKeyframeEasing)
-        : KeyframeEffectModelBase(defaultKeyframeEasing)
+        : KeyframeEffectModelBase(std::move(defaultKeyframeEasing))
     {
         m_keyframes.appendVector(keyframes);
     }

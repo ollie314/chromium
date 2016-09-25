@@ -181,20 +181,23 @@ goog.require('__crWeb.message');
             tagName === 'select' || tagName === 'option') {
           // If the element is a known input element, stop the spiral search and
           // return empty results.
-          return '{}';
+          return {};
         }
 
         if (tagName === 'a' && element.href) {
           // Found a link.
-          return __gCrWeb.common.JSONStringify(
-              {href: element.href,
-               referrerPolicy: getReferrerPolicy_(element)});
+          return {
+            href: element.href,
+            referrerPolicy: getReferrerPolicy_(element)
+          };
         }
 
         if (tagName === 'img' && element.src) {
           // Found an image.
-          var result = {src: element.src,
-                        referrerPolicy: getReferrerPolicy_()};
+          var result = {
+            src: element.src,
+            referrerPolicy: getReferrerPolicy_()
+          };
           // Copy the title, if any.
           if (element.title) {
             result.title = element.title;
@@ -219,12 +222,12 @@ goog.require('__crWeb.message');
             }
             parent = parent.parentNode;
           }
-          return __gCrWeb.common.JSONStringify(result);
+          return result;
         }
         element = element.parentNode;
       }
     }
-    return '{}';
+    return {};
   };
 
   // Suppresses the next click such that they are not handled by JS click
@@ -334,10 +337,6 @@ goog.require('__crWeb.message');
 
   function invokeOnHost_(command) {
     __gCrWeb.message.invokeOnHost(command);
-  };
-
-  function invokeOnHostImmediate_(command) {
-    __gCrWeb.message.invokeOnHostImmediate(command);
   };
 
   /**
@@ -550,15 +549,10 @@ goog.require('__crWeb.message');
       // W3C recommended behavior.
       href = 'about:blank';
     }
-    // ExternalRequest messages need to be handled before the expected
-    // shouldStartLoadWithRequest, as such we cannot wait for the regular
-    // message queue invoke which delays to avoid illegal recursion into
-    // UIWebView. This immediate class of messages is handled ASAP by
-    // CRWWebController.
-    invokeOnHostImmediate_({'command': 'externalRequest',
-                               'href': href,
-                             'target': target,
-                     'referrerPolicy': getReferrerPolicy_()});
+    invokeOnHost_({'command': 'externalRequest',
+                      'href': href,
+                    'target': target,
+            'referrerPolicy': getReferrerPolicy_()});
   };
 
   var resetExternalRequest_ = function() {

@@ -16,8 +16,8 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/sync/api/string_ordinal.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -35,7 +35,6 @@
 #include "extensions/common/switches.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "sync/api/string_ordinal.h"
 
 using content::NavigationController;
 using content::RenderViewHost;
@@ -88,7 +87,8 @@ class AppApiTest : public ExtensionApiTest {
     // processes, but they have no elevated privileges and thus should not
     // have WebUI bindings.
     ui_test_utils::NavigateToURLWithDisposition(
-        browser(), base_url.Resolve("path1/empty.html"), NEW_FOREGROUND_TAB,
+        browser(), base_url.Resolve("path1/empty.html"),
+        WindowOpenDisposition::NEW_FOREGROUND_TAB,
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
     LOG(INFO) << "Nav 1.";
     EXPECT_TRUE(process_map->Contains(
@@ -163,7 +163,8 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, DISABLED_AppProcess) {
   // it.  Either way, app tabs should be considered extension processes, but
   // they have no elevated privileges and thus should not have WebUI bindings.
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), base_url.Resolve("path1/empty.html"), NEW_FOREGROUND_TAB,
+      browser(), base_url.Resolve("path1/empty.html"),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   EXPECT_TRUE(process_map->Contains(
       browser()->tab_strip_model()->GetWebContentsAt(1)->
@@ -172,7 +173,8 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, DISABLED_AppProcess) {
   LOG(INFO) << "Nav 1.";
 
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), base_url.Resolve("path2/empty.html"), NEW_FOREGROUND_TAB,
+      browser(), base_url.Resolve("path2/empty.html"),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   EXPECT_TRUE(process_map->Contains(
       browser()->tab_strip_model()->GetWebContentsAt(2)->
@@ -317,7 +319,8 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_BookmarkAppGetsNormalProcess) {
   // it.  Either way, bookmark app tabs should be considered normal processes
   // with no elevated privileges and no WebUI bindings.
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), base_url.Resolve("path1/empty.html"), NEW_FOREGROUND_TAB,
+      browser(), base_url.Resolve("path1/empty.html"),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   EXPECT_FALSE(process_map->Contains(
       browser()->tab_strip_model()->GetWebContentsAt(1)->
@@ -500,7 +503,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, ReloadIntoAppProcess) {
           &browser()->tab_strip_model()->GetActiveWebContents()->
               GetController()));
   LOG(INFO) << "Reloading.";
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
   reload_observer.Wait();
   LOG(INFO) << "Reloading - done.";
   EXPECT_TRUE(process_map->Contains(
@@ -516,7 +519,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, ReloadIntoAppProcess) {
           &browser()->tab_strip_model()->GetActiveWebContents()->
               GetController()));
   LOG(INFO) << "Reloading.";
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
   reload_observer2.Wait();
   LOG(INFO) << "Reloading - done.";
   EXPECT_FALSE(process_map->Contains(
@@ -594,13 +597,6 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, ReloadIntoAppProcessWithJavaScript) {
 // empty.html) results in the new window being in an app process. See
 // http://crbug.com/89272 for more details.
 IN_PROC_BROWSER_TEST_F(AppApiTest, OpenAppFromIframe) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
-
   extensions::ProcessMap* process_map =
       extensions::ProcessMap::Get(browser()->profile());
 
@@ -815,7 +811,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_ReloadAppAfterCrash) {
       content::Source<NavigationController>(
           &browser()->tab_strip_model()->GetActiveWebContents()->
               GetController()));
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
   observer.Wait();
   ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
       contents,

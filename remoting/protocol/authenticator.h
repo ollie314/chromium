@@ -65,7 +65,9 @@ class Authenticator {
 
   enum RejectionReason {
     INVALID_CREDENTIALS,
+    INVALID_ACCOUNT,
     PROTOCOL_ERROR,
+    REJECTED_BY_USER,
   };
 
   // Callback used for layered Authenticator implementations, particularly

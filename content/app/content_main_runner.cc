@@ -15,15 +15,18 @@
 #include "base/allocator/allocator_check.h"
 #include "base/allocator/allocator_extension.h"
 #include "base/at_exit.h"
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/debug/stack_trace.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/i18n/icu_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
@@ -36,9 +39,9 @@
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "components/tracing/trace_config_file.h"
-#include "components/tracing/trace_to_console.h"
-#include "components/tracing/tracing_switches.h"
+#include "components/tracing/browser/trace_config_file.h"
+#include "components/tracing/common/trace_to_console.h"
+#include "components/tracing/common/tracing_switches.h"
 #include "content/app/mojo/mojo_init.h"
 #include "content/browser/browser_main.h"
 #include "content/browser/gpu/gpu_process_host.h"
@@ -64,7 +67,6 @@
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_switches.h"
 #include "media/base/media.h"
-#include "sandbox/win/src/sandbox_types.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/ui_base_switches.h"
 
@@ -78,6 +80,7 @@
 
 #include "base/trace_event/trace_event_etw_export_win.h"
 #include "base/win/process_startup_helper.h"
+#include "sandbox/win/src/sandbox_types.h"
 #include "ui/base/win/atl_module.h"
 #include "ui/display/win/dpi.h"
 #elif defined(OS_MACOSX)
@@ -125,6 +128,40 @@ extern int DownloadMain(const MainFunctionParams&);
 
 namespace content {
 
+namespace {
+
+// This sets up two singletons responsible for managing field trials. The
+// |field_trial_list| singleton lives on the stack and must outlive the Run()
+// method of the process.
+void InitializeFieldTrialAndFeatureList(
+    std::unique_ptr<base::FieldTrialList>* field_trial_list) {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+
+  // Initialize statistical testing infrastructure.  We set the entropy
+  // provider to nullptr to disallow non-browser processes from creating
+  // their own one-time randomized trials; they should be created in the
+  // browser process.
+  field_trial_list->reset(new base::FieldTrialList(nullptr));
+
+  // Ensure any field trials in browser are reflected into the child
+  // process.
+  if (command_line.HasSwitch(switches::kForceFieldTrials)) {
+    bool result = base::FieldTrialList::CreateTrialsFromString(
+        command_line.GetSwitchValueASCII(switches::kForceFieldTrials),
+        std::set<std::string>());
+    DCHECK(result);
+  }
+
+  std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
+  feature_list->InitializeFromCommandLine(
+      command_line.GetSwitchValueASCII(switches::kEnableFeatures),
+      command_line.GetSwitchValueASCII(switches::kDisableFeatures));
+  base::FeatureList::SetInstance(std::move(feature_list));
+}
+
+}  // namespace
+
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
 base::LazyInstance<ContentBrowserClient>
     g_empty_content_browser_client = LAZY_INSTANCE_INITIALIZER;
@@ -141,10 +178,8 @@ base::LazyInstance<ContentUtilityClient>
 
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA) && defined(OS_ANDROID)
 #if defined __LP64__
-#define kV8NativesDataDescriptor kV8NativesDataDescriptor64
 #define kV8SnapshotDataDescriptor kV8SnapshotDataDescriptor64
 #else
-#define kV8NativesDataDescriptor kV8NativesDataDescriptor32
 #define kV8SnapshotDataDescriptor kV8SnapshotDataDescriptor32
 #endif
 #endif
@@ -225,9 +260,10 @@ class ContentClientInitializer {
 #endif  // !CHROME_MULTIPLE_DLL_CHILD
 
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
+    base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
     if (process_type == switches::kGpuProcess ||
-        base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kSingleProcess)) {
+        cmd->HasSwitch(switches::kSingleProcess) ||
+        (process_type.empty() && cmd->HasSwitch(switches::kInProcessGPU))) {
       if (delegate)
         content_client->gpu_ = delegate->CreateContentGpuClient();
       if (!content_client->gpu_)
@@ -235,8 +271,7 @@ class ContentClientInitializer {
     }
 
     if (process_type == switches::kRendererProcess ||
-        base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kSingleProcess)) {
+        cmd->HasSwitch(switches::kSingleProcess)) {
       if (delegate)
         content_client->renderer_ = delegate->CreateContentRendererClient();
       if (!content_client->renderer_)
@@ -244,8 +279,7 @@ class ContentClientInitializer {
     }
 
     if (process_type == switches::kUtilityProcess ||
-        base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kSingleProcess)) {
+        cmd->HasSwitch(switches::kSingleProcess)) {
       if (delegate)
         content_client->utility_ = delegate->CreateContentUtilityClient();
       // TODO(scottmg): http://crbug.com/237249 Should be in _child.
@@ -300,6 +334,9 @@ int RunZygote(const MainFunctionParams& main_function_params,
 
   MainFunctionParams main_params(command_line);
   main_params.zygote_child = true;
+
+  std::unique_ptr<base::FieldTrialList> field_trial_list;
+  InitializeFieldTrialAndFeatureList(&field_trial_list);
 
   for (size_t i = 0; i < arraysize(kMainFunctions); ++i) {
     if (process_type == kMainFunctions[i].name)
@@ -430,10 +467,11 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     // See note at the initialization of ExitManager, below; basically,
     // only Android builds have the ctor/dtor handlers set up to use
     // TRACE_EVENT right away.
-    TRACE_EVENT0("startup,benchmark", "ContentMainRunnerImpl::Initialize");
+    TRACE_EVENT0("startup,benchmark,rail", "ContentMainRunnerImpl::Initialize");
 #endif  // OS_ANDROID
 
     base::GlobalDescriptors* g_fds = base::GlobalDescriptors::GetInstance();
+    ALLOW_UNUSED_LOCAL(g_fds);
 
     // On Android,
     // - setlocale() is not supported.
@@ -587,7 +625,7 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     // Android tracing started at the beginning of the method.
     // Other OSes have to wait till we get here in order for all the memory
     // management setup to be completed.
-    TRACE_EVENT0("startup,benchmark", "ContentMainRunnerImpl::Initialize");
+    TRACE_EVENT0("startup,benchmark,rail", "ContentMainRunnerImpl::Initialize");
 #endif  // !OS_ANDROID
 
 #if defined(OS_MACOSX)
@@ -641,7 +679,7 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     RegisterPathProvider();
     RegisterContentSchemes(true);
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) && (ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE)
     int icudata_fd = g_fds->MaybeGet(kAndroidICUDataDescriptor);
     if (icudata_fd != -1) {
       auto icudata_region = g_fds->GetRegion(kAndroidICUDataDescriptor);
@@ -652,7 +690,7 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     }
 #else
     CHECK(base::i18n::InitializeICU());
-#endif  // OS_ANDROID
+#endif  // OS_ANDROID && (ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE)
 
     base::StatisticsRecorder::Initialize();
 
@@ -728,6 +766,12 @@ class ContentMainRunnerImpl : public ContentMainRunner {
         *base::CommandLine::ForCurrentProcess();
     std::string process_type =
         command_line.GetSwitchValueASCII(switches::kProcessType);
+
+    // Run this logic on all child processes. Zygotes will run this at a later
+    // point in time when the command line has been updated.
+    std::unique_ptr<base::FieldTrialList> field_trial_list;
+    if (!process_type.empty() && process_type != switches::kZygoteProcess)
+      InitializeFieldTrialAndFeatureList(&field_trial_list);
 
     base::HistogramBase::EnableActivityReportHistogram(process_type);
 

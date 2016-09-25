@@ -4,34 +4,96 @@
 
 #include "chrome/gpu/chrome_content_gpu_client.h"
 
-#include "content/public/common/service_registry.h"
+#include <utility>
+
+#include "base/command_line.h"
+#include "base/lazy_instance.h"
+#include "base/memory/ptr_util.h"
+#include "base/threading/platform_thread.h"
+#include "base/time/time.h"
+#include "components/metrics/child_call_stack_profile_collector.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "services/shell/public/cpp/connector.h"
+#include "services/shell/public/cpp/interface_registry.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/gpu/gpu_arc_video_service.h"
 #endif
 
-#if defined(OS_CHROMEOS)
 namespace {
 
-void CreateGpuArcVideoService(
-    mojo::InterfaceRequest<::arc::mojom::VideoHost> request) {
-  // GpuArcVideoService is strongly bound to the Mojo message pipe it
-  // is connected to. When that message pipe is closed, either explicitly on the
-  // other end (in the browser process), or by a connection error, this object
-  // will be destroyed.
-  new chromeos::arc::GpuArcVideoService(std::move(request));
+#if defined(OS_CHROMEOS)
+void DeprecatedCreateGpuArcVideoService(
+    const gpu::GpuPreferences& gpu_preferences,
+    ::arc::mojom::VideoAcceleratorServiceClientRequest client_request) {
+  chromeos::arc::GpuArcVideoService::DeprecatedConnect(
+      base::MakeUnique<chromeos::arc::GpuArcVideoService>(gpu_preferences),
+      std::move(client_request));
 }
 
-}  // namespace
+void CreateGpuArcVideoService(
+    const gpu::GpuPreferences& gpu_preferences,
+    ::arc::mojom::VideoAcceleratorServiceRequest request) {
+  mojo::MakeStrongBinding(
+      base::MakeUnique<chromeos::arc::GpuArcVideoService>(gpu_preferences),
+      std::move(request));
+}
 #endif
 
-ChromeContentGpuClient::ChromeContentGpuClient() {}
+// Returns appropriate parameters for stack sampling on startup.
+base::StackSamplingProfiler::SamplingParams GetStartupSamplingParams() {
+  base::StackSamplingProfiler::SamplingParams params;
+  params.initial_delay = base::TimeDelta::FromMilliseconds(0);
+  params.bursts = 1;
+  params.samples_per_burst = 300;
+  params.sampling_interval = base::TimeDelta::FromMilliseconds(100);
+  return params;
+}
+
+base::LazyInstance<metrics::ChildCallStackProfileCollector>::Leaky
+    g_call_stack_profile_collector = LAZY_INSTANCE_INITIALIZER;
+
+}  // namespace
+
+ChromeContentGpuClient::ChromeContentGpuClient()
+    : stack_sampling_profiler_(
+        base::PlatformThread::CurrentId(),
+        GetStartupSamplingParams(),
+        g_call_stack_profile_collector.Get().GetProfilerCallback(
+            metrics::CallStackProfileParams(
+                metrics::CallStackProfileParams::GPU_PROCESS,
+                metrics::CallStackProfileParams::GPU_MAIN_THREAD,
+                metrics::CallStackProfileParams::PROCESS_STARTUP,
+                metrics::CallStackProfileParams::MAY_SHUFFLE))) {
+}
 
 ChromeContentGpuClient::~ChromeContentGpuClient() {}
 
-void ChromeContentGpuClient::RegisterMojoServices(
-    content::ServiceRegistry* registry) {
+void ChromeContentGpuClient::Initialize(
+    base::FieldTrialList::Observer* observer) {
+  DCHECK(!field_trial_syncer_);
+  field_trial_syncer_.reset(
+      new chrome_variations::ChildProcessFieldTrialSyncer(observer));
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  field_trial_syncer_->InitFieldTrialObserving(command_line);
+}
+
+void ChromeContentGpuClient::ExposeInterfacesToBrowser(
+    shell::InterfaceRegistry* registry,
+    const gpu::GpuPreferences& gpu_preferences) {
 #if defined(OS_CHROMEOS)
-  registry->AddService(base::Bind(&CreateGpuArcVideoService));
+  registry->AddInterface(
+      base::Bind(&CreateGpuArcVideoService, gpu_preferences));
+  registry->AddInterface(
+      base::Bind(&DeprecatedCreateGpuArcVideoService, gpu_preferences));
 #endif
+}
+
+void ChromeContentGpuClient::ConsumeInterfacesFromBrowser(
+    shell::InterfaceProvider* provider) {
+  metrics::mojom::CallStackProfileCollectorPtr browser_interface;
+  provider->GetInterface(&browser_interface);
+  g_call_stack_profile_collector.Get().SetParentProfileCollector(
+      std::move(browser_interface));
 }

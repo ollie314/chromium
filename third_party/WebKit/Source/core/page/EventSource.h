@@ -42,7 +42,7 @@
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
 #include "wtf/Forward.h"
-#include "wtf/OwnPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -63,9 +63,9 @@ public:
     bool withCredentials() const;
 
     enum State : short {
-        CONNECTING = 0,
-        OPEN = 1,
-        CLOSED = 2
+        kConnecting = 0,
+        kOpen = 1,
+        kClosed = 2
     };
 
     State readyState() const;
@@ -87,7 +87,7 @@ public:
     // asynchronous events from the loader won't be invoked.
     void stop() override;
 
-    // ActiveScriptWrappable
+    // ScriptWrappable
     bool hasPendingActivity() const final;
 
     DECLARE_VIRTUAL_TRACE();
@@ -95,7 +95,7 @@ public:
 private:
     EventSource(ExecutionContext*, const KURL&, const EventSourceInit&);
 
-    void didReceiveResponse(unsigned long, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
+    void didReceiveResponse(unsigned long, const ResourceResponse&, std::unique_ptr<WebDataConsumerHandle>) override;
     void didReceiveData(const char*, unsigned) override;
     void didFinishLoading(unsigned long, double) override;
     void didFail(const ResourceError&) override;
@@ -109,7 +109,7 @@ private:
     void connect();
     void networkRequestEnded();
     void scheduleReconnect();
-    void connectTimerFired(Timer<EventSource>*);
+    void connectTimerFired(TimerBase*);
     void abortConnectionAttempt();
 
     // The original URL specified when constructing EventSource instance. Used
@@ -122,7 +122,7 @@ private:
     State m_state;
 
     Member<EventSourceParser> m_parser;
-    OwnPtr<ThreadableLoader> m_loader;
+    Member<ThreadableLoader> m_loader;
     Timer<EventSource> m_connectTimer;
 
     unsigned long long m_reconnectDelay;

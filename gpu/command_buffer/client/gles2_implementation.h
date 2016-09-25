@@ -124,10 +124,6 @@ class GLES2_IMPL_EXPORT GLES2Implementation
       NON_EXPORTED_BASE(public GpuControlClient),
       NON_EXPORTED_BASE(public base::trace_event::MemoryDumpProvider) {
  public:
-  enum MappedMemoryLimit {
-    kNoLimit = MappedMemoryManager::kNoLimit,
-  };
-
   // Stores GL state that never changes.
   struct GLES2_IMPL_EXPORT GLStaticState {
     GLStaticState();
@@ -140,7 +136,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
     ShaderPrecisionMap shader_precisions;
   };
 
-  // The maxiumum result size from simple GL get commands.
+  // The maximum result size from simple GL get commands.
   static const size_t kMaxSizeOfSimpleResult =
       16 * sizeof(uint32_t);  // NOLINT.
 
@@ -164,7 +160,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   static const size_t kMaxSwapBuffers = 2;
 
   GLES2Implementation(GLES2CmdHelper* helper,
-                      ShareGroup* share_group,
+                      scoped_refptr<ShareGroup> share_group,
                       TransferBufferInterface* transfer_buffer,
                       bool bind_generates_resource,
                       bool lose_context_when_out_of_memory,
@@ -191,15 +187,9 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   // this file instead of having to edit some template or the code generator.
   #include "gpu/command_buffer/client/gles2_implementation_autogen.h"
 
-  void DisableVertexAttribArray(GLuint index) override;
-  void EnableVertexAttribArray(GLuint index) override;
-  void GetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) override;
-  void GetVertexAttribiv(GLuint index, GLenum pname, GLint* params) override;
-  void GetVertexAttribIiv(GLuint index, GLenum pname, GLint* params) override;
-  void GetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params) override;
-
   // ContextSupport implementation.
   void Swap() override;
+  void SwapWithDamage(const gfx::Rect& damage) override;
   void PartialSwapBuffers(const gfx::Rect& sub_buffer) override;
   void CommitOverlayPlanes() override;
   void ScheduleOverlayPlane(int plane_z_order,
@@ -266,9 +256,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                     base::trace_event::ProcessMemoryDump* pmd) override;
 
-  ShareGroup* share_group() const {
-    return share_group_.get();
-  }
+  const scoped_refptr<ShareGroup>& share_group() const { return share_group_; }
 
   const Capabilities& capabilities() const {
     return capabilities_;
@@ -417,6 +405,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
 
   // GpuControlClient implementation.
   void OnGpuControlLostContext() final;
+  void OnGpuControlLostContextMaybeReentrant() final;
   void OnGpuControlErrorMessage(const char* message, int32_t id) final;
 
   void* GetResultBuffer();
@@ -471,7 +460,6 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   bool IsTextureReservedId(GLuint id) { return false; }
   bool IsVertexArrayReservedId(GLuint id) { return false; }
   bool IsProgramReservedId(GLuint id) { return false; }
-  bool IsValuebufferReservedId(GLuint id) { return false; }
   bool IsSamplerReservedId(GLuint id) { return false; }
   bool IsTransformFeedbackReservedId(GLuint id) { return false; }
 
@@ -485,7 +473,6 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void BindTextureHelper(GLenum target, GLuint texture);
   void BindTransformFeedbackHelper(GLenum target, GLuint transformfeedback);
   void BindVertexArrayOESHelper(GLuint array);
-  void BindValuebufferCHROMIUMHelper(GLenum target, GLuint valuebuffer);
   void UseProgramHelper(GLuint program);
 
   void BindBufferStub(GLenum target, GLuint buffer);
@@ -495,7 +482,6 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void BindFramebufferStub(GLenum target, GLuint framebuffer);
   void BindRenderbufferStub(GLenum target, GLuint renderbuffer);
   void BindTextureStub(GLenum target, GLuint texture);
-  void BindValuebufferCHROMIUMStub(GLenum target, GLuint valuebuffer);
 
   void GenBuffersHelper(GLsizei n, const GLuint* buffers);
   void GenFramebuffersHelper(GLsizei n, const GLuint* framebuffers);
@@ -503,7 +489,6 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void GenTexturesHelper(GLsizei n, const GLuint* textures);
   void GenVertexArraysOESHelper(GLsizei n, const GLuint* arrays);
   void GenQueriesEXTHelper(GLsizei n, const GLuint* queries);
-  void GenValuebuffersCHROMIUMHelper(GLsizei n, const GLuint* valuebuffers);
   void GenSamplersHelper(GLsizei n, const GLuint* samplers);
   void GenTransformFeedbacksHelper(GLsizei n, const GLuint* transformfeedbacks);
 
@@ -515,7 +500,6 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   bool DeleteShaderHelper(GLuint shader);
   void DeleteQueriesEXTHelper(GLsizei n, const GLuint* queries);
   void DeleteVertexArraysOESHelper(GLsizei n, const GLuint* arrays);
-  void DeleteValuebuffersCHROMIUMHelper(GLsizei n, const GLuint* valuebuffers);
   void DeleteSamplersHelper(GLsizei n, const GLuint* samplers);
   void DeleteTransformFeedbacksHelper(
       GLsizei n, const GLuint* transformfeedbacks);
@@ -529,7 +513,6 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void DeleteProgramStub(GLsizei n, const GLuint* programs);
   void DeleteShaderStub(GLsizei n, const GLuint* shaders);
   void DeleteVertexArraysOESStub(GLsizei n, const GLuint* arrays);
-  void DeleteValuebuffersCHROMIUMStub(GLsizei n, const GLuint* valuebuffers);
   void DeleteSamplersStub(GLsizei n, const GLuint* samplers);
   void DeleteTransformFeedbacksStub(
       GLsizei n, const GLuint* transformfeedbacks);
@@ -755,7 +738,6 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   GLuint bound_framebuffer_;
   GLuint bound_read_framebuffer_;
   GLuint bound_renderbuffer_;
-  GLuint bound_valuebuffer_;
 
   // The program in use by glUseProgram
   GLuint current_program_;
@@ -828,9 +810,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
 
   base::Callback<void(const char*, int32_t)> error_message_callback_;
   base::Closure lost_context_callback_;
-#if DCHECK_IS_ON()
-  bool lost_context_ = false;
-#endif
+  bool lost_context_callback_run_ = false;
 
   int current_trace_stack_;
 

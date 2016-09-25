@@ -4,7 +4,10 @@
 
 #include "chrome/browser/ui/ash/launcher/multi_profile_browser_status_monitor.h"
 
-#include "ash/shelf/shelf_util.h"
+#include "ash/aura/wm_window_aura.h"
+#include "ash/common/shelf/shelf_item_types.h"
+#include "ash/common/wm_window_property.h"
+#include "ash/resources/grit/ash_resources.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
@@ -15,9 +18,8 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/settings_window_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
-#include "grit/ash_resources.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 MultiProfileBrowserStatusMonitor::MultiProfileBrowserStatusMonitor(
@@ -86,13 +88,15 @@ void MultiProfileBrowserStatusMonitor::ActiveUserChanged(
             browser)) {
       continue;
     }
+    aura::Window* aura_window = browser->window()->GetNativeWindow();
     if (multi_user_util::IsProfileFromActiveUser(browser->profile())) {
-      ash::SetShelfItemDetailsForDialogWindow(
-      browser->window()->GetNativeWindow(),
-        IDR_ASH_SHELF_ICON_SETTINGS,
-        l10n_util::GetStringUTF16(IDS_SETTINGS_TITLE));
+      ash::ShelfItemDetails item_details;
+      item_details.type = ash::TYPE_DIALOG;
+      item_details.image_resource_id = IDR_ASH_SHELF_ICON_SETTINGS;
+      item_details.title = l10n_util::GetStringUTF16(IDS_SETTINGS_TITLE);
+      ash::WmWindowAura::Get(aura_window)->SetShelfItemDetails(item_details);
     } else {
-      ash::ClearShelfItemDetailsForWindow(browser->window()->GetNativeWindow());
+      ash::WmWindowAura::Get(aura_window)->ClearShelfItemDetails();
     }
   }
 

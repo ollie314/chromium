@@ -116,7 +116,7 @@ class JingleSession : public Session {
   base::ThreadChecker thread_checker_;
 
   JingleSessionManager* session_manager_;
-  std::string peer_jid_;
+  SignalingAddress peer_address_;
   Session::EventHandler* event_handler_;
 
   std::string session_id_;
@@ -130,10 +130,10 @@ class JingleSession : public Session {
   Transport* transport_ = nullptr;
 
   // Pending Iq requests. Used for all messages except transport-info.
-  std::set<IqRequest*> pending_requests_;
+  std::set<std::unique_ptr<IqRequest>> pending_requests_;
 
   // Pending transport-info requests.
-  std::list<IqRequest*> transport_info_requests_;
+  std::list<std::unique_ptr<IqRequest>> transport_info_requests_;
 
   base::WeakPtrFactory<JingleSession> weak_factory_;
 

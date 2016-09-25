@@ -31,8 +31,12 @@
 #include "platform/text/TabSize.h"
 #include "platform/text/TextDirection.h"
 #include "platform/text/TextPath.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "wtf/Allocator.h"
+#include "wtf/text/StringView.h"
 #include "wtf/text/WTFString.h"
+
+#include <unicode/utf16.h>
 
 class SkTextBlob;
 
@@ -101,33 +105,6 @@ public:
         m_data.characters16 = c;
     }
 
-    TextRun(const String& string, float xpos = 0, float expansion = 0, ExpansionBehavior expansionBehavior = AllowTrailingExpansion | ForbidLeadingExpansion, TextDirection direction = LTR, bool directionalOverride = false)
-        : m_charactersLength(string.length())
-        , m_len(string.length())
-        , m_xpos(xpos)
-        , m_horizontalGlyphStretch(1)
-        , m_expansion(expansion)
-        , m_expansionBehavior(expansionBehavior)
-        , m_allowTabs(false)
-        , m_direction(direction)
-        , m_directionalOverride(directionalOverride)
-        , m_disableSpacing(false)
-        , m_textJustify(TextJustifyAuto)
-        , m_normalizeSpace(false)
-        , m_tabSize(0)
-    {
-        if (!m_charactersLength) {
-            m_is8Bit = true;
-            m_data.characters8 = 0;
-        } else if (string.is8Bit()) {
-            m_data.characters8 = string.characters8();
-            m_is8Bit = true;
-        } else {
-            m_data.characters16 = string.characters16();
-            m_is8Bit = false;
-        }
-    }
-
     TextRun(const StringView& string, float xpos = 0, float expansion = 0, ExpansionBehavior expansionBehavior = AllowTrailingExpansion | ForbidLeadingExpansion, TextDirection direction = LTR, bool directionalOverride = false)
         : m_charactersLength(string.length())
         , m_len(string.length())
@@ -176,9 +153,19 @@ public:
     const LChar* characters8() const { ASSERT(is8Bit()); return m_data.characters8; }
     const UChar* characters16() const { ASSERT(!is8Bit()); return m_data.characters16; }
 
+    UChar32 codepointAtAndNext(unsigned& i) const
+    {
+        if (is8Bit())
+            return (*this)[i++];
+        UChar32 codepoint;
+        SECURITY_DCHECK(i < m_len);
+        U16_NEXT(characters16(), i, m_len, codepoint);
+        return codepoint;
+    }
+
     bool is8Bit() const { return m_is8Bit; }
-    int length() const { return m_len; }
-    int charactersLength() const { return m_charactersLength; }
+    unsigned length() const { return m_len; }
+    unsigned charactersLength() const { return m_charactersLength; }
 
     bool normalizeSpace() const { return m_normalizeSpace; }
     void setNormalizeSpace(bool normalizeSpace) { m_normalizeSpace = normalizeSpace; }
@@ -199,6 +186,7 @@ public:
     float xPos() const { return m_xpos; }
     void setXPos(float xPos) { m_xpos = xPos; }
     float expansion() const { return m_expansion; }
+    void setExpansion(float expansion) { m_expansion = expansion; }
     bool allowsLeadingExpansion() const { return m_expansionBehavior & AllowLeadingExpansion; }
     bool allowsTrailingExpansion() const { return m_expansionBehavior & AllowTrailingExpansion; }
     TextDirection direction() const { return static_cast<TextDirection>(m_direction); }
@@ -259,10 +247,10 @@ public:
     }
 
     const TextRun& run;
-    int from;
-    int to;
+    unsigned from;
+    unsigned to;
     FloatRect bounds;
-    RefPtr<const SkTextBlob>* cachedTextBlob;
+    sk_sp<SkTextBlob>* cachedTextBlob;
 };
 
 } // namespace blink

@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
@@ -14,10 +15,10 @@
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/display/screen.h"
 #include "ui/events/event_processor.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
-#include "ui/gfx/screen.h"
 #include "ui/views/test/native_widget_factory.h"
 #include "ui/views/test/test_views.h"
 #include "ui/views/test/test_views_delegate.h"
@@ -99,6 +100,21 @@ TEST_F(DesktopNativeWidgetAuraTest, NativeViewInitiallyHidden) {
   init_params.native_widget = new DesktopNativeWidgetAura(&widget);
   widget.Init(init_params);
   EXPECT_FALSE(widget.GetNativeView()->IsVisible());
+}
+
+// Verifies that if the DesktopWindowTreeHost is already shown, the native view
+// still reports not visible as we haven't shown the content window.
+TEST_F(DesktopNativeWidgetAuraTest, WidgetNotVisibleOnlyWindowTreeHostShown) {
+  Widget widget;
+  Widget::InitParams init_params =
+      CreateParams(Widget::InitParams::TYPE_WINDOW);
+  init_params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  init_params.native_widget = new DesktopNativeWidgetAura(&widget);
+  widget.Init(init_params);
+  DesktopNativeWidgetAura* desktop_native_widget_aura =
+      static_cast<DesktopNativeWidgetAura*>(widget.native_widget());
+  desktop_native_widget_aura->host()->Show();
+  EXPECT_FALSE(widget.IsVisible());
 }
 
 // Verify that the cursor state is shared between two native widgets.
@@ -239,10 +255,10 @@ TEST_F(DesktopNativeWidgetAuraTest, WidgetCanBeDestroyedFromNestedLoop) {
   // |RunWithDispatcher()| below.
   base::RunLoop run_loop;
   base::Closure quit_runloop = run_loop.QuitClosure();
-  message_loop()->PostTask(FROM_HERE,
-                           base::Bind(&QuitNestedLoopAndCloseWidget,
-                                      base::Passed(&widget),
-                                      base::Unretained(&quit_runloop)));
+  message_loop()->task_runner()->PostTask(
+      FROM_HERE,
+      base::Bind(&QuitNestedLoopAndCloseWidget, base::Passed(&widget),
+                 base::Unretained(&quit_runloop)));
   run_loop.Run();
 }
 
@@ -432,7 +448,8 @@ TEST_F(DesktopAuraWidgetTest, TopLevelOwnedPopupRepositionTest) {
 
   gfx::Rect new_pos(10, 10, 400, 400);
   popup_window.owned_window()->SetBoundsInScreen(
-      new_pos, gfx::Screen::GetScreen()->GetDisplayNearestPoint(gfx::Point()));
+      new_pos,
+      display::Screen::GetScreen()->GetDisplayNearestPoint(gfx::Point()));
 
   EXPECT_EQ(new_pos,
             popup_window.top_level_widget()->GetWindowBoundsInScreen());
@@ -508,6 +525,8 @@ TEST_F(DesktopAuraWidgetTest, CloseWidgetDuringMouseReleased) {
   RunCloseWidgetDuringDispatchTest(this, ui::ET_MOUSE_RELEASED);
 }
 
+namespace {
+
 // Provides functionality to create a window modal dialog.
 class ModalDialogDelegate : public DialogDelegateView {
  public:
@@ -520,6 +539,8 @@ class ModalDialogDelegate : public DialogDelegateView {
  private:
   DISALLOW_COPY_AND_ASSIGN(ModalDialogDelegate);
 };
+
+}  // namespace
 
 // This test verifies that whether mouse events when a modal dialog is
 // displayed are eaten or recieved by the dialog.
@@ -596,7 +617,8 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
 #if defined(OS_WIN)
 // Tests whether we can activate the top level widget when a modal dialog is
 // active.
-TEST_F(WidgetTest, WindowModalityActivationTest) {
+// Flaky: crbug.com/613428
+TEST_F(WidgetTest, DISABLED_WindowModalityActivationTest) {
   TestDesktopWidgetDelegate widget_delegate;
   widget_delegate.InitWidget(CreateParams(Widget::InitParams::TYPE_WINDOW));
 

@@ -37,6 +37,7 @@
 #include "wtf/text/TextCodec.h"
 #include "wtf/text/TextEncoding.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
@@ -46,7 +47,7 @@ class ExceptionState;
 class TextEncoder final : public GarbageCollectedFinalized<TextEncoder>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static TextEncoder* create(ExecutionContext*, const String& utfLabel, ExceptionState&);
+    static TextEncoder* create(ExecutionContext*, ExceptionState&);
     ~TextEncoder();
 
     // Implement the IDL
@@ -59,7 +60,7 @@ private:
     TextEncoder(const WTF::TextEncoding&);
 
     WTF::TextEncoding m_encoding;
-    OwnPtr<WTF::TextCodec> m_codec;
+    std::unique_ptr<WTF::TextCodec> m_codec;
 };
 
 } // namespace blink

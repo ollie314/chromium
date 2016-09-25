@@ -1,14 +1,15 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="bn">
-<translation id="1008557486741366299">এখনই নয়</translation>
 <translation id="1047726139967079566">এই পৃষ্ঠাটি বুকমার্ক করুন...</translation>
 <translation id="1172898394251786223">পরবর্তী ফিল্ড</translation>
 <translation id="2320166752086256636">কীবোর্ড লুকান</translation>
 <translation id="2467815441875554965">প্রাসঙ্গিক অনুসন্ধান</translation>
+<translation id="2572712655377361602">একটি ডিভাইস নীতি আপনার ফটোতে অ্যাক্সেস অবরুদ্ধ করেছে</translation>
 <translation id="2704606927547763573">প্রতিলিপি করা হয়েছে</translation>
 <translation id="2747003861858887689">পূর্ববর্তী ফিল্ড</translation>
 <translation id="2780046210906776326">কোনো ইমেল অ্যাকাউন্ট নেই</translation>
+<translation id="3172213052701798825">পাসওয়ার্ডের জন্য Google Smart Lock</translation>
 <translation id="3244271242291266297">মিমি</translation>
 <translation id="3252394070589632019"><ph name="VALUE" />, <ph name="ADDITIONAL_INFO" />, <ph name="NUM_SUGGESTIONS" /> এর <ph name="INDEX" /></translation>
 <translation id="3335947283844343239">বন্ধ হওয়া ট্যাব পুনরায় খুলুন</translation>
@@ -19,7 +20,9 @@
 <translation id="4399225372525667111">সাইটের জন্য URLটি সঠিক কিনা Chrome তা যাচাই করতে অক্ষম৷</translation>
 <translation id="4728558894243024398">প্ল্যাটফর্ম</translation>
 <translation id="473775607612524610">আপডেট</translation>
+<translation id="4875622588773761625">আপনি কি চান যে এই সাইটের জন্য <ph name="PASSWORD_MANAGER_BRAND" /> আপনার পাসওয়ার্ড আপডেট করুক?</translation>
 <translation id="5317780077021120954">সংরক্ষণ করুন</translation>
+<translation id="6039694632319341016">আপনি কি চান যে এই সাইটটির ক্ষেত্রে <ph name="USERNAME" /> এর জন্য আপনার পাসওয়ার্ডটি <ph name="PASSWORD_MANAGER_BRAND" /> আপডেট করুক?</translation>
 <translation id="605721222689873409">YY</translation>
 <translation id="6149061208933997199">পাসওয়ার্ড ব্যবহার করুন</translation>
 <translation id="6196207969502475924">ভয়েস অনুসন্ধান</translation>

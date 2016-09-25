@@ -38,13 +38,18 @@ MediaRouter* MediaRouterFactory::GetApiForBrowserContext(
       service_factory.Get().GetServiceForBrowserContext(context, true));
 }
 
+// static
+MediaRouterFactory* MediaRouterFactory::GetInstance() {
+  return &service_factory.Get();
+}
+
 void MediaRouterFactory::BrowserContextShutdown(
     content::BrowserContext* context) {
   if (context->IsOffTheRecord()) {
     MediaRouter* router =
         static_cast<MediaRouter*>(GetServiceForBrowserContext(context, false));
     if (router)
-      router->OnOffTheRecordProfileShutdown();
+      router->OnIncognitoProfileShutdown();
   }
   BrowserContextKeyedServiceFactory::BrowserContextShutdown(context);
 }
@@ -69,11 +74,15 @@ content::BrowserContext* MediaRouterFactory::GetBrowserContextToUse(
 
 KeyedService* MediaRouterFactory::BuildServiceInstanceFor(
     BrowserContext* context) const {
+  MediaRouterBase* media_router = nullptr;
 #if defined(OS_ANDROID)
-  return new MediaRouterAndroid(context);
+  media_router = new MediaRouterAndroid(context);
 #else
-  return new MediaRouterMojoImpl(extensions::ProcessManager::Get(context));
+  media_router =
+      new MediaRouterMojoImpl(extensions::ProcessManager::Get(context));
 #endif
+  media_router->Initialize();
+  return media_router;
 }
 
 }  // namespace media_router

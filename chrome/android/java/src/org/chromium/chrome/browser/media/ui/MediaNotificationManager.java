@@ -13,6 +13,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.media.AudioManager;
@@ -26,14 +27,13 @@ import android.support.v7.app.NotificationCompat;
 import android.support.v7.media.MediaRouter;
 import android.text.TextUtils;
 import android.util.SparseArray;
+import android.util.TypedValue;
 import android.view.KeyEvent;
-import android.view.View;
-import android.widget.RemoteViews;
 
-import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.content_public.common.MediaMetadata;
 
 import javax.annotation.Nullable;
 
@@ -46,10 +46,12 @@ import javax.annotation.Nullable;
 public class MediaNotificationManager {
     private static final String TAG = "MediaNotification";
 
-    // The background notification size on Android Wear. See:
-    // http://developer.android.com/training/wearables/notifications/creating.html
-    private static final int WEARABLE_NOTIFICATION_BACKGROUND_WIDTH = 400;
-    private static final int WEARABLE_NOTIFICATION_BACKGROUND_HEIGHT = 400;
+    // MediaStyle large icon size for pre-N.
+    private static final int PRE_N_LARGE_ICON_SIZE_DP = 128;
+    // MediaStyle large icon size for N.
+    // TODO(zqzhang): use android.R.dimen.media_notification_expanded_image_max_size when Android
+    // SDK is rolled to level 24. See https://crbug.com/645059
+    private static final int N_LARGE_ICON_SIZE_DP = 94;
 
     // We're always used on the UI thread but the LOCK is required by lint when creating the
     // singleton.
@@ -70,6 +72,10 @@ public class MediaNotificationManager {
                 "MediaNotificationManager.ListenerService.PAUSE";
         private static final String ACTION_STOP =
                 "MediaNotificationManager.ListenerService.STOP";
+        private static final String ACTION_SWIPE =
+                "MediaNotificationManager.ListenerService.SWIPE";
+        private static final String ACTION_CANCEL =
+                "MediaNotificationManager.ListenerService.CANCEL";
 
         @Override
         public IBinder onBind(Intent intent) {
@@ -141,7 +147,9 @@ public class MediaNotificationManager {
                     default:
                         break;
                 }
-            } else if (ACTION_STOP.equals(action)) {
+            } else if (ACTION_STOP.equals(action)
+                    || ACTION_SWIPE.equals(action)
+                    || ACTION_CANCEL.equals(action)) {
                 manager.onStop(
                         MediaNotificationListener.ACTION_SOURCE_MEDIA_NOTIFICATION);
                 stopSelf();
@@ -351,6 +359,33 @@ public class MediaNotificationManager {
         sManagers.clear();
     }
 
+    /**
+     * Scale a given bitmap to a proper size for display.
+     * @param icon The bitmap to be resized.
+     * @return A scaled icon to be used in media notification. Returns null if |icon| is null.
+     */
+    public static Bitmap scaleIconForDisplay(Bitmap icon) {
+        if (icon == null) return null;
+
+        int largeIconSizePx;
+        if (isRunningN()) {
+            largeIconSizePx = (int) TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP, N_LARGE_ICON_SIZE_DP,
+                    ContextUtils.getApplicationContext().getResources().getDisplayMetrics());
+        } else {
+            largeIconSizePx = (int) TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP, PRE_N_LARGE_ICON_SIZE_DP,
+                    ContextUtils.getApplicationContext().getResources().getDisplayMetrics());
+        }
+
+        if (icon.getWidth() > largeIconSizePx || icon.getHeight() > largeIconSizePx) {
+            return icon.createScaledBitmap(
+                    icon, largeIconSizePx, largeIconSizePx, true /* filter */);
+        }
+
+        return icon;
+    }
+
     private static MediaNotificationManager getManager(int notificationId) {
         if (sManagers == null) return null;
 
@@ -372,6 +407,12 @@ public class MediaNotificationManager {
         return manager.mNotificationBuilder;
     }
 
+    private static boolean isRunningN() {
+        // TODO(zqzhang): Use Build.VERSION_CODES.N when Android SDK is rolled to level 24.
+        // See https://crbug.com/645059
+        return Build.VERSION.CODENAME.equals("N") || Build.VERSION.SDK_INT > Build.VERSION_CODES.M;
+    }
+
     private final Context mContext;
 
     // ListenerService running for the notification. Only non-null when showing.
@@ -384,8 +425,7 @@ public class MediaNotificationManager {
     private NotificationCompat.Builder mNotificationBuilder;
 
     private Bitmap mNotificationIcon;
-
-    private final Bitmap mDefaultMediaSessionImage;
+    private Bitmap mDefaultLargeIcon;
 
     // |mMediaNotificationInfo| should be not null if and only if the notification is showing.
     private MediaNotificationInfo mMediaNotificationInfo;
@@ -412,12 +452,6 @@ public class MediaNotificationManager {
         mPlayDescription = context.getResources().getString(R.string.accessibility_play);
         mPauseDescription = context.getResources().getString(R.string.accessibility_pause);
         mStopDescription = context.getResources().getString(R.string.accessibility_stop);
-
-        // The MediaSession icon is a plain color.
-        int size = context.getResources().getDimensionPixelSize(R.dimen.media_session_icon_size);
-        mDefaultMediaSessionImage = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
-        mDefaultMediaSessionImage.eraseColor(ApiCompatibilityUtils.getColor(
-                context.getResources(), R.color.media_session_icon_color));
     }
 
     /**
@@ -446,10 +480,12 @@ public class MediaNotificationManager {
     }
 
     private void onPlay(int actionSource) {
+        if (!mMediaNotificationInfo.isPaused) return;
         mMediaNotificationInfo.listener.onPlay(actionSource);
     }
 
     private void onPause(int actionSource) {
+        if (mMediaNotificationInfo.isPaused) return;
         mMediaNotificationInfo.listener.onPause(actionSource);
     }
 
@@ -490,32 +526,17 @@ public class MediaNotificationManager {
     private MediaMetadataCompat createMetadata() {
         MediaMetadataCompat.Builder metadataBuilder = new MediaMetadataCompat.Builder();
 
-        // Choose the image to use as the icon.
-        Bitmap mediaSessionImage = mMediaNotificationInfo.largeIcon == null
-                ? mDefaultMediaSessionImage
-                : mMediaNotificationInfo.largeIcon;
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE,
                     mMediaNotificationInfo.metadata.getTitle());
             metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE,
                     mMediaNotificationInfo.origin);
-            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON,
-                    scaleBitmapForWearable(mediaSessionImage));
-            // METADATA_KEY_ART is optional and should only be used if we can provide something
-            // better than the default image.
-            if (mMediaNotificationInfo.largeIcon != null) {
-                metadataBuilder.putBitmap(
-                        MediaMetadataCompat.METADATA_KEY_ART, mMediaNotificationInfo.largeIcon);
-            }
         } else {
             metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_TITLE,
                     mMediaNotificationInfo.metadata.getTitle());
             metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ARTIST,
                     mMediaNotificationInfo.origin);
-            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, mediaSessionImage);
         }
-
         if (!TextUtils.isEmpty(mMediaNotificationInfo.metadata.getArtist())) {
             metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ARTIST,
                     mMediaNotificationInfo.metadata.getArtist());
@@ -536,25 +557,25 @@ public class MediaNotificationManager {
         updateMediaSession();
 
         mNotificationBuilder = new NotificationCompat.Builder(mContext);
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.MEDIA_STYLE_NOTIFICATION)) {
-            setMediaStyleLayoutForNotificationBuilder(mNotificationBuilder);
-        } else {
-            setCustomLayoutForNotificationBuilder(mNotificationBuilder);
-        }
+        setMediaStyleLayoutForNotificationBuilder(mNotificationBuilder);
+
         mNotificationBuilder.setSmallIcon(mMediaNotificationInfo.icon);
         mNotificationBuilder.setAutoCancel(false);
         mNotificationBuilder.setLocalOnly(true);
 
         if (mMediaNotificationInfo.supportsSwipeAway()) {
             mNotificationBuilder.setOngoing(!mMediaNotificationInfo.isPaused);
+            mNotificationBuilder.setDeleteIntent(createPendingIntent(ListenerService.ACTION_SWIPE));
         }
 
         // The intent will currently only be null when using a custom tab.
         // TODO(avayvod) work out what we should do in this case. See https://crbug.com/585395.
         if (mMediaNotificationInfo.contentIntent != null) {
             mNotificationBuilder.setContentIntent(PendingIntent.getActivity(mContext,
-                    mMediaNotificationInfo.tabId,
-                    mMediaNotificationInfo.contentIntent, 0));
+                    mMediaNotificationInfo.tabId, mMediaNotificationInfo.contentIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT));
+            // Set FLAG_UPDATE_CURRENT so that the intent extras is updated, otherwise the
+            // intent extras will stay the same for the same tab.
         }
 
         mNotificationBuilder.setVisibility(
@@ -637,16 +658,19 @@ public class MediaNotificationManager {
     }
 
     private void setMediaStyleLayoutForNotificationBuilder(NotificationCompat.Builder builder) {
-        // TODO(zqzhang): After we ship the new style, we should see how to present the
-        // metadata.artist and metadata.album. See http://crbug.com/599937
-        builder.setContentTitle(mMediaNotificationInfo.metadata.getTitle());
-        builder.setContentText(mMediaNotificationInfo.origin);
-        // TODO(zqzhang): Update the default icon when a new one in provided.
-        // See http://crbug.com/600396.
-        if (mMediaNotificationInfo.largeIcon != null) {
+        setMediaStyleNotificationText(builder);
+        if (!mMediaNotificationInfo.supportsPlayPause()) {
+            builder.setLargeIcon(null);
+        } else if (mMediaNotificationInfo.largeIcon != null) {
             builder.setLargeIcon(mMediaNotificationInfo.largeIcon);
-        } else {
-            builder.setLargeIcon(mDefaultMediaSessionImage);
+        } else if (!isRunningN()) {
+            if (mDefaultLargeIcon == null) {
+                int resourceId = (mMediaNotificationInfo.defaultLargeIcon != 0)
+                        ? mMediaNotificationInfo.defaultLargeIcon : R.drawable.audio_playing_square;
+                mDefaultLargeIcon = scaleIconForDisplay(
+                        BitmapFactory.decodeResource(mContext.getResources(), resourceId));
+            }
+            builder.setLargeIcon(mDefaultLargeIcon);
         }
         // TODO(zqzhang): It's weird that setShowWhen() don't work on K. Calling setWhen() to force
         // removing the time.
@@ -666,7 +690,7 @@ public class MediaNotificationManager {
                         createPendingIntent(ListenerService.ACTION_PAUSE));
             }
             style.setShowActionsInCompactView(0);
-            style.setCancelButtonIntent(createPendingIntent(ListenerService.ACTION_STOP));
+            style.setCancelButtonIntent(createPendingIntent(ListenerService.ACTION_CANCEL));
             style.setShowCancelButton(true);
             builder.setStyle(style);
         }
@@ -677,87 +701,31 @@ public class MediaNotificationManager {
         }
     }
 
-    private void setCustomLayoutForNotificationBuilder(NotificationCompat.Builder builder) {
-        builder.setContent(createContentView());
-    }
-
-    private RemoteViews createContentView() {
-        RemoteViews contentView =
-                new RemoteViews(mContext.getPackageName(), R.layout.playback_notification_bar);
-
-        // By default, play/pause button is the only one.
-        int playPauseButtonId = R.id.button1;
-        // On Android pre-L, dismissing the notification when the service is no longer in foreground
-        // doesn't work. Instead, a STOP button is shown.
-        if (mMediaNotificationInfo.supportsSwipeAway()
-                        && Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP
-                || mMediaNotificationInfo.supportsStop()) {
-            contentView.setOnClickPendingIntent(
-                    R.id.button1, createPendingIntent(ListenerService.ACTION_STOP));
-            contentView.setContentDescription(R.id.button1, mStopDescription);
-
-            // If the play/pause needs to be shown, it moves over to the second button from the end.
-            playPauseButtonId = R.id.button2;
-        }
-
-        contentView.setTextViewText(R.id.title, mMediaNotificationInfo.metadata.getTitle());
-        contentView.setTextViewText(R.id.status, mMediaNotificationInfo.origin);
-
-        // Android doesn't badge the icons for RemoteViews automatically when
-        // running the app under the Work profile.
-        if (mNotificationIcon == null) {
-            Drawable notificationIconDrawable =
-                    ApiCompatibilityUtils.getUserBadgedIcon(mContext, mMediaNotificationInfo.icon);
-            mNotificationIcon = drawableToBitmap(notificationIconDrawable);
-        }
-
-        if (mNotificationIcon != null) {
-            contentView.setImageViewBitmap(R.id.icon, mNotificationIcon);
-        } else {
-            contentView.setImageViewResource(R.id.icon, mMediaNotificationInfo.icon);
-        }
-
-        if (mMediaNotificationInfo.supportsPlayPause()) {
-            if (mMediaNotificationInfo.isPaused) {
-                contentView.setImageViewResource(playPauseButtonId, R.drawable.ic_vidcontrol_play);
-                contentView.setContentDescription(playPauseButtonId, mPlayDescription);
-                contentView.setOnClickPendingIntent(
-                        playPauseButtonId, createPendingIntent(ListenerService.ACTION_PLAY));
-            } else {
-                // If we're here, the notification supports play/pause button and is playing.
-                contentView.setImageViewResource(playPauseButtonId, R.drawable.ic_vidcontrol_pause);
-                contentView.setContentDescription(playPauseButtonId, mPauseDescription);
-                contentView.setOnClickPendingIntent(
-                        playPauseButtonId, createPendingIntent(ListenerService.ACTION_PAUSE));
-            }
-
-            contentView.setViewVisibility(playPauseButtonId, View.VISIBLE);
-        } else {
-            contentView.setViewVisibility(playPauseButtonId, View.GONE);
-        }
-
-        return contentView;
-    }
-
-    /**
-     * Scales the Bitmap to make the notification background on Wearable devices look better.
-     * The returned Bitmap size will be exactly 400x400.
-     * According to http://developer.android.com/training/wearables/notifications/creating.html,
-     * the background image of Android Wear notifications should be of size 400x400 or 640x400.
-     * Otherwise, it will be scaled to fit the desired size. However for some reason (maybe battery
-     * concern), the smoothing filter is not applied when scaling the image, so we need to manually
-     * scale the image with filter applied before sending to Android Wear.
-     */
-    private Bitmap scaleBitmapForWearable(Bitmap original) {
-        Bitmap result = Bitmap.createScaledBitmap(original, WEARABLE_NOTIFICATION_BACKGROUND_WIDTH,
-                WEARABLE_NOTIFICATION_BACKGROUND_HEIGHT, true);
-        return result;
-    }
-
     private Bitmap drawableToBitmap(Drawable drawable) {
         if (!(drawable instanceof BitmapDrawable)) return null;
 
         BitmapDrawable bitmapDrawable = (BitmapDrawable) drawable;
         return bitmapDrawable.getBitmap();
+    }
+
+    private void setMediaStyleNotificationText(NotificationCompat.Builder builder) {
+        builder.setContentTitle(mMediaNotificationInfo.metadata.getTitle());
+        String artistAndAlbumText = getArtistAndAlbumText(mMediaNotificationInfo.metadata);
+        if (isRunningN() || !artistAndAlbumText.isEmpty()) {
+            builder.setContentText(artistAndAlbumText);
+            builder.setSubText(mMediaNotificationInfo.origin);
+        } else {
+            // Leaving ContentText empty looks bad, so move origin up to the ContentText.
+            builder.setContentText(mMediaNotificationInfo.origin);
+        }
+    }
+
+    private String getArtistAndAlbumText(MediaMetadata metadata) {
+        String artist = (metadata.getArtist() == null) ? "" : metadata.getArtist();
+        String album = (metadata.getAlbum() == null) ? "" : metadata.getAlbum();
+        if (artist.isEmpty() || album.isEmpty()) {
+            return artist + album;
+        }
+        return artist + " - " + album;
     }
 }

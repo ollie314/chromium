@@ -38,11 +38,14 @@ struct ScriptsRunInfo {
   size_t num_blocking_js;
   // A map of extension ids to executing script paths.
   ExecutingScriptsMap executing_scripts;
+  // A map of extension ids to injected stylesheet paths.
+  ExecutingScriptsMap injected_stylesheets;
   // The elapsed time since the ScriptsRunInfo was constructed.
   base::ElapsedTimer timer;
 
-  // Log information about a given script run.
-  void LogRun();
+  // Log information about a given script run. If |send_script_activity| is
+  // true, this also informs the browser of the script run.
+  void LogRun(bool send_script_activity);
 
  private:
   // The routinig id to use to notify the browser of any injections. Since the

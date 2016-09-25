@@ -32,7 +32,6 @@ import errno
 import signal
 import subprocess
 import sys
-import time
 import unittest
 
 # Since we execute this script directly as part of the unit tests, we need to ensure
@@ -69,7 +68,8 @@ class ScriptErrorTest(unittest.TestCase):
 def never_ending_command():
     """Arguments for a command that will never end (useful for testing process
     killing). It should be a process that is unlikely to already be running
-    because all instances will be killed."""
+    because all instances will be killed.
+    """
     if sys.platform == 'win32':
         return ['wmic']
     return ['yes']
@@ -81,7 +81,7 @@ def command_line(cmd, *args):
 
 class ExecutiveTest(unittest.TestCase):
 
-    def assert_interpreter_for_content(self, intepreter, content):
+    def assert_interpreter_for_content(self, interpreter, content):
         fs = MockFileSystem()
 
         tempfile, temp_name = fs.open_binary_tempfile('')
@@ -89,7 +89,7 @@ class ExecutiveTest(unittest.TestCase):
         tempfile.close()
         file_interpreter = Executive.interpreter_for_script(temp_name, fs)
 
-        self.assertEqual(file_interpreter, intepreter)
+        self.assertEqual(file_interpreter, interpreter)
 
     def test_interpreter_for_script(self):
         self.assert_interpreter_for_content(None, '')
@@ -122,13 +122,14 @@ class ExecutiveTest(unittest.TestCase):
 
     def test_popen_args(self):
         executive = Executive()
-        # Explicitly naming the 'args' argument should not thow an exception.
+        # Explicitly naming the 'args' argument should not throw an exception.
         executive.popen(args=command_line('echo', 1), stdout=executive.PIPE).wait()
 
     def test_run_command_with_unicode(self):
         """Validate that it is safe to pass unicode() objects
         to Executive.run* methods, and they will return unicode()
-        objects by default unless decode_output=False"""
+        objects by default unless decode_output=False
+        """
         unicode_tor_input = u"WebKit \u2661 Tor Arne Vestb\u00F8!"
         if sys.platform == 'win32':
             encoding = 'mbcs'

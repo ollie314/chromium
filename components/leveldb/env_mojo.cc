@@ -6,6 +6,9 @@
 
 #include <errno.h>
 
+#include <memory>
+
+#include "base/strings/string_util.h"
 #include "base/trace_event/trace_event.h"
 #include "third_party/leveldatabase/chromium_logger.h"
 #include "third_party/leveldatabase/src/include/leveldb/status.h"
@@ -24,10 +27,10 @@ base::File::Error LastFileError() {
 #endif
 }
 
-Status FilesystemErrorToStatus(filesystem::FileError error,
+Status FilesystemErrorToStatus(filesystem::mojom::FileError error,
                                const std::string& filename,
                                leveldb_env::MethodID method) {
-  if (error == filesystem::FileError::OK)
+  if (error == filesystem::mojom::FileError::OK)
     return Status::OK();
 
   std::string err_str =
@@ -135,10 +138,12 @@ class MojoWritableFile : public leveldb::WritableFile {
         dir_(dir),
         thread_(thread) {
     base::FilePath path = base::FilePath::FromUTF8Unsafe(fname);
-    if (path.BaseName().AsUTF8Unsafe().find("MANIFEST") == 0)
+    if (base::StartsWith(path.BaseName().AsUTF8Unsafe(), "MANIFEST",
+                         base::CompareCase::SENSITIVE)) {
       file_type_ = kManifest;
-    else if (path.MatchesExtension(table_extension))
+    } else if (path.MatchesExtension(table_extension)) {
       file_type_ = kTable;
+    }
     parent_dir_ =
         base::FilePath::FromUTF8Unsafe(fname).DirName().AsUTF8Unsafe();
   }
@@ -191,8 +196,9 @@ class MojoWritableFile : public leveldb::WritableFile {
   enum Type { kManifest, kTable, kOther };
 
   leveldb::Status SyncParent() {
-    filesystem::FileError error = thread_->SyncDirectory(dir_, parent_dir_);
-    return error == filesystem::FileError::OK
+    filesystem::mojom::FileError error =
+        thread_->SyncDirectory(dir_, parent_dir_);
+    return error == filesystem::mojom::FileError::OK
                ? Status::OK()
                : Status::IOError(filename_,
                                  base::File::ErrorToString(base::File::Error(
@@ -224,7 +230,7 @@ Status MojoEnv::NewSequentialFile(const std::string& fname,
   TRACE_EVENT1("leveldb", "MojoEnv::NewSequentialFile", "fname", fname);
   base::File f = thread_->OpenFileHandle(
       dir_, mojo::String::From(fname),
-      filesystem::kFlagOpen | filesystem::kFlagRead);
+      filesystem::mojom::kFlagOpen | filesystem::mojom::kFlagRead);
   if (!f.IsValid()) {
     *result = nullptr;
     return MakeIOError(fname, "Unable to create sequential file",
@@ -240,7 +246,7 @@ Status MojoEnv::NewRandomAccessFile(const std::string& fname,
   TRACE_EVENT1("leveldb", "MojoEnv::NewRandomAccessFile", "fname", fname);
   base::File f = thread_->OpenFileHandle(
       dir_, mojo::String::From(fname),
-      filesystem::kFlagRead | filesystem::kFlagOpen);
+      filesystem::mojom::kFlagRead | filesystem::mojom::kFlagOpen);
   if (!f.IsValid()) {
     *result = nullptr;
     base::File::Error error_code = f.error_details();
@@ -257,7 +263,7 @@ Status MojoEnv::NewWritableFile(const std::string& fname,
   TRACE_EVENT1("leveldb", "MojoEnv::NewWritableFile", "fname", fname);
   base::File f = thread_->OpenFileHandle(
       dir_, mojo::String::From(fname),
-      filesystem::kCreateAlways | filesystem::kFlagWrite);
+      filesystem::mojom::kCreateAlways | filesystem::mojom::kFlagWrite);
   if (!f.IsValid()) {
     *result = nullptr;
     return MakeIOError(fname, "Unable to create writable file",
@@ -273,7 +279,7 @@ Status MojoEnv::NewAppendableFile(const std::string& fname,
   TRACE_EVENT1("leveldb", "MojoEnv::NewAppendableFile", "fname", fname);
   base::File f = thread_->OpenFileHandle(
       dir_, mojo::String::From(fname),
-      filesystem::kFlagOpenAlways | filesystem::kFlagAppend);
+      filesystem::mojom::kFlagOpenAlways | filesystem::mojom::kFlagAppend);
   if (!f.IsValid()) {
     *result = nullptr;
     return MakeIOError(fname, "Unable to create appendable file",
@@ -311,8 +317,8 @@ Status MojoEnv::CreateDir(const std::string& dirname) {
 Status MojoEnv::DeleteDir(const std::string& dirname) {
   TRACE_EVENT1("leveldb", "MojoEnv::DeleteDir", "dirname", dirname);
   return FilesystemErrorToStatus(
-      thread_->Delete(dir_, dirname, filesystem::kDeleteFlagRecursive), dirname,
-      leveldb_env::kDeleteDir);
+      thread_->Delete(dir_, dirname, filesystem::mojom::kDeleteFlagRecursive),
+      dirname, leveldb_env::kDeleteDir);
 }
 
 Status MojoEnv::GetFileSize(const std::string& fname, uint64_t* file_size) {
@@ -331,7 +337,7 @@ Status MojoEnv::RenameFile(const std::string& src, const std::string& target) {
 Status MojoEnv::LockFile(const std::string& fname, FileLock** lock) {
   TRACE_EVENT1("leveldb", "MojoEnv::LockFile", "fname", fname);
 
-  std::pair<filesystem::FileError, LevelDBMojoProxy::OpaqueLock*> p =
+  std::pair<filesystem::mojom::FileError, LevelDBMojoProxy::OpaqueLock*> p =
       thread_->LockFile(dir_, mojo::String::From(fname));
 
   if (p.second)
@@ -346,7 +352,7 @@ Status MojoEnv::UnlockFile(FileLock* lock) {
   std::string fname = my_lock ? my_lock->name() : "(invalid)";
   TRACE_EVENT1("leveldb", "MojoEnv::UnlockFile", "fname", fname);
 
-  filesystem::FileError err = thread_->UnlockFile(my_lock->TakeLock());
+  filesystem::mojom::FileError err = thread_->UnlockFile(my_lock->TakeLock());
   delete my_lock;
   return FilesystemErrorToStatus(err, fname, leveldb_env::kUnlockFile);
 }
@@ -362,15 +368,15 @@ Status MojoEnv::GetTestDirectory(std::string* path) {
 
 Status MojoEnv::NewLogger(const std::string& fname, Logger** result) {
   TRACE_EVENT1("leveldb", "MojoEnv::NewLogger", "fname", fname);
-  scoped_ptr<base::File> f(new base::File(thread_->OpenFileHandle(
+  base::File f(thread_->OpenFileHandle(
       dir_, mojo::String::From(fname),
-      filesystem::kCreateAlways | filesystem::kFlagWrite)));
-  if (!f->IsValid()) {
+      filesystem::mojom::kCreateAlways | filesystem::mojom::kFlagWrite));
+  if (!f.IsValid()) {
     *result = NULL;
     return MakeIOError(fname, "Unable to create log file",
-                       leveldb_env::kNewLogger, f->error_details());
+                       leveldb_env::kNewLogger, f.error_details());
   } else {
-    *result = new leveldb::ChromiumLogger(f.release());
+    *result = new leveldb::ChromiumLogger(std::move(f));
     return Status::OK();
   }
 }

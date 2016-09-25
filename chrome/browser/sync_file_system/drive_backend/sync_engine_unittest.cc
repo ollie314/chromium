@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/test/sequenced_worker_pool_owner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/sync_file_system/drive_backend/callback_helper.h"
 #include "chrome/browser/sync_file_system/drive_backend/fake_sync_worker.h"
 #include "chrome/browser/sync_file_system/drive_backend/sync_worker_interface.h"
@@ -32,7 +32,7 @@ class SyncEngineTest : public testing::Test,
  public:
   typedef RemoteFileSyncService::OriginStatusMap RemoteOriginStatusMap;
 
-  SyncEngineTest() : worker_pool_owner_(1, "Worker") {}
+  SyncEngineTest() : worker_pool_owner_(2, "Worker") {}
   ~SyncEngineTest() override {}
 
   void SetUp() override {
@@ -51,7 +51,7 @@ class SyncEngineTest : public testing::Test,
     sync_engine_.reset(new drive_backend::SyncEngine(
         ui_task_runner.get(), worker_task_runner_.get(),
         nullptr,  // drive_task_runner
-        worker_pool_owner_.pool().get(), profile_dir_.path(),
+        worker_pool_owner_.pool().get(), profile_dir_.GetPath(),
         nullptr,    // task_logger
         nullptr,    // notification_manager
         nullptr,    // extension_service

@@ -27,6 +27,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import copy
+from functools import reduce
 
 
 class TestConfiguration(object):
@@ -136,7 +137,8 @@ class TestConfigurationConverter(object):
 
         for specifier, sets_by_category in matching_sets_by_category.items():
             for category, set_by_category in sets_by_category.items():
-                if len(set_by_category) == 1 and self._specifier_sorter.category_priority(category) > self._specifier_sorter.specifier_priority(specifier):
+                if len(set_by_category) == 1 and self._specifier_sorter.category_priority(
+                        category) > self._specifier_sorter.specifier_priority(specifier):
                     self._junk_specifier_combinations[specifier] = set_by_category
 
         self._specifier_sorter.add_macros(configuration_macros)
@@ -285,14 +287,15 @@ class TestConfigurationConverter(object):
         while try_abbreviating(self._collapsing_sets_by_size.values()):
             pass
 
-        # 4) Substitute specifier subsets that match macros witin each set:
+        # 4) Substitute specifier subsets that match macros within each set:
         #   (win7, win10, release) -> (win, release)
         self.collapse_macros(self._configuration_macros, specifiers_list)
 
         macro_keys = set(self._configuration_macros.keys())
 
         # 5) Collapsing macros may have created combinations the can now be abbreviated.
-        #   (win7, release), (linux, x86, release), (linux, x86_64, release) --> (win7, release), (linux, release) --> (win7, linux, release)
+        #   (win7, release), (linux, x86, release), (linux, x86_64, release)
+        #   --> (win7, release), (linux, release) --> (win7, linux, release)
         while try_abbreviating([self._collapsing_sets_by_category['version'] | macro_keys]):
             pass
 

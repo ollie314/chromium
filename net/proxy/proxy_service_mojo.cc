@@ -9,7 +9,7 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/dns/mojo_host_resolver_impl.h"
 #include "net/interfaces/proxy_resolver_service.mojom.h"
 #include "net/proxy/in_process_mojo_proxy_resolver_factory.h"
@@ -38,11 +38,11 @@ std::unique_ptr<ProxyService> CreateProxyServiceUsingMojoFactory(
 
   std::unique_ptr<ProxyService> proxy_service(new ProxyService(
       std::move(proxy_config_service),
-      base::WrapUnique(new ProxyResolverFactoryMojo(
+      base::MakeUnique<ProxyResolverFactoryMojo>(
           mojo_proxy_factory, host_resolver,
           base::Bind(&NetworkDelegateErrorObserver::Create, network_delegate,
                      base::ThreadTaskRunnerHandle::Get()),
-          net_log)),
+          net_log),
       net_log));
 
   // Configure fetchers to use for PAC script downloads and auto-detect.

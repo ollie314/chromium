@@ -18,14 +18,17 @@
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_navigation_handle.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/common/resource_request_body.h"
+#include "content/common/resource_request_body_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_data.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/stream_handle.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_response.h"
 #include "net/base/load_flags.h"
+#include "net/base/url_util.h"
 #include "net/http/http_request_headers.h"
 #include "net/url_request/redirect_info.h"
 #include "third_party/WebKit/public/web/WebSandboxFlags.h"
@@ -35,28 +38,65 @@ namespace content {
 namespace {
 
 // Returns the net load flags to use based on the navigation type.
-// TODO(clamy): unify the code with what is happening on the renderer side.
-int LoadFlagFromNavigationType(FrameMsg_Navigate_Type::Value navigation_type) {
-  int load_flags = net::LOAD_NORMAL;
+// TODO(clamy): Remove the blink code that sets the caching flags when
+// PlzNavigate launches.
+void UpdateLoadFlagsWithCacheFlags(
+    int* load_flags,
+    FrameMsg_Navigate_Type::Value navigation_type,
+    bool is_post) {
   switch (navigation_type) {
     case FrameMsg_Navigate_Type::RELOAD:
+    case FrameMsg_Navigate_Type::RELOAD_MAIN_RESOURCE:
     case FrameMsg_Navigate_Type::RELOAD_ORIGINAL_REQUEST_URL:
-      load_flags |= net::LOAD_VALIDATE_CACHE;
+      *load_flags |= net::LOAD_VALIDATE_CACHE;
       break;
     case FrameMsg_Navigate_Type::RELOAD_BYPASSING_CACHE:
-      load_flags |= net::LOAD_BYPASS_CACHE;
+      *load_flags |= net::LOAD_BYPASS_CACHE;
       break;
     case FrameMsg_Navigate_Type::RESTORE:
-      load_flags |= net::LOAD_PREFERRING_CACHE;
+      *load_flags |= net::LOAD_PREFERRING_CACHE;
       break;
     case FrameMsg_Navigate_Type::RESTORE_WITH_POST:
-      load_flags |= net::LOAD_ONLY_FROM_CACHE;
+      *load_flags |= net::LOAD_ONLY_FROM_CACHE;
       break;
     case FrameMsg_Navigate_Type::NORMAL:
+      if (is_post)
+        *load_flags |= net::LOAD_VALIDATE_CACHE;
+      break;
     default:
       break;
   }
-  return load_flags;
+}
+
+// This is based on SecurityOrigin::isPotentiallyTrustworthy.
+// TODO(clamy): This should be function in url::Origin.
+bool IsPotentiallyTrustworthyOrigin(const url::Origin& origin) {
+  if (origin.unique())
+    return false;
+
+  if (origin.scheme() == url::kHttpsScheme ||
+      origin.scheme() == url::kAboutScheme ||
+      origin.scheme() == url::kDataScheme ||
+      origin.scheme() == url::kWssScheme ||
+      origin.scheme() == url::kFileScheme) {
+    return true;
+  }
+
+  if (net::IsLocalhost(origin.host()))
+    return true;
+
+  // TODO(clamy): Check for whitelisted origins.
+  return false;
+}
+
+// TODO(clamy): This should be function in FrameTreeNode.
+bool IsSecureFrame(FrameTreeNode* frame) {
+  while (frame) {
+    if (!IsPotentiallyTrustworthyOrigin(frame->current_origin()))
+      return false;
+    frame = frame->parent();
+  }
+  return true;
 }
 
 }  // namespace
@@ -71,6 +111,7 @@ std::unique_ptr<NavigationRequest> NavigationRequest::CreateBrowserInitiated(
     FrameMsg_Navigate_Type::Value navigation_type,
     LoFiState lofi_state,
     bool is_same_document_history_load,
+    bool is_history_navigation_in_new_child,
     const base::TimeTicks& navigation_start,
     NavigationControllerImpl* controller) {
   // Copy existing headers and add necessary headers that may not be present
@@ -80,33 +121,29 @@ std::unique_ptr<NavigationRequest> NavigationRequest::CreateBrowserInitiated(
   headers.SetHeaderIfMissing(net::HttpRequestHeaders::kUserAgent,
                              GetContentClient()->GetUserAgent());
 
-  // Fill POST data from the browser in the request body.
-  scoped_refptr<ResourceRequestBody> request_body;
-  if (entry.GetHasPostData()) {
-    request_body = new ResourceRequestBody();
-    request_body->AppendBytes(
-        reinterpret_cast<const char *>(
-            entry.GetBrowserInitiatedPostData()->front()),
-        entry.GetBrowserInitiatedPostData()->size());
-  }
+  // Fill POST data in the request body.
+  scoped_refptr<ResourceRequestBodyImpl> request_body;
+  if (frame_entry.method() == "POST")
+    request_body = frame_entry.GetPostData();
 
   std::unique_ptr<NavigationRequest> navigation_request(new NavigationRequest(
       frame_tree_node, entry.ConstructCommonNavigationParams(
-                           dest_url, dest_referrer, navigation_type, lofi_state,
-                           navigation_start),
-      BeginNavigationParams(headers.ToString(),
-                            LoadFlagFromNavigationType(navigation_type),
+                           frame_entry, request_body, dest_url, dest_referrer,
+                           navigation_type, lofi_state, navigation_start),
+      BeginNavigationParams(headers.ToString(), net::LOAD_NORMAL,
                             false,  // has_user_gestures
                             false,  // skip_service_worker
                             REQUEST_CONTEXT_TYPE_LOCATION),
       entry.ConstructRequestNavigationParams(
           frame_entry, is_same_document_history_load,
+          is_history_navigation_in_new_child,
+          entry.HasSubtreeHistoryItems(frame_tree_node),
           frame_tree_node->has_committed_real_load(),
           controller->GetPendingEntryIndex() == -1,
           controller->GetIndexOfEntry(&entry),
           controller->GetLastCommittedEntryIndex(),
           controller->GetEntryCount()),
-      request_body, true, &frame_entry, &entry));
+      true, &frame_entry, &entry));
   return navigation_request;
 }
 
@@ -115,7 +152,6 @@ std::unique_ptr<NavigationRequest> NavigationRequest::CreateRendererInitiated(
     FrameTreeNode* frame_tree_node,
     const CommonNavigationParams& common_params,
     const BeginNavigationParams& begin_params,
-    scoped_refptr<ResourceRequestBody> body,
     int current_history_list_offset,
     int current_history_list_length) {
   // TODO(clamy): Check if some PageState should be provided here.
@@ -133,6 +169,8 @@ std::unique_ptr<NavigationRequest> NavigationRequest::CreateRendererInitiated(
       -1,                      // page_id
       0,                       // nav_entry_id
       false,                   // is_same_document_history_load
+      false,                   // is_history_navigation_in_new_child
+      false,                   // has_subtree_history_items
       frame_tree_node->has_committed_real_load(),
       false,                   // intended_as_new_entry
       -1,                      // pending_history_list_offset
@@ -141,7 +179,7 @@ std::unique_ptr<NavigationRequest> NavigationRequest::CreateRendererInitiated(
       false);                  // should_clear_history_list
   std::unique_ptr<NavigationRequest> navigation_request(
       new NavigationRequest(frame_tree_node, common_params, begin_params,
-                            request_params, body, false, nullptr, nullptr));
+                            request_params, false, nullptr, nullptr));
   return navigation_request;
 }
 
@@ -150,7 +188,6 @@ NavigationRequest::NavigationRequest(
     const CommonNavigationParams& common_params,
     const BeginNavigationParams& begin_params,
     const RequestNavigationParams& request_params,
-    scoped_refptr<ResourceRequestBody> body,
     bool browser_initiated,
     const FrameNavigationEntry* frame_entry,
     const NavigationEntryImpl* entry)
@@ -160,16 +197,18 @@ NavigationRequest::NavigationRequest(
       request_params_(request_params),
       browser_initiated_(browser_initiated),
       state_(NOT_STARTED),
-      restore_type_(NavigationEntryImpl::RESTORE_NONE),
+      restore_type_(RestoreType::NONE),
       is_view_source_(false),
       bindings_(NavigationEntryImpl::kInvalidBindings),
       associated_site_instance_type_(AssociatedSiteInstanceType::NONE) {
   DCHECK(!browser_initiated || (entry != nullptr && frame_entry != nullptr));
   if (browser_initiated) {
-    // TODO(clamy): use the FrameNavigationEntry for the source SiteInstance
-    // once it has been moved from the NavigationEntry.
-    source_site_instance_ = entry->source_site_instance();
-    dest_site_instance_ = frame_entry->site_instance();
+    FrameNavigationEntry* frame_entry = entry->GetFrameEntry(frame_tree_node);
+    if (frame_entry) {
+      source_site_instance_ = frame_entry->source_site_instance();
+      dest_site_instance_ = frame_entry->site_instance();
+    }
+
     restore_type_ = entry->restore_type();
     is_view_source_ = entry->IsViewSourceMode();
     bindings_ = entry->bindings();
@@ -180,20 +219,11 @@ NavigationRequest::NavigationRequest(
         frame_tree_node->current_frame_host()->GetSiteInstance();
   }
 
-  // TODO(mkwst): This is incorrect. It ought to use the definition from
-  // 'Document::firstPartyForCookies()' in Blink, which walks the ancestor tree
-  // and verifies that all origins are PSL-matches (and special-cases extension
-  // URLs).
-  const GURL& first_party_for_cookies =
-      frame_tree_node->IsMainFrame()
-          ? common_params.url
-          : frame_tree_node->frame_tree()->root()->current_url();
-  bool parent_is_main_frame = !frame_tree_node->parent() ?
-      false : frame_tree_node->parent()->IsMainFrame();
-  info_.reset(new NavigationRequestInfo(
-      common_params, begin_params, first_party_for_cookies,
-      frame_tree_node->current_origin(), frame_tree_node->IsMainFrame(),
-      parent_is_main_frame, frame_tree_node->frame_tree_node_id(), body));
+  // Update the load flags with cache information.
+  UpdateLoadFlagsWithCacheFlags(&begin_params_.load_flags,
+                                common_params_.navigation_type,
+                                common_params_.method == "POST");
+
 }
 
 NavigationRequest::~NavigationRequest() {
@@ -212,9 +242,11 @@ void NavigationRequest::BeginNavigation() {
     // TODO(clamy): pass the method to the NavigationHandle instead of a
     // boolean.
     navigation_handle_->WillStartRequest(
-        common_params_.method, Referrer::SanitizeForRequest(
-                                   common_params_.url, common_params_.referrer),
+        common_params_.method, common_params_.post_data,
+        Referrer::SanitizeForRequest(common_params_.url,
+                                     common_params_.referrer),
         begin_params_.has_user_gesture, common_params_.transition, false,
+        begin_params_.request_context_type,
         base::Bind(&NavigationRequest::OnStartChecksComplete,
                    base::Unretained(this)));
     return;
@@ -241,6 +273,7 @@ void NavigationRequest::CreateNavigationHandle(int pending_nav_entry_id) {
   // proper values are specified for is_synchronous and is_srcdoc.
   navigation_handle_ = NavigationHandleImpl::Create(
       common_params_.url, frame_tree_node_,
+      !browser_initiated_,
       false,  // is_synchronous
       false,  // is_srcdoc
       common_params_.navigation_start, pending_nav_entry_id);
@@ -254,6 +287,19 @@ void NavigationRequest::TransferNavigationHandleOwnership(
 void NavigationRequest::OnRequestRedirected(
     const net::RedirectInfo& redirect_info,
     const scoped_refptr<ResourceResponse>& response) {
+  // If the navigation is no longer a POST, the POST data should be reset.
+  if (redirect_info.new_method != "POST")
+    common_params_.post_data = nullptr;
+
+  // Mark time for the Navigation Timing API.
+  if (request_params_.navigation_timing.redirect_start.is_null()) {
+    request_params_.navigation_timing.redirect_start =
+        request_params_.navigation_timing.fetch_start;
+  }
+  request_params_.navigation_timing.redirect_end = base::TimeTicks::Now();
+  request_params_.navigation_timing.fetch_start = base::TimeTicks::Now();
+
+  request_params_.redirects.push_back(common_params_.url);
   common_params_.url = redirect_info.new_url;
   common_params_.method = redirect_info.new_method;
   common_params_.referrer.url = GURL(redirect_info.new_referrer);
@@ -273,7 +319,9 @@ void NavigationRequest::OnRequestRedirected(
 
 void NavigationRequest::OnResponseStarted(
     const scoped_refptr<ResourceResponse>& response,
-    std::unique_ptr<StreamHandle> body) {
+    std::unique_ptr<StreamHandle> body,
+    const SSLStatus& ssl_status,
+    std::unique_ptr<NavigationData> navigation_data) {
   DCHECK(state_ == STARTED);
   state_ = RESPONSE_STARTED;
 
@@ -320,13 +368,16 @@ void NavigationRequest::OnResponseStarted(
     return;
   }
 
+  if (navigation_data)
+    navigation_handle_->set_navigation_data(std::move(navigation_data));
+
   // Store the response and the StreamHandle until checks have been processed.
   response_ = response;
   body_ = std::move(body);
 
   // Check if the navigation should be allowed to proceed.
   navigation_handle_->WillProcessResponse(
-      render_frame_host, response->head.headers.get(),
+      render_frame_host, response->head.headers.get(), ssl_status,
       base::Bind(&NavigationRequest::OnWillProcessResponseChecksComplete,
                  base::Unretained(this)));
 }
@@ -344,7 +395,7 @@ void NavigationRequest::OnRequestStarted(base::TimeTicks timestamp) {
   if (frame_tree_node_->IsMainFrame()) {
     TRACE_EVENT_ASYNC_END_WITH_TIMESTAMP0(
         "navigation", "Navigation timeToNetworkStack", navigation_handle_.get(),
-        timestamp.ToInternalValue());
+        timestamp);
   }
 
   frame_tree_node_->navigator()->LogResourceRequestTime(timestamp,
@@ -363,10 +414,57 @@ void NavigationRequest::OnStartChecksComplete(
     return;
   }
 
-  InitializeServiceWorkerHandleIfNeeded();
+  // Use the SiteInstance of the navigating RenderFrameHost to get access to
+  // the StoragePartition. Using the url of the navigation will result in a
+  // wrong StoragePartition being picked when a WebView is navigating.
+  DCHECK_NE(AssociatedSiteInstanceType::NONE, associated_site_instance_type_);
+  RenderFrameHostImpl* navigating_frame_host =
+      associated_site_instance_type_ == AssociatedSiteInstanceType::SPECULATIVE
+          ? frame_tree_node_->render_manager()->speculative_frame_host()
+          : frame_tree_node_->current_frame_host();
+  DCHECK(navigating_frame_host);
+
+  BrowserContext* browser_context =
+      frame_tree_node_->navigator()->GetController()->GetBrowserContext();
+  StoragePartition* partition = BrowserContext::GetStoragePartition(
+      browser_context, navigating_frame_host->GetSiteInstance());
+  DCHECK(partition);
+
+  // Only initialize the ServiceWorkerNavigationHandle if it can be created for
+  // this frame.
+  bool can_create_service_worker =
+      (frame_tree_node_->pending_sandbox_flags() &
+       blink::WebSandboxFlags::Origin) != blink::WebSandboxFlags::Origin;
+  if (can_create_service_worker) {
+    ServiceWorkerContextWrapper* service_worker_context =
+        static_cast<ServiceWorkerContextWrapper*>(
+            partition->GetServiceWorkerContext());
+    navigation_handle_->InitServiceWorkerHandle(service_worker_context);
+  }
+
+  // Mark the fetch_start (Navigation Timing API).
+  request_params_.navigation_timing.fetch_start = base::TimeTicks::Now();
+
+  // TODO(mkwst): This is incorrect. It ought to use the definition from
+  // 'Document::firstPartyForCookies()' in Blink, which walks the ancestor tree
+  // and verifies that all origins are PSL-matches (and special-cases extension
+  // URLs).
+  const GURL& first_party_for_cookies =
+      frame_tree_node_->IsMainFrame()
+          ? common_params_.url
+          : frame_tree_node_->frame_tree()->root()->current_url();
+  bool parent_is_main_frame = !frame_tree_node_->parent()
+                                  ? false
+                                  : frame_tree_node_->parent()->IsMainFrame();
+
   loader_ = NavigationURLLoader::Create(
       frame_tree_node_->navigator()->GetController()->GetBrowserContext(),
-      std::move(info_), navigation_handle_->service_worker_handle(), this);
+      base::MakeUnique<NavigationRequestInfo>(
+          common_params_, begin_params_, first_party_for_cookies,
+          frame_tree_node_->current_origin(), frame_tree_node_->IsMainFrame(),
+          parent_is_main_frame, IsSecureFrame(frame_tree_node_->parent()),
+          frame_tree_node_->frame_tree_node_id()),
+      navigation_handle_->service_worker_handle(), this);
 }
 
 void NavigationRequest::OnRedirectChecksComplete(
@@ -407,6 +505,7 @@ void NavigationRequest::OnWillProcessResponseChecksComplete(
 
 void NavigationRequest::CommitNavigation() {
   DCHECK(response_ || !ShouldMakeNetworkRequestForURL(common_params_.url));
+  DCHECK(!common_params_.url.SchemeIs(url::kJavaScriptScheme));
 
   // Retrieve the RenderFrameHost that needs to commit the navigation.
   RenderFrameHostImpl* render_frame_host =
@@ -421,41 +520,7 @@ void NavigationRequest::CommitNavigation() {
                                       common_params_, request_params_,
                                       is_view_source_);
 
-  // When navigating to a Javascript url, the NavigationRequest is not stored
-  // in the FrameTreeNode. Therefore do not reset it, as this could cancel an
-  // existing pending navigation.
-  if (!common_params_.url.SchemeIs(url::kJavaScriptScheme))
-    frame_tree_node_->ResetNavigationRequest(true);
-}
-
-void NavigationRequest::InitializeServiceWorkerHandleIfNeeded() {
-  // Only initialize the ServiceWorkerNavigationHandle if it can be created for
-  // this frame.
-  bool can_create_service_worker =
-      (frame_tree_node_->pending_sandbox_flags() &
-       blink::WebSandboxFlags::Origin) != blink::WebSandboxFlags::Origin;
-  if (!can_create_service_worker)
-    return;
-
-  // Use the SiteInstance of the navigating RenderFrameHost to get access to
-  // the StoragePartition. Using the url of the navigation will result in a
-  // wrong StoragePartition being picked when a WebView is navigating.
-  RenderFrameHostImpl* navigating_frame_host =
-      frame_tree_node_->render_manager()->speculative_frame_host();
-  if (!navigating_frame_host)
-    navigating_frame_host = frame_tree_node_->current_frame_host();
-  DCHECK(navigating_frame_host);
-
-  BrowserContext* browser_context =
-      frame_tree_node_->navigator()->GetController()->GetBrowserContext();
-  StoragePartition* partition = BrowserContext::GetStoragePartition(
-      browser_context, navigating_frame_host->GetSiteInstance());
-  DCHECK(partition);
-
-  ServiceWorkerContextWrapper* service_worker_context =
-      static_cast<ServiceWorkerContextWrapper*>(
-          partition->GetServiceWorkerContext());
-  navigation_handle_->InitServiceWorkerHandle(service_worker_context);
+  frame_tree_node_->ResetNavigationRequest(true);
 }
 
 }  // namespace content

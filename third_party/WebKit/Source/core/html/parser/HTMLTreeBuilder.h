@@ -32,7 +32,6 @@
 #include "core/html/parser/HTMLParserOptions.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
@@ -50,9 +49,11 @@ class HTMLDocumentParser;
 class HTMLTreeBuilder final : public GarbageCollectedFinalized<HTMLTreeBuilder> {
     WTF_MAKE_NONCOPYABLE(HTMLTreeBuilder);
 public:
-    static HTMLTreeBuilder* create(HTMLDocumentParser* parser, HTMLDocument* document, ParserContentPolicy parserContentPolicy, bool reportErrors, const HTMLParserOptions& options)
+    // HTMLTreeBuilder can be created for non-HTMLDocument (XHTMLDocument) from editing code.
+    // TODO(kouhei): Fix editing code to always invoke HTML parser on HTMLDocument.
+    static HTMLTreeBuilder* create(HTMLDocumentParser* parser, Document& document, ParserContentPolicy parserContentPolicy, const HTMLParserOptions& options)
     {
-        return new HTMLTreeBuilder(parser, document, parserContentPolicy, reportErrors, options);
+        return new HTMLTreeBuilder(parser, document, parserContentPolicy, options);
     }
     static HTMLTreeBuilder* create(HTMLDocumentParser* parser, DocumentFragment* fragment, Element* contextElement, ParserContentPolicy parserContentPolicy, const HTMLParserOptions& options)
     {
@@ -113,8 +114,11 @@ private:
         AfterAfterBodyMode,
         AfterAfterFramesetMode,
     };
+#ifndef DEBUG
+    static const char* toString(InsertionMode);
+#endif
 
-    HTMLTreeBuilder(HTMLDocumentParser*, HTMLDocument*, ParserContentPolicy, bool reportErrors, const HTMLParserOptions&);
+    HTMLTreeBuilder(HTMLDocumentParser*, Document&, ParserContentPolicy, const HTMLParserOptions&);
     HTMLTreeBuilder(HTMLDocumentParser*, DocumentFragment*, Element* contextElement, ParserContentPolicy, const HTMLParserOptions&);
 
     void processToken(AtomicHTMLToken*);
@@ -192,9 +196,8 @@ private:
         WTF_MAKE_NONCOPYABLE(FragmentParsingContext);
         DISALLOW_NEW();
     public:
-        FragmentParsingContext();
-        FragmentParsingContext(DocumentFragment*, Element* contextElement);
-        ~FragmentParsingContext();
+        FragmentParsingContext() = default;
+        void init(DocumentFragment*, Element* contextElement);
 
         DocumentFragment* fragment() const { return m_fragment; }
         Element* contextElement() const { ASSERT(m_fragment); return m_contextElementStackItem->element(); }

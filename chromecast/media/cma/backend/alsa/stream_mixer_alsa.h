@@ -16,6 +16,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread.h"
 #include "base/timer/timer.h"
+#include "chromecast/media/cma/backend/alsa/audio_filter_interface.h"
 #include "chromecast/media/cma/backend/alsa/media_pipeline_backend_alsa.h"
 #include "chromecast/media/cma/backend/alsa/stream_mixer_alsa_input.h"
 #include "chromecast/public/cast_media_shlib.h"
@@ -63,10 +64,6 @@ class StreamMixerAlsa {
     // positive.
     virtual int input_samples_per_second() const = 0;
 
-    // This number will be used to scale the stream before it is mixed. The
-    // result must be in the range (0.0, 1.0].
-    virtual float volume_multiplier() const = 0;
-
     // Returns true if the stream is primary. Primary streams will be given
     // precedence for sample rates and will dictate when data is polled.
     virtual bool primary() const = 0;
@@ -91,6 +88,21 @@ class StreamMixerAlsa {
     // be no larger than the value returned by the most recent call to
     // MaxReadSize(), and |dest->frames()| shall be >= |frames|.
     virtual void GetResampledData(::media::AudioBus* dest, int frames) = 0;
+
+    // Scale |frames| frames at |src| by the current volume (smoothing as
+    // needed). Add the scaled result to |dest|.
+    // VolumeScaleAccumulate will be called once for each channel of audio
+    // present and |repeat_transition| will be true for channels 2 through n.
+    // |src| and |dest| should be 16-byte aligned.
+    virtual void VolumeScaleAccumulate(bool repeat_transition,
+                                       const float* src,
+                                       int frames,
+                                       float* dest) = 0;
+
+    // Called when this input has been skipped for output due to not having any
+    // data available. This indicates that there will be a gap in the playback
+    // from this stream.
+    virtual void OnSkipped() = 0;
 
     // This is called for every InputQueue when the mixer writes data to ALSA
     // for any of its input streams.
@@ -120,7 +132,6 @@ class StreamMixerAlsa {
   int output_samples_per_second() const { return output_samples_per_second_; }
   bool empty() const { return inputs_.empty(); }
   State state() const { return state_; }
-  int num_output_channels() const { return num_output_channels_; }
 
   const scoped_refptr<base::SingleThreadTaskRunner>& task_runner() const {
     return mixer_task_runner_;
@@ -185,7 +196,8 @@ class StreamMixerAlsa {
 
   void WriteFrames();
   bool TryWriteFrames();
-  void WriteMixedPcm(const ::media::AudioBus& mixed, int frames);
+  void WriteMixedPcm(const ::media::AudioBus& mixed, int frames,
+      bool is_silence);
   void UpdateRenderingDelay(int newly_pushed_frames);
   ssize_t BytesPerOutputFormatSample();
 
@@ -196,6 +208,7 @@ class StreamMixerAlsa {
   scoped_refptr<base::SingleThreadTaskRunner> mixer_task_runner_;
 
   unsigned int fixed_output_samples_per_second_;
+  unsigned int low_sample_rate_cutoff_;
   int requested_output_samples_per_second_;
   int output_samples_per_second_;
   snd_pcm_t* pcm_;
@@ -206,7 +219,6 @@ class StreamMixerAlsa {
   // User-configurable ALSA parameters. This caches the results, so the code
   // only has to interact with the command line parameters once.
   std::string alsa_device_name_;
-  int num_output_channels_;
   snd_pcm_uframes_t alsa_buffer_size_;
   bool alsa_period_explicitly_set;
   snd_pcm_uframes_t alsa_period_size_;
@@ -233,6 +245,9 @@ class StreamMixerAlsa {
   std::unique_ptr<base::Timer> check_close_timer_;
 
   std::vector<CastMediaShlib::LoopbackAudioObserver*> loopback_observers_;
+
+  std::unique_ptr<AudioFilterInterface> pre_loopback_filter_;
+  std::unique_ptr<AudioFilterInterface> post_loopback_filter_;
 
   DISALLOW_COPY_AND_ASSIGN(StreamMixerAlsa);
 };

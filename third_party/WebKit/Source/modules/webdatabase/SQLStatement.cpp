@@ -38,7 +38,6 @@
 #include "modules/webdatabase/SQLTransaction.h"
 #include "modules/webdatabase/sqlite/SQLiteDatabase.h"
 #include "modules/webdatabase/sqlite/SQLiteStatement.h"
-#include "platform/Logging.h"
 #include "wtf/text/CString.h"
 
 namespace blink {
@@ -54,12 +53,10 @@ SQLStatement::SQLStatement(Database* database, SQLStatementCallback* callback,
     : m_statementCallback(callback)
     , m_statementErrorCallback(errorCallback)
 {
+    DCHECK(isMainThread());
+
     if (hasCallback() || hasErrorCallback())
         InspectorInstrumentation::asyncTaskScheduled(database->getExecutionContext(), "SQLStatement", this);
-}
-
-SQLStatement::~SQLStatement()
-{
 }
 
 DEFINE_TRACE(SQLStatement)

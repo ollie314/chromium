@@ -9,9 +9,12 @@
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/location.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/active_tab_permission_granter.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/extension_action.h"
@@ -122,7 +125,7 @@ ExtensionAction::ShowAction ExtensionActionRunner::RunAction(
 }
 
 void ExtensionActionRunner::RunBlockedActions(const Extension* extension) {
-  DCHECK(ContainsKey(pending_scripts_, extension->id()) ||
+  DCHECK(base::ContainsKey(pending_scripts_, extension->id()) ||
          web_request_blocked_.count(extension->id()) != 0);
 
   // Clicking to run the extension counts as granting it permission to run on
@@ -350,12 +353,13 @@ void ExtensionActionRunner::ShowBlockedActionBubble(
         base::Bind(&ExtensionActionRunner::OnBlockedActionBubbleClosed,
                    weak_factory_.GetWeakPtr(), extension->id());
     if (default_bubble_close_action_for_testing_) {
-      base::MessageLoop::current()->PostTask(
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
           base::Bind(callback, *default_bubble_close_action_for_testing_));
     } else {
-      toolbar_actions_bar->ShowToolbarActionBubble(base::WrapUnique(
-          new BlockedActionBubbleDelegate(callback, extension->id())));
+      toolbar_actions_bar->ShowToolbarActionBubble(
+          base::MakeUnique<BlockedActionBubbleDelegate>(callback,
+                                                        extension->id()));
     }
   }
 }

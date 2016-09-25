@@ -10,18 +10,20 @@
 #include "core/css/resolver/CSSVariableResolver.h"
 #include "core/css/resolver/StyleResolverState.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
 class ResolvedVariableChecker : public InterpolationType::ConversionChecker {
 public:
-    static PassOwnPtr<ResolvedVariableChecker> create(CSSPropertyID property, CSSVariableReferenceValue* variableReference, CSSValue* resolvedValue)
+    static std::unique_ptr<ResolvedVariableChecker> create(CSSPropertyID property, const CSSValue* variableReference, const CSSValue* resolvedValue)
     {
-        return adoptPtr(new ResolvedVariableChecker(property, variableReference, resolvedValue));
+        return wrapUnique(new ResolvedVariableChecker(property, variableReference, resolvedValue));
     }
 
 private:
-    ResolvedVariableChecker(CSSPropertyID property, CSSVariableReferenceValue* variableReference, CSSValue* resolvedValue)
+    ResolvedVariableChecker(CSSPropertyID property, const CSSValue* variableReference, const CSSValue* resolvedValue)
         : m_property(property)
         , m_variableReference(variableReference)
         , m_resolvedValue(resolvedValue)
@@ -30,31 +32,37 @@ private:
     bool isValid(const InterpolationEnvironment& environment, const InterpolationValue& underlying) const final
     {
         // TODO(alancutter): Just check the variables referenced instead of doing a full CSSValue resolve.
-        CSSValue* resolvedValue = CSSVariableResolver::resolveVariableReferences(environment.state().style()->variables(), m_property, *m_variableReference);
+        const CSSValue* resolvedValue = CSSVariableResolver::resolveVariableReferences(environment.state(), m_property, *m_variableReference);
         return m_resolvedValue->equals(*resolvedValue);
     }
 
     CSSPropertyID m_property;
-    Persistent<CSSVariableReferenceValue> m_variableReference;
-    Persistent<CSSValue> m_resolvedValue;
+    Persistent<const CSSValue> m_variableReference;
+    Persistent<const CSSValue> m_resolvedValue;
 };
+
+CSSInterpolationType::CSSInterpolationType(CSSPropertyID property)
+    : InterpolationType(PropertyHandle(property))
+{
+    DCHECK(!isShorthandProperty(cssProperty()));
+}
 
 InterpolationValue CSSInterpolationType::maybeConvertSingle(const PropertySpecificKeyframe& keyframe, const InterpolationEnvironment& environment, const InterpolationValue& underlying, ConversionCheckers& conversionCheckers) const
 {
-    CSSValue* resolvedCSSValueOwner;
+    const CSSValue* resolvedCSSValueOwner;
     const CSSValue* value = toCSSPropertySpecificKeyframe(keyframe).value();
 
     if (!value)
         return maybeConvertNeutral(underlying, conversionCheckers);
 
-    if (value->isVariableReferenceValue() && !isShorthandProperty(cssProperty())) {
-        resolvedCSSValueOwner = CSSVariableResolver::resolveVariableReferences(environment.state().style()->variables(), cssProperty(), toCSSVariableReferenceValue(*value));
-        conversionCheckers.append(ResolvedVariableChecker::create(cssProperty(), toCSSVariableReferenceValue(const_cast<CSSValue*>(value)), resolvedCSSValueOwner));
+    if (value->isVariableReferenceValue() || value->isPendingSubstitutionValue()) {
+        resolvedCSSValueOwner = CSSVariableResolver::resolveVariableReferences(environment.state(), cssProperty(), *value);
+        conversionCheckers.append(ResolvedVariableChecker::create(cssProperty(), value, resolvedCSSValueOwner));
         value = resolvedCSSValueOwner;
     }
 
     if (value->isInitialValue() || (value->isUnsetValue() && !CSSPropertyMetadata::isInheritedProperty(cssProperty())))
-        return maybeConvertInitial(environment.state());
+        return maybeConvertInitial(environment.state(), conversionCheckers);
 
     if (value->isInheritedValue() || (value->isUnsetValue() && CSSPropertyMetadata::isInheritedProperty(cssProperty())))
         return maybeConvertInherit(environment.state(), conversionCheckers);

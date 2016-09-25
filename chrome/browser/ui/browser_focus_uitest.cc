@@ -7,11 +7,14 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
+#include "base/location.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser.h"
@@ -29,6 +32,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/omnibox/browser/autocomplete_match_type.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/omnibox/browser/omnibox_view.h"
@@ -229,7 +233,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_ClickingMovesFocus) {
 #if defined(OS_POSIX)
   // It seems we have to wait a little bit for the widgets to spin up before
   // we can start clicking on them.
-  base::MessageLoop::current()->task_runner()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       base::TimeDelta::FromMilliseconds(kActionDelayMs));
   content::RunMessageLoop();
@@ -595,7 +599,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusOnReload) {
         content::Source<content::NavigationController>(
             &browser()->tab_strip_model()->GetActiveWebContents()->
                 GetController()));
-    chrome::Reload(browser(), CURRENT_TAB);
+    chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
     observer.Wait();
   }
   // Focus should stay on the location bar.
@@ -612,7 +616,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusOnReload) {
         content::Source<content::NavigationController>(
             &browser()->tab_strip_model()->GetActiveWebContents()->
                 GetController()));
-    chrome::Reload(browser(), CURRENT_TAB);
+    chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
     observer.Wait();
   }
 
@@ -635,7 +639,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_FocusOnReloadCrashedTab) {
         content::Source<content::NavigationController>(
             &browser()->tab_strip_model()->GetActiveWebContents()->
                 GetController()));
-    chrome::Reload(browser(), CURRENT_TAB);
+    chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
     observer.Wait();
   }
 
@@ -665,7 +669,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, NavigateFromOmniboxIntoNewTab) {
   // Navigate to url.
   chrome::NavigateParams p(browser(), url, ui::PAGE_TRANSITION_LINK);
   p.window_action = chrome::NavigateParams::SHOW_WINDOW;
-  p.disposition = CURRENT_TAB;
+  p.disposition = WindowOpenDisposition::CURRENT_TAB;
   chrome::Navigate(&p);
 
   // Focus the omnibox.
@@ -675,8 +679,9 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, NavigateFromOmniboxIntoNewTab) {
       GetOmniboxView()->model()->controller();
 
   // Simulate an alt-enter.
-  controller->OnAutocompleteAccept(url2, NEW_FOREGROUND_TAB,
-                                   ui::PAGE_TRANSITION_TYPED);
+  controller->OnAutocompleteAccept(
+      url2, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui::PAGE_TRANSITION_TYPED, AutocompleteMatchType::URL_WHAT_YOU_TYPED);
 
   // Make sure the second tab is selected.
   EXPECT_EQ(1, browser()->tab_strip_model()->active_index());
@@ -692,12 +697,12 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, NavigateFromOmniboxIntoNewTab) {
 
 // This functionality is currently broken. http://crbug.com/304865.
 //
-//#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
-//// TODO(erg): http://crbug.com/163931
-//#define MAYBE_FocusOnNavigate DISABLED_FocusOnNavigate
-//#else
-//#define MAYBE_FocusOnNavigate FocusOnNavigate
-//#endif
+// #if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
+// // TODO(erg): http://crbug.com/163931
+// #define MAYBE_FocusOnNavigate DISABLED_FocusOnNavigate
+// #else
+// #define MAYBE_FocusOnNavigate FocusOnNavigate
+// #endif
 
 IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_FocusOnNavigate) {
   // Needed on Mac.
@@ -719,7 +724,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_FocusOnNavigate) {
     content::WindowedNotificationObserver back_nav_observer(
         content::NOTIFICATION_NAV_ENTRY_COMMITTED,
         content::NotificationService::AllSources());
-    chrome::GoBack(browser(), CURRENT_TAB);
+    chrome::GoBack(browser(), WindowOpenDisposition::CURRENT_TAB);
     back_nav_observer.Wait();
   }
 
@@ -731,7 +736,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_FocusOnNavigate) {
     content::WindowedNotificationObserver forward_nav_observer(
         content::NOTIFICATION_NAV_ENTRY_COMMITTED,
         content::NotificationService::AllSources());
-    chrome::GoForward(browser(), CURRENT_TAB);
+    chrome::GoForward(browser(), WindowOpenDisposition::CURRENT_TAB);
     forward_nav_observer.Wait();
   }
 

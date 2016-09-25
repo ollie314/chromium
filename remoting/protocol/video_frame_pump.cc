@@ -30,8 +30,6 @@ namespace protocol {
 // must be smaller than the minimum RTO used in PseudoTCP, which is 250ms.
 static const int kKeepAlivePacketIntervalMs = 200;
 
-static bool g_enable_timestamps = false;
-
 VideoFramePump::FrameTimestamps::FrameTimestamps() {}
 VideoFramePump::FrameTimestamps::~FrameTimestamps() {}
 
@@ -41,11 +39,6 @@ VideoFramePump::PacketWithTimestamps::PacketWithTimestamps(
     : packet(std::move(packet)), timestamps(std::move(timestamps)) {}
 
 VideoFramePump::PacketWithTimestamps::~PacketWithTimestamps() {}
-
-// static
-void VideoFramePump::EnableTimestampsForTests() {
-  g_enable_timestamps = true;
-}
 
 VideoFramePump::VideoFramePump(
     scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
@@ -107,17 +100,14 @@ void VideoFramePump::SetLosslessColor(bool want_lossless) {
                             base::Unretained(encoder_.get()), want_lossless));
 }
 
-void VideoFramePump::SetSizeCallback(const SizeCallback& size_callback) {
+void VideoFramePump::SetObserver(Observer* observer) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  size_callback_ = size_callback;
+  observer_ = observer;
 }
 
-webrtc::SharedMemory* VideoFramePump::CreateSharedMemory(size_t size) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return nullptr;
-}
-
-void VideoFramePump::OnCaptureCompleted(webrtc::DesktopFrame* frame) {
+void VideoFramePump::OnCaptureResult(
+    webrtc::DesktopCapturer::Result result,
+    std::unique_ptr<webrtc::DesktopFrame> frame) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   capture_scheduler_.OnCaptureCompleted();
@@ -131,8 +121,8 @@ void VideoFramePump::OnCaptureCompleted(webrtc::DesktopFrame* frame) {
     if (!frame_size_.equals(frame->size()) || !frame_dpi_.equals(dpi)) {
       frame_size_ = frame->size();
       frame_dpi_ = dpi;
-      if (!size_callback_.is_null())
-        size_callback_.Run(frame_size_, frame_dpi_);
+      if (observer_)
+        observer_->OnVideoSizeChanged(this, frame_size_, frame_dpi_);
     }
   }
 
@@ -142,7 +132,7 @@ void VideoFramePump::OnCaptureCompleted(webrtc::DesktopFrame* frame) {
   base::PostTaskAndReplyWithResult(
       encode_task_runner_.get(), FROM_HERE,
       base::Bind(&VideoFramePump::EncodeFrame, encoder_.get(),
-                 base::Passed(base::WrapUnique(frame)),
+                 base::Passed(&frame),
                  base::Passed(&captured_frame_timestamps_)),
       base::Bind(&VideoFramePump::OnFrameEncoded, weak_factory_.GetWeakPtr()));
 }
@@ -172,7 +162,7 @@ VideoFramePump::EncodeFrame(VideoEncoder* encoder,
   std::unique_ptr<VideoPacket> packet;
   // If |frame| is non-NULL then let the encoder process it.
   if (frame)
-    packet = encoder->Encode(*frame, 0);
+    packet = encoder->Encode(*frame);
 
   // If |frame| is NULL, or the encoder returned nothing, return an empty
   // packet.
@@ -187,8 +177,8 @@ VideoFramePump::EncodeFrame(VideoEncoder* encoder,
       (timestamps->encode_ended_time - timestamps->encode_started_time)
           .InMilliseconds());
 
-  return base::WrapUnique(
-      new PacketWithTimestamps(std::move(packet), std::move(timestamps)));
+  return base::MakeUnique<PacketWithTimestamps>(std::move(packet),
+                                                std::move(timestamps));
 }
 
 void VideoFramePump::OnFrameEncoded(
@@ -219,10 +209,6 @@ void VideoFramePump::SendPacket(std::unique_ptr<PacketWithTimestamps> packet) {
 
 void VideoFramePump::UpdateFrameTimers(VideoPacket* packet,
                                        FrameTimestamps* timestamps) {
-  if (g_enable_timestamps)
-    packet->set_timestamp(timestamps->capture_ended_time.ToInternalValue());
-
-
   if (!timestamps->input_event_received_time.is_null()) {
     packet->set_capture_pending_time_ms((timestamps->capture_started_time -
                                          timestamps->input_event_received_time)
@@ -264,7 +250,7 @@ void VideoFramePump::SendKeepAlivePacket() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   video_stub_->ProcessVideoPacket(
-      base::WrapUnique(new VideoPacket()),
+      base::MakeUnique<VideoPacket>(),
       base::Bind(&VideoFramePump::OnKeepAlivePacketSent,
                  weak_factory_.GetWeakPtr()));
 }

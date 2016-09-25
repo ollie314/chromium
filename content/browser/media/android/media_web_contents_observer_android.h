@@ -14,6 +14,10 @@
 #include "content/browser/media/media_web_contents_observer.h"
 #include "content/common/content_export.h"
 
+namespace media {
+enum class MediaContentType;
+}  // namespace media
+
 namespace content {
 
 class BrowserCdmManager;
@@ -42,6 +46,12 @@ class CONTENT_EXPORT MediaWebContentsObserverAndroid
   BrowserSurfaceViewManager* GetSurfaceViewManager(
       RenderFrameHost* render_frame_host);
 
+  // Sets or overrides the BrowserMediaSessionManager for the given
+  // |render_frame_host|.
+  void SetMediaSessionManagerForTest(
+      RenderFrameHost* render_frame_host,
+      std::unique_ptr<BrowserMediaSessionManager> manager);
+
   // Called by the WebContents when a tab has been closed but may still be
   // available for "undo" -- indicates that all media players (even audio only
   // players typically allowed background audio) bound to this WebContents must
@@ -56,14 +66,10 @@ class CONTENT_EXPORT MediaWebContentsObserverAndroid
                    int delegate_id,
                    bool has_audio,
                    bool is_remote,
-                   base::TimeDelta duration);
+                   media::MediaContentType media_content_type);
 
   void DisconnectMediaSession(RenderFrameHost* render_frame_host,
                               int delegate_id);
-
-#if defined(VIDEO_HOLE)
-  void OnFrameInfoUpdated();
-#endif  // defined(VIDEO_HOLE)
 
   // MediaWebContentsObserver overrides.
   void RenderFrameDeleted(RenderFrameHost* render_frame_host) override;

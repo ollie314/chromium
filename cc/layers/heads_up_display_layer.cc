@@ -10,6 +10,7 @@
 #include "cc/layers/heads_up_display_layer_impl.h"
 #include "cc/proto/layer.pb.h"
 #include "cc/trees/layer_tree_host.h"
+#include "cc/trees/layer_tree_settings.h"
 
 namespace cc {
 
@@ -18,11 +19,10 @@ scoped_refptr<HeadsUpDisplayLayer> HeadsUpDisplayLayer::Create() {
 }
 
 HeadsUpDisplayLayer::HeadsUpDisplayLayer()
-    : typeface_(skia::AdoptRef(
-          SkTypeface::CreateFromName("times new roman", SkTypeface::kNormal))) {
+    : typeface_(SkTypeface::MakeFromName("times new roman", SkFontStyle())) {
   if (!typeface_) {
-    typeface_ = skia::AdoptRef(
-        SkTypeface::CreateFromName("monospace", SkTypeface::kBold));
+    typeface_ = SkTypeface::MakeFromName(
+        "monospace", SkFontStyle::FromOldStyle(SkTypeface::kBold));
   }
   DCHECK(typeface_.get());
   SetIsDrawable(true);
@@ -41,13 +41,8 @@ void HeadsUpDisplayLayer::PrepareForCalculateDrawProperties(
   gfx::Transform matrix;
   matrix.MakeIdentity();
 
-  if (layer_tree_host()->debug_state().ShowHudRects()) {
-    int max_texture_size =
-        layer_tree_host()->GetRendererCapabilities().max_texture_size;
-    bounds.SetSize(std::min(max_texture_size,
-                            device_viewport_in_layout_pixels.width()),
-                   std::min(max_texture_size,
-                            device_viewport_in_layout_pixels.height()));
+  if (layer_tree_host()->GetDebugState().ShowHudRects()) {
+    bounds = device_viewport_in_layout_pixels;
   } else {
     int size = 256;
     bounds.SetSize(size, size);
@@ -64,7 +59,7 @@ bool HeadsUpDisplayLayer::HasDrawableContent() const {
 
 std::unique_ptr<LayerImpl> HeadsUpDisplayLayer::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return HeadsUpDisplayLayerImpl::Create(tree_impl, layer_id_);
+  return HeadsUpDisplayLayerImpl::Create(tree_impl, id());
 }
 
 void HeadsUpDisplayLayer::SetTypeForProtoSerialization(

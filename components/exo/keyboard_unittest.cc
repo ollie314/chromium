@@ -31,28 +31,28 @@ class MockKeyboardDelegate : public KeyboardDelegate {
   MOCK_METHOD2(OnKeyboardEnter,
                void(Surface*, const std::vector<ui::DomCode>&));
   MOCK_METHOD1(OnKeyboardLeave, void(Surface*));
-  MOCK_METHOD3(OnKeyboardKey, void(base::TimeDelta, ui::DomCode, bool));
+  MOCK_METHOD3(OnKeyboardKey, void(base::TimeTicks, ui::DomCode, bool));
   MOCK_METHOD1(OnKeyboardModifiers, void(int));
 };
 
 TEST_F(KeyboardTest, OnKeyboardEnter) {
-  scoped_ptr<Surface> surface(new Surface);
-  scoped_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
+  std::unique_ptr<Surface> surface(new Surface);
+  std::unique_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
   gfx::Size buffer_size(10, 10);
-  scoped_ptr<Buffer> buffer(
+  std::unique_ptr<Buffer> buffer(
       new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
   surface->Attach(buffer.get());
   surface->Commit();
 
   aura::client::FocusClient* focus_client =
       aura::client::GetFocusClient(ash::Shell::GetPrimaryRootWindow());
-  focus_client->FocusWindow(surface.get());
+  focus_client->FocusWindow(surface->window());
 
   // Keyboard should try to set initial focus to surface.
   MockKeyboardDelegate delegate;
   EXPECT_CALL(delegate, CanAcceptKeyboardEventsForSurface(surface.get()))
       .WillOnce(testing::Return(false));
-  scoped_ptr<Keyboard> keyboard(new Keyboard(&delegate));
+  std::unique_ptr<Keyboard> keyboard(new Keyboard(&delegate));
 
   ui::test::EventGenerator generator(ash::Shell::GetPrimaryRootWindow());
   generator.PressKey(ui::VKEY_A, 0);
@@ -68,19 +68,19 @@ TEST_F(KeyboardTest, OnKeyboardEnter) {
                                   expected_pressed_keys +
                                       arraysize(expected_pressed_keys))));
   focus_client->FocusWindow(nullptr);
-  focus_client->FocusWindow(surface.get());
+  focus_client->FocusWindow(surface->window());
   // Surface should maintain keyboard focus when moved to top-level window.
-  focus_client->FocusWindow(surface->GetToplevelWindow());
+  focus_client->FocusWindow(surface->window()->GetToplevelWindow());
 
   EXPECT_CALL(delegate, OnKeyboardDestroying(keyboard.get()));
   keyboard.reset();
 }
 
 TEST_F(KeyboardTest, OnKeyboardLeave) {
-  scoped_ptr<Surface> surface(new Surface);
-  scoped_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
+  std::unique_ptr<Surface> surface(new Surface);
+  std::unique_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
   gfx::Size buffer_size(10, 10);
-  scoped_ptr<Buffer> buffer(
+  std::unique_ptr<Buffer> buffer(
       new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
   surface->Attach(buffer.get());
   surface->Commit();
@@ -90,14 +90,14 @@ TEST_F(KeyboardTest, OnKeyboardLeave) {
   focus_client->FocusWindow(nullptr);
 
   MockKeyboardDelegate delegate;
-  scoped_ptr<Keyboard> keyboard(new Keyboard(&delegate));
+  std::unique_ptr<Keyboard> keyboard(new Keyboard(&delegate));
 
   EXPECT_CALL(delegate, CanAcceptKeyboardEventsForSurface(surface.get()))
       .WillOnce(testing::Return(true));
   EXPECT_CALL(delegate, OnKeyboardModifiers(0));
   EXPECT_CALL(delegate,
               OnKeyboardEnter(surface.get(), std::vector<ui::DomCode>()));
-  focus_client->FocusWindow(surface.get());
+  focus_client->FocusWindow(surface->window());
 
   EXPECT_CALL(delegate, OnKeyboardLeave(surface.get()));
   focus_client->FocusWindow(nullptr);
@@ -107,10 +107,10 @@ TEST_F(KeyboardTest, OnKeyboardLeave) {
 }
 
 TEST_F(KeyboardTest, OnKeyboardKey) {
-  scoped_ptr<Surface> surface(new Surface);
-  scoped_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
+  std::unique_ptr<Surface> surface(new Surface);
+  std::unique_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
   gfx::Size buffer_size(10, 10);
-  scoped_ptr<Buffer> buffer(
+  std::unique_ptr<Buffer> buffer(
       new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
   surface->Attach(buffer.get());
   surface->Commit();
@@ -120,14 +120,14 @@ TEST_F(KeyboardTest, OnKeyboardKey) {
   focus_client->FocusWindow(nullptr);
 
   MockKeyboardDelegate delegate;
-  scoped_ptr<Keyboard> keyboard(new Keyboard(&delegate));
+  std::unique_ptr<Keyboard> keyboard(new Keyboard(&delegate));
 
   EXPECT_CALL(delegate, CanAcceptKeyboardEventsForSurface(surface.get()))
       .WillOnce(testing::Return(true));
   EXPECT_CALL(delegate, OnKeyboardModifiers(0));
   EXPECT_CALL(delegate,
               OnKeyboardEnter(surface.get(), std::vector<ui::DomCode>()));
-  focus_client->FocusWindow(surface.get());
+  focus_client->FocusWindow(surface->window());
 
   ui::test::EventGenerator generator(ash::Shell::GetPrimaryRootWindow());
   // This should only generate one press event for KEY_A.
@@ -146,10 +146,10 @@ TEST_F(KeyboardTest, OnKeyboardKey) {
 }
 
 TEST_F(KeyboardTest, OnKeyboardModifiers) {
-  scoped_ptr<Surface> surface(new Surface);
-  scoped_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
+  std::unique_ptr<Surface> surface(new Surface);
+  std::unique_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
   gfx::Size buffer_size(10, 10);
-  scoped_ptr<Buffer> buffer(
+  std::unique_ptr<Buffer> buffer(
       new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
   surface->Attach(buffer.get());
   surface->Commit();
@@ -159,14 +159,14 @@ TEST_F(KeyboardTest, OnKeyboardModifiers) {
   focus_client->FocusWindow(nullptr);
 
   MockKeyboardDelegate delegate;
-  scoped_ptr<Keyboard> keyboard(new Keyboard(&delegate));
+  std::unique_ptr<Keyboard> keyboard(new Keyboard(&delegate));
 
   EXPECT_CALL(delegate, CanAcceptKeyboardEventsForSurface(surface.get()))
       .WillOnce(testing::Return(true));
   EXPECT_CALL(delegate, OnKeyboardModifiers(0));
   EXPECT_CALL(delegate,
               OnKeyboardEnter(surface.get(), std::vector<ui::DomCode>()));
-  focus_client->FocusWindow(surface.get());
+  focus_client->FocusWindow(surface->window());
 
   ui::test::EventGenerator generator(ash::Shell::GetPrimaryRootWindow());
   // This should generate a modifier event.

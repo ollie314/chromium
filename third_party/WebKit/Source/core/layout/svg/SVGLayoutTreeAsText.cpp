@@ -46,6 +46,7 @@
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/line/SVGInlineTextBox.h"
 #include "core/layout/svg/line/SVGRootInlineBox.h"
+#include "core/paint/PaintLayer.h"
 #include "core/svg/LinearGradientAttributes.h"
 #include "core/svg/PatternAttributes.h"
 #include "core/svg/RadialGradientAttributes.h"
@@ -519,7 +520,7 @@ void writeSVGResourceContainer(TextStream& ts, const LayoutObject& object, int i
         writeNameValuePair(ts, "markerUnits", marker->markerUnits());
         ts << " [ref at " << marker->referencePoint() << "]";
         ts << " [angle=";
-        if (marker->angle() == -1)
+        if (marker->orientType() != SVGMarkerOrientAngle)
             ts << marker->orientType() << "]\n";
         else
             ts << marker->angle() << "]\n";
@@ -638,7 +639,6 @@ void writeResources(TextStream& ts, const LayoutObject& object, int indent)
 
     // FIXME: We want to use SVGResourcesCache to determine which resources are present, instead of quering the resource <-> id cache.
     // For now leave the DRT output as is, but later on we should change this so cycles are properly ignored in the DRT output.
-    LayoutObject& layoutObject = const_cast<LayoutObject&>(object);
     if (!svgStyle.maskerResource().isEmpty()) {
         if (LayoutSVGResourceMasker* masker = getLayoutSVGResourceById<LayoutSVGResourceMasker>(object.document(), svgStyle.maskerResource())) {
             writeIndent(ts, indent);
@@ -646,27 +646,39 @@ void writeResources(TextStream& ts, const LayoutObject& object, int indent)
             writeNameAndQuotedValue(ts, "masker", svgStyle.maskerResource());
             ts << " ";
             writeStandardPrefix(ts, *masker, 0);
-            ts << " " << masker->resourceBoundingBox(&layoutObject) << "\n";
+            ts << " " << masker->resourceBoundingBox(&object) << "\n";
         }
     }
-    if (!svgStyle.clipperResource().isEmpty()) {
-        if (LayoutSVGResourceClipper* clipper = getLayoutSVGResourceById<LayoutSVGResourceClipper>(object.document(), svgStyle.clipperResource())) {
-            writeIndent(ts, indent);
-            ts << " ";
-            writeNameAndQuotedValue(ts, "clipPath", svgStyle.clipperResource());
-            ts << " ";
-            writeStandardPrefix(ts, *clipper, 0);
-            ts << " " << clipper->resourceBoundingBox(&layoutObject) << "\n";
+    if (ClipPathOperation* clipPathOperation = style.clipPath()) {
+        if (clipPathOperation->type() == ClipPathOperation::REFERENCE) {
+            const ReferenceClipPathOperation& clipPathReference = toReferenceClipPathOperation(*clipPathOperation);
+            AtomicString id = SVGURIReference::fragmentIdentifierFromIRIString(clipPathReference.url(), object.document());
+            if (LayoutSVGResourceClipper* clipper = getLayoutSVGResourceById<LayoutSVGResourceClipper>(object.document(), id)) {
+                writeIndent(ts, indent);
+                ts << " ";
+                writeNameAndQuotedValue(ts, "clipPath", id);
+                ts << " ";
+                writeStandardPrefix(ts, *clipper, 0);
+                ts << " " << clipper->resourceBoundingBox(object.objectBoundingBox()) << "\n";
+            }
         }
     }
-    if (!svgStyle.filterResource().isEmpty()) {
-        if (LayoutSVGResourceFilter* filter = getLayoutSVGResourceById<LayoutSVGResourceFilter>(object.document(), svgStyle.filterResource())) {
-            writeIndent(ts, indent);
-            ts << " ";
-            writeNameAndQuotedValue(ts, "filter", svgStyle.filterResource());
-            ts << " ";
-            writeStandardPrefix(ts, *filter, 0);
-            ts << " " << filter->resourceBoundingBox(&layoutObject) << "\n";
+    if (style.hasFilter()) {
+        const FilterOperations& filterOperations = style.filter();
+        if (filterOperations.size() == 1) {
+            const FilterOperation& filterOperation = *filterOperations.at(0);
+            if (filterOperation.type() == FilterOperation::REFERENCE) {
+                const auto& referenceFilterOperation = toReferenceFilterOperation(filterOperation);
+                AtomicString id = SVGURIReference::fragmentIdentifierFromIRIString(referenceFilterOperation.url(), object.document());
+                if (LayoutSVGResourceFilter* filter = getLayoutSVGResourceById<LayoutSVGResourceFilter>(object.document(), id)) {
+                    writeIndent(ts, indent);
+                    ts << " ";
+                    writeNameAndQuotedValue(ts, "filter", id);
+                    ts << " ";
+                    writeStandardPrefix(ts, *filter, 0);
+                    ts << " " << filter->resourceBoundingBox(&object) << "\n";
+                }
+            }
         }
     }
 }

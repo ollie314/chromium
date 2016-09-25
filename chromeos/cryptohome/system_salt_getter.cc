@@ -11,7 +11,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 
@@ -40,6 +40,15 @@ void SystemSaltGetter::GetSystemSalt(
       base::Bind(&SystemSaltGetter::DidWaitForServiceToBeAvailable,
                  weak_ptr_factory_.GetWeakPtr(),
                  callback));
+}
+
+void SystemSaltGetter::AddOnSystemSaltReady(const base::Closure& closure) {
+  if (!raw_salt_.empty()) {
+    closure.Run();
+    return;
+  }
+
+  on_system_salt_ready_.push_back(closure);
 }
 
 const SystemSaltGetter::RawSalt* SystemSaltGetter::GetRawSalt() const {
@@ -74,6 +83,12 @@ void SystemSaltGetter::DidGetSystemSalt(
       system_salt.size() % 2 == 0U) {
       raw_salt_ = system_salt;
     system_salt_ = ConvertRawSaltToHexString(system_salt);
+
+    std::vector<base::Closure> callbacks;
+    callbacks.swap(on_system_salt_ready_);
+    for (const base::Closure& callback : callbacks) {
+      callback.Run();
+    }
   } else {
     LOG(WARNING) << "System salt not available";
   }

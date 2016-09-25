@@ -8,8 +8,10 @@
 #include <memory>
 
 #include "base/android/jni_android.h"
+#include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
-#include "device/bluetooth/bluetooth_gatt_descriptor.h"
+#include "device/bluetooth/bluetooth_remote_gatt_characteristic.h"
+#include "device/bluetooth/bluetooth_remote_gatt_descriptor.h"
 
 namespace device {
 
@@ -17,7 +19,7 @@ namespace device {
 // org.chromium.device.bluetooth.ChromeBluetoothRemoteGattDescriptor
 // implement BluetootGattDescriptor.
 class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattDescriptorAndroid
-    : public BluetoothGattDescriptor {
+    : public BluetoothRemoteGattDescriptor {
  public:
   // Create a BluetoothRemoteGattDescriptorAndroid instance and associated
   // Java ChromeBluetoothRemoteGattDescriptor using the provided
@@ -27,9 +29,11 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattDescriptorAndroid
   // reference to |bluetooth_gatt_descriptor_wrapper|.
   static std::unique_ptr<BluetoothRemoteGattDescriptorAndroid> Create(
       const std::string& instanceId,
-      jobject /* BluetoothGattDescriptorWrapper */
+      const base::android::JavaRef<jobject>& /* BluetoothGattDescriptorWrapper
+                                                */
       bluetooth_gatt_descriptor_wrapper,
-      jobject /* chromeBluetoothDevice */ chrome_bluetooth_device);
+      const base::android::JavaRef<
+          jobject>& /* chromeBluetoothDevice */ chrome_bluetooth_device);
 
   ~BluetoothRemoteGattDescriptorAndroid() override;
 
@@ -39,16 +43,16 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattDescriptorAndroid
   // Returns the associated ChromeBluetoothRemoteGattDescriptor Java object.
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject();
 
-  // BluetoothGattDescriptor interface:
+  // BluetoothRemoteGattDescriptor interface:
   std::string GetIdentifier() const override;
   BluetoothUUID GetUUID() const override;
-  bool IsLocal() const override;
   const std::vector<uint8_t>& GetValue() const override;
-  BluetoothGattCharacteristic* GetCharacteristic() const override;
-  BluetoothGattCharacteristic::Permissions GetPermissions() const override;
+  BluetoothRemoteGattCharacteristic* GetCharacteristic() const override;
+  BluetoothRemoteGattCharacteristic::Permissions GetPermissions()
+      const override;
   void ReadRemoteDescriptor(const ValueCallback& callback,
                             const ErrorCallback& error_callback) override;
-  void WriteRemoteDescriptor(const std::vector<uint8_t>& new_value,
+  void WriteRemoteDescriptor(const std::vector<uint8_t>& value,
                              const base::Closure& callback,
                              const ErrorCallback& error_callback) override;
 

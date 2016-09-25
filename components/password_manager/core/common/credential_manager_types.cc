@@ -5,20 +5,26 @@
 #include "components/password_manager/core/common/credential_manager_types.h"
 
 #include "base/logging.h"
+#include "base/strings/string_number_conversions.h"
 #include "components/autofill/core/common/password_form.h"
 
 namespace password_manager {
 
-std::ostream& operator<<(std::ostream& os, CredentialType value) {
+std::string CredentialTypeToString(CredentialType value) {
   switch (value) {
     case CredentialType::CREDENTIAL_TYPE_EMPTY:
-      return os << "CredentialType::CREDENTIAL_TYPE_EMPTY";
+      return "CredentialType::CREDENTIAL_TYPE_EMPTY";
     case CredentialType::CREDENTIAL_TYPE_PASSWORD:
-      return os << "CredentialType::CREDENTIAL_TYPE_PASSWORD";
+      return "CredentialType::CREDENTIAL_TYPE_PASSWORD";
     case CredentialType::CREDENTIAL_TYPE_FEDERATED:
-      return os << "CredentialType::CREDENTIAL_TYPE_FEDERATED";
+      return "CredentialType::CREDENTIAL_TYPE_FEDERATED";
   }
-  return os << "Unknown CredentialType value: " << static_cast<int32_t>(value);
+  return "Unknown CredentialType value: " +
+         base::IntToString(static_cast<int>(value));
+}
+
+std::ostream& operator<<(std::ostream& os, CredentialType value) {
+  return os << CredentialTypeToString(value);
 }
 
 CredentialInfo::CredentialInfo() : type(CredentialType::CREDENTIAL_TYPE_EMPTY) {
@@ -51,6 +57,12 @@ CredentialInfo::CredentialInfo(const CredentialInfo& other) = default;
 CredentialInfo::~CredentialInfo() {
 }
 
+bool CredentialInfo::operator==(const CredentialInfo& rhs) const {
+  return (type == rhs.type && id == rhs.id && name == rhs.name &&
+          icon == rhs.icon && password == rhs.password &&
+          federation.Serialize() == rhs.federation.Serialize());
+}
+
 std::unique_ptr<autofill::PasswordForm> CreatePasswordFormFromCredentialInfo(
     const CredentialInfo& info,
     const GURL& origin) {
@@ -75,10 +87,15 @@ std::unique_ptr<autofill::PasswordForm> CreatePasswordFormFromCredentialInfo(
   form->username_value = info.id;
   return form;
 }
-bool CredentialInfo::operator==(const CredentialInfo& rhs) const {
-  return (type == rhs.type && id == rhs.id && name == rhs.name &&
-          icon == rhs.icon && password == rhs.password &&
-          federation.Serialize() == rhs.federation.Serialize());
+
+std::unique_ptr<autofill::PasswordForm> CreateObservedPasswordFormFromOrigin(
+    const GURL& origin) {
+  std::unique_ptr<autofill::PasswordForm> form(new autofill::PasswordForm);
+  form->origin = origin;
+  form->scheme = autofill::PasswordForm::SCHEME_HTML;
+  form->type = autofill::PasswordForm::TYPE_API;
+  form->signon_realm = origin.spec();
+  return form;
 }
 
 }  // namespace password_manager

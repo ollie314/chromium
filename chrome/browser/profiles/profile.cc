@@ -13,11 +13,11 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/sync_driver/sync_prefs.h"
+#include "components/sync/driver/sync_prefs.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -87,6 +87,8 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 #endif
   registry->RegisterBooleanPref(prefs::kSessionExitedCleanly, true);
   registry->RegisterStringPref(prefs::kSessionExitType, std::string());
+  registry->RegisterInt64Pref(prefs::kSiteEngagementLastUpdateTime, 0,
+                              PrefRegistry::LOSSY_PREF);
   registry->RegisterBooleanPref(
       prefs::kSafeBrowsingEnabled,
       true,
@@ -146,6 +148,8 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 
 #if defined(OS_ANDROID)
   registry->RegisterBooleanPref(prefs::kClickedUpdateMenuItem, false);
+  registry->RegisterStringPref(prefs::kLatestVersionWhenClickedUpdateMenuItem,
+                               std::string());
 #endif
 
 #if defined(ENABLE_MEDIA_ROUTER)
@@ -163,6 +167,10 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kMediaRouterFirstRunFlowAcknowledged,
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+#endif
+
+#if defined(OS_CHROMEOS)
+  registry->RegisterBooleanPref(prefs::kAllowScreenLock, true);
 #endif
 }
 
@@ -206,7 +214,8 @@ bool Profile::IsSyncAllowed() {
   // No ProfileSyncService created yet - we don't want to create one, so just
   // infer the accessible state by looking at prefs/command line flags.
   sync_driver::SyncPrefs prefs(GetPrefs());
-  return ProfileSyncService::IsSyncAllowedByFlag() && !prefs.IsManaged();
+  return browser_sync::ProfileSyncService::IsSyncAllowedByFlag() &&
+         !prefs.IsManaged();
 }
 
 void Profile::MaybeSendDestroyedNotification() {

@@ -14,6 +14,7 @@ Run "generate_token.py -h" for more help on usage.
 """
 import argparse
 import base64
+from datetime import datetime
 import json
 import re
 import os
@@ -34,6 +35,9 @@ DNS_LABEL_REGEX = re.compile(r"^(?!-)[a-z\d-]{1,63}(?<!-)$", re.IGNORECASE)
 # This script generates Version 2 tokens.
 VERSION = "\x02"
 
+# Default key file, relative to script_dir.
+DEFAULT_KEY_FILE = 'eftest.key'
+
 def HostnameFromArg(arg):
   """Determines whether a string represents a valid hostname.
 
@@ -43,6 +47,8 @@ def HostnameFromArg(arg):
     return None
   if arg[-1] == ".":
     arg = arg[:-1]
+  if "." not in arg and arg != "localhost":
+    return None
   if all(DNS_LABEL_REGEX.match(label) for label in arg.split(".")):
     return arg.lower()
 
@@ -95,6 +101,8 @@ def FormatToken(version, signature, data):
                           struct.pack(">I",len(data)) + data)
 
 def main():
+  default_key_file_absolute = os.path.join(script_dir, DEFAULT_KEY_FILE)
+
   parser = argparse.ArgumentParser(
       description="Generate tokens for enabling experimental APIs")
   parser.add_argument("origin",
@@ -108,7 +116,7 @@ def main():
                            "RuntimeFeatures.in")
   parser.add_argument("--key-file",
                       help="Ed25519 private key file to sign the token with",
-                      default="eftest.key")
+                      default=default_key_file_absolute)
   expiry_group = parser.add_mutually_exclusive_group()
   expiry_group.add_argument("--expire-days",
                             help="Days from now when the token should exipire",
@@ -145,8 +153,15 @@ def main():
     print "(The original error was: %s)" % exc
     sys.exit(1)
 
-  # Output a properly-formatted token. Version 1 is hard-coded, as it is
-  # the only defined token version.
+
+  # Output the token details
+  print "Token details:"
+  print " Origin: %s" % args.origin
+  print " Feature: %s" % args.trial_name
+  print " Expiry: %d (%s UTC)" % (expiry, datetime.utcfromtimestamp(expiry))
+  print
+
+  # Output the properly-formatted token.
   print FormatToken(VERSION, signature, token_data)
 
 if __name__ == "__main__":

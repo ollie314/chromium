@@ -62,21 +62,26 @@ public:
     void resetColumnHeight();
     bool recalculateColumnHeight(LayoutMultiColumnSet&);
 
-    LayoutSize flowThreadTranslationAtOffset(LayoutUnit offsetInFlowThread) const;
+    LayoutSize flowThreadTranslationAtOffset(LayoutUnit, LayoutBox::PageBoundaryRule, CoordinateSpaceConversion) const;
     LayoutUnit columnLogicalTopForOffset(LayoutUnit offsetInFlowThread) const;
     LayoutPoint visualPointToFlowThreadPoint(const LayoutPoint& visualPoint) const;
     LayoutRect fragmentsBoundingBox(const LayoutRect& boundingBoxInFlowThread) const;
 
-    void collectLayerFragments(PaintLayerFragments&, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRect) const;
+    LayoutRect flowThreadPortionOverflowRectAt(unsigned columnIndex) const;
+
+    // Get the first and the last column intersecting the specified block range.
+    // Note that |logicalBottomInFlowThread| is an exclusive endpoint.
+    void columnIntervalForBlockRangeInFlowThread(LayoutUnit logicalTopInFlowThread, LayoutUnit logicalBottomInFlowThread, unsigned& firstColumn, unsigned& lastColumn) const;
+
+    // Get the first and the last column intersecting the specified visual rectangle.
+    void columnIntervalForVisualRect(const LayoutRect&, unsigned& firstColumn, unsigned& lastColumn) const;
+
     LayoutRect calculateOverflow() const;
 
-    enum ColumnIndexCalculationMode {
-        ClampToExistingColumns, // Stay within the range of already existing columns.
-        AssumeNewColumns // Allow column indices outside the range of already existing columns.
-    };
-    unsigned columnIndexAtOffset(LayoutUnit offsetInFlowThread, ColumnIndexCalculationMode = ClampToExistingColumns) const;
+    unsigned columnIndexAtOffset(LayoutUnit offsetInFlowThread, LayoutBox::PageBoundaryRule) const;
 
     // The "CSS actual" value of column-count. This includes overflowing columns, if any.
+    // Returns 1 or greater, never 0.
     unsigned actualColumnCount() const;
 
 private:
@@ -89,19 +94,11 @@ private:
     LayoutRect columnRectAt(unsigned columnIndex) const;
     LayoutUnit logicalTopInFlowThreadAt(unsigned columnIndex) const { return m_logicalTopInFlowThread + columnIndex * m_columnHeight; }
     LayoutRect flowThreadPortionRectAt(unsigned columnIndex) const;
-    LayoutRect flowThreadPortionOverflowRectAt(unsigned columnIndex) const;
 
     // Return the column that the specified visual point belongs to. Only the coordinate on the
     // column progression axis is relevant. Every point belongs to a column, even if said point is
     // not inside any of the columns.
     unsigned columnIndexAtVisualPoint(const LayoutPoint& visualPoint) const;
-
-    // Get the first and the last column intersecting the specified block range.
-    // Note that |logicalBottomInFlowThread| is an exclusive endpoint.
-    void columnIntervalForBlockRangeInFlowThread(LayoutUnit logicalTopInFlowThread, LayoutUnit logicalBottomInFlowThread, unsigned& firstColumn, unsigned& lastColumn) const;
-
-    // Get the first and the last column intersecting the specified visual rectangle.
-    void columnIntervalForVisualRect(const LayoutRect&, unsigned& firstColumn, unsigned& lastColumn) const;
 
     const LayoutMultiColumnSet& m_columnSet;
 

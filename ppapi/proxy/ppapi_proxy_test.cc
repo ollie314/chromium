@@ -4,7 +4,6 @@
 
 #include "ppapi/proxy/ppapi_proxy_test.h"
 
-#include <sstream>
 #include <tuple>
 
 #include "base/bind.h"
@@ -14,7 +13,7 @@
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/message_filter.h"
 #include "ppapi/c/pp_errors.h"
@@ -527,8 +526,10 @@ TwoWayTest::TwoWayTest(TwoWayTest::TwoWayTestMode test_mode)
       plugin_thread_("TwoWayTest_PluginThread"),
       remote_harness_(NULL),
       local_harness_(NULL),
-      channel_created_(true, false),
-      shutdown_event_(true, false) {
+      channel_created_(base::WaitableEvent::ResetPolicy::MANUAL,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED),
+      shutdown_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                      base::WaitableEvent::InitialState::NOT_SIGNALED) {
   if (test_mode == TEST_PPP_INTERFACE) {
     remote_harness_ = &plugin_;
     local_harness_ = &host_;
@@ -548,24 +549,26 @@ void TwoWayTest::SetUp() {
   io_thread_.StartWithOptions(options);
   plugin_thread_.Start();
 
-  // Construct the IPC handle name using the process ID so we can safely run
-  // multiple |TwoWayTest|s concurrently.
-  std::ostringstream handle_name;
-  handle_name << "TwoWayTestChannel" << base::GetCurrentProcId();
-  IPC::ChannelHandle handle(handle_name.str());
-  base::WaitableEvent remote_harness_set_up(true, false);
+  IPC::ChannelHandle local_handle, remote_handle;
+  IPC::Channel::GenerateMojoChannelHandlePair("TwoWayTestChannel",
+                                              &local_handle, &remote_handle);
+  base::WaitableEvent remote_harness_set_up(
+      base::WaitableEvent::ResetPolicy::MANUAL,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
   plugin_thread_.task_runner()->PostTask(
-      FROM_HERE, base::Bind(&SetUpRemoteHarness, remote_harness_, handle,
+      FROM_HERE, base::Bind(&SetUpRemoteHarness, remote_harness_, remote_handle,
                             base::RetainedRef(io_thread_.task_runner()),
                             &shutdown_event_, &remote_harness_set_up));
   remote_harness_set_up.Wait();
   local_harness_->SetUpHarnessWithChannel(
-      handle, io_thread_.task_runner().get(), &shutdown_event_,
+      local_handle, io_thread_.task_runner().get(), &shutdown_event_,
       true);  // is_client
 }
 
 void TwoWayTest::TearDown() {
-  base::WaitableEvent remote_harness_torn_down(true, false);
+  base::WaitableEvent remote_harness_torn_down(
+      base::WaitableEvent::ResetPolicy::MANUAL,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
   plugin_thread_.task_runner()->PostTask(
       FROM_HERE, base::Bind(&TearDownRemoteHarness, remote_harness_,
                             &remote_harness_torn_down));
@@ -577,7 +580,9 @@ void TwoWayTest::TearDown() {
 }
 
 void TwoWayTest::PostTaskOnRemoteHarness(const base::Closure& task) {
-  base::WaitableEvent task_complete(true, false);
+  base::WaitableEvent task_complete(
+      base::WaitableEvent::ResetPolicy::MANUAL,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
   plugin_thread_.task_runner()->PostTask(
       FROM_HERE, base::Bind(&RunTaskOnRemoteHarness, task, &task_complete));
   task_complete.Wait();

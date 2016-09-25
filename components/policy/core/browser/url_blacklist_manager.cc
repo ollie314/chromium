@@ -11,13 +11,16 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/task_runner_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "base/values.h"
 #include "base/values.h"
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -26,6 +29,7 @@
 #include "net/base/net_errors.h"
 #include "url/third_party/mozilla/url_parse.h"
 #include "url/url_constants.h"
+#include "url/url_util.h"
 
 using url_matcher::URLMatcher;
 using url_matcher::URLMatcherCondition;
@@ -60,11 +64,11 @@ const char* kBypassBlacklistWildcardForSchemes[] = {
 const size_t kMaxFiltersPerPolicy = 1000;
 
 // A task that builds the blacklist on a background thread.
-scoped_ptr<URLBlacklist> BuildBlacklist(
-    scoped_ptr<base::ListValue> block,
-    scoped_ptr<base::ListValue> allow,
+std::unique_ptr<URLBlacklist> BuildBlacklist(
+    std::unique_ptr<base::ListValue> block,
+    std::unique_ptr<base::ListValue> allow,
     URLBlacklist::SegmentURLCallback segment_url) {
-  scoped_ptr<URLBlacklist> blacklist(new URLBlacklist(segment_url));
+  std::unique_ptr<URLBlacklist> blacklist(new URLBlacklist(segment_url));
   blacklist->Block(block.get());
   blacklist->Allow(allow.get());
   return blacklist;
@@ -204,10 +208,16 @@ void URLBlacklist::Allow(const base::ListValue* filters) {
 }
 
 bool URLBlacklist::IsURLBlocked(const GURL& url) const {
+  return URLBlacklist::GetURLBlacklistState(url) ==
+         URLBlacklist::URLBlacklistState::URL_IN_BLACKLIST;
+}
+
+URLBlacklist::URLBlacklistState URLBlacklist::GetURLBlacklistState(
+    const GURL& url) const {
   std::set<URLMatcherConditionSet::ID> matching_ids =
       url_matcher_->MatchURL(url);
 
-  const FilterComponents* max = NULL;
+  const FilterComponents* max = nullptr;
   for (std::set<URLMatcherConditionSet::ID>::iterator id = matching_ids.begin();
        id != matching_ids.end(); ++id) {
     std::map<int, FilterComponents>::const_iterator it = filters_.find(*id);
@@ -217,17 +227,19 @@ bool URLBlacklist::IsURLBlocked(const GURL& url) const {
       max = &filter;
   }
 
-  // Default to allow.
+  // Default neutral.
   if (!max)
-    return false;
+    return URLBlacklist::URLBlacklistState::URL_NEUTRAL_STATE;
 
   // Some of the internal Chrome URLs are not affected by the "*" in the
   // blacklist. Note that the "*" is the lowest priority filter possible, so
   // any higher priority filter will be applied first.
   if (max->IsBlacklistWildcard() && BypassBlacklistWildcardForURL(url))
-    return false;
+    return URLBlacklist::URLBlacklistState::URL_IN_WHITELIST;
 
-  return !max->allow;
+  return max->allow ?
+      URLBlacklist::URLBlacklistState::URL_IN_WHITELIST :
+      URLBlacklist::URLBlacklistState::URL_IN_BLACKLIST;
 }
 
 size_t URLBlacklist::Size() const {
@@ -243,9 +255,17 @@ bool URLBlacklist::FilterToComponents(SegmentURLCallback segment_url,
                                       uint16_t* port,
                                       std::string* path,
                                       std::string* query) {
+  DCHECK(scheme);
+  DCHECK(host);
+  DCHECK(match_subdomains);
+  DCHECK(port);
+  DCHECK(path);
+  DCHECK(query);
   url::Parsed parsed;
+  const std::string lc_filter = base::ToLowerASCII(filter);
+  const std::string url_scheme = segment_url(filter, &parsed);
 
-  if (segment_url(filter, &parsed) == url::kFileScheme) {
+  if (url_scheme == url::kFileScheme) {
     base::FilePath file_path;
     if (!net::FileURLToFilePath(GURL(filter), &file_path))
       return false;
@@ -254,8 +274,11 @@ bool URLBlacklist::FilterToComponents(SegmentURLCallback segment_url,
     host->clear();
     *match_subdomains = true;
     *port = 0;
-    // Special path when the |filter| is 'file://*'.
-    *path = (filter == "file://*") ? "" : file_path.AsUTF8Unsafe();
+    // Special path when the |filter| is 'file://*' or 'file:*'.
+    if (lc_filter == "file:*" || lc_filter == "file://*")
+      path->clear();
+    else
+      *path = file_path.AsUTF8Unsafe();
 #if defined(FILE_PATH_USES_WIN_SEPARATORS)
     // Separators have to be canonicalized on Windows.
     std::replace(path->begin(), path->end(), '\\', '/');
@@ -264,20 +287,35 @@ bool URLBlacklist::FilterToComponents(SegmentURLCallback segment_url,
     return true;
   }
 
+  // Check if it's a scheme wildcard pattern. We support both versions
+  // (scheme:* and scheme://*) the later being consistent with old filter
+  // definitions.
+  if (lc_filter == url_scheme + ":*" || lc_filter == url_scheme + "://*") {
+    scheme->assign(url_scheme);
+    host->clear();
+    *match_subdomains = true;
+    *port = 0;
+    path->clear();
+    query->clear();
+    return true;
+  }
+
+  // According to documentation host can't be empty.
   if (!parsed.host.is_nonempty())
     return false;
 
   if (parsed.scheme.is_nonempty())
-    scheme->assign(filter, parsed.scheme.begin, parsed.scheme.len);
+    scheme->assign(url_scheme);
   else
     scheme->clear();
 
   host->assign(filter, parsed.host.begin, parsed.host.len);
+  *host = base::ToLowerASCII(*host);
   // Special '*' host, matches all hosts.
   if (*host == "*") {
     host->clear();
     *match_subdomains = true;
-  } else if ((*host)[0] == '.') {
+  } else if (host->at(0) == '.') {
     // A leading dot in the pattern syntax means that we don't want to match
     // subdomains.
     host->erase(0, 1);
@@ -316,12 +354,10 @@ bool URLBlacklist::FilterToComponents(SegmentURLCallback segment_url,
   else
     path->clear();
 
-  if (query) {
-    if (parsed.query.is_nonempty())
-      query->assign(filter, parsed.query.begin, parsed.query.len);
-    else
-      query->clear();
-  }
+  if (parsed.query.is_nonempty())
+    query->assign(filter, parsed.query.begin, parsed.query.len);
+  else
+    query->clear();
 
   return true;
 }
@@ -350,11 +386,11 @@ scoped_refptr<URLMatcherConditionSet> URLBlacklist::CreateConditionSet(
         condition_factory, query, allow, &query_conditions);
   }
 
-  scoped_ptr<URLMatcherSchemeFilter> scheme_filter;
+  std::unique_ptr<URLMatcherSchemeFilter> scheme_filter;
   if (!scheme.empty())
     scheme_filter.reset(new URLMatcherSchemeFilter(scheme));
 
-  scoped_ptr<URLMatcherPortFilter> port_filter;
+  std::unique_ptr<URLMatcherPortFilter> port_filter;
   if (port != 0) {
     std::vector<URLMatcherPortFilter::Range> ranges;
     ranges.push_back(URLMatcherPortFilter::CreateRange(port));
@@ -450,9 +486,9 @@ void URLBlacklistManager::Update() {
   DCHECK(ui_task_runner_->RunsTasksOnCurrentThread());
 
   // The preferences can only be read on the UI thread.
-  scoped_ptr<base::ListValue> block(
+  std::unique_ptr<base::ListValue> block(
       pref_service_->GetList(policy_prefs::kUrlBlacklist)->DeepCopy());
-  scoped_ptr<base::ListValue> allow(
+  std::unique_ptr<base::ListValue> allow(
       pref_service_->GetList(policy_prefs::kUrlWhitelist)->DeepCopy());
 
   // Go through the IO thread to grab a WeakPtr to |this|. This is safe from
@@ -465,8 +501,8 @@ void URLBlacklistManager::Update() {
                                        base::Passed(&allow)));
 }
 
-void URLBlacklistManager::UpdateOnIO(scoped_ptr<base::ListValue> block,
-                                     scoped_ptr<base::ListValue> allow) {
+void URLBlacklistManager::UpdateOnIO(std::unique_ptr<base::ListValue> block,
+                                     std::unique_ptr<base::ListValue> allow) {
   DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
   // The URLBlacklist is built on a worker thread. Once it's ready, it is passed
   // to the URLBlacklistManager on IO.
@@ -481,7 +517,8 @@ void URLBlacklistManager::UpdateOnIO(scoped_ptr<base::ListValue> block,
                  io_weak_ptr_factory_.GetWeakPtr()));
 }
 
-void URLBlacklistManager::SetBlacklist(scoped_ptr<URLBlacklist> blacklist) {
+void URLBlacklistManager::SetBlacklist(
+    std::unique_ptr<URLBlacklist> blacklist) {
   DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
   blacklist_ = std::move(blacklist);
 }
@@ -489,6 +526,12 @@ void URLBlacklistManager::SetBlacklist(scoped_ptr<URLBlacklist> blacklist) {
 bool URLBlacklistManager::IsURLBlocked(const GURL& url) const {
   DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
   return blacklist_->IsURLBlocked(url);
+}
+
+URLBlacklist::URLBlacklistState URLBlacklistManager::GetURLBlacklistState(
+    const GURL& url) const {
+  DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+  return blacklist_->GetURLBlacklistState(url);
 }
 
 bool URLBlacklistManager::ShouldBlockRequestForFrame(const GURL& url,

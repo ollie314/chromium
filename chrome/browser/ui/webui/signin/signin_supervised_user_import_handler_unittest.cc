@@ -17,18 +17,19 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/signin/core/browser/fake_auth_status_provider.h"
+#include "components/sync/api/attachments/attachment_id.h"
+#include "components/sync/api/fake_sync_change_processor.h"
+#include "components/sync/api/sync_error_factory_mock.h"
+#include "components/sync/core/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/protocol/sync.pb.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "content/public/test/test_web_ui.h"
-#include "sync/api/attachments/attachment_id.h"
-#include "sync/api/fake_sync_change_processor.h"
-#include "sync/api/sync_error_factory_mock.h"
-#include "sync/internal_api/public/attachments/attachment_service_proxy_for_test.h"
-#include "sync/protocol/sync.pb.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
 const char kTestGaiaId[] = "test-gaia-id";
+const char kTestEmail[] = "foo@bar.com";
 
 const char kTestWebUIResponse[] = "cr.webUIResponse";
 const char kTestCallbackId[] = "test-callback-id";
@@ -92,7 +93,7 @@ class SigninSupervisedUserImportHandlerTest : public BrowserWithTestWindowTest {
     // Authenticate the test profile.
     fake_signin_manager_ = static_cast<FakeSigninManagerForTesting*>(
         SigninManagerFactory::GetForProfile(profile_));
-    fake_signin_manager_->SetAuthenticatedAccountInfo(kTestGaiaId, kTestGaiaId);
+    fake_signin_manager_->SetAuthenticatedAccountInfo(kTestGaiaId, kTestEmail);
 
     // Add supervised users to the profile.
     SupervisedUserSyncService* sync_service_ =
@@ -174,15 +175,16 @@ TEST_F(SigninSupervisedUserImportHandlerTest, NotAuthenticated) {
 
   // Test the JS -> C++ -> JS callback path.
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(kTestCallbackId));
-  list_args.Append(new base::StringValue(profile()->GetPath().AsUTF16Unsafe()));
+  list_args.AppendString(kTestCallbackId);
+  list_args.AppendString(profile()->GetPath().AsUTF16Unsafe());
   handler()->GetExistingSupervisedUsers(&list_args);
 
   // Expect an error response.
   VerifyResponse(1U, kTestCallbackId, false);
 
-  base::string16 expected_error_message = l10n_util::GetStringUTF16(
-      IDS_PROFILES_CREATE_CUSTODIAN_ACCOUNT_DETAILS_OUT_OF_DATE_ERROR);
+  base::string16 expected_error_message = l10n_util::GetStringFUTF16(
+      IDS_PROFILES_CREATE_CUSTODIAN_ACCOUNT_DETAILS_OUT_OF_DATE_ERROR,
+      base::ASCIIToUTF16(profile()->GetProfileUserName()));
   base::string16 error_message;
   ASSERT_TRUE(web_ui()->call_data()[0]->arg3()->GetAsString(&error_message));
   EXPECT_EQ(expected_error_message, error_message);
@@ -198,15 +200,16 @@ TEST_F(SigninSupervisedUserImportHandlerTest, AuthError) {
 
   // Test the JS -> C++ -> JS callback path.
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(kTestCallbackId));
-  list_args.Append(new base::StringValue(profile()->GetPath().AsUTF16Unsafe()));
+  list_args.AppendString(kTestCallbackId);
+  list_args.AppendString(profile()->GetPath().AsUTF16Unsafe());
   handler()->GetExistingSupervisedUsers(&list_args);
 
   // Expect an error response.
   VerifyResponse(1U, kTestCallbackId, false);
 
-  base::string16 expected_error_message = l10n_util::GetStringUTF16(
-      IDS_PROFILES_CREATE_CUSTODIAN_ACCOUNT_DETAILS_OUT_OF_DATE_ERROR);
+  base::string16 expected_error_message = l10n_util::GetStringFUTF16(
+      IDS_PROFILES_CREATE_CUSTODIAN_ACCOUNT_DETAILS_OUT_OF_DATE_ERROR,
+      base::ASCIIToUTF16(profile()->GetProfileUserName()));
   base::string16 error_message;
   ASSERT_TRUE(web_ui()->call_data()[0]->arg3()->GetAsString(&error_message));
   EXPECT_EQ(expected_error_message, error_message);
@@ -224,8 +227,8 @@ TEST_F(SigninSupervisedUserImportHandlerTest, CustodianIsSupervised) {
 
   // Test the JS -> C++ -> JS callback path.
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(kTestCallbackId));
-  list_args.Append(new base::StringValue(profile_->GetPath().AsUTF16Unsafe()));
+  list_args.AppendString(kTestCallbackId);
+  list_args.AppendString(profile_->GetPath().AsUTF16Unsafe());
   handler()->GetExistingSupervisedUsers(&list_args);
 
   // Expect to do nothing.
@@ -235,8 +238,8 @@ TEST_F(SigninSupervisedUserImportHandlerTest, CustodianIsSupervised) {
 TEST_F(SigninSupervisedUserImportHandlerTest, SendExistingSupervisedUsers) {
   // Test the JS -> C++ -> JS callback path.
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(kTestCallbackId));
-  list_args.Append(new base::StringValue(profile()->GetPath().AsUTF16Unsafe()));
+  list_args.AppendString(kTestCallbackId);
+  list_args.AppendString(profile()->GetPath().AsUTF16Unsafe());
   handler()->GetExistingSupervisedUsers(&list_args);
 
   // Expect a success response.

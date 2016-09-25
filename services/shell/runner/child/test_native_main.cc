@@ -10,12 +10,13 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/process/launch.h"
+#include "base/run_loop.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/process_delegate.h"
-#include "services/shell/public/cpp/shell_client.h"
-#include "services/shell/public/cpp/shell_connection.h"
+#include "services/shell/public/cpp/service.h"
+#include "services/shell/public/cpp/service_context.h"
 #include "services/shell/runner/common/client_util.h"
 #include "services/shell/runner/init.h"
 
@@ -35,7 +36,7 @@ class ProcessDelegate : public mojo::edk::ProcessDelegate {
 
 }  // namespace
 
-int TestNativeMain(shell::ShellClient* shell_client) {
+int TestNativeMain(shell::Service* service) {
   shell::WaitForDebuggerIfNecessary();
 
 #if !defined(OFFICIAL_BUILD)
@@ -57,11 +58,13 @@ int TestNativeMain(shell::ShellClient* shell_client) {
     mojo::edk::SetParentPipeHandleFromCommandLine();
 
     base::MessageLoop loop;
-    shell::ShellConnection impl(shell_client,
-                                shell::GetShellClientRequestFromCommandLine());
-    loop.Run();
+    service->set_context(base::MakeUnique<shell::ServiceContext>(
+        service, shell::GetServiceRequestFromCommandLine()));
+    base::RunLoop().Run();
 
     mojo::edk::ShutdownIPCSupport();
+
+    service->set_context(std::unique_ptr<ServiceContext>());
   }
 
   return 0;

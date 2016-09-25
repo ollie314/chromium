@@ -34,15 +34,12 @@
 #include "url/gurl.h"
 
 namespace base {
-class Histogram;
 class HistogramBase;
-class TimeTicks;
 }  // namespace base
 
 namespace net {
 
 class CookieMonsterDelegate;
-class ParsedCookie;
 
 // The cookie monster is the system for storing and retrieving cookies. It has
 // an in-memory list of all cookies, and synchronizes non-session cookies to an
@@ -140,11 +137,14 @@ class NET_EXPORT CookieMonster : public CookieStore {
   // Only used during unit testing.
   CookieMonster(PersistentCookieStore* store,
                 CookieMonsterDelegate* delegate,
-                int last_access_threshold_milliseconds);
+                base::TimeDelta last_access_threshold);
 
   ~CookieMonster() override;
 
   // Replaces all the cookies by |list|. This method does not flush the backend.
+  // This method does not support setting secure cookies, which need source
+  // URLs.
+  // TODO(mmenke): This method is only used on iOS. Consider removing it.
   void SetAllCookiesAsync(const CookieList& list,
                           const SetCookiesCallback& callback);
 
@@ -490,6 +490,7 @@ class NET_EXPORT CookieMonster : public CookieStore {
                          std::vector<CanonicalCookie*>* cookies);
 
   // Delete any cookies that are equivalent to |ecc| (same path, domain, etc).
+  // |source_url| is the URL that is attempting to set the cookie.
   // If |skip_httponly| is true, httponly cookies will not be deleted.  The
   // return value will be true if |skip_httponly| skipped an httponly cookie or
   // |enforce_strict_secure| is true and the cookie to
@@ -499,6 +500,7 @@ class NET_EXPORT CookieMonster : public CookieStore {
   // NOTE: There should never be more than a single matching equivalent cookie.
   bool DeleteAnyEquivalentCookie(const std::string& key,
                                  const CanonicalCookie& ecc,
+                                 const GURL& source_url,
                                  bool skip_httponly,
                                  bool already_expired,
                                  bool enforce_strict_secure);
@@ -507,6 +509,7 @@ class NET_EXPORT CookieMonster : public CookieStore {
   // cookie in cookies_. Guarantee: all iterators to cookies_ remain valid.
   CookieMap::iterator InternalInsertCookie(const std::string& key,
                                            CanonicalCookie* cc,
+                                           const GURL& source_url,
                                            bool sync_to_store);
 
   // Helper function that sets cookies with more control.
@@ -519,7 +522,9 @@ class NET_EXPORT CookieMonster : public CookieStore {
 
   // Helper function that sets a canonical cookie, deleting equivalents and
   // performing garbage collection.
+  // |source_url| is the URL that's attempting to set the cookie.
   bool SetCanonicalCookie(std::unique_ptr<CanonicalCookie> cc,
+                          const GURL& source_url,
                           const CookieOptions& options);
 
   // Helper function calling SetCanonicalCookie() for all cookies in |list|.
@@ -549,6 +554,8 @@ class NET_EXPORT CookieMonster : public CookieStore {
   // Helper for GarbageCollect(). Deletes up to |purge_goal| cookies with a
   // priority less than or equal to |priority| from |cookies|, while ensuring
   // that at least the |to_protect| most-recent cookies are retained.
+  // |protected_secure_cookies| specifies whether or not secure cookies should
+  // be protected from deletion.
   //
   // |cookies| must be sorted from least-recent to most-recent.
   //
@@ -556,7 +563,8 @@ class NET_EXPORT CookieMonster : public CookieStore {
   size_t PurgeLeastRecentMatches(CookieItVector* cookies,
                                  CookiePriority priority,
                                  size_t to_protect,
-                                 size_t purge_goal);
+                                 size_t purge_goal,
+                                 bool protect_secure_cookies);
 
   // Helper for GarbageCollect(); can be called directly as well.  Deletes all
   // expired cookies in |itpair|.  If |cookie_its| is non-NULL, all the
@@ -566,14 +574,6 @@ class NET_EXPORT CookieMonster : public CookieStore {
   size_t GarbageCollectExpired(const base::Time& current,
                                const CookieMapItPair& itpair,
                                CookieItVector* cookie_its);
-
-  // Helper for GarbageCollect(). Deletes all cookies not marked Secure in
-  // |valid_cookies_its|.  If |cookie_its| is non-NULL, all the Secure cookies
-  // from |itpair| are appended to |cookie_its|.
-  //
-  // Returns the numeber of cookies deleted.
-  size_t GarbageCollectNonSecure(const CookieItVector& valid_cookies,
-                                 CookieItVector* cookie_its);
 
   // Helper for GarbageCollect(). Deletes all cookies in the range specified by
   // [|it_begin|, |it_end|). Returns the number of cookies deleted.

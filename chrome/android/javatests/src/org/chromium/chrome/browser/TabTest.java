@@ -8,8 +8,8 @@ import android.app.Activity;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
@@ -24,6 +24,7 @@ import org.chromium.content.browser.test.util.CriteriaHelper;
 /**
  * Tests for Tab class.
  */
+@RetryOnFailure
 public class TabTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private Tab mTab;
     private CallbackHelper mOnTitleUpdatedHelper;
@@ -83,7 +84,6 @@ public class TabTest extends ChromeActivityTestCaseBase<ChromeActivity> {
      * Note that document mode is explicitly disabled, as the document activity
      * may be fully recreated if its contents is killed while in the background.
      */
-    @CommandLineFlags.Add(ChromeSwitches.DISABLE_DOCUMENT_MODE)
     @SmallTest
     @Feature({"Tab"})
     public void testTabRestoredIfKilledWhileActivityStopped() throws Exception {

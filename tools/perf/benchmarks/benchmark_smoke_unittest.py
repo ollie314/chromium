@@ -15,22 +15,23 @@ import unittest
 
 from telemetry import benchmark as benchmark_module
 from telemetry.core import discover
+from telemetry import decorators
+from telemetry.internal.browser import browser_finder
 from telemetry.testing import options_for_unittests
 from telemetry.testing import progress_reporter
 
+from benchmarks import battor
 from benchmarks import image_decoding
 from benchmarks import indexeddb_perf
 from benchmarks import jetstream
 from benchmarks import kraken
-from benchmarks import memory
 from benchmarks import octane
 from benchmarks import rasterize_and_record_micro
 from benchmarks import repaint
 from benchmarks import spaceport
 from benchmarks import speedometer
-from benchmarks import sunspider
 from benchmarks import text_selection
-from benchmarks import tracing
+from benchmarks import v8_browsing
 
 
 def SmokeTestGenerator(benchmark):
@@ -41,6 +42,7 @@ def SmokeTestGenerator(benchmark):
   # than is usally intended. Instead, if a particular benchmark is failing,
   # disable it in tools/perf/benchmarks/*.
   @benchmark_module.Disabled('chromeos')  # crbug.com/351114
+  @benchmark_module.Disabled('android')  # crbug.com/641934
   def BenchmarkSmokeTest(self):
     # Only measure a single page so that this test cycles reasonably quickly.
     benchmark.options['pageset_repeat'] = 1
@@ -52,7 +54,6 @@ def SmokeTestGenerator(benchmark):
         # pylint: disable=super-on-old-class
         story_set = super(SinglePageBenchmark, self).CreateStorySet(options)
         for story in story_set.stories:
-          story.skip_waits = True
           story_set.stories = [story]
           break
         return story_set
@@ -69,6 +70,11 @@ def SmokeTestGenerator(benchmark):
 
     benchmark.ProcessCommandLineArgs(None, options)
     benchmark_module.ProcessCommandLineArgs(None, options)
+
+    possible_browser = browser_finder.FindBrowser(options)
+    if SinglePageBenchmark.ShouldDisable(possible_browser):
+      self.skipTest('Benchmark %s has ShouldDisable return True' %
+                    SinglePageBenchmark.Name())
 
     self.assertEqual(0, SinglePageBenchmark().Run(options),
                      msg='Failed: %s' % benchmark)
@@ -87,16 +93,18 @@ _BLACK_LIST_TEST_MODULES = {
     speedometer,  # Takes 101 seconds.
     jetstream,  # Take 206 seconds.
     text_selection,  # Always fails on cq bot.
-    memory  # Flaky on bots, crbug.com/513767.
+    kraken,  # Flaky on Android, crbug.com/626174.
+    v8_browsing, # Flaky on Android, crbug.com/628368.
+    battor #Flaky on android, crbug.com/618330.
 }
 
-# Some smoke benchmark tests that run quickly on desktop platform can be very
-# slow on Android. So we create a separate set of black list only for Android.
-_ANDROID_BLACK_LIST_MODULES = {
-    kraken,  # Takes 275 seconds on Android.
-    sunspider,  # Takes 163 seconds on Android.
-    tracing,  # Failed on Android bot, crbug.com/600989.
-}
+
+def MergeDecorators(method, method_attribute, benchmark, benchmark_attribute):
+  # Do set union of attributes to eliminate duplicates.
+  merged_attributes = getattr(method, method_attribute, set()).union(
+      getattr(benchmark, benchmark_attribute, set()))
+  if merged_attributes:
+    setattr(method, method_attribute, merged_attributes)
 
 
 def load_tests(loader, standard_tests, pattern):
@@ -135,21 +143,15 @@ def load_tests(loader, standard_tests, pattern):
     # test from the class. We should probably discover all of the tests
     # in a class, and then throw the ones we don't need away instead.
 
-    # Merge decorators.
-    for attribute in ['_enabled_strings', '_disabled_strings']:
-      # Do set union of attributes to eliminate duplicates.
-      merged_attributes = getattr(method, attribute, set()).union(
-          getattr(benchmark, attribute, set()))
-      if merged_attributes:
-        setattr(method, attribute, merged_attributes)
+    disabled_benchmark_attr = decorators.DisabledAttributeName(benchmark)
+    disabled_method_attr = decorators.DisabledAttributeName(method)
+    enabled_benchmark_attr = decorators.EnabledAttributeName(benchmark)
+    enabled_method_attr = decorators.EnabledAttributeName(method)
 
-    # Disable some tests on android platform only.
-    if sys.modules[benchmark.__module__] in _ANDROID_BLACK_LIST_MODULES:
-      method._disabled_strings.add('android')
-
-    # TODO(bashi): Remove once crrev.com/1266833004 is landed.
-    if benchmark.Name() == 'memory.blink_memory_mobile':
-      method._disabled_strings.add('android')
+    MergeDecorators(method, disabled_method_attr, benchmark,
+                    disabled_benchmark_attr)
+    MergeDecorators(method, enabled_method_attr, benchmark,
+                    enabled_benchmark_attr)
 
     setattr(BenchmarkSmokeTest, benchmark.Name(), method)
 

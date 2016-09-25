@@ -78,13 +78,15 @@ public:
 
     DECLARE_VIRTUAL_TRACE();
 
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
+
     DEFINE_ATTRIBUTE_EVENT_LISTENER(statechange);
 
     // EventTarget
     const AtomicString& interfaceName() const override { return EventTargetNames::MIDIPort; }
     ExecutionContext* getExecutionContext() const final;
 
-    // ActiveScriptWrappable
+    // ScriptWrappable
     bool hasPendingActivity() const final;
 
     // ActiveDOMObject

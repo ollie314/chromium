@@ -30,9 +30,10 @@ public class SnippetsLauncher {
     private static final String TAG = "SnippetsLauncher";
 
     // Task tags for fetching snippets.
-    public static final String TASK_TAG_WIFI_CHARGING = "FetchSnippetsWifiCharging";
     public static final String TASK_TAG_WIFI = "FetchSnippetsWifi";
     public static final String TASK_TAG_FALLBACK = "FetchSnippetsFallback";
+    // TODO(treib): Remove this after M55.
+    private static final String OBSOLETE_TASK_TAG_WIFI_CHARGING = "FetchSnippetsWifiCharging";
 
     // Task tag for re-scheduling the snippet fetching. This is used to support different fetching
     // intervals during different times of day.
@@ -114,7 +115,7 @@ public class SnippetsLauncher {
     private static OneoffTask buildRescheduleTask(Date date) {
         Date now = new Date();
         // Convert from milliseconds to seconds, rounding up.
-        long delaySeconds = (now.getTime() - date.getTime() + 999) / 1000;
+        long delaySeconds = (date.getTime() - now.getTime() + 999) / 1000;
         final long intervalSeconds = 15 * 60;
         return new OneoffTask.Builder()
                 .setService(ChromeBackgroundService.class)
@@ -137,16 +138,14 @@ public class SnippetsLauncher {
     }
 
     @CalledByNative
-    private boolean schedule(long periodWifiChargingSeconds, long periodWifiSeconds,
-            long periodFallbackSeconds, long rescheduleTime) {
+    private boolean schedule(
+            long periodWifiSeconds, long periodFallbackSeconds, long rescheduleTime) {
         if (!mGCMEnabled) return false;
-        Log.d(TAG, "Scheduling: " + periodWifiChargingSeconds + " " + periodWifiSeconds + " "
-                        + periodFallbackSeconds);
+        Log.d(TAG, "Scheduling: " + periodWifiSeconds + " " + periodFallbackSeconds);
         // Google Play Services may not be up to date, if the application was not installed through
         // the Play Store. In this case, scheduling the task will fail silently.
         try {
-            scheduleOrCancelFetchTask(TASK_TAG_WIFI_CHARGING, periodWifiChargingSeconds,
-                    Task.NETWORK_STATE_UNMETERED, true);
+            mScheduler.cancelTask(OBSOLETE_TASK_TAG_WIFI_CHARGING, ChromeBackgroundService.class);
             scheduleOrCancelFetchTask(
                     TASK_TAG_WIFI, periodWifiSeconds, Task.NETWORK_STATE_UNMETERED, false);
             scheduleOrCancelFetchTask(
@@ -169,7 +168,7 @@ public class SnippetsLauncher {
     private boolean unschedule() {
         if (!mGCMEnabled) return false;
         Log.i(TAG, "Unscheduling");
-        return schedule(0, 0, 0, 0);
+        return schedule(0, 0, 0);
     }
 }
 

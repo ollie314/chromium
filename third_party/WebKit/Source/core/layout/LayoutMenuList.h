@@ -39,8 +39,7 @@ public:
     ~LayoutMenuList() override;
 
     HTMLSelectElement* selectElement() const;
-    void setOptionsChanged(bool changed) { m_optionsChanged = changed; }
-    void didSetSelectedIndex(int optionIndex);
+    void didSelectOption(HTMLOptionElement*);
     String text() const;
 
     const char* name() const override { return "LayoutMenuList"; }
@@ -62,6 +61,7 @@ private:
     bool hasControlClip() const override { return true; }
 
     void computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const override;
+    void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const override;
 
     void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
 
@@ -79,21 +79,21 @@ private:
     void createInnerBlock();
     void adjustInnerStyle();
     void setText(const String&);
-    void setTextFromOption(int optionIndex);
-    void updateOptionsWidth();
-    float computeTextWidth(const String&) const;
-    void updateText();
+    void updateInnerBlockHeight();
+    void updateOptionsWidth() const;
     void setIndexToSelectOnCancel(int listIndex);
 
-    void didUpdateActiveOption(int optionIndex);
+    void didUpdateActiveOption(HTMLOptionElement*);
 
     LayoutText* m_buttonText;
     LayoutBlock* m_innerBlock;
 
-    bool m_optionsChanged : 1;
     bool m_isEmpty : 1;
     bool m_hasUpdatedActiveOption : 1;
-    int m_optionsWidth;
+    LayoutUnit m_innerBlockHeight;
+    // m_optionsWidth is calculated and cached on demand.
+    // updateOptionsWidth() should be called before reading them.
+    mutable int m_optionsWidth;
 
     int m_lastActiveIndex;
 

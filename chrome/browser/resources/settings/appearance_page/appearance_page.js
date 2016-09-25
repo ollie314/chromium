@@ -20,13 +20,8 @@ Polymer({
   behaviors: [I18nBehavior],
 
   properties: {
-    /**
-     * The current active route.
-     */
-    currentRoute: {
-      notify: true,
-      type: Object,
-    },
+    /** @private {!settings.AppearanceBrowserProxy} */
+    browserProxy_: Object,
 
     /**
      * Preferences state.
@@ -89,6 +84,7 @@ Polymer({
         {value: 50, name: '50%'},
         {value: 67, name: '67%'},
         {value: 75, name: '75%'},
+        {value: 80, name: '80%'},
         {value: 90, name: '90%'},
         {value: 100, name: '100%'},
         {value: 110, name: '110%'},
@@ -96,6 +92,7 @@ Polymer({
         {value: 150, name: '150%'},
         {value: 175, name: '175%'},
         {value: 200, name: '200%'},
+        {value: 250, name: '250%'},
         {value: 300, name: '300%'},
         {value: 400, name: '400%'},
         {value: 500, name: '500%'},
@@ -104,12 +101,22 @@ Polymer({
 
     /** @private */
     themeSublabel_: String,
+
+    /**
+     * Dictionary defining page visibility.
+     * @type {!AppearancePageVisibility}
+     */
+    pageVisibility: Object,
   },
 
   observers: [
     'themeChanged_(prefs.extensions.theme.id.value)',
     'zoomLevelChanged_(defaultZoomLevel_.value)',
   ],
+
+  created: function() {
+    this.browserProxy_ = settings.AppearanceBrowserProxyImpl.getInstance();
+  },
 
   ready: function() {
     this.$.defaultFontSize.menuOptions = this.fontSizeOptions_;
@@ -123,7 +130,7 @@ Polymer({
   /** @override */
   attached: function() {
     // Query the initial state.
-    cr.sendWithPromise('getResetThemeEnabled').then(
+    this.browserProxy_.getResetThemeEnabled().then(
         this.setResetThemeEnabled.bind(this));
 
     // Set up the change event listener.
@@ -152,7 +159,7 @@ Polymer({
 
   /** @private */
   onCustomizeFontsTap_: function() {
-    this.$.pages.setSubpageChain(['appearance-fonts']);
+    settings.navigateTo(settings.Route.FONTS);
   },
 
   /** @private */
@@ -160,14 +167,19 @@ Polymer({
     window.open(loadTimeData.getString('themesGalleryUrl'));
   },
 
-  /** @private */
-  resetTheme_: function() {
-    chrome.send('resetTheme');
+<if expr="chromeos">
+  /**
+   * ChromeOS only.
+   * @private
+   */
+  openWallpaperManager_: function() {
+    this.browserProxy_.openWallpaperManager();
   },
+</if>
 
   /** @private */
-  showFontsPage_: function() {
-    return this.currentRoute.subpage[0] == 'appearance-fonts';
+  resetTheme_: function() {
+    this.browserProxy_.resetTheme();
   },
 
   /**
@@ -203,4 +215,13 @@ Polymer({
       return;
     chrome.settingsPrivate.setDefaultZoomPercent(percent);
   },
+
+  /**
+   * @param {boolean} bookmarksBarVisible if bookmarks bar option is visible.
+   * @return {string} 'first' if the argument is false or empty otherwise.
+   * @private
+   */
+  getFirst_: function(bookmarksBarVisible) {
+    return !bookmarksBarVisible ? 'first' : '';
+  }
 });

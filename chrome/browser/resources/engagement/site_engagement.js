@@ -7,11 +7,11 @@
 define('main', [
     'mojo/public/js/connection',
     'chrome/browser/ui/webui/engagement/site_engagement.mojom',
-    'content/public/renderer/frame_service_registry',
-], function(connection, siteEngagementMojom, serviceProvider) {
+    'content/public/renderer/frame_interfaces',
+], function(connection, siteEngagementMojom, frameInterfaces) {
   return function() {
     var uiHandler = connection.bindHandleToProxy(
-        serviceProvider.connectToService(
+        frameInterfaces.getInterface(
             siteEngagementMojom.SiteEngagementUIHandler.name),
         siteEngagementMojom.SiteEngagementUIHandler);
 
@@ -51,11 +51,13 @@ define('main', [
      */
     function createRow(info) {
       var originCell = createElementWithClassName('td', 'origin-cell');
-      originCell.textContent = info.origin;
+      originCell.textContent = info.origin.url;
 
       var scoreInput = createElementWithClassName('input', 'score-input');
       scoreInput.addEventListener(
           'change', handleScoreChange.bind(undefined, info.origin));
+      scoreInput.addEventListener('focus', disableAutoupdate);
+      scoreInput.addEventListener('blur', enableAutoupdate);
       scoreInput.value = info.score;
 
       var scoreCell = createElementWithClassName('td', 'score-cell');
@@ -75,6 +77,18 @@ define('main', [
       return row;
     }
 
+    function disableAutoupdate() {
+      if (updateInterval)
+        clearInterval(updateInterval);
+      updateInterval = null;
+    }
+
+    function enableAutoupdate() {
+      if (updateInterval)
+        clearInterval(updateInterval);
+      updateInterval = setInterval(updateEngagementTable, 5000);
+    }
+
     /**
      * Sets the engagement score when a score input is changed. Also resets the
      * update interval.
@@ -83,8 +97,7 @@ define('main', [
      */
     function handleScoreChange(origin, e) {
       uiHandler.setSiteEngagementScoreForOrigin(origin, e.target.value);
-      clearInterval(updateInterval);
-      updateInterval = setInterval(updateEngagementTable, 5000);
+      enableAutoupdate();
     }
 
     /**
@@ -116,7 +129,7 @@ define('main', [
 
       // Compare the hosts of the origin ignoring schemes.
       if (sortKey == 'origin')
-        return new URL(val1).host > new URL(val2).host ? 1 : -1;
+        return new URL(val1.url).host > new URL(val2.url).host ? 1 : -1;
 
       if (sortKey == 'score')
         return val1 - val2;
@@ -150,6 +163,6 @@ define('main', [
     };
 
     updateEngagementTable();
-    updateInterval = setInterval(updateEngagementTable, 5000);
+    enableAutoupdate();
   };
 });

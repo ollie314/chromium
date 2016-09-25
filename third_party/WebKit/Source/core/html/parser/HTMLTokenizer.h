@@ -27,18 +27,21 @@
 #ifndef HTMLTokenizer_h
 #define HTMLTokenizer_h
 
+#include "core/CoreExport.h"
 #include "core/html/parser/HTMLParserOptions.h"
 #include "core/html/parser/HTMLToken.h"
 #include "core/html/parser/InputStreamPreprocessor.h"
 #include "platform/text/SegmentedString.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
-class HTMLTokenizer {
+class CORE_EXPORT HTMLTokenizer {
     WTF_MAKE_NONCOPYABLE(HTMLTokenizer);
     USING_FAST_MALLOC(HTMLTokenizer);
 public:
-    static PassOwnPtr<HTMLTokenizer> create(const HTMLParserOptions& options) { return adoptPtr(new HTMLTokenizer(options)); }
+    static std::unique_ptr<HTMLTokenizer> create(const HTMLParserOptions& options) { return wrapUnique(new HTMLTokenizer(options)); }
     ~HTMLTokenizer();
 
     void reset();

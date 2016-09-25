@@ -10,6 +10,7 @@
 #include "media/base/mime_util.h"
 #include "third_party/WebKit/public/platform/WebMimeRegistry.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationLockType.h"
+#include "third_party/WebKit/public/web/WebFrameSerializerCacheControlPolicy.h"
 
 namespace content {
 

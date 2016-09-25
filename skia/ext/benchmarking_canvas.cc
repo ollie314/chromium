@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
@@ -18,7 +19,6 @@
 #include "third_party/skia/include/core/SkRRect.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/skia/include/core/SkString.h"
-#include "third_party/skia/include/core/SkTLazy.h"
 #include "third_party/skia/include/core/SkTextBlob.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 
@@ -47,14 +47,12 @@ private:
   std::ostringstream oss_;
 };
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(bool b) {
   std::unique_ptr<base::FundamentalValue> val(new base::FundamentalValue(b));
 
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(SkScalar scalar) {
   std::unique_ptr<base::FundamentalValue> val(
       new base::FundamentalValue(scalar));
@@ -62,7 +60,6 @@ std::unique_ptr<base::Value> AsValue(SkScalar scalar) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkSize& size) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
   val->Set("width",  AsValue(size.width()));
@@ -71,7 +68,6 @@ std::unique_ptr<base::Value> AsValue(const SkSize& size) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkPoint& point) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
   val->Set("x", AsValue(point.x()));
@@ -80,7 +76,6 @@ std::unique_ptr<base::Value> AsValue(const SkPoint& point) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkRect& rect) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
   val->Set("left", AsValue(rect.fLeft));
@@ -91,7 +86,6 @@ std::unique_ptr<base::Value> AsValue(const SkRect& rect) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkRRect& rrect) {
   std::unique_ptr<base::DictionaryValue> radii_val(new base::DictionaryValue());
   radii_val->Set("upper-left", AsValue(rrect.radii(SkRRect::kUpperLeft_Corner)));
@@ -106,16 +100,14 @@ std::unique_ptr<base::Value> AsValue(const SkRRect& rrect) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkMatrix& matrix) {
   std::unique_ptr<base::ListValue> val(new base::ListValue());
   for (int i = 0; i < 9; ++i)
-    val->Append(AsValue(matrix[i]).release()); // no scoped_ptr-aware Append() variant
+    val->Append(AsValue(matrix[i]));
 
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(SkColor color) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
   val->SetInteger("a", SkColorGetA(color));
@@ -126,7 +118,6 @@ std::unique_ptr<base::Value> AsValue(SkColor color) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(SkXfermode::Mode mode) {
   std::unique_ptr<base::StringValue> val(
       new base::StringValue(SkXfermode::ModeName(mode)));
@@ -134,7 +125,6 @@ std::unique_ptr<base::Value> AsValue(SkXfermode::Mode mode) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(SkCanvas::PointMode mode) {
   static const char* gModeStrings[] = { "Points", "Lines", "Polygon" };
   DCHECK_LT(static_cast<size_t>(mode), SK_ARRAY_COUNT(gModeStrings));
@@ -145,7 +135,6 @@ std::unique_ptr<base::Value> AsValue(SkCanvas::PointMode mode) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkXfermode& xfermode) {
   SkXfermode::Mode mode;
   if (xfermode.asMode(&mode))
@@ -155,7 +144,6 @@ std::unique_ptr<base::Value> AsValue(const SkXfermode& xfermode) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkColorFilter& filter) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
 
@@ -171,7 +159,7 @@ std::unique_ptr<base::Value> AsValue(const SkColorFilter& filter) {
   if (filter.asColorMatrix(color_matrix)) {
     std::unique_ptr<base::ListValue> color_matrix_val(new base::ListValue());
     for (unsigned i = 0; i < 20; ++i)
-      color_matrix_val->Append(AsValue(color_matrix[i]).release());
+      color_matrix_val->Append(AsValue(color_matrix[i]));
 
     val->Set("color_matrix", std::move(color_matrix_val));
   }
@@ -197,7 +185,6 @@ std::unique_ptr<base::Value> AsValue(const SkColorFilter& filter) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkImageFilter& filter) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
   val->SetInteger("inputs", filter.countInputs());
@@ -211,7 +198,6 @@ std::unique_ptr<base::Value> AsValue(const SkImageFilter& filter) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkPaint& paint) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
   SkPaint default_paint;
@@ -276,7 +262,6 @@ std::unique_ptr<base::Value> AsValue(const SkPaint& paint) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> SaveLayerFlagsAsValue(
     SkCanvas::SaveLayerFlags flags) {
   FlagsBuilder builder('|');
@@ -290,7 +275,6 @@ std::unique_ptr<base::Value> SaveLayerFlagsAsValue(
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(SkRegion::Op op) {
   static const char* gOpStrings[] = { "Difference",
                                       "Intersect",
@@ -304,7 +288,6 @@ std::unique_ptr<base::Value> AsValue(SkRegion::Op op) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkRegion& region) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
   val->Set("bounds", AsValue(SkRect::Make(region.getBounds())));
@@ -312,7 +295,6 @@ std::unique_ptr<base::Value> AsValue(const SkRegion& region) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkBitmap& bitmap) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
   val->Set("size", AsValue(SkSize::Make(bitmap.width(), bitmap.height())));
@@ -320,7 +302,6 @@ std::unique_ptr<base::Value> AsValue(const SkBitmap& bitmap) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkImage& image) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
   val->Set("size", AsValue(SkSize::Make(image.width(), image.height())));
@@ -328,7 +309,6 @@ std::unique_ptr<base::Value> AsValue(const SkImage& image) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkTextBlob& blob) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
   val->Set("bounds", AsValue(blob.bounds()));
@@ -336,7 +316,6 @@ std::unique_ptr<base::Value> AsValue(const SkTextBlob& blob) {
   return std::move(val);
 }
 
-WARN_UNUSED_RESULT
 std::unique_ptr<base::Value> AsValue(const SkPath& path) {
   std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
 
@@ -381,14 +360,14 @@ std::unique_ptr<base::Value> AsValue(const SkPath& path) {
       std::unique_ptr<base::ListValue> pts_val(new base::ListValue());
 
       for (int i = 0; i < gPtsPerVerb[verb]; ++i)
-        pts_val->Append(AsValue(points[i + gPtOffsetPerVerb[verb]]).release());
+        pts_val->Append(AsValue(points[i + gPtOffsetPerVerb[verb]]));
 
       verb_val->Set(gVerbStrings[verb], std::move(pts_val));
 
       if (SkPath::kConic_Verb == verb)
         verb_val->Set("weight", AsValue(iter.conicWeight()));
 
-      verbs_val->Append(verb_val.release());
+      verbs_val->Append(std::move(verb_val));
   }
   val->Set("verbs", std::move(verbs_val));
 
@@ -396,12 +375,11 @@ std::unique_ptr<base::Value> AsValue(const SkPath& path) {
 }
 
 template <typename T>
-WARN_UNUSED_RESULT std::unique_ptr<base::Value> AsListValue(const T array[],
-                                                            size_t count) {
+std::unique_ptr<base::Value> AsListValue(const T array[], size_t count) {
   std::unique_ptr<base::ListValue> val(new base::ListValue());
 
   for (size_t i = 0; i < count; ++i)
-    val->Append(AsValue(array[i]).release());
+    val->Append(AsValue(array[i]));
 
   return std::move(val);
 }
@@ -453,14 +431,13 @@ namespace skia {
 
 class BenchmarkingCanvas::AutoOp {
 public:
+  // AutoOp objects are always scoped within draw call frames,
+  // so the paint is guaranteed to be valid for their lifetime.
   AutoOp(BenchmarkingCanvas* canvas, const char op_name[],
          const SkPaint* paint = nullptr)
       : canvas_(canvas)
       , op_record_(new base::DictionaryValue())
-      , op_params_(new base::ListValue())
-      // AutoOp objects are always scoped within draw call frames,
-      // so the paint is guaranteed to be valid for their lifetime.
-      , paint_(paint) {
+      , op_params_(new base::ListValue()) {
 
     DCHECK(canvas);
     DCHECK(op_name);
@@ -468,15 +445,16 @@ public:
     op_record_->SetString("cmd_string", op_name);
     op_record_->Set("info", op_params_);
 
-    if (paint)
+    if (paint) {
       this->addParam("paint", AsValue(*paint));
+      filtered_paint_ = *paint;
+    }
 
     if (canvas->flags_ & kOverdrawVisualization_Flag) {
       DCHECK(canvas->overdraw_xfermode_);
 
-      paint_ = paint ? filtered_paint_.set(*paint) : filtered_paint_.init();
-      filtered_paint_.get()->setXfermode(canvas->overdraw_xfermode_);
-      filtered_paint_.get()->setAntiAlias(false);
+      filtered_paint_.setXfermode(canvas->overdraw_xfermode_);
+      filtered_paint_.setAntiAlias(false);
     }
 
     start_ticks_ = base::TimeTicks::Now();
@@ -486,26 +464,25 @@ public:
     base::TimeDelta ticks = base::TimeTicks::Now() - start_ticks_;
     op_record_->SetDouble("cmd_time", ticks.InMillisecondsF());
 
-    canvas_->op_records_.Append(op_record_);
+    canvas_->op_records_.Append(std::move(op_record_));
   }
 
   void addParam(const char name[], std::unique_ptr<base::Value> value) {
     std::unique_ptr<base::DictionaryValue> param(new base::DictionaryValue());
     param->Set(name, std::move(value));
 
-    op_params_->Append(param.release());
+    op_params_->Append(std::move(param));
   }
 
-  const SkPaint* paint() const { return paint_; }
+  const SkPaint* paint() const { return &filtered_paint_; }
 
 private:
   BenchmarkingCanvas* canvas_;
-  base::DictionaryValue* op_record_;
+  std::unique_ptr<base::DictionaryValue> op_record_;
   base::ListValue* op_params_;
   base::TimeTicks start_ticks_;
 
-  const SkPaint* paint_;
-  SkTLazy<SkPaint> filtered_paint_;
+  SkPaint filtered_paint_;
 };
 
 BenchmarkingCanvas::BenchmarkingCanvas(SkCanvas* canvas, unsigned flags)

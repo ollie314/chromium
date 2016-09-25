@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/chromeos/logging.h"
 
 namespace policy {
 
@@ -48,8 +48,9 @@ bool RemoteCommandJob::Init(base::TimeTicks now,
     issued_time_ =
         now - base::TimeDelta::FromMilliseconds(command.age_of_command());
   } else {
-    LOG(WARNING) << "No age_of_command provided be server for command "
-                 << unique_id_ << ".";
+    CHROMEOS_SYSLOG(WARNING)
+        << "No age_of_command provided be server for command " << unique_id_
+        << ".";
     // Otherwise, assuming the command was issued just now.
     issued_time_ = now;
   }
@@ -57,6 +58,23 @@ bool RemoteCommandJob::Init(base::TimeTicks now,
   if (!ParseCommandPayload(command.payload()))
     return false;
 
+  switch (command.type()) {
+    case em::RemoteCommand_Type_COMMAND_ECHO_TEST: {
+      CHROMEOS_SYSLOG(WARNING) << "Remote echo test command " << unique_id_
+                               << " initialized.";
+      break;
+    }
+    case em::RemoteCommand_Type_DEVICE_REBOOT: {
+      CHROMEOS_SYSLOG(WARNING) << "Remote reboot command " << unique_id_
+                               << " initialized.";
+      break;
+    }
+    case em::RemoteCommand_Type_DEVICE_SCREENSHOT: {
+      CHROMEOS_SYSLOG(WARNING) << "Remote screenshot command " << unique_id_
+                               << " initialized.";
+      break;
+    }
+  }
   status_ = NOT_STARTED;
   return true;
 }
@@ -65,12 +83,17 @@ bool RemoteCommandJob::Run(base::TimeTicks now,
                            const FinishedCallback& finished_callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (status_ == INVALID)
+  if (status_ == INVALID) {
+    CHROMEOS_SYSLOG(ERROR) << "Remote command " << unique_id_ << " is invalid.";
     return false;
+  }
 
   DCHECK_EQ(NOT_STARTED, status_);
 
   if (IsExpired(now)) {
+    CHROMEOS_SYSLOG(ERROR) << "Remote command " << unique_id_
+                           << " expired (it was issued " << now - issued_time_
+                           << " ago).";
     status_ = EXPIRED;
     return false;
   }
@@ -115,7 +138,7 @@ bool RemoteCommandJob::IsExecutionFinished() const {
   return status_ == SUCCEEDED || status_ == FAILED || status_ == TERMINATED;
 }
 
-scoped_ptr<std::string> RemoteCommandJob::GetResultPayload() const {
+std::unique_ptr<std::string> RemoteCommandJob::GetResultPayload() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(status_ == SUCCEEDED || status_ == FAILED);
 
@@ -142,7 +165,7 @@ void RemoteCommandJob::TerminateImpl() {
 
 void RemoteCommandJob::OnCommandExecutionFinishedWithResult(
     bool succeeded,
-    scoped_ptr<RemoteCommandJob::ResultPayload> result_payload) {
+    std::unique_ptr<RemoteCommandJob::ResultPayload> result_payload) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK_EQ(RUNNING, status_);
   status_ = succeeded ? SUCCEEDED : FAILED;

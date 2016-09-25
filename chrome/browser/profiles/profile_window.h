@@ -57,12 +57,26 @@ void FindOrCreateNewWindowForProfile(
     chrome::startup::IsFirstRun is_first_run,
     bool always_create);
 
+// Opens a Browser for |profile|.
+// If |always_create| is true a window is created even if one already exists.
+// If |is_new_profile| is true a first run window is created.
+// When the browser is opened, |callback| will be run if it isn't null.
+void OpenBrowserWindowForProfile(ProfileManager::CreateCallback callback,
+                                 bool always_create,
+                                 bool is_new_profile,
+                                 Profile* profile,
+                                 Profile::CreateStatus status);
+
+#if !defined(OS_ANDROID)
+// Loads the specified profile given by |path| asynchronously. Once profile is
+// loaded and initialized it runs |callback| if it isn't null.
+void LoadProfileAsync(const base::FilePath& path,
+                      ProfileManager::CreateCallback callback);
+
 // Opens a Browser with the specified profile given by |path|.
 // If |always_create| is true then a new window is created
 // even if a window for that profile already exists. When the browser is
 // opened, |callback| will be run if it isn't null.
-
-#if !defined(OS_ANDROID)
 void SwitchToProfile(const base::FilePath& path,
                      bool always_create,
                      ProfileManager::CreateCallback callback,
@@ -84,11 +98,16 @@ bool HasProfileSwitchTargets(Profile* profile);
 void CreateAndSwitchToNewProfile(ProfileManager::CreateCallback callback,
                                  ProfileMetrics::ProfileAdd metric);
 
-// Closes all browser windows that belong to the guest profile.
+// Closes all browser windows that belong to the guest profile and opens the
+// user manager.
 void CloseGuestProfileWindows();
 
-// Closes all the browser windows for |profile| and opens the user manager.
+// Closes and locks all the browser windows for |profile| and opens the user
+// manager.
 void LockProfile(Profile* profile);
+
+// Close all the browser windows for |profile| and opens the user manager.
+void CloseProfileWindows(Profile* profile);
 
 // Returns whether lock is available to this profile.
 bool IsLockAvailable(Profile* profile);
@@ -110,12 +129,6 @@ void CreateSystemProfileForUserManager(
 // tutorial needs to be shown, and displays the user manager with or without
 // the tutorial.
 void ShowUserManagerMaybeWithTutorial(Profile* profile);
-
-// Enables new profile management preview and shows the user manager tutorial.
-void EnableNewProfileManagementPreview(Profile* profile);
-
-// Disables new profile management preview and attempts to relaunch Chrome.
-void DisableNewProfileManagementPreview(Profile* profile);
 
 // Converts from modes in the avatar menu to modes understood by
 // ProfileChooserView.

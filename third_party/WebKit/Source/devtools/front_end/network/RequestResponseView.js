@@ -45,9 +45,8 @@ WebInspector.RequestResponseView.prototype = {
             return this._sourceView;
 
         var contentProvider = new WebInspector.RequestResponseView.ContentProvider(this.request);
-        var sourceFrame = new WebInspector.ResourceSourceFrame(contentProvider);
-        sourceFrame.setHighlighterType(this.request.resourceType().canonicalMimeType() || this.request.mimeType);
-        this._sourceView = sourceFrame;
+        var highlighterType = this.request.resourceType().canonicalMimeType() || this.request.mimeType;
+        this._sourceView = WebInspector.ResourceSourceFrame.createSearchableView(contentProvider, highlighterType);
         return this._sourceView;
     },
 
@@ -66,7 +65,6 @@ WebInspector.RequestResponseView.prototype = {
             if (!this._emptyWidget) {
                 this._emptyWidget = this._createMessageView(WebInspector.UIString("This request has no response data available."));
                 this._emptyWidget.show(this.element);
-                this.innerView = this._emptyWidget;
             }
         } else {
             if (this._emptyWidget) {
@@ -76,12 +74,10 @@ WebInspector.RequestResponseView.prototype = {
 
             if (this.request.content && this.sourceView) {
                 this.sourceView.show(this.element);
-                this.innerView = this.sourceView;
             } else {
                 if (!this._errorView)
                     this._errorView = this._createMessageView(WebInspector.UIString("Failed to load response data"));
                 this._errorView.show(this.element);
-                this.innerView = this._errorView;
             }
         }
     },

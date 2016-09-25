@@ -29,104 +29,91 @@ WATERFALL = {
 
   'testers': {
     'Win7 Release (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'win',
     },
     'Win7 Debug (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'win',
     },
-    'Win7 Release (ATI)': {
-      'swarming_dimensions': {
-        'gpu': '1002:6779',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
-      'build_config': 'Release',
-      'swarming': True,
-      'os_type': 'win',
-    },
     'Mac 10.10 Release (Intel)': {
-      'swarming_dimensions': {
-        'gpu': '8086:0a2e',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0a2e',
+          'os': 'Mac-10.10'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'mac',
     },
     'Mac 10.10 Debug (Intel)': {
-      'swarming_dimensions': {
-        'gpu': '8086:0a2e',
-        'os': 'Mac-10.10'
-      },
-      'build_config': 'Debug',
-      'swarming': True,
-      'os_type': 'mac',
-    },
-    'Mac Retina Release': {
-      'swarming_dimensions': {
-        'gpu': '10de:0fe9',
-        'hidpi': '1',
-        'os': 'Mac'
-      },
-      'build_config': 'Release',
-      'swarming': True,
-      'os_type': 'mac',
-    },
-    'Mac Retina Debug': {
-      'swarming_dimensions': {
-        'gpu': '10de:0fe9',
-        'hidpi': '1',
-        'os': 'Mac'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0a2e',
+          'os': 'Mac-10.10'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'mac',
     },
     'Mac 10.10 Retina Release (AMD)': {
-      'swarming_dimensions': {
-        'gpu': '1002:6821',
-        'hidpi': '1',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6821',
+          'hidpi': '1',
+          'os': 'Mac'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'mac',
     },
     'Mac 10.10 Retina Debug (AMD)': {
-      'swarming_dimensions': {
-        'gpu': '1002:6821',
-        'hidpi': '1',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6821',
+          'hidpi': '1',
+          'os': 'Mac'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'mac',
     },
     'Linux Release (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Linux'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Linux'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'linux',
     },
     'Linux Debug (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Linux'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Linux'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'linux',
@@ -149,64 +136,82 @@ FYI_WATERFALL = {
 
   'testers': {
     'Win7 Release (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'win',
     },
     'Win7 Debug (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'win',
     },
     'Win8 Release (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Windows-2012ServerR2-SP0'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Windows-2012ServerR2-SP0'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'win',
     },
     'Win8 Debug (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Windows-2012ServerR2-SP0'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Windows-2012ServerR2-SP0'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'win',
     },
     'Win7 Release (ATI)': {
-      'swarming_dimensions': {
-        'gpu': '1002:6779',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          # TODO(kbr): add device PCI ID 6613 once deployed
+          # http://crbug.com/639353
+          'gpu': '1002',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'win',
     },
     'Win7 Debug (ATI)': {
-      'swarming_dimensions': {
-        'gpu': '1002:6779',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          # TODO(kbr): add device PCI ID 6613 once deployed
+          # http://crbug.com/639353
+          'gpu': '1002',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'win',
     },
     'Win7 Release (Intel)': {
-      'swarming_dimensions': {
-        'gpu': '8086:041a',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:041a',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Release',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
@@ -214,10 +219,12 @@ FYI_WATERFALL = {
       'os_type': 'win',
     },
     'Win7 Release (NVIDIA GeForce 730)': {
-      'swarming_dimensions': {
-        'gpu': '10de:0f02',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:0f02',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Release',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
@@ -225,10 +232,12 @@ FYI_WATERFALL = {
       'os_type': 'win',
     },
     'Win7 Release (New Intel)': {
-      'swarming_dimensions': {
-        'gpu': '8086:0412',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0412',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Release',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
@@ -236,57 +245,82 @@ FYI_WATERFALL = {
       'os_type': 'win',
     },
     'Win7 Debug (New Intel)': {
-      'swarming_dimensions': {
-        'gpu': '8086:0412',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0412',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Debug',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
       'swarming': False,
       'os_type': 'win',
     },
+    'Win7 Release (AMD R7 240)': {
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6613',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
+      'build_config': 'Release',
+      # This bot is a one-off and doesn't have similar slaves in the
+      # swarming pool.
+      'swarming': False,
+      'os_type': 'win',
+    },
     'Win7 x64 Release (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Release_x64',
       'swarming': True,
       'os_type': 'win',
     },
     'Win7 x64 Debug (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Debug_x64',
       'swarming': True,
       'os_type': 'win',
     },
     'Mac 10.10 Release (Intel)': {
-      'swarming_dimensions': {
-        'gpu': '8086:0a2e',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0a2e',
+          'os': 'Mac-10.10'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'mac',
     },
     'Mac 10.10 Debug (Intel)': {
-      'swarming_dimensions': {
-        'gpu': '8086:0a2e',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0a2e',
+          'os': 'Mac-10.10'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'mac',
     },
     'Mac 10.10 Release (ATI)': {
-      'swarming_dimensions': {
-        'gpu': '1002:679e',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:679e',
+          'os': 'Mac-10.10'
+        },
+      ],
       'build_config': 'Release',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
@@ -294,10 +328,12 @@ FYI_WATERFALL = {
       'os_type': 'mac',
     },
     'Mac 10.10 Debug (ATI)': {
-      'swarming_dimensions': {
-        'gpu': '1002:679e',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:679e',
+          'os': 'Mac-10.10'
+        },
+      ],
       'build_config': 'Debug',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
@@ -305,59 +341,101 @@ FYI_WATERFALL = {
       'os_type': 'mac',
     },
     'Mac Retina Release': {
-      'swarming_dimensions': {
-        'gpu': '10de:0fe9',
-        'hidpi': '1',
-        'os': 'Mac'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:0fe9',
+          'hidpi': '1',
+          'os': 'Mac'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'mac',
     },
     'Mac Retina Debug': {
-      'swarming_dimensions': {
-        'gpu': '10de:0fe9',
-        'hidpi': '1',
-        'os': 'Mac'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:0fe9',
+          'hidpi': '1',
+          'os': 'Mac'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'mac',
     },
     'Mac 10.10 Retina Release (AMD)': {
-      'swarming_dimensions': {
-        'gpu': '1002:6821',
-        'hidpi': '1',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6821',
+          'hidpi': '1',
+          'os': 'Mac'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'mac',
     },
     'Mac 10.10 Retina Debug (AMD)': {
-      'swarming_dimensions': {
-        'gpu': '1002:6821',
-        'hidpi': '1',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6821',
+          'hidpi': '1',
+          'os': 'Mac'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'mac',
     },
+    'Mac 10.11 Retina Release (AMD)': {
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6821',
+          'hidpi': '1',
+          'os': 'Mac'
+        },
+      ],
+      'build_config': 'Release',
+      # This bot is a one-off for testing purposes.
+      'swarming': False,
+      'os_type': 'mac',
+    },
+    'Mac GPU ASAN Release': {
+      # This bot spawns jobs on multiple GPU types.
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0a2e',
+          'os': 'Mac-10.10'
+        },
+        {
+          'gpu': '1002:6821',
+          'hidpi': '1',
+          'os': 'Mac'
+        },
+      ],
+      'build_config': 'Release',
+      'swarming': True,
+      'os_type': 'mac',
+    },
     'Linux Release (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Linux'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Linux'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'linux',
     },
     'Linux Release (Intel Graphics Stack)': {
-      'swarming_dimensions': {
-        'gpu': '8086:041a',
-        'os': 'Linux'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:041a',
+          'os': 'Linux'
+        },
+      ],
       'build_config': 'Release',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
@@ -365,10 +443,12 @@ FYI_WATERFALL = {
       'os_type': 'linux',
     },
     'Linux Release (ATI)': {
-      'swarming_dimensions': {
-        'gpu': '1002:6779',
-        'os': 'Linux'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6779',
+          'os': 'Linux'
+        },
+      ],
       'build_config': 'Release',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
@@ -376,10 +456,12 @@ FYI_WATERFALL = {
       'os_type': 'linux',
     },
     'Linux Release (NVIDIA GeForce 730)': {
-      'swarming_dimensions': {
-        'gpu': '10de:0f02',
-        'os': 'Linux'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:0f02',
+          'os': 'Linux'
+        },
+      ],
       'build_config': 'Release',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
@@ -387,19 +469,23 @@ FYI_WATERFALL = {
       'os_type': 'linux',
     },
     'Linux Debug (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Linux'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Linux'
+        },
+      ],
       'build_config': 'Debug',
       'swarming': True,
       'os_type': 'linux',
     },
     'Linux Release (New Intel)': {
-      'swarming_dimensions': {
-        'gpu': '8086:0412',
-        'os': 'Linux'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0412',
+          'os': 'Linux'
+        },
+      ],
       'build_config': 'Release',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
@@ -407,15 +493,117 @@ FYI_WATERFALL = {
       'os_type': 'linux',
     },
     'Linux Debug (New Intel)': {
-      'swarming_dimensions': {
-        'gpu': '8086:0412',
-        'os': 'Linux'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0412',
+          'os': 'Linux'
+        },
+      ],
       'build_config': 'Debug',
       # This bot is a one-off and doesn't have similar slaves in the
       # swarming pool.
       'swarming': False,
       'os_type': 'linux',
+    },
+    'Linux Release (AMD R7 240)': {
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6613',
+          'os': 'Linux'
+        },
+      ],
+      'build_config': 'Release',
+      # This bot is a one-off and doesn't have similar slaves in the
+      # swarming pool.
+      'swarming': False,
+      'os_type': 'linux',
+    },
+    'Android Release (Nexus 5)': {
+      'swarming_dimensions': [
+        {
+          # There are no PCI IDs on Android.
+          # This is a hack to get the script working.
+          'gpu': '0000:0000',
+          'os': 'Android'
+        },
+      ],
+      'build_config': 'android-chromium',
+      # This bot is a one-off and doesn't have similar slaves in the
+      # swarming pool.
+      'swarming': False,
+      'os_type': 'android',
+    },
+    'Android Release (Nexus 5X)': {
+      'swarming_dimensions': [
+        {
+          'device_type': 'bullhead',
+          'device_os': 'M',
+          'os': 'Android'
+        },
+      ],
+      'build_config': 'android-chromium',
+      'swarming': True,
+      'os_type': 'android',
+    },
+    'Android Release (Nexus 6)': {
+      'swarming_dimensions': [
+        {
+          # There are no PCI IDs on Android.
+          # This is a hack to get the script working.
+          'gpu': '0000:0000',
+          'os': 'Android'
+        },
+      ],
+      'build_config': 'android-chromium',
+      # This bot is a one-off and doesn't have similar slaves in the
+      # swarming pool.
+      'swarming': False,
+      'os_type': 'android',
+    },
+    'Android Release (Nexus 6P)': {
+      'swarming_dimensions': [
+        {
+          # There are no PCI IDs on Android.
+          # This is a hack to get the script working.
+          'gpu': '0000:0000',
+          'os': 'Android'
+        },
+      ],
+      'build_config': 'android-chromium',
+      # This bot is a one-off and doesn't have similar slaves in the
+      # swarming pool.
+      'swarming': False,
+      'os_type': 'android',
+    },
+    'Android Release (Nexus 9)': {
+      'swarming_dimensions': [
+        {
+          # There are no PCI IDs on Android.
+          # This is a hack to get the script working.
+          'gpu': '0000:0000',
+          'os': 'Android'
+        },
+      ],
+      'build_config': 'android-chromium',
+      # This bot is a one-off and doesn't have similar slaves in the
+      # swarming pool.
+      'swarming': False,
+      'os_type': 'android',
+    },
+    'Android Release (Pixel C)': {
+      'swarming_dimensions': [
+        {
+          # There are no PCI IDs on Android.
+          # This is a hack to get the script working.
+          'gpu': '0000:0000',
+          'os': 'Android'
+        },
+      ],
+      'build_config': 'android-chromium',
+      # This bot is a one-off and doesn't have similar slaves in the
+      # swarming pool.
+      'swarming': False,
+      'os_type': 'android',
     },
 
     # The following "optional" testers don't actually exist on the
@@ -424,57 +612,71 @@ FYI_WATERFALL = {
     # a completely different (redundant) bot specification to handle
     # this.
     'Optional Win7 Release (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'win',
     },
     'Optional Win7 Release (ATI)': {
-      'swarming_dimensions': {
-        'gpu': '1002:6779',
-        'os': 'Windows-2008ServerR2-SP1'
-      },
+      'swarming_dimensions': [
+        {
+          # TODO(kbr): add device PCI ID 6613 once deployed
+          # http://crbug.com/639353
+          'gpu': '1002',
+          'os': 'Windows-2008ServerR2-SP1'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'win',
     },
     'Optional Mac 10.10 Release (Intel)': {
-      'swarming_dimensions': {
-        'gpu': '8086:0a2e',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '8086:0a2e',
+          'os': 'Mac-10.10'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'mac',
     },
     'Optional Mac Retina Release': {
-      'swarming_dimensions': {
-        'gpu': '10de:0fe9',
-        'hidpi': '1',
-        'os': 'Mac'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:0fe9',
+          'hidpi': '1',
+          'os': 'Mac'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'mac',
     },
     'Optional Mac 10.10 Retina Release (AMD)': {
-      'swarming_dimensions': {
-        'gpu': '1002:6821',
-        'hidpi': '1',
-        'os': 'Mac-10.10'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '1002:6821',
+          'hidpi': '1',
+          'os': 'Mac'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'mac',
     },
     'Optional Linux Release (NVIDIA)': {
-      'swarming_dimensions': {
-        'gpu': '10de:104a',
-        'os': 'Linux'
-      },
+      'swarming_dimensions': [
+        {
+          'gpu': '10de:104a',
+          'os': 'Linux'
+        },
+      ],
       'build_config': 'Release',
       'swarming': True,
       'os_type': 'linux',
@@ -512,24 +714,32 @@ COMMON_GTESTS = {
         'run_on_optional': True,
         # Run only on the Win7 and Linux Release NVIDIA 32- and 64-bit bots
         # (and trybots) for the time being, at least until more capacity is
-        # added.
-        'build_configs': ['Release', 'Release_x64'],
+        # added. Also run on the AMD R7 240 bots.
+        # Also run on Nexus 5X swarmed bots.
+        'build_configs': ['Release', 'Release_x64', 'android-chromium'],
         'swarming_dimension_sets': [
           {
             'gpu': '10de:104a',
             'os': 'Windows-2008ServerR2-SP1'
           },
           {
+            'gpu': '1002:6613',
+            'os': 'Windows-2008ServerR2-SP1'
+          },
+          {
             'gpu': '10de:104a',
             'os': 'Linux'
-          }
+          },
+          {
+            'device_type': 'bullhead',
+            'device_os': 'M',
+            'os': 'Android'
+          },
         ],
       },
     ],
-    'swarming': {
+    'desktop_swarming': {
       'shards': 4,
-      'priority_adjustment': 'lower',
-      'expiration': 7200
     }
   },
 
@@ -542,6 +752,7 @@ COMMON_GTESTS = {
         # Run only on the Win7 and Linux Release NVIDIA 32-bit bots
         # (and trybots) for the time being, at least until more capacity is
         # added.
+        # TODO(jmadill): Run on the Win AMD R7 240 bots once they are swarmed.
         'build_configs': ['Release'],
         'swarming_dimension_sets': [
           {
@@ -557,8 +768,6 @@ COMMON_GTESTS = {
     ],
     'swarming': {
       'shards': 12,
-      'priority_adjustment': 'lower',
-      'expiration': 7200
     }
   },
 
@@ -568,14 +777,31 @@ COMMON_GTESTS = {
   'angle_end2end_tests': {
     'tester_configs': [
       {
-        'allow_on_mac_nvidia': True,
+        'allow_on_android': True,
         'fyi_only': True,
         'run_on_optional': True,
       },
     ],
-    'args': ['--use-gpu-in-tests']
+    'disabled_tester_configs': [
+      {
+        'names': [
+          # TODO(ynovikov) Investigate why the test breaks on older devices.
+          'Android Release (Nexus 5)',
+          'Android Release (Nexus 6)',
+          'Android Release (Nexus 9)',
+        ],
+      },
+    ],
+    'desktop_args': ['--use-gpu-in-tests']
   },
-  'angle_unittests': {'args': ['--use-gpu-in-tests']},
+  'angle_unittests': {
+    'tester_configs': [
+      {
+        'allow_on_android': True,
+      }
+    ],
+    'desktop_args': ['--use-gpu-in-tests']
+  },
   # Until the media-only tests are extracted from content_unittests,
   # and audio_unittests and content_unittests can be run on the commit
   # queue with --require-audio-hardware-for-testing, run them only on
@@ -592,20 +818,44 @@ COMMON_GTESTS = {
     ],
     'args': ['--use-gpu-in-tests']
   },
-  'content_gl_tests': {'args': ['--use-gpu-in-tests']},
   # TODO(kbr): content_unittests is killing the Linux GPU swarming
   # bots. crbug.com/582094 . It's not useful now anyway until audio
   # hardware is deployed on the swarming bots, so stop running it
   # everywhere.
   # 'content_unittests': {},
-  'gl_tests': {'args': ['--use-gpu-in-tests']},
-  'gl_unittests': {'args': ['--use-gpu-in-tests']},
+  'gl_tests': {
+    'tester_configs': [
+      {
+        'allow_on_android': True,
+      }
+    ],
+    'disabled_tester_configs': [
+      {
+        'names': [
+          # TODO(kbr): investigate inability to recognize this
+          # configuration in the various tests. crbug.com/624621
+          'Android Release (Pixel C)',
+        ],
+      },
+    ],
+    'desktop_args': ['--use-gpu-in-tests']
+  },
+  'gl_unittests': {
+    'tester_configs': [
+      {
+        'allow_on_android': True,
+      }
+    ],
+    'desktop_args': ['--use-gpu-in-tests']
+  },
   # The gles2_conform_tests are closed-source and deliberately only run
-  # on the FYI waterfall.
+  # on the FYI waterfall and the optional tryservers.
   'gles2_conform_test': {
     'tester_configs': [
       {
         'fyi_only': True,
+        # Run this on the optional tryservers.
+        'run_on_optional': True,
       }
     ],
     'args': ['--use-gpu-in-tests']
@@ -614,7 +864,9 @@ COMMON_GTESTS = {
     'tester_configs': [
       {
         'fyi_only': True,
-        'os_types': ['win']
+        'os_types': ['win'],
+        # Run this on the optional tryservers.
+        'run_on_optional': True,
       }
     ],
     'args': [
@@ -627,7 +879,9 @@ COMMON_GTESTS = {
     'tester_configs': [
       {
         'fyi_only': True,
-        'os_types': ['win']
+        'os_types': ['win'],
+        # Run this on the optional tryservers.
+        'run_on_optional': True,
       }
     ],
     'args': [
@@ -656,30 +910,61 @@ COMMON_GTESTS = {
 
 NON_SWARMED_GTESTS = {
   'tab_capture_end2end_tests': {
+     'swarming': {
+       'can_use_on_swarming_builders': False
+     },
      'test': 'browser_tests',
      'args': [
        '--enable-gpu',
        '--test-launcher-jobs=1',
        '--gtest_filter=CastStreamingApiTestWithPixelOutput.EndToEnd*:' + \
            'TabCaptureApiPixelTest.EndToEnd*'
-     ]
+     ],
+     'swarming': {
+       'can_use_on_swarming_builders': False,
+     },
   }
 }
 
 TELEMETRY_TESTS = {
-  'context_lost': {},
-  'gpu_process_launch_tests': {'target_name': 'gpu_process'},
-  'gpu_rasterization': {},
-  'hardware_accelerated_feature': {},
-  'maps_pixel_test': {
-    'target_name': 'maps',
+  'gpu_process_launch_tests': {
+      'target_name': 'gpu_process',
+      'tester_configs': [
+        {
+          'allow_on_android': True,
+        }
+      ],
+  },
+  'gpu_rasterization': {
     'tester_configs': [
       {
-        'allow_on_mac_nvidia': True,
+        'allow_on_android': True,
       },
     ],
   },
-  'memory_test': {},
+  'hardware_accelerated_feature': {
+    'tester_configs': [
+      {
+        'allow_on_android': True,
+      },
+    ],
+  },
+  'maps_pixel_test': {
+    'target_name': 'maps',
+    'args': [
+      '--os-type',
+      '${os_type}',
+      '--build-revision',
+      '${got_revision}',
+      '--test-machine-name',
+      '${buildername}',
+    ],
+    'tester_configs': [
+      {
+        'allow_on_android': True,
+      },
+    ],
+  },
   'pixel_test': {
     'target_name': 'pixel',
     'args': [
@@ -700,16 +985,41 @@ TELEMETRY_TESTS = {
     ],
     'tester_configs': [
       {
-        'allow_on_mac_nvidia': True,
+        'allow_on_android': True,
       },
     ],
   },
-  'screenshot_sync': {},
-  'trace_test': {},
+  'screenshot_sync': {
+    'tester_configs': [
+      {
+        'allow_on_android': True,
+      },
+    ],
+  },
+  'trace_test': {
+    'tester_configs': [
+      {
+        'allow_on_android': True,
+      },
+    ],
+  },
+}
+
+# These tests use Telemetry's new, simpler, browser_test_runner.
+# Eventually all of the Telemetry based tests above will be ported to
+# this harness, and the old harness will be deleted.
+TELEMETRY_GPU_INTEGRATION_TESTS = {
+  'context_lost': {
+    'tester_configs': [
+      {
+        'allow_on_android': True,
+      },
+    ]
+  },
   'webgl_conformance': {
     'tester_configs': [
       {
-        'allow_on_mac_nvidia': True,
+        'allow_on_android': True,
       },
     ],
   },
@@ -717,8 +1027,8 @@ TELEMETRY_TESTS = {
     'tester_configs': [
       {
         'fyi_only': True,
+        'os_types': ['win'],
         'run_on_optional': True,
-        'os_types': ['win']
       }
     ],
     'target_name': 'webgl_conformance',
@@ -730,8 +1040,8 @@ TELEMETRY_TESTS = {
     'tester_configs': [
       {
         'fyi_only': True,
+        'os_types': ['win'],
         'run_on_optional': True,
-        'os_types': ['win']
       }
     ],
     'disabled_tester_configs': [
@@ -739,7 +1049,9 @@ TELEMETRY_TESTS = {
         'swarming_dimension_sets': [
           # BUG 555545: Disable webgl_conformance_gl_tests on Win/AMD
           {
-            'gpu': '1002:6779',
+            # TODO(kbr): add device PCI ID 6613 once deployed
+            # http://crbug.com/639353
+            'gpu': '1002',
             'os': 'Windows-2008ServerR2-SP1'
           },
           # BUG 590951: Disable webgl_conformance_gl_tests on Win/Intel
@@ -774,7 +1086,9 @@ TELEMETRY_TESTS = {
   'webgl2_conformance_tests': {
     'tester_configs': [
       {
-        'allow_on_mac_nvidia': True,
+         # The WebGL 2.0 conformance tests take over an hour to run on
+         # the Debug bots, which is too long.
+        'build_configs': ['Release', 'Release_x64'],
         'fyi_only': True,
         'run_on_optional': True,
       },
@@ -785,18 +1099,62 @@ TELEMETRY_TESTS = {
           # http://crbug.com/599451: this test is currently too slow
           # to run on x64 in Debug mode. Need to shard the tests.
           'Win7 x64 Debug (NVIDIA)',
-          # http://crbug.com/540543: Linux Intel driver is GL 3.0 and
-          # doesn't support features needed for ES3
-          'Linux Release (New Intel)',
-          'Linux Debug (New Intel)',
         ],
       },
     ],
     'target_name': 'webgl_conformance',
     'args': [
       '--webgl-conformance-version=2.0.0',
-      '--webgl2-only=true',
+      # The current working directory when run via isolate is
+      # out/Debug or out/Release. Reference this file relatively to
+      # it.
+      '--read-abbreviated-json-results-from=' + \
+      '../../content/test/data/gpu/webgl2_conformance_tests_output.json',
     ],
+    'swarming': {
+      # These tests currently take about an hour and fifteen minutes
+      # to run. Split them into roughly 5-minute shards.
+      'shards': 15,
+    },
+  },
+  'webgl2_conformance_angle_tests': {
+    'tester_configs': [
+      {
+         # The WebGL 2.0 conformance tests take over an hour to run on
+         # the Debug bots, which is too long.
+        'build_configs': ['Release'],
+        'fyi_only': True,
+        'run_on_optional': False,
+        # Only run on the NVIDIA Release and New Intel Release Linux bots
+        'swarming_dimension_sets': [
+          {
+            'gpu': '10de:104a',
+            'os': 'Linux'
+          },
+          {
+            'gpu': '8086:0412',
+            'os': 'Linux'
+          },
+        ],
+      },
+    ],
+    'target_name': 'webgl_conformance',
+    'extra_browser_args': [
+      '--use-gl=angle',
+    ],
+    'args': [
+      '--webgl-conformance-version=2.0.0',
+      # The current working directory when run via isolate is
+      # out/Debug or out/Release. Reference this file relatively to
+      # it.
+      '--read-abbreviated-json-results-from=' + \
+      '../../content/test/data/gpu/webgl2_conformance_tests_output.json',
+    ],
+    'swarming': {
+      # These tests currently take about an hour and fifteen minutes
+      # to run. Split them into roughly 5-minute shards.
+      'shards': 15,
+    },
   },
 }
 
@@ -811,16 +1169,13 @@ def substitute_args(tester_config, args):
 
 def matches_swarming_dimensions(tester_config, dimension_sets):
   for dimensions in dimension_sets:
-    if set(dimensions.items()).issubset(
-        tester_config['swarming_dimensions'].items()):
-      return True
+    for cur_dims in tester_config['swarming_dimensions']:
+      if set(dimensions.items()).issubset(cur_dims.items()):
+        return True
   return False
 
-def is_mac_nvidia_retina(tester_config):
-  dims = tester_config['swarming_dimensions']
-  return (dims['gpu'] == '10de:0fe9' and
-          dims['hidpi'] == '1' and
-          dims['os'] == 'Mac')
+def is_android(tester_config):
+  return tester_config['os_type'] == 'android'
 
 def tester_config_matches_tester(tester_name, tester_config, tc, is_fyi,
                                  check_waterfall):
@@ -834,6 +1189,9 @@ def tester_config_matches_tester(tester_name, tester_config, tc, is_fyi,
       return False
 
   if 'names' in tc:
+    # Give priority to matching the tester_name.
+    if tester_name in tc['names']:
+      return True
     if not tester_name in tc['names']:
       return False
   if 'os_types' in tc:
@@ -846,25 +1204,8 @@ def tester_config_matches_tester(tester_name, tester_config, tc, is_fyi,
     if not matches_swarming_dimensions(tester_config,
                                        tc['swarming_dimension_sets']):
       return False
-  # The NVIDIA based MacBook Pro Retinas are oversubscribed and this
-  # is causing severe problems with Chromium's commit queue
-  # (http://crbug.com/572793). As a short-term strategy, run only
-  # critical tests on this configuration; this means removing
-  # everything except the ANGLE end-to-end tests and WebGL 1.0 and 2.0
-  # conformance tests. This also disables all tests on the Debug
-  # NVIDIA bots, because they will effectively lock up some 3 Swarming
-  # bots permanently due to repeatedly launching WebGL 1.0 conformance
-  # tests on the chromium.gpu waterfall, and WebGL 1.0 and 2.0
-  # conformance tests on the chromium.gpu.fyi waterfall.
-  if is_mac_nvidia_retina(tester_config):
-    # Disable all tests on the Debug NVIDIA Retina bots for now. Even
-    # though these aren't part of the highest-volume
-    # mac_chromium_rel_ng tryserver configuration, these tests are
-    # slow, and will lock up a certain number of crucial Swarming
-    # machines essentially permanently.
-    if tester_config['build_config'] == 'Debug':
-      return False
-    if not tc.get('allow_on_mac_nvidia', False):
+  if is_android(tester_config):
+    if not tc.get('allow_on_android', False):
       return False
   return True
 
@@ -884,8 +1225,7 @@ def should_run_on_tester(tester_name, tester_config, test_config, is_fyi):
   else:
     # If tester_configs is unspecified, run nearly all tests by default,
     # but let tester_config_matches_tester filter out any undesired
-    # tests, such as ones that should only run on the Optional bots, or
-    # not run on the NVIDIA Retina MacBook Pros.
+    # tests, such as ones that should only run on the Optional bots.
     return tester_config_matches_tester(tester_name, tester_config, {},
                                         is_fyi, True)
 
@@ -896,6 +1236,9 @@ def generate_gtest(tester_name, tester_config, test, test_config, is_fyi):
   if 'tester_configs' in result:
     # Don't print the tester_configs in the JSON.
     result.pop('tester_configs')
+  if 'disabled_tester_configs' in result:
+    # Don't print the disabled_tester_configs in the JSON.
+    result.pop('disabled_tester_configs')
   if 'test' in result:
     result['name'] = test
   else:
@@ -911,10 +1254,45 @@ def generate_gtest(tester_name, tester_config, test, test_config, is_fyi):
       result['swarming'] = {}
     result['swarming'].update({
       'can_use_on_swarming_builders': True,
-      'dimension_sets': [
-        tester_config['swarming_dimensions']
-      ],
+      'dimension_sets': tester_config['swarming_dimensions']
     })
+    if is_android(tester_config):
+      # Override the isolate target to get rid of any "_apk" suffix
+      # that would be added by the recipes.
+      result['override_isolate_target'] = test
+      # Integrate with the unified logcat system.
+      result['swarming'].update({
+        'cipd_packages': [
+          {
+            'cipd_package': 'infra/tools/luci/logdog/butler/${platform}',
+            'location': 'bin',
+            'revision': 'git_revision:3ff24775a900b675866fbcacf2a8f98a18b2a16a'
+          }
+        ],
+        'output_links': [
+          {
+            'link': [
+              'https://luci-logdog.appspot.com/v/?s',
+              '=android%2Fswarming%2Flogcats%2F',
+              '${TASK_ID}%2F%2B%2Funified_logcats'
+            ],
+            'name': 'shard #${SHARD_INDEX} logcats'
+          }
+        ]
+      })
+  if 'desktop_args' in result:
+    if not is_android(tester_config):
+      if not 'args' in result:
+        result['args'] = []
+      result['args'] += result['desktop_args']
+    # Don't put the desktop args in the JSON.
+    result.pop('desktop_args')
+  if 'desktop_swarming' in result:
+    if not is_android(tester_config):
+      result['swarming'].update(result['desktop_swarming'])
+    # Don't put the desktop_swarming in the JSON.
+    result.pop('desktop_swarming')
+
   # This flag only has an effect on the Linux bots that run tests
   # locally (as opposed to via Swarming), which are only those couple
   # on the chromium.gpu.fyi waterfall. Still, there is no harm in
@@ -923,7 +1301,8 @@ def generate_gtest(tester_name, tester_config, test, test_config, is_fyi):
   return result
 
 def generate_telemetry_test(tester_name, tester_config,
-                            test, test_config, is_fyi):
+                            test, test_config, is_fyi,
+                            use_gpu_integration_test_harness):
   if not should_run_on_tester(tester_name, tester_config, test_config, is_fyi):
     return None
   test_args = ['-v']
@@ -937,6 +1316,9 @@ def generate_telemetry_test(tester_name, tester_config,
   test_args.append('--extra-browser-args=' + extra_browser_args_string)
   if 'args' in test_config:
     test_args.extend(substitute_args(tester_config, test_config['args']))
+  if 'desktop_args' in test_config and not is_android(tester_config):
+    test_args.extend(substitute_args(tester_config,
+                                     test_config['desktop_args']))
   # The step name must end in 'test' or 'tests' in order for the
   # results to automatically show up on the flakiness dashboard.
   # (At least, this was true some time ago.) Continue to use this
@@ -951,21 +1333,25 @@ def generate_telemetry_test(tester_name, tester_config,
     '--show-stdout',
     '--browser=%s' % tester_config['build_config'].lower()
   ]
+  swarming = {
+    # Always say this is true regardless of whether the tester
+    # supports swarming. It doesn't hurt.
+    'can_use_on_swarming_builders': True,
+    'dimension_sets': tester_config['swarming_dimensions']
+  }
+  if 'swarming' in test_config:
+    swarming.update(test_config['swarming'])
   result = {
     'args': prefix_args + test_args,
-    'isolate_name': 'telemetry_gpu_test',
+    'isolate_name': (
+      'telemetry_gpu_integration_test' if use_gpu_integration_test_harness
+      else 'telemetry_gpu_test'),
     'name': step_name,
     'override_compile_targets': [
-      'telemetry_gpu_test_run'
+      ('telemetry_gpu_integration_test_run' if use_gpu_integration_test_harness
+       else 'telemetry_gpu_test_run')
     ],
-    'swarming': {
-      # Always say this is true regardless of whether the tester
-      # supports swarming. It doesn't hurt.
-      'can_use_on_swarming_builders': True,
-      'dimension_sets': [
-        tester_config['swarming_dimensions']
-      ]
-    },
+    'swarming': swarming,
   }
   if 'non_precommit_args' in test_config:
     result['non_precommit_args'] = test_config['non_precommit_args']
@@ -989,11 +1375,13 @@ def generate_gtests(tester_name, tester_config, test_dictionary, is_fyi):
   return gtests
 
 def generate_telemetry_tests(tester_name, tester_config,
-                             test_dictionary, is_fyi):
+                             test_dictionary, is_fyi,
+                             use_gpu_integration_test_harness):
   isolated_scripts = []
   for test_name, test_config in sorted(test_dictionary.iteritems()):
     test = generate_telemetry_test(
-        tester_name, tester_config, test_name, test_config, is_fyi)
+      tester_name, tester_config, test_name, test_config, is_fyi,
+      use_gpu_integration_test_harness)
     if test:
       isolated_scripts.append(test)
   return isolated_scripts
@@ -1005,7 +1393,9 @@ def generate_all_tests(waterfall, is_fyi):
   for name, config in waterfall['testers'].iteritems():
     gtests = generate_gtests(name, config, COMMON_GTESTS, is_fyi)
     isolated_scripts = \
-        generate_telemetry_tests(name, config, TELEMETRY_TESTS, is_fyi)
+      generate_telemetry_tests(name, config, TELEMETRY_TESTS, is_fyi, False) + \
+      generate_telemetry_tests(name, config, TELEMETRY_GPU_INTEGRATION_TESTS,
+                               is_fyi, True)
     tests[name] = {
       'gtest_tests': sorted(gtests, key=lambda x: x['test']),
       'isolated_scripts': sorted(isolated_scripts, key=lambda x: x['name'])

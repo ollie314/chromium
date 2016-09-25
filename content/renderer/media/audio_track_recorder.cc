@@ -11,10 +11,11 @@
 #include "base/macros.h"
 #include "base/stl_util.h"
 #include "content/renderer/media/media_stream_audio_track.h"
-#include "media/audio/audio_parameters.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_converter.h"
 #include "media/base/audio_fifo.h"
+#include "media/base/audio_parameters.h"
+#include "media/base/audio_sample_types.h"
 #include "media/base/bind_to_current_loop.h"
 #include "third_party/opus/src/include/opus.h"
 
@@ -62,7 +63,8 @@ bool DoEncode(OpusEncoder* opus_encoder,
   data_out->resize(kOpusMaxDataBytes);
   const opus_int32 result = opus_encode_float(
       opus_encoder, data_in, num_samples,
-      reinterpret_cast<uint8_t*>(string_as_array(data_out)), kOpusMaxDataBytes);
+      reinterpret_cast<uint8_t*>(base::string_as_array(data_out)),
+      kOpusMaxDataBytes);
 
   if (result > 1) {
     // TODO(ajose): Investigate improving this. http://crbug.com/547918
@@ -74,19 +76,6 @@ bool DoEncode(OpusEncoder* opus_encoder,
   // Otherwise, we have an error.
   DLOG_IF(ERROR, result < 0) << " encode failed: " << opus_strerror(result);
   return false;
-}
-
-// Interleaves |audio_bus| channels() of floats into a single output linear
-// |buffer|.
-// TODO(mcasas) https://crbug.com/580391 use AudioBus::ToInterleavedFloat().
-void ToInterleaved(media::AudioBus* audio_bus, float* buffer) {
-  for (int ch = 0; ch < audio_bus->channels(); ++ch) {
-    const float* src = audio_bus->channel(ch);
-    const float* const src_end = src + audio_bus->frames();
-    float* dest = buffer + ch;
-    for (; src < src_end; ++src, dest += audio_bus->channels())
-      *dest = *src;
-  }
 }
 
 }  // anonymous namespace
@@ -119,7 +108,7 @@ class AudioTrackRecorder::AudioEncoder
 
   // media::AudioConverted::InputCallback implementation.
   double ProvideInput(media::AudioBus* audio_bus,
-                      base::TimeDelta buffer_delay) override;
+                      uint32_t frames_delayed) override;
 
   void DestroyExistingOpusEncoder();
 
@@ -173,7 +162,7 @@ AudioTrackRecorder::AudioEncoder::~AudioEncoder() {
 
 void AudioTrackRecorder::AudioEncoder::OnSetFormat(
     const media::AudioParameters& input_params) {
-  DVLOG(1) << __FUNCTION__;
+  DVLOG(1) << __func__;
   DCHECK(encoder_thread_checker_.CalledOnValidThread());
   if (input_params_.Equals(input_params))
     return;
@@ -240,7 +229,7 @@ void AudioTrackRecorder::AudioEncoder::OnSetFormat(
 void AudioTrackRecorder::AudioEncoder::EncodeAudio(
     std::unique_ptr<media::AudioBus> input_bus,
     const base::TimeTicks& capture_time) {
-  DVLOG(3) << __FUNCTION__ << ", #frames " << input_bus->frames();
+  DVLOG(3) << __func__ << ", #frames " << input_bus->frames();
   DCHECK(encoder_thread_checker_.CalledOnValidThread());
   DCHECK_EQ(input_bus->channels(), input_params_.channels());
   DCHECK(!capture_time.is_null());
@@ -259,7 +248,8 @@ void AudioTrackRecorder::AudioEncoder::EncodeAudio(
     std::unique_ptr<media::AudioBus> audio_bus = media::AudioBus::Create(
         output_params_.channels(), kOpusPreferredFramesPerBuffer);
     converter_->Convert(audio_bus.get());
-    ToInterleaved(audio_bus.get(), buffer_.get());
+    audio_bus->ToInterleaved<media::Float32SampleTypeTraits>(
+        audio_bus->frames(), buffer_.get());
 
     std::unique_ptr<std::string> encoded_data(new std::string());
     if (DoEncode(opus_encoder_, buffer_.get(), kOpusPreferredFramesPerBuffer,
@@ -277,7 +267,7 @@ void AudioTrackRecorder::AudioEncoder::EncodeAudio(
 
 double AudioTrackRecorder::AudioEncoder::ProvideInput(
     media::AudioBus* audio_bus,
-    base::TimeDelta buffer_delay) {
+    uint32_t frames_delayed) {
   fifo_->Consume(audio_bus, 0, audio_bus->frames());
   return 1.0;  // Return volume greater than zero to indicate we have more data.
 }
@@ -305,7 +295,6 @@ AudioTrackRecorder::AudioTrackRecorder(
 
   // Start the |encoder_thread_|. From this point on, |encoder_| should work
   // only on |encoder_thread_|, as enforced by DCHECKs.
-  DCHECK(!encoder_thread_.IsRunning());
   encoder_thread_.Start();
 
   // Connect the source provider to the track as a sink.
@@ -318,7 +307,6 @@ AudioTrackRecorder::~AudioTrackRecorder() {
 }
 
 void AudioTrackRecorder::OnSetFormat(const media::AudioParameters& params) {
-  DCHECK(encoder_thread_.IsRunning());
   // If the source is restarted, might have changed to another capture thread.
   capture_thread_checker_.DetachFromThread();
   DCHECK(capture_thread_checker_.CalledOnValidThread());
@@ -329,7 +317,6 @@ void AudioTrackRecorder::OnSetFormat(const media::AudioParameters& params) {
 
 void AudioTrackRecorder::OnData(const media::AudioBus& audio_bus,
                                 base::TimeTicks capture_time) {
-  DCHECK(encoder_thread_.IsRunning());
   DCHECK(capture_thread_checker_.CalledOnValidThread());
   DCHECK(!capture_time.is_null());
 

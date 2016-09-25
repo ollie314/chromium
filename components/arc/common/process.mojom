@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Next MinVersion: 3
+// Next MinVersion: 6
 
 module arc.mojom;
 
@@ -84,23 +84,35 @@ struct RunningAppProcessInfo {
 
   // Current process state.
   ProcessState process_state;
+
+  // Package names running in the process.
+  [MinVersion=4] array<string>? packages;
+
+  // Whether this app is focused in ARC++ multi-window environment.
+  [MinVersion=5] bool is_focused;
+
+  // Last time the process was active. Milliseconds since boot.
+  // The clock is monotonic (comes from Android System.uptimeMillis()).
+  [MinVersion=5] int64 last_activity_time;
 };
 
 interface ProcessInstance {
   // Requests ARC instance to return the current process list.
-  RequestProcessList() => (array<RunningAppProcessInfo> processes);
+  RequestProcessList@0() => (array<RunningAppProcessInfo> processes);
 
   // Requests ARC instance to kill a process.
   [MinVersion=1]
-  KillProcess(uint32 pid, string reason);
+  KillProcess@1(uint32 pid, string reason);
 
-  // Set oom_score_adj of a process.
+  // Sets oom_score_adj of a process.
   [MinVersion=2]
-  SetOomScoreAdj(uint32 pid, int32 score);
+  DeprecatedSetOomScoreAdj@2(uint32 pid, int32 score);
 
-  // Disable android built-in oom_adj adjustment.
-  // After calling this method, Chrome will take over OOM scores management,
-  // namely oom_score_adj settings.
+  // Disables Android built-in oom_adj adjustment.
   [MinVersion=2]
-  DisableBuiltinOomAdjustment();
+  DeprecatedDisableBuiltinOomAdjustment@3();
+
+  // Disables Android lowmemorykiller.
+  [MinVersion=3]
+  DeprecatedDisableLowMemoryKiller@4();
 };

@@ -7,7 +7,9 @@
 #include <utility>
 
 #include "base/strings/stringprintf.h"
+#include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/mock_cert_verifier.h"
+#include "net/cert/multi_log_ct_verifier.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
@@ -18,8 +20,13 @@
 #include "net/socket/socket_test_util.h"
 #include "net/spdy/spdy_session_pool.h"
 #include "net/ssl/ssl_config_service_defaults.h"
+#include "net/test/gtest_util.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+
+using net::test::IsError;
+using net::test::IsOk;
 
 namespace net {
 
@@ -42,10 +49,11 @@ class HttpNetworkLayerTest : public PlatformTest {
     session_params.host_resolver = &host_resolver_;
     session_params.cert_verifier = cert_verifier_.get();
     session_params.transport_security_state = transport_security_state_.get();
+    session_params.cert_transparency_verifier = &ct_verifier_;
+    session_params.ct_policy_enforcer = &ct_policy_enforcer_;
     session_params.proxy_service = proxy_service_.get();
     session_params.ssl_config_service = ssl_config_service_.get();
-    session_params.http_server_properties =
-        http_server_properties_.GetWeakPtr();
+    session_params.http_server_properties = &http_server_properties_;
     network_session_.reset(new HttpNetworkSession(session_params));
     factory_.reset(new HttpNetworkLayer(network_session_.get()));
   }
@@ -63,16 +71,16 @@ class HttpNetworkLayerTest : public PlatformTest {
 
     std::unique_ptr<HttpTransaction> trans;
     int rv = factory_->CreateTransaction(DEFAULT_PRIORITY, &trans);
-    EXPECT_EQ(OK, rv);
+    EXPECT_THAT(rv, IsOk());
 
-    rv = trans->Start(&request_info, callback.callback(), BoundNetLog());
+    rv = trans->Start(&request_info, callback.callback(), NetLogWithSource());
     if (rv == ERR_IO_PENDING)
       rv = callback.WaitForResult();
-    ASSERT_EQ(OK, rv);
+    ASSERT_THAT(rv, IsOk());
 
     std::string contents;
     rv = ReadTransaction(trans.get(), &contents);
-    EXPECT_EQ(OK, rv);
+    EXPECT_THAT(rv, IsOk());
     EXPECT_EQ(content, contents);
 
     if (!header.empty()) {
@@ -258,6 +266,8 @@ class HttpNetworkLayerTest : public PlatformTest {
   MockHostResolver host_resolver_;
   std::unique_ptr<CertVerifier> cert_verifier_;
   std::unique_ptr<TransportSecurityState> transport_security_state_;
+  MultiLogCTVerifier ct_verifier_;
+  CTPolicyEnforcer ct_policy_enforcer_;
   std::unique_ptr<ProxyService> proxy_service_;
   const scoped_refptr<SSLConfigService> ssl_config_service_;
   std::unique_ptr<HttpNetworkSession> network_session_;
@@ -268,28 +278,28 @@ class HttpNetworkLayerTest : public PlatformTest {
 TEST_F(HttpNetworkLayerTest, CreateAndDestroy) {
   std::unique_ptr<HttpTransaction> trans;
   int rv = factory_->CreateTransaction(DEFAULT_PRIORITY, &trans);
-  EXPECT_EQ(OK, rv);
+  EXPECT_THAT(rv, IsOk());
   EXPECT_TRUE(trans.get() != NULL);
 }
 
 TEST_F(HttpNetworkLayerTest, Suspend) {
   std::unique_ptr<HttpTransaction> trans;
   int rv = factory_->CreateTransaction(DEFAULT_PRIORITY, &trans);
-  EXPECT_EQ(OK, rv);
+  EXPECT_THAT(rv, IsOk());
 
   trans.reset();
 
   factory_->OnSuspend();
 
   rv = factory_->CreateTransaction(DEFAULT_PRIORITY, &trans);
-  EXPECT_EQ(ERR_NETWORK_IO_SUSPENDED, rv);
+  EXPECT_THAT(rv, IsError(ERR_NETWORK_IO_SUSPENDED));
 
   ASSERT_TRUE(trans == NULL);
 
   factory_->OnResume();
 
   rv = factory_->CreateTransaction(DEFAULT_PRIORITY, &trans);
-  EXPECT_EQ(OK, rv);
+  EXPECT_THAT(rv, IsOk());
 }
 
 TEST_F(HttpNetworkLayerTest, GET) {
@@ -319,15 +329,15 @@ TEST_F(HttpNetworkLayerTest, GET) {
 
   std::unique_ptr<HttpTransaction> trans;
   int rv = factory_->CreateTransaction(DEFAULT_PRIORITY, &trans);
-  EXPECT_EQ(OK, rv);
+  EXPECT_THAT(rv, IsOk());
 
-  rv = trans->Start(&request_info, callback.callback(), BoundNetLog());
+  rv = trans->Start(&request_info, callback.callback(), NetLogWithSource());
   rv = callback.GetResult(rv);
-  ASSERT_EQ(OK, rv);
+  ASSERT_THAT(rv, IsOk());
 
   std::string contents;
   rv = ReadTransaction(trans.get(), &contents);
-  EXPECT_EQ(OK, rv);
+  EXPECT_THAT(rv, IsOk());
   EXPECT_EQ("hello world", contents);
 }
 
@@ -358,10 +368,10 @@ TEST_F(HttpNetworkLayerTest, NetworkVerified) {
 
   std::unique_ptr<HttpTransaction> trans;
   int rv = factory_->CreateTransaction(DEFAULT_PRIORITY, &trans);
-  EXPECT_EQ(OK, rv);
+  EXPECT_THAT(rv, IsOk());
 
-  rv = trans->Start(&request_info, callback.callback(), BoundNetLog());
-  ASSERT_EQ(OK, callback.GetResult(rv));
+  rv = trans->Start(&request_info, callback.callback(), NetLogWithSource());
+  ASSERT_THAT(callback.GetResult(rv), IsOk());
 
   EXPECT_TRUE(trans->GetResponseInfo()->network_accessed);
 }
@@ -391,10 +401,10 @@ TEST_F(HttpNetworkLayerTest, NetworkUnVerified) {
 
   std::unique_ptr<HttpTransaction> trans;
   int rv = factory_->CreateTransaction(DEFAULT_PRIORITY, &trans);
-  EXPECT_EQ(OK, rv);
+  EXPECT_THAT(rv, IsOk());
 
-  rv = trans->Start(&request_info, callback.callback(), BoundNetLog());
-  ASSERT_EQ(ERR_CONNECTION_RESET, callback.GetResult(rv));
+  rv = trans->Start(&request_info, callback.callback(), NetLogWithSource());
+  ASSERT_THAT(callback.GetResult(rv), IsError(ERR_CONNECTION_RESET));
 
   // network_accessed is true; the HTTP stack did try to make a connection.
   EXPECT_TRUE(trans->GetResponseInfo()->network_accessed);

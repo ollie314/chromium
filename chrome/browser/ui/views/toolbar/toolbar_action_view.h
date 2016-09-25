@@ -74,7 +74,7 @@ class ToolbarActionView : public views::MenuButton,
       const override;
   bool IsTriggerableEvent(const ui::Event& event) override;
   SkColor GetInkDropBaseColor() const override;
-  bool ShouldShowInkDropHover() const override;
+  bool ShouldShowInkDropHighlight() const override;
 
   // ToolbarActionViewDelegateViews:
   content::WebContents* GetCurrentWebContents() const override;
@@ -92,12 +92,9 @@ class ToolbarActionView : public views::MenuButton,
   // Returns button icon so it can be accessed during tests.
   gfx::ImageSkia GetIconForTest();
 
-  bool wants_to_run_for_testing() const { return wants_to_run_; }
+  bool IsMenuRunningForTesting() const;
 
-  // Set a callback to be called directly before the context menu is shown.
-  // The toolbar action opening the menu will be passed in.
-  static void set_context_menu_callback_for_testing(
-      ContextMenuCallback* callback);
+  bool wants_to_run_for_testing() const { return wants_to_run_; }
 
   views::MenuItemView* menu_for_testing() { return menu_; }
 
@@ -163,8 +160,6 @@ class ToolbarActionView : public views::MenuButton,
 
   // The time the popup was last closed.
   base::TimeTicks popup_closed_time_;
-
-  std::unique_ptr<views::InkDropDelegate> ink_drop_delegate_;
 
   base::WeakPtrFactory<ToolbarActionView> weak_factory_;
 

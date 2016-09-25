@@ -9,13 +9,13 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/navigation_request.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
-#include "content/browser/frame_host/traced_frame_tree_node.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/frame_messages.h"
 #include "content/common/site_isolation_policy.h"
@@ -40,6 +40,10 @@ base::LazyInstance<FrameTreeNodeIdMap> g_frame_tree_node_id_map =
 const double kLoadingProgressNotStarted = 0.0;
 const double kLoadingProgressMinimum = 0.1;
 const double kLoadingProgressDone = 1.0;
+
+void RecordUniqueNameLength(size_t length) {
+  UMA_HISTOGRAM_COUNTS("SessionRestore.FrameUniqueNameLength", length);
+}
 
 }  // namespace
 
@@ -71,16 +75,16 @@ FrameTreeNode* FrameTreeNode::GloballyFindByID(int frame_tree_node_id) {
   return it == nodes->end() ? nullptr : it->second;
 }
 
-FrameTreeNode::FrameTreeNode(
-    FrameTree* frame_tree,
-    Navigator* navigator,
-    RenderFrameHostDelegate* render_frame_delegate,
-    RenderWidgetHostDelegate* render_widget_delegate,
-    RenderFrameHostManager::Delegate* manager_delegate,
-    blink::WebTreeScopeType scope,
-    const std::string& name,
-    const std::string& unique_name,
-    const blink::WebFrameOwnerProperties& frame_owner_properties)
+FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
+                             Navigator* navigator,
+                             RenderFrameHostDelegate* render_frame_delegate,
+                             RenderWidgetHostDelegate* render_widget_delegate,
+                             RenderFrameHostManager::Delegate* manager_delegate,
+                             FrameTreeNode* parent,
+                             blink::WebTreeScopeType scope,
+                             const std::string& name,
+                             const std::string& unique_name,
+                             const FrameOwnerProperties& frame_owner_properties)
     : frame_tree_(frame_tree),
       navigator_(navigator),
       render_manager_(this,
@@ -88,7 +92,7 @@ FrameTreeNode::FrameTreeNode(
                       render_widget_delegate,
                       manager_delegate),
       frame_tree_node_id_(next_frame_tree_node_id_++),
-      parent_(NULL),
+      parent_(parent),
       opener_(nullptr),
       opener_observer_(nullptr),
       has_committed_real_load_(false),
@@ -101,21 +105,21 @@ FrameTreeNode::FrameTreeNode(
           false /* is a potentially trustworthy unique origin */),
       pending_sandbox_flags_(blink::WebSandboxFlags::None),
       frame_owner_properties_(frame_owner_properties),
-      loading_progress_(kLoadingProgressNotStarted) {
+      loading_progress_(kLoadingProgressNotStarted),
+      blame_context_(frame_tree_node_id_, parent) {
   std::pair<FrameTreeNodeIdMap::iterator, bool> result =
       g_frame_tree_node_id_map.Get().insert(
           std::make_pair(frame_tree_node_id_, this));
   CHECK(result.second);
 
-  TRACE_EVENT_OBJECT_CREATED_WITH_ID(
-      "navigation", "FrameTreeNode",
-      TRACE_ID_WITH_SCOPE("FrameTreeNode", frame_tree_node_id_));
-  // Don't TraceSnapshot() until the RenderFrameHostManager is initialized and
-  // calls SetCurrentURL().
+  RecordUniqueNameLength(unique_name.size());
+
+  // Note: this should always be done last in the constructor.
+  blame_context_.Initialize();
 }
 
 FrameTreeNode::~FrameTreeNode() {
-  children_.clear();
+  std::vector<std::unique_ptr<FrameTreeNode>>().swap(children_);
   frame_tree_->FrameRemoved(this);
   FOR_EACH_OBSERVER(Observer, observers_, OnFrameTreeNodeDestroyed(this));
 
@@ -123,10 +127,6 @@ FrameTreeNode::~FrameTreeNode() {
     opener_->RemoveObserver(opener_observer_.get());
 
   g_frame_tree_node_id_map.Get().erase(frame_tree_node_id_);
-
-  TRACE_EVENT_OBJECT_DELETED_WITH_ID(
-      "navigation", "FrameTreeNode",
-      TRACE_ID_WITH_SCOPE("FrameTreeNode", frame_tree_node_id_));
 }
 
 void FrameTreeNode::AddObserver(Observer* observer) {
@@ -146,7 +146,6 @@ FrameTreeNode* FrameTreeNode::AddChild(std::unique_ptr<FrameTreeNode> child,
                                        int frame_routing_id) {
   // Child frame must always be created in the same process as the parent.
   CHECK_EQ(process_id, render_manager_.current_host()->GetProcess()->GetID());
-  child->set_parent(this);
 
   // Initialize the RenderFrameHost for the new node.  We always create child
   // frames in the same SiteInstance as the current frame, and they can swap to
@@ -183,7 +182,7 @@ void FrameTreeNode::RemoveChild(FrameTreeNode* child) {
 
 void FrameTreeNode::ResetForNewProcess() {
   current_frame_host()->set_last_committed_url(GURL());
-  TraceSnapshot();
+  blame_context_.TakeSnapshot();
 
   // Remove child nodes from the tree, then delete them. This destruction
   // operation will notify observers.
@@ -200,7 +199,7 @@ void FrameTreeNode::SetOpener(FrameTreeNode* opener) {
 
   if (opener_) {
     if (!opener_observer_)
-      opener_observer_ = base::WrapUnique(new OpenerDestroyedObserver(this));
+      opener_observer_ = base::MakeUnique<OpenerDestroyedObserver>(this);
     opener_->AddObserver(opener_observer_.get());
   }
 }
@@ -209,7 +208,7 @@ void FrameTreeNode::SetCurrentURL(const GURL& url) {
   if (!has_committed_real_load_ && url != GURL(url::kAboutBlankURL))
     has_committed_real_load_ = true;
   current_frame_host()->set_last_committed_url(url);
-  TraceSnapshot();
+  blame_context_.TakeSnapshot();
 }
 
 void FrameTreeNode::SetCurrentOrigin(
@@ -233,19 +232,38 @@ void FrameTreeNode::SetFrameName(const std::string& name,
     DCHECK_EQ(unique_name, replication_state_.unique_name);
     return;
   }
+
+  if (parent()) {
+    // Non-main frames should have a non-empty unique name.
+    DCHECK(!unique_name.empty());
+  } else {
+    // Unique name of main frames should always stay empty.
+    DCHECK(unique_name.empty());
+  }
+
+  RecordUniqueNameLength(unique_name.size());
   render_manager_.OnDidUpdateName(name, unique_name);
   replication_state_.name = name;
   replication_state_.unique_name = unique_name;
 }
 
-void FrameTreeNode::SetEnforceStrictMixedContentChecking(bool should_enforce) {
-  if (should_enforce ==
-      replication_state_.should_enforce_strict_mixed_content_checking) {
+void FrameTreeNode::AddContentSecurityPolicy(
+    const ContentSecurityPolicyHeader& header) {
+  replication_state_.accumulated_csp_headers.push_back(header);
+  render_manager_.OnDidAddContentSecurityPolicy(header);
+}
+
+void FrameTreeNode::ResetContentSecurityPolicy() {
+  replication_state_.accumulated_csp_headers.clear();
+  render_manager_.OnDidResetContentSecurityPolicy();
+}
+
+void FrameTreeNode::SetInsecureRequestPolicy(
+    blink::WebInsecureRequestPolicy policy) {
+  if (policy == replication_state_.insecure_request_policy)
     return;
-  }
-  render_manager_.OnEnforceStrictMixedContentChecking(should_enforce);
-  replication_state_.should_enforce_strict_mixed_content_checking =
-      should_enforce;
+  render_manager_.OnEnforceInsecureRequestPolicy(policy);
+  replication_state_.insecure_request_policy = policy;
 }
 
 void FrameTreeNode::SetPendingSandboxFlags(
@@ -270,16 +288,11 @@ bool FrameTreeNode::IsDescendantOf(FrameTreeNode* other) const {
 }
 
 FrameTreeNode* FrameTreeNode::PreviousSibling() const {
-  if (!parent_)
-    return nullptr;
+  return GetSibling(-1);
+}
 
-  for (size_t i = 0; i < parent_->child_count(); ++i) {
-    if (parent_->child_at(i) == this)
-      return (i == 0) ? nullptr : parent_->child_at(i - 1);
-  }
-
-  NOTREACHED() << "FrameTreeNode not found in its parent's children.";
-  return nullptr;
+FrameTreeNode* FrameTreeNode::NextSibling() const {
+  return GetSibling(1);
 }
 
 bool FrameTreeNode::IsLoading() const {
@@ -316,6 +329,12 @@ void FrameTreeNode::CreatedNavigationRequest(
     std::unique_ptr<NavigationRequest> navigation_request) {
   CHECK(IsBrowserSideNavigationEnabled());
 
+  // This is never called when navigating to a Javascript URL. For the loading
+  // state, this matches what Blink is doing: Blink doesn't send throbber
+  // notifications for Javascript URLS.
+  DCHECK(!navigation_request->common_params().url.SchemeIs(
+      url::kJavaScriptScheme));
+
   bool was_previously_loading = frame_tree()->IsLoading();
 
   // There's no need to reset the state: there's still an ongoing load, and the
@@ -327,15 +346,9 @@ void FrameTreeNode::CreatedNavigationRequest(
   navigation_request_ = std::move(navigation_request);
   render_manager()->DidCreateNavigationRequest(navigation_request_.get());
 
-  // Force the throbber to start to keep it in sync with what is happening in
-  // the UI. Blink doesn't send throb notifications for JavaScript URLs, so it
-  // is not done here either.
-  if (!navigation_request_->common_params().url.SchemeIs(
-          url::kJavaScriptScheme)) {
-    // TODO(fdegans): Check if this is a same-document navigation and set the
-    // proper argument.
-    DidStartLoading(true, was_previously_loading);
-  }
+  // TODO(fdegans): Check if this is a same-document navigation and set the
+  // proper argument.
+  DidStartLoading(true, was_previously_loading);
 }
 
 void FrameTreeNode::ResetNavigationRequest(bool keep_state) {
@@ -478,13 +491,22 @@ void FrameTreeNode::BeforeUnloadCanceled() {
   }
 }
 
-void FrameTreeNode::TraceSnapshot() const {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  TRACE_EVENT_OBJECT_SNAPSHOT_WITH_ID(
-      "navigation", "FrameTreeNode",
-      TRACE_ID_WITH_SCOPE("FrameTreeNode", frame_tree_node_id_),
-      std::unique_ptr<base::trace_event::ConvertableToTraceFormat>(
-          new TracedFrameTreeNode(*this)));
+FrameTreeNode* FrameTreeNode::GetSibling(int relative_offset) const {
+  if (!parent_ || !parent_->child_count())
+    return nullptr;
+
+  for (size_t i = 0; i < parent_->child_count(); ++i) {
+    if (parent_->child_at(i) == this) {
+      if ((relative_offset < 0 && static_cast<size_t>(-relative_offset) > i) ||
+          i + relative_offset >= parent_->child_count()) {
+        return nullptr;
+      }
+      return parent_->child_at(i + relative_offset);
+    }
+  }
+
+  NOTREACHED() << "FrameTreeNode not found in its parent's children.";
+  return nullptr;
 }
 
 }  // namespace content

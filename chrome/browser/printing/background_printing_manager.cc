@@ -4,7 +4,10 @@
 
 #include "chrome/browser/printing/background_printing_manager.h"
 
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
@@ -58,7 +61,7 @@ BackgroundPrintingManager::~BackgroundPrintingManager() {
   // preview WebContents trying to print). In such a case it will fail to print,
   // but we should at least clean up the observers.
   // TODO(thestig): Handle this case better.
-  STLDeleteValues(&printing_contents_map_);
+  base::STLDeleteValues(&printing_contents_map_);
 }
 
 void BackgroundPrintingManager::OwnPrintPreviewDialog(
@@ -114,7 +117,7 @@ void BackgroundPrintingManager::DeletePreviewContents(
 
   // ... and mortally wound the contents. (Deletion immediately is not a good
   // idea in case this was called from RenderViewGone.)
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, preview_contents);
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, preview_contents);
 }
 
 std::set<content::WebContents*> BackgroundPrintingManager::CurrentContentSet() {
@@ -128,7 +131,7 @@ std::set<content::WebContents*> BackgroundPrintingManager::CurrentContentSet() {
 
 bool BackgroundPrintingManager::HasPrintPreviewDialog(
     WebContents* preview_dialog) {
-  return ContainsKey(printing_contents_map_, preview_dialog);
+  return base::ContainsKey(printing_contents_map_, preview_dialog);
 }
 
 }  // namespace printing

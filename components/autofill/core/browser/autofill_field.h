@@ -14,6 +14,7 @@
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
 #include "components/autofill/core/common/form_field_data.h"
+#include "components/autofill/core/common/signatures_util.h"
 
 namespace autofill {
 
@@ -67,7 +68,10 @@ class AutofillField : public FormFieldData {
 
   // The unique signature of this field, composed of the field name and the html
   // input type in a 32-bit hash.
-  std::string FieldSignature() const;
+  FieldSignature GetFieldSignature() const;
+
+  // Returns the field signature as string.
+  std::string FieldSignatureAsStr() const;
 
   // Returns true if the field type has been determined (without the text in the
   // field).
@@ -90,6 +94,15 @@ class AutofillField : public FormFieldData {
   AutofillUploadContents::Field::PasswordGenerationType generation_type()
       const {
     return generation_type_;
+  }
+
+  void set_form_classifier_outcome(
+      AutofillUploadContents::Field::FormClassifierOutcome outcome) {
+    form_classifier_outcome_ = outcome;
+  }
+  AutofillUploadContents::Field::FormClassifierOutcome form_classifier_outcome()
+      const {
+    return form_classifier_outcome_;
   }
 
   // Set |field_data|'s value to |value|. Uses |field|, |address_language_code|,
@@ -162,6 +175,9 @@ class AutofillField : public FormFieldData {
 
   // The type of password generation event, if it happened.
   AutofillUploadContents::Field::PasswordGenerationType generation_type_;
+
+  // The outcome of HTML parsing based form classifier.
+  AutofillUploadContents::Field::FormClassifierOutcome form_classifier_outcome_;
 
   DISALLOW_COPY_AND_ASSIGN(AutofillField);
 };

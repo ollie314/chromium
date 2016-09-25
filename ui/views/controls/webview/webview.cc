@@ -67,7 +67,8 @@ void WebView::SetWebContents(content::WebContents* replacement) {
     observing_render_process_host_->AddObserver(this);
   }
   // web_contents() now returns |replacement| from here onwards.
-  SetFocusable(!!web_contents());
+  SetFocusBehavior(web_contents() ? FocusBehavior::ALWAYS
+                                  : FocusBehavior::NEVER);
   if (wc_owner_.get() != replacement)
     wc_owner_.reset();
   if (embed_fullscreen_widget_mode_enabled_) {
@@ -284,12 +285,12 @@ void WebView::WebContentsDestroyed() {
   NotifyAccessibilityWebContentsChanged();
 }
 
-void WebView::DidShowFullscreenWidget(int routing_id) {
+void WebView::DidShowFullscreenWidget() {
   if (embed_fullscreen_widget_mode_enabled_)
     ReattachForFullscreenChange(true);
 }
 
-void WebView::DidDestroyFullscreenWidget(int routing_id) {
+void WebView::DidDestroyFullscreenWidget() {
   if (embed_fullscreen_widget_mode_enabled_)
     ReattachForFullscreenChange(false);
 }

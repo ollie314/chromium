@@ -5,17 +5,16 @@
 #include "chrome/browser/ui/webui/options/password_manager_handler.h"
 
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/ui/passwords/password_manager_presenter.h"
+#include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/password_manager/core/browser/mock_password_store.h"
 #include "components/password_manager/core/browser/password_manager_test_utils.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_web_ui.h"
-#include "content/public/test/web_contents_tester.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -25,12 +24,14 @@
 using password_manager::MockPasswordStore;
 
 namespace {
+
 class TestSelectFileDialogFactory final : public ui::SelectFileDialogFactory {
  public:
   TestSelectFileDialogFactory() {}
   ~TestSelectFileDialogFactory() override {}
   ui::SelectFileDialog* Create(ui::SelectFileDialog::Listener* listener,
                                ui::SelectFilePolicy* policy) override {
+    delete policy;  // Ignore the policy, replace it with a test one.
     return new TestSelectFileDialog(listener, new TestSelectFilePolicy);
   }
 
@@ -133,7 +134,8 @@ class MockPasswordManagerPresenter : public PasswordManagerPresenter {
 
 class DummyPasswordManagerHandler : public PasswordUIView {
  public:
-  DummyPasswordManagerHandler() : password_manager_presenter_(this) {
+  explicit DummyPasswordManagerHandler(Profile* profile)
+      : profile_(profile), password_manager_presenter_(this) {
     password_manager_presenter_.Initialize();
   }
   ~DummyPasswordManagerHandler() override {}
@@ -152,7 +154,7 @@ class DummyPasswordManagerHandler : public PasswordUIView {
   gfx::NativeWindow GetNativeWindow() const override;
 #endif
  private:
-  TestingProfile profile_;
+  Profile* profile_;
   PasswordManagerPresenter password_manager_presenter_;
 
   DISALLOW_COPY_AND_ASSIGN(DummyPasswordManagerHandler);
@@ -165,27 +167,33 @@ gfx::NativeWindow DummyPasswordManagerHandler::GetNativeWindow() const {
 #endif
 
 Profile* DummyPasswordManagerHandler::GetProfile() {
-  return &profile_;
+  return profile_;
 }
 
 }  // namespace
 
-class PasswordManagerHandlerTest : public testing::Test {
+class PasswordManagerHandlerTest : public ChromeRenderViewHostTestHarness {
  protected:
-  PasswordManagerHandlerTest() {
-    dummy_handler_.reset(new DummyPasswordManagerHandler());
+  PasswordManagerHandlerTest() {}
+  ~PasswordManagerHandlerTest() override {}
+
+  void SetUp() override {
+    ChromeRenderViewHostTestHarness::SetUp();
+    dummy_handler_.reset(new DummyPasswordManagerHandler(profile()));
     presenter_raw_ = new MockPasswordManagerPresenter(dummy_handler_.get());
-    web_contents_ =
-        content::WebContentsTester::CreateTestWebContents(&profile_, NULL);
-    web_ui_.set_web_contents(web_contents_);
     handler_.reset(new TestPasswordManagerHandler(
         base::WrapUnique(presenter_raw_), &web_ui_));
     handler_->RegisterMessages();
     ui::SelectFileDialog::SetFactory(new TestSelectFileDialogFactory);
     handler_->InitializeHandler();
+    web_ui_.set_web_contents(web_contents());
   }
 
-  ~PasswordManagerHandlerTest() override {}
+  void TearDown() override {
+    handler_.reset();
+    dummy_handler_.reset();
+    ChromeRenderViewHostTestHarness::TearDown();
+  }
 
   void ExportPassword() {
     base::ListValue tmp;
@@ -199,14 +207,10 @@ class PasswordManagerHandlerTest : public testing::Test {
 
   PasswordManagerPresenter* presenter_raw_;
   CallbackTestWebUI web_ui_;
-  content::WebContents* web_contents_;
   std::unique_ptr<DummyPasswordManagerHandler> dummy_handler_;
   std::unique_ptr<TestPasswordManagerHandler> handler_;
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
-  TestingProfile profile_;
-
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerHandlerTest);
 };
 
@@ -216,7 +220,7 @@ MATCHER(IsEmptyPath, "") {
 
 TEST_F(PasswordManagerHandlerTest, PasswordImport) {
   EXPECT_CALL(web_ui_, GetWebContents())
-      .WillRepeatedly(testing::Return(web_contents_));
+      .WillRepeatedly(testing::Return(web_contents()));
   EXPECT_CALL(
       *handler_,
       FileSelected(IsEmptyPath(), 1,

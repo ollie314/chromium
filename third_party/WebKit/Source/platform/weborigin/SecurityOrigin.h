@@ -35,11 +35,12 @@
 #include "wtf/Noncopyable.h"
 #include "wtf/ThreadSafeRefCounted.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
 class KURL;
-class SecurityOriginCache;
+class URLSecurityOriginMap;
 
 class PLATFORM_EXPORT SecurityOrigin : public RefCounted<SecurityOrigin> {
     WTF_MAKE_NONCOPYABLE(SecurityOrigin);
@@ -50,7 +51,7 @@ public:
     static PassRefPtr<SecurityOrigin> createFromString(const String&);
     static PassRefPtr<SecurityOrigin> create(const String& protocol, const String& host, int port);
 
-    static void setCache(SecurityOriginCache*);
+    static void setMap(URLSecurityOriginMap*);
 
     // Some URL schemes use nested URLs for their security context. For example,
     // filesystem URLs look like the following:
@@ -251,8 +252,8 @@ public:
         bool m_canLoadLocalResources;
         bool m_blockLocalAccessFromLocalOrigin;
     };
-    PassOwnPtr<PrivilegeData> createPrivilegeData() const;
-    void transferPrivilegesFrom(PassOwnPtr<PrivilegeData>);
+    std::unique_ptr<PrivilegeData> createPrivilegeData() const;
+    void transferPrivilegesFrom(std::unique_ptr<PrivilegeData>);
 
     void setUniqueOriginIsPotentiallyTrustworthy(bool isUniqueOriginPotentiallyTrustworthy);
 
@@ -271,7 +272,7 @@ private:
     void buildRawString(StringBuilder&, bool includeSuborigin) const;
 
     String toRawStringIgnoreSuborigin() const;
-    static bool deserializeSuboriginAndHost(const String&, String&, String&);
+    static bool deserializeSuboriginAndProtocolAndHost(const String&, const String&, String&, String&, String&);
 
     String m_protocol;
     String m_host;

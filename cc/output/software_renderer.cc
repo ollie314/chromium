@@ -8,11 +8,11 @@
 #include "base/trace_event/trace_event.h"
 #include "cc/base/math_util.h"
 #include "cc/output/compositor_frame.h"
-#include "cc/output/compositor_frame_ack.h"
 #include "cc/output/compositor_frame_metadata.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/output/output_surface.h"
 #include "cc/output/render_surface_filters.h"
+#include "cc/output/renderer_settings.h"
 #include "cc/output/software_output_device.h"
 #include "cc/quads/debug_border_draw_quad.h"
 #include "cc/quads/picture_draw_quad.h"
@@ -20,6 +20,7 @@
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/quads/tile_draw_quad.h"
+#include "cc/resources/scoped_resource.h"
 #include "skia/ext/opacity_filter_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -52,42 +53,17 @@ bool IsScaleAndIntegerTranslate(const SkMatrix& matrix) {
 
 }  // anonymous namespace
 
-std::unique_ptr<SoftwareRenderer> SoftwareRenderer::Create(
-    RendererClient* client,
-    const RendererSettings* settings,
-    OutputSurface* output_surface,
-    ResourceProvider* resource_provider) {
-  return base::WrapUnique(new SoftwareRenderer(client, settings, output_surface,
-                                               resource_provider));
-}
-
-SoftwareRenderer::SoftwareRenderer(RendererClient* client,
-                                   const RendererSettings* settings,
+SoftwareRenderer::SoftwareRenderer(const RendererSettings* settings,
                                    OutputSurface* output_surface,
                                    ResourceProvider* resource_provider)
-    : DirectRenderer(client, settings, output_surface, resource_provider),
-      is_scissor_enabled_(false),
-      is_backbuffer_discarded_(false),
-      output_device_(output_surface->software_device()),
-      current_canvas_(NULL) {
-  if (resource_provider_) {
-    capabilities_.max_texture_size = resource_provider_->max_texture_size();
-    capabilities_.best_texture_format =
-        resource_provider_->best_texture_format();
-  }
-  // The updater can access bitmaps while the SoftwareRenderer is using them.
-  capabilities_.allow_partial_texture_updates = true;
-  capabilities_.using_partial_swap = true;
-
-  capabilities_.using_shared_memory_resources = true;
-
-  capabilities_.allow_rasterize_on_demand = true;
+    : DirectRenderer(settings, output_surface, resource_provider),
+      output_device_(output_surface->software_device()) {
 }
 
 SoftwareRenderer::~SoftwareRenderer() {}
 
-const RendererCapabilitiesImpl& SoftwareRenderer::Capabilities() const {
-  return capabilities_;
+bool SoftwareRenderer::CanPartialSwap() {
+  return true;
 }
 
 void SoftwareRenderer::BeginDrawingFrame(DrawingFrame* frame) {
@@ -98,18 +74,19 @@ void SoftwareRenderer::BeginDrawingFrame(DrawingFrame* frame) {
 void SoftwareRenderer::FinishDrawingFrame(DrawingFrame* frame) {
   TRACE_EVENT0("cc", "SoftwareRenderer::FinishDrawingFrame");
   current_framebuffer_lock_ = nullptr;
-  current_framebuffer_canvas_.clear();
-  current_canvas_ = NULL;
-  root_canvas_ = NULL;
+  current_framebuffer_canvas_.reset();
+  current_canvas_ = nullptr;
+  root_canvas_ = nullptr;
 
   output_device_->EndPaint();
 }
 
-void SoftwareRenderer::SwapBuffers(const CompositorFrameMetadata& metadata) {
+void SoftwareRenderer::SwapBuffers(CompositorFrameMetadata metadata) {
+  DCHECK(visible_);
   TRACE_EVENT0("cc,benchmark", "SoftwareRenderer::SwapBuffers");
   CompositorFrame compositor_frame;
-  compositor_frame.metadata = metadata;
-  output_surface_->SwapBuffers(&compositor_frame);
+  compositor_frame.metadata = std::move(metadata);
+  output_surface_->SwapBuffers(std::move(compositor_frame));
 }
 
 bool SoftwareRenderer::FlippedFramebuffer(const DrawingFrame* frame) const {
@@ -133,12 +110,10 @@ void SoftwareRenderer::EnsureScissorTestDisabled() {
   SetClipRect(gfx::Rect(size.width(), size.height()));
 }
 
-void SoftwareRenderer::Finish() {}
-
 void SoftwareRenderer::BindFramebufferToOutputSurface(DrawingFrame* frame) {
   DCHECK(!output_surface_->HasExternalStencilTest());
   current_framebuffer_lock_ = nullptr;
-  current_framebuffer_canvas_.clear();
+  current_framebuffer_canvas_.reset();
   current_canvas_ = root_canvas_;
 }
 
@@ -151,10 +126,10 @@ bool SoftwareRenderer::BindFramebufferToTexture(
   // same texture again.
   current_framebuffer_lock_ = nullptr;
   current_framebuffer_lock_ =
-      base::WrapUnique(new ResourceProvider::ScopedWriteLockSoftware(
-          resource_provider_, texture->id()));
+      base::MakeUnique<ResourceProvider::ScopedWriteLockSoftware>(
+          resource_provider_, texture->id());
   current_framebuffer_canvas_ =
-      skia::AdoptRef(new SkCanvas(current_framebuffer_lock_->sk_bitmap()));
+      sk_make_sp<SkCanvas>(current_framebuffer_lock_->sk_bitmap());
   current_canvas_ = current_framebuffer_canvas_.get();
   return true;
 }
@@ -317,7 +292,6 @@ void SoftwareRenderer::DoDrawQuad(DrawingFrame* frame,
       NOTREACHED();
       break;
     case DrawQuad::INVALID:
-    case DrawQuad::IO_SURFACE_CONTENT:
     case DrawQuad::YUV_VIDEO_CONTENT:
     case DrawQuad::STREAM_VIDEO_CONTENT:
       DrawUnsupportedQuad(frame, quad);
@@ -363,12 +337,19 @@ void SoftwareRenderer::DrawPictureQuad(const DrawingFrame* frame,
   const bool needs_transparency =
       SkScalarRoundToInt(quad->shared_quad_state->opacity * 255) < 255;
   const bool disable_image_filtering =
-      frame->disable_picture_quad_image_filtering || quad->nearest_neighbor;
+      disable_picture_quad_image_filtering_ || quad->nearest_neighbor;
 
   TRACE_EVENT0("cc", "SoftwareRenderer::DrawPictureQuad");
 
   RasterSource::PlaybackSettings playback_settings;
   playback_settings.playback_to_shared_canvas = true;
+  // Indicates whether content rasterization should happen through an
+  // ImageHijackCanvas, which causes image decodes to be managed by an
+  // ImageDecodeController. PictureDrawQuads are used for resourceless software
+  // draws, while a GPU ImageDecodeController may be in use by the compositor
+  // providing the RasterSource. So we disable the image hijack canvas to avoid
+  // trying to use the GPU ImageDecodeController while doing a software draw.
+  playback_settings.use_image_hijack_canvas = false;
   if (needs_transparency || disable_image_filtering) {
     // TODO(aelias): This isn't correct in all cases. We should detect these
     // cases and fall back to a persistent bitmap backing
@@ -408,15 +389,14 @@ void SoftwareRenderer::DrawTextureQuad(const DrawingFrame* frame,
   }
 
   // TODO(skaslev): Add support for non-premultiplied alpha.
-  ResourceProvider::ScopedReadLockSoftware lock(resource_provider_,
-                                                quad->resource_id());
+  ResourceProvider::ScopedReadLockSkImage lock(resource_provider_,
+                                               quad->resource_id());
   if (!lock.valid())
     return;
-  const SkBitmap* bitmap = lock.sk_bitmap();
-  gfx::RectF uv_rect = gfx::ScaleRect(gfx::BoundingRect(quad->uv_top_left,
-                                                        quad->uv_bottom_right),
-                                      bitmap->width(),
-                                      bitmap->height());
+  const SkImage* image = lock.sk_image();
+  gfx::RectF uv_rect = gfx::ScaleRect(
+      gfx::BoundingRect(quad->uv_top_left, quad->uv_bottom_right),
+      image->width(), image->height());
   gfx::RectF visible_uv_rect = MathUtil::ScaleRectProportional(
       uv_rect, gfx::RectF(quad->rect), gfx::RectF(quad->visible_rect));
   SkRect sk_uv_rect = gfx::RectFToSkRect(visible_uv_rect);
@@ -427,8 +407,8 @@ void SoftwareRenderer::DrawTextureQuad(const DrawingFrame* frame,
   if (quad->y_flipped)
     current_canvas_->scale(1, -1);
 
-  bool blend_background = quad->background_color != SK_ColorTRANSPARENT &&
-                          !bitmap->isOpaque();
+  bool blend_background =
+      quad->background_color != SK_ColorTRANSPARENT && !image->isOpaque();
   bool needs_layer = blend_background && (current_paint_.getAlpha() != 0xFF);
   if (needs_layer) {
     current_canvas_->saveLayerAlpha(&quad_rect, current_paint_.getAlpha());
@@ -441,8 +421,7 @@ void SoftwareRenderer::DrawTextureQuad(const DrawingFrame* frame,
   }
   current_paint_.setFilterQuality(
       quad->nearest_neighbor ? kNone_SkFilterQuality : kLow_SkFilterQuality);
-  current_canvas_->drawBitmapRect(*bitmap, sk_uv_rect, quad_rect,
-                                  &current_paint_);
+  current_canvas_->drawImageRect(image, sk_uv_rect, quad_rect, &current_paint_);
   if (needs_layer)
     current_canvas_->restore();
 }
@@ -454,8 +433,8 @@ void SoftwareRenderer::DrawTileQuad(const DrawingFrame* frame,
   DCHECK(resource_provider_);
   DCHECK(IsSoftwareResource(quad->resource_id()));
 
-  ResourceProvider::ScopedReadLockSoftware lock(resource_provider_,
-                                                quad->resource_id());
+  ResourceProvider::ScopedReadLockSkImage lock(resource_provider_,
+                                               quad->resource_id());
   if (!lock.valid())
     return;
 
@@ -468,9 +447,9 @@ void SoftwareRenderer::DrawTileQuad(const DrawingFrame* frame,
   SkRect uv_rect = gfx::RectFToSkRect(visible_tex_coord_rect);
   current_paint_.setFilterQuality(
       quad->nearest_neighbor ? kNone_SkFilterQuality : kLow_SkFilterQuality);
-  current_canvas_->drawBitmapRect(*lock.sk_bitmap(), uv_rect,
-                                  gfx::RectFToSkRect(visible_quad_vertex_rect),
-                                  &current_paint_);
+  current_canvas_->drawImageRect(lock.sk_image(), uv_rect,
+                                 gfx::RectFToSkRect(visible_quad_vertex_rect),
+                                 &current_paint_);
 }
 
 void SoftwareRenderer::DrawRenderPassQuad(const DrawingFrame* frame,
@@ -492,20 +471,35 @@ void SoftwareRenderer::DrawRenderPassQuad(const DrawingFrame* frame,
                                       gfx::RectF(quad->visible_rect)));
   SkRect content_rect = SkRect::MakeWH(quad->rect.width(), quad->rect.height());
 
+  const SkBitmap* content = lock.sk_bitmap();
+
+  sk_sp<SkImage> filter_image;
+  if (!quad->filters.IsEmpty()) {
+    sk_sp<SkImageFilter> filter = RenderSurfaceFilters::BuildImageFilter(
+        quad->filters, gfx::SizeF(content_texture->size()));
+    if (filter) {
+      SkIRect result_rect;
+      // TODO(ajuma): Apply the filter in the same pass as the content where
+      // possible (e.g. when there's no origin offset). See crbug.com/308201.
+      filter_image =
+          ApplyImageFilter(filter.get(), quad, *content, &result_rect);
+      if (result_rect.isEmpty()) {
+        return;
+      }
+      if (filter_image) {
+        gfx::RectF rect = gfx::SkRectToRectF(SkRect::Make(result_rect));
+        dest_rect = dest_visible_rect =
+            gfx::RectFToSkRect(MathUtil::ScaleRectProportional(
+                QuadVertexRect(), gfx::RectF(quad->rect), rect));
+        content_rect =
+            SkRect::MakeWH(result_rect.width(), result_rect.height());
+      }
+    }
+  }
+
   SkMatrix content_mat;
   content_mat.setRectToRect(content_rect, dest_rect,
                             SkMatrix::kFill_ScaleToFit);
-
-  const SkBitmap* content = lock.sk_bitmap();
-
-  skia::RefPtr<SkImage> filter_image;
-  if (!quad->filters.IsEmpty()) {
-    skia::RefPtr<SkImageFilter> filter = RenderSurfaceFilters::BuildImageFilter(
-        quad->filters, gfx::SizeF(content_texture->size()));
-    // TODO(ajuma): Apply the filter in the same pass as the content where
-    // possible (e.g. when there's no origin offset). See crbug.com/308201.
-    filter_image = ApplyImageFilter(filter.get(), quad, content);
-  }
 
   sk_sp<SkShader> shader;
   if (!filter_image) {
@@ -590,31 +584,11 @@ void SoftwareRenderer::CopyCurrentRenderPassToBitmap(
   request->SendBitmapResult(std::move(bitmap));
 }
 
-void SoftwareRenderer::DiscardBackbuffer() {
-  if (is_backbuffer_discarded_)
-    return;
-
-  output_surface_->DiscardBackbuffer();
-
-  is_backbuffer_discarded_ = true;
-
-  // Damage tracker needs a full reset every time framebuffer is discarded.
-  client_->SetFullRootLayerDamage();
-}
-
-void SoftwareRenderer::EnsureBackbuffer() {
-  if (!is_backbuffer_discarded_)
-    return;
-
-  output_surface_->EnsureBackbuffer();
-  is_backbuffer_discarded_ = false;
-}
-
 void SoftwareRenderer::DidChangeVisibility() {
-  if (visible())
-    EnsureBackbuffer();
+  if (visible_)
+    output_surface_->EnsureBackbuffer();
   else
-    DiscardBackbuffer();
+    output_surface_->DiscardBackbuffer();
 }
 
 bool SoftwareRenderer::ShouldApplyBackgroundFilters(
@@ -628,27 +602,47 @@ bool SoftwareRenderer::ShouldApplyBackgroundFilters(
   return true;
 }
 
-skia::RefPtr<SkImage> SoftwareRenderer::ApplyImageFilter(
+// If non-null, auto_bounds will be filled with the automatically-computed
+// destination bounds. If null, the output will be the same size as the
+// input bitmap.
+sk_sp<SkImage> SoftwareRenderer::ApplyImageFilter(
     SkImageFilter* filter,
     const RenderPassDrawQuad* quad,
-    const SkBitmap* to_filter) const {
+    const SkBitmap& to_filter,
+    SkIRect* auto_bounds) const {
   if (!filter)
     return nullptr;
 
+  SkMatrix local_matrix;
+  local_matrix.setTranslate(quad->filters_origin.x(), quad->filters_origin.y());
+  local_matrix.postScale(quad->filters_scale.x(), quad->filters_scale.y());
+  SkIRect dst_rect;
+  if (auto_bounds) {
+    dst_rect =
+        filter->filterBounds(gfx::RectToSkIRect(quad->rect), local_matrix,
+                             SkImageFilter::kForward_MapDirection);
+    *auto_bounds = dst_rect;
+  } else {
+    dst_rect = to_filter.bounds();
+  }
+
   SkImageInfo dst_info =
-      SkImageInfo::MakeN32Premul(to_filter->width(), to_filter->height());
+      SkImageInfo::MakeN32Premul(dst_rect.width(), dst_rect.height());
   sk_sp<SkSurface> surface = SkSurface::MakeRaster(dst_info);
 
-  SkMatrix localM;
-  localM.setTranslate(SkIntToScalar(-quad->rect.origin().x()),
-                      SkIntToScalar(-quad->rect.origin().y()));
-  localM.preScale(quad->filters_scale.x(), quad->filters_scale.y());
+  if (!surface) {
+    return nullptr;
+  }
 
   SkPaint paint;
-  paint.setImageFilter(filter->makeWithLocalMatrix(localM));
-  surface->getCanvas()->drawBitmap(*to_filter, 0, 0, &paint);
+  // Treat subnormal float values as zero for performance.
+  ScopedSubnormalFloatDisabler disabler;
+  paint.setImageFilter(filter->makeWithLocalMatrix(local_matrix));
+  surface->getCanvas()->translate(-dst_rect.x(), -dst_rect.y());
+  surface->getCanvas()->drawBitmap(to_filter, quad->rect.x(), quad->rect.y(),
+                                   &paint);
 
-  return skia::AdoptRef(surface->newImageSnapshot());
+  return surface->makeImageSnapshot();
 }
 
 SkBitmap SoftwareRenderer::GetBackdropBitmap(
@@ -668,9 +662,10 @@ gfx::Rect SoftwareRenderer::GetBackdropBoundingBoxForRenderPassQuad(
   gfx::Rect backdrop_rect = gfx::ToEnclosingRect(
       MathUtil::MapClippedRect(contents_device_transform, QuadVertexRect()));
 
-  int top, right, bottom, left;
-  quad->background_filters.GetOutsets(&top, &right, &bottom, &left);
-  backdrop_rect.Inset(-left, -top, -right, -bottom);
+  SkMatrix matrix;
+  matrix.setScale(quad->filters_scale.x(), quad->filters_scale.y());
+  backdrop_rect =
+      quad->background_filters.MapRectReverse(backdrop_rect, matrix);
 
   backdrop_rect.Intersect(MoveFromDrawToWindowSpace(
       frame, frame->current_render_pass->output_rect));
@@ -708,11 +703,11 @@ sk_sp<SkShader> SoftwareRenderer::GetBackgroundFilterShader(
   // Draw what's behind, and apply the filter to it.
   SkBitmap backdrop_bitmap = GetBackdropBitmap(backdrop_rect);
 
-  skia::RefPtr<SkImageFilter> filter = RenderSurfaceFilters::BuildImageFilter(
+  sk_sp<SkImageFilter> filter = RenderSurfaceFilters::BuildImageFilter(
       quad->background_filters,
       gfx::SizeF(backdrop_bitmap.width(), backdrop_bitmap.height()));
-  skia::RefPtr<SkImage> filter_backdrop_image =
-      ApplyImageFilter(filter.get(), quad, &backdrop_bitmap);
+  sk_sp<SkImage> filter_backdrop_image =
+      ApplyImageFilter(filter.get(), quad, backdrop_bitmap, nullptr);
 
   if (!filter_backdrop_image)
     return nullptr;

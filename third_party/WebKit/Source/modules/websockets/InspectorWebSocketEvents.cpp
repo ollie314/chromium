@@ -6,28 +6,29 @@
 
 #include "core/dom/Document.h"
 #include "platform/weborigin/KURL.h"
+#include <memory>
 
 namespace blink {
 
-PassOwnPtr<TracedValue> InspectorWebSocketCreateEvent::data(Document* document, unsigned long identifier, const KURL& url, const String& protocol)
+std::unique_ptr<TracedValue> InspectorWebSocketCreateEvent::data(Document* document, unsigned long identifier, const KURL& url, const String& protocol)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setInteger("identifier", identifier);
     value->setString("url", url.getString());
     value->setString("frame", toHexString(document->frame()));
     if (!protocol.isNull())
         value->setString("webSocketProtocol", protocol);
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorWebSocketEvent::data(Document* document, unsigned long identifier)
+std::unique_ptr<TracedValue> InspectorWebSocketEvent::data(Document* document, unsigned long identifier)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setInteger("identifier", identifier);
     value->setString("frame", toHexString(document->frame()));
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
 } // namespace blink

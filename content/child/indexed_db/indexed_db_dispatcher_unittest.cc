@@ -11,7 +11,7 @@
 
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "content/child/indexed_db/mock_webidbcallbacks.h"
 #include "content/child/indexed_db/webidbcursor_impl.h"
@@ -54,8 +54,7 @@ class MockDispatcher : public IndexedDBDispatcher {
 
 class MockSyncMessageFilter : public IPC::SyncMessageFilter {
  public:
-  MockSyncMessageFilter()
-      : SyncMessageFilter(nullptr, false /* is_channel_send_thread_safe */) {}
+  MockSyncMessageFilter() : SyncMessageFilter(nullptr) {}
 
  private:
   ~MockSyncMessageFilter() override {}
@@ -158,7 +157,7 @@ TEST_F(IndexedDBDispatcherTest, CursorTransactionId) {
     std::unique_ptr<WebIDBCursor> cursor;
     EXPECT_EQ(0UL, dispatcher.cursor_transaction_ids_.size());
 
-    auto callbacks = new StrictMock<MockWebIDBCallbacks>();
+    auto* callbacks = new StrictMock<MockWebIDBCallbacks>();
     // Reference first param (cursor) to keep it alive.
     // TODO(cmumford): Cleanup (and below) once std::addressof() is allowed.
     ON_CALL(*callbacks, onSuccess(testing::A<WebIDBCursor*>(), _, _, _))
@@ -204,7 +203,7 @@ TEST_F(IndexedDBDispatcherTest, CursorTransactionId) {
   {
     EXPECT_EQ(0UL, dispatcher.cursor_transaction_ids_.size());
 
-    auto callbacks = new StrictMock<MockWebIDBCallbacks>();
+    auto* callbacks = new StrictMock<MockWebIDBCallbacks>();
     EXPECT_CALL(*callbacks, onSuccess(testing::A<const blink::WebIDBValue&>()))
         .Times(1);
 

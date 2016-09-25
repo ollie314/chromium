@@ -11,8 +11,9 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
-#include "mojo/message_pump/handle_watcher.h"
+#include "base/memory/ptr_util.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/system/watcher.h"
 
 namespace extensions {
 namespace {
@@ -20,29 +21,23 @@ namespace {
 // An implementation of StashService that forwards calls to a StashBackend.
 class StashServiceImpl : public StashService {
  public:
-  StashServiceImpl(mojo::InterfaceRequest<StashService> request,
-                   base::WeakPtr<StashBackend> backend);
+  explicit StashServiceImpl(base::WeakPtr<StashBackend> backend);
   ~StashServiceImpl() override;
 
   // StashService overrides.
   void AddToStash(mojo::Array<StashedObjectPtr> stash) override;
-  void RetrieveStash(
-      const mojo::Callback<void(mojo::Array<StashedObjectPtr> stash)>& callback)
-      override;
+  void RetrieveStash(const RetrieveStashCallback& callback) override;
 
  private:
-  mojo::StrongBinding<StashService> binding_;
   base::WeakPtr<StashBackend> backend_;
 
   DISALLOW_COPY_AND_ASSIGN(StashServiceImpl);
 };
 
-StashServiceImpl::StashServiceImpl(mojo::InterfaceRequest<StashService> request,
-                                   base::WeakPtr<StashBackend> backend)
-    : binding_(this, std::move(request)), backend_(backend) {}
+StashServiceImpl::StashServiceImpl(base::WeakPtr<StashBackend> backend)
+    : backend_(backend) {}
 
-StashServiceImpl::~StashServiceImpl() {
-}
+StashServiceImpl::~StashServiceImpl() {}
 
 void StashServiceImpl::AddToStash(
     mojo::Array<StashedObjectPtr> stashed_objects) {
@@ -51,8 +46,7 @@ void StashServiceImpl::AddToStash(
   backend_->AddToStash(std::move(stashed_objects));
 }
 
-void StashServiceImpl::RetrieveStash(
-    const mojo::Callback<void(mojo::Array<StashedObjectPtr>)>& callback) {
+void StashServiceImpl::RetrieveStash(const RetrieveStashCallback& callback) {
   if (!backend_) {
     callback.Run(mojo::Array<StashedObjectPtr>());
     return;
@@ -84,7 +78,7 @@ class StashBackend::StashEntry {
   void OnHandleReady(MojoResult result);
 
   // The waiters that are waiting for handles to be readable.
-  std::vector<scoped_ptr<mojo::common::HandleWatcher>> waiters_;
+  std::vector<std::unique_ptr<mojo::Watcher>> waiters_;
 
   StashedObjectPtr stashed_object_;
 
@@ -104,11 +98,11 @@ StashBackend::~StashBackend() {
 
 void StashBackend::AddToStash(mojo::Array<StashedObjectPtr> stashed_objects) {
   for (size_t i = 0; i < stashed_objects.size(); i++) {
-    stashed_objects_.push_back(make_scoped_ptr(new StashEntry(
+    stashed_objects_.push_back(base::MakeUnique<StashEntry>(
         std::move(stashed_objects[i]),
         has_notified_ ? base::Closure()
                       : base::Bind(&StashBackend::OnHandleReady,
-                                   weak_factory_.GetWeakPtr()))));
+                                   weak_factory_.GetWeakPtr())));
   }
 }
 
@@ -123,7 +117,9 @@ mojo::Array<StashedObjectPtr> StashBackend::RetrieveStash() {
 }
 
 void StashBackend::BindToRequest(mojo::InterfaceRequest<StashService> request) {
-  new StashServiceImpl(std::move(request), weak_factory_.GetWeakPtr());
+  mojo::MakeStrongBinding(
+      base::MakeUnique<StashServiceImpl>(weak_factory_.GetWeakPtr()),
+      std::move(request));
 }
 
 void StashBackend::OnHandleReady() {
@@ -144,10 +140,9 @@ StashBackend::StashEntry::StashEntry(StashedObjectPtr stashed_object,
     return;
 
   for (size_t i = 0; i < stashed_object_->stashed_handles.size(); i++) {
-    scoped_ptr<mojo::common::HandleWatcher> watcher(
-        new mojo::common::HandleWatcher());
+    std::unique_ptr<mojo::Watcher> watcher(new mojo::Watcher);
     watcher->Start(stashed_object_->stashed_handles[i].get(),
-                   MOJO_HANDLE_SIGNAL_READABLE, MOJO_DEADLINE_INDEFINITE,
+                   MOJO_HANDLE_SIGNAL_READABLE,
                    base::Bind(&StashBackend::StashEntry::OnHandleReady,
                               base::Unretained(this)));
     waiters_.push_back(std::move(watcher));

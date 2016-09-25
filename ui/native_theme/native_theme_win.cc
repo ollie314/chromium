@@ -22,9 +22,12 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkColorPriv.h"
+#include "third_party/skia/include/core/SkPath.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "third_party/skia/include/core/SkSurface.h"
 #include "ui/base/material_design/material_design_controller.h"
-#include "ui/display/win/dpi.h"
+#include "ui/display/win/screen_win.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/gdi_util.h"
@@ -203,7 +206,7 @@ gfx::Size NativeThemeWin::GetPartSize(Part part,
     case kScrollbarVerticalThumb:
     case kScrollbarHorizontalTrack:
     case kScrollbarVerticalTrack: {
-      int size = display::win::GetSystemMetricsInDIP(SM_CXVSCROLL);
+      int size = display::win::ScreenWin::GetSystemMetricsInDIP(SM_CXVSCROLL);
       if (size == 0)
         size = 17;
       return gfx::Size(size, size);
@@ -254,39 +257,18 @@ void NativeThemeWin::Paint(SkCanvas* canvas,
       break;
   }
 
-  bool needs_paint_indirect = false;
-  if (!skia::SupportsPlatformPaint(canvas)) {
-    // This block will only get hit with --enable-accelerated-drawing flag.
-    needs_paint_indirect = true;
-  } else {
-    // Scrollbar components on Windows Classic theme (on all Windows versions)
-    // have particularly problematic alpha values, so always draw them
-    // indirectly. In addition, scrollbar thumbs and grippers for the Windows XP
-    // theme (available only on Windows XP) also need their alpha values
-    // fixed.
-    switch (part) {
-      case kScrollbarDownArrow:
-      case kScrollbarUpArrow:
-      case kScrollbarLeftArrow:
-      case kScrollbarRightArrow:
-        needs_paint_indirect = !GetThemeHandle(SCROLLBAR);
-        break;
-      case kScrollbarHorizontalThumb:
-      case kScrollbarVerticalThumb:
-      case kScrollbarHorizontalGripper:
-      case kScrollbarVerticalGripper:
-        needs_paint_indirect = !GetThemeHandle(SCROLLBAR) ||
-            base::win::GetVersion() == base::win::VERSION_XP;
-        break;
-      default:
-        break;
-    }
-  }
+  skia::ScopedPlatformPaint paint(canvas);
+  HDC surface = paint.GetPlatformSurface();
 
-  if (needs_paint_indirect)
-    PaintIndirect(canvas, part, state, rect, extra);
+  // When drawing the task manager or the bookmark editor, we draw into an
+  // offscreen buffer, where we can use OS-specific drawing routines for
+  // UI features like scrollbars. However, we need to set up that buffer,
+  // and then read it back when it's done and blit it onto the screen.
+
+  if (skia::SupportsPlatformPaint(canvas))
+    PaintDirect(canvas, surface, part, state, rect, extra);
   else
-    PaintDirect(canvas, part, state, rect, extra);
+    PaintIndirect(canvas, surface, part, state, rect, extra);
 }
 
 NativeThemeWin::NativeThemeWin()
@@ -375,14 +357,12 @@ void NativeThemeWin::PaintMenuBackground(SkCanvas* canvas,
   canvas->drawRect(gfx::RectToSkRect(rect), paint);
 }
 
-void NativeThemeWin::PaintDirect(SkCanvas* canvas,
+void NativeThemeWin::PaintDirect(SkCanvas* destination_canvas,
+                                 HDC hdc,
                                  Part part,
                                  State state,
                                  const gfx::Rect& rect,
                                  const ExtraParams& extra) const {
-  skia::ScopedPlatformPaint scoped_platform_paint(canvas);
-  HDC hdc = scoped_platform_paint.GetPlatformSurface();
-
   switch (part) {
     case kCheckbox:
       PaintCheckbox(hdc, part, state, rect, extra.button);
@@ -437,11 +417,11 @@ void NativeThemeWin::PaintDirect(SkCanvas* canvas,
       return;
     case kScrollbarHorizontalTrack:
     case kScrollbarVerticalTrack:
-      PaintScrollbarTrack(canvas, hdc, part, state, rect,
+      PaintScrollbarTrack(destination_canvas, hdc, part, state, rect,
                           extra.scrollbar_track);
       return;
     case kScrollbarCorner:
-      canvas->drawColor(SK_ColorWHITE, SkXfermode::kSrc_Mode);
+      destination_canvas->drawColor(SK_ColorWHITE, SkXfermode::kSrc_Mode);
       return;
     case kTabPanelBackground:
       PaintTabPanelBackground(hdc, rect);
@@ -451,7 +431,7 @@ void NativeThemeWin::PaintDirect(SkCanvas* canvas,
       return;
     case kTrackbarThumb:
     case kTrackbarTrack:
-      PaintTrackbar(canvas, hdc, part, state, rect, extra.trackbar);
+      PaintTrackbar(destination_canvas, hdc, part, state, rect, extra.trackbar);
       return;
     case kWindowResizeGripper:
       PaintWindowResizeGripper(hdc, rect);
@@ -464,8 +444,26 @@ void NativeThemeWin::PaintDirect(SkCanvas* canvas,
 }
 
 SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
+  const bool md = ui::MaterialDesignController::IsModeMaterial();
+  if (!md) {
+    // Link:
+    const SkColor kLinkPressedColor = SkColorSetRGB(200, 0, 0);
+
+    switch (color_id) {
+      // Link
+      case kColorId_LinkDisabled:
+        return system_colors_[COLOR_WINDOWTEXT];
+      case kColorId_LinkEnabled:
+        return system_colors_[COLOR_HOTLIGHT];
+      case kColorId_LinkPressed:
+        return kLinkPressedColor;
+
+      default:
+        break;
+    }
+  }
+
   // TODO: Obtain the correct colors using GetSysColor.
-  const SkColor kUrlTextColor = SkColorSetRGB(0x0b, 0x80, 0x43);
   // Dialogs:
   const SkColor kDialogBackgroundColor = SkColorSetRGB(251, 251, 251);
   // FocusableBorder:
@@ -479,11 +477,13 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
   // MenuItem:
   const SkColor kMenuSchemeHighlightBackgroundColorInvert =
       SkColorSetRGB(0x30, 0x30, 0x30);
-  // Link:
-  const SkColor kLinkPressedColor = SkColorSetRGB(200, 0, 0);
   // Table:
   const SkColor kPositiveTextColor = SkColorSetRGB(0x0b, 0x80, 0x43);
   const SkColor kNegativeTextColor = SkColorSetRGB(0xc5, 0x39, 0x29);
+  // Results Tables:
+  const SkColor kResultsTableUrlColor =
+      md ? gfx::kGoogleBlue700 : SkColorSetRGB(0x0b, 0x80, 0x43);
+  const SkColor kResultsTableSelectedUrlColor = SK_ColorWHITE;
 
   switch (color_id) {
     // Windows
@@ -493,6 +493,8 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
     // Dialogs
     case kColorId_DialogBackground:
     case kColorId_BubbleBackground:
+      if (ui::MaterialDesignController::IsSecondaryUiMaterial())
+        break;
       return color_utils::IsInvertedColorScheme() ?
           color_utils::InvertColor(kDialogBackgroundColor) :
           kDialogBackgroundColor;
@@ -520,20 +522,6 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
       return system_colors_[COLOR_GRAYTEXT];
     case kColorId_LabelBackgroundColor:
       return system_colors_[COLOR_WINDOW];
-
-    // Link
-    case kColorId_LinkDisabled:
-      if (ui::MaterialDesignController::IsModeMaterial())
-        break;
-      return system_colors_[COLOR_WINDOWTEXT];
-    case kColorId_LinkEnabled:
-      if (ui::MaterialDesignController::IsModeMaterial())
-        break;
-      return system_colors_[COLOR_HOTLIGHT];
-    case kColorId_LinkPressed:
-      if (ui::MaterialDesignController::IsModeMaterial())
-        break;
-      return kLinkPressedColor;
 
     // Textfield
     case kColorId_TextfieldDefaultColor:
@@ -617,15 +605,16 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
       return color_utils::AlphaBlend(system_colors_[COLOR_HIGHLIGHTTEXT],
                                      system_colors_[COLOR_HIGHLIGHT], 0x80);
     case kColorId_ResultsTableNormalUrl:
-      return color_utils::GetReadableColor(kUrlTextColor,
-                                           system_colors_[COLOR_WINDOW]);
+      return color_utils::GetReadableColor(kResultsTableUrlColor,
+                                            system_colors_[COLOR_WINDOW]);
     case kColorId_ResultsTableHoveredUrl:
-      return color_utils::GetReadableColor(
-          kUrlTextColor,
+      return color_utils::PickContrastingColor(
+          kResultsTableUrlColor, kResultsTableSelectedUrlColor,
           GetSystemColor(kColorId_ResultsTableHoveredBackground));
     case kColorId_ResultsTableSelectedUrl:
-      return color_utils::GetReadableColor(kUrlTextColor,
-                                           system_colors_[COLOR_HIGHLIGHT]);
+      return color_utils::PickContrastingColor(
+          kResultsTableUrlColor, kResultsTableSelectedUrlColor,
+          system_colors_[COLOR_HIGHLIGHT]);
     case kColorId_ResultsTablePositiveText:
       return color_utils::GetReadableColor(kPositiveTextColor,
                                            system_colors_[COLOR_WINDOW]);
@@ -664,7 +653,8 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
   return GetAuraColor(color_id, this);
 }
 
-void NativeThemeWin::PaintIndirect(SkCanvas* canvas,
+void NativeThemeWin::PaintIndirect(SkCanvas* destination_canvas,
+                                   HDC destination_hdc,
                                    Part part,
                                    State state,
                                    const gfx::Rect& rect,
@@ -675,12 +665,23 @@ void NativeThemeWin::PaintIndirect(SkCanvas* canvas,
   //                  keeping a cache of the resulting bitmaps.
 
   // Create an offscreen canvas that is backed by an HDC.
-  skia::RefPtr<skia::BitmapPlatformDevice> device = skia::AdoptRef(
-      skia::BitmapPlatformDevice::Create(
-          rect.width(), rect.height(), false, NULL));
-  DCHECK(device);
-  SkCanvas offscreen_canvas(device.get());
-  DCHECK(skia::SupportsPlatformPaint(&offscreen_canvas));
+  // This can fail if we don't have access to GDI or if lower-level Windows
+  // calls fail, possibly due to GDI handle exhaustion.
+  base::win::ScopedCreateDC offscreen_hdc(
+      skia::CreateOffscreenSurface(rect.width(), rect.height()));
+  if (!offscreen_hdc.IsValid())
+    return;
+
+  // Will be NULL if lower-level Windows calls fail, or if the backing
+  // allocated is 0 pixels in size (which should never happen according to
+  // Windows documentation).
+  sk_sp<SkSurface> offscreen_surface =
+      skia::MapPlatformSurface(offscreen_hdc.Get());
+  if (!offscreen_surface)
+    return;
+
+  SkCanvas* offscreen_canvas = offscreen_surface->getCanvas();
+  DCHECK(offscreen_canvas);
 
   // Some of the Windows theme drawing operations do not write correct alpha
   // values for fully-opaque pixels; instead the pixels get alpha 0. This is
@@ -690,7 +691,7 @@ void NativeThemeWin::PaintIndirect(SkCanvas* canvas,
   // which pixels get touched by the paint operation. After paint, set any
   // pixels that have alpha 0 to opaque and placeholders to fully-transparent.
   const SkColor placeholder = SkColorSetARGB(1, 0, 0, 0);
-  offscreen_canvas.clear(placeholder);
+  offscreen_canvas->clear(placeholder);
 
   // Offset destination rects to have origin (0,0).
   gfx::Rect adjusted_rect(rect.size());
@@ -709,14 +710,15 @@ void NativeThemeWin::PaintIndirect(SkCanvas* canvas,
       break;
   }
   // Draw the theme controls using existing HDC-drawing code.
-  PaintDirect(&offscreen_canvas, part, state, adjusted_rect, adjusted_extra);
+  PaintDirect(offscreen_canvas, offscreen_hdc.Get(), part, state,
+              adjusted_rect, adjusted_extra);
 
-  SkBitmap bitmap = skia::ReadPixels(&offscreen_canvas);
+  SkBitmap offscreen_bitmap = skia::MapPlatformBitmap(offscreen_hdc.Get());
 
   // Post-process the pixels to fix up the alpha values (see big comment above).
   const SkPMColor placeholder_value = SkPreMultiplyColor(placeholder);
   const int pixel_count = rect.width() * rect.height();
-  SkPMColor* pixels = bitmap.getAddr32(0, 0);
+  SkPMColor* pixels = offscreen_bitmap.getAddr32(0, 0);
   for (int i = 0; i < pixel_count; i++) {
     if (pixels[i] == placeholder_value) {
       // Pixel wasn't touched - make it fully transparent.
@@ -730,8 +732,7 @@ void NativeThemeWin::PaintIndirect(SkCanvas* canvas,
     }
   }
 
-  // Draw the offscreen bitmap to the destination canvas.
-  canvas->drawBitmap(bitmap, rect.x(), rect.y());
+  destination_canvas->drawBitmap(offscreen_bitmap, rect.x(), rect.y());
 }
 
 HRESULT NativeThemeWin::GetThemePartSize(ThemeName theme_name,

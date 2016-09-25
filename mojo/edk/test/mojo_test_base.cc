@@ -4,6 +4,7 @@
 
 #include "mojo/edk/test/mojo_test_base.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "mojo/edk/embedder/embedder.h"
@@ -42,14 +43,16 @@ MojoTestBase::~MojoTestBase() {}
 
 MojoTestBase::ClientController& MojoTestBase::StartClient(
     const std::string& client_name) {
-  clients_.push_back(
-      make_scoped_ptr(new ClientController(client_name, this)));
+  clients_.push_back(base::MakeUnique<ClientController>(
+      client_name, this, process_error_callback_, launch_type_));
   return *clients_.back();
 }
 
-MojoTestBase::ClientController::ClientController(const std::string& client_name,
-                                                 MojoTestBase* test)
-    : test_(test) {
+MojoTestBase::ClientController::ClientController(
+    const std::string& client_name,
+    MojoTestBase* test,
+    const ProcessErrorCallback& process_error_callback,
+    LaunchType launch_type) {
 #if !defined(OS_IOS)
 #if defined(OS_MACOSX)
   // This lock needs to be held while launching the child because the Mach port
@@ -60,7 +63,8 @@ MojoTestBase::ClientController::ClientController(const std::string& client_name,
   // launch and child pid registration.
   base::AutoLock lock(g_mach_broker->GetLock());
 #endif
-  pipe_ = helper_.StartChild(client_name);
+  helper_.set_process_error_callback(process_error_callback);
+  pipe_ = helper_.StartChild(client_name, launch_type);
 #if defined(OS_MACOSX)
   g_mach_broker->AddPlaceholderForPid(helper_.test_child().Handle());
 #endif

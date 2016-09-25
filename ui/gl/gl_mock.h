@@ -12,7 +12,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/gl/gl_bindings.h"
 
-namespace gfx {
+namespace gl {
 
 class MockGLInterface {
  public:
@@ -40,6 +40,20 @@ class MockGLInterface {
       GLint /*zoffset*/, GLsizei /*width*/, GLsizei /*height*/,
       GLsizei /*depth*/, GLenum /*format*/, GLsizei /*imageSize*/,
       const void* /*data*/) {
+    NOTREACHED();
+  }
+
+  void CopySubTextureCHROMIUM(GLuint /*sourceId*/,
+                              GLuint /*destId*/,
+                              GLint /*xoffset*/,
+                              GLint /*yoffset*/,
+                              GLint /*x*/,
+                              GLint /*y*/,
+                              GLsizei /*width*/,
+                              GLsizei /*height*/,
+                              GLboolean /*unpackFlipY*/,
+                              GLboolean /*unpackPremultiplyAlpha*/,
+                              GLboolean /*unpackUnmultiplyAlpha*/) {
     NOTREACHED();
   }
 
@@ -78,6 +92,6 @@ class MockGLInterface {
       GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type);
 };
 
-}  // namespace gfx
+}  // namespace gl
 
 #endif  // UI_GL_GL_MOCK_H_

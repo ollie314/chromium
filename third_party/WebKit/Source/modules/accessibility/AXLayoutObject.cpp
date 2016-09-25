@@ -47,24 +47,24 @@
 #include "core/frame/Settings.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/HTMLImageElement.h"
+#include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLLabelElement.h"
 #include "core/html/HTMLOptionElement.h"
 #include "core/html/HTMLSelectElement.h"
 #include "core/html/HTMLTextAreaElement.h"
+#include "core/html/LabelsNodeList.h"
 #include "core/html/shadow/ShadowElementNames.h"
 #include "core/layout/HitTestResult.h"
-#include "core/layout/LayoutFieldset.h"
 #include "core/layout/LayoutFileUploadControl.h"
 #include "core/layout/LayoutHTMLCanvas.h"
 #include "core/layout/LayoutImage.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutListMarker.h"
 #include "core/layout/LayoutMenuList.h"
-#include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutTextControl.h"
-#include "core/layout/LayoutTextControlSingleLine.h"
-#include "core/layout/LayoutTextFragment.h"
 #include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutAPIShim.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/layout/api/LineLayoutAPIShim.h"
 #include "core/loader/ProgressTracker.h"
 #include "core/page/Page.h"
@@ -135,8 +135,8 @@ static inline LayoutInline* startOfContinuations(LayoutObject* r)
     }
 
     // Blocks with a previous continuation always have a next continuation
-    if (r->isLayoutBlock() && toLayoutBlock(r)->inlineElementContinuation())
-        return toLayoutInline(toLayoutBlock(r)->inlineElementContinuation()->node()->layoutObject());
+    if (r->isLayoutBlockFlow() && toLayoutBlockFlow(r)->inlineElementContinuation())
+        return toLayoutInline(toLayoutBlockFlow(r)->inlineElementContinuation()->node()->layoutObject());
 
     return 0;
 }
@@ -146,7 +146,7 @@ static inline LayoutObject* endOfContinuations(LayoutObject* layoutObject)
     LayoutObject* prev = layoutObject;
     LayoutObject* cur = layoutObject;
 
-    if (!cur->isLayoutInline() && !cur->isLayoutBlock())
+    if (!cur->isLayoutInline() && !cur->isLayoutBlockFlow())
         return layoutObject;
 
     while (cur) {
@@ -155,7 +155,7 @@ static inline LayoutObject* endOfContinuations(LayoutObject* layoutObject)
             cur = toLayoutInline(cur)->inlineElementContinuation();
             ASSERT(cur || !toLayoutInline(prev)->continuation());
         } else {
-            cur = toLayoutBlock(cur)->inlineElementContinuation();
+            cur = toLayoutBlockFlow(cur)->inlineElementContinuation();
         }
     }
 
@@ -173,15 +173,14 @@ static LayoutBoxModelObject* nextContinuation(LayoutObject* layoutObject)
     ASSERT(layoutObject);
     if (layoutObject->isLayoutInline() && !layoutObject->isAtomicInlineLevel())
         return toLayoutInline(layoutObject)->continuation();
-    if (layoutObject->isLayoutBlock())
-        return toLayoutBlock(layoutObject)->inlineElementContinuation();
+    if (layoutObject->isLayoutBlockFlow())
+        return toLayoutBlockFlow(layoutObject)->inlineElementContinuation();
     return 0;
 }
 
 AXLayoutObject::AXLayoutObject(LayoutObject* layoutObject, AXObjectCacheImpl& axObjectCache)
     : AXNodeObject(layoutObject->node(), axObjectCache)
     , m_layoutObject(layoutObject)
-    , m_cachedElementRectDirty(true)
 {
 #if ENABLE(ASSERT)
     m_layoutObject->setHasAXObject(true);
@@ -196,44 +195,6 @@ AXLayoutObject* AXLayoutObject::create(LayoutObject* layoutObject, AXObjectCache
 AXLayoutObject::~AXLayoutObject()
 {
     ASSERT(isDetached());
-}
-
-LayoutRect AXLayoutObject::elementRect() const
-{
-    if (!m_explicitElementRect.isEmpty())
-        return m_explicitElementRect;
-    if (!m_layoutObject)
-        return LayoutRect();
-    if (!m_layoutObject->isBox())
-        return computeElementRect();
-
-    for (const AXObject* obj = this; obj; obj = obj->parentObject()) {
-        if (obj->isAXLayoutObject())
-            toAXLayoutObject(obj)->checkCachedElementRect();
-    }
-    for (const AXObject* obj = this; obj; obj = obj->parentObject()) {
-        if (obj->isAXLayoutObject())
-            toAXLayoutObject(obj)->updateCachedElementRect();
-    }
-
-    return m_cachedElementRect;
-}
-
-SkMatrix44 AXLayoutObject::transformFromLocalParentFrame() const
-{
-    if (!m_layoutObject)
-        return SkMatrix44();
-    LayoutView* layoutView = documentFrameView()->layoutView();
-
-    FrameView* parentFrameView = documentFrameView()->parentFrameView();
-    if (!parentFrameView)
-        return SkMatrix44();
-    LayoutView* parentLayoutView = parentFrameView->layoutView();
-
-    TransformationMatrix accumulatedTransform = layoutView->localToAncestorTransform(parentLayoutView, TraverseDocumentBoundaries);
-    IntPoint scrollPosition = documentFrameView()->scrollPosition();
-    accumulatedTransform.translate(scrollPosition.x(), scrollPosition.y());
-    return TransformationMatrix::toSkMatrix44(accumulatedTransform);
 }
 
 LayoutBoxModelObject* AXLayoutObject::getLayoutBoxModelObject() const
@@ -374,16 +335,17 @@ bool AXLayoutObject::isEditable() const
     if (getLayoutObject() && getLayoutObject()->isTextControl())
         return true;
 
-    if (getNode() && getNode()->isContentEditable())
+    m_layoutObject->document().updateStyleAndLayoutTree();
+    if (getNode() && hasEditableStyle(*getNode()))
         return true;
 
     if (isWebArea()) {
         Document& document = getLayoutObject()->document();
         HTMLElement* body = document.body();
-        if (body && body->isContentEditable())
+        if (body && hasEditableStyle(*body))
             return true;
 
-        return document.isContentEditable();
+        return hasEditableStyle(document);
     }
 
     return AXNodeObject::isEditable();
@@ -393,16 +355,17 @@ bool AXLayoutObject::isEditable() const
 // user-modify. Don't move this logic to AXNodeObject.
 bool AXLayoutObject::isRichlyEditable() const
 {
-    if (getNode() && getNode()->isContentRichlyEditable())
+    m_layoutObject->document().updateStyleAndLayoutTree();
+    if (getNode() && hasRichlyEditableStyle(*getNode()))
         return true;
 
     if (isWebArea()) {
         Document& document = m_layoutObject->document();
         HTMLElement* body = document.body();
-        if (body && body->isContentRichlyEditable())
+        if (body && hasRichlyEditableStyle(*body))
             return true;
 
-        return document.isContentRichlyEditable();
+        return hasRichlyEditableStyle(document);
     }
 
     return AXNodeObject::isRichlyEditable();
@@ -442,10 +405,10 @@ bool AXLayoutObject::isReadOnly() const
     if (isWebArea()) {
         Document& document = m_layoutObject->document();
         HTMLElement* body = document.body();
-        if (body && body->hasEditableStyle())
+        if (body && hasEditableStyle(*body))
             return false;
 
-        return !document.hasEditableStyle();
+        return !hasEditableStyle(document);
     }
 
     return AXNodeObject::isReadOnly();
@@ -517,7 +480,7 @@ AXObjectInclusion AXLayoutObject::defaultObjectInclusion(IgnoredReasons* ignored
         return IgnoreObject;
     }
 
-    if (m_layoutObject->style()->visibility() != VISIBLE) {
+    if (m_layoutObject->style()->visibility() != EVisibility::Visible) {
         // aria-hidden is meant to override visibility as the determinant in AX hierarchy inclusion.
         if (equalIgnoringCase(getAttribute(aria_hiddenAttr), "false"))
             return DefaultBehavior;
@@ -584,6 +547,10 @@ bool AXLayoutObject::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReason
     if (m_layoutObject->isLayoutPart())
         return false;
 
+    // Make sure renderers with layers stay in the tree.
+    if (getLayoutObject() && getLayoutObject()->hasLayer() && getNode() && getNode()->hasChildren())
+        return false;
+
     // find out if this element is inside of a label element.
     // if so, it may be ignored because it's the label for a checkbox or radio button
     AXObject* controlObject = correspondingControlForLabelElement();
@@ -633,10 +600,15 @@ bool AXLayoutObject::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReason
         }
         return false;
     }
+
     if (isHeading())
         return false;
 
     if (isLandmarkRelated())
+        return false;
+
+    // Header and footer tags may also be exposed as landmark roles but not always.
+    if (getNode() && (getNode()->hasTagName(headerTag) || getNode()->hasTagName(footerTag)))
         return false;
 
     if (isLink())
@@ -834,17 +806,46 @@ const AtomicString& AXLayoutObject::accessKey() const
     return toElement(node)->getAttribute(accesskeyAttr);
 }
 
-RGBA32 AXLayoutObject::backgroundColor() const
+RGBA32 AXLayoutObject::computeBackgroundColor() const
 {
     if (!getLayoutObject())
         return AXNodeObject::backgroundColor();
 
-    const ComputedStyle* style = getLayoutObject()->style();
-    if (!style || !style->hasBackground())
-        return AXNodeObject::backgroundColor();
+    Color blendedColor = Color::transparent;
+    // Color::blend should be called like this: background.blend(foreground).
+    for (LayoutObject* layoutObject = getLayoutObject(); layoutObject;
+        layoutObject = layoutObject->parent()) {
+        const AXObject* axParent = axObjectCache().getOrCreate(layoutObject);
+        if (axParent && axParent != this) {
+            Color parentColor = axParent->backgroundColor();
+            blendedColor = parentColor.blend(blendedColor);
+            return blendedColor.rgb();
+        }
 
-    Color color = style->visitedDependentColor(CSSPropertyBackgroundColor);
-    return color.rgb();
+        const ComputedStyle* style = layoutObject->style();
+        if (!style || !style->hasBackground())
+            continue;
+
+        Color currentColor = style->visitedDependentColor(CSSPropertyBackgroundColor);
+        blendedColor = currentColor.blend(blendedColor);
+        // Continue blending until we get no transparency.
+        if (!blendedColor.hasAlpha())
+            break;
+    }
+
+    // If we still have some transparency, blend in the document base color.
+    if (blendedColor.hasAlpha()) {
+        FrameView* view = documentFrameView();
+        if (view) {
+            Color documentBaseColor = view->baseBackgroundColor();
+            blendedColor = documentBaseColor.blend(blendedColor);
+        } else {
+            // Default to a white background.
+            blendedColor.blendWithWhite();
+        }
+    }
+
+    return blendedColor.rgb();
 }
 
 RGBA32 AXLayoutObject::color() const
@@ -1018,18 +1019,19 @@ void AXLayoutObject::loadInlineTextBoxes()
 
 AXObject* AXLayoutObject::nextOnLine() const
 {
-    if (!m_layoutObject)
-        return 0;
+    if (!getLayoutObject())
+        return nullptr;
 
-    InlineBox* inlineBox;
-    if (m_layoutObject->isLayoutInline())
-        inlineBox = toLayoutInline(m_layoutObject)->lastLineBox();
-    else if (m_layoutObject->isText())
-        inlineBox = toLayoutText(m_layoutObject)->lastTextBox();
-    else
-        return 0;
+    InlineBox* inlineBox = nullptr;
+    if (getLayoutObject()->isLayoutInline())
+        inlineBox = toLayoutInline(getLayoutObject())->lastLineBox();
+    else if (getLayoutObject()->isText())
+        inlineBox = toLayoutText(getLayoutObject())->lastTextBox();
 
-    AXObject* result = 0;
+    if (!inlineBox)
+        return nullptr;
+
+    AXObject* result = nullptr;
     for (InlineBox* next = inlineBox->nextOnLine(); next; next = next->nextOnLine()) {
         LayoutObject* layoutObject = LineLayoutAPIShim::layoutObjectFrom(next->getLineLayoutItem());
         result = axObjectCache().getOrCreate(layoutObject);
@@ -1047,18 +1049,19 @@ AXObject* AXLayoutObject::nextOnLine() const
 
 AXObject* AXLayoutObject::previousOnLine() const
 {
-    if (!m_layoutObject)
-        return 0;
+    if (!getLayoutObject())
+        return nullptr;
 
-    InlineBox* inlineBox;
-    if (m_layoutObject->isLayoutInline())
-        inlineBox = toLayoutInline(m_layoutObject)->firstLineBox();
-    else if (m_layoutObject->isText())
-        inlineBox = toLayoutText(m_layoutObject)->firstTextBox();
-    else
-        return 0;
+    InlineBox* inlineBox = nullptr;
+    if (getLayoutObject()->isLayoutInline())
+        inlineBox = toLayoutInline(getLayoutObject())->firstLineBox();
+    else if (getLayoutObject()->isText())
+        inlineBox = toLayoutText(getLayoutObject())->firstTextBox();
 
-    AXObject* result = 0;
+    if (!inlineBox)
+        return nullptr;
+
+    AXObject* result = nullptr;
     for (InlineBox* prev = inlineBox->prevOnLine(); prev; prev = prev->prevOnLine()) {
         LayoutObject* layoutObject = LineLayoutAPIShim::layoutObjectFrom(prev->getLineLayoutItem());
         result = axObjectCache().getOrCreate(layoutObject);
@@ -1305,9 +1308,11 @@ const AtomicString& AXLayoutObject::liveRegionRelevant() const
 
 bool AXLayoutObject::liveRegionAtomic() const
 {
-    // ARIA role status should have implicit aria-atomic value of true.
-    if (getAttribute(aria_atomicAttr).isEmpty() && roleValue() == StatusRole)
+    // ARIA roles "alert" and "status" should have an implicit aria-atomic value of true.
+    if (getAttribute(aria_atomicAttr).isEmpty()
+        && (roleValue() == AlertRole || roleValue() == StatusRole)) {
         return true;
+    }
     return elementAttributeValue(aria_atomicAttr);
 }
 
@@ -1317,116 +1322,36 @@ bool AXLayoutObject::liveRegionBusy() const
 }
 
 //
-// Position and size.
-//
-
-void AXLayoutObject::checkCachedElementRect() const
-{
-    if (m_cachedElementRectDirty)
-        return;
-
-    if (!m_layoutObject)
-        return;
-
-    if (!m_layoutObject->isBox())
-        return;
-
-    bool dirty = false;
-    LayoutBox* box = toLayoutBox(m_layoutObject);
-    if (box->frameRect() != m_cachedFrameRect)
-        dirty = true;
-
-    if (box->canBeScrolledAndHasScrollableArea()) {
-        ScrollableArea* scrollableArea = box->getScrollableArea();
-        if (scrollableArea && scrollableArea->scrollPosition() != m_cachedScrollPosition)
-            dirty = true;
-    }
-
-    if (dirty)
-        markCachedElementRectDirty();
-}
-
-void AXLayoutObject::updateCachedElementRect() const
-{
-    if (!m_cachedElementRectDirty)
-        return;
-
-    if (!m_layoutObject)
-        return;
-
-    if (!m_layoutObject->isBox())
-        return;
-
-    LayoutBox* box = toLayoutBox(m_layoutObject);
-    m_cachedFrameRect = box->frameRect();
-
-    if (box->canBeScrolledAndHasScrollableArea()) {
-        ScrollableArea* scrollableArea = box->getScrollableArea();
-        if (scrollableArea)
-            m_cachedScrollPosition = scrollableArea->scrollPosition();
-    }
-
-    m_cachedElementRect = computeElementRect();
-    m_cachedElementRectDirty = false;
-}
-
-void AXLayoutObject::markCachedElementRectDirty() const
-{
-    if (m_cachedElementRectDirty)
-        return;
-
-    // Marks children recursively, if this element changed.
-    m_cachedElementRectDirty = true;
-    for (AXObject* child = rawFirstChild(); child; child = child->rawNextSibling())
-        child->markCachedElementRectDirty();
-}
-
-IntPoint AXLayoutObject::clickPoint()
-{
-    // Headings are usually much wider than their textual content. If the mid point is used, often it can be wrong.
-    if (isHeading() && children().size() == 1)
-        return children()[0]->clickPoint();
-
-    // use the default position unless this is an editable web area, in which case we use the selection bounds.
-    if (!isWebArea() || isReadOnly())
-        return AXObject::clickPoint();
-
-    IntRect bounds = pixelSnappedIntRect(elementRect());
-    return IntPoint(bounds.x() + (bounds.width() / 2), bounds.y() - (bounds.height() / 2));
-}
-
-//
 // Hit testing.
 //
 
 AXObject* AXLayoutObject::accessibilityHitTest(const IntPoint& point) const
 {
     if (!m_layoutObject || !m_layoutObject->hasLayer())
-        return 0;
+        return nullptr;
 
     PaintLayer* layer = toLayoutBox(m_layoutObject)->layer();
 
     HitTestRequest request(HitTestRequest::ReadOnly | HitTestRequest::Active);
     HitTestResult hitTestResult = HitTestResult(request, point);
     layer->hitTest(hitTestResult);
-    if (!hitTestResult.innerNode())
-        return 0;
 
     Node* node = hitTestResult.innerNode();
-
-    // Allow the hit test to return media control buttons.
-    if (node->isInShadowTree() && (!isHTMLInputElement(*node) || !node->isMediaControlElement()))
-        node = node->shadowHost();
+    if (!node)
+        return nullptr;
 
     if (isHTMLAreaElement(node))
         return accessibilityImageMapHitTest(toHTMLAreaElement(node), point);
 
-    if (isHTMLOptionElement(node))
+    if (isHTMLOptionElement(node)) {
         node = toHTMLOptionElement(*node).ownerSelectElement();
+        if (!node)
+            return nullptr;
+    }
 
     LayoutObject* obj = node->layoutObject();
     if (!obj)
-        return 0;
+        return nullptr;
 
     AXObject* result = axObjectCache().getOrCreate(obj);
     result->updateChildrenIfNecessary();
@@ -1540,7 +1465,7 @@ AXObject* AXLayoutObject::rawNextSibling() const
 
     LayoutObject* nextSibling = 0;
 
-    LayoutInline* inlineContinuation = m_layoutObject->isLayoutBlock() ? toLayoutBlock(m_layoutObject)->inlineElementContinuation() : 0;
+    LayoutInline* inlineContinuation = m_layoutObject->isLayoutBlockFlow() ? toLayoutBlockFlow(m_layoutObject)->inlineElementContinuation() : nullptr;
     if (inlineContinuation) {
         // Case 1: node is a block and has an inline continuation. Next sibling is the inline continuation's first child.
         nextSibling = firstChildConsideringContinuation(inlineContinuation);
@@ -1673,11 +1598,11 @@ Document* AXLayoutObject::getDocument() const
 
 FrameView* AXLayoutObject::documentFrameView() const
 {
-    if (!m_layoutObject)
-        return 0;
+    if (!getLayoutObject())
+        return nullptr;
 
     // this is the LayoutObject's Document's LocalFrame's FrameView
-    return m_layoutObject->document().view();
+    return getLayoutObject()->document().view();
 }
 
 Element* AXLayoutObject::anchorElement() const
@@ -1690,8 +1615,8 @@ Element* AXLayoutObject::anchorElement() const
 
     // Search up the layout tree for a LayoutObject with a DOM node. Defer to an earlier continuation, though.
     for (currLayoutObject = m_layoutObject; currLayoutObject && !currLayoutObject->node(); currLayoutObject = currLayoutObject->parent()) {
-        if (currLayoutObject->isAnonymousBlock()) {
-            LayoutObject* continuation = toLayoutBlock(currLayoutObject)->continuation();
+        if (currLayoutObject->isAnonymousBlock() && currLayoutObject->isLayoutBlockFlow()) {
+            LayoutObject* continuation = toLayoutBlockFlow(currLayoutObject)->continuation();
             if (continuation)
                 return cache.getOrCreate(continuation)->anchorElement();
         }
@@ -1704,9 +1629,11 @@ Element* AXLayoutObject::anchorElement() const
     // search up the DOM tree for an anchor element
     // NOTE: this assumes that any non-image with an anchor is an HTMLAnchorElement
     Node* node = currLayoutObject->node();
-    for ( ; node; node = node->parentNode()) {
-        if (isHTMLAnchorElement(*node) || (node->layoutObject() && cache.getOrCreate(node->layoutObject())->isAnchor()))
-            return toElement(node);
+    if (!node)
+        return nullptr;
+    for (Node& runner : NodeTraversal::inclusiveAncestorsOf(*node)) {
+        if (isHTMLAnchorElement(runner) || (runner.layoutObject() && cache.getOrCreate(runner.layoutObject())->isAnchor()))
+            return toElement(&runner);
     }
 
     return 0;
@@ -1729,10 +1656,14 @@ AXObject::AXRange AXLayoutObject::selection() const
     if (selection.isNone())
         return AXRange();
 
-    Position visibleStart = selection.visibleStart().toParentAnchoredPosition();
-    Position visibleEnd = selection.visibleEnd().toParentAnchoredPosition();
+    VisiblePosition visibleStart = selection.visibleStart();
+    Position start = visibleStart.toParentAnchoredPosition();
+    TextAffinity startAffinity = visibleStart.affinity();
+    VisiblePosition visibleEnd = selection.visibleEnd();
+    Position end = visibleEnd.toParentAnchoredPosition();
+    TextAffinity endAffinity = visibleEnd.affinity();
 
-    Node* anchorNode = visibleStart.anchorNode();
+    Node* anchorNode = start.anchorNode();
     ASSERT(anchorNode);
 
     AXLayoutObject* anchorObject = nullptr;
@@ -1750,7 +1681,7 @@ AXObject::AXRange AXLayoutObject::selection() const
             anchorNode = anchorNode->parentNode();
     }
 
-    Node* focusNode = visibleEnd.anchorNode();
+    Node* focusNode = end.anchorNode();
     ASSERT(focusNode);
 
     AXLayoutObject* focusObject = nullptr;
@@ -1768,15 +1699,12 @@ AXObject::AXRange AXLayoutObject::selection() const
     if (!anchorObject || !focusObject)
         return AXRange();
 
-    int anchorOffset = anchorObject->indexForVisiblePosition(
-        selection.visibleStart());
+    int anchorOffset = anchorObject->indexForVisiblePosition(visibleStart);
     ASSERT(anchorOffset >= 0);
-    int focusOffset = focusObject->indexForVisiblePosition(
-        selection.visibleEnd());
+    int focusOffset = focusObject->indexForVisiblePosition(visibleEnd);
     ASSERT(focusOffset >= 0);
-    return AXRange(
-        anchorObject, anchorOffset,
-        focusObject, focusOffset);
+    return AXRange(anchorObject, anchorOffset, startAffinity,
+        focusObject, focusOffset, endAffinity);
 }
 
 // Gets only the start and end offsets of the selection computed using the
@@ -1833,12 +1761,15 @@ AXObject::AXRange AXLayoutObject::textControlSelection() const
     if (!axObject || !axObject->isAXLayoutObject())
         return AXRange();
 
+    VisibleSelection selection = layout->frame()->selection().selection();
     HTMLTextFormControlElement* textControl = toLayoutTextControl(
         layout)->textFormControlElement();
     ASSERT(textControl);
     int start = textControl->selectionStart();
     int end = textControl->selectionEnd();
-    return AXRange(axObject, start, axObject, end);
+
+    return AXRange(axObject, start, selection.visibleStart().affinity(),
+        axObject, end, selection.visibleEnd().affinity());
 }
 
 int AXLayoutObject::indexForVisiblePosition(const VisiblePosition& position) const
@@ -1883,6 +1814,59 @@ AXLayoutObject* AXLayoutObject::getUnignoredObjectFromNode(Node& node) const
 // Modify or take an action on an object.
 //
 
+// Convert from an accessible object and offset to a VisiblePosition.
+static VisiblePosition toVisiblePosition(AXObject* obj, int offset)
+{
+    if (!obj->getNode())
+        return VisiblePosition();
+
+    Node* node = obj->getNode();
+    if (!node->isTextNode()) {
+        int childCount = obj->children().size();
+
+        // Place position immediately before the container node, if there was no children.
+        if (childCount == 0) {
+            if (!obj->parentObject())
+                return VisiblePosition();
+            return toVisiblePosition(obj->parentObject(), obj->indexInParent());
+        }
+
+        // The offsets are child offsets over the AX tree. Note that we allow
+        // for the offset to equal the number of children as |Range| does.
+        if (offset < 0 || offset > childCount)
+            return VisiblePosition();
+
+        // Clamp to between 0 and child count - 1.
+        int clampedOffset =
+            static_cast<unsigned>(offset) > (obj->children().size() - 1) ? offset - 1 : offset;
+        AXObject* childObj = obj->children()[clampedOffset];
+        Node* childNode = childObj->getNode();
+        if (!childNode || !childNode->parentNode())
+            return VisiblePosition();
+
+        // The index in parent.
+        int adjustedOffset = childNode->nodeIndex();
+
+        // If we had to clamp the offset above, the client wants to select the
+        // end of the node.
+        if (clampedOffset != offset)
+            adjustedOffset++;
+
+        return createVisiblePosition(Position::editingPositionOf(childNode->parentNode(), adjustedOffset));
+    }
+
+    // If it is a text node, we need to call some utility functions that use a TextIterator
+    // to walk the characters of the node and figure out the position corresponding to the
+    // visible character at position |offset|.
+    ContainerNode* parent = node->parentNode();
+    if (!parent)
+        return VisiblePosition();
+
+    VisiblePosition nodePosition = blink::visiblePositionBeforeNode(*node);
+    int nodeIndex = blink::indexForVisiblePosition(nodePosition, parent);
+    return blink::visiblePositionForIndex(nodeIndex + offset, parent);
+}
+
 void AXLayoutObject::setSelection(const AXRange& selection)
 {
     if (!getLayoutObject() || !selection.isValid())
@@ -1898,6 +1882,7 @@ void AXLayoutObject::setSelection(const AXRange& selection)
         return;
     }
 
+    // The selection offsets are offsets into the accessible value.
     if (anchorObject == focusObject
         && anchorObject->getLayoutObject()->isTextControl()) {
         HTMLTextFormControlElement* textControl = toLayoutTextControl(
@@ -1905,37 +1890,32 @@ void AXLayoutObject::setSelection(const AXRange& selection)
         if (selection.anchorOffset <= selection.focusOffset) {
             textControl->setSelectionRange(
                 selection.anchorOffset, selection.focusOffset,
-                SelectionHasForwardDirection, NotDispatchSelectEvent);
+                SelectionHasForwardDirection);
         } else {
             textControl->setSelectionRange(
                 selection.focusOffset, selection.anchorOffset,
-                SelectionHasBackwardDirection, NotDispatchSelectEvent);
+                SelectionHasBackwardDirection);
         }
         return;
     }
-
-    Node* anchorNode = nullptr;
-    while (anchorObject && !anchorNode) {
-        anchorNode = anchorObject->getNode();
-        anchorObject = anchorObject->parentObject();
-    }
-
-    Node* focusNode = nullptr;
-    while (focusObject && !focusNode) {
-        focusNode = focusObject->getNode();
-        focusObject = focusObject->parentObject();
-    }
-
-    if (!anchorNode || !focusNode)
-        return;
 
     LocalFrame* frame = getLayoutObject()->frame();
     if (!frame)
         return;
 
-    frame->selection().setSelection(VisibleSelection(
-        Position(anchorNode, selection.anchorOffset),
-        Position(focusNode, selection.focusOffset)));
+    // TODO(dglazkov): The use of updateStyleAndLayoutIgnorePendingStylesheets needs to be audited.
+    // see http://crbug.com/590369 for more details.
+    // This callsite should probably move up the stack.
+    frame->document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
+    // Set the selection based on visible positions, because the offsets in accessibility nodes
+    // are based on visible indexes, which often skips redundant whitespace, for example.
+    VisiblePosition anchorVisiblePosition = toVisiblePosition(anchorObject, selection.anchorOffset);
+    VisiblePosition focusVisiblePosition = toVisiblePosition(focusObject, selection.focusOffset);
+    if (anchorVisiblePosition.isNull() || focusVisiblePosition.isNull())
+        return;
+
+    frame->selection().setSelection(VisibleSelection(anchorVisiblePosition, focusVisiblePosition));
 }
 
 bool AXLayoutObject::isValidSelectionBound(const AXObject* boundObject) const
@@ -2015,6 +1995,8 @@ void AXLayoutObject::handleAriaExpandedChanged()
             notification = AXObjectCacheImpl::AXRowCollapsed;
 
         axObjectCache().postNotification(this, notification);
+    } else {
+        axObjectCache().postNotification(this, AXObjectCacheImpl::AXExpandedChanged);
     }
 }
 
@@ -2192,7 +2174,7 @@ AXObject* AXLayoutObject::accessibilityImageMapHitTest(HTMLAreaElement* area, co
         return 0;
 
     for (const auto& child : parent->children()) {
-        if (child->elementRect().contains(point))
+        if (child->getBoundsInFrameCoordinates().contains(point))
             return child.get();
     }
 
@@ -2204,7 +2186,7 @@ LayoutObject* AXLayoutObject::layoutParentObject() const
     if (!m_layoutObject)
         return 0;
 
-    LayoutObject* startOfConts = m_layoutObject->isLayoutBlock() ? startOfContinuations(m_layoutObject) : 0;
+    LayoutObject* startOfConts = m_layoutObject->isLayoutBlockFlow() ? startOfContinuations(m_layoutObject) : nullptr;
     if (startOfConts) {
         // Case 1: node is a block and is an inline's continuation. Parent
         // is the start of the continuation chain.
@@ -2266,7 +2248,7 @@ AXObject* AXLayoutObject::remoteSVGElementHitTest(const IntPoint& point) const
     if (!remote)
         return 0;
 
-    IntSize offset = point - roundedIntPoint(elementRect().location());
+    IntSize offset = point - roundedIntPoint(getBoundsInFrameCoordinates().location());
     return remote->accessibilityHitTest(IntPoint(offset));
 }
 
@@ -2276,7 +2258,7 @@ void AXLayoutObject::offsetBoundingBoxForRemoteSVGElement(LayoutRect& rect) cons
 {
     for (AXObject* parent = parentObject(); parent; parent = parent->parentObject()) {
         if (parent->isAXSVGRoot()) {
-            rect.moveBy(parent->parentObject()->elementRect().location());
+            rect.moveBy(parent->parentObject()->getBoundsInFrameCoordinates().location());
             break;
         }
     }
@@ -2416,56 +2398,6 @@ bool AXLayoutObject::elementAttributeValue(const QualifiedName& attributeName) c
         return false;
 
     return equalIgnoringCase(getAttribute(attributeName), "true");
-}
-
-LayoutRect AXLayoutObject::computeElementRect() const
-{
-    LayoutObject* obj = m_layoutObject;
-
-    if (!obj)
-        return LayoutRect();
-
-    if (obj->node()) // If we are a continuation, we want to make sure to use the primary layoutObject.
-        obj = obj->node()->layoutObject();
-
-    // absoluteFocusRingBoundingBox will query the hierarchy below this element, which for large webpages can be very slow.
-    // For a web area, which will have the most elements of any element, absoluteQuads should be used.
-    // We should also use absoluteQuads for SVG elements, otherwise transforms won't be applied.
-
-    LayoutRect result;
-    if (obj->isText()) {
-        Vector<FloatQuad> quads;
-        toLayoutText(obj)->absoluteQuads(quads, LayoutText::ClipToEllipsis);
-        result = LayoutRect(boundingBoxForQuads(obj, quads));
-    } else if (isWebArea() || obj->isSVGRoot()) {
-        result = LayoutRect(obj->absoluteBoundingBoxRect());
-    } else {
-        result = LayoutRect(obj->absoluteElementBoundingBoxRect());
-    }
-
-    Document* document = this->getDocument();
-    if (document && document->isSVGDocument())
-        offsetBoundingBoxForRemoteSVGElement(result);
-    if (document && document->frame() && document->frame()->pagePopupOwner()) {
-        IntPoint popupOrigin = document->view()->contentsToScreen(IntRect()).location();
-        IntPoint mainOrigin = axObjectCache().rootObject()->documentFrameView()->contentsToScreen(IntRect()).location();
-        result.moveBy(IntPoint(popupOrigin - mainOrigin));
-    }
-
-    // The size of the web area should be the content size, not the clipped size.
-    if (isWebArea() && obj->frame()->view())
-        result.setSize(LayoutSize(obj->frame()->view()->contentsSize()));
-
-    // Checkboxes and radio buttons include their label as part of their rect.
-    if (isCheckboxOrRadio()) {
-        HTMLLabelElement* label = labelForElement(toElement(m_layoutObject->node()));
-        if (label && label->layoutObject()) {
-            LayoutRect labelRect = axObjectCache().getOrCreate(label)->elementRect();
-            result.unite(labelRect);
-        }
-    }
-
-    return result;
 }
 
 } // namespace blink

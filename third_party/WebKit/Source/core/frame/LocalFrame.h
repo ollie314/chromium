@@ -31,17 +31,15 @@
 #include "core/CoreExport.h"
 #include "core/dom/WeakIdentifierMap.h"
 #include "core/frame/Frame.h"
-#include "core/frame/LocalFrameLifecycleNotifier.h"
-#include "core/frame/LocalFrameLifecycleObserver.h"
 #include "core/loader/FrameLoader.h"
 #include "core/page/FrameTree.h"
 #include "core/paint/PaintPhase.h"
 #include "platform/Supplementable.h"
 #include "platform/graphics/ImageOrientation.h"
-#include "platform/graphics/paint/DisplayItem.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollTypes.h"
 #include "wtf/HashSet.h"
+#include <memory>
 
 namespace blink {
 
@@ -59,29 +57,31 @@ class FrameSelection;
 class FrameView;
 class HTMLPlugInElement;
 class InputMethodController;
+class InterfaceProvider;
 class IntPoint;
 class IntSize;
 class InstrumentingAgents;
+class JSONObject;
+class LayoutView;
 class LayoutViewItem;
 class LocalDOMWindow;
 class NavigationScheduler;
 class Node;
 class NodeTraversal;
+template <typename Strategy> class PositionWithAffinityTemplate;
+class PluginData;
 class Range;
-class LayoutView;
-class TreeScope;
 class ScriptController;
-class ServiceRegistry;
 class SpellChecker;
-class TreeScope;
 class WebFrameHostScheduler;
 class WebFrameScheduler;
-template <typename Strategy> class PositionWithAffinityTemplate;
 
-class CORE_EXPORT LocalFrame : public Frame, public LocalFrameLifecycleNotifier, public Supplementable<LocalFrame>, public DisplayItemClient {
+extern template class CORE_EXTERN_TEMPLATE_EXPORT Supplement<LocalFrame>;
+
+class CORE_EXPORT LocalFrame final : public Frame, public Supplementable<LocalFrame> {
     USING_GARBAGE_COLLECTED_MIXIN(LocalFrame);
 public:
-    static LocalFrame* create(FrameLoaderClient*, FrameHost*, FrameOwner*, ServiceRegistry* = nullptr);
+    static LocalFrame* create(FrameLoaderClient*, FrameHost*, FrameOwner*, InterfaceProvider* = nullptr);
 
     void init();
     void setView(FrameView*);
@@ -92,7 +92,6 @@ public:
     // Frame overrides:
     ~LocalFrame() override;
     DECLARE_VIRTUAL_TRACE();
-    bool isLocalFrame() const override { return true; }
     DOMWindow* domWindow() const override;
     WindowProxy* windowProxy(DOMWrapperWorld&) override;
     void navigate(Document& originDocument, const KURL&, bool replaceCurrentItem, UserGestureStatus) override;
@@ -103,8 +102,9 @@ public:
     SecurityContext* securityContext() const override;
     void printNavigationErrorMessage(const Frame&, const char* reason) override;
     bool prepareForCommit() override;
+    void didChangeVisibilityState() override;
 
-    void willDetachFrameHost();
+    void detachChildren();
 
     LocalDOMWindow* localDOMWindow() const;
     void setDOMWindow(LocalDOMWindow*);
@@ -126,15 +126,21 @@ public:
     SpellChecker& spellChecker() const;
     FrameConsole& console() const;
 
-    void didChangeVisibilityState();
-
     // This method is used to get the highest level LocalFrame in this
     // frame's in-process subtree.
     // FIXME: This is a temporary hack to support RemoteFrames, and callers
     // should be updated to avoid storing things on the main frame.
     LocalFrame* localFrameRoot();
 
-    InstrumentingAgents* instrumentingAgents() const { return m_instrumentingAgents.get(); }
+    // Note that the result of this function should not be cached: a frame is
+    // not necessarily detached when it is navigated, so the return value can
+    // change.
+    // In addition, this function will always return true for a detached frame.
+    // TODO(dcheng): Move this to LocalDOMWindow and figure out the right
+    // behavior for detached windows.
+    bool isCrossOriginSubframe() const;
+
+    InstrumentingAgents* instrumentingAgents() { return m_instrumentingAgents.get(); }
 
     // ======== All public functions below this point are candidates to move out of LocalFrame into another class. ========
 
@@ -157,8 +163,8 @@ public:
     void deviceScaleFactorChanged();
     double devicePixelRatio() const;
 
-    PassOwnPtr<DragImage> nodeImage(Node&);
-    PassOwnPtr<DragImage> dragImageForSelection(float opacity);
+    std::unique_ptr<DragImage> nodeImage(Node&);
+    std::unique_ptr<DragImage> dragImageForSelection(float opacity);
 
     String selectedText() const;
     String selectedTextForClipboard() const;
@@ -171,11 +177,6 @@ public:
     bool shouldReuseDefaultView(const KURL&) const;
     void removeSpellingMarkersUnderWords(const Vector<String>& words);
 
-    // DisplayItemClient methods
-    String debugName() const final { return "LocalFrame"; }
-    // TODO(chrishtr): fix this.
-    LayoutRect visualRect() const override { return LayoutRect(); }
-
     bool shouldThrottleRendering() const;
 
     // Returns the frame scheduler, creating one if needed.
@@ -184,20 +185,28 @@ public:
 
     bool isNavigationAllowed() const { return m_navigationDisableCount == 0; }
 
-    ServiceRegistry* serviceRegistry() { return m_serviceRegistry; }
+    InterfaceProvider* interfaceProvider() { return m_interfaceProvider; }
+
+    FrameLoaderClient* client() const;
+
+    PluginData* pluginData() const;
 
 private:
     friend class FrameNavigationDisabler;
 
-    LocalFrame(FrameLoaderClient*, FrameHost*, FrameOwner*, ServiceRegistry*);
+    LocalFrame(FrameLoaderClient*, FrameHost*, FrameOwner*, InterfaceProvider*);
 
     // Internal Frame helper overrides:
     WindowProxyManager* getWindowProxyManager() const override;
-
-    String localLayerTreeAsText(unsigned flags) const;
+    // Intentionally private to prevent redundant checks when the type is
+    // already LocalFrame.
+    bool isLocalFrame() const override { return true; }
+    bool isRemoteFrame() const override { return false; }
 
     void enableNavigation() { --m_navigationDisableCount; }
     void disableNavigation() { ++m_navigationDisableCount; }
+
+    std::unique_ptr<WebFrameScheduler> m_frameScheduler;
 
     mutable FrameLoader m_loader;
     Member<NavigationScheduler> m_navigationScheduler;
@@ -214,7 +223,6 @@ private:
     const Member<EventHandler> m_eventHandler;
     const Member<FrameConsole> m_console;
     const Member<InputMethodController> m_inputMethodController;
-    OwnPtr<WebFrameScheduler> m_frameScheduler;
 
     int m_navigationDisableCount;
 
@@ -225,7 +233,7 @@ private:
 
     Member<InstrumentingAgents> m_instrumentingAgents;
 
-    ServiceRegistry* const m_serviceRegistry;
+    InterfaceProvider* const m_interfaceProvider;
 };
 
 inline void LocalFrame::init()
@@ -310,6 +318,30 @@ class FrameNavigationDisabler {
 public:
     explicit FrameNavigationDisabler(LocalFrame&);
     ~FrameNavigationDisabler();
+
+private:
+    Member<LocalFrame> m_frame;
+};
+
+// A helper class for attributing cost inside a scope to a LocalFrame, with
+// output written to the trace log. The class is irrelevant to the core logic
+// of LocalFrame.  Sample usage:
+//
+// void foo(LocalFrame* frame)
+// {
+//     ScopedFrameBlamer frameBlamer(frame);
+//     TRACE_EVENT0("blink", "foo");
+//     // Do some real work...
+// }
+//
+// In Trace Viewer, we can find the cost of slice |foo| attributed to |frame|.
+// Design doc: https://docs.google.com/document/d/15BB-suCb9j-nFt55yCFJBJCGzLg2qUm3WaSOPb8APtI/edit?usp=sharing
+class ScopedFrameBlamer {
+    WTF_MAKE_NONCOPYABLE(ScopedFrameBlamer);
+    STACK_ALLOCATED();
+public:
+    explicit ScopedFrameBlamer(LocalFrame*);
+    ~ScopedFrameBlamer();
 
 private:
     Member<LocalFrame> m_frame;

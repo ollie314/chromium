@@ -8,25 +8,13 @@
 #include "platform/heap/ThreadState.h"
 #include "wtf/Allocator.h"
 #include "wtf/Assertions.h"
-#include "wtf/ListHashSet.h"
 #include "wtf/TypeTraits.h"
 
 namespace blink {
 
 template<typename T> class GarbageCollected;
-template<typename T, typename U, typename V, typename W, typename X> class HeapHashMap;
-template<typename T, typename U, typename V> class HeapHashSet;
-template<typename T, typename U, typename V> class HeapLinkedHashSet;
-template<typename T, size_t inlineCapacity, typename U> class HeapListHashSet;
-template<typename T, size_t inlineCapacity> class HeapVector;
-template<typename T, size_t inlineCapacity> class HeapDeque;
-template<typename T, typename U, typename V> class HeapHashCountedSet;
-template<typename T> class HeapTerminatedArray;
-template<typename T, typename Traits> class HeapVectorBacking;
-template<typename Table> class HeapHashTableBacking;
-template<typename ValueArg, size_t inlineCapacity> class HeapListHashSetAllocator;
 class InlinedGlobalMarkingVisitor;
-template<typename T> class Persistent;
+class WrapperVisitor;
 
 // GC_PLUGIN_IGNORE is used to make the plugin ignore a particular class or
 // field when checking for proper usage.  When using GC_PLUGIN_IGNORE
@@ -56,49 +44,6 @@ public:
     static const bool value = sizeof(checkMarker<T>(nullptr)) == sizeof(YesType);
 };
 
-template <typename T>
-struct IsGarbageCollectedType {
-    using TrueType = char;
-    struct FalseType {
-        char dummy[2];
-    };
-
-    using NonConstType = typename std::remove_const<T>::type;
-    using GarbageCollectedSubclass = WTF::IsSubclassOfTemplate<NonConstType, GarbageCollected>;
-    using GarbageCollectedMixinSubclass = IsGarbageCollectedMixin<NonConstType>;
-    using HeapHashSetSubclass = WTF::IsSubclassOfTemplate<NonConstType, HeapHashSet>;
-    using HeapLinkedHashSetSubclass = WTF::IsSubclassOfTemplate<NonConstType, HeapLinkedHashSet>;
-    using HeapListHashSetSubclass = WTF::IsSubclassOfTemplateTypenameSizeTypename<NonConstType, HeapListHashSet>;
-    using HeapHashMapSubclass = WTF::IsSubclassOfTemplate<NonConstType, HeapHashMap>;
-    using HeapVectorSubclass = WTF::IsSubclassOfTemplateTypenameSize<NonConstType, HeapVector>;
-    using HeapDequeSubclass = WTF::IsSubclassOfTemplateTypenameSize<NonConstType, HeapDeque>;
-    using HeapHashCountedSetSubclass = WTF::IsSubclassOfTemplate<NonConstType, HeapHashCountedSet>;
-    using HeapTerminatedArraySubclass = WTF::IsSubclassOfTemplate<NonConstType, HeapTerminatedArray>;
-    using HeapVectorBackingSubclass = WTF::IsSubclassOfTemplate<NonConstType, HeapVectorBacking>;
-    using HeapHashTableBackingSubclass = WTF::IsSubclassOfTemplate<NonConstType, HeapHashTableBacking>;
-
-    template<typename U, size_t inlineCapacity> static TrueType listHashSetNodeIsHeapAllocated(WTF::ListHashSetNode<U, HeapListHashSetAllocator<U, inlineCapacity>>*);
-    static FalseType listHashSetNodeIsHeapAllocated(...);
-    static const bool isHeapAllocatedListHashSetNode = sizeof(TrueType) == sizeof(listHashSetNodeIsHeapAllocated(reinterpret_cast<NonConstType*>(0)));
-
-    static_assert(sizeof(T), "T must be fully defined");
-
-    static const bool value =
-        GarbageCollectedSubclass::value
-        || GarbageCollectedMixinSubclass::value
-        || HeapHashSetSubclass::value
-        || HeapLinkedHashSetSubclass::value
-        || HeapListHashSetSubclass::value
-        || HeapHashMapSubclass::value
-        || HeapVectorSubclass::value
-        || HeapDequeSubclass::value
-        || HeapHashCountedSetSubclass::value
-        || HeapTerminatedArraySubclass::value
-        || HeapVectorBackingSubclass::value
-        || HeapHashTableBackingSubclass::value
-        || isHeapAllocatedListHashSetNode;
-};
-
 // The GarbageCollectedMixin interface and helper macro
 // USING_GARBAGE_COLLECTED_MIXIN can be used to automatically define
 // TraceTrait/ObjectAliveTrait on non-leftmost deriving classes
@@ -112,22 +57,24 @@ struct IsGarbageCollectedType {
 // object header statically. This can be solved by using GarbageCollectedMixin:
 // class B : public GarbageCollectedMixin {};
 // class A : public GarbageCollected, public B {
-//   USING_GARBAGE_COLLECTED_MIXIN(A)
+//   USING_GARBAGE_COLLECTED_MIXIN(A);
 // };
 //
 // With the helper, as long as we are using Member<B>, TypeTrait<B> will
 // dispatch adjustAndMark dynamically to find collect addr of the object header.
 // Note that this is only enabled for Member<B>. For Member<A> which we can
 // compute the object header addr statically, this dynamic dispatch is not used.
+//
 class PLATFORM_EXPORT GarbageCollectedMixin {
-    IS_GARBAGE_COLLECTED_TYPE();
 public:
     typedef int IsGarbageCollectedMixinMarker;
     virtual void adjustAndMark(Visitor*) const = 0;
     virtual void trace(Visitor*) { }
     virtual void adjustAndMark(InlinedGlobalMarkingVisitor) const = 0;
     virtual void trace(InlinedGlobalMarkingVisitor);
+    virtual void adjustAndMarkWrapper(const WrapperVisitor*) const = 0;
     virtual bool isHeapObjectAlive() const = 0;
+    virtual HeapObjectHeader* adjustAndGetHeapObjectHeader() const = 0;
 };
 
 #define DEFINE_GARBAGE_COLLECTED_MIXIN_METHODS(VISITOR, TYPE)           \
@@ -142,6 +89,22 @@ public:
             return;                                                     \
         }                                                               \
         visitor->mark(static_cast<const TYPE*>(this), &blink::TraceTrait<TYPE>::trace); \
+    }                                                                   \
+    private:
+
+#define DEFINE_GARBAGE_COLLECTED_MIXIN_WRAPPER_METHODS(TYPE)            \
+    public:                                                             \
+    void adjustAndMarkWrapper(const WrapperVisitor* visitor) const override \
+    {                                                                   \
+        typedef WTF::IsSubclassOfTemplate<typename std::remove_const<TYPE>::type, blink::GarbageCollected> IsSubclassOfGarbageCollected; \
+        static_assert(IsSubclassOfGarbageCollected::value, "only garbage collected objects can have garbage collected mixins"); \
+        TraceTrait<TYPE>::markWrapper(visitor, static_cast<const TYPE*>(this));  \
+    }                                                                   \
+    HeapObjectHeader* adjustAndGetHeapObjectHeader() const override     \
+    {                                                                   \
+        typedef WTF::IsSubclassOfTemplate<typename std::remove_const<TYPE>::type, blink::GarbageCollected> IsSubclassOfGarbageCollected; \
+        static_assert(IsSubclassOfGarbageCollected::value, "only garbage collected objects can have garbage collected mixins"); \
+        return TraceTrait<TYPE>::heapObjectHeader(static_cast<const TYPE*>(this)); \
     }                                                                   \
     private:
 
@@ -200,11 +163,12 @@ public:
     IS_GARBAGE_COLLECTED_TYPE();                                        \
     DEFINE_GARBAGE_COLLECTED_MIXIN_METHODS(blink::Visitor*, TYPE)       \
     DEFINE_GARBAGE_COLLECTED_MIXIN_METHODS(blink::InlinedGlobalMarkingVisitor, TYPE) \
+    DEFINE_GARBAGE_COLLECTED_MIXIN_WRAPPER_METHODS(TYPE)                \
     DEFINE_GARBAGE_COLLECTED_MIXIN_CONSTRUCTOR_MARKER(TYPE)             \
 public:                                                                 \
     bool isHeapObjectAlive() const override                             \
     {                                                                   \
-        return ThreadHeap::isHeapObjectAlive(this);                           \
+        return ThreadHeap::isHeapObjectAlive(this);                     \
     }                                                                   \
 private:
 
@@ -273,86 +237,6 @@ protected:
     template<typename U, bool> friend struct FinalizerTraitImpl;
 };
 
-// Base class for objects that are in the Blink garbage-collected heap
-// and are still reference counted.
-//
-// This class should be used sparingly and only to gradually move
-// objects from being reference counted to being managed by the blink
-// garbage collector.
-//
-// While the current reference counting keeps one of these objects
-// alive it will have a Persistent handle to itself allocated so we
-// will not reclaim the memory.  When the reference count reaches 0 the
-// persistent handle will be deleted.  When the garbage collector
-// determines that there are no other references to the object it will
-// be reclaimed and the destructor of the reclaimed object will be
-// called at that time.
-template<typename T>
-class RefCountedGarbageCollected : public GarbageCollectedFinalized<T> {
-    WTF_MAKE_NONCOPYABLE(RefCountedGarbageCollected);
-
-public:
-    RefCountedGarbageCollected()
-        : m_refCount(0)
-    {
-    }
-
-    // Implement method to increase reference count for use with RefPtrs.
-    //
-    // In contrast to the normal WTF::RefCounted, the reference count can reach
-    // 0 and increase again.  This happens in the following scenario:
-    //
-    // (1) The reference count becomes 0, but members, persistents, or
-    //     on-stack pointers keep references to the object.
-    //
-    // (2) The pointer is assigned to a RefPtr again and the reference
-    //     count becomes 1.
-    //
-    // In this case, we have to resurrect m_keepAlive.
-    void ref()
-    {
-        if (UNLIKELY(!m_refCount)) {
-            ASSERT(ThreadState::current()->findPageFromAddress(reinterpret_cast<Address>(this)));
-            makeKeepAlive();
-        }
-        ++m_refCount;
-    }
-
-    // Implement method to decrease reference count for use with RefPtrs.
-    //
-    // In contrast to the normal WTF::RefCounted implementation, the
-    // object itself is not deleted when the reference count reaches
-    // 0.  Instead, the keep-alive persistent handle is deallocated so
-    // that the object can be reclaimed when the garbage collector
-    // determines that there are no other references to the object.
-    void deref()
-    {
-        ASSERT(m_refCount > 0);
-        if (!--m_refCount) {
-            delete m_keepAlive;
-            m_keepAlive = 0;
-        }
-    }
-
-    bool hasOneRef()
-    {
-        return m_refCount == 1;
-    }
-
-protected:
-    ~RefCountedGarbageCollected() { }
-
-private:
-    void makeKeepAlive()
-    {
-        ASSERT(!m_keepAlive);
-        m_keepAlive = new Persistent<T>(static_cast<T*>(this));
-    }
-
-    int m_refCount;
-    Persistent<T>* m_keepAlive;
-};
-
 template<typename T, bool = WTF::IsSubclassOfTemplate<typename std::remove_const<T>::type, GarbageCollected>::value> class NeedsAdjustAndMark;
 
 template<typename T>
@@ -387,13 +271,5 @@ public:
 };
 
 } // namespace blink
-
-namespace WTF {
-
-// Adoption is not needed nor wanted for RefCountedGarbageCollected<>-derived types.
-template<typename T>
-PassRefPtr<T> adoptRef(blink::RefCountedGarbageCollected<T>*) = delete;
-
-} // namespace WTF
 
 #endif

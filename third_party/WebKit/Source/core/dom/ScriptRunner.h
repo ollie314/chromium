@@ -28,6 +28,7 @@
 
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebTraceLocation.h"
 #include "wtf/Deque.h"
 #include "wtf/HashMap.h"
 #include "wtf/Noncopyable.h"
@@ -39,22 +40,25 @@ class Document;
 class ScriptLoader;
 class WebTaskRunner;
 
-class CORE_EXPORT ScriptRunner final : public GarbageCollectedFinalized<ScriptRunner> {
+class CORE_EXPORT ScriptRunner final : public GarbageCollected<ScriptRunner> {
     WTF_MAKE_NONCOPYABLE(ScriptRunner);
 public:
     static ScriptRunner* create(Document* document)
     {
         return new ScriptRunner(document);
     }
-    ~ScriptRunner();
 
-    enum ExecutionType { ASYNC_EXECUTION, IN_ORDER_EXECUTION };
-    void queueScriptForExecution(ScriptLoader*, ExecutionType);
+    // Async scripts may either execute asynchronously (as their load
+    // completes), or 'in order'. See
+    // http://www.html5rocks.com/en/tutorials/speed/script-loading/ for more
+    // information.
+    enum AsyncExecutionType { None, Async, InOrder };
+    void queueScriptForExecution(ScriptLoader*, AsyncExecutionType);
     bool hasPendingScripts() const { return !m_pendingInOrderScripts.isEmpty() || !m_pendingAsyncScripts.isEmpty(); }
     void suspend();
     void resume();
-    void notifyScriptReady(ScriptLoader*, ExecutionType);
-    void notifyScriptLoadError(ScriptLoader*, ExecutionType);
+    void notifyScriptReady(ScriptLoader*, AsyncExecutionType);
+    void notifyScriptLoadError(ScriptLoader*, AsyncExecutionType);
 
     static void movePendingScript(Document&, Document&, ScriptLoader*);
 

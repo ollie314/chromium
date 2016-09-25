@@ -10,10 +10,11 @@
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/InspectorInstrumentation.h"
-#include "core/workers/InProcessWorkerGlobalScopeProxy.h"
+#include "core/workers/InProcessWorkerMessagingProxy.h"
 #include "core/workers/WorkerScriptLoader.h"
 #include "core/workers/WorkerThread.h"
 #include "platform/network/ContentSecurityPolicyResponseHeaders.h"
+#include <memory>
 
 namespace blink {
 
@@ -26,27 +27,28 @@ InProcessWorkerBase::InProcessWorkerBase(ExecutionContext* context)
 
 InProcessWorkerBase::~InProcessWorkerBase()
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
     if (!m_contextProxy)
         return;
-    m_contextProxy->workerObjectDestroyed();
+    m_contextProxy->parentObjectDestroyed();
 }
 
 void InProcessWorkerBase::postMessage(ExecutionContext* context, PassRefPtr<SerializedScriptValue> message, const MessagePortArray& ports, ExceptionState& exceptionState)
 {
-    ASSERT(m_contextProxy);
+    DCHECK(m_contextProxy);
     // Disentangle the port in preparation for sending it to the remote context.
-    OwnPtr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(context, ports, exceptionState);
+    std::unique_ptr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(context, ports, exceptionState);
     if (exceptionState.hadException())
         return;
-    m_contextProxy->postMessageToWorkerGlobalScope(message, channels.release());
+    m_contextProxy->postMessageToWorkerGlobalScope(std::move(message), std::move(channels));
 }
 
 bool InProcessWorkerBase::initialize(ExecutionContext* context, const String& url, ExceptionState& exceptionState)
 {
     suspendIfNeeded();
 
-    KURL scriptURL = resolveURL(url, exceptionState);
+    // TODO(mkwst): Revisit the context as https://drafts.css-houdini.org/worklets/ evolves.
+    KURL scriptURL = resolveURL(url, exceptionState, WebURLRequest::RequestContextScript);
     if (scriptURL.isEmpty())
         return false;
 
@@ -56,10 +58,10 @@ bool InProcessWorkerBase::initialize(ExecutionContext* context, const String& ur
         scriptURL,
         DenyCrossOriginRequests,
         context->securityContext().addressSpace(),
-        bind(&InProcessWorkerBase::onResponse, this),
-        bind(&InProcessWorkerBase::onFinished, this));
+        WTF::bind(&InProcessWorkerBase::onResponse, wrapPersistent(this)),
+        WTF::bind(&InProcessWorkerBase::onFinished, wrapPersistent(this)));
 
-    m_contextProxy = createInProcessWorkerGlobalScopeProxy(context);
+    m_contextProxy = createInProcessWorkerMessagingProxy(context);
 
     return true;
 }
@@ -67,7 +69,7 @@ bool InProcessWorkerBase::initialize(ExecutionContext* context, const String& ur
 void InProcessWorkerBase::terminate()
 {
     if (m_contextProxy)
-        m_contextProxy->terminateWorkerGlobalScope();
+        m_contextProxy->terminateGlobalScope();
 }
 
 void InProcessWorkerBase::stop()
@@ -88,6 +90,13 @@ ContentSecurityPolicy* InProcessWorkerBase::contentSecurityPolicy()
     return m_contentSecurityPolicy.get();
 }
 
+String InProcessWorkerBase::referrerPolicy()
+{
+    if (m_scriptLoader)
+        return m_scriptLoader->referrerPolicy();
+    return m_referrerPolicy;
+}
+
 void InProcessWorkerBase::onResponse()
 {
     InspectorInstrumentation::didReceiveScriptResponse(getExecutionContext(), m_scriptLoader->identifier());
@@ -98,11 +107,12 @@ void InProcessWorkerBase::onFinished()
     if (m_scriptLoader->failed()) {
         dispatchEvent(Event::createCancelable(EventTypeNames::error));
     } else {
-        ASSERT(m_contextProxy);
+        DCHECK(m_contextProxy);
         m_contextProxy->startWorkerGlobalScope(m_scriptLoader->url(), getExecutionContext()->userAgent(), m_scriptLoader->script());
         InspectorInstrumentation::scriptImported(getExecutionContext(), m_scriptLoader->identifier(), m_scriptLoader->script());
     }
     m_contentSecurityPolicy = m_scriptLoader->releaseContentSecurityPolicy();
+    m_referrerPolicy = m_scriptLoader->referrerPolicy();
     m_scriptLoader = nullptr;
 }
 

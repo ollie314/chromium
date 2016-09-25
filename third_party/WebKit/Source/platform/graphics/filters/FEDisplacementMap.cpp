@@ -45,12 +45,17 @@ FEDisplacementMap* FEDisplacementMap::create(Filter* filter, ChannelSelectorType
     return new FEDisplacementMap(filter, xChannelSelector, yChannelSelector, scale);
 }
 
-FloatRect FEDisplacementMap::mapPaintRect(const FloatRect& rect, bool) const
+FloatRect FEDisplacementMap::mapEffect(const FloatRect& rect) const
 {
     FloatRect result = rect;
-    result.inflateX(getFilter()->applyHorizontalScale(m_scale / 2));
-    result.inflateY(getFilter()->applyVerticalScale(m_scale / 2));
+    result.inflateX(getFilter()->applyHorizontalScale(std::abs(m_scale) / 2));
+    result.inflateY(getFilter()->applyVerticalScale(std::abs(m_scale) / 2));
     return result;
+}
+
+FloatRect FEDisplacementMap::mapInputs(const FloatRect& rect) const
+{
+    return inputEffect(0)->mapRect(rect);
 }
 
 ChannelSelectorType FEDisplacementMap::xChannelSelector() const
@@ -154,24 +159,6 @@ TextStream& FEDisplacementMap::externalRepresentation(TextStream& ts, int indent
     inputEffect(0)->externalRepresentation(ts, indent + 1);
     inputEffect(1)->externalRepresentation(ts, indent + 1);
     return ts;
-}
-
-FloatRect FEDisplacementMap::determineAbsolutePaintRect(const FloatRect& requestedRect)
-{
-    FloatRect rect = requestedRect;
-    if (clipsToBounds())
-        rect.intersect(maxEffectRect());
-
-    if (absolutePaintRect().contains(enclosingIntRect(rect)))
-        return rect;
-
-    rect = mapPaintRect(rect, false);
-    rect = inputEffect(0)->determineAbsolutePaintRect(rect);
-    rect = mapPaintRect(rect, true);
-    rect.intersect(requestedRect);
-
-    addAbsolutePaintRect(rect);
-    return rect;
 }
 
 } // namespace blink

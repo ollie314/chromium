@@ -36,6 +36,7 @@ LayoutSVGContainer::LayoutSVGContainer(SVGElement* node)
     : LayoutSVGModelObject(node)
     , m_objectBoundingBoxValid(false)
     , m_needsBoundariesUpdate(true)
+    , m_didScreenScaleFactorChange(false)
     , m_hasNonIsolatedBlendingDescendants(false)
     , m_hasNonIsolatedBlendingDescendantsDirty(false)
 {
@@ -54,30 +55,25 @@ void LayoutSVGContainer::layout()
     calcViewport();
 
     // Allow LayoutSVGTransformableContainer to update its transform.
-    bool updatedTransform = calculateLocalTransform();
+    SVGTransformChange transformChange = calculateLocalTransform();
+    m_didScreenScaleFactorChange =
+        transformChange == SVGTransformChange::Full || SVGLayoutSupport::screenScaleFactorChanged(parent());
 
     // LayoutSVGViewportContainer needs to set the 'layout size changed' flag.
     determineIfLayoutSizeChanged();
-
-    bool transformChanged = SVGLayoutSupport::transformToRootChanged(this);
 
     // When hasRelativeLengths() is false, no descendants have relative lengths
     // (hence no one is interested in viewport size changes).
     bool layoutSizeChanged = element()->hasRelativeLengths()
         && SVGLayoutSupport::layoutSizeOfNearestViewportChanged(this);
 
-    // If any of this container's children need to be laid out, and a filter is
-    // applied to the container, we need to issue paint invalidations for all
-    // the descendants.
-    bool forceLayoutOfChildren = selfNeedsLayout()
-        || (normalChildNeedsLayout() && SVGLayoutSupport::hasFilterResource(*this));
-    SVGLayoutSupport::layoutChildren(firstChild(), forceLayoutOfChildren, transformChanged, layoutSizeChanged);
+    SVGLayoutSupport::layoutChildren(firstChild(), false, m_didScreenScaleFactorChange, layoutSizeChanged);
 
     // Invalidate all resources of this client if our layout changed.
     if (everHadLayout() && needsLayout())
         SVGResourcesCache::clientLayoutChanged(this);
 
-    if (m_needsBoundariesUpdate || updatedTransform) {
+    if (m_needsBoundariesUpdate || transformChange != SVGTransformChange::None) {
         updateCachedBoundaries();
         m_needsBoundariesUpdate = false;
 
@@ -85,6 +81,7 @@ void LayoutSVGContainer::layout()
         LayoutSVGModelObject::setNeedsBoundariesUpdate();
     }
 
+    ASSERT(!m_needsBoundariesUpdate);
     clearNeedsLayout();
 }
 
@@ -169,6 +166,8 @@ void LayoutSVGContainer::updateCachedBoundaries()
 {
     SVGLayoutSupport::computeContainerBoundingBoxes(this, m_objectBoundingBox, m_objectBoundingBoxValid, m_strokeBoundingBox, m_paintInvalidationBoundingBox);
     SVGLayoutSupport::intersectPaintInvalidationRectWithResources(this, m_paintInvalidationBoundingBox);
+    if (element())
+        element()->setNeedsResizeObserverUpdate();
 }
 
 bool LayoutSVGContainer::nodeAtFloatPoint(HitTestResult& result, const FloatPoint& pointInParent, HitTestAction hitTestAction)
@@ -178,7 +177,7 @@ bool LayoutSVGContainer::nodeAtFloatPoint(HitTestResult& result, const FloatPoin
         return false;
 
     FloatPoint localPoint;
-    if (!SVGLayoutSupport::transformToUserSpaceAndCheckClipping(this, localToSVGParentTransform(), pointInParent, localPoint))
+    if (!SVGLayoutSupport::transformToUserSpaceAndCheckClipping(*this, localToSVGParentTransform(), pointInParent, localPoint))
         return false;
 
     for (LayoutObject* child = lastChild(); child; child = child->previousSibling()) {
@@ -190,10 +189,10 @@ bool LayoutSVGContainer::nodeAtFloatPoint(HitTestResult& result, const FloatPoin
         }
     }
 
-    // pointer-events=boundingBox makes it possible for containers to be direct targets
+    // pointer-events: bounding-box makes it possible for containers to be direct targets.
     if (style()->pointerEvents() == PE_BOUNDINGBOX) {
-        ASSERT(isObjectBoundingBoxValid());
-        if (objectBoundingBox().contains(localPoint)) {
+        // Check for a valid bounding box because it will be invalid for empty containers.
+        if (isObjectBoundingBoxValid() && objectBoundingBox().contains(localPoint)) {
             const LayoutPoint& localLayoutPoint = roundedLayoutPoint(localPoint);
             updateHitTestResult(result, localLayoutPoint);
             if (result.addNodeToListBasedTestResult(element(), localLayoutPoint) == StopHitTesting)
@@ -202,6 +201,11 @@ bool LayoutSVGContainer::nodeAtFloatPoint(HitTestResult& result, const FloatPoin
     }
     // 16.4: "If there are no graphics elements whose relevant graphics content is under the pointer (i.e., there is no target element), the event is not dispatched."
     return false;
+}
+
+SVGTransformChange LayoutSVGContainer::calculateLocalTransform()
+{
+    return SVGTransformChange::None;
 }
 
 } // namespace blink

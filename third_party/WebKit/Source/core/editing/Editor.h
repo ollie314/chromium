@@ -34,11 +34,12 @@
 #include "core/editing/FrameSelection.h"
 #include "core/editing/VisibleSelection.h"
 #include "core/editing/WritingDirection.h"
-#include "core/editing/commands/EditAction.h"
 #include "core/editing/iterators/TextIterator.h"
 #include "core/editing/markers/DocumentMarker.h"
+#include "core/events/InputEvent.h"
 #include "platform/PasteMode.h"
 #include "platform/heap/Handle.h"
+#include <memory>
 
 namespace blink {
 
@@ -55,6 +56,8 @@ class SpellChecker;
 class StylePropertySet;
 class TextEvent;
 class UndoStack;
+
+enum class DeleteDirection;
 
 enum EditorCommandSource { CommandFromMenuOrKeyBinding, CommandFromDOM };
 enum EditorParagraphSeparator { EditorParagraphSeparatorIsDiv, EditorParagraphSeparatorIsP };
@@ -84,10 +87,10 @@ public:
     bool canDelete() const;
     bool canSmartCopyOrDelete() const;
 
-    void cut();
+    void cut(EditorCommandSource);
     void copy();
-    void paste();
-    void pasteAsPlainText();
+    void paste(EditorCommandSource);
+    void pasteAsPlainText(EditorCommandSource);
     void performDelete();
 
     static void countEvent(ExecutionContext*, const Event*);
@@ -105,13 +108,13 @@ public:
 
     void clearLastEditCommand();
 
-    bool deleteWithDirection(SelectionDirection, TextGranularity, bool killRing, bool isTypingAction);
-    void deleteSelectionWithSmartDelete(bool smartDelete);
+    bool deleteWithDirection(DeleteDirection, TextGranularity, bool killRing, bool isTypingAction);
+    void deleteSelectionWithSmartDelete(bool smartDelete, InputEvent::InputType);
 
-    void applyStyle(StylePropertySet*, EditAction = EditActionUnspecified);
-    void applyParagraphStyle(StylePropertySet*, EditAction = EditActionUnspecified);
-    void applyStyleToSelection(StylePropertySet*, EditAction);
-    void applyParagraphStyleToSelection(StylePropertySet*, EditAction);
+    void applyStyle(StylePropertySet*, InputEvent::InputType);
+    void applyParagraphStyle(StylePropertySet*, InputEvent::InputType);
+    void applyStyleToSelection(StylePropertySet*, InputEvent::InputType);
+    void applyParagraphStyleToSelection(StylePropertySet*, InputEvent::InputType);
 
     void appliedEditing(CompositeEditCommand*);
     void unappliedEditing(EditCommandComposition*);
@@ -145,6 +148,10 @@ public:
             DCHECK(m_frame);
             return *m_frame;
         }
+
+        // Returns target ranges for the command, currently only supports delete related commands.
+        // Used by InputEvent.
+        RangeVector* getTargetRanges() const;
 
         const EditorInternalCommand* m_command;
         EditorCommandSource m_source;
@@ -208,10 +215,10 @@ public:
     const VisibleSelection& mark() const; // Mark, to be used as emacs uses it.
     void setMark(const VisibleSelection&);
 
-    void computeAndSetTypingStyle(StylePropertySet* , EditAction = EditActionUnspecified);
+    void computeAndSetTypingStyle(StylePropertySet*, InputEvent::InputType);
 
+    // |firstRectForRange| requires up-to-date layout.
     IntRect firstRectForRange(const EphemeralRange&) const;
-    IntRect firstRectForRange(const Range*) const;
 
     void respondToChangedSelection(const VisibleSelection& oldSelection, FrameSelection::SetSelectionOptions);
 
@@ -248,10 +255,11 @@ public:
 private:
     Member<LocalFrame> m_frame;
     Member<CompositeEditCommand> m_lastEditCommand;
+    const Member<UndoStack> m_undoStack;
     int m_preventRevealSelection;
     bool m_shouldStartNewKillRingSequence;
     bool m_shouldStyleWithCSS;
-    const OwnPtr<KillRing> m_killRing;
+    const std::unique_ptr<KillRing> m_killRing;
     VisibleSelection m_mark;
     bool m_areMarkedTextMatchesHighlighted;
     EditorParagraphSeparator m_defaultParagraphSeparator;
@@ -266,9 +274,6 @@ private:
     }
 
     bool canDeleteRange(const EphemeralRange&) const;
-    bool shouldDeleteRange(const EphemeralRange&) const;
-
-    UndoStack* undoStack() const;
 
     bool tryDHTMLCopy();
     bool tryDHTMLCut();
@@ -282,14 +287,13 @@ private:
 
     void revealSelectionAfterEditingOperation(const ScrollAlignment& = ScrollAlignment::alignCenterIfNeeded, RevealExtentOption = DoNotRevealExtent);
     void changeSelectionAfterCommand(const VisibleSelection& newSelection, FrameSelection::SetSelectionOptions);
-    void notifyComponentsOnChangedSelection(const VisibleSelection& oldSelection, FrameSelection::SetSelectionOptions);
+    void notifyComponentsOnChangedSelection();
 
     Element* findEventTargetFromSelection() const;
 
     SpellChecker& spellChecker() const;
 
     bool handleEditingKeyboardEvent(KeyboardEvent*);
-    void requestSpellcheckingAfterApplyingCommand(CompositeEditCommand*);
 };
 
 inline void Editor::setStartNewKillRingSequence(bool flag)

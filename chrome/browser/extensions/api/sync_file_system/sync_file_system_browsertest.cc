@@ -8,7 +8,7 @@
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -102,7 +102,7 @@ class SyncFileSystemTest : public extensions::PlatformAppBrowserTest,
     remote_service_ = new drive_backend::SyncEngine(
         base::ThreadTaskRunnerHandle::Get(),  // ui_task_runner
         MakeSequencedTaskRunner(), MakeSequencedTaskRunner(),
-        content::BrowserThread::GetBlockingPool(), base_dir_.path(),
+        content::BrowserThread::GetBlockingPool(), base_dir_.GetPath(),
         NULL,  // task_logger
         NULL,  // notification_manager
         extension_service,

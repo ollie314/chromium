@@ -16,17 +16,18 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
+#include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
+#include "ui/events/base_event_utils.h"
 #include "ui/events/devices/x11/device_data_manager_x11.h"
 #include "ui/events/devices/x11/device_list_cache_x11.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
-#include "ui/gfx/display.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/x/x11_atom_cache.h"
-#include "ui/gfx/x/x11_types.h"
 
 namespace {
 
@@ -266,6 +267,15 @@ ui::EventType GetTouchEventType(const XEvent& xev) {
       if (!(event->flags & XIPointerEmulated) && GetButtonMaskForX2Event(event))
         return ui::ET_TOUCH_MOVED;
       return ui::ET_UNKNOWN;
+    case XI_DeviceChanged:
+      // This can happen when --touch-devices flag is used.
+      return ui::ET_UNKNOWN;
+    case XI_Leave:
+    case XI_Enter:
+    case XI_FocusIn:
+    case XI_FocusOut:
+      // These may be handled by the PlatformEventDispatcher directly.
+      return ui::ET_UNKNOWN;
     default:
       NOTREACHED();
   }
@@ -302,22 +312,40 @@ bool GetGestureTimes(const XEvent& xev, double* start_time, double* end_time) {
   return true;
 }
 
-int64_t g_last_seen_timestamp_ms_ = 0;
-// accumulated rollover time.
-int64_t g_rollover_ms_ = 0;
+int64_t g_last_seen_timestamp_ms = 0;
+int64_t g_rollover_ms = 0;
 
-// Takes a 32-bit timestamp in milliseconds (e.g., an Xlib Time) and returns
-// a time delta that is immune to timer rollover. This function is not thread
-// safe as we do not use a lock.
-base::TimeDelta TimeDeltaFromXEventTime(uint32_t timestamp) {
-  int64_t timestamp_64 = static_cast<int64_t>(timestamp);
+// Takes Xlib Time and returns a time delta that is immune to timer rollover.
+// This function is not thread safe as we do not use a lock.
+base::TimeTicks TimeTicksFromXEventTime(Time timestamp) {
+  int64_t timestamp64 = timestamp;
+
+  if (!timestamp)
+    return ui::EventTimeForNow();
+
+  // If this is the first event that we get, assume the time stamp roll-over
+  // might have happened before the process was started.
   // Register a rollover if the distance between last timestamp and current one
   // is larger than half the width. This avoids false rollovers even in a case
   // where X server delivers reasonably close events out-of-order.
-  if (g_last_seen_timestamp_ms_ - timestamp_64 > (UINT32_MAX >> 1))
-    g_rollover_ms_ += static_cast<int64_t>(UINT32_MAX) + 1;  // ~49.7 days.
-  g_last_seen_timestamp_ms_ = timestamp_64;
-  return base::TimeDelta::FromMilliseconds(g_rollover_ms_ + timestamp_64);
+  bool had_recent_rollover =
+      !g_last_seen_timestamp_ms ||
+      g_last_seen_timestamp_ms - timestamp64 > (UINT32_MAX >> 1);
+
+  g_last_seen_timestamp_ms = timestamp64;
+  if (!had_recent_rollover)
+    return base::TimeTicks() +
+        base::TimeDelta::FromMilliseconds(g_rollover_ms + timestamp);
+
+  DCHECK(timestamp64 <= UINT32_MAX)
+      << "X11 Time does not roll over 32 bit, the below logic is likely wrong";
+
+  base::TimeTicks now_ticks = ui::EventTimeForNow();
+  int64_t now_ms = (now_ticks - base::TimeTicks()).InMilliseconds();
+
+  g_rollover_ms = now_ms & ~static_cast<int64_t>(UINT32_MAX);
+  uint32_t delta = static_cast<uint32_t>(now_ms - timestamp);
+  return base::TimeTicks() + base::TimeDelta::FromMilliseconds(now_ms - delta);
 }
 
 }  // namespace
@@ -329,8 +357,7 @@ EventType EventTypeFromXEvent(const XEvent& xev) {
   // ET_UNKNOWN as the type so this event will not be further processed.
   // NOTE: During some events unittests there is no device data manager.
   if (DeviceDataManager::HasInstance() &&
-      static_cast<DeviceDataManagerX11*>(DeviceDataManager::GetInstance())
-          ->IsEventBlocked(xev)) {
+      DeviceDataManagerX11::GetInstance()->IsEventBlocked(xev)) {
     return ET_UNKNOWN;
   }
 
@@ -494,41 +521,41 @@ int EventFlagsFromXEvent(const XEvent& xev) {
   return 0;
 }
 
-base::TimeDelta EventTimeFromXEvent(const XEvent& xev) {
+base::TimeTicks EventTimeFromXEvent(const XEvent& xev) {
   switch (xev.type) {
     case KeyPress:
     case KeyRelease:
-      return TimeDeltaFromXEventTime(xev.xkey.time);
+      return TimeTicksFromXEventTime(xev.xkey.time);
     case ButtonPress:
     case ButtonRelease:
-      return TimeDeltaFromXEventTime(xev.xbutton.time);
+      return TimeTicksFromXEventTime(xev.xbutton.time);
       break;
     case MotionNotify:
-      return TimeDeltaFromXEventTime(xev.xmotion.time);
+      return TimeTicksFromXEventTime(xev.xmotion.time);
       break;
     case EnterNotify:
     case LeaveNotify:
-      return TimeDeltaFromXEventTime(xev.xcrossing.time);
+      return TimeTicksFromXEventTime(xev.xcrossing.time);
       break;
     case GenericEvent: {
       double start, end;
       double touch_timestamp;
       if (GetGestureTimes(xev, &start, &end)) {
         // If the driver supports gesture times, use them.
-        return base::TimeDelta::FromMicroseconds(end * 1000000);
+        return ui::EventTimeStampFromSeconds(end);
       } else if (DeviceDataManagerX11::GetInstance()->GetEventData(
                      xev, DeviceDataManagerX11::DT_TOUCH_RAW_TIMESTAMP,
                      &touch_timestamp)) {
-        return base::TimeDelta::FromMicroseconds(touch_timestamp * 1000000);
+        return ui::EventTimeStampFromSeconds(touch_timestamp);
       } else {
         XIDeviceEvent* xide = static_cast<XIDeviceEvent*>(xev.xcookie.data);
-        return TimeDeltaFromXEventTime(xide->time);
+        return TimeTicksFromXEventTime(xide->time);
       }
       break;
     }
   }
   NOTREACHED();
-  return base::TimeDelta();
+  return base::TimeTicks();
 }
 
 gfx::Point EventLocationFromXEvent(const XEvent& xev) {
@@ -626,15 +653,22 @@ gfx::Vector2d GetMouseWheelOffsetFromXEvent(const XEvent& xev) {
   int button = xev.type == GenericEvent ? EventButtonFromXEvent(xev)
                                         : xev.xbutton.button;
 
+  // If this is an xinput1 scroll event from an xinput2 mouse then we need to
+  // block the legacy scroll events for the necessary axes.
+  int scroll_class_type =
+      DeviceDataManagerX11::GetInstance()->GetScrollClassDeviceDetail(xev);
+  bool xi2_vertical = scroll_class_type & SCROLL_TYPE_VERTICAL;
+  bool xi2_horizontal = scroll_class_type & SCROLL_TYPE_HORIZONTAL;
+
   switch (button) {
     case 4:
-      return gfx::Vector2d(0, kWheelScrollAmount);
+      return gfx::Vector2d(0, xi2_vertical ? 0 : kWheelScrollAmount);
     case 5:
-      return gfx::Vector2d(0, -kWheelScrollAmount);
+      return gfx::Vector2d(0, xi2_vertical ? 0 : -kWheelScrollAmount);
     case 6:
-      return gfx::Vector2d(kWheelScrollAmount, 0);
+      return gfx::Vector2d(xi2_horizontal ? 0 : kWheelScrollAmount, 0);
     case 7:
-      return gfx::Vector2d(-kWheelScrollAmount, 0);
+      return gfx::Vector2d(xi2_horizontal ? 0 : -kWheelScrollAmount, 0);
     default:
       return gfx::Vector2d();
   }
@@ -731,7 +765,7 @@ bool GetScrollOffsetsFromXEvent(const XEvent& xev,
     return true;
   }
 
-  if (DeviceDataManagerX11::GetInstance()->GetScrollClassDeviceDetail(xev) !=
+  if (DeviceDataManagerX11::GetInstance()->GetScrollClassEventDetail(xev) !=
       SCROLL_TYPE_NO_SCROLL) {
     double x_scroll_offset, y_scroll_offset;
     DeviceDataManagerX11::GetInstance()->GetScrollClassOffsets(
@@ -771,9 +805,11 @@ bool GetFlingDataFromXEvent(const XEvent& xev,
   return true;
 }
 
-void ResetTimestampRolloverCountersForTesting() {
-  g_last_seen_timestamp_ms_ = 0;
-  g_rollover_ms_ = 0;
+void ResetTimestampRolloverCountersForTesting(
+    std::unique_ptr<base::TickClock> tick_clock) {
+  g_last_seen_timestamp_ms = 0;
+  g_rollover_ms = 0;
+  SetEventTickClockForTesting(std::move(tick_clock));
 }
 
 }  // namespace ui

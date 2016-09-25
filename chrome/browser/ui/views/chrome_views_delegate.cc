@@ -6,6 +6,9 @@
 
 #include <memory>
 
+#include "base/location.h"
+#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -14,17 +17,19 @@
 #include "chrome/browser/lifetime/keep_alive_types.h"
 #include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/browser_window_state.h"
+#include "chrome/grit/chrome_unscaled_resources.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/context_factory.h"
-#include "grit/chrome_unscaled_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/screen.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/widget/native_widget.h"
 #include "ui/views/widget/widget.h"
@@ -35,8 +40,7 @@
 #include "base/profiler/scoped_tracker.h"
 #include "base/task_runner_util.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/app_icon_win.h"
-#include "content/public/browser/browser_thread.h"
+#include "chrome/browser/win/app_icon.h"
 #include "ui/base/win/shell.h"
 #endif
 
@@ -56,12 +60,12 @@
 #endif
 
 #if defined(USE_ASH)
-#include "ash/accelerators/accelerator_controller.h"
-#include "ash/shell.h"
-#include "ash/wm/window_state.h"
-#include "ash/wm/window_state_aura.h"
-#include "chrome/browser/ui/ash/ash_init.h"
-#include "chrome/browser/ui/ash/ash_util.h"
+#include "ash/common/accelerators/accelerator_controller.h"  // nogncheck
+#include "ash/common/wm/window_state.h"  // nogncheck
+#include "ash/common/wm_shell.h"  // nogncheck
+#include "ash/shell.h"  // nogncheck
+#include "ash/wm/window_state_aura.h"  // nogncheck
+#include "chrome/browser/ui/ash/ash_init.h"  // nogncheck
 #endif
 
 // Helpers --------------------------------------------------------------------
@@ -167,7 +171,7 @@ int GetAppbarAutohideEdgesOnWorkerThread(HMONITOR monitor) {
 void ProcessAcceleratorNow(const ui::Accelerator& accelerator) {
   // TODO(afakhry): See if we need here to send the accelerator to the
   // FocusManager of the active window in a follow-up CL.
-  ash::Shell::GetInstance()->accelerator_controller()->Process(accelerator);
+  ash::WmShell::Get()->accelerator_controller()->Process(accelerator);
 }
 #endif  // defined(USE_ASH)
 
@@ -207,7 +211,7 @@ void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
   window_preferences->SetBoolean("maximized",
                                  show_state == ui::SHOW_STATE_MAXIMIZED);
   window_preferences->SetBoolean("docked", show_state == ui::SHOW_STATE_DOCKED);
-  gfx::Rect work_area(gfx::Screen::GetScreen()
+  gfx::Rect work_area(display::Screen::GetScreen()
                           ->GetDisplayNearestWindow(window->GetNativeView())
                           .work_area());
   window_preferences->SetInteger("work_area_left", work_area.x());
@@ -248,7 +252,8 @@ bool ChromeViewsDelegate::GetSavedWindowPlacement(
   // On Ash environment, a window won't span across displays.  Adjust
   // the bounds to fit the work area.
   gfx::NativeView window = widget->GetNativeView();
-  gfx::Display display = gfx::Screen::GetScreen()->GetDisplayMatching(*bounds);
+  display::Display display =
+      display::Screen::GetScreen()->GetDisplayMatching(*bounds);
   bounds->AdjustToFit(display.work_area());
   ash::wm::GetWindowState(window)->set_minimum_visibility(true);
 #endif
@@ -267,16 +272,19 @@ views::ViewsDelegate::ProcessMenuAcceleratorResult
 ChromeViewsDelegate::ProcessAcceleratorWhileMenuShowing(
     const ui::Accelerator& accelerator) {
 #if defined(USE_ASH)
+  // Early return because mash chrome does not have access to ash::Shell
+  if (chrome::IsRunningInMash())
+    return views::ViewsDelegate::ProcessMenuAcceleratorResult::LEAVE_MENU_OPEN;
+
   ash::AcceleratorController* accelerator_controller =
-      ash::Shell::GetInstance()->accelerator_controller();
+      ash::WmShell::Get()->accelerator_controller();
 
   accelerator_controller->accelerator_history()->StoreCurrentAccelerator(
       accelerator);
   if (accelerator_controller->ShouldCloseMenuAndRepostAccelerator(
           accelerator)) {
-    base::MessageLoopForUI::current()->PostTask(
-        FROM_HERE,
-        base::Bind(ProcessAcceleratorNow, accelerator));
+    base::MessageLoopForUI::current()->task_runner()->PostTask(
+        FROM_HERE, base::Bind(ProcessAcceleratorNow, accelerator));
     return views::ViewsDelegate::ProcessMenuAcceleratorResult::CLOSE_MENU;
   }
 
@@ -306,8 +314,7 @@ gfx::ImageSkia* ChromeViewsDelegate::GetDefaultWindowIcon() const {
 #if defined(USE_ASH)
 views::NonClientFrameView* ChromeViewsDelegate::CreateDefaultNonClientFrameView(
     views::Widget* widget) {
-  return chrome::IsNativeViewInAsh(widget->GetNativeView()) ?
-      ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget) : NULL;
+  return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(widget);
 }
 #endif
 

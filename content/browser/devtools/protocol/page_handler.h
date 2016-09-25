@@ -21,10 +21,13 @@ class SkBitmap;
 
 namespace content {
 
+class NavigationHandle;
 class RenderFrameHostImpl;
 class WebContentsImpl;
 
 namespace devtools {
+class PageNavigationThrottle;
+
 namespace page {
 
 class ColorPicker;
@@ -39,9 +42,9 @@ class PageHandler : public NotificationObserver {
   void SetRenderFrameHost(RenderFrameHostImpl* host);
   void SetClient(std::unique_ptr<Client> client);
   void Detached();
-  void OnSwapCompositorFrame(const cc::CompositorFrameMetadata& frame_metadata);
-  void OnSynchronousSwapCompositorFrame(const cc::CompositorFrameMetadata&
-      frame_metadata);
+  void OnSwapCompositorFrame(cc::CompositorFrameMetadata frame_metadata);
+  void OnSynchronousSwapCompositorFrame(
+      cc::CompositorFrameMetadata frame_metadata);
   void DidAttachInterstitialPage();
   void DidDetachInterstitialPage();
   bool screencast_enabled() const { return enabled_ && screencast_enabled_; }
@@ -79,14 +82,23 @@ class PageHandler : public NotificationObserver {
   Response SetColorPickerEnabled(bool enabled);
   Response RequestAppBanner();
 
+  Response SetControlNavigations(bool enabled);
+  Response ProcessNavigation(const std::string& response, int navigation_id);
+
+  std::unique_ptr<PageNavigationThrottle> CreateThrottleForNavigation(
+      NavigationHandle* navigation_handle);
+
+  void OnPageNavigationThrottleDisposed(int navigation_id);
+  void NavigationRequested(const PageNavigationThrottle* throttle);
+
  private:
   WebContentsImpl* GetWebContents();
   void NotifyScreencastVisibility(bool visible);
   void InnerSwapCompositorFrame();
-  void ScreencastFrameCaptured(const cc::CompositorFrameMetadata& metadata,
+  void ScreencastFrameCaptured(cc::CompositorFrameMetadata metadata,
                                const SkBitmap& bitmap,
                                ReadbackResponse response);
-  void ScreencastFrameEncoded(const cc::CompositorFrameMetadata& metadata,
+  void ScreencastFrameEncoded(cc::CompositorFrameMetadata metadata,
                               const base::Time& timestamp,
                               const std::string& data);
 
@@ -119,6 +131,10 @@ class PageHandler : public NotificationObserver {
   int frames_in_flight_;
 
   std::unique_ptr<ColorPicker> color_picker_;
+
+  bool navigation_throttle_enabled_;
+  int next_navigation_id_;
+  std::map<int, PageNavigationThrottle*> navigation_throttles_;
 
   RenderFrameHostImpl* host_;
   std::unique_ptr<Client> client_;

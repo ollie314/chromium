@@ -4,9 +4,15 @@
 
 #include "ash/wm/panels/panel_frame_view.h"
 
-#include "ash/frame/caption_buttons/frame_caption_button_container_view.h"
-#include "ash/frame/default_header_painter.h"
-#include "ash/frame/frame_border_hit_test_controller.h"
+#include "ash/common/frame/caption_buttons/frame_caption_button_container_view.h"
+#include "ash/common/frame/default_header_painter.h"
+#include "ash/common/frame/frame_border_hit_test.h"
+#include "ash/common/material_design/material_design_controller.h"
+#include "ash/common/wm_lookup.h"
+#include "ash/common/wm_shell.h"
+#include "ash/common/wm_window.h"
+#include "ui/aura/client/aura_constants.h"
+#include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/controls/image_view.h"
@@ -19,22 +25,24 @@ namespace ash {
 const char PanelFrameView::kViewClassName[] = "PanelFrameView";
 
 PanelFrameView::PanelFrameView(views::Widget* frame, FrameType frame_type)
-    : frame_(frame),
-      caption_button_container_(NULL),
-      window_icon_(NULL),
-      frame_border_hit_test_controller_(
-          new FrameBorderHitTestController(frame_)) {
+    : frame_(frame), caption_button_container_(nullptr), window_icon_(nullptr) {
+  WmLookup::Get()->GetWindowForWidget(frame)->InstallResizeHandleWindowTargeter(
+      nullptr);
   DCHECK(!frame_->widget_delegate()->CanMaximize());
   if (frame_type != FRAME_NONE)
     InitHeaderPainter();
+  WmShell::Get()->AddShellObserver(this);
 }
 
 PanelFrameView::~PanelFrameView() {
+  WmShell::Get()->RemoveShellObserver(this);
 }
 
 void PanelFrameView::SetFrameColors(SkColor active_frame_color,
                                     SkColor inactive_frame_color) {
   header_painter_->SetFrameColors(active_frame_color, inactive_frame_color);
+  frame_->GetNativeWindow()->SetProperty(
+      aura::client::kTopViewColor, header_painter_->GetInactiveFrameColor());
 }
 
 const char* PanelFrameView::GetClassName() const {
@@ -43,6 +51,8 @@ const char* PanelFrameView::GetClassName() const {
 
 void PanelFrameView::InitHeaderPainter() {
   header_painter_.reset(new DefaultHeaderPainter);
+  frame_->GetNativeWindow()->SetProperty(
+      aura::client::kTopViewColor, header_painter_->GetInactiveFrameColor());
 
   caption_button_container_ = new FrameCaptionButtonContainerView(frame_);
   AddChildView(caption_button_container_);
@@ -66,16 +76,17 @@ gfx::Size PanelFrameView::GetMinimumSize() const {
   if (!header_painter_)
     return gfx::Size();
   gfx::Size min_client_view_size(frame_->client_view()->GetMinimumSize());
-  return gfx::Size(
-      std::max(header_painter_->GetMinimumHeaderWidth(),
-               min_client_view_size.width()),
-      NonClientTopBorderHeight() + min_client_view_size.height());
+  return gfx::Size(std::max(header_painter_->GetMinimumHeaderWidth(),
+                            min_client_view_size.width()),
+                   NonClientTopBorderHeight() + min_client_view_size.height());
 }
 
 void PanelFrameView::Layout() {
   if (!header_painter_)
     return;
   header_painter_->LayoutHeader();
+  frame_->GetNativeWindow()->SetProperty(aura::client::kTopViewInset,
+                                         NonClientTopBorderHeight());
 }
 
 void PanelFrameView::GetWindowMask(const gfx::Size&, gfx::Path*) {
@@ -101,26 +112,7 @@ void PanelFrameView::UpdateWindowTitle() {
   header_painter_->SchedulePaintForTitle();
 }
 
-void PanelFrameView::SizeConstraintsChanged() {
-}
-
-int PanelFrameView::NonClientHitTest(const gfx::Point& point) {
-  if (!header_painter_)
-    return HTNOWHERE;
-  return FrameBorderHitTestController::NonClientHitTest(this,
-      caption_button_container_, point);
-}
-
-void PanelFrameView::OnPaint(gfx::Canvas* canvas) {
-  if (!header_painter_)
-    return;
-  bool paint_as_active = ShouldPaintAsActive();
-  caption_button_container_->SetPaintAsActive(paint_as_active);
-
-  HeaderPainter::Mode header_mode = paint_as_active ?
-      HeaderPainter::MODE_ACTIVE : HeaderPainter::MODE_INACTIVE;
-  header_painter_->PaintHeader(canvas, header_mode);
-}
+void PanelFrameView::SizeConstraintsChanged() {}
 
 gfx::Rect PanelFrameView::GetBoundsForClientView() const {
   gfx::Rect client_bounds = bounds();
@@ -133,6 +125,37 @@ gfx::Rect PanelFrameView::GetWindowBoundsForClientBounds(
   gfx::Rect window_bounds = client_bounds;
   window_bounds.Inset(0, -NonClientTopBorderHeight(), 0, 0);
   return window_bounds;
+}
+
+int PanelFrameView::NonClientHitTest(const gfx::Point& point) {
+  if (!header_painter_)
+    return HTNOWHERE;
+  return FrameBorderNonClientHitTest(this, caption_button_container_, point);
+}
+
+void PanelFrameView::OnPaint(gfx::Canvas* canvas) {
+  if (!header_painter_)
+    return;
+  bool paint_as_active = ShouldPaintAsActive();
+  caption_button_container_->SetPaintAsActive(paint_as_active);
+
+  HeaderPainter::Mode header_mode = paint_as_active
+                                        ? HeaderPainter::MODE_ACTIVE
+                                        : HeaderPainter::MODE_INACTIVE;
+  header_painter_->PaintHeader(canvas, header_mode);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// PanelFrameView, ShellObserver overrides:
+
+void PanelFrameView::OnOverviewModeStarting() {
+  if (ash::MaterialDesignController::IsOverviewMaterial())
+    caption_button_container_->SetVisible(false);
+}
+
+void PanelFrameView::OnOverviewModeEnded() {
+  if (ash::MaterialDesignController::IsOverviewMaterial())
+    caption_button_container_->SetVisible(true);
 }
 
 }  // namespace ash

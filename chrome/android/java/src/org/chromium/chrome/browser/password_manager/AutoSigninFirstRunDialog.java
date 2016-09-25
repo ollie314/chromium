@@ -5,12 +5,9 @@
 package org.chromium.chrome.browser.password_manager;
 
 import android.app.Activity;
-import android.app.AlertDialog;
-import android.app.Dialog;
-import android.app.DialogFragment;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.os.Bundle;
+import android.support.v7.app.AlertDialog;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.method.LinkMovementMethod;
@@ -28,7 +25,7 @@ import org.chromium.ui.base.WindowAndroid;
  * when the user first encounters the auto sign-in feature.
  */
 public class AutoSigninFirstRunDialog
-        extends DialogFragment implements DialogInterface.OnClickListener {
+        implements DialogInterface.OnClickListener, DialogInterface.OnDismissListener {
     private final Context mContext;
     private final String mTitle;
     private final String mExplanation;
@@ -38,6 +35,7 @@ public class AutoSigninFirstRunDialog
     private final String mTurnOffButtonText;
     private long mNativeAutoSigninFirstRunDialog;
     private AlertDialog mDialog;
+    private boolean mWasDismissedByNative;
 
     private AutoSigninFirstRunDialog(Context context, long nativeAutoSigninFirstRunDialog,
             String title, String explanation, int explanationLinkStart, int explanationLinkEnd,
@@ -53,7 +51,7 @@ public class AutoSigninFirstRunDialog
     }
 
     @CalledByNative
-    private static AutoSigninFirstRunDialog createDialog(WindowAndroid windowAndroid,
+    private static AutoSigninFirstRunDialog createAndShowDialog(WindowAndroid windowAndroid,
             long nativeAutoSigninFirstRunDialog, String title, String explanation,
             int explanationLinkStart, int explanationLinkEnd, String okButtonText,
             String turnOffButtonText) {
@@ -63,12 +61,11 @@ public class AutoSigninFirstRunDialog
         AutoSigninFirstRunDialog dialog = new AutoSigninFirstRunDialog(activity,
                 nativeAutoSigninFirstRunDialog, title, explanation, explanationLinkStart,
                 explanationLinkEnd, okButtonText, turnOffButtonText);
-        dialog.show(activity.getFragmentManager(), null);
+        dialog.show();
         return dialog;
     }
 
-    @Override
-    public Dialog onCreateDialog(Bundle savedInstanceState) {
+    private void show() {
         final AlertDialog.Builder builder =
                 new AlertDialog.Builder(mContext, R.style.AlertDialogTheme)
                         .setTitle(mTitle)
@@ -96,30 +93,37 @@ public class AutoSigninFirstRunDialog
         builder.setView(view);
 
         mDialog = builder.create();
-        return mDialog;
+        mDialog.setCanceledOnTouchOutside(false);
+        mDialog.setOnDismissListener(this);
+        mDialog.show();
     }
 
     @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        if (savedInstanceState != null) dismiss();
+    public void onClick(DialogInterface dialog, int whichButton) {
+        if (whichButton == DialogInterface.BUTTON_NEGATIVE) {
+            nativeOnTurnOffClicked(mNativeAutoSigninFirstRunDialog);
+        } else if (whichButton == DialogInterface.BUTTON_POSITIVE) {
+            nativeOnOkClicked(mNativeAutoSigninFirstRunDialog);
+        }
     }
-
-    @Override
-    public void onClick(DialogInterface dialog, int whichButton) {}
 
     @Override
     public void onDismiss(DialogInterface dialog) {
-        super.onDismiss(dialog);
-        nativeOnTurnOffClicked(mNativeAutoSigninFirstRunDialog);
         destroy();
-        mDialog = null;
     }
 
     private void destroy() {
         assert mNativeAutoSigninFirstRunDialog != 0;
         nativeDestroy(mNativeAutoSigninFirstRunDialog);
         mNativeAutoSigninFirstRunDialog = 0;
+        mDialog = null;
+    }
+
+    @CalledByNative
+    private void dismissDialog() {
+        assert !mWasDismissedByNative;
+        mWasDismissedByNative = true;
+        mDialog.dismiss();
     }
 
     private native void nativeOnTurnOffClicked(long nativeAutoSigninFirstRunDialogAndroid);

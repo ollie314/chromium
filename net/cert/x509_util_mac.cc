@@ -5,6 +5,7 @@
 #include "net/cert/x509_util_mac.h"
 
 #include "base/logging.h"
+#include "base/mac/mac_util.h"
 #include "third_party/apple_apsl/cssmapplePriv.h"
 
 namespace net {
@@ -62,16 +63,18 @@ OSStatus CreateSSLClientPolicy(SecPolicyRef* policy) {
 
 OSStatus CreateSSLServerPolicy(const std::string& hostname,
                                SecPolicyRef* policy) {
-  CSSM_APPLE_TP_SSL_OPTIONS tp_ssl_options;
-  memset(&tp_ssl_options, 0, sizeof(tp_ssl_options));
-  tp_ssl_options.Version = CSSM_APPLE_TP_SSL_OPTS_VERSION;
   if (!hostname.empty()) {
+    CSSM_APPLE_TP_SSL_OPTIONS tp_ssl_options;
+    memset(&tp_ssl_options, 0, sizeof(tp_ssl_options));
+    tp_ssl_options.Version = CSSM_APPLE_TP_SSL_OPTS_VERSION;
     tp_ssl_options.ServerName = hostname.data();
     tp_ssl_options.ServerNameLen = hostname.size();
+
+    return CreatePolicy(&CSSMOID_APPLE_TP_SSL, &tp_ssl_options,
+                        sizeof(tp_ssl_options), policy);
   }
 
-  return CreatePolicy(&CSSMOID_APPLE_TP_SSL, &tp_ssl_options,
-                      sizeof(tp_ssl_options), policy);
+  return CreatePolicy(&CSSMOID_APPLE_TP_SSL, nullptr, 0U, policy);
 }
 
 OSStatus CreateBasicX509Policy(SecPolicyRef* policy) {
@@ -100,7 +103,9 @@ OSStatus CreateRevocationPolicies(bool enable_revocation_checking,
     // online revocation checking. Note that, as of OS X 10.7.2, the system
     // will set force this flag on according to system policies, so
     // online revocation checks cannot be completely disabled.
-    if (enable_revocation_checking)
+    // Starting with OS X 10.12, if a CRL policy is added without the
+    // FETCH_CRL_FROM_NET flag, AIA fetching is disabled.
+    if (enable_revocation_checking || base::mac::IsAtLeastOS10_12())
       tp_crl_options.CrlFlags = CSSM_TP_ACTION_FETCH_CRL_FROM_NET;
 
     SecPolicyRef crl_policy;

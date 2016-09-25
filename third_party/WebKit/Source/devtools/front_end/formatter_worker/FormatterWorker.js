@@ -69,6 +69,9 @@ self.onmessage = function(event) {
     case "parseCSS":
         WebInspector.parseCSS(params.content);
         break;
+    case "parseSCSS":
+        WebInspector.FormatterWorkerContentParser.parse(params.content, "text/x-scss");
+        break;
     case "javaScriptOutline":
         WebInspector.javaScriptOutline(params.content);
         break;
@@ -78,10 +81,21 @@ self.onmessage = function(event) {
     case "evaluatableJavaScriptSubstring":
         WebInspector.evaluatableJavaScriptSubstring(params.content);
         break;
+    case "relaxedJSONParser":
+        WebInspector.relaxedJSONParser(params.content);
+        break;
     default:
         console.error("Unsupport method name: " + method);
     }
 };
+
+/**
+ * @param {string} content
+ */
+WebInspector.relaxedJSONParser = function(content)
+{
+    postMessage(WebInspector.RelaxedJSONParser.parse(content));
+}
 
 /**
  * @param {string} content
@@ -216,4 +230,40 @@ WebInspector.format = function(mimeType, text, indentString)
         result.content = text;
     }
     postMessage(result);
+}
+
+/**
+ * @interface
+ */
+WebInspector.FormatterWorkerContentParser = function() { }
+
+WebInspector.FormatterWorkerContentParser.prototype = {
+    /**
+     * @param {string} content
+     * @return {!Object}
+     */
+    parse: function(content) { }
+}
+
+/**
+ * @param {string} content
+ * @param {string} mimeType
+ */
+WebInspector.FormatterWorkerContentParser.parse = function(content, mimeType)
+{
+    var extension = self.runtime.extensions(WebInspector.FormatterWorkerContentParser).find(findExtension);
+    console.assert(extension);
+    extension.instance()
+        .then(instance => instance.parse(content))
+        .catchException(null)
+        .then(postMessage);
+
+    /**
+     * @param {!Runtime.Extension} extension
+     * @return {boolean}
+     */
+    function findExtension(extension)
+    {
+        return extension.descriptor()["mimeType"] === mimeType;
+    }
 }

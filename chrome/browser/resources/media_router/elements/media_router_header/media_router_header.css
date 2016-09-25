@@ -20,10 +20,6 @@
   -webkit-padding-end: 4px;
 }
 
-.cast-mode-list {
-  background-color: var(--paper-teal-500);
-}
-
 #close-button {
   -webkit-margin-start: auto;
   height: 31px;
@@ -34,10 +30,6 @@
   -webkit-margin-start: auto;
   -webkit-padding-end: 16px;
   -webkit-padding-start: 24px;
-}
-
-.filter {
-  background-color: var(--paper-deep-purple-500);
 }
 
 #header {
@@ -55,13 +47,13 @@
 #header-text {
   -webkit-padding-end: 4px;
   font-size: 1.175em;
-  margin: 8px 0 0 0;
+  margin: 8px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .issue {
-  background-color: var(--google-red-500);
+  background-color: var(--paper-red-700);
 }
 
 paper-icon-button {
@@ -73,16 +65,18 @@ paper-icon-button {
   padding-top: 10px;
 }
 
+.cast-mode-list,
+.filter,
 .route-details,
 .sink-list {
-  background-color: var(--paper-blue-500);
+  background-color: var(--paper-blue-700);
 }
 
 #user-email-container {
-  -webkit-padding-start: 12px;
+  -webkit-padding-start: 8px;
   bottom: 0;
   font-size: 0.917em;
-  left: 0;
+  left: auto;
   padding-bottom: 12px;
   position: absolute;
 }

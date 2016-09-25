@@ -6,14 +6,17 @@
 
 #include <memory>
 
+#include "ash/common/system/system_notifier.h"
 #include "ash/shell.h"
-#include "ash/system/system_notifier.h"
 #include "ash/test/ash_test_base.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chromeos/login/login_state.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/notification.h"
+
+using base::UTF8ToUTF16;
 
 class LoginStateNotificationBlockerChromeOSTest
     : public ash::test::AshTestBase,
@@ -54,7 +57,12 @@ class LoginStateNotificationBlockerChromeOSTest
 
   bool ShouldShowNotificationAsPopup(
       const message_center::NotifierId& notifier_id) {
-    return blocker_->ShouldShowNotificationAsPopup(notifier_id);
+    message_center::Notification notification(
+        message_center::NOTIFICATION_TYPE_SIMPLE, "chromeos-id",
+        UTF8ToUTF16("chromeos-title"), UTF8ToUTF16("chromeos-message"),
+        gfx::Image(), UTF8ToUTF16("chromeos-source"), GURL(),
+        notifier_id, message_center::RichNotificationData(), NULL);
+    return blocker_->ShouldShowNotificationAsPopup(notification);
   }
 
  private:

@@ -10,7 +10,7 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -100,7 +100,7 @@ class ZipFileInstallerTest : public testing::Test {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&ZipFileInstaller::LoadFromZipFile,
-                   zipfile_installer_.get(),
+                   zipfile_installer_,
                    original_path));
     observer_.WaitForInstall();
   }

@@ -158,19 +158,6 @@ TEST_F(TextIteratorTest, EnteringTextControlsWithOptionComplex)
     EXPECT_EQ("[][\n][Beginning of range][\n][][\n][Under DOM nodes][\n][][\n][End of range]", iterate<FlatTree>(TextIteratorEntersTextControls));
 }
 
-TEST_F(TextIteratorTest, NotEnteringTextControlHostingShadowTreeEvenWithOption)
-{
-    static const char* bodyContent = "<div>Hello, <input type='text' value='input' id='input'> iterator.</div>";
-    static const char* shadowContent = "<span>shadow</span>";
-    // TextIterator doesn't emit "input" nor "shadow" since (1) the layoutObject for <input> is not created; and
-    // (2) we don't (yet) recurse into shadow trees.
-    setBodyContent(bodyContent);
-    createShadowRootForElementWithIDAndSetInnerHTML(document(), "input", shadowContent);
-    // FIXME: Why is an empty string emitted here?
-    EXPECT_EQ("[Hello, ][][ iterator.]", iterate<DOMTree>());
-    EXPECT_EQ("[Hello, ][][shadow][ iterator.]", iterate<FlatTree>());
-}
-
 TEST_F(TextIteratorTest, NotEnteringShadowTree)
 {
     static const char* bodyContent = "<div>Hello, <span id='host'>text</span> iterator.</div>";
@@ -508,6 +495,42 @@ TEST_F(TextIteratorTest, CopyWholeCodePoints)
     EXPECT_EQ(1, iter.copyTextTo(&buffer, 11, 1)) << "Should emit 1 UChar for '.'.";
     for (int i = 0; i < 12; i++)
         EXPECT_EQ(expected[i], buffer[i]);
+}
+
+// Regression test for crbug.com/630921
+TEST_F(TextIteratorTest, EndingConditionWithDisplayNone)
+{
+    setBodyContent("<div style='display: none'><span>hello</span>world</div>Lorem ipsum dolor sit amet.");
+    Position start(&document(), 0);
+    Position end(document().querySelector("span"), 0);
+    TextIterator iter(start, end);
+    EXPECT_TRUE(iter.atEnd());
+}
+
+// Trickier regression test for crbug.com/630921
+TEST_F(TextIteratorTest, EndingConditionWithDisplayNoneInShadowTree)
+{
+    const char* bodyContent = "<div style='display: none'><span id=host><a></a></span>world</div>Lorem ipsum dolor sit amet.";
+    const char* shadowContent = "<i><b id=end>he</b></i>llo";
+    setBodyContent(bodyContent);
+    setShadowContent(shadowContent, "host");
+
+    ShadowRoot* shadowRoot = document().getElementById("host")->openShadowRoot();
+    Node* bInShadowTree = shadowRoot->getElementById("end");
+
+    Position start(&document(), 0);
+    Position end(bInShadowTree, 0);
+    TextIterator iter(start, end);
+    EXPECT_TRUE(iter.atEnd());
+}
+
+TEST_F(TextIteratorTest, PreserveLeadingSpace)
+{
+    setBodyContent("<div style='width: 2em;'><b><i>foo</i></b> bar</div>");
+    Element* div = document().querySelector("div");
+    Position start(div->firstChild()->firstChild()->firstChild(), 0);
+    Position end(div->lastChild(), 4);
+    EXPECT_EQ("foo bar", plainText(EphemeralRange(start, end), TextIteratorEmitsImageAltText));
 }
 
 } // namespace blink

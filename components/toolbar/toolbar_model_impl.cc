@@ -8,7 +8,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "components/google/core/browser/google_util.h"
 #include "components/grit/components_scaled_resources.h"
 #include "components/prefs/pref_service.h"
 #include "components/security_state/security_state_model.h"
@@ -35,14 +34,6 @@ ToolbarModelImpl::~ToolbarModelImpl() {
 }
 
 // ToolbarModelImpl Implementation.
-base::string16 ToolbarModelImpl::GetText() const {
-  base::string16 search_terms(GetSearchTerms(false));
-  if (!search_terms.empty())
-    return search_terms;
-
-  return GetFormattedURL(NULL);
-}
-
 base::string16 ToolbarModelImpl::GetFormattedURL(size_t* prefix_end) const {
   GURL url(GetURL());
   // Note that we can't unescape spaces here, because if the user copies this
@@ -66,40 +57,15 @@ base::string16 ToolbarModelImpl::GetFormattedURL(size_t* prefix_end) const {
          gfx::kEllipsisUTF16;
 }
 
-base::string16 ToolbarModelImpl::GetCorpusNameForMobile() const {
-  if (!WouldPerformSearchTermReplacement(false))
-    return base::string16();
-  GURL url(GetURL());
-  // If there is a query in the url fragment look for the corpus name there,
-  // otherwise look for the corpus name in the query parameters.
-  const std::string& query_str(google_util::HasGoogleSearchQueryParam(
-      url.ref_piece()) ? url.ref() : url.query());
-  url::Component query(0, static_cast<int>(query_str.length())), key, value;
-  const char kChipKey[] = "sboxchip";
-  while (url::ExtractQueryKeyValue(query_str.c_str(), &query, &key, &value)) {
-    if (key.is_nonempty() && query_str.substr(key.begin, key.len) == kChipKey) {
-      return net::UnescapeAndDecodeUTF8URLComponent(
-          query_str.substr(value.begin, value.len),
-          net::UnescapeRule::NORMAL);
-    }
-  }
-  return base::string16();
-}
-
 GURL ToolbarModelImpl::GetURL() const {
   GURL url;
   return delegate_->GetURL(&url) ? url : GURL(url::kAboutBlankURL);
 }
 
-bool ToolbarModelImpl::WouldPerformSearchTermReplacement(
-    bool ignore_editing) const {
-  return !GetSearchTerms(ignore_editing).empty();
-}
-
 SecurityStateModel::SecurityLevel ToolbarModelImpl::GetSecurityLevel(
     bool ignore_editing) const {
-  // When editing, assume no security style.
-  return (input_in_progress() && !ignore_editing)
+  // When editing or empty, assume no security style.
+  return ((input_in_progress() && !ignore_editing) || !ShouldDisplayURL())
              ? SecurityStateModel::NONE
              : delegate_->GetSecurityLevel();
 }
@@ -107,6 +73,7 @@ SecurityStateModel::SecurityLevel ToolbarModelImpl::GetSecurityLevel(
 int ToolbarModelImpl::GetIcon() const {
   switch (GetSecurityLevel(false)) {
     case SecurityStateModel::NONE:
+    case SecurityStateModel::HTTP_SHOW_WARNING:
       return IDR_LOCATION_BAR_HTTP;
     case SecurityStateModel::EV_SECURE:
     case SecurityStateModel::SECURE:
@@ -128,6 +95,7 @@ gfx::VectorIconId ToolbarModelImpl::GetVectorIcon() const {
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
   switch (GetSecurityLevel(false)) {
     case SecurityStateModel::NONE:
+    case SecurityStateModel::HTTP_SHOW_WARNING:
       return gfx::VectorIconId::LOCATION_BAR_HTTP;
     case SecurityStateModel::EV_SECURE:
     case SecurityStateModel::SECURE:
@@ -163,13 +131,19 @@ base::string16 ToolbarModelImpl::GetEVCertName() const {
       base::UTF8ToUTF16(cert->subject().country_name));
 }
 
-bool ToolbarModelImpl::ShouldDisplayURL() const {
-  return delegate_->ShouldDisplayURL();
+base::string16 ToolbarModelImpl::GetSecureVerboseText() const {
+  switch (GetSecurityLevel(false)) {
+    case SecurityStateModel::SECURE:
+      return l10n_util::GetStringUTF16(IDS_SECURE_VERBOSE_STATE);
+    case SecurityStateModel::SECURITY_ERROR:
+      return l10n_util::GetStringUTF16(delegate_->FailsMalwareCheck()
+                                           ? IDS_DANGEROUS_VERBOSE_STATE
+                                           : IDS_NOT_SECURE_VERBOSE_STATE);
+    default:
+      return base::string16();
+  }
 }
 
-base::string16 ToolbarModelImpl::GetSearchTerms(bool ignore_editing) const {
-  if (!url_replacement_enabled() || (input_in_progress() && !ignore_editing))
-    return base::string16();
-
-  return delegate_->GetSearchTerms(GetSecurityLevel(ignore_editing));
+bool ToolbarModelImpl::ShouldDisplayURL() const {
+  return delegate_->ShouldDisplayURL();
 }

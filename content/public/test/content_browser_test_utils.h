@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/page_type.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
@@ -17,6 +18,8 @@ class FilePath;
 }
 
 namespace gfx {
+class Point;
+class Range;
 class Rect;
 }
 
@@ -28,18 +31,26 @@ class Rect;
 namespace content {
 
 class MessageLoopRunner;
+class RenderFrameHost;
 class Shell;
+class WebContents;
 
 // Generate the file path for testing a particular test.
 // The file for the tests is all located in
 // content/test/data/dir/<file>
 // The returned path is FilePath format.
+//
+// A null |dir| indicates the root directory - i.e.
+// content/test/data/<file>
 base::FilePath GetTestFilePath(const char* dir, const char* file);
 
 // Generate the URL for testing a particular test.
 // HTML for the tests is all located in
 // test_root_directory/dir/<file>
 // The returned path is GURL format.
+//
+// A null |dir| indicates the root directory - i.e.
+// content/test/data/<file>
 GURL GetTestUrl(const char* dir, const char* file);
 
 // Navigates |window| to |url|, blocking until the navigation finishes.
@@ -69,8 +80,17 @@ bool NavigateToURLAndExpectNoCommit(Shell* window, const GURL& url);
 void ReloadBlockUntilNavigationsComplete(Shell* window,
                                          int number_of_navigations);
 
+// Reloads |window| with bypassing cache flag, and blocks until the given number
+// of navigations finishes.
+void ReloadBypassingCacheBlockUntilNavigationsComplete(
+    Shell* window,
+    int number_of_navigations);
+
 // Wait until an application modal dialog is requested.
 void WaitForAppModalDialog(Shell* window);
+
+// Extends the ToRenderFrameHost mechanism to content::Shells.
+RenderFrameHost* ConvertToRenderFrameHost(Shell* shell);
 
 // Used to wait for a new Shell window to be created. Instantiate this object
 // before the operation that will create the window.
@@ -92,8 +112,60 @@ class ShellAddedObserver {
   DISALLOW_COPY_AND_ASSIGN(ShellAddedObserver);
 };
 
+// A WebContentsDelegate that catches messages sent to the console.
+class ConsoleObserverDelegate : public WebContentsDelegate {
+ public:
+  ConsoleObserverDelegate(WebContents* web_contents, const std::string& filter);
+  ~ConsoleObserverDelegate() override;
+
+  // WebContentsDelegate method:
+  bool AddMessageToConsole(WebContents* source,
+                           int32_t level,
+                           const base::string16& message,
+                           int32_t line_no,
+                           const base::string16& source_id) override;
+
+  // Returns the most recent message sent to the console.
+  std::string message() { return message_; }
+
+  // Waits for the next message captured by the filter to be sent to the
+  // console.
+  void Wait();
+
+ private:
+  WebContents* web_contents_;
+  std::string filter_;
+  std::string message_;
+
+  // The MessageLoopRunner used to spin the message loop.
+  scoped_refptr<MessageLoopRunner> message_loop_runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(ConsoleObserverDelegate);
+};
+
 #if defined OS_MACOSX
 void SetWindowBounds(gfx::NativeWindow window, const gfx::Rect& bounds);
+
+// This method will request the string (word) at |point| inside the |rwh| where
+// |point| is with respect to the |rwh| coordinates. |result_callback| is called
+// with the word as well as |baselinePoint| when the result comes back from the
+// renderer. The baseline point is the position of the pop-up in AppKit
+// coordinate system (inverted y-axis).
+void GetStringAtPointForRenderWidget(
+    RenderWidgetHost* rwh,
+    const gfx::Point& point,
+    base::Callback<void(const std::string&, const gfx::Point&)>
+        result_callback);
+
+// This method will request the string identified by |range| inside the |rwh|.
+// When the result comes back, |result_callback| is invoked with the given text
+// and its position in AppKit coordinates (inverted-y axis).
+void GetStringFromRangeForRenderWidget(
+    RenderWidgetHost* rwh,
+    const gfx::Range& range,
+    base::Callback<void(const std::string&, const gfx::Point&)>
+        result_callback);
+
 #endif
 
 }  // namespace content

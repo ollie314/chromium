@@ -30,6 +30,8 @@
 
 #include "core/css/resolver/StyleResolverStats.h"
 
+#include <memory>
+
 namespace blink {
 
 void StyleResolverStats::reset()
@@ -54,6 +56,7 @@ void StyleResolverStats::reset()
     elementsStyled = 0;
     pseudoElementsStyled = 0;
     baseStylesUsed = 0;
+    independentInheritedStylesPropagated = 0;
 }
 
 bool StyleResolverStats::allCountersEnabled() const
@@ -63,9 +66,9 @@ bool StyleResolverStats::allCountersEnabled() const
     return allCountersEnabled;
 }
 
-PassOwnPtr<TracedValue> StyleResolverStats::toTracedValue() const
+std::unique_ptr<TracedValue> StyleResolverStats::toTracedValue() const
 {
-    OwnPtr<TracedValue> tracedValue = TracedValue::create();
+    std::unique_ptr<TracedValue> tracedValue = TracedValue::create();
     tracedValue->setInteger("sharedStyleLookups", sharedStyleLookups);
     tracedValue->setInteger("sharedStyleCandidates", sharedStyleCandidates);
     tracedValue->setInteger("sharedStyleFound", sharedStyleFound);
@@ -87,7 +90,8 @@ PassOwnPtr<TracedValue> StyleResolverStats::toTracedValue() const
     tracedValue->setInteger("elementsStyled", elementsStyled);
     tracedValue->setInteger("pseudoElementsStyled", pseudoElementsStyled);
     tracedValue->setInteger("baseStylesUsed", baseStylesUsed);
-    return tracedValue.release();
+    tracedValue->setInteger("independentInheritedStylesPropagated", independentInheritedStylesPropagated);
+    return tracedValue;
 }
 
 

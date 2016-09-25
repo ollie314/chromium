@@ -30,19 +30,16 @@
 #include "core/CoreExport.h"
 #include "core/events/EventTarget.h"
 #include "core/frame/DOMWindow.h"
-#include "core/frame/DOMWindowLifecycleNotifier.h"
-#include "core/frame/DOMWindowLifecycleObserver.h"
 #include "core/frame/LocalFrame.h"
-#include "core/frame/LocalFrameLifecycleObserver.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
-
 #include "wtf/Assertions.h"
 #include "wtf/Forward.h"
+#include <memory>
 
 namespace blink {
 
-class CustomElementsRegistry;
+class CustomElementRegistry;
 class DOMWindowEventQueue;
 class DOMWindowProperty;
 class DocumentInit;
@@ -54,8 +51,9 @@ class IntRect;
 class MessageEvent;
 class Page;
 class PostMessageTimer;
-class ScriptCallStack;
 class SecurityOrigin;
+class SourceLocation;
+class DOMVisualViewport;
 
 enum PageshowEventPersistence {
     PageshowEventNotPersisted = 0,
@@ -64,10 +62,18 @@ enum PageshowEventPersistence {
 
 // Note: if you're thinking of returning something DOM-related by reference,
 // please ping dcheng@chromium.org first. You probably don't want to do that.
-class CORE_EXPORT LocalDOMWindow final : public DOMWindow, public Supplementable<LocalDOMWindow>, public DOMWindowLifecycleNotifier {
+class CORE_EXPORT LocalDOMWindow final : public DOMWindow, public Supplementable<LocalDOMWindow> {
     USING_GARBAGE_COLLECTED_MIXIN(LocalDOMWindow);
     USING_PRE_FINALIZER(LocalDOMWindow, dispose);
 public:
+
+    class CORE_EXPORT EventListenerObserver : public GarbageCollectedMixin {
+    public:
+        virtual void didAddEventListener(LocalDOMWindow*, const AtomicString&) = 0;
+        virtual void didRemoveEventListener(LocalDOMWindow*, const AtomicString&) = 0;
+        virtual void didRemoveAllEventListeners(LocalDOMWindow*) = 0;
+    };
+
     static Document* createDocument(const String& mimeType, const DocumentInit&, bool forceXHTML);
     static LocalDOMWindow* create(LocalFrame& frame)
     {
@@ -82,11 +88,10 @@ public:
 
     // EventTarget overrides:
     ExecutionContext* getExecutionContext() const override;
-    const LocalDOMWindow* toDOMWindow() const override;
-    LocalDOMWindow* toDOMWindow() override;
+    const LocalDOMWindow* toLocalDOMWindow() const override;
+    LocalDOMWindow* toLocalDOMWindow() override;
 
     // DOMWindow overrides:
-    bool isLocalDOMWindow() const override { return true; }
     LocalFrame* frame() const override;
     Screen* screen() const override;
     History* history() const override;
@@ -106,6 +111,7 @@ public:
     int screenY() const override;
     double scrollX() const override;
     double scrollY() const override;
+    DOMVisualViewport* visualViewport() override;
     const AtomicString& name() const override;
     void setName(const AtomicString&) override;
     String status() const override;
@@ -117,14 +123,13 @@ public:
     double devicePixelRatio() const override;
     ApplicationCache* applicationCache() const override;
     int orientation() const override;
-    Console* console() const override;
     DOMSelection* getSelection() override;
     void blur() override;
-    void print() override;
+    void print(ScriptState*) override;
     void stop() override;
-    void alert(const String& message = String()) override;
-    bool confirm(const String& message) override;
-    String prompt(const String& message, const String& defaultValue) override;
+    void alert(ScriptState*, const String& message = String()) override;
+    bool confirm(ScriptState*, const String& message) override;
+    String prompt(ScriptState*, const String& message, const String& defaultValue) override;
     bool find(const String&, bool caseSensitive, bool backwards, bool wrap, bool wholeWord, bool searchInFrames, bool showDialog) const override;
 
     // FIXME: ScrollBehaviorSmooth is currently unsupported in VisualViewport.
@@ -146,12 +151,16 @@ public:
     void cancelAnimationFrame(int id) override;
     int requestIdleCallback(IdleRequestCallback*, const IdleRequestOptions&) override;
     void cancelIdleCallback(int id) override;
-    CustomElementsRegistry* customElements() const override;
-    void schedulePostMessage(MessageEvent*, SecurityOrigin* target, PassRefPtr<ScriptCallStack>);
+    CustomElementRegistry* customElements(ScriptState*) const override;
+    CustomElementRegistry* customElements() const;
+    CustomElementRegistry* maybeCustomElements() const;
 
     void registerProperty(DOMWindowProperty*);
     void unregisterProperty(DOMWindowProperty*);
 
+    void registerEventListenerObserver(EventListenerObserver*);
+
+    void frameDestroyed();
     void reset();
 
     unsigned pendingUnloadEventListeners() const;
@@ -170,7 +179,7 @@ public:
 
     void postMessageTimerFired(PostMessageTimer*);
     void removePostMessageTimer(PostMessageTimer*);
-    void dispatchMessageEventWithOriginCheck(SecurityOrigin* intendedTargetOrigin, Event*, PassRefPtr<ScriptCallStack>);
+    void dispatchMessageEventWithOriginCheck(SecurityOrigin* intendedTargetOrigin, Event*, std::unique_ptr<SourceLocation>);
 
     // Events
     // EventTarget API
@@ -184,8 +193,6 @@ public:
     // Dispatch the (deprecated) orientationchange event to this DOMWindow and
     // recurse on its child frames.
     void sendOrientationChangeEvent();
-
-    void willDetachDocumentFromFrame();
 
     EventQueue* getEventQueue() const;
     void enqueueWindowEvent(Event*);
@@ -202,53 +209,37 @@ public:
 
     void acceptLanguagesChanged();
 
+    FloatSize getViewportSize(IncludeScrollbarsInRect) const;
+
 protected:
     // EventTarget overrides.
-    bool addEventListenerInternal(const AtomicString& eventType, EventListener*, const EventListenerOptions&) override;
-    bool removeEventListenerInternal(const AtomicString& eventType, EventListener*, const EventListenerOptions&) override;
+    void addedEventListener(const AtomicString& eventType, RegisteredEventListener&) override;
+    void removedEventListener(const AtomicString& eventType, const RegisteredEventListener&) override;
+
+    // Protected DOMWindow overrides.
+    void schedulePostMessage(MessageEvent*, PassRefPtr<SecurityOrigin> target, Document* source) override;
 
 private:
-    // Rather than simply inheriting LocalFrameLifecycleObserver like most other
-    // classes, LocalDOMWindow hides its LocalFrameLifecycleObserver with
-    // composition. This prevents conflicting overloads between DOMWindow, which
-    // has a frame() accessor that returns Frame* for bindings code, and
-    // LocalFrameLifecycleObserver, which has a frame() accessor that returns a
-    // LocalFrame*.
-    class WindowFrameObserver final : public GarbageCollected<WindowFrameObserver>, public LocalFrameLifecycleObserver {
-        USING_GARBAGE_COLLECTED_MIXIN(WindowFrameObserver);
-    public:
-        static WindowFrameObserver* create(LocalDOMWindow*, LocalFrame&);
-
-        DECLARE_VIRTUAL_TRACE();
-
-        // LocalFrameLifecycleObserver overrides:
-        void willDetachFrameHost() override;
-        void contextDestroyed() override;
-
-    private:
-        WindowFrameObserver(LocalDOMWindow*, LocalFrame&);
-
-        Member<LocalDOMWindow> m_window;
-    };
-    friend WTF::OwnedPtrDeleter<WindowFrameObserver>;
+    // Intentionally private to prevent redundant checks when the type is
+    // already LocalDOMWindow.
+    bool isLocalDOMWindow() const override { return true; }
+    bool isRemoteDOMWindow() const override { return false; }
+    void warnUnusedPreloads(TimerBase*);
 
     explicit LocalDOMWindow(LocalFrame&);
     void dispose();
 
     void dispatchLoadEvent();
     void clearDocument();
-    void willDestroyDocumentInFrame();
 
     void willDetachFrameHost();
-    void frameDestroyed();
 
-    Member<WindowFrameObserver> m_frameObserver;
+    Member<LocalFrame> m_frame;
     Member<Document> m_document;
+    Member<DOMVisualViewport> m_visualViewport;
+    Timer<LocalDOMWindow> m_unusedPreloadsTimer;
 
     bool m_shouldPrintWhenFinishedLoading;
-#if ENABLE(ASSERT)
-    bool m_hasBeenReset;
-#endif
 
     HeapHashSet<WeakMember<DOMWindowProperty>> m_properties;
 
@@ -260,10 +251,9 @@ private:
     mutable Member<BarProp> m_scrollbars;
     mutable Member<BarProp> m_statusbar;
     mutable Member<BarProp> m_toolbar;
-    mutable Member<Console> m_console;
     mutable Member<Navigator> m_navigator;
     mutable Member<StyleMedia> m_media;
-    mutable Member<CustomElementsRegistry> m_customElements;
+    mutable Member<CustomElementRegistry> m_customElements;
 
     String m_status;
     String m_defaultStatus;
@@ -274,6 +264,7 @@ private:
     RefPtr<SerializedScriptValue> m_pendingStateObject;
 
     HeapHashSet<Member<PostMessageTimer>> m_postMessageTimers;
+    HeapHashSet<WeakMember<EventListenerObserver>> m_eventListenerObservers;
 };
 
 DEFINE_TYPE_CASTS(LocalDOMWindow, DOMWindow, x, x->isLocalDOMWindow(), x.isLocalDOMWindow());

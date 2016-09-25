@@ -5,11 +5,13 @@
 #ifndef CONTENT_PUBLIC_TEST_TEST_MOJO_APP_H_
 #define CONTENT_PUBLIC_TEST_TEST_MOJO_APP_H_
 
+#include <string>
+
 #include "base/macros.h"
 #include "content/public/test/test_mojo_service.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "services/shell/public/cpp/interface_factory.h"
-#include "services/shell/public/cpp/shell_client.h"
+#include "services/shell/public/cpp/service.h"
 
 namespace content {
 
@@ -17,7 +19,7 @@ extern const char kTestMojoAppUrl[];
 
 // Simple Mojo app which provides a mojom::TestMojoService impl. The app
 // terminates itself after its TestService fulfills a single DoSomething call.
-class TestMojoApp : public shell::ShellClient,
+class TestMojoApp : public shell::Service,
                     public shell::InterfaceFactory<mojom::TestMojoService>,
                     public mojom::TestMojoService {
  public:
@@ -25,16 +27,21 @@ class TestMojoApp : public shell::ShellClient,
   ~TestMojoApp() override;
 
  private:
-  // shell::ShellClient:
-  bool AcceptConnection(shell::Connection* connection) override;
+  // shell::Service:
+  bool OnConnect(const shell::Identity& remote_identity,
+                 shell::InterfaceRegistry* registry) override;
 
   // shell::InterfaceFactory<mojom::TestMojoService>:
-  void Create(shell::Connection* connection,
+  void Create(const shell::Identity& remote_identity,
               mojo::InterfaceRequest<mojom::TestMojoService> request) override;
 
   // TestMojoService:
   void DoSomething(const DoSomethingCallback& callback) override;
+  void DoTerminateProcess(const DoTerminateProcessCallback& callback) override;
+  void CreateFolder(const CreateFolderCallback& callback) override;
   void GetRequestorName(const GetRequestorNameCallback& callback) override;
+  void CreateSharedBuffer(const std::string& message,
+                          const CreateSharedBufferCallback& callback) override;
 
   mojo::Binding<mojom::TestMojoService> service_binding_;
 
@@ -44,6 +51,6 @@ class TestMojoApp : public shell::ShellClient,
   DISALLOW_COPY_AND_ASSIGN(TestMojoApp);
 };
 
-}  // namespace
+}  // namespace content
 
 #endif  // CONTENT_PUBLIC_TEST_TEST_MOJO_APP_H_

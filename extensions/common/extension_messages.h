@@ -12,12 +12,14 @@
 
 #include "base/memory/shared_memory.h"
 #include "base/values.h"
+#include "components/version_info/version_info.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/socket_permission_request.h"
 #include "extensions/common/api/messaging/message.h"
 #include "extensions/common/draggable_region.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extensions_client.h"
+#include "extensions/common/features/feature_session_type.h"
 #include "extensions/common/host_id.h"
 #include "extensions/common/permissions/media_galleries_permission_data.h"
 #include "extensions/common/permissions/permission_set.h"
@@ -44,6 +46,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(extensions::UserScript::RunLocation,
                           extensions::UserScript::RUN_LOCATION_LAST - 1)
 
 IPC_ENUM_TRAITS_MAX_VALUE(HostID::HostType, HostID::HOST_TYPE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(version_info::Channel, version_info::Channel::STABLE)
+IPC_ENUM_TRAITS_MAX_VALUE(extensions::FeatureSessionType,
+                          extensions::FeatureSessionType::LAST)
 
 // Parameters structure for ExtensionHostMsg_AddAPIActionToActivityLog and
 // ExtensionHostMsg_AddEventToActivityLog.
@@ -106,6 +111,14 @@ IPC_STRUCT_BEGIN(ExtensionHostMsg_Request_Params)
 
   // True if request is executed in response to an explicit user gesture.
   IPC_STRUCT_MEMBER(bool, user_gesture)
+
+  // If this API call is for a service worker, then this is the worker thread
+  // id. Otherwise, this is -1.
+  IPC_STRUCT_MEMBER(int, worker_thread_id)
+
+  // If this API call is for a service worker, then this is the embedded
+  // worker id. Otherwise, this is -1.
+  IPC_STRUCT_MEMBER(int, embedded_worker_id)
 IPC_STRUCT_END()
 
 // Allows an extension to execute code in a tab.
@@ -252,7 +265,7 @@ struct ExtensionMsg_PermissionSetStruct {
       const ExtensionMsg_PermissionSetStruct& other);
   ~ExtensionMsg_PermissionSetStruct();
 
-  scoped_ptr<const extensions::PermissionSet> ToPermissionSet() const;
+  std::unique_ptr<const extensions::PermissionSet> ToPermissionSet() const;
 
   extensions::APIPermissionSet apis;
   extensions::ManifestPermissionSet manifest_permissions;
@@ -306,6 +319,7 @@ namespace IPC {
 template <>
 struct ParamTraits<URLPattern> {
   typedef URLPattern param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -316,6 +330,7 @@ struct ParamTraits<URLPattern> {
 template <>
 struct ParamTraits<extensions::URLPatternSet> {
   typedef extensions::URLPatternSet param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -326,6 +341,7 @@ struct ParamTraits<extensions::URLPatternSet> {
 template <>
 struct ParamTraits<extensions::APIPermission::ID> {
   typedef extensions::APIPermission::ID param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -336,6 +352,7 @@ struct ParamTraits<extensions::APIPermission::ID> {
 template <>
 struct ParamTraits<extensions::APIPermissionSet> {
   typedef extensions::APIPermissionSet param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -346,6 +363,7 @@ struct ParamTraits<extensions::APIPermissionSet> {
 template <>
 struct ParamTraits<extensions::ManifestPermissionSet> {
   typedef extensions::ManifestPermissionSet param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -356,6 +374,7 @@ struct ParamTraits<extensions::ManifestPermissionSet> {
 template <>
 struct ParamTraits<HostID> {
   typedef HostID param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -366,6 +385,7 @@ struct ParamTraits<HostID> {
 template <>
 struct ParamTraits<ExtensionMsg_PermissionSetStruct> {
   typedef ExtensionMsg_PermissionSetStruct param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -549,6 +569,11 @@ IPC_MESSAGE_ROUTED2(ExtensionMsg_GetAppInstallStateResponse,
                     std::string /* state */,
                     int32_t /* callback_id */)
 
+// Check whether the Port for extension messaging exists in the frame. If the
+// port ID is unknown, the frame replies with ExtensionHostMsg_CloseMessagePort.
+IPC_MESSAGE_ROUTED1(ExtensionMsg_ValidateMessagePort,
+                    int /* port_id */)
+
 // Dispatch the Port.onConnect event for message channels.
 IPC_MESSAGE_ROUTED5(ExtensionMsg_DispatchOnConnect,
                     int /* target_port_id */,
@@ -558,8 +583,9 @@ IPC_MESSAGE_ROUTED5(ExtensionMsg_DispatchOnConnect,
                     std::string /* tls_channel_id */)
 
 // Deliver a message sent with ExtensionHostMsg_PostMessage.
-IPC_MESSAGE_ROUTED2(ExtensionMsg_DeliverMessage,
+IPC_MESSAGE_ROUTED3(ExtensionMsg_DeliverMessage,
                     int /* target_port_id */,
+                    int /* source_tab_id */,
                     extensions::Message)
 
 // Dispatch the Port.onDisconnect event for message channels.
@@ -567,9 +593,11 @@ IPC_MESSAGE_ROUTED2(ExtensionMsg_DispatchOnDisconnect,
                     int /* port_id */,
                     std::string /* error_message */)
 
-// Informs the renderer what channel (dev, beta, stable, etc) is running.
-IPC_MESSAGE_CONTROL1(ExtensionMsg_SetChannel,
-                     int /* channel */)
+// Informs the renderer what channel (dev, beta, stable, etc) and user session
+// type is running.
+IPC_MESSAGE_CONTROL2(ExtensionMsg_SetSessionInfo,
+                     version_info::Channel /* channel */,
+                     extensions::FeatureSessionType /* session_type */)
 
 // Notify the renderer that its window has closed.
 IPC_MESSAGE_ROUTED0(ExtensionMsg_AppWindowClosed)
@@ -651,30 +679,34 @@ IPC_MESSAGE_CONTROL4(ExtensionHostMsg_RemoveFilteredListener,
 IPC_MESSAGE_ROUTED1(ExtensionHostMsg_EventAck, int /* message_id */)
 
 // Open a channel to all listening contexts owned by the extension with
-// the given ID.  This always returns a valid port ID which can be used for
-// sending messages.  If an error occurred, the opener will be notified
-// asynchronously.
-IPC_SYNC_MESSAGE_CONTROL4_1(ExtensionHostMsg_OpenChannelToExtension,
-                            int /* frame_routing_id */,
-                            ExtensionMsg_ExternalConnectionInfo,
-                            std::string /* channel_name */,
-                            bool /* include_tls_channel_id */,
-                            int /* port_id */)
+// the given ID. This responds asynchronously with ExtensionMsg_AssignPortId.
+// If an error occurred, the opener will be notified asynchronously.
+IPC_MESSAGE_CONTROL5(ExtensionHostMsg_OpenChannelToExtension,
+                     int /* frame_routing_id */,
+                     ExtensionMsg_ExternalConnectionInfo,
+                     std::string /* channel_name */,
+                     bool /* include_tls_channel_id */,
+                     int /* request_id */)
 
-IPC_SYNC_MESSAGE_CONTROL3_1(ExtensionHostMsg_OpenChannelToNativeApp,
-                            int /* frame_routing_id */,
-                            std::string /* source_extension_id */,
-                            std::string /* native_app_name */,
-                            int /* port_id */)
+// The response to a request to open an extension message port, including the
+// global port id and the request id.
+IPC_MESSAGE_ROUTED2(ExtensionMsg_AssignPortId,
+                    int /*port_id */,
+                    int /* request_id */)
+
+IPC_MESSAGE_CONTROL3(ExtensionHostMsg_OpenChannelToNativeApp,
+                     int /* frame_routing_id */,
+                     std::string /* native_app_name */,
+                     int /* request_id */)
 
 // Get a port handle to the given tab.  The handle can be used for sending
 // messages to the extension.
-IPC_SYNC_MESSAGE_CONTROL4_1(ExtensionHostMsg_OpenChannelToTab,
-                            int /* frame_routing_id */,
-                            ExtensionMsg_TabTargetConnectionInfo,
-                            std::string /* extension_id */,
-                            std::string /* channel_name */,
-                            int /* port_id */)
+IPC_MESSAGE_CONTROL5(ExtensionHostMsg_OpenChannelToTab,
+                     int /* frame_routing_id */,
+                     ExtensionMsg_TabTargetConnectionInfo,
+                     std::string /* extension_id */,
+                     std::string /* channel_name */,
+                     int /* request_id */)
 
 // Sent in response to ExtensionMsg_DispatchOnConnect when the port is accepted.
 // The handle is the value returned by ExtensionHostMsg_OpenChannelTo*.
@@ -831,3 +863,27 @@ IPC_MESSAGE_ROUTED3(ExtensionHostMsg_AutomationQuerySelector_Result,
                     int /* request_id */,
                     ExtensionHostMsg_AutomationQuerySelector_Error /* error */,
                     int /* result_acc_obj_id */)
+
+// Tells the renderer whether or not activity logging is enabled. This is only
+// sent if logging is or was previously enabled; not being enabled is assumed
+// otherwise.
+IPC_MESSAGE_CONTROL1(ExtensionMsg_SetActivityLoggingEnabled, bool /* enabled */)
+
+// Messages related to Extension Service Worker.
+#undef IPC_MESSAGE_START
+#define IPC_MESSAGE_START ExtensionWorkerMsgStart
+// A service worker thread sends this message when an extension service worker
+// starts an API request. The browser will always respond with a
+// ExtensionMsg_ResponseWorker.
+IPC_MESSAGE_CONTROL1(ExtensionHostMsg_RequestWorker,
+                     ExtensionHostMsg_Request_Params)
+
+// The browser sends this message in response to all service worker extension
+// api calls. The response data (if any) is one of the base::Value subclasses,
+// wrapped as the first element in a ListValue.
+IPC_MESSAGE_CONTROL5(ExtensionMsg_ResponseWorker,
+                     int /* thread_id */,
+                     int /* request_id */,
+                     bool /* success */,
+                     base::ListValue /* response wrapper (see comment above) */,
+                     std::string /* error */)

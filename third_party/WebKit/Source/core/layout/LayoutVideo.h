@@ -37,9 +37,9 @@ public:
     LayoutVideo(HTMLVideoElement*);
     ~LayoutVideo() override;
 
-    IntRect videoBox() const;
-
     static LayoutSize defaultSize();
+
+    LayoutRect replacedContentRect() const final;
 
     bool supportsAcceleratedRendering() const;
 
@@ -63,12 +63,12 @@ private:
 
     void layout() override;
 
-    LayoutUnit computeReplacedLogicalWidth(ShouldComputePreferred  = ComputeActual) const override;
-    LayoutUnit computeReplacedLogicalHeight() const override;
+    LayoutUnit computeReplacedLogicalWidth(ShouldComputePreferred = ComputeActual) const override;
+    LayoutUnit computeReplacedLogicalHeight(LayoutUnit estimatedUsedWidth = LayoutUnit()) const override;
     LayoutUnit minimumReplacedHeight() const override;
 
-    LayoutUnit offsetLeft() const override;
-    LayoutUnit offsetTop() const override;
+    LayoutUnit offsetLeft(const Element*) const override;
+    LayoutUnit offsetTop(const Element*) const override;
     LayoutUnit offsetWidth() const override;
     LayoutUnit offsetHeight() const override;
 

@@ -9,6 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/utf_string_conversions.h"
@@ -62,7 +63,7 @@ class KeywordProviderTest : public testing::Test {
     // a DCHECK.
     field_trial_list_.reset();
     field_trial_list_.reset(new base::FieldTrialList(
-        new metrics::SHA1EntropyProvider("foo")));
+        base::MakeUnique<metrics::SHA1EntropyProvider>("foo")));
     variations::testing::ClearAllVariationParams();
   }
   ~KeywordProviderTest() override {}
@@ -83,9 +84,9 @@ class KeywordProviderTest : public testing::Test {
  protected:
   static const TemplateURLService::Initializer kTestData[];
 
-  scoped_ptr<base::FieldTrialList> field_trial_list_;
+  std::unique_ptr<base::FieldTrialList> field_trial_list_;
   scoped_refptr<KeywordProvider> kw_provider_;
-  scoped_ptr<MockAutocompleteProviderClient> client_;
+  std::unique_ptr<MockAutocompleteProviderClient> client_;
 };
 
 // static
@@ -110,7 +111,7 @@ const TemplateURLService::Initializer KeywordProviderTest::kTestData[] = {
 };
 
 void KeywordProviderTest::SetUpClientAndKeywordProvider() {
-  scoped_ptr<TemplateURLService> template_url_service(
+  std::unique_ptr<TemplateURLService> template_url_service(
       new TemplateURLService(kTestData, arraysize(kTestData)));
   client_.reset(new MockAutocompleteProviderClient());
   client_->set_template_url_service(std::move(template_url_service));
@@ -428,8 +429,8 @@ TEST_F(KeywordProviderTest, AddKeyword) {
   base::string16 keyword(ASCIIToUTF16("foo"));
   data.SetKeyword(keyword);
   data.SetURL("http://www.google.com/foo?q={searchTerms}");
-  TemplateURL* template_url = new TemplateURL(data);
-  client_->GetTemplateURLService()->Add(template_url);
+  TemplateURL* template_url = client_->GetTemplateURLService()->Add(
+      base::MakeUnique<TemplateURL>(data));
   ASSERT_TRUE(
       template_url ==
       client_->GetTemplateURLService()->GetTemplateURLForKeyword(keyword));

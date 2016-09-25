@@ -25,7 +25,6 @@
 
 #include "core/html/shadow/DateTimeSymbolicFieldElement.h"
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 #include "core/events/KeyboardEvent.h"
 #include "platform/fonts/Font.h"
 #include "platform/text/TextBreakIterator.h"
@@ -56,10 +55,10 @@ DateTimeSymbolicFieldElement::DateTimeSymbolicFieldElement(Document& document, F
     , m_minimumIndex(minimum)
     , m_maximumIndex(maximum)
 {
-    ASSERT(!symbols.isEmpty());
-    ASSERT(m_minimumIndex >= 0);
-    ASSERT_WITH_SECURITY_IMPLICATION(m_maximumIndex < static_cast<int>(m_symbols.size()));
-    ASSERT(m_minimumIndex <= m_maximumIndex);
+    DCHECK(!symbols.isEmpty());
+    DCHECK_GE(m_minimumIndex, 0);
+    SECURITY_DCHECK(m_maximumIndex < static_cast<int>(m_symbols.size()));
+    DCHECK_LE(m_minimumIndex, m_maximumIndex);
 }
 
 float DateTimeSymbolicFieldElement::maximumWidth(const ComputedStyle& style)
@@ -119,8 +118,9 @@ void DateTimeSymbolicFieldElement::stepDown()
     if (hasValue()) {
         if (!indexIsInRange(--m_selectedIndex))
             m_selectedIndex = m_maximumIndex;
-    } else
+    } else {
         m_selectedIndex = m_maximumIndex;
+    }
     updateVisibleValue(DispatchEvent);
 }
 
@@ -129,8 +129,9 @@ void DateTimeSymbolicFieldElement::stepUp()
     if (hasValue()) {
         if (!indexIsInRange(++m_selectedIndex))
             m_selectedIndex = m_minimumIndex;
-    } else
+    } else {
         m_selectedIndex = m_minimumIndex;
+    }
     updateVisibleValue(DispatchEvent);
 }
 
@@ -176,5 +177,3 @@ String DateTimeSymbolicFieldElement::optionAtIndex(int index) const
 }
 
 } // namespace blink
-
-#endif

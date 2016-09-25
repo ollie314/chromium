@@ -37,6 +37,8 @@
 #include "platform/weborigin/KURL.h"
 #include "wtf/Deque.h"
 #include "wtf/HashMap.h"
+#include "wtf/Vector.h"
+#include "wtf/text/AtomicString.h"
 #include "wtf/text/WTFString.h"
 
 
@@ -82,7 +84,7 @@ public:
     class ResourceData final : public GarbageCollectedFinalized<ResourceData> {
         friend class NetworkResourcesData;
     public:
-        ResourceData(const String& requestId, const String& loaderId, const KURL&);
+        ResourceData(NetworkResourcesData*, const String& requestId, const String& loaderId, const KURL&);
 
         String requestId() const { return m_requestId; }
         String loaderId() const { return m_loaderId; }
@@ -98,9 +100,9 @@ public:
 
         bool base64Encoded() const { return m_base64Encoded; }
 
-        unsigned removeContent();
+        size_t removeContent();
         bool isContentEvicted() const { return m_isContentEvicted; }
-        unsigned evictContent();
+        size_t evictContent();
 
         InspectorPageAgent::ResourceType type() const { return m_type; }
         void setType(InspectorPageAgent::ResourceType type) { m_type = type; }
@@ -114,14 +116,11 @@ public:
         String textEncodingName() const { return m_textEncodingName; }
         void setTextEncodingName(const String& textEncodingName) { m_textEncodingName = textEncodingName; }
 
-        TextResourceDecoder* decoder() const { return m_decoder.get(); }
-        void setDecoder(PassOwnPtr<TextResourceDecoder> decoder) { m_decoder = decoder; }
-
         PassRefPtr<SharedBuffer> buffer() const { return m_buffer; }
         void setBuffer(PassRefPtr<SharedBuffer> buffer) { m_buffer = buffer; }
 
         Resource* cachedResource() const { return m_cachedResource.get(); }
-        void setResource(Resource* cachedResource) { m_cachedResource = cachedResource; }
+        void setResource(Resource*);
 
         XHRReplayData* xhrReplayData() const { return m_xhrReplayData.get(); }
         void setXHRReplayData(XHRReplayData* xhrReplayData) { m_xhrReplayData = xhrReplayData; }
@@ -129,13 +128,21 @@ public:
         BlobDataHandle* downloadedFileBlob() const { return m_downloadedFileBlob.get(); }
         void setDownloadedFileBlob(PassRefPtr<BlobDataHandle> blob) { m_downloadedFileBlob = blob; }
 
+        int rawHeaderSize() const { return m_rawHeaderSize; }
+        void setRawHeaderSize(int size) { m_rawHeaderSize = size; }
+
+        Vector<AtomicString> certificate() { return m_certificate; }
+        void setCertificate(const Vector<AtomicString>& certificate) { m_certificate = certificate; }
+
         DECLARE_TRACE();
     private:
         bool hasData() const { return m_dataBuffer.get(); }
         size_t dataLength() const;
         void appendData(const char* data, size_t dataLength);
         size_t decodeDataToContent();
+        void clearWeakMembers(Visitor*);
 
+        Member<NetworkResourcesData> m_networkResourcesData;
         String m_requestId;
         String m_loaderId;
         String m_frameId;
@@ -150,11 +157,12 @@ public:
 
         String m_mimeType;
         String m_textEncodingName;
-        OwnPtr<TextResourceDecoder> m_decoder;
+        int m_rawHeaderSize;
 
         RefPtr<SharedBuffer> m_buffer;
-        Member<Resource> m_cachedResource;
+        WeakMember<Resource> m_cachedResource;
         RefPtr<BlobDataHandle> m_downloadedFileBlob;
+        Vector<AtomicString> m_certificate;
     };
 
     static NetworkResourcesData* create(size_t totalBufferSize, size_t resourceBufferSize)
@@ -172,12 +180,12 @@ public:
     void maybeDecodeDataToContent(const String& requestId);
     void addResource(const String& requestId, Resource*);
     ResourceData const* data(const String& requestId);
-    Vector<String> removeResource(Resource*);
     void clear(const String& preservedLoaderId = String());
 
     void setResourcesDataSizeLimits(size_t maximumResourcesContentSize, size_t maximumSingleResourceContentSize);
     void setXHRReplayData(const String& requestId, XHRReplayData*);
     XHRReplayData* xhrReplayData(const String& requestId);
+    void setCertificate(const String& requestId, const Vector<AtomicString>& certificate);
     HeapVector<Member<ResourceData>> resources();
 
     DECLARE_TRACE();

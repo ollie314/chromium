@@ -7,9 +7,10 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "extensions/common/user_script.h"
 #include "extensions/renderer/injection_host.h"
@@ -51,10 +52,11 @@ class ScriptInjection {
   // Remove the isolated world associated with the given injection host.
   static void RemoveIsolatedWorld(const std::string& host_id);
 
-  ScriptInjection(scoped_ptr<ScriptInjector> injector,
+  ScriptInjection(std::unique_ptr<ScriptInjector> injector,
                   content::RenderFrame* render_frame,
-                  scoped_ptr<const InjectionHost> injection_host,
-                  UserScript::RunLocation run_location);
+                  std::unique_ptr<const InjectionHost> injection_host,
+                  UserScript::RunLocation run_location,
+                  bool log_activity);
   ~ScriptInjection();
 
   // Try to inject the script at the |current_location|. This returns
@@ -96,26 +98,28 @@ class ScriptInjection {
   InjectionResult Inject(ScriptsRunInfo* scripts_run_info);
 
   // Inject any JS scripts into the frame for the injection.
-  void InjectJs();
+  void InjectJs(std::set<std::string>* executing_scripts,
+                size_t* num_injected_js_scripts);
 
   // Called when JS injection for the given frame has been completed.
   void OnJsInjectionCompleted(
       const blink::WebVector<v8::Local<v8::Value> >& results);
 
   // Inject any CSS source into the frame for the injection.
-  void InjectCss();
+  void InjectCss(std::set<std::string>* injected_stylesheets,
+                 size_t* num_injected_stylesheets);
 
   // Notify that we will not inject, and mark it as acknowledged.
   void NotifyWillNotInject(ScriptInjector::InjectFailureReason reason);
 
   // The injector for this injection.
-  scoped_ptr<ScriptInjector> injector_;
+  std::unique_ptr<ScriptInjector> injector_;
 
   // The RenderFrame into which this should inject the script.
   content::RenderFrame* render_frame_;
 
   // The associated injection host.
-  scoped_ptr<const InjectionHost> injection_host_;
+  std::unique_ptr<const InjectionHost> injection_host_;
 
   // The location in the document load at which we inject the script.
   UserScript::RunLocation run_location_;
@@ -131,14 +135,17 @@ class ScriptInjection {
   // Whether or not the injection successfully injected JS.
   bool did_inject_js_;
 
+  // Whether or not we should log dom activity for this injection.
+  bool log_activity_;
+
   // Results storage.
-  scoped_ptr<base::Value> execution_result_;
+  std::unique_ptr<base::Value> execution_result_;
 
   // The callback to run upon completing asynchronously.
   CompletionCallback async_completion_callback_;
 
   // A helper class to hold the render frame and watch for its deletion.
-  scoped_ptr<FrameWatcher> frame_watcher_;
+  std::unique_ptr<FrameWatcher> frame_watcher_;
 
   base::WeakPtrFactory<ScriptInjection> weak_ptr_factory_;
 

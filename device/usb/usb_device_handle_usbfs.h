@@ -7,16 +7,17 @@
 
 #include <list>
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/files/scoped_file.h"
-#include "base/memory/scoped_ptr.h"
 #include "device/usb/usb_device_handle.h"
 
 struct usbdevfs_urb;
 
 namespace base {
 class SequencedTaskRunner;
+class SingleThreadTaskRunner;
 }
 
 namespace device {
@@ -62,13 +63,14 @@ class UsbDeviceHandleUsbfs : public UsbDeviceHandle {
       const std::vector<uint32_t>& packet_lengths,
       unsigned int timeout,
       const IsochronousTransferCallback& callback) override;
-
   void IsochronousTransferOut(
       uint8_t endpoint_number,
       scoped_refptr<net::IOBuffer> buffer,
       const std::vector<uint32_t>& packet_lengths,
       unsigned int timeout,
       const IsochronousTransferCallback& callback) override;
+  // To support DevTools this function may be called from any thread and on
+  // completion |callback| will be run on that thread.
   void GenericTransfer(UsbEndpointDirection direction,
                        uint8_t endpoint_number,
                        scoped_refptr<net::IOBuffer> buffer,
@@ -77,6 +79,16 @@ class UsbDeviceHandleUsbfs : public UsbDeviceHandle {
                        const TransferCallback& callback) override;
   const UsbInterfaceDescriptor* FindInterfaceByEndpoint(
       uint8_t endpoint_address) override;
+
+ protected:
+  ~UsbDeviceHandleUsbfs() override;
+
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner() const {
+    return task_runner_;
+  }
+
+  // Stops |helper_| and releases ownership of |fd_| without closing it.
+  void ReleaseFileDescriptor();
 
  private:
   class FileThreadHelper;
@@ -89,8 +101,7 @@ class UsbDeviceHandleUsbfs : public UsbDeviceHandle {
     const UsbInterfaceDescriptor* interface;
   };
 
-  ~UsbDeviceHandleUsbfs() override;
-  void CloseBlocking();
+  virtual void CloseBlocking();
   void SetConfigurationBlocking(int configuration_value,
                                 const ResultCallback& callback);
   void SetConfigurationComplete(int configuration_value,
@@ -112,22 +123,31 @@ class UsbDeviceHandleUsbfs : public UsbDeviceHandle {
                                    const std::vector<uint32_t>& packet_lengths,
                                    unsigned int timeout,
                                    const IsochronousTransferCallback& callback);
+  void GenericTransferInternal(
+      UsbEndpointDirection direction,
+      uint8_t endpoint_number,
+      scoped_refptr<net::IOBuffer> buffer,
+      size_t length,
+      unsigned int timeout,
+      const TransferCallback& callback,
+      scoped_refptr<base::SingleThreadTaskRunner> callback_runner);
   void ReapedUrbs(const std::vector<usbdevfs_urb*>& urbs);
-  void TransferComplete(scoped_ptr<Transfer> transfer);
+  void TransferComplete(std::unique_ptr<Transfer> transfer);
   void RefreshEndpointInfo();
   void ReportIsochronousError(
       const std::vector<uint32_t>& packet_lengths,
       const UsbDeviceHandle::IsochronousTransferCallback& callback,
       UsbTransferStatus status);
   void SetUpTimeoutCallback(Transfer* transfer, unsigned int timeout);
-
-  static void TransferTimedOut(Transfer* transfer);
+  std::unique_ptr<Transfer> RemoveFromTransferList(Transfer* transfer);
+  void CancelTransfer(Transfer* transfer, UsbTransferStatus status);
+  void DiscardUrbBlocking(Transfer* transfer);
+  void UrbDiscarded(Transfer* transfer);
 
   scoped_refptr<UsbDevice> device_;
   base::ScopedFD fd_;
-  scoped_refptr<base::SequencedTaskRunner> task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
-  base::ThreadChecker thread_checker_;
 
   // Maps claimed interfaces by interface number to their current alternate
   // setting.
@@ -143,7 +163,7 @@ class UsbDeviceHandleUsbfs : public UsbDeviceHandle {
   // destruction.
   FileThreadHelper* helper_;
 
-  std::list<scoped_ptr<Transfer>> transfers_;
+  std::list<std::unique_ptr<Transfer>> transfers_;
 };
 
 }  // namespace device

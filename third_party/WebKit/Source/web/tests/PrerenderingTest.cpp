@@ -44,9 +44,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/tests/FrameTestHelpers.h"
-#include "wtf/OwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include <functional>
 #include <list>
+#include <memory>
 
 using namespace blink;
 using blink::URLTestHelpers::toKURL;
@@ -66,7 +67,7 @@ public:
     void setExtraDataForNextPrerender(WebPrerender::ExtraData* extraData)
     {
         DCHECK(!m_extraData);
-        m_extraData = adoptPtr(extraData);
+        m_extraData = wrapUnique(extraData);
     }
 
     WebPrerender releaseWebPrerender()
@@ -91,13 +92,18 @@ private:
     // From WebPrerendererClient:
     void willAddPrerender(WebPrerender* prerender) override
     {
-        prerender->setExtraData(m_extraData.leakPtr());
+        prerender->setExtraData(m_extraData.release());
 
         DCHECK(!prerender->isNull());
         m_webPrerenders.push_back(*prerender);
     }
 
-    OwnPtr<WebPrerender::ExtraData> m_extraData;
+    bool isPrefetchOnly() override
+    {
+        return false;
+    }
+
+    std::unique_ptr<WebPrerender::ExtraData> m_extraData;
     std::list<WebPrerender> m_webPrerenders;
 };
 
@@ -198,7 +204,7 @@ public:
 
     Element& console()
     {
-        Document* document = m_webViewHelper.webViewImpl()->mainFrameImpl()->frame()->document();
+        Document* document = m_webViewHelper.webView()->mainFrameImpl()->frame()->document();
         Element* console = document->getElementById("console");
         DCHECK(isHTMLUListElement(console));
         return *console;

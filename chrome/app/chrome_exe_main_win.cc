@@ -23,30 +23,20 @@
 #include "base/time/time.h"
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
-#include "chrome/app/chrome_crash_reporter_client.h"
 #include "chrome/app/main_dll_loader_win.h"
-#include "chrome/browser/chrome_process_finder_win.h"
 #include "chrome/browser/policy/policy_path_parser.h"
+#include "chrome/browser/win/chrome_process_finder.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome_elf/chrome_elf_main.h"
-#include "components/crash/content/app/crash_reporter_client.h"
 #include "components/crash/content/app/crash_switches.h"
 #include "components/crash/content/app/crashpad.h"
 #include "components/crash/content/app/run_as_crashpad_handler_win.h"
-#include "components/startup_metric_utils/browser/startup_metric_utils.h"
-#include "components/startup_metric_utils/common/pre_read_field_trial_utils_win.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 
 namespace {
-
-base::LazyInstance<ChromeCrashReporterClient>::Leaky g_chrome_crash_client =
-    LAZY_INSTANCE_INITIALIZER;
-
-base::LazyInstance<std::vector<crash_reporter::UploadedReport>>::Leaky
-    g_uploaded_reports = LAZY_INSTANCE_INITIALIZER;
 
 // List of switches that it's safe to rendezvous early with. Fast start should
 // not be done if a command line contains a switch not in this set.
@@ -127,7 +117,19 @@ BOOL SetProcessDPIAwareWrapper() {
 }
 
 void EnableHighDPISupport() {
-  if (!SetProcessDpiAwarenessWrapper(PROCESS_SYSTEM_DPI_AWARE)) {
+  // Enable per-monitor DPI for Win10 or above instead of Win8.1 since Win8.1
+  // does not have EnableChildWindowDpiMessage, necessary for correct non-client
+  // area scaling across monitors.
+  bool allowed_platform = base::win::GetVersion() >= base::win::VERSION_WIN10;
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  bool per_monitor_dpi_switch =
+      !command_line->HasSwitch(switches::kDisablePerMonitorDpi);
+  PROCESS_DPI_AWARENESS process_dpi_awareness =
+      allowed_platform && per_monitor_dpi_switch
+          ? PROCESS_PER_MONITOR_DPI_AWARE
+          : PROCESS_SYSTEM_DPI_AWARE;
+  if (!SetProcessDpiAwarenessWrapper(process_dpi_awareness)) {
     SetProcessDPIAwareWrapper();
   }
 }
@@ -196,18 +198,6 @@ bool RemoveAppCompatFlagsEntry() {
 
 }  // namespace
 
-// This helper is looked up in the browser to retrieve the crash reports. See
-// CrashUploadListCrashpad. Note that we do not pass an std::vector here,
-// because we do not want to allocate/free in different modules. The returned
-// pointer is read-only.
-extern "C" __declspec(dllexport) void GetUploadedReportsImpl(
-    const crash_reporter::UploadedReport** reports,
-    size_t* report_count) {
-  crash_reporter::GetUploadedReports(g_uploaded_reports.Pointer());
-  *reports = g_uploaded_reports.Pointer()->data();
-  *report_count = g_uploaded_reports.Pointer()->size();
-}
-
 #if !defined(WIN_CONSOLE_APP)
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE prev, wchar_t*, int) {
 #else
@@ -222,15 +212,11 @@ int main() {
   const std::string process_type =
       command_line->GetSwitchValueASCII(switches::kProcessType);
 
-  startup_metric_utils::InitializePreReadOptions(
-      BrowserDistribution::GetDistribution()->GetRegistryPath());
-
   // Confirm that an explicit prefetch profile is used for all process types
   // except for the browser process. Any new process type will have to assign
   // itself a prefetch id. See kPrefetchArgument* constants in
   // content_switches.cc for details.
-  DCHECK(!startup_metric_utils::GetPreReadOptions().use_prefetch_argument ||
-         process_type.empty() ||
+  DCHECK(process_type.empty() ||
          HasValidWindowsPrefetchArgument(*command_line));
 
   if (process_type == crash_reporter::switches::kCrashpadHandler) {
@@ -238,11 +224,7 @@ int main() {
         *base::CommandLine::ForCurrentProcess());
   }
 
-  crash_reporter::SetCrashReporterClient(g_chrome_crash_client.Pointer());
-  crash_reporter::InitializeCrashpadWithEmbeddedHandler(process_type.empty(),
-                                                        process_type);
-
-  startup_metric_utils::RecordExeMainEntryPointTime(base::Time::Now());
+  const base::TimeTicks exe_entry_point_ticks = base::TimeTicks::Now();
 
   // Signal Chrome Elf that Chrome has begun to start.
   SignalChromeElf();
@@ -250,11 +232,7 @@ int main() {
   // The exit manager is in charge of calling the dtors of singletons.
   base::AtExitManager exit_manager;
 
-  // We don't want to set DPI awareness on pre-Win7 because we don't support
-  // DirectWrite there. GDI fonts are kerned very badly, so better to leave
-  // DPI-unaware and at effective 1.0. See also ShouldUseDirectWrite().
-  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
-    EnableHighDPISupport();
+  EnableHighDPISupport();
 
   if (AttemptFastNotify(*command_line))
     return 0;
@@ -264,7 +242,7 @@ int main() {
   // Load and launch the chrome dll. *Everything* happens inside.
   VLOG(1) << "About to load main DLL.";
   MainDllLoader* loader = MakeMainDllLoader();
-  int rc = loader->Launch(instance);
+  int rc = loader->Launch(instance, exe_entry_point_ticks);
   loader->RelaunchChromeBrowserWithNewCommandLineIfNeeded();
   delete loader;
   return rc;

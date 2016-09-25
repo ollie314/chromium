@@ -35,6 +35,7 @@
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/policy/policy_constants.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_observer.h"
@@ -46,7 +47,6 @@
 #include "extensions/browser/api/networking_private/networking_private_delegate_factory.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/switches.h"
-#include "policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -143,7 +143,8 @@ class TestListener : public content::NotificationObserver {
   void Observe(int type,
                const content::NotificationSource& /* source */,
                const content::NotificationDetails& details) override {
-    const std::string& message = *content::Details<std::string>(details).ptr();
+    const std::string& message =
+        content::Details<std::pair<std::string, bool*>>(details).ptr()->first;
     if (message == message_)
       callback_.Run();
   }
@@ -595,10 +596,10 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, GetManagedProperties) {
       "}";
 
   policy::PolicyMap policy;
-  policy.Set(policy::key::kOpenNetworkConfiguration,
-             policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-             policy::POLICY_SOURCE_CLOUD,
-             new base::StringValue(user_policy_blob), nullptr);
+  policy.Set(
+      policy::key::kOpenNetworkConfiguration, policy::POLICY_LEVEL_MANDATORY,
+      policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+      base::WrapUnique(new base::StringValue(user_policy_blob)), nullptr);
   provider_.UpdateChromePolicy(policy);
 
   content::RunAllPendingInMessageLoop();

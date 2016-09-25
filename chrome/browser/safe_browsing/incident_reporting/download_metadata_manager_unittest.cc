@@ -13,8 +13,8 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/run_loop.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_thread.h"
@@ -163,7 +163,7 @@ class DownloadMetadataManagerTestBase : public ::testing::Test {
   }
 
   // Runs all tasks posted to the test thread's message loop.
-  void RunAllTasks() { base::MessageLoop::current()->RunUntilIdle(); }
+  void RunAllTasks() { base::RunLoop().RunUntilIdle(); }
 
   // Adds a DownloadManager for the test profile. The DownloadMetadataManager's
   // observer is stashed for later use. Only call once per call to

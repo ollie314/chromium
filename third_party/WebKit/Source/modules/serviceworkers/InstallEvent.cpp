@@ -4,17 +4,11 @@
 
 #include "modules/serviceworkers/InstallEvent.h"
 
-#include "bindings/modules/v8/UnionTypesModules.h"
 #include "core/dom/ExceptionCode.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "public/platform/WebSecurityOrigin.h"
 
 namespace blink {
-
-InstallEvent* InstallEvent::create()
-{
-    return new InstallEvent();
-}
 
 InstallEvent* InstallEvent::create(const AtomicString& type, const ExtendableEventInit& eventInit)
 {
@@ -94,10 +88,6 @@ void InstallEvent::registerForeignFetch(ExecutionContext* executionContext, cons
 const AtomicString& InstallEvent::interfaceName() const
 {
     return EventNames::InstallEvent;
-}
-
-InstallEvent::InstallEvent()
-{
 }
 
 InstallEvent::InstallEvent(const AtomicString& type, const ExtendableEventInit& initializer)

@@ -4,8 +4,8 @@
 
 #include "core/inspector/InspectorTraceEvents.h"
 
-#include "bindings/core/v8/ScriptCallStack.h"
 #include "bindings/core/v8/ScriptSourceCode.h"
+#include "bindings/core/v8/SourceLocation.h"
 #include "core/animation/Animation.h"
 #include "core/animation/KeyframeEffect.h"
 #include "core/css/invalidation/InvalidationSet.h"
@@ -22,17 +22,19 @@
 #include "core/layout/LayoutObject.h"
 #include "core/page/Page.h"
 #include "core/paint/PaintLayer.h"
+#include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerThread.h"
 #include "core/xmlhttprequest/XMLHttpRequest.h"
 #include "platform/TracedValue.h"
 #include "platform/graphics/GraphicsLayer.h"
+#include "platform/network/ResourceLoadPriority.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/network/ResourceResponse.h"
-#include "platform/v8_inspector/V8StringUtil.h"
 #include "platform/weborigin/KURL.h"
 #include "wtf/Vector.h"
 #include "wtf/text/TextPosition.h"
 #include <inttypes.h>
+#include <memory>
 #include <v8-profiler.h>
 #include <v8.h>
 
@@ -40,7 +42,7 @@ namespace blink {
 
 String toHexString(const void* p)
 {
-    return String::format("0x%" PRIx64, static_cast<uint64_t>(reinterpret_cast<intptr_t>(p)));
+    return String::format("0x%" PRIx64, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(p)));
 }
 
 void setCallStack(TracedValue* value)
@@ -52,10 +54,9 @@ void setCallStack(TracedValue* value)
     if (!*traceCategoryEnabled)
         return;
     // The CPU profiler stack trace does not include call site line numbers.
-    // So we collect the top frame with the currentScriptCallStack to get the
+    // So we collect the top frame with SourceLocation::capture() to get the
     // binding call site info.
-    if (RefPtr<ScriptCallStack> scriptCallStack = ScriptCallStack::capture(1))
-        scriptCallStack->toTracedValue(value, "stackTrace");
+    SourceLocation::capture()->toTracedValue(value, "stackTrace");
     v8::Isolate::GetCurrent()->GetCpuProfiler()->CollectSample();
 }
 
@@ -143,10 +144,12 @@ const char* pseudoTypeToString(CSSSelector::PseudoType pseudoType)
         DEFINE_STRING_MAPPING(PseudoInRange)
         DEFINE_STRING_MAPPING(PseudoOutOfRange)
         DEFINE_STRING_MAPPING(PseudoWebKitCustomElement)
+        DEFINE_STRING_MAPPING(PseudoBlinkInternalElement)
         DEFINE_STRING_MAPPING(PseudoCue)
         DEFINE_STRING_MAPPING(PseudoFutureCue)
         DEFINE_STRING_MAPPING(PseudoPastCue)
         DEFINE_STRING_MAPPING(PseudoUnresolved)
+        DEFINE_STRING_MAPPING(PseudoDefined)
         DEFINE_STRING_MAPPING(PseudoContent)
         DEFINE_STRING_MAPPING(PseudoHost)
         DEFINE_STRING_MAPPING(PseudoHostContext)
@@ -154,6 +157,7 @@ const char* pseudoTypeToString(CSSSelector::PseudoType pseudoType)
         DEFINE_STRING_MAPPING(PseudoSlotted)
         DEFINE_STRING_MAPPING(PseudoSpatialNavigationFocus)
         DEFINE_STRING_MAPPING(PseudoListBox)
+        DEFINE_STRING_MAPPING(PseudoHostHasAppearance)
 #undef DEFINE_STRING_MAPPING
     }
 
@@ -164,16 +168,15 @@ const char* pseudoTypeToString(CSSSelector::PseudoType pseudoType)
 } // namespace
 
 namespace InspectorScheduleStyleInvalidationTrackingEvent {
-PassOwnPtr<TracedValue> fillCommonPart(Element& element, const InvalidationSet& invalidationSet, const char* invalidatedSelector)
+std::unique_ptr<TracedValue> fillCommonPart(Element& element, const InvalidationSet& invalidationSet, const char* invalidatedSelector)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(element.document().frame()));
     setNodeInfo(value.get(), &element, "nodeId", "nodeName");
     value->setString("invalidationSet", descendantInvalidationSetToIdString(invalidationSet));
     value->setString("invalidatedSelectorId", invalidatedSelector);
-    if (RefPtr<ScriptCallStack> stackTrace = ScriptCallStack::capture(1))
-        stackTrace->toTracedValue(value.get(), "stackTrace");
-    return value.release();
+    SourceLocation::capture()->toTracedValue(value.get(), "stackTrace");
+    return value;
 }
 } // namespace InspectorScheduleStyleInvalidationTrackingEvent
 
@@ -182,32 +185,46 @@ const char InspectorScheduleStyleInvalidationTrackingEvent::Class[] = "class";
 const char InspectorScheduleStyleInvalidationTrackingEvent::Id[] = "id";
 const char InspectorScheduleStyleInvalidationTrackingEvent::Pseudo[] = "pseudo";
 
-PassOwnPtr<TracedValue> InspectorScheduleStyleInvalidationTrackingEvent::idChange(Element& element, const InvalidationSet& invalidationSet, const AtomicString& id)
+const char* resourcePriorityString(ResourceLoadPriority priority)
 {
-    OwnPtr<TracedValue> value = fillCommonPart(element, invalidationSet, Id);
+    const char* priorityString = 0;
+    switch (priority) {
+    case ResourceLoadPriorityVeryLow: priorityString = "VeryLow"; break;
+    case ResourceLoadPriorityLow: priorityString = "Low"; break;
+    case ResourceLoadPriorityMedium: priorityString = "Medium"; break;
+    case ResourceLoadPriorityHigh: priorityString = "High"; break;
+    case ResourceLoadPriorityVeryHigh: priorityString = "VeryHigh"; break;
+    case ResourceLoadPriorityUnresolved: break;
+    }
+    return priorityString;
+}
+
+std::unique_ptr<TracedValue> InspectorScheduleStyleInvalidationTrackingEvent::idChange(Element& element, const InvalidationSet& invalidationSet, const AtomicString& id)
+{
+    std::unique_ptr<TracedValue> value = fillCommonPart(element, invalidationSet, Id);
     value->setString("changedId", id);
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorScheduleStyleInvalidationTrackingEvent::classChange(Element& element, const InvalidationSet& invalidationSet, const AtomicString& className)
+std::unique_ptr<TracedValue> InspectorScheduleStyleInvalidationTrackingEvent::classChange(Element& element, const InvalidationSet& invalidationSet, const AtomicString& className)
 {
-    OwnPtr<TracedValue> value = fillCommonPart(element, invalidationSet, Class);
+    std::unique_ptr<TracedValue> value = fillCommonPart(element, invalidationSet, Class);
     value->setString("changedClass", className);
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorScheduleStyleInvalidationTrackingEvent::attributeChange(Element& element, const InvalidationSet& invalidationSet, const QualifiedName& attributeName)
+std::unique_ptr<TracedValue> InspectorScheduleStyleInvalidationTrackingEvent::attributeChange(Element& element, const InvalidationSet& invalidationSet, const QualifiedName& attributeName)
 {
-    OwnPtr<TracedValue> value = fillCommonPart(element, invalidationSet, Attribute);
+    std::unique_ptr<TracedValue> value = fillCommonPart(element, invalidationSet, Attribute);
     value->setString("changedAttribute", attributeName.toString());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorScheduleStyleInvalidationTrackingEvent::pseudoChange(Element& element, const InvalidationSet& invalidationSet, CSSSelector::PseudoType pseudoType)
+std::unique_ptr<TracedValue> InspectorScheduleStyleInvalidationTrackingEvent::pseudoChange(Element& element, const InvalidationSet& invalidationSet, CSSSelector::PseudoType pseudoType)
 {
-    OwnPtr<TracedValue> value = fillCommonPart(element, invalidationSet, Attribute);
+    std::unique_ptr<TracedValue> value = fillCommonPart(element, invalidationSet, Attribute);
     value->setString("changedPseudo", pseudoTypeToString(pseudoType));
-    return value.release();
+    return value;
 }
 
 String descendantInvalidationSetToIdString(const InvalidationSet& set)
@@ -224,56 +241,55 @@ const char InspectorStyleInvalidatorInvalidateEvent::InvalidationSetMatchedTagNa
 const char InspectorStyleInvalidatorInvalidateEvent::PreventStyleSharingForParent[] = "Prevent style sharing for parent";
 
 namespace InspectorStyleInvalidatorInvalidateEvent {
-PassOwnPtr<TracedValue> fillCommonPart(Element& element, const char* reason)
+std::unique_ptr<TracedValue> fillCommonPart(ContainerNode& node, const char* reason)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
-    value->setString("frame", toHexString(element.document().frame()));
-    setNodeInfo(value.get(), &element, "nodeId", "nodeName");
+    std::unique_ptr<TracedValue> value = TracedValue::create();
+    value->setString("frame", toHexString(node.document().frame()));
+    setNodeInfo(value.get(), &node, "nodeId", "nodeName");
     value->setString("reason", reason);
-    return value.release();
+    return value;
 }
 } // namespace InspectorStyleInvalidatorInvalidateEvent
 
-PassOwnPtr<TracedValue> InspectorStyleInvalidatorInvalidateEvent::data(Element& element, const char* reason)
+std::unique_ptr<TracedValue> InspectorStyleInvalidatorInvalidateEvent::data(Element& element, const char* reason)
 {
     return fillCommonPart(element, reason);
 }
 
-PassOwnPtr<TracedValue> InspectorStyleInvalidatorInvalidateEvent::selectorPart(Element& element, const char* reason, const InvalidationSet& invalidationSet, const String& selectorPart)
+std::unique_ptr<TracedValue> InspectorStyleInvalidatorInvalidateEvent::selectorPart(Element& element, const char* reason, const InvalidationSet& invalidationSet, const String& selectorPart)
 {
-    OwnPtr<TracedValue> value = fillCommonPart(element, reason);
+    std::unique_ptr<TracedValue> value = fillCommonPart(element, reason);
     value->beginArray("invalidationList");
     invalidationSet.toTracedValue(value.get());
     value->endArray();
     value->setString("selectorPart", selectorPart);
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorStyleInvalidatorInvalidateEvent::invalidationList(Element& element, const Vector<RefPtr<InvalidationSet>>& invalidationList)
+std::unique_ptr<TracedValue> InspectorStyleInvalidatorInvalidateEvent::invalidationList(ContainerNode& node, const Vector<RefPtr<InvalidationSet>>& invalidationList)
 {
-    OwnPtr<TracedValue> value = fillCommonPart(element, ElementHasPendingInvalidationList);
+    std::unique_ptr<TracedValue> value = fillCommonPart(node, ElementHasPendingInvalidationList);
     value->beginArray("invalidationList");
     for (const auto& invalidationSet : invalidationList)
         invalidationSet->toTracedValue(value.get());
     value->endArray();
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorStyleRecalcInvalidationTrackingEvent::data(Node* node, const StyleChangeReasonForTracing& reason)
+std::unique_ptr<TracedValue> InspectorStyleRecalcInvalidationTrackingEvent::data(Node* node, const StyleChangeReasonForTracing& reason)
 {
     ASSERT(node);
 
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(node->document().frame()));
     setNodeInfo(value.get(), node, "nodeId", "nodeName");
     value->setString("reason", reason.reasonString());
     value->setString("extraData", reason.getExtraData());
-    if (RefPtr<ScriptCallStack> stackTrace = ScriptCallStack::capture(1))
-        stackTrace->toTracedValue(value.get(), "stackTrace");
-    return value.release();
+    SourceLocation::capture()->toTracedValue(value.get(), "stackTrace");
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorLayoutEvent::beginData(FrameView* frameView)
+std::unique_ptr<TracedValue> InspectorLayoutEvent::beginData(FrameView* frameView)
 {
     bool isPartial;
     unsigned needsLayoutObjects;
@@ -281,13 +297,13 @@ PassOwnPtr<TracedValue> InspectorLayoutEvent::beginData(FrameView* frameView)
     LocalFrame& frame = frameView->frame();
     frame.view()->countObjectsNeedingLayout(needsLayoutObjects, totalObjects, isPartial);
 
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setInteger("dirtyObjects", needsLayoutObjects);
     value->setInteger("totalObjects", totalObjects);
     value->setBoolean("partialLayout", isPartial);
     value->setString("frame", toHexString(&frame));
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
 static void createQuad(TracedValue* value, const char* name, const FloatQuad& quad)
@@ -315,19 +331,19 @@ static void setGeneratingNodeInfo(TracedValue* value, const LayoutObject* layout
     setNodeInfo(value, node, idFieldName, nameFieldName);
 }
 
-PassOwnPtr<TracedValue> InspectorLayoutEvent::endData(LayoutObject* rootForThisLayout)
+std::unique_ptr<TracedValue> InspectorLayoutEvent::endData(LayoutObject* rootForThisLayout)
 {
     Vector<FloatQuad> quads;
     rootForThisLayout->absoluteQuads(quads);
 
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     if (quads.size() >= 1) {
         createQuad(value.get(), "root", quads[0]);
         setGeneratingNodeInfo(value.get(), rootForThisLayout, "rootNode");
     } else {
         ASSERT_NOT_REACHED();
     }
-    return value.release();
+    return value;
 }
 
 namespace LayoutInvalidationReason {
@@ -355,7 +371,7 @@ const char SvgResourceInvalidated[] = "SVG resource invalidated";
 const char FloatDescendantChanged[] = "Floating descendant changed";
 const char CountersChanged[] = "Counters changed";
 const char GridChanged[] = "Grid changed";
-const char MenuWidthChanged[] = "Menu width changed";
+const char MenuOptionsChanged[] = "Menu options changed";
 const char RemovedFromLayout[] = "Removed from layout";
 const char AddedToLayout[] = "Added to layout";
 const char TableChanged[] = "Table changed";
@@ -365,98 +381,98 @@ const char SvgChanged[] = "SVG changed";
 const char ScrollbarChanged[] = "Scrollbar changed";
 } // namespace LayoutInvalidationReason
 
-PassOwnPtr<TracedValue> InspectorLayoutInvalidationTrackingEvent::data(const LayoutObject* layoutObject, LayoutInvalidationReasonForTracing reason)
+std::unique_ptr<TracedValue> InspectorLayoutInvalidationTrackingEvent::data(const LayoutObject* layoutObject, LayoutInvalidationReasonForTracing reason)
 {
     ASSERT(layoutObject);
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(layoutObject->frame()));
     setGeneratingNodeInfo(value.get(), layoutObject, "nodeId", "nodeName");
     value->setString("reason", reason);
-    if (RefPtr<ScriptCallStack> stackTrace = ScriptCallStack::capture(1))
-        stackTrace->toTracedValue(value.get(), "stackTrace");
-    return value.release();
+    SourceLocation::capture()->toTracedValue(value.get(), "stackTrace");
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorPaintInvalidationTrackingEvent::data(const LayoutObject* layoutObject, const LayoutObject& paintContainer)
+std::unique_ptr<TracedValue> InspectorPaintInvalidationTrackingEvent::data(const LayoutObject* layoutObject, const LayoutObject& paintContainer)
 {
     ASSERT(layoutObject);
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(layoutObject->frame()));
     setGeneratingNodeInfo(value.get(), &paintContainer, "paintId");
     setGeneratingNodeInfo(value.get(), layoutObject, "nodeId", "nodeName");
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorScrollInvalidationTrackingEvent::data(const LayoutObject& layoutObject)
+std::unique_ptr<TracedValue> InspectorScrollInvalidationTrackingEvent::data(const LayoutObject& layoutObject)
 {
     static const char ScrollInvalidationReason[] = "Scroll with viewport-constrained element";
 
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(layoutObject.frame()));
     value->setString("reason", ScrollInvalidationReason);
     setGeneratingNodeInfo(value.get(), &layoutObject, "nodeId", "nodeName");
-    if (RefPtr<ScriptCallStack> stackTrace = ScriptCallStack::capture(1))
-        stackTrace->toTracedValue(value.get(), "stackTrace");
-    return value.release();
+    SourceLocation::capture()->toTracedValue(value.get(), "stackTrace");
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorSendRequestEvent::data(unsigned long identifier, LocalFrame* frame, const ResourceRequest& request)
+std::unique_ptr<TracedValue> InspectorChangeResourcePriorityEvent::data(unsigned long identifier, const ResourceLoadPriority& loadPriority)
 {
     String requestId = IdentifiersFactory::requestId(identifier);
 
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
+    value->setString("requestId", requestId);
+    value->setString("priority", resourcePriorityString(loadPriority));
+    return value;
+}
+
+std::unique_ptr<TracedValue> InspectorSendRequestEvent::data(unsigned long identifier, LocalFrame* frame, const ResourceRequest& request)
+{
+    String requestId = IdentifiersFactory::requestId(identifier);
+
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("requestId", requestId);
     value->setString("frame", toHexString(frame));
     value->setString("url", request.url().getString());
     value->setString("requestMethod", request.httpMethod());
-    const char* priority = 0;
-    switch (request.priority()) {
-    case ResourceLoadPriorityVeryLow: priority = "VeryLow"; break;
-    case ResourceLoadPriorityLow: priority = "Low"; break;
-    case ResourceLoadPriorityMedium: priority = "Medium"; break;
-    case ResourceLoadPriorityHigh: priority = "High"; break;
-    case ResourceLoadPriorityVeryHigh: priority = "VeryHigh"; break;
-    case ResourceLoadPriorityUnresolved: break;
-    }
+    const char* priority = resourcePriorityString(request.priority());
     if (priority)
         value->setString("priority", priority);
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorReceiveResponseEvent::data(unsigned long identifier, LocalFrame* frame, const ResourceResponse& response)
+std::unique_ptr<TracedValue> InspectorReceiveResponseEvent::data(unsigned long identifier, LocalFrame* frame, const ResourceResponse& response)
 {
     String requestId = IdentifiersFactory::requestId(identifier);
 
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("requestId", requestId);
     value->setString("frame", toHexString(frame));
     value->setInteger("statusCode", response.httpStatusCode());
     value->setString("mimeType", response.mimeType().getString().isolatedCopy());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorReceiveDataEvent::data(unsigned long identifier, LocalFrame* frame, int encodedDataLength)
+std::unique_ptr<TracedValue> InspectorReceiveDataEvent::data(unsigned long identifier, LocalFrame* frame, int encodedDataLength)
 {
     String requestId = IdentifiersFactory::requestId(identifier);
 
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("requestId", requestId);
     value->setString("frame", toHexString(frame));
     value->setInteger("encodedDataLength", encodedDataLength);
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorResourceFinishEvent::data(unsigned long identifier, double finishTime, bool didFail)
+std::unique_ptr<TracedValue> InspectorResourceFinishEvent::data(unsigned long identifier, double finishTime, bool didFail)
 {
     String requestId = IdentifiersFactory::requestId(identifier);
 
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("requestId", requestId);
     value->setBoolean("didFail", didFail);
     if (finishTime)
         value->setDouble("networkTime", finishTime);
-    return value.release();
+    return value;
 }
 
 static LocalFrame* frameForExecutionContext(ExecutionContext* context)
@@ -467,119 +483,121 @@ static LocalFrame* frameForExecutionContext(ExecutionContext* context)
     return frame;
 }
 
-static PassOwnPtr<TracedValue> genericTimerData(ExecutionContext* context, int timerId)
+static std::unique_ptr<TracedValue> genericTimerData(ExecutionContext* context, int timerId)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setInteger("timerId", timerId);
     if (LocalFrame* frame = frameForExecutionContext(context))
         value->setString("frame", toHexString(frame));
-    setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorTimerInstallEvent::data(ExecutionContext* context, int timerId, int timeout, bool singleShot)
+std::unique_ptr<TracedValue> InspectorTimerInstallEvent::data(ExecutionContext* context, int timerId, int timeout, bool singleShot)
 {
-    OwnPtr<TracedValue> value = genericTimerData(context, timerId);
+    std::unique_ptr<TracedValue> value = genericTimerData(context, timerId);
     value->setInteger("timeout", timeout);
     value->setBoolean("singleShot", singleShot);
-    return value.release();
+    setCallStack(value.get());
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorTimerRemoveEvent::data(ExecutionContext* context, int timerId)
+std::unique_ptr<TracedValue> InspectorTimerRemoveEvent::data(ExecutionContext* context, int timerId)
+{
+    std::unique_ptr<TracedValue> value = genericTimerData(context, timerId);
+    setCallStack(value.get());
+    return value;
+}
+
+std::unique_ptr<TracedValue> InspectorTimerFireEvent::data(ExecutionContext* context, int timerId)
 {
     return genericTimerData(context, timerId);
 }
 
-PassOwnPtr<TracedValue> InspectorTimerFireEvent::data(ExecutionContext* context, int timerId)
+std::unique_ptr<TracedValue> InspectorAnimationFrameEvent::data(ExecutionContext* context, int callbackId)
 {
-    return genericTimerData(context, timerId);
-}
-
-PassOwnPtr<TracedValue> InspectorAnimationFrameEvent::data(ExecutionContext* context, int callbackId)
-{
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setInteger("id", callbackId);
     if (context->isDocument())
         value->setString("frame", toHexString(toDocument(context)->frame()));
     else if (context->isWorkerGlobalScope())
         value->setString("worker", toHexString(toWorkerGlobalScope(context)));
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> genericIdleCallbackEvent(ExecutionContext* context, int id)
+std::unique_ptr<TracedValue> genericIdleCallbackEvent(ExecutionContext* context, int id)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setInteger("id", id);
     if (LocalFrame* frame = frameForExecutionContext(context))
         value->setString("frame", toHexString(frame));
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorIdleCallbackRequestEvent::data(ExecutionContext* context, int id, double timeout)
+std::unique_ptr<TracedValue> InspectorIdleCallbackRequestEvent::data(ExecutionContext* context, int id, double timeout)
 {
-    OwnPtr<TracedValue> value = genericIdleCallbackEvent(context, id);
+    std::unique_ptr<TracedValue> value = genericIdleCallbackEvent(context, id);
     value->setInteger("timeout", timeout);
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorIdleCallbackCancelEvent::data(ExecutionContext* context, int id)
+std::unique_ptr<TracedValue> InspectorIdleCallbackCancelEvent::data(ExecutionContext* context, int id)
 {
     return genericIdleCallbackEvent(context, id);
 }
 
-PassOwnPtr<TracedValue> InspectorIdleCallbackFireEvent::data(ExecutionContext* context, int id, double allottedMilliseconds, bool timedOut)
+std::unique_ptr<TracedValue> InspectorIdleCallbackFireEvent::data(ExecutionContext* context, int id, double allottedMilliseconds, bool timedOut)
 {
-    OwnPtr<TracedValue> value = genericIdleCallbackEvent(context, id);
+    std::unique_ptr<TracedValue> value = genericIdleCallbackEvent(context, id);
     value->setDouble("allottedMilliseconds", allottedMilliseconds);
     value->setBoolean("timedOut", timedOut);
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorParseHtmlEvent::beginData(Document* document, unsigned startLine)
+std::unique_ptr<TracedValue> InspectorParseHtmlEvent::beginData(Document* document, unsigned startLine)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setInteger("startLine", startLine);
     value->setString("frame", toHexString(document->frame()));
     value->setString("url", document->url().getString());
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorParseHtmlEvent::endData(unsigned endLine)
+std::unique_ptr<TracedValue> InspectorParseHtmlEvent::endData(unsigned endLine)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setInteger("endLine", endLine);
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorParseAuthorStyleSheetEvent::data(const CSSStyleSheetResource* cachedStyleSheet)
+std::unique_ptr<TracedValue> InspectorParseAuthorStyleSheetEvent::data(const CSSStyleSheetResource* cachedStyleSheet)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("styleSheetUrl", cachedStyleSheet->url().getString());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorXhrReadyStateChangeEvent::data(ExecutionContext* context, XMLHttpRequest* request)
+std::unique_ptr<TracedValue> InspectorXhrReadyStateChangeEvent::data(ExecutionContext* context, XMLHttpRequest* request)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("url", request->url().getString());
     value->setInteger("readyState", request->readyState());
     if (LocalFrame* frame = frameForExecutionContext(context))
         value->setString("frame", toHexString(frame));
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorXhrLoadEvent::data(ExecutionContext* context, XMLHttpRequest* request)
+std::unique_ptr<TracedValue> InspectorXhrLoadEvent::data(ExecutionContext* context, XMLHttpRequest* request)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("url", request->url().getString());
     if (LocalFrame* frame = frameForExecutionContext(context))
         value->setString("frame", toHexString(frame));
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
 static void localToPageQuad(const LayoutObject& layoutObject, const LayoutRect& rect, FloatQuad* quad)
@@ -599,20 +617,20 @@ const char InspectorLayerInvalidationTrackingEvent::RemovedFromSquashingLayer[] 
 const char InspectorLayerInvalidationTrackingEvent::ReflectionLayerChanged[] = "Reflection layer change";
 const char InspectorLayerInvalidationTrackingEvent::NewCompositedLayer[] = "Assigned a new composited layer";
 
-PassOwnPtr<TracedValue> InspectorLayerInvalidationTrackingEvent::data(const PaintLayer* layer, const char* reason)
+std::unique_ptr<TracedValue> InspectorLayerInvalidationTrackingEvent::data(const PaintLayer* layer, const char* reason)
 {
     const LayoutObject& paintInvalidationContainer = layer->layoutObject()->containerForPaintInvalidation();
 
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(paintInvalidationContainer.frame()));
     setGeneratingNodeInfo(value.get(), &paintInvalidationContainer, "paintId");
     value->setString("reason", reason);
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorPaintEvent::data(LayoutObject* layoutObject, const LayoutRect& clipRect, const GraphicsLayer* graphicsLayer)
+std::unique_ptr<TracedValue> InspectorPaintEvent::data(LayoutObject* layoutObject, const LayoutRect& clipRect, const GraphicsLayer* graphicsLayer)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(layoutObject->frame()));
     FloatQuad quad;
     localToPageQuad(*layoutObject, clipRect, &quad);
@@ -621,133 +639,122 @@ PassOwnPtr<TracedValue> InspectorPaintEvent::data(LayoutObject* layoutObject, co
     int graphicsLayerId = graphicsLayer ? graphicsLayer->platformLayer()->id() : 0;
     value->setInteger("layerId", graphicsLayerId);
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> frameEventData(LocalFrame* frame)
+std::unique_ptr<TracedValue> frameEventData(LocalFrame* frame)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(frame));
     bool isMainFrame = frame && frame->isMainFrame();
     value->setBoolean("isMainFrame", isMainFrame);
     value->setString("page", toHexString(frame));
-    return value.release();
+    return value;
 }
 
 
-PassOwnPtr<TracedValue> InspectorCommitLoadEvent::data(LocalFrame* frame)
+std::unique_ptr<TracedValue> InspectorCommitLoadEvent::data(LocalFrame* frame)
 {
     return frameEventData(frame);
 }
 
-PassOwnPtr<TracedValue> InspectorMarkLoadEvent::data(LocalFrame* frame)
+std::unique_ptr<TracedValue> InspectorMarkLoadEvent::data(LocalFrame* frame)
 {
     return frameEventData(frame);
 }
 
-PassOwnPtr<TracedValue> InspectorScrollLayerEvent::data(LayoutObject* layoutObject)
+std::unique_ptr<TracedValue> InspectorScrollLayerEvent::data(LayoutObject* layoutObject)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(layoutObject->frame()));
     setGeneratingNodeInfo(value.get(), layoutObject, "nodeId");
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorUpdateLayerTreeEvent::data(LocalFrame* frame)
+std::unique_ptr<TracedValue> InspectorUpdateLayerTreeEvent::data(LocalFrame* frame)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(frame));
-    return value.release();
+    return value;
 }
 
 namespace {
-PassOwnPtr<TracedValue> fillLocation(const String& url, const TextPosition& textPosition)
+std::unique_ptr<TracedValue> fillLocation(const String& url, const TextPosition& textPosition)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("url", url);
     value->setInteger("lineNumber", textPosition.m_line.oneBasedInt());
     value->setInteger("columnNumber", textPosition.m_column.oneBasedInt());
-    return value.release();
+    return value;
 }
 }
 
-PassOwnPtr<TracedValue> InspectorEvaluateScriptEvent::data(LocalFrame* frame, const String& url, const TextPosition& textPosition)
+std::unique_ptr<TracedValue> InspectorEvaluateScriptEvent::data(LocalFrame* frame, const String& url, const TextPosition& textPosition)
 {
-    OwnPtr<TracedValue> value = fillLocation(url, textPosition);
+    std::unique_ptr<TracedValue> value = fillLocation(url, textPosition);
     value->setString("frame", toHexString(frame));
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorParseScriptEvent::data(unsigned long identifier, const String& url)
+std::unique_ptr<TracedValue> InspectorParseScriptEvent::data(unsigned long identifier, const String& url)
 {
     String requestId = IdentifiersFactory::requestId(identifier);
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("requestId", requestId);
     value->setString("url", url);
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorCompileScriptEvent::data(const String& url, const TextPosition& textPosition)
+std::unique_ptr<TracedValue> InspectorCompileScriptEvent::data(const String& url, const TextPosition& textPosition)
 {
     return fillLocation(url, textPosition);
 }
 
-PassOwnPtr<TracedValue> InspectorFunctionCallEvent::data(ExecutionContext* context, const v8::Local<v8::Function>& function)
+std::unique_ptr<TracedValue> InspectorFunctionCallEvent::data(ExecutionContext* context, const v8::Local<v8::Function>& function)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
-    setCallStack(value.get());
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     if (LocalFrame* frame = frameForExecutionContext(context))
         value->setString("frame", toHexString(frame));
 
     if (function.IsEmpty())
-        return value.release();
+        return value;
 
     v8::Local<v8::Function> originalFunction = getBoundFunction(function);
-    v8::ScriptOrigin origin = originalFunction->GetScriptOrigin();
-    int scriptId = originalFunction->ScriptId();
-    int lineNumber = 0;
-    String scriptName;
-    if (!origin.ResourceName().IsEmpty()) {
-        V8StringResource<> stringResource(origin.ResourceName());
-        stringResource.prepare();
-        scriptName = stringResource;
-        if (!scriptName.isEmpty())
-            lineNumber = originalFunction->GetScriptLineNumber() + 1;
-    }
     v8::Local<v8::Value> functionName = originalFunction->GetDebugName();
     if (!functionName.IsEmpty() && functionName->IsString())
         value->setString("functionName", toCoreString(functionName.As<v8::String>()));
-    value->setString("scriptId", String::number(scriptId));
-    value->setString("scriptName", scriptName);
-    value->setInteger("scriptLine", lineNumber);
-    return value.release();
+    std::unique_ptr<SourceLocation> location = SourceLocation::fromFunction(originalFunction);
+    value->setString("scriptId", String::number(location->scriptId()));
+    value->setString("url", location->url());
+    value->setInteger("lineNumber", location->lineNumber());
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorPaintImageEvent::data(const LayoutImage& layoutImage)
+std::unique_ptr<TracedValue> InspectorPaintImageEvent::data(const LayoutImage& layoutImage)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     setGeneratingNodeInfo(value.get(), &layoutImage, "nodeId");
     if (const ImageResource* resource = layoutImage.cachedImage())
         value->setString("url", resource->url().getString());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorPaintImageEvent::data(const LayoutObject& owningLayoutObject, const StyleImage& styleImage)
+std::unique_ptr<TracedValue> InspectorPaintImageEvent::data(const LayoutObject& owningLayoutObject, const StyleImage& styleImage)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     setGeneratingNodeInfo(value.get(), &owningLayoutObject, "nodeId");
     if (const ImageResource* resource = styleImage.cachedImage())
         value->setString("url", resource->url().getString());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorPaintImageEvent::data(const LayoutObject* owningLayoutObject, const ImageResource& imageResource)
+std::unique_ptr<TracedValue> InspectorPaintImageEvent::data(const LayoutObject* owningLayoutObject, const ImageResource& imageResource)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     setGeneratingNodeInfo(value.get(), owningLayoutObject, "nodeId");
     value->setString("url", imageResource.url().getString());
-    return value.release();
+    return value;
 }
 
 static size_t usedHeapSize()
@@ -757,101 +764,101 @@ static size_t usedHeapSize()
     return heapStatistics.used_heap_size();
 }
 
-PassOwnPtr<TracedValue> InspectorUpdateCountersEvent::data()
+std::unique_ptr<TracedValue> InspectorUpdateCountersEvent::data()
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     if (isMainThread()) {
         value->setInteger("documents", InstanceCounters::counterValue(InstanceCounters::DocumentCounter));
         value->setInteger("nodes", InstanceCounters::counterValue(InstanceCounters::NodeCounter));
         value->setInteger("jsEventListeners", InstanceCounters::counterValue(InstanceCounters::JSEventListenerCounter));
     }
     value->setDouble("jsHeapSizeUsed", static_cast<double>(usedHeapSize()));
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorInvalidateLayoutEvent::data(LocalFrame* frame)
+std::unique_ptr<TracedValue> InspectorInvalidateLayoutEvent::data(LocalFrame* frame)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(frame));
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorRecalculateStylesEvent::data(LocalFrame* frame)
+std::unique_ptr<TracedValue> InspectorRecalculateStylesEvent::data(LocalFrame* frame)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("frame", toHexString(frame));
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorEventDispatchEvent::data(const Event& event)
+std::unique_ptr<TracedValue> InspectorEventDispatchEvent::data(const Event& event)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("type", event.type());
     setCallStack(value.get());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorTimeStampEvent::data(ExecutionContext* context, const String& message)
+std::unique_ptr<TracedValue> InspectorTimeStampEvent::data(ExecutionContext* context, const String& message)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("message", message);
     if (LocalFrame* frame = frameForExecutionContext(context))
         value->setString("frame", toHexString(frame));
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorTracingSessionIdForWorkerEvent::data(const String& sessionId, const String& workerId, WorkerThread* workerThread)
+std::unique_ptr<TracedValue> InspectorTracingSessionIdForWorkerEvent::data(const String& sessionId, const String& workerId, WorkerThread* workerThread)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("sessionId", sessionId);
     value->setString("workerId", workerId);
     value->setDouble("workerThreadId", workerThread->platformThreadId());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorTracingStartedInFrame::data(const String& sessionId, LocalFrame* frame)
+std::unique_ptr<TracedValue> InspectorTracingStartedInFrame::data(const String& sessionId, LocalFrame* frame)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("sessionId", sessionId);
     value->setString("page", toHexString(frame));
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorSetLayerTreeId::data(const String& sessionId, int layerTreeId)
+std::unique_ptr<TracedValue> InspectorSetLayerTreeId::data(const String& sessionId, int layerTreeId)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("sessionId", sessionId);
     value->setInteger("layerTreeId", layerTreeId);
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorAnimationEvent::data(const Animation& animation)
+std::unique_ptr<TracedValue> InspectorAnimationEvent::data(const Animation& animation)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("id", String::number(animation.sequenceNumber()));
     value->setString("state", animation.playState());
-    if (const AnimationEffect* effect = animation.effect()) {
+    if (const AnimationEffectReadOnly* effect = animation.effect()) {
         value->setString("name", animation.id());
         if (effect->isKeyframeEffect()) {
             if (Element* target = toKeyframeEffect(effect)->target())
                 setNodeInfo(value.get(), target, "nodeId", "nodeName");
         }
     }
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorAnimationStateEvent::data(const Animation& animation)
+std::unique_ptr<TracedValue> InspectorAnimationStateEvent::data(const Animation& animation)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     value->setString("state", animation.playState());
-    return value.release();
+    return value;
 }
 
-PassOwnPtr<TracedValue> InspectorHitTestEvent::endData(const HitTestRequest& request, const HitTestLocation& location, const HitTestResult& result)
+std::unique_ptr<TracedValue> InspectorHitTestEvent::endData(const HitTestRequest& request, const HitTestLocation& location, const HitTestResult& result)
 {
-    OwnPtr<TracedValue> value(TracedValue::create());
+    std::unique_ptr<TracedValue> value(TracedValue::create());
     value->setInteger("x", location.roundedPoint().x());
     value->setInteger("y", location.roundedPoint().y());
     if (location.isRectBasedTest())
@@ -866,7 +873,7 @@ PassOwnPtr<TracedValue> InspectorHitTestEvent::endData(const HitTestRequest& req
         value->setBoolean("listBased", true);
     else if (Node* node = result.innerNode())
         setNodeInfo(value.get(), node, "nodeId", "nodeName");
-    return value.release();
+    return value;
 }
 
 } // namespace blink

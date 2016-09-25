@@ -5,19 +5,25 @@
 /**
  * @constructor
  * @extends {WebInspector.ProfileNode}
- * @param {!ProfilerAgent.CPUProfileNode} sourceNode
+ * @param {!ProfilerAgent.ProfileNode} node
  * @param {number} sampleTime
  */
-WebInspector.CPUProfileNode = function(sourceNode, sampleTime)
+WebInspector.CPUProfileNode = function(node, sampleTime)
 {
-    WebInspector.ProfileNode.call(this, sourceNode.functionName, sourceNode.scriptId, sourceNode.url, sourceNode.lineNumber, sourceNode.columnNumber);
-    this.id = sourceNode.id;
-    this.self = sourceNode.hitCount * sampleTime;
-    this.callUID = sourceNode.callUID;
-    this.positionTicks = sourceNode.positionTicks;
-    this.deoptReason = sourceNode.deoptReason;
-    // TODO: Remove the following field in favor of this.self
-    this.selfTime = this.self;
+    var callFrame = node.callFrame || /** @type {!RuntimeAgent.CallFrame} */ ({
+        // Backward compatibility for old SamplingHeapProfileNode format.
+        functionName: node["functionName"],
+        scriptId: node["scriptId"],
+        url: node["url"],
+        lineNumber: node["lineNumber"] - 1,
+        columnNumber: node["columnNumber"] - 1
+    });
+    WebInspector.ProfileNode.call(this, callFrame);
+    this.id = node.id;
+    this.self = node.hitCount * sampleTime;
+    this.positionTicks = node.positionTicks;
+    // Compatibility: legacy backends could provide "no reason" for optimized functions.
+    this.deoptReason = node.deoptReason && node.deoptReason !== "no reason" ? node.deoptReason : null;
 }
 
 WebInspector.CPUProfileNode.prototype = {
@@ -27,144 +33,145 @@ WebInspector.CPUProfileNode.prototype = {
 /**
  * @constructor
  * @extends {WebInspector.ProfileTreeModel}
- * @param {!ProfilerAgent.CPUProfile} profile
+ * @param {!ProfilerAgent.Profile} profile
  */
 WebInspector.CPUProfileDataModel = function(profile)
 {
+    var isLegacyFormat = !!profile["head"];
+    if (isLegacyFormat) {
+        // Legacy format contains raw timestamps and start/stop times are in seconds.
+        this.profileStartTime = profile.startTime * 1000;
+        this.profileEndTime = profile.endTime * 1000;
+        this.timestamps = profile.timestamps;
+        this._compatibilityConversionHeadToNodes(profile);
+    } else {
+        // Current format encodes timestamps as deltas. Start/stop times are in microseconds.
+        this.profileStartTime = profile.startTime / 1000;
+        this.profileEndTime = profile.endTime / 1000;
+        this.timestamps = this._convertTimeDeltas(profile);
+    }
     this.samples = profile.samples;
-    this.timestamps = profile.timestamps;
-    // Convert times from sec to msec.
-    this.profileStartTime = profile.startTime * 1000;
-    this.profileEndTime = profile.endTime * 1000;
     this.totalHitCount = 0;
-    if (!WebInspector.moduleSetting("showNativeFunctionsInJSProfile").get())
-        this._filterNativeFrames(profile.head);
-    this.profileHead = this._translateProfileTree(profile.head);
-    WebInspector.ProfileTreeModel.call(this, this.profileHead, this.profileStartTime, this.profileEndTime);
+    this.profileHead = this._translateProfileTree(profile.nodes);
+    WebInspector.ProfileTreeModel.call(this, this.profileHead);
     this._extractMetaNodes();
     if (this.samples) {
         this._buildIdToNodeMap();
         this._sortSamples();
         this._normalizeTimestamps();
-        this._fixMissingSamples();
     }
-    this._assignTotalTimes(this.profileHead);
 }
 
 WebInspector.CPUProfileDataModel.prototype = {
     /**
-     * @param {!ProfilerAgent.CPUProfileNode} root
+     * @param {!ProfilerAgent.Profile} profile
      */
-    _filterNativeFrames: function(root)
+    _compatibilityConversionHeadToNodes: function(profile)
     {
-        // TODO: get rid of this function and do the filtering while _translateProfileTree
-        if (this.samples) {
-            /** @type {!Map<number, !ProfilerAgent.CPUProfileNode>} */
-            var idToNode = new Map();
-            var stack = [root];
-            while (stack.length) {
-                var node = stack.pop();
-                idToNode.set(node.id, node);
-                for (var i = 0; i < node.children.length; i++) {
-                    node.children[i].parent = node;
-                    stack.push(node.children[i]);
-                }
-            }
-            for (var i = 0; i < this.samples.length; ++i) {
-                var node = idToNode.get(this.samples[i]);
-                while (isNativeNode(node))
-                    node = node.parent;
-                this.samples[i] = node.id;
-            }
-        }
-        processSubtree(root);
-
+        if (!profile.head || profile.nodes)
+            return;
+        /** @type {!Array<!ProfilerAgent.ProfileNode>} */
+        var nodes = [];
+        convertNodesTree(profile.head);
+        profile.nodes = nodes;
+        delete profile.head;
         /**
-         * @param {!ProfilerAgent.CPUProfileNode} node
+         * @param {!ProfilerAgent.ProfileNode} node
+         * @return {number}
+         */
+        function convertNodesTree(node)
+        {
+            nodes.push(node);
+            node.children = (/** @type {!Array<!ProfilerAgent.ProfileNode>} */(node.children)).map(convertNodesTree);
+            return node.id;
+        }
+    },
+
+    /**
+     * @param {!ProfilerAgent.Profile} profile
+     * @return {?Array<number>}
+     */
+    _convertTimeDeltas: function(profile)
+    {
+        if (!profile.timeDeltas)
+            return null;
+        var lastTimeUsec = profile.startTime;
+        var timestamps = new Array(profile.timeDeltas.length);
+        for (var i = 0; i < timestamps.length; ++i) {
+            lastTimeUsec += profile.timeDeltas[i];
+            timestamps[i] = lastTimeUsec;
+        }
+        return timestamps;
+    },
+
+    /**
+     * @param {!Array<!ProfilerAgent.ProfileNode>} nodes
+     * @return {!WebInspector.CPUProfileNode}
+     */
+    _translateProfileTree: function(nodes)
+    {
+        /**
+         * @param {!ProfilerAgent.ProfileNode} node
          * @return {boolean}
          */
         function isNativeNode(node)
         {
+            if (node.callFrame)
+                return !!node.callFrame.url && node.callFrame.url.startsWith("native ");
             return !!node.url && node.url.startsWith("native ");
         }
-
         /**
-         * @param {!ProfilerAgent.CPUProfileNode} node
+         * @param {!Array<!ProfilerAgent.ProfileNode>} nodes
          */
-        function processSubtree(node)
+        function buildChildrenFromParents(nodes)
         {
-            var nativeChildren = [];
-            var children = node.children;
-            for (var i = 0, j = 0; i < children.length; ++i) {
-                var child = children[i];
-                if (isNativeNode(child)) {
-                    nativeChildren.push(child);
-                } else {
-                    children[j++] = child;
-                    processSubtree(child);
-                }
-            }
-            children.length = j;
-            nativeChildren.forEach(mergeChildren.bind(null, node));
-        }
-
-        /**
-         * @param {!ProfilerAgent.CPUProfileNode} node
-         * @param {!ProfilerAgent.CPUProfileNode} nativeNode
-         */
-        function mergeChildren(node, nativeNode)
-        {
-            node.hitCount += nativeNode.hitCount;
-            for (var i = 0; i < nativeNode.children.length; ++i) {
-                var child = nativeNode.children[i];
-                if (isNativeNode(child)) {
-                    mergeChildren(node, child);
-                } else {
-                    node.children.push(child);
-                    child.parent = node;
-                    processSubtree(child);
-                }
+            if (nodes[0].children)
+                return;
+            nodes[0].children = [];
+            for (var i = 1; i < nodes.length; ++i) {
+                var node = nodes[i];
+                var parentNode = nodeByIdMap.get(node.parent);
+                if (parentNode.children)
+                    parentNode.children.push(node.id);
+                else
+                    parentNode.children = [node.id];
             }
         }
-    },
-
-    /**
-     * @param {!ProfilerAgent.CPUProfileNode} root
-     * @return {!WebInspector.CPUProfileNode}
-     */
-    _translateProfileTree: function(root)
-    {
-        /**
-         * @param  {!ProfilerAgent.CPUProfileNode} node
-         * @return {number}
-         */
-        function computeHitCountForSubtree(node)
-        {
-            return node.children.reduce((acc, node) => acc + computeHitCountForSubtree(node), node.hitCount);
+        /** @type {!Map<number, !ProfilerAgent.ProfileNode>} */
+        var nodeByIdMap = new Map();
+        for (var i = 0; i < nodes.length; ++i) {
+            var node = nodes[i];
+            nodeByIdMap.set(node.id, node);
         }
-        this.totalHitCount = computeHitCountForSubtree(root);
+        buildChildrenFromParents(nodes);
+        this.totalHitCount = nodes.reduce((acc, node) => acc + node.hitCount, 0);
         var sampleTime = (this.profileEndTime - this.profileStartTime) / this.totalHitCount;
+        var keepNatives = !!WebInspector.moduleSetting("showNativeFunctionsInJSProfile").get();
+        var root = nodes[0];
+        /** @type {!Map<number, number>} */
+        var idMap = new Map([[root.id, root.id]]);
         var resultRoot = new WebInspector.CPUProfileNode(root, sampleTime);
-        var targetNodeStack = [resultRoot];
-        var sourceNodeStack = [root];
+        var parentNodeStack = root.children.map(() => resultRoot);
+        var sourceNodeStack = root.children.map(id => nodeByIdMap.get(id));
         while (sourceNodeStack.length) {
+            var parentNode = parentNodeStack.pop();
             var sourceNode = sourceNodeStack.pop();
-            var parentNode = targetNodeStack.pop();
-            parentNode.children = sourceNode.children.map(child => new WebInspector.CPUProfileNode(child, sampleTime));
-            sourceNodeStack.push.apply(sourceNodeStack, sourceNode.children);
-            targetNodeStack.push.apply(targetNodeStack, parentNode.children);
+            if (!sourceNode.children)
+                sourceNode.children = [];
+            var targetNode = new WebInspector.CPUProfileNode(sourceNode, sampleTime);
+            if (keepNatives || !isNativeNode(sourceNode)) {
+                parentNode.children.push(targetNode);
+                parentNode = targetNode;
+            } else {
+                parentNode.self += targetNode.self;
+            }
+            idMap.set(sourceNode.id, parentNode.id);
+            parentNodeStack.push.apply(parentNodeStack, sourceNode.children.map(() => parentNode));
+            sourceNodeStack.push.apply(sourceNodeStack, sourceNode.children.map(id => nodeByIdMap.get(id)));
         }
+        if (this.samples)
+            this.samples = this.samples.map(id => idMap.get(id));
         return resultRoot;
-    },
-
-    /**
-     * @param {!WebInspector.ProfileNode} node
-     */
-    _assignTotalTimes: function(node)
-    {
-        // TODO: get rid of this field in favor of this.total
-        node.totalTime = node.total;
-        node.children.forEach(this._assignTotalTimes, this);
     },
 
     _sortSamples: function()
@@ -222,15 +229,14 @@ WebInspector.CPUProfileDataModel.prototype = {
 
     _buildIdToNodeMap: function()
     {
-        /** @type {!Object<number, !WebInspector.CPUProfileNode>} */
-        this._idToNode = {};
+        /** @type {!Map<number, !WebInspector.CPUProfileNode>} */
+        this._idToNode = new Map();
         var idToNode = this._idToNode;
         var stack = [this.profileHead];
         while (stack.length) {
             var node = stack.pop();
-            idToNode[node.id] = node;
-            for (var i = 0; i < node.children.length; i++)
-                stack.push(node.children[i]);
+            idToNode.set(node.id, node);
+            stack.push.apply(stack, node.children);
         }
     },
 
@@ -248,55 +254,6 @@ WebInspector.CPUProfileDataModel.prototype = {
         }
     },
 
-    _fixMissingSamples: function()
-    {
-        // Sometimes sampler is not able to parse the JS stack and returns
-        // a (program) sample instead. The issue leads to call frames belong
-        // to the same function invocation being split apart.
-        // Here's a workaround for that. When there's a single (program) sample
-        // between two call stacks sharing the same bottom node, it is replaced
-        // with the preceeding sample.
-        var samples = this.samples;
-        var samplesCount = samples.length;
-        if (!this.programNode || samplesCount < 3)
-            return;
-        var idToNode = this._idToNode;
-        var programNodeId = this.programNode.id;
-        var gcNodeId = this.gcNode ? this.gcNode.id : -1;
-        var idleNodeId = this.idleNode ? this.idleNode.id : -1;
-        var prevNodeId = samples[0];
-        var nodeId = samples[1];
-        for (var sampleIndex = 1; sampleIndex < samplesCount - 1; sampleIndex++) {
-            var nextNodeId = samples[sampleIndex + 1];
-            if (nodeId === programNodeId && !isSystemNode(prevNodeId) && !isSystemNode(nextNodeId)
-                && bottomNode(idToNode[prevNodeId]) === bottomNode(idToNode[nextNodeId])) {
-                samples[sampleIndex] = prevNodeId;
-            }
-            prevNodeId = nodeId;
-            nodeId = nextNodeId;
-        }
-
-        /**
-         * @param {!WebInspector.ProfileNode} node
-         * @return {!WebInspector.ProfileNode}
-         */
-        function bottomNode(node)
-        {
-            while (node.parent && node.parent.parent)
-                node = node.parent;
-            return node;
-        }
-
-        /**
-         * @param {number} nodeId
-         * @return {boolean}
-         */
-        function isSystemNode(nodeId)
-        {
-            return nodeId === programNodeId || nodeId === gcNodeId || nodeId === idleNodeId;
-        }
-    },
-
     /**
      * @param {function(number, !WebInspector.CPUProfileNode, number)} openFrameCallback
      * @param {function(number, !WebInspector.CPUProfileNode, number, number, number)} closeFrameCallback
@@ -305,7 +262,7 @@ WebInspector.CPUProfileDataModel.prototype = {
      */
     forEachFrame: function(openFrameCallback, closeFrameCallback, startTime, stopTime)
     {
-        if (!this.profileHead)
+        if (!this.profileHead || !this.samples)
             return;
 
         startTime = startTime || 0;
@@ -336,8 +293,8 @@ WebInspector.CPUProfileDataModel.prototype = {
             var id = samples[sampleIndex];
             if (id === prevId)
                 continue;
-            var node = idToNode[id];
-            var prevNode = idToNode[prevId];
+            var node = idToNode.get(id);
+            var prevNode = idToNode.get(prevId);
 
             if (node === gcNode) {
                 // GC samples have no stack, so we just put GC node on top of the last recorded sample.
@@ -390,7 +347,7 @@ WebInspector.CPUProfileDataModel.prototype = {
             prevId = id;
         }
 
-        if (idToNode[prevId] === gcNode) {
+        if (idToNode.get(prevId) === gcNode) {
             var start = stackStartTimes[stackTop];
             var duration = sampleTime - start;
             stackChildrenDuration[stackTop - 1] += duration;
@@ -398,7 +355,7 @@ WebInspector.CPUProfileDataModel.prototype = {
             --stackTop;
         }
 
-        for (var node = idToNode[prevId]; node.parent; node = node.parent) {
+        for (var node = idToNode.get(prevId); node.parent; node = node.parent) {
             var start = stackStartTimes[stackTop];
             var duration = sampleTime - start;
             stackChildrenDuration[stackTop - 1] += duration;
@@ -409,11 +366,11 @@ WebInspector.CPUProfileDataModel.prototype = {
 
     /**
      * @param {number} index
-     * @return {!WebInspector.CPUProfileNode}
+     * @return {?WebInspector.CPUProfileNode}
      */
     nodeByIndex: function(index)
     {
-        return this._idToNode[this.samples[index]];
+        return this._idToNode.get(this.samples[index]) || null;
     },
 
     __proto__: WebInspector.ProfileTreeModel.prototype

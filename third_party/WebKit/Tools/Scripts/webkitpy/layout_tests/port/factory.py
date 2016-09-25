@@ -33,7 +33,6 @@ import optparse
 import re
 
 from webkitpy.common.webkit_finder import WebKitFinder
-from webkitpy.layout_tests.port import builders
 
 
 def platform_options(use_globs=False):
@@ -48,7 +47,8 @@ def platform_options(use_globs=False):
                              help=('Alias for --platform=chromium*' if use_globs else 'Alias for --platform=chromium')),
 
         optparse.make_option('--platform', action='store',
-                             help=('Glob-style list of platform/ports to use (e.g., "mac*")' if use_globs else 'Platform to use (e.g., "mac-lion")')),
+                             help=('Glob-style list of platform/ports to use (e.g., "mac*")'
+                                   if use_globs else 'Platform to use (e.g., "mac-lion")')),
     ]
 
 
@@ -57,17 +57,18 @@ def configuration_options():
         optparse.make_option('--debug', action='store_const', const='Debug', dest="configuration",
                              help='Set the configuration to Debug'),
         optparse.make_option("-t", "--target", dest="target",
-                             help="specify the target configuration to use (Debug/Release)"),
+                             help="Specify the target build subdirectory under src/out/"),
         optparse.make_option('--release', action='store_const', const='Release', dest="configuration",
                              help='Set the configuration to Release'),
     ]
 
 
 def _builder_options(builder_name):
-    configuration = "Debug" if re.search(r"[d|D](ebu|b)g", builder_name) else "Release"
-    is_webkit2 = builder_name.find("WK2") != -1
-    builder_name = builder_name
-    return optparse.Values({'builder_name': builder_name, 'configuration': configuration, 'target': None})
+    return optparse.Values({
+        'builder_name': builder_name,
+        'configuration': "Debug" if re.search(r"[d|D](ebu|b)g", builder_name) else "Release",
+        'target': None,
+    })
 
 
 def _check_configuration_and_target(host, options):
@@ -88,7 +89,8 @@ def _check_configuration_and_target(host, options):
     else:
         raise ValueError('Could not determine build configuration type.\n'
                          'Either switch to one of the default target directories,\n'
-                         'use args.gn, or specify --debug or --release explicitly.')
+                         'use args.gn, or specify --debug or --release explicitly.\n'
+                         'If the directory is out/<dir>, then pass -t <dir>.')
 
 
 def _read_configuration_from_gn(fs, options):
@@ -114,8 +116,7 @@ def _read_configuration_from_gn(fs, options):
 
     args = fs.read_text_file(path)
     for l in args.splitlines():
-        m = re.match('^\s*is_debug\s*=\s*false(\s*$|\s*#.*$)', l)
-        if m:
+        if re.match(r'^\s*is_debug\s*=\s*false(\s*$|\s*#.*$)', l):
             return 'Release'
 
     # if is_debug is set to anything other than false, or if it
@@ -149,7 +150,8 @@ class PortFactory(object):
     def get(self, port_name=None, options=None, **kwargs):
         """Returns an object implementing the Port interface. If
         port_name is None, this routine attempts to guess at the most
-        appropriate port on this platform."""
+        appropriate port on this platform.
+        """
         port_name = port_name or self._default_port(options)
 
         _check_configuration_and_target(self._host.filesystem, options)
@@ -163,7 +165,7 @@ class PortFactory(object):
             module_name, class_name = port_name.rsplit('.', 1)
             module = __import__(module_name, globals(), locals(), [], -1)
             port_class_name = module.get_port_class_name(class_name)
-            if port_class_name != None:
+            if port_class_name is not None:
                 cls = module.__dict__[port_class_name]
                 port_name = cls.determine_full_port_name(self._host, options, class_name)
                 return cls(self._host, port_name, options=options, **kwargs)
@@ -184,11 +186,12 @@ class PortFactory(object):
         by real ports. This does not include any "fake" names like "test"
         or "mock-mac", and it does not include any directories that are not.
 
-        If platform is not specified, we will glob-match all ports"""
+        If platform is not specified, we will glob-match all ports
+        """
         platform = platform or '*'
-        return fnmatch.filter(builders.all_port_names(), platform)
+        return fnmatch.filter(self._host.builders.all_port_names(), platform)
 
     def get_from_builder_name(self, builder_name):
-        port_name = builders.port_name_for_builder_name(builder_name)
+        port_name = self._host.builders.port_name_for_builder_name(builder_name)
         assert port_name, "unrecognized builder name '%s'" % builder_name
         return self.get(port_name, _builder_options(builder_name))

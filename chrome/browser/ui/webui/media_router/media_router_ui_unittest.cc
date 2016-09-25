@@ -7,7 +7,9 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/media/router/create_presentation_connection_request.h"
 #include "chrome/browser/media/router/media_route.h"
+#include "chrome/browser/media/router/media_source_helper.h"
 #include "chrome/browser/media/router/mock_media_router.h"
 #include "chrome/browser/media/router/route_request_result.h"
 #include "chrome/browser/media/router/test_helper.h"
@@ -28,10 +30,29 @@
 
 using testing::_;
 using testing::AnyNumber;
+using testing::Invoke;
 using testing::SaveArg;
 using testing::Return;
 
 namespace media_router {
+
+class PresentationRequestCallbacks {
+public:
+  explicit PresentationRequestCallbacks(
+      const content::PresentationError& expected_error)
+      : expected_error_(expected_error) {}
+
+  void Success(const content::PresentationSessionInfo&, const MediaRoute::Id&) {
+  }
+
+  void Error(const content::PresentationError& error) {
+    EXPECT_EQ(expected_error_.error_type, error.error_type);
+    EXPECT_EQ(expected_error_.message, error.message);
+  }
+
+private:
+  content::PresentationError expected_error_;
+};
 
 class MockRoutesUpdatedCallback {
  public:
@@ -60,11 +81,15 @@ class MediaRouterUITest : public ::testing::Test {
     message_handler_.reset(
         new MediaRouterWebUIMessageHandler(media_router_ui_.get()));
     EXPECT_CALL(mock_router_, RegisterMediaSinksObserver(_))
-        .WillRepeatedly(Return(true));
+        .WillRepeatedly(Invoke([this](MediaSinksObserver* observer) {
+          this->media_sinks_observers_.push_back(observer);
+          return true;
+        }));
     EXPECT_CALL(mock_router_, RegisterMediaRoutesObserver(_))
         .Times(AnyNumber());
     media_router_ui_->InitForTest(&mock_router_, initiator_.get(),
-                                  message_handler_.get());
+                                  message_handler_.get(),
+                                  std::move(create_session_request_));
     message_handler_->SetWebUIForTest(&web_ui_);
   }
 
@@ -75,8 +100,10 @@ class MediaRouterUITest : public ::testing::Test {
   std::unique_ptr<content::WebContents> initiator_;
   content::TestWebUI web_ui_;
   std::unique_ptr<content::WebContents> web_contents_;
+  std::unique_ptr<CreatePresentationConnectionRequest> create_session_request_;
   std::unique_ptr<MediaRouterUI> media_router_ui_;
   std::unique_ptr<MediaRouterWebUIMessageHandler> message_handler_;
+  std::vector<MediaSinksObserver*> media_sinks_observers_;
 };
 
 TEST_F(MediaRouterUITest, RouteCreationTimeoutForTab) {
@@ -136,6 +163,21 @@ TEST_F(MediaRouterUITest, RouteCreationTimeoutForPresentation) {
       RouteRequestResult::FromError("Timed out", RouteRequestResult::TIMED_OUT);
   for (const auto& callback : callbacks)
     callback.Run(*result);
+}
+
+TEST_F(MediaRouterUITest, RouteCreationParametersCantBeCreated) {
+  CreateMediaRouterUI(&profile_);
+  MediaSinkSearchResponseCallback sink_callback;
+  EXPECT_CALL(mock_router_, SearchSinks(_, _, _, _, _))
+      .WillOnce(SaveArg<4>(&sink_callback));
+
+  // Use DEFAULT mode without setting a PresentationRequest.
+  media_router_ui_->SearchSinksAndCreateRoute("sinkId", "search input",
+                                              "domain", MediaCastMode::DEFAULT);
+  std::string expected_title = l10n_util::GetStringUTF8(
+      IDS_MEDIA_ROUTER_ISSUE_CREATE_ROUTE_TIMEOUT_FOR_TAB);
+  EXPECT_CALL(mock_router_, AddIssue(IssueTitleEquals(expected_title)));
+  sink_callback.Run("foundSinkId");
 }
 
 TEST_F(MediaRouterUITest, RouteRequestFromIncognito) {
@@ -202,10 +244,9 @@ TEST_F(MediaRouterUITest, UIMediaRoutesObserverFiltersNonDisplayRoutes) {
   routes.push_back(display_route_2);
 
   std::vector<MediaRoute> filtered_routes;
-  EXPECT_CALL(mock_callback, OnRoutesUpdated(_, _)).WillOnce(
-      SaveArg<0>(&filtered_routes));
-  observer->OnRoutesUpdated(routes,
-                            std::vector<MediaRoute::Id>());
+  EXPECT_CALL(mock_callback, OnRoutesUpdated(_, _))
+      .WillOnce(SaveArg<0>(&filtered_routes));
+  observer->OnRoutesUpdated(routes, std::vector<MediaRoute::Id>());
 
   ASSERT_EQ(2u, filtered_routes.size());
   EXPECT_TRUE(display_route_1.Equals(filtered_routes[0]));
@@ -246,10 +287,9 @@ TEST_F(MediaRouterUITest,
 
   std::vector<MediaRoute::Id> filtered_joinable_route_ids;
   // Save the filtered joinable routes.
-  EXPECT_CALL(mock_callback, OnRoutesUpdated(_, _)).WillOnce(
-      SaveArg<1>(&filtered_joinable_route_ids));
-  observer->OnRoutesUpdated(routes,
-                            joinable_route_ids);
+  EXPECT_CALL(mock_callback, OnRoutesUpdated(_, _))
+      .WillOnce(SaveArg<1>(&filtered_joinable_route_ids));
+  observer->OnRoutesUpdated(routes, joinable_route_ids);
 
   ASSERT_EQ(2u, filtered_joinable_route_ids.size());
   EXPECT_EQ(display_route_1.media_route_id(), filtered_joinable_route_ids[0]);
@@ -259,11 +299,110 @@ TEST_F(MediaRouterUITest,
   observer.reset();
 }
 
+TEST_F(MediaRouterUITest, UIMediaRoutesObserverAssignsCurrentCastModes) {
+  CreateMediaRouterUI(&profile_);
+  SessionID::id_type tab_id = SessionTabHelper::IdForTab(initiator_.get());
+  MediaSource media_source_1(MediaSourceForTab(tab_id));
+  MediaSource media_source_2("mediaSource");
+  MediaSource media_source_3(MediaSourceForDesktop());
+  MockRoutesUpdatedCallback mock_callback;
+  std::unique_ptr<MediaRouterUI::UIMediaRoutesObserver> observer(
+      new MediaRouterUI::UIMediaRoutesObserver(
+          &mock_router_, MediaSource::Id(),
+          base::Bind(&MediaRouterUI::OnRoutesUpdated,
+                     base::Unretained(media_router_ui_.get()))));
+
+  MediaRoute display_route_1("routeId1", media_source_1, "sinkId1", "desc 1",
+                             true, "", true);
+  MediaRoute non_display_route_1("routeId2", media_source_2, "sinkId2",
+                                 "desc 2", true, "", false);
+  MediaRoute display_route_2("routeId3", media_source_3, "sinkId2", "desc 2",
+                             true, "", true);
+  std::vector<MediaRoute> routes;
+  routes.push_back(display_route_1);
+  routes.push_back(non_display_route_1);
+  routes.push_back(display_route_2);
+
+  observer->OnRoutesUpdated(routes, std::vector<MediaRoute::Id>());
+
+  const auto& filtered_routes = media_router_ui_->routes();
+  ASSERT_EQ(2u, filtered_routes.size());
+  EXPECT_TRUE(display_route_1.Equals(filtered_routes[0]));
+  EXPECT_TRUE(filtered_routes[0].for_display());
+  EXPECT_TRUE(display_route_2.Equals(filtered_routes[1]));
+  EXPECT_TRUE(filtered_routes[1].for_display());
+
+  const auto& current_cast_modes = media_router_ui_->current_cast_modes();
+  ASSERT_EQ(2u, current_cast_modes.size());
+  auto cast_mode_entry =
+      current_cast_modes.find(display_route_1.media_route_id());
+  EXPECT_NE(end(current_cast_modes), cast_mode_entry);
+  EXPECT_EQ(MediaCastMode::TAB_MIRROR, cast_mode_entry->second);
+  cast_mode_entry =
+      current_cast_modes.find(non_display_route_1.media_route_id());
+  EXPECT_EQ(end(current_cast_modes), cast_mode_entry);
+  cast_mode_entry = current_cast_modes.find(display_route_2.media_route_id());
+  EXPECT_NE(end(current_cast_modes), cast_mode_entry);
+  EXPECT_EQ(MediaCastMode::DESKTOP_MIRROR, cast_mode_entry->second);
+
+  EXPECT_CALL(mock_router_, UnregisterMediaRoutesObserver(_)).Times(1);
+  observer.reset();
+}
+
+TEST_F(MediaRouterUITest, UIMediaRoutesObserverSkipsUnavailableCastModes) {
+  CreateMediaRouterUI(&profile_);
+  MediaSource media_source_1("mediaSource1");
+  MediaSource media_source_2("mediaSource2");
+  MediaSource media_source_3(MediaSourceForDesktop());
+  MockRoutesUpdatedCallback mock_callback;
+  std::unique_ptr<MediaRouterUI::UIMediaRoutesObserver> observer(
+      new MediaRouterUI::UIMediaRoutesObserver(
+          &mock_router_, MediaSource::Id(),
+          base::Bind(&MediaRouterUI::OnRoutesUpdated,
+                     base::Unretained(media_router_ui_.get()))));
+
+  MediaRoute display_route_1("routeId1", media_source_1, "sinkId1", "desc 1",
+                             true, "", true);
+  MediaRoute non_display_route_1("routeId2", media_source_2, "sinkId2",
+                                 "desc 2", true, "", false);
+  MediaRoute display_route_2("routeId3", media_source_3, "sinkId2", "desc 2",
+                             true, "", true);
+  std::vector<MediaRoute> routes;
+  routes.push_back(display_route_1);
+  routes.push_back(non_display_route_1);
+  routes.push_back(display_route_2);
+
+  observer->OnRoutesUpdated(routes, std::vector<MediaRoute::Id>());
+
+  const auto& filtered_routes = media_router_ui_->routes();
+  ASSERT_EQ(2u, filtered_routes.size());
+  EXPECT_TRUE(display_route_1.Equals(filtered_routes[0]));
+  EXPECT_TRUE(filtered_routes[0].for_display());
+  EXPECT_TRUE(display_route_2.Equals(filtered_routes[1]));
+  EXPECT_TRUE(filtered_routes[1].for_display());
+
+  const auto& current_cast_modes = media_router_ui_->current_cast_modes();
+  ASSERT_EQ(1u, current_cast_modes.size());
+  auto cast_mode_entry =
+      current_cast_modes.find(display_route_1.media_route_id());
+  // No observer for source "mediaSource1" means no cast mode for this route.
+  EXPECT_EQ(end(current_cast_modes), cast_mode_entry);
+  cast_mode_entry =
+      current_cast_modes.find(non_display_route_1.media_route_id());
+  EXPECT_EQ(end(current_cast_modes), cast_mode_entry);
+  cast_mode_entry = current_cast_modes.find(display_route_2.media_route_id());
+  EXPECT_NE(end(current_cast_modes), cast_mode_entry);
+  EXPECT_EQ(MediaCastMode::DESKTOP_MIRROR, cast_mode_entry->second);
+
+  EXPECT_CALL(mock_router_, UnregisterMediaRoutesObserver(_)).Times(1);
+  observer.reset();
+}
+
 TEST_F(MediaRouterUITest, GetExtensionNameExtensionPresent) {
   std::string id = "extensionid";
   GURL url = GURL("chrome-extension://" + id);
   std::unique_ptr<extensions::ExtensionRegistry> registry =
-      base::WrapUnique(new extensions::ExtensionRegistry(nullptr));
+      base::MakeUnique<extensions::ExtensionRegistry>(nullptr);
   scoped_refptr<extensions::Extension> app =
       extensions::test_util::BuildApp(extensions::ExtensionBuilder())
           .MergeManifest(extensions::DictionaryBuilder()
@@ -281,7 +420,7 @@ TEST_F(MediaRouterUITest, GetExtensionNameEmptyWhenNotInstalled) {
   std::string id = "extensionid";
   GURL url = GURL("chrome-extension://" + id);
   std::unique_ptr<extensions::ExtensionRegistry> registry =
-      base::WrapUnique(new extensions::ExtensionRegistry(nullptr));
+      base::MakeUnique<extensions::ExtensionRegistry>(nullptr);
 
   EXPECT_EQ("", MediaRouterUI::GetExtensionName(url, registry.get()));
 }
@@ -289,8 +428,85 @@ TEST_F(MediaRouterUITest, GetExtensionNameEmptyWhenNotInstalled) {
 TEST_F(MediaRouterUITest, GetExtensionNameEmptyWhenNotExtensionURL) {
   GURL url = GURL("https://www.google.com");
   std::unique_ptr<extensions::ExtensionRegistry> registry =
-      base::WrapUnique(new extensions::ExtensionRegistry(nullptr));
+      base::MakeUnique<extensions::ExtensionRegistry>(nullptr);
 
   EXPECT_EQ("", MediaRouterUI::GetExtensionName(url, registry.get()));
+}
+
+TEST_F(MediaRouterUITest, NotFoundErrorOnCloseWithNoSinks) {
+  content::PresentationError expected_error(
+      content::PresentationErrorType::PRESENTATION_ERROR_NO_AVAILABLE_SCREENS,
+      "No screens found.");
+  PresentationRequestCallbacks request_callbacks(expected_error);
+  create_session_request_.reset(new CreatePresentationConnectionRequest(
+      RenderFrameHostId(0, 0), std::string("http://google.com/presentation"),
+      GURL("http://google.com"),
+      base::Bind(&PresentationRequestCallbacks::Success,
+                 base::Unretained(&request_callbacks)),
+      base::Bind(&PresentationRequestCallbacks::Error,
+                 base::Unretained(&request_callbacks))));
+  CreateMediaRouterUI(&profile_);
+  // Destroying the UI should return the expected error from above to the error
+  // callback.
+  media_router_ui_.reset();
+}
+
+TEST_F(MediaRouterUITest, NotFoundErrorOnCloseWithNoCompatibleSinks) {
+  content::PresentationError expected_error(
+      content::PresentationErrorType::PRESENTATION_ERROR_NO_AVAILABLE_SCREENS,
+      "No screens found.");
+  PresentationRequestCallbacks request_callbacks(expected_error);
+  std::string presentation_url("http://google.com/presentation");
+  create_session_request_.reset(new CreatePresentationConnectionRequest(
+      RenderFrameHostId(0, 0), presentation_url, GURL("http://google.com"),
+      base::Bind(&PresentationRequestCallbacks::Success,
+                 base::Unretained(&request_callbacks)),
+      base::Bind(&PresentationRequestCallbacks::Error,
+                 base::Unretained(&request_callbacks))));
+  CreateMediaRouterUI(&profile_);
+
+  // Send a sink to the UI that is compatible with sources other than the
+  // presentation url to cause a NotFoundError.
+  std::vector<MediaSink> sinks;
+  sinks.emplace_back("sink id", "sink name", MediaSink::GENERIC);
+  std::vector<GURL> origins;
+  for (auto* observer : media_sinks_observers_) {
+    if (observer->source().id() != presentation_url) {
+      observer->OnSinksUpdated(sinks, origins);
+    }
+  }
+  // Destroying the UI should return the expected error from above to the error
+  // callback.
+  media_router_ui_.reset();
+}
+
+TEST_F(MediaRouterUITest, AbortErrorOnClose) {
+  content::PresentationError expected_error(
+      content::PresentationErrorType::
+          PRESENTATION_ERROR_SESSION_REQUEST_CANCELLED,
+      "Dialog closed.");
+  PresentationRequestCallbacks request_callbacks(expected_error);
+  std::string presentation_url("http://google.com/presentation");
+  create_session_request_.reset(new CreatePresentationConnectionRequest(
+      RenderFrameHostId(0, 0), presentation_url, GURL("http://google.com"),
+      base::Bind(&PresentationRequestCallbacks::Success,
+                 base::Unretained(&request_callbacks)),
+      base::Bind(&PresentationRequestCallbacks::Error,
+                 base::Unretained(&request_callbacks))));
+  CreateMediaRouterUI(&profile_);
+
+  // Send a sink to the UI that is compatible with the presentation url to avoid
+  // a NotFoundError.
+  std::vector<MediaSink> sinks;
+  sinks.emplace_back("sink id", "sink name", MediaSink::GENERIC);
+  std::vector<GURL> origins;
+  for (auto* observer : media_sinks_observers_) {
+    if (observer->source().id() == presentation_url) {
+      observer->OnSinksUpdated(sinks, origins);
+    }
+  }
+  // Destroying the UI should return the expected error from above to the error
+  // callback.
+  media_router_ui_.reset();
 }
 }  // namespace media_router

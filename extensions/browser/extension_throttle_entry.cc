@@ -14,6 +14,8 @@
 #include "extensions/browser/extension_throttle_manager.h"
 #include "net/base/load_flags.h"
 #include "net/log/net_log.h"
+#include "net/log/net_log_event_type.h"
+#include "net/log/net_log_source_type.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 
@@ -46,12 +48,12 @@ const int ExtensionThrottleEntry::kDefaultMaximumBackoffMs = 15 * 60 * 1000;
 const int ExtensionThrottleEntry::kDefaultEntryLifetimeMs = 2 * 60 * 1000;
 
 // Returns NetLog parameters when a request is rejected by throttling.
-scoped_ptr<base::Value> NetLogRejectedRequestCallback(
+std::unique_ptr<base::Value> NetLogRejectedRequestCallback(
     const std::string* url_id,
     int num_failures,
     const base::TimeDelta& release_after,
     net::NetLogCaptureMode /* capture_mode */) {
-  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("url", *url_id);
   dict->SetInteger("num_failures", num_failures);
   dict->SetInteger("release_after_ms",
@@ -76,9 +78,9 @@ ExtensionThrottleEntry::ExtensionThrottleEntry(
       backoff_entry_(&backoff_policy_),
       manager_(manager),
       url_id_(url_id),
-      net_log_(net::BoundNetLog::Make(
+      net_log_(net::NetLogWithSource::Make(
           manager->net_log(),
-          net::NetLog::SOURCE_EXPONENTIAL_BACKOFF_THROTTLING)),
+          net::NetLogSourceType::EXPONENTIAL_BACKOFF_THROTTLING)),
       ignore_user_gesture_load_flag_for_tests_(
           ignore_user_gesture_load_flag_for_tests) {
   DCHECK(manager_);
@@ -151,7 +153,7 @@ bool ExtensionThrottleEntry::ShouldRejectRequest(
   if (!is_backoff_disabled_ && (ignore_user_gesture_load_flag_for_tests_ ||
                                 !ExplicitUserRequest(request.load_flags())) &&
       GetBackoffEntry()->ShouldRejectRequest()) {
-    net_log_.AddEvent(net::NetLog::TYPE_THROTTLING_REJECTED_REQUEST,
+    net_log_.AddEvent(net::NetLogEventType::THROTTLING_REJECTED_REQUEST,
                       base::Bind(&NetLogRejectedRequestCallback, &url_id_,
                                  GetBackoffEntry()->failure_count(),
                                  GetBackoffEntry()->GetTimeUntilRelease()));

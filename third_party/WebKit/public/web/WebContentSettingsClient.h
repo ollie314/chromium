@@ -16,7 +16,7 @@ class WebURL;
 class WebContentSettingsClient {
 public:
     // Controls whether access to Web Databases is allowed for this frame.
-    virtual bool allowDatabase(const WebString& name, const WebString& displayName, unsigned long estimatedSize) { return true; }
+    virtual bool allowDatabase(const WebString& name, const WebString& displayName, unsigned estimatedSize) { return true; }
 
     // Controls whether access to File System is allowed for this frame.
     virtual bool requestFileSystemAccessSync() { return true; }
@@ -30,9 +30,6 @@ public:
     // Controls whether access to Indexed DB are allowed for this frame.
     virtual bool allowIndexedDB(const WebString& name, const WebSecurityOrigin&) { return true; }
 
-    // Controls whether HTML5 media elements (<audio>, <video>) are allowed for this frame.
-    virtual bool allowMedia(const WebURL& videoURL) { return true; }
-
     // Controls whether plugins are allowed for this frame.
     virtual bool allowPlugins(bool enabledPerSettings) { return enabledPerSettings; }
 
@@ -42,10 +39,7 @@ public:
     // Controls whether scripts loaded from the given URL are allowed to execute for this frame.
     virtual bool allowScriptFromSource(bool enabledPerSettings, const WebURL& scriptURL) { return enabledPerSettings; }
 
-    // Controls whether insecrure content is allowed to display for this frame.
-    virtual bool allowDisplayingInsecureContent(bool enabledPerSettings, const WebURL&) { return enabledPerSettings; }
-
-    // Controls whether insecrure scripts are allowed to execute for this frame.
+    // Controls whether insecure scripts are allowed to execute for this frame.
     virtual bool allowRunningInsecureContent(bool enabledPerSettings, const WebSecurityOrigin&, const WebURL&) { return enabledPerSettings; }
 
     // Controls whether the given script extension should run in a new script
@@ -77,6 +71,12 @@ public:
     // The common use case of this method is actually to selectively disable MutationEvents,
     // but it's been named for consistency with the rest of the interface.
     virtual bool allowMutationEvents(bool defaultValue) { return defaultValue; }
+
+    // Controls whether autoplay is allowed for this frame.
+    virtual bool allowAutoplay(bool defaultValue) { return defaultValue; }
+
+    // Reports that passive mixed content was found at the provided URL.
+    virtual void passiveInsecureContentFound(const WebURL&) {}
 
     // Notifies the client that the frame would have instantiated a plugin if plugins were enabled.
     virtual void didNotAllowPlugins() { }

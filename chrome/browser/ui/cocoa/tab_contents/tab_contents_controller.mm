@@ -50,11 +50,11 @@ class FullscreenObserver : public WebContentsObserver {
     return WebContentsObserver::web_contents();
   }
 
-  void DidShowFullscreenWidget(int routing_id) override {
+  void DidShowFullscreenWidget() override {
     [controller_ toggleFullscreenWidget:YES];
   }
 
-  void DidDestroyFullscreenWidget(int routing_id) override {
+  void DidDestroyFullscreenWidget() override {
     [controller_ toggleFullscreenWidget:NO];
   }
 
@@ -71,12 +71,16 @@ class FullscreenObserver : public WebContentsObserver {
 
 @interface TabContentsController (TabContentsContainerViewDelegate)
 - (BOOL)contentsInFullscreenCaptureMode;
-// Computes and returns the frame to use for the contents view within the
-// container view.
-- (NSRect)frameForContentsView;
+// Computes and returns the frame to use for the contents view using the size of
+// |container| as the target size.
+- (NSRect)frameForContentsViewIn:(NSView*)container;
 
 // Returns YES if the content view should be resized.
 - (BOOL)shouldResizeContentView;
+
+// Returns YES if the content view is inside a popup.
+- (BOOL)isPopup;
+
 @end
 
 // An NSView with special-case handling for when the contents view does not
@@ -112,16 +116,21 @@ class FullscreenObserver : public WebContentsObserver {
 
 // Override auto-resizing logic to query the delegate for the exact frame to
 // use for the contents view.
+// TODO(spqchan): The popup check is a temporary solution to fix the regression
+// issue described in crbug.com/604288. This method doesn't really affect
+// fullscreen if the content is inside a normal browser window, but would
+// cause a flash fullscreen widget to blow up if it's inside a popup.
 - (void)resizeSubviewsWithOldSize:(NSSize)oldBoundsSize {
   NSView* const contentsView =
       [[self subviews] count] > 0 ? [[self subviews] objectAtIndex:0] : nil;
   if (!contentsView || [contentsView autoresizingMask] == NSViewNotSizable ||
-      !delegate_ || ![delegate_ shouldResizeContentView]) {
+      !delegate_ ||
+      (![delegate_ shouldResizeContentView] && [delegate_ isPopup])) {
     return;
   }
 
   ScopedCAActionDisabler disabler;
-  [contentsView setFrame:[delegate_ frameForContentsView]];
+  [contentsView setFrame:[delegate_ frameForContentsViewIn:self]];
 }
 
 // Update the background layer's color whenever the view needs to repaint.
@@ -184,10 +193,11 @@ class FullscreenObserver : public WebContentsObserver {
 @synthesize webContents = contents_;
 @synthesize blockFullscreenResize = blockFullscreenResize_;
 
-- (id)initWithContents:(WebContents*)contents {
+- (id)initWithContents:(WebContents*)contents isPopup:(BOOL)popup {
   if ((self = [super initWithNibName:nil bundle:nil])) {
     fullscreenObserver_.reset(new FullscreenObserver(self));
     [self changeWebContents:contents];
+    isPopup_ = popup;
   }
   return self;
 }
@@ -207,18 +217,10 @@ class FullscreenObserver : public WebContentsObserver {
   [self setView:view];
 }
 
-- (void)ensureContentsSizeDoesNotChange {
-  NSView* contentsContainer = [self view];
-  NSArray* subviews = [contentsContainer subviews];
-  if ([subviews count] > 0) {
-    NSView* currentSubview = [subviews objectAtIndex:0];
-    [currentSubview setAutoresizingMask:NSViewNotSizable];
-  }
-}
-
-- (void)ensureContentsVisible {
+- (void)ensureContentsVisibleInSuperview:(NSView*)superview {
   if (!contents_)
     return;
+
   ScopedCAActionDisabler disabler;
   NSView* contentsContainer = [self view];
   NSArray* subviews = [contentsContainer subviews];
@@ -234,7 +236,7 @@ class FullscreenObserver : public WebContentsObserver {
   }
 
   if ([self shouldResizeContentView])
-    [contentsNativeView setFrame:[self frameForContentsView]];
+    [contentsNativeView setFrame:[self frameForContentsViewIn:superview]];
 
   if ([subviews count] == 0) {
     [contentsContainer addSubview:contentsNativeView];
@@ -242,6 +244,10 @@ class FullscreenObserver : public WebContentsObserver {
     [contentsContainer replaceSubview:[subviews objectAtIndex:0]
                                  with:contentsNativeView];
   }
+
+  [contentsNativeView setAutoresizingMask:NSViewNotSizable];
+  [contentsContainer setFrame:[superview bounds]];
+  [superview addSubview:contentsContainer];
   [contentsNativeView setAutoresizingMask:NSViewWidthSizable|
                                           NSViewHeightSizable];
 
@@ -266,8 +272,10 @@ class FullscreenObserver : public WebContentsObserver {
 
   content::RenderWidgetHostView* const fullscreenView =
       contents_->GetFullscreenRenderWidgetHostView();
-  if (fullscreenView)
-    [fullscreenView->GetNativeView() setFrame:[self frameForContentsView]];
+  if (fullscreenView) {
+    [fullscreenView->GetNativeView()
+        setFrame:[self frameForContentsViewIn:[self view]]];
+  }
 }
 
 - (void)changeWebContents:(WebContents*)newContents {
@@ -319,14 +327,14 @@ class FullscreenObserver : public WebContentsObserver {
   // the view is different.
   if ([self webContents] != updatedContents) {
     [self changeWebContents:updatedContents];
-    [self ensureContentsVisible];
+    [self ensureContentsVisibleInSuperview:[[self view] superview]];
   }
 }
 
 - (void)toggleFullscreenWidget:(BOOL)enterFullscreen {
   isEmbeddingFullscreenWidget_ = enterFullscreen &&
       contents_ && contents_->GetFullscreenRenderWidgetHostView();
-  [self ensureContentsVisible];
+  [self ensureContentsVisibleInSuperview:[[self view] superview]];
 }
 
 - (BOOL)contentsInFullscreenCaptureMode {
@@ -343,11 +351,8 @@ class FullscreenObserver : public WebContentsObserver {
   return YES;
 }
 
-- (NSRect)frameForContentsView {
-  const NSSize containerSize = [[self view] frame].size;
-  gfx::Rect rect;
-  rect.set_width(containerSize.width);
-  rect.set_height(containerSize.height);
+- (NSRect)frameForContentsViewIn:(NSView*)container {
+  gfx::Rect rect([container bounds]);
 
   // In most cases, the contents view is simply sized to fill the container
   // view's bounds. Only WebContentses that are in fullscreen mode and being
@@ -385,6 +390,10 @@ class FullscreenObserver : public WebContentsObserver {
 
 - (BOOL)shouldResizeContentView {
   return !isEmbeddingFullscreenWidget_ || !blockFullscreenResize_;
+}
+
+- (BOOL)isPopup {
+  return isPopup_;
 }
 
 @end

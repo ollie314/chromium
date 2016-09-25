@@ -155,7 +155,7 @@ std::unique_ptr<base::ListValue> GetLanguageList(
     if (lang.empty() || lang == language_id)
       continue;
 
-    if (ContainsValue(base_language_codes, language_id)) {
+    if (base::ContainsValue(base_language_codes, language_id)) {
       // Language is supported. No need to replace
       continue;
     }
@@ -163,7 +163,7 @@ std::unique_ptr<base::ListValue> GetLanguageList(
     if (!l10n_util::CheckAndResolveLocale(language_id, &resolved_locale))
       continue;
 
-    if (!ContainsValue(base_language_codes, resolved_locale)) {
+    if (!base::ContainsValue(base_language_codes, resolved_locale)) {
       // Resolved locale is not supported.
       continue;
     }
@@ -186,26 +186,25 @@ std::unique_ptr<base::ListValue> GetLanguageList(
        it != language_codes.end(); ++it) {
      // Exclude the language which is not in |base_langauge_codes| even it has
      // input methods.
-    if (!ContainsValue(base_language_codes, *it))
-      continue;
+     if (!base::ContainsValue(base_language_codes, *it))
+       continue;
 
-    const base::string16 display_name =
-        l10n_util::GetDisplayNameForLocale(*it, app_locale, true);
-    const base::string16 native_display_name =
-        l10n_util::GetDisplayNameForLocale(*it, *it, true);
+     const base::string16 display_name =
+         l10n_util::GetDisplayNameForLocale(*it, app_locale, true);
+     const base::string16 native_display_name =
+         l10n_util::GetDisplayNameForLocale(*it, *it, true);
 
-    language_map[display_name] =
-        std::make_pair(*it, native_display_name);
+     language_map[display_name] = std::make_pair(*it, native_display_name);
 
-    const std::map<std::string, int>::const_iterator index_pos =
-        language_index.find(*it);
-    if (index_pos != language_index.end()) {
-      base::string16& stored_display_name =
-          most_relevant_locales_display_names[index_pos->second];
-      if (stored_display_name.empty()) {
-        stored_display_name = display_name;
-        ++most_relevant_locales_count;
-      }
+     const std::map<std::string, int>::const_iterator index_pos =
+         language_index.find(*it);
+     if (index_pos != language_index.end()) {
+       base::string16& stored_display_name =
+           most_relevant_locales_display_names[index_pos->second];
+       if (stored_display_name.empty()) {
+         stored_display_name = display_name;
+         ++most_relevant_locales_count;
+       }
     } else {
       display_names.push_back(display_name);
     }
@@ -282,27 +281,38 @@ std::unique_ptr<base::ListValue> GetLanguageList(
   return language_list;
 }
 
+// Note: this method updates |selected_locale| only if it is empty.
+void GetAndMergeKeyboardLayoutsForLocale(input_method::InputMethodUtil* util,
+                                         const std::string& locale,
+                                         std::string* selected_locale,
+                                         std::vector<std::string>* layouts) {
+  std::vector<std::string> layouts_from_locale;
+  util->GetInputMethodIdsFromLanguageCode(
+      locale, input_method::kKeyboardLayoutsOnly, &layouts_from_locale);
+  layouts->insert(layouts->end(), layouts_from_locale.begin(),
+                  layouts_from_locale.end());
+  if (selected_locale->empty() && !layouts_from_locale.empty()) {
+    *selected_locale =
+        util->GetInputMethodDescriptorFromId(layouts_from_locale[0])->id();
+  }
+}
+
 // Invokes |callback| with a list of keyboard layouts that can be used for
 // |resolved_locale|.
 void GetKeyboardLayoutsForResolvedLocale(
+    const std::string& requested_locale,
     const GetKeyboardLayoutsForLocaleCallback& callback,
     const std::string& resolved_locale) {
   input_method::InputMethodUtil* util =
       input_method::InputMethodManager::Get()->GetInputMethodUtil();
   std::vector<std::string> layouts = util->GetHardwareInputMethodIds();
-  std::vector<std::string> layouts_from_locale;
-  util->GetInputMethodIdsFromLanguageCode(
-      resolved_locale,
-      input_method::kKeyboardLayoutsOnly,
-      &layouts_from_locale);
-  layouts.insert(layouts.end(), layouts_from_locale.begin(),
-                 layouts_from_locale.end());
 
+  // "Selected" will be set from the fist non-empty list.
   std::string selected;
-  if (!layouts_from_locale.empty()) {
-    selected =
-        util->GetInputMethodDescriptorFromId(layouts_from_locale[0])->id();
-  }
+  GetAndMergeKeyboardLayoutsForLocale(util, requested_locale, &selected,
+                                      &layouts);
+  GetAndMergeKeyboardLayoutsForLocale(util, resolved_locale, &selected,
+                                      &layouts);
 
   std::unique_ptr<base::ListValue> input_methods_list(new base::ListValue);
   std::set<std::string> input_methods_added;
@@ -579,10 +589,9 @@ void GetKeyboardLayoutsForLocale(
   std::string (*get_application_locale)(const std::string&, bool) =
       &l10n_util::GetApplicationLocale;
   base::PostTaskAndReplyWithResult(
-      background_task_runner.get(),
-      FROM_HERE,
+      background_task_runner.get(), FROM_HERE,
       base::Bind(get_application_locale, locale, false /* set_icu_locale */),
-      base::Bind(&GetKeyboardLayoutsForResolvedLocale, callback));
+      base::Bind(&GetKeyboardLayoutsForResolvedLocale, locale, callback));
 }
 
 std::unique_ptr<base::DictionaryValue> GetCurrentKeyboardLayout() {

@@ -8,14 +8,16 @@
 #include <GLES2/gl2ext.h>
 #include <GLES2/gl2extchromium.h>
 #include <stdint.h>
+
 #include <algorithm>
 #include <utility>
 
 #include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
@@ -43,13 +45,14 @@ GLenum GLInternalFormat(gfx::BufferFormat format) {
       GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,    // DXT5
       GL_ETC1_RGB8_OES,                    // ETC1
       GL_R8_EXT,                           // R_8
+      GL_RGB,                              // BGR_565
       GL_RGBA,                             // RGBA_4444
       GL_RGB,                              // RGBX_8888
       GL_RGBA,                             // RGBA_8888
       GL_RGB,                              // BGRX_8888
       GL_BGRA_EXT,                         // BGRA_8888
-      GL_RGB_YUV_420_CHROMIUM,             // YUV_420
-      GL_INVALID_ENUM,                     // YUV_420_BIPLANAR
+      GL_RGB_YCRCB_420_CHROMIUM,           // YVU_420
+      GL_RGB_YCBCR_420V_CHROMIUM,          // YUV_420_BIPLANAR
       GL_RGB_YCBCR_422_CHROMIUM,           // UYVY_422
   };
   static_assert(arraysize(kGLInternalFormats) ==
@@ -88,14 +91,19 @@ void CreateGLTextureMailbox(gpu::gles2::GLES2Interface* gles2,
 // Buffer::Texture
 
 // Encapsulates the state and logic needed to bind a buffer to a GLES2 texture.
-class Buffer::Texture {
+class Buffer::Texture : public ui::ContextFactoryObserver {
  public:
-  explicit Texture(cc::ContextProvider* context_provider);
-  Texture(cc::ContextProvider* context_provider,
+  Texture(ui::ContextFactory* context_factory,
+          cc::ContextProvider* context_provider);
+  Texture(ui::ContextFactory* context_factory,
+          cc::ContextProvider* context_provider,
           gfx::GpuMemoryBuffer* gpu_memory_buffer,
           unsigned texture_target,
           unsigned query_type);
-  ~Texture();
+  ~Texture() override;
+
+  // Overridden from ui::ContextFactoryObserver:
+  void OnLostResources() override;
 
   // Returns true if GLES2 resources for texture have been lost.
   bool IsLost();
@@ -127,85 +135,95 @@ class Buffer::Texture {
   gpu::Mailbox mailbox() const { return mailbox_; }
 
  private:
+  void DestroyResources();
   void ReleaseWhenQueryResultIsAvailable(const base::Closure& callback);
   void Released();
   void ScheduleWaitForRelease(base::TimeDelta delay);
   void WaitForRelease();
 
+  ui::ContextFactory* context_factory_;
   scoped_refptr<cc::ContextProvider> context_provider_;
   const unsigned texture_target_;
   const unsigned query_type_;
   const GLenum internalformat_;
-  unsigned image_id_;
-  unsigned query_id_;
-  unsigned texture_id_;
+  unsigned image_id_ = 0;
+  unsigned query_id_ = 0;
+  unsigned texture_id_ = 0;
   gpu::Mailbox mailbox_;
   base::Closure release_callback_;
   base::TimeTicks wait_for_release_time_;
-  bool wait_for_release_pending_;
+  bool wait_for_release_pending_ = false;
   base::WeakPtrFactory<Texture> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Texture);
 };
 
-Buffer::Texture::Texture(cc::ContextProvider* context_provider)
-    : context_provider_(context_provider),
+Buffer::Texture::Texture(ui::ContextFactory* context_factory,
+                         cc::ContextProvider* context_provider)
+    : context_factory_(context_factory),
+      context_provider_(context_provider),
       texture_target_(GL_TEXTURE_2D),
       query_type_(GL_COMMANDS_COMPLETED_CHROMIUM),
       internalformat_(GL_RGBA),
-      image_id_(0),
-      query_id_(0),
-      texture_id_(0),
-      wait_for_release_pending_(false),
       weak_ptr_factory_(this) {
   gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
   texture_id_ = CreateGLTexture(gles2, texture_target_);
   // Generate a crypto-secure random mailbox name.
   CreateGLTextureMailbox(gles2, texture_id_, texture_target_, &mailbox_);
+  // Provides a notification when |context_provider_| is lost.
+  context_factory_->AddObserver(this);
 }
 
-Buffer::Texture::Texture(cc::ContextProvider* context_provider,
+Buffer::Texture::Texture(ui::ContextFactory* context_factory,
+                         cc::ContextProvider* context_provider,
                          gfx::GpuMemoryBuffer* gpu_memory_buffer,
                          unsigned texture_target,
                          unsigned query_type)
-    : context_provider_(context_provider),
+    : context_factory_(context_factory),
+      context_provider_(context_provider),
       texture_target_(texture_target),
       query_type_(query_type),
       internalformat_(GLInternalFormat(gpu_memory_buffer->GetFormat())),
-      image_id_(0),
-      query_id_(0),
-      texture_id_(0),
-      wait_for_release_pending_(false),
       weak_ptr_factory_(this) {
   gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
   gfx::Size size = gpu_memory_buffer->GetSize();
   image_id_ =
       gles2->CreateImageCHROMIUM(gpu_memory_buffer->AsClientBuffer(),
                                  size.width(), size.height(), internalformat_);
+  DLOG_IF(WARNING, !image_id_) << "Failed to create GLImage";
+
   gles2->GenQueriesEXT(1, &query_id_);
   texture_id_ = CreateGLTexture(gles2, texture_target_);
+  // Provides a notification when |context_provider_| is lost.
+  context_factory_->AddObserver(this);
 }
 
 Buffer::Texture::~Texture() {
-  gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
-  gles2->DeleteTextures(1, &texture_id_);
-  if (query_id_)
-    gles2->DeleteQueriesEXT(1, &query_id_);
-  if (image_id_)
-    gles2->DestroyImageCHROMIUM(image_id_);
+  DestroyResources();
+  context_factory_->RemoveObserver(this);
+}
+
+void Buffer::Texture::OnLostResources() {
+  DestroyResources();
+  context_provider_ = nullptr;
 }
 
 bool Buffer::Texture::IsLost() {
-  gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
-  return gles2->GetGraphicsResetStatusKHR() != GL_NO_ERROR;
+  if (context_provider_) {
+    gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
+    return gles2->GetGraphicsResetStatusKHR() != GL_NO_ERROR;
+  }
+  return true;
 }
 
 void Buffer::Texture::Release(const base::Closure& callback,
                               const gpu::SyncToken& sync_token,
                               bool is_lost) {
-  gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
-  if (sync_token.HasData())
-    gles2->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
+  if (context_provider_) {
+    gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
+    if (sync_token.HasData())
+      gles2->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
+  }
 
   // Run callback as texture can be reused immediately after waiting for sync
   // token.
@@ -213,75 +231,93 @@ void Buffer::Texture::Release(const base::Closure& callback,
 }
 
 gpu::SyncToken Buffer::Texture::BindTexImage() {
-  gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
-  gles2->ActiveTexture(GL_TEXTURE0);
-  gles2->BindTexture(texture_target_, texture_id_);
-  DCHECK_NE(image_id_, 0u);
-  gles2->BindTexImage2DCHROMIUM(texture_target_, image_id_);
-  // Generate a crypto-secure random mailbox name if not already done.
-  if (mailbox_.IsZero())
-    CreateGLTextureMailbox(gles2, texture_id_, texture_target_, &mailbox_);
-  // Create and return a sync token that can be used to ensure that the
-  // BindTexImage2DCHROMIUM call is processed before issuing any commands
-  // that will read from the texture on a different context.
-  uint64_t fence_sync = gles2->InsertFenceSyncCHROMIUM();
-  gles2->OrderingBarrierCHROMIUM();
   gpu::SyncToken sync_token;
-  gles2->GenUnverifiedSyncTokenCHROMIUM(fence_sync, sync_token.GetData());
+  if (context_provider_) {
+    gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
+    gles2->ActiveTexture(GL_TEXTURE0);
+    gles2->BindTexture(texture_target_, texture_id_);
+    DCHECK_NE(image_id_, 0u);
+    gles2->BindTexImage2DCHROMIUM(texture_target_, image_id_);
+    // Generate a crypto-secure random mailbox name if not already done.
+    if (mailbox_.IsZero())
+      CreateGLTextureMailbox(gles2, texture_id_, texture_target_, &mailbox_);
+    // Create and return a sync token that can be used to ensure that the
+    // BindTexImage2DCHROMIUM call is processed before issuing any commands
+    // that will read from the texture on a different context.
+    uint64_t fence_sync = gles2->InsertFenceSyncCHROMIUM();
+    gles2->OrderingBarrierCHROMIUM();
+    gles2->GenUnverifiedSyncTokenCHROMIUM(fence_sync, sync_token.GetData());
+  }
   return sync_token;
 }
 
 void Buffer::Texture::ReleaseTexImage(const base::Closure& callback,
                                       const gpu::SyncToken& sync_token,
                                       bool is_lost) {
-  gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
-  if (sync_token.HasData())
-    gles2->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
-  gles2->ActiveTexture(GL_TEXTURE0);
-  gles2->BindTexture(texture_target_, texture_id_);
-  DCHECK_NE(query_id_, 0u);
-  gles2->BeginQueryEXT(query_type_, query_id_);
-  gles2->ReleaseTexImage2DCHROMIUM(texture_target_, image_id_);
-  gles2->EndQueryEXT(query_type_);
-  // Run callback when query result is available and ReleaseTexImage has been
-  // handled if sync token has data and buffer has been used. If buffer was
-  // never used then run the callback immediately.
-  if (sync_token.HasData()) {
-    ReleaseWhenQueryResultIsAvailable(callback);
-  } else {
-    callback.Run();
+  if (context_provider_) {
+    gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
+    if (sync_token.HasData())
+      gles2->WaitSyncTokenCHROMIUM(sync_token.GetConstData());
+    gles2->ActiveTexture(GL_TEXTURE0);
+    gles2->BindTexture(texture_target_, texture_id_);
+    DCHECK_NE(query_id_, 0u);
+    gles2->BeginQueryEXT(query_type_, query_id_);
+    gles2->ReleaseTexImage2DCHROMIUM(texture_target_, image_id_);
+    gles2->EndQueryEXT(query_type_);
+    // Run callback when query result is available and ReleaseTexImage has been
+    // handled if sync token has data and buffer has been used. If buffer was
+    // never used then run the callback immediately.
+    if (sync_token.HasData()) {
+      ReleaseWhenQueryResultIsAvailable(callback);
+      return;
+    }
   }
+  callback.Run();
 }
 
 gpu::SyncToken Buffer::Texture::CopyTexImage(Texture* destination,
                                              const base::Closure& callback) {
-  gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
-  gles2->ActiveTexture(GL_TEXTURE0);
-  gles2->BindTexture(texture_target_, texture_id_);
-  DCHECK_NE(image_id_, 0u);
-  gles2->BindTexImage2DCHROMIUM(texture_target_, image_id_);
-  gles2->CopyTextureCHROMIUM(texture_id_, destination->texture_id_,
-                             internalformat_, GL_UNSIGNED_BYTE, false, false,
-                             false);
-  DCHECK_NE(query_id_, 0u);
-  gles2->BeginQueryEXT(query_type_, query_id_);
-  gles2->ReleaseTexImage2DCHROMIUM(texture_target_, image_id_);
-  gles2->EndQueryEXT(query_type_);
-  // Run callback when query result is available and ReleaseTexImage has been
-  // handled.
-  ReleaseWhenQueryResultIsAvailable(callback);
-  // Create and return a sync token that can be used to ensure that the
-  // CopyTextureCHROMIUM call is processed before issuing any commands
-  // that will read from the target texture on a different context.
-  uint64_t fence_sync = gles2->InsertFenceSyncCHROMIUM();
-  gles2->OrderingBarrierCHROMIUM();
   gpu::SyncToken sync_token;
-  gles2->GenUnverifiedSyncTokenCHROMIUM(fence_sync, sync_token.GetData());
+  if (context_provider_) {
+    gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
+    gles2->ActiveTexture(GL_TEXTURE0);
+    gles2->BindTexture(texture_target_, texture_id_);
+    DCHECK_NE(image_id_, 0u);
+    gles2->BindTexImage2DCHROMIUM(texture_target_, image_id_);
+    gles2->CopyTextureCHROMIUM(texture_id_, destination->texture_id_,
+                               internalformat_, GL_UNSIGNED_BYTE, false, false,
+                               false);
+    DCHECK_NE(query_id_, 0u);
+    gles2->BeginQueryEXT(query_type_, query_id_);
+    gles2->ReleaseTexImage2DCHROMIUM(texture_target_, image_id_);
+    gles2->EndQueryEXT(query_type_);
+    // Run callback when query result is available and ReleaseTexImage has been
+    // handled.
+    ReleaseWhenQueryResultIsAvailable(callback);
+    // Create and return a sync token that can be used to ensure that the
+    // CopyTextureCHROMIUM call is processed before issuing any commands
+    // that will read from the target texture on a different context.
+    uint64_t fence_sync = gles2->InsertFenceSyncCHROMIUM();
+    gles2->OrderingBarrierCHROMIUM();
+    gles2->GenUnverifiedSyncTokenCHROMIUM(fence_sync, sync_token.GetData());
+  }
   return sync_token;
+}
+
+void Buffer::Texture::DestroyResources() {
+  if (context_provider_) {
+    gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
+    gles2->DeleteTextures(1, &texture_id_);
+    if (query_id_)
+      gles2->DeleteQueriesEXT(1, &query_id_);
+    if (image_id_)
+      gles2->DestroyImageCHROMIUM(image_id_);
+  }
 }
 
 void Buffer::Texture::ReleaseWhenQueryResultIsAvailable(
     const base::Closure& callback) {
+  DCHECK(context_provider_);
   DCHECK(release_callback_.is_null());
   release_callback_ = callback;
   base::TimeDelta wait_for_release_delay =
@@ -324,7 +360,7 @@ void Buffer::Texture::WaitForRelease() {
 
   base::Closure callback = base::ResetAndReturn(&release_callback_);
 
-  {
+  if (context_provider_) {
     TRACE_EVENT0("exo", "Buffer::Texture::WaitForQueryResult");
 
     // We need to wait for the result to be available. Getting the result of
@@ -341,15 +377,14 @@ void Buffer::Texture::WaitForRelease() {
 ////////////////////////////////////////////////////////////////////////////////
 // Buffer, public:
 
-Buffer::Buffer(scoped_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer)
+Buffer::Buffer(std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer)
     : gpu_memory_buffer_(std::move(gpu_memory_buffer)),
       texture_target_(GL_TEXTURE_2D),
       query_type_(GL_COMMANDS_COMPLETED_CHROMIUM),
       use_zero_copy_(true),
-      is_overlay_candidate_(false),
-      use_count_(0) {}
+      is_overlay_candidate_(false) {}
 
-Buffer::Buffer(scoped_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer,
+Buffer::Buffer(std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer,
                unsigned texture_target,
                unsigned query_type,
                bool use_zero_copy,
@@ -358,16 +393,16 @@ Buffer::Buffer(scoped_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer,
       texture_target_(texture_target),
       query_type_(query_type),
       use_zero_copy_(use_zero_copy),
-      is_overlay_candidate_(is_overlay_candidate),
-      use_count_(0) {}
+      is_overlay_candidate_(is_overlay_candidate) {}
 
 Buffer::~Buffer() {}
 
-scoped_ptr<cc::SingleReleaseCallback> Buffer::ProduceTextureMailbox(
+std::unique_ptr<cc::SingleReleaseCallback> Buffer::ProduceTextureMailbox(
     cc::TextureMailbox* texture_mailbox,
     bool secure_output_only,
-    bool lost_context) {
-  DLOG_IF(WARNING, use_count_)
+    bool client_usage) {
+  DCHECK(attach_count_);
+  DLOG_IF(WARNING, use_count_ && client_usage)
       << "Producing a texture mailbox for a buffer that has not been released";
 
   // Some clients think that they can reuse a buffer before it's released by
@@ -377,7 +412,7 @@ scoped_ptr<cc::SingleReleaseCallback> Buffer::ProduceTextureMailbox(
   // buffer has been reused). We stop running the release callback when this
   // type of behavior is detected as having the buffer always be busy will
   // result in fewer drawing artifacts.
-  if (use_count_ && !lost_context)
+  if (use_count_ && client_usage)
     release_callback_.Reset();
 
   // Increment the use count for this buffer.
@@ -389,11 +424,11 @@ scoped_ptr<cc::SingleReleaseCallback> Buffer::ProduceTextureMailbox(
   if (texture_ && texture_->IsLost())
     texture_.reset();
 
+  ui::ContextFactory* context_factory =
+      aura::Env::GetInstance()->context_factory();
   // Note: This can fail if GPU acceleration has been disabled.
   scoped_refptr<cc::ContextProvider> context_provider =
-      aura::Env::GetInstance()
-          ->context_factory()
-          ->SharedMainThreadContextProvider();
+      context_factory->SharedMainThreadContextProvider();
   if (!context_provider) {
     DLOG(WARNING) << "Failed to acquire a context provider";
     Release();  // Decrements the use count
@@ -404,9 +439,9 @@ scoped_ptr<cc::SingleReleaseCallback> Buffer::ProduceTextureMailbox(
   // if one doesn't already exist. The contents of this buffer are copied to
   // |texture| using a call to CopyTexImage.
   if (!contents_texture_) {
-    contents_texture_ = make_scoped_ptr(
-        new Texture(context_provider.get(), gpu_memory_buffer_.get(),
-                    texture_target_, query_type_));
+    contents_texture_ = base::MakeUnique<Texture>(
+        context_factory, context_provider.get(), gpu_memory_buffer_.get(),
+        texture_target_, query_type_);
   }
 
   if (use_zero_copy_) {
@@ -429,8 +464,10 @@ scoped_ptr<cc::SingleReleaseCallback> Buffer::ProduceTextureMailbox(
   }
 
   // Create a mailbox texture that we copy the buffer contents to.
-  if (!texture_)
-    texture_ = make_scoped_ptr(new Texture(context_provider.get()));
+  if (!texture_) {
+    texture_ =
+        base::MakeUnique<Texture>(context_factory, context_provider.get());
+  }
 
   // Copy the contents of |contents_texture| to |texture| and produce a
   // texture mailbox from the result in |texture|.
@@ -453,12 +490,24 @@ scoped_ptr<cc::SingleReleaseCallback> Buffer::ProduceTextureMailbox(
                             base::Passed(&texture_))));
 }
 
+void Buffer::OnAttach() {
+  DLOG_IF(WARNING, attach_count_ > 0u)
+      << "Reattaching a buffer that is already attached to another surface.";
+  attach_count_++;
+}
+
+void Buffer::OnDetach() {
+  DCHECK_GT(attach_count_, 0u);
+  --attach_count_;
+  CheckReleaseCallback();
+}
+
 gfx::Size Buffer::GetSize() const {
   return gpu_memory_buffer_->GetSize();
 }
 
-scoped_ptr<base::trace_event::TracedValue> Buffer::AsTracedValue() const {
-  scoped_ptr<base::trace_event::TracedValue> value(
+std::unique_ptr<base::trace_event::TracedValue> Buffer::AsTracedValue() const {
+  std::unique_ptr<base::trace_event::TracedValue> value(
       new base::trace_event::TracedValue());
   gfx::Size size = gpu_memory_buffer_->GetSize();
   value->SetInteger("width", size.width());
@@ -473,7 +522,12 @@ scoped_ptr<base::trace_event::TracedValue> Buffer::AsTracedValue() const {
 
 void Buffer::Release() {
   DCHECK_GT(use_count_, 0u);
-  if (--use_count_)
+  --use_count_;
+  CheckReleaseCallback();
+}
+
+void Buffer::CheckReleaseCallback() {
+  if (attach_count_ || use_count_)
     return;
 
   // Run release callback to notify the client that buffer has been released.
@@ -481,11 +535,11 @@ void Buffer::Release() {
     release_callback_.Run();
 }
 
-void Buffer::ReleaseTexture(scoped_ptr<Texture> texture) {
+void Buffer::ReleaseTexture(std::unique_ptr<Texture> texture) {
   texture_ = std::move(texture);
 }
 
-void Buffer::ReleaseContentsTexture(scoped_ptr<Texture> texture) {
+void Buffer::ReleaseContentsTexture(std::unique_ptr<Texture> texture) {
   TRACE_EVENT0("exo", "Buffer::ReleaseContentsTexture");
 
   contents_texture_ = std::move(texture);

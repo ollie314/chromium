@@ -7,30 +7,26 @@
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/Document.h"
 #include "core/fileapi/Blob.h"
-#include "core/frame/ConsoleTypes.h"
 #include "core/testing/DummyPageHolder.h"
 #include "modules/websockets/DocumentWebSocketChannel.h"
 #include "modules/websockets/WebSocketChannelClient.h"
+#include "modules/websockets/WebSocketHandle.h"
+#include "modules/websockets/WebSocketHandleClient.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
-#include "public/platform/WebSecurityOrigin.h"
-#include "public/platform/WebString.h"
-#include "public/platform/WebURL.h"
-#include "public/platform/WebVector.h"
-#include "public/platform/modules/websockets/WebSocketHandle.h"
-#include "public/platform/modules/websockets/WebSocketHandleClient.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/OwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 #include <stdint.h>
 
 using testing::_;
 using testing::InSequence;
 using testing::PrintToString;
 using testing::AnyNumber;
-
+using testing::SaveArg;
 
 namespace blink {
 
@@ -52,7 +48,7 @@ public:
 
     MOCK_METHOD2(didConnect, void(const String&, const String&));
     MOCK_METHOD1(didReceiveTextMessage, void(const String&));
-    void didReceiveBinaryMessage(PassOwnPtr<Vector<char>> payload) override
+    void didReceiveBinaryMessage(std::unique_ptr<Vector<char>> payload) override
     {
         didReceiveBinaryMessageMock(*payload);
     }
@@ -80,10 +76,11 @@ public:
 
     ~MockWebSocketHandle() override { }
 
-    MOCK_METHOD4(connect, void(const WebURL&, const WebVector<WebString>&, const WebSecurityOrigin&, WebSocketHandleClient*));
+    MOCK_METHOD1(initialize, void(InterfaceProvider*));
+    MOCK_METHOD6(connect, void(const KURL&, const Vector<String>&, SecurityOrigin*, const KURL&, const String&, WebSocketHandleClient*));
     MOCK_METHOD4(send, void(bool, WebSocketHandle::MessageType, const char*, size_t));
     MOCK_METHOD1(flowControl, void(int64_t));
-    MOCK_METHOD2(close, void(unsigned short, const WebString&));
+    MOCK_METHOD2(close, void(unsigned short, const String&));
 };
 
 class DocumentWebSocketChannelTest : public ::testing::Test {
@@ -92,7 +89,7 @@ public:
         : m_pageHolder(DummyPageHolder::create())
         , m_channelClient(MockWebSocketChannelClient::create())
         , m_handle(MockWebSocketHandle::create())
-        , m_channel(DocumentWebSocketChannel::create(&m_pageHolder->document(), m_channelClient.get(), String(), 0, handle()))
+        , m_channel(DocumentWebSocketChannel::create(&m_pageHolder->document(), m_channelClient.get(), SourceLocation::capture(), handle()))
         , m_sumOfConsumedBufferedAmount(0)
     {
         ON_CALL(*channelClient(), didConsumeBufferedAmount(_)).WillByDefault(Invoke(this, &DocumentWebSocketChannelTest::didConsumeBufferedAmount));
@@ -132,16 +129,17 @@ public:
     {
         {
             InSequence s;
-            EXPECT_CALL(*handle(), connect(WebURL(KURL(KURL(), "ws://localhost/")), _, _, handleClient()));
+            EXPECT_CALL(*handle(), initialize(_));
+            EXPECT_CALL(*handle(), connect(KURL(KURL(), "ws://localhost/"), _, _, _, _, handleClient()));
             EXPECT_CALL(*handle(), flowControl(65536));
             EXPECT_CALL(*channelClient(), didConnect(String("a"), String("b")));
         }
         EXPECT_TRUE(channel()->connect(KURL(KURL(), "ws://localhost/"), "x"));
-        handleClient()->didConnect(handle(), WebString("a"), WebString("b"));
+        handleClient()->didConnect(handle(), String("a"), String("b"));
         ::testing::Mock::VerifyAndClearExpectations(this);
     }
 
-    OwnPtr<DummyPageHolder> m_pageHolder;
+    std::unique_ptr<DummyPageHolder> m_pageHolder;
     Persistent<MockWebSocketChannelClient> m_channelClient;
     MockWebSocketHandle* m_handle;
     Persistent<DocumentWebSocketChannel> m_channel;
@@ -158,20 +156,49 @@ MATCHER_P2(MemEq, p, len,
     return memcmp(arg, p, len) == 0;
 }
 
+MATCHER_P(KURLEq, urlString,
+    std::string(negation ? "doesn't equal" : "equals")
+    + " to \"" + urlString + "\""
+)
+{
+    KURL url(KURL(), urlString);
+    *result_listener << "where the url is \"" << arg.getString().utf8().data() << "\"";
+    return arg == url;
+}
+
 TEST_F(DocumentWebSocketChannelTest, connectSuccess)
 {
+    Vector<String> protocols;
+    RefPtr<SecurityOrigin> origin;
+
     Checkpoint checkpoint;
     {
         InSequence s;
-        EXPECT_CALL(*handle(), connect(WebURL(KURL(KURL(), "ws://localhost/")), _, _, handleClient()));
+        EXPECT_CALL(*handle(), initialize(_));
+        EXPECT_CALL(*handle(), connect(KURLEq("ws://localhost/"), _, _, KURLEq("http://example.com/"), _, handleClient())).WillOnce(DoAll(
+            SaveArg<1>(&protocols),
+            SaveArg<2>(&origin)));
         EXPECT_CALL(*handle(), flowControl(65536));
         EXPECT_CALL(checkpoint, Call(1));
         EXPECT_CALL(*channelClient(), didConnect(String("a"), String("b")));
     }
 
+    KURL pageUrl(KURL(), "http://example.com/");
+    m_pageHolder->frame().securityContext()->setSecurityOrigin(SecurityOrigin::create(pageUrl));
+    Document& document = m_pageHolder->document();
+    document.setURL(pageUrl);
+    // Make sure that firstPartyForCookies() is set to the given value.
+    EXPECT_STREQ("http://example.com/", document.firstPartyForCookies().getString().utf8().data());
+
     EXPECT_TRUE(channel()->connect(KURL(KURL(), "ws://localhost/"), "x"));
+
+    EXPECT_EQ(1U, protocols.size());
+    EXPECT_STREQ("x", protocols[0].utf8().data());
+
+    EXPECT_STREQ("http://example.com", origin->toString().utf8().data());
+
     checkpoint.Call(1);
-    handleClient()->didConnect(handle(), WebString("a"), WebString("b"));
+    handleClient()->didConnect(handle(), String("a"), String("b"));
 }
 
 TEST_F(DocumentWebSocketChannelTest, sendText)
@@ -240,7 +267,7 @@ TEST_F(DocumentWebSocketChannelTest, sendBinaryInVector)
 
     Vector<char> fooVector;
     fooVector.append("foo", 3);
-    channel()->sendBinaryAsCharVector(adoptPtr(new Vector<char>(fooVector)));
+    channel()->sendBinaryAsCharVector(wrapUnique(new Vector<char>(fooVector)));
 
     EXPECT_EQ(3ul, m_sumOfConsumedBufferedAmount);
 }
@@ -262,22 +289,22 @@ TEST_F(DocumentWebSocketChannelTest, sendBinaryInVectorWithNullBytes)
     {
         Vector<char> v;
         v.append("\0ar", 3);
-        channel()->sendBinaryAsCharVector(adoptPtr(new Vector<char>(v)));
+        channel()->sendBinaryAsCharVector(wrapUnique(new Vector<char>(v)));
     }
     {
         Vector<char> v;
         v.append("b\0z", 3);
-        channel()->sendBinaryAsCharVector(adoptPtr(new Vector<char>(v)));
+        channel()->sendBinaryAsCharVector(wrapUnique(new Vector<char>(v)));
     }
     {
         Vector<char> v;
         v.append("qu\0", 3);
-        channel()->sendBinaryAsCharVector(adoptPtr(new Vector<char>(v)));
+        channel()->sendBinaryAsCharVector(wrapUnique(new Vector<char>(v)));
     }
     {
         Vector<char> v;
         v.append("\0\0\0", 3);
-        channel()->sendBinaryAsCharVector(adoptPtr(new Vector<char>(v)));
+        channel()->sendBinaryAsCharVector(wrapUnique(new Vector<char>(v)));
     }
 
     EXPECT_EQ(12ul, m_sumOfConsumedBufferedAmount);
@@ -293,7 +320,7 @@ TEST_F(DocumentWebSocketChannelTest, sendBinaryInVectorNonLatin1UTF8)
 
     Vector<char> v;
     v.append("\xe7\x8b\x90", 3);
-    channel()->sendBinaryAsCharVector(adoptPtr(new Vector<char>(v)));
+    channel()->sendBinaryAsCharVector(wrapUnique(new Vector<char>(v)));
 
     EXPECT_EQ(3ul, m_sumOfConsumedBufferedAmount);
 }
@@ -308,7 +335,7 @@ TEST_F(DocumentWebSocketChannelTest, sendBinaryInVectorNonUTF8)
 
     Vector<char> v;
     v.append("\x80\xff\xe7", 3);
-    channel()->sendBinaryAsCharVector(adoptPtr(new Vector<char>(v)));
+    channel()->sendBinaryAsCharVector(wrapUnique(new Vector<char>(v)));
 
     EXPECT_EQ(3ul, m_sumOfConsumedBufferedAmount);
 }
@@ -329,7 +356,7 @@ TEST_F(DocumentWebSocketChannelTest, sendBinaryInVectorNonLatin1UTF8Continuation
 
     Vector<char> v;
     v.append("\xe7\x8b\x90\xe7\x8b\x90\xe7\x8b\x90\xe7\x8b\x90\xe7\x8b\x90\xe7\x8b\x90", 18);
-    channel()->sendBinaryAsCharVector(adoptPtr(new Vector<char>(v)));
+    channel()->sendBinaryAsCharVector(wrapUnique(new Vector<char>(v)));
     checkpoint.Call(1);
 
     handleClient()->didReceiveFlowControl(handle(), 16);
@@ -615,7 +642,7 @@ TEST_F(DocumentWebSocketChannelTest, closeFromBrowser)
         EXPECT_CALL(*channelClient(), didStartClosingHandshake());
         EXPECT_CALL(checkpoint, Call(1));
 
-        EXPECT_CALL(*handle(), close(WebSocketChannel::CloseEventCodeNormalClosure, WebString("close reason")));
+        EXPECT_CALL(*handle(), close(WebSocketChannel::CloseEventCodeNormalClosure, String("close reason")));
         EXPECT_CALL(checkpoint, Call(2));
 
         EXPECT_CALL(*channelClient(), didClose(WebSocketChannelClient::ClosingHandshakeComplete, WebSocketChannel::CloseEventCodeNormalClosure, String("close reason")));
@@ -641,7 +668,7 @@ TEST_F(DocumentWebSocketChannelTest, closeFromWebSocket)
     {
         InSequence s;
 
-        EXPECT_CALL(*handle(), close(WebSocketChannel::CloseEventCodeNormalClosure, WebString("close reason")));
+        EXPECT_CALL(*handle(), close(WebSocketChannel::CloseEventCodeNormalClosure, String("close reason")));
         EXPECT_CALL(checkpoint, Call(1));
 
         EXPECT_CALL(*channelClient(), didClose(WebSocketChannelClient::ClosingHandshakeComplete, WebSocketChannel::CloseEventCodeNormalClosure, String("close reason")));
@@ -680,7 +707,7 @@ TEST_F(DocumentWebSocketChannelTest, failFromWebSocket)
         EXPECT_CALL(*channelClient(), didClose(WebSocketChannelClient::ClosingHandshakeIncomplete, WebSocketChannel::CloseEventCodeAbnormalClosure, String()));
     }
 
-    channel()->fail("fail message from WebSocket", ErrorMessageLevel, "sourceURL", 1234);
+    channel()->fail("fail message from WebSocket", ErrorMessageLevel, SourceLocation::create(String(), 0, 0, nullptr));
 }
 
 } // namespace

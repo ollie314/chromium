@@ -136,7 +136,7 @@ bool OscillatorHandler::setType(unsigned type)
 bool OscillatorHandler::calculateSampleAccuratePhaseIncrements(size_t framesToProcess)
 {
     bool isGood = framesToProcess <= m_phaseIncrements.size() && framesToProcess <= m_detuneValues.size();
-    ASSERT(isGood);
+    DCHECK(isGood);
     if (!isGood)
         return false;
 
@@ -208,7 +208,7 @@ void OscillatorHandler::process(size_t framesToProcess)
         return;
     }
 
-    ASSERT(framesToProcess <= m_phaseIncrements.size());
+    DCHECK_LE(framesToProcess, m_phaseIncrements.size());
     if (framesToProcess > m_phaseIncrements.size())
         return;
 
@@ -241,7 +241,7 @@ void OscillatorHandler::process(size_t framesToProcess)
 
     float* destP = outputBus->channel(0)->mutableData();
 
-    ASSERT(quantumFrameOffset <= framesToProcess);
+    DCHECK_LE(quantumFrameOffset, framesToProcess);
 
     // We keep virtualReadIndex double-precision since we're accumulating values.
     double virtualReadIndex = m_virtualReadIndex;
@@ -314,8 +314,8 @@ void OscillatorHandler::process(size_t framesToProcess)
 
 void OscillatorHandler::setPeriodicWave(PeriodicWave* periodicWave)
 {
-    ASSERT(isMainThread());
-    ASSERT(periodicWave);
+    DCHECK(isMainThread());
+    DCHECK(periodicWave);
 
     // This synchronizes with process().
     MutexLocker processLocker(m_processLock);
@@ -330,19 +330,70 @@ bool OscillatorHandler::propagatesSilence() const
 
 // ----------------------------------------------------------------
 
-OscillatorNode::OscillatorNode(AbstractAudioContext& context, float sampleRate)
+OscillatorNode::OscillatorNode(BaseAudioContext& context)
     : AudioScheduledSourceNode(context)
     // Use musical pitch standard A440 as a default.
-    , m_frequency(AudioParam::create(context, 440))
+    , m_frequency(AudioParam::create(context, ParamTypeOscillatorFrequency, 440,
+        - context.sampleRate() / 2,
+        context.sampleRate() / 2))
     // Default to no detuning.
-    , m_detune(AudioParam::create(context, 0))
+    , m_detune(AudioParam::create(context, ParamTypeOscillatorDetune, 0))
 {
-    setHandler(OscillatorHandler::create(*this, sampleRate, m_frequency->handler(), m_detune->handler()));
+    setHandler(OscillatorHandler::create(*this, context.sampleRate(), m_frequency->handler(), m_detune->handler()));
 }
 
-OscillatorNode* OscillatorNode::create(AbstractAudioContext& context, float sampleRate)
+OscillatorNode* OscillatorNode::create(BaseAudioContext& context, ExceptionState& exceptionState)
 {
-    return new OscillatorNode(context, sampleRate);
+    DCHECK(isMainThread());
+
+    if (context.isContextClosed()) {
+        context.throwExceptionForClosedState(exceptionState);
+        return nullptr;
+    }
+
+    return new OscillatorNode(context);
+}
+
+OscillatorNode* OscillatorNode::create(BaseAudioContext* context, const OscillatorOptions& options, ExceptionState& exceptionState)
+{
+    OscillatorNode* node = create(*context, exceptionState);
+
+    if (!node)
+        return nullptr;
+
+    node->handleChannelOptions(options, exceptionState);
+
+    if (options.hasType()) {
+        if (options.type() == "custom" && !options.hasPeriodicWave()) {
+            exceptionState.throwDOMException(
+                InvalidStateError,
+                "'type' cannot be set to 'custom' without also specifying 'periodicWave'");
+            return nullptr;
+        }
+        if (options.type() != "custom" && options.hasPeriodicWave()) {
+            exceptionState.throwDOMException(
+                InvalidStateError,
+                "'type' MUST be 'custom' instead of '"
+                + options.type()
+                + "' if 'periodicWave' is also given");
+            return nullptr;
+        }
+
+        // At this both type and periodicWave are consistently defined.  In that
+        // case, don't set the type if periodicWave is specified because that
+        // will cause an (incorrect) error to be signaled.
+        if (options.type() != "custom")
+            node->setType(options.type(), exceptionState);
+    }
+    if (options.hasDetune())
+        node->detune()->setValue(options.detune());
+    if (options.hasFrequency())
+        node->frequency()->setValue(options.frequency());
+
+    if (options.hasPeriodicWave())
+        node->setPeriodicWave(options.periodicWave());
+
+    return node;
 }
 
 DEFINE_TRACE(OscillatorNode)

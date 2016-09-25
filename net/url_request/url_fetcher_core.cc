@@ -14,7 +14,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/tracked_objects.h"
 #include "net/base/elements_upload_data_stream.h"
 #include "net/base/io_buffer.h"
@@ -50,12 +50,12 @@ URLFetcherCore::Registry::Registry() {}
 URLFetcherCore::Registry::~Registry() {}
 
 void URLFetcherCore::Registry::AddURLFetcherCore(URLFetcherCore* core) {
-  DCHECK(!ContainsKey(fetchers_, core));
+  DCHECK(!base::ContainsKey(fetchers_, core));
   fetchers_.insert(core);
 }
 
 void URLFetcherCore::Registry::RemoveURLFetcherCore(URLFetcherCore* core) {
-  DCHECK(ContainsKey(fetchers_, core));
+  DCHECK(base::ContainsKey(fetchers_, core));
   fetchers_.erase(core);
 }
 
@@ -348,10 +348,6 @@ int URLFetcherCore::GetResponseCode() const {
   return response_code_;
 }
 
-const ResponseCookies& URLFetcherCore::GetCookies() const {
-  return cookies_;
-}
-
 void URLFetcherCore::ReceivedContentWasMalformed() {
   DCHECK(delegate_task_runner_->BelongsToCurrentThread());
   if (network_task_runner_.get()) {
@@ -411,15 +407,17 @@ void URLFetcherCore::OnReceivedRedirect(URLRequest* request,
     was_fetched_via_proxy_ = request_->was_fetched_via_proxy();
     was_cached_ = request_->was_cached();
     total_received_bytes_ += request_->GetTotalReceivedBytes();
-    request->Cancel();
-    OnReadCompleted(request, 0);
+    int result = request->Cancel();
+    OnReadCompleted(request, result);
   }
 }
 
-void URLFetcherCore::OnResponseStarted(URLRequest* request) {
+void URLFetcherCore::OnResponseStarted(URLRequest* request, int net_error) {
   DCHECK_EQ(request, request_.get());
   DCHECK(network_task_runner_->BelongsToCurrentThread());
-  if (request_->status().is_success()) {
+  DCHECK_NE(ERR_IO_PENDING, net_error);
+
+  if (net_error == OK) {
     response_code_ = request_->GetResponseCode();
     response_headers_ = request_->response_headers();
     socket_address_ = request_->GetSocketAddress();
@@ -456,10 +454,7 @@ void URLFetcherCore::OnReadCompleted(URLRequest* request,
   if (throttler_manager)
     url_throttler_entry_ = throttler_manager->RegisterRequestUrl(url_);
 
-  do {
-    if (!request_->status().is_success() || bytes_read <= 0)
-      break;
-
+  while (bytes_read > 0) {
     current_response_bytes_ += bytes_read;
     InformDelegateDownloadProgress();
 
@@ -469,15 +464,12 @@ void URLFetcherCore::OnReadCompleted(URLRequest* request,
       // Write failed or waiting for write completion.
       return;
     }
-  } while (request_->Read(buffer_.get(), kBufferSize, &bytes_read));
-
-  const URLRequestStatus status = request_->status();
-  if (status.is_success())
-    request_->GetResponseCookies(&cookies_);
+    bytes_read = request_->Read(buffer_.get(), kBufferSize);
+  }
 
   // See comments re: HEAD requests in ReadResponse().
-  if (!status.is_io_pending() || request_type_ == URLFetcher::HEAD) {
-    status_ = status;
+  if (bytes_read != ERR_IO_PENDING || request_type_ == URLFetcher::HEAD) {
+    status_ = URLRequestStatus::FromError(bytes_read);
     received_response_content_length_ =
         request_->received_response_content_length();
     total_received_bytes_ += request_->GetTotalReceivedBytes();
@@ -556,7 +548,6 @@ void URLFetcherCore::StartURLRequest() {
   request_context_getter_->AddObserver(this);
   request_ = request_context_getter_->GetURLRequestContext()->CreateRequest(
       original_url_, DEFAULT_PRIORITY, this);
-  request_->set_stack_trace(stack_trace_);
   int flags = request_->load_flags() | load_flags_;
 
   // TODO(mmenke): This should really be with the other code to set the upload
@@ -893,11 +884,9 @@ void URLFetcherCore::ReadResponse() {
   // completed immediately, without trying to read any data back (all we care
   // about is the response code and headers, which we already have).
   int bytes_read = 0;
-  if (request_->status().is_success() &&
-      (request_type_ != URLFetcher::HEAD)) {
-    if (!request_->Read(buffer_.get(), kBufferSize, &bytes_read))
-      bytes_read = -1;  // Match OnReadCompleted() interface contract.
-  }
+  if (request_type_ != URLFetcher::HEAD)
+    bytes_read = request_->Read(buffer_.get(), kBufferSize);
+
   OnReadCompleted(request_.get(), bytes_read);
 }
 

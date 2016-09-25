@@ -12,7 +12,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_constants.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_test_util.h"
 #include "chrome/browser/sync_file_system/drive_backend/fake_drive_service_helper.h"
@@ -96,10 +96,8 @@ class ConflictResolverTest : public testing::Test {
   }
 
   void InitializeMetadataDatabase() {
-    SyncEngineInitializer* initializer =
-        new SyncEngineInitializer(context_.get(),
-                                  database_dir_.path(),
-                                  in_memory_env_.get());
+    SyncEngineInitializer* initializer = new SyncEngineInitializer(
+        context_.get(), database_dir_.GetPath(), in_memory_env_.get());
     SyncStatusCode status = SYNC_STATUS_UNKNOWN;
     sync_task_manager_->ScheduleSyncTask(
         FROM_HERE, std::unique_ptr<SyncTask>(initializer),
@@ -192,7 +190,7 @@ class ConflictResolverTest : public testing::Test {
     SyncStatusCode status = SYNC_STATUS_UNKNOWN;
     base::FilePath local_path = base::FilePath(FILE_PATH_LITERAL("dummy"));
     if (file_change.IsAddOrUpdate())
-      CreateTemporaryFileInDir(database_dir_.path(), &local_path);
+      CreateTemporaryFileInDir(database_dir_.GetPath(), &local_path);
     std::unique_ptr<LocalToRemoteSyncer> syncer(new LocalToRemoteSyncer(
         context_.get(),
         SyncFileMetadata(file_change.file_type(), 0, base::Time()), file_change,

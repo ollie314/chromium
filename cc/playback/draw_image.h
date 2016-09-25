@@ -9,6 +9,8 @@
 #include "third_party/skia/include/core/SkFilterQuality.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkMatrix.h"
+#include "third_party/skia/include/core/SkRect.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 
 namespace cc {
 
@@ -17,13 +19,14 @@ namespace cc {
 class CC_EXPORT DrawImage {
  public:
   DrawImage();
-  DrawImage(const SkImage* image,
+  DrawImage(sk_sp<const SkImage> image,
             const SkIRect& src_rect,
             SkFilterQuality filter_quality,
             const SkMatrix& matrix);
   DrawImage(const DrawImage& other);
+  ~DrawImage();
 
-  const SkImage* image() const { return image_; }
+  const sk_sp<const SkImage>& image() const { return image_; }
   const SkSize& scale() const { return scale_; }
   const SkIRect src_rect() const { return src_rect_; }
   SkFilterQuality filter_quality() const { return filter_quality_; }
@@ -31,13 +34,17 @@ class CC_EXPORT DrawImage {
   const SkMatrix& matrix() const { return matrix_; }
 
   DrawImage ApplyScale(float scale) const {
+    return ApplyScale(SkSize::Make(scale, scale));
+  }
+
+  DrawImage ApplyScale(const SkSize& scale) const {
     SkMatrix scaled_matrix = matrix_;
-    scaled_matrix.postScale(scale, scale);
+    scaled_matrix.postScale(scale.width(), scale.height());
     return DrawImage(image_, src_rect_, filter_quality_, scaled_matrix);
   }
 
  private:
-  const SkImage* image_;
+  sk_sp<const SkImage> image_;
   SkIRect src_rect_;
   SkFilterQuality filter_quality_;
   SkMatrix matrix_;

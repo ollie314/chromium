@@ -26,27 +26,41 @@
 #include "platform/graphics/GradientGeneratedImage.h"
 
 #include "platform/geometry/FloatRect.h"
+#include "platform/geometry/IntSize.h"
 #include "platform/graphics/GraphicsContext.h"
 
 namespace blink {
 
-void GradientGeneratedImage::draw(SkCanvas* canvas, const SkPaint& paint, const FloatRect& destRect, const FloatRect& srcRect, RespectImageOrientationEnum, ImageClampingMode)
+void GradientGeneratedImage::draw(SkCanvas* canvas, const SkPaint& paint, const FloatRect& destRect,
+    const FloatRect& srcRect, RespectImageOrientationEnum, ImageClampingMode)
 {
-    SkAutoCanvasRestore ar(canvas, true);
-    canvas->clipRect(destRect);
-    canvas->translate(destRect.x(), destRect.y());
-    if (destRect.size() != srcRect.size())
-        canvas->scale(destRect.width() / srcRect.width(), destRect.height() / srcRect.height());
-    canvas->translate(-srcRect.x(), -srcRect.y());
+    SkRect visibleSrcRect = srcRect;
+    if (!visibleSrcRect.intersect(SkRect::MakeIWH(m_size.width(), m_size.height())))
+        return;
+
+    const SkMatrix transform = SkMatrix::MakeRectToRect(srcRect, destRect, SkMatrix::kFill_ScaleToFit);
+    SkRect visibleDestRect;
+    transform.mapRect(&visibleDestRect, visibleSrcRect);
+
     SkPaint gradientPaint(paint);
-    m_gradient->applyToPaint(gradientPaint);
-    canvas->drawRect(SkRect::MakeWH(m_size.width(), m_size.height()), gradientPaint);
+    m_gradient->applyToPaint(gradientPaint, transform);
+    canvas->drawRect(visibleDestRect, gradientPaint);
 }
 
 void GradientGeneratedImage::drawTile(GraphicsContext& context, const FloatRect& srcRect)
 {
-    context.setFillGradient(m_gradient);
-    context.fillRect(srcRect);
+    SkPaint gradientPaint(context.fillPaint());
+    m_gradient->applyToPaint(gradientPaint, SkMatrix::I());
+
+    context.drawRect(srcRect, gradientPaint);
+}
+
+bool GradientGeneratedImage::applyShader(SkPaint& paint, const SkMatrix& localMatrix)
+{
+    DCHECK(m_gradient);
+    m_gradient->applyToPaint(paint, localMatrix);
+
+    return true;
 }
 
 } // namespace blink

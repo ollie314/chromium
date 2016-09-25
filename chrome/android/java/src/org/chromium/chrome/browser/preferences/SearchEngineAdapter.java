@@ -10,7 +10,6 @@ import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.os.Build;
 import android.os.Bundle;
-import android.preference.PreferenceManager;
 import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
 import android.view.LayoutInflater;
@@ -25,6 +24,7 @@ import android.widget.RadioButton;
 import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.ContextUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.omnibox.geo.GeolocationHeader;
 import org.chromium.chrome.browser.preferences.website.ContentSetting;
@@ -34,6 +34,7 @@ import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService.LoadListener;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService.TemplateUrl;
+import org.chromium.components.location.LocationUtils;
 import org.chromium.ui.text.SpanApplier;
 import org.chromium.ui.text.SpanApplier.SpanInfo;
 
@@ -204,7 +205,7 @@ public class SearchEngineAdapter extends BaseAdapter implements LoadListener, On
         if (selected) {
             ForegroundColorSpan linkSpan = new ForegroundColorSpan(
                     ApiCompatibilityUtils.getColor(resources, R.color.pref_accent_color));
-            if (LocationSettings.getInstance().isSystemLocationSettingEnabled()) {
+            if (LocationUtils.getInstance().isSystemLocationSettingEnabled()) {
                 String message = mContext.getString(
                         locationEnabled(position, true)
                         ? R.string.search_engine_location_allowed
@@ -247,7 +248,7 @@ public class SearchEngineAdapter extends BaseAdapter implements LoadListener, On
         // First clean up any automatically added permissions (if any) for the previously selected
         // search engine.
         SharedPreferences sharedPreferences =
-                PreferenceManager.getDefaultSharedPreferences(mContext);
+                ContextUtils.getAppSharedPreferences();
         if (sharedPreferences.getBoolean(PrefServiceBridge.LOCATION_AUTO_ALLOWED, false)) {
             if (locationEnabled(mSelectedSearchEnginePosition, false)) {
                 String url = TemplateUrlService.getInstance().getSearchEngineUrlFromTemplateUrl(
@@ -270,9 +271,8 @@ public class SearchEngineAdapter extends BaseAdapter implements LoadListener, On
     }
 
     private void onLocationLinkClicked() {
-        if (!LocationSettings.getInstance().isSystemLocationSettingEnabled()) {
-            mContext.startActivity(
-                    LocationSettings.getInstance().getSystemLocationSettingsIntent());
+        if (!LocationUtils.getInstance().isSystemLocationSettingEnabled()) {
+            mContext.startActivity(LocationUtils.getInstance().getSystemLocationSettingsIntent());
         } else {
             Intent settingsIntent = PreferencesLauncher.createIntentForSettingsPage(
                     mContext, SingleWebsitePreferences.class.getName());

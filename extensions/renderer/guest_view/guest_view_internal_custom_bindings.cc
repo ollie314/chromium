@@ -137,7 +137,7 @@ void GuestViewInternalCustomBindings::AttachGuest(
 
   int element_instance_id = args[0]->Int32Value();
   // An element instance ID uniquely identifies a GuestViewContainer.
-  auto guest_view_container =
+  auto* guest_view_container =
       guest_view::GuestViewContainer::FromID(element_instance_id);
 
   // TODO(fsamuel): Should we be reporting an error if the element instance ID
@@ -147,10 +147,10 @@ void GuestViewInternalCustomBindings::AttachGuest(
 
   int guest_instance_id = args[1]->Int32Value();
 
-  scoped_ptr<base::DictionaryValue> params;
+  std::unique_ptr<base::DictionaryValue> params;
   {
-    scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
-    scoped_ptr<base::Value> params_as_value(
+    std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+    std::unique_ptr<base::Value> params_as_value(
         converter->FromV8Value(args[2], context()->v8_context()));
     params = base::DictionaryValue::From(std::move(params_as_value));
     CHECK(params);
@@ -160,13 +160,13 @@ void GuestViewInternalCustomBindings::AttachGuest(
   // logical units.
   params->SetBoolean(guest_view::kElementSizeIsLogical, true);
 
-  linked_ptr<guest_view::GuestViewRequest> request(
+  std::unique_ptr<guest_view::GuestViewRequest> request(
       new guest_view::GuestViewAttachRequest(
           guest_view_container, guest_instance_id, std::move(params),
           args.Length() == 4 ? args[3].As<v8::Function>()
                              : v8::Local<v8::Function>(),
           args.GetIsolate()));
-  guest_view_container->IssueRequest(request);
+  guest_view_container->IssueRequest(std::move(request));
 
   args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
 }
@@ -182,7 +182,7 @@ void GuestViewInternalCustomBindings::DetachGuest(
 
   int element_instance_id = args[0]->Int32Value();
   // An element instance ID uniquely identifies a GuestViewContainer.
-  auto guest_view_container =
+  auto* guest_view_container =
       guest_view::GuestViewContainer::FromID(element_instance_id);
 
   // TODO(fsamuel): Should we be reporting an error if the element instance ID
@@ -190,12 +190,12 @@ void GuestViewInternalCustomBindings::DetachGuest(
   if (!guest_view_container)
     return;
 
-  linked_ptr<guest_view::GuestViewRequest> request(
+  std::unique_ptr<guest_view::GuestViewRequest> request(
       new guest_view::GuestViewDetachRequest(
           guest_view_container, args.Length() == 2 ? args[1].As<v8::Function>()
                                                    : v8::Local<v8::Function>(),
           args.GetIsolate()));
-  guest_view_container->IssueRequest(request);
+  guest_view_container->IssueRequest(std::move(request));
 
   args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
 }
@@ -221,10 +221,10 @@ void GuestViewInternalCustomBindings::AttachIframeGuest(
   int element_instance_id = args[0]->Int32Value();
   int guest_instance_id = args[1]->Int32Value();
 
-  scoped_ptr<base::DictionaryValue> params;
+  std::unique_ptr<base::DictionaryValue> params;
   {
-    scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
-    scoped_ptr<base::Value> params_as_value(
+    std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+    std::unique_ptr<base::Value> params_as_value(
         converter->FromV8Value(args[2], context()->v8_context()));
     params = base::DictionaryValue::From(std::move(params_as_value));
     CHECK(params);
@@ -258,14 +258,14 @@ void GuestViewInternalCustomBindings::AttachIframeGuest(
       new guest_view::IframeGuestViewContainer(embedder_parent_frame);
   guest_view_container->SetElementInstanceID(element_instance_id);
 
-  linked_ptr<guest_view::GuestViewRequest> request(
+  std::unique_ptr<guest_view::GuestViewRequest> request(
       new guest_view::GuestViewAttachIframeRequest(
           guest_view_container, render_frame->GetRoutingID(), guest_instance_id,
           std::move(params), args.Length() == (num_required_params + 1)
                                  ? args[num_required_params].As<v8::Function>()
                                  : v8::Local<v8::Function>(),
           args.GetIsolate()));
-  guest_view_container->IssueRequest(request);
+  guest_view_container->IssueRequest(std::move(request));
 
   args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
 }
@@ -382,7 +382,7 @@ void GuestViewInternalCustomBindings::RegisterElementResizeCallback(
   int element_instance_id = args[0]->Int32Value();
   // An element instance ID uniquely identifies a ExtensionsGuestViewContainer
   // within a RenderView.
-  auto guest_view_container = static_cast<ExtensionsGuestViewContainer*>(
+  auto* guest_view_container = static_cast<ExtensionsGuestViewContainer*>(
       guest_view::GuestViewContainer::FromID(element_instance_id));
   if (!guest_view_container)
     return;
@@ -408,7 +408,7 @@ void GuestViewInternalCustomBindings::RegisterView(
   // ID as the key. The reference is made weak so that it will not extend the
   // lifetime of the object.
   int view_instance_id = args[0]->Int32Value();
-  auto object =
+  auto* object =
       new v8::Global<v8::Object>(args.GetIsolate(), args[1].As<v8::Object>());
   weak_view_map.Get().insert(std::make_pair(view_instance_id, object));
 

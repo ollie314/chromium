@@ -56,16 +56,16 @@ String CSSFontFaceSrcValue::customCSSText() const
 {
     StringBuilder result;
     if (isLocal()) {
-        result.appendLiteral("local(");
+        result.append("local(");
         result.append(serializeString(m_absoluteResource));
-        result.appendLiteral(")");
+        result.append(')');
     } else {
         result.append(serializeURI(m_specifiedResource));
     }
     if (!m_format.isEmpty()) {
-        result.appendLiteral(" format(");
+        result.append(" format(");
         result.append(serializeString(m_format));
-        result.appendLiteral(")");
+        result.append(')');
     }
     return result.toString();
 }
@@ -85,13 +85,14 @@ static void setCrossOriginAccessControl(FetchRequest& request, SecurityOrigin* s
     request.setCrossOriginAccessControl(securityOrigin, CrossOriginAttributeAnonymous);
 }
 
-FontResource* CSSFontFaceSrcValue::fetch(Document* document)
+FontResource* CSSFontFaceSrcValue::fetch(Document* document) const
 {
     if (!m_fetched) {
         FetchRequest request(ResourceRequest(m_absoluteResource), FetchInitiatorTypeNames::css);
         request.setContentSecurityCheck(m_shouldCheckContentSecurityPolicy);
         SecurityOrigin* securityOrigin = document->getSecurityOrigin();
         setCrossOriginAccessControl(request, securityOrigin);
+        request.mutableResourceRequest().setHTTPReferrer(SecurityPolicy::generateReferrer(m_referrer.referrerPolicy, request.url(), m_referrer.referrer));
         FontResource* resource = FontResource::fetch(request, document->fetcher());
         if (!resource)
             return nullptr;
@@ -104,7 +105,7 @@ FontResource* CSSFontFaceSrcValue::fetch(Document* document)
     return m_fetched->resource();
 }
 
-void CSSFontFaceSrcValue::restoreCachedResourceIfNeeded(Document* document)
+void CSSFontFaceSrcValue::restoreCachedResourceIfNeeded(Document* document) const
 {
     ASSERT(m_fetched);
     ASSERT(document && document->fetcher());
@@ -115,9 +116,10 @@ void CSSFontFaceSrcValue::restoreCachedResourceIfNeeded(Document* document)
 
     FetchRequest request(ResourceRequest(resourceURL), FetchInitiatorTypeNames::css);
     request.setContentSecurityCheck(m_shouldCheckContentSecurityPolicy);
+    request.mutableResourceRequest().setRequestContext(WebURLRequest::RequestContextFont);
     MixedContentChecker::shouldBlockFetch(document->frame(), m_fetched->resource()->lastResourceRequest(),
         m_fetched->resource()->lastResourceRequest().url(), MixedContentChecker::SendReport);
-    document->fetcher()->requestLoadStarted(m_fetched->resource(), request, ResourceFetcher::ResourceLoadingFromCache);
+    document->fetcher()->requestLoadStarted(m_fetched->resource()->identifier(), m_fetched->resource(), request, ResourceFetcher::ResourceLoadingFromCache);
 }
 
 bool CSSFontFaceSrcValue::equals(const CSSFontFaceSrcValue& other) const

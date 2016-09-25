@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event.h"
 #include "gpu/command_buffer/common/cmd_buffer_common.h"
 #include "gpu/command_buffer/common/command_buffer_shared.h"
@@ -19,6 +20,24 @@
 using ::base::SharedMemory;
 
 namespace gpu {
+
+namespace {
+
+class MemoryBufferBacking : public BufferBacking {
+ public:
+  explicit MemoryBufferBacking(size_t size)
+      : memory_(new char[size]), size_(size) {}
+  ~MemoryBufferBacking() override {}
+  void* GetMemory() const override { return memory_.get(); }
+  size_t GetSize() const override { return size_; }
+
+ private:
+  std::unique_ptr<char[]> memory_;
+  size_t size_;
+  DISALLOW_COPY_AND_ASSIGN(MemoryBufferBacking);
+};
+
+}  // anonymous namespace
 
 CommandBufferService::CommandBufferService(
     TransferBufferManagerInterface* transfer_buffer_manager)
@@ -35,10 +54,6 @@ CommandBufferService::CommandBufferService(
 }
 
 CommandBufferService::~CommandBufferService() {
-}
-
-bool CommandBufferService::Initialize() {
-  return true;
 }
 
 CommandBufferService::State CommandBufferService::GetLastState() {
@@ -72,7 +87,7 @@ void CommandBufferService::WaitForGetOffsetInRange(int32_t start, int32_t end) {
 }
 
 void CommandBufferService::Flush(int32_t put_offset) {
-  if (put_offset < 0 || put_offset > num_entries_) {
+  if (put_offset < 0 || put_offset >= num_entries_) {
     error_ = gpu::error::kOutOfBounds;
     return;
   }
@@ -123,27 +138,12 @@ void CommandBufferService::SetGetOffset(int32_t get_offset) {
 
 scoped_refptr<Buffer> CommandBufferService::CreateTransferBuffer(size_t size,
                                                                  int32_t* id) {
-  *id = -1;
-
-  std::unique_ptr<SharedMemory> shared_memory(new SharedMemory());
-  if (!shared_memory->CreateAndMapAnonymous(size)) {
-    if (error_ == error::kNoError)
-      error_ = gpu::error::kOutOfBounds;
-    return NULL;
-  }
-
   static int32_t next_id = 1;
   *id = next_id++;
-
-  if (!RegisterTransferBuffer(
-          *id, MakeBackingFromSharedMemory(std::move(shared_memory), size))) {
-    if (error_ == error::kNoError)
-      error_ = gpu::error::kOutOfBounds;
+  auto result = CreateTransferBufferWithId(size, *id);
+  if (!result)
     *id = -1;
-    return NULL;
-  }
-
-  return GetTransferBuffer(*id);
+  return result;
 }
 
 void CommandBufferService::DestroyTransferBuffer(int32_t id) {
@@ -167,6 +167,20 @@ bool CommandBufferService::RegisterTransferBuffer(
   return transfer_buffer_manager_->RegisterTransferBuffer(id,
                                                           std::move(buffer));
 }
+
+scoped_refptr<Buffer> CommandBufferService::CreateTransferBufferWithId(
+    size_t size,
+    int32_t id) {
+  if (!RegisterTransferBuffer(id,
+                              base::MakeUnique<MemoryBufferBacking>(size))) {
+    if (error_ == error::kNoError)
+      error_ = gpu::error::kOutOfBounds;
+    return NULL;
+  }
+
+  return GetTransferBuffer(id);
+}
+
 
 void CommandBufferService::SetToken(int32_t token) {
   token_ = token;

@@ -30,20 +30,29 @@ class PlatformTouchEvent : public PlatformEvent {
 public:
     PlatformTouchEvent()
         : PlatformEvent(PlatformEvent::TouchStart)
-        , m_cancelable(true)
+        , m_dispatchType(PlatformEvent::Blocking)
         , m_causesScrollingIfUncanceled(false)
+        , m_dispatchedDuringFling(false)
+        , m_touchStartOrFirstTouchMove(false)
     {
     }
 
     const Vector<PlatformTouchPoint>& touchPoints() const { return m_touchPoints; }
 
-    bool cancelable() const { return m_cancelable; }
+    DispatchType dispatchType() const { return m_dispatchType; }
+    bool cancelable() const { return m_dispatchType == PlatformEvent::Blocking; }
     bool causesScrollingIfUncanceled() const { return m_causesScrollingIfUncanceled; }
+    bool dispatchedDuringFling() const { return m_dispatchedDuringFling; }
+    bool touchStartOrFirstTouchMove() const { return m_touchStartOrFirstTouchMove; }
+    uint32_t uniqueTouchEventId() const { return m_uniqueTouchEventId; }
 
 protected:
     Vector<PlatformTouchPoint> m_touchPoints;
-    bool m_cancelable;
+    DispatchType m_dispatchType;
     bool m_causesScrollingIfUncanceled;
+    bool m_dispatchedDuringFling;
+    bool m_touchStartOrFirstTouchMove;
+    uint32_t m_uniqueTouchEventId;
 };
 
 } // namespace blink

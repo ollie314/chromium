@@ -22,8 +22,6 @@
 
 #include "platform/graphics/filters/Filter.h"
 #include "platform/text/TextStream.h"
-#include "third_party/skia/include/core/SkPicture.h"
-#include "third_party/skia/include/effects/SkPictureImageFilter.h"
 
 namespace blink {
 
@@ -42,29 +40,14 @@ SourceGraphic* SourceGraphic::create(Filter* filter)
     return new SourceGraphic(filter);
 }
 
-FloatRect SourceGraphic::determineAbsolutePaintRect(const FloatRect& requestedRect)
+FloatRect SourceGraphic::mapInputs(const FloatRect& rect) const
 {
-    FloatRect srcRect = intersection(m_sourceRect, requestedRect);
-    addAbsolutePaintRect(srcRect);
-    return srcRect;
-}
-
-void SourceGraphic::setPicture(sk_sp<SkPicture> picture)
-{
-    m_picture = std::move(picture);
+    return !m_sourceRect.isEmpty() ? m_sourceRect : rect;
 }
 
 void SourceGraphic::setSourceRect(const IntRect& sourceRect)
 {
     m_sourceRect = sourceRect;
-}
-
-sk_sp<SkImageFilter> SourceGraphic::createImageFilter()
-{
-    if (!m_picture)
-        return nullptr;
-
-    return SkPictureImageFilter::Make(m_picture, m_picture->cullRect());
 }
 
 TextStream& SourceGraphic::externalRepresentation(TextStream& ts, int indent) const

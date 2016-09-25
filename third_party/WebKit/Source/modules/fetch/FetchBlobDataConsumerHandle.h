@@ -10,9 +10,10 @@
 #include "modules/ModulesExport.h"
 #include "modules/fetch/FetchDataConsumerHandle.h"
 #include "platform/blob/BlobData.h"
-#include "wtf/PassOwnPtr.h"
+#include "platform/heap/Handle.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -24,21 +25,21 @@ class MODULES_EXPORT FetchBlobDataConsumerHandle final : public FetchDataConsume
 public:
     class MODULES_EXPORT LoaderFactory : public GarbageCollectedFinalized<LoaderFactory> {
     public:
-        virtual PassOwnPtr<ThreadableLoader> create(ExecutionContext&, ThreadableLoaderClient*, const ThreadableLoaderOptions&, const ResourceLoaderOptions&) = 0;
+        virtual ThreadableLoader* create(ExecutionContext&, ThreadableLoaderClient*, const ThreadableLoaderOptions&, const ResourceLoaderOptions&) = 0;
         virtual ~LoaderFactory() { }
         DEFINE_INLINE_VIRTUAL_TRACE() { }
     };
 
-    static PassOwnPtr<FetchDataConsumerHandle> create(ExecutionContext*, PassRefPtr<BlobDataHandle>);
+    static std::unique_ptr<FetchDataConsumerHandle> create(ExecutionContext*, PassRefPtr<BlobDataHandle>);
 
     // For testing.
-    static PassOwnPtr<FetchDataConsumerHandle> create(ExecutionContext*, PassRefPtr<BlobDataHandle>, LoaderFactory*);
+    static std::unique_ptr<FetchDataConsumerHandle> create(ExecutionContext*, PassRefPtr<BlobDataHandle>, LoaderFactory*);
 
     ~FetchBlobDataConsumerHandle();
 
 private:
     FetchBlobDataConsumerHandle(ExecutionContext*, PassRefPtr<BlobDataHandle>, LoaderFactory*);
-    Reader* obtainReaderInternal(Client*) override;
+    std::unique_ptr<Reader> obtainFetchDataReader(Client*) override;
 
     const char* debugName() const override { return "FetchBlobDataConsumerHandle"; }
 

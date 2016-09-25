@@ -5,14 +5,22 @@
 #include "modules/csspaint/PaintRenderingContext2D.h"
 
 #include "platform/graphics/ImageBuffer.h"
+#include <memory>
 
 namespace blink {
 
-PaintRenderingContext2D::PaintRenderingContext2D(PassOwnPtr<ImageBuffer> imageBuffer)
-    : m_imageBuffer(imageBuffer)
+PaintRenderingContext2D::PaintRenderingContext2D(std::unique_ptr<ImageBuffer> imageBuffer, bool hasAlpha, float zoom)
+    : m_imageBuffer(std::move(imageBuffer)), m_hasAlpha(hasAlpha)
 {
     m_clipAntialiasing = AntiAliased;
     modifiableState().setShouldAntialias(true);
+
+    // RecordingImageBufferSurface doesn't call ImageBufferSurface::clear explicitly.
+    DCHECK(m_imageBuffer);
+    m_imageBuffer->canvas()->clear(hasAlpha ? SK_ColorTRANSPARENT : SK_ColorBLACK);
+    m_imageBuffer->didDraw(FloatRect(0, 0, width(), height()));
+
+    m_imageBuffer->canvas()->scale(zoom, zoom);
 }
 
 int PaintRenderingContext2D::width() const
@@ -59,7 +67,7 @@ void PaintRenderingContext2D::didDraw(const SkIRect& dirtyRect)
     return m_imageBuffer->didDraw(SkRect::Make(dirtyRect));
 }
 
-void PaintRenderingContext2D::validateStateStack()
+void PaintRenderingContext2D::validateStateStack() const
 {
 #if ENABLE(ASSERT)
     SkCanvas* skCanvas = existingDrawingCanvas();

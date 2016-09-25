@@ -17,33 +17,34 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/rand_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/download/download_manager_impl.h"
-#include "content/browser/fileapi/chrome_blob_storage_context.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
-#include "content/browser/mojo/browser_shell_connection.h"
-#include "content/browser/mojo/constants.h"
 #include "content/browser/push_messaging/push_messaging_router.h"
 #include "content/browser/storage_partition_impl_map.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/public/browser/blob_handle.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/mojo_shell_connection.h"
+#include "content/public/common/service_names.h"
 #include "net/cookies/cookie_store.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/channel_id_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/file/file_service.h"
+#include "services/file/public/cpp/constants.h"
+#include "services/file/user_id_map.h"
 #include "services/shell/public/cpp/connection.h"
 #include "services/shell/public/cpp/connector.h"
-#include "services/shell/public/interfaces/shell_client.mojom.h"
-#include "services/user/public/cpp/constants.h"
-#include "services/user/user_id_map.h"
-#include "services/user/user_shell_client.h"
+#include "services/shell/public/interfaces/service.mojom.h"
 #include "storage/browser/database/database_tracker.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 
@@ -53,20 +54,42 @@ namespace content {
 
 namespace {
 
-base::LazyInstance<std::set<std::string>> g_used_user_ids =
-    LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<std::vector<std::pair<BrowserContext*, std::string>>>
-g_context_to_user_id = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<std::map<std::string, BrowserContext*>>
+    g_user_id_to_context = LAZY_INSTANCE_INITIALIZER;
+
+class ShellUserIdHolder : public base::SupportsUserData::Data {
+ public:
+  explicit ShellUserIdHolder(const std::string& user_id) : user_id_(user_id) {}
+  ~ShellUserIdHolder() override {}
+
+  const std::string& user_id() const { return user_id_; }
+
+ private:
+  std::string user_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(ShellUserIdHolder);
+};
 
 // Key names on BrowserContext.
 const char kDownloadManagerKeyName[] = "download_manager";
 const char kMojoShellConnection[] = "mojo-shell-connection";
 const char kMojoWasInitialized[] = "mojo-was-initialized";
+const char kMojoShellUserId[] = "mojo-shell-user-id";
 const char kStoragePartitionMapKeyName[] = "content_storage_partition_map";
 
 #if defined(OS_CHROMEOS)
 const char kMountPointsKey[] = "mount_points";
 #endif  // defined(OS_CHROMEOS)
+
+void RemoveBrowserContextFromUserIdMap(BrowserContext* browser_context) {
+  ShellUserIdHolder* holder = static_cast<ShellUserIdHolder*>(
+      browser_context->GetUserData(kMojoShellUserId));
+  if (holder) {
+    auto it = g_user_id_to_context.Get().find(holder->user_id());
+    if (it != g_user_id_to_context.Get().end())
+      g_user_id_to_context.Get().erase(it);
+  }
+}
 
 StoragePartitionImplMap* GetStoragePartitionMap(
     BrowserContext* browser_context) {
@@ -128,16 +151,18 @@ class BrowserContextShellConnectionHolder
  public:
   BrowserContextShellConnectionHolder(
       std::unique_ptr<shell::Connection> connection,
-      shell::mojom::ShellClientRequest request)
+      shell::mojom::ServiceRequest request)
       : root_connection_(std::move(connection)),
-        shell_connection_(new BrowserShellConnection(std::move(request))) {}
+        shell_connection_(MojoShellConnection::Create(
+            std::move(request),
+            BrowserThread::GetTaskRunnerForThread(BrowserThread::IO))) {}
   ~BrowserContextShellConnectionHolder() override {}
 
-  BrowserShellConnection* shell_connection() { return shell_connection_.get(); }
+  MojoShellConnection* shell_connection() { return shell_connection_.get(); }
 
  private:
   std::unique_ptr<shell::Connection> root_connection_;
-  std::unique_ptr<BrowserShellConnection> shell_connection_;
+  std::unique_ptr<MojoShellConnection> shell_connection_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserContextShellConnectionHolder);
 };
@@ -308,6 +333,18 @@ void BrowserContext::NotifyWillBeDestroyed(BrowserContext* browser_context) {
   // render process hosts die before their profile (browser context) dies.
   ForEachStoragePartition(browser_context,
                           base::Bind(ShutdownServiceWorkerContext));
+
+  // Shared workers also keep render process hosts alive, and are expected to
+  // return ref counts to 0 after documents close. However, shared worker
+  // bookkeeping is done on the IO thread and we want to ensure the hosts are
+  // destructed now, so forcibly release their ref counts here.
+  for (RenderProcessHost::iterator host_iterator =
+           RenderProcessHost::AllHostsIterator();
+       !host_iterator.IsAtEnd(); host_iterator.Advance()) {
+    RenderProcessHost* host = host_iterator.GetCurrentValue();
+    if (host->GetBrowserContext() == browser_context)
+      host->ForceReleaseWorkerRefCounts();
+  }
 }
 
 void BrowserContext::EnsureResourceContextInitialized(BrowserContext* context) {
@@ -366,82 +403,100 @@ void BrowserContext::SetDownloadManagerForTesting(
 void BrowserContext::Initialize(
     BrowserContext* browser_context,
     const base::FilePath& path) {
-  // Generate a GUID for |browser_context| to use as the Mojo user id.
-  std::string new_id = base::GenerateGUID();
-  while (g_used_user_ids.Get().find(new_id) != g_used_user_ids.Get().end())
+
+  std::string new_id;
+  if (GetContentClient() && GetContentClient()->browser()) {
+    new_id = GetContentClient()->browser()->GetShellUserIdForBrowserContext(
+        browser_context);
+  } else {
+    // Some test scenarios initialize a BrowserContext without a content client.
     new_id = base::GenerateGUID();
+  }
 
-  g_used_user_ids.Get().insert(new_id);
-  g_context_to_user_id.Get().push_back(std::make_pair(browser_context, new_id));
+  ShellUserIdHolder* holder = static_cast<ShellUserIdHolder*>(
+      browser_context->GetUserData(kMojoShellUserId));
+  if (holder)
+    file::ForgetShellUserIdUserDirAssociation(holder->user_id());
+  file::AssociateShellUserIdWithUserDir(new_id, path);
+  RemoveBrowserContextFromUserIdMap(browser_context);
+  g_user_id_to_context.Get()[new_id] = browser_context;
+  browser_context->SetUserData(kMojoShellUserId,
+                               new ShellUserIdHolder(new_id));
 
-  user_service::AssociateMojoUserIDWithUserDir(new_id, path);
   browser_context->SetUserData(kMojoWasInitialized,
                                new base::SupportsUserData::Data);
 
-  MojoShellConnection* shell = MojoShellConnection::Get();
-  if (shell) {
+  MojoShellConnection* shell = MojoShellConnection::GetForProcess();
+  if (shell && base::MessageLoop::current()) {
     // NOTE: Many unit tests create a TestBrowserContext without initializing
     // Mojo or the global Mojo shell connection.
 
-    shell::mojom::ShellClientPtr shell_client;
-    shell::mojom::ShellClientRequest shell_client_request =
-        mojo::GetProxy(&shell_client);
+    shell::mojom::ServicePtr service;
+    shell::mojom::ServiceRequest service_request = mojo::GetProxy(&service);
 
     shell::mojom::PIDReceiverPtr pid_receiver;
     shell::Connector::ConnectParams params(
         shell::Identity(kBrowserMojoApplicationName, new_id));
-    params.set_client_process_connection(std::move(shell_client),
+    params.set_client_process_connection(std::move(service),
                                          mojo::GetProxy(&pid_receiver));
     pid_receiver->SetPID(base::GetCurrentProcId());
 
     BrowserContextShellConnectionHolder* connection_holder =
         new BrowserContextShellConnectionHolder(
           shell->GetConnector()->Connect(&params),
-          std::move(shell_client_request));
+          std::move(service_request));
     browser_context->SetUserData(kMojoShellConnection, connection_holder);
 
-    BrowserShellConnection* connection = connection_holder->shell_connection();
+    MojoShellConnection* connection = connection_holder->shell_connection();
+    connection->Start();
 
-    // New embedded application factories should be added to |connection| here.
+    // New embedded service factories should be added to |connection| here.
 
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kMojoLocalStorage)) {
-      connection->AddEmbeddedApplication(
-          user_service::kUserServiceName,
-          base::Bind(
-              &user_service::CreateUserShellClient,
-              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB)),
-          nullptr);
+      MojoApplicationInfo info;
+      info.application_factory =
+          base::Bind(&file::CreateFileService,
+                     BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
+                     BrowserThread::GetTaskRunnerForThread(BrowserThread::DB));
+      connection->AddEmbeddedService(file::kFileServiceName, info);
     }
   }
 }
 
 // static
-const std::string& BrowserContext::GetMojoUserIdFor(
+const std::string& BrowserContext::GetShellUserIdFor(
     BrowserContext* browser_context) {
   CHECK(browser_context->GetUserData(kMojoWasInitialized))
       << "Attempting to get the mojo user id for a BrowserContext that was "
       << "never Initialize()ed.";
 
-  auto it = std::find_if(
-      g_context_to_user_id.Get().begin(),
-      g_context_to_user_id.Get().end(),
-      [&browser_context](const std::pair<BrowserContext*, std::string>& p) {
-        return p.first == browser_context; });
-  CHECK(it != g_context_to_user_id.Get().end());
-  return it->second;
+  ShellUserIdHolder* holder = static_cast<ShellUserIdHolder*>(
+      browser_context->GetUserData(kMojoShellUserId));
+  return holder->user_id();
 }
 
 // static
-shell::Connector* BrowserContext::GetMojoConnectorFor(
+BrowserContext* BrowserContext::GetBrowserContextForShellUserId(
+    const std::string& user_id) {
+  auto it = g_user_id_to_context.Get().find(user_id);
+  return it != g_user_id_to_context.Get().end() ? it->second : nullptr;
+}
+
+// static
+shell::Connector* BrowserContext::GetShellConnectorFor(
+    BrowserContext* browser_context) {
+  MojoShellConnection* connection = GetMojoShellConnectionFor(browser_context);
+  return connection ? connection->GetConnector() : nullptr;
+}
+
+// static
+MojoShellConnection* BrowserContext::GetMojoShellConnectionFor(
     BrowserContext* browser_context) {
   BrowserContextShellConnectionHolder* connection_holder =
       static_cast<BrowserContextShellConnectionHolder*>(
           browser_context->GetUserData(kMojoShellConnection));
-  if (!connection_holder)
-    return nullptr;
-  return connection_holder->shell_connection()->GetConnector();
+  return connection_holder ? connection_holder->shell_connection() : nullptr;
 }
 
 BrowserContext::~BrowserContext() {
@@ -449,8 +504,18 @@ BrowserContext::~BrowserContext() {
       << "Attempting to destroy a BrowserContext that never called "
       << "Initialize()";
 
+  DCHECK(!GetUserData(kStoragePartitionMapKeyName))
+      << "StoragePartitionMap is not shut down properly";
+
+  RemoveBrowserContextFromUserIdMap(this);
+
   if (GetUserData(kDownloadManagerKeyName))
     GetDownloadManager(this)->Shutdown();
+}
+
+void BrowserContext::ShutdownStoragePartitions() {
+  if (GetUserData(kStoragePartitionMapKeyName))
+    RemoveUserData(kStoragePartitionMapKeyName);
 }
 
 }  // namespace content

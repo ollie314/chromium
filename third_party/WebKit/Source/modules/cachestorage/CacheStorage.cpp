@@ -12,9 +12,10 @@
 #include "modules/cachestorage/CacheStorageError.h"
 #include "modules/fetch/Request.h"
 #include "modules/fetch/Response.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCacheError.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCacheStorage.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -38,16 +39,6 @@ bool commonChecks(ScriptState* scriptState, ExceptionState& exceptionState)
         return false;
     }
     return true;
-}
-
-void checkCacheQueryOptions(const CacheQueryOptions& options, ExecutionContext* context)
-{
-    if (!RuntimeEnabledFeatures::cacheIgnoreSearchOptionEnabled() && options.ignoreSearch())
-        context->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "Cache.match() does not support 'ignoreSearch' option yet. See http://crbug.com/520784"));
-    if (options.ignoreMethod())
-        context->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "Cache.match() does not support 'ignoreMethod' option yet. See http://crbug.com/482256"));
-    if (options.ignoreVary())
-        context->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "Cache.match() does not support 'ignoreVary' option yet. See http://crbug.com/499216"));
 }
 
 } // namespace
@@ -95,8 +86,7 @@ public:
     {
         if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
             return;
-        Cache* cache = Cache::create(m_cacheStorage->m_scopedFetcher, adoptPtr(webCache.release()));
-        m_cacheStorage->m_nameToCacheMap.set(m_cacheName, cache);
+        Cache* cache = Cache::create(m_cacheStorage->m_scopedFetcher, wrapUnique(webCache.release()));
         m_resolver->resolve(cache);
         m_resolver.clear();
     }
@@ -129,7 +119,8 @@ public:
     {
         if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
             return;
-        m_resolver->resolve(Response::create(m_resolver->getScriptState()->getExecutionContext(), webResponse));
+        ScriptState::Scope scope(m_resolver->getScriptState());
+        m_resolver->resolve(Response::create(m_resolver->getScriptState(), webResponse));
         m_resolver.clear();
     }
 
@@ -137,7 +128,7 @@ public:
     {
         if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
             return;
-        if (reason == WebServiceWorkerCacheErrorNotFound)
+        if (reason == WebServiceWorkerCacheErrorNotFound || reason == WebServiceWorkerCacheErrorCacheNameNotFound)
             m_resolver->resolve();
         else
             m_resolver->reject(CacheStorageError::createException(reason));
@@ -159,7 +150,6 @@ public:
 
     void onSuccess() override
     {
-        m_cacheStorage->m_nameToCacheMap.remove(m_cacheName);
         if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
             return;
         m_resolver->resolve(true);
@@ -216,7 +206,7 @@ private:
 
 CacheStorage* CacheStorage::create(GlobalFetch::ScopedFetcher* fetcher, WebServiceWorkerCacheStorage* webCacheStorage)
 {
-    return new CacheStorage(fetcher, adoptPtr(webCacheStorage));
+    return new CacheStorage(fetcher, wrapUnique(webCacheStorage));
 }
 
 ScriptPromise CacheStorage::open(ScriptState* scriptState, const String& cacheName, ExceptionState& exceptionState)
@@ -226,12 +216,6 @@ ScriptPromise CacheStorage::open(ScriptState* scriptState, const String& cacheNa
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
-
-    if (m_nameToCacheMap.contains(cacheName)) {
-        Cache* cache = m_nameToCacheMap.find(cacheName)->value;
-        resolver->resolve(cache);
-        return promise;
-    }
 
     if (m_webCacheStorage)
         m_webCacheStorage->dispatchOpen(new WithCacheCallbacks(cacheName, this, resolver), cacheName);
@@ -248,11 +232,6 @@ ScriptPromise CacheStorage::has(ScriptState* scriptState, const String& cacheNam
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
-
-    if (m_nameToCacheMap.contains(cacheName)) {
-        resolver->resolve(true);
-        return promise;
-    }
 
     if (m_webCacheStorage)
         m_webCacheStorage->dispatchHas(new Callbacks(resolver), cacheName);
@@ -312,10 +291,14 @@ ScriptPromise CacheStorage::matchImpl(ScriptState* scriptState, const Request* r
 {
     WebServiceWorkerRequest webRequest;
     request->populateWebServiceWorkerRequest(webRequest);
-    checkCacheQueryOptions(options, scriptState->getExecutionContext());
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
+
+    if (request->method() != HTTPNames::GET && !options.ignoreMethod()) {
+        resolver->resolve();
+        return promise;
+    }
 
     if (m_webCacheStorage)
         m_webCacheStorage->dispatchMatch(new MatchCallbacks(resolver), webRequest, Cache::toWebQueryParams(options));
@@ -325,9 +308,9 @@ ScriptPromise CacheStorage::matchImpl(ScriptState* scriptState, const Request* r
     return promise;
 }
 
-CacheStorage::CacheStorage(GlobalFetch::ScopedFetcher* fetcher, PassOwnPtr<WebServiceWorkerCacheStorage> webCacheStorage)
+CacheStorage::CacheStorage(GlobalFetch::ScopedFetcher* fetcher, std::unique_ptr<WebServiceWorkerCacheStorage> webCacheStorage)
     : m_scopedFetcher(fetcher)
-    , m_webCacheStorage(webCacheStorage)
+    , m_webCacheStorage(std::move(webCacheStorage))
 {
 }
 
@@ -337,13 +320,12 @@ CacheStorage::~CacheStorage()
 
 void CacheStorage::dispose()
 {
-    m_webCacheStorage.clear();
+    m_webCacheStorage.reset();
 }
 
 DEFINE_TRACE(CacheStorage)
 {
     visitor->trace(m_scopedFetcher);
-    visitor->trace(m_nameToCacheMap);
 }
 
 } // namespace blink

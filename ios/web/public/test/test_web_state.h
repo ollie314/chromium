@@ -27,9 +27,12 @@ class TestWebState : public WebState {
   void SetDelegate(WebStateDelegate* delegate) override;
   bool IsWebUsageEnabled() const override;
   void SetWebUsageEnabled(bool enabled) override;
+  bool ShouldSuppressDialogs() const override;
+  void SetShouldSuppressDialogs(bool should_suppress) override;
   UIView* GetView() override;
   BrowserState* GetBrowserState() const override;
   void OpenURL(const OpenURLParams& params) override {}
+  const NavigationManager* GetNavigationManager() const override;
   NavigationManager* GetNavigationManager() override;
   CRWJSInjectionReceiver* GetJSInjectionReceiver() const override;
   void ExecuteJavaScript(const base::string16& javascript) override;
@@ -40,6 +43,7 @@ class TestWebState : public WebState {
   bool ContentIsHTML() const override;
   const base::string16& GetTitle() const override;
   bool IsLoading() const override;
+  double GetLoadingProgress() const override;
   bool IsBeingDestroyed() const override;
   const GURL& GetVisibleURL() const override;
   const GURL& GetLastCommittedURL() const override;
@@ -52,7 +56,6 @@ class TestWebState : public WebState {
   CRWWebViewProxyType GetWebViewProxy() const override;
   bool IsShowingWebInterstitial() const override;
   WebInterstitial* GetWebInterstitial() const override;
-  int GetCertGroupId() const override;
   void AddObserver(WebStateObserver* observer) override {}
   void RemoveObserver(WebStateObserver* observer) override {}
   void AddPolicyDecider(WebStatePolicyDecider* decider) override {}
@@ -62,15 +65,18 @@ class TestWebState : public WebState {
                     uint32_t max_bitmap_size,
                     bool bypass_cache,
                     const ImageDownloadCallback& callback) override;
+  shell::InterfaceRegistry* GetMojoInterfaceRegistry() override;
   base::WeakPtr<WebState> AsWeakPtr() override;
 
   // Setters for test data.
   void SetContentIsHTML(bool content_is_html);
+  void SetLoading(bool is_loading);
   void SetCurrentURL(const GURL& url);
   void SetTrustLevel(URLVerificationTrustLevel trust_level);
 
  private:
   bool web_usage_enabled_;
+  bool is_loading_;
   GURL url_;
   base::string16 title_;
   URLVerificationTrustLevel trust_level_;

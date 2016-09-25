@@ -4,16 +4,17 @@
 
 #include "chrome/browser/image_decoder.h"
 
+#include <utility>
+
 #include "base/bind.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/image_decoder.mojom.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
-#include "content/public/common/service_registry.h"
-#include "skia/public/type_converters.h"
+#include "services/shell/public/cpp/interface_provider.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -32,16 +33,13 @@ const int kBatchModeTimeoutSeconds = 5;
 void OnDecodeImageDone(
     base::Callback<void(int)> fail_callback,
     base::Callback<void(const SkBitmap&, int)> success_callback,
-    int request_id, skia::mojom::BitmapPtr image) {
+    int request_id,
+    const SkBitmap& image) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (image) {
-    SkBitmap bitmap = image.To<SkBitmap>();
-    if (!bitmap.empty()) {
-      success_callback.Run(bitmap, request_id);
-      return;
-    }
-  }
-  fail_callback.Run(request_id);
+  if (!image.isNull() && !image.empty())
+    success_callback.Run(image, request_id);
+  else
+    fail_callback.Run(request_id);
 }
 
 }  // namespace
@@ -58,24 +56,41 @@ ImageDecoder::~ImageDecoder() {
 
 ImageDecoder::ImageRequest::ImageRequest()
     : task_runner_(base::ThreadTaskRunnerHandle::Get()) {
-  DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+  DCHECK(sequence_checker_.CalledOnValidSequence());
 }
 
 ImageDecoder::ImageRequest::ImageRequest(
     const scoped_refptr<base::SequencedTaskRunner>& task_runner)
     : task_runner_(task_runner) {
-  DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+  DCHECK(sequence_checker_.CalledOnValidSequence());
 }
 
 ImageDecoder::ImageRequest::~ImageRequest() {
-  DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+  DCHECK(sequence_checker_.CalledOnValidSequence());
   ImageDecoder::Cancel(this);
 }
 
 // static
 void ImageDecoder::Start(ImageRequest* image_request,
+                         std::vector<uint8_t> image_data) {
+  StartWithOptions(image_request, std::move(image_data), DEFAULT_CODEC, false);
+}
+
+// static
+void ImageDecoder::Start(ImageRequest* image_request,
                          const std::string& image_data) {
-  StartWithOptions(image_request, image_data, DEFAULT_CODEC, false);
+  Start(image_request,
+        std::vector<uint8_t>(image_data.begin(), image_data.end()));
+}
+
+// static
+void ImageDecoder::StartWithOptions(ImageRequest* image_request,
+                                    std::vector<uint8_t> image_data,
+                                    ImageCodec image_codec,
+                                    bool shrink_to_fit) {
+  g_decoder.Pointer()->StartWithOptionsImpl(image_request,
+                                            std::move(image_data),
+                                            image_codec, shrink_to_fit);
 }
 
 // static
@@ -83,12 +98,13 @@ void ImageDecoder::StartWithOptions(ImageRequest* image_request,
                                     const std::string& image_data,
                                     ImageCodec image_codec,
                                     bool shrink_to_fit) {
-  g_decoder.Pointer()->StartWithOptionsImpl(image_request, image_data,
-                                            image_codec, shrink_to_fit);
+  StartWithOptions(image_request,
+                   std::vector<uint8_t>(image_data.begin(), image_data.end()),
+                   image_codec, shrink_to_fit);
 }
 
 void ImageDecoder::StartWithOptionsImpl(ImageRequest* image_request,
-                                        const std::string& image_data,
+                                        std::vector<uint8_t> image_data,
                                         ImageCodec image_codec,
                                         bool shrink_to_fit) {
   DCHECK(image_request);
@@ -106,7 +122,7 @@ void ImageDecoder::StartWithOptionsImpl(ImageRequest* image_request,
       base::Bind(
           &ImageDecoder::DecodeImageInSandbox,
           g_decoder.Pointer(), request_id,
-          std::vector<unsigned char>(image_data.begin(), image_data.end()),
+          base::Passed(std::move(image_data)),
           image_codec, shrink_to_fit));
 }
 
@@ -118,7 +134,7 @@ void ImageDecoder::Cancel(ImageRequest* image_request) {
 
 void ImageDecoder::DecodeImageInSandbox(
     int request_id,
-    const std::vector<unsigned char>& image_data,
+    std::vector<uint8_t> image_data,
     ImageCodec image_codec,
     bool shrink_to_fit) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -158,7 +174,7 @@ void ImageDecoder::DecodeImageInSandbox(
     mojo_codec = mojom::ImageCodec::ROBUST_PNG;
 #endif  // defined(OS_CHROMEOS)
   decoder_->DecodeImage(
-      mojo::Array<uint8_t>::From(image_data),
+      mojo::Array<uint8_t>(std::move(image_data)),
       mojo_codec,
       shrink_to_fit,
       base::Bind(&OnDecodeImageDone,
@@ -190,9 +206,7 @@ void ImageDecoder::StartBatchMode() {
     delete utility_process_host_.get();
     return;
   }
-  content::ServiceRegistry* service_registry =
-      utility_process_host_->GetServiceRegistry();
-  service_registry->ConnectToRemoteService(mojo::GetProxy(&decoder_));
+  utility_process_host_->GetRemoteInterfaces()->GetInterface(&decoder_);
 }
 
 void ImageDecoder::StopBatchMode() {
@@ -237,7 +251,7 @@ void ImageDecoder::OnProcessCrashed(int exit_code) {
   FailAllRequests();
 }
 
-void ImageDecoder::OnProcessLaunchFailed() {
+void ImageDecoder::OnProcessLaunchFailed(int error_code) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   FailAllRequests();
 }

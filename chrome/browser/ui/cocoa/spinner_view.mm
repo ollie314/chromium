@@ -6,7 +6,6 @@
 
 #import <QuartzCore/QuartzCore.h>
 
-#include "base/mac/mac_util.h"
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -32,7 +31,7 @@ NSString* const kSpinnerAnimationName  = @"SpinnerAnimationName";
 NSString* const kRotationAnimationName = @"RotationAnimationName";
 }
 
-@interface SpinnerView () {
+@interface SpinnerView () <CALayerDelegate> {
   base::scoped_nsobject<CAAnimationGroup> spinnerAnimation_;
   base::scoped_nsobject<CABasicAnimation> rotationAnimation_;
   CAShapeLayer* shapeLayer_;  // Weak.
@@ -178,10 +177,8 @@ NSString* const kRotationAnimationName = @"RotationAnimationName";
   // Make sure |shapeLayer_|'s content scale factor matches the window's
   // backing depth (e.g. it's 2.0 on Retina Macs). Don't worry about adjusting
   // any other layers because |shapeLayer_| is the only one displaying content.
-  if (base::mac::IsOSLionOrLater()) {
-    CGFloat backingScaleFactor = [[self window] backingScaleFactor];
-    [shapeLayer_ setContentsScale:backingScaleFactor];
-  }
+  CGFloat backingScaleFactor = [[self window] backingScaleFactor];
+  [shapeLayer_ setContentsScale:backingScaleFactor];
 
   // Create the first half of the arc animation, where it grows from a short
   // block to its full length.

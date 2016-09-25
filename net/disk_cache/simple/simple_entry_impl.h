@@ -20,6 +20,7 @@
 #include "net/disk_cache/simple/simple_entry_format.h"
 #include "net/disk_cache/simple/simple_entry_operation.h"
 #include "net/log/net_log.h"
+#include "net/log/net_log_event_type.h"
 
 namespace base {
 class TaskRunner;
@@ -79,6 +80,11 @@ class NET_EXPORT_PRIVATE SimpleEntryImpl : public Entry,
 
   const std::string& key() const { return key_; }
   uint64_t entry_hash() const { return entry_hash_; }
+
+  // The key is not a constructor parameter to the SimpleEntryImpl, because
+  // during cache iteration, it's necessary to open entries by their hash
+  // alone. In that case, the SimpleSynchronousEntry will read the key from disk
+  // and it will be set.
   void SetKey(const std::string& key);
 
   // From Entry:
@@ -221,7 +227,7 @@ class NET_EXPORT_PRIVATE SimpleEntryImpl : public Entry,
       const base::TimeTicks& start_time,
       std::unique_ptr<SimpleEntryCreationResults> in_results,
       Entry** out_entry,
-      net::NetLog::EventType end_event_type);
+      net::NetLogEventType end_event_type);
 
   // Called after we've closed and written the EOF record to our entry. Until
   // this point it hasn't been safe to OpenEntry() the same entry, but from this
@@ -363,7 +369,7 @@ class NET_EXPORT_PRIVATE SimpleEntryImpl : public Entry,
 
   std::queue<SimpleEntryOperation> pending_operations_;
 
-  net::BoundNetLog net_log_;
+  net::NetLogWithSource net_log_;
 
   std::unique_ptr<SimpleEntryOperation> executing_operation_;
 

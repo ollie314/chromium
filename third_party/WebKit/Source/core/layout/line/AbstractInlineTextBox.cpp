@@ -93,13 +93,12 @@ PassRefPtr<AbstractInlineTextBox> AbstractInlineTextBox::nextInlineTextBox() con
     return getOrCreate(m_lineLayoutItem, m_inlineTextBox->nextTextBox());
 }
 
-LayoutRect AbstractInlineTextBox::bounds() const
+LayoutRect AbstractInlineTextBox::localBounds() const
 {
     if (!m_inlineTextBox || !m_lineLayoutItem)
         return LayoutRect();
 
-    FloatRect boundaries(m_inlineTextBox->calculateBoundaries());
-    return LayoutRect(m_lineLayoutItem.localToAbsoluteQuad(boundaries).enclosingBoundingBox());
+    return m_inlineTextBox->calculateBoundaries();
 }
 
 unsigned AbstractInlineTextBox::len() const

@@ -28,13 +28,12 @@ class LanguagesHandler : public SettingsPageUIHandler {
 
   // SettingsPageUIHandler implementation.
   void RegisterMessages() override;
+  void OnJavascriptAllowed() override {}
+  void OnJavascriptDisallowed() override {}
 
  private:
   // Changes the UI language, provided the user is allowed to do so.
   void HandleSetUILanguage(const base::ListValue* args);
-
-  // Restarts Chrome to apply a UI language change.
-  void HandleRestart(const base::ListValue* args);
 
   Profile* profile_;  // Weak pointer.
 

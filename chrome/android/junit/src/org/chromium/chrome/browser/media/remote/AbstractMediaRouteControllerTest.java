@@ -7,10 +7,10 @@ package org.chromium.chrome.browser.media.remote;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyBoolean;
-import static org.mockito.Matchers.anyInt;
-import static org.mockito.Matchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -29,10 +29,9 @@ import android.support.v7.media.MediaRouter.Callback;
 import android.support.v7.media.MediaRouter.ProviderInfo;
 import android.support.v7.media.MediaRouter.RouteInfo;
 
-import org.chromium.base.ApplicationStatus;
 import org.chromium.base.BaseChromiumApplication;
 import org.chromium.base.CommandLine;
-import org.chromium.base.test.shadows.ShadowMultiDex;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.media.remote.MediaRouteController.MediaStateListener;
 import org.chromium.chrome.browser.media.remote.MediaRouteController.UiListener;
@@ -44,11 +43,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.robolectric.Robolectric;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
-import org.robolectric.internal.ReflectionHelpers;
+import org.robolectric.shadows.multidex.ShadowMultiDex;
+import org.robolectric.util.ReflectionHelpers;
 
 /** Tests for {@link AbstractMediaRouteController}. */
 @RunWith(LocalRobolectricTestRunner.class)
@@ -63,8 +63,7 @@ public class AbstractMediaRouteControllerTest {
         // see http://crbug.com/469649
         CommandLine.init(new String[] {});
 
-        // We need to initialize the ApplicationStatus to avoid DCHECKs
-        ApplicationStatus.initialize((BaseChromiumApplication) Robolectric.application);
+        ContextUtils.initApplicationContextForTests(RuntimeEnvironment.application);
 
         ShadowMediaRouter.sMediaRouter = null;
         ShadowMediaRouter.sCallback = null;
@@ -322,9 +321,9 @@ public class AbstractMediaRouteControllerTest {
     private static RouteInfo createRouteInfo(int playbackType) {
         Class<?>[] paramClasses = new Class[] {ProviderInfo.class, String.class, String.class};
         Object[] paramValues = new Object[] {null, "", ""};
-        RouteInfo routeInfo = ReflectionHelpers.callConstructorReflectively(RouteInfo.class,
+        RouteInfo routeInfo = ReflectionHelpers.callConstructor(RouteInfo.class,
                 ReflectionHelpers.ClassParameter.fromComponentLists(paramClasses, paramValues));
-        ReflectionHelpers.setFieldReflectively(routeInfo, "mPlaybackType", playbackType);
+        ReflectionHelpers.setField(routeInfo, "mPlaybackType", playbackType);
         return routeInfo;
     }
 

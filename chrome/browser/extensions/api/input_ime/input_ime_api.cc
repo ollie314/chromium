@@ -174,14 +174,12 @@ bool ImeObserver::ShouldForwardKeyEvent() const {
   // the key events, and therefore, all key events will be eaten.
   // This is for error-tolerance, and it means that onKeyEvent will never wake
   // up lazy background page.
-  const extensions::EventListenerMap::ListenerList& listener_list =
+  const extensions::EventListenerMap::ListenerList& listeners =
       extensions::EventRouter::Get(profile_)
           ->listeners()
           .GetEventListenersByName(input_ime::OnKeyEvent::kEventName);
-  for (extensions::EventListenerMap::ListenerList::const_iterator it =
-           listener_list.begin();
-       it != listener_list.end(); ++it) {
-    if ((*it)->extension_id() == extension_id_ && !(*it)->IsLazy())
+  for (const std::unique_ptr<extensions::EventListener>& listener : listeners) {
+    if (listener->extension_id() == extension_id_ && !listener->IsLazy())
       return true;
   }
   return false;
@@ -264,7 +262,7 @@ void InputImeEventRouterFactory::RemoveProfile(Profile* profile) {
   if (!profile || router_map_.empty())
     return;
   auto it = router_map_.find(profile);
-  if (it != router_map_.end()) {
+  if (it != router_map_.end() && it->first == profile) {
     delete it->second;
     router_map_.erase(it);
   }
@@ -391,10 +389,9 @@ InputImeAPI::InputImeAPI(content::BrowserContext* context)
 void InputImeAPI::Observe(int type,
                           const content::NotificationSource& source,
                           const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PROFILE_DESTROYED) {
-    extensions::InputImeEventRouterFactory::GetInstance()->RemoveProfile(
-        content::Source<Profile>(source).ptr());
-  }
+  DCHECK_EQ(chrome::NOTIFICATION_PROFILE_DESTROYED, type);
+  extensions::InputImeEventRouterFactory::GetInstance()->RemoveProfile(
+      content::Source<Profile>(source).ptr());
 }
 
 InputImeAPI::~InputImeAPI() {

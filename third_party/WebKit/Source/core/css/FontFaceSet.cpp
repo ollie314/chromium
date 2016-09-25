@@ -232,6 +232,14 @@ void FontFaceSet::loadError(FontFace* fontFace)
     removeFromLoadingFonts(fontFace);
 }
 
+size_t FontFaceSet::approximateBlankCharacterCount() const
+{
+    size_t count = 0;
+    for (auto& fontFace : m_loadingFonts)
+        count += fontFace->approximateBlankCharacterCount();
+    return count;
+}
+
 void FontFaceSet::addToLoadingFonts(FontFace* fontFace)
 {
     if (!m_isLoading) {
@@ -340,11 +348,13 @@ void FontFaceSet::fireDoneEventIfPossible()
         return;
     if (!shouldSignalReady())
         return;
+    Document* d = document();
+    if (!d)
+        return;
 
     // If the layout was invalidated in between when we thought layout
     // was updated and when we're ready to fire the event, just wait
     // until after the next layout before firing events.
-    Document* d = document();
     if (!d->view() || d->view()->needsLayout())
         return;
 
@@ -486,11 +496,6 @@ void FontFaceSet::FontLoadHistogram::record()
     }
 }
 
-static const char* supplementName()
-{
-    return "FontFaceSet";
-}
-
 FontFaceSet* FontFaceSet::from(Document& document)
 {
     FontFaceSet* fonts = static_cast<FontFaceSet*>(Supplement<Document>::from(document, supplementName()));
@@ -506,6 +511,13 @@ void FontFaceSet::didLayout(Document& document)
 {
     if (FontFaceSet* fonts = static_cast<FontFaceSet*>(Supplement<Document>::from(document, supplementName())))
         fonts->didLayout();
+}
+
+size_t FontFaceSet::approximateBlankCharacterCount(Document& document)
+{
+    if (FontFaceSet* fonts = static_cast<FontFaceSet*>(Supplement<Document>::from(document, supplementName())))
+        return fonts->approximateBlankCharacterCount();
+    return 0;
 }
 
 FontFaceSetIterable::IterationSource* FontFaceSet::startIteration(ScriptState*, ExceptionState&)

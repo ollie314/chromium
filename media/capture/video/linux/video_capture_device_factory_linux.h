@@ -4,8 +4,8 @@
 
 // Implementation of a VideoCaptureDeviceFactoryLinux class.
 
-#ifndef MEDIA_VIDEO_CAPTURE_LINUX_VIDEO_CAPTURE_DEVICE_FACTORY_LINUX_H_
-#define MEDIA_VIDEO_CAPTURE_LINUX_VIDEO_CAPTURE_DEVICE_FACTORY_LINUX_H_
+#ifndef MEDIA_CAPTURE_VIDEO_LINUX_VIDEO_CAPTURE_DEVICE_FACTORY_LINUX_H_
+#define MEDIA_CAPTURE_VIDEO_LINUX_VIDEO_CAPTURE_DEVICE_FACTORY_LINUX_H_
 
 #include "media/capture/video/video_capture_device_factory.h"
 
@@ -16,24 +16,27 @@ namespace media {
 
 // Extension of VideoCaptureDeviceFactory to create and manipulate Linux
 // devices.
-class MEDIA_EXPORT VideoCaptureDeviceFactoryLinux
+class CAPTURE_EXPORT VideoCaptureDeviceFactoryLinux
     : public VideoCaptureDeviceFactory {
  public:
   explicit VideoCaptureDeviceFactoryLinux(
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
   ~VideoCaptureDeviceFactoryLinux() override;
 
-  scoped_ptr<VideoCaptureDevice> Create(
-      const VideoCaptureDevice::Name& device_name) override;
-  void GetDeviceNames(VideoCaptureDevice::Names* device_names) override;
-  void GetDeviceSupportedFormats(
-      const VideoCaptureDevice::Name& device,
+  std::unique_ptr<VideoCaptureDevice> CreateDevice(
+      const VideoCaptureDeviceDescriptor& device_descriptor) override;
+  void GetDeviceDescriptors(
+      VideoCaptureDeviceDescriptors* device_descriptors) override;
+  void GetSupportedFormats(
+      const VideoCaptureDeviceDescriptor& device_descriptor,
       VideoCaptureFormats* supported_formats) override;
 
  private:
+  std::string GetDeviceModelId(const std::string& device_id);
+
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureDeviceFactoryLinux);
 };
 
 }  // namespace media
-#endif  // MEDIA_VIDEO_CAPTURE_LINUX_VIDEO_CAPTURE_DEVICE_FACTORY_LINUX_H_
+#endif  // MEDIA_CAPTURE_VIDEO_LINUX_VIDEO_CAPTURE_DEVICE_FACTORY_LINUX_H_

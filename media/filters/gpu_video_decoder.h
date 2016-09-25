@@ -16,6 +16,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "gpu/command_buffer/common/sync_token.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/surface_manager.h"
 #include "media/base/video_decoder.h"
@@ -46,8 +47,9 @@ class MEDIA_EXPORT GpuVideoDecoder
     : public VideoDecoder,
       public VideoDecodeAccelerator::Client {
  public:
-  explicit GpuVideoDecoder(GpuVideoAcceleratorFactories* factories,
-                           const RequestSurfaceCB& request_surface_cb);
+  GpuVideoDecoder(GpuVideoAcceleratorFactories* factories,
+                  const RequestSurfaceCB& request_surface_cb,
+                  scoped_refptr<MediaLog> media_log);
 
   // VideoDecoder implementation.
   std::string GetDisplayName() const override;
@@ -67,6 +69,7 @@ class MEDIA_EXPORT GpuVideoDecoder
   // VideoDecodeAccelerator::Client implementation.
   void NotifyInitializationComplete(bool success) override;
   void ProvidePictureBuffers(uint32_t count,
+                             VideoPixelFormat format,
                              uint32_t textures_per_buffer,
                              const gfx::Size& size,
                              uint32_t texture_target) override;
@@ -92,9 +95,9 @@ class MEDIA_EXPORT GpuVideoDecoder
 
   // A shared memory segment and its allocated size.
   struct SHMBuffer {
-    SHMBuffer(scoped_ptr<base::SharedMemory> m, size_t s);
+    SHMBuffer(std::unique_ptr<base::SharedMemory> m, size_t s);
     ~SHMBuffer();
-    scoped_ptr<base::SharedMemory> shm;
+    std::unique_ptr<base::SharedMemory> shm;
     size_t size;
   };
 
@@ -134,10 +137,10 @@ class MEDIA_EXPORT GpuVideoDecoder
 
   // Request a shared-memory segment of at least |min_size| bytes.  Will
   // allocate as necessary.
-  scoped_ptr<SHMBuffer> GetSHM(size_t min_size);
+  std::unique_ptr<SHMBuffer> GetSHM(size_t min_size);
 
   // Return a shared-memory segment to the available pool.
-  void PutSHM(scoped_ptr<SHMBuffer> shm_buffer);
+  void PutSHM(std::unique_ptr<SHMBuffer> shm_buffer);
 
   // Destroy all PictureBuffers in |buffers|, and delete their textures.
   void DestroyPictureBuffers(PictureBufferMap* buffers);
@@ -157,9 +160,15 @@ class MEDIA_EXPORT GpuVideoDecoder
 
   GpuVideoAcceleratorFactories* factories_;
 
+  // For requesting a suface to render to. If this is null the VDA will return
+  // normal video frames and not render them to a surface.
+  RequestSurfaceCB request_surface_cb_;
+
+  scoped_refptr<MediaLog> media_log_;
+
   // Populated during Initialize() (on success) and unchanged until an error
   // occurs.
-  scoped_ptr<VideoDecodeAccelerator> vda_;
+  std::unique_ptr<VideoDecodeAccelerator> vda_;
 
   InitCB init_cb_;
   OutputCB output_cb_;
@@ -173,14 +182,14 @@ class MEDIA_EXPORT GpuVideoDecoder
 
   VideoDecoderConfig config_;
 
-  // For requesting a suface to render to. If this is null the VDA will return
-  // normal video frames and not render them to a surface.
-  RequestSurfaceCB request_surface_cb_;
-
   // Shared-memory buffer pool.  Since allocating SHM segments requires a
   // round-trip to the browser process, we keep allocation out of the
   // steady-state of the decoder.
   std::vector<SHMBuffer*> available_shm_segments_;
+
+  // Placeholder sync token that was created and validated after the most
+  // recent picture buffers were created.
+  gpu::SyncToken sync_token_;
 
   std::map<int32_t, PendingDecoderBuffer> bitstream_buffers_in_decoder_;
   PictureBufferMap assigned_picture_buffers_;
@@ -194,6 +203,9 @@ class MEDIA_EXPORT GpuVideoDecoder
 
   // The texture target used for decoded pictures.
   uint32_t decoder_texture_target_;
+
+  // The pixel format used for decoded pictures.
+  VideoPixelFormat pixel_format_;
 
   struct BufferData {
     BufferData(int32_t bbid,
@@ -227,6 +239,9 @@ class MEDIA_EXPORT GpuVideoDecoder
   // NotifyInitializationComplete.  Otherwise, it will return initialization
   // status synchronously from VDA::Initialize.
   bool supports_deferred_initialization_;
+
+  // This flag translates to COPY_REQUIRED flag for each frame.
+  bool requires_texture_copy_;
 
   // Bound to factories_->GetMessageLoop().
   // NOTE: Weak pointers must be invalidated before all other member variables.

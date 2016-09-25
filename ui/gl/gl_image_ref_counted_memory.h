@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "ui/gl/gl_export.h"
 #include "ui/gl/gl_image_memory.h"
 
 namespace base {
@@ -17,7 +18,7 @@ class RefCountedMemory;
 
 namespace gl {
 
-class GL_EXPORT GLImageRefCountedMemory : public gl::GLImageMemory {
+class GL_EXPORT GLImageRefCountedMemory : public GLImageMemory {
  public:
   GLImageRefCountedMemory(const gfx::Size& size, unsigned internalformat);
 

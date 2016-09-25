@@ -6,10 +6,14 @@
 
 #include <stddef.h>
 
+#include <memory>
+#include <utility>
+
 #include "base/base_paths_posix.h"
 #include "base/callback.h"
 #include "base/i18n/time_formatting.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
@@ -281,9 +285,9 @@ bool PopulateGalleryPrefInfoFromDictionary(
   return true;
 }
 
-base::DictionaryValue* CreateGalleryPrefInfoDictionary(
+std::unique_ptr<base::DictionaryValue> CreateGalleryPrefInfoDictionary(
     const MediaGalleryPrefInfo& gallery) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  auto dict = base::MakeUnique<base::DictionaryValue>();
   dict->SetString(kMediaGalleriesPrefIdKey,
                   base::Uint64ToString(gallery.pref_id));
   dict->SetString(kMediaGalleriesDeviceIdKey, gallery.device_id);
@@ -823,7 +827,7 @@ base::FilePath MediaGalleriesPreferences::LookUpGalleryPathForExtension(
   DCHECK(IsInitialized());
   DCHECK(extension);
   if (!include_unpermitted_galleries &&
-      !ContainsKey(GalleriesForExtension(*extension), gallery_id))
+      !base::ContainsKey(GalleriesForExtension(*extension), gallery_id))
     return base::FilePath();
 
   MediaGalleriesPrefInfoMap::const_iterator it =
@@ -1147,7 +1151,7 @@ void MediaGalleriesPreferences::EraseOrBlacklistGalleryById(
       new ListPrefUpdate(prefs, prefs::kMediaGalleriesRememberedGalleries));
   base::ListValue* list = update->Get();
 
-  if (!ContainsKey(known_galleries_, id))
+  if (!base::ContainsKey(known_galleries_, id))
     return;
 
   for (base::ListValue::iterator iter = list->begin();
@@ -1188,7 +1192,7 @@ void MediaGalleriesPreferences::EraseOrBlacklistGalleryById(
 bool MediaGalleriesPreferences::NonAutoGalleryHasPermission(
     MediaGalleryPrefId id) const {
   DCHECK(IsInitialized());
-  DCHECK(!ContainsKey(known_galleries_, id) ||
+  DCHECK(!base::ContainsKey(known_galleries_, id) ||
          known_galleries_.find(id)->second.type !=
              MediaGalleryPrefInfo::kAutoDetected);
   ExtensionPrefs* prefs = GetExtensionPrefs();
@@ -1350,10 +1354,10 @@ bool MediaGalleriesPreferences::SetGalleryPermissionInPrefs(
     }
   }
   // ...Otherwise, add a new entry for the gallery.
-  base::DictionaryValue* dict = new base::DictionaryValue;
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
   dict->SetString(kMediaGalleryIdKey, base::Uint64ToString(gallery_id));
   dict->SetBoolean(kMediaGalleryHasPermissionKey, has_access);
-  permissions->Append(dict);
+  permissions->Append(std::move(dict));
   return true;
 }
 

@@ -8,6 +8,7 @@
 #include "base/macros.h"
 #include "base/threading/thread_checker.h"
 #include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_export.h"
 #include "ui/gl/gl_image.h"
 
 namespace gl {
@@ -33,6 +34,7 @@ class GL_EXPORT GLImageEGL : public GLImage {
                             gfx::OverlayTransform transform,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect) override;
+  void Flush() override {}
 
  protected:
   ~GLImageEGL() override;

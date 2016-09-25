@@ -10,8 +10,8 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
@@ -23,6 +23,7 @@ import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content.browser.test.util.TestInputMethodManagerWrapper;
 import org.chromium.content.browser.test.util.TouchCommon;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.R;
 import org.chromium.ui.autofill.AutofillPopup;
 
 import java.util.ArrayList;
@@ -34,6 +35,7 @@ import java.util.concurrent.TimeoutException;
 /**
  * Integration tests for the AutofillPopup.
  */
+@RetryOnFailure
 public class AutofillPopupTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     private static final String FIRST_NAME = "John";
@@ -166,7 +168,7 @@ public class AutofillPopupTest extends ChromeActivityTestCaseBase<ChromeActivity
                 ZIP_CODE, SORTING_CODE, COUNTRY, PHONE_NUMBER, EMAIL,
                 LANGUAGE_CODE);
         mHelper.setProfile(profile);
-        assertEquals(1, mHelper.getNumberOfProfiles());
+        assertEquals(1, mHelper.getNumberOfProfilesToSuggest());
 
         // Click the input field for the first name.
         DOMUtils.waitForNonZeroNodeBounds(webContents, "fn");

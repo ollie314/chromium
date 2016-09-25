@@ -31,16 +31,19 @@
 #ifndef ImageBitmapFactories_h
 #define ImageBitmapFactories_h
 
+#include "bindings/core/v8/HTMLImageElementOrHTMLVideoElementOrHTMLCanvasElementOrBlobOrImageDataOrImageBitmap.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
-#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/fileapi/FileReaderLoader.h"
 #include "core/fileapi/FileReaderLoaderClient.h"
 #include "core/imagebitmap/ImageBitmapOptions.h"
 #include "platform/Supplementable.h"
 #include "platform/geometry/IntRect.h"
-#include "third_party/skia/include/core/SkImage.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include <memory>
+
+class SkImage;
 
 namespace blink {
 
@@ -58,11 +61,10 @@ typedef HTMLImageElementOrHTMLVideoElementOrHTMLCanvasElementOrBlobOrImageDataOr
 class ImageBitmapFactories final : public GarbageCollectedFinalized<ImageBitmapFactories>, public Supplement<LocalDOMWindow>, public Supplement<WorkerGlobalScope> {
     USING_GARBAGE_COLLECTED_MIXIN(ImageBitmapFactories);
 public:
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, const ImageBitmapSourceUnion&, ExceptionState&);
     static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, const ImageBitmapSourceUnion&, const ImageBitmapOptions&, ExceptionState&);
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, const ImageBitmapSourceUnion&, int sx, int sy, int sw, int sh, ExceptionState&);
     static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, const ImageBitmapSourceUnion&, int sx, int sy, int sw, int sh, const ImageBitmapOptions&, ExceptionState&);
-    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, ImageBitmapSource*, int sx, int sy, int sw, int sh, const ImageBitmapOptions&, ExceptionState&);
+    static ScriptPromise createImageBitmap(ScriptState*, EventTarget&, ImageBitmapSource*, Optional<IntRect> cropRect, const ImageBitmapOptions&, ExceptionState&);
+    static ScriptPromise createImageBitmapFromBlob(ScriptState*, EventTarget&, ImageBitmapSource*, Optional<IntRect> cropRect, const ImageBitmapOptions&, ExceptionState&);
 
     virtual ~ImageBitmapFactories() { }
 
@@ -74,7 +76,7 @@ protected:
 private:
     class ImageBitmapLoader final : public GarbageCollectedFinalized<ImageBitmapLoader>, public FileReaderLoaderClient {
     public:
-        static ImageBitmapLoader* create(ImageBitmapFactories& factory, const IntRect& cropRect, const ImageBitmapOptions& options, ScriptState* scriptState)
+        static ImageBitmapLoader* create(ImageBitmapFactories& factory, Optional<IntRect> cropRect, const ImageBitmapOptions& options, ScriptState* scriptState)
         {
             return new ImageBitmapLoader(factory, cropRect, scriptState, options);
         }
@@ -87,13 +89,13 @@ private:
         ~ImageBitmapLoader() override { }
 
     private:
-        ImageBitmapLoader(ImageBitmapFactories&, const IntRect&, ScriptState*, const ImageBitmapOptions&);
+        ImageBitmapLoader(ImageBitmapFactories&, Optional<IntRect> cropRect, ScriptState*, const ImageBitmapOptions&);
 
         void rejectPromise();
 
         void scheduleAsyncImageBitmapDecoding(DOMArrayBuffer*);
-        void decodeImageOnDecoderThread(WebTaskRunner*, DOMArrayBuffer*);
-        void resolvePromiseOnOriginalThread(PassRefPtr<SkImage>);
+        void decodeImageOnDecoderThread(WebTaskRunner*, DOMArrayBuffer*, const String& premultiplyAlphaOption, const String& colorSpaceConversionOption);
+        void resolvePromiseOnOriginalThread(sk_sp<SkImage>);
 
         // FileReaderLoaderClient
         void didStartLoading() override { }
@@ -101,10 +103,10 @@ private:
         void didFinishLoading() override;
         void didFail(FileError::ErrorCode) override;
 
-        FileReaderLoader m_loader;
+        std::unique_ptr<FileReaderLoader> m_loader;
         Member<ImageBitmapFactories> m_factory;
         Member<ScriptPromiseResolver> m_resolver;
-        IntRect m_cropRect;
+        Optional<IntRect> m_cropRect;
         ImageBitmapOptions m_options;
     };
 

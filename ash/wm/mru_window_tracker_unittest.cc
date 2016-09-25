@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/common/wm/mru_window_tracker.h"
+
+#include "ash/aura/wm_window_aura.h"
+#include "ash/common/shell_window_ids.h"
+#include "ash/common/wm/window_state.h"
+#include "ash/common/wm_shell.h"
 #include "ash/shell.h"
-#include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/test_shelf_delegate.h"
-#include "ash/wm/mru_window_tracker.h"
-#include "ash/wm/window_state.h"
 #include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
-#include "base/compiler_specific.h"
-#include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
 #include "ui/views/widget/widget.h"
@@ -28,7 +28,7 @@ class MruWindowTrackerTest : public test::AshTestBase {
   }
 
   ash::MruWindowTracker* mru_window_tracker() {
-    return Shell::GetInstance()->mru_window_tracker();
+    return WmShell::Get()->mru_window_tracker();
   }
 
  private:
@@ -44,15 +44,14 @@ TEST_F(MruWindowTrackerTest, Basic) {
   wm::ActivateWindow(w2.get());
   wm::ActivateWindow(w1.get());
 
-  MruWindowTracker::WindowList window_list =
-      mru_window_tracker()->BuildMruWindowList();
+  aura::Window::Windows window_list =
+      WmWindowAura::ToAuraWindows(mru_window_tracker()->BuildMruWindowList());
   EXPECT_EQ(w1.get(), window_list[0]);
   EXPECT_EQ(w2.get(), window_list[1]);
   EXPECT_EQ(w3.get(), window_list[2]);
 }
 
-// Test that minimized windows are considered least recently used (but kept in
-// correct relative order).
+// Test that minimized windows are not treated specially.
 TEST_F(MruWindowTrackerTest, MinimizedWindowsAreLru) {
   std::unique_ptr<aura::Window> w1(CreateWindow());
   std::unique_ptr<aura::Window> w2(CreateWindow());
@@ -71,16 +70,18 @@ TEST_F(MruWindowTrackerTest, MinimizedWindowsAreLru) {
   wm::GetWindowState(w4.get())->Minimize();
   wm::GetWindowState(w5.get())->Minimize();
 
-  // Expect the relative order of minimized windows to remain the same, but all
-  // minimized windows to be at the end of the list.
-  MruWindowTracker::WindowList window_list =
-      mru_window_tracker()->BuildMruWindowList();
+  // By minimizing the first window, we activate w2 which will move it to the
+  // front of the MRU queue.
+  EXPECT_TRUE(wm::GetWindowState(w2.get())->IsActive());
+
+  aura::Window::Windows window_list =
+      WmWindowAura::ToAuraWindows(mru_window_tracker()->BuildMruWindowList());
   EXPECT_EQ(w2.get(), window_list[0]);
-  EXPECT_EQ(w3.get(), window_list[1]);
-  EXPECT_EQ(w6.get(), window_list[2]);
-  EXPECT_EQ(w1.get(), window_list[3]);
-  EXPECT_EQ(w4.get(), window_list[4]);
-  EXPECT_EQ(w5.get(), window_list[5]);
+  EXPECT_EQ(w1.get(), window_list[1]);
+  EXPECT_EQ(w3.get(), window_list[2]);
+  EXPECT_EQ(w4.get(), window_list[3]);
+  EXPECT_EQ(w5.get(), window_list[4]);
+  EXPECT_EQ(w6.get(), window_list[5]);
 }
 
 // Tests that windows being dragged are only in the WindowList once.
@@ -99,9 +100,35 @@ TEST_F(MruWindowTrackerTest, DraggedWindowsInListOnlyOnce) {
   EXPECT_TRUE(wm::GetWindowState(w1.get())->is_dragged());
 
   // The dragged window should only be in the list once.
-  MruWindowTracker::WindowList window_list =
-      mru_window_tracker()->BuildWindowListIgnoreModal();
+  aura::Window::Windows window_list = WmWindowAura::ToAuraWindows(
+      mru_window_tracker()->BuildWindowListIgnoreModal());
   EXPECT_EQ(1, std::count(window_list.begin(), window_list.end(), w1.get()));
+}
+
+// Tests that windows with propery of |kExcludeFromMruKey|==true are not in the
+// window list.
+TEST_F(MruWindowTrackerTest, ExcludedFormMru) {
+  std::unique_ptr<aura::Window> w1(CreateWindow());
+  std::unique_ptr<aura::Window> w2(CreateWindow());
+  std::unique_ptr<aura::Window> w3(CreateWindow());
+
+  wm::GetWindowState(w1.get())->SetExcludedFromMru(true);
+  wm::GetWindowState(w3.get())->SetExcludedFromMru(true);
+
+  wm::ActivateWindow(w3.get());
+  wm::ActivateWindow(w2.get());
+  wm::ActivateWindow(w1.get());
+
+  // Expect the windows with |kExcludeFromMruKey| property being true are not
+  // in the list.
+  aura::Window::Windows window_list =
+      WmWindowAura::ToAuraWindows(mru_window_tracker()->BuildMruWindowList());
+
+  EXPECT_EQ(window_list.end(),
+            std::find(window_list.begin(), window_list.end(), w1.get()));
+  EXPECT_EQ(window_list.end(),
+            std::find(window_list.begin(), window_list.end(), w3.get()));
+  EXPECT_EQ(1u, window_list.size());
 }
 
 }  // namespace ash

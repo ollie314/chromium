@@ -68,6 +68,8 @@ TEST_F(FetchResponseDataTest, BasicFilter)
     FetchResponseData* internalResponse = createInternalResponse();
     FetchResponseData* basicResponseData = internalResponse->createBasicFilteredResponse();
 
+    EXPECT_EQ(internalResponse, basicResponseData->internalResponse());
+
     EXPECT_FALSE(basicResponseData->headerList()->has("set-cookie"));
 
     Vector<String> barValues;
@@ -97,6 +99,8 @@ TEST_F(FetchResponseDataTest, CORSFilter)
     FetchResponseData* internalResponse = createInternalResponse();
     FetchResponseData* corsResponseData = internalResponse->createCORSFilteredResponse();
 
+    EXPECT_EQ(internalResponse, corsResponseData->internalResponse());
+
     EXPECT_FALSE(corsResponseData->headerList()->has("set-cookie"));
 
     EXPECT_FALSE(corsResponseData->headerList()->has("bar"));
@@ -113,6 +117,63 @@ TEST_F(FetchResponseDataTest, CORSFilterOnResponseWithAccessControlExposeHeaders
     internalResponse->headerList()->append("access-control-expose-headers", "set-cookie, bar");
 
     FetchResponseData* corsResponseData = internalResponse->createCORSFilteredResponse();
+
+    EXPECT_EQ(internalResponse, corsResponseData->internalResponse());
+
+    EXPECT_FALSE(corsResponseData->headerList()->has("set-cookie"));
+
+    Vector<String> barValues;
+    corsResponseData->headerList()->getAll("bar", barValues);
+    ASSERT_EQ(1U, barValues.size());
+    EXPECT_EQ("bar", barValues[0]);
+}
+
+TEST_F(FetchResponseDataTest, CORSFilterWithEmptyHeaderSet)
+{
+    FetchResponseData* internalResponse = createInternalResponse();
+    FetchResponseData* corsResponseData = internalResponse->createCORSFilteredResponse(HTTPHeaderSet());
+
+    EXPECT_EQ(internalResponse, corsResponseData->internalResponse());
+
+    EXPECT_FALSE(corsResponseData->headerList()->has("set-cookie"));
+
+    EXPECT_FALSE(corsResponseData->headerList()->has("bar"));
+
+    Vector<String> cacheControlValues;
+    corsResponseData->headerList()->getAll("cache-control", cacheControlValues);
+    ASSERT_EQ(1U, cacheControlValues.size());
+    EXPECT_EQ("no-cache", cacheControlValues[0]);
+}
+
+TEST_F(FetchResponseDataTest, CORSFilterWithEmptyHeaderSetOnResponseWithAccessControlExposeHeaders)
+{
+    FetchResponseData* internalResponse = createInternalResponse();
+    internalResponse->headerList()->append("access-control-expose-headers", "set-cookie, bar");
+
+    FetchResponseData* corsResponseData = internalResponse->createCORSFilteredResponse(HTTPHeaderSet());
+
+    EXPECT_EQ(internalResponse, corsResponseData->internalResponse());
+
+    EXPECT_FALSE(corsResponseData->headerList()->has("set-cookie"));
+
+    EXPECT_FALSE(corsResponseData->headerList()->has("bar"));
+
+    Vector<String> cacheControlValues;
+    corsResponseData->headerList()->getAll("cache-control", cacheControlValues);
+    ASSERT_EQ(1U, cacheControlValues.size());
+    EXPECT_EQ("no-cache", cacheControlValues[0]);
+}
+
+TEST_F(FetchResponseDataTest, CORSFilterWithExplicitHeaderSet)
+{
+    FetchResponseData* internalResponse = createInternalResponse();
+    HTTPHeaderSet exposedHeaders;
+    exposedHeaders.add("set-cookie");
+    exposedHeaders.add("bar");
+
+    FetchResponseData* corsResponseData = internalResponse->createCORSFilteredResponse(exposedHeaders);
+
+    EXPECT_EQ(internalResponse, corsResponseData->internalResponse());
 
     EXPECT_FALSE(corsResponseData->headerList()->has("set-cookie"));
 
@@ -138,6 +199,8 @@ TEST_F(FetchResponseDataTest, OpaqueFilter)
     FetchResponseData* internalResponse = createInternalResponse();
     FetchResponseData* opaqueResponseData = internalResponse->createOpaqueFilteredResponse();
 
+    EXPECT_EQ(internalResponse, opaqueResponseData->internalResponse());
+
     EXPECT_FALSE(opaqueResponseData->headerList()->has("set-cookie"));
     EXPECT_FALSE(opaqueResponseData->headerList()->has("bar"));
     EXPECT_FALSE(opaqueResponseData->headerList()->has("cache-control"));
@@ -147,6 +210,8 @@ TEST_F(FetchResponseDataTest, OpaqueRedirectFilter)
 {
     FetchResponseData* internalResponse = createInternalResponse();
     FetchResponseData* opaqueResponseData = internalResponse->createOpaqueRedirectFilteredResponse();
+
+    EXPECT_EQ(internalResponse, opaqueResponseData->internalResponse());
 
     EXPECT_EQ(opaqueResponseData->headerList()->size(), 0u);
     EXPECT_EQ(opaqueResponseData->url(), internalResponse->url());
@@ -158,6 +223,8 @@ TEST_F(FetchResponseDataTest, OpaqueFilterOnResponseWithAccessControlExposeHeade
     internalResponse->headerList()->append("access-control-expose-headers", "set-cookie, bar");
 
     FetchResponseData* opaqueResponseData = internalResponse->createOpaqueFilteredResponse();
+
+    EXPECT_EQ(internalResponse, opaqueResponseData->internalResponse());
 
     EXPECT_FALSE(opaqueResponseData->headerList()->has("set-cookie"));
     EXPECT_FALSE(opaqueResponseData->headerList()->has("bar"));

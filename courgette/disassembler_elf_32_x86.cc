@@ -5,6 +5,7 @@
 #include "courgette/disassembler_elf_32_x86.h"
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/logging.h"
@@ -21,17 +22,16 @@ CheckBool DisassemblerElf32X86::TypedRVAX86::ComputeRelativeTarget(
 
 CheckBool DisassemblerElf32X86::TypedRVAX86::EmitInstruction(
     AssemblyProgram* program,
-    RVA target_rva) {
-  return program->EmitRel32(program->FindOrMakeRel32Label(target_rva));
+    Label* label) {
+  return program->EmitRel32(label);
 }
 
 uint16_t DisassemblerElf32X86::TypedRVAX86::op_size() const {
   return 4;
 }
 
-DisassemblerElf32X86::DisassemblerElf32X86(const void* start, size_t length)
-    : DisassemblerElf32(start, length) {
-}
+DisassemblerElf32X86::DisassemblerElf32X86(const uint8_t* start, size_t length)
+    : DisassemblerElf32(start, length) {}
 
 // Convert an ELF relocation struction into an RVA.
 CheckBool DisassemblerElf32X86::RelToRVA(Elf32_Rel rel, RVA* result) const {
@@ -185,7 +185,7 @@ CheckBool DisassemblerElf32X86::ParseRel32RelocsFromSection(
       RVA target_rva = typed_rel32_rva->rva() +
           typed_rel32_rva->relative_target();
       if (IsValidTargetRVA(target_rva)) {
-        rel32_locations_.push_back(typed_rel32_rva.release());
+        rel32_locations_.push_back(std::move(typed_rel32_rva));
 #if COURGETTE_HISTOGRAM_TARGETS
         ++rel32_target_rvas_[target_rva];
 #endif

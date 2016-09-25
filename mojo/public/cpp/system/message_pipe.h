@@ -18,6 +18,7 @@
 #include "base/logging.h"
 #include "mojo/public/c/system/message_pipe.h"
 #include "mojo/public/cpp/system/handle.h"
+#include "mojo/public/cpp/system/message.h"
 
 namespace mojo {
 
@@ -88,6 +89,33 @@ inline MojoResult ReadMessageRaw(MessagePipeHandle message_pipe,
       message_pipe.value(), bytes, num_bytes, handles, num_handles, flags);
 }
 
+// Writes to a message pipe. Takes ownership of |message| and any attached
+// handles.
+inline MojoResult WriteMessageNew(MessagePipeHandle message_pipe,
+                                  ScopedMessageHandle message,
+                                  MojoWriteMessageFlags flags) {
+  return MojoWriteMessageNew(
+      message_pipe.value(), message.release().value(), flags);
+}
+
+// Reads from a message pipe. See |MojoReadMessageNew()| for complete
+// documentation.
+inline MojoResult ReadMessageNew(MessagePipeHandle message_pipe,
+                                 ScopedMessageHandle* message,
+                                 uint32_t* num_bytes,
+                                 MojoHandle* handles,
+                                 uint32_t* num_handles,
+                                 MojoReadMessageFlags flags) {
+  MojoMessageHandle raw_message;
+  MojoResult rv = MojoReadMessageNew(message_pipe.value(), &raw_message,
+                                     num_bytes, handles, num_handles, flags);
+  if (rv != MOJO_RESULT_OK)
+    return rv;
+
+  message->reset(MessageHandle(raw_message));
+  return MOJO_RESULT_OK;
+}
+
 // Fuses two message pipes together at the given handles. See
 // |MojoFuseMessagePipes()| for complete documentation.
 inline MojoResult FuseMessagePipes(ScopedMessagePipeHandle message_pipe0,
@@ -111,11 +139,15 @@ class MessagePipe {
 inline MessagePipe::MessagePipe() {
   MojoResult result = CreateMessagePipe(nullptr, &handle0, &handle1);
   DCHECK_EQ(MOJO_RESULT_OK, result);
+  DCHECK(handle0.is_valid());
+  DCHECK(handle1.is_valid());
 }
 
 inline MessagePipe::MessagePipe(const MojoCreateMessagePipeOptions& options) {
   MojoResult result = CreateMessagePipe(&options, &handle0, &handle1);
   DCHECK_EQ(MOJO_RESULT_OK, result);
+  DCHECK(handle0.is_valid());
+  DCHECK(handle1.is_valid());
 }
 
 inline MessagePipe::~MessagePipe() {

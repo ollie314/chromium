@@ -6,15 +6,6 @@
 cr.define('settings_dropdown_menu', function() {
   function registerTests() {
     suite('SettingsDropdownMenu', function() {
-      // Import settings_dropdown_menu.html before running suite.
-      suiteSetup(function() {
-        return Promise.all([
-          PolymerTest.importHtml('chrome://md-settings/i18n_setup.html'),
-          PolymerTest.importHtml(
-              'chrome://md-settings/controls/settings_dropdown_menu.html'),
-        ]);
-      });
-
       /** @type {SettingsDropdownMenu} */
       var dropdown;
 
@@ -100,6 +91,33 @@ cr.define('settings_dropdown_menu', function() {
         assertEquals(dropdown.notFoundValue_, selectable.selected);
         // Pref should not have changed.
         assertEquals('f', dropdown.pref.value);
+      });
+
+      test('delay setting options', function testDelayedOptions(done) {
+        dropdown.pref = {
+          key: 'test.number2',
+          type: chrome.settingsPrivate.PrefType.NUMBER,
+          value: 200,
+        };
+
+        setTimeout(function() {
+          assertEquals(
+              loadTimeData.getValue('loading'), dropdown.$.dropdownMenu.label);
+          assertTrue(dropdown.$.dropdownMenu.disabled);
+          assertEquals(undefined, selectable.selected);
+
+          dropdown.menuOptions = [{value: 100, name: 'Option 100'},
+                                  {value: 200, name: 'Option 200'},
+                                  {value: 300, name: 'Option 300'},
+                                  {value: 400, name: 'Option 400'}];
+          Polymer.dom.flush();
+
+          // Dropdown menu enables itself and selects the new menu option
+          // correpsonding to the pref value.
+          assertFalse(dropdown.$.dropdownMenu.disabled);
+          assertEquals('200', selectable.selected);
+          done();
+        }, 100);
       });
     });
   }

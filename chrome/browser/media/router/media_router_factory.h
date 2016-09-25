@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_MEDIA_ROUTER_MEDIA_ROUTER_FACTORY_H_
 #define CHROME_BROWSER_MEDIA_ROUTER_MEDIA_ROUTER_FACTORY_H_
 
+#include "base/gtest_prod_util.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
@@ -23,13 +24,17 @@ class MediaRouterFactory : public BrowserContextKeyedServiceFactory {
  public:
   static MediaRouter* GetApiForBrowserContext(content::BrowserContext* context);
 
+  static MediaRouterFactory* GetInstance();
+
  protected:
   // We override the shutdown method for the factory to give the Media Router a
-  // chance to remove off the record media routes.
+  // chance to remove incognito media routes.
   void BrowserContextShutdown(content::BrowserContext* context) override;
 
  private:
   friend struct base::DefaultLazyInstanceTraits<MediaRouterFactory>;
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterFactoryTest,
+                           IncognitoBrowserContextShutdown);
 
   MediaRouterFactory();
   ~MediaRouterFactory() override;

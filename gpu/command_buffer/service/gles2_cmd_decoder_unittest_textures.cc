@@ -33,7 +33,7 @@
 #define GL_DEPTH24_STENCIL8 0x88F0
 #endif
 
-using ::gfx::MockGLInterface;
+using ::gl::MockGLInterface;
 using ::testing::_;
 using ::testing::DoAll;
 using ::testing::InSequence;
@@ -115,6 +115,34 @@ TEST_P(GLES2DecoderTest, GenerateMipmapClearsUnclearedTexture) {
       GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0, 0);
   SetupClearTextureExpectations(kServiceTextureId, kServiceTextureId,
                                 GL_TEXTURE_2D, GL_TEXTURE_2D, 0, GL_RGBA,
+                                GL_RGBA, GL_UNSIGNED_BYTE, 0, 0, 2, 2);
+  EXPECT_CALL(*gl_, GenerateMipmapEXT(GL_TEXTURE_2D));
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+  GenerateMipmap cmd;
+  cmd.Init(GL_TEXTURE_2D);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, GenerateMipmapBaseLevel) {
+  EXPECT_CALL(*gl_, GenerateMipmapEXT(_)).Times(0);
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  DoTexImage2D(
+      GL_TEXTURE_2D, 2, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0, 0);
+
+  {
+    EXPECT_CALL(*gl_, TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 2));
+    TexParameteri cmd;
+    cmd.Init(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 2);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  }
+
+  SetupClearTextureExpectations(kServiceTextureId, kServiceTextureId,
+                                GL_TEXTURE_2D, GL_TEXTURE_2D, 2, GL_RGBA,
                                 GL_RGBA, GL_UNSIGNED_BYTE, 0, 0, 2, 2);
   EXPECT_CALL(*gl_, GenerateMipmapEXT(GL_TEXTURE_2D));
   EXPECT_CALL(*gl_, GetError())
@@ -712,6 +740,195 @@ TEST_P(GLES2DecoderTest, CopyTexImage2DGLError) {
       texture->GetLevelSize(GL_TEXTURE_2D, level, &width, &height, nullptr));
 }
 
+TEST_P(GLES2DecoderManualInitTest, CopyTexImage2DUnsizedInternalFormat) {
+  base::CommandLine command_line(0, NULL);
+  command_line.AppendSwitch(switches::kEnableUnsafeES3APIs);
+  InitState init;
+  init.gl_version = "OpenGL ES 3.0";
+  init.extensions = "GL_APPLE_texture_format_BGRA8888 GL_EXT_sRGB";
+  init.has_alpha = true;
+  init.request_alpha = true;
+  init.bind_generates_resource = true;
+  init.context_type = CONTEXT_TYPE_OPENGLES2;
+  InitDecoderWithCommandLine(init, &command_line);
+
+  GLenum kUnsizedInternalFormats[] = {
+    GL_RED,
+    GL_RG,
+    GL_RGB,
+    GL_RGBA,
+    GL_BGRA_EXT,
+    GL_LUMINANCE,
+    GL_LUMINANCE_ALPHA,
+    GL_SRGB,
+    GL_SRGB_ALPHA,
+  };
+  GLenum target = GL_TEXTURE_2D;
+  GLint level = 0;
+  GLsizei width = 2;
+  GLsizei height = 4;
+  GLint border = 0;
+  EXPECT_CALL(*gl_, GenTextures(_, _))
+      .WillOnce(SetArgumentPointee<1>(kNewServiceId))
+      .RetiresOnSaturation();
+  GenHelper<GenTexturesImmediate>(kNewClientId);
+
+  TextureManager* manager = group().texture_manager();
+
+  EXPECT_CALL(*gl_, GetError()).WillRepeatedly(Return(GL_NO_ERROR));
+  EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(_))
+      .WillRepeatedly(Return(GL_FRAMEBUFFER_COMPLETE));
+  for (size_t i = 0; i < arraysize(kUnsizedInternalFormats); ++i) {
+    // Copy from main framebuffer to texture, using the unsized internal format.
+    DoBindFramebuffer(GL_FRAMEBUFFER, 0, 0);
+    GLenum internal_format = kUnsizedInternalFormats[i];
+    DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+    EXPECT_CALL(*gl_, CopyTexImage2D(target, level, internal_format, 0, 0,
+                                     width, height, border))
+        .Times(1)
+        .RetiresOnSaturation();
+    CopyTexImage2D cmd;
+    cmd.Init(target, level, internal_format, 0, 0, width, height);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+    TextureRef* ref = manager->GetTexture(client_texture_id_);
+    ASSERT_TRUE(ref != nullptr);
+    Texture* texture = ref->texture();
+    GLenum chosen_type = 0;
+    GLenum chosen_internal_format = 0;
+    texture->GetLevelType(target, level, &chosen_type, &chosen_internal_format);
+    EXPECT_NE(0u, chosen_type);
+    EXPECT_NE(0u, chosen_internal_format);
+
+    // Attach texture to FBO, and copy into second texture.
+    DoBindFramebuffer(
+        GL_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+    DoFramebufferTexture2D(GL_FRAMEBUFFER,
+                           GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D,
+                           client_texture_id_,
+                           kServiceTextureId,
+                           0,
+                           GL_NO_ERROR);
+    DoBindTexture(GL_TEXTURE_2D, kNewClientId, kNewServiceId);
+
+    bool complete =
+        (DoCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    if (complete) {
+      EXPECT_CALL(*gl_, CopyTexImage2D(target, level, internal_format, 0, 0,
+                                       width, height, border))
+          .Times(1)
+          .RetiresOnSaturation();
+    }
+    cmd.Init(target, level, internal_format, 0, 0, width, height);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    if (complete) {
+      EXPECT_EQ(GL_NO_ERROR, GetGLError());
+    } else {
+      EXPECT_EQ(GL_INVALID_FRAMEBUFFER_OPERATION, GetGLError());
+    }
+  }
+}
+
+TEST_P(GLES2DecoderManualInitTest, CopyTexImage2DUnsizedInternalFormatES3) {
+  base::CommandLine command_line(0, NULL);
+  command_line.AppendSwitch(switches::kEnableUnsafeES3APIs);
+  InitState init;
+  init.gl_version = "OpenGL ES 3.0";
+  init.extensions = "GL_APPLE_texture_format_BGRA8888";
+  init.has_alpha = true;
+  init.request_alpha = true;
+  init.bind_generates_resource = true;
+  init.context_type = CONTEXT_TYPE_OPENGLES3;
+  InitDecoderWithCommandLine(init, &command_line);
+
+  struct UnsizedSizedInternalFormat {
+    GLenum unsized;
+    GLenum sized;
+  };
+  UnsizedSizedInternalFormat kUnsizedInternalFormats[] = {
+    {GL_RED, GL_R8},
+    {GL_RG, GL_RG8},
+    {GL_RGB, GL_RGB8},
+    {GL_RGBA, GL_RGBA8},
+    {GL_BGRA_EXT, GL_RGBA8},
+    {GL_LUMINANCE, GL_RGB8},
+    {GL_LUMINANCE_ALPHA, GL_RGBA8},
+  };
+  GLenum target = GL_TEXTURE_2D;
+  GLint level = 0;
+  GLsizei width = 2;
+  GLsizei height = 4;
+  GLint border = 0;
+  EXPECT_CALL(*gl_, GenTextures(_, _))
+      .WillOnce(SetArgumentPointee<1>(kNewServiceId))
+      .RetiresOnSaturation();
+  GenHelper<GenTexturesImmediate>(kNewClientId);
+
+  TextureManager* manager = group().texture_manager();
+
+  EXPECT_CALL(*gl_, GetError()).WillRepeatedly(Return(GL_NO_ERROR));
+  EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(_))
+      .WillRepeatedly(Return(GL_FRAMEBUFFER_COMPLETE));
+  for (size_t i = 0; i < arraysize(kUnsizedInternalFormats); ++i) {
+    // Copy from main framebuffer to texture, using the unsized internal format.
+    DoBindFramebuffer(GL_FRAMEBUFFER, 0, 0);
+    GLenum internal_format = kUnsizedInternalFormats[i].unsized;
+    DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+    EXPECT_CALL(*gl_, CopyTexImage2D(target, level, internal_format, 0, 0,
+                                     width, height, border))
+        .Times(1)
+        .RetiresOnSaturation();
+    CopyTexImage2D cmd;
+    cmd.Init(target, level, internal_format, 0, 0, width, height);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+    TextureRef* ref = manager->GetTexture(client_texture_id_);
+    ASSERT_TRUE(ref != nullptr);
+    Texture* texture = ref->texture();
+    GLenum chosen_type = 0;
+    GLenum chosen_internal_format = 0;
+    texture->GetLevelType(target, level, &chosen_type, &chosen_internal_format);
+    EXPECT_NE(0u, chosen_type);
+    EXPECT_NE(0u, chosen_internal_format);
+
+    // Attach texture to FBO, and copy into second texture using the sized
+    // internal format.
+    DoBindFramebuffer(
+        GL_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+    DoFramebufferTexture2D(GL_FRAMEBUFFER,
+                           GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D,
+                           client_texture_id_,
+                           kServiceTextureId,
+                           0,
+                           GL_NO_ERROR);
+    if (DoCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+      continue;
+
+    internal_format = kUnsizedInternalFormats[i].sized;
+    DoBindTexture(GL_TEXTURE_2D, kNewClientId, kNewServiceId);
+
+    bool complete =
+        (DoCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+    if (complete) {
+      EXPECT_CALL(*gl_, CopyTexImage2D(target, level, internal_format, 0, 0,
+                                       width, height, border))
+          .Times(1)
+          .RetiresOnSaturation();
+    }
+    cmd.Init(target, level, internal_format, 0, 0, width, height);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    if (complete) {
+      EXPECT_EQ(GL_NO_ERROR, GetGLError());
+    } else {
+      EXPECT_EQ(GL_INVALID_FRAMEBUFFER_OPERATION, GetGLError());
+    }
+  }
+}
+
 TEST_P(GLES3DecoderTest, CompressedTexImage3DBucket) {
   const uint32_t kBucketId = 123;
   const uint32_t kBadBucketId = 99;
@@ -856,6 +1073,371 @@ TEST_P(GLES2DecoderTest, CompressedTexImage3DFailsOnES2) {
              kBucketId);
     EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
   }
+}
+
+TEST_P(GLES2DecoderTest, CopyTexSubImage3DFailsOnES2) {
+  const GLenum kTarget = GL_TEXTURE_2D_ARRAY;
+  const GLint kLevel = 0;
+  const GLsizei kWidth = 4;
+  const GLsizei kHeight = 4;
+
+  CopyTexSubImage3D cmd;
+  cmd.Init(kTarget,
+           kLevel,
+           0, 0, 0,
+           0, 0,
+           kWidth,
+           kHeight);
+  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
+}
+
+TEST_P(GLES3DecoderTest, CopyTexSubImage3DFaiures) {
+  const GLenum kTarget = GL_TEXTURE_3D;
+  const GLint kLevel = 1;
+  const GLint kXoffset = 0;
+  const GLint kYoffset = 0;
+  const GLint kZoffset = 0;
+  const GLint kX = 0;
+  const GLint kY = 0;
+  const GLsizei kWidth = 2;
+  const GLsizei kHeight = 2;
+  const GLsizei kDepth = 2;
+
+  CopyTexSubImage3D cmd;
+
+  // No texture bound
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  // Incompatible format / type
+  // The default format/type of default read buffer is RGB/UNSIGNED_BYTE
+  const GLint kInternalFormat = GL_RGBA8;
+  const GLenum kFormat = GL_RGBA;
+  const GLenum kType = GL_UNSIGNED_BYTE;
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  DoTexImage3D(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth, 0,
+               kFormat, kType, kSharedMemoryId, kSharedMemoryOffset);
+
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, CopyTexSubImage3DCheckArgs) {
+  const GLenum kTarget = GL_TEXTURE_3D;
+  const GLint kLevel = 1;
+  const GLint kInternalFormat = GL_RGB8;
+  const GLint kXoffset = 0;
+  const GLint kYoffset = 0;
+  const GLint kZoffset = 0;
+  const GLint kX = 0;
+  const GLint kY = 0;
+  const GLsizei kWidth = 2;
+  const GLsizei kHeight = 2;
+  const GLsizei kDepth = 2;
+  const GLsizei kBorder = 0;
+  const GLenum kFormat = GL_RGB;
+  const GLenum kType = GL_UNSIGNED_BYTE;
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  DoTexImage3D(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth,
+               kBorder, kFormat, kType, kSharedMemoryId, kSharedMemoryOffset);
+
+  // Valid args
+  EXPECT_CALL(*gl_,
+              CopyTexSubImage3D(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+                                kX, kY, kWidth, kHeight))
+      .Times(1)
+      .RetiresOnSaturation();
+  CopyTexSubImage3D cmd;
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  // Bad target
+  cmd.Init(GL_TEXTURE_2D, kLevel, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
+
+  // Bad Level
+  cmd.Init(kTarget, -1, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+  cmd.Init(kTarget, 0, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+
+  // Bad xoffest / yoffset of 3D texture
+  cmd.Init(kTarget, kLevel, -1, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+  cmd.Init(kTarget, kLevel, 1, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+  cmd.Init(kTarget, kLevel, kXoffset, -1, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+  cmd.Init(kTarget, kLevel, kXoffset, 1, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+
+  // Bad zoffset: zoffset specifies the layer of the 3D texture to be replaced
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, -1,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, kDepth,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+
+  // Bad width / height
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth + 1, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight + 1);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, CopyTexSubImage3DFeedbackLoopSucceeds0) {
+  const GLenum kTarget = GL_TEXTURE_3D;
+  const GLint kInternalFormat = GL_RGB8;
+  const GLint kXoffset = 0;
+  const GLint kYoffset = 0;
+  const GLint kZoffset = 0;
+  const GLint kX = 0;
+  const GLint kY = 0;
+  const GLsizei kWidth = 2;
+  const GLsizei kHeight = 2;
+  const GLsizei kDepth = 2;
+  const GLsizei kBorder = 0;
+  const GLenum kFormat = GL_RGB;
+  const GLenum kType = GL_UNSIGNED_BYTE;
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  DoBindFramebuffer(
+      GL_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+
+  FramebufferTextureLayer tex_layer;
+  CopyTexSubImage3D cmd;
+
+  // The source and the target for CopyTexSubImage3D are the same 3d texture.
+  // But level of 3D texture != level of read attachment in fbo.
+  GLint kLevel = 0;
+  GLint kLayer = 0; // kZoffset is 0
+  EXPECT_CALL(*gl_, FramebufferTextureLayer(GL_FRAMEBUFFER,
+                                            GL_COLOR_ATTACHMENT0,
+                                            kServiceTextureId, kLevel, kLayer))
+      .Times(1)
+      .RetiresOnSaturation();
+  DoTexImage3D(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth,
+               kBorder, kFormat, kType, kSharedMemoryId, kSharedMemoryOffset);
+  tex_layer.Init(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, client_texture_id_,
+                 kLevel, kLayer);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(tex_layer));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  kLevel = 1;
+  EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(_))
+      .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_,
+              CopyTexSubImage3D(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+                                kX, kY, kWidth, kHeight))
+      .Times(1)
+      .RetiresOnSaturation();
+  DoTexImage3D(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth,
+               kBorder, kFormat, kType, kSharedMemoryId, kSharedMemoryOffset);
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, CopyTexSubImage3DFeedbackLoopSucceeds1) {
+  const GLenum kTarget = GL_TEXTURE_3D;
+  const GLint kInternalFormat = GL_RGB8;
+  const GLint kXoffset = 0;
+  const GLint kYoffset = 0;
+  const GLint kZoffset = 0;
+  const GLint kX = 0;
+  const GLint kY = 0;
+  const GLsizei kWidth = 2;
+  const GLsizei kHeight = 2;
+  const GLsizei kDepth = 2;
+  const GLsizei kBorder = 0;
+  const GLenum kFormat = GL_RGB;
+  const GLenum kType = GL_UNSIGNED_BYTE;
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  DoBindFramebuffer(
+      GL_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+
+  FramebufferTextureLayer tex_layer;
+  CopyTexSubImage3D cmd;
+
+  // The source and the target for CopyTexSubImage3D are the same 3d texture.
+  // But zoffset of 3D texture != layer of read attachment in fbo.
+  GLint kLevel = 0;
+  GLint kLayer = 1; // kZoffset is 0
+  EXPECT_CALL(*gl_, FramebufferTextureLayer(GL_FRAMEBUFFER,
+                                            GL_COLOR_ATTACHMENT0,
+                                            kServiceTextureId, kLevel, kLayer))
+      .Times(1)
+      .RetiresOnSaturation();
+  DoTexImage3D(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth,
+               kBorder, kFormat, kType, kSharedMemoryId, kSharedMemoryOffset);
+  tex_layer.Init(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, client_texture_id_,
+                 kLevel, kLayer);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(tex_layer));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(_))
+      .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_,
+              CopyTexSubImage3D(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+                                kX, kY, kWidth, kHeight))
+      .Times(1)
+      .RetiresOnSaturation();
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, CopyTexSubImage3DFeedbackLoopFails) {
+  const GLenum kTarget = GL_TEXTURE_3D;
+  const GLint kInternalFormat = GL_RGB8;
+  const GLint kXoffset = 0;
+  const GLint kYoffset = 0;
+  const GLint kZoffset = 0;
+  const GLint kX = 0;
+  const GLint kY = 0;
+  const GLsizei kWidth = 2;
+  const GLsizei kHeight = 2;
+  const GLsizei kDepth = 2;
+  const GLsizei kBorder = 0;
+  const GLenum kFormat = GL_RGB;
+  const GLenum kType = GL_UNSIGNED_BYTE;
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  DoBindFramebuffer(
+      GL_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+
+  FramebufferTextureLayer tex_layer;
+  CopyTexSubImage3D cmd;
+
+  // The source and the target for CopyTexSubImage3D are the same 3d texture.
+  // And level / zoffset of 3D texture equal to level / layer of read attachment
+  // in fbo.
+  GLint kLevel = 1;
+  GLint kLayer = 0; // kZoffset is 0
+  EXPECT_CALL(*gl_, FramebufferTextureLayer(GL_FRAMEBUFFER,
+                                            GL_COLOR_ATTACHMENT0,
+                                            kServiceTextureId, kLevel, kLayer))
+      .Times(1)
+      .RetiresOnSaturation();
+  DoTexImage3D(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth,
+               kBorder, kFormat, kType, kSharedMemoryId, kSharedMemoryOffset);
+  tex_layer.Init(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, client_texture_id_,
+                 kLevel, kLayer);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(tex_layer));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(_))
+      .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
+      .RetiresOnSaturation();
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, CopyTexSubImage3DClearTheUncleared3DTexture) {
+  const GLenum kTarget = GL_TEXTURE_3D;
+  const GLint kLevel = 0;
+  const GLint kXoffset = 0;
+  const GLint kYoffset = 0;
+  const GLint kZoffset = 0;
+  const GLint kX = 0;
+  const GLint kY = 0;
+  const GLint kInternalFormat = GL_RGB8;
+  const GLsizei kWidth = 2;
+  const GLsizei kHeight = 2;
+  const GLsizei kDepth = 2;
+  const GLenum kFormat = GL_RGB;
+  const GLenum kType = GL_UNSIGNED_BYTE;
+  const uint32_t kBufferSize = kWidth * kHeight * kDepth * 4;
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  DoTexImage3D(kTarget, kLevel, kInternalFormat, kWidth, kHeight, kDepth, 0,
+               kFormat, kType, 0, 0);
+  TextureRef* texture_ref =
+      group().texture_manager()->GetTexture(client_texture_id_);
+  ASSERT_TRUE(texture_ref != NULL);
+  Texture* texture = texture_ref->texture();
+
+  EXPECT_FALSE(texture->SafeToRenderFrom());
+  EXPECT_FALSE(texture->IsLevelCleared(kTarget, kLevel));
+
+  // CopyTexSubImage3D will clear the uncleared texture
+  EXPECT_CALL(*gl_, GenBuffersARB(1, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BindBuffer(GL_PIXEL_UNPACK_BUFFER, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BufferData(GL_PIXEL_UNPACK_BUFFER,
+                               kBufferSize, _, GL_STATIC_DRAW))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BindTexture(kTarget, kServiceTextureId))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, TexSubImage3DNoData(kTarget, kLevel,
+                                        kXoffset, kYoffset, kZoffset,
+                                        kWidth, kHeight, kDepth,
+                                        kFormat, kType))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BindBuffer(GL_PIXEL_UNPACK_BUFFER, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, DeleteBuffersARB(1, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BindTexture(kTarget, _))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_,
+              CopyTexSubImage3D(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+                                kX, kY, kWidth, kHeight))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  CopyTexSubImage3D cmd;
+  cmd.Init(kTarget, kLevel, kXoffset, kYoffset, kZoffset,
+           kX, kY, kWidth, kHeight);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  EXPECT_TRUE(texture->SafeToRenderFrom());
+  EXPECT_TRUE(texture->IsLevelCleared(kTarget, kLevel));
 }
 
 TEST_P(GLES3DecoderTest, CompressedTexImage3DFailsWithBadImageSize) {
@@ -1038,6 +1620,36 @@ TEST_P(GLES3DecoderTest, CompressedTexSubImage3DFails) {
            kBadBucketId);
   bucket->SetSize(kSubImageSize);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+
+  // Bad target
+  cmd.Init(GL_RGBA,
+           kLevel,
+           kXOffset,
+           kYOffset,
+           kZOffset,
+           kSubWidth,
+           kSubHeight,
+           kSubDepth,
+           kFormat,
+           kBucketId);
+  bucket->SetSize(kSubImageSize);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
+
+  // Bad format
+  cmd.Init(kTarget,
+           kLevel,
+           kXOffset,
+           kYOffset,
+           kZOffset,
+           kSubWidth,
+           kSubHeight,
+           kSubDepth,
+           GL_ONE,
+           kBucketId);
+  bucket->SetSize(kSubImageSize);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
 }
 
 TEST_P(GLES3DecoderTest, CompressedTexImage2DBucketBucketSizeIsZero) {
@@ -2095,7 +2707,7 @@ TEST_P(
                     GL_TEXTURE_2D, 0, 0, 0, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE, _))
         .Times(1)
         .RetiresOnSaturation();
-    cmds::TexImage2D cmd;
+    TexImage2D cmd;
     cmd.Init(GL_TEXTURE_2D,
              0,
              GL_RGBA,
@@ -2479,8 +3091,8 @@ TEST_P(GLES2DecoderTest, ProduceAndConsumeDirectTextureCHROMIUM) {
 
   // Consume the texture into a new client ID.
   GLuint new_texture_id = kNewClientId;
-  CreateAndConsumeTextureCHROMIUMImmediate& consume_cmd =
-      *GetImmediateAs<CreateAndConsumeTextureCHROMIUMImmediate>();
+  CreateAndConsumeTextureINTERNALImmediate& consume_cmd =
+      *GetImmediateAs<CreateAndConsumeTextureINTERNALImmediate>();
   consume_cmd.Init(GL_TEXTURE_2D, new_texture_id, mailbox.name);
   EXPECT_EQ(error::kNoError,
             ExecuteImmediateCmd(consume_cmd, sizeof(mailbox.name)));
@@ -2550,8 +3162,8 @@ TEST_P(GLES2DecoderTest, CreateAndConsumeTextureCHROMIUMInvalidMailbox) {
       .Times(1)
       .RetiresOnSaturation();
 
-  CreateAndConsumeTextureCHROMIUMImmediate& consume_cmd =
-      *GetImmediateAs<CreateAndConsumeTextureCHROMIUMImmediate>();
+  CreateAndConsumeTextureINTERNALImmediate& consume_cmd =
+      *GetImmediateAs<CreateAndConsumeTextureINTERNALImmediate>();
   consume_cmd.Init(GL_TEXTURE_2D, new_texture_id, mailbox.name);
   EXPECT_EQ(error::kNoError,
             ExecuteImmediateCmd(consume_cmd, sizeof(mailbox.name)));
@@ -2599,8 +3211,8 @@ TEST_P(GLES2DecoderTest, CreateAndConsumeTextureCHROMIUMInvalidTarget) {
 
   // Attempt to consume the mailbox with a different target.
   GLuint new_texture_id = kNewClientId;
-  CreateAndConsumeTextureCHROMIUMImmediate& consume_cmd =
-      *GetImmediateAs<CreateAndConsumeTextureCHROMIUMImmediate>();
+  CreateAndConsumeTextureINTERNALImmediate& consume_cmd =
+      *GetImmediateAs<CreateAndConsumeTextureINTERNALImmediate>();
   consume_cmd.Init(GL_TEXTURE_CUBE_MAP, new_texture_id, mailbox.name);
   EXPECT_EQ(error::kNoError,
             ExecuteImmediateCmd(consume_cmd, sizeof(mailbox.name)));
@@ -2846,7 +3458,7 @@ TEST_P(GLES2DecoderTest, GLImageAttachedAfterSubTexImage2D) {
                                   height, format, type, _))
       .Times(1)
       .RetiresOnSaturation();
-  cmds::TexSubImage2D tex_sub_image_2d_cmd;
+  TexSubImage2D tex_sub_image_2d_cmd;
   tex_sub_image_2d_cmd.Init(target, level, xoffset, yoffset, width, height,
                             format, type, pixels_shm_id, pixels_shm_offset,
                             internal);
@@ -2971,6 +3583,7 @@ class MockGLImage : public gl::GLImage {
                void(base::trace_event::ProcessMemoryDump*,
                     uint64_t,
                     const std::string&));
+  void Flush() override {}
 
  protected:
   virtual ~MockGLImage() {}
@@ -3482,12 +4095,26 @@ TEST_P(GLES2DecoderManualInitTest, GetNoCompressedTextureFormats) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
+TEST_P(GLES2DecoderManualInitTest, TexStorageInvalidLevels) {
+  InitState init;
+  init.gl_version = "OpenGL 4.2";
+  init.extensions = "GL_ARB_texture_rectangle GL_ARB_texture_storage";
+  init.bind_generates_resource = true;
+  InitDecoder(init);
+  DoBindTexture(GL_TEXTURE_RECTANGLE_ARB, client_texture_id_,
+                kServiceTextureId);
+  TexStorage2DEXT cmd;
+  cmd.Init(GL_TEXTURE_RECTANGLE_ARB, 2, GL_RGBA8, 4, 4);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+
 TEST_P(GLES3DecoderTest, TexStorage3DValidArgs) {
   DoBindTexture(GL_TEXTURE_3D, client_texture_id_, kServiceTextureId);
   EXPECT_CALL(*gl_, TexStorage3D(GL_TEXTURE_3D, 2, GL_RGB565, 4, 5, 6))
       .Times(1)
       .RetiresOnSaturation();
-  cmds::TexStorage3D cmd;
+  TexStorage3D cmd;
   cmd.Init(GL_TEXTURE_3D, 2, GL_RGB565, 4, 5, 6);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
@@ -3686,6 +4313,17 @@ TEST_P(GLES3DecoderTest, ClearLevel3DMultipleCallsPerLayer) {
       texture, kTarget, kLevel, kFormat, kType, kWidth, kHeight, kDepth));
 }
 
+TEST_P(GLES3DecoderTest, BindSamplerInvalidUnit) {
+  BindSampler cmd;
+  cmd.Init(kNumTextureUnits, client_texture_id_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+
+  cmd.Init(kNumTextureUnits, 0);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+
 // Test that copyTexImage2D uses the emulated internal format, rather than the
 // real internal format.
 TEST_P(GLES2DecoderWithShaderTest, CHROMIUMImageEmulatingRGB) {
@@ -3758,6 +4396,57 @@ TEST_P(GLES2DecoderWithShaderTest, CHROMIUMImageEmulatingRGB) {
       EXPECT_EQ(expectation, static_cast<GLenum>(GetGLError()));
     }
   }
+}
+
+TEST_P(GLES2DecoderTest, BindTextureValidArgs) {
+  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_2D, kServiceTextureId))
+      .Times(1)
+      .RetiresOnSaturation();
+  if (!feature_info()->gl_version_info().BehavesLikeGLES() &&
+      feature_info()->gl_version_info().IsAtLeastGL(3, 2)) {
+    EXPECT_CALL(*gl_, TexParameteri(GL_TEXTURE_2D,
+                                    GL_DEPTH_TEXTURE_MODE,
+                                    GL_RED))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  BindTexture cmd;
+  cmd.Init(GL_TEXTURE_2D, client_texture_id_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES2DecoderTest, BindTextureValidArgsNewId) {
+  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_2D, kNewServiceId))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GenTextures(1, _))
+      .WillOnce(SetArgumentPointee<1>(kNewServiceId));
+  if (!feature_info()->gl_version_info().BehavesLikeGLES() &&
+      feature_info()->gl_version_info().IsAtLeastGL(3, 2)) {
+    EXPECT_CALL(*gl_, TexParameteri(GL_TEXTURE_2D,
+                                    GL_DEPTH_TEXTURE_MODE,
+                                    GL_RED))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  BindTexture cmd;
+  cmd.Init(GL_TEXTURE_2D, kNewClientId);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  EXPECT_TRUE(GetTexture(kNewClientId) != NULL);
+}
+
+TEST_P(GLES2DecoderTest, BindTextureInvalidArgs) {
+  EXPECT_CALL(*gl_, BindTexture(_, _)).Times(0);
+  BindTexture cmd;
+  cmd.Init(GL_TEXTURE_1D, client_texture_id_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
+
+  cmd.Init(GL_TEXTURE_3D, client_texture_id_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
 }
 
 // TODO(gman): Complete this test.

@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/common/cloud_print/cloud_print_constants.h"
 #include "chrome/service/service_process_prefs.h"
@@ -58,7 +58,7 @@ class ConnectorSettingsTest : public testing::Test {
   }
 
   ServiceProcessPrefs* CreateTestFile(const char* json) {
-    base::FilePath file_name = temp_dir_.path().AppendASCII("file.txt");
+    base::FilePath file_name = temp_dir_.GetPath().AppendASCII("file.txt");
     base::DeleteFile(file_name, false);
     if (json) {
       std::string content = json;

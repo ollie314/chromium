@@ -16,6 +16,8 @@
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "build/build_config.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/events/devices/x11/device_data_manager_x11.h"
 #include "ui/events/devices/x11/device_list_cache_x11.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
@@ -23,9 +25,7 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
 #include "ui/events/x/events_x_utils.h"
-#include "ui/gfx/display.h"
 #include "ui/gfx/geometry/point.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/gfx/x/x11_types.h"
 
@@ -76,13 +76,6 @@ unsigned int UpdateX11EventButton(int ui_flag, unsigned int old_x_button) {
 
 namespace ui {
 
-void UpdateDeviceList() {
-  XDisplay* display = gfx::GetXDisplay();
-  DeviceListCacheX11::GetInstance()->UpdateDeviceList(display);
-  TouchFactory::GetInstance()->UpdateDeviceList(display);
-  DeviceDataManagerX11::GetInstance()->UpdateDeviceList(display);
-}
-
 EventType EventTypeFromNative(const base::NativeEvent& native_event) {
   return EventTypeFromXEvent(*native_event);
 }
@@ -91,8 +84,10 @@ int EventFlagsFromNative(const base::NativeEvent& native_event) {
   return EventFlagsFromXEvent(*native_event);
 }
 
-base::TimeDelta EventTimeFromNative(const base::NativeEvent& native_event) {
-  return EventTimeFromXEvent(*native_event);
+base::TimeTicks EventTimeFromNative(const base::NativeEvent& native_event) {
+  base::TimeTicks timestamp = EventTimeFromXEvent(*native_event);
+  ValidateEventTimeClock(&timestamp);
+  return timestamp;
 }
 
 gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {

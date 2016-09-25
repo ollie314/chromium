@@ -10,6 +10,7 @@
 #include "base/guid.h"
 #include "base/i18n/rtl.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
+#include "components/metrics/enabled_state_provider.h"
 #include "components/metrics/gpu/gpu_metrics_provider.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
@@ -98,9 +99,8 @@ void AwMetricsServiceClient::InitializeWithGUID(std::string* guid) {
   pref_service_->SetString(metrics::prefs::kMetricsClientID, *guid);
 
   metrics_state_manager_ = metrics::MetricsStateManager::Create(
-      pref_service_, base::Bind(&AwMetricsServiceClient::is_reporting_enabled,
-                                base::Unretained(this)),
-      base::Bind(&StoreClientInfo), base::Bind(&LoadClientInfo));
+      pref_service_, this, base::Bind(&StoreClientInfo),
+      base::Bind(&LoadClientInfo));
 
   metrics_service_.reset(new ::metrics::MetricsService(
       metrics_state_manager_.get(), this, pref_service_));
@@ -130,7 +130,7 @@ void AwMetricsServiceClient::InitializeWithGUID(std::string* guid) {
 
   is_initialized_ = true;
 
-  if (is_reporting_enabled())
+  if (IsReportingEnabled())
     metrics_service_->Start();
 }
 
@@ -148,18 +148,21 @@ void AwMetricsServiceClient::SetMetricsEnabled(bool enabled) {
   is_enabled_ = enabled;
 }
 
+bool AwMetricsServiceClient::IsConsentGiven() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  return is_enabled_;
+}
+
 metrics::MetricsService* AwMetricsServiceClient::GetMetricsService() {
   return metrics_service_.get();
 }
 
 // In Chrome, UMA and Breakpad are enabled/disabled together by the same
 // checkbox and they share the same client ID (a.k.a. GUID). SetMetricsClientId
-// and OnRecordingDisabled are intended to provide the ID to Breakpad. In
-// WebView, UMA and Breakpad are independent, so these are no-ops.
+// is intended to provide the ID to Breakpad. In WebView, UMA and Breakpad are
+// independent, so this is a no-op.
 
 void AwMetricsServiceClient::SetMetricsClientId(const std::string& client_id) {}
-
-void AwMetricsServiceClient::OnRecordingDisabled() {}
 
 bool AwMetricsServiceClient::IsOffTheRecordSessionActive() {
   // WebView has no incognito mode.
@@ -221,10 +224,5 @@ AwMetricsServiceClient::AwMetricsServiceClient()
       request_context_(nullptr) {}
 
 AwMetricsServiceClient::~AwMetricsServiceClient() {}
-
-bool AwMetricsServiceClient::is_reporting_enabled() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  return is_enabled_;
-}
 
 }  // namespace android_webview

@@ -25,11 +25,13 @@
 #include "core/layout/svg/LayoutSVGResourceMarker.h"
 #include "core/layout/svg/LayoutSVGResourceMasker.h"
 #include "core/layout/svg/LayoutSVGResourcePaintServer.h"
-#include "core/style/SVGComputedStyle.h"
+#include "core/style/ComputedStyle.h"
 #include "core/svg/SVGFilterElement.h"
 #include "core/svg/SVGGradientElement.h"
 #include "core/svg/SVGPatternElement.h"
 #include "core/svg/SVGURIReference.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 #ifndef NDEBUG
 #include <stdio.h>
@@ -46,91 +48,79 @@ SVGResources::SVGResources()
 
 static HashSet<AtomicString>& clipperFilterMaskerTags()
 {
-    DEFINE_STATIC_LOCAL(HashSet<AtomicString>, s_tagList, ());
-    if (s_tagList.isEmpty()) {
+    DEFINE_STATIC_LOCAL(HashSet<AtomicString>, s_tagList, ({
         // "container elements": http://www.w3.org/TR/SVG11/intro.html#TermContainerElement
         // "graphics elements" : http://www.w3.org/TR/SVG11/intro.html#TermGraphicsElement
-        s_tagList.add(aTag.localName());
-        s_tagList.add(circleTag.localName());
-        s_tagList.add(ellipseTag.localName());
-        s_tagList.add(gTag.localName());
-        s_tagList.add(imageTag.localName());
-        s_tagList.add(lineTag.localName());
-        s_tagList.add(markerTag.localName());
-        s_tagList.add(maskTag.localName());
-        s_tagList.add(pathTag.localName());
-        s_tagList.add(polygonTag.localName());
-        s_tagList.add(polylineTag.localName());
-        s_tagList.add(rectTag.localName());
-        s_tagList.add(svgTag.localName());
-        s_tagList.add(textTag.localName());
-        s_tagList.add(useTag.localName());
-
+        aTag.localName(),
+        circleTag.localName(),
+        ellipseTag.localName(),
+        gTag.localName(),
+        imageTag.localName(),
+        lineTag.localName(),
+        markerTag.localName(),
+        maskTag.localName(),
+        pathTag.localName(),
+        polygonTag.localName(),
+        polylineTag.localName(),
+        rectTag.localName(),
+        svgTag.localName(),
+        textTag.localName(),
+        useTag.localName(),
         // Not listed in the definitions is the clipPath element, the SVG spec says though:
         // The "clipPath" element or any of its children can specify property "clip-path".
         // So we have to add clipPathTag here, otherwhise clip-path on clipPath will fail.
         // (Already mailed SVG WG, waiting for a solution)
-        s_tagList.add(clipPathTag.localName());
-
+        clipPathTag.localName(),
         // Not listed in the definitions are the text content elements, though filter/clipper/masker on tspan/text/.. is allowed.
         // (Already mailed SVG WG, waiting for a solution)
-        s_tagList.add(textPathTag.localName());
-        s_tagList.add(tspanTag.localName());
-
+        textPathTag.localName(),
+        tspanTag.localName(),
         // Not listed in the definitions is the foreignObject element, but clip-path
         // is a supported attribute.
-        s_tagList.add(foreignObjectTag.localName());
-
+        foreignObjectTag.localName(),
         // Elements that we ignore, as it doesn't make any sense.
         // defs, pattern, switch (FIXME: Mail SVG WG about these)
         // symbol (is converted to a svg element, when referenced by use, we can safely ignore it.)
-    }
-
+    }));
     return s_tagList;
 }
 
 bool SVGResources::supportsMarkers(const SVGElement& element)
 {
-    DEFINE_STATIC_LOCAL(HashSet<AtomicString>, s_tagList, ());
-    if (s_tagList.isEmpty()) {
-        s_tagList.add(lineTag.localName());
-        s_tagList.add(pathTag.localName());
-        s_tagList.add(polygonTag.localName());
-        s_tagList.add(polylineTag.localName());
-    }
-
+    DEFINE_STATIC_LOCAL(HashSet<AtomicString>, s_tagList, ({
+        lineTag.localName(),
+        pathTag.localName(),
+        polygonTag.localName(),
+        polylineTag.localName(),
+    }));
     return s_tagList.contains(element.localName());
 }
 
 static HashSet<AtomicString>& fillAndStrokeTags()
 {
-    DEFINE_STATIC_LOCAL(HashSet<AtomicString>, s_tagList, ());
-    if (s_tagList.isEmpty()) {
-        s_tagList.add(circleTag.localName());
-        s_tagList.add(ellipseTag.localName());
-        s_tagList.add(lineTag.localName());
-        s_tagList.add(pathTag.localName());
-        s_tagList.add(polygonTag.localName());
-        s_tagList.add(polylineTag.localName());
-        s_tagList.add(rectTag.localName());
-        s_tagList.add(textTag.localName());
-        s_tagList.add(textPathTag.localName());
-        s_tagList.add(tspanTag.localName());
-    }
-
+    DEFINE_STATIC_LOCAL(HashSet<AtomicString>, s_tagList, ({
+        circleTag.localName(),
+        ellipseTag.localName(),
+        lineTag.localName(),
+        pathTag.localName(),
+        polygonTag.localName(),
+        polylineTag.localName(),
+        rectTag.localName(),
+        textTag.localName(),
+        textPathTag.localName(),
+        tspanTag.localName(),
+    }));
     return s_tagList;
 }
 
 static HashSet<AtomicString>& chainableResourceTags()
 {
-    DEFINE_STATIC_LOCAL(HashSet<AtomicString>, s_tagList, ());
-    if (s_tagList.isEmpty()) {
-        s_tagList.add(linearGradientTag.localName());
-        s_tagList.add(filterTag.localName());
-        s_tagList.add(patternTag.localName());
-        s_tagList.add(radialGradientTag.localName());
-    }
-
+    DEFINE_STATIC_LOCAL(HashSet<AtomicString>, s_tagList, ({
+        linearGradientTag.localName(),
+        filterTag.localName(),
+        patternTag.localName(),
+        radialGradientTag.localName(),
+    }));
     return s_tagList;
 }
 
@@ -195,15 +185,15 @@ bool SVGResources::hasResourceData() const
         || m_linkedResource;
 }
 
-static inline SVGResources& ensureResources(OwnPtr<SVGResources>& resources)
+static inline SVGResources& ensureResources(std::unique_ptr<SVGResources>& resources)
 {
     if (!resources)
-        resources = adoptPtr(new SVGResources);
+        resources = wrapUnique(new SVGResources);
 
     return *resources.get();
 }
 
-PassOwnPtr<SVGResources> SVGResources::buildResources(const LayoutObject* object, const SVGComputedStyle& style)
+std::unique_ptr<SVGResources> SVGResources::buildResources(const LayoutObject* object, const ComputedStyle& computedStyle)
 {
     ASSERT(object);
 
@@ -220,18 +210,31 @@ PassOwnPtr<SVGResources> SVGResources::buildResources(const LayoutObject* object
     TreeScope& treeScope = element->treeScope();
     SVGDocumentExtensions& extensions = element->document().accessSVGExtensions();
 
-    OwnPtr<SVGResources> resources;
+    const SVGComputedStyle& style = computedStyle.svgStyle();
+
+    std::unique_ptr<SVGResources> resources;
     if (clipperFilterMaskerTags().contains(tagName)) {
-        if (style.hasClipper()) {
-            AtomicString id = style.clipperResource();
-            if (!ensureResources(resources).setClipper(getLayoutSVGResourceById<LayoutSVGResourceClipper>(treeScope, id)))
-                registerPendingResource(extensions, id, element);
+        if (computedStyle.clipPath() && !object->isSVGRoot()) {
+            ClipPathOperation* clipPathOperation = computedStyle.clipPath();
+            if (clipPathOperation->type() == ClipPathOperation::REFERENCE) {
+                const ReferenceClipPathOperation& clipPathReference = toReferenceClipPathOperation(*clipPathOperation);
+                AtomicString id = SVGURIReference::fragmentIdentifierFromIRIString(clipPathReference.url(), treeScope);
+                if (!ensureResources(resources).setClipper(getLayoutSVGResourceById<LayoutSVGResourceClipper>(treeScope, id)))
+                    registerPendingResource(extensions, id, element);
+            }
         }
 
-        if (style.hasFilter()) {
-            AtomicString id = style.filterResource();
-            if (!ensureResources(resources).setFilter(getLayoutSVGResourceById<LayoutSVGResourceFilter>(treeScope, id)))
-                registerPendingResource(extensions, id, element);
+        if (computedStyle.hasFilter() && !object->isSVGRoot())  {
+            const FilterOperations& filterOperations = computedStyle.filter();
+            if (filterOperations.size() == 1) {
+                const FilterOperation& filterOperation = *filterOperations.at(0);
+                if (filterOperation.type() == FilterOperation::REFERENCE) {
+                    const auto& referenceFilterOperation = toReferenceFilterOperation(filterOperation);
+                    AtomicString id = SVGURIReference::fragmentIdentifierFromIRIString(referenceFilterOperation.url(), treeScope);
+                    if (!ensureResources(resources).setFilter(getLayoutSVGResourceById<LayoutSVGResourceFilter>(treeScope, id)))
+                        registerPendingResource(extensions, id, element);
+                }
+            }
         }
 
         if (style.hasMasker()) {
@@ -279,7 +282,7 @@ PassOwnPtr<SVGResources> SVGResources::buildResources(const LayoutObject* object
             registerPendingResource(extensions, id, element);
     }
 
-    return (!resources || !resources->hasResourceData()) ? nullptr : resources.release();
+    return (!resources || !resources->hasResourceData()) ? nullptr : std::move(resources);
 }
 
 void SVGResources::layoutIfNeeded()
@@ -637,7 +640,7 @@ void SVGResources::dump(const LayoutObject* object)
 
     fprintf(stderr, "-> this=%p, SVGResources(layoutObject=%p, node=%p)\n", this, object, object->node());
     fprintf(stderr, " | DOM Tree:\n");
-    object->node()->showTreeForThis();
+    fprintf(stderr, "%s", object->node()->toTreeStringForThis().utf8().data());
 
     fprintf(stderr, "\n | List of resources:\n");
     if (m_clipperFilterMaskerData) {

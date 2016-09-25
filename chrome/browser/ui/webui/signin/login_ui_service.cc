@@ -17,7 +17,10 @@
 #include "components/signin/core/common/profile_management_switches.h"
 
 LoginUIService::LoginUIService(Profile* profile)
-    : ui_(NULL), profile_(profile) {
+#if !defined(OS_CHROMEOS)
+    : profile_(profile)
+#endif
+{
 }
 
 LoginUIService::~LoginUIService() {}
@@ -30,18 +33,17 @@ void LoginUIService::RemoveObserver(LoginUIService::Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
+LoginUIService::LoginUI* LoginUIService::current_login_ui() const {
+  return ui_list_.empty() ? nullptr : ui_list_.front();
+}
+
 void LoginUIService::SetLoginUI(LoginUI* ui) {
-  DCHECK(!current_login_ui() || current_login_ui() == ui);
-  ui_ = ui;
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnLoginUIShown(ui_));
+  ui_list_.remove(ui);
+  ui_list_.push_front(ui);
 }
 
 void LoginUIService::LoginUIClosed(LoginUI* ui) {
-  if (current_login_ui() != ui)
-    return;
-
-  ui_ = NULL;
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnLoginUIClosed(ui));
+  ui_list_.remove(ui);
 }
 
 void LoginUIService::SyncConfirmationUIClosed(
@@ -50,10 +52,6 @@ void LoginUIService::SyncConfirmationUIClosed(
       Observer,
       observer_list_,
       OnSyncConfirmationUIClosed(result));
-}
-
-void LoginUIService::UntrustedLoginUIShown() {
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnUntrustedLoginUIShown());
 }
 
 void LoginUIService::ShowLoginPopup() {
@@ -81,6 +79,10 @@ void LoginUIService::DisplayLoginResult(Browser* browser,
       signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS);
 }
 
-const base::string16& LoginUIService::GetLastLoginResult() {
+const base::string16& LoginUIService::GetLastLoginResult() const {
   return last_login_result_;
+}
+
+const base::string16& LoginUIService::GetLastLoginErrorEmail() const {
+  return last_login_error_email_;
 }

@@ -11,13 +11,14 @@
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_address.h"
-#include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_auth_controller.h"
 #include "net/http/http_network_session.h"
 #include "net/http/proxy_client_socket.h"
+#include "net/log/net_log_source_type.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context.h"
@@ -30,24 +31,23 @@ ProxyResolvingClientSocket::ProxyResolvingClientSocket(
     const scoped_refptr<net::URLRequestContextGetter>& request_context_getter,
     const net::SSLConfig& ssl_config,
     const net::HostPortPair& dest_host_port_pair)
-        : proxy_resolve_callback_(
-              base::Bind(&ProxyResolvingClientSocket::ProcessProxyResolveDone,
-                         base::Unretained(this))),
-          connect_callback_(
-              base::Bind(&ProxyResolvingClientSocket::ProcessConnectDone,
-                         base::Unretained(this))),
-          ssl_config_(ssl_config),
-          pac_request_(NULL),
-          dest_host_port_pair_(dest_host_port_pair),
-          // Assume that we intend to do TLS on this socket; all
-          // current use cases do.
-          proxy_url_("https://" + dest_host_port_pair_.ToString()),
-          tried_direct_connect_fallback_(false),
-          bound_net_log_(
-              net::BoundNetLog::Make(
-                  request_context_getter->GetURLRequestContext()->net_log(),
-                  net::NetLog::SOURCE_SOCKET)),
-          weak_factory_(this) {
+    : proxy_resolve_callback_(
+          base::Bind(&ProxyResolvingClientSocket::ProcessProxyResolveDone,
+                     base::Unretained(this))),
+      connect_callback_(
+          base::Bind(&ProxyResolvingClientSocket::ProcessConnectDone,
+                     base::Unretained(this))),
+      ssl_config_(ssl_config),
+      pac_request_(NULL),
+      dest_host_port_pair_(dest_host_port_pair),
+      // Assume that we intend to do TLS on this socket; all
+      // current use cases do.
+      proxy_url_("https://" + dest_host_port_pair_.ToString()),
+      tried_direct_connect_fallback_(false),
+      net_log_(net::NetLogWithSource::Make(
+          request_context_getter->GetURLRequestContext()->net_log(),
+          net::NetLogSourceType::SOCKET)),
+      weak_factory_(this) {
   DCHECK(request_context_getter.get());
   net::URLRequestContext* request_context =
       request_context_getter->GetURLRequestContext();
@@ -62,6 +62,9 @@ ProxyResolvingClientSocket::ProxyResolvingClientSocket(
   session_params.cert_verifier = request_context->cert_verifier();
   session_params.transport_security_state =
       request_context->transport_security_state();
+  session_params.cert_transparency_verifier =
+      request_context->cert_transparency_verifier();
+  session_params.ct_policy_enforcer = request_context->ct_policy_enforcer();
   // TODO(rkn): This is NULL because ChannelIDService is not thread safe.
   session_params.channel_id_service = NULL;
   session_params.proxy_service = request_context->proxy_service();
@@ -84,12 +87,11 @@ ProxyResolvingClientSocket::ProxyResolvingClientSocket(
         reference_params->testing_fixed_http_port;
     session_params.testing_fixed_https_port =
         reference_params->testing_fixed_https_port;
-    session_params.enable_spdy31 = reference_params->enable_spdy31;
     session_params.enable_http2 = reference_params->enable_http2;
-    session_params.parse_alternative_services =
-        reference_params->parse_alternative_services;
-    session_params.enable_alternative_service_with_different_host =
-        reference_params->enable_alternative_service_with_different_host;
+    session_params.enable_http2_alternative_service_with_different_host =
+        reference_params->enable_http2_alternative_service_with_different_host;
+    session_params.enable_quic_alternative_service_with_different_host =
+        reference_params->enable_quic_alternative_service_with_different_host;
   }
 
   network_session_.reset(new net::HttpNetworkSession(session_params));
@@ -141,19 +143,16 @@ int ProxyResolvingClientSocket::Connect(
   int status = network_session_->proxy_service()->ResolveProxy(
       proxy_url_,
       std::string(),
-      net::LOAD_NORMAL,
       &proxy_info_,
       proxy_resolve_callback_,
       &pac_request_,
       NULL,
-      bound_net_log_);
+      net_log_);
   if (status != net::ERR_IO_PENDING) {
     // We defer execution of ProcessProxyResolveDone instead of calling it
     // directly here for simplicity. From the caller's point of view,
     // the connect always happens asynchronously.
-    base::MessageLoop* message_loop = base::MessageLoop::current();
-    CHECK(message_loop);
-    message_loop->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&ProxyResolvingClientSocket::ProcessProxyResolveDone,
                    weak_factory_.GetWeakPtr(), status));
@@ -205,7 +204,7 @@ void ProxyResolvingClientSocket::ProcessProxyResolveDone(int status) {
   // Now that we have resolved the proxy, we need to connect.
   status = net::InitSocketHandleForRawConnect(
       dest_host_port_pair_, network_session_.get(), proxy_info_, ssl_config_,
-      ssl_config_, net::PRIVACY_MODE_DISABLED, bound_net_log_, transport_.get(),
+      ssl_config_, net::PRIVACY_MODE_DISABLED, net_log_, transport_.get(),
       connect_callback_);
   if (status != net::ERR_IO_PENDING) {
     // Since this method is always called asynchronously. it is OK to call
@@ -292,8 +291,8 @@ int ProxyResolvingClientSocket::ReconsiderProxyAfterError(int error) {
   }
 
   int rv = network_session_->proxy_service()->ReconsiderProxyAfterError(
-      proxy_url_, std::string(), net::LOAD_NORMAL, error, &proxy_info_,
-      proxy_resolve_callback_, &pac_request_, NULL, bound_net_log_);
+      proxy_url_, std::string(), error, &proxy_info_, proxy_resolve_callback_,
+      &pac_request_, NULL, net_log_);
   if (rv == net::OK || rv == net::ERR_IO_PENDING) {
     CloseTransportSocket();
   } else {
@@ -307,9 +306,7 @@ int ProxyResolvingClientSocket::ReconsiderProxyAfterError(int error) {
   // In both cases we want to post ProcessProxyResolveDone (in the error case
   // we might still want to fall back a direct connection).
   if (rv != net::ERR_IO_PENDING) {
-    base::MessageLoop* message_loop = base::MessageLoop::current();
-    CHECK(message_loop);
-    message_loop->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&ProxyResolvingClientSocket::ProcessProxyResolveDone,
                    weak_factory_.GetWeakPtr(), rv));
@@ -373,11 +370,11 @@ int ProxyResolvingClientSocket::GetLocalAddress(
   return net::ERR_SOCKET_NOT_CONNECTED;
 }
 
-const net::BoundNetLog& ProxyResolvingClientSocket::NetLog() const {
+const net::NetLogWithSource& ProxyResolvingClientSocket::NetLog() const {
   if (transport_.get() && transport_->socket())
     return transport_->socket()->NetLog();
   NOTREACHED();
-  return bound_net_log_;
+  return net_log_;
 }
 
 void ProxyResolvingClientSocket::SetSubresourceSpeculation() {

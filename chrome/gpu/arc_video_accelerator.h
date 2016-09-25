@@ -5,6 +5,8 @@
 #ifndef CHROME_GPU_ARC_VIDEO_ACCELERATOR_H_
 #define CHROME_GPU_ARC_VIDEO_ACCELERATOR_H_
 
+#include <vector>
+
 #include "base/files/scoped_file.h"
 
 namespace chromeos {
@@ -13,12 +15,14 @@ namespace arc {
 enum HalPixelFormatExtension {
   // The pixel formats defined in Android but are used here. They are defined
   // in "system/core/include/system/graphics.h"
+  HAL_PIXEL_FORMAT_BGRA_8888 = 5,
   HAL_PIXEL_FORMAT_YCbCr_420_888 = 0x23,
 
   // The following formats are not defined in Android, but used in
   // ArcVideoAccelerator to identify the input format.
   HAL_PIXEL_FORMAT_H264 = 0x34363248,
   HAL_PIXEL_FORMAT_VP8 = 0x00385056,
+  HAL_PIXEL_FORMAT_VP9 = 0x00395056,
 };
 
 enum PortType {
@@ -27,13 +31,8 @@ enum PortType {
   PORT_COUNT = 2,
 };
 
-enum BufferFlag {
-  BUFFER_FLAG_EOS = 1 << 0,
-};
-
 struct BufferMetadata {
   int64_t timestamp = 0;  // in microseconds
-  uint32_t flags = 0;     // Flags defined in BufferFlag.
   uint32_t bytes_used = 0;
 };
 
@@ -56,11 +55,13 @@ struct VideoFormat {
 // Chromium and the output buffers are returned back to Android side.
 class ArcVideoAccelerator {
  public:
-  enum Error {
+  enum Result {
+    SUCCESS = 0,
     ILLEGAL_STATE = 1,
     INVALID_ARGUMENT = 2,
     UNREADABLE_INPUT = 3,
     PLATFORM_FAILURE = 4,
+    INSUFFICIENT_RESOURCES = 5,
   };
 
   struct Config {
@@ -76,6 +77,11 @@ class ArcVideoAccelerator {
     //                format of each VDA on Chromium is supported.
   };
 
+  struct DmabufPlane {
+    int32_t offset;  // in bytes
+    int32_t stride;  // in bytes
+  };
+
   // The callbacks of the ArcVideoAccelerator. The user of this class should
   // implement this interface.
   class Client {
@@ -83,9 +89,9 @@ class ArcVideoAccelerator {
     virtual ~Client() {}
 
     // Called when an asynchronous error happens. The errors in Initialize()
-    // will not be reported here, but will be indicated by a false return value
+    // will not be reported here, but will be indicated by a return value
     // there.
-    virtual void OnError(Error error) = 0;
+    virtual void OnError(Result error) = 0;
 
     // Called when a buffer with the specified |index| and |port| has been
     // processed and is no longer used in the accelerator. For input buffers,
@@ -101,12 +107,15 @@ class ArcVideoAccelerator {
 
     // Called as a completion notification for Reset().
     virtual void OnResetDone() = 0;
+
+    // Called as a completion notification for Flush().
+    virtual void OnFlushDone() = 0;
   };
 
   // Initializes the ArcVideoAccelerator with specific configuration. This
   // must be called before any other methods. This call is synchronous and
-  // returns true iff initialization is successful.
-  virtual bool Initialize(const Config& config, Client* client) = 0;
+  // returns SUCCESS iff initialization is successful.
+  virtual Result Initialize(const Config& config, Client* client) = 0;
 
   // Assigns a shared memory to be used for the accelerator at the specified
   // port and index. A buffer must be successfully bound before it can be passed
@@ -124,7 +133,8 @@ class ArcVideoAccelerator {
   // reused multiple times without additional bindings.
   virtual void BindDmabuf(PortType port,
                           uint32_t index,
-                          base::ScopedFD dmabuf_fd) = 0;
+                          base::ScopedFD dmabuf_fd,
+                          const std::vector<DmabufPlane>& dmabuf_planes) = 0;
 
   // Passes a buffer to the accelerator. For input buffer, the accelerator
   // will process it. For output buffer, the accelerator will output content
@@ -141,6 +151,11 @@ class ArcVideoAccelerator {
   // be called. Afterwards, all buffers won't be accessed by the accelerator
   // and there won't be more callbacks.
   virtual void Reset() = 0;
+
+  // Flushes the accelerator. After all the output buffers pending decode have
+  // been returned to client by OnBufferDone(), Client::OnFlushDone() will be
+  // called.
+  virtual void Flush() = 0;
 
   virtual ~ArcVideoAccelerator() {}
 };

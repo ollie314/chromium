@@ -4,11 +4,12 @@
 
 #include "extensions/renderer/script_injection_manager.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "content/public/renderer/render_frame.h"
@@ -270,7 +271,7 @@ ScriptInjectionManager::~ScriptInjectionManager() {
 
 void ScriptInjectionManager::OnRenderFrameCreated(
     content::RenderFrame* render_frame) {
-  rfo_helpers_.push_back(make_scoped_ptr(new RFOHelper(render_frame, this)));
+  rfo_helpers_.push_back(base::MakeUnique<RFOHelper>(render_frame, this));
 }
 
 void ScriptInjectionManager::OnExtensionUnloaded(
@@ -290,7 +291,7 @@ void ScriptInjectionManager::OnInjectionFinished(
     ScriptInjection* injection) {
   auto iter =
       std::find_if(running_injections_.begin(), running_injections_.end(),
-                   [injection](const scoped_ptr<ScriptInjection>& mode) {
+                   [injection](const std::unique_ptr<ScriptInjection>& mode) {
                      return injection == mode.get();
                    });
   if (iter != running_injections_.end())
@@ -298,8 +299,7 @@ void ScriptInjectionManager::OnInjectionFinished(
 }
 
 void ScriptInjectionManager::OnUserScriptsUpdated(
-    const std::set<HostID>& changed_hosts,
-    const std::vector<UserScript*>& scripts) {
+    const std::set<HostID>& changed_hosts) {
   for (auto iter = pending_injections_.begin();
        iter != pending_injections_.end();) {
     if (changed_hosts.count((*iter)->host_id()) > 0)
@@ -398,7 +398,7 @@ void ScriptInjectionManager::InjectScripts(
     // (if a script removes its own frame, for example). If this happens, abort.
     if (!active_injection_frames_.count(frame))
       break;
-    scoped_ptr<ScriptInjection> injection(std::move(*iter));
+    std::unique_ptr<ScriptInjection> injection(std::move(*iter));
     iter = frame_injections.erase(iter);
     TryToInject(std::move(injection), run_location, &scripts_run_info);
   }
@@ -406,11 +406,11 @@ void ScriptInjectionManager::InjectScripts(
   // We are done running in the frame.
   active_injection_frames_.erase(frame);
 
-  scripts_run_info.LogRun();
+  scripts_run_info.LogRun(activity_logging_enabled_);
 }
 
 void ScriptInjectionManager::TryToInject(
-    scoped_ptr<ScriptInjection> injection,
+    std::unique_ptr<ScriptInjection> injection,
     UserScript::RunLocation run_location,
     ScriptsRunInfo* scripts_run_info) {
   // Try to inject the script. If the injection is waiting (i.e., for
@@ -437,7 +437,7 @@ void ScriptInjectionManager::TryToInject(
 void ScriptInjectionManager::HandleExecuteCode(
     const ExtensionMsg_ExecuteCode_Params& params,
     content::RenderFrame* render_frame) {
-  scoped_ptr<const InjectionHost> injection_host;
+  std::unique_ptr<const InjectionHost> injection_host;
   if (params.host_id.type() == HostID::EXTENSIONS) {
     injection_host = ExtensionInjectionHost::Create(params.host_id.id());
     if (!injection_host)
@@ -447,11 +447,12 @@ void ScriptInjectionManager::HandleExecuteCode(
         new WebUIInjectionHost(params.host_id));
   }
 
-  scoped_ptr<ScriptInjection> injection(new ScriptInjection(
-      scoped_ptr<ScriptInjector>(
+  std::unique_ptr<ScriptInjection> injection(new ScriptInjection(
+      std::unique_ptr<ScriptInjector>(
           new ProgrammaticScriptInjector(params, render_frame)),
       render_frame, std::move(injection_host),
-      static_cast<UserScript::RunLocation>(params.run_at)));
+      static_cast<UserScript::RunLocation>(params.run_at),
+      activity_logging_enabled_));
 
   FrameStatusMap::const_iterator iter = frame_statuses_.find(render_frame);
   UserScript::RunLocation run_location =
@@ -467,20 +468,16 @@ void ScriptInjectionManager::HandleExecuteDeclarativeScript(
     const ExtensionId& extension_id,
     int script_id,
     const GURL& url) {
-  scoped_ptr<ScriptInjection> injection =
+  std::unique_ptr<ScriptInjection> injection =
       user_script_set_manager_->GetInjectionForDeclarativeScript(
-          script_id,
-          render_frame,
-          tab_id,
-          url,
-          extension_id);
+          script_id, render_frame, tab_id, url, extension_id);
   if (injection.get()) {
     ScriptsRunInfo scripts_run_info(render_frame, UserScript::BROWSER_DRIVEN);
     // TODO(markdittmer): Use return value of TryToInject for error handling.
     TryToInject(std::move(injection), UserScript::BROWSER_DRIVEN,
                 &scripts_run_info);
 
-    scripts_run_info.LogRun();
+    scripts_run_info.LogRun(activity_logging_enabled_);
   }
 }
 
@@ -499,7 +496,7 @@ void ScriptInjectionManager::HandlePermitScriptInjection(int64_t request_id) {
   // know that this is the same page that issued the request (otherwise,
   // RFOHelper::InvalidateAndResetFrame would have caused it to be cleared out).
 
-  scoped_ptr<ScriptInjection> injection(std::move(*iter));
+  std::unique_ptr<ScriptInjection> injection(std::move(*iter));
   pending_injections_.erase(iter);
 
   ScriptsRunInfo scripts_run_info(injection->render_frame(),
@@ -508,7 +505,7 @@ void ScriptInjectionManager::HandlePermitScriptInjection(int64_t request_id) {
       &scripts_run_info);
   if (res == ScriptInjection::INJECTION_BLOCKED)
     running_injections_.push_back(std::move(injection));
-  scripts_run_info.LogRun();
+  scripts_run_info.LogRun(activity_logging_enabled_);
 }
 
 }  // namespace extensions

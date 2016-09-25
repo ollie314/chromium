@@ -58,11 +58,12 @@ bool PermissionsContainsFunction::RunSync() {
   std::unique_ptr<Contains::Params> params(Contains::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
+  // NOTE: |permissions| is not used to make any security decisions. Therefore,
+  // it is entirely fine to set |allow_file_access| to true below. This will
+  // avoid throwing error when extension() doesn't have access to file://.
   std::unique_ptr<const PermissionSet> permissions =
-      helpers::UnpackPermissionSet(
-          params->permissions,
-          ExtensionPrefs::Get(GetProfile())->AllowFileAccess(extension_->id()),
-          &error_);
+      helpers::UnpackPermissionSet(params->permissions,
+                                   true /* allow_file_access */, &error_);
   if (!permissions.get())
     return false;
 
@@ -238,9 +239,8 @@ bool PermissionsRequestFunction::RunAsync() {
     install_ui_.reset(new ExtensionInstallPrompt(GetAssociatedWebContents()));
     install_ui_->ShowDialog(
         base::Bind(&PermissionsRequestFunction::OnInstallPromptDone, this),
-        extension(), nullptr,
-        base::WrapUnique(new ExtensionInstallPrompt::Prompt(
-            ExtensionInstallPrompt::PERMISSIONS_PROMPT)),
+        extension(), nullptr, base::MakeUnique<ExtensionInstallPrompt::Prompt>(
+                                  ExtensionInstallPrompt::PERMISSIONS_PROMPT),
         requested_permissions_->Clone(),
         ExtensionInstallPrompt::GetDefaultShowDialogCallback());
   }

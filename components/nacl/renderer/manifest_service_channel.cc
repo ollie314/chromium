@@ -24,7 +24,7 @@ namespace nacl {
 ManifestServiceChannel::ManifestServiceChannel(
     const IPC::ChannelHandle& handle,
     const base::Callback<void(int32_t)>& connected_callback,
-    scoped_ptr<Delegate> delegate,
+    std::unique_ptr<Delegate> delegate,
     base::WaitableEvent* waitable_event)
     : connected_callback_(connected_callback),
       delegate_(std::move(delegate)),
@@ -32,7 +32,7 @@ ManifestServiceChannel::ManifestServiceChannel(
           handle,
           IPC::Channel::MODE_CLIENT,
           this,
-          content::RenderThread::Get()->GetIOMessageLoopProxy(),
+          content::RenderThread::Get()->GetIOTaskRunner(),
           true,
           waitable_event)),
       peer_pid_(base::kNullProcessId),

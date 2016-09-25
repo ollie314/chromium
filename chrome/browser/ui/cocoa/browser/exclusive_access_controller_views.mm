@@ -5,14 +5,13 @@
 #import "chrome/browser/ui/cocoa/browser/exclusive_access_controller_views.h"
 
 #include "chrome/browser/download/download_shelf.h"
-#include "chrome/browser/fullscreen.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/accelerators_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
-#import "chrome/browser/ui/cocoa/exclusive_access_bubble_window_controller.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/views/exclusive_access_bubble_views.h"
+#include "chrome/browser/ui/views/new_back_shortcut_bubble.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
@@ -34,26 +33,49 @@ ExclusiveAccessController::ExclusiveAccessController(
 ExclusiveAccessController::~ExclusiveAccessController() {}
 
 void ExclusiveAccessController::Show() {
-  if (ExclusiveAccessManager::IsSimplifiedFullscreenUIEnabled()) {
-    views_bubble_.reset(
-        new ExclusiveAccessBubbleViews(this, url_, bubble_type_));
-    return;
+  // Hide the backspace shortcut bubble, to avoid overlapping.
+  new_back_shortcut_bubble_.reset();
+
+  views_bubble_.reset(new ExclusiveAccessBubbleViews(this, url_, bubble_type_));
+}
+
+void ExclusiveAccessController::MaybeShowNewBackShortcutBubble(bool forward) {
+  if (!new_back_shortcut_bubble_ || !new_back_shortcut_bubble_->IsVisible()) {
+      // Show the bubble at most five times.
+      PrefService* prefs = GetProfile()->GetPrefs();
+      int shown_count = prefs->GetInteger(prefs::kBackShortcutBubbleShownCount);
+      constexpr int kMaxShownCount = 5;
+      if (shown_count >= kMaxShownCount)
+        return;
+
+      // Only show the bubble when the user presses a shortcut twice within
+      // three seconds.
+      const base::TimeTicks now = base::TimeTicks::Now();
+      constexpr base::TimeDelta kRepeatWindow = base::TimeDelta::FromSeconds(3);
+      if (last_back_shortcut_press_time_.is_null() ||
+          ((now - last_back_shortcut_press_time_) > kRepeatWindow)) {
+        last_back_shortcut_press_time_ = now;
+        return;
+      }
+
+      // Hide the exclusive access bubble, to avoid overlapping.
+      views_bubble_.reset();
+
+      new_back_shortcut_bubble_.reset(new NewBackShortcutBubble(this));
+      prefs->SetInteger(prefs::kBackShortcutBubbleShownCount, shown_count + 1);
+      last_back_shortcut_press_time_ = base::TimeTicks();
   }
 
-  [cocoa_bubble_ closeImmediately];
-  cocoa_bubble_.reset([[ExclusiveAccessBubbleWindowController alloc]
-                 initWithOwner:controller_
-      exclusive_access_manager:browser_->exclusive_access_manager()
-                       profile:browser_->profile()
-                           url:url_
-                    bubbleType:bubble_type_]);
-  [cocoa_bubble_ showWindow];
+  new_back_shortcut_bubble_->UpdateContent(forward);
+}
+
+void ExclusiveAccessController::HideNewBackShortcutBubble() {
+  if (new_back_shortcut_bubble_)
+    new_back_shortcut_bubble_->Hide();
 }
 
 void ExclusiveAccessController::Destroy() {
   views_bubble_.reset();
-  [cocoa_bubble_ closeImmediately];
-  cocoa_bubble_.reset();
   url_ = GURL();
   bubble_type_ = EXCLUSIVE_ACCESS_BUBBLE_TYPE_NONE;
 }
@@ -61,7 +83,6 @@ void ExclusiveAccessController::Destroy() {
 void ExclusiveAccessController::Layout(CGFloat max_y) {
   if (views_bubble_)
     views_bubble_->RepositionIfVisible();
-  [cocoa_bubble_ positionInWindowAtTop:max_y];
 }
 
 Profile* ExclusiveAccessController::GetProfile() {
@@ -72,12 +93,9 @@ bool ExclusiveAccessController::IsFullscreen() const {
   return [controller_ isInAnyFullscreenMode];
 }
 
-bool ExclusiveAccessController::SupportsFullscreenWithToolbar() const {
-  return chrome::mac::SupportsSystemFullscreen();
-}
-
-void ExclusiveAccessController::UpdateFullscreenWithToolbar(bool with_toolbar) {
-  [controller_ updateFullscreenWithToolbar:with_toolbar];
+void ExclusiveAccessController::UpdateUIForTabFullscreen(
+    TabFullscreenState state) {
+  [controller_ updateUIForTabFullscreen:state];
 }
 
 void ExclusiveAccessController::UpdateFullscreenToolbar() {
@@ -86,27 +104,20 @@ void ExclusiveAccessController::UpdateFullscreenToolbar() {
   [controller_ setFullscreenToolbarVisible:showToolbar];
 }
 
-bool ExclusiveAccessController::IsFullscreenWithToolbar() const {
-  return IsFullscreen() && ![controller_ inPresentationMode];
-}
-
 // See the Fullscreen terminology section and the (Fullscreen) interface
 // category in browser_window_controller.h for a detailed explanation of the
 // logic in this method.
 void ExclusiveAccessController::EnterFullscreen(
     const GURL& url,
-    ExclusiveAccessBubbleType bubble_type,
-    bool with_toolbar) {
+    ExclusiveAccessBubbleType bubble_type) {
   url_ = url;
   bubble_type_ = bubble_type;
   if (browser_->exclusive_access_manager()
           ->fullscreen_controller()
           ->IsWindowFullscreenForTabOrPending())
     [controller_ enterWebContentFullscreen];
-  else if (!url.is_empty())
-    [controller_ enterExtensionFullscreen];
   else
-    [controller_ enterBrowserFullscreenWithToolbar:with_toolbar];
+    [controller_ enterBrowserFullscreen];
 }
 
 void ExclusiveAccessController::ExitFullscreen() {
@@ -143,7 +154,7 @@ void ExclusiveAccessController::HideDownloadShelf() {
 
 bool ExclusiveAccessController::GetAcceleratorForCommandId(
     int cmd_id,
-    ui::Accelerator* accelerator) {
+    ui::Accelerator* accelerator) const {
   *accelerator =
       *AcceleratorsCocoa::GetInstance()->GetAcceleratorForCommand(cmd_id);
   return true;

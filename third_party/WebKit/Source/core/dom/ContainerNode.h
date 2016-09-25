@@ -28,7 +28,6 @@
 #include "core/CoreExport.h"
 #include "core/dom/Node.h"
 #include "core/html/CollectionType.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/Vector.h"
 
 namespace blink {
@@ -55,6 +54,13 @@ enum DynamicRestyleFlags {
     AffectedByLastChildRules = 1 << 11,
 
     NumberOfDynamicRestyleFlags = 12,
+
+    ChildrenAffectedByStructuralRules = ChildrenAffectedByFirstChildRules
+        | ChildrenAffectedByLastChildRules
+        | ChildrenAffectedByDirectAdjacentRules
+        | ChildrenAffectedByIndirectAdjacentRules
+        | ChildrenAffectedByForwardPositionalRules
+        | ChildrenAffectedByBackwardPositionalRules
 };
 
 enum SubtreeModificationAction {
@@ -84,7 +90,7 @@ public:
 
     unsigned countChildren() const;
 
-    Element* querySelector(const AtomicString& selectors, ExceptionState&);
+    Element* querySelector(const AtomicString& selectors, ExceptionState& = ASSERT_NO_EXCEPTION);
     StaticElementList* querySelectorAll(const AtomicString& selectors, ExceptionState&);
 
     Node* insertBefore(Node* newChild, Node* refChild, ExceptionState& = ASSERT_NO_EXCEPTION);
@@ -110,12 +116,13 @@ public:
 
     void cloneChildNodes(ContainerNode* clone);
 
-    void attach(const AttachContext& = AttachContext()) override;
-    void detach(const AttachContext& = AttachContext()) override;
+    void attachLayoutTree(const AttachContext& = AttachContext()) override;
+    void detachLayoutTree(const AttachContext& = AttachContext()) override;
     LayoutRect boundingBox() const final;
     void setFocus(bool) override;
     void focusStateChanged();
     void setActive(bool = true) override;
+    void setDragged(bool) override;
     void setHovered(bool = true) override;
 
     bool childrenOrSiblingsAffectedByFocus() const { return hasRestyleFlag(ChildrenOrSiblingsAffectedByFocus); }
@@ -159,8 +166,8 @@ public:
     // FIXME: These methods should all be renamed to something better than "check",
     // since it's not clear that they alter the style bits of siblings and children.
     enum SiblingCheckType { FinishedParsingChildren, SiblingElementInserted, SiblingElementRemoved };
-    void checkForSiblingStyleChanges(SiblingCheckType, Node* nodeBeforeChange, Node* nodeAfterChange);
-    void recalcChildStyle(StyleRecalcChange);
+    void checkForSiblingStyleChanges(SiblingCheckType, Element* changedElement, Node* nodeBeforeChange, Node* nodeAfterChange);
+    void recalcDescendantStyles(StyleRecalcChange);
 
     bool childrenSupportStyleSharing() const { return !hasRestyleFlags(); }
 
@@ -176,6 +183,7 @@ public:
         {
             ChildrenChange change = {
                 node.isElementNode() ? ElementInserted : NonElementInserted,
+                &node,
                 node.previousSibling(),
                 node.nextSibling(),
                 byParser
@@ -187,6 +195,7 @@ public:
         {
             ChildrenChange change = {
                 node.isElementNode() ? ElementRemoved : NonElementRemoved,
+                &node,
                 previousSibling,
                 nextSibling,
                 byParser
@@ -199,6 +208,7 @@ public:
         bool isChildElementChange() const { return type == ElementInserted || type == ElementRemoved; }
 
         ChildrenChangeType type;
+        Member<Node> siblingChanged;
         Member<Node> siblingBeforeChange;
         Member<Node> siblingAfterChange;
         ChildrenChangeSource byParser;
@@ -209,6 +219,8 @@ public:
     virtual void childrenChanged(const ChildrenChange&);
 
     DECLARE_VIRTUAL_TRACE();
+
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
 protected:
     ContainerNode(TreeScope*, ConstructionType = CreateContainer);
@@ -230,9 +242,13 @@ private:
 
     NodeListsNodeData& ensureNodeLists();
     void removeBetween(Node* previousChild, Node* nextChild, Node& oldChild);
-    void insertBeforeCommon(Node& nextChild, Node& oldChild);
+    template <typename Functor> void insertNodeVector(const NodeVector&, Node* next, const Functor&);
+    class AdoptAndInsertBefore;
+    class AdoptAndAppendChild;
+    friend class AdoptAndInsertBefore;
+    friend class AdoptAndAppendChild;
+    void insertBeforeCommon(Node& nextChild, Node& newChild);
     void appendChildCommon(Node& child);
-    void updateTreeAfterInsertion(Node& child);
     void willRemoveChildren();
     void willRemoveChild(Node& child);
     void removeDetachedChildrenInContainer(ContainerNode&);
@@ -248,6 +264,7 @@ private:
     bool hasRestyleFlagInternal(DynamicRestyleFlags) const;
     bool hasRestyleFlagsInternal() const;
 
+    bool collectChildrenAndRemoveFromOldParentWithCheck(const Node* next, const Node* oldChild, Node& newChild, NodeVector&, ExceptionState&) const;
     inline bool checkAcceptChildGuaranteedNodeTypes(const Node& newChild, const Node* oldChild, ExceptionState&) const;
     inline bool checkAcceptChild(const Node* newChild, const Node* oldChild, ExceptionState&) const;
     inline bool checkParserAcceptChild(const Node& newChild) const;

@@ -6,7 +6,7 @@
  * @constructor
  * @param {number} latitude
  * @param {number} longitude
- * @param {string} error
+ * @param {boolean} error
  */
 WebInspector.Geolocation = function(latitude, longitude, error)
 {
@@ -26,18 +26,17 @@ WebInspector.Geolocation.prototype = {
 
     apply: function()
     {
-        for (var target of WebInspector.targetManager.targets(WebInspector.Target.Type.Page)) {
+        for (var target of WebInspector.targetManager.targets(WebInspector.Target.Capability.Browser)) {
             if (this.error)
                 target.emulationAgent().setGeolocationOverride();
             else
-                target.emulationAgent().setGeolocationOverride(this.latitude, this.longitude, 150);
-
+                target.emulationAgent().setGeolocationOverride(this.latitude, this.longitude, WebInspector.Geolocation.DefaultMockAccuracy);
         }
     },
 
     clear: function()
     {
-        for (var target of WebInspector.targetManager.targets(WebInspector.Target.Type.Page))
+        for (var target of WebInspector.targetManager.targets(WebInspector.Target.Capability.Browser))
             target.emulationAgent().clearGeolocationOverride();
     }
 }
@@ -55,10 +54,13 @@ WebInspector.Geolocation.parseSetting = function(value)
                 return new WebInspector.Geolocation(parseFloat(splitPosition[0]), parseFloat(splitPosition[1]), splitError[1]);
         }
     }
-    return new WebInspector.Geolocation(0, 0, "");
+    return new WebInspector.Geolocation(0, 0, false);
 }
 
 /**
+ * @param {string} latitudeString
+ * @param {string} longitudeString
+ * @param {string} errorStatus
  * @return {?WebInspector.Geolocation}
  */
 WebInspector.Geolocation.parseUserInput = function(latitudeString, longitudeString, errorStatus)
@@ -74,8 +76,7 @@ WebInspector.Geolocation.parseUserInput = function(latitudeString, longitudeStri
 
     var latitude = isLatitudeValid ? parseFloat(latitudeString) : -1;
     var longitude = isLongitudeValid ? parseFloat(longitudeString) : -1;
-
-    return new WebInspector.Geolocation(latitude, longitude, errorStatus ? "PositionUnavailable" : "");
+    return new WebInspector.Geolocation(latitude, longitude, !!errorStatus);
 }
 
 /**
@@ -84,7 +85,8 @@ WebInspector.Geolocation.parseUserInput = function(latitudeString, longitudeStri
  */
 WebInspector.Geolocation.latitudeValidator = function(value)
 {
-    return !value || (/^([+-]?[\d]+(\.\d+)?|[+-]?\.\d+)$/.test(value) && value >= -90 && value <= 90);
+    var numValue = parseFloat(value);
+    return /^([+-]?[\d]+(\.\d+)?|[+-]?\.\d+)$/.test(value) && numValue >= -90 && numValue <= 90;
 }
 
 /**
@@ -93,5 +95,8 @@ WebInspector.Geolocation.latitudeValidator = function(value)
  */
 WebInspector.Geolocation.longitudeValidator = function(value)
 {
-    return !value || (/^([+-]?[\d]+(\.\d+)?|[+-]?\.\d+)$/.test(value) && value >= -180 && value <= 180);
+    var numValue = parseFloat(value);
+    return /^([+-]?[\d]+(\.\d+)?|[+-]?\.\d+)$/.test(value) && numValue >= -180 && numValue <= 180;
 }
+
+WebInspector.Geolocation.DefaultMockAccuracy = 150;

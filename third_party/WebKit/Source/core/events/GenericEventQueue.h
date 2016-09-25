@@ -30,7 +30,6 @@
 #include "core/events/EventQueue.h"
 #include "core/events/EventTarget.h"
 #include "platform/Timer.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
 
@@ -52,7 +51,7 @@ public:
 
 private:
     explicit GenericEventQueue(EventTarget*);
-    void timerFired(Timer<GenericEventQueue>*);
+    void timerFired(TimerBase*);
 
     Member<EventTarget> m_owner;
     HeapVector<Member<Event>> m_pendingEvents;

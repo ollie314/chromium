@@ -93,9 +93,9 @@ BookmarkShortcutDisposition GetBookmarkShortcutDisposition(Profile* profile) {
   return BOOKMARK_SHORTCUT_DISPOSITION_UNCHANGED;
 }
 
-#if defined(TOOLKIT_VIEWS)
+#if defined(TOOLKIT_VIEWS) && !defined(OS_WIN)
 gfx::ImageSkia GetFolderIcon(gfx::VectorIconId id, SkColor text_color) {
-  return gfx::CreateVectorIcon(id, 16,
+  return gfx::CreateVectorIcon(id,
                                color_utils::DeriveDefaultIconColor(text_color));
 }
 #endif
@@ -184,8 +184,8 @@ bool ShouldRemoveBookmarkOpenPagesUI(Profile* profile) {
 int GetBookmarkDragOperation(content::BrowserContext* browser_context,
                              const BookmarkNode* node) {
   PrefService* prefs = user_prefs::UserPrefs::Get(browser_context);
-  Profile* profile = Profile::FromBrowserContext(browser_context);
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(browser_context);
 
   int move = ui::DragDropTypes::DRAG_MOVE;
   if (!prefs->GetBoolean(bookmarks::prefs::kEditBookmarksEnabled) ||
@@ -224,7 +224,7 @@ int GetBookmarkDropOperation(Profile* profile,
   if (!IsValidBookmarkDropLocation(profile, data, parent, index))
     return ui::DragDropTypes::DRAG_NONE;
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
+  BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(profile);
   if (!model->client()->CanBeEditedByUser(parent))
     return ui::DragDropTypes::DRAG_NONE;
 
@@ -257,7 +257,7 @@ bool IsValidBookmarkDropLocation(Profile* profile,
   if (!data.is_valid())
     return false;
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
+  BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(profile);
   if (!model->client()->CanBeEditedByUser(drop_parent))
     return false;
 
@@ -284,37 +284,32 @@ bool IsValidBookmarkDropLocation(Profile* profile,
 }
 
 #if defined(TOOLKIT_VIEWS)
+// TODO(bsep): vectorize the Windows versions: crbug.com/564112
 gfx::ImageSkia GetBookmarkFolderIcon(SkColor text_color) {
 #if defined(OS_WIN)
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-        IDR_BOOKMARK_BAR_FOLDER);
-  }
-#endif
-
+  return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+      IDR_BOOKMARK_BAR_FOLDER);
+#else
   return GetFolderIcon(gfx::VectorIconId::FOLDER, text_color);
+#endif
 }
 
 gfx::ImageSkia GetBookmarkSupervisedFolderIcon(SkColor text_color) {
 #if defined(OS_WIN)
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-        IDR_BOOKMARK_BAR_FOLDER_SUPERVISED);
-  }
-#endif
-
+  return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+      IDR_BOOKMARK_BAR_FOLDER_SUPERVISED);
+#else
   return GetFolderIcon(gfx::VectorIconId::FOLDER_SUPERVISED, text_color);
+#endif
 }
 
 gfx::ImageSkia GetBookmarkManagedFolderIcon(SkColor text_color) {
 #if defined(OS_WIN)
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-        IDR_BOOKMARK_BAR_FOLDER_MANAGED);
-  }
-#endif
-
+  return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+      IDR_BOOKMARK_BAR_FOLDER_MANAGED);
+#else
   return GetFolderIcon(gfx::VectorIconId::FOLDER_MANAGED, text_color);
+#endif
 }
 #endif
 

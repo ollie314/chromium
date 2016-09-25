@@ -8,10 +8,10 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "media/base/audio_converter.h"
@@ -26,8 +26,11 @@ namespace media {
 class MEDIA_EXPORT AudioRendererMixer
     : NON_EXPORTED_BASE(public AudioRendererSink::RenderCallback) {
  public:
+  typedef base::Callback<void(int)> UmaLogCallback;
+
   AudioRendererMixer(const AudioParameters& output_params,
-                     const scoped_refptr<AudioRendererSink>& sink);
+                     scoped_refptr<AudioRendererSink> sink,
+                     const UmaLogCallback& log_callback);
   ~AudioRendererMixer() override;
 
   // Add or remove a mixer input from mixing; called by AudioRendererMixerInput.
@@ -48,9 +51,17 @@ class MEDIA_EXPORT AudioRendererMixer
 
   OutputDeviceInfo GetOutputDeviceInfo();
 
+  // Returns true if called on rendering thread, otherwise false.
+  bool CurrentThreadIsRenderingThread();
+
+  const AudioParameters& GetOutputParamsForTesting() { return output_params_; };
+
  private:
+  class UMAMaxValueTracker;
+
   // Maps input sample rate to the dedicated converter.
-  typedef std::map<int, scoped_ptr<LoopbackAudioConverter>> AudioConvertersMap;
+  using AudioConvertersMap =
+      std::map<int, std::unique_ptr<LoopbackAudioConverter>>;
 
   // AudioRendererSink::RenderCallback implementation.
   int Render(AudioBus* audio_bus,
@@ -62,11 +73,11 @@ class MEDIA_EXPORT AudioRendererMixer
     return sample_rate == output_params_.sample_rate();
   }
 
-  // Output sink for this mixer.
-  scoped_refptr<AudioRendererSink> audio_sink_;
-
   // Output parameters for this mixer.
-  AudioParameters output_params_;
+  const AudioParameters output_params_;
+
+  // Output sink for this mixer.
+  const scoped_refptr<AudioRendererSink> audio_sink_;
 
   // ---------------[ All variables below protected by |lock_| ]---------------
   base::Lock lock_;
@@ -89,6 +100,10 @@ class MEDIA_EXPORT AudioRendererMixer
   base::TimeDelta pause_delay_;
   base::TimeTicks last_play_time_;
   bool playing_;
+
+  // Tracks the maximum number of simultaneous mixer inputs and logs it into
+  // UMA histogram upon the destruction.
+  std::unique_ptr<UMAMaxValueTracker> input_count_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererMixer);
 };

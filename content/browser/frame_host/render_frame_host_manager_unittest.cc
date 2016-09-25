@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include <tuple>
 #include <utility>
 
 #include "base/command_line.h"
@@ -16,7 +17,6 @@
 #include "base/test/histogram_tester.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "content/browser/compositor/test/no_transport_image_transport_factory.h"
 #include "content/browser/frame_host/cross_site_transferring_request.h"
 #include "content/browser/frame_host/navigation_controller_impl.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
@@ -26,6 +26,7 @@
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/webui/web_ui_controller_factory_registry.h"
 #include "content/common/frame_messages.h"
+#include "content/common/frame_owner_properties.h"
 #include "content/common/input_messages.h"
 #include "content/common/site_isolation_policy.h"
 #include "content/common/view_messages.h"
@@ -43,10 +44,10 @@
 #include "content/public/common/javascript_message_type.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/url_utils.h"
+#include "content/public/test/browser_side_navigation_test_utils.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_notification_tracker.h"
 #include "content/public/test/test_utils.h"
-#include "content/test/browser_side_navigation_test_utils.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_content_client.h"
 #include "content/test/test_render_frame_host.h"
@@ -54,7 +55,7 @@
 #include "content/test/test_web_contents.h"
 #include "net/base/load_flags.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/web/WebFrameOwnerProperties.h"
+#include "third_party/WebKit/public/platform/WebInsecureRequestPolicy.h"
 #include "third_party/WebKit/public/web/WebSandboxFlags.h"
 #include "ui/base/page_transition_types.h"
 
@@ -72,22 +73,22 @@ void VerifyPageFocusMessage(MockRenderProcessHost* rph,
   EXPECT_EQ(expected_routing_id, message->routing_id());
   InputMsg_SetFocus::Param params;
   EXPECT_TRUE(InputMsg_SetFocus::Read(message, &params));
-  EXPECT_EQ(expected_focus, base::get<0>(params));
+  EXPECT_EQ(expected_focus, std::get<0>(params));
 }
 
 // Helper function for strict mixed content checking tests.
-void CheckMixedContentIPC(TestRenderFrameHost* rfh,
-                          bool expected_param,
-                          int expected_routing_id) {
+void CheckInsecureRequestPolicyIPC(
+    TestRenderFrameHost* rfh,
+    blink::WebInsecureRequestPolicy expected_param,
+    int expected_routing_id) {
   const IPC::Message* message =
       rfh->GetProcess()->sink().GetUniqueMessageMatching(
-          FrameMsg_EnforceStrictMixedContentChecking::ID);
+          FrameMsg_EnforceInsecureRequestPolicy::ID);
   ASSERT_TRUE(message);
   EXPECT_EQ(expected_routing_id, message->routing_id());
-  FrameMsg_EnforceStrictMixedContentChecking::Param params;
-  EXPECT_TRUE(
-      FrameMsg_EnforceStrictMixedContentChecking::Read(message, &params));
-  EXPECT_EQ(expected_param, base::get<0>(params));
+  FrameMsg_EnforceInsecureRequestPolicy::Param params;
+  EXPECT_TRUE(FrameMsg_EnforceInsecureRequestPolicy::Read(message, &params));
+  EXPECT_EQ(expected_param, std::get<0>(params));
 }
 
 class RenderFrameHostManagerTestWebUIControllerFactory
@@ -304,20 +305,11 @@ class RenderFrameHostManagerTest : public RenderViewHostImplTestHarness {
   void SetUp() override {
     RenderViewHostImplTestHarness::SetUp();
     WebUIControllerFactory::RegisterFactory(&factory_);
-#if !defined(OS_ANDROID)
-    ImageTransportFactory::InitializeForUnitTests(
-        base::WrapUnique(new NoTransportImageTransportFactory));
-#endif
   }
 
   void TearDown() override {
     RenderViewHostImplTestHarness::TearDown();
     WebUIControllerFactory::UnregisterFactoryForTesting(&factory_);
-#if !defined(OS_ANDROID)
-    // RenderWidgetHostView holds on to a reference to SurfaceManager, so it
-    // must be shut down before the ImageTransportFactory.
-    ImageTransportFactory::Terminate();
-#endif
   }
 
   void set_should_create_webui(bool should_create_webui) {
@@ -442,14 +434,15 @@ class RenderFrameHostManagerTest : public RenderViewHostImplTestHarness {
                                                      ->navigator()
                                                      ->GetController());
       FrameMsg_Navigate_Type::Value navigate_type =
-          entry.restore_type() == NavigationEntryImpl::RESTORE_NONE
+          entry.restore_type() == RestoreType::NONE
               ? FrameMsg_Navigate_Type::NORMAL
               : FrameMsg_Navigate_Type::RESTORE;
       std::unique_ptr<NavigationRequest> navigation_request =
           NavigationRequest::CreateBrowserInitiated(
               manager->frame_tree_node_, frame_entry->url(),
               frame_entry->referrer(), *frame_entry, entry, navigate_type,
-              LOFI_UNSPECIFIED, false, base::TimeTicks::Now(), controller);
+              LOFI_UNSPECIFIED, false, false, base::TimeTicks::Now(),
+              controller);
 
       // Simulates request creation that triggers the 1st internal call to
       // GetFrameHostForNavigation.
@@ -464,7 +457,7 @@ class RenderFrameHostManagerTest : public RenderViewHostImplTestHarness {
       return frame_host;
     }
 
-    return manager->Navigate(frame_entry->url(), *frame_entry, entry);
+    return manager->Navigate(frame_entry->url(), *frame_entry, entry, false);
   }
 
   // Returns the pending RenderFrameHost.
@@ -1338,22 +1331,18 @@ TEST_F(RenderFrameHostManagerTest, CreateSwappedOutOpenerRFHs) {
   EXPECT_EQ(rvh1,
             manager->GetSwappedOutRenderViewHost(rvh1->GetSiteInstance()));
 
-  // Ensure a swapped out RFH and RFH is created in the first opener tab.
-  RenderFrameProxyHost* opener1_proxy =
-      opener1_manager->GetRenderFrameProxyHost(rfh2->GetSiteInstance());
-  RenderFrameHostImpl* opener1_rfh = opener1_proxy->render_frame_host();
+  // Ensure a proxy and swapped out RVH are created in the first opener tab.
+  EXPECT_TRUE(
+      opener1_manager->GetRenderFrameProxyHost(rfh2->GetSiteInstance()));
   TestRenderViewHost* opener1_rvh = static_cast<TestRenderViewHost*>(
       opener1_manager->GetSwappedOutRenderViewHost(rvh2->GetSiteInstance()));
-  EXPECT_FALSE(opener1_rfh);
   EXPECT_FALSE(opener1_rvh->is_active());
 
-  // Ensure a swapped out RFH and RVH is created in the second opener tab.
-  RenderFrameProxyHost* opener2_proxy =
-      opener2_manager->GetRenderFrameProxyHost(rfh2->GetSiteInstance());
-  RenderFrameHostImpl* opener2_rfh = opener2_proxy->render_frame_host();
+  // Ensure a proxy and swapped out RVH are created in the second opener tab.
+  EXPECT_TRUE(
+      opener2_manager->GetRenderFrameProxyHost(rfh2->GetSiteInstance()));
   TestRenderViewHost* opener2_rvh = static_cast<TestRenderViewHost*>(
       opener2_manager->GetSwappedOutRenderViewHost(rvh2->GetSiteInstance()));
-  EXPECT_FALSE(opener2_rfh);
   EXPECT_FALSE(opener2_rvh->is_active());
 
   // Navigate to a cross-BrowsingInstance URL.
@@ -1594,13 +1583,11 @@ TEST_F(RenderFrameHostManagerTest, EnableWebUIWithSwappedOutOpener) {
   EXPECT_TRUE(rvh1->GetSiteInstance()->IsRelatedSiteInstance(
                   rvh2->GetSiteInstance()));
 
-  // Ensure a swapped out RFH and RVH is created in the first opener tab.
-  RenderFrameProxyHost* opener1_proxy =
-      opener1_manager->GetRenderFrameProxyHost(rvh2->GetSiteInstance());
-  RenderFrameHostImpl* opener1_rfh = opener1_proxy->render_frame_host();
+  // Ensure a proxy and swapped out RVH are created in the first opener tab.
+  EXPECT_TRUE(
+      opener1_manager->GetRenderFrameProxyHost(rvh2->GetSiteInstance()));
   TestRenderViewHost* opener1_rvh = static_cast<TestRenderViewHost*>(
       opener1_manager->GetSwappedOutRenderViewHost(rvh2->GetSiteInstance()));
-  EXPECT_FALSE(opener1_rfh);
   EXPECT_FALSE(opener1_rvh->is_active());
 
   // Ensure the new RVH has WebUI bindings.
@@ -1749,7 +1736,9 @@ TEST_F(RenderFrameHostManagerTest, CloseWithPendingWhileUnresponsive) {
   EXPECT_TRUE(contents()->CrossProcessNavigationPending());
 
   // Simulate the unresponsiveness timer.  The tab should close.
-  contents()->RendererUnresponsive(rfh1->render_view_host()->GetWidget());
+  contents()->RendererUnresponsive(
+      rfh1->render_view_host()->GetWidget(),
+      RenderWidgetHostDelegate::RENDERER_UNRESPONSIVE_CLOSE_PAGE);
   EXPECT_TRUE(close_delegate.is_closed());
 }
 
@@ -1960,11 +1949,11 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation, DetachPendingChild) {
   contents()->GetMainFrame()->OnCreateChildFrame(
       contents()->GetMainFrame()->GetProcess()->GetNextRoutingID(),
       blink::WebTreeScopeType::Document, "frame_name", "uniqueName1",
-      blink::WebSandboxFlags::None, blink::WebFrameOwnerProperties());
+      blink::WebSandboxFlags::None, FrameOwnerProperties());
   contents()->GetMainFrame()->OnCreateChildFrame(
       contents()->GetMainFrame()->GetProcess()->GetNextRoutingID(),
       blink::WebTreeScopeType::Document, "frame_name", "uniqueName2",
-      blink::WebSandboxFlags::None, blink::WebFrameOwnerProperties());
+      blink::WebSandboxFlags::None, FrameOwnerProperties());
   RenderFrameHostManager* root_manager =
       contents()->GetFrameTree()->root()->render_manager();
   RenderFrameHostManager* iframe1 =
@@ -2099,7 +2088,7 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
   contents1->GetMainFrame()->OnCreateChildFrame(
       contents1->GetMainFrame()->GetProcess()->GetNextRoutingID(),
       blink::WebTreeScopeType::Document, "frame_name", "uniqueName1",
-      blink::WebSandboxFlags::None, blink::WebFrameOwnerProperties());
+      blink::WebSandboxFlags::None, FrameOwnerProperties());
   RenderFrameHostManager* iframe =
       contents()->GetFrameTree()->root()->child_at(0)->render_manager();
   NavigationEntryImpl entry(NULL /* instance */, -1 /* page_id */, kUrl2,
@@ -2148,7 +2137,7 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
   main_rfh->OnCreateChildFrame(main_rfh->GetProcess()->GetNextRoutingID(),
                                blink::WebTreeScopeType::Document, std::string(),
                                "uniqueName1", blink::WebSandboxFlags::None,
-                               blink::WebFrameOwnerProperties());
+                               FrameOwnerProperties());
   RenderFrameHostManager* subframe_rfhm =
       contents()->GetFrameTree()->root()->child_at(0)->render_manager();
 
@@ -2237,7 +2226,7 @@ TEST_F(RenderFrameHostManagerTest, CreateOpenerProxiesWithCycleOnOpenerChain) {
   EXPECT_TRUE(message);
   FrameMsg_UpdateOpener::Param params;
   EXPECT_TRUE(FrameMsg_UpdateOpener::Read(message, &params));
-  EXPECT_EQ(tab2_opener_routing_id, base::get<0>(params));
+  EXPECT_EQ(tab2_opener_routing_id, std::get<0>(params));
 }
 
 // Test that opener proxies are created properly when the opener points
@@ -2284,7 +2273,7 @@ TEST_F(RenderFrameHostManagerTest, CreateOpenerProxiesWhenOpenerPointsToSelf) {
   EXPECT_TRUE(message);
   FrameMsg_UpdateOpener::Param params;
   EXPECT_TRUE(FrameMsg_UpdateOpener::Read(message, &params));
-  EXPECT_EQ(opener_routing_id, base::get<0>(params));
+  EXPECT_EQ(opener_routing_id, std::get<0>(params));
 }
 
 // Build the following frame opener graph and see that it can be properly
@@ -2308,10 +2297,10 @@ TEST_F(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
   int process_id = root1->current_frame_host()->GetProcess()->GetID();
   tree1->AddFrame(root1, process_id, 12, blink::WebTreeScopeType::Document,
                   std::string(), "uniqueName0", blink::WebSandboxFlags::None,
-                  blink::WebFrameOwnerProperties());
+                  FrameOwnerProperties());
   tree1->AddFrame(root1, process_id, 13, blink::WebTreeScopeType::Document,
                   std::string(), "uniqueName1", blink::WebSandboxFlags::None,
-                  blink::WebFrameOwnerProperties());
+                  FrameOwnerProperties());
 
   std::unique_ptr<TestWebContents> tab2(
       TestWebContents::Create(browser_context(), nullptr));
@@ -2321,10 +2310,10 @@ TEST_F(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
   process_id = root2->current_frame_host()->GetProcess()->GetID();
   tree2->AddFrame(root2, process_id, 22, blink::WebTreeScopeType::Document,
                   std::string(), "uniqueName2", blink::WebSandboxFlags::None,
-                  blink::WebFrameOwnerProperties());
+                  FrameOwnerProperties());
   tree2->AddFrame(root2, process_id, 23, blink::WebTreeScopeType::Document,
                   std::string(), "uniqueName3", blink::WebSandboxFlags::None,
-                  blink::WebFrameOwnerProperties());
+                  FrameOwnerProperties());
 
   std::unique_ptr<TestWebContents> tab3(
       TestWebContents::Create(browser_context(), nullptr));
@@ -2339,7 +2328,7 @@ TEST_F(RenderFrameHostManagerTest, TraverseComplexOpenerChain) {
   process_id = root4->current_frame_host()->GetProcess()->GetID();
   tree4->AddFrame(root4, process_id, 42, blink::WebTreeScopeType::Document,
                   std::string(), "uniqueName4", blink::WebSandboxFlags::None,
-                  blink::WebFrameOwnerProperties());
+                  FrameOwnerProperties());
 
   root1->child_at(1)->SetOpener(root1->child_at(1));
   root1->SetOpener(root2->child_at(1));
@@ -2388,15 +2377,15 @@ TEST_F(RenderFrameHostManagerTest, PageFocusPropagatesToSubframeProcesses) {
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
       blink::WebTreeScopeType::Document, "frame1", "uniqueName1",
-      blink::WebSandboxFlags::None, blink::WebFrameOwnerProperties());
+      blink::WebSandboxFlags::None, FrameOwnerProperties());
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
       blink::WebTreeScopeType::Document, "frame2", "uniqueName2",
-      blink::WebSandboxFlags::None, blink::WebFrameOwnerProperties());
+      blink::WebSandboxFlags::None, FrameOwnerProperties());
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
       blink::WebTreeScopeType::Document, "frame3", "uniqueName3",
-      blink::WebSandboxFlags::None, blink::WebFrameOwnerProperties());
+      blink::WebSandboxFlags::None, FrameOwnerProperties());
 
   FrameTreeNode* root = contents()->GetFrameTree()->root();
   RenderFrameHostManager* child1 = root->child_at(0)->render_manager();
@@ -2486,7 +2475,7 @@ TEST_F(RenderFrameHostManagerTest,
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
       blink::WebTreeScopeType::Document, "frame1", "uniqueName1",
-      blink::WebSandboxFlags::None, blink::WebFrameOwnerProperties());
+      blink::WebSandboxFlags::None, FrameOwnerProperties());
 
   FrameTreeNode* root = contents()->GetFrameTree()->root();
   RenderFrameHostManager* child = root->child_at(0)->render_manager();
@@ -2547,8 +2536,7 @@ TEST_F(RenderFrameHostManagerTest, RestoreNavigationToWebUI) {
           browser_context());
   new_entry->SetPageID(0);
   entries.push_back(std::move(new_entry));
-  controller.Restore(
-      0, NavigationController::RESTORE_LAST_SESSION_EXITED_CLEANLY, &entries);
+  controller.Restore(0, RestoreType::LAST_SESSION_EXITED_CLEANLY, &entries);
   ASSERT_EQ(0u, entries.size());
   ASSERT_EQ(1, controller.GetEntryCount());
 
@@ -2562,8 +2550,7 @@ TEST_F(RenderFrameHostManagerTest, RestoreNavigationToWebUI) {
                             Referrer(), base::string16() /* title */,
                             ui::PAGE_TRANSITION_RELOAD,
                             false /* is_renderer_init */);
-  entry.set_restore_type(
-      NavigationEntryImpl::RESTORE_LAST_SESSION_EXITED_CLEANLY);
+  entry.set_restore_type(RestoreType::LAST_SESSION_EXITED_CLEANLY);
   NavigateToEntry(manager, entry);
 
   // As the initial renderer was not live, the new RenderFrameHost should be
@@ -2863,7 +2850,7 @@ TEST_F(RenderFrameHostManagerTestWithBrowserSideNavigation,
       NavigationRequest::CreateBrowserInitiated(
           contents()->GetFrameTree()->root(), frame_entry->url(),
           frame_entry->referrer(), *frame_entry, entry,
-          FrameMsg_Navigate_Type::NORMAL, LOFI_UNSPECIFIED, false,
+          FrameMsg_Navigate_Type::NORMAL, LOFI_UNSPECIFIED, false, false,
           base::TimeTicks::Now(),
           static_cast<NavigationControllerImpl*>(&controller()));
   manager->DidCreateNavigationRequest(navigation_request.get());
@@ -2924,7 +2911,7 @@ TEST_F(RenderFrameHostManagerTestWithBrowserSideNavigation,
       NavigationRequest::CreateBrowserInitiated(
           contents()->GetFrameTree()->root(), frame_entry->url(),
           frame_entry->referrer(), *frame_entry, entry,
-          FrameMsg_Navigate_Type::NORMAL, LOFI_UNSPECIFIED, false,
+          FrameMsg_Navigate_Type::NORMAL, LOFI_UNSPECIFIED, false, false,
           base::TimeTicks::Now(),
           static_cast<NavigationControllerImpl*>(&controller()));
   manager->DidCreateNavigationRequest(navigation_request.get());
@@ -2982,7 +2969,7 @@ TEST_F(RenderFrameHostManagerTestWithBrowserSideNavigation,
       NavigationRequest::CreateBrowserInitiated(
           contents()->GetFrameTree()->root(), frame_entry->url(),
           frame_entry->referrer(), *frame_entry, entry,
-          FrameMsg_Navigate_Type::NORMAL, LOFI_UNSPECIFIED, false,
+          FrameMsg_Navigate_Type::NORMAL, LOFI_UNSPECIFIED, false, false,
           base::TimeTicks::Now(),
           static_cast<NavigationControllerImpl*>(&controller()));
   manager->DidCreateNavigationRequest(navigation_request.get());
@@ -3021,9 +3008,9 @@ TEST_F(RenderFrameHostManagerTestWithBrowserSideNavigation,
 }
 
 // Tests that frame proxies receive updates when a frame's enforcement
-// of strict mixed content checking changes.
+// of insecure request policy changes.
 TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
-       ProxiesReceiveShouldEnforceStrictMixedContentChecking) {
+       ProxiesReceiveInsecureRequestPolicy) {
   const GURL kUrl1("http://www.google.test");
   const GURL kUrl2("http://www.google2.test");
   const GURL kUrl3("http://www.google2.test/foo");
@@ -3034,7 +3021,7 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
   main_test_rfh()->OnCreateChildFrame(
       main_test_rfh()->GetProcess()->GetNextRoutingID(),
       blink::WebTreeScopeType::Document, "frame1", "uniqueName1",
-      blink::WebSandboxFlags::None, blink::WebFrameOwnerProperties());
+      blink::WebSandboxFlags::None, FrameOwnerProperties());
 
   FrameTreeNode* root = contents()->GetFrameTree()->root();
   RenderFrameHostManager* child = root->child_at(0)->render_manager();
@@ -3055,16 +3042,18 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
   // Change the parent's enforcement of strict mixed content checking,
   // and check that the correct IPC is sent to the child frame's
   // process.
-  EXPECT_FALSE(root->current_replication_state()
-                   .should_enforce_strict_mixed_content_checking);
-  main_test_rfh()->DidEnforceStrictMixedContentChecking();
+  EXPECT_EQ(blink::kLeaveInsecureRequestsAlone,
+            root->current_replication_state().insecure_request_policy);
+  main_test_rfh()->DidEnforceInsecureRequestPolicy(
+      blink::kBlockAllMixedContent);
   RenderFrameProxyHost* proxy_to_child =
       root->render_manager()->GetRenderFrameProxyHost(
           child_host->GetSiteInstance());
   EXPECT_NO_FATAL_FAILURE(
-      CheckMixedContentIPC(child_host, true, proxy_to_child->GetRoutingID()));
-  EXPECT_TRUE(root->current_replication_state()
-                  .should_enforce_strict_mixed_content_checking);
+      CheckInsecureRequestPolicyIPC(child_host, blink::kBlockAllMixedContent,
+                                    proxy_to_child->GetRoutingID()));
+  EXPECT_EQ(blink::kBlockAllMixedContent,
+            root->current_replication_state().insecure_request_policy);
 
   // Do the same for the child's enforcement. In general, the parent
   // needs to know the status of the child's flag in case a grandchild
@@ -3072,17 +3061,18 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
   // content checking, and B.com adds an iframe to A.com, then the
   // A.com process needs to know B.com's flag so that the grandchild
   // A.com frame can inherit it.
-  EXPECT_FALSE(root->child_at(0)
-                   ->current_replication_state()
-                   .should_enforce_strict_mixed_content_checking);
-  child_host->DidEnforceStrictMixedContentChecking();
+  EXPECT_EQ(
+      blink::kLeaveInsecureRequestsAlone,
+      root->child_at(0)->current_replication_state().insecure_request_policy);
+  child_host->DidEnforceInsecureRequestPolicy(blink::kBlockAllMixedContent);
   RenderFrameProxyHost* proxy_to_parent =
       child->GetRenderFrameProxyHost(main_test_rfh()->GetSiteInstance());
-  EXPECT_NO_FATAL_FAILURE(CheckMixedContentIPC(
-      main_test_rfh(), true, proxy_to_parent->GetRoutingID()));
-  EXPECT_TRUE(root->child_at(0)
-                  ->current_replication_state()
-                  .should_enforce_strict_mixed_content_checking);
+  EXPECT_NO_FATAL_FAILURE(CheckInsecureRequestPolicyIPC(
+      main_test_rfh(), blink::kBlockAllMixedContent,
+      proxy_to_parent->GetRoutingID()));
+  EXPECT_EQ(
+      blink::kBlockAllMixedContent,
+      root->child_at(0)->current_replication_state().insecure_request_policy);
 
   // Check that the flag for the parent's proxy to the child is reset
   // when the child navigates.
@@ -3098,13 +3088,14 @@ TEST_F(RenderFrameHostManagerTestWithSiteIsolation,
   commit_params.was_within_same_page = false;
   commit_params.method = "GET";
   commit_params.page_state = PageState::CreateFromURL(kUrl3);
-  commit_params.should_enforce_strict_mixed_content_checking = false;
+  commit_params.insecure_request_policy = blink::kLeaveInsecureRequestsAlone;
   child_host->SendNavigateWithParams(&commit_params);
-  EXPECT_NO_FATAL_FAILURE(CheckMixedContentIPC(
-      main_test_rfh(), false, proxy_to_parent->GetRoutingID()));
-  EXPECT_FALSE(root->child_at(0)
-                   ->current_replication_state()
-                   .should_enforce_strict_mixed_content_checking);
+  EXPECT_NO_FATAL_FAILURE(CheckInsecureRequestPolicyIPC(
+      main_test_rfh(), blink::kLeaveInsecureRequestsAlone,
+      proxy_to_parent->GetRoutingID()));
+  EXPECT_EQ(
+      blink::kLeaveInsecureRequestsAlone,
+      root->child_at(0)->current_replication_state().insecure_request_policy);
 }
 
 }  // namespace content

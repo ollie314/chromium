@@ -16,7 +16,6 @@
 #include "extensions/common/permissions/settings_override_permission.h"
 #include "extensions/common/permissions/usb_device_permission.h"
 #include "extensions/common/url_pattern_set.h"
-#include "extensions/strings/grit/extensions_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -107,10 +106,8 @@ TEST_F(ChromePermissionMessageProviderUnittest,
   std::unique_ptr<UsbDevicePermission> usb(new UsbDevicePermission(
       PermissionsInfo::GetInstance()->GetByID(APIPermission::kUsbDevice)));
   std::unique_ptr<base::ListValue> devices_list(new base::ListValue());
-  devices_list->Append(
-      UsbDevicePermissionData(0x02ad, 0x138c, -1).ToValue().release());
-  devices_list->Append(
-      UsbDevicePermissionData(0x02ad, 0x138d, -1).ToValue().release());
+  devices_list->Append(UsbDevicePermissionData(0x02ad, 0x138c, -1).ToValue());
+  devices_list->Append(UsbDevicePermissionData(0x02ad, 0x138d, -1).ToValue());
   ASSERT_TRUE(usb->FromValue(devices_list.get(), nullptr, nullptr));
   permissions.insert(usb.release());
 
@@ -129,6 +126,32 @@ TEST_F(ChromePermissionMessageProviderUnittest,
       l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST),
       message1.message());
   EXPECT_FALSE(message1.submessages().empty());
+}
+
+// Anti-test: Check that adding a parameter to a SettingsOverridePermission
+// doesn't trigger a privilege increase. This is because prior to M46 beta, we
+// failed to store the parameter in the granted_permissions pref. Now we do, and
+// we don't want to bother every user with a spurious permissions warning.
+// See crbug.com/533086 and crbug.com/619759.
+// TODO(treib,devlin): Remove this for M56, when hopefully all users will have
+// updated prefs.
+TEST_F(ChromePermissionMessageProviderUnittest,
+       EvilHackToSuppressSettingsOverrideParameter) {
+  const APIPermissionInfo* info =
+      PermissionsInfo::GetInstance()->GetByID(APIPermission::kSearchProvider);
+
+  APIPermissionSet granted_permissions;
+  granted_permissions.insert(new SettingsOverrideAPIPermission(info));
+
+  APIPermissionSet actual_permissions;
+  actual_permissions.insert(new SettingsOverrideAPIPermission(info, "a.com"));
+
+  EXPECT_FALSE(IsPrivilegeIncrease(granted_permissions, actual_permissions));
+
+  // Just to be safe: Adding the permission (with or without parameter) should
+  // still be considered a privilege escalation.
+  EXPECT_TRUE(IsPrivilegeIncrease(APIPermissionSet(), granted_permissions));
+  EXPECT_TRUE(IsPrivilegeIncrease(APIPermissionSet(), actual_permissions));
 }
 
 }  // namespace extensions

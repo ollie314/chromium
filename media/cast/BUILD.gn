@@ -19,12 +19,13 @@ source_set("common") {
   sources = [
     "cast_config.cc",
     "cast_config.h",
-    "cast_defines.h",
     "cast_environment.cc",
     "cast_environment.h",
     "common/clock_drift_smoother.cc",
     "common/clock_drift_smoother.h",
     "common/expanded_value_base.h",
+    "common/frame_id.cc",
+    "common/frame_id.h",
     "common/rtp_time.cc",
     "common/rtp_time.h",
     "common/transport_encryption_handler.cc",
@@ -153,31 +154,12 @@ source_set("sender") {
     ":common",
     ":net",
     "//media",
+    "//media:media_features",
     "//media:shared_memory_support",
     "//third_party/libvpx",
     "//third_party/opus",
     "//ui/gfx/geometry",
   ]
-
-  # use a restricted subset of media and no software codecs on iOS
-  if (is_ios) {
-    deps += [ "//media:media_for_cast_ios" ]
-    deps -= [
-      "//media",
-      "//third_party/libvpx",
-      "//third_party/opus",
-    ]
-    sources -= [
-      "sender/external_video_encoder.cc",
-      "sender/external_video_encoder.h",
-      "sender/video_encoder_impl.cc",
-      "sender/video_encoder_impl.h",
-      "sender/vp8_encoder.cc",
-      "sender/vp8_encoder.h",
-      "sender/vp8_quantizer_parser.cc",
-      "sender/vp8_quantizer_parser.h",
-    ]
-  }
 
   libs = []
 
@@ -226,16 +208,6 @@ source_set("receiver") {
     "//third_party/opus",
     "//ui/gfx/geometry",
   ]
-
-  # use a restricted subset of media and no software codecs on iOS
-  if (is_ios) {
-    deps += [ "//media:media_for_cast_ios" ]
-    deps -= [
-      "//media",
-      "//third_party/libvpx",
-      "//third_party/opus",
-    ]
-  }
 }
 
 static_library("test_support") {
@@ -308,7 +280,6 @@ test("cast_unittests") {
     "logging/simple_event_subscriber_unittest.cc",
     "logging/stats_event_subscriber_unittest.cc",
     "net/cast_transport_impl_unittest.cc",
-    "net/frame_id_wrap_helper_test.cc",
     "net/mock_cast_transport.cc",
     "net/mock_cast_transport.h",
     "net/pacing/mock_paced_packet_sender.cc",
@@ -364,23 +335,11 @@ test("cast_unittests") {
   if (is_android) {
     deps += [ "//testing/android/native_test:native_test_native_code" ]
   }
-}
 
-# TODO(miu): This can be rolled into cast_unittests now that FFMPEG dependency
-# issues are resolved for iOS; but there are bot/isolates to update too.
-if (is_ios || is_mac) {
-  test("cast_h264_vt_encoder_unittests") {
-    sources = [
-      "sender/h264_vt_encoder_unittest.cc",
-    ]
-    deps = [
-      ":common",
-      ":sender",
-      ":test_support",
-      "//testing/gmock",
-      "//testing/gtest",
-      "//third_party/ffmpeg",
-    ]
+  if (is_ios || is_mac) {
+    sources += [ "sender/h264_vt_encoder_unittest.cc" ]
+
+    deps += [ "//third_party/ffmpeg" ]
   }
 }
 
@@ -426,6 +385,7 @@ if (is_win || is_mac || (is_linux && !is_chromeos)) {
       ":net",
       ":receiver",
       ":test_support",
+      "//build/win:default_exe_manifest",
     ]
 
     if (is_linux && !is_chromeos && use_x11) {
@@ -451,6 +411,7 @@ if (is_win || is_mac || (is_linux && !is_chromeos)) {
       ":net",
       ":sender",
       ":test_support",
+      "//build/win:default_exe_manifest",
     ]
   }
 
@@ -472,6 +433,7 @@ if (is_win || is_mac || (is_linux && !is_chromeos)) {
       ":network_simulation_model_proto",
       ":sender",
       ":test_support",
+      "//build/win:default_exe_manifest",
     ]
   }
 
@@ -484,6 +446,7 @@ if (is_win || is_mac || (is_linux && !is_chromeos)) {
       ":test_support",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
       "//media",
     ]
   }
@@ -497,6 +460,7 @@ if (is_win || is_mac || (is_linux && !is_chromeos)) {
       ":test_support",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
       "//media",
     ]
   }
@@ -510,6 +474,7 @@ if (is_win || is_mac || (is_linux && !is_chromeos)) {
       ":test_support",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 } else {  # !(is_win || is_mac || (is_linux && !is_chromeos))
@@ -537,12 +502,14 @@ if (is_linux && !is_chromeos) {
 # not reference these.
 
 static_library("cast_sender") {
+  complete_static_lib = true
   deps = [
     ":sender",
   ]
 }
 
 static_library("cast_receiver") {
+  complete_static_lib = true
   deps = [
     ":receiver",
   ]

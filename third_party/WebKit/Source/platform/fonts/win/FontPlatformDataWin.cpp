@@ -35,6 +35,7 @@
 #include "platform/LayoutTestSupport.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/graphics/GraphicsContext.h"
+#include "platform/graphics/skia/SkiaUtils.h"
 #include <windows.h>
 
 namespace blink {
@@ -47,14 +48,16 @@ void FontPlatformData::setupPaint(SkPaint* paint, float, const Font*) const
 {
     const float ts = m_textSize >= 0 ? m_textSize : 12;
     paint->setTextSize(SkFloatToScalar(m_textSize));
-    paint->setTypeface(typeface());
+    paint->setTypeface(m_typeface);
     paint->setFakeBoldText(m_syntheticBold);
     paint->setTextSkewX(m_syntheticItalic ? -SK_Scalar1 / 4 : 0);
 
     uint32_t textFlags = paintTextFlags();
     uint32_t flags = paint->getFlags();
-    static const uint32_t textFlagsMask = SkPaint::kAntiAlias_Flag |
-        SkPaint::kLCDRenderText_Flag;
+    static const uint32_t textFlagsMask = SkPaint::kAntiAlias_Flag
+        | SkPaint::kLCDRenderText_Flag
+        | SkPaint::kEmbeddedBitmapText_Flag
+        | SkPaint::kSubpixelText_Flag;
     flags &= ~textFlagsMask;
 
     if (ts <= kMaxSizeForEmbeddedBitmap)
@@ -62,11 +65,10 @@ void FontPlatformData::setupPaint(SkPaint* paint, float, const Font*) const
 
     if (ts >= m_minSizeForAntiAlias) {
 
-        if (m_useSubpixelPositioning
-            // Disable subpixel text for certain older fonts at smaller sizes as
-            // they tend to get quite blurry at non-integer sizes and positions.
-            // For high-DPI this workaround isn't required.
-            && (ts >= m_minSizeForSubpixel
+        // Disable subpixel text for certain older fonts at smaller sizes as
+        // they tend to get quite blurry at non-integer sizes and positions.
+        // For high-DPI this workaround isn't required.
+        if ((ts >= m_minSizeForSubpixel
                 || FontCache::fontCache()->deviceScaleFactor() >= 1.5)
 
             // Subpixel text positioning looks pretty bad without font
@@ -117,14 +119,9 @@ static int computePaintTextFlags(String fontFamilyName)
 }
 
 
-void FontPlatformData::querySystemForRenderStyle(bool)
+void FontPlatformData::querySystemForRenderStyle()
 {
     m_paintTextFlags = computePaintTextFlags(fontFamilyName());
-}
-
-bool FontPlatformData::defaultUseSubpixelPositioning()
-{
-    return FontCache::fontCache()->useSubpixelPositioning();
 }
 
 } // namespace blink

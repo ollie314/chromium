@@ -4,14 +4,16 @@
  * found in the LICENSE file.
  */
 
+.sidebar-pane.accessibility-computed {
+    background-color: rgba(0, 0, 0, 0.03);
+}
+
 .ax-computed-text {
-    padding: 3px 5px 0;
     background-image: url(Images/speech.png);
     background-repeat: no-repeat;
-    background-position: 16px center;
-    padding: 4px 4px 0 4px;
-    padding-left: 36px;
-    min-height: 18px;
+    background-position: 0px center;
+    background-size: 12px;
+    padding-left: 17px;
 }
 
 .ax-computed-text div {
@@ -56,7 +58,11 @@ span.ax-internal-role {
 }
 
 .ax-ignored-node-pane {
-    background-color: hsl(0, 0%, 96%);
+    flex: none;
+}
+
+.ax-tree-ignored-node {
+    font-style: italic;
 }
 
 .tree-outline li {
@@ -100,7 +106,7 @@ span.ax-value-undefined {
 }
 
 .ax-value-string {
-    color: rgb(26, 26, 166);
+    color: rgb(200, 0, 0);
 }
 
 .sidebar-pane-stack .sidebar-pane {

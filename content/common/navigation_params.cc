@@ -4,10 +4,13 @@
 
 #include "content/common/navigation_params.h"
 
+#include "base/logging.h"
 #include "build/build_config.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/url_constants.h"
+#include "url/gurl.h"
+#include "url/url_constants.h"
 
 namespace content {
 
@@ -15,12 +18,13 @@ namespace content {
 bool ShouldMakeNetworkRequestForURL(const GURL& url) {
   CHECK(IsBrowserSideNavigationEnabled());
 
-  // Data URLs, Javascript URLs, about:blank, srcdoc should not send a request
+  // Javascript URLs, about:blank, srcdoc should not send a request
   // to the network stack.
   // TODO(clamy): same document navigations should not send requests to the
   // network stack. Neither should pushState/popState.
-  return !url.SchemeIs(url::kDataScheme) && url != GURL(url::kAboutBlankURL) &&
+  return url != GURL(url::kAboutBlankURL) &&
          !url.SchemeIs(url::kJavaScriptScheme) && !url.is_empty() &&
+         !url.SchemeIs(url::kContentIDScheme) &&
          url != GURL(content::kAboutSrcDocURL);
 }
 
@@ -47,7 +51,8 @@ CommonNavigationParams::CommonNavigationParams(
     const GURL& history_url_for_data_url,
     LoFiState lofi_state,
     const base::TimeTicks& navigation_start,
-    std::string method)
+    std::string method,
+    const scoped_refptr<ResourceRequestBodyImpl>& post_data)
     : url(url),
       referrer(referrer),
       transition(transition),
@@ -60,7 +65,14 @@ CommonNavigationParams::CommonNavigationParams(
       history_url_for_data_url(history_url_for_data_url),
       lofi_state(lofi_state),
       navigation_start(navigation_start),
-      method(method) {}
+      method(method),
+      post_data(post_data) {
+  // |method != "POST"| should imply absence of |post_data|.
+  if (method != "POST" && post_data) {
+    NOTREACHED();
+    this->post_data = nullptr;
+  }
+}
 
 CommonNavigationParams::CommonNavigationParams(
     const CommonNavigationParams& other) = default;
@@ -100,14 +112,12 @@ StartNavigationParams::StartNavigationParams()
 
 StartNavigationParams::StartNavigationParams(
     const std::string& extra_headers,
-    const std::vector<unsigned char>& browser_initiated_post_data,
 #if defined(OS_ANDROID)
     bool has_user_gesture,
 #endif
     int transferred_request_child_id,
     int transferred_request_request_id)
     : extra_headers(extra_headers),
-      browser_initiated_post_data(browser_initiated_post_data),
 #if defined(OS_ANDROID)
       has_user_gesture(has_user_gesture),
 #endif
@@ -128,6 +138,8 @@ RequestNavigationParams::RequestNavigationParams()
       page_id(-1),
       nav_entry_id(0),
       is_same_document_history_load(false),
+      is_history_navigation_in_new_child(false),
+      has_subtree_history_items(false),
       has_committed_real_load(false),
       intended_as_new_entry(false),
       pending_history_list_offset(-1),
@@ -147,6 +159,8 @@ RequestNavigationParams::RequestNavigationParams(
     int32_t page_id,
     int nav_entry_id,
     bool is_same_document_history_load,
+    bool is_history_navigation_in_new_child,
+    bool has_subtree_history_items,
     bool has_committed_real_load,
     bool intended_as_new_entry,
     int pending_history_list_offset,
@@ -162,6 +176,8 @@ RequestNavigationParams::RequestNavigationParams(
       page_id(page_id),
       nav_entry_id(nav_entry_id),
       is_same_document_history_load(is_same_document_history_load),
+      is_history_navigation_in_new_child(is_history_navigation_in_new_child),
+      has_subtree_history_items(has_subtree_history_items),
       has_committed_real_load(has_committed_real_load),
       intended_as_new_entry(intended_as_new_entry),
       pending_history_list_offset(pending_history_list_offset),

@@ -68,8 +68,6 @@ class ManagePasswordsBubbleCocoaTest : public CocoaProfileTest {
     ASSERT_TRUE(testing::Mock::VerifyAndClearExpectations(mock));
     autofill::PasswordForm form;
     EXPECT_CALL(*mock, GetPendingPassword()).WillOnce(ReturnRef(form));
-    std::vector<const autofill::PasswordForm*> forms;
-    EXPECT_CALL(*mock, GetCurrentForms()).WillOnce(ReturnRef(forms));
     GURL origin;
     EXPECT_CALL(*mock, GetOrigin()).WillOnce(ReturnRef(origin));
     EXPECT_CALL(*mock, GetState())
@@ -97,7 +95,7 @@ class ManagePasswordsBubbleCocoaTest : public CocoaProfileTest {
 
   ManagePasswordsUIControllerMock* UIController() {
     return static_cast<ManagePasswordsUIControllerMock*>(
-        PasswordsModelDelegateFromWebContents(test_web_contents_));
+        ManagePasswordsUIController::FromWebContents(test_web_contents_));
   }
 
   ManagePasswordsBubbleController* controller() {
@@ -121,6 +119,7 @@ TEST_F(ManagePasswordsBubbleCocoaTest, ShowShouldCreateAndShowBubble) {
   ShowBubble(false);
   EXPECT_TRUE(ManagePasswordsBubbleCocoa::instance());
   EXPECT_TRUE([bubbleWindow() isVisible]);
+  EXPECT_TRUE([bubbleWindow() autorecalculatesKeyViewLoop]);
 }
 
 TEST_F(ManagePasswordsBubbleCocoaTest, CloseShouldCloseAndDeleteBubble) {
@@ -174,6 +173,17 @@ TEST_F(ManagePasswordsBubbleCocoaTest, HideBubbleOnChangedState) {
   icon()->OnChangingState();
   EXPECT_FALSE(ManagePasswordsBubbleCocoa::instance());
   EXPECT_FALSE([bubbleWindow() isVisible]);
+}
+
+TEST_F(ManagePasswordsBubbleCocoaTest, ShowBubbleTwice) {
+  ShowBubble(false);
+  base::scoped_nsobject<NSWindow> bubble([bubbleWindow() retain]);
+  // Opening the bubble again should retrieve the data from the UI controller
+  // again.
+  ShowBubble(false);
+  EXPECT_TRUE(ManagePasswordsBubbleCocoa::instance());
+  EXPECT_NSNE(bubble, bubbleWindow());
+  EXPECT_TRUE([bubbleWindow() isVisible]);
 }
 
 TEST_F(ManagePasswordsBubbleCocoaTest, OpenWithoutFocus) {

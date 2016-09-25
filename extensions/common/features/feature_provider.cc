@@ -5,10 +5,10 @@
 #include "extensions/common/features/feature_provider.h"
 
 #include <map>
+#include <memory>
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
 #include "content/public/common/content_switches.h"
@@ -23,16 +23,6 @@ namespace {
 
 class Static {
  public:
-  FeatureProvider* GetFeatures(const std::string& name) const {
-    auto it = feature_providers_.find(name);
-    if (it == feature_providers_.end())
-      CRASH_WITH_MINIDUMP("FeatureProvider \"" + name + "\" not found");
-    return it->second.get();
-  }
-
- private:
-  friend struct base::DefaultLazyInstanceTraits<Static>;
-
   Static() {
     TRACE_EVENT0("startup", "extensions::FeatureProvider::Static");
     base::Time begin_time = base::Time::Now();
@@ -59,10 +49,20 @@ class Static {
     }
   }
 
-  std::map<std::string, scoped_ptr<FeatureProvider>> feature_providers_;
+  FeatureProvider* GetFeatures(const std::string& name) const {
+    auto it = feature_providers_.find(name);
+    if (it == feature_providers_.end())
+      CRASH_WITH_MINIDUMP("FeatureProvider \"" + name + "\" not found");
+    return it->second.get();
+  }
+
+ private:
+  std::map<std::string, std::unique_ptr<FeatureProvider>> feature_providers_;
+
+  DISALLOW_COPY_AND_ASSIGN(Static);
 };
 
-base::LazyInstance<Static> g_static = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<Static>::Leaky g_static = LAZY_INSTANCE_INITIALIZER;
 
 const Feature* GetFeatureFromProviderByName(const std::string& provider_name,
                                             const std::string& feature_name) {

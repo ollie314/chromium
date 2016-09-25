@@ -26,7 +26,6 @@
 
 namespace blink {
 
-class ProgressValueElement;
 class LayoutProgress;
 
 class CORE_EXPORT HTMLProgressElement final : public LabelableElement {
@@ -62,13 +61,14 @@ private:
 
     void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
 
-    void attach(const AttachContext& = AttachContext()) override;
+    void attachLayoutTree(const AttachContext& = AttachContext()) override;
 
     void didElementStateChange();
     void didAddUserAgentShadowRoot(ShadowRoot&) override;
     bool isDeterminate() const;
+    void setValueWidthPercentage(double) const;
 
-    Member<ProgressValueElement> m_value;
+    Member<Element> m_value;
 };
 
 } // namespace blink

@@ -31,6 +31,8 @@
 #ifndef WebRTCPeerConnectionHandler_h
 #define WebRTCPeerConnectionHandler_h
 
+#include "WebRTCStats.h"
+
 namespace blink {
 
 class WebMediaConstraints;
@@ -49,6 +51,14 @@ class WebRTCVoidRequest;
 class WebString;
 struct WebRTCDataChannelInit;
 
+// Used to back histogram value of "WebRTC.PeerConnection.SelectedRtcpMuxPolicy", so treat as append-only.
+enum RtcpMuxPolicy {
+    RtcpMuxPolicyRequire,
+    RtcpMuxPolicyNegotiate,
+    RtcpMuxPolicyDefault,
+    RtcpMuxPolicyMax
+};
+
 class WebRTCPeerConnectionHandler {
 public:
     virtual ~WebRTCPeerConnectionHandler() { }
@@ -64,6 +74,7 @@ public:
     virtual WebRTCSessionDescription localDescription() = 0;
     virtual WebRTCSessionDescription remoteDescription() = 0;
     virtual bool updateICE(const WebRTCConfiguration&) = 0;
+    virtual void logSelectedRtcpMuxPolicy(RtcpMuxPolicy) = 0;
 
     // DEPRECATED
     virtual bool addICECandidate(const WebRTCICECandidate&) { return false; }
@@ -72,6 +83,9 @@ public:
     virtual bool addStream(const WebMediaStream&, const WebMediaConstraints&) = 0;
     virtual void removeStream(const WebMediaStream&) = 0;
     virtual void getStats(const WebRTCStatsRequest&) = 0;
+    // Gets stats using the new stats collection API, see third_party/webrtc/api/stats/.
+    // These will replace the old stats collection API when the new API has matured enough.
+    virtual void getStats(std::unique_ptr<WebRTCStatsReportCallback>) = 0;
     virtual WebRTCDataChannelHandler* createDataChannel(const WebString& label, const WebRTCDataChannelInit&) = 0;
     virtual WebRTCDTMFSenderHandler* createDTMFSender(const WebMediaStreamTrack&) = 0;
     virtual void stop() = 0;

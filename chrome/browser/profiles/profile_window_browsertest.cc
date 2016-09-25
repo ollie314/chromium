@@ -87,7 +87,7 @@ class EmptyAcceleratorHandler : public ui::AcceleratorProvider {
  public:
   // Don't handle accelerators.
   bool GetAcceleratorForCommandId(int command_id,
-                                  ui::Accelerator* accelerator) override {
+                                  ui::Accelerator* accelerator) const override {
     return false;
   }
 };
@@ -268,8 +268,9 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowWebUIBrowserTest,
   EXPECT_TRUE(RunJavascriptTest("testNoPodFocused"));
 }
 
+// This test is flaky, see https://crbug.com/611619.
 IN_PROC_BROWSER_TEST_F(ProfileWindowWebUIBrowserTest,
-                       UserManagerFocusMultipleProfiles) {
+                       DISABLED_UserManagerFocusMultipleProfiles) {
   // The profile names are meant to sort differently by ICU collation and by
   // naive sorting. See crbug/596280.
   base::FilePath expected_path = CreateTestingProfile("#abc", "Profile 1");

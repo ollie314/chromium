@@ -46,6 +46,7 @@
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
+#include "platform/HostWindow.h"
 #include "wtf/text/StringBuilder.h"
 #include <limits>
 
@@ -104,7 +105,6 @@ private:
     ImageDocumentParser(ImageDocument* document)
         : RawDataDocumentParser(document)
     {
-        UseCounter::count(document, UseCounter::ImageDocument);
     }
 
     void appendBytes(const char*, size_t) override;
@@ -123,7 +123,7 @@ static String imageTitle(const String& filename, const IntSize& size)
 {
     StringBuilder result;
     result.append(filename);
-    result.appendLiteral(" (");
+    result.append(" (");
     // FIXME: Localize numbers. Safari/OSX shows localized numbers with group
     // separaters. For example, "1,920x1,080".
     result.appendNumber(size.width());
@@ -145,7 +145,9 @@ void ImageDocumentParser::appendBytes(const char* data, size_t length)
 
     if (document()->cachedImage()) {
         RELEASE_ASSERT(length <= std::numeric_limits<unsigned>::max());
-        document()->cachedImage()->appendData(data, length);
+        // If decoding has already failed, there's no point in sending additional data to the ImageResource.
+        if (document()->cachedImage()->getStatus() != Resource::DecodeError)
+            document()->cachedImage()->appendData(data, length);
     }
 
     if (!isDetached())
@@ -158,8 +160,7 @@ void ImageDocumentParser::finish()
         ImageResource* cachedImage = document()->cachedImage();
         DocumentLoader* loader = document()->loader();
         cachedImage->setResponse(loader->response());
-        cachedImage->setLoadFinishTime(loader->timing().responseEnd());
-        cachedImage->finish();
+        cachedImage->finish(loader->timing().responseEnd());
 
         // Report the natural image size in the page title, regardless of zoom level.
         // At a zoom level of 1 the image is guaranteed to have an integer size.
@@ -194,6 +195,9 @@ ImageDocument::ImageDocument(const DocumentInit& initializer)
 {
     setCompatibilityMode(QuirksMode);
     lockCompatibilityMode();
+    UseCounter::count(*this, UseCounter::ImageDocument);
+    if (!isInMainFrame())
+        UseCounter::count(*this, UseCounter::ImageDocumentInFrame);
 }
 
 DocumentParser* ImageDocument::createParser()
@@ -207,8 +211,6 @@ void ImageDocument::createDocumentStructure()
     appendChild(rootElement);
     rootElement->insertedByParser();
 
-    frame()->loader().dispatchDocumentElementAvailable();
-    frame()->loader().runScriptsAtDocumentElementAvailable();
     if (isStopped())
         return; // runScriptsAtDocumentElementAvailable can detach the frame.
 
@@ -221,7 +223,7 @@ void ImageDocument::createDocumentStructure()
     HTMLBodyElement* body = HTMLBodyElement::create(*this);
     body->setAttribute(styleAttr, "margin: 0px;");
 
-    frame()->loader().client()->dispatchWillInsertBody();
+    willInsertBody();
 
     m_imageElement = HTMLImageElement::create(*this);
     m_imageElement->setAttribute(styleAttr, "-webkit-user-select: none");
@@ -246,32 +248,37 @@ void ImageDocument::createDocumentStructure()
 
 float ImageDocument::scale() const
 {
+    DCHECK_EQ(m_shrinkToFitMode, Desktop);
     if (!m_imageElement || m_imageElement->document() != this)
         return 1.0f;
 
     FrameView* view = frame()->view();
     if (!view)
-        return 1;
+        return 1.0f;
 
-    ASSERT(m_imageElement->cachedImage());
-    LayoutSize imageSize = m_imageElement->cachedImage()->imageSize(LayoutObject::shouldRespectImageOrientation(m_imageElement->layoutObject()), pageZoomFactor(this));
-    LayoutSize windowSize = LayoutSize(view->width(), view->height());
+    DCHECK(m_imageElement->cachedImage());
+    const float zoom = pageZoomFactor(this);
+    LayoutSize imageSize = m_imageElement->cachedImage()->imageSize(LayoutObject::shouldRespectImageOrientation(m_imageElement->layoutObject()), zoom);
 
-    float widthScale = windowSize.width().toFloat() / imageSize.width().toFloat();
-    float heightScale = windowSize.height().toFloat() / imageSize.height().toFloat();
+    // We want to pretend the viewport is larger when the user has zoomed the
+    // page in (but not when the zoom is coming from device scale).
+    const float manualZoom = zoom / view->getHostWindow()->windowToViewportScalar(1.f);
+    float widthScale = view->width() * manualZoom / imageSize.width().toFloat();
+    float heightScale = view->height() * manualZoom / imageSize.height().toFloat();
 
     return min(widthScale, heightScale);
 }
 
-void ImageDocument::resizeImageToFit(ScaleType type)
+void ImageDocument::resizeImageToFit()
 {
-    if (!m_imageElement || m_imageElement->document() != this || (pageZoomFactor(this) > 1 && type == ScaleOnlyUnzoomedDocument))
+    DCHECK_EQ(m_shrinkToFitMode, Desktop);
+    if (!m_imageElement || m_imageElement->document() != this)
         return;
 
-    ASSERT(m_imageElement->cachedImage());
-    LayoutSize imageSize = m_imageElement->cachedImage()->imageSize(LayoutObject::shouldRespectImageOrientation(m_imageElement->layoutObject()), pageZoomFactor(this));
+    DCHECK(m_imageElement->cachedImage());
+    LayoutSize imageSize = m_imageElement->cachedImage()->imageSize(LayoutObject::shouldRespectImageOrientation(m_imageElement->layoutObject()), 1.f);
 
-    float scale = this->scale();
+    const float scale = this->scale();
     m_imageElement->setWidth(static_cast<int>(imageSize.width() * scale));
     m_imageElement->setHeight(static_cast<int>(imageSize.height() * scale));
 
@@ -280,7 +287,7 @@ void ImageDocument::resizeImageToFit(ScaleType type)
 
 void ImageDocument::imageClicked(int x, int y)
 {
-    ASSERT(m_shrinkToFitMode == Desktop);
+    DCHECK_EQ(m_shrinkToFitMode, Desktop);
 
     if (!m_imageSizeIsKnown || imageFitsInWindow())
         return;
@@ -288,11 +295,11 @@ void ImageDocument::imageClicked(int x, int y)
     m_shouldShrinkImage = !m_shouldShrinkImage;
 
     if (m_shouldShrinkImage) {
-        windowSizeChanged(ScaleZoomedDocument);
+        windowSizeChanged();
     } else {
-        restoreImageSize(ScaleZoomedDocument);
+        restoreImageSize();
 
-        updateLayout();
+        updateStyleAndLayout();
 
         double scale = this->scale();
 
@@ -305,12 +312,12 @@ void ImageDocument::imageClicked(int x, int y)
 
 void ImageDocument::imageUpdated()
 {
-    ASSERT(m_imageElement);
+    DCHECK(m_imageElement);
 
     if (m_imageSizeIsKnown)
         return;
 
-    updateLayoutTree();
+    updateStyleAndLayoutTree();
     if (!m_imageElement->cachedImage() || m_imageElement->cachedImage()->imageSize(LayoutObject::shouldRespectImageOrientation(m_imageElement->layoutObject()), pageZoomFactor(this)).isEmpty())
         return;
 
@@ -318,21 +325,21 @@ void ImageDocument::imageUpdated()
 
     if (shouldShrinkToFit()) {
         // Force resizing of the image
-        windowSizeChanged(ScaleOnlyUnzoomedDocument);
+        windowSizeChanged();
     }
 }
 
-void ImageDocument::restoreImageSize(ScaleType type)
+void ImageDocument::restoreImageSize()
 {
-    ASSERT(m_shrinkToFitMode == Desktop);
+    DCHECK_EQ(m_shrinkToFitMode, Desktop);
 
-    if (!m_imageElement || !m_imageSizeIsKnown || m_imageElement->document() != this || (pageZoomFactor(this) < 1 && type == ScaleOnlyUnzoomedDocument))
+    if (!m_imageElement || !m_imageSizeIsKnown || m_imageElement->document() != this)
         return;
 
-    ASSERT(m_imageElement->cachedImage());
+    DCHECK(m_imageElement->cachedImage());
     LayoutSize imageSize = m_imageElement->cachedImage()->imageSize(LayoutObject::shouldRespectImageOrientation(m_imageElement->layoutObject()), 1.0f);
-    m_imageElement->setWidth(imageSize.width());
-    m_imageElement->setHeight(imageSize.height());
+    m_imageElement->setWidth(imageSize.width().toInt());
+    m_imageElement->setHeight(imageSize.height().toInt());
 
     if (imageFitsInWindow())
         m_imageElement->removeInlineStyleProperty(CSSPropertyCursor);
@@ -344,23 +351,11 @@ void ImageDocument::restoreImageSize(ScaleType type)
 
 bool ImageDocument::imageFitsInWindow() const
 {
-    ASSERT(m_shrinkToFitMode == Desktop);
-
-    if (!m_imageElement || m_imageElement->document() != this)
-        return true;
-
-    FrameView* view = frame()->view();
-    if (!view)
-        return true;
-
-    ASSERT(m_imageElement->cachedImage());
-    LayoutSize imageSize = m_imageElement->cachedImage()->imageSize(LayoutObject::shouldRespectImageOrientation(m_imageElement->layoutObject()), pageZoomFactor(this));
-    LayoutSize windowSize = LayoutSize(view->width(), view->height());
-
-    return imageSize.width() <= windowSize.width() && imageSize.height() <= windowSize.height();
+    DCHECK_EQ(m_shrinkToFitMode, Desktop);
+    return this->scale() >= 1;
 }
 
-void ImageDocument::windowSizeChanged(ScaleType type)
+void ImageDocument::windowSizeChanged()
 {
     if (!m_imageElement || !m_imageSizeIsKnown || m_imageElement->document() != this)
         return;
@@ -392,13 +387,13 @@ void ImageDocument::windowSizeChanged(ScaleType type)
         // If the window has been resized so that the image fits, restore the image size
         // otherwise update the restored image size.
         if (fitsInWindow)
-            restoreImageSize(type);
+            restoreImageSize();
         else
-            resizeImageToFit(type);
+            resizeImageToFit();
     } else {
         // If the image isn't resized but needs to be, then resize it.
         if (!fitsInWindow) {
-            resizeImageToFit(type);
+            resizeImageToFit();
             m_didShrinkImage = true;
         }
     }
@@ -433,7 +428,7 @@ DEFINE_TRACE(ImageDocument)
 void ImageEventListener::handleEvent(ExecutionContext*, Event* event)
 {
     if (event->type() == EventTypeNames::resize) {
-        m_doc->windowSizeChanged(ImageDocument::ScaleOnlyUnzoomedDocument);
+        m_doc->windowSizeChanged();
     } else if (event->type() == EventTypeNames::click && event->isMouseEvent()) {
         MouseEvent* mouseEvent = toMouseEvent(event);
         m_doc->imageClicked(mouseEvent->x(), mouseEvent->y());

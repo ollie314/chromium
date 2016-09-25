@@ -14,11 +14,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
+#include "net/log/net_log_source_type.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/udp/datagram_client_socket.h"
@@ -40,7 +41,7 @@ class MockConnectClientSocket : public StreamSocket {
   MockConnectClientSocket(const AddressList& addrlist, net::NetLog* net_log)
       : connected_(false),
         addrlist_(addrlist),
-        net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)) {}
+        net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::SOCKET)) {}
 
   // StreamSocket implementation.
   int Connect(const CompletionCallback& callback) override {
@@ -64,7 +65,7 @@ class MockConnectClientSocket : public StreamSocket {
       SetIPv6Address(address);
     return OK;
   }
-  const BoundNetLog& NetLog() const override { return net_log_; }
+  const NetLogWithSource& NetLog() const override { return net_log_; }
 
   void SetSubresourceSpeculation() override {}
   void SetOmniboxSpeculation() override {}
@@ -100,7 +101,7 @@ class MockConnectClientSocket : public StreamSocket {
  private:
   bool connected_;
   const AddressList addrlist_;
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(MockConnectClientSocket);
 };
@@ -109,7 +110,7 @@ class MockFailingClientSocket : public StreamSocket {
  public:
   MockFailingClientSocket(const AddressList& addrlist, net::NetLog* net_log)
       : addrlist_(addrlist),
-        net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)) {}
+        net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::SOCKET)) {}
 
   // StreamSocket implementation.
   int Connect(const CompletionCallback& callback) override {
@@ -126,7 +127,7 @@ class MockFailingClientSocket : public StreamSocket {
   int GetLocalAddress(IPEndPoint* address) const override {
     return ERR_UNEXPECTED;
   }
-  const BoundNetLog& NetLog() const override { return net_log_; }
+  const NetLogWithSource& NetLog() const override { return net_log_; }
 
   void SetSubresourceSpeculation() override {}
   void SetOmniboxSpeculation() override {}
@@ -164,7 +165,7 @@ class MockFailingClientSocket : public StreamSocket {
 
  private:
   const AddressList addrlist_;
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(MockFailingClientSocket);
 };
@@ -179,7 +180,7 @@ class MockTriggerableClientSocket : public StreamSocket {
       : should_connect_(should_connect),
         is_connected_(false),
         addrlist_(addrlist),
-        net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)),
+        net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::SOCKET)),
         weak_factory_(this) {}
 
   // Call this method to get a closure which will trigger the connect callback
@@ -252,7 +253,7 @@ class MockTriggerableClientSocket : public StreamSocket {
       SetIPv6Address(address);
     return OK;
   }
-  const BoundNetLog& NetLog() const override { return net_log_; }
+  const NetLogWithSource& NetLog() const override { return net_log_; }
 
   void SetSubresourceSpeculation() override {}
   void SetOmniboxSpeculation() override {}
@@ -298,7 +299,7 @@ class MockTriggerableClientSocket : public StreamSocket {
   bool should_connect_;
   bool is_connected_;
   const AddressList addrlist_;
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
   CompletionCallback callback_;
   ConnectionAttempts connection_attempts_;
 

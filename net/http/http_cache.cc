@@ -25,7 +25,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
@@ -43,7 +43,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
-#include "net/quic/crypto/quic_server_info.h"
+#include "net/quic/core/crypto/quic_server_info.h"
 
 #if defined(OS_POSIX)
 #include <unistd.h>
@@ -240,7 +240,7 @@ void HttpCache::MetadataWriter::Write(const GURL& url,
   int rv = transaction_->Start(
       &request_info_,
       base::Bind(&MetadataWriter::OnIOComplete, base::Unretained(this)),
-      BoundNetLog());
+      NetLogWithSource());
   if (rv != ERR_IO_PENDING)
     VerifyResponse(rv);
 }
@@ -293,7 +293,7 @@ class HttpCache::QuicServerInfoFactoryAdaptor : public QuicServerInfoFactory {
 HttpCache::HttpCache(HttpNetworkSession* session,
                      std::unique_ptr<BackendFactory> backend_factory,
                      bool set_up_quic_server_info)
-    : HttpCache(base::WrapUnique(new HttpNetworkLayer(session)),
+    : HttpCache(base::MakeUnique<HttpNetworkLayer>(session),
                 std::move(backend_factory),
                 set_up_quic_server_info) {}
 
@@ -342,7 +342,7 @@ HttpCache::~HttpCache() {
     DeactivateEntry(entry);
   }
 
-  STLDeleteElements(&doomed_entries_);
+  base::STLDeleteElements(&doomed_entries_);
 
   // Before deleting pending_ops_, we have to make sure that the disk cache is
   // done with said operations, or it will attempt to use deleted data.
@@ -366,7 +366,7 @@ HttpCache::~HttpCache() {
       pending_op->callback.Reset();
     }
 
-    STLDeleteElements(&pending_op->pending_queue);
+    base::STLDeleteElements(&pending_op->pending_queue);
     if (delete_pending_op)
       delete pending_op;
   }

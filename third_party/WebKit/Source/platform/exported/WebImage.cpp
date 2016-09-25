@@ -36,23 +36,19 @@
 #include "public/platform/WebData.h"
 #include "public/platform/WebSize.h"
 #include "third_party/skia/include/core/SkImage.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/Vector.h"
 #include <algorithm>
+#include <memory>
 
 namespace blink {
 
 WebImage WebImage::fromData(const WebData& data, const WebSize& desiredSize)
 {
     RefPtr<SharedBuffer> buffer = PassRefPtr<SharedBuffer>(data);
-    OwnPtr<ImageDecoder> decoder(ImageDecoder::create(*buffer.get(), ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileIgnored));
-    if (!decoder)
-        return WebImage();
-
-    decoder->setData(buffer.get(), true);
-    if (!decoder->isSizeAvailable())
+    std::unique_ptr<ImageDecoder> decoder(ImageDecoder::create(buffer, true,
+        ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileIgnored));
+    if (!decoder || !decoder->isSizeAvailable())
         return WebImage();
 
     // Frames are arranged by decreasing size, then decreasing bit depth.
@@ -91,12 +87,9 @@ WebVector<WebImage> WebImage::framesFromData(const WebData& data)
     const size_t maxFrameCount = 8;
 
     RefPtr<SharedBuffer> buffer = PassRefPtr<SharedBuffer>(data);
-    OwnPtr<ImageDecoder> decoder(ImageDecoder::create(*buffer.get(), ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileIgnored));
-    if (!decoder)
-        return WebVector<WebImage>();
-
-    decoder->setData(buffer.get(), true);
-    if (!decoder->isSizeAvailable())
+    std::unique_ptr<ImageDecoder> decoder(ImageDecoder::create(buffer, true,
+        ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileIgnored));
+    if (!decoder || !decoder->isSizeAvailable())
         return WebVector<WebImage>();
 
     // Frames are arranged by decreasing size, then decreasing bit depth.
@@ -143,12 +136,12 @@ WebSize WebImage::size() const
     return WebSize(m_bitmap.width(), m_bitmap.height());
 }
 
-WebImage::WebImage(const PassRefPtr<Image>& image)
+WebImage::WebImage(PassRefPtr<Image> image)
 {
     if (!image)
         return;
 
-    if (RefPtr<SkImage> skImage = image->imageForCurrentFrame())
+    if (sk_sp<SkImage> skImage = image->imageForCurrentFrame())
         skImage->asLegacyBitmap(&m_bitmap, SkImage::kRO_LegacyBitmapMode);
 }
 

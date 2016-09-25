@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/message_center_switches.h"
@@ -182,7 +185,8 @@ void MessageListView::ResetRepositionSession() {
     has_deferred_task_ = false;
     // cancel cause OnBoundsAnimatorDone which deletes |deleted_when_done_|.
     animator_.Cancel();
-    STLDeleteContainerPointers(deleting_views_.begin(), deleting_views_.end());
+    base::STLDeleteContainerPointers(deleting_views_.begin(),
+                                     deleting_views_.end());
     deleting_views_.clear();
     adding_views_.clear();
   }
@@ -223,8 +227,8 @@ void MessageListView::OnBoundsAnimatorProgressed(
 }
 
 void MessageListView::OnBoundsAnimatorDone(views::BoundsAnimator* animator) {
-  STLDeleteContainerPointers(deleted_when_done_.begin(),
-                             deleted_when_done_.end());
+  base::STLDeleteContainerPointers(deleted_when_done_.begin(),
+                                   deleted_when_done_.end());
   deleted_when_done_.clear();
 
   if (clear_all_started_) {
@@ -456,7 +460,7 @@ void MessageListView::AnimateClearingOneNotification() {
 
   // Schedule to start sliding out next notification after a short delay.
   if (!clearing_all_views_.empty()) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, base::Bind(&MessageListView::AnimateClearingOneNotification,
                               weak_ptr_factory_.GetWeakPtr()),
         base::TimeDelta::FromMilliseconds(

@@ -32,16 +32,9 @@
 namespace blink {
 
 class PlatformEvent {
-    DISALLOW_NEW();
 public:
     enum EventType {
         NoType = 0,
-
-        // PlatformKeyboardEvent
-        KeyDown,
-        KeyUp,
-        RawKeyDown,
-        Char,
 
         // PlatformMouseEvent
         MouseMoved,
@@ -102,24 +95,36 @@ public:
         IsComposing = 1 << 14,
 
         AltGrKey  = 1 << 15,
-        OSKey     = 1 << 16,
-        FnKey     = 1 << 17,
-        SymbolKey = 1 << 18,
+        FnKey     = 1 << 16,
+        SymbolKey = 1 << 17,
 
-        ScrollLockOn = 1 << 19,
+        ScrollLockOn = 1 << 18,
 
         // The set of non-stateful modifiers that specifically change the
         // interpretation of the key being pressed. For example; IsLeft,
         // IsRight, IsComposing don't change the meaning of the key
         // being pressed. NumLockOn, ScrollLockOn, CapsLockOn are stateful
         // and don't indicate explicit depressed state.
-        KeyModifiers = SymbolKey | FnKey | OSKey | AltGrKey | MetaKey | AltKey | CtrlKey | ShiftKey,
+        KeyModifiers = SymbolKey | FnKey | AltGrKey | MetaKey | AltKey | CtrlKey | ShiftKey,
     };
 
     enum RailsMode {
         RailsModeFree       = 0,
         RailsModeHorizontal = 1,
         RailsModeVertical   = 2,
+    };
+
+    // These values are direct mappings of the values in WebInputEvent
+    // so the values can be cast between the enumerations. static_asserts
+    // checking this are in web/WebInputEventConversion.cpp.
+    enum DispatchType {
+        Blocking,
+        EventNonBlocking,
+        // All listeners are passive.
+        ListenersNonBlockingPassive,
+        // This value represents a state which would have normally blocking
+        // but was forced to be non-blocking during fling; not cancelable.
+        ListenersForcedNonBlockingDueToFling,
     };
 
     EventType type() const { return static_cast<EventType>(m_type); }

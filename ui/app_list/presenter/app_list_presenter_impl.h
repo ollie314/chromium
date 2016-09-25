@@ -52,8 +52,9 @@ class APP_LIST_PRESENTER_EXPORT AppListPresenterImpl
   AppListView* GetView() { return view_; }
 
   // AppListPresenter:
-  void Show(aura::Window* window) override;
+  void Show(int64_t display_id) override;
   void Dismiss() override;
+  void ToggleAppList(int64_t display_id) override;
   bool IsVisible() const override;
   bool GetTargetVisibility() const override;
 

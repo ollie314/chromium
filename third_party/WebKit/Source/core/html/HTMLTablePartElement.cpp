@@ -33,6 +33,7 @@
 #include "core/dom/shadow/FlatTreeTraversal.h"
 #include "core/html/HTMLTableElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
+#include "platform/weborigin/Referrer.h"
 
 namespace blink {
 
@@ -53,7 +54,8 @@ void HTMLTablePartElement::collectStyleForPresentationAttribute(const QualifiedN
         String url = stripLeadingAndTrailingHTMLSpaces(value);
         if (!url.isEmpty()) {
             CSSImageValue* imageValue = CSSImageValue::create(url, document().completeURL(url));
-            style->setProperty(CSSProperty(CSSPropertyBackgroundImage, imageValue));
+            imageValue->setReferrer(Referrer(document().outgoingReferrer(), document().getReferrerPolicy()));
+            style->setProperty(CSSProperty(CSSPropertyBackgroundImage, *imageValue));
         }
     } else if (name == valignAttr) {
         if (equalIgnoringCase(value, "top"))

@@ -6,8 +6,9 @@
  * @constructor
  * @extends {WebInspector.VBox}
  * @param {!WebInspector.TimelineModel} model
+ * @param {!Array<!WebInspector.TimelineModel.Filter>} filters
  */
-WebInspector.TimelineTreeView = function(model)
+WebInspector.TimelineTreeView = function(model, filters)
 {
     WebInspector.VBox.call(this);
     this.element.classList.add("timeline-tree-view");
@@ -15,11 +16,7 @@ WebInspector.TimelineTreeView = function(model)
     this._model = model;
     this._linkifier = new WebInspector.Linkifier();
 
-    this._filters = [];
-    if (!Runtime.experiments.isEnabled("timelineShowAllEvents")) {
-        this._filters.push(WebInspector.TimelineUIUtils.visibleEventsFilter());
-        this._filters.push(new WebInspector.ExcludeTopLevelFilter());
-    }
+    this._filters = filters.slice();
 
     var columns = [];
     this._populateColumns(columns);
@@ -84,12 +81,18 @@ WebInspector.TimelineTreeView.prototype = {
     _onHover: function(node) { },
 
     /**
-     * @param {!RuntimeAgent.CallFrame} frame
-     * @return {!Element}
+     * @param {!WebInspector.TracingModel.Event} event
+     * @return {?Element}
      */
-    linkifyLocation: function(frame)
+    _linkifyLocation: function(event)
     {
-        return this._linkifier.linkifyConsoleCallFrame(this._model.target(), frame);
+        var target = this._model.targetByEvent(event);
+        if (!target)
+            return null;
+        var frame = WebInspector.TimelineProfileTree.eventStackFrame(event);
+        if (!frame)
+            return null;
+        return this._linkifier.maybeLinkifyConsoleCallFrame(target, frame);
     },
 
     /**
@@ -236,7 +239,7 @@ WebInspector.TimelineTreeView.prototype = {
         this._detailsView.detachChildWidgets();
         this._detailsView.element.removeChildren();
         if (!selectedNode || !this._showDetailsForNode(selectedNode)) {
-            var banner = this._detailsView.element.createChild("div", "banner");
+            var banner = this._detailsView.element.createChild("div", "full-widget-dimmed-banner");
             banner.createTextChild(WebInspector.UIString("Select item for details."));
         }
     },
@@ -342,16 +345,14 @@ WebInspector.TimelineTreeView.GridNode.prototype = {
         } else if (event) {
             var data = event.args["data"];
             var deoptReason = data && data["deoptReason"];
-            if (deoptReason && deoptReason !== "no reason")
+            if (deoptReason)
                 container.createChild("div", "activity-warning").title = WebInspector.UIString("Not optimized: %s", deoptReason);
             name.textContent = event.name === WebInspector.TimelineModel.RecordType.JSFrame
                 ? WebInspector.beautifyFunctionName(event.args["data"]["functionName"])
                 : WebInspector.TimelineUIUtils.eventTitle(event);
-            var frame = WebInspector.TimelineProfileTree.eventStackFrame(event);
-            if (frame && frame["url"]) {
-                var callFrame = /** @type {!RuntimeAgent.CallFrame} */ (frame);
-                container.createChild("div", "activity-link").appendChild(this._treeView.linkifyLocation(callFrame));
-            }
+            var link = this._treeView._linkifyLocation(event);
+            if (link)
+                container.createChild("div", "activity-link").appendChild(link);
             icon.style.backgroundColor = WebInspector.TimelineUIUtils.eventColor(event);
         }
         return cell;
@@ -446,11 +447,12 @@ WebInspector.TimelineTreeView.TreeGridNode.prototype = {
  * @constructor
  * @extends {WebInspector.TimelineTreeView}
  * @param {!WebInspector.TimelineModel} model
+ * @param {!Array<!WebInspector.TimelineModel.Filter>} filters
  */
-WebInspector.AggregatedTimelineTreeView = function(model)
+WebInspector.AggregatedTimelineTreeView = function(model, filters)
 {
     this._groupBySetting = WebInspector.settings.createSetting("timelineTreeGroupBy", WebInspector.TimelineAggregator.GroupBy.Category);
-    WebInspector.TimelineTreeView.call(this, model);
+    WebInspector.TimelineTreeView.call(this, model, filters);
     var nonessentialEvents = [
         WebInspector.TimelineModel.RecordType.EventDispatch,
         WebInspector.TimelineModel.RecordType.FunctionCall,
@@ -491,6 +493,8 @@ WebInspector.AggregatedTimelineTreeView.prototype = {
     _displayInfoForGroupNode: function(node)
     {
         var categories = WebInspector.TimelineUIUtils.categories();
+        var color = node.id ? WebInspector.TimelineUIUtils.eventColor(node.event) : categories["other"].color;
+
         switch (this._groupBySetting.get()) {
         case WebInspector.TimelineAggregator.GroupBy.Category:
             var category = categories[node.id] || categories["other"];
@@ -505,8 +509,17 @@ WebInspector.AggregatedTimelineTreeView.prototype = {
                 name = this._executionContextNamesByOrigin.get(name) || name;
             return {
                 name: name || WebInspector.UIString("unattributed"),
-                color: node.id ? WebInspector.TimelineUIUtils.eventColor(node.event) : categories["other"].color
-            }
+                color: color
+            };
+
+        case WebInspector.TimelineAggregator.GroupBy.EventName:
+            var name = node.event.name === WebInspector.TimelineModel.RecordType.JSFrame ?
+                WebInspector.UIString("JavaScript") : WebInspector.TimelineUIUtils.eventTitle(node.event);
+            return {
+                name: name,
+                color: node.event.name === WebInspector.TimelineModel.RecordType.JSFrame ?
+                    WebInspector.TimelineUIUtils.eventStyle(node.event).category.color : color
+            };
 
         case WebInspector.TimelineAggregator.GroupBy.URL:
             break;
@@ -516,8 +529,8 @@ WebInspector.AggregatedTimelineTreeView.prototype = {
         }
         return {
             name: node.id || WebInspector.UIString("unattributed"),
-            color: node.id ? WebInspector.TimelineUIUtils.eventColor(node.event) : categories["other"].color
-        }
+            color: color
+        };
     },
 
     /**
@@ -541,6 +554,7 @@ WebInspector.AggregatedTimelineTreeView.prototype = {
                 this._groupByCombobox.select(option);
         }
         addGroupingOption.call(this, WebInspector.UIString("No Grouping"), WebInspector.TimelineAggregator.GroupBy.None);
+        addGroupingOption.call(this, WebInspector.UIString("Group by Activity"), WebInspector.TimelineAggregator.GroupBy.EventName);
         addGroupingOption.call(this, WebInspector.UIString("Group by Category"), WebInspector.TimelineAggregator.GroupBy.Category);
         addGroupingOption.call(this, WebInspector.UIString("Group by Domain"), WebInspector.TimelineAggregator.GroupBy.Domain);
         addGroupingOption.call(this, WebInspector.UIString("Group by Subdomain"), WebInspector.TimelineAggregator.GroupBy.Subdomain);
@@ -603,6 +617,17 @@ WebInspector.AggregatedTimelineTreeView.prototype = {
         return true;
     },
 
+    /**
+     * @return {!WebInspector.TimelineAggregator}
+     */
+    _createAggregator: function()
+    {
+        return new WebInspector.TimelineAggregator(
+            event => WebInspector.TimelineUIUtils.eventStyle(event).title,
+            event => WebInspector.TimelineUIUtils.eventStyle(event).category.name
+        );
+    },
+
     __proto__: WebInspector.TimelineTreeView.prototype,
 };
 
@@ -610,10 +635,11 @@ WebInspector.AggregatedTimelineTreeView.prototype = {
  * @constructor
  * @extends {WebInspector.AggregatedTimelineTreeView}
  * @param {!WebInspector.TimelineModel} model
+ * @param {!Array<!WebInspector.TimelineModel.Filter>} filters
  */
-WebInspector.CallTreeTimelineTreeView = function(model)
+WebInspector.CallTreeTimelineTreeView = function(model, filters)
 {
-    WebInspector.AggregatedTimelineTreeView.call(this, model);
+    WebInspector.AggregatedTimelineTreeView.call(this, model, filters);
     this._dataGrid.markColumnAsSortedBy("total", WebInspector.DataGrid.Order.Descending);
 }
 
@@ -625,8 +651,7 @@ WebInspector.CallTreeTimelineTreeView.prototype = {
     _buildTree: function()
     {
         var topDown = this._buildTopDownTree(WebInspector.TimelineAggregator.eventId);
-        var aggregator = new WebInspector.TimelineAggregator(event => WebInspector.TimelineUIUtils.eventStyle(event).category.name);
-        return aggregator.performGrouping(topDown, this._groupBySetting.get());
+        return this._createAggregator().performGrouping(topDown, this._groupBySetting.get());
     },
 
     __proto__: WebInspector.AggregatedTimelineTreeView.prototype,
@@ -636,10 +661,11 @@ WebInspector.CallTreeTimelineTreeView.prototype = {
  * @constructor
  * @extends {WebInspector.AggregatedTimelineTreeView}
  * @param {!WebInspector.TimelineModel} model
+ * @param {!Array<!WebInspector.TimelineModel.Filter>} filters
  */
-WebInspector.BottomUpTimelineTreeView = function(model)
+WebInspector.BottomUpTimelineTreeView = function(model, filters)
 {
-    WebInspector.AggregatedTimelineTreeView.call(this, model);
+    WebInspector.AggregatedTimelineTreeView.call(this, model, filters);
     this._dataGrid.markColumnAsSortedBy("self", WebInspector.DataGrid.Order.Descending);
 }
 
@@ -651,8 +677,7 @@ WebInspector.BottomUpTimelineTreeView.prototype = {
     _buildTree: function()
     {
         var topDown = this._buildTopDownTree(WebInspector.TimelineAggregator.eventId);
-        var aggregator = new WebInspector.TimelineAggregator(event => WebInspector.TimelineUIUtils.eventStyle(event).category.name);
-        return WebInspector.TimelineProfileTree.buildBottomUp(topDown, aggregator.groupFunction(this._groupBySetting.get()));
+        return WebInspector.TimelineProfileTree.buildBottomUp(topDown, this._createAggregator().groupFunction(this._groupBySetting.get()));
     },
 
     __proto__: WebInspector.AggregatedTimelineTreeView.prototype
@@ -662,13 +687,14 @@ WebInspector.BottomUpTimelineTreeView.prototype = {
  * @constructor
  * @extends {WebInspector.TimelineTreeView}
  * @param {!WebInspector.TimelineModel} model
+ * @param {!Array<!WebInspector.TimelineModel.Filter>} filters
  * @param {!WebInspector.TimelineModeViewDelegate} delegate
  */
-WebInspector.EventsTimelineTreeView = function(model, delegate)
+WebInspector.EventsTimelineTreeView = function(model, filters, delegate)
 {
     this._filtersControl = new WebInspector.TimelineFilters();
     this._filtersControl.addEventListener(WebInspector.TimelineFilters.Events.FilterChanged, this._onFilterChanged, this);
-    WebInspector.TimelineTreeView.call(this, model);
+    WebInspector.TimelineTreeView.call(this, model, filters);
     this._delegate = delegate;
     this._filters.push.apply(this._filters, this._filtersControl.filters());
     this._dataGrid.markColumnAsSortedBy("startTime", WebInspector.DataGrid.Order.Ascending);
@@ -819,9 +845,7 @@ WebInspector.TimelineStackView = function(treeView)
     this._dataGrid.asWidget().show(this.element);
 }
 
-/**
- * @enum {symbol}
- */
+/** @enum {symbol} */
 WebInspector.TimelineStackView.Events = {
     SelectionChanged: Symbol("SelectionChanged")
 }

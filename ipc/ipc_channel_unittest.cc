@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/run_loop.h"
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
@@ -10,9 +11,11 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/pickle.h"
+#include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
@@ -37,7 +40,7 @@ TEST_F(IPCChannelTest, ChannelTest) {
   IPC::TestChannelListener::SendOneMessage(sender(), "hello from parent");
 
   // Run message loop.
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   // Close the channel so the client's OnChannelError() gets fired.
   channel()->Close();
@@ -76,7 +79,7 @@ TEST_F(IPCChannelTest, ChannelTestExistingPipe) {
   IPC::TestChannelListener::SendOneMessage(sender(), "hello from parent");
 
   // Run message loop.
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   // Close the channel so the client's OnChannelError() gets fired.
   channel()->Close();
@@ -104,7 +107,7 @@ TEST_F(IPCChannelTest, ChannelProxyTest) {
   IPC::TestChannelListener::SendOneMessage(sender(), "hello from parent");
 
   // Run message loop.
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   EXPECT_TRUE(WaitForClientShutdown());
 
@@ -144,7 +147,7 @@ TEST_F(IPCChannelTest, MAYBE_SendMessageInChannelConnected) {
   IPC::TestChannelListener::SendOneMessage(sender(), "hello from parent");
 
   // Run message loop.
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   // Close the channel so the client's OnChannelError() gets fired.
   channel()->Close();
@@ -158,13 +161,14 @@ MULTIPROCESS_IPC_TEST_CLIENT_MAIN(GenericClient) {
   IPC::TestChannelListener listener;
 
   // Set up IPC channel.
-  scoped_ptr<IPC::Channel> channel(IPC::Channel::CreateClient(
-      IPCTestBase::GetChannelName("GenericClient"), &listener));
+  std::unique_ptr<IPC::Channel> channel(IPC::Channel::CreateClient(
+      IPCTestBase::GetChannelName("GenericClient"), &listener,
+      main_message_loop.task_runner()));
   CHECK(channel->Connect());
   listener.Init(channel.get());
   IPC::TestChannelListener::SendOneMessage(channel.get(), "hello from child");
 
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   return 0;
 }
 

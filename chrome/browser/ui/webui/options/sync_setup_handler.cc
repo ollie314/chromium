@@ -14,7 +14,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -41,20 +41,20 @@
 #include "chrome/grit/locale_settings.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/common/profile_management_switches.h"
-#include "components/sync_driver/sync_prefs.h"
+#include "components/strings/grit/components_strings.h"
+#include "components/sync/driver/sync_prefs.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
-#include "grit/components_strings.h"
 #include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -64,6 +64,7 @@
 #include "components/signin/core/browser/signin_manager.h"
 #endif
 
+using browser_sync::ProfileSyncService;
 using content::WebContents;
 using l10n_util::GetStringFUTF16;
 using l10n_util::GetStringUTF16;
@@ -77,7 +78,6 @@ struct SyncConfigInfo {
 
   bool encrypt_all;
   bool sync_everything;
-  bool sync_nothing;
   syncer::ModelTypeSet data_types;
   bool payments_integration_enabled;
   std::string passphrase;
@@ -87,7 +87,6 @@ struct SyncConfigInfo {
 SyncConfigInfo::SyncConfigInfo()
     : encrypt_all(false),
       sync_everything(false),
-      sync_nothing(false),
       payments_integration_enabled(false),
       passphrase_is_gaia(false) {}
 
@@ -105,14 +104,6 @@ bool GetConfiguration(const std::string& json, SyncConfigInfo* config) {
     DLOG(ERROR) << "GetConfiguration() not passed a syncAllDataTypes value";
     return false;
   }
-
-  if (!result->GetBoolean("syncNothing", &config->sync_nothing)) {
-    DLOG(ERROR) << "GetConfiguration() not passed a syncNothing value";
-    return false;
-  }
-
-  DCHECK(!(config->sync_everything && config->sync_nothing))
-      << "syncAllDataTypes and syncNothing cannot both be true";
 
   if (!result->GetBoolean("paymentsIntegrationEnabled",
                           &config->payments_integration_enabled)) {
@@ -248,7 +239,6 @@ void SyncSetupHandler::GetStaticLocalizedValues(
       {"settingUp", IDS_SYNC_LOGIN_SETTING_UP},
       {"syncAllDataTypes", IDS_SYNC_EVERYTHING},
       {"chooseDataTypes", IDS_SYNC_CHOOSE_DATATYPES},
-      {"syncNothing", IDS_SYNC_NOTHING},
       {"bookmarks", IDS_SYNC_DATATYPE_BOOKMARKS},
       {"preferences", IDS_SYNC_DATATYPE_PREFERENCES},
       {"autofill", IDS_SYNC_DATATYPE_AUTOFILL},
@@ -257,7 +247,6 @@ void SyncSetupHandler::GetStaticLocalizedValues(
       {"extensions", IDS_SYNC_DATATYPE_EXTENSIONS},
       {"typedURLs", IDS_SYNC_DATATYPE_TYPED_URLS},
       {"apps", IDS_SYNC_DATATYPE_APPS},
-      {"wifiCredentials", IDS_SYNC_DATATYPE_WIFI_CREDENTIALS},
       {"openTabs", IDS_SYNC_DATATYPE_TABS},
       {"enablePaymentsIntegration", IDS_AUTOFILL_USE_PAYMENTS_DATA},
       {"serviceUnavailableError", IDS_SYNC_SETUP_ABORTED_BY_PENDING_CLEAR},
@@ -297,8 +286,8 @@ void SyncSetupHandler::GetStaticLocalizedValues(
 
 void SyncSetupHandler::ConfigureSyncDone() {
   base::StringValue page("done");
-  web_ui()->CallJavascriptFunction(
-      "SyncSetupOverlay.showSyncSetupPage", page);
+  web_ui()->CallJavascriptFunctionUnsafe("SyncSetupOverlay.showSyncSetupPage",
+                                         page);
 
   // Suppress the sign in promo once the user starts sync. This way the user
   // doesn't see the sign in promo even if they sign out later on.
@@ -313,7 +302,7 @@ void SyncSetupHandler::ConfigureSyncDone() {
 
     // We're done configuring, so notify ProfileSyncService that it is OK to
     // start syncing.
-    service->SetSetupInProgress(false);
+    sync_blocker_.reset();
     service->SetFirstSetupComplete();
   }
 }
@@ -431,7 +420,7 @@ bool SyncSetupHandler::PrepareSyncSetup() {
 
   ProfileSyncService* service = GetSyncService();
   if (service)
-    service->SetSetupInProgress(true);
+    sync_blocker_ = service->GetSetupInProgressHandle();
 
   return true;
 }
@@ -448,8 +437,8 @@ void SyncSetupHandler::DisplaySpinner() {
                               base::TimeDelta::FromSeconds(kTimeoutSec),
                               this, &SyncSetupHandler::DisplayTimeout);
 
-  web_ui()->CallJavascriptFunction(
-      "SyncSetupOverlay.showSyncSetupPage", page, args);
+  web_ui()->CallJavascriptFunctionUnsafe("SyncSetupOverlay.showSyncSetupPage",
+                                         page, args);
 }
 
 // TODO(kochi): Handle error conditions other than timeout.
@@ -463,8 +452,8 @@ void SyncSetupHandler::DisplayTimeout() {
 
   base::StringValue page("timeout");
   base::DictionaryValue args;
-  web_ui()->CallJavascriptFunction(
-      "SyncSetupOverlay.showSyncSetupPage", page, args);
+  web_ui()->CallJavascriptFunctionUnsafe("SyncSetupOverlay.showSyncSetupPage",
+                                         page, args);
 }
 
 void SyncSetupHandler::OnDidClosePage(const base::ListValue* args) {
@@ -528,19 +517,6 @@ void SyncSetupHandler::HandleConfigure(const base::ListValue* args) {
   // dialog.
   if (!service || !service->IsBackendInitialized()) {
     CloseUI();
-    return;
-  }
-
-  // Disable sync, but remain signed in if the user selected "Sync nothing" in
-  // the advanced settings dialog. Note: In order to disable sync across
-  // restarts on Chrome OS, we must call RequestStop(CLEAR_DATA), which
-  // suppresses sync startup in addition to disabling it.
-  if (configuration.sync_nothing) {
-    ProfileSyncService::SyncEvent(
-        ProfileSyncService::STOP_FROM_ADVANCED_DIALOG);
-    CloseUI();
-    service->RequestStop(ProfileSyncService::CLEAR_DATA);
-    service->SetSetupInProgress(false);
     return;
   }
 
@@ -693,7 +669,9 @@ void SyncSetupHandler::HandleStopSyncing(const base::ListValue* args) {
 
   if (delete_profile) {
     // Do as BrowserOptionsHandler::DeleteProfile().
-    webui::DeleteProfileAtPath(GetProfile()->GetPath(), web_ui());
+    webui::DeleteProfileAtPath(GetProfile()->GetPath(),
+                               web_ui(),
+                               ProfileMetrics::DELETE_PROFILE_SETTINGS);
   }
 }
 #endif
@@ -742,15 +720,16 @@ void SyncSetupHandler::CloseSyncSetup() {
         }
       }
     }
-
-    GetLoginUIService()->LoginUIClosed(this);
   }
+
+  LoginUIService* service = GetLoginUIService();
+  if (service)
+    service->LoginUIClosed(this);
 
   // Alert the sync service anytime the sync setup dialog is closed. This can
   // happen due to the user clicking the OK or Cancel button, or due to the
   // dialog being closed by virtue of sync being disabled in the background.
-  if (sync_service)
-    sync_service->SetSetupInProgress(false);
+  sync_blocker_.reset();
 
   configuring_sync_ = false;
 }
@@ -817,8 +796,8 @@ void SyncSetupHandler::FocusUI() {
 void SyncSetupHandler::CloseUI() {
   CloseSyncSetup();
   base::StringValue page("done");
-  web_ui()->CallJavascriptFunction(
-      "SyncSetupOverlay.showSyncSetupPage", page);
+  web_ui()->CallJavascriptFunctionUnsafe("SyncSetupOverlay.showSyncSetupPage",
+                                         page);
 }
 
 bool SyncSetupHandler::IsExistingWizardPresent() {
@@ -915,9 +894,10 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
   args.SetBoolean("showPassphrase", service->IsPassphraseRequired());
 
   // To distinguish between FROZEN_IMPLICIT_PASSPHRASE and CUSTOM_PASSPHRASE
-  // we only set usePassphrase for CUSTOM_PASSPHRASE.
+  // we only set usePassphrase for PassphraseType::CUSTOM_PASSPHRASE.
   args.SetBoolean("usePassphrase",
-                  service->GetPassphraseType() == syncer::CUSTOM_PASSPHRASE);
+                  service->GetPassphraseType() ==
+                      syncer::PassphraseType::CUSTOM_PASSPHRASE);
   base::Time passphrase_time = service->GetExplicitPassphraseTime();
   syncer::PassphraseType passphrase_type = service->GetPassphraseType();
   if (!passphrase_time.is_null()) {
@@ -932,13 +912,13 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
         GetStringFUTF16(IDS_SYNC_ENTER_GOOGLE_PASSPHRASE_BODY_WITH_DATE,
                         passphrase_time_str));
     switch (passphrase_type) {
-      case syncer::FROZEN_IMPLICIT_PASSPHRASE:
+      case syncer::PassphraseType::FROZEN_IMPLICIT_PASSPHRASE:
         args.SetString(
             "fullEncryptionBody",
             GetStringFUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_GOOGLE_WITH_DATE,
                             passphrase_time_str));
         break;
-      case syncer::CUSTOM_PASSPHRASE:
+      case syncer::PassphraseType::CUSTOM_PASSPHRASE:
         args.SetString(
             "fullEncryptionBody",
             GetStringFUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM_WITH_DATE,
@@ -950,7 +930,7 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
             GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM));
         break;
     }
-  } else if (passphrase_type == syncer::CUSTOM_PASSPHRASE) {
+  } else if (passphrase_type == syncer::PassphraseType::CUSTOM_PASSPHRASE) {
     args.SetString(
         "fullEncryptionBody",
         GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM));
@@ -961,8 +941,8 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
   }
 
   base::StringValue page("configure");
-  web_ui()->CallJavascriptFunction(
-      "SyncSetupOverlay.showSyncSetupPage", page, args);
+  web_ui()->CallJavascriptFunctionUnsafe("SyncSetupOverlay.showSyncSetupPage",
+                                         page, args);
 
   // Make sure the tab used for the Gaia sign in does not cover the settings
   // tab.

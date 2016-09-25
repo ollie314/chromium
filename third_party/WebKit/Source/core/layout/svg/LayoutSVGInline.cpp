@@ -89,9 +89,9 @@ LayoutRect LayoutSVGInline::absoluteClippedOverflowRect() const
     return SVGLayoutSupport::clippedOverflowRectForPaintInvalidation(*this, *view());
 }
 
-void LayoutSVGInline::mapLocalToAncestor(const LayoutBoxModelObject* ancestor, TransformState& transformState, MapCoordinatesFlags) const
+void LayoutSVGInline::mapLocalToAncestor(const LayoutBoxModelObject* ancestor, TransformState& transformState, MapCoordinatesFlags flags) const
 {
-    SVGLayoutSupport::mapLocalToAncestor(this, ancestor, transformState);
+    SVGLayoutSupport::mapLocalToAncestor(this, ancestor, transformState, flags);
 }
 
 const LayoutObject* LayoutSVGInline::pushMappingToContainer(const LayoutBoxModelObject* ancestorToStopAt, LayoutGeometryMap& geometryMap) const
@@ -145,23 +145,9 @@ void LayoutSVGInline::removeChild(LayoutObject* child)
 
 void LayoutSVGInline::invalidateTreeIfNeeded(const PaintInvalidationState& paintInvalidationState)
 {
-    ASSERT(!needsLayout());
-
-    if (!shouldCheckForPaintInvalidation(paintInvalidationState))
-        return;
-
-    PaintInvalidationState newPaintInvalidationState(paintInvalidationState, *this);
-    PaintInvalidationReason reason = invalidatePaintIfNeeded(newPaintInvalidationState);
-    clearPaintInvalidationFlags(newPaintInvalidationState);
-
-    if (reason == PaintInvalidationDelayedFull)
-        paintInvalidationState.pushDelayedPaintInvalidationTarget(*this);
-
-    if (reason == PaintInvalidationSVGResourceChange)
-        newPaintInvalidationState.setForceSubtreeInvalidationWithinContainer();
-
-    newPaintInvalidationState.updateForChildren();
-    invalidatePaintOfSubtreesIfNeeded(newPaintInvalidationState);
+    // TODO(wangxianzhu): Verify if the inherited LayoutBoxModelObject::invalidateTreeIfNeeded()
+    // is applicable here. If yes, remove this overriding method.
+    LayoutObject::invalidateTreeIfNeeded(paintInvalidationState);
 }
 
 } // namespace blink

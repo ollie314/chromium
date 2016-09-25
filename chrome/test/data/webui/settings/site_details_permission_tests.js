@@ -17,7 +17,7 @@ cr.define('site_details_permission', function() {
        */
       var prefs = {
         exceptions: {
-          media_stream_camera: [
+          camera: [
             {
               embeddingOrigin: 'https://foo-allow.com:443',
               origin: 'https://foo-allow.com:443',
@@ -59,7 +59,7 @@ cr.define('site_details_permission', function() {
         return browserProxy.whenCalled('setCategoryPermissionForOrigin').then(
             function(arguments) {
               assertEquals(origin, arguments[0]);
-              assertEquals('', arguments[1]);
+              assertEquals(origin, arguments[1]);
               assertEquals(testElement.category, arguments[2]);
               assertEquals(allow ?
                   settings.PermissionValues.ALLOW :
@@ -77,7 +77,7 @@ cr.define('site_details_permission', function() {
 
         return browserProxy.whenCalled('getExceptionList').then(function() {
           assertTrue(testElement.$.details.hidden);
-        }.bind(this));
+        });
       });
 
       test('camera category', function() {
@@ -86,27 +86,26 @@ cr.define('site_details_permission', function() {
         testElement.category = settings.ContentSettingsTypes.CAMERA;
         testElement.site = {
           origin: origin,
-          embeddingOrigin: '',
+          embeddingOrigin: origin,
         };
 
         return browserProxy.whenCalled('getExceptionList').then(function() {
           assertFalse(testElement.$.details.hidden);
 
           var header = testElement.$.details.querySelector(
-              '.permission-header');
+              '#permissionHeader');
           assertEquals('Camera', header.innerText.trim(),
               'Widget should be labelled correctly');
 
           // Flip the permission and validate that prefs stay in sync.
-          return validatePermissionFlipWorks(origin, true).then(function() {
-            browserProxy.resetResolver('setCategoryPermissionForOrigin');
-            return validatePermissionFlipWorks(origin, false).then(function() {
-              browserProxy.resetResolver('setCategoryPermissionForOrigin');
-              return validatePermissionFlipWorks(origin, true).then(function() {
-              }.bind(this));
-            }.bind(this));
-          }.bind(this));
-        }.bind(this));
+          return validatePermissionFlipWorks(origin, true);
+        }).then(function() {
+          browserProxy.resetResolver('setCategoryPermissionForOrigin');
+          return validatePermissionFlipWorks(origin, false);
+        }).then(function() {
+          browserProxy.resetResolver('setCategoryPermissionForOrigin');
+          return validatePermissionFlipWorks(origin, true);
+        });
       });
 
       test('disappear on empty', function() {
@@ -115,17 +114,17 @@ cr.define('site_details_permission', function() {
         testElement.category = settings.ContentSettingsTypes.CAMERA;
         testElement.site = {
           origin: origin,
-          embeddingOrigin: '',
+          embeddingOrigin: origin,
         };
 
         return browserProxy.whenCalled('getExceptionList').then(function() {
           assertFalse(testElement.$.details.hidden);
 
           browserProxy.setPrefs(prefsEmpty);
-          return browserProxy.whenCalled('getExceptionList').then(function() {
-            assertTrue(testElement.$.details.hidden);
-          }.bind(this));
-        }.bind(this));
+          return browserProxy.whenCalled('getExceptionList');
+        }).then(function() {
+          assertTrue(testElement.$.details.hidden);
+        });
       });
     });
   }

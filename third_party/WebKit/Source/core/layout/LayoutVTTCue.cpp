@@ -213,11 +213,11 @@ void SnapToLinesLayouter::layout()
     // area and a width of margin at the right of the rendering area.
     IntRect titleArea = m_cueBox.containingBlock()->absoluteBoundingBoxRect();
     if (blink::isHorizontalWritingMode(writingMode)) {
-        titleArea.move(0, margin);
-        titleArea.contract(0, 2 * margin);
+        titleArea.move(0, margin.toInt());
+        titleArea.contract(0, (2 * margin).toInt());
     } else {
-        titleArea.move(margin, 0);
-        titleArea.contract(2 * margin, 0);
+        titleArea.move(margin.toInt(), 0);
+        titleArea.contract((2 * margin).toInt(), 0);
     }
 
     // 15. Step loop: If none of the boxes in boxes would overlap any of the
@@ -319,7 +319,7 @@ void LayoutVTTCue::layout()
     // Determine the area covered by the media controls, if any. If the controls
     // are present, they are the next sibling of the text track container, which
     // is our parent. (LayoutMedia ensures that the media controls are laid out
-    // before text tracks, so that the layout is up-to-date here.)
+    // before text tracks, so that the layout is up to date here.)
     ASSERT(parent()->node()->isTextTrackContainer());
     IntRect controlsRect;
     if (LayoutObject* parentSibling = parent()->nextSibling()) {

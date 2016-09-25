@@ -33,6 +33,7 @@
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "core/dom/Document.h"
+#include "core/events/Event.h"
 #include "core/frame/LocalFrame.h"
 
 namespace blink {
@@ -86,12 +87,13 @@ v8::Local<v8::Value> V8EventListener::callListenerFunction(ScriptState* scriptSt
     if (!frame)
         return v8::Local<v8::Value>();
 
-    if (!frame->script().canExecuteScripts(AboutToExecuteScript))
+    // TODO(jochen): Consider moving this check into canExecuteScripts. http://crbug.com/608641
+    if (scriptState->world().isMainWorld() && !frame->script().canExecuteScripts(AboutToExecuteScript))
         return v8::Local<v8::Value>();
 
     v8::Local<v8::Value> parameters[1] = { jsEvent };
     v8::Local<v8::Value> result;
-    if (!frame->script().callFunction(handlerFunction, receiver, WTF_ARRAY_LENGTH(parameters), parameters).ToLocal(&result))
+    if (!V8ScriptRunner::callFunction(handlerFunction, frame->document(), receiver, WTF_ARRAY_LENGTH(parameters), parameters, scriptState->isolate()).ToLocal(&result))
         return v8::Local<v8::Value>();
     return result;
 }

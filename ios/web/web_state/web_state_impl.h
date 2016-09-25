@@ -20,6 +20,8 @@
 #include "ios/web/navigation/navigation_manager_delegate.h"
 #include "ios/web/navigation/navigation_manager_impl.h"
 #include "ios/web/net/request_tracker_impl.h"
+#import "ios/web/public/java_script_dialog_callback.h"
+#include "ios/web/public/java_script_dialog_type.h"
 #include "ios/web/public/web_state/web_state.h"
 #include "url/gurl.h"
 
@@ -36,6 +38,7 @@ class HttpResponseHeaders;
 namespace web {
 
 class BrowserState;
+struct ContextMenuParams;
 struct Credential;
 struct FaviconURL;
 struct LoadCommittedDetails;
@@ -182,11 +185,6 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // that is the point where MIME type is set from HTTP headers.
   void SetContentsMimeType(const std::string& mime_type);
 
-  // Executes a JavaScript string on the page asynchronously.
-  // TODO(shreyasv): Rename this to ExecuteJavaScript for consistency with
-  // upstream API.
-  virtual void ExecuteJavaScriptAsync(const base::string16& script);
-
   // Returns whether the navigation corresponding to |request| should be allowed
   // to continue by asking its policy deciders. Defaults to true.
   bool ShouldAllowRequest(NSURLRequest* request);
@@ -220,9 +218,12 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   void SetDelegate(WebStateDelegate* delegate) override;
   bool IsWebUsageEnabled() const override;
   void SetWebUsageEnabled(bool enabled) override;
+  bool ShouldSuppressDialogs() const override;
+  void SetShouldSuppressDialogs(bool should_suppress) override;
   UIView* GetView() override;
   BrowserState* GetBrowserState() const override;
   void OpenURL(const WebState::OpenURLParams& params) override;
+  const NavigationManager* GetNavigationManager() const override;
   NavigationManager* GetNavigationManager() override;
   CRWJSInjectionReceiver* GetJSInjectionReceiver() const override;
   void ExecuteJavaScript(const base::string16& javascript) override;
@@ -233,6 +234,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   bool ContentIsHTML() const override;
   const base::string16& GetTitle() const override;
   bool IsLoading() const override;
+  double GetLoadingProgress() const override;
   bool IsBeingDestroyed() const override;
   const GURL& GetVisibleURL() const override;
   const GURL& GetLastCommittedURL() const override;
@@ -240,7 +242,6 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   void ShowTransientContentView(CRWContentView* content_view) override;
   bool IsShowingWebInterstitial() const override;
   WebInterstitial* GetWebInterstitial() const override;
-  int GetCertGroupId() const override;
   void AddScriptCommandCallback(const ScriptCommandCallback& callback,
                                 const std::string& command_prefix) override;
   void RemoveScriptCommandCallback(const std::string& command_prefix) override;
@@ -250,6 +251,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
                     uint32_t max_bitmap_size,
                     bool bypass_cache,
                     const ImageDownloadCallback& callback) override;
+  shell::InterfaceRegistry* GetMojoInterfaceRegistry() override;
   base::WeakPtr<WebState> AsWeakPtr() override;
 
   // Adds |interstitial|'s view to the web controller's content view.
@@ -260,6 +262,18 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
 
   // Notifies the delegate that the load progress was updated.
   void SendChangeLoadProgress(double progress);
+  // Notifies the delegate that a context menu needs handling.
+  bool HandleContextMenu(const ContextMenuParams& params);
+
+  // Notifies the delegate that a JavaScript dialog needs to be presented.
+  void RunJavaScriptDialog(const GURL& origin_url,
+                           JavaScriptDialogType java_script_dialog_type,
+                           NSString* message_text,
+                           NSString* default_prompt_text,
+                           const DialogClosedCallback& callback);
+
+  // Cancels all dialogs associated with this web_state.
+  void CancelActiveAndPendingDialogs();
 
   // NavigationManagerDelegate:
   void NavigateToPendingEntry() override;
@@ -350,6 +364,9 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // any WeakPtrs to WebStateImpl are invalidated before its member variable's
   // destructors are executed, rendering them invalid.
   base::WeakPtrFactory<WebState> weak_factory_;
+
+  // Mojo interface registry for this WebState.
+  std::unique_ptr<shell::InterfaceRegistry> mojo_interface_registry_;
 
   DISALLOW_COPY_AND_ASSIGN(WebStateImpl);
 };

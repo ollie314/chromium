@@ -23,11 +23,11 @@ animationstart
 audioend
 audioprocess
 audiostart
-autocomplete
-autocompleteerror
+auxclick
 availablechange
 beforecopy
 beforecut
+beforeinput
 beforeinstallprompt
 beforepaste
 beforeunload
@@ -65,6 +65,7 @@ cut
 datachannel
 dblclick
 defaultsessionstart
+devicechange
 devicelight
 devicemotion
 deviceorientation
@@ -135,6 +136,7 @@ loading
 loadingdone
 loadingerror
 loadstart
+longtasktimingbufferfull
 lostpointercapture
 mark
 message
@@ -242,10 +244,14 @@ updateready
 updatestart
 upgradeneeded
 versionchange
-visualviewportchanged
 visibilitychange
 voiceschanged
 volumechange
+vrdisplayconnect
+vrdisplaydisconnect
+vrdisplayactivate
+vrdisplaydeactivate
+vrdisplaypresentchange
 waiting
 waitingforkey
 webglcontextcreationerror

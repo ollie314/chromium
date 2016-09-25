@@ -10,9 +10,9 @@
 #include "build/build_config.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/constants.h"
-#include "grit/components_strings.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -102,6 +102,10 @@ BookmarkAppConfirmationView::BookmarkAppConfirmationView(
 
 views::View* BookmarkAppConfirmationView::GetInitiallyFocusedView() {
   return title_tf_;
+}
+
+ui::ModalType BookmarkAppConfirmationView::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 base::string16 BookmarkAppConfirmationView::GetWindowTitle() const {

@@ -13,6 +13,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.FlakyTest;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
@@ -34,6 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Integration tests for autofill keyboard accessory.
  */
 @CommandLineFlags.Add({ChromeSwitches.ENABLE_AUTOFILL_KEYBOARD_ACCESSORY})
+@RetryOnFailure
 public class AutofillKeyboardAccessoryTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private final AtomicReference<ContentViewCore> mViewCoreRef =
             new AtomicReference<ContentViewCore>();
@@ -49,7 +51,8 @@ public class AutofillKeyboardAccessoryTest extends ChromeActivityTestCaseBase<Ch
     @Override
     public void startMainActivity() throws InterruptedException {}
 
-    private void loadTestPage(boolean isRtl) throws InterruptedException, ExecutionException {
+    private void loadTestPage(boolean isRtl) throws InterruptedException, ExecutionException,
+            TimeoutException {
         startMainActivityWithURL(UrlUtils.encodeHtmlDataUri("<html"
                 + (isRtl ? " dir=\"rtl\"" : "")
                 + "><head>"
@@ -101,7 +104,7 @@ public class AutofillKeyboardAccessoryTest extends ChromeActivityTestCaseBase<Ch
     @MediumTest
     @Feature({"keyboard-accessory"})
     public void testAutofocusedFieldDoesNotShowKeyboardAccessory() throws InterruptedException,
-           ExecutionException {
+           ExecutionException, TimeoutException {
         loadTestPage(false);
         assertTrue("Keyboard accessory should be hidden.",
                 ThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {

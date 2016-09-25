@@ -23,21 +23,21 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
 #include "net/cookies/canonical_cookie.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/views/border.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/scroll_view.h"
@@ -342,13 +342,11 @@ views::View* CollectedCookiesViews::CreateAllowedPane() {
   allowed_cookies_tree_->set_auto_expand_children(true);
   allowed_cookies_tree_->SetController(this);
 
-  block_allowed_button_ = new views::LabelButton(this,
+  block_allowed_button_ = views::MdTextButton::CreateSecondaryUiButton(this,
       l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_BLOCK_BUTTON));
-  block_allowed_button_->SetStyle(views::Button::STYLE_BUTTON);
 
-  delete_allowed_button_ = new views::LabelButton(this,
+  delete_allowed_button_ = views::MdTextButton::CreateSecondaryUiButton(this,
       l10n_util::GetStringUTF16(IDS_COOKIES_REMOVE_LABEL));
-  delete_allowed_button_->SetStyle(views::Button::STYLE_BUTTON);
 
   // Create the view that holds all the controls together.  This will be the
   // pane added to the tabbed pane.
@@ -416,12 +414,11 @@ views::View* CollectedCookiesViews::CreateBlockedPane() {
   blocked_cookies_tree_->set_auto_expand_children(true);
   blocked_cookies_tree_->SetController(this);
 
-  allow_blocked_button_ = new views::LabelButton(this,
-      l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_ALLOW_BUTTON));
-  allow_blocked_button_->SetStyle(views::Button::STYLE_BUTTON);
-  for_session_blocked_button_ = new views::LabelButton(this,
+  allow_blocked_button_ = views::MdTextButton::CreateSecondaryUiButton(
+      this, l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_ALLOW_BUTTON));
+  for_session_blocked_button_ = views::MdTextButton::CreateSecondaryUiButton(
+      this,
       l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_SESSION_ONLY_BUTTON));
-  for_session_blocked_button_->SetStyle(views::Button::STYLE_BUTTON);
 
   // Create the view that holds all the controls together.  This will be the
   // pane added to the tabbed pane.
@@ -500,8 +497,10 @@ void CollectedCookiesViews::EnableControls() {
 }
 
 void CollectedCookiesViews::ShowCookieInfo() {
-  ui::TreeModelNode* node = allowed_cookies_tree_->GetSelectedNode();
-  if (!node)
+  ui::TreeModelNode* node = allowed_cookies_tree_->IsDrawn() ?
+                            allowed_cookies_tree_->GetSelectedNode() : nullptr;
+
+  if (!node && blocked_cookies_tree_->IsDrawn())
     node = blocked_cookies_tree_->GetSelectedNode();
 
   if (node) {

@@ -4,16 +4,16 @@
 
 #include "extensions/browser/api/bluetooth/bluetooth_event_router.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread.h"
+#include "device/bluetooth/bluetooth_common.h"
 #include "device/bluetooth/bluetooth_uuid.h"
 #include "device/bluetooth/test/mock_bluetooth_adapter.h"
 #include "extensions/browser/extension_registry.h"
@@ -43,7 +43,6 @@ class BluetoothEventRouterTest : public ExtensionsTest {
   BluetoothEventRouterTest()
       : ui_thread_(content::BrowserThread::UI, &message_loop_),
         mock_adapter_(new testing::StrictMock<device::MockBluetoothAdapter>()),
-        notification_service_(content::NotificationService::Create()),
         router_(new BluetoothEventRouter(browser_context())) {
     router_->SetAdapterForTest(mock_adapter_);
   }
@@ -60,8 +59,7 @@ class BluetoothEventRouterTest : public ExtensionsTest {
   // Note: |ui_thread_| must be declared before |router_|.
   content::TestBrowserThread ui_thread_;
   testing::StrictMock<device::MockBluetoothAdapter>* mock_adapter_;
-  scoped_ptr<content::NotificationService> notification_service_;
-  scoped_ptr<BluetoothEventRouter> router_;
+  std::unique_ptr<BluetoothEventRouter> router_;
 };
 
 TEST_F(BluetoothEventRouterTest, BluetoothEventListener) {
@@ -100,15 +98,13 @@ TEST_F(BluetoothEventRouterTest, UnloadExtension) {
 // This test check that calling SetDiscoveryFilter before StartDiscoverySession
 // for given extension will start session with proper filter.
 TEST_F(BluetoothEventRouterTest, SetDiscoveryFilter) {
-  scoped_ptr<device::BluetoothDiscoveryFilter> discovery_filter(
-      new device::BluetoothDiscoveryFilter(
-          device::BluetoothDiscoveryFilter::Transport::TRANSPORT_LE));
+  std::unique_ptr<device::BluetoothDiscoveryFilter> discovery_filter(
+      new device::BluetoothDiscoveryFilter(device::BLUETOOTH_TRANSPORT_LE));
 
   discovery_filter->SetRSSI(-80);
   discovery_filter->AddUUID(device::BluetoothUUID("1000"));
 
-  device::BluetoothDiscoveryFilter df(
-      device::BluetoothDiscoveryFilter::Transport::TRANSPORT_LE);
+  device::BluetoothDiscoveryFilter df(device::BLUETOOTH_TRANSPORT_LE);
   df.CopyFrom(*discovery_filter);
 
   router_->SetDiscoveryFilter(std::move(discovery_filter), mock_adapter_,

@@ -16,6 +16,7 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
@@ -42,7 +43,7 @@ import java.util.concurrent.Callable;
  * Integration tests for the BindingManager API. This test plants a mock BindingManager
  * implementation and verifies that the signals it relies on are correctly delivered.
  */
-@CommandLineFlags.Add(ChromeSwitches.DISABLE_DOCUMENT_MODE)  // crbug.com/414719
+@RetryOnFailure
 public class BindingManagerIntegrationTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     private static class MockBindingManager implements BindingManager {
@@ -253,7 +254,7 @@ public class BindingManagerIntegrationTest extends ChromeActivityTestCaseBase<Ch
      * crashed in background is restored in foreground. This is a regression test for
      * http://crbug.com/399521.
      */
-    @DisabledTest // Flaked on the try bot: http://crbug.com/543153
+    @DisabledTest(message = "crbug.com/543153")
     @LargeTest
     @Feature({"ProcessManagement"})
     public void testCrashInBackground() throws InterruptedException {

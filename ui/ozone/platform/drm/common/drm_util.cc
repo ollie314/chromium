@@ -26,6 +26,15 @@
 #define DRM_CAP_CURSOR_HEIGHT 0x9
 #endif
 
+#if !defined(DRM_FORMAT_R8)
+// TODO(dshwang): after most linux and libdrm has this definition, remove it.
+#define DRM_FORMAT_R8 fourcc_code('R', '8', ' ', ' ')
+#endif
+#if !defined(DRM_FORMAT_YV12)
+// TODO(dcastagna): after libdrm has this definition, remove it.
+#define DRM_FORMAT_YV12 fourcc_code('Y', 'V', '1', '2')
+#endif
+
 namespace ui {
 
 namespace {
@@ -187,11 +196,11 @@ bool HasColorCorrectionMatrix(int fd, drmModeCrtc* crtc) {
 gfx::Size GetMaximumCursorSize(int fd) {
   uint64_t width = 0, height = 0;
   if (drmGetCap(fd, DRM_CAP_CURSOR_WIDTH, &width)) {
-    PLOG(WARNING) << "Unable to get cursor width capability";
+    VPLOG(1) << "Unable to get cursor width capability";
     return gfx::Size(kDefaultCursorWidth, kDefaultCursorHeight);
   }
   if (drmGetCap(fd, DRM_CAP_CURSOR_HEIGHT, &height)) {
-    PLOG(WARNING) << "Unable to get cursor height capability";
+    VPLOG(1) << "Unable to get cursor height capability";
     return gfx::Size(kDefaultCursorWidth, kDefaultCursorHeight);
   }
 
@@ -280,12 +289,12 @@ DisplaySnapshot_Params CreateDisplaySnapshotParams(
         static_cast<uint8_t*>(edid_blob->data),
         static_cast<uint8_t*>(edid_blob->data) + edid_blob->length);
 
-    GetDisplayIdFromEDID(params.edid, connector_index, &params.display_id,
-                         &params.product_id);
+    display::GetDisplayIdFromEDID(params.edid, connector_index,
+                                  &params.display_id, &params.product_id);
 
-    ParseOutputDeviceData(params.edid, nullptr, nullptr, &params.display_name,
-                          nullptr, nullptr);
-    ParseOutputOverscanFlag(params.edid, &params.has_overscan);
+    display::ParseOutputDeviceData(params.edid, nullptr, nullptr,
+                                   &params.display_name, nullptr, nullptr);
+    display::ParseOutputOverscanFlag(params.edid, &params.has_overscan);
   } else {
     VLOG(1) << "Failed to get EDID blob for connector "
             << info->connector()->connector_id;
@@ -318,6 +327,8 @@ DisplaySnapshot_Params CreateDisplaySnapshotParams(
 
 int GetFourCCFormatFromBufferFormat(gfx::BufferFormat format) {
   switch (format) {
+    case gfx::BufferFormat::R_8:
+      return DRM_FORMAT_R8;
     case gfx::BufferFormat::RGBA_8888:
       return DRM_FORMAT_ABGR8888;
     case gfx::BufferFormat::RGBX_8888:
@@ -326,8 +337,12 @@ int GetFourCCFormatFromBufferFormat(gfx::BufferFormat format) {
       return DRM_FORMAT_ARGB8888;
     case gfx::BufferFormat::BGRX_8888:
       return DRM_FORMAT_XRGB8888;
+    case gfx::BufferFormat::BGR_565:
+      return DRM_FORMAT_RGB565;
     case gfx::BufferFormat::UYVY_422:
       return DRM_FORMAT_UYVY;
+    case gfx::BufferFormat::YVU_420:
+      return DRM_FORMAT_YV12;
     default:
       NOTREACHED();
       return 0;
@@ -336,6 +351,8 @@ int GetFourCCFormatFromBufferFormat(gfx::BufferFormat format) {
 
 gfx::BufferFormat GetBufferFormatFromFourCCFormat(int format) {
   switch (format) {
+    case DRM_FORMAT_R8:
+      return gfx::BufferFormat::R_8;
     case DRM_FORMAT_ABGR8888:
       return gfx::BufferFormat::RGBA_8888;
     case DRM_FORMAT_XBGR8888:
@@ -344,8 +361,12 @@ gfx::BufferFormat GetBufferFormatFromFourCCFormat(int format) {
       return gfx::BufferFormat::BGRA_8888;
     case DRM_FORMAT_XRGB8888:
       return gfx::BufferFormat::BGRX_8888;
+    case DRM_FORMAT_RGB565:
+      return gfx::BufferFormat::BGR_565;
     case DRM_FORMAT_UYVY:
       return gfx::BufferFormat::UYVY_422;
+    case DRM_FORMAT_YV12:
+      return gfx::BufferFormat::YVU_420;
     default:
       NOTREACHED();
       return gfx::BufferFormat::BGRA_8888;
@@ -361,6 +382,8 @@ int GetFourCCFormatForFramebuffer(gfx::BufferFormat format) {
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
       return DRM_FORMAT_XRGB8888;
+    case gfx::BufferFormat::BGR_565:
+      return DRM_FORMAT_RGB565;
     case gfx::BufferFormat::UYVY_422:
       return DRM_FORMAT_UYVY;
     default:

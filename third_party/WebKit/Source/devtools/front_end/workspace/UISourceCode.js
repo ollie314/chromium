@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 /**
  * @constructor
  * @extends {WebInspector.Object}
@@ -63,18 +62,16 @@ WebInspector.UISourceCode = function(project, url, contentType)
     this._messages = [];
 }
 
-/**
- * @enum {string}
- */
+/** @enum {symbol} */
 WebInspector.UISourceCode.Events = {
-    WorkingCopyChanged: "WorkingCopyChanged",
-    WorkingCopyCommitted: "WorkingCopyCommitted",
-    TitleChanged: "TitleChanged",
-    SourceMappingChanged: "SourceMappingChanged",
-    MessageAdded: "MessageAdded",
-    MessageRemoved: "MessageRemoved",
-    LineDecorationAdded: "LineDecorationAdded",
-    LineDecorationRemoved: "LineDecorationRemoved"
+    WorkingCopyChanged: Symbol("WorkingCopyChanged"),
+    WorkingCopyCommitted: Symbol("WorkingCopyCommitted"),
+    TitleChanged: Symbol("TitleChanged"),
+    SourceMappingChanged: Symbol("SourceMappingChanged"),
+    MessageAdded: Symbol("MessageAdded"),
+    MessageRemoved: Symbol("MessageRemoved"),
+    LineDecorationAdded: Symbol("LineDecorationAdded"),
+    LineDecorationRemoved: Symbol("LineDecorationRemoved")
 }
 
 WebInspector.UISourceCode.prototype = {
@@ -190,14 +187,14 @@ WebInspector.UISourceCode.prototype = {
      */
     _updateName: function(name, url, contentType)
     {
-        var oldURД = this.url();
+        var oldURL = this.url();
         this._url = this._url.substring(0, this._url.length - this._name.length) + name;
         this._name = name;
         if (url)
             this._url = url;
         if (contentType)
             this._contentType = contentType;
-        this.dispatchEventToListeners(WebInspector.UISourceCode.Events.TitleChanged, oldURД);
+        this.dispatchEventToListeners(WebInspector.UISourceCode.Events.TitleChanged, oldURL);
     },
 
     /**
@@ -533,7 +530,7 @@ WebInspector.UISourceCode.prototype = {
      */
     extension: function()
     {
-        return WebInspector.TextUtils.extension(this._name);
+        return WebInspector.ParsedURL.extractExtension(this._name);
     },
 
     /**
@@ -554,12 +551,21 @@ WebInspector.UISourceCode.prototype = {
     searchInContent: function(query, caseSensitive, isRegex, callback)
     {
         var content = this.content();
-        if (content) {
-            WebInspector.StaticContentProvider.searchInContent(content, query, caseSensitive, isRegex, callback);
+        if (!content) {
+            this._project.searchInFileContent(this, query, caseSensitive, isRegex, callback);
             return;
         }
 
-        this._project.searchInFileContent(this, query, caseSensitive, isRegex, callback);
+        // searchInContent should call back later.
+        setTimeout(doSearch.bind(null, content), 0);
+
+        /**
+         * @param {string} content
+         */
+        function doSearch(content)
+        {
+            callback(WebInspector.ContentProvider.performSearchInContent(content, query, caseSensitive, isRegex));
+        }
     },
 
     /**

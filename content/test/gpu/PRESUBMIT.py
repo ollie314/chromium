@@ -10,11 +10,6 @@ for more details about the presubmit API built into depot_tools.
 
 import re
 
-def _PyLintChecks(input_api, output_api):
-  pylint_checks = input_api.canned_checks.GetPylint(input_api, output_api,
-          extra_paths_list=_GetPathsToPrepend(input_api), pylintrc='pylintrc')
-  return input_api.RunTests(pylint_checks)
-
 def _GetPathsToPrepend(input_api):
   current_dir = input_api.PresubmitLocalPath()
   chromium_src_dir = input_api.os_path.join(current_dir, '..', '..', '..')
@@ -24,10 +19,10 @@ def _GetPathsToPrepend(input_api):
     input_api.os_path.join(chromium_src_dir,
         'third_party', 'catapult', 'telemetry'),
     input_api.os_path.join(chromium_src_dir,
-        'third_party', 'catapult', 'catapult_base'),
+        'third_party', 'catapult', 'common', 'py_utils'),
   ]
 
-def _WebGLTextExpectationsTests(input_api, output_api):
+def _GpuUnittestsArePassingCheck(input_api, output_api):
   if not input_api.AffectedFiles():
     return []
 
@@ -57,14 +52,12 @@ def _WebGLTextExpectationsTests(input_api, output_api):
 
 def CheckChangeOnUpload(input_api, output_api):
   results = []
-  results.extend(_PyLintChecks(input_api, output_api))
-  results.extend(_WebGLTextExpectationsTests(input_api, output_api))
+  results.extend(_GpuUnittestsArePassingCheck(input_api, output_api))
   return results
 
 def CheckChangeOnCommit(input_api, output_api):
   results = []
-  results.extend(_PyLintChecks(input_api, output_api))
-  results.extend(_WebGLTextExpectationsTests(input_api, output_api))
+  results.extend(_GpuUnittestsArePassingCheck(input_api, output_api))
   return results
 
 def PostUploadHook(cl, change, output_api):
@@ -80,9 +73,10 @@ def PostUploadHook(cl, change, output_api):
     return []
 
   bots = [
-    'tryserver.chromium.linux:linux_optional_gpu_tests_rel',
-    'tryserver.chromium.mac:mac_optional_gpu_tests_rel',
-    'tryserver.chromium.win:win_optional_gpu_tests_rel',
+    'master.tryserver.chromium.linux:linux_optional_gpu_tests_rel',
+    'master.tryserver.chromium.mac:mac_optional_gpu_tests_rel',
+    'master.tryserver.chromium.win:win_optional_gpu_tests_rel',
+    'master.tryserver.chromium.android:android_optional_gpu_tests_rel',
   ]
 
   results = []

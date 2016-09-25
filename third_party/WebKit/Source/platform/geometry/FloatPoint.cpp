@@ -27,10 +27,10 @@
 #include "platform/geometry/FloatPoint.h"
 
 #include "SkPoint.h"
-#include "platform/FloatConversion.h"
 #include "platform/geometry/DoublePoint.h"
 #include "platform/geometry/LayoutPoint.h"
 #include "platform/geometry/LayoutSize.h"
+#include "wtf/MathExtras.h"
 #include "wtf/text/WTFString.h"
 #include <limits>
 #include <math.h>
@@ -92,7 +92,7 @@ SkPoint FloatPoint::data() const
 
 FloatPoint FloatPoint::narrowPrecision(double x, double y)
 {
-    return FloatPoint(narrowPrecisionToFloat(x), narrowPrecisionToFloat(y));
+    return FloatPoint(clampTo<float>(x), clampTo<float>(y));
 }
 
 bool findIntersection(const FloatPoint& p1, const FloatPoint& p2, const FloatPoint& d1, const FloatPoint& d2, FloatPoint& intersection)
@@ -114,11 +114,9 @@ bool findIntersection(const FloatPoint& p1, const FloatPoint& p2, const FloatPoi
     return true;
 }
 
-#ifndef NDEBUG
 String FloatPoint::toString() const
 {
-    return String::format("%f,%f", x(), y());
+    return String::format("%lg,%lg", x(), y());
 }
-#endif
 
 } // namespace blink

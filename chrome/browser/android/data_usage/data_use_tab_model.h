@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/containers/hash_tables.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -25,6 +27,10 @@
 namespace base {
 class SingleThreadTaskRunner;
 class TickClock;
+}
+
+namespace content {
+class NavigationEntry;
 }
 
 namespace chrome {
@@ -43,6 +49,12 @@ class ExternalDataUseObserverBridge;
 // events that took place.
 class DataUseTabModel {
  public:
+  // TrackingInfo maintains the tracking information for a single tab.
+  struct TrackingInfo {
+    std::string label;
+    std::string tag;
+  };
+
   // TransitionType enumerates the types of possible browser navigation events
   // and transitions.
   enum TransitionType {
@@ -66,30 +78,41 @@ class DataUseTabModel {
 
     // Navigating from history.
     TRANSITION_HISTORY_ITEM,
+
+    // Navigation back or forward.
+    TRANSITION_FORWARD_BACK,
+
+    // Navigation due to form submission.
+    TRANSITION_FORM_SUBMIT,
   };
 
   // TabDataUseObserver provides the interface for getting notifications from
-  // the DataUseTabModel. TabDataUseObserver is called back on UI thread.
+  // the DataUseTabModel. The observer must be added on the UI thread, and the
+  // callbacks will be received on the UI thread.
   class TabDataUseObserver {
    public:
     virtual ~TabDataUseObserver() {}
 
-    // Notification callback when tab tracking sessions are started and ended.
-    // The callback will be received on the same thread AddObserver was called
-    // from.
+    // Notification callbacks when tab tracking sessions are started and ended.
     virtual void NotifyTrackingStarting(SessionID::id_type tab_id) = 0;
     virtual void NotifyTrackingEnding(SessionID::id_type tab_id) = 0;
+
+    // Notification callback that DataUseTabModel is ready to process the UI
+    // navigation events.
+    virtual void OnDataUseTabModelReady() = 0;
   };
 
-  DataUseTabModel();
+  // The tags to report for data usage from a default chrome tab, and a chrome
+  // custom tab.
+  static const char kDefaultTag[];
+  static const char kCustomTabTag[];
 
-  // Initializes |this| on UI thread. |external_data_use_observer_bridge| is the
-  // pointer to ExternalDataUseObserverBridge object. DataUseTabModel and
-  // ExternalDataUseObserverBridge objects are owned by ExternalDataUseObserver
-  // and DataUseTabModel is destroyed first followed by
-  // ExternalDataUseObserverBridge.
-  void InitOnUIThread(
-      const ExternalDataUseObserverBridge* external_data_use_observer_bridge);
+  // |force_fetch_matching_rules_callback| is the callback to be run to initiate
+  // fetching matching rules and |on_matching_rules_fetched_callback|
+  // is the callback to be run after matching rules are fetched.
+  DataUseTabModel(
+      const base::Closure& force_fetch_matching_rules_callback,
+      const base::Callback<void(bool)>& on_matching_rules_fetched_callback);
 
   virtual ~DataUseTabModel();
 
@@ -99,10 +122,17 @@ class DataUseTabModel {
   // tab of the generated event, |transition| indicates the type of the UI
   // event/transition,  |url| is the URL in the source tab, |package| indicates
   // the android package name of external application that initiated the event.
+  // |navigation_entry| corresponds to the navigation entry of the current
+  // navigation in back-forward navigation history, and is used to save the
+  // current tracking label to be used for back-forward navigations.
+  // |navigation_entry| can be null in some cases where it cannot be retrieved
+  // such as buffered navigation events or when support for back-forward
+  // navigations is not needed such as custom tab navigation.
   void OnNavigationEvent(SessionID::id_type tab_id,
                          TransitionType transition,
                          const GURL& url,
-                         const std::string& package);
+                         const std::string& package,
+                         content::NavigationEntry* navigation_entry);
 
   // Notifies the DataUseTabModel that tab with |tab_id| is closed. Any active
   // tracking sessions for the tab are terminated, and the tab is marked as
@@ -112,23 +142,28 @@ class DataUseTabModel {
   // Notifies the DataUseTabModel that tracking label |label| is removed. Any
   // active tracking sessions with the label are ended, without notifying any of
   // the TabDataUseObserver.
-  virtual void OnTrackingLabelRemoved(std::string label);
+  virtual void OnTrackingLabelRemoved(const std::string& label);
 
-  // Gets the label for the tab with id |tab_id| at time |timestamp|.
-  // |output_label| must not be null. If a tab tracking session is found that
-  // was active at |timestamp|, returns true and |output_label| is populated
-  // with its label. Otherwise, returns false and |output_label| is set to
-  // empty string.
-  virtual bool GetLabelForTabAtTime(SessionID::id_type tab_id,
-                                    base::TimeTicks timestamp,
-                                    std::string* output_label) const;
+  // Gets the tracking information for the tab with id |tab_id| at time
+  // |timestamp|. |output_info| must not be null. If a tab tracking session is
+  // found that was active at |timestamp|, returns true and
+  // |output_tracking_info| is populated with its information. Otherwise,
+  // returns false.
+  virtual bool GetTrackingInfoForTabAtTime(
+      SessionID::id_type tab_id,
+      base::TimeTicks timestamp,
+      TrackingInfo* output_tracking_info) const;
 
   // Returns true if the navigation event would end the tracking session for
   // |tab_id|. |transition| is the type of the UI event/transition. |url| is the
-  // URL in the tab.
-  bool WouldNavigationEventEndTracking(SessionID::id_type tab_id,
-                                       TransitionType transition,
-                                       const GURL& url) const;
+  // URL in the tab. |navigation_entry| which can be null corresponds to the
+  // navigation entry of the current navigation in back-forward navigation
+  // history.
+  bool WouldNavigationEventEndTracking(
+      SessionID::id_type tab_id,
+      TransitionType transition,
+      const GURL& url,
+      const content::NavigationEntry* navigation_entry) const;
 
   // Adds observers to the observer list. Must be called on UI thread.
   // |observer| is notified on the UI thread.
@@ -164,6 +199,11 @@ class DataUseTabModel {
   // package name match.
   bool IsCustomTabPackageMatch(SessionID::id_type tab_id) const;
 
+  // Returns true if DataUseTabModel is ready to process UI navigation events.
+  bool is_ready_for_navigation_event() const {
+    return is_ready_for_navigation_event_;
+  }
+
  protected:
   // Notifies the observers that a data usage tracking session started for
   // |tab_id|. Protected for testing.
@@ -173,9 +213,14 @@ class DataUseTabModel {
   // |tab_id|. Protected for testing.
   void NotifyObserversOfTrackingEnding(SessionID::id_type tab_id);
 
+  // Notifies the observers that DataUseTabModel is ready to process navigation
+  // events.
+  void NotifyObserversOfDataUseTabModelReady();
+
  private:
   friend class DataUseTabModelTest;
   friend class ExternalDataUseObserverTest;
+  friend class ExternalDataUseReporterTest;
   friend class TabDataUseEntryTest;
   friend class TestDataUseTabModel;
   FRIEND_TEST_ALL_PREFIXES(DataUseTabModelTest,
@@ -195,51 +240,30 @@ class DataUseTabModel {
                            UnexpiredTabEntryRemovaltimeHistogram);
   FRIEND_TEST_ALL_PREFIXES(ExternalDataUseObserverTest,
                            MatchingRuleFetchOnControlAppInstall);
-  FRIEND_TEST_ALL_PREFIXES(
-      ExternalDataUseObserverTest,
-      ProcessBufferedNavigationEventsAfterControlAppNotInstalled);
-  FRIEND_TEST_ALL_PREFIXES(ExternalDataUseObserverTest,
-                           ProcessBufferedNavigationEventsAfterRuleFetch);
-  FRIEND_TEST_ALL_PREFIXES(ExternalDataUseObserverTest,
-                           ProcessBufferedNavigationEventsAfterMaxLimit);
 
   typedef base::hash_map<SessionID::id_type, TabDataUseEntry> TabEntryMap;
-
-  // Contains the details of a single UI navigation event.
-  struct DataUseUINavigationEvent {
-    DataUseUINavigationEvent(SessionID::id_type tab_id,
-                             TransitionType transition_type,
-                             GURL url,
-                             std::string package)
-        : tab_id(tab_id),
-          transition_type(transition_type),
-          url(url),
-          package(package) {}
-
-    const SessionID::id_type tab_id;
-    const TransitionType transition_type;
-    const GURL url;
-    const std::string package;
-  };
 
   // Gets the current label of a tab, and the new label if a navigation event
   // occurs in the tab. |tab_id| is the source tab of the generated event,
   // |transition| indicates the type of the UI event/transition,  |url| is the
   // URL in the source tab, |package| indicates the android package name of
-  // external application that initiated the event. |current_label|, |new_label|
-  // and |is_package_match| should not be null, and are set with current and new
-  // labels respectively. |current_label| will be set to empty string, if there
-  // is no active tracking session. |new_label| will be set to empty string if
-  // there would be no active tracking session if the navigation happens.
-  // |is_package_match| will be set to true if a tracking session will start due
-  // to package name match.
-  void GetCurrentAndNewLabelForNavigationEvent(SessionID::id_type tab_id,
-                                               TransitionType transition,
-                                               const GURL& url,
-                                               const std::string& package,
-                                               std::string* current_label,
-                                               std::string* new_label,
-                                               bool* is_package_match) const;
+  // external application that initiated the event. |navigation_entry| which can
+  // be null is the navigation entry of the current navigation in back-forward
+  // history. |current_label|, |new_label| and |is_package_match| should not be
+  // null, and are set with current and new labels respectively. |current_label|
+  // will be set to empty string, if there is no active tracking session.
+  // |new_label| will be set to empty string if there would be no active
+  // tracking session if the navigation happens. |is_package_match| will be set
+  // to true if a tracking session will start due to package name match.
+  void GetCurrentAndNewLabelForNavigationEvent(
+      SessionID::id_type tab_id,
+      TransitionType transition,
+      const GURL& url,
+      const std::string& package,
+      const content::NavigationEntry* navigation_entry,
+      std::string* current_label,
+      std::string* new_label,
+      bool* is_package_match) const;
 
   // Initiates a new tracking session with the |label| for tab with id |tab_id|.
   // |is_custom_tab_package_match| is true if |tab_id| is a custom tab and
@@ -256,11 +280,6 @@ class DataUseTabModel {
   // |kMaxTabEntries|, oldest unexpired tab entries will be removed until its
   // size is |kMaxTabEntries|.
   void CompactTabEntries();
-
-  // Processes the UI navigation events buffered in |data_use_ui_navigations_|
-  // and deletes the vector in |data_use_ui_navigations_| so that navigation
-  // events will not be buffered any more.
-  void ProcessBufferedNavigationEvents();
 
   // Collection of observers that receive tracking session start and end
   // notifications. Notifications are posted on UI thread.
@@ -286,18 +305,17 @@ class DataUseTabModel {
   // Stores the matching patterns.
   std::unique_ptr<DataUseMatcher> data_use_matcher_;
 
+  // Callback to be run to initiate fetching the matching rules.
+  const base::Closure force_fetch_matching_rules_callback_;
+
+  // True if DataUseTabModel is ready to process UI navigation events.
+  // DataUseTabModel will be considered ready when the first rule fetch is
+  // complete or the control app not installed callback was received, whichever
+  // is sooner.
+  bool is_ready_for_navigation_event_;
+
   // True if the external control app is installed.
   bool is_control_app_installed_;
-
-  // Buffer of UI navigation events that occurred until the first rule fetch is
-  // complete or the control app not installed callback was received or until
-  // |kDefaultMaxNavigationEventsBuffered| navigation events were buffered,
-  // whichever occurs first. Existence of the vector in scoped_ptr indicates if
-  // the UI navigation events need to be buffered. If the scoped_ptr contains a
-  // vector all navigation events will be added to it. Otherwise all navigation
-  // events will be processed immediately.
-  std::unique_ptr<std::vector<DataUseUINavigationEvent>>
-      data_use_ui_navigations_;
 
   base::ThreadChecker thread_checker_;
 

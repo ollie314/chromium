@@ -86,8 +86,7 @@ std::unique_ptr<DictionaryPrefUpdate> GetWindowPlacementDictionaryReadWrite(
   DCHECK(!window_name.empty());
   // A normal DictionaryPrefUpdate will suffice for non-app windows.
   if (prefs->FindPreference(window_name.c_str())) {
-    return base::WrapUnique(
-        new DictionaryPrefUpdate(prefs, window_name.c_str()));
+    return base::MakeUnique<DictionaryPrefUpdate>(prefs, window_name.c_str());
   }
   return std::unique_ptr<DictionaryPrefUpdate>(
       new WindowPlacementPrefUpdate(prefs, window_name));
@@ -134,6 +133,13 @@ void SaveWindowPlacement(const Browser* browser,
       SessionServiceFactory::GetForProfileIfExisting(browser->profile());
   if (session_service)
     session_service->SetWindowBounds(browser->session_id(), bounds, show_state);
+}
+
+void SaveWindowWorkspace(const Browser* browser, const std::string& workspace) {
+  SessionService* session_service =
+      SessionServiceFactory::GetForProfileIfExisting(browser->profile());
+  if (session_service)
+    session_service->SetWindowWorkspace(browser->session_id(), workspace);
 }
 
 void GetSavedWindowBoundsAndShowState(const Browser* browser,

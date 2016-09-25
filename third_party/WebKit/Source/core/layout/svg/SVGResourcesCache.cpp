@@ -24,6 +24,7 @@
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCycleSolver.h"
 #include "core/svg/SVGDocumentExtensions.h"
+#include <memory>
 
 namespace blink {
 
@@ -40,15 +41,13 @@ void SVGResourcesCache::addResourcesFromLayoutObject(LayoutObject* object, const
     ASSERT(object);
     ASSERT(!m_cache.contains(object));
 
-    const SVGComputedStyle& svgStyle = style.svgStyle();
-
     // Build a list of all resources associated with the passed LayoutObject.
-    OwnPtr<SVGResources> newResources = SVGResources::buildResources(object, svgStyle);
+    std::unique_ptr<SVGResources> newResources = SVGResources::buildResources(object, style);
     if (!newResources)
         return;
 
     // Put object in cache.
-    SVGResources* resources = m_cache.set(object, newResources.release()).storedValue->value.get();
+    SVGResources* resources = m_cache.set(object, std::move(newResources)).storedValue->value.get();
 
     // Run cycle-detection _afterwards_, so self-references can be caught as well.
     SVGResourcesCycleSolver solver(object, resources);
@@ -64,7 +63,7 @@ void SVGResourcesCache::addResourcesFromLayoutObject(LayoutObject* object, const
 
 void SVGResourcesCache::removeResourcesFromLayoutObject(LayoutObject* object)
 {
-    OwnPtr<SVGResources> resources = m_cache.take(object);
+    std::unique_ptr<SVGResources> resources = m_cache.take(object);
     if (!resources)
         return;
 

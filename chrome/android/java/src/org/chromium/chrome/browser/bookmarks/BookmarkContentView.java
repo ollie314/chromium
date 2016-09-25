@@ -53,7 +53,7 @@ public class BookmarkContentView extends RelativeLayout implements
             shadow.setVisibility(View.GONE);
         } else {
             shadow.init(ApiCompatibilityUtils.getColor(getResources(),
-                    R.color.bookmark_app_bar_shadow_color), FadingShadow.POSITION_TOP);
+                    R.color.toolbar_shadow_color), FadingShadow.POSITION_TOP);
         }
     }
 
@@ -63,8 +63,8 @@ public class BookmarkContentView extends RelativeLayout implements
      *         method. False otherwise.
      */
     boolean onBackPressed() {
-        if (mDelegate != null && mDelegate.isSelectionEnabled()) {
-            mDelegate.clearSelection();
+        if (mDelegate != null && mDelegate.getSelectionDelegate().isSelectionEnabled()) {
+            mDelegate.getSelectionDelegate().clearSelection();
             return true;
         }
         return false;

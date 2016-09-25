@@ -46,21 +46,22 @@
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_view_cocoa.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/toolbar/app_menu_badge_controller.h"
+#include "chrome/browser/ui/toolbar/app_menu_icon_controller.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
 #import "ui/base/cocoa/menu_controller.h"
 #import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -160,6 +161,7 @@ CGFloat BrowserActionsContainerDelegate::GetMaxAllowedWidth() {
 - (void)browserActionsContainerWillAnimate:(NSNotification*)notification;
 - (void)adjustLocationSizeBy:(CGFloat)dX animate:(BOOL)animate;
 - (void)updateAppMenuButtonSeverity:(AppMenuIconPainter::Severity)severity
+                           iconType:(AppMenuIconController::IconType)iconType
                             animate:(BOOL)animate;
 @end
 
@@ -192,22 +194,21 @@ class CommandObserverBridge : public CommandObserver {
 // A class registered for C++ notifications. This is used to detect changes in
 // preferences and upgrade available notifications. Bridges the notification
 // back to the ToolbarController.
-class NotificationBridge : public AppMenuBadgeController::Delegate {
+class NotificationBridge : public AppMenuIconController::Delegate {
  public:
   explicit NotificationBridge(ToolbarController* controller)
       : controller_(controller),
-        badge_controller_([controller browser]->profile(), this) {
-  }
+        app_menu_icon_controller_([controller browser]->profile(), this) {}
   ~NotificationBridge() override {}
 
-  void UpdateBadgeSeverity() {
-    badge_controller_.UpdateDelegate();
-  }
+  void UpdateSeverity() { app_menu_icon_controller_.UpdateDelegate(); }
 
-  void UpdateBadgeSeverity(AppMenuBadgeController::BadgeType type,
-                           AppMenuIconPainter::Severity severity,
-                           bool animate) override {
-    [controller_ updateAppMenuButtonSeverity:severity animate:animate];
+  void UpdateSeverity(AppMenuIconController::IconType type,
+                      AppMenuIconPainter::Severity severity,
+                      bool animate) override {
+    [controller_ updateAppMenuButtonSeverity:severity
+                                    iconType:type
+                                     animate:animate];
   }
 
   void OnPreferenceChanged(const std::string& pref_name) {
@@ -217,7 +218,7 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
  private:
   ToolbarController* controller_;  // weak, owns us
 
-  AppMenuBadgeController badge_controller_;
+  AppMenuIconController app_menu_icon_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationBridge);
 };
@@ -229,18 +230,10 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
 @synthesize browser = browser_;
 
 + (CGFloat)locationBarHeight {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return 29;
-  }
-
   return kMaterialDesignLocationBarHeight;
 }
 
 + (CGFloat)appMenuLeftPadding {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return 3;
-  }
-
   return kMaterialDesignElementPadding;
 }
 
@@ -296,146 +289,98 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
   // When linking and running on 10.10+, both -awakeFromNib and -viewDidLoad may
   // be called, don't initialize twice.
   if (locationBarView_) {
-    DCHECK(base::mac::IsOSYosemiteOrLater());
+    DCHECK(base::mac::IsAtLeastOS10_10());
     return;
   }
 
   // Make Material Design layout adjustments to the NIB items.
-  bool isModeMaterial = ui::MaterialDesignController::IsModeMaterial();
-  if (isModeMaterial) {
-    ToolbarView* toolbarView = [self toolbarView];
-    NSRect toolbarBounds = [toolbarView bounds];
-    NSSize toolbarButtonSize = [ToolbarButton toolbarButtonSize];
+  ToolbarView* toolbarView = [self toolbarView];
+  NSRect toolbarBounds = [toolbarView bounds];
+  NSSize toolbarButtonSize = [ToolbarButton toolbarButtonSize];
 
-    // Set the toolbar height.
-    NSRect frame = [toolbarView frame];
-    frame.size.height = [self baseToolbarHeight];
-    [toolbarView setFrame:frame];
+  // Set the toolbar height.
+  NSRect frame = [toolbarView frame];
+  frame.size.height = [self baseToolbarHeight];
+  [toolbarView setFrame:frame];
 
-    NSRect backButtonFrame = [backButton_ frame];
-    backButtonFrame.origin.x =
-        kMaterialDesignElementPadding + kMaterialDesignButtonInset;
-    backButtonFrame.origin.y = NSMaxY(toolbarBounds) -
-        kMaterialDesignElementPadding - toolbarButtonSize.height;
-    backButtonFrame.size = toolbarButtonSize;
-    [backButton_ setFrame:backButtonFrame];
+  NSRect backButtonFrame = [backButton_ frame];
+  backButtonFrame.origin.x =
+      kMaterialDesignElementPadding + kMaterialDesignButtonInset;
+  backButtonFrame.origin.y = NSMaxY(toolbarBounds) -
+      kMaterialDesignElementPadding - toolbarButtonSize.height;
+  backButtonFrame.size = toolbarButtonSize;
+  [backButton_ setFrame:backButtonFrame];
 
-    NSRect forwardButtonFrame = [forwardButton_ frame];
-    forwardButtonFrame.origin.x =
-        NSMaxX(backButtonFrame) + 2 * kMaterialDesignButtonInset;
-    forwardButtonFrame.origin.y = backButtonFrame.origin.y;
-    forwardButtonFrame.size = toolbarButtonSize;
-    [forwardButton_ setFrame:forwardButtonFrame];
+  NSRect forwardButtonFrame = [forwardButton_ frame];
+  forwardButtonFrame.origin.x =
+      NSMaxX(backButtonFrame) + 2 * kMaterialDesignButtonInset;
+  forwardButtonFrame.origin.y = backButtonFrame.origin.y;
+  forwardButtonFrame.size = toolbarButtonSize;
+  [forwardButton_ setFrame:forwardButtonFrame];
 
-    NSRect reloadButtonFrame = [reloadButton_ frame];
-    reloadButtonFrame.origin.x =
-        NSMaxX(forwardButtonFrame) + 2 * kMaterialDesignButtonInset;
-    reloadButtonFrame.origin.y = forwardButtonFrame.origin.y;
-    reloadButtonFrame.size = toolbarButtonSize;
-    [reloadButton_ setFrame:reloadButtonFrame];
+  NSRect reloadButtonFrame = [reloadButton_ frame];
+  reloadButtonFrame.origin.x =
+      NSMaxX(forwardButtonFrame) + 2 * kMaterialDesignButtonInset;
+  reloadButtonFrame.origin.y = forwardButtonFrame.origin.y;
+  reloadButtonFrame.size = toolbarButtonSize;
+  [reloadButton_ setFrame:reloadButtonFrame];
 
-    NSRect homeButtonFrame = [homeButton_ frame];
-    homeButtonFrame.origin.x =
-        NSMaxX(reloadButtonFrame) + 2 * kMaterialDesignButtonInset;
-    homeButtonFrame.origin.y = reloadButtonFrame.origin.y;
-    homeButtonFrame.size = toolbarButtonSize;
-    [homeButton_ setFrame:homeButtonFrame];
+  NSRect homeButtonFrame = [homeButton_ frame];
+  homeButtonFrame.origin.x =
+      NSMaxX(reloadButtonFrame) + 2 * kMaterialDesignButtonInset;
+  homeButtonFrame.origin.y = reloadButtonFrame.origin.y;
+  homeButtonFrame.size = toolbarButtonSize;
+  [homeButton_ setFrame:homeButtonFrame];
 
-    // Replace the app button from the nib with an AppToolbarButton instance for
-    // Material Design.
-    AppToolbarButton* newMenuButton =
-        [[[AppToolbarButton alloc] initWithFrame:[appMenuButton_ frame]]
-            autorelease];
-    [newMenuButton setAutoresizingMask:[appMenuButton_ autoresizingMask]];
-    [[appMenuButton_ superview] addSubview:newMenuButton];
-    [appMenuButton_ removeFromSuperview];
-    appMenuButton_ = newMenuButton;
+  // Replace the app button from the nib with an AppToolbarButton instance for
+  // Material Design.
+  AppToolbarButton* newMenuButton =
+      [[[AppToolbarButton alloc] initWithFrame:[appMenuButton_ frame]]
+          autorelease];
+  [newMenuButton setAutoresizingMask:[appMenuButton_ autoresizingMask]];
+  [[appMenuButton_ superview] addSubview:newMenuButton];
+  [appMenuButton_ removeFromSuperview];
+  appMenuButton_ = newMenuButton;
 
-    // Adjust the menu button's position.
-    NSRect menuButtonFrame = [appMenuButton_ frame];
-    CGFloat menuButtonFrameMaxX =
-        NSMaxX(toolbarBounds) - [ToolbarController appMenuLeftPadding];
-    menuButtonFrame.origin.x =
-        menuButtonFrameMaxX - kMaterialDesignButtonInset -
-            toolbarButtonSize.width;
-    menuButtonFrame.origin.y = homeButtonFrame.origin.y;
-    menuButtonFrame.size = toolbarButtonSize;
-    [appMenuButton_ setFrame:menuButtonFrame];
+  // Adjust the menu button's position.
+  NSRect menuButtonFrame = [appMenuButton_ frame];
+  CGFloat menuButtonFrameMaxX =
+      NSMaxX(toolbarBounds) - [ToolbarController appMenuLeftPadding];
+  menuButtonFrame.origin.x =
+      menuButtonFrameMaxX - kMaterialDesignButtonInset -
+          toolbarButtonSize.width;
+  menuButtonFrame.origin.y = homeButtonFrame.origin.y;
+  menuButtonFrame.size = toolbarButtonSize;
+  [appMenuButton_ setFrame:menuButtonFrame];
 
-    // Adjust the size and location on the location bar to take up the
-    // space between the reload and menu buttons.
-    NSRect locationBarFrame = [locationBar_ frame];
-    locationBarFrame.origin.x = NSMaxX(homeButtonFrame) +
-        kMaterialDesignButtonInset;
-    locationBarFrame.origin.y = NSMaxY(toolbarBounds) -
-        kMaterialDesignLocationBarPadding - kMaterialDesignLocationBarHeight;
-    locationBarFrame.size.width =
-        menuButtonFrame.origin.x -
-            locationBarFrame.origin.x;
-    locationBarFrame.size.height = kMaterialDesignLocationBarHeight;
-    [locationBar_ setFrame:locationBarFrame];
-
-    // Correctly position the extension buttons' container view.
-    NSRect containerFrame = [browserActionsContainerView_ frame];
-    containerFrame.size.width += kMaterialDesignButtonInset;
-    containerFrame.origin.y =
-        locationBarFrame.origin.y + kMaterialDesignContainerYOffset;
-    containerFrame.size.height = toolbarButtonSize.height;
-    [browserActionsContainerView_ setFrame:containerFrame];
-  } else {
-    [[backButton_ cell] setImageID:IDR_BACK
-                    forButtonState:image_button_cell::kDefaultState];
-    [[backButton_ cell] setImageID:IDR_BACK_H
-                    forButtonState:image_button_cell::kHoverState];
-    [[backButton_ cell] setImageID:IDR_BACK_P
-                    forButtonState:image_button_cell::kPressedState];
-    [[backButton_ cell] setImageID:IDR_BACK_D
-                    forButtonState:image_button_cell::kDisabledState];
-
-    [[forwardButton_ cell] setImageID:IDR_FORWARD
-                       forButtonState:image_button_cell::kDefaultState];
-    [[forwardButton_ cell] setImageID:IDR_FORWARD_H
-                       forButtonState:image_button_cell::kHoverState];
-    [[forwardButton_ cell] setImageID:IDR_FORWARD_P
-                       forButtonState:image_button_cell::kPressedState];
-    [[forwardButton_ cell] setImageID:IDR_FORWARD_D
-                       forButtonState:image_button_cell::kDisabledState];
-
-    [[reloadButton_ cell] setImageID:IDR_RELOAD
-                      forButtonState:image_button_cell::kDefaultState];
-    [[reloadButton_ cell] setImageID:IDR_RELOAD_H
-                      forButtonState:image_button_cell::kHoverState];
-    [[reloadButton_ cell] setImageID:IDR_RELOAD_P
-                      forButtonState:image_button_cell::kPressedState];
-
-    [[homeButton_ cell] setImageID:IDR_HOME
-                    forButtonState:image_button_cell::kDefaultState];
-    [[homeButton_ cell] setImageID:IDR_HOME_H
-                    forButtonState:image_button_cell::kHoverState];
-    [[homeButton_ cell] setImageID:IDR_HOME_P
-                    forButtonState:image_button_cell::kPressedState];
-
-    [[appMenuButton_ cell] setImageID:IDR_TOOLS
-                       forButtonState:image_button_cell::kDefaultState];
-    [[appMenuButton_ cell] setImageID:IDR_TOOLS_H
-                       forButtonState:image_button_cell::kHoverState];
-    [[appMenuButton_ cell] setImageID:IDR_TOOLS_P
-                       forButtonState:image_button_cell::kPressedState];
-
-    // Adjust the toolbar height if running on Retina - see the comment in
-    // -baseToolbarHeight.
-    CGFloat toolbarHeight = [self baseToolbarHeight];
-    ToolbarView* toolbarView = [self toolbarView];
-    NSRect toolbarFrame = [toolbarView frame];
-    if (toolbarFrame.size.height != toolbarHeight) {
-      toolbarFrame.size.height = toolbarHeight;
-      [toolbarView setFrame:toolbarFrame];
-    }
+  // Adjust the size and location on the location bar to take up the
+  // space between the reload and menu buttons.
+  NSRect locationBarFrame = [locationBar_ frame];
+  locationBarFrame.origin.x = NSMaxX(homeButtonFrame) +
+      kMaterialDesignButtonInset;
+  if (![homeButton_ isHidden]) {
+    // Ensure proper spacing between the home button and the location bar.
+    locationBarFrame.origin.x += kMaterialDesignElementPadding;
   }
+  locationBarFrame.origin.y = NSMaxY(toolbarBounds) -
+      kMaterialDesignLocationBarPadding - kMaterialDesignLocationBarHeight;
+  locationBarFrame.size.width =
+      menuButtonFrame.origin.x -
+          locationBarFrame.origin.x;
+  locationBarFrame.size.height = kMaterialDesignLocationBarHeight;
+  [locationBar_ setFrame:locationBarFrame];
+
+  // Correctly position the extension buttons' container view.
+  NSRect containerFrame = [browserActionsContainerView_ frame];
+  containerFrame.size.width += kMaterialDesignButtonInset;
+  containerFrame.origin.y =
+      locationBarFrame.origin.y + kMaterialDesignContainerYOffset;
+  containerFrame.size.height = toolbarButtonSize.height;
+  [browserActionsContainerView_ setFrame:containerFrame];
 
   notificationBridge_.reset(
       new ToolbarControllerInternal::NotificationBridge(self));
-  notificationBridge_->UpdateBadgeSeverity();
+  notificationBridge_->UpdateSeverity();
 
   [appMenuButton_ setOpenMenuOnClick:YES];
 
@@ -453,8 +398,18 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
   locationBarView_.reset(new LocationBarViewMac(locationBar_, commands_,
                                                 profile_, browser_));
   [locationBar_ setFont:[NSFont systemFontOfSize:14]];
-  if (!isModeMaterial) {
-    [locationBar_ setFont:[NSFont systemFontOfSize:[NSFont systemFontSize]]];
+
+  // Add the location bar's accessibility views as direct subviews of the
+  // toolbar. They are logical children of the location bar, but the location
+  // bar's actual Cocoa control is an NSCell, so it cannot have child views.
+  // The |locationBarView_| is responsible for positioning the accessibility
+  // views.
+  std::vector<NSView*> accessibility_views =
+      locationBarView_->GetDecorationAccessibilityViews();
+  for (const auto& view : accessibility_views) {
+    [[self toolbarView] addSubview:view
+                        positioned:NSWindowAbove
+                        relativeTo:locationBar_];
   }
 
   // Register pref observers for the optional home and page/options buttons
@@ -488,17 +443,17 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
                                            NSTrackingActiveAlways
                                      owner:self
                                   userInfo:nil]);
-  NSView* toolbarView = [self view];
-  [toolbarView addTrackingArea:trackingArea_.get()];
+  NSView* parentView = [self view];
+  [parentView addTrackingArea:trackingArea_.get()];
 
   // If the user has any Browser Actions installed, the container view for them
   // may have to be resized depending on the width of the toolbar frame.
-  [toolbarView setPostsFrameChangedNotifications:YES];
+  [parentView setPostsFrameChangedNotifications:YES];
   [[NSNotificationCenter defaultCenter]
       addObserver:self
          selector:@selector(toolbarFrameChanged)
              name:NSViewFrameDidChangeNotification
-           object:toolbarView];
+           object:parentView];
 
   // Set ViewIDs for toolbar elements which don't have their dedicated class.
   // ViewIDs of |toolbarView|, |reloadButton_|, |locationBar_| and
@@ -781,9 +736,8 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
   // since the frame edges of each button are right on top of each other. When
   // hiding the button, reverse the direction of the movement (to the left).
   CGFloat moveX = [homeButton_ frame].size.width;
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    moveX -= 1.0;
-  }
+  // Ensure proper spacing between the home button and the location bar.
+  moveX += kMaterialDesignElementPadding;
   if (hide)
     moveX *= -1;  // Reverse the direction of the move.
 
@@ -805,16 +759,11 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
 }
 
 - (void)updateAppMenuButtonSeverity:(AppMenuIconPainter::Severity)severity
+                           iconType:(AppMenuIconController::IconType)iconType
                             animate:(BOOL)animate {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    AppToolbarButtonCell* cell =
-        base::mac::ObjCCastStrict<AppToolbarButtonCell>([appMenuButton_ cell]);
-    [cell setSeverity:severity shouldAnimate:animate];
-    return;
-  }
   AppToolbarButton* appMenuButton =
       base::mac::ObjCCastStrict<AppToolbarButton>(appMenuButton_);
-  [appMenuButton setSeverity:severity shouldAnimate:animate];
+  [appMenuButton setSeverity:severity iconType:iconType shouldAnimate:animate];
 }
 
 - (void)prefChanged:(const std::string&)prefName {
@@ -904,9 +853,7 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
         locationBarXPos;
     // Equalize the distance between the location bar and the first extension
     // button, and the distance between the location bar and home/reload button.
-    if (ui::MaterialDesignController::IsModeMaterial()) {
-      leftDistance -= kMaterialDesignButtonInset;
-    }
+    leftDistance -= kMaterialDesignButtonInset;
   }
   if (leftDistance != 0.0)
     [self adjustLocationSizeBy:leftDistance animate:animate];
@@ -937,20 +884,8 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
     // it afterwards.
     [browserActionsContainerView_ stopAnimation];
     NSRect containerFrame = [browserActionsContainerView_ frame];
-    if (!ui::MaterialDesignController::IsModeMaterial()) {
-      CGFloat elementTopPadding =
-          kMaterialDesignElementPadding + kMaterialDesignButtonInset;
-      // Pre-Material Design, this value is calculated from the values in
-      // Toolbar.xib: the height of the toolbar (35) minus the height of the
-      // child elements (29) minus the y-origin of the elements (4).
-      elementTopPadding = 2;
-      containerFrame.origin.y =
-          NSHeight([[self view] frame]) - NSHeight(containerFrame) -
-          elementTopPadding;
-    } else {
-      containerFrame.origin.y =
-          [locationBar_ frame].origin.y + kMaterialDesignContainerYOffset;
-    }
+    containerFrame.origin.y =
+        [locationBar_ frame].origin.y + kMaterialDesignContainerYOffset;
     [browserActionsContainerView_ setFrame:containerFrame];
     [self pinLocationBarToLeftOfBrowserActionsContainerAndAnimate:NO];
   }
@@ -1055,19 +990,8 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
 
 - (CGFloat)baseToolbarHeight {
   // Height of the toolbar in pixels when the bookmark bar is closed.
-  const CGFloat baseToolbarHeightNormal =
-      ui::MaterialDesignController::IsModeMaterial() ? 37 : 35;
-
-  // Not all lines are drawn at 2x normal height when running on Retina, which
-  // causes the toolbar controls to be visually 1pt too high within the toolbar
-  // area. It's not possible to adjust the control y-positions by 0.5pt and have
-  // them appear 0.5pt lower (they are still drawn at their original locations),
-  // so instead shave off 1pt from the bottom of the toolbar. Note that there's
-  // an offsetting change in -[BookmarkBarController preferredHeight] to
-  // maintain the proper spacing between bookmark icons and toolbar items. See
-  // https://crbug.com/326245 .
-  return [[self view] cr_lineWidth] == 0.5 ? baseToolbarHeightNormal - 1
-                                           : baseToolbarHeightNormal;
+  const CGFloat kBaseToolbarHeightNormal = 37;
+  return kBaseToolbarHeightNormal;
 }
 
 - (CGFloat)desiredHeightForCompression:(CGFloat)compressByHeight {
@@ -1097,6 +1021,11 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
   return appMenuController_.get();
 }
 
+- (BOOL)isLocationBarFocused {
+  OmniboxEditModel* model = locationBarView_->GetOmniboxView()->model();
+  return model->has_focus();
+}
+
 // (URLDropTargetController protocol)
 - (void)dropURLs:(NSArray*)urls inView:(NSView*)view at:(NSPoint)point {
   // TODO(viettrungluu): This code is more or less copied from the code in
@@ -1115,12 +1044,15 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
   GURL url(url_formatter::FixupURL(
       base::SysNSStringToUTF8([urls objectAtIndex:0]), std::string()));
 
+  // Security: Sanitize text to prevent self-XSS.
   if (url.SchemeIs(url::kJavaScriptScheme)) {
     browser_->window()->GetLocationBar()->GetOmniboxView()->SetUserText(
           OmniboxView::StripJavascriptSchemas(base::UTF8ToUTF16(url.spec())));
+    return;
   }
-  OpenURLParams params(
-      url, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false);
+
+  OpenURLParams params(url, Referrer(), WindowOpenDisposition::CURRENT_TAB,
+                       ui::PAGE_TRANSITION_TYPED, false);
   browser_->tab_strip_model()->GetActiveWebContents()->OpenURL(params);
 }
 
@@ -1137,8 +1069,12 @@ class NotificationBridge : public AppMenuBadgeController::Delegate {
       metrics::OmniboxEventProto::BLANK, &match, NULL);
   GURL url(match.destination_url);
 
-  OpenURLParams params(
-      url, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false);
+  // Security: Block JavaScript to prevent self-XSS.
+  if (url.SchemeIs(url::kJavaScriptScheme))
+    return;
+
+  OpenURLParams params(url, Referrer(), WindowOpenDisposition::CURRENT_TAB,
+                       ui::PAGE_TRANSITION_TYPED, false);
   browser_->tab_strip_model()->GetActiveWebContents()->OpenURL(params);
 }
 

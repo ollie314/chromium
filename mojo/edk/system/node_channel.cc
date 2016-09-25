@@ -29,6 +29,7 @@ T Align(T t) {
   return t + (k - (t % k)) % k;
 }
 
+// NOTE: Please ONLY append messages to the end of this enum.
 enum class MessageType : uint32_t {
   ACCEPT_CHILD,
   ACCEPT_PARENT,
@@ -42,6 +43,11 @@ enum class MessageType : uint32_t {
 #if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
   RELAY_PORTS_MESSAGE,
 #endif
+  BROADCAST,
+#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+  PORTS_MESSAGE_FROM_RELAY,
+#endif
+  ACCEPT_PEER,
 };
 
 struct Header {
@@ -60,6 +66,12 @@ struct AcceptChildData {
 struct AcceptParentData {
   ports::NodeName token;
   ports::NodeName child_name;
+};
+
+struct AcceptPeerData {
+  ports::NodeName token;
+  ports::NodeName peer_name;
+  ports::PortName port_name;
 };
 
 // This message may include a process handle on plaforms that require it.
@@ -110,6 +122,11 @@ struct IntroductionData {
 struct RelayPortsMessageData {
   ports::NodeName destination;
 };
+
+// This struct is followed by the full payload of a relayed message.
+struct PortsMessageFromRelayData {
+  ports::NodeName source;
+};
 #endif
 
 template <typename DataType>
@@ -127,9 +144,15 @@ Channel::MessagePtr CreateMessage(MessageType type,
 }
 
 template <typename DataType>
-void GetMessagePayload(const void* bytes, DataType** out_data) {
+bool GetMessagePayload(const void* bytes,
+                       size_t num_bytes,
+                       DataType** out_data) {
+  static_assert(sizeof(DataType) > 0, "DataType must have non-zero size.");
+  if (num_bytes < sizeof(Header) + sizeof(DataType))
+    return false;
   *out_data = reinterpret_cast<const DataType*>(
       static_cast<const char*>(bytes) + sizeof(Header));
+  return true;
 }
 
 }  // namespace
@@ -138,8 +161,15 @@ void GetMessagePayload(const void* bytes, DataType** out_data) {
 scoped_refptr<NodeChannel> NodeChannel::Create(
     Delegate* delegate,
     ScopedPlatformHandle platform_handle,
-    scoped_refptr<base::TaskRunner> io_task_runner) {
-  return new NodeChannel(delegate, std::move(platform_handle), io_task_runner);
+    scoped_refptr<base::TaskRunner> io_task_runner,
+    const ProcessErrorCallback& process_error_callback) {
+#if defined(OS_NACL_SFI)
+  LOG(FATAL) << "Multi-process not yet supported on NaCl-SFI";
+  return nullptr;
+#else
+  return new NodeChannel(delegate, std::move(platform_handle), io_task_runner,
+                         process_error_callback);
+#endif
 }
 
 // static
@@ -166,8 +196,9 @@ void NodeChannel::Start() {
 #endif
 
   base::AutoLock lock(channel_lock_);
-  DCHECK(channel_);
-  channel_->Start();
+  // ShutDown() may have already been called, in which case |channel_| is null.
+  if (channel_)
+    channel_->Start();
 }
 
 void NodeChannel::ShutDown() {
@@ -184,10 +215,28 @@ void NodeChannel::ShutDown() {
   }
 }
 
+void NodeChannel::LeakHandleOnShutdown() {
+  base::AutoLock lock(channel_lock_);
+  if (channel_) {
+    channel_->LeakHandle();
+  }
+}
+
+void NodeChannel::NotifyBadMessage(const std::string& error) {
+  if (!process_error_callback_.is_null())
+    process_error_callback_.Run("Received bad user message: " + error);
+}
+
 void NodeChannel::SetRemoteProcessHandle(base::ProcessHandle process_handle) {
   DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
   base::AutoLock lock(remote_process_handle_lock_);
+  DCHECK_EQ(base::kNullProcessHandle, remote_process_handle_);
+  CHECK_NE(remote_process_handle_, base::GetCurrentProcessHandle());
   remote_process_handle_ = process_handle;
+#if defined(OS_WIN)
+  DCHECK(!scoped_remote_process_handle_.is_valid());
+  scoped_remote_process_handle_.reset(PlatformHandle(process_handle));
+#endif
 }
 
 bool NodeChannel::HasRemoteProcessHandle() {
@@ -206,7 +255,7 @@ base::ProcessHandle NodeChannel::CopyRemoteProcessHandle() {
         base::GetCurrentProcessHandle(), remote_process_handle_,
         base::GetCurrentProcessHandle(), &handle, 0, FALSE,
         DUPLICATE_SAME_ACCESS);
-    DCHECK(result);
+    DPCHECK(result);
     return handle;
   }
   return base::kNullProcessHandle;
@@ -240,6 +289,18 @@ void NodeChannel::AcceptParent(const ports::NodeName& token,
   WriteChannelMessage(std::move(message));
 }
 
+void NodeChannel::AcceptPeer(const ports::NodeName& sender_name,
+                             const ports::NodeName& token,
+                             const ports::PortName& port_name) {
+  AcceptPeerData* data;
+  Channel::MessagePtr message =
+      CreateMessage(MessageType::ACCEPT_PEER, sizeof(AcceptPeerData), 0, &data);
+  data->token = token;
+  data->peer_name = sender_name;
+  data->port_name = port_name;
+  WriteChannelMessage(std::move(message));
+}
+
 void NodeChannel::AddBrokerClient(const ports::NodeName& client_name,
                                   base::ProcessHandle process_handle) {
   AddBrokerClientData* data;
@@ -254,6 +315,7 @@ void NodeChannel::AddBrokerClient(const ports::NodeName& client_name,
   data->client_name = client_name;
 #if !defined(OS_WIN)
   data->process_handle = process_handle;
+  data->padding = 0;
 #endif
   WriteChannelMessage(std::move(message));
 }
@@ -322,6 +384,15 @@ void NodeChannel::Introduce(const ports::NodeName& name,
   WriteChannelMessage(std::move(message));
 }
 
+void NodeChannel::Broadcast(Channel::MessagePtr message) {
+  DCHECK(!message->has_handles());
+  void* data;
+  Channel::MessagePtr broadcast_message = CreateMessage(
+      MessageType::BROADCAST, message->data_num_bytes(), 0, &data);
+  memcpy(data, message->data(), message->data_num_bytes());
+  WriteChannelMessage(std::move(broadcast_message));
+}
+
 #if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
 void NodeChannel::RelayPortsMessage(const ports::NodeName& destination,
                                     Channel::MessagePtr message) {
@@ -365,15 +436,35 @@ void NodeChannel::RelayPortsMessage(const ports::NodeName& destination,
 
   WriteChannelMessage(std::move(relay_message));
 }
+
+void NodeChannel::PortsMessageFromRelay(const ports::NodeName& source,
+                                        Channel::MessagePtr message) {
+  size_t num_bytes = sizeof(PortsMessageFromRelayData) +
+      message->payload_size();
+  PortsMessageFromRelayData* data;
+  Channel::MessagePtr relayed_message = CreateMessage(
+      MessageType::PORTS_MESSAGE_FROM_RELAY, num_bytes, message->num_handles(),
+      &data);
+  data->source = source;
+  if (message->payload_size())
+    memcpy(data + 1, message->payload(), message->payload_size());
+  relayed_message->SetHandles(message->TakeHandles());
+  WriteChannelMessage(std::move(relayed_message));
+}
 #endif  // defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
 
 NodeChannel::NodeChannel(Delegate* delegate,
                          ScopedPlatformHandle platform_handle,
-                         scoped_refptr<base::TaskRunner> io_task_runner)
+                         scoped_refptr<base::TaskRunner> io_task_runner,
+                         const ProcessErrorCallback& process_error_callback)
     : delegate_(delegate),
       io_task_runner_(io_task_runner),
-      channel_(
-          Channel::Create(this, std::move(platform_handle), io_task_runner_)) {
+      process_error_callback_(process_error_callback)
+#if !defined(OS_NACL_SFI)
+      , channel_(
+          Channel::Create(this, std::move(platform_handle), io_task_runner_))
+#endif
+      {
 }
 
 NodeChannel::~NodeChannel() {
@@ -387,6 +478,11 @@ void NodeChannel::OnChannelMessage(const void* payload,
 
   RequestContext request_context(RequestContext::Source::SYSTEM);
 
+  // Ensure this NodeChannel stays alive through the extent of this method. The
+  // delegate may have the only other reference to this object and it may choose
+  // to drop it here in response to, e.g., a malformed message.
+  scoped_refptr<NodeChannel> keepalive = this;
+
 #if defined(OS_WIN)
   // If we receive handles from a known process, rewrite them to our own
   // process. This can occur when a privileged node receives handles directly
@@ -394,11 +490,20 @@ void NodeChannel::OnChannelMessage(const void* payload,
   {
     base::AutoLock lock(remote_process_handle_lock_);
     if (handles && remote_process_handle_ != base::kNullProcessHandle) {
+      // Note that we explicitly mark the handles as being owned by the sending
+      // process before rewriting them, in order to accommodate RewriteHandles'
+      // internal sanity checks.
+      for (auto& handle : *handles)
+        handle.owning_process = remote_process_handle_;
       if (!Channel::Message::RewriteHandles(remote_process_handle_,
                                             base::GetCurrentProcessHandle(),
-                                            handles->data(), handles->size())) {
+                                            handles.get())) {
         DLOG(ERROR) << "Received one or more invalid handles.";
       }
+    } else if (handles) {
+      // Handles received by an unknown process must already be owned by us.
+      for (auto& handle : *handles)
+        handle.owning_process = base::GetCurrentProcessHandle();
     }
   }
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
@@ -415,77 +520,93 @@ void NodeChannel::OnChannelMessage(const void* payload,
   }
 #endif  // defined(OS_WIN)
 
+
+  if (payload_size <= sizeof(Header)) {
+    delegate_->OnChannelError(remote_node_name_, this);
+    return;
+  }
+
   const Header* header = static_cast<const Header*>(payload);
   switch (header->type) {
     case MessageType::ACCEPT_CHILD: {
       const AcceptChildData* data;
-      GetMessagePayload(payload, &data);
-      delegate_->OnAcceptChild(remote_node_name_, data->parent_name,
-                               data->token);
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        delegate_->OnAcceptChild(remote_node_name_, data->parent_name,
+                                 data->token);
+        return;
+      }
       break;
     }
 
     case MessageType::ACCEPT_PARENT: {
       const AcceptParentData* data;
-      GetMessagePayload(payload, &data);
-      delegate_->OnAcceptParent(remote_node_name_, data->token,
-                                data->child_name);
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        delegate_->OnAcceptParent(remote_node_name_, data->token,
+                                  data->child_name);
+        return;
+      }
       break;
     }
 
     case MessageType::ADD_BROKER_CLIENT: {
       const AddBrokerClientData* data;
-      GetMessagePayload(payload, &data);
-      ScopedPlatformHandle process_handle;
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        ScopedPlatformHandle process_handle;
 #if defined(OS_WIN)
-      if (!handles || handles->size() != 1) {
-        DLOG(ERROR) << "Dropping invalid AddBrokerClient message.";
-        break;
-      }
-      process_handle = ScopedPlatformHandle(handles->at(0));
-      handles->clear();
-      delegate_->OnAddBrokerClient(remote_node_name_, data->client_name,
-                                   process_handle.release().handle);
+        if (!handles || handles->size() != 1) {
+          DLOG(ERROR) << "Dropping invalid AddBrokerClient message.";
+          break;
+        }
+        process_handle = ScopedPlatformHandle(handles->at(0));
+        handles->clear();
+        delegate_->OnAddBrokerClient(remote_node_name_, data->client_name,
+                                     process_handle.release().handle);
 #else
-      if (handles && handles->size() != 0) {
-        DLOG(ERROR) << "Dropping invalid AddBrokerClient message.";
-        break;
-      }
-      delegate_->OnAddBrokerClient(remote_node_name_, data->client_name,
-                                   data->process_handle);
+        if (handles && handles->size() != 0) {
+          DLOG(ERROR) << "Dropping invalid AddBrokerClient message.";
+          break;
+        }
+        delegate_->OnAddBrokerClient(remote_node_name_, data->client_name,
+                                     data->process_handle);
 #endif
+        return;
+      }
       break;
     }
 
     case MessageType::BROKER_CLIENT_ADDED: {
       const BrokerClientAddedData* data;
-      GetMessagePayload(payload, &data);
-      ScopedPlatformHandle broker_channel;
-      if (!handles || handles->size() != 1) {
-        DLOG(ERROR) << "Dropping invalid BrokerClientAdded message.";
-        break;
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        ScopedPlatformHandle broker_channel;
+        if (!handles || handles->size() != 1) {
+          DLOG(ERROR) << "Dropping invalid BrokerClientAdded message.";
+          break;
+        }
+        broker_channel = ScopedPlatformHandle(handles->at(0));
+        handles->clear();
+        delegate_->OnBrokerClientAdded(remote_node_name_, data->client_name,
+                                       std::move(broker_channel));
+        return;
       }
-      broker_channel = ScopedPlatformHandle(handles->at(0));
-      handles->clear();
-      delegate_->OnBrokerClientAdded(remote_node_name_, data->client_name,
-                                     std::move(broker_channel));
       break;
     }
 
     case MessageType::ACCEPT_BROKER_CLIENT: {
       const AcceptBrokerClientData* data;
-      GetMessagePayload(payload, &data);
-      ScopedPlatformHandle broker_channel;
-      if (handles && handles->size() > 1) {
-        DLOG(ERROR) << "Dropping invalid AcceptBrokerClient message.";
-        break;
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        ScopedPlatformHandle broker_channel;
+        if (handles && handles->size() > 1) {
+          DLOG(ERROR) << "Dropping invalid AcceptBrokerClient message.";
+          break;
+        }
+        if (handles && handles->size() == 1) {
+          broker_channel = ScopedPlatformHandle(handles->at(0));
+          handles->clear();
+        }
+        delegate_->OnAcceptBrokerClient(remote_node_name_, data->broker_name,
+                                        std::move(broker_channel));
+        return;
       }
-      if (handles && handles->size() == 1) {
-        broker_channel = ScopedPlatformHandle(handles->at(0));
-        handles->clear();
-      }
-      delegate_->OnAcceptBrokerClient(remote_node_name_, data->broker_name,
-                                      std::move(broker_channel));
       break;
     }
 
@@ -495,44 +616,50 @@ void NodeChannel::OnChannelMessage(const void* payload,
           new Channel::Message(payload_size, num_handles));
       message->SetHandles(std::move(handles));
       memcpy(message->mutable_payload(), payload, payload_size);
-      delegate_->OnPortsMessage(std::move(message));
-      break;
+      delegate_->OnPortsMessage(remote_node_name_, std::move(message));
+      return;
     }
 
     case MessageType::REQUEST_PORT_MERGE: {
       const RequestPortMergeData* data;
-      GetMessagePayload(payload, &data);
-
-      const char* token_data = reinterpret_cast<const char*>(data + 1);
-      const size_t token_size = payload_size - sizeof(*data) - sizeof(Header);
-      std::string token(token_data, token_size);
-
-      delegate_->OnRequestPortMerge(remote_node_name_,
-                                    data->connector_port_name, token);
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        // Don't accept an empty token.
+        size_t token_size = payload_size - sizeof(*data) - sizeof(Header);
+        if (token_size == 0)
+          break;
+        std::string token(reinterpret_cast<const char*>(data + 1), token_size);
+        delegate_->OnRequestPortMerge(remote_node_name_,
+                                      data->connector_port_name, token);
+        return;
+      }
       break;
     }
 
     case MessageType::REQUEST_INTRODUCTION: {
       const IntroductionData* data;
-      GetMessagePayload(payload, &data);
-      delegate_->OnRequestIntroduction(remote_node_name_, data->name);
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        delegate_->OnRequestIntroduction(remote_node_name_, data->name);
+        return;
+      }
       break;
     }
 
     case MessageType::INTRODUCE: {
       const IntroductionData* data;
-      GetMessagePayload(payload, &data);
-      if (handles && handles->size() > 1) {
-        DLOG(ERROR) << "Dropping invalid introduction message.";
-        break;
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        if (handles && handles->size() > 1) {
+          DLOG(ERROR) << "Dropping invalid introduction message.";
+          break;
+        }
+        ScopedPlatformHandle channel_handle;
+        if (handles && handles->size() == 1) {
+          channel_handle = ScopedPlatformHandle(handles->at(0));
+          handles->clear();
+        }
+        delegate_->OnIntroduce(remote_node_name_, data->name,
+                               std::move(channel_handle));
+        return;
       }
-      ScopedPlatformHandle channel_handle;
-      if (handles && handles->size() == 1) {
-        channel_handle = ScopedPlatformHandle(handles->at(0));
-        handles->clear();
-      }
-      delegate_->OnIntroduce(remote_node_name_, data->name,
-                             std::move(channel_handle));
       break;
     }
 
@@ -544,45 +671,98 @@ void NodeChannel::OnChannelMessage(const void* payload,
         from_process = remote_process_handle_;
       }
       const RelayPortsMessageData* data;
-      GetMessagePayload(payload, &data);
-      const void* message_start = data + 1;
-      Channel::MessagePtr message = Channel::Message::Deserialize(
-          message_start, payload_size - sizeof(Header) - sizeof(*data));
-      if (!message) {
-        DLOG(ERROR) << "Dropping invalid relay message.";
-        break;
-      }
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-      message->SetHandles(std::move(handles));
-      MachPortRelay* relay = delegate_->GetMachPortRelay();
-      if (!relay) {
-        LOG(ERROR) << "Receiving mach ports without a port relay from "
-                   << remote_node_name_ << ". Dropping message.";
-        break;
-      }
-      {
-        base::AutoLock lock(pending_mach_messages_lock_);
-        if (relay->port_provider()->TaskForPid(from_process) ==
-            MACH_PORT_NULL) {
-          pending_relay_messages_.push(
-              std::make_pair(data->destination, std::move(message)));
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        // Don't try to relay an empty message.
+        if (payload_size <= sizeof(Header) + sizeof(RelayPortsMessageData))
+          break;
+
+        const void* message_start = data + 1;
+        Channel::MessagePtr message = Channel::Message::Deserialize(
+            message_start, payload_size - sizeof(Header) - sizeof(*data));
+        if (!message) {
+          DLOG(ERROR) << "Dropping invalid relay message.";
           break;
         }
+  #if defined(OS_MACOSX) && !defined(OS_IOS)
+        message->SetHandles(std::move(handles));
+        MachPortRelay* relay = delegate_->GetMachPortRelay();
+        if (!relay) {
+          LOG(ERROR) << "Receiving mach ports without a port relay from "
+                     << remote_node_name_ << ". Dropping message.";
+          break;
+        }
+        {
+          base::AutoLock lock(pending_mach_messages_lock_);
+          if (relay->port_provider()->TaskForPid(from_process) ==
+              MACH_PORT_NULL) {
+            pending_relay_messages_.push(
+                std::make_pair(data->destination, std::move(message)));
+            break;
+          }
+        }
+  #endif
+        delegate_->OnRelayPortsMessage(remote_node_name_, from_process,
+                                       data->destination, std::move(message));
+        return;
       }
-#endif
-      delegate_->OnRelayPortsMessage(remote_node_name_, from_process,
-                                     data->destination, std::move(message));
       break;
     }
 #endif
 
+    case MessageType::BROADCAST: {
+      if (payload_size <= sizeof(Header))
+        break;
+      const void* data = static_cast<const void*>(
+          reinterpret_cast<const Header*>(payload) + 1);
+      Channel::MessagePtr message =
+          Channel::Message::Deserialize(data, payload_size - sizeof(Header));
+      if (!message || message->has_handles()) {
+        DLOG(ERROR) << "Dropping invalid broadcast message.";
+        break;
+      }
+      delegate_->OnBroadcast(remote_node_name_, std::move(message));
+      return;
+    }
+
+#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+    case MessageType::PORTS_MESSAGE_FROM_RELAY:
+      const PortsMessageFromRelayData* data;
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        size_t num_bytes = payload_size - sizeof(*data);
+        if (num_bytes < sizeof(Header))
+          break;
+        num_bytes -= sizeof(Header);
+
+        size_t num_handles = handles ? handles->size() : 0;
+        Channel::MessagePtr message(
+            new Channel::Message(num_bytes, num_handles));
+        message->SetHandles(std::move(handles));
+        if (num_bytes)
+          memcpy(message->mutable_payload(), data + 1, num_bytes);
+        delegate_->OnPortsMessageFromRelay(
+            remote_node_name_, data->source, std::move(message));
+        return;
+      }
+      break;
+
+#endif  // defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+
+    case MessageType::ACCEPT_PEER: {
+      const AcceptPeerData* data;
+      if (GetMessagePayload(payload, payload_size, &data)) {
+        delegate_->OnAcceptPeer(remote_node_name_, data->token, data->peer_name,
+                                data->port_name);
+        return;
+      }
+      break;
+    }
+
     default:
-      DLOG(ERROR) << "Received unknown message type "
-                  << static_cast<uint32_t>(header->type) << " from node "
-                  << remote_node_name_;
-      delegate_->OnChannelError(remote_node_name_);
       break;
   }
+
+  DLOG(ERROR) << "Received invalid message. Closing channel.";
+  delegate_->OnChannelError(remote_node_name_, this);
 }
 
 void NodeChannel::OnChannelError() {
@@ -595,7 +775,7 @@ void NodeChannel::OnChannelError() {
   // to the name name after that destruction. So may a copy of
   // |remote_node_name_| so it can be used if |this| becomes destroyed.
   ports::NodeName node_name = remote_node_name_;
-  delegate_->OnChannelError(node_name);
+  delegate_->OnChannelError(node_name, this);
 }
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -620,7 +800,6 @@ void NodeChannel::ProcessPendingMessagesWithMachPorts() {
     pending_writes.swap(pending_write_messages_);
     pending_relays.swap(pending_relay_messages_);
   }
-  DCHECK(pending_writes.empty() && pending_relays.empty());
 
   while (!pending_writes.empty()) {
     Channel::MessagePtr message = std::move(pending_writes.front());
@@ -639,6 +818,9 @@ void NodeChannel::ProcessPendingMessagesWithMachPorts() {
       channel_->Write(std::move(message));
     }
   }
+
+  // Ensure this NodeChannel stays alive while flushing relay messages.
+  scoped_refptr<NodeChannel> keepalive = this;
 
   while (!pending_relays.empty()) {
     ports::NodeName destination = pending_relays.front().first;
@@ -667,11 +849,13 @@ void NodeChannel::WriteChannelMessage(Channel::MessagePtr message) {
 
     // Rewrite outgoing handles if we have a handle to the destination process.
     if (remote_process_handle != base::kNullProcessHandle) {
-      if (!message->RewriteHandles(base::GetCurrentProcessHandle(),
-                                   remote_process_handle, message->handles(),
-                                   message->num_handles())) {
+      ScopedPlatformHandleVectorPtr handles = message->TakeHandles();
+      if (!Channel::Message::RewriteHandles(base::GetCurrentProcessHandle(),
+                                            remote_process_handle,
+                                            handles.get())) {
         DLOG(ERROR) << "Failed to duplicate one or more outgoing handles.";
       }
+      message->SetHandles(std::move(handles));
     }
   }
 #elif defined(OS_MACOSX) && !defined(OS_IOS)

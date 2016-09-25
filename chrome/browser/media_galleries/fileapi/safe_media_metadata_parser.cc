@@ -8,7 +8,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/blob_reader.h"
 #include "chrome/common/extensions/chrome_utility_extensions_messages.h"
 #include "chrome/grit/generated_resources.h"
@@ -80,8 +80,7 @@ void SafeMediaMetadataParser::OnParseMediaMetadataFinished(
   // We need to make a scoped copy of this vector since it will be destroyed
   // at the end of the IPC message handler.
   std::unique_ptr<std::vector<metadata::AttachedImage>> attached_images_copy =
-      base::WrapUnique(
-          new std::vector<metadata::AttachedImage>(attached_images));
+      base::MakeUnique<std::vector<metadata::AttachedImage>>(attached_images);
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,

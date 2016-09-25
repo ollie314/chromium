@@ -12,6 +12,7 @@
 #include "core/layout/LayoutObject.h"
 #include "core/layout/shapes/ShapeOutsideInfo.h"
 #include "core/style/ComputedStyleConstants.h"
+#include "platform/HostWindow.h"
 #include "platform/graphics/Path.h"
 
 namespace blink {
@@ -25,11 +26,13 @@ public:
     PathBuilder() : m_path(protocol::ListValue::create()) { }
     virtual ~PathBuilder() { }
 
-    PassOwnPtr<protocol::ListValue> release() { return m_path.release(); }
+    std::unique_ptr<protocol::ListValue> release() { return std::move(m_path); }
 
-    void appendPath(const Path& path)
+    void appendPath(const Path& path, float scale)
     {
-        path.apply(this, &PathBuilder::appendPathElement);
+        Path transformPath(path);
+        transformPath.transform(AffineTransform().scale(scale));
+        transformPath.apply(this, &PathBuilder::appendPathElement);
     }
 
 protected:
@@ -44,7 +47,7 @@ private:
     void appendPathElement(const PathElement*);
     void appendPathCommandAndPoints(const char* command, const FloatPoint points[], size_t length);
 
-    OwnPtr<protocol::ListValue> m_path;
+    std::unique_ptr<protocol::ListValue> m_path;
 };
 
 void PathBuilder::appendPathCommandAndPoints(const char* command, const FloatPoint points[], size_t length)
@@ -90,10 +93,10 @@ public:
         , m_layoutObject(layoutObject)
         , m_shapeOutsideInfo(shapeOutsideInfo) { }
 
-    static PassOwnPtr<protocol::ListValue> buildPath(FrameView& view, LayoutObject& layoutObject, const ShapeOutsideInfo& shapeOutsideInfo, const Path& path)
+    static std::unique_ptr<protocol::ListValue> buildPath(FrameView& view, LayoutObject& layoutObject, const ShapeOutsideInfo& shapeOutsideInfo, const Path& path, float scale)
     {
         ShapePathBuilder builder(view, layoutObject, shapeOutsideInfo);
-        builder.appendPath(path);
+        builder.appendPath(path, scale);
         return builder.release();
     }
 
@@ -111,9 +114,9 @@ private:
 };
 
 
-PassOwnPtr<protocol::Array<double>> buildArrayForQuad(const FloatQuad& quad)
+std::unique_ptr<protocol::Array<double>> buildArrayForQuad(const FloatQuad& quad)
 {
-    OwnPtr<protocol::Array<double>> array = protocol::Array<double>::create();
+    std::unique_ptr<protocol::Array<double>> array = protocol::Array<double>::create();
     array->addItem(quad.p1().x());
     array->addItem(quad.p1().y());
     array->addItem(quad.p2().x());
@@ -122,7 +125,7 @@ PassOwnPtr<protocol::Array<double>> buildArrayForQuad(const FloatQuad& quad)
     array->addItem(quad.p3().y());
     array->addItem(quad.p4().x());
     array->addItem(quad.p4().y());
-    return array.release();
+    return array;
 }
 
 Path quadToPath(const FloatQuad& quad)
@@ -163,9 +166,9 @@ const ShapeOutsideInfo* shapeOutsideInfoForNode(Node* node, Shape::DisplayPaths*
     return shapeOutsideInfo;
 }
 
-PassOwnPtr<protocol::DictionaryValue> buildElementInfo(Element* element)
+std::unique_ptr<protocol::DictionaryValue> buildElementInfo(Element* element)
 {
-    OwnPtr<protocol::DictionaryValue> elementInfo = protocol::DictionaryValue::create();
+    std::unique_ptr<protocol::DictionaryValue> elementInfo = protocol::DictionaryValue::create();
     Element* realElement = element;
     PseudoElement* pseudoElement = nullptr;
     if (element->isPseudoElement()) {
@@ -190,9 +193,9 @@ PassOwnPtr<protocol::DictionaryValue> buildElementInfo(Element* element)
     }
     if (pseudoElement) {
         if (pseudoElement->getPseudoId() == PseudoIdBefore)
-            classNames.appendLiteral("::before");
+            classNames.append("::before");
         else if (pseudoElement->getPseudoId() == PseudoIdAfter)
-            classNames.appendLiteral("::after");
+            classNames.append("::after");
     }
     if (!classNames.isEmpty())
         elementInfo->setString("className", classNames.toString());
@@ -200,7 +203,7 @@ PassOwnPtr<protocol::DictionaryValue> buildElementInfo(Element* element)
     LayoutObject* layoutObject = element->layoutObject();
     FrameView* containingView = element->document().view();
     if (!layoutObject || !containingView)
-        return elementInfo.release();
+        return elementInfo;
 
     // layoutObject the getBoundingClientRect() data in the tooltip
     // to be consistent with the rulers (see http://crbug.com/262338).
@@ -208,16 +211,17 @@ PassOwnPtr<protocol::DictionaryValue> buildElementInfo(Element* element)
     elementInfo->setString("nodeWidth", String::number(boundingBox->width()));
     elementInfo->setString("nodeHeight", String::number(boundingBox->height()));
 
-    return elementInfo.release();
+    return elementInfo;
 }
 
 } // namespace
 
-InspectorHighlight::InspectorHighlight()
+InspectorHighlight::InspectorHighlight(float scale)
     : m_highlightPaths(protocol::ListValue::create())
     , m_showRulers(false)
     , m_showExtensionLines(false)
     , m_displayAsMaterial(false)
+    , m_scale(scale)
 {
 }
 
@@ -234,7 +238,11 @@ InspectorHighlight::InspectorHighlight(Node* node, const InspectorHighlightConfi
     , m_showRulers(highlightConfig.showRulers)
     , m_showExtensionLines(highlightConfig.showExtensionLines)
     , m_displayAsMaterial(highlightConfig.displayAsMaterial)
+    , m_scale(1.f)
 {
+    FrameView* frameView = node->document().view();
+    if (frameView)
+        m_scale = 1.f / frameView->getHostWindow()->windowToViewportScalar(1.f);
     appendPathsForShapeOutside(node, highlightConfig);
     appendNodeHighlight(node, highlightConfig);
     if (appendElementInfo && node->isElementNode())
@@ -249,20 +257,20 @@ void InspectorHighlight::appendQuad(const FloatQuad& quad, const Color& fillColo
 {
     Path path = quadToPath(quad);
     PathBuilder builder;
-    builder.appendPath(path);
+    builder.appendPath(path, m_scale);
     appendPath(builder.release(), fillColor, outlineColor, name);
 }
 
-void InspectorHighlight::appendPath(PassOwnPtr<protocol::ListValue> path, const Color& fillColor, const Color& outlineColor, const String& name)
+void InspectorHighlight::appendPath(std::unique_ptr<protocol::ListValue> path, const Color& fillColor, const Color& outlineColor, const String& name)
 {
-    OwnPtr<protocol::DictionaryValue> object = protocol::DictionaryValue::create();
-    object->setValue("path", path);
+    std::unique_ptr<protocol::DictionaryValue> object = protocol::DictionaryValue::create();
+    object->setValue("path", std::move(path));
     object->setString("fillColor", fillColor.serialized());
     if (outlineColor != Color::transparent)
         object->setString("outlineColor", outlineColor.serialized());
     if (!name.isEmpty())
         object->setString("name", name);
-    m_highlightPaths->pushValue(object.release());
+    m_highlightPaths->pushValue(std::move(object));
 }
 
 void InspectorHighlight::appendEventTargetQuads(Node* eventTargetNode, const InspectorHighlightConfig& highlightConfig)
@@ -288,9 +296,9 @@ void InspectorHighlight::appendPathsForShapeOutside(Node* node, const InspectorH
         return;
     }
 
-    appendPath(ShapePathBuilder::buildPath(*node->document().view(), *node->layoutObject(), *shapeOutsideInfo, paths.shape), config.shape, Color::transparent);
+    appendPath(ShapePathBuilder::buildPath(*node->document().view(), *node->layoutObject(), *shapeOutsideInfo, paths.shape, m_scale), config.shape, Color::transparent);
     if (paths.marginShape.length())
-        appendPath(ShapePathBuilder::buildPath(*node->document().view(), *node->layoutObject(), *shapeOutsideInfo, paths.marginShape), config.shapeMargin, Color::transparent);
+        appendPath(ShapePathBuilder::buildPath(*node->document().view(), *node->layoutObject(), *shapeOutsideInfo, paths.marginShape, m_scale), config.shapeMargin, Color::transparent);
 }
 
 void InspectorHighlight::appendNodeHighlight(Node* node, const InspectorHighlightConfig& highlightConfig)
@@ -321,20 +329,20 @@ void InspectorHighlight::appendNodeHighlight(Node* node, const InspectorHighligh
     appendQuad(margin, highlightConfig.margin, Color::transparent, "margin");
 }
 
-PassOwnPtr<protocol::DictionaryValue> InspectorHighlight::asProtocolValue() const
+std::unique_ptr<protocol::DictionaryValue> InspectorHighlight::asProtocolValue() const
 {
-    OwnPtr<protocol::DictionaryValue> object = protocol::DictionaryValue::create();
+    std::unique_ptr<protocol::DictionaryValue> object = protocol::DictionaryValue::create();
     object->setValue("paths", m_highlightPaths->clone());
     object->setBoolean("showRulers", m_showRulers);
     object->setBoolean("showExtensionLines", m_showExtensionLines);
     if (m_elementInfo)
         object->setValue("elementInfo", m_elementInfo->clone());
     object->setBoolean("displayAsMaterial", m_displayAsMaterial);
-    return object.release();
+    return object;
 }
 
 // static
-bool InspectorHighlight::getBoxModel(Node* node, OwnPtr<protocol::DOM::BoxModel>* model)
+bool InspectorHighlight::getBoxModel(Node* node, std::unique_ptr<protocol::DOM::BoxModel>* model)
 {
     LayoutObject* layoutObject = node->layoutObject();
     FrameView* view = node->document().view();
@@ -353,8 +361,8 @@ bool InspectorHighlight::getBoxModel(Node* node, OwnPtr<protocol::DOM::BoxModel>
         .setPadding(buildArrayForQuad(padding))
         .setBorder(buildArrayForQuad(border))
         .setMargin(buildArrayForQuad(margin))
-        .setWidth(modelObject ? adjustForAbsoluteZoom(modelObject->pixelSnappedOffsetWidth(), modelObject) : boundingBox.width())
-        .setHeight(modelObject ? adjustForAbsoluteZoom(modelObject->pixelSnappedOffsetHeight(), modelObject) : boundingBox.height()).build();
+        .setWidth(modelObject ? adjustForAbsoluteZoom(modelObject->pixelSnappedOffsetWidth(modelObject->offsetParent()), modelObject) : boundingBox.width())
+        .setHeight(modelObject ? adjustForAbsoluteZoom(modelObject->pixelSnappedOffsetHeight(modelObject->offsetParent()), modelObject) : boundingBox.height()).build();
 
     Shape::DisplayPaths paths;
     FloatQuad boundsQuad;
@@ -362,8 +370,8 @@ bool InspectorHighlight::getBoxModel(Node* node, OwnPtr<protocol::DOM::BoxModel>
     if (const ShapeOutsideInfo* shapeOutsideInfo = shapeOutsideInfoForNode(node, &paths, &boundsQuad)) {
         (*model)->setShapeOutside(protocol::DOM::ShapeOutsideInfo::create()
             .setBounds(buildArrayForQuad(boundsQuad))
-            .setShape(protocol::Array<protocol::Value>::parse(ShapePathBuilder::buildPath(*view, *layoutObject, *shapeOutsideInfo, paths.shape).get(), &errors))
-            .setMarginShape(protocol::Array<protocol::Value>::parse(ShapePathBuilder::buildPath(*view, *layoutObject, *shapeOutsideInfo, paths.marginShape).get(), &errors))
+            .setShape(protocol::Array<protocol::Value>::parse(ShapePathBuilder::buildPath(*view, *layoutObject, *shapeOutsideInfo, paths.shape, 1.f).get(), &errors))
+            .setMarginShape(protocol::Array<protocol::Value>::parse(ShapePathBuilder::buildPath(*view, *layoutObject, *shapeOutsideInfo, paths.marginShape, 1.f).get(), &errors))
             .build());
     }
 

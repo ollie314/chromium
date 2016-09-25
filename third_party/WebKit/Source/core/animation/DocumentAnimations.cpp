@@ -31,15 +31,14 @@
 #include "core/animation/DocumentAnimations.h"
 
 #include "core/animation/AnimationClock.h"
-#include "core/animation/AnimationTimeline.h"
 #include "core/animation/CompositorPendingAnimations.h"
+#include "core/animation/DocumentTimeline.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/Node.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
-#include "core/layout/LayoutView.h"
 
 namespace blink {
 
@@ -68,11 +67,15 @@ void DocumentAnimations::updateAnimationTimingIfNeeded(Document& document)
         updateAnimationTiming(document, TimingUpdateOnDemand);
 }
 
-void DocumentAnimations::updateCompositorAnimations(Document& document)
+void DocumentAnimations::updateAnimations(Document& document)
 {
-    ASSERT(document.lifecycle().state() == DocumentLifecycle::CompositingClean);
+    if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled())
+        DCHECK(document.lifecycle().state() >= DocumentLifecycle::CompositingClean);
+    else
+        DCHECK(document.lifecycle().state() >= DocumentLifecycle::LayoutClean);
+
     if (document.compositorPendingAnimations().update()) {
-        ASSERT(document.view());
+        DCHECK(document.view());
         document.view()->scheduleAnimation();
     }
 

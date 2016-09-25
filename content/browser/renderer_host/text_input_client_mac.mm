@@ -5,7 +5,7 @@
 #import "content/browser/renderer_host/text_input_client_mac.h"
 
 #include "base/memory/singleton.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
@@ -37,6 +37,10 @@ void TextInputClientMac::GetStringAtPoint(
     RenderWidgetHost* rwh,
     gfx::Point point,
     void (^reply_handler)(NSAttributedString*, NSPoint)) {
+  // TODO(ekaramad): In principle, we are using the same handler regardless of
+  // the |rwh| which requested this. We should track the callbacks for each
+  // |rwh| individually so that one slow RWH will not end up clearing the
+  // callback for another (https://crbug.com/643233).
   DCHECK(replyForPointHandler_.get() == nil);
   replyForPointHandler_.reset(reply_handler, base::scoped_policy::RETAIN);
   RenderWidgetHostImpl* rwhi = RenderWidgetHostImpl::From(rwh);

@@ -32,6 +32,7 @@
 #define V8ObjectConstructor_h
 
 #include "bindings/core/v8/V8PerIsolateData.h"
+#include "core/CoreExport.h"
 #include "wtf/Allocator.h"
 
 #include <v8.h>
@@ -50,7 +51,6 @@ public:
 
     ConstructorMode(v8::Isolate* isolate)
         : m_isolate(isolate)
-        , m_microtaskSuppression(isolate, v8::MicrotasksScope::kDoNotRunMicrotasks)
     {
         V8PerIsolateData* data = V8PerIsolateData::from(m_isolate);
         m_previous = data->m_constructorMode;
@@ -71,10 +71,9 @@ public:
 private:
     v8::Isolate* m_isolate;
     bool m_previous;
-    v8::MicrotasksScope m_microtaskSuppression;
 };
 
-class V8ObjectConstructor {
+class CORE_EXPORT V8ObjectConstructor {
     STATIC_ONLY(V8ObjectConstructor);
 public:
     static v8::MaybeLocal<v8::Object> newInstance(v8::Isolate*, v8::Local<v8::Function>);

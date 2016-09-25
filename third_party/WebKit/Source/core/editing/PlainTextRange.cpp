@@ -82,6 +82,7 @@ EphemeralRange PlainTextRange::createRangeFor(const ContainerNode& scope, GetRan
     if (getRangeFor == ForSelection)
         behaviorFlags |= TextIteratorEmitsCharactersBetweenAllVisiblePositions;
     auto range = EphemeralRange::rangeOfContents(scope);
+
     TextIterator it(range.startPosition(), range.endPosition(), behaviorFlags);
 
     // FIXME: the atEnd() check shouldn't be necessary, workaround for
@@ -174,6 +175,8 @@ PlainTextRange PlainTextRange::create(const ContainerNode& scope, const Ephemera
     Node* endContainer = range.endPosition().computeContainerNode();
     if (endContainer != scope && !endContainer->isDescendantOf(&scope))
         return PlainTextRange();
+
+    DocumentLifecycle::DisallowTransitionScope disallowTransition(scope.document().lifecycle());
 
     size_t start = TextIterator::rangeLength(Position(&const_cast<ContainerNode&>(scope), 0), range.startPosition());
     size_t end = TextIterator::rangeLength(Position(&const_cast<ContainerNode&>(scope), 0), range.endPosition());

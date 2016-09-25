@@ -27,10 +27,12 @@ class ChromeLauncherController;
 // item with the appropriate LauncherItemController type).
 class AppShortcutLauncherItemController : public LauncherItemController {
  public:
-  AppShortcutLauncherItemController(const std::string& app_id,
-                                    ChromeLauncherController* controller);
-
   ~AppShortcutLauncherItemController() override;
+
+  static AppShortcutLauncherItemController* Create(
+      const std::string& app_id,
+      const std::string& launch_id,
+      ChromeLauncherController* controller);
 
   std::vector<content::WebContents*> GetRunningApplications();
 
@@ -55,6 +57,17 @@ class AppShortcutLauncherItemController : public LauncherItemController {
   const GURL& refocus_url() const { return refocus_url_; }
   // Set the refocus url pattern. Used by unit tests.
   void set_refocus_url(const GURL& refocus_url) { refocus_url_ = refocus_url; }
+
+  ChromeLauncherController* controller() { return chrome_launcher_controller_; }
+
+  const std::string& app_id() const { return app_id_; }
+
+  const std::string& launch_id() const { return launch_id_; }
+
+ protected:
+  AppShortcutLauncherItemController(const std::string& app_id,
+                                    const std::string& launch_id,
+                                    ChromeLauncherController* controller);
 
  private:
   // Get the last running application.
@@ -92,6 +105,14 @@ class AppShortcutLauncherItemController : public LauncherItemController {
   base::Time last_launch_attempt_;
 
   ChromeLauncherController* chrome_launcher_controller_;
+
+  // The application id associated with this app shortcut.
+  const std::string app_id_;
+
+  // An id that can be passed to an app when launched in order to support
+  // multiple shelf items per app. This id is used together with the app_id to
+  // uniquely identify each shelf item that has the same app_id.
+  const std::string launch_id_;
 
   DISALLOW_COPY_AND_ASSIGN(AppShortcutLauncherItemController);
 };

@@ -20,6 +20,10 @@
 
 #include "core/svg/SVGViewElement.h"
 
+#include "core/SVGNames.h"
+#include "core/frame/UseCounter.h"
+#include "core/svg/SVGStaticStringList.h"
+
 namespace blink {
 
 inline SVGViewElement::SVGViewElement(Document& document)
@@ -28,6 +32,7 @@ inline SVGViewElement::SVGViewElement(Document& document)
     , m_viewTarget(SVGStaticStringList::create(this, SVGNames::viewTargetAttr))
 {
     addToPropertyMap(m_viewTarget);
+    UseCounter::count(document, UseCounter::SVGViewElement);
 }
 
 DEFINE_NODE_FACTORY(SVGViewElement)
@@ -37,6 +42,11 @@ DEFINE_TRACE(SVGViewElement)
     visitor->trace(m_viewTarget);
     SVGElement::trace(visitor);
     SVGFitToViewBox::trace(visitor);
+}
+
+SVGStringListTearOff* SVGViewElement::viewTarget()
+{
+    return m_viewTarget->tearOff();
 }
 
 void SVGViewElement::parseAttribute(const QualifiedName& name, const AtomicString& oldValue, const AtomicString& value)

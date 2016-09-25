@@ -19,11 +19,12 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/test_switches.h"
+#include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
@@ -32,16 +33,23 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/mhtml_generation_params.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "media/cdm/cdm_paths.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
-
+#include "testing/gmock/include/gmock/gmock.h"
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
+#endif
+
+#if defined(ENABLE_PEPPER_CDMS)
+#include "chrome/browser/media/pepper_cdm_test_constants.h"
+#include "chrome/browser/media/pepper_cdm_test_helper.h"
 #endif
 
 using content::BrowserThread;
@@ -56,6 +64,20 @@ const LocalSharedObjectsContainer* GetSiteSettingsCookieContainer(
           browser->tab_strip_model()->GetWebContentsAt(0));
   return static_cast<const LocalSharedObjectsContainer*>(
       &settings->allowed_local_shared_objects());
+}
+
+class MockWebContentsLoadFailObserver : public content::WebContentsObserver {
+ public:
+  explicit MockWebContentsLoadFailObserver(content::WebContents* web_contents)
+      : content::WebContentsObserver(web_contents) {}
+  virtual ~MockWebContentsLoadFailObserver() {}
+
+  MOCK_METHOD1(DidFinishNavigation,
+               void(content::NavigationHandle* navigation_handle));
+};
+
+MATCHER(IsErrorTooManyRedirects, "") {
+  return arg->GetNetErrorCode() == net::ERR_TOO_MANY_REDIRECTS;
 }
 
 }  // namespace
@@ -230,12 +252,14 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, RedirectLoopCookies) {
   CookieSettingsFactory::GetForProfile(browser()->profile())
       ->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
 
-  ui_test_utils::NavigateToURL(browser(), test_url);
-
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  ASSERT_EQ(base::UTF8ToUTF16(test_url.spec() + " failed to load"),
-            web_contents->GetTitle());
+  MockWebContentsLoadFailObserver observer(web_contents);
+  EXPECT_CALL(observer, DidFinishNavigation(IsErrorTooManyRedirects()));
+
+  ui_test_utils::NavigateToURL(browser(), test_url);
+
+  ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&observer));
 
   EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)->
       IsContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES));
@@ -318,33 +342,13 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsTest, RedirectCrossOrigin) {
 #if defined(ENABLE_PLUGINS)
 class PepperContentSettingsSpecialCasesTest : public ContentSettingsTest {
  protected:
-  static const char kExternalClearKeyMimeType[];
-
   // Registers any CDM plugins not registered by default.
   void SetUpCommandLine(base::CommandLine* command_line) override {
 #if defined(ENABLE_PEPPER_CDMS)
-    // Platform-specific filename relative to the chrome executable.
-#if defined(OS_WIN)
-    const char kLibraryName[] = "clearkeycdmadapter.dll";
-#else  // !defined(OS_WIN)
-#if defined(OS_MACOSX)
-    const char kLibraryName[] = "clearkeycdmadapter.plugin";
-#elif defined(OS_POSIX)
-    const char kLibraryName[] = "libclearkeycdmadapter.so";
-#endif  // defined(OS_MACOSX)
-#endif  // defined(OS_WIN)
-
     // Append the switch to register the External Clear Key CDM.
-    base::FilePath::StringType pepper_plugins = BuildPepperPluginRegistration(
-        kLibraryName, "Clear Key CDM", kExternalClearKeyMimeType);
-#if defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
-    // The CDM must be registered when it is a component.
-    pepper_plugins.append(FILE_PATH_LITERAL(","));
-    pepper_plugins.append(
-        BuildPepperPluginRegistration(kWidevineCdmAdapterFileName,
-                                      kWidevineCdmDisplayName,
-                                      kWidevineCdmPluginMimeType));
-#endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
+    base::FilePath::StringType pepper_plugins = BuildPepperCdmRegistration(
+        kClearKeyCdmBaseDirectory, kClearKeyCdmAdapterFileName,
+        kClearKeyCdmDisplayName, kClearKeyCdmPepperMimeType);
     command_line->AppendSwitchNative(switches::kRegisterPepperPlugins,
                                      pepper_plugins);
 #endif  // defined(ENABLE_PEPPER_CDMS)
@@ -354,6 +358,15 @@ class PepperContentSettingsSpecialCasesTest : public ContentSettingsTest {
     command_line->AppendSwitch(switches::kEnableNaCl);
 #endif
   }
+
+#if defined(ENABLE_PEPPER_CDMS)
+  void SetUpDefaultCommandLine(base::CommandLine* command_line) override {
+    base::CommandLine default_command_line(base::CommandLine::NO_PROGRAM);
+    InProcessBrowserTest::SetUpDefaultCommandLine(&default_command_line);
+    test_launcher_utils::RemoveCommandLineSwitch(
+        default_command_line, switches::kDisableComponentUpdate, command_line);
+  }
+#endif  // defined(ENABLE_PEPPER_CDMS)
 
   void RunLoadPepperPluginTest(const char* mime_type, bool expect_loaded) {
     const char* expected_result = expect_loaded ? "Loaded" : "Not Loaded";
@@ -429,40 +442,7 @@ class PepperContentSettingsSpecialCasesTest : public ContentSettingsTest {
               tab_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_JAVASCRIPT));
     EXPECT_FALSE(tab_settings->IsContentBlocked(CONTENT_SETTINGS_TYPE_PLUGINS));
   }
-
- private:
-  // Builds the string to pass to kRegisterPepperPlugins for a single
-  // plugin using the provided parameters and a dummy version.
-  // Multiple results may be passed to kRegisterPepperPlugins, separated by ",".
-  base::FilePath::StringType BuildPepperPluginRegistration(
-      const char* library_name,
-      const char* display_name,
-      const char* mime_type) {
-    base::FilePath plugin_dir;
-    EXPECT_TRUE(PathService::Get(base::DIR_MODULE, &plugin_dir));
-
-    base::FilePath plugin_lib = plugin_dir.AppendASCII(library_name);
-    EXPECT_TRUE(base::PathExists(plugin_lib));
-
-    base::FilePath::StringType pepper_plugin = plugin_lib.value();
-    std::string string_to_append = "#";
-    string_to_append.append(display_name);
-    string_to_append.append("#A CDM#0.1.0.0;");
-    string_to_append.append(mime_type);
-
-#if defined(OS_WIN)
-    pepper_plugin.append(base::ASCIIToUTF16(string_to_append));
-#else
-    pepper_plugin.append(string_to_append);
-#endif
-
-    return pepper_plugin;
-  }
 };
-
-const char
-PepperContentSettingsSpecialCasesTest::kExternalClearKeyMimeType[] =
-    "application/x-ppapi-clearkey-cdm";
 
 class PepperContentSettingsSpecialCasesPluginsBlockedTest
     : public PepperContentSettingsSpecialCasesTest {
@@ -493,17 +473,11 @@ class PepperContentSettingsSpecialCasesJavaScriptBlockedTest
 // A sanity check to verify that the plugin that is used as a baseline below
 // can be loaded.
 IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesTest, Baseline) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
   HostContentSettingsMapFactory::GetForProfile(browser()->profile())
       ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
                                  CONTENT_SETTING_ALLOW);
 
-  RunLoadPepperPluginTest(kExternalClearKeyMimeType, true);
+  RunLoadPepperPluginTest(kClearKeyCdmPepperMimeType, true);
 }
 #endif  // defined(ENABLE_PEPPER_CDMS)
 
@@ -514,24 +488,17 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesTest, Baseline) {
 // The plugin successfully loaded above is blocked.
 IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesPluginsBlockedTest,
                        Normal) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
-  RunLoadPepperPluginTest(kExternalClearKeyMimeType, false);
+  RunLoadPepperPluginTest(kClearKeyCdmPepperMimeType, false);
 }
 
 #if defined(WIDEVINE_CDM_AVAILABLE) && !defined(OS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesPluginsBlockedTest,
                        WidevineCdm) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
+  // Check that Widevine CDM is available and registered.
+  base::FilePath adapter_path =
+      GetPepperCdmPath(kWidevineCdmBaseDirectory, kWidevineCdmAdapterFileName);
+  EXPECT_TRUE(base::PathExists(adapter_path)) << adapter_path.MaybeAsASCII();
+  EXPECT_TRUE(IsPepperCdmRegistered(kWidevineCdmPluginMimeType));
   RunLoadPepperPluginTest(kWidevineCdmPluginMimeType, true);
 }
 #endif  // defined(WIDEVINE_CDM_AVAILABLE) && !defined(OS_CHROMEOS)
@@ -540,12 +507,6 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesPluginsBlockedTest,
 #if !defined(DISABLE_NACL)
 IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesPluginsBlockedTest,
                        NaCl) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
   RunLoadPepperPluginTest("application/x-nacl", true);
 }
 #endif  // !defined(DISABLE_NACL)
@@ -557,24 +518,17 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesPluginsBlockedTest,
 // A plugin with no special behavior is not blocked when JavaScript is blocked.
 IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesJavaScriptBlockedTest,
                        Normal) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
   RunJavaScriptBlockedTest("load_clearkey_no_js.html", false);
 }
 
 #if defined(WIDEVINE_CDM_AVAILABLE)
 IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesJavaScriptBlockedTest,
                        WidevineCdm) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
+  // Check that Widevine CDM is available and registered.
+  base::FilePath adapter_path =
+      GetPepperCdmPath(kWidevineCdmBaseDirectory, kWidevineCdmAdapterFileName);
+  EXPECT_TRUE(base::PathExists(adapter_path)) << adapter_path.MaybeAsASCII();
+  EXPECT_TRUE(IsPepperCdmRegistered(kWidevineCdmPluginMimeType));
   RunJavaScriptBlockedTest("load_widevine_no_js.html", true);
 }
 #endif  // defined(WIDEVINE_CDM_AVAILABLE)
@@ -583,12 +537,6 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesJavaScriptBlockedTest,
 #if !defined(DISABLE_NACL)
 IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesJavaScriptBlockedTest,
                        NaCl) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
   RunJavaScriptBlockedTest("load_nacl_no_js.html", true);
 }
 #endif  // !defined(DISABLE_NACL)

@@ -5,12 +5,12 @@
 #ifndef COMPONENTS_POLICY_CORE_COMMON_CLOUD_POLICY_HEADER_SERVICE_H_
 #define COMPONENTS_POLICY_CORE_COMMON_CLOUD_POLICY_HEADER_SERVICE_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "components/policy/policy_export.h"
 
@@ -23,7 +23,7 @@ namespace policy {
 class PolicyHeaderIOHelper;
 
 // Per-profile service used to generate PolicyHeaderIOHelper objects, and
-// keep them up-to-date as policy changes.
+// keep them up to date as policy changes.
 // TODO(atwilson): Move to components/policy once CloudPolicyStore is moved.
 class POLICY_EXPORT PolicyHeaderService : public CloudPolicyStore::Observer {
  public:
@@ -41,7 +41,7 @@ class POLICY_EXPORT PolicyHeaderService : public CloudPolicyStore::Observer {
   // this object and must ensure it outlives ProfileHeaderService (in practice,
   // this is called by ProfileIOData, which is shutdown *after* all
   // ProfileKeyedServices are shutdown).
-  scoped_ptr<PolicyHeaderIOHelper> CreatePolicyHeaderIOHelper(
+  std::unique_ptr<PolicyHeaderIOHelper> CreatePolicyHeaderIOHelper(
       scoped_refptr<base::SequencedTaskRunner> task_runner);
 
   // Overridden CloudPolicyStore::Observer methods:

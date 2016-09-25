@@ -23,10 +23,9 @@
 #include "core/layout/api/LineLayoutSVGInlineText.h"
 #include "core/layout/svg/LayoutSVGInlineText.h"
 #include "core/layout/svg/SVGTextFragment.h"
-#include "core/layout/svg/SVGTextLayoutAttributes.h"
-#include "core/layout/svg/SVGTextMetrics.h"
 #include "wtf/Allocator.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
@@ -36,6 +35,7 @@ class LayoutObject;
 class PathPositionMapper;
 class SVGInlineFlowBox;
 class SVGInlineTextBox;
+class SVGTextMetrics;
 
 // SVGTextLayoutEngine performs the second layout phase for SVG text.
 //
@@ -49,10 +49,8 @@ class SVGTextLayoutEngine {
     STACK_ALLOCATED();
     WTF_MAKE_NONCOPYABLE(SVGTextLayoutEngine);
 public:
-    SVGTextLayoutEngine(Vector<SVGTextLayoutAttributes*>&);
+    SVGTextLayoutEngine(const Vector<LayoutSVGInlineText*>&);
     ~SVGTextLayoutEngine();
-
-    Vector<SVGTextLayoutAttributes*>& layoutAttributes() { return m_layoutAttributes; }
 
     void layoutCharactersInTextBoxes(InlineFlowBox* start);
     void finishLayout();
@@ -71,19 +69,19 @@ private:
     void layoutInlineTextBox(SVGInlineTextBox*);
     void layoutTextOnLineOrPath(SVGInlineTextBox*, LineLayoutSVGInlineText, const ComputedStyle&);
 
-    bool currentLogicalCharacterAttributes(SVGTextLayoutAttributes*&);
-    bool currentLogicalCharacterMetrics(SVGTextLayoutAttributes*&, SVGTextMetrics&);
+    const LayoutSVGInlineText* nextLogicalTextNode();
+    const LayoutSVGInlineText* currentLogicalCharacterMetrics(SVGTextMetrics&);
     void advanceToNextLogicalCharacter(const SVGTextMetrics&);
 
-private:
-    Vector<SVGTextLayoutAttributes*>& m_layoutAttributes;
+    // Logical iteration state.
+    const Vector<LayoutSVGInlineText*>& m_descendantTextNodes;
+    unsigned m_currentLogicalTextNodeIndex;
+    unsigned m_logicalCharacterOffset;
+    unsigned m_logicalMetricsListOffset;
 
     Vector<SVGInlineTextBox*> m_lineLayoutBoxes;
 
     SVGTextFragment m_currentTextFragment;
-    unsigned m_layoutAttributesPosition;
-    unsigned m_logicalCharacterOffset;
-    unsigned m_logicalMetricsListOffset;
     SVGInlineTextMetricsIterator m_visualMetricsIterator;
     FloatPoint m_textPosition;
     bool m_isVerticalText;
@@ -91,7 +89,7 @@ private:
     bool m_textLengthSpacingInEffect;
 
     // Text on path layout
-    OwnPtr<PathPositionMapper> m_textPath;
+    std::unique_ptr<PathPositionMapper> m_textPath;
     float m_textPathStartOffset;
     float m_textPathCurrentOffset;
     float m_textPathDisplacement;

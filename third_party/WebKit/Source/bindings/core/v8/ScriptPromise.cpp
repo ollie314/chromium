@@ -127,8 +127,10 @@ private:
             return;
 
         v8::Local<v8::Array> values = v8::Array::New(value.isolate(), m_values.size());
-        for (size_t i = 0; i < m_values.size(); ++i)
-            values->Set(i, m_values[i].v8Value());
+        for (size_t i = 0; i < m_values.size(); ++i) {
+            if (!v8CallBoolean(values->CreateDataProperty(value.context(), i, m_values[i].v8Value())))
+                return;
+        }
 
         markPromiseSettled();
         m_resolver.resolve(values);
@@ -314,17 +316,12 @@ ScriptPromise ScriptPromise::all(ScriptState* scriptState, const Vector<ScriptPr
 
 void ScriptPromise::increaseInstanceCount()
 {
-    // An instance is only counted only on the main thread. This is because the
-    // leak detector can detect leaks on the main thread so far. We plan to fix
-    // the leak detector to work on worker threads (crbug.com/507224).
-    if (isMainThread())
-        InstanceCounters::incrementCounter(InstanceCounters::ScriptPromiseCounter);
+    InstanceCounters::incrementCounter(InstanceCounters::ScriptPromiseCounter);
 }
 
 void ScriptPromise::decreaseInstanceCount()
 {
-    if (isMainThread())
-        InstanceCounters::decrementCounter(InstanceCounters::ScriptPromiseCounter);
+    InstanceCounters::decrementCounter(InstanceCounters::ScriptPromiseCounter);
 }
 
 } // namespace blink

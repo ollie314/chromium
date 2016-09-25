@@ -4,11 +4,13 @@
 
 package org.chromium.chrome.browser;
 
+import android.test.suitebuilder.annotation.MediumTest;
 import android.text.TextUtils;
 
 import org.chromium.base.BuildInfo;
 import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 
 import java.io.BufferedReader;
@@ -33,10 +35,11 @@ public class ProcessIsolationTest extends ChromeActivityTestCaseBase<ChromeActiv
      * Verifies that process isolation works, i.e., that the browser and
      * renderer processes use different user IDs.
      * @throws InterruptedException
-     * @MediumTest
      */
+    @MediumTest
     @DisableIf.Build(sdk_is_greater_than = 22, message = "crbug.com/517611")
     @Feature({"Browser", "Security"})
+    @RetryOnFailure
     public void testProcessIsolationForRenderers() throws InterruptedException {
         int tabsCount = getActivity().getCurrentTabModel().getCount();
         // The ActivityManager can be used to retrieve the current processes, but the reported UID

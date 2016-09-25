@@ -27,7 +27,6 @@
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ContainerNode.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/dom/NodeTraversal.h"
 
 namespace blink {
@@ -60,7 +59,7 @@ Node* TreeWalker::parentNode(ExceptionState& exceptionState)
         unsigned acceptNodeResult = acceptNode(node, exceptionState);
         if (exceptionState.hadException())
             return 0;
-        if (acceptNodeResult == NodeFilter::FILTER_ACCEPT)
+        if (acceptNodeResult == NodeFilter::kFilterAccept)
             return setCurrent(node);
     }
     return 0;
@@ -73,16 +72,16 @@ Node* TreeWalker::firstChild(ExceptionState& exceptionState)
         if (exceptionState.hadException())
             return 0;
         switch (acceptNodeResult) {
-        case NodeFilter::FILTER_ACCEPT:
+        case NodeFilter::kFilterAccept:
             m_current = node;
             return m_current.get();
-        case NodeFilter::FILTER_SKIP:
+        case NodeFilter::kFilterSkip:
             if (node->hasChildren()) {
                 node = node->firstChild();
                 continue;
             }
             break;
-        case NodeFilter::FILTER_REJECT:
+        case NodeFilter::kFilterReject:
             break;
         }
         do {
@@ -106,16 +105,16 @@ Node* TreeWalker::lastChild(ExceptionState& exceptionState)
         if (exceptionState.hadException())
             return 0;
         switch (acceptNodeResult) {
-        case NodeFilter::FILTER_ACCEPT:
+        case NodeFilter::kFilterAccept:
             m_current = node;
             return m_current.get();
-        case NodeFilter::FILTER_SKIP:
+        case NodeFilter::kFilterSkip:
             if (node->lastChild()) {
                 node = node->lastChild();
                 continue;
             }
             break;
-        case NodeFilter::FILTER_REJECT:
+        case NodeFilter::kFilterReject:
             break;
         }
         do {
@@ -143,17 +142,17 @@ Node* TreeWalker::previousSibling(ExceptionState& exceptionState)
             if (exceptionState.hadException())
                 return 0;
             switch (acceptNodeResult) {
-            case NodeFilter::FILTER_ACCEPT:
+            case NodeFilter::kFilterAccept:
                 m_current = sibling;
                 return m_current.get();
-            case NodeFilter::FILTER_SKIP:
+            case NodeFilter::kFilterSkip:
                 if (sibling->lastChild()) {
                     sibling = sibling->lastChild();
                     node = sibling;
                     continue;
                 }
                 break;
-            case NodeFilter::FILTER_REJECT:
+            case NodeFilter::kFilterReject:
                 break;
             }
             sibling = sibling->previousSibling();
@@ -164,7 +163,7 @@ Node* TreeWalker::previousSibling(ExceptionState& exceptionState)
         unsigned acceptNodeResult = acceptNode(node, exceptionState);
         if (exceptionState.hadException())
             return 0;
-        if (acceptNodeResult == NodeFilter::FILTER_ACCEPT)
+        if (acceptNodeResult == NodeFilter::kFilterAccept)
             return 0;
     }
 }
@@ -180,17 +179,17 @@ Node* TreeWalker::nextSibling(ExceptionState& exceptionState)
             if (exceptionState.hadException())
                 return 0;
             switch (acceptNodeResult) {
-            case NodeFilter::FILTER_ACCEPT:
+            case NodeFilter::kFilterAccept:
                 m_current = sibling;
                 return m_current.get();
-            case NodeFilter::FILTER_SKIP:
+            case NodeFilter::kFilterSkip:
                 if (sibling->hasChildren()) {
                     sibling = sibling->firstChild();
                     node = sibling;
                     continue;
                 }
                 break;
-            case NodeFilter::FILTER_REJECT:
+            case NodeFilter::kFilterReject:
                 break;
             }
             sibling = sibling->nextSibling();
@@ -201,7 +200,7 @@ Node* TreeWalker::nextSibling(ExceptionState& exceptionState)
         unsigned acceptNodeResult = acceptNode(node, exceptionState);
         if (exceptionState.hadException())
             return 0;
-        if (acceptNodeResult == NodeFilter::FILTER_ACCEPT)
+        if (acceptNodeResult == NodeFilter::kFilterAccept)
             return 0;
     }
 }
@@ -215,17 +214,17 @@ Node* TreeWalker::previousNode(ExceptionState& exceptionState)
             unsigned acceptNodeResult = acceptNode(node, exceptionState);
             if (exceptionState.hadException())
                 return 0;
-            if (acceptNodeResult == NodeFilter::FILTER_REJECT)
+            if (acceptNodeResult == NodeFilter::kFilterReject)
                 continue;
             while (Node* lastChild = node->lastChild()) {
                 node = lastChild;
                 acceptNodeResult = acceptNode(node, exceptionState);
                 if (exceptionState.hadException())
                     return 0;
-                if (acceptNodeResult == NodeFilter::FILTER_REJECT)
+                if (acceptNodeResult == NodeFilter::kFilterReject)
                     break;
             }
-            if (acceptNodeResult == NodeFilter::FILTER_ACCEPT) {
+            if (acceptNodeResult == NodeFilter::kFilterAccept) {
                 m_current = node;
                 return m_current.get();
             }
@@ -239,7 +238,7 @@ Node* TreeWalker::previousNode(ExceptionState& exceptionState)
         unsigned acceptNodeResult = acceptNode(node, exceptionState);
         if (exceptionState.hadException())
             return 0;
-        if (acceptNodeResult == NodeFilter::FILTER_ACCEPT)
+        if (acceptNodeResult == NodeFilter::kFilterAccept)
             return setCurrent(node);
     }
     return 0;
@@ -254,9 +253,9 @@ Children:
         unsigned acceptNodeResult = acceptNode(node, exceptionState);
         if (exceptionState.hadException())
             return 0;
-        if (acceptNodeResult == NodeFilter::FILTER_ACCEPT)
+        if (acceptNodeResult == NodeFilter::kFilterAccept)
             return setCurrent(node);
-        if (acceptNodeResult == NodeFilter::FILTER_REJECT)
+        if (acceptNodeResult == NodeFilter::kFilterReject)
             break;
     }
     while (Node* nextSibling = NodeTraversal::nextSkippingChildren(*node, root())) {
@@ -264,9 +263,9 @@ Children:
         unsigned acceptNodeResult = acceptNode(node, exceptionState);
         if (exceptionState.hadException())
             return 0;
-        if (acceptNodeResult == NodeFilter::FILTER_ACCEPT)
+        if (acceptNodeResult == NodeFilter::kFilterAccept)
             return setCurrent(node);
-        if (acceptNodeResult == NodeFilter::FILTER_SKIP)
+        if (acceptNodeResult == NodeFilter::kFilterSkip)
             goto Children;
     }
     return 0;
@@ -276,6 +275,11 @@ DEFINE_TRACE(TreeWalker)
 {
     visitor->trace(m_current);
     NodeIteratorBase::trace(visitor);
+}
+
+DEFINE_TRACE_WRAPPERS(TreeWalker)
+{
+    NodeIteratorBase::traceWrappers(visitor);
 }
 
 } // namespace blink

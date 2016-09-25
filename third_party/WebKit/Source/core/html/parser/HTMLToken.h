@@ -29,7 +29,8 @@
 #include "core/dom/Attribute.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "wtf/Forward.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -80,6 +81,32 @@ public:
         class Range {
             DISALLOW_NEW();
         public:
+            static constexpr int kInvalidOffset = -1;
+
+            inline void clear()
+            {
+#if ENABLE(ASSERT)
+                start = kInvalidOffset;
+                end = kInvalidOffset;
+#endif
+            }
+
+            // Check Range instance that is actively being parsed.
+            inline void checkValidStart() const
+            {
+                DCHECK_NE(start, kInvalidOffset);
+                DCHECK_GE(start, 0);
+            }
+
+            // Check Range instance which finished parse.
+            inline void checkValid() const
+            {
+                checkValidStart();
+                DCHECK_NE(end, kInvalidOffset);
+                DCHECK_GE(end, 0);
+                DCHECK_LE(start, end);
+            }
+
             int start;
             int end;
         };
@@ -94,7 +121,7 @@ public:
         String value() const { return String(m_value); }
 
         void appendToValue(UChar c) { m_value.append(c); }
-        void appendToValue(const String& value) { append(m_value, value); }
+        void appendToValue(const String& value) { value.appendTo(m_value); }
         void clearValue() { m_value.clear(); }
 
         const Range& nameRange() const { return m_nameRange; }
@@ -121,8 +148,8 @@ public:
     void clear()
     {
         m_type = Uninitialized;
+        m_range.clear();
         m_range.start = 0;
-        m_range.end = 0;
         m_baseOffset = 0;
         // Don't call Vector::clear() as that would destroy the
         // alloced VectorBuffer. If the innerHTML'd content has
@@ -199,7 +226,7 @@ public:
     {
         ASSERT(m_type == Uninitialized);
         m_type = DOCTYPE;
-        m_doctypeData = adoptPtr(new DoctypeData);
+        m_doctypeData = wrapUnique(new DoctypeData);
     }
 
     void beginDOCTYPE(UChar character)
@@ -254,9 +281,9 @@ public:
         m_doctypeData->m_systemIdentifier.append(character);
     }
 
-    PassOwnPtr<DoctypeData> releaseDoctypeData()
+    std::unique_ptr<DoctypeData> releaseDoctypeData()
     {
-        return m_doctypeData.release();
+        return std::move(m_doctypeData);
     }
 
     /* Start/End Tag Tokens */
@@ -313,45 +340,43 @@ public:
         ASSERT(m_type == StartTag || m_type == EndTag);
         m_attributes.grow(m_attributes.size() + 1);
         m_currentAttribute = &m_attributes.last();
-#if ENABLE(ASSERT)
-        m_currentAttribute->mutableNameRange().start = 0;
-        m_currentAttribute->mutableNameRange().end = 0;
-        m_currentAttribute->mutableValueRange().start = 0;
-        m_currentAttribute->mutableValueRange().end = 0;
-#endif
+        m_currentAttribute->mutableNameRange().clear();
+        m_currentAttribute->mutableValueRange().clear();
     }
 
     void beginAttributeName(int offset)
     {
         m_currentAttribute->mutableNameRange().start = offset - m_baseOffset;
+        m_currentAttribute->nameRange().checkValidStart();
     }
 
     void endAttributeName(int offset)
     {
         int index = offset - m_baseOffset;
         m_currentAttribute->mutableNameRange().end = index;
+        m_currentAttribute->nameRange().checkValid();
         m_currentAttribute->mutableValueRange().start = index;
         m_currentAttribute->mutableValueRange().end = index;
     }
 
     void beginAttributeValue(int offset)
     {
+        m_currentAttribute->mutableValueRange().clear();
         m_currentAttribute->mutableValueRange().start = offset - m_baseOffset;
-#if ENABLE(ASSERT)
-        m_currentAttribute->mutableValueRange().end = 0;
-#endif
+        m_currentAttribute->valueRange().checkValidStart();
     }
 
     void endAttributeValue(int offset)
     {
         m_currentAttribute->mutableValueRange().end = offset - m_baseOffset;
+        m_currentAttribute->valueRange().checkValid();
     }
 
     void appendToAttributeName(UChar character)
     {
         ASSERT(character);
         ASSERT(m_type == StartTag || m_type == EndTag);
-        ASSERT(m_currentAttribute->nameRange().start);
+        m_currentAttribute->nameRange().checkValidStart();
         m_currentAttribute->appendToName(character);
     }
 
@@ -359,7 +384,7 @@ public:
     {
         ASSERT(character);
         ASSERT(m_type == StartTag || m_type == EndTag);
-        ASSERT(m_currentAttribute->valueRange().start);
+        m_currentAttribute->valueRange().checkValidStart();
         m_currentAttribute->appendToValue(character);
     }
 
@@ -472,8 +497,12 @@ private:
     Attribute* m_currentAttribute;
 
     // For DOCTYPE
-    OwnPtr<DoctypeData> m_doctypeData;
+    std::unique_ptr<DoctypeData> m_doctypeData;
 };
+
+#ifndef NDEBUG
+const char* toString(HTMLToken::TokenType);
+#endif
 
 } // namespace blink
 

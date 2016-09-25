@@ -31,6 +31,7 @@
 #include "public/web/WebFormControlElement.h"
 
 #include "core/dom/NodeComputedStyle.h"
+#include "core/events/Event.h"
 #include "core/html/HTMLFormControlElement.h"
 #include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLInputElement.h"
@@ -97,6 +98,26 @@ void WebFormControlElement::setValue(const WebString& value, bool sendEvents)
         unwrap<HTMLSelectElement>()->setValue(value, sendEvents);
 }
 
+void WebFormControlElement::setAutofillValue(const WebString& value)
+{
+    // The input and change events will be sent in setValue.
+    if (isHTMLInputElement(*m_private) || isHTMLTextAreaElement(*m_private)) {
+        if (!focused())
+            unwrap<Element>()->dispatchFocusEvent(nullptr, WebFocusTypeForward, nullptr);
+        unwrap<Element>()->dispatchScopedEvent(Event::createBubble(EventTypeNames::keydown));
+        unwrap<HTMLTextFormControlElement>()->setValue(value, DispatchInputAndChangeEvent);
+        unwrap<Element>()->dispatchScopedEvent(Event::createBubble(EventTypeNames::keyup));
+        if (!focused())
+            unwrap<Element>()->dispatchBlurEvent(nullptr, WebFocusTypeForward, nullptr);
+    } else if (isHTMLSelectElement(*m_private)) {
+        if (!focused())
+            unwrap<Element>()->dispatchFocusEvent(nullptr, WebFocusTypeForward, nullptr);
+        unwrap<HTMLSelectElement>()->setValue(value, true);
+        if (!focused())
+            unwrap<Element>()->dispatchBlurEvent(nullptr, WebFocusTypeForward, nullptr);
+    }
+}
+
 WebString WebFormControlElement::value() const
 {
     if (isHTMLInputElement(*m_private))
@@ -141,9 +162,9 @@ WebString WebFormControlElement::editingValue() const
 void WebFormControlElement::setSelectionRange(int start, int end)
 {
     if (isHTMLInputElement(*m_private))
-        unwrap<HTMLInputElement>()->setSelectionRange(start, end, SelectionHasNoDirection, NotDispatchSelectEvent);
+        unwrap<HTMLInputElement>()->setSelectionRange(start, end);
     else if (isHTMLTextAreaElement(*m_private))
-        unwrap<HTMLTextAreaElement>()->setSelectionRange(start, end, SelectionHasNoDirection, NotDispatchSelectEvent);
+        unwrap<HTMLTextAreaElement>()->setSelectionRange(start, end);
 }
 
 int WebFormControlElement::selectionStart() const
@@ -164,10 +185,22 @@ int WebFormControlElement::selectionEnd() const
     return 0;
 }
 
+WebString WebFormControlElement::alignmentForFormData() const
+{
+    if (const ComputedStyle* style = constUnwrap<HTMLFormControlElement>()->computedStyle()) {
+        if (style->textAlign() == RIGHT)
+            return WebString::fromUTF8("right");
+        if (style->textAlign() == LEFT)
+            return WebString::fromUTF8("left");
+    }
+    return WebString();
+}
+
 WebString WebFormControlElement::directionForFormData() const
 {
-    if (const ComputedStyle* style = constUnwrap<HTMLFormControlElement>()->computedStyle())
+    if (const ComputedStyle* style = constUnwrap<HTMLFormControlElement>()->computedStyle()) {
         return style->isLeftToRightDirection() ? WebString::fromUTF8("ltr") : WebString::fromUTF8("rtl");
+    }
     return WebString::fromUTF8("ltr");
 }
 

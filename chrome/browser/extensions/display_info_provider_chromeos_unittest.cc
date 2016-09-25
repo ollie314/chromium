@@ -6,25 +6,29 @@
 
 #include <stdint.h>
 
-#include "ash/ash_switches.h"
+#include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
+#include "ash/common/wm_shell.h"
 #include "ash/display/display_manager.h"
 #include "ash/display/screen_orientation_controller_chromeos.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/display_manager_test_api.h"
-#include "ash/wm/maximize_mode/maximize_mode_controller.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "extensions/common/api/system_display.h"
+#include "ui/display/display.h"
+#include "ui/display/display_switches.h"
 #include "ui/display/manager/display_layout.h"
-#include "ui/gfx/display.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace extensions {
 namespace {
+
+using DisplayUnitInfoList = DisplayInfoProvider::DisplayUnitInfoList;
+using DisplayLayoutList = DisplayInfoProvider::DisplayLayoutList;
 
 class DisplayInfoProviderChromeosTest : public ash::test::AshTestBase {
  public:
@@ -34,7 +38,7 @@ class DisplayInfoProviderChromeosTest : public ash::test::AshTestBase {
 
   void SetUp() override {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        ash::switches::kAshUseFirstDisplayAsInternal);
+        switches::kUseFirstDisplayAsInternal);
     ash::test::AshTestBase::SetUp();
   }
 
@@ -50,9 +54,9 @@ class DisplayInfoProviderChromeosTest : public ash::test::AshTestBase {
   }
 
   bool DisplayExists(int64_t display_id) const {
-    const gfx::Display& display =
+    const display::Display& display =
         GetDisplayManager()->GetDisplayForId(display_id);
-    return display.id() != gfx::Display::kInvalidDisplayID;
+    return display.id() != display::Display::kInvalidDisplayID;
   }
 
   ash::DisplayManager* GetDisplayManager() const {
@@ -242,8 +246,9 @@ TEST_F(DisplayInfoProviderChromeosTest, GetRotation) {
   EXPECT_EQ("0,0 600x500", SystemInfoDisplayBoundsToString(result[0].bounds));
   EXPECT_EQ(90, result[0].rotation);
 
-  GetDisplayManager()->SetDisplayRotation(display_id, gfx::Display::ROTATE_270,
-                                          gfx::Display::ROTATION_SOURCE_ACTIVE);
+  GetDisplayManager()->SetDisplayRotation(
+      display_id, display::Display::ROTATE_270,
+      display::Display::ROTATION_SOURCE_ACTIVE);
 
   result = DisplayInfoProvider::Get()->GetAllDisplaysInfo();
 
@@ -253,8 +258,9 @@ TEST_F(DisplayInfoProviderChromeosTest, GetRotation) {
   EXPECT_EQ("0,0 600x500", SystemInfoDisplayBoundsToString(result[0].bounds));
   EXPECT_EQ(270, result[0].rotation);
 
-  GetDisplayManager()->SetDisplayRotation(display_id, gfx::Display::ROTATE_180,
-                                          gfx::Display::ROTATION_SOURCE_ACTIVE);
+  GetDisplayManager()->SetDisplayRotation(
+      display_id, display::Display::ROTATE_180,
+      display::Display::ROTATION_SOURCE_ACTIVE);
 
   result = DisplayInfoProvider::Get()->GetAllDisplaysInfo();
 
@@ -264,8 +270,9 @@ TEST_F(DisplayInfoProviderChromeosTest, GetRotation) {
   EXPECT_EQ("0,0 500x600", SystemInfoDisplayBoundsToString(result[0].bounds));
   EXPECT_EQ(180, result[0].rotation);
 
-  GetDisplayManager()->SetDisplayRotation(display_id, gfx::Display::ROTATE_0,
-                                          gfx::Display::ROTATION_SOURCE_ACTIVE);
+  GetDisplayManager()->SetDisplayRotation(
+      display_id, display::Display::ROTATE_0,
+      display::Display::ROTATION_SOURCE_ACTIVE);
 
   result = DisplayInfoProvider::Get()->GetAllDisplaysInfo();
 
@@ -431,10 +438,64 @@ TEST_F(DisplayInfoProviderChromeosTest, GetBounds) {
             SystemInfoDisplayBoundsToString(result[1].bounds));
 }
 
+TEST_F(DisplayInfoProviderChromeosTest, Layout) {
+  UpdateDisplay("500x400,500x400,500x400");
+
+  DisplayUnitInfoList displays =
+      DisplayInfoProvider::Get()->GetAllDisplaysInfo();
+  std::string primary_id = displays[0].id;
+  ASSERT_EQ(3u, displays.size());
+
+  DisplayLayoutList layout = DisplayInfoProvider::Get()->GetDisplayLayout();
+
+  ASSERT_EQ(2u, layout.size());
+
+  // Confirm layout.
+  EXPECT_EQ(displays[1].id, layout[0].id);
+  EXPECT_EQ(primary_id, layout[0].parent_id);
+  EXPECT_EQ(api::system_display::LAYOUT_POSITION_RIGHT, layout[0].position);
+  EXPECT_EQ(0, layout[0].offset);
+
+  EXPECT_EQ(displays[2].id, layout[1].id);
+  EXPECT_EQ(layout[0].id, layout[1].parent_id);
+  EXPECT_EQ(api::system_display::LAYOUT_POSITION_RIGHT, layout[1].position);
+  EXPECT_EQ(0, layout[1].offset);
+
+  // Modify layout.
+  layout[0].offset = 100;
+  layout[1].parent_id = primary_id;
+  layout[1].position = api::system_display::LAYOUT_POSITION_BOTTOM;
+  layout[1].offset = -100;
+
+  // Update with modified layout.
+  ASSERT_TRUE(DisplayInfoProvider::Get()->SetDisplayLayout(layout));
+
+  // Get updated layout.
+  layout = DisplayInfoProvider::Get()->GetDisplayLayout();
+
+  // Confirm modified layout.
+  EXPECT_EQ(displays[1].id, layout[0].id);
+  EXPECT_EQ(primary_id, layout[0].parent_id);
+  EXPECT_EQ(api::system_display::LAYOUT_POSITION_RIGHT, layout[0].position);
+  EXPECT_EQ(100, layout[0].offset);
+
+  EXPECT_EQ(displays[2].id, layout[1].id);
+  EXPECT_EQ(primary_id, layout[1].parent_id);
+  EXPECT_EQ(api::system_display::LAYOUT_POSITION_BOTTOM, layout[1].position);
+  EXPECT_EQ(-100, layout[1].offset);
+
+  // TODO(stevenjb/oshima): Implement and test illegal layout prevention.
+
+  // Test setting invalid layout fails.
+  layout[0].parent_id = displays[2].id;
+  layout[1].parent_id = displays[1].id;
+  EXPECT_FALSE(DisplayInfoProvider::Get()->SetDisplayLayout(layout));
+}
+
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginLeftExact) {
   UpdateDisplay("1200x600,520x400");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(-520));
   info.bounds_origin_y.reset(new int(50));
@@ -453,7 +514,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginLeftExact) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginRightExact) {
   UpdateDisplay("1200x600,520x400");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(1200));
   info.bounds_origin_y.reset(new int(100));
@@ -472,7 +533,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginRightExact) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginTopExact) {
   UpdateDisplay("1200x600,520x400");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(1100));
   info.bounds_origin_y.reset(new int(-400));
@@ -491,7 +552,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginTopExact) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginBottomExact) {
   UpdateDisplay("1200x600,520x400");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(-350));
   info.bounds_origin_y.reset(new int(600));
@@ -510,7 +571,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginBottomExact) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginSameCenter) {
   UpdateDisplay("1200x600,520x400");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(340));
   info.bounds_origin_y.reset(new int(100));
@@ -529,7 +590,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginSameCenter) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginLeftOutside) {
   UpdateDisplay("1200x600,520x400");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(-1040));
   info.bounds_origin_y.reset(new int(100));
@@ -548,7 +609,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginLeftOutside) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginTopOutside) {
   UpdateDisplay("1200x600,520x400");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(-360));
   info.bounds_origin_y.reset(new int(-301));
@@ -568,7 +629,7 @@ TEST_F(DisplayInfoProviderChromeosTest,
        SetBoundsOriginLeftButSharesBottomSide) {
   UpdateDisplay("1200x600,1000x100");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(-650));
   info.bounds_origin_y.reset(new int(700));
@@ -587,7 +648,7 @@ TEST_F(DisplayInfoProviderChromeosTest,
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginRightButSharesTopSide) {
   UpdateDisplay("1200x600,1000x100");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(850));
   info.bounds_origin_y.reset(new int(-150));
@@ -606,7 +667,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginRightButSharesTopSide) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginTopButSharesLeftSide) {
   UpdateDisplay("1200x600,1000x100/l");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(-150));
   info.bounds_origin_y.reset(new int(-650));
@@ -626,7 +687,7 @@ TEST_F(DisplayInfoProviderChromeosTest,
        SetBoundsOriginBottomButSharesRightSide) {
   UpdateDisplay("1200x600,1000x100/l");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(1350));
   info.bounds_origin_y.reset(new int(450));
@@ -645,7 +706,7 @@ TEST_F(DisplayInfoProviderChromeosTest,
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginPrimaryHiDPI) {
   UpdateDisplay("1200x600*2,500x500");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(250));
   info.bounds_origin_y.reset(new int(-100));
@@ -664,7 +725,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginPrimaryHiDPI) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginSecondaryHiDPI) {
   UpdateDisplay("1200x600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(450));
   info.bounds_origin_y.reset(new int(-100));
@@ -683,7 +744,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginSecondaryHiDPI) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginOutOfBounds) {
   UpdateDisplay("1200x600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(0x200001));
   info.bounds_origin_y.reset(new int(-100));
@@ -702,7 +763,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginOutOfBounds) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginOutOfBoundsNegative) {
   UpdateDisplay("1200x600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(300));
   info.bounds_origin_y.reset(new int(-0x200001));
@@ -721,7 +782,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginOutOfBoundsNegative) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginMaxValues) {
   UpdateDisplay("1200x4600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(200000));
   info.bounds_origin_y.reset(new int(10));
@@ -740,7 +801,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginMaxValues) {
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginOnPrimary) {
   UpdateDisplay("1200x600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(300));
   info.is_primary.reset(new bool(true));
@@ -756,14 +817,16 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginOnPrimary) {
   EXPECT_EQ("1200,0 300x500", secondary.bounds().ToString());
   // The operation failed because the primary property would be set before
   // setting bounds. The primary display shouldn't have been changed, though.
-  EXPECT_NE(gfx::Screen::GetScreen()->GetPrimaryDisplay().id(), secondary.id());
+  EXPECT_NE(display::Screen::GetScreen()->GetPrimaryDisplay().id(),
+            secondary.id());
 }
 
 TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginWithMirroring) {
   UpdateDisplay("1200x600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
-  const gfx::Display& primary = gfx::Screen::GetScreen()->GetPrimaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& primary =
+      display::Screen::GetScreen()->GetPrimaryDisplay();
 
   api::system_display::DisplayProperties info;
   info.bounds_origin_x.reset(new int(300));
@@ -783,7 +846,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetBoundsOriginWithMirroring) {
 TEST_F(DisplayInfoProviderChromeosTest, SetRotation) {
   UpdateDisplay("1200x600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.rotation.reset(new int(90));
 
@@ -796,7 +859,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetRotation) {
   EXPECT_TRUE(error.empty());
 
   EXPECT_EQ("1200,0 500x300", secondary.bounds().ToString());
-  EXPECT_EQ(gfx::Display::ROTATE_90, secondary.rotation());
+  EXPECT_EQ(display::Display::ROTATE_90, secondary.rotation());
 
   info.rotation.reset(new int(270));
   CallSetDisplayUnitInfo(
@@ -806,7 +869,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetRotation) {
   EXPECT_TRUE(error.empty());
 
   EXPECT_EQ("1200,0 500x300", secondary.bounds().ToString());
-  EXPECT_EQ(gfx::Display::ROTATE_270, secondary.rotation());
+  EXPECT_EQ(display::Display::ROTATE_270, secondary.rotation());
 
   info.rotation.reset(new int(180));
   // Switch primary display.
@@ -818,8 +881,9 @@ TEST_F(DisplayInfoProviderChromeosTest, SetRotation) {
   EXPECT_TRUE(error.empty());
 
   EXPECT_EQ("0,0 300x500", secondary.bounds().ToString());
-  EXPECT_EQ(gfx::Display::ROTATE_180, secondary.rotation());
-  EXPECT_EQ(gfx::Screen::GetScreen()->GetPrimaryDisplay().id(), secondary.id());
+  EXPECT_EQ(display::Display::ROTATE_180, secondary.rotation());
+  EXPECT_EQ(display::Screen::GetScreen()->GetPrimaryDisplay().id(),
+            secondary.id());
 
   info.rotation.reset(new int(0));
   CallSetDisplayUnitInfo(
@@ -829,8 +893,9 @@ TEST_F(DisplayInfoProviderChromeosTest, SetRotation) {
   EXPECT_TRUE(error.empty());
 
   EXPECT_EQ("0,0 300x500", secondary.bounds().ToString());
-  EXPECT_EQ(gfx::Display::ROTATE_0, secondary.rotation());
-  EXPECT_EQ(gfx::Screen::GetScreen()->GetPrimaryDisplay().id(), secondary.id());
+  EXPECT_EQ(display::Display::ROTATE_0, secondary.rotation());
+  EXPECT_EQ(display::Screen::GetScreen()->GetPrimaryDisplay().id(),
+            secondary.id());
 }
 
 // Tests that rotation changes made before entering maximize mode are restored
@@ -843,15 +908,16 @@ TEST_F(DisplayInfoProviderChromeosTest, SetRotationBeforeMaximizeMode) {
 
   bool success = false;
   std::string error;
-  CallSetDisplayUnitInfo(base::Int64ToString(gfx::Display::InternalDisplayId()),
-                         info, &success, &error);
+  CallSetDisplayUnitInfo(
+      base::Int64ToString(display::Display::InternalDisplayId()), info,
+      &success, &error);
 
   ASSERT_TRUE(success);
   EXPECT_TRUE(error.empty());
   EXPECT_FALSE(screen_orientation_controller->rotation_locked());
 
   // Entering maximize mode enables accelerometer screen rotations.
-  ash::Shell::GetInstance()
+  ash::WmShell::Get()
       ->maximize_mode_controller()
       ->EnableMaximizeModeWindowManager(true);
   // Rotation lock should not activate because DisplayInfoProvider::SetInfo()
@@ -860,21 +926,21 @@ TEST_F(DisplayInfoProviderChromeosTest, SetRotationBeforeMaximizeMode) {
 
   // ScreenOrientationController rotations override display info.
   screen_orientation_controller->SetDisplayRotation(
-      gfx::Display::ROTATE_0, gfx::Display::ROTATION_SOURCE_ACTIVE);
-  EXPECT_EQ(gfx::Display::ROTATE_0, GetCurrentInternalDisplayRotation());
+      display::Display::ROTATE_0, display::Display::ROTATION_SOURCE_ACTIVE);
+  EXPECT_EQ(display::Display::ROTATE_0, GetCurrentInternalDisplayRotation());
 
   // Exiting maximize mode should restore the initial rotation
-  ash::Shell::GetInstance()
+  ash::WmShell::Get()
       ->maximize_mode_controller()
       ->EnableMaximizeModeWindowManager(false);
-  EXPECT_EQ(gfx::Display::ROTATE_90, GetCurrentInternalDisplayRotation());
+  EXPECT_EQ(display::Display::ROTATE_90, GetCurrentInternalDisplayRotation());
 }
 
 // Tests that rotation changes made during maximize mode lock the display
 // against accelerometer rotations.
 TEST_F(DisplayInfoProviderChromeosTest, SetRotationDuringMaximizeMode) {
   // Entering maximize mode enables accelerometer screen rotations.
-  ash::Shell::GetInstance()
+  ash::WmShell::Get()
       ->maximize_mode_controller()
       ->EnableMaximizeModeWindowManager(true);
 
@@ -887,8 +953,9 @@ TEST_F(DisplayInfoProviderChromeosTest, SetRotationDuringMaximizeMode) {
 
   bool success = false;
   std::string error;
-  CallSetDisplayUnitInfo(base::Int64ToString(gfx::Display::InternalDisplayId()),
-                         info, &success, &error);
+  CallSetDisplayUnitInfo(
+      base::Int64ToString(display::Display::InternalDisplayId()), info,
+      &success, &error);
 
   ASSERT_TRUE(success);
   EXPECT_TRUE(error.empty());
@@ -900,7 +967,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetRotationDuringMaximizeMode) {
 TEST_F(DisplayInfoProviderChromeosTest, SetInvalidRotation) {
   UpdateDisplay("1200x600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.rotation.reset(new int(91));
 
@@ -916,7 +983,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetInvalidRotation) {
 TEST_F(DisplayInfoProviderChromeosTest, SetNegativeOverscan) {
   UpdateDisplay("1200x600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.overscan.reset(new api::system_display::Insets);
   info.overscan->left = -10;
@@ -979,7 +1046,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetNegativeOverscan) {
 TEST_F(DisplayInfoProviderChromeosTest, SetOverscanLargerThanHorizontalBounds) {
   UpdateDisplay("1200x600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.overscan.reset(new api::system_display::Insets);
   // Horizontal overscan is 151, which would make the bounds width 149.
@@ -1001,7 +1068,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetOverscanLargerThanHorizontalBounds) {
 TEST_F(DisplayInfoProviderChromeosTest, SetOverscanLargerThanVerticalBounds) {
   UpdateDisplay("1200x600,600x1000");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.overscan.reset(new api::system_display::Insets);
   // Vertical overscan is 501, which would make the bounds height 499.
@@ -1022,7 +1089,7 @@ TEST_F(DisplayInfoProviderChromeosTest, SetOverscanLargerThanVerticalBounds) {
 TEST_F(DisplayInfoProviderChromeosTest, SetOverscan) {
   UpdateDisplay("1200x600,600x1000*2");
 
-  const gfx::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
+  const display::Display& secondary = ash::ScreenUtil::GetSecondaryDisplay();
   api::system_display::DisplayProperties info;
   info.overscan.reset(new api::system_display::Insets);
   info.overscan->left = 20;
@@ -1083,7 +1150,7 @@ TEST_F(DisplayInfoProviderChromeosTest, DisplayMode) {
   // Get the currently active mode and one other mode to switch to.
   int64_t id;
   base::StringToInt64(primary_info.id, &id);
-  ash::DisplayMode active_mode =
+  scoped_refptr<display::ManagedDisplayMode> active_mode =
       GetDisplayManager()->GetActiveModeForDisplayId(id);
   const api::system_display::DisplayMode* cur_mode = nullptr;
   const api::system_display::DisplayMode* other_mode = nullptr;
@@ -1100,12 +1167,14 @@ TEST_F(DisplayInfoProviderChromeosTest, DisplayMode) {
   ASSERT_NE(other_mode, cur_mode);
 
   // Verify that other_mode differs from the active mode.
-  ash::DisplayMode other_mode_ash;
-  other_mode_ash.size.SetSize(other_mode->width_in_native_pixels,
-                              other_mode->height_in_native_pixels);
-  other_mode_ash.ui_scale = other_mode->ui_scale;
-  other_mode_ash.device_scale_factor = other_mode->device_scale_factor;
-  EXPECT_FALSE(active_mode.IsEquivalent(other_mode_ash));
+  scoped_refptr<display::ManagedDisplayMode> other_mode_ash(
+      new display::ManagedDisplayMode(
+          gfx::Size(other_mode->width_in_native_pixels,
+                    other_mode->height_in_native_pixels),
+          active_mode->refresh_rate(), active_mode->is_interlaced(),
+          active_mode->native(), other_mode->ui_scale,
+          other_mode->device_scale_factor));
+  EXPECT_FALSE(active_mode->IsEquivalent(other_mode_ash));
 
   // Switch modes.
   api::system_display::DisplayProperties info;
@@ -1119,7 +1188,7 @@ TEST_F(DisplayInfoProviderChromeosTest, DisplayMode) {
 
   // Verify that other_mode now matches the active mode.
   active_mode = GetDisplayManager()->GetActiveModeForDisplayId(id);
-  EXPECT_TRUE(active_mode.IsEquivalent(other_mode_ash));
+  EXPECT_TRUE(active_mode->IsEquivalent(other_mode_ash));
 }
 
 }  // namespace

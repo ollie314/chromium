@@ -22,6 +22,7 @@
 #include "components/policy/core/common/policy_bundle.h"
 #include "components/policy/core/common/policy_load_status.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/policy/policy_constants.h"
 
 namespace policy {
 
@@ -58,6 +59,20 @@ PolicyLoadStatus JsonErrorToPolicyLoadStatus(int status) {
   return POLICY_LOAD_STATUS_PARSE_ERROR;
 }
 
+bool IsUserPolicy(const PolicyMap::const_iterator iter) {
+  const PolicyDetails* policy_details = GetChromePolicyDetails(iter->first);
+  if (!policy_details) {
+    LOG(ERROR) << "Ignoring unknown platform policy: " << iter->first;
+    return false;
+  }
+  if (policy_details->is_device_policy) {
+    // Device Policy is only implemented as Cloud Policy (not Platform Policy).
+    LOG(ERROR) << "Ignoring device platform policy: " << iter->first;
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 ConfigDirPolicyLoader::ConfigDirPolicyLoader(
@@ -77,8 +92,8 @@ void ConfigDirPolicyLoader::InitOnBackgroundThread() {
                              callback);
 }
 
-scoped_ptr<PolicyBundle> ConfigDirPolicyLoader::Load() {
-  scoped_ptr<PolicyBundle> bundle(new PolicyBundle());
+std::unique_ptr<PolicyBundle> ConfigDirPolicyLoader::Load() {
+  std::unique_ptr<PolicyBundle> bundle(new PolicyBundle());
   LoadFromPath(config_dir_.Append(kMandatoryConfigDir),
                POLICY_LEVEL_MANDATORY,
                bundle.get());
@@ -146,7 +161,7 @@ void ConfigDirPolicyLoader::LoadFromPath(const base::FilePath& path,
     deserializer.set_allow_trailing_comma(true);
     int error_code = 0;
     std::string error_msg;
-    scoped_ptr<base::Value> value =
+    std::unique_ptr<base::Value> value =
         deserializer.Deserialize(&error_code, &error_msg);
     if (!value.get()) {
       LOG(WARNING) << "Failed to read configuration file "
@@ -163,7 +178,7 @@ void ConfigDirPolicyLoader::LoadFromPath(const base::FilePath& path,
     }
 
     // Detach the "3rdparty" node.
-    scoped_ptr<base::Value> third_party;
+    std::unique_ptr<base::Value> third_party;
     if (dictionary_value->Remove("3rdparty", &third_party))
       Merge3rdPartyPolicy(third_party.get(), level, bundle);
 
@@ -171,6 +186,7 @@ void ConfigDirPolicyLoader::LoadFromPath(const base::FilePath& path,
     PolicyMap policy_map;
     policy_map.LoadFrom(dictionary_value, level, scope_,
                         POLICY_SOURCE_PLATFORM);
+    policy_map.EraseNonmatching(base::Bind(&IsUserPolicy));
     bundle->Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
         .MergeFrom(policy_map);
   }
@@ -196,7 +212,7 @@ void ConfigDirPolicyLoader::Merge3rdPartyPolicy(
 
   for (base::DictionaryValue::Iterator domains_it(*domains_dictionary);
        !domains_it.IsAtEnd(); domains_it.Advance()) {
-    if (!ContainsKey(supported_domains, domains_it.key())) {
+    if (!base::ContainsKey(supported_domains, domains_it.key())) {
       LOG(WARNING) << "Unsupported 3rd party policy domain: "
                    << domains_it.key();
       continue;

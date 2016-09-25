@@ -4,11 +4,15 @@
 
 // https://html.spec.whatwg.org/#imagebitmapoptions
 
-[RuntimeEnabled=ExperimentalCanvasFeatures] enum ImageOrientation { "none", "flipY" };
-[RuntimeEnabled=ExperimentalCanvasFeatures] enum PremultiplyAlpha { "none", "premultiply", "default" };
-[RuntimeEnabled=ExperimentalCanvasFeatures] enum ColorspaceConversion { "none", "default" };
+enum ImageOrientation { "none", "flipY" };
+enum PremultiplyAlpha { "none", "premultiply", "default" };
+enum ColorSpaceConversion { "none", "default" };
+[RuntimeEnabled=ExperimentalCanvasFeatures] enum ResizeQuality { "pixelated", "low", "medium", "high" };
 dictionary ImageBitmapOptions {
-    [RuntimeEnabled=ExperimentalCanvasFeatures] ImageOrientation imageOrientation = "none";
-    [RuntimeEnabled=ExperimentalCanvasFeatures] PremultiplyAlpha premultiplyAlpha = "default";
-    [RuntimeEnabled=ExperimentalCanvasFeatures] ColorspaceConversion colorspaceConversion = "default";
+    ImageOrientation imageOrientation = "none";
+    PremultiplyAlpha premultiplyAlpha = "default";
+    ColorSpaceConversion colorSpaceConversion = "default";
+    [RuntimeEnabled=ExperimentalCanvasFeatures, EnforceRange] unsigned long? resizeWidth;
+    [RuntimeEnabled=ExperimentalCanvasFeatures, EnforceRange] unsigned long? resizeHeight;
+    [RuntimeEnabled=ExperimentalCanvasFeatures] ResizeQuality resizeQuality = "low";
 };

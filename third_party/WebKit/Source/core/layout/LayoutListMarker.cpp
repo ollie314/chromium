@@ -30,12 +30,16 @@
 #include "core/layout/ListMarkerText.h"
 #include "core/layout/api/LineLayoutBlockFlow.h"
 #include "core/paint/ListMarkerPainter.h"
-#include "core/paint/PaintLayer.h"
 #include "platform/fonts/Font.h"
 
 namespace blink {
 
 const int cMarkerPaddingPx = 7;
+
+// TODO(glebl): Move to WebKit/Source/core/css/html.css after
+// Blink starts to support ::marker crbug.com/457718
+// Recommended UA margin for list markers.
+const int cUAMarkerMarginEm = 1;
 
 LayoutListMarker::LayoutListMarker(LayoutListItem* item)
     : LayoutBox(nullptr)
@@ -159,7 +163,7 @@ void LayoutListMarker::layout()
 void LayoutListMarker::imageChanged(WrappedImagePtr o, const IntRect*)
 {
     // A list marker can't have a background or border image, so no need to call the base class method.
-    if (o != m_image->data())
+    if (!m_image || o != m_image->data())
         return;
 
     LayoutSize imageSize = isImage() ? imageBulletSize() : LayoutSize();
@@ -204,7 +208,7 @@ LayoutUnit LayoutListMarker::getWidthOfTextWithSuffix() const
     if (m_text.isEmpty())
         return LayoutUnit();
     const Font& font = style()->font();
-    LayoutUnit itemWidth = LayoutUnit(font.width(m_text));
+    LayoutUnit itemWidth = LayoutUnit(font.width(TextRun(m_text)));
     // TODO(wkorman): Look into constructing a text run for both text and suffix
     // and painting them together.
     UChar suffix[2] = { ListMarkerText::suffix(style()->listStyleType(), m_listItem->value()), ' ' };
@@ -262,7 +266,7 @@ void LayoutListMarker::updateMargins()
             switch (getListStyleCategory()) {
             case ListStyleCategory::Symbol:
                 marginStart = LayoutUnit(-1);
-                marginEnd = fontMetrics.ascent() - minPreferredLogicalWidth() + 1;
+                marginEnd = fontMetrics.ascent() - minPreferredLogicalWidth() + 1 + LayoutUnit(cUAMarkerMarginEm * style()->computedFontSize());
                 break;
             default:
                 break;
@@ -418,13 +422,13 @@ IntRect LayoutListMarker::getRelativeMarkerRect() const
         }
         break;
     case ListStyleCategory::Language:
-        relativeRect = IntRect(0, 0, getWidthOfTextWithSuffix(), style()->font().getFontMetrics().height());
+        relativeRect = IntRect(0, 0, getWidthOfTextWithSuffix().toInt(), style()->font().getFontMetrics().height());
         break;
     }
 
     if (!style()->isHorizontalWritingMode()) {
         relativeRect = relativeRect.transposedRect();
-        relativeRect.setX(size().width() - relativeRect.x() - relativeRect.width());
+        relativeRect.setX((size().width() - relativeRect.x() - relativeRect.width()).toInt());
     }
 
     return relativeRect;

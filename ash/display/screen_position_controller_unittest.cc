@@ -6,10 +6,10 @@
 
 #include <memory>
 
+#include "ash/common/shell_window_ids.h"
 #include "ash/display/display_manager.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
-#include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/shell_test_api.h"
 #include "ui/aura/env.h"
@@ -18,16 +18,19 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/layout.h"
 #include "ui/display/manager/display_layout.h"
+#include "ui/display/screen.h"
 #include "ui/events/test/event_generator.h"
-#include "ui/gfx/screen.h"
 
 #if defined(OS_WIN)
 // TODO(scottmg): RootWindow doesn't get resized immediately on Windows
 // Ash. http://crbug.com/247916.
 #define MAYBE_ConvertHostPointToScreen DISABLED_ConvertHostPointToScreen
-#define MAYBE_ConvertHostPointToScreenHiDPI DISABLED_ConvertHostPointToScreenHiDPI
-#define MAYBE_ConvertHostPointToScreenRotate DISABLED_ConvertHostPointToScreenRotate
-#define MAYBE_ConvertHostPointToScreenUIScale DISABLED_ConvertHostPointToScreenUIScale
+#define MAYBE_ConvertHostPointToScreenHiDPI \
+  DISABLED_ConvertHostPointToScreenHiDPI
+#define MAYBE_ConvertHostPointToScreenRotate \
+  DISABLED_ConvertHostPointToScreenRotate
+#define MAYBE_ConvertHostPointToScreenUIScale \
+  DISABLED_ConvertHostPointToScreenUIScale
 #define MAYBE_ConvertToScreenWhileRemovingSecondaryDisplay \
   DISABLED_ConvertToScreenWhileRemovingSecondaryDisplay
 #else
@@ -119,7 +122,7 @@ TEST_F(ScreenPositionControllerTest, MAYBE_ConvertHostPointToScreen) {
   const gfx::Point window_pos(100, 100);
   window_->SetBoundsInScreen(
       gfx::Rect(window_pos, gfx::Size(100, 100)),
-      gfx::Screen::GetScreen()->GetDisplayNearestPoint(window_pos));
+      display::Screen::GetScreen()->GetDisplayNearestPoint(window_pos));
   SetSecondaryDisplayLayout(display::DisplayPlacement::RIGHT);
   // The point is on the primary root window.
   EXPECT_EQ("50,50", ConvertHostPointToScreen(50, 50));
@@ -156,7 +159,7 @@ TEST_F(ScreenPositionControllerTest, MAYBE_ConvertHostPointToScreen) {
   const gfx::Point window_pos2(300, 100);
   window_->SetBoundsInScreen(
       gfx::Rect(window_pos2, gfx::Size(100, 100)),
-      gfx::Screen::GetScreen()->GetDisplayNearestPoint(window_pos2));
+      display::Screen::GetScreen()->GetDisplayNearestPoint(window_pos2));
   // The point is on the secondary display.
   EXPECT_EQ("250,50", ConvertHostPointToScreen(50, 50));
   // The point is out of the all root windows.
@@ -201,7 +204,7 @@ TEST_F(ScreenPositionControllerTest, MAYBE_ConvertHostPointToScreenHiDPI) {
 
   // Put |window_| to the primary 2x display.
   window_->SetBoundsInScreen(gfx::Rect(20, 20, 50, 50),
-                             gfx::Screen::GetScreen()->GetPrimaryDisplay());
+                             display::Screen::GetScreen()->GetPrimaryDisplay());
   // (30, 30) means the host coordinate, so the point is still on the primary
   // root window.  Since it's 2x, the specified native point was halved.
   EXPECT_EQ("15,15", ConvertHostPointToScreen(30, 30));
@@ -227,7 +230,7 @@ TEST_F(ScreenPositionControllerTest, MAYBE_ConvertHostPointToScreenRotate) {
   UpdateDisplay("100+100-200x200/r,100+500-200x200/l");
   // Put |window_| to the 1st.
   window_->SetBoundsInScreen(gfx::Rect(20, 20, 50, 50),
-                             gfx::Screen::GetScreen()->GetPrimaryDisplay());
+                             display::Screen::GetScreen()->GetPrimaryDisplay());
 
   // The point is on the 1st host.
   EXPECT_EQ("70,149", ConvertHostPointToScreen(50, 70));
@@ -259,7 +262,7 @@ TEST_F(ScreenPositionControllerTest, MAYBE_ConvertHostPointToScreenUIScale) {
   UpdateDisplay("100+100-200x200*2@1.5,100+500-200x200");
   // Put |window_| to the 1st.
   window_->SetBoundsInScreen(gfx::Rect(20, 20, 50, 50),
-                             gfx::Screen::GetScreen()->GetPrimaryDisplay());
+                             display::Screen::GetScreen()->GetPrimaryDisplay());
 
   // The point is on the 1st host.
   EXPECT_EQ("45,45", ConvertHostPointToScreen(60, 60));

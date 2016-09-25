@@ -251,6 +251,17 @@ function isPluginTrusted(plugin) {
 }
 
 /**
+ * @param {Object} plugin An object containing the information about a plugin.
+ *     See returnPluginsData() for the format of this object.
+ * @return {boolean} Whether the plugin is marked click to play by policy.
+ *
+ * This would normally be set by setting the policy DefaultPluginsSetting to 3.
+ */
+function isPluginPolicyClickToPlay(plugin) {
+    return plugin.policy_click_to_play == true;
+}
+
+/**
  * Helper to convert callback-based define() API to a promise-based API.
  * @param {!Array<string>} moduleNames
  * @return {!Promise}
@@ -263,49 +274,43 @@ function importModules(moduleNames) {
   });
 }
 
-// NOTE: Need to keep a reference to the stub here such that it is not garbage
-// collected, which causes the pipe to close and future calls from C++ to JS to
-// get dropped.
-var pluginsPageStub = null;
-
+// NOTE: Need to keep a global reference to the |pageImpl| such that it is not
+// garbage collected, which causes the pipe to close and future calls from C++
+// to JS to get dropped. This also allows tests to make direct calls on it.
+var pageImpl = null;
 var browserProxy = null;
-// Exposed globally such that the tests can make direct calls on it.
-var pageProxy = null;
 
 function initializeProxies() {
   return importModules([
-    'mojo/public/js/bindings',
-    'mojo/public/js/core',
     'mojo/public/js/connection',
     'chrome/browser/ui/webui/plugins/plugins.mojom',
-    'content/public/renderer/frame_service_registry',
+    'content/public/renderer/frame_interfaces',
   ]).then(function(modules) {
-    var bindings = modules[0];
-    var core = modules[1];
-    var connection = modules[2];
-    var pluginsMojom = modules[3];
-    var serviceProvider = modules[4];
+    var connection = modules[0];
+    var pluginsMojom = modules[1];
+    var frameInterfaces = modules[2];
 
     browserProxy = connection.bindHandleToProxy(
-        serviceProvider.connectToService(
-            pluginsMojom.PluginsHandlerMojo.name),
-        pluginsMojom.PluginsHandlerMojo);
+        frameInterfaces.getInterface(pluginsMojom.PluginsPageHandler.name),
+        pluginsMojom.PluginsPageHandler);
 
-    // Connect pipe handle to JS code.
-    var pipe = core.createMessagePipe();
-    pluginsPageStub = connection.bindHandleToStub(
-        pipe.handle0, pluginsMojom.PluginsPageMojo);
+    /** @constructor */
+    var PluginsPageImpl = function() {};
 
-    pageProxy = {
-      __proto__: pluginsMojom.PluginsPageMojo.stubClass.prototype,
+    PluginsPageImpl.prototype = {
+      __proto__: pluginsMojom.PluginsPage.stubClass.prototype,
+
+      /** @override */
       onPluginsUpdated: function(plugins) {
         returnPluginsData({plugins: plugins});
       },
     };
+    pageImpl = new PluginsPageImpl();
 
-    bindings.StubBindings(pluginsPageStub).delegate = pageProxy;
-    // Send pipe handle to C++.
-    browserProxy.setClientPage(pipe.handle1);
+    // Create a message pipe, with one end of the pipe already connected to JS.
+    var handle = connection.bindStubDerivedImpl(pageImpl);
+    // Send the other end of the pipe to C++.
+    browserProxy.setClientPage(handle);
   });
 }
 

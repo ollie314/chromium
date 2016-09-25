@@ -12,22 +12,28 @@ import java.util.Locale;
 /**
  * This class represents a scanned URL and information associated with that URL.
  */
-class UrlInfo implements Comparable<UrlInfo> {
+class UrlInfo {
     private static final String URL_KEY = "url";
     private static final String DISTANCE_KEY = "distance";
+    private static final String SCAN_TIMESTAMP_KEY = "scan_timestamp";
+    private static final String HAS_BEEN_DISPLAYED_KEY = "has_been_displayed";
     private final String mUrl;
-    private final double mDistance;
+    private double mDistance;
+    private long mScanTimestamp;
+    private boolean mHasBeenDisplayed;
 
-    public UrlInfo(String url, double distance) {
+    public UrlInfo(String url, double distance, long scanTimestamp) {
         mUrl = url;
         mDistance = distance;
+        mScanTimestamp = scanTimestamp;
+        mHasBeenDisplayed = false;
     }
 
     /**
      * Constructs a simple UrlInfo with only a URL.
      */
     public UrlInfo(String url) {
-        this(url, -1.0);
+        this(url, -1.0, System.currentTimeMillis());
     }
 
     /**
@@ -39,11 +45,52 @@ class UrlInfo implements Comparable<UrlInfo> {
     }
 
     /**
-     * Gets the distance of the URL from the scanner in meters..
+     * Sets the distance of the URL from the scanner in meters.
+     * @param distance The estimated distance of the URL from the scanner in meters.
+     */
+    public void setDistance(double distance) {
+        mDistance = distance;
+    }
+
+    /**
+     * Gets the distance of the URL from the scanner in meters.
      * @return The estimated distance of the URL from the scanner in meters.
      */
     public double getDistance() {
         return mDistance;
+    }
+
+    /**
+     * Sets the timestamp of when the URL was last scanned.
+     * This timestamp should be recorded using System.currentTimeMillis().
+     * @param scanTimestamp the new timestamp.
+     */
+    public void setScanTimestamp(long scanTimestamp) {
+        mScanTimestamp = scanTimestamp;
+    }
+
+    /**
+     * Gets the timestamp of when the URL was last scanned.
+     * This timestamp is recorded using System.currentTimeMillis().
+     * @return The scan timestamp.
+     */
+    public long getScanTimestamp() {
+        return mScanTimestamp;
+    }
+
+    /**
+     * Marks this URL as having been displayed to the user.
+     */
+    public void setHasBeenDisplayed() {
+        mHasBeenDisplayed = true;
+    }
+
+    /**
+     * Tells if we've displayed this URL.
+     * @return Whether we've displayed this URL.
+     */
+    public boolean hasBeenDisplayed() {
+        return mHasBeenDisplayed;
     }
 
     /**
@@ -54,7 +101,9 @@ class UrlInfo implements Comparable<UrlInfo> {
     public JSONObject jsonSerialize() throws JSONException {
         return new JSONObject()
                 .put(URL_KEY, mUrl)
-                .put(DISTANCE_KEY, mDistance);
+                .put(DISTANCE_KEY, mDistance)
+                .put(SCAN_TIMESTAMP_KEY, mScanTimestamp)
+                .put(HAS_BEEN_DISPLAYED_KEY, mHasBeenDisplayed);
     }
 
     /**
@@ -64,56 +113,14 @@ class UrlInfo implements Comparable<UrlInfo> {
      * @throws JSONException if the values cannot be serialized.
      */
     public static UrlInfo jsonDeserialize(JSONObject jsonObject) throws JSONException {
-        return new UrlInfo(jsonObject.getString(URL_KEY), jsonObject.getDouble(DISTANCE_KEY));
-    }
-
-    /**
-     * Returns a hash code for this UrlInfo.
-     * @return hash code
-     */
-    @Override
-    public int hashCode() {
-        int hash = 31 + mUrl.hashCode();
-        hash = hash * 31 + (int) mDistance;
-        return hash;
-    }
-
-    /**
-     * Checks if two UrlInfos are equal.
-     * @param other the UrlInfo to compare to.
-     * @return true if the UrlInfo are equal.
-     */
-    @Override
-    public boolean equals(Object other) {
-        if (this == other) {
-            return true;
+        UrlInfo urlInfo = new UrlInfo(
+                jsonObject.getString(URL_KEY),
+                jsonObject.getDouble(DISTANCE_KEY),
+                jsonObject.getLong(SCAN_TIMESTAMP_KEY));
+        if (jsonObject.optBoolean(HAS_BEEN_DISPLAYED_KEY, false)) {
+            urlInfo.setHasBeenDisplayed();
         }
-
-        if (other instanceof UrlInfo) {
-            UrlInfo urlInfo = (UrlInfo) other;
-            return compareTo(urlInfo) == 0;
-        }
-        return false;
-    }
-
-    /**
-     * Compares two UrlInfos.
-     * @param other the UrlInfo to compare to.
-     * @return the comparison value.
-     */
-    @Override
-    public int compareTo(UrlInfo other) {
-        int compareValue = mUrl.compareTo(other.mUrl);
-        if (compareValue != 0) {
-            return compareValue;
-        }
-
-        compareValue = Double.compare(mDistance, other.mDistance);
-        if (compareValue != 0) {
-            return compareValue;
-        }
-
-        return 0;
+        return urlInfo;
     }
 
     /**
@@ -121,6 +128,7 @@ class UrlInfo implements Comparable<UrlInfo> {
      */
     @Override
     public String toString() {
-        return String.format(Locale.getDefault(), "%s %f", mUrl, mDistance);
+        return String.format(Locale.getDefault(), "%s %f %d %b",
+                mUrl, mDistance, mScanTimestamp, mHasBeenDisplayed);
     }
 }

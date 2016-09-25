@@ -33,6 +33,7 @@
 #include "core/frame/Settings.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/track/TextTrackContainer.h"
+#include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutTheme.h"
 #include "platform/EventDispatchForbiddenScope.h"
 
@@ -51,6 +52,9 @@ static bool shouldShowFullscreenButton(const HTMLMediaElement& mediaElement)
     // user chose to enter fullscreen.  crbug.com/500732 .
     if (mediaElement.isFullscreen())
         return true;
+
+    if (!mediaElement.isHTMLVideoElement())
+        return false;
 
     if (!mediaElement.hasVideo())
         return false;
@@ -78,14 +82,14 @@ public:
     explicit BatchedControlUpdate(MediaControls* controls)
         : m_controls(controls)
     {
-        ASSERT(isMainThread());
-        ASSERT(s_batchDepth >= 0);
+        DCHECK(isMainThread());
+        DCHECK_GE(s_batchDepth, 0);
         ++s_batchDepth;
     }
     ~BatchedControlUpdate()
     {
-        ASSERT(isMainThread());
-        ASSERT(s_batchDepth > 0);
+        DCHECK(isMainThread());
+        DCHECK_GT(s_batchDepth, 0);
         if (!(--s_batchDepth))
             m_controls->computeWhichControlsFit();
     }
@@ -113,8 +117,11 @@ MediaControls::MediaControls(HTMLMediaElement& mediaElement)
     , m_muteButton(nullptr)
     , m_volumeSlider(nullptr)
     , m_toggleClosedCaptionsButton(nullptr)
+    , m_textTrackList(nullptr)
+    , m_overflowList(nullptr)
     , m_castButton(nullptr)
-    , m_fullScreenButton(nullptr)
+    , m_fullscreenButton(nullptr)
+    , m_downloadButton(nullptr)
     , m_hideMediaControlsTimer(this, &MediaControls::hideMediaControlsTimerFired)
     , m_hideTimerBehaviorFlags(IgnoreNone)
     , m_isMouseOverControls(false)
@@ -154,6 +161,12 @@ MediaControls* MediaControls::create(HTMLMediaElement& mediaElement)
 //     +-MediaControlToggleClosedCaptionsButtonElement (-webkit-media-controls-toggle-closed-captions-button)
 //     +-MediaControlCastButtonElement                 (-internal-media-controls-cast-button)
 //     \-MediaControlFullscreenButtonElement           (-webkit-media-controls-fullscreen-button)
+// +-MediaControlTextTrackListElement                (-internal-media-controls-text-track-list)
+// | {for each renderable text track}
+//  \-MediaControlTextTrackListItem                 (-internal-media-controls-text-track-list-item)
+//  +-MediaControlTextTrackListItemInput            (-internal-media-controls-text-track-list-item-input)
+//  +-MediaControlTextTrackListItemCaptions         (-internal-media-controls-text-track-list-kind-captions)
+//  +-MediaControlTextTrackListItemSubtitles        (-internal-media-controls-text-track-list-kind-subtitles)
 void MediaControls::initializeControls()
 {
     const bool useNewUi = RuntimeEnabledFeatures::newMediaPlaybackUiEnabled();
@@ -211,23 +224,49 @@ void MediaControls::initializeControls()
     if (m_allowHiddenVolumeControls && preferHiddenVolumeControls(document()))
         m_volumeSlider->setIsWanted(false);
 
-    MediaControlToggleClosedCaptionsButtonElement* toggleClosedCaptionsButton = MediaControlToggleClosedCaptionsButtonElement::create(*this);
-    m_toggleClosedCaptionsButton = toggleClosedCaptionsButton;
-    panel->appendChild(toggleClosedCaptionsButton);
+    MediaControlFullscreenButtonElement* fullscreenButton = MediaControlFullscreenButtonElement::create(*this);
+    m_fullscreenButton = fullscreenButton;
+    panel->appendChild(fullscreenButton);
+
+    MediaControlDownloadButtonElement* downloadButton = MediaControlDownloadButtonElement::create(*this);
+    m_downloadButton = downloadButton;
+    panel->appendChild(downloadButton);
 
     MediaControlCastButtonElement* castButton = MediaControlCastButtonElement::create(*this, false);
     m_castButton = castButton;
     panel->appendChild(castButton);
 
-    MediaControlFullscreenButtonElement* fullscreenButton = MediaControlFullscreenButtonElement::create(*this);
-    m_fullScreenButton = fullscreenButton;
-    panel->appendChild(fullscreenButton);
+    MediaControlToggleClosedCaptionsButtonElement* toggleClosedCaptionsButton = MediaControlToggleClosedCaptionsButtonElement::create(*this);
+    m_toggleClosedCaptionsButton = toggleClosedCaptionsButton;
+    panel->appendChild(toggleClosedCaptionsButton);
 
     m_panel = panel;
     enclosure->appendChild(panel);
 
     m_enclosure = enclosure;
     appendChild(enclosure);
+
+    MediaControlTextTrackListElement* textTrackList = MediaControlTextTrackListElement::create(*this);
+    m_textTrackList = textTrackList;
+    appendChild(textTrackList);
+
+    MediaControlOverflowMenuButtonElement* overflowMenu = MediaControlOverflowMenuButtonElement::create(*this);
+    m_overflowMenu = overflowMenu;
+    panel->appendChild(overflowMenu);
+
+    MediaControlOverflowMenuListElement* overflowList = MediaControlOverflowMenuListElement::create(*this);
+    m_overflowList = overflowList;
+    appendChild(overflowList);
+
+    // The order in which we append elements to the overflow list is significant
+    // because it determines how the elements show up in the overflow menu relative to each other.
+    // The first item appended appears at the top of the overflow menu.
+    m_overflowList->appendChild(m_playButton->createOverflowElement(*this, MediaControlPlayButtonElement::create(*this)));
+    m_overflowList->appendChild(m_fullscreenButton->createOverflowElement(*this, MediaControlFullscreenButtonElement::create(*this)));
+    m_overflowList->appendChild(m_downloadButton->createOverflowElement(*this, MediaControlDownloadButtonElement::create(*this)));
+    m_overflowList->appendChild(m_muteButton->createOverflowElement(*this, MediaControlMuteButtonElement::create(*this)));
+    m_overflowList->appendChild(m_castButton->createOverflowElement(*this, MediaControlCastButtonElement::create(*this, false)));
+    m_overflowList->appendChild(m_toggleClosedCaptionsButton->createOverflowElement(*this, MediaControlToggleClosedCaptionsButtonElement::create(*this)));
 }
 
 void MediaControls::reset()
@@ -267,9 +306,11 @@ void MediaControls::reset()
 
     refreshClosedCaptionsButtonVisibility();
 
-    m_fullScreenButton->setIsWanted(shouldShowFullscreenButton(mediaElement()));
+    m_fullscreenButton->setIsWanted(shouldShowFullscreenButton(mediaElement()));
 
     refreshCastButtonVisibilityWithoutUpdate();
+
+    m_downloadButton->setIsWanted(m_downloadButton->shouldDisplayDownloadButton());
 }
 
 LayoutObject* MediaControls::layoutObjectForTextTrackLayout()
@@ -315,7 +356,7 @@ void MediaControls::makeTransparent()
 bool MediaControls::shouldHideMediaControls(unsigned behaviorFlags) const
 {
     // Never hide for a media element without visual representation.
-    if (!mediaElement().hasVideo() || mediaElement().isPlayingRemotely())
+    if (!mediaElement().isHTMLVideoElement() || !mediaElement().hasVideo() || mediaElement().isPlayingRemotely())
         return false;
     // Don't hide if the mouse is over the controls.
     const bool ignoreControlsHover = behaviorFlags & IgnoreControlsHover;
@@ -330,6 +371,9 @@ bool MediaControls::shouldHideMediaControls(unsigned behaviorFlags) const
     // through all the potential ancestor hosts for the focused element.)
     const bool ignoreFocus = behaviorFlags & IgnoreFocus;
     if (!ignoreFocus && (mediaElement().focused() || contains(document().focusedElement())))
+        return false;
+    // Don't hide the media controls when the text track list is showing.
+    if (m_textTrackList->isWanted())
         return false;
     return true;
 }
@@ -457,6 +501,16 @@ void MediaControls::refreshClosedCaptionsButtonVisibility()
     BatchedControlUpdate batch(this);
 }
 
+void MediaControls::toggleTextTrackList()
+{
+    if (!mediaElement().hasClosedCaptions()) {
+        m_textTrackList->setVisible(false);
+        return;
+    }
+
+    m_textTrackList->setVisible(!m_textTrackList->isWanted());
+}
+
 void MediaControls::refreshCastButtonVisibility()
 {
     refreshCastButtonVisibilityWithoutUpdate();
@@ -494,7 +548,7 @@ void MediaControls::refreshCastButtonVisibilityWithoutUpdate()
         // newMediaPlaybackUiEnabled case, we let computeWhichControlsFit()
         // handle this.
         if ( !RuntimeEnabledFeatures::newMediaPlaybackUiEnabled()
-            && m_fullScreenButton->getBoundingClientRect()->right() > m_panel->getBoundingClientRect()->right()) {
+            && m_fullscreenButton->getBoundingClientRect()->right() > m_panel->getBoundingClientRect()->right()) {
             m_castButton->setIsWanted(false);
             m_overlayCastButton->tryShowOverlay();
         }
@@ -512,14 +566,14 @@ void MediaControls::showOverlayCastButtonIfNeeded()
 
 void MediaControls::enteredFullscreen()
 {
-    m_fullScreenButton->setIsFullscreen(true);
+    m_fullscreenButton->setIsFullscreen(true);
     stopHideMediaControlsTimer();
     startHideMediaControlsTimer();
 }
 
 void MediaControls::exitedFullscreen()
 {
-    m_fullScreenButton->setIsFullscreen(false);
+    m_fullscreenButton->setIsFullscreen(false);
     stopHideMediaControlsTimer();
     startHideMediaControlsTimer();
 }
@@ -579,7 +633,7 @@ void MediaControls::defaultEventHandler(Event* event)
     }
 }
 
-void MediaControls::hideMediaControlsTimerFired(Timer<MediaControls>*)
+void MediaControls::hideMediaControlsTimerFired(TimerBase*)
 {
     unsigned behaviorFlags = m_hideTimerBehaviorFlags | IgnoreFocus | IgnoreVideoHover;
     m_hideTimerBehaviorFlags = IgnoreNone;
@@ -645,7 +699,7 @@ void MediaControls::notifyPanelWidthChanged(const LayoutUnit& newWidth)
     m_panelWidthChangedTimer.startOneShot(0, BLINK_FROM_HERE);
 }
 
-void MediaControls::panelWidthChangedTimerFired(Timer<MediaControls>*)
+void MediaControls::panelWidthChangedTimerFired(TimerBase*)
 {
     computeWhichControlsFit();
 }
@@ -661,16 +715,35 @@ void MediaControls::computeWhichControlsFit()
 
     // Controls that we'll hide / show, in order of decreasing priority.
     MediaControlElement* elements[] = {
+        // Exclude m_overflowMenu; we handle it specially.
         m_playButton.get(),
-        m_toggleClosedCaptionsButton.get(),
-        m_fullScreenButton.get(),
+        m_fullscreenButton.get(),
+        m_downloadButton.get(),
         m_timeline.get(),
-        m_currentTimeDisplay.get(),
-        m_volumeSlider.get(),
-        m_castButton.get(),
         m_muteButton.get(),
+        m_volumeSlider.get(),
+        m_toggleClosedCaptionsButton.get(),
+        m_castButton.get(),
+        m_currentTimeDisplay.get(),
         m_durationDisplay.get(),
     };
+
+    int usedWidth = 0;
+
+    // Assume that all controls require 48px, unless we can get the computed
+    // style for the play button.  Since the play button or overflow is always
+    // shown, one of the two buttons should be available the first time we're
+    // called after layout.  This will
+    // also be the first time we have m_panelWidth!=0, so it won't matter if
+    // we get this wrong before that.
+    int minimumWidth = 48;
+    if (m_playButton->layoutObject() && m_playButton->layoutObject()->style()) {
+        const ComputedStyle* style = m_playButton->layoutObject()->style();
+        minimumWidth = ceil(style->width().pixels() / style->effectiveZoom());
+    } else if (m_overflowMenu->layoutObject() && m_overflowMenu->layoutObject()->style()) {
+        const ComputedStyle* style = m_overflowMenu->layoutObject()->style();
+        minimumWidth = ceil(style->width().pixels() / style->effectiveZoom());
+    }
 
     if (!m_panelWidth) {
         // No layout yet -- hide everything, then make them show up later.
@@ -684,15 +757,21 @@ void MediaControls::computeWhichControlsFit()
         return;
     }
 
-    int usedWidth = 0;
+    // Insert an overflow menu. However, if we see that the overflow menu
+    // doesn't end up containing at least two elements, we will not display it
+    // but instead make place for the first element that was dropped.
+    m_overflowMenu->setDoesFit(true);
+    m_overflowMenu->setIsWanted(true);
+    usedWidth = minimumWidth;
+
+    std::list<MediaControlElement*> overflowElements;
+    MediaControlElement* firstDisplacedElement = nullptr;
+    // For each control that fits, enable it in order of decreasing priority.
     bool droppedCastButton = false;
-    // Assume that all controls require 48px.  Ideally, we could get this
-    // the computed style, but that requires the controls to be shown.
-    const int minimumWidth = 48;
     for (MediaControlElement* element : elements) {
         if (!element)
             continue;
-
+        element->shouldShowButtonInOverflowMenu(false);
         if (element->isWanted()) {
             if (usedWidth + minimumWidth <= m_panelWidth) {
                 element->setDoesFit(true);
@@ -701,8 +780,28 @@ void MediaControls::computeWhichControlsFit()
                 element->setDoesFit(false);
                 if (element == m_castButton.get())
                     droppedCastButton = true;
+                element->shouldShowButtonInOverflowMenu(true);
+                if (element->hasOverflowButton())
+                    overflowElements.push_front(element);
+                // We want a way to access the first media element that was
+                // removed. If we don't end up needing an overflow menu, we can
+                // use the space the overflow menu would have taken up to
+                // instead display that media element.
+                if (!element->hasOverflowButton() && !firstDisplacedElement)
+                    firstDisplacedElement = element;
             }
         }
+    }
+
+    // If we don't have at least two overflow elements, we will not show the
+    // overflow menu.
+    if (overflowElements.empty()) {
+        m_overflowMenu->setIsWanted(false);
+        if (firstDisplacedElement)
+            firstDisplacedElement->setDoesFit(true);
+    } else if (overflowElements.size() == 1) {
+        m_overflowMenu->setIsWanted(false);
+        overflowElements.front()->setDoesFit(true);
     }
 
     // Special case for cast: if we want a cast button but dropped it, then
@@ -728,7 +827,7 @@ void MediaControls::invalidate(Element* element)
         return;
 
     if (LayoutObject* layoutObject = element->layoutObject())
-        layoutObject->setShouldDoFullPaintInvalidation();
+        layoutObject->setShouldDoFullPaintInvalidationIncludingNonCompositingDescendants();
 }
 
 void MediaControls::networkStateChanged()
@@ -736,9 +835,20 @@ void MediaControls::networkStateChanged()
     invalidate(m_playButton);
     invalidate(m_overlayPlayButton);
     invalidate(m_muteButton);
-    invalidate(m_fullScreenButton);
+    invalidate(m_fullscreenButton);
+    invalidate(m_downloadButton);
     invalidate(m_timeline);
     invalidate(m_volumeSlider);
+}
+
+bool MediaControls::overflowMenuVisible()
+{
+    return m_overflowList->isWanted();
+}
+
+void MediaControls::toggleOverflowMenu()
+{
+    m_overflowList->setIsWanted(!m_overflowList->isWanted());
 }
 
 DEFINE_TRACE(MediaControls)
@@ -753,9 +863,13 @@ DEFINE_TRACE(MediaControls)
     visitor->trace(m_muteButton);
     visitor->trace(m_volumeSlider);
     visitor->trace(m_toggleClosedCaptionsButton);
-    visitor->trace(m_fullScreenButton);
+    visitor->trace(m_fullscreenButton);
+    visitor->trace(m_downloadButton);
     visitor->trace(m_durationDisplay);
     visitor->trace(m_enclosure);
+    visitor->trace(m_textTrackList);
+    visitor->trace(m_overflowMenu);
+    visitor->trace(m_overflowList);
     visitor->trace(m_castButton);
     visitor->trace(m_overlayCastButton);
     HTMLDivElement::trace(visitor);

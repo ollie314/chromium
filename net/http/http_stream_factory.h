@@ -17,7 +17,6 @@
 #include "net/base/request_priority.h"
 #include "net/http/http_server_properties.h"
 #include "net/socket/connection_attempts.h"
-#include "net/ssl/ssl_failure_state.h"
 // This file can be included from net/http even though
 // it is in net/websockets because it doesn't
 // introduce any link dependency to net/websockets.
@@ -32,7 +31,6 @@ class Value;
 namespace net {
 
 class AuthCredentials;
-class BoundNetLog;
 class BidirectionalStreamImpl;
 class HostMappingRules;
 class HostPortPair;
@@ -42,6 +40,7 @@ class HttpResponseHeaders;
 class HttpResponseInfo;
 class HttpServerProperties;
 class HttpStream;
+class NetLogWithSource;
 class ProxyInfo;
 class SSLCertRequestInfo;
 class SSLInfo;
@@ -100,11 +99,9 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
     // This is the failure to create a stream case.
     // |used_ssl_config| indicates the actual SSL configuration used for this
     // stream, since the HttpStreamRequest may have modified the configuration
-    // during stream processing. If an SSL handshake failed, |ssl_failure_state|
-    // is the state the SSLClientSocket was in.
+    // during stream processing.
     virtual void OnStreamFailed(int status,
-                                const SSLConfig& used_ssl_config,
-                                SSLFailureState ssl_failure_state) = 0;
+                                const SSLConfig& used_ssl_config) = 0;
 
     // Called when we have a certificate error for the request.
     // |used_ssl_config| indicates the actual SSL configuration used for this
@@ -183,11 +180,11 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   // Returns the LoadState for the request.
   virtual LoadState GetLoadState() const = 0;
 
-  // Returns true if TLS/NPN was negotiated for this stream.
-  virtual bool was_npn_negotiated() const = 0;
+  // Returns true if TLS/ALPN was negotiated for this stream.
+  virtual bool was_alpn_negotiated() const = 0;
 
   // Protocol negotiated with the server.
-  virtual NextProto protocol_negotiated() const = 0;
+  virtual NextProto negotiated_protocol() const = 0;
 
   // Returns true if this stream is being fetched over SPDY.
   virtual bool using_spdy() const = 0;
@@ -203,9 +200,7 @@ class NET_EXPORT HttpStreamFactory {
 
   void ProcessAlternativeServices(HttpNetworkSession* session,
                                   const HttpResponseHeaders* headers,
-                                  const HostPortPair& http_host_port_pair);
-
-  GURL ApplyHostMappingRules(const GURL& url, HostPortPair* endpoint);
+                                  const url::SchemeHostPort& http_server);
 
   // Virtual interface methods.
 
@@ -217,7 +212,7 @@ class NET_EXPORT HttpStreamFactory {
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
-      const BoundNetLog& net_log) = 0;
+      const NetLogWithSource& net_log) = 0;
 
   // Request a WebSocket handshake stream.
   // Will call delegate->OnWebSocketHandshakeStreamReady on successful
@@ -229,7 +224,7 @@ class NET_EXPORT HttpStreamFactory {
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
       WebSocketHandshakeStreamBase::CreateHelper* create_helper,
-      const BoundNetLog& net_log) = 0;
+      const NetLogWithSource& net_log) = 0;
 
   // Request a BidirectionalStreamImpl.
   // Will call delegate->OnBidirectionalStreamImplReady on successful
@@ -240,48 +235,19 @@ class NET_EXPORT HttpStreamFactory {
       const SSLConfig& server_ssl_config,
       const SSLConfig& proxy_ssl_config,
       HttpStreamRequest::Delegate* delegate,
-      const BoundNetLog& net_log) = 0;
+      const NetLogWithSource& net_log) = 0;
 
   // Requests that enough connections for |num_streams| be opened.
   virtual void PreconnectStreams(int num_streams,
-                                 const HttpRequestInfo& info,
-                                 const SSLConfig& server_ssl_config,
-                                 const SSLConfig& proxy_ssl_config) = 0;
+                                 const HttpRequestInfo& info) = 0;
 
   virtual const HostMappingRules* GetHostMappingRules() const = 0;
-
-  // Static settings
-
-  // Reset all static settings to initialized values. Used to init test suite.
-  static void ResetStaticSettingsToInit();
-
-  // Turns spdy on or off.
-  // TODO(mmenke):  Figure out if this can be made a property of the
-  //                HttpNetworkSession.
-  static void set_spdy_enabled(bool value) {
-    spdy_enabled_ = value;
-  }
-  static bool spdy_enabled() { return spdy_enabled_; }
 
  protected:
   HttpStreamFactory();
 
  private:
-  void ProcessAlternativeService(
-      const base::WeakPtr<HttpServerProperties>& http_server_properties,
-      base::StringPiece alternative_service_str,
-      const HostPortPair& http_host_port_pair,
-      const HttpNetworkSession& session);
-
-  void ProcessAlternateProtocol(
-      const base::WeakPtr<HttpServerProperties>& http_server_properties,
-      const std::vector<std::string>& alternate_protocol_values,
-      const HostPortPair& http_host_port_pair,
-      const HttpNetworkSession& session);
-
-  static bool spdy_enabled_;
-
-  HostPortPair RewriteHost(HostPortPair host_port_pair);
+  url::SchemeHostPort RewriteHost(const url::SchemeHostPort& server);
 
   DISALLOW_COPY_AND_ASSIGN(HttpStreamFactory);
 };

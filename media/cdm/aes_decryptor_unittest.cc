@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <stdint.h>
+#include "media/cdm/aes_decryptor.h"
 
+#include <stdint.h>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -11,6 +13,7 @@
 #include "base/debug/leak_annotations.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/values.h"
 #include "media/base/cdm_callback_promise.h"
 #include "media/base/cdm_config.h"
@@ -19,9 +22,9 @@
 #include "media/base/decrypt_config.h"
 #include "media/base/decryptor.h"
 #include "media/base/mock_filters.h"
-#include "media/cdm/aes_decryptor.h"
 #include "media/cdm/api/content_decryption_module.h"
 #include "media/cdm/cdm_adapter.h"
+#include "media/cdm/cdm_file_io.h"
 #include "media/cdm/external_clear_key_test_helper.h"
 #include "media/cdm/simple_cdm_allocator.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -41,7 +44,7 @@ MATCHER(IsEmpty, "") { return arg.empty(); }
 MATCHER(IsNotEmpty, "") { return !arg.empty(); }
 MATCHER(IsJSONDictionary, "") {
   std::string result(arg.begin(), arg.end());
-  scoped_ptr<base::Value> root(base::JSONReader().ReadToValue(result));
+  std::unique_ptr<base::Value> root(base::JSONReader().ReadToValue(result));
   return (root.get() && root->GetType() == base::Value::TYPE_DICTIONARY);
 }
 
@@ -201,7 +204,7 @@ static scoped_refptr<DecoderBuffer> CreateEncryptedBuffer(
       key_id.size());
   std::string iv_string(
       reinterpret_cast<const char*>(iv.empty() ? NULL : &iv[0]), iv.size());
-  encrypted_buffer->set_decrypt_config(scoped_ptr<DecryptConfig>(
+  encrypted_buffer->set_decrypt_config(std::unique_ptr<DecryptConfig>(
       new DecryptConfig(key_id_string, iv_string, subsample_entries)));
   return encrypted_buffer;
 }
@@ -245,14 +248,14 @@ class AesDecryptorTest : public testing::TestWithParam<std::string> {
       CdmConfig cdm_config;  // default settings of false are sufficient.
 
       helper_.reset(new ExternalClearKeyTestHelper());
-      scoped_ptr<CdmAllocator> allocator(new SimpleCdmAllocator());
+      std::unique_ptr<CdmAllocator> allocator(new SimpleCdmAllocator());
       CdmAdapter::Create(
           helper_->KeySystemName(), helper_->LibraryPath(), cdm_config,
-          std::move(allocator), base::Bind(&AesDecryptorTest::OnSessionMessage,
+          std::move(allocator), base::Bind(&AesDecryptorTest::CreateCdmFileIO,
                                            base::Unretained(this)),
-          base::Bind(&AesDecryptorTest::OnSessionClosed,
+          base::Bind(&AesDecryptorTest::OnSessionMessage,
                      base::Unretained(this)),
-          base::Bind(&AesDecryptorTest::OnLegacySessionError,
+          base::Bind(&AesDecryptorTest::OnSessionClosed,
                      base::Unretained(this)),
           base::Bind(&AesDecryptorTest::OnSessionKeysChange,
                      base::Unretained(this)),
@@ -260,7 +263,7 @@ class AesDecryptorTest : public testing::TestWithParam<std::string> {
                      base::Unretained(this)),
           base::Bind(&AesDecryptorTest::OnCdmCreated, base::Unretained(this)));
 
-      message_loop_.RunUntilIdle();
+      base::RunLoop().RunUntilIdle();
     }
   }
 
@@ -295,26 +298,23 @@ class AesDecryptorTest : public testing::TestWithParam<std::string> {
         << "Unexpectedly rejected with message: " << error_message;
   }
 
-  scoped_ptr<SimpleCdmPromise> CreatePromise(ExpectedResult expected_result) {
-    scoped_ptr<SimpleCdmPromise> promise(
-        new CdmCallbackPromise<>(base::Bind(&AesDecryptorTest::OnResolve,
-                                            base::Unretained(this),
-                                            expected_result),
-                                 base::Bind(&AesDecryptorTest::OnReject,
-                                            base::Unretained(this),
-                                            expected_result)));
+  std::unique_ptr<SimpleCdmPromise> CreatePromise(
+      ExpectedResult expected_result) {
+    std::unique_ptr<SimpleCdmPromise> promise(new CdmCallbackPromise<>(
+        base::Bind(&AesDecryptorTest::OnResolve, base::Unretained(this),
+                   expected_result),
+        base::Bind(&AesDecryptorTest::OnReject, base::Unretained(this),
+                   expected_result)));
     return promise;
   }
 
-  scoped_ptr<NewSessionCdmPromise> CreateSessionPromise(
+  std::unique_ptr<NewSessionCdmPromise> CreateSessionPromise(
       ExpectedResult expected_result) {
-    scoped_ptr<NewSessionCdmPromise> promise(
+    std::unique_ptr<NewSessionCdmPromise> promise(
         new CdmCallbackPromise<std::string>(
             base::Bind(&AesDecryptorTest::OnResolveWithSession,
-                       base::Unretained(this),
-                       expected_result),
-            base::Bind(&AesDecryptorTest::OnReject,
-                       base::Unretained(this),
+                       base::Unretained(this), expected_result),
+            base::Bind(&AesDecryptorTest::OnReject, base::Unretained(this),
                        expected_result)));
     return promise;
   }
@@ -322,8 +322,7 @@ class AesDecryptorTest : public testing::TestWithParam<std::string> {
   // Creates a new session using |key_id|. Returns the session ID.
   std::string CreateSession(const std::vector<uint8_t>& key_id) {
     DCHECK(!key_id.empty());
-    EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsJSONDictionary(),
-                                        GURL::EmptyGURL()));
+    EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsJSONDictionary()));
     cdm_->CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
                                           EmeInitDataType::WEBM, key_id,
                                           CreateSessionPromise(RESOLVED));
@@ -335,21 +334,14 @@ class AesDecryptorTest : public testing::TestWithParam<std::string> {
   // Closes the session specified by |session_id|.
   void CloseSession(const std::string& session_id) {
     EXPECT_CALL(*this, OnSessionClosed(session_id));
+    EXPECT_CALL(*this, OnSessionKeysChangeCalled(session_id, false));
     cdm_->CloseSession(session_id, CreatePromise(RESOLVED));
   }
 
-  // Removes the session specified by |session_id|. This should simply do a
-  // CloseSession().
-  // TODO(jrummell): Clean this up when the prefixed API is removed.
-  // http://crbug.com/249976.
+  // Only persistent sessions can be removed.
   void RemoveSession(const std::string& session_id) {
-    if (GetParam() == "AesDecryptor") {
-      EXPECT_CALL(*this, OnSessionClosed(session_id));
-      cdm_->RemoveSession(session_id, CreatePromise(RESOLVED));
-    } else {
-      // CdmAdapter fails as only persistent sessions can be removed.
-      cdm_->RemoveSession(session_id, CreatePromise(REJECTED));
-    }
+    // TODO(ddorwin): This should be RESOLVED after https://crbug.com/616166.
+    cdm_->RemoveSession(session_id, CreatePromise(REJECTED));
   }
 
   MOCK_METHOD2(OnSessionKeysChangeCalled,
@@ -384,7 +376,7 @@ class AesDecryptorTest : public testing::TestWithParam<std::string> {
   }
 
   bool KeysInfoContains(std::vector<uint8_t> expected) {
-    for (const auto& key_id : keys_info_) {
+    for (auto* key_id : keys_info_) {
       if (key_id->key_id == expected)
         return true;
     }
@@ -455,17 +447,16 @@ class AesDecryptorTest : public testing::TestWithParam<std::string> {
     }
   }
 
-  MOCK_METHOD4(OnSessionMessage,
+  std::unique_ptr<CdmFileIO> CreateCdmFileIO(cdm::FileIOClient* client) {
+    ADD_FAILURE() << "Should never be called";
+    return nullptr;
+  }
+
+  MOCK_METHOD3(OnSessionMessage,
                void(const std::string& session_id,
                     MediaKeys::MessageType message_type,
-                    const std::vector<uint8_t>& message,
-                    const GURL& legacy_destination_url));
+                    const std::vector<uint8_t>& message));
   MOCK_METHOD1(OnSessionClosed, void(const std::string& session_id));
-  MOCK_METHOD4(OnLegacySessionError,
-               void(const std::string& session_id,
-                    MediaKeys::Exception exception,
-                    uint32_t system_code,
-                    const std::string& error_message));
   MOCK_METHOD2(OnSessionExpirationUpdate,
                void(const std::string& session_id,
                     const base::Time& new_expiry_time));
@@ -477,7 +468,7 @@ class AesDecryptorTest : public testing::TestWithParam<std::string> {
   CdmKeysInfo keys_info_;
 
   // Helper class to load/unload External Clear Key Library, if necessary.
-  scoped_ptr<ExternalClearKeyTestHelper> helper_;
+  std::unique_ptr<ExternalClearKeyTestHelper> helper_;
 
   base::MessageLoop message_loop_;
 
@@ -491,32 +482,56 @@ class AesDecryptorTest : public testing::TestWithParam<std::string> {
   const std::vector<SubsampleEntry> no_subsample_entries_;
 };
 
-TEST_P(AesDecryptorTest, CreateSessionWithNullInitData) {
-  EXPECT_CALL(*this,
-              OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
+TEST_P(AesDecryptorTest, CreateSessionWithEmptyInitData) {
   cdm_->CreateSessionAndGenerateRequest(
       MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
-      std::vector<uint8_t>(), CreateSessionPromise(RESOLVED));
+      std::vector<uint8_t>(), CreateSessionPromise(REJECTED));
+  cdm_->CreateSessionAndGenerateRequest(
+      MediaKeys::TEMPORARY_SESSION, EmeInitDataType::CENC,
+      std::vector<uint8_t>(), CreateSessionPromise(REJECTED));
+  cdm_->CreateSessionAndGenerateRequest(
+      MediaKeys::TEMPORARY_SESSION, EmeInitDataType::KEYIDS,
+      std::vector<uint8_t>(), CreateSessionPromise(REJECTED));
+}
+
+TEST_P(AesDecryptorTest, CreateSessionWithVariousLengthInitData_WebM) {
+  std::vector<uint8_t> init_data;
+  init_data.resize(1);
+  cdm_->CreateSessionAndGenerateRequest(
+      MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
+      std::vector<uint8_t>(init_data), CreateSessionPromise(RESOLVED));
+
+  init_data.resize(16);  // The expected size.
+  cdm_->CreateSessionAndGenerateRequest(
+      MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
+      std::vector<uint8_t>(init_data), CreateSessionPromise(RESOLVED));
+
+  init_data.resize(512);
+  cdm_->CreateSessionAndGenerateRequest(
+      MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
+      std::vector<uint8_t>(init_data), CreateSessionPromise(RESOLVED));
+
+  init_data.resize(513);
+  cdm_->CreateSessionAndGenerateRequest(
+      MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
+      std::vector<uint8_t>(init_data), CreateSessionPromise(REJECTED));
 }
 
 TEST_P(AesDecryptorTest, MultipleCreateSession) {
-  EXPECT_CALL(*this,
-              OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
+  EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsNotEmpty()));
   cdm_->CreateSessionAndGenerateRequest(
       MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
-      std::vector<uint8_t>(), CreateSessionPromise(RESOLVED));
+      std::vector<uint8_t>(1), CreateSessionPromise(RESOLVED));
 
-  EXPECT_CALL(*this,
-              OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
+  EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsNotEmpty()));
   cdm_->CreateSessionAndGenerateRequest(
       MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
-      std::vector<uint8_t>(), CreateSessionPromise(RESOLVED));
+      std::vector<uint8_t>(1), CreateSessionPromise(RESOLVED));
 
-  EXPECT_CALL(*this,
-              OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
+  EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsNotEmpty()));
   cdm_->CreateSessionAndGenerateRequest(
       MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
-      std::vector<uint8_t>(), CreateSessionPromise(RESOLVED));
+      std::vector<uint8_t>(1), CreateSessionPromise(RESOLVED));
 }
 
 TEST_P(AesDecryptorTest, CreateSessionWithCencInitData) {
@@ -536,8 +551,7 @@ TEST_P(AesDecryptorTest, CreateSessionWithCencInitData) {
   };
 
 #if defined(USE_PROPRIETARY_CODECS)
-  EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsJSONDictionary(),
-                                      GURL::EmptyGURL()));
+  EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsJSONDictionary()));
   cdm_->CreateSessionAndGenerateRequest(
       MediaKeys::TEMPORARY_SESSION, EmeInitDataType::CENC,
       std::vector<uint8_t>(init_data, init_data + arraysize(init_data)),
@@ -554,8 +568,7 @@ TEST_P(AesDecryptorTest, CreateSessionWithKeyIdsInitData) {
   const char init_data[] =
       "{\"kids\":[\"AQI\",\"AQIDBA\",\"AQIDBAUGBwgJCgsMDQ4PEA\"]}";
 
-  EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsJSONDictionary(),
-                                      GURL::EmptyGURL()));
+  EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsJSONDictionary()));
   cdm_->CreateSessionAndGenerateRequest(
       MediaKeys::TEMPORARY_SESSION, EmeInitDataType::KEYIDS,
       std::vector<uint8_t>(init_data, init_data + arraysize(init_data) - 1),
@@ -760,8 +773,6 @@ TEST_P(AesDecryptorTest, CloseSession) {
 }
 
 TEST_P(AesDecryptorTest, RemoveSession) {
-  // TODO(jrummell): Clean this up when the prefixed API is removed.
-  // http://crbug.com/249976.
   std::string session_id = CreateSession(key_id_);
   scoped_refptr<DecoderBuffer> encrypted_buffer = CreateEncryptedBuffer(
       encrypted_data_, key_id_, iv_, no_subsample_entries_);

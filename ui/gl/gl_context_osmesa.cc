@@ -11,7 +11,7 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_surface.h"
 
-namespace gfx {
+namespace gl {
 
 GLContextOSMesa::GLContextOSMesa(GLShareGroup* share_group)
     : GLContextReal(share_group),
@@ -83,9 +83,7 @@ bool GLContextOSMesa::MakeCurrent(GLSurface* surface) {
   OSMesaPixelStore(OSMESA_Y_UP, 0);
 
   SetCurrent(surface);
-  if (!InitializeDynamicBindings()) {
-    return false;
-  }
+  InitializeDynamicBindings();
 
   if (!surface->OnMakeCurrent(this)) {
     LOG(ERROR) << "Could not make current.";
@@ -150,4 +148,4 @@ GLContextOSMesa::~GLContextOSMesa() {
   Destroy();
 }
 
-}  // namespace gfx
+}  // namespace gl

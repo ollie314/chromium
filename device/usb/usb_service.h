@@ -7,6 +7,8 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "base/bind_helpers.h"
@@ -55,24 +57,47 @@ class UsbService : public base::NonThreadSafe {
 
   virtual ~UsbService();
 
-  virtual scoped_refptr<UsbDevice> GetDevice(const std::string& guid) = 0;
+  scoped_refptr<UsbDevice> GetDevice(const std::string& guid);
 
   // Enumerates available devices.
-  virtual void GetDevices(const GetDevicesCallback& callback) = 0;
+  virtual void GetDevices(const GetDevicesCallback& callback);
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
+  // Methods to add and remove devices for testing purposes. Only a device added
+  // by this method can be removed by RemoveDeviceForTesting().
+  void AddDeviceForTesting(scoped_refptr<UsbDevice> device);
+  void RemoveDeviceForTesting(const std::string& device_guid);
+  void GetTestDevices(std::vector<scoped_refptr<UsbDevice>>* devices);
+
  protected:
-  UsbService();
+  UsbService(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+             scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
 
   void NotifyDeviceAdded(scoped_refptr<UsbDevice> device);
   void NotifyDeviceRemoved(scoped_refptr<UsbDevice> device);
 
-  base::ObserverList<Observer, true> observer_list_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner() {
+    return task_runner_;
+  }
+
+  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner() {
+    return blocking_task_runner_;
+  }
+
+  std::unordered_map<std::string, scoped_refptr<UsbDevice>>& devices() {
+    return devices_;
+  }
 
  private:
   friend void base::DeletePointer<UsbService>(UsbService* service);
+
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
+  std::unordered_map<std::string, scoped_refptr<UsbDevice>> devices_;
+  std::unordered_set<std::string> testing_devices_;
+  base::ObserverList<Observer, true> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(UsbService);
 };

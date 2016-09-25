@@ -6,9 +6,6 @@
 
 #include <string>
 
-#include "ash/shell.h"
-#include "ash/test/test_shell_delegate.h"
-#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -20,8 +17,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/test_mock_time_task_runner.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/tick_clock.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -229,7 +226,7 @@ class AutomaticRebootManagerTest
 
 void SaveUptimeToFile(const base::FilePath& path,
                       const base::TimeDelta& uptime) {
-  if (path.empty() || uptime == base::TimeDelta())
+  if (path.empty() || uptime.is_zero())
     return;
 
   const std::string uptime_seconds = base::DoubleToString(uptime.InSecondsF());
@@ -319,7 +316,7 @@ AutomaticRebootManagerBasicTest::~AutomaticRebootManagerBasicTest() {
 
 void AutomaticRebootManagerBasicTest::SetUp() {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  const base::FilePath& temp_dir = temp_dir_.path();
+  const base::FilePath& temp_dir = temp_dir_.GetPath();
   const base::FilePath uptime_file = temp_dir.Append("uptime");
   uptime_provider()->set_uptime_file_path(uptime_file);
   ASSERT_FALSE(base::WriteFile(uptime_file, NULL, 0));
@@ -386,7 +383,7 @@ void AutomaticRebootManagerBasicTest::SetUptimeLimit(
     const base::TimeDelta& limit,
     bool expect_reboot) {
   uptime_limit_ = limit;
-  if (limit == base::TimeDelta()) {
+  if (limit.is_zero()) {
     local_state_.RemoveManagedPref(prefs::kUptimeLimit);
   } else {
     local_state_.SetManagedPref(

@@ -17,6 +17,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/rand_callback.h"
+#include "net/socket/next_proto.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/tcp_client_socket.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -50,11 +51,13 @@ class MockSSLClientSocket : public net::SSLClientSocket {
   MOCK_CONST_METHOD0(IsConnectedAndIdle, bool());
   MOCK_CONST_METHOD1(GetPeerAddress, int(net::IPEndPoint*));
   MOCK_CONST_METHOD1(GetLocalAddress, int(net::IPEndPoint*));
-  MOCK_CONST_METHOD0(NetLog, const net::BoundNetLog&());
+  MOCK_CONST_METHOD0(NetLog, const net::NetLogWithSource&());
   MOCK_METHOD0(SetSubresourceSpeculation, void());
   MOCK_METHOD0(SetOmniboxSpeculation, void());
   MOCK_CONST_METHOD0(WasEverUsed, bool());
   MOCK_CONST_METHOD0(UsingTCPFastOpen, bool());
+  MOCK_CONST_METHOD0(WasNpnNegotiated, bool());
+  MOCK_CONST_METHOD0(GetNegotiatedProtocol, net::NextProto());
   MOCK_METHOD1(GetSSLInfo, bool(net::SSLInfo*));
   MOCK_CONST_METHOD1(GetConnectionAttempts, void(net::ConnectionAttempts*));
   MOCK_METHOD0(ClearConnectionAttempts, void());
@@ -67,15 +70,14 @@ class MockSSLClientSocket : public net::SSLClientSocket {
                    unsigned char*,
                    unsigned int));
   MOCK_METHOD1(GetSSLCertRequestInfo, void(net::SSLCertRequestInfo*));
-  MOCK_CONST_METHOD1(GetNextProto,
-                     net::SSLClientSocket::NextProtoStatus(std::string*));
   MOCK_CONST_METHOD0(GetUnverifiedServerCertificateChain,
                      scoped_refptr<net::X509Certificate>());
   MOCK_CONST_METHOD0(GetChannelIDService, net::ChannelIDService*());
-  MOCK_METHOD2(GetSignedEKMForTokenBinding,
-               net::Error(crypto::ECPrivateKey*, std::vector<uint8_t>*));
+  MOCK_METHOD3(GetTokenBindingSignature,
+               net::Error(crypto::ECPrivateKey*,
+                          net::TokenBindingType,
+                          std::vector<uint8_t>*));
   MOCK_CONST_METHOD0(GetChannelIDKey, crypto::ECPrivateKey*());
-  MOCK_CONST_METHOD0(GetSSLFailureState, net::SSLFailureState());
   bool IsConnected() const override { return true; }
 
  private:

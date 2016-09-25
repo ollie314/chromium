@@ -127,11 +127,7 @@ remoting.ConnectionStats.prototype.update = function(stats) {
    * @return {string} Formatted number.
    */
   function formatStatNumber(value, units, digits) {
-    if (value != undefined) {
-      return value.toFixed(digits) + ' ' + units;
-    } else {
-      return "n/a";
-    }
+    return value.toFixed(digits) + ' ' + units;
   }
 
   /**

@@ -25,6 +25,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/download_protection_util.h"
+#include "chrome/common/safe_browsing/file_type_policies.h"
 #include "components/history/core/browser/download_constants.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/prefs/pref_service.h"
@@ -54,8 +55,11 @@ int64_t GetEndTime(const ClientIncidentReport_DownloadDetails& details) {
 
 bool IsBinaryDownloadForCurrentOS(
     ClientDownloadRequest::DownloadType download_type) {
+  // Whenever a new DownloadType is introduced, the following set of conditions
+  // should also be updated so that the IsBinaryDownloadForCurrentOS() will
+  // return true for that DownloadType as appropriate.
   static_assert(ClientDownloadRequest::DownloadType_MAX ==
-                    ClientDownloadRequest::INVALID_MAC_ARCHIVE,
+                    ClientDownloadRequest::SAMPLED_UNSUPPORTED_FILE,
                 "Update logic below");
 
 // Platform-specific types are relevant only for their own platforms.
@@ -77,7 +81,8 @@ bool IsBinaryDownloadForCurrentOS(
   if (download_type == ClientDownloadRequest::ZIPPED_EXECUTABLE ||
       download_type == ClientDownloadRequest::ZIPPED_ARCHIVE ||
       download_type == ClientDownloadRequest::INVALID_ZIP ||
-      download_type == ClientDownloadRequest::ARCHIVE) {
+      download_type == ClientDownloadRequest::ARCHIVE ||
+      download_type == ClientDownloadRequest::PPAPI_SAVE_REQUEST) {
     return true;
   }
 
@@ -91,15 +96,17 @@ bool IsBinaryDownloadForCurrentOS(
 bool IsBinaryDownload(const history::DownloadRow& row) {
   // TODO(grt): Peek into archives to see if they contain binaries;
   // http://crbug.com/386915.
-  return (download_protection_util::IsSupportedBinaryFile(row.target_path) &&
-          !download_protection_util::IsArchiveFile(row.target_path) &&
+  FileTypePolicies* policies = FileTypePolicies::GetInstance();
+  return (policies->IsCheckedBinaryFile(row.target_path) &&
+          !policies->IsArchiveFile(row.target_path) &&
           IsBinaryDownloadForCurrentOS(
               download_protection_util::GetDownloadType(row.target_path)));
 }
 
 // Returns true if a download represented by a DownloadRow is not a binary file.
 bool IsNonBinaryDownload(const history::DownloadRow& row) {
-  return !download_protection_util::IsSupportedBinaryFile(row.target_path);
+  return !FileTypePolicies::GetInstance()->IsCheckedBinaryFile(
+      row.target_path);
 }
 
 // Returns true if a download represented by a DownloadDetails is binary file
@@ -213,8 +220,7 @@ void PopulateNonBinaryDetailsFromRow(
     const history::DownloadRow& download,
     ClientIncidentReport_NonBinaryDownloadDetails* details) {
   details->set_file_type(
-      base::FilePath(
-          download_protection_util::GetFileExtension(download.target_path))
+      base::FilePath(FileTypePolicies::GetFileExtension(download.target_path))
           .AsUTF8Unsafe());
   details->set_length(download.received_bytes);
   if (download.url_chain.back().has_host())

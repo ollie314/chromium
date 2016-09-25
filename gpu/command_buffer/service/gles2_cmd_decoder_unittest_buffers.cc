@@ -7,7 +7,7 @@
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest.h"
 
-using ::gfx::MockGLInterface;
+using ::gl::MockGLInterface;
 using ::testing::_;
 using ::testing::Return;
 using ::testing::SetArgPointee;
@@ -21,39 +21,51 @@ namespace {
 
 }  // namespace anonymous
 
-TEST_P(GLES2DecoderTest, BindBufferBaseValidArgs) {
+TEST_P(GLES3DecoderTest, BindBufferBaseValidArgs) {
   EXPECT_CALL(
       *gl_, BindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 2, kServiceBufferId));
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS, _))
-      .WillOnce(SetArgPointee<1>(4))
-      .RetiresOnSaturation();
-  SpecializedSetup<cmds::BindBufferBase, 0>(true);
-  cmds::BindBufferBase cmd;
+  SpecializedSetup<BindBufferBase, 0>(true);
+  BindBufferBase cmd;
   cmd.Init(GL_TRANSFORM_FEEDBACK_BUFFER, 2, client_buffer_id_);
-  decoder_->set_unsafe_es3_apis_enabled(true);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
 }
 
-TEST_P(GLES2DecoderTest, BindBufferBaseValidArgsNewId) {
+TEST_P(GLES3DecoderTest, BindBufferBaseValidArgsNewId) {
   EXPECT_CALL(*gl_,
               BindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 2, kNewServiceId));
-  EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS, _))
-      .WillOnce(SetArgPointee<1>(4))
-      .RetiresOnSaturation();
   EXPECT_CALL(*gl_, GenBuffersARB(1, _))
       .WillOnce(SetArgPointee<1>(kNewServiceId));
-  SpecializedSetup<cmds::BindBufferBase, 0>(true);
-  cmds::BindBufferBase cmd;
+  SpecializedSetup<BindBufferBase, 0>(true);
+  BindBufferBase cmd;
   cmd.Init(GL_TRANSFORM_FEEDBACK_BUFFER, 2, kNewClientId);
-  decoder_->set_unsafe_es3_apis_enabled(true);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(GetBuffer(kNewClientId) != NULL);
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
+}
+
+
+TEST_P(GLES3DecoderTest, BindBufferRangeValidArgs) {
+  EXPECT_CALL(*gl_, BindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 2,
+                                    kServiceBufferId, 4, 4));
+  SpecializedSetup<BindBufferRange, 0>(true);
+  BindBufferRange cmd;
+  cmd.Init(GL_TRANSFORM_FEEDBACK_BUFFER, 2, client_buffer_id_, 4, 4);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, BindBufferRangeValidArgsNewId) {
+  EXPECT_CALL(*gl_, BindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 2,
+                                    kNewServiceId, 4, 4));
+  EXPECT_CALL(*gl_, GenBuffersARB(1, _))
+      .WillOnce(SetArgPointee<1>(kNewServiceId));
+  SpecializedSetup<BindBufferRange, 0>(true);
+  BindBufferRange cmd;
+  cmd.Init(GL_TRANSFORM_FEEDBACK_BUFFER, 2, kNewClientId, 4, 4);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  EXPECT_TRUE(GetBuffer(kNewClientId) != NULL);
 }
 
 TEST_P(GLES2DecoderTest, MapBufferRangeUnmapBufferReadSucceeds) {
@@ -501,6 +513,41 @@ TEST_P(GLES2DecoderTest, DeleteBuffersDestroysDataStore) {
     cmd.Init(kTarget);
     EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
     EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+  }
+}
+
+TEST_P(GLES2DecoderTest, MapUnmapBufferInvalidTarget) {
+  const GLenum kTarget = GL_TEXTURE_2D;
+  const GLintptr kOffset = 10;
+  const GLsizeiptr kSize = 64;
+  const GLbitfield kAccess = GL_MAP_WRITE_BIT;
+
+  uint32_t result_shm_id = kSharedMemoryId;
+  uint32_t result_shm_offset = kSharedMemoryOffset;
+  uint32_t data_shm_id = kSharedMemoryId;
+  // uint32_t is Result for both MapBufferRange and UnmapBuffer commands.
+  uint32_t data_shm_offset = kSharedMemoryOffset + sizeof(uint32_t);
+
+  decoder_->set_unsafe_es3_apis_enabled(true);
+
+  typedef MapBufferRange::Result Result;
+  Result* result = GetSharedMemoryAs<Result*>();
+
+  {
+    MapBufferRange cmd;
+    cmd.Init(kTarget, kOffset, kSize, kAccess, data_shm_id, data_shm_offset,
+             result_shm_id, result_shm_offset);
+    *result = 0;
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(0u, *result);
+    EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
+  }
+
+  {
+    UnmapBuffer cmd;
+    cmd.Init(kTarget);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
   }
 }
 

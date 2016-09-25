@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_SYNC_GLUE_THEME_DATA_TYPE_CONTROLLER_H_
 
 #include "base/macros.h"
-#include "components/sync_driver/ui_data_type_controller.h"
+#include "components/sync/driver/ui_data_type_controller.h"
 
 class Profile;
 
@@ -14,13 +14,13 @@ namespace browser_sync {
 
 class ThemeDataTypeController : public sync_driver::UIDataTypeController {
  public:
-  ThemeDataTypeController(const base::Closure& error_callback,
+  // |dump_stack| is called when an unrecoverable error occurs.
+  ThemeDataTypeController(const base::Closure& dump_stack,
                           sync_driver::SyncClient* sync_client,
                           Profile* profile);
-
- private:
   ~ThemeDataTypeController() override;
 
+ private:
   // UIDataTypeController implementations.
   bool StartModels() override;
 

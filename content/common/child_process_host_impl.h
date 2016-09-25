@@ -79,8 +79,11 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
   bool Send(IPC::Message* message) override;
   void ForceShutdown() override;
   std::string CreateChannel() override;
+  std::string CreateChannelMojo(const std::string& child_token) override;
+  void CreateChannelMojo() override;
   bool IsChannelOpening() override;
   void AddFilter(IPC::MessageFilter* filter) override;
+  shell::InterfaceProvider* GetRemoteInterfaces() override;
 #if defined(OS_POSIX)
   base::ScopedFD TakeClientFileDescriptor() override;
 #endif
@@ -108,6 +111,10 @@ class CONTENT_EXPORT ChildProcessHostImpl : public ChildProcessHost,
                                  gfx::GpuMemoryBufferHandle* handle);
   void OnDeletedGpuMemoryBuffer(gfx::GpuMemoryBufferId id,
                                 const gpu::SyncToken& sync_token);
+
+  // Initializes the IPC channel and returns true on success. |channel_| must be
+  // non-null.
+  bool InitChannel();
 
   ChildProcessHostDelegate* delegate_;
   base::Process peer_process_;

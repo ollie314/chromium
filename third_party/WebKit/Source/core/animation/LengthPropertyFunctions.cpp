@@ -169,8 +169,8 @@ bool LengthPropertyFunctions::getLength(CSSPropertyID property, const ComputedSt
     case CSSPropertyMinWidth:
         result = style.minWidth();
         return true;
-    case CSSPropertyMotionOffset:
-        result = style.motionOffset();
+    case CSSPropertyOffsetDistance:
+        result = style.offsetDistance();
         return true;
     case CSSPropertyPaddingBottom:
         result = style.paddingBottom();
@@ -277,7 +277,7 @@ bool LengthPropertyFunctions::getLength(CSSPropertyID property, const ComputedSt
         return true;
     case CSSPropertyLineHeight:
         // Percent Lengths are used to represent numbers on line-height.
-        if (style.specifiedLineHeight().hasPercent())
+        if (style.specifiedLineHeight().isPercentOrCalc())
             return false;
         result = style.specifiedLineHeight();
         return true;
@@ -287,7 +287,7 @@ bool LengthPropertyFunctions::getLength(CSSPropertyID property, const ComputedSt
         result = Length(style.perspective(), Fixed);
         return true;
     case CSSPropertyStrokeWidth:
-        ASSERT(!isZoomedLength(CSSPropertyStrokeWidth));
+        DCHECK(!isZoomedLength(CSSPropertyStrokeWidth));
         result = style.strokeWidth().length();
         return true;
     case CSSPropertyVerticalAlign:
@@ -354,8 +354,8 @@ bool LengthPropertyFunctions::setLength(CSSPropertyID property, ComputedStyle& s
     case CSSPropertyMinWidth:
         style.setMinWidth(value);
         return true;
-    case CSSPropertyMotionOffset:
-        style.setMotionOffset(value);
+    case CSSPropertyOffsetDistance:
+        style.setOffsetDistance(value);
         return true;
     case CSSPropertyPaddingBottom:
         style.setPaddingBottom(value);
@@ -414,7 +414,7 @@ bool LengthPropertyFunctions::setLength(CSSPropertyID property, ComputedStyle& s
 
     case CSSPropertyLineHeight:
         // Percent Lengths are used to represent numbers on line-height.
-        if (value.hasPercent())
+        if (value.isPercentOrCalc())
             return false;
         style.setLineHeight(value);
         return true;

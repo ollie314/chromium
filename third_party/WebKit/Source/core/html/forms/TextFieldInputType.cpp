@@ -61,7 +61,7 @@ using namespace HTMLNames;
 class DataListIndicatorElement final : public HTMLDivElement {
 private:
     inline DataListIndicatorElement(Document& document) : HTMLDivElement(document) { }
-    inline HTMLInputElement* hostInput() const { return toHTMLInputElement(shadowHost()); }
+    inline HTMLInputElement* hostInput() const { return toHTMLInputElement(ownerShadowHost()); }
 
     LayoutObject* createLayoutObject(const ComputedStyle&) override
     {
@@ -81,7 +81,7 @@ private:
 
     void defaultEventHandler(Event* event) override
     {
-        ASSERT(document().isActive());
+        DCHECK(document().isActive());
         if (event->type() != EventTypeNames::click)
             return;
         HTMLInputElement* host = hostInput();
@@ -109,11 +109,23 @@ public:
 
 TextFieldInputType::TextFieldInputType(HTMLInputElement& element)
     : InputType(element)
+    , InputTypeView(element)
 {
 }
 
 TextFieldInputType::~TextFieldInputType()
 {
+}
+
+DEFINE_TRACE(TextFieldInputType)
+{
+    InputTypeView::trace(visitor);
+    InputType::trace(visitor);
+}
+
+InputTypeView* TextFieldInputType::createView()
+{
+    return this;
 }
 
 SpinButtonElement* TextFieldInputType::spinButtonElement() const
@@ -151,10 +163,7 @@ void TextFieldInputType::setValue(const String& sanitizedValue, bool valueChange
         element().updateView();
 
     unsigned max = visibleValue().length();
-    if (element().focused())
-        element().setSelectionRange(max, max, SelectionHasNoDirection, NotDispatchSelectEvent);
-    else
-        element().cacheSelectionInResponseToSetValue(max);
+    element().setSelectionRange(max, max);
 
     if (!valueChanged)
         return;
@@ -198,10 +207,10 @@ void TextFieldInputType::handleKeydownEventForSpinButton(KeyboardEvent* event)
 {
     if (element().isDisabledOrReadOnly())
         return;
-    const String& key = event->keyIdentifier();
-    if (key == "Up")
+    const String& key = event->key();
+    if (key == "ArrowUp")
         spinButtonStepUp();
-    else if (key == "Down" && !event->altKey())
+    else if (key == "ArrowDown" && !event->altKey())
         spinButtonStepDown();
     else
         return;
@@ -241,13 +250,13 @@ void TextFieldInputType::forwardEvent(Event* event)
 
 void TextFieldInputType::handleFocusEvent(Element* oldFocusedNode, WebFocusType focusType)
 {
-    InputType::handleFocusEvent(oldFocusedNode, focusType);
+    InputTypeView::handleFocusEvent(oldFocusedNode, focusType);
     element().beginEditing();
 }
 
 void TextFieldInputType::handleBlurEvent()
 {
-    InputType::handleBlurEvent();
+    InputTypeView::handleBlurEvent();
     element().endEditing();
     if (SpinButtonElement *spinButton = spinButtonElement())
         spinButton->releaseCapture();
@@ -255,7 +264,7 @@ void TextFieldInputType::handleBlurEvent()
 
 bool TextFieldInputType::shouldSubmitImplicitly(Event* event)
 {
-    return (event->type() == EventTypeNames::textInput && event->hasInterface(EventNames::TextEvent) && toTextEvent(event)->data() == "\n") || InputType::shouldSubmitImplicitly(event);
+    return (event->type() == EventTypeNames::textInput && event->hasInterface(EventNames::TextEvent) && toTextEvent(event)->data() == "\n") || InputTypeView::shouldSubmitImplicitly(event);
 }
 
 LayoutObject* TextFieldInputType::createLayoutObject(const ComputedStyle&) const
@@ -270,9 +279,9 @@ bool TextFieldInputType::shouldHaveSpinButton() const
 
 void TextFieldInputType::createShadowSubtree()
 {
-    ASSERT(element().shadow());
+    DCHECK(element().shadow());
     ShadowRoot* shadowRoot = element().userAgentShadowRoot();
-    ASSERT(!shadowRoot->hasChildren());
+    DCHECK(!shadowRoot->hasChildren());
 
     Document& document = element().document();
     bool shouldHaveSpinButton = this->shouldHaveSpinButton();
@@ -311,7 +320,7 @@ Element* TextFieldInputType::containerElement() const
 
 void TextFieldInputType::destroyShadowSubtree()
 {
-    InputType::destroyShadowSubtree();
+    InputTypeView::destroyShadowSubtree();
     if (SpinButtonElement* spinButton = spinButtonElement())
         spinButton->removeSpinButtonOwner();
 }
@@ -410,9 +419,13 @@ void TextFieldInputType::handleBeforeTextInsertedEvent(BeforeTextInsertedEvent* 
     // that case, and nothing in the text field will be removed.
     unsigned selectionLength = 0;
     if (element().focused()) {
+        // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+        // needs to be audited.  See http://crbug.com/590369 for more details.
+        element().document().updateStyleAndLayoutIgnorePendingStylesheets();
+
         selectionLength = element().document().frame()->selection().selectedText().length();
     }
-    ASSERT(oldLength >= selectionLength);
+    DCHECK_GE(oldLength, selectionLength);
 
     // Selected characters will be removed by the next text event.
     unsigned baseLength = oldLength - selectionLength;
@@ -457,7 +470,7 @@ void TextFieldInputType::updatePlaceholderText()
         Element* container = containerElement();
         Node* previous = container ? container : element().innerEditorElement();
         previous->parentNode()->insertBefore(placeholder, previous);
-        ASSERT_WITH_SECURITY_IMPLICATION(placeholder->parentNode() == previous->parentNode());
+        SECURITY_DCHECK(placeholder->parentNode() == previous->parentNode());
     }
     placeholder->setTextContent(placeholderText);
 }
@@ -526,7 +539,7 @@ void TextFieldInputType::updateView()
 void TextFieldInputType::focusAndSelectSpinButtonOwner()
 {
     element().focus();
-    element().select(NotDispatchSelectEvent);
+    element().setSelectionRange(0, std::numeric_limits<int>::max());
 }
 
 bool TextFieldInputType::shouldSpinButtonRespondToMouseEvents()

@@ -72,10 +72,11 @@ class ExternalDataUseObserverBridge {
   // OnReportDataUseDone. ReportDataUse should not be called if a
   // request to submit data use is already in progress.
   void ReportDataUse(const std::string& label,
+                     const std::string& tag,
                      net::NetworkChangeNotifier::ConnectionType connection_type,
                      const std::string& mcc_mnc,
-                     const base::Time& start_time,
-                     const base::Time& end_time,
+                     base::Time start_time,
+                     base::Time end_time,
                      int64_t bytes_downloaded,
                      int64_t bytes_uploaded) const;
 

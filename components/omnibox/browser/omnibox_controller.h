@@ -5,9 +5,10 @@
 #ifndef COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_CONTROLLER_H_
 #define COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_CONTROLLER_H_
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_controller_delegate.h"
@@ -31,7 +32,7 @@ class Rect;
 // TODO(beaudoin): Keep on expanding this class so that OmniboxEditModel no
 //     longer needs to hold any reference to AutocompleteController. Also make
 //     this the point of contact between InstantController and OmniboxEditModel.
-//     As the refactor progresses, keep the class comment up-to-date to
+//     As the refactor progresses, keep the class comment up to date to
 //     precisely explain what this class is doing.
 class OmniboxController : public AutocompleteControllerDelegate {
  public:
@@ -82,7 +83,7 @@ class OmniboxController : public AutocompleteControllerDelegate {
 
   OmniboxPopupModel* popup_;
 
-  scoped_ptr<AutocompleteController> autocomplete_controller_;
+  std::unique_ptr<AutocompleteController> autocomplete_controller_;
 
   // TODO(beaudoin): This AutocompleteMatch is used to let the OmniboxEditModel
   // know what it should display. Not every field is required for that purpose,

@@ -89,7 +89,7 @@ void EasyUnlockAppManagerImpl::LaunchSetup() {
 
   OpenApplication(AppLaunchParams(extension_service->profile(), extension,
                                   extensions::LAUNCH_CONTAINER_WINDOW,
-                                  NEW_WINDOW,
+                                  WindowOpenDisposition::NEW_WINDOW,
                                   extensions::SOURCE_CHROME_INTERNAL));
 }
 
@@ -166,7 +166,7 @@ bool EasyUnlockAppManagerImpl::SendUserUpdatedEvent(const std::string& user_id,
   info.data_ready = data_ready;
 
   std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->Append(info.ToValue().release());
+  args->Append(info.ToValue());
 
   std::unique_ptr<extensions::Event> event(
       new extensions::Event(histogram_value, event_name, std::move(args)));

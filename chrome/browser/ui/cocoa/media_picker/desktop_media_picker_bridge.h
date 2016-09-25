@@ -6,16 +6,19 @@
 #define CHROME_BROWSER_UI_COCOA_MEDIA_PICKER_DESKTOP_MEDIA_PICKER_BRIDGE_H_
 
 #include "base/macros.h"
-#include "chrome/browser/media/desktop_media_list.h"
-#include "chrome/browser/media/desktop_media_list_observer.h"
+#include "chrome/browser/media/webrtc/desktop_media_list.h"
+#include "chrome/browser/media/webrtc/desktop_media_list_observer.h"
 
 // Protocol corresponding to |DesktopMediaListObserver|.
 @protocol DesktopMediaPickerObserver
-- (void)sourceAddedAtIndex:(int)index;
-- (void)sourceRemovedAtIndex:(int)index;
-- (void)sourceMovedFrom:(int)oldIndex to:(int)newIndex;
-- (void)sourceNameChangedAtIndex:(int)index;
-- (void)sourceThumbnailChangedAtIndex:(int)index;
+- (void)sourceAddedForList:(DesktopMediaList*)list atIndex:(int)index;
+- (void)sourceRemovedForList:(DesktopMediaList*)list atIndex:(int)index;
+- (void)sourceMovedForList:(DesktopMediaList*)list
+                      from:(int)oldIndex
+                        to:(int)newIndex;
+- (void)sourceNameChangedForList:(DesktopMediaList*)list atIndex:(int)index;
+- (void)sourceThumbnailChangedForList:(DesktopMediaList*)list
+                              atIndex:(int)index;
 @end
 
 // Provides a |DesktopMediaListObserver| implementation that forwards

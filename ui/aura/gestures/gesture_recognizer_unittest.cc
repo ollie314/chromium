@@ -7,9 +7,13 @@
 #include <list>
 
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/simple_test_tick_clock.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/env.h"
@@ -481,27 +485,29 @@ class ScopedGestureRecognizerSetter {
 
 class TimedEvents {
  private:
-  int simulated_now_;
+  base::SimpleTestTickClock tick_clock_;
 
  public:
   // Use a non-zero start time to pass DCHECKs which ensure events have had a
   // time assigned.
-  TimedEvents() : simulated_now_(1) {
+  TimedEvents() {
+    tick_clock_.Advance(base::TimeDelta::FromMilliseconds(1));
   }
 
-  base::TimeDelta Now() {
-    base::TimeDelta t = base::TimeDelta::FromMilliseconds(simulated_now_);
-    simulated_now_++;
+  base::TimeTicks Now() {
+    base::TimeTicks t = tick_clock_.NowTicks();
+    tick_clock_.Advance(base::TimeDelta::FromMilliseconds(1));
     return t;
   }
 
-  base::TimeDelta LeapForward(int time_in_millis) {
-    simulated_now_ += time_in_millis;
-    return base::TimeDelta::FromMilliseconds(simulated_now_);
+  base::TimeTicks LeapForward(int time_in_millis) {
+    tick_clock_.Advance(base::TimeDelta::FromMilliseconds(time_in_millis));
+    return tick_clock_.NowTicks();
   }
 
-  base::TimeDelta InFuture(int time_in_millis) {
-    return base::TimeDelta::FromMilliseconds(simulated_now_ + time_in_millis);
+  base::TimeTicks InFuture(int time_in_millis) {
+    return tick_clock_.NowTicks() +
+        base::TimeDelta::FromMilliseconds(time_in_millis);
   }
 
   void SendScrollEvents(ui::EventProcessor* dispatcher,
@@ -510,7 +516,7 @@ class TimedEvents {
                         int dx,
                         int dy,
                         int touch_id,
-                        int time_step,
+                        int time_step_ms,
                         int num_steps,
                         GestureEventConsumeDelegate* delegate) {
     float x = x_start;
@@ -520,10 +526,10 @@ class TimedEvents {
       x += dx;
       y += dy;
       ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(x, y), touch_id,
-                          base::TimeDelta::FromMilliseconds(simulated_now_));
+                          tick_clock_.NowTicks());
       ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move);
       ASSERT_FALSE(details.dispatcher_destroyed);
-      simulated_now_ += time_step;
+      tick_clock_.Advance(base::TimeDelta::FromMilliseconds(time_step_ms));
     }
   }
 
@@ -534,12 +540,11 @@ class TimedEvents {
                        GestureEventConsumeDelegate* delegate) {
     delegate->Reset();
     ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(), touch_id,
-                        base::TimeDelta::FromMilliseconds(simulated_now_));
+                        Now());
     move.set_location_f(gfx::PointF(x, y));
     move.set_root_location_f(gfx::PointF(x, y));
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move);
     ASSERT_FALSE(details.dispatcher_destroyed);
-    simulated_now_++;
   }
 };
 
@@ -621,9 +626,8 @@ class RemoveOnTouchCancelHandler : public TestEventHandler {
 void DelayByLongPressTimeout() {
   ui::GestureProvider::Config config;
   base::RunLoop run_loop;
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      run_loop.QuitClosure(),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(),
       config.gesture_detector_config.longpress_timeout * 2);
   run_loop.Run();
 }
@@ -631,9 +635,8 @@ void DelayByLongPressTimeout() {
 void DelayByShowPressTimeout() {
   ui::GestureProvider::Config config;
   base::RunLoop run_loop;
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      run_loop.QuitClosure(),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(),
       config.gesture_detector_config.showpress_timeout * 2);
   run_loop.Run();
 }
@@ -2540,12 +2543,9 @@ TEST_F(GestureRecognizerTest, PressDoesNotCrash) {
   ui::TouchEvent press2(ui::ET_TOUCH_PRESSED, gfx::Point(55, 45), 7, tes.Now());
   DispatchEventUsingWindowDispatcher(&press2);
 
-  // FIXME(tdresser): this should not generate a tap down; however,
-  // there is at least one case where we need to allow a touch press
-  // from a currently used touch id. See crbug.com/373125 for details.
-  EXPECT_TRUE(delegate->begin());
-  EXPECT_TRUE(delegate->tap_down());
-  EXPECT_TRUE(delegate->tap_cancel());
+  EXPECT_FALSE(delegate->begin());
+  EXPECT_FALSE(delegate->tap_down());
+  EXPECT_FALSE(delegate->tap_cancel());
   EXPECT_FALSE(delegate->scroll_begin());
 }
 
@@ -2576,6 +2576,7 @@ TEST_F(GestureRecognizerTest, TwoFingerTap) {
       delegate->events(), ui::ET_GESTURE_TAP_CANCEL, ui::ET_GESTURE_BEGIN);
 
   // Little bit of touch move should not affect our state.
+  // Moving within slop region doesn't cause scrolling.
   delegate->Reset();
   ui::TouchEvent move1(ui::ET_TOUCH_MOVED, gfx::Point(102, 202),
                        kTouchId1, tes.Now());
@@ -2583,8 +2584,7 @@ TEST_F(GestureRecognizerTest, TwoFingerTap) {
   ui::TouchEvent move2(ui::ET_TOUCH_MOVED, gfx::Point(131, 202),
                        kTouchId2, tes.Now());
   DispatchEventUsingWindowDispatcher(&move2);
-  EXPECT_3_EVENTS(delegate->events(), ui::ET_GESTURE_SCROLL_BEGIN,
-                  ui::ET_GESTURE_SCROLL_UPDATE, ui::ET_GESTURE_SCROLL_UPDATE);
+  EXPECT_0_EVENTS(delegate->events());
 
   // Make sure there is enough delay before the touch is released so that it is
   // recognized as a tap.
@@ -2597,15 +2597,14 @@ TEST_F(GestureRecognizerTest, TwoFingerTap) {
       delegate->events(), ui::ET_GESTURE_TWO_FINGER_TAP, ui::ET_GESTURE_END);
 
   // Lift second finger.
-  // Make sure there is enough delay before the touch is released so that it is
-  // recognized as a tap.
+  // Two fingers have been down at some point during the current touch,
+  // single tap doesn't happen while releasing the second finger.
   delegate->Reset();
   ui::TouchEvent release2(ui::ET_TOUCH_RELEASED, gfx::Point(130, 201),
                           kTouchId2, tes.LeapForward(50));
 
   DispatchEventUsingWindowDispatcher(&release2);
-  EXPECT_2_EVENTS(
-      delegate->events(), ui::ET_GESTURE_SCROLL_END, ui::ET_GESTURE_END);
+  EXPECT_1_EVENT(delegate->events(), ui::ET_GESTURE_END);
 }
 
 TEST_F(GestureRecognizerTest, TwoFingerTapExpired) {

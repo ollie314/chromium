@@ -5,9 +5,10 @@
 #ifndef COMPONENTS_SESSIONS_CORE_TAB_RESTORE_SERVICE_CLIENT_H_
 #define COMPONENTS_SESSIONS_CORE_TAB_RESTORE_SERVICE_CLIENT_H_
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "components/sessions/core/session_id.h"
 #include "components/sessions/core/sessions_export.h"
@@ -27,8 +28,9 @@ class LiveTabContext;
 
 // Callback from TabRestoreServiceClient::GetLastSession.
 // The second parameter is the id of the window that was last active.
-typedef base::Callback<void(ScopedVector<SessionWindow>, SessionID::id_type)>
-    GetLastSessionCallback;
+using GetLastSessionCallback =
+    base::Callback<void(std::vector<std::unique_ptr<SessionWindow>>,
+                        SessionID::id_type)>;
 
 // A client interface that needs to be supplied to the tab restore service by
 // the embedder.

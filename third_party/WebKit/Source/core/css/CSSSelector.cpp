@@ -34,6 +34,7 @@
 #include "wtf/StdLibExtras.h"
 #include "wtf/text/StringBuilder.h"
 #include <algorithm>
+#include <memory>
 
 #ifndef NDEBUG
 #include <stdio.h>
@@ -252,10 +253,12 @@ PseudoId CSSSelector::pseudoId(PseudoType type)
     case PseudoInRange:
     case PseudoOutOfRange:
     case PseudoWebKitCustomElement:
+    case PseudoBlinkInternalElement:
     case PseudoCue:
     case PseudoFutureCue:
     case PseudoPastCue:
     case PseudoUnresolved:
+    case PseudoDefined:
     case PseudoContent:
     case PseudoHost:
     case PseudoHostContext:
@@ -264,6 +267,7 @@ PseudoId CSSSelector::pseudoId(PseudoType type)
     case PseudoFullScreenAncestor:
     case PseudoSpatialNavigationFocus:
     case PseudoListBox:
+    case PseudoHostHasAppearance:
     case PseudoSlotted:
         return PseudoIdNone;
     }
@@ -285,6 +289,12 @@ const static NameToPseudoStruct pseudoTypeWithoutArgumentsMap[] = {
 {"-internal-list-box",            CSSSelector::PseudoListBox},
 {"-internal-media-controls-cast-button", CSSSelector::PseudoWebKitCustomElement},
 {"-internal-media-controls-overlay-cast-button", CSSSelector::PseudoWebKitCustomElement},
+{"-internal-media-controls-text-track-list", CSSSelector::PseudoWebKitCustomElement},
+{"-internal-media-controls-text-track-list-item", CSSSelector::PseudoWebKitCustomElement},
+{"-internal-media-controls-text-track-list-item-input", CSSSelector::PseudoWebKitCustomElement},
+{"-internal-media-controls-text-track-list-kind-captions", CSSSelector::PseudoWebKitCustomElement},
+{"-internal-media-controls-text-track-list-kind-subtitles", CSSSelector::PseudoWebKitCustomElement},
+{"-internal-shadow-host-has-appearance", CSSSelector::PseudoHostHasAppearance},
 {"-internal-spatial-navigation-focus", CSSSelector::PseudoSpatialNavigationFocus},
 {"-webkit-any-link",              CSSSelector::PseudoAnyLink},
 {"-webkit-autofill",              CSSSelector::PseudoAutofill},
@@ -309,6 +319,7 @@ const static NameToPseudoStruct pseudoTypeWithoutArgumentsMap[] = {
 {"cue",                           CSSSelector::PseudoWebKitCustomElement},
 {"decrement",                     CSSSelector::PseudoDecrement},
 {"default",                       CSSSelector::PseudoDefault},
+{"defined",                       CSSSelector::PseudoDefined},
 {"disabled",                      CSSSelector::PseudoDisabled},
 {"double-button",                 CSSSelector::PseudoDoubleButton},
 {"empty",                         CSSSelector::PseudoEmpty},
@@ -406,6 +417,9 @@ static CSSSelector::PseudoType nameToPseudoType(const AtomicString& name, bool h
     if (match == pseudoTypeMapEnd || match->string != name.getString())
         return CSSSelector::PseudoUnknown;
 
+    if (match->type == CSSSelector::PseudoDefined && !RuntimeEnabledFeatures::customElementsV1Enabled())
+        return CSSSelector::PseudoUnknown;
+
     return static_cast<CSSSelector::PseudoType>(match->type);
 }
 
@@ -448,8 +462,17 @@ CSSSelector::PseudoType CSSSelector::parsePseudoType(const AtomicString& name, b
 
     if (name.startsWith("-webkit-"))
         return PseudoWebKitCustomElement;
+    if (name.startsWith("-internal-"))
+        return PseudoBlinkInternalElement;
 
     return PseudoUnknown;
+}
+
+PseudoId CSSSelector::parsePseudoId(const String& name)
+{
+    unsigned nameWithoutColonsStart = name[0] == ':' ? (name[1] == ':' ? 2 : 1) : 0;
+    return pseudoId(parsePseudoType(
+        AtomicString(name.substring(nameWithoutColonsStart)), false));
 }
 
 void CSSSelector::updatePseudoType(const AtomicString& value, bool hasArguments)
@@ -481,6 +504,7 @@ void CSSSelector::updatePseudoType(const AtomicString& value, bool hasArguments)
     case PseudoScrollbarTrackPiece:
     case PseudoSelection:
     case PseudoWebKitCustomElement:
+    case PseudoBlinkInternalElement:
     case PseudoContent:
     case PseudoShadow:
     case PseudoSlotted:
@@ -501,6 +525,7 @@ void CSSSelector::updatePseudoType(const AtomicString& value, bool hasArguments)
     case PseudoCornerPresent:
     case PseudoDecrement:
     case PseudoDefault:
+    case PseudoDefined:
     case PseudoDisabled:
     case PseudoDoubleButton:
     case PseudoDrag:
@@ -517,6 +542,7 @@ void CSSSelector::updatePseudoType(const AtomicString& value, bool hasArguments)
     case PseudoHorizontal:
     case PseudoHost:
     case PseudoHostContext:
+    case PseudoHostHasAppearance:
     case PseudoHover:
     case PseudoInRange:
     case PseudoIncrement:
@@ -653,7 +679,7 @@ String CSSSelector::selectorText(const String& rightSide) const
                 break;
             }
         } else if (cs->m_match == PseudoElement) {
-            str.appendLiteral("::");
+            str.append("::");
             str.append(cs->serializingValue());
         } else if (cs->isAttributeSelector()) {
             str.append('[');
@@ -672,19 +698,19 @@ String CSSSelector::selectorText(const String& rightSide) const
                 str.append(']');
                 break;
             case AttributeList:
-                str.appendLiteral("~=");
+                str.append("~=");
                 break;
             case AttributeHyphen:
-                str.appendLiteral("|=");
+                str.append("|=");
                 break;
             case AttributeBegin:
-                str.appendLiteral("^=");
+                str.append("^=");
                 break;
             case AttributeEnd:
-                str.appendLiteral("$=");
+                str.append("$=");
                 break;
             case AttributeContain:
-                str.appendLiteral("*=");
+                str.append("*=");
                 break;
             default:
                 break;
@@ -692,7 +718,7 @@ String CSSSelector::selectorText(const String& rightSide) const
             if (cs->m_match != AttributeSet) {
                 serializeString(cs->serializingValue(), str);
                 if (cs->attributeMatch() == CaseInsensitive)
-                    str.appendLiteral(" i");
+                    str.append(" i");
                 str.append(']');
             }
         }
@@ -748,10 +774,10 @@ void CSSSelector::setArgument(const AtomicString& value)
     m_data.m_rareData->m_argument = value;
 }
 
-void CSSSelector::setSelectorList(PassOwnPtr<CSSSelectorList> selectorList)
+void CSSSelector::setSelectorList(std::unique_ptr<CSSSelectorList> selectorList)
 {
     createRareData();
-    m_data.m_rareData->m_selectorList = selectorList;
+    m_data.m_rareData->m_selectorList = std::move(selectorList);
 }
 
 static bool validateSubSelector(const CSSSelector* selector)
@@ -799,6 +825,7 @@ static bool validateSubSelector(const CSSSelector* selector)
     case CSSSelector::PseudoNot:
     case CSSSelector::PseudoSpatialNavigationFocus:
     case CSSSelector::PseudoListBox:
+    case CSSSelector::PseudoHostHasAppearance:
         return true;
     default:
         return false;
@@ -890,6 +917,51 @@ bool CSSSelector::matchesPseudoElement() const
             return false;
     }
     return false;
+}
+
+template <typename Functor>
+static bool forEachTagHistory(const Functor& functor, const CSSSelector& selector)
+{
+    for (const CSSSelector* current = &selector; current; current = current->tagHistory()) {
+        if (functor(*current))
+            return true;
+        if (const CSSSelectorList* selectorList = current->selectorList()) {
+            for (const CSSSelector* subSelector = selectorList->first(); subSelector; subSelector = CSSSelectorList::next(*subSelector)) {
+                if (forEachTagHistory(functor, *subSelector))
+                    return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool CSSSelector::hasContentPseudo() const
+{
+    return forEachTagHistory([](const CSSSelector& selector) -> bool {
+        return selector.relationIsAffectedByPseudoContent();
+    }, *this);
+}
+
+bool CSSSelector::hasSlottedPseudo() const
+{
+    return forEachTagHistory([](const CSSSelector& selector) ->  bool {
+        return selector.getPseudoType() == CSSSelector::PseudoSlotted;
+    }, *this);
+}
+
+bool CSSSelector::hasDeepCombinatorOrShadowPseudo() const
+{
+    return forEachTagHistory([](const CSSSelector& selector) -> bool {
+        return selector.relation() == CSSSelector::ShadowDeep || selector.getPseudoType() == CSSSelector::PseudoShadow;
+    }, *this);
+}
+
+bool CSSSelector::needsUpdatedDistribution() const
+{
+    return forEachTagHistory([](const CSSSelector& selector) -> bool {
+        return selector.relationIsAffectedByPseudoContent() || selector.getPseudoType() == CSSSelector::PseudoSlotted || selector.getPseudoType() == CSSSelector::PseudoHostContext;
+    }, *this);
 }
 
 CSSSelector::RareData::RareData(const AtomicString& value)

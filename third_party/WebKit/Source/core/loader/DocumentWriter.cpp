@@ -39,7 +39,7 @@
 #include "core/loader/FrameLoaderStateMachine.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "wtf/PassOwnPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -84,10 +84,10 @@ void DocumentWriter::appendReplacingData(const String& source)
 
 void DocumentWriter::addData(const char* bytes, size_t length)
 {
-    ASSERT(m_parser);
+    DCHECK(m_parser);
     if (m_parser->needsDecoder() && 0 < length) {
-        OwnPtr<TextResourceDecoder> decoder = m_decoderBuilder.buildFor(m_document);
-        m_parser->setDecoder(decoder.release());
+        std::unique_ptr<TextResourceDecoder> decoder = m_decoderBuilder.buildFor(m_document);
+        m_parser->setDecoder(std::move(decoder));
     }
     // appendBytes() can result replacing DocumentLoader::m_writer.
     m_parser->appendBytes(bytes, length);
@@ -95,14 +95,14 @@ void DocumentWriter::addData(const char* bytes, size_t length)
 
 void DocumentWriter::end()
 {
-    ASSERT(m_document);
+    DCHECK(m_document);
 
     if (!m_parser)
         return;
 
     if (m_parser->needsDecoder()) {
-        OwnPtr<TextResourceDecoder> decoder = m_decoderBuilder.buildFor(m_document);
-        m_parser->setDecoder(decoder.release());
+        std::unique_ptr<TextResourceDecoder> decoder = m_decoderBuilder.buildFor(m_document);
+        m_parser->setDecoder(std::move(decoder));
     }
 
     m_parser->finish();
@@ -112,7 +112,8 @@ void DocumentWriter::end()
 
 void DocumentWriter::setDocumentWasLoadedAsPartOfNavigation()
 {
-    ASSERT(m_parser && !m_parser->isStopped());
+    DCHECK(m_parser);
+    DCHECK(!m_parser->isStopped());
     m_parser->setDocumentWasLoadedAsPartOfNavigation();
 }
 

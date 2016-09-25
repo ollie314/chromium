@@ -22,14 +22,15 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_local.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/test/chromedriver/logging.h"
 #include "chrome/test/chromedriver/net/port_server.h"
@@ -77,11 +78,14 @@ class HttpServer : public net::HttpServer::Delegate {
     std::unique_ptr<net::ServerSocket> server_socket(
         new net::TCPServerSocket(NULL, net::NetLog::Source()));
     if (ListenOnIPv4(server_socket.get(), port, allow_remote) != net::OK) {
-      // If we fail to listen on IPv4, try using an IPv6 address. This will work
-      // on an IPv6-only host, but we will be IPv4-only on dual-stack hosts.
+      // This will work on an IPv6-only host, but we will be IPv4-only on
+      // dual-stack hosts.
       // TODO(samuong): change this to listen on both IPv4 and IPv6.
-      if (ListenOnIPv6(server_socket.get(), port, allow_remote) != net::OK)
+      VLOG(0) << "listen on IPv4 failed, trying IPv6";
+      if (ListenOnIPv6(server_socket.get(), port, allow_remote) != net::OK) {
+        VLOG(1) << "listen on both IPv4 and IPv6 failed, giving up";
         return false;
+      }
     }
     server_.reset(new net::HttpServer(std::move(server_socket), this));
     net::IPEndPoint address;
@@ -204,7 +208,7 @@ void RunServer(uint16_t port,
   HttpRequestHandlerFunc handle_request_func =
       base::Bind(&HandleRequestOnCmdThread, &handler, whitelisted_ips);
 
-  io_thread.message_loop()->PostTask(
+  io_thread.task_runner()->PostTask(
       FROM_HERE,
       base::Bind(&StartServerOnIOThread, port, allow_remote,
                  base::Bind(&HandleRequestOnIOThread, cmd_loop.task_runner(),
@@ -215,8 +219,8 @@ void RunServer(uint16_t port,
   // destroyed, which waits until all pending tasks have been completed.
   // This assumes the response is sent synchronously as part of the IO task.
   cmd_run_loop.Run();
-  io_thread.message_loop()
-      ->PostTask(FROM_HERE, base::Bind(&StopServerOnIOThread));
+  io_thread.task_runner()->PostTask(FROM_HERE,
+                                    base::Bind(&StopServerOnIOThread));
 }
 
 }  // namespace

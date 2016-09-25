@@ -4,7 +4,7 @@
 
 #include "net/cert/ev_root_ca_metadata.h"
 
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
 #include <cert.h>
 #include <pkcs11n.h>
 #include <secerr.h>
@@ -15,17 +15,17 @@
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
 #include "crypto/nss_util.h"
 #endif
 
 namespace net {
 
-#if defined(USE_NSS_VERIFIER) || defined(OS_WIN)
+#if defined(USE_NSS_CERTS) || defined(OS_WIN)
 // Raw metadata.
 struct EVMetadata {
   // kMaxOIDsPerCA is the number of OIDs that we can support per root CA. At
-  // least one CA has different EV policies for businuss vs government
+  // least one CA has different EV policies for business vs government
   // entities and, in the case of cross-signing, we might need to list another
   // CA's policy OID under the cross-signing root.
   static const size_t kMaxOIDsPerCA = 2;
@@ -48,8 +48,7 @@ static const EVMetadata ev_root_ca_metadata[] = {
           0x30, 0x50, 0xba, 0x9e, 0xa8, 0x7e, 0xfe, 0x9a, 0xce, 0x3c}},
         {
             // AC Camerfirma uses the last two arcs to track how the private key
-            // is
-            // managed - the effective verification policy is the same.
+            // is managed - the effective verification policy is the same.
             "1.3.6.1.4.1.17326.10.14.2.1.2", "1.3.6.1.4.1.17326.10.14.2.2.2",
         },
     },
@@ -60,8 +59,7 @@ static const EVMetadata ev_root_ca_metadata[] = {
           0xc7, 0x52, 0xa1, 0x2c, 0x5b, 0x29, 0xf6, 0xd6, 0xaa, 0x0c}},
         {
             // AC Camerfirma uses the last two arcs to track how the private key
-            // is
-            // managed - the effective verification policy is the same.
+            // is managed - the effective verification policy is the same.
             "1.3.6.1.4.1.17326.10.8.12.1.2", "1.3.6.1.4.1.17326.10.8.12.2.2",
         },
     },
@@ -582,7 +580,7 @@ EVRootCAMetadata* EVRootCAMetadata::GetInstance() {
   return g_ev_root_ca_metadata.Pointer();
 }
 
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
 bool EVRootCAMetadata::IsEVPolicyOID(PolicyOID policy_oid) const {
   return policy_oids_.find(policy_oid) != policy_oids_.end();
 }
@@ -673,7 +671,7 @@ bool EVRootCAMetadata::IsEVPolicyOID(PolicyOID policy_oid) const {
 bool EVRootCAMetadata::HasEVPolicyOID(const SHA1HashValue& fingerprint,
                                       PolicyOID policy_oid) const {
   for (size_t i = 0; i < arraysize(ev_root_ca_metadata); i++) {
-    if (!fingerprint.Equals(ev_root_ca_metadata[i].fingerprint))
+    if (fingerprint != ev_root_ca_metadata[i].fingerprint)
       continue;
     for (size_t j = 0; j < arraysize(ev_root_ca_metadata[i].policy_oids); j++) {
       if (ev_root_ca_metadata[i].policy_oids[j][0] == '\0')
@@ -691,7 +689,7 @@ bool EVRootCAMetadata::HasEVPolicyOID(const SHA1HashValue& fingerprint,
 bool EVRootCAMetadata::AddEVCA(const SHA1HashValue& fingerprint,
                                const char* policy) {
   for (size_t i = 0; i < arraysize(ev_root_ca_metadata); i++) {
-    if (fingerprint.Equals(ev_root_ca_metadata[i].fingerprint))
+    if (fingerprint == ev_root_ca_metadata[i].fingerprint)
       return false;
   }
 
@@ -728,7 +726,7 @@ bool EVRootCAMetadata::RemoveEVCA(const SHA1HashValue& fingerprint) {
 
 EVRootCAMetadata::EVRootCAMetadata() {
   // Constructs the object from the raw metadata in ev_root_ca_metadata.
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
   crypto::EnsureNSSInit();
 
   for (size_t i = 0; i < arraysize(ev_root_ca_metadata); i++) {

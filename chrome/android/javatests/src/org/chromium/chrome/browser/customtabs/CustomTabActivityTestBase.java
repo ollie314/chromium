@@ -61,7 +61,7 @@ public abstract class CustomTabActivityTestBase extends
         final CallbackHelper pageLoadFinishedHelper = new CallbackHelper();
         tab.addObserver(new EmptyTabObserver() {
             @Override
-            public void onPageLoadFinished(Tab tab) {
+            public void onLoadStopped(Tab tab, boolean toDifferentDocument) {
                 pageLoadFinishedHelper.notifyCalled();
             }
         });
@@ -73,7 +73,7 @@ public abstract class CustomTabActivityTestBase extends
         CriteriaHelper.pollUiThread(new Criteria("Deferred startup never completed") {
             @Override
             public boolean isSatisfied() {
-                return DeferredStartupHandler.getInstance().isDeferredStartupComplete();
+                return DeferredStartupHandler.getInstance().isDeferredStartupCompleteForApp();
             }
         }, 5000, 200);
         assertNotNull(tab);

@@ -25,6 +25,7 @@
 #include "core/layout/api/SelectionState.h"
 #include "core/layout/line/InlineBox.h"
 #include "core/style/ShadowData.h"
+#include <memory>
 
 namespace blink {
 
@@ -92,9 +93,10 @@ public:
     InlineBox* firstLeafChild() const;
     InlineBox* lastLeafChild() const;
 
-    typedef void (*CustomInlineBoxRangeReverse)(void* userData, Vector<InlineBox*>::iterator first, Vector<InlineBox*>::iterator last);
-    void collectLeafBoxesInLogicalOrder(Vector<InlineBox*>&, CustomInlineBoxRangeReverse customReverseImplementation = 0, void* userData = nullptr) const;
+    typedef void (*CustomInlineBoxRangeReverse)(Vector<InlineBox*>::iterator first, Vector<InlineBox*>::iterator last);
+    void collectLeafBoxesInLogicalOrder(Vector<InlineBox*>&, CustomInlineBoxRangeReverse customReverseImplementation = 0) const;
 
+    DISABLE_CFI_PERF
     void setConstructed() final
     {
         InlineBox::setConstructed();
@@ -154,13 +156,13 @@ public:
     {
         if (!includeLogicalLeftEdge())
             return 0;
-        return isHorizontal() ? boxModelObject().paddingLeft() : boxModelObject().paddingTop();
+        return (isHorizontal() ? boxModelObject().paddingLeft() : boxModelObject().paddingTop()).toInt();
     }
     int paddingLogicalRight() const
     {
         if (!includeLogicalRightEdge())
             return 0;
-        return isHorizontal() ? boxModelObject().paddingRight() : boxModelObject().paddingBottom();
+        return (isHorizontal() ? boxModelObject().paddingRight() : boxModelObject().paddingBottom()).toInt();
     }
 
     bool includeLogicalLeftEdge() const { return m_includeLogicalLeftEdge; }
@@ -310,7 +312,7 @@ private:
     void setOverflowFromLogicalRects(const LayoutRect& logicalLayoutOverflow, const LayoutRect& logicalVisualOverflow, LayoutUnit lineTop, LayoutUnit lineBottom);
 
 protected:
-    OwnPtr<OverflowModel> m_overflow;
+    std::unique_ptr<SimpleOverflowModel> m_overflow;
 
     bool isInlineFlowBox() const final { return true; }
 

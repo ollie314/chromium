@@ -89,11 +89,11 @@
   width: 32px;
 }
 
-#danger-icon[icon='warning'] {
+#danger-icon[icon='cr:warning'] {
   color: rgb(255, 193, 7);
 }
 
-#danger-icon[icon='remove-circle'] {
+#danger-icon[icon='downloads:remove-circle'] {
   color: rgb(244, 67, 54);
 }
 
@@ -113,8 +113,8 @@
   -webkit-margin-end: 12px;  /* Only really affects #tag. */
 }
 
-#resume,
-.is-active :-webkit-any(#name, #file-link, #pause, #show) {
+#pause-or-resume,
+.is-active :-webkit-any(#name, #file-link, #show) {
   color: rgb(51, 103, 214);
 }
 
@@ -197,10 +197,9 @@
 #remove {
   color: #969696;
   font-size: 16px;
-  height: 16px;
+  height: 32px;
   line-height: 17px;  /* TODO(dbeam): why is this necesssary? */
-  padding: 8px;
-  width: 16px;
+  width: 32px;
 }
 
 #incognito {

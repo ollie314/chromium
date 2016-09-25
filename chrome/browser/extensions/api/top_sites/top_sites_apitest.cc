@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 
+#include "base/run_loop.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/top_sites/top_sites_api.h"
@@ -38,11 +39,12 @@ class TopSitesExtensionTest : public InProcessBrowserTest {
     // before we get to the conditional below. Otherwise, we'll run a nested
     // message loop until the async callback.
     top_sites->GetMostVisitedURLs(
-        base::Bind(&TopSitesExtensionTest::OnTopSitesAvailable, this), false);
+        base::Bind(&TopSitesExtensionTest::OnTopSitesAvailable,
+                   base::Unretained(this)), false);
 
     if (!top_sites_inited_) {
       waiting_ = true;
-      base::MessageLoop::current()->Run();
+      base::RunLoop().Run();
     }
 
     // By this point, we know topsites has loaded. We can run the tests now.

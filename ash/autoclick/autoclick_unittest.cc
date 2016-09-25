@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "ash/autoclick/autoclick_controller.h"
+#include "ash/display/display_manager.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ui/aura/test/test_window_delegate.h"
@@ -22,9 +23,7 @@ class MouseEventCapturer : public ui::EventHandler {
   MouseEventCapturer() { Reset(); }
   ~MouseEventCapturer() override {}
 
-  void Reset() {
-    events_.clear();
-  }
+  void Reset() { events_.clear(); }
 
   void OnMouseEvent(ui::MouseEvent* event) override {
     if (!(event->flags() & ui::EF_LEFT_MOUSE_BUTTON))
@@ -48,9 +47,7 @@ class MouseEventCapturer : public ui::EventHandler {
     ASSERT_LT(events_.size(), 100u);
   }
 
-  const std::vector<ui::MouseEvent>& captured_events() const {
-    return events_;
-  }
+  const std::vector<ui::MouseEvent>& captured_events() const { return events_; }
 
  private:
   std::vector<ui::MouseEvent> events_;
@@ -66,10 +63,15 @@ class AutoclickTest : public test::AshTestBase {
   void SetUp() override {
     test::AshTestBase::SetUp();
     Shell::GetInstance()->AddPreTargetHandler(&mouse_event_capturer_);
-    GetAutoclickController()->SetAutoclickDelay(0);
+    GetAutoclickController()->SetAutoclickDelay(base::TimeDelta());
 
     // Move mouse to deterministic location at the start of each test.
     GetEventGenerator().MoveMouseTo(100, 100);
+
+    // Make sure the display is initialized so we don't fail the test due to any
+    // input events caused from creating the display.
+    Shell::GetInstance()->display_manager()->UpdateDisplays();
+    RunAllPendingInMessageLoop();
   }
 
   void TearDown() override {
@@ -165,7 +167,7 @@ TEST_F(AutoclickTest, MovementThreshold) {
   EXPECT_EQ(2u, root_windows.size());
 
   // Run test for the secondary display too to test fix for crbug.com/449870.
-  for (const auto& root_window : root_windows) {
+  for (auto* root_window : root_windows) {
     gfx::Point center = root_window->GetBoundsInScreen().CenterPoint();
 
     GetAutoclickController()->SetEnabled(true);
@@ -214,7 +216,8 @@ TEST_F(AutoclickTest, KeyModifiersReleased) {
   MoveMouseWithFlagsTo(12, 12, modifier_flags);
 
   // Simulate releasing key modifiers by sending key released events.
-  GetEventGenerator().ReleaseKey(ui::VKEY_CONTROL,
+  GetEventGenerator().ReleaseKey(
+      ui::VKEY_CONTROL,
       static_cast<ui::EventFlags>(ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN));
   GetEventGenerator().ReleaseKey(ui::VKEY_SHIFT, ui::EF_ALT_DOWN);
 
@@ -253,18 +256,16 @@ TEST_F(AutoclickTest, UserInputCancelsAutoclick) {
   // Test another gesture.
   GetEventGenerator().MoveMouseTo(100, 100);
   GetEventGenerator().GestureScrollSequence(
-      gfx::Point(100, 100),
-      gfx::Point(200, 200),
-      base::TimeDelta::FromMilliseconds(200),
-      3);
+      gfx::Point(100, 100), gfx::Point(200, 200),
+      base::TimeDelta::FromMilliseconds(200), 3);
   events = WaitForMouseEvents();
   EXPECT_EQ(0u, events.size());
 
   // Test scroll events.
   GetEventGenerator().MoveMouseTo(200, 200);
-  GetEventGenerator().ScrollSequence(
-      gfx::Point(100, 100), base::TimeDelta::FromMilliseconds(200),
-      0, 100, 3, 2);
+  GetEventGenerator().ScrollSequence(gfx::Point(100, 100),
+                                     base::TimeDelta::FromMilliseconds(200), 0,
+                                     100, 3, 2);
   events = WaitForMouseEvents();
   EXPECT_EQ(0u, events.size());
 }

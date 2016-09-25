@@ -15,8 +15,8 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
@@ -29,6 +29,7 @@
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
+#include "content/browser/renderer_host/text_input_manager.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_contents/web_contents_view.h"
@@ -42,6 +43,7 @@
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -61,7 +63,7 @@ class InterstitialPageImpl::InterstitialPageRVHDelegateView
   explicit InterstitialPageRVHDelegateView(InterstitialPageImpl* page);
 
   // RenderViewHostDelegateView implementation:
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
+#if defined(USE_EXTERNAL_POPUP_MENU)
   void ShowPopupMenu(RenderFrameHost* render_frame_host,
                      const gfx::Rect& bounds,
                      int item_height,
@@ -296,11 +298,8 @@ void InterstitialPageImpl::Hide() {
   controller_->delegate()->DetachInterstitialPage();
   // Let's revert to the original title if necessary.
   NavigationEntry* entry = controller_->GetVisibleEntry();
-  if (entry && !new_navigation_ && should_revert_web_contents_title_) {
-    entry->SetTitle(original_web_contents_title_);
-    controller_->delegate()->NotifyNavigationStateChanged(
-        INVALIDATE_TYPE_TITLE);
-  }
+  if (entry && !new_navigation_ && should_revert_web_contents_title_)
+    web_contents_->UpdateTitleForEntry(entry, original_web_contents_title_);
 
   static_cast<WebContentsImpl*>(web_contents_)->DidChangeVisibleSSLState();
 
@@ -409,8 +408,7 @@ void InterstitialPageImpl::UpdateTitle(
   }
   // TODO(evan): make use of title_direction.
   // http://code.google.com/p/chromium/issues/detail?id=27094
-  entry->SetTitle(title);
-  controller_->delegate()->NotifyNavigationStateChanged(INVALIDATE_TYPE_TITLE);
+  web_contents_->UpdateTitleForEntry(entry, title);
 }
 
 InterstitialPage* InterstitialPageImpl::GetAsInterstitialPage() {
@@ -667,7 +665,7 @@ void InterstitialPageImpl::DontProceed() {
 
   if (should_discard_pending_nav_entry_) {
     // Since no navigation happens we have to discard the transient entry
-    // explicitely.  Note that by calling DiscardNonCommittedEntries() we also
+    // explicitly.  Note that by calling DiscardNonCommittedEntries() we also
     // discard the pending entry, which is what we want, since the navigation is
     // cancelled.
     controller_->DiscardNonCommittedEntries();
@@ -759,19 +757,22 @@ void InterstitialPageImpl::CreateNewFullscreenWidget(int32_t render_process_id,
       << "InterstitialPage does not support showing full screen popups.";
 }
 
-void InterstitialPageImpl::ShowCreatedWindow(int route_id,
+void InterstitialPageImpl::ShowCreatedWindow(int process_id,
+                                             int route_id,
                                              WindowOpenDisposition disposition,
                                              const gfx::Rect& initial_rect,
                                              bool user_gesture) {
   NOTREACHED() << "InterstitialPage does not support showing popups yet.";
 }
 
-void InterstitialPageImpl::ShowCreatedWidget(int route_id,
+void InterstitialPageImpl::ShowCreatedWidget(int process_id,
+                                             int route_id,
                                              const gfx::Rect& initial_rect) {
   NOTREACHED() << "InterstitialPage does not support showing drop-downs yet.";
 }
 
-void InterstitialPageImpl::ShowCreatedFullscreenWidget(int route_id) {
+void InterstitialPageImpl::ShowCreatedFullscreenWidget(int process_id,
+                                                       int route_id) {
   NOTREACHED()
       << "InterstitialPage does not support showing full screen popups.";
 }
@@ -827,6 +828,12 @@ void InterstitialPageImpl::TakeActionOnResourceDispatcher(
 
   RenderFrameHostImpl* rfh =
       static_cast<RenderFrameHostImpl*>(rvh->GetMainFrame());
+  // Note, the RenderViewHost can lose its main frame if a new RenderFrameHost
+  // commits with a new RenderViewHost. Additionally, RenderViewHosts for OOPIF
+  // don't have main frames.
+  if (!rfh)
+    return;
+
   switch (action) {
     case BLOCK:
       ResourceDispatcherHost::BlockRequestsForFrameFromUI(rfh);
@@ -860,7 +867,7 @@ InterstitialPageImpl::InterstitialPageRVHDelegateView::
     : interstitial_page_(page) {
 }
 
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
+#if defined(USE_EXTERNAL_POPUP_MENU)
 void InterstitialPageImpl::InterstitialPageRVHDelegateView::ShowPopupMenu(
     RenderFrameHost* render_frame_host,
     const gfx::Rect& bounds,
@@ -929,6 +936,31 @@ void InterstitialPageImpl::UnderlyingContentObserver::NavigationEntryCommitted(
 
 void InterstitialPageImpl::UnderlyingContentObserver::WebContentsDestroyed() {
   interstitial_->OnNavigatingAwayOrTabClosing();
+}
+
+TextInputManager* InterstitialPageImpl::GetTextInputManager() {
+  return !web_contents_ ? nullptr : static_cast<WebContentsImpl*>(web_contents_)
+                                        ->GetTextInputManager();
+}
+
+void InterstitialPageImpl::GetScreenInfo(ScreenInfo* screen_info) {
+  WebContentsImpl* web_contents_impl =
+      static_cast<WebContentsImpl*>(web_contents_);
+  if (!web_contents_impl) {
+    WebContentsView::GetDefaultScreenInfo(screen_info);
+    return;
+  }
+
+  web_contents_impl->GetView()->GetScreenInfo(screen_info);
+}
+
+void InterstitialPageImpl::UpdateDeviceScaleFactor(double device_scale_factor) {
+  WebContentsImpl* web_contents_impl =
+      static_cast<WebContentsImpl*>(web_contents_);
+  if (!web_contents_impl)
+    return;
+
+  web_contents_impl->UpdateDeviceScaleFactor(device_scale_factor);
 }
 
 }  // namespace content

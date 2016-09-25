@@ -13,8 +13,6 @@ namespace blink {
 
 NodeIntersectionObserverData::NodeIntersectionObserverData() { }
 
-NodeIntersectionObserverData::~NodeIntersectionObserverData() { }
-
 IntersectionObservation* NodeIntersectionObserverData::getObservationFor(IntersectionObserver& observer)
 {
     auto i = m_intersectionObservations.find(&observer);
@@ -49,6 +47,13 @@ DEFINE_TRACE(NodeIntersectionObserverData)
 {
     visitor->trace(m_intersectionObservers);
     visitor->trace(m_intersectionObservations);
+}
+
+DEFINE_TRACE_WRAPPERS(NodeIntersectionObserverData)
+{
+    for (auto& entry : m_intersectionObservations) {
+        visitor->traceWrappers(entry.key);
+    }
 }
 
 } // namespace blink

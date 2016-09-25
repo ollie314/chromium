@@ -57,8 +57,6 @@ TestWebGraphicsContext3D::TestWebGraphicsContext3D()
       times_end_query_succeeds_(-1),
       context_lost_(false),
       times_map_buffer_chromium_succeeds_(-1),
-      current_used_transfer_buffer_usage_bytes_(0),
-      max_used_transfer_buffer_usage_bytes_(0),
       next_program_id_(1000),
       next_shader_id_(2000),
       next_framebuffer_id_(1),
@@ -76,6 +74,7 @@ TestWebGraphicsContext3D::TestWebGraphicsContext3D()
       weak_ptr_factory_(this) {
   CreateNamespace();
   set_support_image(true);
+  set_have_extension_egl_image(true);  // For stream textures.
 }
 
 TestWebGraphicsContext3D::~TestWebGraphicsContext3D() {
@@ -550,19 +549,10 @@ void TestWebGraphicsContext3D::bufferData(GLenum target,
     return;
   }
 
-  size_t old_size = buffer->size;
-
   buffer->pixels.reset(new uint8_t[size]);
   buffer->size = size;
-  if (data != NULL)
+  if (data != nullptr)
     memcpy(buffer->pixels.get(), data, size);
-  if (buffer->target == GL_PIXEL_UNPACK_TRANSFER_BUFFER_CHROMIUM)
-    current_used_transfer_buffer_usage_bytes_ +=
-        base::checked_cast<int>(buffer->size) -
-        base::checked_cast<int>(old_size);
-  max_used_transfer_buffer_usage_bytes_ =
-      std::max(max_used_transfer_buffer_usage_bytes_,
-               current_used_transfer_buffer_usage_bytes_);
 }
 
 void TestWebGraphicsContext3D::pixelStorei(GLenum pname, GLint param) {
@@ -619,7 +609,7 @@ GLuint TestWebGraphicsContext3D::createImageCHROMIUM(ClientBuffer buffer,
                                                      GLsizei width,
                                                      GLsizei height,
                                                      GLenum internalformat) {
-  DCHECK_EQ(GL_RGBA, static_cast<int>(internalformat));
+  DCHECK(internalformat == GL_RGB || internalformat == GL_RGBA);
   GLuint image_id = NextImageId();
   base::AutoLock lock(namespace_->lock);
   std::unordered_set<unsigned>& images = namespace_->images;
@@ -642,7 +632,7 @@ GLuint TestWebGraphicsContext3D::createGpuMemoryBufferImageCHROMIUM(
     GLsizei height,
     GLenum internalformat,
     GLenum usage) {
-  DCHECK_EQ(GL_RGBA, static_cast<int>(internalformat));
+  DCHECK(internalformat == GL_RGB || internalformat == GL_RGBA);
   GLuint image_id = NextImageId();
   base::AutoLock lock(namespace_->lock);
   std::unordered_set<unsigned>& images = namespace_->images;
@@ -773,14 +763,8 @@ void TestWebGraphicsContext3D::RetireRenderbufferId(GLuint id) {
   namespace_->renderbuffer_set.erase(id);
 }
 
-void TestWebGraphicsContext3D::SetMaxTransferBufferUsageBytes(
-    size_t max_transfer_buffer_usage_bytes) {
-  test_capabilities_.max_transfer_buffer_usage_bytes =
-      max_transfer_buffer_usage_bytes;
-}
-
 void TestWebGraphicsContext3D::SetMaxSamples(int max_samples) {
-  test_capabilities_.gpu.max_samples = max_samples;
+  test_capabilities_.max_samples = max_samples;
 }
 
 TestWebGraphicsContext3D::TextureTargets::TextureTargets() {

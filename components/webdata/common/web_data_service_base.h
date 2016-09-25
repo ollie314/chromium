@@ -10,7 +10,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_delete_on_message_loop.h"
-#include "base/memory/scoped_ptr.h"
 #include "components/webdata/common/webdata_export.h"
 #include "sql/init_status.h"
 
@@ -37,7 +36,8 @@ class WEBDATA_EXPORT WebDataServiceBase
   // takes a single parameter, the sql::InitStatus value from trying
   // to open the database.
   // TODO(joi): Should we combine this with WebDatabaseService::InitCallback?
-  typedef base::Callback<void(sql::InitStatus)> ProfileErrorCallback;
+  typedef base::Callback<void(sql::InitStatus, const std::string&)>
+      ProfileErrorCallback;
 
   typedef base::Closure DBLoadedCallback;
 

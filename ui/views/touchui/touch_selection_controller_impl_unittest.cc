@@ -44,8 +44,8 @@ const int kBarBottomAllowance = 3;
 // For selection bounds |b1| and |b2| in a paragraph of text, returns -1 if |b1|
 // is physically before |b2|, +1 if |b2| is before |b1|, and 0 if they are at
 // the same location.
-int CompareTextSelectionBounds(const ui::SelectionBound& b1,
-                               const ui::SelectionBound& b2) {
+int CompareTextSelectionBounds(const gfx::SelectionBound& b1,
+                               const gfx::SelectionBound& b2) {
   if (b1.edge_top().y() < b2.edge_top().y() ||
       b1.edge_top().x() < b2.edge_top().x()) {
     return -1;
@@ -97,7 +97,7 @@ class TouchSelectionControllerImplTest : public ViewsTestBase {
     textfield_widget_->SetContentsView(container);
     container->AddChildView(textfield_);
 
-    textfield_->SetBoundsRect(gfx::Rect(0, 0, 200, 20));
+    textfield_->SetBoundsRect(gfx::Rect(0, 0, 200, 21));
     textfield_->set_id(1);
     textfield_widget_->Show();
 
@@ -153,7 +153,7 @@ class TouchSelectionControllerImplTest : public ViewsTestBase {
 
     gfx::Point grip_location = gfx::Point(handle->size().width() / 2,
                                           handle->size().height() / 2);
-    base::TimeDelta time_stamp = base::TimeDelta();
+    base::TimeTicks time_stamp = base::TimeTicks();
     {
       ui::GestureEventDetails details(ui::ET_GESTURE_SCROLL_BEGIN);
       ui::GestureEvent scroll_begin(
@@ -181,6 +181,10 @@ class TouchSelectionControllerImplTest : public ViewsTestBase {
     return GetSelectionController()->GetCursorHandleNativeView();
   }
 
+  gfx::SelectionBound::Type GetSelectionHandle1Type() {
+    return GetSelectionController()->GetSelectionHandle1Type();
+  }
+
   gfx::Rect GetSelectionHandle1Bounds() {
     return GetSelectionController()->GetSelectionHandle1Bounds();
   }
@@ -193,7 +197,7 @@ class TouchSelectionControllerImplTest : public ViewsTestBase {
     return GetSelectionController()->GetCursorHandleBounds();
   }
 
-  gfx::Rect GetExpectedHandleBounds(const ui::SelectionBound& bound) {
+  gfx::Rect GetExpectedHandleBounds(const gfx::SelectionBound& bound) {
     return GetSelectionController()->GetExpectedHandleBounds(bound);
   }
 
@@ -231,7 +235,7 @@ class TouchSelectionControllerImplTest : public ViewsTestBase {
   void VerifyHandlePositions(bool cursor_at_selection_handle_1,
                              bool check_direction,
                              const tracked_objects::Location& from_here) {
-    ui::SelectionBound anchor, focus;
+    gfx::SelectionBound anchor, focus;
     textfield_->GetSelectionEndPoints(&anchor, &focus);
     std::string from_str = from_here.ToString();
     if (textfield_->HasSelection()) {
@@ -257,16 +261,46 @@ class TouchSelectionControllerImplTest : public ViewsTestBase {
     }
     if (check_direction)  {
       if (CompareTextSelectionBounds(anchor, focus) < 0) {
-        EXPECT_EQ(ui::SelectionBound::LEFT, anchor.type()) << from_str;
-        EXPECT_EQ(ui::SelectionBound::RIGHT, focus.type())  << from_str;
+        EXPECT_EQ(gfx::SelectionBound::LEFT, anchor.type()) << from_str;
+        EXPECT_EQ(gfx::SelectionBound::RIGHT, focus.type()) << from_str;
       } else if (CompareTextSelectionBounds(anchor, focus) > 0) {
-        EXPECT_EQ(ui::SelectionBound::LEFT, focus.type())  << from_str;
-        EXPECT_EQ(ui::SelectionBound::RIGHT, anchor.type())  << from_str;
+        EXPECT_EQ(gfx::SelectionBound::LEFT, focus.type()) << from_str;
+        EXPECT_EQ(gfx::SelectionBound::RIGHT, anchor.type()) << from_str;
       } else {
-        EXPECT_EQ(ui::SelectionBound::CENTER, focus.type()) << from_str;
-        EXPECT_EQ(ui::SelectionBound::CENTER, anchor.type()) << from_str;
+        EXPECT_EQ(gfx::SelectionBound::CENTER, focus.type()) << from_str;
+        EXPECT_EQ(gfx::SelectionBound::CENTER, anchor.type()) << from_str;
       }
     }
+  }
+
+  // Sets up a textfield with a long text string such that it doesn't all fit
+  // into the textfield. Then selects the text - the first handle is expected
+  // to be invisible. |selection_start| is the position of the first handle.
+  void SetupSelectionInvisibleHandle(uint32_t selection_start) {
+    // Create a textfield with lots of text in it.
+    CreateTextfield();
+    std::string some_text("some text");
+    std::string textfield_text;
+    for (int i = 0; i < 10; ++i)
+      textfield_text += some_text;
+    textfield_->SetText(ASCIIToUTF16(textfield_text));
+
+    // Tap the textfield to invoke selection.
+    ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
+    details.set_tap_count(1);
+    ui::GestureEvent tap(0, 0, 0, base::TimeTicks(), details);
+    textfield_->OnGestureEvent(&tap);
+
+    // Select some text such that one handle is hidden.
+    textfield_->SelectRange(gfx::Range(
+        selection_start, static_cast<uint32_t>(textfield_text.length())));
+
+    // Check that one selection handle is hidden.
+    EXPECT_FALSE(IsSelectionHandle1Visible());
+    EXPECT_TRUE(IsSelectionHandle2Visible());
+    EXPECT_EQ(gfx::Range(selection_start,
+                         static_cast<uint32_t>(textfield_text.length())),
+              textfield_->GetSelectedRange());
   }
 
   Widget* textfield_widget_;
@@ -289,7 +323,7 @@ TEST_F(TouchSelectionControllerImplTest, SelectionInTextfieldTest) {
   // Tap the textfield to invoke touch selection.
   ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
   details.set_tap_count(1);
-  ui::GestureEvent tap(0, 0, 0, base::TimeDelta(), details);
+  ui::GestureEvent tap(0, 0, 0, base::TimeTicks(), details);
   textfield_->OnGestureEvent(&tap);
 
   // Test selecting a range.
@@ -322,7 +356,7 @@ TEST_F(TouchSelectionControllerImplTest, SelectionInBidiTextfieldTest) {
   // Tap the textfield to invoke touch selection.
   ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
   details.set_tap_count(1);
-  ui::GestureEvent tap(0, 0, 0, base::TimeDelta(), details);
+  ui::GestureEvent tap(0, 0, 0, base::TimeTicks(), details);
   textfield_->OnGestureEvent(&tap);
 
   // Test cursor at run boundary and with empty selection.
@@ -374,7 +408,7 @@ TEST_F(TouchSelectionControllerImplTest, SelectRectCallbackTest) {
   // Tap the textfield to invoke touch selection.
   ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
   details.set_tap_count(1);
-  ui::GestureEvent tap(0, 0, 0, base::TimeDelta(), details);
+  ui::GestureEvent tap(0, 0, 0, base::TimeTicks(), details);
   textfield_->OnGestureEvent(&tap);
   textfield_->SelectRange(gfx::Range(3, 7));
 
@@ -416,7 +450,7 @@ TEST_F(TouchSelectionControllerImplTest, SelectRectInBidiCallbackTest) {
   // Tap the textfield to invoke touch selection.
   ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
   details.set_tap_count(1);
-  ui::GestureEvent tap(0, 0, 0, base::TimeDelta(), details);
+  ui::GestureEvent tap(0, 0, 0, base::TimeTicks(), details);
   textfield_->OnGestureEvent(&tap);
 
   // Select [c] from left to right.
@@ -539,30 +573,8 @@ TEST_F(TouchSelectionControllerImplTest, SelectRectInBidiCallbackTest) {
 
 TEST_F(TouchSelectionControllerImplTest,
        HiddenSelectionHandleRetainsCursorPosition) {
-  // Create a textfield with lots of text in it.
-  CreateTextfield();
-  std::string textfield_text("some text");
-  for (int i = 0; i < 10; ++i)
-    textfield_text += textfield_text;
-  textfield_->SetText(ASCIIToUTF16(textfield_text));
-
-  // Tap the textfield to invoke selection.
-  ui::GestureEventDetails details(ui::ET_GESTURE_TAP);
-  details.set_tap_count(1);
-  ui::GestureEvent tap(0, 0, 0, base::TimeDelta(), details);
-  textfield_->OnGestureEvent(&tap);
-
-  // Select some text such that one handle is hidden.
-  textfield_->SelectRange(
-      gfx::Range(10u, static_cast<uint32_t>(textfield_text.length())));
-
-  // Check that one selection handle is hidden.
-  EXPECT_FALSE(IsSelectionHandle1Visible());
-  EXPECT_TRUE(IsSelectionHandle2Visible());
-  EXPECT_EQ(
-      gfx::Range(10u, static_cast<uint32_t>(textfield_text.length())),
-      textfield_->GetSelectedRange());
-
+  static const uint32_t selection_start = 10u;
+  SetupSelectionInvisibleHandle(selection_start);
   // Drag the visible handle around and make sure the selection end point of the
   // invisible handle does not change.
   size_t visible_handle_position = textfield_->GetSelectedRange().end();
@@ -574,6 +586,24 @@ TEST_F(TouchSelectionControllerImplTest,
     visible_handle_position = textfield_->GetSelectedRange().end();
     EXPECT_EQ((size_t) 10, textfield_->GetSelectedRange().start());
   }
+}
+
+// Tests that we can handle the hidden handle getting exposed as a result of a
+// drag and that it maintains the correct orientation when exposed.
+TEST_F(TouchSelectionControllerImplTest, HiddenSelectionHandleExposed) {
+  static const uint32_t selection_start = 0u;
+  SetupSelectionInvisibleHandle(selection_start);
+
+  // Drag the handle until the selection shrinks such that the other handle
+  // becomes visible.
+  while (!IsSelectionHandle1Visible()) {
+    static const int drag_diff = -10;
+    SimulateSelectionHandleDrag(gfx::Vector2d(drag_diff, 0), 2);
+  }
+
+  // Confirm that the exposed handle maintains the LEFT orientation
+  // (and does not reset to gfx::SelectionBound::Type::CENTER).
+  EXPECT_EQ(gfx::SelectionBound::Type::LEFT, GetSelectionHandle1Type());
 }
 
 TEST_F(TouchSelectionControllerImplTest,
@@ -615,7 +645,7 @@ class TestTouchEditable : public ui::TouchEditable {
 
   void set_cursor_rect(const gfx::RectF& cursor_rect) {
     cursor_bound_.SetEdge(cursor_rect.origin(), cursor_rect.bottom_left());
-    cursor_bound_.set_type(ui::SelectionBound::Type::CENTER);
+    cursor_bound_.set_type(gfx::SelectionBound::Type::CENTER);
   }
 
   ~TestTouchEditable() override {}
@@ -626,8 +656,8 @@ class TestTouchEditable : public ui::TouchEditable {
     NOTREACHED();
   }
   void MoveCaretTo(const gfx::Point& point) override { NOTREACHED(); }
-  void GetSelectionEndPoints(ui::SelectionBound* anchor,
-                             ui::SelectionBound* focus) override {
+  void GetSelectionEndPoints(gfx::SelectionBound* anchor,
+                             gfx::SelectionBound* focus) override {
     *anchor = *focus = cursor_bound_;
   }
   gfx::Rect GetBounds() override { return gfx::Rect(bounds_.size()); }
@@ -657,11 +687,6 @@ class TestTouchEditable : public ui::TouchEditable {
     NOTREACHED();
     return false;
   }
-  bool GetAcceleratorForCommandId(int command_id,
-                                  ui::Accelerator* accelerator) override {
-    NOTREACHED();
-    return false;
-  }
   void ExecuteCommand(int command_id, int event_flags) override {
     NOTREACHED();
   }
@@ -673,7 +698,7 @@ class TestTouchEditable : public ui::TouchEditable {
 
   // Cursor position inside the client view.
   //gfx::Rect cursor_rect_;
-  ui::SelectionBound cursor_bound_;
+  gfx::SelectionBound cursor_bound_;
 
   DISALLOW_COPY_AND_ASSIGN(TestTouchEditable);
 };
@@ -820,7 +845,7 @@ TEST_F(TouchSelectionControllerImplTest, MouseCaptureChangedEventIgnored) {
   StartTouchEditing();
   EXPECT_TRUE(GetSelectionController());
   ui::MouseEvent capture_changed(ui::ET_MOUSE_CAPTURE_CHANGED, gfx::Point(5, 5),
-                                 gfx::Point(5, 5), base::TimeDelta(), 0, 0);
+                                 gfx::Point(5, 5), base::TimeTicks(), 0, 0);
   generator.Dispatch(&capture_changed);
   RunPendingMessages();
   EXPECT_TRUE(GetSelectionController());

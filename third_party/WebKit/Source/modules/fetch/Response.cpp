@@ -13,8 +13,10 @@
 #include "bindings/core/v8/V8Blob.h"
 #include "bindings/core/v8/V8FormData.h"
 #include "bindings/core/v8/V8HiddenValue.h"
+#include "bindings/core/v8/V8URLSearchParams.h"
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/DOMArrayBufferView.h"
+#include "core/dom/URLSearchParams.h"
 #include "core/fileapi/Blob.h"
 #include "core/html/FormData.h"
 #include "core/streams/ReadableStreamOperations.h"
@@ -24,17 +26,17 @@
 #include "modules/fetch/FetchFormDataConsumerHandle.h"
 #include "modules/fetch/ReadableStreamDataConsumerHandle.h"
 #include "modules/fetch/ResponseInit.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/network/EncodedFormData.h"
 #include "platform/network/HTTPHeaderMap.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponse.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
 namespace {
 
-FetchResponseData* createFetchResponseDataFromWebResponse(ExecutionContext* executionContext, const WebServiceWorkerResponse& webResponse)
+FetchResponseData* createFetchResponseDataFromWebResponse(ScriptState* scriptState, const WebServiceWorkerResponse& webResponse)
 {
     FetchResponseData* response = nullptr;
     if (webResponse.status() > 0)
@@ -52,16 +54,20 @@ FetchResponseData* createFetchResponseDataFromWebResponse(ExecutionContext* exec
         response->headerList()->append(i->key, i->value);
     }
 
-    response->replaceBodyStreamBuffer(new BodyStreamBuffer(FetchBlobDataConsumerHandle::create(executionContext, webResponse.blobDataHandle())));
+    response->replaceBodyStreamBuffer(new BodyStreamBuffer(scriptState, FetchBlobDataConsumerHandle::create(scriptState->getExecutionContext(), webResponse.blobDataHandle())));
 
     // Filter the response according to |webResponse|'s ResponseType.
     switch (webResponse.responseType()) {
     case WebServiceWorkerResponseTypeBasic:
         response = response->createBasicFilteredResponse();
         break;
-    case WebServiceWorkerResponseTypeCORS:
-        response = response->createCORSFilteredResponse();
+    case WebServiceWorkerResponseTypeCORS: {
+        HTTPHeaderSet headerNames;
+        for (const auto& header : webResponse.corsExposedHeaderNames())
+            headerNames.add(String(header));
+        response = response->createCORSFilteredResponse(headerNames);
         break;
+    }
     case WebServiceWorkerResponseTypeOpaque:
         response = response->createOpaqueFilteredResponse();
         break;
@@ -109,7 +115,7 @@ bool isValidReasonPhrase(const String& statusText)
 
 Response* Response::create(ScriptState* scriptState, ExceptionState& exceptionState)
 {
-    return create(scriptState->getExecutionContext(), nullptr, String(), ResponseInit(), exceptionState);
+    return create(scriptState, nullptr, String(), ResponseInit(), exceptionState);
 }
 
 Response* Response::create(ScriptState* scriptState, ScriptValue bodyValue, const Dictionary& init, ExceptionState& exceptionState)
@@ -119,44 +125,39 @@ Response* Response::create(ScriptState* scriptState, ScriptValue bodyValue, cons
     v8::Isolate* isolate = scriptState->isolate();
     ExecutionContext* executionContext = scriptState->getExecutionContext();
 
-    OwnPtr<FetchDataConsumerHandle> bodyHandle;
+    BodyStreamBuffer* bodyBuffer = nullptr;
     String contentType;
     if (bodyValue.isUndefined() || bodyValue.isNull()) {
         // Note: The IDL processor cannot handle this situation. See
         // https://crbug.com/335871.
     } else if (V8Blob::hasInstance(body, isolate)) {
         Blob* blob = V8Blob::toImpl(body.As<v8::Object>());
-        bodyHandle = FetchBlobDataConsumerHandle::create(executionContext, blob->blobDataHandle());
+        bodyBuffer = new BodyStreamBuffer(scriptState, FetchBlobDataConsumerHandle::create(executionContext, blob->blobDataHandle()));
         contentType = blob->type();
-    } else if (V8ArrayBuffer::hasInstance(body, isolate)) {
-        bodyHandle = FetchFormDataConsumerHandle::create(V8ArrayBuffer::toImpl(body.As<v8::Object>()));
-    } else if (V8ArrayBufferView::hasInstance(body, isolate)) {
-        bodyHandle = FetchFormDataConsumerHandle::create(V8ArrayBufferView::toImpl(body.As<v8::Object>()));
+    } else if (body->IsArrayBuffer()) {
+        bodyBuffer = new BodyStreamBuffer(scriptState, FetchFormDataConsumerHandle::create(V8ArrayBuffer::toImpl(body.As<v8::Object>())));
+    } else if (body->IsArrayBufferView()) {
+        bodyBuffer = new BodyStreamBuffer(scriptState, FetchFormDataConsumerHandle::create(V8ArrayBufferView::toImpl(body.As<v8::Object>())));
     } else if (V8FormData::hasInstance(body, isolate)) {
         RefPtr<EncodedFormData> formData = V8FormData::toImpl(body.As<v8::Object>())->encodeMultiPartFormData();
         // Here we handle formData->boundary() as a C-style string. See
         // FormDataEncoder::generateUniqueBoundaryString.
         contentType = AtomicString("multipart/form-data; boundary=") + formData->boundary().data();
-        bodyHandle = FetchFormDataConsumerHandle::create(executionContext, formData.release());
-    } else if (RuntimeEnabledFeatures::responseConstructedWithReadableStreamEnabled() && ReadableStreamOperations::isReadableStream(scriptState, bodyValue)) {
-        bodyHandle = ReadableStreamDataConsumerHandle::create(scriptState, bodyValue);
-        reader = ReadableStreamOperations::getReader(scriptState, bodyValue, exceptionState);
-        if (exceptionState.hadException()) {
-            reader = ScriptValue();
-            bodyHandle = createFetchDataConsumerHandleFromWebHandle(createUnexpectedErrorDataConsumerHandle());
-            exceptionState.clearException();
-        } else {
-            bodyHandle = ReadableStreamDataConsumerHandle::create(scriptState, reader);
-        }
+        bodyBuffer = new BodyStreamBuffer(scriptState, FetchFormDataConsumerHandle::create(executionContext, formData.release()));
+    } else if (V8URLSearchParams::hasInstance(body, isolate)) {
+        RefPtr<EncodedFormData> formData = V8URLSearchParams::toImpl(body.As<v8::Object>())->toEncodedFormData();
+        bodyBuffer = new BodyStreamBuffer(scriptState, FetchFormDataConsumerHandle::create(executionContext, formData.release()));
+        contentType = "application/x-www-form-urlencoded;charset=UTF-8";
+    } else if (ReadableStreamOperations::isReadableStream(scriptState, bodyValue)) {
+        bodyBuffer = new BodyStreamBuffer(scriptState, bodyValue);
     } else {
         String string = toUSVString(isolate, body, exceptionState);
         if (exceptionState.hadException())
             return nullptr;
-        bodyHandle = FetchFormDataConsumerHandle::create(string);
+        bodyBuffer = new BodyStreamBuffer(scriptState, FetchFormDataConsumerHandle::create(string));
         contentType = "text/plain;charset=UTF-8";
     }
-    // TODO(yhirano): Add the URLSearchParams case.
-    Response* response = create(executionContext, bodyHandle.release(), contentType, ResponseInit(init, exceptionState), exceptionState);
+    Response* response = create(scriptState, bodyBuffer, contentType, ResponseInit(init, exceptionState), exceptionState);
     if (!exceptionState.hadException() && !reader.isEmpty()) {
         // Add a hidden reference so that the weak persistent in the
         // ReadableStreamDataConsumerHandle will be valid as long as the
@@ -172,7 +173,7 @@ Response* Response::create(ScriptState* scriptState, ScriptValue bodyValue, cons
     return response;
 }
 
-Response* Response::create(ExecutionContext* context, PassOwnPtr<FetchDataConsumerHandle> bodyHandle, const String& contentType, const ResponseInit& init, ExceptionState& exceptionState)
+Response* Response::create(ScriptState* scriptState, BodyStreamBuffer* body, const String& contentType, const ResponseInit& init, ExceptionState& exceptionState)
 {
     unsigned short status = init.status;
 
@@ -192,7 +193,7 @@ Response* Response::create(ExecutionContext* context, PassOwnPtr<FetchDataConsum
 
     // "3. Let |r| be a new Response object, associated with a new response,
     // Headers object, and Body object."
-    Response* r = new Response(context);
+    Response* r = new Response(scriptState->getExecutionContext());
 
     // "4. Set |r|'s response's status to |init|'s status member."
     r->m_response->setStatus(init.status);
@@ -219,7 +220,7 @@ Response* Response::create(ExecutionContext* context, PassOwnPtr<FetchDataConsum
             return nullptr;
     }
     // "7. If body is given, run these substeps:"
-    if (bodyHandle) {
+    if (body) {
         // "1. If |init|'s status member is a null body status, throw a
         //     TypeError."
         // "2. Let |stream| and |Content-Type| be the result of extracting
@@ -236,7 +237,8 @@ Response* Response::create(ExecutionContext* context, PassOwnPtr<FetchDataConsum
             exceptionState.throwTypeError("Response with null body status cannot have body");
             return nullptr;
         }
-        r->m_response->replaceBodyStreamBuffer(new BodyStreamBuffer(bodyHandle));
+        r->m_response->replaceBodyStreamBuffer(body);
+        r->refreshBody(scriptState);
         if (!contentType.isEmpty() && !r->m_response->headerList()->has("Content-Type"))
             r->m_response->headerList()->append("Content-Type", contentType);
     }
@@ -254,10 +256,10 @@ Response* Response::create(ExecutionContext* context, FetchResponseData* respons
     return new Response(context, response);
 }
 
-Response* Response::create(ExecutionContext* context, const WebServiceWorkerResponse& webResponse)
+Response* Response::create(ScriptState* scriptState, const WebServiceWorkerResponse& webResponse)
 {
-    FetchResponseData* responseData = createFetchResponseDataFromWebResponse(context, webResponse);
-    return new Response(context, responseData);
+    FetchResponseData* responseData = createFetchResponseDataFromWebResponse(scriptState, webResponse);
+    return new Response(scriptState->getExecutionContext(), responseData);
 }
 
 Response* Response::error(ExecutionContext* context)
@@ -347,14 +349,15 @@ Headers* Response::headers() const
     return m_headers;
 }
 
-Response* Response::clone(ExceptionState& exceptionState)
+Response* Response::clone(ScriptState* scriptState, ExceptionState& exceptionState)
 {
     if (isBodyLocked() || bodyUsed()) {
         exceptionState.throwTypeError("Response body is already used");
         return nullptr;
     }
 
-    FetchResponseData* response = m_response->clone(getExecutionContext());
+    FetchResponseData* response = m_response->clone(scriptState);
+    refreshBody(scriptState);
     Headers* headers = Headers::create(response->headerList());
     headers->setGuard(m_headers->getGuard());
     return new Response(getExecutionContext(), response, headers);
@@ -371,35 +374,26 @@ bool Response::hasPendingActivity() const
     return Body::hasPendingActivity();
 }
 
-void Response::stop()
-{
-    if (m_response->internalBuffer())
-        m_response->internalBuffer()->stop();
-}
-
 void Response::populateWebServiceWorkerResponse(WebServiceWorkerResponse& response)
 {
     m_response->populateWebServiceWorkerResponse(response);
 }
 
-Response::Response(ExecutionContext* context)
-    : Body(context)
-    , m_response(FetchResponseData::create())
-    , m_headers(Headers::create(m_response->headerList()))
-{
-    m_headers->setGuard(Headers::ResponseGuard);
-}
+Response::Response(ExecutionContext* context) : Response(context, FetchResponseData::create()) {}
 
 Response::Response(ExecutionContext* context, FetchResponseData* response)
-    : Body(context)
-    , m_response(response)
-    , m_headers(Headers::create(m_response->headerList()))
+    : Response(context, response, Headers::create(response->headerList()))
 {
     m_headers->setGuard(Headers::ResponseGuard);
 }
 
 Response::Response(ExecutionContext* context, FetchResponseData* response, Headers* headers)
-    : Body(context) , m_response(response) , m_headers(headers) {}
+    : Body(context)
+    , m_response(response)
+    , m_headers(headers)
+{
+    installBody();
+}
 
 bool Response::hasBody() const
 {
@@ -419,6 +413,28 @@ String Response::mimeType() const
 String Response::internalMIMEType() const
 {
     return m_response->internalMIMEType();
+}
+
+void Response::installBody()
+{
+    if (!internalBodyBuffer())
+        return;
+    refreshBody(internalBodyBuffer()->scriptState());
+}
+
+void Response::refreshBody(ScriptState* scriptState)
+{
+    v8::Local<v8::Value> bodyBuffer = toV8(internalBodyBuffer(), scriptState);
+    v8::Local<v8::Value> response = toV8(this, scriptState);
+    if (response.IsEmpty()) {
+        // |toV8| can return an empty handle when the worker is terminating.
+        // We don't want the renderer to crash in such cases.
+        // TODO(yhirano): Delete this block after the graceful shutdown
+        // mechanism is introduced.
+        return;
+    }
+    DCHECK(response->IsObject());
+    V8HiddenValue::setHiddenValue(scriptState, response.As<v8::Object>(), V8HiddenValue::internalBodyBuffer(scriptState->isolate()), bodyBuffer);
 }
 
 DEFINE_TRACE(Response)

@@ -34,16 +34,20 @@ class MEDIA_EXPORT AudioManagerCras : public AudioManagerBase {
 
   // AudioManagerBase implementation.
   AudioOutputStream* MakeLinearOutputStream(
-      const AudioParameters& params) override;
+      const AudioParameters& params,
+      const LogCallback& log_callback) override;
   AudioOutputStream* MakeLowLatencyOutputStream(
       const AudioParameters& params,
-      const std::string& device_id) override;
+      const std::string& device_id,
+      const LogCallback& log_callback) override;
   AudioInputStream* MakeLinearInputStream(
       const AudioParameters& params,
-      const std::string& device_id) override;
+      const std::string& device_id,
+      const LogCallback& log_callback) override;
   AudioInputStream* MakeLowLatencyInputStream(
       const AudioParameters& params,
-      const std::string& device_id) override;
+      const std::string& device_id,
+      const LogCallback& log_callback) override;
 
   static snd_pcm_format_t BitsToFormat(int bits_per_sample);
 
@@ -61,6 +65,8 @@ class MEDIA_EXPORT AudioManagerCras : public AudioManagerBase {
   // Called by MakeLinearInputStream and MakeLowLatencyInputStream.
   AudioInputStream* MakeInputStream(const AudioParameters& params,
                                     const std::string& device_id);
+
+  void GetAudioDeviceNamesImpl(bool is_input, AudioDeviceNames* device_names);
 
   void AddBeamformingDevices(AudioDeviceNames* device_names);
 

@@ -23,10 +23,10 @@ build_ime = !is_ios
 # the host to load datapack and generate output in a format defined
 # by the platform (this is to support notifications).
 #
-# Introduce a standalone target that build on both 'host' and 'target'
-# toolset that just build the support to load datapack. The dependency
+# Introduce a standalone target that can build on both 'host' and 'target'
+# toolchains that just builds the support to load datapacks. The dependencies
 # should be kept minimal to have to build too many targets with multiple
-# toolsets.
+# toolchains.
 component("ui_data_pack") {
   sources = [
     "resource/data_pack.cc",
@@ -74,7 +74,6 @@ component("base") {
     "clipboard/clipboard_util_win.h",
     "clipboard/clipboard_win.cc",
     "clipboard/clipboard_win.h",
-    "clipboard/custom_data_helper_linux.cc",
     "clipboard/custom_data_helper_mac.mm",
     "cocoa/animation_utils.h",
     "cocoa/appkit_utils.h",
@@ -97,6 +96,8 @@ component("base") {
     "cocoa/controls/hyperlink_button_cell.mm",
     "cocoa/controls/hyperlink_text_view.h",
     "cocoa/controls/hyperlink_text_view.mm",
+    "cocoa/defaults_utils.h",
+    "cocoa/defaults_utils.mm",
     "cocoa/find_pasteboard.h",
     "cocoa/find_pasteboard.mm",
     "cocoa/flipped_view.h",
@@ -115,6 +116,8 @@ component("base") {
     "cocoa/menu_controller.mm",
     "cocoa/nib_loading.h",
     "cocoa/nib_loading.mm",
+    "cocoa/nscolor_additions.h",
+    "cocoa/nscolor_additions.mm",
     "cocoa/nsgraphics_context_additions.h",
     "cocoa/nsgraphics_context_additions.mm",
     "cocoa/nsview_additions.h",
@@ -145,15 +148,13 @@ component("base") {
     "default_theme_provider_mac.mm",
     "device_form_factor.h",
     "device_form_factor_android.cc",
-    "device_form_factor_android.h",
     "device_form_factor_desktop.cc",
     "device_form_factor_ios.mm",
     "dragdrop/drag_drop_types.h",
+    "dragdrop/drag_drop_types_mac.mm",
     "dragdrop/drag_drop_types_win.cc",
     "dragdrop/drag_source_win.cc",
     "dragdrop/drag_source_win.h",
-    "dragdrop/drag_utils_aura.cc",
-    "dragdrop/drag_utils_mac.mm",
     "dragdrop/drag_utils_win.cc",
     "dragdrop/drop_target_event.cc",
     "dragdrop/drop_target_event.h",
@@ -161,15 +162,15 @@ component("base") {
     "dragdrop/drop_target_win.h",
     "dragdrop/os_exchange_data.cc",
     "dragdrop/os_exchange_data.h",
+    "dragdrop/os_exchange_data_provider_builder_mac.h",
+    "dragdrop/os_exchange_data_provider_builder_mac.mm",
+    "dragdrop/os_exchange_data_provider_factory.cc",
+    "dragdrop/os_exchange_data_provider_factory.h",
     "dragdrop/os_exchange_data_provider_mac.h",
     "dragdrop/os_exchange_data_provider_mac.mm",
     "dragdrop/os_exchange_data_provider_win.cc",
     "dragdrop/os_exchange_data_provider_win.h",
     "hit_test.h",
-    "ios/cru_context_menu_controller.h",
-    "ios/cru_context_menu_controller.mm",
-    "ios/cru_context_menu_holder.h",
-    "ios/cru_context_menu_holder.mm",
     "l10n/formatter.cc",
     "l10n/formatter.h",
     "l10n/l10n_font_util.cc",
@@ -235,8 +236,6 @@ component("base") {
     "template_expressions.h",
     "theme_provider.cc",
     "theme_provider.h",
-    "touch/selection_bound.cc",
-    "touch/selection_bound.h",
     "touch/touch_device.h",
     "touch/touch_editing_controller.cc",
     "touch/touch_editing_controller.h",
@@ -281,6 +280,9 @@ component("base") {
     "win/mouse_wheel_util.h",
     "win/open_file_name_win.cc",
     "win/open_file_name_win.h",
+    "win/osk_display_manager.cc",
+    "win/osk_display_manager.h",
+    "win/osk_display_observer.h",
     "win/scoped_ole_initializer.cc",
     "win/scoped_ole_initializer.h",
     "win/shell.cc",
@@ -302,11 +304,15 @@ component("base") {
       "accelerators/accelerator_history.h",
       "accelerators/accelerator_manager.cc",
       "accelerators/accelerator_manager.h",
+      "accelerators/accelerator_manager_delegate.h",
       "base_window.cc",
       "base_window.h",
       "clipboard/clipboard.cc",
       "clipboard/clipboard.h",
       "clipboard/clipboard_constants.cc",
+      "clipboard/clipboard_monitor.cc",
+      "clipboard/clipboard_monitor.h",
+      "clipboard/clipboard_observer.h",
       "clipboard/custom_data_helper.cc",
       "clipboard/custom_data_helper.h",
       "clipboard/scoped_clipboard_writer.cc",
@@ -356,6 +362,7 @@ component("base") {
   defines = [ "UI_BASE_IMPLEMENTATION" ]
 
   public_deps = [
+    ":ui_data_pack",
     ":ui_features",
     "//base",
     "//skia",
@@ -370,7 +377,7 @@ component("base") {
     "//base/third_party/dynamic_annotations",
     "//net",
     "//third_party/icu",
-    "//ui/base:ui_data_pack",
+    "//third_party/zlib:zlib",
     "//ui/display",
     "//ui/events",
     "//ui/events/devices",
@@ -392,36 +399,10 @@ component("base") {
     deps += [ "//ui/events" ]
   }
 
-  if (use_x11 && use_aura) {
-    sources += [
-      "x/selection_owner.cc",
-      "x/selection_owner.h",
-      "x/selection_requestor.cc",
-      "x/selection_requestor.h",
-      "x/selection_utils.cc",
-      "x/selection_utils.h",
-    ]
-  }
+  if (use_x11) {
+    public_deps += [ "//ui/base/x" ]
+    configs += [ "//build/config/linux:x11" ]
 
-  if (use_aura) {
-    deps += [ "//ui/events" ]
-  } else {
-    sources -= [
-      "cursor/cursor.cc",
-      "cursor/cursor.h",
-      "dragdrop/drag_utils_aura.cc",
-    ]
-  }
-  if (use_x11 || ozone_platform_x11) {
-    sources += [
-      "x/x11_foreign_window_manager.cc",
-      "x/x11_foreign_window_manager.h",
-      "x/x11_menu_list.cc",
-      "x/x11_menu_list.h",
-      "x/x11_util.cc",
-      "x/x11_util.h",
-      "x/x11_util_internal.h",
-    ]
     if (!is_chromeos) {
       sources += [
         "idle/idle_query_x11.cc",
@@ -430,16 +411,48 @@ component("base") {
         "idle/screensaver_window_finder_x11.h",
       ]
       configs += [ "//build/config/linux:xscrnsaver" ]
+      deps += [ "//ui/gfx/x" ]
     }
-    deps += [ "//ui/gfx/x" ]
+  }
+
+  if (use_x11 && use_aura) {
+    sources += [
+      "cursor/cursor_loader_x11.cc",
+      "cursor/cursor_loader_x11.h",
+      "cursor/cursor_x11.cc",
+      "x/selection_owner.cc",
+      "x/selection_owner.h",
+      "x/selection_requestor.cc",
+      "x/selection_requestor.h",
+      "x/selection_utils.cc",
+      "x/selection_utils.h",
+    ]
+    deps += [
+      "//ui/events/platform/x11",
+      "//ui/gfx/x",
+    ]
+
+    if (!is_chromeos) {
+      # These Aura X11 files aren't used on ChromeOS.
+      sources += [
+        "dragdrop/os_exchange_data_provider_aurax11.cc",
+        "dragdrop/os_exchange_data_provider_aurax11.h",
+      ]
+    }
+  }
+
+  if (use_aura) {
+    deps += [ "//ui/events" ]
+    sources += [ "window_tracker_template.h" ]
+  } else {
+    sources -= [
+      "cursor/cursor.cc",
+      "cursor/cursor.h",
+    ]
   }
 
   if (!use_aura || !is_linux) {
     sources -= [ "resource/resource_bundle_auralinux.cc" ]
-  }
-
-  if (use_aura && is_win) {
-    sources -= [ "dragdrop/drag_utils_aura.cc" ]
   }
 
   if (is_linux) {
@@ -509,41 +522,19 @@ component("base") {
     sources -= [
       "cursor/image_cursors.cc",
       "cursor/image_cursors.h",
-      "dragdrop/drag_utils.cc",
-      "dragdrop/drag_utils.h",
     ]
 
     libs += [
       "Accelerate.framework",
+      "AppKit.framework",
       "AudioUnit.framework",
+      "Carbon.framework",
       "CoreVideo.framework",
+      "Foundation.framework",
     ]
   }
 
-  if (use_x11 || ozone_platform_x11) {
-    #'all_dependent_settings': {
-    #'ldflags': [
-    #'-L<(PRODUCT_DIR)',
-    #],
-    #},
-    configs += [ "//build/config/linux:x11" ]
-  }
-
   if (use_aura) {
-    if (use_x11) {
-      sources += [
-        "cursor/cursor_loader_x11.cc",
-        "cursor/cursor_loader_x11.h",
-        "cursor/cursor_x11.cc",
-      ]
-      if (!is_chromeos) {
-        # These Aura X11 files aren't used on ChromeOS.
-        sources += [
-          "dragdrop/os_exchange_data_provider_aurax11.cc",
-          "dragdrop/os_exchange_data_provider_aurax11.h",
-        ]
-      }
-    }
     if (is_android) {
       sources += [ "cursor/cursor_loader_android.cc" ]
     }
@@ -571,16 +562,15 @@ component("base") {
       "dragdrop/drop_target_event.h",
       "dragdrop/os_exchange_data.cc",
       "dragdrop/os_exchange_data.h",
+      "dragdrop/os_exchange_data_provider_factory.cc",
+      "dragdrop/os_exchange_data_provider_factory.h",
       "nine_image_painter_factory.cc",
       "nine_image_painter_factory.h",
     ]
   }
 
   if (is_android) {
-    deps += [
-      ":ui_base_jni_headers",
-      "//ui/android:ui_java",
-    ]
+    deps += [ ":ui_base_jni_headers" ]
 
     libs += [ "jnigraphics" ]
   }
@@ -607,11 +597,17 @@ component("base") {
 
   # Aura clipboard.
   if (use_aura) {
-    if (use_x11) {
-      sources += [ "clipboard/clipboard_aurax11.cc" ]
+    if (use_clipboard_aurax11) {
+      sources += [
+        "clipboard/clipboard_aurax11.cc",
+        "clipboard/clipboard_aurax11.h",
+      ]
     } else if (!is_win && !is_android) {
       # This file is used for all non-X11, non-Windows, non-Android aura Builds.
-      sources += [ "clipboard/clipboard_aura.cc" ]
+      sources += [
+        "clipboard/clipboard_aura.cc",
+        "clipboard/clipboard_aura.h",
+      ]
     }
   }
 
@@ -620,7 +616,7 @@ component("base") {
   }
 }
 
-source_set("test_support") {
+static_library("test_support") {
   testonly = true
   sources = [
     "test/material_design_controller_test_api.cc",
@@ -637,6 +633,8 @@ source_set("test_support") {
     sources += [
       "test/nswindow_fullscreen_notification_waiter.h",
       "test/nswindow_fullscreen_notification_waiter.mm",
+      "test/scoped_fake_full_keyboard_access.h",
+      "test/scoped_fake_full_keyboard_access.mm",
       "test/scoped_fake_nswindow_focus.h",
       "test/scoped_fake_nswindow_focus.mm",
       "test/scoped_fake_nswindow_fullscreen.h",
@@ -718,11 +716,10 @@ bundle_data("ui_base_unittests_bundle_data") {
   ]
 }
 
-# GYP version: ui/base/ui_base_tests.gyp:ui_base_unittests
 test("ui_base_unittests") {
   sources = [
+    "clipboard/clipboard_mac_unittest.mm",
     "clipboard/clipboard_util_mac_unittest.mm",
-    "ios/cru_context_menu_controller_unittest.mm",
     "l10n/l10n_util_mac_unittest.mm",
     "l10n/l10n_util_unittest.cc",
     "l10n/l10n_util_win_unittest.cc",
@@ -735,6 +732,7 @@ test("ui_base_unittests") {
     "resource/resource_bundle_unittest.cc",
     "resource/scale_factor_unittest.cc",
     "template_expressions_unittest.cc",
+    "test/page_transition_types_unittest.cc",
     "test/run_all_unittests.cc",
     "user_activity/user_activity_detector_unittest.cc",
   ]
@@ -760,6 +758,7 @@ test("ui_base_unittests") {
   } else {  # !is_ios
     sources += [
       "accelerators/accelerator_manager_unittest.cc",
+      "accelerators/accelerator_unittest.cc",
       "accelerators/menu_label_accelerator_util_linux_unittest.cc",
       "clipboard/custom_data_helper_unittest.cc",
       "cocoa/base_view_unittest.mm",
@@ -773,6 +772,7 @@ test("ui_base_unittests") {
       "cocoa/fullscreen_window_manager_unittest.mm",
       "cocoa/hover_image_button_unittest.mm",
       "cocoa/menu_controller_unittest.mm",
+      "cocoa/nscolor_additions_unittest.mm",
       "cocoa/nsgraphics_context_additions_unittest.mm",
       "cocoa/nsview_additions_unittest.mm",
       "cocoa/three_part_image_unittest.mm",
@@ -782,7 +782,6 @@ test("ui_base_unittests") {
       "models/tree_node_model_unittest.cc",
       "test/data/resource.h",
       "text/bytes_formatting_unittest.cc",
-      "touch/selection_bound_unittest.cc",
       "webui/web_ui_util_unittest.cc",
     ]
   }
@@ -799,9 +798,6 @@ test("ui_base_unittests") {
     ]
     if (is_linux && use_aura && !is_chromeos) {
       sources += [ "ime/input_method_auralinux_unittest.cc" ]
-    }
-    if (is_mac) {
-      sources += [ "resource/resource_bundle_mac_unittest.mm" ]
     }
     if (use_x11) {
       sources += [ "ime/composition_text_util_pango_unittest.cc" ]
@@ -850,6 +846,7 @@ test("ui_base_unittests") {
       "dragdrop/os_exchange_data_win_unittest.cc",
       "win/hwnd_subclass_unittest.cc",
       "win/open_file_name_win_unittest.cc",
+      "win/osk_display_manager_unittest.cc",
     ]
 
     ldflags = [
@@ -873,11 +870,10 @@ test("ui_base_unittests") {
       "//chrome:resources",
       "//ui/android:ui_java",
     ]
-    isolate_file = "ui_base_tests.isolate"
   }
 
   if (use_pango) {
-    configs += [ "//build/config/linux:pangocairo" ]
+    configs += [ "//build/config/linux/pangocairo" ]
   }
 
   if (use_x11) {
@@ -913,6 +909,7 @@ test("ui_base_unittests") {
     sources += [
       "dragdrop/os_exchange_data_provider_aurax11_unittest.cc",
       "x/selection_requestor_unittest.cc",
+      "x/x11_util_unittest.cc",
     ]
   }
 
@@ -923,7 +920,7 @@ test("ui_base_unittests") {
     ]
   }
 
-  if (is_linux || is_mac || is_win) {
+  if (is_android || is_linux || is_mac || is_win) {
     # TODO(brettw): We should be able to depend on //ui/resources:ui_test_pak
     # instead of depending directly on the non-test .pak files, but depending
     # on ui_test_pak seems to have no effect.

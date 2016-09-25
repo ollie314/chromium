@@ -31,6 +31,7 @@
 #ifndef HeapPage_h
 #define HeapPage_h
 
+#include "base/trace_event/memory_allocator_dump.h"
 #include "platform/PlatformExport.h"
 #include "platform/heap/BlinkGC.h"
 #include "platform/heap/GCInfo.h"
@@ -142,7 +143,7 @@ class WebMemoryAllocatorDump;
 // - 1 bit used to mark DOM trees for V8.
 // - 14 bit is enough for gcInfoIndex because there are less than 2^14 types
 //   in Blink.
-const size_t headerDOMMarkBitMask = 1u << 17;
+const size_t headerWrapperMarkBitMask = 1u << 17;
 const size_t headerGCInfoIndexShift = 18;
 const size_t headerGCInfoIndexMask = (static_cast<size_t>((1 << 14) - 1)) << headerGCInfoIndexShift;
 const size_t headerSizeMask = (static_cast<size_t>((1 << 14) - 1)) << 3;
@@ -205,6 +206,9 @@ public:
         ASSERT(size < nonLargeObjectPageSizeMax);
         m_encoded = static_cast<uint32_t>(size) | (m_encoded & ~headerSizeMask);
     }
+    bool isWrapperHeaderMarked() const;
+    void markWrapperHeader();
+    void unmarkWrapperHeader();
     bool isMarked() const;
     void mark();
     void unmark();
@@ -398,7 +402,7 @@ public:
         size_t freeSize = 0;
     };
 
-    virtual void takeSnapshot(WebMemoryAllocatorDump*, ThreadState::GCSnapshotInfo&, HeapSnapshotInfo&) = 0;
+    virtual void takeSnapshot(base::trace_event::MemoryAllocatorDump*, ThreadState::GCSnapshotInfo&, HeapSnapshotInfo&) = 0;
 #if ENABLE(ASSERT)
     virtual bool contains(Address) = 0;
 #endif
@@ -474,7 +478,7 @@ public:
     void checkAndMarkPointer(Visitor*, Address) override;
     void markOrphaned() override;
 
-    void takeSnapshot(WebMemoryAllocatorDump*, ThreadState::GCSnapshotInfo&, HeapSnapshotInfo&) override;
+    void takeSnapshot(base::trace_event::MemoryAllocatorDump*, ThreadState::GCSnapshotInfo&, HeapSnapshotInfo&) override;
 #if ENABLE(ASSERT)
     // Returns true for the whole blinkPageSize page that the page is on, even
     // for the header, and the unmapped guard page at the start. That ensures
@@ -490,8 +494,7 @@ public:
         return sizeof(NormalPage) + paddingSize;
     }
 
-
-    NormalPageArena* arenaForNormalPage();
+    inline NormalPageArena* arenaForNormalPage() const;
 
 private:
     HeapObjectHeader* findHeaderFromAddress(Address);
@@ -531,7 +534,7 @@ public:
     void checkAndMarkPointer(Visitor*, Address) override;
     void markOrphaned() override;
 
-    void takeSnapshot(WebMemoryAllocatorDump*, ThreadState::GCSnapshotInfo&, HeapSnapshotInfo&) override;
+    void takeSnapshot(base::trace_event::MemoryAllocatorDump*, ThreadState::GCSnapshotInfo&, HeapSnapshotInfo&) override;
 #if ENABLE(ASSERT)
     // Returns true for any address that is on one of the pages that this
     // large object uses. That ensures that we can use a negative result to
@@ -690,6 +693,10 @@ public:
     ThreadState* getThreadState() { return m_threadState; }
     int arenaIndex() const { return m_index; }
 
+    Address allocateLargeObject(size_t allocationSize, size_t gcInfoIndex);
+
+    bool willObjectBeLazilySwept(BasePage*, void*) const;
+
 protected:
     BasePage* m_firstPage;
     BasePage* m_firstUnsweptPage;
@@ -735,6 +742,9 @@ public:
         return header->payloadEnd() == m_currentAllocationPoint;
     }
 
+    bool isLazySweeping() const { return m_isLazySweeping; }
+    void setIsLazySweeping(bool flag) { m_isLazySweeping = flag; }
+
 private:
     void allocatePage();
     Address outOfLineAllocate(size_t allocationSize, size_t gcInfoIndex);
@@ -757,6 +767,8 @@ private:
 
     // The size of promptly freed objects in the heap.
     size_t m_promptlyFreedSize;
+
+    bool m_isLazySweeping;
 };
 
 class LargeObjectArena final : public BaseArena {
@@ -835,6 +847,29 @@ inline HeapObjectHeader* HeapObjectHeader::fromPayload(const void* payload)
 }
 
 NO_SANITIZE_ADDRESS inline
+bool HeapObjectHeader::isWrapperHeaderMarked() const
+{
+    ASSERT(checkHeader());
+    return m_encoded & headerWrapperMarkBitMask;
+}
+
+NO_SANITIZE_ADDRESS inline
+void HeapObjectHeader::markWrapperHeader()
+{
+    ASSERT(checkHeader());
+    ASSERT(!isWrapperHeaderMarked());
+    m_encoded |= headerWrapperMarkBitMask;
+}
+
+NO_SANITIZE_ADDRESS inline
+void HeapObjectHeader::unmarkWrapperHeader()
+{
+    ASSERT(checkHeader());
+    ASSERT(isWrapperHeaderMarked());
+    m_encoded &= ~headerWrapperMarkBitMask;
+}
+
+NO_SANITIZE_ADDRESS inline
 bool HeapObjectHeader::isMarked() const
 {
     ASSERT(checkHeader());
@@ -888,6 +923,11 @@ inline Address NormalPageArena::allocateObject(size_t allocationSize, size_t gcI
         return result;
     }
     return outOfLineAllocate(allocationSize, gcInfoIndex);
+}
+
+inline NormalPageArena* NormalPage::arenaForNormalPage() const
+{
+    return static_cast<NormalPageArena*>(arena());
 }
 
 } // namespace blink

@@ -43,18 +43,19 @@
 #include "public/platform/WebStorageArea.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
+#include <memory>
 
 namespace blink {
 
-StorageArea* StorageArea::create(PassOwnPtr<WebStorageArea> storageArea, StorageType storageType)
+StorageArea* StorageArea::create(std::unique_ptr<WebStorageArea> storageArea, StorageType storageType)
 {
-    return new StorageArea(storageArea, storageType);
+    return new StorageArea(std::move(storageArea), storageType);
 }
 
-StorageArea::StorageArea(PassOwnPtr<WebStorageArea> storageArea, StorageType storageType)
-    : LocalFrameLifecycleObserver(nullptr)
-    , m_storageArea(storageArea)
+StorageArea::StorageArea(std::unique_ptr<WebStorageArea> storageArea, StorageType storageType)
+    : m_storageArea(std::move(storageArea))
     , m_storageType(storageType)
+    , m_frameUsedForCanAccessStorage(nullptr)
     , m_canAccessStorageCachedResult(false)
 {
 }
@@ -65,7 +66,7 @@ StorageArea::~StorageArea()
 
 DEFINE_TRACE(StorageArea)
 {
-    LocalFrameLifecycleObserver::trace(visitor);
+    visitor->trace(m_frameUsedForCanAccessStorage);
 }
 
 unsigned StorageArea::length(ExceptionState& exceptionState, LocalFrame* frame)
@@ -139,17 +140,16 @@ bool StorageArea::canAccessStorage(LocalFrame* frame)
     if (!frame || !frame->page())
         return false;
 
-    // LocalFrameLifecycleObserver is used to safely keep the cached
-    // reference to the LocalFrame. Should the LocalFrame die before
-    // this StorageArea does, that cached reference will be cleared.
-    if (this->frame() == frame)
+    // Should the LocalFrame die before this StorageArea does,
+    // that cached reference will be cleared.
+    if (m_frameUsedForCanAccessStorage == frame)
         return m_canAccessStorageCachedResult;
     StorageNamespaceController* controller = StorageNamespaceController::from(frame->page());
     if (!controller)
         return false;
     bool result = controller->getStorageClient()->canAccessStorage(frame, m_storageType);
     // Move attention to the new LocalFrame.
-    LocalFrameLifecycleObserver::setContext(frame);
+    m_frameUsedForCanAccessStorage = frame;
     m_canAccessStorageCachedResult = result;
     return result;
 }
@@ -209,7 +209,7 @@ bool StorageArea::isEventSource(Storage* storage, WebStorageArea* sourceAreaInst
 {
     ASSERT(storage);
     StorageArea* area = storage->area();
-    return area->m_storageArea == sourceAreaInstance;
+    return area->m_storageArea.get() == sourceAreaInstance;
 }
 
 } // namespace blink

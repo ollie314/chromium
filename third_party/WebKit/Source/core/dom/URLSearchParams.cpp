@@ -7,7 +7,6 @@
 #include "core/dom/DOMURL.h"
 #include "platform/network/FormDataEncoder.h"
 #include "platform/weborigin/KURL.h"
-#include "wtf/text/StringBuilder.h"
 #include "wtf/text/TextEncoding.h"
 
 namespace blink {
@@ -38,8 +37,12 @@ private:
 
 URLSearchParams* URLSearchParams::create(const URLSearchParamsInit& init)
 {
-    if (init.isUSVString())
-        return new URLSearchParams(init.getAsUSVString());
+    if (init.isUSVString()) {
+        const String& queryString = init.getAsUSVString();
+        if (queryString.startsWith('?'))
+            return new URLSearchParams(queryString.substring(1));
+        return new URLSearchParams(queryString);
+    }
     if (init.isURLSearchParams())
         return new URLSearchParams(init.getAsURLSearchParams());
 
@@ -120,22 +123,11 @@ void URLSearchParams::setInput(const String& queryString)
     runUpdateSteps();
 }
 
-static String encodeString(const String& input)
-{
-    return encodeWithURLEscapeSequences(input).replace("%20", "+");
-}
-
 String URLSearchParams::toString() const
 {
-    StringBuilder result;
-    for (size_t i = 0; i < m_params.size(); ++i) {
-        if (i)
-            result.append('&');
-        result.append(encodeString(m_params[i].first));
-        result.append('=');
-        result.append(encodeString(m_params[i].second));
-    }
-    return result.toString();
+    Vector<char> encodedData;
+    encodeAsFormData(encodedData);
+    return String(encodedData.data(), encodedData.size());
 }
 
 void URLSearchParams::append(const String& name, const String& value)
@@ -208,11 +200,16 @@ void URLSearchParams::set(const String& name, const String& value)
         runUpdateSteps();
 }
 
-PassRefPtr<EncodedFormData> URLSearchParams::encodeFormData() const
+void URLSearchParams::encodeAsFormData(Vector<char>& encodedData) const
+{
+    for (const auto& param : m_params)
+        FormDataEncoder::addKeyValuePairAsFormData(encodedData, param.first.utf8(), param.second.utf8(), EncodedFormData::FormURLEncoded, FormDataEncoder::DoNotNormalizeCRLF);
+}
+
+PassRefPtr<EncodedFormData> URLSearchParams::toEncodedFormData() const
 {
     Vector<char> encodedData;
-    for (const auto& param : m_params)
-        FormDataEncoder::addKeyValuePairAsFormData(encodedData, param.first.utf8(), param.second.utf8(), EncodedFormData::FormURLEncoded);
+    encodeAsFormData(encodedData);
     return EncodedFormData::create(encodedData.data(), encodedData.size());
 }
 

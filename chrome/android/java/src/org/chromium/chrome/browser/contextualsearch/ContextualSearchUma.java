@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.contextualsearch;
 import android.util.Pair;
 
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.PanelState;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchBlacklist.BlacklistReason;
@@ -144,6 +145,14 @@ public class ContextualSearchUma {
     private static final int RESULTS_SEEN_FROM_LONG_PRESS = 2;
     private static final int RESULTS_NOT_SEEN_FROM_LONG_PRESS = 3;
     private static final int RESULTS_BY_GESTURE_BOUNDARY = 4;
+
+    // Constants used to log UMA "enum" histograms with details about whether search results
+    // were seen, and whether any existing tap suppression heuristics were satisfied.
+    private static final int RESULTS_SEEN_SUPPRESSION_HEURSTIC_SATISFIED = 0;
+    private static final int RESULTS_NOT_SEEN_SUPPRESSION_HEURSTIC_SATISFIED = 1;
+    private static final int RESULTS_SEEN_SUPPRESSION_HEURSTIC_NOT_SATISFIED = 2;
+    private static final int RESULTS_NOT_SEEN_SUPPRESSION_HEURSTIC_NOT_SATISFIED = 3;
+    private static final int RESULTS_SEEN_SUPPRESSION_BOUNDARY = 4;
 
     // Constants used to log UMA "enum" histograms with details about the Peek Promo Outcome.
     private static final int PEEK_PROMO_OUTCOME_SEEN_OPENED = 0;
@@ -772,6 +781,23 @@ public class ContextualSearchUma {
     }
 
     /**
+     * Logs a user action for the duration of viewing the panel that describes the amount of time
+     * the user viewed the bar and panel overall.
+     * @param durationMs The duration to record.
+     */
+    public static void logPanelViewDurationAction(long durationMs) {
+        if (durationMs < 1000) {
+            RecordUserAction.record("ContextualSearch.ViewLessThanOneSecond");
+        } else if (durationMs < 3000) {
+            RecordUserAction.record("ContextualSearch.ViewOneToThreeSeconds");
+        } else if (durationMs < 10000) {
+            RecordUserAction.record("ContextualSearch.ViewThreeToTenSeconds");
+        } else {
+            RecordUserAction.record("ContextualSearch.ViewMoreThanTenSeconds");
+        }
+    }
+
+    /**
      * Logs whether the promo was seen.
      * Logs multiple histograms, with and without the original triggering gesture.
      * @param wasPanelSeen Whether the panel was seen.
@@ -806,7 +832,8 @@ public class ContextualSearchUma {
         int result = wasPanelSeen ? (wasTap ? RESULTS_SEEN_FROM_TAP : RESULTS_SEEN_FROM_LONG_PRESS)
                 : (wasTap ? RESULTS_NOT_SEEN_FROM_TAP : RESULTS_NOT_SEEN_FROM_LONG_PRESS);
         RecordHistogram.recordEnumeratedHistogram(
-                "Search.ContextualSearchResultsSeenSelectionWasUrl", result, RESULTS_SEEN_BOUNDARY);
+                "Search.ContextualSearchResultsSeenSelectionWasUrl", result,
+                RESULTS_BY_GESTURE_BOUNDARY);
     }
 
     /**
@@ -858,6 +885,47 @@ public class ContextualSearchUma {
     public static void logScreenTopTapSuppression(boolean wasSuppressed) {
         RecordHistogram.recordEnumeratedHistogram("Search.ContextualSearchScreenTopSuppressed",
                 wasSuppressed ? TAP_SUPPRESSED : NOT_TAP_SUPPRESSED, TAP_SUPPRESSED_BOUNDARY);
+    }
+
+    /**
+     * Log whether results were seen due to a Tap with broad signals.
+     * @param wasSearchContentViewSeen If the panel was opened.
+     * @param isSecondTap Whether this was the second tap after an initial suppressed tap.
+     */
+    public static void logTapSuppressionResultsSeen(
+            boolean wasSearchContentViewSeen, boolean isSecondTap) {
+        if (isSecondTap) {
+            RecordHistogram.recordEnumeratedHistogram("Search.ContextualSearchSecondTapSeen",
+                    wasSearchContentViewSeen ? RESULTS_SEEN : RESULTS_NOT_SEEN,
+                    RESULTS_SEEN_BOUNDARY);
+        } else {
+            RecordHistogram.recordEnumeratedHistogram("Search.ContextualSearchTapSuppressionSeen",
+                    wasSearchContentViewSeen ? RESULTS_SEEN : RESULTS_NOT_SEEN,
+                    RESULTS_SEEN_BOUNDARY);
+        }
+    }
+
+    /**
+     * Logs whether results were seen and whether any tap suppression heuristics were satisfied.
+     * @param wasSearchContentViewSeen If the panel was opened.
+     * @param wasAnySuppressionHeuristicSatisfied Whether any of the implemented suppression
+     *                                            heuristics were satisfied.
+     */
+    public static void logAnyTapSuppressionHeuristicSatisfied(boolean wasSearchContentViewSeen,
+            boolean wasAnySuppressionHeuristicSatisfied) {
+        int code;
+        if (wasAnySuppressionHeuristicSatisfied) {
+            code = wasSearchContentViewSeen ? RESULTS_SEEN_SUPPRESSION_HEURSTIC_SATISFIED
+                    : RESULTS_NOT_SEEN_SUPPRESSION_HEURSTIC_SATISFIED;
+        } else {
+            code = wasSearchContentViewSeen ? RESULTS_SEEN_SUPPRESSION_HEURSTIC_NOT_SATISFIED
+                    : RESULTS_NOT_SEEN_SUPPRESSION_HEURSTIC_NOT_SATISFIED;
+        }
+
+        RecordHistogram.recordEnumeratedHistogram(
+                "Search.ContextualSearchTapSuppressionSeen.AnyHeuristicSatisfied",
+                code,
+                RESULTS_SEEN_SUPPRESSION_BOUNDARY);
     }
 
     /**
@@ -1007,6 +1075,62 @@ public class ContextualSearchUma {
     }
 
     /**
+     * Logs a user action for a change to the Panel state, which allows sequencing of actions.
+     * @param toState The state to transition to.
+     * @param reason The reason for the state transition.
+     */
+    public static void logPanelStateUserAction(PanelState toState, StateChangeReason reason) {
+        switch (toState) {
+            case CLOSED:
+                if (reason == StateChangeReason.BACK_PRESS) {
+                    RecordUserAction.record("ContextualSearch.BackPressClose");
+                } else if (reason == StateChangeReason.CLOSE_BUTTON) {
+                    RecordUserAction.record("ContextualSearch.CloseButtonClose");
+                } else if (reason == StateChangeReason.SWIPE || reason == StateChangeReason.FLING) {
+                    RecordUserAction.record("ContextualSearch.SwipeOrFlingClose");
+                } else if (reason == StateChangeReason.TAB_PROMOTION) {
+                    RecordUserAction.record("ContextualSearch.TabPromotionClose");
+                } else if (reason == StateChangeReason.BASE_PAGE_TAP) {
+                    RecordUserAction.record("ContextualSearch.BasePageTapClose");
+                } else if (reason == StateChangeReason.BASE_PAGE_SCROLL) {
+                    RecordUserAction.record("ContextualSearch.BasePageScrollClose");
+                } else if (reason == StateChangeReason.SEARCH_BAR_TAP) {
+                    RecordUserAction.record("ContextualSearch.SearchBarTapClose");
+                } else if (reason == StateChangeReason.SERP_NAVIGATION) {
+                    RecordUserAction.record("ContextualSearch.NavigationClose");
+                } else {
+                    RecordUserAction.record("ContextualSearch.UncommonClose");
+                }
+                break;
+            case PEEKED:
+                if (reason == StateChangeReason.TEXT_SELECT_TAP) {
+                    RecordUserAction.record("ContextualSearch.TapPeek");
+                } else if (reason == StateChangeReason.SWIPE || reason == StateChangeReason.FLING) {
+                    RecordUserAction.record("ContextualSearch.SwipeOrFlingPeek");
+                } else if (reason == StateChangeReason.TEXT_SELECT_LONG_PRESS) {
+                    RecordUserAction.record("ContextualSearch.LongpressPeek");
+                }
+                break;
+            case EXPANDED:
+                if (reason == StateChangeReason.SWIPE || reason == StateChangeReason.FLING) {
+                    RecordUserAction.record("ContextualSearch.SwipeOrFlingExpand");
+                } else if (reason == StateChangeReason.SEARCH_BAR_TAP) {
+                    RecordUserAction.record("ContextualSearch.SearchBarTapExpand");
+                }
+                break;
+            case MAXIMIZED:
+                if (reason == StateChangeReason.SWIPE || reason == StateChangeReason.FLING) {
+                    RecordUserAction.record("ContextualSearch.SwipeOrFlingMaximize");
+                } else if (reason == StateChangeReason.SERP_NAVIGATION) {
+                    RecordUserAction.record("ContextualSearch.NavigationMaximize");
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    /**
      * Logs how a state was exited for the first time within a Contextual Search.
      * @param fromState The state to transition from.
      * @param toState The state to transition to.
@@ -1109,7 +1233,6 @@ public class ContextualSearchUma {
         int code = ContextualSearchBlacklist.getBlacklistMetricsCode(reason, wasSeen);
         RecordHistogram.recordEnumeratedHistogram("Search.ContextualSearchBlacklistSeen",
                 code, ContextualSearchBlacklist.BLACKLIST_BOUNDARY);
-
     }
 
     /**

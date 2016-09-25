@@ -35,6 +35,7 @@
 #include "WebAXObject.h"
 #include "WebDOMMessageEvent.h"
 #include "WebDataSource.h"
+#include "WebFileChooserParams.h"
 #include "WebFrame.h"
 #include "WebFrameOwnerProperties.h"
 #include "WebHistoryCommitType.h"
@@ -47,21 +48,25 @@
 #include "WebTextDirection.h"
 #include "public/platform/BlameContext.h"
 #include "public/platform/WebCommon.h"
+#include "public/platform/WebEffectiveConnectionType.h"
 #include "public/platform/WebFileSystem.h"
 #include "public/platform/WebFileSystemType.h"
+#include "public/platform/WebInsecureRequestPolicy.h"
 #include "public/platform/WebLoadingBehaviorFlag.h"
+#include "public/platform/WebPageVisibilityState.h"
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/WebSetSinkIdCallbacks.h"
 #include "public/platform/WebStorageQuotaCallbacks.h"
 #include "public/platform/WebStorageQuotaType.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebURLRequest.h"
+#include "public/web/WebContentSecurityPolicy.h"
 #include <v8.h>
 
 namespace blink {
 
 enum class WebTreeScopeType;
-class ServiceRegistry;
+class InterfaceProvider;
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
 class WebAppBannerClient;
@@ -75,8 +80,8 @@ class WebDataSource;
 class WebEncryptedMediaClient;
 class WebExternalPopupMenu;
 class WebExternalPopupMenuClient;
+class WebFileChooserCompletion;
 class WebFormElement;
-class WebGeolocationClient;
 class WebInstalledAppClient;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
@@ -84,11 +89,7 @@ class WebMediaPlayerEncryptedMediaClient;
 class WebMediaPlayerSource;
 class WebMediaSession;
 class WebMediaStream;
-class WebMIDIClient;
-class WebNotificationPermissionCallback;
-class WebPermissionClient;
 class WebServiceWorkerProvider;
-class WebSocketHandle;
 class WebPlugin;
 class WebPresentationClient;
 class WebPushClient;
@@ -97,9 +98,7 @@ class WebScreenOrientationClient;
 class WebString;
 class WebURL;
 class WebURLResponse;
-class WebUSBClient;
 class WebUserMediaClient;
-class WebVRClient;
 class WebWorkerContentSettingsClientProxy;
 struct WebColorSuggestion;
 struct WebConsoleMessage;
@@ -118,7 +117,7 @@ public:
 
     // May return null.
     // WebContentDecryptionModule* may be null if one has not yet been set.
-    virtual WebMediaPlayer* createMediaPlayer(const WebMediaPlayerSource&, WebMediaPlayerClient*, WebMediaPlayerEncryptedMediaClient*, WebContentDecryptionModule*, const WebString& sinkId, WebMediaSession*) { return 0; }
+    virtual WebMediaPlayer* createMediaPlayer(const WebMediaPlayerSource&, WebMediaPlayerClient*, WebMediaPlayerEncryptedMediaClient*, WebContentDecryptionModule*, const WebString& sinkId) { return 0; }
 
     // May return null.
     virtual WebMediaSession* createMediaSession() { return 0; }
@@ -173,7 +172,7 @@ public:
     enum class DetachType { Remove, Swap };
 
     // This frame has been detached from the view, but has not been closed yet.
-    virtual void frameDetached(WebFrame*, DetachType) { }
+    virtual void frameDetached(WebLocalFrame*, DetachType) {}
 
     // This frame has become focused..
     virtual void frameFocused() { }
@@ -185,8 +184,8 @@ public:
     // This frame's name has changed.
     virtual void didChangeName(const WebString& name, const WebString& uniqueName) { }
 
-    // This frame has been set to enforce strict mixed content checking.
-    virtual void didEnforceStrictMixedContentChecking() {}
+    // This frame has set an insecure request policy.
+    virtual void didEnforceInsecureRequestPolicy(WebInsecureRequestPolicy) {}
 
     // This frame has been updated to a unique origin, which should be
     // considered potentially trustworthy if
@@ -198,6 +197,12 @@ public:
 
     // The sandbox flags have changed for a child frame of this frame.
     virtual void didChangeSandboxFlags(WebFrame* childFrame, WebSandboxFlags flags) { }
+
+    // Called when a new Content Security Policy is added to the frame's
+    // document.  This can be triggered by handling of HTTP headers, handling
+    // of <meta> element, or by inheriting CSP from the parent (in case of
+    // about:blank).
+    virtual void didAddContentSecurityPolicy(const WebString& headerValue, WebContentSecurityPolicyType, WebContentSecurityPolicySource) { }
 
     // Some frame owner properties have changed for a child frame of this frame.
     // Frame owner properties currently include: scrolling, marginwidth and
@@ -262,9 +267,6 @@ public:
     // During a history navigation, we may choose to load new subframes from history as well.
     // This returns such a history item if appropriate.
     virtual WebHistoryItem historyItemForNewChildFrame() { return WebHistoryItem(); }
-
-    // Whether the client is handling a navigation request.
-    virtual bool hasPendingNavigation() { return false; }
 
     // Navigational notifications ------------------------------------------
 
@@ -347,7 +349,7 @@ public:
     // The navigation resulted in no change to the documents within the page.
     // For example, the navigation may have just resulted in scrolling to a
     // named anchor or a PopState event may have been dispatched.
-    virtual void didNavigateWithinPage(WebLocalFrame*, const WebHistoryItem&, WebHistoryCommitType) { }
+    virtual void didNavigateWithinPage(WebLocalFrame*, const WebHistoryItem&, WebHistoryCommitType, bool contentInitiated) { }
 
     // Called upon update to scroll position, document state, and other
     // non-navigational events related to the data held by WebHistoryItem.
@@ -364,10 +366,8 @@ public:
     // out-of-process parent frame.
     virtual void dispatchLoad() { }
 
-    // Web Notifications ---------------------------------------------------
-
-    // Requests permission to display platform notifications on the origin of this frame.
-    virtual void requestNotificationPermission(const WebSecurityOrigin&, WebNotificationPermissionCallback* callback) { }
+    // Returns the effective connection type when the frame was fetched.
+    virtual WebEffectiveConnectionType getEffectiveConnectionType() { return WebEffectiveConnectionType::TypeUnknown; }
 
 
     // Push API ---------------------------------------------------
@@ -392,6 +392,14 @@ public:
     // operations.
     virtual void didChangeSelection(bool isSelectionEmpty) { }
 
+    // This method is called in response to handleInputEvent() when the
+    // default action for the current keyboard event is not suppressed by the
+    // page, to give the embedder a chance to handle the keyboard event
+    // specially.
+    //
+    // Returns true if the keyboard event was handled by the embedder,
+    // indicating that the default action should be suppressed.
+    virtual bool handleCurrentKeyboardEvent() { return false; }
 
     // Dialogs -------------------------------------------------------------
 
@@ -429,6 +437,13 @@ public:
     // the user selects 'OK' or false otherwise.
     virtual bool runModalBeforeUnloadDialog(bool isReload) { return true; }
 
+    // This method returns immediately after showing the dialog. When the
+    // dialog is closed, it should call the WebFileChooserCompletion to
+    // pass the results of the dialog. Returns false if
+    // WebFileChooseCompletion will never be called.
+    virtual bool runFileChooser(
+        const blink::WebFileChooserParams& params,
+        WebFileChooserCompletion* chooserCompletion) { return false; }
 
     // UI ------------------------------------------------------------------
 
@@ -436,31 +451,19 @@ public:
     // the given frame. Additional context data is supplied.
     virtual void showContextMenu(const WebContextMenuData&) { }
 
-    // Called when the data attached to the currently displayed context menu is
-    // invalidated. The context menu may be closed if possible.
-    virtual void clearContextMenu() { }
-
+    // This method is called in response to WebView's saveImageAt(x, y).
+    // A data url from <canvas> or <img> is passed to the method's argument.
+    virtual void saveImageFromDataURL(const WebString&) { }
 
     // Low-level resource notifications ------------------------------------
 
     // A request is about to be sent out, and the client may modify it.  Request
     // is writable, and changes to the URL, for example, will change the request
-    // made.  If this request is the result of a redirect, then redirectResponse
-    // will be non-null and contain the response that triggered the redirect.
-    virtual void willSendRequest(
-        WebLocalFrame*, unsigned identifier, WebURLRequest&,
-        const WebURLResponse& redirectResponse) { }
+    // made.
+    virtual void willSendRequest(WebLocalFrame*, WebURLRequest&) {}
 
-    // Response headers have been received for the resource request given
-    // by identifier.
-    virtual void didReceiveResponse(unsigned identifier, const WebURLResponse&) { }
-
-    virtual void didChangeResourcePriority(
-        unsigned identifier, const WebURLRequest::Priority& priority, int) { }
-
-    // The resource request given by identifier succeeded.
-    virtual void didFinishResourceLoad(
-        WebLocalFrame*, unsigned identifier) { }
+    // Response headers have been received.
+    virtual void didReceiveResponse(const WebURLResponse&) {}
 
     // The specified request was satified from WebCore's memory cache.
     virtual void didLoadResourceFromMemoryCache(
@@ -483,10 +486,10 @@ public:
 
     // This frame has displayed inactive content (such as an image) from
     // a connection with certificate errors.
-    virtual void didDisplayContentWithCertificateErrors(const WebURL& url, const WebCString& securityInfo, const WebURL& mainResourceUrl, const WebCString& mainResourceSecurityInfo) {}
+    virtual void didDisplayContentWithCertificateErrors(const WebURL& url) {}
     // This frame has run active content (such as a script) from a
     // connection with certificate errors.
-    virtual void didRunContentWithCertificateErrors(const WebURL& url, const WebCString& securityInfo, const WebURL& mainResourceUrl, const WebCString& mainResourceSecurityInfo) {}
+    virtual void didRunContentWithCertificateErrors(const WebURL& url) {}
 
     // A performance timing event (e.g. first paint) occurred
     virtual void didChangePerformanceTiming() { }
@@ -519,19 +522,11 @@ public:
 
     // Find-in-page notifications ------------------------------------------
 
-    // Notifies how many matches have been found so far, for a given
-    // identifier.  |finalUpdate| specifies whether this is the last update
-    // (all frames have completed scoping). This notification is only delivered
-    // to the main frame and aggregates all matches across all frames.
+    // Notifies how many matches have been found in this frame so far, for a
+    // given identifier.  |finalUpdate| specifies whether this is the last
+    // update for this frame.
     virtual void reportFindInPageMatchCount(
         int identifier, int count, bool finalUpdate) { }
-
-    // Notifies how many matches have been found in a specific frame so far,
-    // for a given identifier. Unlike reprotFindInPageMatchCount(), this
-    // notification is sent to the client of each frame, and only reports
-    // results per-frame.
-    virtual void reportFindInFrameMatchCount(
-        int identifier, int count, bool finalUpdate) {}
 
     // Notifies what tick-mark rect is currently selected.   The given
     // identifier lets the client know which request this message belongs
@@ -541,12 +536,6 @@ public:
     // where on the screen the selection rect is currently located.
     virtual void reportFindInPageSelection(
         int identifier, int activeMatchOrdinal, const WebRect& selection) { }
-
-    // Currently, TextFinder will report up the frame tree on certain events to
-    // form a tree of TextFinders. When we're experimenting with OOPIFs, this
-    // is precisely not what we want. Experiments that want to search per frame
-    // should override this to true.
-    virtual bool shouldSearchSingleFrame() { return false; }
 
     // Quota ---------------------------------------------------------
 
@@ -563,17 +552,6 @@ public:
         unsigned long long newQuotaInBytes,
         WebStorageQuotaCallbacks) { }
 
-    // WebSocket -----------------------------------------------------
-
-    // A WebSocket object is going to open a new WebSocket connection.
-    virtual void willOpenWebSocket(WebSocketHandle*) { }
-
-    // Geolocation ---------------------------------------------------------
-
-    // Access the embedder API for (client-based) geolocation client .
-    virtual WebGeolocationClient* geolocationClient() { return 0; }
-
-
     // MediaStream -----------------------------------------------------
 
     // A new WebRTCPeerConnectionHandler is created.
@@ -587,26 +565,14 @@ public:
     virtual WebEncryptedMediaClient* encryptedMediaClient() { return 0; }
 
 
-    // Web MIDI -------------------------------------------------------------
-
-    virtual WebMIDIClient* webMIDIClient() { return 0; }
-
-
-    // Messages ------------------------------------------------------
-
-    // Notifies the embedder that a postMessage was issued on this frame, and
-    // gives the embedder a chance to handle it instead of WebKit. Returns true
-    // if the embedder handled it.
-    virtual bool willCheckAndDispatchMessageEvent(
-        WebLocalFrame* sourceFrame,
-        WebFrame* targetFrame,
-        WebSecurityOrigin target,
-        WebDOMMessageEvent event) { return false; }
+    // User agent ------------------------------------------------------
 
     // Asks the embedder if a specific user agent should be used. Non-empty
     // strings indicate an override should be used. Otherwise,
     // Platform::current()->userAgent() will be called to provide one.
     virtual WebString userAgentOverride() { return WebString(); }
+
+    // Do not track ----------------------------------------------------
 
     // Asks the embedder what value the network stack will send for the DNT
     // header. An empty string indicates that no DNT header will be send.
@@ -656,14 +622,11 @@ public:
     // Fullscreen ----------------------------------------------------------
 
     // Called to enter/exit fullscreen mode.
-    // After calling enterFullscreen, WebWidget::{will,Did}EnterFullScreen
-    // should bound resizing the WebWidget into fullscreen mode.
-    // Similarly, when exitFullScreen is called,
-    // WebWidget::{will,Did}ExitFullScreen should bound resizing the WebWidget
-    // out of fullscreen mode.
-    // Note: the return value is ignored.
-    virtual bool enterFullscreen() { return false; }
-    virtual bool exitFullscreen() { return false; }
+    // After calling enterFullscreen or exitFullscreen,
+    // WebWidget::didEnterFullscreen or WebWidget::didExitFullscreen
+    // respectively will be called once the fullscreen mode has changed.
+    virtual void enterFullscreen() { }
+    virtual void exitFullscreen() { }
 
 
     // Sudden termination --------------------------------------------------
@@ -677,16 +640,6 @@ public:
     };
     virtual void suddenTerminationDisablerChanged(bool present, SuddenTerminationDisablerType) { }
 
-
-    // Permissions ---------------------------------------------------------
-
-    // Access the embedder API for permission client.
-    virtual WebPermissionClient* permissionClient() { return 0; }
-
-    // Virtual Reality -----------------------------------------------------
-
-    // Access the embedder API for virtual reality client.
-    virtual WebVRClient* webVRClient() { return 0; }
 
     // App Banners ---------------------------------------------------------
     virtual WebAppBannerClient* appBannerClient() { return 0; }
@@ -710,9 +663,6 @@ public:
     // Bluetooth -----------------------------------------------------------
     virtual WebBluetooth* bluetooth() { return 0; }
 
-    // WebUSB --------------------------------------------------------------
-    virtual WebUSBClient* usbClient() { return nullptr; }
-
 
     // Audio Output Devices API --------------------------------------------
 
@@ -727,7 +677,22 @@ public:
     }
 
     // Mojo ----------------------------------------------------------------
-    virtual ServiceRegistry* serviceRegistry() { return nullptr; }
+    virtual InterfaceProvider* interfaceProvider() { return nullptr; }
+
+    // Visibility ----------------------------------------------------------
+
+    // Returns the current visibility of the WebFrame.
+    virtual WebPageVisibilityState visibilityState() const
+    {
+        return WebPageVisibilityStateVisible;
+    }
+
+    // Overwrites the given URL to use an HTML5 embed if possible.
+    // An empty URL is returned if the URL is not overriden.
+    virtual WebURL overrideFlashEmbedWithHTML(const WebURL& url)
+    {
+        return WebURL();
+    }
 
 protected:
     virtual ~WebFrameClient() { }

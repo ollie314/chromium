@@ -32,6 +32,9 @@
 #include "core/layout/LayoutScrollbarPart.h"
 #include "core/layout/LayoutScrollbarTheme.h"
 #include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutAPIShim.h"
+#include "core/layout/api/LayoutPartItem.h"
+#include "core/paint/ObjectPaintInvalidator.h"
 #include "platform/graphics/GraphicsContext.h"
 
 namespace blink {
@@ -90,7 +93,7 @@ DEFINE_TRACE(LayoutScrollbar)
 LayoutBox* LayoutScrollbar::owningLayoutObject() const
 {
     if (m_owningFrame)
-        return m_owningFrame->ownerLayoutObject();
+        return toLayoutBox(LayoutAPIShim::layoutObjectFrom(m_owningFrame->ownerLayoutItem()));
     return m_owner && m_owner->layoutObject() ? m_owner->layoutObject()->enclosingBox() : 0;
 }
 
@@ -188,7 +191,7 @@ void LayoutScrollbar::updateScrollbarParts(bool destroy)
     LayoutScrollbarPart* part = m_parts.get(ScrollbarBGPart);
     if (part) {
         part->layout();
-        newThickness = isHorizontal ? part->size().height() : part->size().width();
+        newThickness = (isHorizontal ? part->size().height() : part->size().width()).toInt();
     }
 
     if (newThickness != oldThickness) {
@@ -314,16 +317,16 @@ IntRect LayoutScrollbar::trackRect(int startLength, int endLength) const
         part->layout();
 
     if (orientation() == HorizontalScrollbar) {
-        int marginLeft = part ? static_cast<int>(part->marginLeft()) : 0;
-        int marginRight = part ? static_cast<int>(part->marginRight()) : 0;
+        int marginLeft = part ? part->marginLeft().toInt() : 0;
+        int marginRight = part ? part->marginRight().toInt() : 0;
         startLength += marginLeft;
         endLength += marginRight;
         int totalLength = startLength + endLength;
         return IntRect(x() + startLength, y(), width() - totalLength, height());
     }
 
-    int marginTop = part ? static_cast<int>(part->marginTop()) : 0;
-    int marginBottom = part ? static_cast<int>(part->marginBottom()) : 0;
+    int marginTop = part ? part->marginTop().toInt() : 0;
+    int marginBottom = part ? part->marginBottom().toInt() : 0;
     startLength += marginTop;
     endLength += marginBottom;
     int totalLength = startLength + endLength;
@@ -341,11 +344,11 @@ IntRect LayoutScrollbar::trackPieceRectWithMargins(ScrollbarPart partType, const
 
     IntRect rect = oldRect;
     if (orientation() == HorizontalScrollbar) {
-        rect.setX(rect.x() + partLayoutObject->marginLeft());
-        rect.setWidth(rect.width() - partLayoutObject->marginWidth());
+        rect.setX((rect.x() + partLayoutObject->marginLeft()).toInt());
+        rect.setWidth((rect.width() - partLayoutObject->marginWidth()).toInt());
     } else {
-        rect.setY(rect.y() + partLayoutObject->marginTop());
-        rect.setHeight(rect.height() - partLayoutObject->marginHeight());
+        rect.setY((rect.y() + partLayoutObject->marginTop()).toInt());
+        rect.setHeight((rect.height() - partLayoutObject->marginHeight()).toInt());
     }
     return rect;
 }
@@ -356,13 +359,13 @@ int LayoutScrollbar::minimumThumbLength() const
     if (!partLayoutObject)
         return 0;
     partLayoutObject->layout();
-    return orientation() == HorizontalScrollbar ? partLayoutObject->size().width() : partLayoutObject->size().height();
+    return (orientation() == HorizontalScrollbar ? partLayoutObject->size().width() : partLayoutObject->size().height()).toInt();
 }
 
-void LayoutScrollbar::invalidateDisplayItemClientsOfScrollbarParts(const LayoutBoxModelObject& paintInvalidationContainer)
+void LayoutScrollbar::invalidateDisplayItemClientsOfScrollbarParts()
 {
     for (auto& part : m_parts)
-        part.value->invalidateDisplayItemClientsIncludingNonCompositingDescendants(&paintInvalidationContainer, PaintInvalidationScroll);
+        ObjectPaintInvalidator(*part.value).invalidateDisplayItemClientsIncludingNonCompositingDescendants(PaintInvalidationScroll);
 }
 
 } // namespace blink

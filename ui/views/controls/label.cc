@@ -19,6 +19,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/default_style.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
@@ -27,15 +28,6 @@
 #include "ui/native_theme/native_theme.h"
 
 namespace views {
-namespace {
-
-const gfx::FontList& GetDefaultFontList() {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  return rb.GetFontListWithDelta(ui::kLabelFontSizeDelta);
-}
-
-}  // namespace
-
 // static
 const char Label::kViewClassName[] = "Label";
 const int Label::kFocusBorderPadding = 1;
@@ -51,6 +43,12 @@ Label::Label(const base::string16& text, const gfx::FontList& font_list) {
 }
 
 Label::~Label() {
+}
+
+// static
+const gfx::FontList& Label::GetDefaultFontList() {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return rb.GetFontListWithDelta(ui::kLabelFontSizeDelta);
 }
 
 void Label::SetFontList(const gfx::FontList& font_list) {
@@ -191,8 +189,16 @@ void Label::SetHandlesTooltips(bool enabled) {
   handles_tooltips_ = enabled;
 }
 
-void Label::SizeToFit(int max_width) {
+void Label::SizeToFit(int fixed_width) {
   DCHECK(multi_line());
+  DCHECK_EQ(0, max_width_);
+  fixed_width_ = fixed_width;
+  SizeToPreferredSize();
+}
+
+void Label::SetMaximumWidth(int max_width) {
+  DCHECK(multi_line());
+  DCHECK_EQ(0, fixed_width_);
   max_width_ = max_width;
   SizeToPreferredSize();
 }
@@ -213,7 +219,7 @@ base::string16 Label::GetDisplayTextForTesting() {
 
 gfx::Insets Label::GetInsets() const {
   gfx::Insets insets = View::GetInsets();
-  if (focusable()) {
+  if (focus_behavior() != FocusBehavior::NEVER) {
     insets += gfx::Insets(kFocusBorderPadding, kFocusBorderPadding,
                           kFocusBorderPadding, kFocusBorderPadding);
   }
@@ -233,12 +239,16 @@ gfx::Size Label::GetPreferredSize() const {
   if (!visible() && collapse_when_hidden_)
     return gfx::Size();
 
-  if (multi_line() && max_width_ != 0 && !text().empty())
-    return gfx::Size(max_width_, GetHeightForWidth(max_width_));
+  if (multi_line() && fixed_width_ != 0 && !text().empty())
+    return gfx::Size(fixed_width_, GetHeightForWidth(fixed_width_));
 
   gfx::Size size(GetTextSize());
   const gfx::Insets insets = GetInsets();
   size.Enlarge(insets.width(), insets.height());
+
+  if (multi_line() && max_width_ != 0 && max_width_ < size.width())
+    return gfx::Size(max_width_, GetHeightForWidth(max_width_));
+
   return size;
 }
 
@@ -332,7 +342,8 @@ bool Label::GetTooltipText(const gfx::Point& p, base::string16* tooltip) const {
 }
 
 void Label::OnEnabledChanged() {
-  RecalculateColors();
+  ApplyTextColors();
+  View::OnEnabledChanged();
 }
 
 std::unique_ptr<gfx::RenderText> Label::CreateRenderText(
@@ -378,7 +389,7 @@ void Label::OnPaint(gfx::Canvas* canvas) {
   } else {
     PaintText(canvas);
   }
-  if (HasFocus())
+  if (HasFocus() && !ui::MaterialDesignController::IsSecondaryUiMaterial())
     canvas->DrawFocusRect(GetFocusBounds());
 }
 
@@ -418,6 +429,7 @@ void Label::Init(const base::string16& text, const gfx::FontList& font_list) {
   UpdateColorsFromTheme(GetNativeTheme());
   handles_tooltips_ = true;
   collapse_when_hidden_ = false;
+  fixed_width_ = 0;
   max_width_ = 0;
   is_first_paint_text_ = true;
   SetText(text);
@@ -435,7 +447,7 @@ void Label::MaybeBuildRenderTextLines() {
     return;
 
   gfx::Rect rect = GetContentsBounds();
-  if (focusable())
+  if (focus_behavior() != FocusBehavior::NEVER)
     rect.Inset(kFocusBorderPadding, kFocusBorderPadding);
   if (rect.IsEmpty())
     return;
@@ -481,7 +493,7 @@ void Label::MaybeBuildRenderTextLines() {
     for (size_t i = lines_.size(); i < lines.size(); ++i)
       lines_.back()->SetText(lines_.back()->text() + lines[i]);
   }
-  RecalculateColors();
+  ApplyTextColors();
 }
 
 gfx::Rect Label::GetFocusBounds() {
@@ -560,6 +572,11 @@ void Label::RecalculateColors() {
                                     background_color_) :
       requested_disabled_color_;
 
+  ApplyTextColors();
+  SchedulePaint();
+}
+
+void Label::ApplyTextColors() {
   SkColor color = enabled() ? actual_enabled_color_ : actual_disabled_color_;
   bool subpixel_rendering_suppressed =
       SkColorGetA(background_color_) != 0xFF || !subpixel_rendering_enabled_;
@@ -567,7 +584,6 @@ void Label::RecalculateColors() {
     lines_[i]->SetColor(color);
     lines_[i]->set_subpixel_rendering_suppressed(subpixel_rendering_suppressed);
   }
-  SchedulePaint();
 }
 
 void Label::UpdateColorsFromTheme(const ui::NativeTheme* theme) {

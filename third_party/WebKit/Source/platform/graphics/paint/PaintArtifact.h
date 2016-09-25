@@ -35,7 +35,7 @@ class PLATFORM_EXPORT PaintArtifact final {
     WTF_MAKE_NONCOPYABLE(PaintArtifact);
 public:
     PaintArtifact();
-    PaintArtifact(DisplayItemList, Vector<PaintChunk>);
+    PaintArtifact(DisplayItemList, Vector<PaintChunk>, bool isSuitableForGpuRasterization);
     PaintArtifact(PaintArtifact&&);
     ~PaintArtifact();
 
@@ -48,6 +48,10 @@ public:
 
     Vector<PaintChunk>& paintChunks() { return m_paintChunks; }
     const Vector<PaintChunk>& paintChunks() const { return m_paintChunks; }
+
+    Vector<PaintChunk>::const_iterator findChunkByDisplayItemIndex(size_t index) const { return findChunkInVectorByDisplayItemIndex(m_paintChunks, index); }
+
+    bool isSuitableForGpuRasterization() const { return m_isSuitableForGpuRasterization; }
 
     // Resets to an empty paint artifact.
     void reset();
@@ -65,8 +69,7 @@ public:
 private:
     DisplayItemList m_displayItemList;
     Vector<PaintChunk> m_paintChunks;
-
-    friend class PaintControllerTest;
+    bool m_isSuitableForGpuRasterization;
 };
 
 } // namespace blink

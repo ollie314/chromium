@@ -30,7 +30,6 @@
 
 #include "core/dom/Document.h"
 
-#include "core/dom/DocumentVisibilityObserver.h"
 #include "core/frame/FrameView.h"
 #include "core/html/HTMLHeadElement.h"
 #include "core/html/HTMLLinkElement.h"
@@ -41,6 +40,7 @@
 #include "platform/weborigin/SecurityOrigin.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include <memory>
 
 namespace blink {
 
@@ -50,7 +50,7 @@ protected:
 
     void TearDown() override
     {
-        ThreadHeap::collectAllGarbage();
+        ThreadState::current()-> collectAllGarbage();
     }
 
     Document& document() const { return m_dummyPageHolder->document(); }
@@ -59,7 +59,7 @@ protected:
     void setHtmlInnerHTML(const char*);
 
 private:
-    OwnPtr<DummyPageHolder> m_dummyPageHolder;
+    std::unique_ptr<DummyPageHolder> m_dummyPageHolder;
 };
 
 void DocumentTest::SetUp()
@@ -71,85 +71,6 @@ void DocumentTest::setHtmlInnerHTML(const char* htmlContent)
 {
     document().documentElement()->setInnerHTML(String::fromUTF8(htmlContent), ASSERT_NO_EXCEPTION);
     document().view()->updateAllLifecyclePhases();
-}
-
-class MockDocumentVisibilityObserver
-    : public GarbageCollectedFinalized<MockDocumentVisibilityObserver>
-    , public DocumentVisibilityObserver {
-    USING_GARBAGE_COLLECTED_MIXIN(MockDocumentVisibilityObserver);
-public:
-    static MockDocumentVisibilityObserver* create(Document& document)
-    {
-        return new MockDocumentVisibilityObserver(document);
-    }
-
-    DEFINE_INLINE_VIRTUAL_TRACE()
-    {
-        DocumentVisibilityObserver::trace(visitor);
-    }
-
-    MOCK_METHOD1(didChangeVisibilityState, void(PageVisibilityState));
-    MOCK_METHOD0(willDetachDocument, void());
-
-private:
-    MockDocumentVisibilityObserver(Document& document) : DocumentVisibilityObserver(document) { }
-};
-
-TEST_F(DocumentTest, VisibilityOberver)
-{
-    page().setVisibilityState(PageVisibilityStateVisible, true); // initial state
-    MockDocumentVisibilityObserver* observer1 = MockDocumentVisibilityObserver::create(document());
-
-    {
-        MockDocumentVisibilityObserver* observer2 = MockDocumentVisibilityObserver::create(document());
-        EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateHidden)).Times(0);
-        EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateVisible)).Times(0);
-        EXPECT_CALL(*observer2, didChangeVisibilityState(PageVisibilityStateHidden)).Times(0);
-        EXPECT_CALL(*observer2, didChangeVisibilityState(PageVisibilityStateVisible)).Times(0);
-        ::testing::Mock::VerifyAndClearExpectations(observer1);
-        ::testing::Mock::VerifyAndClearExpectations(observer2);
-
-        EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateHidden)).Times(1);
-        EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateVisible)).Times(0);
-        EXPECT_CALL(*observer2, didChangeVisibilityState(PageVisibilityStateHidden)).Times(1);
-        EXPECT_CALL(*observer2, didChangeVisibilityState(PageVisibilityStateVisible)).Times(0);
-        page().setVisibilityState(PageVisibilityStateHidden, false);
-        ::testing::Mock::VerifyAndClearExpectations(observer1);
-        ::testing::Mock::VerifyAndClearExpectations(observer2);
-
-        EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateHidden)).Times(0);
-        EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateVisible)).Times(0);
-        EXPECT_CALL(*observer2, didChangeVisibilityState(PageVisibilityStateHidden)).Times(0);
-        EXPECT_CALL(*observer2, didChangeVisibilityState(PageVisibilityStateVisible)).Times(0);
-        page().setVisibilityState(PageVisibilityStateHidden, false);
-        ::testing::Mock::VerifyAndClearExpectations(observer1);
-        ::testing::Mock::VerifyAndClearExpectations(observer2);
-
-        EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateHidden)).Times(0);
-        EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateVisible)).Times(1);
-        EXPECT_CALL(*observer2, didChangeVisibilityState(PageVisibilityStateHidden)).Times(0);
-        EXPECT_CALL(*observer2, didChangeVisibilityState(PageVisibilityStateVisible)).Times(0);
-        OwnPtr<DummyPageHolder> alternatePage = DummyPageHolder::create(IntSize(800, 600));
-        Document& alternateDocument = alternatePage->document();
-        observer2->setObservedDocument(alternateDocument);
-        page().setVisibilityState(PageVisibilityStateVisible, false);
-        ::testing::Mock::VerifyAndClearExpectations(observer1);
-        ::testing::Mock::VerifyAndClearExpectations(observer2);
-
-        EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateHidden)).Times(1);
-        EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateVisible)).Times(0);
-        EXPECT_CALL(*observer2, didChangeVisibilityState(PageVisibilityStateHidden)).Times(1);
-        EXPECT_CALL(*observer2, didChangeVisibilityState(PageVisibilityStateVisible)).Times(0);
-        observer2->setObservedDocument(document());
-        page().setVisibilityState(PageVisibilityStateHidden, false);
-        ::testing::Mock::VerifyAndClearExpectations(observer1);
-        ::testing::Mock::VerifyAndClearExpectations(observer2);
-    }
-
-    // observer2 destroyed
-    EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateHidden)).Times(0);
-    EXPECT_CALL(*observer1, didChangeVisibilityState(PageVisibilityStateVisible)).Times(1);
-    page().setVisibilityState(PageVisibilityStateVisible, false);
 }
 
 // This tests that we properly resize and re-layout pages for printing in the presence of
@@ -263,23 +184,37 @@ TEST_F(DocumentTest, referrerPolicyParsing)
     struct TestCase {
         const char* policy;
         ReferrerPolicy expected;
+        bool isLegacy;
     } tests[] = {
-        { "always", ReferrerPolicyAlways },
-        { "default", ReferrerPolicyNoReferrerWhenDowngrade },
-        { "never", ReferrerPolicyNever },
-        { "no-referrer", ReferrerPolicyNever },
-        { "no-referrer-when-downgrade", ReferrerPolicyNoReferrerWhenDowngrade },
-        { "not-a-real-policy", ReferrerPolicyDefault },
-        { "origin", ReferrerPolicyOrigin },
-        { "origin-when-crossorigin", ReferrerPolicyOriginWhenCrossOrigin },
-        { "origin-when-cross-origin", ReferrerPolicyOriginWhenCrossOrigin },
+        { "", ReferrerPolicyDefault, false },
+        // Test that invalid policy values are ignored.
+        { "not-a-real-policy", ReferrerPolicyDefault, false },
+        { "not-a-real-policy,also-not-a-real-policy", ReferrerPolicyDefault, false },
+        { "not-a-real-policy,unsafe-url", ReferrerPolicyAlways, false },
+        { "unsafe-url,not-a-real-policy", ReferrerPolicyAlways, false },
+        // Test parsing each of the policy values.
+        { "always", ReferrerPolicyAlways, true },
+        { "default", ReferrerPolicyNoReferrerWhenDowngrade, true },
+        { "never", ReferrerPolicyNever, true },
+        { "no-referrer", ReferrerPolicyNever, false },
+        { "default", ReferrerPolicyNoReferrerWhenDowngrade, true },
+        { "no-referrer-when-downgrade", ReferrerPolicyNoReferrerWhenDowngrade, false },
+        { "origin", ReferrerPolicyOrigin, false },
+        { "origin-when-crossorigin", ReferrerPolicyOriginWhenCrossOrigin, true },
+        { "origin-when-cross-origin", ReferrerPolicyOriginWhenCrossOrigin, false },
         { "unsafe-url", ReferrerPolicyAlways },
     };
 
     for (auto test : tests) {
         document().setReferrerPolicy(ReferrerPolicyDefault);
-
-        document().processReferrerPolicy(test.policy);
+        if (test.isLegacy) {
+            // Legacy keyword support must be explicitly enabled for the policy to parse successfully.
+            document().parseAndSetReferrerPolicy(test.policy);
+            EXPECT_EQ(ReferrerPolicyDefault, document().getReferrerPolicy());
+            document().parseAndSetReferrerPolicy(test.policy, true);
+        } else {
+            document().parseAndSetReferrerPolicy(test.policy);
+        }
         EXPECT_EQ(test.expected, document().getReferrerPolicy()) << test.policy;
     }
 }

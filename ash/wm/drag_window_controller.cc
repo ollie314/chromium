@@ -6,10 +6,12 @@
 
 #include <algorithm>
 
+#include "ash/aura/wm_window_aura.h"
+#include "ash/common/shell_window_ids.h"
+#include "ash/common/wm/forwarding_layer_delegate.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
-#include "ash/shell_window_ids.h"
 #include "ash/wm/window_util.h"
 #include "base/memory/ptr_util.h"
 #include "ui/aura/client/aura_constants.h"
@@ -20,6 +22,7 @@
 #include "ui/base/hit_test.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_tree_owner.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -28,11 +31,14 @@
 
 namespace ash {
 
-// This keeps tack of the drag window's state. It creates/destory/updates bounds
-// and opacity based on the current bounds.
-class DragWindowController::DragWindowDetails : public aura::WindowDelegate {
+// This keeps track of the drag window's state. It creates/destroys/updates
+// bounds and opacity based on the current bounds.
+class DragWindowController::DragWindowDetails
+    : public aura::WindowDelegate,
+      public ::wm::LayerDelegateFactory {
  public:
-  DragWindowDetails(const gfx::Display& display, aura::Window* original_window)
+  DragWindowDetails(const display::Display& display,
+                    aura::Window* original_window)
       : root_window_(Shell::GetInstance()
                          ->window_tree_host_manager()
                          ->GetRootWindowForDisplayId(display.id())) {}
@@ -77,6 +83,7 @@ class DragWindowController::DragWindowDetails : public aura::WindowDelegate {
   void CreateDragWindow(aura::Window* original_window,
                         const gfx::Rect& bounds_in_screen) {
     DCHECK(!drag_window_);
+    original_window_ = original_window;
     drag_window_ = new aura::Window(this);
     int parent_id = original_window->parent()->id();
     aura::Window* container = root_window_->GetChildById(parent_id);
@@ -108,11 +115,7 @@ class DragWindowController::DragWindowDetails : public aura::WindowDelegate {
 
   void RecreateWindowLayers(aura::Window* original_window) {
     DCHECK(!layer_owner_.get());
-    layer_owner_ = ::wm::RecreateLayers(original_window);
-    // TODO(oshima): Recreated child layers may not have been painted
-    // yet, and may not be able to paint to because it does not have
-    // its original delegate.
-    layer_owner_->root()->set_delegate(original_window->layer()->delegate());
+    layer_owner_ = ::wm::RecreateLayers(original_window, this);
     // Place the layer at (0, 0) of the DragWindowController's window.
     gfx::Rect layer_bounds = layer_owner_->root()->bounds();
     layer_bounds.set_origin(gfx::Point(0, 0));
@@ -127,6 +130,16 @@ class DragWindowController::DragWindowDetails : public aura::WindowDelegate {
     ui::ScopedLayerAnimationSettings scoped_setter(layer->GetAnimator());
     layer->SetOpacity(opacity);
     layer_owner_->root()->SetOpacity(1.0f);
+  }
+
+  // aura::WindowDelegate:
+  ui::LayerDelegate* CreateDelegate(ui::Layer* foo, ui::Layer* layer) override {
+    if (!layer || !layer->delegate())
+      return nullptr;
+    wm::ForwardingLayerDelegate* new_delegate =
+        new wm::ForwardingLayerDelegate(foo, layer);
+    delegates_.push_back(base::WrapUnique(new_delegate));
+    return new_delegate;
   }
 
   // aura::WindowDelegate:
@@ -162,6 +175,10 @@ class DragWindowController::DragWindowDetails : public aura::WindowDelegate {
 
   aura::Window* drag_window_ = nullptr;  // Owned by the container.
 
+  aura::Window* original_window_ = nullptr;
+
+  std::vector<std::unique_ptr<wm::ForwardingLayerDelegate>> delegates_;
+
   // The copy of window_->layer() and its descendants.
   std::unique_ptr<ui::LayerTreeOwner> layer_owner_;
 
@@ -182,14 +199,14 @@ float DragWindowController::GetDragWindowOpacity(
 DragWindowController::DragWindowController(aura::Window* window)
     : window_(window) {
   DCHECK(drag_windows_.empty());
-  gfx::Screen* screen = gfx::Screen::GetScreen();
-  gfx::Display current = screen->GetDisplayNearestWindow(window_);
+  display::Screen* screen = display::Screen::GetScreen();
+  display::Display current = screen->GetDisplayNearestWindow(window_);
 
-  for (const gfx::Display& display : screen->GetAllDisplays()) {
+  for (const display::Display& display : screen->GetAllDisplays()) {
     if (current.id() == display.id())
       continue;
     drag_windows_.push_back(
-        base::WrapUnique(new DragWindowDetails(display, window_)));
+        base::MakeUnique<DragWindowDetails>(display, window_));
   }
 }
 
@@ -232,6 +249,22 @@ const ui::LayerTreeOwner* DragWindowController::GetDragLayerOwnerForTest(
     }
   }
   return nullptr;
+}
+
+void DragWindowController::RequestLayerPaintForTest() {
+  ui::PaintContext context(nullptr, 1.0f, gfx::Rect());
+  for (auto& details : drag_windows_) {
+    std::vector<ui::Layer*> layers;
+    layers.push_back(details->drag_window_->layer());
+    while (layers.size()) {
+      ui::Layer* layer = layers.back();
+      layers.pop_back();
+      if (layer->delegate())
+        layer->delegate()->OnPaintLayer(context);
+      for (auto* child : layer->children())
+        layers.push_back(child);
+    }
+  }
 }
 
 }  // namespace ash

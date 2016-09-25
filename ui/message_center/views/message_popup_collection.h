@@ -15,7 +15,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/native_widget_types.h"
 #include "ui/message_center/message_center_export.h"
 #include "ui/message_center/message_center_observer.h"
 #include "ui/message_center/views/message_center_controller.h"
@@ -26,13 +25,12 @@ namespace base {
 class RunLoop;
 }
 
-namespace views {
-class Widget;
+namespace display {
+class Display;
 }
 
-namespace gfx {
-class Display;
-class Screen;
+namespace views {
+class Widget;
 }
 
 namespace message_center {
@@ -54,11 +52,7 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
     : public MessageCenterController,
       public MessageCenterObserver {
  public:
-  // |parent| specifies the parent widget of the toast windows. The default
-  // parent will be used for NULL. Usually each icon is spacing against its
-  // predecessor.
-  MessagePopupCollection(gfx::NativeView parent,
-                         MessageCenter* message_center,
+  MessagePopupCollection(MessageCenter* message_center,
                          MessageCenterTray* tray,
                          PopupAlignmentDelegate* alignment_delegate);
   ~MessagePopupCollection() override;
@@ -83,7 +77,7 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
   void OnMouseExited(ToastContentsView* toast_exited);
 
   // Invoked by toasts when they start/finish their animations.
-  // While "defer counter" is greater then zero, the popup collection does
+  // While "defer counter" is greater than zero, the popup collection does
   // not perform updates. It is used to wait for various animations and user
   // actions like serial closing of the toasts, when the remaining toasts "flow
   // under the mouse".
@@ -99,10 +93,7 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
   void ForgetToast(ToastContentsView* toast);
 
   // Called when the display bounds has been changed. Used in Windows only.
-  void OnDisplayMetricsChanged(const gfx::Display& display);
-
-  // Used by ToastContentsView to locate itself.
-  gfx::NativeView parent() const { return parent_; }
+  void OnDisplayMetricsChanged(const display::Display& display);
 
  private:
   friend class test::MessagePopupCollectionTest;
@@ -150,7 +141,6 @@ class MESSAGE_CENTER_EXPORT MessagePopupCollection
   void WaitForTest();
   gfx::Rect GetToastRectAt(size_t index) const;
 
-  gfx::NativeView parent_;
   MessageCenter* message_center_;
   MessageCenterTray* tray_;
   Toasts toasts_;

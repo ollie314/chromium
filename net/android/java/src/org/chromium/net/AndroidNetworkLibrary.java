@@ -7,8 +7,11 @@ package org.chromium.net;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.security.KeyChain;
 import android.telephony.TelephonyManager;
 import android.util.Log;
@@ -226,6 +229,30 @@ class AndroidNetworkLibrary {
         ConnectivityManager connectivityManager =
                 (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo networkInfo = connectivityManager.getActiveNetworkInfo();
+        if (networkInfo == null) return false; // No active network.
         return networkInfo.isRoaming();
+    }
+
+    /**
+     * Gets the SSID of the currently associated WiFi access point if there is one. Otherwise,
+     * returns empty string.
+     */
+    @CalledByNative
+    public static String getWifiSSID(Context context) {
+        if (context == null) {
+            return "";
+        }
+        final Intent intent = context.registerReceiver(
+                null, new IntentFilter(WifiManager.NETWORK_STATE_CHANGED_ACTION));
+        if (intent != null) {
+            final WifiInfo wifiInfo = intent.getParcelableExtra(WifiManager.EXTRA_WIFI_INFO);
+            if (wifiInfo != null) {
+                final String ssid = wifiInfo.getSSID();
+                if (ssid != null) {
+                    return ssid;
+                }
+            }
+        }
+        return "";
     }
 }

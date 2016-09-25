@@ -9,12 +9,18 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "media/audio/fake_audio_input_stream.h"
 #include "media/base/video_frame.h"
+#include "mojo/public/cpp/bindings/string.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkPaint.h"
+#include "ui/gfx/codec/png_codec.h"
 
 namespace media {
 
@@ -23,12 +29,16 @@ static const float kPacmanAngularVelocity = 600;
 // Beep every 500 ms.
 static const int kBeepInterval = 500;
 
+static const uint32_t kMinZoom = 100;
+static const uint32_t kMaxZoom = 400;
+
 void DrawPacman(bool use_argb,
                 uint8_t* const data,
                 base::TimeDelta elapsed_time,
                 float frame_rate,
-                const gfx::Size& frame_size) {
-  // |kN32_SkColorType| stands for the appropriiate RGBA/BGRA format.
+                const gfx::Size& frame_size,
+                uint32_t zoom) {
+  // |kN32_SkColorType| stands for the appropriate RGBA/BGRA format.
   const SkColorType colorspace =
       use_argb ? kN32_SkColorType : kAlpha_8_SkColorType;
   const SkImageInfo info = SkImageInfo::Make(
@@ -39,6 +49,12 @@ void DrawPacman(bool use_argb,
   SkPaint paint;
   paint.setStyle(SkPaint::kFill_Style);
   SkCanvas canvas(bitmap);
+
+  const SkScalar unscaled_zoom = zoom / 100.f;
+  SkMatrix matrix;
+  matrix.setScale(unscaled_zoom, unscaled_zoom, frame_size.width() / 2,
+                  frame_size.height() / 2);
+  canvas.setMatrix(matrix);
 
   // Equalize Alpha_8 that has light green background while RGBA has white.
   if (use_argb) {
@@ -72,10 +88,35 @@ void DrawPacman(bool use_argb,
   canvas.drawText(time_string.data(), time_string.length(), 30, 20, paint);
 }
 
+// Creates a PNG-encoded frame and sends it back to |callback|. The other
+// parameters are used to replicate the PacMan rendering.
+void DoTakeFakePhoto(VideoCaptureDevice::TakePhotoCallback callback,
+                     const VideoCaptureFormat& capture_format,
+                     base::TimeDelta elapsed_time,
+                     float fake_capture_rate,
+                     uint32_t zoom) {
+  std::unique_ptr<uint8_t[]> buffer(new uint8_t[VideoFrame::AllocationSize(
+      PIXEL_FORMAT_ARGB, capture_format.frame_size)]);
+
+  DrawPacman(true /* use_argb */, buffer.get(), elapsed_time, fake_capture_rate,
+             capture_format.frame_size, zoom);
+
+  mojom::BlobPtr blob = mojom::Blob::New();
+  const bool result = gfx::PNGCodec::Encode(
+      buffer.get(), gfx::PNGCodec::FORMAT_RGBA, capture_format.frame_size,
+      capture_format.frame_size.width() * 4, true /* discard_transparency */,
+      std::vector<gfx::PNGCodec::Comment>(), &blob->data);
+  DCHECK(result);
+
+  blob->mime_type = "image/png";
+  callback.Run(std::move(blob));
+}
+
 FakeVideoCaptureDevice::FakeVideoCaptureDevice(BufferOwnership buffer_ownership,
                                                float fake_capture_rate)
     : buffer_ownership_(buffer_ownership),
       fake_capture_rate_(fake_capture_rate),
+      current_zoom_(kMinZoom),
       weak_factory_(this) {}
 
 FakeVideoCaptureDevice::~FakeVideoCaptureDevice() {
@@ -84,7 +125,7 @@ FakeVideoCaptureDevice::~FakeVideoCaptureDevice() {
 
 void FakeVideoCaptureDevice::AllocateAndStart(
     const VideoCaptureParams& params,
-    scoped_ptr<VideoCaptureDevice::Client> client) {
+    std::unique_ptr<VideoCaptureDevice::Client> client) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   client_ = std::move(client);
@@ -137,6 +178,52 @@ void FakeVideoCaptureDevice::StopAndDeAllocate() {
   client_.reset();
 }
 
+void FakeVideoCaptureDevice::GetPhotoCapabilities(
+    GetPhotoCapabilitiesCallback callback) {
+  mojom::PhotoCapabilitiesPtr photo_capabilities =
+      mojom::PhotoCapabilities::New();
+  photo_capabilities->iso = mojom::Range::New();
+  photo_capabilities->iso->current = 100;
+  photo_capabilities->iso->max = 100;
+  photo_capabilities->iso->min = 100;
+  photo_capabilities->height = mojom::Range::New();
+  photo_capabilities->height->current = capture_format_.frame_size.height();
+  photo_capabilities->height->max = 1080;
+  photo_capabilities->height->min = 240;
+  photo_capabilities->width = mojom::Range::New();
+  photo_capabilities->width->current = capture_format_.frame_size.width();
+  photo_capabilities->width->max = 1920;
+  photo_capabilities->width->min = 320;
+  photo_capabilities->zoom = mojom::Range::New();
+  photo_capabilities->zoom->current = current_zoom_;
+  photo_capabilities->zoom->max = kMaxZoom;
+  photo_capabilities->zoom->min = kMinZoom;
+  photo_capabilities->focus_mode = mojom::MeteringMode::NONE;
+  photo_capabilities->exposure_mode = mojom::MeteringMode::NONE;
+  photo_capabilities->exposure_compensation = mojom::Range::New();
+  photo_capabilities->exposure_compensation->current = 0;
+  photo_capabilities->exposure_compensation->max = 0;
+  photo_capabilities->exposure_compensation->min = 0;
+  photo_capabilities->white_balance_mode = mojom::MeteringMode::NONE;
+  photo_capabilities->fill_light_mode = mojom::FillLightMode::NONE;
+  photo_capabilities->red_eye_reduction = false;
+  callback.Run(std::move(photo_capabilities));
+}
+
+void FakeVideoCaptureDevice::SetPhotoOptions(mojom::PhotoSettingsPtr settings,
+                                             SetPhotoOptionsCallback callback) {
+  if (settings->has_zoom)
+    current_zoom_ = std::max(kMinZoom, std::min(settings->zoom, kMaxZoom));
+  callback.Run(true);
+}
+
+void FakeVideoCaptureDevice::TakePhoto(TakePhotoCallback callback) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&DoTakeFakePhoto, base::Passed(&callback), capture_format_,
+                 elapsed_time_, fake_capture_rate_, current_zoom_));
+}
+
 void FakeVideoCaptureDevice::CaptureUsingOwnBuffers(
     base::TimeTicks expected_execution_time) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -144,12 +231,15 @@ void FakeVideoCaptureDevice::CaptureUsingOwnBuffers(
   memset(fake_frame_.get(), 0, frame_size);
 
   DrawPacman(false /* use_argb */, fake_frame_.get(), elapsed_time_,
-             fake_capture_rate_, capture_format_.frame_size);
+             fake_capture_rate_, capture_format_.frame_size, current_zoom_);
 
   // Give the captured frame to the client.
+  base::TimeTicks now = base::TimeTicks::Now();
+  if (first_ref_time_.is_null())
+    first_ref_time_ = now;
   client_->OnIncomingCapturedData(fake_frame_.get(), frame_size,
-                                  capture_format_, 0 /* rotation */,
-                                  base::TimeTicks::Now());
+                                  capture_format_, 0 /* rotation */, now,
+                                  now - first_ref_time_);
   BeepAndScheduleNextCapture(
       expected_execution_time,
       base::Bind(&FakeVideoCaptureDevice::CaptureUsingOwnBuffers,
@@ -160,7 +250,7 @@ void FakeVideoCaptureDevice::CaptureUsingClientBuffers(
     base::TimeTicks expected_execution_time) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  scoped_ptr<VideoCaptureDevice::Client::Buffer> capture_buffer(
+  std::unique_ptr<VideoCaptureDevice::Client::Buffer> capture_buffer(
       client_->ReserveOutputBuffer(capture_format_.frame_size,
                                    capture_format_.pixel_format,
                                    capture_format_.pixel_storage));
@@ -173,7 +263,7 @@ void FakeVideoCaptureDevice::CaptureUsingClientBuffers(
     // need to use |fake_frame_| to draw onto.
     memset(fake_frame_.get(), 0, capture_format_.ImageAllocationSize());
     DrawPacman(false /* use_argb */, fake_frame_.get(), elapsed_time_,
-               fake_capture_rate_, capture_format_.frame_size);
+               fake_capture_rate_, capture_format_.frame_size, current_zoom_);
 
     // Copy data from |fake_frame_| into the reserved planes of GpuMemoryBuffer.
     size_t offset = 0;
@@ -191,12 +281,15 @@ void FakeVideoCaptureDevice::CaptureUsingClientBuffers(
     uint8_t* data_ptr = static_cast<uint8_t*>(capture_buffer->data());
     memset(data_ptr, 0, capture_buffer->mapped_size());
     DrawPacman(true /* use_argb */, data_ptr, elapsed_time_, fake_capture_rate_,
-               capture_format_.frame_size);
+               capture_format_.frame_size, current_zoom_);
   }
 
   // Give the captured frame to the client.
+  base::TimeTicks now = base::TimeTicks::Now();
+  if (first_ref_time_.is_null())
+    first_ref_time_ = now;
   client_->OnIncomingCapturedBuffer(std::move(capture_buffer), capture_format_,
-                                    base::TimeTicks::Now());
+                                    now, now - first_ref_time_);
 
   BeepAndScheduleNextCapture(
       expected_execution_time,
@@ -227,7 +320,7 @@ void FakeVideoCaptureDevice::BeepAndScheduleNextCapture(
   const base::TimeTicks next_execution_time =
       std::max(current_time, expected_execution_time + frame_interval);
   const base::TimeDelta delay = next_execution_time - current_time;
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::Bind(next_capture, next_execution_time), delay);
 }
 

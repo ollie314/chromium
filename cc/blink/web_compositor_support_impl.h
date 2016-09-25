@@ -12,10 +12,6 @@
 #include "third_party/WebKit/public/platform/WebContentLayerClient.h"
 #include "third_party/WebKit/public/platform/WebLayer.h"
 
-namespace blink {
-class WebGraphicsContext3D;
-}
-
 namespace cc_blink {
 
 class CC_BLINK_EXPORT WebCompositorSupportImpl
@@ -29,7 +25,7 @@ class CC_BLINK_EXPORT WebCompositorSupportImpl
   blink::WebContentLayer* createContentLayer(
       blink::WebContentLayerClient* client) override;
   blink::WebExternalTextureLayer* createExternalTextureLayer(
-      blink::WebExternalTextureLayerClient* client) override;
+      cc::TextureLayerClient* client) override;
   blink::WebImageLayer* createImageLayer() override;
   blink::WebScrollbarLayer* createScrollbarLayer(
       blink::WebScrollbar* scrollbar,

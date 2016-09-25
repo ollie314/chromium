@@ -13,11 +13,13 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "content/browser/frame_host/frame_tree_node_blame_context.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/frame_host/render_frame_host_manager.h"
 #include "content/common/content_export.h"
+#include "content/common/frame_owner_properties.h"
 #include "content/common/frame_replication_state.h"
-#include "third_party/WebKit/public/web/WebFrameOwnerProperties.h"
+#include "third_party/WebKit/public/platform/WebInsecureRequestPolicy.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -27,6 +29,7 @@ class FrameTree;
 class NavigationRequest;
 class Navigator;
 class RenderFrameHostImpl;
+struct ContentSecurityPolicyHeader;
 
 // When a page contains iframes, its renderer process maintains a tree structure
 // of those frames. We are mirroring this tree in the browser process. This
@@ -58,10 +61,11 @@ class CONTENT_EXPORT FrameTreeNode {
                 RenderFrameHostDelegate* render_frame_delegate,
                 RenderWidgetHostDelegate* render_widget_delegate,
                 RenderFrameHostManager::Delegate* manager_delegate,
+                FrameTreeNode* parent,
                 blink::WebTreeScopeType scope,
                 const std::string& name,
                 const std::string& unique_name,
-                const blink::WebFrameOwnerProperties& frame_owner_properties);
+                const FrameOwnerProperties& frame_owner_properties);
 
   ~FrameTreeNode();
 
@@ -96,6 +100,10 @@ class CONTENT_EXPORT FrameTreeNode {
 
   const std::string& frame_name() const {
     return replication_state_.name;
+  }
+
+  const std::string& unique_name() const {
+    return replication_state_.unique_name;
   }
 
   size_t child_count() const {
@@ -141,9 +149,17 @@ class CONTENT_EXPORT FrameTreeNode {
   // Set the current name and notify proxies about the update.
   void SetFrameName(const std::string& name, const std::string& unique_name);
 
-  // Sets the current enforcement of strict mixed content checking and
-  // notifies proxies about the update.
-  void SetEnforceStrictMixedContentChecking(bool should_enforce);
+  // Add CSP header to replication state and notify proxies about the update.
+  void AddContentSecurityPolicy(const ContentSecurityPolicyHeader& header);
+
+  // Discards previous CSP headers and notifies proxies about the update.
+  // Typically invoked after committing navigation to a new document (since the
+  // new document comes with a fresh set of CSP http headers).
+  void ResetContentSecurityPolicy();
+
+  // Sets the current insecure request policy, and notifies proxies about the
+  // update.
+  void SetInsecureRequestPolicy(blink::WebInsecureRequestPolicy policy);
 
   // Returns the currently active sandbox flags for this frame.  This includes
   // flags inherited from parent frames and the currently active flags from the
@@ -174,12 +190,12 @@ class CONTENT_EXPORT FrameTreeNode {
   // flags were changed.
   bool CommitPendingSandboxFlags();
 
-  const blink::WebFrameOwnerProperties& frame_owner_properties() {
+  const FrameOwnerProperties& frame_owner_properties() {
     return frame_owner_properties_;
   }
 
   void set_frame_owner_properties(
-      const blink::WebFrameOwnerProperties& frame_owner_properties) {
+      const FrameOwnerProperties& frame_owner_properties) {
     frame_owner_properties_ = frame_owner_properties;
   }
 
@@ -201,6 +217,10 @@ class CONTENT_EXPORT FrameTreeNode {
   // Return the node immediately preceding this node in its parent's
   // |children_|, or nullptr if there is no such node.
   FrameTreeNode* PreviousSibling() const;
+
+  // Return the node immediately following this node in its parent's
+  // |children_|, or nullptr if there is no such node.
+  FrameTreeNode* NextSibling() const;
 
   // Returns true if this node is in a loading state.
   bool IsLoading() const;
@@ -265,12 +285,13 @@ class CONTENT_EXPORT FrameTreeNode {
   // FrameTreeNode.
   void BeforeUnloadCanceled();
 
+  // Returns the BlameContext associated with this node.
+  FrameTreeNodeBlameContext& blame_context() { return blame_context_; }
+
  private:
   class OpenerDestroyedObserver;
 
-  void set_parent(FrameTreeNode* parent) { parent_ = parent; }
-
-  void TraceSnapshot() const;
+  FrameTreeNode* GetSibling(int relative_offset) const;
 
   // The next available browser-global FrameTreeNode ID.
   static int next_frame_tree_node_id_;
@@ -292,8 +313,7 @@ class CONTENT_EXPORT FrameTreeNode {
   // even if the frame does a cross-process navigation.
   const int frame_tree_node_id_;
 
-  // The parent node of this frame. NULL if this node is the root or if it has
-  // not yet been attached to the frame tree.
+  // The parent node of this frame. |nullptr| if this node is the root.
   FrameTreeNode* parent_;
 
   // The frame that opened this frame, if any.  Will be set to null if the
@@ -332,7 +352,7 @@ class CONTENT_EXPORT FrameTreeNode {
   // properties, we update them here too.
   //
   // Note that dynamic updates only take effect on the next frame navigation.
-  blink::WebFrameOwnerProperties frame_owner_properties_;
+  FrameOwnerProperties frame_owner_properties_;
 
   // Used to track this node's loading progress (from 0 to 1).
   double loading_progress_;
@@ -346,6 +366,11 @@ class CONTENT_EXPORT FrameTreeNode {
   base::ObserverList<Observer> observers_;
 
   base::TimeTicks last_focus_time_;
+
+  // A helper for tracing the snapshots of this FrameTreeNode and attributing
+  // browser process activities to this node (when possible).  It is unrelated
+  // to the core logic of FrameTreeNode.
+  FrameTreeNodeBlameContext blame_context_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameTreeNode);
 };

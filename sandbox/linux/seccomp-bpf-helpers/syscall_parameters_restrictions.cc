@@ -47,11 +47,6 @@
 #define PR_SET_VMA 0x53564d41
 #endif
 
-// https://android.googlesource.com/platform/system/core/+/lollipop-release/libcutils/sched_policy.c
-#if !defined(PR_SET_TIMERSLACK_PID)
-#define PR_SET_TIMERSLACK_PID 41
-#endif
-
 #ifndef PR_SET_PTRACER
 #define PR_SET_PTRACER 0x59616d61
 #endif
@@ -93,6 +88,18 @@ inline bool IsAndroid() {
 
 inline bool IsArchitectureMips() {
 #if defined(__mips__)
+  return true;
+#else
+  return false;
+#endif
+}
+
+// Ubuntu's version of glibc has a race condition in sem_post that can cause
+// it to call futex(2) with bogus op arguments. To workaround this, we need
+// to allow those futex(2) calls to fail with EINVAL, instead of crashing the
+// process. See crbug.com/598471.
+inline bool IsBuggyGlibcSemPost() {
+#if defined(LIBC_GLIBC) && !defined(OS_CHROMEOS)
   return true;
 #else
   return false;
@@ -146,9 +153,35 @@ ResultExpr RestrictPrctl() {
   return Switch(option)
       .CASES((PR_GET_NAME, PR_SET_NAME, PR_GET_DUMPABLE, PR_SET_DUMPABLE
 #if defined(OS_ANDROID)
-              ,
-              PR_SET_VMA, PR_SET_TIMERSLACK_PID, PR_SET_PTRACER
-#endif
+              , PR_SET_VMA, PR_SET_PTRACER
+
+// Enable PR_SET_TIMERSLACK_PID, an Android custom prctl which is used in:
+// https://android.googlesource.com/platform/system/core/+/lollipop-release/libcutils/sched_policy.c.
+// Depending on the Android kernel version, this prctl may have different
+// values. Since we don't know the correct value for the running kernel, we must
+// allow them all.
+//
+// The effect is:
+// On 3.14 kernels, this allows PR_SET_TIMERSLACK_PID and 43 and 127 (invalid
+// prctls which will return EINVAL)
+// On 3.18 kernels, this allows PR_SET_TIMERSLACK_PID, PR_SET_THP_DISABLE, and
+// 127 (invalid).
+// On 4.1 kernels and up, this allows PR_SET_TIMERSLACK_PID, PR_SET_THP_DISABLE,
+// and PR_MPX_ENABLE_MANAGEMENT.
+
+// https://android.googlesource.com/kernel/common/+/android-3.14/include/uapi/linux/prctl.h
+#define PR_SET_TIMERSLACK_PID_1 41
+
+// https://android.googlesource.com/kernel/common/+/android-3.18/include/uapi/linux/prctl.h
+#define PR_SET_TIMERSLACK_PID_2 43
+
+// https://android.googlesource.com/kernel/common/+/android-4.1/include/uapi/linux/prctl.h and up
+#define PR_SET_TIMERSLACK_PID_3 127
+
+              , PR_SET_TIMERSLACK_PID_1
+              , PR_SET_TIMERSLACK_PID_2
+              , PR_SET_TIMERSLACK_PID_3
+#endif  // defined(OS_ANDROID)
               ),
              Allow())
       .Default(CrashSIGSYSPrctl());
@@ -253,15 +286,10 @@ ResultExpr RestrictFutex() {
   const uint64_t kAllowedFutexFlags = FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME;
   const Arg<int> op(1);
   return Switch(op & ~kAllowedFutexFlags)
-      .CASES((FUTEX_WAIT,
-              FUTEX_WAKE,
-              FUTEX_REQUEUE,
-              FUTEX_CMP_REQUEUE,
-              FUTEX_WAKE_OP,
-              FUTEX_WAIT_BITSET,
-              FUTEX_WAKE_BITSET),
+      .CASES((FUTEX_WAIT, FUTEX_WAKE, FUTEX_REQUEUE, FUTEX_CMP_REQUEUE,
+              FUTEX_WAKE_OP, FUTEX_WAIT_BITSET, FUTEX_WAKE_BITSET),
              Allow())
-      .Default(CrashSIGSYSFutex());
+      .Default(IsBuggyGlibcSemPost() ? Error(EINVAL) : CrashSIGSYSFutex());
 }
 
 ResultExpr RestrictGetSetpriority(pid_t target_pid) {
@@ -321,6 +349,16 @@ ResultExpr RestrictClockID() {
               CLOCK_THREAD_CPUTIME_ID),
              Allow())
       .Default(CrashSIGSYS());
+}
+
+#if !defined(GRND_NONBLOCK)
+#define GRND_NONBLOCK 1
+#endif
+
+ResultExpr RestrictGetRandom() {
+  const Arg<unsigned int> flags(2);
+  const unsigned int kGoodFlags = GRND_NONBLOCK;
+  return If((flags & ~kGoodFlags) == 0, Allow()).Else(CrashSIGSYS());
 }
 
 }  // namespace sandbox.

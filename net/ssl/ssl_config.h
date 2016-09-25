@@ -26,6 +26,7 @@ enum {
   SSL_PROTOCOL_VERSION_TLS1 = 0x0301,
   SSL_PROTOCOL_VERSION_TLS1_1 = 0x0302,
   SSL_PROTOCOL_VERSION_TLS1_2 = 0x0303,
+  SSL_PROTOCOL_VERSION_TLS1_3 = 0x0304,
 };
 
 enum TokenBindingParam {
@@ -55,11 +56,6 @@ struct NET_EXPORT SSLConfig {
   // be NULL if user doesn't care about the cert status.
   bool IsAllowedBadCert(X509Certificate* cert, CertStatus* cert_status) const;
 
-  // Same as above except works with DER encoded certificates instead
-  // of X509Certificate.
-  bool IsAllowedBadCert(const base::StringPiece& der_cert,
-                        CertStatus* cert_status) const;
-
   // Returns the set of flags to use for certificate verification, which is a
   // bitwise OR of CertVerifier::VerifyFlags that represent this SSLConfig's
   // configuration.
@@ -80,6 +76,10 @@ struct NET_EXPORT SSLConfig {
   // equivalent to also setting rev_checking_enabled, but only when the
   // certificate chain chains to a local (non-public) trust anchor.
   bool rev_checking_required_local_anchors;
+
+  // sha1_local_anchors_enabled is true if SHA-1 signed certificates issued by a
+  // local (non-public) trust anchor should be allowed.
+  bool sha1_local_anchors_enabled;
 
   // The minimum and maximum protocol versions that are enabled.
   // (Use the SSL_PROTOCOL_VERSION_xxx enumerators defined above.)
@@ -114,8 +114,8 @@ struct NET_EXPORT SSLConfig {
   // servers with bad configurations without full removal.
   bool deprecated_cipher_suites_enabled;
 
-  // Enables RC4 cipher suites.
-  bool rc4_enabled;
+  // Enables DHE cipher suites.
+  bool dhe_enabled;
 
   bool channel_id_enabled;   // True if TLS channel ID extension is enabled.
 
@@ -136,10 +136,12 @@ struct NET_EXPORT SSLConfig {
 
   struct NET_EXPORT CertAndStatus {
     CertAndStatus();
+    CertAndStatus(scoped_refptr<X509Certificate> cert, CertStatus status);
+    CertAndStatus(const CertAndStatus&);
     ~CertAndStatus();
 
-    std::string der_cert;
-    CertStatus cert_status;
+    scoped_refptr<X509Certificate> cert;
+    CertStatus cert_status = 0;
   };
 
   // Add any known-bad SSL certificate (with its cert status) to
@@ -168,16 +170,6 @@ struct NET_EXPORT SSLConfig {
   // Layer Protocol Negotation), in decreasing order of preference.  Protocols
   // will be advertised in this order during TLS handshake.
   NextProtoVector alpn_protos;
-
-  // The list of application level protocols supported with NPN (Next Protocol
-  // Negotiation).  The last item on the list is selected if there is no overlap
-  // between |npn_protos| and the protocols supported by the server, otherwise
-  // server preference is observed and the order of |npn_protos| is irrelevant.
-  // Note that due to NSS limitations, ports which use NSS will use
-  // |alpn_protos| for both ALPN and NPN. However, if |npn_protos| is empty, NPN
-  // will still be disabled.
-  // TODO(bnc): Deprecate NPN, see https://crbug.com/526713.
-  NextProtoVector npn_protos;
 
   // True if renegotiation should be allowed for the default application-level
   // protocol when the peer negotiates neither ALPN nor NPN.

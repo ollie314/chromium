@@ -8,6 +8,7 @@
 #include "base/strings/string16.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/reload_type.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -56,7 +57,10 @@ class CONTENT_EXPORT NavigatorDelegate {
   // A provisional load in |render_frame_host| failed.
   virtual void DidFailProvisionalLoadWithError(
       RenderFrameHostImpl* render_frame_host,
-      const FrameHostMsg_DidFailProvisionalLoadWithError_Params& params) {}
+      const GURL& validated_url,
+      int error_code,
+      const base::string16& error_description,
+      bool was_ignored_by_handler) {}
 
   // Document load in |render_frame_host| failed.
   virtual void DidFailLoadWithError(
@@ -99,9 +103,8 @@ class CONTENT_EXPORT NavigatorDelegate {
 
   // Notifies the Navigator embedder that a navigation to the pending
   // NavigationEntry has started in the browser process.
-  virtual void DidStartNavigationToPendingEntry(
-      const GURL& url,
-      NavigationController::ReloadType reload_type) {}
+  virtual void DidStartNavigationToPendingEntry(const GURL& url,
+                                                ReloadType reload_type) {}
 
   // Opens a URL with the given parameters. See PageNavigator::OpenURL, which
   // this forwards to.

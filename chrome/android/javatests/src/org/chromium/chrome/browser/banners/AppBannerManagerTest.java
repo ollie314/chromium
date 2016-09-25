@@ -23,6 +23,7 @@ import android.widget.TextView;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.infobar.AppBannerInfoBarAndroid;
@@ -33,6 +34,7 @@ import org.chromium.chrome.browser.infobar.InfoBarContainer.InfoBarAnimationList
 import org.chromium.chrome.browser.webapps.WebappDataStorage;
 import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
 import org.chromium.chrome.test.util.browser.TabLoadObserver;
+import org.chromium.chrome.test.util.browser.WebappTestPage;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TouchCommon;
@@ -68,8 +70,8 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
     private static final String WEB_APP_PATH =
             "/chrome/test/data/banners/manifest_test_page.html";
 
-    private static final String WEB_APP_SHORT_TITLE_PATH =
-            "/chrome/test/data/banners/manifest_short_name_only_test_page.html";
+    private static final String WEB_APP_SHORT_TITLE_MANIFEST =
+            "/chrome/test/data/banners/manifest_short_name_only.json";
 
     private static final String WEB_APP_TITLE = "Manifest test app";
 
@@ -172,7 +174,7 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
     @Override
     protected void setUp() throws Exception {
         mPackageManager = new TestPackageManager();
-        AppBannerManager.setIsEnabledForTesting(true);
+        AppBannerManager.setIsSupported(true);
         AppBannerInfoBarDelegateAndroid.setPackageManagerForTesting(mPackageManager);
         ShortcutHelper.setDelegateForTests(new ShortcutHelper.Delegate() {
             @Override
@@ -223,10 +225,9 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                AppBannerManager manager =
-                        getActivity().getActivityTab().getAppBannerManagerForTesting();
+                AppBannerManager manager = getActivity().getActivityTab().getAppBannerManager();
                 return mDetailsDelegate.mNumRetrieved == numExpected
-                        && !manager.isFetcherActiveForTesting();
+                        && !manager.isActiveForTesting();
             }
         });
     }
@@ -313,9 +314,8 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                AppBannerManager manager =
-                        getActivity().getActivityTab().getAppBannerManagerForTesting();
-                return !manager.isFetcherActiveForTesting();
+                AppBannerManager manager = getActivity().getActivityTab().getAppBannerManager();
+                return !manager.isActiveForTesting();
             }
         });
         waitUntilNoInfoBarsExist();
@@ -326,9 +326,8 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                AppBannerManager manager =
-                        getActivity().getActivityTab().getAppBannerManagerForTesting();
-                return !manager.isFetcherActiveForTesting();
+                AppBannerManager manager = getActivity().getActivityTab().getAppBannerManager();
+                return !manager.isActiveForTesting();
             }
         });
         waitUntilAppBannerInfoBarAppears(expectedTitle);
@@ -336,6 +335,7 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
 
     @SmallTest
     @Feature({"AppBanners"})
+    @RetryOnFailure
     public void testFullNativeInstallPathwayFromId() throws Exception {
         runFullNativeInstallPathway(mNativeAppUrl, NATIVE_APP_BLANK_REFERRER);
     }
@@ -349,6 +349,7 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
 
     @MediumTest
     @Feature({"AppBanners"})
+    @RetryOnFailure
     public void testBannerAppearsThenDoesNotAppearAgainForMonths() throws Exception {
         // Visit a site that requests a banner.
         new TabLoadObserver(getActivity().getActivityTab()).fullyLoadUrl(mNativeAppUrl);
@@ -444,6 +445,7 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
 
     @MediumTest
     @Feature({"AppBanners"})
+    @RetryOnFailure
     public void testBitmapFetchersCanOverlapWithoutCrashing() throws Exception {
         // Visit a site that requests a banner rapidly and repeatedly.
         for (int i = 1; i <= 10; i++) {
@@ -462,18 +464,23 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
 
     @SmallTest
     @Feature({"AppBanners"})
+    @RetryOnFailure
     public void testWebAppBannerAppears() throws Exception {
         triggerWebAppBanner(mWebAppUrl, WEB_APP_TITLE);
     }
 
     @SmallTest
     @Feature({"AppBanners"})
+    @RetryOnFailure
     public void testBannerFallsBackToShortName() throws Exception {
-        triggerWebAppBanner(mTestServer.getURL(WEB_APP_SHORT_TITLE_PATH), WEB_APP_SHORT_TITLE);
+        triggerWebAppBanner(WebappTestPage.urlOfPageWithServiceWorkerAndManifest(
+                                    mTestServer, WEB_APP_SHORT_TITLE_MANIFEST),
+                WEB_APP_SHORT_TITLE);
     }
 
     @SmallTest
     @Feature({"AppBanners"})
+    @RetryOnFailure
     public void testWebAppSplashscreenIsDownloaded() throws Exception {
         // Sets the overriden factory to observer splash screen update.
         final TestDataStorageFactory dataStorageFactory = new TestDataStorageFactory();
@@ -486,9 +493,8 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                AppBannerManager manager =
-                        getActivity().getActivityTab().getAppBannerManagerForTesting();
-                return !manager.isFetcherActiveForTesting();
+                AppBannerManager manager = getActivity().getActivityTab().getAppBannerManager();
+                return !manager.isActiveForTesting();
             }
         });
         waitUntilNoInfoBarsExist();
@@ -504,9 +510,8 @@ public class AppBannerManagerTest extends ChromeTabbedActivityTestBase {
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                AppBannerManager manager =
-                        getActivity().getActivityTab().getAppBannerManagerForTesting();
-                return !manager.isFetcherActiveForTesting();
+                AppBannerManager manager = getActivity().getActivityTab().getAppBannerManager();
+                return !manager.isActiveForTesting();
             }
         });
         waitUntilAppBannerInfoBarAppears(WEB_APP_TITLE);

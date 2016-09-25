@@ -53,6 +53,12 @@ class CONTENT_EXPORT WebContentsViewAura
   // Allow the WebContentsViewDelegate to be set explicitly.
   void SetDelegateForTesting(WebContentsViewDelegate* delegate);
 
+  // Set a flag to pass nullptr as the parent_view argument to
+  // RenderWidgetHostViewAura::InitAsChild().
+  void set_init_rwhv_with_null_parent_for_testing(bool set) {
+    init_rwhv_with_null_parent_for_testing_ = set;
+  }
+
  private:
   class WindowObserver;
 
@@ -78,10 +84,14 @@ class CONTENT_EXPORT WebContentsViewAura
   ui::TouchSelectionController* GetSelectionController() const;
   TouchSelectionControllerClientAura* GetSelectionControllerClient() const;
 
+  // Returns GetNativeView unless overridden for testing.
+  gfx::NativeView GetRenderWidgetHostViewParent() const;
+
   // Overridden from WebContentsView:
   gfx::NativeView GetNativeView() const override;
   gfx::NativeView GetContentNativeView() const override;
   gfx::NativeWindow GetTopLevelNativeWindow() const override;
+  void GetScreenInfo(ScreenInfo* screen_info) const override;
   void GetContainerBounds(gfx::Rect* out) const override;
   void SizeContents(const gfx::Size& size) override;
   void Focus() override;
@@ -113,12 +123,18 @@ class CONTENT_EXPORT WebContentsViewAura
   void UpdateDragCursor(blink::WebDragOperation operation) override;
   void GotFocus() override;
   void TakeFocus(bool reverse) override;
-  void ShowDisambiguationPopup(
-      const gfx::Rect& target_rect,
-      const SkBitmap& zoomed_bitmap,
-      const base::Callback<void(ui::GestureEvent*)>& gesture_cb,
-      const base::Callback<void(ui::MouseEvent*)>& mouse_cb) override;
-  void HideDisambiguationPopup() override;
+#if defined(USE_EXTERNAL_POPUP_MENU)
+  void ShowPopupMenu(RenderFrameHost* render_frame_host,
+                     const gfx::Rect& bounds,
+                     int item_height,
+                     double item_font_size,
+                     int selected_item,
+                     const std::vector<MenuItem>& items,
+                     bool right_aligned,
+                     bool allow_multiple_selection) override;
+
+  void HidePopupMenu() override;
+#endif
 
   // Overridden from OverscrollControllerDelegate:
   gfx::Rect GetVisibleBounds() const override;
@@ -195,6 +211,8 @@ class CONTENT_EXPORT WebContentsViewAura
   std::unique_ptr<OverscrollNavigationOverlay> navigation_overlay_;
 
   std::unique_ptr<GestureNavSimple> gesture_nav_simple_;
+
+  bool init_rwhv_with_null_parent_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsViewAura);
 };

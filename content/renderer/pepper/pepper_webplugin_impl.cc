@@ -9,7 +9,9 @@
 #include <utility>
 
 #include "base/debug/crash_logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/pepper/message_channel.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
@@ -65,8 +67,7 @@ PepperWebPluginImpl::PepperWebPluginImpl(
       full_frame_(params.loadManually),
       throttler_(std::move(throttler)),
       instance_object_(PP_MakeUndefined()),
-      container_(nullptr),
-      destroyed_(false) {
+      container_(nullptr) {
   DCHECK(plugin_module);
   init_data_->module = plugin_module;
   init_data_->render_frame = render_frame;
@@ -109,8 +110,6 @@ bool PepperWebPluginImpl::initialize(WebPluginContainer* container) {
     if (!container_)
       return false;
 
-    DCHECK(!destroyed_);
-
     DCHECK(instance_);
     ppapi::PpapiGlobals::Get()->GetVarTracker()->ReleaseVar(instance_object_);
     instance_object_ = PP_MakeUndefined();
@@ -142,10 +141,6 @@ bool PepperWebPluginImpl::initialize(WebPluginContainer* container) {
 }
 
 void PepperWebPluginImpl::destroy() {
-  // TODO(tommycli): Remove once we fix https://crbug.com/588624.
-  CHECK(!destroyed_);
-  destroyed_ = true;
-
   container_ = nullptr;
 
   if (instance_) {
@@ -155,7 +150,7 @@ void PepperWebPluginImpl::destroy() {
     instance_ = nullptr;
   }
 
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
 }
 
 v8::Local<v8::Object> PepperWebPluginImpl::v8ScriptableObject(
@@ -199,12 +194,8 @@ void PepperWebPluginImpl::updateGeometry(
     const WebVector<WebRect>& cut_outs_rects,
     bool is_visible) {
   plugin_rect_ = window_rect;
-  if (instance_ && !instance_->FlashIsFullscreenOrPending()) {
-    std::vector<gfx::Rect> cut_outs;
-    for (size_t i = 0; i < cut_outs_rects.size(); ++i)
-      cut_outs.push_back(cut_outs_rects[i]);
-    instance_->ViewChanged(plugin_rect_, clip_rect, unobscured_rect, cut_outs);
-  }
+  if (instance_ && !instance_->FlashIsFullscreenOrPending())
+    instance_->ViewChanged(plugin_rect_, clip_rect, unobscured_rect);
 }
 
 void PepperWebPluginImpl::updateFocus(bool focused,
@@ -233,7 +224,7 @@ void PepperWebPluginImpl::didReceiveResponse(
 void PepperWebPluginImpl::didReceiveData(const char* data, int data_length) {
   blink::WebURLLoaderClient* document_loader = instance_->document_loader();
   if (document_loader)
-    document_loader->didReceiveData(nullptr, data, data_length, 0);
+    document_loader->didReceiveData(nullptr, data, data_length, 0, data_length);
 }
 
 void PepperWebPluginImpl::didFinishLoading() {
@@ -271,8 +262,8 @@ bool PepperWebPluginImpl::startFind(const blink::WebString& search_text,
   return instance_->StartFind(search_text, case_sensitive, identifier);
 }
 
-void PepperWebPluginImpl::selectFindResult(bool forward) {
-  instance_->SelectFindResult(forward);
+void PepperWebPluginImpl::selectFindResult(bool forward, int identifier) {
+  instance_->SelectFindResult(forward, identifier);
 }
 
 void PepperWebPluginImpl::stopFind() { instance_->StopFind(); }

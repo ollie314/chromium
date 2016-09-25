@@ -14,7 +14,6 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "components/invalidation/impl/invalidation_logger.h"
 #include "components/invalidation/impl/invalidator_registrar.h"
@@ -31,7 +30,8 @@ class InvalidationServiceAndroid
     : public base::NonThreadSafe,
       public InvalidationService {
  public:
-  explicit InvalidationServiceAndroid(jobject context);
+  explicit InvalidationServiceAndroid(
+      const base::android::JavaRef<jobject>& context);
   ~InvalidationServiceAndroid() override;
 
   // InvalidationService implementation.

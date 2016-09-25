@@ -15,6 +15,7 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service_factory.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "ui/android/view_android.h"
 
 namespace autofill {
 class AutofillMetrics;
@@ -66,7 +67,6 @@ class AwAutofillClient : public autofill::AutofillClient,
   sync_driver::SyncService* GetSyncService() override;
   IdentityProvider* GetIdentityProvider() override;
   rappor::RapporService* GetRapporService() override;
-  void HideRequestAutocompleteDialog() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(
       const autofill::CreditCard& card,
@@ -79,13 +79,12 @@ class AwAutofillClient : public autofill::AutofillClient,
       const autofill::CreditCard& card,
       std::unique_ptr<base::DictionaryValue> legal_message,
       const base::Closure& callback) override;
+  void ConfirmCreditCardFillAssist(const autofill::CreditCard& card,
+                                   const base::Closure& callback) override;
   void LoadRiskData(
       const base::Callback<void(const std::string&)>& callback) override;
   bool HasCreditCardScanFeature() override;
   void ScanCreditCard(const CreditCardScanCallback& callback) override;
-  void ShowRequestAutocompleteDialog(const autofill::FormData& form,
-                                     content::RenderFrameHost* rfh,
-                                     const ResultCallback& callback) override;
   void ShowAutofillPopup(
       const gfx::RectF& element_bounds,
       base::i18n::TextDirection text_direction,
@@ -103,7 +102,11 @@ class AwAutofillClient : public autofill::AutofillClient,
                              const base::string16& profile_full_name) override;
   void OnFirstUserGestureObserved() override;
   bool IsContextSecure(const GURL& form_origin) override;
+  bool ShouldShowSigninPromo() override;
+  void StartSigninFlow() override;
 
+  void Dismissed(JNIEnv* env,
+                 const base::android::JavaParamRef<jobject>& obj);
   void SuggestionSelected(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj,
                           jint position);
@@ -121,6 +124,8 @@ class AwAutofillClient : public autofill::AutofillClient,
   content::WebContents* web_contents_;
   bool save_form_data_;
   JavaObjectWeakGlobalRef java_ref_;
+
+  ui::ViewAndroid::ScopedAnchorView anchor_view_;
 
   // The current Autofill query values.
   std::vector<autofill::Suggestion> suggestions_;

@@ -12,7 +12,6 @@
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/native_widget_types.h"
 #include "ui/message_center/views/message_center_controller.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -27,9 +26,14 @@ class View;
 
 namespace message_center {
 
+namespace test {
+class MessagePopupCollectionTest;
+}
+
 class MessagePopupCollection;
 class MessageView;
 class Notification;
+class PopupAlignmentDelegate;
 
 // The widget host for a popup. Also implements MessageCenterController
 // which delegates over to MessagePopupCollection, but takes care about
@@ -43,6 +47,7 @@ class ToastContentsView : public views::WidgetDelegateView,
   static gfx::Size GetToastSizeForView(const views::View* view);
 
   ToastContentsView(const std::string& notification_id,
+                    PopupAlignmentDelegate* alignment_delegate,
                     base::WeakPtr<MessagePopupCollection> collection);
   ~ToastContentsView() override;
 
@@ -69,7 +74,7 @@ class ToastContentsView : public views::WidgetDelegateView,
   gfx::Point origin() { return origin_; }
   gfx::Rect bounds() { return gfx::Rect(origin_, preferred_size_); }
 
-  const std::string& id() { return id_; }
+  const std::string& id() const { return id_; }
 
   // Overridden from views::View:
   void OnMouseEntered(const ui::MouseEvent& event) override;
@@ -79,6 +84,8 @@ class ToastContentsView : public views::WidgetDelegateView,
   void GetAccessibleState(ui::AXViewState* state) override;
 
  private:
+  friend class test::MessagePopupCollectionTest;
+
   // Overridden from MessageCenterController:
   void ClickOnNotification(const std::string& notification_id) override;
   void RemoveNotification(const std::string& notification_id,
@@ -102,8 +109,11 @@ class ToastContentsView : public views::WidgetDelegateView,
   void OnDisplayChanged() override;
   void OnWorkAreaChanged() override;
 
+  // Recalculates preferred size from underlying view and notifies about it.
+  void UpdatePreferredSize();
+
   // Initialization and update.
-  void CreateWidget(gfx::NativeView parent);
+  void CreateWidget(PopupAlignmentDelegate* alignment_delegate);
 
   // Immediately moves the toast without any sort of delay or animation.
   void SetBoundsInstantly(gfx::Rect new_bounds);

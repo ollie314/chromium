@@ -4,11 +4,10 @@
 
 #include "modules/battery/BatteryDispatcher.h"
 
-#include "platform/MojoHelper.h"
+#include "platform/mojo/MojoHelper.h"
+#include "public/platform/InterfaceProvider.h"
 #include "public/platform/Platform.h"
-#include "public/platform/ServiceRegistry.h"
 #include "wtf/Assertions.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -25,15 +24,14 @@ BatteryDispatcher::BatteryDispatcher()
 
 void BatteryDispatcher::queryNextStatus()
 {
-    m_monitor->QueryNextStatus(
-        sameThreadBindForMojo(&BatteryDispatcher::onDidChange, this));
+    m_monitor->QueryNextStatus(convertToBaseCallback(WTF::bind(&BatteryDispatcher::onDidChange, wrapPersistent(this))));
 }
 
-void BatteryDispatcher::onDidChange(device::BatteryStatusPtr batteryStatus)
+void BatteryDispatcher::onDidChange(device::blink::BatteryStatusPtr batteryStatus)
 {
     queryNextStatus();
 
-    ASSERT(batteryStatus);
+    DCHECK(batteryStatus);
 
     updateBatteryStatus(BatteryStatus(
         batteryStatus->charging,
@@ -51,9 +49,8 @@ void BatteryDispatcher::updateBatteryStatus(const BatteryStatus& batteryStatus)
 
 void BatteryDispatcher::startListening()
 {
-    ASSERT(!m_monitor.is_bound());
-    Platform::current()->serviceRegistry()->connectToRemoteService(
-        mojo::GetProxy(&m_monitor));
+    DCHECK(!m_monitor.is_bound());
+    Platform::current()->interfaceProvider()->getInterface(mojo::GetProxy(&m_monitor));
     queryNextStatus();
 }
 

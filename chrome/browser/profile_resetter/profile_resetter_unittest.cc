@@ -11,6 +11,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_path_override.h"
 #include "build/build_config.h"
@@ -260,7 +261,7 @@ std::unique_ptr<BrandcodeConfigFetcher> ConfigParserTest::WaitForRequest(
   std::unique_ptr<BrandcodeConfigFetcher> fetcher(new BrandcodeConfigFetcher(
       base::Bind(&ConfigParserTest::Callback, base::Unretained(this)), url,
       "ABCD"));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(fetcher->IsActive());
   // Look for the brand code in the request.
   EXPECT_NE(std::string::npos, request_listener_.upload_data.find("ABCD"));
@@ -558,15 +559,12 @@ TEST_F(ProfileResetterTest, ResetExtensionsByDisabling) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  scoped_refptr<Extension> theme =
-      CreateExtension(base::ASCIIToUTF16("example1"),
-                      temp_dir.path(),
-                      Manifest::INVALID_LOCATION,
-                      extensions::Manifest::TYPE_THEME,
-                      false);
+  scoped_refptr<Extension> theme = CreateExtension(
+      base::ASCIIToUTF16("example1"), temp_dir.GetPath(),
+      Manifest::INVALID_LOCATION, extensions::Manifest::TYPE_THEME, false);
   service_->FinishInstallationForTest(theme.get());
   // Let ThemeService finish creating the theme pack.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   ThemeService* theme_service =
       ThemeServiceFactory::GetForProfile(profile());
@@ -654,15 +652,12 @@ TEST_F(ProfileResetterTest, ResetExtensionsAndDefaultApps) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  scoped_refptr<Extension> ext1 =
-      CreateExtension(base::ASCIIToUTF16("example1"),
-                      temp_dir.path(),
-                      Manifest::INVALID_LOCATION,
-                      extensions::Manifest::TYPE_THEME,
-                      false);
+  scoped_refptr<Extension> ext1 = CreateExtension(
+      base::ASCIIToUTF16("example1"), temp_dir.GetPath(),
+      Manifest::INVALID_LOCATION, extensions::Manifest::TYPE_THEME, false);
   service_->FinishInstallationForTest(ext1.get());
   // Let ThemeService finish creating the theme pack.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   ThemeService* theme_service =
       ThemeServiceFactory::GetForProfile(profile());
@@ -861,7 +856,7 @@ TEST_F(ProfileResetterTest, CheckSnapshots) {
   ResettableSettingsSnapshot nonorganic_snap(profile());
   nonorganic_snap.RequestShortcuts(base::Closure());
   // Let it enumerate shortcuts on the FILE thread.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   int diff_fields = ResettableSettingsSnapshot::ALL_FIELDS;
   if (!ShortcutHandler::IsSupported())
     diff_fields &= ~ResettableSettingsSnapshot::SHORTCUTS;
@@ -889,7 +884,7 @@ TEST_F(ProfileResetterTest, CheckSnapshots) {
   ResettableSettingsSnapshot organic_snap(profile());
   organic_snap.RequestShortcuts(base::Closure());
   // Let it enumerate shortcuts on the FILE thread.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(diff_fields, nonorganic_snap.FindDifferentFields(organic_snap));
   nonorganic_snap.Subtract(organic_snap);
   const GURL urls[] = {GURL("http://foo.de"), GURL("http://goo.gl")};
@@ -935,7 +930,7 @@ TEST_F(ProfileResetterTest, FeedbackSerializationAsProtoTest) {
   ResettableSettingsSnapshot nonorganic_snap(profile());
   nonorganic_snap.RequestShortcuts(base::Closure());
   // Let it enumerate shortcuts on the FILE thread.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   static_assert(ResettableSettingsSnapshot::ALL_FIELDS == 31,
                 "this test needs to be expanded");
@@ -1016,7 +1011,7 @@ TEST_F(ProfileResetterTest, GetReadableFeedback) {
                                        profile(),
                                        base::ConstRef(snapshot)));
   // Let it enumerate shortcuts on the FILE thread.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ::testing::Mock::VerifyAndClearExpectations(&capture);
   // The homepage and the startup page are in punycode. They are unreadable.
   // Trying to find the extension name.
@@ -1055,7 +1050,7 @@ TEST_F(ProfileResetterTest, DestroySnapshotFast) {
   deleted_snapshot.reset();
   // Running remaining tasks shouldn't trigger the callback to be called as
   // |deleted_snapshot| was deleted before it could run.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 }  // namespace

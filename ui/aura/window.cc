@@ -34,11 +34,12 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/events/event_target_iterator.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/scoped_canvas.h"
-#include "ui/gfx/screen.h"
 
 namespace aura {
 
@@ -67,8 +68,8 @@ class ScopedCursorHider {
     if (hid_cursor_) {
       client::CursorClient* cursor_client = client::GetCursorClient(window_);
       if (cursor_client) {
-        const gfx::Display& display =
-            gfx::Screen::GetScreen()->GetDisplayNearestWindow(window_);
+        const display::Display& display =
+            display::Screen::GetScreen()->GetDisplayNearestWindow(window_);
         cursor_client->SetDisplay(display);
         cursor_client->ShowCursor();
       }
@@ -89,7 +90,7 @@ Window::Window(WindowDelegate* delegate)
       delegate_(delegate),
       parent_(NULL),
       visible_(false),
-      id_(-1),
+      id_(kInitialId),
       transparent_(false),
       user_data_(NULL),
       ignore_events_(false),
@@ -149,6 +150,10 @@ Window::~Window() {
     RemoveObserver(observer);
     observer->OnWindowDestroyed(this);
   }
+
+  // Delete the LayoutManager before properties. This way if the LayoutManager
+  // depends upon properties existing the properties are still valid.
+  layout_manager_.reset();
 
   // Clear properties.
   for (std::map<const void*, Value>::const_iterator iter = prop_map_.begin();
@@ -317,7 +322,7 @@ void Window::SetBounds(const gfx::Rect& new_bounds) {
 }
 
 void Window::SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen,
-                               const gfx::Display& dst_display) {
+                               const display::Display& dst_display) {
   Window* root = GetRootWindow();
   if (root) {
     aura::client::ScreenPositionClient* screen_position_client =
@@ -572,7 +577,7 @@ void Window::SetCapture() {
   client::CaptureClient* capture_client = client::GetCaptureClient(root_window);
   if (!capture_client)
     return;
-  client::GetCaptureClient(root_window)->SetCapture(this);
+  capture_client->SetCapture(this);
 }
 
 void Window::ReleaseCapture() {
@@ -582,7 +587,7 @@ void Window::ReleaseCapture() {
   client::CaptureClient* capture_client = client::GetCaptureClient(root_window);
   if (!capture_client)
     return;
-  client::GetCaptureClient(root_window)->ReleaseCapture(this);
+  capture_client->ReleaseCapture(this);
 }
 
 bool Window::HasCapture() {
@@ -1089,7 +1094,7 @@ ui::EventTarget* Window::GetParentTarget() {
 }
 
 std::unique_ptr<ui::EventTargetIterator> Window::GetChildIterator() const {
-  return base::WrapUnique(new ui::EventTargetIteratorImpl<Window>(children()));
+  return base::MakeUnique<ui::EventTargetIteratorImpl<Window>>(children());
 }
 
 ui::EventTargeter* Window::GetEventTargeter() {

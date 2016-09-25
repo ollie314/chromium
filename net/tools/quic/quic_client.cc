@@ -14,13 +14,14 @@
 #include "base/logging.h"
 #include "base/run_loop.h"
 #include "net/base/sockaddr_storage.h"
-#include "net/quic/crypto/quic_random.h"
-#include "net/quic/quic_bug_tracker.h"
-#include "net/quic/quic_connection.h"
-#include "net/quic/quic_data_reader.h"
-#include "net/quic/quic_flags.h"
-#include "net/quic/quic_protocol.h"
-#include "net/quic/quic_server_id.h"
+#include "net/quic/core/crypto/quic_random.h"
+#include "net/quic/core/quic_bug_tracker.h"
+#include "net/quic/core/quic_connection.h"
+#include "net/quic/core/quic_data_reader.h"
+#include "net/quic/core/quic_flags.h"
+#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_server_id.h"
+#include "net/tools/quic/quic_epoll_alarm_factory.h"
 #include "net/tools/quic/quic_epoll_connection_helper.h"
 #include "net/tools/quic/quic_socket_utils.h"
 #include "net/tools/quic/spdy_balsa_utils.h"
@@ -32,6 +33,7 @@
 // TODO(rtenneti): Add support for MMSG_MORE.
 #define MMSG_MORE 0
 
+using base::StringPiece;
 using std::string;
 using std::vector;
 
@@ -49,26 +51,27 @@ QuicClient::QuicClient(IPEndPoint server_address,
                        const QuicServerId& server_id,
                        const QuicVersionVector& supported_versions,
                        EpollServer* epoll_server,
-                       ProofVerifier* proof_verifier)
+                       std::unique_ptr<ProofVerifier> proof_verifier)
     : QuicClient(server_address,
                  server_id,
                  supported_versions,
                  QuicConfig(),
                  epoll_server,
-                 proof_verifier) {}
+                 std::move(proof_verifier)) {}
 
 QuicClient::QuicClient(IPEndPoint server_address,
                        const QuicServerId& server_id,
                        const QuicVersionVector& supported_versions,
                        const QuicConfig& config,
                        EpollServer* epoll_server,
-                       ProofVerifier* proof_verifier)
+                       std::unique_ptr<ProofVerifier> proof_verifier)
     : QuicClientBase(
           server_id,
           supported_versions,
           config,
           new QuicEpollConnectionHelper(epoll_server, QuicAllocator::SIMPLE),
-          proof_verifier),
+          new QuicEpollAlarmFactory(epoll_server),
+          std::move(proof_verifier)),
       server_address_(server_address),
       local_port_(0),
       epoll_server_(epoll_server),
@@ -86,8 +89,8 @@ QuicClient::~QuicClient() {
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
   }
 
-  STLDeleteElements(&data_to_resend_on_connect_);
-  STLDeleteElements(&data_sent_before_handshake_);
+  base::STLDeleteElements(&data_to_resend_on_connect_);
+  base::STLDeleteElements(&data_sent_before_handshake_);
 
   CleanUpAllUDPSockets();
 }
@@ -190,7 +193,7 @@ bool QuicClient::Connect() {
       for (QuicDataToResend* data : data_to_resend_on_connect_) {
         data->Resend();
       }
-      STLDeleteElements(&data_to_resend_on_connect_);
+      base::STLDeleteElements(&data_to_resend_on_connect_);
     }
     if (session() != nullptr &&
         session()->error() != QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT) {
@@ -230,10 +233,10 @@ void QuicClient::StartConnect() {
   }
 
   CreateQuicClientSession(new QuicConnection(
-      GetNextConnectionId(), server_address_, helper(), writer,
+      GetNextConnectionId(), server_address_, helper(), alarm_factory(), writer,
       /* owns_writer= */ false, Perspective::IS_CLIENT, supported_versions()));
 
-  // Reset |writer_| after |session()| so that the old writer outlives the old
+  // Reset |writer()| after |session()| so that the old writer outlives the old
   // session.
   set_writer(writer);
   session()->Initialize();
@@ -249,8 +252,8 @@ void QuicClient::Disconnect() {
         QUIC_PEER_GOING_AWAY, "Client disconnecting",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
   }
-  STLDeleteElements(&data_to_resend_on_connect_);
-  STLDeleteElements(&data_sent_before_handshake_);
+  base::STLDeleteElements(&data_to_resend_on_connect_);
+  base::STLDeleteElements(&data_sent_before_handshake_);
 
   CleanUpAllUDPSockets();
 
@@ -288,7 +291,7 @@ void QuicClient::SendRequest(const BalsaHeaders& headers,
 
   if (rv == QUIC_PENDING) {
     // May need to retry request if asynchronous rendezvous fails.
-    auto new_headers = new BalsaHeaders;
+    auto* new_headers = new BalsaHeaders;
     new_headers->CopyFrom(headers);
     push_promise_data_to_resend_.reset(
         new ClientQuicDataToResend(new_headers, body, fin, this));
@@ -300,14 +303,13 @@ void QuicClient::SendRequest(const BalsaHeaders& headers,
     QUIC_BUG << "stream creation failed!";
     return;
   }
-  stream->set_visitor(this);
   stream->SendRequest(SpdyBalsaUtils::RequestHeadersToSpdyHeaders(headers),
                       body, fin);
   if (FLAGS_enable_quic_stateless_reject_support) {
     // Record this in case we need to resend.
-    auto new_headers = new BalsaHeaders;
+    auto* new_headers = new BalsaHeaders;
     new_headers->CopyFrom(headers);
-    auto data_to_resend =
+    auto* data_to_resend =
         new ClientQuicDataToResend(new_headers, body, fin, this);
     MaybeAddQuicDataToResend(data_to_resend);
   }
@@ -318,7 +320,7 @@ void QuicClient::MaybeAddQuicDataToResend(QuicDataToResend* data_to_resend) {
   if (session()->IsCryptoHandshakeConfirmed()) {
     // The handshake is confirmed.  No need to continue saving requests to
     // resend.
-    STLDeleteElements(&data_sent_before_handshake_);
+    base::STLDeleteElements(&data_sent_before_handshake_);
     delete data_to_resend;
     return;
   }
@@ -345,6 +347,14 @@ void QuicClient::SendRequestsAndWaitForResponse(
   }
   while (WaitForEvents()) {
   }
+}
+
+QuicSpdyClientStream* QuicClient::CreateReliableClientStream() {
+  QuicSpdyClientStream* stream = QuicClientBase::CreateReliableClientStream();
+  if (stream) {
+    stream->set_visitor(this);
+  }
+  return stream;
 }
 
 bool QuicClient::WaitForEvents() {
@@ -395,7 +405,7 @@ void QuicClient::OnEvent(int fd, EpollEvent* event) {
     while (connected() && more_to_read) {
       more_to_read = packet_reader_->ReadAndDispatchPackets(
           GetLatestFD(), QuicClient::GetLatestClientAddress().port(),
-          *helper()->GetClock(), this,
+          false /* potentially_small_mtu */, *helper()->GetClock(), this,
           overflow_supported_ ? &packets_dropped_ : nullptr);
     }
   }

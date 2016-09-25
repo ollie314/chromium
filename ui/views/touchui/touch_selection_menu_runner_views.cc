@@ -160,12 +160,8 @@ Button* TouchSelectionMenuRunnerViews::Menu::CreateButton(
       gfx::RemoveAcceleratorChar(title, '&', nullptr, nullptr);
   LabelButton* button = new LabelButton(this, label);
   button->SetMinSize(gfx::Size(kMenuButtonMinWidth, kMenuButtonMinHeight));
-  button->SetFocusable(true);
-  button->set_request_focus_on_press(false);
-  const gfx::FontList& font_list =
-      ui::ResourceBundle::GetSharedInstance().GetFontList(
-          ui::ResourceBundle::SmallFont);
-  button->SetFontList(font_list);
+  button->SetFocusForPlatform();
+  button->AdjustFontSize(ui::ResourceBundle::kSmallFontDelta);
   button->SetHorizontalAlignment(gfx::ALIGN_CENTER);
   button->set_tag(tag);
   return button;

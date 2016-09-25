@@ -33,11 +33,10 @@
 
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "public/platform/WebCallbacks.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/TypeTraits.h"
-
 #include <memory>
+#include <utility>
 
 namespace blink {
 
@@ -50,7 +49,7 @@ namespace blink {
 //    called trivial WebType holder is used. For example,
 //    CallbackPromiseAdapter<bool, void> is a subclass of
 //    WebCallbacks<bool, void>.
-//  - If a WebType is OwnPtr<T>, its corresponding type parameter on
+//  - If a WebType is std::unique_ptr<T>, its corresponding type parameter on
 //    WebCallbacks is std::unique_ptr<T>, because WebCallbacks must be exposed to
 //    Chromium.
 //
@@ -64,9 +63,9 @@ namespace blink {
 // Example:
 // class MyClass {
 // public:
-//     using WebType = OwnPtr<WebMyClass>;
+//     using WebType = std::unique_ptr<WebMyClass>;
 //     static PassRefPtr<MyClass> take(ScriptPromiseResolver* resolver,
-//         PassOwnPtr<WebMyClass> webInstance)
+//         std::unique_ptr<WebMyClass> webInstance)
 //     {
 //         return MyClass::create(webInstance);
 //     }
@@ -82,21 +81,19 @@ namespace blink {
 //     }
 //     ...
 // };
-// OwnPtr<WebCallbacks<std::unique_ptr<WebMyClass>, const WebMyErrorClass&>>
-//     callbacks = adoptPtr(new CallbackPromiseAdapter<MyClass, MyErrorClass>(
+// std::unique_ptr<WebCallbacks<std::unique_ptr<WebMyClass>, const WebMyErrorClass&>>
+//     callbacks = wrapUnique(new CallbackPromiseAdapter<MyClass, MyErrorClass>(
 //     resolver));
 // ...
 //
-// OwnPtr<WebCallbacks<bool, const WebMyErrorClass&>> callbacks2 =
-//     adoptPtr(new CallbackPromiseAdapter<bool, MyErrorClass>(resolver));
+// std::unique_ptr<WebCallbacks<bool, const WebMyErrorClass&>> callbacks2 =
+//     wrapUnique(new CallbackPromiseAdapter<bool, MyErrorClass>(resolver));
 // ...
 //
 //
 // In order to implement the above exceptions, we have template classes below.
 // OnSuccess and OnError provide onSuccess and onError implementation, and there
-// are utility templates that provide
-//  - OwnPtr - WebPassOwnPtr translation ([Web]PassType[Impl], adopt, pass),
-//  - trivial WebType holder (TrivialWebTypeHolder).
+// are utility templates that provide the trivial WebType holder.
 
 namespace internal {
 
@@ -118,34 +115,8 @@ private:
     template <typename T> static CallbackPromiseAdapterTrivialWebTypeHolder<T> webTypeHolderMatcher(...);
     template <typename T> using WebTypeHolder = decltype(webTypeHolderMatcher<T>(nullptr));
 
-    // The following templates should be gone when the repositories are merged
-    // and we can use C++11 libraries.
-    template <typename T>
-    struct PassTypeImpl {
-        using Type = T;
-    };
-    template <typename T>
-    struct PassTypeImpl<OwnPtr<T>> {
-        using Type = PassOwnPtr<T>;
-    };
-    template <typename T>
-    struct WebPassTypeImpl {
-        using Type = T;
-    };
-    template <typename T>
-    struct WebPassTypeImpl<OwnPtr<T>> {
-        using Type = std::unique_ptr<T>;
-    };
-    template <typename T> using PassType = typename PassTypeImpl<T>::Type;
-    template <typename T> using WebPassType = typename WebPassTypeImpl<T>::Type;
-    template <typename T> static T& adopt(T& x) { return x; }
-    template <typename T>
-    static PassOwnPtr<T> adopt(std::unique_ptr<T>& x) { return adoptPtr(x.release()); }
-    template <typename T> static PassType<T> pass(T& x) { return x; }
-    template <typename T> static PassOwnPtr<T> pass(OwnPtr<T>& x) { return x.release(); }
-
     template <typename S, typename T>
-    class Base : public WebCallbacks<WebPassType<typename S::WebType>, WebPassType<typename T::WebType>> {
+    class Base : public WebCallbacks<typename S::WebType, typename T::WebType> {
     public:
         explicit Base(ScriptPromiseResolver* resolver) : m_resolver(resolver) {}
         ScriptPromiseResolver* resolver() { return m_resolver; }
@@ -158,13 +129,12 @@ private:
     class OnSuccess : public Base<S, T> {
     public:
         explicit OnSuccess(ScriptPromiseResolver* resolver) : Base<S, T>(resolver) {}
-        void onSuccess(WebPassType<typename S::WebType> r) override
+        void onSuccess(typename S::WebType result) override
         {
-            typename S::WebType result(adopt(r));
             ScriptPromiseResolver* resolver = this->resolver();
             if (!resolver->getExecutionContext() || resolver->getExecutionContext()->activeDOMObjectsAreStopped())
                 return;
-            resolver->resolve(S::take(resolver, pass(result)));
+            resolver->resolve(S::take(resolver, std::move(result)));
         }
     };
     template <typename T>
@@ -183,13 +153,13 @@ private:
     class OnError : public OnSuccess<S, T> {
     public:
         explicit OnError(ScriptPromiseResolver* resolver) : OnSuccess<S, T>(resolver) {}
-        void onError(WebPassType<typename T::WebType> e) override
+        void onError(typename T::WebType e) override
         {
-            typename T::WebType result(adopt(e));
             ScriptPromiseResolver* resolver = this->resolver();
             if (!resolver->getExecutionContext() || resolver->getExecutionContext()->activeDOMObjectsAreStopped())
                 return;
-            resolver->reject(T::take(resolver, pass(result)));
+            ScriptState::Scope scope(resolver->getScriptState());
+            resolver->reject(T::take(resolver, std::move(e)));
         }
     };
     template <typename S>

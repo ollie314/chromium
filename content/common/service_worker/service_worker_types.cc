@@ -55,6 +55,20 @@ ServiceWorkerFetchRequest::ServiceWorkerFetchRequest(
 
 ServiceWorkerFetchRequest::~ServiceWorkerFetchRequest() {}
 
+size_t ServiceWorkerFetchRequest::EstimatedStructSize() {
+  size_t size = sizeof(ServiceWorkerFetchRequest);
+  size += url.spec().size();
+  size += blob_uuid.size();
+  size += client_id.size();
+
+  for (const auto& key_and_value : headers) {
+    size += key_and_value.first.size();
+    size += key_and_value.second.size();
+  }
+
+  return size;
+}
+
 ServiceWorkerResponse::ServiceWorkerResponse()
     : status_code(0),
       response_type(blink::WebServiceWorkerResponseTypeOpaque),
@@ -73,7 +87,8 @@ ServiceWorkerResponse::ServiceWorkerResponse(
     blink::WebServiceWorkerResponseError error,
     base::Time response_time,
     bool is_in_cache_storage,
-    const std::string& cache_storage_cache_name)
+    const std::string& cache_storage_cache_name,
+    const ServiceWorkerHeaderList& cors_exposed_headers)
     : url(url),
       status_code(status_code),
       status_text(status_text),
@@ -85,12 +100,28 @@ ServiceWorkerResponse::ServiceWorkerResponse(
       error(error),
       response_time(response_time),
       is_in_cache_storage(is_in_cache_storage),
-      cache_storage_cache_name(cache_storage_cache_name) {}
+      cache_storage_cache_name(cache_storage_cache_name),
+      cors_exposed_header_names(cors_exposed_headers) {}
 
 ServiceWorkerResponse::ServiceWorkerResponse(
     const ServiceWorkerResponse& other) = default;
 
 ServiceWorkerResponse::~ServiceWorkerResponse() {}
+
+size_t ServiceWorkerResponse::EstimatedStructSize() {
+  size_t size = sizeof(ServiceWorkerResponse);
+  size += url.spec().size();
+  size += blob_uuid.size();
+  size += stream_url.spec().size();
+  size += cache_storage_cache_name.size();
+  for (const auto& key_and_value : headers) {
+    size += key_and_value.first.size();
+    size += key_and_value.second.size();
+  }
+  for (const auto& header : cors_exposed_header_names)
+    size += header.size();
+  return size;
+}
 
 ServiceWorkerObjectInfo::ServiceWorkerObjectInfo()
     : handle_id(kInvalidServiceWorkerHandleId),

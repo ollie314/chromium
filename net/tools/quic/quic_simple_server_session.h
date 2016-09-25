@@ -14,15 +14,15 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "base/containers/hash_tables.h"
 #include "base/macros.h"
-#include "net/quic/quic_crypto_server_stream.h"
-#include "net/quic/quic_protocol.h"
-#include "net/quic/quic_spdy_session.h"
+#include "net/quic/core/quic_crypto_server_stream.h"
+#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_server_session_base.h"
+#include "net/quic/core/quic_spdy_session.h"
 #include "net/tools/quic/quic_in_memory_cache.h"
-#include "net/tools/quic/quic_server_session_base.h"
 #include "net/tools/quic/quic_simple_server_stream.h"
 
 namespace net {
@@ -48,7 +48,7 @@ class QuicSimpleServerSession : public QuicServerSessionBase {
     PromisedStreamInfo(SpdyHeaderBlock request_headers,
                        QuicStreamId stream_id,
                        SpdyPriority priority)
-        : request_headers(request_headers),
+        : request_headers(std::move(request_headers)),
           stream_id(stream_id),
           priority(priority),
           is_cancelled(false) {}
@@ -58,9 +58,11 @@ class QuicSimpleServerSession : public QuicServerSessionBase {
     bool is_cancelled;
   };
 
+  // Takes ownership of |connection|.
   QuicSimpleServerSession(const QuicConfig& config,
                           QuicConnection* connection,
-                          QuicServerSessionVisitor* visitor,
+                          QuicServerSessionBase::Visitor* visitor,
+                          QuicCryptoServerStream::Helper* helper,
                           const QuicCryptoServerConfig* crypto_config,
                           QuicCompressedCertsCache* compressed_certs_cache);
 
@@ -120,7 +122,7 @@ class QuicSimpleServerSession : public QuicServerSessionBase {
   // Send PUSH_PROMISE frame on headers stream.
   void SendPushPromise(QuicStreamId original_stream_id,
                        QuicStreamId promised_stream_id,
-                       const SpdyHeaderBlock& headers);
+                       SpdyHeaderBlock headers);
 
   // Fetch response from cache for request headers enqueued into
   // promised_headers_and_streams_ and send them on dedicated stream until

@@ -8,10 +8,12 @@
 
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/browser_view_renderer.h"
+#include "android_webview/browser/deferred_gpu_command_service.h"
 #include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
 #include "android_webview/common/aw_descriptors.h"
 #include "android_webview/common/aw_switches.h"
 #include "android_webview/crash_reporter/aw_microdump_crash_reporter.h"
+#include "android_webview/gpu/aw_content_gpu_client.h"
 #include "android_webview/lib/aw_browser_dependency_factory_impl.h"
 #include "android_webview/native/aw_locale_manager_impl.h"
 #include "android_webview/native/aw_media_url_interceptor.h"
@@ -28,7 +30,7 @@
 #include "base/logging.h"
 #include "base/threading/thread_restrictions.h"
 #include "cc/base/switches.h"
-#include "components/external_video_surface/browser/android/external_video_surface_container_impl.h"
+#include "components/crash/content/app/breakpad_linux.h"
 #include "content/public/browser/android/browser_media_player_manager_register.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_thread.h"
@@ -61,19 +63,7 @@ AwMainDelegate::~AwMainDelegate() {
 bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   content::SetContentClient(&content_client_);
 
-  content::RegisterMediaUrlInterceptor(new AwMediaUrlInterceptor());
-
-  BrowserViewRenderer::CalculateTileMemoryPolicy();
-
-  // WebView apps can override WebView#computeScroll to achieve custom
-  // scroll/fling. As a result, fling animations may not be ticked, potentially
-  // confusing the tap suppression controller. Simply disable it for WebView.
-  ui::GestureConfiguration::GetInstance()
-      ->set_fling_touchscreen_tap_suppression_enabled(false);
-
   base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
-  cl->AppendSwitch(switches::kIPCSyncCompositing);
-  cl->AppendSwitch(cc::switches::kEnableBeginFrameScheduling);
 
   // WebView uses the Android system's scrollbars and overscroll glow.
   cl->AppendSwitch(switches::kDisableOverscrollEdgeEffect);
@@ -116,33 +106,36 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // https://crbug.com/521319
   cl->AppendSwitch(switches::kDisablePresentationAPI);
 
+#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
   if (cl->GetSwitchValueASCII(switches::kProcessType).empty()) {
     // Browser process (no type specified).
 
+    content::RegisterMediaUrlInterceptor(new AwMediaUrlInterceptor());
+    BrowserViewRenderer::CalculateTileMemoryPolicy();
+    // WebView apps can override WebView#computeScroll to achieve custom
+    // scroll/fling. As a result, fling animations may not be ticked,
+    // potentially
+    // confusing the tap suppression controller. Simply disable it for WebView
+    ui::GestureConfiguration::GetInstance()
+        ->set_fling_touchscreen_tap_suppression_enabled(false);
+
     base::android::RegisterApkAssetWithGlobalDescriptors(
-        kV8NativesDataDescriptor32,
-        gin::V8Initializer::GetNativesFilePath(true).AsUTF8Unsafe());
+        kV8NativesDataDescriptor,
+        gin::V8Initializer::GetNativesFilePath().AsUTF8Unsafe());
     base::android::RegisterApkAssetWithGlobalDescriptors(
         kV8SnapshotDataDescriptor32,
         gin::V8Initializer::GetSnapshotFilePath(true).AsUTF8Unsafe());
-
-    base::android::RegisterApkAssetWithGlobalDescriptors(
-        kV8NativesDataDescriptor64,
-        gin::V8Initializer::GetNativesFilePath(false).AsUTF8Unsafe());
     base::android::RegisterApkAssetWithGlobalDescriptors(
         kV8SnapshotDataDescriptor64,
         gin::V8Initializer::GetSnapshotFilePath(false).AsUTF8Unsafe());
   }
+#endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
   if (cl->HasSwitch(switches::kWebViewSandboxedRenderer)) {
     cl->AppendSwitch(switches::kInProcessGPU);
     cl->AppendSwitchASCII(switches::kRendererProcessLimit, "1");
     cl->AppendSwitch(switches::kDisableRendererBackgrounding);
   }
-
-  // TODO(liberato, watk): Reenable after resolving fullscreen test failures.
-  // See http://crbug.com/597495
-  cl->AppendSwitch(switches::kDisableUnifiedMediaPipeline);
 
   return false;
 }
@@ -160,7 +153,7 @@ void AwMainDelegate::PreSandboxStartup() {
       command_line.GetSwitchValueASCII(switches::kProcessType);
   int crash_signal_fd = -1;
   if (process_type == switches::kRendererProcess) {
-    auto global_descriptors = base::GlobalDescriptors::GetInstance();
+    auto* global_descriptors = base::GlobalDescriptors::GetInstance();
     int pak_fd = global_descriptors->Get(kAndroidWebViewLocalePakDescriptor);
     base::MemoryMappedFile::Region pak_region =
         global_descriptors->GetRegion(kAndroidWebViewLocalePakDescriptor);
@@ -174,10 +167,12 @@ void AwMainDelegate::PreSandboxStartup() {
     crash_signal_fd =
         global_descriptors->Get(kAndroidWebViewCrashSignalDescriptor);
   }
-  if (process_type.empty() &&
-      command_line.HasSwitch(switches::kSingleProcess)) {
-    // "webview" has a special treatment in breakpad_linux.cc.
-    process_type = "webview";
+  if (process_type.empty()) {
+    if (command_line.HasSwitch(switches::kSingleProcess)) {
+      process_type = breakpad::kWebViewSingleProcessType;
+    } else {
+      process_type = breakpad::kBrowserProcessType;
+    }
   }
 
   crash_reporter::EnableMicrodumpCrashReporter(process_type, crash_signal_fd);
@@ -222,6 +217,19 @@ content::ContentBrowserClient*
   return content_browser_client_.get();
 }
 
+namespace {
+gpu::SyncPointManager* GetSyncPointManager() {
+  DCHECK(DeferredGpuCommandService::GetInstance());
+  return DeferredGpuCommandService::GetInstance()->sync_point_manager();
+}
+}  // namespace
+
+content::ContentGpuClient* AwMainDelegate::CreateContentGpuClient() {
+  content_gpu_client_.reset(
+      new AwContentGpuClient(base::Bind(&GetSyncPointManager)));
+  return content_gpu_client_.get();
+}
+
 content::ContentRendererClient*
     AwMainDelegate::CreateContentRendererClient() {
   content_renderer_client_.reset(new AwContentRendererClient());
@@ -249,14 +257,5 @@ AwMessagePortService* AwMainDelegate::CreateAwMessagePortService() {
 AwLocaleManager* AwMainDelegate::CreateAwLocaleManager() {
   return new AwLocaleManagerImpl();
 }
-
-#if defined(VIDEO_HOLE)
-content::ExternalVideoSurfaceContainer*
-AwMainDelegate::CreateExternalVideoSurfaceContainer(
-    content::WebContents* web_contents) {
-  return external_video_surface::ExternalVideoSurfaceContainerImpl::Create(
-      web_contents);
-}
-#endif
 
 }  // namespace android_webview

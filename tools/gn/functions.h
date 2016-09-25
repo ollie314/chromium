@@ -222,6 +222,14 @@ Value RunLoadableModule(Scope* scope,
                         BlockNode* block,
                         Err* err);
 
+extern const char kPool[];
+extern const char kPool_HelpShort[];
+extern const char kPool_Help[];
+Value RunPool(const FunctionCallNode* function,
+              const std::vector<Value>& args,
+              Scope* block_scope,
+              Err* err);
+
 extern const char kPrint[];
 extern const char kPrint_HelpShort[];
 extern const char kPrint_Help[];
@@ -297,6 +305,14 @@ Value RunSourceSet(Scope* scope,
                    BlockNode* block,
                    Err* err);
 
+extern const char kSplitList[];
+extern const char kSplitList_HelpShort[];
+extern const char kSplitList_Help[];
+Value RunSplitList(Scope* scope,
+                   const FunctionCallNode* function,
+                   const ListNode* args_list,
+                   Err* err);
+
 extern const char kStaticLibrary[];
 extern const char kStaticLibrary_HelpShort[];
 extern const char kStaticLibrary_Help[];
@@ -341,15 +357,6 @@ Value RunToolchain(Scope* scope,
                    const std::vector<Value>& args,
                    BlockNode* block,
                    Err* err);
-
-extern const char kToolchainArgs[];
-extern const char kToolchainArgs_HelpShort[];
-extern const char kToolchainArgs_Help[];
-Value RunToolchainArgs(Scope* scope,
-                       const FunctionCallNode* function,
-                       const std::vector<Value>& args,
-                       BlockNode* block,
-                       Err* err);
 
 extern const char kWriteFile[];
 extern const char kWriteFile_HelpShort[];

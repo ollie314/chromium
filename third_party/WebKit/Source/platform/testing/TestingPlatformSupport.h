@@ -37,9 +37,26 @@
 #include "public/platform/WebScheduler.h"
 #include "public/platform/WebThread.h"
 #include "wtf/Vector.h"
+#include <memory>
+
+namespace base {
+class SimpleTestTickClock;
+class TestDiscardableMemoryAllocator;
+}
+
+namespace cc {
+class OrderedSimpleTaskRunner;
+}
+
+namespace cc_blink {
+class WebCompositorSupportImpl;
+} // namespace cc_blink
 
 namespace blink {
-
+namespace scheduler {
+class RendererScheduler;
+class RendererSchedulerImpl;
+}
 class TestingPlatformMockWebTaskRunner;
 class TestingPlatformMockWebThread;
 class WebCompositorSupport;
@@ -65,17 +82,16 @@ public:
     bool canExceedIdleDeadlineIfRequired() override { return false; }
     void postIdleTask(const WebTraceLocation&, WebThread::IdleTask*) override { }
     void postNonNestableIdleTask(const WebTraceLocation&, WebThread::IdleTask*) override { }
-    void postIdleTaskAfterWakeup(const WebTraceLocation&, WebThread::IdleTask*) override { }
-    std::unique_ptr<WebViewScheduler> createWebViewScheduler(blink::WebView*) override { return nullptr; }
+    std::unique_ptr<WebViewScheduler> createWebViewScheduler(InterventionReporter*) override { return nullptr; }
     void suspendTimerQueue() override { }
     void resumeTimerQueue() override { }
-    void addPendingNavigation() override { }
-    void removePendingNavigation() override { }
+    void addPendingNavigation(WebScheduler::NavigatingFrameType) override { }
+    void removePendingNavigation(WebScheduler::NavigatingFrameType) override { }
     void onNavigationStarted() override { }
 
 private:
-    WTF::Deque<OwnPtr<WebTaskRunner::Task>> m_tasks;
-    OwnPtr<TestingPlatformMockWebTaskRunner> m_mockWebTaskRunner;
+    WTF::Deque<std::unique_ptr<WebTaskRunner::Task>> m_tasks;
+    std::unique_ptr<TestingPlatformMockWebTaskRunner> m_mockWebTaskRunner;
 };
 
 class TestingPlatformSupport : public Platform {
@@ -94,8 +110,16 @@ public:
     WebString defaultLocale() override;
     WebCompositorSupport* compositorSupport() override;
     WebThread* currentThread() override;
-    void registerMemoryDumpProvider(blink::WebMemoryDumpProvider*, const char* name) override {}
-    void unregisterMemoryDumpProvider(blink::WebMemoryDumpProvider*) override {}
+    WebBlobRegistry* getBlobRegistry() override;
+    WebClipboard* clipboard() override;
+    WebFileUtilities* fileUtilities() override;
+    WebIDBFactory* idbFactory() override;
+    WebMimeRegistry* mimeRegistry() override;
+    WebURLLoaderMockFactory* getURLLoaderMockFactory() override;
+    blink::WebURLLoader* createURLLoader() override;
+
+    WebData loadResource(const char* name) override;
+    WebURLError cancelledError(const WebURL&) const override;
 
 protected:
     const Config m_config;
@@ -111,10 +135,51 @@ public:
 
     // Platform:
     WebThread* currentThread() override;
-    TestingPlatformMockScheduler* mockWebScheduler();
+
+    // Runs a single task.
+    void runSingleTask();
+
+    // Runs all currently queued immediate tasks and delayed tasks whose delay has expired
+    // plus any immediate tasks that are posted as a result of running those tasks.
+    //
+    // This function ignores future delayed tasks when deciding if the system is idle.
+    // If you need to ensure delayed tasks run, try runForPeriodSeconds() instead.
+    void runUntilIdle();
+
+    // Runs for |seconds|. Note we use a testing clock rather than the wall clock here.
+    void runForPeriodSeconds(double seconds);
+
+    // Advances |m_clock| by |seconds|.
+    void advanceClockSeconds(double seconds);
+
+    scheduler::RendererScheduler* rendererScheduler() const;
+
+    // Controls the behavior of |m_mockTaskRunner| if true, then |m_clock| will
+    // be advanced to the next timer when there's no more immediate work to do.
+    void setAutoAdvanceNowToPendingTasks(bool);
 
 protected:
-    OwnPtr<TestingPlatformMockWebThread> m_mockWebThread;
+    static double getTestTime();
+
+    std::unique_ptr<base::SimpleTestTickClock> m_clock;
+    scoped_refptr<cc::OrderedSimpleTaskRunner> m_mockTaskRunner;
+    std::unique_ptr<scheduler::RendererSchedulerImpl> m_scheduler;
+    std::unique_ptr<WebThread> m_thread;
+};
+
+class ScopedUnittestsEnvironmentSetup {
+    WTF_MAKE_NONCOPYABLE(ScopedUnittestsEnvironmentSetup);
+public:
+    ScopedUnittestsEnvironmentSetup(int argc, char** argv);
+    ~ScopedUnittestsEnvironmentSetup();
+
+private:
+    class DummyPlatform;
+    std::unique_ptr<base::TestDiscardableMemoryAllocator> m_discardableMemoryAllocator;
+    std::unique_ptr<DummyPlatform> m_platform;
+    std::unique_ptr<cc_blink::WebCompositorSupportImpl> m_compositorSupport;
+    TestingPlatformSupport::Config m_testingPlatformConfig;
+    std::unique_ptr<TestingPlatformSupport> m_testingPlatformSupport;
 };
 
 } // namespace blink

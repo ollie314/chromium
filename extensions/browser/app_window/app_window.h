@@ -7,12 +7,12 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/sessions/core/session_id.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
@@ -191,6 +191,14 @@ class AppWindow : public content::WebContentsDelegate,
     // If true, the window will be visible on all workspaces. Defaults to false.
     bool visible_on_all_workspaces;
 
+    // If true, the window will have its own shelf icon. Otherwise the window
+    // will be grouped in the shelf with other windows that are associated with
+    // the app. Defaults to false.
+    bool show_in_shelf;
+
+    // Icon URL to be used for setting the window icon.
+    GURL window_icon_url;
+
     // The API enables developers to specify content or window bounds. This
     // function combines them into a single, constrained window size.
     gfx::Rect GetInitialWindowBounds(const gfx::Insets& frame_insets) const;
@@ -272,7 +280,7 @@ class AppWindow : public content::WebContentsDelegate,
   void SetAppIconUrl(const GURL& icon_url);
 
   // Set the window shape. Passing a NULL |region| sets the default shape.
-  void UpdateShape(scoped_ptr<SkRegion> region);
+  void UpdateShape(std::unique_ptr<SkRegion> region);
 
   // Called from the render interface to modify the draggable regions.
   void UpdateDraggableRegions(const std::vector<DraggableRegion>& regions);
@@ -368,7 +376,12 @@ class AppWindow : public content::WebContentsDelegate,
   // remove this TODO.
   bool is_ime_window() const { return is_ime_window_; }
 
-  void SetAppWindowContentsForTesting(scoped_ptr<AppWindowContents> contents) {
+  bool show_in_shelf() const { return show_in_shelf_; }
+
+  const GURL& window_icon_url() const { return window_icon_url_; }
+
+  void SetAppWindowContentsForTesting(
+      std::unique_ptr<AppWindowContents> contents) {
     app_window_contents_ = std::move(contents);
   }
 
@@ -386,7 +399,7 @@ class AppWindow : public content::WebContentsDelegate,
       content::WebContents* web_contents,
       SkColor color,
       const std::vector<content::ColorSuggestion>& suggestions) override;
-  void RunFileChooser(content::WebContents* tab,
+  void RunFileChooser(content::RenderFrameHost* render_frame_host,
                       const content::FileChooserParams& params) override;
   bool IsPopupOrPanel(const content::WebContents* source) const override;
   void MoveContents(content::WebContents* source,
@@ -427,6 +440,9 @@ class AppWindow : public content::WebContentsDelegate,
                           bool last_unlocked_by_target) override;
   bool PreHandleGestureEvent(content::WebContents* source,
                              const blink::WebGestureEvent& event) override;
+  std::unique_ptr<content::BluetoothChooser> RunBluetoothChooser(
+      content::RenderFrameHost* frame,
+      const content::BluetoothChooser::EventHandler& event_handler) override;
 
   // content::WebContentsObserver implementation.
   void RenderViewCreated(content::RenderViewHost* render_view_host) override;
@@ -516,12 +532,12 @@ class AppWindow : public content::WebContentsDelegate,
   GURL app_icon_url_;
 
   // An object to load the app's icon as an extension resource.
-  scoped_ptr<IconImage> app_icon_image_;
+  std::unique_ptr<IconImage> app_icon_image_;
 
-  scoped_ptr<NativeAppWindow> native_app_window_;
-  scoped_ptr<AppWindowContents> app_window_contents_;
-  scoped_ptr<AppDelegate> app_delegate_;
-  scoped_ptr<AppWebContentsHelper> helper_;
+  std::unique_ptr<NativeAppWindow> native_app_window_;
+  std::unique_ptr<AppWindowContents> app_window_contents_;
+  std::unique_ptr<AppDelegate> app_delegate_;
+  std::unique_ptr<AppWebContentsHelper> helper_;
 
   // The initial url this AppWindow was navigated to.
   GURL initial_url_;
@@ -565,6 +581,14 @@ class AppWindow : public content::WebContentsDelegate,
 
   // Whether |is_ime_window| was set in the CreateParams.
   bool is_ime_window_;
+
+  // Whether |show_in_shelf| was set in the CreateParams.
+  bool show_in_shelf_;
+
+  // Icon URL to be used for setting the window icon. If not empty,
+  // app_icon_ will be fetched and set using this URL and will have
+  // app_icon_image_ as a badge.
+  GURL window_icon_url_;
 
   // PlzNavigate: this is called when the first navigation is ready to commit.
   base::Closure on_first_commit_callback_;

@@ -7,9 +7,10 @@
 #include "base/command_line.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_egl_api_implementation.h"
+#include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/gl_switches.h"
 
-namespace gfx {
+namespace gl {
 
 class EGLApiTest : public testing::Test {
  public:
@@ -42,6 +43,8 @@ class EGLApiTest : public testing::Test {
       api_->InitializeWithCommandLine(&g_driver_egl, command_line);
     else
       api_->Initialize(&g_driver_egl);
+    g_driver_egl.InitializeClientExtensionBindings();
+    GLSurfaceEGL::InitializeDisplay(EGL_DEFAULT_DISPLAY);
     g_driver_egl.InitializeExtensionBindings();
   }
 
@@ -138,4 +141,4 @@ TEST_F(EGLApiTest, DisabledExtensionStringTest) {
   EXPECT_STREQ(kFilteredExtensions, GetExtensions().second);
 }
 
-}  // namespace gfx
+}  // namespace gl

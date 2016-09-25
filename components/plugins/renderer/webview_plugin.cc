@@ -7,16 +7,17 @@
 #include <stddef.h>
 
 #include "base/auto_reset.h"
-#include "base/message_loop/message_loop.h"
+#include "base/bind.h"
+#include "base/location.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/public/common/web_preferences.h"
 #include "content/public/renderer/render_view.h"
 #include "gin/converter.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
-#include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
@@ -39,10 +40,8 @@ using blink::WebPlugin;
 using blink::WebPluginContainer;
 using blink::WebPoint;
 using blink::WebRect;
-using blink::WebSize;
 using blink::WebString;
 using blink::WebURLError;
-using blink::WebURLRequest;
 using blink::WebURLResponse;
 using blink::WebVector;
 using blink::WebView;
@@ -54,16 +53,17 @@ WebViewPlugin::WebViewPlugin(content::RenderView* render_view,
     : content::RenderViewObserver(render_view),
       delegate_(delegate),
       container_(nullptr),
-      web_view_(WebView::create(this)),
-      finished_loading_(false),
+      web_view_(WebView::create(this, blink::WebPageVisibilityStateVisible)),
       focused_(false),
       is_painting_(false),
-      is_resizing_(false) {
+      is_resizing_(false),
+      web_frame_client_(this),
+      weak_factory_(this) {
   // ApplyWebPreferences before making a WebLocalFrame so that the frame sees a
   // consistent view of our preferences.
   content::RenderView::ApplyWebPreferences(preferences, web_view_);
-  WebLocalFrame* web_local_frame =
-      WebLocalFrame::create(blink::WebTreeScopeType::Document, this);
+  WebLocalFrame* web_local_frame = WebLocalFrame::create(
+      blink::WebTreeScopeType::Document, &web_frame_client_);
   web_frame_ = web_local_frame;
   web_view_->setMainFrame(web_frame_);
   // TODO(dcheng): The main frame widget currently has a special case.
@@ -84,43 +84,10 @@ WebViewPlugin* WebViewPlugin::Create(content::RenderView* render_view,
 }
 
 WebViewPlugin::~WebViewPlugin() {
+  DCHECK(!weak_factory_.HasWeakPtrs());
   web_frame_widget_->close();
   web_view_->close();
   web_frame_->close();
-}
-
-void WebViewPlugin::ReplayReceivedData(WebPlugin* plugin) {
-  if (!response_.isNull()) {
-    plugin->didReceiveResponse(response_);
-    size_t total_bytes = 0;
-    for (std::list<std::string>::iterator it = data_.begin(); it != data_.end();
-         ++it) {
-      plugin->didReceiveData(
-          it->c_str(), base::checked_cast<int, size_t>(it->length()));
-      total_bytes += it->length();
-    }
-    UMA_HISTOGRAM_MEMORY_KB(
-        "PluginDocument.Memory",
-        (base::checked_cast<int, size_t>(total_bytes / 1024)));
-    UMA_HISTOGRAM_COUNTS(
-        "PluginDocument.NumChunks",
-        (base::checked_cast<int, size_t>(data_.size())));
-  }
-  // We need to transfer the |focused_| to new plugin after it loaded.
-  if (focused_) {
-    plugin->updateFocus(true, blink::WebFocusTypeNone);
-  }
-  if (finished_loading_) {
-    plugin->didFinishLoading();
-  }
-  if (error_) {
-    plugin->didFailLoading(*error_);
-  }
-}
-
-void WebViewPlugin::RestoreTitleText() {
-  if (container_)
-    container_->element().setAttribute("title", old_title_);
 }
 
 WebPluginContainer* WebViewPlugin::container() const { return container_; }
@@ -150,13 +117,15 @@ bool WebViewPlugin::initialize(WebPluginContainer* container) {
 }
 
 void WebViewPlugin::destroy() {
+  weak_factory_.InvalidateWeakPtrs();
+
   if (delegate_) {
     delegate_->PluginDestroyed();
     delegate_ = nullptr;
   }
   container_ = nullptr;
   content::RenderViewObserver::Observe(nullptr);
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
 }
 
 v8::Local<v8::Object> WebViewPlugin::v8ScriptableObject(v8::Isolate* isolate) {
@@ -200,22 +169,21 @@ void WebViewPlugin::updateGeometry(const WebRect& window_rect,
                                    const WebRect& unobscured_rect,
                                    const WebVector<WebRect>& cut_outs_rects,
                                    bool is_visible) {
-  base::AutoReset<bool> is_resizing(
-        &is_resizing_, true);
+  DCHECK(container_);
+
+  base::AutoReset<bool> is_resizing(&is_resizing_, true);
 
   if (static_cast<gfx::Rect>(window_rect) != rect_) {
     rect_ = window_rect;
-    WebSize newSize(window_rect.width, window_rect.height);
-    web_view_->resize(newSize);
+    web_view_->resize(rect_.size());
   }
 
-  if (delegate_) {
-    delegate_->OnUnobscuredRectUpdate(gfx::Rect(unobscured_rect));
-    // The delegate may have dirtied style and layout of the WebView.
-    // See for example the resizePoster function in plugin_poster.html.
-    // Run the lifecycle now so that it is clean.
-    web_view_->updateAllLifecyclePhases();
-  }
+  // Plugin updates are forbidden during Blink layout. Therefore,
+  // UpdatePluginForNewGeometry must be posted to a task to run asynchronously.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&WebViewPlugin::UpdatePluginForNewGeometry,
+                 weak_factory_.GetWeakPtr(), window_rect, unobscured_rect));
 }
 
 void WebViewPlugin::updateFocus(bool focused, blink::WebFocusType focus_type) {
@@ -251,22 +219,19 @@ blink::WebInputEventResult WebViewPlugin::handleInputEvent(
 }
 
 void WebViewPlugin::didReceiveResponse(const WebURLResponse& response) {
-  DCHECK(response_.isNull());
-  response_ = response;
+  NOTREACHED();
 }
 
 void WebViewPlugin::didReceiveData(const char* data, int data_length) {
-  data_.push_back(std::string(data, data_length));
+  NOTREACHED();
 }
 
 void WebViewPlugin::didFinishLoading() {
-  DCHECK(!finished_loading_);
-  finished_loading_ = true;
+  NOTREACHED();
 }
 
 void WebViewPlugin::didFailLoading(const WebURLError& error) {
-  DCHECK(!error_.get());
-  error_.reset(new WebURLError(error));
+  NOTREACHED();
 }
 
 bool WebViewPlugin::acceptsLoadDrops() { return false; }
@@ -315,8 +280,9 @@ void WebViewPlugin::scheduleAnimation() {
   }
 }
 
-void WebViewPlugin::didClearWindowObject(WebLocalFrame* frame) {
-  if (!delegate_)
+void WebViewPlugin::PluginWebFrameClient::didClearWindowObject(
+    WebLocalFrame* frame) {
+  if (!plugin_->delegate_)
     return;
 
   v8::Isolate* isolate = blink::mainThreadIsolate();
@@ -328,22 +294,29 @@ void WebViewPlugin::didClearWindowObject(WebLocalFrame* frame) {
   v8::Local<v8::Object> global = context->Global();
 
   global->Set(gin::StringToV8(isolate, "plugin"),
-              delegate_->GetV8Handle(isolate));
+              plugin_->delegate_->GetV8Handle(isolate));
 }
 
-void WebViewPlugin::didReceiveResponse(unsigned identifier,
-                                       const WebURLResponse& response) {
-  WebFrameClient::didReceiveResponse(identifier, response);
-}
-
-void WebViewPlugin::OnDestruct() {
-  // By default RenderViewObservers are destroyed along with the RenderView.
-  // WebViewPlugin has a custom destruction mechanism, so we disable this.
-}
+void WebViewPlugin::OnDestruct() {}
 
 void WebViewPlugin::OnZoomLevelChanged() {
   if (container_) {
     web_view_->setZoomLevel(
       blink::WebView::zoomFactorToZoomLevel(container_->pageZoomFactor()));
   }
+}
+
+void WebViewPlugin::UpdatePluginForNewGeometry(
+    const blink::WebRect& window_rect,
+    const blink::WebRect& unobscured_rect) {
+  DCHECK(container_);
+  if (!delegate_)
+    return;
+
+  // The delegate may instantiate a new plugin.
+  delegate_->OnUnobscuredRectUpdate(gfx::Rect(unobscured_rect));
+  // The delegate may have dirtied style and layout of the WebView.
+  // See for example the resizePoster function in plugin_poster.html.
+  // Run the lifecycle now so that it is clean.
+  web_view_->updateAllLifecyclePhases();
 }

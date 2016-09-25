@@ -34,23 +34,12 @@
 #include "wtf/Threading.h"
 #include "wtf/WTFExport.h"
 #include "wtf/text/StringHash.h"
-
-namespace blink {
-
-// TODO(hajimehoshi): CompressibleStringTable should be moved from blink to WTF
-// namespace. Fix this forward declaration when we do this.
-class CompressibleStringTable;
-
-typedef void (*CompressibleStringTableDestructor)(CompressibleStringTable*);
-
-}
+#include <memory>
 
 namespace WTF {
 
 class AtomicStringTable;
 struct ICUConverterWrapper;
-
-typedef void (*AtomicStringTableDestructor)(AtomicStringTable*);
 
 class WTF_EXPORT WTFThreadData {
     DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
@@ -59,29 +48,19 @@ public:
     WTFThreadData();
     ~WTFThreadData();
 
-    AtomicStringTable* getAtomicStringTable()
+    AtomicStringTable& getAtomicStringTable()
     {
-        return m_atomicStringTable;
-    }
-
-    blink::CompressibleStringTable* compressibleStringTable()
-    {
-        return m_compressibleStringTable;
+        return *m_atomicStringTable;
     }
 
     ICUConverterWrapper& cachedConverterICU() { return *m_cachedConverterICU; }
 
 private:
-    AtomicStringTable* m_atomicStringTable;
-    AtomicStringTableDestructor m_atomicStringTableDestructor;
-    blink::CompressibleStringTable* m_compressibleStringTable;
-    blink::CompressibleStringTableDestructor m_compressibleStringTableDestructor;
-    OwnPtr<ICUConverterWrapper> m_cachedConverterICU;
+    std::unique_ptr<AtomicStringTable> m_atomicStringTable;
+    std::unique_ptr<ICUConverterWrapper> m_cachedConverterICU;
 
     static ThreadSpecific<WTFThreadData>* staticData;
     friend WTFThreadData& wtfThreadData();
-    friend class AtomicStringTable;
-    friend class blink::CompressibleStringTable;
 };
 
 inline WTFThreadData& wtfThreadData()

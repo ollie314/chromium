@@ -27,6 +27,7 @@
 #include "core/dom/SelectorQuery.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "core/HTMLNames.h"
 #include "core/css/SelectorChecker.h"
 #include "core/css/parser/CSSParser.h"
 #include "core/dom/Document.h"
@@ -36,8 +37,12 @@
 #include "core/dom/StaticNodeList.h"
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/dom/shadow/ShadowRoot.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
+
+using namespace HTMLNames;
 
 struct SingleElementSelectorQueryTrait {
     typedef Element* OutputType;
@@ -108,13 +113,12 @@ void SelectorDataList::initialize(const CSSSelectorList& selectorList)
     m_usesDeepCombinatorOrShadowPseudo = false;
     m_needsUpdatedDistribution = false;
     m_selectors.reserveInitialCapacity(selectorCount);
-    unsigned index = 0;
-    for (const CSSSelector* selector = selectorList.first(); selector; selector = CSSSelectorList::next(*selector), ++index) {
+    for (const CSSSelector* selector = selectorList.first(); selector; selector = CSSSelectorList::next(*selector)) {
         if (selector->matchesPseudoElement())
             continue;
         m_selectors.uncheckedAppend(selector);
-        m_usesDeepCombinatorOrShadowPseudo |= selectorList.selectorUsesDeepCombinatorOrShadowPseudo(index);
-        m_needsUpdatedDistribution |= selectorList.selectorNeedsUpdatedDistribution(index);
+        m_usesDeepCombinatorOrShadowPseudo |= selector->hasDeepCombinatorOrShadowPseudo();
+        m_needsUpdatedDistribution |= selector->needsUpdatedDistribution();
     }
 }
 
@@ -205,10 +209,8 @@ inline bool matchesTagName(const QualifiedName& tagName, const Element& element)
 template <typename SelectorQueryTrait>
 void SelectorDataList::collectElementsByTagName(ContainerNode& rootNode, const QualifiedName& tagName,  typename SelectorQueryTrait::OutputType& output) const
 {
+    DCHECK_EQ(tagName.namespaceURI(), starAtom);
     for (Element& element : ElementTraversal::descendantsOf(rootNode)) {
-        // querySelector*() doesn't allow namespaces and throws before it gets
-        // here so we can ignore them.
-        DCHECK_EQ(tagName.namespaceURI(), starAtom);
         if (matchesTagName(tagName, element)) {
             SelectorQueryTrait::appendElement(output, element);
             if (SelectorQueryTrait::shouldOnlyMatchFirstElement)
@@ -225,7 +227,7 @@ inline bool SelectorDataList::canUseFastQuery(const ContainerNode& rootNode) con
         return false;
     if (rootNode.document().inQuirksMode())
         return false;
-    if (!rootNode.inShadowIncludingDocument())
+    if (!rootNode.isConnected())
         return false;
     return m_selectors.size() == 1;
 }
@@ -261,8 +263,8 @@ void SelectorDataList::findTraverseRootsAndExecute(ContainerNode& rootNode, type
     bool startFromParent = false;
 
     for (const CSSSelector* selector = m_selectors[0]; selector; selector = selector->tagHistory()) {
-        if (selector->match() == CSSSelector::Id && !rootNode.treeScope().containsMultipleElementsWithId(selector->value())) {
-            Element* element = rootNode.treeScope().getElementById(selector->value());
+        if (selector->match() == CSSSelector::Id && rootNode.isInTreeScope() && !rootNode.containingTreeScope().containsMultipleElementsWithId(selector->value())) {
+            Element* element = rootNode.containingTreeScope().getElementById(selector->value());
             ContainerNode* adjustedNode = &rootNode;
             if (element && (isTreeScopeRoot(rootNode) || element->isDescendantOf(&rootNode)))
                 adjustedNode = element;
@@ -391,7 +393,7 @@ static ShadowRoot* authorShadowRootOf(const ContainerNode& node)
 
     ElementShadow* shadow = toElement(node).shadow();
     DCHECK(shadow);
-    for (ShadowRoot* shadowRoot = shadow->oldestShadowRoot(); shadowRoot; shadowRoot = shadowRoot->youngerShadowRoot()) {
+    for (ShadowRoot* shadowRoot = &shadow->oldestShadowRoot(); shadowRoot; shadowRoot = shadowRoot->youngerShadowRoot()) {
         if (shadowRoot->type() == ShadowRootType::V0 || shadowRoot->type() == ShadowRootType::Open)
             return shadowRoot;
     }
@@ -427,7 +429,7 @@ static ContainerNode* nextTraversingShadowTree(const ContainerNode& node, const 
             return youngerShadowRoot;
         }
 
-        current = shadowRoot->host();
+        current = &shadowRoot->host();
     }
     return nullptr;
 }
@@ -444,10 +446,16 @@ void SelectorDataList::executeSlowTraversingShadowTree(ContainerNode& rootNode, 
     }
 }
 
-const CSSSelector* SelectorDataList::selectorForIdLookup(const CSSSelector& firstSelector) const
+static const CSSSelector* selectorForIdLookup(const CSSSelector& firstSelector)
 {
     for (const CSSSelector* selector = &firstSelector; selector; selector = selector->tagHistory()) {
         if (selector->match() == CSSSelector::Id)
+            return selector;
+        // We only use the fast path when in standards mode where #id selectors
+        // are case sensitive, so we need the same behavior for [id=value].
+        if (selector->match() == CSSSelector::AttributeExact
+            && selector->attribute() == idAttr
+            && selector->attributeMatch() == CSSSelector::CaseSensitive)
             return selector;
         if (selector->relation() != CSSSelector::SubSelector)
             break;
@@ -473,11 +481,12 @@ void SelectorDataList::execute(ContainerNode& rootNode, typename SelectorQueryTr
     }
 
     DCHECK_EQ(m_selectors.size(), 1u);
+    DCHECK(!rootNode.document().inQuirksMode());
 
     const CSSSelector& selector = *m_selectors[0];
     const CSSSelector& firstSelector = selector;
 
-    // Fast path for querySelector*('#id'), querySelector*('tag#id').
+    // Fast path for querySelector*('#id'), querySelector*('tag#id'), querySelector*('tag[id=example]').
     if (const CSSSelector* idSelector = selectorForIdLookup(firstSelector)) {
         const AtomicString& idToMatch = idSelector->value();
         if (rootNode.treeScope().containsMultipleElementsWithId(idToMatch)) {
@@ -510,8 +519,15 @@ void SelectorDataList::execute(ContainerNode& rootNode, typename SelectorQueryTr
             collectElementsByClassName<SelectorQueryTrait>(rootNode, firstSelector.value(), output);
             return;
         case CSSSelector::Tag:
-            collectElementsByTagName<SelectorQueryTrait>(rootNode, firstSelector.tagQName(), output);
-            return;
+            if (firstSelector.tagQName().namespaceURI() == starAtom) {
+                collectElementsByTagName<SelectorQueryTrait>(rootNode, firstSelector.tagQName(), output);
+                return;
+            }
+            // querySelector*() doesn't allow namespace prefix resolution and
+            // throws before we get here, but we still may have selectors for
+            // elements without a namespace.
+            DCHECK_EQ(firstSelector.tagQName().namespaceURI(), nullAtom);
+            break;
         default:
             break; // If we need another fast path, add here.
         }
@@ -520,9 +536,9 @@ void SelectorDataList::execute(ContainerNode& rootNode, typename SelectorQueryTr
     findTraverseRootsAndExecute<SelectorQueryTrait>(rootNode, output);
 }
 
-PassOwnPtr<SelectorQuery> SelectorQuery::adopt(CSSSelectorList selectorList)
+std::unique_ptr<SelectorQuery> SelectorQuery::adopt(CSSSelectorList selectorList)
 {
-    return adoptPtr(new SelectorQuery(std::move(selectorList)));
+    return wrapUnique(new SelectorQuery(std::move(selectorList)));
 }
 
 SelectorQuery::SelectorQuery(CSSSelectorList selectorList)
@@ -553,7 +569,7 @@ Element* SelectorQuery::queryFirst(ContainerNode& rootNode) const
 
 SelectorQuery* SelectorQueryCache::add(const AtomicString& selectors, const Document& document, ExceptionState& exceptionState)
 {
-    HashMap<AtomicString, OwnPtr<SelectorQuery>>::iterator it = m_entries.find(selectors);
+    HashMap<AtomicString, std::unique_ptr<SelectorQuery>>::iterator it = m_entries.find(selectors);
     if (it != m_entries.end())
         return it->value.get();
 

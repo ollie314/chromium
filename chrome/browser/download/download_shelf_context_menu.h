@@ -43,8 +43,6 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
   bool IsCommandIdChecked(int command_id) const override;
   bool IsCommandIdVisible(int command_id) const override;
   void ExecuteCommand(int command_id, int event_flags) override;
-  bool GetAcceleratorForCommandId(int command_id,
-                                  ui::Accelerator* accelerator) override;
   bool IsItemForCommandIdDynamic(int command_id) const override;
   base::string16 GetLabelForCommandId(int command_id) const override;
 
@@ -75,10 +73,6 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
   // Information source.
   content::DownloadItem* download_item_;
   std::unique_ptr<DownloadCommands> download_commands_;
-
-#if defined(OS_WIN)
-  bool is_adobe_pdf_reader_up_to_date_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(DownloadShelfContextMenu);
 };

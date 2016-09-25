@@ -36,55 +36,26 @@ public abstract class OverlayPanelAnimation extends OverlayPanelBase
      */
     public static final long BASE_ANIMATION_DURATION_MS = 218;
 
-    /**
-     * The maximum animation duration in milliseconds.
-     */
+    /** The maximum animation duration in milliseconds. */
     public static final long MAXIMUM_ANIMATION_DURATION_MS = 350;
 
-    /**
-     * The minimum animation duration in milliseconds.
-     */
+    /** The minimum animation duration in milliseconds. */
     private static final long MINIMUM_ANIMATION_DURATION_MS = Math.round(7 * 1000 / 60);
 
-    /**
-     * Average animation velocity in dps per second.
-     */
+    /** Average animation velocity in dps per second. */
     private static final float INITIAL_ANIMATION_VELOCITY_DP_PER_SECOND = 1750f;
 
-    /**
-     * The PanelState to which the Panel is being animated.
-     */
+    /** The PanelState to which the Panel is being animated. */
     private PanelState mAnimatingState;
 
-    /**
-     * The StateChangeReason for which the Panel is being animated.
-     */
+    /** The StateChangeReason for which the Panel is being animated. */
     private StateChangeReason mAnimatingStateReason;
 
-    /**
-     * The animation set.
-     */
+    /** The animation set. */
     private ChromeAnimation<Animatable<?>> mLayoutAnimations;
 
-    /**
-     * The {@link LayoutUpdateHost} used to request a new frame to be updated and rendered.
-     */
+    /** The {@link LayoutUpdateHost} used to request a new frame to be updated and rendered. */
     private final LayoutUpdateHost mUpdateHost;
-
-    /**
-     * Whether the panel's close animation is running.
-     */
-    private boolean mIsAnimatingPanelClosing;
-
-    /**
-     * Whether the panel's expand animation is running.
-     */
-    private boolean mIsAnimatingPanelExpanding;
-
-    /**
-     * The reason for the panel expanding.
-     */
-    private StateChangeReason mPanelExpansionStateChangeReason;
 
     // ============================================================================================
     // Constructor
@@ -118,8 +89,6 @@ public abstract class OverlayPanelAnimation extends OverlayPanelBase
      * @param reason The reason for the change of panel state.
      */
     protected void expandPanel(StateChangeReason reason) {
-        mIsAnimatingPanelExpanding = true;
-        mPanelExpansionStateChangeReason = reason;
         animatePanelToState(PanelState.EXPANDED, reason);
     }
 
@@ -130,10 +99,6 @@ public abstract class OverlayPanelAnimation extends OverlayPanelBase
      */
     protected void peekPanel(StateChangeReason reason) {
         updateBasePageTargetY();
-
-        // Indicate to the Compositor that for now on the Panel should be
-        // rendered, until it's closed.
-        startShowing();
 
         // TODO(pedrosimonetti): Implement custom animation with the following values.
         // int SEARCH_BAR_ANIMATION_DURATION_MS = 218;
@@ -147,35 +112,65 @@ public abstract class OverlayPanelAnimation extends OverlayPanelBase
 
     @Override
     protected void closePanel(StateChangeReason reason, boolean animate) {
-        // If close without animation is called while the panel is already animating closed, cancel
-        // the animation and finish closing immediately.
-        if (mIsAnimatingPanelClosing) {
-            if (!animate) {
-                cancelAnimation(this, Property.PANEL_HEIGHT);
-            } else {
-                return;
-            }
-        }
-
         if (animate) {
-            mIsAnimatingPanelClosing = true;
-            animatePanelToState(PanelState.CLOSED, reason);
+            // Only animates the closing action if not doing that already.
+            if (mAnimatingState != PanelState.CLOSED) {
+                animatePanelToState(PanelState.CLOSED, reason);
+            }
         } else {
             resizePanelToState(PanelState.CLOSED, reason);
         }
     }
 
     @Override
-    public void onSizeChanged(float width, float height) {
-        super.onSizeChanged(width, height);
-        // In fullscreen, when the panel is opened the bottom Android controls show causing
-        // a call to onSizeChanged(). Since the screen size changes, the height of the panel
-        // needs to be recalculated. If the expansion animation is running, cancel it and start
-        // a new one, so that the panel ends up in the right position.
-        if (mIsAnimatingPanelExpanding) {
-            cancelHeightAnimation();
-            expandPanel(mPanelExpansionStateChangeReason);
+    protected void handleSizeChanged(float width, float height, float previousWidth) {
+        if (!isShowing()) return;
+
+        boolean wasFullWidthSizePanel = doesMatchFullWidthCriteria(previousWidth);
+        boolean isFullWidthSizePanel = isFullWidthSizePanel();
+        // We support resize from any full width to full width, or from narrow width to narrow width
+        // when the width does not change (as when the keyboard is shown/hidden).
+        boolean isPanelResizeSupported = isFullWidthSizePanel && wasFullWidthSizePanel
+                || !isFullWidthSizePanel && !wasFullWidthSizePanel && width == previousWidth;
+
+        // TODO(pedrosimonetti): See crbug.com/568351.
+        // We can't keep the panel opened after a viewport size change when the panel's
+        // ContentView needs to be resized to a non-default size. The panel provides
+        // different desired MeasureSpecs when full-width vs narrow-width
+        // (See {@link OverlayPanel#createNewOverlayPanelContentInternal()}).
+        // When the activity is resized, ContentViewClient asks for the MeasureSpecs
+        // before the panel is notified of the size change, resulting in the panel's
+        // ContentView being laid out incorrectly.
+        if (isPanelResizeSupported) {
+            if (mAnimatingState != PanelState.UNDEFINED) {
+                // If the size changes when an animation is happening, then we need to restart the
+                // animation, because the size of the Panel might have changed as well.
+                animatePanelToState(mAnimatingState, mAnimatingStateReason);
+            } else {
+                updatePanelForSizeChange();
+            }
+        } else {
+            // TODO(pedrosimonetti): Find solution that does not require async handling.
+            // NOTE(pedrosimonetti): Should close the Panel asynchronously because
+            // we might be in the middle of laying out the CompositorViewHolder
+            // View. See {@link CompositorViewHolder#onLayout()}. Closing the Panel
+            // has the effect of destroying the Views used by the Panel (which are
+            // children of the CompositorViewHolder), and if we do that synchronously
+            // it will cause a crash in {@link FrameLayout#layoutChildren()}.
+            mContainerView.getHandler().post(new Runnable() {
+                @Override
+                public void run() {
+                    closePanel(StateChangeReason.UNKNOWN, false);
+                }
+            });
         }
+    }
+
+    /**
+     * Updates the Panel so it preserves its state when the size changes.
+     */
+    protected void updatePanelForSizeChange() {
+        resizePanelToState(getPanelState(), StateChangeReason.UNKNOWN);
     }
 
     /**
@@ -411,16 +406,15 @@ public abstract class OverlayPanelAnimation extends OverlayPanelBase
      * Called when layout-specific actions are needed after the animation finishes.
      */
     protected void onAnimationFinished() {
-        mIsAnimatingPanelClosing = false;
-        mIsAnimatingPanelExpanding = false;
-
         // If animating to a particular PanelState, and after completing
         // resizing the Panel to its desired state, then the Panel's state
         // should be updated. This method also is called when an animation
         // is cancelled (which can happen by a subsequent gesture while
         // an animation is happening). That's why the actual height should
         // be checked.
-        if (mAnimatingState != PanelState.UNDEFINED
+        // TODO(mdjones): Move animations not directly related to the panel's state into their
+        // own animation handler (i.e. peek promo, G sprite, etc.). See https://crbug.com/617307.
+        if (mAnimatingState != null && mAnimatingState != PanelState.UNDEFINED
                 && getHeight() == getPanelHeightFromState(mAnimatingState)) {
             setPanelState(mAnimatingState, mAnimatingStateReason);
         }
@@ -463,7 +457,7 @@ public abstract class OverlayPanelAnimation extends OverlayPanelBase
      * @param setStartValueAfterDelay See {@link Animation#setStartValueAfterStartDelay(boolean)}
      * @param interpolator            The interpolator to use for the animation
      */
-    protected <T extends Enum<?>> void addToAnimation(Animatable<T> object, T prop, float start,
+    public <T extends Enum<?>> void addToAnimation(Animatable<T> object, T prop, float start,
             float end, long duration, long startTime, boolean setStartValueAfterDelay,
             Interpolator interpolator) {
         ChromeAnimation.Animation<Animatable<?>> component = createAnimation(object, prop, start,

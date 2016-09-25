@@ -5,15 +5,26 @@
 #ifndef BoxPainter_h
 #define BoxPainter_h
 
-#include "core/layout/LayoutBoxModelObject.h"
-#include "core/paint/ObjectPainter.h"
+#include "core/layout/BackgroundBleedAvoidance.h"
+#include "core/style/ShadowData.h"
+#include "platform/geometry/LayoutSize.h"
+#include "platform/graphics/GraphicsTypes.h"
+#include "third_party/skia/include/core/SkXfermode.h"
 #include "wtf/Allocator.h"
 
 namespace blink {
 
 class BackgroundImageGeometry;
+class ComputedStyle;
+class FillLayer;
 class FloatRoundedRect;
+class GraphicsContext;
+class Image;
+class InlineFlowBox;
 class LayoutPoint;
+class LayoutRect;
+class LayoutBoxModelObject;
+class NinePieceImage;
 struct PaintInfo;
 class LayoutBox;
 class LayoutObject;
@@ -47,14 +58,10 @@ public:
     static void paintBoxShadow(const PaintInfo&, const LayoutRect&, const ComputedStyle&, ShadowStyle, bool includeLogicalLeftEdge = true, bool includeLogicalRightEdge = true);
     static bool shouldForceWhiteBackgroundForPrintEconomy(const ComputedStyle&, const Document&);
 
+    LayoutRect boundsForDrawingRecorder(const PaintInfo&, const LayoutPoint& adjustedPaintOffset);
+
 private:
     void paintBackground(const PaintInfo&, const LayoutRect&, const Color& backgroundColor, BackgroundBleedAvoidance = BackgroundBleedNone);
-    static FloatRoundedRect backgroundRoundedRectAdjustedForBleedAvoidance(const LayoutObject&, const LayoutRect&, BackgroundBleedAvoidance, const InlineFlowBox*, const LayoutSize&, bool includeLogicalLeftEdge, bool includeLogicalRightEdge);
-    static FloatRoundedRect getBackgroundRoundedRect(const LayoutObject&, const LayoutRect&, const InlineFlowBox*, LayoutUnit inlineBoxWidth, LayoutUnit inlineBoxHeight,
-        bool includeLogicalLeftEdge, bool includeLogicalRightEdge);
-    static void applyBoxShadowForBackground(GraphicsContext&, const LayoutObject&);
-
-    LayoutRect boundsForDrawingRecorder(const LayoutPoint& paintOffset);
 
     const LayoutBox& m_layoutBox;
 };

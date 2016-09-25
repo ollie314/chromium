@@ -6,11 +6,6 @@
 
 namespace blink {
 
-ExtendableMessageEvent* ExtendableMessageEvent::create()
-{
-    return new ExtendableMessageEvent;
-}
-
 ExtendableMessageEvent* ExtendableMessageEvent::create(const AtomicString& type, const ExtendableMessageEventInit& initializer)
 {
     return new ExtendableMessageEvent(type, initializer);
@@ -23,19 +18,19 @@ ExtendableMessageEvent* ExtendableMessageEvent::create(const AtomicString& type,
 
 ExtendableMessageEvent* ExtendableMessageEvent::create(PassRefPtr<SerializedScriptValue> data, const String& origin, MessagePortArray* ports, WaitUntilObserver* observer)
 {
-    return new ExtendableMessageEvent(data, origin, ports, observer);
+    return new ExtendableMessageEvent(std::move(data), origin, ports, observer);
 }
 
 ExtendableMessageEvent* ExtendableMessageEvent::create(PassRefPtr<SerializedScriptValue> data, const String& origin, MessagePortArray* ports, ServiceWorkerClient* source, WaitUntilObserver* observer)
 {
-    ExtendableMessageEvent* event = new ExtendableMessageEvent(data, origin, ports, observer);
+    ExtendableMessageEvent* event = new ExtendableMessageEvent(std::move(data), origin, ports, observer);
     event->m_sourceAsClient = source;
     return event;
 }
 
 ExtendableMessageEvent* ExtendableMessageEvent::create(PassRefPtr<SerializedScriptValue> data, const String& origin, MessagePortArray* ports, ServiceWorker* source, WaitUntilObserver* observer)
 {
-    ExtendableMessageEvent* event = new ExtendableMessageEvent(data, origin, ports, observer);
+    ExtendableMessageEvent* event = new ExtendableMessageEvent(std::move(data), origin, ports, observer);
     event->m_sourceAsServiceWorker = source;
     return event;
 }
@@ -84,10 +79,6 @@ DEFINE_TRACE(ExtendableMessageEvent)
     visitor->trace(m_sourceAsMessagePort);
     visitor->trace(m_ports);
     ExtendableEvent::trace(visitor);
-}
-
-ExtendableMessageEvent::ExtendableMessageEvent()
-{
 }
 
 ExtendableMessageEvent::ExtendableMessageEvent(const AtomicString& type, const ExtendableMessageEventInit& initializer)

@@ -21,7 +21,6 @@
 #ifndef WTF_HashFunctions_h
 #define WTF_HashFunctions_h
 
-#include "wtf/OwnPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/StdLibExtras.h"
 #include <memory>
@@ -112,11 +111,11 @@ template <typename T> struct FloatHash {
     typedef typename IntTypes<sizeof(T)>::UnsignedType Bits;
     static unsigned hash(T key)
     {
-        return hashInt(bitwise_cast<Bits>(key));
+        return hashInt(bitwiseCast<Bits>(key));
     }
     static bool equal(T a, T b)
     {
-        return bitwise_cast<Bits>(a) == bitwise_cast<Bits>(b);
+        return bitwiseCast<Bits>(a) == bitwiseCast<Bits>(b);
     }
     static const bool safeToCompareToEmptyOrDeleted = true;
 };
@@ -152,23 +151,6 @@ struct RefPtrHash : PtrHash<T> {
     static bool equal(T* a, const RefPtr<T>& b) { return a == b; }
     static bool equal(const RefPtr<T>& a, T* b) { return a == b; }
     static bool equal(const RefPtr<T>& a, const PassRefPtr<T>& b) { return a == b; }
-};
-
-template <typename T>
-struct OwnPtrHash : PtrHash<T> {
-    using PtrHash<T>::hash;
-    static unsigned hash(const OwnPtr<T>& key) { return hash(key.get()); }
-    static unsigned hash(const PassOwnPtr<T>& key) { return hash(key.get()); }
-
-    static bool equal(const OwnPtr<T>& a, const OwnPtr<T>& b)
-    {
-        return a.get() == b.get();
-    }
-    static bool equal(const OwnPtr<T>& a, T* b) { return a == b; }
-    static bool equal(const OwnPtr<T>& a, const PassOwnPtr<T>& b)
-    {
-        return a.get() == b.get();
-    }
 };
 
 template <typename T>
@@ -218,10 +200,6 @@ struct DefaultHash<T*> {
 template <typename T>
 struct DefaultHash<RefPtr<T>> {
     using Hash = RefPtrHash<T>;
-};
-template <typename T>
-struct DefaultHash<OwnPtr<T>> {
-    using Hash = OwnPtrHash<T>;
 };
 template <typename T>
 struct DefaultHash<std::unique_ptr<T>> {

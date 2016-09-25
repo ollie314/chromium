@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
@@ -165,29 +165,29 @@ void HIDDetectionScreen::OnViewDestroyed(HIDDetectionView* view) {
 
 void HIDDetectionScreen::RequestPinCode(device::BluetoothDevice* device) {
   VLOG(1) << "RequestPinCode id = " << device->GetDeviceID()
-          << " name = " << device->GetName();
+          << " name = " << device->GetNameForDisplay();
   device->CancelPairing();
 }
 
 void HIDDetectionScreen::RequestPasskey(device::BluetoothDevice* device) {
   VLOG(1) << "RequestPassKey id = " << device->GetDeviceID()
-          << " name = " << device->GetName();
+          << " name = " << device->GetNameForDisplay();
   device->CancelPairing();
 }
 
 void HIDDetectionScreen::DisplayPinCode(device::BluetoothDevice* device,
                                         const std::string& pincode) {
   VLOG(1) << "DisplayPinCode id = " << device->GetDeviceID()
-          << " name = " << device->GetName();
+          << " name = " << device->GetNameForDisplay();
   GetContextEditor().SetString(kContextKeyPinCode, pincode);
-  SetKeyboardDeviceName_(base::UTF16ToUTF8(device->GetName()));
+  SetKeyboardDeviceName_(base::UTF16ToUTF8(device->GetNameForDisplay()));
   SendKeyboardDeviceNotification();
 }
 
 void HIDDetectionScreen::DisplayPasskey(device::BluetoothDevice* device,
                                         uint32_t passkey) {
   VLOG(1) << "DisplayPassKey id = " << device->GetDeviceID()
-          << " name = " << device->GetName();
+          << " name = " << device->GetNameForDisplay();
   std::string pincode = base::UintToString(passkey);
   pincode = std::string(kPincodeLength - pincode.length(), '0').append(pincode);
   // No differences in UI for passkey and pincode authentication calls.
@@ -374,24 +374,24 @@ void HIDDetectionScreen::SetKeyboardDeviceName_(const std::string& name) {
 
 void HIDDetectionScreen::DeviceAdded(
     device::BluetoothAdapter* adapter, device::BluetoothDevice* device) {
-  VLOG(1) << "BT input device added id = " << device->GetDeviceID() <<
-      " name = " << device->GetName();
+  VLOG(1) << "BT input device added id = " << device->GetDeviceID()
+          << " name = " << device->GetNameForDisplay();
   TryPairingAsPointingDevice(device);
   TryPairingAsKeyboardDevice(device);
 }
 
 void HIDDetectionScreen::DeviceChanged(
     device::BluetoothAdapter* adapter, device::BluetoothDevice* device) {
-  VLOG(1) << "BT device changed id = " << device->GetDeviceID() << " name = " <<
-      device->GetName();
+  VLOG(1) << "BT device changed id = " << device->GetDeviceID()
+          << " name = " << device->GetNameForDisplay();
   TryPairingAsPointingDevice(device);
   TryPairingAsKeyboardDevice(device);
 }
 
 void HIDDetectionScreen::DeviceRemoved(
     device::BluetoothAdapter* adapter, device::BluetoothDevice* device) {
-  VLOG(1) << "BT device removed id = " << device->GetDeviceID() << " name = " <<
-      device->GetName();
+  VLOG(1) << "BT device removed id = " << device->GetDeviceID()
+          << " name = " << device->GetNameForDisplay();
 }
 
 void HIDDetectionScreen::OnInputDeviceAdded(

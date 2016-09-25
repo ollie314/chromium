@@ -31,7 +31,8 @@
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
-#include "modules/webaudio/AbstractAudioContext.h"
+#include "modules/webaudio/AudioBufferOptions.h"
+#include "modules/webaudio/BaseAudioContext.h"
 #include "platform/audio/AudioBus.h"
 #include "platform/audio/AudioFileReader.h"
 #include "platform/audio/AudioUtilities.h"
@@ -41,7 +42,7 @@ namespace blink {
 
 AudioBuffer* AudioBuffer::create(unsigned numberOfChannels, size_t numberOfFrames, float sampleRate)
 {
-    if (!AudioUtilities::isValidAudioBufferSampleRate(sampleRate) || numberOfChannels > AbstractAudioContext::maxNumberOfChannels() || !numberOfChannels || !numberOfFrames)
+    if (!AudioUtilities::isValidAudioBufferSampleRate(sampleRate) || numberOfChannels > BaseAudioContext::maxNumberOfChannels() || !numberOfChannels || !numberOfFrames)
         return nullptr;
 
     AudioBuffer* buffer = new AudioBuffer(numberOfChannels, numberOfFrames, sampleRate);
@@ -53,7 +54,7 @@ AudioBuffer* AudioBuffer::create(unsigned numberOfChannels, size_t numberOfFrame
 
 AudioBuffer* AudioBuffer::create(unsigned numberOfChannels, size_t numberOfFrames, float sampleRate, ExceptionState& exceptionState)
 {
-    if (!numberOfChannels || numberOfChannels > AbstractAudioContext::maxNumberOfChannels()) {
+    if (!numberOfChannels || numberOfChannels > BaseAudioContext::maxNumberOfChannels()) {
         exceptionState.throwDOMException(
             NotSupportedError,
             ExceptionMessages::indexOutsideRange(
@@ -61,7 +62,7 @@ AudioBuffer* AudioBuffer::create(unsigned numberOfChannels, size_t numberOfFrame
                 numberOfChannels,
                 1u,
                 ExceptionMessages::InclusiveBound,
-                AbstractAudioContext::maxNumberOfChannels(),
+                BaseAudioContext::maxNumberOfChannels(),
                 ExceptionMessages::InclusiveBound));
         return nullptr;
     }
@@ -102,6 +103,37 @@ AudioBuffer* AudioBuffer::create(unsigned numberOfChannels, size_t numberOfFrame
     }
 
     return audioBuffer;
+}
+
+AudioBuffer* AudioBuffer::create(BaseAudioContext* context, const AudioBufferOptions& options, ExceptionState& exceptionState)
+{
+    unsigned numberOfChannels;
+    size_t numberOfFrames;
+    float sampleRate;
+
+    if (!options.hasNumberOfChannels()) {
+        exceptionState.throwDOMException(
+            NotFoundError,
+            "AudioBufferOptions: numberOfChannels is required.");
+        return nullptr;
+    }
+
+    if (!options.hasLength()) {
+        exceptionState.throwDOMException(
+            NotFoundError,
+            "AudioBufferOptions: length is required.");
+        return nullptr;
+    }
+
+    numberOfChannels = options.numberOfChannels();
+    numberOfFrames = options.length();
+
+    if (options.hasSampleRate())
+        sampleRate = options.sampleRate();
+    else
+        sampleRate = context->sampleRate();
+
+    return create(numberOfChannels, numberOfFrames, sampleRate, exceptionState);
 }
 
 AudioBuffer* AudioBuffer::createFromAudioFileData(const void* data, size_t dataSize, bool mixToMono, float sampleRate)
@@ -186,8 +218,7 @@ DOMFloat32Array* AudioBuffer::getChannelData(unsigned channelIndex, ExceptionSta
         return nullptr;
     }
 
-    DOMFloat32Array* channelData = m_channels[channelIndex].get();
-    return DOMFloat32Array::create(channelData->buffer(), channelData->byteOffset(), channelData->length());
+    return getChannelData(channelIndex);
 }
 
 DOMFloat32Array* AudioBuffer::getChannelData(unsigned channelIndex)
@@ -240,8 +271,8 @@ void AudioBuffer::copyFromChannel(DOMFloat32Array* destination, long channelNumb
     const float* src = channelData->data();
     float* dst = destination->data();
 
-    ASSERT(src);
-    ASSERT(dst);
+    DCHECK(src);
+    DCHECK(dst);
 
     memcpy(dst, src + startInChannel, count * sizeof(*src));
 }
@@ -288,8 +319,8 @@ void AudioBuffer::copyToChannel(DOMFloat32Array* source, long channelNumber, uns
     const float* src = source->data();
     float* dst = channelData->data();
 
-    ASSERT(src);
-    ASSERT(dst);
+    DCHECK(src);
+    DCHECK(dst);
 
     memcpy(dst + startInChannel, src, count * sizeof(*dst));
 }

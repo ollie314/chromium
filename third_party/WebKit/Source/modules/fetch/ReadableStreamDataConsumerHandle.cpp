@@ -38,7 +38,7 @@ public:
     public:
         static v8::Local<v8::Function> createFunction(ScriptState* scriptState, PassRefPtr<ReadingContext> context)
         {
-            return (new OnFulfilled(scriptState, context))->bindToV8Function();
+            return (new OnFulfilled(scriptState, std::move(context)))->bindToV8Function();
         }
 
         ScriptValue call(ScriptValue v) override
@@ -49,12 +49,12 @@ public:
             bool done;
             v8::Local<v8::Value> item = v.v8Value();
             ASSERT(item->IsObject());
-            v8::Local<v8::Value> value = v8CallOrCrash(v8UnpackIteratorResult(v.getScriptState(), item.As<v8::Object>(), &done));
+            v8::Local<v8::Value> value = v8UnpackIteratorResult(v.getScriptState(), item.As<v8::Object>(), &done).ToLocalChecked();
             if (done) {
                 readingContext->onReadDone();
                 return v;
             }
-            if (!V8Uint8Array::hasInstance(value, v.isolate())) {
+            if (!value->IsUint8Array()) {
                 readingContext->onRejected();
                 return ScriptValue();
             }
@@ -73,7 +73,7 @@ public:
     public:
         static v8::Local<v8::Function> createFunction(ScriptState* scriptState, PassRefPtr<ReadingContext> context)
         {
-            return (new OnRejected(scriptState, context))->bindToV8Function();
+            return (new OnRejected(scriptState, std::move(context)))->bindToV8Function();
         }
 
         ScriptValue call(ScriptValue v) override
@@ -159,9 +159,10 @@ public:
                 m_isReading = false;
                 return WebDataConsumerHandle::UnexpectedError;
             }
-            ReadableStreamOperations::read(m_scriptState.get(), reader).then(
-                OnFulfilled::createFunction(m_scriptState.get(), this),
-                OnRejected::createFunction(m_scriptState.get(), this));
+            ReadableStreamOperations::defaultReaderRead(
+                m_scriptState.get(), reader).then(
+                    OnFulfilled::createFunction(m_scriptState.get(), this),
+                    OnRejected::createFunction(m_scriptState.get(), this));
         }
         return WebDataConsumerHandle::ShouldWait;
     }
@@ -220,7 +221,7 @@ public:
     void notifyLater()
     {
         ASSERT(m_client);
-        Platform::current()->currentThread()->getWebTaskRunner()->postTask(BLINK_FROM_HERE, bind(&ReadingContext::notify, PassRefPtr<ReadingContext>(this)));
+        Platform::current()->currentThread()->getWebTaskRunner()->postTask(BLINK_FROM_HERE, WTF::bind(&ReadingContext::notify, PassRefPtr<ReadingContext>(this)));
     }
 
 private:
@@ -271,10 +272,9 @@ ReadableStreamDataConsumerHandle::ReadableStreamDataConsumerHandle(ScriptState* 
 }
 ReadableStreamDataConsumerHandle::~ReadableStreamDataConsumerHandle() = default;
 
-FetchDataConsumerHandle::Reader* ReadableStreamDataConsumerHandle::obtainReaderInternal(Client* client)
+std::unique_ptr<FetchDataConsumerHandle::Reader> ReadableStreamDataConsumerHandle::obtainFetchDataReader(Client* client)
 {
-    return new ReadingContext::ReaderImpl(m_readingContext, client);
+    return WTF::wrapUnique(new ReadingContext::ReaderImpl(m_readingContext, client));
 }
 
 } // namespace blink
-

@@ -9,12 +9,11 @@
 
 #include <deque>
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "extensions/browser/api/cast_channel/logger_util.h"
 #include "extensions/common/api/cast_channel/logging.pb.h"
@@ -45,7 +44,7 @@ class Logger : public base::RefCounted<Logger> {
   //
   // See crbug.com/518951 for information on why base::Clock
   // is used instead of base::TickClock.
-  Logger(scoped_ptr<base::Clock> clock, base::Time unix_epoch_time);
+  Logger(std::unique_ptr<base::Clock> clock, base::Time unix_epoch_time);
 
   // For newly created sockets. Will create an event and log a
   // CAST_SOCKET_CREATED event.
@@ -81,7 +80,7 @@ class Logger : public base::RefCounted<Logger> {
   // compressed in gzip format.
   // If serialization or compression failed, returns nullptr.
   // |length|: If successful, assigned with size of compressed content.
-  scoped_ptr<char[]> GetLogs(size_t* length) const;
+  std::unique_ptr<char[]> GetLogs(size_t* length) const;
 
   // Clears the internal map.
   void Reset();
@@ -114,8 +113,8 @@ class Logger : public base::RefCounted<Logger> {
     LastErrors last_errors;
   };
 
-  typedef std::map<int, linked_ptr<AggregatedSocketEventLog> >
-      AggregatedSocketEventLogMap;
+  using AggregatedSocketEventLogMap =
+      std::map<int, std::unique_ptr<AggregatedSocketEventLog>>;
 
   // Returns a SocketEvent proto with common fields (EventType, timestamp)
   // populated.
@@ -129,7 +128,7 @@ class Logger : public base::RefCounted<Logger> {
       int channel_id,
       const proto::SocketEvent& socket_event);
 
-  scoped_ptr<base::Clock> clock_;
+  std::unique_ptr<base::Clock> clock_;
   AggregatedSocketEventLogMap aggregated_socket_events_;
   base::Time unix_epoch_time_;
 

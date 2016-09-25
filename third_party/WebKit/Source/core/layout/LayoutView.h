@@ -32,7 +32,7 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollableArea.h"
-#include "wtf/OwnPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -128,10 +128,7 @@ public:
     void absoluteQuads(Vector<FloatQuad>&) const override;
 
     LayoutRect viewRect() const override;
-    LayoutRect overflowClipRect(const LayoutPoint& location, OverlayScrollbarSizeRelevancy = IgnoreOverlayScrollbarSize) const override;
-
-    bool shouldDoFullPaintInvalidationForNextLayout() const;
-    bool doingFullPaintInvalidation() const;
+    LayoutRect overflowClipRect(const LayoutPoint& location, OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const override;
 
     LayoutState* layoutState() const { return m_layoutState; }
 
@@ -182,9 +179,9 @@ public:
 
     void pushLayoutState(LayoutState& layoutState) { m_layoutState = &layoutState; }
     void popLayoutState() { ASSERT(m_layoutState); m_layoutState = m_layoutState->next(); }
-    void invalidateTreeIfNeeded(const PaintInvalidationState&) final;
 
     LayoutRect visualOverflowRect() const override;
+    LayoutRect localOverflowRectForPaintInvalidation() const override;
 
     // Invalidates paint for the entire view, including composited descendants, but not including child frames.
     // It is very likely you do not want to call this method.
@@ -208,6 +205,8 @@ public:
     // or PaintLayerScrollableArea handle the scroll.
     ScrollResult scroll(ScrollGranularity, const FloatSize&) override;
 
+    LayoutRect debugRect() const override;
+
 private:
     void mapLocalToAncestor(const LayoutBoxModelObject* ancestor, TransformState&, MapCoordinatesFlags = ApplyContainerFlip) const override;
 
@@ -219,6 +218,8 @@ private:
 #if ENABLE(ASSERT)
     void checkLayoutState();
 #endif
+
+    void setShouldDoFullPaintInvalidationOnResizeIfNeeded();
 
     void updateFromStyle() override;
     bool allowsOverflowClip() const override;
@@ -261,8 +262,8 @@ private:
     // See the class comment for more details.
     LayoutState* m_layoutState;
 
-    OwnPtr<ViewFragmentationContext> m_fragmentationContext;
-    OwnPtr<PaintLayerCompositor> m_compositor;
+    std::unique_ptr<ViewFragmentationContext> m_fragmentationContext;
+    std::unique_ptr<PaintLayerCompositor> m_compositor;
     RefPtr<IntervalArena> m_intervalArena;
 
     LayoutQuote* m_layoutQuoteHead;

@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/callback.h"
@@ -18,10 +19,14 @@
 #include "media/base/decoder_buffer.h"
 #include "media/base/decryptor.h"
 #include "media/base/demuxer.h"
+#include "media/base/media_track.h"
 #include "media/base/pipeline.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/renderer.h"
+#include "media/base/renderer_client.h"
+#include "media/base/stream_parser.h"
 #include "media/base/text_track.h"
+#include "media/base/text_track_config.h"
 #include "media/base/time_source.h"
 #include "media/base/video_decoder.h"
 #include "media/base/video_decoder_config.h"
@@ -31,33 +36,49 @@
 
 namespace media {
 
+class MockPipelineClient : public Pipeline::Client {
+ public:
+  MockPipelineClient();
+  ~MockPipelineClient();
+
+  MOCK_METHOD1(OnError, void(PipelineStatus));
+  MOCK_METHOD0(OnEnded, void());
+  MOCK_METHOD1(OnMetadata, void(PipelineMetadata));
+  MOCK_METHOD1(OnBufferingStateChange, void(BufferingState));
+  MOCK_METHOD0(OnDurationChange, void());
+  MOCK_METHOD2(OnAddTextTrack,
+               void(const TextTrackConfig&, const AddTextTrackDoneCB&));
+  MOCK_METHOD0(OnWaitingForDecryptionKey, void());
+  MOCK_METHOD1(OnVideoNaturalSizeChange, void(const gfx::Size&));
+  MOCK_METHOD1(OnVideoOpacityChange, void(bool));
+};
+
 class MockPipeline : public Pipeline {
  public:
   MockPipeline();
   virtual ~MockPipeline();
 
   // Note: Start() and Resume() declarations are not actually overrides; they
-  // take scoped_ptr* instead of scoped_ptr so that they can be mock methods.
+  // take unique_ptr* instead of unique_ptr so that they can be mock methods.
   // Private stubs for Start() and Resume() implement the actual Pipeline
   // interface by forwarding to these mock methods.
-  MOCK_METHOD10(Start,
-                void(Demuxer*,
-                     scoped_ptr<Renderer>*,
-                     const base::Closure&,
-                     const PipelineStatusCB&,
-                     const PipelineStatusCB&,
-                     const PipelineMetadataCB&,
-                     const BufferingStateCB&,
-                     const base::Closure&,
-                     const AddTextTrackCB&,
-                     const base::Closure&));
-  MOCK_METHOD1(Stop, void(const base::Closure&));
+  MOCK_METHOD4(Start,
+               void(Demuxer*,
+                    std::unique_ptr<Renderer>*,
+                    Client*,
+                    const PipelineStatusCB&));
+  MOCK_METHOD0(Stop, void());
   MOCK_METHOD2(Seek, void(base::TimeDelta, const PipelineStatusCB&));
   MOCK_METHOD1(Suspend, void(const PipelineStatusCB&));
   MOCK_METHOD3(Resume,
-               void(scoped_ptr<Renderer>*,
+               void(std::unique_ptr<Renderer>*,
                     base::TimeDelta,
                     const PipelineStatusCB&));
+
+  MOCK_METHOD1(OnEnabledAudioTracksChanged,
+               void(const std::vector<MediaTrack::Id>&));
+  MOCK_METHOD1(OnSelectedVideoTrackChanged,
+               void(const std::vector<MediaTrack::Id>&));
 
   // TODO(sandersd): This should automatically return true between Start() and
   // Stop(). (Or better, remove it from the interface entirely.)
@@ -81,16 +102,10 @@ class MockPipeline : public Pipeline {
  private:
   // Forwarding stubs (see comment above).
   void Start(Demuxer* demuxer,
-             scoped_ptr<Renderer> renderer,
-             const base::Closure& ended_cb,
-             const PipelineStatusCB& error_cb,
-             const PipelineStatusCB& seek_cb,
-             const PipelineMetadataCB& metadata_cb,
-             const BufferingStateCB& buffering_state_cb,
-             const base::Closure& duration_change_cb,
-             const AddTextTrackCB& add_text_track_cb,
-             const base::Closure& waiting_for_decryption_key_cb) override;
-  void Resume(scoped_ptr<Renderer> renderer,
+             std::unique_ptr<Renderer> renderer,
+             Client* client,
+             const PipelineStatusCB& seek_cb) override;
+  void Resume(std::unique_ptr<Renderer> renderer,
               base::TimeDelta timestamp,
               const PipelineStatusCB& seek_cb) override;
 
@@ -110,10 +125,15 @@ class MockDemuxer : public Demuxer {
   MOCK_METHOD1(CancelPendingSeek, void(base::TimeDelta));
   MOCK_METHOD2(Seek, void(base::TimeDelta time, const PipelineStatusCB& cb));
   MOCK_METHOD0(Stop, void());
+  MOCK_METHOD0(AbortPendingReads, void());
   MOCK_METHOD1(GetStream, DemuxerStream*(DemuxerStream::Type));
   MOCK_CONST_METHOD0(GetStartTime, base::TimeDelta());
   MOCK_CONST_METHOD0(GetTimelineOffset, base::Time());
   MOCK_CONST_METHOD0(GetMemoryUsage, int64_t());
+  MOCK_METHOD2(OnEnabledAudioTracksChanged,
+               void(const std::vector<MediaTrack::Id>&, base::TimeDelta));
+  MOCK_METHOD2(OnSelectedVideoTrackChanged,
+               void(const std::vector<MediaTrack::Id>&, base::TimeDelta));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockDemuxer);
@@ -138,6 +158,9 @@ class MockDemuxerStream : public DemuxerStream {
   void set_liveness(Liveness liveness);
 
   VideoRotation video_rotation() override;
+  MOCK_CONST_METHOD0(enabled, bool());
+  MOCK_METHOD2(set_enabled, void(bool, base::TimeDelta));
+  MOCK_METHOD1(SetStreamStatusChangeCB, void(const StreamStatusChangeCB&));
 
  private:
   Type type_;
@@ -192,22 +215,34 @@ class MockAudioDecoder : public AudioDecoder {
   DISALLOW_COPY_AND_ASSIGN(MockAudioDecoder);
 };
 
+class MockRendererClient : public RendererClient {
+ public:
+  MockRendererClient();
+  ~MockRendererClient();
+
+  // RendererClient implementation.
+  MOCK_METHOD1(OnError, void(PipelineStatus));
+  MOCK_METHOD0(OnEnded, void());
+  MOCK_METHOD1(OnStatisticsUpdate, void(const PipelineStatistics&));
+  MOCK_METHOD1(OnBufferingStateChange, void(BufferingState));
+  MOCK_METHOD0(OnWaitingForDecryptionKey, void());
+  MOCK_METHOD1(OnVideoNaturalSizeChange, void(const gfx::Size&));
+  MOCK_METHOD1(OnVideoOpacityChange, void(bool));
+  MOCK_METHOD1(OnDurationChange, void(base::TimeDelta));
+};
+
 class MockVideoRenderer : public VideoRenderer {
  public:
   MockVideoRenderer();
   virtual ~MockVideoRenderer();
 
   // VideoRenderer implementation.
-  MOCK_METHOD9(Initialize,
+  MOCK_METHOD5(Initialize,
                void(DemuxerStream* stream,
-                    const PipelineStatusCB& init_cb,
                     CdmContext* cdm_context,
-                    const StatisticsCB& statistics_cb,
-                    const BufferingStateCB& buffering_state_cb,
-                    const base::Closure& ended_cb,
-                    const PipelineStatusCB& error_cb,
+                    RendererClient* client,
                     const TimeSource::WallClockTimeCB& wall_clock_time_cb,
-                    const base::Closure& waiting_for_decryption_key_cb));
+                    const PipelineStatusCB& init_cb));
   MOCK_METHOD1(Flush, void(const base::Closure& callback));
   MOCK_METHOD1(StartPlayingFrom, void(base::TimeDelta));
   MOCK_METHOD1(OnTimeStateChanged, void(bool));
@@ -222,15 +257,11 @@ class MockAudioRenderer : public AudioRenderer {
   virtual ~MockAudioRenderer();
 
   // AudioRenderer implementation.
-  MOCK_METHOD8(Initialize,
+  MOCK_METHOD4(Initialize,
                void(DemuxerStream* stream,
-                    const PipelineStatusCB& init_cb,
                     CdmContext* cdm_context,
-                    const StatisticsCB& statistics_cb,
-                    const BufferingStateCB& buffering_state_cb,
-                    const base::Closure& ended_cb,
-                    const PipelineStatusCB& error_cb,
-                    const base::Closure& waiting_for_decryption_key_cb));
+                    RendererClient* client,
+                    const PipelineStatusCB& init_cb));
   MOCK_METHOD0(GetTimeSource, TimeSource*());
   MOCK_METHOD1(Flush, void(const base::Closure& callback));
   MOCK_METHOD0(StartPlaying, void());
@@ -246,14 +277,10 @@ class MockRenderer : public Renderer {
   virtual ~MockRenderer();
 
   // Renderer implementation.
-  MOCK_METHOD7(Initialize,
+  MOCK_METHOD3(Initialize,
                void(DemuxerStreamProvider* demuxer_stream_provider,
-                    const PipelineStatusCB& init_cb,
-                    const StatisticsCB& statistics_cb,
-                    const BufferingStateCB& buffering_state_cb,
-                    const base::Closure& ended_cb,
-                    const PipelineStatusCB& error_cb,
-                    const base::Closure& waiting_for_decryption_key_cb));
+                    RendererClient* client,
+                    const PipelineStatusCB& init_cb));
   MOCK_METHOD1(Flush, void(const base::Closure& flush_cb));
   MOCK_METHOD1(StartPlayingFrom, void(base::TimeDelta timestamp));
   MOCK_METHOD1(SetPlaybackRate, void(double playback_rate));
@@ -341,8 +368,35 @@ class MockCdmContext : public CdmContext {
   MOCK_METHOD0(GetDecryptor, Decryptor*());
   int GetCdmId() const override;
 
+  void set_cdm_id(int cdm_id);
+
  private:
+  int cdm_id_ = CdmContext::kInvalidCdmId;
+
   DISALLOW_COPY_AND_ASSIGN(MockCdmContext);
+};
+
+class MockStreamParser : public StreamParser {
+ public:
+  MockStreamParser();
+  ~MockStreamParser() override;
+
+  // StreamParser interface
+  MOCK_METHOD8(
+      Init,
+      void(const InitCB& init_cb,
+           const NewConfigCB& config_cb,
+           const NewBuffersCB& new_buffers_cb,
+           bool ignore_text_track,
+           const EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
+           const NewMediaSegmentCB& new_segment_cb,
+           const EndMediaSegmentCB& end_of_segment_cb,
+           const scoped_refptr<MediaLog>& media_log));
+  MOCK_METHOD0(Flush, void());
+  MOCK_METHOD2(Parse, bool(const uint8_t*, int));
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockStreamParser);
 };
 
 }  // namespace media

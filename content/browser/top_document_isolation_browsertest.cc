@@ -55,13 +55,13 @@ class TopDocumentIsolationTest : public ContentBrowserTest {
   Shell* OpenPopup(FrameTreeNode* opener, const std::string& url) {
     GURL gurl =
         opener->current_frame_host()->GetLastCommittedURL().Resolve(url);
-    return content::OpenPopup(opener->current_frame_host(), gurl, "_blank");
+    return content::OpenPopup(opener, gurl, "_blank");
   }
 
   void RendererInitiatedNavigateToURL(FrameTreeNode* node, const GURL& url) {
     TestFrameNavigationObserver nav_observer(node);
-    ASSERT_TRUE(ExecuteScript(node->current_frame_host(),
-                              "window.location.href='" + url.spec() + "'"));
+    ASSERT_TRUE(
+        ExecuteScript(node, "window.location.href='" + url.spec() + "'"));
     nav_observer.Wait();
   }
 
@@ -278,8 +278,9 @@ IN_PROC_BROWSER_TEST_F(TopDocumentIsolationTest,
       DepictFrameTree(root()));
 }
 
+// Flaky. See http://crbug.com/611300.
 IN_PROC_BROWSER_TEST_F(TopDocumentIsolationTest,
-                       NavigateToSubframeSiteWithPopup2) {
+                       DISABLED_NavigateToSubframeSiteWithPopup2) {
   if (content::AreAllSitesIsolatedForTesting())
     return;  // Top Document Isolation is disabled in this mode.
 
@@ -381,7 +382,15 @@ IN_PROC_BROWSER_TEST_F(TopDocumentIsolationTest,
       DepictFrameTree(root()));
 }
 
-IN_PROC_BROWSER_TEST_F(TopDocumentIsolationTest, FramesForSitesInHistory) {
+// Flaky on Mac. See https://crbug.com/611344.
+#if defined(OS_MACOSX)
+#define MAYBE_FramesForSitesInHistory DISABLED_FramesForSitesInHistory
+#else
+#define MAYBE_FramesForSitesInHistory FramesForSitesInHistory
+#endif
+
+IN_PROC_BROWSER_TEST_F(TopDocumentIsolationTest,
+                       MAYBE_FramesForSitesInHistory) {
   if (content::AreAllSitesIsolatedForTesting())
     return;  // Top Document Isolation is disabled in this mode.
 

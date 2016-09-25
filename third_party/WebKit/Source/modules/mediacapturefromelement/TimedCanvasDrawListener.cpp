@@ -4,10 +4,13 @@
 
 #include "modules/mediacapturefromelement/TimedCanvasDrawListener.h"
 
+#include "third_party/skia/include/core/SkImage.h"
+#include <memory>
+
 namespace blink {
 
-TimedCanvasDrawListener::TimedCanvasDrawListener(const PassOwnPtr<WebCanvasCaptureHandler>& handler, double frameRate)
-    : CanvasDrawListener(handler)
+TimedCanvasDrawListener::TimedCanvasDrawListener(std::unique_ptr<WebCanvasCaptureHandler> handler, double frameRate)
+    : CanvasDrawListener(std::move(handler))
     , m_frameInterval(1 / frameRate)
     , m_requestFrameTimer(this, &TimedCanvasDrawListener::requestFrameTimerFired)
 {
@@ -16,20 +19,20 @@ TimedCanvasDrawListener::TimedCanvasDrawListener(const PassOwnPtr<WebCanvasCaptu
 TimedCanvasDrawListener::~TimedCanvasDrawListener() {}
 
 // static
-TimedCanvasDrawListener* TimedCanvasDrawListener::create(const PassOwnPtr<WebCanvasCaptureHandler>& handler, double frameRate)
+TimedCanvasDrawListener* TimedCanvasDrawListener::create(std::unique_ptr<WebCanvasCaptureHandler> handler, double frameRate)
 {
-    TimedCanvasDrawListener* listener = new TimedCanvasDrawListener(handler, frameRate);
+    TimedCanvasDrawListener* listener = new TimedCanvasDrawListener(std::move(handler), frameRate);
     listener->m_requestFrameTimer.startRepeating(listener->m_frameInterval, BLINK_FROM_HERE);
     return listener;
 }
 
-void TimedCanvasDrawListener::sendNewFrame(const WTF::PassRefPtr<SkImage>& image)
+void TimedCanvasDrawListener::sendNewFrame(sk_sp<SkImage> image)
 {
     m_frameCaptureRequested = false;
-    CanvasDrawListener::sendNewFrame(image);
+    CanvasDrawListener::sendNewFrame(std::move(image));
 }
 
-void TimedCanvasDrawListener::requestFrameTimerFired(Timer<TimedCanvasDrawListener>*)
+void TimedCanvasDrawListener::requestFrameTimerFired(TimerBase*)
 {
     // TODO(emircan): Measure the jitter and log, see crbug.com/589974.
     m_frameCaptureRequested = true;

@@ -10,7 +10,7 @@ function test()
     function createNavigatorView(constructor)
     {
         var navigatorView = new constructor();
-        navigatorView.setWorkspace(InspectorTest.testWorkspace);
+        navigatorView._resetWorkspace(InspectorTest.testWorkspace);
         navigatorView.show(WebInspector.inspectorView.element);
         return navigatorView;
     }
@@ -22,8 +22,8 @@ function test()
     var uiSourceCodes = [];
     function addUISourceCode(url, isContentScript)
     {
-        var contentProvider = new WebInspector.StaticContentProvider(WebInspector.resourceTypes.Script, "");
-        var uiSourceCode = InspectorTest.testNetworkProject.addFileForURL(url, contentProvider, InspectorTest.mainFrame(), isContentScript);
+        var contentProvider = WebInspector.StaticContentProvider.fromString(url, WebInspector.resourceTypes.Script, "");
+        var uiSourceCode = InspectorTest.testNetworkProject.addFile(contentProvider, InspectorTest.mainFrame(), isContentScript);
         uiSourceCodes.push(uiSourceCode);
     }
 

@@ -17,6 +17,7 @@
 #include "content/common/content_export.h"
 #include "content/public/common/page_type.h"
 #include "content/public/common/referrer.h"
+#include "content/public/common/resource_request_body.h"
 #include "ui/base/page_transition_types.h"
 
 class GURL;
@@ -86,6 +87,10 @@ class NavigationEntry {
   // The caller is responsible for detecting when there is no title and
   // displaying the appropriate "Untitled" label if this is being displayed to
   // the user.
+  // Use WebContents::UpdateTitleForEntry() in most cases, since that notifies
+  // observers when the visible title changes. Only call
+  // NavigationEntry::SetTitle() below directly when this entry is known not to
+  // be visible.
   virtual void SetTitle(const base::string16& title) = 0;
   virtual const base::string16& GetTitle() const = 0;
 
@@ -139,8 +144,8 @@ class NavigationEntry {
   // whether the page had post data.
   //
   // The actual post data is stored either in
-  // 1) browser_initiated_post_data when a new post data request is started.
-  // 2) content_state when a post request has started and is extracted by
+  // 1) post_data when a new post data request is started.
+  // 2) PageState when a post request has started and is extracted by
   //    WebKit to actually make the request.
   virtual void SetHasPostData(bool has_post_data) = 0;
   virtual bool GetHasPostData() const = 0;
@@ -149,16 +154,15 @@ class NavigationEntry {
   virtual void SetPostID(int64_t post_id) = 0;
   virtual int64_t GetPostID() const = 0;
 
-  // Holds the raw post data of a browser initiated post request.
-  // For efficiency, this should be cleared when content_state is populated
+  // Holds the raw post data of a post request.
+  // For efficiency, this should be cleared when PageState is populated
   // since the data is duplicated.
   // Note, this field:
   // 1) is not persisted in session restore.
   // 2) is shallow copied with the static copy Create method above.
   // 3) may be nullptr so check before use.
-  virtual void SetBrowserInitiatedPostData(
-      const base::RefCountedMemory* data) = 0;
-  virtual const base::RefCountedMemory* GetBrowserInitiatedPostData() const = 0;
+  virtual void SetPostData(const scoped_refptr<ResourceRequestBody>& data) = 0;
+  virtual scoped_refptr<ResourceRequestBody> GetPostData() const = 0;
 
   // The favicon data and tracking information. See content::FaviconStatus.
   virtual const FaviconStatus& GetFavicon() const = 0;

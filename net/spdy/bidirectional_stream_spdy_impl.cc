@@ -38,18 +38,18 @@ BidirectionalStreamSpdyImpl::BidirectionalStreamSpdyImpl(
       closed_stream_status_(ERR_FAILED),
       closed_stream_received_bytes_(0),
       closed_stream_sent_bytes_(0),
+      closed_has_load_timing_info_(false),
       weak_factory_(this) {}
 
 BidirectionalStreamSpdyImpl::~BidirectionalStreamSpdyImpl() {
-  if (stream_) {
-    stream_->DetachDelegate();
-    DCHECK(!stream_);
-  }
+  // Sends a RST to the remote if the stream is destroyed before it completes.
+  ResetStream();
 }
 
 void BidirectionalStreamSpdyImpl::Start(
     const BidirectionalStreamRequestInfo* request_info,
-    const BoundNetLog& net_log,
+    const NetLogWithSource& net_log,
+    bool /*send_request_headers_automatically*/,
     BidirectionalStreamImpl::Delegate* delegate,
     std::unique_ptr<base::Timer> timer) {
   DCHECK(!stream_);
@@ -59,7 +59,10 @@ void BidirectionalStreamSpdyImpl::Start(
   timer_ = std::move(timer);
 
   if (!spdy_session_) {
-    delegate_->OnFailed(ERR_CONNECTION_CLOSED);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(&BidirectionalStreamSpdyImpl::NotifyError,
+                   weak_factory_.GetWeakPtr(), ERR_CONNECTION_CLOSED));
     return;
   }
 
@@ -72,6 +75,11 @@ void BidirectionalStreamSpdyImpl::Start(
                  weak_factory_.GetWeakPtr()));
   if (rv != ERR_IO_PENDING)
     OnStreamInitialized(rv);
+}
+
+void BidirectionalStreamSpdyImpl::SendRequestHeaders() {
+  // Request headers will be sent automatically.
+  NOTREACHED();
 }
 
 int BidirectionalStreamSpdyImpl::ReadData(IOBuffer* buf, int buf_len) {
@@ -95,22 +103,54 @@ int BidirectionalStreamSpdyImpl::ReadData(IOBuffer* buf, int buf_len) {
   return ERR_IO_PENDING;
 }
 
-void BidirectionalStreamSpdyImpl::SendData(IOBuffer* data,
+void BidirectionalStreamSpdyImpl::SendData(const scoped_refptr<IOBuffer>& data,
                                            int length,
                                            bool end_stream) {
-  DCHECK(!stream_closed_);
-  DCHECK(stream_);
+  DCHECK(length > 0 || (length == 0 && end_stream));
 
-  stream_->SendData(data, length,
+  if (!stream_) {
+    LOG(ERROR) << "Trying to send data after stream has been destroyed.";
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&BidirectionalStreamSpdyImpl::NotifyError,
+                              weak_factory_.GetWeakPtr(), ERR_UNEXPECTED));
+    return;
+  }
+
+  DCHECK(!stream_closed_);
+  stream_->SendData(data.get(), length,
                     end_stream ? NO_MORE_DATA_TO_SEND : MORE_DATA_TO_SEND);
 }
 
-void BidirectionalStreamSpdyImpl::Cancel() {
-  if (!stream_)
+void BidirectionalStreamSpdyImpl::SendvData(
+    const std::vector<scoped_refptr<IOBuffer>>& buffers,
+    const std::vector<int>& lengths,
+    bool end_stream) {
+  DCHECK_EQ(buffers.size(), lengths.size());
+
+  if (!stream_) {
+    LOG(ERROR) << "Trying to send data after stream has been destroyed.";
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&BidirectionalStreamSpdyImpl::NotifyError,
+                              weak_factory_.GetWeakPtr(), ERR_UNEXPECTED));
     return;
-  // Cancels the stream and detaches the delegate so it doesn't get called back.
-  stream_->DetachDelegate();
-  DCHECK(!stream_);
+  }
+
+  DCHECK(!stream_closed_);
+  int total_len = 0;
+  for (int len : lengths) {
+    total_len += len;
+  }
+
+  pending_combined_buffer_ = new net::IOBuffer(total_len);
+  int len = 0;
+  // TODO(xunjieli): Get rid of extra copy. Coalesce headers and data frames.
+  for (size_t i = 0; i < buffers.size(); ++i) {
+    memcpy(pending_combined_buffer_->data() + len, buffers[i]->data(),
+           lengths[i]);
+    len += lengths[i];
+  }
+  stream_->SendData(pending_combined_buffer_.get(), total_len,
+                    end_stream ? NO_MORE_DATA_TO_SEND : MORE_DATA_TO_SEND);
 }
 
 NextProto BidirectionalStreamSpdyImpl::GetProtocol() const {
@@ -137,18 +177,38 @@ int64_t BidirectionalStreamSpdyImpl::GetTotalSentBytes() const {
   return stream_->raw_sent_bytes();
 }
 
+bool BidirectionalStreamSpdyImpl::GetLoadTimingInfo(
+    LoadTimingInfo* load_timing_info) const {
+  if (stream_closed_) {
+    if (!closed_has_load_timing_info_)
+      return false;
+    *load_timing_info = closed_load_timing_info_;
+    return true;
+  }
+
+  // If |stream_| isn't created or has ID 0, return false. This is to match
+  // the implementation in SpdyHttpStream.
+  if (!stream_ || stream_->stream_id() == 0)
+    return false;
+
+  return stream_->GetLoadTimingInfo(load_timing_info);
+}
+
 void BidirectionalStreamSpdyImpl::OnRequestHeadersSent() {
   DCHECK(stream_);
 
-  negotiated_protocol_ = stream_->GetProtocol();
-  delegate_->OnHeadersSent();
+  negotiated_protocol_ = kProtoHTTP2;
+  if (delegate_)
+    delegate_->OnStreamReady(/*request_headers_sent=*/true);
 }
 
 SpdyResponseHeadersStatus BidirectionalStreamSpdyImpl::OnResponseHeadersUpdated(
     const SpdyHeaderBlock& response_headers) {
   DCHECK(stream_);
 
-  delegate_->OnHeadersReceived(response_headers);
+  if (delegate_)
+    delegate_->OnHeadersReceived(response_headers);
+
   return RESPONSE_HEADERS_ARE_COMPLETE;
 }
 
@@ -176,14 +236,17 @@ void BidirectionalStreamSpdyImpl::OnDataSent() {
   DCHECK(stream_);
   DCHECK(!stream_closed_);
 
-  delegate_->OnDataSent();
+  pending_combined_buffer_ = nullptr;
+  if (delegate_)
+    delegate_->OnDataSent();
 }
 
 void BidirectionalStreamSpdyImpl::OnTrailers(const SpdyHeaderBlock& trailers) {
   DCHECK(stream_);
   DCHECK(!stream_closed_);
 
-  delegate_->OnTrailersReceived(trailers);
+  if (delegate_)
+    delegate_->OnTrailersReceived(trailers);
 }
 
 void BidirectionalStreamSpdyImpl::OnClose(int status) {
@@ -193,12 +256,14 @@ void BidirectionalStreamSpdyImpl::OnClose(int status) {
   closed_stream_status_ = status;
   closed_stream_received_bytes_ = stream_->raw_received_bytes();
   closed_stream_sent_bytes_ = stream_->raw_sent_bytes();
-  stream_.reset();
+  closed_has_load_timing_info_ =
+      stream_->GetLoadTimingInfo(&closed_load_timing_info_);
 
   if (status != OK) {
-    delegate_->OnFailed(status);
+    NotifyError(status);
     return;
   }
+  ResetStream();
   // Complete any remaining read, as all data has been buffered.
   // If user has not called ReadData (i.e |read_buffer_| is nullptr), this will
   // do nothing.
@@ -206,20 +271,19 @@ void BidirectionalStreamSpdyImpl::OnClose(int status) {
   DoBufferedRead();
 }
 
-void BidirectionalStreamSpdyImpl::SendRequestHeaders() {
-  std::unique_ptr<SpdyHeaderBlock> headers(new SpdyHeaderBlock);
+int BidirectionalStreamSpdyImpl::SendRequestHeadersHelper() {
+  SpdyHeaderBlock headers;
   HttpRequestInfo http_request_info;
   http_request_info.url = request_info_->url;
   http_request_info.method = request_info_->method;
   http_request_info.extra_headers = request_info_->extra_headers;
 
   CreateSpdyHeadersFromHttpRequest(
-      http_request_info, http_request_info.extra_headers,
-      stream_->GetProtocolVersion(), true, headers.get());
-  stream_->SendRequestHeaders(std::move(headers),
-                              request_info_->end_stream_on_headers
-                                  ? NO_MORE_DATA_TO_SEND
-                                  : MORE_DATA_TO_SEND);
+      http_request_info, http_request_info.extra_headers, true, &headers);
+  return stream_->SendRequestHeaders(std::move(headers),
+                                     request_info_->end_stream_on_headers
+                                         ? NO_MORE_DATA_TO_SEND
+                                         : MORE_DATA_TO_SEND);
 }
 
 void BidirectionalStreamSpdyImpl::OnStreamInitialized(int rv) {
@@ -227,10 +291,40 @@ void BidirectionalStreamSpdyImpl::OnStreamInitialized(int rv) {
   if (rv == OK) {
     stream_ = stream_request_.ReleaseStream();
     stream_->SetDelegate(this);
-    SendRequestHeaders();
-    return;
+    rv = SendRequestHeadersHelper();
+    if (rv == OK) {
+      OnRequestHeadersSent();
+      return;
+    } else if (rv == ERR_IO_PENDING) {
+      return;
+    }
   }
-  delegate_->OnFailed(rv);
+  NotifyError(rv);
+}
+
+void BidirectionalStreamSpdyImpl::NotifyError(int rv) {
+  ResetStream();
+  if (delegate_) {
+    BidirectionalStreamImpl::Delegate* delegate = delegate_;
+    delegate_ = nullptr;
+    // Cancel any pending callback.
+    weak_factory_.InvalidateWeakPtrs();
+    delegate->OnFailed(rv);
+    // |this| can be null when returned from delegate.
+  }
+}
+
+void BidirectionalStreamSpdyImpl::ResetStream() {
+  if (!stream_)
+    return;
+  if (!stream_->IsClosed()) {
+    // This sends a RST to the remote.
+    stream_->DetachDelegate();
+    DCHECK(!stream_);
+  } else {
+    // Stream is already closed, so it is not legal to call DetachDelegate.
+    stream_.reset();
+  }
 }
 
 void BidirectionalStreamSpdyImpl::ScheduleBufferedRead() {
@@ -266,7 +360,8 @@ void BidirectionalStreamSpdyImpl::DoBufferedRead() {
     DCHECK_NE(ERR_IO_PENDING, rv);
     read_buffer_ = nullptr;
     read_buffer_len_ = 0;
-    delegate_->OnDataRead(rv);
+    if (delegate_)
+      delegate_->OnDataRead(rv);
   }
 }
 

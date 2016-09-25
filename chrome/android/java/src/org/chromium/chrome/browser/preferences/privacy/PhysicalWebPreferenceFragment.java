@@ -17,7 +17,6 @@ import android.preference.PreferenceFragment;
 
 import org.chromium.base.Log;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.physicalweb.ListUrlsActivity;
 import org.chromium.chrome.browser.physicalweb.PhysicalWeb;
 import org.chromium.chrome.browser.physicalweb.PhysicalWebUma;
@@ -65,8 +64,7 @@ public class PhysicalWebPreferenceFragment extends PreferenceFragment {
                         && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     PhysicalWebUma.onPrefsLocationGranted(getActivity());
                     Log.d(TAG, "Location permission granted");
-                    PhysicalWeb.startPhysicalWeb(
-                            (ChromeApplication) getActivity().getApplicationContext());
+                    PhysicalWeb.startPhysicalWeb();
                 } else {
                     PhysicalWebUma.onPrefsLocationDenied(getActivity());
                     Log.d(TAG, "Location permission denied");
@@ -80,9 +78,8 @@ public class PhysicalWebPreferenceFragment extends PreferenceFragment {
         ChromeSwitchPreference physicalWebSwitch =
                 (ChromeSwitchPreference) findPreference(PREF_PHYSICAL_WEB_SWITCH);
 
-        boolean isPhysicalWebEnabled =
-                PrivacyPreferencesManager.getInstance(getActivity()).isPhysicalWebEnabled();
-        physicalWebSwitch.setChecked(isPhysicalWebEnabled);
+        physicalWebSwitch.setChecked(
+                PrivacyPreferencesManager.getInstance().isPhysicalWebEnabled());
 
         physicalWebSwitch.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
             @Override
@@ -94,7 +91,7 @@ public class PhysicalWebPreferenceFragment extends PreferenceFragment {
                 } else {
                     PhysicalWebUma.onPrefsFeatureDisabled(getActivity());
                 }
-                PrivacyPreferencesManager.getInstance(getActivity()).setPhysicalWebEnabled(enabled);
+                PrivacyPreferencesManager.getInstance().setPhysicalWebEnabled(enabled);
                 return true;
             }
         });

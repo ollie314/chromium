@@ -49,7 +49,7 @@ DragEvent::DragEvent(const AtomicString& eventType, bool canBubble, bool cancela
         platformTimeStamp, syntheticEventType,
         // TODO(zino): Should support canvas hit region because the drag event
         // is a kind of mouse event. Please see http://crbug.com/594073
-        String())
+        String(), nullptr)
     , m_dataTransfer(dataTransfer)
 
 {
@@ -99,8 +99,7 @@ DragEvent& DragEventDispatchMediator::event() const
 
 DispatchEventResult DragEventDispatchMediator::dispatchEvent(EventDispatcher& dispatcher) const
 {
-    if (event().relatedTargetScoped())
-        event().eventPath().adjustForRelatedTarget(dispatcher.node(), event().relatedTarget());
+    event().eventPath().adjustForRelatedTarget(dispatcher.node(), event().relatedTarget());
     return EventDispatchMediator::dispatchEvent(dispatcher);
 }
 

@@ -58,18 +58,18 @@ class ASH_EXPORT SessionStateAnimatorImpl : public SessionStateAnimator {
                                   AnimationSpeed speed,
                                   base::Closure callback) override;
   AnimationSequence* BeginAnimationSequence(base::Closure callback) override;
-  bool IsBackgroundHidden() const override;
-  void ShowBackground() override;
-  void HideBackground() override;
+  bool IsWallpaperHidden() const override;
+  void ShowWallpaper() override;
+  void HideWallpaper() override;
 
  private:
   class AnimationSequence;
   friend class AnimationSequence;
 
   virtual void StartAnimationInSequence(int container_mask,
-      AnimationType type,
-      AnimationSpeed speed,
-      AnimationSequence* observer);
+                                        AnimationType type,
+                                        AnimationSpeed speed,
+                                        AnimationSequence* observer);
 
   // Apply animation |type| to window |window| with |speed| and add |observer|
   // if it is not NULL to the last animation sequence.

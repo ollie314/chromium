@@ -5,11 +5,14 @@
 #include "modules/presentation/PresentationConnectionCallbacks.h"
 
 #include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "core/dom/DOMException.h"
 #include "modules/presentation/PresentationConnection.h"
 #include "modules/presentation/PresentationError.h"
 #include "modules/presentation/PresentationRequest.h"
 #include "public/platform/modules/presentation/WebPresentationConnectionClient.h"
 #include "public/platform/modules/presentation/WebPresentationError.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -23,11 +26,11 @@ PresentationConnectionCallbacks::PresentationConnectionCallbacks(ScriptPromiseRe
 
 void PresentationConnectionCallbacks::onSuccess(std::unique_ptr<WebPresentationConnectionClient> PresentationConnectionClient)
 {
-    OwnPtr<WebPresentationConnectionClient> result(adoptPtr(PresentationConnectionClient.release()));
+    std::unique_ptr<WebPresentationConnectionClient> result(wrapUnique(PresentationConnectionClient.release()));
 
     if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
         return;
-    m_resolver->resolve(PresentationConnection::take(m_resolver.get(), result.release(), m_request));
+    m_resolver->resolve(PresentationConnection::take(m_resolver.get(), std::move(result), m_request));
 }
 
 void PresentationConnectionCallbacks::onError(const WebPresentationError& error)

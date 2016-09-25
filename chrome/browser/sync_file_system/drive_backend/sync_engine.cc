@@ -10,9 +10,9 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/drive/drive_notification_manager_factory.h"
@@ -75,7 +75,6 @@ SyncEngine::DriveServiceFactory::CreateDriveService(
       drive::DriveServiceInterface>(new drive::DriveAPIService(
       oauth2_token_service, url_request_context_getter, blocking_task_runner,
       GURL(google_apis::DriveApiUrlGenerator::kBaseUrlForProduction),
-      GURL(google_apis::DriveApiUrlGenerator::kBaseDownloadUrlForProduction),
       GURL(google_apis::DriveApiUrlGenerator::kBaseThumbnailUrlForProduction),
       std::string() /* custom_user_agent */));
 }
@@ -90,7 +89,7 @@ class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
   }
 
   ~WorkerObserver() override {
-    DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+    DCHECK(sequence_checker_.CalledOnValidSequence());
   }
 
   void OnPendingFileListUpdated(int item_count) override {
@@ -100,7 +99,7 @@ class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
       return;
     }
 
-    DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+    DCHECK(sequence_checker_.CalledOnValidSequence());
     ui_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&SyncEngine::OnPendingFileListUpdated,
@@ -120,7 +119,7 @@ class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
       return;
     }
 
-    DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+    DCHECK(sequence_checker_.CalledOnValidSequence());
     ui_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&SyncEngine::OnFileStatusChanged,
@@ -136,7 +135,7 @@ class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
       return;
     }
 
-    DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+    DCHECK(sequence_checker_.CalledOnValidSequence());
     ui_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&SyncEngine::UpdateServiceState,
@@ -202,7 +201,7 @@ std::unique_ptr<SyncEngine> SyncEngine::CreateForBrowserContext(
       ui_task_runner.get(), worker_task_runner.get(), drive_task_runner.get(),
       worker_pool.get(), GetSyncFileSystemDir(context->GetPath()), task_logger,
       notification_manager, extension_service, signin_manager, token_service,
-      request_context.get(), base::WrapUnique(new DriveServiceFactory()),
+      request_context.get(), base::MakeUnique<DriveServiceFactory>(),
       nullptr /* env_override */));
 
   sync_engine->Initialize();

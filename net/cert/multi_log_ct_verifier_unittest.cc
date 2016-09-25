@@ -14,7 +14,6 @@
 #include "base/metrics/statistics_recorder.h"
 #include "base/values.h"
 #include "net/base/net_errors.h"
-#include "net/base/test_data_directory.h"
 #include "net/cert/ct_log_verifier.h"
 #include "net/cert/ct_serialization.h"
 #include "net/cert/ct_verify_result.h"
@@ -23,10 +22,12 @@
 #include "net/cert/signed_certificate_timestamp.h"
 #include "net/cert/x509_certificate.h"
 #include "net/log/net_log.h"
+#include "net/log/net_log_source_type.h"
 #include "net/log/test_net_log.h"
 #include "net/log/test_net_log_entry.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/ct_test_util.h"
+#include "net/test/test_data_directory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -51,8 +52,9 @@ class MockSCTObserver : public CTVerifier::Observer {
 class MultiLogCTVerifierTest : public ::testing::Test {
  public:
   void SetUp() override {
-    scoped_refptr<const CTLogVerifier> log(CTLogVerifier::Create(
-        ct::GetTestPublicKey(), kLogDescription, "https://ct.example.com"));
+    scoped_refptr<const CTLogVerifier> log(
+        CTLogVerifier::Create(ct::GetTestPublicKey(), kLogDescription,
+                              "https://ct.example.com", "dns.example.com"));
     ASSERT_TRUE(log);
     log_verifiers_.push_back(log);
 
@@ -85,69 +87,57 @@ class MultiLogCTVerifierTest : public ::testing::Test {
       return false;
 
     const TestNetLogEntry& parsed = entries[1];
-    base::ListValue* verified_scts;
-    if (!parsed.GetListValue("verified_scts", &verified_scts) ||
-        verified_scts->GetSize() != 1) {
+    base::ListValue* scts;
+    if (!parsed.GetListValue("scts", &scts) || scts->GetSize() != 1) {
       return false;
     }
 
     base::DictionaryValue* the_sct;
-    if (!verified_scts->GetDictionary(0, &the_sct))
+    if (!scts->GetDictionary(0, &the_sct))
       return false;
 
     std::string origin;
     if (!the_sct->GetString("origin", &origin))
       return false;
-    if (origin != "embedded_in_certificate")
+    if (origin != "Embedded in certificate")
       return false;
 
-    base::ListValue* other_scts;
-    if (!parsed.GetListValue("invalid_scts", &other_scts) ||
-        !other_scts->empty()) {
+    std::string verification_status;
+    if (!the_sct->GetString("verification_status", &verification_status))
       return false;
-    }
-
-    if (!parsed.GetListValue("unknown_logs_scts", &other_scts) ||
-        !other_scts->empty()) {
+    if (verification_status != "Verified")
       return false;
-    }
 
     return true;
   }
 
   bool VerifySinglePrecertificateChain(scoped_refptr<X509Certificate> chain,
-                                       const BoundNetLog& bound_net_log,
+                                       const NetLogWithSource& net_log,
                                        ct::CTVerifyResult* result) {
-    return verifier_->Verify(chain.get(),
-                             std::string(),
-                             std::string(),
-                             result,
-                             bound_net_log) == OK;
+    return verifier_->Verify(chain.get(), std::string(), std::string(), result,
+                             net_log) == OK;
   }
 
   bool VerifySinglePrecertificateChain(scoped_refptr<X509Certificate> chain) {
     ct::CTVerifyResult result;
-    TestNetLog net_log;
-    BoundNetLog bound_net_log =
-        BoundNetLog::Make(&net_log, NetLog::SOURCE_CONNECT_JOB);
+    TestNetLog test_net_log;
+    NetLogWithSource net_log =
+        NetLogWithSource::Make(&test_net_log, NetLogSourceType::CONNECT_JOB);
 
-    return verifier_->Verify(chain.get(),
-                             std::string(),
-                             std::string(),
-                             &result,
-                             bound_net_log) == OK;
+    return verifier_->Verify(chain.get(), std::string(), std::string(), &result,
+                             net_log) == OK;
   }
 
   bool CheckPrecertificateVerification(scoped_refptr<X509Certificate> chain) {
     ct::CTVerifyResult result;
-    TestNetLog net_log;
-    BoundNetLog bound_net_log =
-      BoundNetLog::Make(&net_log, NetLog::SOURCE_CONNECT_JOB);
-    return (VerifySinglePrecertificateChain(chain, bound_net_log, &result) &&
+    TestNetLog test_net_log;
+    NetLogWithSource net_log =
+        NetLogWithSource::Make(&test_net_log, NetLogSourceType::CONNECT_JOB);
+    return (VerifySinglePrecertificateChain(chain, net_log, &result) &&
             ct::CheckForSingleVerifiedSCTInResult(result, kLogDescription) &&
             ct::CheckForSCTOrigin(
                 result, ct::SignedCertificateTimestamp::SCT_EMBEDDED) &&
-            CheckForEmbeddedSCTInNetLog(net_log));
+            CheckForEmbeddedSCTInNetLog(test_net_log));
   }
 
   // Histogram-related helper methods
@@ -221,9 +211,8 @@ TEST_F(MultiLogCTVerifierTest, VerifiesSCTOverX509Cert) {
   std::string sct_list = ct::GetSCTListForTesting();
 
   ct::CTVerifyResult result;
-  EXPECT_EQ(OK,
-            verifier_->Verify(
-                chain_.get(), std::string(), sct_list, &result, BoundNetLog()));
+  EXPECT_EQ(OK, verifier_->Verify(chain_.get(), std::string(), sct_list,
+                                  &result, NetLogWithSource()));
   ASSERT_TRUE(ct::CheckForSingleVerifiedSCTInResult(result, kLogDescription));
   ASSERT_TRUE(ct::CheckForSCTOrigin(
       result, ct::SignedCertificateTimestamp::SCT_FROM_TLS_EXTENSION));
@@ -233,11 +222,11 @@ TEST_F(MultiLogCTVerifierTest, IdentifiesSCTFromUnknownLog) {
   std::string sct_list = ct::GetSCTListWithInvalidSCT();
   ct::CTVerifyResult result;
 
-  EXPECT_NE(OK,
-            verifier_->Verify(
-                chain_.get(), std::string(), sct_list, &result, BoundNetLog()));
-  EXPECT_EQ(1U, result.unknown_logs_scts.size());
-  EXPECT_EQ("", result.unknown_logs_scts[0]->log_description);
+  EXPECT_NE(OK, verifier_->Verify(chain_.get(), std::string(), sct_list,
+                                  &result, NetLogWithSource()));
+  EXPECT_EQ(1U, result.scts.size());
+  EXPECT_EQ("", result.scts[0].sct->log_description);
+  EXPECT_EQ(ct::SCT_STATUS_LOG_UNKNOWN, result.scts[0].status);
 }
 
 TEST_F(MultiLogCTVerifierTest, CountsValidSCTsInStatusHistogram) {
@@ -255,9 +244,8 @@ TEST_F(MultiLogCTVerifierTest, CountsInvalidSCTsInStatusHistogram) {
   int num_invalid_scts = GetValueFromHistogram(
       "Net.CertificateTransparency.SCTStatus", ct::SCT_STATUS_LOG_UNKNOWN);
 
-  EXPECT_NE(OK,
-            verifier_->Verify(
-                chain_.get(), std::string(), sct_list, &result, BoundNetLog()));
+  EXPECT_NE(OK, verifier_->Verify(chain_.get(), std::string(), sct_list,
+                                  &result, NetLogWithSource()));
 
   ASSERT_EQ(num_valid_scts, NumValidSCTsInStatusHistogram());
   ASSERT_EQ(num_invalid_scts + 1,

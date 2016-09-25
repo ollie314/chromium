@@ -7,7 +7,10 @@
 #include <utility>
 #include <vector>
 
+#include "base/location.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/process_info_native_handler.h"
@@ -48,7 +51,7 @@ class TestNatives : public gin::Wrappable<TestNatives> {
   }
 
   void FinishTesting() {
-    base::MessageLoop::current()->PostTask(FROM_HERE, quit_closure_);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, quit_closure_);
   }
 
   static gin::WrapperInfo kWrapperInfo;
@@ -65,40 +68,41 @@ gin::WrapperInfo TestNatives::kWrapperInfo = {gin::kEmbedderNativeGin};
 
 }  // namespace
 
-gin::WrapperInfo TestServiceProvider::kWrapperInfo = {gin::kEmbedderNativeGin};
+gin::WrapperInfo TestInterfaceProvider::kWrapperInfo =
+    {gin::kEmbedderNativeGin};
 
-gin::Handle<TestServiceProvider> TestServiceProvider::Create(
+gin::Handle<TestInterfaceProvider> TestInterfaceProvider::Create(
     v8::Isolate* isolate) {
-  return gin::CreateHandle(isolate, new TestServiceProvider());
+  return gin::CreateHandle(isolate, new TestInterfaceProvider());
 }
 
-TestServiceProvider::~TestServiceProvider() {
+TestInterfaceProvider::~TestInterfaceProvider() {
 }
 
-gin::ObjectTemplateBuilder TestServiceProvider::GetObjectTemplateBuilder(
+gin::ObjectTemplateBuilder TestInterfaceProvider::GetObjectTemplateBuilder(
     v8::Isolate* isolate) {
-  return Wrappable<TestServiceProvider>::GetObjectTemplateBuilder(isolate)
-      .SetMethod("connectToService", &TestServiceProvider::ConnectToService);
+  return Wrappable<TestInterfaceProvider>::GetObjectTemplateBuilder(isolate)
+      .SetMethod("getInterface", &TestInterfaceProvider::GetInterface);
 }
 
-mojo::Handle TestServiceProvider::ConnectToService(
-    const std::string& service_name) {
-  EXPECT_EQ(1u, service_factories_.count(service_name))
-      << "Unregistered service " << service_name << " requested.";
+mojo::Handle TestInterfaceProvider::GetInterface(
+    const std::string& interface_name) {
+  EXPECT_EQ(1u, factories_.count(interface_name))
+      << "Unregistered interface " << interface_name << " requested.";
   mojo::MessagePipe pipe;
   std::map<std::string,
            base::Callback<void(mojo::ScopedMessagePipeHandle)> >::iterator it =
-      service_factories_.find(service_name);
-  if (it != service_factories_.end())
+      factories_.find(interface_name);
+  if (it != factories_.end())
     it->second.Run(std::move(pipe.handle0));
   return pipe.handle1.release();
 }
 
-TestServiceProvider::TestServiceProvider() {
+TestInterfaceProvider::TestInterfaceProvider() {
 }
 
 // static
-void TestServiceProvider::IgnoreHandle(mojo::ScopedMessagePipeHandle handle) {
+void TestInterfaceProvider::IgnoreHandle(mojo::ScopedMessagePipeHandle handle) {
 }
 
 ApiTestEnvironment::ApiTestEnvironment(
@@ -128,15 +132,10 @@ void ApiTestEnvironment::RegisterModules() {
                                      NULL,
                                      v8_schema_registry_.get());
   env()->module_system()->RegisterNativeHandler(
-      "process",
-      scoped_ptr<NativeHandler>(new ProcessInfoNativeHandler(
-          env()->context(),
-          env()->context()->GetExtensionID(),
-          env()->context()->GetContextTypeDescription(),
-          false,
-          false,
-          2,
-          false)));
+      "process", std::unique_ptr<NativeHandler>(new ProcessInfoNativeHandler(
+                     env()->context(), env()->context()->GetExtensionID(),
+                     env()->context()->GetContextTypeDescription(), false,
+                     false, 2, false)));
   env()->RegisterTestFile("test_environment_specific_bindings",
                           "unit_test_environment_specific_bindings.js");
 
@@ -160,13 +159,13 @@ void ApiTestEnvironment::RegisterModules() {
   gin::ModuleRegistry::From(env()->context()->v8_context())
       ->AddBuiltinModule(env()->isolate(), mojo::edk::js::Support::kModuleName,
                          mojo::edk::js::Support::GetModule(env()->isolate()));
-  gin::Handle<TestServiceProvider> service_provider =
-      TestServiceProvider::Create(env()->isolate());
-  service_provider_ = service_provider.get();
+  gin::Handle<TestInterfaceProvider> interface_provider =
+    TestInterfaceProvider::Create(env()->isolate());
+  interface_provider_ = interface_provider.get();
   gin::ModuleRegistry::From(env()->context()->v8_context())
       ->AddBuiltinModule(env()->isolate(),
-                         "content/public/renderer/frame_service_registry",
-                         service_provider.ToV8());
+                         "content/public/renderer/frame_interfaces",
+                         interface_provider.ToV8());
 }
 
 void ApiTestEnvironment::InitializeEnvironment() {
@@ -191,11 +190,11 @@ void ApiTestEnvironment::RunTest(const std::string& file_name,
       env()->isolate(),
       "testNatives",
       TestNatives::Create(env()->isolate(), run_loop.QuitClosure()).ToV8());
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&ApiTestEnvironment::RunTestInner, base::Unretained(this),
                  test_name, run_loop.QuitClosure()));
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&ApiTestEnvironment::RunPromisesAgain,
                             base::Unretained(this)));
   run_loop.Run();
@@ -208,14 +207,14 @@ void ApiTestEnvironment::RunTestInner(const std::string& test_name,
   v8::Local<v8::Value> result =
       env()->module_system()->CallModuleMethod("testBody", test_name);
   if (!result->IsTrue()) {
-    base::MessageLoop::current()->PostTask(FROM_HERE, quit_closure);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, quit_closure);
     FAIL() << "Failed to run test \"" << test_name << "\"";
   }
 }
 
 void ApiTestEnvironment::RunPromisesAgain() {
   v8::MicrotasksScope::PerformCheckpoint(env()->isolate());
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&ApiTestEnvironment::RunPromisesAgain,
                             base::Unretained(this)));
 }

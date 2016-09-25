@@ -1,14 +1,15 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="no">
-<translation id="1008557486741366299">Ikke nå</translation>
 <translation id="1047726139967079566">Legg til bokmerke for denne siden</translation>
 <translation id="1172898394251786223">Neste felt</translation>
 <translation id="2320166752086256636">Skjul tastaturet</translation>
 <translation id="2467815441875554965">Kontekstbasert søk</translation>
+<translation id="2572712655377361602">En enhetsinnstilling har blokkert tilgangen til bildene dine</translation>
 <translation id="2704606927547763573">Kopiert</translation>
 <translation id="2747003861858887689">Forrige felt</translation>
 <translation id="2780046210906776326">Ingen e-postkontoer</translation>
+<translation id="3172213052701798825">Google Smart Lock for passord</translation>
 <translation id="3244271242291266297">MM</translation>
 <translation id="3252394070589632019"><ph name="VALUE" />, <ph name="ADDITIONAL_INFO" />, <ph name="INDEX" /> av <ph name="NUM_SUGGESTIONS" /></translation>
 <translation id="3335947283844343239">Åpne lukkede faner igjen</translation>
@@ -19,7 +20,9 @@
 <translation id="4399225372525667111">Chrome kan ikke bekrefte at nettadressen for dette nettstedet er korrekt.</translation>
 <translation id="4728558894243024398">Plattform</translation>
 <translation id="473775607612524610">Oppdater</translation>
+<translation id="4875622588773761625">Vil du at <ph name="PASSWORD_MANAGER_BRAND" /> skal oppdatere passordet for dette nettstedet?</translation>
 <translation id="5317780077021120954">Lagre</translation>
+<translation id="6039694632319341016">Vil du at <ph name="PASSWORD_MANAGER_BRAND" /> skal oppdatere passordet ditt for <ph name="USERNAME" /> for dette nettstedet?</translation>
 <translation id="605721222689873409">ÅÅ</translation>
 <translation id="6149061208933997199">Bruk passord</translation>
 <translation id="6196207969502475924">Google Talesøk</translation>

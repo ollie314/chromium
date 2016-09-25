@@ -4,12 +4,13 @@
 
 #include "platform/testing/WebLayerTreeViewImplForTesting.h"
 
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_timeline.h"
 #include "cc/blink/web_layer_impl.h"
 #include "cc/layers/layer.h"
-#include "cc/trees/layer_tree_host.h"
+#include "cc/trees/layer_tree_host_in_process.h"
+#include "cc/trees/layer_tree_settings.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebLayer.h"
 #include "public/platform/WebLayerTreeView.h"
@@ -18,6 +19,26 @@
 namespace blink {
 
 WebLayerTreeViewImplForTesting::WebLayerTreeViewImplForTesting()
+    : WebLayerTreeViewImplForTesting(defaultLayerTreeSettings())
+{
+}
+
+WebLayerTreeViewImplForTesting::WebLayerTreeViewImplForTesting(const cc::LayerTreeSettings& settings)
+{
+    cc::LayerTreeHostInProcess::InitParams params;
+    params.client = this;
+    params.settings = &settings;
+    params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
+    params.task_graph_runner = &m_taskGraphRunner;
+    params.animation_host = cc::AnimationHost::CreateForTesting(cc::ThreadInstance::MAIN);
+    m_layerTreeHost = cc::LayerTreeHostInProcess::CreateSingleThreaded(this, &params);
+    ASSERT(m_layerTreeHost);
+}
+
+WebLayerTreeViewImplForTesting::~WebLayerTreeViewImplForTesting() {}
+
+// static
+cc::LayerTreeSettings WebLayerTreeViewImplForTesting::defaultLayerTreeSettings()
 {
     cc::LayerTreeSettings settings;
 
@@ -25,64 +46,68 @@ WebLayerTreeViewImplForTesting::WebLayerTreeViewImplForTesting()
     // to keep content always crisp when possible.
     settings.layer_transforms_should_scale_layer_contents = true;
 
-    cc::LayerTreeHost::InitParams params;
-    params.client = this;
-    params.settings = &settings;
-    params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
-    params.task_graph_runner = &m_taskGraphRunner;
-    m_layerTreeHost = cc::LayerTreeHost::CreateSingleThreaded(this, &params);
-    ASSERT(m_layerTreeHost);
+    return settings;
 }
 
-WebLayerTreeViewImplForTesting::~WebLayerTreeViewImplForTesting() {}
+bool WebLayerTreeViewImplForTesting::hasLayer(const WebLayer& layer)
+{
+    return layer.ccLayer()->GetLayerTreeHostForTesting() == m_layerTreeHost.get();
+}
 
 void WebLayerTreeViewImplForTesting::setRootLayer(const blink::WebLayer& root)
 {
-    m_layerTreeHost->SetRootLayer(static_cast<const cc_blink::WebLayerImpl*>(&root)->layer());
+    m_layerTreeHost->GetLayerTree()->SetRootLayer(static_cast<const cc_blink::WebLayerImpl*>(&root)->layer());
 }
 
 void WebLayerTreeViewImplForTesting::clearRootLayer()
 {
-    m_layerTreeHost->SetRootLayer(scoped_refptr<cc::Layer>());
+    m_layerTreeHost->GetLayerTree()->SetRootLayer(scoped_refptr<cc::Layer>());
 }
 
 void WebLayerTreeViewImplForTesting::attachCompositorAnimationTimeline(cc::AnimationTimeline* compositorTimeline)
 {
-    ASSERT(m_layerTreeHost->animation_host());
-    m_layerTreeHost->animation_host()->AddAnimationTimeline(compositorTimeline);
+    DCHECK(m_layerTreeHost->GetLayerTree()->animation_host());
+    m_layerTreeHost->GetLayerTree()->animation_host()->AddAnimationTimeline(compositorTimeline);
 }
 
 void WebLayerTreeViewImplForTesting::detachCompositorAnimationTimeline(cc::AnimationTimeline* compositorTimeline)
 {
-    ASSERT(m_layerTreeHost->animation_host());
-    m_layerTreeHost->animation_host()->RemoveAnimationTimeline(compositorTimeline);
+    DCHECK(m_layerTreeHost->GetLayerTree()->animation_host());
+    m_layerTreeHost->GetLayerTree()->animation_host()->RemoveAnimationTimeline(compositorTimeline);
 }
 
 void WebLayerTreeViewImplForTesting::setViewportSize(const WebSize& unusedDeprecated, const WebSize& deviceViewportSize)
 {
     gfx::Size gfxSize(std::max(0, deviceViewportSize.width), std::max(0, deviceViewportSize.height));
-    m_layerTreeHost->SetViewportSize(gfxSize);
+    m_layerTreeHost->GetLayerTree()->SetViewportSize(gfxSize);
 }
 
 void WebLayerTreeViewImplForTesting::setViewportSize(const WebSize& deviceViewportSize)
 {
     gfx::Size gfxSize(std::max(0, deviceViewportSize.width), std::max(0, deviceViewportSize.height));
-    m_layerTreeHost->SetViewportSize(gfxSize);
+    m_layerTreeHost->GetLayerTree()->SetViewportSize(gfxSize);
+}
+
+WebSize WebLayerTreeViewImplForTesting::getViewportSize() const
+{
+    return WebSize(
+        m_layerTreeHost->GetLayerTree()->device_viewport_size().width(),
+        m_layerTreeHost->GetLayerTree()->device_viewport_size().height());
 }
 
 void WebLayerTreeViewImplForTesting::setDeviceScaleFactor(float deviceScaleFactor)
 {
-    m_layerTreeHost->SetDeviceScaleFactor(deviceScaleFactor);
+    m_layerTreeHost->GetLayerTree()->SetDeviceScaleFactor(deviceScaleFactor);
 }
 
 void WebLayerTreeViewImplForTesting::setBackgroundColor(WebColor color)
 {
-    m_layerTreeHost->set_background_color(color);
+    m_layerTreeHost->GetLayerTree()->set_background_color(color);
 }
 
 void WebLayerTreeViewImplForTesting::setHasTransparentBackground(bool transparent)
 {
-    m_layerTreeHost->set_has_transparent_background(transparent);
+    m_layerTreeHost->GetLayerTree()->set_has_transparent_background(transparent);
 }
 
 void WebLayerTreeViewImplForTesting::setVisible(bool visible)
@@ -95,7 +120,7 @@ void WebLayerTreeViewImplForTesting::setPageScaleFactorAndLimits(
     float minimum,
     float maximum)
 {
-    m_layerTreeHost->SetPageScaleFactorAndLimits(pageScaleFactor, minimum, maximum);
+    m_layerTreeHost->GetLayerTree()->SetPageScaleFactorAndLimits(pageScaleFactor, minimum, maximum);
 }
 
 void WebLayerTreeViewImplForTesting::startPageScaleAnimation(
@@ -129,12 +154,12 @@ void WebLayerTreeViewImplForTesting::ApplyViewportDeltas(
 {
 }
 
-void WebLayerTreeViewImplForTesting::RequestNewOutputSurface()
+void WebLayerTreeViewImplForTesting::RequestNewCompositorFrameSink()
 {
-    // Intentionally do not create and set an OutputSurface.
+    // Intentionally do not create and set an CompositorFrameSink.
 }
 
-void WebLayerTreeViewImplForTesting::DidFailToInitializeOutputSurface()
+void WebLayerTreeViewImplForTesting::DidFailToInitializeCompositorFrameSink()
 {
     ASSERT_NOT_REACHED();
 }
@@ -145,7 +170,7 @@ void WebLayerTreeViewImplForTesting::registerViewportLayers(
     const blink::WebLayer* innerViewportScrollLayer,
     const blink::WebLayer* outerViewportScrollLayer)
 {
-    m_layerTreeHost->RegisterViewportLayers(
+    m_layerTreeHost->GetLayerTree()->RegisterViewportLayers(
         // The scroll elasticity layer will only exist when using pinch virtual
         // viewports.
         overscrollElasticityLayer
@@ -162,7 +187,7 @@ void WebLayerTreeViewImplForTesting::registerViewportLayers(
 
 void WebLayerTreeViewImplForTesting::clearViewportLayers()
 {
-    m_layerTreeHost->RegisterViewportLayers(scoped_refptr<cc::Layer>(),
+    m_layerTreeHost->GetLayerTree()->RegisterViewportLayers(scoped_refptr<cc::Layer>(),
         scoped_refptr<cc::Layer>(),
         scoped_refptr<cc::Layer>(),
         scoped_refptr<cc::Layer>());
@@ -181,7 +206,7 @@ void WebLayerTreeViewImplForTesting::setEventListenerProperties(
     blink::WebEventListenerProperties properties)
 {
     // Equality of static_cast is checked in render_widget_compositor.cc.
-    m_layerTreeHost->SetEventListenerProperties(
+    m_layerTreeHost->GetLayerTree()->SetEventListenerProperties(
         static_cast<cc::EventListenerClass>(eventClass),
         static_cast<cc::EventListenerProperties>(properties));
 }
@@ -191,18 +216,18 @@ WebLayerTreeViewImplForTesting::eventListenerProperties(blink::WebEventListenerC
 {
     // Equality of static_cast is checked in render_widget_compositor.cc.
     return static_cast<blink::WebEventListenerProperties>(
-        m_layerTreeHost->event_listener_properties(
+        m_layerTreeHost->GetLayerTree()->event_listener_properties(
             static_cast<cc::EventListenerClass>(eventClass)));
 }
 
 void WebLayerTreeViewImplForTesting::setHaveScrollEventHandlers(bool haveEentHandlers)
 {
-    m_layerTreeHost->SetHaveScrollEventHandlers(haveEentHandlers);
+    m_layerTreeHost->GetLayerTree()->SetHaveScrollEventHandlers(haveEentHandlers);
 }
 
 bool WebLayerTreeViewImplForTesting::haveScrollEventHandlers() const
 {
-    return m_layerTreeHost->have_scroll_event_handlers();
+    return m_layerTreeHost->GetLayerTree()->have_scroll_event_handlers();
 }
 
 } // namespace blink

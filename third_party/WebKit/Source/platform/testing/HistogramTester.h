@@ -6,7 +6,7 @@
 #define HistogramTester_h
 
 #include "platform/Histogram.h"
-#include "wtf/OwnPtr.h"
+#include <memory>
 
 namespace base {
 class HistogramTester;
@@ -21,10 +21,11 @@ public:
     ~HistogramTester();
 
     void expectUniqueSample(const std::string& name, base::HistogramBase::Sample, base::HistogramBase::Count) const;
+    void expectBucketCount(const std::string& name, base::HistogramBase::Sample, base::HistogramBase::Count) const;
     void expectTotalCount(const std::string& name, base::HistogramBase::Count) const;
 
 private:
-    OwnPtr<base::HistogramTester> m_histogramTester;
+    std::unique_ptr<base::HistogramTester> m_histogramTester;
 };
 
 } // namespace blink

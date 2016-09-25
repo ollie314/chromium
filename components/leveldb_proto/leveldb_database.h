@@ -5,12 +5,12 @@
 #ifndef COMPONENTS_LEVELDB_PROTO_LEVELDB_DATABASE_H_
 #define COMPONENTS_LEVELDB_PROTO_LEVELDB_DATABASE_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_split.h"
 #include "base/threading/thread_collision_warner.h"
 
@@ -44,6 +44,7 @@ class LevelDB {
   virtual bool Save(const base::StringPairs& pairs_to_save,
                     const std::vector<std::string>& keys_to_remove);
   virtual bool Load(std::vector<std::string>* entries);
+  virtual bool Get(const std::string& key, bool* found, std::string* entry);
 
   static bool Destroy(const base::FilePath& database_dir);
 
@@ -52,8 +53,8 @@ class LevelDB {
 
   // The declaration order of these members matters: |db_| depends on |env_| and
   // therefore has to be destructed first.
-  scoped_ptr<leveldb::Env> env_;
-  scoped_ptr<leveldb::DB> db_;
+  std::unique_ptr<leveldb::Env> env_;
+  std::unique_ptr<leveldb::DB> db_;
   base::HistogramBase* open_histogram_;
 
   DISALLOW_COPY_AND_ASSIGN(LevelDB);

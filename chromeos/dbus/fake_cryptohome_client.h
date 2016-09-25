@@ -8,6 +8,8 @@
 #include <stdint.h>
 
 #include <map>
+#include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -25,6 +27,7 @@ class CHROMEOS_EXPORT FakeCryptohomeClient : public CryptohomeClient {
       const AsyncCallStatusHandler& handler,
       const AsyncCallStatusWithDataHandler& data_handler) override;
   void ResetAsyncCallStatusHandlers() override;
+  void SetLowDiskSpaceHandler(const LowDiskSpaceHandler& handler) override;
   void WaitForServiceToBeAvailable(
       const WaitForServiceToBeAvailableCallback& callback) override;
   void IsMounted(const BoolDBusMethodCallback& callback) override;
@@ -41,6 +44,8 @@ class CHROMEOS_EXPORT FakeCryptohomeClient : public CryptohomeClient {
   void RenameCryptohome(const cryptohome::Identification& cryptohome_id_from,
                         const cryptohome::Identification& cryptohome_id_to,
                         const ProtobufMethodCallback& callback) override;
+  void GetAccountDiskUsage(const cryptohome::Identification& account_id,
+                           const ProtobufMethodCallback& callback) override;
   void GetSystemSalt(const GetSystemSaltCallback& callback) override;
   void GetSanitizedUsername(const cryptohome::Identification& cryptohome_id,
                             const StringDBusMethodCallback& callback) override;
@@ -217,12 +222,18 @@ class CHROMEOS_EXPORT FakeCryptohomeClient : public CryptohomeClient {
       const ProtobufMethodCallback& callback);
 
   // Posts tasks which return fake results to the UI thread.
-  void ReturnAsyncMethodResult(const AsyncMethodCallback& callback,
-                               bool returns_data);
+  void ReturnAsyncMethodResult(const AsyncMethodCallback& callback);
 
-  // This method is used to implement ReturnAsyncMethodResult.
-  void ReturnAsyncMethodResultInternal(const AsyncMethodCallback& callback,
-                                       bool returns_data);
+  // Posts tasks which return fake data to the UI thread.
+  void ReturnAsyncMethodData(const AsyncMethodCallback& callback,
+                             const std::string& data);
+
+  // This method is used to implement ReturnAsyncMethodResult without data.
+  void ReturnAsyncMethodResultInternal(const AsyncMethodCallback& callback);
+
+  // This method is used to implement ReturnAsyncMethodResult with data.
+  void ReturnAsyncMethodDataInternal(const AsyncMethodCallback& callback,
+                                     const std::string& data);
 
   bool service_is_available_;
   int async_call_id_;

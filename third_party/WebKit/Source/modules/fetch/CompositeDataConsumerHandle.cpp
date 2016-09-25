@@ -4,14 +4,16 @@
 
 #include "modules/fetch/CompositeDataConsumerHandle.h"
 
-#include "platform/ThreadSafeFunctional.h"
+#include "platform/CrossThreadFunctional.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebTaskRunner.h"
 #include "public/platform/WebThread.h"
 #include "public/platform/WebTraceLocation.h"
 #include "wtf/Locker.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/ThreadSafeRefCounted.h"
 #include "wtf/ThreadingPrimitives.h"
+#include <memory>
 
 namespace blink {
 
@@ -32,42 +34,42 @@ private:
 class CompositeDataConsumerHandle::Context final : public ThreadSafeRefCounted<Context> {
 public:
     using Token = unsigned;
-    static PassRefPtr<Context> create(PassOwnPtr<WebDataConsumerHandle> handle) { return adoptRef(new Context(handle)); }
+    static PassRefPtr<Context> create(std::unique_ptr<WebDataConsumerHandle> handle) { return adoptRef(new Context(std::move(handle))); }
     ~Context()
     {
-        ASSERT(!m_readerThread);
-        ASSERT(!m_reader);
-        ASSERT(!m_client);
+        DCHECK(!m_readerThread);
+        DCHECK(!m_reader);
+        DCHECK(!m_client);
     }
-    PassOwnPtr<ReaderImpl> obtainReader(Client* client)
+    std::unique_ptr<ReaderImpl> obtainReader(Client* client)
     {
         MutexLocker locker(m_mutex);
-        ASSERT(!m_readerThread);
-        ASSERT(!m_reader);
-        ASSERT(!m_client);
+        DCHECK(!m_readerThread);
+        DCHECK(!m_reader);
+        DCHECK(!m_client);
         ++m_token;
         m_client = client;
         m_readerThread = Platform::current()->currentThread();
         m_reader = m_handle->obtainReader(m_client);
-        return adoptPtr(new ReaderImpl(this));
+        return wrapUnique(new ReaderImpl(this));
     }
     void detachReader()
     {
         MutexLocker locker(m_mutex);
-        ASSERT(m_readerThread);
-        ASSERT(m_readerThread->isCurrentThread());
-        ASSERT(m_reader);
-        ASSERT(!m_isInTwoPhaseRead);
-        ASSERT(!m_isUpdateWaitingForEndRead);
+        DCHECK(m_readerThread);
+        DCHECK(m_readerThread->isCurrentThread());
+        DCHECK(m_reader);
+        DCHECK(!m_isInTwoPhaseRead);
+        DCHECK(!m_isUpdateWaitingForEndRead);
         ++m_token;
         m_reader = nullptr;
         m_readerThread = nullptr;
         m_client = nullptr;
     }
-    void update(PassOwnPtr<WebDataConsumerHandle> handle)
+    void update(std::unique_ptr<WebDataConsumerHandle> handle)
     {
         MutexLocker locker(m_mutex);
-        m_handle = handle;
+        m_handle = std::move(handle);
         if (!m_readerThread) {
             // There is no reader.
             return;
@@ -78,21 +80,21 @@ public:
 
     Result read(void* data, size_t size, Flags flags, size_t* readSize)
     {
-        ASSERT(m_readerThread && m_readerThread->isCurrentThread());
+        DCHECK(m_readerThread && m_readerThread->isCurrentThread());
         return m_reader->read(data, size, flags, readSize);
     }
     Result beginRead(const void** buffer, Flags flags, size_t* available)
     {
-        ASSERT(m_readerThread && m_readerThread->isCurrentThread());
-        ASSERT(!m_isInTwoPhaseRead);
+        DCHECK(m_readerThread && m_readerThread->isCurrentThread());
+        DCHECK(!m_isInTwoPhaseRead);
         Result r = m_reader->beginRead(buffer, flags, available);
         m_isInTwoPhaseRead = (r == Ok);
         return r;
     }
     Result endRead(size_t readSize)
     {
-        ASSERT(m_readerThread && m_readerThread->isCurrentThread());
-        ASSERT(m_isInTwoPhaseRead);
+        DCHECK(m_readerThread && m_readerThread->isCurrentThread());
+        DCHECK(m_isInTwoPhaseRead);
         Result r = m_reader->endRead(readSize);
         m_isInTwoPhaseRead = false;
         if (m_isUpdateWaitingForEndRead) {
@@ -106,8 +108,8 @@ public:
     }
 
 private:
-    explicit Context(PassOwnPtr<WebDataConsumerHandle> handle)
-        : m_handle(handle)
+    explicit Context(std::unique_ptr<WebDataConsumerHandle> handle)
+        : m_handle(std::move(handle))
         , m_readerThread(nullptr)
         , m_client(nullptr)
         , m_token(0)
@@ -126,8 +128,8 @@ private:
             // This request is not fresh. Ignore it.
             return;
         }
-        ASSERT(m_readerThread);
-        ASSERT(m_reader);
+        DCHECK(m_readerThread);
+        DCHECK(m_reader);
         if (m_readerThread->isCurrentThread()) {
             if (m_isInTwoPhaseRead) {
                 // We are waiting for the two-phase read completion.
@@ -140,11 +142,11 @@ private:
             return;
         }
         ++m_token;
-        m_readerThread->getWebTaskRunner()->postTask(BLINK_FROM_HERE, threadSafeBind(&Context::updateReader, this, m_token));
+        m_readerThread->getWebTaskRunner()->postTask(BLINK_FROM_HERE, crossThreadBind(&Context::updateReader, wrapPassRefPtr(this), m_token));
     }
 
-    OwnPtr<Reader> m_reader;
-    OwnPtr<WebDataConsumerHandle> m_handle;
+    std::unique_ptr<Reader> m_reader;
+    std::unique_ptr<WebDataConsumerHandle> m_handle;
     // Note: Holding a WebThread raw pointer is not generally safe, but we can
     // do that in this case because:
     //  1. Destructing a ReaderImpl when the bound thread ends is a user's
@@ -184,7 +186,7 @@ Result CompositeDataConsumerHandle::ReaderImpl::endRead(size_t readSize)
 
 CompositeDataConsumerHandle::Updater::Updater(PassRefPtr<Context> context)
     : m_context(context)
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     , m_thread(Platform::current()->currentThread())
 #endif
 {
@@ -192,24 +194,26 @@ CompositeDataConsumerHandle::Updater::Updater(PassRefPtr<Context> context)
 
 CompositeDataConsumerHandle::Updater::~Updater() {}
 
-void CompositeDataConsumerHandle::Updater::update(PassOwnPtr<WebDataConsumerHandle> handle)
+void CompositeDataConsumerHandle::Updater::update(std::unique_ptr<WebDataConsumerHandle> handle)
 {
-    ASSERT(handle);
-    ASSERT(m_thread->isCurrentThread());
-    m_context->update(handle);
+    DCHECK(handle);
+#if DCHECK_IS_ON()
+    DCHECK(m_thread->isCurrentThread());
+#endif
+    m_context->update(std::move(handle));
 }
 
-CompositeDataConsumerHandle::CompositeDataConsumerHandle(PassOwnPtr<WebDataConsumerHandle> handle, Updater** updater)
-    : m_context(Context::create(handle))
+CompositeDataConsumerHandle::CompositeDataConsumerHandle(std::unique_ptr<WebDataConsumerHandle> handle, Updater** updater)
+    : m_context(Context::create(std::move(handle)))
 {
     *updater = new Updater(m_context);
 }
 
 CompositeDataConsumerHandle::~CompositeDataConsumerHandle() { }
 
-WebDataConsumerHandle::Reader* CompositeDataConsumerHandle::obtainReaderInternal(Client* client)
+std::unique_ptr<WebDataConsumerHandle::Reader> CompositeDataConsumerHandle::obtainReader(Client* client)
 {
-    return m_context->obtainReader(client).leakPtr();
+    return m_context->obtainReader(client);
 }
 
 } // namespace blink

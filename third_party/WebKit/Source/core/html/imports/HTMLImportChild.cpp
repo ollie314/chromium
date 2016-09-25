@@ -33,9 +33,9 @@
 #include "core/css/StyleSheetList.h"
 #include "core/dom/Document.h"
 #include "core/dom/StyleEngine.h"
-#include "core/dom/custom/CustomElement.h"
-#include "core/dom/custom/CustomElementMicrotaskImportStep.h"
-#include "core/dom/custom/CustomElementSyncMicrotaskQueue.h"
+#include "core/dom/custom/V0CustomElement.h"
+#include "core/dom/custom/V0CustomElementMicrotaskImportStep.h"
+#include "core/dom/custom/V0CustomElementSyncMicrotaskQueue.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/imports/HTMLImportChildClient.h"
 #include "core/html/imports/HTMLImportLoader.h"
@@ -83,9 +83,9 @@ void HTMLImportChild::didFinish()
 void HTMLImportChild::didFinishLoading()
 {
     stateWillChange();
-    if (document() && document()->styleSheets()->length() > 0)
+    if (document() && document()->styleSheets().length() > 0)
         UseCounter::count(root()->document(), UseCounter::HTMLImportsHasStyleSheets);
-    CustomElement::didFinishLoadingImport(*(root()->document()));
+    V0CustomElement::didFinishLoadingImport(*(root()->document()));
 }
 
 void HTMLImportChild::didFinishUpgradingCustomElements()
@@ -100,7 +100,7 @@ void HTMLImportChild::dispose()
     if (parent())
         parent()->removeChild(this);
 
-    ASSERT(m_loader);
+    DCHECK(m_loader);
     m_loader->removeImport(this);
     m_loader = nullptr;
 
@@ -112,7 +112,7 @@ void HTMLImportChild::dispose()
 
 Document* HTMLImportChild::document() const
 {
-    ASSERT(m_loader);
+    DCHECK(m_loader);
     return m_loader->document();
 }
 
@@ -139,16 +139,16 @@ void HTMLImportChild::invalidateCustomElementMicrotaskStep()
 
 void HTMLImportChild::createCustomElementMicrotaskStepIfNeeded()
 {
-    ASSERT(!m_customElementMicrotaskStep);
+    DCHECK(!m_customElementMicrotaskStep);
 
     if (!hasFinishedLoading() && !formsCycle()) {
-        m_customElementMicrotaskStep = CustomElement::didCreateImport(this);
+        m_customElementMicrotaskStep = V0CustomElement::didCreateImport(this);
     }
 }
 
 bool HTMLImportChild::hasFinishedLoading() const
 {
-    ASSERT(m_loader);
+    DCHECK(m_loader);
 
     return m_loader->isDone() && m_loader->microtaskQueue()->isEmpty() && !m_customElementMicrotaskStep;
 }
@@ -156,14 +156,14 @@ bool HTMLImportChild::hasFinishedLoading() const
 HTMLImportLoader* HTMLImportChild::loader() const
 {
     // This should never be called after dispose().
-    ASSERT(m_loader);
+    DCHECK(m_loader);
     return m_loader;
 }
 
 void HTMLImportChild::setClient(HTMLImportChildClient* client)
 {
-    ASSERT(client);
-    ASSERT(!m_client);
+    DCHECK(client);
+    DCHECK(!m_client);
     m_client = client;
 }
 

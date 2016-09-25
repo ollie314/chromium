@@ -8,6 +8,7 @@ import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
 import org.chromium.content.browser.test.util.Criteria;
@@ -36,11 +37,12 @@ public class SnackbarTest extends ChromeTabbedActivityTestBase {
     }
 
     @MediumTest
+    @RetryOnFailure
     public void testStackQueueOrder() throws InterruptedException {
         final Snackbar stackbar = Snackbar.make("stack", mDefaultController,
-                Snackbar.TYPE_ACTION);
+                Snackbar.TYPE_ACTION, Snackbar.UMA_TEST_SNACKBAR);
         final Snackbar queuebar = Snackbar.make("queue", mDefaultController,
-                Snackbar.TYPE_NOTIFICATION);
+                Snackbar.TYPE_NOTIFICATION, Snackbar.UMA_TEST_SNACKBAR);
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -77,11 +79,12 @@ public class SnackbarTest extends ChromeTabbedActivityTestBase {
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testQueueStackOrder() throws InterruptedException {
         final Snackbar stackbar = Snackbar.make("stack", mDefaultController,
-                Snackbar.TYPE_ACTION);
+                Snackbar.TYPE_ACTION, Snackbar.UMA_TEST_SNACKBAR);
         final Snackbar queuebar = Snackbar.make("queue", mDefaultController,
-                Snackbar.TYPE_NOTIFICATION);
+                Snackbar.TYPE_NOTIFICATION, Snackbar.UMA_TEST_SNACKBAR);
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {

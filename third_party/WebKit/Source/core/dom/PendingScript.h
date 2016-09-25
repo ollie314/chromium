@@ -30,7 +30,9 @@
 #include "core/CoreExport.h"
 #include "core/fetch/ResourceOwner.h"
 #include "core/fetch/ScriptResource.h"
+#include "platform/MemoryCoordinator.h"
 #include "platform/heap/Handle.h"
+#include "wtf/Noncopyable.h"
 #include "wtf/text/TextPosition.h"
 
 namespace blink {
@@ -44,14 +46,13 @@ class ScriptSourceCode;
 // A RefPtr alone does not prevent the underlying Resource
 // from purging its data buffer. This class holds a dummy client open for its
 // lifetime in order to guarantee that the data buffer will not be purged.
-class CORE_EXPORT PendingScript final : public GarbageCollectedFinalized<PendingScript>, public ResourceOwner<ScriptResource> {
+class CORE_EXPORT PendingScript final : public GarbageCollectedFinalized<PendingScript>, public ResourceOwner<ScriptResource>, public MemoryCoordinatorClient {
     USING_GARBAGE_COLLECTED_MIXIN(PendingScript);
     USING_PRE_FINALIZER(PendingScript, dispose);
+    WTF_MAKE_NONCOPYABLE(PendingScript);
 public:
     static PendingScript* create(Element*, ScriptResource*);
     ~PendingScript() override;
-
-    PendingScript& operator=(const PendingScript&);
 
     TextPosition startingPosition() const { return m_startingPosition; }
     void setStartingPosition(const TextPosition& position) { m_startingPosition = position; }
@@ -88,6 +89,9 @@ public:
 
 private:
     PendingScript(Element*, ScriptResource*);
+    PendingScript() = delete;
+
+    void prepareToSuspend() override;
 
     bool m_watchingForLoad;
     Member<Element> m_element;
@@ -96,7 +100,7 @@ private:
     double m_parserBlockingLoadStartTime;
 
     Member<ScriptStreamer> m_streamer;
-    ScriptResourceClient* m_client;
+    Member<ScriptResourceClient> m_client;
 };
 
 } // namespace blink

@@ -18,7 +18,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/task_runner_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/request_sender.h"
@@ -293,8 +293,8 @@ int ResponseWriter::Write(net::IOBuffer* buffer,
                           int num_bytes,
                           const net::CompletionCallback& callback) {
   if (!get_content_callback_.is_null()) {
-    get_content_callback_.Run(HTTP_SUCCESS, base::WrapUnique(new std::string(
-                                                buffer->data(), num_bytes)));
+    get_content_callback_.Run(
+        HTTP_SUCCESS, base::MakeUnique<std::string>(buffer->data(), num_bytes));
   }
 
   if (file_writer_) {

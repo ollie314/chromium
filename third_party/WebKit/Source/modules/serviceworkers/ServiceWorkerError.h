@@ -33,8 +33,8 @@
 
 #include "platform/heap/Handle.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerError.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+
+#include <v8.h>
 
 namespace blink {
 
@@ -47,6 +47,13 @@ public:
     // For CallbackPromiseAdapter
     using WebType = const WebServiceWorkerError&;
     static DOMException* take(ScriptPromiseResolver*, const WebServiceWorkerError& webError);
+};
+
+class ServiceWorkerErrorForUpdate : public ServiceWorkerError {
+    STATIC_ONLY(ServiceWorkerErrorForUpdate);
+public:
+    // For CallbackPromiseAdapter
+    static v8::Local<v8::Value> take(ScriptPromiseResolver* resolver, const WebServiceWorkerError& webError);
 };
 
 } // namespace blink

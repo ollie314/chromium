@@ -30,6 +30,7 @@
 #include "public/platform/WebCommon.h"
 #include "public/platform/modules/indexeddb/WebIDBCursor.h"
 #include "public/platform/modules/indexeddb/WebIDBMetadata.h"
+#include "public/platform/modules/indexeddb/WebIDBObserver.h"
 #include "public/platform/modules/indexeddb/WebIDBTypes.h"
 
 namespace blink {
@@ -40,6 +41,7 @@ class WebIDBDatabaseCallbacks;
 class WebIDBKey;
 class WebIDBKeyPath;
 class WebIDBKeyRange;
+class WebIDBObserver;
 
 class WebIDBDatabase {
 public:
@@ -47,7 +49,8 @@ public:
 
     virtual void createObjectStore(long long transactionId, long long objectStoreId, const WebString& name, const WebIDBKeyPath&, bool autoIncrement) = 0;
     virtual void deleteObjectStore(long long transactionId, long long objectStoreId) = 0;
-    virtual void createTransaction(long long id, WebIDBDatabaseCallbacks*, const WebVector<long long>& scope, WebIDBTransactionMode) = 0;
+    virtual void renameObjectStore(long long transactionId, long long objectStoreId, const WebString& name) = 0;
+    virtual void createTransaction(long long id, const WebVector<long long>& scope, WebIDBTransactionMode) = 0;
     virtual void close() = 0;
     virtual void versionChangeIgnored() = 0;
 
@@ -56,11 +59,14 @@ public:
 
     virtual void createIndex(long long transactionId, long long objectStoreId, long long indexId, const WebString& name, const WebIDBKeyPath&, bool unique, bool multiEntry) = 0;
     virtual void deleteIndex(long long transactionId, long long objectStoreId, long long indexId) = 0;
+    virtual void renameIndex(long long transactionId, long long objectStoreId, long long indexId, const WebString& newName) = 0;
 
     static const long long minimumIndexId = 30;
 
     typedef WebVector<WebIDBKey> WebIndexKeys;
 
+    virtual int32_t addObserver(std::unique_ptr<WebIDBObserver>, long long transactionId) = 0;
+    virtual void removeObservers(const WebVector<int32_t>& observerIdsToRemove) = 0;
     virtual void get(long long transactionId, long long objectStoreId, long long indexId, const WebIDBKeyRange&, bool keyOnly, WebIDBCallbacks*) = 0;
     virtual void getAll(long long transactionId, long long objectStoreId, long long indexId, const WebIDBKeyRange&, long long maxCount, bool keyOnly, WebIDBCallbacks*) = 0;
     virtual void put(long long transactionId, long long objectStoreId, const WebData& value, const WebVector<WebBlobInfo>&, const WebIDBKey&, WebIDBPutMode, WebIDBCallbacks*, const WebVector<long long>& indexIds, const WebVector<WebIndexKeys>&) = 0;

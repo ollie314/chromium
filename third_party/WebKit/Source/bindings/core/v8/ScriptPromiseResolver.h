@@ -13,7 +13,8 @@
 #include "core/dom/ActiveDOMObject.h"
 #include "core/dom/ExecutionContext.h"
 #include "platform/Timer.h"
-#include "wtf/RefCounted.h"
+#include "platform/heap/Handle.h"
+#include "platform/heap/SelfKeepAlive.h"
 #include <v8.h>
 
 namespace blink {
@@ -137,7 +138,7 @@ private:
     }
 
     void resolveOrRejectImmediately();
-    void onTimerFired(Timer<ScriptPromiseResolver>*);
+    void onTimerFired(TimerBase*);
 
     ResolutionState m_state;
     const RefPtr<ScriptState> m_scriptState;

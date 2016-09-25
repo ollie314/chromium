@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -27,6 +26,7 @@
 #include "extensions/renderer/v8_helpers.h"
 #include "gin/per_context_data.h"
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
@@ -107,12 +107,13 @@ ScriptContext::ScriptContext(const v8::Local<v8::Context>& v8_context,
       effective_context_type_(effective_context_type),
       safe_builtins_(this),
       isolate_(v8_context->GetIsolate()),
-      url_(web_frame_ ? GetDataSourceURLForFrame(web_frame_) : GURL()),
       runner_(new Runner(this)) {
   VLOG(1) << "Created context:\n" << GetDebugString();
   gin::PerContextData* gin_data = gin::PerContextData::From(v8_context);
   CHECK(gin_data);
   gin_data->set_runner(runner_.get());
+  if (web_frame_)
+    url_ = GetAccessCheckedFrameURL(web_frame_);
 }
 
 ScriptContext::~ScriptContext() {
@@ -255,8 +256,12 @@ std::string ScriptContext::GetEffectiveContextTypeDescription() const {
 
 bool ScriptContext::IsAnyFeatureAvailableToContext(const Feature& api) {
   DCHECK(thread_checker_.CalledOnValidThread());
+  // TODO(lazyboy): Decide what we should do for SERVICE_WORKER_CONTEXT.
+  GURL url = context_type() == Feature::SERVICE_WORKER_CONTEXT
+                 ? url_
+                 : GetDataSourceURLForFrame(web_frame());
   return ExtensionAPI::GetSharedInstance()->IsAnyFeatureAvailableToContext(
-      api, extension(), context_type(), GetDataSourceURLForFrame(web_frame()));
+      api, extension(), context_type(), url);
 }
 
 // static
@@ -273,6 +278,22 @@ GURL ScriptContext::GetDataSourceURLForFrame(const blink::WebFrame* frame) {
                                           ? frame->provisionalDataSource()
                                           : frame->dataSource();
   return data_source ? GURL(data_source->request().url()) : GURL();
+}
+
+// static
+GURL ScriptContext::GetAccessCheckedFrameURL(const blink::WebFrame* frame) {
+  const blink::WebURL& weburl = frame->document().url();
+  if (weburl.isEmpty()) {
+    blink::WebDataSource* data_source = frame->provisionalDataSource()
+                                            ? frame->provisionalDataSource()
+                                            : frame->dataSource();
+    if (data_source &&
+        frame->getSecurityOrigin().canAccess(
+            blink::WebSecurityOrigin::create(data_source->request().url()))) {
+      return GURL(data_source->request().url());
+    }
+  }
+  return GURL(weburl);
 }
 
 // static
@@ -323,7 +344,7 @@ void ScriptContext::OnResponseReceived(const std::string& name,
   DCHECK(thread_checker_.CalledOnValidThread());
   v8::HandleScope handle_scope(isolate());
 
-  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
   v8::Local<v8::Value> argv[] = {
       v8::Integer::New(isolate(), request_id),
       v8::String::NewFromUtf8(isolate(), name.c_str()),

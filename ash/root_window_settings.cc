@@ -6,19 +6,18 @@
 
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_property.h"
-#include "ui/gfx/display.h"
+#include "ui/display/display.h"
 
 DECLARE_WINDOW_PROPERTY_TYPE(ash::RootWindowSettings*);
 
 namespace ash {
 
 DEFINE_OWNED_WINDOW_PROPERTY_KEY(RootWindowSettings,
-                                 kRootWindowSettingsKey, NULL);
+                                 kRootWindowSettingsKey,
+                                 NULL);
 
 RootWindowSettings::RootWindowSettings()
-    : display_id(gfx::Display::kInvalidDisplayID),
-      controller(NULL) {
-}
+    : display_id(display::Display::kInvalidDisplayID), controller(NULL) {}
 
 RootWindowSettings* InitRootWindowSettings(aura::Window* root) {
   RootWindowSettings* settings = new RootWindowSettings();

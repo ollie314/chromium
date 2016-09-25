@@ -155,6 +155,9 @@
     ]
   },
 
+  "Http09OnNonDefaultPortsEnabled": {
+  },
+
   "JavascriptEnabled": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "JavascriptEnabled": false },
@@ -247,6 +250,9 @@
   },
 
   "RemoteAccessHostDebugOverridePolicies": {
+  },
+
+  "RemoteAccessHostAllowUiAccessForRemoteAssistance": {
   },
 
   "PrintingEnabled": {
@@ -581,6 +587,16 @@
     "test_policy": { "RequireOnlineRevocationChecksForLocalAnchors": true },
     "pref_mappings": [
       { "pref": "ssl.rev_checking.required_for_local_anchors",
+        "local_state": true
+      }
+    ]
+  },
+
+  "EnableSha1ForLocalAnchors": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "EnableSha1ForLocalAnchors": true },
+    "pref_mappings": [
+      { "pref": "ssl.sha1_enabled_for_local_anchors",
         "local_state": true
       }
     ]
@@ -1767,6 +1783,16 @@
     ]
   },
 
+  "PacHttpsUrlStrippingEnabled": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "PacHttpsUrlStrippingEnabled": true },
+    "pref_mappings": [
+      { "pref": "proxy.pac_https_url_stripping_enabled",
+        "local_state": true
+      }
+    ]
+  },
+
   "RegisteredProtocolHandlers": {
     "os": ["win", "linux", "mac", "chromeos"],
     "can_be_recommended": true,
@@ -1848,20 +1874,38 @@
     ]
   },
 
+  "ForceBrowserSignin": {
+    "os": ["win", "linux", "mac"],
+    "test_policy": { "ForceBrowserSignin": false },
+    "pref_mappings": [
+      { "pref": "profile.force_browser_signin",
+        "local_state": true
+      }
+    ]
+  },
+
   "SSLVersionMin": {
   },
 
   "SSLVersionFallbackMin": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "SSLVersionFallbackMin": "tls1.2" },
-    "pref_mappings": []
+  },
+
+  "CertificateTransparencyEnforcementDisabledForUrls": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "CertificateTransparencyEnforcementDisabledForUrls": ["example.com"] },
+    "pref_mappings": [
+      { "pref": "certificate_transparency.excluded_hosts" }
+    ]
   },
 
   "RC4Enabled": {
+  },
+
+  "DHEEnabled": {
     "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "RC4Enabled": true },
+    "test_policy": { "DHEEnabled": true },
     "pref_mappings": [
-      { "pref": "ssl.rc4_enabled",
+      { "pref": "ssl.dhe_enabled",
         "local_state": true
       }
     ]
@@ -1882,6 +1926,70 @@
     "test_policy": { "SuppressUnsupportedOSWarning": true },
     "pref_mappings": [
       { "pref": "browser.suppress_unsupported_os_warning",
+        "local_state": true
+      }
+    ]
+  },
+
+  "AllowedDomainsForApps": {
+    "pref": "settings.allowed_domains_for_apps",
+    "test_policy": { "AllowedDomainsForApps": "google.com,mit.edu" },
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "pref_mappings": [
+      { "pref": "settings.allowed_domains_for_apps"
+      }
+    ]
+  },
+
+  "AllowedDomainsForApps": {
+    "pref": "settings.allowed_domains_for_apps",
+    "test_policy": { "AllowedDomainsForApps": "google.com,mit.edu" },
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "pref_mappings": [
+      { "pref": "settings.allowed_domains_for_apps"
+      }
+    ]
+  },
+
+  "AllowedDomainsForApps": {
+    "pref": "settings.allowed_domains_for_apps",
+    "test_policy": { "AllowedDomainsForApps": "google.com,mit.edu" },
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "pref_mappings": [
+      { "pref": "settings.allowed_domains_for_apps"
+      }
+    ]
+  },
+
+  "EnableMediaRouter": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "EnableMediaRouter": true },
+    "pref_mappings": [
+      { "pref": "media_router.enable_media_router" }
+    ]
+  },
+
+  "NTPContentSuggestionsEnabled": {
+    "os": ["android"],
+    "test_policy": { "NTPContentSuggestionsEnabled": false },
+    "pref_mappings": [
+      { "pref": "ntp_snippets.enable" }
+    ]
+  },
+
+  "WebRtcUdpPortRange": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "WebRtcUdpPortRange": "10000-11999" },
+    "pref_mappings": [
+      { "pref": "webrtc.udp_port_range" }
+    ]
+  },
+
+  "ComponentUpdatesEnabled": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "ComponentUpdatesEnabled": true },
+    "pref_mappings": [
+      { "pref": "component_updates.component_updates_enabled",
         "local_state": true
       }
     ]
@@ -1963,6 +2071,14 @@
     "test_policy": { "ExternalStorageDisabled": true },
     "pref_mappings": [
       { "pref": "hardware.external_storage_disabled" }
+    ]
+  },
+
+  "ExternalStorageReadOnly": {
+    "os": ["chromeos"],
+    "test_policy": { "ExternalStorageReadOnly": true },
+    "pref_mappings": [
+      { "pref": "hardware.external_storage_read_only" }
     ]
   },
 
@@ -2454,6 +2570,29 @@
     "test_policy": { "ArcPolicy": "" }
   },
 
+  "AllowScreenLock": {
+    "os": ["chromeos"],
+    "test_policy": { "AllowScreenLock": true },
+    "pref_mappings": [
+      { "pref": "allow_screen_lock"}
+    ]
+  },
+
+  "ArcCertificatesSyncMode": {
+    "os": ["chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "ArcCertificatesSyncMode": 0 }
+  },
+
+  "ArcBackupRestoreEnabled": {
+    "os": ["chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "ArcBackupRestoreEnabled": false },
+    "pref_mappings": [
+      { "pref": "arc.backup_restore.enabled" }
+    ]
+  },
+
   "----- Chrome OS device policies ---------------------------------------": {},
 
   "DevicePolicyRefreshRate": {
@@ -2675,7 +2814,7 @@
 
   "AllowKioskAppControlChromeVersion": {
   },
-  
+
   "LoginAuthenticationBehavior": {
     "os": ["chromeos"],
     "test_policy": { "LoginAuthenticationBehavior": 1 },
@@ -2707,6 +2846,9 @@
     ]
   },
 
+  "WebRestrictionsAuthority": {
+  },
+
   "TaskManagerEndProcessEnabled": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "TaskManagerEndProcessEnabled": false },
@@ -2715,6 +2857,22 @@
         "pref": "task_manager.end_process_enabled",
         "local_state": true
       }
+    ]
+  },
+
+  "LoginVideoCaptureAllowedUrls": {
+    "os": ["chromeos"],
+    "test_policy": { "LoginVideoCaptureAllowedUrls": [ "https://example.com" ] },
+    "pref_mappings": [
+      { "pref": "cros.device.login_video_capture_allowed_urls" }
+    ]
+  },
+
+  "LoginApps": {
+    "os": ["chromeos"],
+    "test_policy": { "LoginApps": [ "abcdefghijklmnopabcdefghijklmnop" ] },
+    "pref_mappings": [
+      { "pref": "cros.device.login_apps" }
     ]
   },
 

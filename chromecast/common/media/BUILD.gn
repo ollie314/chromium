@@ -2,61 +2,43 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# CMA is not used on Android; exclude CMA-specific targets.
-enable_cma = !is_android
+import("//chromecast/chromecast.gni")
+import("//mojo/public/tools/bindings/mojom.gni")
 
 # GYP target: chromecast.gyp:cast_shell_media
 source_set("media") {
   sources = [
-    "shared_memory_chunk.cc",
-    "shared_memory_chunk.h",
+    "cast_media_client.cc",
+    "cast_media_client.h",
   ]
-
-  public_deps = [
-    ":cast_messages",
-  ]
-  if (enable_cma) {
-    public_deps += [ ":cma_messages" ]
-  }
 
   deps = [
     "//base",
-    "//chromecast/media/cma/ipc",
+    "//chromecast/media/base",
+    "//chromecast/media/cdm",
+    "//chromecast/public:public",
+    "//media",
   ]
-}
 
-# GYP target: chromecast.gyp:cast_shell_common
-source_set("cast_messages") {
-  sources = [
-    "cast_message_generator.cc",
-    "cast_message_generator.h",
-    "cast_messages.h",
-  ]
-  deps = [
-    "//ipc",
-  ]
-}
-
-if (enable_cma) {
-  # GYP target: chromecast.gyp:cast_shell_media
-  source_set("cma_messages") {
-    sources = [
-      "cma_ipc_common.h",
-      "cma_message_generator.cc",
-      "cma_message_generator.h",
-      "cma_messages.h",
-      "cma_param_traits.cc",
-      "cma_param_traits.h",
-      "cma_param_traits_macros.h",
+  if (is_android) {
+    sources += [
+      "cast_media_client_android.cc",
+      "cast_media_client_android.h",
     ]
-
-    deps = [
-      "//chromecast/media/cma/pipeline",
-      "//content/public/common",
-      "//media",
-      "//media:shared_memory_support",
-      "//ui/gfx/ipc",
-      "//ui/gfx/ipc/skia",
+    deps += [
+      "//chromecast/media/base",
+      "//components/cdm/common",
+      "//media/base/android",
     ]
   }
+
+  if (use_playready) {
+    public_configs = [ "//chromecast:playready_config" ]
+  }
+}
+
+mojom("interfaces") {
+  sources = [
+    "media_caps.mojom",
+  ]
 }

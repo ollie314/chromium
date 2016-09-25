@@ -8,6 +8,48 @@
 
 <include src="login_shared.js">
 
+/**
+ * Asynchronously loads the pin keyboard.
+ */
+function showPinKeyboardAsync() {
+  'use strict';
+
+  // This function could get called multiple times. Do nothing if we have
+  // already loaded. This check needs to happen before the registerAssets call,
+  // because that will clobber the loaded state.
+  if (cr.ui.login.ResourceLoader.alreadyLoadedAssets('custom-elements'))
+    return;
+
+  // Register loader for custom elements.
+  cr.ui.login.ResourceLoader.registerAssets({
+    id: 'custom-elements',
+    html: [{ url: 'chrome://oobe/custom_elements.html' }]
+  });
+
+  // Called after polymer has been loaded. Fades the pin element in.
+  var onPinLoaded = function(pinKeyboard) {
+    var podRow = $('pod-row');
+    podRow.togglePinTransitions(true);
+    podRow.setFocusedPodPinVisibility(true);
+  };
+
+  // The element we want to see if loaded.
+  var getPinKeyboard = function() {
+    return $('pod-row').querySelectorAll('pin-keyboard')[0];
+  };
+
+  // We only load the PIN element when it is actually shown so that lock screen
+  // load times remain low when the user is not using a PIN.
+  //
+  // Loading the PIN element blocks the DOM, which will interrupt any running
+  // animations. We load the PIN after an idle notification to allow the pod
+  // fly-in animation to complete without interruption.
+  cr.ui.login.ResourceLoader.loadAssetsOnIdle('custom-elements', function() {
+    cr.ui.login.ResourceLoader.waitUntilLayoutComplete(getPinKeyboard,
+                                                       onPinLoaded);
+  });
+}
+
 cr.define('cr.ui.Oobe', function() {
   return {
     /**
@@ -15,9 +57,6 @@ cr.define('cr.ui.Oobe', function() {
      * be invoked to do final setup.
      */
     initialize: function() {
-      // TODO(jdufault): Remove this after resolving crbug.com/452599.
-      console.log('Start initializing LOCK OOBE');
-
       cr.ui.login.DisplayManager.initialize();
       login.AccountPickerScreen.register();
 

@@ -34,6 +34,7 @@
 #include "core/dom/Fullscreen.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/frame/ImageBitmap.h"
+#include "core/frame/LocalDOMWindow.h"
 #include "core/frame/Settings.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/imagebitmap/ImageBitmapOptions.h"
@@ -45,7 +46,7 @@
 #include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/gpu/Extensions3DUtil.h"
 #include "public/platform/WebCanvas.h"
-#include "public/platform/WebGraphicsContext3D.h"
+#include <memory>
 
 namespace blink {
 
@@ -82,9 +83,9 @@ LayoutObject* HTMLVideoElement::createLayoutObject(const ComputedStyle&)
     return new LayoutVideo(this);
 }
 
-void HTMLVideoElement::attach(const AttachContext& context)
+void HTMLVideoElement::attachLayoutTree(const AttachContext& context)
 {
-    HTMLMediaElement::attach(context);
+    HTMLMediaElement::attachLayoutTree(context);
 
     updateDisplayState();
     if (shouldDisplayPosterImage()) {
@@ -203,16 +204,24 @@ void HTMLVideoElement::paintCurrentFrame(SkCanvas* canvas, const IntRect& destRe
     if (!paint || !SkXfermode::AsMode(paint->getXfermode(), &mode))
         mode = SkXfermode::kSrcOver_Mode;
 
-    // TODO(junov, philipj): crbug.com/456529 Pass the whole SkPaint instead of only alpha and xfermode
-    webMediaPlayer()->paint(canvas, destRect, paint ? paint->getAlpha() : 0xFF, mode);
+    SkPaint mediaPaint;
+    if (paint) {
+        mediaPaint = *paint;
+    } else {
+        mediaPaint.setAlpha(0xFF);
+        mediaPaint.setFilterQuality(kLow_SkFilterQuality);
+    }
+    mediaPaint.setXfermodeMode(mode);
+
+    webMediaPlayer()->paint(canvas, destRect, mediaPaint);
 }
 
-bool HTMLVideoElement::copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface* gl, Platform3DObject texture, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY)
+bool HTMLVideoElement::copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface* gl, GLuint texture, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY)
 {
     if (!webMediaPlayer())
         return false;
 
-    ASSERT(Extensions3DUtil::canUseCopyTextureCHROMIUM(GL_TEXTURE_2D, internalFormat, type, 0));
+    DCHECK(Extensions3DUtil::canUseCopyTextureCHROMIUM(GL_TEXTURE_2D, internalFormat, type, 0));
     return webMediaPlayer()->copyVideoTextureToPlatformTexture(gl, texture, internalFormat, type, premultiplyAlpha, flipY);
 }
 
@@ -294,7 +303,7 @@ PassRefPtr<Image> HTMLVideoElement::getSourceImageForCanvas(SourceImageStatus* s
 
     IntSize intrinsicSize(videoWidth(), videoHeight());
     // FIXME: Not sure if we dhould we be doing anything with the AccelerationHint argument here?
-    OwnPtr<ImageBuffer> imageBuffer = ImageBuffer::create(intrinsicSize);
+    std::unique_ptr<ImageBuffer> imageBuffer = ImageBuffer::create(intrinsicSize);
     if (!imageBuffer) {
         *status = InvalidSourceImageStatus;
         return nullptr;
@@ -326,22 +335,23 @@ IntSize HTMLVideoElement::bitmapSourceSize() const
     return IntSize(videoWidth(), videoHeight());
 }
 
-ScriptPromise HTMLVideoElement::createImageBitmap(ScriptState* scriptState, EventTarget& eventTarget, int sx, int sy, int sw, int sh, const ImageBitmapOptions& options, ExceptionState& exceptionState)
+ScriptPromise HTMLVideoElement::createImageBitmap(ScriptState* scriptState, EventTarget& eventTarget, Optional<IntRect> cropRect, const ImageBitmapOptions& options, ExceptionState& exceptionState)
 {
-    ASSERT(eventTarget.toDOMWindow());
-    if (getNetworkState() == HTMLMediaElement::NETWORK_EMPTY) {
+    DCHECK(eventTarget.toLocalDOMWindow());
+    if (getNetworkState() == HTMLMediaElement::kNetworkEmpty) {
         exceptionState.throwDOMException(InvalidStateError, "The provided element has not retrieved data.");
         return ScriptPromise();
     }
-    if (getReadyState() <= HTMLMediaElement::HAVE_METADATA) {
+    if (getReadyState() <= HTMLMediaElement::kHaveMetadata) {
         exceptionState.throwDOMException(InvalidStateError, "The provided element's player has no current data.");
         return ScriptPromise();
     }
-    if (!sw || !sh) {
-        exceptionState.throwDOMException(IndexSizeError, String::format("The source %s provided is 0.", sw ? "height" : "width"));
+    if ((cropRect && !ImageBitmap::isSourceSizeValid(cropRect->width(), cropRect->height(), exceptionState))
+        || !ImageBitmap::isSourceSizeValid(bitmapSourceSize().width(), bitmapSourceSize().height(), exceptionState))
         return ScriptPromise();
-    }
-    return ImageBitmapSource::fulfillImageBitmap(scriptState, ImageBitmap::create(this, IntRect(sx, sy, sw, sh), eventTarget.toDOMWindow()->document(), options));
+    if (!ImageBitmap::isResizeOptionValid(options, exceptionState))
+        return ScriptPromise();
+    return ImageBitmapSource::fulfillImageBitmap(scriptState, ImageBitmap::create(this, cropRect, eventTarget.toLocalDOMWindow()->document(), options));
 }
 
 } // namespace blink

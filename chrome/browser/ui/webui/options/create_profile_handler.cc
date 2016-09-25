@@ -10,7 +10,7 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
@@ -25,7 +25,7 @@
 #include "chrome/browser/ui/webui/profile_helper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -200,7 +200,7 @@ void CreateProfileHandler::CreateShortcutAndShowSuccess(bool create_shortcut,
       profile_creation_type_ == SUPERVISED_PROFILE_IMPORT;
   dict.SetBoolean("isSupervised", is_supervised);
 #endif
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       GetJavascriptMethodName(PROFILE_CREATION_SUCCESS), dict);
 
   // If the new profile is a supervised user, instead of opening a new window
@@ -228,12 +228,15 @@ void CreateProfileHandler::ShowProfileCreationError(
   DCHECK_NE(NO_CREATION_IN_PROGRESS, profile_creation_type_);
   profile_creation_type_ = NO_CREATION_IN_PROGRESS;
   profile_path_being_created_.clear();
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       GetJavascriptMethodName(PROFILE_CREATION_ERROR),
       base::StringValue(error));
   // The ProfileManager calls us back with a NULL profile in some cases.
-  if (profile)
-    webui::DeleteProfileAtPath(profile->GetPath(), web_ui());
+  if (profile) {
+    webui::DeleteProfileAtPath(profile->GetPath(),
+                               web_ui(),
+                               ProfileMetrics::DELETE_PROFILE_SETTINGS);
+  }
 }
 
 void CreateProfileHandler::RecordProfileCreationMetrics(
@@ -327,12 +330,13 @@ bool CreateProfileHandler::ProcessSupervisedCreateProfileArgs(
       // If sync is not yet fully initialized, the creation may take extra time,
       // so show a message. Import doesn't wait for an acknowledgment, so it
       // won't have the same potential delay.
-      ProfileSyncService* sync_service =
+      browser_sync::ProfileSyncService* sync_service =
           ProfileSyncServiceFactory::GetInstance()->GetForProfile(
               Profile::FromWebUI(web_ui()));
-      ProfileSyncService::SyncStatusSummary status =
+      browser_sync::ProfileSyncService::SyncStatusSummary status =
           sync_service->QuerySyncStatusSummary();
-      if (status == ProfileSyncService::DATATYPES_NOT_INITIALIZED) {
+      if (status ==
+          browser_sync::ProfileSyncService::DATATYPES_NOT_INITIALIZED) {
         ShowProfileCreationWarning(l10n_util::GetStringUTF16(
             IDS_PROFILES_CREATE_SUPERVISED_JUST_SIGNED_IN));
       }
@@ -374,7 +378,9 @@ void CreateProfileHandler::CancelProfileRegistration(bool user_initiated) {
   // Cancelling registration means the callback passed into
   // RegisterAndInitSync() won't be called, so the cleanup must be done here.
   profile_path_being_created_.clear();
-  webui::DeleteProfileAtPath(new_profile->GetPath(), web_ui());
+  webui::DeleteProfileAtPath(new_profile->GetPath(),
+                             web_ui(),
+                             ProfileMetrics::DELETE_PROFILE_SETTINGS);
 }
 
 void CreateProfileHandler::RegisterSupervisedUser(
@@ -426,8 +432,8 @@ void CreateProfileHandler::OnSupervisedUserRegistered(
 void CreateProfileHandler::ShowProfileCreationWarning(
     const base::string16& warning) {
   DCHECK_EQ(SUPERVISED_PROFILE_CREATION, profile_creation_type_);
-  web_ui()->CallJavascriptFunction("BrowserOptions.showCreateProfileWarning",
-                                   base::StringValue(warning));
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "BrowserOptions.showCreateProfileWarning", base::StringValue(warning));
 }
 
 void CreateProfileHandler::RecordSupervisedProfileCreationMetrics(

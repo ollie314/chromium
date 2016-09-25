@@ -5,13 +5,14 @@
 #include "components/certificate_transparency/log_proof_fetcher.h"
 
 #include <iterator>
+#include <memory>
 
 #include "base/callback_helpers.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "components/safe_json/safe_json_parser.h"
@@ -46,7 +47,7 @@ class LogFetcher : public net::URLRequest::Delegate {
   ~LogFetcher() override {}
 
   // net::URLRequest::Delegate
-  void OnResponseStarted(net::URLRequest* request) override;
+  void OnResponseStarted(net::URLRequest* request, int net_error) override;
   void OnReadCompleted(net::URLRequest* request, int bytes_read) override;
 
   const std::string& assembled_response() const { return assembled_response_; }
@@ -56,7 +57,7 @@ class LogFetcher : public net::URLRequest::Delegate {
   // Returns true if another read should be started, false if the read
   // failed completely or we have to wait for OnResponseStarted to
   // be called.
-  bool HandleReadResult(int bytes_read);
+  bool HandleReadResult(int result);
 
   // Calls URLRequest::Read on |request| repeatedly, until HandleReadResult
   // indicates it should no longer be called. Usually this would be when there
@@ -71,7 +72,7 @@ class LogFetcher : public net::URLRequest::Delegate {
   // After this method the LogFetcher is deleted and no longer safe to call.
   void InvokeFailureCallback(int net_error, int http_response_code);
 
-  scoped_ptr<net::URLRequest> url_request_;
+  std::unique_ptr<net::URLRequest> url_request_;
   const GURL request_url_;
   base::Closure success_callback_;
   FailureCallback failure_callback_;
@@ -101,12 +102,13 @@ LogFetcher::LogFetcher(net::URLRequestContext* request_context,
   url_request_->Start();
 }
 
-void LogFetcher::OnResponseStarted(net::URLRequest* request) {
+void LogFetcher::OnResponseStarted(net::URLRequest* request, int net_error) {
+  DCHECK_NE(net::ERR_IO_PENDING, net_error);
   DCHECK_EQ(url_request_.get(), request);
   int http_response_code = request->GetResponseCode();
 
-  if (!request->status().is_success()) {
-    InvokeFailureCallback(request->status().error(), http_response_code);
+  if (net_error != net::OK) {
+    InvokeFailureCallback(net_error, http_response_code);
     return;
   }
 
@@ -132,53 +134,43 @@ void LogFetcher::OnReadCompleted(net::URLRequest* request, int bytes_read) {
     StartNextReadLoop();
 }
 
-bool LogFetcher::HandleReadResult(int bytes_read) {
-  // Start by checking for an error condition.
-  // If there are errors, invoke the failure callback and clean up the
-  // request.
-  if (!url_request_->status().is_success() || bytes_read < 0) {
-    int net_error = url_request_->status().error();
-    if (net_error == net::OK)
-      net_error = net::URLRequestStatus::FAILED;
+bool LogFetcher::HandleReadResult(int result) {
+  if (result == net::ERR_IO_PENDING)
+    return false;
 
-    InvokeFailureCallback(net_error, net::HTTP_OK);
+  if (result < 0) {
+    InvokeFailureCallback(result, net::HTTP_OK);
     return false;
   }
 
-  // Not an error, but no data available, so wait for OnReadCompleted
-  // callback.
-  if (url_request_->status().is_io_pending())
-    return false;
-
   // Nothing more to read from the stream - finish handling the response.
-  if (bytes_read == 0) {
+  if (result == 0) {
     RequestComplete();
     return false;
   }
 
   // Data is available, collect it and indicate another read is needed.
-  DCHECK_GE(bytes_read, 0);
-  // |bytes_read| is non-negative at this point, casting to size_t should be
+  DCHECK_GE(result, 0);
+  // |result| is non-negative at this point, casting to size_t should be
   // safe.
-  if (base::checked_cast<size_t>(bytes_read) >
+  if (base::checked_cast<size_t>(result) >
           LogProofFetcher::kMaxLogResponseSizeInBytes ||
       LogProofFetcher::kMaxLogResponseSizeInBytes <
-          (assembled_response_.size() + bytes_read)) {
+          (assembled_response_.size() + result)) {
     // Log response is too big, invoke the failure callback.
     InvokeFailureCallback(net::ERR_FILE_TOO_BIG, net::HTTP_OK);
     return false;
   }
 
-  assembled_response_.append(response_buffer_->data(), bytes_read);
+  assembled_response_.append(response_buffer_->data(), result);
   return true;
 }
 
 void LogFetcher::StartNextReadLoop() {
   bool continue_reading = true;
   while (continue_reading) {
-    int read_bytes = 0;
-    url_request_->Read(response_buffer_.get(), response_buffer_->size(),
-                       &read_bytes);
+    int read_bytes =
+        url_request_->Read(response_buffer_.get(), response_buffer_->size());
     continue_reading = HandleReadResult(read_bytes);
   }
 }
@@ -235,7 +227,7 @@ class LogResponseHandler {
  protected:
   // Handle successful parsing of JSON by invoking HandleParsedJson, then
   // invoking the |done_callback_| with the returned Closure.
-  void OnJsonParseSuccess(scoped_ptr<base::Value> parsed_json);
+  void OnJsonParseSuccess(std::unique_ptr<base::Value> parsed_json);
 
   // Handle failure to parse the JSON by invoking HandleJsonParseFailure, then
   // invoking the |done_callback_| with the returned Closure.
@@ -252,7 +244,7 @@ class LogResponseHandler {
 
   const std::string log_id_;
   LogProofFetcher::FetchFailedCallback failure_callback_;
-  scoped_ptr<LogFetcher> fetcher_;
+  std::unique_ptr<LogFetcher> fetcher_;
   DoneCallback done_callback_;
 
   base::WeakPtrFactory<LogResponseHandler> weak_factory_;
@@ -308,7 +300,7 @@ void LogResponseHandler::HandleNetFailure(int net_error,
 }
 
 void LogResponseHandler::OnJsonParseSuccess(
-    scoped_ptr<base::Value> parsed_json) {
+    std::unique_ptr<base::Value> parsed_json) {
   base::ResetAndReturn(&done_callback_).Run(HandleParsedJson(*parsed_json));
   // NOTE: |this| is not valid after the |done_callback_| is invoked.
 }
@@ -396,8 +388,6 @@ LogProofFetcher::LogProofFetcher(net::URLRequestContext* request_context)
 }
 
 LogProofFetcher::~LogProofFetcher() {
-  STLDeleteContainerPointers(inflight_fetches_.begin(),
-                             inflight_fetches_.end());
 }
 
 void LogProofFetcher::FetchSignedTreeHead(
@@ -406,8 +396,8 @@ void LogProofFetcher::FetchSignedTreeHead(
     const SignedTreeHeadFetchedCallback& fetched_callback,
     const FetchFailedCallback& failed_callback) {
   GURL request_url = base_log_url.Resolve("ct/v1/get-sth");
-  StartFetch(request_url, new GetSTHLogResponseHandler(log_id, fetched_callback,
-                                                       failed_callback));
+  StartFetch(request_url, base::MakeUnique<GetSTHLogResponseHandler>(
+                              log_id, fetched_callback, failed_callback));
 }
 
 void LogProofFetcher::FetchConsistencyProof(
@@ -420,24 +410,30 @@ void LogProofFetcher::FetchConsistencyProof(
   GURL request_url = base_log_url.Resolve(base::StringPrintf(
       "ct/v1/get-sth-consistency?first=%" PRIu64 "&second=%" PRIu64,
       old_tree_size, new_tree_size));
-  StartFetch(request_url, new GetConsistencyProofLogResponseHandler(
-                              log_id, fetched_callback, failed_callback));
+  StartFetch(request_url,
+             base::MakeUnique<GetConsistencyProofLogResponseHandler>(
+                 log_id, fetched_callback, failed_callback));
 }
 
-void LogProofFetcher::StartFetch(const GURL& request_url,
-                                 LogResponseHandler* log_request) {
-  log_request->StartFetch(request_context_, request_url,
-                          base::Bind(&LogProofFetcher::OnFetchDone,
-                                     weak_factory_.GetWeakPtr(), log_request));
-  inflight_fetches_.insert(log_request);
+void LogProofFetcher::StartFetch(
+    const GURL& request_url,
+    std::unique_ptr<LogResponseHandler> log_request) {
+  log_request->StartFetch(
+      request_context_, request_url,
+      base::Bind(&LogProofFetcher::OnFetchDone, weak_factory_.GetWeakPtr(),
+                 log_request.get()));
+  inflight_fetches_.insert(std::move(log_request));
 }
 
 void LogProofFetcher::OnFetchDone(LogResponseHandler* log_handler,
                                   const base::Closure& requestor_callback) {
-  auto it = inflight_fetches_.find(log_handler);
+  auto it = std::find_if(
+      inflight_fetches_.begin(), inflight_fetches_.end(),
+      [log_handler](const std::unique_ptr<LogResponseHandler>& ptr) {
+        return ptr.get() == log_handler;
+      });
   DCHECK(it != inflight_fetches_.end());
 
-  delete *it;
   inflight_fetches_.erase(it);
   requestor_callback.Run();
 }

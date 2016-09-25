@@ -11,7 +11,7 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -27,20 +27,27 @@
 #include "chrome/browser/ui/webui/print_preview/print_preview_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/printing/common/print_messages.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui_data_source.h"
-#include "grit/browser_resources.h"
-#include "grit/components_strings.h"
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
+
+#if defined(OS_CHROMEOS)
+#include "base/command_line.h"
+#include "base/feature_list.h"
+#include "chrome/common/chrome_features.h"
+#include "chrome/common/chrome_switches.h"
+#endif
 
 using content::WebContents;
 using printing::PageSizeMargins;
@@ -172,6 +179,7 @@ content::WebUIDataSource* CreatePrintPreviewUISource() {
   source->AddLocalizedString("printButton", IDS_PRINT_PREVIEW_PRINT_BUTTON);
   source->AddLocalizedString("saveButton", IDS_PRINT_PREVIEW_SAVE_BUTTON);
   source->AddLocalizedString("printing", IDS_PRINT_PREVIEW_PRINTING);
+  source->AddLocalizedString("saving", IDS_PRINT_PREVIEW_SAVING);
   source->AddLocalizedString("printingToPDFInProgress",
                              IDS_PRINT_PREVIEW_PRINTING_TO_PDF_IN_PROGRESS);
 #if defined(OS_MACOSX)
@@ -259,8 +267,6 @@ content::WebUIDataSource* CreatePrintPreviewUISource() {
   source->AddLocalizedString("printPagesLabel",
                              IDS_PRINT_PREVIEW_PRINT_PAGES_LABEL);
   source->AddLocalizedString("optionsLabel", IDS_PRINT_PREVIEW_OPTIONS_LABEL);
-  source->AddLocalizedString("optionDistillPage",
-                             IDS_PRINT_PREVIEW_OPTION_DISTILL_PAGE);
   source->AddLocalizedString("optionHeaderFooter",
                              IDS_PRINT_PREVIEW_OPTION_HEADER_FOOTER);
   source->AddLocalizedString("optionFitToPage",
@@ -335,9 +341,7 @@ content::WebUIDataSource* CreatePrintPreviewUISource() {
   source->AddLocalizedString(
       "noDestsPromoAddPrinterButtonLabel",
       IDS_PRINT_PREVIEW_NO_DESTS_PROMO_ADD_PRINTER_BUTTON_LABEL);
-  source->AddLocalizedString(
-      "noDestsPromoNotNowButtonLabel",
-      IDS_PRINT_PREVIEW_NO_DESTS_PROMO_NOT_NOW_BUTTON_LABEL);
+  source->AddLocalizedString("noDestsPromoNotNowButtonLabel", IDS_NOT_NOW);
   source->AddLocalizedString("couldNotPrint",
                              IDS_PRINT_PREVIEW_COULD_NOT_PRINT);
   source->AddLocalizedString("registerPromoButtonText",
@@ -391,11 +395,20 @@ content::WebUIDataSource* CreatePrintPreviewUISource() {
                           IDR_PRINT_PREVIEW_IMAGES_MOBILE_SHARED);
   source->SetDefaultResource(IDR_PRINT_PREVIEW_HTML);
   source->SetRequestFilter(base::Bind(&HandleRequestCallback));
-  source->OverrideContentSecurityPolicyFrameSrc("frame-src 'self';");
+  source->OverrideContentSecurityPolicyChildSrc("child-src 'self';");
   source->DisableDenyXFrameOptions();
   source->OverrideContentSecurityPolicyObjectSrc("object-src 'self';");
   source->AddLocalizedString("moreOptionsLabel", IDS_MORE_OPTIONS_LABEL);
   source->AddLocalizedString("lessOptionsLabel", IDS_LESS_OPTIONS_LABEL);
+#if defined(OS_CHROMEOS)
+  bool cups_and_md_settings_enabled =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          ::switches::kEnableNativeCups) &&
+      base::FeatureList::IsEnabled(features::kMaterialDesignSettings);
+  source->AddBoolean("showLocalManageButton", cups_and_md_settings_enabled);
+#else
+  source->AddBoolean("showLocalManageButton", true);
+#endif
   return source;
 }
 
@@ -410,8 +423,7 @@ PrintPreviewUI::PrintPreviewUI(content::WebUI* web_ui)
       handler_(NULL),
       source_is_modifiable_(true),
       source_has_selection_(false),
-      dialog_closed_(false),
-      weak_ptr_factory_(this) {
+      dialog_closed_(false) {
   // Set up the chrome://print/ data source.
   Profile* profile = Profile::FromWebUI(web_ui);
   content::WebUIDataSource::Add(profile, CreatePrintPreviewUISource());
@@ -502,7 +514,7 @@ void PrintPreviewUI::OnInitiatorClosed() {
   printing::BackgroundPrintingManager* background_printing_manager =
       g_browser_process->background_printing_manager();
   if (background_printing_manager->HasPrintPreviewDialog(preview_dialog))
-    web_ui()->CallJavascriptFunction("cancelPendingPrintRequest");
+    web_ui()->CallJavascriptFunctionUnsafe("cancelPendingPrintRequest");
   else
     OnClosePrintPreviewDialog();
 }
@@ -517,7 +529,7 @@ void PrintPreviewUI::OnPrintPreviewRequest(int request_id) {
 
 #if defined(ENABLE_BASIC_PRINTING)
 void PrintPreviewUI::OnShowSystemDialog() {
-  web_ui()->CallJavascriptFunction("onSystemDialogLinkClicked");
+  web_ui()->CallJavascriptFunctionUnsafe("onSystemDialogLinkClicked");
 }
 #endif  // ENABLE_BASIC_PRINTING
 
@@ -528,9 +540,8 @@ void PrintPreviewUI::OnDidGetPreviewPageCount(
     g_testing_delegate->DidGetPreviewPageCount(params.page_count);
   base::FundamentalValue count(params.page_count);
   base::FundamentalValue request_id(params.preview_request_id);
-  web_ui()->CallJavascriptFunction("onDidGetPreviewPageCount",
-                                   count,
-                                   request_id);
+  web_ui()->CallJavascriptFunctionUnsafe("onDidGetPreviewPageCount", count,
+                                         request_id);
 }
 
 void PrintPreviewUI::OnDidGetDefaultPageLayout(
@@ -559,8 +570,8 @@ void PrintPreviewUI::OnDidGetDefaultPageLayout(
                     printable_area.height());
 
   base::FundamentalValue has_page_size_style(has_custom_page_size_style);
-  web_ui()->CallJavascriptFunction("onDidGetDefaultPageLayout", layout,
-                                   has_page_size_style);
+  web_ui()->CallJavascriptFunctionUnsafe("onDidGetDefaultPageLayout", layout,
+                                         has_page_size_style);
 }
 
 void PrintPreviewUI::OnDidPreviewPage(int page_number,
@@ -571,10 +582,10 @@ void PrintPreviewUI::OnDidPreviewPage(int page_number,
   base::FundamentalValue request_id(preview_request_id);
   if (g_testing_delegate)
     g_testing_delegate->DidRenderPreviewPage(web_ui()->GetWebContents());
-  web_ui()->CallJavascriptFunction(
-      "onDidPreviewPage", number, ui_identifier, request_id);
+  web_ui()->CallJavascriptFunctionUnsafe("onDidPreviewPage", number,
+                                         ui_identifier, request_id);
   if (g_testing_delegate && g_testing_delegate->IsAutoCancelEnabled())
-    web_ui()->CallJavascriptFunction("autoCancelForTesting");
+    web_ui()->CallJavascriptFunctionUnsafe("autoCancelForTesting");
 }
 
 void PrintPreviewUI::OnPreviewDataIsAvailable(int expected_pages_count,
@@ -594,12 +605,12 @@ void PrintPreviewUI::OnPreviewDataIsAvailable(int expected_pages_count,
   }
   base::FundamentalValue ui_identifier(id_);
   base::FundamentalValue ui_preview_request_id(preview_request_id);
-  web_ui()->CallJavascriptFunction("updatePrintPreview", ui_identifier,
-                                   ui_preview_request_id);
+  web_ui()->CallJavascriptFunctionUnsafe("updatePrintPreview", ui_identifier,
+                                         ui_preview_request_id);
 }
 
 void PrintPreviewUI::OnFileSelectionCancelled() {
-  web_ui()->CallJavascriptFunction("fileSelectionCancelled");
+  web_ui()->CallJavascriptFunctionUnsafe("fileSelectionCancelled");
 }
 
 void PrintPreviewUI::OnCancelPendingPreviewRequest() {
@@ -608,11 +619,11 @@ void PrintPreviewUI::OnCancelPendingPreviewRequest() {
 
 void PrintPreviewUI::OnPrintPreviewFailed() {
   handler_->OnPrintPreviewFailed();
-  web_ui()->CallJavascriptFunction("printPreviewFailed");
+  web_ui()->CallJavascriptFunctionUnsafe("printPreviewFailed");
 }
 
 void PrintPreviewUI::OnInvalidPrinterSettings() {
-  web_ui()->CallJavascriptFunction("invalidPrinterSettings");
+  web_ui()->CallJavascriptFunctionUnsafe("invalidPrinterSettings");
 }
 
 PrintPreviewDataService* PrintPreviewUI::print_preview_data_service() {
@@ -646,7 +657,7 @@ void PrintPreviewUI::OnClosePrintPreviewDialog() {
 }
 
 void PrintPreviewUI::OnReloadPrintersList() {
-  web_ui()->CallJavascriptFunction("reloadPrintersList");
+  web_ui()->CallJavascriptFunctionUnsafe("reloadPrintersList");
 }
 
 void PrintPreviewUI::OnSetOptionsFromDocument(
@@ -656,7 +667,8 @@ void PrintPreviewUI::OnSetOptionsFromDocument(
                      params.is_scaling_disabled);
   options.SetInteger(printing::kSettingCopies, params.copies);
   options.SetInteger(printing::kSettingDuplexMode, params.duplex);
-  web_ui()->CallJavascriptFunction("printPresetOptionsFromDocument", options);
+  web_ui()->CallJavascriptFunctionUnsafe("printPresetOptionsFromDocument",
+                                         options);
 }
 
 // static
@@ -671,8 +683,4 @@ void PrintPreviewUI::SetSelectedFileForTesting(const base::FilePath& path) {
 void PrintPreviewUI::SetPdfSavedClosureForTesting(
     const base::Closure& closure) {
   handler_->SetPdfSavedClosureForTesting(closure);
-}
-
-base::WeakPtr<PrintPreviewUI> PrintPreviewUI::GetWeakPtr() {
-  return weak_ptr_factory_.GetWeakPtr();
 }

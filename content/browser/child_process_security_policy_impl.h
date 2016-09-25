@@ -5,10 +5,11 @@
 #ifndef CONTENT_BROWSER_CHILD_PROCESS_SECURITY_POLICY_IMPL_H_
 #define CONTENT_BROWSER_CHILD_PROCESS_SECURITY_POLICY_IMPL_H_
 
-
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
@@ -78,6 +79,9 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
   void GrantSendMidiSysExMessage(int child_id) override;
   bool CanAccessDataForOrigin(int child_id, const GURL& url) override;
 
+  // Returns if |child_id| can read all of the |files|.
+  bool CanReadAllFiles(int child_id, const std::vector<base::FilePath>& files);
+
   // Pseudo schemes are treated differently than other schemes because they
   // cannot be requested like normal URLs.  There is no mechanism for revoking
   // pseudo schemes.
@@ -134,6 +138,10 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
   // handlers.
   bool CanCommitURL(int child_id, const GURL& url);
 
+  // Whether the given origin is valid for an origin header. Valid origin
+  // headers are commitable URLs plus suborigin URLs.
+  bool CanSetAsOriginHeader(int child_id, const GURL& url);
+
   // Explicit permissions checks for FileSystemURL specified files.
   bool CanReadFileSystemFile(int child_id, const storage::FileSystemURL& url);
   bool CanWriteFileSystemFile(int child_id, const storage::FileSystemURL& url);
@@ -171,7 +179,7 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
   class SecurityState;
 
   typedef std::set<std::string> SchemeSet;
-  typedef std::map<int, SecurityState*> SecurityStateMap;
+  typedef std::map<int, std::unique_ptr<SecurityState>> SecurityStateMap;
   typedef std::map<int, int> WorkerToMainProcessMap;
   typedef std::map<storage::FileSystemType, int> FileSystemPermissionPolicyMap;
 

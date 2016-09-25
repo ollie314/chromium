@@ -92,19 +92,21 @@ TEST_F(CastTransportHostFilterTest, SimpleMessages) {
   media::cast::CastTransportRtpConfig audio_config;
   audio_config.ssrc = 1;
   audio_config.feedback_ssrc = 2;
-  CastHostMsg_InitializeAudio init_audio_msg(kChannelId, audio_config);
+  audio_config.rtp_payload_type = media::cast::RtpPayloadType::AUDIO_OPUS;
+  CastHostMsg_InitializeStream init_audio_msg(kChannelId, audio_config);
   FakeSend(init_audio_msg);
 
   media::cast::CastTransportRtpConfig video_config;
   video_config.ssrc = 11;
   video_config.feedback_ssrc = 12;
-  CastHostMsg_InitializeVideo init_video_msg(kChannelId, video_config);
+  video_config.rtp_payload_type = media::cast::RtpPayloadType::VIDEO_VP8;
+  CastHostMsg_InitializeStream init_video_msg(kChannelId, video_config);
   FakeSend(init_video_msg);
 
   media::cast::EncodedFrame audio_frame;
   audio_frame.dependency = media::cast::EncodedFrame::KEY;
-  audio_frame.frame_id = 1;
-  audio_frame.referenced_frame_id = 1;
+  audio_frame.frame_id = media::cast::FrameId::first() + 1;
+  audio_frame.referenced_frame_id = media::cast::FrameId::first() + 1;
   const int kSamples = 47;
   audio_frame.rtp_timestamp = media::cast::RtpTimeTicks() +
       media::cast::RtpTimeDelta::FromTicks(kSamples);
@@ -116,8 +118,8 @@ TEST_F(CastTransportHostFilterTest, SimpleMessages) {
 
   media::cast::EncodedFrame video_frame;
   video_frame.dependency = media::cast::EncodedFrame::KEY;
-  video_frame.frame_id = 1;
-  video_frame.referenced_frame_id = 1;
+  video_frame.frame_id = media::cast::FrameId::first() + 1;
+  video_frame.referenced_frame_id = media::cast::FrameId::first() + 1;
   // Let's make sure we try a few kb so multiple packets
   // are generated.
   const int kVideoDataSize = 4711;
@@ -130,12 +132,13 @@ TEST_F(CastTransportHostFilterTest, SimpleMessages) {
       media::cast::RtpTimeTicks().Expand(UINT32_C(2)));
   FakeSend(rtcp_msg);
 
-  std::vector<uint32_t> frame_ids;
-  frame_ids.push_back(1);
+  std::vector<media::cast::FrameId> frame_ids;
+  frame_ids.push_back(media::cast::FrameId::first() + 1);
   CastHostMsg_CancelSendingFrames cancel_msg(kChannelId, 1, frame_ids);
   FakeSend(cancel_msg);
 
-  CastHostMsg_ResendFrameForKickstart kickstart_msg(kChannelId, 1, 1);
+  CastHostMsg_ResendFrameForKickstart kickstart_msg(
+      kChannelId, 1, media::cast::FrameId::first() + 1);
   FakeSend(kickstart_msg);
 
   CastHostMsg_Delete delete_msg(kChannelId);

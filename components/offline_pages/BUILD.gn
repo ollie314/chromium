@@ -6,31 +6,44 @@ if (is_android) {
   import("//build/config/android/rules.gni")
 }
 
-# GYP: //components/offline_pages.gypi:offline_pages
 static_library("offline_pages") {
   sources = [
+    "archive_manager.cc",
+    "archive_manager.h",
+    "client_namespace_constants.cc",
+    "client_namespace_constants.h",
+    "client_policy_controller.cc",
+    "client_policy_controller.h",
+    "offline_event_logger.cc",
+    "offline_event_logger.h",
     "offline_page_archiver.h",
-    "offline_page_bookmark_bridge.cc",
-    "offline_page_bookmark_bridge.h",
+    "offline_page_client_policy.h",
     "offline_page_item.cc",
     "offline_page_item.h",
     "offline_page_metadata_store.cc",
     "offline_page_metadata_store.h",
-    "offline_page_metadata_store_impl.cc",
-    "offline_page_metadata_store_impl.h",
+    "offline_page_metadata_store_sql.cc",
+    "offline_page_metadata_store_sql.h",
     "offline_page_model.cc",
     "offline_page_model.h",
+    "offline_page_model_event_logger.cc",
+    "offline_page_model_event_logger.h",
+    "offline_page_model_impl.cc",
+    "offline_page_model_impl.h",
+    "offline_page_storage_manager.cc",
+    "offline_page_storage_manager.h",
+    "offline_page_types.h",
+    "offline_store_types.h",
+    "snapshot_controller.cc",
+    "snapshot_controller.h",
   ]
 
   deps = [
     ":switches",
     "//base",
-    "//components/bookmarks/browser",
     "//components/keyed_service/core",
-    "//components/leveldb_proto",
-    "//components/offline_pages/proto:offline_pages_proto",
     "//net",
-    "//third_party/leveldatabase",
+    "//sql:sql",
     "//url",
   ]
 }
@@ -42,23 +55,24 @@ static_library("test_support") {
     "offline_page_test_archiver.h",
     "offline_page_test_store.cc",
     "offline_page_test_store.h",
+    "stub_offline_page_model.cc",
+    "stub_offline_page_model.h",
   ]
 
   deps = [
     ":offline_pages",
     ":switches",
     "//base",
+    "//components/keyed_service/core",
     "//testing/gtest",
     "//url",
   ]
 }
 
-source_set("switches") {
+static_library("switches") {
   sources = [
     "offline_page_feature.cc",
     "offline_page_feature.h",
-    "offline_page_switches.cc",
-    "offline_page_switches.h",
   ]
 
   deps = [
@@ -70,8 +84,13 @@ source_set("switches") {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "archive_manager_unittest.cc",
+    "client_policy_controller_unittest.cc",
     "offline_page_metadata_store_impl_unittest.cc",
-    "offline_page_model_unittest.cc",
+    "offline_page_model_event_logger_unittest.cc",
+    "offline_page_model_impl_unittest.cc",
+    "offline_page_storage_manager_unittest.cc",
+    "snapshot_controller_unittest.cc",
   ]
 
   deps = [
@@ -80,25 +99,18 @@ source_set("unit_tests") {
     ":test_support",
     "//base",
     "//base/test:test_support",
-    "//components/bookmarks/browser",
-    "//components/bookmarks/test",
-    "//components/leveldb_proto",
-    "//components/offline_pages/proto:offline_pages_proto",
+    "//sql:sql",
     "//testing/gtest",
     "//url",
   ]
 }
 
 if (is_android) {
-  java_cpp_enum("offline_page_feature_enums_java") {
-    sources = [
-      "offline_page_feature.h",
-    ]
-  }
-
   java_cpp_enum("offline_page_model_enums_java") {
     sources = [
-      "offline_page_model.h",
+      "background/request_queue.h",
+      "background/save_page_request.h",
+      "offline_page_types.h",
     ]
   }
 }

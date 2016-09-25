@@ -29,11 +29,12 @@
 #include "net/http/http_server_properties.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/log/net_log.h"
+#include "net/log/net_log_event_type.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_retry_info.h"
 #include "net/proxy/proxy_service.h"
-#include "net/quic/quic_protocol.h"
-#include "net/quic/quic_utils.h"
+#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_utils.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
@@ -246,9 +247,9 @@ std::unique_ptr<base::DictionaryValue> GetNetConstants() {
   {
     std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
 
-    dict->SetInteger("PHASE_BEGIN", NetLog::PHASE_BEGIN);
-    dict->SetInteger("PHASE_END", NetLog::PHASE_END);
-    dict->SetInteger("PHASE_NONE", NetLog::PHASE_NONE);
+    dict->SetInteger("PHASE_BEGIN", static_cast<int>(NetLogEventPhase::BEGIN));
+    dict->SetInteger("PHASE_END", static_cast<int>(NetLogEventPhase::END));
+    dict->SetInteger("PHASE_NONE", static_cast<int>(NetLogEventPhase::NONE));
 
     constants_dict->Set("logEventPhase", std::move(dict));
   }
@@ -381,31 +382,31 @@ NET_EXPORT std::unique_ptr<base::DictionaryValue> GetNetInfo(
 
       base::ListValue* entry_list = new base::ListValue();
 
-      HostCache::EntryMap::Iterator it(cache->entries());
-      for (; it.HasNext(); it.Advance()) {
-        const HostCache::Key& key = it.key();
-        const HostCache::Entry& entry = it.value();
+      for (const auto& pair : cache->entries()) {
+        const HostCache::Key& key = pair.first;
+        const HostCache::Entry& entry = pair.second;
 
-        base::DictionaryValue* entry_dict = new base::DictionaryValue();
+        std::unique_ptr<base::DictionaryValue> entry_dict(
+            new base::DictionaryValue());
 
         entry_dict->SetString("hostname", key.hostname);
         entry_dict->SetInteger("address_family",
                                static_cast<int>(key.address_family));
         entry_dict->SetString("expiration",
-                              NetLog::TickCountToString(it.expiration()));
+                              NetLog::TickCountToString(entry.expires()));
 
-        if (entry.error != OK) {
-          entry_dict->SetInteger("error", entry.error);
+        if (entry.error() != OK) {
+          entry_dict->SetInteger("error", entry.error());
         } else {
+          const AddressList& addresses = entry.addresses();
           // Append all of the resolved addresses.
           base::ListValue* address_list = new base::ListValue();
-          for (size_t i = 0; i < entry.addrlist.size(); ++i) {
-            address_list->AppendString(entry.addrlist[i].ToStringWithoutPort());
-          }
+          for (size_t i = 0; i < addresses.size(); ++i)
+            address_list->AppendString(addresses[i].ToStringWithoutPort());
           entry_dict->Set("addresses", address_list);
         }
 
-        entry_list->Append(entry_dict);
+        entry_list->Append(std::move(entry_dict));
       }
 
       cache_info_dict->Set("entries", entry_list);
@@ -431,15 +432,8 @@ NET_EXPORT std::unique_ptr<base::DictionaryValue> GetNetInfo(
   if (info_sources & NET_INFO_SPDY_STATUS) {
     base::DictionaryValue* status_dict = new base::DictionaryValue();
 
-    status_dict->SetBoolean("enable_spdy31",
-                            http_network_session->params().enable_spdy31 &&
-                                HttpStreamFactory::spdy_enabled());
     status_dict->SetBoolean("enable_http2",
-                            http_network_session->params().enable_http2 &&
-                                HttpStreamFactory::spdy_enabled());
-    status_dict->SetBoolean(
-        "use_alternative_services",
-        http_network_session->params().parse_alternative_services);
+                            http_network_session->params().enable_http2);
 
     NextProtoVector alpn_protos;
     http_network_session->GetAlpnProtos(&alpn_protos);
@@ -451,18 +445,6 @@ NET_EXPORT std::unique_ptr<base::DictionaryValue> GetNetInfo(
         next_protos_string.append(SSLClientSocket::NextProtoToString(proto));
       }
       status_dict->SetString("alpn_protos", next_protos_string);
-    }
-
-    NextProtoVector npn_protos;
-    http_network_session->GetNpnProtos(&npn_protos);
-    if (!npn_protos.empty()) {
-      std::string next_protos_string;
-      for (NextProto proto : npn_protos) {
-        if (!next_protos_string.empty())
-          next_protos_string.append(",");
-        next_protos_string.append(SSLClientSocket::NextProtoToString(proto));
-      }
-      status_dict->SetString("npn_protos", next_protos_string);
     }
 
     net_info_dict->Set(NetInfoSourceToString(NET_INFO_SPDY_STATUS),
@@ -522,12 +504,12 @@ NET_EXPORT void CreateNetLogEntriesForActiveObjects(
     NetLog::ThreadSafeObserver* observer) {
   // Put together the list of all requests.
   std::vector<const URLRequest*> requests;
-  for (const auto& context : contexts) {
+  for (auto* context : contexts) {
     // May only be called on the context's thread.
     DCHECK(context->CalledOnValidThread());
     // Contexts should all be using the same NetLog.
     DCHECK_EQ((*contexts.begin())->net_log(), context->net_log());
-    for (const auto& request : *context->url_requests()) {
+    for (auto* request : *context->url_requests()) {
       requests.push_back(request);
     }
   }
@@ -536,15 +518,15 @@ NET_EXPORT void CreateNetLogEntriesForActiveObjects(
   std::sort(requests.begin(), requests.end(), RequestCreatedBefore);
 
   // Create fake events.
-  for (const auto& request : requests) {
+  for (auto* request : requests) {
     NetLog::ParametersCallback callback =
         base::Bind(&GetRequestStateAsValue, base::Unretained(request));
 
     // Note that passing the hardcoded NetLogCaptureMode::Default() below is
     // fine, since GetRequestStateAsValue() ignores the capture mode.
     NetLog::EntryData entry_data(
-        NetLog::TYPE_REQUEST_ALIVE, request->net_log().source(),
-        NetLog::PHASE_BEGIN, request->creation_time(), &callback);
+        NetLogEventType::REQUEST_ALIVE, request->net_log().source(),
+        NetLogEventPhase::BEGIN, request->creation_time(), &callback);
     NetLog::Entry entry(&entry_data, NetLogCaptureMode::Default());
     observer->OnAddEntry(entry);
   }

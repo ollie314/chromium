@@ -156,8 +156,8 @@ void QueryResults::AdjustResultMap(size_t begin, size_t end, ptrdiff_t delta) {
 
 QueryOptions::QueryOptions()
     : max_count(0),
-      duplicate_policy(QueryOptions::REMOVE_ALL_DUPLICATES) {
-}
+      duplicate_policy(QueryOptions::REMOVE_ALL_DUPLICATES),
+      matching_algorithm(query_parser::MatchingAlgorithm::DEFAULT) {}
 
 void QueryOptions::SetRecentDayRange(int days_ago) {
   end_time = base::Time::Now();
@@ -254,7 +254,8 @@ HistoryAddPageArgs::HistoryAddPageArgs()
                          RedirectList(),
                          ui::PAGE_TRANSITION_LINK,
                          SOURCE_BROWSED,
-                         false) {
+                         false,
+                         true) {
 }
 
 HistoryAddPageArgs::HistoryAddPageArgs(const GURL& url,
@@ -265,7 +266,8 @@ HistoryAddPageArgs::HistoryAddPageArgs(const GURL& url,
                                        const RedirectList& redirects,
                                        ui::PageTransition transition,
                                        VisitSource source,
-                                       bool did_replace_entry)
+                                       bool did_replace_entry,
+                                       bool consider_for_ntp_most_visited)
     : url(url),
       time(time),
       context_id(context_id),
@@ -274,7 +276,8 @@ HistoryAddPageArgs::HistoryAddPageArgs(const GURL& url,
       redirects(redirects),
       transition(transition),
       visit_source(source),
-      did_replace_entry(did_replace_entry) {
+      did_replace_entry(did_replace_entry),
+      consider_for_ntp_most_visited(consider_for_ntp_most_visited) {
 }
 
 HistoryAddPageArgs::HistoryAddPageArgs(const HistoryAddPageArgs& other) =

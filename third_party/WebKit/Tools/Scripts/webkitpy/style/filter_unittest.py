@@ -38,7 +38,7 @@ from filter import FilterConfiguration
 # Part of the reason is that it is not immediately clear what
 # expression the unittest module uses to assert "not equals" -- the
 # negation of __eq__() or __ne__(), which are not necessarily
-# equivalent expresions in Python.  For example, from Python's "Data
+# equivalent expressions in Python.  For example, from Python's "Data
 # Model" documentation--
 #
 #   "There are no implied relationships among the comparison
@@ -47,7 +47,7 @@ from filter import FilterConfiguration
 #    also define __ne__() so that the operators will behave as
 #    expected."
 #
-#   (from http://docs.python.org/reference/datamodel.html#object.__ne__ )
+# (from http://docs.python.org/reference/datamodel.html#object.__ne__ )
 
 
 class ValidateFilterRulesTest(unittest.TestCase):

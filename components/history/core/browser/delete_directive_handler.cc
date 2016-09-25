@@ -5,6 +5,7 @@
 #include "components/history/core/browser/delete_directive_handler.h"
 
 #include <stddef.h>
+
 #include <utility>
 
 #include "base/json/json_writer.h"
@@ -14,10 +15,10 @@
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
-#include "sync/api/sync_change.h"
-#include "sync/protocol/history_delete_directive_specifics.pb.h"
-#include "sync/protocol/proto_value_conversions.h"
-#include "sync/protocol/sync.pb.h"
+#include "components/sync/api/sync_change.h"
+#include "components/sync/protocol/history_delete_directive_specifics.pb.h"
+#include "components/sync/protocol/proto_value_conversions.h"
+#include "components/sync/protocol/sync.pb.h"
 
 namespace {
 
@@ -32,7 +33,7 @@ std::string RandASCIIString(size_t length) {
 
 std::string DeleteDirectiveToString(
     const sync_pb::HistoryDeleteDirectiveSpecifics& delete_directive) {
-  scoped_ptr<base::DictionaryValue> value(
+  std::unique_ptr<base::DictionaryValue> value(
       syncer::HistoryDeleteDirectiveSpecificsToValue(delete_directive));
   std::string str;
   base::JSONWriter::Write(*value, &str);
@@ -295,13 +296,13 @@ DeleteDirectiveHandler::~DeleteDirectiveHandler() {
 void DeleteDirectiveHandler::Start(
     HistoryService* history_service,
     const syncer::SyncDataList& initial_sync_data,
-    scoped_ptr<syncer::SyncChangeProcessor> sync_processor) {
+    std::unique_ptr<syncer::SyncChangeProcessor> sync_processor) {
   DCHECK(thread_checker_.CalledOnValidThread());
   sync_processor_ = std::move(sync_processor);
   if (!initial_sync_data.empty()) {
     // Drop processed delete directives during startup.
     history_service->ScheduleDBTask(
-        scoped_ptr<HistoryDBTask>(
+        std::unique_ptr<HistoryDBTask>(
             new DeleteDirectiveTask(weak_ptr_factory_.GetWeakPtr(),
                                     initial_sync_data, DROP_AFTER_PROCESSING)),
         &internal_tracker_);
@@ -406,7 +407,7 @@ syncer::SyncError DeleteDirectiveHandler::ProcessSyncChanges(
     // redelivered delete directives to avoid processing them again and again
     // in one chrome session.
     history_service->ScheduleDBTask(
-        scoped_ptr<HistoryDBTask>(
+        std::unique_ptr<HistoryDBTask>(
             new DeleteDirectiveTask(weak_ptr_factory_.GetWeakPtr(),
                                     delete_directives, KEEP_AFTER_PROCESSING)),
         &internal_tracker_);

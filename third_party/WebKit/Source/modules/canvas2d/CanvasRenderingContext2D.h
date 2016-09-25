@@ -27,7 +27,6 @@
 #define CanvasRenderingContext2D_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/modules/v8/UnionTypesModules.h"
 #include "core/html/canvas/CanvasContextCreationAttributes.h"
 #include "core/html/canvas/CanvasRenderingContext.h"
 #include "core/html/canvas/CanvasRenderingContextFactory.h"
@@ -56,11 +55,12 @@ class FontMetrics;
 class HitRegion;
 class HitRegionOptions;
 class HitRegionManager;
+class HitTestCanvasResult;
 class Path2D;
 class SVGMatrixTearOff;
 class TextMetrics;
 
-typedef HTMLImageElementOrHTMLVideoElementOrHTMLCanvasElementOrImageBitmap CanvasImageSourceUnion;
+typedef HTMLImageElementOrHTMLVideoElementOrHTMLCanvasElementOrImageBitmapOrOffscreenCanvas CanvasImageSourceUnion;
 
 class MODULES_EXPORT CanvasRenderingContext2D final : public CanvasRenderingContext, public BaseRenderingContext2D, public WebThread::TaskObserver, public SVGResourceClient {
     DEFINE_WRAPPERTYPEINFO();
@@ -78,7 +78,6 @@ public:
             return new CanvasRenderingContext2D(canvas, attrs, document);
         }
         CanvasRenderingContext::ContextType getContextType() const override { return CanvasRenderingContext::Context2d; }
-        void onError(HTMLCanvasElement*, const String& error) override { }
     };
 
     ~CanvasRenderingContext2D() override;
@@ -87,6 +86,7 @@ public:
 
     bool isContextLost() const override;
 
+    bool shouldAntialias() const override;
     void setShouldAntialias(bool) override;
 
     void scrollPathIntoView();
@@ -135,7 +135,7 @@ public:
     void willProcessTask() override { }
 
     void styleDidChange(const ComputedStyle* oldStyle, const ComputedStyle& newStyle) override;
-    std::pair<Element*, String> getControlAndIdIfHitRegionExists(const LayoutPoint& location) override;
+    HitTestCanvasResult* getControlAndIdIfHitRegionExists(const LayoutPoint& location) override;
     String getIdFromControl(const Element*) override;
 
     // SVGResourceClient implementation
@@ -144,7 +144,7 @@ public:
     // BaseRenderingContext2D implementation
     bool originClean() const final;
     void setOriginTainted() final;
-    bool wouldTaintOrigin(CanvasImageSource* source) final { return CanvasRenderingContext::wouldTaintOrigin(source); }
+    bool wouldTaintOrigin(CanvasImageSource* source, ExecutionContext*) final { return CanvasRenderingContext::wouldTaintOrigin(source); }
 
     int width() const final;
     int height() const final;
@@ -165,7 +165,17 @@ public:
     SkImageFilter* stateGetFilter() final;
     void snapshotStateForFilter() final;
 
-    void validateStateStack() final;
+    void validateStateStack() const final;
+
+    PassRefPtr<Image> getImage(AccelerationHint, SnapshotReason) const final;
+
+    bool isAccelerationOptimalForCanvasContent() const;
+
+    void resetUsageTracking();
+
+    void incrementFrameCount() { m_usageCounters.numFramesSinceReset++; }
+
+    bool isPaintable() const final { return hasImageBuffer(); }
 
 private:
     friend class CanvasRenderingContext2DAutoRestoreSkCanvas;
@@ -174,9 +184,9 @@ private:
 
     void dispose();
 
-    void dispatchContextLostEvent(Timer<CanvasRenderingContext2D>*);
-    void dispatchContextRestoredEvent(Timer<CanvasRenderingContext2D>*);
-    void tryRestoreContextEvent(Timer<CanvasRenderingContext2D>*);
+    void dispatchContextLostEvent(TimerBase*);
+    void dispatchContextRestoredEvent(TimerBase*);
+    void tryRestoreContextEvent(TimerBase*);
 
     void unwindStateStack();
 
@@ -198,7 +208,7 @@ private:
     CanvasRenderingContext::ContextType getContextType() const override { return CanvasRenderingContext::Context2d; }
     bool is2d() const override { return true; }
     bool isAccelerated() const override;
-    bool hasAlpha() const override { return m_hasAlpha; }
+    bool hasAlpha() const override { return creationAttributes().alpha(); }
     void setIsHidden(bool) override;
     void stop() final;
     DECLARE_VIRTUAL_TRACE();
@@ -208,7 +218,6 @@ private:
     WebLayer* platformLayer() const override;
 
     Member<HitRegionManager> m_hitRegionManager;
-    bool m_hasAlpha;
     LostContextMode m_contextLostMode;
     bool m_contextRestorable;
     unsigned m_tryRestoreContextAttemptCount;
@@ -221,7 +230,8 @@ private:
     ListHashSet<String> m_fontLRUList;
 };
 
-DEFINE_TYPE_CASTS(CanvasRenderingContext2D, CanvasRenderingContext, context, context->is2d(), context.is2d());
+DEFINE_TYPE_CASTS(CanvasRenderingContext2D, CanvasRenderingContext, context,
+    context->is2d() && context->canvas(), context.is2d() && context.canvas());
 
 } // namespace blink
 

@@ -16,6 +16,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -538,6 +539,12 @@ bool UserManagerBase::IsCurrentUserNonCryptohomeDataEphemeral() const {
          IsUserNonCryptohomeDataEphemeral(GetLoggedInUser()->GetAccountId());
 }
 
+bool UserManagerBase::IsCurrentUserCryptohomeDataEphemeral() const {
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  return IsUserLoggedIn() &&
+         IsUserCryptohomeDataEphemeral(GetActiveUser()->GetAccountId());
+}
+
 bool UserManagerBase::CanCurrentUserLock() const {
   DCHECK(task_runner_->RunsTasksOnCurrentThread());
   return IsUserLoggedIn() && active_user_->can_lock();
@@ -619,6 +626,31 @@ bool UserManagerBase::IsUserNonCryptohomeDataEphemeral(
   //    - or -
   // b) The browser is restarting after a crash.
   return AreEphemeralUsersEnabled() || HasBrowserRestarted();
+}
+
+bool UserManagerBase::IsUserCryptohomeDataEphemeral(
+    const AccountId& account_id) const {
+  // Don't consider stub users data as ephemeral.
+  if (IsStubAccountId(account_id))
+    return false;
+
+  // Data belonging to the guest and demo users is always ephemeral.
+  if (IsGuestAccountId(account_id) || IsDemoApp(account_id))
+    return true;
+
+  // Data belonging to the public accounts is always ephemeral.
+  const User* user = FindUser(account_id);
+  if (user && user->GetType() == USER_TYPE_PUBLIC_ACCOUNT)
+    return true;
+
+  // Ephemeral users.
+  if (AreEphemeralUsersEnabled() && user &&
+      user->GetType() == USER_TYPE_REGULAR &&
+      FindUserInList(account_id) == nullptr) {
+    return true;
+  }
+
+  return false;
 }
 
 void UserManagerBase::AddObserver(UserManager::Observer* obs) {
@@ -820,7 +852,8 @@ void UserManagerBase::GuestUserLoggedIn() {
 void UserManagerBase::AddUserRecord(User* user) {
   // Add the user to the front of the user list.
   ListPrefUpdate prefs_users_update(GetLocalState(), kRegularUsers);
-  prefs_users_update->Insert(0, new base::StringValue(user->email()));
+  prefs_users_update->Insert(
+      0, base::MakeUnique<base::StringValue>(user->email()));
   users_.insert(users_.begin(), user);
 }
 
@@ -1011,14 +1044,14 @@ void UserManagerBase::SendGaiaUserLoginMetrics(const AccountId& account_id) {
       account_id != AccountId::FromUserEmail(last_email) &&
       time_to_login.InSeconds() <= kLogoutToLoginDelayMaxSec) {
     UMA_HISTOGRAM_CUSTOM_COUNTS("UserManager.LogoutToLoginDelay",
-                                time_to_login.InSeconds(), 0,
+                                time_to_login.InSeconds(), 1,
                                 kLogoutToLoginDelayMaxSec, 50);
   }
 }
 
 void UserManagerBase::UpdateUserAccountLocale(const AccountId& account_id,
                                               const std::string& locale) {
-  scoped_ptr<std::string> resolved_locale(new std::string());
+  std::unique_ptr<std::string> resolved_locale(new std::string());
   if (!locale.empty() && locale != GetApplicationLocale()) {
     // base::Passed will nullptr out |resolved_locale|, so cache the underlying
     // ptr.
@@ -1036,7 +1069,7 @@ void UserManagerBase::UpdateUserAccountLocale(const AccountId& account_id,
 
 void UserManagerBase::DoUpdateAccountLocale(
     const AccountId& account_id,
-    scoped_ptr<std::string> resolved_locale) {
+    std::unique_ptr<std::string> resolved_locale) {
   User* user = FindUserAndModify(account_id);
   if (user && resolved_locale)
     user->SetAccountLocale(*resolved_locale);

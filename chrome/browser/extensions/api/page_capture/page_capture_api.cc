@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/api/page_capture/page_capture_api.h"
 
 #include <limits>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
@@ -18,6 +19,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/mhtml_generation_params.h"
 #include "extensions/common/extension_messages.h"
 
 using content::BrowserThread;
@@ -104,10 +106,8 @@ void PageCaptureSaveAsMHTMLFunction::TemporaryFileCreated(bool success) {
       // Setup a ShareableFileReference so the temporary file gets deleted
       // once it is no longer used.
       mhtml_file_ = ShareableFileReference::GetOrCreate(
-          mhtml_path_,
-          ShareableFileReference::DELETE_ON_FINAL_RELEASE,
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)
-              .get());
+          mhtml_path_, ShareableFileReference::DELETE_ON_FINAL_RELEASE,
+          BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE).get());
     }
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
@@ -132,7 +132,7 @@ void PageCaptureSaveAsMHTMLFunction::TemporaryFileCreated(bool success) {
   }
 
   web_contents->GenerateMHTML(
-      mhtml_path_,
+      content::MHTMLGenerationParams(mhtml_path_),
       base::Bind(&PageCaptureSaveAsMHTMLFunction::MHTMLGenerated, this));
 }
 
@@ -173,10 +173,10 @@ void PageCaptureSaveAsMHTMLFunction::ReturnSuccess(int64_t file_size) {
   ChildProcessSecurityPolicy::GetInstance()->GrantReadFile(
       child_id, mhtml_path_);
 
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  SetResult(dict);
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("mhtmlFilePath", mhtml_path_.value());
   dict->SetInteger("mhtmlFileLength", file_size);
+  SetResult(std::move(dict));
 
   SendResponse(true);
 

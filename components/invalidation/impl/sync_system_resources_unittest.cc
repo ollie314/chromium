@@ -10,8 +10,9 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
-
+#include "base/run_loop.h"
 #include "components/invalidation/impl/push_client_channel.h"
 #include "components/invalidation/impl/state_writer.h"
 #include "google/cacheinvalidation/include/types.h"
@@ -51,8 +52,7 @@ class MockStorageCallback {
 class SyncSystemResourcesTest : public testing::Test {
  protected:
   SyncSystemResourcesTest()
-      : push_client_channel_(
-            scoped_ptr<notifier::PushClient>(new notifier::FakePushClient())),
+      : push_client_channel_(base::WrapUnique(new notifier::FakePushClient())),
         sync_system_resources_(&push_client_channel_, &mock_state_writer_) {}
 
   ~SyncSystemResourcesTest() override {}
@@ -136,7 +136,7 @@ TEST_F(SyncSystemResourcesTest, ScheduleImmediately) {
   EXPECT_CALL(mock_closure, Run());
   sync_system_resources_.internal_scheduler()->Schedule(
       invalidation::Scheduler::NoDelay(), mock_closure.CreateClosure());
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(SyncSystemResourcesTest, ScheduleOnListenerThread) {
@@ -147,7 +147,7 @@ TEST_F(SyncSystemResourcesTest, ScheduleOnListenerThread) {
       invalidation::Scheduler::NoDelay(), mock_closure.CreateClosure());
   EXPECT_TRUE(
       sync_system_resources_.internal_scheduler()->IsRunningOnThread());
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(SyncSystemResourcesTest, ScheduleWithZeroDelay) {
@@ -156,7 +156,7 @@ TEST_F(SyncSystemResourcesTest, ScheduleWithZeroDelay) {
   EXPECT_CALL(mock_closure, Run());
   sync_system_resources_.internal_scheduler()->Schedule(
       invalidation::TimeDelta::FromSeconds(0), mock_closure.CreateClosure());
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // TODO(akalin): Figure out how to test with a non-zero delay.
@@ -172,7 +172,7 @@ TEST_F(SyncSystemResourcesTest, WriteState) {
       .WillOnce(SaveArg<0>(&results));
   sync_system_resources_.storage()->WriteKey(
       std::string(), "state", mock_storage_callback.CreateCallback());
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(invalidation::Status(invalidation::Status::SUCCESS, std::string()),
             results);
 }

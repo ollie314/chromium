@@ -44,14 +44,11 @@ namespace {
 
 #if !defined(OS_ANDROID)
 bool EnableOutOfProcessV8Pac(const base::CommandLine& command_line) {
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("OutOfProcessPac");
-
   if (command_line.HasSwitch(switches::kDisableOutOfProcessPac))
     return false;
   if (command_line.HasSwitch(switches::kV8PacMojoOutOfProcess))
     return true;
-  return group_name == "Enabled";
+  return true;
 }
 #endif  // !defined(OS_ANDROID)
 
@@ -79,8 +76,8 @@ ProxyServiceFactory::CreateProxyConfigService(PrefProxyConfigTracker* tracker) {
   // that code be moved to chrome/browser instead of being in net, so that it
   // can use BrowserThread instead of raw MessageLoop pointers? See bug 25354.
   base_service = net::ProxyService::CreateSystemProxyConfigService(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE));
 #endif  // !defined(OS_CHROMEOS)
 
   return tracker->CreateTrackingProxyConfigService(std::move(base_service));
@@ -95,8 +92,7 @@ ProxyServiceFactory::CreatePrefProxyConfigTrackerOfProfile(
   return new chromeos::ProxyConfigServiceImpl(profile_prefs, local_state_prefs);
 #else
   return new PrefProxyConfigTrackerImpl(
-      profile_prefs,
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
+      profile_prefs, BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
 #endif  // defined(OS_CHROMEOS)
 }
 
@@ -109,7 +105,7 @@ ProxyServiceFactory::CreatePrefProxyConfigTrackerOfLocalState(
 #else
   return new PrefProxyConfigTrackerImpl(
       local_state_prefs,
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
 #endif  // defined(OS_CHROMEOS)
 }
 
@@ -120,7 +116,8 @@ std::unique_ptr<net::ProxyService> ProxyServiceFactory::CreateProxyService(
     net::NetworkDelegate* network_delegate,
     std::unique_ptr<net::ProxyConfigService> proxy_config_service,
     const base::CommandLine& command_line,
-    bool quick_check_enabled) {
+    bool quick_check_enabled,
+    bool pac_https_url_stripping_enabled) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   bool use_v8 = !command_line.HasSwitch(switches::kWinHttpProxyResolver);
   // TODO(eroman): Figure out why this doesn't work in single-process mode.
@@ -190,6 +187,10 @@ std::unique_ptr<net::ProxyService> ProxyServiceFactory::CreateProxyService(
   }
 
   proxy_service->set_quick_check_enabled(quick_check_enabled);
+  proxy_service->set_sanitize_url_policy(
+      pac_https_url_stripping_enabled
+          ? net::ProxyService::SanitizeUrlPolicy::SAFE
+          : net::ProxyService::SanitizeUrlPolicy::UNSAFE);
 
   return proxy_service;
 }

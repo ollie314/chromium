@@ -7,6 +7,8 @@
 #include <stdint.h>
 
 #include "base/json/json_reader.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/timer/elapsed_timer.h"
 #include "content/public/child/v8_value_converter.h"
 #include "extensions/renderer/request_sender.h"
 #include "extensions/renderer/script_context.h"
@@ -30,6 +32,7 @@ SendRequestNatives::SendRequestNatives(RequestSender* request_sender,
 // callback will be dispatched to EventBindings::HandleResponse.
 void SendRequestNatives::StartRequest(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
+  base::ElapsedTimer timer;
   CHECK_EQ(5, args.Length());
   std::string name = *v8::String::Utf8Value(args[0]);
   bool has_callback = args[2]->BooleanValue();
@@ -39,7 +42,7 @@ void SendRequestNatives::StartRequest(
   int request_id = request_sender_->GetNextRequestId();
   args.GetReturnValue().Set(static_cast<int32_t>(request_id));
 
-  scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
+  std::unique_ptr<V8ValueConverter> converter(V8ValueConverter::create());
 
   // See http://crbug.com/149880. The context menus APIs relies on this, but
   // we shouldn't really be doing it (e.g. for the sake of the storage API).
@@ -48,20 +51,25 @@ void SendRequestNatives::StartRequest(
   if (!preserve_null_in_objects)
     converter->SetStripNullFromObjects(true);
 
-  scoped_ptr<base::Value> value_args(
+  std::unique_ptr<base::Value> value_args(
       converter->FromV8Value(args[1], context()->v8_context()));
   if (!value_args.get() || !value_args->IsType(base::Value::TYPE_LIST)) {
     NOTREACHED() << "Unable to convert args passed to StartRequest";
     return;
   }
 
-  request_sender_->StartRequest(
-      context(),
-      name,
-      request_id,
-      has_callback,
-      for_io_thread,
-      static_cast<base::ListValue*>(value_args.get()));
+  if (request_sender_->StartRequest(
+          context(),
+          name,
+          request_id,
+          has_callback,
+          for_io_thread,
+          static_cast<base::ListValue*>(value_args.get()))) {
+    // TODO(devlin): Would it be useful to partition this data based on
+    // extension function once we have a suitable baseline? crbug.com/608561.
+    UMA_HISTOGRAM_TIMES("Extensions.Functions.StartRequestElapsedTime",
+                        timer.Elapsed());
+  }
 }
 
 void SendRequestNatives::GetGlobal(

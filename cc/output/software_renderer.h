@@ -11,35 +11,32 @@
 #include "cc/output/direct_renderer.h"
 
 namespace cc {
-
-class OutputSurface;
-class RendererClient;
-class ResourceProvider;
-class SoftwareOutputDevice;
-
 class DebugBorderDrawQuad;
+class OutputSurface;
 class PictureDrawQuad;
 class RenderPassDrawQuad;
+class ResourceProvider;
+class SoftwareOutputDevice;
 class SolidColorDrawQuad;
 class TextureDrawQuad;
 class TileDrawQuad;
 
 class CC_EXPORT SoftwareRenderer : public DirectRenderer {
  public:
-  static std::unique_ptr<SoftwareRenderer> Create(
-      RendererClient* client,
-      const RendererSettings* settings,
-      OutputSurface* output_surface,
-      ResourceProvider* resource_provider);
+  SoftwareRenderer(const RendererSettings* settings,
+                   OutputSurface* output_surface,
+                   ResourceProvider* resource_provider);
 
   ~SoftwareRenderer() override;
-  const RendererCapabilitiesImpl& Capabilities() const override;
-  void Finish() override;
-  void SwapBuffers(const CompositorFrameMetadata& metadata) override;
-  void DiscardBackbuffer() override;
-  void EnsureBackbuffer() override;
+
+  void SwapBuffers(CompositorFrameMetadata metadata) override;
+
+  void SetDisablePictureQuadImageFiltering(bool disable) {
+    disable_picture_quad_image_filtering_ = disable;
+  }
 
  protected:
+  bool CanPartialSwap() override;
   void BindFramebufferToOutputSurface(DrawingFrame* frame) override;
   bool BindFramebufferToTexture(DrawingFrame* frame,
                                 const ScopedResource* texture) override;
@@ -47,7 +44,6 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
   void PrepareSurfaceForPass(DrawingFrame* frame,
                              SurfaceInitializationMode initialization_mode,
                              const gfx::Rect& render_pass_scissor) override;
-
   void DoDrawQuad(DrawingFrame* frame,
                   const DrawQuad* quad,
                   const gfx::QuadF* draw_region) override;
@@ -59,12 +55,6 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
   void CopyCurrentRenderPassToBitmap(
       DrawingFrame* frame,
       std::unique_ptr<CopyOutputRequest> request) override;
-
-  SoftwareRenderer(RendererClient* client,
-                   const RendererSettings* settings,
-                   OutputSurface* output_surface,
-                   ResourceProvider* resource_provider);
-
   void DidChangeVisibility() override;
 
  private:
@@ -88,9 +78,10 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
   void DrawUnsupportedQuad(const DrawingFrame* frame,
                            const DrawQuad* quad);
   bool ShouldApplyBackgroundFilters(const RenderPassDrawQuad* quad) const;
-  skia::RefPtr<SkImage> ApplyImageFilter(SkImageFilter* filter,
-                                         const RenderPassDrawQuad* quad,
-                                         const SkBitmap* to_filter) const;
+  sk_sp<SkImage> ApplyImageFilter(SkImageFilter* filter,
+                                  const RenderPassDrawQuad* quad,
+                                  const SkBitmap& to_filter,
+                                  SkIRect* auto_bounds) const;
   gfx::Rect GetBackdropBoundingBoxForRenderPassQuad(
       const DrawingFrame* frame,
       const RenderPassDrawQuad* quad,
@@ -101,18 +92,18 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
       const RenderPassDrawQuad* quad,
       SkShader::TileMode content_tile_mode) const;
 
-  RendererCapabilitiesImpl capabilities_;
-  bool is_scissor_enabled_;
-  bool is_backbuffer_discarded_;
+  bool disable_picture_quad_image_filtering_ = false;
+
+  bool is_scissor_enabled_ = false;
   gfx::Rect scissor_rect_;
 
   SoftwareOutputDevice* output_device_;
-  SkCanvas* root_canvas_;
-  SkCanvas* current_canvas_;
+  SkCanvas* root_canvas_ = nullptr;
+  SkCanvas* current_canvas_ = nullptr;
   SkPaint current_paint_;
   std::unique_ptr<ResourceProvider::ScopedWriteLockSoftware>
       current_framebuffer_lock_;
-  skia::RefPtr<SkCanvas> current_framebuffer_canvas_;
+  sk_sp<SkCanvas> current_framebuffer_canvas_;
 
   DISALLOW_COPY_AND_ASSIGN(SoftwareRenderer);
 };

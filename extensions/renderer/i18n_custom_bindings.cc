@@ -11,6 +11,8 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
@@ -18,8 +20,16 @@
 #include "extensions/common/message_bundle.h"
 #include "extensions/renderer/script_context.h"
 #include "extensions/renderer/v8_helpers.h"
+#include "third_party/cld/cld_version.h"
+
+#if BUILDFLAG(CLD_VERSION) == 2
 #include "third_party/cld_2/src/public/compact_lang_det.h"
 #include "third_party/cld_2/src/public/encodings.h"
+#elif BUILDFLAG(CLD_VERSION) == 3
+#include "third_party/cld_3/src/src/nnet_language_identifier.h"
+#else
+# error "CLD_VERSION must be 2 or 3"
+#endif
 
 namespace extensions {
 
@@ -27,7 +37,7 @@ using namespace v8_helpers;
 
 namespace {
 
-// Max number of languages detected by CLD2.
+// Max number of languages to detect.
 const int kCldNumLangs = 3;
 
 struct DetectedLanguage {
@@ -37,7 +47,7 @@ struct DetectedLanguage {
 
   // Returns a new v8::Local<v8::Value> representing the serialized form of
   // this DetectedLanguage object.
-  scoped_ptr<base::DictionaryValue> ToDictionary() const;
+  std::unique_ptr<base::DictionaryValue> ToDictionary() const;
 
   std::string language;
   int percentage;
@@ -49,6 +59,7 @@ struct DetectedLanguage {
 // LanguageDetectionResult object that holds detected langugae reliability and
 // array of DetectedLanguage
 struct LanguageDetectionResult {
+  LanguageDetectionResult() {}
   explicit LanguageDetectionResult(bool is_reliable)
       : is_reliable(is_reliable) {}
   ~LanguageDetectionResult() {}
@@ -62,14 +73,15 @@ struct LanguageDetectionResult {
 
   // Array of detectedLanguage of size 1-3. The null is returned if
   // there were no languages detected
-  std::vector<scoped_ptr<DetectedLanguage>> languages;
+  std::vector<std::unique_ptr<DetectedLanguage>> languages;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(LanguageDetectionResult);
 };
 
-scoped_ptr<base::DictionaryValue> DetectedLanguage::ToDictionary() const {
-  scoped_ptr<base::DictionaryValue> dict_value(new base::DictionaryValue());
+std::unique_ptr<base::DictionaryValue> DetectedLanguage::ToDictionary() const {
+  std::unique_ptr<base::DictionaryValue> dict_value(
+      new base::DictionaryValue());
   dict_value->SetString("language", language.c_str());
   dict_value->SetInteger("percentage", percentage);
   return dict_value;
@@ -78,7 +90,7 @@ scoped_ptr<base::DictionaryValue> DetectedLanguage::ToDictionary() const {
 v8::Local<v8::Value> LanguageDetectionResult::ToValue(ScriptContext* context) {
   base::DictionaryValue dict_value;
   dict_value.SetBoolean("isReliable", is_reliable);
-  scoped_ptr<base::ListValue> languages_list(new base::ListValue());
+  std::unique_ptr<base::ListValue> languages_list(new base::ListValue());
   for (const auto& language : languages)
     languages_list->Append(language->ToDictionary());
   dict_value.Set("languages", std::move(languages_list));
@@ -87,16 +99,17 @@ v8::Local<v8::Value> LanguageDetectionResult::ToValue(ScriptContext* context) {
   v8::Isolate* isolate = v8_context->GetIsolate();
   v8::EscapableHandleScope handle_scope(isolate);
 
-  scoped_ptr<content::V8ValueConverter> converter(
+  std::unique_ptr<content::V8ValueConverter> converter(
       content::V8ValueConverter::create());
   v8::Local<v8::Value> result = converter->ToV8Value(&dict_value, v8_context);
   return handle_scope.Escape(result);
 }
 
+#if BUILDFLAG(CLD_VERSION) == 2
 void InitDetectedLanguages(
     CLD2::Language* languages,
     int* percents,
-    std::vector<scoped_ptr<DetectedLanguage>>* detected_languages) {
+    std::vector<std::unique_ptr<DetectedLanguage>>* detected_languages) {
   for (int i = 0; i < kCldNumLangs; i++) {
     std::string language_code;
     // Convert LanguageCode 'zh' to 'zh-CN' and 'zh-Hant' to 'zh-TW' for
@@ -111,9 +124,44 @@ void InitDetectedLanguages(
           CLD2::LanguageCode(static_cast<CLD2::Language>(languages[i]));
     }
     detected_languages->push_back(
-        make_scoped_ptr(new DetectedLanguage(language_code, percents[i])));
+        base::MakeUnique<DetectedLanguage>(language_code, percents[i]));
   }
 }
+
+#elif BUILDFLAG(CLD_VERSION) == 3
+void InitDetectedLanguages(
+    const std::vector<chrome_lang_id::NNetLanguageIdentifier::Result>&
+        lang_results,
+    LanguageDetectionResult* result) {
+  std::vector<std::unique_ptr<DetectedLanguage>>* detected_languages =
+      &result->languages;
+  bool* is_reliable = &result->is_reliable;
+
+  // is_reliable is set to "true", so that the reliability can be calculated by
+  // &&'ing the reliability of each predicted language.
+  *is_reliable = true;
+  for (size_t i = 0; i < lang_results.size(); ++i) {
+    const chrome_lang_id::NNetLanguageIdentifier::Result& lang_result =
+        lang_results.at(i);
+    const std::string& language_code = lang_result.language;
+    if (language_code == chrome_lang_id::NNetLanguageIdentifier::kUnknown) {
+      // If the first language is kUnknown, then all languages are kUnknown.
+      // Thus, is_reliable is set to "false".
+      if (i == 0) {
+        *is_reliable = false;
+      }
+      break;
+    }
+
+    *is_reliable = *is_reliable && lang_result.is_reliable;
+    const int percent = static_cast<int>(100 * lang_result.proportion);
+    detected_languages->push_back(
+        base::MakeUnique<DetectedLanguage>(language_code, percent));
+  }
+}
+#else
+# error "CLD_VERSION must be 2 or 3"
+#endif
 
 }  // namespace
 
@@ -154,8 +202,11 @@ void I18NCustomBindings::GetL10nMessage(
 
     L10nMessagesMap messages;
     // A sync call to load message catalogs for current extension.
-    render_frame->Send(
-        new ExtensionHostMsg_GetMessageBundle(extension_id, &messages));
+    {
+      SCOPED_UMA_HISTOGRAM_TIMER("Extensions.SyncGetMessageBundle");
+      render_frame->Send(
+          new ExtensionHostMsg_GetMessageBundle(extension_id, &messages));
+    }
 
     // Save messages we got.
     ExtensionToL10nMessagesMap& l10n_messages_map =
@@ -203,6 +254,7 @@ void I18NCustomBindings::DetectTextLanguage(
   CHECK(args[0]->IsString());
 
   std::string text = *v8::String::Utf8Value(args[0]);
+#if BUILDFLAG(CLD_VERSION) == 2
   CLD2::CLDHints cldhints = {nullptr, "", CLD2::UNKNOWN_ENCODING,
                              CLD2::UNKNOWN_LANGUAGE};
 
@@ -238,8 +290,22 @@ void I18NCustomBindings::DetectTextLanguage(
   LanguageDetectionResult result(is_reliable);
   // populate LanguageDetectionResult with languages and percents
   InitDetectedLanguages(languages, percents, &result.languages);
-
   args.GetReturnValue().Set(result.ToValue(context()));
+
+#elif BUILDFLAG(CLD_VERSION) == 3
+  chrome_lang_id::NNetLanguageIdentifier nnet_lang_id(/*min_num_bytes=*/0,
+                                                      /*max_num_bytes=*/512);
+  const std::vector<chrome_lang_id::NNetLanguageIdentifier::Result>
+      lang_results = nnet_lang_id.FindTopNMostFreqLangs(text, kCldNumLangs);
+  LanguageDetectionResult result;
+
+  // Populate LanguageDetectionResult with prediction reliability, languages,
+  // and the corresponding percentages.
+  InitDetectedLanguages(lang_results, &result);
+  args.GetReturnValue().Set(result.ToValue(context()));
+#else
+# error "CLD_VERSION must be 2 or 3"
+#endif
 }
 
 }  // namespace extensions

@@ -19,7 +19,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -41,6 +40,7 @@
 #include "components/storage_monitor/storage_info.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "components/storage_monitor/test_storage_monitor.h"
+#include "components/sync/api/string_ordinal.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_factory.h"
 #include "content/public/browser/web_contents.h"
@@ -49,7 +49,6 @@
 #include "content/public/test/web_contents_tester.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
-#include "sync/api/string_ordinal.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
@@ -134,7 +133,7 @@ bool TestMediaFileSystemContext::RegisterFileSystem(
 }
 
 void TestMediaFileSystemContext::RevokeFileSystem(const std::string& fs_name) {
-  if (!ContainsKey(file_systems_by_name_, fs_name))
+  if (!base::ContainsKey(file_systems_by_name_, fs_name))
     return;
   EXPECT_EQ(1U, file_systems_by_name_.erase(fs_name));
 }
@@ -167,7 +166,7 @@ void GetGalleryInfoCallback(
     FSInfoMap* results,
     const std::vector<MediaFileSystemInfo>& file_systems) {
   for (size_t i = 0; i < file_systems.size(); ++i) {
-    ASSERT_FALSE(ContainsKey(*results, file_systems[i].pref_id));
+    ASSERT_FALSE(base::ContainsKey(*results, file_systems[i].pref_id));
     (*results)[file_systems[i].pref_id] = file_systems[i];
   }
 }
@@ -398,7 +397,7 @@ bool MediaFileSystemInfoComparator(const MediaFileSystemInfo& a,
 
 MockProfileSharedRenderProcessHostFactory::
     ~MockProfileSharedRenderProcessHostFactory() {
-  STLDeleteValues(&rph_map_);
+  base::STLDeleteValues(&rph_map_);
 }
 
 content::MockRenderProcessHost*
@@ -471,7 +470,7 @@ ProfileState::~ProfileState() {
   shared_web_contents2_.reset();
   profile_.reset();
 
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 MediaGalleriesPreferences* ProfileState::GetMediaGalleriesPrefs() {
@@ -499,7 +498,7 @@ void ProfileState::CheckGalleries(
                  base::StringPrintf("%s (no permission)", test.c_str()),
                  base::ConstRef(empty_names),
                  base::ConstRef(empty_expectation)));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, GetAndClearComparisonCount());
 
   // Read permission only.
@@ -509,7 +508,7 @@ void ProfileState::CheckGalleries(
                  base::StringPrintf("%s (regular permission)", test.c_str()),
                  base::ConstRef(compare_names_read_),
                  base::ConstRef(regular_extension_galleries)));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, GetAndClearComparisonCount());
 
   // All galleries permission.
@@ -519,7 +518,7 @@ void ProfileState::CheckGalleries(
                  base::StringPrintf("%s (all permission)", test.c_str()),
                  base::ConstRef(compare_names_all_),
                  base::ConstRef(all_extension_galleries)));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, GetAndClearComparisonCount());
 }
 
@@ -530,7 +529,7 @@ FSInfoMap ProfileState::GetGalleriesInfo(extensions::Extension* extension) {
   registry->GetMediaFileSystemsForExtension(
       single_web_contents_.get(), extension,
       base::Bind(&GetGalleryInfoCallback, base::Unretained(&results)));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   return results;
 }
 
@@ -647,14 +646,14 @@ std::string MediaFileSystemRegistryTest::AttachDevice(
   DCHECK(StorageInfo::IsRemovableDevice(device_id));
   base::string16 label = location.BaseName().LossyDisplayName();
   ProcessAttach(device_id, label, location.value());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   return device_id;
 }
 
 void MediaFileSystemRegistryTest::DetachDevice(const std::string& device_id) {
   DCHECK(StorageInfo::IsRemovableDevice(device_id));
   ProcessDetach(device_id);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 void MediaFileSystemRegistryTest::SetGalleryPermission(
@@ -719,7 +718,7 @@ void MediaFileSystemRegistryTest::CheckNewGalleryInfo(
   for (FSInfoMap::const_iterator it = new_galleries_info.begin();
        it != new_galleries_info.end();
        ++it) {
-    if (ContainsKey(galleries_info, it->first))
+    if (base::ContainsKey(galleries_info, it->first))
       continue;
 
     ASSERT_FALSE(found_new);
@@ -778,9 +777,9 @@ void MediaFileSystemRegistryTest::SetUp() {
 #endif
 
   ASSERT_TRUE(galleries_dir_.CreateUniqueTempDir());
-  empty_dir_ = galleries_dir_.path().AppendASCII("empty");
+  empty_dir_ = galleries_dir_.GetPath().AppendASCII("empty");
   ASSERT_TRUE(base::CreateDirectory(empty_dir_));
-  dcim_dir_ = galleries_dir_.path().AppendASCII("with_dcim");
+  dcim_dir_ = galleries_dir_.GetPath().AppendASCII("with_dcim");
   ASSERT_TRUE(base::CreateDirectory(dcim_dir_));
   ASSERT_TRUE(base::CreateDirectory(
       dcim_dir_.Append(storage_monitor::kDCIMDirectoryName)));
@@ -896,7 +895,7 @@ TEST_F(MediaFileSystemRegistryTest,
       break;
     }
   }
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(forget_gallery);
   EXPECT_EQ(gallery_count, GetAutoAddedGalleries(profile_state).size());
 

@@ -11,7 +11,6 @@
 #include "base/command_line.h"
 #include "base/debug/alias.h"
 #include "base/macros.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -24,11 +23,13 @@
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
 #include "chrome/browser/ui/views/touch_uma/touch_uma.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
+#include "components/grit/components_scaled_resources.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/components_scaled_resources.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
+#include "content/public/common/url_constants.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "third_party/skia/include/pathops/SkPathOps.h"
 #include "ui/accessibility/ax_view_state.h"
@@ -38,7 +39,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/animation/animation_container.h"
-#include "ui/gfx/animation/multi_animation.h"
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_analysis.h"
@@ -90,13 +90,10 @@ const double kSelectedTabOpacity = 0.3;
 // Inactive selected tabs have their throb value scaled by this.
 const double kSelectedTabThrobScale = 0.95 - kSelectedTabOpacity;
 
-// Offset from the right edge for the start of the pinned title change
-// animation.
-const int kPinnedTitleChangeInitialXOffset = 6;
-
 // Max number of images to cache. This has to be at least two since rounding
 // errors may lead to tabs in the same tabstrip having different sizes.
-const size_t kMaxImageCacheSize = 4;
+// 8 = normal/incognito, active/inactive, 2 sizes within tabstrip.
+const size_t kMaxImageCacheSize = 8;
 
 // Height of the miniature tab strip in immersive mode.
 const int kImmersiveTabHeight = 3;
@@ -118,7 +115,142 @@ const double kImmersiveTabMinThrobOpacity = 0.66;
 const int kImmersiveLoadingStepCount = 32;
 
 const char kTabCloseButtonName[] = "TabCloseButton";
-const int kTabCloseButtonSize = 16;
+
+////////////////////////////////////////////////////////////////////////////////
+// ImageCacheEntryMetadata
+//
+// All metadata necessary to uniquely identify a cached image.
+struct ImageCacheEntryMetadata {
+  ImageCacheEntryMetadata(int resource_id,
+                          SkColor fill_color,
+                          SkColor stroke_color,
+                          bool use_fill_and_stroke_images,
+                          float scale_factor,
+                          const gfx::Size& size);
+
+  ~ImageCacheEntryMetadata();
+
+  bool operator==(const ImageCacheEntryMetadata& rhs) const;
+
+  int resource_id;     // Only needed by pre-MD
+  SkColor fill_color;  // Both colors only needed by MD
+  SkColor stroke_color;
+  bool use_fill_and_stroke_images;
+  float scale_factor;
+  gfx::Size size;
+};
+
+ImageCacheEntryMetadata::ImageCacheEntryMetadata(
+    int resource_id,
+    SkColor fill_color,
+    SkColor stroke_color,
+    bool use_fill_and_stroke_images,
+    float scale_factor,
+    const gfx::Size& size)
+    : resource_id(resource_id),
+      fill_color(fill_color),
+      stroke_color(stroke_color),
+      use_fill_and_stroke_images(use_fill_and_stroke_images),
+      scale_factor(scale_factor),
+      size(size) {
+  // Some fields are only relevant for pre-MD vs. MD.  Erase the irrelevant ones
+  // so they don't cause incorrect cache misses.
+  // TODO(pkasting): Remove |resource_id| field when non-MD code is deleted.
+  if (ui::MaterialDesignController::IsModeMaterial())
+    resource_id = 0;
+  else
+    fill_color = stroke_color = SK_ColorTRANSPARENT;
+}
+
+ImageCacheEntryMetadata::~ImageCacheEntryMetadata() {}
+
+bool ImageCacheEntryMetadata::operator==(
+    const ImageCacheEntryMetadata& rhs) const {
+  return resource_id == rhs.resource_id && fill_color == rhs.fill_color &&
+         stroke_color == rhs.stroke_color &&
+         use_fill_and_stroke_images == rhs.use_fill_and_stroke_images &&
+         scale_factor == rhs.scale_factor && size == rhs.size;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ImageCacheEntry and cache management
+//
+// A cached image and the metadata used to generate it.
+struct ImageCacheEntry {
+  ImageCacheEntry(const ImageCacheEntryMetadata& metadata,
+                  const gfx::ImageSkia& fill_image,
+                  const gfx::ImageSkia& stroke_image);
+  ~ImageCacheEntry();
+
+  ImageCacheEntryMetadata metadata;
+  gfx::ImageSkia fill_image;
+  gfx::ImageSkia stroke_image;
+};
+
+ImageCacheEntry::ImageCacheEntry(const ImageCacheEntryMetadata& metadata,
+                                 const gfx::ImageSkia& fill_image,
+                                 const gfx::ImageSkia& stroke_image)
+    : metadata(metadata), fill_image(fill_image), stroke_image(stroke_image) {}
+
+ImageCacheEntry::~ImageCacheEntry() {}
+
+typedef std::list<ImageCacheEntry> ImageCache;
+
+// As the majority of the tabs are inactive, and painting tabs is slowish,
+// we cache a handful of the inactive tab backgrounds here.
+static ImageCache* g_image_cache = nullptr;
+
+struct TabImages {
+  gfx::ImageSkia* image_l;
+  gfx::ImageSkia* image_c;
+  gfx::ImageSkia* image_r;
+  int l_width;
+  int r_width;
+};
+static TabImages g_active_images = {0};
+static TabImages g_inactive_images = {0};
+static TabImages g_mask_images = {0};
+
+// Loads the images to be used for the tab background.
+void LoadTabImages() {
+  g_image_cache->clear();
+
+  // We're not letting people override tab images just yet.
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+
+  g_active_images.image_l = rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_LEFT);
+  g_active_images.image_c = rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_CENTER);
+  g_active_images.image_r = rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_RIGHT);
+  g_active_images.l_width = g_active_images.image_l->width();
+  g_active_images.r_width = g_active_images.image_r->width();
+
+  g_inactive_images.image_l = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_LEFT);
+  g_inactive_images.image_c = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_CENTER);
+  g_inactive_images.image_r = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_RIGHT);
+  g_inactive_images.l_width = g_inactive_images.image_l->width();
+  g_inactive_images.r_width = g_inactive_images.image_r->width();
+
+  g_mask_images.image_l = rb.GetImageSkiaNamed(IDR_TAB_ALPHA_LEFT);
+  g_mask_images.image_r = rb.GetImageSkiaNamed(IDR_TAB_ALPHA_RIGHT);
+  g_mask_images.l_width = g_mask_images.image_l->width();
+  g_mask_images.r_width = g_mask_images.image_r->width();
+}
+
+// Performs a one-time initialization of static resources such as tab images.
+void InitTabResources() {
+  static bool initialized = false;
+  if (initialized)
+    return;
+
+  initialized = true;
+  g_image_cache = new ImageCache();
+
+  // Load the tab images once now, and maybe again later if the theme changes.
+  LoadTabImages();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Drawing and utility functions
 
 // Returns the width of the tab endcap at scale 1.  More precisely, this is the
 // width of the curve making up either the outer or inner edge of the stroke;
@@ -135,13 +267,184 @@ void DrawHighlight(gfx::Canvas* canvas,
                    SkColor color) {
   const SkColor colors[2] = { color, SkColorSetA(color, 0) };
   SkPaint paint;
-  paint.setStyle(SkPaint::kFill_Style);
   paint.setAntiAlias(true);
   paint.setShader(SkGradientShader::MakeRadial(p, radius, colors, nullptr, 2,
                                                SkShader::kClamp_TileMode));
   canvas->sk_canvas()->drawRect(
       SkRect::MakeXYWH(p.x() - radius, p.y() - radius, radius * 2, radius * 2),
       paint);
+}
+
+// Returns whether the favicon for the given URL should be colored according to
+// the browser theme.
+bool ShouldThemifyFaviconForUrl(const GURL& url) {
+  return url.SchemeIs(content::kChromeUIScheme) &&
+         url.host() != chrome::kChromeUIHelpHost &&
+         url.host() != chrome::kChromeUIUberHost &&
+         url.host() != chrome::kChromeUIAppLauncherPageHost;
+}
+
+// Returns a path corresponding to the tab's content region inside the outer
+// stroke.
+gfx::Path GetFillPath(float scale, const gfx::Size& size) {
+  const float right = size.width() * scale;
+  // The bottom of the tab needs to be pixel-aligned or else when we call
+  // ClipPath with anti-aliasing enabled it can cause artifacts.
+  const float bottom = std::ceil(size.height() * scale);
+  const float unscaled_endcap_width = GetUnscaledEndcapWidth();
+
+  gfx::Path fill;
+  fill.moveTo(right - 1, bottom);
+  fill.rCubicTo(-0.75 * scale, 0, -1.625 * scale, -0.5 * scale, -2 * scale,
+                -1.5 * scale);
+  fill.lineTo(right - 1 - (unscaled_endcap_width - 2) * scale, 2.5 * scale);
+  // Prevent overdraw in the center near minimum width (only happens if
+  // scale < 2).  We could instead avoid this by increasing the tab inset
+  // values, but that would shift all the content inward as well, unless we
+  // then overlapped the content on the endcaps, by which point we'd have a
+  // huge mess.
+  const float scaled_endcap_width = 1 + unscaled_endcap_width * scale;
+  const float overlap = scaled_endcap_width * 2 - right;
+  const float offset = (overlap > 0) ? (overlap / 2) : 0;
+  fill.rCubicTo(-0.375 * scale, -1 * scale, -1.25 * scale + offset,
+                -1.5 * scale, -2 * scale + offset, -1.5 * scale);
+  if (overlap < 0)
+    fill.lineTo(scaled_endcap_width, scale);
+  fill.rCubicTo(-0.75 * scale, 0, -1.625 * scale - offset, 0.5 * scale,
+                -2 * scale - offset, 1.5 * scale);
+  fill.lineTo(1 + 2 * scale, bottom - 1.5 * scale);
+  fill.rCubicTo(-0.375 * scale, scale, -1.25 * scale, 1.5 * scale, -2 * scale,
+                1.5 * scale);
+  fill.close();
+  return fill;
+}
+
+// Returns a path corresponding to the tab's outer border for a given tab |size|
+// and |scale|.  If |unscale_at_end| is true, this path will be normalized to a
+// 1x scale by scaling by 1/scale before returning.  If |extend_to_top| is true,
+// the path is extended vertically to the top of the tab bounds.  The caller
+// uses this for Fitts' Law purposes in maximized/fullscreen mode.
+gfx::Path GetBorderPath(float scale,
+                        bool unscale_at_end,
+                        bool extend_to_top,
+                        const gfx::Size& size) {
+  gfx::Path path;
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    const float top = scale - 1;
+    const float right = size.width() * scale;
+    const float bottom = size.height() * scale;
+    const float unscaled_endcap_width = GetUnscaledEndcapWidth();
+
+    path.moveTo(0, bottom);
+    path.rLineTo(0, -1);
+    path.rCubicTo(0.75 * scale, 0, 1.625 * scale, -0.5 * scale, 2 * scale,
+                  -1.5 * scale);
+    path.lineTo((unscaled_endcap_width - 2) * scale, top + 1.5 * scale);
+    if (extend_to_top) {
+      // Create the vertical extension by extending the side diagonals until
+      // they reach the top of the bounds.
+      const float dy = 2.5 * scale - 1;
+      const float dx = Tab::GetInverseDiagonalSlope() * dy;
+      path.rLineTo(dx, -dy);
+      path.lineTo(right - (unscaled_endcap_width - 2) * scale - dx, 0);
+      path.rLineTo(dx, dy);
+    } else {
+      path.rCubicTo(0.375 * scale, -scale, 1.25 * scale, -1.5 * scale,
+                    2 * scale, -1.5 * scale);
+      path.lineTo(right - unscaled_endcap_width * scale, top);
+      path.rCubicTo(0.75 * scale, 0, 1.625 * scale, 0.5 * scale, 2 * scale,
+                    1.5 * scale);
+    }
+    path.lineTo(right - 2 * scale, bottom - 1 - 1.5 * scale);
+    path.rCubicTo(0.375 * scale, scale, 1.25 * scale, 1.5 * scale, 2 * scale,
+                  1.5 * scale);
+    path.rLineTo(0, 1);
+    path.close();
+
+    if (unscale_at_end && (scale != 1))
+      path.transform(SkMatrix::MakeScale(1.f / scale));
+  } else {
+    // Hit mask constants.
+    const SkScalar kTabCapWidth = 15;
+    const SkScalar kTabTopCurveWidth = 4;
+    const SkScalar kTabBottomCurveWidth = 3;
+#if defined(OS_MACOSX)
+    // Mac's Cocoa UI doesn't have shadows.
+    const SkScalar kTabInset = 0;
+#elif defined(TOOLKIT_VIEWS)
+    // The views browser UI has shadows in the left, right and top parts of the
+    // tab.
+    const SkScalar kTabInset = 6;
+#endif
+
+    SkScalar left = kTabInset;
+    SkScalar top = SkIntToScalar(0);
+    SkScalar right = SkIntToScalar(size.width()) - kTabInset;
+    SkScalar bottom = SkIntToScalar(size.height());
+
+    // Start in the lower-left corner.
+    path.moveTo(left, bottom);
+
+    // Left end cap.
+    path.lineTo(left + kTabBottomCurveWidth, bottom - kTabBottomCurveWidth);
+    path.lineTo(left + kTabCapWidth - kTabTopCurveWidth,
+                top + kTabTopCurveWidth);
+    path.lineTo(left + kTabCapWidth, top);
+
+    // Connect to the right cap.
+    path.lineTo(right - kTabCapWidth, top);
+
+    // Right end cap.
+    path.lineTo(right - kTabCapWidth + kTabTopCurveWidth,
+                top + kTabTopCurveWidth);
+    path.lineTo(right - kTabBottomCurveWidth, bottom - kTabBottomCurveWidth);
+    path.lineTo(right, bottom);
+
+    // Close out the path.
+    path.lineTo(left, bottom);
+    path.close();
+
+    // Unscaling is not necessary since we never scaled up to begin with.
+  }
+
+  return path;
+}
+
+void PaintTabFill(gfx::Canvas* canvas,
+                  const gfx::ImageSkia& fill_image,
+                  gfx::Rect rect,
+                  bool is_active) {
+  const gfx::Insets tab_insets(GetLayoutInsets(TAB));
+  // If this isn't the foreground tab, don't draw over the toolbar, but do
+  // include the 1 px divider stroke at the bottom.
+  const int toolbar_overlap = is_active ? 0 : (tab_insets.bottom() - 1);
+
+  // Draw left edge.
+  gfx::ImageSkia tab_l = gfx::ImageSkiaOperations::CreateTiledImage(
+      fill_image, rect.x(), rect.y(), g_mask_images.l_width, rect.height());
+  gfx::ImageSkia theme_l = gfx::ImageSkiaOperations::CreateMaskedImage(
+      tab_l, *g_mask_images.image_l);
+  canvas->DrawImageInt(
+      theme_l, 0, 0, theme_l.width(), theme_l.height() - toolbar_overlap, 0, 0,
+      theme_l.width(), theme_l.height() - toolbar_overlap, false);
+
+  // Draw right edge.
+  gfx::ImageSkia tab_r = gfx::ImageSkiaOperations::CreateTiledImage(
+      fill_image, rect.right() - g_mask_images.r_width, rect.y(),
+      g_mask_images.r_width, rect.height());
+  gfx::ImageSkia theme_r = gfx::ImageSkiaOperations::CreateMaskedImage(
+      tab_r, *g_mask_images.image_r);
+  canvas->DrawImageInt(theme_r, 0, 0, theme_r.width(),
+                       theme_r.height() - toolbar_overlap,
+                       rect.width() - theme_r.width(), 0, theme_r.width(),
+                       theme_r.height() - toolbar_overlap, false);
+
+  // Draw center.  Instead of masking out the top portion we simply skip over it
+  // by incrementing by the top padding, since it's a simple rectangle.
+  rect.Inset(g_mask_images.l_width, tab_insets.top(), g_mask_images.r_width,
+             toolbar_overlap);
+  canvas->TileImageInt(fill_image, rect.x(), rect.y(), g_mask_images.l_width,
+                       tab_insets.top(), rect.width(), rect.height());
 }
 
 }  // namespace
@@ -170,7 +473,7 @@ class Tab::FaviconCrashAnimation : public gfx::LinearAnimation,
           static_cast<int>(floor(kHidingOffset * 2.0 * state)));
     } else {
       // Animate the crashed icon up.
-      target_->set_should_display_crashed_favicon();
+      target_->SetShouldDisplayCrashedFavicon(true);
       target_->SetFaviconHidingOffset(
           static_cast<int>(
               floor(kHidingOffset - ((state - .5) * 2.0 * kHidingOffset))));
@@ -240,36 +543,7 @@ class Tab::TabCloseButton : public views::ImageButton,
   const char* GetClassName() const override { return kTabCloseButtonName; }
 
  private:
-  // Returns the rectangular bounds of parent tab's visible region in the
-  // local coordinate space of |this|.
-  gfx::Rect GetTabBounds() const {
-    gfx::Path tab_mask;
-    tab_->GetHitTestMask(&tab_mask);
-
-    gfx::RectF tab_bounds_f(gfx::SkRectToRectF(tab_mask.getBounds()));
-    views::View::ConvertRectToTarget(tab_, this, &tab_bounds_f);
-    return gfx::ToEnclosingRect(tab_bounds_f);
-  }
-
-  // Returns the rectangular bounds of the tab close button in the local
-  // coordinate space of |this|, not including clipped regions on the top
-  // or bottom of the button. |tab_bounds| is the rectangular bounds of
-  // the parent tab's visible region in the local coordinate space of |this|.
-  gfx::Rect GetTabCloseButtonBounds(const gfx::Rect& tab_bounds) const {
-    gfx::Rect button_bounds(GetContentsBounds());
-    button_bounds.set_x(GetMirroredXForRect(button_bounds));
-
-    int top_overflow = tab_bounds.y() - button_bounds.y();
-    int bottom_overflow = button_bounds.bottom() - tab_bounds.bottom();
-    if (top_overflow > 0)
-      button_bounds.set_y(tab_bounds.y());
-    else if (bottom_overflow > 0)
-      button_bounds.set_height(button_bounds.height() - bottom_overflow);
-
-    return button_bounds;
-  }
-
-  // views::ViewTargeterDelegate:
+  // views::MaskedTargeterDelegate:
   View* TargetForRect(View* root, const gfx::Rect& rect) override {
     CHECK_EQ(root, this);
 
@@ -282,6 +556,14 @@ class Tab::TabCloseButton : public views::ImageButton,
 
 #if defined(USE_AURA)
     // Include the padding in hit-test for touch events.
+    // TODO(pkasting): It seems like touch events would generate rects rather
+    // than points and thus use the TargetForRect() call above.  If this is
+    // reached, it may be from someone calling GetEventHandlerForPoint() while a
+    // touch happens to be occurring.  In such a case, maybe we don't want this
+    // code to run?  It's possible this block should be removed, or maybe this
+    // whole function deleted.  Note that in these cases, we should probably
+    // also remove the padding on the close button bounds (see Tab::Layout()),
+    // as it will be pointless.
     if (aura::Env::GetInstance()->is_touch_down())
       contents_bounds = GetLocalBounds();
 #endif
@@ -289,47 +571,12 @@ class Tab::TabCloseButton : public views::ImageButton,
     return contents_bounds.Intersects(rect) ? this : parent();
   }
 
-  // views:MaskedTargeterDelegate:
+  // We need to define this so hit-testing won't include the border region.
   bool GetHitTestMask(gfx::Path* mask) const override {
-    DCHECK(mask);
-    mask->reset();
-
-    // The parent tab may be partially occluded by another tab if we are
-    // in stacked tab mode, which means that the tab close button may also
-    // be partially occluded. Define the hit test mask of the tab close
-    // button to be the intersection of the parent tab's visible bounds
-    // and the bounds of the tab close button.
-    gfx::Rect tab_bounds(GetTabBounds());
-    gfx::Rect button_bounds(GetTabCloseButtonBounds(tab_bounds));
-    gfx::Rect intersection(gfx::IntersectRects(tab_bounds, button_bounds));
-
-    if (!intersection.IsEmpty()) {
-      mask->addRect(RectToSkRect(intersection));
-      return true;
-    }
-
-    return false;
-  }
-
-  bool DoesIntersectRect(const View* target,
-                         const gfx::Rect& rect) const override {
-    CHECK_EQ(target, this);
-
-    // If the request is not made in response to a gesture, use the
-    // default implementation.
-    if (views::UsePointBasedTargeting(rect))
-      return MaskedTargeterDelegate::DoesIntersectRect(target, rect);
-
-    // The hit test request is in response to a gesture. Return false if any
-    // part of the tab close button is hidden from the user.
-    // TODO(tdanderson): Consider always returning the intersection if the
-    //                   non-rectangular shape of the tab can be accounted for.
-    gfx::Rect tab_bounds(GetTabBounds());
-    gfx::Rect button_bounds(GetTabCloseButtonBounds(tab_bounds));
-    if (!tab_bounds.Contains(button_bounds))
-      return false;
-
-    return MaskedTargeterDelegate::DoesIntersectRect(target, rect);
+    gfx::Rect button_bounds(GetContentsBounds());
+    button_bounds.set_x(GetMirroredXForRect(button_bounds));
+    mask->addRect(gfx::RectToSkRect(button_bounds));
+    return true;
   }
 
   Tab* tab_;
@@ -409,78 +656,10 @@ void Tab::ThrobberView::OnPaint(gfx::Canvas* canvas) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Tab::ImageCacheEntryMetadata
-
-struct Tab::ImageCacheEntryMetadata {
-  ImageCacheEntryMetadata(bool incognito,
-                          int resource_id,
-                          ui::ScaleFactor scale_factor,
-                          const gfx::Size& size);
-  ~ImageCacheEntryMetadata();
-
-  // Making this a non-member would require a friend declaration in Tab.  Bleh.
-  bool operator==(const ImageCacheEntryMetadata& rhs) const;
-
-  // Whether the resource is drawn in an incognito window.  This is only set to
-  // true when Material Design is enabled, since before MD tabs in normal and
-  // incognito windows look the same.
-  bool incognito;
-
-  int resource_id;
-  ui::ScaleFactor scale_factor;
-  gfx::Size size;
-};
-
-Tab::ImageCacheEntryMetadata::ImageCacheEntryMetadata(
-    bool incognito,
-    int resource_id,
-    ui::ScaleFactor scale_factor,
-    const gfx::Size& size)
-    : incognito(incognito),
-      resource_id(resource_id),
-      scale_factor(scale_factor),
-      size(size) {
-  DCHECK_NE(ui::SCALE_FACTOR_NONE, scale_factor);
-}
-
-Tab::ImageCacheEntryMetadata::~ImageCacheEntryMetadata() {}
-
-bool Tab::ImageCacheEntryMetadata::operator==(
-    const ImageCacheEntryMetadata& rhs) const {
-  return incognito == rhs.incognito && resource_id == rhs.resource_id &&
-      scale_factor == rhs.scale_factor && size == rhs.size;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Tab::ImageCacheEntry
-
-struct Tab::ImageCacheEntry {
-  ImageCacheEntry(const ImageCacheEntryMetadata& metadata,
-                  const gfx::ImageSkia& image);
-  ~ImageCacheEntry();
-
-  ImageCacheEntryMetadata metadata;
-  gfx::ImageSkia image;
-};
-
-Tab::ImageCacheEntry::ImageCacheEntry(const ImageCacheEntryMetadata& metadata,
-                                      const gfx::ImageSkia& image)
-    : metadata(metadata), image(image) {}
-
-Tab::ImageCacheEntry::~ImageCacheEntry() {}
-
-////////////////////////////////////////////////////////////////////////////////
-// Tab, statics:
+// Tab, public:
 
 // static
 const char Tab::kViewClassName[] = "Tab";
-Tab::TabImages Tab::active_images_ = {0};
-Tab::TabImages Tab::inactive_images_ = {0};
-Tab::TabImages Tab::mask_images_ = {0};
-Tab::ImageCache* Tab::image_cache_ = NULL;
-
-////////////////////////////////////////////////////////////////////////////////
-// Tab, public:
 
 Tab::Tab(TabController* controller, gfx::AnimationContainer* container)
     : controller_(controller),
@@ -538,10 +717,10 @@ Tab::Tab(TabController* controller, gfx::AnimationContainer* container)
   // on the current theme and active state.  The hovered and pressed images
   // don't depend on the these, so we can set them here.
   const gfx::ImageSkia& hovered = gfx::CreateVectorIcon(
-      gfx::VectorIconId::TAB_CLOSE_HOVERED_PRESSED, kTabCloseButtonSize,
+      gfx::VectorIconId::TAB_CLOSE_HOVERED_PRESSED,
       SkColorSetRGB(0xDB, 0x44, 0x37));
   const gfx::ImageSkia& pressed = gfx::CreateVectorIcon(
-      gfx::VectorIconId::TAB_CLOSE_HOVERED_PRESSED, kTabCloseButtonSize,
+      gfx::VectorIconId::TAB_CLOSE_HOVERED_PRESSED,
       SkColorSetRGB(0xA8, 0x35, 0x2A));
   close_button_->SetImage(views::CustomButton::STATE_HOVERED, &hovered);
   close_button_->SetImage(views::CustomButton::STATE_PRESSED, &pressed);
@@ -557,34 +736,6 @@ Tab::Tab(TabController* controller, gfx::AnimationContainer* container)
   pulse_animation_->SetSlideDuration(kPulseDurationMs);
   pulse_animation_->SetContainer(animation_container_.get());
 
-  const int kPinnedTitleChangeAnimationDuration1MS = 1600;
-  const int kPinnedTitleChangeAnimationStart1MS = 0;
-  const int kPinnedTitleChangeAnimationEnd1MS = 1900;
-  const int kPinnedTitleChangeAnimationDuration2MS = 0;
-  const int kPinnedTitleChangeAnimationDuration3MS = 550;
-  const int kPinnedTitleChangeAnimationStart3MS = 150;
-  const int kPinnedTitleChangeAnimationEnd3MS = 800;
-  const int kPinnedTitleChangeAnimationIntervalMS = 40;
-  gfx::MultiAnimation::Parts parts;
-  parts.push_back(gfx::MultiAnimation::Part(
-      kPinnedTitleChangeAnimationDuration1MS,
-      kPinnedTitleChangeAnimationStart1MS,
-      kPinnedTitleChangeAnimationEnd1MS,
-      gfx::Tween::EASE_OUT));
-  parts.push_back(gfx::MultiAnimation::Part(
-      kPinnedTitleChangeAnimationDuration2MS,
-      gfx::Tween::ZERO));
-  parts.push_back(gfx::MultiAnimation::Part(
-      kPinnedTitleChangeAnimationDuration3MS,
-      kPinnedTitleChangeAnimationStart3MS,
-      kPinnedTitleChangeAnimationEnd3MS,
-      gfx::Tween::EASE_IN));
-  const base::TimeDelta timeout =
-      base::TimeDelta::FromMilliseconds(kPinnedTitleChangeAnimationIntervalMS);
-  pinned_title_change_animation_.reset(new gfx::MultiAnimation(parts, timeout));
-  pinned_title_change_animation_->SetContainer(animation_container_.get());
-  pinned_title_change_animation_->set_delegate(this);
-
   hover_controller_.SetAnimationContainer(animation_container_.get());
 }
 
@@ -596,6 +747,10 @@ bool Tab::IsActive() const {
 }
 
 void Tab::ActiveStateChanged() {
+  // The pinned tab title changed indicator is only shown for inactive tabs.
+  // When transitioning between active and inactive always reset the state
+  // to enforce that.
+  SetPinnedTabTitleChangedIndicatorVisible(false);
   OnButtonColorMaybeChanged();
   alert_indicator_button_->UpdateEnabledForMuteToggle();
   Layout();
@@ -631,7 +786,7 @@ void Tab::SetData(const TabRendererData& data) {
 
   if (!data_.IsCrashed()) {
     crash_icon_animation_->Stop();
-    should_display_crashed_favicon_ = false;
+    SetShouldDisplayCrashedFavicon(false);
     favicon_hiding_offset_ = 0;
   } else if (!should_display_crashed_favicon_ &&
              !crash_icon_animation_->is_animating()) {
@@ -643,7 +798,7 @@ void Tab::SetData(const TabRendererData& data) {
     alert_indicator_button_->TransitionToAlertState(data_.alert_state);
 
   if (old.pinned != data_.pinned)
-    StopPinnedTabTitleAnimation();
+    showing_pinned_tab_title_changed_indicator_ = false;
 
   DataChanged(old);
 
@@ -671,13 +826,14 @@ void Tab::StopPulse() {
   pulse_animation_->Stop();
 }
 
-void Tab::StartPinnedTabTitleAnimation() {
-  if (data().pinned)
-    pinned_title_change_animation_->Start();
-}
+void Tab::SetPinnedTabTitleChangedIndicatorVisible(bool value) {
+  if (value == showing_pinned_tab_title_changed_indicator_)
+    return;
 
-void Tab::StopPinnedTabTitleAnimation() {
-  pinned_title_change_animation_->Stop();
+  DCHECK(!value || data().pinned);
+
+  showing_pinned_tab_title_changed_indicator_ = value;
+  SchedulePaint();
 }
 
 int Tab::GetWidthOfLargestSelectableRegion() const {
@@ -727,17 +883,6 @@ int Tab::GetImmersiveHeight() {
 }
 
 // static
-int Tab::GetYInsetForActiveTabBackground() {
-  // The computed value here is strangely less than the height of the area atop
-  // the tab that doesn't get a background painted; otherwise, we could compute
-  // the value by simply using GetLayoutInsets(TAB).top().  My suspicion is that
-  // originally there was some sort of off-by-one error in how this background
-  // was painted, and theme authors compensated; now we're stuck perpetuating it
-  // as a result.
-  return GetLayoutConstant(TAB_TOP_EXCLUSION_HEIGHT) + 1;
-}
-
-// static
 float Tab::GetInverseDiagonalSlope() {
   // This is computed from the border path as follows:
   // * The unscaled endcap width is enough for the whole stroke outer curve,
@@ -758,7 +903,7 @@ float Tab::GetInverseDiagonalSlope() {
 
 void Tab::AnimationProgressed(const gfx::Animation* animation) {
   // Ignore if the pulse animation is being performed on active tab because
-  // it repaints the same image. See |Tab::PaintTabBackground()|.
+  // it repaints the same image. See PaintTab().
   if ((animation != pulse_animation_.get()) || !IsActive())
     SchedulePaint();
 }
@@ -808,80 +953,13 @@ void Tab::ShowContextMenuForView(views::View* source,
 // Tab, views::MaskedTargeterDelegate overrides:
 
 bool Tab::GetHitTestMask(gfx::Path* mask) const {
-  DCHECK(mask);
-
   // When the window is maximized we don't want to shave off the edges or top
   // shadow of the tab, such that the user can click anywhere along the top
   // edge of the screen to select a tab. Ditto for immersive fullscreen.
   const views::Widget* widget = GetWidget();
-  const bool extend_to_top =
-      widget && (widget->IsMaximized() || widget->IsFullscreen());
-
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    SkPath border;
-    const float scale = GetWidget()->GetCompositor()->device_scale_factor();
-    GetBorderPath(scale, extend_to_top, &border);
-    mask->addPath(border, SkMatrix::MakeScale(1 / scale));
-  } else {
-    // Hit mask constants.
-    const SkScalar kTabCapWidth = 15;
-    const SkScalar kTabTopCurveWidth = 4;
-    const SkScalar kTabBottomCurveWidth = 3;
-#if defined(OS_MACOSX)
-    // Mac's Cocoa UI doesn't have shadows.
-    const SkScalar kTabInset = 0;
-#elif defined(TOOLKIT_VIEWS)
-    // The views browser UI has shadows in the left, right and top parts of the
-    // tab.
-    const SkScalar kTabInset = 6;
-#endif
-
-    SkScalar left = kTabInset;
-    SkScalar top = GetLayoutConstant(TAB_TOP_EXCLUSION_HEIGHT);
-    SkScalar right = SkIntToScalar(width()) - kTabInset;
-    SkScalar bottom = SkIntToScalar(height());
-
-    // Start in the lower-left corner.
-    mask->moveTo(left, bottom);
-
-    // Left end cap.
-    mask->lineTo(left + kTabBottomCurveWidth, bottom - kTabBottomCurveWidth);
-    mask->lineTo(left + kTabCapWidth - kTabTopCurveWidth,
-                 top + kTabTopCurveWidth);
-    mask->lineTo(left + kTabCapWidth, top);
-
-    // Extend over the top shadow area if we have one and the caller wants it.
-    if (top > 0 && extend_to_top) {
-      mask->lineTo(left + kTabCapWidth, 0);
-      mask->lineTo(right - kTabCapWidth, 0);
-    }
-
-    // Connect to the right cap.
-    mask->lineTo(right - kTabCapWidth, top);
-
-    // Right end cap.
-    mask->lineTo(right - kTabCapWidth + kTabTopCurveWidth,
-                 top + kTabTopCurveWidth);
-    mask->lineTo(right - kTabBottomCurveWidth, bottom - kTabBottomCurveWidth);
-    mask->lineTo(right, bottom);
-
-    // Close out the path.
-    mask->lineTo(left, bottom);
-    mask->close();
-  }
-
-  // It is possible for a portion of the tab to be occluded if tabs are
-  // stacked, so modify the hit test mask to only include the visible
-  // region of the tab.
-  gfx::Rect clip;
-  controller_->ShouldPaintTab(this, &clip);
-  if (clip.size().GetArea()) {
-    SkRect intersection(mask->getBounds());
-    mask->reset();
-    if (!intersection.intersect(RectToSkRect(clip)))
-       return false;
-    mask->addRect(intersection);
-  }
+  *mask = GetBorderPath(
+      GetWidget()->GetCompositor()->device_scale_factor(), true,
+      widget && (widget->IsMaximized() || widget->IsFullscreen()), size());
   return true;
 }
 
@@ -902,21 +980,16 @@ void Tab::OnPaint(gfx::Canvas* canvas) {
   if (width() < GetMinimumInactiveSize().width() && !data().pinned)
     return;
 
-  gfx::Rect clip;
-  if (!controller_->ShouldPaintTab(this, &clip))
+  gfx::Path clip;
+  if (!controller_->ShouldPaintTab(
+          this, base::Bind(&GetBorderPath, canvas->image_scale(), true, false),
+          &clip))
     return;
-  if (!clip.IsEmpty()) {
-    canvas->Save();
-    canvas->ClipRect(clip);
-  }
 
   if (controller_->IsImmersiveStyle())
     PaintImmersiveTab(canvas);
   else
-    PaintTab(canvas);
-
-  if (!clip.IsEmpty())
-    canvas->Restore();
+    PaintTab(canvas, clip);
 }
 
 void Tab::Layout() {
@@ -941,16 +1014,17 @@ void Tab::Layout() {
     // The close button should be as large as possible so that there is a larger
     // hit-target for touch events. So the close button bounds extends to the
     // edges of the tab. However, the larger hit-target should be active only
-    // for mouse events, and the close-image should show up in the right place.
+    // for touch events, and the close-image should show up in the right place.
     // So a border is added to the button with necessary padding. The close
-    // button (BaseTab::TabCloseButton) makes sure the padding is a hit-target
-    // only for touch events.
+    // button (Tab::TabCloseButton) makes sure the padding is a hit-target only
+    // for touch events.
+    // TODO(pkasting): The padding should maybe be removed, see comments in
+    // TabCloseButton::TargetForRect().
     close_button_->SetBorder(views::Border::NullBorder());
     const gfx::Size close_button_size(close_button_->GetPreferredSize());
     const int top = lb.y() + (lb.height() - close_button_size.height() + 1) / 2;
     const int left = kAfterTitleSpacing;
-    const int close_button_end = lb.right() +
-        GetLayoutConstant(TAB_CLOSE_BUTTON_TRAILING_PADDING_OVERLAP);
+    const int close_button_end = lb.right();
     close_button_->SetPosition(
         gfx::Point(close_button_end - close_button_size.width() - left, 0));
     const int bottom = height() - close_button_size.height() - top;
@@ -986,7 +1060,7 @@ void Tab::Layout() {
     if (showing_alert_indicator_) {
       title_width =
           alert_indicator_button_->x() - kAfterTitleSpacing - title_left;
-    } else if (close_button_->visible()) {
+    } else if (showing_close_button_) {
       // Allow the title to overlay the close button's empty border padding.
       title_width = close_button_->x() + close_button_->GetInsets().left() -
           kAfterTitleSpacing - title_left;
@@ -1002,6 +1076,7 @@ void Tab::Layout() {
 void Tab::OnThemeChanged() {
   LoadTabImages();
   OnButtonColorMaybeChanged();
+  favicon_ = gfx::ImageSkia();
 }
 
 const char* Tab::GetClassName() const {
@@ -1184,6 +1259,12 @@ void Tab::MaybeAdjustLeftForPinnedTab(gfx::Rect* bounds) const {
 }
 
 void Tab::DataChanged(const TabRendererData& old) {
+  // We may overzealously reset the favicon cache here but this check eliminates
+  // at least some unnecessary re-computations and fixes the behavior of
+  // about:crash.
+  if (!old.favicon.BackedBySameObjectAs(data().favicon))
+    favicon_ = gfx::ImageSkia();
+
   if (data().alert_state != old.alert_state || data().title != old.title)
     TooltipTextChanged();
 
@@ -1196,8 +1277,26 @@ void Tab::DataChanged(const TabRendererData& old) {
     StopPulse();
 }
 
-void Tab::PaintTab(gfx::Canvas* canvas) {
-  PaintTabBackground(canvas);
+void Tab::PaintTab(gfx::Canvas* canvas, const gfx::Path& clip) {
+  const int kActiveTabFillId = IDR_THEME_TOOLBAR;
+  const bool has_custom_image =
+      GetThemeProvider()->HasCustomImage(kActiveTabFillId);
+  const int y_offset = -GetLayoutInsets(TAB).top();
+  if (IsActive()) {
+    PaintTabBackgroundUsingFillId(canvas, canvas, true, kActiveTabFillId,
+                                  has_custom_image, y_offset);
+  } else {
+    PaintInactiveTabBackground(canvas, clip);
+
+    const double throb_value = GetThrobValue();
+    if (throb_value > 0) {
+      canvas->SaveLayerAlpha(gfx::ToRoundedInt(throb_value * 0xff),
+                             GetLocalBounds());
+      PaintTabBackgroundUsingFillId(canvas, canvas, true, kActiveTabFillId,
+                                    has_custom_image, y_offset);
+      canvas->Restore();
+    }
+  }
 
   if (showing_icon_)
     PaintIcon(canvas);
@@ -1247,71 +1346,8 @@ void Tab::PaintImmersiveTab(gfx::Canvas* canvas) {
   }
 }
 
-void Tab::PaintTabBackground(gfx::Canvas* canvas) {
-  const int kActiveTabFillId = IDR_THEME_TOOLBAR;
-  const bool has_custom_image =
-      GetThemeProvider()->HasCustomImage(kActiveTabFillId);
-  const int y_offset = -GetYInsetForActiveTabBackground();
-  if (IsActive()) {
-    PaintTabBackgroundUsingFillId(canvas, true, kActiveTabFillId,
-                                  has_custom_image, y_offset);
-  } else {
-    if (pinned_title_change_animation_->is_animating())
-      PaintInactiveTabBackgroundWithTitleChange(canvas);
-    else
-      PaintInactiveTabBackground(canvas);
-
-    const double throb_value = GetThrobValue();
-    if (throb_value > 0) {
-      canvas->SaveLayerAlpha(gfx::ToRoundedInt(throb_value * 0xff),
-                             GetLocalBounds());
-      PaintTabBackgroundUsingFillId(canvas, true, kActiveTabFillId,
-                                    has_custom_image, y_offset);
-      canvas->Restore();
-    }
-  }
-}
-
-void Tab::PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas) {
-  const int kPinnedTitleChangeGradientRadius = 20;
-  const float radius = kPinnedTitleChangeGradientRadius;
-  double x = radius;
-  SkColor hover_color =
-      GetThemeProvider()->GetColor(ThemeProperties::COLOR_TOOLBAR);
-  if (pinned_title_change_animation_->current_part_index() == 0) {
-    x = pinned_title_change_animation_->CurrentValueBetween(
-            width() + radius - kPinnedTitleChangeInitialXOffset, radius);
-  } else if (pinned_title_change_animation_->current_part_index() == 2) {
-    x = pinned_title_change_animation_->CurrentValueBetween(radius, -radius);
-    const int alpha =
-        pinned_title_change_animation_->CurrentValueBetween(255, 0);
-    hover_color = SkColorSetA(hover_color, static_cast<SkAlpha>(alpha));
-  }
-  SkPoint p;
-  p.set(SkDoubleToScalar(x), 0);
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    PaintInactiveTabBackground(canvas);
-    gfx::ScopedCanvas scoped_canvas(canvas);
-    const float scale = canvas->UndoDeviceScaleFactor();
-    SkPath fill;
-    GetFillPath(scale, &fill);
-    canvas->ClipPath(fill, true);
-    p.scale(SkFloatToScalar(scale));
-    DrawHighlight(canvas, p, SkFloatToScalar(radius * scale), hover_color);
-  } else {
-    gfx::Canvas background_canvas(size(), canvas->image_scale(), false);
-    PaintInactiveTabBackground(&background_canvas);
-    gfx::ImageSkia background_image(background_canvas.ExtractImageRep());
-    canvas->DrawImageInt(background_image, 0, 0);
-    gfx::Canvas hover_canvas(size(), canvas->image_scale(), false);
-    DrawHighlight(&hover_canvas, p, SkFloatToScalar(radius), hover_color);
-    gfx::ImageSkia hover_image = gfx::ImageSkiaOperations::CreateMaskedImage(
-        gfx::ImageSkia(hover_canvas.ExtractImageRep()), background_image);
-    canvas->DrawImageInt(hover_image, 0, 0);
-  }
-}
-
-void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
+void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas,
+                                     const gfx::Path& clip) {
   bool has_custom_image;
   int fill_id = controller_->GetBackgroundResourceId(&has_custom_image);
 
@@ -1320,37 +1356,64 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   // image is a composited foreground + frame image.  Note that if the theme is
   // only providing a custom frame image, |has_custom_image| will be true, but
   // we should use the |background_offset_| here.
-  const int y_offset = GetThemeProvider()->HasCustomImage(fill_id) ?
-      -GetLayoutConstant(TAB_TOP_EXCLUSION_HEIGHT) : background_offset_.y();
+  const ui::ThemeProvider* tp = GetThemeProvider();
+  const int y_offset = tp->HasCustomImage(fill_id) ? 0 : background_offset_.y();
 
   // We only cache the image when it's the default image and we're not hovered,
   // to avoid caching a background image that isn't the same for all tabs.
   if (has_custom_image || hover_controller_.ShouldDraw()) {
-    PaintTabBackgroundUsingFillId(canvas, false, fill_id, has_custom_image,
-                                  y_offset);
+    PaintTabBackgroundUsingFillId(canvas, canvas, false, fill_id,
+                                  has_custom_image, y_offset);
     return;
   }
 
+  // For efficiency, we don't use separate fill and stroke images unless we
+  // really need to clip the stroke and not the fill (for stacked tabs).  This
+  // saves memory and avoids an extra image draw at the cost of recalculating
+  // the images when MaySetClip() toggles.
+  const bool use_fill_and_stroke_images =
+      controller_->MaySetClip() &&
+      ui::MaterialDesignController::IsModeMaterial();
+
   const ImageCacheEntryMetadata metadata(
-      ui::MaterialDesignController::IsModeMaterial() &&
-          controller_->IsIncognito(),
-      fill_id, ui::GetSupportedScaleFactor(canvas->image_scale()), size());
+      fill_id, tp->GetColor(ThemeProperties::COLOR_BACKGROUND_TAB),
+      controller_->GetToolbarTopSeparatorColor(), use_fill_and_stroke_images,
+      canvas->image_scale(), size());
   auto it = std::find_if(
-      image_cache_->begin(), image_cache_->end(),
+      g_image_cache->begin(), g_image_cache->end(),
       [&metadata](const ImageCacheEntry& e) { return e.metadata == metadata; });
-  if (it == image_cache_->end()) {
+  if (it == g_image_cache->end()) {
     gfx::Canvas tmp_canvas(size(), canvas->image_scale(), false);
-    PaintTabBackgroundUsingFillId(&tmp_canvas, false, fill_id, false, y_offset);
-    image_cache_->emplace_front(metadata,
-                                gfx::ImageSkia(tmp_canvas.ExtractImageRep()));
-    if (image_cache_->size() > kMaxImageCacheSize)
-      image_cache_->pop_back();
-    it = image_cache_->begin();
+    if (use_fill_and_stroke_images) {
+      gfx::Canvas tmp_fill_canvas(size(), canvas->image_scale(), false);
+      PaintTabBackgroundUsingFillId(&tmp_fill_canvas, &tmp_canvas, false,
+                                    fill_id, false, y_offset);
+      g_image_cache->emplace_front(
+          metadata, gfx::ImageSkia(tmp_fill_canvas.ExtractImageRep()),
+          gfx::ImageSkia(tmp_canvas.ExtractImageRep()));
+    } else {
+      PaintTabBackgroundUsingFillId(&tmp_canvas, &tmp_canvas, false, fill_id,
+                                    false, y_offset);
+      g_image_cache->emplace_front(
+          metadata, gfx::ImageSkia(),
+          gfx::ImageSkia(tmp_canvas.ExtractImageRep()));
+    }
+    if (g_image_cache->size() > kMaxImageCacheSize)
+      g_image_cache->pop_back();
+    it = g_image_cache->begin();
   }
-  canvas->DrawImageInt(it->image, 0, 0);
+
+  gfx::ScopedCanvas scoped_canvas(
+      use_fill_and_stroke_images ? canvas : nullptr);
+  if (use_fill_and_stroke_images) {
+    canvas->DrawImageInt(it->fill_image, 0, 0);
+    canvas->sk_canvas()->clipPath(clip, SkRegion::kDifference_Op, true);
+  }
+  canvas->DrawImageInt(it->stroke_image, 0, 0);
 }
 
-void Tab::PaintTabBackgroundUsingFillId(gfx::Canvas* canvas,
+void Tab::PaintTabBackgroundUsingFillId(gfx::Canvas* fill_canvas,
+                                        gfx::Canvas* stroke_canvas,
                                         bool is_active,
                                         int fill_id,
                                         bool has_custom_image,
@@ -1367,59 +1430,68 @@ void Tab::PaintTabBackgroundUsingFillId(gfx::Canvas* canvas,
   const SkScalar radius =
       std::max(SkFloatToScalar(width() / 4.f), kMinHoverRadius);
   const bool draw_hover = !is_active && hover_controller_.ShouldDraw();
-  SkPoint hover_location(PointToSkPoint(hover_controller_.location()));
+  SkPoint hover_location(gfx::PointToSkPoint(hover_controller_.location()));
   const SkColor hover_color =
       SkColorSetA(toolbar_color, hover_controller_.GetAlpha());
 
   if (ui::MaterialDesignController::IsModeMaterial()) {
-    gfx::ScopedCanvas scoped_canvas(canvas);
-    const float scale = canvas->UndoDeviceScaleFactor();
-
-    // Draw the fill.
-    SkPath fill;
-    GetFillPath(scale, &fill);
+    gfx::Path fill;
     SkPaint paint;
     paint.setAntiAlias(true);
+
+    // Draw the fill.
     {
-      gfx::ScopedCanvas clip_scoper(canvas);
-      canvas->ClipPath(fill, true);
-      if (has_custom_image) {
-        gfx::ScopedCanvas scale_scoper(canvas);
-        canvas->sk_canvas()->scale(scale, scale);
-        canvas->TileImageInt(*fill_image, x_offset, y_offset, 0, 0, width(),
-                             height());
-      } else {
-        paint.setColor(
-            is_active ? toolbar_color
-                      : tp->GetColor(ThemeProperties::COLOR_BACKGROUND_TAB));
-        canvas->DrawRect(gfx::ScaleToEnclosingRect(GetLocalBounds(), scale),
-                         paint);
-      }
-      if (draw_hover) {
-        hover_location.scale(SkFloatToScalar(scale));
-        DrawHighlight(canvas, hover_location, radius * scale, hover_color);
+      gfx::ScopedCanvas scoped_canvas(fill_canvas);
+      const float scale = fill_canvas->UndoDeviceScaleFactor();
+
+      fill = GetFillPath(scale, size());
+      {
+        gfx::ScopedCanvas clip_scoper(fill_canvas);
+        fill_canvas->ClipPath(fill, true);
+        if (has_custom_image) {
+          gfx::ScopedCanvas scale_scoper(fill_canvas);
+          fill_canvas->sk_canvas()->scale(scale, scale);
+          fill_canvas->TileImageInt(*fill_image, x_offset, y_offset, 0, 0,
+                                    width(), height());
+        } else {
+          paint.setColor(
+              is_active ? toolbar_color
+                        : tp->GetColor(ThemeProperties::COLOR_BACKGROUND_TAB));
+          fill_canvas->DrawRect(
+              gfx::ScaleToEnclosingRect(GetLocalBounds(), scale), paint);
+        }
+        if (draw_hover) {
+          hover_location.scale(SkFloatToScalar(scale));
+          DrawHighlight(fill_canvas, hover_location, radius * scale,
+                        hover_color);
+        }
       }
     }
 
     // Draw the stroke.
-    SkPath stroke;
-    GetBorderPath(scale, false, &stroke);
-    Op(stroke, fill, kDifference_SkPathOp, &stroke);
-    if (!is_active) {
-      // Clip out the bottom line; this will be drawn for us by
-      // TabStrip::PaintChildren().
-      canvas->sk_canvas()->clipRect(
-          SkRect::MakeWH(width() * scale, height() * scale - 1));
+    {
+      gfx::ScopedCanvas scoped_canvas(stroke_canvas);
+      const float scale = stroke_canvas->UndoDeviceScaleFactor();
+
+      gfx::Path stroke = GetBorderPath(scale, false, false, size());
+      Op(stroke, fill, kDifference_SkPathOp, &stroke);
+      if (!is_active) {
+        // Clip out the bottom line; this will be drawn for us by
+        // TabStrip::PaintChildren().
+        stroke_canvas->ClipRect(
+            gfx::RectF(width() * scale, height() * scale - 1));
+      }
+      paint.setColor(controller_->GetToolbarTopSeparatorColor());
+      stroke_canvas->DrawPath(stroke, paint);
     }
-    paint.setColor(controller_->GetToolbarTopSeparatorColor());
-    canvas->DrawPath(stroke, paint);
   } else {
+    gfx::Canvas* canvas = stroke_canvas;
+    gfx::Rect rect(gfx::Point(x_offset, y_offset), size());
     if (draw_hover) {
       // Draw everything to a temporary canvas so we can extract an image for
       // use in masking the hover glow.
       gfx::Canvas background_canvas(size(), canvas->image_scale(), false);
-      PaintTabFill(&background_canvas, fill_image, x_offset, y_offset,
-                   is_active);
+      PaintTabFill(&background_canvas, *fill_image, rect, is_active);
       gfx::ImageSkia background_image(background_canvas.ExtractImageRep());
       canvas->DrawImageInt(background_image, 0, 0);
 
@@ -1429,11 +1501,12 @@ void Tab::PaintTabBackgroundUsingFillId(gfx::Canvas* canvas,
           gfx::ImageSkia(hover_canvas.ExtractImageRep()), background_image);
       canvas->DrawImageInt(result, 0, 0);
     } else {
-      PaintTabFill(canvas, fill_image, x_offset, y_offset, is_active);
+      PaintTabFill(canvas, *fill_image, rect, is_active);
     }
 
     // Now draw the stroke, highlights, and shadows around the tab edge.
-    TabImages* stroke_images = is_active ? &active_images_ : &inactive_images_;
+    TabImages* stroke_images =
+        is_active ? &g_active_images : &g_inactive_images;
     canvas->DrawImageInt(*stroke_images->image_l, 0, 0);
     canvas->TileImageInt(
         *stroke_images->image_c, stroke_images->l_width, 0,
@@ -1443,43 +1516,44 @@ void Tab::PaintTabBackgroundUsingFillId(gfx::Canvas* canvas,
   }
 }
 
-void Tab::PaintTabFill(gfx::Canvas* canvas,
-                       gfx::ImageSkia* fill_image,
-                       int x_offset,
-                       int y_offset,
-                       bool is_active) {
-  const gfx::Insets tab_insets(GetLayoutInsets(TAB));
-  // If this isn't the foreground tab, don't draw over the toolbar, but do
-  // include the 1 px divider stroke at the bottom.
-  const int toolbar_overlap = is_active ? 0 : (tab_insets.bottom() - 1);
+void Tab::PaintPinnedTabTitleChangedIndicatorAndIcon(
+    gfx::Canvas* canvas,
+    const gfx::Rect& favicon_draw_bounds) {
+  // The pinned tab title changed indicator consists of two parts:
+  // . a clear (totally transparent) part over the bottom right (or left in rtl)
+  //   of the favicon. This is done by drawing the favicon to a canvas, then
+  //   drawing the clear part on top of the favicon.
+  // . a circle in the bottom right (or left in rtl) of the favicon.
+  if (!favicon_.isNull()) {
+    const float kIndicatorCropRadius = 4.5;
+    gfx::Canvas icon_canvas(gfx::Size(gfx::kFaviconSize, gfx::kFaviconSize),
+                            canvas->image_scale(), false);
+    icon_canvas.DrawImageInt(favicon_, 0, 0);
+    SkPaint clear_paint;
+    clear_paint.setAntiAlias(true);
+    clear_paint.setXfermodeMode(SkXfermode::kClear_Mode);
+    const int circle_x = base::i18n::IsRTL() ? 0 : gfx::kFaviconSize;
+    icon_canvas.DrawCircle(gfx::PointF(circle_x, gfx::kFaviconSize),
+                           kIndicatorCropRadius, clear_paint);
+    canvas->DrawImageInt(gfx::ImageSkia(icon_canvas.ExtractImageRep()), 0, 0,
+                         favicon_draw_bounds.width(),
+                         favicon_draw_bounds.height(), favicon_draw_bounds.x(),
+                         favicon_draw_bounds.y(), favicon_draw_bounds.width(),
+                         favicon_draw_bounds.height(), false);
+  }
 
-  // Draw left edge.
-  gfx::ImageSkia tab_l = gfx::ImageSkiaOperations::CreateTiledImage(
-      *fill_image, x_offset, y_offset, mask_images_.l_width, height());
-  gfx::ImageSkia theme_l =
-      gfx::ImageSkiaOperations::CreateMaskedImage(tab_l, *mask_images_.image_l);
-  canvas->DrawImageInt(
-      theme_l, 0, 0, theme_l.width(), theme_l.height() - toolbar_overlap, 0, 0,
-      theme_l.width(), theme_l.height() - toolbar_overlap, false);
-
-  // Draw right edge.
-  gfx::ImageSkia tab_r = gfx::ImageSkiaOperations::CreateTiledImage(
-      *fill_image, x_offset + width() - mask_images_.r_width, y_offset,
-      mask_images_.r_width, height());
-  gfx::ImageSkia theme_r =
-      gfx::ImageSkiaOperations::CreateMaskedImage(tab_r, *mask_images_.image_r);
-  canvas->DrawImageInt(theme_r, 0, 0, theme_r.width(),
-                       theme_r.height() - toolbar_overlap,
-                       width() - theme_r.width(), 0, theme_r.width(),
-                       theme_r.height() - toolbar_overlap, false);
-
-  // Draw center.  Instead of masking out the top portion we simply skip over it
-  // by incrementing by the top padding, since it's a simple rectangle.
-  canvas->TileImageInt(*fill_image, x_offset + mask_images_.l_width,
-                       y_offset + tab_insets.top(), mask_images_.l_width,
-                       tab_insets.top(),
-                       width() - mask_images_.l_width - mask_images_.r_width,
-                       height() - tab_insets.top() - toolbar_overlap);
+  // Draws the actual pinned tab title changed indicator.
+  const int kIndicatorRadius = 3;
+  SkPaint indicator_paint;
+  indicator_paint.setColor(GetNativeTheme()->GetSystemColor(
+      ui::NativeTheme::kColorId_CallToActionColor));
+  indicator_paint.setAntiAlias(true);
+  const int indicator_x = GetMirroredXWithWidthInView(
+      favicon_bounds_.right() - kIndicatorRadius, kIndicatorRadius * 2);
+  const int indicator_y = favicon_bounds_.bottom() - kIndicatorRadius;
+  canvas->DrawCircle(gfx::Point(indicator_x + kIndicatorRadius,
+                                indicator_y + kIndicatorRadius),
+                     kIndicatorRadius, indicator_paint);
 }
 
 void Tab::PaintIcon(gfx::Canvas* canvas) {
@@ -1490,18 +1564,36 @@ void Tab::PaintIcon(gfx::Canvas* canvas) {
   if (bounds.IsEmpty())
     return;
 
-  if (data().network_state != TabRendererData::NETWORK_STATE_NONE) {
-    // Throbber will do its own painting.
-  } else {
-    const gfx::ImageSkia& favicon = should_display_crashed_favicon_ ?
-        *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-            IDR_CRASH_SAD_FAVICON) :
-        data().favicon;
-    if (!favicon.isNull()) {
-      canvas->DrawImageInt(favicon, 0, 0, bounds.width(), bounds.height(),
-                           bounds.x(), bounds.y(), bounds.width(),
-                           bounds.height(), false);
+  // Throbber will do its own painting.
+  if (data().network_state != TabRendererData::NETWORK_STATE_NONE)
+    return;
+
+  // Ensure that |favicon_| is created.
+  if (favicon_.isNull()) {
+    ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
+    favicon_ = should_display_crashed_favicon_
+                   ? *rb->GetImageSkiaNamed(IDR_CRASH_SAD_FAVICON)
+                   : data().favicon;
+    // Themify the icon if it's a chrome:// page or if it's the sadtab favicon.
+    // This ensures chrome:// pages are visible over the tab background. This is
+    // similar to code in the bookmarks bar.
+    if (!favicon_.isNull() &&
+        (should_display_crashed_favicon_ ||
+         favicon_.BackedBySameObjectAs(
+             *rb->GetImageSkiaNamed(IDR_DEFAULT_FAVICON)) ||
+         ShouldThemifyFaviconForUrl(data().url))) {
+      favicon_ = gfx::ImageSkiaOperations::CreateHSLShiftedImage(
+          favicon_, GetThemeProvider()->GetTint(ThemeProperties::TINT_BUTTONS));
     }
+  }
+
+  if (showing_pinned_tab_title_changed_indicator_ &&
+      !should_display_crashed_favicon_) {
+    PaintPinnedTabTitleChangedIndicatorAndIcon(canvas, bounds);
+  } else if (!favicon_.isNull()) {
+    canvas->DrawImageInt(favicon_, 0, 0, bounds.width(), bounds.height(),
+                         bounds.x(), bounds.y(), bounds.width(),
+                         bounds.height(), false);
   }
 }
 
@@ -1606,15 +1698,19 @@ double Tab::GetThrobValue() {
   const double offset =
       is_selected ? (kSelectedTabThrobScale * kHoverOpacity) : kHoverOpacity;
 
-  // Showing both the pulse and title change animation at the same time is too
-  // much.
-  if (pulse_animation_->is_animating() &&
-      !pinned_title_change_animation_->is_animating()) {
+  if (pulse_animation_->is_animating())
     val += pulse_animation_->GetCurrentValue() * offset;
-  } else if (hover_controller_.ShouldDraw()) {
+  else if (hover_controller_.ShouldDraw())
     val += hover_controller_.GetAnimationValue() * offset;
-  }
   return val;
+}
+
+void Tab::SetShouldDisplayCrashedFavicon(bool value) {
+  if (value == should_display_crashed_favicon_)
+    return;
+
+  should_display_crashed_favicon_ = value;
+  favicon_ = gfx::ImageSkia();
 }
 
 void Tab::SetFaviconHidingOffset(int offset) {
@@ -1638,8 +1734,7 @@ void Tab::OnButtonColorMaybeChanged() {
     title_->SetEnabledColor(title_color);
     alert_indicator_button_->OnParentTabButtonColorChanged();
     const gfx::ImageSkia& close_button_normal_image = gfx::CreateVectorIcon(
-        gfx::VectorIconId::TAB_CLOSE_NORMAL, kTabCloseButtonSize,
-        button_color_);
+        gfx::VectorIconId::TAB_CLOSE_NORMAL, button_color_);
     close_button_->SetImage(views::CustomButton::STATE_NORMAL,
                             &close_button_normal_image);
   }
@@ -1657,116 +1752,13 @@ void Tab::ScheduleIconPaint() {
   SchedulePaintInRect(bounds);
 }
 
-void Tab::GetFillPath(float scale, SkPath* fill) const {
-  const float right = width() * scale;
-  const float bottom = height() * scale;
-  const float unscaled_endcap_width = GetUnscaledEndcapWidth();
-
-  fill->moveTo(right - 1, bottom);
-  fill->rCubicTo(-0.75 * scale, 0, -1.625 * scale, -0.5 * scale, -2 * scale,
-                 -1.5 * scale);
-  fill->lineTo(right - 1 - (unscaled_endcap_width - 2) * scale, 2.5 * scale);
-  // Prevent overdraw in the center near minimum width (only happens if
-  // scale < 2).  We could instead avoid this by increasing the tab inset
-  // values, but that would shift all the content inward as well, unless we
-  // then overlapped the content on the endcaps, by which point we'd have a
-  // huge mess.
-  const float scaled_endcap_width = 1 + unscaled_endcap_width * scale;
-  const float overlap = scaled_endcap_width * 2 - right;
-  const float offset = (overlap > 0) ? (overlap / 2) : 0;
-  fill->rCubicTo(-0.375 * scale, -1 * scale, -1.25 * scale + offset,
-                 -1.5 * scale, -2 * scale + offset, -1.5 * scale);
-  if (overlap < 0)
-    fill->lineTo(scaled_endcap_width, scale);
-  fill->rCubicTo(-0.75 * scale, 0, -1.625 * scale - offset, 0.5 * scale,
-                 -2 * scale - offset, 1.5 * scale);
-  fill->lineTo(1 + 2 * scale, bottom - 1.5 * scale);
-  fill->rCubicTo(-0.375 * scale, scale, -1.25 * scale, 1.5 * scale, -2 * scale,
-                 1.5 * scale);
-  fill->close();
-}
-
-void Tab::GetBorderPath(float scale, bool extend_to_top, SkPath* path) const {
-  const float top = scale - 1;
-  const float right = width() * scale;
-  const float bottom = height() * scale;
-  const float unscaled_endcap_width = GetUnscaledEndcapWidth();
-
-  path->moveTo(0, bottom);
-  path->rLineTo(0, -1);
-  path->rCubicTo(0.75 * scale, 0, 1.625 * scale, -0.5 * scale, 2 * scale,
-                 -1.5 * scale);
-  path->lineTo((unscaled_endcap_width - 2) * scale, top + 1.5 * scale);
-  if (extend_to_top) {
-    // Create the vertical extension by extending the side diagonals until they
-    // reach the top of the bounds.
-    const float dy = 2.5 * scale - 1;
-    const float dx = GetInverseDiagonalSlope() * dy;
-    path->rLineTo(dx, -dy);
-    path->lineTo(right - (unscaled_endcap_width - 2) * scale - dx, 0);
-    path->rLineTo(dx, dy);
-  } else {
-    path->rCubicTo(0.375 * scale, -scale, 1.25 * scale, -1.5 * scale, 2 * scale,
-                   -1.5 * scale);
-    path->lineTo(right - unscaled_endcap_width * scale, top);
-    path->rCubicTo(0.75 * scale, 0, 1.625 * scale, 0.5 * scale, 2 * scale,
-                   1.5 * scale);
-  }
-  path->lineTo(right - 2 * scale, bottom - 1 - 1.5 * scale);
-  path->rCubicTo(0.375 * scale, scale, 1.25 * scale, 1.5 * scale, 2 * scale,
-                 1.5 * scale);
-  path->rLineTo(0, 1);
-  path->close();
-}
-
 gfx::Rect Tab::GetImmersiveBarRect() const {
   // The main bar is as wide as the normal tab's horizontal top line.
   // This top line of the tab extends a few pixels left and right of the
   // center image due to pixels in the rounded corner images.
   const int kBarPadding = 1;
-  int main_bar_left = active_images_.l_width - kBarPadding;
-  int main_bar_right = width() - active_images_.r_width + kBarPadding;
+  int main_bar_left = g_active_images.l_width - kBarPadding;
+  int main_bar_right = width() - g_active_images.r_width + kBarPadding;
   return gfx::Rect(
       main_bar_left, 0, main_bar_right - main_bar_left, kImmersiveBarHeight);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Tab, private static:
-
-// static
-void Tab::InitTabResources() {
-  static bool initialized = false;
-  if (initialized)
-    return;
-
-  initialized = true;
-  image_cache_ = new ImageCache();
-
-  // Load the tab images once now, and maybe again later if the theme changes.
-  LoadTabImages();
-}
-
-// static
-void Tab::LoadTabImages() {
-  image_cache_->clear();
-
-  // We're not letting people override tab images just yet.
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-
-  active_images_.image_l = rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_LEFT);
-  active_images_.image_c = rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_CENTER);
-  active_images_.image_r = rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_RIGHT);
-  active_images_.l_width = active_images_.image_l->width();
-  active_images_.r_width = active_images_.image_r->width();
-
-  inactive_images_.image_l = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_LEFT);
-  inactive_images_.image_c = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_CENTER);
-  inactive_images_.image_r = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_RIGHT);
-  inactive_images_.l_width = inactive_images_.image_l->width();
-  inactive_images_.r_width = inactive_images_.image_r->width();
-
-  mask_images_.image_l = rb.GetImageSkiaNamed(IDR_TAB_ALPHA_LEFT);
-  mask_images_.image_r = rb.GetImageSkiaNamed(IDR_TAB_ALPHA_RIGHT);
-  mask_images_.l_width = mask_images_.image_l->width();
-  mask_images_.r_width = mask_images_.image_r->width();
 }

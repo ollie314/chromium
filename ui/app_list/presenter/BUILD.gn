@@ -2,19 +2,23 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//testing/test.gni")
 import("//build/config/ui.gni")
+import("//mojo/public/tools/bindings/mojom.gni")
+import("//testing/test.gni")
 
 assert(use_aura)
 
 component("presenter") {
   sources = [
     "app_list_presenter.h",
+    "app_list_presenter_delegate.cc",
     "app_list_presenter_delegate.h",
     "app_list_presenter_delegate_factory.h",
     "app_list_presenter_export.h",
     "app_list_presenter_impl.cc",
     "app_list_presenter_impl.h",
+    "app_list_view_delegate_factory.cc",
+    "app_list_view_delegate_factory.h",
   ]
 
   defines = [ "APP_LIST_PRESENTER_IMPLEMENTATION" ]
@@ -26,13 +30,32 @@ component("presenter") {
     "//ui/compositor",
     "//ui/gfx/geometry",
     "//ui/views",
+
+    # Temporary dependency to fix compile flake in http://crbug.com/611898.
+    # TODO(tapted): Remove once http://crbug.com/612382 is fixed.
+    "//ui/accessibility:ax_gen",
   ]
 }
 
-source_set("test_support") {
+mojom("mojom") {
+  sources = [
+    "app_list_presenter.mojom",
+  ]
+  deps = [
+    "//services/ui/public/interfaces",
+  ]
+
+  use_new_wrapper_types = false
+}
+
+static_library("test_support") {
   sources = [
     "test/app_list_presenter_impl_test_api.cc",
     "test/app_list_presenter_impl_test_api.h",
+
+    # Temporary dependency to fix compile flake in http://crbug.com/611898.
+    # TODO(tapted): Remove once http://crbug.com/612382 is fixed.
+    "//ui/accessibility:ax_gen",
   ]
 
   public_deps = [
@@ -63,6 +86,10 @@ test("app_list_presenter_unittests") {
     "//ui/base",
     "//ui/gl:test_support",
     "//ui/wm:wm",
+
+    # Temporary dependency to fix compile flake in http://crbug.com/611898.
+    # TODO(tapted): Remove once http://crbug.com/612382 is fixed.
+    "//ui/accessibility:ax_gen",
   ]
 
   data_deps = [

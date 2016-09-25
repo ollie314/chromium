@@ -1,6 +1,24 @@
-<!-- Polymer is lazily-loaded inside of user_pod_template.js -->
+<dom-module id="user-pod-template-shared-styles">
+  <template>
+    <link rel="stylesheet" href="user_pod_template.css">
+  </template>
+</dom-module>
 
-<div id="user-pod-template" class="pod" hidden>
+<style is="custom-style" include="user-pod-template-shared-styles"></style>
+
+<iron-iconset-svg name="user-pod" size="24">
+  <svg>
+    <defs>
+      <!--
+      Inlined from Polymer's iron-icons to avoid importing everything.
+      See http://goo.gl/Y1OdAq for instructions on adding additional icons.
+      -->
+      <g id="arrow-forward"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></g>
+    </defs>
+  </svg>
+</iron-iconset-svg>
+
+<div id="user-pod-template" class="pod disabled" hidden>
   <div class="user-image-pane">
     <div class="user-image-container">
       <img class="user-image" alt>
@@ -12,8 +30,13 @@
       <div class="indicator locked-indicator"></div>
     </div>
   </div>
+<if expr="chromeos">
+  <div class="pin-container pin-disabled pin-tag">
+    <pin-keyboard enable-password hide-input></pin-keyboard>
+  </div>
+</if>
   <div class="main-pane">
-    <div class="name-container">
+    <div class="name-container pin-tag">
       <div class="name"></div>
       <div class="learn-more-container">
         <div class="learn-more"></div>
@@ -21,15 +44,21 @@
     </div>
     <div class="auth-container">
       <!-- Password Authentication -->
+      <div class="custom-icon-container" hidden></div>
       <div class="password-entry-container">
         <div class="password-container">
           <input type="password" class="password"
                  i18n-values="placeholder:passwordHint">
         </div>
+<if expr="chromeos">
         <div class="capslock-hint-container">
           <img class="capslock-hint"
                src="chrome://theme/IDR_LOGIN_PASSWORD_CAPS_LOCK" alt>
         </div>
+        <paper-icon-button class="submit-button" disabled
+                           icon="user-pod:arrow-forward" tabindex="-1">
+        </paper-icon-button>
+</if>
       </div>
       <!-- User Click Authentication -->
       <div class="password-label"></div>
@@ -39,9 +68,8 @@
         <span class="animated-ellipsis-component1">.</span>
         <span class="animated-ellipsis-component2">.</span>
       </div>
-      <div class="custom-icon-container" hidden></div>
       <div class="reauth-hint-container">
-        <iron-icon icon="warning" class="reauth-warning"></iron-icon>
+        <span class="reauth-warning"></span>
         <span class="reauth-name-hint"></span>
       </div>
       <div class="launch-app-button-container" hidden>
@@ -52,6 +80,10 @@
   </div>
   <div class="action-box-area">
     <div class="custom-appearance action-box-button"></div>
+    <!-- iron-icon is imported inside user_manager.html -->
+    <iron-icon icon="cr:more-vert" class="action-box-icon"></iron-icon>
+  </div>
+  <div class="user-image-gradient-area">
   </div>
   <div class="user-type-icon-area" hidden>
     <div class="custom-appearance user-type-icon-image"></div>
@@ -97,9 +129,11 @@
       </table>
       <div class="action-box-remove-legacy-supervised-user-warning-text"
           i18n-content="removeLegacySupervisedUserWarningText"></div>
-      <button class="remove-warning-button
-                     custom-appearance button-fancy button-red"
-          i18n-content="removeUserWarningButtonTitle"></button>
+      <div class="action-box-remove-non-owner-user-warning-text"
+          i18n-content="removeNonOwnerUserWarningText"></div>
+      <!-- paper-button is imported inside user_manager.html -->
+      <paper-button class="remove-warning-button"
+          i18n-content="removeUserWarningButtonTitle"></paper-button>
     </div>
   </div>
   <div class="user-type-bubble">

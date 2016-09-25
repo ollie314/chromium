@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "dbus/message.h"
 #include "dbus/mock_bus.h"
 #include "dbus/mock_object_proxy.h"
@@ -69,6 +70,7 @@ class MockObserver : public CrasAudioClient::Observer {
   MOCK_METHOD0(NodesChanged, void());
   MOCK_METHOD1(ActiveOutputNodeChanged, void(uint64_t node_id));
   MOCK_METHOD1(ActiveInputNodeChanged, void(uint64_t node_id));
+  MOCK_METHOD2(OutputNodeVolumeChanged, void(uint64_t node_id, int volume));
 };
 
 // Expect the reader to be empty.
@@ -281,6 +283,16 @@ class CrasAudioClientTest : public testing::Test {
             Invoke(this,
                    &CrasAudioClientTest::OnConnectToActiveInputNodeChanged));
 
+    // Set an expectation so mock_cras_proxy's monitoring
+    // OutputNodeVolumeChanged ConnectToSignal will use
+    // OnConnectToOutputNodeVolumeChanged() to run the callback.
+    EXPECT_CALL(
+        *mock_cras_proxy_.get(),
+        ConnectToSignal(interface_name_, cras::kOutputNodeVolumeChanged, _, _))
+        .WillRepeatedly(
+            Invoke(this,
+                   &CrasAudioClientTest::OnConnectToOutputNodeVolumeChanged));
+
     // Set an expectation so mock_bus's GetObjectProxy() for the given
     // service name and the object path will return mock_cras_proxy_.
     EXPECT_CALL(*mock_bus_.get(),
@@ -295,7 +307,7 @@ class CrasAudioClientTest : public testing::Test {
     client_.reset(CrasAudioClient::Create());
     client_->Init(mock_bus_.get());
     // Run the message loop to run the signal connection result callback.
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void TearDown() override { mock_bus_->ShutdownAndBlock(); }
@@ -344,6 +356,12 @@ class CrasAudioClientTest : public testing::Test {
     active_input_node_changed_handler_.Run(signal);
   }
 
+  // Send output node volume changed signal to the tested client.
+  void SendOutputNodeVolumeChangedSignal(dbus::Signal *signal) {
+    ASSERT_FALSE(output_node_volume_changed_handler_.is_null());
+    output_node_volume_changed_handler_.Run(signal);
+  }
+
   // The interface name.
   const std::string interface_name_;
   // The client to be tested.
@@ -364,6 +382,8 @@ class CrasAudioClientTest : public testing::Test {
   dbus::ObjectProxy::SignalCallback active_output_node_changed_handler_;
   // The ActiveInputNodeChanged signal handler given by the tested client.
   dbus::ObjectProxy::SignalCallback active_input_node_changed_handler_;
+  // The OutputNodeVolumeChanged signal handler given by the tested client.
+  dbus::ObjectProxy::SignalCallback output_node_volume_changed_handler_;
   // The name of the method which is expected to be called.
   std::string expected_method_name_;
   // The response which the mock cras proxy returns.
@@ -452,6 +472,22 @@ class CrasAudioClientTest : public testing::Test {
                                                      success));
   }
 
+  // Checks the requested interface name and signal name.
+  // Used to implement the mock cras proxy.
+  void OnConnectToOutputNodeVolumeChanged(
+      const std::string& interface_name,
+      const std::string& signal_name,
+      const dbus::ObjectProxy::SignalCallback& signal_callback,
+      const dbus::ObjectProxy::OnConnectedCallback& on_connected_callback) {
+    output_node_volume_changed_handler_ = signal_callback;
+    const bool success = true;
+    message_loop_.task_runner()->PostTask(FROM_HERE,
+                                          base::Bind(on_connected_callback,
+                                                     interface_name,
+                                                     signal_name,
+                                                     success));
+  }
+
   // Checks the content of the method call and returns the response.
   // Used to implement the mock cras proxy.
   void OnCallMethod(dbus::MethodCall* method_call,
@@ -504,7 +540,7 @@ TEST_F(CrasAudioClientTest, OutputMuteChanged) {
   // Run the signal callback again and make sure the observer isn't called.
   SendOutputMuteChangedSignal(&signal);
 
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, InputMuteChanged) {
@@ -533,7 +569,7 @@ TEST_F(CrasAudioClientTest, InputMuteChanged) {
   // Run the signal callback again and make sure the observer isn't called.
   SendInputMuteChangedSignal(&signal);
 
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, NodesChanged) {
@@ -558,7 +594,7 @@ TEST_F(CrasAudioClientTest, NodesChanged) {
   // Run the signal callback again and make sure the observer isn't called.
   SendNodesChangedSignal(&signal);
 
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, ActiveOutputNodeChanged) {
@@ -586,7 +622,7 @@ TEST_F(CrasAudioClientTest, ActiveOutputNodeChanged) {
   // Run the signal callback again and make sure the observer isn't called.
   SendActiveOutputNodeChangedSignal(&signal);
 
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, ActiveInputNodeChanged) {
@@ -614,7 +650,37 @@ TEST_F(CrasAudioClientTest, ActiveInputNodeChanged) {
   // Run the signal callback again and make sure the observer isn't called.
   SendActiveInputNodeChangedSignal(&signal);
 
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(CrasAudioClientTest, OutputNodeVolumeChanged) {
+  const uint64_t kNodeId = 20003;
+  const int32_t volume = 82;
+  // Create a signal
+  dbus::Signal signal(cras::kCrasControlInterface,
+                      cras::kOutputNodeVolumeChanged);
+  dbus::MessageWriter writer(&signal);
+  writer.AppendUint64(kNodeId);
+  writer.AppendInt32(volume);
+
+  // Set expectations
+  MockObserver observer;
+  EXPECT_CALL(observer, OutputNodeVolumeChanged(kNodeId, volume)).Times(1);
+
+  // Add the observer.
+  client_->AddObserver(&observer);
+
+  // Run the signal callback.
+  SendOutputNodeVolumeChangedSignal(&signal);
+
+  // Remove the observer.
+  client_->RemoveObserver(&observer);
+  EXPECT_CALL(observer, OutputNodeVolumeChanged(_, _)).Times(0);
+
+  // Run the signal callback again and make sure the observer isn't called.
+  SendOutputNodeVolumeChangedSignal(&signal);
+
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, GetNodes) {
@@ -639,7 +705,7 @@ TEST_F(CrasAudioClientTest, GetNodes) {
                     error_callback.GetCallback());
   EXPECT_CALL(error_callback, Run(_, _)).Times(0);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, SetOutputNodeVolume) {
@@ -657,7 +723,7 @@ TEST_F(CrasAudioClientTest, SetOutputNodeVolume) {
   // Call method.
   client_->SetOutputNodeVolume(kNodeId, kVolume);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, SetOutputUserMute) {
@@ -672,7 +738,7 @@ TEST_F(CrasAudioClientTest, SetOutputUserMute) {
   // Call method.
   client_->SetOutputUserMute(kUserMuteOn);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, SetInputNodeGain) {
@@ -690,7 +756,7 @@ TEST_F(CrasAudioClientTest, SetInputNodeGain) {
   // Call method.
   client_->SetInputNodeGain(kNodeId, kInputGain);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, SetInputMute) {
@@ -705,7 +771,7 @@ TEST_F(CrasAudioClientTest, SetInputMute) {
   // Call method.
   client_->SetInputMute(kInputMuteOn);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, SetActiveOutputNode) {
@@ -720,7 +786,7 @@ TEST_F(CrasAudioClientTest, SetActiveOutputNode) {
   // Call method.
   client_->SetActiveOutputNode(kNodeId);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, SetActiveInputNode) {
@@ -735,7 +801,7 @@ TEST_F(CrasAudioClientTest, SetActiveInputNode) {
   // Call method.
   client_->SetActiveInputNode(kNodeId);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, AddActiveInputNode) {
@@ -750,7 +816,7 @@ TEST_F(CrasAudioClientTest, AddActiveInputNode) {
   // Call method.
   client_->AddActiveInputNode(kNodeId);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, RemoveActiveInputNode) {
@@ -765,7 +831,7 @@ TEST_F(CrasAudioClientTest, RemoveActiveInputNode) {
   // Call method.
   client_->RemoveActiveInputNode(kNodeId);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, AddActiveOutputNode) {
@@ -780,7 +846,7 @@ TEST_F(CrasAudioClientTest, AddActiveOutputNode) {
   // Call method.
   client_->AddActiveOutputNode(kNodeId);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, RemoveActiveOutputNode) {
@@ -795,7 +861,7 @@ TEST_F(CrasAudioClientTest, RemoveActiveOutputNode) {
   // Call method.
   client_->RemoveActiveOutputNode(kNodeId);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, SwapLeftRight) {
@@ -813,7 +879,7 @@ TEST_F(CrasAudioClientTest, SwapLeftRight) {
   // Call method.
   client_->SwapLeftRight(kNodeId, kSwap);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(CrasAudioClientTest, SetGlobalOutputChannelRemix) {
@@ -832,7 +898,7 @@ TEST_F(CrasAudioClientTest, SetGlobalOutputChannelRemix) {
   // Call method.
   client_->SetGlobalOutputChannelRemix(kChannels, kMixer);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 }  // namespace chromeos

@@ -42,6 +42,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/platform_thread.h"
 
 using base::ThreadTicks;
 using base::Time;
@@ -97,16 +98,6 @@ uint32_t g_high_res_timer_count = 0;
 // The lock to control access to the above two variables.
 base::LazyInstance<base::Lock>::Leaky g_high_res_lock =
     LAZY_INSTANCE_INITIALIZER;
-
-// Returns a pointer to the QueryThreadCycleTime() function from Windows.
-// Can't statically link to it because it is not available on XP.
-using QueryThreadCycleTimePtr = decltype(::QueryThreadCycleTime)*;
-QueryThreadCycleTimePtr GetQueryThreadCycleTimeFunction() {
-  static const QueryThreadCycleTimePtr query_thread_cycle_time_fn =
-      reinterpret_cast<QueryThreadCycleTimePtr>(::GetProcAddress(
-          ::GetModuleHandle(L"kernel32.dll"), "QueryThreadCycleTime"));
-  return query_thread_cycle_time_fn;
-}
 
 // Returns the current value of the performance counter.
 uint64_t QPCNowRaw() {
@@ -244,7 +235,7 @@ bool Time::IsHighResolutionTimerInUse() {
 }
 
 // static
-Time Time::FromExploded(bool is_local, const Exploded& exploded) {
+bool Time::FromExploded(bool is_local, const Exploded& exploded, Time* time) {
   // Create the system struct representing our exploded time. It will either be
   // in local time or UTC.
   SYSTEMTIME st;
@@ -262,17 +253,19 @@ Time Time::FromExploded(bool is_local, const Exploded& exploded) {
   // Ensure that it's in UTC.
   if (is_local) {
     SYSTEMTIME utc_st;
-    success = TzSpecificLocalTimeToSystemTime(NULL, &st, &utc_st) &&
+    success = TzSpecificLocalTimeToSystemTime(nullptr, &st, &utc_st) &&
               SystemTimeToFileTime(&utc_st, &ft);
   } else {
     success = !!SystemTimeToFileTime(&st, &ft);
   }
 
   if (!success) {
-    NOTREACHED() << "Unable to convert time";
-    return Time(0);
+    *time = Time(0);
+    return false;
   }
-  return Time(FileTimeToMicroseconds(ft));
+
+  *time = Time(FileTimeToMicroseconds(ft));
+  return true;
 }
 
 void Time::Explode(bool is_local, Exploded* exploded) const {
@@ -297,7 +290,7 @@ void Time::Explode(bool is_local, Exploded* exploded) const {
     // daylight saving time, it will take daylight saving time into account,
     // even if the time you are converting is in standard time.
     success = FileTimeToSystemTime(&utc_ft, &utc_st) &&
-              SystemTimeToTzSpecificLocalTime(NULL, &utc_st, &st);
+              SystemTimeToTzSpecificLocalTime(nullptr, &utc_st, &st);
   } else {
     success = !!FileTimeToSystemTime(&utc_ft, &st);
   }
@@ -511,6 +504,26 @@ bool TimeTicks::IsHighResolution() {
 }
 
 // static
+bool TimeTicks::IsConsistentAcrossProcesses() {
+  // According to Windows documentation [1] QPC is consistent post-Windows
+  // Vista. So if we are using QPC then we are consistent which is the same as
+  // being high resolution.
+  //
+  // [1] https://msdn.microsoft.com/en-us/library/windows/desktop/dn553408(v=vs.85).aspx
+  //
+  // "In general, the performance counter results are consistent across all
+  // processors in multi-core and multi-processor systems, even when measured on
+  // different threads or processes. Here are some exceptions to this rule:
+  // - Pre-Windows Vista operating systems that run on certain processors might
+  // violate this consistency because of one of these reasons:
+  //     1. The hardware processors have a non-invariant TSC and the BIOS
+  //     doesn't indicate this condition correctly.
+  //     2. The TSC synchronization algorithm that was used wasn't suitable for
+  //     systems with large numbers of processors."
+  return IsHighResolution();
+}
+
+// static
 TimeTicks::Clock TimeTicks::GetClock() {
   return IsHighResolution() ?
       Clock::WIN_QPC : Clock::WIN_ROLLOVER_PROTECTED_TIME_GET_TIME;
@@ -518,11 +531,17 @@ TimeTicks::Clock TimeTicks::GetClock() {
 
 // static
 ThreadTicks ThreadTicks::Now() {
+  return ThreadTicks::GetForThread(PlatformThread::CurrentHandle());
+}
+
+// static
+ThreadTicks ThreadTicks::GetForThread(
+    const base::PlatformThreadHandle& thread_handle) {
   DCHECK(IsSupported());
 
   // Get the number of TSC ticks used by the current thread.
   ULONG64 thread_cycle_time = 0;
-  GetQueryThreadCycleTimeFunction()(::GetCurrentThread(), &thread_cycle_time);
+  ::QueryThreadCycleTime(thread_handle.platform_handle(), &thread_cycle_time);
 
   // Get the frequency of the TSC.
   double tsc_ticks_per_second = TSCTicksPerSecond();
@@ -537,8 +556,7 @@ ThreadTicks ThreadTicks::Now() {
 
 // static
 bool ThreadTicks::IsSupportedWin() {
-  static bool is_supported = GetQueryThreadCycleTimeFunction() &&
-                             base::CPU().has_non_stop_time_stamp_counter() &&
+  static bool is_supported = base::CPU().has_non_stop_time_stamp_counter() &&
                              !IsBuggyAthlon(base::CPU());
   return is_supported;
 }

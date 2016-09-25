@@ -16,6 +16,7 @@
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "media/base/bind_to_current_loop.h"
+#include "media/capture/video/blob_utils.h"
 #include "media/capture/video/linux/video_capture_device_linux.h"
 
 namespace media {
@@ -26,7 +27,9 @@ namespace media {
 // buffers back to driver in time.
 const uint32_t kNumVideoBuffers = 4;
 // Timeout in milliseconds v4l2_thread_ blocks waiting for a frame from the hw.
-const int kCaptureTimeoutMs = 200;
+// This value has been fine tuned. Before changing or modifying it see
+// https://crbug.com/470717
+const int kCaptureTimeoutMs = 1000;
 // The number of continuous timeouts tolerated before treated as error.
 const int kContinuousTimeoutLimit = 10;
 // MJPEG is preferred if the requested width or height is larger than this.
@@ -155,11 +158,11 @@ std::list<uint32_t> V4L2CaptureDelegate::GetListOfUsableFourCcs(
 }
 
 V4L2CaptureDelegate::V4L2CaptureDelegate(
-    const VideoCaptureDevice::Name& device_name,
+    const VideoCaptureDeviceDescriptor& device_descriptor,
     const scoped_refptr<base::SingleThreadTaskRunner>& v4l2_task_runner,
     int power_line_frequency)
     : v4l2_task_runner_(v4l2_task_runner),
-      device_name_(device_name),
+      device_descriptor_(device_descriptor),
       power_line_frequency_(power_line_frequency),
       is_capturing_(false),
       timeout_count_(0),
@@ -169,13 +172,14 @@ void V4L2CaptureDelegate::AllocateAndStart(
     int width,
     int height,
     float frame_rate,
-    scoped_ptr<VideoCaptureDevice::Client> client) {
+    std::unique_ptr<VideoCaptureDevice::Client> client) {
   DCHECK(v4l2_task_runner_->BelongsToCurrentThread());
   DCHECK(client);
   client_ = std::move(client);
 
   // Need to open camera with O_RDWR after Linux kernel 3.3.
-  device_fd_.reset(HANDLE_EINTR(open(device_name_.id().c_str(), O_RDWR)));
+  device_fd_.reset(
+      HANDLE_EINTR(open(device_descriptor_.device_id.c_str(), O_RDWR)));
   if (!device_fd_.is_valid()) {
     SetErrorState(FROM_HERE, "Failed to open V4L2 device driver file.");
     return;
@@ -318,6 +322,12 @@ void V4L2CaptureDelegate::StopAndDeAllocate() {
   client_.reset();
 }
 
+void V4L2CaptureDelegate::TakePhoto(
+    VideoCaptureDevice::TakePhotoCallback callback) {
+  DCHECK(v4l2_task_runner_->BelongsToCurrentThread());
+  take_photo_callbacks_.push(std::move(callback));
+}
+
 void V4L2CaptureDelegate::SetRotation(int rotation) {
   DCHECK(v4l2_task_runner_->BelongsToCurrentThread());
   DCHECK(rotation >= 0 && rotation < 360 && rotation % 90 == 0);
@@ -390,9 +400,24 @@ void V4L2CaptureDelegate::DoCapture() {
     buffer_tracker_pool_[buffer.index]->set_payload_size(buffer.bytesused);
     const scoped_refptr<BufferTracker>& buffer_tracker =
         buffer_tracker_pool_[buffer.index];
+
+    base::TimeDelta timestamp =
+        base::TimeDelta::FromSeconds(buffer.timestamp.tv_sec) +
+        base::TimeDelta::FromMicroseconds(buffer.timestamp.tv_usec);
     client_->OnIncomingCapturedData(
         buffer_tracker->start(), buffer_tracker->payload_size(),
-        capture_format_, rotation_, base::TimeTicks::Now());
+        capture_format_, rotation_, base::TimeTicks::Now(), timestamp);
+
+    while (!take_photo_callbacks_.empty()) {
+      VideoCaptureDevice::TakePhotoCallback cb =
+          std::move(take_photo_callbacks_.front());
+      take_photo_callbacks_.pop();
+
+      mojom::BlobPtr blob =
+          Blobify(buffer_tracker->start(), buffer.bytesused, capture_format_);
+      if (blob)
+        cb.Run(std::move(blob));
+    }
 
     if (HANDLE_EINTR(ioctl(device_fd_.get(), VIDIOC_QBUF, &buffer)) < 0) {
       SetErrorState(FROM_HERE, "Failed to enqueue capture buffer");

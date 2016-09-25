@@ -42,9 +42,8 @@ void AddSurfaceQuad(RenderPass* pass,
   SurfaceDrawQuad* surface_quad =
       pass->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
   gfx::Rect quad_rect = gfx::Rect(surface_size);
-  surface_quad->SetNew(pass->shared_quad_state_list.back(),
-                       gfx::Rect(surface_size), gfx::Rect(surface_size),
-                       surface_id);
+  surface_quad->SetNew(pass->shared_quad_state_list.back(), quad_rect,
+                       quad_rect, surface_id);
 }
 void AddRenderPassQuad(RenderPass* pass, RenderPassId render_pass_id) {
   gfx::Rect output_rect = gfx::Rect(0, 0, 5, 5);
@@ -55,7 +54,7 @@ void AddRenderPassQuad(RenderPass* pass, RenderPassId render_pass_id) {
       pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
   quad->SetNew(shared_state, output_rect, output_rect, render_pass_id, 0,
                gfx::Vector2dF(), gfx::Size(), FilterOperations(),
-               gfx::Vector2dF(), FilterOperations());
+               gfx::Vector2dF(), gfx::PointF(), FilterOperations());
 }
 
 void AddQuadInPass(RenderPass* pass, Quad desc) {

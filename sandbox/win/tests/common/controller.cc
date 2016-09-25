@@ -136,15 +136,12 @@ void TestRunner::Init(JobLevel job_level,
 }
 
 TargetPolicy* TestRunner::GetPolicy() {
-  return policy_;
+  return policy_.get();
 }
 
 TestRunner::~TestRunner() {
   if (target_process_.IsValid() && kill_on_destruction_)
     ::TerminateProcess(target_process_.Get(), 0);
-
-  if (policy_)
-    policy_->Release();
 }
 
 bool TestRunner::AddRule(TargetPolicy::SubSystem subsystem,
@@ -222,6 +219,8 @@ int TestRunner::InternalRunTest(const wchar_t* command) {
 
   // Launch the sandboxed process.
   ResultCode result = SBOX_ALL_OK;
+  ResultCode warning_result = SBOX_ALL_OK;
+  DWORD last_error = ERROR_SUCCESS;
   PROCESS_INFORMATION target = {0};
 
   base::string16 arguments(L"\"");
@@ -236,10 +235,9 @@ int TestRunner::InternalRunTest(const wchar_t* command) {
                           NULL, NULL, &startup_info, &target)) {
       return SBOX_ERROR_GENERIC;
     }
-    broker_->AddTargetPeer(target.hProcess);
   } else {
     result = broker_->SpawnTarget(prog_name, arguments.c_str(), policy_,
-                                  &target);
+                                  &warning_result, &last_error, &target);
   }
 
   if (SBOX_ALL_OK != result)

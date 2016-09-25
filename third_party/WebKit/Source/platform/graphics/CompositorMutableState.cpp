@@ -20,27 +20,27 @@ CompositorMutableState::~CompositorMutableState() {}
 
 double CompositorMutableState::opacity() const
 {
-    return m_mainLayer->opacity();
+    return m_mainLayer->Opacity();
 }
 
 void CompositorMutableState::setOpacity(double opacity)
 {
     if (!m_mainLayer)
         return;
-    m_mainLayer->OnOpacityAnimated(opacity);
+    m_mainLayer->layer_tree_impl()->property_trees()->effect_tree.OnOpacityAnimated(opacity, m_mainLayer->effect_tree_index(), m_mainLayer->layer_tree_impl());
     m_mutation->setOpacity(opacity);
 }
 
 const SkMatrix44& CompositorMutableState::transform() const
 {
-    return m_mainLayer ? m_mainLayer->transform().matrix() : SkMatrix44::I();
+    return m_mainLayer ? m_mainLayer->Transform().matrix() : SkMatrix44::I();
 }
 
 void CompositorMutableState::setTransform(const SkMatrix44& matrix)
 {
     if (!m_mainLayer)
         return;
-    m_mainLayer->OnTransformAnimated(gfx::Transform(matrix));
+    m_mainLayer->layer_tree_impl()->property_trees()->transform_tree.OnTransformAnimated(gfx::Transform(matrix), m_mainLayer->transform_tree_index(), m_mainLayer->layer_tree_impl());
     m_mutation->setTransform(matrix);
 }
 
@@ -56,7 +56,7 @@ void CompositorMutableState::setScrollLeft(double scrollLeft)
 
     gfx::ScrollOffset offset = m_scrollLayer->CurrentScrollOffset();
     offset.set_x(scrollLeft);
-    m_scrollLayer->OnScrollOffsetAnimated(offset);
+    m_scrollLayer->layer_tree_impl()->property_trees()->scroll_tree.OnScrollOffsetAnimated(m_scrollLayer->id(), m_scrollLayer->transform_tree_index(), m_scrollLayer->scroll_tree_index(), offset, m_scrollLayer->layer_tree_impl());
     m_mutation->setScrollLeft(scrollLeft);
 }
 
@@ -71,7 +71,7 @@ void CompositorMutableState::setScrollTop(double scrollTop)
         return;
     gfx::ScrollOffset offset = m_scrollLayer->CurrentScrollOffset();
     offset.set_y(scrollTop);
-    m_scrollLayer->OnScrollOffsetAnimated(offset);
+    m_scrollLayer->layer_tree_impl()->property_trees()->scroll_tree.OnScrollOffsetAnimated(m_scrollLayer->id(), m_scrollLayer->transform_tree_index(), m_scrollLayer->scroll_tree_index(), offset, m_scrollLayer->layer_tree_impl());
     m_mutation->setScrollTop(scrollTop);
 }
 

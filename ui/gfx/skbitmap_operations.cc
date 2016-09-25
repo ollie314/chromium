@@ -10,7 +10,6 @@
 #include <algorithm>
 
 #include "base/logging.h"
-#include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
@@ -130,6 +129,9 @@ SkBitmap SkBitmapOperations::CreateMaskedBitmap(const SkBitmap& rgb,
 SkBitmap SkBitmapOperations::CreateButtonBackground(SkColor color,
                                                     const SkBitmap& image,
                                                     const SkBitmap& mask) {
+  // Despite this assert, it seems like image is actually unpremultiplied.
+  // The math producing dst_row[x] below is a correct SrcOver when
+  // bg_* are premultiplied and img_* are unpremultiplied.
   DCHECK(image.colorType() == kN32_SkColorType);
   DCHECK(mask.colorType() == kN32_SkColorType);
 
@@ -137,9 +139,9 @@ SkBitmap SkBitmapOperations::CreateButtonBackground(SkColor color,
   background.allocN32Pixels(mask.width(), mask.height());
 
   double bg_a = SkColorGetA(color);
-  double bg_r = SkColorGetR(color);
-  double bg_g = SkColorGetG(color);
-  double bg_b = SkColorGetB(color);
+  double bg_r = SkColorGetR(color) * (bg_a / 255.0);
+  double bg_g = SkColorGetG(color) * (bg_a / 255.0);
+  double bg_b = SkColorGetB(color) * (bg_a / 255.0);
 
   SkAutoLockPixels lock_mask(mask);
   SkAutoLockPixels lock_image(image);
@@ -158,12 +160,13 @@ SkBitmap SkBitmapOperations::CreateButtonBackground(SkColor color,
       double img_g = SkColorGetG(image_pixel);
       double img_b = SkColorGetB(image_pixel);
 
-      double img_alpha = static_cast<double>(img_a) / 255.0;
+      double img_alpha = img_a / 255.0;
       double img_inv = 1 - img_alpha;
 
       double mask_a = static_cast<double>(SkColorGetA(mask_row[x])) / 255.0;
 
       dst_row[x] = SkColorSetARGB(
+          // This is pretty weird; why not the usual SrcOver alpha?
           static_cast<int>(std::min(255.0, bg_a + img_a) * mask_a),
           static_cast<int>(((bg_r * img_inv) + (img_r * img_alpha)) * mask_a),
           static_cast<int>(((bg_g * img_inv) + (img_g * img_alpha)) * mask_a),
@@ -649,10 +652,8 @@ SkBitmap SkBitmapOperations::UnPreMultiply(const SkBitmap& bitmap) {
   if (bitmap.isOpaque())
     return bitmap;
 
-  const SkImageInfo& info = bitmap.info();
-  SkImageInfo opaque_info =
-      SkImageInfo::Make(info.width(), info.height(), info.colorType(),
-                        kOpaque_SkAlphaType, info.profileType());
+  const SkImageInfo& opaque_info =
+      bitmap.info().makeAlphaType(kOpaque_SkAlphaType);
   SkBitmap opaque_bitmap;
   opaque_bitmap.allocPixels(opaque_info);
 
@@ -740,9 +741,7 @@ SkBitmap SkBitmapOperations::CreateDropShadow(
     // The blur is halved to produce a shadow that correctly fits within the
     // |shadow_margin|.
     SkScalar sigma = SkDoubleToScalar(shadow.blur() / 2);
-    skia::RefPtr<SkImageFilter> filter =
-        skia::AdoptRef(SkBlurImageFilter::Create(sigma, sigma));
-    paint.setImageFilter(filter.get());
+    paint.setImageFilter(SkBlurImageFilter::Make(sigma, sigma, nullptr));
 
     canvas.saveLayer(0, &paint);
     canvas.drawBitmap(shadow_image,

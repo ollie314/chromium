@@ -33,16 +33,19 @@
 
 #include "SkFontMgr.h"
 #include "SkTypeface_win.h"
+#include "platform/Language.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/fonts/FontDescription.h"
 #include "platform/fonts/FontFaceCreationParams.h"
 #include "platform/fonts/FontPlatformData.h"
 #include "platform/fonts/SimpleFontData.h"
 #include "platform/fonts/win/FontFallbackWin.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
-HashMap<String, RefPtr<SkTypeface>>* FontCache::s_sideloadedFonts = 0;
+HashMap<String, sk_sp<SkTypeface>>* FontCache::s_sideloadedFonts = 0;
 
 // Cached system font metrics.
 AtomicString* FontCache::s_menuFontFamilyName = 0;
@@ -67,10 +70,10 @@ int32_t ensureMinimumFontHeightIfNeeded(int32_t fontHeight)
 void FontCache::addSideloadedFontForTesting(SkTypeface* typeface)
 {
     if (!s_sideloadedFonts)
-        s_sideloadedFonts = new HashMap<String, RefPtr<SkTypeface>>;
+        s_sideloadedFonts = new HashMap<String, sk_sp<SkTypeface>>;
     SkString name;
     typeface->getFamilyName(&name);
-    s_sideloadedFonts->set(name.c_str(), adoptRef(typeface));
+    s_sideloadedFonts->set(name.c_str(), sk_sp<SkTypeface>(typeface));
 }
 
 // static
@@ -97,17 +100,9 @@ void FontCache::setStatusFontMetrics(const wchar_t* familyName, int32_t fontHeig
 FontCache::FontCache()
     : m_purgePreventCount(0)
 {
-    if (s_fontManager) {
-        m_fontManager = s_fontManager;
-    } else if (s_useDirectWrite) {
-        m_fontManager = adoptRef(SkFontMgr_New_DirectWrite());
-    } else {
-        m_fontManager = adoptRef(SkFontMgr_New_GDI());
-    }
-
-    // Subpixel text positioning is only supported by the DirectWrite backend (not GDI).
-    s_useSubpixelPositioning = s_useDirectWrite;
-
+    m_fontManager = sk_ref_sp(s_staticFontManager);
+    if (!m_fontManager)
+        m_fontManager.reset(SkFontMgr_New_DirectWrite());
     ASSERT(m_fontManager.get());
 }
 
@@ -131,7 +126,6 @@ PassRefPtr<SimpleFontData> FontCache::fallbackFontForCharacter(
     UScriptCode script;
     const wchar_t* family = getFallbackFamily(character,
         fontDescription.genericFamily(),
-        fontDescription.script(),
         fontDescription.locale(),
         &script,
         fallbackPriority,
@@ -140,6 +134,35 @@ PassRefPtr<SimpleFontData> FontCache::fallbackFontForCharacter(
     if (family) {
         FontFaceCreationParams createByFamily(AtomicString(family, wcslen(family)));
         data = getFontPlatformData(fontDescription, createByFamily);
+    }
+
+    if ((!data || !data->fontContainsCharacter(character)) && s_useSkiaFontFallback) {
+        const char* bcp47Locale = nullptr;
+        int localeCount = 0;
+        // If the font description has a locale, use that. Otherwise, Skia will
+        // fall back on the user's default locale.
+        // TODO(kulshin): extract locale fallback logic from
+        //   FontCacheAndroid.cpp and share that code
+        if (fontDescription.locale()) {
+            bcp47Locale = fontDescription.locale()->localeForSkFontMgr();
+            localeCount = 1;
+        }
+
+        CString familyName = fontDescription.family().family().utf8();
+
+        SkTypeface* typeface = m_fontManager->matchFamilyStyleCharacter(
+            familyName.data(),
+            fontDescription.skiaFontStyle(),
+            &bcp47Locale,
+            localeCount,
+            character);
+        if (typeface) {
+            SkString skiaFamily;
+            typeface->getFamilyName(&skiaFamily);
+            FontFaceCreationParams createByFamily(
+                AtomicString(skiaFamily.c_str()));
+            data = getFontPlatformData(fontDescription, createByFamily);
+        }
     }
 
     // Last resort font list : PanUnicode. CJK fonts have a pretty
@@ -331,13 +354,13 @@ static bool typefacesHasStretchSuffix(const AtomicString& family,
     return false;
 }
 
-PassOwnPtr<FontPlatformData> FontCache::createFontPlatformData(const FontDescription& fontDescription,
+std::unique_ptr<FontPlatformData> FontCache::createFontPlatformData(const FontDescription& fontDescription,
     const FontFaceCreationParams& creationParams, float fontSize)
 {
     ASSERT(creationParams.creationType() == CreateFontByFamily);
 
     CString name;
-    RefPtr<SkTypeface> tf = createTypeface(fontDescription, creationParams, name);
+    sk_sp<SkTypeface> tf = createTypeface(fontDescription, creationParams, name);
     // Windows will always give us a valid pointer here, even if the face name
     // is non-existent. We have to double-check and see if the family name was
     // really used.
@@ -369,13 +392,12 @@ PassOwnPtr<FontPlatformData> FontCache::createFontPlatformData(const FontDescrip
         }
     }
 
-    OwnPtr<FontPlatformData> result = adoptPtr(new FontPlatformData(tf,
+    std::unique_ptr<FontPlatformData> result = wrapUnique(new FontPlatformData(tf,
         name.data(),
         fontSize,
         (fontDescription.weight() >= FontWeight600 && !tf->isBold()) || fontDescription.isSyntheticBold(),
         ((fontDescription.style() == FontStyleItalic || fontDescription.style() == FontStyleOblique) && !tf->isItalic()) || fontDescription.isSyntheticItalic(),
-        fontDescription.orientation(),
-        s_useSubpixelPositioning));
+        fontDescription.orientation()));
 
     struct FamilyMinSize {
         const wchar_t* family;
@@ -425,7 +447,7 @@ PassOwnPtr<FontPlatformData> FontCache::createFontPlatformData(const FontDescrip
         }
     }
 
-    return result.release();
+    return result;
 }
 
 } // namespace blink

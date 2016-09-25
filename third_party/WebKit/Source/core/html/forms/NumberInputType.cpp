@@ -34,17 +34,15 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/HTMLNames.h"
 #include "core/InputTypeNames.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/events/BeforeTextInsertedEvent.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/events/ScopedEventQueue.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/inspector/ConsoleMessage.h"
-#include "core/layout/LayoutTextControl.h"
+#include "core/layout/LayoutObject.h"
 #include "platform/text/PlatformLocale.h"
 #include "wtf/MathExtras.h"
-#include "wtf/PassOwnPtr.h"
 #include <limits>
 
 namespace blink {
@@ -76,7 +74,7 @@ struct RealNumberRenderSize {
 
 static RealNumberRenderSize calculateRenderSize(const Decimal& value)
 {
-    ASSERT(value.isFinite());
+    DCHECK(value.isFinite());
     const unsigned sizeOfDigits = String::number(value.value().coefficient()).length();
     const unsigned sizeOfSign = value.isNegative() ? 1 : 0;
     const int exponent = value.exponent();
@@ -139,7 +137,7 @@ bool NumberInputType::typeMismatchFor(const String& value) const
 
 bool NumberInputType::typeMismatch() const
 {
-    ASSERT(!typeMismatchFor(element().value()));
+    DCHECK(!typeMismatchFor(element().value()));
     return false;
 }
 
@@ -167,7 +165,7 @@ bool NumberInputType::sizeShouldIncludeDecoration(int defaultSize, int& preferre
         return false;
 
     const Decimal step = parseToDecimalForNumberType(stepString, 1);
-    ASSERT(step.isFinite());
+    DCHECK(step.isFinite());
 
     RealNumberRenderSize size = calculateRenderSize(minimum).max(calculateRenderSize(maximum).max(calculateRenderSize(step)));
 
@@ -278,7 +276,7 @@ bool NumberInputType::supportsPlaceholder() const
 
 void NumberInputType::minOrMaxAttributeChanged()
 {
-    InputType::minOrMaxAttributeChanged();
+    TextFieldInputType::minOrMaxAttributeChanged();
 
     if (element().layoutObject())
         element().layoutObject()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::AttributeChanged);
@@ -286,7 +284,7 @@ void NumberInputType::minOrMaxAttributeChanged()
 
 void NumberInputType::stepAttributeChanged()
 {
-    InputType::stepAttributeChanged();
+    TextFieldInputType::stepAttributeChanged();
 
     if (element().layoutObject())
         element().layoutObject()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::AttributeChanged);

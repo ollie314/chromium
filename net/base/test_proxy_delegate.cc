@@ -13,7 +13,8 @@ namespace net {
 TestProxyDelegate::TestProxyDelegate()
     : on_before_tunnel_request_called_(false),
       on_tunnel_request_completed_called_(false),
-      on_tunnel_headers_received_called_(false) {}
+      on_tunnel_headers_received_called_(false),
+      get_alternative_proxy_invocations_(0) {}
 
 TestProxyDelegate::~TestProxyDelegate() {}
 
@@ -41,7 +42,6 @@ void TestProxyDelegate::VerifyOnTunnelHeadersReceived(
 
 void TestProxyDelegate::OnResolveProxy(const GURL& url,
                                        const std::string& method,
-                                       int load_flags,
                                        const ProxyService& proxy_service,
                                        ProxyInfo* result) {}
 
@@ -56,10 +56,6 @@ void TestProxyDelegate::OnTunnelConnectCompleted(
 
 void TestProxyDelegate::OnFallback(const ProxyServer& bad_proxy,
                                    int net_error) {}
-
-void TestProxyDelegate::OnBeforeSendHeaders(URLRequest* request,
-                                            const ProxyInfo& proxy_info,
-                                            HttpRequestHeaders* headers) {}
 
 void TestProxyDelegate::OnBeforeTunnelRequest(
     const HostPortPair& proxy_server,
@@ -82,6 +78,23 @@ void TestProxyDelegate::OnTunnelHeadersReceived(
 bool TestProxyDelegate::IsTrustedSpdyProxy(
     const net::ProxyServer& proxy_server) {
   return proxy_server.is_valid() && trusted_spdy_proxy_ == proxy_server;
+}
+
+void TestProxyDelegate::GetAlternativeProxy(
+    const GURL& url,
+    const ProxyServer& resolved_proxy_server,
+    ProxyServer* alternative_proxy_server) const {
+  EXPECT_TRUE(resolved_proxy_server.is_valid());
+  EXPECT_FALSE(alternative_proxy_server->is_valid());
+  *alternative_proxy_server = alternative_proxy_server_;
+  get_alternative_proxy_invocations_++;
+}
+
+void TestProxyDelegate::OnAlternativeProxyBroken(
+    const ProxyServer& alternative_proxy_server) {
+  EXPECT_TRUE(alternative_proxy_server.is_valid());
+  EXPECT_EQ(alternative_proxy_server_, alternative_proxy_server);
+  alternative_proxy_server_ = ProxyServer();
 }
 
 }  // namespace net

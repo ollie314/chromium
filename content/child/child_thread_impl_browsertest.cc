@@ -40,7 +40,8 @@ class ChildThreadImplBrowserTest : public ContentBrowserTest {
   void SetUpOnMainThread() override {
     NavigateToURL(shell(), GURL(url::kAboutBlankURL));
     PostTaskToInProcessRendererAndWait(
-        base::Bind(&ChildThreadImplBrowserTest::SetUpOnChildThread, this));
+        base::Bind(&ChildThreadImplBrowserTest::SetUpOnChildThread,
+                   base::Unretained(this)));
   }
 
   ChildGpuMemoryBufferManager* child_gpu_memory_buffer_manager() {
@@ -159,7 +160,7 @@ IN_PROC_BROWSER_TEST_P(ChildThreadImplGpuMemoryBufferBrowserTest,
   std::unique_ptr<gfx::GpuMemoryBuffer> buffer =
       child_gpu_memory_buffer_manager()->AllocateGpuMemoryBuffer(
           buffer_size, format, gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
-          0 /* surface_id */);
+          gpu::kNullSurfaceHandle);
   ASSERT_TRUE(buffer);
   EXPECT_EQ(format, buffer->GetFormat());
 
@@ -200,10 +201,11 @@ INSTANTIATE_TEST_CASE_P(
                                          kEnableNativeBuffers),
                        // These formats are guaranteed to work on all platforms.
                        ::testing::Values(gfx::BufferFormat::R_8,
+                                         gfx::BufferFormat::BGR_565,
                                          gfx::BufferFormat::RGBA_4444,
                                          gfx::BufferFormat::RGBA_8888,
                                          gfx::BufferFormat::BGRA_8888,
-                                         gfx::BufferFormat::YUV_420)));
+                                         gfx::BufferFormat::YVU_420)));
 
 }  // namespace
 }  // namespace content

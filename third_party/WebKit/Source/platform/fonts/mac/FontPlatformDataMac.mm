@@ -26,6 +26,7 @@
 #import "platform/LayoutTestSupport.h"
 #import "platform/fonts/Font.h"
 #import "platform/fonts/shaping/HarfBuzzFace.h"
+#import "platform/graphics/skia/SkiaUtils.h"
 #import "public/platform/Platform.h"
 #import "public/platform/mac/WebSandboxSupport.h"
 #import "third_party/skia/include/ports/SkTypeface_mac.h"
@@ -72,7 +73,7 @@ static CTFontDescriptorRef cascadeToLastResortFontDescriptor()
     return descriptor;
 }
 
-static PassRefPtr<SkTypeface> loadFromBrowserProcess(NSFont* nsFont, float textSize)
+static sk_sp<SkTypeface> loadFromBrowserProcess(NSFont* nsFont, float textSize)
 {
     // Send cross-process request to load font.
     WebSandboxSupport* sandboxSupport = Platform::current()->sandboxSupport();
@@ -93,7 +94,7 @@ static PassRefPtr<SkTypeface> loadFromBrowserProcess(NSFont* nsFont, float textS
     }
     RetainPtr<CGFontRef> cgFont(AdoptCF, loadedCgFont);
     RetainPtr<CTFontRef> ctFont(AdoptCF, CTFontCreateWithGraphicsFont(cgFont.get(), textSize, 0, cascadeToLastResortFontDescriptor()));
-    PassRefPtr<SkTypeface> returnFont = adoptRef(SkCreateTypefaceFromCTFont(ctFont.get(), cgFont.get()));
+    sk_sp<SkTypeface> returnFont(SkCreateTypefaceFromCTFont(ctFont.get(), cgFont.get()));
 
     if (!returnFont.get())
         // TODO crbug.com/461279: Make this appear in the inspector console?
@@ -132,7 +133,7 @@ void FontPlatformData::setupPaint(SkPaint* paint, float, const Font* font) const
     paint->setEmbeddedBitmapText(false);
     const float ts = m_textSize >= 0 ? m_textSize : 12;
     paint->setTextSize(SkFloatToScalar(ts));
-    paint->setTypeface(typeface());
+    paint->setTypeface(m_typeface);
     paint->setFakeBoldText(m_syntheticBold);
     paint->setTextSkewX(m_syntheticItalic ? -SK_Scalar1 / 4 : 0);
     paint->setLCDRenderText(shouldSmoothFonts);
@@ -154,7 +155,7 @@ FontPlatformData::FontPlatformData(NSFont *nsFont, float size, bool syntheticBol
 {
     DCHECK(nsFont);
     if (canLoadInProcess(nsFont)) {
-        m_typeface = adoptRef(SkCreateTypefaceFromCTFont(toCTFontRef(nsFont)));
+        m_typeface.reset(SkCreateTypefaceFromCTFont(toCTFontRef(nsFont)));
     } else {
         // In process loading fails for cases where third party font manager software
         // registers fonts in non system locations such as /Library/Fonts
@@ -162,11 +163,5 @@ FontPlatformData::FontPlatformData(NSFont *nsFont, float size, bool syntheticBol
         m_typeface = loadFromBrowserProcess(nsFont, size);
     }
 }
-
-bool FontPlatformData::defaultUseSubpixelPositioning()
-{
-    return FontDescription::subpixelPositioning();
-}
-
 
 } // namespace blink

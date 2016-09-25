@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "ui/ozone/platform/drm/gpu/drm_thread.h"
 #include "ui/ozone/platform/drm/gpu/proxy_helpers.h"
 #include "ui/ozone/platform/drm/host/drm_display_host_manager.h"
@@ -15,10 +15,30 @@
 
 namespace ui {
 
+CursorProxyThread::CursorProxyThread(MusThreadProxy* mus_thread_proxy)
+    : mus_thread_proxy_(mus_thread_proxy) {}
+CursorProxyThread::~CursorProxyThread() {}
+
+void CursorProxyThread::CursorSet(gfx::AcceleratedWidget window,
+                                  const std::vector<SkBitmap>& bitmaps,
+                                  const gfx::Point& point,
+                                  int frame_delay_ms) {
+  mus_thread_proxy_->CursorSet(window, bitmaps, point, frame_delay_ms);
+}
+void CursorProxyThread::Move(gfx::AcceleratedWidget window,
+                             const gfx::Point& point) {
+  mus_thread_proxy_->Move(window, point);
+}
+void CursorProxyThread::InitializeOnEvdev() {
+  mus_thread_proxy_->InitializeOnEvdev();
+}
+
 MusThreadProxy::MusThreadProxy()
     : ws_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       drm_thread_(nullptr),
       weak_ptr_factory_(this) {}
+
+void MusThreadProxy::InitializeOnEvdev() {}
 
 MusThreadProxy::~MusThreadProxy() {
   DCHECK(on_window_server_thread_.CalledOnValidThread());

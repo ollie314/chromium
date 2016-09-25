@@ -24,6 +24,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.EnormousTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.FlakyTest;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.ScalableTimeout;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
@@ -78,6 +79,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
      */
     @EnormousTest
     @Feature({"Omnibox"})
+    @RetryOnFailure
     public void testSimpleUse() throws InterruptedException {
         typeInOmnibox("aaaaaaa", false);
 
@@ -99,6 +101,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
      */
     @MediumTest
     @Feature({"Omnibox"})
+    @RetryOnFailure
     public void testFocusChangingSoftInputMode() throws InterruptedException {
         final UrlBar urlBar = (UrlBar) getActivity().findViewById(R.id.url_bar);
 
@@ -126,10 +129,18 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
      */
     @MediumTest
     @Feature({"Omnibox"})
+    @RetryOnFailure
     public void testRequestZeroSuggestOnFocus() throws Exception {
         final LocationBarLayout locationBar =
                 (LocationBarLayout) getActivity().findViewById(R.id.location_bar);
         final UrlBar urlBar = (UrlBar) getActivity().findViewById(R.id.url_bar);
+
+        ThreadUtils.runOnUiThreadBlocking(new Runnable(){
+            @Override
+            public void run() {
+                urlBar.setUrl("http://www.example.com/", null);
+            }
+        });
 
         final TestAutocompleteController controller = new TestAutocompleteController(
                 locationBar, null, null);
@@ -151,6 +162,10 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
                 return controller.numZeroSuggestRequests();
             }
         }));
+
+        getInstrumentation().waitForIdleSync();
+
+        assertFalse(controller.isStartAutocompleteCalled());
     }
 
     /**
@@ -158,6 +173,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
      */
     @MediumTest
     @Feature({"Omnibox"})
+    @RetryOnFailure
     public void testRequestZeroSuggestAfterDelete() throws InterruptedException {
         final LocationBarLayout locationBar =
                 (LocationBarLayout) getActivity().findViewById(R.id.location_bar);
@@ -253,6 +269,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     // text is correct.
     @MediumTest
     @Feature({"Omnibox"})
+    @RetryOnFailure
     public void testDefaultText() throws InterruptedException {
         startMainActivityFromLauncher();
 
@@ -280,6 +297,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     @MediumTest
     @Feature({"Omnibox", "Main"})
+    @RetryOnFailure
     public void testAutoCompleteAndCorrectionLandscape() throws ExecutionException,
             InterruptedException {
         // Default orientation for tablets is landscape. Default for phones is portrait.
@@ -292,6 +310,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     @MediumTest
     @Feature({"Omnibox", "Main"})
+    @RetryOnFailure
     public void testAutoCompleteAndCorrectionPortrait() throws ExecutionException,
             InterruptedException {
         // Default orientation for tablets is landscape. Default for phones is portrait.
@@ -343,6 +362,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     @MediumTest
     @Feature({"Omnibox"})
+    @RetryOnFailure
     public void testDuplicateAutocompleteTextResults()
             throws InterruptedException, ExecutionException {
         Map<String, List<SuggestionsResult>> suggestionsMap = buildSuggestionMap(
@@ -371,6 +391,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     @MediumTest
     @Feature({"Omnibox"})
+    @RetryOnFailure
     public void testGrowingAutocompleteTextResults()
             throws InterruptedException, ExecutionException {
         Map<String, List<SuggestionsResult>> suggestionsMap = buildSuggestionMap(
@@ -399,6 +420,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     @MediumTest
     @Feature({"Omnibox"})
+    @RetryOnFailure
     public void testShrinkingAutocompleteTextResults()
             throws InterruptedException, ExecutionException {
         Map<String, List<SuggestionsResult>> suggestionsMap = buildSuggestionMap(
@@ -573,6 +595,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testSplitPathFromUrlDisplayText() {
         verifySplitUrlAndPath("", null, LocationBarLayout.splitPathFromUrlDisplayText(""));
         verifySplitUrlAndPath(
@@ -631,6 +654,7 @@ public class OmniboxTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     @MediumTest
     @Feature({"Omnibox"})
+    @RetryOnFailure
     public void testSuggestionDirectionSwitching() throws InterruptedException {
         final TextView urlBarView = (TextView) getActivity().findViewById(R.id.url_bar);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {

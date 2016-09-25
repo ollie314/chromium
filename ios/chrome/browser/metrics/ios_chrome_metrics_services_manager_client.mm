@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "components/metrics/enabled_state_provider.h"
 #include "components/metrics/metrics_state_manager.h"
 #include "components/prefs/pref_service.h"
 #include "components/rappor/rappor_service.h"
@@ -30,9 +31,23 @@ std::unique_ptr<metrics::ClientInfo> LoadMetricsClientInfo() {
 
 }  // namespace
 
+class IOSChromeMetricsServicesManagerClient::IOSChromeEnabledStateProvider
+    : public metrics::EnabledStateProvider {
+ public:
+  IOSChromeEnabledStateProvider() {}
+  ~IOSChromeEnabledStateProvider() override {}
+
+  bool IsConsentGiven() override {
+    return IOSChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(IOSChromeEnabledStateProvider);
+};
+
 IOSChromeMetricsServicesManagerClient::IOSChromeMetricsServicesManagerClient(
     PrefService* local_state)
-    : local_state_(local_state) {
+    : enabled_state_provider_(new IOSChromeEnabledStateProvider()),
+      local_state_(local_state) {
   DCHECK(local_state);
 }
 
@@ -42,8 +57,8 @@ IOSChromeMetricsServicesManagerClient::
 std::unique_ptr<rappor::RapporService>
 IOSChromeMetricsServicesManagerClient::CreateRapporService() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return base::WrapUnique(new rappor::RapporService(
-      local_state_, base::Bind(&::IsOffTheRecordSessionActive)));
+  return base::MakeUnique<rappor::RapporService>(
+      local_state_, base::Bind(&::IsOffTheRecordSessionActive));
 }
 
 std::unique_ptr<variations::VariationsService>
@@ -62,8 +77,12 @@ IOSChromeMetricsServicesManagerClient::CreateVariationsService() {
 std::unique_ptr<metrics::MetricsServiceClient>
 IOSChromeMetricsServicesManagerClient::CreateMetricsServiceClient() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return IOSChromeMetricsServiceClient::Create(GetMetricsStateManager(),
-                                               local_state_);
+  return IOSChromeMetricsServiceClient::Create(GetMetricsStateManager());
+}
+
+std::unique_ptr<const base::FieldTrial::EntropyProvider>
+IOSChromeMetricsServicesManagerClient::CreateEntropyProvider() {
+  return GetMetricsStateManager()->CreateDefaultEntropyProvider();
 }
 
 net::URLRequestContextGetter*
@@ -78,7 +97,7 @@ bool IOSChromeMetricsServicesManagerClient::IsSafeBrowsingEnabled(
 }
 
 bool IOSChromeMetricsServicesManagerClient::IsMetricsReportingEnabled() {
-  return IOSChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
+  return enabled_state_provider_->IsReportingEnabled();
 }
 
 bool IOSChromeMetricsServicesManagerClient::OnlyDoMetricsRecording() {
@@ -91,8 +110,7 @@ IOSChromeMetricsServicesManagerClient::GetMetricsStateManager() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!metrics_state_manager_) {
     metrics_state_manager_ = metrics::MetricsStateManager::Create(
-        local_state_, base::Bind(&IOSChromeMetricsServiceAccessor::
-                                     IsMetricsAndCrashReportingEnabled),
+        local_state_, enabled_state_provider_.get(),
         base::Bind(&PostStoreMetricsClientInfo),
         base::Bind(&LoadMetricsClientInfo));
   }

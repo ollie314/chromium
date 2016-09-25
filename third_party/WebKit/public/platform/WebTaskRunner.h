@@ -6,14 +6,20 @@
 #define WebTaskRunner_h
 
 #include "WebCommon.h"
+#include "public/platform/WebTraceLocation.h"
+#include <memory>
 
 #ifdef INSIDE_BLINK
 #include "wtf/Functional.h"
 #endif
 
+namespace base {
+class SingleThreadTaskRunner;
+}
+
 namespace blink {
 
-class WebTraceLocation;
+using SingleThreadTaskRunner = base::SingleThreadTaskRunner;
 
 // The blink representation of a chromium SingleThreadTaskRunner.
 class BLINK_PLATFORM_EXPORT WebTaskRunner {
@@ -34,8 +40,16 @@ public:
     // Takes ownership of |Task|. Can be called from any thread.
     virtual void postDelayedTask(const WebTraceLocation&, Task*, double delayMs) = 0;
 
+    // Schedule a task to be run after |delayMs| on the the associated WebThread.
+    // Can be called from any thread.
+    virtual void postDelayedTask(const WebTraceLocation&, const base::Closure&, double delayMs) = 0;
+
     // Returns a clone of the WebTaskRunner.
-    virtual WebTaskRunner* clone() = 0;
+    virtual std::unique_ptr<WebTaskRunner> clone() = 0;
+
+    // Returns true if the current thread is a thread on which a task may be run.
+    // Can be called from any thread.
+    virtual bool runsTasksOnCurrentThread() = 0;
 
     // ---
 
@@ -55,21 +69,19 @@ public:
     // real time domain.
     virtual double monotonicallyIncreasingVirtualTimeSeconds() const = 0;
 
+    // Returns the underlying task runner object.
+    virtual SingleThreadTaskRunner* toSingleThreadTaskRunner() = 0;
+
 #ifdef INSIDE_BLINK
     // Helpers for posting bound functions as tasks.
 
     // For cross-thread posting. Can be called from any thread.
-    void postTask(const WebTraceLocation&, PassOwnPtr<CrossThreadClosure>);
-    void postDelayedTask(const WebTraceLocation&, PassOwnPtr<CrossThreadClosure>, long long delayMs);
+    void postTask(const WebTraceLocation&, std::unique_ptr<CrossThreadClosure>);
+    void postDelayedTask(const WebTraceLocation&, std::unique_ptr<CrossThreadClosure>, long long delayMs);
 
     // For same-thread posting. Must be called from the associated WebThread.
-    void postTask(const WebTraceLocation&, PassOwnPtr<SameThreadClosure>);
-    void postDelayedTask(const WebTraceLocation&, PassOwnPtr<SameThreadClosure>, long long delayMs);
-
-    PassOwnPtr<WebTaskRunner> adoptClone()
-    {
-        return adoptPtr(clone());
-    }
+    void postTask(const WebTraceLocation&, std::unique_ptr<WTF::Closure>);
+    void postDelayedTask(const WebTraceLocation&, std::unique_ptr<WTF::Closure>, long long delayMs);
 #endif
 };
 

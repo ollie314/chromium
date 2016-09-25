@@ -89,12 +89,49 @@
             }],
           ],
         }],
+        ['OS=="win"',  {
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'SubSystem': '2',  # /SUBSYSTEM:WINDOWS
+            },
+          },
+        }],
       ],
     },
   ],
   'conditions': [
     ['OS=="win"', {
       'targets': [
+        {
+          # Duplicates crashpad_handler.exe to crashpad_handler.com and makes it
+          # a console app.
+          'target_name': 'crashpad_handler_console',
+          'type': 'none',
+          'dependencies': [
+            '../third_party/mini_chromium/mini_chromium.gyp:base',
+            '../tools/tools.gyp:crashpad_tool_support',
+            'crashpad_handler',
+          ],
+          'actions': [
+            {
+              'action_name': 'copy handler exe to com',
+              'inputs': [
+                '<(PRODUCT_DIR)/crashpad_handler.exe',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/crashpad_handler.com',
+              ],
+              'action': [
+                'copy <(PRODUCT_DIR)\crashpad_handler.exe '
+                    '<(PRODUCT_DIR)\crashpad_handler.com >nul && '
+                'editbin -nologo -subsystem:console '
+                    '<(PRODUCT_DIR)\crashpad_handler.com >nul',
+              ],
+              'msvs_cygwin_shell': '0',
+              'quote_cmd': '0',
+            },
+          ],
+        },
         {
           'target_name': 'crashy_program',
           'type': 'executable',
@@ -109,6 +146,40 @@
           'sources': [
             'win/crashy_test_program.cc',
           ],
+        },
+        {
+          'target_name': 'crash_other_program',
+          'type': 'executable',
+          'dependencies': [
+            '../client/client.gyp:crashpad_client',
+            '../test/test.gyp:crashpad_test',
+            '../third_party/mini_chromium/mini_chromium.gyp:base',
+            '../util/util.gyp:crashpad_util',
+          ],
+          'sources': [
+            'win/crash_other_program.cc',
+          ],
+        },
+        {
+          'target_name': 'hanging_program',
+          'type': 'executable',
+          'dependencies': [
+            '../client/client.gyp:crashpad_client',
+            '../third_party/mini_chromium/mini_chromium.gyp:base',
+          ],
+          'sources': [
+            'win/hanging_program.cc',
+          ],
+        },
+        {
+          'target_name': 'loader_lock_dll',
+          'type': 'loadable_module',
+          'sources': [
+            'win/loader_lock_dll.cc',
+          ],
+          'msvs_settings': {
+            'NoImportLibrary': 'true',
+          },
         },
         {
           'target_name': 'self_destroying_program',

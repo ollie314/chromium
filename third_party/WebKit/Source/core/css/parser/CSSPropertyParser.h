@@ -25,10 +25,10 @@
 
 #include "core/css/StyleRule.h"
 #include "core/css/parser/CSSParserTokenRange.h"
+#include "wtf/text/StringView.h"
 
 namespace blink {
 
-struct CSSParserString;
 class CSSProperty;
 class CSSValue;
 class StylePropertyShorthand;
@@ -37,6 +37,7 @@ class StylePropertyShorthand;
 // Outputs: Vector of CSSProperties
 
 class CSSPropertyParser {
+    WTF_MAKE_NONCOPYABLE(CSSPropertyParser);
     STACK_ALLOCATED();
 public:
     static bool parseValue(CSSPropertyID, bool important,
@@ -44,12 +45,7 @@ public:
         HeapVector<CSSProperty, 256>&, StyleRule::RuleType);
 
     // Parses a non-shorthand CSS property
-    static CSSValue* parseSingleValue(CSSPropertyID, const CSSParserTokenRange&, const CSSParserContext&);
-
-    // TODO(timloh): This doesn't seem like the right place for these
-    static bool isSystemColor(CSSValueID);
-    static bool isColorKeyword(CSSValueID);
-    static bool isValidNumericValue(double);
+    static const CSSValue* parseSingleValue(CSSPropertyID, const CSSParserTokenRange&, const CSSParserContext&);
 
 private:
     CSSPropertyParser(const CSSParserTokenRange&, const CSSParserContext&,
@@ -58,15 +54,15 @@ private:
     // TODO(timloh): Rename once the CSSParserValue-based parseValue is removed
     bool parseValueStart(CSSPropertyID unresolvedProperty, bool important);
     bool consumeCSSWideKeyword(CSSPropertyID unresolvedProperty, bool important);
-    CSSValue* parseSingleValue(CSSPropertyID);
+    const CSSValue* parseSingleValue(CSSPropertyID, CSSPropertyID = CSSPropertyInvalid);
 
     bool inQuirksMode() const { return isQuirksModeBehavior(m_context.mode()); }
 
     bool parseViewportDescriptor(CSSPropertyID propId, bool important);
     bool parseFontFaceDescriptor(CSSPropertyID);
 
-    void addProperty(CSSPropertyID, CSSValue*, bool important, bool implicit = false);
-    void addExpandedPropertyForValue(CSSPropertyID propId, CSSValue*, bool);
+    void addProperty(CSSPropertyID, CSSPropertyID, const CSSValue&, bool important, bool implicit = false);
+    void addExpandedPropertyForValue(CSSPropertyID propId, const CSSValue&, bool);
 
     bool consumeBorder(bool important);
 
@@ -81,12 +77,13 @@ private:
     bool consumeColumns(bool important);
 
     bool consumeGridItemPositionShorthand(CSSPropertyID, bool important);
-    bool consumeGridTemplateRowsAndAreasAndColumns(bool important);
-    bool consumeGridTemplateShorthand(bool important);
+    bool consumeGridTemplateRowsAndAreasAndColumns(CSSPropertyID, bool important);
+    bool consumeGridTemplateShorthand(CSSPropertyID, bool important);
     bool consumeGridShorthand(bool important);
     bool consumeGridAreaShorthand(bool important);
 
     bool consumeFont(bool important);
+    bool consumeFontVariantShorthand(bool important);
     bool consumeSystemFont(bool important);
 
     bool consumeBorderSpacing(bool important);
@@ -98,39 +95,16 @@ private:
 
     bool consumeLegacyBreakProperty(CSSPropertyID, bool important);
 
-    class ShorthandScope {
-        STACK_ALLOCATED();
-    public:
-        ShorthandScope(CSSPropertyParser* parser, CSSPropertyID propId) : m_parser(parser)
-        {
-            if (!(m_parser->m_inParseShorthand++))
-                m_parser->m_currentShorthand = propId;
-        }
-        ~ShorthandScope()
-        {
-            if (!(--m_parser->m_inParseShorthand))
-                m_parser->m_currentShorthand = CSSPropertyInvalid;
-        }
-
-    private:
-        CSSPropertyParser* m_parser;
-    };
-
 private:
     // Inputs:
     CSSParserTokenRange m_range;
     const CSSParserContext& m_context;
-
     // Outputs:
     HeapVector<CSSProperty, 256>* m_parsedProperties;
-
-    // Locals during parsing:
-    int m_inParseShorthand;
-    CSSPropertyID m_currentShorthand;
 };
 
-CSSPropertyID unresolvedCSSPropertyID(const CSSParserString&);
-CSSValueID cssValueKeywordID(const CSSParserString&);
+CSSPropertyID unresolvedCSSPropertyID(StringView);
+CSSValueID cssValueKeywordID(StringView);
 
 } // namespace blink
 

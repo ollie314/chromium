@@ -6,6 +6,7 @@ package org.chromium.content.browser;
 
 import android.os.Bundle;
 
+import org.chromium.content.common.FileDescriptorInfo;
 import org.chromium.content.common.IChildProcessCallback;
 import org.chromium.content.common.IChildProcessService;
 
@@ -39,6 +40,8 @@ public interface ChildProcessConnection {
     int getServiceNumber();
 
     boolean isInSandbox();
+
+    String getPackageName();
 
     IChildProcessService getService();
 

@@ -33,6 +33,7 @@
 
 #include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
+#include <memory>
 #include <v8.h>
 
 namespace blink {
@@ -66,10 +67,19 @@ public:
         return v8::Local<T>::New(isolate, m_handle);
     }
 
+    // If you don't need to get weak callback, use setPhantom instead.
+    // setPhantom is faster than setWeak.
     template<typename P>
     void setWeak(P* parameters, void (*callback)(const v8::WeakCallbackInfo<P>&), v8::WeakCallbackType type = v8::WeakCallbackType::kParameter)
     {
         m_handle.SetWeak(parameters, callback, type);
+    }
+
+    // Turns this handle into a weak phantom handle without
+    // finalization callback.
+    void setPhantom()
+    {
+        m_handle.SetWeak();
     }
 
     void clearWeak()
@@ -85,7 +95,7 @@ public:
         m_handle.Reset(isolate, handle);
     }
 
-    // Note: This is clear in the OwnPtr sense, not the v8::Handle sense.
+    // Note: This is clear in the std::unique_ptr sense, not the v8::Handle sense.
     void clear()
     {
         m_handle.Reset();
@@ -107,15 +117,13 @@ public:
         return m_handle == other;
     }
 
-private:
-    // FIXME: This function does an unsafe handle access. Remove it.
-    friend class V8AbstractEventListener;
-    friend class V8PerIsolateData;
-    ALWAYS_INLINE v8::Persistent<T>& getUnsafe()
+    ALWAYS_INLINE v8::Persistent<T>& get()
     {
         return m_handle;
     }
 
+
+private:
     v8::Persistent<T> m_handle;
 };
 

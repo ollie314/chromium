@@ -15,7 +15,7 @@
 #include "base/macros.h"
 #include "base/profiler/native_stack_sampler.h"
 #include "base/synchronization/lock.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/elapsed_timer.h"
 
 namespace base {
@@ -101,7 +101,9 @@ StackSamplingProfiler::Frame::Frame(uintptr_t instruction_pointer,
 
 StackSamplingProfiler::Frame::~Frame() {}
 
-StackSamplingProfiler::Frame::Frame() {}
+StackSamplingProfiler::Frame::Frame()
+    : instruction_pointer(0), module_index(kUnknownModuleIndex) {
+}
 
 // StackSamplingProfiler::CallStackProfile ------------------------------------
 
@@ -120,7 +122,8 @@ StackSamplingProfiler::SamplingThread::SamplingThread(
     const CompletedCallback& completed_callback)
     : native_sampler_(std::move(native_sampler)),
       params_(params),
-      stop_event_(false, false),
+      stop_event_(WaitableEvent::ResetPolicy::AUTOMATIC,
+                  WaitableEvent::InitialState::NOT_SIGNALED),
       completed_callback_(completed_callback) {}
 
 StackSamplingProfiler::SamplingThread::~SamplingThread() {}
@@ -273,6 +276,12 @@ void StackSamplingProfiler::Stop() {
 }
 
 // StackSamplingProfiler::Frame global functions ------------------------------
+
+bool operator==(const StackSamplingProfiler::Module& a,
+                const StackSamplingProfiler::Module& b) {
+  return a.base_address == b.base_address && a.id == b.id &&
+      a.filename == b.filename;
+}
 
 bool operator==(const StackSamplingProfiler::Frame &a,
                 const StackSamplingProfiler::Frame &b) {

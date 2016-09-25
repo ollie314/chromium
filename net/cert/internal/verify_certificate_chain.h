@@ -5,49 +5,34 @@
 #ifndef NET_CERT_INTERNAL_VERIFY_CERTIFICATE_CHAIN_H_
 #define NET_CERT_INTERNAL_VERIFY_CERTIFICATE_CHAIN_H_
 
-#include <stdint.h>
-
-#include <memory>
-#include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
 #include "net/base/net_export.h"
+#include "net/cert/internal/cert_errors.h"
+#include "net/cert/internal/parsed_certificate.h"
+#include "net/der/input.h"
 
 namespace net {
 
 namespace der {
-class Input;
 struct GeneralizedTime;
 }
 
 class SignaturePolicy;
-
-struct NET_EXPORT TrustAnchor {
-  ~TrustAnchor();
-
-  // DER-encoded SubjectPublicKeyInfo for the trusted key.
-  std::string spki;
-
-  // DER-encoded "Name" corresponding to the key.
-  std::string name;
-};
-
-// A very simple implementation of a TrustStore, which contains mappings from
-// names to trusted public keys.
-struct NET_EXPORT TrustStore {
-  TrustStore();
-  TrustStore(const TrustStore& other);
-  ~TrustStore();
-
-  std::vector<TrustAnchor> anchors;
-};
+class TrustAnchor;
+class TrustStore;
 
 // VerifyCertificateChain() verifies a certificate path (chain) based on the
-// rules in RFC 5280.
+// rules in RFC 5280. The caller is responsible for building the path and
+// finding the trust anchor.
 //
-// WARNING: This implementation is in progress, and is currently
-// incomplete. DO NOT USE IT unless its limitations are acceptable for your use.
+// WARNING: This implementation is in progress, and is currently incomplete.
+// Consult an OWNER before using it.
+//
+// TODO(eroman): Take a CertPath instead of ParsedCertificateList +
+//               TrustAnchor.
 //
 // ---------
 // Inputs
@@ -59,10 +44,11 @@ struct NET_EXPORT TrustStore {
 //
 //      * cert_chain[0] is the target certificate to verify.
 //      * cert_chain[i+1] holds the certificate that issued cert_chain[i].
-//      * cert_chain[N-1] must have been issued by a trust anchor
+//      * cert_chain[N-1] must be issued by the trust anchor.
 //
-//   trust_store:
-//     Contains the set of trusted public keys (and their names).
+//   trust_anchor:
+//     Contains the trust anchor (root) used to verify the chain. Must be
+//     non-null.
 //
 //   signature_policy:
 //     The policy to use when verifying signatures (what hash algorithms are
@@ -76,11 +62,18 @@ struct NET_EXPORT TrustStore {
 // ---------
 //
 //   Returns true if the target certificate can be verified.
-NET_EXPORT bool VerifyCertificateChain(const std::vector<der::Input>& certs_der,
-                                       const TrustStore& trust_store,
+//
+//   errors:
+//     Must be non-null. The set of errors/warnings encountered while
+//     validating the path are appended to this structure. There is no
+//     guarantee that on success |errors| is empty, or conversely that
+//     on failure |errors| is non-empty. Consumers must only use the
+//     boolean return value to determine success/failure.
+NET_EXPORT bool VerifyCertificateChain(const ParsedCertificateList& certs,
+                                       const TrustAnchor* trust_anchor,
                                        const SignaturePolicy* signature_policy,
-                                       const der::GeneralizedTime& time)
-    WARN_UNUSED_RESULT;
+                                       const der::GeneralizedTime& time,
+                                       CertErrors* errors) WARN_UNUSED_RESULT;
 
 }  // namespace net
 

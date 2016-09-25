@@ -100,8 +100,15 @@ class ThemeProperties {
     COLOR_TOOLBAR_TOP_SEPARATOR,
     COLOR_TOOLBAR_TOP_SEPARATOR_INACTIVE,
 
+    // Colors of vertical separators, such as on the bookmark bar or on the DL
+    // shelf.
+    COLOR_TOOLBAR_VERTICAL_SEPARATOR,
+
     // The color of a background tab, as well as the new tab button.
     COLOR_BACKGROUND_TAB,
+
+    // The color of the "instructions text" in an empty bookmarks bar.
+    COLOR_BOOKMARK_BAR_INSTRUCTIONS_TEXT,
 
     // Colors used for the detached (NTP) bookmark bar.
     COLOR_DETACHED_BOOKMARK_BAR_BACKGROUND,

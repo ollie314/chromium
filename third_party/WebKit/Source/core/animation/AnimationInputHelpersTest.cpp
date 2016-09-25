@@ -9,6 +9,7 @@
 #include "core/testing/DummyPageHolder.h"
 #include "platform/animation/TimingFunction.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include <memory>
 
 namespace blink {
 
@@ -26,16 +27,21 @@ public:
 
     void timingFunctionRoundTrips(const String& string, ExceptionState& exceptionState)
     {
+        ASSERT_FALSE(exceptionState.hadException());
         RefPtr<TimingFunction> timingFunction = parseTimingFunction(string, exceptionState);
+        EXPECT_FALSE(exceptionState.hadException());
         EXPECT_NE(nullptr, timingFunction);
         EXPECT_EQ(string, timingFunction->toString());
+        exceptionState.clearException();
     }
 
     void timingFunctionThrows(const String& string, ExceptionState& exceptionState)
     {
+        ASSERT_FALSE(exceptionState.hadException());
         RefPtr<TimingFunction> timingFunction = parseTimingFunction(string, exceptionState);
         EXPECT_TRUE(exceptionState.hadException());
         EXPECT_EQ(V8TypeError, exceptionState.code());
+        exceptionState.clearException();
     }
 
 
@@ -49,12 +55,11 @@ protected:
     void TearDown() override
     {
         document.release();
-        ThreadHeap::collectAllGarbage();
+        ThreadState::current()-> collectAllGarbage();
     }
 
-    OwnPtr<DummyPageHolder> pageHolder;
+    std::unique_ptr<DummyPageHolder> pageHolder;
     Persistent<Document> document;
-    TrackExceptionState exceptionState;
 };
 
 TEST_F(AnimationAnimationInputHelpersTest, ParseKeyframePropertyAttributes)
@@ -80,6 +85,7 @@ TEST_F(AnimationAnimationInputHelpersTest, ParseKeyframePropertyAttributes)
 
 TEST_F(AnimationAnimationInputHelpersTest, ParseAnimationTimingFunction)
 {
+    TrackExceptionState exceptionState;
     timingFunctionThrows("", exceptionState);
     timingFunctionThrows("initial", exceptionState);
     timingFunctionThrows("inherit", exceptionState);
@@ -90,15 +96,15 @@ TEST_F(AnimationAnimationInputHelpersTest, ParseAnimationTimingFunction)
     timingFunctionRoundTrips("ease-in", exceptionState);
     timingFunctionRoundTrips("ease-out", exceptionState);
     timingFunctionRoundTrips("ease-in-out", exceptionState);
-    timingFunctionRoundTrips("step-start", exceptionState);
-    timingFunctionRoundTrips("step-middle", exceptionState);
-    timingFunctionRoundTrips("step-end", exceptionState);
-    timingFunctionRoundTrips("steps(3, start)", exceptionState);
-    timingFunctionRoundTrips("steps(3, middle)", exceptionState);
-    timingFunctionRoundTrips("steps(3, end)", exceptionState);
     timingFunctionRoundTrips("cubic-bezier(0.1, 5, 0.23, 0)", exceptionState);
 
-    EXPECT_EQ("steps(3, end)", parseTimingFunction("steps(3)", exceptionState)->toString());
+    EXPECT_EQ("steps(1, start)", parseTimingFunction("step-start", exceptionState)->toString());
+    EXPECT_EQ("steps(1, middle)", parseTimingFunction("step-middle", exceptionState)->toString());
+    EXPECT_EQ("steps(1)", parseTimingFunction("step-end", exceptionState)->toString());
+    EXPECT_EQ("steps(3, start)", parseTimingFunction("steps(3, start)", exceptionState)->toString());
+    EXPECT_EQ("steps(3, middle)", parseTimingFunction("steps(3, middle)", exceptionState)->toString());
+    EXPECT_EQ("steps(3)", parseTimingFunction("steps(3, end)", exceptionState)->toString());
+    EXPECT_EQ("steps(3)", parseTimingFunction("steps(3)", exceptionState)->toString());
 
     timingFunctionThrows("steps(3, nowhere)", exceptionState);
     timingFunctionThrows("steps(-3, end)", exceptionState);

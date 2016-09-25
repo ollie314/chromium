@@ -23,8 +23,8 @@
 // Include FFmpeg header files.
 extern "C" {
 // Disable deprecated features which result in spammy compile warnings.  This
-// list of defines must mirror those in the 'defines' section of BUILD.gn file &
-// ffmpeg.gyp file or the headers below will generate different structures!
+// list of defines must mirror those in the 'defines' section of FFmpeg's
+// BUILD.gn file or the headers below will generate different structures!
 #define FF_API_CONVERGENCE_DURATION 0
 // Upstream libavcodec/utils.c still uses the deprecated
 // av_dup_packet(), causing deprecation warnings.
@@ -92,6 +92,9 @@ MEDIA_EXPORT base::TimeDelta ConvertFromTimeBase(const AVRational& time_base,
 // represent 0.5 seconds.
 MEDIA_EXPORT int64_t ConvertToTimeBase(const AVRational& time_base,
                                        const base::TimeDelta& timestamp);
+
+// Converts an FFmpeg audio codec ID into its corresponding supported codec id.
+MEDIA_EXPORT AudioCodec CodecIDToAudioCodec(AVCodecID codec_id);
 
 // Returns true if AVStream is successfully converted to a AudioDecoderConfig.
 // Returns false if conversion fails, in which case |config| is not modified.

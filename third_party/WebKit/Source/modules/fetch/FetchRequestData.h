@@ -12,7 +12,6 @@
 #include "platform/weborigin/ReferrerPolicy.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerRequest.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/text/AtomicString.h"
 #include "wtf/text/WTFString.h"
@@ -24,6 +23,7 @@ class ExecutionContext;
 class FetchHeaderList;
 class PasswordCredential;
 class SecurityOrigin;
+class ScriptState;
 class WebServiceWorkerRequest;
 
 class FetchRequestData final : public GarbageCollectedFinalized<FetchRequestData> {
@@ -32,10 +32,10 @@ public:
     enum Tainting { BasicTainting, CORSTainting, OpaqueTainting };
 
     static FetchRequestData* create();
-    static FetchRequestData* create(ExecutionContext*, const WebServiceWorkerRequest&);
+    static FetchRequestData* create(ScriptState*, const WebServiceWorkerRequest&);
     // Call Request::refreshBody() after calling clone() or pass().
-    FetchRequestData* clone(ExecutionContext*);
-    FetchRequestData* pass(ExecutionContext*);
+    FetchRequestData* clone(ScriptState*);
+    FetchRequestData* pass(ScriptState*);
     ~FetchRequestData();
 
     void setMethod(AtomicString method) { m_method = method; }

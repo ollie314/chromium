@@ -7,29 +7,25 @@
 
 #include "content/public/browser/render_frame_host.h"
 #include "media/mojo/interfaces/output_protection.mojom.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 
-// Implements media::interfaces::OutputProtection to check display links and
+// Implements media::mojom::OutputProtection to check display links and
 // their statuses. On all platforms we'll check the network links. On ChromeOS
 // we'll also check the hardware links. Can only be used on the UI thread.
-class OutputProtectionImpl : public media::interfaces::OutputProtection {
+class OutputProtectionImpl : public media::mojom::OutputProtection {
  public:
   static void Create(
       content::RenderFrameHost* render_frame_host,
-      mojo::InterfaceRequest<media::interfaces::OutputProtection> request);
+      mojo::InterfaceRequest<media::mojom::OutputProtection> request);
 
-  OutputProtectionImpl(content::RenderFrameHost* render_frame_host,
-                       mojo::InterfaceRequest<OutputProtection> request);
+  explicit OutputProtectionImpl(content::RenderFrameHost* render_frame_host);
   ~OutputProtectionImpl() final;
 
-  // media::interfaces::OutputProtection implementation.
+  // media::mojom::OutputProtection implementation.
   void QueryStatus(const QueryStatusCallback& callback) final;
   void EnableProtection(uint32_t desired_protection_mask,
                         const EnableProtectionCallback& callback) final;
 
  private:
-  mojo::StrongBinding<media::interfaces::OutputProtection> binding_;
-
   content::RenderFrameHost* const render_frame_host_;
 
   base::WeakPtrFactory<OutputProtectionImpl> weak_factory_;

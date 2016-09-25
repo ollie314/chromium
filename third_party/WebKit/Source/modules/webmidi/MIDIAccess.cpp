@@ -35,22 +35,22 @@
 #include "core/loader/DocumentLoader.h"
 #include "modules/webmidi/MIDIAccessInitializer.h"
 #include "modules/webmidi/MIDIConnectionEvent.h"
-#include "modules/webmidi/MIDIController.h"
 #include "modules/webmidi/MIDIInput.h"
 #include "modules/webmidi/MIDIInputMap.h"
 #include "modules/webmidi/MIDIOutput.h"
 #include "modules/webmidi/MIDIOutputMap.h"
 #include "modules/webmidi/MIDIPort.h"
 #include "platform/AsyncMethodRunner.h"
+#include <memory>
 
 namespace blink {
 
 using PortState = MIDIAccessor::MIDIPortState;
 
-MIDIAccess::MIDIAccess(PassOwnPtr<MIDIAccessor> accessor, bool sysexEnabled, const Vector<MIDIAccessInitializer::PortDescriptor>& ports, ExecutionContext* executionContext)
+MIDIAccess::MIDIAccess(std::unique_ptr<MIDIAccessor> accessor, bool sysexEnabled, const Vector<MIDIAccessInitializer::PortDescriptor>& ports, ExecutionContext* executionContext)
     : ActiveScriptWrappable(this)
     , ActiveDOMObject(executionContext)
-    , m_accessor(accessor)
+    , m_accessor(std::move(accessor))
     , m_sysexEnabled(sysexEnabled)
     , m_hasPendingActivity(false)
 {
@@ -72,7 +72,7 @@ MIDIAccess::~MIDIAccess()
 
 void MIDIAccess::dispose()
 {
-    m_accessor.clear();
+    m_accessor.reset();
 }
 
 EventListener* MIDIAccess::onstatechange()
@@ -88,7 +88,7 @@ void MIDIAccess::setOnstatechange(EventListener* listener)
 
 bool MIDIAccess::hasPendingActivity() const
 {
-    return m_hasPendingActivity && !getExecutionContext()->activeDOMObjectsAreStopped();
+    return m_hasPendingActivity && getExecutionContext() && !getExecutionContext()->activeDOMObjectsAreStopped();
 }
 
 MIDIInputMap* MIDIAccess::inputs() const
@@ -129,7 +129,7 @@ MIDIOutputMap* MIDIAccess::outputs() const
 
 void MIDIAccess::didAddInputPort(const String& id, const String& manufacturer, const String& name, const String& version, PortState state)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
     MIDIInput* port = MIDIInput::create(this, id, manufacturer, name, version, state);
     m_inputs.append(port);
     dispatchEvent(MIDIConnectionEvent::create(port));
@@ -137,7 +137,7 @@ void MIDIAccess::didAddInputPort(const String& id, const String& manufacturer, c
 
 void MIDIAccess::didAddOutputPort(const String& id, const String& manufacturer, const String& name, const String& version, PortState state)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
     unsigned portIndex = m_outputs.size();
     MIDIOutput* port = MIDIOutput::create(this, portIndex, id, manufacturer, name, version, state);
     m_outputs.append(port);
@@ -146,7 +146,7 @@ void MIDIAccess::didAddOutputPort(const String& id, const String& manufacturer, 
 
 void MIDIAccess::didSetInputPortState(unsigned portIndex, PortState state)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
     if (portIndex >= m_inputs.size())
         return;
 
@@ -155,7 +155,7 @@ void MIDIAccess::didSetInputPortState(unsigned portIndex, PortState state)
 
 void MIDIAccess::didSetOutputPortState(unsigned portIndex, PortState state)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
     if (portIndex >= m_outputs.size())
         return;
 
@@ -164,7 +164,7 @@ void MIDIAccess::didSetOutputPortState(unsigned portIndex, PortState state)
 
 void MIDIAccess::didReceiveMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStamp)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
     if (portIndex >= m_inputs.size())
         return;
 
@@ -172,7 +172,7 @@ void MIDIAccess::didReceiveMIDIData(unsigned portIndex, const unsigned char* dat
     // into time in milliseconds (a DOMHighResTimeStamp) according to the same time coordinate system as performance.now().
     // This is how timestamps are defined in the Web MIDI spec.
     Document* document = toDocument(getExecutionContext());
-    ASSERT(document);
+    DCHECK(document);
 
     double timeStampInMilliseconds = 1000 * document->loader()->timing().monotonicTimeToZeroBasedDocumentTime(timeStamp);
 
@@ -193,7 +193,7 @@ void MIDIAccess::sendMIDIData(unsigned portIndex, const unsigned char* data, siz
         timeStamp = 0;
     } else {
         Document* document = toDocument(getExecutionContext());
-        ASSERT(document);
+        DCHECK(document);
         double documentStartTime = document->loader()->timing().referenceMonotonicTime();
         timeStamp = documentStartTime + 0.001 * timeStampInMilliseconds;
     }
@@ -203,7 +203,7 @@ void MIDIAccess::sendMIDIData(unsigned portIndex, const unsigned char* data, siz
 
 void MIDIAccess::stop()
 {
-    m_accessor.clear();
+    m_accessor.reset();
 }
 
 DEFINE_TRACE(MIDIAccess)

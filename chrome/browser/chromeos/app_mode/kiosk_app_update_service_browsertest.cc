@@ -21,8 +21,8 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/scoped_path_override.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/browser_process.h"
@@ -67,7 +67,7 @@ class KioskAppUpdateServiceTest
     extensions::PlatformAppBrowserTest::SetUpInProcessBrowserTestFixture();
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    const base::FilePath& temp_dir = temp_dir_.path();
+    const base::FilePath& temp_dir = temp_dir_.GetPath();
 
     const base::TimeDelta uptime = base::TimeDelta::FromHours(3);
     const std::string uptime_seconds =

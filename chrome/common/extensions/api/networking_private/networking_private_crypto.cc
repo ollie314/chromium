@@ -14,15 +14,15 @@
 
 #include "base/logging.h"
 #include "base/strings/string_util.h"
+#include "components/cast_certificate/cast_cert_validator.h"
 #include "crypto/openssl_util.h"
 #include "crypto/rsa_private_key.h"
 #include "crypto/scoped_openssl_types.h"
-#include "extensions/common/cast/cast_cert_validator.h"
 #include "net/cert/pem_tokenizer.h"
 
 namespace {
 
-namespace cast_crypto = ::extensions::api::cast_crypto;
+namespace cast_crypto = ::cast_certificate;
 
 // Parses |pem_data| for a PEM block of |pem_type|.
 // Returns true if a |pem_type| block is found, storing the decoded result in
@@ -51,8 +51,7 @@ bool VerifyCredentials(
     const std::string& signature,
     const std::string& data,
     const std::string& connected_mac) {
-  base::Time::Exploded now;
-  base::Time::Now().UTCExplode(&now);
+  base::Time now = base::Time::Now();
   return VerifyCredentialsAtTime(certificate, intermediate_certificates,
                                  signature, data, connected_mac, now);
 }
@@ -63,7 +62,7 @@ bool VerifyCredentialsAtTime(
     const std::string& signature,
     const std::string& data,
     const std::string& connected_mac,
-    const base::Time::Exploded& time) {
+    const base::Time& time) {
   static const char kErrorPrefix[] = "Device verification failed. ";
 
   std::vector<std::string> headers;
@@ -97,7 +96,8 @@ bool VerifyCredentialsAtTime(
 
   std::unique_ptr<cast_crypto::CertVerificationContext> verification_context;
   if (!cast_crypto::VerifyDeviceCert(certs, time, &verification_context,
-                                     &unused_policy)) {
+                                     &unused_policy, nullptr,
+                                     cast_crypto::CRLPolicy::CRL_OPTIONAL)) {
     LOG(ERROR) << kErrorPrefix << "Failed verifying cast device cert";
     return false;
   }

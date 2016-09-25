@@ -24,7 +24,11 @@
 
 #include "core/page/scrolling/ScrollingCoordinator.h"
 
+#include "core/css/CSSStyleSheet.h"
+#include "core/css/StyleSheetList.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
+#include "core/frame/VisualViewport.h"
 #include "core/layout/LayoutPart.h"
 #include "core/layout/api/LayoutViewItem.h"
 #include "core/layout/compositing/CompositedLayerMapping.h"
@@ -52,14 +56,15 @@ public:
     ScrollingCoordinatorTest()
         : m_baseURL("http://www.test.com/")
     {
-        m_helper.initialize(true, 0, &m_mockWebViewClient, &configureSettings);
+        m_helper.initialize(true, nullptr, &m_mockWebViewClient, nullptr, &configureSettings);
         webViewImpl()->resize(IntSize(320, 240));
 
         // OSX attaches main frame scrollbars to the VisualViewport so the VisualViewport layers need
         // to be initialized.
         webViewImpl()->updateAllLifecyclePhases();
-        webViewImpl()->setRootGraphicsLayer(
-            webViewImpl()->mainFrameImpl()->frame()->view()->layoutView()->compositor()->rootGraphicsLayer());
+        WebFrameWidgetBase* mainFrameWidget = webViewImpl()->mainFrameImpl()->frameWidget();
+        mainFrameWidget->setRootGraphicsLayer(
+            webViewImpl()->mainFrameImpl()->frame()->view()->layoutViewItem().compositor()->rootGraphicsLayer());
     }
 
     ~ScrollingCoordinatorTest() override
@@ -93,8 +98,8 @@ public:
         return webScrollLayer;
     }
 
-    WebViewImpl* webViewImpl() const { return m_helper.webViewImpl(); }
-    LocalFrame* frame() const { return m_helper.webViewImpl()->mainFrameImpl()->frame(); }
+    WebViewImpl* webViewImpl() const { return m_helper.webView(); }
+    LocalFrame* frame() const { return m_helper.webView()->mainFrameImpl()->frame(); }
 
     WebLayerTreeView* webLayerTreeView() const { return webViewImpl()->layerTreeView(); }
 
@@ -130,6 +135,10 @@ TEST_F(ScrollingCoordinatorTest, fastScrollingByDefault)
     ASSERT_FALSE(rootScrollLayer->shouldScrollOnMainThread());
     ASSERT_EQ(WebEventListenerProperties::Nothing, webLayerTreeView()->eventListenerProperties(WebEventListenerClass::TouchStartOrMove));
     ASSERT_EQ(WebEventListenerProperties::Nothing, webLayerTreeView()->eventListenerProperties(WebEventListenerClass::MouseWheel));
+
+    WebLayer* innerViewportScrollLayer = page->frameHost().visualViewport().scrollLayer()->platformLayer();
+    ASSERT_TRUE(innerViewportScrollLayer->scrollable());
+    ASSERT_FALSE(innerViewportScrollLayer->shouldScrollOnMainThread());
 }
 
 TEST_F(ScrollingCoordinatorTest, fastScrollingCanBeDisabledWithSetting)
@@ -148,11 +157,19 @@ TEST_F(ScrollingCoordinatorTest, fastScrollingCanBeDisabledWithSetting)
     WebLayer* rootScrollLayer = getRootScrollLayer();
     ASSERT_TRUE(rootScrollLayer->scrollable());
     ASSERT_TRUE(rootScrollLayer->shouldScrollOnMainThread());
+
+    // Main scrolling should also propagate to inner viewport layer.
+    WebLayer* innerViewportScrollLayer = page->frameHost().visualViewport().scrollLayer()->platformLayer();
+    ASSERT_TRUE(innerViewportScrollLayer->scrollable());
+    ASSERT_TRUE(innerViewportScrollLayer->shouldScrollOnMainThread());
 }
 
 
 TEST_F(ScrollingCoordinatorTest, fastFractionalScrollingDiv)
 {
+    bool origFractionalOffsetsEnabled = RuntimeEnabledFeatures::fractionalScrollOffsetsEnabled();
+    RuntimeEnabledFeatures::setFractionalScrollOffsetsEnabled(true);
+
     registerMockedHttpURLLoad("fractional-scroll-div.html");
     navigateTo(m_baseURL + "fractional-scroll-div.html");
     forceFullCompositingUpdate();
@@ -182,6 +199,8 @@ TEST_F(ScrollingCoordinatorTest, fastFractionalScrollingDiv)
     ASSERT_TRUE(webScrollLayer);
     ASSERT_NEAR(1.2, webScrollLayer->scrollPositionDouble().x, 0.01);
     ASSERT_NEAR(1.2, webScrollLayer->scrollPositionDouble().y, 0.01);
+
+    RuntimeEnabledFeatures::setFractionalScrollOffsetsEnabled(origFractionalOffsetsEnabled);
 }
 
 static WebLayer* webLayerFromElement(Element* element)
@@ -359,7 +378,7 @@ TEST_F(ScrollingCoordinatorTest, updateEventHandlersDuringTeardown)
 
     // Simulate detaching the document from its DOM window. This should not
     // cause a crash when the WebViewImpl is closed by the test runner.
-    frame()->document()->detach();
+    frame()->document()->shutdown();
 }
 
 TEST_F(ScrollingCoordinatorTest, clippedBodyTest)
@@ -489,10 +508,10 @@ TEST_F(ScrollingCoordinatorTest, iframeScrolling)
     ASSERT_TRUE(layoutPart->widget()->isFrameView());
 
     FrameView* innerFrameView = toFrameView(layoutPart->widget());
-    LayoutView* innerLayoutView = innerFrameView->layoutView();
-    ASSERT_TRUE(innerLayoutView);
+    LayoutViewItem innerLayoutViewItem = innerFrameView->layoutViewItem();
+    ASSERT_FALSE(innerLayoutViewItem.isNull());
 
-    PaintLayerCompositor* innerCompositor = innerLayoutView->compositor();
+    PaintLayerCompositor* innerCompositor = innerLayoutViewItem.compositor();
     ASSERT_TRUE(innerCompositor->inCompositingMode());
     ASSERT_TRUE(innerCompositor->scrollLayer());
 
@@ -533,10 +552,10 @@ TEST_F(ScrollingCoordinatorTest, rtlIframe)
     ASSERT_TRUE(layoutPart->widget()->isFrameView());
 
     FrameView* innerFrameView = toFrameView(layoutPart->widget());
-    LayoutView* innerLayoutView = innerFrameView->layoutView();
-    ASSERT_TRUE(innerLayoutView);
+    LayoutViewItem innerLayoutViewItem = innerFrameView->layoutViewItem();
+    ASSERT_FALSE(innerLayoutViewItem.isNull());
 
-    PaintLayerCompositor* innerCompositor = innerLayoutView->compositor();
+    PaintLayerCompositor* innerCompositor = innerLayoutViewItem.compositor();
     ASSERT_TRUE(innerCompositor->inCompositingMode());
     ASSERT_TRUE(innerCompositor->scrollLayer());
 
@@ -628,6 +647,40 @@ TEST_F(ScrollingCoordinatorTest, FixedPositionLosingBackingShouldTriggerMainThre
 
     EXPECT_FALSE(static_cast<LayoutBoxModelObject*>(fixedPos->layoutObject())->layer()->hasCompositedLayerMapping());
     EXPECT_TRUE(scrollLayer->shouldScrollOnMainThread());
+}
+
+TEST_F(ScrollingCoordinatorTest, CustomScrollbarShouldTriggerMainThreadScroll)
+{
+    webViewImpl()->settings()->setPreferCompositingToLCDTextEnabled(true);
+    webViewImpl()->setDeviceScaleFactor(2.f);
+    registerMockedHttpURLLoad("custom_scrollbar.html");
+    navigateTo(m_baseURL + "custom_scrollbar.html");
+    forceFullCompositingUpdate();
+
+    Document* document = frame()->document();
+    Element* container = document->getElementById("container");
+    Element* content = document->getElementById("content");
+    DCHECK_EQ(container->getAttribute(HTMLNames::classAttr), "custom_scrollbar");
+    DCHECK(container);
+    DCHECK(content);
+
+    LayoutObject* layoutObject = container->layoutObject();
+    ASSERT_TRUE(layoutObject->isBox());
+    LayoutBox* box = toLayoutBox(layoutObject);
+    ASSERT_TRUE(box->usesCompositedScrolling());
+    CompositedLayerMapping* compositedLayerMapping = box->layer()->compositedLayerMapping();
+    GraphicsLayer* scrollbarGraphicsLayer = compositedLayerMapping->layerForVerticalScrollbar();
+    ASSERT_TRUE(scrollbarGraphicsLayer);
+    ASSERT_TRUE(scrollbarGraphicsLayer->platformLayer()->shouldScrollOnMainThread());
+    ASSERT_TRUE(scrollbarGraphicsLayer->platformLayer()->mainThreadScrollingReasons() & MainThreadScrollingReason::kCustomScrollbarScrolling);
+
+    // remove custom scrollbar class, the scrollbar is expected to scroll on
+    // impl thread as it is an overlay scrollbar.
+    container->removeAttribute("class");
+    forceFullCompositingUpdate();
+    scrollbarGraphicsLayer = compositedLayerMapping->layerForVerticalScrollbar();
+    ASSERT_FALSE(scrollbarGraphicsLayer->platformLayer()->shouldScrollOnMainThread());
+    ASSERT_FALSE(scrollbarGraphicsLayer->platformLayer()->mainThreadScrollingReasons() & MainThreadScrollingReason::kCustomScrollbarScrolling);
 }
 
 } // namespace blink

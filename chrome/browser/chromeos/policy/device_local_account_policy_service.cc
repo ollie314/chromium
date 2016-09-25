@@ -18,8 +18,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/thread_task_runner_handle.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/affiliated_cloud_policy_invalidator.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
@@ -37,13 +36,12 @@
 #include "components/policy/core/common/cloud/cloud_policy_refresh_scheduler.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "components/policy/core/common/cloud/resource_cache.h"
-#include "components/policy/core/common/cloud/system_policy_request_context.h"
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/core/common/policy_switches.h"
+#include "components/policy/policy_constants.h"
+#include "components/policy/proto/device_management_backend.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "policy/policy_constants.h"
-#include "policy/proto/device_management_backend.pb.h"
 #include "url/gurl.h"
 
 namespace em = enterprise_management;
@@ -53,25 +51,24 @@ namespace policy {
 namespace {
 
 // Creates and initializes a cloud policy client. Returns nullptr if the device
-// is not enterprise-enrolled.
+// doesn't have credentials in device settings (i.e. is not
+// enterprise-enrolled).
 std::unique_ptr<CloudPolicyClient> CreateClient(
     chromeos::DeviceSettingsService* device_settings_service,
     DeviceManagementService* device_management_service,
     scoped_refptr<net::URLRequestContextGetter> system_request_context) {
   const em::PolicyData* policy_data = device_settings_service->policy_data();
   if (!policy_data ||
-      GetManagementMode(*policy_data) != MANAGEMENT_MODE_ENTERPRISE_MANAGED ||
+      !policy_data->has_request_token() ||
+      !policy_data->has_device_id() ||
       !device_management_service) {
     return std::unique_ptr<CloudPolicyClient>();
   }
 
-  scoped_refptr<net::URLRequestContextGetter> request_context =
-      new SystemPolicyRequestContext(
-          system_request_context, GetUserAgent());
-
   std::unique_ptr<CloudPolicyClient> client(new CloudPolicyClient(
       std::string(), std::string(), kPolicyVerificationKeyHash,
-      device_management_service, request_context));
+      device_management_service, system_request_context,
+      nullptr /* signing_service */));
   client->SetupRegistration(policy_data->request_token(),
                             policy_data->device_id());
   return client;
@@ -95,7 +92,7 @@ void DeleteOrphanedCaches(
   for (base::FilePath path = enumerator.Next(); !path.empty();
        path = enumerator.Next()) {
     const std::string subdirectory(path.BaseName().MaybeAsASCII());
-    if (!ContainsKey(subdirectories_to_keep, subdirectory))
+    if (!base::ContainsKey(subdirectories_to_keep, subdirectory))
       base::DeleteFile(path, true);
   }
 }
@@ -196,7 +193,7 @@ void DeviceLocalAccountPolicyBroker::UpdateRefreshDelay() {
         store_->policy_map().GetValue(key::kPolicyRefreshRate);
     int delay = 0;
     if (policy_value && policy_value->GetAsInteger(&delay))
-      core_.refresh_scheduler()->SetRefreshDelay(delay);
+      core_.refresh_scheduler()->SetDesiredRefreshDelay(delay);
   }
 }
 
@@ -233,14 +230,14 @@ void DeviceLocalAccountPolicyBroker::CreateComponentCloudPolicyService(
 
   std::unique_ptr<ResourceCache> resource_cache(
       new ResourceCache(component_policy_cache_path_,
-                        content::BrowserThread::GetMessageLoopProxyForThread(
+                        content::BrowserThread::GetTaskRunnerForThread(
                             content::BrowserThread::FILE)));
 
   component_policy_service_.reset(new ComponentCloudPolicyService(
       this, &schema_registry_, core(), client, std::move(resource_cache),
-      request_context, content::BrowserThread::GetMessageLoopProxyForThread(
+      request_context, content::BrowserThread::GetTaskRunnerForThread(
                            content::BrowserThread::FILE),
-      content::BrowserThread::GetMessageLoopProxyForThread(
+      content::BrowserThread::GetTaskRunnerForThread(
           content::BrowserThread::IO)));
 }
 

@@ -70,7 +70,8 @@ public:
     void parseString(const String&);
     void parseStringAtPosition(const String&, const TextPosition&);
 
-    bool isCacheable() const;
+    bool isCacheableForResource() const;
+    bool isCacheableForStyleElement() const;
 
     bool isLoading() const;
 
@@ -81,6 +82,7 @@ public:
     bool hasSingleOwnerNode() const;
     Node* singleOwnerNode() const;
     Document* singleOwnerDocument() const;
+    bool hasSingleOwnerDocument() const { return m_hasSingleOwnerDocument; }
 
     const String& charset() const { return m_parserContext.charset(); }
 
@@ -90,7 +92,7 @@ public:
     void setHasSyntacticallyValidCSSHeader(bool isValidCss);
     bool hasSyntacticallyValidCSSHeader() const { return m_hasSyntacticallyValidCSSHeader; }
 
-    void setHasFontFaceRule(bool b) { m_hasFontFaceRule = b; }
+    void setHasFontFaceRule() { m_hasFontFaceRule = true; }
     bool hasFontFaceRule() const { return m_hasFontFaceRule; }
     void findFontFaceRules(HeapVector<Member<const StyleRuleFontFace>>& fontFaceRules);
 
@@ -139,11 +141,12 @@ public:
     bool isMutable() const { return m_isMutable; }
     void setMutable() { m_isMutable = true; }
 
-    void removeSheetFromCache(Document*);
+    bool isUsedFromTextCache() const { return m_isUsedFromTextCache; }
+    void setIsUsedFromTextCache() { m_isUsedFromTextCache = true; }
 
-    bool isInMemoryCache() const { return m_isInMemoryCache; }
-    void addedToMemoryCache();
-    void removedFromMemoryCache();
+    bool isReferencedFromResource() const { return m_referencedFromResource; }
+    void setReferencedFromResource(CSSStyleSheetResource*);
+    void clearReferencedFromResource();
 
     void setHasMediaQueries();
     bool hasMediaQueries() const { return m_hasMediaQueries; }
@@ -177,14 +180,15 @@ private:
     using PrefixNamespaceURIMap = HashMap<AtomicString, AtomicString>;
     PrefixNamespaceURIMap m_namespaces;
     AtomicString m_defaultNamespace;
+    WeakMember<CSSStyleSheetResource> m_referencedFromResource;
 
     bool m_hasSyntacticallyValidCSSHeader : 1;
     bool m_didLoadErrorOccur : 1;
     bool m_isMutable : 1;
-    bool m_isInMemoryCache : 1;
     bool m_hasFontFaceRule : 1;
     bool m_hasMediaQueries : 1;
     bool m_hasSingleOwnerDocument : 1;
+    bool m_isUsedFromTextCache : 1;
 
     CSSParserContext m_parserContext;
 

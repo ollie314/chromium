@@ -26,6 +26,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -33,7 +34,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
@@ -58,21 +58,15 @@ class CastTransportImpl final : public CastTransport {
   CastTransportImpl(
       base::TickClock* clock,  // Owned by the caller.
       base::TimeDelta logging_flush_interval,
-      scoped_ptr<Client> client,
-      scoped_ptr<PacketTransport> transport,
+      std::unique_ptr<Client> client,
+      std::unique_ptr<PacketTransport> transport,
       const scoped_refptr<base::SingleThreadTaskRunner>& transport_task_runner);
 
   ~CastTransportImpl() final;
 
   // CastTransport implementation for sending.
-  void InitializeAudio(const CastTransportRtpConfig& config,
-                       const RtcpCastMessageCallback& cast_message_cb,
-                       const RtcpRttCallback& rtt_cb,
-                       const RtcpPliCallback& pli_cb) final;
-  void InitializeVideo(const CastTransportRtpConfig& config,
-                       const RtcpCastMessageCallback& cast_message_cb,
-                       const RtcpRttCallback& rtt_cb,
-                       const RtcpPliCallback& pli_cb) final;
+  void InitializeStream(const CastTransportRtpConfig& config,
+                        std::unique_ptr<RtcpObserver> rtcp_observer) final;
   void InsertFrame(uint32_t ssrc, const EncodedFrame& frame) final;
 
   void SendSenderReport(uint32_t ssrc,
@@ -80,9 +74,9 @@ class CastTransportImpl final : public CastTransport {
                         RtpTimeTicks current_time_as_rtp_timestamp) final;
 
   void CancelSendingFrames(uint32_t ssrc,
-                           const std::vector<uint32_t>& frame_ids) final;
+                           const std::vector<FrameId>& frame_ids) final;
 
-  void ResendFrameForKickstart(uint32_t ssrc, uint32_t frame_id) final;
+  void ResendFrameForKickstart(uint32_t ssrc, FrameId frame_id) final;
 
   PacketReceiverCallback PacketReceiverForTesting() final;
 
@@ -117,6 +111,11 @@ class CastTransportImpl final : public CastTransport {
   void SendRtcpFromRtpReceiver() final;
 
  private:
+  // Handle received RTCP messages on RTP sender.
+  class RtcpClient;
+
+  struct RtpStreamSession;
+
   FRIEND_TEST_ALL_PREFIXES(CastTransportImplTest, NacksCancelRetransmits);
   FRIEND_TEST_ALL_PREFIXES(CastTransportImplTest, CancelRetransmits);
   FRIEND_TEST_ALL_PREFIXES(CastTransportImplTest, Kickstart);
@@ -136,7 +135,7 @@ class CastTransportImpl final : public CastTransport {
   void SendRawEvents();
 
   // Called when a packet is received.
-  bool OnReceivedPacket(scoped_ptr<Packet> packet);
+  bool OnReceivedPacket(std::unique_ptr<Packet> packet);
 
   // Called when a log message is received.
   void OnReceivedLogMessage(EventMediaType media_type,
@@ -144,13 +143,12 @@ class CastTransportImpl final : public CastTransport {
 
   // Called when a RTCP Cast message is received.
   void OnReceivedCastMessage(uint32_t ssrc,
-                             const RtcpCastMessageCallback& cast_message_cb,
                              const RtcpCastMessage& cast_message);
 
   base::TickClock* const clock_;  // Not owned by this class.
   const base::TimeDelta logging_flush_interval_;
-  const scoped_ptr<Client> transport_client_;
-  const scoped_ptr<PacketTransport> transport_;
+  const std::unique_ptr<Client> transport_client_;
+  const std::unique_ptr<PacketTransport> transport_;
   const scoped_refptr<base::SingleThreadTaskRunner> transport_task_runner_;
 
   // FrameEvents and PacketEvents pending delivery via raw events callback.
@@ -161,21 +159,6 @@ class CastTransportImpl final : public CastTransport {
 
   // Packet sender that performs pacing.
   PacedSender pacer_;
-
-  // Packetizer for audio and video frames.
-  scoped_ptr<RtpSender> audio_sender_;
-  scoped_ptr<RtpSender> video_sender_;
-
-  // Maintains RTCP session for audio and video.
-  scoped_ptr<SenderRtcpSession> audio_rtcp_session_;
-  scoped_ptr<SenderRtcpSession> video_rtcp_session_;
-
-  // Encrypts data in EncodedFrames before they are sent.  Note that it's
-  // important for the encryption to happen here, in code that would execute in
-  // the main browser process, for security reasons.  This helps to mitigate
-  // the damage that could be caused by a compromised renderer process.
-  TransportEncryptionHandler audio_encryptor_;
-  TransportEncryptionHandler video_encryptor_;
 
   // Right after a frame is sent we record the number of bytes sent to the
   // socket. We record the corresponding bytes sent for the most recent ACKed
@@ -188,14 +171,19 @@ class CastTransportImpl final : public CastTransport {
   // While non-null, global WiFi behavior modifications are in effect. This is
   // used, for example, to turn off WiFi scanning that tends to interfere with
   // the reliability of UDP packet transmission.
-  scoped_ptr<net::ScopedWifiOptions> wifi_options_autoreset_;
+  std::unique_ptr<net::ScopedWifiOptions> wifi_options_autoreset_;
 
   // Do not initialize the |rtcp_builder_at_rtp_receiver_| if the RTP receiver
   // SSRC does not match these ssrcs. Only RTP receiver needs to register its
   // SSRC in this set.
   std::set<uint32_t> valid_rtp_receiver_ssrcs_;
 
-  scoped_ptr<RtcpBuilder> rtcp_builder_at_rtp_receiver_;
+  std::unique_ptr<RtcpBuilder> rtcp_builder_at_rtp_receiver_;
+
+  // Records the initialized stream sessions on RTP sender. The sender SSRC is
+  // used as key since it is unique for each RTP stream.
+  using SessionMap = std::map<uint32_t, std::unique_ptr<RtpStreamSession>>;
+  SessionMap sessions_;
 
   base::WeakPtrFactory<CastTransportImpl> weak_factory_;
 

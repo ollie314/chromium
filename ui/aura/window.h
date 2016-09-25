@@ -30,8 +30,11 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/wm/public/window_types.h"
 
-namespace gfx {
+namespace display {
 class Display;
+}
+
+namespace gfx {
 class Transform;
 class Vector2d;
 }
@@ -70,6 +73,9 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
                            public ui::EventTarget,
                            public ui::GestureConsumer {
  public:
+  // Initial value of id() for newly created windows.
+  static constexpr int kInitialId = -1;
+
   // Used when stacking windows.
   enum StackDirection {
     STACK_ABOVE,
@@ -172,7 +178,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   // Changes the bounds of the window in the screen coordintates.
   // If present, the window's parent's LayoutManager may adjust the bounds.
   void SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen_coords,
-                         const gfx::Display& dst_display);
+                         const display::Display& dst_display);
 
   // Returns the target bounds of the window. If the window's layer is
   // not animating, it simply returns the current bounds.

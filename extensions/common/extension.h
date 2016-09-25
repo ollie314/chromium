@@ -6,6 +6,7 @@
 #define EXTENSIONS_COMMON_EXTENSION_H_
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -14,8 +15,8 @@
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
+#include "extensions/common/extension_id.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/install_warning.h"
 #include "extensions/common/manifest.h"
@@ -35,13 +36,6 @@ namespace extensions {
 class PermissionSet;
 class PermissionsData;
 class PermissionsParser;
-
-// Uniquely identifies an Extension, using 32 characters from the alphabet
-// 'a'-'p'.  An empty string represents "no extension".
-//
-// Note: If this gets used heavily in files that don't otherwise need to include
-// extension.h, we should pull it into a dedicated header.
-typedef std::string ExtensionId;
 
 // Represents a Chrome extension.
 // Once created, an Extension object is immutable, with the exception of its
@@ -88,7 +82,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
                                            // disabled for user prompting.
     DISABLE_UPDATE_REQUIRED_BY_POLICY = 1 << 14,  // Doesn't meet minimum
                                                   // version requirement.
-    DISABLE_REASON_LAST = 1 << 15,  // This should always be the last value
+    DISABLE_CUSTODIAN_APPROVAL_REQUIRED = 1 << 15,  // Supervised user needs
+                                                    // approval by custodian.
+    DISABLE_REASON_LAST = 1 << 16,  // This should always be the last value
   };
 
   // A base class for parsed manifest data that APIs want to store on
@@ -152,9 +148,8 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     // also installed by Default (i.e. WAS_INSTALLED_BY_DEFAULT is also true).
     WAS_INSTALLED_BY_OEM = 1 << 10,
 
-    // |WAS_INSTALLED_BY_CUSTODIAN| means this extension was installed by the
-    // custodian of a supervised user.
-    WAS_INSTALLED_BY_CUSTODIAN = 1 << 11,
+    // DEPRECATED: WAS_INSTALLED_BY_CUSTODIAN is now stored as a pref instead.
+    // WAS_INSTALLED_BY_CUSTODIAN = 1 << 11,
 
     // |MAY_BE_UNTRUSTED| indicates that this extension came from a potentially
     // unsafe source (e.g., sideloaded from a local CRX file via the Windows
@@ -331,9 +326,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool was_installed_by_oem() const {
     return (creation_flags_ & WAS_INSTALLED_BY_OEM) != 0;
   }
-  bool was_installed_by_custodian() const {
-    return (creation_flags_ & WAS_INSTALLED_BY_CUSTODIAN) != 0;
-  }
 
   // Type-related queries.
   bool is_app() const;
@@ -359,7 +351,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
                               base::string16* error);
 
   Extension(const base::FilePath& path,
-            scoped_ptr<extensions::Manifest> manifest);
+            std::unique_ptr<extensions::Manifest> manifest);
   virtual ~Extension();
 
   // Initialize the extension from a parsed manifest.
@@ -424,10 +416,10 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // The parser for the manifest's permissions. This is NULL anytime not during
   // initialization.
   // TODO(rdevlin.cronin): This doesn't really belong here.
-  scoped_ptr<PermissionsParser> permissions_parser_;
+  std::unique_ptr<PermissionsParser> permissions_parser_;
 
   // The active permissions for the extension.
-  scoped_ptr<PermissionsData> permissions_data_;
+  std::unique_ptr<PermissionsData> permissions_data_;
 
   // Any warnings that occurred when trying to create/parse the extension.
   std::vector<InstallWarning> install_warnings_;
@@ -436,7 +428,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   GURL extension_url_;
 
   // The extension's version.
-  scoped_ptr<base::Version> version_;
+  std::unique_ptr<base::Version> version_;
 
   // The extension's user visible version name.
   std::string version_name_;
@@ -452,10 +444,10 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   std::string public_key_;
 
   // The manifest from which this extension was created.
-  scoped_ptr<Manifest> manifest_;
+  std::unique_ptr<Manifest> manifest_;
 
   // Stored parsed manifest data.
-  using ManifestDataMap = std::map<std::string, scoped_ptr<ManifestData>>;
+  using ManifestDataMap = std::map<std::string, std::unique_ptr<ManifestData>>;
   ManifestDataMap manifest_data_;
 
   // Set to true at the end of InitValue when initialization is finished.
@@ -495,7 +487,7 @@ struct ExtensionInfo {
                 Manifest::Location location);
   ~ExtensionInfo();
 
-  scoped_ptr<base::DictionaryValue> extension_manifest;
+  std::unique_ptr<base::DictionaryValue> extension_manifest;
   ExtensionId extension_id;
   base::FilePath extension_path;
   Manifest::Location extension_location;

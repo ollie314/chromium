@@ -34,7 +34,8 @@
 #include "core/events/EventDispatchMediator.h"
 #include "core/events/EventDispatcher.h"
 #include "core/events/EventTarget.h"
-#include "wtf/OwnPtr.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -47,15 +48,15 @@ ScopedEventQueue::ScopedEventQueue()
 
 ScopedEventQueue::~ScopedEventQueue()
 {
-    ASSERT(!m_scopingLevel);
-    ASSERT(!m_queuedEventDispatchMediators.size());
+    DCHECK(!m_scopingLevel);
+    DCHECK(!m_queuedEventDispatchMediators.size());
 }
 
 void ScopedEventQueue::initialize()
 {
-    ASSERT(!s_instance);
-    OwnPtr<ScopedEventQueue> instance = adoptPtr(new ScopedEventQueue);
-    s_instance = instance.leakPtr();
+    DCHECK(!s_instance);
+    std::unique_ptr<ScopedEventQueue> instance = wrapUnique(new ScopedEventQueue);
+    s_instance = instance.release();
 }
 
 void ScopedEventQueue::enqueueEventDispatchMediator(EventDispatchMediator* mediator)
@@ -77,7 +78,7 @@ void ScopedEventQueue::dispatchAllEvents()
 
 void ScopedEventQueue::dispatchEvent(EventDispatchMediator* mediator) const
 {
-    ASSERT(mediator->event().target());
+    DCHECK(mediator->event().target());
     Node* node = mediator->event().target()->toNode();
     EventDispatcher::dispatchEvent(*node, mediator);
 }
@@ -97,7 +98,7 @@ void ScopedEventQueue::incrementScopingLevel()
 
 void ScopedEventQueue::decrementScopingLevel()
 {
-    ASSERT(m_scopingLevel);
+    DCHECK(m_scopingLevel);
     m_scopingLevel--;
     if (!m_scopingLevel)
         dispatchAllEvents();

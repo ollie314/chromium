@@ -7,6 +7,8 @@
 #include "base/bind.h"
 #include "base/single_thread_task_runner.h"
 #include "chromecast/base/task_runner_impl.h"
+#include "chromecast/browser/media/video_resolution_policy.h"
+#include "chromecast/media/cdm/cast_cdm_context.h"
 #include "chromecast/media/cma/base/balanced_media_task_runner_factory.h"
 #include "chromecast/media/cma/base/cma_logging.h"
 #include "chromecast/media/cma/base/demuxer_stream_adapter.h"
@@ -16,7 +18,9 @@
 #include "chromecast/public/media/media_pipeline_device_params.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/demuxer_stream.h"
+#include "media/base/demuxer_stream_provider.h"
 #include "media/base/media_log.h"
+#include "media/base/renderer_client.h"
 
 namespace chromecast {
 namespace media {
@@ -29,31 +33,44 @@ const base::TimeDelta kMaxDeltaFetcher(base::TimeDelta::FromMilliseconds(2000));
 
 CastRenderer::CastRenderer(
     const CreateMediaPipelineBackendCB& create_backend_cb,
-    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner)
+    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+    const std::string& audio_device_id,
+    VideoResolutionPolicy* video_resolution_policy,
+    MediaResourceTracker* media_resource_tracker)
     : create_backend_cb_(create_backend_cb),
       task_runner_(task_runner),
+      audio_device_id_(audio_device_id),
+      video_resolution_policy_(video_resolution_policy),
+      media_resource_tracker_(media_resource_tracker),
+      client_(nullptr),
+      cast_cdm_context_(nullptr),
       media_task_runner_factory_(
-          new BalancedMediaTaskRunnerFactory(kMaxDeltaFetcher)) {
+          new BalancedMediaTaskRunnerFactory(kMaxDeltaFetcher)),
+      weak_factory_(this) {
   CMALOG(kLogControl) << __FUNCTION__ << ": " << this;
+
+  if (video_resolution_policy_)
+    video_resolution_policy_->AddObserver(this);
 }
 
 CastRenderer::~CastRenderer() {
   CMALOG(kLogControl) << __FUNCTION__ << ": " << this;
   DCHECK(task_runner_->BelongsToCurrentThread());
+
+  if (video_resolution_policy_)
+    video_resolution_policy_->RemoveObserver(this);
 }
 
 void CastRenderer::Initialize(
     ::media::DemuxerStreamProvider* demuxer_stream_provider,
-    const ::media::PipelineStatusCB& init_cb,
-    const ::media::StatisticsCB& statistics_cb,
-    const ::media::BufferingStateCB& buffering_state_cb,
-    const base::Closure& ended_cb,
-    const ::media::PipelineStatusCB& error_cb,
-    const base::Closure& waiting_for_decryption_key_cb) {
+    ::media::RendererClient* client,
+    const ::media::PipelineStatusCB& init_cb) {
   CMALOG(kLogControl) << __FUNCTION__ << ": " << this;
   DCHECK(task_runner_->BelongsToCurrentThread());
 
   // Create pipeline backend.
+  media_resource_usage_.reset(
+      new MediaResourceTracker::ScopedUsage(media_resource_tracker_));
   backend_task_runner_.reset(new TaskRunnerImpl());
   // TODO(erickung): crbug.com/443956. Need to provide right LoadType.
   LoadType load_type = kLoadTypeMediaSource;
@@ -63,13 +80,15 @@ void CastRenderer::Initialize(
           : MediaPipelineDeviceParams::kModeSyncPts;
   MediaPipelineDeviceParams params(sync_type, backend_task_runner_.get());
   std::unique_ptr<MediaPipelineBackend> backend =
-      create_backend_cb_.Run(params);
+      create_backend_cb_.Run(params, audio_device_id_);
 
   // Create pipeline.
   MediaPipelineClient pipeline_client;
-  pipeline_client.error_cb = error_cb;
-  pipeline_client.buffering_state_cb = buffering_state_cb;
-  pipeline_.reset(new MediaPipelineImpl);
+  pipeline_client.error_cb =
+      base::Bind(&CastRenderer::OnError, weak_factory_.GetWeakPtr());
+  pipeline_client.buffering_state_cb = base::Bind(
+      &CastRenderer::OnBufferingStateChange, weak_factory_.GetWeakPtr());
+  pipeline_.reset(new MediaPipelineImpl());
   pipeline_->SetClient(pipeline_client);
   pipeline_->Initialize(load_type, std::move(backend));
 
@@ -78,13 +97,17 @@ void CastRenderer::Initialize(
       demuxer_stream_provider->GetStream(::media::DemuxerStream::AUDIO);
   if (audio_stream) {
     AvPipelineClient audio_client;
-    audio_client.wait_for_key_cb = waiting_for_decryption_key_cb;
-    audio_client.eos_cb =
-        base::Bind(&CastRenderer::OnEos, base::Unretained(this), STREAM_AUDIO);
-    audio_client.playback_error_cb = error_cb;
-    audio_client.statistics_cb = statistics_cb;
+    audio_client.wait_for_key_cb = base::Bind(
+        &CastRenderer::OnWaitingForDecryptionKey, weak_factory_.GetWeakPtr());
+    audio_client.eos_cb = base::Bind(&CastRenderer::OnEnded,
+                                     weak_factory_.GetWeakPtr(), STREAM_AUDIO);
+    audio_client.playback_error_cb =
+        base::Bind(&CastRenderer::OnError, weak_factory_.GetWeakPtr());
+    audio_client.statistics_cb = base::Bind(&CastRenderer::OnStatisticsUpdate,
+                                            weak_factory_.GetWeakPtr());
     std::unique_ptr<CodedFrameProvider> frame_provider(new DemuxerStreamAdapter(
         task_runner_, media_task_runner_factory_, audio_stream));
+
     ::media::PipelineStatus status =
         pipeline_->InitializeAudio(audio_stream->audio_decoder_config(),
                                    audio_client, std::move(frame_provider));
@@ -100,19 +123,23 @@ void CastRenderer::Initialize(
       demuxer_stream_provider->GetStream(::media::DemuxerStream::VIDEO);
   if (video_stream) {
     VideoPipelineClient video_client;
-    // TODO(alokp): Set VideoPipelineClient::natural_size_changed_cb.
-    video_client.av_pipeline_client.wait_for_key_cb =
-        waiting_for_decryption_key_cb;
-    video_client.av_pipeline_client.eos_cb =
-        base::Bind(&CastRenderer::OnEos, base::Unretained(this), STREAM_VIDEO);
-    video_client.av_pipeline_client.playback_error_cb = error_cb;
-    video_client.av_pipeline_client.statistics_cb = statistics_cb;
+    video_client.av_pipeline_client.wait_for_key_cb = base::Bind(
+        &CastRenderer::OnWaitingForDecryptionKey, weak_factory_.GetWeakPtr());
+    video_client.av_pipeline_client.eos_cb = base::Bind(
+        &CastRenderer::OnEnded, weak_factory_.GetWeakPtr(), STREAM_VIDEO);
+    video_client.av_pipeline_client.playback_error_cb =
+        base::Bind(&CastRenderer::OnError, weak_factory_.GetWeakPtr());
+    video_client.av_pipeline_client.statistics_cb = base::Bind(
+        &CastRenderer::OnStatisticsUpdate, weak_factory_.GetWeakPtr());
+    video_client.natural_size_changed_cb = base::Bind(
+        &CastRenderer::OnVideoNaturalSizeChange, weak_factory_.GetWeakPtr());
     // TODO(alokp): Change MediaPipelineImpl API to accept a single config
     // after CmaRenderer is deprecated.
     std::vector<::media::VideoDecoderConfig> video_configs;
     video_configs.push_back(video_stream->video_decoder_config());
     std::unique_ptr<CodedFrameProvider> frame_provider(new DemuxerStreamAdapter(
         task_runner_, media_task_runner_factory_, video_stream));
+
     ::media::PipelineStatus status = pipeline_->InitializeVideo(
         video_configs, video_client, std::move(frame_provider));
     if (status != ::media::PIPELINE_OK) {
@@ -122,14 +149,36 @@ void CastRenderer::Initialize(
     video_stream->EnableBitstreamConverter();
   }
 
-  ended_cb_ = ended_cb;
+  if (cast_cdm_context_) {
+    pipeline_->SetCdm(cast_cdm_context_);
+    cast_cdm_context_ = nullptr;
+  }
+
+  client_ = client;
   init_cb.Run(::media::PIPELINE_OK);
+
+  if (video_stream) {
+    // Force compositor to treat video as opaque (needed for overlay codepath).
+    OnVideoOpacityChange(true);
+  }
 }
 
 void CastRenderer::SetCdm(::media::CdmContext* cdm_context,
                           const ::media::CdmAttachedCB& cdm_attached_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  NOTIMPLEMENTED();
+  DCHECK(cdm_context);
+
+  auto cast_cdm_context = static_cast<CastCdmContext*>(cdm_context);
+
+  if (!pipeline_) {
+    // If the pipeline has not yet been created in Initialize(), cache
+    // |cast_cdm_context| and pass it in when Initialize() is called.
+    cast_cdm_context_ = cast_cdm_context;
+  } else {
+    pipeline_->SetCdm(cast_cdm_context);
+  }
+
+  cdm_attached_cb.Run(true);
 }
 
 void CastRenderer::Flush(const base::Closure& flush_cb) {
@@ -170,13 +219,58 @@ bool CastRenderer::HasVideo() {
   return pipeline_->HasVideo();
 }
 
-void CastRenderer::OnEos(Stream stream) {
+void CastRenderer::OnVideoResolutionPolicyChanged() {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  if (!video_resolution_policy_)
+    return;
+
+  if (video_resolution_policy_->ShouldBlock(video_res_))
+    OnError(::media::PIPELINE_ERROR_DECODE);
+}
+
+void CastRenderer::OnError(::media::PipelineStatus status) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  client_->OnError(status);
+}
+
+void CastRenderer::OnEnded(Stream stream) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(!eos_[stream]);
   eos_[stream] = true;
   CMALOG(kLogControl) << __FUNCTION__ << ": eos_audio=" << eos_[STREAM_AUDIO]
                       << " eos_video=" << eos_[STREAM_VIDEO];
   if (eos_[STREAM_AUDIO] && eos_[STREAM_VIDEO])
-    ended_cb_.Run();
+    client_->OnEnded();
+}
+
+void CastRenderer::OnStatisticsUpdate(
+    const ::media::PipelineStatistics& stats) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  client_->OnStatisticsUpdate(stats);
+}
+
+void CastRenderer::OnBufferingStateChange(::media::BufferingState state) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  client_->OnBufferingStateChange(state);
+}
+
+void CastRenderer::OnWaitingForDecryptionKey() {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  client_->OnWaitingForDecryptionKey();
+}
+
+void CastRenderer::OnVideoNaturalSizeChange(const gfx::Size& size) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  client_->OnVideoNaturalSizeChange(size);
+
+  video_res_ = size;
+  OnVideoResolutionPolicyChanged();
+}
+
+void CastRenderer::OnVideoOpacityChange(bool opaque) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  DCHECK(opaque);
+  client_->OnVideoOpacityChange(opaque);
 }
 
 }  // namespace media

@@ -164,13 +164,12 @@ class CONTENT_EXPORT FontFileEnumerator
   HRESULT STDMETHODCALLTYPE
   RuntimeClassInitialize(IDWriteFactory* factory,
                          IDWriteFontFileLoader* loader,
-                         std::vector<base::string16>* file_names);
+                         std::vector<HANDLE>* files);
 
  private:
   Microsoft::WRL::ComPtr<IDWriteFactory> factory_;
   Microsoft::WRL::ComPtr<IDWriteFontFileLoader> loader_;
-  std::vector<base::string16> file_names_;
-  std::vector<Microsoft::WRL::ComPtr<IDWriteFontFileStream>> file_streams_;
+  std::vector<HANDLE> files_;
   UINT32 next_file_ = 0;
   UINT32 current_file_ = UINT_MAX;
 
@@ -180,7 +179,6 @@ class CONTENT_EXPORT FontFileEnumerator
 // Implements the DirectWrite font file stream interface that maps the file to
 // be loaded as a memory mapped file, and subsequently returns pointers into
 // the mapped memory block.
-// TODO(kulshin): confirm that using custom streams is actually an improvement
 class CONTENT_EXPORT FontFileStream
     : public Microsoft::WRL::RuntimeClass<
           Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>,
@@ -198,8 +196,7 @@ class CONTENT_EXPORT FontFileStream
                                              void** fragment_context) override;
   void STDMETHODCALLTYPE ReleaseFileFragment(void* fragment_context) override {}
 
-  HRESULT STDMETHODCALLTYPE
-  RuntimeClassInitialize(const base::string16& file_name);
+  HRESULT STDMETHODCALLTYPE RuntimeClassInitialize(HANDLE handle);
 
  private:
   base::MemoryMappedFile data_;

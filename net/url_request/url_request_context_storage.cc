@@ -11,6 +11,8 @@
 #include "net/base/proxy_delegate.h"
 #include "net/base/sdch_manager.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/ct_verifier.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -20,7 +22,6 @@
 #include "net/proxy/proxy_service.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/url_request/http_user_agent_settings.h"
-#include "net/url_request/url_request_backoff_manager.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job_factory.h"
 #include "net/url_request/url_request_throttler_manager.h"
@@ -88,8 +89,8 @@ void URLRequestContextStorage::set_proxy_delegate(
 
 void URLRequestContextStorage::set_http_server_properties(
     std::unique_ptr<HttpServerProperties> http_server_properties) {
+  context_->set_http_server_properties(http_server_properties.get());
   http_server_properties_ = std::move(http_server_properties);
-  context_->set_http_server_properties(http_server_properties_->GetWeakPtr());
 }
 
 void URLRequestContextStorage::set_cookie_store(
@@ -102,6 +103,18 @@ void URLRequestContextStorage::set_transport_security_state(
     std::unique_ptr<TransportSecurityState> transport_security_state) {
   context_->set_transport_security_state(transport_security_state.get());
   transport_security_state_ = std::move(transport_security_state);
+}
+
+void URLRequestContextStorage::set_cert_transparency_verifier(
+    std::unique_ptr<CTVerifier> cert_transparency_verifier) {
+  context_->set_cert_transparency_verifier(cert_transparency_verifier.get());
+  cert_transparency_verifier_ = std::move(cert_transparency_verifier);
+}
+
+void URLRequestContextStorage::set_ct_policy_enforcer(
+    std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer) {
+  context_->set_ct_policy_enforcer(ct_policy_enforcer.get());
+  ct_policy_enforcer_ = std::move(ct_policy_enforcer);
 }
 
 void URLRequestContextStorage::set_http_network_session(
@@ -125,12 +138,6 @@ void URLRequestContextStorage::set_throttler_manager(
     std::unique_ptr<URLRequestThrottlerManager> throttler_manager) {
   context_->set_throttler_manager(throttler_manager.get());
   throttler_manager_ = std::move(throttler_manager);
-}
-
-void URLRequestContextStorage::set_backoff_manager(
-    std::unique_ptr<URLRequestBackoffManager> backoff_manager) {
-  context_->set_backoff_manager(backoff_manager.get());
-  backoff_manager_ = std::move(backoff_manager);
 }
 
 void URLRequestContextStorage::set_http_user_agent_settings(

@@ -27,10 +27,12 @@
  */
 
 #include "platform/audio/HRTFKernel.h"
+
 #include "platform/audio/AudioChannel.h"
-#include "platform/FloatConversion.h"
 #include "wtf/MathExtras.h"
+#include "wtf/PtrUtil.h"
 #include <algorithm>
+#include <memory>
 
 namespace blink {
 
@@ -55,7 +57,7 @@ static float extractAverageGroupDelay(AudioChannel* channel, size_t analysisFFTS
     FFTFrame estimationFrame(analysisFFTSize);
     estimationFrame.doFFT(impulseP);
 
-    float frameDelay = narrowPrecisionToFloat(estimationFrame.extractAverageGroupDelay());
+    float frameDelay = clampTo<float>(estimationFrame.extractAverageGroupDelay());
     estimationFrame.doInverseFFT(impulseP);
 
     return frameDelay;
@@ -86,24 +88,24 @@ HRTFKernel::HRTFKernel(AudioChannel* channel, size_t fftSize, float sampleRate)
         }
     }
 
-    m_fftFrame = adoptPtr(new FFTFrame(fftSize));
+    m_fftFrame = wrapUnique(new FFTFrame(fftSize));
     m_fftFrame->doPaddedFFT(impulseResponse, truncatedResponseLength);
 }
 
-PassOwnPtr<AudioChannel> HRTFKernel::createImpulseResponse()
+std::unique_ptr<AudioChannel> HRTFKernel::createImpulseResponse()
 {
-    OwnPtr<AudioChannel> channel = adoptPtr(new AudioChannel(fftSize()));
+    std::unique_ptr<AudioChannel> channel = wrapUnique(new AudioChannel(fftSize()));
     FFTFrame fftFrame(*m_fftFrame);
 
     // Add leading delay back in.
     fftFrame.addConstantGroupDelay(m_frameDelay);
     fftFrame.doInverseFFT(channel->mutableData());
 
-    return channel.release();
+    return channel;
 }
 
 // Interpolates two kernels with x: 0 -> 1 and returns the result.
-PassOwnPtr<HRTFKernel> HRTFKernel::createInterpolatedKernel(HRTFKernel* kernel1, HRTFKernel* kernel2, float x)
+std::unique_ptr<HRTFKernel> HRTFKernel::createInterpolatedKernel(HRTFKernel* kernel1, HRTFKernel* kernel2, float x)
 {
     ASSERT(kernel1 && kernel2);
     if (!kernel1 || !kernel2)
@@ -120,8 +122,8 @@ PassOwnPtr<HRTFKernel> HRTFKernel::createInterpolatedKernel(HRTFKernel* kernel1,
 
     float frameDelay = (1 - x) * kernel1->frameDelay() + x * kernel2->frameDelay();
 
-    OwnPtr<FFTFrame> interpolatedFrame = FFTFrame::createInterpolatedFrame(*kernel1->fftFrame(), *kernel2->fftFrame(), x);
-    return HRTFKernel::create(interpolatedFrame.release(), frameDelay, sampleRate1);
+    std::unique_ptr<FFTFrame> interpolatedFrame = FFTFrame::createInterpolatedFrame(*kernel1->fftFrame(), *kernel2->fftFrame(), x);
+    return HRTFKernel::create(std::move(interpolatedFrame), frameDelay, sampleRate1);
 }
 
 } // namespace blink

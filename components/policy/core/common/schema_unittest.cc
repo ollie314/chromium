@@ -6,8 +6,10 @@
 
 #include <stddef.h>
 
+#include <memory>
+#include <utility>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "components/policy/core/common/schema_internal.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -156,7 +158,7 @@ void TestSchemaValidationHelper(const std::string& source,
   // Test that Schema::Normalize() will return the same value as
   // Schema::Validate().
   error = kNoErrorReturned;
-  scoped_ptr<base::Value> cloned_value(value.DeepCopy());
+  std::unique_ptr<base::Value> cloned_value(value.DeepCopy());
   bool touched = false;
   returned =
       schema.Normalize(cloned_value.get(), strategy, NULL, &error, &touched);
@@ -654,8 +656,8 @@ TEST(SchemaTest, Validate) {
     dict.SetString("one", "string");
     dict.SetInteger("two", 2);
     base::ListValue list;
-    list.Append(dict.DeepCopy());
-    list.Append(dict.DeepCopy());
+    list.Append(dict.CreateDeepCopy());
+    list.Append(dict.CreateDeepCopy());
     bundle.Set("ArrayOfObjects", list.DeepCopy());
   }
 
@@ -664,8 +666,8 @@ TEST(SchemaTest, Validate) {
     list.AppendString("a string");
     list.AppendString("another string");
     base::ListValue listlist;
-    listlist.Append(list.DeepCopy());
-    listlist.Append(list.DeepCopy());
+    listlist.Append(list.CreateDeepCopy());
+    listlist.Append(list.CreateDeepCopy());
     bundle.Set("ArrayOfArray", listlist.DeepCopy());
   }
 
@@ -769,9 +771,10 @@ TEST(SchemaTest, Validate) {
     base::ListValue root;
 
     // Unknown property.
-    base::DictionaryValue* dict_value = new base::DictionaryValue();
+    std::unique_ptr<base::DictionaryValue> dict_value(
+        new base::DictionaryValue());
     dict_value->SetBoolean("three", true);
-    root.Append(dict_value);  // Pass ownership to root.
+    root.Append(std::move(dict_value));
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN_TOPLEVEL, false);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN, true);
@@ -781,9 +784,9 @@ TEST(SchemaTest, Validate) {
     root.Remove(root.GetSize() - 1, NULL);
 
     // Invalid property.
-    dict_value = new base::DictionaryValue();
+    dict_value.reset(new base::DictionaryValue());
     dict_value->SetBoolean("two", true);
-    root.Append(dict_value);  // Pass ownership to root.
+    root.Append(std::move(dict_value));
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN_TOPLEVEL, false);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN, false);
@@ -803,7 +806,7 @@ TEST(SchemaTest, Validate) {
     root.Set("List", list_value);  // Pass ownership to root.
 
     // Test that there are not errors here.
-    list_value->Append(new base::FundamentalValue(12345));
+    list_value->AppendInteger(12345);
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, true);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN_TOPLEVEL, true);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN, true);
@@ -811,7 +814,7 @@ TEST(SchemaTest, Validate) {
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_INVALID, true);
 
     // Invalid list item.
-    list_value->Append(new base::StringValue("blabla"));
+    list_value->AppendString("blabla");
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN_TOPLEVEL, false);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN, false);
@@ -827,12 +830,13 @@ TEST(SchemaTest, Validate) {
     base::ListValue root;
 
     base::ListValue* list_value = new base::ListValue();
-    base::DictionaryValue* dict_value = new base::DictionaryValue();
+    std::unique_ptr<base::DictionaryValue> dict_value(
+        new base::DictionaryValue());
     dict_value->Set("List", list_value);  // Pass ownership to dict_value.
-    root.Append(dict_value);  // Pass ownership to root.
+    root.Append(std::move(dict_value));
 
     // Test that there are not errors here.
-    list_value->Append(new base::StringValue("blabla"));
+    list_value->AppendString("blabla");
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, true);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN_TOPLEVEL, true);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN, true);
@@ -840,7 +844,7 @@ TEST(SchemaTest, Validate) {
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_INVALID, true);
 
     // Invalid list item.
-    list_value->Append(new base::FundamentalValue(12345));
+    list_value->AppendInteger(12345);
     TestSchemaValidation(subschema, root, SCHEMA_STRICT, false);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN_TOPLEVEL, false);
     TestSchemaValidation(subschema, root, SCHEMA_ALLOW_UNKNOWN, false);

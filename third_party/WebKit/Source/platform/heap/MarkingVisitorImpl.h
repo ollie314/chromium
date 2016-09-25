@@ -9,10 +9,6 @@
 #include "platform/heap/ThreadState.h"
 #include "platform/heap/Visitor.h"
 #include "wtf/Allocator.h"
-#include "wtf/Functional.h"
-#include "wtf/HashFunctions.h"
-#include "wtf/Locker.h"
-#include "wtf/TypeTraits.h"
 
 namespace blink {
 
@@ -41,10 +37,13 @@ protected:
         ASSERT(ThreadState::current()->isInGC());
         ASSERT(toDerived()->getMarkingMode() != Visitor::WeakProcessing);
 
+        // A GC should only mark the objects that belong in its heap.
+        DCHECK(&pageFromObject(objectPointer)->arena()->getThreadState()->heap() == &toDerived()->heap());
+
         header->mark();
 
         if (callback)
-            ThreadHeap::pushTraceCallback(const_cast<void*>(objectPointer), callback);
+            toDerived()->heap().pushTraceCallback(const_cast<void*>(objectPointer), callback);
     }
 
     inline void mark(const void* objectPointer, TraceCallback callback)
@@ -58,7 +57,7 @@ protected:
     inline void registerDelayedMarkNoTracing(const void* objectPointer)
     {
         ASSERT(toDerived()->getMarkingMode() != Visitor::WeakProcessing);
-        ThreadHeap::pushPostMarkingCallback(const_cast<void*>(objectPointer), &markNoTracingCallback);
+        toDerived()->heap().pushPostMarkingCallback(const_cast<void*>(objectPointer), &markNoTracingCallback);
     }
 
     inline void registerWeakMembers(const void* closure, const void* objectPointer, WeakCallback callback)
@@ -67,19 +66,19 @@ protected:
         // We don't want to run weak processings when taking a snapshot.
         if (toDerived()->getMarkingMode() == Visitor::SnapshotMarking)
             return;
-        ThreadHeap::pushThreadLocalWeakCallback(const_cast<void*>(closure), const_cast<void*>(objectPointer), callback);
+        toDerived()->heap().pushThreadLocalWeakCallback(const_cast<void*>(closure), const_cast<void*>(objectPointer), callback);
     }
 
     inline void registerWeakTable(const void* closure, EphemeronCallback iterationCallback, EphemeronCallback iterationDoneCallback)
     {
         ASSERT(toDerived()->getMarkingMode() != Visitor::WeakProcessing);
-        ThreadHeap::registerWeakTable(const_cast<void*>(closure), iterationCallback, iterationDoneCallback);
+        toDerived()->heap().registerWeakTable(const_cast<void*>(closure), iterationCallback, iterationDoneCallback);
     }
 
 #if ENABLE(ASSERT)
     inline bool weakTableRegistered(const void* closure)
     {
-        return ThreadHeap::weakTableRegistered(closure);
+        return toDerived()->heap().weakTableRegistered(closure);
     }
 #endif
 
@@ -105,19 +104,18 @@ protected:
         return true;
     }
 
-    Derived* toDerived()
-    {
-        return static_cast<Derived*>(this);
-    }
-
-protected:
     inline void registerWeakCellWithCallback(void** cell, WeakCallback callback)
     {
         ASSERT(toDerived()->getMarkingMode() != Visitor::WeakProcessing);
         // We don't want to run weak processings when taking a snapshot.
         if (toDerived()->getMarkingMode() == Visitor::SnapshotMarking)
             return;
-        ThreadHeap::pushGlobalWeakCallback(cell, callback);
+        toDerived()->heap().pushGlobalWeakCallback(cell, callback);
+    }
+
+    Derived* toDerived()
+    {
+        return static_cast<Derived*>(this);
     }
 
 private:

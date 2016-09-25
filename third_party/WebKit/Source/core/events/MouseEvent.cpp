@@ -27,6 +27,7 @@
 #include "core/dom/Element.h"
 #include "core/events/EventDispatcher.h"
 #include "platform/PlatformMouseEvent.h"
+#include "public/platform/WebPointerProperties.h"
 
 namespace blink {
 
@@ -39,8 +40,6 @@ MouseEvent* MouseEvent::create(ScriptState* scriptState, const AtomicString& typ
 
 MouseEvent* MouseEvent::create(const AtomicString& eventType, AbstractView* view, const PlatformMouseEvent& event, int detail, Node* relatedTarget)
 {
-    ASSERT(event.type() == PlatformEvent::MouseMoved || event.button() != NoButton);
-
     bool isMouseEnterOrLeave = eventType == EventTypeNames::mouseenter || eventType == EventTypeNames::mouseleave;
     bool isCancelable = !isMouseEnterOrLeave;
     bool isBubbling = !isMouseEnterOrLeave;
@@ -49,9 +48,10 @@ MouseEvent* MouseEvent::create(const AtomicString& eventType, AbstractView* view
         eventType, isBubbling, isCancelable, view,
         detail, event.globalPosition().x(), event.globalPosition().y(), event.position().x(), event.position().y(),
         event.movementDelta().x(), event.movementDelta().y(),
-        event.getModifiers(), event.button(),
+        event.getModifiers(), static_cast<short>(event.pointerProperties().button),
         platformModifiersToButtons(event.getModifiers()),
-        relatedTarget, event.timestamp(), event.getSyntheticEventType(), event.region());
+        relatedTarget, event.timestamp(), event.getSyntheticEventType(), event.region(),
+        &event);
 }
 
 MouseEvent* MouseEvent::create(const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view,
@@ -62,12 +62,13 @@ MouseEvent* MouseEvent::create(const AtomicString& type, bool canBubble, bool ca
     EventTarget* relatedTarget,
     double platformTimeStamp,
     PlatformMouseEvent::SyntheticEventType syntheticEventType,
-    const String& region)
+    const String& region,
+    const PlatformMouseEvent* mouseEvent)
 {
     return new MouseEvent(type, canBubble, cancelable, view,
         detail, screenX, screenY, windowX, windowY,
         movementX, movementY,
-        modifiers, button, buttons, relatedTarget, platformTimeStamp, syntheticEventType, region);
+        modifiers, button, buttons, relatedTarget, platformTimeStamp, syntheticEventType, region, mouseEvent);
 }
 
 MouseEvent* MouseEvent::create(const AtomicString& eventType, AbstractView* view, Event* underlyingEvent, SimulatedClickCreationScope creationScope)
@@ -90,7 +91,7 @@ MouseEvent* MouseEvent::create(const AtomicString& eventType, AbstractView* view
     double timestamp = underlyingEvent ? underlyingEvent->platformTimeStamp() : monotonicallyIncreasingTime();
     MouseEvent* createdEvent = MouseEvent::create(eventType, true, true, view,
         0, screenX, screenY, 0, 0, 0, 0, modifiers, 0, 0, nullptr,
-        timestamp, syntheticType, String());
+        timestamp, syntheticType, String(), nullptr);
 
     createdEvent->setTrusted(creationScope == SimulatedClickCreationScope::FromUserAgent);
     createdEvent->setUnderlyingEvent(underlyingEvent);
@@ -118,8 +119,9 @@ MouseEvent::MouseEvent(const AtomicString& eventType, bool canBubble, bool cance
     EventTarget* relatedTarget,
     double platformTimeStamp,
     PlatformMouseEvent::SyntheticEventType syntheticEventType,
-    const String& region)
-    : MouseRelatedEvent(eventType, canBubble, cancelable, relatedTarget, view, detail, IntPoint(screenX, screenY),
+    const String& region,
+    const PlatformMouseEvent* mouseEvent)
+    : MouseRelatedEvent(eventType, canBubble, cancelable, view, detail, IntPoint(screenX, screenY),
         IntPoint(windowX, windowY), IntPoint(movementX, movementY), modifiers,
         platformTimeStamp,
         syntheticEventType == PlatformMouseEvent::Positionless ? PositionType::Positionless : PositionType::Position,
@@ -130,6 +132,8 @@ MouseEvent::MouseEvent(const AtomicString& eventType, bool canBubble, bool cance
     , m_syntheticEventType(syntheticEventType)
     , m_region(region)
 {
+    if (mouseEvent)
+        m_mouseEvent.reset(new PlatformMouseEvent(*mouseEvent));
 }
 
 MouseEvent::MouseEvent(const AtomicString& eventType, const MouseEventInit& initializer)
@@ -151,29 +155,13 @@ unsigned short MouseEvent::platformModifiersToButtons(unsigned modifiers)
     unsigned short buttons = 0;
 
     if (modifiers & PlatformEvent::LeftButtonDown)
-        buttons |= static_cast<unsigned short>(Buttons::Left);
+        buttons |= static_cast<unsigned short>(WebPointerProperties::Buttons::Left);
     if (modifiers & PlatformEvent::RightButtonDown)
-        buttons |= static_cast<unsigned short>(Buttons::Right);
+        buttons |= static_cast<unsigned short>(WebPointerProperties::Buttons::Right);
     if (modifiers & PlatformEvent::MiddleButtonDown)
-        buttons |= static_cast<unsigned short>(Buttons::Middle);
+        buttons |= static_cast<unsigned short>(WebPointerProperties::Buttons::Middle);
 
     return buttons;
-}
-
-unsigned short MouseEvent::buttonToButtons(short button)
-{
-    switch (button) {
-    case NoButton:
-        return static_cast<unsigned short>(Buttons::None);
-    case LeftButton:
-        return static_cast<unsigned short>(Buttons::Left);
-    case RightButton:
-        return static_cast<unsigned short>(Buttons::Right);
-    case MiddleButton:
-        return static_cast<unsigned short>(Buttons::Middle);
-    }
-    ASSERT_NOT_REACHED();
-    return 0;
 }
 
 void MouseEvent::initMouseEvent(ScriptState* scriptState, const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view,
@@ -181,7 +169,7 @@ void MouseEvent::initMouseEvent(ScriptState* scriptState, const AtomicString& ty
                                 bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
                                 short button, EventTarget* relatedTarget, unsigned short buttons)
 {
-    if (dispatched())
+    if (isBeingDispatched())
         return;
 
     if (scriptState && scriptState->world().isIsolatedWorld())
@@ -273,8 +261,7 @@ MouseEvent& MouseEventDispatchMediator::event() const
 DispatchEventResult MouseEventDispatchMediator::dispatchEvent(EventDispatcher& dispatcher) const
 {
     MouseEvent& mouseEvent = event();
-    if (mouseEvent.relatedTargetScoped())
-        mouseEvent.eventPath().adjustForRelatedTarget(dispatcher.node(), mouseEvent.relatedTarget());
+    mouseEvent.eventPath().adjustForRelatedTarget(dispatcher.node(), mouseEvent.relatedTarget());
 
     if (!mouseEvent.isTrusted())
         return dispatcher.dispatch();
@@ -285,7 +272,7 @@ DispatchEventResult MouseEventDispatchMediator::dispatchEvent(EventDispatcher& d
     if (mouseEvent.type().isEmpty())
         return DispatchEventResult::NotCanceled; // Shouldn't happen.
 
-    ASSERT(!mouseEvent.target() || mouseEvent.target() != mouseEvent.relatedTarget());
+    DCHECK(!mouseEvent.target() || mouseEvent.target() != mouseEvent.relatedTarget());
 
     EventTarget* relatedTarget = mouseEvent.relatedTarget();
 

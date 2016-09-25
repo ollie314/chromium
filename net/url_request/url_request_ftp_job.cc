@@ -8,7 +8,7 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
@@ -101,7 +101,7 @@ void URLRequestFtpJob::Start() {
   } else {
     DCHECK_EQ(request_->context()->proxy_service(), proxy_service_);
     rv = proxy_service_->ResolveProxy(
-        request_->url(), "GET", request_->load_flags(), &proxy_info_,
+        request_->url(), "GET", &proxy_info_,
         base::Bind(&URLRequestFtpJob::OnResolveProxyComplete,
                    base::Unretained(this)),
         &pac_request_, NULL, request_->net_log());
@@ -291,7 +291,7 @@ void URLRequestFtpJob::GetAuthChallengeInfo(
 
   scoped_refptr<AuthChallengeInfo> auth_info(new AuthChallengeInfo);
   auth_info->is_proxy = false;
-  auth_info->challenger = HostPortPair::FromURL(request_->url());
+  auth_info->challenger = url::Origin(request_->url());
   // scheme and realm are kept empty.
   DCHECK(auth_info->scheme.empty());
   DCHECK(auth_info->realm.empty());
@@ -323,10 +323,6 @@ void URLRequestFtpJob::CancelAuth() {
   // there were no auth.  Schedule this for later so that we don't cause
   // any recursing into the caller as a result of this call.
   OnStartCompletedAsync(OK);
-}
-
-UploadProgress URLRequestFtpJob::GetUploadProgress() const {
-  return UploadProgress();
 }
 
 int URLRequestFtpJob::ReadRawData(IOBuffer* buf, int buf_size) {

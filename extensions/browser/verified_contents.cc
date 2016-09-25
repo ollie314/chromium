@@ -44,12 +44,12 @@ const char kWebstoreKId[] = "webstore";
 // Helper function to iterate over a list of dictionaries, returning the
 // dictionary that has |key| -> |value| in it, if any, or NULL.
 DictionaryValue* FindDictionaryWithValue(const ListValue* list,
-                                         std::string key,
-                                         std::string value) {
-  for (ListValue::const_iterator i = list->begin(); i != list->end(); ++i) {
-    if (!(*i)->IsType(Value::TYPE_DICTIONARY))
+                                         const std::string& key,
+                                         const std::string& value) {
+  for (const auto& i : *list) {
+    DictionaryValue* dictionary;
+    if (!i->GetAsDictionary(&dictionary))
       continue;
-    DictionaryValue* dictionary = static_cast<DictionaryValue*>(*i);
     std::string found_value;
     if (dictionary->GetString(key, &found_value) && found_value == value)
       return dictionary;
@@ -96,7 +96,7 @@ bool VerifiedContents::InitFrom(const base::FilePath& path,
   if (!GetPayload(path, &payload, ignore_invalid_signature))
     return false;
 
-  scoped_ptr<base::Value> value(base::JSONReader::Read(payload));
+  std::unique_ptr<base::Value> value(base::JSONReader::Read(payload));
   if (!value.get() || !value->IsType(Value::TYPE_DICTIONARY))
     return false;
   DictionaryValue* dictionary = static_cast<DictionaryValue*>(value.get());
@@ -235,7 +235,7 @@ bool VerifiedContents::GetPayload(const base::FilePath& path,
   std::string contents;
   if (!base::ReadFileToString(path, &contents))
     return false;
-  scoped_ptr<base::Value> value(base::JSONReader::Read(contents));
+  std::unique_ptr<base::Value> value(base::JSONReader::Read(contents));
   if (!value.get() || !value->IsType(Value::TYPE_LIST))
     return false;
   ListValue* top_list = static_cast<ListValue*>(value.get());

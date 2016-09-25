@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.init;
 
+import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
@@ -24,15 +26,16 @@ import android.view.WindowManager;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.LoaderErrors;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.WarmupManager;
-import org.chromium.chrome.browser.metrics.LaunchMetrics;
 import org.chromium.chrome.browser.metrics.MemoryUma;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tabmodel.DocumentModeAssassin;
 import org.chromium.chrome.browser.upgrade.UpgradeActivity;
+import org.chromium.content.browser.ChildProcessCreationParams;
 import org.chromium.ui.base.DeviceFormFactor;
 
 import java.lang.reflect.Field;
@@ -42,9 +45,6 @@ import java.lang.reflect.Field;
  */
 public abstract class AsyncInitializationActivity extends AppCompatActivity implements
         ChromeActivityNativeDelegate, BrowserParts {
-
-    private static final LaunchMetrics.BooleanEvent sBadIntentMetric =
-            new LaunchMetrics.BooleanEvent("Launch.InvalidIntent");
 
     protected final Handler mHandler;
 
@@ -72,14 +72,16 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     }
 
     @Override
+    // TODO(estevenson): Replace with Build.VERSION_CODES.N when available.
+    @TargetApi(24)
     protected void attachBaseContext(Context newBase) {
         super.attachBaseContext(newBase);
 
-        // On N, Chrome should always retain the tab strip layout on tablets. Normally in
+        // On N+, Chrome should always retain the tab strip layout on tablets. Normally in
         // multi-window, if Chrome is launched into a smaller screen Android will load the tab
         // switcher resources. Overriding the smallestScreenWidthDp in the Configuration ensures
         // Android will load the tab strip resources. See crbug.com/588838.
-        if (Build.VERSION.CODENAME.equals("N")) {
+        if (Build.VERSION.CODENAME.equals("N") || Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
             int smallestDeviceWidthDp = DeviceFormFactor.getSmallestDeviceWidthDp(this);
 
             if (smallestDeviceWidthDp >= DeviceFormFactor.MINIMUM_TABLET_WIDTH_DP) {
@@ -108,8 +110,20 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
 
         // Kick off long running IO tasks that can be done in parallel.
         mNativeInitializationController = new NativeInitializationController(this, this);
-        mNativeInitializationController.startBackgroundTasks();
+        initializeChildProcessCreationParams();
+        mNativeInitializationController.startBackgroundTasks(shouldAllocateChildConnection());
     }
+
+    /** Controls the parameter of {@link NativeInitializationController#startBackgroundTasks()}.*/
+    @VisibleForTesting
+    public boolean shouldAllocateChildConnection() {
+        return true;
+    }
+
+    /**
+     * Allow derived classes to initialize their own {@link ChildProcessCreationParams}.
+     */
+    protected void initializeChildProcessCreationParams() {}
 
     @Override
     public void postInflationStartup() {
@@ -172,7 +186,7 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     /**
      * Actions that may be run at some point after startup. Place tasks that are not critical to the
      * startup path here.  This method will be called automatically and should not be called
-     * directly by subclasses.  Overriding methods should call super.onDeferredStartup().
+     * directly by subclasses.
      */
     protected void onDeferredStartup() { }
 
@@ -190,7 +204,14 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
      * be called on that order.
      */
     @Override
+    @SuppressLint("MissingSuperCall")  // Called in onCreateInternal.
     protected final void onCreate(Bundle savedInstanceState) {
+        TraceEvent.begin("AsyncInitializationActivity.onCreate()");
+        onCreateInternal(savedInstanceState);
+        TraceEvent.end("AsyncInitializationActivity.onCreate()");
+    }
+
+    private final void onCreateInternal(Bundle savedInstanceState) {
         if (DocumentModeAssassin.getInstance().isMigrationNecessary()) {
             super.onCreate(null);
 
@@ -203,7 +224,6 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
         }
 
         if (!isStartedUpCorrectly(getIntent())) {
-            sBadIntentMetric.recordHit();
             super.onCreate(null);
             ApiCompatibilityUtils.finishAndRemoveTask(this);
             return;
@@ -320,6 +340,11 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     @Override
     public boolean isActivityFinishing() {
         return isFinishing();
+    }
+
+    @Override
+    public boolean shouldStartGpuProcess() {
+        return true;
     }
 
     @Override

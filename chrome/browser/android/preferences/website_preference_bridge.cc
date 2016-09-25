@@ -4,13 +4,21 @@
 
 #include "chrome/browser/android/preferences/website_preference_bridge.h"
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
+#include "base/android/callback_android.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "chrome/browser/android/preferences/important_sites_util.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_quota_helper.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
@@ -20,27 +28,37 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/content_settings/web_site_settings_uma_util.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
+#include "chrome/browser/permissions/permission_uma_util.h"
 #include "chrome/browser/permissions/permission_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/storage/storage_info_fetcher.h"
+#include "chrome/browser/usb/usb_chooser_context.h"
+#include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "jni/WebsitePreferenceBridge_jni.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "storage/browser/quota/quota_manager.h"
 #include "storage/common/quota/quota_status_code.h"
 #include "url/url_constants.h"
 
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertUTF8ToJavaString;
+using base::android::JavaParamRef;
 using base::android::JavaRef;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
 using content::BrowserThread;
 
 namespace {
+// We need to limit our size due to the algorithm in ImportantSiteUtil, but we
+// want to be more on the liberal side here as we're not exposing these sites
+// to the user, we're just using them for our 'clear unimportant' feature in
+// ManageSpaceActivity.java.
+const int kMaxImportantSites = 10;
 
 Profile* GetActiveUserProfile(bool is_incognito) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
@@ -54,7 +72,11 @@ HostContentSettingsMap* GetHostContentSettingsMap(bool is_incognito) {
       GetActiveUserProfile(is_incognito));
 }
 
-typedef void (*InfoListInsertionFunction)(JNIEnv*, jobject, jstring, jstring);
+typedef void (*InfoListInsertionFunction)(
+    JNIEnv*,
+    const base::android::JavaRefOrBare<jobject>&,
+    const base::android::JavaRefOrBare<jstring>&,
+    const base::android::JavaRefOrBare<jstring>&);
 
 void GetOrigins(JNIEnv* env,
                 ContentSettingsType content_type,
@@ -113,7 +135,7 @@ void GetOrigins(JNIEnv* env,
     if (embedder != origin)
       jembedder = ConvertUTF8ToJavaString(env, embedder);
 
-    insertionFunc(env, list, jorigin.obj(), jembedder.obj());
+    insertionFunc(env, list, jorigin, jembedder);
   }
 }
 
@@ -139,9 +161,13 @@ void SetSettingForOrigin(JNIEnv* env,
   GURL origin_url(ConvertJavaStringToUTF8(env, origin));
   GURL embedder_url =
       embedder ? GURL(ConvertJavaStringToUTF8(env, embedder)) : GURL();
-  PermissionUtil::SetContentSettingAndRecordRevocation(
-      GetActiveUserProfile(is_incognito), origin_url, embedder_url,
-      content_type, std::string(), setting);
+  Profile* profile = GetActiveUserProfile(is_incognito);
+  PermissionUtil::ScopedRevocationReporter scoped_revocation_reporter(
+      profile, origin_url, embedder_url, content_type,
+      PermissionSourceUI::SITE_SETTINGS);
+  HostContentSettingsMapFactory::GetForProfile(profile)
+      ->SetContentSettingDefaultScope(origin_url, embedder_url, content_type,
+                                      std::string(), setting);
   WebSiteSettingsUmaUtil::LogPermissionChange(content_type, setting);
 }
 
@@ -312,18 +338,15 @@ static jint GetNotificationSettingForOrigin(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz,
     const JavaParamRef<jstring>& origin,
-    const JavaParamRef<jstring>& embedder,
     jboolean is_incognito) {
-  return DesktopNotificationProfileUtil::GetContentSetting(
-      GetActiveUserProfile(is_incognito),
-      GURL(ConvertJavaStringToUTF8(env, origin)));
+  return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                             origin, origin, is_incognito);
 }
 
 static void SetNotificationSettingForOrigin(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz,
     const JavaParamRef<jstring>& origin,
-    const JavaParamRef<jstring>& embedder,
     jint value,
     jboolean is_incognito) {
   // Note: Web Notification permission behaves differently from all other
@@ -406,65 +429,6 @@ static void SetCameraSettingForOrigin(JNIEnv* env,
                       is_incognito);
 }
 
-static scoped_refptr<content_settings::CookieSettings> GetCookieSettings() {
-  // A single cookie setting applies to both incognito and non-incognito.
-  Profile* profile = ProfileManager::GetActiveUserProfile();
-  return CookieSettingsFactory::GetForProfile(profile);
-}
-
-static void GetCookieOrigins(JNIEnv* env,
-                             const JavaParamRef<jclass>& clazz,
-                             const JavaParamRef<jobject>& list,
-                             jboolean managedOnly) {
-  ContentSettingsForOneType all_settings;
-  GetCookieSettings()->GetCookieSettings(&all_settings);
-  const ContentSetting default_setting =
-      GetCookieSettings()->GetDefaultCookieSetting(nullptr);
-  for (const auto& settings_it : all_settings) {
-    if (settings_it.setting == default_setting)
-      continue;
-    if (managedOnly &&
-        HostContentSettingsMap::GetProviderTypeFromSource(settings_it.source) !=
-            HostContentSettingsMap::ProviderType::POLICY_PROVIDER) {
-      continue;
-    }
-    const std::string& origin = settings_it.primary_pattern.ToString();
-    const std::string& embedder = settings_it.secondary_pattern.ToString();
-    ScopedJavaLocalRef<jstring> jorigin = ConvertUTF8ToJavaString(env, origin);
-    ScopedJavaLocalRef<jstring> jembedder;
-    if (embedder != origin)
-      jembedder = ConvertUTF8ToJavaString(env, embedder);
-    Java_WebsitePreferenceBridge_insertCookieInfoIntoList(env, list,
-        jorigin.obj(), jembedder.obj());
-  }
-}
-
-static jint GetCookieSettingForOrigin(JNIEnv* env,
-                                      const JavaParamRef<jclass>& clazz,
-                                      const JavaParamRef<jstring>& origin,
-                                      const JavaParamRef<jstring>& embedder,
-                                      jboolean is_incognito) {
-  return GetSettingForOrigin(env, CONTENT_SETTINGS_TYPE_COOKIES, origin,
-                             embedder, false);
-}
-
-static void SetCookieSettingForOrigin(JNIEnv* env,
-                                      const JavaParamRef<jclass>& clazz,
-                                      const JavaParamRef<jstring>& origin,
-                                      const JavaParamRef<jstring>& embedder,
-                                      jint value,
-                                      jboolean is_incognito) {
-  GURL url(ConvertJavaStringToUTF8(env, origin));
-  ContentSetting setting = static_cast<ContentSetting>(value);
-  if (setting == CONTENT_SETTING_DEFAULT) {
-    GetCookieSettings()->ResetCookieSetting(url);
-  } else {
-    GetCookieSettings()->SetCookieSetting(url, setting);
-  }
-  WebSiteSettingsUmaUtil::LogPermissionChange(CONTENT_SETTINGS_TYPE_COOKIES,
-                                              setting);
-}
-
 static jboolean IsContentSettingsPatternValid(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz,
@@ -481,6 +445,62 @@ static jboolean UrlMatchesContentSettingsPattern(
   ContentSettingsPattern pattern = ContentSettingsPattern::FromString(
       ConvertJavaStringToUTF8(env, jpattern));
   return pattern.Matches(GURL(ConvertJavaStringToUTF8(env, jurl)));
+}
+
+static void GetUsbOrigins(JNIEnv* env,
+                          const JavaParamRef<jclass>& clazz,
+                          const JavaParamRef<jobject>& list) {
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  UsbChooserContext* context = UsbChooserContextFactory::GetForProfile(profile);
+  for (const auto& object : context->GetAllGrantedObjects()) {
+    // Remove the trailing slash so that origins are matched correctly in
+    // SingleWebsitePreferences.mergePermissionInfoForTopLevelOrigin.
+    std::string origin = object->requesting_origin.spec();
+    DCHECK_EQ('/', origin.back());
+    origin.pop_back();
+    ScopedJavaLocalRef<jstring> jorigin = ConvertUTF8ToJavaString(env, origin);
+
+    std::string embedder = object->embedding_origin.spec();
+    DCHECK_EQ('/', embedder.back());
+    embedder.pop_back();
+    ScopedJavaLocalRef<jstring> jembedder;
+    if (embedder != origin)
+      jembedder = ConvertUTF8ToJavaString(env, embedder);
+
+    std::string name;
+    bool found = object->object.GetString("name", &name);
+    DCHECK(found);
+    ScopedJavaLocalRef<jstring> jname = ConvertUTF8ToJavaString(env, name);
+
+    std::string serialized;
+    bool written = base::JSONWriter::Write(object->object, &serialized);
+    DCHECK(written);
+    ScopedJavaLocalRef<jstring> jserialized =
+        ConvertUTF8ToJavaString(env, serialized);
+
+    Java_WebsitePreferenceBridge_insertUsbInfoIntoList(
+        env, list, jorigin, jembedder, jname, jserialized);
+  }
+}
+
+static void RevokeUsbPermission(JNIEnv* env,
+                                const JavaParamRef<jclass>& clazz,
+                                const JavaParamRef<jstring>& jorigin,
+                                const JavaParamRef<jstring>& jembedder,
+                                const JavaParamRef<jstring>& jobject) {
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  UsbChooserContext* context = UsbChooserContextFactory::GetForProfile(profile);
+  GURL origin(ConvertJavaStringToUTF8(env, jorigin));
+  DCHECK(origin.is_valid());
+  // If embedder == origin above then a null embedder was sent to Java instead
+  // of a duplicated string.
+  GURL embedder(
+      ConvertJavaStringToUTF8(env, jembedder.is_null() ? jorigin : jembedder));
+  DCHECK(embedder.is_valid());
+  std::unique_ptr<base::DictionaryValue> object = base::DictionaryValue::From(
+      base::JSONReader::Read(ConvertJavaStringToUTF8(env, jobject)));
+  DCHECK(object);
+  context->RevokeObjectPermission(origin, embedder, *object);
 }
 
 namespace {
@@ -521,7 +541,7 @@ class SiteDataDeleteHelper :
         NULL);
 
     cookies_tree_model_.reset(new CookiesTreeModel(
-        container, profile_->GetExtensionSpecialStoragePolicy(), false));
+        container, profile_->GetExtensionSpecialStoragePolicy()));
     cookies_tree_model_->AddCookiesTreeObserver(this);
   }
 
@@ -599,13 +619,11 @@ class StorageInfoReadyCallback {
       ScopedJavaLocalRef<jstring> host =
           ConvertUTF8ToJavaString(env_, i->host);
 
-      Java_WebsitePreferenceBridge_insertStorageInfoIntoList(
-          env_, list.obj(), host.obj(), i->type, i->usage);
+      Java_WebsitePreferenceBridge_insertStorageInfoIntoList(env_, list, host,
+                                                             i->type, i->usage);
     }
 
-    Java_StorageInfoReadyCallback_onStorageInfoReady(
-        env_, java_callback_.obj(), list.obj());
-
+    base::android::RunCallbackAndroid(java_callback_, list);
     delete this;
   }
 
@@ -624,8 +642,7 @@ class StorageInfoClearedCallback {
   void OnStorageInfoCleared(storage::QuotaStatusCode code) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-    Java_StorageInfoClearedCallback_onStorageInfoCleared(
-        env_, java_callback_.obj());
+    Java_StorageInfoClearedCallback_onStorageInfoCleared(env_, java_callback_);
 
     delete this;
   }
@@ -643,29 +660,51 @@ class LocalStorageInfoReadyCallback {
   }
 
   void OnLocalStorageModelInfoLoaded(
+      Profile* profile,
       const std::list<BrowsingDataLocalStorageHelper::LocalStorageInfo>&
           local_storage_info) {
     ScopedJavaLocalRef<jobject> map =
         Java_WebsitePreferenceBridge_createLocalStorageInfoMap(env_);
+
+    std::vector<ImportantSitesUtil::ImportantDomainInfo> important_domains =
+        ImportantSitesUtil::GetImportantRegisterableDomains(profile,
+                                                            kMaxImportantSites);
 
     std::list<BrowsingDataLocalStorageHelper::LocalStorageInfo>::const_iterator
         i;
     for (i = local_storage_info.begin(); i != local_storage_info.end(); ++i) {
       ScopedJavaLocalRef<jstring> full_origin =
           ConvertUTF8ToJavaString(env_, i->origin_url.spec());
-      // Remove the trailing backslash so the origin is matched correctly in
-      // SingleWebsitePreferences.mergePermissionInfoForTopLevelOrigin.
       std::string origin_str = i->origin_url.GetOrigin().spec();
-      DCHECK(origin_str[origin_str.size() - 1] == '/');
-      origin_str = origin_str.substr(0, origin_str.size() - 1);
+      bool important = false;
+      std::string registerable_domain;
+      if (i->origin_url.HostIsIPAddress()) {
+        registerable_domain = i->origin_url.host();
+      } else {
+        registerable_domain =
+            net::registry_controlled_domains::GetDomainAndRegistry(
+                i->origin_url,
+                net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
+      }
+      auto important_domain_search = [&registerable_domain](
+          const ImportantSitesUtil::ImportantDomainInfo& item) {
+        return item.registerable_domain == registerable_domain;
+      };
+      if (std::find_if(important_domains.begin(), important_domains.end(),
+                       important_domain_search) != important_domains.end()) {
+        important = true;
+      }
+      // Remove the trailing slash so the origin is matched correctly in
+      // SingleWebsitePreferences.mergePermissionInfoForTopLevelOrigin.
+      DCHECK_EQ('/', origin_str.back());
+      origin_str.pop_back();
       ScopedJavaLocalRef<jstring> origin =
           ConvertUTF8ToJavaString(env_, origin_str);
       Java_WebsitePreferenceBridge_insertLocalStorageInfoIntoMap(
-          env_, map.obj(), origin.obj(), full_origin.obj(), i->size);
+          env_, map, origin, full_origin, i->size, important);
     }
 
-    Java_LocalStorageInfoReadyCallback_onLocalStorageInfoReady(
-        env_, java_callback_.obj(), map.obj());
+    base::android::RunCallbackAndroid(java_callback_, map);
     delete this;
   }
 
@@ -697,7 +736,7 @@ static void FetchLocalStorageInfo(JNIEnv* env,
       new LocalStorageInfoReadyCallback(java_callback);
   local_storage_helper->StartFetching(
       base::Bind(&LocalStorageInfoReadyCallback::OnLocalStorageModelInfoLoaded,
-                 base::Unretained(local_storage_callback)));
+                 base::Unretained(local_storage_callback), profile));
 }
 
 static void FetchStorageInfo(JNIEnv* env,

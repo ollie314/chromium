@@ -4,12 +4,14 @@
 
 #include "modules/encryptedmedia/MediaKeyStatusMap.h"
 
+#include "bindings/core/v8/ArrayBufferOrArrayBufferView.h"
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/DOMArrayPiece.h"
 #include "public/platform/WebData.h"
 #include "wtf/text/WTFString.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace blink {
 
@@ -38,6 +40,8 @@ public:
         // Compare the keyIds of 2 different MapEntries. Assume that |a| and |b|
         // are not null, but the keyId() may be. KeyIds are compared byte
         // by byte.
+        DCHECK(a);
+        DCHECK(b);
 
         // Handle null cases first (which shouldn't happen).
         //    |aKeyId|    |bKeyId|     result
@@ -54,7 +58,8 @@ public:
             return result < 0;
 
         // KeyIds are equal to the shared length, so the shorter string is <.
-        return a->keyId()->byteLength() <= b->keyId()->byteLength();
+        DCHECK_NE(a->keyId()->byteLength(), b->keyId()->byteLength());
+        return a->keyId()->byteLength() < b->keyId()->byteLength();
     }
 
     DEFINE_INLINE_VIRTUAL_TRACE()
@@ -115,14 +120,12 @@ void MediaKeyStatusMap::clear()
 
 void MediaKeyStatusMap::addEntry(WebData keyId, const String& status)
 {
-    m_entries.append(MapEntry::create(keyId, status));
-
-    // No need to do any sorting for the first entry.
-    if (m_entries.size() == 1)
-        return;
-
-    // Sort the entries.
-    std::sort(m_entries.begin(), m_entries.end(), MapEntry::compareLessThan);
+    // Insert new entry into sorted list.
+    MapEntry* entry = MapEntry::create(keyId, status);
+    size_t index = 0;
+    while (index < m_entries.size() && MapEntry::compareLessThan(m_entries[index], entry))
+        ++index;
+    m_entries.insert(index, entry);
 }
 
 const MediaKeyStatusMap::MapEntry& MediaKeyStatusMap::at(size_t index) const
@@ -139,23 +142,28 @@ size_t MediaKeyStatusMap::indexOf(const DOMArrayPiece& key) const
             return index;
     }
 
-    // Not found, so return an index outside the valid range.
-    return m_entries.size();
+    // Not found, so return an index outside the valid range. The caller
+    // must ensure this value is not exposed outside this class.
+    return std::numeric_limits<size_t>::max();
+}
+
+bool MediaKeyStatusMap::has(const ArrayBufferOrArrayBufferView& keyId)
+{
+    size_t index = indexOf(keyId);
+    return index < m_entries.size();
+}
+
+ScriptValue MediaKeyStatusMap::get(ScriptState* scriptState, const ArrayBufferOrArrayBufferView& keyId)
+{
+    size_t index = indexOf(keyId);
+    if (index >= m_entries.size())
+        return ScriptValue(scriptState, v8::Undefined(scriptState->isolate()));
+    return ScriptValue::from(scriptState, at(index).status());
 }
 
 PairIterable<ArrayBufferOrArrayBufferView, String>::IterationSource* MediaKeyStatusMap::startIteration(ScriptState*, ExceptionState&)
 {
     return new MapIterationSource(this);
-}
-
-bool MediaKeyStatusMap::getMapEntry(ScriptState*, const ArrayBufferOrArrayBufferView& key, String& value, ExceptionState&)
-{
-    size_t index = indexOf(key);
-    if (index < m_entries.size()) {
-        value = at(index).status();
-        return true;
-    }
-    return false;
 }
 
 DEFINE_TRACE(MediaKeyStatusMap)

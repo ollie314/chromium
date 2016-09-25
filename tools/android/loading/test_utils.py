@@ -4,6 +4,7 @@
 
 """Common utilities used in unit tests, within this directory."""
 
+import clovis_constants
 import dependency_graph
 import devtools_monitor
 import loading_trace
@@ -16,7 +17,9 @@ import user_satisfied_lens
 class FakeRequestTrack(devtools_monitor.Track):
   def __init__(self, events):
     super(FakeRequestTrack, self).__init__(None)
-    self._events = [self._RewriteEvent(e) for e in events]
+    self._events = events
+    for e in self._events:
+      e.timing.request_time = e.timestamp
 
   def Handle(self, _method, _msg):
     assert False  # Should never be called.
@@ -31,12 +34,6 @@ class FakeRequestTrack(devtools_monitor.Track):
             cls._METADATA_KEY: {
                 cls._DUPLICATES_KEY: 0,
                 cls._INCONSISTENT_INITIATORS_KEY: 0}}
-
-  def _RewriteEvent(self, event):
-    # This modifies the instance used across tests, so this method
-    # must be idempotent.
-    event.timing = event.timing._replace(request_time=event.timestamp)
-    return event
 
 
 class FakePageTrack(devtools_monitor.Track):
@@ -70,14 +67,14 @@ def MakeRequestWithTiming(
     source_url: a url or number which will be used as the source (initiating)
       url. If the source url is not present, then url will be a root. The
       convention in tests is to use a source_url of 'null' in this case.
-    timing_dict: (dict) Suitable to be passed to request_track.TimingFromDict().
+    timing_dict: (dict) Suitable to be passed to request_track.Timing().
     initiator_type: the initiator type to use.
 
   Returns:
     A request_track.Request.
   """
   assert initiator_type in ('other', 'parser')
-  timing = request_track.TimingFromDict(timing_dict)
+  timing = request_track.Timing.FromDevToolsDict(timing_dict)
   rq = request_track.Request.FromJsonDict({
       'timestamp': timing.request_time,
       'request_id': str(MakeRequestWithTiming._next_request_id),
@@ -86,7 +83,7 @@ def MakeRequestWithTiming(
       'response_headers': {'Content-Type':
                            'null' if not magic_content_type
                            else 'magic-debug-content' },
-      'timing': request_track.TimingAsList(timing)
+      'timing': timing.ToJsonDict()
   })
   MakeRequestWithTiming._next_request_id += 1
   return rq
@@ -140,11 +137,12 @@ def MakeRequest(
 
 
 def LoadingTraceFromEvents(requests, page_events=None, trace_events=None):
-  """Returns a LoadingTrace instance from a list of requests and page events."""
+  """Returns a LoadingTrace instance from various events."""
   request = FakeRequestTrack(requests)
   page_event_track = FakePageTrack(page_events if page_events else [])
   if trace_events is not None:
-    tracing_track = tracing.TracingTrack(None)
+    tracing_track = tracing.TracingTrack(None,
+        clovis_constants.DEFAULT_CATEGORIES)
     tracing_track.Handle('Tracing.dataCollected',
                          {'params': {'value': [e for e in trace_events]}})
   else:
@@ -225,7 +223,35 @@ class MockConnection(object):
     return response
 
 
-class MockUserSatisfiedLens(user_satisfied_lens._UserSatisfiedLens):
+class MockUserSatisfiedLens(user_satisfied_lens._FirstEventLens):
   def _CalculateTimes(self, _):
     self._satisfied_msec = float('inf')
     self._event_msec = float('inf')
+
+
+class TraceCreator(object):
+  def __init__(self):
+    self._request_index = 1
+
+  def RequestAt(self, timestamp_msec, duration=1, frame_id=None):
+    timestamp_sec = float(timestamp_msec) / 1000
+    rq = request_track.Request.FromJsonDict({
+        'url': 'http://bla-%s-.com' % timestamp_msec,
+        'document_url': 'http://bla.com',
+        'request_id': '0.%s' % self._request_index,
+        'frame_id': frame_id or '123.%s' % timestamp_msec,
+        'initiator': {'type': 'other'},
+        'timestamp': timestamp_sec,
+        'timing': {'request_time': timestamp_sec,
+                   'loading_finished': duration},
+        'status': 200})
+    self._request_index += 1
+    return rq
+
+  def CreateTrace(self, requests, events, main_frame_id):
+    page_event = {'method': 'Page.frameStartedLoading',
+                  'frame_id': main_frame_id}
+    trace = LoadingTraceFromEvents(
+        requests, trace_events=events, page_events=[page_event])
+    trace.tracing_track.SetMainFrameID(main_frame_id)
+    return trace

@@ -14,7 +14,7 @@
 namespace content {
 
 namespace {
-bool g_accept_all_cookies = true;
+bool g_block_third_party_cookies = false;
 }
 
 ShellNetworkDelegate::ShellNetworkDelegate() {
@@ -23,8 +23,8 @@ ShellNetworkDelegate::ShellNetworkDelegate() {
 ShellNetworkDelegate::~ShellNetworkDelegate() {
 }
 
-void ShellNetworkDelegate::SetAcceptAllCookies(bool accept) {
-  g_accept_all_cookies = accept;
+void ShellNetworkDelegate::SetBlockThirdPartyCookies(bool block) {
+  g_block_third_party_cookies = block;
 }
 
 int ShellNetworkDelegate::OnBeforeURLRequest(
@@ -34,17 +34,16 @@ int ShellNetworkDelegate::OnBeforeURLRequest(
   return net::OK;
 }
 
-int ShellNetworkDelegate::OnBeforeSendHeaders(
+int ShellNetworkDelegate::OnBeforeStartTransaction(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     net::HttpRequestHeaders* headers) {
   return net::OK;
 }
 
-void ShellNetworkDelegate::OnSendHeaders(
+void ShellNetworkDelegate::OnStartTransaction(
     net::URLRequest* request,
-    const net::HttpRequestHeaders& headers) {
-}
+    const net::HttpRequestHeaders& headers) {}
 
 int ShellNetworkDelegate::OnHeadersReceived(
     net::URLRequest* request,
@@ -82,9 +81,9 @@ ShellNetworkDelegate::AuthRequiredResponse ShellNetworkDelegate::OnAuthRequired(
 
 bool ShellNetworkDelegate::OnCanGetCookies(const net::URLRequest& request,
                                            const net::CookieList& cookie_list) {
-  net::StaticCookiePolicy::Type policy_type = g_accept_all_cookies ?
-      net::StaticCookiePolicy::ALLOW_ALL_COOKIES :
-      net::StaticCookiePolicy::BLOCK_ALL_THIRD_PARTY_COOKIES;
+  net::StaticCookiePolicy::Type policy_type = g_block_third_party_cookies ?
+      net::StaticCookiePolicy::BLOCK_ALL_THIRD_PARTY_COOKIES :
+      net::StaticCookiePolicy::ALLOW_ALL_COOKIES;
   net::StaticCookiePolicy policy(policy_type);
   int rv = policy.CanGetCookies(
       request.url(), request.first_party_for_cookies());
@@ -94,9 +93,9 @@ bool ShellNetworkDelegate::OnCanGetCookies(const net::URLRequest& request,
 bool ShellNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
                                           const std::string& cookie_line,
                                           net::CookieOptions* options) {
-  net::StaticCookiePolicy::Type policy_type = g_accept_all_cookies ?
-      net::StaticCookiePolicy::ALLOW_ALL_COOKIES :
-      net::StaticCookiePolicy::BLOCK_ALL_THIRD_PARTY_COOKIES;
+  net::StaticCookiePolicy::Type policy_type = g_block_third_party_cookies ?
+      net::StaticCookiePolicy::BLOCK_ALL_THIRD_PARTY_COOKIES :
+      net::StaticCookiePolicy::ALLOW_ALL_COOKIES;
   net::StaticCookiePolicy policy(policy_type);
   int rv = policy.CanSetCookie(
       request.url(), request.first_party_for_cookies());

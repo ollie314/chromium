@@ -14,7 +14,7 @@
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/test/browser_test.h"
@@ -108,7 +108,7 @@ class MediaFileValidatorTest : public InProcessBrowserTest {
                          const std::string& content,
                          bool expected_result) {
     ASSERT_TRUE(base_dir_.CreateUniqueTempDir());
-    base::FilePath base = base_dir_.path();
+    base::FilePath base = base_dir_.GetPath();
     base::FilePath src_path = base.AppendASCII("src_fs");
     ASSERT_TRUE(base::CreateDirectory(src_path));
 

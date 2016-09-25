@@ -4,11 +4,12 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/android/build_info.h"
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -16,11 +17,12 @@
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "media/audio/android/audio_manager_android.h"
+#include "media/audio/audio_device_description.h"
 #include "media/audio/audio_io.h"
-#include "media/audio/audio_manager_base.h"
 #include "media/audio/audio_unittest_util.h"
 #include "media/audio/mock_audio_source_callback.h"
 #include "media/base/decoder_buffer.h"
@@ -39,10 +41,9 @@ using ::testing::Return;
 namespace media {
 namespace {
 
-ACTION_P3(CheckCountAndPostQuitTask, count, limit, loop) {
-  if (++*count >= limit) {
-    loop->PostTask(FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
-  }
+ACTION_P4(CheckCountAndPostQuitTask, count, limit, task_runner, quit_closure) {
+  if (++*count >= limit)
+    task_runner->PostTask(FROM_HERE, quit_closure);
 }
 
 const char kSpeechFile_16b_s_48k[] = "speech_16b_stereo_48kHz.raw";
@@ -105,8 +106,9 @@ void CheckDeviceNames(const AudioDeviceNames& device_names) {
   AudioDeviceNames::const_iterator it = device_names.begin();
 
   // The first device in the list should always be the default device.
-  EXPECT_EQ(AudioManager::GetDefaultDeviceName(), it->device_name);
-  EXPECT_EQ(std::string(AudioManagerBase::kDefaultDeviceId), it->unique_id);
+  EXPECT_EQ(AudioDeviceDescription::GetDefaultDeviceName(), it->device_name);
+  EXPECT_EQ(std::string(AudioDeviceDescription::kDefaultDeviceId),
+            it->unique_id);
   ++it;
 
   // Other devices should have non-empty name and id and should not contain
@@ -116,8 +118,9 @@ void CheckDeviceNames(const AudioDeviceNames& device_names) {
     EXPECT_FALSE(it->unique_id.empty());
     DVLOG(2) << "Device ID(" << it->unique_id
              << "), label: " << it->device_name;
-    EXPECT_NE(AudioManager::GetDefaultDeviceName(), it->device_name);
-    EXPECT_NE(std::string(AudioManagerBase::kDefaultDeviceId), it->unique_id);
+    EXPECT_NE(AudioDeviceDescription::GetDefaultDeviceName(), it->device_name);
+    EXPECT_NE(std::string(AudioDeviceDescription::kDefaultDeviceId),
+              it->unique_id);
     ++it;
   }
 }
@@ -272,7 +275,7 @@ class FileAudioSink : public AudioInputStream::AudioInputCallback {
               uint32_t hardware_delay_bytes,
               double volume) override {
     const int num_samples = src->frames() * src->channels();
-    scoped_ptr<int16_t> interleaved(new int16_t[num_samples]);
+    std::unique_ptr<int16_t> interleaved(new int16_t[num_samples]);
     const int bytes_per_sample = sizeof(*interleaved);
     src->ToInterleaved(src->frames(), bytes_per_sample, interleaved.get());
 
@@ -289,7 +292,7 @@ class FileAudioSink : public AudioInputStream::AudioInputCallback {
  private:
   base::WaitableEvent* event_;
   AudioParameters params_;
-  scoped_ptr<media::SeekableBuffer> buffer_;
+  std::unique_ptr<media::SeekableBuffer> buffer_;
   FILE* binary_file_;
 
   DISALLOW_COPY_AND_ASSIGN(FileAudioSink);
@@ -324,7 +327,7 @@ class FullDuplexAudioSinkSource
 
     EXPECT_EQ(params_.bits_per_sample(), 16);
     const int num_samples = src->frames() * src->channels();
-    scoped_ptr<int16_t> interleaved(new int16_t[num_samples]);
+    std::unique_ptr<int16_t> interleaved(new int16_t[num_samples]);
     const int bytes_per_sample = sizeof(*interleaved);
     src->ToInterleaved(src->frames(), bytes_per_sample, interleaved.get());
     const int size = bytes_per_sample * num_samples;
@@ -403,8 +406,8 @@ class FullDuplexAudioSinkSource
   AudioParameters params_;
   base::TimeTicks previous_time_;
   base::Lock lock_;
-  scoped_ptr<media::SeekableBuffer> fifo_;
-  scoped_ptr<uint8_t[]> buffer_;
+  std::unique_ptr<media::SeekableBuffer> fifo_;
+  std::unique_ptr<uint8_t[]> buffer_;
   bool started_;
 
   DISALLOW_COPY_AND_ASSIGN(FullDuplexAudioSinkSource);
@@ -428,7 +431,6 @@ class AudioAndroidOutputTest : public testing::Test {
 
  protected:
   AudioManager* audio_manager() { return audio_manager_.get(); }
-  base::MessageLoopForUI* loop() { return loop_.get(); }
   const AudioParameters& audio_output_parameters() {
     return audio_output_parameters_;
   }
@@ -436,7 +438,9 @@ class AudioAndroidOutputTest : public testing::Test {
   // Synchronously runs the provided callback/closure on the audio thread.
   void RunOnAudioThread(const base::Closure& closure) {
     if (!audio_manager()->GetTaskRunner()->BelongsToCurrentThread()) {
-      base::WaitableEvent event(false, false);
+      base::WaitableEvent event(
+          base::WaitableEvent::ResetPolicy::AUTOMATIC,
+          base::WaitableEvent::InitialState::NOT_SIGNALED);
       audio_manager()->GetTaskRunner()->PostTask(
           FROM_HERE,
           base::Bind(&AudioAndroidOutputTest::RunOnAudioThreadImpl,
@@ -504,17 +508,20 @@ class AudioAndroidOutputTest : public testing::Test {
     int count = 0;
     MockAudioSourceCallback source;
 
+    base::RunLoop run_loop;
     EXPECT_CALL(source, OnMoreData(NotNull(), _, 0))
         .Times(AtLeast(num_callbacks))
         .WillRepeatedly(
-            DoAll(CheckCountAndPostQuitTask(&count, num_callbacks, loop()),
+            DoAll(CheckCountAndPostQuitTask(&count, num_callbacks,
+                                            base::ThreadTaskRunnerHandle::Get(),
+                                            run_loop.QuitWhenIdleClosure()),
                   Invoke(RealOnMoreData)));
     EXPECT_CALL(source, OnError(audio_output_stream_)).Times(0);
 
     OpenAndStartAudioOutputStreamOnAudioThread(&source);
 
     start_time_ = base::TimeTicks::Now();
-    loop()->Run();
+    run_loop.Run();
     end_time_ = base::TimeTicks::Now();
 
     StopAndCloseAudioOutputStreamOnAudioThread();
@@ -541,7 +548,7 @@ class AudioAndroidOutputTest : public testing::Test {
   void MakeOutputStream(const AudioParameters& params) {
     DCHECK(audio_manager()->GetTaskRunner()->BelongsToCurrentThread());
     audio_output_stream_ = audio_manager()->MakeAudioOutputStream(
-        params, std::string());
+        params, std::string(), AudioManager::LogCallback());
     EXPECT_TRUE(audio_output_stream_);
   }
 
@@ -565,7 +572,7 @@ class AudioAndroidOutputTest : public testing::Test {
     audio_output_stream_ = NULL;
   }
 
-  scoped_ptr<base::MessageLoopForUI> loop_;
+  std::unique_ptr<base::MessageLoopForUI> loop_;
   ScopedAudioManagerPtr audio_manager_;
   AudioParameters audio_output_parameters_;
   AudioOutputStream* audio_output_stream_;
@@ -654,16 +661,18 @@ class AudioAndroidInputTest : public AudioAndroidOutputTest,
     int count = 0;
     MockAudioInputCallback sink;
 
+    base::RunLoop run_loop;
     EXPECT_CALL(sink, OnData(audio_input_stream_, NotNull(), _, _))
         .Times(AtLeast(num_callbacks))
-        .WillRepeatedly(
-            CheckCountAndPostQuitTask(&count, num_callbacks, loop()));
+        .WillRepeatedly(CheckCountAndPostQuitTask(
+            &count, num_callbacks, base::ThreadTaskRunnerHandle::Get(),
+            run_loop.QuitWhenIdleClosure()));
     EXPECT_CALL(sink, OnError(audio_input_stream_)).Times(0);
 
     OpenAndStartAudioInputStreamOnAudioThread(&sink);
 
     start_time_ = base::TimeTicks::Now();
-    loop()->Run();
+    run_loop.Run();
     end_time_ = base::TimeTicks::Now();
 
     StopAndCloseAudioInputStreamOnAudioThread();
@@ -683,13 +692,14 @@ class AudioAndroidInputTest : public AudioAndroidOutputTest,
   void GetDefaultInputStreamParameters() {
     DCHECK(audio_manager()->GetTaskRunner()->BelongsToCurrentThread());
     audio_input_parameters_ = audio_manager()->GetInputStreamParameters(
-        AudioManagerBase::kDefaultDeviceId);
+        AudioDeviceDescription::kDefaultDeviceId);
   }
 
   void MakeInputStream(const AudioParameters& params) {
     DCHECK(audio_manager()->GetTaskRunner()->BelongsToCurrentThread());
     audio_input_stream_ = audio_manager()->MakeAudioInputStream(
-        params, AudioManagerBase::kDefaultDeviceId);
+        params, AudioDeviceDescription::kDefaultDeviceId,
+        AudioManager::LogCallback());
     EXPECT_TRUE(audio_input_stream_);
   }
 
@@ -854,7 +864,8 @@ TEST_F(AudioAndroidOutputTest, DISABLED_RunOutputStreamWithFileAsSource) {
     return;
   }
 
-  base::WaitableEvent event(false, false);
+  base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                            base::WaitableEvent::InitialState::NOT_SIGNALED);
   FileAudioSource source(&event, file_name);
 
   OpenAndStartAudioOutputStreamOnAudioThread(&source);
@@ -877,7 +888,8 @@ TEST_P(AudioAndroidInputTest, DISABLED_RunSimplexInputStreamWithFileAsSink) {
                                              params.frames_per_buffer(),
                                              params.channels());
 
-  base::WaitableEvent event(false, false);
+  base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                            base::WaitableEvent::InitialState::NOT_SIGNALED);
   FileAudioSink sink(&event, params, file_name);
 
   OpenAndStartAudioInputStreamOnAudioThread(&sink);
@@ -904,7 +916,8 @@ TEST_P(AudioAndroidInputTest, DISABLED_RunDuplexInputStreamWithFileAsSink) {
                                              in_params.frames_per_buffer(),
                                              in_params.channels());
 
-  base::WaitableEvent event(false, false);
+  base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                            base::WaitableEvent::InitialState::NOT_SIGNALED);
   FileAudioSink sink(&event, in_params, file_name);
   MockAudioSourceCallback source;
 

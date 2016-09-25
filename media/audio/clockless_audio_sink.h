@@ -5,10 +5,10 @@
 #ifndef MEDIA_AUDIO_CLOCKLESS_AUDIO_SINK_H_
 #define MEDIA_AUDIO_CLOCKLESS_AUDIO_SINK_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "media/base/audio_renderer_sink.h"
 
@@ -26,6 +26,7 @@ class MEDIA_EXPORT ClocklessAudioSink
     : NON_EXPORTED_BASE(public AudioRendererSink) {
  public:
   ClocklessAudioSink();
+  explicit ClocklessAudioSink(const OutputDeviceInfo& device_info);
 
   // AudioRendererSink implementation.
   void Initialize(const AudioParameters& params,
@@ -36,6 +37,7 @@ class MEDIA_EXPORT ClocklessAudioSink
   void Play() override;
   bool SetVolume(double volume) override;
   OutputDeviceInfo GetOutputDeviceInfo() override;
+  bool CurrentThreadIsRenderingThread() override;
 
   // Returns the time taken to consume all the audio.
   base::TimeDelta render_time() { return playback_time_; }
@@ -50,7 +52,8 @@ class MEDIA_EXPORT ClocklessAudioSink
   ~ClocklessAudioSink() override;
 
  private:
-  scoped_ptr<ClocklessAudioSinkThread> thread_;
+  const OutputDeviceInfo device_info_;
+  std::unique_ptr<ClocklessAudioSinkThread> thread_;
   bool initialized_;
   bool playing_;
   bool hashing_;

@@ -10,7 +10,7 @@ from gpu_tests import cloud_storage_test_base
 from gpu_tests import pixel_expectations
 import page_sets
 
-from catapult_base import cloud_storage
+from py_utils import cloud_storage
 from telemetry.page import page_test
 from telemetry.util import image_util
 
@@ -79,7 +79,7 @@ class PixelValidator(cloud_storage_test_base.ValidatorBase):
           os.path.dirname(__file__), page.expected_colors))
       expected_colors = self._ReadPixelExpectations(expected_colors_file)
       self._ValidateScreenshotSamples(
-          page.display_name, screenshot, expected_colors, dpr)
+          tab, page.display_name, screenshot, expected_colors, dpr)
       return
 
     image_name = self._UrlToImageName(page.display_name)
@@ -116,7 +116,7 @@ class PixelValidator(cloud_storage_test_base.ValidatorBase):
           image_name, page.revision, screenshot)
 
     # Test new snapshot against existing reference image
-    if not image_util.AreEqual(ref_png, screenshot, tolerance=2):
+    if not image_util.AreEqual(ref_png, screenshot, tolerance=page.tolerance):
       if self.options.test_machine_name:
         self._UploadErrorImagesToCloudStorage(image_name, screenshot, ref_png)
       else:
@@ -165,7 +165,7 @@ class PixelValidator(cloud_storage_test_base.ValidatorBase):
       json_contents = json.load(f)
     return json_contents
 
-class Pixel(cloud_storage_test_base.TestBase):
+class Pixel(cloud_storage_test_base.CloudStorageTestBase):
   test = PixelValidator
 
   @classmethod

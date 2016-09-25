@@ -4,8 +4,12 @@
 
 #include "web/WebRemoteFrameImpl.h"
 
+#include "core/dom/Fullscreen.h"
+#include "core/dom/RemoteSecurityContext.h"
+#include "core/dom/SecurityContext.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
+#include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/layout/LayoutObject.h"
 #include "core/page/Page.h"
@@ -177,12 +181,6 @@ WebPerformance WebRemoteFrameImpl::performance() const
     return WebPerformance();
 }
 
-bool WebRemoteFrameImpl::dispatchBeforeUnloadEvent()
-{
-    NOTREACHED();
-    return false;
-}
-
 void WebRemoteFrameImpl::dispatchUnloadEvent()
 {
     NOTREACHED();
@@ -328,154 +326,6 @@ unsigned WebRemoteFrameImpl::unloadListenerCount() const
     return 0;
 }
 
-void WebRemoteFrameImpl::insertText(const WebString&)
-{
-    NOTREACHED();
-}
-
-void WebRemoteFrameImpl::setMarkedText(const WebString&, unsigned location, unsigned length)
-{
-    NOTREACHED();
-}
-
-void WebRemoteFrameImpl::unmarkText()
-{
-    NOTREACHED();
-}
-
-bool WebRemoteFrameImpl::hasMarkedText() const
-{
-    NOTREACHED();
-    return false;
-}
-
-WebRange WebRemoteFrameImpl::markedRange() const
-{
-    NOTREACHED();
-    return WebRange();
-}
-
-bool WebRemoteFrameImpl::firstRectForCharacterRange(unsigned location, unsigned length, WebRect&) const
-{
-    NOTREACHED();
-    return false;
-}
-
-size_t WebRemoteFrameImpl::characterIndexForPoint(const WebPoint&) const
-{
-    NOTREACHED();
-    return 0;
-}
-
-bool WebRemoteFrameImpl::executeCommand(const WebString&, const WebNode&)
-{
-    NOTREACHED();
-    return false;
-}
-
-bool WebRemoteFrameImpl::executeCommand(const WebString&, const WebString& value, const WebNode&)
-{
-    NOTREACHED();
-    return false;
-}
-
-bool WebRemoteFrameImpl::isCommandEnabled(const WebString&) const
-{
-    NOTREACHED();
-    return false;
-}
-
-void WebRemoteFrameImpl::enableContinuousSpellChecking(bool)
-{
-}
-
-bool WebRemoteFrameImpl::isContinuousSpellCheckingEnabled() const
-{
-    return false;
-}
-
-void WebRemoteFrameImpl::requestTextChecking(const WebElement&)
-{
-    NOTREACHED();
-}
-
-void WebRemoteFrameImpl::removeSpellingMarkers()
-{
-    NOTREACHED();
-}
-
-bool WebRemoteFrameImpl::hasSelection() const
-{
-    NOTREACHED();
-    return false;
-}
-
-WebRange WebRemoteFrameImpl::selectionRange() const
-{
-    NOTREACHED();
-    return WebRange();
-}
-
-WebString WebRemoteFrameImpl::selectionAsText() const
-{
-    NOTREACHED();
-    return WebString();
-}
-
-WebString WebRemoteFrameImpl::selectionAsMarkup() const
-{
-    NOTREACHED();
-    return WebString();
-}
-
-bool WebRemoteFrameImpl::selectWordAroundCaret()
-{
-    NOTREACHED();
-    return false;
-}
-
-void WebRemoteFrameImpl::selectRange(const WebPoint& base, const WebPoint& extent)
-{
-    NOTREACHED();
-}
-
-void WebRemoteFrameImpl::selectRange(const WebRange&)
-{
-    NOTREACHED();
-}
-
-void WebRemoteFrameImpl::moveRangeSelection(const WebPoint& base, const WebPoint& extent, WebFrame::TextGranularity granularity)
-{
-    NOTREACHED();
-}
-
-void WebRemoteFrameImpl::moveCaretSelection(const WebPoint&)
-{
-    NOTREACHED();
-}
-
-bool WebRemoteFrameImpl::setEditableSelectionOffsets(int start, int end)
-{
-    NOTREACHED();
-    return false;
-}
-
-bool WebRemoteFrameImpl::setCompositionFromExistingText(int compositionStart, int compositionEnd, const WebVector<WebCompositionUnderline>& underlines)
-{
-    NOTREACHED();
-    return false;
-}
-
-void WebRemoteFrameImpl::extendSelectionAndDelete(int before, int after)
-{
-    NOTREACHED();
-}
-
-void WebRemoteFrameImpl::setCaretVisible(bool)
-{
-    NOTREACHED();
-}
-
 int WebRemoteFrameImpl::printBegin(const WebPrintParams&, const WebNode& constrainToNode)
 {
     NOTREACHED();
@@ -503,35 +353,6 @@ bool WebRemoteFrameImpl::isPrintScalingDisabledForPlugin(const WebNode&)
 {
     NOTREACHED();
     return false;
-}
-
-bool WebRemoteFrameImpl::hasCustomPageSizeStyle(int pageIndex)
-{
-    NOTREACHED();
-    return false;
-}
-
-bool WebRemoteFrameImpl::isPageBoxVisible(int pageIndex)
-{
-    NOTREACHED();
-    return false;
-}
-
-void WebRemoteFrameImpl::pageSizeAndMarginsInPixels(
-    int pageIndex,
-    WebSize& pageSize,
-    int& marginTop,
-    int& marginRight,
-    int& marginBottom,
-    int& marginLeft)
-{
-    NOTREACHED();
-}
-
-WebString WebRemoteFrameImpl::pageProperty(const WebString& propertyName, int pageIndex)
-{
-    NOTREACHED();
-    return WebString();
 }
 
 void WebRemoteFrameImpl::printPagesWithBoundaries(WebCanvas*, const WebSize&)
@@ -608,13 +429,6 @@ WebRemoteFrameImpl* WebRemoteFrameImpl::fromFrame(RemoteFrame& frame)
     return static_cast<RemoteFrameClientImpl*>(frame.client())->webFrame();
 }
 
-void WebRemoteFrameImpl::initializeFromFrame(WebLocalFrame* source) const
-{
-    DCHECK(source);
-    WebLocalFrameImpl* localFrameImpl = toWebLocalFrameImpl(source);
-    client()->initializeChildFrame(localFrameImpl->frame()->page()->deviceScaleFactor());
-}
-
 void WebRemoteFrameImpl::setReplicatedOrigin(const WebSecurityOrigin& origin) const
 {
     DCHECK(frame());
@@ -647,10 +461,23 @@ void WebRemoteFrameImpl::setReplicatedName(const WebString& name, const WebStrin
     frame()->tree().setPrecalculatedName(name, uniqueName);
 }
 
-void WebRemoteFrameImpl::setReplicatedShouldEnforceStrictMixedContentChecking(bool shouldEnforce) const
+void WebRemoteFrameImpl::addReplicatedContentSecurityPolicyHeader(const WebString& headerValue, WebContentSecurityPolicyType type, WebContentSecurityPolicySource source) const
+{
+    frame()->securityContext()->contentSecurityPolicy()->addPolicyFromHeaderValue(
+        headerValue,
+        static_cast<ContentSecurityPolicyHeaderType>(type),
+        static_cast<ContentSecurityPolicyHeaderSource>(source));
+}
+
+void WebRemoteFrameImpl::resetReplicatedContentSecurityPolicy() const
+{
+    frame()->securityContext()->resetReplicatedContentSecurityPolicy();
+}
+
+void WebRemoteFrameImpl::setReplicatedInsecureRequestPolicy(WebInsecureRequestPolicy policy) const
 {
     DCHECK(frame());
-    frame()->securityContext()->setShouldEnforceStrictMixedContentChecking(shouldEnforce);
+    frame()->securityContext()->setInsecureRequestPolicy(policy);
 }
 
 void WebRemoteFrameImpl::setReplicatedPotentiallyTrustworthyUniqueOrigin(bool isUniqueOriginPotentiallyTrustworthy) const
@@ -688,6 +515,29 @@ bool WebRemoteFrameImpl::isIgnoredForHitTest() const
     if (!owner || !owner->layoutObject())
         return false;
     return owner->layoutObject()->style()->pointerEvents() == PE_NONE;
+}
+
+void WebRemoteFrameImpl::willEnterFullscreen()
+{
+    // This should only ever be called when the FrameOwner is local.
+    HTMLFrameOwnerElement* ownerElement = toHTMLFrameOwnerElement(frame()->owner());
+
+    // Call requestFullscreen() on |ownerElement| to make it the provisional
+    // fullscreen element in FullscreenController, and to prepare
+    // fullscreenchange events that will need to fire on it and its (local)
+    // ancestors. The events will be triggered if/when fullscreen is entered.
+    //
+    // Passing |forCrossProcessAncestor| to requestFullscreen is necessary
+    // because:
+    // - |ownerElement| will need :-webkit-full-screen-ancestor style in
+    //   addition to :-webkit-full-screen.
+    // - there's no need to resend the ToggleFullscreen IPC to the browser
+    //   process.
+    //
+    // TODO(alexmos): currently, this assumes prefixed requests, but in the
+    // future, this should plumb in information about which request type
+    // (prefixed or unprefixed) to use for firing fullscreen events.
+    Fullscreen::from(ownerElement->document()).requestFullscreen(*ownerElement, Fullscreen::PrefixedRequest, true /* forCrossProcessAncestor */);
 }
 
 WebRemoteFrameImpl::WebRemoteFrameImpl(WebTreeScopeType scope, WebRemoteFrameClient* client)

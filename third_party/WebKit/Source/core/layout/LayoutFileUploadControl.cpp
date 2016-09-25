@@ -22,14 +22,11 @@
 
 #include "core/HTMLNames.h"
 #include "core/InputTypeNames.h"
-#include "core/dom/shadow/ElementShadow.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/editing/PositionWithAffinity.h"
 #include "core/fileapi/FileList.h"
 #include "core/html/HTMLInputElement.h"
-#include "core/layout/LayoutButton.h"
 #include "core/layout/LayoutTheme.h"
-#include "core/layout/TextRunConstructor.h"
 #include "core/paint/FileUploadControlPainter.h"
 #include "platform/fonts/Font.h"
 #include "platform/text/PlatformLocale.h"
@@ -101,7 +98,7 @@ void LayoutFileUploadControl::computeIntrinsicLogicalWidths(LayoutUnit& minLogic
     }
     maxLogicalWidth = LayoutUnit(ceilf(std::max(minDefaultLabelWidth, defaultLabelWidth)));
 
-    if (!style()->width().hasPercent())
+    if (!style()->width().isPercentOrCalc())
         minLogicalWidth = maxLogicalWidth;
 }
 
@@ -128,7 +125,7 @@ void LayoutFileUploadControl::computePreferredLogicalWidths()
         m_minPreferredLogicalWidth = std::min(m_minPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(LayoutUnit(styleToUse.maxWidth().value())));
     }
 
-    int toAdd = borderAndPaddingWidth();
+    int toAdd = borderAndPaddingWidth().toInt();
     m_minPreferredLogicalWidth += toAdd;
     m_maxPreferredLogicalWidth += toAdd;
 

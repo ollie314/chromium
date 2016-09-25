@@ -32,10 +32,7 @@
 
 #include "core/dom/Document.h"
 #include "core/inspector/InspectedFrames.h"
-#include "core/inspector/InstrumentingAgents.h"
-#include "core/inspector/PageConsoleAgent.h"
 #include "platform/weborigin/KURL.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/WTFString.h"
 
@@ -46,15 +43,8 @@ static const char workerInspectionEnabled[] = "workerInspectionEnabled";
 static const char waitForDebuggerOnStart[] = "waitForDebuggerOnStart";
 };
 
-InspectorWorkerAgent* InspectorWorkerAgent::create(InspectedFrames* inspectedFrames, PageConsoleAgent* consoleAgent)
-{
-    return new InspectorWorkerAgent(inspectedFrames, consoleAgent);
-}
-
-InspectorWorkerAgent::InspectorWorkerAgent(InspectedFrames* inspectedFrames, PageConsoleAgent* consoleAgent)
-    : InspectorBaseAgent<InspectorWorkerAgent, protocol::Frontend::Worker>("Worker")
-    , m_inspectedFrames(inspectedFrames)
-    , m_consoleAgent(consoleAgent)
+InspectorWorkerAgent::InspectorWorkerAgent(InspectedFrames* inspectedFrames)
+    : m_inspectedFrames(inspectedFrames)
 {
 }
 
@@ -66,7 +56,7 @@ void InspectorWorkerAgent::restore()
 {
     if (!enabled())
         return;
-    m_instrumentingAgents->setInspectorWorkerAgent(this);
+    m_instrumentingAgents->addInspectorWorkerAgent(this);
     connectToAllProxies();
 }
 
@@ -75,7 +65,7 @@ void InspectorWorkerAgent::enable(ErrorString*)
     if (enabled())
         return;
     m_state->setBoolean(WorkerAgentState::workerInspectionEnabled, true);
-    m_instrumentingAgents->setInspectorWorkerAgent(this);
+    m_instrumentingAgents->addInspectorWorkerAgent(this);
     connectToAllProxies();
 }
 
@@ -85,7 +75,7 @@ void InspectorWorkerAgent::disable(ErrorString*)
         return;
     m_state->setBoolean(WorkerAgentState::workerInspectionEnabled, false);
     m_state->setBoolean(WorkerAgentState::waitForDebuggerOnStart, false);
-    m_instrumentingAgents->setInspectorWorkerAgent(nullptr);
+    m_instrumentingAgents->removeInspectorWorkerAgent(this);
     for (auto& idProxy : m_connectedProxies)
         idProxy.value->disconnectFromInspector(this);
     m_connectedProxies.clear();
@@ -183,17 +173,11 @@ void InspectorWorkerAgent::dispatchMessageFromWorker(WorkerInspectorProxy* proxy
     frontend()->dispatchMessageFromWorker(proxy->inspectorId(), message);
 }
 
-void InspectorWorkerAgent::workerConsoleAgentEnabled(WorkerInspectorProxy* proxy)
-{
-    m_consoleAgent->workerConsoleAgentEnabled(proxy);
-}
-
 DEFINE_TRACE(InspectorWorkerAgent)
 {
     visitor->trace(m_connectedProxies);
-    visitor->trace(m_consoleAgent);
     visitor->trace(m_inspectedFrames);
-    InspectorBaseAgent<InspectorWorkerAgent, protocol::Frontend::Worker>::trace(visitor);
+    InspectorBaseAgent::trace(visitor);
 }
 
 } // namespace blink

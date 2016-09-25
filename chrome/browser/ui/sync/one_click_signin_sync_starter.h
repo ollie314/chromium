@@ -20,11 +20,18 @@
 #include "content/public/browser/web_contents_observer.h"
 
 class Browser;
+
+namespace browser_sync {
 class ProfileSyncService;
+}  // namespace browser_sync
 
 namespace content {
 class WebContents;
 }  // namespace content
+
+namespace sync_driver {
+class SyncSetupInProgressHandle;
+}  // namespace sync_driver
 
 // Waits for successful sign-in notification from the signin manager and then
 // starts the sync machine.  Instances of this class delete themselves once
@@ -193,7 +200,7 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
   // disabled during setup. In this case GetProfileSyncService will return NULL,
   // but we still need to call PSS::SetSetupInProgress(false). For this purpose
   // call FinishProfileSyncServiceSetup() function.
-  ProfileSyncService* GetProfileSyncService();
+  browser_sync::ProfileSyncService* GetProfileSyncService();
 
   void FinishProfileSyncServiceSetup();
 
@@ -237,6 +244,9 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
   // SigninTracker always expects an observer, this object will just disregard
   // following AccountAddedToCookie calls triggered by account reconciliation.
   bool first_account_added_to_cookie_;
+
+  // Prevents Sync from running until configuration is complete.
+  std::unique_ptr<sync_driver::SyncSetupInProgressHandle> sync_blocker_;
 
   base::WeakPtrFactory<OneClickSigninSyncStarter> weak_pointer_factory_;
 

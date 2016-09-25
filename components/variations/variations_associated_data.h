@@ -6,7 +6,9 @@
 #define COMPONENTS_VARIATIONS_VARIATIONS_ASSOCIATED_DATA_H_
 
 #include <map>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "base/metrics/field_trial.h"
 #include "components/variations/active_field_trials.h"
@@ -41,9 +43,14 @@
 //   // use |id|
 // }
 
+namespace base {
+struct Feature;
+}
+
 namespace variations {
 
 typedef int VariationID;
+class VariationsHttpHeaderProvider;
 
 const VariationID EMPTY_ID = 0;
 
@@ -123,6 +130,18 @@ bool AssociateVariationParams(const std::string& trial_name,
 bool GetVariationParams(const std::string& trial_name,
                         std::map<std::string, std::string>* params);
 
+// Retrieves the set of key-value |params| for the variation associated with the
+// specified |feature|. A feature is associated with at most one variation,
+// through the variation's associated field trial, and selected group. See
+// base/feature_list.h for more information on features. If the feature is not
+// enabled, or if there's no associated variation params, returns false and does
+// not modify |params|. Calling this function will result in the associated
+// field trial being marked as active if found (i.e. group() will be called on
+// it), if it wasn't already. Currently, this information is only available from
+// the browser process. Thread safe.
+bool GetVariationParamsByFeature(const base::Feature& feature,
+                                 std::map<std::string, std::string>* params);
+
 // Retrieves a specific parameter value corresponding to |param_name| for the
 // variation associated with the specified field trial, based on its selected
 // group. If the field trial does not exist or the specified parameter does not
@@ -133,8 +152,45 @@ bool GetVariationParams(const std::string& trial_name,
 std::string GetVariationParamValue(const std::string& trial_name,
                                    const std::string& param_name);
 
+// Retrieves a specific parameter value corresponding to |param_name| for the
+// variation associated with the specified |feature|. A feature is associated
+// with at most one variation, through the variation's associated field trial,
+// and selected group. See base/feature_list.h for more information on
+// features. If the feature is not enabled, or the specified parameter does not
+// exist, returns an empty string.Calling this function will result in the
+// associated field trial being marked as active if found (i.e. group() will be
+// called on it), if it wasn't already. Currently, this information is only
+// available from the browser process. Thread safe.
+std::string GetVariationParamValueByFeature(const base::Feature& feature,
+                                            const std::string& param_name);
+
 // Expose some functions for testing.
 namespace testing {
+
+// Use this class as a member in your test class to set variation params for
+// your tests. You can directly set the parameters in the constructor (if they
+// are used by other members upon construction). You can change them later
+// arbitrarily many times using the SetVariationParams function. Internally, it
+// creates a FieldTrialList as a member. It works well for multiple tests of a
+// given test class, as it clears the parameters when this class is destructed.
+// Note that it clears all parameters (not just those registered here).
+class VariationParamsManager {
+ public:
+  VariationParamsManager(const std::string& trial_name,
+                         const std::map<std::string, std::string>& params);
+  ~VariationParamsManager();
+
+  // Associates |params| with the given |trial_name|. It creates a new group,
+  // used only for testing. Between two calls of this function,
+  // ClearAllVariationParams() has to be called.
+  void SetVariationParams(const std::string& trial_name,
+                          const std::map<std::string, std::string>& params);
+
+ private:
+  std::unique_ptr<base::FieldTrialList> field_trial_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(VariationParamsManager);
+};
 
 // Clears all of the mapped associations.
 void ClearAllVariationIDs();

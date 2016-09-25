@@ -8,13 +8,14 @@ import("//build/config/compiler/compiler.gni")
 import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
-import("//build_overrides/v8.gni")
+import("//net/features.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 import("//testing/test.gni")
 import("//third_party/icu/config.gni")
 import("//third_party/protobuf/proto_library.gni")
 import("//tools/grit/grit_rule.gni")
 import("//url/features.gni")
+import("//v8/gni/v8.gni")
 
 if (is_android) {
   import("//build/config/android/config.gni")
@@ -39,24 +40,6 @@ posix_avoid_mmap = is_android && current_cpu != "x86"
 use_v8_in_net = !is_ios
 enable_built_in_dns = !is_ios
 
-declare_args() {
-  # Disables support for file URLs.  File URL support requires use of icu.
-  disable_file_support = false
-
-  # WebSockets and socket stream code are not used on iOS and are optional in
-  # cronet.
-  enable_websockets = !is_ios
-  disable_ftp_support = is_ios
-
-  # Enable Kerberos authentication. It is disabled by default on ChromeOS, iOS,
-  # Chromecast, at least for now. This feature needs configuration (krb5.conf
-  # and so on).
-  use_kerberos = !is_chromeos && !is_ios && !is_chromecast
-
-  # Do not disable brotli filter by default.
-  disable_brotli_filter = false
-}
-
 config("net_config") {
   defines = []
   if (posix_avoid_mmap) {
@@ -68,15 +51,13 @@ config("net_config") {
   if (disable_ftp_support) {
     defines += [ "DISABLE_FTP_SUPPORT=1" ]
   }
+  if (enable_websockets) {
+    defines += [ "ENABLE_WEBSOCKETS" ]
+  }
 }
 
 config("net_internal_config") {
   defines = [
-    # TODO(GYP) Note that the GYP file supports linux_link_kerberos (defaults to
-    # 0) which implies that we run pkg_config on kerberos and link to that
-    # rather than setting this define which will dynamically open it. That
-    # doesn't seem to be set in the regular builds, so we're skipping this
-    # capability here.
     "DLOPEN_KERBEROS",
     "NET_IMPLEMENTATION",
   ]
@@ -99,10 +80,11 @@ net_configs = [
 
   # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
   "//build/config/compiler:no_size_t_to_int_warning",
+  "//build/config/compiler:wexit_time_destructors",
 ]
 
 if (use_glib && use_gconf && !is_chromeos) {
-  net_configs += [ "//build/config/linux:gconf" ]
+  net_configs += [ "//build/config/linux/gconf" ]
 }
 
 if (is_linux) {
@@ -160,77 +142,6 @@ component("net") {
       ]
     }
 
-    if (use_openssl) {
-      sources -= [
-        "base/nss_memio.c",
-        "base/nss_memio.h",
-        "cert/ct_log_verifier_nss.cc",
-        "cert/ct_objects_extractor_nss.cc",
-        "cert/jwk_serializer_nss.cc",
-        "cert/scoped_nss_types.h",
-        "cert/x509_util_nss.cc",
-        "quic/crypto/aead_base_decrypter_nss.cc",
-        "quic/crypto/aead_base_encrypter_nss.cc",
-        "quic/crypto/aes_128_gcm_12_decrypter_nss.cc",
-        "quic/crypto/aes_128_gcm_12_encrypter_nss.cc",
-        "quic/crypto/chacha20_poly1305_rfc7539_decrypter_nss.cc",
-        "quic/crypto/chacha20_poly1305_rfc7539_encrypter_nss.cc",
-        "quic/crypto/channel_id_nss.cc",
-        "quic/crypto/p256_key_exchange_nss.cc",
-        "quic/crypto/proof_source_chromium_nss.cc",
-        "socket/nss_ssl_util.cc",
-        "socket/nss_ssl_util.h",
-        "socket/ssl_client_socket_nss.cc",
-        "socket/ssl_client_socket_nss.h",
-        "socket/ssl_server_socket_nss.cc",
-        "socket/ssl_server_socket_nss.h",
-        "ssl/token_binding_nss.cc",
-      ]
-      if (is_ios) {
-        sources -= [
-          "cert/x509_util_ios.cc",
-          "cert/x509_util_ios.h",
-        ]
-      }
-    } else {
-      sources -= [
-        "cert/ct_log_verifier_openssl.cc",
-        "cert/ct_objects_extractor_openssl.cc",
-        "cert/jwk_serializer_openssl.cc",
-        "cert/x509_util_openssl.cc",
-        "cert/x509_util_openssl.h",
-        "quic/crypto/aead_base_decrypter_openssl.cc",
-        "quic/crypto/aead_base_encrypter_openssl.cc",
-        "quic/crypto/aes_128_gcm_12_decrypter_openssl.cc",
-        "quic/crypto/aes_128_gcm_12_encrypter_openssl.cc",
-        "quic/crypto/chacha20_poly1305_rfc7539_decrypter_openssl.cc",
-        "quic/crypto/chacha20_poly1305_rfc7539_encrypter_openssl.cc",
-        "quic/crypto/channel_id_openssl.cc",
-        "quic/crypto/p256_key_exchange_openssl.cc",
-        "quic/crypto/proof_source_chromium_openssl.cc",
-        "quic/crypto/scoped_evp_aead_ctx.cc",
-        "quic/crypto/scoped_evp_aead_ctx.h",
-        "socket/ssl_client_socket_openssl.cc",
-        "socket/ssl_client_socket_openssl.h",
-        "socket/ssl_server_socket_openssl.cc",
-        "socket/ssl_server_socket_openssl.h",
-        "ssl/openssl_ssl_util.cc",
-        "ssl/openssl_ssl_util.h",
-        "ssl/ssl_client_session_cache_openssl.cc",
-        "ssl/ssl_client_session_cache_openssl.h",
-        "ssl/ssl_key_logger.cc",
-        "ssl/ssl_key_logger.h",
-        "ssl/ssl_platform_key.h",
-        "ssl/ssl_platform_key_task_runner.cc",
-        "ssl/ssl_platform_key_task_runner.h",
-        "ssl/test_ssl_private_key.cc",
-        "ssl/test_ssl_private_key.h",
-        "ssl/threaded_ssl_private_key.cc",
-        "ssl/threaded_ssl_private_key.h",
-        "ssl/token_binding_openssl.cc",
-      ]
-    }
-
     if (!use_openssl_certs) {
       sources -= [
         "base/crypto_module_openssl.cc",
@@ -267,8 +178,8 @@ component("net") {
       ]
     }
 
-    if (use_glib && use_gconf && !is_chromeos) {
-      deps += [ "//build/linux:gio" ]
+    if (use_gio) {
+      deps += [ "//build/linux/libgio" ]
     }
 
     if (!use_nss_certs) {
@@ -276,6 +187,8 @@ component("net") {
         "base/crypto_module_nss.cc",
         "base/keygen_handler_nss.cc",
         "cert/cert_database_nss.cc",
+        "cert/internal/trust_store_nss.cc",
+        "cert/internal/trust_store_nss.h",
         "cert/nss_cert_database.cc",
         "cert/nss_cert_database.h",
         "cert/x509_certificate_nss.cc",
@@ -302,37 +215,23 @@ component("net") {
         "ssl/client_key_store.h",
         "ssl/ssl_platform_key_nss.cc",
       ]
-    } else if (use_openssl) {
-      # client_cert_store_nss.c requires NSS_CmpCertChainWCANames from NSS's
-      # libssl, but our bundled copy is not built in OpenSSL ports. Pull that
-      # file in directly.
-      sources += [ "third_party/nss/ssl/cmpcert.c" ]
+    } else {
+      sources += [
+        "third_party/nss/ssl/cmpcert.cc",
+        "third_party/nss/ssl/cmpcert.h",
+      ]
     }
 
-    if (!use_nss_verifier) {
+    if (!use_nss_certs) {
       # These files are part of the partial implementation of NSS for
       # cert verification, so keep them in that case.
       sources -= [
         "cert/cert_verify_proc_nss.cc",
         "cert/cert_verify_proc_nss.h",
         "cert/test_root_certs_nss.cc",
-        "cert/x509_util_nss_certs.cc",
+        "cert/x509_util_nss.cc",
         "cert_net/nss_ocsp.cc",
         "cert_net/nss_ocsp.h",
-      ]
-    }
-
-    if (is_ios && use_nss_verifier) {
-      sources -= [
-        "cert/cert_verify_proc_ios.cc",
-        "cert/cert_verify_proc_ios.h",
-        "cert/x509_certificate_openssl_ios.cc",
-      ]
-
-      deps += [
-        "//net/third_party/nss/ssl:libssl",
-        "//third_party/nss",
-        "//third_party/nss:nspr",
       ]
     }
 
@@ -349,10 +248,6 @@ component("net") {
         "dns/mdns_client.h",
         "dns/mdns_client_impl.cc",
         "dns/mdns_client_impl.h",
-        "dns/record_parsed.cc",
-        "dns/record_parsed.h",
-        "dns/record_rdata.cc",
-        "dns/record_rdata.h",
       ]
     }
 
@@ -380,16 +275,12 @@ component("net") {
         "base/network_interfaces_mac.cc",
         "base/network_interfaces_mac.h",
         "base/platform_mime_util_mac.mm",
+        "cert/test_root_certs_mac.cc",
         "proxy/proxy_resolver_mac.cc",
         "proxy/proxy_server_mac.cc",
       ]
 
       sources -= [ "disk_cache/blockfile/file_posix.cc" ]
-    }
-
-    if (is_ios && !use_nss_verifier) {
-      net_unfiltered_sources += [ "cert/test_root_certs_mac.cc" ]
-      sources -= [ "cert/x509_certificate_ios.cc" ]
     }
 
     if (is_ios || is_mac) {
@@ -426,6 +317,8 @@ component("net") {
 
   if (is_mac) {
     libs = [
+      "CFNetwork.framework",
+      "CoreServices.framework",
       "Foundation.framework",
       "Security.framework",
       "SystemConfiguration.framework",
@@ -448,6 +341,7 @@ component("net") {
       "crypt32.lib",
       "dhcpcsvc.lib",
       "iphlpapi.lib",
+      "ncrypt.lib",
       "rpcrt4.lib",
       "secur32.lib",
       "urlmon.lib",
@@ -472,10 +366,7 @@ component("net") {
     if (use_platform_icu_alternatives) {
       if (is_android) {
         # Use ICU alternative on Android.
-        sources += [
-          "base/net_string_util_icu_alternatives_android.cc",
-          "base/net_string_util_icu_alternatives_android.h",
-        ]
+        sources += [ "base/net_string_util_icu_alternatives_android.cc" ]
         deps += [ ":net_jni_headers" ]
       } else if (is_ios) {
         # Use ICU alternative on iOS.
@@ -499,9 +390,11 @@ component("net") {
     # Brotli support.
     if (!disable_brotli_filter) {
       sources += [ "filter/brotli_filter.cc" ]
+      sources += [ "filter/brotli_source_stream.cc" ]
       deps += [ "//third_party/brotli" ]
     } else {
       sources += [ "filter/brotli_filter_disabled.cc" ]
+      sources += [ "filter/brotli_source_stream_disabled.cc" ]
     }
   }
 }
@@ -519,11 +412,12 @@ proto_library("net_quic_proto") {
   visibility = [ ":net" ]
 
   sources = [
-    "quic/proto/cached_network_parameters.proto",
-    "quic/proto/source_address_token.proto",
+    "quic/core/proto/cached_network_parameters.proto",
+    "quic/core/proto/source_address_token.proto",
   ]
   cc_generator_options = "dllexport_decl=NET_EXPORT_PRIVATE:"
   cc_include = "net/base/net_export.h"
+  component_build_force_source_set = true
 
   defines = [ "NET_IMPLEMENTATION" ]
 
@@ -582,22 +476,22 @@ if (!is_ios) {
       ":test_support",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 }
 
 bundle_data("test_support_bundle_data") {
+  visibility = [ ":test_support" ]
   testonly = true
-  sources = [
-    "data/ssl/certificates",
-  ]
+  sources = gypi_values.net_test_support_data_sources
   outputs = [
     "{{bundle_resources_dir}}/" +
         "{{source_root_relative_dir}}/{{source_file_part}}",
   ]
 }
 
-source_set("test_support") {
+static_library("test_support") {
   testonly = true
   sources = [
     "base/load_timing_info_test_util.cc",
@@ -606,8 +500,6 @@ source_set("test_support") {
     "base/mock_file_stream.h",
     "base/test_completion_callback.cc",
     "base/test_completion_callback.h",
-    "base/test_data_directory.cc",
-    "base/test_data_directory.h",
     "cert/mock_cert_verifier.cc",
     "cert/mock_cert_verifier.h",
     "cert/mock_client_cert_verifier.cc",
@@ -629,6 +521,8 @@ source_set("test_support") {
     "dns/mock_host_resolver.h",
     "dns/mock_mdns_socket_factory.cc",
     "dns/mock_mdns_socket_factory.h",
+    "http/http_stream_factory_test_util.cc",
+    "http/http_stream_factory_test_util.h",
     "http/http_transaction_test_util.cc",
     "http/http_transaction_test_util.h",
     "log/test_net_log.cc",
@@ -665,15 +559,22 @@ source_set("test_support") {
     "test/embedded_test_server/request_handler_util.cc",
     "test/embedded_test_server/request_handler_util.h",
     "test/event_waiter.h",
+    "test/gtest_util.h",
     "test/net_test_suite.cc",
     "test/net_test_suite.h",
     "test/python_utils.cc",
     "test/python_utils.h",
+    "test/scoped_disable_exit_on_dfatal.cc",
+    "test/scoped_disable_exit_on_dfatal.h",
     "test/test_certificate_data.h",
+    "test/test_data_directory.cc",
+    "test/test_data_directory.h",
     "test/url_request/ssl_certificate_error_job.cc",
     "test/url_request/ssl_certificate_error_job.h",
     "test/url_request/url_request_failed_job.cc",
     "test/url_request/url_request_failed_job.h",
+    "test/url_request/url_request_hanging_read_job.cc",
+    "test/url_request/url_request_hanging_read_job.h",
     "test/url_request/url_request_mock_data_job.cc",
     "test/url_request/url_request_mock_data_job.h",
     "test/url_request/url_request_slow_download_job.cc",
@@ -702,10 +603,6 @@ source_set("test_support") {
     "//build/config/compiler:no_size_t_to_int_warning",
   ]
 
-  deps = [
-    ":test_support_bundle_data",
-  ]
-
   public_deps = [
     "//base",
     "//base/test:test_support",
@@ -717,11 +614,19 @@ source_set("test_support") {
     "//url",
   ]
 
-  if (!is_ios) {
+  deps = []
+
+  data = [
+    "data/",
+  ]
+
+  if (is_ios) {
+    deps += [ ":test_support_bundle_data" ]
+  } else {
     public_deps += [ "//third_party/protobuf:py_proto" ]
   }
 
-  if (use_nss_verifier) {
+  if (use_nss_certs) {
     public_deps += [ "//crypto:platform" ]
   }
 
@@ -891,6 +796,29 @@ if (use_v8_in_net && !is_android) {
 }
 
 if (!is_ios && !is_android) {
+  executable("cert_verify_tool") {
+    testonly = true
+    sources = [
+      "tools/cert_verify_tool/cert_verify_tool.cc",
+      "tools/cert_verify_tool/cert_verify_tool_util.cc",
+      "tools/cert_verify_tool/cert_verify_tool_util.h",
+      "tools/cert_verify_tool/verify_using_cert_verify_proc.cc",
+      "tools/cert_verify_tool/verify_using_cert_verify_proc.h",
+      "tools/cert_verify_tool/verify_using_path_builder.cc",
+      "tools/cert_verify_tool/verify_using_path_builder.h",
+    ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+    deps = [
+      ":net",
+      ":test_support",
+      "//base",
+      "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
+    ]
+  }
+
   executable("crash_cache") {
     testonly = true
     sources = [
@@ -904,6 +832,7 @@ if (!is_ios && !is_android) {
       ":test_support",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 
@@ -919,6 +848,7 @@ if (!is_ios && !is_android) {
       ":net",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 
@@ -934,6 +864,7 @@ if (!is_ios && !is_android) {
       ":net",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 
@@ -947,6 +878,7 @@ if (!is_ios && !is_android) {
       ":net",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 
@@ -963,6 +895,7 @@ if (!is_ios && !is_android) {
       "//base",
       "//base:i18n",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
       "//url",
     ]
   }
@@ -979,6 +912,7 @@ if (!is_ios && !is_android) {
       ":net",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 
@@ -994,6 +928,7 @@ if (!is_ios && !is_android) {
       ":net",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 
@@ -1009,6 +944,7 @@ if (!is_ios && !is_android) {
       ":net",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 
@@ -1023,15 +959,8 @@ if (!is_ios && !is_android) {
         ":net_with_v8",
         "//base",
         "//build/config/sanitizers:deps",
+        "//build/win:default_exe_manifest",
       ]
-
-      if (is_desktop_linux && use_gconf && use_glib) {
-        configs += [
-          "//build/config/linux:gconf",
-          "//build/config/linux:glib",
-        ]
-        deps += [ "//build/linux:gio" ]
-      }
     }
   }
 
@@ -1045,6 +974,7 @@ if (!is_ios && !is_android) {
       "//base",
       "//base/test:test_support",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
       "//testing/gtest",
     ]
   }
@@ -1062,6 +992,7 @@ if (!is_ios && !is_android) {
       ":test_support",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 
@@ -1076,12 +1007,13 @@ if (!is_ios && !is_android) {
       "//base",
       "//base:i18n",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
       "//net/tools/tld_cleanup",
     ]
   }
 }
 
-if (is_linux) {
+if (is_linux || is_mac) {
   executable("cachetool") {
     testonly = true
     sources = [
@@ -1108,7 +1040,9 @@ if (is_linux) {
       "//url",
     ]
   }
+}
 
+if (is_linux) {
   static_library("epoll_server") {
     sources = [
       "tools/epoll_server/epoll_server.cc",
@@ -1120,93 +1054,14 @@ if (is_linux) {
     ]
   }
 
-  static_library("flip_in_mem_edsm_server_base") {
-    testonly = true
-    sources = [
-      "tools/flip_server/acceptor_thread.cc",
-      "tools/flip_server/acceptor_thread.h",
-      "tools/flip_server/constants.h",
-      "tools/flip_server/flip_config.cc",
-      "tools/flip_server/flip_config.h",
-      "tools/flip_server/http_interface.cc",
-      "tools/flip_server/http_interface.h",
-      "tools/flip_server/mem_cache.cc",
-      "tools/flip_server/mem_cache.h",
-      "tools/flip_server/output_ordering.cc",
-      "tools/flip_server/output_ordering.h",
-      "tools/flip_server/ring_buffer.cc",
-      "tools/flip_server/ring_buffer.h",
-      "tools/flip_server/sm_connection.cc",
-      "tools/flip_server/sm_connection.h",
-      "tools/flip_server/sm_interface.h",
-      "tools/flip_server/spdy_interface.cc",
-      "tools/flip_server/spdy_interface.h",
-      "tools/flip_server/spdy_ssl.cc",
-      "tools/flip_server/spdy_ssl.h",
-      "tools/flip_server/spdy_util.cc",
-      "tools/flip_server/spdy_util.h",
-      "tools/flip_server/streamer_interface.cc",
-      "tools/flip_server/streamer_interface.h",
-      "tools/flip_server/tcp_socket_util.cc",
-      "tools/flip_server/tcp_socket_util.h",
-      "tools/flip_server/url_to_filename_encoder.cc",
-      "tools/flip_server/url_to_filename_encoder.h",
-      "tools/flip_server/url_utilities.cc",
-      "tools/flip_server/url_utilities.h",
-    ]
-    deps = [
-      ":balsa",
-      ":epoll_server",
-      ":net",
-      "//base",
-      "//third_party/boringssl",
-    ]
-  }
-
-  executable("flip_in_mem_edsm_server_unittests") {
-    testonly = true
-    sources = [
-      "tools/flip_server/flip_test_utils.cc",
-      "tools/flip_server/flip_test_utils.h",
-      "tools/flip_server/http_interface_test.cc",
-      "tools/flip_server/mem_cache_test.cc",
-      "tools/flip_server/run_all_tests.cc",
-      "tools/flip_server/spdy_interface_test.cc",
-      "tools/flip_server/url_to_filename_encoder_unittest.cc",
-      "tools/flip_server/url_utilities_unittest.cc",
-    ]
-    deps = [
-      ":balsa",
-      ":flip_in_mem_edsm_server_base",
-      ":net",
-      ":test_support",
-      "//build/config/sanitizers:deps",
-      "//testing/gmock",
-      "//testing/gtest",
-      "//third_party/boringssl",
-    ]
-  }
-
-  executable("flip_in_mem_edsm_server") {
-    testonly = true
-    sources = [
-      "tools/flip_server/flip_in_mem_edsm_server.cc",
-    ]
-    deps = [
-      ":balsa",
-      ":flip_in_mem_edsm_server_base",
-      ":net",
-      "//base",
-      "//build/config/sanitizers:deps",
-    ]
-  }
-
   source_set("epoll_quic_tools") {
     sources = [
       "tools/quic/quic_client.cc",
       "tools/quic/quic_client.h",
       "tools/quic/quic_default_packet_writer.cc",
       "tools/quic/quic_default_packet_writer.h",
+      "tools/quic/quic_epoll_alarm_factory.cc",
+      "tools/quic/quic_epoll_alarm_factory.h",
       "tools/quic/quic_epoll_clock.cc",
       "tools/quic/quic_epoll_clock.h",
       "tools/quic/quic_epoll_connection_helper.cc",
@@ -1269,6 +1124,7 @@ if (is_linux) {
 if (is_android) {
   generate_jni("net_jni_headers") {
     sources = [
+      "android/java/src/org/chromium/net/AndroidCellularSignalStrength.java",
       "android/java/src/org/chromium/net/AndroidCertVerifyResult.java",
       "android/java/src/org/chromium/net/AndroidKeyStore.java",
       "android/java/src/org/chromium/net/AndroidNetworkLibrary.java",
@@ -1308,6 +1164,8 @@ if (is_android || is_linux) {
 
 source_set("simple_quic_tools") {
   sources = [
+    "tools/quic/chlo_extractor.cc",
+    "tools/quic/chlo_extractor.h",
     "tools/quic/quic_client_base.cc",
     "tools/quic/quic_client_base.h",
     "tools/quic/quic_client_session.cc",
@@ -1319,10 +1177,12 @@ source_set("simple_quic_tools") {
     "tools/quic/quic_per_connection_packet_writer.cc",
     "tools/quic/quic_per_connection_packet_writer.h",
     "tools/quic/quic_process_packet_interface.h",
-    "tools/quic/quic_server_session_base.cc",
-    "tools/quic/quic_server_session_base.h",
     "tools/quic/quic_simple_client.cc",
     "tools/quic/quic_simple_client.h",
+    "tools/quic/quic_simple_crypto_server_stream_helper.cc",
+    "tools/quic/quic_simple_crypto_server_stream_helper.h",
+    "tools/quic/quic_simple_dispatcher.cc",
+    "tools/quic/quic_simple_dispatcher.h",
     "tools/quic/quic_simple_per_connection_packet_writer.cc",
     "tools/quic/quic_simple_per_connection_packet_writer.h",
     "tools/quic/quic_simple_server.cc",
@@ -1331,12 +1191,16 @@ source_set("simple_quic_tools") {
     "tools/quic/quic_simple_server_packet_writer.h",
     "tools/quic/quic_simple_server_session.cc",
     "tools/quic/quic_simple_server_session.h",
+    "tools/quic/quic_simple_server_session_helper.cc",
+    "tools/quic/quic_simple_server_session_helper.h",
     "tools/quic/quic_simple_server_stream.cc",
     "tools/quic/quic_simple_server_stream.h",
     "tools/quic/quic_spdy_client_stream.cc",
     "tools/quic/quic_spdy_client_stream.h",
     "tools/quic/quic_time_wait_list_manager.cc",
     "tools/quic/quic_time_wait_list_manager.h",
+    "tools/quic/stateless_rejector.cc",
+    "tools/quic/stateless_rejector.h",
     "tools/quic/synchronous_host_resolver.cc",
     "tools/quic/synchronous_host_resolver.h",
   ]
@@ -1387,6 +1251,7 @@ if (!is_ios) {
       ":simple_quic_tools",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
       "//url",
     ]
   }
@@ -1399,26 +1264,55 @@ if (!is_ios) {
       ":simple_quic_tools",
       "//base",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
       "//third_party/boringssl",
       "//third_party/protobuf:protobuf_lite",
+    ]
+  }
+  executable("quic_packet_printer") {
+    sources = [
+      "tools/quic/quic_packet_printer_bin.cc",
+    ]
+    deps = [
+      ":net",
+      ":simple_quic_tools",
+      "//base",
+      "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
+      "//third_party/boringssl",
+      "//third_party/protobuf:protobuf_lite",
+    ]
+  }
+  executable("quic_reject_reason_decoder") {
+    sources = [
+      "tools/quic/quic_reject_reason_decoder_bin.cc",
+    ]
+    deps = [
+      ":net",
+      ":simple_quic_tools",
+      "//base",
+      "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
+      "//third_party/boringssl",
+      "//third_party/protobuf:protobuf_lite",
+    ]
+  }
+  executable("crypto_message_printer") {
+    sources = [
+      "tools/quic/crypto_message_printer_bin.cc",
+    ]
+    deps = [
+      ":net",
+      "//base",
+      "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 }
 
 bundle_data("net_unittests_bundle_data") {
   testonly = true
-  sources = [
-    "data/certificate_policies_unittest",
-    "data/name_constraints_unittest",
-    "data/parse_certificate_unittest",
-    "data/parse_ocsp_unittest",
-    "data/test.html",
-    "data/url_request_unittest",
-    "data/verify_certificate_chain_unittest",
-    "data/verify_name_match_unittest/names",
-    "third_party/nist-pkits/certs",
-    "third_party/nist-pkits/crls",
-  ]
+  sources = gypi_values.net_unittests_data_sources
   outputs = [
     "{{bundle_resources_dir}}/" +
         "{{source_root_relative_dir}}/{{source_file_part}}",
@@ -1440,7 +1334,6 @@ test("net_unittests") {
     ":balsa",
     ":extras",
     ":net",
-    ":net_unittests_bundle_data",
     ":simple_quic_tools",
     ":stale_while_revalidate_experiment_domains",
     ":test_support",
@@ -1459,14 +1352,10 @@ test("net_unittests") {
     "//url:url_features",
   ]
 
-  data = [
-    "data/",
+  data = []
+  data_deps = [
+    "third_party/nist-pkits/",
   ]
-  data_deps = []
-
-  if (use_openssl) {
-    data_deps += [ "third_party/nist-pkits/" ]
-  }
 
   if (is_linux || is_mac || is_win) {
     deps += [
@@ -1496,12 +1385,15 @@ test("net_unittests") {
     deps += [
       ":epoll_quic_tools",
       ":epoll_server",
-      ":flip_in_mem_edsm_server_base",
     ]
   }
 
   if (is_mac || is_ios) {
     sources += gypi_values.net_base_test_mac_ios_sources
+  }
+
+  if (is_mac) {
+    libs = [ "Security.framework" ]
   }
 
   if (is_chromeos) {
@@ -1514,6 +1406,7 @@ test("net_unittests") {
 
   if (!use_nss_certs) {
     sources -= [
+      "cert/internal/trust_store_nss_unittest.cc",
       "cert/nss_cert_database_unittest.cc",
       "ssl/client_cert_store_nss_unittest.cc",
     ]
@@ -1523,15 +1416,6 @@ test("net_unittests") {
         "cert/nss_profile_filter_chromeos_unittest.cc",
       ]
     }
-  }
-
-  if (use_openssl) {
-    sources -= [ "quic/test_tools/crypto_test_utils_nss.cc" ]
-  } else {
-    sources -= [
-      "quic/test_tools/crypto_test_utils_openssl.cc",
-      "ssl/ssl_client_session_cache_openssl_unittest.cc",
-    ]
   }
 
   if (use_kerberos) {
@@ -1551,7 +1435,7 @@ test("net_unittests") {
     sources -= [ "http/http_auth_handler_negotiate_unittest.cc" ]
   }
 
-  if (!use_nss_verifier) {
+  if (!use_nss_certs) {
     # Only include this test when using NSS for cert verification.
     sources -= [ "cert_net/nss_ocsp_unittest.cc" ]
   }
@@ -1628,8 +1512,6 @@ test("net_unittests") {
     sources -= [
       "dns/mdns_cache_unittest.cc",
       "dns/mdns_client_unittest.cc",
-      "dns/record_parsed_unittest.cc",
-      "dns/record_rdata_unittest.cc",
     ]
   }
 
@@ -1662,10 +1544,9 @@ test("net_unittests") {
       # OS is not "linux" or "freebsd" or "openbsd".
       "socket/unix_domain_client_socket_posix_unittest.cc",
       "socket/unix_domain_server_socket_posix_unittest.cc",
-
-      # See bug http://crbug.com/344533.
-      "disk_cache/blockfile/index_table_v3_unittest.cc",
     ]
+
+    bundle_deps = [ ":net_unittests_bundle_data" ]
   }
 
   # Unit tests that aren't supported by the current ICU alternatives on Android.
@@ -1704,9 +1585,11 @@ test("net_unittests") {
   # Also, exclude the test from iOS for now (needs to read input data files).
   if (disable_brotli_filter || is_ios) {
     sources -= [ "filter/brotli_filter_unittest.cc" ]
+    sources -= [ "filter/brotli_source_stream_unittest.cc" ]
   }
 
   if (is_android) {
+    data_deps += [ "//net/tools/testserver:testserver_py" ]
     deps += [
       ":net_test_jni_headers",
       "//base:base_java_unittest_support",
@@ -1721,14 +1604,9 @@ test("net_unittests") {
       "//v8:v8_external_startup_data_assets",
     ]
     android_manifest = "//net/android/unittest_support/AndroidManifest.xml"
-    sources -= [
-      # See bug http://crbug.com/344533.
-      "disk_cache/blockfile/index_table_v3_unittest.cc",
-    ]
     set_sources_assignment_filter([])
     sources += [ "base/address_tracker_linux_unittest.cc" ]
     set_sources_assignment_filter(sources_assignment_filter)
-    isolate_file = "net_unittests.isolate"
     shard_timeout = 300
   }
 
@@ -1741,6 +1619,10 @@ test("net_unittests") {
       # data += [ "$root_out_dir/net_unittests.dSYM/" ]
     }
   }
+
+  if (is_win) {
+    libs = [ "iphlpapi.lib" ]
+  }
 }
 
 # !is_android && !is_win && !is_mac
@@ -1752,7 +1634,7 @@ if (!is_ios) {
     sources = [
       "base/mime_sniffer_perftest.cc",
       "cookies/cookie_monster_perftest.cc",
-      "disk_cache/blockfile/disk_cache_perftest.cc",
+      "disk_cache/disk_cache_perftest.cc",
       "extras/sqlite/sqlite_persistent_cookie_store_perftest.cc",
       "proxy/proxy_resolver_perftest.cc",
       "udp/udp_socket_perftest.cc",
@@ -1768,6 +1650,7 @@ if (!is_ios) {
       "//base:i18n",
       "//base/test:test_support_perf",
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
       "//testing/gtest",
       "//url",
     ]
@@ -1786,6 +1669,8 @@ if (!is_ios) {
 
 # Fuzzers
 
+# This has a global (InitGlobals) that must always be linked in, so
+# must be a source set instead of a static library.
 source_set("net_fuzzer_test_support") {
   testonly = true
 
@@ -1793,10 +1678,29 @@ source_set("net_fuzzer_test_support") {
     "base/fuzzer_test_support.cc",
     "socket/fuzzed_socket.cc",
     "socket/fuzzed_socket.h",
+    "socket/fuzzed_socket_factory.cc",
+    "socket/fuzzed_socket_factory.h",
+    "udp/fuzzed_datagram_client_socket.cc",
+    "udp/fuzzed_datagram_client_socket.h",
+  ]
+  public_deps = [
+    "//base/test:test_support",
   ]
   deps = [
     "//base",
     "//base:i18n",
+    "//net",
+  ]
+}
+
+fuzzer_test("net_data_job_fuzzer") {
+  sources = [
+    "url_request/url_request_data_job_fuzzer.cc",
+  ]
+  deps = [
+    ":net_fuzzer_test_support",
+    ":test_support",
+    "//base",
     "//net",
   ]
 }
@@ -1810,6 +1714,7 @@ fuzzer_test("net_mime_sniffer_fuzzer") {
     "//base",
     "//net",
   ]
+  dict = "data/fuzzer_dictionaries/net_mime_sniffer_fuzzer.dict"
 }
 
 fuzzer_test("net_parse_proxy_list_pac_fuzzer") {
@@ -1850,6 +1755,7 @@ fuzzer_test("net_parse_proxy_rules_fuzzer") {
     ":net_fuzzer_test_support",
     "//net",
   ]
+  dict = "data/fuzzer_dictionaries/net_parse_proxy_bypass_rules_fuzzer.dict"
 }
 
 fuzzer_test("net_parse_data_url_fuzzer") {
@@ -1861,6 +1767,7 @@ fuzzer_test("net_parse_data_url_fuzzer") {
     "//base",
     "//net",
   ]
+  dict = "data/fuzzer_dictionaries/net_parse_data_url_fuzzer.dict"
 }
 
 fuzzer_test("net_parse_ip_pattern_fuzzer") {
@@ -1879,6 +1786,49 @@ fuzzer_test("net_get_domain_and_registry_fuzzer") {
   ]
   deps = [
     ":net_fuzzer_test_support",
+    "//base",
+    "//net",
+  ]
+  dict = "data/fuzzer_dictionaries/net_get_domain_and_registry_fuzzer.dict"
+}
+
+fuzzer_test("net_cert_verify_name_match_fuzzer") {
+  sources = [
+    "cert/internal/verify_name_match_fuzzer.cc",
+  ]
+  deps = [
+    ":net_fuzzer_test_support",
+    "//base",
+    "//net",
+  ]
+}
+
+fuzzer_test("net_cert_normalize_name_fuzzer") {
+  sources = [
+    "cert/internal/verify_name_match_normalizename_fuzzer.cc",
+  ]
+  deps = [
+    "//base",
+    "//net",
+  ]
+}
+
+fuzzer_test("net_cert_verify_name_in_subtree_fuzzer") {
+  sources = [
+    "cert/internal/verify_name_match_verifynameinsubtree_fuzzer.cc",
+  ]
+  deps = [
+    ":net_fuzzer_test_support",
+    "//base",
+    "//net",
+  ]
+}
+
+fuzzer_test("net_cert_parse_certificate_fuzzer") {
+  sources = [
+    "cert/internal/parse_certificate_fuzzer.cc",
+  ]
+  deps = [
     "//base",
     "//net",
   ]
@@ -1903,6 +1853,34 @@ fuzzer_test("net_dns_record_fuzzer") {
     "//base",
     "//net",
   ]
+  dict = "data/fuzzer_dictionaries/net_dns_record_fuzzer.dict"
+}
+
+fuzzer_test("net_dns_hosts_parse_fuzzer") {
+  sources = [
+    "dns/dns_hosts_parse_fuzzer.cc",
+  ]
+  deps = [
+    ":net_fuzzer_test_support",
+    "//base",
+    "//net",
+  ]
+  dict = "data/fuzzer_dictionaries/net_dns_hosts_parse_fuzzer.dict"
+}
+
+fuzzer_test("net_host_resolver_impl_fuzzer") {
+  sources = [
+    "dns/fuzzed_host_resolver.cc",
+    "dns/fuzzed_host_resolver.h",
+    "dns/host_resolver_impl_fuzzer.cc",
+  ]
+  deps = [
+    ":net_fuzzer_test_support",
+    ":test_support",
+    "//base",
+    "//net",
+  ]
+  dict = "data/fuzzer_dictionaries/net_host_resolver_impl_fuzzer.dict"
 }
 
 fuzzer_test("net_http_stream_parser_fuzzer") {
@@ -1915,7 +1893,7 @@ fuzzer_test("net_http_stream_parser_fuzzer") {
     "//base",
     "//net",
   ]
-  dict = "data/http/http.dict"
+  dict = "data/fuzzer_dictionaries/net_http_stream_parser_fuzzer.dict"
 }
 
 fuzzer_test("net_ftp_ctrl_response_fuzzer") {
@@ -1953,6 +1931,30 @@ fuzzer_test("net_unescape_url_component_fuzzer") {
   libfuzzer_options = [ "max_len = 2048" ]
 }
 
+fuzzer_test("net_websocket_deflate_stream_fuzzer") {
+  sources = [
+    "websockets/websocket_deflate_stream_fuzzer.cc",
+  ]
+  deps = [
+    ":net_fuzzer_test_support",
+    "//net",
+  ]
+  dict = "data/fuzzer_dictionaries/net_websocket_frame_parser_fuzzer.dict"
+  libfuzzer_options = [ "max_len=512" ]
+}
+
+fuzzer_test("net_websocket_extension_parser_fuzzer") {
+  sources = [
+    "websockets/websocket_extension_parser_fuzzer.cc",
+  ]
+  deps = [
+    ":net_fuzzer_test_support",
+    "//net",
+  ]
+  dict = "data/fuzzer_dictionaries/net_websocket_extension_parser_fuzzer.dict"
+  libfuzzer_options = [ "max_len = 256" ]
+}
+
 fuzzer_test("net_websocket_frame_parser_fuzzer") {
   sources = [
     "websockets/websocket_frame_parser_fuzzer.cc",
@@ -1961,6 +1963,8 @@ fuzzer_test("net_websocket_frame_parser_fuzzer") {
     ":net_fuzzer_test_support",
     "//net",
   ]
+  dict = "data/fuzzer_dictionaries/net_websocket_frame_parser_fuzzer.dict"
+  libfuzzer_options = [ "max_len=256" ]
 }
 
 fuzzer_test("net_http_chunked_decoder_fuzzer") {
@@ -1971,7 +1975,6 @@ fuzzer_test("net_http_chunked_decoder_fuzzer") {
     ":net_fuzzer_test_support",
     "//net",
   ]
-  dict = "http/http_chunked_decoder_fuzzer.dict"
 }
 
 fuzzer_test("net_http_proxy_client_socket_fuzzer") {
@@ -1984,12 +1987,25 @@ fuzzer_test("net_http_proxy_client_socket_fuzzer") {
     "//base",
     "//net",
   ]
-  dict = "data/http/http.dict"
+  dict = "data/fuzzer_dictionaries/net_http_proxy_client_socket_fuzzer.dict"
+}
+
+fuzzer_test("net_parse_url_hostname_to_address_fuzzer") {
+  sources = [
+    "base/parse_url_hostname_to_address_fuzzer.cc",
+  ]
+  deps = [
+    ":net_fuzzer_test_support",
+    "//base",
+    "//net",
+  ]
+  libfuzzer_options = [ "max_len=512" ]
+  seed_corpus = "data/fuzzer_data/hostnames/"
 }
 
 fuzzer_test("net_quic_crypto_framer_parse_message_fuzzer") {
   sources = [
-    "quic/quic_crypto_framer_parse_message_fuzzer.cc",
+    "quic/core/quic_crypto_framer_parse_message_fuzzer.cc",
   ]
   deps = [
     ":net_fuzzer_test_support",
@@ -2013,6 +2029,31 @@ fuzzer_test("net_socks_client_socket_fuzzer") {
 fuzzer_test("net_socks5_client_socket_fuzzer") {
   sources = [
     "socket/socks5_client_socket_fuzzer.cc",
+  ]
+  deps = [
+    ":net_fuzzer_test_support",
+    ":test_support",
+    "//base",
+    "//net",
+  ]
+}
+
+fuzzer_test("net_url_request_fuzzer") {
+  sources = [
+    "url_request/url_request_fuzzer.cc",
+  ]
+  deps = [
+    ":net_fuzzer_test_support",
+    ":test_support",
+    "//base",
+    "//net",
+  ]
+  dict = "data/fuzzer_dictionaries/net_url_request_fuzzer.dict"
+}
+
+fuzzer_test("net_auth_challenge_tokenizer_fuzzer") {
+  sources = [
+    "http/http_auth_challenge_tokenizer_fuzzer.cc",
   ]
   deps = [
     ":net_fuzzer_test_support",

@@ -4,19 +4,19 @@
 
 #include "ash/shell/content/client/shell_browser_main_parts.h"
 
-#include "ash/ash_switches.h"
+#include "ash/common/login_status.h"
+#include "ash/common/material_design/material_design_controller.h"
 #include "ash/content/shell_content_state.h"
-#include "ash/desktop_background/desktop_background_controller.h"
 #include "ash/shell.h"
 #include "ash/shell/content/shell_content_state_impl.h"
 #include "ash/shell/shell_delegate_impl.h"
 #include "ash/shell/window_watcher.h"
 #include "ash/shell_init_params.h"
-#include "ash/system/user/login_status.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/i18n/icu_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
@@ -29,15 +29,16 @@
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/compositor/compositor.h"
-#include "ui/gfx/screen.h"
+#include "ui/display/screen.h"
 #include "ui/message_center/message_center.h"
 #include "ui/views/test/test_views_delegate.h"
 #include "ui/wm/core/wm_state.h"
 
 #if defined(USE_X11)
-#include "ui/events/devices/x11/touch_factory_x11.h"
+#include "ui/events/devices/x11/touch_factory_x11.h"  // nogncheck
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -95,11 +96,13 @@ void ShellBrowserMainParts::PreMainMessageLoopStart() {
 
 void ShellBrowserMainParts::PostMainMessageLoopStart() {
 #if defined(OS_CHROMEOS)
-  chromeos::DBusThreadManager::Initialize();
+  chromeos::DBusThreadManager::Initialize(
+      chromeos::DBusThreadManager::PROCESS_ASH);
 #endif
 }
 
 void ShellBrowserMainParts::ToolkitInitialized() {
+  ash::MaterialDesignController::Initialize();
   wm_state_.reset(new ::wm::WMState);
 }
 
@@ -127,17 +130,17 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
 
   ShellContentState::SetInstance(
       new ShellContentStateImpl(browser_context_.get()));
-
+  ui::MaterialDesignController::Initialize();
   ash::ShellInitParams init_params;
   init_params.delegate = delegate_;
   init_params.context_factory = content::GetContextFactory();
   init_params.blocking_pool = content::BrowserThread::GetBlockingPool();
   ash::Shell::CreateInstance(init_params);
   ash::Shell::GetInstance()->CreateShelf();
-  ash::Shell::GetInstance()->UpdateAfterLoginStatusChange(user::LOGGED_IN_USER);
+  ash::Shell::GetInstance()->UpdateAfterLoginStatusChange(LoginStatus::USER);
 
   window_watcher_.reset(new ash::shell::WindowWatcher);
-  gfx::Screen::GetScreen()->AddObserver(window_watcher_.get());
+  display::Screen::GetScreen()->AddObserver(window_watcher_.get());
 
   ash::shell::InitWindowTypeLauncher();
 
@@ -145,7 +148,7 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
 }
 
 void ShellBrowserMainParts::PostMainMessageLoopRun() {
-  gfx::Screen::GetScreen()->RemoveObserver(window_watcher_.get());
+  display::Screen::GetScreen()->RemoveObserver(window_watcher_.get());
 
   window_watcher_.reset();
   delegate_ = nullptr;
@@ -169,7 +172,7 @@ void ShellBrowserMainParts::PostMainMessageLoopRun() {
 }
 
 bool ShellBrowserMainParts::MainMessageLoopRun(int* result_code) {
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   return true;
 }
 

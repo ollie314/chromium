@@ -8,10 +8,10 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/sys_byteorder.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/public/common/content_switches.h"
 #include "jingle/glue/utils.h"
 #include "net/base/ip_address.h"
@@ -123,16 +123,16 @@ void IpcNetworkManager::OnNetworkListChanged(
 
   // Update the default local addresses.
   rtc::IPAddress ipv4_default;
-  rtc::IPAddress ipv6_defualt;
+  rtc::IPAddress ipv6_default;
   if (use_default_ipv4_address) {
     ipv4_default =
         jingle_glue::NetIPAddressToRtcIPAddress(default_ipv4_local_address);
   }
   if (use_default_ipv6_address) {
-    ipv6_defualt =
+    ipv6_default =
         jingle_glue::NetIPAddressToRtcIPAddress(default_ipv6_local_address);
   }
-  set_default_local_addresses(ipv4_default, ipv6_defualt);
+  set_default_local_addresses(ipv4_default, ipv6_default);
 
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAllowLoopbackInPeerConnection)) {

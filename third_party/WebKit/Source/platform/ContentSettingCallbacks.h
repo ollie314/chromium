@@ -9,8 +9,7 @@
 #include "wtf/Allocator.h"
 #include "wtf/Functional.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -18,17 +17,17 @@ class PLATFORM_EXPORT ContentSettingCallbacks {
     USING_FAST_MALLOC(ContentSettingCallbacks);
     WTF_MAKE_NONCOPYABLE(ContentSettingCallbacks);
 public:
-    static PassOwnPtr<ContentSettingCallbacks> create(PassOwnPtr<SameThreadClosure> allowed, PassOwnPtr<SameThreadClosure> denied);
+    static std::unique_ptr<ContentSettingCallbacks> create(std::unique_ptr<WTF::Closure> allowed, std::unique_ptr<WTF::Closure> denied);
     virtual ~ContentSettingCallbacks() { }
 
     void onAllowed() { (*m_allowed)(); }
     void onDenied() { (*m_denied)(); }
 
 private:
-    ContentSettingCallbacks(PassOwnPtr<SameThreadClosure> allowed, PassOwnPtr<SameThreadClosure> denied);
+    ContentSettingCallbacks(std::unique_ptr<WTF::Closure> allowed, std::unique_ptr<WTF::Closure> denied);
 
-    OwnPtr<SameThreadClosure> m_allowed;
-    OwnPtr<SameThreadClosure> m_denied;
+    std::unique_ptr<WTF::Closure> m_allowed;
+    std::unique_ptr<WTF::Closure> m_denied;
 };
 
 } // namespace blink

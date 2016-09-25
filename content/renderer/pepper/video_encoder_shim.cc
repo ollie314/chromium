@@ -13,7 +13,7 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/sys_info.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/renderer/pepper/pepper_video_encoder_host.h"
 #include "content/renderer/render_thread_impl.h"
 #include "third_party/libvpx/source/libvpx/vpx/vp8cx.h"
@@ -487,7 +487,8 @@ void VideoEncoderShim::OnBitstreamBufferReady(
     bool key_frame) {
   DCHECK(RenderThreadImpl::current());
 
-  host_->BitstreamBufferReady(bitstream_buffer_id, payload_size, key_frame);
+  host_->BitstreamBufferReady(bitstream_buffer_id, payload_size, key_frame,
+                              frame->timestamp());
 }
 
 void VideoEncoderShim::OnNotifyError(

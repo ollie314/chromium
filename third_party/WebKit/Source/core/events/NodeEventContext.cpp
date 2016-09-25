@@ -38,7 +38,7 @@ NodeEventContext::NodeEventContext(Node* node, EventTarget* currentTarget)
     : m_node(node)
     , m_currentTarget(currentTarget)
 {
-    ASSERT(m_node);
+    DCHECK(m_node);
 }
 
 DEFINE_TRACE(NodeEventContext)
@@ -50,8 +50,8 @@ DEFINE_TRACE(NodeEventContext)
 
 void NodeEventContext::handleLocalEvents(Event& event) const
 {
-    if (touchEventContext()) {
-        touchEventContext()->handleLocalEvents(event);
+    if (TouchEventContext* touchContext = touchEventContext()) {
+        touchContext->handleLocalEvents(event);
     } else if (relatedTarget()) {
         if (event.isMouseEvent()) {
             toMouseEvent(event).setRelatedTarget(relatedTarget());

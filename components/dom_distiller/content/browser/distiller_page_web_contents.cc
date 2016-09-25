@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
 #include "components/dom_distiller/content/browser/web_contents_main_frame_observer.h"
@@ -21,7 +21,8 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "ui/gfx/screen.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "url/gurl.h"
 
 namespace dom_distiller {
@@ -144,7 +145,7 @@ gfx::Size DistillerPageWebContents::GetSizeForNewRenderView(
   // in the executed domdistiller.js won't be 0.
   if (size.IsEmpty()) {
     DVLOG(1) << "Using fullscreen as default RenderView size";
-    size = gfx::Screen::GetScreen()->GetPrimaryDisplay().size();
+    size = display::Screen::GetScreen()->GetPrimaryDisplay().size();
   }
   return size;
 }

@@ -6,6 +6,8 @@
 
 #include <utility>
 
+#include <Carbon/Carbon.h>
+
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/string16.h"
@@ -15,11 +17,12 @@
 #import "chrome/browser/ui/cocoa/passwords/account_avatar_fetcher_manager.h"
 #import "chrome/browser/ui/cocoa/passwords/account_chooser_view_controller.h"
 #import "chrome/browser/ui/cocoa/passwords/credential_item_button.h"
-#include "chrome/browser/ui/passwords/password_dialog_controller.h"
+#include "chrome/browser/ui/passwords/password_dialog_controller_mock.h"
 #include "components/autofill/core/common/password_form.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
+#import "ui/events/test/cocoa_test_event_utils.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -43,7 +46,7 @@
 
 namespace {
 
-const char kDialogTitle[] = "Choose an account";
+constexpr char kDialogTitle[] = "Choose an account";
 
 // Returns a PasswordForm with only a username.
 std::unique_ptr<autofill::PasswordForm> Credential(const char* username) {
@@ -52,24 +55,6 @@ std::unique_ptr<autofill::PasswordForm> Credential(const char* username) {
   credential->username_value = base::ASCIIToUTF16(username);
   return credential;
 }
-
-class PasswordDialogControllerMock : public PasswordDialogController {
- public:
-  MOCK_CONST_METHOD0(GetLocalForms, const FormsVector&());
-  MOCK_CONST_METHOD0(GetFederationsForms, const FormsVector&());
-  MOCK_CONST_METHOD0(GetAccoutChooserTitle,
-                     std::pair<base::string16, gfx::Range>());
-  MOCK_CONST_METHOD0(GetAutoSigninPromoTitle, base::string16());
-  MOCK_CONST_METHOD0(GetAutoSigninText,
-                     std::pair<base::string16, gfx::Range>());
-  MOCK_METHOD0(OnSmartLockLinkClicked, void());
-  MOCK_METHOD2(OnChooseCredentials, void(
-      const autofill::PasswordForm& password_form,
-      password_manager::CredentialType credential_type));
-  MOCK_METHOD0(OnAutoSigninOK, void());
-  MOCK_METHOD0(OnAutoSigninTurnOff, void());
-  MOCK_METHOD0(OnCloseDialog, void());
-};
 
 // Tests for the account chooser dialog view.
 class AccountChooserViewControllerTest : public CocoaTest,
@@ -119,6 +104,8 @@ void AccountChooserViewControllerTest::SetUpAccountChooser(
   EXPECT_CALL(dialog_controller_, GetAccoutChooserTitle())
       .WillOnce(testing::Return(std::make_pair(base::ASCIIToUTF16(kDialogTitle),
                                                gfx::Range(0, 5))));
+  EXPECT_CALL(dialog_controller_, ShouldShowSignInButton())
+      .WillOnce(testing::Return(local->size() == 1));
   [view_controller_ view];
   ASSERT_TRUE(testing::Mock::VerifyAndClearExpectations(&dialog_controller_));
 }
@@ -158,8 +145,10 @@ TEST_F(AccountChooserViewControllerTest, ConfiguresViews) {
 TEST_F(AccountChooserViewControllerTest, ConfiguresFederatedCredential) {
   const char federation[] = "https://google.com/idp";
   const char name[] = "Peter the Great";
+  const char username[] = "pete";
+
   PasswordDialogController::FormsVector local_forms;
-  local_forms.push_back(Credential("pizza"));
+  local_forms.push_back(Credential(username));
   local_forms.back()->federation_origin = url::Origin(GURL(federation));
   local_forms.back()->display_name = base::ASCIIToUTF16(name);
   SetUpAccountChooser(&local_forms);
@@ -171,6 +160,7 @@ TEST_F(AccountChooserViewControllerTest, ConfiguresFederatedCredential) {
       base::SysNSStringToUTF8([base::mac::ObjCCastStrict<CredentialItemButton>(
           [buttons objectAtIndex:0]) title]);
   EXPECT_THAT(title, testing::HasSubstr(name));
+  EXPECT_THAT(title, testing::HasSubstr(username));
   EXPECT_THAT(title, testing::HasSubstr(GURL(federation).host()));
 }
 
@@ -218,6 +208,15 @@ TEST_F(AccountChooserViewControllerTest, ClickTitleLink) {
                                      atIndex:0];
 }
 
+TEST_F(AccountChooserViewControllerTest, ClickSignIn) {
+  PasswordDialogController::FormsVector local_forms;
+  local_forms.push_back(Credential("pizza"));
+  SetUpAccountChooser(&local_forms);
+  EXPECT_TRUE(view_controller().signInButton);
+  EXPECT_CALL(dialog_controller(), OnSignInClicked());
+  [view_controller().signInButton performClick:nil];
+}
+
 TEST_F(AccountChooserViewControllerTest, ClosePromptAndHandleClick) {
   // A user may press mouse down, some navigation closes the dialog, mouse up
   // still sends the action. The view should not crash.
@@ -229,6 +228,18 @@ TEST_F(AccountChooserViewControllerTest, ClosePromptAndHandleClick) {
   [base::mac::ObjCCastStrict<CredentialItemButton>(
       [view_controller().credentialButtons objectAtIndex:0]) performClick:nil];
   [view_controller().cancelButton performClick:nil];
+  EXPECT_TRUE(view_controller().signInButton);
+  [view_controller().signInButton performClick:nil];
+}
+
+TEST_F(AccountChooserViewControllerTest, CloseOnEsc) {
+  PasswordDialogController::FormsVector local_forms;
+  local_forms.push_back(Credential("pizza"));
+  SetUpAccountChooser(&local_forms);
+  EXPECT_CALL(*this, OnPerformClose());
+  [[view_controller() view]
+      performKeyEquivalent:cocoa_test_event_utils::KeyEventWithKeyCode(
+                               kVK_Escape, '\e', NSKeyDown, 0)];
 }
 
 }  // namespace

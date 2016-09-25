@@ -22,7 +22,6 @@
 class SkCanvas;
 
 namespace cc {
-class ImageSerializationProcessor;
 
 class CC_EXPORT CompositingDisplayItem : public DisplayItem {
  public:
@@ -34,18 +33,14 @@ class CC_EXPORT CompositingDisplayItem : public DisplayItem {
   explicit CompositingDisplayItem(const proto::DisplayItem& proto);
   ~CompositingDisplayItem() override;
 
-  void ToProtobuf(proto::DisplayItem* proto,
-                  ImageSerializationProcessor* image_serialization_processor)
-      const override;
+  void ToProtobuf(proto::DisplayItem* proto) const override;
   void Raster(SkCanvas* canvas,
-              const gfx::Rect& canvas_target_playback_rect,
               SkPicture::AbortCallback* callback) const override;
   void AsValueInto(const gfx::Rect& visual_rect,
                    base::trace_event::TracedValue* array) const override;
   size_t ExternalMemoryUsage() const override;
 
   int ApproximateOpCount() const { return 1; }
-  bool IsSuitableForGpuRasterization() const { return true; }
 
  private:
   void SetNew(uint8_t alpha,
@@ -69,21 +64,17 @@ class CC_EXPORT EndCompositingDisplayItem : public DisplayItem {
   ~EndCompositingDisplayItem() override;
 
   static std::unique_ptr<EndCompositingDisplayItem> Create() {
-    return base::WrapUnique(new EndCompositingDisplayItem());
+    return base::MakeUnique<EndCompositingDisplayItem>();
   }
 
-  void ToProtobuf(proto::DisplayItem* proto,
-                  ImageSerializationProcessor* image_serialization_processor)
-      const override;
+  void ToProtobuf(proto::DisplayItem* proto) const override;
   void Raster(SkCanvas* canvas,
-              const gfx::Rect& canvas_target_playback_rect,
               SkPicture::AbortCallback* callback) const override;
   void AsValueInto(const gfx::Rect& visual_rect,
                    base::trace_event::TracedValue* array) const override;
   size_t ExternalMemoryUsage() const override;
 
   int ApproximateOpCount() const { return 0; }
-  bool IsSuitableForGpuRasterization() const { return true; }
 };
 
 }  // namespace cc

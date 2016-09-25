@@ -4,8 +4,14 @@
 
 #include "device/bluetooth/dbus/fake_bluetooth_gatt_descriptor_client.h"
 
+#include <vector>
+
 #include "base/bind.h"
+#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/logging.h"
+#include "dbus/bus.h"
+#include "dbus/property.h"
 #include "device/bluetooth/dbus/bluetooth_gatt_characteristic_client.h"
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -109,7 +115,7 @@ void FakeBluetoothGattDescriptorClient::ReadValue(
     uint8_t value_byte = chrc_props->notifying.value() ? 0x01 : 0x00;
     const std::vector<uint8_t>& cur_value = properties->value.value();
 
-    if (!cur_value.size() || cur_value[0] != value_byte) {
+    if (cur_value.empty() || cur_value[0] != value_byte) {
       std::vector<uint8_t> value = {value_byte, 0x00};
       properties->value.ReplaceValue(value);
     }
@@ -130,7 +136,7 @@ void FakeBluetoothGattDescriptorClient::WriteValue(
 
   // Since the only fake descriptor is "Client Characteristic Configuration"
   // and BlueZ doesn't allow writing to it, return failure.
-  error_callback.Run("org.bluez.Error.NotPermitted",
+  error_callback.Run(bluetooth_gatt_service::kErrorWriteNotPermitted,
                      "Writing to the Client Characteristic Configuration "
                      "descriptor not allowed");
 }

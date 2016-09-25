@@ -7,18 +7,22 @@
 #include <malloc.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <memory>
 #include <new>
 #include <vector>
 
 #include "base/atomicops.h"
+#include "base/process/process_metrics.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_local.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if !defined(OS_WIN)
+#include <unistd.h>
+#endif
 
 // Some new Android NDKs (64 bit) does not expose (p)valloc anymore. These
 // functions are implemented at the shim-layer level.
@@ -76,15 +80,15 @@ class AllocatorShimTest : public testing::Test {
                            void* address,
                            size_t size) {
     if (instance_) {
-      // Address 0x42 is a special sentinel for the NewHandlerConcurrency test.
+      // Address 0x420 is a special sentinel for the NewHandlerConcurrency test.
       // The first time (but only the first one) it is hit it fails, causing the
       // invocation of the std::new_handler.
-      if (address == reinterpret_cast<void*>(0x42)) {
-        if (!instance_->did_fail_realloc_0x42_once->Get()) {
-          instance_->did_fail_realloc_0x42_once->Set(true);
+      if (address == reinterpret_cast<void*>(0x420)) {
+        if (!instance_->did_fail_realloc_0x420_once->Get()) {
+          instance_->did_fail_realloc_0x420_once->Set(true);
           return nullptr;
         } else {
-          return reinterpret_cast<void*>(0x42ul);
+          return reinterpret_cast<void*>(0x420ul);
         }
       }
 
@@ -120,7 +124,7 @@ class AllocatorShimTest : public testing::Test {
     memset(&aligned_allocs_intercepted_by_alignment, 0, array_size);
     memset(&reallocs_intercepted_by_size, 0, array_size);
     memset(&frees_intercepted_by_addr, 0, array_size);
-    did_fail_realloc_0x42_once.reset(new ThreadLocalBoolean());
+    did_fail_realloc_0x420_once.reset(new ThreadLocalBoolean());
     subtle::Release_Store(&num_new_handler_calls, 0);
     instance_ = this;
   }
@@ -135,7 +139,7 @@ class AllocatorShimTest : public testing::Test {
   size_t reallocs_intercepted_by_size[kMaxSizeTracked];
   size_t reallocs_intercepted_by_addr[kMaxSizeTracked];
   size_t frees_intercepted_by_addr[kMaxSizeTracked];
-  std::unique_ptr<ThreadLocalBoolean> did_fail_realloc_0x42_once;
+  std::unique_ptr<ThreadLocalBoolean> did_fail_realloc_0x420_once;
   subtle::Atomic32 num_new_handler_calls;
 
  private:
@@ -158,8 +162,8 @@ class ThreadDelegateForNewHandlerTest : public PlatformThread::Delegate {
 
   void ThreadMain() override {
     event_->Wait();
-    void* res = realloc(reinterpret_cast<void*>(0x42ul), 1);
-    EXPECT_EQ(0x42u, reinterpret_cast<uintptr_t>(res));
+    void* res = realloc(reinterpret_cast<void*>(0x420ul), 1);
+    EXPECT_EQ(reinterpret_cast<void*>(0x420ul), res);
   }
 
  private:
@@ -178,7 +182,6 @@ AllocatorDispatch g_mock_dispatch = {
 };
 
 TEST_F(AllocatorShimTest, InterceptLibcSymbols) {
-  const size_t kPageSize = sysconf(_SC_PAGESIZE);
   InsertAllocatorDispatch(&g_mock_dispatch);
 
   void* alloc_ptr = malloc(19);
@@ -189,6 +192,7 @@ TEST_F(AllocatorShimTest, InterceptLibcSymbols) {
   ASSERT_NE(nullptr, zero_alloc_ptr);
   ASSERT_GE(zero_allocs_intercepted_by_size[2 * 23], 1u);
 
+#if !defined(OS_WIN)
   void* memalign_ptr = memalign(128, 53);
   ASSERT_NE(nullptr, memalign_ptr);
   ASSERT_EQ(0u, reinterpret_cast<uintptr_t>(memalign_ptr) % 128);
@@ -205,6 +209,7 @@ TEST_F(AllocatorShimTest, InterceptLibcSymbols) {
 
   void* valloc_ptr = valloc(61);
   ASSERT_NE(nullptr, valloc_ptr);
+  const size_t kPageSize = base::GetPageSize();
   ASSERT_EQ(0u, reinterpret_cast<uintptr_t>(valloc_ptr) % kPageSize);
   ASSERT_GE(aligned_allocs_intercepted_by_alignment[kPageSize], 1u);
   ASSERT_GE(aligned_allocs_intercepted_by_size[61], 1u);
@@ -215,15 +220,17 @@ TEST_F(AllocatorShimTest, InterceptLibcSymbols) {
   ASSERT_GE(aligned_allocs_intercepted_by_alignment[kPageSize], 1u);
   // pvalloc rounds the size up to the next page.
   ASSERT_GE(aligned_allocs_intercepted_by_size[kPageSize], 1u);
+#endif  // OS_WIN
 
   char* realloc_ptr = static_cast<char*>(realloc(nullptr, 71));
   ASSERT_NE(nullptr, realloc_ptr);
   ASSERT_GE(reallocs_intercepted_by_size[71], 1u);
   ASSERT_GE(reallocs_intercepted_by_addr[Hash(nullptr)], 1u);
   strcpy(realloc_ptr, "foobar");
+  void* old_realloc_ptr = realloc_ptr;
   realloc_ptr = static_cast<char*>(realloc(realloc_ptr, 73));
   ASSERT_GE(reallocs_intercepted_by_size[73], 1u);
-  ASSERT_GE(reallocs_intercepted_by_addr[Hash(realloc_ptr)], 1u);
+  ASSERT_GE(reallocs_intercepted_by_addr[Hash(old_realloc_ptr)], 1u);
   ASSERT_EQ(0, strcmp(realloc_ptr, "foobar"));
 
   free(alloc_ptr);
@@ -232,6 +239,7 @@ TEST_F(AllocatorShimTest, InterceptLibcSymbols) {
   free(zero_alloc_ptr);
   ASSERT_GE(frees_intercepted_by_addr[Hash(zero_alloc_ptr)], 1u);
 
+#if !defined(OS_WIN)
   free(memalign_ptr);
   ASSERT_GE(frees_intercepted_by_addr[Hash(memalign_ptr)], 1u);
 
@@ -243,6 +251,7 @@ TEST_F(AllocatorShimTest, InterceptLibcSymbols) {
 
   free(pvalloc_ptr);
   ASSERT_GE(frees_intercepted_by_addr[Hash(pvalloc_ptr)], 1u);
+#endif  // OS_WIN
 
   free(realloc_ptr);
   ASSERT_GE(frees_intercepted_by_addr[Hash(realloc_ptr)], 1u);
@@ -292,7 +301,8 @@ TEST_F(AllocatorShimTest, InterceptCppSymbols) {
 // This test exercises the case of concurrent OOM failure, which would end up
 // invoking std::new_handler concurrently. This is to cover the CallNewHandler()
 // paths of allocator_shim.cc and smoke-test its thread safey.
-// The test creates kNumThreads threads. Each of them does just a realloc(0x42).
+// The test creates kNumThreads threads. Each of them does just a
+// realloc(0x420).
 // The shim intercepts such realloc and makes it fail only once on each thread.
 // We expect to see excactly kNumThreads invocations of the new_handler.
 TEST_F(AllocatorShimTest, NewHandlerConcurrency) {
@@ -301,7 +311,8 @@ TEST_F(AllocatorShimTest, NewHandlerConcurrency) {
 
   // The WaitableEvent here is used to attempt to trigger all the threads at
   // the same time, after they have been initialized.
-  WaitableEvent event(/*manual_reset=*/true, /*initially_signaled=*/false);
+  WaitableEvent event(WaitableEvent::ResetPolicy::MANUAL,
+                      WaitableEvent::InitialState::NOT_SIGNALED);
 
   ThreadDelegateForNewHandlerTest mock_thread_main(&event);
 

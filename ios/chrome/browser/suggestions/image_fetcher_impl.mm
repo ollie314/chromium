@@ -7,58 +7,69 @@
 #include <UIKit/UIKit.h>
 
 #include "base/threading/sequenced_worker_pool.h"
+#include "components/image_fetcher/image_fetcher_delegate.h"
 #include "ios/chrome/browser/net/image_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "skia/ext/skia_utils_ios.h"
+#include "ui/gfx/image/image.h"
 
 namespace suggestions {
 
 ImageFetcherImpl::ImageFetcherImpl(
     net::URLRequestContextGetter* url_request_context,
     base::SequencedWorkerPool* blocking_pool) {
-  imageFetcher_.reset(new image_fetcher::ImageFetcher(blocking_pool));
+  imageFetcher_.reset(new ::ImageFetcher(blocking_pool));
   imageFetcher_->SetRequestContextGetter(url_request_context);
 }
 
 ImageFetcherImpl::~ImageFetcherImpl() {
 }
 
-void ImageFetcherImpl::SetImageFetcherDelegate(ImageFetcherDelegate* delegate) {
+void ImageFetcherImpl::SetImageFetcherDelegate(
+    image_fetcher::ImageFetcherDelegate* delegate) {
   DCHECK(delegate);
   delegate_ = delegate;
 }
 
+void ImageFetcherImpl::SetDataUseServiceName(
+    DataUseServiceName data_use_service_name) {
+  // Not implemented - will be obsolete once iOS also uses
+  // image_fetcher::ImageDataFetcher.
+  NOTREACHED();
+}
+
 void ImageFetcherImpl::StartOrQueueNetworkRequest(
-    const GURL& url,
+    const std::string& id,
     const GURL& image_url,
-    base::Callback<void(const GURL&, const SkBitmap*)> callback) {
+    base::Callback<void(const std::string&, const gfx::Image&)> callback) {
   if (image_url.is_empty()) {
-    callback.Run(url, nullptr);
+    gfx::Image empty_image;
+    callback.Run(id, empty_image);
     if (delegate_) {
-      delegate_->OnImageFetched(url, nullptr);
+      delegate_->OnImageFetched(id, empty_image);
     }
     return;
   }
-  // Copy url reference so it's retained.
-  const GURL page_url(url);
-  image_fetcher::ImageFetchedCallback fetcher_callback =
+  // Copy string reference so it's retained.
+  const std::string fetch_id(id);
+  ImageFetchedCallback fetcher_callback =
       ^(const GURL& original_url, int response_code, NSData* data) {
       if (data) {
         // Most likely always returns 1x images.
-        UIImage* image = [UIImage imageWithData:data scale:1];
-        if (image) {
-          SkBitmap bitmap =
-              skia::CGImageToSkBitmap(image.CGImage, [image size], YES);
-          callback.Run(page_url, &bitmap);
+        UIImage* ui_image = [UIImage imageWithData:data scale:1];
+        if (ui_image) {
+          gfx::Image gfx_image(ui_image);
+          callback.Run(fetch_id, gfx_image);
           if (delegate_) {
-            delegate_->OnImageFetched(page_url, &bitmap);
+            delegate_->OnImageFetched(fetch_id, gfx_image);
           }
           return;
         }
       }
-      callback.Run(page_url, nullptr);
+      gfx::Image empty_image;
+      callback.Run(fetch_id, empty_image);
       if (delegate_) {
-        delegate_->OnImageFetched(page_url, nullptr);
+        delegate_->OnImageFetched(fetch_id, empty_image);
       }
   };
   imageFetcher_->StartDownload(image_url, fetcher_callback);

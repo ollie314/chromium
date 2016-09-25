@@ -26,8 +26,21 @@
 #include "wtf/text/CString.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include <sstream>
 
 namespace WTF {
+
+namespace {
+
+CString printedString(const CString& string)
+{
+    std::ostringstream output;
+    output << string;
+    const std::string& result = output.str();
+    return CString(result.data(), result.length());
+}
+
+} // anonymous namespace
 
 TEST(CStringTest, NullStringConstructor)
 {
@@ -96,18 +109,6 @@ TEST(CStringTest, ZeroTerminated)
     const char* referenceString = "WebKit";
     CString stringWithLength(referenceString, 3);
     EXPECT_EQ(0, stringWithLength.data()[3]);
-}
-
-TEST(CStringTest, CopyOnWrite)
-{
-    const char* initialString = "Webkit";
-    CString string(initialString);
-    CString copy = string;
-
-    string.mutableData()[3] = 'K';
-    EXPECT_TRUE(string != copy);
-    EXPECT_STREQ("WebKit", string.data());
-    EXPECT_STREQ(initialString, copy.data());
 }
 
 TEST(CStringTest, Comparison)
@@ -195,6 +196,14 @@ TEST(CStringTest, Comparison)
     d = "b";
     EXPECT_FALSE(c == d);
     EXPECT_TRUE(c != d);
+}
+
+TEST(CStringTest, Printer)
+{
+    EXPECT_STREQ("<null>", printedString(CString()).data());
+    EXPECT_STREQ("\"abc\"", printedString("abc").data());
+    EXPECT_STREQ("\"\\t\\n\\r\\\"\\\\\"", printedString("\t\n\r\"\\").data());
+    EXPECT_STREQ("\"\\xFF\\x00\\x01xyz\"", printedString(CString("\xff\0\x01xyz", 6)).data());
 }
 
 } // namespace WTF

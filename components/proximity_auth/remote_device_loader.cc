@@ -19,7 +19,7 @@ RemoteDeviceLoader::RemoteDeviceLoader(
     const std::vector<cryptauth::ExternalDeviceInfo>& unlock_keys,
     const std::string& user_id,
     const std::string& user_private_key,
-    scoped_ptr<SecureMessageDelegate> secure_message_delegate,
+    std::unique_ptr<SecureMessageDelegate> secure_message_delegate,
     ProximityAuthPrefManager* pref_manager)
     : remaining_unlock_keys_(unlock_keys),
       user_id_(user_id),
@@ -88,7 +88,7 @@ void RemoteDeviceLoader::OnPSKDerived(
       user_id_, unlock_key.friendly_device_name(), unlock_key.public_key(),
       bluetooth_type, bluetooth_address, psk, std::string()));
 
-  if (!remaining_unlock_keys_.size())
+  if (remaining_unlock_keys_.empty())
     callback_.Run(remote_devices_);
 }
 

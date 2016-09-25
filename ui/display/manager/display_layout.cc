@@ -12,7 +12,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "ui/gfx/display.h"
+#include "ui/display/display.h"
 #include "ui/gfx/geometry/insets.h"
 
 namespace display {
@@ -36,10 +36,10 @@ bool IsIdInList(int64_t id, const DisplayIdList& list) {
   return iter != list.end();
 }
 
-gfx::Display* FindDisplayById(DisplayList* display_list, int64_t id) {
-  auto iter = std::find_if(
-      display_list->begin(), display_list->end(),
-      [id](const gfx::Display& display) { return display.id() == id; });
+Display* FindDisplayById(Displays* display_list, int64_t id) {
+  auto iter =
+      std::find_if(display_list->begin(), display_list->end(),
+                   [id](const Display& display) { return display.id() == id; });
   return &(*iter);
 }
 
@@ -49,16 +49,38 @@ gfx::Display* FindDisplayById(DisplayList* display_list, int64_t id) {
 // DisplayPlacement
 
 DisplayPlacement::DisplayPlacement()
-    : display_id(gfx::Display::kInvalidDisplayID),
-      parent_display_id(gfx::Display::kInvalidDisplayID),
-      position(DisplayPlacement::RIGHT),
-      offset(0) {}
+    : DisplayPlacement(Display::kInvalidDisplayID,
+                       Display::kInvalidDisplayID,
+                       DisplayPlacement::RIGHT,
+                       0,
+                       DisplayPlacement::TOP_LEFT) {}
 
-DisplayPlacement::DisplayPlacement(Position pos, int offset)
-    : display_id(gfx::Display::kInvalidDisplayID),
-      parent_display_id(gfx::Display::kInvalidDisplayID),
-      position(pos),
-      offset(offset) {
+DisplayPlacement::DisplayPlacement(Position position, int offset)
+    : DisplayPlacement(Display::kInvalidDisplayID,
+                       Display::kInvalidDisplayID,
+                       position,
+                       offset,
+                       DisplayPlacement::TOP_LEFT) {}
+
+DisplayPlacement::DisplayPlacement(Position position,
+                                   int offset,
+                                   OffsetReference offset_reference)
+    : DisplayPlacement(Display::kInvalidDisplayID,
+                       Display::kInvalidDisplayID,
+                       position,
+                       offset,
+                       offset_reference) {}
+
+DisplayPlacement::DisplayPlacement(int64_t display_id,
+                                   int64_t parent_display_id,
+                                   Position position,
+                                   int offset,
+                                   OffsetReference offset_reference)
+    : display_id(display_id),
+      parent_display_id(parent_display_id),
+      position(position),
+      offset(offset),
+      offset_reference(offset_reference) {
   DCHECK_LE(TOP, position);
   DCHECK_GE(LEFT, position);
   // Set the default value to |position| in case position is invalid.  DCHECKs
@@ -73,7 +95,8 @@ DisplayPlacement::DisplayPlacement(const DisplayPlacement& placement)
     : display_id(placement.display_id),
       parent_display_id(placement.parent_display_id),
       position(placement.position),
-      offset(placement.offset) {}
+      offset(placement.offset),
+      offset_reference(placement.offset_reference) {}
 
 DisplayPlacement& DisplayPlacement::Swap() {
   switch (position) {
@@ -97,9 +120,9 @@ DisplayPlacement& DisplayPlacement::Swap() {
 
 std::string DisplayPlacement::ToString() const {
   std::stringstream s;
-  if (display_id != gfx::Display::kInvalidDisplayID)
+  if (display_id != Display::kInvalidDisplayID)
     s << "id=" << display_id << ", ";
-  if (parent_display_id != gfx::Display::kInvalidDisplayID)
+  if (parent_display_id != Display::kInvalidDisplayID)
     s << "parent=" << parent_display_id << ", ";
   s << PositionToString(position) << ", ";
   s << offset;
@@ -155,11 +178,11 @@ bool DisplayPlacement::StringToPosition(const base::StringPiece& string,
 DisplayLayout::DisplayLayout()
     : mirrored(false),
       default_unified(true),
-      primary_id(gfx::Display::kInvalidDisplayID) {}
+      primary_id(Display::kInvalidDisplayID) {}
 
 DisplayLayout::~DisplayLayout() {}
 
-void DisplayLayout::ApplyToDisplayList(DisplayList* display_list,
+void DisplayLayout::ApplyToDisplayList(Displays* display_list,
                                        std::vector<int64_t>* updated_ids,
                                        int minimum_offset_overlap) const {
   // Layout from primary, then dependent displays.
@@ -202,11 +225,11 @@ bool DisplayLayout::Validate(const DisplayIdList& list,
       LOG(ERROR) << "PlacementList must be sorted by display_id";
       return false;
     }
-    if (placement.display_id == gfx::Display::kInvalidDisplayID) {
+    if (placement.display_id == Display::kInvalidDisplayID) {
       LOG(ERROR) << "display_id is not initialized";
       return false;
     }
-    if (placement.parent_display_id == gfx::Display::kInvalidDisplayID) {
+    if (placement.parent_display_id == Display::kInvalidDisplayID) {
       LOG(ERROR) << "display_parent_id is not initialized";
       return false;
     }
@@ -287,13 +310,12 @@ DisplayPlacement DisplayLayout::FindPlacementById(int64_t display_id) const {
 
 // static
 bool DisplayLayout::ApplyDisplayPlacement(const DisplayPlacement& placement,
-                                          DisplayList* display_list,
+                                          Displays* display_list,
                                           int minimum_offset_overlap) {
-  const gfx::Display& parent_display =
+  const Display& parent_display =
       *FindDisplayById(display_list, placement.parent_display_id);
   DCHECK(parent_display.is_valid());
-  gfx::Display* target_display =
-      FindDisplayById(display_list, placement.display_id);
+  Display* target_display = FindDisplayById(display_list, placement.display_id);
   gfx::Rect old_bounds(target_display->bounds());
   DCHECK(target_display);
 
@@ -308,11 +330,17 @@ bool DisplayLayout::ApplyDisplayPlacement(const DisplayPlacement& placement,
   int offset = placement.offset;
   if (position == DisplayPlacement::TOP ||
       position == DisplayPlacement::BOTTOM) {
+    if (placement.offset_reference == DisplayPlacement::BOTTOM_RIGHT)
+      offset = parent_bounds.width() - offset - target_bounds.width();
+
     offset = std::min(
         offset, parent_bounds.width() - minimum_offset_overlap);
     offset = std::max(
         offset, -target_bounds.width() + minimum_offset_overlap);
   } else {
+    if (placement.offset_reference == DisplayPlacement::BOTTOM_RIGHT)
+      offset = parent_bounds.height() - offset - target_bounds.height();
+
     offset = std::min(
         offset, parent_bounds.height() - minimum_offset_overlap);
     offset = std::max(

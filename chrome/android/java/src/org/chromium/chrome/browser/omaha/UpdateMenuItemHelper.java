@@ -77,6 +77,9 @@ public class UpdateMenuItemHelper {
     // Whether the menu item was clicked. This is used to log the click-through rate.
     private boolean mMenuItemClicked;
 
+    // The latest Chrome version available if OmahaClient.isNewerVersionAvailable() returns true.
+    private String mLatestVersion;
+
     /**
      * @return The {@link UpdateMenuItemHelper} instance.
      */
@@ -119,6 +122,7 @@ public class UpdateMenuItemHelper {
             protected Void doInBackground(Void... params) {
                 if (OmahaClient.isNewerVersionAvailable(activity)) {
                     mUpdateUrl = OmahaClient.getMarketURL(activity);
+                    mLatestVersion = OmahaClient.getLatestVersionNumberString(activity);
                     mUpdateAvailable = true;
                     recordInternalStorageSize();
                 } else {
@@ -193,7 +197,12 @@ public class UpdateMenuItemHelper {
             return true;
         }
 
-        if (!getBooleanParam(ENABLE_UPDATE_BADGE)) {
+        // The badge is hidden if the update menu item has been clicked until there is an
+        // even newer version of Chrome available.
+        String latestVersionWhenClicked =
+                PrefServiceBridge.getInstance().getLatestVersionWhenClickedUpdateMenuItem();
+        if (!getBooleanParam(ENABLE_UPDATE_BADGE)
+                || TextUtils.equals(latestVersionWhenClicked, mLatestVersion)) {
             return false;
         }
 
@@ -206,6 +215,13 @@ public class UpdateMenuItemHelper {
      */
     public void onMenuItemClicked(ChromeActivity activity) {
         if (mUpdateUrl == null) return;
+
+        // If the update menu item is showing because it was forced on through about://flags
+        // then mLatestVersion may be null.
+        if (mLatestVersion != null) {
+            PrefServiceBridge.getInstance().setLatestVersionWhenClickedUpdateMenuItem(
+                    mLatestVersion);
+        }
 
         // Fire an intent to open the URL.
         try {
@@ -380,26 +396,25 @@ public class UpdateMenuItemHelper {
 
         File path = Environment.getDataDirectory();
         StatFs statFs = new StatFs(path.getAbsolutePath());
-        int size;
+        long size;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR2) {
             size = getSize(statFs);
         } else {
             size = getSizeUpdatedApi(statFs);
         }
         RecordHistogram.recordLinearCountHistogram(
-                "GoogleUpdate.InfoBar.InternalStorageSizeAvailable", size, 1, 200, 100);
+                "GoogleUpdate.InfoBar.InternalStorageSizeAvailable", (int) size, 1, 200, 100);
     }
 
     @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR2)
-    private static int getSizeUpdatedApi(StatFs statFs) {
-        return (int) statFs.getAvailableBytes() / (1024 * 1024);
+    private static long getSizeUpdatedApi(StatFs statFs) {
+        return statFs.getAvailableBytes() / (1024 * 1024);
     }
 
     @SuppressWarnings("deprecation")
-    private static int getSize(StatFs statFs) {
+    private static long getSize(StatFs statFs) {
         int blockSize = statFs.getBlockSize();
         int availableBlocks = statFs.getAvailableBlocks();
-        int size = (blockSize * availableBlocks) / (1024 * 1024);
-        return size;
+        return (blockSize * availableBlocks) / (1024 * 1024);
     }
 }

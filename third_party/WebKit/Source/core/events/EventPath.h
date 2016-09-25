@@ -44,7 +44,7 @@ class TouchEvent;
 class TouchList;
 class TreeScope;
 
-class CORE_EXPORT EventPath final : public GarbageCollectedFinalized<EventPath> {
+class CORE_EXPORT EventPath final : public GarbageCollected<EventPath> {
     WTF_MAKE_NONCOPYABLE(EventPath);
 public:
     explicit EventPath(Node&, Event* = nullptr);
@@ -56,7 +56,7 @@ public:
     NodeEventContext& at(size_t index) { return m_nodeEventContexts[index]; }
     NodeEventContext& last() { return m_nodeEventContexts[size() - 1]; }
 
-    WindowEventContext& windowEventContext() { ASSERT(m_windowEventContext); return *m_windowEventContext; }
+    WindowEventContext& windowEventContext() { DCHECK(m_windowEventContext); return *m_windowEventContext; }
     void ensureWindowEventContext();
 
     bool isEmpty() const { return m_nodeEventContexts.isEmpty(); }
@@ -82,8 +82,11 @@ private:
     void calculateAdjustedTargets();
     void calculateTreeOrderAndSetNearestAncestorClosedTree();
 
-    void shrink(size_t newSize) { ASSERT(!m_windowEventContext); m_nodeEventContexts.shrink(newSize); }
-    void shrinkIfNeeded(const Node& target, const EventTarget& relatedTarget);
+    void shrink(size_t newSize) { DCHECK(!m_windowEventContext); m_nodeEventContexts.shrink(newSize); }
+
+    void retargetRelatedTarget(const Node& relatedTargetNode);
+
+    void shrinkForRelatedTarget(const Node& target, const Node& relatedTarget);
 
     void adjustTouchList(const TouchList*, HeapVector<Member<TouchList>> adjustedTouchList, const HeapVector<Member<TreeScope>>& treeScopes);
 
@@ -95,7 +98,7 @@ private:
     static void buildRelatedNodeMap(const Node&, RelatedTargetMap&);
     static EventTarget* findRelatedNode(TreeScope&, RelatedTargetMap&);
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     static void checkReachability(TreeScope&, TouchList&);
 #endif
 

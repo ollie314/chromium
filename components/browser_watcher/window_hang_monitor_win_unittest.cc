@@ -4,10 +4,11 @@
 
 #include "components/browser_watcher/window_hang_monitor_win.h"
 
+#include <memory>
+
 #include "base/base_paths.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/process.h"
@@ -95,7 +96,8 @@ class MonitoredProcessClient {
  public:
   MonitoredProcessClient()
       : message_window_thread_("Message window thread"),
-        hang_event_(true, false) {
+        hang_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                    base::WaitableEvent::InitialState::NOT_SIGNALED) {
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
     read_pipe_.Set(GetSwitchValueHandle(command_line, kChildReadPipeSwitch));
@@ -142,7 +144,9 @@ class MonitoredProcessClient {
         base::Thread::Options(base::MessageLoop::TYPE_UI, 0)));
 
     bool succeeded = false;
-    base::WaitableEvent created(true, false);
+    base::WaitableEvent created(
+        base::WaitableEvent::ResetPolicy::MANUAL,
+        base::WaitableEvent::InitialState::NOT_SIGNALED);
     ASSERT_TRUE(message_window_thread_.task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&MonitoredProcessClient::CreateMessageWindowInWorkerThread,
@@ -191,7 +195,9 @@ class MonitoredProcessClient {
   }
 
   void DeleteMessageWindow() {
-    base::WaitableEvent deleted(true, false);
+    base::WaitableEvent deleted(
+        base::WaitableEvent::ResetPolicy::MANUAL,
+        base::WaitableEvent::InitialState::NOT_SIGNALED);
     message_window_thread_.task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&MonitoredProcessClient::DeleteMessageWindowInWorkerThread,
@@ -209,7 +215,7 @@ class MonitoredProcessClient {
 
   // The thread that holds the message window.
   base::Thread message_window_thread_;
-  scoped_ptr<base::win::MessageWindow> message_window_;
+  std::unique_ptr<base::win::MessageWindow> message_window_;
 
   // Event used to hang the message window.
   base::WaitableEvent hang_event_;
@@ -237,7 +243,8 @@ class HangMonitorThread {
   // Instantiates the background thread.
   HangMonitorThread()
       : event_(WindowHangMonitor::WINDOW_NOT_FOUND),
-        event_received_(false, false),
+        event_received_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                        base::WaitableEvent::InitialState::NOT_SIGNALED),
         thread_("Hang monitor thread") {}
 
   ~HangMonitorThread() {
@@ -253,7 +260,9 @@ class HangMonitorThread {
       return false;
     }
 
-    base::WaitableEvent complete(false, false);
+    base::WaitableEvent complete(
+        base::WaitableEvent::ResetPolicy::AUTOMATIC,
+        base::WaitableEvent::InitialState::NOT_SIGNALED);
     if (!thread_.task_runner()->PostTask(
             FROM_HERE,
             base::Bind(&HangMonitorThread::StartupOnThread,
@@ -318,7 +327,7 @@ class HangMonitorThread {
   // the WindowHangMonitor.
   base::WaitableEvent event_received_;
   // The WindowHangMonitor under test.
-  scoped_ptr<WindowHangMonitor> hang_monitor_;
+  std::unique_ptr<WindowHangMonitor> hang_monitor_;
   // The background thread.
   base::Thread thread_;
 

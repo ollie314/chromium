@@ -52,6 +52,8 @@ class WebContents;
 // This is intended to be used only on the UI thread.
 class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
  public:
+  // A Java counterpart will be generated for this enum.
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.content_public.browser
   enum DownloadState {
     // Download is actively progressing.
     IN_PROGRESS = 0,
@@ -192,6 +194,7 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
   virtual const std::vector<GURL>& GetUrlChain() const = 0;
   virtual const GURL& GetOriginalUrl() const = 0;
   virtual const GURL& GetReferrerUrl() const = 0;
+  virtual const GURL& GetSiteUrl() const = 0;
   virtual const GURL& GetTabUrl() const = 0;
   virtual const GURL& GetTabReferrerUrl() const = 0;
   virtual std::string GetSuggestedFilename() const = 0;
@@ -326,10 +329,6 @@ class CONTENT_EXPORT DownloadItem : public base::SupportsUserData {
 
   // Mark the download to be auto-opened when completed.
   virtual void SetOpenWhenComplete(bool open) = 0;
-
-  // Mark the download as temporary (not visible in persisted store or
-  // SearchDownloads(), removed from main UI upon completion).
-  virtual void SetIsTemporary(bool temporary) = 0;
 
   // Mark the download as having been opened (without actually opening it).
   virtual void SetOpened(bool opened) = 0;

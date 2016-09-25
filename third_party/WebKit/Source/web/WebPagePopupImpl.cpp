@@ -38,7 +38,8 @@
 #include "core/frame/Settings.h"
 #include "core/frame/VisualViewport.h"
 #include "core/input/EventHandler.h"
-#include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutAPIShim.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/loader/EmptyClients.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/FocusController.h"
@@ -62,6 +63,7 @@
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebSettingsImpl.h"
 #include "web/WebViewImpl.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -72,7 +74,7 @@ public:
         return new PagePopupChromeClient(popup);
     }
 
-    void setWindowRect(const IntRect& rect) override
+    void setWindowRect(const IntRect& rect, LocalFrame&) override
     {
         m_popup->setWindowRect(rect);
     }
@@ -89,17 +91,18 @@ private:
         m_popup->closePopup();
     }
 
-    IntRect windowRect() override
+    IntRect rootWindowRect() override
     {
-        return m_popup->m_windowRectInScreen;
+        return m_popup->windowRectInScreen();
     }
 
     IntRect viewportToScreen(const IntRect& rect, const Widget* widget) const override
     {
         WebRect rectInScreen(rect);
+        WebRect windowRect = m_popup->windowRectInScreen();
         m_popup->widgetClient()->convertViewportToWindow(&rectInScreen);
-        rectInScreen.x += m_popup->m_windowRectInScreen.x;
-        rectInScreen.y += m_popup->m_windowRectInScreen.y;
+        rectInScreen.x += windowRect.x;
+        rectInScreen.y += windowRect.y;
         return rectInScreen;
     }
 
@@ -118,9 +121,9 @@ private:
 
     void scheduleAnimation(Widget*) override
     {
-        // Calling scheduleAnimation on m_webView so WebTestProxy will call beginFrame.
+        // Calling scheduleAnimation on m_webView so WebViewTestProxy will call beginFrame.
         if (LayoutTestSupport::isRunningLayoutTest())
-            m_popup->m_webView->scheduleAnimation();
+            m_popup->m_webView->mainFrameImpl()->frameWidget()->scheduleAnimation();
 
         if (m_popup->isAcceleratedCompositingActive()) {
             DCHECK(m_popup->m_layerTreeView);
@@ -157,10 +160,9 @@ private:
         return IntSize(0, 0);
     }
 
-    void setCursor(const Cursor& cursor, LocalFrame* localRoot) override
+    void setCursor(const Cursor& cursor, LocalFrame* localFrame) override
     {
-        if (m_popup->m_webView->client())
-            m_popup->m_webView->client()->didChangeCursor(WebCursorInfo(cursor));
+        m_popup->m_widgetClient->didChangeCursor(WebCursorInfo(cursor));
     }
 
     void setEventListenerProperties(WebEventListenerClass eventClass, WebEventListenerProperties properties) override
@@ -274,15 +276,18 @@ bool WebPagePopupImpl::initializePage()
     m_chromeClient = PagePopupChromeClient::create(this);
     pageClients.chromeClient = m_chromeClient.get();
 
+    Settings& mainSettings = m_webView->page()->settings();
     m_page = Page::create(pageClients);
     m_page->settings().setScriptEnabled(true);
     m_page->settings().setAllowScriptsToCloseWindows(true);
-    m_page->settings().setDeviceSupportsTouch(m_webView->page()->settings().deviceSupportsTouch());
+    m_page->settings().setDeviceSupportsTouch(mainSettings.deviceSupportsTouch());
+    m_page->settings().setMinimumFontSize(mainSettings.minimumFontSize());
+    m_page->settings().setMinimumLogicalFontSize(mainSettings.minimumLogicalFontSize());
     // FIXME: Should we support enabling a11y while a popup is shown?
-    m_page->settings().setAccessibilityEnabled(m_webView->page()->settings().accessibilityEnabled());
-    m_page->settings().setScrollAnimatorEnabled(m_webView->page()->settings().scrollAnimatorEnabled());
+    m_page->settings().setAccessibilityEnabled(mainSettings.accessibilityEnabled());
+    m_page->settings().setScrollAnimatorEnabled(mainSettings.scrollAnimatorEnabled());
 
-    provideContextFeaturesTo(*m_page, adoptPtr(new PagePopupFeaturesClient()));
+    provideContextFeaturesTo(*m_page, wrapUnique(new PagePopupFeaturesClient()));
     DEFINE_STATIC_LOCAL(FrameLoaderClient, emptyFrameLoaderClient, (EmptyFrameLoaderClient::create()));
     LocalFrame* frame = LocalFrame::create(&emptyFrameLoaderClient, &m_page->frameHost(), 0);
     frame->setPagePopupOwner(m_popupClient->ownerElement());
@@ -332,13 +337,12 @@ AXObject* WebPagePopupImpl::rootAXObject()
         return 0;
     AXObjectCache* cache = document->axObjectCache();
     DCHECK(cache);
-    return toAXObjectCacheImpl(cache)->getOrCreate(document->layoutView());
+    return toAXObjectCacheImpl(cache)->getOrCreate(toLayoutView(LayoutAPIShim::layoutObjectFrom(document->layoutViewItem())));
 }
 
 void WebPagePopupImpl::setWindowRect(const IntRect& rectInScreen)
 {
-    m_windowRectInScreen = rectInScreen;
-    widgetClient()->setWindowRect(m_windowRectInScreen);
+    widgetClient()->setWindowRect(rectInScreen);
 }
 
 void WebPagePopupImpl::setRootGraphicsLayer(GraphicsLayer* layer)
@@ -416,7 +420,14 @@ void WebPagePopupImpl::resize(const WebSize& newSizeInViewport)
     WebRect newSize(0, 0, newSizeInViewport.width, newSizeInViewport.height);
     widgetClient()->convertViewportToWindow(&newSize);
 
-    setWindowRect(WebRect(m_windowRectInScreen.x, m_windowRectInScreen.y, newSize.width, newSize.height));
+    WebRect windowRect = windowRectInScreen();
+
+    // TODO(bokan): We should only call into this if the bounds actually changed
+    // but this reveals a bug in Aura. crbug.com/633140.
+    windowRect.width = newSize.width;
+    windowRect.height = newSize.height;
+    setWindowRect(windowRect);
+
     if (m_page) {
         toLocalFrame(m_page->mainFrame())->view()->resize(newSizeInViewport);
         m_page->frameHost().visualViewport().setSize(newSizeInViewport);
@@ -427,12 +438,14 @@ void WebPagePopupImpl::resize(const WebSize& newSizeInViewport)
 
 WebInputEventResult WebPagePopupImpl::handleKeyEvent(const WebKeyboardEvent& event)
 {
-    return handleKeyEvent(PlatformKeyboardEventBuilder(event));
+    if (m_closing || !m_page->mainFrame() || !toLocalFrame(m_page->mainFrame())->view())
+        return WebInputEventResult::NotHandled;
+    return toLocalFrame(m_page->mainFrame())->eventHandler().keyEvent(event);
 }
 
 WebInputEventResult WebPagePopupImpl::handleCharEvent(const WebKeyboardEvent& event)
 {
-    return handleKeyEvent(PlatformKeyboardEventBuilder(event));
+    return handleKeyEvent(event);
 }
 
 WebInputEventResult WebPagePopupImpl::handleGestureEvent(const WebGestureEvent& event)
@@ -467,7 +480,8 @@ bool WebPagePopupImpl::isViewportPointInWindow(int x, int y)
 {
     WebRect pointInWindow(x, y, 0, 0);
     widgetClient()->convertViewportToWindow(&pointInWindow);
-    return IntRect(0, 0, m_windowRectInScreen.width, m_windowRectInScreen.height).contains(IntPoint(pointInWindow.x, pointInWindow.y));
+    WebRect windowRect = windowRectInScreen();
+    return IntRect(0, 0, windowRect.width, windowRect.height).contains(IntPoint(pointInWindow.x, pointInWindow.y));
 }
 
 WebInputEventResult WebPagePopupImpl::handleInputEvent(const WebInputEvent& event)
@@ -475,13 +489,6 @@ WebInputEventResult WebPagePopupImpl::handleInputEvent(const WebInputEvent& even
     if (m_closing)
         return WebInputEventResult::NotHandled;
     return PageWidgetDelegate::handleInputEvent(*this, event, m_page->deprecatedLocalMainFrame());
-}
-
-WebInputEventResult WebPagePopupImpl::handleKeyEvent(const PlatformKeyboardEvent& event)
-{
-    if (m_closing || !m_page->mainFrame() || !toLocalFrame(m_page->mainFrame())->view())
-        return WebInputEventResult::NotHandled;
-    return toLocalFrame(m_page->mainFrame())->eventHandler().keyEvent(event);
 }
 
 void WebPagePopupImpl::setFocus(bool enable)
@@ -547,14 +554,20 @@ void WebPagePopupImpl::compositeAndReadbackAsync(WebCompositeAndReadbackAsyncCal
 
 WebPoint WebPagePopupImpl::positionRelativeToOwner()
 {
-    WebRect windowRect = m_webView->client()->rootWindowRect();
-    return WebPoint(m_windowRectInScreen.x - windowRect.x, m_windowRectInScreen.y - windowRect.y);
+    WebRect rootWindowRect = m_webView->client()->rootWindowRect();
+    WebRect windowRect = windowRectInScreen();
+    return WebPoint(windowRect.x - rootWindowRect.x, windowRect.y - rootWindowRect.y);
 }
 
 void WebPagePopupImpl::cancel()
 {
     if (m_popupClient)
         m_popupClient->closePopup();
+}
+
+WebRect WebPagePopupImpl::windowRectInScreen() const
+{
+    return widgetClient()->windowRect();
 }
 
 // WebPagePopup ----------------------------------------------------------------

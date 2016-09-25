@@ -7,10 +7,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/files/file.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/shared_memory.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_math.h"
 #include "base/process/process.h"
 #include "base/strings/string_number_conversions.h"
@@ -19,14 +20,15 @@
 #include "content/browser/media/capture/desktop_capture_device_uma_types.h"
 #include "content/browser/media/capture/web_contents_audio_input_stream.h"
 #include "content/browser/media/media_internals.h"
-#include "content/browser/media/webrtc/webrtc_internals.h"
 #include "content/browser/renderer_host/media/audio_input_debug_writer.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/browser/renderer_host/media/audio_input_sync_writer.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
+#include "content/browser/webrtc/webrtc_internals.h"
 #include "content/public/browser/web_contents_media_capture_id.h"
-#include "media/audio/audio_manager_base.h"
+#include "media/audio/audio_device_description.h"
 #include "media/base/audio_bus.h"
+#include "media/base/media_switches.h"
 
 namespace content {
 
@@ -81,7 +83,7 @@ struct AudioInputRendererHost::AudioEntry {
   // The AudioInputController that manages the audio input stream.
   scoped_refptr<media::AudioInputController> controller;
 
-  // The audio input stream ID in the render view.
+  // The audio input stream ID in the RenderFrame.
   int stream_id;
 
   // Shared memory for transmission of the audio data. It has
@@ -290,17 +292,6 @@ void AudioInputRendererHost::DoHandleError(
     return;
   }
 
-  // This is a fix for crbug.com/357501. The error can be triggered when closing
-  // the lid on Macs, which causes more problems than it fixes.
-  // Also, in crbug.com/357569, the goal is to remove usage of the error since
-  // it was added to solve a crash on Windows that no longer can be reproduced.
-  if (error_code == media::AudioInputController::NO_DATA_ERROR) {
-    // TODO(henrika): it might be possible to do something other than just
-    // logging when we detect many NO_DATA_ERROR calls for a stream.
-    LogMessage(entry->stream_id, "AIC::DoCheckForNoData: NO_DATA_ERROR", false);
-    return;
-  }
-
   std::ostringstream oss;
   oss << "AIC reports error_code=" << error_code;
   LogMessage(entry->stream_id, oss.str(), false);
@@ -378,14 +369,15 @@ void AudioInputRendererHost::DoCreateStream(
   }
 
   media::AudioParameters audio_params(config.params);
-  if (media_stream_manager_->audio_input_device_manager()
-          ->ShouldUseFakeDevice())
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUseFakeDeviceForMediaStream)) {
     audio_params.set_format(media::AudioParameters::AUDIO_FAKE);
+  }
 
   // Check if we have the permission to open the device and which device to use.
   MediaStreamType type = MEDIA_NO_SERVICE;
   std::string device_name;
-  std::string device_id = media::AudioManagerBase::kDefaultDeviceId;
+  std::string device_id = media::AudioDeviceDescription::kDefaultDeviceId;
   if (audio_params.format() != media::AudioParameters::AUDIO_FAKE) {
     const StreamDeviceInfo* info = media_stream_manager_->
         audio_input_device_manager()->GetOpenedDeviceInfoById(session_id);
@@ -436,16 +428,18 @@ void AudioInputRendererHost::DoCreateStream(
   // entry and construct an AudioInputController.
   entry->writer.reset(writer.release());
   if (WebContentsMediaCaptureId::IsWebContentsDeviceId(device_id)) {
+    // For MEDIA_DESKTOP_AUDIO_CAPTURE, the source is selected from picker
+    // window, we do not mute the source audio.
+    // For MEDIA_TAB_AUDIO_CAPTURE, the probable use case is Cast, we mute
+    // the source audio.
+    // TODO(qiangchen): Analyze audio constraints to make a duplicating or
+    // diverting decision. It would give web developer more flexibility.
     entry->controller = media::AudioInputController::CreateForStream(
-        audio_manager_->GetTaskRunner(),
-        this,
+        audio_manager_->GetTaskRunner(), this,
         WebContentsAudioInputStream::Create(
-            device_id,
-            audio_params,
-            audio_manager_->GetWorkerTaskRunner(),
-            audio_mirroring_manager_),
-        entry->writer.get(),
-        user_input_monitor_);
+            device_id, audio_params, audio_manager_->GetWorkerTaskRunner(),
+            audio_mirroring_manager_, type == MEDIA_DESKTOP_AUDIO_CAPTURE),
+        entry->writer.get(), user_input_monitor_);
     // Only count for captures from desktop media picker dialog.
     if (entry->controller.get() && type == MEDIA_DESKTOP_AUDIO_CAPTURE)
       IncrementDesktopCaptureCounter(TAB_AUDIO_CAPTURER_CREATED);
@@ -468,7 +462,9 @@ void AudioInputRendererHost::DoCreateStream(
     // Only count for captures from desktop media picker dialog and system loop
     // back audio.
     if (entry->controller.get() && type == MEDIA_DESKTOP_AUDIO_CAPTURE &&
-        device_id == media::AudioManagerBase::kLoopbackInputDeviceId) {
+        (device_id == media::AudioDeviceDescription::kLoopbackInputDeviceId ||
+         device_id ==
+             media::AudioDeviceDescription::kLoopbackWithMuteDeviceId)) {
       IncrementDesktopCaptureCounter(SYSTEM_LOOPBACK_AUDIO_CAPTURER_CREATED);
     }
   }

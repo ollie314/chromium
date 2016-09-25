@@ -82,20 +82,18 @@ bool StyleSheetCandidate::isEnabledAndLoading() const
     return isHTMLLink() && !toHTMLLinkElement(node()).isDisabled() && toHTMLLinkElement(node()).styleSheetIsLoading();
 }
 
-bool StyleSheetCandidate::hasPreferrableName() const
-{
-    DCHECK(isEnabledAndLoading() || sheet());
-    return !isEnabledViaScript() && !title().isEmpty() && !isAlternate();
-}
-
 bool StyleSheetCandidate::canBeActivated(const String& currentPreferrableName) const
 {
     StyleSheet* sheet = this->sheet();
     if (!sheet || sheet->disabled() || !sheet->isCSSStyleSheet())
         return false;
 
-    if (sheet->ownerNode() && sheet->ownerNode()->isInShadowTree())
-        return true;
+    if (sheet->ownerNode() && sheet->ownerNode()->isInShadowTree()) {
+        if (isCSSStyle())
+            return true;
+        if (isHTMLLink() && !isImport())
+            return !isAlternate();
+    }
 
     const AtomicString& title = this->title();
     if (!isEnabledViaScript() && !title.isEmpty() && title != currentPreferrableName)
@@ -108,7 +106,7 @@ bool StyleSheetCandidate::canBeActivated(const String& currentPreferrableName) c
 
 StyleSheetCandidate::Type StyleSheetCandidate::typeOf(Node& node)
 {
-    if (node.getNodeType() == Node::PROCESSING_INSTRUCTION_NODE)
+    if (node.getNodeType() == Node::kProcessingInstructionNode)
         return Pi;
 
     if (node.isHTMLElement()) {

@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browsing_data/mock_browsing_data_appcache_helper.h"
 #include "chrome/browser/browsing_data/mock_browsing_data_cache_storage_helper.h"
@@ -52,7 +52,7 @@ class CookiesTreeModelTest : public testing::Test {
     special_storage_policy_ = nullptr;
 #endif
     profile_.reset();
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void SetUp() override {
@@ -106,7 +106,7 @@ class CookiesTreeModelTest : public testing::Test {
     mock_browsing_data_local_storage_helper_ = nullptr;
     mock_browsing_data_database_helper_ = nullptr;
     mock_browsing_data_flash_lso_helper_ = nullptr;
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   std::unique_ptr<CookiesTreeModel> CreateCookiesTreeModelWithInitialSample() {
@@ -125,7 +125,7 @@ class CookiesTreeModelTest : public testing::Test {
                                mock_browsing_data_flash_lso_helper_.get());
 
     CookiesTreeModel* cookies_model =
-        new CookiesTreeModel(container, special_storage_policy(), false);
+        new CookiesTreeModel(container, special_storage_policy());
     mock_browsing_data_cookie_helper_->
         AddCookieSamples(GURL("http://foo1"), "A=1");
     mock_browsing_data_cookie_helper_->
@@ -1100,7 +1100,7 @@ TEST_F(CookiesTreeModelTest, RemoveSingleCookieNode) {
                              mock_browsing_data_service_worker_helper_.get(),
                              mock_browsing_data_cache_storage_helper_.get(),
                              mock_browsing_data_flash_lso_helper_.get());
-  CookiesTreeModel cookies_model(container, special_storage_policy(), false);
+  CookiesTreeModel cookies_model(container, special_storage_policy());
 
   mock_browsing_data_cookie_helper_->
       AddCookieSamples(GURL("http://foo1"), "A=1");
@@ -1207,7 +1207,7 @@ TEST_F(CookiesTreeModelTest, RemoveSingleCookieNodeOf3) {
                              mock_browsing_data_service_worker_helper_.get(),
                              mock_browsing_data_cache_storage_helper_.get(),
                              mock_browsing_data_flash_lso_helper_.get());
-  CookiesTreeModel cookies_model(container, special_storage_policy(), false);
+  CookiesTreeModel cookies_model(container, special_storage_policy());
 
   mock_browsing_data_cookie_helper_->
       AddCookieSamples(GURL("http://foo1"), "A=1");
@@ -1317,7 +1317,7 @@ TEST_F(CookiesTreeModelTest, RemoveSecondOrigin) {
                              mock_browsing_data_service_worker_helper_.get(),
                              mock_browsing_data_cache_storage_helper_.get(),
                              mock_browsing_data_flash_lso_helper_.get());
-  CookiesTreeModel cookies_model(container, special_storage_policy(), false);
+  CookiesTreeModel cookies_model(container, special_storage_policy());
 
   mock_browsing_data_cookie_helper_->
       AddCookieSamples(GURL("http://foo1"), "A=1");
@@ -1361,7 +1361,7 @@ TEST_F(CookiesTreeModelTest, OriginOrdering) {
                              mock_browsing_data_service_worker_helper_.get(),
                              mock_browsing_data_cache_storage_helper_.get(),
                              mock_browsing_data_flash_lso_helper_.get());
-  CookiesTreeModel cookies_model(container, special_storage_policy(), false);
+  CookiesTreeModel cookies_model(container, special_storage_policy());
 
   mock_browsing_data_cookie_helper_->
       AddCookieSamples(GURL("http://a.foo2.com"), "A=1");
@@ -1410,7 +1410,7 @@ TEST_F(CookiesTreeModelTest, ContentSettings) {
                              mock_browsing_data_service_worker_helper_.get(),
                              mock_browsing_data_cache_storage_helper_.get(),
                              mock_browsing_data_flash_lso_helper_.get());
-  CookiesTreeModel cookies_model(container, special_storage_policy(), false);
+  CookiesTreeModel cookies_model(container, special_storage_policy());
 
   mock_browsing_data_cookie_helper_->AddCookieSamples(host, "A=1");
   mock_browsing_data_cookie_helper_->Notify();
@@ -1515,7 +1515,7 @@ TEST_F(CookiesTreeModelTest, CookiesFilter) {
                              mock_browsing_data_service_worker_helper_.get(),
                              mock_browsing_data_cache_storage_helper_.get(),
                              mock_browsing_data_flash_lso_helper_.get());
-  CookiesTreeModel cookies_model(container, special_storage_policy(), false);
+  CookiesTreeModel cookies_model(container, special_storage_policy());
 
   mock_browsing_data_cookie_helper_->
       AddCookieSamples(GURL("http://123.com"), "A=1");
@@ -1557,8 +1557,7 @@ TEST_F(CookiesTreeModelTest, CanonicalizeCookieSource) {
                              mock_browsing_data_service_worker_helper_.get(),
                              mock_browsing_data_cache_storage_helper_.get(),
                              mock_browsing_data_flash_lso_helper_.get());
-  CookiesTreeModel cookies_model(container, special_storage_policy(),
-                                 true /* group by cookie source */);
+  CookiesTreeModel cookies_model(container, special_storage_policy());
 
   mock_browsing_data_cookie_helper_->AddCookieSamples(
       GURL("file:///tmp/test.html"), "A=1");
@@ -1646,7 +1645,7 @@ TEST_F(CookiesTreeModelTest, CookiesFilterWithoutSource) {
                              mock_browsing_data_service_worker_helper_.get(),
                              mock_browsing_data_cache_storage_helper_.get(),
                              mock_browsing_data_flash_lso_helper_.get());
-  CookiesTreeModel cookies_model(container, special_storage_policy(), false);
+  CookiesTreeModel cookies_model(container, special_storage_policy());
 
   mock_browsing_data_cookie_helper_->
       AddCookieSamples(GURL(), "A=1");

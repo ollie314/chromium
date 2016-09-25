@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser;
 
+import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -11,14 +12,12 @@ import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.text.SpannableString;
 import android.text.method.LinkMovementMethod;
-import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
 import android.view.Window;
-import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -30,14 +29,20 @@ import android.widget.TextView;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.widget.TextViewWithClickableSpans;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
  * A general-purpose dialog for presenting a list of things to pick from.
+ *
+ * The dialog is shown by the ItemChooserDialog constructor, and always calls
+ * ItemSelectedCallback.onItemSelected() as it's closing.
  */
 public class ItemChooserDialog {
     /**
@@ -59,7 +64,7 @@ public class ItemChooserDialog {
      */
     public static class ItemChooserRow {
         private final String mKey;
-        private final String mDescription;
+        private String mDescription;
 
         public ItemChooserRow(String key, String description) {
             mKey = key;
@@ -85,41 +90,45 @@ public class ItemChooserDialog {
      */
     public static class ItemChooserLabels {
         // The title at the top of the dialog.
-        public final CharSequence mTitle;
+        public final CharSequence title;
         // The message to show while there are no results.
-        public final CharSequence mSearching;
+        public final CharSequence searching;
         // The message to show when no results were produced.
-        public final CharSequence mNoneFound;
+        public final CharSequence noneFound;
+        // A status message to show above the button row after an item has
+        // been added and discovery is still ongoing.
+        public final CharSequence statusActive;
         // A status message to show above the button row after discovery has
         // stopped and no devices have been found.
-        public final CharSequence mStatusIdleNoneFound;
+        public final CharSequence statusIdleNoneFound;
         // A status message to show above the button row after an item has
         // been added and discovery has stopped.
-        public final CharSequence mStatusIdleSomeFound;
+        public final CharSequence statusIdleSomeFound;
         // The label for the positive button (e.g. Select/Pair).
-        public final CharSequence mPositiveButton;
+        public final CharSequence positiveButton;
 
         public ItemChooserLabels(CharSequence title, CharSequence searching, CharSequence noneFound,
-                CharSequence statusIdleNoneFound, CharSequence statusIdleSomeFound,
-                CharSequence positiveButton) {
-            mTitle = title;
-            mSearching = searching;
-            mNoneFound = noneFound;
-            mStatusIdleNoneFound = statusIdleNoneFound;
-            mStatusIdleSomeFound = statusIdleSomeFound;
-            mPositiveButton = positiveButton;
+                CharSequence statusActive, CharSequence statusIdleNoneFound,
+                CharSequence statusIdleSomeFound, CharSequence positiveButton) {
+            this.title = title;
+            this.searching = searching;
+            this.noneFound = noneFound;
+            this.statusActive = statusActive;
+            this.statusIdleNoneFound = statusIdleNoneFound;
+            this.statusIdleSomeFound = statusIdleSomeFound;
+            this.positiveButton = positiveButton;
         }
     }
 
     /**
      * The various states the dialog can represent.
      */
-    private enum State { STARTING, DISCOVERY_IDLE }
+    private enum State { STARTING, PROGRESS_UPDATE_AVAILABLE, DISCOVERY_IDLE }
 
     /**
      * An adapter for keeping track of which items to show in the dialog.
      */
-    private class ItemAdapter extends ArrayAdapter<ItemChooserRow>
+    public class ItemAdapter extends ArrayAdapter<ItemChooserRow>
             implements AdapterView.OnItemClickListener {
         private final LayoutInflater mInflater;
 
@@ -136,6 +145,12 @@ public class ItemChooserDialog {
         // A set of keys that are marked as disabled in the dialog.
         private Set<String> mDisabledEntries = new HashSet<String>();
 
+        // Item descriptions are counted in a map.
+        private Map<String, Integer> mItemDescriptionMap = new HashMap<>();
+
+        // Map of keys to items so that we can access the items in O(1).
+        private Map<String, ItemChooserRow> mKeyToItemMap = new HashMap<>();
+
         public ItemAdapter(Context context, int resource) {
             super(context, resource);
 
@@ -148,8 +163,55 @@ public class ItemChooserDialog {
         }
 
         @Override
+        public boolean isEmpty() {
+            boolean isEmpty = super.isEmpty();
+            if (isEmpty) {
+                assert mKeyToItemMap.isEmpty();
+                assert mDisabledEntries.isEmpty();
+                assert mItemDescriptionMap.isEmpty();
+            } else {
+                assert !mKeyToItemMap.isEmpty();
+                assert !mItemDescriptionMap.isEmpty();
+            }
+            return isEmpty;
+        }
+
+        public void addOrUpdate(ItemChooserRow item) {
+            ItemChooserRow oldItem = mKeyToItemMap.get(item.mKey);
+            if (oldItem != null) {
+                if (oldItem.equals(item)) {
+                    // No need to update anything.
+                    return;
+                }
+                if (!oldItem.mDescription.equals(item.mDescription)) {
+                    removeFromDescriptionsMap(oldItem.mDescription);
+                    oldItem.mDescription = item.mDescription;
+                    addToDescriptionsMap(oldItem.mDescription);
+                }
+                notifyDataSetChanged();
+                return;
+            }
+            ItemChooserRow result = mKeyToItemMap.put(item.mKey, item);
+            assert result == null;
+
+            addToDescriptionsMap(item.mDescription);
+            add(item);
+        }
+
+        @Override
+        public void remove(ItemChooserRow item) {
+            ItemChooserRow oldItem = mKeyToItemMap.remove(item.mKey);
+            if (oldItem == null) return;
+            removeFromDescriptionsMap(oldItem.mDescription);
+            super.remove(oldItem);
+        }
+
+        @Override
         public void clear() {
             mSelectedItem = ListView.INVALID_POSITION;
+            mKeyToItemMap.clear();
+            mDisabledEntries.clear();
+            mItemDescriptionMap.clear();
             mConfirmButton.setEnabled(false);
             super.clear();
         }
@@ -162,6 +224,20 @@ public class ItemChooserDialog {
             ItemChooserRow row = getItem(mSelectedItem);
             if (row == null) return "";
             return row.mKey;
+        }
+
+        /**
+         * Returns the text to be displayed on the chooser for an item. For items with the same
+         * description, their unique keys are appended to distinguish them.
+         * @param position The index of the item.
+         */
+        public String getDisplayText(int position) {
+            ItemChooserRow item = getItem(position);
+            String description = item.mDescription;
+            int counter = mItemDescriptionMap.get(description);
+            return counter == 1 ? description
+                    : mActivity.getString(R.string.item_chooser_item_name_with_id, description,
+                            item.mKey);
         }
 
         /**
@@ -218,8 +294,7 @@ public class ItemChooserDialog {
                 }
             }
 
-            ItemChooserRow item = getItem(position);
-            view.setText(item.mDescription);
+            view.setText(getDisplayText(position));
             return view;
         }
 
@@ -229,9 +304,28 @@ public class ItemChooserDialog {
             mConfirmButton.setEnabled(true);
             mItemAdapter.notifyDataSetChanged();
         }
+
+        private void addToDescriptionsMap(String description) {
+            int count = mItemDescriptionMap.containsKey(description)
+                    ? mItemDescriptionMap.get(description)
+                    : 0;
+            mItemDescriptionMap.put(description, count + 1);
+        }
+
+        private void removeFromDescriptionsMap(String description) {
+            if (!mItemDescriptionMap.containsKey(description)) {
+                return;
+            }
+            int count = mItemDescriptionMap.get(description);
+            if (count == 1) {
+                mItemDescriptionMap.remove(description);
+            } else {
+                mItemDescriptionMap.put(description, count - 1);
+            }
+        }
     }
 
-    private Context mContext;
+    private Activity mActivity;
 
     // The dialog this class encapsulates.
     private Dialog mDialog;
@@ -254,27 +348,29 @@ public class ItemChooserDialog {
     private ItemAdapter mItemAdapter;
 
     // How much of the height of the screen should be taken up by the listview.
-    private static final double LISTVIEW_HEIGHT_PERCENT = 0.30;
+    private static final float LISTVIEW_HEIGHT_PERCENT = 0.30f;
+    // The height of a row of the listview in dp.
+    private static final int LIST_ROW_HEIGHT_DP = 48;
     // The minimum height of the listview in the dialog (in dp).
-    private static final int MIN_HEIGHT_DP = 56;
+    private static final int MIN_HEIGHT_DP = (int) (LIST_ROW_HEIGHT_DP * 1.5);
     // The maximum height of the listview in the dialog (in dp).
-    private static final int MAX_HEIGHT_DP = 400;
+    private static final int MAX_HEIGHT_DP = (int) (LIST_ROW_HEIGHT_DP * 8.5);
 
     /**
      * Creates the ItemChooserPopup and displays it (and starts waiting for data).
      *
-     * @param context Context which is used for launching a dialog.
+     * @param activity Activity which is used for launching a dialog.
      * @param callback The callback used to communicate back what was selected.
      * @param labels The labels to show in the dialog.
      */
     public ItemChooserDialog(
-            Context context, ItemSelectedCallback callback, ItemChooserLabels labels) {
-        mContext = context;
+            Activity activity, ItemSelectedCallback callback, ItemChooserLabels labels) {
+        mActivity = activity;
         mItemSelectedCallback = callback;
         mLabels = labels;
 
-        LinearLayout dialogContainer = (LinearLayout) LayoutInflater.from(
-                mContext).inflate(R.layout.item_chooser_dialog, null);
+        LinearLayout dialogContainer = (LinearLayout) LayoutInflater.from(mActivity).inflate(
+                R.layout.item_chooser_dialog, null);
 
         mListView = (ListView) dialogContainer.findViewById(R.id.items);
         mProgressBar = (ProgressBar) dialogContainer.findViewById(R.id.progress);
@@ -284,14 +380,14 @@ public class ItemChooserDialog {
         mEmptyMessage =
                 (TextViewWithClickableSpans) dialogContainer.findViewById(R.id.not_found_message);
 
-        mTitle.setText(labels.mTitle);
+        mTitle.setText(labels.title);
         mTitle.setMovementMethod(LinkMovementMethod.getInstance());
 
         mEmptyMessage.setMovementMethod(LinkMovementMethod.getInstance());
         mStatus.setMovementMethod(LinkMovementMethod.getInstance());
 
         mConfirmButton = (Button) dialogContainer.findViewById(R.id.positive);
-        mConfirmButton.setText(labels.mPositiveButton);
+        mConfirmButton.setText(labels.positiveButton);
         mConfirmButton.setEnabled(false);
         mConfirmButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -302,7 +398,7 @@ public class ItemChooserDialog {
             }
         });
 
-        mItemAdapter = new ItemAdapter(mContext, R.layout.item_chooser_dialog_row);
+        mItemAdapter = new ItemAdapter(mActivity, R.layout.item_chooser_dialog_row);
         mListView.setAdapter(mItemAdapter);
         mListView.setEmptyView(mEmptyMessage);
         mListView.setOnItemClickListener(mItemAdapter);
@@ -310,26 +406,29 @@ public class ItemChooserDialog {
         setState(State.STARTING);
 
         // The list is the main element in the dialog and it should grow and
-        // shrink according to the size of the screen available (clamped to a
-        // min and a max).
+        // shrink according to the size of the screen available.
         View listViewContainer = dialogContainer.findViewById(R.id.container);
-        DisplayMetrics metrics = new DisplayMetrics();
-        WindowManager manager = (WindowManager) mContext.getSystemService(
-                Context.WINDOW_SERVICE);
-        manager.getDefaultDisplay().getMetrics(metrics);
-
-        float density = context.getResources().getDisplayMetrics().density;
-        int height = (int) (metrics.heightPixels * LISTVIEW_HEIGHT_PERCENT);
-        height = Math.min(height, Math.round(MAX_HEIGHT_DP * density));
-        height = Math.max(height, Math.round(MIN_HEIGHT_DP * density));
-        listViewContainer.setLayoutParams(
-                new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, height));
+        listViewContainer.setLayoutParams(new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                getListHeight(mActivity.getWindow().getDecorView().getHeight(),
+                        mActivity.getResources().getDisplayMetrics().density)));
 
         showDialogForView(dialogContainer);
     }
 
+    // Computes the height of the device list, bound to half-multiples of the
+    // row height so that it's obvious if there are more elements to scroll to.
+    @VisibleForTesting
+    static int getListHeight(int decorHeight, float density) {
+        float heightDp = decorHeight / density * LISTVIEW_HEIGHT_PERCENT;
+        // Round to (an integer + 0.5) times LIST_ROW_HEIGHT.
+        heightDp = (Math.round(heightDp / LIST_ROW_HEIGHT_DP - 0.5f) + 0.5f) * LIST_ROW_HEIGHT_DP;
+        heightDp = MathUtils.clamp(heightDp, MIN_HEIGHT_DP, MAX_HEIGHT_DP);
+        return (int) Math.round(heightDp * density);
+    }
+
     private void showDialogForView(View view) {
-        mDialog = new Dialog(mContext);
+        mDialog = new Dialog(mActivity);
         mDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         mDialog.addContentView(view,
                 new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
@@ -342,7 +441,7 @@ public class ItemChooserDialog {
         });
 
         Window window = mDialog.getWindow();
-        if (!DeviceFormFactor.isTablet(mContext)) {
+        if (!DeviceFormFactor.isTablet(mActivity)) {
             // On smaller screens, make the dialog fill the width of the screen,
             // and appear at the top.
             window.setBackgroundDrawable(new ColorDrawable(Color.WHITE));
@@ -359,14 +458,15 @@ public class ItemChooserDialog {
     }
 
     /**
-    * Add an item to the end of the list to show in the dialog.
+    * Add an item to the end of the list to show in the dialog if the item
+    * was not in the chooser. Otherwise update the items description.
     *
-    * @param item The item to be added to the end of the chooser.
+    * @param item The item to be added to the end of the chooser or updated.
     */
-    public void addItemToList(ItemChooserRow item) {
+    public void addOrUpdateItem(ItemChooserRow item) {
         mProgressBar.setVisibility(View.GONE);
-        mItemAdapter.add(item);
-        setState(State.DISCOVERY_IDLE);
+        mItemAdapter.addOrUpdate(item);
+        setState(State.PROGRESS_UPDATE_AVAILABLE);
     }
 
     /**
@@ -418,16 +518,21 @@ public class ItemChooserDialog {
     private void setState(State state) {
         switch (state) {
             case STARTING:
-                mStatus.setText(mLabels.mSearching);
+                mStatus.setText(mLabels.searching);
                 mListView.setVisibility(View.GONE);
                 mProgressBar.setVisibility(View.VISIBLE);
                 mEmptyMessage.setVisibility(View.GONE);
                 break;
+            case PROGRESS_UPDATE_AVAILABLE:
+                mStatus.setText(mLabels.statusActive);
+                mProgressBar.setVisibility(View.GONE);
+                mListView.setVisibility(View.VISIBLE);
+                break;
             case DISCOVERY_IDLE:
                 boolean showEmptyMessage = mItemAdapter.isEmpty();
                 mStatus.setText(showEmptyMessage
-                        ? mLabels.mStatusIdleNoneFound : mLabels.mStatusIdleSomeFound);
-                mEmptyMessage.setText(mLabels.mNoneFound);
+                        ? mLabels.statusIdleNoneFound : mLabels.statusIdleSomeFound);
+                mEmptyMessage.setText(mLabels.noneFound);
                 mEmptyMessage.setVisibility(showEmptyMessage ? View.VISIBLE : View.GONE);
                 break;
         }

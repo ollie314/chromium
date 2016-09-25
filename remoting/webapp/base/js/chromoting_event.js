@@ -115,6 +115,11 @@ remoting.ChromotingEvent = function(type) {
    * @type {number}
    */
   this.host_last_heartbeat_elapsed_time;
+  /**
+    * To track features like number of ESC key press in a session.
+    * @type {remoting.ChromotingEvent.FeatureTracker}
+    */
+  this.feature_tracker;
   this.init_();
 };
 
@@ -215,6 +220,16 @@ remoting.ChromotingEvent.SessionSummary = function() {
   this.entry_point;
 };
 
+/**
+ * For tracking features like keypress count.
+ * All counting fields will be initialized to 0.
+ * @constructor
+ */
+remoting.ChromotingEvent.FeatureTracker = function() {
+  /** @type {number} */
+  this.fullscreen_esc_count = 0;
+};
+
 })();
 
 /**
@@ -229,7 +244,8 @@ remoting.ChromotingEvent.Type = {
   HEARTBEAT_REJECTED: 6,
   RESTART: 7,
   HOST_STATUS: 8,
-  SIGNAL_STRATEGY_PROGRESS: 9
+  SIGNAL_STRATEGY_PROGRESS: 9,
+  FEATURE_TRACKING: 10
 };
 
 /** @enum {number} */
@@ -294,6 +310,7 @@ remoting.ChromotingEvent.SessionState = {
   STARTED: 15,
   SIGNALING: 16,
   CREATING_PLUGIN: 17,
+  VIDEO_STREAM_STARTED: 18,
 };
 
 /** @enum {number} */
@@ -331,6 +348,7 @@ remoting.ChromotingEvent.ConnectionError = {
   MAX_SESSION_LENGTH: 16,
   HOST_CONFIGURATION_ERROR: 17,
   NACL_PLUGIN_CRASHED: 18,
+  INVALID_ACCOUNT: 19,
 };
 
 /** @enum {number} */

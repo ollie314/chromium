@@ -6,6 +6,8 @@
 
 #include "core/layout/LayoutTestHelper.h"
 #include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutAPIShim.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/layout/compositing/PaintLayerCompositor.h"
 #include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/PaintLayer.h"
@@ -32,7 +34,7 @@ private:
         RenderingTest::SetUp();
         enableCompositing();
 
-        m_layoutView = document().view()->layoutView();
+        m_layoutView = toLayoutView(LayoutAPIShim::layoutObjectFrom(document().view()->layoutViewItem()));
         ASSERT_TRUE(m_layoutView);
     }
 
@@ -43,14 +45,14 @@ void drawEmptyClip(GraphicsContext& context, LayoutView& layoutView, PaintPhase 
 {
     LayoutRect rect(1, 1, 9, 9);
     ClipRect clipRect(rect);
-    LayerClipRecorder LayerClipRecorder(context, *layoutView.compositor()->rootLayer()->layoutObject(), DisplayItem::ClipLayerForeground, clipRect, 0, LayoutPoint(), PaintLayerFlags());
+    LayerClipRecorder LayerClipRecorder(context, *layoutView.compositor()->rootLayer()->layoutObject(), DisplayItem::kClipLayerForeground, clipRect, 0, LayoutPoint(), PaintLayerFlags());
 }
 
 void drawRectInClip(GraphicsContext& context, LayoutView& layoutView, PaintPhase phase, const LayoutRect& bound)
 {
     IntRect rect(1, 1, 9, 9);
     ClipRect clipRect((LayoutRect(rect)));
-    LayerClipRecorder LayerClipRecorder(context, *layoutView.compositor()->rootLayer()->layoutObject(), DisplayItem::ClipLayerForeground, clipRect, 0, LayoutPoint(), PaintLayerFlags());
+    LayerClipRecorder LayerClipRecorder(context, *layoutView.compositor()->rootLayer()->layoutObject(), DisplayItem::kClipLayerForeground, clipRect, 0, LayoutPoint(), PaintLayerFlags());
     if (!LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(context, layoutView, phase)) {
         LayoutObjectDrawingRecorder drawingRecorder(context, layoutView, phase, bound);
         context.drawRect(rect);

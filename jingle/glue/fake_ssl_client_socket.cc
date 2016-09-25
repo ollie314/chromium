@@ -80,7 +80,7 @@ base::StringPiece FakeSSLClientSocket::GetSslServerHello() {
 }
 
 FakeSSLClientSocket::FakeSSLClientSocket(
-    scoped_ptr<net::StreamSocket> transport_socket)
+    std::unique_ptr<net::StreamSocket> transport_socket)
     : transport_socket_(std::move(transport_socket)),
       next_handshake_state_(STATE_NONE),
       handshake_completed_(false),
@@ -315,7 +315,7 @@ int FakeSSLClientSocket::GetLocalAddress(net::IPEndPoint* address) const {
   return transport_socket_->GetLocalAddress(address);
 }
 
-const net::BoundNetLog& FakeSSLClientSocket::NetLog() const {
+const net::NetLogWithSource& FakeSSLClientSocket::NetLog() const {
   return transport_socket_->NetLog();
 }
 

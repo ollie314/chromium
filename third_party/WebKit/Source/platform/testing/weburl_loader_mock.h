@@ -7,8 +7,8 @@
 
 #include "base/macros.h"
 #include "public/platform/WebURLLoader.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/WeakPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -19,6 +19,8 @@ class WebURLLoaderMockFactoryImpl;
 class WebURLLoaderTestDelegate;
 class WebURLRequest;
 class WebURLResponse;
+
+const int kRedirectResponseOverheadBytes = 300;
 
 // A simple class for mocking WebURLLoader.
 // If the WebURLLoaderMockFactory it is associated with has been configured to
@@ -46,7 +48,8 @@ class WebURLLoaderMock : public WebURLLoader {
   void loadSynchronously(const WebURLRequest& request,
                          WebURLResponse& response,
                          WebURLError& error,
-                         WebData& data) override;
+                         WebData& data,
+                         int64_t& encoded_data_length) override;
   void loadAsynchronously(const WebURLRequest& request,
                           WebURLLoaderClient* client) override;
   void cancel() override;
@@ -61,7 +64,7 @@ class WebURLLoaderMock : public WebURLLoader {
  private:
   WebURLLoaderMockFactoryImpl* factory_ = nullptr;
   WebURLLoaderClient* client_ = nullptr;
-  OwnPtr<WebURLLoader> default_loader_;
+  std::unique_ptr<WebURLLoader> default_loader_;
   bool using_default_loader_ = false;
   bool is_deferred_ = false;
 

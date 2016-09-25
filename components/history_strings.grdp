@@ -11,6 +11,9 @@
   <message name="IDS_HISTORY_BROWSERESULTS" desc="Title of browsing results page">
     History
   </message>
+  <message name="IDS_HISTORY_CANCEL_EDITING_BUTTON" desc="Text for the button to exit editing mode [Length: 7em].">
+    Cancel
+  </message>
   <message name="IDS_HISTORY_CONTINUED" desc="Shown after the date if the data is continued from the previous page">
     (Cont.)
   </message>
@@ -27,6 +30,15 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
   </message>
   <message name="IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING_NO_INCOGNITO" desc="Warning shown before deleting from the history page">
     Are you sure you want to delete these pages from your history?
+  </message>
+  <message name="IDS_HISTORY_DELETE_SELECTED_ENTRIES_BUTTON" desc="Text for the button to delete selected history entries [Length: 16em].">
+    Delete
+  </message>
+  <message name="IDS_HISTORY_ENTRY_ACCESSIBILITY_DELETE" desc="Name for the accessibility action to delete a single history entry.">
+    Delete
+  </message>
+  <message name="IDS_HISTORY_ENTRY_ACCESSIBILITY_LABEL" desc="Accessibility label for a history entry. Summarizes fields in the history entry (title, domain, and time).">
+    <ph name="TITLE"><ex>PI: The Magical Number</ex>$1</ph>, <ph name="DOMAIN"><ex>pi.com</ex>$2</ph>, <ph name="TIME"><ex>3:14</ex>$3</ph>
   </message>
   <message name="IDS_HISTORY_ENTRY_BOOKMARKED" desc="Whether a history entry is bookmarked.">
     Bookmarked
@@ -76,21 +88,33 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
   <message name="IDS_HISTORY_OLDER" desc="HTML text shown as page navigation tool to take the user forward to their older history">
     Older
   </message>
+  <if expr="not use_titlecase">
   <message name="IDS_HISTORY_OPEN_CLEAR_BROWSING_DATA_DIALOG" desc="Title of the button that will open the clear browsing data dialog.">
     Clear browsing data...
   </message>
+  </if>
+  <if expr="use_titlecase">
+    <message name="IDS_HISTORY_OPEN_CLEAR_BROWSING_DATA_DIALOG" desc="In Title Case: Title of the button that will open the clear browsing data dialog [Length: 16em].">
+      Clear Browsing Data...
+    </message>
+  </if>
   <message name="IDS_HISTORY_OTHER_DEVICES_X_MORE" desc="In the 'Other Sessions' section of the history page, the label for showing that X more tabs are available for a session.">
     <ph name="NUM_TABS_MORE">$1<ex>42</ex></ph> more...
   </message>
-  <message name="IDS_HISTORY_OTHER_SESSIONS_COLLAPSE_SESSION" desc="In the 'Other Sessions' menu on the history page, the label for the command to collapse (hide) the list of windows and tabs in a session.">
-    Collapse list
-  </message>
-  <message name="IDS_HISTORY_OTHER_SESSIONS_EXPAND_SESSION" desc="In the 'Other Sessions' menu on the history page, the label for the command to expand (uncollapse) the list of windows and tabs in a session.">
-    Expand list
-  </message>
-  <message name="IDS_HISTORY_OTHER_SESSIONS_OPEN_ALL" desc="In the 'Other Sessions' menu on the history page, the label for the command to open all tabs and windows from a session.">
-    Open all
-  </message>
+  <if expr="not is_android">
+    <message name="IDS_HISTORY_OTHER_SESSIONS_COLLAPSE_SESSION" desc="In the 'Other Sessions' menu on the history page, the label for the command to collapse (hide) the list of windows and tabs in a session.">
+      Collapse list
+    </message>
+    <message name="IDS_HISTORY_OTHER_SESSIONS_EXPAND_SESSION" desc="In the 'Other Sessions' menu on the history page, the label for the command to expand (uncollapse) the list of windows and tabs in a session.">
+      Expand list
+    </message>
+    <message name="IDS_HISTORY_OTHER_SESSIONS_HIDE_FOR_NOW" desc="In the 'Other Sessions' menu on the history page, the label for the command to remove entry corresponding to a session.">
+      Hide for now
+    </message>
+    <message name="IDS_HISTORY_OTHER_SESSIONS_OPEN_ALL" desc="In the 'Other Sessions' menu on the history page, the label for the command to open all tabs and windows from a session.">
+      Open all
+    </message>
+  </if>
   <message name="IDS_HISTORY_RANGE_ALL_TIME" desc="Option in the history range button group. Shows results a page at a time, without grouping them by domain.">
     All
   </message>
@@ -145,6 +169,9 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
   </if>
   <message name="IDS_HISTORY_SHOWFULLHISTORY_LINK" desc="The label of the Show Full History link at the bottom of the back/forward menu.">
     Show Full History
+  </message>
+  <message name="IDS_HISTORY_START_EDITING_BUTTON" desc="Text for the button to enter editing mode, which allows the user to delete one or more history entries [Length: 7em].">
+    Edit
   </message>
   <message name="IDS_HISTORY_TITLE" desc="Title for the history tab.">
     History

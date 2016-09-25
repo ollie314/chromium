@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "content/public/browser/browser_thread.h"
@@ -77,9 +78,9 @@ ExtensionFunction::ResponseValue SettingsFunction::UseReadResult(
   if (!result->status().ok())
     return Error(result->status().message);
 
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->Swap(&result->settings());
-  return OneArgument(dict);
+  return OneArgument(std::move(dict));
 }
 
 ExtensionFunction::ResponseValue SettingsFunction::UseWriteResult(
@@ -175,7 +176,7 @@ ExtensionFunction::ResponseValue StorageStorageAreaGetFunction::RunWithStorage(
       base::DictionaryValue* with_default_values = as_dict->DeepCopy();
       with_default_values->MergeDictionary(&result->settings());
       return UseReadResult(ValueStore::MakeReadResult(
-          make_scoped_ptr(with_default_values), result->status()));
+          base::WrapUnique(with_default_values), result->status()));
     }
 
     default:
@@ -216,7 +217,7 @@ StorageStorageAreaGetBytesInUseFunction::RunWithStorage(ValueStore* storage) {
   }
 
   return OneArgument(
-      new base::FundamentalValue(static_cast<int>(bytes_in_use)));
+      base::MakeUnique<base::FundamentalValue>(static_cast<int>(bytes_in_use)));
 }
 
 ExtensionFunction::ResponseValue StorageStorageAreaSetFunction::RunWithStorage(

@@ -24,6 +24,7 @@ enum FontDisplay {
 
 class RemoteFontFaceSource final : public CSSFontFaceSource, public FontResourceClient {
     USING_PRE_FINALIZER(RemoteFontFaceSource, dispose);
+    USING_GARBAGE_COLLECTED_MIXIN(RemoteFontFaceSource);
 public:
     enum DisplayPeriod { BlockPeriod, SwapPeriod, FailurePeriod };
 
@@ -43,6 +44,8 @@ public:
     void fontLoadLongLimitExceeded(FontResource*) override;
     String debugName() const override { return "RemoteFontFaceSource"; }
 
+    bool isBlank() override { return m_period == BlockPeriod; }
+
     // For UMA reporting
     bool hadBlankText() override { return m_histograms.hadBlankText(); }
     void paintRequested() { m_histograms.fallbackFontPainted(m_period); }
@@ -58,7 +61,11 @@ private:
     class FontLoadHistograms {
         DISALLOW_NEW();
     public:
-        FontLoadHistograms() : m_loadStartTime(0), m_blankPaintTime(0), m_isLongLimitExceeded(false) { }
+        // Should not change following order in CacheHitMetrics to be used for metrics values.
+        enum CacheHitMetrics { Miss, DiskHit, DataUrl, MemoryHit, CacheHitEnumMax };
+        enum DataSource { FromUnknown, FromDataURL, FromMemoryCache, FromDiskCache, FromNetwork };
+
+        FontLoadHistograms(DataSource dataSource) : m_loadStartTime(0), m_blankPaintTime(0), m_isLongLimitExceeded(false), m_dataSource(dataSource) { }
         void loadStarted();
         void fallbackFontPainted(DisplayPeriod);
         void fontLoaded(bool isInterventionTriggered);
@@ -66,16 +73,21 @@ private:
         void recordFallbackTime(const FontResource*);
         void recordRemoteFont(const FontResource*);
         bool hadBlankText() { return m_blankPaintTime; }
+        DataSource dataSource() { return m_dataSource; }
+        void maySetDataSource(DataSource dataSource) { m_dataSource = (m_dataSource != FromUnknown) ? m_dataSource : dataSource; }
     private:
         void recordLoadTimeHistogram(const FontResource*, int duration);
-        void recordInterventionResult(bool triggered);
+        void recordInterventionResult(bool isTriggered);
+        CacheHitMetrics dataSourceMetricsValue();
         double m_loadStartTime;
         double m_blankPaintTime;
         bool m_isLongLimitExceeded;
+        DataSource m_dataSource;
     };
 
     void switchToSwapPeriod();
     void switchToFailurePeriod();
+    bool shouldTriggerWebFontsIntervention();
 
     Member<FontResource> m_font;
     Member<CSSFontSelector> m_fontSelector;

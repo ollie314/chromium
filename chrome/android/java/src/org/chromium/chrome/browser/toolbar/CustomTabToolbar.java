@@ -4,11 +4,18 @@
 
 package org.chromium.chrome.browser.toolbar;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
+import android.animation.ValueAnimator.AnimatorUpdateListener;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
@@ -16,16 +23,19 @@ import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.Pair;
 import android.util.TypedValue;
+import android.view.GestureDetector;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.widget.FrameLayout;
 import android.widget.ImageButton;
-import android.widget.ImageView;
 import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.WindowDelegate;
@@ -44,10 +54,14 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.ActionModeController.ActionBarDelegate;
 import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.widget.TintedDrawable;
+import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.components.dom_distiller.core.DomDistillerService;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
+import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.interpolators.BakedBezierInterpolator;
+import org.chromium.ui.widget.Toast;
 
 import java.util.List;
 
@@ -56,6 +70,41 @@ import java.util.List;
  */
 public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         View.OnLongClickListener {
+
+    /**
+     * A simple {@link FrameLayout} that prevents its children from getting touch events. This is
+     * especially useful to prevent {@link UrlBar} from running custom touch logic since it is
+     * read-only in custom tabs.
+     */
+    public static class InterceptTouchLayout extends FrameLayout {
+        private GestureDetector mGestureDetector;
+
+        public InterceptTouchLayout(Context context, AttributeSet attrs) {
+            super(context, attrs);
+            mGestureDetector = new GestureDetector(getContext(),
+                    new GestureDetector.SimpleOnGestureListener() {
+                        @Override
+                        public boolean onSingleTapConfirmed(MotionEvent e) {
+                            if (LibraryLoader.isInitialized()) {
+                                RecordUserAction.record("CustomTabs.TapUrlBar");
+                            }
+                            return super.onSingleTapConfirmed(e);
+                        }
+                    });
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent ev) {
+            return true;
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            mGestureDetector.onTouchEvent(event);
+            return super.onTouchEvent(event);
+        }
+    }
+
     private static final int TITLE_ANIM_DELAY_MS = 800;
     private static final int STATE_DOMAIN_ONLY = 0;
     private static final int STATE_TITLE_ONLY = 1;
@@ -65,7 +114,7 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     private View mTitleUrlContainer;
     private UrlBar mUrlBar;
     private TextView mTitleBar;
-    private ImageView mSecurityButton;
+    private TintedImageButton mSecurityButton;
     private ImageButton mCustomActionButton;
     private int mSecurityIconType;
     private ImageButton mCloseButton;
@@ -73,8 +122,10 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     // Whether dark tint should be applied to icons and text.
     private boolean mUseDarkColors = true;
 
+    private ValueAnimator mBrandColorTransitionAnimation;
+    private boolean mBrandColorTransitionActive;
+
     private CustomTabToolbarAnimationDelegate mAnimDelegate;
-    private long mInitializeTimeStamp;
     private int mState = STATE_DOMAIN_ONLY;
     private String mFirstUrl;
     private boolean mShowsOfflinePage = false;
@@ -106,7 +157,8 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         mTitleBar = (TextView) findViewById(R.id.title_bar);
         mLocationBarFrameLayout = findViewById(R.id.location_bar_frame_layout);
         mTitleUrlContainer = findViewById(R.id.title_url_container);
-        mSecurityButton = (ImageButton) findViewById(R.id.security_button);
+        mTitleUrlContainer.setOnLongClickListener(this);
+        mSecurityButton = (TintedImageButton) findViewById(R.id.security_button);
         mSecurityIconType = ConnectionSecurityLevel.NONE;
         mCustomActionButton = (ImageButton) findViewById(R.id.action_button);
         mCustomActionButton.setOnLongClickListener(this);
@@ -125,7 +177,6 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
             ToolbarTabController tabController, AppMenuButtonHelper appMenuButtonHelper) {
         super.initialize(toolbarDataProvider, tabController, appMenuButtonHelper);
         updateVisualsForState();
-        mInitializeTimeStamp = System.currentTimeMillis();
     }
 
     @Override
@@ -138,8 +189,10 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
                 if (currentTab == null || currentTab.getWebContents() == null) return;
                 Activity activity = currentTab.getWindowAndroid().getActivity().get();
                 if (activity == null) return;
-                WebsiteSettingsPopup.show(activity, currentTab, mState == STATE_TITLE_ONLY
-                        ? parsePublisherNameFromUrl(currentTab.getUrl()) : null);
+                String publisherName = mState == STATE_TITLE_ONLY
+                        ? parsePublisherNameFromUrl(currentTab.getUrl()) : null;
+                WebsiteSettingsPopup.show(activity, currentTab, publisherName,
+                        WebsiteSettingsPopup.OPENED_FROM_TOOLBAR);
             }
         });
     }
@@ -200,11 +253,8 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     @Override
     public boolean shouldEmphasizeHttpsScheme() {
         int securityLevel = getSecurityLevel();
-        if (securityLevel == ConnectionSecurityLevel.SECURITY_ERROR
-                || securityLevel == ConnectionSecurityLevel.SECURITY_POLICY_WARNING) {
-            return true;
-        }
-        return false;
+        return securityLevel == ConnectionSecurityLevel.SECURITY_ERROR
+                || securityLevel == ConnectionSecurityLevel.SECURITY_POLICY_WARNING;
     }
 
     @Override
@@ -366,11 +416,9 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         mTitleBar.setTextColor(titleTextColor);
 
         if (getProgressBar() != null) {
-            if (!mUseDarkColors) {
-                getProgressBar().setBackgroundColor(ColorUtils
-                        .getLightProgressbarBackground(getToolbarDataProvider().getPrimaryColor()));
-                getProgressBar().setForegroundColor(ApiCompatibilityUtils.getColor(resources,
-                        R.color.progress_bar_foreground_white));
+            if (!ColorUtils.isUsingDefaultToolbarColor(getResources(),
+                    getBackground().getColor())) {
+                getProgressBar().setThemeColor(getBackground().getColor(), false);
             } else {
                 getProgressBar().setBackgroundColor(ApiCompatibilityUtils.getColor(resources,
                         R.color.progress_bar_background));
@@ -445,20 +493,23 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
     @Override
     public void updateSecurityIcon(int securityLevel) {
-        if (mSecurityIconType == securityLevel || mState == STATE_TITLE_ONLY) return;
+        if (mState == STATE_TITLE_ONLY) return;
 
         mSecurityIconType = securityLevel;
 
         if (securityLevel == ConnectionSecurityLevel.NONE) {
             mAnimDelegate.hideSecurityButton();
         } else {
-            int id = LocationBarLayout.getSecurityIconResource(
-                    securityLevel, !shouldEmphasizeHttpsScheme());
-            // ImageView#setImageResource is no-op if given resource is the current one.
+            boolean isSmallDevice = !DeviceFormFactor.isTablet(getContext());
+            int id = LocationBarLayout.getSecurityIconResource(securityLevel, isSmallDevice);
             if (id == 0) {
                 mSecurityButton.setImageDrawable(null);
             } else {
+                // ImageView#setImageResource is no-op if given resource is the current one.
                 mSecurityButton.setImageResource(id);
+                mSecurityButton.setTint(
+                        LocationBarLayout.getColorStateList(securityLevel, getToolbarDataProvider(),
+                                getResources(), false /* omnibox is not opaque */));
             }
             mAnimDelegate.showSecurityButton();
         }
@@ -474,7 +525,7 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
         if (mShowsOfflinePage) {
             // If we are showing an offline page, immediately update icon to offline bolt.
             TintedDrawable bolt = TintedDrawable.constructTintedDrawable(
-                    getResources(), R.drawable.offline_bolt);
+                    getResources(), R.drawable.offline_pin);
             bolt.setTint(mUseDarkColors ? mDarkModeTint : mLightModeTint);
             mSecurityButton.setImageDrawable(bolt);
             mAnimDelegate.showSecurityButton();
@@ -491,10 +542,46 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
      */
     @Override
     protected void onPrimaryColorChanged(boolean shouldAnimate) {
-        int primaryColor = getToolbarDataProvider().getPrimaryColor();
-        getBackground().setColor(primaryColor);
-        mUseDarkColors = !ColorUtils.shoudUseLightForegroundOnBackground(primaryColor);
-        updateVisualsForState();
+        if (mBrandColorTransitionActive) mBrandColorTransitionAnimation.cancel();
+
+        final ColorDrawable background = getBackground();
+        final int initialColor = background.getColor();
+        final int finalColor = getToolbarDataProvider().getPrimaryColor();
+
+        if (background.getColor() == finalColor) return;
+
+        mBrandColorTransitionAnimation = ValueAnimator.ofFloat(0, 1)
+                .setDuration(ToolbarPhone.THEME_COLOR_TRANSITION_DURATION);
+        mBrandColorTransitionAnimation.setInterpolator(BakedBezierInterpolator.TRANSFORM_CURVE);
+        mBrandColorTransitionAnimation.addUpdateListener(new AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                float fraction = animation.getAnimatedFraction();
+                int red = (int) (Color.red(initialColor)
+                        + fraction * (Color.red(finalColor) - Color.red(initialColor)));
+                int green = (int) (Color.green(initialColor)
+                        + fraction * (Color.green(finalColor) - Color.green(initialColor)));
+                int blue = (int) (Color.blue(initialColor)
+                        + fraction * (Color.blue(finalColor) - Color.blue(initialColor)));
+                background.setColor(Color.rgb(red, green, blue));
+            }
+        });
+        mBrandColorTransitionAnimation.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                mBrandColorTransitionActive = false;
+
+                // Using the current background color instead of the final color in case this
+                // animation was cancelled.  This ensures the assets are updated to the visible
+                // color.
+                mUseDarkColors =
+                        !ColorUtils.shouldUseLightForegroundOnBackground(background.getColor());
+                updateVisualsForState();
+            }
+        });
+        mBrandColorTransitionAnimation.start();
+        mBrandColorTransitionActive = true;
+        if (!shouldAnimate) mBrandColorTransitionAnimation.end();
     }
 
     @Override
@@ -588,15 +675,22 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
     @Override
     public boolean onLongClick(View v) {
-        CharSequence description = null;
         if (v == mCloseButton) {
-            description = getResources().getString(R.string.close_tab);
+            return showAccessibilityToast(v, getResources().getString(R.string.close_tab));
         } else if (v == mCustomActionButton) {
-            description = mCustomActionButton.getContentDescription();
-        } else {
-            return false;
+            return showAccessibilityToast(v, mCustomActionButton.getContentDescription());
+        } else if (v == mTitleUrlContainer) {
+            ClipboardManager clipboard = (ClipboardManager) getContext()
+                    .getSystemService(Context.CLIPBOARD_SERVICE);
+            Tab tab = getCurrentTab();
+            if (tab == null) return false;
+            String url = tab.getOriginalUrl();
+            ClipData clip = ClipData.newPlainText("url", url);
+            clipboard.setPrimaryClip(clip);
+            Toast.makeText(getContext(), R.string.url_copied, Toast.LENGTH_SHORT).show();
+            return true;
         }
-        return showAccessibilityToast(v, description);
+        return false;
     }
 
     private static String parsePublisherNameFromUrl(String url) {
@@ -618,9 +712,6 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
     public void setToolbarDataProvider(ToolbarDataProvider model) {}
 
     @Override
-    public void onUrlPreFocusChanged(boolean gainFocus) {}
-
-    @Override
     public void onTextChangedForAutocomplete(boolean canInlineAutocomplete) {}
 
     @Override
@@ -628,6 +719,17 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
     @Override
     public void setUrlBarFocus(boolean shouldBeFocused) {}
+
+    @Override
+    public void showUrlBarCursorWithoutFocusAnimations() {}
+
+    @Override
+    public boolean isUrlBarFocused() {
+        return false;
+    }
+
+    @Override
+    public void selectAll() {}
 
     @Override
     public void revertChanges() {}
@@ -648,9 +750,6 @@ public class CustomTabToolbar extends ToolbarLayout implements LocationBar,
 
     @Override
     public void setAutocompleteProfile(Profile profile) {}
-
-    @Override
-    public void backKeyPressed() {}
 
     @Override
     public void showAppMenuUpdateBadge() {}

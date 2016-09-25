@@ -26,11 +26,11 @@
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_switches.h"
 #include "components/policy/core/common/policy_test_utils.h"
+#include "components/policy/proto/chrome_extension_policy.pb.h"
+#include "components/policy/proto/cloud_policy.pb.h"
 #include "extensions/common/extension.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "policy/proto/chrome_extension_policy.pb.h"
-#include "policy/proto/cloud_policy.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -122,7 +122,7 @@ class ComponentCloudPolicyTest : public ExtensionBrowserTest {
         << "Pre-existing policies in this machine will make this test fail.";
 
     // Install the initial extension.
-    ExtensionTestMessageListener ready_listener("ready", true);
+    ExtensionTestMessageListener ready_listener("ready", false);
     event_listener_.reset(new ExtensionTestMessageListener("event", true));
     extension_ = LoadExtension(kTestExtensionPath);
     ASSERT_TRUE(extension_.get());
@@ -136,6 +136,11 @@ class ComponentCloudPolicyTest : public ExtensionBrowserTest {
     EXPECT_TRUE(event_listener_->WaitUntilSatisfied());
 
     ExtensionBrowserTest::SetUpOnMainThread();
+  }
+
+  void TearDownOnMainThread() override {
+    event_listener_.reset();
+    ExtensionBrowserTest::TearDownOnMainThread();
   }
 
   scoped_refptr<const extensions::Extension> LoadExtension(
@@ -223,7 +228,7 @@ class ComponentCloudPolicyTest : public ExtensionBrowserTest {
 
 IN_PROC_BROWSER_TEST_F(ComponentCloudPolicyTest, FetchExtensionPolicy) {
   // Read the initial policy.
-  ExtensionTestMessageListener policy_listener(kTestPolicyJSON, true);
+  ExtensionTestMessageListener policy_listener(kTestPolicyJSON, false);
   event_listener_->Reply("get-policy-Name");
   EXPECT_TRUE(policy_listener.WaitUntilSatisfied());
 }
@@ -250,12 +255,15 @@ IN_PROC_BROWSER_TEST_F(ComponentCloudPolicyTest, UpdateExtensionPolicy) {
   event_listener_->Reply("get-policy-Name");
   EXPECT_TRUE(policy_listener1.WaitUntilSatisfied());
 
-  ExtensionTestMessageListener policy_listener2(kTestPolicy2JSON, true);
+  ExtensionTestMessageListener policy_listener2(kTestPolicy2JSON, false);
   policy_listener1.Reply("get-policy-Another");
   EXPECT_TRUE(policy_listener2.WaitUntilSatisfied());
 }
 
 IN_PROC_BROWSER_TEST_F(ComponentCloudPolicyTest, InstallNewExtension) {
+  event_listener_->Reply("idle");
+  event_listener_.reset();
+
   EXPECT_TRUE(test_server_.UpdatePolicyData(
       dm_protocol::kChromeExtensionPolicyType, kTestExtension2, kTestPolicy2));
   // Installing a new extension doesn't trigger another policy fetch because
@@ -264,7 +272,7 @@ IN_PROC_BROWSER_TEST_F(ComponentCloudPolicyTest, InstallNewExtension) {
   // the extension.
   RefreshPolicies();
 
-  ExtensionTestMessageListener result_listener("ok", true);
+  ExtensionTestMessageListener result_listener("ok", false);
   result_listener.set_failure_message("fail");
   scoped_refptr<const extensions::Extension> extension2 =
       LoadExtension(kTestExtension2Path);
@@ -315,7 +323,7 @@ IN_PROC_BROWSER_TEST_F(ComponentCloudPolicyTest, SignOutAndBackIn) {
   EXPECT_TRUE(event_listener.WaitUntilSatisfied());
 
   // The extension got an update event; verify that the policy was empty.
-  ExtensionTestMessageListener signout_policy_listener("{}", true);
+  ExtensionTestMessageListener signout_policy_listener("{}", false);
   event_listener.Reply("get-policy-Name");
   EXPECT_TRUE(signout_policy_listener.WaitUntilSatisfied());
 
@@ -328,7 +336,7 @@ IN_PROC_BROWSER_TEST_F(ComponentCloudPolicyTest, SignOutAndBackIn) {
   EXPECT_TRUE(event_listener2.WaitUntilSatisfied());
 
   // The extension got updated policy; verify it.
-  ExtensionTestMessageListener signin_policy_listener(kTestPolicyJSON, true);
+  ExtensionTestMessageListener signin_policy_listener(kTestPolicyJSON, false);
   event_listener2.Reply("get-policy-Name");
   EXPECT_TRUE(signin_policy_listener.WaitUntilSatisfied());
 

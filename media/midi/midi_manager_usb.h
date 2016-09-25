@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -16,7 +17,7 @@
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "media/midi/midi_manager.h"
 #include "media/midi/usb_midi_device.h"
@@ -36,11 +37,13 @@ class USB_MIDI_EXPORT MidiManagerUsb
       public UsbMidiDeviceDelegate,
       NON_EXPORTED_BASE(public UsbMidiInputStream::Delegate) {
  public:
-  explicit MidiManagerUsb(scoped_ptr<UsbMidiDevice::Factory> device_factory);
+  explicit MidiManagerUsb(
+      std::unique_ptr<UsbMidiDevice::Factory> device_factory);
   ~MidiManagerUsb() override;
 
   // MidiManager implementation.
   void StartInitialization() override;
+  void Finalize() override;
   void DispatchSendMidiData(MidiManagerClient* client,
                             uint32_t port_index,
                             const std::vector<uint8_t>& data,
@@ -52,7 +55,7 @@ class USB_MIDI_EXPORT MidiManagerUsb
                           const uint8_t* data,
                           size_t size,
                           base::TimeTicks time) override;
-  void OnDeviceAttached(scoped_ptr<UsbMidiDevice> device) override;
+  void OnDeviceAttached(std::unique_ptr<UsbMidiDevice> device) override;
   void OnDeviceDetached(size_t index) override;
 
   // UsbMidiInputStream::Delegate implementation.
@@ -79,17 +82,20 @@ class USB_MIDI_EXPORT MidiManagerUsb
   void OnEnumerateDevicesDone(bool result, UsbMidiDevice::Devices* devices);
   bool AddPorts(UsbMidiDevice* device, int device_id);
 
-  scoped_ptr<UsbMidiDevice::Factory> device_factory_;
+  std::unique_ptr<UsbMidiDevice::Factory> device_factory_;
   ScopedVector<UsbMidiDevice> devices_;
   ScopedVector<UsbMidiOutputStream> output_streams_;
-  scoped_ptr<UsbMidiInputStream> input_stream_;
+  std::unique_ptr<UsbMidiInputStream> input_stream_;
 
   base::Callback<void(Result result)> initialize_callback_;
 
   // A map from <endpoint_number, cable_number> to the index of input jacks.
   base::hash_map<std::pair<int, int>, size_t> input_jack_dictionary_;
 
-  scoped_ptr<MidiScheduler> scheduler_;
+  // Lock to ensure the MidiScheduler is being destructed only once in
+  // Finalize() on Chrome_IOThread.
+  base::Lock scheduler_lock_;
+  std::unique_ptr<MidiScheduler> scheduler_;
 
   DISALLOW_COPY_AND_ASSIGN(MidiManagerUsb);
 };

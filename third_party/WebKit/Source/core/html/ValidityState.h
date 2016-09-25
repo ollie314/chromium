@@ -26,11 +26,10 @@
 
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/html/FormAssociatedElement.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
-class ValidityState final : public GarbageCollectedFinalized<ValidityState>, public ScriptWrappable {
+class ValidityState final : public GarbageCollected<ValidityState>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
     WTF_MAKE_NONCOPYABLE(ValidityState);
 public:

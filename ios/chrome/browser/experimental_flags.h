@@ -34,6 +34,27 @@ bool IsTabSwitcherEnabled();
 // Whether the reading list is enabled.
 bool IsReadingListEnabled();
 
+// Whether the All Bookmarks view is visible in bookmarks.
+bool IsAllBookmarksEnabled();
+
+// Whether the Physical Web feature is enabled.
+bool IsPhysicalWebEnabled();
+
+// Whether the update password UI is enabled.
+bool IsUpdatePasswordUIEnabled();
+
+// Whether the QR Code Reader is enabled.
+bool IsQRCodeReaderEnabled();
+
+// Whether the Clear Browsing Data counters and time selection UI is enabled.
+bool IsNewClearBrowsingDataUIEnabled();
+
+// Whether the Payment Request API is enabled or not.
+bool IsPaymentRequestEnabled();
+
+// Whether launching actions from Spotlight is enabled.
+bool IsSpotlightActionsEnabled();
+
 }  // namespace experimental_flags
 
 #endif  // IOS_CHROME_BROWSER_EXPERIMENTAL_FLAGS_H_

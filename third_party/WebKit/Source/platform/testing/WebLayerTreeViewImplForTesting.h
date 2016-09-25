@@ -9,12 +9,11 @@
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_single_thread_client.h"
 #include "public/platform/WebLayerTreeView.h"
-#include "wtf/PassOwnPtr.h"
-
 #include <memory>
 
 namespace cc {
 class LayerTreeHost;
+class LayerTreeSettings;
 }
 
 namespace blink {
@@ -29,7 +28,12 @@ class WebLayerTreeViewImplForTesting : public blink::WebLayerTreeView,
     WTF_MAKE_NONCOPYABLE(WebLayerTreeViewImplForTesting);
 public:
     WebLayerTreeViewImplForTesting();
+    explicit WebLayerTreeViewImplForTesting(const cc::LayerTreeSettings&);
     ~WebLayerTreeViewImplForTesting() override;
+
+    static cc::LayerTreeSettings defaultLayerTreeSettings();
+    cc::LayerTreeHost* layerTreeHost() { return m_layerTreeHost.get(); }
+    bool hasLayer(const WebLayer&);
 
     // blink::WebLayerTreeView implementation.
     void setRootLayer(const blink::WebLayer&) override;
@@ -39,6 +43,7 @@ public:
     virtual void setViewportSize(const blink::WebSize& unusedDeprecated,
         const blink::WebSize& deviceViewportSize);
     void setViewportSize(const blink::WebSize&) override;
+    WebSize getViewportSize() const override;
     void setDeviceScaleFactor(float) override;
     void setBackgroundColor(blink::WebColor) override;
     void setHasTransparentBackground(bool) override;
@@ -80,9 +85,9 @@ public:
         const gfx::Vector2dF& elasticOverscrollDelta,
         float pageScale,
         float topControlsDelta) override;
-    void RequestNewOutputSurface() override;
-    void DidInitializeOutputSurface() override {}
-    void DidFailToInitializeOutputSurface() override;
+    void RequestNewCompositorFrameSink() override;
+    void DidInitializeCompositorFrameSink() override {}
+    void DidFailToInitializeCompositorFrameSink() override;
     void WillCommit() override {}
     void DidCommit() override {}
     void DidCommitAndDrawFrame() override {}

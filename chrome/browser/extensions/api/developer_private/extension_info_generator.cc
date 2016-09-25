@@ -4,14 +4,16 @@
 
 #include "chrome/browser/extensions/api/developer_private/extension_info_generator.h"
 
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "base/base64.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/developer_private/inspectable_views_finder.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
@@ -47,6 +49,7 @@
 #include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/grit/extensions_browser_resources.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -284,6 +287,8 @@ void ExtensionInfoGenerator::CreateExtensionsInfo(
   if (include_disabled) {
     add_to_list(registry->disabled_extensions(),
                 developer::EXTENSION_STATE_DISABLED);
+    add_to_list(registry->blacklisted_extensions(),
+                developer::EXTENSION_STATE_BLACKLISTED);
   }
   if (include_terminated) {
     add_to_list(registry->terminated_extensions(),
@@ -315,6 +320,9 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
   // Blacklist text.
   int blacklist_text = -1;
   switch (extension_prefs_->GetExtensionBlacklistState(extension.id())) {
+    case BLACKLISTED_MALWARE:
+      blacklist_text = IDS_OPTIONS_BLACKLISTED_MALWARE;
+      break;
     case BLACKLISTED_SECURITY_VULNERABILITY:
       blacklist_text = IDS_OPTIONS_BLACKLISTED_SECURITY_VULNERABILITY;
       break;
@@ -367,8 +375,12 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
             ->shared_module_service()
             ->GetDependentExtensions(&extension);
     for (const scoped_refptr<const Extension>& dependent :
-             *dependent_extensions)
-      info->dependent_extensions.push_back(dependent->id());
+             *dependent_extensions) {
+      developer::DependentExtension extension;
+      extension.id = dependent->id();
+      extension.name = dependent->name();
+      info->dependent_extensions.push_back(std::move(extension));
+    }
   }
 
   info->description = extension.description();
@@ -454,7 +466,7 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
   if (error_console_enabled) {
     const ErrorList& errors =
         error_console_->GetErrorsForExtension(extension.id());
-    for (const ExtensionError* error : errors) {
+    for (const auto& error : errors) {
       switch (error->type()) {
         case ExtensionError::MANIFEST_ERROR:
           info->manifest_errors.push_back(ConstructManifestError(
@@ -498,6 +510,14 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
       extensions::path_util::PrettifyPath(extension.path()).AsUTF8Unsafe()));
   }
 
+  // Permissions.
+  PermissionMessages messages =
+      extension.permissions_data()->GetPermissionMessages();
+  // TODO(devlin): We need to include retained device/file info. We also need
+  // to indicate which can be removed and which can't.
+  for (const PermissionMessage& message : messages)
+    info->permissions.push_back(base::UTF16ToUTF8(message.message()));
+
   // Runs on all urls.
   ScriptingPermissionsModifier permissions_modifier(
       browser_context_, make_scoped_refptr(&extension));
@@ -506,8 +526,7 @@ void ExtensionInfoGenerator::CreateExtensionInfoHelper(
        permissions_modifier.CanAffectExtension(
            extension.permissions_data()->active_permissions())) ||
       permissions_modifier.HasAffectedExtension();
-  info->run_on_all_urls.is_active =
-      util::AllowedScriptingOnAllUrls(extension.id(), browser_context_);
+  info->run_on_all_urls.is_active = permissions_modifier.IsAllowedOnAllUrls();
 
   // Runtime warnings.
   std::vector<std::string> warnings =

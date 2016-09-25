@@ -6,6 +6,7 @@
  * @constructor
  * @param {!WebInspector.DebuggerWorkspaceBinding} debuggerWorkspaceBinding
  * @param {!WebInspector.NetworkMapping} networkMapping
+ * @implements {WebInspector.TargetManager.Observer}
  */
 WebInspector.BlackboxManager = function(debuggerWorkspaceBinding, networkMapping)
 {
@@ -21,6 +22,8 @@ WebInspector.BlackboxManager = function(debuggerWorkspaceBinding, networkMapping
     this._debuggerModelData = new Map();
     /** @type {!Map<string, boolean>} */
     this._isBlackboxedURLCache = new Map();
+
+    WebInspector.targetManager.observeTargets(this);
 }
 
 WebInspector.BlackboxManager.prototype = {
@@ -42,15 +45,52 @@ WebInspector.BlackboxManager.prototype = {
         WebInspector.moduleSetting("skipStackFramesPattern").removeChangeListener(listener, thisObject);
     },
 
+     /**
+     * @override
+     * @param {!WebInspector.Target} target
+     */
+    targetAdded: function(target)
+    {
+        var debuggerModel = WebInspector.DebuggerModel.fromTarget(target);
+        if (debuggerModel)
+            this._setBlackboxPatterns(debuggerModel);
+    },
+
+    /**
+     * @override
+     * @param {!WebInspector.Target} target
+     */
+    targetRemoved: function(target)
+    {
+    },
+
+    /**
+     * @param {!WebInspector.DebuggerModel} debuggerModel
+     * @return {!Promise<boolean>}
+     */
+    _setBlackboxPatterns: function(debuggerModel)
+    {
+        var regexPatterns = WebInspector.moduleSetting("skipStackFramesPattern").getAsArray();
+        var patterns = /** @type {!Array<string>} */([]);
+        for (var item of regexPatterns) {
+            if (!item.disabled && item.pattern)
+                patterns.push(item.pattern);
+        }
+        return debuggerModel.setBlackboxPatterns(patterns);
+    },
+
     /**
      * @param {!WebInspector.DebuggerModel.Location} location
      * @return {boolean}
      */
     isBlackboxedRawLocation: function(location)
     {
-        var positions = this._scriptPositions(location.script());
+        var script = location.script();
+        if (!script)
+            return false;
+        var positions = this._scriptPositions(script);
         if (!positions)
-            return this._isBlackboxedScript(location.script());
+            return this._isBlackboxedScript(script);
         var index = positions.lowerBound(location, comparator);
         return !!(index % 2);
 
@@ -61,9 +101,9 @@ WebInspector.BlackboxManager.prototype = {
          */
         function comparator(a, b)
         {
-            if (a.lineNumber !== b.line)
-                return a.lineNumber - b.line;
-            return a.columnNumber - b.column;
+            if (a.lineNumber !== b.lineNumber)
+                return a.lineNumber - b.lineNumber;
+            return a.columnNumber - b.columnNumber;
         }
     },
 
@@ -125,12 +165,12 @@ WebInspector.BlackboxManager.prototype = {
         var positions = [];
         // If content in script file begin is not mapped and one or more ranges are blackboxed then blackbox it.
         if (mappings[0].lineNumber !== 0 || mappings[0].columnNumber !== 0) {
-            positions.push({ line: 0, column: 0});
+            positions.push({ lineNumber: 0, columnNumber: 0});
             currentBlackboxed = true;
         }
         for (var mapping of mappings) {
             if (mapping.sourceURL && currentBlackboxed !== this.isBlackboxedURL(mapping.sourceURL)) {
-                positions.push({ line: mapping.lineNumber, column: mapping.columnNumber });
+                positions.push({ lineNumber: mapping.lineNumber, columnNumber: mapping.columnNumber });
                 currentBlackboxed = !currentBlackboxed;
             }
             isBlackboxed = currentBlackboxed || isBlackboxed;
@@ -258,6 +298,7 @@ WebInspector.BlackboxManager.prototype = {
 
         var promises = [];
         for (var debuggerModel of WebInspector.DebuggerModel.instances()) {
+            promises.push(this._setBlackboxPatterns.bind(this, debuggerModel));
             for (var scriptId in debuggerModel.scripts) {
                 var script = debuggerModel.scripts[scriptId];
                 promises.push(this._addScript(script)
@@ -308,7 +349,7 @@ WebInspector.BlackboxManager.prototype = {
     _addScript: function(script)
     {
         var blackboxed = this._isBlackboxedScript(script);
-        return this._setScriptState(script, blackboxed ? [ { line: 0, column: 0 } ] : []);
+        return this._setScriptState(script, blackboxed ? [ { lineNumber: 0, columnNumber: 0 } ] : []);
     },
 
     /**
@@ -355,7 +396,7 @@ WebInspector.BlackboxManager.prototype = {
             var hasChanged = false;
             hasChanged = previousScriptState.length !== positions.length;
             for (var i = 0; !hasChanged && i < positions.length; ++i)
-                hasChanged = positions[i].line !== previousScriptState[i].line || positions[i].column !== previousScriptState[i].column;
+                hasChanged = positions[i].lineNumber !== previousScriptState[i].lineNumber || positions[i].columnNumber !== previousScriptState[i].columnNumber;
             if (!hasChanged)
                 return Promise.resolve();
         } else {

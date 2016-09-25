@@ -261,7 +261,7 @@ void TraceEvent::AppendValueAsJSON(unsigned char type,
       // So as not to lose bits from a 64-bit pointer, output as a hex string.
       StringAppendF(
           out, "\"0x%" PRIx64 "\"",
-          static_cast<uint64_t>(reinterpret_cast<intptr_t>(value.as_pointer)));
+          static_cast<uint64_t>(reinterpret_cast<uintptr_t>(value.as_pointer)));
       break;
     case TRACE_VALUE_TYPE_STRING:
     case TRACE_VALUE_TYPE_COPY_STRING:
@@ -358,17 +358,41 @@ void TraceEvent::AppendAsJSON(
 
   // If id_ is set, print it out as a hex string so we don't loose any
   // bits (it might be a 64-bit pointer).
-  if (flags_ & TRACE_EVENT_FLAG_HAS_ID) {
+  unsigned int id_flags_ = flags_ & (TRACE_EVENT_FLAG_HAS_ID |
+                                     TRACE_EVENT_FLAG_HAS_LOCAL_ID |
+                                     TRACE_EVENT_FLAG_HAS_GLOBAL_ID);
+  if (id_flags_) {
     if (scope_ != trace_event_internal::kGlobalScope)
       StringAppendF(out, ",\"scope\":\"%s\"", scope_);
-    StringAppendF(out, ",\"id\":\"0x%" PRIx64 "\"", static_cast<uint64_t>(id_));
+
+    switch (id_flags_) {
+      case TRACE_EVENT_FLAG_HAS_ID:
+        StringAppendF(out, ",\"id\":\"0x%" PRIx64 "\"",
+                      static_cast<uint64_t>(id_));
+        break;
+
+      case TRACE_EVENT_FLAG_HAS_LOCAL_ID:
+        StringAppendF(out, ",\"id2\":{\"local\":\"0x%" PRIx64 "\"}",
+                      static_cast<uint64_t>(id_));
+        break;
+
+      case TRACE_EVENT_FLAG_HAS_GLOBAL_ID:
+        StringAppendF(out, ",\"id2\":{\"global\":\"0x%" PRIx64 "\"}",
+                      static_cast<uint64_t>(id_));
+        break;
+
+      default:
+        NOTREACHED() << "More than one of the ID flags are set";
+        break;
+    }
   }
 
   if (flags_ & TRACE_EVENT_FLAG_BIND_TO_ENCLOSING)
     StringAppendF(out, ",\"bp\":\"e\"");
 
   if ((flags_ & TRACE_EVENT_FLAG_FLOW_OUT) ||
-      (flags_ & TRACE_EVENT_FLAG_FLOW_IN)) {
+      (flags_ & TRACE_EVENT_FLAG_FLOW_IN) ||
+      phase_ == TRACE_EVENT_PHASE_BIND_IDS) {
     StringAppendF(out, ",\"bind_id\":\"0x%" PRIx64 "\"",
                   static_cast<uint64_t>(bind_id_));
   }

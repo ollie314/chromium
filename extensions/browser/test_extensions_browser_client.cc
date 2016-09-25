@@ -122,7 +122,7 @@ bool TestExtensionsBrowserClient::AllowCrossRendererResourceLoad(
 
 PrefService* TestExtensionsBrowserClient::GetPrefServiceForContext(
     BrowserContext* context) {
-  return NULL;
+  return nullptr;
 }
 
 void TestExtensionsBrowserClient::GetEarlyExtensionPrefsObservers(
@@ -134,9 +134,9 @@ ProcessManagerDelegate* TestExtensionsBrowserClient::GetProcessManagerDelegate()
   return process_manager_delegate_;
 }
 
-scoped_ptr<ExtensionHostDelegate>
+std::unique_ptr<ExtensionHostDelegate>
 TestExtensionsBrowserClient::CreateExtensionHostDelegate() {
-  return scoped_ptr<ExtensionHostDelegate>();
+  return std::unique_ptr<ExtensionHostDelegate>();
 }
 
 bool TestExtensionsBrowserClient::DidVersionUpdate(BrowserContext* context) {
@@ -150,11 +150,6 @@ bool TestExtensionsBrowserClient::IsRunningInForcedAppMode() { return false; }
 
 bool TestExtensionsBrowserClient::IsLoggedInAsPublicAccount() {
   return false;
-}
-
-ApiActivityMonitor* TestExtensionsBrowserClient::GetApiActivityMonitor(
-    BrowserContext* context) {
-  return NULL;
 }
 
 ExtensionSystemProvider*
@@ -171,10 +166,10 @@ void TestExtensionsBrowserClient::RegisterMojoServices(
     const Extension* extension) const {
 }
 
-scoped_ptr<RuntimeAPIDelegate>
+std::unique_ptr<RuntimeAPIDelegate>
 TestExtensionsBrowserClient::CreateRuntimeAPIDelegate(
     content::BrowserContext* context) const {
-  return scoped_ptr<RuntimeAPIDelegate>(new TestRuntimeAPIDelegate());
+  return std::unique_ptr<RuntimeAPIDelegate>(new TestRuntimeAPIDelegate());
 }
 
 const ComponentExtensionResourceManager*
@@ -185,7 +180,7 @@ TestExtensionsBrowserClient::GetComponentExtensionResourceManager() {
 void TestExtensionsBrowserClient::BroadcastEventToRenderers(
     events::HistogramValue histogram_value,
     const std::string& event_name,
-    scoped_ptr<base::ListValue> args) {}
+    std::unique_ptr<base::ListValue> args) {}
 
 net::NetLog* TestExtensionsBrowserClient::GetNetLog() {
   return NULL;

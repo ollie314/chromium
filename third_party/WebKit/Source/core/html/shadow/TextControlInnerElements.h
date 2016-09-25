@@ -66,19 +66,6 @@ private:
     bool supportsFocus() const override { return false; }
 };
 
-class SearchFieldDecorationElement final : public HTMLDivElement {
-public:
-    static SearchFieldDecorationElement* create(Document&);
-
-    void defaultEventHandler(Event*) override;
-    bool willRespondToMouseClickEvents() override;
-
-private:
-    explicit SearchFieldDecorationElement(Document&);
-    const AtomicString& shadowPseudoId() const override;
-    bool supportsFocus() const override { return false; }
-};
-
 class SearchFieldCancelButtonElement final : public HTMLDivElement {
 public:
     static SearchFieldCancelButtonElement* create(Document&);
@@ -88,7 +75,7 @@ public:
 
 private:
     explicit SearchFieldCancelButtonElement(Document&);
-    void detach(const AttachContext& = AttachContext()) override;
+    void detachLayoutTree(const AttachContext& = AttachContext()) override;
     bool supportsFocus() const override { return false; }
 
     bool m_capturing;

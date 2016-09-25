@@ -11,6 +11,7 @@
 #include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "media/base/audio_buffer.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
@@ -43,7 +44,7 @@ const int kDecodingDelay = 3;
 static scoped_refptr<DecoderBuffer> CreateFakeEncryptedBuffer() {
   const int buffer_size = 16;  // Need a non-empty buffer;
   scoped_refptr<DecoderBuffer> buffer(new DecoderBuffer(buffer_size));
-  buffer->set_decrypt_config(scoped_ptr<DecryptConfig>(new DecryptConfig(
+  buffer->set_decrypt_config(std::unique_ptr<DecryptConfig>(new DecryptConfig(
       std::string(reinterpret_cast<const char*>(kFakeKeyId),
                   arraysize(kFakeKeyId)),
       std::string(reinterpret_cast<const char*>(kFakeIv), arraysize(kFakeIv)),
@@ -89,17 +90,15 @@ class DecryptingAudioDecoderTest : public testing::Test {
     int channels = ChannelLayoutToChannelCount(config.channel_layout());
     if (channels < 0)
       channels = 0;
-    decoded_frame_ = AudioBuffer::CreateEmptyBuffer(config.channel_layout(),
-                                                    channels,
-                                                    kSampleRate,
-                                                    kFakeAudioFrameSize,
-                                                    kNoTimestamp());
+    decoded_frame_ = AudioBuffer::CreateEmptyBuffer(
+        config.channel_layout(), channels, kSampleRate, kFakeAudioFrameSize,
+        kNoTimestamp);
     decoded_frame_list_.push_back(decoded_frame_);
 
     decoder_->Initialize(config, cdm_context_.get(), NewExpectedBoolCB(success),
                          base::Bind(&DecryptingAudioDecoderTest::FrameReady,
                                     base::Unretained(this)));
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   enum CdmType { CDM_WITHOUT_DECRYPTOR, CDM_WITH_DECRYPTOR };
@@ -146,7 +145,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
     decoder_->Decode(buffer,
                      base::Bind(&DecryptingAudioDecoderTest::DecodeDone,
                                 base::Unretained(this)));
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   // Helper function to simulate the decrypting and decoding process in the
@@ -198,7 +197,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
     decoder_->Decode(encrypted_buffer_,
                      base::Bind(&DecryptingAudioDecoderTest::DecodeDone,
                                 base::Unretained(this)));
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     // Make sure the Decode() on the decoder triggers a DecryptAndDecode() on
     // the decryptor.
     EXPECT_FALSE(pending_audio_decode_cb_.is_null());
@@ -212,7 +211,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
     decoder_->Decode(encrypted_buffer_,
                      base::Bind(&DecryptingAudioDecoderTest::DecodeDone,
                                 base::Unretained(this)));
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void AbortPendingAudioDecodeCB() {
@@ -238,7 +237,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
             this, &DecryptingAudioDecoderTest::AbortPendingAudioDecodeCB));
 
     decoder_->Reset(NewExpectedClosure());
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void Destroy() {
@@ -247,7 +246,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
             this, &DecryptingAudioDecoderTest::AbortAllPendingCBs));
 
     decoder_.reset();
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   MOCK_METHOD1(FrameReady, void(const scoped_refptr<AudioBuffer>&));
@@ -256,9 +255,9 @@ class DecryptingAudioDecoderTest : public testing::Test {
   MOCK_METHOD0(OnWaitingForDecryptionKey, void(void));
 
   base::MessageLoop message_loop_;
-  scoped_ptr<DecryptingAudioDecoder> decoder_;
-  scoped_ptr<StrictMock<MockCdmContext>> cdm_context_;
-  scoped_ptr<StrictMock<MockDecryptor>> decryptor_;
+  std::unique_ptr<DecryptingAudioDecoder> decoder_;
+  std::unique_ptr<StrictMock<MockCdmContext>> cdm_context_;
+  std::unique_ptr<StrictMock<MockDecryptor>> decryptor_;
   AudioDecoderConfig config_;
 
   // Variables to help the |decryptor_| to simulate decoding delay and flushing.
@@ -344,16 +343,12 @@ TEST_F(DecryptingAudioDecoderTest, DecryptAndDecode_MultipleFrames) {
 
   scoped_refptr<AudioBuffer> frame_a = AudioBuffer::CreateEmptyBuffer(
       config_.channel_layout(),
-      ChannelLayoutToChannelCount(config_.channel_layout()),
-      kSampleRate,
-      kFakeAudioFrameSize,
-      kNoTimestamp());
+      ChannelLayoutToChannelCount(config_.channel_layout()), kSampleRate,
+      kFakeAudioFrameSize, kNoTimestamp);
   scoped_refptr<AudioBuffer> frame_b = AudioBuffer::CreateEmptyBuffer(
       config_.channel_layout(),
-      ChannelLayoutToChannelCount(config_.channel_layout()),
-      kSampleRate,
-      kFakeAudioFrameSize,
-      kNoTimestamp());
+      ChannelLayoutToChannelCount(config_.channel_layout()), kSampleRate,
+      kFakeAudioFrameSize, kNoTimestamp);
   decoded_frame_list_.push_back(frame_a);
   decoded_frame_list_.push_back(frame_b);
 
@@ -391,7 +386,7 @@ TEST_F(DecryptingAudioDecoderTest, Reinitialize_ConfigChange) {
   EXPECT_NE(new_config.samples_per_second(), config_.samples_per_second());
 
   ReinitializeConfigChange(new_config);
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Test the case where the a key is added when the decryptor is in
@@ -405,7 +400,7 @@ TEST_F(DecryptingAudioDecoderTest, KeyAdded_DuringWaitingForKey) {
   EXPECT_CALL(*this, FrameReady(decoded_frame_));
   EXPECT_CALL(*this, DecodeDone(DecodeStatus::OK));
   key_added_cb_.Run();
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Test the case where the a key is added when the decryptor is in
@@ -423,7 +418,7 @@ TEST_F(DecryptingAudioDecoderTest, KeyAdded_DruingPendingDecode) {
   key_added_cb_.Run();
   base::ResetAndReturn(&pending_audio_decode_cb_).Run(
       Decryptor::kNoKey, Decryptor::AudioFrames());
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Test resetting when the decoder is in kIdle state but has not decoded any

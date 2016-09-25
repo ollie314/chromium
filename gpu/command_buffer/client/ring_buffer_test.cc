@@ -12,6 +12,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/run_loop.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
@@ -37,9 +38,9 @@ class BaseRingBufferTest : public testing::Test {
   static const unsigned int kAlignment = 4;
 
   void RunPendingSetToken() {
-    for (std::vector<const void*>::iterator it = set_token_arguments_.begin();
-         it != set_token_arguments_.end();
-         ++it) {
+    for (std::vector<const volatile void*>::iterator it =
+             set_token_arguments_.begin();
+         it != set_token_arguments_.end(); ++it) {
       api_mock_->SetToken(cmd::kSetToken, 1, *it);
     }
     set_token_arguments_.clear();
@@ -48,7 +49,7 @@ class BaseRingBufferTest : public testing::Test {
 
   void SetToken(unsigned int command,
                 unsigned int arg_count,
-                const void* _args) {
+                const volatile void* _args) {
     EXPECT_EQ(static_cast<unsigned int>(cmd::kSetToken), command);
     EXPECT_EQ(1u, arg_count);
     if (delay_set_token_)
@@ -76,7 +77,6 @@ class BaseRingBufferTest : public testing::Test {
     }
     command_buffer_.reset(
         new CommandBufferService(transfer_buffer_manager_.get()));
-    EXPECT_TRUE(command_buffer_->Initialize());
 
     executor_.reset(
         new CommandExecutor(command_buffer_.get(), api_mock_.get(), NULL));
@@ -98,7 +98,7 @@ class BaseRingBufferTest : public testing::Test {
   std::unique_ptr<CommandBufferService> command_buffer_;
   std::unique_ptr<CommandExecutor> executor_;
   std::unique_ptr<CommandBufferHelper> helper_;
-  std::vector<const void*> set_token_arguments_;
+  std::vector<const volatile void*> set_token_arguments_;
   bool delay_set_token_;
 
   std::unique_ptr<int8_t[]> buffer_;
@@ -128,7 +128,7 @@ class RingBufferTest : public BaseRingBufferTest {
 
   void TearDown() override {
     // If the CommandExecutor posts any tasks, this forces them to run.
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
 
     BaseRingBufferTest::TearDown();
   }

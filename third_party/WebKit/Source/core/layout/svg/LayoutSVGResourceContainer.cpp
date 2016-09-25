@@ -27,7 +27,7 @@
 #include "core/layout/svg/SVGResourcesCache.h"
 #include "core/paint/PaintLayer.h"
 
-#include "wtf/TemporaryChange.h"
+#include "wtf/AutoReset.h"
 
 namespace blink {
 
@@ -59,7 +59,7 @@ void LayoutSVGResourceContainer::layout()
     if (m_isInLayout)
         return;
 
-    TemporaryChange<bool> inLayoutChange(m_isInLayout, true);
+    AutoReset<bool> inLayoutChange(&m_isInLayout, true);
 
     LayoutSVGHiddenContainer::layout();
 
@@ -245,14 +245,13 @@ void LayoutSVGResourceContainer::registerResource()
         // If the client has a layer (is a non-SVGElement) we need to signal
         // invalidation in the same way as is done in markAllResourceClientsForInvalidation above.
         if (layoutObject->hasLayer() && resourceType() == FilterResourceType) {
-            if (style.hasFilter())
-                toLayoutBoxModelObject(layoutObject)->layer()->filterNeedsPaintInvalidation();
-            // If this is the SVG root, we could have both 'filter' and
-            // '-webkit-filter' applied, so we need to do the invalidation
-            // below as well, unless we can optimistically determine that
-            // 'filter' does not apply to the element in question.
-            if (!layoutObject->isSVGRoot() || !style.svgStyle().hasFilter())
+            if (!style.hasFilter())
                 continue;
+            toLayoutBoxModelObject(layoutObject)->layer()->filterNeedsPaintInvalidation();
+            if (!layoutObject->isSVGRoot())
+                continue;
+            // A root SVG element with a filter, however, still needs to run
+            // the full invalidation step below.
         }
 
         StyleDifference diff;

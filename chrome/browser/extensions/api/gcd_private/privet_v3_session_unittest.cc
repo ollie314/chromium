@@ -6,7 +6,7 @@
 
 #include "base/base64.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/api/gcd_private/privet_v3_context_getter.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
@@ -232,8 +232,9 @@ TEST_F(PrivetV3SessionTest, Pairing) {
             const std::string& key = spake.GetUnverifiedKey();
             EXPECT_TRUE(hmac.Init(key));
             std::string signature(hmac.DigestLength(), ' ');
-            EXPECT_TRUE(hmac.Sign(fingerprint, reinterpret_cast<unsigned char*>(
-                                                   string_as_array(&signature)),
+            EXPECT_TRUE(hmac.Sign(fingerprint,
+                                  reinterpret_cast<unsigned char*>(
+                                      base::string_as_array(&signature)),
                                   signature.size()));
 
             std::string signature_base64;

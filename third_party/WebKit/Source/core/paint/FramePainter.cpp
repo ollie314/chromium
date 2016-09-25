@@ -46,22 +46,20 @@ void FramePainter::paint(GraphicsContext& context, const GlobalPaintFlags global
         // TODO(pdr): Make this conditional on the rootLayerScrolls setting.
         Optional<ScopedPaintChunkProperties> scopedPaintChunkProperties;
         if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
-            TransformPaintPropertyNode* transform = m_frameView->scrollTranslation() ? m_frameView->scrollTranslation() : m_frameView->preTranslation();
-            ClipPaintPropertyNode* clip = m_frameView->contentClip();
-            if (transform || clip) {
+            if (const PropertyTreeState* contentsState = m_frameView->totalPropertyTreeStateForContents()) {
                 PaintChunkProperties properties(context.getPaintController().currentPaintChunkProperties());
-                if (transform)
-                    properties.transform = transform;
-                if (clip)
-                    properties.clip = clip;
-                scopedPaintChunkProperties.emplace(context.getPaintController(), properties);
+                properties.transform = contentsState->transform;
+                properties.clip = contentsState->clip;
+                properties.effect = contentsState->effect;
+                properties.scroll = contentsState->scroll;
+                scopedPaintChunkProperties.emplace(context.getPaintController(), *frameView().layoutView(), properties);
             }
         }
 
         TransformRecorder transformRecorder(context, *frameView().layoutView(),
             AffineTransform::translation(frameView().x() - frameView().scrollX(), frameView().y() - frameView().scrollY()));
 
-        ClipRecorder recorder(context, *frameView().layoutView(), DisplayItem::ClipFrameToVisibleContentRect, LayoutRect(frameView().visibleContentRect()));
+        ClipRecorder recorder(context, *frameView().layoutView(), DisplayItem::kClipFrameToVisibleContentRect, frameView().visibleContentRect());
 
         documentDirtyRect.moveBy(-frameView().location() + frameView().scrollPosition());
         paintContents(context, globalPaintFlags, documentDirtyRect);
@@ -78,14 +76,14 @@ void FramePainter::paint(GraphicsContext& context, const GlobalPaintFlags global
             if (TransformPaintPropertyNode* transform = m_frameView->preTranslation()) {
                 PaintChunkProperties properties(context.getPaintController().currentPaintChunkProperties());
                 properties.transform = transform;
-                scopedPaintChunkProperties.emplace(context.getPaintController(), properties);
+                scopedPaintChunkProperties.emplace(context.getPaintController(), *frameView().layoutView(), properties);
             }
         }
 
         TransformRecorder transformRecorder(context, *frameView().layoutView(),
             AffineTransform::translation(frameView().x(), frameView().y()));
 
-        ClipRecorder recorder(context, *frameView().layoutView(), DisplayItem::ClipFrameScrollbars, LayoutRect(IntPoint(), visibleAreaWithScrollbars.size()));
+        ClipRecorder recorder(context, *frameView().layoutView(), DisplayItem::kClipFrameScrollbars, IntRect(IntPoint(), visibleAreaWithScrollbars.size()));
 
         paintScrollbars(context, scrollViewDirtyRect);
     }
@@ -95,24 +93,8 @@ void FramePainter::paintContents(GraphicsContext& context, const GlobalPaintFlag
 {
     Document* document = frameView().frame().document();
 
-#ifndef NDEBUG
-    bool fillWithRed;
-    if (document->printing())
-        fillWithRed = false; // Printing, don't fill with red (can't remember why).
-    else if (frameView().frame().owner())
-        fillWithRed = false; // Subframe, don't fill with red.
-    else if (frameView().isTransparent())
-        fillWithRed = false; // Transparent, don't fill with red.
-    else if (globalPaintFlags & GlobalPaintSelectionOnly)
-        fillWithRed = false; // Selections are transparent, don't fill with red.
-    else
-        fillWithRed = true;
-
-    if (fillWithRed && !LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(context, *frameView().layoutView(), DisplayItem::DebugRedFill)) {
-        IntRect contentRect(IntPoint(), frameView().contentsSize());
-        LayoutObjectDrawingRecorder drawingRecorder(context, *frameView().layoutView(), DisplayItem::DebugRedFill, contentRect);
-    }
-#endif
+    if (frameView().shouldThrottleRendering() || !document->isActive())
+        return;
 
     LayoutView* layoutView = frameView().layoutView();
     if (!layoutView) {
@@ -120,12 +102,15 @@ void FramePainter::paintContents(GraphicsContext& context, const GlobalPaintFlag
         return;
     }
 
-    if (!frameView().shouldThrottleRendering()) {
-        RELEASE_ASSERT(!frameView().needsLayout());
-        ASSERT(document->lifecycle().state() >= DocumentLifecycle::CompositingClean);
-    }
+    // TODO(crbug.com/590856): It's still broken when we choose not to crash when the check fails.
+    if (!frameView().checkDoesNotNeedLayout())
+        return;
 
-    TRACE_EVENT1("devtools.timeline", "Paint", "data", InspectorPaintEvent::data(layoutView, LayoutRect(rect), 0));
+    // TODO(wangxianzhu): The following check should be stricter, but currently this is blocked
+    // by the svg root issue (crbug.com/442939).
+    DCHECK(document->lifecycle().state() >= DocumentLifecycle::CompositingClean);
+
+    TRACE_EVENT1("devtools.timeline,rail", "Paint", "data", InspectorPaintEvent::data(layoutView, LayoutRect(rect), 0));
 
     bool isTopLevelPainter = !s_inPaintContents;
     s_inPaintContents = true;
@@ -141,8 +126,7 @@ void FramePainter::paintContents(GraphicsContext& context, const GlobalPaintFlag
     PaintLayer* rootLayer = layoutView->layer();
 
 #if ENABLE(ASSERT)
-    if (!frameView().shouldThrottleRendering())
-        layoutView->assertSubtreeIsLaidOut();
+    layoutView->assertSubtreeIsLaidOut();
     LayoutObject::SetLayoutNeededForbiddenScope forbidSetNeedsLayout(*rootLayer->layoutObject());
 #endif
 
@@ -187,8 +171,8 @@ void FramePainter::paintScrollCorner(GraphicsContext& context, const IntRect& co
 {
     if (frameView().scrollCorner()) {
         bool needsBackground = frameView().frame().isMainFrame();
-        if (needsBackground && !LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(context, *frameView().layoutView(), DisplayItem::ScrollbarCorner)) {
-            LayoutObjectDrawingRecorder drawingRecorder(context, *frameView().layoutView(), DisplayItem::ScrollbarCorner, FloatRect(cornerRect));
+        if (needsBackground && !LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(context, *frameView().layoutView(), DisplayItem::kScrollbarCorner)) {
+            LayoutObjectDrawingRecorder drawingRecorder(context, *frameView().layoutView(), DisplayItem::kScrollbarCorner, FloatRect(cornerRect));
             context.fillRect(cornerRect, frameView().baseBackgroundColor());
 
         }

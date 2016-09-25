@@ -15,7 +15,7 @@
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -311,7 +311,7 @@ void AppLauncherHandler::Observe(int type,
         CreateAppInfo(extension,
                       extension_service_,
                       &app_info);
-        web_ui()->CallJavascriptFunction("ntp.appMoved", app_info);
+        web_ui()->CallJavascriptFunctionUnsafe("ntp.appMoved", app_info);
       } else {
         HandleGetApps(NULL);
       }
@@ -349,7 +349,7 @@ void AppLauncherHandler::OnExtensionLoaded(
   base::FundamentalValue highlight(prefs->IsFromBookmark(extension->id()) &&
                                    attempted_bookmark_app_install_);
   attempted_bookmark_app_install_ = false;
-  web_ui()->CallJavascriptFunction("ntp.appAdded", *app_info, highlight);
+  web_ui()->CallJavascriptFunctionUnsafe("ntp.appAdded", *app_info, highlight);
 }
 
 void AppLauncherHandler::OnExtensionUnloaded(
@@ -379,8 +379,7 @@ void AppLauncherHandler::FillAppDictionary(base::DictionaryValue* dictionary) {
     const Extension* extension = extension_service_->GetInstalledExtension(*it);
     if (extension && extensions::ui_util::ShouldDisplayInNewTabPage(
             extension, profile)) {
-      base::DictionaryValue* app_info = GetAppInfo(extension);
-      list->Append(app_info);
+      list->Append(GetAppInfo(extension));
     }
   }
 
@@ -401,14 +400,12 @@ void AppLauncherHandler::FillAppDictionary(base::DictionaryValue* dictionary) {
   }
 }
 
-base::DictionaryValue* AppLauncherHandler::GetAppInfo(
+std::unique_ptr<base::DictionaryValue> AppLauncherHandler::GetAppInfo(
     const Extension* extension) {
-  base::DictionaryValue* app_info = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> app_info(new base::DictionaryValue());
   // CreateAppInfo can change the extension prefs.
   base::AutoReset<bool> auto_reset(&ignore_changes_, true);
-  CreateAppInfo(extension,
-                extension_service_,
-                app_info);
+  CreateAppInfo(extension, extension_service_, app_info.get());
   return app_info;
 }
 
@@ -450,7 +447,7 @@ void AppLauncherHandler::HandleGetApps(const base::ListValue* args) {
 
   SetAppToBeHighlighted();
   FillAppDictionary(&dictionary);
-  web_ui()->CallJavascriptFunction("ntp.getAppsCallback", dictionary);
+  web_ui()->CallJavascriptFunctionUnsafe("ntp.getAppsCallback", dictionary);
 
   // First time we get here we set up the observer so that we can tell update
   // the apps as they change.
@@ -505,8 +502,9 @@ void AppLauncherHandler::HandleLaunchApp(const base::ListValue* args) {
 
   Profile* profile = extension_service_->profile();
 
-  WindowOpenDisposition disposition = args->GetSize() > 3 ?
-        webui::GetDispositionFromClick(args, 3) : CURRENT_TAB;
+  WindowOpenDisposition disposition =
+      args->GetSize() > 3 ? webui::GetDispositionFromClick(args, 3)
+                          : WindowOpenDisposition::CURRENT_TAB;
   if (extension_id != extensions::kWebStoreAppId) {
     CHECK_NE(launch_bucket, extension_misc::APP_LAUNCH_BUCKET_INVALID);
     extensions::RecordAppLaunchType(launch_bucket, extension->GetType());
@@ -514,11 +512,12 @@ void AppLauncherHandler::HandleLaunchApp(const base::ListValue* args) {
     extensions::RecordWebStoreLaunch();
   }
 
-  if (disposition == NEW_FOREGROUND_TAB || disposition == NEW_BACKGROUND_TAB ||
-      disposition == NEW_WINDOW) {
+  if (disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
+      disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB ||
+      disposition == WindowOpenDisposition::NEW_WINDOW) {
     // TODO(jamescook): Proper support for background tabs.
     AppLaunchParams params(profile, extension,
-                           disposition == NEW_WINDOW
+                           disposition == WindowOpenDisposition::NEW_WINDOW
                                ? extensions::LAUNCH_CONTAINER_WINDOW
                                : extensions::LAUNCH_CONTAINER_TAB,
                            disposition, extensions::SOURCE_NEW_TAB_PAGE);
@@ -534,7 +533,9 @@ void AppLauncherHandler::HandleLaunchApp(const base::ListValue* args) {
       old_contents = browser->tab_strip_model()->GetActiveWebContents();
 
     AppLaunchParams params = CreateAppLaunchParamsUserContainer(
-        profile, extension, old_contents ? CURRENT_TAB : NEW_FOREGROUND_TAB,
+        profile, extension,
+        old_contents ? WindowOpenDisposition::CURRENT_TAB
+                     : WindowOpenDisposition::NEW_FOREGROUND_TAB,
         extensions::SOURCE_NEW_TAB_PAGE);
     params.override_url = GURL(url);
     WebContents* new_contents = OpenApplication(params);
@@ -784,19 +785,20 @@ void AppLauncherHandler::SetAppToBeHighlighted() {
     return;
 
   base::StringValue app_id(highlight_app_id_);
-  web_ui()->CallJavascriptFunction("ntp.setAppToBeHighlighted", app_id);
+  web_ui()->CallJavascriptFunctionUnsafe("ntp.setAppToBeHighlighted", app_id);
   highlight_app_id_.clear();
 }
 
 void AppLauncherHandler::OnExtensionPreferenceChanged() {
   base::DictionaryValue dictionary;
   FillAppDictionary(&dictionary);
-  web_ui()->CallJavascriptFunction("ntp.appsPrefChangeCallback", dictionary);
+  web_ui()->CallJavascriptFunctionUnsafe("ntp.appsPrefChangeCallback",
+                                         dictionary);
 }
 
 void AppLauncherHandler::OnLocalStatePreferenceChanged() {
 #if defined(ENABLE_APP_LIST)
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "ntp.appLauncherPromoPrefChangeCallback",
       base::FundamentalValue(g_browser_process->local_state()->GetBoolean(
           prefs::kShowAppLauncherPromo)));
@@ -831,7 +833,7 @@ void AppLauncherHandler::ExtensionEnableFlowFinished() {
   // icon disappears but isn't replaced by the enabled icon, making a poor
   // visual experience.
   base::StringValue app_id(extension_id_prompting_);
-  web_ui()->CallJavascriptFunction("ntp.launchAppAfterEnable", app_id);
+  web_ui()->CallJavascriptFunctionUnsafe("ntp.launchAppAfterEnable", app_id);
 
   extension_enable_flow_.reset();
   extension_id_prompting_ = "";
@@ -876,7 +878,7 @@ void AppLauncherHandler::AppRemoved(const Extension* extension,
   if (!app_info.get())
     return;
 
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "ntp.appRemoved", *app_info, base::FundamentalValue(is_uninstall),
       base::FundamentalValue(!extension_id_prompting_.empty()));
 }

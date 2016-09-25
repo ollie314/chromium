@@ -6,7 +6,6 @@
 #define MEDIA_BASE_ANDROID_ANDROID_CDM_FACTORY_H_
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "media/base/android/provision_fetcher.h"
 #include "media/base/cdm_factory.h"
 #include "media/base/media_export.h"
@@ -26,7 +25,6 @@ class MEDIA_EXPORT AndroidCdmFactory : public CdmFactory {
               const CdmConfig& cdm_config,
               const SessionMessageCB& session_message_cb,
               const SessionClosedCB& session_closed_cb,
-              const LegacySessionErrorCB& legacy_session_error_cb,
               const SessionKeysChangeCB& session_keys_change_cb,
               const SessionExpirationUpdateCB& session_expiration_update_cb,
               const CdmCreatedCB& cdm_created_cb) final;

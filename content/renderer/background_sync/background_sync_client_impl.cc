@@ -6,9 +6,11 @@
 
 #include <utility>
 
+#include "base/time/time.h"
 #include "content/child/background_sync/background_sync_provider.h"
 #include "content/child/background_sync/background_sync_type_converters.h"
 #include "content/renderer/service_worker/service_worker_context_client.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebThread.h"
 #include "third_party/WebKit/public/platform/modules/background_sync/WebSyncProvider.h"
@@ -19,26 +21,26 @@ namespace content {
 
 // static
 void BackgroundSyncClientImpl::Create(
-    mojo::InterfaceRequest<mojom::BackgroundSyncServiceClient> request) {
-  new BackgroundSyncClientImpl(std::move(request));
+    mojo::InterfaceRequest<blink::mojom::BackgroundSyncServiceClient> request) {
+  mojo::MakeStrongBinding(base::WrapUnique(new BackgroundSyncClientImpl),
+                          std::move(request));
 }
 
 BackgroundSyncClientImpl::~BackgroundSyncClientImpl() {}
 
-BackgroundSyncClientImpl::BackgroundSyncClientImpl(
-    mojo::InterfaceRequest<mojom::BackgroundSyncServiceClient> request)
-    : binding_(this, std::move(request)) {}
+BackgroundSyncClientImpl::BackgroundSyncClientImpl() {}
 
 void BackgroundSyncClientImpl::Sync(
     const mojo::String& tag,
-    content::mojom::BackgroundSyncEventLastChance last_chance,
+    blink::mojom::BackgroundSyncEventLastChance last_chance,
     const SyncCallback& callback) {
   DCHECK(!blink::Platform::current()->mainThread()->isCurrentThread());
 
   ServiceWorkerContextClient* client =
       ServiceWorkerContextClient::ThreadSpecificInstance();
   if (!client) {
-    callback.Run(mojom::ServiceWorkerEventStatus::ABORTED);
+    callback.Run(blink::mojom::ServiceWorkerEventStatus::ABORTED,
+                 base::Time::Now());
     return;
   }
 

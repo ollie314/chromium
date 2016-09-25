@@ -14,7 +14,7 @@
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -139,7 +139,8 @@ void ReloadButton::ButtonPressed(views::Button* /* button */,
 
   if (visible_mode_ == MODE_STOP) {
     if (command_updater_)
-      command_updater_->ExecuteCommandWithDisposition(IDC_STOP, CURRENT_TAB);
+      command_updater_->ExecuteCommandWithDisposition(
+          IDC_STOP, WindowOpenDisposition::CURRENT_TAB);
     // The user has clicked, so we can feel free to update the button,
     // even if the mouse is still hovering.
     ChangeMode(MODE_RELOAD, true);
@@ -181,8 +182,9 @@ bool ReloadButton::IsCommandIdVisible(int command_id) const {
   return true;
 }
 
-bool ReloadButton::GetAcceleratorForCommandId(int command_id,
-    ui::Accelerator* accelerator) {
+bool ReloadButton::GetAcceleratorForCommandId(
+    int command_id,
+    ui::Accelerator* accelerator) const {
   switch (command_id) {
     case IDS_RELOAD_MENU_NORMAL_RELOAD_ITEM:
       GetWidget()->GetAccelerator(IDC_RELOAD, accelerator);
@@ -235,15 +237,14 @@ void ReloadButton::ChangeModeInternal(Mode mode) {
       const gfx::VectorIconId icon_id = (mode == MODE_RELOAD)
                                             ? gfx::VectorIconId::NAVIGATE_RELOAD
                                             : gfx::VectorIconId::NAVIGATE_STOP;
-      const int kButtonSize = 16;
       const SkColor normal_color =
           tp->GetColor(ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON);
       const SkColor disabled_color =
           tp->GetColor(ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON_INACTIVE);
       SetImage(views::Button::STATE_NORMAL,
-               gfx::CreateVectorIcon(icon_id, kButtonSize, normal_color));
+               gfx::CreateVectorIcon(icon_id, normal_color));
       SetImage(views::Button::STATE_DISABLED,
-               gfx::CreateVectorIcon(icon_id, kButtonSize, disabled_color));
+               gfx::CreateVectorIcon(icon_id, disabled_color));
       set_ink_drop_base_color(normal_color);
     } else {
       SetImage(views::Button::STATE_NORMAL,

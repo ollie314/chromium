@@ -10,18 +10,21 @@
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "components/sync_driver/sync_service_observer.h"
+#include "components/sync/driver/sync_service_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/extension_registry_observer.h"
 
 class AppSyncUIStateObserver;
 class Profile;
+
+namespace browser_sync {
 class ProfileSyncService;
+}  // namespace browser_sync
 
 namespace extensions {
 class ExtensionRegistry;
-}
+}  // namespace extensions
 
 // AppSyncUIState watches app sync and installation and change its state
 // accordingly. Its status is for UI display only. It only watches for new
@@ -75,7 +78,7 @@ class AppSyncUIState : public KeyedService,
                          const extensions::Extension* extension) override;
 
   Profile* profile_;
-  ProfileSyncService* sync_service_;
+  browser_sync::ProfileSyncService* sync_service_;
 
   // Timer to limit how much time STATUS_SYNCING is allowed.
   base::OneShotTimer max_syncing_status_timer_;

@@ -9,6 +9,7 @@ import android.test.InstrumentationTestCase;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelContent;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager;
@@ -79,6 +80,11 @@ public class ReaderModeManagerTest extends InstrumentationTestCase {
         }
 
         @Override
+        protected boolean isDistillerHeuristicAlwaysTrue() {
+            return true;
+        }
+
+        @Override
         protected void recordPanelVisibilityForNavigation(boolean visible) {
             mRecordedCount++;
             mVisibleCount += visible ? 1 : 0;
@@ -106,12 +112,18 @@ public class ReaderModeManagerTest extends InstrumentationTestCase {
      */
     private static class MockReaderModePanel extends ReaderModePanel {
         public MockReaderModePanel(Context context, OverlayPanelManager manager) {
-            super(context, null, manager, null);
+            super(context, null, null, manager, null);
         }
 
         @Override
         public ReaderModeSceneLayer createNewReaderModeSceneLayer() {
             return null;
+        }
+
+        @Override
+        public void peekPanel(StateChangeReason reason) {
+            setHeightForTesting(1);
+            super.peekPanel(reason);
         }
 
         @Override
@@ -172,6 +184,7 @@ public class ReaderModeManagerTest extends InstrumentationTestCase {
      */
     @SmallTest
     @Feature({"ReaderModeManager"})
+    @RetryOnFailure
     public void testInfoBarEvents() {
         mPanel.requestPanelShow(StateChangeReason.UNKNOWN);
 
@@ -189,6 +202,7 @@ public class ReaderModeManagerTest extends InstrumentationTestCase {
      */
     @SmallTest
     @Feature({"ReaderModeManager"})
+    @RetryOnFailure
     public void testFullscreenEvents() {
         mPanel.requestPanelShow(StateChangeReason.UNKNOWN);
 
@@ -206,6 +220,7 @@ public class ReaderModeManagerTest extends InstrumentationTestCase {
      */
     @SmallTest
     @Feature({"ReaderModeManager"})
+    @RetryOnFailure
     public void testPanelOpenRecorded() {
         Tab tab = new Tab(0, false, null);
         mReaderManager.onShown(tab);
@@ -233,6 +248,7 @@ public class ReaderModeManagerTest extends InstrumentationTestCase {
      */
     @SmallTest
     @Feature({"ReaderModeManager"})
+    @RetryOnFailure
     public void testPanelCloseRecorded() {
         Tab tab = new Tab(0, false, null);
         mReaderManager.setShouldTrigger(false);

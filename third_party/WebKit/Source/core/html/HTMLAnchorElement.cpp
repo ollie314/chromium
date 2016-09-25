@@ -23,6 +23,7 @@
 
 #include "core/html/HTMLAnchorElement.h"
 
+#include "core/editing/EditingUtilities.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/events/MouseEvent.h"
 #include "core/frame/FrameHost.h"
@@ -30,17 +31,86 @@
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "core/layout/LayoutImage.h"
+#include "core/layout/LayoutBox.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/PingLoader.h"
 #include "core/page/ChromeClient.h"
 #include "platform/network/NetworkHints.h"
 #include "platform/weborigin/SecurityPolicy.h"
+#include "public/platform/WebNavigationHintType.h"
 
 namespace blink {
 
 using namespace HTMLNames;
+
+class HTMLAnchorElement::NavigationHintSender : public GarbageCollected<HTMLAnchorElement::NavigationHintSender> {
+public:
+    static NavigationHintSender* create(HTMLAnchorElement* anchorElement)
+    {
+        return new NavigationHintSender(anchorElement);
+    }
+    void handleEvent(Event*);
+
+    DECLARE_TRACE();
+
+private:
+    explicit NavigationHintSender(HTMLAnchorElement*);
+    bool shouldSendNavigationHint() const;
+    void maybeSendNavigationHint(WebNavigationHintType);
+
+    Member<HTMLAnchorElement> m_anchorElement;
+};
+
+void HTMLAnchorElement::NavigationHintSender::handleEvent(Event* event)
+{
+    if (event->type() == EventTypeNames::mousedown && event->isMouseEvent() && toMouseEvent(event)->button() == static_cast<short>(WebPointerProperties::Button::Left))
+        maybeSendNavigationHint(WebNavigationHintType::LinkMouseDown);
+    else if (event->type() == EventTypeNames::gesturetapunconfirmed)
+        maybeSendNavigationHint(WebNavigationHintType::LinkTapUnconfirmed);
+    else if (event->type() == EventTypeNames::gestureshowpress)
+        maybeSendNavigationHint(WebNavigationHintType::LinkTapDown);
+}
+
+DEFINE_TRACE(HTMLAnchorElement::NavigationHintSender)
+{
+    visitor->trace(m_anchorElement);
+}
+
+HTMLAnchorElement::NavigationHintSender::NavigationHintSender(HTMLAnchorElement* anchorElement)
+    : m_anchorElement(anchorElement)
+{
+}
+
+bool HTMLAnchorElement::NavigationHintSender::shouldSendNavigationHint() const
+{
+    const KURL& url = m_anchorElement->href();
+    // Currently the navigation hint only supports HTTP and HTTPS.
+    if (!url.protocolIsInHTTPFamily())
+        return false;
+
+    Document& document = m_anchorElement->document();
+    // If the element was detached from the frame, handleClick() doesn't cause
+    // the navigation.
+    if (!document.frame())
+        return false;
+
+    // When the user clicks a link which is to the current document with a hash,
+    // the network request is not fetched. So we don't send the navigation hint
+    // to the browser process.
+    if (url.hasFragmentIdentifier() && equalIgnoringFragmentIdentifier(document.url(), url))
+        return false;
+
+    return true;
+}
+
+void HTMLAnchorElement::NavigationHintSender::maybeSendNavigationHint(WebNavigationHintType type)
+{
+    if (!shouldSendNavigationHint())
+        return;
+
+    sendNavigationHint(m_anchorElement->href(), type);
+}
 
 HTMLAnchorElement::HTMLAnchorElement(const QualifiedName& tagName, Document& document)
     : HTMLElement(tagName, document)
@@ -59,12 +129,23 @@ HTMLAnchorElement::~HTMLAnchorElement()
 {
 }
 
+DEFINE_TRACE(HTMLAnchorElement)
+{
+    visitor->trace(m_navigationHintSender);
+    HTMLElement::trace(visitor);
+}
+
 bool HTMLAnchorElement::supportsFocus() const
 {
-    if (hasEditableStyle())
+    if (hasEditableStyle(*this))
         return HTMLElement::supportsFocus();
     // If not a link we should still be able to focus the element if it has tabIndex.
     return isLink() || HTMLElement::supportsFocus();
+}
+
+bool HTMLAnchorElement::matchesEnabledPseudoClass() const
+{
+    return isLink();
 }
 
 bool HTMLAnchorElement::shouldHaveFocusAppearance() const
@@ -96,7 +177,7 @@ bool HTMLAnchorElement::isMouseFocusable() const
 
 bool HTMLAnchorElement::isKeyboardFocusable() const
 {
-    ASSERT(document().isActive());
+    DCHECK(document().isActive());
 
     if (isFocusable() && Element::supportsFocus())
         return HTMLElement::isKeyboardFocusable();
@@ -111,9 +192,9 @@ static void appendServerMapMousePosition(StringBuilder& url, Event* event)
     if (!event->isMouseEvent())
         return;
 
-    ASSERT(event->target());
+    DCHECK(event->target());
     Node* target = event->target()->toNode();
-    ASSERT(target);
+    DCHECK(target);
     if (!isHTMLImageElement(*target))
         return;
 
@@ -157,6 +238,9 @@ void HTMLAnchorElement::defaultEventHandler(Event* event)
             return;
         }
 
+        if (RuntimeEnabledFeatures::speculativeLaunchServiceWorkerEnabled())
+            ensureNavigationHintSender()->handleEvent(event);
+
         if (isLinkClick(event) && isLiveLink()) {
             handleClick(event);
             return;
@@ -168,7 +252,7 @@ void HTMLAnchorElement::defaultEventHandler(Event* event)
 
 void HTMLAnchorElement::setActive(bool down)
 {
-    if (hasEditableStyle())
+    if (hasEditableStyle(*this))
         return;
 
     ContainerNode::setActive(down);
@@ -184,7 +268,7 @@ void HTMLAnchorElement::parseAttribute(const QualifiedName& name, const AtomicSt
             pseudoStateChanged(CSSSelector::PseudoVisited);
             pseudoStateChanged(CSSSelector::PseudoAnyLink);
         }
-        if (wasLink && !isLink() && treeScope().adjustedFocusedElement() == this) {
+        if (wasLink && !isLink() && adjustedFocusedElementInTreeScope() == this) {
             // We might want to call blur(), but it's dangerous to dispatch
             // events here.
             document().setNeedsFocusedElementCheck();
@@ -226,7 +310,7 @@ bool HTMLAnchorElement::canStartSelection() const
 {
     if (!isLink())
         return HTMLElement::canStartSelection();
-    return hasEditableStyle();
+    return hasEditableStyle(*this);
 }
 
 bool HTMLAnchorElement::draggable() const
@@ -299,7 +383,7 @@ short HTMLAnchorElement::tabIndex() const
 
 bool HTMLAnchorElement::isLiveLink() const
 {
-    return isLink() && !hasEditableStyle();
+    return isLink() && !hasEditableStyle(*this);
 }
 
 void HTMLAnchorElement::sendPings(const KURL& destinationURL) const
@@ -337,7 +421,7 @@ void HTMLAnchorElement::handleClick(Event* event)
     request.setInputPerfMetricReportPolicy(InputToLoadPerfMetricReportPolicy::ReportLink);
 
     ReferrerPolicy policy;
-    if (hasAttribute(referrerpolicyAttr) && SecurityPolicy::referrerPolicyFromString(fastGetAttribute(referrerpolicyAttr), &policy) && !hasRel(RelationNoReferrer)) {
+    if (hasAttribute(referrerpolicyAttr) && SecurityPolicy::referrerPolicyFromStringWithLegacyKeywords(fastGetAttribute(referrerpolicyAttr), &policy) && !hasRel(RelationNoReferrer)) {
         request.setHTTPReferrer(SecurityPolicy::generateReferrer(policy, completedURL, document().outgoingReferrer()));
     }
 
@@ -357,18 +441,21 @@ void HTMLAnchorElement::handleClick(Event* event)
         }
         if (hasRel(RelationNoOpener))
             frameRequest.setShouldSetOpener(NeverSetOpener);
+        // TODO(japhet): Link clicks can be emulated via JS without a user gesture.
+        // Why doesn't this go through NavigationScheduler?
         frame->loader().load(frameRequest);
     }
 }
 
 bool isEnterKeyKeydownEvent(Event* event)
 {
-    return event->type() == EventTypeNames::keydown && event->isKeyboardEvent() && toKeyboardEvent(event)->keyIdentifier() == "Enter";
+    return event->type() == EventTypeNames::keydown && event->isKeyboardEvent() && toKeyboardEvent(event)->key() == "Enter" && !toKeyboardEvent(event)->repeat();
 }
 
 bool isLinkClick(Event* event)
 {
-    return event->type() == EventTypeNames::click && (!event->isMouseEvent() || toMouseEvent(event)->button() != RightButton);
+    // Allow detail <= 1 so that synthetic clicks work. They may have detail == 0.
+    return (event->type() == EventTypeNames::click || event->type() == EventTypeNames::auxclick) && (!event->isMouseEvent() || (toMouseEvent(event)->button() != static_cast<short>(WebPointerProperties::Button::Right) && toMouseEvent(event)->detail() <= 1));
 }
 
 bool HTMLAnchorElement::willRespondToMouseClickEvents()
@@ -386,6 +473,13 @@ Node::InsertionNotificationRequest HTMLAnchorElement::insertedInto(ContainerNode
     InsertionNotificationRequest request = HTMLElement::insertedInto(insertionPoint);
     logAddElementIfIsolatedWorldAndInDocument("a", hrefAttr);
     return request;
+}
+
+HTMLAnchorElement::NavigationHintSender* HTMLAnchorElement::ensureNavigationHintSender()
+{
+    if (!m_navigationHintSender)
+        m_navigationHintSender = NavigationHintSender::create(this);
+    return m_navigationHintSender;
 }
 
 } // namespace blink

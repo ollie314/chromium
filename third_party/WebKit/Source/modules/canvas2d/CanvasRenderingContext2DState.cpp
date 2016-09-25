@@ -17,11 +17,13 @@
 #include "modules/canvas2d/CanvasRenderingContext2D.h"
 #include "modules/canvas2d/CanvasStyle.h"
 #include "platform/graphics/DrawLooperBuilder.h"
+#include "platform/graphics/filters/FilterEffect.h"
 #include "platform/graphics/filters/FilterOperation.h"
 #include "platform/graphics/filters/SkiaImageFilterBuilder.h"
 #include "platform/graphics/skia/SkiaUtils.h"
 #include "third_party/skia/include/effects/SkDashPathEffect.h"
 #include "third_party/skia/include/effects/SkDropShadowImageFilter.h"
+#include <memory>
 
 static const char defaultFont[] = "10px sans-serif";
 static const char defaultFilter[] = "none";
@@ -293,6 +295,10 @@ SkImageFilter* CanvasRenderingContext2DState::getFilter(Element* styleResolution
     if (!m_filterValue)
         return nullptr;
 
+    // StyleResolverState cannot be used in frame-less documents.
+    if (!styleResolutionHost->document().frame())
+        return nullptr;
+
     if (!m_resolvedFilter) {
         RefPtr<ComputedStyle> filterStyle = ComputedStyle::create();
         // Must set font in case the filter uses any font-relative units (em, ex)
@@ -301,31 +307,31 @@ SkImageFilter* CanvasRenderingContext2DState::getFilter(Element* styleResolution
         StyleResolverState resolverState(styleResolutionHost->document(), styleResolutionHost, filterStyle.get());
         resolverState.setStyle(filterStyle);
 
-        StyleBuilder::applyProperty(CSSPropertyWebkitFilter, resolverState, m_filterValue.get());
+        StyleBuilder::applyProperty(CSSPropertyFilter, resolverState, *m_filterValue);
         resolverState.loadPendingResources();
-        FilterEffectBuilder* filterEffectBuilder = FilterEffectBuilder::create();
 
         // We can't reuse m_fillPaint and m_strokePaint for the filter, since these incorporate
         // the global alpha, which isn't applicable here.
         SkPaint fillPaintForFilter;
-        SkPaint strokePaintForFilter;
         m_fillStyle->applyToPaint(fillPaintForFilter);
-        m_strokeStyle->applyToPaint(strokePaintForFilter);
         fillPaintForFilter.setColor(m_fillStyle->paintColor());
+        SkPaint strokePaintForFilter;
+        m_strokeStyle->applyToPaint(strokePaintForFilter);
         strokePaintForFilter.setColor(m_strokeStyle->paintColor());
-        FloatSize floatCanvasSize(canvasSize);
-        const double effectiveZoom = 1.0; // Deliberately ignore zoom on the canvas element
-        filterEffectBuilder->build(styleResolutionHost, filterStyle->filter(), effectiveZoom, &floatCanvasSize, &fillPaintForFilter, &strokePaintForFilter);
 
-        FilterEffect* lastEffect = filterEffectBuilder->lastEffect();
-        if (lastEffect) {
-            lastEffect->determineFilterPrimitiveSubregion();
-        }
-        m_resolvedFilter = SkiaImageFilterBuilder::build(lastEffect, ColorSpaceDeviceRGB);
-        if (m_resolvedFilter) {
-            updateFilterReferences(toHTMLCanvasElement(styleResolutionHost), context, filterStyle->filter());
-            if (lastEffect->originTainted())
-                context->setOriginTainted();
+        FilterEffectBuilder filterEffectBuilder(
+            styleResolutionHost,
+            FloatRect((FloatPoint()), FloatSize(canvasSize)),
+            1.0f, // Deliberately ignore zoom on the canvas element.
+            &fillPaintForFilter, &strokePaintForFilter);
+
+        if (FilterEffect* lastEffect = filterEffectBuilder.buildFilterEffect(filterStyle->filter())) {
+            m_resolvedFilter = SkiaImageFilterBuilder::build(lastEffect, ColorSpaceDeviceRGB);
+            if (m_resolvedFilter) {
+                updateFilterReferences(toHTMLCanvasElement(styleResolutionHost), context, filterStyle->filter());
+                if (lastEffect->originTainted())
+                    context->setOriginTainted();
+            }
         }
     }
 
@@ -347,7 +353,7 @@ void CanvasRenderingContext2DState::clearResolvedFilter() const
 SkDrawLooper* CanvasRenderingContext2DState::emptyDrawLooper() const
 {
     if (!m_emptyDrawLooper) {
-        OwnPtr<DrawLooperBuilder> drawLooperBuilder = DrawLooperBuilder::create();
+        std::unique_ptr<DrawLooperBuilder> drawLooperBuilder = DrawLooperBuilder::create();
         m_emptyDrawLooper = drawLooperBuilder->detachDrawLooper();
     }
     return m_emptyDrawLooper.get();
@@ -356,7 +362,7 @@ SkDrawLooper* CanvasRenderingContext2DState::emptyDrawLooper() const
 SkDrawLooper* CanvasRenderingContext2DState::shadowOnlyDrawLooper() const
 {
     if (!m_shadowOnlyDrawLooper) {
-        OwnPtr<DrawLooperBuilder> drawLooperBuilder = DrawLooperBuilder::create();
+        std::unique_ptr<DrawLooperBuilder> drawLooperBuilder = DrawLooperBuilder::create();
         drawLooperBuilder->addShadow(m_shadowOffset, m_shadowBlur, m_shadowColor, DrawLooperBuilder::ShadowIgnoresTransforms, DrawLooperBuilder::ShadowRespectsAlpha);
         m_shadowOnlyDrawLooper = drawLooperBuilder->detachDrawLooper();
     }
@@ -366,7 +372,7 @@ SkDrawLooper* CanvasRenderingContext2DState::shadowOnlyDrawLooper() const
 SkDrawLooper* CanvasRenderingContext2DState::shadowAndForegroundDrawLooper() const
 {
     if (!m_shadowAndForegroundDrawLooper) {
-        OwnPtr<DrawLooperBuilder> drawLooperBuilder = DrawLooperBuilder::create();
+        std::unique_ptr<DrawLooperBuilder> drawLooperBuilder = DrawLooperBuilder::create();
         drawLooperBuilder->addShadow(m_shadowOffset, m_shadowBlur, m_shadowColor, DrawLooperBuilder::ShadowIgnoresTransforms, DrawLooperBuilder::ShadowRespectsAlpha);
         drawLooperBuilder->addUnmodifiedContent();
         m_shadowAndForegroundDrawLooper = drawLooperBuilder->detachDrawLooper();
@@ -394,8 +400,8 @@ SkImageFilter* CanvasRenderingContext2DState::shadowAndForegroundImageFilter() c
 
 void CanvasRenderingContext2DState::shadowParameterChanged()
 {
-    m_shadowOnlyDrawLooper.clear();
-    m_shadowAndForegroundDrawLooper.clear();
+    m_shadowOnlyDrawLooper.reset();
+    m_shadowAndForegroundDrawLooper.reset();
     m_shadowOnlyImageFilter.reset();
     m_shadowAndForegroundImageFilter.reset();
 }
@@ -424,7 +430,7 @@ void CanvasRenderingContext2DState::setShadowColor(SkColor shadowColor)
     shadowParameterChanged();
 }
 
-void CanvasRenderingContext2DState::setFilter(CSSValue* filterValue)
+void CanvasRenderingContext2DState::setFilter(const CSSValue* filterValue)
 {
     m_filterValue = filterValue;
     m_resolvedFilter.reset();

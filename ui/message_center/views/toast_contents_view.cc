@@ -12,14 +12,15 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "ui/accessibility/ax_view_state.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
-#include "ui/gfx/display.h"
-#include "ui/gfx/screen.h"
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/notification.h"
 #include "ui/message_center/views/message_popup_collection.h"
 #include "ui/message_center/views/message_view.h"
+#include "ui/message_center/views/popup_alignment_delegate.h"
 #include "ui/views/background.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -29,7 +30,7 @@
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #endif
 
-using gfx::Screen;
+using display::Screen;
 
 namespace message_center {
 namespace {
@@ -50,11 +51,13 @@ gfx::Size ToastContentsView::GetToastSizeForView(const views::View* view) {
 
 ToastContentsView::ToastContentsView(
     const std::string& notification_id,
+    PopupAlignmentDelegate* alignment_delegate,
     base::WeakPtr<MessagePopupCollection> collection)
     : collection_(collection),
       id_(notification_id),
       is_closing_(false),
       closing_animation_(NULL) {
+  DCHECK(alignment_delegate);
   set_notify_enter_exit_on_child(true);
   // Sets the transparent background. Then, when the message view is slid out,
   // the whole toast seems to slide although the actual bound of the widget
@@ -64,7 +67,7 @@ ToastContentsView::ToastContentsView(
   fade_animation_.reset(new gfx::SlideAnimation(this));
   fade_animation_->SetSlideDuration(kFadeInOutDuration);
 
-  CreateWidget(collection->parent());
+  CreateWidget(alignment_delegate);
 }
 
 // This is destroyed when the toast window closes.
@@ -78,8 +81,7 @@ void ToastContentsView::SetContents(MessageView* view,
   bool already_has_contents = child_count() > 0;
   RemoveAllChildViews(true);
   AddChildView(view);
-  preferred_size_ = GetToastSizeForView(view);
-  Layout();
+  UpdatePreferredSize();
 
   // If it has the contents already, this invocation means an update of the
   // popup toast, and the new contents should be read through a11y feature.
@@ -94,11 +96,7 @@ void ToastContentsView::UpdateContents(const Notification& notification,
   DCHECK_GT(child_count(), 0);
   MessageView* message_view = static_cast<MessageView*>(child_at(0));
   message_view->UpdateWithNotification(notification);
-  gfx::Size new_size = GetToastSizeForView(message_view);
-  if (preferred_size_ != new_size) {
-    preferred_size_ = new_size;
-    Layout();
-  }
+  UpdatePreferredSize();
   if (a11y_feedback_for_updates)
     NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, false);
 }
@@ -127,23 +125,32 @@ void ToastContentsView::CloseWithAnimation() {
 }
 
 void ToastContentsView::SetBoundsInstantly(gfx::Rect new_bounds) {
-  if (new_bounds == bounds())
+  DCHECK(new_bounds.size().width() <= preferred_size_.width() &&
+         new_bounds.size().height() <= preferred_size_.height())
+      << "we can not display widget bigger than notification";
+
+  if (!GetWidget())
+    return;
+
+  if (new_bounds == GetWidget()->GetWindowBoundsInScreen())
     return;
 
   origin_ = new_bounds.origin();
-  if (!GetWidget())
-    return;
   GetWidget()->SetBounds(new_bounds);
 }
 
 void ToastContentsView::SetBoundsWithAnimation(gfx::Rect new_bounds) {
-  if (new_bounds == bounds())
-    return;
+  DCHECK(new_bounds.size().width() <= preferred_size_.width() &&
+         new_bounds.size().height() <= preferred_size_.height())
+      << "we can not display widget bigger than notification";
 
-  origin_ = new_bounds.origin();
   if (!GetWidget())
     return;
 
+  if (new_bounds == animated_bounds_end_)
+    return;
+
+  origin_ = new_bounds.origin();
   // This picks up the current bounds, so if there was a previous animation
   // half-done, the next one will pick up from the current location.
   // This is the only place that should query current location of the Widget
@@ -195,7 +202,7 @@ void ToastContentsView::OnBoundsAnimationEndedOrCancelled(
     // See crbug.com/243469
     widget->Hide();
 #if defined(OS_WIN)
-    widget->SetOpacity(0xFF);
+    widget->SetOpacity(1.f);
 #endif
 
     widget->Close();
@@ -216,9 +223,8 @@ void ToastContentsView::AnimationProgressed(const gfx::Animation* animation) {
         animated_bounds_start_, animated_bounds_end_));
     GetWidget()->SetBounds(current);
   } else if (animation == fade_animation_.get()) {
-    unsigned char opacity =
-        static_cast<unsigned char>(fade_animation_->GetCurrentValue() * 255);
-    GetWidget()->SetOpacity(opacity);
+    GetWidget()->SetOpacity(
+        static_cast<float>(fade_animation_->GetCurrentValue()));
   }
 }
 
@@ -289,6 +295,24 @@ gfx::Size ToastContentsView::GetPreferredSize() const {
   return child_count() ? GetToastSizeForView(child_at(0)) : gfx::Size();
 }
 
+void ToastContentsView::UpdatePreferredSize() {
+  DCHECK_GT(child_count(), 0);
+  gfx::Size new_size = GetToastSizeForView(child_at(0));
+  if (preferred_size_ == new_size)
+    return;
+  // Growing notifications instantly can cause notification's to overlap
+  // And shrinking with animation, leaves area, where nothing is drawn
+  const bool change_instantly = preferred_size_.width() > new_size.width() ||
+                                preferred_size_.height() > new_size.height();
+  preferred_size_ = new_size;
+  Layout();
+  if (change_instantly) {
+    SetBoundsInstantly(bounds());
+    return;
+  }
+  SetBoundsWithAnimation(bounds());
+}
+
 void ToastContentsView::GetAccessibleState(ui::AXViewState* state) {
   if (child_count() > 0)
     child_at(0)->GetAccessibleState(state);
@@ -337,14 +361,14 @@ void ToastContentsView::ClickOnNotificationButton(
     collection_->ClickOnNotificationButton(notification_id, button_index);
 }
 
-void ToastContentsView::CreateWidget(gfx::NativeView parent) {
+void ToastContentsView::CreateWidget(
+    PopupAlignmentDelegate* alignment_delegate) {
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
   params.keep_on_top = true;
-  if (parent)
-    params.parent = parent;
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   params.delegate = this;
   views::Widget* widget = new views::Widget();
+  alignment_delegate->ConfigureWidgetInitParamsForContainer(widget, &params);
   widget->set_focus_on_creation(false);
 
 #if defined(OS_WIN)

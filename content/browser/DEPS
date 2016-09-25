@@ -1,11 +1,10 @@
 include_rules = [
-  # Allow inclusion of specific components that we depend on. We may only
-  # depend on components which we share with the mojo html_viewer.
+  # Allow inclusion of specific components that we depend on.
+  # See comment in content/DEPS for which components are allowed.
   "+components/filesystem",
   "+components/leveldb",
+  "+components/link_header_util",
   "+components/mime_util",
-  "+components/mus/public/interfaces",
-  "+components/mus/public",
   "+components/profile_service",
   "+components/scheduler/common",
   "+components/tracing",
@@ -14,21 +13,19 @@ include_rules = [
   "+content/app/strings/grit",  # For generated headers
   "+content/public/browser",
   "+device/battery",  # For battery status service.
+  "+device/gamepad", # For gamepad API
+  "+device/generic_sensor",  # For sensors service.
+  "+device/geolocation",
+  "+device/power_save_blocker",
+  "+device/sensors/public",
+  "+device/time_zone_monitor/public",
   "+device/vibration",  # For Vibration API
+  "+device/vr",  # For WebVR API
   "+gin/v8_initializer.h",
-  "+media/media_features.h",
-  "+media/audio",  # For audio input for speech input feature.
-  "+media/capture",  # For Video Device monitoring in Mac.
-  "+media/base",  # For Android JNI registration.
-  "+media/capture",  # For Device Monitoring
-  "+media/filters",  # For reporting GPU decoding UMA.
-  "+media/midi",  # For Web MIDI API
-  "+media/mojo",  # For mojo media services.
   "+mojo",
   "+services",
   "+sql",
   "+ui/aura_extra",
-  "+ui/views/mus",  # http://crbug.com/555767
   "+ui/webui",
   "+win8/util",
 
@@ -54,24 +51,29 @@ include_rules = [
   # header-only types, and some selected common code.
   "-third_party/WebKit",
   "+third_party/WebKit/public/platform/WebAddressSpace.h",
-  "+third_party/WebKit/public/platform/WebCircularGeofencingRegion.h",
   "+third_party/WebKit/public/platform/WebCursorInfo.h",
   "+third_party/WebKit/public/platform/WebDisplayMode.h",
   "+third_party/WebKit/public/platform/WebDragOperation.h",
   "+third_party/WebKit/public/platform/WebFocusType.h",
   "+third_party/WebKit/public/platform/WebGamepad.h",
   "+third_party/WebKit/public/platform/WebGamepads.h",
-  "+third_party/WebKit/public/platform/WebGeofencingEventType.h",
-  "+third_party/WebKit/public/platform/WebGraphicsContext3D.h",
+  "+third_party/WebKit/public/platform/WebInsecureRequestPolicy.h",
+  "+third_party/WebKit/public/platform/WebNavigationHintType.h",
   "+third_party/WebKit/public/platform/WebReferrerPolicy.h",
   "+third_party/WebKit/public/platform/WebScreenInfo.h",
   "+third_party/WebKit/public/platform/WebString.h",
-  "+third_party/WebKit/public/platform/modules/geolocation/geolocation.mojom.h",
+  "+third_party/WebKit/public/platform/mime_registry.mojom.h",
+  "+third_party/WebKit/public/platform/modules/background_sync/background_sync.mojom.h",
+  "+third_party/WebKit/public/platform/modules/broadcastchannel/broadcast_channel.mojom.h",
+  "+third_party/WebKit/public/platform/modules/imagecapture/image_capture.mojom.h",
   "+third_party/WebKit/public/platform/modules/indexeddb/WebIDBDatabaseException.h",
   "+third_party/WebKit/public/platform/modules/indexeddb/WebIDBTypes.h",
   "+third_party/WebKit/public/platform/modules/notifications/WebNotificationConstants.h",
+  "+third_party/WebKit/public/platform/modules/notifications/notification.mojom.h",
+  "+third_party/WebKit/public/platform/modules/offscreencanvas/offscreen_canvas_surface.mojom.h",
   "+third_party/WebKit/public/platform/modules/permissions/permission.mojom.h",
   "+third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h",
+  "+third_party/WebKit/public/platform/modules/presentation/presentation.mojom.h",
   "+third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h",
   "+third_party/WebKit/public/platform/modules/screen_orientation/WebLockOrientationError.h",
   "+third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationLockType.h",
@@ -82,8 +84,10 @@ include_rules = [
   "+third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerResponseError.h",
   "+third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerResponseType.h",
   "+third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerState.h",
+  "+third_party/WebKit/public/platform/modules/serviceworker/service_worker_event_status.mojom.h",
   "+third_party/WebKit/public/platform/modules/vr/WebVR.h",
   "+third_party/WebKit/public/platform/modules/wake_lock/wake_lock_service.mojom.h",
+  "+third_party/WebKit/public/platform/modules/websockets/websocket.mojom.h",
   "+third_party/WebKit/public/web/WebAXEnums.h",
   "+third_party/WebKit/public/web/WebCompositionUnderline.h",
   "+third_party/WebKit/public/web/WebConsoleMessage.h",
@@ -91,7 +95,7 @@ include_rules = [
   "+third_party/WebKit/public/web/WebDeviceEmulationParams.h",
   "+third_party/WebKit/public/web/WebDragStatus.h",
   "+third_party/WebKit/public/web/WebFindOptions.h",
-  "+third_party/WebKit/public/web/WebFrameOwnerProperties.h",
+  "+third_party/WebKit/public/web/WebFrameSerializerCacheControlPolicy.h",
   "+third_party/WebKit/public/web/WebInputEvent.h",
   "+third_party/WebKit/public/web/WebMediaPlayerAction.h",
   "+third_party/WebKit/public/web/WebPluginAction.h",
@@ -107,7 +111,8 @@ include_rules = [
 
   # Until we define where mojo interfaces should live in blink we whitelist each
   # one separately.
-  "+third_party/WebKit/public/platform/modules/bluetooth/web_bluetooth.mojom.h"
+  "+third_party/WebKit/public/platform/modules/bluetooth/web_bluetooth.mojom.h",
+  "+third_party/WebKit/public/platform/modules/notifications/notification_service.mojom.h",
 
   # DO NOT ADD ANY CHROME OR COMPONENTS INCLUDES HERE!!!
   # See https://sites.google.com/a/chromium.org/dev/developers/content-module

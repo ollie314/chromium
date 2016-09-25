@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//mojo/public/mojo_application.gni")
+import("//services/shell/public/cpp/service.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//testing/test.gni")
 
@@ -15,13 +15,12 @@ executable("standalone") {
     ":lib",
     "//base",
     "//build/config/sanitizers:deps",
+    "//build/win:default_exe_manifest",
   ]
 }
 
 source_set("lib") {
   sources = [
-    "context.cc",
-    "context.h",
     "desktop/launcher_process.cc",
     "desktop/launcher_process.h",
     "desktop/main_helper.cc",
@@ -36,7 +35,6 @@ source_set("lib") {
     "//base/third_party/dynamic_annotations",
     "//components/tracing:startup_tracing",
     "//mojo/edk/system",
-    "//mojo/message_pump",
     "//services/catalog:lib",
     "//services/shell",
     "//services/shell/public/cpp",
@@ -49,6 +47,13 @@ source_set("lib") {
   data_deps = [
     "//services/tracing",
   ]
+
+  if (!is_ios) {
+    sources += [
+      "context.cc",
+      "context.h",
+    ]
+  }
 
   # This target includes some files behind #ifdef OS... guards. Since gn is not
   # smart enough to understand preprocess includes, it does complains about

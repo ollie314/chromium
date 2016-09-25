@@ -132,31 +132,31 @@ String MarkupFormatter::resolveURLIfNeeded(const Element& element, const String&
 void MarkupFormatter::appendStartMarkup(StringBuilder& result, const Node& node, Namespaces* namespaces)
 {
     switch (node.getNodeType()) {
-    case Node::TEXT_NODE:
-        ASSERT_NOT_REACHED();
+    case Node::kTextNode:
+        NOTREACHED();
         break;
-    case Node::COMMENT_NODE:
+    case Node::kCommentNode:
         appendComment(result, toComment(node).data());
         break;
-    case Node::DOCUMENT_NODE:
+    case Node::kDocumentNode:
         appendXMLDeclaration(result, toDocument(node));
         break;
-    case Node::DOCUMENT_FRAGMENT_NODE:
+    case Node::kDocumentFragmentNode:
         break;
-    case Node::DOCUMENT_TYPE_NODE:
+    case Node::kDocumentTypeNode:
         appendDocumentType(result, toDocumentType(node));
         break;
-    case Node::PROCESSING_INSTRUCTION_NODE:
+    case Node::kProcessingInstructionNode:
         appendProcessingInstruction(result, toProcessingInstruction(node).target(), toProcessingInstruction(node).data());
         break;
-    case Node::ELEMENT_NODE:
-        ASSERT_NOT_REACHED();
+    case Node::kElementNode:
+        NOTREACHED();
         break;
-    case Node::CDATA_SECTION_NODE:
+    case Node::kCdataSectionNode:
         appendCDATASection(result, toCDATASection(node).data());
         break;
-    case Node::ATTRIBUTE_NODE:
-        ASSERT_NOT_REACHED();
+    case Node::kAttributeNode:
+        NOTREACHED();
         break;
     }
 }
@@ -178,7 +178,7 @@ void MarkupFormatter::appendEndMarkup(StringBuilder& result, const Element& elem
     if (shouldSelfClose(element) || (!element.hasChildren() && elementCannotHaveEndTag(element)))
         return;
 
-    result.appendLiteral("</");
+    result.append("</");
     result.append(element.tagQName().toString());
     result.append('>');
 }
@@ -234,7 +234,7 @@ void MarkupFormatter::appendNamespace(StringBuilder& result, const AtomicString&
             result.append(prefix);
         }
 
-        result.appendLiteral("=\"");
+        result.append("=\"");
         appendAttributeValue(result, namespaceURI, false);
         result.append('"');
     }
@@ -249,9 +249,9 @@ void MarkupFormatter::appendText(StringBuilder& result, Text& text)
 void MarkupFormatter::appendComment(StringBuilder& result, const String& comment)
 {
     // FIXME: Comment content is not escaped, but XMLSerializer (and possibly other callers) should raise an exception if it includes "-->".
-    result.appendLiteral("<!--");
+    result.append("<!--");
     result.append(comment);
-    result.appendLiteral("-->");
+    result.append("-->");
 }
 
 void MarkupFormatter::appendXMLDeclaration(StringBuilder& result, const Document& document)
@@ -259,22 +259,22 @@ void MarkupFormatter::appendXMLDeclaration(StringBuilder& result, const Document
     if (!document.hasXMLDeclaration())
         return;
 
-    result.appendLiteral("<?xml version=\"");
+    result.append("<?xml version=\"");
     result.append(document.xmlVersion());
     const String& encoding = document.xmlEncoding();
     if (!encoding.isEmpty()) {
-        result.appendLiteral("\" encoding=\"");
+        result.append("\" encoding=\"");
         result.append(encoding);
     }
     if (document.xmlStandaloneStatus() != Document::StandaloneUnspecified) {
-        result.appendLiteral("\" standalone=\"");
+        result.append("\" standalone=\"");
         if (document.xmlStandalone())
-            result.appendLiteral("yes");
+            result.append("yes");
         else
-            result.appendLiteral("no");
+            result.append("no");
     }
 
-    result.appendLiteral("\"?>");
+    result.append("\"?>");
 }
 
 void MarkupFormatter::appendDocumentType(StringBuilder& result, const DocumentType& n)
@@ -282,19 +282,19 @@ void MarkupFormatter::appendDocumentType(StringBuilder& result, const DocumentTy
     if (n.name().isEmpty())
         return;
 
-    result.appendLiteral("<!DOCTYPE ");
+    result.append("<!DOCTYPE ");
     result.append(n.name());
     if (!n.publicId().isEmpty()) {
-        result.appendLiteral(" PUBLIC \"");
+        result.append(" PUBLIC \"");
         result.append(n.publicId());
         result.append('"');
         if (!n.systemId().isEmpty()) {
-            result.appendLiteral(" \"");
+            result.append(" \"");
             result.append(n.systemId());
             result.append('"');
         }
     } else if (!n.systemId().isEmpty()) {
-        result.appendLiteral(" SYSTEM \"");
+        result.append(" SYSTEM \"");
         result.append(n.systemId());
         result.append('"');
     }
@@ -304,11 +304,11 @@ void MarkupFormatter::appendDocumentType(StringBuilder& result, const DocumentTy
 void MarkupFormatter::appendProcessingInstruction(StringBuilder& result, const String& target, const String& data)
 {
     // FIXME: PI data is not escaped, but XMLSerializer (and possibly other callers) this should raise an exception if it includes "?>".
-    result.appendLiteral("<?");
+    result.append("<?");
     result.append(target);
     result.append(' ');
     result.append(data);
-    result.appendLiteral("?>");
+    result.append("?>");
 }
 
 void MarkupFormatter::appendOpenTag(StringBuilder& result, const Element& element, Namespaces* namespaces)
@@ -397,9 +397,9 @@ void MarkupFormatter::appendAttribute(StringBuilder& result, const Element& elem
 void MarkupFormatter::appendCDATASection(StringBuilder& result, const String& section)
 {
     // FIXME: CDATA content is not escaped, but XMLSerializer (and possibly other callers) should raise an exception if it includes "]]>".
-    result.appendLiteral("<![CDATA[");
+    result.append("<![CDATA[");
     result.append(section);
-    result.appendLiteral("]]>");
+    result.append("]]>");
 }
 
 bool MarkupFormatter::shouldAddNamespaceElement(const Element& element, Namespaces& namespaces) const

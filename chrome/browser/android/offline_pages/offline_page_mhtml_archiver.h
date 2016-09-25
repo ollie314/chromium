@@ -71,14 +71,15 @@ class OfflinePageMHTMLArchiver : public OfflinePageArchiver {
   // Callback for Generating MHTML.
   void OnGenerateMHTMLDone(const GURL& url,
                            const base::FilePath& file_path,
+                           const base::string16& title,
                            int64_t file_size);
 
-  // Sends the result of archiving a page to the client that requested archive
-  // creation.
-  void ReportResult(ArchiverResult result,
-                    const GURL& url,
-                    const base::FilePath& file_path,
-                    int64_t file_size);
+  // Checks whether the page to be saved has security error when loaded over
+  // HTTPS. Saving a page will fail if that is the case. HTTP connections are
+  // not affected.
+  virtual bool HasConnectionSecurityError();
+
+  // Reports failure to create archive a page to the client that requested it.
   void ReportFailure(ArchiverResult result);
 
  private:

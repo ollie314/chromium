@@ -14,11 +14,12 @@ DomainReliabilityContextManager::DomainReliabilityContextManager(
 }
 
 DomainReliabilityContextManager::~DomainReliabilityContextManager() {
-  RemoveAllContexts();
+  RemoveContexts(
+      base::Callback<bool(const GURL&)>() /* no filter - delete everything */);
 }
 
 void DomainReliabilityContextManager::RouteBeacon(
-    scoped_ptr<DomainReliabilityBeacon> beacon) {
+    std::unique_ptr<DomainReliabilityBeacon> beacon) {
   DomainReliabilityContext* context = GetContextForHost(beacon->url.host());
   if (!context)
     return;
@@ -28,7 +29,7 @@ void DomainReliabilityContextManager::RouteBeacon(
 
 void DomainReliabilityContextManager::SetConfig(
     const GURL& origin,
-    scoped_ptr<DomainReliabilityConfig> config,
+    std::unique_ptr<DomainReliabilityConfig> config,
     base::TimeDelta max_age) {
   std::string key = origin.host();
 
@@ -69,17 +70,22 @@ void DomainReliabilityContextManager::ClearConfig(const GURL& origin) {
   }
 }
 
-void DomainReliabilityContextManager::ClearBeaconsInAllContexts() {
-  for (auto& context_entry : contexts_)
-    context_entry.second->ClearBeacons();
+void DomainReliabilityContextManager::ClearBeacons(
+    const base::Callback<bool(const GURL&)>& origin_filter) {
+  for (auto& context_entry : contexts_) {
+    if (origin_filter.is_null() ||
+        origin_filter.Run(context_entry.second->config().origin)) {
+      context_entry.second->ClearBeacons();
+    }
+  }
 }
 
 DomainReliabilityContext* DomainReliabilityContextManager::AddContextForConfig(
-    scoped_ptr<const DomainReliabilityConfig> config) {
+    std::unique_ptr<const DomainReliabilityConfig> config) {
   std::string key = config->origin.host();
   // TODO(juliatuttle): Convert this to actual origin.
 
-  scoped_ptr<DomainReliabilityContext> context =
+  std::unique_ptr<DomainReliabilityContext> context =
       context_factory_->CreateContextForConfig(std::move(config));
   DomainReliabilityContext** entry = &contexts_[key];
   if (*entry)
@@ -89,16 +95,25 @@ DomainReliabilityContext* DomainReliabilityContextManager::AddContextForConfig(
   return *entry;
 }
 
-void DomainReliabilityContextManager::RemoveAllContexts() {
-  STLDeleteContainerPairSecondPointers(
-      contexts_.begin(), contexts_.end());
-  contexts_.clear();
+void DomainReliabilityContextManager::RemoveContexts(
+    const base::Callback<bool(const GURL&)>& origin_filter) {
+  for (ContextMap::iterator it = contexts_.begin(); it != contexts_.end(); ) {
+    if (!origin_filter.is_null() &&
+        !origin_filter.Run(it->second->config().origin)) {
+      ++it;
+      continue;
+    }
+
+    delete it->second;
+    it = contexts_.erase(it);
+  }
 }
 
-scoped_ptr<base::Value> DomainReliabilityContextManager::GetWebUIData() const {
-  scoped_ptr<base::ListValue> contexts_value(new base::ListValue());
+std::unique_ptr<base::Value> DomainReliabilityContextManager::GetWebUIData()
+    const {
+  std::unique_ptr<base::ListValue> contexts_value(new base::ListValue());
   for (const auto& context_entry : contexts_)
-    contexts_value->Append(context_entry.second->GetWebUIData().release());
+    contexts_value->Append(context_entry.second->GetWebUIData());
   return std::move(contexts_value);
 }
 

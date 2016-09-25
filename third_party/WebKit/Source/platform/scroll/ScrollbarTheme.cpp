@@ -34,7 +34,7 @@
 #include "platform/graphics/paint/DrawingDisplayItem.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/graphics/paint/PaintController.h"
-#include "platform/scroll/ScrollbarThemeClient.h"
+#include "platform/scroll/Scrollbar.h"
 #include "platform/scroll/ScrollbarThemeMock.h"
 #include "platform/scroll/ScrollbarThemeOverlayMock.h"
 #include "public/platform/Platform.h"
@@ -56,7 +56,7 @@ static inline bool shouldPaintScrollbarPart(const IntRect& partRect, const CullR
     return (!partRect.isEmpty()) || cullRect.intersectsCullRect(partRect);
 }
 
-bool ScrollbarTheme::paint(const ScrollbarThemeClient& scrollbar, GraphicsContext& graphicsContext, const CullRect& cullRect)
+bool ScrollbarTheme::paint(const Scrollbar& scrollbar, GraphicsContext& graphicsContext, const CullRect& cullRect)
 {
     // Create the ScrollbarControlPartMask based on the cullRect
     ScrollbarControlPartMask scrollMask = NoPart;
@@ -184,10 +184,10 @@ void ScrollbarTheme::paintScrollCorner(GraphicsContext& context, const DisplayIt
     if (cornerRect.isEmpty())
         return;
 
-    if (DrawingRecorder::useCachedDrawingIfPossible(context, displayItemClient, DisplayItem::ScrollbarCorner))
+    if (DrawingRecorder::useCachedDrawingIfPossible(context, displayItemClient, DisplayItem::kScrollbarCorner))
         return;
 
-    DrawingRecorder recorder(context, displayItemClient, DisplayItem::ScrollbarCorner, cornerRect);
+    DrawingRecorder recorder(context, displayItemClient, DisplayItem::kScrollbarCorner, cornerRect);
 #if OS(MACOSX)
     context.fillRect(cornerRect, Color::white);
 #else
@@ -197,7 +197,7 @@ void ScrollbarTheme::paintScrollCorner(GraphicsContext& context, const DisplayIt
 
 bool ScrollbarTheme::shouldCenterOnThumb(const ScrollbarThemeClient& scrollbar, const PlatformMouseEvent& evt)
 {
-    return Platform::current()->scrollbarBehavior()->shouldCenterOnThumb(static_cast<WebScrollbarBehavior::Button>(evt.button()), evt.shiftKey(), evt.altKey());
+    return Platform::current()->scrollbarBehavior()->shouldCenterOnThumb(evt.pointerProperties().button, evt.shiftKey(), evt.altKey());
 }
 
 bool ScrollbarTheme::shouldSnapBackToDragOrigin(const ScrollbarThemeClient& scrollbar, const PlatformMouseEvent& evt)
@@ -321,16 +321,16 @@ DisplayItem::Type ScrollbarTheme::buttonPartToDisplayItemType(ScrollbarPart part
 {
     switch (part) {
     case BackButtonStartPart:
-        return DisplayItem::ScrollbarBackButtonStart;
+        return DisplayItem::kScrollbarBackButtonStart;
     case BackButtonEndPart:
-        return DisplayItem::ScrollbarBackButtonEnd;
+        return DisplayItem::kScrollbarBackButtonEnd;
     case ForwardButtonStartPart:
-        return DisplayItem::ScrollbarForwardButtonStart;
+        return DisplayItem::kScrollbarForwardButtonStart;
     case ForwardButtonEndPart:
-        return DisplayItem::ScrollbarForwardButtonEnd;
+        return DisplayItem::kScrollbarForwardButtonEnd;
     default:
         ASSERT_NOT_REACHED();
-        return DisplayItem::ScrollbarBackButtonStart;
+        return DisplayItem::kScrollbarBackButtonStart;
     }
 }
 
@@ -338,12 +338,12 @@ DisplayItem::Type ScrollbarTheme::trackPiecePartToDisplayItemType(ScrollbarPart 
 {
     switch (part) {
     case BackTrackPart:
-        return DisplayItem::ScrollbarBackTrack;
+        return DisplayItem::kScrollbarBackTrack;
     case ForwardTrackPart:
-        return DisplayItem::ScrollbarForwardTrack;
+        return DisplayItem::kScrollbarForwardTrack;
     default:
         ASSERT_NOT_REACHED();
-        return DisplayItem::ScrollbarBackTrack;
+        return DisplayItem::kScrollbarBackTrack;
     }
 }
 

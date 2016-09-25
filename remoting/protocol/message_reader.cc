@@ -12,7 +12,7 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "remoting/base/compound_buffer.h"
@@ -114,8 +114,9 @@ void MessageReader::OnDataReceived(net::IOBuffer* data, int data_size) {
 }
 
 void MessageReader::RunCallback(std::unique_ptr<CompoundBuffer> message) {
-  if (!message_received_callback_.is_null())
+  if (!message_received_callback_.is_null()) {
     message_received_callback_.Run(std::move(message));
+  }
 }
 
 }  // namespace protocol

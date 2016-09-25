@@ -11,6 +11,7 @@ promise_test(function(t) {
         reader.releaseLock();
         var another = stream.getReader();
         assert_not_equals(another, reader);
+        another.releaseLock();
       });
   }, 'ReadableStreamReader acquisition / releasing');
 
@@ -36,16 +37,29 @@ promise_test(function(t) {
       });
   }, 'read contents with ReadableStreamReader');
 
+promise_test(() => {
+    let reader;
+    return fetch('/fetch/resources/progressive.php').then(res => {
+        reader = res.body.getReader();
+        return Promise.all([reader.read(), reader.read(), reader.read()]);
+      }).then(() => {
+        reader.releaseLock();
+        // We expect the test finishes without crashing.
+      });
+  }, 'parallel read');
+
 promise_test(function(t) {
     return fetch('/fetch/resources/progressive.php').then(function(res) {
         assert_false(res.bodyUsed);
         var reader = res.body.getReader();
-        assert_true(res.bodyUsed);
-        return res.text();
-      }).then(unreached_rejection(t), function() {
-        // text() should fail because bodyUsed is set.
+        assert_false(res.bodyUsed);
+        return res.text().then(unreached_fulfillment(t), function() {
+            // text() should fail because the body is locked.
+            // TODO(yhirano): Use finally once it gets available.
+            reader.releaseLock();
+          });
       });
-  }, 'acquiring a reader should set bodyUsed.');
+  }, 'acquiring a reader should not set bodyUsed.');
 
 promise_test(function(t) {
     var reader;

@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_SYNC_PROFILE_SYNC_SERVICE_ANDROID_H_
 
 #include <jni.h>
+
 #include <map>
 
 #include "base/android/jni_weak_ref.h"
@@ -14,13 +15,20 @@
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "components/invalidation/public/invalidation_util.h"
-#include "components/sync_driver/sync_prefs.h"
-#include "components/sync_driver/sync_service_observer.h"
+#include "components/sync/driver/sync_prefs.h"
+#include "components/sync/driver/sync_service_observer.h"
 #include "google/cacheinvalidation/include/types.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
 class Profile;
+
+namespace browser_sync {
 class ProfileSyncService;
+}
+
+namespace sync_driver {
+class SyncSetupInProgressHandle;
+}
 
 // Android wrapper of the ProfileSyncService which provides access from the Java
 // layer. Note that on Android, there's only a single profile, and therefore
@@ -121,6 +129,11 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
+  // Gets SyncProtocolError.ClientAction.
+  jint GetProtocolErrorClientAction(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+
   // Pure SyncPrefs calls.
   jboolean IsPassphrasePrompted(
       JNIEnv* env,
@@ -189,7 +202,10 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
   Profile* profile_;
 
   // A reference to the sync service for this profile.
-  ProfileSyncService* sync_service_;
+  browser_sync::ProfileSyncService* sync_service_;
+
+  // Prevents Sync from running until configuration is complete.
+  std::unique_ptr<sync_driver::SyncSetupInProgressHandle> sync_blocker_;
 
   // The class that handles getting, setting, and persisting sync
   // preferences.

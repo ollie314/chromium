@@ -20,6 +20,7 @@
 #include "build/build_config.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
+#include "content/browser/renderer_host/media/video_capture_buffer_handle.h"
 #include "content/browser/renderer_host/media/video_capture_buffer_pool.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
@@ -42,11 +43,11 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/layout.h"
-#include "ui/gfx/display.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
+#include "ui/display/test/test_screen.h"
 #include "ui/gfx/geometry/dip_util.h"
 #include "ui/gfx/geometry/size_conversions.h"
-#include "ui/gfx/screen.h"
-#include "ui/gfx/test/test_screen.h"
 
 namespace content {
 namespace {
@@ -75,7 +76,7 @@ void RunCurrentLoopWithDeadline() {
       FROM_HERE, TestTimeouts::action_max_timeout(),
       base::Bind(&DeadlineExceeded,
                  base::MessageLoop::current()->QuitWhenIdleClosure()));
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   deadline.Stop();
 }
 
@@ -276,11 +277,11 @@ class CaptureTestRenderViewHost : public TestRenderViewHost {
                             bool swapped_out,
                             CaptureTestSourceController* controller)
       : TestRenderViewHost(instance,
-                           base::WrapUnique(new CaptureTestRenderWidgetHost(
+                           base::MakeUnique<CaptureTestRenderWidgetHost>(
                                widget_delegate,
                                instance->GetProcess(),
                                routing_id,
-                               controller)),
+                               controller),
                            delegate,
                            main_frame_routing_id,
                            swapped_out) {
@@ -332,26 +333,17 @@ class StubClient : public media::VideoCaptureDevice::Client {
       const base::Closure& error_callback)
       : report_callback_(report_callback),
         error_callback_(error_callback) {
-    buffer_pool_ = new VideoCaptureBufferPool(2);
+    buffer_pool_ = new VideoCaptureBufferPoolImpl(2);
   }
   ~StubClient() override {}
 
-  MOCK_METHOD5(OnIncomingCapturedData,
+  MOCK_METHOD6(OnIncomingCapturedData,
                void(const uint8_t* data,
                     int length,
                     const media::VideoCaptureFormat& frame_format,
                     int rotation,
-                    const base::TimeTicks& timestamp));
-  MOCK_METHOD9(OnIncomingCapturedYuvData,
-               void(const uint8_t* y_data,
-                    const uint8_t* u_data,
-                    const uint8_t* v_data,
-                    size_t y_stride,
-                    size_t u_stride,
-                    size_t v_stride,
-                    const media::VideoCaptureFormat& frame_format,
-                    int clockwise_rotation,
-                    const base::TimeTicks& timestamp));
+                    base::TimeTicks reference_time,
+                    base::TimeDelta timestamp));
 
   MOCK_METHOD0(DoOnIncomingCapturedBuffer, void(void));
 
@@ -374,14 +366,14 @@ class StubClient : public media::VideoCaptureDevice::Client {
   // Trampoline method to workaround GMOCK problems with std::unique_ptr<>.
   void OnIncomingCapturedBuffer(std::unique_ptr<Buffer> buffer,
                                 const media::VideoCaptureFormat& frame_format,
-                                const base::TimeTicks& timestamp) override {
+                                base::TimeTicks reference_time,
+                                base::TimeDelta timestamp) override {
     DoOnIncomingCapturedBuffer();
   }
 
   void OnIncomingCapturedVideoFrame(
       std::unique_ptr<Buffer> buffer,
-      const scoped_refptr<media::VideoFrame>& frame,
-      const base::TimeTicks& timestamp) override {
+      const scoped_refptr<media::VideoFrame>& frame) override {
     EXPECT_FALSE(frame->visible_rect().IsEmpty());
     EXPECT_EQ(media::PIXEL_FORMAT_I420, frame->format());
     double frame_rate = 0;
@@ -431,10 +423,9 @@ class StubClient : public media::VideoCaptureDevice::Client {
  private:
   class AutoReleaseBuffer : public media::VideoCaptureDevice::Client::Buffer {
    public:
-    AutoReleaseBuffer(
-        const scoped_refptr<VideoCaptureBufferPool>& pool,
-        std::unique_ptr<VideoCaptureBufferPool::BufferHandle> buffer_handle,
-        int buffer_id)
+    AutoReleaseBuffer(const scoped_refptr<VideoCaptureBufferPool>& pool,
+                      std::unique_ptr<VideoCaptureBufferHandle> buffer_handle,
+                      int buffer_id)
         : id_(buffer_id),
           pool_(pool),
           buffer_handle_(std::move(buffer_handle)) {
@@ -460,7 +451,7 @@ class StubClient : public media::VideoCaptureDevice::Client {
 
     const int id_;
     const scoped_refptr<VideoCaptureBufferPool> pool_;
-    const std::unique_ptr<VideoCaptureBufferPool::BufferHandle> buffer_handle_;
+    const std::unique_ptr<VideoCaptureBufferHandle> buffer_handle_;
   };
 
   scoped_refptr<VideoCaptureBufferPool> buffer_pool_;
@@ -600,8 +591,8 @@ class MAYBE_WebContentsVideoCaptureDeviceTest : public testing::Test {
     test_screen_.display()->set_bounds(gfx::Rect(0, 0, 2560, 1440));
     test_screen_.display()->set_device_scale_factor(kTestDeviceScaleFactor);
 
-    gfx::Screen::SetScreenInstance(&test_screen_);
-    ASSERT_EQ(&test_screen_, gfx::Screen::GetScreen());
+    display::Screen::SetScreenInstance(&test_screen_);
+    ASSERT_EQ(&test_screen_, display::Screen::GetScreen());
 
     // TODO(nick): Sadness and woe! Much "mock-the-world" boilerplate could be
     // eliminated here, if only we could use RenderViewHostTestHarness. The
@@ -659,7 +650,7 @@ class MAYBE_WebContentsVideoCaptureDeviceTest : public testing::Test {
     render_view_host_factory_.reset();
     render_process_host_factory_.reset();
 
-    gfx::Screen::SetScreenInstance(nullptr);
+    display::Screen::SetScreenInstance(nullptr);
   }
 
   // Accessors.
@@ -767,7 +758,7 @@ class MAYBE_WebContentsVideoCaptureDeviceTest : public testing::Test {
   }
 
  private:
-  gfx::test::TestScreen test_screen_;
+  display::test::TestScreen test_screen_;
 
   StubClientObserver client_observer_;
 

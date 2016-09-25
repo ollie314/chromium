@@ -48,7 +48,7 @@ class FakeGCMClient : public GCMClient {
       const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
       const scoped_refptr<net::URLRequestContextGetter>&
           url_request_context_getter,
-      scoped_ptr<Encryptor> encryptor,
+      std::unique_ptr<Encryptor> encryptor,
       Delegate* delegate) override;
   void Start(StartMode start_mode) override;
   void Stop() override;
@@ -69,7 +69,7 @@ class FakeGCMClient : public GCMClient {
   void UpdateAccountMapping(const AccountMapping& account_mapping) override;
   void RemoveAccountMapping(const std::string& account_id) override;
   void SetLastTokenFetchTime(const base::Time& time) override;
-  void UpdateHeartbeatTimer(scoped_ptr<base::Timer> timer) override;
+  void UpdateHeartbeatTimer(std::unique_ptr<base::Timer> timer) override;
   void AddInstanceIDData(const std::string& app_id,
                          const std::string& instance_id,
                          const std::string& extra_data) override;
@@ -113,6 +113,7 @@ class FakeGCMClient : public GCMClient {
                            const std::string& message_id);
 
   Delegate* delegate_;
+  std::string product_category_for_subtypes_;
   bool started_;
   StartMode start_mode_;
   StartModeOverridding start_mode_overridding_;

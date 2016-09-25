@@ -11,24 +11,25 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
+#include "chrome/browser/ui/passwords/passwords_model_delegate.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/passwords/credentials_item_view.h"
 #include "chrome/browser/ui/views/passwords/credentials_selection_view.h"
 #include "chrome/browser/ui/views/passwords/manage_password_items_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_icon_views.h"
 #include "chrome/grit/generated_resources.h"
-#include "content/public/browser/render_view_host.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
+#include "content/public/browser/user_metrics.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/button/blue_button.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/controls/styled_label.h"
 #include "ui/views/controls/styled_label_listener.h"
-#include "ui/views/event_monitor.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
@@ -175,15 +176,6 @@ void AddTitleRowWithLink(views::GridLayout* layout,
   layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 }
 
-std::unique_ptr<views::LabelButton> GenerateButton(
-    views::ButtonListener* listener,
-    const base::string16& text) {
-  std::unique_ptr<views::LabelButton> button(
-      new views::LabelButton(listener, text));
-  button->SetStyle(views::Button::STYLE_BUTTON);
-  return button;
-}
-
 }  // namespace
 
 // ManagePasswordsBubbleView::AutoSigninView ----------------------------------
@@ -309,16 +301,14 @@ ManagePasswordsBubbleView::PendingView::PendingView(
   // Create the pending credential item, save button and refusal combobox.
   ManagePasswordItemsView* item = nullptr;
   if (!parent->model()->pending_password().username_value.empty()) {
-    std::vector<const autofill::PasswordForm*> credentials(
-        1, &parent->model()->pending_password());
-    item = new ManagePasswordItemsView(parent_->model(), credentials);
+    item = new ManagePasswordItemsView(parent_->model(),
+                                       &parent->model()->pending_password());
   }
-  save_button_ = new views::BlueButton(
+  save_button_ = views::MdTextButton::CreateSecondaryUiBlueButton(
       this, l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SAVE_BUTTON));
-  never_button_ = GenerateButton(
+  never_button_ = views::MdTextButton::CreateSecondaryUiButton(
       this,
-      l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON))
-           .release();
+      l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_BUBBLE_BLACKLIST_BUTTON));
 
   // Title row.
   BuildColumnSet(layout, SINGLE_VIEW_COLUMN_SET);
@@ -361,12 +351,17 @@ ManagePasswordsBubbleView::PendingView::~PendingView() {
 void ManagePasswordsBubbleView::PendingView::ButtonPressed(
     views::Button* sender,
     const ui::Event& event) {
-  if (sender == save_button_)
+  if (sender == save_button_) {
     parent_->model()->OnSaveClicked();
-  else if (sender == never_button_)
+    if (parent_->model()->ReplaceToShowSignInPromoIfNeeded()) {
+      parent_->Refresh();
+      return;
+    }
+  } else if (sender == never_button_) {
     parent_->model()->OnNeverForThisSiteClicked();
-  else
+  } else {
     NOTREACHED();
+  }
 
   parent_->CloseBubble();
 }
@@ -381,7 +376,7 @@ void ManagePasswordsBubbleView::PendingView::StyledLabelLinkClicked(
 
 // ManagePasswordsBubbleView::ManageView --------------------------------------
 
-// A view offering the user a list of her currently saved credentials
+// A view offering the user a list of their currently saved credentials
 // for the current page, along with a "Manage passwords" link and a
 // "Done" button.
 class ManagePasswordsBubbleView::ManageView : public views::View,
@@ -416,18 +411,10 @@ ManagePasswordsBubbleView::ManageView::ManageView(
   // If we have a list of passwords to store for the current site, display
   // them to the user for management. Otherwise, render a "No passwords for
   // this site" message.
-
-  bool only_PSL_matches =
-      find_if(parent_->model()->local_credentials().begin(),
-              parent_->model()->local_credentials().end(),
-              [](const autofill::PasswordForm* form) {
-                return !form->is_public_suffix_match;
-              }) == parent_->model()->local_credentials().end();
-
   BuildColumnSet(layout, SINGLE_VIEW_COLUMN_SET);
-  if (!only_PSL_matches) {
+  if (!parent_->model()->local_credentials().empty()) {
     ManagePasswordItemsView* item = new ManagePasswordItemsView(
-        parent_->model(), parent_->model()->local_credentials().get());
+        parent_->model(), &parent_->model()->local_credentials());
     layout->StartRowWithPadding(0, SINGLE_VIEW_COLUMN_SET, 0,
                                 views::kUnrelatedControlVerticalSpacing);
     layout->AddView(item);
@@ -451,8 +438,8 @@ ManagePasswordsBubbleView::ManageView::ManageView(
   manage_link_->SetUnderline(false);
   manage_link_->set_listener(this);
 
-  done_button_ =
-      GenerateButton(this, l10n_util::GetStringUTF16(IDS_DONE)).release();
+  done_button_ = views::MdTextButton::CreateSecondaryUiButton(
+      this, l10n_util::GetStringUTF16(IDS_DONE));
 
   BuildColumnSet(layout, LINK_BUTTON_COLUMN_SET);
   layout->StartRowWithPadding(0, LINK_BUTTON_COLUMN_SET, 0,
@@ -527,8 +514,8 @@ ManagePasswordsBubbleView::SaveConfirmationView::SaveConfirmationView(
   layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
   layout->AddView(confirmation);
 
-  ok_button_ =
-      GenerateButton(this, l10n_util::GetStringUTF16(IDS_OK)).release();
+  ok_button_ = views::MdTextButton::CreateSecondaryUiButton(
+      this, l10n_util::GetStringUTF16(IDS_OK));
 
   BuildColumnSet(layout, SINGLE_BUTTON_COLUMN_SET);
   layout->StartRowWithPadding(
@@ -557,54 +544,63 @@ void ManagePasswordsBubbleView::SaveConfirmationView::ButtonPressed(
   parent_->CloseBubble();
 }
 
-// ManagePasswordsBubbleView::WebContentMouseHandler --------------------------
+// ManagePasswordsBubbleView::SignInPromoView ---------------------------------
 
-// The class listens for WebContentsView events and notifies the bubble if the
-// view was clicked on or received keystrokes.
-class ManagePasswordsBubbleView::WebContentMouseHandler
-    : public ui::EventHandler {
+// A view that offers user to sign in to Chrome.
+class ManagePasswordsBubbleView::SignInPromoView
+    : public views::View,
+      public views::ButtonListener {
  public:
-  explicit WebContentMouseHandler(ManagePasswordsBubbleView* bubble);
-
-  void OnKeyEvent(ui::KeyEvent* event) override;
-  void OnMouseEvent(ui::MouseEvent* event) override;
-  void OnTouchEvent(ui::TouchEvent* event) override;
+  explicit SignInPromoView(ManagePasswordsBubbleView* parent);
 
  private:
-  ManagePasswordsBubbleView* bubble_;
-  std::unique_ptr<views::EventMonitor> event_monitor_;
+  // views::ButtonListener:
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
-  DISALLOW_COPY_AND_ASSIGN(WebContentMouseHandler);
+  ManagePasswordsBubbleView* parent_;
+
+  views::Button* signin_button_;
+  views::Button* no_button_;
+
+  DISALLOW_COPY_AND_ASSIGN(SignInPromoView);
 };
 
-ManagePasswordsBubbleView::WebContentMouseHandler::WebContentMouseHandler(
-    ManagePasswordsBubbleView* bubble)
-    : bubble_(bubble) {
-  content::WebContents* web_contents = bubble_->web_contents();
-  DCHECK(web_contents);
-  event_monitor_ = views::EventMonitor::CreateWindowMonitor(
-      this, web_contents->GetTopLevelNativeWindow());
+ManagePasswordsBubbleView::SignInPromoView::SignInPromoView(
+    ManagePasswordsBubbleView* parent)
+    : parent_(parent) {
+  views::GridLayout* layout = new views::GridLayout(this);
+  layout->set_minimum_size(gfx::Size(kDesiredBubbleWidth, 0));
+  SetLayoutManager(layout);
+
+  signin_button_ = views::MdTextButton::CreateSecondaryUiBlueButton(
+      this,
+      l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SIGNIN_PROMO_SIGN_IN));
+  no_button_ = views::MdTextButton::CreateSecondaryUiButton(
+      this,
+      l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SIGNIN_PROMO_NO_THANKS));
+
+  // Button row.
+  BuildColumnSet(layout, DOUBLE_BUTTON_COLUMN_SET);
+  layout->StartRow(0, DOUBLE_BUTTON_COLUMN_SET);
+  layout->AddView(signin_button_);
+  layout->AddView(no_button_);
+
+  parent_->set_initially_focused_view(signin_button_);
+  content::RecordAction(
+      base::UserMetricsAction("Signin_Impression_FromPasswordBubble"));
 }
 
-void ManagePasswordsBubbleView::WebContentMouseHandler::OnKeyEvent(
-    ui::KeyEvent* event) {
-  content::WebContents* web_contents = bubble_->web_contents();
-  content::RenderViewHost* rvh = web_contents->GetRenderViewHost();
-  if ((event->key_code() == ui::VKEY_ESCAPE ||
-       rvh->IsFocusedElementEditable()) && event->type() == ui::ET_KEY_PRESSED)
-    bubble_->CloseBubble();
-}
+void ManagePasswordsBubbleView::SignInPromoView::ButtonPressed(
+    views::Button* sender,
+    const ui::Event& event) {
+  if (sender == signin_button_)
+    parent_->model()->OnSignInToChromeClicked();
+  else if (sender == no_button_)
+    parent_->model()->OnSkipSignInClicked();
+  else
+    NOTREACHED();
 
-void ManagePasswordsBubbleView::WebContentMouseHandler::OnMouseEvent(
-    ui::MouseEvent* event) {
-  if (event->type() == ui::ET_MOUSE_PRESSED)
-    bubble_->CloseBubble();
-}
-
-void ManagePasswordsBubbleView::WebContentMouseHandler::OnTouchEvent(
-    ui::TouchEvent* event) {
-  if (event->type() == ui::ET_TOUCH_PRESSED)
-    bubble_->CloseBubble();
+  parent_->CloseBubble();
 }
 
 // ManagePasswordsBubbleView::UpdatePendingView -------------------------------
@@ -650,20 +646,16 @@ ManagePasswordsBubbleView::UpdatePendingView::UpdatePendingView(
   // Create the pending credential item, update button.
   View* item = nullptr;
   if (parent->model()->ShouldShowMultipleAccountUpdateUI()) {
-    selection_view_ = new CredentialsSelectionView(
-        parent->model(), parent->model()->local_credentials().get(),
-        parent->model()->pending_password().username_value);
+    selection_view_ = new CredentialsSelectionView(parent->model());
     item = selection_view_;
   } else {
-    std::vector<const autofill::PasswordForm*> forms;
-    forms.push_back(&parent->model()->pending_password());
-    item = new ManagePasswordItemsView(parent_->model(), forms);
+    item = new ManagePasswordItemsView(parent_->model(),
+                                       &parent->model()->pending_password());
   }
-  nope_button_ = GenerateButton(
-      this,
-      l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_CANCEL_BUTTON)).release();
+  nope_button_ = views::MdTextButton::CreateSecondaryUiButton(
+      this, l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_CANCEL_BUTTON));
 
-  update_button_ = new views::BlueButton(
+  update_button_ = views::MdTextButton::CreateSecondaryUiBlueButton(
       this, l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_UPDATE_BUTTON));
 
   // Title row.
@@ -768,7 +760,7 @@ void ManagePasswordsBubbleView::ActivateBubble() {
 }
 
 content::WebContents* ManagePasswordsBubbleView::web_contents() const {
-  return model_.web_contents();
+  return model_.GetWebContents();
 }
 
 ManagePasswordsBubbleView::ManagePasswordsBubbleView(
@@ -776,11 +768,11 @@ ManagePasswordsBubbleView::ManagePasswordsBubbleView(
     views::View* anchor_view,
     DisplayReason reason)
     : LocationBarBubbleDelegateView(anchor_view, web_contents),
-      model_(web_contents,
+      model_(PasswordsModelDelegateFromWebContents(web_contents),
              reason == AUTOMATIC ? ManagePasswordsBubbleModel::AUTOMATIC
                                  : ManagePasswordsBubbleModel::USER_ACTION),
       initially_focused_view_(nullptr) {
-  mouse_handler_.reset(new WebContentMouseHandler(this));
+  mouse_handler_.reset(new WebContentMouseHandler(this, this->web_contents()));
 }
 
 ManagePasswordsBubbleView::~ManagePasswordsBubbleView() {
@@ -793,10 +785,9 @@ views::View* ManagePasswordsBubbleView::GetInitiallyFocusedView() {
 }
 
 void ManagePasswordsBubbleView::Init() {
-  views::FillLayout* layout = new views::FillLayout();
-  SetLayoutManager(layout);
+  SetLayoutManager(new views::FillLayout);
 
-  Refresh();
+  CreateChild();
 }
 
 void ManagePasswordsBubbleView::CloseBubble() {
@@ -816,12 +807,22 @@ bool ManagePasswordsBubbleView::ShouldShowWindowTitle() const {
 }
 
 bool ManagePasswordsBubbleView::ShouldShowCloseButton() const {
-  return model_.state() == password_manager::ui::PENDING_PASSWORD_STATE;
+  return model_.state() == password_manager::ui::PENDING_PASSWORD_STATE ||
+      model_.state() == password_manager::ui::CHROME_SIGN_IN_PROMO_STATE;
 }
 
 void ManagePasswordsBubbleView::Refresh() {
   RemoveAllChildViews(true);
   initially_focused_view_ = NULL;
+  CreateChild();
+
+  // Show/hide the close button.
+  GetWidget()->non_client_view()->ResetWindowControls();
+  GetWidget()->UpdateWindowTitle();
+  SizeToContents();
+}
+
+void ManagePasswordsBubbleView::CreateChild() {
   if (model_.state() == password_manager::ui::PENDING_PASSWORD_STATE) {
     AddChildView(new PendingView(this));
   } else if (model_.state() ==
@@ -831,10 +832,10 @@ void ManagePasswordsBubbleView::Refresh() {
     AddChildView(new SaveConfirmationView(this));
   } else if (model_.state() == password_manager::ui::AUTO_SIGNIN_STATE) {
     AddChildView(new AutoSigninView(this));
+  } else if (model_.state() ==
+             password_manager::ui::CHROME_SIGN_IN_PROMO_STATE) {
+    AddChildView(new SignInPromoView(this));
   } else {
     AddChildView(new ManageView(this));
   }
-  if (GetWidget())
-    GetWidget()->UpdateWindowTitle();
-  GetLayoutManager()->Layout(this);
 }

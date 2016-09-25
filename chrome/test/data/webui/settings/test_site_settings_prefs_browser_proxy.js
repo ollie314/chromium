@@ -8,24 +8,34 @@
  */
 var prefsEmpty = {
   defaults: {
-    media_stream_camera: '',
+    auto_downloads: '',
+    background_sync: '',
+    camera: '',
     cookies: '',
     fullscreen: '',
     geolocation: '',
     javascript: '',
-    media_stream_mic: '',
+    keygen: '',
+    mic: '',
     notifications: '',
+    plugins: '',
     popups: '',
+    unsandboxed_plugins: '',
   },
   exceptions: {
-    media_stream_camera: [],
+    auto_downloads: [],
+    background_sync: [],
+    camera: [],
     cookies: [],
     fullscreen: [],
     geolocation: [],
     javascript: [],
-    media_stream_mic: [],
+    keygen: [],
+    mic: [],
     notifications: [],
+    plugins: [],
     popups: [],
+    unsandboxed_plugins: [],
   },
 };
 
@@ -40,8 +50,10 @@ var prefsEmpty = {
  */
 var TestSiteSettingsPrefsBrowserProxy = function() {
   settings.TestBrowserProxy.call(this, [
+    'fetchZoomLevels',
     'getDefaultValueForContentType',
     'getExceptionList',
+    'removeZoomLevel',
     'resetCategoryPermissionForOrigin',
     'setCategoryPermissionForOrigin',
     'setDefaultValueForContentType',
@@ -49,10 +61,11 @@ var TestSiteSettingsPrefsBrowserProxy = function() {
 
   /** @private {!SiteSettingsPref} */
   this.prefs_ = prefsEmpty;
+
+  /** @private {!Array<ZoomLevelEntry>} */
+  this.zoomList_ = [];
 };
 
-// TODO(finnur): Modify the tests so that most of the code this class implements
-//     can be ripped out.
 TestSiteSettingsPrefsBrowserProxy.prototype = {
   __proto__: settings.TestBrowserProxy.prototype,
 
@@ -72,6 +85,14 @@ TestSiteSettingsPrefsBrowserProxy.prototype = {
     }
   },
 
+  /**
+   * Sets the prefs to use when testing.
+   * @param !Array<ZoomLevelEntry> list The zoom list to set.
+   */
+  setZoomList: function(list) {
+    this.zoomList_ = list;
+  },
+
   /** @override */
   setDefaultValueForContentType: function(contentType, defaultValue) {
     this.methodCalled(
@@ -82,73 +103,108 @@ TestSiteSettingsPrefsBrowserProxy.prototype = {
   getDefaultValueForContentType: function(contentType) {
     this.methodCalled('getDefaultValueForContentType', contentType);
 
-    if (contentType == settings.ContentSettingsTypes.CAMERA) {
-      return Promise.resolve(
-          this.prefs_.defaults.media_stream_camera != 'block');
+    var pref = undefined;
+    if (contentType == settings.ContentSettingsTypes.AUTOMATIC_DOWNLOADS) {
+      pref = this.prefs_.defaults.auto_downloads;
+    } else if (contentType == settings.ContentSettingsTypes.BACKGROUND_SYNC) {
+      pref = this.prefs_.background_sync;
+    } else if (contentType == settings.ContentSettingsTypes.CAMERA) {
+      pref = this.prefs_.defaults.camera;
     } else if (contentType == settings.ContentSettingsTypes.COOKIES) {
-      return Promise.resolve(this.prefs_.defaults.cookies != 'block');
+      pref = this.prefs_.defaults.cookies;
     } else if (contentType == settings.ContentSettingsTypes.FULLSCREEN) {
-      return Promise.resolve(this.prefs_.defaults.fullscreen != 'block');
+      pref = this.prefs_.defaults.fullscreen;
     } else if (contentType == settings.ContentSettingsTypes.GEOLOCATION) {
-      return Promise.resolve(this.prefs_.defaults.geolocation != 'block');
+      pref = this.prefs_.defaults.geolocation;
     } else if (contentType == settings.ContentSettingsTypes.IMAGES) {
-      return Promise.resolve(this.prefs_.defaults.images != 'block');
+      pref = this.prefs_.defaults.images;
     } else if (contentType == settings.ContentSettingsTypes.JAVASCRIPT) {
-      return Promise.resolve(this.prefs_.defaults.javascript != 'block');
+      pref = this.prefs_.defaults.javascript;
+    } else if (contentType == settings.ContentSettingsTypes.KEYGEN) {
+      pref = this.prefs_.defaults.keygen;
     } else if (contentType == settings.ContentSettingsTypes.MIC) {
-      return Promise.resolve(this.prefs_.defaults.media_stream_mic != 'block');
+      pref = this.prefs_.defaults.mic;
     } else if (contentType == settings.ContentSettingsTypes.NOTIFICATIONS) {
-      return Promise.resolve(this.prefs_.defaults.notifications != 'block');
+      pref = this.prefs_.defaults.notifications;
     } else if (contentType == settings.ContentSettingsTypes.POPUPS) {
-      return Promise.resolve(this.prefs_.defaults.popups != 'block');
+      pref = this.prefs_.defaults.popups;
+    } else if (contentType == settings.ContentSettingsTypes.PLUGINS) {
+      pref = this.prefs_.defaults.plugins;
+    } else if (
+        contentType == settings.ContentSettingsTypes.UNSANDBOXED_PLUGINS) {
+      pref = this.prefs_.defaults.unsandboxed_plugins;
     } else {
       console.log('getDefault received unknown category: ' + contentType);
     }
 
-    return Promise.resolve([]);
+    assert(pref != undefined, 'Pref is missing for ' + contentType);
+    return Promise.resolve(pref);
   },
 
   /** @override */
   getExceptionList: function(contentType) {
     this.methodCalled('getExceptionList', contentType);
 
-    if (contentType == settings.ContentSettingsTypes.CAMERA)
-      return Promise.resolve(this.prefs_.exceptions.media_stream_camera);
+    var pref = undefined;
+    if (contentType == settings.ContentSettingsTypes.AUTOMATIC_DOWNLOADS)
+      pref = this.prefs_.exceptions.auto_downloads;
+    else if (contentType == settings.ContentSettingsTypes.BACKGROUND_SYNC)
+      pref = this.prefs_.exceptions.background_sync;
+    else if (contentType == settings.ContentSettingsTypes.CAMERA)
+      pref = this.prefs_.exceptions.camera;
     else if (contentType == settings.ContentSettingsTypes.COOKIES)
-      return Promise.resolve(this.prefs_.exceptions.cookies);
+      pref = this.prefs_.exceptions.cookies;
     else if (contentType == settings.ContentSettingsTypes.FULLSCREEN)
-      return Promise.resolve(this.prefs_.exceptions.fullscreen);
+      pref = this.prefs_.exceptions.fullscreen;
     else if (contentType == settings.ContentSettingsTypes.GEOLOCATION)
-      return Promise.resolve(this.prefs_.exceptions.geolocation);
+      pref = this.prefs_.exceptions.geolocation;
     else if (contentType == settings.ContentSettingsTypes.IMAGES)
-      return Promise.resolve(this.prefs_.exceptions.images);
+      pref = this.prefs_.exceptions.images;
     else if (contentType == settings.ContentSettingsTypes.JAVASCRIPT)
-      return Promise.resolve(this.prefs_.exceptions.javascript);
+      pref = this.prefs_.exceptions.javascript;
+    else if (contentType == settings.ContentSettingsTypes.KEYGEN)
+      pref = this.prefs_.exceptions.keygen;
     else if (contentType == settings.ContentSettingsTypes.MIC)
-      return Promise.resolve(this.prefs_.exceptions.media_stream_mic);
+      pref = this.prefs_.exceptions.mic;
     else if (contentType == settings.ContentSettingsTypes.NOTIFICATIONS)
-      return Promise.resolve(this.prefs_.exceptions.notifications);
+      pref = this.prefs_.exceptions.notifications;
+    else if (contentType == settings.ContentSettingsTypes.PLUGINS)
+      pref = this.prefs_.exceptions.plugins;
     else if (contentType == settings.ContentSettingsTypes.POPUPS)
-      return Promise.resolve(this.prefs_.exceptions.popups);
+      pref = this.prefs_.exceptions.popups;
+    else if (contentType == settings.ContentSettingsTypes.UNSANDBOXED_PLUGINS)
+      pref = this.prefs_.exceptions.unsandboxed_plugins;
     else
       console.log('getExceptionList received unknown category: ' + contentType);
 
-    return Promise.resolve([]);
+    assert(pref != undefined, 'Pref is missing for ' + contentType);
+    return Promise.resolve(pref);
   },
 
   /** @override */
   resetCategoryPermissionForOrigin: function(
-      primaryPattern, secondaryPattern, contentType) {
+      primaryPattern, secondaryPattern, contentType, incognito) {
     this.methodCalled('resetCategoryPermissionForOrigin',
-        [primaryPattern, secondaryPattern, contentType]);
+        [primaryPattern, secondaryPattern, contentType, incognito]);
     return Promise.resolve();
   },
 
   /** @override */
   setCategoryPermissionForOrigin: function(
-      primaryPattern, secondaryPattern, contentType, value) {
+      primaryPattern, secondaryPattern, contentType, value, incognito) {
     this.methodCalled('setCategoryPermissionForOrigin',
         [primaryPattern, secondaryPattern, contentType, value]);
     return Promise.resolve();
+  },
+
+  /** @override */
+  fetchZoomLevels: function() {
+    cr.webUIListenerCallback('onZoomLevelsChanged', this.zoomList_);
+    this.methodCalled('fetchZoomLevels');
+  },
+
+  /** @override */
+  removeZoomLevel: function(host) {
+    this.methodCalled('removeZoomLevel', [host]);
   },
 };

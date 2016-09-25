@@ -42,23 +42,15 @@ const char kPrivetActionComplete[] = "complete";
 const char kPrivetActionCancel[] = "cancel";
 
 const char kPrivetDefaultDeviceType[] = "_privet._tcp.local";
-const char kPrivetSubtypeTemplate[] = "%s._sub._privet._tcp.local";
 
 const char kPrivetTypePrinter[] = "printer";
 
 const char kPrivetTxtKeyName[] = "ty";
 const char kPrivetTxtKeyDescription[] = "note";
-const char kPrivetTxtKeyURL[] = "url";
 const char kPrivetTxtKeyVersion[] = "txtvers";
 const char kPrivetTxtKeyType[] = "type";
 const char kPrivetTxtKeyID[] = "id";
-const char kPrivetTxtKeyConnectionState[] = "cs";
 const char kPrivetTxtKeyGcdID[] = "gcd_id";
 const char kPrivetTxtKeyDevicesClass[] = "class";
-
-const char kPrivetConnectionStatusOnline[] = "online";
-const char kPrivetConnectionStatusOffline[] = "offline";
-const char kPrivetConnectionStatusConnecting[] = "connecting";
-const char kPrivetConnectionStatusNotConfigured[] = "not-configured";
 
 }  // namespace cloud_print

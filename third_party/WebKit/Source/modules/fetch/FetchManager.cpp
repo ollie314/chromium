@@ -10,7 +10,6 @@
 #include "bindings/core/v8/V8ThrowException.h"
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/Document.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/fetch/FetchUtils.h"
 #include "core/fileapi/Blob.h"
 #include "core/frame/Frame.h"
@@ -39,9 +38,9 @@
 #include "platform/weborigin/SecurityPolicy.h"
 #include "public/platform/WebURLRequest.h"
 #include "wtf/HashSet.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
@@ -65,7 +64,7 @@ public:
     ~Loader() override;
     DECLARE_VIRTUAL_TRACE();
 
-    void didReceiveResponse(unsigned long, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
+    void didReceiveResponse(unsigned long, const ResourceResponse&, std::unique_ptr<WebDataConsumerHandle>) override;
     void didFinishLoading(unsigned long, double) override;
     void didFail(const ResourceError&) override;
     void didFailAccessControlCheck(const ResourceError&) override;
@@ -75,14 +74,14 @@ public:
     void dispose();
 
     class SRIVerifier final : public GarbageCollectedFinalized<SRIVerifier>, public WebDataConsumerHandle::Client {
+    public:
         // Promptly clear m_handle and m_reader.
         EAGERLY_FINALIZE();
-    public:
         // SRIVerifier takes ownership of |handle| and |response|.
         // |updater| must be garbage collected. The other arguments
         // all must have the lifetime of the give loader.
-        SRIVerifier(PassOwnPtr<WebDataConsumerHandle> handle, CompositeDataConsumerHandle::Updater* updater, Response* response, FetchManager::Loader* loader, String integrityMetadata, const KURL& url)
-            : m_handle(handle)
+        SRIVerifier(std::unique_ptr<WebDataConsumerHandle> handle, CompositeDataConsumerHandle::Updater* updater, Response* response, FetchManager::Loader* loader, String integrityMetadata, const KURL& url)
+            : m_handle(std::move(handle))
             , m_updater(updater)
             , m_response(response)
             , m_loader(loader)
@@ -142,13 +141,15 @@ public:
             visitor->trace(m_loader);
         }
     private:
-        OwnPtr<WebDataConsumerHandle> m_handle;
+        std::unique_ptr<WebDataConsumerHandle> m_handle;
         Member<CompositeDataConsumerHandle::Updater> m_updater;
+        // We cannot store a Response because its JS wrapper can be collected.
+        // TODO(yhirano): Fix this.
         Member<Response> m_response;
         Member<FetchManager::Loader> m_loader;
         String m_integrityMetadata;
         KURL m_url;
-        OwnPtr<WebDataConsumerHandle::Reader> m_reader;
+        std::unique_ptr<WebDataConsumerHandle::Reader> m_reader;
         Vector<char> m_buffer;
         bool m_finished;
     };
@@ -168,7 +169,7 @@ private:
     Member<FetchManager> m_fetchManager;
     Member<ScriptPromiseResolver> m_resolver;
     Member<FetchRequestData> m_request;
-    OwnPtr<ThreadableLoader> m_loader;
+    Member<ThreadableLoader> m_loader;
     bool m_failed;
     bool m_finished;
     int m_responseHttpStatusCode;
@@ -203,13 +204,16 @@ DEFINE_TRACE(FetchManager::Loader)
     visitor->trace(m_fetchManager);
     visitor->trace(m_resolver);
     visitor->trace(m_request);
+    visitor->trace(m_loader);
     visitor->trace(m_integrityVerifier);
     visitor->trace(m_executionContext);
 }
 
-void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
+void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceResponse& response, std::unique_ptr<WebDataConsumerHandle> handle)
 {
     ASSERT(handle);
+    ScriptState* scriptState = m_resolver->getScriptState();
+    ScriptState::Scope scope(scriptState);
 
     if (response.url().protocolIs("blob") && response.httpStatusCode() == 404) {
         // "If |blob| is null, return a network error."
@@ -294,9 +298,9 @@ void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceRespo
     FetchResponseData* responseData = nullptr;
     CompositeDataConsumerHandle::Updater* updater = nullptr;
     if (m_request->integrity().isEmpty())
-        responseData = FetchResponseData::createWithBuffer(new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle)));
+        responseData = FetchResponseData::createWithBuffer(new BodyStreamBuffer(scriptState, createFetchDataConsumerHandleFromWebHandle(std::move(handle))));
     else
-        responseData = FetchResponseData::createWithBuffer(new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(CompositeDataConsumerHandle::create(createWaitingDataConsumerHandle(), &updater))));
+        responseData = FetchResponseData::createWithBuffer(new BodyStreamBuffer(scriptState, createFetchDataConsumerHandleFromWebHandle(CompositeDataConsumerHandle::create(createWaitingDataConsumerHandle(), &updater))));
     responseData->setStatus(response.httpStatusCode());
     responseData->setStatusMessage(response.httpStatusText());
     for (auto& it : response.httpHeaderFields())
@@ -331,9 +335,12 @@ void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceRespo
         case FetchRequestData::BasicTainting:
             taintedResponse = responseData->createBasicFilteredResponse();
             break;
-        case FetchRequestData::CORSTainting:
-            taintedResponse = responseData->createCORSFilteredResponse();
+        case FetchRequestData::CORSTainting: {
+            HTTPHeaderSet headerNames;
+            extractCorsExposedHeaderNamesList(response, headerNames);
+            taintedResponse = responseData->createCORSFilteredResponse(headerNames);
             break;
+        }
         case FetchRequestData::OpaqueTainting:
             taintedResponse = responseData->createOpaqueFilteredResponse();
             break;
@@ -358,7 +365,7 @@ void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceRespo
         m_resolver.clear();
     } else {
         ASSERT(!m_integrityVerifier);
-        m_integrityVerifier = new SRIVerifier(handle, updater, r, this, m_request->integrity(), response.url());
+        m_integrityVerifier = new SRIVerifier(std::move(handle), updater, r, this, m_request->integrity(), response.url());
     }
 }
 
@@ -518,7 +525,7 @@ void FetchManager::Loader::dispose()
     m_fetchManager = nullptr;
     if (m_loader) {
         m_loader->cancel();
-        m_loader.clear();
+        m_loader = nullptr;
     }
     m_executionContext = nullptr;
 }
@@ -559,7 +566,7 @@ void FetchManager::Loader::performHTTPFetch(bool corsFlag, bool corsPreflightFla
     request.setHTTPMethod(m_request->method());
     request.setFetchRequestMode(m_request->mode());
     request.setFetchCredentialsMode(m_request->credentials());
-    const Vector<OwnPtr<FetchHeaderList::Header>>& list = m_request->headerList()->list();
+    const Vector<std::unique_ptr<FetchHeaderList::Header>>& list = m_request->headerList()->list();
     for (size_t i = 0; i < list.size(); ++i) {
         request.addHTTPHeaderField(AtomicString(list[i]->first), AtomicString(list[i]->second));
     }
@@ -585,7 +592,7 @@ void FetchManager::Loader::performHTTPFetch(bool corsFlag, bool corsPreflightFla
     // Note that generateReferrer generates |no-referrer| from |no-referrer|
     // referrer string (i.e. String()).
     request.setHTTPReferrer(SecurityPolicy::generateReferrer(referrerPolicy, m_request->url(), referrerString));
-    request.setSkipServiceWorker(m_isIsolatedWorld);
+    request.setSkipServiceWorker(m_isIsolatedWorld ? WebURLRequest::SkipServiceWorker::All : WebURLRequest::SkipServiceWorker::None);
 
     // "3. Append `Host`, ..."
     // FIXME: Implement this when the spec is fixed.
@@ -678,11 +685,11 @@ void FetchManager::Loader::failed(const String& message)
     if (m_failed || m_finished)
         return;
     m_failed = true;
+    if (m_executionContext->activeDOMObjectsAreStopped())
+        return;
     if (!message.isEmpty())
         m_executionContext->addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, message));
     if (m_resolver) {
-        if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
-            return;
         ScriptState* state = m_resolver->getScriptState();
         ScriptState::Scope scope(state);
         m_resolver->reject(V8ThrowException::createTypeError(state->isolate(), "Failed to fetch"));
@@ -705,10 +712,6 @@ FetchManager* FetchManager::create(ExecutionContext* executionContext)
 FetchManager::FetchManager(ExecutionContext* executionContext)
     : ContextLifecycleObserver(executionContext)
     , m_isStopped(false)
-{
-}
-
-FetchManager::~FetchManager()
 {
 }
 

@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "components/crx_file/id_util.h"
 #include "components/guest_view/browser/guest_view_event.h"
@@ -126,9 +127,9 @@ void ExtensionOptionsGuest::DidInitialize(
 }
 
 void ExtensionOptionsGuest::GuestViewDidStopLoading() {
-  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  DispatchEventToView(make_scoped_ptr(new GuestViewEvent(
-      extension_options_internal::OnLoad::kEventName, std::move(args))));
+  std::unique_ptr<base::DictionaryValue> args(new base::DictionaryValue());
+  DispatchEventToView(base::MakeUnique<GuestViewEvent>(
+      extension_options_internal::OnLoad::kEventName, std::move(args)));
 }
 
 const char* ExtensionOptionsGuest::GetAPINamespace() const {
@@ -148,9 +149,9 @@ void ExtensionOptionsGuest::OnPreferredSizeChanged(const gfx::Size& pref_size) {
   // Convert the size from physical pixels to logical pixels.
   options.width = PhysicalPixelsToLogicalPixels(pref_size.width());
   options.height = PhysicalPixelsToLogicalPixels(pref_size.height());
-  DispatchEventToView(make_scoped_ptr(new GuestViewEvent(
+  DispatchEventToView(base::MakeUnique<GuestViewEvent>(
       extension_options_internal::OnPreferredSizeChanged::kEventName,
-      options.ToValue())));
+      options.ToValue()));
 }
 
 bool ExtensionOptionsGuest::ShouldHandleFindRequestsForEmbedder() const {
@@ -167,22 +168,20 @@ WebContents* ExtensionOptionsGuest::OpenURLFromTab(
   // this guest view, change the disposition to NEW_FOREGROUND_TAB.
   if ((!params.url.SchemeIs(extensions::kExtensionScheme) ||
        params.url.host() != options_page_.host()) &&
-      params.disposition == CURRENT_TAB) {
+      params.disposition == WindowOpenDisposition::CURRENT_TAB) {
     return extension_options_guest_delegate_->OpenURLInNewTab(
-        content::OpenURLParams(params.url,
-                               params.referrer,
-                               params.frame_tree_node_id,
-                               NEW_FOREGROUND_TAB,
-                               params.transition,
-                               params.is_renderer_initiated));
+        content::OpenURLParams(
+            params.url, params.referrer, params.frame_tree_node_id,
+            WindowOpenDisposition::NEW_FOREGROUND_TAB, params.transition,
+            params.is_renderer_initiated));
   }
   return extension_options_guest_delegate_->OpenURLInNewTab(params);
 }
 
 void ExtensionOptionsGuest::CloseContents(WebContents* source) {
-  DispatchEventToView(make_scoped_ptr(
-      new GuestViewEvent(extension_options_internal::OnClose::kEventName,
-                         make_scoped_ptr(new base::DictionaryValue()))));
+  DispatchEventToView(base::MakeUnique<GuestViewEvent>(
+      extension_options_internal::OnClose::kEventName,
+      base::WrapUnique(new base::DictionaryValue())));
 }
 
 bool ExtensionOptionsGuest::HandleContextMenu(
@@ -212,11 +211,9 @@ bool ExtensionOptionsGuest::ShouldCreateWebContents(
   //   ctrl-click or middle mouse button click
   if (extension_options_guest_delegate_) {
     extension_options_guest_delegate_->OpenURLInNewTab(
-        content::OpenURLParams(target_url,
-                               content::Referrer(),
-                               NEW_FOREGROUND_TAB,
-                               ui::PAGE_TRANSITION_LINK,
-                               false));
+        content::OpenURLParams(target_url, content::Referrer(),
+                               WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                               ui::PAGE_TRANSITION_LINK, false));
   }
   return false;
 }
@@ -225,10 +222,10 @@ void ExtensionOptionsGuest::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
   if (attached()) {
-    auto guest_zoom_controller =
-        ui_zoom::ZoomController::FromWebContents(web_contents());
+    auto* guest_zoom_controller =
+        zoom::ZoomController::FromWebContents(web_contents());
     guest_zoom_controller->SetZoomMode(
-        ui_zoom::ZoomController::ZOOM_MODE_ISOLATED);
+        zoom::ZoomController::ZOOM_MODE_ISOLATED);
     SetGuestZoomLevelToMatchEmbedder();
 
     if (!url::IsSameOriginWith(params.url, options_page_)) {

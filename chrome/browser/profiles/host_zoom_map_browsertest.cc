@@ -34,8 +34,8 @@
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_switches.h"
-#include "components/ui/zoom/page_zoom.h"
-#include "components/ui/zoom/zoom_event_manager.h"
+#include "components/zoom/page_zoom.h"
+#include "components/zoom/zoom_event_manager.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/test/test_utils.h"
 #include "net/dns/mock_host_resolver.h"
@@ -52,7 +52,7 @@ class ZoomLevelChangeObserver {
  public:
   explicit ZoomLevelChangeObserver(content::BrowserContext* context)
       : message_loop_runner_(new content::MessageLoopRunner) {
-    subscription_ = ui_zoom::ZoomEventManager::GetForBrowserContext(context)
+    subscription_ = zoom::ZoomEventManager::GetForBrowserContext(context)
                         ->AddZoomLevelChangedCallback(base::Bind(
                             &ZoomLevelChangeObserver::OnZoomLevelChanged,
                             base::Unretained(this)));
@@ -289,19 +289,19 @@ IN_PROC_BROWSER_TEST_F(HostZoomMapBrowserTest, ToggleDefaultZoomLevel) {
 
   GURL test_url2 = ConstructTestServerURL(kTestURLTemplate2);
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), test_url2, NEW_FOREGROUND_TAB,
+      browser(), test_url2, WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   EXPECT_TRUE(
       content::ZoomValuesEqual(default_zoom_level, GetZoomLevel(test_url2)));
 
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  ui_zoom::PageZoom::Zoom(web_contents, content::PAGE_ZOOM_OUT);
+  zoom::PageZoom::Zoom(web_contents, content::PAGE_ZOOM_OUT);
   observer.BlockUntilZoomLevelForHostHasChanged(test_url2.host());
   EXPECT_FALSE(
       content::ZoomValuesEqual(default_zoom_level, GetZoomLevel(test_url2)));
 
-  ui_zoom::PageZoom::Zoom(web_contents, content::PAGE_ZOOM_IN);
+  zoom::PageZoom::Zoom(web_contents, content::PAGE_ZOOM_IN);
   observer.BlockUntilZoomLevelForHostHasChanged(test_url2.host());
   EXPECT_TRUE(
       content::ZoomValuesEqual(default_zoom_level, GetZoomLevel(test_url2)));

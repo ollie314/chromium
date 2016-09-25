@@ -26,8 +26,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-"""
-This is an implementation of the Port interface that overrides other
+"""This is an implementation of the Port interface that overrides other
 ports and changes the Driver binary to "MockDRT".
 
 The MockDRT objects emulate what a real DRT would do. In particular, they
@@ -37,7 +36,6 @@ MockDRT to crash).
 """
 
 import base64
-import logging
 import optparse
 import os
 import sys
@@ -54,8 +52,6 @@ from webkitpy.common.system.systemhost import SystemHost
 from webkitpy.layout_tests.models import test_run_results
 from webkitpy.layout_tests.port.driver import DriverInput, DriverOutput
 from webkitpy.layout_tests.port.factory import PortFactory
-
-_log = logging.getLogger(__name__)
 
 
 class MockDRTPort(object):
@@ -129,10 +125,10 @@ class MockDRTPort(object):
     def _make_wdiff_available(self):
         self.__delegate._wdiff_available = True
 
-    def setup_environ_for_server(self, server_name):
+    def setup_environ_for_server(self):
         env = self.__delegate.setup_environ_for_server()
         # We need to propagate PATH down so the python code can find the checkout.
-        env['PATH'] = os.environ['PATH']
+        env['PATH'] = self.host.environ.get('PATH')
         return env
 
     def lookup_virtual_test_args(self, test_name):

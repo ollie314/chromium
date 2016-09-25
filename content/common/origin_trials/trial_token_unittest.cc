@@ -12,6 +12,7 @@
 #include "base/test/simple_test_clock.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/WebOriginTrialTokenStatus.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -27,6 +28,13 @@ namespace {
 //  0x10, 0xac, 0xf9, 0x3a, 0x1c, 0xb8, 0xa9, 0x28, 0x70, 0xd2, 0x9a,
 //  0xd0, 0x0b, 0x59, 0xe1, 0xac, 0x2b, 0xb7, 0xd5, 0xca, 0x1f, 0x64,
 //  0x90, 0x08, 0x8e, 0xa8, 0xe0, 0x56, 0x3a, 0x04, 0xd0
+//
+//  This private key can also be found in tools/origin_trials/eftest.key in
+//  binary form. Please update that if changing the key.
+//
+//  To use this with a real browser, use --origin-trial-public-key with the
+//  public key, base-64-encoded:
+//  --origin-trial-public-key=dRCs+TocuKkocNKa0AtZ4awrt9XKH2SQCI6o4FY6BNA=
 const uint8_t kTestPublicKey[] = {
     0x75, 0x10, 0xac, 0xf9, 0x3a, 0x1c, 0xb8, 0xa9, 0x28, 0x70, 0xd2,
     0x9a, 0xd0, 0x0b, 0x59, 0xe1, 0xac, 0x2b, 0xb7, 0xd5, 0xca, 0x1f,
@@ -75,10 +83,10 @@ double kInvalidTimestamp = 1458766278.0;
 
 // Well-formed trial token with an invalid signature.
 const char* kInvalidSignatureToken =
-    "AYeNXSDktgG9p4ns5B1WKsLq2TytMxfR4whfbi+oyT0rXyzh+qXYfxbDMGmyjU2Z"
-    "lEJ16vQObMXJoOaYUqd8xwkAAABZeyJvcmlnaW4iOiAiaHR0cHM6Ly92YWxpZC5l"
-    "eGFtcGxlLmNvbTo0NDMiLCAiZmVhdHVyZSI6ICJGcm9idWxhdGUiLCAiZXhwaXJ5"
-    "IjogMTQ1ODc2NjI3N30=";
+    "Ap+Q/Qm0ELadZql+dlEGSwnAVsFZKgCEtUZg8idQC3uekkIeSZIY1tftoYdrwhqj"
+    "7FO5L22sNvkZZnacLvmfNwsAAABaeyJvcmlnaW4iOiAiaHR0cHM6Ly92YWxpZC5l"
+    "eGFtcGxlLmNvbTo0NDMiLCAiZmVhdHVyZSI6ICJGcm9idWxhdGV4IiwgImV4cGly"
+    "eSI6IDE0NTg3NjYyNzd9";
 
 // Trial token truncated in the middle of the length field; too short to
 // possibly be valid.
@@ -153,10 +161,19 @@ class TrialTokenTest : public testing::TestWithParam<const char*> {
                               arraysize(kTestPublicKey2))) {}
 
  protected:
-  std::unique_ptr<std::string> Extract(const std::string& token_text,
-                                       base::StringPiece public_key) {
-    return TrialToken::Extract(token_text, public_key);
+  blink::WebOriginTrialTokenStatus Extract(const std::string& token_text,
+                                           base::StringPiece public_key,
+                                           std::string* token_payload) {
+    return TrialToken::Extract(token_text, public_key, token_payload);
   }
+
+  blink::WebOriginTrialTokenStatus ExtractIgnorePayload(
+      const std::string& token_text,
+      base::StringPiece public_key) {
+    std::string token_payload;
+    return Extract(token_text, public_key, &token_payload);
+  }
+
   std::unique_ptr<TrialToken> Parse(const std::string& token_payload) {
     return TrialToken::Parse(token_payload);
   }
@@ -196,46 +213,47 @@ class TrialTokenTest : public testing::TestWithParam<const char*> {
 // Test verification of signature and extraction of token JSON from signed
 // token.
 TEST_F(TrialTokenTest, ValidateValidSignature) {
-  std::unique_ptr<std::string> token_payload =
-      Extract(kSampleToken, correct_public_key());
-  ASSERT_TRUE(token_payload);
-  EXPECT_STREQ(kSampleTokenJSON, token_payload.get()->c_str());
+  std::string token_payload;
+  blink::WebOriginTrialTokenStatus status =
+      Extract(kSampleToken, correct_public_key(), &token_payload);
+  ASSERT_EQ(blink::WebOriginTrialTokenStatus::Success, status);
+  EXPECT_STREQ(kSampleTokenJSON, token_payload.c_str());
 }
 
 TEST_F(TrialTokenTest, ValidateInvalidSignature) {
-  std::unique_ptr<std::string> token_payload =
-      Extract(kInvalidSignatureToken, correct_public_key());
-  ASSERT_FALSE(token_payload);
+  blink::WebOriginTrialTokenStatus status =
+      ExtractIgnorePayload(kInvalidSignatureToken, correct_public_key());
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::InvalidSignature, status);
 }
 
 TEST_F(TrialTokenTest, ValidateSignatureWithIncorrectKey) {
-  std::unique_ptr<std::string> token_payload =
-      Extract(kSampleToken, incorrect_public_key());
-  ASSERT_FALSE(token_payload);
+  blink::WebOriginTrialTokenStatus status =
+      ExtractIgnorePayload(kSampleToken, incorrect_public_key());
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::InvalidSignature, status);
 }
 
 TEST_F(TrialTokenTest, ValidateEmptyToken) {
-  std::unique_ptr<std::string> token_payload =
-      Extract("", correct_public_key());
-  ASSERT_FALSE(token_payload);
+  blink::WebOriginTrialTokenStatus status =
+      ExtractIgnorePayload("", correct_public_key());
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::Malformed, status);
 }
 
 TEST_F(TrialTokenTest, ValidateShortToken) {
-  std::unique_ptr<std::string> token_payload =
-      Extract(kTruncatedToken, correct_public_key());
-  ASSERT_FALSE(token_payload);
+  blink::WebOriginTrialTokenStatus status =
+      ExtractIgnorePayload(kTruncatedToken, correct_public_key());
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::Malformed, status);
 }
 
 TEST_F(TrialTokenTest, ValidateUnsupportedVersion) {
-  std::unique_ptr<std::string> token_payload =
-      Extract(kIncorrectVersionToken, correct_public_key());
-  ASSERT_FALSE(token_payload);
+  blink::WebOriginTrialTokenStatus status =
+      ExtractIgnorePayload(kIncorrectVersionToken, correct_public_key());
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::WrongVersion, status);
 }
 
 TEST_F(TrialTokenTest, ValidateSignatureWithIncorrectLength) {
-  std::unique_ptr<std::string> token_payload =
-      Extract(kIncorrectLengthToken, correct_public_key());
-  ASSERT_FALSE(token_payload);
+  blink::WebOriginTrialTokenStatus status =
+      ExtractIgnorePayload(kIncorrectLengthToken, correct_public_key());
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::Malformed, status);
 }
 
 // Test parsing of fields from JSON token.
@@ -276,25 +294,42 @@ TEST_F(TrialTokenTest, ValidateValidToken) {
   EXPECT_FALSE(ValidateDate(token.get(), invalid_timestamp_));
 }
 
-TEST_F(TrialTokenTest, TokenIsValidForFeature) {
+TEST_F(TrialTokenTest, TokenIsValid) {
   std::unique_ptr<TrialToken> token = Parse(kSampleTokenJSON);
   ASSERT_TRUE(token);
-  EXPECT_TRUE(token->IsValidForFeature(expected_origin_, kExpectedFeatureName,
-                                       valid_timestamp_));
-  EXPECT_FALSE(token->IsValidForFeature(
-      expected_origin_, base::ToUpperASCII(kExpectedFeatureName),
-      valid_timestamp_));
-  EXPECT_FALSE(token->IsValidForFeature(
-      expected_origin_, base::ToLowerASCII(kExpectedFeatureName),
-      valid_timestamp_));
-  EXPECT_FALSE(token->IsValidForFeature(invalid_origin_, kExpectedFeatureName,
-                                        valid_timestamp_));
-  EXPECT_FALSE(token->IsValidForFeature(insecure_origin_, kExpectedFeatureName,
-                                        valid_timestamp_));
-  EXPECT_FALSE(token->IsValidForFeature(expected_origin_, kInvalidFeatureName,
-                                        valid_timestamp_));
-  EXPECT_FALSE(token->IsValidForFeature(expected_origin_, kExpectedFeatureName,
-                                        invalid_timestamp_));
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::Success,
+            token->IsValid(expected_origin_, valid_timestamp_));
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::WrongOrigin,
+            token->IsValid(invalid_origin_, valid_timestamp_));
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::WrongOrigin,
+            token->IsValid(insecure_origin_, valid_timestamp_));
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::Expired,
+            token->IsValid(expected_origin_, invalid_timestamp_));
+}
+
+// Test overall extraction, to ensure output status matches returned token
+TEST_F(TrialTokenTest, ExtractValidToken) {
+  blink::WebOriginTrialTokenStatus status;
+  std::unique_ptr<TrialToken> token =
+      TrialToken::From(kSampleToken, correct_public_key(), &status);
+  EXPECT_TRUE(token);
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::Success, status);
+}
+
+TEST_F(TrialTokenTest, ExtractInvalidSignature) {
+  blink::WebOriginTrialTokenStatus status;
+  std::unique_ptr<TrialToken> token =
+      TrialToken::From(kSampleToken, incorrect_public_key(), &status);
+  EXPECT_FALSE(token);
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::InvalidSignature, status);
+}
+
+TEST_F(TrialTokenTest, ExtractMalformedToken) {
+  blink::WebOriginTrialTokenStatus status;
+  std::unique_ptr<TrialToken> token =
+      TrialToken::From(kIncorrectLengthToken, correct_public_key(), &status);
+  EXPECT_FALSE(token);
+  EXPECT_EQ(blink::WebOriginTrialTokenStatus::Malformed, status);
 }
 
 }  // namespace content

@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <utility>
 
 #include "base/files/file_path.h"
 #include "base/strings/string_number_conversions.h"
@@ -282,9 +283,10 @@ void AccessibilityTreeFormatterWin::AddProperties(
     dict->SetInteger("n_relations", n_relations);
 
   LONG group_level, similar_items_in_group, position_in_group;
-  if (SUCCEEDED(ax_object->get_groupPosition(&group_level,
-                                 &similar_items_in_group,
-                                 &position_in_group))) {
+  // |GetGroupPosition| returns S_FALSE when no grouping information is
+  // available so avoid using |SUCCEEDED|.
+  if (ax_object->get_groupPosition(&group_level, &similar_items_in_group,
+                                   &position_in_group) == S_OK) {
     dict->SetInteger("group_level", group_level);
     dict->SetInteger("similar_items_in_group", similar_items_in_group);
     dict->SetInteger("position_in_group", position_in_group);

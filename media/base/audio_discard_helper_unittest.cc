@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "media/base/audio_discard_helper.h"
+
 #include <stddef.h>
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "media/base/audio_buffer.h"
 #include "media/base/audio_bus.h"
-#include "media/base/audio_discard_helper.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/test_helpers.h"
 #include "media/base/timestamp_constants.h"
@@ -28,21 +30,16 @@ static scoped_refptr<DecoderBuffer> CreateEncodedBuffer(
 }
 
 static scoped_refptr<AudioBuffer> CreateDecodedBuffer(int frames) {
-  return MakeAudioBuffer(kSampleFormatPlanarF32,
-                         CHANNEL_LAYOUT_MONO,
-                         1,
-                         kSampleRate,
-                         0.0f,
-                         kDataStep,
-                         frames,
-                         kNoTimestamp());
+  return MakeAudioBuffer(kSampleFormatPlanarF32, CHANNEL_LAYOUT_MONO, 1,
+                         kSampleRate, 0.0f, kDataStep, frames, kNoTimestamp);
 }
 
 static float ExtractDecodedData(const scoped_refptr<AudioBuffer>& buffer,
                                 int index) {
   // This is really inefficient, but we can't access the raw AudioBuffer if any
   // start trimming has been applied.
-  scoped_ptr<AudioBus> temp_bus = AudioBus::Create(buffer->channel_count(), 1);
+  std::unique_ptr<AudioBus> temp_bus =
+      AudioBus::Create(buffer->channel_count(), 1);
   buffer->ReadFrames(1, index, 0, temp_bus.get());
   return temp_bus->channel(0)[0];
 }
@@ -465,7 +462,7 @@ TEST(AudioDiscardHelperTest, CompleteDiscard) {
   scoped_refptr<DecoderBuffer> encoded_buffer =
       CreateEncodedBuffer(kTimestamp, kDuration);
   encoded_buffer->set_discard_padding(
-      std::make_pair(kInfiniteDuration(), base::TimeDelta()));
+      std::make_pair(kInfiniteDuration, base::TimeDelta()));
   scoped_refptr<AudioBuffer> decoded_buffer = CreateDecodedBuffer(kTestFrames);
 
   // Verify all of the first buffer is discarded.
@@ -495,7 +492,7 @@ TEST(AudioDiscardHelperTest, CompleteDiscardWithDelayedDiscard) {
   scoped_refptr<DecoderBuffer> encoded_buffer =
       CreateEncodedBuffer(kTimestamp, kDuration);
   encoded_buffer->set_discard_padding(
-      std::make_pair(kInfiniteDuration(), base::TimeDelta()));
+      std::make_pair(kInfiniteDuration, base::TimeDelta()));
   scoped_refptr<AudioBuffer> decoded_buffer = CreateDecodedBuffer(kTestFrames);
 
   // Setup a delayed discard.
@@ -531,7 +528,7 @@ TEST(AudioDiscardHelperTest, CompleteDiscardWithInitialDiscardDecoderDelay) {
   scoped_refptr<DecoderBuffer> encoded_buffer =
       CreateEncodedBuffer(kTimestamp, kDuration);
   encoded_buffer->set_discard_padding(
-      std::make_pair(kInfiniteDuration(), base::TimeDelta()));
+      std::make_pair(kInfiniteDuration, base::TimeDelta()));
   scoped_refptr<AudioBuffer> decoded_buffer = CreateDecodedBuffer(kTestFrames);
 
   // Verify all of the first buffer is discarded.

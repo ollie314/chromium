@@ -31,8 +31,11 @@
 #define MediaControlElements_h
 
 #include "core/html/shadow/MediaControlElementTypes.h"
+#include "public/platform/WebLocalizedString.h"
 
 namespace blink {
+
+class TextTrack;
 
 // ----------------------------
 
@@ -53,7 +56,7 @@ private:
 
     void startTimer();
     void stopTimer();
-    void transitionTimerFired(Timer<MediaControlPanelElement>*);
+    void transitionTimerFired(TimerBase*);
     void didBecomeVisible();
 
     bool m_isDisplayed;
@@ -92,6 +95,10 @@ public:
     bool willRespondToMouseClickEvents() override { return true; }
     void updateDisplayType() override;
 
+    WebLocalizedString::Name getOverflowStringName() override;
+
+    bool hasOverflowButton() override { return true; }
+
 private:
     explicit MediaControlMuteButtonElement(MediaControls&);
 
@@ -106,6 +113,10 @@ public:
 
     bool willRespondToMouseClickEvents() override { return true; }
     void updateDisplayType() override;
+
+    WebLocalizedString::Name getOverflowStringName() override;
+
+    bool hasOverflowButton() override { return true; }
 
 private:
     explicit MediaControlPlayButtonElement(MediaControls&);
@@ -138,6 +149,10 @@ public:
 
     void updateDisplayType() override;
 
+    WebLocalizedString::Name getOverflowStringName() override;
+
+    bool hasOverflowButton() override { return true; }
+
 private:
     explicit MediaControlToggleClosedCaptionsButtonElement(MediaControls&);
 
@@ -145,6 +160,85 @@ private:
 };
 
 // ----------------------------
+
+class MediaControlTextTrackListElement final : public MediaControlDivElement {
+public:
+    static MediaControlTextTrackListElement* create(MediaControls&);
+
+    bool willRespondToMouseClickEvents() override { return true; }
+
+    void setVisible(bool);
+
+private:
+    explicit MediaControlTextTrackListElement(MediaControls&);
+
+    void defaultEventHandler(Event*) override;
+
+    void refreshTextTrackListMenu();
+
+    // Returns the label for the track when a valid track is passed in and "Off" when the parameter is null.
+    String getTextTrackLabel(TextTrack*);
+    // Creates the track element in the list when a valid track is passed in and the "Off" item when the parameter is null.
+    Element* createTextTrackListItem(TextTrack*);
+
+    void showTextTrackAtIndex(unsigned);
+    void disableShowingTextTracks();
+};
+
+// ----------------------------
+// Represents the overflow menu which is displayed when the width of the media
+// player is small enough that at least two buttons are no longer visible.
+class MediaControlOverflowMenuButtonElement final : public MediaControlInputElement {
+public:
+    static MediaControlOverflowMenuButtonElement* create(MediaControls&);
+
+    // The overflow button should respond to mouse clicks since we want a click
+    // to open up the menu.
+    bool willRespondToMouseClickEvents() override { return true; }
+
+private:
+    explicit MediaControlOverflowMenuButtonElement(MediaControls&);
+
+    void defaultEventHandler(Event*) override;
+};
+
+// ----------------------------
+// Holds a list of elements within the overflow menu.
+class MediaControlOverflowMenuListElement final : public MediaControlDivElement {
+public:
+    static MediaControlOverflowMenuListElement* create(MediaControls&);
+
+private:
+    explicit MediaControlOverflowMenuListElement(MediaControls&);
+
+    void defaultEventHandler(Event*) override;
+};
+
+// ----------------------------
+// Represents a button that allows users to download media if the file is
+// downloadable.
+class MediaControlDownloadButtonElement final : public MediaControlInputElement {
+public:
+    static MediaControlDownloadButtonElement* create(MediaControls&);
+
+    WebLocalizedString::Name getOverflowStringName() override;
+
+    bool hasOverflowButton() override { return true; }
+
+    // Returns true if the download button should be shown. We should
+    // show the button for only non-MSE, non-EME, and non-MediaStream content.
+    bool shouldDisplayDownloadButton();
+
+    DECLARE_VIRTUAL_TRACE();
+
+private:
+    explicit MediaControlDownloadButtonElement(MediaControls&);
+
+    void defaultEventHandler(Event*) override;
+
+    // Points to an anchor element that contains the URL of the media file.
+    Member<HTMLAnchorElement> m_anchor;
+};
 
 class MediaControlTimelineElement final : public MediaControlInputElement {
 public:
@@ -174,6 +268,10 @@ public:
 
     void setIsFullscreen(bool);
 
+    WebLocalizedString::Name getOverflowStringName() override;
+
+    bool hasOverflowButton() override { return true; }
+
 private:
     explicit MediaControlFullscreenButtonElement(MediaControls&);
 
@@ -189,6 +287,10 @@ public:
     bool willRespondToMouseClickEvents() override { return true; }
 
     void setIsPlayingRemotely(bool);
+
+    WebLocalizedString::Name getOverflowStringName() override;
+
+    bool hasOverflowButton() override { return true; }
 
     // This will show a cast button if it is not covered by another element.
     // This MUST be called for cast button elements that are overlay elements.

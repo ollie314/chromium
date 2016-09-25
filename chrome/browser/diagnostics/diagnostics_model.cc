@@ -27,12 +27,12 @@ namespace diagnostics {
 #if defined(OS_WIN)
 const int DiagnosticsModel::kDiagnosticsTestCount = 17;
 #elif defined(OS_MACOSX)
-const int DiagnosticsModel::kDiagnosticsTestCount = 13;
+const int DiagnosticsModel::kDiagnosticsTestCount = 14;
 #elif defined(OS_POSIX)
 #if defined(OS_CHROMEOS)
-const int DiagnosticsModel::kDiagnosticsTestCount = 17;
+const int DiagnosticsModel::kDiagnosticsTestCount = 18;
 #else
-const int DiagnosticsModel::kDiagnosticsTestCount = 15;
+const int DiagnosticsModel::kDiagnosticsTestCount = 16;
 #endif
 #endif
 
@@ -50,7 +50,7 @@ class DiagnosticsModelImpl : public DiagnosticsModel {
  public:
   DiagnosticsModelImpl() : tests_run_(0) {}
 
-  ~DiagnosticsModelImpl() override { STLDeleteElements(&tests_); }
+  ~DiagnosticsModelImpl() override { base::STLDeleteElements(&tests_); }
 
   int GetTestRunCount() const override { return tests_run_; }
 
@@ -151,7 +151,6 @@ class DiagnosticsModelWin : public DiagnosticsModelImpl {
  public:
   DiagnosticsModelWin() {
     tests_.push_back(MakeOperatingSystemTest());
-    tests_.push_back(MakeConflictingDllsTest());
     tests_.push_back(MakeInstallTypeTest());
     tests_.push_back(MakeVersionTest());
     tests_.push_back(MakeUserDirTest());
@@ -164,8 +163,9 @@ class DiagnosticsModelWin : public DiagnosticsModelImpl {
     tests_.push_back(MakeBookMarksTest());
     tests_.push_back(MakeSqliteWebDataDbTest());
     tests_.push_back(MakeSqliteCookiesDbTest());
+    tests_.push_back(MakeSqliteFaviconsDbTest());
     tests_.push_back(MakeSqliteHistoryDbTest());
-    tests_.push_back(MakeSqliteThumbnailsDbTest());
+    tests_.push_back(MakeSqliteTopSitesDbTest());
     tests_.push_back(MakeSqliteWebDatabaseTrackerDbTest());
   }
 
@@ -187,8 +187,9 @@ class DiagnosticsModelMac : public DiagnosticsModelImpl {
     tests_.push_back(MakeBookMarksTest());
     tests_.push_back(MakeSqliteWebDataDbTest());
     tests_.push_back(MakeSqliteCookiesDbTest());
+    tests_.push_back(MakeSqliteFaviconsDbTest());
     tests_.push_back(MakeSqliteHistoryDbTest());
-    tests_.push_back(MakeSqliteThumbnailsDbTest());
+    tests_.push_back(MakeSqliteTopSitesDbTest());
     tests_.push_back(MakeSqliteWebDatabaseTrackerDbTest());
   }
 
@@ -212,8 +213,9 @@ class DiagnosticsModelPosix : public DiagnosticsModelImpl {
     tests_.push_back(MakeBookMarksTest());
     tests_.push_back(MakeSqliteWebDataDbTest());
     tests_.push_back(MakeSqliteCookiesDbTest());
+    tests_.push_back(MakeSqliteFaviconsDbTest());
     tests_.push_back(MakeSqliteHistoryDbTest());
-    tests_.push_back(MakeSqliteThumbnailsDbTest());
+    tests_.push_back(MakeSqliteTopSitesDbTest());
     tests_.push_back(MakeSqliteWebDatabaseTrackerDbTest());
 #if defined(OS_CHROMEOS)
     tests_.push_back(MakeSqliteNssCertDbTest());

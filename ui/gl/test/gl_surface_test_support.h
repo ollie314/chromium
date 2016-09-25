@@ -7,7 +7,7 @@
 
 #include "ui/gl/gl_implementation.h"
 
-namespace gfx {
+namespace gl {
 
 class GLContext;
 
@@ -17,9 +17,8 @@ class GLSurfaceTestSupport {
   static void InitializeOneOffImplementation(GLImplementation impl,
                                              bool fallback_to_osmesa);
   static void InitializeOneOffWithMockBindings();
-  static void InitializeDynamicMockBindings(GLContext* context);
 };
 
-}  // namespace gfx
+}  // namespace gl
 
 #endif  // UI_GL_TEST_GL_SURFACE_TEST_SUPPORT_H_

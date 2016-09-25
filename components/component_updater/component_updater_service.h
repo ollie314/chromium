@@ -7,17 +7,19 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/version.h"
 #include "components/update_client/update_client.h"
 #include "url/gurl.h"
 
 class ComponentsUI;
+class PluginObserver;
 class SupervisedUserWhitelistService;
 
 namespace base {
@@ -35,6 +37,10 @@ class URLRequestContextGetter;
 class URLRequest;
 }
 
+namespace policy {
+class ComponentUpdaterPolicyTest;
+}
+
 namespace update_client {
 class ComponentInstaller;
 class Configurator;
@@ -49,6 +55,14 @@ class OnDemandUpdater;
 using Configurator = update_client::Configurator;
 using CrxComponent = update_client::CrxComponent;
 using CrxUpdateItem = update_client::CrxUpdateItem;
+
+struct ComponentInfo {
+  ComponentInfo(const std::string& id, const base::string16& name);
+  ~ComponentInfo();
+
+  const std::string id;
+  const base::string16 name;
+};
 
 // The component update service is in charge of installing or upgrading
 // select parts of chrome. Each part is called a component and managed by
@@ -67,6 +81,7 @@ using CrxUpdateItem = update_client::CrxUpdateItem;
 // All methods are safe to call ONLY from the browser's main thread.
 class ComponentUpdateService {
  public:
+  using CompletionCallback = update_client::UpdateClient::CompletionCallback;
   using Observer = update_client::UpdateClient::Observer;
 
   // Adds an observer for this class. An observer should not be added more
@@ -94,6 +109,13 @@ class ComponentUpdateService {
 
   // Returns a list of registered components.
   virtual std::vector<std::string> GetComponentIDs() const = 0;
+
+  // Returns a ComponentInfo describing a registered component that implements a
+  // handler for the specified |mime_type|. If multiple such components exist,
+  // returns information for the one that was most recently registered. If no
+  // such components exist, returns nullptr.
+  virtual std::unique_ptr<ComponentInfo> GetComponentForMimeType(
+      const std::string& mime_type) const = 0;
 
   // Returns an interface for on-demand updates. On-demand updates are
   // proactively triggered outside the normal component update service schedule.
@@ -126,6 +148,7 @@ class ComponentUpdateService {
                                    CrxUpdateItem* item) const = 0;
 
   friend class ::ComponentsUI;
+  FRIEND_TEST_ALL_PREFIXES(DefaultComponentInstallerTest, RegisterComponent);
 };
 
 using ServiceObserver = ComponentUpdateService::Observer;
@@ -136,22 +159,24 @@ class OnDemandUpdater {
 
  private:
   friend class OnDemandTester;
+  friend class policy::ComponentUpdaterPolicyTest;
   friend class SupervisedUserWhitelistInstaller;
   friend class ::ComponentsUI;
+  friend class ::PluginObserver;
 
   // Triggers an update check for a component. |id| is a value
   // returned by GetCrxComponentID(). If an update for this component is already
   // in progress, the function returns |kInProgress|. If an update is available,
   // the update will be applied. The caller can subscribe to component update
-  // service notifications to get an indication about the outcome of the
-  // on-demand update. The function does not implement any cooldown interval.
-  // TODO(sorin): improve this API so that the result of this non-blocking
-  // call is provided by a callback.
-  virtual bool OnDemandUpdate(const std::string& id) = 0;
+  // service notifications and provide an optional callback to get the result
+  // of the call. The function does not implement any cooldown interval.
+  virtual void OnDemandUpdate(
+      const std::string& id,
+      ComponentUpdateService::CompletionCallback callback) = 0;
 };
 
 // Creates the component updater.
-scoped_ptr<ComponentUpdateService> ComponentUpdateServiceFactory(
+std::unique_ptr<ComponentUpdateService> ComponentUpdateServiceFactory(
     const scoped_refptr<Configurator>& config);
 
 }  // namespace component_updater

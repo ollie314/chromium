@@ -13,14 +13,14 @@
 #include "third_party/skia/include/core/SkSurface.h"
 #include "ui/gfx/vsync_provider.h"
 #include "ui/ozone/common/egl_util.h"
-#include "ui/ozone/platform/wayland/wayland_display.h"
+#include "ui/ozone/common/gl_ozone_egl.h"
+#include "ui/ozone/platform/wayland/wayland_connection.h"
 #include "ui/ozone/platform/wayland/wayland_object.h"
 #include "ui/ozone/platform/wayland/wayland_window.h"
 #include "ui/ozone/public/surface_ozone_canvas.h"
-#include "ui/ozone/public/surface_ozone_egl.h"
 
 #if defined(USE_WAYLAND_EGL)
-#include "ui/ozone/platform/wayland/wayland_egl_surface.h"
+#include "ui/ozone/platform/wayland/gl_surface_wayland.h"
 #endif
 
 namespace ui {
@@ -31,34 +31,36 @@ static void DeleteSharedMemory(void* pixels, void* context) {
 
 class WaylandCanvasSurface : public SurfaceOzoneCanvas {
  public:
-  WaylandCanvasSurface(WaylandDisplay* display, WaylandWindow* window_);
+  WaylandCanvasSurface(WaylandConnection* connection, WaylandWindow* window_);
   ~WaylandCanvasSurface() override;
 
   // SurfaceOzoneCanvas
-  skia::RefPtr<SkSurface> GetSurface() override;
+  sk_sp<SkSurface> GetSurface() override;
   void ResizeCanvas(const gfx::Size& viewport_size) override;
   void PresentCanvas(const gfx::Rect& damage) override;
   std::unique_ptr<gfx::VSyncProvider> CreateVSyncProvider() override;
 
  private:
-  WaylandDisplay* display_;
+  WaylandConnection* connection_;
   WaylandWindow* window_;
 
   gfx::Size size_;
-  skia::RefPtr<SkSurface> sk_surface_;
+  sk_sp<SkSurface> sk_surface_;
   wl::Object<wl_shm_pool> pool_;
   wl::Object<wl_buffer> buffer_;
 
   DISALLOW_COPY_AND_ASSIGN(WaylandCanvasSurface);
 };
 
-WaylandCanvasSurface::WaylandCanvasSurface(WaylandDisplay* display,
+WaylandCanvasSurface::WaylandCanvasSurface(WaylandConnection* connection,
                                            WaylandWindow* window)
-    : display_(display), window_(window), size_(window->GetBounds().size()) {}
+    : connection_(connection),
+      window_(window),
+      size_(window->GetBounds().size()) {}
 
 WaylandCanvasSurface::~WaylandCanvasSurface() {}
 
-skia::RefPtr<SkSurface> WaylandCanvasSurface::GetSurface() {
+sk_sp<SkSurface> WaylandCanvasSurface::GetSurface() {
   if (sk_surface_)
     return sk_surface_;
 
@@ -67,8 +69,8 @@ skia::RefPtr<SkSurface> WaylandCanvasSurface::GetSurface() {
   if (!shared_memory->CreateAndMapAnonymous(length))
     return nullptr;
 
-  wl::Object<wl_shm_pool> pool(
-      wl_shm_create_pool(display_->shm(), shared_memory->handle().fd, length));
+  wl::Object<wl_shm_pool> pool(wl_shm_create_pool(
+      connection_->shm(), shared_memory->handle().fd, length));
   if (!pool)
     return nullptr;
   wl::Object<wl_buffer> buffer(
@@ -77,10 +79,10 @@ skia::RefPtr<SkSurface> WaylandCanvasSurface::GetSurface() {
   if (!buffer)
     return nullptr;
 
-  sk_surface_ = skia::AdoptRef(SkSurface::NewRasterDirectReleaseProc(
+  sk_surface_ = SkSurface::MakeRasterDirectReleaseProc(
       SkImageInfo::MakeN32Premul(size_.width(), size_.height()),
       shared_memory->memory(), size_.width() * 4, &DeleteSharedMemory,
-      shared_memory.get(), nullptr));
+      shared_memory.get(), nullptr);
   if (!sk_surface_)
     return nullptr;
   pool_ = std::move(pool);
@@ -97,7 +99,7 @@ void WaylandCanvasSurface::ResizeCanvas(const gfx::Size& viewport_size) {
   // still fits (but still reallocate if the new size is much smaller than the
   // old size).
   if (sk_surface_) {
-    sk_surface_.clear();
+    sk_surface_.reset();
     buffer_.reset();
     pool_.reset();
   }
@@ -114,7 +116,7 @@ void WaylandCanvasSurface::PresentCanvas(const gfx::Rect& damage) {
                     damage.height());
   wl_surface_attach(surface, buffer_.get(), 0, 0);
   wl_surface_commit(surface);
-  display_->ScheduleFlush();
+  connection_->ScheduleFlush();
 }
 
 std::unique_ptr<gfx::VSyncProvider>
@@ -125,49 +127,102 @@ WaylandCanvasSurface::CreateVSyncProvider() {
   return nullptr;
 }
 
-WaylandSurfaceFactory::WaylandSurfaceFactory(WaylandDisplay* display)
-    : display_(display) {}
+namespace {
 
-WaylandSurfaceFactory::~WaylandSurfaceFactory() {}
+class GLOzoneEGLWayland : public GLOzoneEGL {
+ public:
+  GLOzoneEGLWayland(WaylandConnection* connection) : connection_(connection) {}
+  ~GLOzoneEGLWayland() override {}
 
-intptr_t WaylandSurfaceFactory::GetNativeDisplay() {
-  return reinterpret_cast<intptr_t>(display_->display());
+  scoped_refptr<gl::GLSurface> CreateViewGLSurface(
+      gfx::AcceleratedWidget widget) override;
+
+  scoped_refptr<gl::GLSurface> CreateOffscreenGLSurface(
+      const gfx::Size& size) override;
+
+ protected:
+  intptr_t GetNativeDisplay() override;
+  bool LoadGLES2Bindings() override;
+
+ private:
+  WaylandConnection* connection_;
+
+  DISALLOW_COPY_AND_ASSIGN(GLOzoneEGLWayland);
+};
+
+scoped_refptr<gl::GLSurface> GLOzoneEGLWayland::CreateViewGLSurface(
+    gfx::AcceleratedWidget widget) {
+#if defined(USE_WAYLAND_EGL)
+  DCHECK(connection_);
+  WaylandWindow* window = connection_->GetWindow(widget);
+  DCHECK(window);
+  // The wl_egl_window needs to be created before the GLSurface so it can be
+  // used in the GLSurface constructor.
+  auto egl_window = CreateWaylandEglWindow(window);
+  if (!egl_window)
+    return nullptr;
+  return gl::InitializeGLSurface(new GLSurfaceWayland(std::move(egl_window)));
+#else
+  return nullptr;
+#endif
 }
 
-bool WaylandSurfaceFactory::LoadEGLGLES2Bindings(
-    AddGLLibraryCallback add_gl_library,
-    SetGLGetProcAddressProcCallback set_gl_get_proc_address) {
+scoped_refptr<gl::GLSurface> GLOzoneEGLWayland::CreateOffscreenGLSurface(
+    const gfx::Size& size) {
 #if defined(USE_WAYLAND_EGL)
-  if (!display_)
-    return false;
+  return gl::InitializeGLSurface(new gl::PbufferGLSurfaceEGL(size));
+#else
+  return nullptr;
+#endif
+}
+
+intptr_t GLOzoneEGLWayland::GetNativeDisplay() {
+  return reinterpret_cast<intptr_t>(connection_->display());
+}
+
+bool GLOzoneEGLWayland::LoadGLES2Bindings() {
+#if defined(USE_WAYLAND_EGL)
   setenv("EGL_PLATFORM", "wayland", 0);
-  return LoadDefaultEGLGLES2Bindings(add_gl_library, set_gl_get_proc_address);
+  return LoadDefaultEGLGLES2Bindings();
 #else
   return false;
 #endif
 }
 
-std::unique_ptr<SurfaceOzoneCanvas>
-WaylandSurfaceFactory::CreateCanvasForWidget(gfx::AcceleratedWidget widget) {
-  WaylandWindow* window = display_->GetWindow(widget);
-  DCHECK(window);
-  return base::WrapUnique(new WaylandCanvasSurface(display_, window));
+}  // namespace
+
+WaylandSurfaceFactory::WaylandSurfaceFactory(WaylandConnection* connection)
+    : connection_(connection) {
+  if (connection_)
+    egl_implementation_.reset(new GLOzoneEGLWayland(connection_));
 }
 
-std::unique_ptr<SurfaceOzoneEGL>
-WaylandSurfaceFactory::CreateEGLSurfaceForWidget(
-    gfx::AcceleratedWidget widget) {
-#if defined(USE_WAYLAND_EGL)
-  WaylandWindow* window = display_->GetWindow(widget);
-  DCHECK(window);
-  auto surface = base::WrapUnique(
-      new WaylandEGLSurface(window, window->GetBounds().size()));
-  if (!surface->Initialize())
+WaylandSurfaceFactory::~WaylandSurfaceFactory() {}
+
+std::unique_ptr<SurfaceOzoneCanvas>
+WaylandSurfaceFactory::CreateCanvasForWidget(gfx::AcceleratedWidget widget) {
+  if (!connection_)
     return nullptr;
-  return std::move(surface);
-#else
-  return nullptr;
-#endif
+  WaylandWindow* window = connection_->GetWindow(widget);
+  DCHECK(window);
+  return base::MakeUnique<WaylandCanvasSurface>(connection_, window);
+}
+
+std::vector<gl::GLImplementation>
+WaylandSurfaceFactory::GetAllowedGLImplementations() {
+  std::vector<gl::GLImplementation> impls;
+  impls.push_back(gl::kGLImplementationEGLGLES2);
+  return impls;
+}
+
+GLOzone* WaylandSurfaceFactory::GetGLOzone(
+    gl::GLImplementation implementation) {
+  switch (implementation) {
+    case gl::kGLImplementationEGLGLES2:
+      return egl_implementation_.get();
+    default:
+      return nullptr;
+  }
 }
 
 scoped_refptr<NativePixmap> WaylandSurfaceFactory::CreateNativePixmap(
@@ -180,6 +235,7 @@ scoped_refptr<NativePixmap> WaylandSurfaceFactory::CreateNativePixmap(
 }
 
 scoped_refptr<NativePixmap> WaylandSurfaceFactory::CreateNativePixmapFromHandle(
+    gfx::AcceleratedWidget widget,
     gfx::Size size,
     gfx::BufferFormat format,
     const gfx::NativePixmapHandle& handle) {

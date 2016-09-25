@@ -25,6 +25,7 @@
 #ifndef HTMLTextFormControlElement_h
 #define HTMLTextFormControlElement_h
 
+#include "base/gtest_prod_util.h"
 #include "core/CoreExport.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/html/HTMLFormControlElementWithState.h"
@@ -36,20 +37,12 @@ class Range;
 
 enum TextFieldSelectionDirection { SelectionHasNoDirection, SelectionHasForwardDirection, SelectionHasBackwardDirection };
 enum TextFieldEventBehavior { DispatchNoEvent, DispatchChangeEvent, DispatchInputAndChangeEvent };
-enum NeedToDispatchSelectEvent { DispatchSelectEvent, NotDispatchSelectEvent };
 
 class CORE_EXPORT HTMLTextFormControlElement : public HTMLFormControlElementWithState {
 public:
     // Common flag for HTMLInputElement::tooLong(), HTMLTextAreaElement::tooLong(),
     // HTMLInputElement::tooShort() and HTMLTextAreaElement::tooShort().
     enum NeedsToCheckDirtyFlag {CheckDirtyFlag, IgnoreDirtyFlag};
-    // Option of setSelectionRange.
-    enum SelectionOption {
-        ChangeSelection,
-        ChangeSelectionAndFocus,
-        ChangeSelectionIfFocused,
-        NotChangeSelection
-    };
 
     ~HTMLTextFormControlElement() override;
 
@@ -74,11 +67,16 @@ public:
     void setSelectionStart(int);
     void setSelectionEnd(int);
     void setSelectionDirection(const String&);
-    void select(NeedToDispatchSelectEvent = DispatchSelectEvent);
+    void select();
     virtual void setRangeText(const String& replacement, ExceptionState&);
     virtual void setRangeText(const String& replacement, unsigned start, unsigned end, const String& selectionMode, ExceptionState&);
-    void setSelectionRange(int start, int end, const String& direction);
-    void setSelectionRange(int start, int end, TextFieldSelectionDirection = SelectionHasNoDirection, NeedToDispatchSelectEvent = DispatchSelectEvent, SelectionOption = ChangeSelection);
+    // Web-exposed setSelectionRange() function. This schedule to dispatch
+    // 'select' event.
+    void setSelectionRangeForBinding(int start, int end, const String& direction = "none");
+    // Blink-internal version of setSelectionRange(). This translates "none"
+    // direction to "forward" on platforms without "none" direction.
+    // This returns true if it updated cached selection and/or FrameSelection.
+    bool setSelectionRange(int start, int end, TextFieldSelectionDirection = SelectionHasNoDirection);
     Range* selection() const;
 
     virtual bool supportsAutocapitalize() const = 0;
@@ -118,14 +116,6 @@ protected:
 
     void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
 
-    void cacheSelection(int start, int end, TextFieldSelectionDirection direction)
-    {
-        ASSERT(start >= 0);
-        m_cachedSelectionStart = start;
-        m_cachedSelectionEnd = end;
-        m_cachedSelectionDirection = direction;
-    }
-
     void restoreCachedSelection();
 
     void defaultEventHandler(Event*) override;
@@ -142,6 +132,15 @@ private:
     int computeSelectionStart() const;
     int computeSelectionEnd() const;
     TextFieldSelectionDirection computeSelectionDirection() const;
+    void cacheSelection(int start, int end, TextFieldSelectionDirection direction)
+    {
+        DCHECK_GE(start, 0);
+        DCHECK_LE(start, end);
+        m_cachedSelectionStart = start;
+        m_cachedSelectionEnd = end;
+        m_cachedSelectionDirection = direction;
+    }
+    static int indexForPosition(HTMLElement* innerEditor, const Position&);
 
     void dispatchFocusEvent(Element* oldFocusedElement, WebFocusType, InputDeviceCapabilities* sourceCapabilities) final;
     void dispatchBlurEvent(Element* newFocusedElement, WebFocusType, InputDeviceCapabilities* sourceCapabilities) final;
@@ -164,6 +163,8 @@ private:
     int m_cachedSelectionStart;
     int m_cachedSelectionEnd;
     TextFieldSelectionDirection m_cachedSelectionDirection;
+
+    FRIEND_TEST_ALL_PREFIXES(HTMLTextFormControlElementTest, IndexForPosition);
 };
 
 inline bool isHTMLTextFormControlElement(const Element& element)

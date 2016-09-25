@@ -10,9 +10,8 @@
 #include "platform/SharedBuffer.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Functional.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 class SkBitmap;
 
@@ -35,7 +34,7 @@ public:
 
     // Asynchronously downloads an image from the given url, decodes the loaded
     // data, and passes the bitmap to the callback.
-    void start(ExecutionContext*, const KURL&, PassOwnPtr<ImageCallback>);
+    void start(ExecutionContext*, const KURL&, std::unique_ptr<ImageCallback>);
 
     // Cancels the pending load, if there is one. The |m_imageCallback| will not
     // be run.
@@ -47,15 +46,19 @@ public:
     void didFail(const ResourceError&) override;
     void didFailRedirectCheck() override;
 
-    DEFINE_INLINE_TRACE() {}
+    DEFINE_INLINE_TRACE()
+    {
+        visitor->trace(m_threadableLoader);
+    }
 
 private:
     void runCallbackWithEmptyBitmap();
 
     bool m_stopped;
+    double m_startTime;
     RefPtr<SharedBuffer> m_data;
-    OwnPtr<ImageCallback> m_imageCallback;
-    OwnPtr<ThreadableLoader> m_threadableLoader;
+    std::unique_ptr<ImageCallback> m_imageCallback;
+    Member<ThreadableLoader> m_threadableLoader;
 };
 
 } // namespace blink

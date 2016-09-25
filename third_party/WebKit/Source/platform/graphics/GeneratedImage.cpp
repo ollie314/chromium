@@ -48,25 +48,23 @@ void GeneratedImage::drawPattern(GraphicsContext& destContext, const FloatRect& 
     SkPictureBuilder builder(tileRect, nullptr, &destContext);
     builder.context().beginRecording(tileRect);
     drawTile(builder.context(), srcRect);
-    RefPtr<SkPicture> tilePicture = builder.endRecording();
+    sk_sp<SkPicture> tilePicture = builder.endRecording();
 
-    AffineTransform patternTransform;
-    patternTransform.translate(phase.x(), phase.y());
-    patternTransform.scale(scale.width(), scale.height());
-    patternTransform.translate(tileRect.x(), tileRect.y());
+    SkMatrix patternMatrix = SkMatrix::MakeTrans(phase.x(), phase.y());
+    patternMatrix.preScale(scale.width(), scale.height());
+    patternMatrix.preTranslate(tileRect.x(), tileRect.y());
 
-    RefPtr<Pattern> picturePattern = Pattern::createPicturePattern(tilePicture.release());
-    picturePattern->setPatternSpaceTransform(patternTransform);
+    RefPtr<Pattern> picturePattern = Pattern::createPicturePattern(std::move(tilePicture));
 
     SkPaint fillPaint = destContext.fillPaint();
-    picturePattern->applyToPaint(fillPaint);
+    picturePattern->applyToPaint(fillPaint, patternMatrix);
     fillPaint.setColor(SK_ColorBLACK);
     fillPaint.setXfermodeMode(compositeOp);
 
     destContext.drawRect(destRect, fillPaint);
 }
 
-PassRefPtr<SkImage> GeneratedImage::imageForCurrentFrame()
+sk_sp<SkImage> GeneratedImage::imageForCurrentFrame()
 {
     return nullptr;
 }

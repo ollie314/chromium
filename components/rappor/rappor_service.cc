@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/stl_util.h"
@@ -64,11 +65,11 @@ RapporService::RapporService(
 }
 
 RapporService::~RapporService() {
-  STLDeleteValues(&metrics_map_);
+  base::STLDeleteValues(&metrics_map_);
 }
 
 void RapporService::AddDailyObserver(
-    scoped_ptr<metrics::DailyEvent::Observer> observer) {
+    std::unique_ptr<metrics::DailyEvent::Observer> observer) {
   daily_event_.AddObserver(std::move(observer));
 }
 
@@ -82,11 +83,9 @@ void RapporService::Initialize(net::URLRequestContextGetter* request_context) {
     return;
   }
   DVLOG(1) << "RapporService reporting to " << server_url.spec();
-  InitializeInternal(make_scoped_ptr(new LogUploader(server_url,
-                                                     kMimeType,
-                                                     request_context)),
-                     internal::LoadCohort(pref_service_),
-                     internal::LoadSecret(pref_service_));
+  InitializeInternal(
+      base::MakeUnique<LogUploader>(server_url, kMimeType, request_context),
+      internal::LoadCohort(pref_service_), internal::LoadSecret(pref_service_));
 }
 
 void RapporService::Update(int recording_groups, bool may_upload) {
@@ -124,7 +123,7 @@ void RapporService::RegisterPrefs(PrefRegistrySimple* registry) {
 }
 
 void RapporService::InitializeInternal(
-    scoped_ptr<LogUploaderInterface> uploader,
+    std::unique_ptr<LogUploaderInterface> uploader,
     int32_t cohort,
     const std::string& secret) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -137,7 +136,7 @@ void RapporService::InitializeInternal(
 
 void RapporService::CancelNextLogRotation() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  STLDeleteValues(&metrics_map_);
+  base::STLDeleteValues(&metrics_map_);
   log_rotation_timer_.Stop();
 }
 
@@ -178,7 +177,7 @@ bool RapporService::ExportMetrics(RapporReports* reports) {
     report->set_bits(std::string(bytes.begin(), bytes.end()));
     DVLOG(2) << "Exporting metric " << kv.first;
   }
-  STLDeleteValues(&metrics_map_);
+  base::STLDeleteValues(&metrics_map_);
 
   sampler_.ExportMetrics(secret_, reports);
 
@@ -249,15 +248,15 @@ RapporMetric* RapporService::LookUpMetric(const std::string& metric_name,
   return new_metric;
 }
 
-scoped_ptr<Sample> RapporService::CreateSample(RapporType type) {
+std::unique_ptr<Sample> RapporService::CreateSample(RapporType type) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(IsInitialized());
-  return scoped_ptr<Sample>(
+  return base::WrapUnique(
       new Sample(cohort_, internal::kRapporParametersForType[type]));
 }
 
 void RapporService::RecordSampleObj(const std::string& metric_name,
-                                    scoped_ptr<Sample> sample) {
+                                    std::unique_ptr<Sample> sample) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!RecordingAllowed(sample->parameters()))
     return;

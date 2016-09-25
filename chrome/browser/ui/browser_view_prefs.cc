@@ -11,7 +11,7 @@
 #include "components/prefs/pref_service.h"
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#include "ui/base/x/x11_util.h"
+#include "ui/base/x/x11_util.h"  // nogncheck
 #endif
 
 namespace {
@@ -32,13 +32,14 @@ void RegisterBrowserViewLocalPrefs(PrefRegistrySimple* registry) {
 
 void RegisterBrowserViewProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  bool custom_frame_default = false;
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-  custom_frame_default = ui::GetCustomFramePrefDefault();
+  registry->RegisterBooleanPref(prefs::kUseCustomChromeFrame,
+                                ui::GetCustomFramePrefDefault());
 #endif
 
-  registry->RegisterBooleanPref(prefs::kUseCustomChromeFrame,
-                                custom_frame_default);
+  registry->RegisterIntegerPref(
+      prefs::kBackShortcutBubbleShownCount, 0,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 void MigrateBrowserTabStripPrefs(PrefService* prefs) {

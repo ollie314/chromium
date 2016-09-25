@@ -15,10 +15,10 @@
 #include "content/public/browser/url_data_source.h"
 #include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_resource.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 
 class ExtensionIconSet;
 class Profile;
+class SkBitmap;
 
 namespace extensions {
 class Extension;
@@ -74,8 +74,7 @@ class ExtensionIconSource : public content::URLDataSource,
   std::string GetMimeType(const std::string&) const override;
   void StartDataRequest(
       const std::string& path,
-      int render_process_id,
-      int render_frame_id,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const content::URLDataSource::GotDataCallback& callback) override;
 
  private:

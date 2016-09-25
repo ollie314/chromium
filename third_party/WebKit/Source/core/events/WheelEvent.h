@@ -34,15 +34,27 @@ namespace blink {
 
 class PlatformWheelEvent;
 
+#if OS(MACOSX)
+enum WheelEventPhase {
+    WheelEventPhaseNone        = 0,
+    WheelEventPhaseBegan       = 1 << 0,
+    WheelEventPhaseStationary  = 1 << 1,
+    WheelEventPhaseChanged     = 1 << 2,
+    WheelEventPhaseEnded       = 1 << 3,
+    WheelEventPhaseCancelled   = 1 << 4,
+    WheelEventPhaseMayBegin    = 1 << 5,
+};
+#endif
+
 class CORE_EXPORT WheelEvent final : public MouseEvent {
     DEFINE_WRAPPERTYPEINFO();
 public:
     enum { TickMultiplier = 120 };
 
     enum DeltaMode {
-        DOM_DELTA_PIXEL = 0,
-        DOM_DELTA_LINE,
-        DOM_DELTA_PAGE
+        kDomDeltaPixel = 0,
+        kDomDeltaLine,
+        kDomDeltaPage
     };
 
     static WheelEvent* create()
@@ -61,11 +73,19 @@ public:
         const FloatPoint& rawDelta, unsigned deltaMode, AbstractView* view,
         const IntPoint& screenLocation, const IntPoint& windowLocation,
         PlatformEvent::Modifiers modifiers, unsigned short buttons, double platformTimeStamp,
-        bool canScroll, int resendingPluginId, bool hasPreciseScrollingDeltas, RailsMode railsMode)
+        int resendingPluginId, bool hasPreciseScrollingDeltas, RailsMode railsMode, bool cancelable
+#if OS(MACOSX)
+        , WheelEventPhase phase, WheelEventPhase momentumPhase
+#endif
+        )
     {
         return new WheelEvent(wheelTicks, rawDelta, deltaMode, view,
             screenLocation, windowLocation, modifiers, buttons, platformTimeStamp,
-            canScroll, resendingPluginId,  hasPreciseScrollingDeltas, railsMode);
+            resendingPluginId, hasPreciseScrollingDeltas, railsMode, cancelable
+#if OS(MACOSX)
+            , phase, momentumPhase
+#endif
+            );
     }
 
     double deltaX() const { return m_deltaX; } // Positive when scrolling right.
@@ -77,7 +97,6 @@ public:
     unsigned deltaMode() const { return m_deltaMode; }
     float ticksX() const { return static_cast<float>(m_wheelDelta.x()) / TickMultiplier; }
     float ticksY() const { return static_cast<float>(m_wheelDelta.y()) / TickMultiplier; }
-    bool canScroll() const { return m_canScroll; }
     int resendingPluginId() const { return m_resendingPluginId; }
     bool hasPreciseScrollingDeltas() const { return m_hasPreciseScrollingDeltas; }
     RailsMode getRailsMode() const { return m_railsMode; }
@@ -88,6 +107,11 @@ public:
 
     EventDispatchMediator* createMediator() override;
 
+#if OS(MACOSX)
+    WheelEventPhase phase() const { return m_phase; }
+    WheelEventPhase momentumPhase() const { return m_momentumPhase; }
+#endif
+
     DECLARE_VIRTUAL_TRACE();
 
 private:
@@ -96,17 +120,28 @@ private:
     WheelEvent(const FloatPoint& wheelTicks, const FloatPoint& rawDelta,
         unsigned, AbstractView*, const IntPoint& screenLocation, const IntPoint& windowLocation,
         PlatformEvent::Modifiers, unsigned short buttons, double platformTimeStamp,
-        bool canScroll, int resendingPluginId, bool hasPreciseScrollingDeltas, RailsMode);
+        int resendingPluginId, bool hasPreciseScrollingDeltas, RailsMode, bool cancelable);
+#if OS(MACOSX)
+    WheelEvent(const FloatPoint& wheelTicks, const FloatPoint& rawDelta,
+        unsigned, AbstractView*, const IntPoint& screenLocation, const IntPoint& windowLocation,
+        PlatformEvent::Modifiers, unsigned short buttons, double platformTimeStamp,
+        int resendingPluginId, bool hasPreciseScrollingDeltas, RailsMode, bool cancelable,
+        WheelEventPhase phase, WheelEventPhase momentumPhase
+    );
+#endif
 
     IntPoint m_wheelDelta;
     double m_deltaX;
     double m_deltaY;
     double m_deltaZ;
     unsigned m_deltaMode;
-    bool m_canScroll;
     int m_resendingPluginId;
     bool m_hasPreciseScrollingDeltas;
     RailsMode m_railsMode;
+#if OS(MACOSX)
+    WheelEventPhase m_phase;
+    WheelEventPhase m_momentumPhase;
+#endif
 };
 
 DEFINE_EVENT_TYPE_CASTS(WheelEvent);

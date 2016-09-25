@@ -9,13 +9,21 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
+#include "content/public/common/features.h"
 #include "content/public/renderer/media_stream_video_sink.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
 
 namespace media {
 class VideoFrame;
 }  // namespace media
+
+namespace video_track_recorder {
+const int kVEAEncoderMinResolutionWidth = 640;
+const int kVEAEncoderMinResolutionHeight = 480;
+}  // namespace video_track_recorder
 
 namespace content {
 
@@ -31,6 +39,7 @@ class CONTENT_EXPORT VideoTrackRecorder
   enum class CodecId {
     VP8,
     VP9,
+    H264,
   };
   class Encoder;
 
@@ -54,6 +63,12 @@ class CONTENT_EXPORT VideoTrackRecorder
  private:
   friend class VideoTrackRecorderTest;
 
+  void InitializeEncoder(CodecId codec,
+                         const OnEncodedVideoCB& on_encoded_video_callback,
+                         int32_t bits_per_second,
+                         const scoped_refptr<media::VideoFrame>& frame,
+                         base::TimeTicks capture_time);
+
   // Used to check that we are destroyed on the same thread we were created.
   base::ThreadChecker main_render_thread_checker_;
 
@@ -61,7 +76,16 @@ class CONTENT_EXPORT VideoTrackRecorder
   blink::WebMediaStreamTrack track_;
 
   // Inner class to encode using whichever codec is configured.
-  const scoped_refptr<Encoder> encoder_;
+  scoped_refptr<Encoder> encoder_;
+
+  base::Callback<void(const scoped_refptr<media::VideoFrame>& frame,
+                      base::TimeTicks capture_time)>
+      initialize_encoder_callback_;
+
+  // Used to track the paused state during the initialization process.
+  bool paused_before_init_;
+
+  base::WeakPtrFactory<VideoTrackRecorder> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoTrackRecorder);
 };

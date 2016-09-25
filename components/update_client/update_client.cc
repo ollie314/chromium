@@ -19,9 +19,9 @@
 #include "base/observer_list.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_checker.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/update_client/configurator.h"
 #include "components/update_client/crx_update_item.h"
@@ -55,7 +55,9 @@ CrxUpdateItem::~CrxUpdateItem() {
 }
 
 CrxComponent::CrxComponent()
-    : allows_background_download(true), requires_network_encryption(true) {}
+    : allows_background_download(true),
+      requires_network_encryption(true),
+      supports_group_policy_enable_component_updates(false) {}
 
 CrxComponent::CrxComponent(const CrxComponent& other) = default;
 
@@ -70,7 +72,7 @@ CrxComponent::~CrxComponent() {
 // including any thread objects that might execute callbacks bound to it.
 UpdateClientImpl::UpdateClientImpl(
     const scoped_refptr<Configurator>& config,
-    scoped_ptr<PingManager> ping_manager,
+    std::unique_ptr<PingManager> ping_manager,
     UpdateChecker::Factory update_checker_factory,
     CrxDownloader::Factory crx_downloader_factory)
     : is_stopped_(false),
@@ -110,8 +112,8 @@ void UpdateClientImpl::Install(const std::string& id,
   // argument is available when the task completes, along with the task itself.
   const auto callback =
       base::Bind(&UpdateClientImpl::OnTaskComplete, this, completion_callback);
-  scoped_ptr<TaskUpdate> task(new TaskUpdate(update_engine_.get(), true, ids,
-                                             crx_data_callback, callback));
+  std::unique_ptr<TaskUpdate> task(new TaskUpdate(
+      update_engine_.get(), true, ids, crx_data_callback, callback));
 
   // Install tasks are run concurrently and never queued up.
   RunTask(std::move(task));
@@ -124,8 +126,8 @@ void UpdateClientImpl::Update(const std::vector<std::string>& ids,
 
   const auto callback =
       base::Bind(&UpdateClientImpl::OnTaskComplete, this, completion_callback);
-  scoped_ptr<TaskUpdate> task(new TaskUpdate(update_engine_.get(), false, ids,
-                                             crx_data_callback, callback));
+  std::unique_ptr<TaskUpdate> task(new TaskUpdate(
+      update_engine_.get(), false, ids, crx_data_callback, callback));
 
   // If no other tasks are running at the moment, run this update task.
   // Otherwise, queue the task up.
@@ -136,7 +138,7 @@ void UpdateClientImpl::Update(const std::vector<std::string>& ids,
   }
 }
 
-void UpdateClientImpl::RunTask(scoped_ptr<Task> task) {
+void UpdateClientImpl::RunTask(std::unique_ptr<Task> task) {
   DCHECK(thread_checker_.CalledOnValidThread());
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&Task::Run, base::Unretained(task.get())));
@@ -167,7 +169,7 @@ void UpdateClientImpl::OnTaskComplete(
   // Pick up a task from the queue if the queue has pending tasks and no other
   // task is running.
   if (tasks_.empty() && !task_queue_.empty()) {
-    RunTask(scoped_ptr<Task>(task_queue_.front()));
+    RunTask(std::unique_ptr<Task>(task_queue_.front()));
     task_queue_.pop();
   }
 }
@@ -196,7 +198,7 @@ bool UpdateClientImpl::GetCrxUpdateState(const std::string& id,
 bool UpdateClientImpl::IsUpdating(const std::string& id) const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  for (const auto& task : tasks_) {
+  for (const auto* task : tasks_) {
     const auto ids(task->GetIds());
     if (std::find(ids.begin(), ids.end(), id) != ids.end()) {
       return true;
@@ -225,14 +227,14 @@ void UpdateClientImpl::Stop() {
   // they have not picked up by the update engine, and not shared with any
   // task runner yet.
   while (!task_queue_.empty()) {
-    const auto task(task_queue_.front());
+    auto* task(task_queue_.front());
     task_queue_.pop();
     task->Cancel();
   }
 }
 
 void UpdateClientImpl::SendUninstallPing(const std::string& id,
-                                         const Version& version,
+                                         const base::Version& version,
                                          int reason) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -250,7 +252,7 @@ void UpdateClientImpl::SendUninstallPing(const std::string& id,
 
 scoped_refptr<UpdateClient> UpdateClientFactory(
     const scoped_refptr<Configurator>& config) {
-  scoped_ptr<PingManager> ping_manager(new PingManager(config));
+  std::unique_ptr<PingManager> ping_manager(new PingManager(config));
   return new UpdateClientImpl(config, std::move(ping_manager),
                               &UpdateChecker::Create, &CrxDownloader::Create);
 }

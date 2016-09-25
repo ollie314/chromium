@@ -13,12 +13,13 @@ import android.os.RemoteException;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.childaccounts.ChildAccountService;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
-import org.chromium.components.webrestrictions.WebRestrictionsContentProvider;
+import org.chromium.components.webrestrictions.browser.WebRestrictionsContentProvider;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -26,6 +27,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * Instrumentation test for SupervisedUserContentProvider.
  */
+@RetryOnFailure
 public class SupervisedUserContentProviderTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final String DEFAULT_ACCOUNT = "test@gmail.com";
     private static final String AUTHORITY_SUFFIX = ".SupervisedUserProvider";
@@ -48,12 +50,12 @@ public class SupervisedUserContentProviderTest extends ChromeActivityTestCaseBas
                        .authority(mAuthority)
                        .path("authorized")
                        .build();
-        SigninTestUtil.get().resetSigninState();
+        SigninTestUtil.resetSigninState();
     }
 
     @Override
     public void tearDown() throws Exception {
-        SigninTestUtil.get().resetSigninState();
+        SigninTestUtil.resetSigninState();
         super.tearDown();
     }
 
@@ -99,7 +101,7 @@ public class SupervisedUserContentProviderTest extends ChromeActivityTestCaseBas
 
     @SmallTest
     public void testWithSupervisedUser() throws RemoteException, ExecutionException {
-        final Account account = SigninTestUtil.get().addAndSignInTestAccount();
+        final Account account = SigninTestUtil.addAndSignInTestAccount();
         assertNotNull(account);
         assertTrue(ThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {
 

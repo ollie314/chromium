@@ -10,7 +10,6 @@
 #include "core/fetch/ClientHintsPreferences.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
-#include "core/html/HTMLDocument.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/origin_trials/OriginTrialContext.h"
@@ -22,7 +21,8 @@ namespace blink {
 
 void HttpEquiv::process(Document& document, const AtomicString& equiv, const AtomicString& content, bool inDocumentHeadElement)
 {
-    ASSERT(!equiv.isNull() && !content.isNull());
+    DCHECK(!equiv.isNull());
+    DCHECK(!content.isNull());
 
     if (equalIgnoringCase(equiv, "default-style")) {
         processHttpEquivDefaultStyle(document, content);
@@ -60,7 +60,7 @@ void HttpEquiv::processHttpEquivContentSecurityPolicy(Document& document, const 
     else if (equalIgnoringCase(equiv, "content-security-policy-report-only"))
         document.contentSecurityPolicy()->didReceiveHeader(content, ContentSecurityPolicyHeaderTypeReport, ContentSecurityPolicyHeaderSourceMeta);
     else
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
 }
 
 void HttpEquiv::processHttpEquivAcceptCH(Document& document, const AtomicString& content)
@@ -79,6 +79,10 @@ void HttpEquiv::processHttpEquivDefaultStyle(Document& document, const AtomicStr
 
 void HttpEquiv::processHttpEquivRefresh(Document& document, const AtomicString& content)
 {
+    UseCounter::count(document, UseCounter::MetaRefresh);
+    if (!document.contentSecurityPolicy()->allowInlineScript(KURL(), "", OrdinalNumber(), "", ContentSecurityPolicy::SuppressReport))
+        UseCounter::count(document, UseCounter::MetaRefreshWhenCSPBlocksInlineScript);
+
     document.maybeHandleHttpRefresh(content, Document::HttpRefreshFromMetaTag);
 }
 
@@ -88,8 +92,12 @@ void HttpEquiv::processHttpEquivSetCookie(Document& document, const AtomicString
     if (!document.isHTMLDocument())
         return;
 
+    UseCounter::count(document, UseCounter::MetaSetCookie);
+    if (!document.contentSecurityPolicy()->allowInlineScript(KURL(), "", OrdinalNumber(), "", ContentSecurityPolicy::SuppressReport))
+        UseCounter::count(document, UseCounter::MetaSetCookieWhenCSPBlocksInlineScript);
+
     // Exception (for sandboxed documents) ignored.
-    toHTMLDocument(document).setCookie(content, IGNORE_EXCEPTION);
+    document.setCookie(content, IGNORE_EXCEPTION);
 }
 
 } // namespace blink

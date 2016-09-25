@@ -8,10 +8,11 @@
 
 #include "base/files/file_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "net/base/test_data_directory.h"
+#include "net/cert/internal/cert_errors.h"
 #include "net/cert/pem_tokenizer.h"
 #include "net/der/input.h"
 #include "net/der/parser.h"
+#include "net/test/test_data_directory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -23,15 +24,25 @@ namespace {
 template <size_t N>
 bool ParseDer(const uint8_t (&data)[N],
               std::unique_ptr<SignatureAlgorithm>* out) {
-  *out = SignatureAlgorithm::CreateFromDer(der::Input(data, N));
-  return !!*out;
+  CertErrors errors;
+  *out = SignatureAlgorithm::Create(der::Input(data, N), &errors);
+  bool success = !!*out;
+
+  // TODO(crbug.com/634443): Test the errors.
+  // if (!success)
+  //   EXPECT_FALSE(errors.empty());
+
+  return success;
 }
 
 // Parses a SignatureAlgorithm given an empty DER input.
 TEST(SignatureAlgorithmTest, ParseDerEmpty) {
+  CertErrors errors;
   std::unique_ptr<SignatureAlgorithm> algorithm =
-      SignatureAlgorithm::CreateFromDer(der::Input());
+      SignatureAlgorithm::Create(der::Input(), &errors);
   ASSERT_FALSE(algorithm);
+  // TODO(crbug.com/634443): Test the errors.
+  // EXPECT_FALSE(errors.empty());
 }
 
 // Parses a SignatureAlgorithm given invalid DER input.

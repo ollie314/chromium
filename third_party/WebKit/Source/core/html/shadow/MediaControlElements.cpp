@@ -32,19 +32,24 @@
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/InputTypeNames.h"
 #include "core/dom/ClientRect.h"
+#include "core/dom/Text.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/events/MouseEvent.h"
 #include "core/frame/LocalFrame.h"
+#include "core/html/HTMLAnchorElement.h"
+#include "core/html/HTMLLabelElement.h"
 #include "core/html/HTMLMediaSource.h"
+#include "core/html/HTMLSpanElement.h"
 #include "core/html/HTMLVideoElement.h"
 #include "core/html/TimeRanges.h"
 #include "core/html/shadow/MediaControls.h"
+#include "core/html/track/TextTrackList.h"
 #include "core/input/EventHandler.h"
-#include "core/layout/LayoutTheme.h"
-#include "core/layout/LayoutVideo.h"
 #include "core/layout/api/LayoutSliderItem.h"
+#include "platform/EventDispatchForbiddenScope.h"
 #include "platform/Histogram.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "platform/text/PlatformLocale.h"
 #include "public/platform/Platform.h"
 #include "public/platform/UserMetricsAction.h"
 
@@ -56,6 +61,16 @@ namespace {
 
 // This is the duration from mediaControls.css
 const double fadeOutDuration = 0.3;
+
+const QualifiedName& trackIndexAttrName()
+{
+    // Save the track index in an attribute to avoid holding a pointer to the text track.
+    DEFINE_STATIC_LOCAL(QualifiedName, trackIndexAttr, (nullAtom, "data-track-index", nullAtom));
+    return trackIndexAttr;
+}
+
+// When specified as trackIndex, disable text tracks.
+const int trackIndexOffValue = -1;
 
 bool isUserInteractionEvent(Event* event)
 {
@@ -94,6 +109,21 @@ Element* elementFromCenter(Element& element)
     int centerY = static_cast<int>((clientRect->top() + clientRect->bottom()) / 2);
 
     return element.document().elementFromPoint(centerX , centerY);
+}
+
+bool hasDuplicateLabel(TextTrack* currentTrack)
+{
+    DCHECK(currentTrack);
+    TextTrackList* trackList = currentTrack->trackList();
+    // The runtime of this method is quadratic but since there are usually very few text tracks it won't
+    // affect the performance much.
+    String currentTrackLabel = currentTrack->label();
+    for (unsigned i = 0; i < trackList->length(); i++) {
+        TextTrack* track = trackList->anonymousIndexedGetter(i);
+        if (currentTrack != track && currentTrackLabel == track->label())
+            return true;
+    }
+    return false;
 }
 
 } // anonymous namespace
@@ -141,7 +171,7 @@ void MediaControlPanelElement::stopTimer()
         m_transitionTimer.stop();
 }
 
-void MediaControlPanelElement::transitionTimerFired(Timer<MediaControlPanelElement>*)
+void MediaControlPanelElement::transitionTimerFired(TimerBase*)
 {
     if (!m_opaque)
         setIsWanted(false);
@@ -151,7 +181,7 @@ void MediaControlPanelElement::transitionTimerFired(Timer<MediaControlPanelEleme
 
 void MediaControlPanelElement::didBecomeVisible()
 {
-    ASSERT(m_isDisplayed && m_opaque);
+    DCHECK(m_isDisplayed && m_opaque);
     mediaElement().mediaControlsDidBecomeVisible();
 }
 
@@ -271,6 +301,14 @@ void MediaControlMuteButtonElement::defaultEventHandler(Event* event)
 void MediaControlMuteButtonElement::updateDisplayType()
 {
     setDisplayType(mediaElement().muted() ? MediaUnMuteButton : MediaMuteButton);
+    updateOverflowString();
+}
+
+WebLocalizedString::Name MediaControlMuteButtonElement::getOverflowStringName()
+{
+    if (mediaElement().muted())
+        return WebLocalizedString::OverflowMenuUnmute;
+    return WebLocalizedString::OverflowMenuMute;
 }
 
 // ----------------------------
@@ -313,6 +351,14 @@ void MediaControlPlayButtonElement::defaultEventHandler(Event* event)
 void MediaControlPlayButtonElement::updateDisplayType()
 {
     setDisplayType(mediaElement().paused() ? MediaPlayButton : MediaPauseButton);
+    updateOverflowString();
+}
+
+WebLocalizedString::Name MediaControlPlayButtonElement::getOverflowStringName()
+{
+    if (mediaElement().paused())
+        return WebLocalizedString::OverflowMenuPlay;
+    return WebLocalizedString::OverflowMenuPause;
 }
 
 // ----------------------------
@@ -371,25 +417,266 @@ MediaControlToggleClosedCaptionsButtonElement* MediaControlToggleClosedCaptionsB
 
 void MediaControlToggleClosedCaptionsButtonElement::updateDisplayType()
 {
-    bool captionsVisible = mediaElement().closedCaptionsVisible();
+    bool captionsVisible = mediaElement().textTracksVisible();
     setDisplayType(captionsVisible ? MediaHideClosedCaptionsButton : MediaShowClosedCaptionsButton);
-    setChecked(captionsVisible);
 }
 
 void MediaControlToggleClosedCaptionsButtonElement::defaultEventHandler(Event* event)
 {
     if (event->type() == EventTypeNames::click) {
-        if (mediaElement().closedCaptionsVisible())
-            Platform::current()->recordAction(UserMetricsAction("Media.Controls.ClosedCaptionHide"));
-        else
-            Platform::current()->recordAction(UserMetricsAction("Media.Controls.ClosedCaptionShow"));
-        mediaElement().setClosedCaptionsVisible(!mediaElement().closedCaptionsVisible());
-        setChecked(mediaElement().closedCaptionsVisible());
+        // If the user opens up the closed captions menu from the overfow menu,
+        // the overflow menu should no longer be visible.
+        if (mediaControls().overflowMenuVisible())
+            mediaControls().toggleOverflowMenu();
+        mediaControls().toggleTextTrackList();
         updateDisplayType();
         event->setDefaultHandled();
     }
 
     HTMLInputElement::defaultEventHandler(event);
+}
+
+WebLocalizedString::Name MediaControlToggleClosedCaptionsButtonElement::getOverflowStringName()
+{
+    return WebLocalizedString::OverflowMenuCaptions;
+}
+
+// ----------------------------
+
+MediaControlTextTrackListElement::MediaControlTextTrackListElement(MediaControls& mediaControls)
+    : MediaControlDivElement(mediaControls, MediaTextTrackList)
+{
+}
+
+MediaControlTextTrackListElement* MediaControlTextTrackListElement::create(MediaControls& mediaControls)
+{
+    MediaControlTextTrackListElement* element = new MediaControlTextTrackListElement(mediaControls);
+    element->setShadowPseudoId(AtomicString("-internal-media-controls-text-track-list"));
+    element->setIsWanted(false);
+    return element;
+}
+
+void MediaControlTextTrackListElement::defaultEventHandler(Event* event)
+{
+    if (event->type() == EventTypeNames::change) {
+        // Identify which input element was selected and set track to showing
+        Node* target = event->target()->toNode();
+        if (!target || !target->isElementNode())
+            return;
+
+        disableShowingTextTracks();
+        int trackIndex = toElement(target)->getIntegralAttribute(trackIndexAttrName());
+        if (trackIndex != trackIndexOffValue) {
+            DCHECK_GE(trackIndex, 0);
+            showTextTrackAtIndex(trackIndex);
+            mediaElement().disableAutomaticTextTrackSelection();
+        }
+
+        mediaControls().toggleTextTrackList();
+        event->setDefaultHandled();
+    }
+    MediaControlDivElement::defaultEventHandler(event);
+}
+
+void MediaControlTextTrackListElement::setVisible(bool visible)
+{
+    if (visible) {
+        setIsWanted(true);
+        refreshTextTrackListMenu();
+    } else {
+        setIsWanted(false);
+    }
+}
+
+void MediaControlTextTrackListElement::showTextTrackAtIndex(unsigned indexToEnable)
+{
+    TextTrackList* trackList = mediaElement().textTracks();
+    if (indexToEnable >= trackList->length())
+        return;
+    TextTrack* track = trackList->anonymousIndexedGetter(indexToEnable);
+    if (track && track->canBeRendered())
+        track->setMode(TextTrack::showingKeyword());
+}
+
+void MediaControlTextTrackListElement::disableShowingTextTracks()
+{
+    TextTrackList* trackList = mediaElement().textTracks();
+    for (unsigned i = 0; i < trackList->length(); ++i) {
+        TextTrack* track = trackList->anonymousIndexedGetter(i);
+        if (track->mode() == TextTrack::showingKeyword())
+            track->setMode(TextTrack::disabledKeyword());
+    }
+}
+
+String MediaControlTextTrackListElement::getTextTrackLabel(TextTrack* track)
+{
+    if (!track)
+        return mediaElement().locale().queryString(WebLocalizedString::TextTracksOff);
+
+    String trackLabel = track->label();
+
+    if (trackLabel.isEmpty())
+        trackLabel = String(mediaElement().locale().queryString(WebLocalizedString::TextTracksNoLabel));
+
+    return trackLabel;
+}
+
+// TextTrack parameter when passed in as a nullptr, creates the "Off" list item in the track list.
+Element* MediaControlTextTrackListElement::createTextTrackListItem(TextTrack* track)
+{
+    int trackIndex = track ? track->trackIndex() : trackIndexOffValue;
+    HTMLLabelElement* trackItem = HTMLLabelElement::create(document());
+    trackItem->setShadowPseudoId(AtomicString("-internal-media-controls-text-track-list-item"));
+    HTMLInputElement* trackItemInput = HTMLInputElement::create(document(), nullptr, false);
+    trackItemInput->setShadowPseudoId(AtomicString("-internal-media-controls-text-track-list-item-input"));
+    trackItemInput->setType(InputTypeNames::checkbox);
+    trackItemInput->setIntegralAttribute(trackIndexAttrName(), trackIndex);
+    if (!mediaElement().textTracksVisible()) {
+        if (!track)
+            trackItemInput->setChecked(true);
+    } else {
+        // If there are multiple text tracks set to showing, they must all have
+        // checkmarks displayed.
+        if (track && track->mode() == TextTrack::showingKeyword())
+            trackItemInput->setChecked(true);
+    }
+
+    trackItem->appendChild(trackItemInput);
+    String trackLabel = getTextTrackLabel(track);
+    trackItem->appendChild(Text::create(document(), trackLabel));
+    // Add a track kind marker icon if there are multiple tracks with the same label or if the track has no label.
+    if (track && (track->label().isEmpty() || hasDuplicateLabel(track))) {
+        HTMLSpanElement* trackKindMarker = HTMLSpanElement::create(document());
+        if (track->kind() == track->captionsKeyword()) {
+            trackKindMarker->setShadowPseudoId(AtomicString("-internal-media-controls-text-track-list-kind-captions"));
+        } else {
+            DCHECK_EQ(track->kind(), track->subtitlesKeyword());
+            trackKindMarker->setShadowPseudoId(AtomicString("-internal-media-controls-text-track-list-kind-subtitles"));
+        }
+        trackItem->appendChild(trackKindMarker);
+    }
+    return trackItem;
+}
+
+void MediaControlTextTrackListElement::refreshTextTrackListMenu()
+{
+    if (!mediaElement().hasClosedCaptions() || !mediaElement().textTracksAreReady())
+        return;
+
+    EventDispatchForbiddenScope::AllowUserAgentEvents allowEvents;
+    removeChildren(OmitSubtreeModifiedEvent);
+
+    // Construct a menu for subtitles and captions
+    // Pass in a nullptr to createTextTrackListItem to create the "Off" track item.
+    appendChild(createTextTrackListItem(nullptr));
+
+    TextTrackList* trackList = mediaElement().textTracks();
+    for (unsigned i = 0; i < trackList->length(); i++) {
+        TextTrack* track = trackList->anonymousIndexedGetter(i);
+        if (!track->canBeRendered())
+            continue;
+        appendChild(createTextTrackListItem(track));
+    }
+}
+
+// ----------------------------
+MediaControlOverflowMenuButtonElement::MediaControlOverflowMenuButtonElement(MediaControls& mediaControls)
+    : MediaControlInputElement(mediaControls, MediaOverflowButton)
+{
+}
+
+MediaControlOverflowMenuButtonElement* MediaControlOverflowMenuButtonElement::create(MediaControls& mediaControls)
+{
+    MediaControlOverflowMenuButtonElement* button = new MediaControlOverflowMenuButtonElement(mediaControls);
+    button->ensureUserAgentShadowRoot();
+    button->setType(InputTypeNames::button);
+    button->setShadowPseudoId(AtomicString("-internal-overflow-menu-button"));
+    button->setIsWanted(false);
+    return button;
+}
+
+void MediaControlOverflowMenuButtonElement::defaultEventHandler(Event* event)
+{
+    if (event->type() == EventTypeNames::click) {
+        mediaControls().toggleOverflowMenu();
+        event->setDefaultHandled();
+    }
+
+    HTMLInputElement::defaultEventHandler(event);
+}
+
+// ----------------------------
+MediaControlOverflowMenuListElement::MediaControlOverflowMenuListElement(MediaControls& mediaControls)
+    : MediaControlDivElement(mediaControls, MediaOverflowList)
+{
+}
+
+MediaControlOverflowMenuListElement* MediaControlOverflowMenuListElement::create(MediaControls& mediaControls)
+{
+    MediaControlOverflowMenuListElement* element = new MediaControlOverflowMenuListElement(mediaControls);
+    element->setIsWanted(false);
+    element->setShadowPseudoId(AtomicString("-internal-media-controls-overflow-menu-list"));
+    return element;
+}
+
+void MediaControlOverflowMenuListElement::defaultEventHandler(Event* event)
+{
+    if (event->type() == EventTypeNames::click)
+        event->setDefaultHandled();
+
+    MediaControlDivElement::defaultEventHandler(event);
+}
+
+// ----------------------------
+MediaControlDownloadButtonElement::MediaControlDownloadButtonElement(MediaControls& mediaControls)
+    : MediaControlInputElement(mediaControls, MediaDownloadButton)
+{
+}
+
+MediaControlDownloadButtonElement* MediaControlDownloadButtonElement::create(MediaControls& mediaControls)
+{
+    MediaControlDownloadButtonElement* button = new MediaControlDownloadButtonElement(mediaControls);
+    button->ensureUserAgentShadowRoot();
+    button->setType(InputTypeNames::button);
+    button->setShadowPseudoId(AtomicString("-internal-download-button"));
+    button->setIsWanted(false);
+    return button;
+}
+
+WebLocalizedString::Name MediaControlDownloadButtonElement::getOverflowStringName()
+{
+    return WebLocalizedString::OverflowMenuDownload;
+}
+
+bool MediaControlDownloadButtonElement::shouldDisplayDownloadButton()
+{
+    const KURL& url = mediaElement().currentSrc();
+
+    if (!url.isNull() && !url.isEmpty() && !HTMLMediaElement::isMediaStreamURL(url.getString()) && !url.protocolIs("blob") && !HTMLMediaSource::lookup(url)) {
+        return true;
+    }
+    return false;
+}
+
+void MediaControlDownloadButtonElement::defaultEventHandler(Event* event)
+{
+    const KURL& url = mediaElement().currentSrc();
+    if (event->type() == EventTypeNames::click && !(url.isNull() || url.isEmpty())) {
+        if (!m_anchor) {
+            HTMLAnchorElement* anchor = HTMLAnchorElement::create(document());
+            anchor->setAttribute(HTMLNames::downloadAttr, "");
+            m_anchor = anchor;
+        }
+        m_anchor->setURL(url);
+        m_anchor->dispatchSimulatedClick(event);
+    }
+    MediaControlInputElement::defaultEventHandler(event);
+}
+
+DEFINE_TRACE(MediaControlDownloadButtonElement)
+{
+    visitor->trace(m_anchor);
+    MediaControlInputElement::trace(visitor);
 }
 
 // ----------------------------
@@ -411,10 +698,10 @@ MediaControlTimelineElement* MediaControlTimelineElement::create(MediaControls& 
 
 void MediaControlTimelineElement::defaultEventHandler(Event* event)
 {
-    if (event->isMouseEvent() && toMouseEvent(event)->button() != LeftButton)
+    if (event->isMouseEvent() && toMouseEvent(event)->button() != static_cast<short>(WebPointerProperties::Button::Left))
         return;
 
-    if (!inShadowIncludingDocument() || !document().isActive())
+    if (!isConnected() || !document().isActive())
         return;
 
     if (event->type() == EventTypeNames::mousedown) {
@@ -447,7 +734,7 @@ void MediaControlTimelineElement::defaultEventHandler(Event* event)
 
 bool MediaControlTimelineElement::willRespondToMouseClickEvents()
 {
-    return inShadowIncludingDocument() && document().isActive();
+    return isConnected() && document().isActive();
 }
 
 void MediaControlTimelineElement::setPosition(double currentTime)
@@ -491,10 +778,10 @@ MediaControlVolumeSliderElement* MediaControlVolumeSliderElement::create(MediaCo
 
 void MediaControlVolumeSliderElement::defaultEventHandler(Event* event)
 {
-    if (event->isMouseEvent() && toMouseEvent(event)->button() != LeftButton)
+    if (event->isMouseEvent() && toMouseEvent(event)->button() != static_cast<short>(WebPointerProperties::Button::Left))
         return;
 
-    if (!inShadowIncludingDocument() || !document().isActive())
+    if (!isConnected() || !document().isActive())
         return;
 
     MediaControlInputElement::defaultEventHandler(event);
@@ -515,7 +802,7 @@ void MediaControlVolumeSliderElement::defaultEventHandler(Event* event)
 
 bool MediaControlVolumeSliderElement::willRespondToMouseMoveEvents()
 {
-    if (!inShadowIncludingDocument() || !document().isActive())
+    if (!isConnected() || !document().isActive())
         return false;
 
     return MediaControlInputElement::willRespondToMouseMoveEvents();
@@ -523,7 +810,7 @@ bool MediaControlVolumeSliderElement::willRespondToMouseMoveEvents()
 
 bool MediaControlVolumeSliderElement::willRespondToMouseClickEvents()
 {
-    if (!inShadowIncludingDocument() || !document().isActive())
+    if (!isConnected() || !document().isActive())
         return false;
 
     return MediaControlInputElement::willRespondToMouseClickEvents();
@@ -575,6 +862,13 @@ void MediaControlFullscreenButtonElement::defaultEventHandler(Event* event)
 void MediaControlFullscreenButtonElement::setIsFullscreen(bool isFullscreen)
 {
     setDisplayType(isFullscreen ? MediaExitFullscreenButton : MediaEnterFullscreenButton);
+}
+
+WebLocalizedString::Name MediaControlFullscreenButtonElement::getOverflowStringName()
+{
+    if (mediaElement().isFullscreen())
+        return WebLocalizedString::OverflowMenuExitFullscreen;
+    return WebLocalizedString::OverflowMenuEnterFullscreen;
 }
 
 // ----------------------------
@@ -638,11 +932,19 @@ void MediaControlCastButtonElement::setIsPlayingRemotely(bool isPlayingRemotely)
             setDisplayType(MediaCastOffButton);
         }
     }
+    updateOverflowString();
+}
+
+WebLocalizedString::Name MediaControlCastButtonElement::getOverflowStringName()
+{
+    if (mediaElement().isPlayingRemotely())
+        return WebLocalizedString::OverflowMenuStopCast;
+    return WebLocalizedString::OverflowMenuCast;
 }
 
 void MediaControlCastButtonElement::tryShowOverlay()
 {
-    ASSERT(m_isOverlayButton);
+    DCHECK(m_isOverlayButton);
 
     setIsWanted(true);
     if (elementFromCenter(*this) != &mediaElement()) {
@@ -650,7 +952,7 @@ void MediaControlCastButtonElement::tryShowOverlay()
         return;
     }
 
-    ASSERT(isWanted());
+    DCHECK(isWanted());
     if (!m_showUseCounted) {
         m_showUseCounted = true;
         recordMetrics(CastOverlayMetrics::Shown);
@@ -664,7 +966,7 @@ bool MediaControlCastButtonElement::keepEventInNode(Event* event)
 
 void MediaControlCastButtonElement::recordMetrics(CastOverlayMetrics metric)
 {
-    ASSERT(m_isOverlayButton);
+    DCHECK(m_isOverlayButton);
     DEFINE_STATIC_LOCAL(EnumerationHistogram, overlayHistogram, ("Cast.Sender.Overlay", static_cast<int>(CastOverlayMetrics::Count)));
     overlayHistogram.count(static_cast<int>(metric));
 }

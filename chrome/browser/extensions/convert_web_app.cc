@@ -9,7 +9,9 @@
 
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/base64.h"
@@ -125,15 +127,16 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
     icons->SetString(size, icon_path);
 
     if (icon.url.is_valid()) {
-      base::DictionaryValue* linked_icon = new base::DictionaryValue();
+      std::unique_ptr<base::DictionaryValue> linked_icon(
+          new base::DictionaryValue());
       linked_icon->SetString(keys::kLinkedAppIconURL, icon.url.spec());
       linked_icon->SetInteger(keys::kLinkedAppIconSize, icon.width);
-      linked_icons->Append(linked_icon);
+      linked_icons->Append(std::move(linked_icon));
     }
   }
 
   // Write the manifest.
-  base::FilePath manifest_path = temp_dir.path().Append(kManifestFilename);
+  base::FilePath manifest_path = temp_dir.GetPath().Append(kManifestFilename);
   JSONFileValueSerializer serializer(manifest_path);
   if (!serializer.Serialize(*root)) {
     LOG(ERROR) << "Could not serialize manifest.";
@@ -141,7 +144,7 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
   }
 
   // Write the icon files.
-  base::FilePath icons_dir = temp_dir.path().AppendASCII(kIconsDirName);
+  base::FilePath icons_dir = temp_dir.GetPath().AppendASCII(kIconsDirName);
   if (!base::CreateDirectory(icons_dir)) {
     LOG(ERROR) << "Could not create icons directory.";
     return NULL;
@@ -171,12 +174,9 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
 
   // Finally, create the extension object to represent the unpacked directory.
   std::string error;
-  scoped_refptr<Extension> extension = Extension::Create(
-      temp_dir.path(),
-      Manifest::INTERNAL,
-      *root,
-      Extension::FROM_BOOKMARK,
-      &error);
+  scoped_refptr<Extension> extension =
+      Extension::Create(temp_dir.GetPath(), Manifest::INTERNAL, *root,
+                        Extension::FROM_BOOKMARK, &error);
   if (!extension.get()) {
     LOG(ERROR) << error;
     return NULL;

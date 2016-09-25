@@ -25,7 +25,7 @@
 #include "core/CSSPropertyNames.h"
 #include "core/CoreExport.h"
 #include "core/animation/css/CSSAnimationUpdate.h"
-#include "core/css/CSSSVGDocumentValue.h"
+#include "core/css/CSSPendingSubstitutionValue.h"
 #include "core/css/CSSToLengthConversionData.h"
 #include "core/css/resolver/CSSToStyleMap.h"
 #include "core/css/resolver/ElementResolveContext.h"
@@ -36,6 +36,7 @@
 #include "core/style/CachedUAStyle.h"
 #include "core/style/ComputedStyle.h"
 #include "core/style/StyleInheritedData.h"
+#include <memory>
 
 namespace blink {
 
@@ -61,12 +62,7 @@ public:
 
     const ElementResolveContext& elementContext() const { return m_elementContext; }
 
-    void setStyle(PassRefPtr<ComputedStyle> style)
-    {
-        // FIXME: Improve RAII of StyleResolverState to remove this function.
-        m_style = style;
-        m_cssToLengthConversionData = CSSToLengthConversionData(m_style.get(), rootElementStyle(), document().layoutView(), m_style->effectiveZoom());
-    }
+    void setStyle(PassRefPtr<ComputedStyle>);
     const ComputedStyle* style() const { return m_style.get(); }
     ComputedStyle* style() { return m_style.get(); }
     PassRefPtr<ComputedStyle> takeStyle() { return m_style.release(); }
@@ -159,6 +155,8 @@ public:
     void setCustomPropertySetForApplyAtRule(const String&, StylePropertySet*);
     StylePropertySet* customPropertySetForApplyAtRule(const String&);
 
+    HeapHashMap<CSSPropertyID, Member<const CSSValue>>& parsedPropertiesForPendingSubstitutionCache(const CSSPendingSubstitutionValue&) const;
+
 private:
     ElementResolveContext m_elementContext;
     Member<Document> m_document;
@@ -180,11 +178,14 @@ private:
 
     FontBuilder m_fontBuilder;
 
-    OwnPtr<CachedUAStyle> m_cachedUAStyle;
+    std::unique_ptr<CachedUAStyle> m_cachedUAStyle;
 
     ElementStyleResources m_elementStyleResources;
 
     HeapHashMap<String, Member<StylePropertySet>> m_customPropertySetsForApplyAtRule;
+
+    mutable HeapHashMap<Member<const CSSPendingSubstitutionValue>, Member<HeapHashMap<CSSPropertyID, Member<const CSSValue>>>> m_parsedPropertiesForPendingSubstitutionCache;
+
 };
 
 } // namespace blink

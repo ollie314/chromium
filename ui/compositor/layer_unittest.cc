@@ -20,7 +20,9 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
+#include "cc/animation/animation_player.h"
 #include "cc/layers/layer.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/output/copy_output_result.h"
@@ -28,6 +30,7 @@
 #include "cc/surfaces/surface_sequence.h"
 #include "cc/test/pixel_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/khronos/GLES2/gl2.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer_animation_element.h"
@@ -44,10 +47,12 @@
 #include "ui/compositor/test/test_layers.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/font_list.h"
 #include "ui/gfx/gfx_paths.h"
 #include "ui/gfx/skia_util.h"
 
 using cc::MatchesPNGFile;
+using cc::WritePNGFile;
 
 namespace ui {
 
@@ -90,6 +95,72 @@ class ColoredLayer : public Layer, public LayerDelegate {
   SkColor color_;
 };
 
+// Layer delegate for painting text with effects on canvas.
+class DrawStringLayerDelegate : public LayerDelegate {
+ public:
+  enum DrawFunction {
+    STRING_WITH_HALO,
+    STRING_FADED,
+    STRING_WITH_SHADOWS
+  };
+
+  DrawStringLayerDelegate(
+      SkColor back_color, SkColor halo_color,
+      DrawFunction func, const gfx::Size& layer_size)
+      : background_color_(back_color),
+        halo_color_(halo_color),
+        func_(func),
+        layer_size_(layer_size) {
+  }
+
+  ~DrawStringLayerDelegate() override {}
+
+  // Overridden from LayerDelegate:
+  void OnPaintLayer(const ui::PaintContext& context) override {
+    ui::PaintRecorder recorder(context, layer_size_);
+    gfx::Rect bounds(layer_size_);
+    recorder.canvas()->DrawColor(background_color_);
+    const base::string16 text = base::ASCIIToUTF16("Tests!");
+    switch (func_) {
+      case STRING_WITH_HALO:
+        recorder.canvas()->DrawStringRectWithHalo(
+            text, font_list_, SK_ColorRED, halo_color_, bounds, 0);
+        break;
+      case STRING_FADED:
+        recorder.canvas()->DrawFadedString(
+            text, font_list_, SK_ColorRED, bounds, 0);
+        break;
+      case STRING_WITH_SHADOWS: {
+        gfx::ShadowValues shadows;
+        shadows.push_back(
+            gfx::ShadowValue(gfx::Vector2d(2, 2), 2, SK_ColorRED));
+        recorder.canvas()->DrawStringRectWithShadows(
+            text, font_list_, SK_ColorRED, bounds, 0, 0, shadows);
+        break;
+      }
+      default:
+        NOTREACHED();
+    }
+  }
+
+  void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override {}
+
+  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
+
+  base::Closure PrepareForLayerBoundsChange() override {
+    return base::Closure();
+  }
+
+ private:
+  const SkColor background_color_;
+  const SkColor halo_color_;
+  const DrawFunction func_;
+  const gfx::FontList font_list_;
+  const gfx::Size layer_size_;
+
+  DISALLOW_COPY_AND_ASSIGN(DrawStringLayerDelegate);
+};
+
 class LayerWithRealCompositorTest : public testing::Test {
  public:
   LayerWithRealCompositorTest() {
@@ -98,6 +169,7 @@ class LayerWithRealCompositorTest : public testing::Test {
     } else {
       LOG(ERROR) << "Could not open test data directory.";
     }
+    gfx::FontList::SetDefaultFontDescription("Arial, Times New Roman, 15px");
   }
   ~LayerWithRealCompositorTest() override {}
 
@@ -137,6 +209,14 @@ class LayerWithRealCompositorTest : public testing::Test {
   Layer* CreateNoTextureLayer(const gfx::Rect& bounds) {
     Layer* layer = CreateLayer(LAYER_NOT_DRAWN);
     layer->SetBounds(bounds);
+    return layer;
+  }
+
+  std::unique_ptr<Layer> CreateDrawStringLayer(
+      const gfx::Rect& bounds, DrawStringLayerDelegate* delegate) {
+    std::unique_ptr<Layer> layer(new Layer(LAYER_TEXTURED));
+    layer->SetBounds(bounds);
+    layer->set_delegate(delegate);
     return layer;
   }
 
@@ -633,6 +713,28 @@ TEST_F(LayerWithRealCompositorTest, DrawTree) {
   EXPECT_FALSE(d3.painted());
 }
 
+// Tests that scheduling paint on a layer with a mask updates the mask.
+TEST_F(LayerWithRealCompositorTest, SchedulePaintUpdatesMask) {
+  std::unique_ptr<Layer> layer(
+      CreateColorLayer(SK_ColorRED, gfx::Rect(20, 20, 400, 400)));
+  std::unique_ptr<Layer> mask_layer(CreateLayer(ui::LAYER_TEXTURED));
+  mask_layer->SetBounds(gfx::Rect(layer->GetTargetBounds().size()));
+  layer->SetMaskLayer(mask_layer.get());
+
+  GetCompositor()->SetRootLayer(layer.get());
+  WaitForDraw();
+
+  DrawTreeLayerDelegate d1(layer->bounds());
+  layer->set_delegate(&d1);
+  DrawTreeLayerDelegate d2(mask_layer->bounds());
+  mask_layer->set_delegate(&d2);
+
+  layer->SchedulePaint(gfx::Rect(5, 5, 5, 5));
+  WaitForDraw();
+  EXPECT_TRUE(d1.painted());
+  EXPECT_TRUE(d2.painted());
+}
+
 // Tests no-texture Layers.
 // Create this hierarchy:
 // L1 - red
@@ -734,14 +836,12 @@ TEST_F(LayerWithNullDelegateTest, EscapedDebugNames) {
 TEST_F(LayerWithNullDelegateTest, SwitchLayerPreservesCCLayerState) {
   std::unique_ptr<Layer> l1(CreateLayer(LAYER_SOLID_COLOR));
   l1->SetFillsBoundsOpaquely(true);
-  l1->SetForceRenderSurface(true);
   l1->SetVisible(false);
   l1->SetBounds(gfx::Rect(4, 5));
 
   EXPECT_EQ(gfx::Point3F(), l1->cc_layer_for_testing()->transform_origin());
   EXPECT_TRUE(l1->cc_layer_for_testing()->DrawsContent());
   EXPECT_TRUE(l1->cc_layer_for_testing()->contents_opaque());
-  EXPECT_TRUE(l1->cc_layer_for_testing()->force_render_surface());
   EXPECT_TRUE(l1->cc_layer_for_testing()->hide_layer_and_subtree());
   EXPECT_EQ(gfx::Size(4, 5), l1->cc_layer_for_testing()->bounds());
 
@@ -758,7 +858,6 @@ TEST_F(LayerWithNullDelegateTest, SwitchLayerPreservesCCLayerState) {
   EXPECT_EQ(gfx::Point3F(), l1->cc_layer_for_testing()->transform_origin());
   EXPECT_TRUE(l1->cc_layer_for_testing()->DrawsContent());
   EXPECT_TRUE(l1->cc_layer_for_testing()->contents_opaque());
-  EXPECT_TRUE(l1->cc_layer_for_testing()->force_render_surface());
   EXPECT_TRUE(l1->cc_layer_for_testing()->hide_layer_and_subtree());
   EXPECT_EQ(gfx::Size(4, 5), l1->cc_layer_for_testing()->bounds());
   EXPECT_FALSE(callback1_run);
@@ -776,7 +875,6 @@ TEST_F(LayerWithNullDelegateTest, SwitchLayerPreservesCCLayerState) {
   EXPECT_EQ(gfx::Point3F(), l1->cc_layer_for_testing()->transform_origin());
   EXPECT_TRUE(l1->cc_layer_for_testing()->DrawsContent());
   EXPECT_TRUE(l1->cc_layer_for_testing()->contents_opaque());
-  EXPECT_TRUE(l1->cc_layer_for_testing()->force_render_surface());
   EXPECT_TRUE(l1->cc_layer_for_testing()->hide_layer_and_subtree());
   EXPECT_EQ(gfx::Size(4, 5), l1->cc_layer_for_testing()->bounds());
   EXPECT_TRUE(callback2_run);
@@ -795,7 +893,6 @@ TEST_F(LayerWithNullDelegateTest, SwitchLayerPreservesCCLayerState) {
   EXPECT_EQ(gfx::Point3F(), l1->cc_layer_for_testing()->transform_origin());
   EXPECT_TRUE(l1->cc_layer_for_testing()->DrawsContent());
   EXPECT_TRUE(l1->cc_layer_for_testing()->contents_opaque());
-  EXPECT_TRUE(l1->cc_layer_for_testing()->force_render_surface());
   EXPECT_TRUE(l1->cc_layer_for_testing()->hide_layer_and_subtree());
   EXPECT_EQ(gfx::Size(4, 5), l1->cc_layer_for_testing()->bounds());
   EXPECT_FALSE(callback3_run);
@@ -929,6 +1026,34 @@ TEST_F(LayerWithNullDelegateTest, SetBoundsSchedulesPaint) {
 
   // The CompositorDelegate (us) should have been told to draw for a resize.
   WaitForDraw();
+}
+
+static void EmptyReleaseCallback(const gpu::SyncToken& sync_token,
+                                 bool is_lost) {}
+
+// Checks that the damage rect for a TextureLayer is empty after a commit.
+TEST_F(LayerWithNullDelegateTest, EmptyDamagedRect) {
+  std::unique_ptr<Layer> root(CreateLayer(LAYER_SOLID_COLOR));
+  cc::TextureMailbox mailbox(gpu::Mailbox::Generate(), gpu::SyncToken(),
+                             GL_TEXTURE_2D);
+  root->SetTextureMailbox(mailbox, cc::SingleReleaseCallback::Create(
+                                       base::Bind(EmptyReleaseCallback)),
+                          gfx::Size(10, 10));
+  compositor()->SetRootLayer(root.get());
+
+  root->SetBounds(gfx::Rect(0, 0, 10, 10));
+  root->SetVisible(true);
+  WaitForCommit();
+
+  gfx::Rect damaged_rect(0, 0, 5, 5);
+  root->SchedulePaint(damaged_rect);
+  EXPECT_EQ(damaged_rect, root->damaged_region_for_testing().bounds());
+  WaitForCommit();
+  EXPECT_TRUE(root->damaged_region_for_testing().IsEmpty());
+
+  compositor()->SetRootLayer(nullptr);
+  root.reset();
+  WaitForCommit();
 }
 
 void ExpectRgba(int x, int y, SkColor expected_color, SkColor actual_color) {
@@ -1233,6 +1358,115 @@ TEST_F(LayerWithRealCompositorTest, ModifyHierarchy) {
   EXPECT_TRUE(MatchesPNGFile(bitmap, ref_img2, cc::ExactPixelComparator(true)));
 }
 
+// It is really hard to write pixel test on text rendering,
+// due to different font appearance.
+// So we choose to check result only on Windows.
+// See https://codereview.chromium.org/1634103003/#msg41
+#if defined(OS_WIN)
+TEST_F(LayerWithRealCompositorTest, CanvasDrawStringRectWithHalo) {
+  gfx::Size size(50, 50);
+  GetCompositor()->SetScaleAndSize(1.0f, size);
+  DrawStringLayerDelegate delegate(SK_ColorBLUE, SK_ColorWHITE,
+                                   DrawStringLayerDelegate::STRING_WITH_HALO,
+                                   size);
+  std::unique_ptr<Layer> layer(
+      CreateDrawStringLayer(gfx::Rect(size), &delegate));
+  DrawTree(layer.get());
+
+  SkBitmap bitmap;
+  ReadPixels(&bitmap);
+  ASSERT_FALSE(bitmap.empty());
+
+  base::FilePath ref_img =
+      test_data_directory().AppendASCII("string_with_halo.png");
+  // WritePNGFile(bitmap, ref_img, true);
+
+  float percentage_pixels_large_error = 1.0f;
+  float percentage_pixels_small_error = 0.0f;
+  float average_error_allowed_in_bad_pixels = 1.f;
+  int large_error_allowed = 1;
+  int small_error_allowed = 0;
+
+  EXPECT_TRUE(MatchesPNGFile(bitmap, ref_img,
+                             cc::FuzzyPixelComparator(
+                                 true,
+                                 percentage_pixels_large_error,
+                                 percentage_pixels_small_error,
+                                 average_error_allowed_in_bad_pixels,
+                                 large_error_allowed,
+                                 small_error_allowed)));
+}
+
+TEST_F(LayerWithRealCompositorTest, CanvasDrawFadedString) {
+  gfx::Size size(50, 50);
+  GetCompositor()->SetScaleAndSize(1.0f, size);
+  DrawStringLayerDelegate delegate(SK_ColorBLUE, SK_ColorWHITE,
+                                   DrawStringLayerDelegate::STRING_FADED,
+                                   size);
+  std::unique_ptr<Layer> layer(
+      CreateDrawStringLayer(gfx::Rect(size), &delegate));
+  DrawTree(layer.get());
+
+  SkBitmap bitmap;
+  ReadPixels(&bitmap);
+  ASSERT_FALSE(bitmap.empty());
+
+  base::FilePath ref_img =
+      test_data_directory().AppendASCII("string_faded.png");
+  // WritePNGFile(bitmap, ref_img, true);
+
+  float percentage_pixels_large_error = 8.0f;  // 200px / (50*50)
+  float percentage_pixels_small_error = 0.0f;
+  float average_error_allowed_in_bad_pixels = 80.f;
+  int large_error_allowed = 255;
+  int small_error_allowed = 0;
+
+  EXPECT_TRUE(MatchesPNGFile(bitmap, ref_img,
+                             cc::FuzzyPixelComparator(
+                                 true,
+                                 percentage_pixels_large_error,
+                                 percentage_pixels_small_error,
+                                 average_error_allowed_in_bad_pixels,
+                                 large_error_allowed,
+                                 small_error_allowed)));
+}
+
+TEST_F(LayerWithRealCompositorTest, CanvasDrawStringRectWithShadows) {
+  gfx::Size size(50, 50);
+  GetCompositor()->SetScaleAndSize(1.0f, size);
+  DrawStringLayerDelegate delegate(
+      SK_ColorBLUE, SK_ColorWHITE,
+      DrawStringLayerDelegate::STRING_WITH_SHADOWS,
+      size);
+  std::unique_ptr<Layer> layer(
+      CreateDrawStringLayer(gfx::Rect(size), &delegate));
+  DrawTree(layer.get());
+
+  SkBitmap bitmap;
+  ReadPixels(&bitmap);
+  ASSERT_FALSE(bitmap.empty());
+
+  base::FilePath ref_img =
+      test_data_directory().AppendASCII("string_with_shadows.png");
+  // WritePNGFile(bitmap, ref_img, true);
+
+  float percentage_pixels_large_error = 7.4f;  // 185px / (50*50)
+  float percentage_pixels_small_error = 0.0f;
+  float average_error_allowed_in_bad_pixels = 60.f;
+  int large_error_allowed = 246;
+  int small_error_allowed = 0;
+
+  EXPECT_TRUE(MatchesPNGFile(bitmap, ref_img,
+                             cc::FuzzyPixelComparator(
+                                 true,
+                                 percentage_pixels_large_error,
+                                 percentage_pixels_small_error,
+                                 average_error_allowed_in_bad_pixels,
+                                 large_error_allowed,
+                                 small_error_allowed)));
+}
+#endif  // defined(OS_WIN)
+
 // Opacity is rendered correctly.
 // Checks that modifying the hierarchy correctly affects final composite.
 TEST_F(LayerWithRealCompositorTest, Opacity) {
@@ -1489,9 +1723,9 @@ TEST_F(LayerWithDelegateTest, SetBoundsWhenInvisible) {
 
 namespace {
 
-void FakeSatisfyCallback(cc::SurfaceSequence) {}
+void FakeSatisfyCallback(const cc::SurfaceSequence&) {}
 
-void FakeRequireCallback(cc::SurfaceId, cc::SurfaceSequence) {}
+void FakeRequireCallback(const cc::SurfaceId&, const cc::SurfaceSequence&) {}
 
 }  // namespace
 
@@ -1558,41 +1792,43 @@ TEST_F(LayerWithRealCompositorTest, AddRemoveThreadedAnimations) {
   l1->SetAnimator(LayerAnimator::CreateImplicitAnimator());
   l2->SetAnimator(LayerAnimator::CreateImplicitAnimator());
 
-  EXPECT_FALSE(l1->HasPendingThreadedAnimationsForTesting());
+  auto player1 = l1->GetAnimator()->GetAnimationPlayerForTesting();
+  auto player2 = l2->GetAnimator()->GetAnimationPlayerForTesting();
+
+  EXPECT_FALSE(player1->has_any_animation());
 
   // Trigger a threaded animation.
   l1->SetOpacity(0.5f);
 
-  EXPECT_TRUE(l1->HasPendingThreadedAnimationsForTesting());
+  EXPECT_TRUE(player1->has_any_animation());
 
   // Ensure we can remove a pending threaded animation.
   l1->GetAnimator()->StopAnimating();
 
-  EXPECT_FALSE(l1->HasPendingThreadedAnimationsForTesting());
+  EXPECT_FALSE(player1->has_any_animation());
 
   // Trigger another threaded animation.
   l1->SetOpacity(0.2f);
 
-  EXPECT_TRUE(l1->HasPendingThreadedAnimationsForTesting());
+  EXPECT_TRUE(player1->has_any_animation());
 
   root->Add(l1.get());
   GetCompositor()->SetRootLayer(root.get());
 
-  // Now that l1 is part of a tree, it should have dispatched the pending
-  // animation.
-  EXPECT_FALSE(l1->HasPendingThreadedAnimationsForTesting());
+  // Now l1 is part of a tree.
+  EXPECT_TRUE(player1->has_any_animation());
 
-  // Ensure that l1 no longer holds on to animations.
   l1->SetOpacity(0.1f);
-  EXPECT_FALSE(l1->HasPendingThreadedAnimationsForTesting());
+  // IMMEDIATELY_SET_NEW_TARGET is a default preemption strategy for conflicting
+  // animations.
+  EXPECT_FALSE(player1->has_any_animation());
 
-  // Ensure that adding a layer to an existing tree causes its pending
-  // animations to get dispatched.
+  // Adding a layer to an existing tree.
   l2->SetOpacity(0.5f);
-  EXPECT_TRUE(l2->HasPendingThreadedAnimationsForTesting());
+  EXPECT_TRUE(player2->has_any_animation());
 
   l1->Add(l2.get());
-  EXPECT_FALSE(l2->HasPendingThreadedAnimationsForTesting());
+  EXPECT_TRUE(player2->has_any_animation());
 }
 
 // Tests that in-progress threaded animations complete when a Layer's

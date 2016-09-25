@@ -43,44 +43,6 @@ namespace WTF {
 class CString;
 struct StringHash;
 
-// Declarations of string operations
-
-WTF_EXPORT int charactersToIntStrict(const LChar*, size_t, bool* ok = 0, int base = 10);
-WTF_EXPORT int charactersToIntStrict(const UChar*, size_t, bool* ok = 0, int base = 10);
-WTF_EXPORT unsigned charactersToUIntStrict(const LChar*, size_t, bool* ok = 0, int base = 10);
-WTF_EXPORT unsigned charactersToUIntStrict(const UChar*, size_t, bool* ok = 0, int base = 10);
-WTF_EXPORT int64_t charactersToInt64Strict(const LChar*, size_t, bool* ok = 0, int base = 10);
-WTF_EXPORT int64_t charactersToInt64Strict(const UChar*, size_t, bool* ok = 0, int base = 10);
-WTF_EXPORT uint64_t charactersToUInt64Strict(const LChar*, size_t, bool* ok = 0, int base = 10);
-WTF_EXPORT uint64_t charactersToUInt64Strict(const UChar*, size_t, bool* ok = 0, int base = 10);
-
-WTF_EXPORT int charactersToInt(const LChar*, size_t, bool* ok = 0); // ignores trailing garbage
-WTF_EXPORT int charactersToInt(const UChar*, size_t, bool* ok = 0); // ignores trailing garbage
-WTF_EXPORT unsigned charactersToUInt(const LChar*, size_t, bool* ok = 0); // ignores trailing garbage
-WTF_EXPORT unsigned charactersToUInt(const UChar*, size_t, bool* ok = 0); // ignores trailing garbage
-WTF_EXPORT int64_t charactersToInt64(const LChar*, size_t, bool* ok = 0); // ignores trailing garbage
-WTF_EXPORT int64_t charactersToInt64(const UChar*, size_t, bool* ok = 0); // ignores trailing garbage
-WTF_EXPORT uint64_t charactersToUInt64(const LChar*, size_t, bool* ok = 0); // ignores trailing garbage
-WTF_EXPORT uint64_t charactersToUInt64(const UChar*, size_t, bool* ok = 0); // ignores trailing garbage
-
-// FIXME: Like the strict functions above, these give false for "ok" when there
-// is trailing garbage.  Like the non-strict functions above, these return the
-// value when there is trailing garbage.  It would be better if these were more
-// consistent with the above functions instead.
-WTF_EXPORT double charactersToDouble(const LChar*, size_t, bool* ok = 0);
-WTF_EXPORT double charactersToDouble(const UChar*, size_t, bool* ok = 0);
-WTF_EXPORT double charactersToDouble(const LChar*, size_t, size_t& parsedLength);
-WTF_EXPORT double charactersToDouble(const UChar*, size_t, size_t& parsedLength);
-WTF_EXPORT float charactersToFloat(const LChar*, size_t, bool* ok = 0);
-WTF_EXPORT float charactersToFloat(const UChar*, size_t, bool* ok = 0);
-WTF_EXPORT float charactersToFloat(const LChar*, size_t, size_t& parsedLength);
-WTF_EXPORT float charactersToFloat(const UChar*, size_t, size_t& parsedLength);
-
-enum TrailingZerosTruncatingPolicy {
-    KeepTrailingZeros,
-    TruncateTrailingZeros
-};
-
 enum UTF8ConversionMode {
     LenientUTF8Conversion,
     StrictUTF8Conversion,
@@ -176,13 +138,6 @@ public:
 
     bool is8Bit() const { return m_impl->is8Bit(); }
 
-    unsigned sizeInBytes() const
-    {
-        if (!m_impl)
-            return 0;
-        return m_impl->length() * (is8Bit() ? sizeof(LChar) : sizeof(UChar));
-    }
-
     CString ascii() const;
     CString latin1() const;
     CString utf8(UTF8ConversionMode = LenientUTF8Conversion) const;
@@ -201,130 +156,85 @@ public:
     static String number(long long);
     static String number(unsigned long long);
 
-    static String number(double, unsigned precision = 6, TrailingZerosTruncatingPolicy = TruncateTrailingZeros);
+    static String number(double, unsigned precision = 6);
 
     // Number to String conversion following the ECMAScript definition.
     static String numberToStringECMAScript(double);
     static String numberToStringFixedWidth(double, unsigned decimalPlaces);
 
-    // Find a single character or string, also with match function & latin1
-    // forms.
+    // Find characters.
     size_t find(UChar c, unsigned start = 0) const
         { return m_impl ? m_impl->find(c, start) : kNotFound; }
     size_t find(LChar c, unsigned start = 0) const
         { return m_impl ? m_impl->find(c, start) : kNotFound; }
     size_t find(char c, unsigned start = 0) const { return find(static_cast<LChar>(c), start); }
-
-    size_t find(const String& str) const
-        { return m_impl ? m_impl->find(str.impl()) : kNotFound; }
-    size_t find(const String& str, unsigned start) const
-        { return m_impl ? m_impl->find(str.impl(), start) : kNotFound; }
-
     size_t find(CharacterMatchFunctionPtr matchFunction, unsigned start = 0) const
         { return m_impl ? m_impl->find(matchFunction, start) : kNotFound; }
-    size_t find(const LChar* str, unsigned start = 0) const
-        { return m_impl ? m_impl->find(str, start) : kNotFound; }
 
-    size_t findNextLineStart(unsigned start = 0) const
-        { return m_impl ? m_impl->findNextLineStart(start) : kNotFound; }
+    // Find substrings.
+    size_t find(const StringView& value, unsigned start = 0, TextCaseSensitivity caseSensitivity = TextCaseSensitive) const
+        { return m_impl ? DISPATCH_CASE_OP(caseSensitivity, m_impl->find, (value, start)) : kNotFound; }
+
+    // Unicode aware case insensitive string matching.
+    size_t findIgnoringCase(const StringView& value, unsigned start = 0) const
+        { return m_impl ? m_impl->findIgnoringCase(value, start) : kNotFound; }
+
+    // ASCII case insensitive string matching.
+    size_t findIgnoringASCIICase(const StringView& value, unsigned start = 0) const
+        { return m_impl ? m_impl->findIgnoringASCIICase(value, start) : kNotFound; }
+
+    bool contains(char c) const { return find(c) != kNotFound; }
+    bool contains(const StringView& value, TextCaseSensitivity caseSensitivity = TextCaseSensitive) const
+        { return find(value, 0, caseSensitivity) != kNotFound; }
 
     // Find the last instance of a single character or string.
     size_t reverseFind(UChar c, unsigned start = UINT_MAX) const
         { return m_impl ? m_impl->reverseFind(c, start) : kNotFound; }
-    size_t reverseFind(const String& str, unsigned start = UINT_MAX) const
-        { return m_impl ? m_impl->reverseFind(str.impl(), start) : kNotFound; }
-
-    // Case insensitive string matching.
-    size_t findIgnoringCase(const LChar* str, unsigned start = 0) const
-        { return m_impl ? m_impl->findIgnoringCase(str, start) : kNotFound; }
-    size_t findIgnoringCase(const String& str, unsigned start = 0) const
-        { return m_impl ? m_impl->findIgnoringCase(str.impl(), start) : kNotFound; }
-
-    // ASCII case insensitive string matching.
-    size_t findIgnoringASCIICase(const String& str, unsigned start = 0) const
-        { return m_impl ? m_impl->findIgnoringASCIICase(str.impl(), start) : kNotFound; }
-
-    // Wrappers for find adding dynamic sensitivity check.
-    size_t find(const LChar* str, unsigned start, TextCaseSensitivity caseSensitivity) const
-        { return DISPATCH_CASE_OP(caseSensitivity, find, (str, start)); }
-    size_t find(const String& str, unsigned start, TextCaseSensitivity caseSensitivity) const
-        { return DISPATCH_CASE_OP(caseSensitivity, find, (str, start)); }
-
-    Vector<UChar> charactersWithNullTermination() const;
-    unsigned copyTo(UChar* buffer, unsigned pos, unsigned maxLength) const;
-
-    template<size_t inlineCapacity>
-    void appendTo(Vector<UChar, inlineCapacity>&, unsigned pos = 0, unsigned len = UINT_MAX) const;
-
-    template<typename BufferType>
-    void appendTo(BufferType&, unsigned pos = 0, unsigned len = UINT_MAX) const;
-
-    template<size_t inlineCapacity>
-    void prependTo(Vector<UChar, inlineCapacity>&, unsigned pos = 0, unsigned len = UINT_MAX) const;
+    size_t reverseFind(const StringView& value, unsigned start = UINT_MAX) const
+        { return m_impl ? m_impl->reverseFind(value, start) : kNotFound; }
 
     UChar32 characterStartingAt(unsigned) const;
-    template<typename CharacterType>
-    bool contains(CharacterType c) const { return find(c) != kNotFound; }
-    bool contains(const LChar* str, TextCaseSensitivity caseSensitivity = TextCaseSensitive) const { return find(str, 0, caseSensitivity) != kNotFound; }
-    bool contains(const String& str, TextCaseSensitivity caseSensitivity = TextCaseSensitive) const { return find(str, 0, caseSensitivity) != kNotFound; }
 
-    bool startsWith(const String& s, TextCaseSensitivity caseSensitivity = TextCaseSensitive) const
-        { return m_impl ? DISPATCH_CASE_OP(caseSensitivity, m_impl->startsWith, (s.impl())) : s.isEmpty(); }
+    bool startsWith(const StringView& prefix, TextCaseSensitivity caseSensitivity = TextCaseSensitive) const
+        { return m_impl ? DISPATCH_CASE_OP(caseSensitivity, m_impl->startsWith, (prefix)) : prefix.isEmpty(); }
     bool startsWith(UChar character) const
         { return m_impl ? m_impl->startsWith(character) : false; }
-    template<unsigned matchLength>
-    bool startsWith(const char (&prefix)[matchLength], TextCaseSensitivity caseSensitivity = TextCaseSensitive) const
-        { return m_impl ? DISPATCH_CASE_OP(caseSensitivity, m_impl->startsWith, (prefix, matchLength - 1)) : !matchLength; }
 
-    bool endsWith(const String& s, TextCaseSensitivity caseSensitivity = TextCaseSensitive) const
-        { return m_impl ? DISPATCH_CASE_OP(caseSensitivity, m_impl->endsWith, (s.impl())) : s.isEmpty(); }
+    bool endsWith(const StringView& suffix, TextCaseSensitivity caseSensitivity = TextCaseSensitive) const
+        { return m_impl ? DISPATCH_CASE_OP(caseSensitivity, m_impl->endsWith, (suffix)) : suffix.isEmpty(); }
     bool endsWith(UChar character) const
         { return m_impl ? m_impl->endsWith(character) : false; }
-    template<unsigned matchLength>
-    bool endsWith(const char (&prefix)[matchLength], TextCaseSensitivity caseSensitivity = TextCaseSensitive) const
-        { return m_impl ? DISPATCH_CASE_OP(caseSensitivity, m_impl->endsWith, (prefix, matchLength - 1)) : !matchLength; }
 
-    void append(const String&);
+    void append(const StringView&);
     void append(LChar);
     void append(char c) { append(static_cast<LChar>(c)); }
     void append(UChar);
-    void append(const LChar*, unsigned length);
-    void append(const char* charactersToAppend, unsigned length) { append(reinterpret_cast<const LChar*>(charactersToAppend), length); }
-    void append(const UChar*, unsigned length);
-    void insert(const String&, unsigned pos);
-    void insert(const LChar*, unsigned length, unsigned pos);
-    void insert(const UChar*, unsigned length, unsigned pos);
+    void insert(const StringView&, unsigned pos);
 
-    String& replace(UChar a, UChar b)
+    // TODO(esprehn): replace strangely both modifies this String *and* return a
+    // value. It should only do one of those.
+    String& replace(UChar pattern, UChar replacement)
     {
         if (m_impl)
-            m_impl = m_impl->replace(a, b);
+            m_impl = m_impl->replace(pattern, replacement);
         return *this;
     }
-    String& replace(UChar a, const String& b)
+    String& replace(UChar pattern, const StringView& replacement)
     {
         if (m_impl)
-            m_impl = m_impl->replace(a, b.impl());
+            m_impl = m_impl->replace(pattern, replacement);
         return *this;
     }
-    String& replace(const String& a, const String& b)
+    String& replace(const StringView& pattern, const StringView& replacement)
     {
         if (m_impl)
-            m_impl = m_impl->replace(a.impl(), b.impl());
+            m_impl = m_impl->replace(pattern, replacement);
         return *this;
     }
-    String& replace(unsigned index, unsigned len, const String& b)
+    String& replace(unsigned index, unsigned lengthToReplace, const StringView& replacement)
     {
         if (m_impl)
-            m_impl = m_impl->replace(index, len, b.impl());
-        return *this;
-    }
-
-    ALWAYS_INLINE String& replace(UChar a, const char* characters)
-    {
-        ASSERT(characters);
-        if (m_impl)
-            m_impl = m_impl->replace(a, characters, strlen(characters));
+            m_impl = m_impl->replace(index, lengthToReplace, replacement);
         return *this;
     }
 
@@ -336,15 +246,12 @@ public:
 
     void ensure16Bit();
 
-    void truncate(unsigned len);
-    void remove(unsigned pos, int len = 1);
+    void truncate(unsigned length);
+    void remove(unsigned start, unsigned length = 1);
 
     String substring(unsigned pos, unsigned len = UINT_MAX) const;
     String left(unsigned len) const { return substring(0, len); }
     String right(unsigned len) const { return substring(length() - len, len); }
-
-    StringView createView() const { return StringView(impl()); }
-    StringView createView(unsigned offset, unsigned length) const { return StringView(impl(), offset, length); }
 
     // Returns a lowercase/uppercase version of the string
     String lower() const;
@@ -382,6 +289,16 @@ public:
     {
         split(separator, false, result);
     }
+
+    // Copy characters out of the string. See StringImpl.h for detailed docs.
+    unsigned copyTo(UChar* buffer, unsigned start, unsigned maxLength) const
+        { return m_impl ? m_impl->copyTo(buffer, start, maxLength) : 0; }
+    template<typename BufferType>
+    void appendTo(BufferType&, unsigned start = 0, unsigned length = UINT_MAX) const;
+    template<typename BufferType>
+    void prependTo(BufferType&, unsigned start = 0, unsigned length = UINT_MAX) const;
+
+    // Convert the string into a number.
 
     int toIntStrict(bool* ok = 0, int base = 10) const;
     unsigned toUIntStrict(bool* ok = 0, int base = 10) const;
@@ -443,6 +360,8 @@ public:
     bool containsOnlyLatin1() const;
     bool containsOnlyWhitespace() const { return !m_impl || m_impl->containsOnlyWhitespace(); }
 
+    size_t charactersSizeInBytes() const { return m_impl ? m_impl->charactersSizeInBytes() : 0; }
+
     // Hash table deleted values, which are only constructed and never copied or
     // destroyed.
     String(WTF::HashTableDeletedValueType) : m_impl(WTF::HashTableDeletedValue) { }
@@ -452,20 +371,9 @@ public:
     void show() const;
 #endif
 
-    // Workaround for a compiler bug. Use operator[] instead.
-    UChar characterAt(unsigned index) const
-    {
-        if (!m_impl || index >= m_impl->length())
-            return 0;
-        return (*m_impl)[index];
-    }
-
 private:
     typedef struct ImplicitConversionFromWTFStringToBoolDisallowed* (String::*UnspecifiedBoolType);
     operator UnspecifiedBoolType() const;
-
-    template <typename CharacterType>
-    void removeInternal(const CharacterType*, unsigned, int);
 
     template <typename CharacterType>
     void appendInternal(CharacterType);
@@ -495,14 +403,6 @@ template<size_t inlineCapacity>
 inline bool operator!=(const Vector<char, inlineCapacity>& a, const String& b) { return !(a == b); }
 template<size_t inlineCapacity>
 inline bool operator!=(const String& a, const Vector<char, inlineCapacity>& b) { return b != a; }
-
-inline bool equalIgnoringCase(const String& a, const String& b) { return equalIgnoringCase(a.impl(), b.impl()); }
-inline bool equalIgnoringCase(const String& a, const LChar* b) { return equalIgnoringCase(a.impl(), b); }
-inline bool equalIgnoringCase(const String& a, const char* b) { return equalIgnoringCase(a.impl(), reinterpret_cast<const LChar*>(b)); }
-inline bool equalIgnoringCase(const LChar* a, const String& b) { return equalIgnoringCase(a, b.impl()); }
-inline bool equalIgnoringCase(const char* a, const String& b) { return equalIgnoringCase(reinterpret_cast<const LChar*>(a), b.impl()); }
-
-inline bool equalIgnoringASCIICase(const String& a, const String& b) { return equalIgnoringASCIICase(a.impl(), b.impl()); }
 
 inline bool equalPossiblyIgnoringCase(const String& a, const String& b, bool ignoreCase)
 {
@@ -583,22 +483,6 @@ inline bool codePointCompareLessThan(const String& a, const String& b)
 
 WTF_EXPORT int codePointCompareIgnoringASCIICase(const String&, const char*);
 
-template<size_t inlineCapacity>
-inline void append(Vector<UChar, inlineCapacity>& vector, const String& string)
-{
-    unsigned length = string.length();
-    if (!length)
-        return;
-    if (string.is8Bit()) {
-        const LChar* characters8 = string.characters8();
-        vector.reserveCapacity(vector.size() + length);
-        for (size_t i = 0; i < length; ++i)
-            vector.uncheckedAppend(characters8[i]);
-    } else {
-        vector.append(string.characters16(), length);
-    }
-}
-
 template<bool isSpecialCharacter(UChar), typename CharacterType>
 inline bool isAllSpecialCharacters(const CharacterType* characters, size_t length)
 {
@@ -622,49 +506,20 @@ inline bool String::isAllSpecialCharacters() const
     return WTF::isAllSpecialCharacters<isSpecialCharacter, UChar>(characters16(), len);
 }
 
-template<size_t inlineCapacity>
-inline void String::appendTo(Vector<UChar, inlineCapacity>& result, unsigned pos, unsigned len) const
+template<typename BufferType>
+void String::appendTo(BufferType& result, unsigned position, unsigned length) const
 {
-    unsigned numberOfCharactersToCopy = std::min(len, length() - pos);
-    if (!numberOfCharactersToCopy)
+    if (!m_impl)
         return;
-    result.reserveCapacity(result.size() + numberOfCharactersToCopy);
-    if (is8Bit()) {
-        const LChar* characters8 = m_impl->characters8();
-        for (size_t i = 0; i < numberOfCharactersToCopy; ++i)
-            result.uncheckedAppend(characters8[pos + i]);
-    } else {
-        const UChar* characters16 = m_impl->characters16();
-        result.append(characters16 + pos, numberOfCharactersToCopy);
-    }
+    m_impl->appendTo(result, position, length);
 }
 
 template<typename BufferType>
-inline void String::appendTo(BufferType& result, unsigned pos, unsigned len) const
+void String::prependTo(BufferType& result, unsigned position, unsigned length) const
 {
-    unsigned numberOfCharactersToCopy = std::min(len, length() - pos);
-    if (!numberOfCharactersToCopy)
+    if (!m_impl)
         return;
-    if (is8Bit())
-        result.append(m_impl->characters8() + pos, numberOfCharactersToCopy);
-    else
-        result.append(m_impl->characters16() + pos, numberOfCharactersToCopy);
-}
-
-template<size_t inlineCapacity>
-inline void String::prependTo(Vector<UChar, inlineCapacity>& result, unsigned pos, unsigned len) const
-{
-    unsigned numberOfCharactersToCopy = std::min(len, length() - pos);
-    if (!numberOfCharactersToCopy)
-        return;
-    if (is8Bit()) {
-        size_t oldSize = result.size();
-        result.resize(oldSize + numberOfCharactersToCopy);
-        memmove(result.data() + numberOfCharactersToCopy, result.data(), oldSize * sizeof(UChar));
-        StringImpl::copyChars(result.data(), m_impl->characters8() + pos, numberOfCharactersToCopy);
-    } else {
-        result.prepend(m_impl->characters16() + pos, numberOfCharactersToCopy);
-    }
+    m_impl->prependTo(result, position, length);
 }
 
 // StringHash is the default hash for String
@@ -682,35 +537,28 @@ WTF_EXPORT extern const String& xmlnsWithColon;
 // double-quotes, and escapes chracters other than ASCII printables.
 WTF_EXPORT std::ostream& operator<<(std::ostream&, const String&);
 
+inline StringView::StringView(const String& string, unsigned offset, unsigned length)
+    : StringView(string.impl(), offset, length) {}
+inline StringView::StringView(const String& string, unsigned offset)
+    : StringView(string.impl(), offset) {}
+inline StringView::StringView(const String& string)
+    : StringView(string.impl()) {}
+
 } // namespace WTF
 
 WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(String);
 
 using WTF::CString;
-using WTF::KeepTrailingZeros;
 using WTF::StrictUTF8Conversion;
 using WTF::StrictUTF8ConversionReplacingUnpairedSurrogatesWithFFFD;
 using WTF::String;
 using WTF::emptyString;
 using WTF::emptyString16Bit;
-using WTF::append;
 using WTF::charactersAreAllASCII;
-using WTF::charactersToIntStrict;
-using WTF::charactersToUIntStrict;
-using WTF::charactersToInt64Strict;
-using WTF::charactersToUInt64Strict;
-using WTF::charactersToInt;
-using WTF::charactersToUInt;
-using WTF::charactersToInt64;
-using WTF::charactersToUInt64;
-using WTF::charactersToDouble;
-using WTF::charactersToFloat;
 using WTF::equal;
-using WTF::equalIgnoringCase;
 using WTF::find;
 using WTF::isAllSpecialCharacters;
 using WTF::isSpaceOrNewline;
-using WTF::reverseFind;
 
 #include "wtf/text/AtomicString.h"
 #endif // WTFString_h

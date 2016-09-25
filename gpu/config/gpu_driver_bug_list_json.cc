@@ -19,7 +19,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
 {
   "name": "gpu driver bug list",
   // Please update the version number whenever you change this file.
-  "version": "8.62",
+  "version": "9.02",
   "entries": [
     {
       "id": 1,
@@ -41,58 +41,6 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       "gl_vendor": "ARM.*",
       "features": [
         "use_client_side_arrays_for_stream_buffers"
-      ]
-    },
-    {
-      "id": 3,
-      "description": "glGenerateMipmap leaks vram without setting texture filters on some Mac drivers",
-      "webkit_bugs": [48489],
-      "cr_bugs": [349137],
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.9"
-        }
-      },
-      "features": [
-        "set_texture_filter_before_generating_mipmap"
-      ]
-    },
-    {
-      "id": 4,
-      "description": "glReadPixels incorrectly sets alpha to 0 on some drivers from a drawing buffer without alpha channel",
-      "webkit_bugs": [33416],
-      "cr_bugs": [349137],
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.9"
-        }
-      },
-      "features": [
-        "clear_alpha_in_readpixels"
-      ]
-    },
-    {
-      "id": 5,
-      "description": "Always call glUseProgram after a successful link to avoid a driver bug",
-      "cr_bugs": [349137],
-      "vendor_id": "0x10de",
-      "exceptions": [
-        {
-          "os": {
-            "type": "macosx",
-            "version": {
-              "op": ">=",
-              "value": "10.9"
-            }
-          }
-        }
-      ],
-      "features": [
-        "use_current_program_after_successful_link"
       ]
     },
     {
@@ -121,127 +69,6 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       "vendor_id": "0x10de",
       "features": [
         "needs_offscreen_buffer_workaround"
-      ]
-    },
-    {
-      "id": 8,
-      "description": "A few built-in glsl functions on Mac behave incorrectly",
-      "cr_bugs": [349137],
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.9"
-        }
-      },
-      "vendor_id": "0x1002",
-      "features": [
-        "needs_glsl_built_in_function_emulation"
-      ]
-    },
-    {
-      "id": 9,
-      "description": "AMD drivers get gl_PointCoord backward on OS X 10.8 or earlier",
-      "cr_bugs": [256349],
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.9"
-        }
-      },
-      "vendor_id": "0x1002",
-      "features": [
-        "reverse_point_sprite_coord_origin"
-      ]
-    },
-    {
-      "id": 10,
-      "description": "Intel drivers get gl_PointCoord backward on OS X 10.8 or earlier",
-      "cr_bugs": [256349],
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.9"
-        }
-      },
-      "vendor_id": "0x8086",
-      "features": [
-        "reverse_point_sprite_coord_origin"
-      ]
-    },
-    {
-      "id": 11,
-      "description": "Limit max texure size to 4096 on Macs with Intel GPUs",
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.9"
-        }
-      },
-      "vendor_id": "0x8086",
-      "features": [
-        "max_texture_size_limit_4096"
-      ]
-    },
-    {
-      "id": 12,
-      "description": "Limit max cube map texure size to 1024 on Macs with Intel GPUs",
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.9"
-        }
-      },
-      "vendor_id": "0x8086",
-      "features": [
-        "max_cube_map_texture_size_limit_1024"
-      ]
-    },
-    {
-      "id": 13,
-      "description": "Limit max cube map texure size to 512 on older Macs with Intel GPUs",
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.7.3"
-        }
-      },
-      "vendor_id": "0x8086",
-      "features": [
-        "max_cube_map_texture_size_limit_512"
-      ]
-    },
-    {
-      "id": 14,
-      "description": "Limit max texure size and cube map texture size to 4096 on Macs with AMD GPUs",
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.9"
-        }
-      },
-      "vendor_id": "0x1002",
-      "features": [
-        "max_texture_size_limit_4096",
-        "max_cube_map_texture_size_limit_4096"
-      ]
-    },
-    {
-      "id": 16,
-      "description": "EXT_occlusion_query appears to be buggy with Intel GPUs on Linux",
-      "os": {
-        "type": "linux"
-      },
-      "vendor_id": "0x8086",
-      "disabled_extensions": [
-        "GL_ARB_occlusion_query2",
-        "GL_ARB_occlusion_query"
       ]
     },
     {
@@ -329,21 +156,6 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       "gl_renderer": ".*Mali-4.*",
       "features": [
         "use_non_zero_size_for_client_side_stream_buffers"
-      ]
-    },
-    {
-      "id": 25,
-      "cr_bugs": [152225],
-      "description": "PBO + Readpixels don't work on OS X 10.7",
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.8"
-        }
-      },
-      "features": [
-        "disable_async_readpixels"
       ]
     },
     {
@@ -467,6 +279,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
         "type": "linux"
       },
       "vendor_id": "0x10de",
+      "gl_vendor": "NVIDIA.*",
       "features": [
         "init_gl_position_in_vertex_shader"
       ]
@@ -488,7 +301,11 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       "cr_bugs": [290391],
       "description": "Multisampled renderbuffer allocation must be validated on some Macs",
       "os": {
-        "type": "macosx"
+        "type": "macosx",
+        "version": {
+          "op": "<",
+          "value": "10.10"
+        }
       },
       "features": [
         "validate_multisample_buffer_allocation"
@@ -562,11 +379,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       "description": "Force to use discrete GPU on older MacBookPro models",
       "cr_bugs": [113703],
       "os": {
-        "type": "macosx",
-        "version": {
-          "op": ">=",
-          "value": "10.7"
-        }
+        "type": "macosx"
       },
       "machine_model_name": ["MacBookPro"],
       "machine_model_version": {
@@ -622,11 +435,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       "exceptions": [
         {
           "os": {
-            "type": "macosx",
-            "version": {
-              "op": ">=",
-              "value": "10.9"
-            }
+            "type": "macosx"
           }
         }
       ],
@@ -659,33 +468,6 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       ]
     },
     {
-      "id": 57,
-      "cr_bugs": [322760],
-      "description": "Mac drivers handle varyings without static use incorrectly",
-      "os": {
-        "type": "macosx"
-      },
-      "features": [
-        "init_varyings_without_static_use"
-      ]
-    },
-    {
-      "id": 58,
-      "description": "Multisampling is buggy in ATI cards on older Mac OS X",
-      "cr_bugs": [67752, 83153],
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.7.2"
-        }
-      },
-      "vendor_id": "0x1002",
-      "features": [
-        "disable_chromium_framebuffer_multisample"
-      ]
-    },
-    {
       "id": 59,
       "description": "Multisampling is buggy in Intel IvyBridge",
       "cr_bugs": [116370],
@@ -696,36 +478,6 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       "device_id": ["0x0152", "0x0156", "0x015a", "0x0162", "0x0166"],
       "features": [
         "disable_chromium_framebuffer_multisample"
-      ]
-    },
-    {
-      "id": 60,
-      "description": "Multisampling is buggy on Mac OS X prior to 10.8.3",
-      "cr_bugs": [137303, 162466],
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.8.3"
-        }
-      },
-      "features": [
-        "disable_chromium_framebuffer_multisample"
-      ]
-    },
-    {
-      "id": 63,
-      "description": "Shaders with sampler arrays indexing for-loop indices cause the GLSL compiler to crash on OS X",
-      "cr_bugs": [348198, 349137],
-      "os": {
-        "type": "macosx",
-        "version": {
-          "op": "<",
-          "value": "10.9"
-        }
-      },
-      "features": [
-        "unroll_for_loop_with_sampler_array_index"
       ]
     },
     {
@@ -748,6 +500,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
         "type": "linux"
       },
       "vendor_id": "0x10de",
+      "gl_vendor": "NVIDIA.*",
       "features": [
         "init_vertex_attributes"
       ]
@@ -759,7 +512,8 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       "os": {
         "type": "linux"
       },
-      "driver_vendor": "Mesa",
+      "gl_type": "gl",
+      "gl_renderer": ".*Mesa.*",
       "features": [
         "disable_post_sub_buffers_for_onscreen_surfaces"
       ]
@@ -852,8 +606,8 @@ LONG_STRING_CONST(
       },
       "gl_vendor": "ARM.*",
       "gl_renderer": ".*Mali-4.*",
-      "features": [
-        "disable_multisampled_render_to_texture"
+      "disabled_extensions": [
+        "GL_EXT_multisampled_render_to_texture"
       ]
     },
     {
@@ -1071,17 +825,6 @@ LONG_STRING_CONST(
       ]
     },
     {
-      "id": 96,
-      "description": "glBindFramebuffer sometimes requires a glBegin/End to take effect",
-      "cr_bugs": [435786],
-      "os": {
-        "type": "macosx"
-      },
-      "features": [
-        "gl_begin_gl_end_on_fbo_change_to_backbuffer"
-      ]
-    },
-    {
       "id": 97,
       "description": "Multisampling has poor performance in Intel BayTrail",
       "cr_bugs": [443517],
@@ -1254,11 +997,13 @@ LONG_STRING_CONST(
     },
     {
       "id": 109,
+      "cr_bugs": [449150, 514510],
       "description": "MakeCurrent is slow on Linux with NVIDIA drivers",
       "vendor_id": "0x10de",
       "os": {
         "type": "linux"
       },
+      "gl_vendor": "NVIDIA.*",
       "features": [
         "use_virtualized_gl_contexts"
       ]
@@ -1351,8 +1096,8 @@ LONG_STRING_CONST(
         }
       },
       "gl_renderer": "Adreno \\(TM\\) 4.*",
-      "features": [
-        "disable_multisampled_render_to_texture"
+      "disabled_extensions": [
+        "GL_EXT_multisampled_render_to_texture"
       ]
     },
     {
@@ -1380,6 +1125,7 @@ LONG_STRING_CONST(
         "value": "331"
       },
       "vendor_id": "0x10de",
+      "gl_vendor": "NVIDIA.*",
       "features": [
         "remove_pow_with_constant_exponent"
       ]
@@ -1441,7 +1187,7 @@ LONG_STRING_CONST(
       },
       "gl_renderer": "Adreno \\(TM\\) [45].*",
       "features": [
-        "disable_program_cache"
+        "disable_program_disk_cache"
       ]
     },
     {
@@ -1513,6 +1259,7 @@ LONG_STRING_CONST(
       "os": {
         "type": "linux"
       },
+      "gl_vendor": "NVIDIA.*",
       "features": [
         "force_cube_complete"
       ]
@@ -1723,23 +1470,6 @@ LONG_STRING_CONST(
 // Avoid C2026 (string too big) error on VisualStudio.
 LONG_STRING_CONST(
     {
-      "id": 146,
-      "description": "Crashes in D3D11 on specific AMD drivers",
-      "cr_bugs": [517040],
-      "os": {
-        "type": "win"
-      },
-      "vendor_id": "0x1002",
-      "driver_version": {
-        "op": "between",
-        "value": "15.200",
-        "value2": "15.201"
-      },
-      "features": [
-        "disable_d3d11"
-      ]
-    },
-    {
       "id": 147,
       "description": "Limit max texure size to 4096 on all of Android",
       "os": {
@@ -1823,42 +1553,8 @@ LONG_STRING_CONST(
       },
       "gl_vendor": "Vivante Corporation",
       "gl_renderer": "Vivante GC1000",
-      "features": [
-        "disable_multisampled_render_to_texture"
-      ]
-    },
-    {
-      "id": 154,
-      "cr_bugs": [581777],
-      "description": "glReadPixels does not work on IOSurface backed textures",
-      "os": {
-        "type": "macosx"
-      },
-      "exceptions": [
-        {
-          "os": {
-            "type": "macosx",
-            "version": {
-              "op": ">=",
-              "value": "10.9"
-            }
-          }
-        }
-      ],
-      "features": [
-        "iosurface_readback_workaround"
-      ]
-    },
-    {
-      "id": 155,
-      "cr_bugs": [597794],
-      "description": "Seamless cubemap does not work for Mac Intel",
-      "os": {
-        "type": "macosx"
-      },
-      "vendor_id": "0x8086",
-      "features": [
-        "disable_texture_cube_map_seamless"
+      "disabled_extensions": [
+        "GL_EXT_multisampled_render_to_texture"
       ]
     },
     {
@@ -1909,6 +1605,8 @@ LONG_STRING_CONST(
           "value": "10.10"
         }
       },
+      "vendor_id": "0x10de",
+      "device_id": ["0x0fd5"],
       "features": [
         "disable_overlay_ca_layers"
       ]
@@ -1979,8 +1677,363 @@ LONG_STRING_CONST(
       "features": [
         "disable_discard_framebuffer"
       ]
+    },
+    {
+      "id": 163,
+      "cr_bugs": [607130],
+      "description": "Multisample renderbuffers with format GL_RGB8 have performance issues on Intel GPUs.",
+      "os": {
+        "type": "macosx"
+      },
+      "vendor_id": "0x8086",
+      "features": [
+        "disable_webgl_rgb_multisampling_usage"
+      ]
+    },
+    {
+      "id": 164,
+      "cr_bugs": [595948],
+      "description": "glColorMask does not work for multisample renderbuffers on old AMD GPUs.",
+      "os": {
+        "type": "macosx"
+      },
+      "vendor_id": "0x1002",
+      "device_id": ["0x68b8", "0x6720", "0x6741"],
+      "features": [
+        "disable_multisampling_color_mask_usage"
+      ]
+    },
+    {
+      "id": 165,
+      "cr_bugs": [596774],
+      "description": "Unpacking overlapping rows from unpack buffers is unstable on NVIDIA GL driver",
+      "gl_vendor": "NVIDIA.*",
+      "features": [
+        "unpack_overlapping_rows_separately_unpack_buffer"
+      ]
+    },
+    {
+      "id": 167,
+      "cr_bugs": [610516],
+      "description": "glEGLImageTargetTexture2DOES crashes on Mali-400",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "ARM.*",
+      "gl_renderer": ".*Mali-4.*",
+      "features": [
+        "avda_dont_copy_pictures"
+      ]
+    },
+    {
+      "id": 168,
+      "description": "VirtualBox driver doesn't correctly support partial swaps.",
+      "cr_bugs": [613722],
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x80ee",
+      "features": [
+        "disable_post_sub_buffers_for_onscreen_surfaces"
+      ]
+    },
+    {
+      "id": 169,
+      "description": "Mac Drivers store texture level parameters on int16_t that overflow",
+      "cr_bugs": [610153],
+      "os": {
+        "type": "macosx"
+      },
+      "features": [
+        "use_shadowed_tex_level_params"
+      ]
+    },
+    {
+      "id": 170,
+      "description": "Zero copy DXGI video hangs on shutdown on Win < 8.1",
+      "cr_bugs": [621190],
+      "os": {
+        "type": "win",
+        "version": {
+          "op": "<",
+          "value": "8.1"
+        }
+      },
+      "features": [
+        "disable_dxgi_zero_copy_video"
+      ]
+    },
+    {
+      "id": 171,
+      "description": "NV12 DXGI video hangs or displays incorrect colors on AMD drivers",
+      "cr_bugs": [623029, 644293],
+      "os": {
+        "type": "win"
+      },
+      "vendor_id": "0x1002",
+      "features": [
+        "disable_dxgi_zero_copy_video",
+        "disable_nv12_dxgi_video"
+      ]
+    },
+    {
+      "id": 172,
+      "description": "Limited enabling of Chromium GL_INTEL_framebuffer_CMAA",
+      "cr_bugs": [535198],
+      "exceptions" : [
+        {
+          "os": {
+            "type" : "chromeos"
+          },
+          "vendor_id": "0x8086",
+          "device_id": ["0x1602", "0x1606", "0x160a", "0x160b", "0x160d",
+                        "0x160e", "0x1612", "0x1616", "0x161a", "0x161b",
+                        "0x161d", "0x161e", "0x1622", "0x1626", "0x162a",
+                        "0x162b", "0x162d", "0x162e", "0x22b0", "0x22b1",
+                        "0x22b2", "0x22b3"]
+        }
+      ],
+      "features": [
+        "disable_framebuffer_cmaa"
+      ]
+    },
+    {
+      "id": 173,
+      "description": "Limit transparent visuals to drivers known to work",
+      "cr_bugs": [369209],
+      "os": {
+        "type": "linux"
+      },
+      "exceptions" : [
+        {
+          "driver_vendor": "Mesa"
+        }
+      ],
+      "features": [
+        "disable_transparent_visuals"
+      ]
+    },
+    {
+      "id": 174,
+      "description": "Adreno 4xx support for EXT_multisampled_render_to_texture is buggy on Android 7.0",
+      "cr_bugs": [612474],
+      "os": {
+        "type": "android",
+        "version": {
+          "op": "between",
+          "value": "7.0.0",
+          "value2": "7.0.99"
+          // Only initial version of N.
+        }
+      },
+      "gl_renderer": "Adreno \\(TM\\) 4.*",
+      "disabled_extensions": [
+        "GL_EXT_multisampled_render_to_texture"
+      ]
+    },
+    {
+      "id": 175,
+      "description": "Adreno 5xx support for EXT_multisampled_render_to_texture is buggy on Android < 7.0",
+      "cr_bugs": [612474],
+      "os": {
+        "type": "android",
+        "version": {
+          "op": "<",
+          "value": "7.0"
+        }
+      },
+      "gl_renderer": "Adreno \\(TM\\) 5.*",
+      "disabled_extensions": [
+        "GL_EXT_multisampled_render_to_texture"
+      ]
+    },
+    {
+      "id": 176,
+      "description": "glClear does not work on Acer Predator GT-810",
+      "cr_bugs": [633634],
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "Intel",
+      "gl_renderer": ".*Atom.*x5/x7.*",
+      "features": [
+        "gl_clear_broken"
+      ]
+    },
+    {
+      "id": 177,
+      "description": "glGetFragData{Location|Index} works incorrectly on Max",
+      "cr_bugs": [638340],
+      "os": {
+        "type": "macosx"
+      },
+      "features": [
+        "get_frag_data_info_bug"
+      ]
+    },
+    {
+      "id": 178,
+      "description": "GL_KHR_blend_equation_advanced is incorrectly implemented on Intel BayTrail on KitKat",
+      "cr_bugs": [639470],
+      "os": {
+        "type": "android",
+        "version": {
+          "op": "<",
+          "value": "5.0"
+        }
+      },
+      "gl_vendor": "Intel.*",
+      "gl_renderer": "Intel(R) HD Graphics for BayTrail",
+      "features": [
+        "disable_blend_equation_advanced"
+      ]
+    },
+    {
+      "id": 179,
+      "description": "glResumeTransformFeedback works incorrectly on Intel GPUs",
+      "cr_bugs": [638514],
+      "os": {
+        "type": "macosx"
+      },
+      "vendor_id": "0x8086",
+      "features": [
+        "rebind_transform_feedback_before_resume"
+      ]
+    },
+    {
+      "id": 180,
+      "cr_bugs": [579060,632461],
+      "description": "eglCreateImageKHR fails for one component textures on PowerVR",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "Imagination.*",
+      "gl_renderer": "PowerVR .*",
+      "features": [
+        "avoid_one_component_egl_images"
+      ]
+    },
+    {
+      "id": 181,
+      "description": "glTexStorage* are buggy when base mipmap level is not 0",
+      "cr_bugs": [640506],
+      "os": {
+        "type": "macosx"
+      },
+      "vendor_id": "0x8086",
+      "features": [
+        "reset_base_mipmap_level_before_texstorage"
+      ]
+    },
+    {
+      "id": 182,
+      "cr_bugs": [638691],
+      "description": "Frequent hang in glClear on old android versions on Mali-T7xx",
+      "os": {
+        "type": "android",
+        "version": {
+          "op": "<",
+          "value": "6.0"
+        }
+      },
+      "gl_renderer": ".*Mali-T7.*",
+      "features": [
+        "gl_clear_broken"
+      ]
+    },
+    {
+      "id": 183,
+      "description": "Result of abs(i) where i is an integer in vertex shader is wrong",
+      "cr_bugs": [642227],
+      "os": {
+        "type": "macosx"
+      },
+      "vendor_id": "0x8086",
+      "features": [
+        "emulate_abs_int_function"
+      ]
+    },
+    {
+      "id": 184,
+      "description": "Rewrite texelFetchOffset to texelFetch for Intel Mac",
+      "cr_bugs": [642605],
+      "os": {
+        "type": "macosx"
+      },
+      "vendor_id": "0x8086",
+      "features": [
+        "rewrite_texelfetchoffset_to_texelfetch"
+      ]
+    },
+    {
+      "id": 185,
+      "description": "Zero-copy NV12 video displays incorrect colors on NVIDIA drivers.",
+      "cr_bugs": [635319],
+      "os": {
+        "type": "win"
+      },
+      "vendor_id": "0x10de",
+      "features": [
+        "disable_dxgi_zero_copy_video"
+      ]
+    },
+    {
+      "id": 186,
+      "description": "Rewrite condition in for and while loops for Intel Mac",
+      "cr_bugs": [644669],
+      "os": {
+        "type": "macosx"
+      },
+      "vendor_id": "0x8086",
+      "features": [
+        "add_and_true_to_loop_condition"
+      ]
+    },
+    {
+      "id": 187,
+      "description": "Rewrite do-while loops to simpler constructs on Mac",
+      "cr_bugs": [644669],
+      "os": {
+        "type": "macosx",
+        "version": {
+          "op": "<",
+          "value": "10.11"
+        }
+      },
+      "features": [
+        "rewrite_do_while_loops"
+      ]
+    },
+    {
+      "id": 188,
+      "description": "AVSampleBufferDisplayLayer leaks IOSurfaces on 10.9.",
+      "cr_bugs": [632178],
+      "os": {
+        "type": "macosx",
+        "version": {
+          "op": "<=",
+          "value": "10.10"
+        }
+      },
+      "features": [
+        "disable_av_sample_buffer_display_layer"
+      ]
+    },
+    {
+      "id": 189,
+      "description": "Do TexImage2D first before CopyTexImage2D for cube map texture on Intel Mac",
+      "cr_bugs": [648197],
+      "os": {
+        "type": "macosx"
+      },
+      "vendor_id": "0x8086",
+      "features": [
+        "do_teximage_before_copyteximage_to_cube_map"
+      ]
     }
   ]
+  // Please update the version number at beginning of this file whenever you
+  // change this file.
 }
 
 );  // LONG_STRING_CONST macro

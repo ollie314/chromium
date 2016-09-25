@@ -26,13 +26,13 @@ WebInspector.DeviceOrientation.prototype = {
 
     apply: function()
     {
-        for (var target of WebInspector.targetManager.targets(WebInspector.Target.Type.Page))
+        for (var target of WebInspector.targetManager.targets(WebInspector.Target.Capability.Browser))
             target.deviceOrientationAgent().setDeviceOrientationOverride(this.alpha, this.beta, this.gamma);
     },
 
     clear: function()
     {
-        for (var target of WebInspector.targetManager.targets(WebInspector.Target.Type.Page))
+        for (var target of WebInspector.targetManager.targets(WebInspector.Target.Capability.Browser))
             target.deviceOrientationAgent().clearDeviceOrientationOverride();
     }
 }
@@ -77,5 +77,5 @@ WebInspector.DeviceOrientation.parseUserInput = function(alphaString, betaString
  */
 WebInspector.DeviceOrientation.validator = function(value)
 {
-    return !value || /^([+-]?[\d]+(\.\d+)?|[+-]?\.\d+)$/.test(value);
+    return /^([+-]?[\d]+(\.\d+)?|[+-]?\.\d+)$/.test(value);
 }

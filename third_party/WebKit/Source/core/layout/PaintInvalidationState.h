@@ -6,7 +6,9 @@
 #define PaintInvalidationState_h
 
 #include "core/CoreExport.h"
+#include "core/paint/PaintInvalidator.h"
 #include "platform/geometry/LayoutRect.h"
+#include "platform/graphics/PaintInvalidationReason.h"
 #include "platform/transforms/AffineTransform.h"
 #include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
@@ -34,7 +36,7 @@ enum VisualRectFlags {
 // needs of the paint invalidation systems (keeping visual rectangles
 // instead of layout specific information).
 //
-// See Source/core/paint/README.md ### PaintInvalidationState for more details.
+// See Source/core/paint/README.md#Paint-invalidation for more details.
 
 class CORE_EXPORT PaintInvalidationState {
     DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
@@ -45,19 +47,23 @@ public:
     // For root LayoutView, or when sub-frame LayoutView's invalidateTreeIfNeeded() is called directly from
     // FrameView::invalidateTreeIfNeededRecursive() instead of the owner LayoutPart.
     // TODO(wangxianzhu): Eliminate the latter case.
-    PaintInvalidationState(const LayoutView&, Vector<LayoutObject*>& pendingDelayedPaintInvalidations);
+    PaintInvalidationState(const LayoutView&, Vector<const LayoutObject*>& pendingDelayedPaintInvalidations);
 
     // When a PaintInvalidationState is constructed, it can be used to map points/rects in the object's
     // local space (border box space for LayoutBoxes). After invalidation of the current object,
     // before invalidation of the subtrees, this method must be called to apply clip and scroll offset
     // etc. for creating child PaintInvalidationStates.
-    void updateForChildren();
+    void updateForChildren(PaintInvalidationReason);
 
-    bool forcedSubtreeInvalidationWithinContainer() const { return m_forcedSubtreeInvalidationWithinContainer; }
-    void setForceSubtreeInvalidationWithinContainer() { m_forcedSubtreeInvalidationWithinContainer = true; }
+    bool hasForcedSubtreeInvalidationFlags() const { return m_forcedSubtreeInvalidationFlags; }
 
-    bool forcedSubtreeInvalidationRectUpdateWithinContainer() const { return m_forcedSubtreeInvalidationRectUpdateWithinContainer; }
-    void setForceSubtreeInvalidationRectUpdateWithinContainer() { m_forcedSubtreeInvalidationRectUpdateWithinContainer = true; }
+    bool forcedSubtreeInvalidationCheckingWithinContainer() const { return m_forcedSubtreeInvalidationFlags & PaintInvalidatorContext::ForcedSubtreeInvalidationChecking; }
+    void setForceSubtreeInvalidationCheckingWithinContainer() { m_forcedSubtreeInvalidationFlags |= PaintInvalidatorContext::ForcedSubtreeInvalidationChecking; }
+
+    bool forcedSubtreeFullInvalidationWithinContainer() const { return m_forcedSubtreeInvalidationFlags & PaintInvalidatorContext::ForcedSubtreeFullInvalidation; }
+
+    bool forcedSubtreeInvalidationRectUpdateWithinContainerOnly() const { return m_forcedSubtreeInvalidationFlags == PaintInvalidatorContext::ForcedSubtreeInvalidationRectUpdate; }
+    void setForceSubtreeInvalidationRectUpdateWithinContainer() { m_forcedSubtreeInvalidationFlags |= PaintInvalidatorContext::ForcedSubtreeInvalidationRectUpdate; }
 
     const LayoutBoxModelObject& paintInvalidationContainer() const { return *m_paintInvalidationContainer; }
 
@@ -71,18 +77,13 @@ public:
 
     void mapLocalRectToPaintInvalidationBacking(LayoutRect&) const;
 
-    // Records |obj| as needing paint invalidation on the next frame. See the definition of PaintInvalidationDelayedFull for more details.
-    void pushDelayedPaintInvalidationTarget(LayoutObject& obj) const { m_pendingDelayedPaintInvalidations.append(&obj); }
-    Vector<LayoutObject*>& pendingDelayedPaintInvalidationTargets() const { return m_pendingDelayedPaintInvalidations; }
+    PaintLayer& paintingLayer() const;
 
-    PaintLayer& enclosingSelfPaintingLayer(const LayoutObject&) const;
-
-#if ENABLE(ASSERT)
     const LayoutObject& currentObject() const { return m_currentObject; }
-#endif
 
 private:
     friend class VisualRectMappingTest;
+    friend class PaintInvalidatorContextAdapter;
 
     void mapLocalRectToPaintInvalidationContainer(LayoutRect&) const;
 
@@ -95,8 +96,7 @@ private:
 
     const LayoutObject& m_currentObject;
 
-    bool m_forcedSubtreeInvalidationWithinContainer;
-    bool m_forcedSubtreeInvalidationRectUpdateWithinContainer;
+    unsigned m_forcedSubtreeInvalidationFlags;
 
     bool m_clipped;
     bool m_clippedForAbsolutePosition;
@@ -135,13 +135,32 @@ private:
     // with |m_paintOffset| yields the "final" offset.
     AffineTransform m_svgTransform;
 
-    Vector<LayoutObject*>& m_pendingDelayedPaintInvalidations;
+    // Records objects needing paint invalidation on the next frame. See the definition of PaintInvalidationDelayedFull for more details.
+    Vector<const LayoutObject*>& m_pendingDelayedPaintInvalidations;
 
-    PaintLayer& m_enclosingSelfPaintingLayer;
+    PaintLayer& m_paintingLayer;
 
 #if ENABLE(ASSERT)
     bool m_didUpdateForChildren;
 #endif
+
+#if ENABLE(ASSERT) && !defined(NDEBUG)
+// #define CHECK_FAST_PATH_SLOW_PATH_EQUALITY
+#endif
+
+#ifdef CHECK_FAST_PATH_SLOW_PATH_EQUALITY
+    void assertFastPathAndSlowPathRectsEqual(const LayoutRect& fastPathRect, const LayoutRect& slowPathRect) const;
+    bool m_canCheckFastPathSlowPathEquality;
+#endif
+};
+
+// This is temporary to adapt legacy PaintInvalidationState to PaintInvalidatorContext
+class PaintInvalidatorContextAdapter : public PaintInvalidatorContext {
+public:
+    PaintInvalidatorContextAdapter(const PaintInvalidationState&);
+    void mapLocalRectToPaintInvalidationBacking(const LayoutObject&, LayoutRect&) const override;
+private:
+    const PaintInvalidationState& m_paintInvalidationState;
 };
 
 } // namespace blink

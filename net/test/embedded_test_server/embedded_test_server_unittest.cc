@@ -25,15 +25,19 @@
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
+#include "net/test/gtest_util.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
 #include "net/cert_net/nss_ocsp.h"
 #endif
+
+using net::test::IsOk;
 
 namespace net {
 namespace test_server {
@@ -83,7 +87,7 @@ class TestConnectionListener
 
   // Get called from the EmbeddedTestServer thread to be notified that
   // a connection was read from.
-  void ReadFromSocket(const net::StreamSocket& connection) override {
+  void ReadFromSocket(const net::StreamSocket& connection, int rv) override {
     base::AutoLock lock(lock_);
     did_read_from_socket_ = true;
   }
@@ -123,7 +127,7 @@ class EmbeddedTestServerTest
   }
 
   void SetUp() override {
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
     // This is needed so NSS's HTTP client functions are initialized on the
     // right thread. These tests create SSLClientSockets on a different thread.
     // TODO(davidben): Initialization can't be deferred to SSLClientSocket. See
@@ -146,7 +150,7 @@ class EmbeddedTestServerTest
   void TearDown() override {
     if (server_->Started())
       ASSERT_TRUE(server_->ShutdownAndWaitUntilComplete());
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
     ShutdownNSSHttpIO();
 #endif
   }
@@ -163,7 +167,7 @@ class EmbeddedTestServerTest
     num_responses_received_ = 0;
     num_responses_expected_ = num_responses;
     // Will be terminated in OnURLFetchComplete().
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
   }
 
   // Handles |request| sent to |path| and returns the response per |content|,
@@ -301,7 +305,7 @@ TEST_P(EmbeddedTestServerTest, ConnectionListenerAccept) {
       ClientSocketFactory::GetDefaultFactory()->CreateTransportClientSocket(
           address_list, NULL, &net_log, NetLog::Source());
   TestCompletionCallback callback;
-  ASSERT_EQ(OK, callback.GetResult(socket->Connect(callback.callback())));
+  ASSERT_THAT(callback.GetResult(socket->Connect(callback.callback())), IsOk());
 
   connection_listener_.WaitUntilFirstConnectionAccepted();
 
@@ -385,8 +389,8 @@ class CancelRequestDelegate : public TestDelegate {
   CancelRequestDelegate() {}
   ~CancelRequestDelegate() override {}
 
-  void OnResponseStarted(URLRequest* request) override {
-    TestDelegate::OnResponseStarted(request);
+  void OnResponseStarted(URLRequest* request, int net_error) override {
+    TestDelegate::OnResponseStarted(request, net_error);
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, run_loop_.QuitClosure(), base::TimeDelta::FromSeconds(1));
   }
@@ -498,7 +502,7 @@ typedef std::tr1::tuple<bool, bool, EmbeddedTestServer::Type>
 class EmbeddedTestServerThreadingTest
     : public testing::TestWithParam<ThreadingTestParams> {
   void SetUp() override {
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
     // This is needed so NSS's HTTP client functions are initialized on the
     // right thread. These tests create SSLClientSockets on a different thread.
     // TODO(davidben): Initialization can't be deferred to SSLClientSocket. See
@@ -509,7 +513,7 @@ class EmbeddedTestServerThreadingTest
   }
 
   void TearDown() override {
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
     ShutdownNSSHttpIO();
 #endif
   }
@@ -555,7 +559,7 @@ class EmbeddedTestServerThreadingTestDelegate
     fetcher->SetRequestContext(
         new TestURLRequestContextGetter(loop->task_runner()));
     fetcher->Start();
-    loop->Run();
+    base::RunLoop().Run();
     fetcher.reset();
 
     // Shut down.

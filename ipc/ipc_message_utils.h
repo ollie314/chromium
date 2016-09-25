@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <tuple>
@@ -20,8 +21,8 @@
 #include "base/containers/stack_container.h"
 #include "base/files/file.h"
 #include "base/format_macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -39,6 +40,7 @@ class NullableString16;
 class Time;
 class TimeDelta;
 class TimeTicks;
+class UnguessableToken;
 struct FileDescriptor;
 
 #if (defined(OS_MACOSX) && !defined(OS_IOS)) || defined(OS_WIN)
@@ -374,7 +376,7 @@ struct IPC_EXPORT ParamTraits<std::vector<bool> > {
 };
 
 template <class P>
-struct ParamTraits<std::vector<P> > {
+struct ParamTraits<std::vector<P>> {
   typedef std::vector<P> param_type;
   static void GetSize(base::PickleSizer* sizer, const param_type& p) {
     GetParamSize(sizer, static_cast<int>(p.size()));
@@ -554,6 +556,7 @@ struct IPC_EXPORT ParamTraits<base::DictionaryValue> {
 template<>
 struct IPC_EXPORT ParamTraits<base::FileDescriptor> {
   typedef base::FileDescriptor param_type;
+  static void GetSize(base::PickleSizer* sizer, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -566,6 +569,7 @@ struct IPC_EXPORT ParamTraits<base::FileDescriptor> {
 template <>
 struct IPC_EXPORT ParamTraits<base::SharedMemoryHandle> {
   typedef base::SharedMemoryHandle param_type;
+  static void GetSize(base::PickleSizer* sizer, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -655,6 +659,17 @@ struct IPC_EXPORT ParamTraits<base::TimeDelta> {
 template <>
 struct IPC_EXPORT ParamTraits<base::TimeTicks> {
   typedef base::TimeTicks param_type;
+  static void GetSize(base::PickleSizer* sizer, const param_type& p);
+  static void Write(base::Pickle* m, const param_type& p);
+  static bool Read(const base::Pickle* m,
+                   base::PickleIterator* iter,
+                   param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct IPC_EXPORT ParamTraits<base::UnguessableToken> {
+  typedef base::UnguessableToken param_type;
   static void GetSize(base::PickleSizer* sizer, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
@@ -941,8 +956,8 @@ struct ParamTraits<base::SmallMap<NormalMap, kArraySize, EqualKey, MapInit> > {
 };
 
 template <class P>
-struct ParamTraits<scoped_ptr<P> > {
-  typedef scoped_ptr<P> param_type;
+struct ParamTraits<std::unique_ptr<P>> {
+  typedef std::unique_ptr<P> param_type;
   static void GetSize(base::PickleSizer* sizer, const param_type& p) {
     bool valid = !!p;
     GetParamSize(sizer, valid);
@@ -982,6 +997,43 @@ struct ParamTraits<scoped_ptr<P> > {
   }
 };
 
+template <class P>
+struct ParamTraits<base::Optional<P>> {
+  typedef base::Optional<P> param_type;
+  static void GetSize(base::PickleSizer* sizer, const param_type& p) {
+    const bool is_set = static_cast<bool>(p);
+    GetParamSize(sizer, is_set);
+    if (is_set)
+      GetParamSize(sizer, p.value());
+  }
+  static void Write(base::Pickle* m, const param_type& p) {
+    const bool is_set = static_cast<bool>(p);
+    WriteParam(m, is_set);
+    if (is_set)
+      WriteParam(m, p.value());
+  }
+  static bool Read(const base::Pickle* m,
+                   base::PickleIterator* iter,
+                   param_type* r) {
+    bool is_set = false;
+    if (!iter->ReadBool(&is_set))
+      return false;
+    if (is_set) {
+      P value;
+      if (!ReadParam(m, iter, &value))
+        return false;
+      *r = std::move(value);
+    }
+    return true;
+  }
+  static void Log(const param_type& p, std::string* l) {
+    if (p)
+      LogParam(p.value(), l);
+    else
+      l->append("(unset)");
+  }
+};
+
 // IPC types ParamTraits -------------------------------------------------------
 
 // A ChannelHandle is basically a platform-inspecific wrapper around the
@@ -990,6 +1042,7 @@ struct ParamTraits<scoped_ptr<P> > {
 template<>
 struct IPC_EXPORT ParamTraits<IPC::ChannelHandle> {
   typedef ChannelHandle param_type;
+  static void GetSize(base::PickleSizer* sizer, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,

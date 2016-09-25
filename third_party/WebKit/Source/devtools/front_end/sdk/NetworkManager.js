@@ -51,9 +51,6 @@ WebInspector.NetworkManager = function(target)
     else
         this._networkAgent.enable();
 
-    /** @type {!Map<!NetworkAgent.CertificateId, !Promise<!NetworkAgent.CertificateDetails>>} */
-    this._certificateDetailsCache = new Map();
-
     this._bypassServiceWorkerSetting = WebInspector.settings.createSetting("bypassServiceWorker", false);
     if (this._bypassServiceWorkerSetting.get())
         this._bypassServiceWorkerChanged();
@@ -62,12 +59,13 @@ WebInspector.NetworkManager = function(target)
     WebInspector.moduleSetting("cacheDisabled").addChangeListener(this._cacheDisabledSettingChanged, this);
 }
 
-WebInspector.NetworkManager.EventTypes = {
-    RequestStarted: "RequestStarted",
-    RequestUpdated: "RequestUpdated",
-    RequestFinished: "RequestFinished",
-    RequestUpdateDropped: "RequestUpdateDropped",
-    ResponseReceived: "ResponseReceived"
+/** @enum {symbol} */
+WebInspector.NetworkManager.Events = {
+    RequestStarted: Symbol("RequestStarted"),
+    RequestUpdated: Symbol("RequestUpdated"),
+    RequestFinished: Symbol("RequestFinished"),
+    RequestUpdateDropped: Symbol("RequestUpdateDropped"),
+    ResponseReceived: Symbol("ResponseReceived")
 }
 
 WebInspector.NetworkManager._MIMETypes = {
@@ -81,12 +79,48 @@ WebInspector.NetworkManager._MIMETypes = {
     "text/vtt":                    {"texttrack": true},
 }
 
+/**
+ * @param {!WebInspector.Target} target
+ * @return {?WebInspector.NetworkManager}
+ */
+WebInspector.NetworkManager.fromTarget = function(target)
+{
+    return /** @type {?WebInspector.NetworkManager} */ (target.model(WebInspector.NetworkManager));
+}
+
 /** @typedef {{download: number, upload: number, latency: number, title: string}} */
 WebInspector.NetworkManager.Conditions;
 /** @type {!WebInspector.NetworkManager.Conditions} */
 WebInspector.NetworkManager.NoThrottlingConditions = {title: WebInspector.UIString("No throttling"), download: -1, upload: -1, latency: 0};
 /** @type {!WebInspector.NetworkManager.Conditions} */
 WebInspector.NetworkManager.OfflineConditions = {title: WebInspector.UIString("Offline"), download: 0, upload: 0, latency: 0};
+
+/**
+ * @param {!WebInspector.NetworkManager.Conditions} conditions
+ * @return {!NetworkAgent.ConnectionType}
+ * TODO(allada): this belongs to NetworkConditionsSelector, which should hardcode/guess it.
+ */
+WebInspector.NetworkManager._connectionType = function(conditions)
+{
+    if (!conditions.download && !conditions.upload)
+        return NetworkAgent.ConnectionType.None;
+    var types = WebInspector.NetworkManager._connectionTypes;
+    if (!types) {
+        WebInspector.NetworkManager._connectionTypes = [];
+        types = WebInspector.NetworkManager._connectionTypes;
+        types.push(["2g", NetworkAgent.ConnectionType.Cellular2g]);
+        types.push(["3g", NetworkAgent.ConnectionType.Cellular3g]);
+        types.push(["4g", NetworkAgent.ConnectionType.Cellular4g]);
+        types.push(["bluetooth", NetworkAgent.ConnectionType.Bluetooth]);
+        types.push(["wifi", NetworkAgent.ConnectionType.Wifi]);
+        types.push(["wimax", NetworkAgent.ConnectionType.Wimax]);
+    }
+    for (var type of types) {
+        if (conditions.title.toLowerCase().indexOf(type[0]) !== -1)
+            return type[1];
+    }
+    return NetworkAgent.ConnectionType.Other;
+}
 
 WebInspector.NetworkManager.prototype = {
     /**
@@ -110,44 +144,6 @@ WebInspector.NetworkManager.prototype = {
     dispose: function()
     {
         WebInspector.moduleSetting("cacheDisabled").removeChangeListener(this._cacheDisabledSettingChanged, this);
-    },
-
-    /**
-     * @param {!NetworkAgent.CertificateId} certificateId
-     * @return {!Promise<!NetworkAgent.CertificateDetails>}
-     */
-    certificateDetailsPromise: function(certificateId)
-    {
-        var cachedPromise = this._certificateDetailsCache.get(certificateId);
-        if (cachedPromise)
-            return cachedPromise;
-
-        /**
-         * @this {WebInspector.NetworkManager}
-         * @param {function(?NetworkAgent.CertificateDetails)} resolve
-         * @param {function()} reject
-         */
-        function executor(resolve, reject) {
-            /**
-             * @param {?Protocol.Error} error
-             * @param {?NetworkAgent.CertificateDetails} certificateDetails
-             */
-            function innerCallback(error, certificateDetails)
-            {
-                if (error) {
-                    console.error("Unable to get certificate details from the browser (for certificate ID ", certificateId, "): ", error);
-                    reject();
-                } else {
-                    resolve(certificateDetails);
-                }
-            }
-            this._networkAgent.getCertificateDetails(certificateId, innerCallback);
-        }
-
-        var promise = new Promise(executor.bind(this));
-
-        this._certificateDetailsCache.set(certificateId, promise);
-        return promise;
     },
 
     /**
@@ -293,6 +289,19 @@ WebInspector.NetworkDispatcher.prototype = {
     /**
      * @override
      * @param {!NetworkAgent.RequestId} requestId
+     * @param {!NetworkAgent.ResourcePriority} newPriority
+     * @param {!NetworkAgent.Timestamp} timestamp
+     */
+    resourceChangedPriority: function(requestId, newPriority, timestamp)
+    {
+        var networkRequest = this._inflightRequestsById[requestId];
+        if (networkRequest)
+            networkRequest.setPriority(newPriority);
+    },
+
+    /**
+     * @override
+     * @param {!NetworkAgent.RequestId} requestId
      * @param {!PageAgent.FrameId} frameId
      * @param {!NetworkAgent.LoaderId} loaderId
      * @param {string} documentURL
@@ -355,7 +364,7 @@ WebInspector.NetworkDispatcher.prototype = {
             eventData.loaderId = loaderId;
             eventData.resourceType = resourceType;
             eventData.mimeType = response.mimeType;
-            this._manager.dispatchEventToListeners(WebInspector.NetworkManager.EventTypes.RequestUpdateDropped, eventData);
+            this._manager.dispatchEventToListeners(WebInspector.NetworkManager.Events.RequestUpdateDropped, eventData);
             return;
         }
 
@@ -365,7 +374,7 @@ WebInspector.NetworkDispatcher.prototype = {
         this._updateNetworkRequestWithResponse(networkRequest, response);
 
         this._updateNetworkRequest(networkRequest);
-        this._manager.dispatchEventToListeners(WebInspector.NetworkManager.EventTypes.ResponseReceived, networkRequest);
+        this._manager.dispatchEventToListeners(WebInspector.NetworkManager.Events.ResponseReceived, networkRequest);
     },
 
     /**
@@ -382,7 +391,7 @@ WebInspector.NetworkDispatcher.prototype = {
             return;
 
         networkRequest.resourceSize += dataLength;
-        if (encodedDataLength != -1)
+        if (encodedDataLength !== -1)
             networkRequest.increaseTransferSize(encodedDataLength);
         networkRequest.endTime = time;
 
@@ -443,11 +452,11 @@ WebInspector.NetworkDispatcher.prototype = {
      * @override
      * @param {!NetworkAgent.RequestId} requestId
      * @param {string} requestURL
+     * @param {!NetworkAgent.Initiator=} initiator
      */
-    webSocketCreated: function(requestId, requestURL)
+    webSocketCreated: function(requestId, requestURL, initiator)
     {
-        // FIXME: WebSocket MUST have initiator info.
-        var networkRequest = new WebInspector.NetworkRequest(this._manager._target, requestId, requestURL, "", "", "", null);
+        var networkRequest = new WebInspector.NetworkRequest(this._manager._target, requestId, requestURL, "", "", "", initiator || null);
         networkRequest.setResourceType(WebInspector.resourceTypes.WebSocket);
         this._startNetworkRequest(networkRequest);
     },
@@ -609,7 +618,7 @@ WebInspector.NetworkDispatcher.prototype = {
     {
         this._inflightRequestsById[networkRequest.requestId] = networkRequest;
         this._inflightRequestsByURL[networkRequest.url] = networkRequest;
-        this._dispatchEventToListeners(WebInspector.NetworkManager.EventTypes.RequestStarted, networkRequest);
+        this._dispatchEventToListeners(WebInspector.NetworkManager.Events.RequestStarted, networkRequest);
     },
 
     /**
@@ -617,7 +626,7 @@ WebInspector.NetworkDispatcher.prototype = {
      */
     _updateNetworkRequest: function(networkRequest)
     {
-        this._dispatchEventToListeners(WebInspector.NetworkManager.EventTypes.RequestUpdated, networkRequest);
+        this._dispatchEventToListeners(WebInspector.NetworkManager.Events.RequestUpdated, networkRequest);
     },
 
     /**
@@ -631,7 +640,7 @@ WebInspector.NetworkDispatcher.prototype = {
         networkRequest.finished = true;
         if (encodedDataLength >= 0)
             networkRequest.setTransferSize(encodedDataLength);
-        this._dispatchEventToListeners(WebInspector.NetworkManager.EventTypes.RequestFinished, networkRequest);
+        this._dispatchEventToListeners(WebInspector.NetworkManager.Events.RequestFinished, networkRequest);
         delete this._inflightRequestsById[networkRequest.requestId];
         delete this._inflightRequestsByURL[networkRequest.url];
     },
@@ -679,14 +688,29 @@ WebInspector.MultitargetNetworkManager = function()
 
     this._userAgentOverride = "";
     /** @type {!Set<!Protocol.NetworkAgent>} */
-    this._agentsCapableOfEmulation = new Set();
+    this._agents = new Set();
     /** @type {!WebInspector.NetworkManager.Conditions} */
     this._networkConditions = WebInspector.NetworkManager.NoThrottlingConditions;
 }
 
+/** @enum {symbol} */
 WebInspector.MultitargetNetworkManager.Events = {
-    ConditionsChanged: "ConditionsChanged",
-    UserAgentChanged: "UserAgentChanged"
+    ConditionsChanged: Symbol("ConditionsChanged"),
+    UserAgentChanged: Symbol("UserAgentChanged")
+}
+
+/**
+ * @param {string} uaString
+ * @return {string}
+ */
+WebInspector.MultitargetNetworkManager.patchUserAgentWithChromeVersion = function(uaString)
+{
+    // Patches Chrome/CriOS version from user agent ("1.2.3.4" when user agent is: "Chrome/1.2.3.4").
+    var chromeRegex = new RegExp("(?:^|\\W)Chrome/(\\S+)");
+    var chromeMatch = navigator.userAgent.match(chromeRegex);
+    if (chromeMatch && chromeMatch.length > 1)
+        return String.sprintf(uaString, chromeMatch[1]);
+    return uaString;
 }
 
 WebInspector.MultitargetNetworkManager.prototype = {
@@ -703,20 +727,9 @@ WebInspector.MultitargetNetworkManager.prototype = {
             networkAgent.setUserAgentOverride(this._currentUserAgent());
         for (var url of this._blockedURLs)
             networkAgent.addBlockedURL(url);
-
-        networkAgent.canEmulateNetworkConditions(callback.bind(this));
-
-        /**
-         * @this {WebInspector.MultitargetNetworkManager}
-         */
-        function callback(error, canEmulate)
-        {
-            if (error || !canEmulate)
-                return;
-            this._agentsCapableOfEmulation.add(networkAgent);
-            if (this.isThrottling())
-                this._updateNetworkConditions(networkAgent);
-        }
+        this._agents.add(networkAgent);
+        if (this.isThrottling())
+            this._updateNetworkConditions(networkAgent);
     },
 
     /**
@@ -725,7 +738,7 @@ WebInspector.MultitargetNetworkManager.prototype = {
      */
     targetRemoved: function(target)
     {
-        this._agentsCapableOfEmulation.delete(target.networkAgent());
+        this._agents.delete(target.networkAgent());
     },
 
     /**
@@ -750,7 +763,7 @@ WebInspector.MultitargetNetworkManager.prototype = {
     setNetworkConditions: function(conditions)
     {
         this._networkConditions = conditions;
-        for (var agent of this._agentsCapableOfEmulation)
+        for (var agent of this._agents)
             this._updateNetworkConditions(agent);
         this.dispatchEventToListeners(WebInspector.MultitargetNetworkManager.Events.ConditionsChanged);
     },
@@ -772,7 +785,7 @@ WebInspector.MultitargetNetworkManager.prototype = {
         if (!this.isThrottling()) {
             networkAgent.emulateNetworkConditions(false, 0, 0, 0);
         } else {
-            networkAgent.emulateNetworkConditions(this.isOffline(), conditions.latency, conditions.download < 0 ? 0 : conditions.download, conditions.upload < 0 ? 0 : conditions.upload);
+            networkAgent.emulateNetworkConditions(this.isOffline(), conditions.latency, conditions.download < 0 ? 0 : conditions.download, conditions.upload < 0 ? 0 : conditions.upload, WebInspector.NetworkManager._connectionType(conditions));
         }
     },
 
@@ -878,13 +891,22 @@ WebInspector.MultitargetNetworkManager.prototype = {
     },
 
     /**
-     * @param {!NetworkAgent.CertificateId} certificateId
+     * @param {string} origin
+     * @param {function(!Array<string>)} callback
      */
-    showCertificateViewer: function(certificateId)
+    getCertificate: function(origin, callback)
     {
         var target = WebInspector.targetManager.mainTarget();
-        if (target)
-            target.networkAgent().showCertificateViewer(certificateId);
+        target.networkAgent().getCertificate(origin, mycallback);
+
+        /**
+         * @param {?Protocol.Error} error
+         * @param {!Array<string>} certificate
+         */
+        function mycallback(error, certificate)
+        {
+            callback(error ? [] : certificate);
+        }
     },
 
     /**

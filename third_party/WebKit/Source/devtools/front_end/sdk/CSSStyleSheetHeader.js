@@ -28,6 +28,18 @@ WebInspector.CSSStyleSheetHeader = function(cssModel, payload)
 
 WebInspector.CSSStyleSheetHeader.prototype = {
     /**
+     * @return {!WebInspector.ContentProvider}
+     */
+    originalContentProvider: function()
+    {
+        if (!this._originalContentProvider) {
+            var lazyContent = this._cssModel.originalStyleSheetText.bind(this._cssModel, this);
+            this._originalContentProvider = new WebInspector.StaticContentProvider(this.contentURL(), this.contentType(), lazyContent);
+        }
+        return this._originalContentProvider;
+    },
+
+    /**
      * @param {string=} sourceMapURL
      */
     setSourceMapURL: function(sourceMapURL)
@@ -65,7 +77,8 @@ WebInspector.CSSStyleSheetHeader.prototype = {
      */
     _viaInspectorResourceURL: function()
     {
-        var frame = this._cssModel.target().resourceTreeModel.frameForId(this.frameId);
+        var resourceTreeModel = WebInspector.ResourceTreeModel.fromTarget(this.target());
+        var frame = resourceTreeModel.frameForId(this.frameId);
         console.assert(frame);
         var parsedURL = new WebInspector.ParsedURL(frame.url);
         var fakeURL = "inspector://" + parsedURL.host + parsedURL.folderPathComponents;
@@ -123,6 +136,10 @@ WebInspector.CSSStyleSheetHeader.prototype = {
 
     /**
      * @override
+     * @param {string} query
+     * @param {boolean} caseSensitive
+     * @param {boolean} isRegex
+     * @param {function(!Array.<!WebInspector.ContentProvider.SearchMatch>)} callback
      */
     searchInContent: function(query, caseSensitive, isRegex, callback)
     {
@@ -144,3 +161,62 @@ WebInspector.CSSStyleSheetHeader.prototype = {
     }
 }
 
+/**
+ * @constructor
+ * @implements {WebInspector.ContentProvider}
+ * @param {!WebInspector.CSSStyleSheetHeader} header
+ */
+WebInspector.CSSStyleSheetHeader.OriginalContentProvider = function(header)
+{
+    this._header = header;
+}
+
+WebInspector.CSSStyleSheetHeader.OriginalContentProvider.prototype = {
+    /**
+     * @override
+     * @return {string}
+     */
+    contentURL: function()
+    {
+        return this._header.contentURL();
+    },
+
+    /**
+     * @override
+     * @return {!WebInspector.ResourceType}
+     */
+    contentType: function()
+    {
+        return this._header.contentType();
+    },
+
+    /**
+     * @override
+     * @return {!Promise<?string>}
+     */
+    requestContent: function()
+    {
+        return /** @type {!Promise<?string>} */(this._header.cssModel().originalStyleSheetText(this._header));
+    },
+
+    /**
+     * @override
+     * @param {string} query
+     * @param {boolean} caseSensitive
+     * @param {boolean} isRegex
+     * @param {function(!Array.<!WebInspector.ContentProvider.SearchMatch>)} callback
+     */
+    searchInContent: function(query, caseSensitive, isRegex, callback)
+    {
+        /**
+         * @param {?string} content
+         */
+        function performSearch(content)
+        {
+            var searchResults = content ? WebInspector.ContentProvider.performSearchInContent(content, query, caseSensitive, isRegex) : [];
+            callback(searchResults);
+        }
+
+        this.requestContent().then(performSearch);
+    }
+}

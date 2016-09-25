@@ -14,84 +14,16 @@
 #include "base/trace_event/trace_event.h"
 #include "ui/gfx/swap_result.h"
 #include "ui/gl/gl_context.h"
+#include "ui/gl/gl_image.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
 
-namespace gfx {
+namespace gl {
 
 namespace {
 base::LazyInstance<base::ThreadLocalPointer<GLSurface> >::Leaky
     current_surface_ = LAZY_INSTANCE_INITIALIZER;
 }  // namespace
-
-// static
-bool GLSurface::InitializeOneOff() {
-  DCHECK_EQ(kGLImplementationNone, GetGLImplementation());
-
-  TRACE_EVENT0("gpu,startup", "GLSurface::InitializeOneOff");
-
-  std::vector<GLImplementation> allowed_impls;
-  GetAllowedGLImplementations(&allowed_impls);
-  DCHECK(!allowed_impls.empty());
-
-  base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
-
-  // The default implementation is always the first one in list.
-  GLImplementation impl = allowed_impls[0];
-  bool fallback_to_osmesa = false;
-  if (cmd->HasSwitch(switches::kOverrideUseGLWithOSMesaForTests)) {
-    impl = kGLImplementationOSMesaGL;
-  } else if (cmd->HasSwitch(switches::kUseGL)) {
-    std::string requested_implementation_name =
-        cmd->GetSwitchValueASCII(switches::kUseGL);
-    if (requested_implementation_name == "any") {
-      fallback_to_osmesa = true;
-    } else if (requested_implementation_name ==
-                   kGLImplementationSwiftShaderName ||
-               requested_implementation_name == kGLImplementationANGLEName) {
-      impl = kGLImplementationEGLGLES2;
-    } else {
-      impl = GetNamedGLImplementation(requested_implementation_name);
-      if (!ContainsValue(allowed_impls, impl)) {
-        LOG(ERROR) << "Requested GL implementation is not available.";
-        return false;
-      }
-    }
-  }
-
-  bool gpu_service_logging = cmd->HasSwitch(switches::kEnableGPUServiceLogging);
-  bool disable_gl_drawing = cmd->HasSwitch(switches::kDisableGLDrawingForTests);
-
-  return InitializeOneOffImplementation(
-      impl, fallback_to_osmesa, gpu_service_logging, disable_gl_drawing);
-}
-
-// static
-bool GLSurface::InitializeOneOffImplementation(GLImplementation impl,
-                                               bool fallback_to_osmesa,
-                                               bool gpu_service_logging,
-                                               bool disable_gl_drawing) {
-  bool initialized =
-      InitializeStaticGLBindings(impl) && InitializeOneOffInternal();
-  if (!initialized && fallback_to_osmesa) {
-    ClearGLBindings();
-    initialized = InitializeStaticGLBindings(kGLImplementationOSMesaGL) &&
-                  InitializeOneOffInternal();
-  }
-  if (!initialized)
-    ClearGLBindings();
-
-  if (initialized) {
-    DVLOG(1) << "Using "
-             << GetGLImplementationName(GetGLImplementation())
-             << " GL implementation.";
-    if (gpu_service_logging)
-      InitializeDebugGLBindings();
-    if (disable_gl_drawing)
-      InitializeNullDrawGLBindings();
-  }
-  return initialized;
-}
 
 GLSurface::GLSurface() {}
 
@@ -119,6 +51,10 @@ bool GLSurface::DeferDraws() {
   return false;
 }
 
+bool GLSurface::SupportsSwapBuffersWithDamage() {
+  return false;
+}
+
 bool GLSurface::SupportsPostSubBuffer() {
   return false;
 }
@@ -131,12 +67,19 @@ bool GLSurface::SupportsAsyncSwap() {
   return false;
 }
 
-unsigned int GLSurface::GetBackingFrameBufferObject() {
+unsigned int GLSurface::GetBackingFramebufferObject() {
   return 0;
 }
 
 void GLSurface::SwapBuffersAsync(const SwapCompletionCallback& callback) {
   NOTREACHED();
+}
+
+gfx::SwapResult GLSurface::SwapBuffersWithDamage(int x,
+                                                 int y,
+                                                 int width,
+                                                 int height) {
+  return gfx::SwapResult::SWAP_FAILED;
 }
 
 gfx::SwapResult GLSurface::PostSubBuffer(int x, int y, int width, int height) {
@@ -163,9 +106,6 @@ void GLSurface::CommitOverlayPlanesAsync(
 
 bool GLSurface::OnMakeCurrent(GLContext* context) {
   return true;
-}
-
-void GLSurface::NotifyWasBound() {
 }
 
 bool GLSurface::SetBackbufferAllocation(bool allocated) {
@@ -195,32 +135,27 @@ GLSurface::Format GLSurface::GetFormat() {
   return SURFACE_DEFAULT;
 }
 
-VSyncProvider* GLSurface::GetVSyncProvider() {
+gfx::VSyncProvider* GLSurface::GetVSyncProvider() {
   return NULL;
 }
 
 bool GLSurface::ScheduleOverlayPlane(int z_order,
-                                     OverlayTransform transform,
-                                     gl::GLImage* image,
-                                     const Rect& bounds_rect,
-                                     const RectF& crop_rect) {
+                                     gfx::OverlayTransform transform,
+                                     GLImage* image,
+                                     const gfx::Rect& bounds_rect,
+                                     const gfx::RectF& crop_rect) {
   NOTIMPLEMENTED();
   return false;
 }
 
-bool GLSurface::ScheduleCALayer(gl::GLImage* contents_image,
-                                const RectF& contents_rect,
-                                float opacity,
-                                unsigned background_color,
-                                unsigned edge_aa_mask,
-                                const RectF& rect,
-                                bool is_clipped,
-                                const RectF& clip_rect,
-                                const Transform& transform,
-                                int sorting_content_id,
-                                unsigned filter) {
+bool GLSurface::ScheduleCALayer(const ui::CARendererLayerParams& params) {
   NOTIMPLEMENTED();
   return false;
+}
+
+void GLSurface::ScheduleCALayerInUseQuery(
+    std::vector<CALayerInUseQuery> queries) {
+  NOTIMPLEMENTED();
 }
 
 bool GLSurface::IsSurfaceless() const {
@@ -301,6 +236,13 @@ void GLSurfaceAdapter::SwapBuffersAsync(
   surface_->SwapBuffersAsync(callback);
 }
 
+gfx::SwapResult GLSurfaceAdapter::SwapBuffersWithDamage(int x,
+                                                        int y,
+                                                        int width,
+                                                        int height) {
+  return surface_->SwapBuffersWithDamage(x, y, width, height);
+}
+
 gfx::SwapResult GLSurfaceAdapter::PostSubBuffer(int x,
                                                 int y,
                                                 int width,
@@ -326,6 +268,10 @@ void GLSurfaceAdapter::CommitOverlayPlanesAsync(
   surface_->CommitOverlayPlanesAsync(callback);
 }
 
+bool GLSurfaceAdapter::SupportsSwapBuffersWithDamage() {
+  return surface_->SupportsSwapBuffersWithDamage();
+}
+
 bool GLSurfaceAdapter::SupportsPostSubBuffer() {
   return surface_->SupportsPostSubBuffer();
 }
@@ -346,8 +292,8 @@ void* GLSurfaceAdapter::GetHandle() {
   return surface_->GetHandle();
 }
 
-unsigned int GLSurfaceAdapter::GetBackingFrameBufferObject() {
-  return surface_->GetBackingFrameBufferObject();
+unsigned int GLSurfaceAdapter::GetBackingFramebufferObject() {
+  return surface_->GetBackingFramebufferObject();
 }
 
 bool GLSurfaceAdapter::OnMakeCurrent(GLContext* context) {
@@ -378,15 +324,15 @@ GLSurface::Format GLSurfaceAdapter::GetFormat() {
   return surface_->GetFormat();
 }
 
-VSyncProvider* GLSurfaceAdapter::GetVSyncProvider() {
+gfx::VSyncProvider* GLSurfaceAdapter::GetVSyncProvider() {
   return surface_->GetVSyncProvider();
 }
 
 bool GLSurfaceAdapter::ScheduleOverlayPlane(int z_order,
-                                            OverlayTransform transform,
-                                            gl::GLImage* image,
-                                            const Rect& bounds_rect,
-                                            const RectF& crop_rect) {
+                                            gfx::OverlayTransform transform,
+                                            GLImage* image,
+                                            const gfx::Rect& bounds_rect,
+                                            const gfx::RectF& crop_rect) {
   return surface_->ScheduleOverlayPlane(
       z_order, transform, image, bounds_rect, crop_rect);
 }
@@ -405,4 +351,15 @@ bool GLSurfaceAdapter::BuffersFlipped() const {
 
 GLSurfaceAdapter::~GLSurfaceAdapter() {}
 
-}  // namespace gfx
+scoped_refptr<GLSurface> InitializeGLSurface(scoped_refptr<GLSurface> surface) {
+  if (!surface->Initialize())
+    return nullptr;
+  return surface;
+}
+
+GLSurface::CALayerInUseQuery::CALayerInUseQuery() = default;
+GLSurface::CALayerInUseQuery::CALayerInUseQuery(const CALayerInUseQuery&) =
+    default;
+GLSurface::CALayerInUseQuery::~CALayerInUseQuery() = default;
+
+}  // namespace gl

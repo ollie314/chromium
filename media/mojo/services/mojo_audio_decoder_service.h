@@ -13,32 +13,32 @@
 #include "base/memory/weak_ptr.h"
 #include "media/base/audio_decoder.h"
 #include "media/mojo/interfaces/audio_decoder.mojom.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
-#include "mojo/public/cpp/system/data_pipe.h"
+#include "media/mojo/services/media_mojo_export.h"
 
 namespace media {
 
 class MediaKeys;
 class MojoCdmServiceContext;
+class MojoDecoderBufferReader;
 
-class MojoAudioDecoderService : public interfaces::AudioDecoder {
+class MEDIA_MOJO_EXPORT MojoAudioDecoderService
+    : NON_EXPORTED_BASE(public mojom::AudioDecoder) {
  public:
   MojoAudioDecoderService(
       base::WeakPtr<MojoCdmServiceContext> mojo_cdm_service_context,
-      std::unique_ptr<media::AudioDecoder> decoder,
-      mojo::InterfaceRequest<interfaces::AudioDecoder> request);
+      std::unique_ptr<media::AudioDecoder> decoder);
 
   ~MojoAudioDecoderService() final;
 
-  // interfaces::AudioDecoder implementation
-  void Initialize(interfaces::AudioDecoderClientPtr client,
-                  interfaces::AudioDecoderConfigPtr config,
+  // mojom::AudioDecoder implementation
+  void Initialize(mojom::AudioDecoderClientAssociatedPtrInfo client,
+                  mojom::AudioDecoderConfigPtr config,
                   int32_t cdm_id,
                   const InitializeCallback& callback) final;
 
   void SetDataSource(mojo::ScopedDataPipeConsumerHandle receive_pipe) final;
 
-  void Decode(interfaces::DecoderBufferPtr buffer,
+  void Decode(mojom::DecoderBufferPtr buffer,
               const DecodeCallback& callback) final;
 
   void Reset(const ResetCallback& callback) final;
@@ -59,16 +59,7 @@ class MojoAudioDecoderService : public interfaces::AudioDecoder {
   // Called by |decoder_| for each decoded buffer.
   void OnAudioBufferReady(const scoped_refptr<AudioBuffer>& audio_buffer);
 
-  // A helper method to read and deserialize DecoderBuffer from data pipe.
-  scoped_refptr<DecoderBuffer> ReadDecoderBuffer(
-      interfaces::DecoderBufferPtr buffer);
-
-  // A binding represents the association between the service and the
-  // communication channel, i.e. the pipe.
-  mojo::StrongBinding<interfaces::AudioDecoder> binding_;
-
-  // DataPipe for serializing the data section of DecoderBuffer.
-  mojo::ScopedDataPipeConsumerHandle consumer_handle_;
+  std::unique_ptr<MojoDecoderBufferReader> mojo_decoder_buffer_reader_;
 
   // A helper object required to get CDM from CDM id.
   base::WeakPtr<MojoCdmServiceContext> mojo_cdm_service_context_;
@@ -77,7 +68,7 @@ class MojoAudioDecoderService : public interfaces::AudioDecoder {
   std::unique_ptr<media::AudioDecoder> decoder_;
 
   // The destination for the decoded buffers.
-  interfaces::AudioDecoderClientPtr client_;
+  mojom::AudioDecoderClientAssociatedPtr client_;
 
   // Hold a reference to the CDM to keep it alive for the lifetime of the
   // |decoder_|. The |cdm_| owns the CdmContext which is passed to |decoder_|.

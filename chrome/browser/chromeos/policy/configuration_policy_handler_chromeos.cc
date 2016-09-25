@@ -11,10 +11,12 @@
 #include <utility>
 #include <vector>
 
+#include "ash/common/accessibility_types.h"
 #include "base/callback.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -29,11 +31,10 @@
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/schema.h"
+#include "components/policy/policy_constants.h"
 #include "components/prefs/pref_value_map.h"
+#include "components/strings/grit/components_strings.h"
 #include "crypto/sha2.h"
-#include "grit/components_strings.h"
-#include "policy/policy_constants.h"
-#include "ui/chromeos/accessibility_types.h"
 #include "url/gurl.h"
 
 namespace policy {
@@ -264,12 +265,13 @@ void NetworkConfigurationPolicyHandler::PrepareForDisplaying(
   const PolicyMap::Entry* entry = policies->Get(policy_name());
   if (!entry)
     return;
-  base::Value* sanitized_config = SanitizeNetworkConfig(entry->value);
+  std::unique_ptr<base::Value> sanitized_config =
+      SanitizeNetworkConfig(entry->value.get());
   if (!sanitized_config)
-    sanitized_config = base::Value::CreateNullValue().release();
+    sanitized_config = base::Value::CreateNullValue();
 
-  policies->Set(policy_name(), entry->level, entry->scope,
-                entry->source, sanitized_config, nullptr);
+  policies->Set(policy_name(), entry->level, entry->scope, entry->source,
+                std::move(sanitized_config), nullptr);
 }
 
 NetworkConfigurationPolicyHandler::NetworkConfigurationPolicyHandler(
@@ -282,7 +284,8 @@ NetworkConfigurationPolicyHandler::NetworkConfigurationPolicyHandler(
 }
 
 // static
-base::Value* NetworkConfigurationPolicyHandler::SanitizeNetworkConfig(
+std::unique_ptr<base::Value>
+NetworkConfigurationPolicyHandler::SanitizeNetworkConfig(
     const base::Value* config) {
   std::string json_string;
   if (!config->GetAsString(&json_string))
@@ -303,7 +306,7 @@ base::Value* NetworkConfigurationPolicyHandler::SanitizeNetworkConfig(
 
   base::JSONWriter::WriteWithOptions(
       *toplevel_dict, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json_string);
-  return new base::StringValue(json_string);
+  return base::MakeUnique<base::StringValue>(json_string);
 }
 
 PinnedLauncherAppsPolicyHandler::PinnedLauncherAppsPolicyHandler()
@@ -326,7 +329,7 @@ void PinnedLauncherAppsPolicyHandler::ApplyPolicySettings(
       std::string id;
       if ((*entry)->GetAsString(&id)) {
         base::DictionaryValue* app_dict = new base::DictionaryValue();
-        app_dict->SetString(ash::kPinnedAppsPrefAppIDPath, id);
+        app_dict->SetString(ash::launcher::kPinnedAppsPrefAppIDPath, id);
         pinned_apps_list->Append(app_dict);
       }
     }
@@ -336,8 +339,9 @@ void PinnedLauncherAppsPolicyHandler::ApplyPolicySettings(
 
 ScreenMagnifierPolicyHandler::ScreenMagnifierPolicyHandler()
     : IntRangePolicyHandlerBase(key::kScreenMagnifierType,
-                                0, ui::MAGNIFIER_FULL, false) {
-}
+                                0,
+                                ash::MAGNIFIER_FULL,
+                                false) {}
 
 ScreenMagnifierPolicyHandler::~ScreenMagnifierPolicyHandler() {
 }

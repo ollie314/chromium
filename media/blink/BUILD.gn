@@ -13,13 +13,11 @@ component("blink") {
     "//cc",
     "//cc/blink",
     "//gpu",
-    "//gpu/blink",
     "//media",
     "//media:shared_memory_support",
     "//net",
     "//skia",
     "//third_party/WebKit/public:blink",
-    "//third_party/WebKit/public:mojo_bindings",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//url",
@@ -30,12 +28,8 @@ component("blink") {
   sources = [
     "active_loader.cc",
     "active_loader.h",
-    "buffered_data_source.cc",
-    "buffered_data_source.h",
     "buffered_data_source_host_impl.cc",
     "buffered_data_source_host_impl.h",
-    "buffered_resource_loader.cc",
-    "buffered_resource_loader.h",
     "cache_util.cc",
     "cache_util.h",
     "cdm_result_promise.h",
@@ -64,6 +58,8 @@ component("blink") {
     "url_index.h",
     "video_frame_compositor.cc",
     "video_frame_compositor.h",
+    "watch_time_reporter.cc",
+    "watch_time_reporter.h",
     "webaudiosourceprovider_impl.cc",
     "webaudiosourceprovider_impl.h",
     "webcontentdecryptionmodule_impl.cc",
@@ -97,6 +93,7 @@ component("blink") {
         "webmediaplayer_cast_android.cc",
         "webmediaplayer_cast_android.h",
       ]
+      deps += [ "//gpu/command_buffer/client:gles2_interface" ]
     }
   }
 }
@@ -108,8 +105,6 @@ test("media_blink_unittests") {
     "//base/test:test_support",
     "//cc",
     "//cc/blink",
-    "//components/scheduler:scheduler",
-    "//components/scheduler:test_support",
     "//gin",
     "//media",
     "//media:shared_memory_support",
@@ -117,18 +112,20 @@ test("media_blink_unittests") {
     "//net",
     "//testing/gmock",
     "//testing/gtest",
-    "//third_party/WebKit/public:blink_for_unittests",
+    "//third_party/WebKit/public:blink",
+    "//third_party/WebKit/public:test_support",
     "//ui/gfx:test_support",
     "//ui/gfx/geometry",
     "//url",
   ]
 
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+  configs += [
+    "//build/config/compiler:no_size_t_to_int_warning",
+    "//v8:external_startup_data",
+  ]
 
   sources = [
     "buffered_data_source_host_impl_unittest.cc",
-    "buffered_data_source_unittest.cc",
-    "buffered_resource_loader_unittest.cc",
     "cache_util_unittest.cc",
     "interval_map_unittest.cc",
     "key_system_config_selector_unittest.cc",
@@ -138,18 +135,22 @@ test("media_blink_unittests") {
     "mock_weburlloader.h",
     "multibuffer_data_source_unittest.cc",
     "multibuffer_unittest.cc",
+    "resource_multibuffer_data_provider_unittest.cc",
     "run_all_unittests.cc",
     "test_response_generator.cc",
     "test_response_generator.h",
     "url_index_unittest.cc",
     "video_frame_compositor_unittest.cc",
+    "watch_time_reporter_unittest.cc",
     "webaudiosourceprovider_impl_unittest.cc",
     "webmediaplayer_impl_unittest.cc",
   ]
 
   if (is_android) {
-    deps += [ "//ui/gl" ]
+    deps += [
+      "//media/base/android",
+      "//media/base/android:media_java",
+      "//v8:v8_external_startup_data_assets",
+    ]
   }
-
-  configs += [ "//v8:external_startup_data" ]
 }

@@ -34,62 +34,95 @@
 #include "core/dom/StyleEngine.h"
 #include "core/events/Event.h"
 #include "core/frame/FrameHost.h"
+#include "core/frame/HostsUsingFeatures.h"
 #include "core/frame/LocalFrame.h"
-#include "core/frame/OriginsUsingFeatures.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/input/EventHandler.h"
 #include "core/inspector/ConsoleMessage.h"
+#include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutFullScreen.h"
 #include "core/layout/api/LayoutFullScreenItem.h"
 #include "core/page/ChromeClient.h"
+#include "platform/ScopedOrientationChangeIndicator.h"
 #include "platform/UserGestureIndicator.h"
 
 namespace blink {
 
 using namespace HTMLNames;
 
-static bool fullscreenIsAllowedForAllOwners(const Document& document)
+namespace {
+
+// https://html.spec.whatwg.org/multipage/embedded-content.html#allowed-to-use
+bool allowedToUseFullscreen(const Frame* frame)
 {
-    if (!document.frame())
+    // To determine whether a Document object |document| is allowed to use the
+    // feature indicated by attribute name |allowattribute|, run these steps:
+
+    // 1. If |document| has no browsing context, then return false.
+    if (!frame)
         return false;
 
-    for (const Frame* frame = document.frame(); frame->owner(); frame = frame->tree().parent()) {
-        // TODO(alexmos): The allowfullscreen attribute will need to be
-        // replicated for this to work with OOPIFs.  For now, deny fullscreen
-        // access inside OOPIFs until https://crbug.com/550497 is fixed.
-        if (frame->owner()->isRemote())
-            return false;
+    // 2. If |document|'s browsing context has no browsing context container, then
+    // return true.
+    if (frame->isMainFrame())
+        return true;
 
-        HTMLFrameOwnerElement* owner = toHTMLFrameOwnerElement(frame->owner());
-        if (!isHTMLIFrameElement(owner))
-            return false;
-        if (!owner->hasAttribute(allowfullscreenAttr))
-            return false;
-    }
-    return true;
+    // 3. If |document|'s browsing context has a browsing context container that
+    // is an iframe element with an |allowattribute| attribute specified, and
+    // whose node document is allowed to use the feature indicated by
+    // |allowattribute|, then return true.
+    if (frame->owner() && frame->owner()->allowFullscreen())
+        return allowedToUseFullscreen(frame->tree().parent());
+
+    // 4. Return false.
+    return false;
 }
 
-static bool fullscreenIsSupported(const Document& document)
+bool allowedToRequestFullscreen(Document& document)
+{
+    // An algorithm is allowed to request fullscreen if one of the following is
+    // true:
+
+    //  The algorithm is triggered by a user activation.
+    if (UserGestureIndicator::utilizeUserGesture())
+        return true;
+
+    //  The algorithm is triggered by a user generated orientation change.
+    if (ScopedOrientationChangeIndicator::processingOrientationChange())
+        return true;
+
+    String message = ExceptionMessages::failedToExecute("requestFullscreen",
+        "Element", "API can only be initiated by a user gesture.");
+    document.addConsoleMessage(
+        ConsoleMessage::create(JSMessageSource, WarningMessageLevel, message));
+
+    return false;
+}
+
+// https://fullscreen.spec.whatwg.org/#fullscreen-is-supported
+bool fullscreenIsSupported(const Document& document)
 {
     // Fullscreen is supported if there is no previously-established user preference,
     // security risk, or platform limitation.
     return !document.settings() || document.settings()->fullscreenSupported();
 }
 
-static bool fullscreenElementReady(const Element& element)
+// https://fullscreen.spec.whatwg.org/#fullscreen-element-ready-check
+bool fullscreenElementReady(const Element& element)
 {
     // A fullscreen element ready check for an element |element| returns true if all of the
     // following are true, and false otherwise:
 
     // |element| is in a document.
-    if (!element.inShadowIncludingDocument())
+    if (!element.isConnected())
         return false;
 
-    // |element|'s node document's fullscreen enabled flag is set.
-    if (!fullscreenIsAllowedForAllOwners(element.document()))
+    // |element|'s node document is allowed to use the feature indicated by
+    // |attribute name allowfullscreen.
+    if (!allowedToUseFullscreen(element.document().frame()))
         return false;
 
     // |element|'s node document's fullscreen element stack is either empty or its top element is an
@@ -107,7 +140,7 @@ static bool fullscreenElementReady(const Element& element)
     // |element|'s node document's browsing context either has a browsing context container and the
     // fullscreen element ready check returns true for |element|'s node document's browsing
     // context's browsing context container, or it has no browsing context container.
-    if (const Element* owner = element.document().ownerElement()) {
+    if (const Element* owner = element.document().localOwner()) {
         if (!fullscreenElementReady(*owner))
             return false;
     }
@@ -115,12 +148,12 @@ static bool fullscreenElementReady(const Element& element)
     return true;
 }
 
-static bool isPrefixed(const AtomicString& type)
+bool isPrefixed(const AtomicString& type)
 {
     return type == EventTypeNames::webkitfullscreenchange || type == EventTypeNames::webkitfullscreenerror;
 }
 
-static Event* createEvent(const AtomicString& type, EventTarget& target)
+Event* createEvent(const AtomicString& type, EventTarget& target)
 {
     EventInit initializer;
     initializer.setBubbles(isPrefixed(type));
@@ -128,6 +161,37 @@ static Event* createEvent(const AtomicString& type, EventTarget& target)
     event->setTarget(&target);
     return event;
 }
+
+// Helper to walk the ancestor chain and return the Document of the topmost
+// local ancestor frame. Note that this is not the same as the topmost frame's
+// Document, which might be unavailable in OOPIF scenarios. For example, with
+// OOPIFs, when called on the bottom frame's Document in a A-B-C-B hierarchy in
+// process B, this will skip remote frame C and return this frame: A-[B]-C-B.
+Document& topmostLocalAncestor(Document& document)
+{
+    Document* topmost = &document;
+    Frame* frame = document.frame();
+    while (frame) {
+        frame = frame->tree().parent();
+        if (frame && frame->isLocalFrame())
+            topmost = toLocalFrame(frame)->document();
+    }
+    return *topmost;
+}
+
+// Helper to find the browsing context container in |doc| that embeds the
+// |descendant| Document, possibly through multiple levels of nesting.  This
+// works even in OOPIF scenarios like A-B-A, where there may be remote frames
+// in between |doc| and |descendant|.
+HTMLFrameOwnerElement* findContainerForDescendant(const Document& doc, const Document& descendant)
+{
+    Frame* frame = descendant.frame();
+    while (frame->tree().parent() != doc.frame())
+        frame = frame->tree().parent();
+    return toHTMLFrameOwnerElement(frame->owner());
+}
+
+} // anonymous namespace
 
 const char* Fullscreen::supplementName()
 {
@@ -154,25 +218,21 @@ Element* Fullscreen::fullscreenElementFrom(Document& document)
 {
     if (Fullscreen* found = fromIfExists(document))
         return found->fullscreenElement();
-    return 0;
+    return nullptr;
 }
 
 Element* Fullscreen::currentFullScreenElementFrom(Document& document)
 {
     if (Fullscreen* found = fromIfExists(document))
-        return found->webkitCurrentFullScreenElement();
-    return 0;
-}
-
-bool Fullscreen::isFullScreen(Document& document)
-{
-    return currentFullScreenElementFrom(document);
+        return found->currentFullScreenElement();
+    return nullptr;
 }
 
 Fullscreen::Fullscreen(Document& document)
-    : DocumentLifecycleObserver(&document)
+    : ContextLifecycleObserver(&document)
     , m_fullScreenLayoutObject(nullptr)
     , m_eventQueueTimer(this, &Fullscreen::eventQueueTimerFired)
+    , m_forCrossProcessDescendant(false)
 {
     document.setHasFullscreenSupplement();
 }
@@ -183,36 +243,42 @@ Fullscreen::~Fullscreen()
 
 inline Document* Fullscreen::document()
 {
-    return lifecycleContext();
+    return toDocument(lifecycleContext());
 }
 
-void Fullscreen::documentWasDetached()
+void Fullscreen::contextDestroyed()
 {
     m_eventQueue.clear();
 
     if (m_fullScreenLayoutObject)
         m_fullScreenLayoutObject->destroy();
 
-    m_fullScreenElement = nullptr;
-    m_fullScreenElementStack.clear();
-
+    m_currentFullScreenElement = nullptr;
+    m_fullscreenElementStack.clear();
 }
 
-void Fullscreen::requestFullscreen(Element& element, RequestType requestType)
+// https://fullscreen.spec.whatwg.org/#dom-element-requestfullscreen
+void Fullscreen::requestFullscreen(Element& element, RequestType requestType, bool forCrossProcessDescendant)
 {
-    if (document()->isSecureContext()) {
-        UseCounter::count(document(), UseCounter::FullscreenSecureOrigin);
-    } else {
-        UseCounter::count(document(), UseCounter::FullscreenInsecureOrigin);
-        OriginsUsingFeatures::countAnyWorld(*document(), OriginsUsingFeatures::Feature::FullscreenInsecureOrigin);
+    Document& document = element.document();
+
+    // Use counters only need to be incremented in the process of the actual
+    // fullscreen element.
+    if (!forCrossProcessDescendant) {
+        if (document.isSecureContext()) {
+            UseCounter::count(document, UseCounter::FullscreenSecureOrigin);
+        } else {
+            UseCounter::count(document, UseCounter::FullscreenInsecureOrigin);
+            HostsUsingFeatures::countAnyWorld(document, HostsUsingFeatures::Feature::FullscreenInsecureHost);
+        }
     }
 
     // Ignore this request if the document is not in a live frame.
-    if (!document()->isActive())
+    if (!document.isActive())
         return;
 
     // If |element| is on top of |doc|'s fullscreen element stack, terminate these substeps.
-    if (&element == fullscreenElement())
+    if (&element == fullscreenElementFrom(document))
         return;
 
     do {
@@ -224,32 +290,36 @@ void Fullscreen::requestFullscreen(Element& element, RequestType requestType)
         if (!fullscreenElementReady(element))
             break;
 
-        // This algorithm is not allowed to show a pop-up:
-        //   An algorithm is allowed to show a pop-up if, in the task in which the algorithm is running, either:
-        //   - an activation behavior is currently being processed whose click event was trusted, or
-        //   - the event listener for a trusted click event is being handled.
-        if (!UserGestureIndicator::utilizeUserGesture()) {
-            String message = ExceptionMessages::failedToExecute("requestFullScreen",
-                "Element", "API can only be initiated by a user gesture.");
-            document()->getExecutionContext()->addConsoleMessage(
-                ConsoleMessage::create(JSMessageSource, WarningMessageLevel, message));
-            break;
-        }
-
         // Fullscreen is not supported.
-        if (!fullscreenIsSupported(element.document()))
+        if (!fullscreenIsSupported(document))
+            break;
+
+        // This algorithm is not allowed to request fullscreen.
+        // OOPIF: If |forCrossProcessDescendant| is true, requestFullscreen was
+        // already called on a descendant element in another process, and
+        // getting here means that it was already allowed to request fullscreen.
+        if (!forCrossProcessDescendant && !allowedToRequestFullscreen(document))
             break;
 
         // 2. Let doc be element's node document. (i.e. "this")
-        Document* currentDoc = document();
 
         // 3. Let docs be all doc's ancestor browsing context's documents (if any) and doc.
+        //
+        // For OOPIF scenarios, |docs| will only contain documents for local
+        // ancestors, and remote ancestors will be processed in their
+        // respective processes.  This preserves the spec's event firing order
+        // for local ancestors, but not for remote ancestors.  However, that
+        // difference shouldn't be observable in practice: a fullscreenchange
+        // event handler would need to postMessage a frame in another renderer
+        // process, where the message should be queued up and processed after
+        // the IPC that dispatches fullscreenchange.
         HeapDeque<Member<Document>> docs;
 
-        do {
-            docs.prepend(currentDoc);
-            currentDoc = currentDoc->ownerElement() ? &currentDoc->ownerElement()->document() : nullptr;
-        } while (currentDoc);
+        docs.prepend(&document);
+        for (Frame* frame = document.frame()->tree().parent(); frame; frame = frame->tree().parent()) {
+            if (frame->isLocalFrame())
+                docs.prepend(toLocalFrame(frame)->document());
+        }
 
         // 4. For each document in docs, run these substeps:
         HeapDeque<Member<Document>>::iterator current = docs.begin(), following = docs.begin();
@@ -267,74 +337,85 @@ void Fullscreen::requestFullscreen(Element& element, RequestType requestType)
             // set to true on the document.
             if (!followingDoc) {
                 from(*currentDoc).pushFullscreenElementStack(element, requestType);
-                enqueueChangeEvent(*currentDoc, requestType);
+                from(document).enqueueChangeEvent(*currentDoc, requestType);
                 continue;
             }
 
             // 3. Otherwise, if document's fullscreen element stack is either empty or its top element
             // is not following document's browsing context container,
             Element* topElement = fullscreenElementFrom(*currentDoc);
-            if (!topElement || topElement != followingDoc->ownerElement()) {
+            HTMLFrameOwnerElement* followingOwner = findContainerForDescendant(*currentDoc, *followingDoc);
+            if (!topElement || topElement != followingOwner) {
                 // ...push following document's browsing context container on document's fullscreen element
                 // stack, and queue a task to fire an event named fullscreenchange with its bubbles attribute
                 // set to true on document.
-                from(*currentDoc).pushFullscreenElementStack(*followingDoc->ownerElement(), requestType);
-                enqueueChangeEvent(*currentDoc, requestType);
+                from(*currentDoc).pushFullscreenElementStack(*followingOwner, requestType);
+                from(document).enqueueChangeEvent(*currentDoc, requestType);
                 continue;
             }
 
             // 4. Otherwise, do nothing for this document. It stays the same.
         } while (++current != docs.end());
 
+        from(document).m_forCrossProcessDescendant = forCrossProcessDescendant;
+
         // 5. Return, and run the remaining steps asynchronously.
         // 6. Optionally, perform some animation.
-        document()->frameHost()->chromeClient().enterFullScreenForElement(&element);
+        document.frameHost()->chromeClient().enterFullscreenForElement(&element);
 
         // 7. Optionally, display a message indicating how the user can exit displaying the context object fullscreen.
         return;
     } while (false);
 
-    enqueueErrorEvent(element, requestType);
+    from(document).enqueueErrorEvent(element, requestType);
 }
 
+// https://fullscreen.spec.whatwg.org/#fully-exit-fullscreen
 void Fullscreen::fullyExitFullscreen(Document& document)
 {
     // To fully exit fullscreen, run these steps:
 
     // 1. Let |doc| be the top-level browsing context's document.
-    Document& doc = document.topDocument();
+    //
+    // Since the top-level browsing context's document might be unavailable in
+    // OOPIF scenarios (i.e., when the top frame is remote), this actually uses
+    // the Document of the topmost local ancestor frame.  Without OOPIF, this
+    // will be the top frame's document.  With OOPIF, each renderer process for
+    // the current page will separately call fullyExitFullscreen to cover all
+    // local frames in each process.
+    Document& doc = topmostLocalAncestor(document);
 
     // 2. If |doc|'s fullscreen element stack is empty, terminate these steps.
     if (!fullscreenElementFrom(doc))
         return;
 
     // 3. Remove elements from |doc|'s fullscreen element stack until only the top element is left.
-    size_t stackSize = from(doc).m_fullScreenElementStack.size();
-    from(doc).m_fullScreenElementStack.remove(0, stackSize - 1);
-    DCHECK_EQ(from(doc).m_fullScreenElementStack.size(), 1u);
+    size_t stackSize = from(doc).m_fullscreenElementStack.size();
+    from(doc).m_fullscreenElementStack.remove(0, stackSize - 1);
+    DCHECK_EQ(from(doc).m_fullscreenElementStack.size(), 1u);
 
     // 4. Act as if the exitFullscreen() method was invoked on |doc|.
-    from(doc).exitFullscreen();
+    exitFullscreen(doc);
 }
 
-void Fullscreen::exitFullscreen()
+// https://fullscreen.spec.whatwg.org/#exit-fullscreen
+void Fullscreen::exitFullscreen(Document& document)
 {
     // The exitFullscreen() method must run these steps:
 
     // 1. Let doc be the context object. (i.e. "this")
-    Document* currentDoc = document();
-    if (!currentDoc->isActive())
+    if (!document.isActive())
         return;
 
     // 2. If doc's fullscreen element stack is empty, terminate these steps.
-    if (m_fullScreenElementStack.isEmpty())
+    if (!fullscreenElementFrom(document))
         return;
 
     // 3. Let descendants be all the doc's descendant browsing context's documents with a non-empty fullscreen
     // element stack (if any), ordered so that the child of the doc is last and the document furthest
     // away from the doc is first.
     HeapDeque<Member<Document>> descendants;
-    for (Frame* descendant = document()->frame() ? document()->frame()->tree().traverseNext() : 0; descendant; descendant = descendant->tree().traverseNext()) {
+    for (Frame* descendant = document.frame() ? document.frame()->tree().traverseNext() : nullptr; descendant; descendant = descendant->tree().traverseNext()) {
         if (!descendant->isLocalFrame())
             continue;
         DCHECK(toLocalFrame(descendant)->document());
@@ -346,15 +427,15 @@ void Fullscreen::exitFullscreen()
     // task to fire an event named fullscreenchange with its bubbles attribute set to true on descendant.
     for (auto& descendant : descendants) {
         DCHECK(descendant);
-        RequestType requestType = from(*descendant).m_fullScreenElementStack.last().second;
+        RequestType requestType = from(*descendant).m_fullscreenElementStack.last().second;
         from(*descendant).clearFullscreenElementStack();
-        enqueueChangeEvent(*descendant, requestType);
+        from(document).enqueueChangeEvent(*descendant, requestType);
     }
 
     // 5. While doc is not null, run these substeps:
-    Element* newTop = 0;
-    while (currentDoc) {
-        RequestType requestType = from(*currentDoc).m_fullScreenElementStack.last().second;
+    Element* newTop = nullptr;
+    for (Document* currentDoc = &document; currentDoc;) {
+        RequestType requestType = from(*currentDoc).m_fullscreenElementStack.last().second;
 
         // 1. Pop the top element of doc's fullscreen element stack.
         from(*currentDoc).popFullscreenElementStack();
@@ -362,28 +443,39 @@ void Fullscreen::exitFullscreen()
         //    If doc's fullscreen element stack is non-empty and the element now at the top is either
         //    not in a document or its node document is not doc, repeat this substep.
         newTop = fullscreenElementFrom(*currentDoc);
-        if (newTop && (!newTop->inShadowIncludingDocument() || newTop->document() != currentDoc))
+        if (newTop && (!newTop->isConnected() || newTop->document() != currentDoc))
             continue;
 
         // 2. Queue a task to fire an event named fullscreenchange with its bubbles attribute set to true
         // on doc.
-        enqueueChangeEvent(*currentDoc, requestType);
+        from(document).enqueueChangeEvent(*currentDoc, requestType);
 
         // 3. If doc's fullscreen element stack is empty and doc's browsing context has a browsing context
         // container, set doc to that browsing context container's node document.
-        if (!newTop && currentDoc->ownerElement()) {
-            currentDoc = &currentDoc->ownerElement()->document();
-            continue;
+        //
+        // OOPIF: If browsing context container's document is in another
+        // process, keep moving up the ancestor chain and looking for a
+        // browsing context container with a local document.
+        // TODO(alexmos): Deal with nested fullscreen cases, see
+        // https://crbug.com/617369.
+        if (!newTop) {
+            Frame* frame = currentDoc->frame()->tree().parent();
+            while (frame && frame->isRemoteFrame())
+                frame = frame->tree().parent();
+            if (frame) {
+                currentDoc = toLocalFrame(frame)->document();
+                continue;
+            }
         }
 
         // 4. Otherwise, set doc to null.
-        currentDoc = 0;
+        currentDoc = nullptr;
     }
 
     // 6. Return, and run the remaining steps asynchronously.
     // 7. Optionally, perform some animation.
 
-    FrameHost* host = document()->frameHost();
+    FrameHost* host = document.frameHost();
 
     // Speculative fix for engaget.com/videos per crbug.com/336239.
     // FIXME: This check is wrong. We DCHECK(document->isActive()) above
@@ -395,30 +487,31 @@ void Fullscreen::exitFullscreen()
     // full screen stack.
     if (!newTop) {
         // FIXME: if the frame exiting fullscreen is not the frame that entered
-        // fullscreen (but a parent frame for example), m_fullScreenElement
-        // might be null. We want to pass an element that is part of the
-        // document so we will pass the documentElement in that case.
-        // This should be fix by exiting fullscreen for a frame instead of an
-        // element, see https://crbug.com/441259
-        host->chromeClient().exitFullScreenForElement(
-            m_fullScreenElement ? m_fullScreenElement.get() : document()->documentElement());
+        // fullscreen (but a parent frame for example),
+        // m_currentFullScreenElement might be null. We want to pass an element
+        // that is part of the document so we will pass the documentElement in
+        // that case. This should be fix by exiting fullscreen for a frame
+        // instead of an element, see https://crbug.com/441259
+        Element* currentFullScreenElement = currentFullScreenElementFrom(document);
+        host->chromeClient().exitFullscreenForElement(
+            currentFullScreenElement ? currentFullScreenElement : document.documentElement());
         return;
     }
 
     // Otherwise, notify the chrome of the new full screen element.
-    host->chromeClient().enterFullScreenForElement(newTop);
+    host->chromeClient().enterFullscreenForElement(newTop);
 }
 
+// https://fullscreen.spec.whatwg.org/#dom-document-fullscreenenabled
 bool Fullscreen::fullscreenEnabled(Document& document)
 {
-    // 4. The fullscreenEnabled attribute must return true if the context object has its
-    //    fullscreen enabled flag set and fullscreen is supported, and false otherwise.
-
-    // Top-level browsing contexts are implied to have their allowFullScreen attribute set.
-    return fullscreenIsAllowedForAllOwners(document) && fullscreenIsSupported(document);
+    // The fullscreenEnabled attribute's getter must return true if the context
+    // object is allowed to use the feature indicated by attribute name
+    // allowfullscreen and fullscreen is supported, and false otherwise.
+    return allowedToUseFullscreen(document.frame()) && fullscreenIsSupported(document);
 }
 
-void Fullscreen::didEnterFullScreenForElement(Element* element)
+void Fullscreen::didEnterFullscreenForElement(Element* element)
 {
     DCHECK(element);
     if (!document()->isActive())
@@ -427,30 +520,45 @@ void Fullscreen::didEnterFullScreenForElement(Element* element)
     if (m_fullScreenLayoutObject)
         m_fullScreenLayoutObject->unwrapLayoutObject();
 
-    m_fullScreenElement = element;
+    m_currentFullScreenElement = element;
 
     // Create a placeholder block for a the full-screen element, to keep the page from reflowing
     // when the element is removed from the normal flow. Only do this for a LayoutBox, as only
     // a box will have a frameRect. The placeholder will be created in setFullScreenLayoutObject()
     // during layout.
-    LayoutObject* layoutObject = m_fullScreenElement->layoutObject();
+    LayoutObject* layoutObject = m_currentFullScreenElement->layoutObject();
     bool shouldCreatePlaceholder = layoutObject && layoutObject->isBox();
     if (shouldCreatePlaceholder) {
         m_savedPlaceholderFrameRect = toLayoutBox(layoutObject)->frameRect();
         m_savedPlaceholderComputedStyle = ComputedStyle::clone(layoutObject->styleRef());
     }
 
-    if (m_fullScreenElement != document()->documentElement())
+    // TODO(alexmos): When |m_forCrossProcessDescendant| is true, some of
+    // this layout work has already been done in another process, so it should
+    // not be necessary to repeat it here.
+    if (m_currentFullScreenElement != document()->documentElement())
         LayoutFullScreen::wrapLayoutObject(layoutObject, layoutObject ? layoutObject->parent() : 0, document());
 
-    m_fullScreenElement->setContainsFullScreenElementOnAncestorsCrossingFrameBoundaries(true);
+    // When |m_forCrossProcessDescendant| is true, m_currentFullScreenElement
+    // corresponds to the HTMLFrameOwnerElement for the out-of-process iframe
+    // that contains the actual fullscreen element.   Hence, it must also set
+    // the ContainsFullScreenElement flag (so that it gains the
+    // -webkit-full-screen-ancestor style).
+    if (m_forCrossProcessDescendant) {
+        DCHECK(m_currentFullScreenElement->isFrameOwnerElement());
+        DCHECK(toHTMLFrameOwnerElement(m_currentFullScreenElement)->contentFrame()->isRemoteFrame());
+        m_currentFullScreenElement->setContainsFullScreenElement(true);
+    }
+
+    m_currentFullScreenElement->setContainsFullScreenElementOnAncestorsCrossingFrameBoundaries(true);
+
     document()->styleEngine().ensureFullscreenUAStyle();
-    m_fullScreenElement->pseudoStateChanged(CSSSelector::PseudoFullScreen);
+    m_currentFullScreenElement->pseudoStateChanged(CSSSelector::PseudoFullScreen);
 
-    // FIXME: This should not call updateLayoutTree.
-    document()->updateLayoutTree();
+    // FIXME: This should not call updateStyleAndLayoutTree.
+    document()->updateStyleAndLayoutTree();
 
-    m_fullScreenElement->didBecomeFullscreenElement();
+    m_currentFullScreenElement->didBecomeFullscreenElement();
 
     if (document()->frame())
         document()->frame()->eventHandler().scheduleHoverStateUpdate();
@@ -458,24 +566,27 @@ void Fullscreen::didEnterFullScreenForElement(Element* element)
     m_eventQueueTimer.startOneShot(0, BLINK_FROM_HERE);
 }
 
-void Fullscreen::didExitFullScreenForElement(Element*)
+void Fullscreen::didExitFullscreen()
 {
-    if (!m_fullScreenElement)
+    if (!m_currentFullScreenElement)
         return;
 
     if (!document()->isActive())
         return;
 
-    m_fullScreenElement->willStopBeingFullscreenElement();
+    m_currentFullScreenElement->willStopBeingFullscreenElement();
 
-    m_fullScreenElement->setContainsFullScreenElementOnAncestorsCrossingFrameBoundaries(false);
+    if (m_forCrossProcessDescendant)
+        m_currentFullScreenElement->setContainsFullScreenElement(false);
+
+    m_currentFullScreenElement->setContainsFullScreenElementOnAncestorsCrossingFrameBoundaries(false);
 
     if (m_fullScreenLayoutObject)
         LayoutFullScreenItem(m_fullScreenLayoutObject).unwrapLayoutObject();
 
     document()->styleEngine().ensureFullscreenUAStyle();
-    m_fullScreenElement->pseudoStateChanged(CSSSelector::PseudoFullScreen);
-    m_fullScreenElement = nullptr;
+    m_currentFullScreenElement->pseudoStateChanged(CSSSelector::PseudoFullScreen);
+    m_currentFullScreenElement = nullptr;
 
     if (document()->frame())
         document()->frame()->eventHandler().scheduleHoverStateUpdate();
@@ -485,9 +596,11 @@ void Fullscreen::didExitFullScreenForElement(Element*)
     // exiting document.
     Document* exitingDocument = document();
     if (m_eventQueue.isEmpty())
-        exitingDocument = &document()->topDocument();
+        exitingDocument = &topmostLocalAncestor(*document());
     DCHECK(exitingDocument);
     from(*exitingDocument).m_eventQueueTimer.startOneShot(0, BLINK_FROM_HERE);
+
+    m_forCrossProcessDescendant = false;
 }
 
 void Fullscreen::setFullScreenLayoutObject(LayoutFullScreen* layoutObject)
@@ -498,7 +611,7 @@ void Fullscreen::setFullScreenLayoutObject(LayoutFullScreen* layoutObject)
     if (layoutObject && m_savedPlaceholderComputedStyle) {
         layoutObject->createPlaceholder(m_savedPlaceholderComputedStyle.release(), m_savedPlaceholderFrameRect);
     } else if (layoutObject && m_fullScreenLayoutObject && m_fullScreenLayoutObject->placeholder()) {
-        LayoutBlock* placeholder = m_fullScreenLayoutObject->placeholder();
+        LayoutBlockFlow* placeholder = m_fullScreenLayoutObject->placeholder();
         layoutObject->createPlaceholder(ComputedStyle::clone(placeholder->styleRef()), placeholder->frameRect());
     }
 
@@ -524,13 +637,13 @@ void Fullscreen::enqueueChangeEvent(Document& document, RequestType requestType)
         Fullscreen& fullscreen = from(document);
         EventTarget* target = fullscreen.fullscreenElement();
         if (!target)
-            target = fullscreen.webkitCurrentFullScreenElement();
+            target = fullscreen.currentFullScreenElement();
         if (!target)
             target = &document;
         event = createEvent(EventTypeNames::webkitfullscreenchange, *target);
     }
     m_eventQueue.append(event);
-    // NOTE: The timer is started in didEnterFullScreenForElement/didExitFullScreenForElement.
+    // NOTE: The timer is started in didEnterFullscreenForElement/didExitFullscreen.
 }
 
 void Fullscreen::enqueueErrorEvent(Element& element, RequestType requestType)
@@ -544,7 +657,7 @@ void Fullscreen::enqueueErrorEvent(Element& element, RequestType requestType)
     m_eventQueueTimer.startOneShot(0, BLINK_FROM_HERE);
 }
 
-void Fullscreen::eventQueueTimerFired(Timer<Fullscreen>*)
+void Fullscreen::eventQueueTimerFired(TimerBase*)
 {
     HeapDeque<Member<Event>> eventQueue;
     m_eventQueue.swap(eventQueue);
@@ -554,7 +667,7 @@ void Fullscreen::eventQueueTimerFired(Timer<Fullscreen>*)
         Node* target = event->target()->toNode();
 
         // If the element was removed from our tree, also message the documentElement.
-        if (!target->inShadowIncludingDocument() && document()->documentElement()) {
+        if (!target->isConnected() && document()->documentElement()) {
             DCHECK(isPrefixed(event->type()));
             eventQueue.append(createEvent(event->type(), *document()->documentElement()));
         }
@@ -571,14 +684,14 @@ void Fullscreen::elementRemoved(Element& oldNode)
     // 1. If |oldNode| is at the top of its node document's fullscreen element stack, act as if the
     //    exitFullscreen() method was invoked on that document.
     if (fullscreenElement() == &oldNode) {
-        exitFullscreen();
+        exitFullscreen(oldNode.document());
         return;
     }
 
     // 2. Otherwise, remove |oldNode| from its node document's fullscreen element stack.
-    for (size_t i = 0; i < m_fullScreenElementStack.size(); ++i) {
-        if (m_fullScreenElementStack[i].first.get() == &oldNode) {
-            m_fullScreenElementStack.remove(i);
+    for (size_t i = 0; i < m_fullscreenElementStack.size(); ++i) {
+        if (m_fullscreenElementStack[i].first.get() == &oldNode) {
+            m_fullscreenElementStack.remove(i);
             return;
         }
     }
@@ -588,29 +701,29 @@ void Fullscreen::elementRemoved(Element& oldNode)
 
 void Fullscreen::clearFullscreenElementStack()
 {
-    m_fullScreenElementStack.clear();
+    m_fullscreenElementStack.clear();
 }
 
 void Fullscreen::popFullscreenElementStack()
 {
-    if (m_fullScreenElementStack.isEmpty())
+    if (m_fullscreenElementStack.isEmpty())
         return;
 
-    m_fullScreenElementStack.removeLast();
+    m_fullscreenElementStack.removeLast();
 }
 
 void Fullscreen::pushFullscreenElementStack(Element& element, RequestType requestType)
 {
-    m_fullScreenElementStack.append(std::make_pair(&element, requestType));
+    m_fullscreenElementStack.append(std::make_pair(&element, requestType));
 }
 
 DEFINE_TRACE(Fullscreen)
 {
-    visitor->trace(m_fullScreenElement);
-    visitor->trace(m_fullScreenElementStack);
+    visitor->trace(m_currentFullScreenElement);
+    visitor->trace(m_fullscreenElementStack);
     visitor->trace(m_eventQueue);
     Supplement<Document>::trace(visitor);
-    DocumentLifecycleObserver::trace(visitor);
+    ContextLifecycleObserver::trace(visitor);
 }
 
 } // namespace blink

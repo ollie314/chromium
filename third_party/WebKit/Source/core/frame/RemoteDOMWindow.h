@@ -22,7 +22,6 @@ public:
 
     // DOMWindow overrides:
     DECLARE_VIRTUAL_TRACE();
-    bool isRemoteDOMWindow() const override { return true; }
     RemoteFrame* frame() const override;
     Screen* screen() const override;
     History* history() const override;
@@ -53,14 +52,13 @@ public:
     double devicePixelRatio() const override;
     ApplicationCache* applicationCache() const override;
     int orientation() const override;
-    Console* console() const override;
     DOMSelection* getSelection() override;
     void blur() override;
-    void print() override;
+    void print(ScriptState*) override;
     void stop() override;
-    void alert(const String& message = String()) override;
-    bool confirm(const String& message) override;
-    String prompt(const String& message, const String& defaultValue) override;
+    void alert(ScriptState*, const String& message = String()) override;
+    bool confirm(ScriptState*, const String& message) override;
+    String prompt(ScriptState*, const String& message, const String& defaultValue) override;
     bool find(const String&, bool caseSensitive, bool backwards, bool wrap, bool wholeWord, bool searchInFrames, bool showDialog) const override;
     void scrollBy(double x, double y, ScrollBehavior = ScrollBehaviorAuto) const override;
     void scrollBy(const ScrollToOptions&) const override;
@@ -78,12 +76,21 @@ public:
     void cancelAnimationFrame(int id) override;
     int requestIdleCallback(IdleRequestCallback*, const IdleRequestOptions&) override;
     void cancelIdleCallback(int id) override;
-    CustomElementsRegistry* customElements() const override;
+    CustomElementRegistry* customElements(ScriptState*) const override;
 
     void frameDetached();
 
+protected:
+    // Protected DOMWindow overrides:
+    void schedulePostMessage(MessageEvent*, PassRefPtr<SecurityOrigin> target, Document* source) override;
+
 private:
     explicit RemoteDOMWindow(RemoteFrame&);
+
+    // Intentionally private to prevent redundant checks when the type is
+    // already RemoteDOMWindow.
+    bool isLocalDOMWindow() const override { return false; }
+    bool isRemoteDOMWindow() const override { return true; }
 
     Member<RemoteFrame> m_frame;
 };

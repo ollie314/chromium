@@ -12,16 +12,30 @@
 
 namespace pairing_chromeos {
 
-SharkConnectionListener::SharkConnectionListener(OnConnectedCallback callback)
+SharkConnectionListener::SharkConnectionListener(
+    const scoped_refptr<base::SingleThreadTaskRunner>& file_task_runner,
+    OnConnectedCallback callback)
     : callback_(callback) {
-  controller_.reset(new BluetoothHostPairingController());
+  controller_.reset(new BluetoothHostPairingController(file_task_runner));
   controller_->AddObserver(this);
   controller_->StartPairing();
 }
 
 SharkConnectionListener::~SharkConnectionListener() {
-  if (controller_)
+  if (controller_.get())
     controller_->RemoveObserver(this);
+}
+
+void SharkConnectionListener::ResetController() {
+  if (controller_.get()) {
+    controller_->RemoveObserver(this);
+    controller_->Reset();
+  }
+}
+
+BluetoothHostPairingController*
+SharkConnectionListener::GetControllerForTesting() {
+  return static_cast<BluetoothHostPairingController*>(controller_.get());
 }
 
 void SharkConnectionListener::PairingStageChanged(Stage new_stage) {

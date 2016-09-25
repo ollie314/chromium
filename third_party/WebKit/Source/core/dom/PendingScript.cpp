@@ -48,6 +48,7 @@ PendingScript::PendingScript(Element* element, ScriptResource* resource)
 {
     setScriptResource(resource);
     ThreadState::current()->registerPreFinalizer(this);
+    MemoryCoordinator::instance().registerClient(this);
 }
 
 PendingScript::~PendingScript()
@@ -60,20 +61,6 @@ void PendingScript::dispose()
         return;
     stopWatchingForLoad();
     releaseElementAndClear();
-}
-
-PendingScript& PendingScript::operator=(const PendingScript& other)
-{
-    if (this == &other)
-        return *this;
-
-    m_watchingForLoad = other.m_watchingForLoad;
-    m_element = other.m_element;
-    m_startingPosition = other.m_startingPosition;
-    m_integrityFailure = other.m_integrityFailure;
-    m_streamer = other.m_streamer;
-    this->ResourceOwner<ScriptResource, ScriptResourceClient>::operator=(other);
-    return *this;
 }
 
 void PendingScript::watchForLoad(ScriptResourceClient* client)
@@ -199,7 +186,9 @@ DEFINE_TRACE(PendingScript)
 {
     visitor->trace(m_element);
     visitor->trace(m_streamer);
+    visitor->trace(m_client);
     ResourceOwner<ScriptResource>::trace(visitor);
+    MemoryCoordinatorClient::trace(visitor);
 }
 
 ScriptSourceCode PendingScript::getSource(const KURL& documentURL, bool& errorOccurred) const
@@ -238,6 +227,13 @@ bool PendingScript::errorOccurred() const
     if (m_streamer && m_streamer->resource())
         return m_streamer->resource()->errorOccurred();
     return false;
+}
+
+void PendingScript::prepareToSuspend()
+{
+    if (!m_streamer)
+        return;
+    m_streamer->cancel();
 }
 
 } // namespace blink

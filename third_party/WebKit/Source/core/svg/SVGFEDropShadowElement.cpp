@@ -23,8 +23,8 @@
 #include "core/layout/LayoutObject.h"
 #include "core/style/ComputedStyle.h"
 #include "core/style/SVGComputedStyle.h"
-#include "core/svg/SVGParserUtilities.h"
 #include "core/svg/graphics/filters/SVGFilterBuilder.h"
+#include "platform/graphics/filters/FEDropShadow.h"
 
 namespace blink {
 
@@ -57,6 +57,23 @@ void SVGFEDropShadowElement::setStdDeviation(float x, float y)
     stdDeviationX()->baseValue()->setValue(x);
     stdDeviationY()->baseValue()->setValue(y);
     invalidate();
+}
+
+bool SVGFEDropShadowElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)
+{
+    DCHECK(layoutObject());
+    FEDropShadow* dropShadow = static_cast<FEDropShadow*>(effect);
+
+    const SVGComputedStyle& svgStyle = layoutObject()->styleRef().svgStyle();
+    if (attrName == SVGNames::flood_colorAttr) {
+        dropShadow->setShadowColor(svgStyle.floodColor());
+        return true;
+    }
+    if (attrName == SVGNames::flood_opacityAttr) {
+        dropShadow->setShadowOpacity(svgStyle.floodOpacity());
+        return true;
+    }
+    return SVGFilterPrimitiveStandardAttributes::setFilterEffectAttribute(effect, attrName);
 }
 
 void SVGFEDropShadowElement::svgAttributeChanged(const QualifiedName& attrName)

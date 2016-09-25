@@ -10,6 +10,7 @@
 #include "platform/Crypto.h"
 #include "platform/heap/Handle.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
+#include "platform/network/ResourceRequest.h"
 #include "wtf/HashSet.h"
 #include "wtf/text/WTFString.h"
 
@@ -27,12 +28,13 @@ public:
 
     void parse(const UChar* begin, const UChar* end);
 
-    bool matches(const KURL&, ContentSecurityPolicy::RedirectStatus = ContentSecurityPolicy::DidNotRedirect) const;
+    bool matches(const KURL&, ResourceRequest::RedirectStatus = ResourceRequest::RedirectStatus::NoRedirect) const;
     bool allowInline() const;
     bool allowEval() const;
     bool allowDynamic() const;
     bool allowNonce(const String&) const;
     bool allowHash(const CSPHashValue&) const;
+    bool allowHashedAttributes() const;
     uint8_t hashAlgorithmsUsed() const;
 
     bool isHashOrNoncePresent() const;
@@ -50,11 +52,12 @@ private:
     void addSourceStar();
     void addSourceUnsafeInline();
     void addSourceUnsafeEval();
-    void addSourceUnsafeDynamic();
+    void addSourceStrictDynamic();
+    void addSourceUnsafeHashedAttributes();
     void addSourceNonce(const String& nonce);
     void addSourceHash(const ContentSecurityPolicyHashAlgorithm&, const DigestValue& hash);
 
-    bool hasSourceMatchInList(const KURL&, ContentSecurityPolicy::RedirectStatus) const;
+    bool hasSourceMatchInList(const KURL&, ResourceRequest::RedirectStatus) const;
 
     Member<ContentSecurityPolicy> m_policy;
     HeapVector<Member<CSPSource>> m_list;
@@ -64,6 +67,7 @@ private:
     bool m_allowInline;
     bool m_allowEval;
     bool m_allowDynamic;
+    bool m_allowHashedAttributes;
     HashSet<String> m_nonces;
     HashSet<CSPHashValue> m_hashes;
     uint8_t m_hashAlgorithmsUsed;

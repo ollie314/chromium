@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "media/cast/cast_config.h"
 #include "media/cast/cast_environment.h"
 #include "media/cast/net/cast_transport.h"
 #include "media/cast/net/rtcp/rtcp_defines.h"
@@ -28,14 +29,8 @@ struct SenderEncodedFrame;
 class FrameSender {
  public:
   FrameSender(scoped_refptr<CastEnvironment> cast_environment,
-              bool is_audio,
               CastTransport* const transport_sender,
-              int rtp_timebase,
-              uint32_t ssrc,
-              double max_frame_rate,
-              base::TimeDelta min_playout_delay,
-              base::TimeDelta max_playout_delay,
-              base::TimeDelta animated_playout_delay,
+              const FrameSenderConfig& config,
               CongestionControl* congestion_control);
   virtual ~FrameSender();
 
@@ -51,7 +46,7 @@ class FrameSender {
 
   // Called by the encoder with the next EncodeFrame to send.
   void SendEncodedFrame(int requested_bitrate_before_encode,
-                        scoped_ptr<SenderEncodedFrame> encoded_frame);
+                        std::unique_ptr<SenderEncodedFrame> encoded_frame);
 
  protected:
   // Returns the number of frames in the encoder's backlog.
@@ -62,9 +57,27 @@ class FrameSender {
   virtual base::TimeDelta GetInFlightMediaDuration() const = 0;
 
  protected:
+  class RtcpClient : public RtcpObserver {
+   public:
+    explicit RtcpClient(base::WeakPtr<FrameSender> frame_sender);
+    ~RtcpClient() override;
+
+    void OnReceivedCastMessage(const RtcpCastMessage& cast_message) override;
+    void OnReceivedRtt(base::TimeDelta round_trip_time) override;
+    void OnReceivedPli() override;
+
+   private:
+    const base::WeakPtr<FrameSender> frame_sender_;
+  };
   // Schedule and execute periodic sending of RTCP report.
   void ScheduleNextRtcpReport();
   void SendRtcpReport(bool schedule_future_reports);
+
+  // Protected for testability.
+  void OnReceivedCastFeedback(const RtcpCastMessage& cast_feedback);
+
+  // Called when a Pli message is received.
+  void OnReceivedPli();
 
   void OnMeasuredRoundTripTime(base::TimeDelta rtt);
 
@@ -89,12 +102,6 @@ class FrameSender {
   void ResendCheck();
   void ResendForKickstart();
 
-  // Protected for testability.
-  void OnReceivedCastFeedback(const RtcpCastMessage& cast_feedback);
-
-  // Called when a Pli message is received.
-  void OnReceivedPli();
-
   // Returns true if too many frames would be in-flight by encoding and sending
   // the next frame having the given |frame_duration|.
   bool ShouldDropNextFrame(base::TimeDelta frame_duration) const;
@@ -103,11 +110,11 @@ class FrameSender {
   // Warning: If a frame ID too far in the past is requested, the getters will
   // silently succeed but return incorrect values.  Be sure to respect
   // media::cast::kMaxUnackedFrames.
-  void RecordLatestFrameTimestamps(uint32_t frame_id,
+  void RecordLatestFrameTimestamps(FrameId frame_id,
                                    base::TimeTicks reference_time,
                                    RtpTimeTicks rtp_timestamp);
-  base::TimeTicks GetRecordedReferenceTime(uint32_t frame_id) const;
-  RtpTimeTicks GetRecordedRtpTimestamp(uint32_t frame_id) const;
+  base::TimeTicks GetRecordedReferenceTime(FrameId frame_id) const;
+  RtpTimeTicks GetRecordedRtpTimestamp(FrameId frame_id) const;
 
   // Returns the number of frames that were sent but not yet acknowledged.
   int GetUnacknowledgedFrameCount() const;
@@ -146,15 +153,13 @@ class FrameSender {
   // last time any frame was sent or re-sent.
   base::TimeTicks last_send_time_;
 
-  // The ID of the last frame sent.  Logic throughout FrameSender assumes this
-  // can safely wrap-around.  This member is invalid until
+  // The ID of the last frame sent.  This member is invalid until
   // |!last_send_time_.is_null()|.
-  uint32_t last_sent_frame_id_;
+  FrameId last_sent_frame_id_;
 
   // The ID of the latest (not necessarily the last) frame that has been
-  // acknowledged.  Logic throughout AudioSender assumes this can safely
-  // wrap-around.  This member is invalid until |!last_send_time_.is_null()|.
-  uint32_t latest_acked_frame_id_;
+  // acknowledged.  This member is invalid until |!last_send_time_.is_null()|.
+  FrameId latest_acked_frame_id_;
 
   // Counts the number of duplicate ACK that are being received.  When this
   // number reaches a threshold, the sender will take this as a sign that the
@@ -164,7 +169,7 @@ class FrameSender {
 
   // This object controls how we change the bitrate to make sure the
   // buffer doesn't overflow.
-  scoped_ptr<CongestionControl> congestion_control_;
+  std::unique_ptr<CongestionControl> congestion_control_;
 
   // The most recently measured round trip time.
   base::TimeDelta current_round_trip_time_;
@@ -185,7 +190,8 @@ class FrameSender {
 
   // Ring buffers to keep track of recent frame timestamps (both in terms of
   // local reference time and RTP media time).  These should only be accessed
-  // through the Record/GetXXX() methods.
+  // through the Record/GetXXX() methods.  The index into this ring
+  // buffer is the lower 8 bits of the FrameId.
   base::TimeTicks frame_reference_times_[256];
   RtpTimeTicks frame_rtp_timestamps_[256];
 

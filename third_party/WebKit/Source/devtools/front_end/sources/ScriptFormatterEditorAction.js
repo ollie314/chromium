@@ -24,6 +24,8 @@ WebInspector.FormatterScriptMapping.prototype = {
     {
         var debuggerModelLocation = /** @type {!WebInspector.DebuggerModel.Location} */ (rawLocation);
         var script = debuggerModelLocation.script();
+        if (!script)
+            return null;
         var uiSourceCode = this._editorAction._uiSourceCodes.get(script);
         if (!uiSourceCode)
             return null;
@@ -77,7 +79,6 @@ WebInspector.FormatterScriptMapping.prototype = {
     {
         return true;
     }
-
 }
 
 /**
@@ -344,7 +345,7 @@ WebInspector.ScriptFormatterEditorAction.prototype = {
             var formattedUISourceCode = this._workspace.uiSourceCode(this._projectId, uiSourceCodePath);
             var formatData = formattedUISourceCode ? this._formatData.get(formattedUISourceCode) : null;
             if (formatData)
-                 this._showIfNeeded(uiSourceCode, /** @type {!WebInspector.UISourceCode} */ (formattedUISourceCode), formatData.mapping);
+                this._showIfNeeded(uiSourceCode, /** @type {!WebInspector.UISourceCode} */ (formattedUISourceCode), formatData.mapping);
             return;
         }
 
@@ -368,8 +369,9 @@ WebInspector.ScriptFormatterEditorAction.prototype = {
         function innerCallback(formattedContent, formatterMapping)
         {
             var scripts = this._scriptsForUISourceCode(uiSourceCode);
-            var contentProvider = new WebInspector.StaticContentProvider(uiSourceCode.contentType(), formattedContent);
-            var formattedUISourceCode = this._project.addContentProvider(uiSourceCode.url() + ":formatted", contentProvider);
+            var formattedURL = uiSourceCode.url() + ":formatted";
+            var contentProvider = WebInspector.StaticContentProvider.fromString(formattedURL, uiSourceCode.contentType(), formattedContent);
+            var formattedUISourceCode = this._project.addContentProvider(formattedURL, contentProvider);
             var formattedPath = formattedUISourceCode.url();
             var formatData = new WebInspector.FormatterScriptMapping.FormatData(uiSourceCode.project().id(), uiSourceCode.url(), formatterMapping, scripts);
             this._formatData.set(formattedUISourceCode, formatData);

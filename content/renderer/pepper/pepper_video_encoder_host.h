@@ -71,7 +71,8 @@ class CONTENT_EXPORT PepperVideoEncoderHost
                                size_t output_buffer_size) override;
   void BitstreamBufferReady(int32_t bitstream_buffer_id,
                             size_t payload_size,
-                            bool key_frame) override;
+                            bool key_frame,
+                            base::TimeDelta timestamp) override;
   void NotifyError(media::VideoEncodeAccelerator::Error error) override;
 
   // ResourceHost implementation.
@@ -81,6 +82,7 @@ class CONTENT_EXPORT PepperVideoEncoderHost
 
   // GpuControlClient implementation.
   void OnGpuControlLostContext() final;
+  void OnGpuControlLostContextMaybeReentrant() final;
   void OnGpuControlErrorMessage(const char* msg, int id) final {}
 
   int32_t OnHostMsgGetSupportedProfiles(
@@ -136,7 +138,6 @@ class CONTENT_EXPORT PepperVideoEncoderHost
   // Buffer manager for shared memory that holds video frames.
   ppapi::MediaStreamBufferManager buffer_manager_;
 
-  scoped_refptr<gpu::GpuChannelHost> channel_;
   std::unique_ptr<gpu::CommandBufferProxyImpl> command_buffer_;
 
   std::unique_ptr<media::VideoEncodeAccelerator> encoder_;

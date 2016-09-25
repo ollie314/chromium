@@ -15,7 +15,7 @@
 
 namespace nacl {
 
-FileDownloader::FileDownloader(scoped_ptr<blink::WebURLLoader> url_loader,
+FileDownloader::FileDownloader(std::unique_ptr<blink::WebURLLoader> url_loader,
                                base::File file,
                                StatusCallback status_cb,
                                ProgressCallback progress_cb)
@@ -50,11 +50,11 @@ void FileDownloader::didReceiveResponse(
     progress_cb_.Run(total_bytes_received_, total_bytes_to_be_received_);
 }
 
-void FileDownloader::didReceiveData(
-    blink::WebURLLoader* loader,
-    const char* data,
-    int data_length,
-    int encoded_data_length) {
+void FileDownloader::didReceiveData(blink::WebURLLoader* loader,
+                                    const char* data,
+                                    int data_length,
+                                    int encoded_data_length,
+                                    int encoded_body_length) {
   if (status_ == SUCCESS) {
     if (file_.Write(total_bytes_received_, data, data_length) == -1) {
       status_ = FAILED;

@@ -6,15 +6,17 @@
 #define IOS_CHROME_BROWSER_SYNC_SYNC_SETUP_SERVICE_H_
 
 #include <map>
+#include <memory>
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "sync/internal_api/public/base/model_type.h"
-#include "sync/internal_api/public/util/syncer_error.h"
+#include "components/sync/base/model_type.h"
+#include "components/sync/base/syncer_error.h"
 
 namespace sync_driver {
 class SyncService;
+class SyncSetupInProgressHandle;
 }
 
 class PrefService;
@@ -41,6 +43,7 @@ class SyncSetupService : public KeyedService {
     kSyncPasswords,
     kSyncOpenTabs,
     kSyncAutofill,
+    kSyncPreferences,
     kNumberOfSyncableDatatypes
   } SyncableDatatype;
 
@@ -83,11 +86,11 @@ class SyncSetupService : public KeyedService {
   // Returns true if the user has gone through the initial sync configuration.
   // This method is guaranteed not to start the sync backend so it can be
   // called at start-up.
-  bool HasFinishedInitialSetup();
+  virtual bool HasFinishedInitialSetup();
 
   // Pauses sync allowing the user to configure what data to sync before
   // actually starting to sync data with the server.
-  void PrepareForFirstSyncSetup();
+  virtual void PrepareForFirstSyncSetup();
 
   // Commit the current state of the configuration to the sync backend.
   void CommitChanges();
@@ -104,6 +107,9 @@ class SyncSetupService : public KeyedService {
   sync_driver::SyncService* const sync_service_;
   PrefService* const prefs_;
   syncer::ModelTypeSet user_selectable_types_;
+
+  // Prevents Sync from running until configuration is complete.
+  std::unique_ptr<sync_driver::SyncSetupInProgressHandle> sync_blocker_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSetupService);
 };

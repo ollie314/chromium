@@ -263,7 +263,7 @@ Device.prototype.createSessionContents_ = function(maxNumTabs) {
         numTabsShown++;
         var a = createElementWithClassName('a', 'device-tab-entry');
         a.href = tab.url;
-        a.style.backgroundImage = getFaviconImageSet(tab.url);
+        a.style.backgroundImage = cr.icon.getFavicon(tab.url);
         this.addHighlightedText_(a, tab.title);
         // Add a tooltip, since it might be ellipsized. The ones that are not
         // necessary will be removed once added to the document, so we can
@@ -297,7 +297,9 @@ Device.prototype.createSessionContents_ = function(maxNumTabs) {
     moreLink.classList.add('device-show-more-tabs');
     moreLink.addEventListener('click', this.view_.increaseRowHeight.bind(
         this.view_, this.row_, numTabsHidden));
-    moreLink.textContent = loadTimeData.getStringF('xMore', numTabsHidden);
+    // TODO(jshin): Use plural message formatter when available in JS.
+    moreLink.textContent = loadTimeData.getStringF('xMore',
+        numTabsHidden.toLocaleString());
     var moreWrapper = createElementWithClassName('div', 'more-wrapper');
     moreWrapper.appendChild(moreLink);
     contents.appendChild(moreWrapper);

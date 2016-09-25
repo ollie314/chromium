@@ -12,7 +12,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_constants.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_test_util.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.h"
@@ -78,9 +78,7 @@ class SyncEngineInitializerTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
-  base::FilePath database_path() {
-    return database_dir_.path();
-  }
+  base::FilePath database_path() { return database_dir_.GetPath(); }
 
   SyncStatusCode RunInitializer() {
     SyncEngineInitializer* initializer =

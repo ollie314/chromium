@@ -7,17 +7,17 @@
 
 #include <list>
 #include <map>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string_piece.h"
 #include "net/http/http_response_headers.h"
-#include "net/quic/spdy_utils.h"
+#include "net/quic/core/spdy_utils.h"
 #include "net/spdy/spdy_framer.h"
 #include "url/gurl.h"
 
@@ -45,7 +45,7 @@ class QuicInMemoryCache {
   // comprising a response for the push request.
   struct ServerPushInfo {
     ServerPushInfo(GURL request_url,
-                   const SpdyHeaderBlock& headers,
+                   SpdyHeaderBlock headers,
                    SpdyPriority priority,
                    std::string body);
     ServerPushInfo(const ServerPushInfo& other);
@@ -75,8 +75,10 @@ class QuicInMemoryCache {
     void set_response_type(SpecialResponseType response_type) {
       response_type_ = response_type;
     }
-    void set_headers(const SpdyHeaderBlock& headers) { headers_ = headers; }
-    void set_trailers(const SpdyHeaderBlock& trailers) { trailers_ = trailers; }
+    void set_headers(SpdyHeaderBlock headers) { headers_ = std::move(headers); }
+    void set_trailers(SpdyHeaderBlock trailers) {
+      trailers_ = std::move(trailers);
+    }
     void set_body(base::StringPiece body) { body.CopyToString(&body_); }
 
    private:
@@ -108,7 +110,7 @@ class QuicInMemoryCache {
     base::StringPiece path() { return path_; }
     void set_path(base::StringPiece path) { path_ = path; }
 
-    SpdyHeaderBlock spdy_headers() { return spdy_headers_; }
+    const SpdyHeaderBlock& spdy_headers() { return spdy_headers_; }
 
     base::StringPiece body() { return body_; }
 
@@ -167,15 +169,15 @@ class QuicInMemoryCache {
   // Add a response to the cache.
   void AddResponse(base::StringPiece host,
                    base::StringPiece path,
-                   const SpdyHeaderBlock& response_headers,
+                   SpdyHeaderBlock response_headers,
                    base::StringPiece response_body);
 
   // Add a response, with trailers, to the cache.
   void AddResponse(base::StringPiece host,
                    base::StringPiece path,
-                   const SpdyHeaderBlock& response_headers,
+                   SpdyHeaderBlock response_headers,
                    base::StringPiece response_body,
-                   const SpdyHeaderBlock& response_trailers);
+                   SpdyHeaderBlock response_trailers);
 
   // Simulate a special behavior at a particular path.
   void AddSpecialResponse(base::StringPiece host,
@@ -206,9 +208,9 @@ class QuicInMemoryCache {
   void AddResponseImpl(base::StringPiece host,
                        base::StringPiece path,
                        SpecialResponseType response_type,
-                       const SpdyHeaderBlock& response_headers,
+                       SpdyHeaderBlock response_headers,
                        base::StringPiece response_body,
-                       const SpdyHeaderBlock& response_trailers);
+                       SpdyHeaderBlock response_trailers);
 
   std::string GetKey(base::StringPiece host, base::StringPiece path) const;
 
@@ -231,6 +233,10 @@ class QuicInMemoryCache {
 
   // A map from request URL to associated server push responses (if any).
   std::multimap<std::string, ServerPushInfo> server_push_resources_;
+
+  // Protects against concurrent access from test threads setting responses, and
+  // server threads accessing those responses.
+  mutable base::Lock response_mutex_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicInMemoryCache);
 };

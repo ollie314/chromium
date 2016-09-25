@@ -28,7 +28,6 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseCallback.h"
@@ -38,7 +37,7 @@
 
 namespace blink {
 
-Database* DOMWindowWebDatabase::openDatabase(DOMWindow& windowArg, const String& name, const String& version, const String& displayName, unsigned long estimatedSize, DatabaseCallback* creationCallback, ExceptionState& exceptionState)
+Database* DOMWindowWebDatabase::openDatabase(DOMWindow& windowArg, const String& name, const String& version, const String& displayName, unsigned estimatedSize, DatabaseCallback* creationCallback, ExceptionState& exceptionState)
 {
     LocalDOMWindow& window = toLocalDOMWindow(windowArg);
     if (!window.isCurrentlyDisplayedInFrame())

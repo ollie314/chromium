@@ -21,13 +21,13 @@
 #ifndef SVGFilterBuilder_h
 #define SVGFilterBuilder_h
 
+#include "core/style/SVGComputedStyleDefs.h"
 #include "platform/graphics/filters/FilterEffect.h"
 #include "platform/heap/Handle.h"
 #include "wtf/HashMap.h"
 #include "wtf/HashSet.h"
-#include "wtf/PassRefPtr.h"
+#include "wtf/text/AtomicString.h"
 #include "wtf/text/AtomicStringHash.h"
-#include "wtf/text/WTFString.h"
 
 class SkPaint;
 
@@ -39,7 +39,7 @@ class SVGFilterElement;
 
 // A map from LayoutObject -> FilterEffect and FilterEffect -> dependent (downstream) FilterEffects ("reverse DAG").
 // Used during invalidations from changes to the primitives (graph nodes).
-class SVGFilterGraphNodeMap final : public GarbageCollectedFinalized<SVGFilterGraphNodeMap> {
+class SVGFilterGraphNodeMap final : public GarbageCollected<SVGFilterGraphNodeMap> {
 public:
     static SVGFilterGraphNodeMap* create()
     {
@@ -66,7 +66,7 @@ public:
     DECLARE_TRACE();
 
 private:
-    SVGFilterGraphNodeMap() = default;
+    SVGFilterGraphNodeMap();
 
     // The value is a list, which contains those filter effects,
     // which depends on the key filter effect.
@@ -87,6 +87,8 @@ public:
 
     FilterEffect* getEffectById(const AtomicString& id) const;
     FilterEffect* lastEffect() const { return m_lastEffect.get(); }
+
+    static ColorSpace resolveColorSpace(EColorInterpolation);
 
 private:
     void add(const AtomicString& id, FilterEffect*);

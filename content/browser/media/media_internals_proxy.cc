@@ -6,28 +6,32 @@
 
 #include <stddef.h>
 
+#include <utility>
+
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/media/media_internals_handler.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_ui.h"
+#include "net/log/net_log_event_type.h"
 
 namespace content {
 
 static const int kMediaInternalsProxyEventDelayMilliseconds = 100;
 
-static const net::NetLog::EventType kNetEventTypeFilter[] = {
-  net::NetLog::TYPE_DISK_CACHE_ENTRY_IMPL,
-  net::NetLog::TYPE_SPARSE_READ,
-  net::NetLog::TYPE_SPARSE_WRITE,
-  net::NetLog::TYPE_URL_REQUEST_START_JOB,
-  net::NetLog::TYPE_HTTP_TRANSACTION_READ_RESPONSE_HEADERS,
+static const net::NetLogEventType kNetEventTypeFilter[] = {
+    net::NetLogEventType::DISK_CACHE_ENTRY_IMPL,
+    net::NetLogEventType::SPARSE_READ,
+    net::NetLogEventType::SPARSE_WRITE,
+    net::NetLogEventType::URL_REQUEST_START_JOB,
+    net::NetLogEventType::HTTP_TRANSACTION_READ_RESPONSE_HEADERS,
 };
 
 MediaInternalsProxy::MediaInternalsProxy() {
@@ -98,7 +102,7 @@ void MediaInternalsProxy::OnAddEntry(const net::NetLog::Entry& entry) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&MediaInternalsProxy::AddNetEventOnUIThread, this,
-                 entry.ToValue()));
+                 base::Passed(entry.ToValue())));
 }
 
 MediaInternalsProxy::~MediaInternalsProxy() {}
@@ -106,14 +110,14 @@ MediaInternalsProxy::~MediaInternalsProxy() {}
 base::Value* MediaInternalsProxy::GetConstants() {
   base::DictionaryValue* event_phases = new base::DictionaryValue();
   event_phases->SetInteger(
-      net::NetLog::EventPhaseToString(net::NetLog::PHASE_NONE),
-      net::NetLog::PHASE_NONE);
+      net::NetLog::EventPhaseToString(net::NetLogEventPhase::NONE),
+      static_cast<int>(net::NetLogEventPhase::NONE));
   event_phases->SetInteger(
-      net::NetLog::EventPhaseToString(net::NetLog::PHASE_BEGIN),
-      net::NetLog::PHASE_BEGIN);
+      net::NetLog::EventPhaseToString(net::NetLogEventPhase::BEGIN),
+      static_cast<int>(net::NetLogEventPhase::BEGIN));
   event_phases->SetInteger(
-      net::NetLog::EventPhaseToString(net::NetLog::PHASE_END),
-      net::NetLog::PHASE_END);
+      net::NetLog::EventPhaseToString(net::NetLogEventPhase::END),
+      static_cast<int>(net::NetLogEventPhase::END));
 
   base::DictionaryValue* constants = new base::DictionaryValue();
   constants->Set("eventTypes", net::NetLog::GetEventTypesAsValue());
@@ -153,7 +157,8 @@ void MediaInternalsProxy::UpdateUIOnUIThread(const base::string16& update) {
     handler_->OnUpdate(update);
 }
 
-void MediaInternalsProxy::AddNetEventOnUIThread(base::Value* entry) {
+void MediaInternalsProxy::AddNetEventOnUIThread(
+    std::unique_ptr<base::Value> entry) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Send the updates to the page in kMediaInternalsProxyEventDelayMilliseconds
@@ -166,7 +171,7 @@ void MediaInternalsProxy::AddNetEventOnUIThread(base::Value* entry) {
         base::TimeDelta::FromMilliseconds(
             kMediaInternalsProxyEventDelayMilliseconds));
   }
-  pending_net_updates_->Append(entry);
+  pending_net_updates_->Append(std::move(entry));
 }
 
 void MediaInternalsProxy::SendNetEventsOnUIThread() {

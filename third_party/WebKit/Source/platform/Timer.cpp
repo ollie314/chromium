@@ -40,16 +40,14 @@
 
 namespace blink {
 
-TimerBase::TimerBase() : TimerBase(Platform::current()->currentThread()->scheduler()->timerTaskRunner()) { }
-
 TimerBase::TimerBase(WebTaskRunner* webTaskRunner)
     : m_nextFireTime(0)
     , m_repeatInterval(0)
-    , m_cancellableTimerTask(nullptr)
-    , m_webTaskRunner(webTaskRunner)
+    , m_webTaskRunner(webTaskRunner->clone())
 #if DCHECK_IS_ON()
     , m_thread(currentThread())
 #endif
+    , m_weakPtrFactory(this)
 {
     ASSERT(m_webTaskRunner);
 }
@@ -74,9 +72,7 @@ void TimerBase::stop()
 
     m_repeatInterval = 0;
     m_nextFireTime = 0;
-    if (m_cancellableTimerTask)
-        m_cancellableTimerTask->cancel();
-    m_cancellableTimerTask = nullptr;
+    m_weakPtrFactory.revokeAll();
 }
 
 double TimerBase::nextFireInterval() const
@@ -88,9 +84,21 @@ double TimerBase::nextFireInterval() const
     return m_nextFireTime - current;
 }
 
+// static
+WebTaskRunner* TimerBase::getTimerTaskRunner()
+{
+    return Platform::current()->currentThread()->scheduler()->timerTaskRunner();
+}
+
+// static
+WebTaskRunner* TimerBase::getUnthrottledTaskRunner()
+{
+    return Platform::current()->currentThread()->getWebTaskRunner();
+}
+
 WebTaskRunner* TimerBase::timerTaskRunner() const
 {
-    return m_webTaskRunner;
+    return m_webTaskRunner.get();
 }
 
 void TimerBase::setNextFireTime(double now, double delay)
@@ -101,12 +109,12 @@ void TimerBase::setNextFireTime(double now, double delay)
 
     if (m_nextFireTime != newTime) {
         m_nextFireTime = newTime;
-        if (m_cancellableTimerTask)
-            m_cancellableTimerTask->cancel();
-        m_cancellableTimerTask = new CancellableTimerTask(this);
+
+        // Cancel any previously posted task.
+        m_weakPtrFactory.revokeAll();
 
         double delayMs = 1000.0 * (newTime - now);
-        timerTaskRunner()->postDelayedTask(m_location, m_cancellableTimerTask, delayMs);
+        timerTaskRunner()->postDelayedTask(m_location, base::Bind(&TimerBase::runInternal, m_weakPtrFactory.createWeakPtr()), delayMs);
     }
 }
 
@@ -116,9 +124,11 @@ void TimerBase::runInternal()
     if (!canFire())
         return;
 
+    m_weakPtrFactory.revokeAll();
+
     TRACE_EVENT0("blink", "TimerBase::run");
 #if DCHECK_IS_ON()
-    DCHECK_EQ(m_thread, currentThread()) << "Timer posted by " << m_location.functionName() << " " << m_location.fileName() << " was run on a different thread";
+    DCHECK_EQ(m_thread, currentThread()) << "Timer posted by " << m_location.function_name() << " " << m_location.file_name() << " was run on a different thread";
 #endif
     TRACE_EVENT_SET_SAMPLING_STATE("blink", "BlinkInternal");
 
@@ -143,11 +153,6 @@ bool TimerBase::Comparator::operator()(const TimerBase* a, const TimerBase* b) c
 }
 
 // static
-WebTaskRunner* TimerBase::UnthrottledWebTaskRunner()
-{
-    return Platform::current()->currentThread()->getWebTaskRunner();
-}
-
 double TimerBase::timerMonotonicallyIncreasingTime() const
 {
     return timerTaskRunner()->monotonicallyIncreasingVirtualTimeSeconds();

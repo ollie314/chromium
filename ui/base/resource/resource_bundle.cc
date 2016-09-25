@@ -17,7 +17,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
@@ -26,20 +25,21 @@
 #include "build/build_config.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/data_pack.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_features.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/safe_integer_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_source.h"
-#include "ui/gfx/screen.h"
 #include "ui/strings/grit/app_locale_settings.h"
 
 #if defined(OS_ANDROID)
@@ -53,10 +53,6 @@
 
 #if defined(OS_WIN)
 #include "ui/display/win/dpi.h"
-#endif
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-#include "base/mac/mac_util.h"
 #endif
 
 namespace ui {
@@ -107,6 +103,13 @@ base::FilePath GetResourcesPakFilePath(const std::string& pak_name) {
 #endif  // OS_WIN
 }
 
+SkBitmap CreateEmptyBitmap() {
+  SkBitmap bitmap;
+  bitmap.allocN32Pixels(32, 32);
+  bitmap.eraseARGB(255, 255, 255, 0);
+  return bitmap;
+}
+
 }  // namespace
 
 // An ImageSkiaSource that loads bitmaps for the requested scale factor from
@@ -129,8 +132,16 @@ class ResourceBundle::ResourceBundleImageSource : public gfx::ImageSkiaSource {
     ScaleFactor scale_factor = GetSupportedScaleFactor(scale);
     bool found = rb_->LoadBitmap(resource_id_, &scale_factor,
                                  &image, &fell_back_to_1x);
-    if (!found)
+    if (!found) {
+#if defined(OS_ANDROID)
+      // TODO(oshima): Android unit_tests runs at DSF=3 with 100P assets.
       return gfx::ImageSkiaRep();
+#else
+      NOTREACHED() << "Unable to load image with id " << resource_id_
+                   << ", scale=" << scale;
+      return gfx::ImageSkiaRep(CreateEmptyBitmap(), scale);
+#endif
+    }
 
     // If the resource is in the package with SCALE_FACTOR_NONE, it
     // can be used in any scale factor. The image is maked as "unscaled"
@@ -156,6 +167,29 @@ class ResourceBundle::ResourceBundleImageSource : public gfx::ImageSkiaSource {
   const int resource_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceBundleImageSource);
+};
+
+struct ResourceBundle::FontKey {
+  FontKey(int in_size_delta,
+          gfx::Font::FontStyle in_style,
+          gfx::Font::Weight in_weight)
+      : size_delta(in_size_delta), style(in_style), weight(in_weight) {}
+
+  ~FontKey() {}
+
+  bool operator==(const FontKey& rhs) const {
+    return std::tie(size_delta, style, weight) ==
+           std::tie(rhs.size_delta, rhs.style, rhs.weight);
+  }
+
+  bool operator<(const FontKey& rhs) const {
+    return std::tie(size_delta, style, weight) <
+           std::tie(rhs.size_delta, rhs.style, rhs.weight);
+  }
+
+  int size_delta;
+  gfx::Font::FontStyle style;
+  gfx::Font::Weight weight;
 };
 
 // static
@@ -221,24 +255,12 @@ bool ResourceBundle::LocaleDataPakExists(const std::string& locale) {
 
 void ResourceBundle::AddDataPackFromPath(const base::FilePath& path,
                                          ScaleFactor scale_factor) {
-  AddDataPackFromPathInternal(path, scale_factor, false, false);
+  AddDataPackFromPathInternal(path, scale_factor, false);
 }
 
 void ResourceBundle::AddOptionalDataPackFromPath(const base::FilePath& path,
-                                         ScaleFactor scale_factor) {
-  AddDataPackFromPathInternal(path, scale_factor, true, false);
-}
-
-void ResourceBundle::AddMaterialDesignDataPackFromPath(
-    const base::FilePath& path,
-    ScaleFactor scale_factor) {
-  AddDataPackFromPathInternal(path, scale_factor, false, true);
-}
-
-void ResourceBundle::AddOptionalMaterialDesignDataPackFromPath(
-    const base::FilePath& path,
-    ScaleFactor scale_factor) {
-  AddDataPackFromPathInternal(path, scale_factor, true, true);
+                                                 ScaleFactor scale_factor) {
+  AddDataPackFromPathInternal(path, scale_factor, true);
 }
 
 void ResourceBundle::AddDataPackFromFile(base::File file,
@@ -309,8 +331,6 @@ std::string ResourceBundle::LoadLocaleResources(
 
   std::unique_ptr<DataPack> data_pack(new DataPack(SCALE_FACTOR_100P));
   if (!data_pack->LoadFromPath(locale_file_path)) {
-    UMA_HISTOGRAM_ENUMERATION("ResourceBundle.LoadLocaleResourcesError",
-                              logging::GetLastSystemErrorCode(), 16000);
     LOG(ERROR) << "failed to load locale.pak";
     NOTREACHED();
     return std::string();
@@ -323,6 +343,7 @@ std::string ResourceBundle::LoadLocaleResources(
 
 void ResourceBundle::LoadTestResources(const base::FilePath& path,
                                        const base::FilePath& locale_path) {
+  is_test_resources_ = true;
   DCHECK(!ui::GetSupportedScaleFactors().empty());
   const ScaleFactor scale_factor(ui::GetSupportedScaleFactors()[0]);
   // Use the given resource pak for both common and localized resources.
@@ -336,6 +357,9 @@ void ResourceBundle::LoadTestResources(const base::FilePath& path,
   } else {
     locale_resources_data_.reset(new DataPack(ui::SCALE_FACTOR_NONE));
   }
+  // This is necessary to initialize ICU since we won't be calling
+  // LoadLocaleResources in this case.
+  l10n_util::GetApplicationLocale(std::string());
 }
 
 void ResourceBundle::UnloadLocaleResources() {
@@ -426,24 +450,23 @@ gfx::Image& ResourceBundle::GetImageNamed(int resource_id) {
   return images_[resource_id];
 }
 
-base::RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytes(
+base::RefCountedMemory* ResourceBundle::LoadDataResourceBytes(
     int resource_id) const {
   return LoadDataResourceBytesForScale(resource_id, ui::SCALE_FACTOR_NONE);
 }
 
-base::RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytesForScale(
+base::RefCountedMemory* ResourceBundle::LoadDataResourceBytesForScale(
     int resource_id,
     ScaleFactor scale_factor) const {
-  base::RefCountedStaticMemory* bytes = NULL;
+  base::RefCountedMemory* bytes = NULL;
   if (delegate_)
     bytes = delegate_->LoadDataResourceBytes(resource_id, scale_factor);
 
   if (!bytes) {
     base::StringPiece data =
         GetRawDataResourceForScale(resource_id, scale_factor);
-    if (!data.empty()) {
+    if (!data.empty())
       bytes = new base::RefCountedStaticMemory(data.data(), data.length());
-    }
   }
 
   return bytes;
@@ -533,19 +556,35 @@ base::string16 ResourceBundle::GetLocalizedString(int message_id) {
   return msg;
 }
 
+base::RefCountedMemory* ResourceBundle::LoadLocalizedResourceBytes(
+    int resource_id) {
+  {
+    base::AutoLock lock_scope(*locale_resources_data_lock_);
+    base::StringPiece data;
+    if (locale_resources_data_.get() &&
+        locale_resources_data_->GetStringPiece(
+            static_cast<uint16_t>(resource_id), &data) &&
+        !data.empty()) {
+      return new base::RefCountedStaticMemory(data.data(), data.length());
+    }
+  }
+  // Release lock_scope and fall back to main data pack.
+  return LoadDataResourceBytes(resource_id);
+}
+
 const gfx::FontList& ResourceBundle::GetFontListWithDelta(
     int size_delta,
-    gfx::Font::FontStyle style) {
+    gfx::Font::FontStyle style,
+    gfx::Font::Weight weight) {
   base::AutoLock lock_scope(*images_and_fonts_lock_);
 
-  typedef std::pair<int, gfx::Font::FontStyle> Key;
-  const Key styled_key(size_delta, style);
+  const FontKey styled_key(size_delta, style, weight);
 
   auto found = font_cache_.find(styled_key);
   if (found != font_cache_.end())
     return found->second;
 
-  const Key base_key(0, gfx::Font::NORMAL);
+  const FontKey base_key(0, gfx::Font::NORMAL, gfx::Font::Weight::NORMAL);
   gfx::FontList& base = font_cache_[base_key];
   if (styled_key == base_key)
     return base;
@@ -554,7 +593,8 @@ const gfx::FontList& ResourceBundle::GetFontListWithDelta(
   // Cache the unstyled font by first inserting a default-constructed font list.
   // Then, derive it for the initial insertion, or use the iterator that points
   // to the existing entry that the insertion collided with.
-  const Key sized_key(size_delta, gfx::Font::NORMAL);
+  const FontKey sized_key(size_delta, gfx::Font::NORMAL,
+                          gfx::Font::Weight::NORMAL);
   auto sized = font_cache_.insert(std::make_pair(sized_key, gfx::FontList()));
   if (sized.second)
     sized.first->second = base.DeriveWithSizeDelta(size_delta);
@@ -563,26 +603,26 @@ const gfx::FontList& ResourceBundle::GetFontListWithDelta(
 
   auto styled = font_cache_.insert(std::make_pair(styled_key, gfx::FontList()));
   DCHECK(styled.second);  // Otherwise font_cache_.find(..) would have found it.
-  styled.first->second = sized.first->second.DeriveWithStyle(
-      sized.first->second.GetFontStyle() | style);
+  styled.first->second = sized.first->second.Derive(
+      0, sized.first->second.GetFontStyle() | style, weight);
+
   return styled.first->second;
 }
 
 const gfx::Font& ResourceBundle::GetFontWithDelta(int size_delta,
-                                                  gfx::Font::FontStyle style) {
-  return GetFontListWithDelta(size_delta, style).GetPrimaryFont();
+                                                  gfx::Font::FontStyle style,
+                                                  gfx::Font::Weight weight) {
+  return GetFontListWithDelta(size_delta, style, weight).GetPrimaryFont();
 }
 
 const gfx::FontList& ResourceBundle::GetFontList(FontStyle legacy_style) {
-  gfx::Font::FontStyle font_style = gfx::Font::NORMAL;
-  if (legacy_style == BoldFont || legacy_style == SmallBoldFont ||
-      legacy_style == MediumBoldFont || legacy_style == LargeBoldFont)
-    font_style = gfx::Font::BOLD;
+  gfx::Font::Weight font_weight = gfx::Font::Weight::NORMAL;
+  if (legacy_style == BoldFont || legacy_style == MediumBoldFont)
+    font_weight = gfx::Font::Weight::BOLD;
 
   int size_delta = 0;
   switch (legacy_style) {
     case SmallFont:
-    case SmallBoldFont:
       size_delta = kSmallFontDelta;
       break;
     case MediumFont:
@@ -590,7 +630,6 @@ const gfx::FontList& ResourceBundle::GetFontList(FontStyle legacy_style) {
       size_delta = kMediumFontDelta;
       break;
     case LargeFont:
-    case LargeBoldFont:
       size_delta = kLargeFontDelta;
       break;
     case BaseFont:
@@ -598,7 +637,7 @@ const gfx::FontList& ResourceBundle::GetFontList(FontStyle legacy_style) {
       break;
   }
 
-  return GetFontListWithDelta(size_delta, font_style);
+  return GetFontListWithDelta(size_delta, gfx::Font::NORMAL, font_weight);
 }
 
 const gfx::Font& ResourceBundle::GetFont(FontStyle style) {
@@ -651,8 +690,8 @@ void ResourceBundle::InitSharedInstance(Delegate* delegate) {
 #endif
 #if defined(OS_ANDROID)
   float display_density;
-  if (gfx::Display::HasForceDeviceScaleFactor()) {
-    display_density = gfx::Display::GetForcedDeviceScaleFactor();
+  if (display::Display::HasForceDeviceScaleFactor()) {
+    display_density = display::Display::GetForcedDeviceScaleFactor();
   } else {
     gfx::DeviceDisplayInfo device_info;
     display_density = device_info.GetDIPScale();
@@ -661,7 +700,7 @@ void ResourceBundle::InitSharedInstance(Delegate* delegate) {
   if (closest != SCALE_FACTOR_100P)
     supported_scale_factors.push_back(closest);
 #elif defined(OS_IOS)
-  gfx::Display display = gfx::Screen::GetScreen()->GetPrimaryDisplay();
+  display::Display display = display::Screen::GetScreen()->GetPrimaryDisplay();
   if (display.device_scale_factor() > 2.0) {
     DCHECK_EQ(3.0, display.device_scale_factor());
     supported_scale_factors.push_back(SCALE_FACTOR_300P);
@@ -671,10 +710,8 @@ void ResourceBundle::InitSharedInstance(Delegate* delegate) {
   } else {
     supported_scale_factors.push_back(SCALE_FACTOR_100P);
   }
-#elif defined(OS_MACOSX)
-  if (base::mac::IsOSLionOrLater())
-    supported_scale_factors.push_back(SCALE_FACTOR_200P);
-#elif defined(OS_CHROMEOS) || defined(OS_LINUX) || defined(OS_WIN)
+#elif defined(OS_MACOSX) || defined(OS_CHROMEOS) || defined(OS_LINUX) || \
+    defined(OS_WIN)
   supported_scale_factors.push_back(SCALE_FACTOR_200P);
 #endif
   ui::SetSupportedScaleFactors(supported_scale_factors);
@@ -685,24 +722,6 @@ void ResourceBundle::FreeImages() {
 }
 
 void ResourceBundle::LoadChromeResources() {
-  // The material design data packs contain some of the same asset IDs as in
-  // the non-material design data packs. Add these to the ResourceBundle
-  // first so that they are searched first when a request for an asset is
-  // made.
-  if (MaterialDesignController::IsModeMaterial()) {
-    if (IsScaleFactorSupported(SCALE_FACTOR_100P)) {
-      AddMaterialDesignDataPackFromPath(
-          GetResourcesPakFilePath("chrome_material_100_percent.pak"),
-          SCALE_FACTOR_100P);
-    }
-
-    if (IsScaleFactorSupported(SCALE_FACTOR_200P)) {
-      AddOptionalMaterialDesignDataPackFromPath(
-          GetResourcesPakFilePath("chrome_material_200_percent.pak"),
-          SCALE_FACTOR_200P);
-    }
-  }
-
   // Always load the 1x data pack first as the 2x data pack contains both 1x and
   // 2x images. The 1x data pack only has 1x images, thus passes in an accurate
   // scale factor to gfx::ImageSkia::AddRepresentation.
@@ -720,8 +739,7 @@ void ResourceBundle::LoadChromeResources() {
 void ResourceBundle::AddDataPackFromPathInternal(
     const base::FilePath& path,
     ScaleFactor scale_factor,
-    bool optional,
-    bool has_only_material_assets) {
+    bool optional) {
   // Do not pass an empty |path| value to this method. If the absolute path is
   // unknown pass just the pack file name.
   DCHECK(!path.empty());
@@ -735,7 +753,6 @@ void ResourceBundle::AddDataPackFromPathInternal(
     return;
 
   std::unique_ptr<DataPack> data_pack(new DataPack(scale_factor));
-  data_pack->set_has_only_material_design_assets(has_only_material_assets);
   if (data_pack->LoadFromPath(pack_path)) {
     AddDataPack(data_pack.release());
   } else if (!optional) {
@@ -805,6 +822,7 @@ bool ResourceBundle::LoadBitmap(int resource_id,
                                 SkBitmap* bitmap,
                                 bool* fell_back_to_1x) const {
   DCHECK(fell_back_to_1x);
+  ResourceHandle* data_handle_100_percent = nullptr;
   for (size_t i = 0; i < data_packs_.size(); ++i) {
     if (data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_NONE &&
         LoadBitmap(*data_packs_[i], resource_id, bitmap, fell_back_to_1x)) {
@@ -812,11 +830,25 @@ bool ResourceBundle::LoadBitmap(int resource_id,
       *scale_factor = ui::SCALE_FACTOR_NONE;
       return true;
     }
+    if (data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_100P)
+      data_handle_100_percent = data_packs_[i];
+
     if (data_packs_[i]->GetScaleFactor() == *scale_factor &&
         LoadBitmap(*data_packs_[i], resource_id, bitmap, fell_back_to_1x)) {
       return true;
     }
   }
+
+  // Unit tests may only have 1x data pack. Allow them to fallback to 1x
+  // resources.
+  if (*scale_factor != ui::SCALE_FACTOR_100P && is_test_resources_ &&
+      data_handle_100_percent &&
+      LoadBitmap(*data_handle_100_percent, resource_id, bitmap,
+                 fell_back_to_1x)) {
+    *fell_back_to_1x = true;
+    return true;
+  }
+
   return false;
 }
 
@@ -825,9 +857,7 @@ gfx::Image& ResourceBundle::GetEmptyImage() {
 
   if (empty_image_.IsEmpty()) {
     // The placeholder bitmap is bright red so people notice the problem.
-    SkBitmap bitmap;
-    bitmap.allocN32Pixels(32, 32);
-    bitmap.eraseARGB(255, 255, 0, 0);
+    SkBitmap bitmap = CreateEmptyBitmap();
     empty_image_ = gfx::Image::CreateFrom1xBitmap(bitmap);
   }
   return empty_image_;

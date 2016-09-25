@@ -37,13 +37,12 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "wtf/Forward.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/AtomicString.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
@@ -77,11 +76,11 @@ public:
 
     // These exact numeric values are important because JS expects them.
     enum State {
-        UNSENT = 0,
-        OPENED = 1,
-        HEADERS_RECEIVED = 2,
-        LOADING = 3,
-        DONE = 4
+        kUnsent = 0,
+        kOpened = 1,
+        kHeadersReceived = 2,
+        kLoading = 3,
+        kDone = 4
     };
 
     enum ResponseTypeCode {
@@ -101,7 +100,7 @@ public:
     void resume() override;
     void stop() override;
 
-    // ActiveScriptWrappable
+    // ScriptWrappable
     bool hasPendingActivity() const final;
 
     // XMLHttpRequestEventTarget
@@ -148,6 +147,7 @@ public:
     // progress event throttle.
     EAGERLY_FINALIZE();
     DECLARE_VIRTUAL_TRACE();
+    DECLARE_TRACE_WRAPPERS();
 
 private:
     class BlobLoader;
@@ -157,7 +157,7 @@ private:
     SecurityOrigin* getSecurityOrigin() const;
 
     void didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent) override;
-    void didReceiveResponse(unsigned long identifier, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
+    void didReceiveResponse(unsigned long identifier, const ResourceResponse&, std::unique_ptr<WebDataConsumerHandle>) override;
     void didReceiveData(const char* data, unsigned dataLength) override;
     // When responseType is set to "blob", didDownloadData() is called instead
     // of didReceiveData().
@@ -193,7 +193,7 @@ private:
     bool responseIsXML() const;
     bool responseIsHTML() const;
 
-    PassOwnPtr<TextResourceDecoder> createDecoder() const;
+    std::unique_ptr<TextResourceDecoder> createDecoder() const;
 
     void initResponseDocument();
     void parseDocumentChunk(const char* data, unsigned dataLength);
@@ -223,10 +223,6 @@ private:
     // Clears variables used only while the resource is being loaded.
     void clearVariablesForLoading();
     // Returns false iff reentry happened and a new load is started.
-    //
-    // This method may invoke V8 GC with m_loader unset. If you touch the
-    // XMLHttpRequest instance after internalAbort() call, you must hold a
-    // refcount on it to prevent it from destroyed.
     bool internalAbort();
     // Clears variables holding response header and body data.
     void clearResponse();
@@ -265,13 +261,13 @@ private:
     Member<Blob> m_responseBlob;
     Member<Stream> m_responseLegacyStream;
 
-    OwnPtr<ThreadableLoader> m_loader;
+    Member<ThreadableLoader> m_loader;
     State m_state;
 
     ResourceResponse m_response;
     String m_finalResponseCharset;
 
-    OwnPtr<TextResourceDecoder> m_decoder;
+    std::unique_ptr<TextResourceDecoder> m_decoder;
 
     ScriptString m_responseText;
     Member<Document> m_responseDocument;
@@ -319,6 +315,8 @@ private:
     bool m_downloadingToFile;
     bool m_responseTextOverflow;
 };
+
+std::ostream& operator<<(std::ostream&, const XMLHttpRequest*);
 
 } // namespace blink
 

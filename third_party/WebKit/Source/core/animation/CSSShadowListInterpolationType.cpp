@@ -11,6 +11,8 @@
 #include "core/css/resolver/StyleBuilder.h"
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/style/ShadowList.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -34,16 +36,16 @@ InterpolationValue CSSShadowListInterpolationType::maybeConvertNeutral(const Int
     return createNeutralValue();
 }
 
-InterpolationValue CSSShadowListInterpolationType::maybeConvertInitial(const StyleResolverState&) const
+InterpolationValue CSSShadowListInterpolationType::maybeConvertInitial(const StyleResolverState&, ConversionCheckers&) const
 {
     return convertShadowList(ShadowListPropertyFunctions::getInitialShadowList(cssProperty()), 1);
 }
 
 class ParentShadowListChecker : public InterpolationType::ConversionChecker {
 public:
-    static PassOwnPtr<ParentShadowListChecker> create(CSSPropertyID property, PassRefPtr<ShadowList> shadowList)
+    static std::unique_ptr<ParentShadowListChecker> create(CSSPropertyID property, PassRefPtr<ShadowList> shadowList)
     {
-        return adoptPtr(new ParentShadowListChecker(property, shadowList));
+        return wrapUnique(new ParentShadowListChecker(property, std::move(shadowList)));
     }
 
 private:
@@ -85,13 +87,13 @@ InterpolationValue CSSShadowListInterpolationType::maybeConvertValue(const CSSVa
 
     const CSSValueList& valueList = toCSSValueList(value);
     return ListInterpolationFunctions::createList(valueList.length(), [&valueList](size_t index) {
-        return ShadowInterpolationFunctions::maybeConvertCSSValue(*valueList.item(index));
+        return ShadowInterpolationFunctions::maybeConvertCSSValue(valueList.item(index));
     });
 }
 
-PairwiseInterpolationValue CSSShadowListInterpolationType::mergeSingleConversions(InterpolationValue&& start, InterpolationValue&& end) const
+PairwiseInterpolationValue CSSShadowListInterpolationType::maybeMergeSingles(InterpolationValue&& start, InterpolationValue&& end) const
 {
-    return ListInterpolationFunctions::mergeSingleConversions(std::move(start), std::move(end), ShadowInterpolationFunctions::mergeSingleConversions);
+    return ListInterpolationFunctions::maybeMergeSingles(std::move(start), std::move(end), ShadowInterpolationFunctions::maybeMergeSingles);
 }
 
 InterpolationValue CSSShadowListInterpolationType::maybeConvertUnderlyingValue(const InterpolationEnvironment& environment) const

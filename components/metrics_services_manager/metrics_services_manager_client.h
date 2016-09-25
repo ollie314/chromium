@@ -5,8 +5,10 @@
 #ifndef COMPONENTS_METRICS_SERVICES_MANAGER_METRICS_SERVICES_MANAGER_CLIENT_H_
 #define COMPONENTS_METRICS_SERVICES_MANAGER_METRICS_SERVICES_MANAGER_CLIENT_H_
 
+#include <memory>
+
 #include "base/callback_forward.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/metrics/field_trial.h"
 
 namespace metrics {
 class MetricsServiceClient;
@@ -33,11 +35,13 @@ class MetricsServicesManagerClient {
   virtual ~MetricsServicesManagerClient() {}
 
   // Methods that create the various services in the context of the embedder.
-  virtual scoped_ptr<rappor::RapporService> CreateRapporService() = 0;
-  virtual scoped_ptr<variations::VariationsService>
+  virtual std::unique_ptr<rappor::RapporService> CreateRapporService() = 0;
+  virtual std::unique_ptr<variations::VariationsService>
   CreateVariationsService() = 0;
-  virtual scoped_ptr<metrics::MetricsServiceClient>
+  virtual std::unique_ptr<metrics::MetricsServiceClient>
   CreateMetricsServiceClient() = 0;
+  virtual std::unique_ptr<const base::FieldTrial::EntropyProvider>
+  CreateEntropyProvider() = 0;
 
   // Returns the URL request context in which the metrics services should
   // operate.
@@ -56,6 +60,10 @@ class MetricsServicesManagerClient {
 
   // Whether the metrics services should record but not report metrics.
   virtual bool OnlyDoMetricsRecording() = 0;
+
+  // Update the running state of metrics services managed by the embedder, for
+  // example, crash reporting.
+  virtual void UpdateRunningServices(bool may_record, bool may_upload) {}
 };
 
 }  // namespace metrics_services_manager

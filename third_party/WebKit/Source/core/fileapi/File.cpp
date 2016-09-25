@@ -28,6 +28,7 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/fileapi/FilePropertyBag.h"
+#include "core/frame/UseCounter.h"
 #include "platform/FileMetadata.h"
 #include "platform/MIMETypeRegistry.h"
 #include "platform/blob/BlobData.h"
@@ -35,6 +36,7 @@
 #include "public/platform/WebFileUtilities.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/DateMath.h"
+#include <memory>
 
 namespace blink {
 
@@ -53,42 +55,42 @@ static String getContentTypeFromFileName(const String& name, File::ContentTypeLo
     return type;
 }
 
-static PassOwnPtr<BlobData> createBlobDataForFileWithType(const String& path, const String& contentType)
+static std::unique_ptr<BlobData> createBlobDataForFileWithType(const String& path, const String& contentType)
 {
-    OwnPtr<BlobData> blobData = BlobData::create();
+    std::unique_ptr<BlobData> blobData = BlobData::create();
     blobData->setContentType(contentType);
     blobData->appendFile(path);
-    return blobData.release();
+    return blobData;
 }
 
-static PassOwnPtr<BlobData> createBlobDataForFile(const String& path, File::ContentTypeLookupPolicy policy)
+static std::unique_ptr<BlobData> createBlobDataForFile(const String& path, File::ContentTypeLookupPolicy policy)
 {
     return createBlobDataForFileWithType(path, getContentTypeFromFileName(path, policy));
 }
 
-static PassOwnPtr<BlobData> createBlobDataForFileWithName(const String& path, const String& fileSystemName, File::ContentTypeLookupPolicy policy)
+static std::unique_ptr<BlobData> createBlobDataForFileWithName(const String& path, const String& fileSystemName, File::ContentTypeLookupPolicy policy)
 {
     return createBlobDataForFileWithType(path, getContentTypeFromFileName(fileSystemName, policy));
 }
 
-static PassOwnPtr<BlobData> createBlobDataForFileWithMetadata(const String& fileSystemName, const FileMetadata& metadata)
+static std::unique_ptr<BlobData> createBlobDataForFileWithMetadata(const String& fileSystemName, const FileMetadata& metadata)
 {
-    OwnPtr<BlobData> blobData = BlobData::create();
+    std::unique_ptr<BlobData> blobData = BlobData::create();
     blobData->setContentType(getContentTypeFromFileName(fileSystemName, File::WellKnownContentTypes));
     blobData->appendFile(metadata.platformPath, 0, metadata.length, metadata.modificationTime / msPerSecond);
-    return blobData.release();
+    return blobData;
 }
 
-static PassOwnPtr<BlobData> createBlobDataForFileSystemURL(const KURL& fileSystemURL, const FileMetadata& metadata)
+static std::unique_ptr<BlobData> createBlobDataForFileSystemURL(const KURL& fileSystemURL, const FileMetadata& metadata)
 {
-    OwnPtr<BlobData> blobData = BlobData::create();
+    std::unique_ptr<BlobData> blobData = BlobData::create();
     blobData->setContentType(getContentTypeFromFileName(fileSystemURL.path(), File::WellKnownContentTypes));
     blobData->appendFileSystemURL(fileSystemURL, 0, metadata.length, metadata.modificationTime / msPerSecond);
-    return blobData.release();
+    return blobData;
 }
 
 // static
-File* File::create(const HeapVector<BlobOrStringOrArrayBufferViewOrArrayBuffer>& fileBits, const String& fileName, const FilePropertyBag& options, ExceptionState& exceptionState)
+File* File::create(ExecutionContext* context, const HeapVector<ArrayBufferOrArrayBufferViewOrBlobOrUSVString>& fileBits, const String& fileName, const FilePropertyBag& options, ExceptionState& exceptionState)
 {
     ASSERT(options.hasType());
     if (!options.type().containsOnlyASCII()) {
@@ -103,13 +105,15 @@ File* File::create(const HeapVector<BlobOrStringOrArrayBufferViewOrArrayBuffer>&
         lastModified = currentTimeMS();
     ASSERT(options.hasEndings());
     bool normalizeLineEndingsToNative = options.endings() == "native";
+    if (normalizeLineEndingsToNative)
+        UseCounter::count(context, UseCounter::FileAPINativeLineEndings);
 
-    OwnPtr<BlobData> blobData = BlobData::create();
+    std::unique_ptr<BlobData> blobData = BlobData::create();
     blobData->setContentType(options.type().lower());
     populateBlobData(blobData.get(), fileBits, normalizeLineEndingsToNative);
 
     long long fileSize = blobData->length();
-    return File::create(fileName, lastModified, BlobDataHandle::create(blobData.release(), fileSize));
+    return File::create(fileName, lastModified, BlobDataHandle::create(std::move(blobData), fileSize));
 }
 
 File* File::createWithRelativePath(const String& path, const String& relativePath)
@@ -141,20 +145,20 @@ File::File(const String& path, const String& name, ContentTypeLookupPolicy polic
 {
 }
 
-File::File(const String& path, const String& name, const String& relativePath, UserVisibility userVisibility, bool hasSnaphotData, uint64_t size, double lastModified, PassRefPtr<BlobDataHandle> blobDataHandle)
-    : Blob(blobDataHandle)
+File::File(const String& path, const String& name, const String& relativePath, UserVisibility userVisibility, bool hasSnapshotData, uint64_t size, double lastModified, PassRefPtr<BlobDataHandle> blobDataHandle)
+    : Blob(std::move(blobDataHandle))
     , m_hasBackingFile(!path.isEmpty() || !relativePath.isEmpty())
     , m_userVisibility(userVisibility)
     , m_path(path)
     , m_name(name)
-    , m_snapshotSize(hasSnaphotData ? static_cast<long long>(size) : -1)
-    , m_snapshotModificationTimeMS(hasSnaphotData ? lastModified : invalidFileTime())
+    , m_snapshotSize(hasSnapshotData ? static_cast<long long>(size) : -1)
+    , m_snapshotModificationTimeMS(hasSnapshotData ? lastModified : invalidFileTime())
     , m_relativePath(relativePath)
 {
 }
 
 File::File(const String& name, double modificationTimeMS, PassRefPtr<BlobDataHandle> blobDataHandle)
-    : Blob(blobDataHandle)
+    : Blob(std::move(blobDataHandle))
     , m_hasBackingFile(false)
     , m_userVisibility(File::IsNotUserVisible)
     , m_name(name)
@@ -259,7 +263,7 @@ unsigned long long File::size() const
 
 Blob* File::slice(long long start, long long end, const String& contentType, ExceptionState& exceptionState) const
 {
-    if (hasBeenClosed()) {
+    if (isClosed()) {
         exceptionState.throwDOMException(InvalidStateError, "File has been closed.");
         return nullptr;
     }
@@ -274,7 +278,7 @@ Blob* File::slice(long long start, long long end, const String& contentType, Exc
     clampSliceOffsets(size, start, end);
 
     long long length = end - start;
-    OwnPtr<BlobData> blobData = BlobData::create();
+    std::unique_ptr<BlobData> blobData = BlobData::create();
     blobData->setContentType(contentType);
     if (!m_fileSystemURL.isEmpty()) {
         blobData->appendFileSystemURL(m_fileSystemURL, start, length, modificationTimeMS / msPerSecond);
@@ -282,7 +286,7 @@ Blob* File::slice(long long start, long long end, const String& contentType, Exc
         ASSERT(!m_path.isEmpty());
         blobData->appendFile(m_path, start, length, modificationTimeMS / msPerSecond);
     }
-    return Blob::create(BlobDataHandle::create(blobData.release(), length));
+    return Blob::create(BlobDataHandle::create(std::move(blobData), length));
 }
 
 void File::captureSnapshot(long long& snapshotSize, double& snapshotModificationTimeMS) const
@@ -308,7 +312,7 @@ void File::captureSnapshot(long long& snapshotSize, double& snapshotModification
 
 void File::close(ExecutionContext* executionContext, ExceptionState& exceptionState)
 {
-    if (hasBeenClosed()) {
+    if (isClosed()) {
         exceptionState.throwDOMException(InvalidStateError, "Blob has been closed.");
         return;
     }

@@ -5,14 +5,14 @@
 #ifndef COMPONENTS_GUEST_VIEW_BROWSER_GUEST_VIEW_BASE_H_
 #define COMPONENTS_GUEST_VIEW_BROWSER_GUEST_VIEW_BASE_H_
 
+#include <memory>
 #include <queue>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "components/guest_view/common/guest_view_constants.h"
-#include "components/ui/zoom/zoom_observer.h"
+#include "components/zoom/zoom_observer.h"
 #include "content/public/browser/browser_plugin_guest_delegate.h"
 #include "content/public/browser/guest_host.h"
 #include "content/public/browser/render_process_host_observer.h"
@@ -36,10 +36,10 @@ struct SetSizeParams {
   SetSizeParams();
   ~SetSizeParams();
 
-  scoped_ptr<bool> enable_auto_size;
-  scoped_ptr<gfx::Size> min_size;
-  scoped_ptr<gfx::Size> max_size;
-  scoped_ptr<gfx::Size> normal_size;
+  std::unique_ptr<bool> enable_auto_size;
+  std::unique_ptr<gfx::Size> min_size;
+  std::unique_ptr<gfx::Size> max_size;
+  std::unique_ptr<gfx::Size> normal_size;
 };
 
 // A GuestViewBase is the base class browser-side API implementation for a
@@ -51,7 +51,7 @@ struct SetSizeParams {
 class GuestViewBase : public content::BrowserPluginGuestDelegate,
                       public content::WebContentsDelegate,
                       public content::WebContentsObserver,
-                      public ui_zoom::ZoomObserver {
+                      public zoom::ZoomObserver {
  public:
   // Returns a *ViewGuest if this GuestView is of the given view type.
   template <typename T>
@@ -113,10 +113,10 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   virtual int GetTaskPrefix() const = 0;
 
   // Dispatches an event to the guest proxy.
-  void DispatchEventToGuestProxy(scoped_ptr<GuestViewEvent> event);
+  void DispatchEventToGuestProxy(std::unique_ptr<GuestViewEvent> event);
 
   // Dispatches an event to the view.
-  void DispatchEventToView(scoped_ptr<GuestViewEvent> event);
+  void DispatchEventToView(std::unique_ptr<GuestViewEvent> event);
 
   // This creates a WebContents and initializes |this| GuestViewBase to use the
   // newly created WebContents.
@@ -364,7 +364,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
       const std::vector<content::ColorSuggestion>& suggestions) final;
   void ResizeDueToAutoResize(content::WebContents* web_contents,
                              const gfx::Size& new_size) final;
-  void RunFileChooser(content::WebContents* web_contents,
+  void RunFileChooser(content::RenderFrameHost* render_frame_host,
                       const content::FileChooserParams& params) final;
   bool ShouldFocusPageAfterCrash() final;
   void UpdatePreferredSize(content::WebContents* web_contents,
@@ -379,11 +379,11 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // ui_zoom::ZoomObserver implementation.
   void OnZoomChanged(
-      const ui_zoom::ZoomController::ZoomChangedEventData& data) final;
+      const zoom::ZoomController::ZoomChangedEventData& data) final;
 
   void SendQueuedEvents();
 
-  void CompleteInit(scoped_ptr<base::DictionaryValue> create_params,
+  void CompleteInit(std::unique_ptr<base::DictionaryValue> create_params,
                     const WebContentsCreatedCallback& callback,
                     content::WebContents* guest_web_contents);
 
@@ -432,7 +432,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // This is a queue of Events that are destined to be sent to the embedder once
   // the guest is attached to a particular embedder.
-  std::deque<scoped_ptr<GuestViewEvent>> pending_events_;
+  std::deque<std::unique_ptr<GuestViewEvent>> pending_events_;
 
   // The opener guest view.
   base::WeakPtr<GuestViewBase> opener_;
@@ -441,15 +441,15 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // are passed in from JavaScript. This will typically be the view instance ID,
   // and element-specific parameters. These parameters are passed along to new
   // guests that are created from this guest.
-  scoped_ptr<base::DictionaryValue> attach_params_;
+  std::unique_ptr<base::DictionaryValue> attach_params_;
 
   // This observer ensures that this guest self-destructs if the embedder goes
   // away.
-  scoped_ptr<OwnerContentsObserver> owner_contents_observer_;
+  std::unique_ptr<OwnerContentsObserver> owner_contents_observer_;
 
   // This observer ensures that if the guest is unattached and its opener goes
   // away then this guest also self-destructs.
-  scoped_ptr<OpenerLifetimeObserver> opener_lifetime_observer_;
+  std::unique_ptr<OpenerLifetimeObserver> opener_lifetime_observer_;
 
   // The size of the guest content. Note: In autosize mode, the container
   // element may not match the size of the guest.

@@ -38,6 +38,7 @@
 #include "public/platform/WebRect.h"
 #include "public/platform/WebScreenInfo.h"
 #include "public/web/WebMeaningfulLayout.h"
+#include "public/web/WebTextDirection.h"
 #include "public/web/WebTouchAction.h"
 
 namespace blink {
@@ -56,9 +57,6 @@ class WebWidgetClient {
 public:
     // Called when a region of the WebWidget needs to be re-painted.
     virtual void didInvalidateRect(const WebRect&) { }
-
-    // Called when the Widget has changed size as a result of an auto-resize.
-    virtual void didAutoResize(const WebSize& newSize) { }
 
     // Attempt to initialize compositing for this widget. If this is successful,
     // layerTreeView() will return a valid WebLayerTreeView.
@@ -79,10 +77,6 @@ public:
 
     virtual void didFirstLayoutAfterFinishedParsing() { }
 
-    // Called when the widget acquires or loses focus, respectively.
-    virtual void didFocus() { }
-    virtual void didBlur() { }
-
     // Called when the cursor for the widget changes.
     virtual void didChangeCursor(const WebCursorInfo&) { }
 
@@ -102,10 +96,6 @@ public:
 
     // Called to get the position of the resizer rect in window coordinates.
     virtual WebRect windowResizerRect() { return WebRect(); }
-
-    // Called to get the position of the root window containing the widget
-    // in screen coordinates.
-    virtual WebRect rootWindowRect() { return WebRect(); }
 
     // Called to query information about the screen where this widget is
     // displayed.
@@ -169,11 +159,6 @@ public:
     // something as a result of a tap without explicitly consuming the event.
     virtual void showUnhandledTapUIIfNeeded(const WebPoint& tappedPosition,
         const WebNode& tappedNode, bool pageChanged) { }
-
-    // Called immediately after a mousedown event is dispatched due to a mouse
-    // press or gesture tap.
-    // Note: This is called even when the mouse down event is prevent default.
-    virtual void onMouseDown(const WebNode& mouseDownNode) { }
 
     // Converts the |rect| from Blink's Viewport coordinates to the
     // coordinates in the native window used to display the content, in

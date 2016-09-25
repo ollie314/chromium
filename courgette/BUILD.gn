@@ -25,6 +25,8 @@ static_library("courgette_lib") {
     "disassembler_elf_32_arm.h",
     "disassembler_elf_32_x86.cc",
     "disassembler_elf_32_x86.h",
+    "disassembler_win32.cc",
+    "disassembler_win32.h",
     "disassembler_win32_x64.cc",
     "disassembler_win32_x64.h",
     "disassembler_win32_x86.cc",
@@ -45,17 +47,26 @@ static_library("courgette_lib") {
     "program_detector.cc",
     "program_detector.h",
     "region.h",
-    "rel32_finder_win32_x86.cc",
-    "rel32_finder_win32_x86.h",
+    "rel32_finder.cc",
+    "rel32_finder.h",
+    "rel32_finder_x64.cc",
+    "rel32_finder_x64.h",
+    "rel32_finder_x86.cc",
+    "rel32_finder_x86.h",
     "simple_delta.cc",
     "simple_delta.h",
     "streams.cc",
     "streams.h",
-    "third_party/bsdiff.h",
-    "third_party/bsdiff_apply.cc",
-    "third_party/bsdiff_create.cc",
-    "third_party/paged_array.h",
-    "third_party/qsufsort.h",
+    "third_party/bsdiff/bsdiff.h",
+    "third_party/bsdiff/bsdiff_apply.cc",
+    "third_party/bsdiff/bsdiff_create.cc",
+    "third_party/bsdiff/bsdiff_search.h",
+    "third_party/bsdiff/paged_array.h",
+    "third_party/divsufsort/divsufsort.cc",
+    "third_party/divsufsort/divsufsort.h",
+    "third_party/divsufsort/divsufsort_private.h",
+    "third_party/divsufsort/sssort.cc",
+    "third_party/divsufsort/trsort.cc",
     "types_elf.h",
     "types_win_pe.h",
   ]
@@ -66,37 +77,82 @@ static_library("courgette_lib") {
   ]
 }
 
-executable("courgette") {
-  if (is_win && current_cpu == "x64") {
-    # The build infrastructure needs courgette to be named courgette64.
-    output_name = "courgette64"
+if (!is_ios) {
+  executable("courgette") {
+    if (is_win && current_cpu == "x64") {
+      # The build infrastructure needs courgette to be named courgette64.
+      output_name = "courgette64"
+    }
+
+    sources = [
+      "courgette_tool.cc",
+    ]
+
+    if (is_win) {
+      ldflags = [ "/LARGEADDRESSAWARE" ]
+    }
+
+    deps = [
+      ":courgette_lib",
+      "//base",
+      "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
+    ]
   }
 
-  sources = [
-    "courgette_tool.cc",
-  ]
+  executable("courgette_minimal_tool") {
+    sources = [
+      "courgette_minimal_tool.cc",
+    ]
+
+    deps = [
+      ":courgette_lib",
+      "//base",
+      "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
+    ]
+  }
 
   if (is_win) {
-    ldflags = [ "/LARGEADDRESSAWARE" ]
+    if (current_cpu == "x64") {
+      # TODO(sebmarchand): The official build scripts expect courgette.exe to be
+      # in the official build archives, remove this once they have been updated.
+      # https://crbug.com/629243
+      copy("copy_courgette_binaries") {
+        sources = [
+          "$root_out_dir/courgette64.exe",
+        ]
+        outputs = [
+          "$root_out_dir/courgette.exe",
+        ]
+        deps = [
+          ":courgette",
+        ]
+      }
+    } else {
+      # Make sure that we have a copy of courgette64.exe in the root out
+      # directory.
+      copy("copy_courgette_binaries") {
+        if (is_clang) {
+          courgette64_toolchain = "//build/toolchain/win:clang_x64"
+        } else {
+          courgette64_toolchain = "//build/toolchain/win:x64"
+        }
+        courgette64_label = ":courgette($courgette64_toolchain)"
+
+        courgette64_out_dir = get_label_info(courgette64_label, "root_out_dir")
+        sources = [
+          "$courgette64_out_dir/courgette64.exe",
+        ]
+        outputs = [
+          "$root_out_dir/{{source_file_part}}",
+        ]
+        deps = [
+          courgette64_label,
+        ]
+      }
+    }
   }
-
-  deps = [
-    ":courgette_lib",
-    "//base",
-    "//build/config/sanitizers:deps",
-  ]
-}
-
-executable("courgette_minimal_tool") {
-  sources = [
-    "courgette_minimal_tool.cc",
-  ]
-
-  deps = [
-    ":courgette_lib",
-    "//base",
-    "//build/config/sanitizers:deps",
-  ]
 }
 
 test("courgette_unittests") {
@@ -116,10 +172,12 @@ test("courgette_unittests") {
     "image_utils_unittest.cc",
     "label_manager_unittest.cc",
     "memory_allocator_unittest.cc",
-    "rel32_finder_win32_x86_unittest.cc",
+    "program_detector_unittest.cc",
+    "rel32_finder_unittest.cc",
     "streams_unittest.cc",
-    "third_party/paged_array_unittest.cc",
-    "third_party/qsufsort_unittest.cc",
+    "third_party/bsdiff/bsdiff_search_unittest.cc",
+    "third_party/bsdiff/paged_array_unittest.cc",
+    "third_party/divsufsort/divsufsort_unittest.cc",
     "typedrva_unittest.cc",
     "versioning_unittest.cc",
   ]

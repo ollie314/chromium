@@ -25,8 +25,8 @@
 
 #include "platform/graphics/DeferredImageDecoder.h"
 
+#include "platform/CrossThreadFunctional.h"
 #include "platform/SharedBuffer.h"
-#include "platform/ThreadSafeFunctional.h"
 #include "platform/graphics/ImageDecodingStore.h"
 #include "platform/graphics/ImageFrameGenerator.h"
 #include "platform/graphics/test/MockImageDecoder.h"
@@ -42,7 +42,9 @@
 #include "third_party/skia/include/core/SkPixmap.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "wtf/PassRefPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -97,13 +99,12 @@ public:
     void SetUp() override
     {
         ImageDecodingStore::instance().setCacheLimitInBytes(1024 * 1024);
-        DeferredImageDecoder::setEnabled(true);
         m_data = SharedBuffer::create(whitePNG, sizeof(whitePNG));
         m_frameCount = 1;
-        OwnPtr<MockImageDecoder> decoder = MockImageDecoder::create(this);
+        std::unique_ptr<MockImageDecoder> decoder = MockImageDecoder::create(this);
         m_actualDecoder = decoder.get();
         m_actualDecoder->setSize(1, 1);
-        m_lazyDecoder = DeferredImageDecoder::createForTesting(decoder.release());
+        m_lazyDecoder = DeferredImageDecoder::createForTesting(std::move(decoder));
         m_surface = SkSurface::MakeRasterN32Premul(100, 100);
         ASSERT_TRUE(m_surface.get());
         m_decodeRequestCount = 0;
@@ -161,7 +162,7 @@ protected:
 
     // Don't own this but saves the pointer to query states.
     MockImageDecoder* m_actualDecoder;
-    OwnPtr<DeferredImageDecoder> m_lazyDecoder;
+    std::unique_ptr<DeferredImageDecoder> m_lazyDecoder;
     sk_sp<SkSurface> m_surface;
     int m_decodeRequestCount;
     RefPtr<SharedBuffer> m_data;
@@ -174,8 +175,8 @@ protected:
 
 TEST_F(DeferredImageDecoderTest, drawIntoSkPicture)
 {
-    m_lazyDecoder->setData(*m_data, true);
-    RefPtr<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
+    m_lazyDecoder->setData(m_data, true);
+    sk_sp<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
     ASSERT_TRUE(image);
     EXPECT_EQ(1, image->width());
     EXPECT_EQ(1, image->height());
@@ -201,8 +202,8 @@ TEST_F(DeferredImageDecoderTest, drawIntoSkPictureProgressive)
     RefPtr<SharedBuffer> partialData = SharedBuffer::create(m_data->data(), m_data->size() - 10);
 
     // Received only half the file.
-    m_lazyDecoder->setData(*partialData, false);
-    RefPtr<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
+    m_lazyDecoder->setData(partialData, false);
+    sk_sp<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
     ASSERT_TRUE(image);
     SkPictureRecorder recorder;
     SkCanvas* tempCanvas = recorder.beginRecording(100, 100, 0, 0);
@@ -210,7 +211,7 @@ TEST_F(DeferredImageDecoderTest, drawIntoSkPictureProgressive)
     m_surface->getCanvas()->drawPicture(recorder.finishRecordingAsPicture());
 
     // Fully received the file and draw the SkPicture again.
-    m_lazyDecoder->setData(*m_data, true);
+    m_lazyDecoder->setData(m_data, true);
     image = m_lazyDecoder->createFrameAtIndex(0);
     ASSERT_TRUE(image);
     tempCanvas = recorder.beginRecording(100, 100, 0, 0);
@@ -231,8 +232,8 @@ static void rasterizeMain(SkCanvas* canvas, SkPicture* picture)
 
 TEST_F(DeferredImageDecoderTest, decodeOnOtherThread)
 {
-    m_lazyDecoder->setData(*m_data, true);
-    RefPtr<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
+    m_lazyDecoder->setData(m_data, true);
+    sk_sp<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
     ASSERT_TRUE(image);
     EXPECT_EQ(1, image->width());
     EXPECT_EQ(1, image->height());
@@ -244,9 +245,9 @@ TEST_F(DeferredImageDecoderTest, decodeOnOtherThread)
     EXPECT_EQ(0, m_decodeRequestCount);
 
     // Create a thread to rasterize SkPicture.
-    OwnPtr<WebThread> thread = adoptPtr(Platform::current()->createThread("RasterThread"));
-    thread->getWebTaskRunner()->postTask(BLINK_FROM_HERE, threadSafeBind(&rasterizeMain, AllowCrossThreadAccess(m_surface->getCanvas()), AllowCrossThreadAccess(picture.get())));
-    thread.clear();
+    std::unique_ptr<WebThread> thread = wrapUnique(Platform::current()->createThread("RasterThread"));
+    thread->getWebTaskRunner()->postTask(BLINK_FROM_HERE, crossThreadBind(&rasterizeMain, crossThreadUnretained(m_surface->getCanvas()), crossThreadUnretained(picture.get())));
+    thread.reset();
     EXPECT_EQ(0, m_decodeRequestCount);
 
     SkBitmap canvasBitmap;
@@ -259,9 +260,9 @@ TEST_F(DeferredImageDecoderTest, decodeOnOtherThread)
 TEST_F(DeferredImageDecoderTest, singleFrameImageLoading)
 {
     m_status = ImageFrame::FramePartial;
-    m_lazyDecoder->setData(*m_data, false);
+    m_lazyDecoder->setData(m_data, false);
     EXPECT_FALSE(m_lazyDecoder->frameIsCompleteAtIndex(0));
-    RefPtr<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
+    sk_sp<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
     ASSERT_TRUE(image);
     unsigned firstId = image->uniqueID();
     EXPECT_FALSE(m_lazyDecoder->frameIsCompleteAtIndex(0));
@@ -269,7 +270,7 @@ TEST_F(DeferredImageDecoderTest, singleFrameImageLoading)
 
     m_status = ImageFrame::FrameComplete;
     m_data->append(" ", 1u);
-    m_lazyDecoder->setData(*m_data, true);
+    m_lazyDecoder->setData(m_data, true);
     EXPECT_FALSE(m_actualDecoder);
     EXPECT_TRUE(m_lazyDecoder->frameIsCompleteAtIndex(0));
 
@@ -286,9 +287,9 @@ TEST_F(DeferredImageDecoderTest, multiFrameImageLoading)
     m_frameCount = 1;
     m_frameDuration = 10;
     m_status = ImageFrame::FramePartial;
-    m_lazyDecoder->setData(*m_data, false);
+    m_lazyDecoder->setData(m_data, false);
 
-    RefPtr<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
+    sk_sp<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
     ASSERT_TRUE(image);
     unsigned firstId = image->uniqueID();
     EXPECT_FALSE(m_lazyDecoder->frameIsCompleteAtIndex(0));
@@ -298,7 +299,7 @@ TEST_F(DeferredImageDecoderTest, multiFrameImageLoading)
     m_frameDuration = 20;
     m_status = ImageFrame::FrameComplete;
     m_data->append(" ", 1u);
-    m_lazyDecoder->setData(*m_data, false);
+    m_lazyDecoder->setData(m_data, false);
 
     image = m_lazyDecoder->createFrameAtIndex(0);
     ASSERT_TRUE(image);
@@ -312,7 +313,7 @@ TEST_F(DeferredImageDecoderTest, multiFrameImageLoading)
     m_frameCount = 3;
     m_frameDuration = 30;
     m_status = ImageFrame::FrameComplete;
-    m_lazyDecoder->setData(*m_data, true);
+    m_lazyDecoder->setData(m_data, true);
     EXPECT_FALSE(m_actualDecoder);
     EXPECT_TRUE(m_lazyDecoder->frameIsCompleteAtIndex(0));
     EXPECT_TRUE(m_lazyDecoder->frameIsCompleteAtIndex(1));
@@ -326,8 +327,8 @@ TEST_F(DeferredImageDecoderTest, multiFrameImageLoading)
 TEST_F(DeferredImageDecoderTest, decodedSize)
 {
     m_decodedSize = IntSize(22, 33);
-    m_lazyDecoder->setData(*m_data, true);
-    RefPtr<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
+    m_lazyDecoder->setData(m_data, true);
+    sk_sp<SkImage> image = m_lazyDecoder->createFrameAtIndex(0);
     ASSERT_TRUE(image);
     EXPECT_EQ(m_decodedSize.width(), image->width());
     EXPECT_EQ(m_decodedSize.height(), image->height());
@@ -347,22 +348,20 @@ TEST_F(DeferredImageDecoderTest, decodedSize)
 TEST_F(DeferredImageDecoderTest, smallerFrameCount)
 {
     m_frameCount = 1;
-    m_lazyDecoder->setData(*m_data, false);
+    m_lazyDecoder->setData(m_data, false);
     EXPECT_EQ(m_frameCount, m_lazyDecoder->frameCount());
     m_frameCount = 2;
-    m_lazyDecoder->setData(*m_data, false);
+    m_lazyDecoder->setData(m_data, false);
     EXPECT_EQ(m_frameCount, m_lazyDecoder->frameCount());
     m_frameCount = 0;
-    m_lazyDecoder->setData(*m_data, true);
+    m_lazyDecoder->setData(m_data, true);
     EXPECT_EQ(m_frameCount, m_lazyDecoder->frameCount());
 }
 
 TEST_F(DeferredImageDecoderTest, frameOpacity)
 {
-    OwnPtr<ImageDecoder> actualDecoder = ImageDecoder::create(*m_data,
+    std::unique_ptr<DeferredImageDecoder> decoder = DeferredImageDecoder::create(m_data, true,
         ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileApplied);
-    OwnPtr<DeferredImageDecoder> decoder = DeferredImageDecoder::createForTesting(actualDecoder.release());
-    decoder->setData(*m_data, true);
 
     SkImageInfo pixInfo = SkImageInfo::MakeN32Premul(1, 1);
 
@@ -373,7 +372,7 @@ TEST_F(DeferredImageDecoderTest, frameOpacity)
     SkPixmap pixmap(pixInfo, storage.get(), rowBytes);
 
     // Before decoding, the frame is not known to be opaque.
-    RefPtr<SkImage> frame = decoder->createFrameAtIndex(0);
+    sk_sp<SkImage> frame = decoder->createFrameAtIndex(0);
     ASSERT_TRUE(frame);
     EXPECT_FALSE(frame->isOpaque());
 
@@ -398,14 +397,24 @@ TEST_F(DeferredImageDecoderTest, respectActualDecoderSizeOnCreate)
     m_data = SharedBuffer::create(animatedGIF, sizeof(animatedGIF));
     m_frameCount = 2;
     forceFirstFrameToBeEmpty();
-    m_lazyDecoder->setData(*m_data, false);
+    m_lazyDecoder->setData(m_data, false);
     m_lazyDecoder->createFrameAtIndex(0);
     m_lazyDecoder->createFrameAtIndex(1);
-    m_lazyDecoder->setData(*m_data, true);
+    m_lazyDecoder->setData(m_data, true);
     // Clears only the first frame (0 bytes). If DeferredImageDecoder doesn't
     // check with the actual decoder it reports 4 bytes instead.
     size_t frameBytesCleared = m_lazyDecoder->clearCacheExceptFrame(1);
     EXPECT_EQ(static_cast<size_t>(0), frameBytesCleared);
+}
+
+TEST_F(DeferredImageDecoderTest, data)
+{
+    RefPtr<SharedBuffer> originalData = SharedBuffer::create(m_data->data(), m_data->size());
+    EXPECT_EQ(originalData->size(), m_data->size());
+    m_lazyDecoder->setData(originalData, false);
+    RefPtr<SharedBuffer> newData = m_lazyDecoder->data();
+    EXPECT_EQ(originalData->size(), newData->size());
+    EXPECT_EQ(0, std::memcmp(originalData->data(), newData->data(), newData->size()));
 }
 
 } // namespace blink

@@ -20,7 +20,7 @@
 #include "services/shell/public/cpp/connection.h"
 #include "services/shell/public/cpp/connector.h"
 #include "services/shell/public/interfaces/connector.mojom.h"
-#include "services/shell/public/interfaces/shell_client_factory.mojom.h"
+#include "services/shell/public/interfaces/service_factory.mojom.h"
 #include "services/shell/runner/common/switches.h"
 
 namespace shell {
@@ -65,12 +65,13 @@ std::unique_ptr<Connection> LaunchAndConnectToProcess(
                                         primordial_pipe_token);
 
   // Allocate the pipe locally.
+  std::string child_token = mojo::edk::GenerateRandomToken();
   mojo::ScopedMessagePipeHandle pipe =
-      mojo::edk::CreateParentMessagePipe(primordial_pipe_token);
+      mojo::edk::CreateParentMessagePipe(primordial_pipe_token, child_token);
 
-  shell::mojom::ShellClientPtr client;
+  shell::mojom::ServicePtr client;
   client.Bind(
-      mojo::InterfacePtrInfo<shell::mojom::ShellClient>(std::move(pipe), 0u));
+      mojo::InterfacePtrInfo<shell::mojom::Service>(std::move(pipe), 0u));
   shell::mojom::PIDReceiverPtr receiver;
 
   shell::Connector::ConnectParams params(target);
@@ -94,7 +95,8 @@ std::unique_ptr<Connection> LaunchAndConnectToProcess(
   DCHECK(process->IsValid());
   receiver->SetPID(process->Pid());
   mojo::edk::ChildProcessLaunched(process->Handle(),
-                                  platform_channel_pair.PassServerHandle());
+                                  platform_channel_pair.PassServerHandle(),
+                                  child_token);
   return connection;
 }
 

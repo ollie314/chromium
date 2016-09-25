@@ -12,9 +12,11 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/pickle.h"
 #include "base/process/process_handle.h"
 #include "base/rand_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_checker.h"
@@ -27,10 +29,7 @@
 
 namespace IPC {
 
-ChannelWin::State::State(ChannelWin* channel) : is_pending(false) {
-  memset(&context.overlapped, 0, sizeof(context.overlapped));
-  context.handler = channel;
-}
+ChannelWin::State::State() = default;
 
 ChannelWin::State::~State() {
   static_assert(offsetof(ChannelWin::State, context) == 0,
@@ -42,8 +41,6 @@ ChannelWin::ChannelWin(const IPC::ChannelHandle& channel_handle,
                        Mode mode,
                        Listener* listener)
     : ChannelReader(listener),
-      input_state_(this),
-      output_state_(this),
       peer_pid_(base::kNullProcessId),
       waiting_connect_(mode & MODE_SERVER_FLAG),
       processing_incoming_(false),
@@ -267,6 +264,11 @@ void ChannelWin::HandleInternalMessage(const Message& msg) {
   listener()->OnChannelConnected(claimed_pid);
 
   FlushPrelimQueue();
+
+  if (IsAttachmentBrokerEndpoint() &&
+      AttachmentBroker::GetGlobal()->IsPrivilegedBroker()) {
+    AttachmentBroker::GetGlobal()->ReceivedPeerPid(claimed_pid);
+  }
 }
 
 base::ProcessId ChannelWin::GetSenderPID() {
@@ -373,9 +375,8 @@ bool ChannelWin::CreatePipe(const IPC::ChannelHandle &channel_handle,
   }
 
   // Create the Hello message to be sent when Connect is called
-  scoped_ptr<Message> m(new Message(MSG_ROUTING_NONE,
-                                    HELLO_MESSAGE_TYPE,
-                                    IPC::Message::PRIORITY_NORMAL));
+  std::unique_ptr<Message> m(new Message(MSG_ROUTING_NONE, HELLO_MESSAGE_TYPE,
+                                         IPC::Message::PRIORITY_NORMAL));
 
   // Don't send the secret to the untrusted process, and don't send a secret
   // if the value is zero (for IPC backwards compatability).
@@ -392,6 +393,8 @@ bool ChannelWin::CreatePipe(const IPC::ChannelHandle &channel_handle,
 }
 
 bool ChannelWin::Connect() {
+  WillConnect();
+
   DLOG_IF(WARNING, thread_check_.get()) << "Connect called more than once";
 
   if (!thread_check_.get())
@@ -410,13 +413,10 @@ bool ChannelWin::Connect() {
     // Complete setup asynchronously. By not setting input_state_.is_pending
     // to true, we indicate to OnIOCompleted that this is the special
     // initialization signal.
-    base::MessageLoopForIO::current()->PostTask(
+    base::MessageLoopForIO::current()->task_runner()->PostTask(
         FROM_HERE,
-        base::Bind(&ChannelWin::OnIOCompleted,
-                   weak_factory_.GetWeakPtr(),
-                   &input_state_.context,
-                   0,
-                   0));
+        base::Bind(&ChannelWin::OnIOCompleted, weak_factory_.GetWeakPtr(),
+                   &input_state_.context, 0, 0));
   }
 
   if (!waiting_connect_)
@@ -578,10 +578,11 @@ void ChannelWin::OnIOCompleted(
 // Channel's methods
 
 // static
-scoped_ptr<Channel> Channel::Create(const IPC::ChannelHandle& channel_handle,
-                                    Mode mode,
-                                    Listener* listener) {
-  return scoped_ptr<Channel>(new ChannelWin(channel_handle, mode, listener));
+std::unique_ptr<Channel> Channel::Create(
+    const IPC::ChannelHandle& channel_handle,
+    Mode mode,
+    Listener* listener) {
+  return base::WrapUnique(new ChannelWin(channel_handle, mode, listener));
 }
 
 // static

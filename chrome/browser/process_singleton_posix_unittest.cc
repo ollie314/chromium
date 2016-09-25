@@ -69,8 +69,10 @@ class ProcessSingletonPosixTest : public testing::Test {
   ProcessSingletonPosixTest()
       : kill_callbacks_(0),
         io_thread_(BrowserThread::IO),
-        wait_event_(true, false),
-        signal_event_(true, false),
+        wait_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                    base::WaitableEvent::InitialState::NOT_SIGNALED),
+        signal_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                      base::WaitableEvent::InitialState::NOT_SIGNALED),
         process_singleton_on_thread_(NULL) {
     io_thread_.StartIOThread();
   }
@@ -84,7 +86,7 @@ class ProcessSingletonPosixTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     // Use a long directory name to ensure that the socket isn't opened through
     // the symlink.
-    user_data_path_ = temp_dir_.path().Append(
+    user_data_path_ = temp_dir_.GetPath().Append(
         std::string(sizeof(sockaddr_un::sun_path), 'a'));
     ASSERT_TRUE(CreateDirectory(user_data_path_));
 
@@ -95,7 +97,7 @@ class ProcessSingletonPosixTest : public testing::Test {
 
   void TearDown() override {
     scoped_refptr<base::ThreadTestHelper> io_helper(new base::ThreadTestHelper(
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get()));
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO).get()));
     ASSERT_TRUE(io_helper->Run());
 
     // Destruct the ProcessSingleton object before the IO thread so that its

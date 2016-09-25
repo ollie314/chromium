@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -17,6 +19,7 @@
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_socket.h"
+#include "device/hid/input_service_linux.h"
 
 namespace device {
 class BluetoothAdapter;
@@ -34,15 +37,33 @@ class BluetoothHostPairingController
       public device::BluetoothAdapter::Observer,
       public device::BluetoothDevice::PairingDelegate {
  public:
-  typedef HostPairingController::Observer Observer;
+  using Observer = HostPairingController::Observer;
+  using InputDeviceInfo = device::InputServiceLinux::InputDeviceInfo;
 
-  BluetoothHostPairingController();
+  // An interface that is used for testing purpose.
+  class TestDelegate {
+   public:
+    virtual void OnAdapterReset() = 0;
+
+   protected:
+    TestDelegate() {}
+    virtual ~TestDelegate() {}
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(TestDelegate);
+  };
+
+  explicit BluetoothHostPairingController(
+      const scoped_refptr<base::SingleThreadTaskRunner>& file_task_runner);
   ~BluetoothHostPairingController() override;
+
+  // These functions should be only used in tests.
+  void SetDelegateForTesting(TestDelegate* delegate);
+  scoped_refptr<device::BluetoothAdapter> GetAdapterForTesting();
 
  private:
   void ChangeStage(Stage new_stage);
   void SendHostStatus();
-  void Reset();
 
   void OnGetAdapter(scoped_refptr<device::BluetoothAdapter> adapter);
   void SetName();
@@ -61,6 +82,8 @@ class BluetoothHostPairingController
   void OnSendError(const std::string& error_message);
   void OnReceiveError(device::BluetoothSocket::ErrorReason reason,
                       const std::string& error_message);
+  void PowerOffAdapterIfApplicable(const std::vector<InputDeviceInfo>& devices);
+  void ResetAdapter();
 
   // HostPairingController:
   void AddObserver(Observer* observer) override;
@@ -74,6 +97,7 @@ class BluetoothHostPairingController
   void OnUpdateStatusChanged(UpdateStatus update_status) override;
   void OnEnrollmentStatusChanged(EnrollmentStatus enrollment_status) override;
   void SetPermanentId(const std::string& permanent_id) override;
+  void Reset() override;
 
   // ProtoDecoder::Observer:
   void OnHostStatusMessage(const pairing_api::HostStatus& message) override;
@@ -114,8 +138,10 @@ class BluetoothHostPairingController
   scoped_refptr<device::BluetoothAdapter> adapter_;
   scoped_refptr<device::BluetoothSocket> service_socket_;
   scoped_refptr<device::BluetoothSocket> controller_socket_;
-  scoped_ptr<ProtoDecoder> proto_decoder_;
+  std::unique_ptr<ProtoDecoder> proto_decoder_;
+  TestDelegate* delegate_ = nullptr;
 
+  scoped_refptr<base::SingleThreadTaskRunner> file_task_runner_;
   base::ThreadChecker thread_checker_;
   base::ObserverList<Observer> observers_;
   base::WeakPtrFactory<BluetoothHostPairingController> ptr_factory_;

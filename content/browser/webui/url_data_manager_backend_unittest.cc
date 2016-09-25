@@ -26,15 +26,15 @@ class CancelAfterFirstReadURLRequestDelegate : public net::TestDelegate {
 
   ~CancelAfterFirstReadURLRequestDelegate() override {}
 
-  void OnResponseStarted(net::URLRequest* request) override {
+  void OnResponseStarted(net::URLRequest* request, int net_error) override {
     // net::TestDelegate will start the first read.
-    TestDelegate::OnResponseStarted(request);
+    TestDelegate::OnResponseStarted(request, net_error);
     request->Cancel();
   }
 
   void OnReadCompleted(net::URLRequest* request, int bytes_read) override {
     // Read should have been cancelled.
-    EXPECT_EQ(-1, bytes_read);
+    EXPECT_EQ(net::ERR_ABORTED, bytes_read);
   }
 
  private:
@@ -43,7 +43,8 @@ class CancelAfterFirstReadURLRequestDelegate : public net::TestDelegate {
 
 class UrlDataManagerBackendTest : public testing::Test {
  public:
-  UrlDataManagerBackendTest() {
+  UrlDataManagerBackendTest()
+      : thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP) {
     // URLRequestJobFactory takes ownership of the passed in ProtocolHandler.
     url_request_job_factory_.SetProtocolHandler(
         "chrome", URLDataManagerBackend::CreateProtocolHandler(

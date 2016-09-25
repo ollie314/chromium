@@ -11,9 +11,9 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chromecast/media/base/decrypt_context_impl.h"
-#include "chromecast/media/cdm/browser_cdm_cast.h"
+#include "chromecast/media/cdm/cast_cdm_context.h"
 #include "chromecast/media/cma/base/buffering_frame_provider.h"
 #include "chromecast/media/cma/base/buffering_state.h"
 #include "chromecast/media/cma/base/cma_logging.h"
@@ -41,15 +41,14 @@ AvPipelineImpl::AvPipelineImpl(MediaPipelineBackend::Decoder* decoder,
       decoder_(decoder),
       client_(client),
       state_(kUninitialized),
-      buffered_time_(::media::kNoTimestamp()),
-      playable_buffered_time_(::media::kNoTimestamp()),
+      buffered_time_(::media::kNoTimestamp),
+      playable_buffered_time_(::media::kNoTimestamp),
       enable_feeding_(false),
       pending_read_(false),
-      enable_time_update_(false),
-      pending_time_update_task_(false),
-      media_keys_(NULL),
-      media_keys_callback_id_(kNoCallbackId),
-      weak_factory_(this) {
+      cast_cdm_context_(NULL),
+      player_tracker_callback_id_(kNoCallbackId),
+      weak_factory_(this),
+      decrypt_weak_factory_(this) {
   DCHECK(decoder_);
   decoder_->SetDelegate(this);
   weak_this_ = weak_factory_.GetWeakPtr();
@@ -59,8 +58,8 @@ AvPipelineImpl::AvPipelineImpl(MediaPipelineBackend::Decoder* decoder,
 AvPipelineImpl::~AvPipelineImpl() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (media_keys_ && media_keys_callback_id_ != kNoCallbackId)
-    media_keys_->UnregisterPlayer(media_keys_callback_id_);
+  if (cast_cdm_context_ && player_tracker_callback_id_ != kNoCallbackId)
+    cast_cdm_context_->UnregisterPlayer(player_tracker_callback_id_);
 }
 
 void AvPipelineImpl::SetCodedFrameProvider(
@@ -124,8 +123,8 @@ void AvPipelineImpl::Flush(const base::Closure& flush_cb) {
   pushed_buffer_ = nullptr;
   // Remove any frames left in the frame provider.
   pending_read_ = false;
-  buffered_time_ = ::media::kNoTimestamp();
-  playable_buffered_time_ = ::media::kNoTimestamp();
+  buffered_time_ = ::media::kNoTimestamp;
+  playable_buffered_time_ = ::media::kNoTimestamp;
   non_playable_frames_.clear();
 
   frame_provider_->Flush(base::Bind(&AvPipelineImpl::OnFlushDone, weak_this_));
@@ -149,20 +148,30 @@ void AvPipelineImpl::Stop() {
   CMALOG(kLogControl) << __FUNCTION__;
   // Stop feeding the pipeline.
   enable_feeding_ = false;
+  // Drop any pending asynchronous decryption, so any pending
+  // OnBufferDecrypted() callback will not be called. StartPlayingFrom() sets
+  // enable_feeding_ back to true, so if a pending decryption callback from
+  // before Stop() is allowed to complete after StartPlayingFrom() is called
+  // again, it will think everything is fine and try to push a buffer, resulting
+  // in a double push.
+  decrypt_weak_factory_.InvalidateWeakPtrs();
   set_state(kStopped);
 }
 
-void AvPipelineImpl::SetCdm(BrowserCdmCast* media_keys) {
+void AvPipelineImpl::SetCdm(CastCdmContext* cast_cdm_context) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(media_keys);
+  DCHECK(cast_cdm_context);
 
-  if (media_keys_ && media_keys_callback_id_ != kNoCallbackId)
-    media_keys_->UnregisterPlayer(media_keys_callback_id_);
+  if (cast_cdm_context_ && player_tracker_callback_id_ != kNoCallbackId)
+    cast_cdm_context_->UnregisterPlayer(player_tracker_callback_id_);
 
-  media_keys_ = media_keys;
-  media_keys_callback_id_ = media_keys_->RegisterPlayer(
+  cast_cdm_context_ = cast_cdm_context;
+  player_tracker_callback_id_ = cast_cdm_context_->RegisterPlayer(
       base::Bind(&AvPipelineImpl::OnCdmStateChanged, weak_this_),
       base::Bind(&AvPipelineImpl::OnCdmDestroyed, weak_this_));
+
+  // We could be waiting for CDM to provide key (see b/29564232).
+  OnCdmStateChanged();
 }
 
 void AvPipelineImpl::FetchBuffer() {
@@ -206,19 +215,20 @@ void AvPipelineImpl::ProcessPendingBuffer() {
     enable_feeding_ = false;
   }
 
-  std::unique_ptr<DecryptContextImpl> decrypt_context;
   if (!pending_buffer_->end_of_stream() &&
       pending_buffer_->decrypt_config()) {
     // Verify that CDM has the key ID.
     // Should not send the frame if the key ID is not available yet.
     std::string key_id(pending_buffer_->decrypt_config()->key_id());
-    if (!media_keys_) {
+    if (!cast_cdm_context_) {
       CMALOG(kLogControl) << "No CDM for frame: pts="
                           << pending_buffer_->timestamp();
       return;
     }
-    decrypt_context = media_keys_->GetDecryptContext(key_id);
-    if (!decrypt_context.get()) {
+
+    std::unique_ptr<DecryptContextImpl> decrypt_context =
+        cast_cdm_context_->GetDecryptContext(key_id);
+    if (!decrypt_context) {
       CMALOG(kLogControl) << "frame(pts=" << pending_buffer_->timestamp()
                           << "): waiting for key id "
                           << base::HexEncode(&key_id[0], key_id.size());
@@ -227,32 +237,60 @@ void AvPipelineImpl::ProcessPendingBuffer() {
       return;
     }
 
-    // If we do have the clear key, decrypt the pending buffer
-    // and reset the decryption context (not needed anymore).
-    crypto::SymmetricKey* key = decrypt_context->GetKey();
-    if (key != NULL) {
-      pending_buffer_ = DecryptDecoderBuffer(pending_buffer_, key);
-      decrypt_context.reset();
+    DCHECK_NE(decrypt_context->GetKeySystem(), KEY_SYSTEM_NONE);
+
+    // If we can get the clear content, decrypt the pending buffer
+    if (decrypt_context->CanDecryptToBuffer()) {
+      auto buffer = pending_buffer_;
+      pending_buffer_ = nullptr;
+      DecryptDecoderBuffer(buffer, decrypt_context.get(),
+                           base::Bind(&AvPipelineImpl::OnBufferDecrypted,
+                                      decrypt_weak_factory_.GetWeakPtr(),
+                                      base::Passed(&decrypt_context)));
+
+      return;
     }
+
+    pending_buffer_->set_decrypt_context(std::move(decrypt_context));
   }
+
+  PushPendingBuffer();
+}
+
+void AvPipelineImpl::PushPendingBuffer() {
+  DCHECK(pending_buffer_);
+  DCHECK(!pushed_buffer_);
 
   if (!pending_buffer_->end_of_stream() && buffering_state_.get()) {
     base::TimeDelta timestamp =
         base::TimeDelta::FromMicroseconds(pending_buffer_->timestamp());
-    if (timestamp != ::media::kNoTimestamp())
+    if (timestamp != ::media::kNoTimestamp)
       buffering_state_->SetMaxRenderingTime(timestamp);
   }
 
-  DCHECK(!pushed_buffer_);
   pushed_buffer_ = pending_buffer_;
-  if (decrypt_context && decrypt_context->GetKeySystem() != KEY_SYSTEM_NONE)
-    pushed_buffer_->set_decrypt_context(std::move(decrypt_context));
   pending_buffer_ = nullptr;
   MediaPipelineBackend::BufferStatus status =
       decoder_->PushBuffer(pushed_buffer_.get());
 
   if (status != MediaPipelineBackend::kBufferPending)
     OnPushBufferComplete(status);
+}
+
+void AvPipelineImpl::OnBufferDecrypted(
+    std::unique_ptr<DecryptContextImpl> decrypt_context,
+    scoped_refptr<DecoderBufferBase> buffer,
+    bool success) {
+  if (!success) {
+    LOG(WARNING) << "Can't decrypt with decrypt_context";
+    buffer->set_decrypt_context(std::move(decrypt_context));
+  }
+
+  if (!enable_feeding_)
+    return;
+
+  pending_buffer_ = buffer;
+  PushPendingBuffer();
 }
 
 void AvPipelineImpl::OnPushBufferComplete(BufferStatus status) {
@@ -288,8 +326,8 @@ void AvPipelineImpl::OnKeyStatusChanged(const std::string& key_id,
                                         uint32_t system_code) {
   CMALOG(kLogControl) << __FUNCTION__ << " key_status= " << key_status
                       << " system_code=" << system_code;
-  DCHECK(media_keys_);
-  media_keys_->SetKeyStatus(key_id, key_status, system_code);
+  DCHECK(cast_cdm_context_);
+  cast_cdm_context_->SetKeyStatus(key_id, key_status, system_code);
 }
 
 void AvPipelineImpl::OnVideoResolutionChanged(const Size& size) {
@@ -310,7 +348,7 @@ void AvPipelineImpl::OnCdmStateChanged() {
 
 void AvPipelineImpl::OnCdmDestroyed() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  media_keys_ = NULL;
+  cast_cdm_context_ = NULL;
 }
 
 void AvPipelineImpl::OnDataBuffered(
@@ -322,7 +360,7 @@ void AvPipelineImpl::OnDataBuffered(
     return;
 
   if (!buffer->end_of_stream() &&
-      (buffered_time_ == ::media::kNoTimestamp() ||
+      (buffered_time_ == ::media::kNoTimestamp ||
        buffered_time_ <
            base::TimeDelta::FromMicroseconds(buffer->timestamp()))) {
     buffered_time_ = base::TimeDelta::FromMicroseconds(buffer->timestamp());
@@ -350,14 +388,15 @@ void AvPipelineImpl::UpdatePlayableFrames() {
       const CastDecryptConfig* decrypt_config =
           non_playable_frame->decrypt_config();
       if (decrypt_config &&
-          !(media_keys_ &&
-            media_keys_->GetDecryptContext(decrypt_config->key_id()).get())) {
+          !(cast_cdm_context_ &&
+            cast_cdm_context_->GetDecryptContext(decrypt_config->key_id())
+                .get())) {
         // The frame is still not playable. All the following are thus not
         // playable.
         break;
       }
 
-      if (playable_buffered_time_ == ::media::kNoTimestamp() ||
+      if (playable_buffered_time_ == ::media::kNoTimestamp ||
           playable_buffered_time_ < base::TimeDelta::FromMicroseconds(
                                         non_playable_frame->timestamp())) {
         playable_buffered_time_ =

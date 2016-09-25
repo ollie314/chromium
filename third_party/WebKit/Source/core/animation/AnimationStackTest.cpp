@@ -5,14 +5,15 @@
 #include "core/animation/AnimationStack.h"
 
 #include "core/animation/AnimationClock.h"
-#include "core/animation/AnimationTimeline.h"
 #include "core/animation/CompositorPendingAnimations.h"
+#include "core/animation/DocumentTimeline.h"
 #include "core/animation/ElementAnimations.h"
 #include "core/animation/KeyframeEffectModel.h"
 #include "core/animation/LegacyStyleInterpolation.h"
 #include "core/animation/animatable/AnimatableDouble.h"
 #include "core/testing/DummyPageHolder.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include <memory>
 
 namespace blink {
 
@@ -23,7 +24,7 @@ protected:
         pageHolder = DummyPageHolder::create();
         document = &pageHolder->document();
         document->animationClock().resetTimeForTesting();
-        timeline = AnimationTimeline::create(document.get());
+        timeline = DocumentTimeline::create(document.get());
         element = document->createElement("foo", ASSERT_NO_EXCEPTION);
     }
 
@@ -61,14 +62,14 @@ protected:
     InertEffect* makeInertEffect(EffectModel* effect)
     {
         Timing timing;
-        timing.fillMode = Timing::FillModeBoth;
+        timing.fillMode = Timing::FillMode::BOTH;
         return InertEffect::create(effect, timing, false, 0);
     }
 
     KeyframeEffect* makeKeyframeEffect(EffectModel* effect, double duration = 10)
     {
         Timing timing;
-        timing.fillMode = Timing::FillModeBoth;
+        timing.fillMode = Timing::FillMode::BOTH;
         timing.iterationDuration = duration;
         return KeyframeEffect::create(element.get(), effect, timing);
     }
@@ -79,9 +80,9 @@ protected:
         return toLegacyStyleInterpolation(interpolation).currentValue().get();
     }
 
-    OwnPtr<DummyPageHolder> pageHolder;
+    std::unique_ptr<DummyPageHolder> pageHolder;
     Persistent<Document> document;
-    Persistent<AnimationTimeline> timeline;
+    Persistent<DocumentTimeline> timeline;
     Persistent<Element> element;
 };
 
@@ -142,28 +143,28 @@ TEST_F(AnimationAnimationStackTest, ForwardsFillDiscarding)
     ActiveInterpolationsMap interpolations;
 
     updateTimeline(11);
-    ThreadHeap::collectAllGarbage();
+    ThreadState::current()-> collectAllGarbage();
     interpolations = AnimationStack::activeInterpolations(&element->elementAnimations()->animationStack(), nullptr, nullptr, KeyframeEffect::DefaultPriority);
     EXPECT_EQ(1u, interpolations.size());
     EXPECT_TRUE(interpolationValue(interpolations, CSSPropertyFontSize)->equals(AnimatableDouble::create(3).get()));
     EXPECT_EQ(3u, sampledEffectCount());
 
     updateTimeline(13);
-    ThreadHeap::collectAllGarbage();
+    ThreadState::current()-> collectAllGarbage();
     interpolations = AnimationStack::activeInterpolations(&element->elementAnimations()->animationStack(), nullptr, nullptr, KeyframeEffect::DefaultPriority);
     EXPECT_EQ(1u, interpolations.size());
     EXPECT_TRUE(interpolationValue(interpolations, CSSPropertyFontSize)->equals(AnimatableDouble::create(3).get()));
     EXPECT_EQ(3u, sampledEffectCount());
 
     updateTimeline(15);
-    ThreadHeap::collectAllGarbage();
+    ThreadState::current()-> collectAllGarbage();
     interpolations = AnimationStack::activeInterpolations(&element->elementAnimations()->animationStack(), nullptr, nullptr, KeyframeEffect::DefaultPriority);
     EXPECT_EQ(1u, interpolations.size());
     EXPECT_TRUE(interpolationValue(interpolations, CSSPropertyFontSize)->equals(AnimatableDouble::create(3).get()));
     EXPECT_EQ(2u, sampledEffectCount());
 
     updateTimeline(17);
-    ThreadHeap::collectAllGarbage();
+    ThreadState::current()-> collectAllGarbage();
     interpolations = AnimationStack::activeInterpolations(&element->elementAnimations()->animationStack(), nullptr, nullptr, KeyframeEffect::DefaultPriority);
     EXPECT_EQ(1u, interpolations.size());
     EXPECT_TRUE(interpolationValue(interpolations, CSSPropertyFontSize)->equals(AnimatableDouble::create(3).get()));

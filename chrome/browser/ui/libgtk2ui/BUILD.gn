@@ -70,7 +70,7 @@ component("libgtk2ui") {
       "gconf_listener.cc",
       "gconf_listener.h",
     ]
-    configs += [ "//build/config/linux:gconf" ]
+    configs += [ "//build/config/linux/gconf" ]
   }
   defines = [ "LIBGTK2UI_IMPLEMENTATION" ]
 
@@ -97,17 +97,19 @@ component("libgtk2ui") {
     "//chrome:extra_resources",
     "//chrome:resources",
     "//chrome:strings",
+    "//chrome/app:command_ids",
     "//chrome/app/theme:theme_resources",
     "//components/resources",
     "//content/public/browser",
-    "//mojo/edk/system",
     "//printing",
     "//skia",
     "//ui/aura",
     "//ui/base",
     "//ui/base/ime",
+    "//ui/display",
     "//ui/events",
     "//ui/events:events_base",
+    "//ui/events/platform/x11",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/gfx/x",

@@ -13,8 +13,9 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_constants.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_test_util.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_util.h"
@@ -210,14 +211,13 @@ class MetadataDatabaseTest : public testing::TestWithParam<bool> {
   SyncStatusCode InitializeMetadataDatabase() {
     SyncStatusCode status = SYNC_STATUS_UNKNOWN;
     metadata_database_ = MetadataDatabase::CreateInternal(
-        database_dir_.path(), in_memory_env_.get(),
-        GetParam(), &status);
+        database_dir_.GetPath(), in_memory_env_.get(), GetParam(), &status);
     return status;
   }
 
   void DropDatabase() {
     metadata_database_.reset();
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void SetUpDatabaseByTrackedFiles(const TrackedFile** tracked_files,
@@ -267,7 +267,7 @@ class MetadataDatabaseTest : public testing::TestWithParam<bool> {
     options.max_open_files = 0;  // Use minimum.
     options.env = in_memory_env_.get();
     leveldb::Status status =
-        leveldb::DB::Open(options, database_dir_.path().AsUTF8Unsafe(), &db);
+        leveldb::DB::Open(options, database_dir_.GetPath().AsUTF8Unsafe(), &db);
     EXPECT_TRUE(status.ok());
 
     std::unique_ptr<LevelDBWrapper> wrapper(

@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,7 +25,6 @@
 #include "base/command_line.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/global_descriptors.h"
@@ -36,10 +36,12 @@
 #include "components/nacl/common/nacl_switches.h"
 #include "components/nacl/loader/sandbox_linux/nacl_sandbox_linux.h"
 #include "content/public/common/content_descriptors.h"
+#include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/send_zygote_child_ping_linux.h"
 #include "content/public/common/zygote_fork_delegate_linux.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_switches.h"
+#include "mojo/edk/embedder/embedder.h"
 #include "sandbox/linux/services/credentials.h"
 #include "sandbox/linux/services/namespace_sandbox.h"
 
@@ -115,8 +117,11 @@ void BecomeNaClLoader(base::ScopedFD browser_fd,
   nacl_sandbox->SealLayerOneSandbox();
   nacl_sandbox->CheckSandboxingStateWithPolicy();
 
-  base::GlobalDescriptors::GetInstance()->Set(kPrimaryIPCChannel,
+  base::GlobalDescriptors::GetInstance()->Set(kMojoIPCChannel,
                                               browser_fd.release());
+
+  // The Mojo EDK must be initialized before using IPC.
+  mojo::edk::Init();
 
   base::MessageLoopForIO main_message_loop;
 #if defined(OS_NACL_NONSFI)
@@ -148,7 +153,7 @@ void ChildNaClLoaderInit(std::vector<base::ScopedFD> child_fds,
       child_fds[content::ZygoteForkDelegate::kPIDOracleFDIndex].get()));
 
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kProcessChannelID, channel_id);
+      switches::kMojoChannelToken, channel_id);
 
   // Save the browser socket and close the rest.
   base::ScopedFD browser_fd(
@@ -441,7 +446,7 @@ int main(int argc, char* argv[]) {
   CheckRDebug(argv[0]);
 #endif
 
-  scoped_ptr<nacl::NaClSandbox> nacl_sandbox(new nacl::NaClSandbox);
+  std::unique_ptr<nacl::NaClSandbox> nacl_sandbox(new nacl::NaClSandbox);
   // Make sure that the early initialization did not start any spurious
   // threads.
 #if !defined(THREAD_SANITIZER)

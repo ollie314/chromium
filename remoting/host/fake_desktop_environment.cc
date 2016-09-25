@@ -69,7 +69,7 @@ std::unique_ptr<InputInjector> FakeDesktopEnvironment::CreateInputInjector() {
 }
 
 std::unique_ptr<ScreenControls> FakeDesktopEnvironment::CreateScreenControls() {
-  return base::WrapUnique(new FakeScreenControls());
+  return base::MakeUnique<FakeScreenControls>();
 }
 
 std::unique_ptr<webrtc::DesktopCapturer>
@@ -83,7 +83,7 @@ FakeDesktopEnvironment::CreateVideoCapturer() {
 
 std::unique_ptr<webrtc::MouseCursorMonitor>
 FakeDesktopEnvironment::CreateMouseCursorMonitor() {
-  return base::WrapUnique(new FakeMouseCursorMonitor());
+  return base::MakeUnique<FakeMouseCursorMonitor>();
 }
 
 std::string FakeDesktopEnvironment::GetCapabilities() const {
@@ -91,6 +91,10 @@ std::string FakeDesktopEnvironment::GetCapabilities() const {
 }
 
 void FakeDesktopEnvironment::SetCapabilities(const std::string& capabilities) {}
+
+uint32_t FakeDesktopEnvironment::GetDesktopSessionId() const {
+  return UINT32_MAX;
+}
 
 FakeDesktopEnvironmentFactory::FakeDesktopEnvironmentFactory() {}
 FakeDesktopEnvironmentFactory::~FakeDesktopEnvironmentFactory() {}

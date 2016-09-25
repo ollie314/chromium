@@ -17,15 +17,15 @@
 
 namespace cc {
 
-FakeContentLayerClient::ImageData::ImageData(const SkImage* img,
+FakeContentLayerClient::ImageData::ImageData(sk_sp<const SkImage> img,
                                              const gfx::Point& point,
                                              const SkPaint& paint)
-    : image(skia::SharePtr(img)), point(point), paint(paint) {}
+    : image(std::move(img)), point(point), paint(paint) {}
 
-FakeContentLayerClient::ImageData::ImageData(const SkImage* img,
+FakeContentLayerClient::ImageData::ImageData(sk_sp<const SkImage> img,
                                              const gfx::Transform& transform,
                                              const SkPaint& paint)
-    : image(skia::SharePtr(img)), transform(transform), paint(paint) {}
+    : image(std::move(img)), transform(transform), paint(paint) {}
 
 FakeContentLayerClient::ImageData::ImageData(const ImageData& other) = default;
 
@@ -55,36 +55,35 @@ FakeContentLayerClient::PaintContentsToDisplayList(
   DisplayItemListSettings settings;
   settings.use_cached_picture = display_list_use_cached_picture_;
   scoped_refptr<DisplayItemList> display_list =
-      DisplayItemList::Create(PaintableRegion(), settings);
+      DisplayItemList::Create(settings);
+  display_list->SetRetainVisualRectsForTesting(true);
   SkPictureRecorder recorder;
-  skia::RefPtr<SkCanvas> canvas;
+  sk_sp<SkCanvas> canvas;
 
   for (RectPaintVector::const_iterator it = draw_rects_.begin();
        it != draw_rects_.end(); ++it) {
     const gfx::RectF& draw_rect = it->first;
     const SkPaint& paint = it->second;
-    canvas =
-        skia::SharePtr(recorder.beginRecording(gfx::RectFToSkRect(draw_rect)));
+    canvas = sk_ref_sp(recorder.beginRecording(gfx::RectFToSkRect(draw_rect)));
     canvas->drawRect(gfx::RectFToSkRect(draw_rect), paint);
-    display_list->CreateAndAppendItem<DrawingDisplayItem>(
+    display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(
         ToEnclosingRect(draw_rect), recorder.finishRecordingAsPicture());
   }
 
   for (ImageVector::const_iterator it = draw_images_.begin();
        it != draw_images_.end(); ++it) {
     if (!it->transform.IsIdentity()) {
-      display_list->CreateAndAppendItem<TransformDisplayItem>(PaintableRegion(),
-                                                              it->transform);
+      display_list->CreateAndAppendPairedBeginItem<TransformDisplayItem>(
+          it->transform);
     }
-    canvas = skia::SharePtr(
+    canvas = sk_ref_sp(
         recorder.beginRecording(it->image->width(), it->image->height()));
     canvas->drawImage(it->image.get(), it->point.x(), it->point.y(),
                       &it->paint);
-    display_list->CreateAndAppendItem<DrawingDisplayItem>(
+    display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(
         PaintableRegion(), recorder.finishRecordingAsPicture());
     if (!it->transform.IsIdentity()) {
-      display_list->CreateAndAppendItem<EndTransformDisplayItem>(
-          PaintableRegion());
+      display_list->CreateAndAppendPairedEndItem<EndTransformDisplayItem>();
     }
   }
 
@@ -94,15 +93,13 @@ FakeContentLayerClient::PaintContentsToDisplayList(
     while (!draw_rect.IsEmpty()) {
       SkPaint paint;
       paint.setColor(red ? SK_ColorRED : SK_ColorBLUE);
-      canvas =
-          skia::SharePtr(recorder.beginRecording(gfx::RectToSkRect(draw_rect)));
+      canvas = sk_ref_sp(recorder.beginRecording(gfx::RectToSkRect(draw_rect)));
       canvas->drawIRect(gfx::RectToSkIRect(draw_rect), paint);
-      display_list->CreateAndAppendItem<DrawingDisplayItem>(
+      display_list->CreateAndAppendDrawingItem<DrawingDisplayItem>(
           draw_rect, recorder.finishRecordingAsPicture());
       draw_rect.Inset(1, 1);
     }
   }
-
 
   display_list->Finalize();
   return display_list;

@@ -5,16 +5,16 @@
 // Implementation of a fake VideoCaptureDevice class. Used for testing other
 // video capture classes when no real hardware is available.
 
-#ifndef MEDIA_VIDEO_CAPTURE_FAKE_VIDEO_CAPTURE_DEVICE_H_
-#define MEDIA_VIDEO_CAPTURE_FAKE_VIDEO_CAPTURE_DEVICE_H_
+#ifndef MEDIA_CAPTURE_VIDEO_FAKE_VIDEO_CAPTURE_DEVICE_H_
+#define MEDIA_CAPTURE_VIDEO_FAKE_VIDEO_CAPTURE_DEVICE_H_
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/atomicops.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -22,7 +22,7 @@
 
 namespace media {
 
-class MEDIA_EXPORT FakeVideoCaptureDevice : public VideoCaptureDevice {
+class CAPTURE_EXPORT FakeVideoCaptureDevice : public VideoCaptureDevice {
  public:
   enum class BufferOwnership {
     OWN_BUFFERS,
@@ -35,8 +35,12 @@ class MEDIA_EXPORT FakeVideoCaptureDevice : public VideoCaptureDevice {
 
   // VideoCaptureDevice implementation.
   void AllocateAndStart(const VideoCaptureParams& params,
-                        scoped_ptr<Client> client) override;
+                        std::unique_ptr<Client> client) override;
   void StopAndDeAllocate() override;
+  void GetPhotoCapabilities(GetPhotoCapabilitiesCallback callback) override;
+  void SetPhotoOptions(mojom::PhotoSettingsPtr settings,
+                       SetPhotoOptionsCallback callback) override;
+  void TakePhoto(TakePhotoCallback callback) override;
 
  private:
   void CaptureUsingOwnBuffers(base::TimeTicks expected_execution_time);
@@ -53,15 +57,19 @@ class MEDIA_EXPORT FakeVideoCaptureDevice : public VideoCaptureDevice {
   // Frame rate of the fake video device.
   const float fake_capture_rate_;
 
-  scoped_ptr<VideoCaptureDevice::Client> client_;
+  std::unique_ptr<VideoCaptureDevice::Client> client_;
   // |fake_frame_| is used for capturing on Own Buffers.
-  scoped_ptr<uint8_t[]> fake_frame_;
+  std::unique_ptr<uint8_t[]> fake_frame_;
   // Time when the next beep occurs.
   base::TimeDelta beep_time_;
   // Time since the fake video started rendering frames.
   base::TimeDelta elapsed_time_;
   VideoCaptureFormat capture_format_;
 
+  uint32_t current_zoom_;
+
+  // The system time when we receive the first frame.
+  base::TimeTicks first_ref_time_;
   // FakeVideoCaptureDevice post tasks to itself for frame construction and
   // needs to deal with asynchronous StopAndDeallocate().
   base::WeakPtrFactory<FakeVideoCaptureDevice> weak_factory_;
@@ -71,4 +79,4 @@ class MEDIA_EXPORT FakeVideoCaptureDevice : public VideoCaptureDevice {
 
 }  // namespace media
 
-#endif  // MEDIA_VIDEO_CAPTURE_FAKE_VIDEO_CAPTURE_DEVICE_H_
+#endif  // MEDIA_CAPTURE_VIDEO_FAKE_VIDEO_CAPTURE_DEVICE_H_

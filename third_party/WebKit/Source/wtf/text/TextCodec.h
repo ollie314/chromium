@@ -29,9 +29,9 @@
 
 #include "wtf/Forward.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/text/Unicode.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace WTF {
 
@@ -50,7 +50,11 @@ enum UnencodableHandling {
     // Encodes the character as en entity as above, but escaped
     // non-alphanumeric characters. This is used in URLs.
     // For example, U+6DE would be "%26%231758%3B".
-    URLEncodedEntitiesForUnencodables
+    URLEncodedEntitiesForUnencodables,
+
+    // Encodes the character as a CSS entity.  For example U+06DE
+    // would be \06de.  See: https://www.w3.org/TR/css-syntax-3/#escaping
+    CSSEncodedEntitiesForUnencodables,
 };
 
 typedef char UnencodableReplacementArray[32];
@@ -70,8 +74,7 @@ static_assert(!DoNotFlush, "DoNotFlush should be falsy");
 static_assert(FetchEOF, "FetchEOF should be truthy");
 static_assert(DataEOF, "DataEOF should be truthy");
 
-
-class TextCodec {
+class WTF_EXPORT TextCodec {
     WTF_MAKE_NONCOPYABLE(TextCodec); USING_FAST_MALLOC(TextCodec);
 public:
     TextCodec() { }
@@ -95,7 +98,7 @@ public:
 
 typedef void (*EncodingNameRegistrar)(const char* alias, const char* name);
 
-typedef PassOwnPtr<TextCodec> (*NewTextCodecFunction)(const TextEncoding&, const void* additionalData);
+typedef std::unique_ptr<TextCodec> (*NewTextCodecFunction)(const TextEncoding&, const void* additionalData);
 typedef void (*TextCodecRegistrar)(const char* name, NewTextCodecFunction, const void* additionalData);
 
 } // namespace WTF

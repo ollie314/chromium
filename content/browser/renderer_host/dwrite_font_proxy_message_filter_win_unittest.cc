@@ -7,10 +7,13 @@
 #include <dwrite.h>
 #include <dwrite_2.h>
 
+#include <memory>
+
+#include "base/files/file.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/win/windows_version.h"
 #include "content/common/dwrite_font_proxy_messages.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -76,16 +79,12 @@ class DWriteFontProxyMessageFilterUnitTest : public testing::Test {
 };
 
 TEST_F(DWriteFontProxyMessageFilterUnitTest, GetFamilyCount) {
-  if (!gfx::win::ShouldUseDirectWrite())
-    return;
   UINT32 family_count = 0;
   Send(new DWriteFontProxyMsg_GetFamilyCount(&family_count));
   EXPECT_NE(0u, family_count);  // Assume there's some fonts on the test system.
 }
 
 TEST_F(DWriteFontProxyMessageFilterUnitTest, FindFamily) {
-  if (!gfx::win::ShouldUseDirectWrite())
-    return;
   UINT32 arial_index = 0;
   Send(new DWriteFontProxyMsg_FindFamily(L"Arial", &arial_index));
   EXPECT_NE(UINT_MAX, arial_index);
@@ -103,8 +102,6 @@ TEST_F(DWriteFontProxyMessageFilterUnitTest, FindFamily) {
 }
 
 TEST_F(DWriteFontProxyMessageFilterUnitTest, GetFamilyNames) {
-  if (!gfx::win::ShouldUseDirectWrite())
-    return;
   UINT32 arial_index = 0;
   Send(new DWriteFontProxyMsg_FindFamily(L"Arial", &arial_index));
   filter_->ResetReply();
@@ -120,8 +117,6 @@ TEST_F(DWriteFontProxyMessageFilterUnitTest, GetFamilyNames) {
 }
 
 TEST_F(DWriteFontProxyMessageFilterUnitTest, GetFamilyNamesIndexOutOfBounds) {
-  if (!gfx::win::ShouldUseDirectWrite())
-    return;
   std::vector<DWriteStringPair> names;
   UINT32 invalid_index = 1000000;
   Send(new DWriteFontProxyMsg_GetFamilyNames(invalid_index, &names));
@@ -130,14 +125,13 @@ TEST_F(DWriteFontProxyMessageFilterUnitTest, GetFamilyNamesIndexOutOfBounds) {
 }
 
 TEST_F(DWriteFontProxyMessageFilterUnitTest, GetFontFiles) {
-  if (!gfx::win::ShouldUseDirectWrite())
-    return;
   UINT32 arial_index = 0;
   Send(new DWriteFontProxyMsg_FindFamily(L"Arial", &arial_index));
   filter_->ResetReply();
 
   std::vector<base::string16> files;
-  Send(new DWriteFontProxyMsg_GetFontFiles(arial_index, &files));
+  std::vector<IPC::PlatformFileForTransit> handles;
+  Send(new DWriteFontProxyMsg_GetFontFiles(arial_index, &files, &handles));
 
   EXPECT_LT(0u, files.size());
   for (const base::string16& file : files) {
@@ -146,17 +140,16 @@ TEST_F(DWriteFontProxyMessageFilterUnitTest, GetFontFiles) {
 }
 
 TEST_F(DWriteFontProxyMessageFilterUnitTest, GetFontFilesIndexOutOfBounds) {
-  if (!gfx::win::ShouldUseDirectWrite())
-    return;
   std::vector<base::string16> files;
+  std::vector<IPC::PlatformFileForTransit> handles;
   UINT32 invalid_index = 1000000;
-  Send(new DWriteFontProxyMsg_GetFontFiles(invalid_index, &files));
+  Send(new DWriteFontProxyMsg_GetFontFiles(invalid_index, &files, &handles));
 
   EXPECT_EQ(0u, files.size());
 }
 
 TEST_F(DWriteFontProxyMessageFilterUnitTest, MapCharacter) {
-  if (!gfx::win::ShouldUseDirectWrite() || !IsDWrite2Available())
+  if (!IsDWrite2Available())
     return;
 
   DWriteFontStyle font_style;
@@ -179,7 +172,7 @@ TEST_F(DWriteFontProxyMessageFilterUnitTest, MapCharacter) {
 }
 
 TEST_F(DWriteFontProxyMessageFilterUnitTest, MapCharacterInvalidCharacter) {
-  if (!gfx::win::ShouldUseDirectWrite() || !IsDWrite2Available())
+  if (!IsDWrite2Available())
     return;
 
   DWriteFontStyle font_style;
@@ -198,7 +191,7 @@ TEST_F(DWriteFontProxyMessageFilterUnitTest, MapCharacterInvalidCharacter) {
 }
 
 TEST_F(DWriteFontProxyMessageFilterUnitTest, MapCharacterInvalidAfterValid) {
-  if (!gfx::win::ShouldUseDirectWrite() || !IsDWrite2Available())
+  if (!IsDWrite2Available())
     return;
 
   DWriteFontStyle font_style;
@@ -218,6 +211,30 @@ TEST_F(DWriteFontProxyMessageFilterUnitTest, MapCharacterInvalidAfterValid) {
   EXPECT_NE(0, result.font_style.font_weight);
   EXPECT_EQ(DWRITE_FONT_STYLE_NORMAL, result.font_style.font_slant);
   EXPECT_NE(0, result.font_style.font_stretch);
+}
+
+TEST_F(DWriteFontProxyMessageFilterUnitTest, TestCustomFontFiles) {
+  // Override windows fonts path to force the custom font file codepath.
+  filter_->SetWindowsFontsPathForTesting(L"X:\\NotWindowsFonts");
+  // Set the peer process so the filter duplicates handles into the current
+  // process.
+  filter_->set_peer_process_for_testing(base::Process::Current());
+
+  UINT32 arial_index = 0;
+  Send(new DWriteFontProxyMsg_FindFamily(L"Arial", &arial_index));
+  filter_->ResetReply();
+
+  std::vector<base::string16> files;
+  std::vector<IPC::PlatformFileForTransit> handles;
+  Send(new DWriteFontProxyMsg_GetFontFiles(arial_index, &files, &handles));
+
+  EXPECT_TRUE(files.empty());
+  EXPECT_FALSE(handles.empty());
+  for (const IPC::PlatformFileForTransit& handle : handles) {
+    EXPECT_TRUE(handle.IsValid());
+    base::File file = IPC::PlatformFileForTransitToFile(handle);
+    EXPECT_LT(0, file.GetLength());  // Check the file exists
+  }
 }
 
 }  // namespace

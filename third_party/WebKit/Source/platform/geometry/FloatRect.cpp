@@ -26,7 +26,6 @@
 
 #include "platform/geometry/FloatRect.h"
 
-#include "platform/FloatConversion.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/LayoutRect.h"
 #include "third_party/skia/include/core/SkRect.h"
@@ -60,7 +59,7 @@ void FloatRect::move(const IntSize& delta)
 
 FloatRect FloatRect::narrowPrecision(double x, double y, double width, double height)
 {
-    return FloatRect(narrowPrecisionToFloat(x), narrowPrecisionToFloat(y), narrowPrecisionToFloat(width), narrowPrecisionToFloat(height));
+    return FloatRect(clampTo<float>(x), clampTo<float>(y), clampTo<float>(width), clampTo<float>(height));
 }
 
 #if ENABLE(ASSERT)
@@ -197,18 +196,6 @@ FloatRect unionRect(const Vector<FloatRect>& rects)
     return result;
 }
 
-#ifndef NDEBUG
-void FloatRect::show() const
-{
-    LayoutRect(*this).show();
-}
-
-String FloatRect::toString() const
-{
-    return String::format("%s %s", location().toString().ascii().data(), size().toString().ascii().data());
-}
-#endif
-
 IntRect enclosingIntRect(const FloatRect& rect)
 {
     IntPoint location = flooredIntPoint(rect.minXMinYCorner());
@@ -242,6 +229,13 @@ FloatRect mapRect(const FloatRect& r, const FloatRect& srcRect, const FloatRect&
     return FloatRect(destRect.x() + (r.x() - srcRect.x()) * widthScale,
         destRect.y() + (r.y() - srcRect.y()) * heightScale,
         r.width() * widthScale, r.height() * heightScale);
+}
+
+String FloatRect::toString() const
+{
+    return String::format("%s %s",
+        location().toString().ascii().data(),
+        size().toString().ascii().data());
 }
 
 } // namespace blink

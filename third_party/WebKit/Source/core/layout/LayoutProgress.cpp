@@ -27,7 +27,7 @@
 
 namespace blink {
 
-LayoutProgress::LayoutProgress(HTMLElement* element)
+LayoutProgress::LayoutProgress(HTMLProgressElement* element)
     : LayoutBlockFlow(element)
     , m_position(HTMLProgressElement::InvalidPosition)
     , m_animationStartTime(0)
@@ -84,7 +84,7 @@ bool LayoutProgress::isAnimating() const
     return m_animating;
 }
 
-void LayoutProgress::animationTimerFired(Timer<LayoutProgress>*)
+void LayoutProgress::animationTimerFired(TimerBase*)
 {
     setShouldDoFullPaintInvalidation();
     if (!m_animationTimer.isActive() && m_animating)
@@ -111,14 +111,7 @@ void LayoutProgress::updateAnimationState()
 
 HTMLProgressElement* LayoutProgress::progressElement() const
 {
-    if (!node())
-        return nullptr;
-
-    if (isHTMLProgressElement(*node()))
-        return toHTMLProgressElement(node());
-
-    ASSERT(node()->shadowHost());
-    return toHTMLProgressElement(node()->shadowHost());
+    return toHTMLProgressElement(node());
 }
 
 } // namespace blink

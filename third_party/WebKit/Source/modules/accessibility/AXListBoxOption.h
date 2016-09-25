@@ -39,6 +39,7 @@ class AXObjectCacheImpl;
 class HTMLSelectElement;
 
 class AXListBoxOption final : public AXLayoutObject {
+    WTF_MAKE_NONCOPYABLE(AXListBoxOption);
 
 private:
     AXListBoxOption(LayoutObject*, AXObjectCacheImpl&);
@@ -61,7 +62,6 @@ private:
     bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 
     HTMLSelectElement* listBoxOptionParentNode() const;
-    int listBoxOptionIndex() const;
     bool isParentPresentationalRole() const;
 };
 

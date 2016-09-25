@@ -40,6 +40,7 @@
 #include "../platform/WebSize.h"
 #include "../platform/WebTopControlsState.h"
 #include "WebCompositionUnderline.h"
+#include "WebRange.h"
 #include "WebTextDirection.h"
 #include "WebTextInputInfo.h"
 
@@ -72,11 +73,12 @@ public:
     virtual void resizeVisualViewport(const WebSize&) { }
 
     // Called to notify the WebWidget of entering/exiting fullscreen mode.
-    virtual void didEnterFullScreen() { }
-    virtual void didExitFullScreen() { }
+    virtual void didEnterFullscreen() { }
+    virtual void didExitFullscreen() { }
 
     // Called to update imperative animation state. This should be called before
     // paint, although the client can rate-limit these calls.
+    // |lastFrameTimeMonotonic| is in seconds.
     virtual void beginFrame(double lastFrameTimeMonotonic) { }
 
     // Called to run through the entire set of document lifecycle phases needed
@@ -93,7 +95,9 @@ public:
     // warranted before painting again).
     virtual void paint(WebCanvas*, const WebRect& viewPort) { }
 
-    virtual void paintCompositedDeprecated(WebCanvas*, const WebRect&) { }
+    // Similar to paint() but ignores compositing decisions, squashing all
+    // contents of the WebWidget into the output given to the WebCanvas.
+    virtual void paintIgnoringCompositing(WebCanvas*, const WebRect&) {}
 
     // Run layout and paint of all pending document changes asynchronously.
     // The caller is resposible for keeping the WebLayoutAndPaintAsyncCallback
@@ -150,24 +154,17 @@ public:
         KeepSelection,
     };
 
-    // Called to inform the WebWidget to confirm an ongoing composition.
-    // This method is same as confirmComposition(WebString());
-    // Returns true if there is an ongoing composition.
-    virtual bool confirmComposition() { return false; } // Deprecated
-    virtual bool confirmComposition(ConfirmCompositionBehavior selectionBehavior) { return false; }
+    // Called to inform the WebWidget that deleting the ongoing composition if
+    // any, inserting the specified text, and moving the caret according to
+    // relativeCaretPosition.
+    virtual bool commitText(const WebString& text, int relativeCaretPosition) { return false; }
 
-    // Called to inform the WebWidget to confirm an ongoing composition with a
-    // new composition text. If the text is empty then the current composition
-    // text is confirmed. If there is no ongoing composition, then deletes the
-    // current selection and inserts the text. This method has no effect if
-    // there is no ongoing composition and the text is empty.
-    // Returns true if there is an ongoing composition or the text is inserted.
-    virtual bool confirmComposition(const WebString& text) { return false; }
+    // Called to inform the WebWidget to confirm an ongoing composition.
+    virtual bool finishComposingText(ConfirmCompositionBehavior selectionBehavior) { return false; }
 
     // Fetches the character range of the current composition, also called the
-    // "marked range." Returns true and fills the out-paramters on success;
-    // returns false on failure.
-    virtual bool compositionRange(size_t* location, size_t* length) { return false; }
+    // "marked range."
+    virtual WebRange compositionRange() { return WebRange(); }
 
     // Returns information about the current text input of this WebWidget.
     // Note that this query can be expensive for long fields, as it returns the
@@ -190,11 +187,8 @@ public:
     // (i.e its anchor is its start).
     virtual bool isSelectionAnchorFirst() const { return false; }
 
-    // Fetch the current selection range of this WebWidget. If there is no
-    // selection, it will output a 0-length range with the location at the
-    // caret. Returns true and fills the out-paramters on success; returns false
-    // on failure.
-    virtual bool caretOrSelectionRange(size_t* location, size_t* length) { return false; }
+    // Fetch the current selection range of this WebWidget.
+    virtual WebRange caretOrSelectionRange() { return WebRange(); }
 
     // Changes the text direction of the selected input node.
     virtual void setTextDirection(WebTextDirection) { }
@@ -205,6 +199,10 @@ public:
 
     // Returns true if the WebWidget created is of type WebView.
     virtual bool isWebView() const { return false; }
+
+    // Returns true if the WebWidget created is of type WebFrameWidget.
+    virtual bool isWebFrameWidget() const { return false; }
+
     // Returns true if the WebWidget created is of type WebPagePopup.
     virtual bool isPagePopup() const { return false; }
 
@@ -236,13 +234,17 @@ public:
     // but not the select popup.
     virtual WebPagePopup* pagePopup() const { return 0; }
 
-    // Notification about the top controls height.  If the boolean is true, then
-    // the embedder shrunk the WebView size by the top controls height.
-    virtual void setTopControlsHeight(float height, bool topControlsShrinkLayoutSize) { }
-
     // Updates top controls constraints and current state. Allows embedder to
     // control what are valid states for top controls and if it should animate.
     virtual void updateTopControlsState(WebTopControlsState constraints, WebTopControlsState current, bool animate) { }
+
+    // Populate |bounds| with the composition character bounds for the ongoing
+    // composition. Returns false if there is no focused input or any ongoing
+    // composition.
+    virtual bool getCompositionCharacterBounds(WebVector<WebRect>& bounds) { return false; }
+
+    // Applies the range on the focused frame so that the text will later be replaced.
+    virtual void applyReplacementRange(const WebRange&) {}
 
 protected:
     ~WebWidget() { }

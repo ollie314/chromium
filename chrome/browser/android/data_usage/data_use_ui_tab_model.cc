@@ -9,13 +9,23 @@
 #include "base/logging.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
-#include "url/gurl.h"
+#include "content/public/browser/navigation_entry.h"
+
+namespace {
+
+// Default maximum limit imposed for the initial UI navigation event buffer.
+// Once this limit is reached, the buffer will be cleared.
+const uint32_t kDefaultMaxNavigationEventsBuffered = 100;
+
+}  // namespace
 
 namespace chrome {
 
 namespace android {
 
-DataUseUITabModel::DataUseUITabModel() : weak_factory_(this) {
+DataUseUITabModel::DataUseUITabModel()
+    : data_use_ui_navigations_(new std::vector<DataUseUINavigationEvent>()),
+      weak_factory_(this) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 }
 
@@ -29,16 +39,25 @@ DataUseUITabModel::~DataUseUITabModel() {
 void DataUseUITabModel::ReportBrowserNavigation(
     const GURL& gurl,
     ui::PageTransition page_transition,
-    SessionID::id_type tab_id) const {
+    SessionID::id_type tab_id,
+    content::NavigationEntry* navigation_entry) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK_LE(0, tab_id);
+  DCHECK_EQ(navigation_entry->GetURL(), gurl);
 
   DataUseTabModel::TransitionType transition_type;
 
-  if (data_use_tab_model_ &&
-      ConvertTransitionType(page_transition, gurl, &transition_type)) {
+  if (!ConvertTransitionType(page_transition, gurl, &transition_type))
+    return;
+
+  if (data_use_ui_navigations_) {
+    BufferNavigationEvent(tab_id, transition_type, gurl, std::string());
+    return;
+  }
+
+  if (data_use_tab_model_) {
     data_use_tab_model_->OnNavigationEvent(tab_id, transition_type, gurl,
-                                           std::string());
+                                           std::string(), navigation_entry);
   }
 }
 
@@ -64,10 +83,18 @@ void DataUseUITabModel::ReportCustomTabInitialNavigation(
   if (tab_id <= 0)
     return;
 
+  if (data_use_ui_navigations_) {
+    BufferNavigationEvent(tab_id, DataUseTabModel::TRANSITION_CUSTOM_TAB,
+                          GURL(url), package_name);
+    return;
+  }
+
   if (data_use_tab_model_) {
+    // Data use tracking started with custom tab navigation is permanent. So
+    // no need to pass the navigation entry.
     data_use_tab_model_->OnNavigationEvent(
-        tab_id, DataUseTabModel::TRANSITION_CUSTOM_TAB, GURL(url),
-        package_name);
+        tab_id, DataUseTabModel::TRANSITION_CUSTOM_TAB, GURL(url), package_name,
+        nullptr);
   }
 }
 
@@ -80,6 +107,10 @@ void DataUseUITabModel::SetDataUseTabModel(
 
   data_use_tab_model_ = data_use_tab_model->GetWeakPtr();
   data_use_tab_model_->AddObserver(this);
+
+  // Check if |data_use_tab_model_| is already ready for navigation events.
+  if (data_use_tab_model_->is_ready_for_navigation_event())
+    OnDataUseTabModelReady();
 }
 
 base::WeakPtr<DataUseUITabModel> DataUseUITabModel::GetWeakPtr() {
@@ -139,7 +170,8 @@ bool DataUseUITabModel::CheckAndResetDataUseTrackingStarted(
 bool DataUseUITabModel::WouldDataUseTrackingEnd(
     const std::string& url,
     int page_transition,
-    SessionID::id_type tab_id) const {
+    SessionID::id_type tab_id,
+    const content::NavigationEntry* navigation_entry) const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   TabEvents::const_iterator it = tab_events_.find(tab_id);
@@ -154,11 +186,19 @@ bool DataUseUITabModel::WouldDataUseTrackingEnd(
     return false;
   }
 
+  if (transition_type != DataUseTabModel::TRANSITION_FORWARD_BACK) {
+    // NavigationEntry is only needed for back-forward navigations. For other
+    // navigations, such as redirects, NavigationEntry may not correspond to the
+    // current navigation.
+    navigation_entry = nullptr;
+  }
+  DCHECK(!navigation_entry || (navigation_entry->GetURL() == GURL(url)));
+
   if (!data_use_tab_model_)
     return false;
 
   return data_use_tab_model_->WouldNavigationEventEndTracking(
-      tab_id, transition_type, GURL(url));
+      tab_id, transition_type, GURL(url), navigation_entry);
 }
 
 void DataUseUITabModel::UserClickedContinueOnDialogBox(
@@ -209,11 +249,12 @@ bool DataUseUITabModel::ConvertTransitionType(
     DataUseTabModel::TransitionType* transition_type) const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (!ui::PageTransitionIsMainFrame(page_transition) ||
-      (((page_transition & ui::PAGE_TRANSITION_CORE_MASK) !=
-        ui::PAGE_TRANSITION_RELOAD) &&
-       !ui::PageTransitionIsNewNavigation(page_transition))) {
+  if (!ui::PageTransitionIsMainFrame(page_transition))
     return false;
+
+  if (page_transition & ui::PAGE_TRANSITION_FORWARD_BACK) {
+    *transition_type = DataUseTabModel::TRANSITION_FORWARD_BACK;
+    return true;
   }
 
   switch (page_transition & ui::PAGE_TRANSITION_CORE_MASK) {
@@ -221,10 +262,10 @@ bool DataUseUITabModel::ConvertTransitionType(
       if ((page_transition & ui::PAGE_TRANSITION_FROM_API) != 0) {
         // Clicking on bookmarks.
         *transition_type = DataUseTabModel::TRANSITION_BOOKMARK;
-        return true;
+      } else {
+        // Newtab, clicking on a link.
+        *transition_type = DataUseTabModel::TRANSITION_LINK;
       }
-      // Newtab, clicking on a link.
-      *transition_type = DataUseTabModel::TRANSITION_LINK;
       return true;
     case ui::PAGE_TRANSITION_TYPED:
       *transition_type = DataUseTabModel::TRANSITION_OMNIBOX_NAVIGATION;
@@ -246,16 +287,65 @@ bool DataUseUITabModel::ConvertTransitionType(
       *transition_type = DataUseTabModel::TRANSITION_OMNIBOX_SEARCH;
       return true;
     case ui::PAGE_TRANSITION_RELOAD:
-      if ((page_transition & ui::PAGE_TRANSITION_FORWARD_BACK) == 0) {
-        // Restored tabs or user reloaded the page.
-        // TODO(rajendrant): Handle only the tab restore case. We are only
-        // interested in that.
-        *transition_type = DataUseTabModel::TRANSITION_RELOAD;
-        return true;
-      }
+      // Restored tabs or user reloaded the page.
+      // TODO(rajendrant): Handle only the tab restore case. We are only
+      // interested in that.
+      *transition_type = DataUseTabModel::TRANSITION_RELOAD;
+      return true;
+    case ui::PAGE_TRANSITION_FORM_SUBMIT:
+      *transition_type = DataUseTabModel::TRANSITION_FORM_SUBMIT;
+      return true;
+    case ui::PAGE_TRANSITION_HOME_PAGE:
+      // TODO(rajendrant): Handle the home page navigation as enter & exit.
       return false;
     default:
       return false;
+  }
+}
+
+void DataUseUITabModel::OnDataUseTabModelReady() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(data_use_tab_model_ &&
+         data_use_tab_model_->is_ready_for_navigation_event());
+  ProcessBufferedNavigationEvents();
+}
+
+void DataUseUITabModel::BufferNavigationEvent(
+    SessionID::id_type tab_id,
+    DataUseTabModel::TransitionType transition,
+    const GURL& url,
+    const std::string& package) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(!data_use_tab_model_ ||
+         !data_use_tab_model_->is_ready_for_navigation_event());
+
+  data_use_ui_navigations_->push_back(
+      DataUseUINavigationEvent(tab_id, transition, url, package));
+
+  if (data_use_ui_navigations_->size() >= kDefaultMaxNavigationEventsBuffered) {
+    ProcessBufferedNavigationEvents();
+    // TODO(rajendrant): Add histogram to track that the buffer was full before
+    // |SetDataUseTabModel| or |OnDataUseTabModelReady| got called.
+  }
+}
+
+void DataUseUITabModel::ProcessBufferedNavigationEvents() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (!data_use_ui_navigations_)
+    return;
+
+  // Move the ownership of vector managed by |data_use_ui_navigations_| and
+  // release it, so that navigation events will be processed immediately.
+  const auto tmp_data_use_ui_navigations_ = std::move(data_use_ui_navigations_);
+  for (const auto& ui_event : *tmp_data_use_ui_navigations_.get()) {
+    if (data_use_tab_model_) {
+      // TODO(rajendrant): Find the navigation entry corresponding to this
+      // navigation and pass to |OnNavigationEvent|.
+      data_use_tab_model_->OnNavigationEvent(
+          ui_event.tab_id, ui_event.transition_type, ui_event.url,
+          ui_event.package, nullptr);
+    }
   }
 }
 

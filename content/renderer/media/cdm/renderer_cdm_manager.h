@@ -74,6 +74,9 @@ class RendererCdmManager : public RenderFrameObserver {
   void UnregisterMediaKeys(int cdm_id);
 
  private:
+  // RenderFrameObserver implementation.
+  void OnDestruct() override;
+
   // Gets the pointer to ProxyMediaKeys given the |cdm_id|.
   ProxyMediaKeys* GetMediaKeys(int cdm_id);
 
@@ -81,14 +84,8 @@ class RendererCdmManager : public RenderFrameObserver {
   void OnSessionMessage(int cdm_id,
                         const std::string& session_id,
                         media::MediaKeys::MessageType message_type,
-                        const std::vector<uint8_t>& message,
-                        const GURL& legacy_destination_url);
+                        const std::vector<uint8_t>& message);
   void OnSessionClosed(int cdm_id, const std::string& session_id);
-  void OnLegacySessionError(int cdm_id,
-                            const std::string& session_id,
-                            media::MediaKeys::Exception exception,
-                            uint32_t system_code,
-                            const std::string& error_message);
   void OnSessionKeysChange(
       int cdm_id,
       const std::string& session_id,

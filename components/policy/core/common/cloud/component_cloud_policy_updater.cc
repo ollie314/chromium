@@ -15,8 +15,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "components/policy/core/common/cloud/component_cloud_policy_store.h"
 #include "components/policy/core/common/cloud/external_policy_data_fetcher.h"
-#include "policy/proto/chrome_extension_policy.pb.h"
-#include "policy/proto/device_management_backend.pb.h"
+#include "components/policy/proto/chrome_extension_policy.pb.h"
+#include "components/policy/proto/device_management_backend.pb.h"
 
 namespace em = enterprise_management;
 
@@ -37,7 +37,7 @@ const int64_t kMaxParallelPolicyDataFetches = 2;
 
 ComponentCloudPolicyUpdater::ComponentCloudPolicyUpdater(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
-    scoped_ptr<ExternalPolicyDataFetcher> external_policy_data_fetcher,
+    std::unique_ptr<ExternalPolicyDataFetcher> external_policy_data_fetcher,
     ComponentCloudPolicyStore* store)
     : store_(store),
       external_policy_data_updater_(task_runner,
@@ -48,7 +48,7 @@ ComponentCloudPolicyUpdater::~ComponentCloudPolicyUpdater() {
 }
 
 void ComponentCloudPolicyUpdater::UpdateExternalPolicy(
-    scoped_ptr<em::PolicyFetchResponse> response) {
+    std::unique_ptr<em::PolicyFetchResponse> response) {
   // Keep a serialized copy of |response|, to cache it later.
   // The policy is also rejected if it exceeds the maximum size.
   std::string serialized_response;

@@ -13,9 +13,10 @@ namespace test {
 
 MockTimeWaitListManager::MockTimeWaitListManager(
     QuicPacketWriter* writer,
-    QuicServerSessionVisitor* visitor,
-    QuicConnectionHelperInterface* helper)
-    : QuicTimeWaitListManager(writer, visitor, helper) {
+    QuicServerSessionBase::Visitor* visitor,
+    QuicConnectionHelperInterface* helper,
+    QuicAlarmFactory* alarm_factory)
+    : QuicTimeWaitListManager(writer, visitor, helper, alarm_factory) {
   // Though AddConnectionIdToTimeWait is mocked, we want to retain its
   // functionality.
   EXPECT_CALL(*this, AddConnectionIdToTimeWait(_, _, _, _))

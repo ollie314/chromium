@@ -8,8 +8,9 @@
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/trace_config_memory_test_util.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -25,6 +26,7 @@ namespace {
 
 using base::trace_event::MemoryDumpManager;
 using base::trace_event::MemoryDumpType;
+using tracing::BeginTracingWithTraceConfig;
 using tracing::BeginTracingWithWatch;
 using tracing::WaitForWatchEvent;
 using tracing::EndTracing;
@@ -44,27 +46,23 @@ class TracingBrowserTest : public InProcessBrowserTest {
     ASSERT_TRUE(content::ExecuteScript(rvh, ";"));
   }
 
-  void PerformDumpMemoryTestActions() {
-    std::string json_events;
-    base::TimeDelta no_timeout;
-
+  void PerformDumpMemoryTestActions(
+      const base::trace_event::TraceConfig& trace_config) {
     GURL url1("about:blank");
     ui_test_utils::NavigateToURLWithDisposition(
-        browser(), url1, NEW_FOREGROUND_TAB,
+        browser(), url1, WindowOpenDisposition::NEW_FOREGROUND_TAB,
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
     ASSERT_NO_FATAL_FAILURE(ExecuteJavascriptOnCurrentTab());
 
     // Begin tracing and watch for multiple periodic dump trace events.
     std::string event_name = base::trace_event::MemoryDumpTypeToString(
         MemoryDumpType::PERIODIC_INTERVAL);
-    ASSERT_TRUE(BeginTracingWithWatch(MemoryDumpManager::kTraceCategory,
-                                      MemoryDumpManager::kTraceCategory,
-                                      event_name, 10));
+    ASSERT_TRUE(BeginTracingWithTraceConfig(trace_config));
 
     // Create and destroy renderers while tracing is enabled.
     GURL url2("chrome://credits");
     ui_test_utils::NavigateToURLWithDisposition(
-        browser(), url2, NEW_FOREGROUND_TAB,
+        browser(), url2, WindowOpenDisposition::NEW_FOREGROUND_TAB,
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
     ASSERT_NO_FATAL_FAILURE(ExecuteJavascriptOnCurrentTab());
 
@@ -73,26 +71,17 @@ class TracingBrowserTest : public InProcessBrowserTest {
 
     GURL url3("chrome://settings");
     ui_test_utils::NavigateToURLWithDisposition(
-        browser(), url3, CURRENT_TAB,
+        browser(), url3, WindowOpenDisposition::CURRENT_TAB,
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
     ASSERT_NO_FATAL_FAILURE(ExecuteJavascriptOnCurrentTab());
 
-    EXPECT_TRUE(WaitForWatchEvent(no_timeout));
+    std::string json_events;
     ASSERT_TRUE(EndTracing(&json_events));
 
     // Expect the basic memory dumps to be present in the trace.
     EXPECT_NE(std::string::npos, json_events.find("process_totals"));
-
     EXPECT_NE(std::string::npos, json_events.find("v8"));
     EXPECT_NE(std::string::npos, json_events.find("blink_gc"));
-  }
-};
-
-class SingleProcessTracingBrowserTest : public TracingBrowserTest {
- protected:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    InProcessBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kSingleProcess);
   }
 };
 
@@ -153,32 +142,28 @@ IN_PROC_BROWSER_TEST_F(TracingBrowserTest, BeginTracingWithWatch) {
                                     "OnJavaScriptExecuteRequestForTests", 2));
   // Open two tabs to different URLs to encourage two separate renderer
   // processes. Each will fire an event that will be counted towards the total.
-  ui_test_utils::NavigateToURLWithDisposition(browser(), url1,
-      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), url1, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   ASSERT_NO_FATAL_FAILURE(ExecuteJavascriptOnCurrentTab());
-  ui_test_utils::NavigateToURLWithDisposition(browser(), url2,
-      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), url2, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   ASSERT_NO_FATAL_FAILURE(ExecuteJavascriptOnCurrentTab());
   EXPECT_TRUE(WaitForWatchEvent(no_timeout));
   ASSERT_TRUE(EndTracing(&json_events));
 }
 
-// Multi-process mode.
-// Flaky on win and Linux: https://crbug.com/594884.
-IN_PROC_BROWSER_TEST_F(TracingBrowserTest, DISABLED_TestMemoryInfra) {
-  PerformDumpMemoryTestActions();
+IN_PROC_BROWSER_TEST_F(TracingBrowserTest, TestMemoryInfra) {
+  PerformDumpMemoryTestActions(base::trace_event::TraceConfig(
+      base::trace_event::TraceConfigMemoryTestUtil::
+          GetTraceConfig_PeriodicTriggers(250, 2000)));
 }
 
-// Single-process mode.
-// Flaky (leaking) on linux_chromium_asan_rel_ng: https://crbug.com/585026
-// and Windows https://crbug.com/594884
-#if defined(ADDRESS_SANITIZER) || defined(OS_WIN)
-#define MAYBE_TestMemoryInfra DISABLED_TestMemoryInfra
-#else
-#define MAYBE_TestMemoryInfra TestMemoryInfra
-#endif
-IN_PROC_BROWSER_TEST_F(SingleProcessTracingBrowserTest, MAYBE_TestMemoryInfra) {
-  PerformDumpMemoryTestActions();
+IN_PROC_BROWSER_TEST_F(TracingBrowserTest, TestBackgroundMemoryInfra) {
+  PerformDumpMemoryTestActions(base::trace_event::TraceConfig(
+      base::trace_event::TraceConfigMemoryTestUtil::
+          GetTraceConfig_BackgroundTrigger(200)));
 }
 
 }  // namespace

@@ -8,7 +8,6 @@
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/modules/v8/UnionTypesModules.h"
 #include "modules/ModulesExport.h"
 #include "modules/fetch/Body.h"
 #include "modules/fetch/BodyStreamBuffer.h"
@@ -16,7 +15,6 @@
 #include "modules/fetch/Headers.h"
 #include "platform/blob/BlobData.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -32,15 +30,15 @@ class MODULES_EXPORT Response final : public Body {
     DEFINE_WRAPPERTYPEINFO();
     WTF_MAKE_NONCOPYABLE(Response);
 public:
-    ~Response() override { }
-
+    // These "create" function which takes a ScriptState* must be called with
+    // entering an appropriate V8 context.
     // From Response.idl:
     static Response* create(ScriptState*, ExceptionState&);
     static Response* create(ScriptState*, ScriptValue body, const Dictionary&, ExceptionState&);
 
-    static Response* create(ExecutionContext*, PassOwnPtr<FetchDataConsumerHandle> bodyHandle, const String& contentType, const ResponseInit&, ExceptionState&);
+    static Response* create(ScriptState*, BodyStreamBuffer*, const String& contentType, const ResponseInit&, ExceptionState&);
     static Response* create(ExecutionContext*, FetchResponseData*);
-    static Response* create(ExecutionContext*, const WebServiceWorkerResponse&);
+    static Response* create(ScriptState*, const WebServiceWorkerResponse&);
 
     static Response* createClone(const Response&);
 
@@ -58,20 +56,22 @@ public:
     Headers* headers() const;
 
     // From Response.idl:
-    Response* clone(ExceptionState&);
+    // This function must be called with entering an appropriate V8 context.
+    Response* clone(ScriptState*, ExceptionState&);
 
-    // ActiveScriptWrappable
+    // ScriptWrappable
     bool hasPendingActivity() const final;
-
-    // ActiveDOMObject
-    void stop() override;
 
     // Does not call response.setBlobDataHandle().
     void populateWebServiceWorkerResponse(WebServiceWorkerResponse& /* response */);
 
     bool hasBody() const;
     BodyStreamBuffer* bodyBuffer() override { return m_response->buffer(); }
+    // Returns the BodyStreamBuffer of |m_response|. This method doesn't check
+    // the internal response of |m_response| even if |m_response| has it.
     const BodyStreamBuffer* bodyBuffer() const override { return m_response->buffer(); }
+    // Returns the BodyStreamBuffer of the internal response of |m_response| if
+    // any. Otherwise, returns one of |m_response|.
     BodyStreamBuffer* internalBodyBuffer() { return m_response->internalBuffer(); }
     const BodyStreamBuffer* internalBodyBuffer() const { return m_response->internalBuffer(); }
     bool bodyUsed() override;
@@ -85,6 +85,9 @@ private:
     explicit Response(ExecutionContext*);
     Response(ExecutionContext*, FetchResponseData*);
     Response(ExecutionContext*, FetchResponseData*, Headers*);
+
+    void installBody();
+    void refreshBody(ScriptState*);
 
     const Member<FetchResponseData> m_response;
     const Member<Headers> m_headers;

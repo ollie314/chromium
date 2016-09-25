@@ -68,6 +68,8 @@ public:
 
     bool isDisabledFormControl() const override;
 
+    bool matchesEnabledPseudoClass() const override;
+
     bool isEnumeratable() const override { return false; }
 
     bool isRequired() const;
@@ -126,7 +128,7 @@ protected:
     void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
     virtual void requiredAttributeChanged();
     virtual void disabledAttributeChanged();
-    void attach(const AttachContext& = AttachContext()) override;
+    void attachLayoutTree(const AttachContext& = AttachContext()) override;
     InsertionNotificationRequest insertedInto(ContainerNode*) override;
     void removedFrom(ContainerNode*) override;
     void willChangeForm() override;
@@ -154,7 +156,7 @@ private:
     bool isFormControlElement() const final { return true; }
     bool alwaysCreateUserAgentShadowRoot() const override { return true; }
 
-    short tabIndex() const final;
+    short tabIndex() const;
 
     bool isValidElement() override;
     bool matchesValidityPseudoClasses() const override;

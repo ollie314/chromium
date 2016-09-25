@@ -110,6 +110,17 @@ class CONTENT_EXPORT MediaStreamAudioProcessor :
   void OnDisableAecDump() override;
   void OnIpcClosing() override;
 
+  // Returns true if MediaStreamAudioProcessor would modify the audio signal,
+  // based on the |constraints| and |effects_flags| parsed from a user media
+  // request. If the audio signal would not be modified, there is no need to
+  // instantiate a MediaStreamAudioProcessor and feed audio through it. Doing so
+  // would waste a non-trivial amount of memory and CPU resources.
+  //
+  // See media::AudioParameters::PlatformEffectsMask for interpretation of
+  // |effects_flags|.
+  static bool WouldModifyAudio(const blink::WebMediaConstraints& constraints,
+                               int effects_flags);
+
  protected:
   ~MediaStreamAudioProcessor() override;
 
@@ -124,6 +135,7 @@ class CONTENT_EXPORT MediaStreamAudioProcessor :
                      int sample_rate,
                      int audio_delay_milliseconds) override;
   void OnPlayoutDataSourceChanged() override;
+  void OnRenderThreadChanged() override;
 
   // webrtc::AudioProcessorInterface implementation.
   // This method is called on the libjingle thread.
@@ -151,6 +163,9 @@ class CONTENT_EXPORT MediaStreamAudioProcessor :
                   int volume,
                   bool key_pressed,
                   float* const* output_ptrs);
+
+  // Update AEC stats. Called on the main render thread.
+  void UpdateAecStats();
 
   // Cached value for the render delay latency. This member is accessed by
   // both the capture audio thread and the render audio thread.
@@ -189,13 +204,17 @@ class CONTENT_EXPORT MediaStreamAudioProcessor :
   // Used to DCHECK that some methods are called on the render audio thread.
   base::ThreadChecker render_thread_checker_;
 
+  // Message loop for the main render thread. We're assuming that we're created
+  // on the main render thread.
+  base::MessageLoop* main_thread_message_loop_;
+
   // Flag to enable stereo channel mirroring.
   bool audio_mirroring_;
 
+  // Typing detector. |typing_detected_| is used to show the result of typing
+  // detection. It can be accessed by the capture audio thread and by the
+  // libjingle thread which calls GetStats().
   std::unique_ptr<webrtc::TypingDetection> typing_detector_;
-  // This flag is used to show the result of typing detection.
-  // It can be accessed by the capture audio thread and by the libjingle thread
-  // which calls GetStats().
   base::subtle::Atomic32 typing_detected_;
 
   // Communication with browser for AEC dump.
@@ -204,8 +223,8 @@ class CONTENT_EXPORT MediaStreamAudioProcessor :
   // Flag to avoid executing Stop() more than once.
   bool stopped_;
 
-  // Object for logging echo information when the AEC is enabled. Accessible by
-  // the libjingle thread through GetStats().
+  // Object for logging UMA stats for echo information when the AEC is enabled.
+  // Accessed on the main render thread.
   std::unique_ptr<EchoInformation> echo_information_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamAudioProcessor);

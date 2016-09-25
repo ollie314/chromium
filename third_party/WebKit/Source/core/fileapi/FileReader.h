@@ -40,6 +40,7 @@
 #include "core/fileapi/FileReaderLoaderClient.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
+#include <memory>
 
 namespace blink {
 
@@ -57,9 +58,9 @@ public:
     ~FileReader() override;
 
     enum ReadyState {
-        EMPTY = 0,
-        LOADING = 1,
-        DONE = 2
+        kEmpty = 0,
+        kLoading = 1,
+        kDone = 2
     };
 
     void readAsArrayBuffer(Blob*, ExceptionState&);
@@ -72,13 +73,13 @@ public:
     void doAbort();
 
     ReadyState getReadyState() const { return m_state; }
-    FileError* error() { return m_error; }
+    DOMException* error() { return m_error; }
     void result(StringOrArrayBuffer& resultAttribute) const;
 
     // ActiveDOMObject
     void stop() override;
 
-    // ActiveScriptWrappable
+    // ScriptWrappable
     bool hasPendingActivity() const final;
 
     // EventTarget
@@ -122,14 +123,15 @@ private:
         LoadingStateAborted
     };
     LoadingState m_loadingState;
+    bool m_stillFiringEvents;
 
     String m_blobType;
     RefPtr<BlobDataHandle> m_blobDataHandle;
     FileReaderLoader::ReadType m_readType;
     String m_encoding;
 
-    OwnPtr<FileReaderLoader> m_loader;
-    Member<FileError> m_error;
+    std::unique_ptr<FileReaderLoader> m_loader;
+    Member<DOMException> m_error;
     double m_lastProgressNotificationTimeMS;
 };
 

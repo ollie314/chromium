@@ -9,10 +9,15 @@
 WebInspector.AccessibilitySidebarView = function()
 {
     WebInspector.ThrottledWidget.call(this);
-    this._computedTextSubPane = null;
-    this._axNodeSubPane = null;
     this._node = null;
-    this._sidebarPaneStack = null;
+    this._sidebarPaneStack = WebInspector.viewManager.createStackLocation();
+    this._treeSubPane = new WebInspector.AXTreePane();
+    this._sidebarPaneStack.showView(this._treeSubPane);
+    this._ariaSubPane = new WebInspector.ARIAAttributesPane();
+    this._sidebarPaneStack.showView(this._ariaSubPane);
+    this._axNodeSubPane = new WebInspector.AXNodeSubPane();
+    this._sidebarPaneStack.showView(this._axNodeSubPane);
+    this._sidebarPaneStack.widget().show(this.element);
     WebInspector.context.addFlavorChangeListener(WebInspector.DOMNode, this._pullNode, this);
     this._pullNode();
 }
@@ -27,26 +32,39 @@ WebInspector.AccessibilitySidebarView.prototype = {
     },
 
     /**
+     * @param {?Array<!AccessibilityAgent.AXNode>} nodes
+     */
+    accessibilityNodeCallback: function(nodes)
+    {
+        if (!nodes)
+            return;
+
+        var currentAXNode = nodes[0];
+        // TODO(aboxhall): implement hideView() in WebInspector.ViewLocation and use it here.
+        if (currentAXNode.ignored)
+            this._ariaSubPane.parentWidget().contentElement.classList.add("sidebar-hidden-override");
+        else
+            this._ariaSubPane.parentWidget().contentElement.classList.remove("sidebar-hidden-override");
+
+        if (this._axNodeSubPane)
+            this._axNodeSubPane.setAXNode(currentAXNode);
+        if (this._treeSubPane)
+            this._treeSubPane.setAXNodeAndAncestors(nodes);
+    },
+
+    /**
      * @override
      * @protected
      * @return {!Promise.<?>}
      */
     doUpdate: function()
     {
-        /**
-         * @param {?AccessibilityAgent.AXNode} accessibilityNode
-         * @this {WebInspector.AccessibilitySidebarView}
-         */
-        function accessibilityNodeCallback(accessibilityNode)
-        {
-            if (this._computedTextSubPane)
-                this._computedTextSubPane.setAXNode(accessibilityNode);
-            if (this._axNodeSubPane)
-                this._axNodeSubPane.setAXNode(accessibilityNode);
-        }
         var node = this.node();
-        return WebInspector.AccessibilityModel.fromTarget(node.target()).getAXNode(node.id)
-            .then(accessibilityNodeCallback.bind(this))
+        this._treeSubPane.setNode(node);
+        this._axNodeSubPane.setNode(node);
+        this._ariaSubPane.setNode(node);
+        return WebInspector.AccessibilityModel.fromTarget(node.target()).getAXNodeChain(node.id)
+            .then((nodes) => { this.accessibilityNodeCallback(nodes); });
     },
 
     /**
@@ -56,23 +74,9 @@ WebInspector.AccessibilitySidebarView.prototype = {
     {
         WebInspector.ThrottledWidget.prototype.wasShown.call(this);
 
-        if (!this._sidebarPaneStack) {
-            this._computedTextSubPane = new WebInspector.AXComputedTextSubPane();
-            this._computedTextSubPane.setNode(this.node());
-            this._computedTextSubPane.show(this.element);
-            this._computedTextSubPane.expand();
-
-            this._axNodeSubPane = new WebInspector.AXNodeSubPane();
-            this._axNodeSubPane.setNode(this.node());
-            this._axNodeSubPane.show(this.element);
-            this._axNodeSubPane.expand();
-
-            this._sidebarPaneStack = new WebInspector.SidebarPaneStack();
-            this._sidebarPaneStack.element.classList.add("flex-auto");
-            this._sidebarPaneStack.show(this.element);
-            this._sidebarPaneStack.addPane(this._computedTextSubPane);
-            this._sidebarPaneStack.addPane(this._axNodeSubPane);
-        }
+        this._treeSubPane.setNode(this.node());
+        this._axNodeSubPane.setNode(this.node());
+        this._ariaSubPane.setNode(this.node());
 
         WebInspector.targetManager.addModelListener(WebInspector.DOMModel, WebInspector.DOMModel.Events.AttrModified, this._onAttrChange, this);
         WebInspector.targetManager.addModelListener(WebInspector.DOMModel, WebInspector.DOMModel.Events.AttrRemoved, this._onAttrChange, this);
@@ -94,10 +98,8 @@ WebInspector.AccessibilitySidebarView.prototype = {
     _pullNode: function()
     {
         this._node = WebInspector.context.flavor(WebInspector.DOMNode);
-        if (this._computedTextSubPane)
-            this._computedTextSubPane.setNode(this._node);
-        if (this._axNodeSubPane)
-            this._axNodeSubPane.setNode(this._node);
+        this._ariaSubPane.setNode(this._node);
+        this._axNodeSubPane.setNode(this._node);
         this.update();
     },
 
@@ -133,12 +135,12 @@ WebInspector.AccessibilitySidebarView.prototype = {
 
 /**
  * @constructor
- * @extends {WebInspector.SidebarPane}
+ * @extends {WebInspector.SimpleView}
  * @param {string} name
  */
 WebInspector.AccessibilitySubPane = function(name)
 {
-    WebInspector.SidebarPane.call(this, name);
+    WebInspector.SimpleView.call(this, name);
 
     this._axNode = null;
     this.registerRequiredCSS("accessibility/accessibilityNode.css");
@@ -176,7 +178,7 @@ WebInspector.AccessibilitySubPane.prototype = {
      */
     createInfo: function(textContent, className)
     {
-        var classNameOrDefault = className || "info";
+        var classNameOrDefault = className || "gray-info-message";
         var info = this.element.createChild("div", classNameOrDefault);
         info.textContent = textContent;
         return info;
@@ -196,77 +198,5 @@ WebInspector.AccessibilitySubPane.prototype = {
         return treeOutline;
     },
 
-    __proto__: WebInspector.SidebarPane.prototype
+    __proto__: WebInspector.SimpleView.prototype
 }
-
-/**
- * @constructor
- * @extends {WebInspector.AccessibilitySubPane}
- */
-WebInspector.AXComputedTextSubPane = function()
-{
-    WebInspector.AccessibilitySubPane.call(this, WebInspector.UIString("Computed Text"));
-
-    this._computedTextElement = this.element.createChild("div", "ax-computed-text hidden");
-
-    this._noTextInfo = this.createInfo(WebInspector.UIString("Node has no text alternative."));
-    this._treeOutline = this.createTreeOutline();
-};
-
-
-WebInspector.AXComputedTextSubPane.prototype = {
-    /**
-     * @param {?AccessibilityAgent.AXNode} axNode
-     * @override
-     */
-    setAXNode: function(axNode)
-    {
-        if (this._axNode === axNode)
-            return;
-        this._axNode = axNode;
-
-        var treeOutline = this._treeOutline;
-        treeOutline.removeChildren();
-        var target = this.node().target();
-
-        if (!axNode || axNode.ignored) {
-            this._computedTextElement.classList.add("hidden");
-            treeOutline.element.classList.add("hidden");
-
-            this._noTextInfo.classList.remove("hidden");
-            return;
-        }
-        this._computedTextElement.removeChildren();
-
-        // TODO(aboxhall): include contents where appropriate (requires protocol change)
-        this._computedTextElement.classList.toggle("hidden", !axNode.name || !axNode.name.value);
-        if (axNode.name && axNode.name.value)
-            this._computedTextElement.createChild("div").textContent = axNode.name.value;
-
-        var foundProperty = false;
-        /**
-         * @param {!AccessibilityAgent.AXProperty} property
-         */
-        function addProperty(property)
-        {
-            foundProperty = true;
-            treeOutline.appendChild(new WebInspector.AXNodePropertyTreePropertyElement(property, target));
-        }
-
-        if (axNode.value && axNode.value.type === AccessibilityAgent.AXValueType.String)
-            addProperty(/** @type {!AccessibilityAgent.AXProperty} */ ({name: "value", value: axNode.value}));
-
-        var propertiesArray = /** @type {!Array.<!AccessibilityAgent.AXProperty> } */ (axNode.properties);
-        for (var property of propertiesArray) {
-            if (property.name == AccessibilityAgent.AXWidgetAttributes.Valuetext) {
-                addProperty(property);
-                break;
-            }
-        }
-
-        treeOutline.element.classList.toggle("hidden", !foundProperty)
-        this._noTextInfo.classList.toggle("hidden", !treeOutline.element.classList.contains("hidden") || !this._computedTextElement.classList.contains("hidden"));
-    },
-
-    __proto__: WebInspector.AccessibilitySubPane.prototype
-};

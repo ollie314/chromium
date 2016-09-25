@@ -8,14 +8,18 @@
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "content/browser/background_sync/background_sync_context.h"
+#include "content/browser/background_sync/background_sync_manager.h"
 #include "content/browser/devtools/service_worker_devtools_agent_host.h"
 #include "content/browser/devtools/service_worker_devtools_manager.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
+#include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/browser/service_worker/service_worker_context_watcher.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_version.h"
+#include "content/browser/storage_partition_impl_map.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -41,23 +45,33 @@ using Response = DevToolsProtocolClient::Response;
 
 namespace {
 
+using ScopeAgentsMap =
+    std::map<GURL, std::unique_ptr<ServiceWorkerDevToolsAgentHost::List>>;
+
 void ResultNoOp(bool success) {
 }
+
 void StatusNoOp(ServiceWorkerStatusCode status) {
 }
+
+void StatusNoOpKeepingRegistration(
+    scoped_refptr<content::ServiceWorkerRegistration> protect,
+    ServiceWorkerStatusCode status) {
+}
+
 void PushDeliveryNoOp(PushDeliveryStatus status) {
 }
 
 const std::string GetVersionRunningStatusString(
-    content::ServiceWorkerVersion::RunningStatus running_status) {
+    EmbeddedWorkerStatus running_status) {
   switch (running_status) {
-    case content::ServiceWorkerVersion::STOPPED:
+    case EmbeddedWorkerStatus::STOPPED:
       return kServiceWorkerVersionRunningStatusStopped;
-    case content::ServiceWorkerVersion::STARTING:
+    case EmbeddedWorkerStatus::STARTING:
       return kServiceWorkerVersionRunningStatusStarting;
-    case content::ServiceWorkerVersion::RUNNING:
+    case EmbeddedWorkerStatus::RUNNING:
       return kServiceWorkerVersionRunningStatusRunning;
-    case content::ServiceWorkerVersion::STOPPING:
+    case EmbeddedWorkerStatus::STOPPING:
       return kServiceWorkerVersionRunningStatusStopping;
   }
   return std::string();
@@ -137,34 +151,47 @@ scoped_refptr<ServiceWorkerRegistration> CreateRegistrationDictionaryValue(
   return registration;
 }
 
-scoped_refptr<ServiceWorkerDevToolsAgentHost> GetMatchingServiceWorker(
+void GetMatchingHostsByScopeMap(
     const ServiceWorkerDevToolsAgentHost::List& agent_hosts,
-    const GURL& url) {
-  scoped_refptr<ServiceWorkerDevToolsAgentHost> best_host;
-  bool best_host_scope_matched = false;
-  int best_host_scope_length = 0;
-
-  for (auto host : agent_hosts) {
-    if (host->GetURL().host_piece() != url.host_piece())
+    const std::set<GURL>& urls,
+    ScopeAgentsMap* scope_agents_map) {
+  std::set<base::StringPiece> host_name_set;
+  for (const GURL& url : urls)
+    host_name_set.insert(url.host_piece());
+  for (const auto& host : agent_hosts) {
+    if (host_name_set.find(host->scope().host_piece()) == host_name_set.end())
       continue;
-    const bool scope_matched =
-        ServiceWorkerUtils::ScopeMatches(host->scope(), url);
-    const int scope_length = host->scope().spec().length();
-    bool replace = false;
-    if (!best_host)
-      replace = true;
-    else if (best_host_scope_matched)
-      replace = scope_matched && scope_length >= best_host_scope_length;
-    else
-      replace = scope_matched || scope_length >= best_host_scope_length;
-
-    if (replace) {
-      best_host = host;
-      best_host_scope_matched = scope_matched;
-      best_host_scope_length = scope_length;
+    const auto& it = scope_agents_map->find(host->scope());
+    if (it == scope_agents_map->end()) {
+      std::unique_ptr<ServiceWorkerDevToolsAgentHost::List> new_list(
+          new ServiceWorkerDevToolsAgentHost::List());
+      new_list->push_back(host);
+      (*scope_agents_map)[host->scope()] = std::move(new_list);
+    } else {
+      it->second->push_back(host);
     }
   }
-  return best_host;
+}
+
+void AddEligibleHosts(const ServiceWorkerDevToolsAgentHost::List& list,
+                      ServiceWorkerDevToolsAgentHost::Map* result) {
+  base::Time last_installed_time;
+  base::Time last_doomed_time;
+  for (const auto& host : list) {
+    if (host->version_installed_time() > last_installed_time)
+      last_installed_time = host->version_installed_time();
+    if (host->version_doomed_time() > last_doomed_time)
+      last_doomed_time = host->version_doomed_time();
+  }
+  for (const auto& host : list) {
+    // We don't attech old redundant Service Workers when there is newer
+    // installed Service Worker.
+    if (host->version_doomed_time().is_null() ||
+        (last_installed_time < last_doomed_time &&
+         last_doomed_time == host->version_doomed_time())) {
+      (*result)[host->GetId()] = host;
+    }
+  }
 }
 
 ServiceWorkerDevToolsAgentHost::Map GetMatchingServiceWorkers(
@@ -173,15 +200,17 @@ ServiceWorkerDevToolsAgentHost::Map GetMatchingServiceWorkers(
   ServiceWorkerDevToolsAgentHost::Map result;
   if (!browser_context)
     return result;
+
   ServiceWorkerDevToolsAgentHost::List agent_hosts;
   ServiceWorkerDevToolsManager::GetInstance()
       ->AddAllAgentHostsForBrowserContext(browser_context, &agent_hosts);
-  for (const GURL& url : urls) {
-    scoped_refptr<ServiceWorkerDevToolsAgentHost> host =
-        GetMatchingServiceWorker(agent_hosts, url);
-    if (host)
-      result[host->GetId()] = host;
-  }
+
+  ScopeAgentsMap scope_agents_map;
+  GetMatchingHostsByScopeMap(agent_hosts, urls, &scope_agents_map);
+
+  for (const auto& it : scope_agents_map)
+    AddEligibleHosts(*it.second.get(), &result);
+
   return result;
 }
 
@@ -215,24 +244,34 @@ Response CreateInvalidVersionIdErrorResponse() {
   return Response::InternalError("Invalid version ID");
 }
 
-const std::string GetDevToolsAgentHostTypeString(
-    content::DevToolsAgentHost::Type type) {
-  switch (type) {
-    case DevToolsAgentHost::TYPE_WEB_CONTENTS:
-      return "web_contents";
-    case DevToolsAgentHost::TYPE_FRAME:
-      return "frame";
-    case DevToolsAgentHost::TYPE_SHARED_WORKER:
-      return "shared_worker";
-    case DevToolsAgentHost::TYPE_SERVICE_WORKER:
-      return "service_worker";
-    case DevToolsAgentHost::TYPE_EXTERNAL:
-      return "external";
-    case DevToolsAgentHost::TYPE_BROWSER:
-      return "browser";
-  }
-  NOTREACHED() << type;
-  return std::string();
+void DidFindRegistrationForDispatchSyncEventOnIO(
+    scoped_refptr<BackgroundSyncContext> sync_context,
+    const std::string& tag,
+    bool last_chance,
+    ServiceWorkerStatusCode status,
+    scoped_refptr<content::ServiceWorkerRegistration> registration) {
+  if (status != SERVICE_WORKER_OK || !registration->active_version())
+    return;
+  BackgroundSyncManager* background_sync_manager =
+      sync_context->background_sync_manager();
+  scoped_refptr<content::ServiceWorkerVersion> version(
+      registration->active_version());
+  // Keep the registration while dispatching the sync event.
+  background_sync_manager->EmulateDispatchSyncEvent(
+      tag, std::move(version), last_chance,
+      base::Bind(&StatusNoOpKeepingRegistration, std::move(registration)));
+}
+
+void DispatchSyncEventOnIO(scoped_refptr<ServiceWorkerContextWrapper> context,
+                           scoped_refptr<BackgroundSyncContext> sync_context,
+                           const GURL& origin,
+                           int64_t registration_id,
+                           const std::string& tag,
+                           bool last_chance) {
+  context->FindReadyRegistrationForId(
+      registration_id, origin,
+      base::Bind(&DidFindRegistrationForDispatchSyncEventOnIO, sync_context,
+                 tag, last_chance));
 }
 
 }  // namespace
@@ -329,7 +368,7 @@ Response ServiceWorkerHandler::Disable() {
   ServiceWorkerDevToolsManager::GetInstance()->RemoveObserver(this);
   ClearForceUpdate();
   for (const auto& pair : attached_hosts_)
-    pair.second->DetachClient();
+    pair.second->DetachClient(this);
   attached_hosts_.clear();
   DCHECK(context_watcher_);
   context_watcher_->Stop();
@@ -371,6 +410,15 @@ Response ServiceWorkerHandler::StartWorker(const std::string& scope_url) {
   if (!context_)
     return CreateContextErrorResponse();
   context_->StartServiceWorker(GURL(scope_url), base::Bind(&StatusNoOp));
+  return Response::OK();
+}
+
+Response ServiceWorkerHandler::SkipWaiting(const std::string& scope_url) {
+  if (!enabled_)
+    return Response::OK();
+  if (!context_)
+    return CreateContextErrorResponse();
+  context_->SkipWaitingWorker(GURL(scope_url));
   return Response::OK();
 }
 
@@ -442,6 +490,32 @@ Response ServiceWorkerHandler::DeliverPushMessage(
   return Response::OK();
 }
 
+Response ServiceWorkerHandler::DispatchSyncEvent(
+    const std::string& origin,
+    const std::string& registration_id,
+    const std::string& tag,
+    bool last_chance) {
+  if (!enabled_)
+    return Response::OK();
+  if (!render_frame_host_)
+    return CreateContextErrorResponse();
+  int64_t id = 0;
+  if (!base::StringToInt64(registration_id, &id))
+    return CreateInvalidVersionIdErrorResponse();
+
+  StoragePartitionImpl* partition =
+      static_cast<StoragePartitionImpl*>(BrowserContext::GetStoragePartition(
+          render_frame_host_->GetProcess()->GetBrowserContext(),
+          render_frame_host_->GetSiteInstance()));
+  BackgroundSyncContext* sync_context = partition->GetBackgroundSyncContext();
+
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(&DispatchSyncEventOnIO, context_,
+                                     make_scoped_refptr(sync_context),
+                                     GURL(origin), id, tag, last_chance));
+  return Response::OK();
+}
+
 Response ServiceWorkerHandler::GetTargetInfo(
     const std::string& target_id,
     scoped_refptr<TargetInfo>* target_info) {
@@ -452,7 +526,7 @@ Response ServiceWorkerHandler::GetTargetInfo(
   *target_info =
       TargetInfo::Create()
           ->set_id(agent_host->GetId())
-          ->set_type(GetDevToolsAgentHostTypeString(agent_host->GetType()))
+          ->set_type(agent_host->GetType())
           ->set_title(agent_host->GetTitle())
           ->set_url(agent_host->GetURL().spec());
   return Response::OK();
@@ -474,7 +548,7 @@ void ServiceWorkerHandler::OpenNewDevToolsWindow(int process_id,
           ->GetDevToolsAgentHostForWorker(process_id, devtools_agent_route_id));
   if (!agent_host.get())
     return;
-  agent_host->Inspect(render_frame_host_->GetProcess()->GetBrowserContext());
+  agent_host->Inspect();
 }
 
 void ServiceWorkerHandler::OnWorkerRegistrationUpdated(
@@ -559,6 +633,15 @@ void ServiceWorkerHandler::WorkerReadyForInspection(
   UpdateHosts();
 }
 
+void ServiceWorkerHandler::WorkerVersionInstalled(
+    ServiceWorkerDevToolsAgentHost* host) {
+  UpdateHosts();
+}
+void ServiceWorkerHandler::WorkerVersionDoomed(
+    ServiceWorkerDevToolsAgentHost* host) {
+  UpdateHosts();
+}
+
 void ServiceWorkerHandler::WorkerDestroyed(
     ServiceWorkerDevToolsAgentHost* host) {
   UpdateHosts();
@@ -582,7 +665,7 @@ void ServiceWorkerHandler::ReportWorkerTerminated(
   auto it = attached_hosts_.find(host->GetId());
   if (it == attached_hosts_.end())
     return;
-  host->DetachClient();
+  host->DetachClient(this);
   client_->WorkerTerminated(WorkerTerminatedParams::Create()->
       set_worker_id(host->GetId()));
   attached_hosts_.erase(it);

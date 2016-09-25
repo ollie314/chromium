@@ -42,8 +42,10 @@
 #include "core/layout/TextAutosizer.h"
 #include "core/paint/BoxPainter.h"
 #include "core/paint/PaintLayer.h"
+#include "core/paint/TablePaintInvalidator.h"
 #include "core/paint/TablePainter.h"
 #include "core/style/StyleInheritedData.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -59,7 +61,7 @@ LayoutTable::LayoutTable(Element* element)
     , m_needsSectionRecalc(false)
     , m_columnLogicalWidthChanged(false)
     , m_columnLayoutObjectsValid(false)
-    , m_hasCellColspanThatDeterminesTableWidth(false)
+    , m_noCellColspanAtLeast(0)
     , m_hSpacing(0)
     , m_vSpacing(0)
     , m_borderStart(0)
@@ -76,7 +78,6 @@ LayoutTable::~LayoutTable()
 void LayoutTable::styleDidChange(StyleDifference diff, const ComputedStyle* oldStyle)
 {
     LayoutBlock::styleDidChange(diff, oldStyle);
-    propagateStyleToAnonymousChildren();
 
     bool oldFixedTableLayout = oldStyle ? oldStyle->isFixedTableLayout() : false;
 
@@ -92,14 +93,16 @@ void LayoutTable::styleDidChange(StyleDifference diff, const ComputedStyle* oldS
         // According to the CSS2 spec, you only use fixed table layout if an
         // explicit width is specified on the table.  Auto width implies auto table layout.
         if (style()->isFixedTableLayout())
-            m_tableLayout = adoptPtr(new TableLayoutAlgorithmFixed(this));
+            m_tableLayout = wrapUnique(new TableLayoutAlgorithmFixed(this));
         else
-            m_tableLayout = adoptPtr(new TableLayoutAlgorithmAuto(this));
+            m_tableLayout = wrapUnique(new TableLayoutAlgorithmAuto(this));
     }
 
     // If border was changed, invalidate collapsed borders cache.
     if (!needsLayout() && oldStyle && oldStyle->border() != style()->border())
         invalidateCollapsedBorders();
+    if (LayoutTableBoxComponent::doCellsHaveDirtyWidth(*this, *this, diff, *oldStyle))
+        markAllCellsWidthsDirtyAndOrNeedsLayout(MarkDirtyAndNeedsLayout);
 }
 
 static inline void resetSectionPointerIfNotBefore(LayoutTableSection*& ptr, LayoutObject* before)
@@ -206,16 +209,6 @@ void LayoutTable::addChild(LayoutObject* child, LayoutObject* beforeChild)
     section->addChild(child);
 }
 
-void LayoutTable::addChildIgnoringContinuation(LayoutObject* newChild, LayoutObject* beforeChild)
-{
-    // We need to bypass the LayoutBlock implementation and instead do a normal addChild() (or we
-    // won't get there at all), so that any missing anonymous table part layoutObjects are
-    // inserted. Otherwise we might end up with an insane layout tree with inlines or blocks as
-    // direct children of a table, which will break assumptions made all over the code, which may
-    // lead to crashers and security issues.
-    addChild(newChild, beforeChild);
-}
-
 void LayoutTable::addCaption(const LayoutTableCaption* caption)
 {
     ASSERT(m_captions.find(caption) == kNotFound);
@@ -273,7 +266,7 @@ void LayoutTable::updateLogicalWidth()
 
     LayoutBlock* cb = containingBlock();
 
-    LayoutUnit availableLogicalWidth = containingBlockLogicalWidthForContent() + (isOutOfFlowPositioned() ? cb->paddingLogicalWidth() : LayoutUnit());
+    LayoutUnit availableLogicalWidth = containingBlockLogicalWidthForContent();
     bool hasPerpendicularContainingBlock = cb->style()->isHorizontalWritingMode() != style()->isHorizontalWritingMode();
     LayoutUnit containerWidthInInlineDirection = hasPerpendicularContainingBlock ? perpendicularContainingBlockLogicalHeight() : availableLogicalWidth;
 
@@ -292,7 +285,13 @@ void LayoutTable::updateLogicalWidth()
             availableContentLogicalWidth = shrinkLogicalWidthToAvoidFloats(marginStart, marginEnd, toLayoutBlockFlow(cb));
 
         // Ensure we aren't bigger than our available width.
-        setLogicalWidth(LayoutUnit(std::min(availableContentLogicalWidth, maxPreferredLogicalWidth()).floor()));
+        LayoutUnit maxWidth = maxPreferredLogicalWidth();
+        // scaledWidthFromPercentColumns depends on m_layoutStruct in TableLayoutAlgorithmAuto, which
+        // maxPreferredLogicalWidth fills in. So scaledWidthFromPercentColumns has to be called after
+        // maxPreferredLogicalWidth.
+        LayoutUnit scaledWidth = m_tableLayout->scaledWidthFromPercentColumns() + bordersPaddingAndSpacingInRowDirection();
+        maxWidth = std::max(scaledWidth, maxWidth);
+        setLogicalWidth(LayoutUnit(std::min(availableContentLogicalWidth, maxWidth).floor()));
     }
 
     // Ensure we aren't bigger than our max-width style.
@@ -355,7 +354,7 @@ LayoutUnit LayoutTable::convertStyleLogicalHeightToComputedHeight(const Length& 
             borders = borderAndPadding;
         }
         computedLogicalHeight = LayoutUnit(styleLogicalHeight.value() - borders);
-    } else if (styleLogicalHeight.hasPercent()) {
+    } else if (styleLogicalHeight.isPercentOrCalc()) {
         computedLogicalHeight = computePercentageLogicalHeight(styleLogicalHeight);
     } else if (styleLogicalHeight.isIntrinsic()) {
         computedLogicalHeight = computeIntrinsicLogicalContentHeightUsing(styleLogicalHeight, logicalHeight() - borderAndPadding, borderAndPadding);
@@ -419,18 +418,18 @@ bool LayoutTable::recalcChildOverflowAfterStyleChange()
     ASSERT(childNeedsOverflowRecalcAfterStyleChange());
     clearChildNeedsOverflowRecalcAfterStyleChange();
 
-    // If the table needs layout the sections we keep pointers to may have gone away and
+    // If the table sections we keep pointers to have gone away then the table will be rebuilt and
     // overflow will get recalculated anyway so return early.
-    if (needsLayout())
+    if (needsSectionRecalc())
         return false;
 
     bool childrenOverflowChanged = false;
     for (LayoutTableSection* section = topSection(); section; section = sectionBelow(section)) {
         if (!section->childNeedsOverflowRecalcAfterStyleChange())
             continue;
-        childrenOverflowChanged |= section->recalcChildOverflowAfterStyleChange();
+        childrenOverflowChanged = section->recalcChildOverflowAfterStyleChange() || childrenOverflowChanged;
     }
-    return childrenOverflowChanged;
+    return recalcPositionedDescendantsOverflowAfterStyleChange() || childrenOverflowChanged;
 }
 
 void LayoutTable::layout()
@@ -540,10 +539,27 @@ void LayoutTable::layout()
 
         distributeExtraLogicalHeight(floorToInt(computedLogicalHeight - totalSectionLogicalHeight));
 
-        for (LayoutTableSection* section = topSection(); section; section = sectionBelow(section))
+        bool isPaginated = view()->layoutState()->isPaginated();
+        LayoutTableSection* topSection = this->topSection();
+        LayoutUnit logicalOffset = topSection ? topSection->logicalTop() : LayoutUnit();
+        for (LayoutTableSection* section = topSection; section; section = sectionBelow(section)) {
+            section->setLogicalTop(logicalOffset);
             section->layoutRows();
+            logicalOffset += section->logicalHeight();
+            // If the section is a repeating header group that allows at least one row of content then store the
+            // offset for other sections to offset their rows against.
+            if (isPaginated && m_head && m_head == section && section->logicalHeight() < section->pageLogicalHeightForOffset(logicalOffset)
+                && section->getPaginationBreakability() != LayoutBox::AllowAnyBreaks) {
+                LayoutUnit offsetForTableHeaders = state.heightOffsetForTableHeaders();
+                // Don't include any strut in the header group - we only want the height from its content.
+                offsetForTableHeaders += section->logicalHeight();
+                if (LayoutTableRow* row = section->firstRow())
+                    offsetForTableHeaders -= section->paginationStrutForRow(row, section->logicalTop());
+                state.setHeightOffsetForTableHeaders(offsetForTableHeaders);
+            }
+        }
 
-        if (!topSection() && computedLogicalHeight > totalSectionLogicalHeight && !document().inQuirksMode()) {
+        if (!topSection && computedLogicalHeight > totalSectionLogicalHeight && !document().inQuirksMode()) {
             // Completely empty tables (with no sections or anything) should at least honor specified height
             // in strict mode.
             setLogicalHeight(logicalHeight() + computedLogicalHeight);
@@ -554,7 +570,7 @@ void LayoutTable::layout()
             sectionLogicalLeft += style()->isLeftToRightDirection() ? paddingStart() : paddingEnd();
 
         // position the table sections
-        LayoutTableSection* section = topSection();
+        LayoutTableSection* section = topSection;
         while (section) {
             if (!sectionMoved && section->logicalTop() != logicalHeight())
                 sectionMoved = true;
@@ -645,15 +661,15 @@ void LayoutTable::addOverflowFromChildren()
     // Technically it's odd that we are incorporating the borders into layout overflow, which is only supposed to be about overflow from our
     // descendant objects, but since tables don't support overflow:auto, this works out fine.
     if (collapseBorders()) {
-        int rightBorderOverflow = size().width() + outerBorderRight() - borderRight();
+        int rightBorderOverflow = (size().width() + outerBorderRight() - borderRight()).toInt();
         int leftBorderOverflow = borderLeft() - outerBorderLeft();
-        int bottomBorderOverflow = size().height() + outerBorderBottom() - borderBottom();
+        int bottomBorderOverflow = (size().height() + outerBorderBottom() - borderBottom()).toInt();
         int topBorderOverflow = borderTop() - outerBorderTop();
         IntRect borderOverflowRect(leftBorderOverflow, topBorderOverflow, rightBorderOverflow - leftBorderOverflow, bottomBorderOverflow - topBorderOverflow);
         if (borderOverflowRect != pixelSnappedBorderBoxRect()) {
             LayoutRect borderLayoutRect(borderOverflowRect);
             addLayoutOverflow(borderLayoutRect);
-            addVisualOverflow(borderLayoutRect);
+            addContentsVisualOverflow(borderLayoutRect);
         }
     }
 
@@ -688,6 +704,16 @@ void LayoutTable::subtractCaptionRect(LayoutRect& rect) const
     }
 }
 
+void LayoutTable::markAllCellsWidthsDirtyAndOrNeedsLayout(WhatToMarkAllCells whatToMark)
+{
+    for (LayoutObject* child = children()->firstChild(); child; child = child->nextSibling()) {
+        if (!child->isTableSection())
+            continue;
+        LayoutTableSection* section = toLayoutTableSection(child);
+        section->markAllCellsWidthsDirtyAndOrNeedsLayout(whatToMark);
+    }
+}
+
 void LayoutTable::paintBoxDecorationBackground(const PaintInfo& paintInfo, const LayoutPoint& paintOffset) const
 {
     TablePainter(*this).paintBoxDecorationBackground(paintInfo, paintOffset);
@@ -717,7 +743,7 @@ void LayoutTable::computePreferredLogicalWidths()
 
     computeIntrinsicLogicalWidths(m_minPreferredLogicalWidth, m_maxPreferredLogicalWidth);
 
-    int bordersPaddingAndSpacing = bordersPaddingAndSpacingInRowDirection();
+    int bordersPaddingAndSpacing = bordersPaddingAndSpacingInRowDirection().toInt();
     m_minPreferredLogicalWidth += bordersPaddingAndSpacing;
     m_maxPreferredLogicalWidth += bordersPaddingAndSpacing;
 
@@ -783,7 +809,9 @@ void LayoutTable::appendEffectiveColumn(unsigned span)
 
     // Unless the table has cell(s) with colspan that exceed the number of columns afforded
     // by the other rows in the table we can use the fast path when mapping columns to effective columns.
-    m_hasCellColspanThatDeterminesTableWidth = m_hasCellColspanThatDeterminesTableWidth || span > 1;
+    if (span == 1 && m_noCellColspanAtLeast + 1 == numEffectiveColumns()) {
+        m_noCellColspanAtLeast++;
+    }
 
     // Propagate the change in our columns representation to the sections that don't need
     // cell recalc. If they do, they will be synced up directly with m_columns later.
@@ -871,7 +899,7 @@ void LayoutTable::recalcSections() const
     m_foot = nullptr;
     m_firstBody = nullptr;
     m_hasColElements = false;
-    m_hasCellColspanThatDeterminesTableWidth = hasCellColspanThatDeterminesTableWidth();
+    m_noCellColspanAtLeast = calcNoCellColspanAtLeast();
 
     // We need to get valid pointers to caption, head, foot and first body again
     LayoutObject* nextSibling;
@@ -1327,19 +1355,19 @@ int LayoutTable::firstLineBoxBaseline() const
 
     int baseline = topNonEmptySection->firstLineBoxBaseline();
     if (baseline >= 0)
-        return topNonEmptySection->logicalTop() + baseline;
+        return (topNonEmptySection->logicalTop() + baseline).toInt();
 
     // FF, Presto and IE use the top of the section as the baseline if its first row is empty of cells or content.
     // The baseline of an empty row isn't specified by CSS 2.1.
     if (topNonEmptySection->firstRow() && !topNonEmptySection->firstRow()->firstCell())
-        return topNonEmptySection->logicalTop();
+        return topNonEmptySection->logicalTop().toInt();
 
     return -1;
 }
 
-LayoutRect LayoutTable::overflowClipRect(const LayoutPoint& location, OverlayScrollbarSizeRelevancy relevancy) const
+LayoutRect LayoutTable::overflowClipRect(const LayoutPoint& location, OverlayScrollbarClipBehavior overlayScrollbarClipBehavior) const
 {
-    LayoutRect rect = LayoutBlock::overflowClipRect(location, relevancy);
+    LayoutRect rect = LayoutBlock::overflowClipRect(location, overlayScrollbarClipBehavior);
 
     // If we have a caption, expand the clip to include the caption.
     // FIXME: Technically this is wrong, but it's virtually impossible to fix this
@@ -1415,43 +1443,23 @@ const BorderValue& LayoutTable::tableEndBorderAdjoiningCell(const LayoutTableCel
     return style()->borderStart();
 }
 
+void LayoutTable::ensureIsReadyForPaintInvalidation()
+{
+    LayoutBlock::ensureIsReadyForPaintInvalidation();
+    recalcCollapsedBordersIfNeeded();
+}
+
 PaintInvalidationReason LayoutTable::invalidatePaintIfNeeded(const PaintInvalidationState& paintInvalidationState)
 {
-    // Information of collapsed borders doesn't affect layout and are for painting only.
-    // Do it now instead of during painting to invalidate table cells if needed.
-    recalcCollapsedBordersIfNeeded();
+    if (collapseBorders() && !m_collapsedBorders.isEmpty())
+        paintInvalidationState.paintingLayer().setNeedsPaintPhaseDescendantBlockBackgrounds();
+
     return LayoutBlock::invalidatePaintIfNeeded(paintInvalidationState);
 }
 
-void LayoutTable::invalidatePaintOfSubtreesIfNeeded(const PaintInvalidationState& childPaintInvalidationState)
+PaintInvalidationReason LayoutTable::invalidatePaintIfNeeded(const PaintInvalidatorContext& context) const
 {
-    // Table cells paint background from the containing column group, column, section and row.
-    // If background of any of them changed, we need to invalidate all affected cells.
-    // Here use shouldDoFullPaintInvalidation() as a broader condition of background change.
-    for (LayoutObject* section = firstChild(); section; section = section->nextSibling()) {
-        if (!section->isTableSection())
-            continue;
-        for (LayoutTableRow* row = toLayoutTableSection(section)->firstRow(); row; row = row->nextRow()) {
-            for (LayoutTableCell* cell = row->firstCell(); cell; cell = cell->nextCell()) {
-                ColAndColGroup colAndColGroup = colElementAtAbsoluteColumn(cell->absoluteColumnIndex());
-                LayoutTableCol* column = colAndColGroup.col;
-                LayoutTableCol* columnGroup = colAndColGroup.colgroup;
-                // Table cells paint container's background on the container's backing instead of its own (if any),
-                // so we must invalidate it by the containers.
-                bool invalidated = false;
-                if ((columnGroup && columnGroup->shouldDoFullPaintInvalidation())
-                    || (column && column->shouldDoFullPaintInvalidation())
-                    || section->shouldDoFullPaintInvalidation()) {
-                    section->invalidateDisplayItemClient(*cell);
-                    invalidated = true;
-                }
-                if ((!invalidated || row->isPaintInvalidationContainer()) && row->shouldDoFullPaintInvalidation())
-                    row->invalidateDisplayItemClient(*cell);
-            }
-        }
-    }
-
-    LayoutBlock::invalidatePaintOfSubtreesIfNeeded(childPaintInvalidationState);
+    return TablePaintInvalidator(*this, context).invalidatePaintIfNeeded();
 }
 
 LayoutUnit LayoutTable::paddingTop() const

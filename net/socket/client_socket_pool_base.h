@@ -84,12 +84,12 @@ class NET_EXPORT_PRIVATE ConnectJob {
              RequestPriority priority,
              ClientSocketPool::RespectLimits respect_limits,
              Delegate* delegate,
-             const BoundNetLog& net_log);
+             const NetLogWithSource& net_log);
   virtual ~ConnectJob();
 
   // Accessors
   const std::string& group_name() const { return group_name_; }
-  const BoundNetLog& net_log() { return net_log_; }
+  const NetLogWithSource& net_log() { return net_log_; }
 
   // Releases ownership of the underlying socket to the caller.
   // Returns the released socket, or NULL if there was a connection
@@ -115,7 +115,7 @@ class NET_EXPORT_PRIVATE ConnectJob {
     return connect_timing_;
   }
 
-  const BoundNetLog& net_log() const { return net_log_; }
+  const NetLogWithSource& net_log() const { return net_log_; }
 
  protected:
   RequestPriority priority() const { return priority_; }
@@ -148,7 +148,7 @@ class NET_EXPORT_PRIVATE ConnectJob {
   base::OneShotTimer timer_;
   Delegate* delegate_;
   std::unique_ptr<StreamSocket> socket_;
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
   // A ConnectJob is idle until Connect() has been called.
   bool idle_;
 
@@ -181,7 +181,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
             RequestPriority priority,
             ClientSocketPool::RespectLimits respect_limits,
             Flags flags,
-            const BoundNetLog& net_log);
+            const NetLogWithSource& net_log);
 
     virtual ~Request();
 
@@ -192,7 +192,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
       return respect_limits_;
     }
     Flags flags() const { return flags_; }
-    const BoundNetLog& net_log() const { return net_log_; }
+    const NetLogWithSource& net_log() const { return net_log_; }
 
     // TODO(eroman): Temporary until crbug.com/467797 is solved.
     void CrashIfInvalid() const;
@@ -210,7 +210,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     const RequestPriority priority_;
     const ClientSocketPool::RespectLimits respect_limits_;
     const Flags flags_;
-    const BoundNetLog net_log_;
+    const NetLogWithSource net_log_;
 
     // TODO(eroman): Temporary until crbug.com/467797 is solved.
     Liveness liveness_ = ALIVE;
@@ -313,14 +313,6 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   }
 
   bool HasGroup(const std::string& group_name) const;
-
-  // Called to enable/disable cleaning up idle sockets. When enabled,
-  // idle sockets that have been around for longer than a period defined
-  // by kCleanupInterval are cleaned up using a timer. Otherwise they are
-  // closed next time client makes a request. This may reduce network
-  // activity and power consumption.
-  static bool cleanup_timer_enabled();
-  static bool set_cleanup_timer_enabled(bool enabled);
 
   // Closes all idle sockets if |force| is true.  Else, only closes idle
   // sockets that timed out or can't be reused.  Made public for testing.
@@ -533,20 +525,11 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   void IncrementIdleCount();
   void DecrementIdleCount();
 
-  // Start cleanup timer for idle sockets.
-  void StartIdleSocketTimer();
-
   // Scans the group map for groups which have an available socket slot and
   // at least one pending request. Returns true if any groups are stalled, and
   // if so (and if both |group| and |group_name| are not NULL), fills |group|
   // and |group_name| with data of the stalled group having highest priority.
   bool FindTopStalledGroup(Group** group, std::string* group_name) const;
-
-  // Called when timer_ fires.  This method scans the idle sockets removing
-  // sockets that timed out or can't be reused.
-  void OnCleanupTimerFired() {
-    CleanupIdleSockets(false);
-  }
 
   // Removes |job| from |group|, which must already own |job|.
   void RemoveConnectJob(ConnectJob* job, Group* group);
@@ -564,7 +547,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
                      ClientSocketHandle* handle,
                      base::TimeDelta time_idle,
                      Group* group,
-                     const BoundNetLog& net_log);
+                     const NetLogWithSource& net_log);
 
   // Adds |socket| to the list of idle sockets for |group|.
   void AddIdleSocket(std::unique_ptr<StreamSocket> socket, Group* group);
@@ -625,10 +608,6 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   // possible that the request is cancelled.
   PendingCallbackMap pending_callback_map_;
 
-  // Timer used to periodically prune idle sockets that timed out or can't be
-  // reused.
-  base::RepeatingTimer timer_;
-
   // The total number of idle sockets in the system.
   int idle_socket_count_;
 
@@ -643,9 +622,6 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
 
   // The maximum number of sockets kept per group.
   const int max_sockets_per_group_;
-
-  // Whether to use timer to cleanup idle sockets.
-  bool use_cleanup_timer_;
 
   // The time to wait until closing idle sockets.
   const base::TimeDelta unused_idle_socket_timeout_;
@@ -692,7 +668,7 @@ class ClientSocketPoolBase {
             ClientSocketPool::RespectLimits respect_limits,
             internal::ClientSocketPoolBaseHelper::Flags flags,
             const scoped_refptr<SocketParams>& params,
-            const BoundNetLog& net_log)
+            const NetLogWithSource& net_log)
         : internal::ClientSocketPoolBaseHelper::Request(handle,
                                                         callback,
                                                         priority,
@@ -765,7 +741,7 @@ class ClientSocketPoolBase {
                     ClientSocketPool::RespectLimits respect_limits,
                     ClientSocketHandle* handle,
                     const CompletionCallback& callback,
-                    const BoundNetLog& net_log) {
+                    const NetLogWithSource& net_log) {
     std::unique_ptr<const Request> request(new Request(
         handle, callback, priority, respect_limits,
         internal::ClientSocketPoolBaseHelper::NORMAL, params, net_log));
@@ -778,7 +754,7 @@ class ClientSocketPoolBase {
   void RequestSockets(const std::string& group_name,
                       const scoped_refptr<SocketParams>& params,
                       int num_sockets,
-                      const BoundNetLog& net_log) {
+                      const NetLogWithSource& net_log) {
     const Request request(nullptr /* no handle */, CompletionCallback(), IDLE,
                           ClientSocketPool::RespectLimits::ENABLED,
                           internal::ClientSocketPoolBaseHelper::NO_IDLE_SOCKETS,

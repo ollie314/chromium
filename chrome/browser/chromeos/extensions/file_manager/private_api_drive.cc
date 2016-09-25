@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_drive.h"
 
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -97,8 +98,6 @@ void FillEntryPropertiesValueForDrive(const drive::ResourceEntry& entry_proto,
   if (!entry_proto.resource_id().empty()) {
     DriveApiUrlGenerator url_generator(
         (GURL(google_apis::DriveApiUrlGenerator::kBaseUrlForProduction)),
-        (GURL(
-            google_apis::DriveApiUrlGenerator::kBaseDownloadUrlForProduction)),
         (GURL(google_apis::DriveApiUrlGenerator::
                   kBaseThumbnailUrlForProduction)));
     properties->thumbnail_url.reset(new std::string(
@@ -771,11 +770,11 @@ void FileManagerPrivateSearchDriveFunction::OnEntryDefinitionList(
     entries->Append(entry);
   }
 
-  base::DictionaryValue* result = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->Set("entries", entries);
   result->SetString("nextFeed", next_link.spec());
 
-  SetResult(result);
+  SetResult(std::move(result));
   SendResponse(true);
 }
 
@@ -856,7 +855,7 @@ void FileManagerPrivateSearchDriveMetadataFunction::OnEntryDefinitionList(
     std::unique_ptr<drive::MetadataSearchResultVector> search_result_info_list,
     std::unique_ptr<EntryDefinitionList> entry_definition_list) {
   DCHECK_EQ(search_result_info_list->size(), entry_definition_list->size());
-  base::ListValue* results_list = new base::ListValue();
+  std::unique_ptr<base::ListValue> results_list(new base::ListValue());
 
   // Convert Drive files to something File API stack can understand.  See
   // file_browser_handler_custom_bindings.cc and
@@ -884,14 +883,16 @@ void FileManagerPrivateSearchDriveMetadataFunction::OnEntryDefinitionList(
     results_list->Append(result_dict);
   }
 
-  SetResult(results_list);
+  SetResult(std::move(results_list));
   SendResponse(true);
 }
 
-bool FileManagerPrivateGetDriveConnectionStateFunction::RunSync() {
+ExtensionFunction::ResponseAction
+FileManagerPrivateGetDriveConnectionStateFunction::Run() {
   api::file_manager_private::DriveConnectionState result;
 
-  switch (drive::util::GetDriveConnectionStatus(GetProfile())) {
+  switch (drive::util::GetDriveConnectionStatus(
+      Profile::FromBrowserContext(browser_context()))) {
     case drive::util::DRIVE_DISCONNECTED_NOSERVICE:
       result.type = kDriveConnectionTypeOffline;
       result.reason.reset(new std::string(kDriveConnectionReasonNoService));
@@ -916,13 +917,14 @@ bool FileManagerPrivateGetDriveConnectionStateFunction::RunSync() {
       chromeos::NetworkHandler::Get()
           ->network_state_handler()
           ->FirstNetworkByType(chromeos::NetworkTypePattern::Mobile());
-  results_ = api::file_manager_private::GetDriveConnectionState::Results::
-      Create(result);
 
-  drive::EventLogger* logger = file_manager::util::GetLogger(GetProfile());
+  drive::EventLogger* logger = file_manager::util::GetLogger(
+      Profile::FromBrowserContext(browser_context()));
   if (logger)
     logger->Log(logging::LOG_INFO, "%s succeeded.", name());
-  return true;
+  return RespondNow(ArgumentList(
+      api::file_manager_private::GetDriveConnectionState::Results::Create(
+          result)));
 }
 
 bool FileManagerPrivateRequestAccessTokenFunction::RunAsync() {
@@ -935,7 +937,7 @@ bool FileManagerPrivateRequestAccessTokenFunction::RunAsync() {
 
   if (!drive_service) {
     // DriveService is not available.
-    SetResult(new base::StringValue(""));
+    SetResult(base::MakeUnique<base::StringValue>(std::string()));
     SendResponse(true);
     return true;
   }
@@ -955,7 +957,7 @@ bool FileManagerPrivateRequestAccessTokenFunction::RunAsync() {
 void FileManagerPrivateRequestAccessTokenFunction::OnAccessTokenFetched(
     google_apis::DriveApiErrorCode code,
     const std::string& access_token) {
-  SetResult(new base::StringValue(access_token));
+  SetResult(base::MakeUnique<base::StringValue>(access_token));
   SendResponse(true);
 }
 
@@ -994,7 +996,7 @@ void FileManagerPrivateInternalGetShareUrlFunction::OnGetShareUrl(
     return;
   }
 
-  SetResult(new base::StringValue(share_url.spec()));
+  SetResult(base::MakeUnique<base::StringValue>(share_url.spec()));
   SendResponse(true);
 }
 
@@ -1070,7 +1072,8 @@ bool FileManagerPrivateInternalGetDownloadUrlFunction::RunAsync() {
   if (!file_system) {
     // |file_system| is NULL if Drive is disabled or not mounted.
     SetError("Drive is disabled or not mounted.");
-    SetResult(new base::StringValue(""));  // Intentionally returns a blank.
+    // Intentionally returns a blank.
+    SetResult(base::MakeUnique<base::StringValue>(std::string()));
     return false;
   }
 
@@ -1078,7 +1081,8 @@ bool FileManagerPrivateInternalGetDownloadUrlFunction::RunAsync() {
       render_frame_host(), GetProfile(), GURL(params->url));
   if (!drive::util::IsUnderDriveMountPoint(path)) {
     SetError("The given file is not in Drive.");
-    SetResult(new base::StringValue(""));  // Intentionally returns a blank.
+    // Intentionally returns a blank.
+    SetResult(base::MakeUnique<base::StringValue>(std::string()));
     return false;
   }
   base::FilePath file_path = drive::util::ExtractDrivePath(path);
@@ -1098,14 +1102,14 @@ void FileManagerPrivateInternalGetDownloadUrlFunction::OnGetResourceEntry(
 
   if (error != drive::FILE_ERROR_OK) {
     SetError("Download Url for this item is not available.");
-    SetResult(new base::StringValue(""));  // Intentionally returns a blank.
+    // Intentionally returns a blank.
+    SetResult(base::MakeUnique<base::StringValue>(std::string()));
     SendResponse(false);
     return;
   }
 
   DriveApiUrlGenerator url_generator(
       (GURL(google_apis::DriveApiUrlGenerator::kBaseUrlForProduction)),
-      (GURL(google_apis::DriveApiUrlGenerator::kBaseDownloadUrlForProduction)),
       (GURL(
           google_apis::DriveApiUrlGenerator::kBaseThumbnailUrlForProduction)));
   download_url_ = url_generator.GenerateDownloadFileUrl(entry->resource_id());
@@ -1132,14 +1136,15 @@ void FileManagerPrivateInternalGetDownloadUrlFunction::OnTokenFetched(
     const std::string& access_token) {
   if (code != google_apis::HTTP_SUCCESS) {
     SetError("Not able to fetch the token.");
-    SetResult(new base::StringValue(""));  // Intentionally returns a blank.
+    // Intentionally returns a blank.
+    SetResult(base::MakeUnique<base::StringValue>(std::string()));
     SendResponse(false);
     return;
   }
 
   const std::string url =
-      download_url_.Resolve("?access_token=" + access_token).spec();
-  SetResult(new base::StringValue(url));
+      download_url_.Resolve("?alt=media&access_token=" + access_token).spec();
+  SetResult(base::MakeUnique<base::StringValue>(url));
 
   SendResponse(true);
 }

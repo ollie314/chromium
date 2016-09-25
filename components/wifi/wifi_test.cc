@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -13,7 +14,6 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -75,7 +75,7 @@ class WiFiTest {
   base::mac::ScopedNSAutoreleasePool scoped_pool_;
 #endif
 
-  scoped_ptr<WiFiService> wifi_service_;
+  std::unique_ptr<WiFiService> wifi_service_;
 
   // Need AtExitManager to support AsWeakPtr (in NetLog).
   base::AtExitManager exit_manager_;
@@ -157,7 +157,8 @@ bool WiFiTest::ParseCommandLine(int argc, const char* argv[]) {
   }
 
   // Optional properties (frequency, password) to use for connect or create.
-  scoped_ptr<base::DictionaryValue> properties(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> properties(
+      new base::DictionaryValue());
 
   if (!frequency.empty()) {
     int value = 0;
@@ -203,7 +204,7 @@ bool WiFiTest::ParseCommandLine(int argc, const char* argv[]) {
       wifi_service_->StartConnect(network_guid, &error);
       VLOG(0) << error;
       if (error.empty())
-        base::MessageLoop::current()->Run();
+        base::RunLoop().Run();
       return true;
     }
   }
@@ -233,7 +234,7 @@ bool WiFiTest::ParseCommandLine(int argc, const char* argv[]) {
         base::Bind(&WiFiTest::OnNetworksChanged, base::Unretained(this)),
         base::Bind(&WiFiTest::OnNetworkListChanged, base::Unretained(this)));
     wifi_service_->RequestNetworkScan();
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
     return true;
   }
 

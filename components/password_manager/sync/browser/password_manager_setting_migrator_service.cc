@@ -10,7 +10,7 @@
 #include "build/build_config.h"
 #include "components/password_manager/core/browser/password_manager_settings_migration_experiment.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
-#include "components/sync_driver/sync_service.h"
+#include "components/sync/driver/sync_service.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 
 namespace {
@@ -84,6 +84,8 @@ void TrackInitialAndFinalValues(PrefService* prefs,
 
 namespace password_manager {
 
+bool PasswordManagerSettingMigratorService::force_disabled_for_testing_ = false;
+
 PasswordManagerSettingMigratorService::PasswordManagerSettingMigratorService(
     syncable_prefs::PrefServiceSyncable* prefs)
     : prefs_(prefs), sync_service_(nullptr) {
@@ -96,6 +98,8 @@ PasswordManagerSettingMigratorService::
 
 void PasswordManagerSettingMigratorService::InitializeMigration(
     sync_driver::SyncService* sync_service) {
+  if (force_disabled_for_testing_)
+    return;
   SaveCurrentPrefState(prefs_, &initial_new_pref_value_,
                        &initial_legacy_pref_value_);
   const int kMaxInitialValues = 4;

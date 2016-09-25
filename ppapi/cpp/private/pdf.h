@@ -58,6 +58,20 @@ class PDF {
                                         int* natives_size_out,
                                         const char** snapshot_data_out,
                                         int* snapshot_size_out);
+  static void SetAccessibilityViewportInfo(
+      const InstanceHandle& instance,
+      PP_PrivateAccessibilityViewportInfo* viewport_info);
+  static void SetAccessibilityDocInfo(
+      const InstanceHandle& instance,
+      PP_PrivateAccessibilityDocInfo* doc_info);
+  static void SetAccessibilityPageInfo(
+      const InstanceHandle& instance,
+      PP_PrivateAccessibilityPageInfo* page_info,
+      PP_PrivateAccessibilityTextRunInfo text_runs[],
+      PP_PrivateAccessibilityCharInfo chars[]);
+  static void SetCrashData(const InstanceHandle& instance,
+                           const char* pdf_url,
+                           const char* top_level_url);
 };
 
 }  // namespace pp

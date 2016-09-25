@@ -39,6 +39,9 @@
 #include "platform/image-decoders/png/PNGImageDecoder.h"
 
 #include "png.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
+
 #if !defined(PNG_LIBPNG_VER_MAJOR) || !defined(PNG_LIBPNG_VER_MINOR)
 #error version error: compile against a versioned libpng.
 #endif
@@ -133,6 +136,7 @@ public:
     png_structp pngPtr() const { return m_png; }
     png_infop infoPtr() const { return m_info; }
 
+    size_t getReadOffset() const { return m_readOffset; }
     void setReadOffset(size_t offset) { m_readOffset = offset; }
     size_t currentBufferSize() const { return m_currentBufferSize; }
     bool decodingSizeOnly() const { return m_decodingSizeOnly; }
@@ -140,10 +144,10 @@ public:
     bool hasAlpha() const { return m_hasAlpha; }
 
     png_bytep interlaceBuffer() const { return m_interlaceBuffer.get(); }
-    void createInterlaceBuffer(int size) { m_interlaceBuffer = adoptArrayPtr(new png_byte[size]); }
+    void createInterlaceBuffer(int size) { m_interlaceBuffer = wrapArrayUnique(new png_byte[size]); }
 #if USE(QCMSLIB)
     png_bytep rowBuffer() const { return m_rowBuffer.get(); }
-    void createRowBuffer(int size) { m_rowBuffer = adoptArrayPtr(new png_byte[size]); }
+    void createRowBuffer(int size) { m_rowBuffer = wrapArrayUnique(new png_byte[size]); }
 #endif
 
 private:
@@ -154,9 +158,9 @@ private:
     size_t m_currentBufferSize;
     bool m_decodingSizeOnly;
     bool m_hasAlpha;
-    OwnPtr<png_byte[]> m_interlaceBuffer;
+    std::unique_ptr<png_byte[]> m_interlaceBuffer;
 #if USE(QCMSLIB)
-    OwnPtr<png_byte[]> m_rowBuffer;
+    std::unique_ptr<png_byte[]> m_rowBuffer;
 #endif
 };
 
@@ -212,7 +216,6 @@ void PNGImageDecoder::headerAvailable()
     if (colorType == PNG_COLOR_TYPE_GRAY || colorType == PNG_COLOR_TYPE_GRAY_ALPHA)
         png_set_gray_to_rgb(png);
 
-#if USE(QCMSLIB)
     if ((colorType & PNG_COLOR_MASK_COLOR) && !m_ignoreGammaAndColorProfile) {
         // We only support color profiles for color PALETTE and RGB[A] PNG. Supporting
         // color profiles for gray-scale images is slightly tricky, at least using the
@@ -223,7 +226,7 @@ void PNGImageDecoder::headerAvailable()
         bool imageHasAlpha = (colorType & PNG_COLOR_MASK_ALPHA) || trnsCount;
 #ifdef PNG_iCCP_SUPPORTED
         if (png_get_valid(png, info, PNG_INFO_sRGB)) {
-            setColorProfileAndTransform(nullptr, 0, imageHasAlpha, true /* useSRGB */);
+            setColorProfileAndComputeTransform(nullptr, 0, imageHasAlpha, true /* useSRGB */);
         } else {
             char* profileName = nullptr;
             int compressionType = 0;
@@ -234,12 +237,11 @@ void PNGImageDecoder::headerAvailable()
 #endif
             png_uint_32 profileLength = 0;
             if (png_get_iCCP(png, info, &profileName, &compressionType, &profile, &profileLength)) {
-                setColorProfileAndTransform(profile, profileLength, imageHasAlpha, false /* useSRGB */);
+                setColorProfileAndComputeTransform(reinterpret_cast<char*>(profile), profileLength, imageHasAlpha, false /* useSRGB */);
             }
         }
 #endif // PNG_iCCP_SUPPORTED
     }
-#endif // USE(QCMSLIB)
 
     if (!hasColorProfile()) {
         // Deal with gamma and keep it under our control.
@@ -290,7 +292,7 @@ void PNGImageDecoder::rowAvailable(unsigned char* rowBuffer, unsigned rowIndex, 
     ImageFrame& buffer = m_frameBufferCache[0];
     if (buffer.getStatus() == ImageFrame::FrameEmpty) {
         png_structp png = m_reader->pngPtr();
-        if (!buffer.setSize(size().width(), size().height())) {
+        if (!buffer.setSizeAndColorProfile(size().width(), size().height(), colorProfile())) {
             longjmp(JMPBUF(png), 1);
             return;
         }
@@ -426,7 +428,7 @@ void PNGImageDecoder::decode(bool onlySize)
         return;
 
     if (!m_reader)
-        m_reader = adoptPtr(new PNGImageReader(this, m_offset));
+        m_reader = wrapUnique(new PNGImageReader(this, m_offset));
 
     // If we couldn't decode the image but have received all the data, decoding
     // has failed.
@@ -435,7 +437,7 @@ void PNGImageDecoder::decode(bool onlySize)
 
     // If decoding is done or failed, we don't need the PNGImageReader anymore.
     if (isComplete(this) || failed())
-        m_reader.clear();
+        m_reader.reset();
 }
 
 } // namespace blink

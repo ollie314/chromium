@@ -45,7 +45,7 @@ class Node;
 class Range;
 class TreeScope;
 
-class DOMSelection final : public GarbageCollected<DOMSelection>, public ScriptWrappable, public DOMWindowProperty {
+class CORE_EXPORT DOMSelection final : public GarbageCollected<DOMSelection>, public ScriptWrappable, public DOMWindowProperty {
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(DOMSelection);
 public:
@@ -98,6 +98,8 @@ public:
 
 private:
     explicit DOMSelection(const TreeScope*);
+
+    bool isAvailable() const;
 
     // Convenience method for accessors, does not check m_frame present.
     const VisibleSelection& visibleSelection() const;

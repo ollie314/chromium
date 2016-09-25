@@ -12,7 +12,6 @@
 #include "base/macros.h"
 #include "components/filesystem/public/interfaces/directory.mojom.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace base {
 class FilePath;
@@ -21,16 +20,17 @@ class FilePath;
 namespace filesystem {
 
 class LockTable;
+class SharedTempDir;
 
-class FileImpl : public File {
+class FileImpl : public mojom::File {
  public:
-  FileImpl(mojo::InterfaceRequest<File> request,
-           const base::FilePath& path,
+  FileImpl(const base::FilePath& path,
            uint32_t flags,
+           scoped_refptr<SharedTempDir> temp_dir,
            scoped_refptr<LockTable> lock_table);
-  FileImpl(mojo::InterfaceRequest<File> request,
-           const base::FilePath& path,
+  FileImpl(const base::FilePath& path,
            base::File file,
+           scoped_refptr<SharedTempDir> temp_dir,
            scoped_refptr<LockTable> lock_table);
   ~FileImpl() override;
 
@@ -38,7 +38,7 @@ class FileImpl : public File {
   bool IsValid() const;
 
   // Attempts to perform the native operating system's locking operations on
-  // the internal File handle
+  // the internal mojom::File handle
   base::File::Error RawLockFile();
   base::File::Error RawUnlockFile();
 
@@ -48,32 +48,31 @@ class FileImpl : public File {
   void Close(const CloseCallback& callback) override;
   void Read(uint32_t num_bytes_to_read,
             int64_t offset,
-            Whence whence,
+            mojom::Whence whence,
             const ReadCallback& callback) override;
   void Write(mojo::Array<uint8_t> bytes_to_write,
              int64_t offset,
-             Whence whence,
+             mojom::Whence whence,
              const WriteCallback& callback) override;
   void Tell(const TellCallback& callback) override;
   void Seek(int64_t offset,
-            Whence whence,
+            mojom::Whence whence,
             const SeekCallback& callback) override;
   void Stat(const StatCallback& callback) override;
   void Truncate(int64_t size, const TruncateCallback& callback) override;
-  void Touch(TimespecOrNowPtr atime,
-             TimespecOrNowPtr mtime,
+  void Touch(mojom::TimespecOrNowPtr atime,
+             mojom::TimespecOrNowPtr mtime,
              const TouchCallback& callback) override;
-  void Dup(mojo::InterfaceRequest<File> file,
-           const DupCallback& callback) override;
+  void Dup(mojom::FileRequest file, const DupCallback& callback) override;
   void Flush(const FlushCallback& callback) override;
   void Lock(const LockCallback& callback) override;
   void Unlock(const UnlockCallback& callback) override;
   void AsHandle(const AsHandleCallback& callback) override;
 
  private:
-  mojo::StrongBinding<File> binding_;
   base::File file_;
   base::FilePath path_;
+  scoped_refptr<SharedTempDir> temp_dir_;
   scoped_refptr<LockTable> lock_table_;
 
   DISALLOW_COPY_AND_ASSIGN(FileImpl);

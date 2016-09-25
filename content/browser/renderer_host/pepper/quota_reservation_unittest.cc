@@ -17,7 +17,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "storage/browser/fileapi/quota/quota_reservation.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -90,7 +90,7 @@ class QuotaReservationTest : public testing::Test {
   }
 
   base::FilePath MakeFilePath(const base::FilePath::StringType& file_name) {
-    return work_dir_.path().Append(file_name);
+    return work_dir_.GetPath().Append(file_name);
   }
 
   storage::FileSystemURL MakeFileSystemURL(

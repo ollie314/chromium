@@ -9,16 +9,15 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "jni/ScreenshotTask_jni.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/android/window_android.h"
-#include "ui/gfx/display.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/screen.h"
 #include "ui/snapshot/snapshot.h"
 
 using base::android::AttachCurrentThread;
+using base::android::JavaParamRef;
 using base::android::ScopedJavaGlobalRef;
 using ui::WindowAndroid;
 

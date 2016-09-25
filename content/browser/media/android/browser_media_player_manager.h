@@ -54,9 +54,12 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   static void RegisterMediaUrlInterceptor(
       media::MediaUrlInterceptor* media_url_interceptor);
 
+  // Init the SurfaceTexturePeer.
+  static void InitSurfaceTexturePeer();
+
   // Pass a java surface object to the MediaPlayerAndroid object
   // identified by render process handle, render frame ID and player ID.
-  static void SetSurfacePeer(scoped_refptr<gfx::SurfaceTexture> surface_texture,
+  static void SetSurfacePeer(scoped_refptr<gl::SurfaceTexture> surface_texture,
                              base::ProcessHandle render_process_handle,
                              int render_frame_id,
                              int player_id);
@@ -72,7 +75,7 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
 
   // ContentVideoView::Client implementation.
   void DidExitFullscreen(bool release_media_player) override;
-  void SetVideoSurface(gfx::ScopedJavaSurface surface) override;
+  void SetVideoSurface(gl::ScopedJavaSurface surface) override;
 
   // Called when browser player wants the renderer media element to seek.
   // Any actual seek started by renderer will be handled by browser in OnSeek().
@@ -102,11 +105,6 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   media::MediaPlayerAndroid* GetPlayer(int player_id) override;
   bool RequestPlay(int player_id, base::TimeDelta duration,
                    bool has_audio) override;
-#if defined(VIDEO_HOLE)
-  void AttachExternalVideoSurface(int player_id, jobject surface);
-  void DetachExternalVideoSurface(int player_id);
-  void OnFrameInfoUpdated();
-#endif  // defined(VIDEO_HOLE)
 
   // Message handlers.
   virtual void OnEnterFullscreen(int player_id);
@@ -123,11 +121,6 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   virtual void OnRequestRemotePlaybackControl(int player_id);
   virtual bool IsPlayingRemotely(int player_id);
   virtual void ReleaseFullscreenPlayer(media::MediaPlayerAndroid* player);
-
-#if defined(VIDEO_HOLE)
-  void OnNotifyExternalSurface(
-      int player_id, bool is_request, const gfx::RectF& rect);
-#endif  // defined(VIDEO_HOLE)
 
  protected:
   // Clients must use Create() or subclass constructor.
@@ -189,12 +182,6 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   // Helper method to start playback.
   void StartInternal(int player_id);
 
-#if defined(VIDEO_HOLE)
-  void ReleasePlayerOfExternalVideoSurfaceIfNeeded(int future_player);
-  void OnRequestExternalSurface(int player_id, const gfx::RectF& rect);
-  void ReleaseExternalSurface(int player_id);
-#endif  // defined(VIDEO_HOLE)
-
   RenderFrameHost* const render_frame_host_;
 
   // An array of managed players.
@@ -209,11 +196,6 @@ class CONTENT_EXPORT BrowserMediaPlayerManager
   // The fullscreen video view object or NULL if video is not played in
   // fullscreen.
   std::unique_ptr<ContentVideoView> video_view_;
-
-#if defined(VIDEO_HOLE)
-  std::unique_ptr<ExternalVideoSurfaceContainer>
-      external_video_surface_container_;
-#endif
 
   // Player ID of the fullscreen media player.
   int fullscreen_player_id_;

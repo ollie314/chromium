@@ -24,6 +24,7 @@
 #include "core/CoreExport.h"
 #include "core/css/CSSValue.h"
 #include "platform/CrossOriginAttributeValue.h"
+#include "platform/weborigin/Referrer.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
@@ -53,13 +54,16 @@ public:
     }
     ~CSSImageValue();
 
-    bool isCachePending() const { return m_isCachePending; }
+    bool isCachePending() const { return !m_cachedImage; }
     StyleImage* cachedImage() const { ASSERT(!isCachePending()); return m_cachedImage.get(); }
-    StyleImage* cacheImage(Document*, CrossOriginAttributeValue = CrossOriginAttributeNotSet);
+    StyleImage* cacheImage(const Document&, CrossOriginAttributeValue = CrossOriginAttributeNotSet);
 
     const String& url() const { return m_absoluteURL; }
 
-    void reResolveURL(const Document&);
+    void setReferrer(const Referrer& referrer) { m_referrer = referrer; }
+    const Referrer& referrer() const { return m_referrer; }
+
+    void reResolveURL(const Document&) const;
 
     String customCSSText() const;
 
@@ -69,7 +73,7 @@ public:
 
     bool knownToBeOpaque(const LayoutObject&) const;
 
-    CSSImageValue* valueWithURLMadeAbsolute()
+    CSSImageValue* valueWithURLMadeAbsolute() const
     {
         return create(KURL(ParsedURLString, m_absoluteURL), m_cachedImage.get());
     }
@@ -77,17 +81,19 @@ public:
     void setInitiator(const AtomicString& name) { m_initiatorName = name; }
 
     DECLARE_TRACE_AFTER_DISPATCH();
-    void restoreCachedResourceIfNeeded(Document&) const;
+    void restoreCachedResourceIfNeeded(const Document&) const;
 
 private:
     CSSImageValue(const AtomicString& rawValue, const KURL&, StyleImage*);
     CSSImageValue(const AtomicString& absoluteURL);
 
     AtomicString m_relativeURL;
-    AtomicString m_absoluteURL;
-    bool m_isCachePending;
-    Member<StyleImage> m_cachedImage;
+    Referrer m_referrer;
     AtomicString m_initiatorName;
+
+    // Cached image data.
+    mutable AtomicString m_absoluteURL;
+    mutable Member<StyleImage> m_cachedImage;
 };
 
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSImageValue, isImageValue());

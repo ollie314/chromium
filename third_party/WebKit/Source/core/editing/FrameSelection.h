@@ -39,6 +39,7 @@
 #include "platform/geometry/LayoutRect.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Noncopyable.h"
+#include <memory>
 
 namespace blink {
 
@@ -47,6 +48,7 @@ class CharacterData;
 class CullRect;
 class LayoutBlock;
 class LocalFrame;
+class FrameCaret;
 class GranularityStrategy;
 class GraphicsContext;
 class HTMLFormElement;
@@ -70,7 +72,7 @@ enum class CaretVisibility;
 class CORE_EXPORT FrameSelection final : public GarbageCollectedFinalized<FrameSelection> {
     WTF_MAKE_NONCOPYABLE(FrameSelection);
 public:
-    static FrameSelection* create(LocalFrame* frame = nullptr)
+    static FrameSelection* create(LocalFrame* frame)
     {
         return new FrameSelection(frame);
     }
@@ -81,11 +83,10 @@ public:
         // 1 << 0 is reserved for EUserTriggered
         CloseTyping = 1 << 1,
         ClearTypingStyle = 1 << 2,
-        SpellCorrectionTriggered = 1 << 3,
-        DoNotSetFocus = 1 << 4,
-        DoNotUpdateAppearance = 1 << 5,
-        DoNotClearStrategy = 1 << 6,
-        DoNotAdjustInFlatTree = 1 << 7,
+        DoNotSetFocus = 1 << 3,
+        DoNotUpdateAppearance = 1 << 4,
+        DoNotClearStrategy = 1 << 5,
+        DoNotAdjustInFlatTree = 1 << 6,
     };
     typedef unsigned SetSelectionOptions; // Union of values in SetSelectionOption and EUserTriggered
     static inline EUserTriggered selectionOptionsToUserTriggered(SetSelectionOptions options)
@@ -93,6 +94,10 @@ public:
         return static_cast<EUserTriggered>(options & UserTriggered);
     }
 
+    bool isAvailable() const { return m_document; }
+    // You should not call |document()| when |!isAvailable()|.
+    const Document& document() const;
+    Document& document();
     LocalFrame* frame() const { return m_frame; }
     Element* rootEditableElement() const { return selection().rootEditableElement(); }
     Element* rootEditableElementOrDocumentElement() const;
@@ -102,9 +107,9 @@ public:
     bool isContentEditable() const { return selection().isContentEditable(); }
     bool isContentRichlyEditable() const { return selection().isContentRichlyEditable(); }
 
+    // TODO(xiaochengh): Remove the |moveTo(VisiblePosition)| overload.
     void moveTo(const VisiblePosition&, EUserTriggered = NotUserTriggered, CursorAlignOnScroll = CursorAlignOnScroll::IfNeeded);
-    void moveTo(const VisiblePosition&, const VisiblePosition&, EUserTriggered = NotUserTriggered);
-    void moveTo(const Position&, TextAffinity, EUserTriggered = NotUserTriggered);
+    void moveTo(const Position&, TextAffinity);
 
     template <typename Strategy>
     const VisibleSelectionTemplate<Strategy>& visibleSelection() const;
@@ -115,14 +120,12 @@ public:
     // TODO(yosin) We should get rid of two parameters version of
     // |setSelection()| to avoid conflict of four parameters version.
     void setSelection(const VisibleSelection& selection, TextGranularity granularity) { setSelection(selection, CloseTyping | ClearTypingStyle, CursorAlignOnScroll::IfNeeded, granularity); }
-    void setSelection(const VisibleSelectionInFlatTree& selection, TextGranularity granularity) { setSelection(selection, CloseTyping | ClearTypingStyle, CursorAlignOnScroll::IfNeeded, granularity); }
     // TODO(yosin) We should get rid of |Range| version of |setSelectedRagne()|
     // for Oilpan.
     bool setSelectedRange(Range*, TextAffinity, SelectionDirectionalMode = SelectionDirectionalMode::NonDirectional, SetSelectionOptions = CloseTyping | ClearTypingStyle);
     bool setSelectedRange(const EphemeralRange&, TextAffinity, SelectionDirectionalMode = SelectionDirectionalMode::NonDirectional, FrameSelection::SetSelectionOptions = CloseTyping | ClearTypingStyle);
     void selectAll();
     void clear();
-    void prepareForDestruction();
 
     // Call this after doing user-triggered selections to make it easy to delete the frame you entirely selected.
     void selectFrameElementInParentIfFullySelected();
@@ -146,12 +149,6 @@ public:
 
     TextGranularity granularity() const { return m_granularity; }
 
-    void setStart(const VisiblePosition &, EUserTriggered = NotUserTriggered);
-    void setEnd(const VisiblePosition &, EUserTriggered = NotUserTriggered);
-
-    void setBase(const VisiblePosition&, EUserTriggered = NotUserTriggered);
-    void setExtent(const VisiblePosition&, EUserTriggered = NotUserTriggered);
-
     Position base() const { return selection().base(); }
     Position extent() const { return selection().extent(); }
     Position start() const { return selection().start(); }
@@ -168,7 +165,6 @@ public:
     bool isNone() const { return selection().isNone(); }
     bool isCaret() const { return selection().isCaret(); }
     bool isRange() const { return selection().isRange(); }
-    bool isCaretOrRange() const { return selection().isCaretOrRange(); }
     bool isInPasswordField() const;
     bool isDirectional() const { return selection().isDirectional(); }
 
@@ -176,7 +172,11 @@ public:
     // the return value from underlying VisibleSelection's firstRange() is returned.
     Range* firstRange() const;
 
+    void documentAttached(Document*);
+    void documentDetached(const Document&);
+    void nodeChildrenWillBeRemoved(ContainerNode&);
     void nodeWillBeRemoved(Node&);
+    void dataWillChange(const CharacterData& node);
     void didUpdateCharacterData(CharacterData*, unsigned offset, unsigned oldLength, unsigned newLength);
     void didMergeTextNodes(const Text& oldNode, unsigned offset);
     void didSplitTextNode(const Text& oldNode);
@@ -185,15 +185,15 @@ public:
     void commitAppearanceIfNeeded(LayoutView&);
     void updateAppearance();
     void setCaretVisible(bool caretIsVisible);
-    bool isCaretBoundsDirty() const { return m_caretRectDirty; }
+    bool isCaretBoundsDirty() const;
     void setCaretRectNeedsUpdate();
     void scheduleVisualUpdate() const;
-    void invalidateCaretRect();
+    void invalidateCaretRect(bool forceInvalidation = false);
     void paintCaret(GraphicsContext&, const LayoutPoint&);
 
     // Used to suspend caret blinking while the mouse is down.
-    void setCaretBlinkingSuspended(bool suspended) { m_isCaretBlinkingSuspended = suspended; }
-    bool isCaretBlinkingSuspended() const { return m_isCaretBlinkingSuspended; }
+    void setCaretBlinkingSuspended(bool);
+    bool isCaretBlinkingSuspended() const;
 
     // Focus
     void setFocused(bool);
@@ -207,12 +207,10 @@ public:
     bool selectWordAroundPosition(const VisiblePosition&);
 
 #ifndef NDEBUG
-    void formatForDebugger(char* buffer, unsigned length) const;
     void showTreeForThis() const;
 #endif
 
     enum EndPointsAdjustmentMode { AdjustEndpointsAtBidiBoundary, DoNotAdjsutEndpoints };
-    void setNonDirectionalSelectionIfNeeded(const VisibleSelection&, TextGranularity, EndPointsAdjustmentMode = DoNotAdjsutEndpoints);
     void setNonDirectionalSelectionIfNeeded(const VisibleSelectionInFlatTree&, TextGranularity, EndPointsAdjustmentMode = DoNotAdjsutEndpoints);
     void setFocusedNodeIfNeeded();
     void notifyLayoutObjectOfSelectionChange(EUserTriggered);
@@ -236,7 +234,7 @@ public:
     void revealSelection(const ScrollAlignment& = ScrollAlignment::alignCenterIfNeeded, RevealExtentOption = DoNotRevealExtent);
     void setSelectionFromNone();
 
-    bool shouldShowBlockCursor() const { return m_shouldShowBlockCursor; }
+    bool shouldShowBlockCursor() const;
     void setShouldShowBlockCursor(bool);
 
     // TODO(yosin): We should check DOM tree version and style version in
@@ -249,6 +247,8 @@ public:
 
 private:
     friend class FrameSelectionTest;
+    friend class PaintControllerPaintTestForSlimmingPaintV1AndV2;
+    FRIEND_TEST_ALL_PREFIXES(PaintControllerPaintTestForSlimmingPaintV1AndV2, FullDocumentPaintingWithCaret);
 
     explicit FrameSelection(LocalFrame*);
 
@@ -258,11 +258,8 @@ private:
 
     template <typename Strategy>
     VisiblePositionTemplate<Strategy> originalBase() const;
-    void setOriginalBase(const VisiblePosition& newBase) { m_originalBase = newBase; }
-    void setOriginalBase(const VisiblePositionInFlatTree& newBase) { m_originalBaseInFlatTree = newBase; }
-
-    template <typename Strategy>
-    void setNonDirectionalSelectionIfNeededAlgorithm(const VisibleSelectionTemplate<Strategy>&, TextGranularity, EndPointsAdjustmentMode);
+    void setOriginalBase(const VisiblePosition&);
+    void setOriginalBase(const VisiblePositionInFlatTree&);
 
     template <typename Strategy>
     void setSelectionAlgorithm(const VisibleSelectionTemplate<Strategy>&, SetSelectionOptions, CursorAlignOnScroll, TextGranularity);
@@ -275,13 +272,7 @@ private:
 
     void focusedOrActiveStateChanged();
 
-    void caretBlinkTimerFired(Timer<FrameSelection>*);
-    void stopCaretBlinkTimer();
-
     void setUseSecureKeyboardEntry(bool);
-
-    void setCaretVisibility(CaretVisibility);
-    bool shouldBlinkCaret() const;
 
     void updateSelectionIfNeeded(const Position& base, const Position& extent, const Position& start, const Position& end);
 
@@ -291,36 +282,27 @@ private:
     GranularityStrategy* granularityStrategy();
 
     // For unittests
-    bool shouldPaintCaretForTesting() const { return m_shouldPaintCaret; }
-    bool isPreviousCaretDirtyForTesting() const { return m_previousCaretNode; }
+    bool shouldPaintCaretForTesting() const;
+    bool isPreviousCaretDirtyForTesting() const;
 
+    Member<Document> m_document;
     Member<LocalFrame> m_frame;
     const Member<PendingSelection> m_pendingSelection;
     const Member<SelectionEditor> m_selectionEditor;
 
     // Used to store base before the adjustment at bidi boundary
-    VisiblePosition m_originalBase;
     VisiblePositionInFlatTree m_originalBaseInFlatTree;
     TextGranularity m_granularity;
-
-    Member<Node> m_previousCaretNode; // The last node which painted the caret. Retained for clearing the old caret when it moves.
-    LayoutRect m_previousCaretRect;
-    CaretVisibility m_previousCaretVisibility;
+    LayoutUnit m_xPosForVerticalArrowNavigation;
 
     Member<EditingStyle> m_typingStyle;
 
-    Timer<FrameSelection> m_caretBlinkTimer;
-
-    bool m_caretRectDirty : 1;
-    bool m_shouldPaintCaret : 1;
-    bool m_isCaretBlinkingSuspended : 1;
     bool m_focused : 1;
-    bool m_shouldShowBlockCursor : 1;
 
     // Controls text granularity used to adjust the selection's extent in moveRangeSelectionExtent.
-    OwnPtr<GranularityStrategy> m_granularityStrategy;
+    std::unique_ptr<GranularityStrategy> m_granularityStrategy;
 
-    OwnPtr<CaretBase> m_caretBase;
+    const Member<FrameCaret> m_frameCaret;
 };
 
 inline EditingStyle* FrameSelection::typingStyle() const

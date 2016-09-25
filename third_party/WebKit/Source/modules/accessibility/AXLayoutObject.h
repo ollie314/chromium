@@ -46,6 +46,8 @@ class Node;
 class Widget;
 
 class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
+    WTF_MAKE_NONCOPYABLE(AXLayoutObject);
+
 protected:
     AXLayoutObject(LayoutObject*, AXObjectCacheImpl&);
 
@@ -55,21 +57,15 @@ public:
 
     // Public, overridden from AXObject.
     LayoutObject* getLayoutObject() const final { return m_layoutObject; }
-    LayoutRect elementRect() const override;
     LayoutBoxModelObject* getLayoutBoxModelObject() const;
-    SkMatrix44 transformFromLocalParentFrame() const override;
     ScrollableArea* getScrollableAreaIfScrollable() const final;
     AccessibilityRole determineAccessibilityRole() override;
     AccessibilityRole nativeAccessibilityRoleIgnoringAria() const override;
-    void checkCachedElementRect() const;
-    void updateCachedElementRect() const;
 
 protected:
     LayoutObject* m_layoutObject;
-    mutable LayoutRect m_cachedElementRect;
-    mutable LayoutRect m_cachedFrameRect;
-    mutable IntPoint m_cachedScrollPosition;
-    mutable bool m_cachedElementRectDirty;
+
+    LayoutObject* layoutObjectForRelativeBounds() const override { return m_layoutObject; }
 
     //
     // Overridden from AXObject.
@@ -99,7 +95,7 @@ protected:
 
     // Properties of static elements.
     const AtomicString& accessKey() const override;
-    RGBA32 backgroundColor() const final;
+    RGBA32 computeBackgroundColor() const final;
     RGBA32 color() const final;
     String fontFamily() const final;
     // Font size is in pixels.
@@ -148,10 +144,6 @@ protected:
     AXRange selectionUnderObject() const override;
     void setSelection(const AXRange&) override;
 
-    // Location and click point in frame-relative coordinates.
-    void markCachedElementRectDirty() const override;
-    IntPoint clickPoint() override;
-
     // Hit testing.
     AXObject* accessibilityHitTest(const IntPoint&) const override;
     AXObject* elementAccessibilityHitTest(const IntPoint&) const override;
@@ -189,7 +181,7 @@ protected:
     // Text metrics. Most of these should be deprecated, needs major cleanup.
     int index(const VisiblePosition&) const override;
     VisiblePosition visiblePositionForIndex(int) const override;
-    void lineBreaks(Vector<int>&) const override;
+    void lineBreaks(Vector<int>&) const final;
 
 private:
     AXObject* treeAncestorDisallowingChild() const;

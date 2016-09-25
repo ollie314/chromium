@@ -17,6 +17,7 @@
 #include "gpu/config/gpu_info_collector.h"
 #include "gpu/config/gpu_switches.h"
 #include "ui/gl/gl_switches.h"
+#include "ui/gl/gpu_switching_manager.h"
 
 namespace gpu {
 
@@ -43,6 +44,18 @@ void StringToIntSet(const std::string& str, std::set<int>* list) {
     bool succeed = base::StringToInt(piece, &number);
     DCHECK(succeed);
     list->insert(number);
+  }
+}
+
+// |str| is in the format of "0x040a;0x10de;...;hex32_N".
+void StringToIds(const std::string& str, std::vector<uint32_t>* list) {
+  DCHECK(list);
+  for (const base::StringPiece& piece : base::SplitStringPiece(
+           str, ";", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
+    uint32_t id = 0;
+    bool succeed = base::HexStringToUInt(piece, &id);
+    DCHECK(succeed);
+    list->push_back(id);
   }
 }
 
@@ -94,6 +107,55 @@ void ApplyGpuDriverBugWorkarounds(const GPUInfo& gpu_info,
 void StringToFeatureSet(
     const std::string& str, std::set<int>* feature_set) {
   StringToIntSet(str, feature_set);
+}
+
+void ParseSecondaryGpuDevicesFromCommandLine(
+    const base::CommandLine& command_line,
+    GPUInfo* gpu_info) {
+  DCHECK(gpu_info);
+
+  const char* secondary_vendor_switch_key = switches::kGpuSecondaryVendorIDs;
+  const char* secondary_device_switch_key = switches::kGpuSecondaryDeviceIDs;
+
+  if (command_line.HasSwitch(switches::kGpuTestingSecondaryVendorIDs) &&
+      command_line.HasSwitch(switches::kGpuTestingSecondaryDeviceIDs)) {
+    secondary_vendor_switch_key = switches::kGpuTestingSecondaryVendorIDs;
+    secondary_device_switch_key = switches::kGpuTestingSecondaryDeviceIDs;
+  }
+
+  if (!command_line.HasSwitch(secondary_vendor_switch_key) ||
+      !command_line.HasSwitch(secondary_device_switch_key)) {
+    return;
+  }
+
+  std::vector<uint32_t> vendor_ids;
+  std::vector<uint32_t> device_ids;
+  StringToIds(command_line.GetSwitchValueASCII(secondary_vendor_switch_key),
+              &vendor_ids);
+  StringToIds(command_line.GetSwitchValueASCII(secondary_device_switch_key),
+              &device_ids);
+
+  DCHECK(vendor_ids.size() == device_ids.size());
+  gpu_info->secondary_gpus.clear();
+  for (size_t i = 0; i < vendor_ids.size() && i < device_ids.size(); ++i) {
+    gpu::GPUInfo::GPUDevice secondary_device;
+    secondary_device.active = false;
+    secondary_device.vendor_id = vendor_ids[i];
+    secondary_device.device_id = device_ids[i];
+    gpu_info->secondary_gpus.push_back(secondary_device);
+  }
+}
+
+void InitializeDualGpusIfSupported(
+    const std::set<int>& driver_bug_workarounds) {
+  ui::GpuSwitchingManager* switching_manager =
+      ui::GpuSwitchingManager::GetInstance();
+  if (!switching_manager->SupportsDualGpus())
+    return;
+  if (driver_bug_workarounds.count(gpu::FORCE_DISCRETE_GPU) == 1)
+    ui::GpuSwitchingManager::GetInstance()->ForceUseOfDiscreteGpu();
+  else if (driver_bug_workarounds.count(gpu::FORCE_INTEGRATED_GPU) == 1)
+    ui::GpuSwitchingManager::GetInstance()->ForceUseOfIntegratedGpu();
 }
 
 }  // namespace gpu

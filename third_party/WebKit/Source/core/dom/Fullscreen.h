@@ -29,8 +29,8 @@
 #define Fullscreen_h
 
 #include "core/CoreExport.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/Document.h"
-#include "core/dom/DocumentLifecycleObserver.h"
 #include "core/dom/Element.h"
 #include "platform/Supplementable.h"
 #include "platform/Timer.h"
@@ -47,7 +47,7 @@ class ComputedStyle;
 class CORE_EXPORT Fullscreen final
     : public GarbageCollectedFinalized<Fullscreen>
     , public Supplement<Document>
-    , public DocumentLifecycleObserver {
+    , public ContextLifecycleObserver {
     USING_GARBAGE_COLLECTED_MIXIN(Fullscreen);
 public:
     virtual ~Fullscreen();
@@ -56,8 +56,7 @@ public:
     static Fullscreen* fromIfExists(Document&);
     static Element* fullscreenElementFrom(Document&);
     static Element* currentFullScreenElementFrom(Document&);
-    static bool isFullScreen(Document&);
-    static bool isActiveFullScreenElement(const Element&);
+    static bool isCurrentFullScreenElement(const Element&);
 
     enum RequestType {
         // Element.requestFullscreen()
@@ -67,15 +66,23 @@ public:
         PrefixedRequest,
     };
 
-    void requestFullscreen(Element&, RequestType);
+    // |forCrossProcessDescendant| is used in OOPIF scenarios and is set to
+    // true when fullscreen is requested for an out-of-process descendant
+    // element.
+    static void requestFullscreen(Element&, RequestType, bool forCrossProcessDescendant = false);
+
     static void fullyExitFullscreen(Document&);
-    void exitFullscreen();
+    static void exitFullscreen(Document&);
 
     static bool fullscreenEnabled(Document&);
-    Element* fullscreenElement() const { return !m_fullScreenElementStack.isEmpty() ? m_fullScreenElementStack.last().first.get() : 0; }
+    // TODO(foolip): The fullscreen element stack is modified synchronously in
+    // requestFullscreen(), which is not per spec and means that
+    // |fullscreenElement()| is not always the same as
+    // |currentFullScreenElement()|, see https://crbug.com/402421.
+    Element* fullscreenElement() const { return !m_fullscreenElementStack.isEmpty() ? m_fullscreenElementStack.last().first.get() : nullptr; }
 
-    void didEnterFullScreenForElement(Element*);
-    void didExitFullScreenForElement(Element*);
+    void didEnterFullscreenForElement(Element*);
+    void didExitFullscreen();
 
     void setFullScreenLayoutObject(LayoutFullScreen*);
     LayoutFullScreen* fullScreenLayoutObject() const { return m_fullScreenLayoutObject; }
@@ -83,10 +90,20 @@ public:
 
     void elementRemoved(Element&);
 
-    // Mozilla API
-    Element* webkitCurrentFullScreenElement() const { return m_fullScreenElement.get(); }
+    // Returns true if the current fullscreen element stack corresponds to a
+    // container for an actual fullscreen element in a descendant
+    // out-of-process iframe.
+    bool forCrossProcessDescendant() { return m_forCrossProcessDescendant; }
 
-    void documentWasDetached() override;
+    // Mozilla API
+    // TODO(foolip): |currentFullScreenElement()| is a remnant from before the
+    // fullscreen element stack. It is still maintained separately from the
+    // stack and is is what the :-webkit-full-screen pseudo-class depends on. It
+    // should be removed, see https://crbug.com/402421.
+    Element* currentFullScreenElement() const { return m_currentFullScreenElement.get(); }
+
+    // ContextLifecycleObserver:
+    void contextDestroyed() override;
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -103,30 +120,40 @@ private:
 
     void enqueueChangeEvent(Document&, RequestType);
     void enqueueErrorEvent(Element&, RequestType);
-    void eventQueueTimerFired(Timer<Fullscreen>*);
+    void eventQueueTimerFired(TimerBase*);
 
-    Member<Element> m_fullScreenElement;
-    HeapVector<std::pair<Member<Element>, RequestType>> m_fullScreenElementStack;
+    HeapVector<std::pair<Member<Element>, RequestType>> m_fullscreenElementStack;
+    Member<Element> m_currentFullScreenElement;
     LayoutFullScreen* m_fullScreenLayoutObject;
     Timer<Fullscreen> m_eventQueueTimer;
     HeapDeque<Member<Event>> m_eventQueue;
     LayoutRect m_savedPlaceholderFrameRect;
     RefPtr<ComputedStyle> m_savedPlaceholderComputedStyle;
-};
 
-inline bool Fullscreen::isActiveFullScreenElement(const Element& element)
-{
-    Fullscreen* fullscreen = fromIfExists(element.document());
-    if (!fullscreen)
-        return false;
-    return fullscreen->webkitCurrentFullScreenElement() == &element;
-}
+    // TODO(alexmos, dcheng): Currently, this assumes that if fullscreen was
+    // entered for an element in an out-of-process iframe, then it's not
+    // possible to re-enter fullscreen for a different element in this
+    // document, since that requires a user gesture, which can't be obtained
+    // since nothing in this document is visible, and since user gestures can't
+    // be forwarded across processes. However, the latter assumption could
+    // change if https://crbug.com/161068 is fixed so that cross-process
+    // postMessage can carry user gestures.  If that happens, this should be
+    // moved to be part of |m_fullscreenElementStack|.
+    bool m_forCrossProcessDescendant;
+};
 
 inline Fullscreen* Fullscreen::fromIfExists(Document& document)
 {
     if (!document.hasFullscreenSupplement())
-        return 0;
+        return nullptr;
     return fromIfExistsSlow(document);
+}
+
+inline bool Fullscreen::isCurrentFullScreenElement(const Element& element)
+{
+    if (Fullscreen* found = fromIfExists(element.document()))
+        return found->currentFullScreenElement() == &element;
+    return false;
 }
 
 } // namespace blink

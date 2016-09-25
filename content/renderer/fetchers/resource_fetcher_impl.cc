@@ -69,7 +69,8 @@ void ResourceFetcherImpl::SetHeader(const std::string& header,
   }
 }
 
-void ResourceFetcherImpl::SetSkipServiceWorker(bool skip_service_worker) {
+void ResourceFetcherImpl::SetSkipServiceWorker(
+    blink::WebURLRequest::SkipServiceWorker skip_service_worker) {
   DCHECK(!request_.isNull());
   DCHECK(!loader_);
 
@@ -121,8 +122,8 @@ void ResourceFetcherImpl::Start(
   }
   loader_->loadAsynchronously(request_, this);
 
-  // No need to hold on to the request.
-  request_.reset();
+  // No need to hold on to the request; reset it now.
+  request_ = blink::WebURLRequest();
 }
 
 void ResourceFetcherImpl::SetTimeout(const base::TimeDelta& timeout) {

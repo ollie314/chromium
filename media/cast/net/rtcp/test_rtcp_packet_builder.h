@@ -4,8 +4,8 @@
 
 // A very simple packet builder class for building RTCP packets.
 // Used for testing only.
-#ifndef MEDIA_CAST_RTCP_TEST_RTCP_PACKET_BUILDER_H_
-#define MEDIA_CAST_RTCP_TEST_RTCP_PACKET_BUILDER_H_
+#ifndef MEDIA_CAST_NET_RTCP_TEST_RTCP_PACKET_BUILDER_H_
+#define MEDIA_CAST_NET_RTCP_TEST_RTCP_PACKET_BUILDER_H_
 
 #include <stdint.h>
 #include <vector>
@@ -77,7 +77,7 @@ class TestRtcpPacketBuilder {
   void AddCast(uint32_t remote_ssrc,
                uint32_t local_ssrc,
                base::TimeDelta target_delay);
-  void AddCst2(const std::vector<uint32_t>& later_received_frames);
+  void AddCst2(const std::vector<FrameId>& later_received_frames);
   void AddErrorCst2();  // With wrong identifier.
   void AddPli(uint32_t remote_ssrc, uint32_t local_ssrc);
 
@@ -89,7 +89,7 @@ class TestRtcpPacketBuilder {
                            CastLoggingEvent event,
                            uint16_t event_timesamp_delta);
 
-  scoped_ptr<Packet> GetPacket();
+  std::unique_ptr<Packet> GetPacket();
   const uint8_t* Data();
   int Length() { return kMaxIpPacketSize - big_endian_writer_.remaining(); }
   base::BigEndianReader* Reader();
@@ -111,4 +111,4 @@ class TestRtcpPacketBuilder {
 }  // namespace cast
 }  // namespace media
 
-#endif  //  MEDIA_CAST_RTCP_TEST_RTCP_PACKET_BUILDER_H_
+#endif  // MEDIA_CAST_NET_RTCP_TEST_RTCP_PACKET_BUILDER_H_

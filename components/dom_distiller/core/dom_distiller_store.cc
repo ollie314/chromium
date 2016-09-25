@@ -5,17 +5,18 @@
 #include "components/dom_distiller/core/dom_distiller_store.h"
 
 #include <stddef.h>
+
 #include <utility>
 
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/dom_distiller/core/article_entry.h"
-#include "sync/api/sync_change.h"
-#include "sync/protocol/article_specifics.pb.h"
-#include "sync/protocol/sync.pb.h"
+#include "components/sync/api/sync_change.h"
+#include "components/sync/protocol/article_specifics.pb.h"
+#include "components/sync/protocol/sync.pb.h"
 
 using leveldb_proto::ProtoDatabase;
 using sync_pb::ArticleSpecifics;

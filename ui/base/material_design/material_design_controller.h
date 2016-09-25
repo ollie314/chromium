@@ -20,8 +20,6 @@ class UI_BASE_EXPORT MaterialDesignController {
   // The different material design modes. The order cannot be changed without
   // updating references as these are used as array indices.
   enum Mode {
-    // Classic, non-material design.
-    NON_MATERIAL = 0,
     // Basic material design.
     MATERIAL_NORMAL = 1,
     // Material design targeted at mouse/touch hybrid devices.
@@ -34,21 +32,32 @@ class UI_BASE_EXPORT MaterialDesignController {
   // Get the current Mode that should be used by the system.
   static Mode GetMode();
 
-  // Returns true if the current mode is a material design variant.
+  // Returns true. TODO(estade): remove.
   static bool IsModeMaterial();
+
+  // Returns true if the current mode is a material design variant and this mode
+  // should be extended to cover secondary UI.
+  static bool IsSecondaryUiMaterial();
 
   // Returns the per-platform default material design variant.
   static Mode DefaultMode();
 
+  static bool is_mode_initialized() { return is_mode_initialized_; }
+
  private:
   friend class test::MaterialDesignControllerTestAPI;
 
-  // Tracks whether |mode_| has been initialized. This is necessary so tests can
-  // reset the state back to a clean state during tear down.
+  // Tracks whether |mode_| has been initialized. This is necessary to avoid
+  // checking the |mode_| early in initialization before a call to Initialize().
+  // Tests can use it to reset the state back to a clean state during tear down.
   static bool is_mode_initialized_;
 
   // The current Mode to be used by the system.
   static Mode mode_;
+
+  // True when |mode_| applies beyond the primary UI (toolbar, tabstrip,
+  // etc.). For example, this controls use of MD inside bubbles and dialogs.
+  static bool include_secondary_ui_;
 
   // Declarations only. Do not allow construction of an object.
   MaterialDesignController();

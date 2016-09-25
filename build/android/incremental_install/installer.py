@@ -20,11 +20,10 @@ sys.path.append(
 import devil_chromium
 from devil.android import apk_helper
 from devil.android import device_utils
-from devil.android import device_errors
 from devil.android.sdk import version_codes
 from devil.utils import reraiser_thread
+from devil.utils import run_tests_helper
 from pylib import constants
-from pylib.utils import run_tests_helper
 from pylib.utils import time_profile
 
 prev_sys_path = list(sys.path)
@@ -86,7 +85,8 @@ def Uninstall(device, package, enable_device_cache=False):
 
 def Install(device, apk, split_globs=None, native_libs=None, dex_files=None,
             enable_device_cache=False, use_concurrency=True,
-            show_proguard_warning=False, permissions=()):
+            show_proguard_warning=False, permissions=(),
+            allow_downgrade=True):
   """Installs the given incremental apk and all required supporting files.
 
   Args:
@@ -119,9 +119,11 @@ def Install(device, apk, split_globs=None, native_libs=None, dex_files=None,
       for split_glob in split_globs:
         splits.extend((f for f in glob.glob(split_glob)))
       device.InstallSplitApk(apk, splits, reinstall=True,
-                             allow_cached_props=True, permissions=permissions)
+                             allow_cached_props=True, permissions=permissions,
+                             allow_downgrade=allow_downgrade)
     else:
-      device.Install(apk, reinstall=True, permissions=permissions)
+      device.Install(apk, reinstall=True, permissions=permissions,
+                     allow_downgrade=allow_downgrade)
     install_timer.Stop(log=False)
 
   # Push .so and .dex files to the device (if they have changed).
@@ -162,7 +164,7 @@ def Install(device, apk, split_globs=None, native_libs=None, dex_files=None,
     has_selinux = device.build_version_sdk >= version_codes.LOLLIPOP
     if has_selinux and apk.HasIsolatedProcesses():
       raise Exception('Cannot use incremental installs on Android L+ without '
-                      'first disabling isoloated processes.\n'
+                      'first disabling isolated processes.\n'
                       'To do so, use GN arg:\n'
                       '    disable_incremental_isolated_processes=true')
 
@@ -272,6 +274,12 @@ def main():
                       default=0,
                       action='count',
                       help='Verbose level (multiple times for more)')
+  parser.add_argument('--disable-downgrade',
+                      action='store_false',
+                      default=True,
+                      dest='allow_downgrade',
+                      help='Disable install of apk with lower version number'
+                           'than the version already on the device.')
 
   args = parser.parse_args()
 
@@ -300,7 +308,8 @@ def main():
     Install(device, apk, split_globs=args.splits, native_libs=args.native_libs,
             dex_files=args.dex_files, enable_device_cache=args.cache,
             use_concurrency=args.threading,
-            show_proguard_warning=args.show_proguard_warning)
+            show_proguard_warning=args.show_proguard_warning,
+            allow_downgrade=args.allow_downgrade)
 
 
 if __name__ == '__main__':

@@ -34,16 +34,18 @@
 #include "core/workers/InProcessWorkerObjectProxy.h"
 #include "core/workers/WorkerBackingThread.h"
 #include "core/workers/WorkerThreadStartupData.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
-PassOwnPtr<DedicatedWorkerThread> DedicatedWorkerThread::create(PassRefPtr<WorkerLoaderProxy> workerLoaderProxy, InProcessWorkerObjectProxy& workerObjectProxy, double timeOrigin)
+std::unique_ptr<DedicatedWorkerThread> DedicatedWorkerThread::create(PassRefPtr<WorkerLoaderProxy> workerLoaderProxy, InProcessWorkerObjectProxy& workerObjectProxy, double timeOrigin)
 {
-    return adoptPtr(new DedicatedWorkerThread(workerLoaderProxy, workerObjectProxy, timeOrigin));
+    return wrapUnique(new DedicatedWorkerThread(std::move(workerLoaderProxy), workerObjectProxy, timeOrigin));
 }
 
 DedicatedWorkerThread::DedicatedWorkerThread(PassRefPtr<WorkerLoaderProxy> workerLoaderProxy, InProcessWorkerObjectProxy& workerObjectProxy, double timeOrigin)
-    : WorkerThread(workerLoaderProxy, workerObjectProxy)
+    : WorkerThread(std::move(workerLoaderProxy), workerObjectProxy)
     , m_workerBackingThread(WorkerBackingThread::create("DedicatedWorker Thread"))
     , m_workerObjectProxy(workerObjectProxy)
     , m_timeOrigin(timeOrigin)
@@ -54,16 +56,14 @@ DedicatedWorkerThread::~DedicatedWorkerThread()
 {
 }
 
-WorkerGlobalScope* DedicatedWorkerThread::createWorkerGlobalScope(PassOwnPtr<WorkerThreadStartupData> startupData)
+WorkerOrWorkletGlobalScope* DedicatedWorkerThread::createWorkerGlobalScope(std::unique_ptr<WorkerThreadStartupData> startupData)
 {
-    return DedicatedWorkerGlobalScope::create(this, startupData, m_timeOrigin);
+    return DedicatedWorkerGlobalScope::create(this, std::move(startupData), m_timeOrigin);
 }
 
-void DedicatedWorkerThread::postInitialize()
+void DedicatedWorkerThread::clearWorkerBackingThread()
 {
-    // Notify the parent object of our current active state before the event
-    // loop starts processing tasks.
-    m_workerObjectProxy.reportPendingActivity(false);
+    m_workerBackingThread = nullptr;
 }
 
 } // namespace blink

@@ -180,7 +180,7 @@ bool AwRenderFrameExt::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void AwRenderFrameExt::OnDocumentHasImagesRequest(int id) {
+void AwRenderFrameExt::OnDocumentHasImagesRequest(uint32_t id) {
   bool hasImages = false;
   blink::WebView* webview = GetWebView();
   if (webview) {
@@ -300,6 +300,10 @@ blink::WebFrameWidget* AwRenderFrameExt::GetWebFrameWidget() {
     return nullptr;
 
   return render_frame()->GetRenderView()->GetWebFrameWidget();
+}
+
+void AwRenderFrameExt::OnDestruct() {
+  delete this;
 }
 
 }  // namespace android_webview

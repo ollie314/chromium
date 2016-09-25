@@ -29,25 +29,25 @@
 #include "modules/ModulesExport.h"
 #include "platform/audio/AudioBus.h"
 #include "wtf/Forward.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/ThreadSafeRefCounted.h"
 #include "wtf/Vector.h"
 #include "wtf/build_config.h"
+#include <memory>
 
 #define DEBUG_AUDIONODE_REFERENCES 0
 
 namespace blink {
 
-class AbstractAudioContext;
+class BaseAudioContext;
 class AudioNode;
+class AudioNodeOptions;
 class AudioNodeInput;
 class AudioNodeOutput;
 class AudioParam;
 class ExceptionState;
 
-// An AudioNode is the basic building block for handling audio within an AbstractAudioContext.
+// An AudioNode is the basic building block for handling audio within an BaseAudioContext.
 // It may be an audio source, an intermediate processing module, or an audio destination.
 // Each AudioNode can have inputs and/or outputs. An AudioSourceNode has no inputs and a single output.
 // An AudioDestinationNode has one input and no outputs and represents the final destination to the audio hardware.
@@ -71,27 +71,27 @@ public:
     enum { ProcessingSizeInFrames = 128 };
 
     enum NodeType {
-        NodeTypeUnknown,
-        NodeTypeDestination,
-        NodeTypeOscillator,
-        NodeTypeAudioBufferSource,
-        NodeTypeMediaElementAudioSource,
-        NodeTypeMediaStreamAudioDestination,
-        NodeTypeMediaStreamAudioSource,
-        NodeTypeJavaScript,
-        NodeTypeBiquadFilter,
-        NodeTypePanner,
-        NodeTypeStereoPanner,
-        NodeTypeConvolver,
-        NodeTypeDelay,
-        NodeTypeGain,
-        NodeTypeChannelSplitter,
-        NodeTypeChannelMerger,
-        NodeTypeAnalyser,
-        NodeTypeDynamicsCompressor,
-        NodeTypeWaveShaper,
-        NodeTypeIIRFilter,
-        NodeTypeEnd
+        NodeTypeUnknown = 0,
+        NodeTypeDestination = 1,
+        NodeTypeOscillator = 2,
+        NodeTypeAudioBufferSource = 3,
+        NodeTypeMediaElementAudioSource = 4,
+        NodeTypeMediaStreamAudioDestination = 5,
+        NodeTypeMediaStreamAudioSource = 6,
+        NodeTypeJavaScript = 7,
+        NodeTypeBiquadFilter = 8,
+        NodeTypePanner = 9,
+        NodeTypeStereoPanner = 10,
+        NodeTypeConvolver = 11,
+        NodeTypeDelay = 12,
+        NodeTypeGain = 13,
+        NodeTypeChannelSplitter = 14,
+        NodeTypeChannelMerger = 15,
+        NodeTypeAnalyser = 16,
+        NodeTypeDynamicsCompressor = 17,
+        NodeTypeWaveShaper = 18,
+        NodeTypeIIRFilter = 19,
+        NodeTypeEnd = 20
     };
 
     AudioHandler(NodeType, AudioNode&, float sampleRate);
@@ -106,11 +106,11 @@ public:
     // nullptr after dispose().  We must not call node() in an audio rendering
     // thread.
     AudioNode* node() const;
-    // context() returns a valid object until the AbstractAudioContext dies, and returns
+    // context() returns a valid object until the BaseAudioContext dies, and returns
     // nullptr otherwise.  This always returns a valid object in an audio
     // rendering thread, and inside dispose().  We must not call context() in
     // the destructor.
-    virtual AbstractAudioContext* context() const;
+    virtual BaseAudioContext* context() const;
     void clearContext() { m_context = nullptr; }
 
     enum ChannelCountMode {
@@ -217,6 +217,7 @@ public:
     AudioBus::ChannelInterpretation internalChannelInterpretation() const { return m_channelInterpretation; }
 
     void updateChannelCountMode();
+    void updateChannelInterpretation();
 
 protected:
     // Inputs and outputs must be created before the AudioHandler is
@@ -245,14 +246,14 @@ private:
     UntracedMember<AudioNode> m_node;
 
     // This untraced member is safe because this is cleared for all of live
-    // AudioHandlers when the AbstractAudioContext dies.  Do not access m_context
+    // AudioHandlers when the BaseAudioContext dies.  Do not access m_context
     // directly, use context() instead.
     // See http://crbug.com/404527 for the detail.
-    UntracedMember<AbstractAudioContext> m_context;
+    UntracedMember<BaseAudioContext> m_context;
 
     float m_sampleRate;
-    Vector<OwnPtr<AudioNodeInput>> m_inputs;
-    Vector<OwnPtr<AudioNodeOutput>> m_outputs;
+    Vector<std::unique_ptr<AudioNodeInput>> m_inputs;
+    Vector<std::unique_ptr<AudioNodeOutput>> m_outputs;
 
     double m_lastProcessingTime;
     double m_lastNonSilentTime;
@@ -266,13 +267,24 @@ private:
     static int s_nodeCount[NodeTypeEnd];
 #endif
 
-protected:
-    unsigned m_channelCount;
     ChannelCountMode m_channelCountMode;
     AudioBus::ChannelInterpretation m_channelInterpretation;
+
+protected:
+    // Set the (internal) channelCountMode and channelInterpretation
+    // accordingly. Use this in the node constructors to set the internal state
+    // correctly if the node uses values different from the defaults.
+    void setInternalChannelCountMode(ChannelCountMode);
+    void setInternalChannelInterpretation(AudioBus::ChannelInterpretation);
+
+    unsigned m_channelCount;
     // The new channel count mode that will be used to set the actual mode in the pre or post
     // rendering phase.
     ChannelCountMode m_newChannelCountMode;
+    // The new channel interpretation that will be used to set the actual
+    // intepretation in the pre or post rendering phase.
+    AudioBus::ChannelInterpretation m_newChannelInterpretation;
+
 };
 
 class MODULES_EXPORT AudioNode : public EventTargetWithInlineData {
@@ -281,6 +293,8 @@ class MODULES_EXPORT AudioNode : public EventTargetWithInlineData {
 public:
     DECLARE_VIRTUAL_TRACE();
     AudioHandler& handler() const;
+
+    void handleChannelOptions(const AudioNodeOptions&, ExceptionState&);
 
     virtual AudioNode* connect(AudioNode*, unsigned outputIndex, unsigned inputIndex, ExceptionState&);
     void connect(AudioParam*, unsigned outputIndex, ExceptionState&);
@@ -291,7 +305,7 @@ public:
     void disconnect(AudioNode*, unsigned outputIndex, unsigned inputIndex, ExceptionState&);
     void disconnect(AudioParam*, ExceptionState&);
     void disconnect(AudioParam*, unsigned outputIndex, ExceptionState&);
-    AbstractAudioContext* context() const;
+    BaseAudioContext* context() const;
     unsigned numberOfInputs() const;
     unsigned numberOfOutputs() const;
     unsigned long channelCount() const;
@@ -312,7 +326,7 @@ public:
     void disconnectWithoutException(unsigned outputIndex);
 
 protected:
-    explicit AudioNode(AbstractAudioContext&);
+    explicit AudioNode(BaseAudioContext&);
     // This should be called in a constructor.
     void setHandler(PassRefPtr<AudioHandler>);
 
@@ -324,7 +338,7 @@ private:
     // Returns true if the specified AudioParam was connected.
     bool disconnectFromOutputIfConnected(unsigned outputIndex, AudioParam&);
 
-    Member<AbstractAudioContext> m_context;
+    Member<BaseAudioContext> m_context;
     RefPtr<AudioHandler> m_handler;
     // Represents audio node graph with Oilpan references. N-th HeapHashSet
     // represents a set of AudioNode objects connected to this AudioNode's N-th

@@ -24,7 +24,6 @@
 #include "ui/events/devices/x11/device_data_manager_x11.h"
 #include "ui/events/devices/x11/device_list_cache_x11.h"
 #include "ui/events/event_switches.h"
-#include "ui/gfx/x/x11_types.h"
 
 namespace ui {
 
@@ -87,7 +86,7 @@ void TouchFactory::SetTouchDeviceListFromCommandLine() {
   }
 }
 
-void TouchFactory::UpdateDeviceList(Display* display) {
+void TouchFactory::UpdateDeviceList(XDisplay* display) {
   // Detect touch devices.
   touch_device_lookup_.reset();
   touch_device_list_.clear();
@@ -214,6 +213,11 @@ void TouchFactory::SetupXI2ForXWindow(Window window) {
   unsigned char mask[XIMaskLen(XI_LASTEVENT)];
   memset(mask, 0, sizeof(mask));
 
+  XISetMask(mask, XI_Enter);
+  XISetMask(mask, XI_Leave);
+  XISetMask(mask, XI_FocusIn);
+  XISetMask(mask, XI_FocusOut);
+
   XISetMask(mask, XI_TouchBegin);
   XISetMask(mask, XI_TouchUpdate);
   XISetMask(mask, XI_TouchEnd);
@@ -336,7 +340,7 @@ void TouchFactory::CacheTouchscreenIds(int device_id) {
   if (!DeviceDataManager::HasInstance())
     return;
   std::vector<TouchscreenDevice> touchscreens =
-      DeviceDataManager::GetInstance()->touchscreen_devices();
+      DeviceDataManager::GetInstance()->GetTouchscreenDevices();
   const auto it =
       std::find_if(touchscreens.begin(), touchscreens.end(),
                    [device_id](const TouchscreenDevice& touchscreen) {

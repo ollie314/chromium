@@ -37,7 +37,7 @@ class MEDIA_BLINK_EXPORT ResourceMultiBuffer
   ~ResourceMultiBuffer() override;
 
   // MultiBuffer implementation.
-  scoped_ptr<MultiBuffer::DataProvider> CreateWriter(
+  std::unique_ptr<MultiBuffer::DataProvider> CreateWriter(
       const BlockId& pos) override;
   bool RangeSupported() const override;
   void OnEmpty() override;
@@ -77,6 +77,8 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
   // Last modified time.
   base::Time last_modified() const { return last_modified_; }
 
+  const std::string& etag() const { return etag_; }
+
   // Expiration time.
   base::Time valid_until() const { return valid_until_; }
 
@@ -97,12 +99,19 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
   // this is not called regularly.
   void Use();
 
+  // Call this before we add some data to the multibuffer().
+  // If the multibuffer is empty, the data origin is set from
+  // |origin| and returns true. If not, it compares |origin|
+  // to the previous origin and returns wheather they match or not.
+  bool ValidateDataOrigin(const GURL& origin);
+
   // Setters.
   void set_length(int64_t length);
   void set_cacheable(bool cacheable);
   void set_valid_until(base::Time valid_until);
   void set_range_supported();
   void set_last_modified(base::Time last_modified);
+  void set_etag(const std::string& etag);
 
   // A redirect has occured (or we've found a better UrlData for the same
   // resource).
@@ -148,6 +157,11 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
   // the same url.
   const GURL url_;
 
+  // Origin of the data, should only be different from the url_.GetOrigin()
+  // when service workers are involved.
+  GURL data_origin_;
+  bool have_data_origin_;
+
   // Cross-origin access mode.
   const CORSMode cors_mode_;
 
@@ -176,6 +190,9 @@ class MEDIA_BLINK_EXPORT UrlData : public base::RefCounted<UrlData> {
 
   // Last modification time according to http headers.
   base::Time last_modified_;
+
+  // Etag from HTTP reply.
+  std::string etag_;
 
   ResourceMultiBuffer multibuffer_;
   std::vector<RedirectCB> redirect_callbacks_;

@@ -11,7 +11,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "cc/resources/shared_bitmap.h"
@@ -103,25 +103,27 @@ void ConvertImageData(PPB_ImageData_Impl* src_image,
   DCHECK(PPB_ImageData_Impl::IsImageDataFormatSupported(src_image->format()));
   DCHECK(PPB_ImageData_Impl::IsImageDataFormatSupported(dest_image->format()));
 
-  const SkBitmap* src_bitmap = src_image->GetMappedBitmap();
-  const SkBitmap* dest_bitmap = dest_image->GetMappedBitmap();
+  SkBitmap src_bitmap(src_image->GetMappedBitmap());
+  SkBitmap dest_bitmap(dest_image->GetMappedBitmap());
+  SkAutoLockPixels src_lock(src_bitmap);
+  SkAutoLockPixels dest_lock(dest_bitmap);
   if (src_rect.width() == src_image->width() &&
       dest_rect.width() == dest_image->width()) {
     // Fast path if the full frame can be converted at once.
     SkSwapRB(
-        dest_bitmap->getAddr32(static_cast<int>(dest_rect.fLeft),
-                               static_cast<int>(dest_rect.fTop)),
-        src_bitmap->getAddr32(static_cast<int>(src_rect.fLeft),
-                              static_cast<int>(src_rect.fTop)),
+        dest_bitmap.getAddr32(static_cast<int>(dest_rect.fLeft),
+                              static_cast<int>(dest_rect.fTop)),
+        src_bitmap.getAddr32(static_cast<int>(src_rect.fLeft),
+                             static_cast<int>(src_rect.fTop)),
         src_rect.width() * src_rect.height());
   } else {
     // Slow path where we convert line by line.
     for (int y = 0; y < src_rect.height(); y++) {
       SkSwapRB(
-          dest_bitmap->getAddr32(static_cast<int>(dest_rect.fLeft),
-                                 static_cast<int>(dest_rect.fTop + y)),
-          src_bitmap->getAddr32(static_cast<int>(src_rect.fLeft),
-                                static_cast<int>(src_rect.fTop + y)),
+          dest_bitmap.getAddr32(static_cast<int>(dest_rect.fLeft),
+                                static_cast<int>(dest_rect.fTop + y)),
+          src_bitmap.getAddr32(static_cast<int>(src_rect.fLeft),
+                               static_cast<int>(src_rect.fTop + y)),
           src_rect.width());
     }
   }
@@ -130,7 +132,7 @@ void ConvertImageData(PPB_ImageData_Impl* src_image,
 }  // namespace
 
 struct PepperGraphics2DHost::QueuedOperation {
-  enum Type { PAINT, SCROLL, REPLACE, };
+  enum Type { PAINT, SCROLL, REPLACE, TRANSFORM };
 
   QueuedOperation(Type t)
       : type(t), paint_x(0), paint_y(0), scroll_dx(0), scroll_dy(0) {}
@@ -148,6 +150,10 @@ struct PepperGraphics2DHost::QueuedOperation {
 
   // Valid when type == REPLACE.
   scoped_refptr<PPB_ImageData_Impl> replace_image;
+
+  // Valid when type == TRANSFORM
+  float scale;
+  gfx::PointF translation;
 };
 
 // static
@@ -223,6 +229,8 @@ int32_t PepperGraphics2DHost::OnResourceMessageReceived(
                                         OnHostMsgFlush)
     PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_Graphics2D_SetScale,
                                       OnHostMsgSetScale)
+    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_Graphics2D_SetLayerTransform,
+                                      OnHostMsgSetLayerTransform)
     PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_Graphics2D_ReadImageData,
                                       OnHostMsgReadImageData)
   PPAPI_END_MESSAGE_MAP()
@@ -274,7 +282,7 @@ bool PepperGraphics2DHost::ReadImageData(PP_Resource image,
     SkPaint paint;
     paint.setXfermodeMode(SkXfermode::kSrc_Mode);
     dest_canvas->drawBitmapRect(
-        *image_data_->GetMappedBitmap(), src_irect, dest_rect, &paint);
+        image_data_->GetMappedBitmap(), src_irect, dest_rect, &paint);
   }
   return true;
 }
@@ -314,7 +322,7 @@ void PepperGraphics2DHost::Paint(blink::WebCanvas* canvas,
                                  const gfx::Rect& paint_rect) {
   TRACE_EVENT0("pepper", "PepperGraphics2DHost::Paint");
   ImageDataAutoMapper auto_mapper(image_data_.get());
-  const SkBitmap& backing_bitmap = *image_data_->GetMappedBitmap();
+  SkBitmap backing_bitmap = image_data_->GetMappedBitmap();
 
   gfx::Rect invalidate_rect = plugin_rect;
   invalidate_rect.Intersect(paint_rect);
@@ -346,14 +354,6 @@ void PepperGraphics2DHost::Paint(blink::WebCanvas* canvas,
     canvas->drawRect(sk_invalidate_rect, paint);
   }
 
-  SkBitmap image;
-  // Copy to device independent bitmap when target canvas doesn't support
-  // platform paint.
-  if (!skia::SupportsPlatformPaint(canvas))
-    backing_bitmap.copyTo(&image, kN32_SkColorType);
-  else
-    image = backing_bitmap;
-
   SkPaint paint;
   if (is_always_opaque_) {
     // When we know the device is opaque, we can disable blending for slightly
@@ -366,7 +366,8 @@ void PepperGraphics2DHost::Paint(blink::WebCanvas* canvas,
     canvas->scale(scale_, scale_);
     pixel_origin.scale(1.0f / scale_);
   }
-  canvas->drawBitmap(image, pixel_origin.x(), pixel_origin.y(), &paint);
+  canvas->drawBitmap(backing_bitmap, pixel_origin.x(), pixel_origin.y(),
+                     &paint);
 }
 
 void PepperGraphics2DHost::ViewInitiatedPaint() {
@@ -376,8 +377,6 @@ void PepperGraphics2DHost::ViewInitiatedPaint() {
     need_flush_ack_ = false;
   }
 }
-
-void PepperGraphics2DHost::SetScale(float scale) { scale_ = scale; }
 
 float PepperGraphics2DHost::GetScale() const { return scale_; }
 
@@ -524,6 +523,21 @@ int32_t PepperGraphics2DHost::OnHostMsgSetScale(
   return PP_ERROR_BADARGUMENT;
 }
 
+int32_t PepperGraphics2DHost::OnHostMsgSetLayerTransform(
+            ppapi::host::HostMessageContext* context,
+            float scale,
+            const PP_FloatPoint& translation) {
+  if (scale < 0.0f)
+    return PP_ERROR_BADARGUMENT;
+
+  QueuedOperation operation(QueuedOperation::TRANSFORM);
+  operation.scale = scale;
+  operation.translation = gfx::PointF(translation.x, translation.y);
+  queued_operations_.push_back(operation);
+  return PP_OK;
+}
+
+
 int32_t PepperGraphics2DHost::OnHostMsgReadImageData(
     ppapi::host::HostMessageContext* context,
     PP_Resource image,
@@ -590,10 +604,15 @@ int32_t PepperGraphics2DHost::Flush(PP_Resource* old_image_data) {
   bool done_replace_contents = false;
   bool no_update_visible = true;
   bool is_plugin_visible = true;
+
   for (size_t i = 0; i < queued_operations_.size(); i++) {
     QueuedOperation& operation = queued_operations_[i];
     gfx::Rect op_rect;
     switch (operation.type) {
+      case QueuedOperation::TRANSFORM:
+        ExecuteTransform(operation.scale, operation.translation);
+        no_update_visible = false;
+        break;
       case QueuedOperation::PAINT:
         ExecutePaintImageData(operation.paint_image.get(),
                               operation.paint_x,
@@ -627,11 +646,15 @@ int32_t PepperGraphics2DHost::Flush(PP_Resource* old_image_data) {
     // is visible to determine how to deal with the callback.
     if (bound_instance_ && !op_rect.IsEmpty()) {
       gfx::Point scroll_delta(operation.scroll_dx, operation.scroll_dy);
-      if (!ConvertToLogicalPixels(scale_,
-                                  &op_rect,
+      // In use-zoom-for-dsf mode, the viewport (thus cc) uses native
+      // pixels, so the damage and rects have to be scaled.
+      gfx::Rect op_rect_in_viewport = op_rect;
+      ConvertToLogicalPixels(scale_, &op_rect, nullptr);
+      if (!ConvertToLogicalPixels(scale_ / viewport_to_dip_scale_,
+                                  &op_rect_in_viewport,
                                   operation.type == QueuedOperation::SCROLL
                                       ? &scroll_delta
-                                      : NULL)) {
+                                      : nullptr)) {
         // Conversion requires falling back to InvalidateRect.
         operation.type = QueuedOperation::PAINT;
       }
@@ -649,10 +672,10 @@ int32_t PepperGraphics2DHost::Flush(PP_Resource* old_image_data) {
       // partially or completely off-screen.
       if (operation.type == QueuedOperation::SCROLL) {
         bound_instance_->ScrollRect(
-            scroll_delta.x(), scroll_delta.y(), op_rect);
+            scroll_delta.x(), scroll_delta.y(), op_rect_in_viewport);
       } else {
-        if (!op_rect.IsEmpty())
-          bound_instance_->InvalidateRect(op_rect);
+        if (!op_rect_in_viewport.IsEmpty())
+          bound_instance_->InvalidateRect(op_rect_in_viewport);
       }
       texture_mailbox_modified_ = true;
     }
@@ -677,6 +700,11 @@ int32_t PepperGraphics2DHost::Flush(PP_Resource* old_image_data) {
   }
 
   return PP_OK_COMPLETIONPENDING;
+}
+
+void PepperGraphics2DHost::ExecuteTransform(const float& scale,
+                                            const gfx::PointF& translate) {
+  bound_instance_->SetGraphics2DTransform(scale, translate);
 }
 
 void PepperGraphics2DHost::ExecutePaintImageData(PPB_ImageData_Impl* image,
@@ -712,7 +740,7 @@ void PepperGraphics2DHost::ExecutePaintImageData(PPB_ImageData_Impl* image,
     SkPaint paint;
     paint.setXfermodeMode(SkXfermode::kSrc_Mode);
     backing_canvas->drawBitmapRect(
-        *image->GetMappedBitmap(), src_irect, dest_rect, &paint);
+        image->GetMappedBitmap(), src_irect, dest_rect, &paint);
   }
 }
 

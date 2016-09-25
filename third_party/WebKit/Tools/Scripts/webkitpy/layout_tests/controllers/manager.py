@@ -37,7 +37,6 @@ including crash logs, and mismatches with expectations.
 The Manager object has a constructor and one main method called run.
 """
 
-import datetime
 import json
 import logging
 import random
@@ -150,9 +149,9 @@ class Manager(object):
                         break
 
                     _log.info('')
-                    _log.info('Retrying %s, attempt %d of %d...' %
-                              (grammar.pluralize('unexpected failure', len(tests_to_retry)),
-                               retry_attempt, self._options.num_retries))
+                    _log.info('Retrying %s, attempt %d of %d...',
+                              grammar.pluralize('unexpected failure', len(tests_to_retry)),
+                              retry_attempt, self._options.num_retries)
 
                     retry_results = self._run_tests(tests_to_retry,
                                                     tests_to_skip=set(),
@@ -187,8 +186,8 @@ class Manager(object):
 
         exit_code = summarized_failing_results['num_regressions']
         if exit_code > test_run_results.MAX_FAILURES_EXIT_STATUS:
-            _log.warning('num regressions (%d) exceeds max exit status (%d)' %
-                         (exit_code, test_run_results.MAX_FAILURES_EXIT_STATUS))
+            _log.warning('num regressions (%d) exceeds max exit status (%d)',
+                         exit_code, test_run_results.MAX_FAILURES_EXIT_STATUS)
             exit_code = test_run_results.MAX_FAILURES_EXIT_STATUS
 
         if not self._options.dry_run:
@@ -207,7 +206,8 @@ class Manager(object):
             else:
                 if initial_results.interrupted:
                     exit_code = test_run_results.EARLY_EXIT_STATUS
-                if self._options.show_results and (exit_code or (self._options.full_results_html and initial_results.total_failures)):
+                if self._options.show_results and (
+                        exit_code or (self._options.full_results_html and initial_results.total_failures)):
                     self._port.show_results_html_file(results_path)
                 self._printer.print_results(time.time() - start_time, initial_results, summarized_failing_results)
 
@@ -230,7 +230,7 @@ class Manager(object):
         return self.INSPECTOR_SUBDIR in test
 
     def _is_websocket_test(self, test):
-        if self._port.is_wpt_enabled() and self._port.is_wpt_test(test):
+        if self._port.should_use_wptserve(test):
             return False
 
         return self.WEBSOCKET_SUBDIR in test
@@ -253,11 +253,8 @@ class Manager(object):
         if self._options.order == 'natural':
             tests_to_run.sort(key=self._port.test_key)
         elif self._options.order == 'random':
-            random.shuffle(tests_to_run)
-        elif self._options.order == 'random-seeded':
-            rnd = random.Random()
-            rnd.seed(4)  # http://xkcd.com/221/
-            rnd.shuffle(tests_to_run)
+            tests_to_run.sort()
+            random.Random(self._options.seed).shuffle(tests_to_run)
 
         tests_to_run, tests_in_other_chunks = self._finder.split_into_chunks(tests_to_run)
         self._expectations.add_extra_skipped_tests(tests_in_other_chunks)
@@ -269,7 +266,8 @@ class Manager(object):
         return TestInput(test_file,
                          self._options.slow_time_out_ms if self._test_is_slow(test_file) else self._options.time_out_ms,
                          self._test_requires_lock(test_file),
-                         should_add_missing_baselines=(self._options.new_test_results and not self._test_is_expected_missing(test_file)))
+                         should_add_missing_baselines=(self._options.new_test_results and
+                                                       not self._test_is_expected_missing(test_file)))
 
     def _test_requires_lock(self, test_file):
         """Return True if the test needs to be locked when running multiple
@@ -282,7 +280,9 @@ class Manager(object):
 
     def _test_is_expected_missing(self, test_file):
         expectations = self._expectations.model().get_expectations(test_file)
-        return test_expectations.MISSING in expectations or test_expectations.NEEDS_REBASELINE in expectations or test_expectations.NEEDS_MANUAL_REBASELINE in expectations
+        return (test_expectations.MISSING in expectations or
+                test_expectations.NEEDS_REBASELINE in expectations or
+                test_expectations.NEEDS_MANUAL_REBASELINE in expectations)
 
     def _test_is_slow(self, test_file):
         return test_expectations.SLOW in self._expectations.model().get_expectations(test_file)
@@ -293,8 +293,9 @@ class Manager(object):
     def _rename_results_folder(self):
         try:
             timestamp = time.strftime(
-                "%Y-%m-%d-%H-%M-%S", time.localtime(self._filesystem.mtime(self._filesystem.join(self._results_directory, "results.html"))))
-        except (IOError, OSError), e:
+                "%Y-%m-%d-%H-%M-%S", time.localtime(
+                    self._filesystem.mtime(self._filesystem.join(self._results_directory, "results.html"))))
+        except (IOError, OSError) as e:
             # It might be possible that results.html was not generated in previous run, because the test
             # run was interrupted even before testing started. In those cases, don't archive the folder.
             # Simply override the current folder contents with new results.
@@ -369,12 +370,13 @@ class Manager(object):
                                       tests_to_skip, num_workers, retry_attempt)
 
     def _start_servers(self, tests_to_run):
-        if self._port.is_wpt_enabled() and any(self._port.is_wpt_test(test) for test in tests_to_run):
+        if self._port.is_wptserve_enabled() and any(self._port.is_wptserve_test(test) for test in tests_to_run):
             self._printer.write_update('Starting WPTServe ...')
             self._port.start_wptserve()
             self._wptserve_started = True
 
-        if self._port.requires_http_server() or any((self._is_http_test(test) or self._is_inspector_test(test)) for test in tests_to_run):
+        if self._port.requires_http_server() or any((self._is_http_test(test) or self._is_inspector_test(test))
+                                                    for test in tests_to_run):
             self._printer.write_update('Starting HTTP server ...')
             self._port.start_http_server(additional_dirs={}, number_of_drivers=self._options.max_locked_shards)
             self._http_server_started = True
@@ -432,7 +434,7 @@ class Manager(object):
         """
         crashed_processes = []
         for test, result in run_results.unexpected_results_by_name.iteritems():
-            if (result.type != test_expectations.CRASH):
+            if result.type != test_expectations.CRASH:
                 continue
             for failure in result.failures:
                 if not isinstance(failure, test_failures.FailureCrash):
@@ -470,12 +472,14 @@ class Manager(object):
         self._port.clobber_old_port_specific_results()
 
     def _tests_to_retry(self, run_results):
-        # TODO(ojan): This should also check that result.type != test_expectations.MISSING since retrying missing expectations is silly.
-        # But that's a bit tricky since we only consider the last retry attempt for the count of unexpected regressions.
-        return [result.test_name for result in run_results.unexpected_results_by_name.values() if result.type != test_expectations.PASS]
+        # TODO(ojan): This should also check that result.type != test_expectations.MISSING
+        # since retrying missing expectations is silly. But that's a bit tricky since we
+        # only consider the last retry attempt for the count of unexpected regressions.
+        return [result.test_name for result in run_results.unexpected_results_by_name.values(
+        ) if result.type != test_expectations.PASS]
 
     def _write_json_files(self, summarized_full_results, summarized_failing_results, initial_results, running_all_tests):
-        _log.debug("Writing JSON files in %s." % self._results_directory)
+        _log.debug("Writing JSON files in %s.", self._results_directory)
 
         # FIXME: Upload stats.json to the server and delete times_ms.
         times_trie = json_results_generator.test_timings_trie(initial_results.results_by_name.values())
@@ -499,6 +503,9 @@ class Manager(object):
         # We write failing_results.json out as jsonp because we need to load it
         # from a file url for results.html and Chromium doesn't allow that.
         json_results_generator.write_json(self._filesystem, summarized_failing_results, full_results_path, callback="ADD_RESULTS")
+
+        if self._options.json_test_results:
+            json_results_generator.write_json(self._filesystem, summarized_failing_results, self._options.json_test_results)
 
         _log.debug("Finished writing JSON files.")
 
@@ -528,11 +535,11 @@ class Manager(object):
                 if response.code == 200:
                     _log.debug("JSON uploaded.")
                 else:
-                    _log.debug("JSON upload failed, %d: '%s'" % (response.code, response.read()))
+                    _log.debug("JSON upload failed, %d: '%s'", response.code, response.read())
             else:
                 _log.error("JSON upload failed; no response returned")
-        except Exception, err:
-            _log.error("Upload failed: %s" % err)
+        except Exception as err:
+            _log.error("Upload failed: %s", err)
 
     def _copy_results_html_file(self, destination_path):
         base_dir = self._port.path_from_webkit_base('LayoutTests', 'fast', 'harness')

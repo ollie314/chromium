@@ -23,9 +23,13 @@
  */
 
 #include "modules/webaudio/ChannelSplitterNode.h"
-#include "modules/webaudio/AbstractAudioContext.h"
+#include "bindings/core/v8/ExceptionMessages.h"
+#include "bindings/core/v8/ExceptionState.h"
+#include "core/dom/ExceptionCode.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/AudioNodeOutput.h"
+#include "modules/webaudio/BaseAudioContext.h"
+#include "modules/webaudio/ChannelSplitterOptions.h"
 
 namespace blink {
 
@@ -49,14 +53,14 @@ PassRefPtr<ChannelSplitterHandler> ChannelSplitterHandler::create(AudioNode& nod
 void ChannelSplitterHandler::process(size_t framesToProcess)
 {
     AudioBus* source = input(0).bus();
-    ASSERT(source);
-    ASSERT_UNUSED(framesToProcess, framesToProcess == source->length());
+    DCHECK(source);
+    DCHECK_EQ(framesToProcess, source->length());
 
     unsigned numberOfSourceChannels = source->numberOfChannels();
 
     for (unsigned i = 0; i < numberOfOutputs(); ++i) {
         AudioBus* destination = output(i).bus();
-        ASSERT(destination);
+        DCHECK(destination);
 
         if (i < numberOfSourceChannels) {
             // Split the channel out if it exists in the source.
@@ -71,17 +75,55 @@ void ChannelSplitterHandler::process(size_t framesToProcess)
 
 // ----------------------------------------------------------------
 
-ChannelSplitterNode::ChannelSplitterNode(AbstractAudioContext& context, float sampleRate, unsigned numberOfOutputs)
+ChannelSplitterNode::ChannelSplitterNode(BaseAudioContext& context, unsigned numberOfOutputs)
     : AudioNode(context)
 {
-    setHandler(ChannelSplitterHandler::create(*this, sampleRate, numberOfOutputs));
+    setHandler(ChannelSplitterHandler::create(*this, context.sampleRate(), numberOfOutputs));
 }
 
-ChannelSplitterNode* ChannelSplitterNode::create(AbstractAudioContext& context, float sampleRate, unsigned numberOfOutputs)
+ChannelSplitterNode* ChannelSplitterNode::create(BaseAudioContext& context, ExceptionState& exceptionState)
 {
-    if (!numberOfOutputs || numberOfOutputs > AbstractAudioContext::maxNumberOfChannels())
+    DCHECK(isMainThread());
+
+    // Default number of outputs for the splitter node is 6.
+    return create(context, 6, exceptionState);
+}
+
+ChannelSplitterNode* ChannelSplitterNode::create(BaseAudioContext& context, unsigned numberOfOutputs, ExceptionState& exceptionState)
+{
+    DCHECK(isMainThread());
+
+    if (context.isContextClosed()) {
+        context.throwExceptionForClosedState(exceptionState);
         return nullptr;
-    return new ChannelSplitterNode(context, sampleRate, numberOfOutputs);
+    }
+
+    if (!numberOfOutputs || numberOfOutputs > BaseAudioContext::maxNumberOfChannels()) {
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            ExceptionMessages::indexOutsideRange<size_t>(
+                "number of outputs",
+                numberOfOutputs,
+                1,
+                ExceptionMessages::InclusiveBound,
+                BaseAudioContext::maxNumberOfChannels(),
+                ExceptionMessages::InclusiveBound));
+        return nullptr;
+    }
+
+    return new ChannelSplitterNode(context, numberOfOutputs);
+}
+
+ChannelSplitterNode* ChannelSplitterNode::create(BaseAudioContext* context, const ChannelSplitterOptions& options, ExceptionState& exceptionState)
+{
+    ChannelSplitterNode* node = create(*context, options.numberOfOutputs(), exceptionState);
+
+    if (!node)
+        return nullptr;
+
+    node->handleChannelOptions(options, exceptionState);
+
+    return node;
 }
 
 } // namespace blink

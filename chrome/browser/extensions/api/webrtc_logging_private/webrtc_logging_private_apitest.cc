@@ -4,6 +4,9 @@
 
 #include <stddef.h>
 
+#include <memory>
+#include <utility>
+
 #include "base/json/json_writer.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
@@ -12,7 +15,7 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/media/webrtc_log_uploader.h"
+#include "chrome/browser/media/webrtc/webrtc_log_uploader.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
@@ -49,16 +52,17 @@ std::string ParamsToString(const base::ListValue& parameters) {
 }
 
 void InitializeTestMetaData(base::ListValue* parameters) {
-  base::DictionaryValue* meta_data_entry = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> meta_data_entry(
+      new base::DictionaryValue());
   meta_data_entry->SetString("key", kTestLoggingSessionIdKey);
   meta_data_entry->SetString("value", kTestLoggingSessionIdValue);
-  base::ListValue* meta_data = new base::ListValue();
-  meta_data->Append(meta_data_entry);
-  meta_data_entry = new base::DictionaryValue();
+  std::unique_ptr<base::ListValue> meta_data(new base::ListValue());
+  meta_data->Append(std::move(meta_data_entry));
+  meta_data_entry.reset(new base::DictionaryValue());
   meta_data_entry->SetString("key", "url");
   meta_data_entry->SetString("value", kTestLoggingUrl);
-  meta_data->Append(meta_data_entry);
-  parameters->Append(meta_data);
+  meta_data->Append(std::move(meta_data_entry));
+  parameters->Append(std::move(meta_data));
 }
 
 class WebrtcLoggingPrivateApiTest : public ExtensionApiTest {
@@ -81,10 +85,11 @@ class WebrtcLoggingPrivateApiTest : public ExtensionApiTest {
   }
 
   void AppendTabIdAndUrl(base::ListValue* parameters) {
-    base::DictionaryValue* request_info = new base::DictionaryValue();
+    std::unique_ptr<base::DictionaryValue> request_info(
+        new base::DictionaryValue());
     request_info->SetInteger(
         "tabId", extensions::ExtensionTabUtil::GetTabId(web_contents()));
-    parameters->Append(request_info);
+    parameters->Append(std::move(request_info));
     parameters->AppendString(web_contents()->GetURL().GetOrigin().spec());
   }
 
@@ -95,11 +100,11 @@ class WebrtcLoggingPrivateApiTest : public ExtensionApiTest {
         function, ParamsToString(parameters), browser()));
     if (expect_results) {
       EXPECT_TRUE(result.get());
-      return result.get() != nullptr;
+      return result != nullptr;
     }
 
     EXPECT_FALSE(result.get());
-    return result.get() == nullptr;
+    return result == nullptr;
   }
 
   template<typename Function>
@@ -296,8 +301,8 @@ IN_PROC_BROWSER_TEST_F(WebrtcLoggingPrivateApiTest, TestStartStopUpload) {
   EXPECT_NE(std::string::npos, log_part.find("Cpu brand:"));
 
   // Check the multipart contents.
-  std::vector<std::string> multipart_lines;
-  base::SplitStringUsingSubstr(multipart, "\r\n", &multipart_lines);
+  std::vector<std::string> multipart_lines = base::SplitStringUsingSubstr(
+      multipart, "\r\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   ASSERT_EQ(31, static_cast<int>(multipart_lines.size()));
 
   EXPECT_STREQ(&boundary[0], multipart_lines[0].c_str());

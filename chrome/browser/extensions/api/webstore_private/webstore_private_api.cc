@@ -10,17 +10,17 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_ui_util.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/gpu/gpu_feature_checker.h"
 #include "chrome/browser/profiles/profile.h"
@@ -52,6 +52,8 @@ namespace GetEphemeralAppsEnabled =
 namespace GetIsLauncherEnabled = api::webstore_private::GetIsLauncherEnabled;
 namespace GetStoreLogin = api::webstore_private::GetStoreLogin;
 namespace GetWebGLStatus = api::webstore_private::GetWebGLStatus;
+namespace IsPendingCustodianApproval =
+    api::webstore_private::IsPendingCustodianApproval;
 namespace IsInIncognitoMode = api::webstore_private::IsInIncognitoMode;
 namespace LaunchEphemeralApp = api::webstore_private::LaunchEphemeralApp;
 namespace SetStoreLogin = api::webstore_private::SetStoreLogin;
@@ -70,7 +72,8 @@ class PendingApprovals {
       const std::string& id);
 
  private:
-  typedef ScopedVector<WebstoreInstaller::Approval> ApprovalList;
+  using ApprovalList =
+      std::vector<std::unique_ptr<WebstoreInstaller::Approval>>;
 
   ApprovalList approvals_;
 
@@ -82,18 +85,19 @@ PendingApprovals::~PendingApprovals() {}
 
 void PendingApprovals::PushApproval(
     std::unique_ptr<WebstoreInstaller::Approval> approval) {
-  approvals_.push_back(approval.release());
+  approvals_.push_back(std::move(approval));
 }
 
 std::unique_ptr<WebstoreInstaller::Approval> PendingApprovals::PopApproval(
     Profile* profile,
     const std::string& id) {
-  for (size_t i = 0; i < approvals_.size(); ++i) {
-    WebstoreInstaller::Approval* approval = approvals_[i];
-    if (approval->extension_id == id &&
-        profile->IsSameProfile(approval->profile)) {
-      approvals_.weak_erase(approvals_.begin() + i);
-      return std::unique_ptr<WebstoreInstaller::Approval>(approval);
+  for (ApprovalList::iterator iter = approvals_.begin();
+       iter != approvals_.end(); ++iter) {
+    if (iter->get()->extension_id == id &&
+        profile->IsSameProfile(iter->get()->profile)) {
+      std::unique_ptr<WebstoreInstaller::Approval> approval = std::move(*iter);
+      approvals_.erase(iter);
+      return approval;
     }
   }
   return std::unique_ptr<WebstoreInstaller::Approval>();
@@ -324,7 +328,6 @@ void WebstorePrivateBeginInstallWithManifest3Function::HandleInstallProceed() {
           chrome_details_.GetProfile(), details().id,
           std::move(parsed_manifest_), false));
   approval->use_app_installed_bubble = !!details().app_install_bubble;
-  approval->enable_launcher = !!details().enable_launcher;
   // If we are enabling the launcher, we should not show the app list in order
   // to train the user to open it themselves at least once.
   approval->skip_post_install_ui = !!details().enable_launcher;
@@ -410,22 +413,6 @@ WebstorePrivateCompleteInstallFunction::Run() {
 
   scoped_active_install_.reset(new ScopedActiveInstall(
       InstallTracker::Get(browser_context()), params->expected_id));
-
-  AppListService* app_list_service = AppListService::Get();
-
-  if (approval_->enable_launcher) {
-    app_list_service->EnableAppList(chrome_details_.GetProfile(),
-                                    AppListService::ENABLE_FOR_APP_INSTALL);
-  }
-
-  if (IsAppLauncherEnabled() && approval_->manifest->is_app()) {
-    // Show the app list to show download is progressing. Don't show the app
-    // list on first app install so users can be trained to open it themselves.
-    app_list_service->ShowForAppInstall(
-        chrome_details_.GetProfile(),
-        params->expected_id,
-        approval_->enable_launcher);
-  }
 
   // Balanced in OnExtensionInstallSuccess() or OnExtensionInstallFailure().
   AddRef();
@@ -601,6 +588,52 @@ ExtensionFunction::ResponseAction
 WebstorePrivateGetEphemeralAppsEnabledFunction::Run() {
   return RespondNow(ArgumentList(GetEphemeralAppsEnabled::Results::Create(
       false)));
+}
+
+WebstorePrivateIsPendingCustodianApprovalFunction::
+    WebstorePrivateIsPendingCustodianApprovalFunction()
+    : chrome_details_(this) {}
+
+WebstorePrivateIsPendingCustodianApprovalFunction::
+    ~WebstorePrivateIsPendingCustodianApprovalFunction() {}
+
+ExtensionFunction::ResponseAction
+WebstorePrivateIsPendingCustodianApprovalFunction::Run() {
+  std::unique_ptr<IsPendingCustodianApproval::Params> params(
+      IsPendingCustodianApproval::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  Profile* profile = chrome_details_.GetProfile();
+
+  if (!profile->IsSupervised()) {
+    return RespondNow(BuildResponse(false));
+  }
+
+  ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context());
+
+  const Extension* extension =
+      registry->GetExtensionById(params->id, ExtensionRegistry::EVERYTHING);
+  if (!extension) {
+    return RespondNow(BuildResponse(false));
+  }
+
+  ExtensionPrefs* extensions_prefs = ExtensionPrefs::Get(browser_context());
+
+  if (extensions::util::NeedCustodianApprovalForPermissionIncrease(profile) &&
+      extensions_prefs->HasDisableReason(
+          params->id, Extension::DISABLE_PERMISSIONS_INCREASE)) {
+    return RespondNow(BuildResponse(true));
+  }
+
+  bool is_pending_approval = extensions_prefs->HasDisableReason(
+      params->id, Extension::DISABLE_CUSTODIAN_APPROVAL_REQUIRED);
+
+  return RespondNow(BuildResponse(is_pending_approval));
+}
+
+ExtensionFunction::ResponseValue
+WebstorePrivateIsPendingCustodianApprovalFunction::BuildResponse(bool result) {
+  return OneArgument(base::MakeUnique<base::FundamentalValue>(result));
 }
 
 }  // namespace extensions

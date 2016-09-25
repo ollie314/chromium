@@ -30,6 +30,7 @@ import copy
 import logging
 
 from webkitpy.common.memoized import memoized
+from functools import reduce
 
 _log = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ class BaselineOptimizer(object):
         # test suite in the name and the virtual baseline name is not a strict superset of the non-virtual name.
         # For example, virtual/gpu/fast/canvas/foo-expected.png corresponds to fast/canvas/foo-expected.png and
         # the baseline directories are like platform/mac/virtual/gpu/fast/canvas. So, to get the path
-        # to the baseline in the platform directory, we need to append jsut foo-expected.png to the directory.
+        # to the baseline in the platform directory, we need to append just foo-expected.png to the directory.
         virtual_suite = self._virtual_suite(baseline_name)
         if virtual_suite:
             baseline_name_without_virtual = baseline_name[len(virtual_suite.name) + 1:]
@@ -232,7 +233,7 @@ class BaselineOptimizer(object):
                 file_name = self._join_directory(directory, baseline_name)
                 if self._scm.exists(file_name):
                     scm_files.append(file_name)
-                else:
+                elif self._filesystem.exists(file_name):
                     fs_files.append(file_name)
 
         if scm_files or fs_files:
@@ -284,22 +285,23 @@ class BaselineOptimizer(object):
 
         if new_results_by_directory == results_by_directory:
             if new_results_by_directory:
-                _log.debug("  %s: (already optimal)" % basename)
+                _log.debug("  %s: (already optimal)", basename)
                 self.write_by_directory(results_by_directory, _log.debug, "    ")
             else:
-                _log.debug("  %s: (no baselines found)" % basename)
+                _log.debug("  %s: (no baselines found)", basename)
             # This is just used for unittests. Intentionally set it to the old data if we don't modify anything.
             self.new_results_by_directory.append(results_by_directory)
             return True
 
-        if self._results_by_port_name(results_by_directory, baseline_name) != self._results_by_port_name(new_results_by_directory, baseline_name):
+        if self._results_by_port_name(results_by_directory, baseline_name) != self._results_by_port_name(
+                new_results_by_directory, baseline_name):
             # This really should never happen. Just a sanity check to make sure the script fails in the case of bugs
             # instead of committing incorrect baselines.
-            _log.error("  %s: optimization failed" % basename)
+            _log.error("  %s: optimization failed", basename)
             self.write_by_directory(results_by_directory, _log.warning, "      ")
             return False
 
-        _log.debug("  %s:" % basename)
+        _log.debug("  %s:", basename)
         _log.debug("    Before: ")
         self.write_by_directory(results_by_directory, _log.debug, "      ")
         _log.debug("    After: ")

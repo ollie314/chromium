@@ -142,9 +142,6 @@ class WebstoreInstaller : public content::NotificationObserver,
     // so there's no need to show it again.
     bool skip_install_dialog;
 
-    // Whether we should enable the launcher before installing the app.
-    bool enable_launcher;
-
     // Manifest check level for checking actual manifest against expected
     // manifest.
     ManifestCheckLevel manifest_check_level;
@@ -159,7 +156,7 @@ class WebstoreInstaller : public content::NotificationObserver,
     scoped_refptr<Extension> dummy_extension;
 
     // Required minimum version.
-    std::unique_ptr<Version> minimum_version;
+    std::unique_ptr<base::Version> minimum_version;
 
     // The authuser index required to download the item being installed. May be
     // the empty string, in which case no authuser parameter is used.

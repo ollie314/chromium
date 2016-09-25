@@ -160,7 +160,8 @@ class ExtensionStorageMonitorTest : public ExtensionBrowserTest {
         GetNotificationId(extension->id()));
 
     OpenApplication(AppLaunchParams(profile(), extension, LAUNCH_CONTAINER_NONE,
-                                    NEW_WINDOW, extensions::SOURCE_TEST));
+                                    WindowOpenDisposition::NEW_WINDOW,
+                                    extensions::SOURCE_TEST));
     ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
 
     // Instruct the app to write |num_bytes| of data.
@@ -254,7 +255,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionStorageMonitorTest,
 
 // Verify that notifications are disabled when the user clicks the action button
 // in the notification.
-IN_PROC_BROWSER_TEST_F(ExtensionStorageMonitorTest, UninstallExtension) {
+// Flaky: https://crbug.com/617801
+IN_PROC_BROWSER_TEST_F(ExtensionStorageMonitorTest,
+                       DISABLED_UninstallExtension) {
   const Extension* extension = InitWriteDataApp();
   ASSERT_TRUE(extension);
   WriteBytesExpectingNotification(extension, GetInitialExtensionThreshold());

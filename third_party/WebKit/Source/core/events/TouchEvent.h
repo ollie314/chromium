@@ -48,23 +48,17 @@ public:
     static TouchEvent* create(TouchList* touches,
         TouchList* targetTouches, TouchList* changedTouches,
         const AtomicString& type, AbstractView* view,
-        PlatformEvent::Modifiers modifiers, bool cancelable, bool causesScrollingIfUncanceled,
+        PlatformEvent::Modifiers modifiers, bool cancelable, bool causesScrollingIfUncanceled, bool firstTouchMoveOrStart,
         double platformTimeStamp)
     {
         return new TouchEvent(touches, targetTouches, changedTouches, type, view,
-            modifiers, cancelable, causesScrollingIfUncanceled, platformTimeStamp);
+            modifiers, cancelable, causesScrollingIfUncanceled, firstTouchMoveOrStart, platformTimeStamp);
     }
 
     static TouchEvent* create(const AtomicString& type, const TouchEventInit& initializer)
     {
         return new TouchEvent(type, initializer);
     }
-
-    void initTouchEvent(ScriptState*, TouchList* touches, TouchList* targetTouches,
-        TouchList* changedTouches, const AtomicString& type,
-        AbstractView*,
-        int, int, int, int, // unused useless members of web exposed API
-        bool ctrlKey, bool altKey, bool shiftKey, bool metaKey);
 
     TouchList* touches() const { return m_touches.get(); }
     TouchList* targetTouches() const { return m_targetTouches.get(); }
@@ -82,6 +76,8 @@ public:
 
     void preventDefault() override;
 
+    void doneDispatchingEventAtCurrentTarget() override;
+
     EventDispatchMediator* createMediator() override;
 
     DECLARE_VIRTUAL_TRACE();
@@ -92,6 +88,7 @@ private:
         TouchList* changedTouches, const AtomicString& type,
         AbstractView*, PlatformEvent::Modifiers,
         bool cancelable, bool causesScrollingIfUncanceled,
+        bool firstTouchMoveOrStart,
         double platformTimeStamp);
     TouchEvent(const AtomicString&, const TouchEventInit&);
 
@@ -99,6 +96,8 @@ private:
     Member<TouchList> m_targetTouches;
     Member<TouchList> m_changedTouches;
     bool m_causesScrollingIfUncanceled;
+    bool m_firstTouchMoveOrStart;
+    bool m_defaultPreventedBeforeCurrentTarget;
 };
 
 class TouchEventDispatchMediator final : public EventDispatchMediator {

@@ -4,6 +4,8 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/cancelable_callback.h"
 #include "base/command_line.h"
@@ -11,6 +13,7 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
@@ -19,7 +22,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/device/tcp_device_provider.h"
@@ -39,7 +42,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/test_switches.h"
+#include "chrome/test/base/test_chrome_web_ui_controller_factory.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/app_modal/javascript_app_modal_dialog.h"
 #include "components/app_modal/native_app_modal_dialog.h"
@@ -52,7 +55,9 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/worker_service.h"
 #include "content/public/browser/worker_service_observer.h"
 #include "content/public/common/content_switches.h"
@@ -114,6 +119,8 @@ const char kReloadSharedWorkerTestPage[] =
     "files/workers/debug_shared_worker_initialization.html";
 const char kReloadSharedWorkerTestWorker[] =
     "files/workers/debug_shared_worker_initialization.js";
+const char kEmulateNetworkConditionsPage[] =
+    "files/devtools/emulate_network_conditions.html";
 
 template <typename... T>
 void DispatchOnTestSuiteSkipCheck(DevToolsWindow* window,
@@ -221,7 +228,7 @@ class TestInterceptor : public net::URLRequestInterceptor {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
     net::URLRequestFilter::GetInstance()->AddHostnameInterceptor(
         url.scheme(), url.host(),
-        make_scoped_ptr(new TestInterceptor(url, file_path)));
+        base::WrapUnique(new TestInterceptor(url, file_path)));
   }
 
   // Unregisters previously created TestInterceptor, which should delete it.
@@ -716,7 +723,8 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
 // we try to close them.
 IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest, TestDockedDevToolsClose) {
   RunBeforeUnloadSanityTest(true, base::Bind(
-      &DevToolsBeforeUnloadTest::CloseDevToolsWindowAsync, this), false);
+      &DevToolsBeforeUnloadTest::CloseDevToolsWindowAsync,
+      base::Unretained(this)), false);
 }
 
 // Tests that BeforeUnload event gets called on docked devtools if
@@ -724,7 +732,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest, TestDockedDevToolsClose) {
 IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
                        TestDockedDevToolsInspectedTabClose) {
   RunBeforeUnloadSanityTest(true, base::Bind(
-      &DevToolsBeforeUnloadTest::CloseInspectedTab, this));
+      &DevToolsBeforeUnloadTest::CloseInspectedTab,
+      base::Unretained(this)));
 }
 
 // Tests that BeforeUnload event gets called on docked devtools if
@@ -732,14 +741,16 @@ IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
 IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
                        TestDockedDevToolsInspectedBrowserClose) {
   RunBeforeUnloadSanityTest(true, base::Bind(
-      &DevToolsBeforeUnloadTest::CloseInspectedBrowser, this));
+      &DevToolsBeforeUnloadTest::CloseInspectedBrowser,
+      base::Unretained(this)));
 }
 
 // Tests that BeforeUnload event gets called on undocked devtools if
 // we try to close them.
 IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest, TestUndockedDevToolsClose) {
   RunBeforeUnloadSanityTest(false, base::Bind(
-      &DevToolsBeforeUnloadTest::CloseDevToolsWindowAsync, this), false);
+      &DevToolsBeforeUnloadTest::CloseDevToolsWindowAsync,
+      base::Unretained(this)), false);
 }
 
 // Tests that BeforeUnload event gets called on undocked devtools if
@@ -747,7 +758,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest, TestUndockedDevToolsClose) {
 IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
                        TestUndockedDevToolsInspectedTabClose) {
   RunBeforeUnloadSanityTest(false, base::Bind(
-      &DevToolsBeforeUnloadTest::CloseInspectedTab, this));
+      &DevToolsBeforeUnloadTest::CloseInspectedTab,
+      base::Unretained(this)));
 }
 
 // Tests that BeforeUnload event gets called on undocked devtools if
@@ -755,7 +767,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
 IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
                        TestUndockedDevToolsInspectedBrowserClose) {
   RunBeforeUnloadSanityTest(false, base::Bind(
-      &DevToolsBeforeUnloadTest::CloseInspectedBrowser, this));
+      &DevToolsBeforeUnloadTest::CloseInspectedBrowser,
+      base::Unretained(this)));
 }
 
 // Tests that BeforeUnload event gets called on undocked devtools if
@@ -806,9 +819,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
 
 // Tests that BeforeUnload event gets called on devtools that are opened
 // on another devtools.
-// Disabled because of http://crbug.com/497857
 IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
-                       DISABLED_TestDevToolsOnDevTools) {
+                       TestDevToolsOnDevTools) {
   ASSERT_TRUE(spawned_test_server()->Start());
   LoadTestPage(kDebuggerTestPage);
 
@@ -930,7 +942,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest, DevToolsExtensionWithHttpIframe) {
                      http_iframe.spec() + "'></iframe>");
 
   // Install the extension.
-  const Extension* extension = LoadExtensionFromPath(dir->unpacked_path());
+  const Extension* extension = LoadExtensionFromPath(dir->UnpackedPath());
   ASSERT_TRUE(extension);
 
   // Open a devtools window.
@@ -981,6 +993,13 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
                        TestContentScriptIsPresent) {
   LoadExtension("simple_content_script");
   RunTest("testContentScriptIsPresent", kPageWithContentScript);
+}
+
+// Tests that console selector shows correct context names.
+IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
+                       TestConsoleContextNames) {
+  LoadExtension("simple_content_script");
+  RunTest("testConsoleContextNames", kPageWithContentScript);
 }
 
 // Tests that scripts are not duplicated after Scripts Panel switch.
@@ -1060,6 +1079,10 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestConsoleOnNavigateBack) {
 
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestDeviceEmulation) {
   RunTest("testDeviceMetricsOverrides", "about:blank");
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestDispatchKeyEventDoesNotCrash) {
+  RunTest("testDispatchKeyEventDoesNotCrash", "about:blank");
 }
 
 // Tests that settings are stored in profile correctly.
@@ -1174,7 +1197,7 @@ class DevToolsReattachAfterCrashTest : public DevToolsSanityTest {
     ui_test_utils::NavigateToURL(browser(), GURL(content::kChromeUICrashURL));
     crash_observer.Wait();
     content::TestNavigationObserver navigation_observer(GetInspectedTab(), 1);
-    chrome::Reload(browser(), CURRENT_TAB);
+    chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
     navigation_observer.Wait();
   }
 };
@@ -1202,13 +1225,6 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, AutoAttachToWindowOpen) {
 }
 
 IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest, InspectSharedWorker) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
-
   RunTest("testSharedWorker", kSharedWorkerTestPage, kSharedWorkerTestWorker);
 }
 
@@ -1271,13 +1287,6 @@ class RemoteDebuggingTest : public ExtensionApiTest {
 #define MAYBE_RemoteDebugger RemoteDebugger
 #endif
 IN_PROC_BROWSER_TEST_F(RemoteDebuggingTest, MAYBE_RemoteDebugger) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
-
   ASSERT_TRUE(RunExtensionTest("target_list")) << message_;
 }
 
@@ -1303,9 +1312,9 @@ class DevToolsPixelOutputTests : public DevToolsSanityTest {
 };
 
 // This test enables switches::kUseGpuInTests which causes false positives
-// with MemorySanitizer.
+// with MemorySanitizer. This is also flakey on many configurations.
 #if defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER) || \
-    (defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD))
+    defined(OS_WIN)|| (defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD))
 #define MAYBE_TestScreenshotRecording DISABLED_TestScreenshotRecording
 #else
 #define MAYBE_TestScreenshotRecording TestScreenshotRecording
@@ -1317,7 +1326,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsPixelOutputTests,
 
 // This test enables switches::kUseGpuInTests which causes false positives
 // with MemorySanitizer.
-#if defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER)
+#if defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER) || defined(OS_WIN)
 #define MAYBE_TestLatencyInfoInstrumentation \
   DISABLED_TestLatencyInfoInstrumentation
 #else
@@ -1327,7 +1336,6 @@ IN_PROC_BROWSER_TEST_F(DevToolsPixelOutputTests,
                        MAYBE_TestLatencyInfoInstrumentation) {
   WebContents* web_contents = GetInspectedTab();
   OpenDevToolsWindow(kLatencyInfoTestPage, false);
-  RunTestMethod("enableExperiment", "timelineLatencyInfo");
   DispatchAndWait("startTimeline");
 
   for (int i = 0; i < 3; ++i) {
@@ -1336,7 +1344,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsPixelOutputTests,
     DispatchInPageAndWait("waitForEvent", "mousemove");
   }
 
-  SimulateMouseClickAt(web_contents, 0, blink::WebPointerProperties::ButtonLeft,
+  SimulateMouseClickAt(web_contents, 0,
+                       blink::WebPointerProperties::Button::Left,
                        gfx::Point(30, 60));
   DispatchInPageAndWait("waitForEvent", "click");
 
@@ -1352,4 +1361,96 @@ IN_PROC_BROWSER_TEST_F(DevToolsPixelOutputTests,
                 "MouseWheel", "GestureTap");
 
   CloseDevToolsWindow();
+}
+
+class DevToolsNetInfoTest : public DevToolsSanityTest {
+ protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(switches::kEnableNetworkInformation);
+    command_line->AppendSwitch(
+        switches::kEnableExperimentalWebPlatformFeatures);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(DevToolsNetInfoTest, EmulateNetworkConditions) {
+  RunTest("testEmulateNetworkConditions", kEmulateNetworkConditionsPage);
+}
+
+class StaticURLDataSource : public content::URLDataSource {
+ public:
+  StaticURLDataSource(const std::string& source, const std::string& content)
+      : source_(source), content_(content) {}
+
+  std::string GetSource() const override { return source_; }
+  void StartDataRequest(
+      const std::string& path,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+      const GotDataCallback& callback) override {
+    std::string data(content_);
+    callback.Run(base::RefCountedString::TakeString(&data));
+  }
+  std::string GetMimeType(const std::string& path) const override {
+    return "text/html";
+  }
+  bool ShouldAddContentSecurityPolicy() const override { return false; }
+
+ private:
+  std::string source_;
+  std::string content_;
+  DISALLOW_COPY_AND_ASSIGN(StaticURLDataSource);
+};
+
+class MockWebUIProvider
+    : public TestChromeWebUIControllerFactory::WebUIProvider {
+ public:
+  MockWebUIProvider(const std::string& source, const std::string& content)
+      : source_(source), content_(content) {}
+
+  content::WebUIController* NewWebUI(content::WebUI* web_ui,
+                                     const GURL& url) override {
+    content::URLDataSource::Add(Profile::FromWebUI(web_ui),
+                                new StaticURLDataSource(source_, content_));
+    return new content::WebUIController(web_ui);
+  }
+
+ private:
+  std::string source_;
+  std::string content_;
+  DISALLOW_COPY_AND_ASSIGN(MockWebUIProvider);
+};
+
+// This tests checks that window is correctly initialized when DevTools is
+// opened while navigation through history with forward and back actions.
+// (crbug.com/627407)
+// Flaky on Windows. http://crbug.com/628174#c4
+#if defined(OS_WIN)
+#define MAYBE_TestWindowInitializedOnNavigateBack \
+  DISABLED_TestWindowInitializedOnNavigateBack
+#else
+#define MAYBE_TestWindowInitializedOnNavigateBack \
+  TestWindowInitializedOnNavigateBack
+#endif
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
+                       MAYBE_TestWindowInitializedOnNavigateBack) {
+  TestChromeWebUIControllerFactory test_factory;
+  MockWebUIProvider mock_provider("dummyurl",
+                                  "<script>\n"
+                                  "  window.abc = 239;\n"
+                                  "  console.log(abc);\n"
+                                  "</script>");
+  test_factory.AddFactoryOverride(GURL("chrome://dummyurl").host(),
+                                  &mock_provider);
+  content::WebUIControllerFactory::RegisterFactory(&test_factory);
+
+  ui_test_utils::NavigateToURL(browser(), GURL("chrome://dummyurl"));
+  DevToolsWindow* window =
+      DevToolsWindowTesting::OpenDevToolsWindowSync(GetInspectedTab(), true);
+  chrome::DuplicateTab(browser());
+  chrome::SelectPreviousTab(browser());
+  ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
+  chrome::GoBack(browser(), WindowOpenDisposition::CURRENT_TAB);
+  RunTestFunction(window, "testWindowInitializedOnNavigateBack");
+
+  DevToolsWindowTesting::CloseDevToolsWindowSync(window);
+  content::WebUIControllerFactory::UnregisterFactoryForTesting(&test_factory);
 }

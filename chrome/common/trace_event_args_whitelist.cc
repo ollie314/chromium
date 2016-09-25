@@ -8,6 +8,7 @@
 #include "base/strings/pattern.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
+#include "base/trace_event/trace_event.h"
 
 namespace {
 
@@ -18,12 +19,17 @@ struct WhitelistEntry {
 };
 
 const char* const kInputLatencyAllowedArgs[] = {"data", nullptr};
+const char* const kMemoryDumpAllowedArgs[] = {"dumps", nullptr};
 
 const WhitelistEntry kEventArgsWhitelist[] = {
     {"__metadata", "thread_name", nullptr},
+    {"__metadata", "process_name", nullptr},
     {"ipc", "SyncChannel::Send", nullptr},
     {"toplevel", "*", nullptr},
     {"latencyInfo", "*", kInputLatencyAllowedArgs},
+    // Redefined the string since MemoryDumpManager::kTraceCategory causes
+    // static initialization of this struct.
+    {TRACE_DISABLED_BY_DEFAULT("memory-infra"), "*", kMemoryDumpAllowedArgs},
     {nullptr, nullptr, nullptr}};
 
 const char* kMetadataWhitelist[] = {
@@ -84,7 +90,7 @@ bool IsTraceEventArgsWhitelisted(
 }
 
 bool IsMetadataWhitelisted(const std::string& metadata_name) {
-  for (auto key : kMetadataWhitelist) {
+  for (auto* key : kMetadataWhitelist) {
     if (base::MatchPattern(metadata_name, key)) {
       return true;
     }

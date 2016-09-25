@@ -76,7 +76,7 @@ SearchSuggestionParser::SuggestResult::SuggestResult(
     const base::string16& annotation,
     const base::string16& answer_contents,
     const base::string16& answer_type,
-    scoped_ptr<SuggestionAnswer> answer,
+    std::unique_ptr<SuggestionAnswer> answer,
     const std::string& suggest_query_params,
     const std::string& deletion_url,
     bool from_keyword_provider,
@@ -365,7 +365,7 @@ std::string SearchSuggestionParser::ExtractJsonData(
 }
 
 // static
-scoped_ptr<base::Value> SearchSuggestionParser::DeserializeJsonData(
+std::unique_ptr<base::Value> SearchSuggestionParser::DeserializeJsonData(
     base::StringPiece json_data) {
   // The JSON response should be an array.
   for (size_t response_start_index = json_data.find("["), i = 0;
@@ -377,11 +377,12 @@ scoped_ptr<base::Value> SearchSuggestionParser::DeserializeJsonData(
     JSONStringValueDeserializer deserializer(json_data);
     deserializer.set_allow_trailing_comma(true);
     int error_code = 0;
-    scoped_ptr<base::Value> data = deserializer.Deserialize(&error_code, NULL);
+    std::unique_ptr<base::Value> data =
+        deserializer.Deserialize(&error_code, NULL);
     if (error_code == 0)
       return data;
   }
-  return scoped_ptr<base::Value>();
+  return std::unique_ptr<base::Value>();
 }
 
 // static
@@ -453,9 +454,6 @@ bool SearchSuggestionParser::ParseSuggestResults(
   base::string16 suggestion;
   std::string type;
   int relevance = default_result_relevance;
-  // Prohibit navsuggest in FORCED_QUERY mode.  Users wants queries, not URLs.
-  const bool allow_navsuggest =
-      input.type() != metrics::OmniboxInputType::FORCED_QUERY;
   const base::string16& trimmed_input =
       base::CollapseWhitespace(input.text(), false);
   for (size_t index = 0; results_list->GetString(index, &suggestion); ++index) {
@@ -483,7 +481,7 @@ bool SearchSuggestionParser::ParseSuggestResults(
       // Do not blindly trust the URL coming from the server to be valid.
       GURL url(url_formatter::FixupURL(base::UTF16ToUTF8(suggestion),
                                        std::string()));
-      if (url.is_valid() && allow_navsuggest) {
+      if (url.is_valid()) {
         base::string16 title;
         if (descriptions != NULL)
           descriptions->GetString(index, &title);
@@ -503,7 +501,7 @@ bool SearchSuggestionParser::ParseSuggestResults(
       base::string16 annotation;
       base::string16 answer_contents;
       base::string16 answer_type_str;
-      scoped_ptr<SuggestionAnswer> answer;
+      std::unique_ptr<SuggestionAnswer> answer;
       std::string suggest_query_params;
 
       if (suggestion_details) {

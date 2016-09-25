@@ -27,9 +27,52 @@
 #include "platform/network/ResourceResponse.h"
 
 #include "wtf/CurrentTime.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/StdLibExtras.h"
+#include <memory>
 
 namespace blink {
+
+namespace {
+
+template <typename Interface>
+Vector<Interface> isolatedCopy(const Vector<Interface>& src)
+{
+    Vector<Interface> result;
+    result.reserveCapacity(src.size());
+    for (const auto& timestamp : src) {
+        result.append(timestamp.isolatedCopy());
+    }
+    return result;
+}
+
+} // namespace
+
+ResourceResponse::SignedCertificateTimestamp::SignedCertificateTimestamp(
+    const blink::WebURLResponse::SignedCertificateTimestamp& sct)
+    : m_status(sct.status)
+    , m_origin(sct.origin)
+    , m_logDescription(sct.logDescription)
+    , m_logId(sct.logId)
+    , m_timestamp(sct.timestamp)
+    , m_hashAlgorithm(sct.hashAlgorithm)
+    , m_signatureAlgorithm(sct.signatureAlgorithm)
+    , m_signatureData(sct.signatureData)
+{
+}
+
+ResourceResponse::SignedCertificateTimestamp ResourceResponse::SignedCertificateTimestamp::isolatedCopy() const
+{
+    return SignedCertificateTimestamp(
+        m_status.isolatedCopy(),
+        m_origin.isolatedCopy(),
+        m_logDescription.isolatedCopy(),
+        m_logId.isolatedCopy(),
+        m_timestamp,
+        m_hashAlgorithm.isolatedCopy(),
+        m_signatureAlgorithm.isolatedCopy(),
+        m_signatureData.isolatedCopy());
+}
 
 ResourceResponse::ResourceResponse()
     : m_expectedContentLength(0)
@@ -56,10 +99,13 @@ ResourceResponse::ResourceResponse()
     , m_wasAlternateProtocolAvailable(false)
     , m_wasFetchedViaProxy(false)
     , m_wasFetchedViaServiceWorker(false)
+    , m_wasFetchedViaForeignFetch(false)
     , m_wasFallbackRequiredByServiceWorker(false)
     , m_serviceWorkerResponseType(WebServiceWorkerResponseTypeDefault)
     , m_responseTime(0)
     , m_remotePort(0)
+    , m_encodedBodyLength(0)
+    , m_decodedBodyLength(0)
 {
 }
 
@@ -92,10 +138,13 @@ ResourceResponse::ResourceResponse(const KURL& url, const AtomicString& mimeType
     , m_wasAlternateProtocolAvailable(false)
     , m_wasFetchedViaProxy(false)
     , m_wasFetchedViaServiceWorker(false)
+    , m_wasFetchedViaForeignFetch(false)
     , m_wasFallbackRequiredByServiceWorker(false)
     , m_serviceWorkerResponseType(WebServiceWorkerResponseTypeDefault)
     , m_responseTime(0)
     , m_remotePort(0)
+    , m_encodedBodyLength(0)
+    , m_decodedBodyLength(0)
 {
 }
 
@@ -111,20 +160,24 @@ ResourceResponse::ResourceResponse(CrossThreadResourceResponseData* data)
     setHTTPStatusCode(data->m_httpStatusCode);
     setHTTPStatusText(AtomicString(data->m_httpStatusText));
 
-    m_httpHeaderFields.adopt(data->m_httpHeaders.release());
+    m_httpHeaderFields.adopt(std::move(data->m_httpHeaders));
     setLastModifiedDate(data->m_lastModifiedDate);
     setResourceLoadTiming(data->m_resourceLoadTiming.release());
-    m_securityInfo = data->m_securityInfo;
     m_hasMajorCertificateErrors = data->m_hasMajorCertificateErrors;
     m_securityStyle = data->m_securityStyle;
     m_securityDetails.protocol = data->m_securityDetails.protocol;
     m_securityDetails.cipher = data->m_securityDetails.cipher;
     m_securityDetails.keyExchange = data->m_securityDetails.keyExchange;
+    m_securityDetails.keyExchangeGroup = data->m_securityDetails.keyExchangeGroup;
     m_securityDetails.mac = data->m_securityDetails.mac;
-    m_securityDetails.certID = data->m_securityDetails.certID;
-    m_securityDetails.numUnknownSCTs = data->m_securityDetails.numUnknownSCTs;
-    m_securityDetails.numInvalidSCTs = data->m_securityDetails.numInvalidSCTs;
-    m_securityDetails.numValidSCTs = data->m_securityDetails.numValidSCTs;
+    m_securityDetails.subjectName = data->m_securityDetails.subjectName;
+    m_securityDetails.sanList = data->m_securityDetails.sanList;
+    m_securityDetails.issuer = data->m_securityDetails.issuer;
+    m_securityDetails.validFrom = data->m_securityDetails.validFrom;
+    m_securityDetails.validTo = data->m_securityDetails.validTo;
+    for (auto& cert : data->m_certificate)
+        m_securityDetails.certificate.append(AtomicString(cert));
+    m_securityDetails.sctList = data->m_securityDetails.sctList;
     m_httpVersion = data->m_httpVersion;
     m_appCacheID = data->m_appCacheID;
     m_appCacheManifestURL = data->m_appCacheManifestURL.copy();
@@ -134,6 +187,7 @@ ResourceResponse::ResourceResponse(CrossThreadResourceResponseData* data)
     m_wasAlternateProtocolAvailable = data->m_wasAlternateProtocolAvailable;
     m_wasFetchedViaProxy = data->m_wasFetchedViaProxy;
     m_wasFetchedViaServiceWorker = data->m_wasFetchedViaServiceWorker;
+    m_wasFetchedViaForeignFetch = data->m_wasFetchedViaForeignFetch;
     m_wasFallbackRequiredByServiceWorker = data->m_wasFallbackRequiredByServiceWorker;
     m_serviceWorkerResponseType = data->m_serviceWorkerResponseType;
     m_originalURLViaServiceWorker = data->m_originalURLViaServiceWorker;
@@ -141,6 +195,8 @@ ResourceResponse::ResourceResponse(CrossThreadResourceResponseData* data)
     m_responseTime = data->m_responseTime;
     m_remoteIPAddress = AtomicString(data->m_remoteIPAddress);
     m_remotePort = data->m_remotePort;
+    m_encodedBodyLength = data->m_encodedBodyLength;
+    m_decodedBodyLength = data->m_decodedBodyLength;
     m_downloadedFilePath = data->m_downloadedFilePath;
     m_downloadedFileHandle = data->m_downloadedFileHandle;
 
@@ -148,9 +204,12 @@ ResourceResponse::ResourceResponse(CrossThreadResourceResponseData* data)
     // whatever values may be present in the opaque m_extraData structure.
 }
 
-PassOwnPtr<CrossThreadResourceResponseData> ResourceResponse::copyData() const
+ResourceResponse::ResourceResponse(const ResourceResponse&) = default;
+ResourceResponse& ResourceResponse::operator=(const ResourceResponse&) = default;
+
+std::unique_ptr<CrossThreadResourceResponseData> ResourceResponse::copyData() const
 {
-    OwnPtr<CrossThreadResourceResponseData> data = adoptPtr(new CrossThreadResourceResponseData);
+    std::unique_ptr<CrossThreadResourceResponseData> data = wrapUnique(new CrossThreadResourceResponseData);
     data->m_url = url().copy();
     data->m_mimeType = mimeType().getString().isolatedCopy();
     data->m_expectedContentLength = expectedContentLength();
@@ -162,17 +221,21 @@ PassOwnPtr<CrossThreadResourceResponseData> ResourceResponse::copyData() const
     data->m_lastModifiedDate = lastModifiedDate();
     if (m_resourceLoadTiming)
         data->m_resourceLoadTiming = m_resourceLoadTiming->deepCopy();
-    data->m_securityInfo = CString(m_securityInfo.data(), m_securityInfo.length());
     data->m_hasMajorCertificateErrors = m_hasMajorCertificateErrors;
     data->m_securityStyle = m_securityStyle;
     data->m_securityDetails.protocol = m_securityDetails.protocol.isolatedCopy();
     data->m_securityDetails.cipher = m_securityDetails.cipher.isolatedCopy();
     data->m_securityDetails.keyExchange = m_securityDetails.keyExchange.isolatedCopy();
+    data->m_securityDetails.keyExchangeGroup = m_securityDetails.keyExchangeGroup.isolatedCopy();
     data->m_securityDetails.mac = m_securityDetails.mac.isolatedCopy();
-    data->m_securityDetails.certID = m_securityDetails.certID;
-    data->m_securityDetails.numUnknownSCTs = m_securityDetails.numUnknownSCTs;
-    data->m_securityDetails.numInvalidSCTs = m_securityDetails.numInvalidSCTs;
-    data->m_securityDetails.numValidSCTs = m_securityDetails.numValidSCTs;
+    data->m_securityDetails.subjectName = m_securityDetails.subjectName.isolatedCopy();
+    data->m_securityDetails.sanList = isolatedCopy(m_securityDetails.sanList);
+    data->m_securityDetails.issuer = m_securityDetails.issuer.isolatedCopy();
+    data->m_securityDetails.validFrom = m_securityDetails.validFrom;
+    data->m_securityDetails.validTo = m_securityDetails.validTo;
+    for (auto& cert : m_securityDetails.certificate)
+        data->m_certificate.append(cert.getString().isolatedCopy());
+    data->m_securityDetails.sctList = isolatedCopy(m_securityDetails.sctList);
     data->m_httpVersion = m_httpVersion;
     data->m_appCacheID = m_appCacheID;
     data->m_appCacheManifestURL = m_appCacheManifestURL.copy();
@@ -182,6 +245,7 @@ PassOwnPtr<CrossThreadResourceResponseData> ResourceResponse::copyData() const
     data->m_wasAlternateProtocolAvailable = m_wasAlternateProtocolAvailable;
     data->m_wasFetchedViaProxy = m_wasFetchedViaProxy;
     data->m_wasFetchedViaServiceWorker = m_wasFetchedViaServiceWorker;
+    data->m_wasFetchedViaForeignFetch = m_wasFetchedViaForeignFetch;
     data->m_wasFallbackRequiredByServiceWorker = m_wasFallbackRequiredByServiceWorker;
     data->m_serviceWorkerResponseType = m_serviceWorkerResponseType;
     data->m_originalURLViaServiceWorker = m_originalURLViaServiceWorker.copy();
@@ -189,13 +253,15 @@ PassOwnPtr<CrossThreadResourceResponseData> ResourceResponse::copyData() const
     data->m_responseTime = m_responseTime;
     data->m_remoteIPAddress = m_remoteIPAddress.getString().isolatedCopy();
     data->m_remotePort = m_remotePort;
+    data->m_encodedBodyLength = m_encodedBodyLength;
+    data->m_decodedBodyLength = m_decodedBodyLength;
     data->m_downloadedFilePath = m_downloadedFilePath.isolatedCopy();
     data->m_downloadedFileHandle = m_downloadedFileHandle;
 
     // Bug https://bugs.webkit.org/show_bug.cgi?id=60397 this doesn't support
     // whatever values may be present in the opaque m_extraData structure.
 
-    return data.release();
+    return data;
 }
 
 bool ResourceResponse::isHTTP() const
@@ -324,16 +390,20 @@ void ResourceResponse::updateHeaderParsedState(const AtomicString& name)
         m_haveParsedLastModifiedHeader = false;
 }
 
-void ResourceResponse::setSecurityDetails(const String& protocol, const String& keyExchange, const String& cipher, const String& mac, int certId, size_t numUnknownScts, size_t numInvalidScts, size_t numValidScts)
+void ResourceResponse::setSecurityDetails(const String& protocol, const String& keyExchange, const String& keyExchangeGroup, const String& cipher, const String& mac, const String& subjectName, const Vector<String>& sanList, const String& issuer, time_t validFrom, time_t validTo, const Vector<AtomicString>& certificate, const SignedCertificateTimestampList& sctList)
 {
     m_securityDetails.protocol = protocol;
     m_securityDetails.keyExchange = keyExchange;
+    m_securityDetails.keyExchangeGroup = keyExchangeGroup;
     m_securityDetails.cipher = cipher;
     m_securityDetails.mac = mac;
-    m_securityDetails.certID = certId;
-    m_securityDetails.numUnknownSCTs = numUnknownScts;
-    m_securityDetails.numInvalidSCTs = numInvalidScts;
-    m_securityDetails.numValidSCTs = numValidScts;
+    m_securityDetails.subjectName = subjectName;
+    m_securityDetails.sanList = sanList;
+    m_securityDetails.issuer = issuer;
+    m_securityDetails.validFrom = validFrom;
+    m_securityDetails.validTo = validTo;
+    m_securityDetails.certificate = certificate;
+    m_securityDetails.sctList = sctList;
 }
 
 void ResourceResponse::setHTTPHeaderField(const AtomicString& name, const AtomicString& value)
@@ -362,21 +432,21 @@ const HTTPHeaderMap& ResourceResponse::httpHeaderFields() const
     return m_httpHeaderFields;
 }
 
-bool ResourceResponse::cacheControlContainsNoCache()
+bool ResourceResponse::cacheControlContainsNoCache() const
 {
     if (!m_cacheControlHeader.parsed)
         m_cacheControlHeader = parseCacheControlDirectives(m_httpHeaderFields.get(cacheControlHeaderString()), m_httpHeaderFields.get(pragmaHeaderString()));
     return m_cacheControlHeader.containsNoCache;
 }
 
-bool ResourceResponse::cacheControlContainsNoStore()
+bool ResourceResponse::cacheControlContainsNoStore() const
 {
     if (!m_cacheControlHeader.parsed)
         m_cacheControlHeader = parseCacheControlDirectives(m_httpHeaderFields.get(cacheControlHeaderString()), m_httpHeaderFields.get(pragmaHeaderString()));
     return m_cacheControlHeader.containsNoStore;
 }
 
-bool ResourceResponse::cacheControlContainsMustRevalidate()
+bool ResourceResponse::cacheControlContainsMustRevalidate() const
 {
     if (!m_cacheControlHeader.parsed)
         m_cacheControlHeader = parseCacheControlDirectives(m_httpHeaderFields.get(cacheControlHeaderString()), m_httpHeaderFields.get(pragmaHeaderString()));
@@ -390,14 +460,14 @@ bool ResourceResponse::hasCacheValidatorFields() const
     return !m_httpHeaderFields.get(lastModifiedHeader).isEmpty() || !m_httpHeaderFields.get(eTagHeader).isEmpty();
 }
 
-double ResourceResponse::cacheControlMaxAge()
+double ResourceResponse::cacheControlMaxAge() const
 {
     if (!m_cacheControlHeader.parsed)
         m_cacheControlHeader = parseCacheControlDirectives(m_httpHeaderFields.get(cacheControlHeaderString()), m_httpHeaderFields.get(pragmaHeaderString()));
     return m_cacheControlHeader.maxAge;
 }
 
-double ResourceResponse::cacheControlStaleWhileRevalidate()
+double ResourceResponse::cacheControlStaleWhileRevalidate() const
 {
     if (!m_cacheControlHeader.parsed)
         m_cacheControlHeader = parseCacheControlDirectives(m_httpHeaderFields.get(cacheControlHeaderString()), m_httpHeaderFields.get(pragmaHeaderString()));
@@ -535,6 +605,16 @@ void ResourceResponse::setResourceLoadInfo(PassRefPtr<ResourceLoadInfo> loadInfo
     m_resourceLoadInfo = loadInfo;
 }
 
+void ResourceResponse::addToEncodedBodyLength(int value)
+{
+    m_encodedBodyLength += value;
+}
+
+void ResourceResponse::addToDecodedBodyLength(int value)
+{
+    m_decodedBodyLength += value;
+}
+
 void ResourceResponse::setDownloadedFilePath(const String& downloadedFilePath)
 {
     m_downloadedFilePath = downloadedFilePath;
@@ -542,10 +622,10 @@ void ResourceResponse::setDownloadedFilePath(const String& downloadedFilePath)
         m_downloadedFileHandle.clear();
         return;
     }
-    OwnPtr<BlobData> blobData = BlobData::create();
+    std::unique_ptr<BlobData> blobData = BlobData::create();
     blobData->appendFile(m_downloadedFilePath);
     blobData->detachFromCurrentThread();
-    m_downloadedFileHandle = BlobDataHandle::create(blobData.release(), -1);
+    m_downloadedFileHandle = BlobDataHandle::create(std::move(blobData), -1);
 }
 
 bool ResourceResponse::compare(const ResourceResponse& a, const ResourceResponse& b)
@@ -571,6 +651,10 @@ bool ResourceResponse::compare(const ResourceResponse& a, const ResourceResponse
     if (a.resourceLoadTiming() && b.resourceLoadTiming() && *a.resourceLoadTiming() == *b.resourceLoadTiming())
         return true;
     if (a.resourceLoadTiming() != b.resourceLoadTiming())
+        return false;
+    if (a.encodedBodyLength() != b.encodedBodyLength())
+        return false;
+    if (a.decodedBodyLength() != b.decodedBodyLength())
         return false;
     return true;
 }

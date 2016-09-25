@@ -18,9 +18,11 @@
 #include "cc/proto/begin_main_frame_and_commit_state.pb.h"
 #include "cc/proto/gfx_conversions.h"
 #include "cc/trees/draw_property_utils.h"
+#include "cc/trees/effect_node.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/property_tree_builder.h"
+#include "cc/trees/scroll_node.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
 #include "ui/gfx/transform.h"
@@ -78,12 +80,12 @@ LayerTreeHostCommon::CalcDrawPropsImplInputs::CalcDrawPropsImplInputs(
     const gfx::Vector2dF& elastic_overscroll,
     const LayerImpl* elastic_overscroll_application_layer,
     int max_texture_size,
-    bool can_use_lcd_text,
-    bool layers_always_allowed_lcd_text,
     bool can_render_to_separate_surface,
     bool can_adjust_raster_scales,
+    bool verify_clip_tree_calculations,
+    bool verify_visible_rect_calculations,
+    bool verify_transform_tree_calculations,
     LayerImplList* render_surface_layer_list,
-    int current_render_surface_layer_list_id,
     PropertyTrees* property_trees)
     : root_layer(root_layer),
       device_viewport_size(device_viewport_size),
@@ -97,25 +99,24 @@ LayerTreeHostCommon::CalcDrawPropsImplInputs::CalcDrawPropsImplInputs(
       elastic_overscroll_application_layer(
           elastic_overscroll_application_layer),
       max_texture_size(max_texture_size),
-      can_use_lcd_text(can_use_lcd_text),
-      layers_always_allowed_lcd_text(layers_always_allowed_lcd_text),
       can_render_to_separate_surface(can_render_to_separate_surface),
       can_adjust_raster_scales(can_adjust_raster_scales),
+      verify_clip_tree_calculations(verify_clip_tree_calculations),
+      verify_visible_rect_calculations(verify_visible_rect_calculations),
+      verify_transform_tree_calculations(verify_transform_tree_calculations),
       render_surface_layer_list(render_surface_layer_list),
-      current_render_surface_layer_list_id(
-          current_render_surface_layer_list_id),
       property_trees(property_trees) {}
 
 LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting::
     CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
                                       const gfx::Size& device_viewport_size,
                                       const gfx::Transform& device_transform,
-                                      LayerImplList* render_surface_layer_list,
-                                      int current_render_surface_layer_list_id)
+                                      float device_scale_factor,
+                                      LayerImplList* render_surface_layer_list)
     : CalcDrawPropsImplInputs(root_layer,
                               device_viewport_size,
                               device_transform,
-                              1.f,
+                              device_scale_factor,
                               1.f,
                               NULL,
                               NULL,
@@ -123,12 +124,12 @@ LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting::
                               gfx::Vector2dF(),
                               NULL,
                               std::numeric_limits<int>::max() / 2,
-                              false,
-                              false,
                               true,
                               false,
+                              true,
+                              true,
+                              true,
                               render_surface_layer_list,
-                              current_render_surface_layer_list_id,
                               GetPropertyTrees(root_layer)) {
   DCHECK(root_layer);
   DCHECK(render_surface_layer_list);
@@ -137,13 +138,37 @@ LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting::
 LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting::
     CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
                                       const gfx::Size& device_viewport_size,
-                                      LayerImplList* render_surface_layer_list,
-                                      int current_render_surface_layer_list_id)
+                                      const gfx::Transform& device_transform,
+                                      LayerImplList* render_surface_layer_list)
+    : CalcDrawPropsImplInputsForTesting(root_layer,
+                                        device_viewport_size,
+                                        device_transform,
+                                        1.f,
+                                        render_surface_layer_list) {}
+
+LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting::
+    CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
+                                      const gfx::Size& device_viewport_size,
+                                      LayerImplList* render_surface_layer_list)
     : CalcDrawPropsImplInputsForTesting(root_layer,
                                         device_viewport_size,
                                         gfx::Transform(),
-                                        render_surface_layer_list,
-                                        current_render_surface_layer_list_id) {}
+                                        1.f,
+                                        render_surface_layer_list) {}
+
+LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting::
+    CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
+                                      const gfx::Size& device_viewport_size,
+                                      float device_scale_factor,
+                                      LayerImplList* render_surface_layer_list)
+    : CalcDrawPropsImplInputsForTesting(root_layer,
+                                        device_viewport_size,
+                                        gfx::Transform(),
+                                        device_scale_factor,
+                                        render_surface_layer_list) {}
+
+LayerTreeHostCommon::ScrollUpdateInfo::ScrollUpdateInfo()
+    : layer_id(Layer::INVALID_ID) {}
 
 bool LayerTreeHostCommon::ScrollUpdateInfo::operator==(
     const LayerTreeHostCommon::ScrollUpdateInfo& other) const {
@@ -195,241 +220,44 @@ void ScrollAndScaleSet::FromProtobuf(const proto::ScrollAndScaleSet& proto) {
   top_controls_delta = proto.top_controls_delta();
 }
 
-inline gfx::Rect CalculateVisibleRectWithCachedLayerRect(
-    const gfx::Rect& target_surface_rect,
-    const gfx::Rect& layer_bound_rect,
-    const gfx::Rect& layer_rect_in_target_space,
-    const gfx::Transform& transform) {
-  if (layer_rect_in_target_space.IsEmpty())
-    return gfx::Rect();
-
-  // Is this layer fully contained within the target surface?
-  if (target_surface_rect.Contains(layer_rect_in_target_space))
-    return layer_bound_rect;
-
-  // If the layer doesn't fill up the entire surface, then find the part of
-  // the surface rect where the layer could be visible. This avoids trying to
-  // project surface rect points that are behind the projection point.
-  gfx::Rect minimal_surface_rect = target_surface_rect;
-  minimal_surface_rect.Intersect(layer_rect_in_target_space);
-
-  if (minimal_surface_rect.IsEmpty())
-    return gfx::Rect();
-
-  // Project the corners of the target surface rect into the layer space.
-  // This bounding rectangle may be larger than it needs to be (being
-  // axis-aligned), but is a reasonable filter on the space to consider.
-  // Non-invertible transforms will create an empty rect here.
-
-  gfx::Transform surface_to_layer(gfx::Transform::kSkipInitialization);
-  if (!transform.GetInverse(&surface_to_layer)) {
-    // Because we cannot use the surface bounds to determine what portion of
-    // the layer is visible, we must conservatively assume the full layer is
-    // visible.
-    return layer_bound_rect;
+static inline void SetMaskLayersAreDrawnRenderSurfaceLayerListMembers(
+    RenderSurfaceImpl* surface,
+    PropertyTrees* property_trees) {
+  LayerImpl* mask_layer = surface->MaskLayer();
+  LayerImpl* replica_mask_layer = surface->ReplicaMaskLayer();
+  if (mask_layer) {
+    mask_layer->set_is_drawn_render_surface_layer_list_member(true);
+    draw_property_utils::ComputeMaskDrawProperties(mask_layer, property_trees);
   }
-
-  gfx::Rect layer_rect = MathUtil::ProjectEnclosingClippedRect(
-      surface_to_layer, minimal_surface_rect);
-  layer_rect.Intersect(layer_bound_rect);
-  return layer_rect;
-}
-
-gfx::Rect LayerTreeHostCommon::CalculateVisibleRect(
-    const gfx::Rect& target_surface_rect,
-    const gfx::Rect& layer_bound_rect,
-    const gfx::Transform& transform) {
-  gfx::Rect layer_in_surface_space =
-      MathUtil::MapEnclosingClippedRect(transform, layer_bound_rect);
-  return CalculateVisibleRectWithCachedLayerRect(
-      target_surface_rect, layer_bound_rect, layer_in_surface_space, transform);
-}
-
-static inline bool IsRootLayer(const Layer* layer) {
-  return !layer->parent();
-}
-
-template <typename LayerType>
-static bool HasInvertibleOrAnimatedTransform(LayerType* layer) {
-  return layer->transform_is_invertible() ||
-         layer->HasPotentiallyRunningTransformAnimation();
-}
-
-static inline void MarkLayerWithRenderSurfaceLayerListId(
-    LayerImpl* layer,
-    int current_render_surface_layer_list_id) {
-  layer->draw_properties().last_drawn_render_surface_layer_list_id =
-      current_render_surface_layer_list_id;
-}
-
-static inline void MarkMasksWithRenderSurfaceLayerListId(
-    LayerImpl* layer,
-    int current_render_surface_layer_list_id) {
-  if (layer->mask_layer()) {
-    MarkLayerWithRenderSurfaceLayerListId(layer->mask_layer(),
-                                          current_render_surface_layer_list_id);
-  }
-  if (layer->replica_layer() && layer->replica_layer()->mask_layer()) {
-    MarkLayerWithRenderSurfaceLayerListId(layer->replica_layer()->mask_layer(),
-                                          current_render_surface_layer_list_id);
+  if (replica_mask_layer) {
+    replica_mask_layer->set_is_drawn_render_surface_layer_list_member(true);
+    draw_property_utils::ComputeMaskDrawProperties(replica_mask_layer,
+                                                   property_trees);
   }
 }
 
-static inline void ClearRenderSurfaceLayerListId(LayerImplList* layer_list,
-                                                 ScrollTree* scroll_tree) {
-  const int cleared_render_surface_layer_list_id = 0;
+static inline void ClearMaskLayersAreDrawnRenderSurfaceLayerListMembers(
+    RenderSurfaceImpl* surface) {
+  LayerImpl* mask_layer = surface->MaskLayer();
+  LayerImpl* replica_mask_layer = surface->ReplicaMaskLayer();
+  if (mask_layer)
+    mask_layer->set_is_drawn_render_surface_layer_list_member(false);
+  if (replica_mask_layer)
+    replica_mask_layer->set_is_drawn_render_surface_layer_list_member(false);
+}
+
+static inline void ClearIsDrawnRenderSurfaceLayerListMember(
+    LayerImplList* layer_list,
+    ScrollTree* scroll_tree) {
   for (LayerImpl* layer : *layer_list) {
-    if (layer->IsDrawnRenderSurfaceLayerListMember()) {
-      DCHECK_GT(scroll_tree->Node(layer->scroll_tree_index())
-                    ->data.num_drawn_descendants,
-                0);
-      scroll_tree->Node(layer->scroll_tree_index())
-          ->data.num_drawn_descendants--;
+    if (layer->is_drawn_render_surface_layer_list_member()) {
+      DCHECK_GT(
+          scroll_tree->Node(layer->scroll_tree_index())->num_drawn_descendants,
+          0);
+      scroll_tree->Node(layer->scroll_tree_index())->num_drawn_descendants--;
     }
-    MarkLayerWithRenderSurfaceLayerListId(layer,
-                                          cleared_render_surface_layer_list_id);
-    MarkMasksWithRenderSurfaceLayerListId(layer,
-                                          cleared_render_surface_layer_list_id);
+    layer->set_is_drawn_render_surface_layer_list_member(false);
   }
-}
-
-struct PreCalculateMetaInformationRecursiveData {
-  size_t num_unclipped_descendants;
-  int num_layer_or_descendants_with_copy_request;
-  int num_layer_or_descendants_with_touch_handler;
-  int num_descendants_that_draw_content;
-
-  PreCalculateMetaInformationRecursiveData()
-      : num_unclipped_descendants(0),
-        num_layer_or_descendants_with_copy_request(0),
-        num_layer_or_descendants_with_touch_handler(0),
-        num_descendants_that_draw_content(0) {}
-
-  void Merge(const PreCalculateMetaInformationRecursiveData& data) {
-    num_layer_or_descendants_with_copy_request +=
-        data.num_layer_or_descendants_with_copy_request;
-    num_layer_or_descendants_with_touch_handler +=
-        data.num_layer_or_descendants_with_touch_handler;
-    num_unclipped_descendants += data.num_unclipped_descendants;
-    num_descendants_that_draw_content += data.num_descendants_that_draw_content;
-  }
-};
-
-static bool IsMetaInformationRecomputationNeeded(Layer* layer) {
-  return layer->layer_tree_host()->needs_meta_info_recomputation();
-}
-
-static void UpdateMetaInformationSequenceNumber(Layer* root_layer) {
-  root_layer->layer_tree_host()->IncrementMetaInformationSequenceNumber();
-}
-
-// Recursively walks the layer tree(if needed) to compute any information
-// that is needed before doing the main recursion.
-static void PreCalculateMetaInformationInternal(
-    Layer* layer,
-    PreCalculateMetaInformationRecursiveData* recursive_data) {
-  if (!IsMetaInformationRecomputationNeeded(layer)) {
-    DCHECK(IsRootLayer(layer));
-    return;
-  }
-
-  if (layer->clip_parent())
-    recursive_data->num_unclipped_descendants++;
-
-  if (!HasInvertibleOrAnimatedTransform(layer)) {
-    // Layers with singular transforms should not be drawn, the whole subtree
-    // can be skipped.
-    return;
-  }
-
-  for (size_t i = 0; i < layer->children().size(); ++i) {
-    Layer* child_layer = layer->child_at(i);
-
-    PreCalculateMetaInformationRecursiveData data_for_child;
-    PreCalculateMetaInformationInternal(child_layer, &data_for_child);
-    recursive_data->Merge(data_for_child);
-  }
-
-  if (layer->clip_children()) {
-    size_t num_clip_children = layer->clip_children()->size();
-    DCHECK_GE(recursive_data->num_unclipped_descendants, num_clip_children);
-    recursive_data->num_unclipped_descendants -= num_clip_children;
-  }
-
-  if (layer->HasCopyRequest())
-    recursive_data->num_layer_or_descendants_with_copy_request++;
-
-  if (!layer->touch_event_handler_region().IsEmpty())
-    recursive_data->num_layer_or_descendants_with_touch_handler++;
-
-  layer->set_num_unclipped_descendants(
-      recursive_data->num_unclipped_descendants);
-
-  if (IsRootLayer(layer))
-    layer->layer_tree_host()->SetNeedsMetaInfoRecomputation(false);
-}
-
-static void PreCalculateMetaInformationInternalForTesting(
-    LayerImpl* layer,
-    PreCalculateMetaInformationRecursiveData* recursive_data) {
-  if (layer->clip_parent())
-    recursive_data->num_unclipped_descendants++;
-
-  if (!HasInvertibleOrAnimatedTransform(layer)) {
-    // Layers with singular transforms should not be drawn, the whole subtree
-    // can be skipped.
-    return;
-  }
-
-  for (size_t i = 0; i < layer->children().size(); ++i) {
-    LayerImpl* child_layer = layer->child_at(i);
-
-    PreCalculateMetaInformationRecursiveData data_for_child;
-    PreCalculateMetaInformationInternalForTesting(child_layer, &data_for_child);
-    recursive_data->Merge(data_for_child);
-  }
-
-  if (layer->clip_children()) {
-    size_t num_clip_children = layer->clip_children()->size();
-    DCHECK_GE(recursive_data->num_unclipped_descendants, num_clip_children);
-    recursive_data->num_unclipped_descendants -= num_clip_children;
-  }
-
-  if (layer->HasCopyRequest())
-    recursive_data->num_layer_or_descendants_with_copy_request++;
-
-  if (!layer->touch_event_handler_region().IsEmpty())
-    recursive_data->num_layer_or_descendants_with_touch_handler++;
-
-  layer->draw_properties().num_unclipped_descendants =
-      recursive_data->num_unclipped_descendants;
-  layer->set_layer_or_descendant_has_touch_handler(
-      (recursive_data->num_layer_or_descendants_with_touch_handler != 0));
-  // TODO(enne): this should be synced from the main thread, so is only
-  // for tests constructing layers on the compositor thread.
-  layer->SetNumDescendantsThatDrawContent(
-      recursive_data->num_descendants_that_draw_content);
-
-  if (layer->DrawsContent())
-    recursive_data->num_descendants_that_draw_content++;
-}
-
-void LayerTreeHostCommon::PreCalculateMetaInformation(Layer* root_layer) {
-  PreCalculateMetaInformationRecursiveData recursive_data;
-  PreCalculateMetaInformationInternal(root_layer, &recursive_data);
-}
-
-void LayerTreeHostCommon::PreCalculateMetaInformationForTesting(
-    LayerImpl* root_layer) {
-  PreCalculateMetaInformationRecursiveData recursive_data;
-  PreCalculateMetaInformationInternalForTesting(root_layer, &recursive_data);
-}
-
-void LayerTreeHostCommon::PreCalculateMetaInformationForTesting(
-    Layer* root_layer) {
-  UpdateMetaInformationSequenceNumber(root_layer);
-  PreCalculateMetaInformationRecursiveData recursive_data;
-  PreCalculateMetaInformationInternal(root_layer, &recursive_data);
 }
 
 static bool CdpPerfTracingEnabled() {
@@ -506,14 +334,14 @@ static void ComputeLayerScrollsDrawnDescendants(LayerTreeImpl* layer_tree_impl,
                                                 ScrollTree* scroll_tree) {
   for (int i = static_cast<int>(scroll_tree->size()) - 1; i > 0; --i) {
     ScrollNode* node = scroll_tree->Node(i);
-    scroll_tree->parent(node)->data.num_drawn_descendants +=
-        node->data.num_drawn_descendants;
+    scroll_tree->parent(node)->num_drawn_descendants +=
+        node->num_drawn_descendants;
   }
   for (LayerImpl* layer : *layer_tree_impl) {
     bool scrolls_drawn_descendant = false;
     if (layer->scrollable()) {
       ScrollNode* node = scroll_tree->Node(layer->scroll_tree_index());
-      if (node->data.num_drawn_descendants > 0)
+      if (node->num_drawn_descendants > 0)
         scrolls_drawn_descendant = true;
     }
     layer->set_scrolls_drawn_descendant(scrolls_drawn_descendant);
@@ -524,22 +352,24 @@ static void ComputeInitialRenderSurfaceLayerList(
     LayerTreeImpl* layer_tree_impl,
     PropertyTrees* property_trees,
     LayerImplList* render_surface_layer_list,
-    bool can_render_to_separate_surface,
-    int current_render_surface_layer_list_id) {
+    bool can_render_to_separate_surface) {
   ScrollTree* scroll_tree = &property_trees->scroll_tree;
   for (int i = 0; i < static_cast<int>(scroll_tree->size()); ++i)
-    scroll_tree->Node(i)->data.num_drawn_descendants = 0;
+    scroll_tree->Node(i)->num_drawn_descendants = 0;
 
   // Add all non-skipped surfaces to the initial render surface layer list. Add
   // all non-skipped layers to the layer list of their target surface, and
   // add their content rect to their target surface's accumulated content rect.
   for (LayerImpl* layer : *layer_tree_impl) {
-    if (layer->render_surface())
+    if (layer->render_surface()) {
       layer->ClearRenderSurfaceLayerList();
+      ClearMaskLayersAreDrawnRenderSurfaceLayerListMembers(
+          layer->render_surface());
+    }
+    layer->set_is_drawn_render_surface_layer_list_member(false);
 
     bool layer_is_drawn =
-        property_trees->effect_tree.Node(layer->effect_tree_index())
-            ->data.is_drawn;
+        property_trees->effect_tree.Node(layer->effect_tree_index())->is_drawn;
     bool is_root = layer_tree_impl->IsRootLayer(layer);
     bool skip_layer =
         !is_root && draw_property_utils::LayerShouldBeSkipped(
@@ -580,10 +410,10 @@ static void ComputeInitialRenderSurfaceLayerList(
       // same is true for layers with filters that move pixels.
       // TODO(senorblanco): make this smarter for the SkImageFilter case (check
       // for pixel-moving filters)
-      bool is_occlusion_immune = layer->HasCopyRequest() ||
-                                 layer->has_replica() ||
-                                 layer->filters().HasReferenceFilter() ||
-                                 layer->filters().HasFilterThatMovesPixels();
+      const FilterOperations& filters = surface->Filters();
+      bool is_occlusion_immune =
+          surface->HasCopyRequest() || surface->HasReplica() ||
+          filters.HasReferenceFilter() || filters.HasFilterThatMovesPixels();
       if (is_occlusion_immune) {
         surface->SetNearestOcclusionImmuneAncestor(surface);
       } else if (is_root) {
@@ -598,9 +428,8 @@ static void ComputeInitialRenderSurfaceLayerList(
     if (!layer_should_be_drawn)
       continue;
 
-    MarkLayerWithRenderSurfaceLayerListId(layer,
-                                          current_render_surface_layer_list_id);
-    scroll_tree->Node(layer->scroll_tree_index())->data.num_drawn_descendants++;
+    layer->set_is_drawn_render_surface_layer_list_member(true);
+    scroll_tree->Node(layer->scroll_tree_index())->num_drawn_descendants++;
     layer->render_target()->layer_list().push_back(layer);
 
     // The layer contributes its drawable content rect to its render target.
@@ -617,36 +446,13 @@ static void ComputeSurfaceContentRects(LayerTreeImpl* layer_tree_impl,
   for (LayerImpl* layer : base::Reversed(*render_surface_layer_list)) {
     if (layer_tree_impl->IsRootLayer(layer)) {
       // The root layer's surface content rect is always the entire viewport.
-      gfx::Rect viewport =
-          gfx::ToEnclosingRect(property_trees->clip_tree.ViewportClip());
-      layer->render_surface()->SetContentRect(viewport);
+      layer->render_surface()->SetContentRectToViewport();
       continue;
     }
-
     RenderSurfaceImpl* surface = layer->render_surface();
-    gfx::Rect surface_content_rect = surface->accumulated_content_rect();
-
-    if (!layer->replica_layer() && !layer->HasCopyRequest() &&
-        surface->is_clipped()) {
-      // Here, we clip the render surface's content rect with its clip rect.
-      // As the clip rect of render surface is in the surface's target
-      // space, we first map the content rect into the target space,
-      // intersect it with clip rect and project back the result to the
-      // surface space.
-      if (!surface_content_rect.IsEmpty()) {
-        gfx::Rect surface_clip_rect = LayerTreeHostCommon::CalculateVisibleRect(
-            surface->clip_rect(), surface_content_rect,
-            surface->draw_transform());
-        surface_content_rect.Intersect(surface_clip_rect);
-      }
-    }
-    // The RenderSurfaceImpl backing texture cannot exceed the maximum
-    // supported texture size.
-    surface_content_rect.set_width(
-        std::min(surface_content_rect.width(), max_texture_size));
-    surface_content_rect.set_height(
-        std::min(surface_content_rect.height(), max_texture_size));
-    surface->SetContentRect(surface_content_rect);
+    // Now all contributing drawable content rect has been accumulated to this
+    // render surface, calculate the content rect.
+    surface->CalculateContentRectFromAccumulatedContentRect(max_texture_size);
 
     // Now the render surface's content rect is calculated correctly, it could
     // contribute to its render target.
@@ -655,12 +461,10 @@ static void ComputeSurfaceContentRects(LayerTreeImpl* layer_tree_impl,
   }
 }
 
-static void ComputeListOfNonEmptySurfaces(
-    LayerTreeImpl* layer_tree_impl,
-    PropertyTrees* property_trees,
-    LayerImplList* initial_surface_list,
-    LayerImplList* final_surface_list,
-    int current_render_surface_layer_list_id) {
+static void ComputeListOfNonEmptySurfaces(LayerTreeImpl* layer_tree_impl,
+                                          PropertyTrees* property_trees,
+                                          LayerImplList* initial_surface_list,
+                                          LayerImplList* final_surface_list) {
   // Walk the initial surface list forwards. The root surface and each
   // surface with a non-empty content rect go into the final render surface
   // layer list. Surfaces with empty content rects or whose target isn't in
@@ -671,8 +475,8 @@ static void ComputeListOfNonEmptySurfaces(
     RenderSurfaceImpl* target_surface = surface->render_target();
     if (!is_root && (surface->content_rect().IsEmpty() ||
                      target_surface->layer_list().empty())) {
-      ClearRenderSurfaceLayerListId(&surface->layer_list(),
-                                    &property_trees->scroll_tree);
+      ClearIsDrawnRenderSurfaceLayerListMember(&surface->layer_list(),
+                                               &property_trees->scroll_tree);
       surface->ClearLayerLists();
       if (!is_root) {
         LayerImplList& target_list = target_surface->layer_list();
@@ -693,8 +497,7 @@ static void ComputeListOfNonEmptySurfaces(
       }
       continue;
     }
-    MarkMasksWithRenderSurfaceLayerListId(layer,
-                                          current_render_surface_layer_list_id);
+    SetMaskLayersAreDrawnRenderSurfaceLayerListMembers(surface, property_trees);
     final_surface_list->push_back(layer);
   }
 }
@@ -704,7 +507,6 @@ static void CalculateRenderSurfaceLayerList(
     PropertyTrees* property_trees,
     LayerImplList* render_surface_layer_list,
     const bool can_render_to_separate_surface,
-    const int current_render_surface_layer_list_id,
     const int max_texture_size) {
   // This calculates top level Render Surface Layer List, and Layer List for all
   // Render Surfaces.
@@ -715,31 +517,17 @@ static void CalculateRenderSurfaceLayerList(
   // First compute an RSLL that might include surfaces that later turn out to
   // have an empty content rect. After surface content rects are computed,
   // produce a final RSLL that omits empty surfaces.
-  ComputeInitialRenderSurfaceLayerList(
-      layer_tree_impl, property_trees, &initial_render_surface_list,
-      can_render_to_separate_surface, current_render_surface_layer_list_id);
+  ComputeInitialRenderSurfaceLayerList(layer_tree_impl, property_trees,
+                                       &initial_render_surface_list,
+                                       can_render_to_separate_surface);
   ComputeSurfaceContentRects(layer_tree_impl, property_trees,
                              &initial_render_surface_list, max_texture_size);
-  ComputeListOfNonEmptySurfaces(
-      layer_tree_impl, property_trees, &initial_render_surface_list,
-      render_surface_layer_list, current_render_surface_layer_list_id);
+  ComputeListOfNonEmptySurfaces(layer_tree_impl, property_trees,
+                                &initial_render_surface_list,
+                                render_surface_layer_list);
 
   ComputeLayerScrollsDrawnDescendants(layer_tree_impl,
                                       &property_trees->scroll_tree);
-}
-
-static void ComputeMaskLayerDrawProperties(const LayerImpl* layer,
-                                           LayerImpl* mask_layer) {
-  DrawProperties& mask_layer_draw_properties = mask_layer->draw_properties();
-  mask_layer_draw_properties.visible_layer_rect = gfx::Rect(layer->bounds());
-  mask_layer_draw_properties.target_space_transform =
-      layer->draw_properties().target_space_transform;
-  mask_layer_draw_properties.screen_space_transform =
-      layer->draw_properties().screen_space_transform;
-  mask_layer_draw_properties.maximum_animation_contents_scale =
-      layer->draw_properties().maximum_animation_contents_scale;
-  mask_layer_draw_properties.starting_animation_contents_scale =
-      layer->draw_properties().starting_animation_contents_scale;
 }
 
 void CalculateDrawPropertiesInternal(
@@ -825,24 +613,24 @@ void CalculateDrawPropertiesInternal(
   DCHECK(inputs->can_render_to_separate_surface ==
          inputs->property_trees->non_root_surfaces_enabled);
   for (LayerImpl* layer : visible_layer_list) {
-    draw_property_utils::ComputeLayerDrawProperties(
-        layer, inputs->property_trees, inputs->layers_always_allowed_lcd_text,
-        inputs->can_use_lcd_text);
-    if (layer->mask_layer())
-      ComputeMaskLayerDrawProperties(layer, layer->mask_layer());
-    LayerImpl* replica_mask_layer =
-        layer->replica_layer() ? layer->replica_layer()->mask_layer() : nullptr;
-    if (replica_mask_layer)
-      ComputeMaskLayerDrawProperties(layer, replica_mask_layer);
+    draw_property_utils::ComputeLayerDrawProperties(layer,
+                                                    inputs->property_trees);
   }
 
-  DCHECK_EQ(
-      inputs->current_render_surface_layer_list_id,
-      inputs->root_layer->layer_tree_impl()->current_render_surface_list_id());
   CalculateRenderSurfaceLayerList(
       inputs->root_layer->layer_tree_impl(), inputs->property_trees,
       inputs->render_surface_layer_list, inputs->can_render_to_separate_surface,
-      inputs->current_render_surface_layer_list_id, inputs->max_texture_size);
+      inputs->max_texture_size);
+
+  if (inputs->verify_clip_tree_calculations)
+    draw_property_utils::VerifyClipTreeCalculations(visible_layer_list,
+                                                    inputs->property_trees);
+  if (inputs->verify_visible_rect_calculations)
+    draw_property_utils::VerifyVisibleRectsCalculations(visible_layer_list,
+                                                        inputs->property_trees);
+  if (inputs->verify_transform_tree_calculations)
+    draw_property_utils::VerifyTransformTreeCalculations(
+        visible_layer_list, inputs->property_trees);
 
   if (should_measure_property_tree_performance) {
     TRACE_EVENT_END0(TRACE_DISABLED_BY_DEFAULT("cc.debug.cdp-perf"),
@@ -859,7 +647,7 @@ void LayerTreeHostCommon::CalculateDrawPropertiesForTesting(
   LayerList update_layer_list;
   bool can_render_to_separate_surface = true;
   PropertyTrees* property_trees =
-      inputs->root_layer->layer_tree_host()->property_trees();
+      inputs->root_layer->GetLayerTree()->property_trees();
   Layer* overscroll_elasticity_layer = nullptr;
   gfx::Vector2dF elastic_overscroll;
   PropertyTreeBuilder::BuildPropertyTrees(
@@ -869,11 +657,10 @@ void LayerTreeHostCommon::CalculateDrawPropertiesForTesting(
       inputs->page_scale_factor, inputs->device_scale_factor,
       gfx::Rect(inputs->device_viewport_size), inputs->device_transform,
       property_trees);
-  draw_property_utils::UpdateRenderSurfaces(inputs->root_layer, property_trees);
   draw_property_utils::UpdatePropertyTrees(property_trees,
                                            can_render_to_separate_surface);
   draw_property_utils::FindLayersThatNeedUpdates(
-      inputs->root_layer->layer_tree_host(), property_trees->transform_tree,
+      inputs->root_layer->GetLayerTree(), property_trees->transform_tree,
       property_trees->effect_tree, &update_layer_list);
 }
 
@@ -926,16 +713,15 @@ void LayerTreeHostCommon::CalculateDrawProperties(
   }
 }
 
-void LayerTreeHostCommon::CalculateDrawProperties(
+void LayerTreeHostCommon::CalculateDrawPropertiesForTesting(
     CalcDrawPropsImplInputsForTesting* inputs) {
-  PreCalculateMetaInformationRecursiveData recursive_data;
-  PreCalculateMetaInformationInternalForTesting(inputs->root_layer,
-                                                &recursive_data);
+  PropertyTreeBuilder::PreCalculateMetaInformationForTesting(
+      inputs->root_layer);
   CalculateDrawPropertiesInternal(inputs, BUILD_PROPERTY_TREES_IF_NEEDED);
 }
 
 PropertyTrees* GetPropertyTrees(Layer* layer) {
-  return layer->layer_tree_host()->property_trees();
+  return layer->GetLayerTree()->property_trees();
 }
 
 PropertyTrees* GetPropertyTrees(LayerImpl* layer) {

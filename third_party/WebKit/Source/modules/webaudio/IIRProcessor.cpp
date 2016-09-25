@@ -5,6 +5,8 @@
 #include "modules/webaudio/IIRProcessor.h"
 
 #include "modules/webaudio/IIRDSPKernel.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -13,8 +15,8 @@ IIRProcessor::IIRProcessor(float sampleRate, size_t numberOfChannels, const Vect
 {
     unsigned feedbackLength = feedbackCoef.size();
     unsigned feedforwardLength = feedforwardCoef.size();
-    ASSERT(feedbackLength > 0);
-    ASSERT(feedforwardLength > 0);
+    DCHECK_GT(feedbackLength, 0u);
+    DCHECK_GT(feedforwardLength, 0u);
 
     m_feedforward.allocate(feedforwardLength);
     m_feedback.allocate(feedbackLength);
@@ -23,7 +25,7 @@ IIRProcessor::IIRProcessor(float sampleRate, size_t numberOfChannels, const Vect
 
     // Need to scale the feedback and feedforward coefficients appropriately. (It's up to the caller
     // to ensure feedbackCoef[0] is not 0!)
-    ASSERT(feedbackCoef[0] != 0);
+    DCHECK_NE(feedbackCoef[0], 0);
 
     if (feedbackCoef[0] != 1) {
         // The provided filter is:
@@ -46,7 +48,7 @@ IIRProcessor::IIRProcessor(float sampleRate, size_t numberOfChannels, const Vect
         m_feedback[0] = 1;
     }
 
-    m_responseKernel = adoptPtr(new IIRDSPKernel(this));
+    m_responseKernel = wrapUnique(new IIRDSPKernel(this));
 }
 
 IIRProcessor::~IIRProcessor()
@@ -55,9 +57,9 @@ IIRProcessor::~IIRProcessor()
         uninitialize();
 }
 
-PassOwnPtr<AudioDSPKernel> IIRProcessor::createKernel()
+std::unique_ptr<AudioDSPKernel> IIRProcessor::createKernel()
 {
-    return adoptPtr(new IIRDSPKernel(this));
+    return wrapUnique(new IIRDSPKernel(this));
 }
 
 void IIRProcessor::process(const AudioBus* source, AudioBus* destination, size_t framesToProcess)

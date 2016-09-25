@@ -10,7 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 #include "content/common/navigation_params.h"
-#include "content/common/resource_request_body.h"
+#include "content/common/resource_request_body_impl.h"
 #include "content/public/common/referrer.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -28,8 +28,8 @@ struct CONTENT_EXPORT NavigationRequestInfo {
                         const url::Origin& request_initiator,
                         bool is_main_frame,
                         bool parent_is_main_frame,
-                        int frame_tree_node_id,
-                        scoped_refptr<ResourceRequestBody> request_body);
+                        bool are_ancestors_secure,
+                        int frame_tree_node_id);
   ~NavigationRequestInfo();
 
   const CommonNavigationParams common_params;
@@ -45,9 +45,11 @@ struct CONTENT_EXPORT NavigationRequestInfo {
   const bool is_main_frame;
   const bool parent_is_main_frame;
 
-  const int frame_tree_node_id;
+  // Whether all ancestor frames of the frame that is navigating have a secure
+  // origin. True for main frames.
+  const bool are_ancestors_secure;
 
-  scoped_refptr<ResourceRequestBody> request_body;
+  const int frame_tree_node_id;
 };
 
 }  // namespace content

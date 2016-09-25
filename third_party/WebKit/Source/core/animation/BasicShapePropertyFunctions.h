@@ -33,14 +33,14 @@ public:
             if (style.shapeOutside()->cssBox() != BoxMissing)
                 return nullptr;
             return style.shapeOutside()->shape();
-        case CSSPropertyWebkitClipPath:
+        case CSSPropertyClipPath:
             if (!style.clipPath())
                 return nullptr;
             if (style.clipPath()->type() != ClipPathOperation::SHAPE)
                 return nullptr;
             return toShapeClipPathOperation(style.clipPath())->basicShape();
         default:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
             return nullptr;
         }
     }
@@ -49,13 +49,13 @@ public:
     {
         switch (property) {
         case CSSPropertyShapeOutside:
-            style.setShapeOutside(ShapeValue::createShapeValue(shape, BoxMissing));
+            style.setShapeOutside(ShapeValue::createShapeValue(std::move(shape), BoxMissing));
             break;
-        case CSSPropertyWebkitClipPath:
-            style.setClipPath(ShapeClipPathOperation::create(shape));
+        case CSSPropertyClipPath:
+            style.setClipPath(ShapeClipPathOperation::create(std::move(shape)));
             break;
         default:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
         }
     }
 };

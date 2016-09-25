@@ -13,21 +13,17 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
-#include "chrome/browser/ui/views/frame/browser_frame_common_win.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/browser_window_property_manager_win.h"
 #include "chrome/browser/ui/views/frame/system_menu_insertion_delegate_win.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_constants.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/theme_provider.h"
 #include "ui/display/win/screen_win.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/views/controls/menu/native_menu_win.h"
-
-namespace {
-
-const int kClientEdgeThickness = 3;
-
-}  // namespace
+#include "ui/views/resources/grit/views_resources.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserDesktopWindowTreeHostWin, public:
@@ -87,21 +83,28 @@ int BrowserDesktopWindowTreeHostWin::GetInitialShowState() const {
 
 bool BrowserDesktopWindowTreeHostWin::GetClientAreaInsets(
     gfx::Insets* insets) const {
-  // Use the default client insets for an opaque frame or a glass popup/app
-  // frame.
-  if (!GetWidget()->ShouldUseNativeFrame() ||
-      !browser_view_->IsBrowserTypeNormal()) {
+  // Always use default insets for opaque frame.
+  if (!ShouldUseNativeFrame())
     return false;
-  }
 
-  int border_thickness = GetSystemMetrics(SM_CXSIZEFRAME);
-  // In fullscreen mode, we have no frame. In restored mode, we draw our own
-  // client edge over part of the default frame.
-  if (GetWidget()->IsFullscreen())
-    border_thickness = 0;
-  else if (!IsMaximized() && base::win::GetVersion() < base::win::VERSION_WIN10)
-    border_thickness -= kClientEdgeThickness;
-  insets->Set(0, border_thickness, border_thickness, border_thickness);
+  // Use default insets for popups and apps, unless we are custom drawing the
+  // titlebar.
+  if (!browser_frame_->CustomDrawSystemTitlebar() &&
+      !browser_view_->IsBrowserTypeNormal())
+    return false;
+
+  if (GetWidget()->IsFullscreen()) {
+    // In fullscreen mode there is no frame.
+    *insets = gfx::Insets();
+  } else {
+    const int frame_thickness =
+        display::win::ScreenWin::GetSystemMetricsForHwnd(
+            GetHWND(), SM_CXSIZEFRAME);
+    // Reduce the Windows non-client border size because we extend the border
+    // into our client area in UpdateDWMFrame().
+    *insets = gfx::Insets(0, frame_thickness, frame_thickness,
+                          frame_thickness) - GetClientEdgeThicknesses();
+  }
   return true;
 }
 
@@ -151,27 +154,24 @@ bool BrowserDesktopWindowTreeHostWin::PreHandleMSG(UINT message,
 void BrowserDesktopWindowTreeHostWin::PostHandleMSG(UINT message,
                                                     WPARAM w_param,
                                                     LPARAM l_param) {
+  HWND hwnd = GetHWND();
   switch (message) {
     case WM_CREATE:
-      minimize_button_metrics_.Init(GetHWND());
+      minimize_button_metrics_.Init(hwnd);
       break;
     case WM_WINDOWPOSCHANGED: {
       UpdateDWMFrame();
 
       // Windows lies to us about the position of the minimize button before a
-      // window is visible.  We use this position to place the OTR avatar in RTL
-      // mode, so when the window is shown, we need to re-layout and schedule a
-      // paint for the non-client frame view so that the icon top has the
-      // correct
-      // position when the window becomes visible.  This fixes bugs where the
-      // icon
-      // appears to overlay the minimize button.
-      // Note that we will call Layout every time SetWindowPos is called with
-      // SWP_SHOWWINDOW, however callers typically are careful about not
-      // specifying this flag unless necessary to avoid flicker.
-      // This may be invoked during creation on XP and before the
-      // non_client_view
-      // has been created.
+      // window is visible. We use this position to place the incognito avatar
+      // in RTL mode, so when the window is shown, we need to re-layout and
+      // schedule a paint for the non-client frame view so that the icon top has
+      // the correct position when the window becomes visible. This fixes bugs
+      // where the icon appears to overlay the minimize button. Note that we
+      // will call Layout every time SetWindowPos is called with SWP_SHOWWINDOW,
+      // however callers typically are careful about not specifying this flag
+      // unless necessary to avoid flicker. This may be invoked during creation
+      // on XP and before the non_client_view has been created.
       WINDOWPOS* window_pos = reinterpret_cast<WINDOWPOS*>(l_param);
       if (window_pos->flags & SWP_SHOWWINDOW &&
           GetWidget()->non_client_view()) {
@@ -186,15 +186,15 @@ void BrowserDesktopWindowTreeHostWin::PostHandleMSG(UINT message,
         // This is necessary to avoid white flashing in the titlebar area around
         // the minimize/maximize/close buttons.
         DCHECK_EQ(0, insets.top());
-        HDC dc = GetDC(GetHWND());
+        HDC dc = GetDC(hwnd);
         MARGINS margins = GetDWMFrameMargins();
         RECT client_rect;
-        GetClientRect(GetHWND(), &client_rect);
+        GetClientRect(hwnd, &client_rect);
         HBRUSH brush = CreateSolidBrush(0);
         RECT rect = {0, 0, client_rect.right, margins.cyTopHeight};
         FillRect(dc, &rect, brush);
         DeleteObject(brush);
-        ReleaseDC(GetHWND(), dc);
+        ReleaseDC(hwnd, dc);
         did_gdi_clear_ = true;
       }
       break;
@@ -226,8 +226,14 @@ bool BrowserDesktopWindowTreeHostWin::ShouldUseNativeFrame() const {
   // context of the BrowserView destructor.
   if (!browser_view_->browser())
     return false;
-  return chrome::ShouldUseNativeFrame(browser_view_,
-                                      GetWidget()->GetThemeProvider());
+  // We don't theme popup or app windows, so regardless of whether or not a
+  // theme is active for normal browser windows, we don't want to use the custom
+  // frame for popups/apps.
+  if (!browser_view_->IsBrowserTypeNormal())
+    return true;
+  // Otherwise, we use the native frame when we're told we should by the theme
+  // provider (e.g. no custom theme is active).
+  return GetWidget()->GetThemeProvider()->ShouldUseNativeFrame();
 }
 
 void BrowserDesktopWindowTreeHostWin::FrameTypeChanged() {
@@ -239,6 +245,16 @@ void BrowserDesktopWindowTreeHostWin::FrameTypeChanged() {
 // BrowserDesktopWindowTreeHostWin, private:
 
 void BrowserDesktopWindowTreeHostWin::UpdateDWMFrame() {
+  // With a custom titlebar we want the margins to always be 2 pixels, because
+  // that gives us the 1 pixel accent color border around the window (a 1 pixel
+  // margin is not sufficient, it will draw a messed-up-looking border instead).
+  if (browser_frame_->CustomDrawSystemTitlebar() && ShouldUseNativeFrame() &&
+      !GetWidget()->IsFullscreen()) {
+    MARGINS margins = {2, 2, 2, 2};
+    DwmExtendFrameIntoClientArea(GetHWND(), &margins);
+    return;
+  }
+
   // For "normal" windows on Aero, we always need to reset the glass area
   // correctly, even if we're not currently showing the native frame (e.g.
   // because a theme is showing), so we explicitly check for that case rather
@@ -256,48 +272,53 @@ void BrowserDesktopWindowTreeHostWin::UpdateDWMFrame() {
   DwmExtendFrameIntoClientArea(GetHWND(), &margins);
 }
 
+gfx::Insets
+BrowserDesktopWindowTreeHostWin::GetClientEdgeThicknesses() const {
+  // Maximized windows have no visible client edge; the content goes to
+  // the edge of the screen.  Restored windows on Windows 10 don't paint
+  // the full 3D client edge, but paint content right to the edge of the
+  // client area.
+  if (IsMaximized() ||
+      (base::win::GetVersion() >= base::win::VERSION_WIN10))
+    return gfx::Insets();
+
+  const ui::ThemeProvider* const tp = GetWidget()->GetThemeProvider();
+    return gfx::Insets(
+        0, tp->GetImageSkiaNamed(IDR_CONTENT_LEFT_SIDE)->width(),
+        tp->GetImageSkiaNamed(IDR_CONTENT_BOTTOM_CENTER)->height(),
+        tp->GetImageSkiaNamed(IDR_CONTENT_RIGHT_SIDE)->width());
+}
+
 MARGINS BrowserDesktopWindowTreeHostWin::GetDWMFrameMargins() const {
-  MARGINS margins = { 0 };
+  // If we're using the opaque frame or we're fullscreen we don't extend the
+  // glass in at all because it won't be visible.
+  if (!ShouldUseNativeFrame() || GetWidget()->IsFullscreen())
+    return MARGINS{0};
 
-  // If the opaque frame is visible, we use the default (zero) margins.
-  // Otherwise, we need to figure out how to extend the glass in.
-  if (GetWidget()->ShouldUseNativeFrame()) {
-    // In fullscreen mode, we don't extend glass into the client area at all,
-    // because the GDI-drawn text in the web content composited over it will
-    // become semi-transparent over any glass area.
-    if (!IsMaximized() && !GetWidget()->IsFullscreen()) {
-      margins.cyTopHeight = kClientEdgeThickness + 1;
-      // On Windows 10, we don't draw our own window border, so don't extend the
-      // nonclient area in for it. The top is extended so that the MARGINS isn't
-      // treated as an empty (ignored) extension.
-      if (base::win::GetVersion() >= base::win::VERSION_WIN10) {
-        margins.cxLeftWidth = 0;
-        margins.cxRightWidth = 0;
-        margins.cyBottomHeight = 0;
-      } else {
-        margins.cxLeftWidth = kClientEdgeThickness + 1;
-        margins.cxRightWidth = kClientEdgeThickness + 1;
-        margins.cyBottomHeight = kClientEdgeThickness + 1;
-      }
-    }
-    // In maximized mode, we only have a titlebar strip of glass, no side/bottom
-    // borders.
-    if (!browser_view_->IsFullscreen()) {
-      gfx::Rect tabstrip_bounds(
-          browser_frame_->GetBoundsForTabStrip(browser_view_->tabstrip()));
-      tabstrip_bounds =
-          display::win::ScreenWin::DIPToClientRect(GetHWND(), tabstrip_bounds);
-      margins.cyTopHeight = tabstrip_bounds.bottom();
+  // The glass should extend to the bottom of the tabstrip.
+  HWND hwnd = GetHWND();
+  gfx::Rect tabstrip_bounds(
+      browser_frame_->GetBoundsForTabStrip(browser_view_->tabstrip()));
+  tabstrip_bounds =
+      display::win::ScreenWin::DIPToClientRect(hwnd, tabstrip_bounds);
 
-      // On pre-Win 10, we need to offset the DWM frame into the toolbar so that
-      // the blackness doesn't show up on our rounded toolbar corners.  In Win
-      // 10 and above there are no rounded corners, so this is unnecessary.
-      const int kDWMFrameTopOffset = 3;
-      if (base::win::GetVersion() < base::win::VERSION_WIN10)
-        margins.cyTopHeight += kDWMFrameTopOffset;
-    }
+  // Extend inwards far enough to go under the semitransparent client edges.
+  const gfx::Insets thicknesses = GetClientEdgeThicknesses();
+  gfx::Point left_top = display::win::ScreenWin::DIPToClientPoint(
+      hwnd, gfx::Point(thicknesses.left(), thicknesses.top()));
+  gfx::Point right_bottom = display::win::ScreenWin::DIPToClientPoint(
+      hwnd, gfx::Point(thicknesses.right(), thicknesses.bottom()));
+
+  if (base::win::GetVersion() <= base::win::VERSION_WIN7) {
+    // The 2 px (not DIP) at the inner edges of the glass are a light and
+    // dark line, so we must inset further to account for those.
+    constexpr gfx::Vector2d kDWMEdgeThickness(2, 2);
+    left_top += kDWMEdgeThickness;
+    right_bottom += kDWMEdgeThickness;
   }
-  return margins;
+
+  return MARGINS{left_top.x(), right_bottom.x(),
+                 tabstrip_bounds.bottom() + left_top.y(), right_bottom.y()};
 }
 
 ////////////////////////////////////////////////////////////////////////////////

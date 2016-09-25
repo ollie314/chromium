@@ -23,6 +23,7 @@
 #include "core/fetch/ResourceFetcher.h"
 #include "core/testing/DummyPageHolder.h"
 #include "platform/heap/Handle.h"
+#include "platform/heap/Heap.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
@@ -30,8 +31,10 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebURLResponse.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
@@ -45,7 +48,7 @@ protected:
     {
         m_originalMemoryCache = replaceMemoryCacheForTesting(MemoryCache::create());
         m_page = DummyPageHolder::create();
-        document()->setURL(KURL(KURL(), "https://localhost/"));
+        document().setURL(KURL(KURL(), "https://localhost/"));
     }
 
     ~CSSStyleSheetResourceTest() override
@@ -53,10 +56,10 @@ protected:
         replaceMemoryCacheForTesting(m_originalMemoryCache.release());
     }
 
-    Document* document() { return &m_page->document(); }
+    Document& document() { return m_page->document(); }
 
     Persistent<MemoryCache> m_originalMemoryCache;
-    OwnPtr<DummyPageHolder> m_page;
+    std::unique_ptr<DummyPageHolder> m_page;
 };
 
 TEST_F(CSSStyleSheetResourceTest, PruneCanCauseEviction)
@@ -68,7 +71,7 @@ TEST_F(CSSStyleSheetResourceTest, PruneCanCauseEviction)
 
         // We need to disable loading because we manually give a response to
         // the image resource.
-        document()->fetcher()->setAutoLoadImages(false);
+        document().fetcher()->setAutoLoadImages(false);
 
         CSSStyleSheetResource* cssResource = CSSStyleSheetResource::createForTest(ResourceRequest(cssURL), "utf-8");
         memoryCache()->add(cssResource);
@@ -82,11 +85,11 @@ TEST_F(CSSStyleSheetResourceTest, PruneCanCauseEviction)
             CSSImageValue::create(String("image"), imageURL),
             CSSImageValue::create(String("image"), imageURL),
             CSSPrimitiveValue::create(1.0, CSSPrimitiveValue::UnitType::Number));
-        Vector<OwnPtr<CSSParserSelector>> selectors;
-        selectors.append(adoptPtr(new CSSParserSelector()));
+        Vector<std::unique_ptr<CSSParserSelector>> selectors;
+        selectors.append(wrapUnique(new CSSParserSelector()));
         selectors[0]->setMatch(CSSSelector::Id);
         selectors[0]->setValue("foo");
-        CSSProperty property(CSSPropertyBackground, crossfade);
+        CSSProperty property(CSSPropertyBackground, *crossfade);
         contents->parserAppendRule(
             StyleRule::create(CSSSelectorList::adoptSelectorVector(selectors), ImmutableStylePropertySet::create(&property, 1, HTMLStandardMode)));
 
@@ -112,7 +115,7 @@ TEST_F(CSSStyleSheetResourceTest, PruneCanCauseEviction)
         }
         ASSERT_TRUE(memoryCache()->isInSameLRUListForTest(cssResource, imageResource));
     }
-    ThreadHeap::collectAllGarbage();
+    ThreadState::current()-> collectAllGarbage();
     // This operation should not lead to crash!
     memoryCache()->pruneAll();
 }
@@ -134,7 +137,8 @@ TEST_F(CSSStyleSheetResourceTest, DuplicateResourceNotCached)
     cssResource->responseReceived(ResourceResponse(cssURL, "style/css", 0, nullAtom, String()), nullptr);
     cssResource->finish();
 
-    StyleSheetContents* contents = StyleSheetContents::create(CSSParserContext(HTMLStandardMode, nullptr));
+    CSSParserContext parserContext(HTMLStandardMode, nullptr);
+    StyleSheetContents* contents = StyleSheetContents::create(parserContext);
     CSSStyleSheet* sheet = CSSStyleSheet::create(contents, document());
     EXPECT_TRUE(sheet);
 
@@ -143,10 +147,11 @@ TEST_F(CSSStyleSheetResourceTest, DuplicateResourceNotCached)
 
     // Verify that the cache will have a mapping for |imageResource| at |url|.
     // The underlying |contents| for the stylesheet resource must have a
-    // matching cache status.
-    ASSERT_TRUE(memoryCache()->contains(imageResource));
-    ASSERT_FALSE(memoryCache()->contains(cssResource));
-    ASSERT_FALSE(contents->isInMemoryCache());
+    // matching reference status.
+    EXPECT_TRUE(memoryCache()->contains(imageResource));
+    EXPECT_FALSE(memoryCache()->contains(cssResource));
+    EXPECT_FALSE(contents->isReferencedFromResource());
+    EXPECT_FALSE(cssResource->restoreParsedStyleSheet(parserContext));
 }
 
 } // namespace

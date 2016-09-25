@@ -34,7 +34,7 @@
 #include "public/platform/WebURL.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponse.h"
 #include "public/web/modules/serviceworker/WebServiceWorkerContextClient.h"
-#include "wtf/PassOwnPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -77,59 +77,64 @@ WebURL ServiceWorkerGlobalScopeClientImpl::scope() const
     return m_client.scope();
 }
 
-void ServiceWorkerGlobalScopeClientImpl::didHandleActivateEvent(int eventID, WebServiceWorkerEventResult result)
+void ServiceWorkerGlobalScopeClientImpl::didHandleActivateEvent(int eventID, WebServiceWorkerEventResult result, double eventDispatchTime)
 {
-    m_client.didHandleActivateEvent(eventID, result);
+    m_client.didHandleActivateEvent(eventID, result, eventDispatchTime);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::didHandleExtendableMessageEvent(int eventID, WebServiceWorkerEventResult result)
+void ServiceWorkerGlobalScopeClientImpl::didHandleExtendableMessageEvent(int eventID, WebServiceWorkerEventResult result, double eventDispatchTime)
 {
-    m_client.didHandleExtendableMessageEvent(eventID, result);
+    m_client.didHandleExtendableMessageEvent(eventID, result, eventDispatchTime);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::didHandleFetchEvent(int fetchEventID)
+void ServiceWorkerGlobalScopeClientImpl::respondToFetchEvent(int responseID, double eventDispatchTime)
 {
-    m_client.didHandleFetchEvent(fetchEventID);
+    m_client.respondToFetchEvent(responseID, eventDispatchTime);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::didHandleFetchEvent(int fetchEventID, const WebServiceWorkerResponse& webResponse)
+void ServiceWorkerGlobalScopeClientImpl::respondToFetchEvent(int responseID, const WebServiceWorkerResponse& response, double eventDispatchTime)
 {
-    m_client.didHandleFetchEvent(fetchEventID, webResponse);
+    m_client.respondToFetchEvent(responseID, response, eventDispatchTime);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::didHandleInstallEvent(int installEventID, WebServiceWorkerEventResult result)
+void ServiceWorkerGlobalScopeClientImpl::didHandleFetchEvent(int eventFinishID, WebServiceWorkerEventResult result, double eventDispatchTime)
 {
-    m_client.didHandleInstallEvent(installEventID, result);
+    m_client.didHandleFetchEvent(eventFinishID, result, eventDispatchTime);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::didHandleNotificationClickEvent(int eventID, WebServiceWorkerEventResult result)
+void ServiceWorkerGlobalScopeClientImpl::didHandleInstallEvent(int installEventID, WebServiceWorkerEventResult result, double eventDispatchTime)
 {
-    m_client.didHandleNotificationClickEvent(eventID, result);
+    m_client.didHandleInstallEvent(installEventID, result, eventDispatchTime);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::didHandleNotificationCloseEvent(int eventID, WebServiceWorkerEventResult result)
+void ServiceWorkerGlobalScopeClientImpl::didHandleNotificationClickEvent(int eventID, WebServiceWorkerEventResult result, double eventDispatchTime)
 {
-    m_client.didHandleNotificationCloseEvent(eventID, result);
+    m_client.didHandleNotificationClickEvent(eventID, result, eventDispatchTime);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::didHandlePushEvent(int pushEventID, WebServiceWorkerEventResult result)
+void ServiceWorkerGlobalScopeClientImpl::didHandleNotificationCloseEvent(int eventID, WebServiceWorkerEventResult result, double eventDispatchTime)
 {
-    m_client.didHandlePushEvent(pushEventID, result);
+    m_client.didHandleNotificationCloseEvent(eventID, result, eventDispatchTime);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::didHandleSyncEvent(int syncEventID, WebServiceWorkerEventResult result)
+void ServiceWorkerGlobalScopeClientImpl::didHandlePushEvent(int pushEventID, WebServiceWorkerEventResult result, double eventDispatchTime)
 {
-    m_client.didHandleSyncEvent(syncEventID, result);
+    m_client.didHandlePushEvent(pushEventID, result, eventDispatchTime);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::postMessageToClient(const WebString& clientUUID, const WebString& message, PassOwnPtr<WebMessagePortChannelArray> webChannels)
+void ServiceWorkerGlobalScopeClientImpl::didHandleSyncEvent(int syncEventID, WebServiceWorkerEventResult result, double eventDispatchTime)
 {
-    m_client.postMessageToClient(clientUUID, message, webChannels.leakPtr());
+    m_client.didHandleSyncEvent(syncEventID, result, eventDispatchTime);
 }
 
-void ServiceWorkerGlobalScopeClientImpl::postMessageToCrossOriginClient(const WebCrossOriginServiceWorkerClient& client, const WebString& message, PassOwnPtr<WebMessagePortChannelArray> webChannels)
+void ServiceWorkerGlobalScopeClientImpl::postMessageToClient(const WebString& clientUUID, const WebString& message, std::unique_ptr<WebMessagePortChannelArray> webChannels)
 {
-    m_client.postMessageToCrossOriginClient(client, message, webChannels.leakPtr());
+    m_client.postMessageToClient(clientUUID, message, webChannels.release());
+}
+
+void ServiceWorkerGlobalScopeClientImpl::postMessageToCrossOriginClient(const WebCrossOriginServiceWorkerClient& client, const WebString& message, std::unique_ptr<WebMessagePortChannelArray> webChannels)
+{
+    m_client.postMessageToCrossOriginClient(client, message, webChannels.release());
 }
 
 void ServiceWorkerGlobalScopeClientImpl::skipWaiting(WebServiceWorkerSkipWaitingCallbacks* callbacks)

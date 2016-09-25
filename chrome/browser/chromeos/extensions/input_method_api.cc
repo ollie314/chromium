@@ -12,6 +12,7 @@
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/chromeos/extensions/dictionary_event_router.h"
@@ -23,11 +24,13 @@
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/api/input_method_private.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -43,6 +46,8 @@ namespace AddWordToDictionary =
 namespace SetCurrentInputMethod =
     extensions::api::input_method_private::SetCurrentInputMethod;
 namespace SetXkbLayout = extensions::api::input_method_private::SetXkbLayout;
+namespace OpenOptionsPage =
+    extensions::api::input_method_private::OpenOptionsPage;
 namespace OnChanged = extensions::api::input_method_private::OnChanged;
 namespace OnDictionaryChanged =
     extensions::api::input_method_private::OnDictionaryChanged;
@@ -71,7 +76,7 @@ InputMethodPrivateGetInputMethodConfigFunction::Run() {
 #if !defined(OS_CHROMEOS)
   EXTENSION_FUNCTION_VALIDATE(false);
 #else
-  base::DictionaryValue* output = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> output(new base::DictionaryValue());
   output->SetBoolean(
       "isPhysicalKeyboardAutocorrectEnabled",
       !base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -81,7 +86,7 @@ InputMethodPrivateGetInputMethodConfigFunction::Run() {
                          Profile::FromBrowserContext(browser_context())
                              ->GetPrefs()
                              ->GetBoolean(prefs::kLanguageImeMenuActivated));
-  return RespondNow(OneArgument(output));
+  return RespondNow(OneArgument(std::move(output)));
 #endif
 }
 
@@ -92,7 +97,7 @@ InputMethodPrivateGetCurrentInputMethodFunction::Run() {
 #else
   chromeos::input_method::InputMethodManager* manager =
       chromeos::input_method::InputMethodManager::Get();
-  return RespondNow(OneArgument(new base::StringValue(
+  return RespondNow(OneArgument(base::MakeUnique<base::StringValue>(
       manager->GetActiveIMEState()->GetCurrentInputMethod().id())));
 #endif
 }
@@ -126,7 +131,7 @@ InputMethodPrivateGetInputMethodsFunction::Run() {
 #if !defined(OS_CHROMEOS)
   EXTENSION_FUNCTION_VALIDATE(false);
 #else
-  base::ListValue* output = new base::ListValue();
+  std::unique_ptr<base::ListValue> output(new base::ListValue());
   chromeos::input_method::InputMethodManager* manager =
       chromeos::input_method::InputMethodManager::Get();
   chromeos::input_method::InputMethodUtil* util = manager->GetInputMethodUtil();
@@ -143,7 +148,7 @@ InputMethodPrivateGetInputMethodsFunction::Run() {
     val->SetString("indicator", util->GetInputMethodShortName(input_method));
     output->Append(val);
   }
-  return RespondNow(OneArgument(output));
+  return RespondNow(OneArgument(std::move(output)));
 #endif
 }
 
@@ -163,11 +168,11 @@ InputMethodPrivateFetchAllDictionaryWordsFunction::Run() {
   }
 
   const std::set<std::string>& words = dictionary->GetWords();
-  base::ListValue* output = new base::ListValue();
+  std::unique_ptr<base::ListValue> output(new base::ListValue());
   for (auto it = words.begin(); it != words.end(); ++it) {
     output->AppendString(*it);
   }
-  return RespondNow(OneArgument(output));
+  return RespondNow(OneArgument(std::move(output)));
 #endif
 }
 
@@ -206,7 +211,7 @@ InputMethodPrivateGetEncryptSyncEnabledFunction::Run() {
 #if !defined(OS_CHROMEOS)
   EXTENSION_FUNCTION_VALIDATE(false);
 #else
-  ProfileSyncService* profile_sync_service =
+  browser_sync::ProfileSyncService* profile_sync_service =
       ProfileSyncServiceFactory::GetForProfile(
           Profile::FromBrowserContext(browser_context()));
   if (!profile_sync_service)
@@ -263,6 +268,36 @@ InputMethodPrivateShowInputViewFunction::Run() {
 #endif
 }
 
+ExtensionFunction::ResponseAction
+InputMethodPrivateOpenOptionsPageFunction::Run() {
+#if !defined(OS_CHROMEOS)
+  EXTENSION_FUNCTION_VALIDATE(false);
+#else
+  std::unique_ptr<OpenOptionsPage::Params> params(
+      OpenOptionsPage::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+  scoped_refptr<chromeos::input_method::InputMethodManager::State> ime_state =
+      chromeos::input_method::InputMethodManager::Get()->GetActiveIMEState();
+  const chromeos::input_method::InputMethodDescriptor* ime =
+      ime_state->GetInputMethodFromId(params->input_method_id);
+  if (!ime)
+    return RespondNow(Error("IME not found: *", params->input_method_id));
+
+  content::WebContents* web_contents = GetSenderWebContents();
+  if (web_contents) {
+    const GURL& options_page_url = ime->options_page_url();
+    if (!options_page_url.is_empty()) {
+      Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+      content::OpenURLParams url_params(options_page_url, content::Referrer(),
+                                        WindowOpenDisposition::SINGLETON_TAB,
+                                        ui::PAGE_TRANSITION_LINK, false);
+      browser->OpenURL(url_params);
+    }
+  }
+  return RespondNow(NoArguments());
+#endif
+}
+
 InputMethodAPI::InputMethodAPI(content::BrowserContext* context)
     : context_(context) {
   EventRouter::Get(context_)->RegisterObserver(this, OnChanged::kEventName);
@@ -288,6 +323,7 @@ InputMethodAPI::InputMethodAPI(content::BrowserContext* context)
   registry->RegisterFunction<InputMethodPrivateGetEncryptSyncEnabledFunction>();
   registry->RegisterFunction<
       InputMethodPrivateNotifyImeMenuItemActivatedFunction>();
+  registry->RegisterFunction<InputMethodPrivateOpenOptionsPageFunction>();
 }
 
 InputMethodAPI::~InputMethodAPI() {

@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -80,10 +80,8 @@ void CreateCloudPrintSigninTab(Browser* browser,
         browser->OpenURL(content::OpenURLParams(
             google_util::AppendGoogleLocaleParam(
                 url, g_browser_process->GetApplicationLocale()),
-            content::Referrer(),
-            NEW_FOREGROUND_TAB,
-            ui::PAGE_TRANSITION_AUTO_BOOKMARK,
-            false));
+            content::Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
+            ui::PAGE_TRANSITION_AUTO_BOOKMARK, false));
     new SignInObserver(web_contents, callback);
   }
 }

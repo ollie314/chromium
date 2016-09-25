@@ -13,7 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_store_base.h"
 #include "components/policy/policy_export.h"
-#include "policy/proto/policy_signing_key.pb.h"
+#include "components/policy/proto/policy_signing_key.pb.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -37,7 +37,7 @@ class POLICY_EXPORT UserCloudPolicyStore : public UserCloudPolicyStoreBase {
 
   // Factory method for creating a UserCloudPolicyStore for a profile with path
   // |profile_path|.
-  static scoped_ptr<UserCloudPolicyStore> Create(
+  static std::unique_ptr<UserCloudPolicyStore> Create(
       const base::FilePath& profile_path,
       const std::string& verification_key,
       scoped_refptr<base::SequencedTaskRunner> background_task_runner);
@@ -75,8 +75,8 @@ class POLICY_EXPORT UserCloudPolicyStore : public UserCloudPolicyStoreBase {
   // occurs on a background thread (results are sent back to the calling
   // thread).
   void Validate(
-      scoped_ptr<enterprise_management::PolicyFetchResponse> policy,
-      scoped_ptr<enterprise_management::PolicySigningKey> key,
+      std::unique_ptr<enterprise_management::PolicyFetchResponse> policy,
+      std::unique_ptr<enterprise_management::PolicySigningKey> key,
       const std::string& verification_key,
       bool validate_in_background,
       const UserCloudPolicyValidator::CompletionCallback& callback);

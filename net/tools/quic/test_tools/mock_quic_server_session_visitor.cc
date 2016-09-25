@@ -11,5 +11,9 @@ MockQuicServerSessionVisitor::MockQuicServerSessionVisitor() {}
 
 MockQuicServerSessionVisitor::~MockQuicServerSessionVisitor() {}
 
+MockQuicCryptoServerStreamHelper::MockQuicCryptoServerStreamHelper() {}
+
+MockQuicCryptoServerStreamHelper::~MockQuicCryptoServerStreamHelper() {}
+
 }  // namespace test
 }  // namespace net

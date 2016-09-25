@@ -32,7 +32,6 @@ namespace blink {
 
 LayoutSVGViewportContainer::LayoutSVGViewportContainer(SVGElement* node)
     : LayoutSVGContainer(node)
-    , m_didTransformToRootUpdate(false)
     , m_isLayoutSizeChanged(false)
     , m_needsTransformUpdate(true)
 {
@@ -65,15 +64,21 @@ void LayoutSVGViewportContainer::calcViewport()
     }
 }
 
-bool LayoutSVGViewportContainer::calculateLocalTransform()
+void LayoutSVGViewportContainer::setNeedsTransformUpdate()
 {
-    m_didTransformToRootUpdate = m_needsTransformUpdate || SVGLayoutSupport::transformToRootChanged(parent());
-    if (!m_needsTransformUpdate)
-        return false;
+    setMayNeedPaintInvalidationSubtree();
+    m_needsTransformUpdate = true;
+}
 
+SVGTransformChange LayoutSVGViewportContainer::calculateLocalTransform()
+{
+    if (!m_needsTransformUpdate)
+        return SVGTransformChange::None;
+
+    SVGTransformChangeDetector changeDetector(m_localToParentTransform);
     m_localToParentTransform = AffineTransform::translation(m_viewport.x(), m_viewport.y()) * viewportTransform();
     m_needsTransformUpdate = false;
-    return true;
+    return changeDetector.computeChange(m_localToParentTransform);
 }
 
 AffineTransform LayoutSVGViewportContainer::viewportTransform() const

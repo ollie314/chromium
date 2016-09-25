@@ -23,8 +23,9 @@
 
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/UnionTypesCore.h"
-#include "core/dom/ExceptionCode.h"
+#include "bindings/core/v8/HTMLElementOrLong.h"
+#include "bindings/core/v8/HTMLOptionElementOrHTMLOptGroupElement.h"
+#include "bindings/core/v8/NodeListOrElement.h"
 #include "core/dom/StaticNodeList.h"
 #include "core/html/HTMLOptionElement.h"
 #include "core/html/HTMLSelectElement.h"
@@ -34,7 +35,7 @@ namespace blink {
 HTMLOptionsCollection::HTMLOptionsCollection(ContainerNode& select)
     : HTMLCollection(select, SelectOptions, DoesNotOverrideItemAfter)
 {
-    ASSERT(isHTMLSelectElement(select));
+    DCHECK(isHTMLSelectElement(select));
 }
 
 void HTMLOptionsCollection::supportedPropertyNames(Vector<String>& names)
@@ -47,7 +48,7 @@ void HTMLOptionsCollection::supportedPropertyNames(Vector<String>& names)
     unsigned length = this->length();
     for (unsigned i = 0; i < length; ++i) {
         Element* element = item(i);
-        ASSERT(element);
+        DCHECK(element);
         const AtomicString& idAttribute = element->getIdAttribute();
         if (!idAttribute.isEmpty()) {
             HashSet<AtomicString>::AddResult addResult = existingNames.add(idAttribute);

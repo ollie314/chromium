@@ -4,9 +4,11 @@
 
 #include "core/css/CSSVariableData.h"
 
+#include "core/css/CSSSyntaxDescriptor.h"
 #include "core/css/parser/CSSParser.h"
 #include "core/css/parser/CSSParserTokenRange.h"
 #include "wtf/text/StringBuilder.h"
+#include "wtf/text/StringView.h"
 
 namespace blink {
 
@@ -26,9 +28,8 @@ template<typename CharacterType> void CSSVariableData::updateTokens(const CSSPar
     for (const CSSParserToken& token : range) {
         if (token.hasStringBacking()) {
             unsigned length = token.value().length();
-            CSSParserString parserString;
-            parserString.init(currentOffset, length);
-            m_tokens.append(token.copyWithUpdatedString(parserString));
+            StringView string(currentOffset, length);
+            m_tokens.append(token.copyWithUpdatedString(string));
             currentOffset += length;
         } else {
             m_tokens.append(token);
@@ -49,13 +50,8 @@ void CSSVariableData::consumeAndUpdateTokens(const CSSParserTokenRange& range)
 
     while (!localRange.atEnd()) {
         CSSParserToken token = localRange.consume();
-        if (token.hasStringBacking()) {
-            CSSParserString value = token.value();
-            if (value.is8Bit())
-                stringBuilder.append(value.characters8(), value.length());
-            else
-                stringBuilder.append(value.characters16(), value.length());
-        }
+        if (token.hasStringBacking())
+            stringBuilder.append(token.value());
     }
     m_backingString = stringBuilder.toString();
     if (m_backingString.is8Bit())
@@ -70,6 +66,12 @@ CSSVariableData::CSSVariableData(const CSSParserTokenRange& range, bool needsVar
 {
     ASSERT(!range.atEnd());
     consumeAndUpdateTokens(range);
+}
+
+const CSSValue* CSSVariableData::parseForSyntax(const CSSSyntaxDescriptor& syntax) const
+{
+    DCHECK(!needsVariableResolution());
+    return syntax.parse(tokenRange());
 }
 
 } // namespace blink

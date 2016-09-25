@@ -58,7 +58,7 @@ public:
     virtual void setTrackList(TextTrackList*);
     TextTrackList* trackList() { return m_trackList; }
 
-    void setKind(const AtomicString&) override;
+    bool isVisualKind() const;
 
     static const AtomicString& subtitlesKeyword();
     static const AtomicString& captionsKeyword();
@@ -70,6 +70,11 @@ public:
     static const AtomicString& disabledKeyword();
     static const AtomicString& hiddenKeyword();
     static const AtomicString& showingKeyword();
+
+    void setKind(const AtomicString& kind) { m_kind = kind; }
+    void setLabel(const AtomicString& label) { m_label = label; }
+    void setLanguage(const AtomicString& language) { m_language = language; }
+    void setId(const String& id) { m_id = id; }
 
     AtomicString mode() const { return m_mode; }
     virtual void setMode(const AtomicString&);
@@ -102,7 +107,8 @@ public:
     int trackIndex();
     void invalidateTrackIndex();
 
-    bool isRendered();
+    bool isRendered() const;
+    bool canBeRendered() const;
     int trackIndexRelativeToRenderedTracks();
 
     bool hasBeenConfigured() const { return m_hasBeenConfigured; }
@@ -118,11 +124,10 @@ public:
 
     DECLARE_VIRTUAL_TRACE();
 
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
+
 protected:
     TextTrack(const AtomicString& kind, const AtomicString& label, const AtomicString& language, const AtomicString& id, TextTrackType);
-
-    bool isValidKind(const AtomicString& kind) const override { return isValidKindKeyword(kind); }
-    AtomicString defaultKind() const override { return subtitlesKeyword(); }
 
     void addListOfCues(HeapVector<Member<TextTrackCue>>&);
 

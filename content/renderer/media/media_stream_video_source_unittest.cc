@@ -53,7 +53,7 @@ class MediaStreamVideoSourceTest : public ::testing::Test {
     webkit_source_.initialize(base::UTF8ToUTF16("dummy_source_id"),
                               blink::WebMediaStreamSource::TypeVideo,
                               base::UTF8ToUTF16("dummy_source_name"),
-                              false /* remote */, true /* readonly */);
+                              false /* remote */);
     webkit_source_.setExtraData(mock_source_);
   }
 
@@ -314,6 +314,14 @@ TEST_F(MediaStreamVideoSourceTest, MandatoryMinVgaOptional720P) {
   CreateTrackAndStartSource(factory.CreateWebMediaConstraints(), 1280, 720, 30);
 }
 
+// Test that the capture output is 720P if the camera supports it and the
+// mandatory constraint is exactly width 1280.
+TEST_F(MediaStreamVideoSourceTest, MandatoryExact720P) {
+  MockConstraintFactory factory;
+  factory.basic().width.setExact(1280);
+  CreateTrackAndStartSource(factory.CreateWebMediaConstraints(), 1280, 720, 30);
+}
+
 // Test that the capture output have aspect ratio 4:3 if a mandatory constraint
 // require it even if an optional constraint request a higher resolution
 // that don't have this aspect ratio.
@@ -373,8 +381,26 @@ TEST_F(MediaStreamVideoSourceTest, MinFrameRateLargerThanMaxFrameRate) {
   MockConstraintFactory factory;
   factory.basic().frameRate.setMin(25);
   factory.basic().frameRate.setMax(15);
-  blink::WebMediaStreamTrack track = CreateTrack(
-      "123", factory.CreateWebMediaConstraints());
+  blink::WebMediaStreamTrack track =
+      CreateTrack("123", factory.CreateWebMediaConstraints());
+  mock_source()->CompleteGetSupportedFormats();
+  EXPECT_EQ(1, NumberOfFailedConstraintsCallbacks());
+}
+
+TEST_F(MediaStreamVideoSourceTest, ExactWidthNotSupported) {
+  MockConstraintFactory factory;
+  factory.basic().width.setExact(12000);
+  blink::WebMediaStreamTrack track =
+      CreateTrack("123", factory.CreateWebMediaConstraints());
+  mock_source()->CompleteGetSupportedFormats();
+  EXPECT_EQ(1, NumberOfFailedConstraintsCallbacks());
+}
+
+TEST_F(MediaStreamVideoSourceTest, MinWidthNotSupported) {
+  MockConstraintFactory factory;
+  factory.basic().width.setMin(12000);
+  blink::WebMediaStreamTrack track =
+      CreateTrack("123", factory.CreateWebMediaConstraints());
   mock_source()->CompleteGetSupportedFormats();
   EXPECT_EQ(1, NumberOfFailedConstraintsCallbacks());
 }
@@ -679,28 +705,6 @@ TEST_F(MediaStreamVideoSourceTest, SourceChangeFrameSize) {
   EXPECT_EQ(700, sink.frame_size().height());
 
   sink.DisconnectFromTrack();
-}
-
-TEST_F(MediaStreamVideoSourceTest, IsConstraintSupported) {
-  EXPECT_TRUE(MediaStreamVideoSource::IsConstraintSupported(
-          MediaStreamVideoSource::kMaxFrameRate));
-  EXPECT_TRUE(MediaStreamVideoSource::IsConstraintSupported(
-        MediaStreamVideoSource::kMinFrameRate));
-  EXPECT_TRUE(MediaStreamVideoSource::IsConstraintSupported(
-      MediaStreamVideoSource::kMaxWidth));
-  EXPECT_TRUE(MediaStreamVideoSource::IsConstraintSupported(
-        MediaStreamVideoSource::kMinWidth));
-  EXPECT_TRUE(MediaStreamVideoSource::IsConstraintSupported(
-        MediaStreamVideoSource::kMaxHeight));
-  EXPECT_TRUE(MediaStreamVideoSource::IsConstraintSupported(
-      MediaStreamVideoSource::kMinHeight));
-  EXPECT_TRUE(MediaStreamVideoSource::IsConstraintSupported(
-        MediaStreamVideoSource::kMaxAspectRatio));
-  EXPECT_TRUE(MediaStreamVideoSource::IsConstraintSupported(
-      MediaStreamVideoSource::kMinAspectRatio));
-
-  EXPECT_FALSE(MediaStreamVideoSource::IsConstraintSupported(
-      "something unsupported"));
 }
 
 // Test that the constraint negotiation can handle 0.0 fps as frame rate.

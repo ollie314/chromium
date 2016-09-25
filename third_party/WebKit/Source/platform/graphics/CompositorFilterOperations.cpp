@@ -4,18 +4,18 @@
 
 #include "platform/graphics/CompositorFilterOperations.h"
 
-#include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
 
 namespace blink {
 
-CompositorFilterOperations::CompositorFilterOperations()
-{
-}
-
-const cc::FilterOperations& CompositorFilterOperations::asFilterOperations() const
+const cc::FilterOperations& CompositorFilterOperations::asCcFilterOperations() const
 {
     return m_filterOperations;
+}
+
+cc::FilterOperations CompositorFilterOperations::releaseCcFilterOperations()
+{
+    return std::move(m_filterOperations);
 }
 
 void CompositorFilterOperations::appendGrayscaleFilter(float amount)
@@ -91,7 +91,7 @@ void CompositorFilterOperations::appendSaturatingBrightnessFilter(float amount)
 void CompositorFilterOperations::appendReferenceFilter(sk_sp<SkImageFilter> imageFilter)
 {
     m_filterOperations.Append(
-        cc::FilterOperation::CreateReferenceFilter(skia::SharePtr(std::move(imageFilter))));
+        cc::FilterOperation::CreateReferenceFilter(std::move(imageFilter)));
 }
 
 void CompositorFilterOperations::clear()

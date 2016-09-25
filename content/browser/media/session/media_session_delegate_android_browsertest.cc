@@ -2,12 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/media/session/media_session.h"
 #include "content/browser/media/session/mock_media_session_observer.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/shell/browser/shell.h"
+#include "media/base/media_content_type.h"
 
 namespace content {
 
@@ -27,7 +33,7 @@ class MediaSessionDelegateAndroidBrowserTest : public ContentBrowserTest {};
 
 IN_PROC_BROWSER_TEST_F(MediaSessionDelegateAndroidBrowserTest,
                        MAYBE_OnAudioFocusChangeAfterDtorCrash) {
-  scoped_ptr<MockMediaSessionObserver> media_session_observer(
+  std::unique_ptr<MockMediaSessionObserver> media_session_observer(
       new MockMediaSessionObserver);
 
   MediaSession* media_session = MediaSession::Get(shell()->web_contents());
@@ -39,13 +45,13 @@ IN_PROC_BROWSER_TEST_F(MediaSessionDelegateAndroidBrowserTest,
 
   media_session_observer->StartNewPlayer();
   media_session->AddPlayer(media_session_observer.get(), 0,
-                           MediaSession::Type::Content);
+                           media::MediaContentType::Persistent);
   EXPECT_TRUE(media_session->IsActive());
   EXPECT_FALSE(other_media_session->IsActive());
 
   media_session_observer->StartNewPlayer();
   other_media_session->AddPlayer(media_session_observer.get(), 1,
-                                 MediaSession::Type::Content);
+                                 media::MediaContentType::Persistent);
   EXPECT_TRUE(media_session->IsActive());
   EXPECT_TRUE(other_media_session->IsActive());
 
@@ -55,7 +61,7 @@ IN_PROC_BROWSER_TEST_F(MediaSessionDelegateAndroidBrowserTest,
   // to the listeners. If the bug is still present, it will crash.
   {
     base::RunLoop run_loop;
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), base::TimeDelta::FromSeconds(1));
     run_loop.Run();
   }

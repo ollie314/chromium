@@ -30,7 +30,6 @@
 #include "core/fetch/IntegrityMetadata.h"
 #include "core/fetch/ResourceClient.h"
 #include "core/fetch/TextResource.h"
-#include "platform/text/CompressibleString.h"
 
 namespace blink {
 
@@ -41,6 +40,7 @@ enum class ScriptIntegrityDisposition {
 };
 
 class FetchRequest;
+class ResourceFetcher;
 class ScriptResource;
 
 class CORE_EXPORT ScriptResourceClient : public ResourceClient {
@@ -72,7 +72,7 @@ public:
 
     void destroyDecodedDataForFailedRevalidation() override;
 
-    const CompressibleString& script();
+    const String& script();
 
     bool mimeTypeAllowedByNosniff() const;
 
@@ -100,7 +100,7 @@ private:
     ScriptIntegrityDisposition m_integrityDisposition;
     IntegrityMetadataSet m_integrityMetadata;
 
-    CompressibleString m_script;
+    AtomicString m_script;
 };
 
 DEFINE_RESOURCE_TYPE_CASTS(Script);

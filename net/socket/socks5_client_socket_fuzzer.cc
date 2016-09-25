@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/test/fuzzed_data_provider.h"
 #include "net/base/address_list.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -23,15 +23,14 @@
 // |data| is used to create a FuzzedSocket to fuzz reads and writes, see that
 // class for details.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  // Needed for thread checks and waits.
-  base::MessageLoopForIO message_loop;
-
   // Use a test NetLog, to exercise logging code.
-  net::BoundTestNetLog bound_test_net_log;
+  net::TestNetLog test_net_log;
+
+  base::FuzzedDataProvider data_provider(data, size);
 
   net::TestCompletionCallback callback;
   std::unique_ptr<net::FuzzedSocket> fuzzed_socket(
-      new net::FuzzedSocket(data, size, bound_test_net_log.bound()));
+      new net::FuzzedSocket(&data_provider, &test_net_log));
   CHECK_EQ(net::OK, fuzzed_socket->Connect(callback.callback()));
 
   std::unique_ptr<net::ClientSocketHandle> socket_handle(

@@ -13,14 +13,12 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/power_monitor/power_observer.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_states.h"
 #include "net/base/net_error_details.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
-#include "net/base/upload_progress.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/socket/connection_attempts.h"
 #include "net/url_request/redirect_info.h"
@@ -96,10 +94,10 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
   virtual void Kill();
 
   // Called to read post-filtered data from this Job, returning the number of
-  // bytes read, 0 when there is no more data, or -1 if there was an error.
-  // This is just the backend for URLRequest::Read, see that function for
+  // bytes read, 0 when there is no more data, or net error if there was an
+  // error. This is just the backend for URLRequest::Read, see that function for
   // more info.
-  bool Read(IOBuffer* buf, int buf_size, int* bytes_read);
+  int Read(IOBuffer* buf, int buf_size);
 
   // Stops further caching of this request, if any. For more info, see
   // URLRequest::StopCaching().
@@ -117,9 +115,6 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
 
   // Called to fetch the current load state for the job.
   virtual LoadState GetLoadState() const;
-
-  // Called to get the upload progress in bytes.
-  virtual UploadProgress GetUploadProgress() const;
 
   // Called to fetch the charset for this request.  Only makes sense for some
   // types of requests. Returns true on success.  Calling this on a type that
@@ -139,12 +134,6 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
   // false and leaves |endpoint| unchanged if it is unavailable.
   virtual bool GetRemoteEndpoint(IPEndPoint* endpoint) const;
 
-  // Returns the cookie values included in the response, if applicable.
-  // Returns true if applicable.
-  // NOTE: This removes the cookies from the job, so it will only return
-  //       useful results once per job.
-  virtual bool GetResponseCookies(std::vector<std::string>* cookies);
-
   // Populates the network error details of the most recent origin that the
   // network stack makes the request to.
   virtual void PopulateNetErrorDetails(NetErrorDetails* details) const;
@@ -155,7 +144,7 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
   // This class takes ownership of the returned Filter.
   //
   // The default implementation returns NULL.
-  virtual Filter* SetupFilter() const;
+  virtual std::unique_ptr<Filter> SetupFilter() const;
 
   // Called to determine if this response is a redirect.  Only makes sense
   // for some types of requests.  This method returns true if the response
@@ -204,9 +193,6 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
   // Continue processing the request ignoring the last error.
   virtual void ContinueDespiteLastError();
 
-  // Continue with the network request.
-  virtual void ResumeNetworkStart();
-
   void FollowDeferredRedirect();
 
   // Returns true if the Job is done producing response data and has called
@@ -221,6 +207,10 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
 
   // Whether we have processed the response for that request yet.
   bool has_response_started() const { return has_handled_response_; }
+
+  // The number of bytes read before passing to the filter. This value reflects
+  // bytes read even when there is no filter.
+  int64_t prefilter_bytes_read() const { return prefilter_bytes_read_; }
 
   // These methods are not applicable to all connections.
   virtual bool GetMimeType(std::string* mime_type) const;
@@ -267,9 +257,6 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
 
   // Delegates to URLRequest::Delegate.
   bool CanEnablePrivacyMode() const;
-
-  // Notifies the job that the network is about to be used.
-  void NotifyBeforeNetworkStart(bool* defer);
 
   // Notifies the job that headers have been received.
   void NotifyHeadersComplete();
@@ -340,10 +327,6 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
   // Set the proxy server that was used, if any.
   void SetProxyServer(const HostPortPair& proxy_server);
 
-  // The number of bytes read before passing to the filter. This value reflects
-  // bytes read even when there is no filter.
-  int64_t prefilter_bytes_read() const { return prefilter_bytes_read_; }
-
   // The number of bytes read after passing through the filter. This value
   // reflects bytes read even when there is no filter.
   int64_t postfilter_bytes_read() const { return postfilter_bytes_read_; }
@@ -357,16 +340,13 @@ class NET_EXPORT URLRequestJob : public base::PowerObserver {
   // Completion callback for raw reads. See |ReadRawData| for details.
   // |bytes_read| is either >= 0 to indicate a successful read and count of
   // bytes read, or < 0 to indicate an error.
+  // On return, |this| may be deleted.
   void ReadRawDataComplete(int bytes_read);
 
   // The request that initiated this job. This value will never be nullptr.
   URLRequest* request_;
 
  private:
-  // Set the status of the associated URLRequest.
-  // TODO(mmenke): Make the URLRequest manage its own status.
-  void SetStatus(const URLRequestStatus& status);
-
   // When data filtering is enabled, this function is used to read data
   // for the filter. Returns a net error code to indicate if raw data was
   // successfully read,  an error happened, or the IO is pending.

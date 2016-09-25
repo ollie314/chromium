@@ -2,14 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.page import page_test
+from telemetry.page import legacy_page_test
 from telemetry.timeline.model import TimelineModel
 from telemetry.timeline import tracing_config
 from telemetry.util import statistics
 from telemetry.value import scalar
 
 
-class V8GCTimes(page_test.PageTest):
+class V8GCTimes(legacy_page_test.LegacyPageTest):
 
   _TIME_OUT_IN_SECONDS = 60
   _CATEGORIES = ['blink.console',
@@ -23,14 +23,17 @@ class V8GCTimes(page_test.PageTest):
     super(V8GCTimes, self).__init__()
 
   def WillNavigateToPage(self, page, tab):
+    del page  # unused
     config = tracing_config.TracingConfig()
     for category in self._CATEGORIES:
-      config.tracing_category_filter.AddIncludedCategory(category)
+      config.chrome_trace_config.category_filter.AddIncludedCategory(
+          category)
     config.enable_chrome_trace = True
     tab.browser.platform.tracing_controller.StartTracing(
         config, self._TIME_OUT_IN_SECONDS)
 
   def ValidateAndMeasurePage(self, page, tab, results):
+    del page  # unused
     trace_data = tab.browser.platform.tracing_controller.StopTracing()
     timeline_model = TimelineModel(trace_data)
     renderer_process = timeline_model.GetRendererProcessFromTabId(tab.id)

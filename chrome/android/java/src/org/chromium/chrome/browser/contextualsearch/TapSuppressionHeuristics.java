@@ -10,25 +10,31 @@ package org.chromium.chrome.browser.contextualsearch;
 public class TapSuppressionHeuristics extends ContextualSearchHeuristics {
     /**
      * Gets all the heuristics needed for Tap suppression.
-     * @param selectionController The {@link ContextualSearchSelectionController}
+     * @param selectionController The {@link ContextualSearchSelectionController}.
+     * @param previousTapState The state of the previous tap, or {@code null}.
      * @param x The x position of the Tap.
      * @param y The y position of the Tap.
+     * @param tapsSinceOpen the number of Tap gestures since the last open of the panel.
      */
-    TapSuppressionHeuristics(
-            ContextualSearchSelectionController selectionController, int x, int y) {
+    TapSuppressionHeuristics(ContextualSearchSelectionController selectionController,
+            ContextualSearchTapState previousTapState, int x, int y, int tapsSinceOpen) {
         super();
         RecentScrollTapSuppression scrollTapExperiment =
                 new RecentScrollTapSuppression(selectionController);
         mHeuristics.add(scrollTapExperiment);
         TapFarFromPreviousSuppression farFromPreviousHeuristic =
-                new TapFarFromPreviousSuppression(selectionController, x, y);
+                new TapFarFromPreviousSuppression(selectionController, previousTapState, x, y);
         mHeuristics.add(farFromPreviousHeuristic);
         NearTopTapSuppression tapNearTopSuppression =
                 new NearTopTapSuppression(selectionController, y);
         mHeuristics.add(tapNearTopSuppression);
         BarOverlapTapSuppression barOverlapTapSuppression =
-                new BarOverlapTapSuppression(selectionController, x, y);
+                new BarOverlapTapSuppression(selectionController, y);
         mHeuristics.add(barOverlapTapSuppression);
+        // General Tap Suppression and Tap Twice.
+        TapSuppression tapSuppression =
+                new TapSuppression(selectionController, previousTapState, x, y, tapsSinceOpen);
+        mHeuristics.add(tapSuppression);
     }
 
     /**
@@ -60,7 +66,7 @@ public class TapSuppressionHeuristics extends ContextualSearchHeuristics {
      */
     boolean shouldSuppressTap() {
         for (ContextualSearchHeuristic heuristic : mHeuristics) {
-            if (heuristic.isConditionSatisfied()) return true;
+            if (heuristic.isConditionSatisfiedAndEnabled()) return true;
         }
         return false;
     }

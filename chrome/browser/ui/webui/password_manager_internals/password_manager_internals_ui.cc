@@ -12,6 +12,7 @@
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/password_manager_internals_resources.h"
 #include "components/password_manager/content/browser/password_manager_internals_service_factory.h"
 #include "components/password_manager/core/browser/password_manager_internals_service.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
@@ -19,7 +20,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
-#include "grit/password_manager_internals_resources.h"
 #include "net/base/escape.h"
 
 using password_manager::PasswordManagerInternalsService;
@@ -39,6 +39,7 @@ content::WebUIDataSource* CreatePasswordManagerInternalsHTMLSource() {
       IDR_PASSWORD_MANAGER_INTERNALS_PASSWORD_MANAGER_INTERNALS_CSS);
   source->SetDefaultResource(
       IDR_PASSWORD_MANAGER_INTERNALS_PASSWORD_MANAGER_INTERNALS_HTML);
+  source->DisableI18nAndUseGzipForAllPaths();
   return source;
 }
 
@@ -70,7 +71,7 @@ void PasswordManagerInternalsUI::DidStopLoading() {
           Profile::FromWebUI(web_ui()));
   // No service means the WebUI is displayed in Incognito.
   base::FundamentalValue is_incognito(!service);
-  web_ui()->CallJavascriptFunction("notifyAboutIncognito", is_incognito);
+  web_ui()->CallJavascriptFunctionUnsafe("notifyAboutIncognito", is_incognito);
 
   if (service) {
     registered_with_logging_service_ = true;
@@ -87,7 +88,7 @@ void PasswordManagerInternalsUI::DidStopLoading() {
   if (url.is_valid() && url.has_query()) {
     std::vector<std::string> query_parameters = base::SplitString(
         url.query(), "&", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
-    if (ContainsValue(query_parameters, "reset_fre"))
+    if (base::ContainsValue(query_parameters, "reset_fre"))
       ResetAutoSignInFirstRunExperience();
   }
 }
@@ -99,8 +100,8 @@ void PasswordManagerInternalsUI::LogSavePasswordProgress(
   std::string no_quotes(text);
   std::replace(no_quotes.begin(), no_quotes.end(), '"', ' ');
   base::StringValue text_string_value(net::EscapeForHTML(no_quotes));
-  web_ui()->CallJavascriptFunction("addSavePasswordProgressLog",
-                                   text_string_value);
+  web_ui()->CallJavascriptFunctionUnsafe("addSavePasswordProgressLog",
+                                         text_string_value);
 }
 
 void PasswordManagerInternalsUI::UnregisterFromLoggingServiceIfNecessary() {

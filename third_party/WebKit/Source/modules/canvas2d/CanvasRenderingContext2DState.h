@@ -9,6 +9,7 @@
 #include "modules/canvas2d/ClipList.h"
 #include "platform/fonts/Font.h"
 #include "platform/transforms/AffineTransform.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "wtf/Vector.h"
 
 namespace blink {
@@ -84,7 +85,7 @@ public:
 
     void setFontForFilter(const Font& font) { m_fontForFilter = font; }
 
-    void setFilter(CSSValue*);
+    void setFilter(const CSSValue*);
     void setUnparsedFilter(const String& filterString) { m_unparsedFilter = filterString; }
     const String& unparsedFilter() const { return m_unparsedFilter; }
     SkImageFilter* getFilter(Element*, IntSize canvasSize, CanvasRenderingContext2D*) const;
@@ -194,9 +195,9 @@ private:
     FloatSize m_shadowOffset;
     double m_shadowBlur;
     SkColor m_shadowColor;
-    mutable RefPtr<SkDrawLooper> m_emptyDrawLooper;
-    mutable RefPtr<SkDrawLooper> m_shadowOnlyDrawLooper;
-    mutable RefPtr<SkDrawLooper> m_shadowAndForegroundDrawLooper;
+    mutable sk_sp<SkDrawLooper> m_emptyDrawLooper;
+    mutable sk_sp<SkDrawLooper> m_shadowOnlyDrawLooper;
+    mutable sk_sp<SkDrawLooper> m_shadowAndForegroundDrawLooper;
     mutable sk_sp<SkImageFilter> m_shadowOnlyImageFilter;
     mutable sk_sp<SkImageFilter> m_shadowAndForegroundImageFilter;
 
@@ -210,7 +211,7 @@ private:
     Font m_fontForFilter;
 
     String m_unparsedFilter;
-    Member<CSSValue> m_filterValue;
+    Member<const CSSValue> m_filterValue;
     mutable sk_sp<SkImageFilter> m_resolvedFilter;
 
     // Text state.

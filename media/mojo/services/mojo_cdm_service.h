@@ -10,23 +10,25 @@
 #include <memory>
 
 #include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/media_keys.h"
 #include "media/mojo/interfaces/content_decryption_module.mojom.h"
+#include "media/mojo/services/media_mojo_export.h"
 #include "media/mojo/services/mojo_cdm_promise.h"
 #include "media/mojo/services/mojo_cdm_service_context.h"
 #include "media/mojo/services/mojo_decryptor_service.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace media {
 
 class CdmFactory;
 
-// A interfaces::ContentDecryptionModule implementation backed by a
+// A mojom::ContentDecryptionModule implementation backed by a
 // media::MediaKeys.
-class MojoCdmService : public interfaces::ContentDecryptionModule {
+class MEDIA_MOJO_EXPORT MojoCdmService
+    : NON_EXPORTED_BASE(public mojom::ContentDecryptionModule) {
  public:
   // Get the CDM associated with |cdm_id|, which is unique per process.
   // Can be called on any thread. The returned CDM is not guaranteed to be
@@ -39,46 +41,34 @@ class MojoCdmService : public interfaces::ContentDecryptionModule {
   static scoped_refptr<MediaKeys> LegacyGetCdm(int cdm_id);
 
   // Constructs a MojoCdmService and strongly binds it to the |request|.
-  MojoCdmService(
-      base::WeakPtr<MojoCdmServiceContext> context,
-      CdmFactory* cdm_factory,
-      mojo::InterfaceRequest<interfaces::ContentDecryptionModule> request);
+  MojoCdmService(base::WeakPtr<MojoCdmServiceContext> context,
+                 CdmFactory* cdm_factory);
 
   ~MojoCdmService() final;
 
-  // interfaces::ContentDecryptionModule implementation.
-  void SetClient(interfaces::ContentDecryptionModuleClientPtr client) final;
+  // mojom::ContentDecryptionModule implementation.
+  void SetClient(mojom::ContentDecryptionModuleClientPtr client) final;
   void Initialize(const mojo::String& key_system,
                   const mojo::String& security_origin,
-                  interfaces::CdmConfigPtr cdm_config,
+                  mojom::CdmConfigPtr cdm_config,
                   const InitializeCallback& callback) final;
-  void SetServerCertificate(
-      mojo::Array<uint8_t> certificate_data,
-      const mojo::Callback<void(interfaces::CdmPromiseResultPtr)>& callback)
-      final;
+  void SetServerCertificate(mojo::Array<uint8_t> certificate_data,
+                            const SetServerCertificateCallback& callback) final;
   void CreateSessionAndGenerateRequest(
-      interfaces::ContentDecryptionModule::SessionType session_type,
-      interfaces::ContentDecryptionModule::InitDataType init_data_type,
+      mojom::ContentDecryptionModule::SessionType session_type,
+      mojom::ContentDecryptionModule::InitDataType init_data_type,
       mojo::Array<uint8_t> init_data,
-      const mojo::Callback<void(interfaces::CdmPromiseResultPtr, mojo::String)>&
-          callback) final;
-  void LoadSession(
-      interfaces::ContentDecryptionModule::SessionType session_type,
-      const mojo::String& session_id,
-      const mojo::Callback<void(interfaces::CdmPromiseResultPtr, mojo::String)>&
-          callback) final;
-  void UpdateSession(
-      const mojo::String& session_id,
-      mojo::Array<uint8_t> response,
-      const mojo::Callback<void(interfaces::CdmPromiseResultPtr)>& callback)
-      final;
+      const CreateSessionAndGenerateRequestCallback& callback) final;
+  void LoadSession(mojom::ContentDecryptionModule::SessionType session_type,
+                   const mojo::String& session_id,
+                   const LoadSessionCallback& callback) final;
+  void UpdateSession(const mojo::String& session_id,
+                     mojo::Array<uint8_t> response,
+                     const UpdateSessionCallback& callback) final;
   void CloseSession(const mojo::String& session_id,
-                    const mojo::Callback<void(interfaces::CdmPromiseResultPtr)>&
-                        callback) final;
-  void RemoveSession(
-      const mojo::String& session_id,
-      const mojo::Callback<void(interfaces::CdmPromiseResultPtr)>& callback)
-      final;
+                    const CloseSessionCallback& callback) final;
+  void RemoveSession(const mojo::String& session_id,
+                     const RemoveSessionCallback& callback) final;
 
   // Get CDM to be used by the media pipeline.
   scoped_refptr<MediaKeys> GetCdm();
@@ -92,18 +82,13 @@ class MojoCdmService : public interfaces::ContentDecryptionModule {
   // Callbacks for firing session events.
   void OnSessionMessage(const std::string& session_id,
                         MediaKeys::MessageType message_type,
-                        const std::vector<uint8_t>& message,
-                        const GURL& legacy_destination_url);
+                        const std::vector<uint8_t>& message);
   void OnSessionKeysChange(const std::string& session_id,
                            bool has_additional_usable_key,
                            CdmKeysInfo keys_info);
   void OnSessionExpirationUpdate(const std::string& session_id,
                                  const base::Time& new_expiry_time);
   void OnSessionClosed(const std::string& session_id);
-  void OnLegacySessionError(const std::string& session_id,
-                            MediaKeys::Exception exception,
-                            uint32_t system_code,
-                            const std::string& error_message);
 
   // Callback for when |decryptor_| loses connectivity.
   void OnDecryptorConnectionError();
@@ -113,7 +98,6 @@ class MojoCdmService : public interfaces::ContentDecryptionModule {
   // living in the same process.
   static int next_cdm_id_;
 
-  mojo::StrongBinding<interfaces::ContentDecryptionModule> binding_;
   base::WeakPtr<MojoCdmServiceContext> context_;
 
   CdmFactory* cdm_factory_;
@@ -124,7 +108,7 @@ class MojoCdmService : public interfaces::ContentDecryptionModule {
   // Set to a valid CDM ID if the |cdm_| is successfully created.
   int cdm_id_;
 
-  interfaces::ContentDecryptionModuleClientPtr client_;
+  mojom::ContentDecryptionModuleClientPtr client_;
 
   base::WeakPtr<MojoCdmService> weak_this_;
   base::WeakPtrFactory<MojoCdmService> weak_factory_;

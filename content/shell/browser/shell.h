@@ -22,9 +22,11 @@
 #include "base/android/scoped_java_ref.h"
 #elif defined(USE_AURA)
 #if defined(OS_CHROMEOS)
-namespace gfx {
+
+namespace display {
 class Screen;
 }
+
 namespace wm {
 class WMTestHelper;
 }
@@ -69,11 +71,11 @@ class Shell : public WebContentsDelegate,
 #endif
   void GoBackOrForward(int offset);
   void Reload();
+  void ReloadBypassingCache();
   void Stop();
   void UpdateNavigationControls(bool to_different_document);
   void Close();
   void ShowDevTools();
-  void ShowDevToolsForElementAt(int x, int y);
   void CloseDevTools();
 #if defined(OS_MACOSX)
   // Resizes the web content view to the given dimensions.
@@ -156,7 +158,6 @@ class Shell : public WebContentsDelegate,
                            const base::string16& source_id) override;
   void RendererUnresponsive(WebContents* source) override;
   void ActivateContents(WebContents* contents) override;
-  bool HandleContextMenu(const content::ContextMenuParams& params) override;
 
   static gfx::Size GetShellDefaultSize();
 
@@ -202,8 +203,6 @@ class Shell : public WebContentsDelegate,
   void PlatformSetIsLoading(bool loading);
   // Set the title of shell window
   void PlatformSetTitle(const base::string16& title);
-  // User right-clicked on the web view
-  bool PlatformHandleContextMenu(const content::ContextMenuParams& params);
 #if defined(OS_ANDROID)
   void PlatformToggleFullscreenModeForTab(WebContents* web_contents,
                                           bool enter_fullscreen);
@@ -222,10 +221,8 @@ class Shell : public WebContentsDelegate,
   void ToggleFullscreenModeForTab(WebContents* web_contents,
                                   bool enter_fullscreen);
   // WebContentsObserver
-  void RenderViewCreated(RenderViewHost* render_view_host) override;
   void TitleWasSet(NavigationEntry* entry, bool explicit_set) override;
 
-  void InnerShowDevTools();
   void OnDevToolsWebContentsDestroyed();
 
   std::unique_ptr<ShellJavaScriptDialogManager> dialog_manager_;
@@ -249,7 +246,7 @@ class Shell : public WebContentsDelegate,
 #elif defined(USE_AURA)
 #if defined(OS_CHROMEOS)
   static wm::WMTestHelper* wm_test_helper_;
-  static gfx::Screen* test_screen_;
+  static display::Screen* test_screen_;
 #endif
 #if defined(TOOLKIT_VIEWS)
   static views::ViewsDelegate* views_delegate_;

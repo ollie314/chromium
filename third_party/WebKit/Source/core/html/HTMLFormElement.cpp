@@ -24,20 +24,19 @@
 
 #include "core/html/HTMLFormElement.h"
 
+#include "bindings/core/v8/RadioNodeListOrElement.h"
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptEventListener.h"
-#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/HTMLNames.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeListsNodeData.h"
-#include "core/events/AutocompleteErrorEvent.h"
 #include "core/events/Event.h"
-#include "core/events/GenericEventQueue.h"
 #include "core/events/ScopedEventQueue.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/RemoteFrame.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLCollection.h"
@@ -49,12 +48,15 @@
 #include "core/html/RadioNodeList.h"
 #include "core/html/forms/FormController.h"
 #include "core/inspector/ConsoleMessage.h"
-#include "core/layout/LayoutTextControl.h"
+#include "core/layout/LayoutObject.h"
+#include "core/loader/FormSubmission.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/MixedContentChecker.h"
 #include "core/loader/NavigationScheduler.h"
 #include "platform/UserGestureIndicator.h"
+#include "public/platform/WebInsecureRequestPolicy.h"
+#include "wtf/AutoReset.h"
 #include "wtf/text/AtomicString.h"
 #include <limits>
 
@@ -69,11 +71,8 @@ HTMLFormElement::HTMLFormElement(Document& document)
     , m_hasElementsAssociatedByParser(false)
     , m_hasElementsAssociatedByFormAttribute(false)
     , m_didFinishParsingChildren(false)
-    , m_isSubmittingOrInUserJSSubmitEvent(false)
-    , m_shouldSubmit(false)
     , m_isInResetFunction(false)
     , m_wasDemoted(false)
-    , m_pendingAutocompleteEventsQueue(GenericEventQueue::create(this))
 {
 }
 
@@ -93,7 +92,7 @@ DEFINE_TRACE(HTMLFormElement)
     visitor->trace(m_radioButtonGroupScope);
     visitor->trace(m_associatedElements);
     visitor->trace(m_imageElements);
-    visitor->trace(m_pendingAutocompleteEventsQueue);
+    visitor->trace(m_plannedNavigation);
     HTMLElement::trace(visitor);
 }
 
@@ -140,7 +139,7 @@ Node::InsertionNotificationRequest HTMLFormElement::insertedInto(ContainerNode* 
 {
     HTMLElement::insertedInto(insertionPoint);
     logAddElementIfIsolatedWorldAndInDocument("form", methodAttr, actionAttr);
-    if (insertionPoint->inShadowIncludingDocument())
+    if (insertionPoint->isConnected())
         this->document().didAssociateFormControl(this);
     return InsertionDone;
 }
@@ -187,7 +186,7 @@ void HTMLFormElement::removedFrom(ContainerNode* insertionPoint)
 void HTMLFormElement::handleLocalEvents(Event& event)
 {
     Node* targetNode = event.target()->toNode();
-    if (event.eventPhase() != Event::CAPTURING_PHASE && targetNode && targetNode != this && (event.type() == EventTypeNames::submit || event.type() == EventTypeNames::reset)) {
+    if (event.eventPhase() != Event::kCapturingPhase && targetNode && targetNode != this && (event.type() == EventTypeNames::submit || event.type() == EventTypeNames::reset)) {
         event.stopPropagation();
         return;
     }
@@ -236,17 +235,7 @@ void HTMLFormElement::submitImplicitly(Event* event, bool fromImplicitSubmission
         }
     }
     if (fromImplicitSubmissionTrigger && submissionTriggerCount == 1)
-        prepareForSubmission(event);
-}
-
-// FIXME: Consolidate this and similar code in FormSubmission.cpp.
-static inline HTMLFormControlElement* submitElementFromEvent(const Event* event)
-{
-    for (Node* node = event->target()->toNode(); node; node = node->parentOrShadowHostNode()) {
-        if (node->isElementNode() && toElement(node)->isFormControlElement())
-            return toHTMLFormControlElement(node);
-    }
-    return 0;
+        prepareForSubmission(event, nullptr);
 }
 
 bool HTMLFormElement::validateInteractively()
@@ -267,7 +256,7 @@ bool HTMLFormElement::validateInteractively()
 
     // Needs to update layout now because we'd like to call isFocusable(), which
     // has !layoutObject()->needsLayout() assertion.
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     // Focus on the first focusable control and show a validation message.
     for (unsigned i = 0; i < unhandledInvalidControls.size(); ++i) {
@@ -292,16 +281,20 @@ bool HTMLFormElement::validateInteractively()
     return false;
 }
 
-void HTMLFormElement::prepareForSubmission(Event* event)
+void HTMLFormElement::prepareForSubmission(Event* event, HTMLFormControlElement* submitButton)
 {
     LocalFrame* frame = document().frame();
-    if (!frame || m_isSubmittingOrInUserJSSubmitEvent)
+    if (!frame || m_isSubmitting || m_inUserJSSubmitEvent)
         return;
 
+    if (document().isSandboxed(SandboxForms)) {
+        document().addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Blocked form submission to '" + m_attributes.action() + "' because the form's frame is sandboxed and the 'allow-forms' permission is not set."));
+        return;
+    }
+
     bool skipValidation = !document().page() || noValidate();
-    ASSERT(event);
-    HTMLFormControlElement* submitElement = submitElementFromEvent(event);
-    if (submitElement && submitElement->formNoValidate())
+    DCHECK(event);
+    if (submitButton && submitButton->formNoValidate())
         skipValidation = true;
 
     UseCounter::count(document(), UseCounter::FormSubmissionStarted);
@@ -309,23 +302,26 @@ void HTMLFormElement::prepareForSubmission(Event* event)
     if (!skipValidation && !validateInteractively())
         return;
 
-    m_isSubmittingOrInUserJSSubmitEvent = true;
-    m_shouldSubmit = false;
-
-    frame->loader().client()->dispatchWillSendSubmitEvent(this);
-
-    if (dispatchEvent(Event::createCancelableBubble(EventTypeNames::submit)) == DispatchEventResult::NotCanceled)
-        m_shouldSubmit = true;
-
-    m_isSubmittingOrInUserJSSubmitEvent = false;
-
-    if (m_shouldSubmit)
-        submit(event, true);
+    bool shouldSubmit;
+    {
+        AutoReset<bool> submitEventHandlerScope(&m_inUserJSSubmitEvent, true);
+        frame->loader().client()->dispatchWillSendSubmitEvent(this);
+        shouldSubmit = dispatchEvent(Event::createCancelableBubble(EventTypeNames::submit)) == DispatchEventResult::NotCanceled;
+    }
+    if (shouldSubmit) {
+        m_plannedNavigation = nullptr;
+        submit(event, submitButton);
+    }
+    if (!m_plannedNavigation)
+        return;
+    AutoReset<bool> submitScope(&m_isSubmitting, true);
+    scheduleFormSubmission(m_plannedNavigation);
+    m_plannedNavigation = nullptr;
 }
 
 void HTMLFormElement::submitFromJavaScript()
 {
-    submit(0, false);
+    submit(nullptr, nullptr);
 }
 
 void HTMLFormElement::submitDialog(FormSubmission* formSubmission)
@@ -338,59 +334,63 @@ void HTMLFormElement::submitDialog(FormSubmission* formSubmission)
     }
 }
 
-void HTMLFormElement::submit(Event* event, bool activateSubmitButton)
+void HTMLFormElement::submit(Event* event, HTMLFormControlElement* submitButton)
 {
     FrameView* view = document().view();
     LocalFrame* frame = document().frame();
     if (!view || !frame || !frame->page())
         return;
 
-    if (m_isSubmittingOrInUserJSSubmitEvent) {
-        m_shouldSubmit = true;
+    // https://html.spec.whatwg.org/multipage/forms.html#form-submission-algorithm
+    // 2. If form document is not connected, has no associated browsing context,
+    // or its active sandboxing flag set has its sandboxed forms browsing
+    // context flag set, then abort these steps without doing anything.
+    if (!isConnected())
         return;
-    }
 
-    m_isSubmittingOrInUserJSSubmitEvent = true;
+    if (m_isSubmitting)
+        return;
 
-    HTMLFormControlElement* firstSuccessfulSubmitButton = nullptr;
-    bool needButtonActivation = activateSubmitButton; // do we need to activate a submit button?
+    // Delay dispatching 'close' to dialog until done submitting.
+    EventQueueScope scopeForDialogClose;
+    AutoReset<bool> submitScope(&m_isSubmitting, true);
 
-    const FormAssociatedElement::List& elements = associatedElements();
-    for (unsigned i = 0; i < elements.size(); ++i) {
-        FormAssociatedElement* associatedElement = elements[i];
-        if (!associatedElement->isFormControlElement())
-            continue;
-        if (needButtonActivation) {
+    if (event && !submitButton) {
+        // In a case of implicit submission without a submit button, 'submit'
+        // event handler might add a submit button. We search for a submit
+        // button again.
+        // TODO(tkent): Do we really need to activate such submit button?
+        for (const auto& associatedElement : associatedElements()) {
+            if (!associatedElement->isFormControlElement())
+                continue;
             HTMLFormControlElement* control = toHTMLFormControlElement(associatedElement);
-            if (control->isActivatedSubmit())
-                needButtonActivation = false;
-            else if (firstSuccessfulSubmitButton == 0 && control->isSuccessfulSubmitButton())
-                firstSuccessfulSubmitButton = control;
+            DCHECK(!control->isActivatedSubmit());
+            if (control->isSuccessfulSubmitButton()) {
+                submitButton = control;
+                break;
+            }
         }
     }
 
-    if (needButtonActivation && firstSuccessfulSubmitButton)
-        firstSuccessfulSubmitButton->setActivatedSubmit(true);
-
-    FormSubmission* formSubmission = FormSubmission::create(this, m_attributes, event);
-    EventQueueScope scopeForDialogClose; // Delay dispatching 'close' to dialog until done submitting.
-    if (formSubmission->method() == FormSubmission::DialogMethod)
+    FormSubmission* formSubmission = FormSubmission::create(this, m_attributes, event, submitButton);
+    if (formSubmission->method() == FormSubmission::DialogMethod) {
         submitDialog(formSubmission);
-    else
+    } else if (m_inUserJSSubmitEvent) {
+        // Need to postpone the submission in order to make this cancelable by
+        // another submission request.
+        m_plannedNavigation = formSubmission;
+    } else {
+        // This runs JavaScript code if action attribute value is javascript:
+        // protocol.
         scheduleFormSubmission(formSubmission);
-
-    if (needButtonActivation && firstSuccessfulSubmitButton)
-        firstSuccessfulSubmitButton->setActivatedSubmit(false);
-
-    m_shouldSubmit = false;
-    m_isSubmittingOrInUserJSSubmitEvent = false;
+    }
 }
 
 void HTMLFormElement::scheduleFormSubmission(FormSubmission* submission)
 {
-    ASSERT(submission->method() == FormSubmission::PostMethod || submission->method() == FormSubmission::GetMethod);
-    ASSERT(submission->data());
-    ASSERT(submission->form());
+    DCHECK(submission->method() == FormSubmission::PostMethod || submission->method() == FormSubmission::GetMethod);
+    DCHECK(submission->data());
+    DCHECK(submission->form());
     if (submission->action().isEmpty())
         return;
     if (document().isSandboxed(SandboxForms)) {
@@ -421,9 +421,15 @@ void HTMLFormElement::scheduleFormSubmission(FormSubmission* submission)
     if (MixedContentChecker::isMixedFormAction(document().frame(), submission->action()))
         UseCounter::count(document().frame(), UseCounter::MixedContentFormsSubmitted);
 
-    // FIXME: Plumb form submission for remote frames.
-    if (targetFrame->isLocalFrame())
+    // TODO(lukasza): Investigate if the code below can uniformly handle remote
+    // and local frames (i.e. by calling virtual Frame::navigate from a timer).
+    // See also https://goo.gl/95d2KA.
+    if (targetFrame->isLocalFrame()) {
         toLocalFrame(targetFrame)->navigationScheduler().scheduleFormSubmission(&document(), submission);
+    } else {
+        FrameLoadRequest frameLoadRequest = submission->createFrameLoadRequest(&document());
+        toRemoteFrame(targetFrame)->navigate(frameLoadRequest);
+    }
 }
 
 void HTMLFormElement::reset()
@@ -448,53 +454,19 @@ void HTMLFormElement::reset()
     m_isInResetFunction = false;
 }
 
-void HTMLFormElement::requestAutocomplete()
-{
-    String errorMessage;
-
-    if (!document().frame())
-        errorMessage = "requestAutocomplete: form is not owned by a displayed document.";
-    else if (!shouldAutocomplete())
-        errorMessage = "requestAutocomplete: form autocomplete attribute is set to off.";
-    else if (!UserGestureIndicator::utilizeUserGesture())
-        errorMessage = "requestAutocomplete: must be called in response to a user gesture.";
-
-    if (!errorMessage.isEmpty()) {
-        document().addConsoleMessage(ConsoleMessage::create(RenderingMessageSource, LogMessageLevel, errorMessage));
-        finishRequestAutocomplete(AutocompleteResultErrorDisabled);
-    } else {
-        document().frame()->loader().client()->didRequestAutocomplete(this);
-    }
-}
-
-void HTMLFormElement::finishRequestAutocomplete(AutocompleteResult result)
-{
-    Event* event = nullptr;
-    if (result == AutocompleteResultSuccess)
-        event = Event::createBubble(EventTypeNames::autocomplete);
-    else if (result == AutocompleteResultErrorDisabled)
-        event = AutocompleteErrorEvent::create("disabled");
-    else if (result == AutocompleteResultErrorCancel)
-        event = AutocompleteErrorEvent::create("cancel");
-    else if (result == AutocompleteResultErrorInvalid)
-        event = AutocompleteErrorEvent::create("invalid");
-    else
-        ASSERT_NOT_REACHED();
-
-    event->setTarget(this);
-    m_pendingAutocompleteEventsQueue->enqueueEvent(event);
-}
-
 void HTMLFormElement::parseAttribute(const QualifiedName& name, const AtomicString& oldValue, const AtomicString& value)
 {
     if (name == actionAttr) {
         m_attributes.parseAction(value);
-        // If the new action attribute is pointing to insecure "action" location from a secure page
-        // it is marked as "passive" mixed content.
+        logUpdateAttributeIfIsolatedWorldAndInDocument("form", actionAttr, oldValue, value);
+
+        // If we're not upgrading insecure requests, and the new action attribute is pointing to
+        // an insecure "action" location from a secure page it is marked as "passive" mixed content.
+        if (document().getInsecureRequestPolicy() & kUpgradeInsecureRequests)
+            return;
         KURL actionURL = document().completeURL(m_attributes.action().isEmpty() ? document().url().getString() : m_attributes.action());
         if (MixedContentChecker::isMixedFormAction(document().frame(), actionURL))
             UseCounter::count(document().frame(), UseCounter::MixedContentFormPresent);
-        logUpdateAttributeIfIsolatedWorldAndInDocument("form", actionAttr, oldValue, value);
     } else if (name == targetAttr) {
         m_attributes.setTarget(value);
     } else if (name == methodAttr) {
@@ -503,10 +475,6 @@ void HTMLFormElement::parseAttribute(const QualifiedName& name, const AtomicStri
         m_attributes.updateEncodingType(value);
     } else if (name == accept_charsetAttr) {
         m_attributes.setAcceptCharset(value);
-    } else if (name == onautocompleteAttr) {
-        setAttributeEventListener(EventTypeNames::autocomplete, createAttributeEventListener(this, name, value, eventParameterName()));
-    } else if (name == onautocompleteerrorAttr) {
-        setAttributeEventListener(EventTypeNames::autocompleteerror, createAttributeEventListener(this, name, value, eventParameterName()));
     } else {
         HTMLElement::parseAttribute(name, oldValue, value);
     }
@@ -589,9 +557,9 @@ const FormAssociatedElement::List& HTMLFormElement::associatedElements() const
     Node* scope = mutableThis;
     if (m_hasElementsAssociatedByParser)
         scope = &NodeTraversal::highestAncestorOrSelf(*mutableThis);
-    if (inShadowIncludingDocument() && m_hasElementsAssociatedByFormAttribute)
+    if (isConnected() && m_hasElementsAssociatedByFormAttribute)
         scope = &treeScope().rootNode();
-    ASSERT(scope);
+    DCHECK(scope);
     collectAssociatedElements(*scope, mutableThis->m_associatedElements);
     mutableThis->m_associatedElementsAreDirty = false;
     return m_associatedElements;
@@ -698,16 +666,16 @@ Element* HTMLFormElement::elementFromPastNamesMap(const AtomicString& pastName)
     if (pastName.isEmpty() || !m_pastNamesMap)
         return 0;
     Element* element = m_pastNamesMap->get(pastName);
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     if (!element)
         return 0;
-    ASSERT_WITH_SECURITY_IMPLICATION(toHTMLElement(element)->formOwner() == this);
+    SECURITY_DCHECK(toHTMLElement(element)->formOwner() == this);
     if (isHTMLImageElement(*element)) {
-        ASSERT_WITH_SECURITY_IMPLICATION(imageElements().find(element) != kNotFound);
+        SECURITY_DCHECK(imageElements().find(element) != kNotFound);
     } else if (isHTMLObjectElement(*element)) {
-        ASSERT_WITH_SECURITY_IMPLICATION(associatedElements().find(toHTMLObjectElement(element)) != kNotFound);
+        SECURITY_DCHECK(associatedElements().find(toHTMLObjectElement(element)) != kNotFound);
     } else {
-        ASSERT_WITH_SECURITY_IMPLICATION(associatedElements().find(toHTMLFormControlElement(element)) != kNotFound);
+        SECURITY_DCHECK(associatedElements().find(toHTMLFormControlElement(element)) != kNotFound);
     }
 #endif
     return element;
@@ -782,7 +750,7 @@ void HTMLFormElement::anonymousNamedGetter(const AtomicString& name, RadioNodeLi
     // but if the first the size cannot be zero.
     HeapVector<Member<Element>> elements;
     getNamedElements(name, elements);
-    ASSERT(!elements.isEmpty());
+    DCHECK(!elements.isEmpty());
 
     bool onlyMatchImg = !elements.isEmpty() && isHTMLImageElement(*elements.first());
     if (onlyMatchImg) {

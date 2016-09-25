@@ -11,19 +11,18 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_error_details.h"
-#include "net/base/upload_progress.h"
 #include "net/http/http_response_info.h"
 #include "net/socket/connection_attempts.h"
 
 namespace net {
 
 class AuthCredentials;
-class BoundNetLog;
 class HttpRequestHeaders;
 class IOBuffer;
+class NetLogWithSource;
 class SSLPrivateKey;
 class X509Certificate;
 
@@ -40,7 +39,7 @@ class FailingHttpTransaction : public HttpTransaction {
   // HttpTransaction
   int Start(const HttpRequestInfo* request_info,
             const CompletionCallback& callback,
-            const BoundNetLog& net_log) override;
+            const NetLogWithSource& net_log) override;
   int RestartIgnoringLastError(const CompletionCallback& callback) override;
   int RestartWithCertificate(X509Certificate* client_cert,
                              SSLPrivateKey* client_private_key,
@@ -58,7 +57,6 @@ class FailingHttpTransaction : public HttpTransaction {
   void DoneReading() override;
   const HttpResponseInfo* GetResponseInfo() const override;
   LoadState GetLoadState() const override;
-  UploadProgress GetUploadProgress() const override;
   void SetQuicServerInfo(QuicServerInfo* quic_server_info) override;
   bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
   bool GetRemoteEndpoint(IPEndPoint* endpoint) const override;
@@ -68,8 +66,8 @@ class FailingHttpTransaction : public HttpTransaction {
       WebSocketHandshakeStreamBase::CreateHelper* create_helper) override;
   void SetBeforeNetworkStartCallback(
       const BeforeNetworkStartCallback& callback) override;
-  void SetBeforeProxyHeadersSentCallback(
-      const BeforeProxyHeadersSentCallback& callback) override;
+  void SetBeforeHeadersSentCallback(
+      const BeforeHeadersSentCallback& callback) override;
   int ResumeNetworkStart() override;
   void GetConnectionAttempts(ConnectionAttempts* out) const override;
 
@@ -86,7 +84,7 @@ FailingHttpTransaction::~FailingHttpTransaction() {}
 
 int FailingHttpTransaction::Start(const HttpRequestInfo* request_info,
                                   const CompletionCallback& callback,
-                                  const BoundNetLog& net_log)  {
+                                  const NetLogWithSource& net_log) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
                                                 base::Bind(callback, error_));
   return ERR_IO_PENDING;
@@ -147,10 +145,6 @@ LoadState FailingHttpTransaction::GetLoadState() const  {
   return LOAD_STATE_IDLE;
 }
 
-UploadProgress FailingHttpTransaction::GetUploadProgress() const  {
-  return UploadProgress();
-}
-
 void FailingHttpTransaction::SetQuicServerInfo(
     QuicServerInfo* quic_server_info) {
 }
@@ -180,9 +174,8 @@ void FailingHttpTransaction::SetBeforeNetworkStartCallback(
     const BeforeNetworkStartCallback& callback)  {
 }
 
-void FailingHttpTransaction::SetBeforeProxyHeadersSentCallback(
-    const BeforeProxyHeadersSentCallback& callback)  {
-}
+void FailingHttpTransaction::SetBeforeHeadersSentCallback(
+    const BeforeHeadersSentCallback& callback) {}
 
 int FailingHttpTransaction::ResumeNetworkStart()  {
   NOTREACHED();

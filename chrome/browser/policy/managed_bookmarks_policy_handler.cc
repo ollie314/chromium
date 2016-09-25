@@ -11,9 +11,9 @@
 #include "components/bookmarks/managed/managed_bookmarks_tracker.h"
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/policy/core/common/policy_map.h"
+#include "components/policy/policy_constants.h"
 #include "components/prefs/pref_value_map.h"
 #include "components/url_formatter/url_fixer.h"
-#include "policy/policy_constants.h"
 #include "url/gurl.h"
 
 using bookmarks::ManagedBookmarksTracker;
@@ -49,7 +49,7 @@ void ManagedBookmarksPolicyHandler::ApplyPolicySettings(
 std::string
 ManagedBookmarksPolicyHandler::GetFolderName(const base::ListValue& list) {
   // Iterate over the list, and try to find the FolderName.
-  for (auto el : list) {
+  for (const auto& el : list) {
     const base::DictionaryValue* dict = NULL;
     if (!el || !el->GetAsDictionary(&dict)) continue;
 

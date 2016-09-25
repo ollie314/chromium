@@ -7,12 +7,13 @@ package org.chromium.chrome.browser;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.AsyncTask;
-import android.preference.PreferenceManager;
+import android.os.StrictMode;
 
 import com.google.android.gms.gcm.GcmNetworkManager;
 import com.google.android.gms.gcm.OneoffTask;
 import com.google.android.gms.gcm.Task;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
@@ -93,7 +94,7 @@ public class BackgroundSyncLauncher {
         new AsyncTask<Void, Void, Boolean>() {
             @Override
             protected Boolean doInBackground(Void... params) {
-                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+                SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
                 return prefs.getBoolean(PREF_BACKGROUND_SYNC_LAUNCH_NEXT_ONLINE, false);
             }
             @Override
@@ -120,7 +121,7 @@ public class BackgroundSyncLauncher {
         new AsyncTask<Void, Void, Void>() {
             @Override
             protected Void doInBackground(Void... params) {
-                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+                SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
                 prefs.edit()
                         .putBoolean(PREF_BACKGROUND_SYNC_LAUNCH_NEXT_ONLINE, shouldLaunch)
                         .apply();
@@ -213,6 +214,8 @@ public class BackgroundSyncLauncher {
     }
 
     private static boolean removeScheduledTasks(GcmNetworkManager scheduler) {
+        // Third-party code causes broadcast to touch disk. http://crbug.com/614679
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
         try {
             scheduler.cancelTask(TASK_TAG, ChromeBackgroundService.class);
         } catch (IllegalArgumentException e) {
@@ -223,6 +226,8 @@ public class BackgroundSyncLauncher {
             setGCMEnabled(false);
             // Return false so that the failure will be logged.
             return false;
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
         }
         return true;
     }

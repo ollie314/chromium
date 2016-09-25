@@ -53,8 +53,9 @@ WebInspector.HeapSnapshotGridNode = function(tree, hasChildren)
     this._providerObject = null;
 }
 
+/** @enum {symbol} */
 WebInspector.HeapSnapshotGridNode.Events = {
-    PopulateComplete: "PopulateComplete"
+    PopulateComplete: Symbol("PopulateComplete")
 }
 
 /**
@@ -233,12 +234,12 @@ WebInspector.HeapSnapshotGridNode.prototype = {
     {
         var indexOfFirstChildInRange = 0;
         for (var i = 0; i < this._retrievedChildrenRanges.length; i++) {
-           var range = this._retrievedChildrenRanges[i];
-           if (range.from <= nodePosition && nodePosition < range.to) {
-               var childIndex = indexOfFirstChildInRange + nodePosition - range.from;
-               return this.allChildren()[childIndex];
-           }
-           indexOfFirstChildInRange += range.to - range.from + 1;
+            var range = this._retrievedChildrenRanges[i];
+            if (range.from <= nodePosition && nodePosition < range.to) {
+                var childIndex = indexOfFirstChildInRange + nodePosition - range.from;
+                return this.allChildren()[childIndex];
+            }
+            indexOfFirstChildInRange += range.to - range.from + 1;
         }
         return null;
     },
@@ -584,7 +585,7 @@ WebInspector.HeapSnapshotGenericObjectNode.prototype = {
         case "array":
             value = (value || "") + "[]";
             break;
-        };
+        }
         if (this._reachableFromWindow)
             valueStyle += " highlight";
         if (value === "Object")

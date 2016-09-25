@@ -16,6 +16,15 @@ namespace {
 class ClipboardUtilMacTest : public PlatformTest {
  public:
   ClipboardUtilMacTest() { }
+
+  NSDictionary* DictionaryFromPasteboard(NSPasteboard* pboard) {
+    NSArray* types = [pboard types];
+    NSMutableDictionary* data = [NSMutableDictionary dictionary];
+    for (NSString* type in types) {
+      [data setObject:[pboard dataForType:type] forKey:type];
+    }
+    return data;
+  }
 };
 
 TEST_F(ClipboardUtilMacTest, PasteboardItemFromUrl) {
@@ -31,7 +40,10 @@ TEST_F(ClipboardUtilMacTest, PasteboardItemFromUrl) {
 
   NSArray* urls = nil;
   NSArray* titles = nil;
-  [pasteboard->get() getURLs:&urls andTitles:&titles convertingFilenames:NO];
+  [pasteboard->get() getURLs:&urls
+                   andTitles:&titles
+         convertingFilenames:NO
+         convertingTextToURL:NO];
 
   ASSERT_EQ(1u, [urls count]);
   EXPECT_NSEQ(urlString, [urls objectAtIndex:0]);
@@ -53,7 +65,10 @@ TEST_F(ClipboardUtilMacTest, PasteboardItemWithTitle) {
 
   NSArray* urls = nil;
   NSArray* titles = nil;
-  [pasteboard->get() getURLs:&urls andTitles:&titles convertingFilenames:NO];
+  [pasteboard->get() getURLs:&urls
+                   andTitles:&titles
+         convertingFilenames:NO
+         convertingTextToURL:NO];
 
   ASSERT_EQ(1u, [urls count]);
   EXPECT_NSEQ(urlString, [urls objectAtIndex:0]);
@@ -76,7 +91,10 @@ TEST_F(ClipboardUtilMacTest, PasteboardItemWithFilePath) {
 
   NSArray* urls = nil;
   NSArray* titles = nil;
-  [pasteboard->get() getURLs:&urls andTitles:&titles convertingFilenames:NO];
+  [pasteboard->get() getURLs:&urls
+                   andTitles:&titles
+         convertingFilenames:NO
+         convertingTextToURL:NO];
 
   ASSERT_EQ(1u, [urls count]);
   EXPECT_NSEQ(urlString, [urls objectAtIndex:0]);
@@ -94,6 +112,22 @@ TEST_F(ClipboardUtilMacTest, CheckForLeak) {
       EXPECT_TRUE(pboard->get());
     }
   }
+}
+
+TEST_F(ClipboardUtilMacTest, CompareToWriteToPasteboard) {
+  NSString* urlString = @"https://www.cnn.com/";
+
+  base::scoped_nsobject<NSPasteboardItem> item(
+      ui::ClipboardUtil::PasteboardItemFromUrl(urlString, nil));
+  scoped_refptr<ui::UniquePasteboard> pasteboard = new ui::UniquePasteboard;
+  [pasteboard->get() writeObjects:@[ item ]];
+
+  scoped_refptr<ui::UniquePasteboard> pboard = new ui::UniquePasteboard;
+  [pboard->get() setDataForURL:urlString title:urlString];
+
+  NSDictionary* data1 = DictionaryFromPasteboard(pasteboard->get());
+  NSDictionary* data2 = DictionaryFromPasteboard(pboard->get());
+  EXPECT_NSEQ(data1, data2);
 }
 
 }  // namespace

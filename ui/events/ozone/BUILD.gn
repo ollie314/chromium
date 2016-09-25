@@ -37,8 +37,10 @@ if (use_ozone) {
     deps = [
       "//base",
       "//base/third_party/dynamic_annotations",
+      "//ui/display",
       "//ui/events",
       "//ui/events:events_base",
+      "//ui/gfx",
     ]
 
     defines = [ "EVENTS_OZONE_IMPLEMENTATION" ]
@@ -131,6 +133,7 @@ if (use_ozone) {
       ":events_ozone",
       ":events_ozone_layout",
       "//base",
+      "//ui/display",
       "//ui/events",
       "//ui/events:dom_keycode_converter",
       "//ui/events:events_base",
@@ -208,5 +211,7 @@ component("events_ozone_layout") {
       "layout/xkb/xkb_keyboard_layout_engine.cc",
       "layout/xkb/xkb_keyboard_layout_engine.h",
     ]
+
+    deps += [ "//ui/events/keycodes:xkb" ]
   }
 }

@@ -401,7 +401,7 @@ TEST_F(WebViewUnitTest, EmbeddedFullscreenDuringScreenCapture_ClickToFocus) {
   web_view()->SetBoundsRect(gfx::Rect(0, 0, 100, 90));
   views::View* const something_to_focus = new views::View();
   something_to_focus->SetBoundsRect(gfx::Rect(0, 90, 100, 10));
-  something_to_focus->SetFocusable(true);
+  something_to_focus->SetFocusBehavior(View::FocusBehavior::ALWAYS);
   top_level_widget()->GetContentsView()->AddChildView(something_to_focus);
 
   web_view()->SetEmbedFullscreenWidgetMode(true);
@@ -467,8 +467,9 @@ TEST_F(WebViewUnitTest, EmbeddedFullscreenDuringScreenCapture_ClickToFocus) {
 // if WebView is already removed from Widget.
 TEST_F(WebViewUnitTest, DetachedWebViewDestructor) {
   // Init WebView with attached NativeView.
-  const scoped_ptr<content::WebContents> web_contents(CreateWebContents());
-  scoped_ptr<WebView> webview(new WebView(web_contents->GetBrowserContext()));
+  const std::unique_ptr<content::WebContents> web_contents(CreateWebContents());
+  std::unique_ptr<WebView> webview(
+      new WebView(web_contents->GetBrowserContext()));
   View* contents_view = top_level_widget()->GetContentsView();
   contents_view->AddChildView(webview.get());
   webview->SetWebContents(web_contents.get());

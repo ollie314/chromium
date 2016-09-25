@@ -34,7 +34,7 @@
 
 namespace blink {
 
-class AbstractAudioContext;
+class BaseAudioContext;
 class AudioBus;
 
 class AudioScheduledSourceHandler : public AudioHandler {
@@ -122,6 +122,7 @@ private:
 };
 
 class AudioScheduledSourceNode : public AudioSourceNode, public ActiveScriptWrappable {
+    USING_GARBAGE_COLLECTED_MIXIN(AudioScheduledSourceNode);
 public:
     void start(ExceptionState&);
     void start(double when, ExceptionState&);
@@ -131,11 +132,13 @@ public:
     EventListener* onended();
     void setOnended(EventListener*);
 
-    // ActiveScriptWrappable
+    // ScriptWrappable:
     bool hasPendingActivity() const final;
 
+    DEFINE_INLINE_VIRTUAL_TRACE() { AudioSourceNode::trace(visitor); }
+
 protected:
-    explicit AudioScheduledSourceNode(AbstractAudioContext&);
+    explicit AudioScheduledSourceNode(BaseAudioContext&);
     AudioScheduledSourceHandler& audioScheduledSourceHandler() const;
 };
 

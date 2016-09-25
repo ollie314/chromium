@@ -36,6 +36,13 @@ void SetAsDefaultBrowserUsingSystemSettings(
 // dialog will be shown and this method returns true.
 bool SetAsDefaultProtocolClientUsingIntentPicker(const std::string& protocol);
 
+// Initiates the interaction with the system settings for the default handler of
+// |protocol|. The function takes care of making sure |on_finished_callback|
+// will get called exactly once when the interaction is finished.
+void SetAsDefaultProtocolClientUsingSystemSettings(
+    const std::string& protocol,
+    const base::Closure& on_finished_callback);
+
 // Generates an application user model ID (AppUserModelId) for a given app
 // name and profile path. The returned app id is in the format of
 // "|app_name|[.<profile_id>]". "profile_id" is appended when user override
@@ -50,9 +57,9 @@ base::string16 GetAppModelIdForProfile(const base::string16& app_name,
 // calling GetAppModelIdForProfile() with ShellUtil::GetAppId() as app_name.
 base::string16 GetChromiumModelIdForProfile(const base::FilePath& profile_path);
 
-// Get the AppUserModelId for the App List, for the profile in |profile_path|.
-base::string16 GetAppListAppModelIdForProfile(
-    const base::FilePath& profile_path);
+// Records the pinned state of the current executable into a histogram. Must be
+// called on the IO thread.
+void RecordIsPinnedToTaskbarHistogram();
 
 // Migrates existing chrome taskbar pins by tagging them with correct app id.
 // see http://crbug.com/28104

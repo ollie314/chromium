@@ -15,7 +15,9 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "components/visitedlink/browser/visitedlink_delegate.h"
+#include "components/web_restrictions/browser/web_restrictions_client.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
 #include "net/url_request/url_request_job_factory.h"
@@ -28,13 +30,6 @@ class PermissionManager;
 class ResourceContext;
 class SSLHostStateDelegate;
 class WebContents;
-}
-
-namespace data_reduction_proxy {
-class DataReductionProxyConfigurator;
-class DataReductionProxyIOData;
-class DataReductionProxyService;
-class DataReductionProxySettings;
 }
 
 namespace policy {
@@ -58,6 +53,7 @@ namespace prefs {
 // Used for Kerberos authentication.
 extern const char kAuthAndroidNegotiateAccountType[];
 extern const char kAuthServerWhitelist[];
+extern const char kWebRestrictionsAuthority[];
 
 }  // namespace prefs
 
@@ -77,7 +73,6 @@ class AwBrowserContext : public content::BrowserContext,
   static AwBrowserContext* FromWebContents(
       content::WebContents* web_contents);
 
-  static void SetDataReductionProxyEnabled(bool enabled);
   static void SetLegacyCacheRemovalDelayForTest(int delay_ms);
 
   // Maps to BrowserMainParts::PreMainMessageLoopRun.
@@ -88,14 +83,11 @@ class AwBrowserContext : public content::BrowserContext,
 
   AwQuotaManagerBridge* GetQuotaManagerBridge();
   AwFormDatabaseService* GetFormDatabaseService();
-  data_reduction_proxy::DataReductionProxySettings*
-      GetDataReductionProxySettings();
-  data_reduction_proxy::DataReductionProxyIOData*
-      GetDataReductionProxyIOData();
   AwURLRequestContextGetter* GetAwURLRequestContext();
   AwMessagePortService* GetMessagePortService();
 
   policy::URLBlacklistManager* GetURLBlacklistManager();
+  web_restrictions::WebRestrictionsClient* GetWebRestrictionProvider();
 
   // content::BrowserContext implementation.
   std::unique_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
@@ -128,8 +120,8 @@ class AwBrowserContext : public content::BrowserContext,
 
  private:
   void InitUserPrefService();
-  void CreateDataReductionProxyStatisticsIfNecessary();
-  static bool data_reduction_proxy_enabled_;
+  void OnWebRestrictionsAuthorityChanged();
+
 
   // Delay, in milliseconds, before removing the legacy cache dir.
   // This is non-const for testing purposes.
@@ -153,14 +145,11 @@ class AwBrowserContext : public content::BrowserContext,
   std::unique_ptr<policy::BrowserPolicyConnectorBase> browser_policy_connector_;
   std::unique_ptr<policy::URLBlacklistManager> blacklist_manager_;
 
-  std::unique_ptr<data_reduction_proxy::DataReductionProxySettings>
-      data_reduction_proxy_settings_;
   std::unique_ptr<AwSSLHostStateDelegate> ssl_host_state_delegate_;
-  std::unique_ptr<data_reduction_proxy::DataReductionProxyIOData>
-      data_reduction_proxy_io_data_;
-  std::unique_ptr<data_reduction_proxy::DataReductionProxyService>
-      data_reduction_proxy_service_;
   std::unique_ptr<content::PermissionManager> permission_manager_;
+  std::unique_ptr<web_restrictions::WebRestrictionsClient>
+      web_restriction_provider_;
+  PrefChangeRegistrar pref_change_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(AwBrowserContext);
 };

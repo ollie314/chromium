@@ -63,6 +63,8 @@ public:
 
     virtual PerformanceTiming* timing() const;
 
+    virtual void updateLongTaskInstrumentation() {}
+
     // Reduce the resolution to 5µs to prevent timing attacks. See:
     // http://www.w3.org/TR/hr-time-2/#privacy-security
     static double clampTimeResolution(double timeSeconds);
@@ -72,6 +74,7 @@ public:
     // document's time origin and has a time resolution that is safe for
     // exposing to web.
     DOMHighResTimeStamp monotonicTimeToDOMHighResTimeStamp(double) const;
+    double monotonicTimeToDOMHighResTimeStampInMillis(DOMHighResTimeStamp) const;
     DOMHighResTimeStamp now() const;
 
     double timeOrigin() const { return m_timeOrigin; }
@@ -90,6 +93,13 @@ public:
     void setFrameTimingBufferSize(unsigned);
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(frametimingbufferfull);
+
+    void clearLongTaskTimings();
+    void setLongTaskTimingBufferSize(unsigned);
+
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(longtasktimingbufferfull);
+
+    void addLongTaskTiming(double, double, const String& frameContextUrl);
 
     void addResourceTiming(const ResourceTimingInfo&);
 
@@ -120,18 +130,23 @@ protected:
     bool isFrameTimingBufferFull();
     void addFrameTimingBuffer(PerformanceEntry&);
 
-    void notifyObserversOfEntry(PerformanceEntry&);
-    bool hasObserverFor(PerformanceEntry::EntryType);
+    bool isLongTaskTimingBufferFull();
+    void addLongTaskTimingBuffer(PerformanceEntry&);
 
-    void deliverObservationsTimerFired(Timer<PerformanceBase>*);
+    void notifyObserversOfEntry(PerformanceEntry&);
+    bool hasObserverFor(PerformanceEntry::EntryType) const;
+
+    void deliverObservationsTimerFired(TimerBase*);
 
     PerformanceEntryVector m_frameTimingBuffer;
     unsigned m_frameTimingBufferSize;
     PerformanceEntryVector m_resourceTimingBuffer;
     unsigned m_resourceTimingBufferSize;
-    double m_timeOrigin;
-
+    PerformanceEntryVector m_longTaskTimingBuffer;
+    unsigned m_longTaskTimingBufferSize;
     Member<UserTiming> m_userTiming;
+
+    double m_timeOrigin;
 
     PerformanceEntryTypeMask m_observerFilterOptions;
     PerformanceObservers m_observers;

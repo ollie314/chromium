@@ -12,7 +12,8 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/capture_client.h"
@@ -28,6 +29,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/base/hit_test.h"
+#include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "ui/events/event_handler.h"
 #include "ui/events/event_utils.h"
@@ -37,7 +39,6 @@
 #include "ui/events/test/test_event_handler.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/transform.h"
 
 namespace aura {
@@ -408,7 +409,7 @@ TEST_F(WindowEventDispatcherTest, TouchEventsOutsideBounds) {
 
 // Tests that scroll events are dispatched correctly.
 TEST_F(WindowEventDispatcherTest, ScrollEventDispatch) {
-  base::TimeDelta now = ui::EventTimeForNow();
+  base::TimeTicks now = ui::EventTimeForNow();
   ui::test::TestEventHandler handler;
   root_window()->AddPreTargetHandler(&handler);
 
@@ -1652,7 +1653,7 @@ TEST_F(WindowEventDispatcherTest, DeleteDispatcherDuringPreDispatch) {
   // Here we can't use EventGenerator since it expects that the dispatcher is
   // not destroyed at the end of the dispatch.
   ui::MouseEvent mouse_move(ui::ET_MOUSE_MOVED, gfx::Point(20, 20),
-                            gfx::Point(20, 20), base::TimeDelta(), 0, 0);
+                            gfx::Point(20, 20), base::TimeTicks(), 0, 0);
   ui::EventDispatchDetails details =
       host->dispatcher()->DispatchEvent(w2, &mouse_move);
   EXPECT_TRUE(details.dispatcher_destroyed);
@@ -2016,12 +2017,12 @@ class WindowEventDispatcherTestWithMessageLoop
     std::unique_ptr<ui::MouseEvent> mouse(new ui::MouseEvent(
         ui::ET_MOUSE_PRESSED, gfx::Point(10, 10), gfx::Point(10, 10),
         ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE));
-    message_loop()->PostTask(
+    message_loop()->task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&WindowEventDispatcherTestWithMessageLoop::RepostEventHelper,
-                   host()->dispatcher(),
-                   base::Passed(&mouse)));
-    message_loop()->PostTask(FROM_HERE, message_loop()->QuitWhenIdleClosure());
+                   host()->dispatcher(), base::Passed(&mouse)));
+    message_loop()->task_runner()->PostTask(
+        FROM_HERE, message_loop()->QuitWhenIdleClosure());
 
     base::MessageLoop::ScopedNestableTaskAllower allow(message_loop());
     base::RunLoop loop;
@@ -2065,11 +2066,10 @@ TEST_F(WindowEventDispatcherTestWithMessageLoop, EventRepostedInNonNestedLoop) {
   CHECK(!message_loop()->is_running());
   // Perform the test in a callback, so that it runs after the message-loop
   // starts.
-  message_loop()->PostTask(
-      FROM_HERE, base::Bind(
-          &WindowEventDispatcherTestWithMessageLoop::RunTest,
-          base::Unretained(this)));
-  message_loop()->Run();
+  message_loop()->task_runner()->PostTask(
+      FROM_HERE, base::Bind(&WindowEventDispatcherTestWithMessageLoop::RunTest,
+                            base::Unretained(this)));
+  base::RunLoop().Run();
 }
 
 class WindowEventDispatcherTestInHighDPI : public WindowEventDispatcherTest {

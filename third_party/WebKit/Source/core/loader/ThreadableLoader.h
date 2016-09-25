@@ -34,9 +34,10 @@
 #include "core/CoreExport.h"
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "platform/CrossThreadCopier.h"
+#include "platform/heap/Handle.h"
 #include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/PassOwnPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -126,7 +127,7 @@ struct CrossThreadCopier<ThreadableLoaderOptions> {
 // - ResourceLoaderOptions argument will be passed to the FetchRequest
 //   that this ThreadableLoader creates. It can be altered e.g. when
 //   redirect happens.
-class CORE_EXPORT ThreadableLoader {
+class CORE_EXPORT ThreadableLoader : public GarbageCollectedFinalized<ThreadableLoader> {
     WTF_MAKE_NONCOPYABLE(ThreadableLoader);
 public:
     // ThreadableLoaderClient methods may not destroy the ThreadableLoader
@@ -152,9 +153,9 @@ public:
     // After any of these methods is called, the loader won't call any of the
     // ThreadableLoaderClient methods.
     //
-    // When a ThreadableLoader is destructed, any of the
-    // ThreadableLoaderClient methods is NOT called in response to the
-    // destruction either synchronously or after destruction.
+    // A user must guarantee that the loading completes before the attached
+    // client gets invalid. Also, a user must guarantee that the loading
+    // completes before the ThreadableLoader is destructed.
     //
     // When ThreadableLoader::cancel() is called,
     // ThreadableLoaderClient::didFail() is called with a ResourceError
@@ -166,8 +167,8 @@ public:
     // ThreadableLoaderClient methods:
     // - may call cancel()
     // - can destroy the ThreadableLoader instance in them (by clearing
-    //   OwnPtr<ThreadableLoader>).
-    static PassOwnPtr<ThreadableLoader> create(ExecutionContext&, ThreadableLoaderClient*, const ThreadableLoaderOptions&, const ResourceLoaderOptions&);
+    //   std::unique_ptr<ThreadableLoader>).
+    static ThreadableLoader* create(ExecutionContext&, ThreadableLoaderClient*, const ThreadableLoaderOptions&, const ResourceLoaderOptions&);
 
     // The methods on the ThreadableLoaderClient passed on create() call
     // may be called synchronous to start() call.
@@ -183,6 +184,8 @@ public:
     virtual void cancel() = 0;
 
     virtual ~ThreadableLoader() { }
+
+    DEFINE_INLINE_VIRTUAL_TRACE() {}
 
 protected:
     ThreadableLoader() { }

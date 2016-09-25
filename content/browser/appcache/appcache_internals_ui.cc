@@ -265,7 +265,7 @@ void AppCacheInternalsUI::Proxy::RequestFileDetails(
 }
 
 void AppCacheInternalsUI::Proxy::HandleFileDetailsRequest() {
-  if (preparing_response_ || !response_enquiries_.size() || !appcache_service_)
+  if (preparing_response_ || response_enquiries_.empty() || !appcache_service_)
     return;
   preparing_response_ = true;
   appcache_service_->storage()->LoadResponseInfo(
@@ -351,6 +351,7 @@ AppCacheInternalsUI::AppCacheInternalsUI(WebUI* web_ui)
   source->AddResourcePath("appcache_internals.js", IDR_APPCACHE_INTERNALS_JS);
   source->AddResourcePath("appcache_internals.css", IDR_APPCACHE_INTERNALS_CSS);
   source->SetDefaultResource(IDR_APPCACHE_INTERNALS_HTML);
+  source->DisableI18nAndUseGzipForAllPaths();
 
   WebUIDataSource::Add(browser_context(), source);
 
@@ -419,7 +420,7 @@ void AppCacheInternalsUI::OnAllAppCacheInfoReady(
   std::string incognito_path_prefix;
   if (browser_context()->IsOffTheRecord())
     incognito_path_prefix = "Incognito ";
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       kFunctionOnAllAppCacheInfoReady,
       base::StringValue(incognito_path_prefix + partition_path.AsUTF8Unsafe()),
       *GetListValueFromAppCacheInfoCollection(collection.get()));
@@ -429,7 +430,7 @@ void AppCacheInternalsUI::OnAppCacheInfoDeleted(
     const base::FilePath& partition_path,
     const std::string& manifest_url,
     bool deleted) {
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       kFunctionOnAppCacheInfoDeleted,
       base::StringValue(partition_path.AsUTF8Unsafe()),
       base::StringValue(manifest_url), base::FundamentalValue(deleted));
@@ -440,12 +441,12 @@ void AppCacheInternalsUI::OnAppCacheDetailsReady(
     const std::string& manifest_url,
     std::unique_ptr<AppCacheResourceInfoVector> resource_info_vector) {
   if (resource_info_vector) {
-    web_ui()->CallJavascriptFunction(
+    web_ui()->CallJavascriptFunctionUnsafe(
         kFunctionOnAppCacheDetailsReady, base::StringValue(manifest_url),
         base::StringValue(partition_path.AsUTF8Unsafe()),
         *GetListValueForAppCacheResourceInfoVector(resource_info_vector.get()));
   } else {
-    web_ui()->CallJavascriptFunction(
+    web_ui()->CallJavascriptFunctionUnsafe(
         kFunctionOnAppCacheDetailsReady, base::StringValue(manifest_url),
         base::StringValue(partition_path.AsUTF8Unsafe()));
   }
@@ -483,7 +484,7 @@ void AppCacheInternalsUI::OnFileDetailsReady(
   if (data_length < response_info->response_data_size())
     hex_dump.append("\nNote: data is truncated...");
   hex_dump.append("</pre>");
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       kFunctionOnFileDetailsReady,
       *GetDictionaryValueForResponseEnquiry(response_enquiry),
       base::StringValue(headers), base::StringValue(hex_dump));
@@ -492,7 +493,7 @@ void AppCacheInternalsUI::OnFileDetailsReady(
 void AppCacheInternalsUI::OnFileDetailsFailed(
     const Proxy::ResponseEnquiry& response_enquiry,
     int net_result_code) {
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       kFunctionOnFileDetailsFailed,
       *GetDictionaryValueForResponseEnquiry(response_enquiry),
       base::FundamentalValue(net_result_code));

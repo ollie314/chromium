@@ -12,10 +12,16 @@
 #include "net/base/hash_value.h"
 #include "net/cert/internal/parse_certificate.h"
 #include "net/cert/internal/signature_algorithm.h"
+#include "net/cert/ocsp_revocation_status.h"
 #include "net/der/input.h"
 #include "net/der/parse_values.h"
 #include "net/der/parser.h"
 #include "net/der/tag.h"
+
+namespace base {
+class Time;
+class TimeDelta;
+}
 
 namespace net {
 
@@ -70,11 +76,6 @@ struct OCSPCertID {
 // }
 // (from RFC 5280)
 struct OCSPCertStatus {
-  enum class Status {
-    GOOD,
-    REVOKED,
-    UNKNOWN,
-  };
 
   // Correspond to the values of CRLReason
   enum class RevocationReason {
@@ -93,7 +94,7 @@ struct OCSPCertStatus {
     LAST = AA_COMPROMISE,
   };
 
-  Status status;
+  OCSPRevocationStatus status;
   der::GeneralizedTime revocation_time;
   bool has_reason;
   RevocationReason revocation_reason;
@@ -264,18 +265,28 @@ NET_EXPORT_PRIVATE bool ParseOCSPResponseData(const der::Input& raw_tlv,
 NET_EXPORT_PRIVATE bool ParseOCSPResponse(const der::Input& raw_tlv,
                                           OCSPResponse* out);
 
-// Checks the certificate status of |cert| based on the OCSPResponseData
-// |response_data| and issuer |issuer| and sets the results in |out|. In the
-// case that there are multiple responses for a given certificate, as a result
-// of caching or performance (RFC 6960, 4.2.2.3), the strictest response is
-// returned (REVOKED > UNKNOWN > GOOD).
+// Checks the certificate status of |cert_tbs_certificate_tlv| based on the
+// OCSPResponseData |response_data| and issuer |issuer_tbs_certificate_tlv| and
+// sets the results in |out|. In the case that there are multiple responses for
+// a given certificate, as a result of caching or performance (RFC 6960,
+// 4.2.2.3), the strictest response is returned (REVOKED > UNKNOWN > GOOD).
 //
 // On failure |out| has an undefined state. Some of its fields may have been
 // updated during parsing, whereas others may not have been changed.
-NET_EXPORT_PRIVATE bool GetOCSPCertStatus(const OCSPResponseData& response_data,
-                                          const ParsedCertificate& issuer,
-                                          const ParsedCertificate& cert,
-                                          OCSPCertStatus* out);
+NET_EXPORT_PRIVATE bool GetOCSPCertStatus(
+    const OCSPResponseData& response_data,
+    const der::Input& issuer_tbs_certificate_tlv,
+    const der::Input& cert_tbs_certificate_tlv,
+    OCSPCertStatus* out);
+
+// Returns true if |response|, a valid OCSP response with a thisUpdate field and
+// potentially a nextUpdate field, is valid at |verify_time| and not older than
+// |max_age|. Expressed differently, returns true if |response.thisUpdate| <=
+// |verify_time| < response.nextUpdate, and |response.thisUpdate| >=
+// |verify_time| - |max_age|.
+NET_EXPORT_PRIVATE bool CheckOCSPDateValid(const OCSPSingleResponse& response,
+                                           const base::Time& verify_time,
+                                           const base::TimeDelta& max_age);
 
 }  // namespace net
 

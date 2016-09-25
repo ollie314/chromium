@@ -35,6 +35,10 @@ AXContentNodeData::AXContentNodeData() {
 
 AXContentNodeData::AXContentNodeData(const AXContentNodeData& other) = default;
 
+AXContentNodeData::AXContentNodeData(const AXNodeData& other)
+    : AXNodeData(other) {
+}
+
 AXContentNodeData::~AXContentNodeData() {
 }
 
@@ -90,7 +94,8 @@ std::string AXContentNodeData::ToString() const {
 }
 
 AXContentTreeData::AXContentTreeData()
-    : routing_id(-1),
+    : AXTreeData(),
+      routing_id(-1),
       parent_routing_id(-1) {
 }
 

@@ -48,7 +48,7 @@ void AppendPrintersAndRunCallbackIfDone(base::ListValue* printers_out,
     EXPECT_TRUE(printers.GetDictionary(i, &printer))
         << "Found invalid printer value at index " << i << ": " << printers;
     if (printer)
-      printers_out->Append(printer->DeepCopy());
+      printers_out->Append(printer->CreateDeepCopy());
   }
   if (done && !callback.is_null())
     callback.Run();
@@ -297,7 +297,8 @@ class PrinterProviderApiTest : public ShellApiTest {
                                      test_param, &extension_id);
     ASSERT_FALSE(extension_id.empty());
 
-    scoped_ptr<base::Value> expected_printer_info(new base::DictionaryValue());
+    std::unique_ptr<base::Value> expected_printer_info(
+        new base::DictionaryValue());
     base::RunLoop run_loop;
     StartGetUsbPrinterInfoRequest(
         extension_id, device,
@@ -330,11 +331,11 @@ class PrinterProviderApiTest : public ShellApiTest {
   // in |expoected_printers| are unique.
   void ValidatePrinterListValue(
       const base::ListValue& printers,
-      const std::vector<scoped_ptr<base::Value>> expected_printers) {
+      const std::vector<std::unique_ptr<base::Value>>& expected_printers) {
     ASSERT_EQ(expected_printers.size(), printers.GetSize());
     for (const auto& printer_value : expected_printers) {
-      EXPECT_TRUE(printers.Find(*printer_value.get()) != printers.end())
-          << "Unable to find " << *printer_value.get() << " in " << printers;
+      EXPECT_TRUE(printers.Find(*printer_value) != printers.end())
+          << "Unable to find " << *printer_value << " in " << printers;
     }
   }
 
@@ -351,7 +352,7 @@ class PrinterProviderApiTest : public ShellApiTest {
     if (!data_dir_.IsValid() && !data_dir_.CreateUniqueTempDir())
       return false;
 
-    *path = data_dir_.path().AppendASCII("data.pwg");
+    *path = data_dir_.GetPath().AppendASCII("data.pwg");
     int written = base::WriteFile(*path, data, size);
     if (written != size)
       return false;
@@ -365,7 +366,13 @@ class PrinterProviderApiTest : public ShellApiTest {
   DISALLOW_COPY_AND_ASSIGN(PrinterProviderApiTest);
 };
 
-IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, PrintJobSuccess) {
+// TODO(crbug.com/631983): Flaky on Linux and CrOS trybots.
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+#define MAYBE_PrintJobSuccess DISABLED_PrintJobSuccess
+#else
+#define MAYBE_PrintJobSuccess PrintJobSuccess
+#endif  // defined(OS_CHROMEOS) || defined(OS_LINUX)
+IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, MAYBE_PrintJobSuccess) {
   RunPrintRequestTestApp("OK", PRINT_REQUEST_DATA_TYPE_BYTES, "OK");
 }
 
@@ -489,7 +496,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, GetPrintersSuccess) {
 
   run_loop.Run();
 
-  std::vector<scoped_ptr<base::Value>> expected_printers;
+  std::vector<std::unique_ptr<base::Value>> expected_printers;
   expected_printers.push_back(
       DictionaryBuilder()
           .Set("description", "Test printer")
@@ -507,7 +514,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, GetPrintersSuccess) {
           .Set("name", "Printer 2")
           .Build());
 
-  ValidatePrinterListValue(printers, std::move(expected_printers));
+  ValidatePrinterListValue(printers, expected_printers);
 }
 
 IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, GetPrintersAsyncSuccess) {
@@ -528,7 +535,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, GetPrintersAsyncSuccess) {
 
   run_loop.Run();
 
-  std::vector<scoped_ptr<base::Value>> expected_printers;
+  std::vector<std::unique_ptr<base::Value>> expected_printers;
   expected_printers.push_back(
       DictionaryBuilder()
           .Set("description", "Test printer")
@@ -538,7 +545,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, GetPrintersAsyncSuccess) {
           .Set("name", "Printer 1")
           .Build());
 
-  ValidatePrinterListValue(printers, std::move(expected_printers));
+  ValidatePrinterListValue(printers, expected_printers);
 }
 
 IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, GetPrintersTwoExtensions) {
@@ -566,7 +573,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, GetPrintersTwoExtensions) {
 
   run_loop.Run();
 
-  std::vector<scoped_ptr<base::Value>> expected_printers;
+  std::vector<std::unique_ptr<base::Value>> expected_printers;
   expected_printers.push_back(
       DictionaryBuilder()
           .Set("description", "Test printer")
@@ -600,7 +607,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, GetPrintersTwoExtensions) {
           .Set("name", "Printer 2")
           .Build());
 
-  ValidatePrinterListValue(printers, std::move(expected_printers));
+  ValidatePrinterListValue(printers, expected_printers);
 }
 
 IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest,
@@ -661,7 +668,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest,
 
   run_loop.Run();
 
-  std::vector<scoped_ptr<base::Value>> expected_printers;
+  std::vector<std::unique_ptr<base::Value>> expected_printers;
   expected_printers.push_back(
       DictionaryBuilder()
           .Set("description", "Test printer")
@@ -679,7 +686,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest,
           .Set("name", "Printer 2")
           .Build());
 
-  ValidatePrinterListValue(printers, std::move(expected_printers));
+  ValidatePrinterListValue(printers, expected_printers);
 }
 
 IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest,
@@ -708,7 +715,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest,
 
   run_loop.Run();
 
-  std::vector<scoped_ptr<base::Value>> expected_printers;
+  std::vector<std::unique_ptr<base::Value>> expected_printers;
   expected_printers.push_back(
       DictionaryBuilder()
           .Set("description", "Test printer")
@@ -726,7 +733,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest,
           .Set("name", "Printer 2")
           .Build());
 
-  ValidatePrinterListValue(printers, std::move(expected_printers));
+  ValidatePrinterListValue(printers, expected_printers);
 }
 
 IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, GetPrintersNoListener) {
@@ -826,7 +833,7 @@ IN_PROC_BROWSER_TEST_F(PrinterProviderApiTest, GetUsbPrinterInfo) {
   ASSERT_FALSE(extension_id.empty());
 
   UsbGuidMap* guid_map = UsbGuidMap::Get(browser_context());
-  scoped_ptr<base::Value> expected_printer_info(
+  std::unique_ptr<base::Value> expected_printer_info(
       DictionaryBuilder()
           .Set("description", "This printer is a USB device.")
           .Set("extensionId", extension_id)

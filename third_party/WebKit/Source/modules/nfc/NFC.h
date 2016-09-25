@@ -7,27 +7,39 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/modules/v8/UnionTypesModules.h"
-#include "core/frame/LocalFrameLifecycleObserver.h"
-#include "core/page/PageLifecycleObserver.h"
+#include "bindings/modules/v8/StringOrArrayBufferOrNFCMessage.h"
+#include "core/dom/ContextLifecycleObserver.h"
+#include "core/page/PageVisibilityObserver.h"
+#include "device/nfc/nfc.mojom-blink.h"
+#include "mojo/public/cpp/bindings/binding.h"
 
 namespace blink {
 
 class MessageCallback;
+class NFCError;
 class NFCPushOptions;
 using NFCPushMessage = StringOrArrayBufferOrNFCMessage;
 class NFCWatchOptions;
 
 class NFC final
-    : public GarbageCollected<NFC>
+    : public GarbageCollectedFinalized<NFC>
     , public ScriptWrappable
-    , public LocalFrameLifecycleObserver
-    , public PageLifecycleObserver {
+    , public PageVisibilityObserver
+    , public ContextLifecycleObserver
+    , public device::nfc::mojom::blink::NFCClient {
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(NFC);
+    USING_PRE_FINALIZER(NFC, dispose);
 
 public:
     static NFC* create(LocalFrame*);
+
+    virtual ~NFC();
+
+    void dispose();
+
+    // ContextLifecycleObserver overrides.
+    void contextDestroyed() override;
 
     // Pushes NFCPushMessage asynchronously to NFC tag / peer.
     ScriptPromise push(ScriptState*, const NFCPushMessage&, const NFCPushOptions&);
@@ -44,17 +56,24 @@ public:
     // Cancels all watch operations.
     ScriptPromise cancelWatch(ScriptState*);
 
-    // Implementation of LocalFrameLifecycleObserver.
-    void willDetachFrameHost() override;
-
-    // Implementation of PageLifecycleObserver.
+    // Implementation of PageVisibilityObserver.
     void pageVisibilityChanged() override;
 
     // Interface required by garbage collection.
     DECLARE_VIRTUAL_TRACE();
 
 private:
+    void OnRequestCompleted(ScriptPromiseResolver*, device::nfc::mojom::blink::NFCErrorPtr);
+    void OnConnectionError();
+
+    // device::nfc::mojom::blink::NFCClient implementation.
+    void OnWatch(mojo::WTFArray<uint32_t> ids, device::nfc::mojom::blink::NFCMessagePtr) override;
+
+private:
     explicit NFC(LocalFrame*);
+    device::nfc::mojom::blink::NFCPtr m_nfc;
+    mojo::Binding<device::nfc::mojom::blink::NFCClient> m_client;
+    HeapHashSet<Member<ScriptPromiseResolver>> m_requests;
 };
 
 } // namespace blink

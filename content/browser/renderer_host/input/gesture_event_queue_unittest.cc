@@ -13,8 +13,9 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "content/browser/renderer_host/input/touchpad_tap_suppression_controller.h"
 #include "content/common/input/input_event_ack_state.h"
@@ -125,9 +126,7 @@ class GestureEventQueueTest : public testing::Test,
     queue()->ProcessGestureAck(ack, type, ui::LatencyInfo());
   }
 
-  void RunUntilIdle() {
-    base::MessageLoop::current()->RunUntilIdle();
-  }
+  void RunUntilIdle() { base::RunLoop().RunUntilIdle(); }
 
   size_t GetAndResetSentGestureEventCount() {
     size_t count = sent_gesture_event_count_;
@@ -1093,7 +1092,7 @@ TEST_F(GestureEventQueueTest, DebounceDefersFollowingGestureEvents) {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       TimeDelta::FromMilliseconds(5));
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   // The deferred events are correctly queued in coalescing queue.
   EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
@@ -1154,6 +1153,31 @@ TEST_F(GestureEventQueueTest, DebounceDropsDeferredEvents) {
     WebGestureEvent merged_event = GestureEventQueueEventAt(i);
     EXPECT_EQ(expected[i], merged_event.type);
   }
+}
+
+TEST_F(GestureEventQueueTest, CoalescesSyntheticScrollBeginEndEvents) {
+  // Test coalescing of only GestureScrollBegin/End events.
+  SimulateGestureEvent(WebInputEvent::GestureScrollUpdate,
+                       blink::WebGestureDeviceTouchpad);
+  EXPECT_EQ(1U, GetAndResetSentGestureEventCount());
+  EXPECT_EQ(1U, GestureEventQueueSize());
+
+  WebGestureEvent synthetic_end = SyntheticWebGestureEventBuilder::Build(
+      WebInputEvent::GestureScrollEnd, blink::WebGestureDeviceTouchpad);
+  synthetic_end.data.scrollEnd.synthetic = true;
+
+  SimulateGestureEvent(synthetic_end);
+  EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
+  EXPECT_EQ(2U, GestureEventQueueSize());
+
+  // Synthetic begin will remove the unsent synthetic end.
+  WebGestureEvent synthetic_begin = SyntheticWebGestureEventBuilder::Build(
+      WebInputEvent::GestureScrollBegin, blink::WebGestureDeviceTouchpad);
+  synthetic_begin.data.scrollBegin.synthetic = true;
+
+  SimulateGestureEvent(synthetic_begin);
+  EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
+  EXPECT_EQ(1U, GestureEventQueueSize());
 }
 
 }  // namespace content

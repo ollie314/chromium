@@ -33,12 +33,14 @@
  * @extends {WebInspector.VBox}
  * @implements {WebInspector.DOMNodeHighlighter}
  * @param {!WebInspector.Target} target
+ * @param {!WebInspector.ResourceTreeModel} resourceTreeModel
  */
-WebInspector.ScreencastView = function(target)
+WebInspector.ScreencastView = function(target, resourceTreeModel)
 {
     WebInspector.VBox.call(this);
     this._target = target;
     this._domModel = WebInspector.DOMModel.fromTarget(target);
+    this._resourceTreeModel = resourceTreeModel;
 
     this.setMinimumSize(150, 150);
     this.registerRequiredCSS("screencast/screencastView.css");
@@ -97,8 +99,8 @@ WebInspector.ScreencastView.prototype = {
         this._shortcuts = /** !Object.<number, function(Event=):boolean> */ ({});
         this._shortcuts[WebInspector.KeyboardShortcut.makeKey("l", WebInspector.KeyboardShortcut.Modifiers.Ctrl)] = this._focusNavigationBar.bind(this);
 
-        this._target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.ScreencastFrame, this._screencastFrame, this);
-        this._target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.ScreencastVisibilityChanged, this._screencastVisibilityChanged, this);
+        this._resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.ScreencastFrame, this._screencastFrame, this);
+        this._resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.ScreencastVisibilityChanged, this._screencastVisibilityChanged, this);
 
         WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.SuspendStateChanged, this._onSuspendStateChange, this);
         this._updateGlasspane();
@@ -559,7 +561,7 @@ WebInspector.ScreencastView.prototype = {
      * @param {!DOMAgent.Quad} clipQuad
      * @param {!DOMAgent.RGBA} fillColor
      */
-    _drawOutlinedQuadWithClip: function (quad, clipQuad, fillColor)
+    _drawOutlinedQuadWithClip: function(quad, clipQuad, fillColor)
     {
         this._context.fillStyle = this._cssColor(fillColor);
         this._context.save();
@@ -585,7 +587,7 @@ WebInspector.ScreencastView.prototype = {
         this._nodeIdElement.textContent = this._node.getAttribute("id") ? "#" + this._node.getAttribute("id") : "";
         var className = this._node.getAttribute("class");
         if (className && className.length > 50)
-           className = className.substring(0, 50) + "\u2026";
+            className = className.substring(0, 50) + "\u2026";
         this._classNameElement.textContent = className || "";
         this._nodeWidthElement.textContent = this._model.width;
         this._nodeHeightElement.textContent = this._model.height;
@@ -705,7 +707,7 @@ WebInspector.ScreencastView.prototype = {
 
     _createNavigationBar: function()
     {
-        this._navigationBar = this.element.createChild("div", "toolbar-background screencast-navigation");
+        this._navigationBar = this.element.createChild("div", "screencast-navigation");
         if (Runtime.queryParam("hideNavigation"))
             this._navigationBar.classList.add("hidden");
 
@@ -722,7 +724,7 @@ WebInspector.ScreencastView.prototype = {
 
         this._navigationUrl = this._navigationBar.createChild("input");
         this._navigationUrl.type = "text";
-        this._navigationUrl.addEventListener('keyup', this._navigationUrlKeyUp.bind(this), true);
+        this._navigationUrl.addEventListener("keyup", this._navigationUrlKeyUp.bind(this), true);
 
         this._navigationProgressBar = new WebInspector.ScreencastView.ProgressTracker(this._navigationBar.createChild("div", "progress"));
 
@@ -734,19 +736,19 @@ WebInspector.ScreencastView.prototype = {
     {
         var newIndex = this._historyIndex + offset;
         if (newIndex < 0 || newIndex >= this._historyEntries.length)
-          return;
+            return;
         this._target.pageAgent().navigateToHistoryEntry(this._historyEntries[newIndex].id);
         this._requestNavigationHistory();
     },
 
     _navigateReload: function()
     {
-        this._target.resourceTreeModel.reloadPage();
+        this._resourceTreeModel.reloadPage();
     },
 
     _navigationUrlKeyUp: function(event)
     {
-        if (event.keyIdentifier != 'Enter')
+        if (event.key !== "Enter")
             return;
         var url = this._navigationUrl.value;
         if (!url)
@@ -765,13 +767,13 @@ WebInspector.ScreencastView.prototype = {
     _onNavigationHistory: function(error, currentIndex, entries)
     {
         if (error)
-          return;
+            return;
 
         this._historyIndex = currentIndex;
         this._historyEntries = entries;
 
-        this._navigationBack.disabled = currentIndex == 0;
-        this._navigationForward.disabled = currentIndex == (entries.length - 1);
+        this._navigationBack.disabled = currentIndex === 0;
+        this._navigationForward.disabled = currentIndex === (entries.length - 1);
 
         var url = entries[currentIndex].url;
         var match = url.match(WebInspector.ScreencastView._HttpRegex);
@@ -788,7 +790,7 @@ WebInspector.ScreencastView.prototype = {
         return true;
     },
 
-  __proto__: WebInspector.VBox.prototype
+    __proto__: WebInspector.VBox.prototype
 }
 
 /**
@@ -799,10 +801,10 @@ WebInspector.ScreencastView.ProgressTracker = function(element)
 {
     this._element = element;
 
-    WebInspector.targetManager.addModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.MainFrameNavigated, this._onMainFrameNavigated, this);
-    WebInspector.targetManager.addModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.Load, this._onLoad, this);
-    WebInspector.targetManager.addModelListener(WebInspector.NetworkManager, WebInspector.NetworkManager.EventTypes.RequestStarted, this._onRequestStarted, this);
-    WebInspector.targetManager.addModelListener(WebInspector.NetworkManager, WebInspector.NetworkManager.EventTypes.RequestFinished, this._onRequestFinished, this);
+    WebInspector.targetManager.addModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.Events.MainFrameNavigated, this._onMainFrameNavigated, this);
+    WebInspector.targetManager.addModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.Events.Load, this._onLoad, this);
+    WebInspector.targetManager.addModelListener(WebInspector.NetworkManager, WebInspector.NetworkManager.Events.RequestStarted, this._onRequestStarted, this);
+    WebInspector.targetManager.addModelListener(WebInspector.NetworkManager, WebInspector.NetworkManager.Events.RequestFinished, this._onRequestFinished, this);
 }
 
 WebInspector.ScreencastView.ProgressTracker.prototype = {
@@ -832,14 +834,14 @@ WebInspector.ScreencastView.ProgressTracker.prototype = {
 
     _onRequestStarted: function(event)
     {
-      if (!this._navigationProgressVisible())
-          return;
-      var request = /** @type {!WebInspector.NetworkRequest} */ (event.data);
-      // Ignore long-living WebSockets for the sake of progress indicator, as we won't be waiting them anyway.
-      if (request.type === WebInspector.resourceTypes.WebSocket)
-          return;
-      this._requestIds[request.requestId] = request;
-      ++this._startedRequests;
+        if (!this._navigationProgressVisible())
+            return;
+        var request = /** @type {!WebInspector.NetworkRequest} */ (event.data);
+        // Ignore long-living WebSockets for the sake of progress indicator, as we won't be waiting them anyway.
+        if (request.type === WebInspector.resourceTypes.WebSocket)
+            return;
+        this._requestIds[request.requestId] = request;
+        ++this._startedRequests;
     },
 
     _onRequestFinished: function(event)
@@ -858,9 +860,9 @@ WebInspector.ScreencastView.ProgressTracker.prototype = {
     _updateProgress: function(progress)
     {
         if (!this._navigationProgressVisible())
-          return;
+            return;
         if (this._maxDisplayedProgress >= progress)
-          return;
+            return;
         this._maxDisplayedProgress = progress;
         this._displayProgress(progress);
     },

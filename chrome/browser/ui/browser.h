@@ -24,23 +24,22 @@
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_delegate.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/chrome_bubble_manager.h"
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/profile_chooser_constants.h"
 #include "chrome/browser/ui/search/search_tab_helper_delegate.h"
-#include "chrome/browser/ui/search_engines/search_engine_tab_helper_delegate.h"
 #include "chrome/browser/ui/signin_view_controller.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/prefs/pref_change_registrar.h"
-#include "components/prefs/pref_member.h"
 #include "components/sessions/core/session_id.h"
 #include "components/toolbar/toolbar_model.h"
 #include "components/translate/content/browser/content_translate_driver.h"
-#include "components/ui/zoom/zoom_observer.h"
+#include "components/zoom/zoom_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/page_navigator.h"
@@ -110,11 +109,10 @@ class WebContentsModalDialogHost;
 class Browser : public TabStripModelObserver,
                 public content::WebContentsDelegate,
                 public CoreTabHelperDelegate,
-                public SearchEngineTabHelperDelegate,
                 public SearchTabHelperDelegate,
                 public ChromeWebModalDialogManagerDelegate,
                 public BookmarkTabHelperDelegate,
-                public ui_zoom::ZoomObserver,
+                public zoom::ZoomObserver,
                 public content::PageNavigator,
                 public content::NotificationObserver,
 #if defined(ENABLE_EXTENSIONS)
@@ -185,6 +183,9 @@ class Browser : public TabStripModelObserver,
     // The bounds of the window to open.
     gfx::Rect initial_bounds;
 
+    // The workspace the window should open in, if the platform supports it.
+    std::string initial_workspace;
+
     ui::WindowShowState initial_show_state;
 
     bool is_session_restore;
@@ -239,6 +240,7 @@ class Browser : public TabStripModelObserver,
   bool is_trusted_source() const { return is_trusted_source_; }
   Profile* profile() const { return profile_; }
   gfx::Rect override_bounds() const { return override_bounds_; }
+  const std::string& initial_workspace() const { return initial_workspace_; }
 
   // |window()| will return NULL if called before |CreateBrowserWindow()|
   // is done.
@@ -299,7 +301,8 @@ class Browser : public TabStripModelObserver,
   gfx::Image GetCurrentPageIcon() const;
 
   // Gets the title of the window based on the selected tab's title.
-  base::string16 GetWindowTitleForCurrentTab() const;
+  // Disables additional formatting when |include_app_name| is false.
+  base::string16 GetWindowTitleForCurrentTab(bool include_app_name) const;
 
   // Prepares a title string for display (removes embedded newlines, etc).
   static void FormatTitleForDisplay(base::string16* title);
@@ -384,11 +387,6 @@ class Browser : public TabStripModelObserver,
   // in |SupportsWindowFeature| for details on this.
   bool CanSupportWindowFeature(WindowFeature feature) const;
 
-  // TODO(port): port these, and re-merge the two function declaration lists.
-  // Page-related commands.
-  void ToggleEncodingAutoDetect();
-  void OverrideEncoding(int encoding_id);
-
   // Show various bits of UI
   void OpenFile();
 
@@ -400,6 +398,7 @@ class Browser : public TabStripModelObserver,
   // this Browser. Updates the UI for the start of this navigation.
   void UpdateUIForNavigationInTab(content::WebContents* contents,
                                   ui::PageTransition transition,
+                                  chrome::NavigateParams::WindowAction action,
                                   bool user_initiated);
 
   // Shows the signin flow for |mode| in a tab-modal dialog.
@@ -429,7 +428,8 @@ class Browser : public TabStripModelObserver,
   content::WebContents* OpenURL(const content::OpenURLParams& params) override;
 
   // Overridden from TabStripModelObserver:
-  void TabInsertedAt(content::WebContents* contents,
+  void TabInsertedAt(TabStripModel* tab_strip_model,
+                     content::WebContents* contents,
                      int index,
                      bool foreground) override;
   void TabClosingAt(TabStripModel* tab_strip_model,
@@ -448,7 +448,8 @@ class Browser : public TabStripModelObserver,
                      content::WebContents* old_contents,
                      content::WebContents* new_contents,
                      int index) override;
-  void TabPinnedStateChanged(content::WebContents* contents,
+  void TabPinnedStateChanged(TabStripModel* tab_strip_model,
+                             content::WebContents* contents,
                              int index) override;
   void TabStripEmpty() override;
 
@@ -479,14 +480,12 @@ class Browser : public TabStripModelObserver,
       content::SecurityStyleExplanations* security_style_explanations) override;
   void ShowCertificateViewerInDevTools(
       content::WebContents* web_contents,
-      int cert_id) override;
+      scoped_refptr<net::X509Certificate> certificate) override;
   std::unique_ptr<content::BluetoothChooser> RunBluetoothChooser(
       content::RenderFrameHost* frame,
       const content::BluetoothChooser::EventHandler& event_handler) override;
   void RequestAppBannerFromDevTools(
       content::WebContents* web_contents) override;
-
-  bool RequestAppBanner(content::WebContents* web_contents);
 
   bool is_type_tabbed() const { return type_ == TYPE_TABBED; }
   bool is_type_popup() const { return type_ == TYPE_POPUP; }
@@ -510,6 +509,9 @@ class Browser : public TabStripModelObserver,
   extensions::WindowController* extension_window_controller() const {
     return extension_window_controller_.get();
   }
+
+  bool ShouldRunUnloadListenerBeforeClosing(content::WebContents* web_contents);
+  bool RunUnloadListenerBeforeClosing(content::WebContents* web_contents);
 
  private:
   friend class BrowserTest;
@@ -629,7 +631,7 @@ class Browser : public TabStripModelObserver,
       content::WebContents* web_contents,
       SkColor color,
       const std::vector<content::ColorSuggestion>& suggestions) override;
-  void RunFileChooser(content::WebContents* web_contents,
+  void RunFileChooser(content::RenderFrameHost* render_frame_host,
                       const content::FileChooserParams& params) override;
   void EnumerateDirectory(content::WebContents* web_contents,
                           int request_id,
@@ -688,14 +690,7 @@ class Browser : public TabStripModelObserver,
   bool CanReloadContents(content::WebContents* web_contents) const override;
   bool CanSaveContents(content::WebContents* web_contents) const override;
 
-  // Overridden from SearchEngineTabHelperDelegate:
-  void ConfirmAddSearchProvider(TemplateURL* template_url,
-                                Profile* profile) override;
-
   // Overridden from SearchTabHelperDelegate:
-  void NavigateOnThumbnailClick(const GURL& url,
-                                WindowOpenDisposition disposition,
-                                content::WebContents* source_contents) override;
   void OnWebContentsInstantSupportDisabled(
       const content::WebContents* web_contents) override;
   OmniboxView* GetOmniboxView() override;
@@ -713,7 +708,7 @@ class Browser : public TabStripModelObserver,
 
   // Overridden from ZoomObserver:
   void OnZoomChanged(
-      const ui_zoom::ZoomController::ZoomChangedEventData& data) override;
+      const zoom::ZoomController::ZoomChangedEventData& data) override;
 
   // Overridden from SelectFileDialog::Listener:
   void FileSelected(const base::FilePath& path,
@@ -949,6 +944,7 @@ class Browser : public TabStripModelObserver,
   // shell shortcut's startup info.
   gfx::Rect override_bounds_;
   ui::WindowShowState initial_show_state_;
+  const std::string initial_workspace_;
 
   // Tracks when this browser is being created by session restore.
   bool is_session_restore_;
@@ -964,9 +960,6 @@ class Browser : public TabStripModelObserver,
 
   // Dialog box used for opening and saving files.
   scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
-
-  // Keep track of the encoding auto detect pref.
-  BooleanPrefMember encoding_auto_detect_;
 
   // Helper which implements the ContentSettingBubbleModel interface.
   std::unique_ptr<BrowserContentSettingBubbleModelDelegate>

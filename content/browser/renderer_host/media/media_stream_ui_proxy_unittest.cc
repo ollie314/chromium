@@ -7,11 +7,14 @@
 #include <utility>
 
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "content/browser/frame_host/render_frame_host_delegate.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/rect.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 using testing::_;
 using testing::Return;
@@ -62,7 +65,7 @@ class MediaStreamUIProxyTest : public testing::Test {
 
   ~MediaStreamUIProxyTest() override {
     proxy_.reset();
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
  protected:
@@ -101,7 +104,7 @@ TEST_F(MediaStreamUIProxyTest, Deny) {
   EXPECT_CALL(delegate_, RequestMediaAccessPermission(SameRequest(request_ptr),
                                                       _))
     .WillOnce(SaveArg<1>(&callback));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ASSERT_FALSE(callback.is_null());
 
   MediaStreamDevices devices;
@@ -110,7 +113,7 @@ TEST_F(MediaStreamUIProxyTest, Deny) {
   MediaStreamDevices response;
   EXPECT_CALL(response_callback_, OnAccessRequestResponse(_, _))
     .WillOnce(SaveArg<0>(&response));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(response.empty());
 }
@@ -129,7 +132,7 @@ TEST_F(MediaStreamUIProxyTest, AcceptAndStart) {
   EXPECT_CALL(delegate_, RequestMediaAccessPermission(SameRequest(request_ptr),
                                                       _))
     .WillOnce(SaveArg<1>(&callback));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ASSERT_FALSE(callback.is_null());
 
   MediaStreamDevices devices;
@@ -142,12 +145,12 @@ TEST_F(MediaStreamUIProxyTest, AcceptAndStart) {
   MediaStreamDevices response;
   EXPECT_CALL(response_callback_, OnAccessRequestResponse(_, _))
     .WillOnce(SaveArg<0>(&response));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_FALSE(response.empty());
 
   proxy_->OnStarted(base::Closure(), MediaStreamUIProxy::WindowIdCallback());
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Verify that the proxy can be deleted before the request is processed.
@@ -165,7 +168,7 @@ TEST_F(MediaStreamUIProxyTest, DeleteBeforeAccepted) {
   EXPECT_CALL(delegate_, RequestMediaAccessPermission(SameRequest(request_ptr)
                                                       , _))
     .WillOnce(SaveArg<1>(&callback));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ASSERT_FALSE(callback.is_null());
 
   proxy_.reset();
@@ -189,7 +192,7 @@ TEST_F(MediaStreamUIProxyTest, StopFromUI) {
   EXPECT_CALL(delegate_, RequestMediaAccessPermission(SameRequest(request_ptr)
                                                       , _))
     .WillOnce(SaveArg<1>(&callback));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ASSERT_FALSE(callback.is_null());
 
   base::Closure stop_callback;
@@ -205,7 +208,7 @@ TEST_F(MediaStreamUIProxyTest, StopFromUI) {
   MediaStreamDevices response;
   EXPECT_CALL(response_callback_, OnAccessRequestResponse(_, _))
     .WillOnce(SaveArg<0>(&response));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_FALSE(response.empty());
 
@@ -213,12 +216,12 @@ TEST_F(MediaStreamUIProxyTest, StopFromUI) {
   proxy_->OnStarted(base::Bind(&MockStopStreamHandler::OnStop,
                                base::Unretained(&stop_handler)),
                     MediaStreamUIProxy::WindowIdCallback());
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   ASSERT_FALSE(stop_callback.is_null());
   EXPECT_CALL(stop_handler, OnStop());
   stop_callback.Run();
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(MediaStreamUIProxyTest, WindowIdCallbackCalled) {
@@ -236,7 +239,7 @@ TEST_F(MediaStreamUIProxyTest, WindowIdCallbackCalled) {
   EXPECT_CALL(delegate_, RequestMediaAccessPermission(SameRequest(request_ptr),
                                                       _))
       .WillOnce(SaveArg<1>(&callback));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   const int kWindowId = 1;
   std::unique_ptr<MockMediaStreamUI> ui(new MockMediaStreamUI());
@@ -252,19 +255,17 @@ TEST_F(MediaStreamUIProxyTest, WindowIdCallbackCalled) {
       base::Bind(&MockStopStreamHandler::OnStop, base::Unretained(&handler)),
       base::Bind(&MockStopStreamHandler::OnWindowId,
                  base::Unretained(&handler)));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(MediaStreamUIProxyTest, CheckAccess) {
-  proxy_->CheckAccess(GURL("http://origin/"),
-                           MEDIA_DEVICE_AUDIO_CAPTURE,
-                           0,
-                           0,
-                           base::Bind(&MockResponseCallback::OnCheckResponse,
-                                      base::Unretained(&response_callback_)));
+  proxy_->CheckAccess(url::Origin(GURL("http://origin/")),
+                      MEDIA_DEVICE_AUDIO_CAPTURE, 0, 0,
+                      base::Bind(&MockResponseCallback::OnCheckResponse,
+                                 base::Unretained(&response_callback_)));
   EXPECT_CALL(delegate_, CheckMediaAccessPermission(_, _));
   EXPECT_CALL(response_callback_, OnCheckResponse(_));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
-}  // content
+}  // namespace content

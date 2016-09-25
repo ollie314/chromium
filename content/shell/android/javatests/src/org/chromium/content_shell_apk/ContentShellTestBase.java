@@ -32,7 +32,7 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import java.lang.reflect.Method;
+import java.lang.reflect.AnnotatedElement;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -74,8 +74,9 @@ public class ContentShellTestBase
      * Starts the content shell activity with the provided test url.
      * The url is synchronously loaded.
      * @param url Test url to load.
+     * @throws InterruptedException
      */
-    protected void startActivityWithTestUrl(String url) throws Throwable {
+    protected void startActivityWithTestUrl(String url) throws InterruptedException {
         launchContentShellWithUrl(UrlUtils.getIsolatedTestFileUrl(url));
         assertNotNull(getActivity());
         waitForActiveShellToBeDoneLoading();
@@ -231,7 +232,7 @@ public class ContentShellTestBase
     protected void runTest() throws Throwable {
         super.runTest();
         try {
-            Method method = getClass().getMethod(getName(), (Class[]) null);
+            AnnotatedElement method = getClass().getMethod(getName(), (Class[]) null);
             if (method.isAnnotationPresent(RerunWithUpdatedContainerView.class)) {
                 replaceContainerView();
                 super.runTest();

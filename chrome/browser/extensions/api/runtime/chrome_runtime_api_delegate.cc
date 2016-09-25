@@ -9,10 +9,11 @@
 #include <utility>
 #include <vector>
 
+#include "base/lazy_instance.h"
 #include "base/location.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -60,30 +61,57 @@ const int kFastReloadTime = 10000;
 // disabled.
 const int kFastReloadCount = 5;
 
-// The policy we use for exponential backoff of update check requests.
-const net::BackoffEntry::Policy kBackoffPolicy = {
-    // num_errors_to_ignore
-    0,
+// A holder class for the policy we use for exponential backoff of update check
+// requests.
+class BackoffPolicy {
+ public:
+  BackoffPolicy();
+  ~BackoffPolicy();
 
-    // initial_delay_ms (note that we set 'always_use_initial_delay' to false
-    // below)
-    1000 * extensions::kDefaultUpdateFrequencySeconds,
+  // Returns the actual policy to use.
+  static const net::BackoffEntry::Policy* Get();
 
-    // multiply_factor
-    1,
-
-    // jitter_factor
-    0.1,
-
-    // maximum_backoff_ms (-1 means no maximum)
-    -1,
-
-    // entry_lifetime_ms (-1 means never discard)
-    -1,
-
-    // always_use_initial_delay
-    false,
+ private:
+  net::BackoffEntry::Policy policy_;
 };
+
+// We use a LazyInstance since one of the the policy values references an
+// extern symbol, which would cause a static initializer to be generated if we
+// just declared the policy struct as a static variable.
+base::LazyInstance<BackoffPolicy> g_backoff_policy = LAZY_INSTANCE_INITIALIZER;
+
+BackoffPolicy::BackoffPolicy() {
+  policy_ = {
+      // num_errors_to_ignore
+      0,
+
+      // initial_delay_ms (note that we set 'always_use_initial_delay' to false
+      // below)
+      1000 * extensions::kDefaultUpdateFrequencySeconds,
+
+      // multiply_factor
+      1,
+
+      // jitter_factor
+      0.1,
+
+      // maximum_backoff_ms (-1 means no maximum)
+      -1,
+
+      // entry_lifetime_ms (-1 means never discard)
+      -1,
+
+      // always_use_initial_delay
+      false,
+  };
+}
+
+BackoffPolicy::~BackoffPolicy() {}
+
+// static
+const net::BackoffEntry::Policy* BackoffPolicy::Get() {
+  return &g_backoff_policy.Get().policy_;
+}
 
 base::TickClock* g_test_clock = nullptr;
 
@@ -93,9 +121,10 @@ struct ChromeRuntimeAPIDelegate::UpdateCheckInfo {
  public:
   UpdateCheckInfo() {
     if (g_test_clock)
-      backoff.reset(new net::BackoffEntry(&kBackoffPolicy, g_test_clock));
+      backoff.reset(
+          new net::BackoffEntry(BackoffPolicy::Get(), g_test_clock));
     else
-      backoff.reset(new net::BackoffEntry(&kBackoffPolicy));
+      backoff.reset(new net::BackoffEntry(BackoffPolicy::Get()));
   }
 
   std::unique_ptr<net::BackoffEntry> backoff;
@@ -233,7 +262,7 @@ void ChromeRuntimeAPIDelegate::OpenURL(const GURL& uninstall_url) {
 
   chrome::NavigateParams params(
       browser, uninstall_url, ui::PAGE_TRANSITION_CLIENT_REDIRECT);
-  params.disposition = NEW_FOREGROUND_TAB;
+  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   params.user_gesture = false;
   chrome::Navigate(&params);
 }
@@ -307,10 +336,11 @@ void ChromeRuntimeAPIDelegate::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == extensions::NOTIFICATION_EXTENSION_UPDATE_FOUND);
-  typedef const std::pair<std::string, Version> UpdateDetails;
+  DCHECK_EQ(extensions::NOTIFICATION_EXTENSION_UPDATE_FOUND, type);
+  using UpdateDetails = const std::pair<std::string, base::Version>;
   const std::string& id = content::Details<UpdateDetails>(details)->first;
-  const Version& version = content::Details<UpdateDetails>(details)->second;
+  const base::Version& version =
+      content::Details<UpdateDetails>(details)->second;
   if (version.IsValid()) {
     CallUpdateCallbacks(
         id, UpdateCheckResult(true, kUpdateFound, version.GetString()));

@@ -7,6 +7,7 @@
 #include "V8TestIntegerIndexedGlobal.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/GeneratedCodeHelper.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
 #include "bindings/core/v8/V8Document.h"
 #include "bindings/core/v8/V8Node.h"
@@ -23,7 +24,7 @@ namespace blink {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestIntegerIndexedGlobal::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestIntegerIndexedGlobal::domTemplate, V8TestIntegerIndexedGlobal::trace, 0, 0, V8TestIntegerIndexedGlobal::preparePrototypeAndInterfaceObject, V8TestIntegerIndexedGlobal::installConditionallyEnabledProperties, "TestIntegerIndexedGlobal", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent };
+const WrapperTypeInfo V8TestIntegerIndexedGlobal::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestIntegerIndexedGlobal::domTemplate, V8TestIntegerIndexedGlobal::trace, V8TestIntegerIndexedGlobal::traceWrappers, 0, nullptr, "TestIntegerIndexedGlobal", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromActiveScriptWrappable, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -32,6 +33,19 @@ const WrapperTypeInfo V8TestIntegerIndexedGlobal::wrapperTypeInfo = { gin::kEmbe
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
 // bindings/core/v8/ScriptWrappable.h.
 const WrapperTypeInfo& TestIntegerIndexedGlobal::s_wrapperTypeInfo = V8TestIntegerIndexedGlobal::wrapperTypeInfo;
+
+// not [ActiveScriptWrappable]
+static_assert(
+    !std::is_base_of<ActiveScriptWrappable, TestIntegerIndexedGlobal>::value,
+    "TestIntegerIndexedGlobal inherits from ActiveScriptWrappable, but is not specifying "
+    "[ActiveScriptWrappable] extended attribute in the IDL file.  "
+    "Be consistent.");
+static_assert(
+    std::is_same<decltype(&TestIntegerIndexedGlobal::hasPendingActivity),
+                 decltype(&ScriptWrappable::hasPendingActivity)>::value,
+    "TestIntegerIndexedGlobal is overriding hasPendingActivity(), but is not specifying "
+    "[ActiveScriptWrappable] extended attribute in the IDL file.  "
+    "Be consistent.");
 
 namespace TestIntegerIndexedGlobalV8Internal {
 
@@ -42,7 +56,7 @@ static void lengthAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& inf
     v8SetReturnValue(info, static_cast<double>(impl->length()));
 }
 
-static void lengthAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void lengthAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestIntegerIndexedGlobalV8Internal::lengthAttributeGetter(info);
 }
@@ -53,12 +67,12 @@ static void lengthAttributeSetter(v8::Local<v8::Value> v8Value, const v8::Functi
     ExceptionState exceptionState(ExceptionState::SetterContext, "length", "TestIntegerIndexedGlobal", holder, info.GetIsolate());
     TestIntegerIndexedGlobal* impl = V8TestIntegerIndexedGlobal::toImpl(holder);
     unsigned long long cppValue = toUInt64(info.GetIsolate(), v8Value, NormalConversion, exceptionState);
-    if (exceptionState.throwIfNeeded())
+    if (exceptionState.hadException())
         return;
     impl->setLength(cppValue);
 }
 
-static void lengthAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void lengthAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
     TestIntegerIndexedGlobalV8Internal::lengthAttributeSetter(v8Value, info);
@@ -66,19 +80,21 @@ static void lengthAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Val
 
 static void voidMethodDocumentMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
+    TestIntegerIndexedGlobal* impl = V8TestIntegerIndexedGlobal::toImpl(info.Holder());
+
     if (UNLIKELY(info.Length() < 1)) {
-        V8ThrowException::throwException(createMinimumArityTypeErrorForMethod(info.GetIsolate(), "voidMethodDocument", "TestIntegerIndexedGlobal", 1, info.Length()), info.GetIsolate());
+        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodDocument", "TestIntegerIndexedGlobal", ExceptionMessages::notEnoughArguments(1, info.Length())));
         return;
     }
-    TestIntegerIndexedGlobal* impl = V8TestIntegerIndexedGlobal::toImpl(info.Holder());
+
     Document* document;
-    {
-        document = V8Document::toImplWithTypeCheck(info.GetIsolate(), info[0]);
-        if (!document) {
-            V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodDocument", "TestIntegerIndexedGlobal", "parameter 1 is not of type 'Document'."));
-            return;
-        }
+    document = V8Document::toImplWithTypeCheck(info.GetIsolate(), info[0]);
+    if (!document) {
+        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodDocument", "TestIntegerIndexedGlobal", "parameter 1 is not of type 'Document'."));
+
+        return;
     }
+
     impl->voidMethodDocument(document);
 }
 
@@ -87,44 +103,60 @@ static void voidMethodDocumentMethodCallback(const v8::FunctionCallbackInfo<v8::
     TestIntegerIndexedGlobalV8Internal::voidMethodDocumentMethod(info);
 }
 
-static void indexedPropertyGetterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Value>& info)
+void namedPropertyGetterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
+{
+    if (!name->IsString())
+        return;
+    const AtomicString& propertyName = toCoreAtomicString(name.As<v8::String>());
+
+    V8TestIntegerIndexedGlobal::namedPropertyGetterCustom(propertyName, info);
+}
+
+void namedPropertySetterCallback(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
+{
+    if (!name->IsString())
+        return;
+    const AtomicString& propertyName = toCoreAtomicString(name.As<v8::String>());
+
+    V8TestIntegerIndexedGlobal::namedPropertySetterCustom(propertyName, v8Value, info);
+}
+
+void namedPropertyDeleterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
+{
+    if (!name->IsString())
+        return;
+    const AtomicString& propertyName = toCoreAtomicString(name.As<v8::String>());
+
+    V8TestIntegerIndexedGlobal::namedPropertyDeleterCustom(propertyName, info);
+}
+
+void namedPropertyQueryCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
+{
+    if (!name->IsString())
+        return;
+    const AtomicString& propertyName = toCoreAtomicString(name.As<v8::String>());
+
+    V8TestIntegerIndexedGlobal::namedPropertyQueryCustom(propertyName, info);
+}
+
+void namedPropertyEnumeratorCallback(const v8::PropertyCallbackInfo<v8::Array>& info)
+{
+    V8TestIntegerIndexedGlobal::namedPropertyEnumeratorCustom(info);
+}
+
+void indexedPropertyGetterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
     V8TestIntegerIndexedGlobal::indexedPropertyGetterCustom(index, info);
 }
 
-static void indexedPropertySetterCallback(uint32_t index, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
+void indexedPropertySetterCallback(uint32_t index, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
     V8TestIntegerIndexedGlobal::indexedPropertySetterCustom(index, v8Value, info);
 }
 
-static void indexedPropertyDeleterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Boolean>& info)
+void indexedPropertyDeleterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Boolean>& info)
 {
     V8TestIntegerIndexedGlobal::indexedPropertyDeleterCustom(index, info);
-}
-
-static void namedPropertyGetterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
-{
-    V8TestIntegerIndexedGlobal::namedPropertyGetterCustom(name, info);
-}
-
-static void namedPropertySetterCallback(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
-{
-    V8TestIntegerIndexedGlobal::namedPropertySetterCustom(name, v8Value, info);
-}
-
-static void namedPropertyQueryCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
-{
-    V8TestIntegerIndexedGlobal::namedPropertyQueryCustom(name, info);
-}
-
-static void namedPropertyDeleterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
-{
-    V8TestIntegerIndexedGlobal::namedPropertyDeleterCustom(name, info);
-}
-
-static void namedPropertyEnumeratorCallback(const v8::PropertyCallbackInfo<v8::Array>& info)
-{
-    V8TestIntegerIndexedGlobal::namedPropertyEnumeratorCustom(info);
 }
 
 } // namespace TestIntegerIndexedGlobalV8Internal
@@ -154,6 +186,9 @@ static void installV8TestIntegerIndexedGlobalTemplate(v8::Isolate* isolate, cons
     // Indexed properties
     v8::IndexedPropertyHandlerConfiguration indexedPropertyHandlerConfig(TestIntegerIndexedGlobalV8Internal::indexedPropertyGetterCallback, TestIntegerIndexedGlobalV8Internal::indexedPropertySetterCallback, 0, TestIntegerIndexedGlobalV8Internal::indexedPropertyDeleterCallback, indexedPropertyEnumerator<TestIntegerIndexedGlobal>, v8::Local<v8::Value>(), v8::PropertyHandlerFlags::kNone);
     instanceTemplate->SetHandler(indexedPropertyHandlerConfig);
+
+    // Array iterator (@@iterator)
+    instanceTemplate->SetIntrinsicDataProperty(v8::Symbol::GetIterator(isolate), v8::kArrayProto_values, v8::DontEnum);
 }
 
 v8::Local<v8::FunctionTemplate> V8TestIntegerIndexedGlobal::domTemplate(v8::Isolate* isolate, const DOMWrapperWorld& world)
@@ -165,7 +200,7 @@ v8::Local<v8::FunctionTemplate> V8TestIntegerIndexedGlobal::domTemplateForNamedP
 {
     v8::Local<v8::FunctionTemplate> parentTemplate = V8None::domTemplate(isolate, world);
 
-    v8::Local<v8::FunctionTemplate> namedPropertiesObjectFunctionTemplate = v8::FunctionTemplate::New(isolate);
+    v8::Local<v8::FunctionTemplate> namedPropertiesObjectFunctionTemplate = v8::FunctionTemplate::New(isolate, V8ObjectConstructor::isValidConstructorMode);
     namedPropertiesObjectFunctionTemplate->SetClassName(v8AtomicString(isolate, "TestIntegerIndexedGlobalProperties"));
     namedPropertiesObjectFunctionTemplate->Inherit(parentTemplate);
 
@@ -190,7 +225,7 @@ v8::Local<v8::Object> V8TestIntegerIndexedGlobal::findInstanceInPrototypeChain(v
 
 TestIntegerIndexedGlobal* V8TestIntegerIndexedGlobal::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
-    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
+    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : nullptr;
 }
 
 } // namespace blink

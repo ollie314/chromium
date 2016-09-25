@@ -38,6 +38,7 @@ namespace blink {
 class AXObjectCacheImpl;
 
 class AXImageMapLink final : public AXNodeObject {
+    WTF_MAKE_NONCOPYABLE(AXImageMapLink);
 
 private:
     explicit AXImageMapLink(HTMLAreaElement*, AXObjectCacheImpl&);
@@ -61,8 +62,7 @@ public:
     bool isLink() const override { return true; }
     bool isLinked() const override { return true; }
     AXObject* computeParent() const override;
-
-    LayoutRect elementRect() const override;
+    void getRelativeBounds(AXObject** outContainer, FloatRect& outBoundsInContainer, SkMatrix44& outContainerTransform) const override;
 
 private:
     bool isImageMapLink() const override { return true; }

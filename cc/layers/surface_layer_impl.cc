@@ -29,7 +29,7 @@ std::unique_ptr<LayerImpl> SurfaceLayerImpl::CreateLayerImpl(
   return SurfaceLayerImpl::Create(tree_impl, id());
 }
 
-void SurfaceLayerImpl::SetSurfaceId(SurfaceId surface_id) {
+void SurfaceLayerImpl::SetSurfaceId(const SurfaceId& surface_id) {
   if (surface_id_ == surface_id)
     return;
 
@@ -179,7 +179,7 @@ void SurfaceLayerImpl::AppendRainbowDebugBorder(RenderPass* render_pass) {
 
 void SurfaceLayerImpl::AsValueInto(base::trace_event::TracedValue* dict) const {
   LayerImpl::AsValueInto(dict);
-  dict->SetInteger("surface_id", surface_id_.id);
+  dict->SetString("surface_id", surface_id_.ToString());
 }
 
 const char* SurfaceLayerImpl::LayerTypeAsString() const {

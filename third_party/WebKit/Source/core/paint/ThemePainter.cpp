@@ -23,6 +23,7 @@
 
 #include "core/InputTypeNames.h"
 #include "core/frame/FrameView.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLDataListElement.h"
 #include "core/html/HTMLDataListOptionsCollection.h"
 #include "core/html/HTMLInputElement.h"
@@ -56,8 +57,7 @@ static WebFallbackThemeEngine::State getWebFallbackThemeState(const LayoutObject
     return WebFallbackThemeEngine::StateNormal;
 }
 
-ThemePainter::ThemePainter(Theme* platformTheme)
-    : m_platformTheme(platformTheme)
+ThemePainter::ThemePainter()
 {
 }
 
@@ -68,18 +68,16 @@ bool ThemePainter::paint(const LayoutObject& o, const PaintInfo& paintInfo, cons
     if (LayoutTheme::theme().shouldUseFallbackTheme(o.styleRef()))
         return paintUsingFallbackTheme(o, paintInfo, r);
 
-    if (m_platformTheme) {
-        switch (part) {
-        case CheckboxPart:
-        case RadioPart:
-        case PushButtonPart:
-        case SquareButtonPart:
-        case ButtonPart:
-        case InnerSpinButtonPart:
-            m_platformTheme->paint(part, LayoutTheme::controlStatesForLayoutObject(o), const_cast<GraphicsContext&>(paintInfo.context), r, o.styleRef().effectiveZoom(), o.view()->frameView());
-            return false;
-        default:
-            break;
+    if (part == ButtonPart && o.node()) {
+        UseCounter::count(o.document(), UseCounter::CSSValueAppearanceButtonRendered);
+        if (isHTMLAnchorElement(o.node())) {
+            UseCounter::count(o.document(), UseCounter::CSSValueAppearanceButtonForAnchor);
+        } else if (isHTMLButtonElement(o.node())) {
+            UseCounter::count(o.document(), UseCounter::CSSValueAppearanceButtonForButton);
+        } else if (isHTMLInputElement(o.node()) && toHTMLInputElement(o.node())->isTextButton()) {
+            // Text buttons (type=button, reset, submit) has
+            // -webkit-appearance:push-button by default.
+            UseCounter::count(o.node()->document(), UseCounter::CSSValueAppearanceButtonForOtherButtons);
         }
     }
 
@@ -128,8 +126,8 @@ bool ThemePainter::paint(const LayoutObject& o, const PaintInfo& paintInfo, cons
         return MediaControlsPainter::paintMediaVolumeSlider(o, paintInfo, r);
     case MediaVolumeSliderThumbPart:
         return MediaControlsPainter::paintMediaVolumeSliderThumb(o, paintInfo, r);
-    case MediaFullScreenVolumeSliderPart:
-    case MediaFullScreenVolumeSliderThumbPart:
+    case MediaFullscreenVolumeSliderPart:
+    case MediaFullscreenVolumeSliderThumbPart:
     case MediaTimeRemainingPart:
     case MediaCurrentTimePart:
     case MediaControlsBackgroundPart:
@@ -137,6 +135,16 @@ bool ThemePainter::paint(const LayoutObject& o, const PaintInfo& paintInfo, cons
     case MediaCastOffButtonPart:
     case MediaOverlayCastOffButtonPart:
         return MediaControlsPainter::paintMediaCastButton(o, paintInfo, r);
+    case MediaTrackSelectionCheckmarkPart:
+        return MediaControlsPainter::paintMediaTrackSelectionCheckmark(o, paintInfo, r);
+    case MediaClosedCaptionsIconPart:
+        return MediaControlsPainter::paintMediaClosedCaptionsIcon(o, paintInfo, r);
+    case MediaSubtitlesIconPart:
+        return MediaControlsPainter::paintMediaSubtitlesIcon(o, paintInfo, r);
+    case MediaOverflowMenuButtonPart:
+        return MediaControlsPainter::paintMediaOverflowMenu(o, paintInfo, r);
+    case MediaDownloadIconPart:
+        return MediaControlsPainter::paintMediaDownloadIcon(o, paintInfo, r);
     case MenulistButtonPart:
     case TextFieldPart:
     case TextAreaPart:
@@ -145,10 +153,6 @@ bool ThemePainter::paint(const LayoutObject& o, const PaintInfo& paintInfo, cons
         return paintSearchField(o, paintInfo, r);
     case SearchFieldCancelButtonPart:
         return paintSearchFieldCancelButton(o, paintInfo, r);
-    case SearchFieldDecorationPart:
-        return paintSearchFieldDecoration(o, paintInfo, r);
-    case SearchFieldResultsDecorationPart:
-        return paintSearchFieldResultsDecoration(o, paintInfo, r);
     default:
         break;
     }
@@ -161,6 +165,14 @@ bool ThemePainter::paintBorderOnly(const LayoutObject& o, const PaintInfo& paint
     // Call the appropriate paint method based off the appearance value.
     switch (o.styleRef().appearance()) {
     case TextFieldPart:
+        UseCounter::count(o.document(), UseCounter::CSSValueAppearanceTextFieldRendered);
+        if (isHTMLInputElement(o.node())) {
+            HTMLInputElement* input = toHTMLInputElement(o.node());
+            if (input->type() == InputTypeNames::search)
+                UseCounter::count(o.document(), UseCounter::CSSValueAppearanceTextFieldForSearch);
+            else if (input->isTextField())
+                UseCounter::count(o.document(), UseCounter::CSSValueAppearanceTextFieldForTextField);
+        }
         return paintTextField(o, paintInfo, r);
     case TextAreaPart:
         return paintTextArea(o, paintInfo, r);
@@ -181,8 +193,6 @@ bool ThemePainter::paintBorderOnly(const LayoutObject& o, const PaintInfo& paint
     case SliderThumbHorizontalPart:
     case SliderThumbVerticalPart:
     case SearchFieldCancelButtonPart:
-    case SearchFieldDecorationPart:
-    case SearchFieldResultsDecorationPart:
     default:
         break;
     }
@@ -212,8 +222,6 @@ bool ThemePainter::paintDecorations(const LayoutObject& o, const PaintInfo& pain
     case SliderThumbVerticalPart:
     case SearchFieldPart:
     case SearchFieldCancelButtonPart:
-    case SearchFieldDecorationPart:
-    case SearchFieldResultsDecorationPart:
     default:
         break;
     }

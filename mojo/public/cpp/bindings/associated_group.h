@@ -10,19 +10,18 @@
 #include "base/memory/ref_counted.h"
 #include "mojo/public/cpp/bindings/associated_interface_ptr_info.h"
 #include "mojo/public/cpp/bindings/associated_interface_request.h"
-#include "mojo/public/cpp/bindings/lib/scoped_interface_endpoint_handle.h"
+#include "mojo/public/cpp/bindings/bindings_export.h"
+#include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
 
 namespace mojo {
 
-namespace internal {
-class MultiplexRouter;
-}
+class AssociatedGroupController;
 
 // AssociatedGroup refers to all the interface endpoints running at one end of a
 // message pipe. It is used to create associated interfaces for that message
 // pipe.
 // It is thread safe and cheap to make copies.
-class AssociatedGroup {
+class MOJO_CPP_BINDINGS_EXPORT AssociatedGroup {
  public:
   // Configuration used by CreateAssociatedInterface(). Please see the comments
   // of that method for more details.
@@ -50,8 +49,8 @@ class AssociatedGroup {
       AssociatedInterfaceConfig config,
       AssociatedInterfacePtrInfo<T>* ptr_info,
       AssociatedInterfaceRequest<T>* request) {
-    internal::ScopedInterfaceEndpointHandle local;
-    internal::ScopedInterfaceEndpointHandle remote;
+    ScopedInterfaceEndpointHandle local;
+    ScopedInterfaceEndpointHandle remote;
     CreateEndpointHandlePair(&local, &remote);
 
     if (!local.is_valid() || !remote.is_valid()) {
@@ -61,32 +60,30 @@ class AssociatedGroup {
     }
 
     if (config == WILL_PASS_PTR) {
-      internal::AssociatedInterfacePtrInfoHelper::SetHandle(ptr_info,
-                                                            std::move(remote));
+      ptr_info->set_handle(std::move(remote));
+
       // The implementation is local, therefore set the version according to
       // the interface definition that this code is built against.
       ptr_info->set_version(T::Version_);
-      internal::AssociatedInterfaceRequestHelper::SetHandle(request,
-                                                            std::move(local));
+      request->Bind(std::move(local));
     } else {
-      internal::AssociatedInterfacePtrInfoHelper::SetHandle(ptr_info,
-                                                            std::move(local));
+      ptr_info->set_handle(std::move(local));
+
       // The implementation is remote, we don't know about its actual version
       // yet.
       ptr_info->set_version(0u);
-      internal::AssociatedInterfaceRequestHelper::SetHandle(request,
-                                                            std::move(remote));
+      request->Bind(std::move(remote));
     }
   }
 
  private:
-  friend class internal::MultiplexRouter;
+  friend class AssociatedGroupController;
 
   void CreateEndpointHandlePair(
-      internal::ScopedInterfaceEndpointHandle* local_endpoint,
-      internal::ScopedInterfaceEndpointHandle* remote_endpoint);
+      ScopedInterfaceEndpointHandle* local_endpoint,
+      ScopedInterfaceEndpointHandle* remote_endpoint);
 
-  scoped_refptr<internal::MultiplexRouter> router_;
+  scoped_refptr<AssociatedGroupController> controller_;
 };
 
 }  // namespace mojo

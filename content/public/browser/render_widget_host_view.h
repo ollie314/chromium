@@ -11,20 +11,20 @@
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/skia/include/core/SkRegion.h"
 #include "ui/gfx/native_widget_types.h"
 
 class GURL;
 
 namespace gfx {
+class Point;
 class Rect;
 class Size;
 }
 
 namespace ui {
 class TextInputClient;
+class AcceleratedWidgetMac;
 }
 
 namespace content {
@@ -82,7 +82,6 @@ class CONTENT_EXPORT RenderWidgetHostView {
   // Retrieves the native view used to contain plugins and identify the
   // renderer in IPC messages.
   virtual gfx::NativeView GetNativeView() const = 0;
-  virtual gfx::NativeViewId GetNativeViewId() const = 0;
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() = 0;
 
   // Returns a ui::TextInputClient to support text input or nullptr if this RWHV
@@ -125,7 +124,7 @@ class CONTENT_EXPORT RenderWidgetHostView {
   virtual void SetShowingContextMenu(bool showing) = 0;
 
   // Returns the currently selected text.
-  virtual base::string16 GetSelectedText() const = 0;
+  virtual base::string16 GetSelectedText() = 0;
 
   // Subclasses should override this method to set the background color. |color|
   // could be transparent or opaque.
@@ -160,7 +159,24 @@ class CONTENT_EXPORT RenderWidgetHostView {
   // deleted after this call.
   virtual void EndFrameSubscription() = 0;
 
+  // Notification that a node was touched.
+  // The |location_dips_screen| parameter contains the location where the touch
+  // occurred in DIPs in screen coordinates.
+  // The |editable| parameter indicates if the node is editable, for e.g.
+  // an input field, etc.
+  virtual void FocusedNodeTouched(const gfx::Point& location_dips_screen,
+                                  bool editable) = 0;
+
+  // Informs the view that its associated render widget has frames to draw and
+  // wants to have BeginFrame messages sent to it.  This should only be called
+  // when the value has changed.  Views must initially default to false.
+  virtual void SetNeedsBeginFrames(bool needs_begin_frames) = 0;
+
 #if defined(OS_MACOSX)
+  // Return the accelerated widget which hosts the CALayers that draw the
+  // content of the view in GetNativeView. This may be null.
+  virtual ui::AcceleratedWidgetMac* GetAcceleratedWidgetMac() const = 0;
+
   // Set the view's active state (i.e., tint state of controls).
   virtual void SetActive(bool active) = 0;
 

@@ -12,7 +12,7 @@
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/views/tabs/alert_indicator_button.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/views/controls/button/image_button.h"
@@ -39,6 +39,7 @@ class FakeTabController : public TabController {
   bool ShouldHideCloseButtonForInactiveTabs() override {
     return false;
   }
+  bool MaySetClip() override { return false; }
   void SelectTab(Tab* tab) override {}
   void ExtendSelectionTo(Tab* tab) override {}
   void ToggleSelected(Tab* tab) override {}
@@ -63,11 +64,15 @@ class FakeTabController : public TabController {
   }
   void OnMouseEventInTab(views::View* source,
                          const ui::MouseEvent& event) override {}
-  bool ShouldPaintTab(const Tab* tab, gfx::Rect* clip) override { return true; }
+  bool ShouldPaintTab(
+      const Tab* tab,
+      const base::Callback<gfx::Path(const gfx::Size&)>& border_callback,
+      gfx::Path* clip) override {
+    return true;
+  }
   bool CanPaintThrobberToLayer() const override {
     return paint_throbber_to_layer_;
   }
-  bool IsIncognito() const override { return false; }
   bool IsImmersiveStyle() const override { return immersive_style_; }
   SkColor GetToolbarTopSeparatorColor() const override { return SK_ColorBLACK; }
   int GetBackgroundResourceId(bool* custom_image) const override {
@@ -260,15 +265,13 @@ TEST_F(TabTest, HitTestTopPixel) {
   int middle_y = tab.height() / 2;
   EXPECT_FALSE(tab.HitTestPoint(gfx::Point(0, middle_y)));
 
-  // Normally, tabs should not be hit if we click in the exclusion region, only
-  // if we click below it.
-  const int exclusion = GetLayoutConstant(TAB_TOP_EXCLUSION_HEIGHT);
+  // Tabs should not be hit if we click above them.
   int middle_x = tab.width() / 2;
-  EXPECT_FALSE(tab.HitTestPoint(gfx::Point(middle_x, exclusion - 1)));
-  EXPECT_TRUE(tab.HitTestPoint(gfx::Point(middle_x, exclusion)));
+  EXPECT_FALSE(tab.HitTestPoint(gfx::Point(middle_x, -1)));
+  EXPECT_TRUE(tab.HitTestPoint(gfx::Point(middle_x, 0)));
 
-  // If the window is maximized, however, we want clicks in the top edge to
-  // select the tab.
+  // Make sure top edge clicks still select the tab when the window is
+  // maximized.
   widget.Maximize();
   EXPECT_TRUE(tab.HitTestPoint(gfx::Point(middle_x, 0)));
 
@@ -406,6 +409,26 @@ TEST_F(TabTest, CloseButtonLayout) {
 
   // Also make sure the close button is sized as large as the tab.
   EXPECT_EQ(50, GetCloseButton(tab)->bounds().height());
+}
+
+// Regression test for http://crbug.com/609701. Ensure TabCloseButton does not
+// get focus on right click.
+TEST_F(TabTest, CloseButtonFocus) {
+  Widget widget;
+  InitWidget(&widget);
+  FakeTabController tab_controller;
+  Tab tab(&tab_controller, nullptr);
+  widget.GetContentsView()->AddChildView(&tab);
+
+  views::ImageButton* tab_close_button = GetCloseButton(tab);
+
+  // Verify tab_close_button does not get focus on right click.
+  ui::MouseEvent right_click_event(ui::ET_KEY_PRESSED, gfx::Point(),
+                                   gfx::Point(), base::TimeTicks(),
+                                   ui::EF_RIGHT_MOUSE_BUTTON, 0);
+  tab_close_button->OnMousePressed(right_click_event);
+  EXPECT_NE(tab_close_button,
+            tab_close_button->GetFocusManager()->GetFocusedView());
 }
 
 // Tests expected changes to the ThrobberView state when the WebContents loading

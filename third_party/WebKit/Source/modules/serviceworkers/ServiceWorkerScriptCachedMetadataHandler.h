@@ -8,8 +8,8 @@
 #include "core/fetch/CachedMetadataHandler.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/Vector.h"
+#include <stdint.h>
 
 namespace blink {
 
@@ -24,9 +24,9 @@ public:
     }
     ~ServiceWorkerScriptCachedMetadataHandler() override;
     DECLARE_VIRTUAL_TRACE();
-    void setCachedMetadata(unsigned dataTypeID, const char*, size_t, CacheType) override;
+    void setCachedMetadata(uint32_t dataTypeID, const char*, size_t, CacheType) override;
     void clearCachedMetadata(CacheType) override;
-    CachedMetadata* cachedMetadata(unsigned dataTypeID) const override;
+    PassRefPtr<CachedMetadata> cachedMetadata(uint32_t dataTypeID) const override;
     String encoding() const override;
 
 private:

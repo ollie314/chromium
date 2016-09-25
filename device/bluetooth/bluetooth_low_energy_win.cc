@@ -467,14 +467,10 @@ bool CollectBluetoothLowEnergyDeviceInfo(
           device_info_handle, &device_info_data, result, error)) {
     return false;
   }
-  if (!CollectBluetoothLowEnergyDeviceFriendlyName(
-          device_info_handle, &device_info_data, result, error)) {
-    // Only fail if not the GATT service device interface, which doesn't have a
-    // friendly name.
-    if (device_interface_data->InterfaceClassGuid !=
-        GUID_BLUETOOTH_GATT_SERVICE_DEVICE_INTERFACE)
-      return false;
-  }
+  // Get the friendly name. If it fails it is OK to leave the
+  // device_info_data.friendly_name as nullopt indicating the name not read.
+  CollectBluetoothLowEnergyDeviceFriendlyName(device_info_handle,
+                                              &device_info_data, result, error);
   if (!CollectBluetoothLowEnergyDeviceAddress(
           device_info_handle, &device_info_data, result, error)) {
     return false;
@@ -595,17 +591,14 @@ DeviceRegistryPropertyValue::Create(DWORD property_type,
       break;
     }
   }
-  return base::WrapUnique(new DeviceRegistryPropertyValue(
-      property_type, std::move(value), value_size));
+  return base::WrapUnique(
+      new DeviceRegistryPropertyValue(property_type, std::move(value)));
 }
 
 DeviceRegistryPropertyValue::DeviceRegistryPropertyValue(
     DWORD property_type,
-    std::unique_ptr<uint8_t[]> value,
-    size_t value_size)
-    : property_type_(property_type),
-      value_(std::move(value)),
-      value_size_(value_size) {}
+    std::unique_ptr<uint8_t[]> value)
+    : property_type_(property_type), value_(std::move(value)) {}
 
 DeviceRegistryPropertyValue::~DeviceRegistryPropertyValue() {
 }
@@ -843,15 +836,20 @@ HRESULT BluetoothLowEnergyWrapper::RegisterGattEvents(
     base::FilePath& service_path,
     BTH_LE_GATT_EVENT_TYPE event_type,
     PVOID event_parameter,
-    PFNBLUETOOTH_GATT_EVENT_CALLBACK callback,
+    PFNBLUETOOTH_GATT_EVENT_CALLBACK_CORRECTED callback,
     PVOID context,
     BLUETOOTH_GATT_EVENT_HANDLE* out_handle) {
   base::File file(service_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
   if (!file.IsValid())
     return HRESULT_FROM_WIN32(ERROR_OPEN_FAILED);
-  return BluetoothGATTRegisterEvent(file.GetPlatformFile(), event_type,
-                                    event_parameter, callback, context,
-                                    out_handle, BLUETOOTH_GATT_FLAG_NONE);
+  // Cast to the official callback type for compatibility with the Windows
+  // 10.0.10586 definition, even though it is incorrect. This cast can be
+  // removed when we mandate building Chromium with the 10.0.14393 SDK or
+  // higher.
+  return BluetoothGATTRegisterEvent(
+      file.GetPlatformFile(), event_type, event_parameter,
+      reinterpret_cast<PFNBLUETOOTH_GATT_EVENT_CALLBACK>(callback), context,
+      out_handle, BLUETOOTH_GATT_FLAG_NONE);
 }
 
 HRESULT BluetoothLowEnergyWrapper::UnregisterGattEvent(

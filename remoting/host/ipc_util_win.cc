@@ -13,6 +13,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/win_util.h"
+#include "ipc/attachment_broker.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "remoting/host/win/security_descriptor.h"
@@ -56,9 +57,15 @@ bool CreateConnectedIpcChannel(
   }
 
   // Wrap the pipe into an IPC channel.
-  std::unique_ptr<IPC::ChannelProxy> server = IPC::ChannelProxy::Create(
-      IPC::ChannelHandle(pipe.Get()), IPC::Channel::MODE_SERVER, listener,
-      io_task_runner);
+  std::unique_ptr<IPC::ChannelProxy> server(
+      new IPC::ChannelProxy(listener, io_task_runner));
+  IPC::AttachmentBroker* broker = IPC::AttachmentBroker::GetGlobal();
+  DCHECK(broker) << "No AttachmentBroker registered.";
+  if (broker->IsPrivilegedBroker()) {
+    broker->RegisterCommunicationChannel(server.get(), io_task_runner);
+  }
+  server->Init(IPC::ChannelHandle(pipe.Get()), IPC::Channel::MODE_SERVER,
+               /*create_pipe_now=*/true);
 
   // Convert the channel name to the pipe name.
   std::string pipe_name(kChromePipeNamePrefix);

@@ -66,8 +66,8 @@ public:
     IntSize sliderTickSize() const override;
     int sliderTickOffsetFromTrackCenter() const override;
 
-    int popupInternalPaddingLeft(const ComputedStyle&) const override;
-    int popupInternalPaddingRight(const ComputedStyle&) const override;
+    int popupInternalPaddingStart(const ComputedStyle&) const override;
+    int popupInternalPaddingEnd(const ComputedStyle&) const override;
     int popupInternalPaddingTop(const ComputedStyle&) const override;
     int popupInternalPaddingBottom(const ComputedStyle&) const override;
 
@@ -93,8 +93,6 @@ protected:
     void adjustMenuListButtonStyle(ComputedStyle&, Element*) const override;
     void adjustSearchFieldStyle(ComputedStyle&) const override;
     void adjustSearchFieldCancelButtonStyle(ComputedStyle&) const override;
-    void adjustSearchFieldDecorationStyle(ComputedStyle&) const override;
-    void adjustSearchFieldResultsDecorationStyle(ComputedStyle&) const override;
 
 public:
     // Constants and methods shared with ThemePainterMac
@@ -123,7 +121,6 @@ public:
 
     const IntSize* searchFieldSizes() const;
     const IntSize* cancelButtonSizes() const;
-    const IntSize* resultsButtonSizes() const;
     void setSearchCellState(const LayoutObject&, const IntRect&);
     void setSearchFieldSize(ComputedStyle&) const;
 
@@ -133,10 +130,6 @@ public:
 
     // A view associated to the contained document. Subclasses may not have such a view and return a fake.
     NSView* documentViewFor(const LayoutObject&) const;
-
-    int minimumProgressBarHeight(const ComputedStyle&) const;
-    const IntSize* progressBarSizes() const;
-    const int* progressBarMargins(NSControlSize) const;
 
     void updateActiveState(NSCell*, const LayoutObject&);
 
@@ -150,8 +143,8 @@ public:
     static constexpr float menuListBaseArrowHeight = 4.0f;
     static constexpr float menuListBaseArrowWidth = 5.0f;
     static constexpr float menuListBaseSpaceBetweenArrows = 2.0f;
-    static const int menuListArrowPaddingLeft = 4;
-    static const int menuListArrowPaddingRight = 4;
+    static const int menuListArrowPaddingStart = 4;
+    static const int menuListArrowPaddingEnd = 4;
     static const int sliderThumbWidth = 15;
     static const int sliderThumbHeight = 15;
     static const int sliderThumbShadowBlur = 1;
@@ -161,14 +154,18 @@ public:
 
 protected:
     void adjustMediaSliderThumbSize(ComputedStyle&) const;
-    String extraFullScreenStyleSheet() override;
+    String extraFullscreenStyleSheet() override;
 
     // Controls color values returned from platformFocusRingColor(). systemColor() will be used when false.
     bool usesTestModeFocusRingColor() const;
 
     bool shouldUseFallbackTheme(const ComputedStyle&) const override;
 
+    void adjustProgressBarBounds(ComputedStyle&) const override;
+
 private:
+    const int* progressBarHeights() const;
+    const int* progressBarMargins(NSControlSize) const;
     String fileListNameForWidth(Locale&, const FileList*, const Font&, int width) const override;
     String extraDefaultStyleSheet() override;
     bool themeDrawsFocusRing(const ComputedStyle&) const override;

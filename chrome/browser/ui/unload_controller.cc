@@ -6,7 +6,7 @@
 
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/ui/browser.h"
@@ -43,7 +43,6 @@ bool UnloadController::CanCloseContents(content::WebContents* contents) {
       is_calling_before_unload_handlers();
 }
 
-// static
 bool UnloadController::ShouldRunUnloadEventsHelper(
     content::WebContents* contents) {
   // If |contents| is being inspected, devtools needs to intercept beforeunload
@@ -51,8 +50,14 @@ bool UnloadController::ShouldRunUnloadEventsHelper(
   return DevToolsWindow::GetInstanceForInspectedWebContents(contents) != NULL;
 }
 
-// static
 bool UnloadController::RunUnloadEventsHelper(content::WebContents* contents) {
+  // Special case for when we quit an application. The devtools window can
+  // close if it's beforeunload event has already fired which will happen due
+  // to the interception of it's content's beforeunload.
+  if (browser_->is_devtools() &&
+      DevToolsWindow::HasFiredBeforeUnloadEventForDevToolsBrowser(browser_))
+    return false;
+
   // If there's a devtools window attached to |contents|,
   // we would like devtools to call its own beforeunload handlers first,
   // and then call beforeunload handlers for |contents|.
@@ -69,7 +74,7 @@ bool UnloadController::RunUnloadEventsHelper(content::WebContents* contents) {
     // them. Once they have fired, we'll get a message back saying whether
     // to proceed closing the page or not, which sends us back to this method
     // with the NeedToFireBeforeUnload bit cleared.
-    contents->DispatchBeforeUnload(false);
+    contents->DispatchBeforeUnload();
     return true;
   }
   return false;
@@ -209,22 +214,19 @@ void UnloadController::CancelWindowClose() {
 void UnloadController::Observe(int type,
                                const content::NotificationSource& source,
                                const content::NotificationDetails& details) {
-  switch (type) {
-    case content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED:
-      if (is_attempting_to_close_browser_) {
-        ClearUnloadState(content::Source<content::WebContents>(source).ptr(),
-                         false);  // See comment for ClearUnloadState().
-      }
-      break;
-    default:
-      NOTREACHED() << "Got a notification we didn't register for.";
+  DCHECK_EQ(content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED, type);
+
+  if (is_attempting_to_close_browser_) {
+    ClearUnloadState(content::Source<content::WebContents>(source).ptr(),
+                     false);  // See comment for ClearUnloadState().
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // UnloadController, TabStripModelObserver implementation:
 
-void UnloadController::TabInsertedAt(content::WebContents* contents,
+void UnloadController::TabInsertedAt(TabStripModel* tab_strip_model,
+                                     content::WebContents* contents,
                                      int index,
                                      bool foreground) {
   TabAttachedImpl(contents);
@@ -297,7 +299,7 @@ void UnloadController::ProcessPendingTabs() {
       // and then call beforeunload handlers for |web_contents|.
       // See DevToolsWindow::InterceptPageBeforeUnload for details.
       if (!DevToolsWindow::InterceptPageBeforeUnload(web_contents))
-        web_contents->DispatchBeforeUnload(false);
+        web_contents->DispatchBeforeUnload();
     } else {
       ClearUnloadState(web_contents, true);
     }

@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
+#include "base/run_loop.h"
 #include "base/test/test_simple_task_runner.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -117,8 +118,7 @@ class MockHotwordService : public HotwordService {
 
 std::unique_ptr<KeyedService> BuildMockHotwordService(
     content::BrowserContext* context) {
-  return base::WrapUnique(
-      new MockHotwordService(static_cast<Profile*>(context)));
+  return base::MakeUnique<MockHotwordService>(static_cast<Profile*>(context));
 }
 
 }  // namespace
@@ -256,7 +256,7 @@ TEST_P(HotwordServiceTest, PreviousLanguageSetOnInstall) {
   SetApplicationLocale(profile(), "test_locale");
 
   hotword_service->InstallHotwordExtensionFromWebstore(1);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ("test_locale",
             profile()->GetPrefs()->GetString(prefs::kHotwordPreviousLanguage));
@@ -284,7 +284,7 @@ TEST_P(HotwordServiceTest, UninstallReinstallTriggeredCorrectly) {
 
   // Do an initial installation.
   hotword_service->InstallHotwordExtensionFromWebstore(1);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ("en",
             profile()->GetPrefs()->GetString(prefs::kHotwordPreviousLanguage));
 
@@ -379,7 +379,7 @@ TEST_P(HotwordServiceTest, DisableAlwaysOnOnLanguageChange) {
 
   // Do an initial installation.
   hotword_service->InstallHotwordExtensionFromWebstore(1);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   // The previous locale should be set but should match the current
   // locale. No reason to uninstall.

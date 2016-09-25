@@ -27,7 +27,7 @@ TEST(OriginTest, UniqueOriginComparison) {
                               "yay",
                               "http::///invalid.example.com/"};
 
-  for (const auto& test_url : urls) {
+  for (auto* test_url : urls) {
     SCOPED_TRACE(test_url);
     GURL url(test_url);
     url::Origin origin(url);
@@ -250,6 +250,63 @@ TEST(OriginTest, UnsafelyCreateUniqueViaEmbeddedNulls) {
     EXPECT_TRUE(origin.unique());
     EXPECT_FALSE(origin.IsSameOriginWith(origin));
   }
+}
+
+TEST(OriginTest, DomainIs) {
+  const struct {
+    const char* url;
+    const char* lower_ascii_domain;
+    bool expected_domain_is;
+  } kTestCases[] = {
+      {"http://google.com/foo", "google.com", true},
+      {"http://www.google.com:99/foo", "google.com", true},
+      {"http://www.google.com.cn/foo", "google.com", false},
+      {"http://www.google.comm", "google.com", false},
+      {"http://www.iamnotgoogle.com/foo", "google.com", false},
+      {"http://www.google.com/foo", "Google.com", false},
+
+      // If the host ends with a dot, it matches domains with or without a dot.
+      {"http://www.google.com./foo", "google.com", true},
+      {"http://www.google.com./foo", "google.com.", true},
+      {"http://www.google.com./foo", ".com", true},
+      {"http://www.google.com./foo", ".com.", true},
+
+      // But, if the host doesn't end with a dot and the input domain does, then
+      // it's considered to not match.
+      {"http://google.com/foo", "google.com.", false},
+
+      // If the host ends with two dots, it doesn't match.
+      {"http://www.google.com../foo", "google.com", false},
+
+      // Filesystem scheme.
+      {"filesystem:http://www.google.com:99/foo/", "google.com", true},
+      {"filesystem:http://www.iamnotgoogle.com/foo/", "google.com", false},
+
+      // File scheme.
+      {"file:///home/user/text.txt", "", false},
+      {"file:///home/user/text.txt", "txt", false},
+  };
+
+  for (const auto& test_case : kTestCases) {
+    SCOPED_TRACE(testing::Message() << "(url, domain): (" << test_case.url
+                                    << ", " << test_case.lower_ascii_domain
+                                    << ")");
+    GURL url(test_case.url);
+    ASSERT_TRUE(url.is_valid());
+    url::Origin origin(url);
+
+    EXPECT_EQ(test_case.expected_domain_is,
+              origin.DomainIs(test_case.lower_ascii_domain));
+  }
+
+  // If the URL is invalid, DomainIs returns false.
+  GURL invalid_url("google.com");
+  ASSERT_FALSE(invalid_url.is_valid());
+  EXPECT_FALSE(url::Origin(invalid_url).DomainIs("google.com"));
+
+  // Unique origins.
+  EXPECT_FALSE(url::Origin().DomainIs(""));
+  EXPECT_FALSE(url::Origin().DomainIs("com"));
 }
 
 }  // namespace url

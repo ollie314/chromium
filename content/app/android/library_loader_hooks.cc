@@ -9,6 +9,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
 #include "base/android/jni_string.h"
+#include "base/android/library_loader/library_loader_hooks.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -16,9 +17,9 @@
 #include "base/strings/string_util.h"
 #include "base/trace_event/trace_event.h"
 #include "base/tracked_objects.h"
-#include "components/tracing/trace_config_file.h"
-#include "components/tracing/trace_to_console.h"
-#include "components/tracing/tracing_switches.h"
+#include "components/tracing/browser/trace_config_file.h"
+#include "components/tracing/common/trace_to_console.h"
+#include "components/tracing/common/tracing_switches.h"
 #include "content/app/android/app_jni_registrar.h"
 #include "content/browser/android/browser_jni_registrar.h"
 #include "content/common/android/common_jni_registrar.h"
@@ -26,14 +27,17 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 #include "device/bluetooth/android/bluetooth_jni_registrar.h"
+#include "device/gamepad/android/gamepad_jni_registrar.h"
+#include "device/generic_sensor/android/sensors_jni_registrar.h"
+#include "device/geolocation/android/geolocation_jni_registrar.h"
 #include "device/usb/android/usb_jni_registrar.h"
 #include "media/base/android/media_jni_registrar.h"
+#include "media/capture/content/android/screen_capture_jni_registrar.h"
 #include "media/capture/video/android/capture_jni_registrar.h"
 #include "media/midi/midi_jni_registrar.h"
 #include "net/android/net_jni_registrar.h"
 #include "ui/android/ui_android_jni_registrar.h"
 #include "ui/base/android/ui_base_jni_registrar.h"
-#include "ui/events/android/events_jni_registrar.h"
 #include "ui/gfx/android/gfx_jni_registrar.h"
 #include "ui/gl/android/gl_jni_registrar.h"
 #include "ui/shell_dialogs/android/shell_dialogs_jni_registrar.h"
@@ -59,22 +63,31 @@ bool EnsureJniRegistered(JNIEnv* env) {
     if (!ui::gl::android::RegisterJni(env))
       return false;
 
-    if (!ui::events::android::RegisterJni(env))
-      return false;
-
     if (!ui::shell_dialogs::RegisterJni(env))
       return false;
 
     if (!content::android::RegisterCommonJni(env))
       return false;
 
-    if (!content::android::RegisterBrowserJni(env))
-      return false;
+    if (base::android::GetLibraryProcessType(env) ==
+        base::android::PROCESS_BROWSER) {
+      if (!content::android::RegisterBrowserJni(env))
+        return false;
+    }
 
     if (!content::android::RegisterAppJni(env))
       return false;
 
     if (!device::android::RegisterBluetoothJni(env))
+      return false;
+
+    if (!device::android::RegisterGamepadJni(env))
+      return false;
+
+    if (!device::android::RegisterGeolocationJni(env))
+      return false;
+
+    if (!device::android::RegisterSensorsJni(env))
       return false;
 
     if (!device::android::RegisterUsbJni(env))
@@ -87,6 +100,9 @@ bool EnsureJniRegistered(JNIEnv* env) {
       return false;
 
     if (!media::midi::RegisterJni(env))
+      return false;
+
+    if (!media::RegisterScreenCaptureJni(env))
       return false;
 
     if (!ui::RegisterUIAndroidJni(env))

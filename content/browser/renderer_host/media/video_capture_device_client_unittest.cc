@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/media/video_capture_buffer_pool.h"
 #include "content/browser/renderer_host/media/video_capture_controller.h"
@@ -37,17 +37,15 @@ class MockVideoCaptureController : public VideoCaptureController {
       : VideoCaptureController(max_buffers) {}
   ~MockVideoCaptureController() override {}
 
-  MOCK_METHOD1(MockDoIncomingCapturedVideoFrameOnIOThread,
-               void(const gfx::Size&));
-  MOCK_METHOD0(DoErrorOnIOThread, void());
-  MOCK_METHOD1(DoLogOnIOThread, void(const std::string& message));
-  MOCK_METHOD1(DoBufferDestroyedOnIOThread, void(int buffer_id_to_drop));
+  MOCK_METHOD1(MockOnIncomingCapturedVideoFrame, void(const gfx::Size&));
+  MOCK_METHOD0(OnError, void());
+  MOCK_METHOD1(OnLog, void(const std::string& message));
+  MOCK_METHOD1(OnBufferDestroyed, void(int buffer_id_to_drop));
 
-  void DoIncomingCapturedVideoFrameOnIOThread(
+  void OnIncomingCapturedVideoFrame(
       std::unique_ptr<media::VideoCaptureDevice::Client::Buffer> buffer,
-      const scoped_refptr<media::VideoFrame>& frame,
-      const base::TimeTicks& timestamp) override {
-    MockDoIncomingCapturedVideoFrameOnIOThread(frame->coded_size());
+      const scoped_refptr<media::VideoFrame>& frame) override {
+    MockOnIncomingCapturedVideoFrame(frame->coded_size());
   }
 };
 
@@ -82,12 +80,11 @@ TEST_F(VideoCaptureDeviceClientTest, Minimal) {
       media::PIXEL_FORMAT_I420,
       media::PIXEL_STORAGE_CPU);
   DCHECK(device_client_.get());
-  EXPECT_CALL(*controller_, DoLogOnIOThread(_)).Times(1);
-  EXPECT_CALL(*controller_, MockDoIncomingCapturedVideoFrameOnIOThread(_))
-      .Times(1);
+  EXPECT_CALL(*controller_, OnLog(_)).Times(1);
+  EXPECT_CALL(*controller_, MockOnIncomingCapturedVideoFrame(_)).Times(1);
   device_client_->OnIncomingCapturedData(data, kScratchpadSizeInBytes,
                                          kFrameFormat, 0 /*clockwise rotation*/,
-                                         base::TimeTicks());
+                                         base::TimeTicks(), base::TimeDelta());
   base::RunLoop().RunUntilIdle();
   Mock::VerifyAndClearExpectations(controller_.get());
 }
@@ -104,12 +101,11 @@ TEST_F(VideoCaptureDeviceClientTest, FailsSilentlyGivenInvalidFrameFormat) {
       media::VideoPixelStorage::PIXEL_STORAGE_CPU);
   DCHECK(device_client_.get());
   // Expect the the call to fail silently inside the VideoCaptureDeviceClient.
-  EXPECT_CALL(*controller_, DoLogOnIOThread(_)).Times(1);
-  EXPECT_CALL(*controller_, MockDoIncomingCapturedVideoFrameOnIOThread(_))
-      .Times(0);
+  EXPECT_CALL(*controller_, OnLog(_)).Times(1);
+  EXPECT_CALL(*controller_, MockOnIncomingCapturedVideoFrame(_)).Times(0);
   device_client_->OnIncomingCapturedData(data, kScratchpadSizeInBytes,
                                          kFrameFormat, 0 /*clockwise rotation*/,
-                                         base::TimeTicks());
+                                         base::TimeTicks(), base::TimeDelta());
   base::RunLoop().RunUntilIdle();
   Mock::VerifyAndClearExpectations(controller_.get());
 }
@@ -124,16 +120,15 @@ TEST_F(VideoCaptureDeviceClientTest, DropsFrameIfNoBuffer) {
       media::PIXEL_STORAGE_CPU);
   // We expect the second frame to be silently dropped, so these should
   // only be called once despite the two frames.
-  EXPECT_CALL(*controller_, DoLogOnIOThread(_)).Times(1);
-  EXPECT_CALL(*controller_, MockDoIncomingCapturedVideoFrameOnIOThread(_))
-      .Times(1);
+  EXPECT_CALL(*controller_, OnLog(_)).Times(1);
+  EXPECT_CALL(*controller_, MockOnIncomingCapturedVideoFrame(_)).Times(1);
   // Pass two frames. The second will be dropped.
   device_client_->OnIncomingCapturedData(data, kScratchpadSizeInBytes,
                                          kFrameFormat, 0 /*clockwise rotation*/,
-                                         base::TimeTicks());
+                                         base::TimeTicks(), base::TimeDelta());
   device_client_->OnIncomingCapturedData(data, kScratchpadSizeInBytes,
                                          kFrameFormat, 0 /*clockwise rotation*/,
-                                         base::TimeTicks());
+                                         base::TimeTicks(), base::TimeDelta());
   base::RunLoop().RunUntilIdle();
   Mock::VerifyAndClearExpectations(controller_.get());
 }
@@ -173,12 +168,12 @@ TEST_F(VideoCaptureDeviceClientTest, DataCaptureGoodPixelFormats) {
   for (media::VideoPixelFormat format : kSupportedFormats) {
     params.requested_format.pixel_format = format;
 
-    EXPECT_CALL(*controller_, DoLogOnIOThread(_)).Times(1);
-    EXPECT_CALL(*controller_, MockDoIncomingCapturedVideoFrameOnIOThread(_))
-        .Times(1);
+    EXPECT_CALL(*controller_, OnLog(_)).Times(1);
+    EXPECT_CALL(*controller_, MockOnIncomingCapturedVideoFrame(_)).Times(1);
     device_client_->OnIncomingCapturedData(
         data, params.requested_format.ImageAllocationSize(),
-        params.requested_format, 0 /* clockwise_rotation */, base::TimeTicks());
+        params.requested_format, 0 /* clockwise_rotation */, base::TimeTicks(),
+        base::TimeDelta());
     base::RunLoop().RunUntilIdle();
     Mock::VerifyAndClearExpectations(controller_.get());
   }
@@ -207,7 +202,7 @@ TEST_F(VideoCaptureDeviceClientTest, CheckRotationsAndCrops) {
   const size_t kScratchpadSizeInBytes = 400;
   unsigned char data[kScratchpadSizeInBytes] = {};
 
-  EXPECT_CALL(*controller_, DoLogOnIOThread(_)).Times(1);
+  EXPECT_CALL(*controller_, OnLog(_)).Times(1);
 
   media::VideoCaptureParams params;
   for (const auto& size_and_rotation : kSizeAndRotations) {
@@ -218,12 +213,13 @@ TEST_F(VideoCaptureDeviceClientTest, CheckRotationsAndCrops) {
         media::VideoCaptureFormat(size_and_rotation.input_resolution, 30.0f,
                                   media::PIXEL_FORMAT_ARGB);
     gfx::Size coded_size;
-    EXPECT_CALL(*controller_, MockDoIncomingCapturedVideoFrameOnIOThread(_))
+    EXPECT_CALL(*controller_, MockOnIncomingCapturedVideoFrame(_))
         .Times(1)
         .WillOnce(SaveArg<0>(&coded_size));
     device_client_->OnIncomingCapturedData(
         data, params.requested_format.ImageAllocationSize(),
-        params.requested_format, size_and_rotation.rotation, base::TimeTicks());
+        params.requested_format, size_and_rotation.rotation, base::TimeTicks(),
+        base::TimeDelta());
     base::RunLoop().RunUntilIdle();
 
     EXPECT_EQ(coded_size.width(), size_and_rotation.output_resolution.width());

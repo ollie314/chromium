@@ -10,7 +10,7 @@
 
 #include "base/macros.h"
 #include "build/build_config.h"
-#include "skia/ext/refptr.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/views/mus/mus_export.h"
 
 namespace aura {
@@ -32,17 +32,24 @@ class ViewsDelegate;
 // |resource_file| is the path to the apk file containing the resources.
 class VIEWS_MUS_EXPORT AuraInit {
  public:
-  AuraInit(shell::Connector* connector, const std::string& resource_file);
+  // |resource_file| is the file to load strings and 1x icons from.
+  // |resource_file_200| can be an empty string, otherwise it is the file to
+  // load 2x icons from.
+  AuraInit(shell::Connector* connector,
+           const std::string& resource_file,
+           const std::string& resource_file_200 = std::string());
+
   ~AuraInit();
 
  private:
   void InitializeResources(shell::Connector* connector);
 
-#if defined(OS_LINUX) && !defined(OS_ANDROID)
-  skia::RefPtr<font_service::FontLoader> font_loader_;
+#if defined(OS_LINUX)
+  sk_sp<font_service::FontLoader> font_loader_;
 #endif
 
   const std::string resource_file_;
+  const std::string resource_file_200_;
 
   std::unique_ptr<aura::Env> env_;
   std::unique_ptr<ViewsDelegate> views_delegate_;

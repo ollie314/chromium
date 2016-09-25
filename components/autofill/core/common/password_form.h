@@ -100,9 +100,9 @@ struct PasswordForm {
   // the PasswordManager for form autofill; that is, the action of the saved
   // credentials must match the action of the form on the page to be autofilled.
   // If this is empty / not available, it will result in a "restricted" IE-like
-  // autofill policy, where we wait for the user to type in his username before
-  // autofilling the password. In these cases, after successful login the action
-  // URL will automatically be assigned by the PasswordManager.
+  // autofill policy, where we wait for the user to type in their username
+  // before autofilling the password. In these cases, after successful login the
+  // action URL will automatically be assigned by the PasswordManager.
   //
   // When parsing an HTML form, this must always be set.
   GURL action;
@@ -175,15 +175,6 @@ struct PasswordForm {
   // Whether the |new_password_element| has an autocomplete=new-password
   // attribute. This is only used in parsed HTML forms.
   bool new_password_marked_by_site;
-
-  // Whether or not this login was saved under an HTTPS session with a valid
-  // SSL cert. We will never match or autofill a PasswordForm where
-  // ssl_valid == true with a PasswordForm where ssl_valid == false. This means
-  // passwords saved under HTTPS will never get autofilled onto an HTTP page.
-  // When importing, this should be set to true if the page URL is HTTPS, thus
-  // giving it "the benefit of the doubt" that the SSL cert was valid when it
-  // was saved. Default to false.
-  bool ssl_valid;
 
   // True if this PasswordForm represents the last username/password login the
   // user selected to log in to the site. If there is only one saved entry for
@@ -304,12 +295,6 @@ bool ArePasswordFormUniqueKeyEqual(const PasswordForm& left,
 struct LessThanUniqueKey {
   bool operator()(const PasswordForm* left, const PasswordForm* right) const;
 };
-
-// Map username to PasswordForm* for convenience. See password_form_manager.h.
-using PasswordFormMap = std::map<base::string16, std::unique_ptr<PasswordForm>>;
-
-// Like PasswordFormMap, but with weak (not owned) pointers.
-using ConstPasswordFormMap = std::map<base::string16, const PasswordForm*>;
 
 // For testing.
 std::ostream& operator<<(std::ostream& os, PasswordForm::Layout layout);

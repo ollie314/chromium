@@ -54,6 +54,7 @@ class ServiceWorkerHandler : public DevToolsAgentHostClient,
   Response Stop(const std::string& worker_id);
   Response Unregister(const std::string& scope_url);
   Response StartWorker(const std::string& scope_url);
+  Response SkipWaiting(const std::string& scope_url);
   Response StopWorker(const std::string& version_id);
   Response UpdateRegistration(const std::string& scope_url);
   Response InspectWorker(const std::string& version_id);
@@ -61,6 +62,10 @@ class ServiceWorkerHandler : public DevToolsAgentHostClient,
   Response DeliverPushMessage(const std::string& origin,
                               const std::string& registration_id,
                               const std::string& data);
+  Response DispatchSyncEvent(const std::string& origin,
+                             const std::string& registration_id,
+                             const std::string& tag,
+                             bool last_chance);
   Response GetTargetInfo(const std::string& target_id,
                          scoped_refptr<TargetInfo>* target_info);
   Response ActivateTarget(const std::string& target_id);
@@ -68,6 +73,8 @@ class ServiceWorkerHandler : public DevToolsAgentHostClient,
   // WorkerDevToolsManager::Observer implementation.
   void WorkerCreated(ServiceWorkerDevToolsAgentHost* host) override;
   void WorkerReadyForInspection(ServiceWorkerDevToolsAgentHost* host) override;
+  void WorkerVersionInstalled(ServiceWorkerDevToolsAgentHost* host) override;
+  void WorkerVersionDoomed(ServiceWorkerDevToolsAgentHost* host) override;
   void WorkerDestroyed(ServiceWorkerDevToolsAgentHost* host) override;
 
  private:

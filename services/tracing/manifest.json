@@ -3,8 +3,14 @@
   "name": "mojo:tracing",
   "display_name": "Tracing Collector",
   "capabilities": {
+    "provided": {
+      "app": [
+        "tracing::TracingCollector",
+        "tracing::StartupPerformanceDataCollector"
+      ]
+    },
     "required": {
-      "mojo:shell": { "classes": [ "all_users" ] }
+      "mojo:shell": { "classes": [ "shell:all_users" ] }
     }
   }
 }

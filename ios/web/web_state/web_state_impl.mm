@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/web/interstitials/web_interstitial_impl.h"
 #import "ios/web/navigation/crw_session_controller.h"
@@ -14,9 +15,11 @@
 #include "ios/web/navigation/navigation_item_impl.h"
 #include "ios/web/net/request_group_util.h"
 #include "ios/web/public/browser_state.h"
+#import "ios/web/public/java_script_dialog_presenter.h"
 #include "ios/web/public/navigation_item.h"
 #include "ios/web/public/url_util.h"
 #include "ios/web/public/web_client.h"
+#import "ios/web/public/web_state/context_menu_params.h"
 #include "ios/web/public/web_state/credential.h"
 #include "ios/web/public/web_state/ui/crw_content_view.h"
 #include "ios/web/public/web_state/web_state_delegate.h"
@@ -25,13 +28,28 @@
 #include "ios/web/web_state/global_web_state_event_tracker.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/ui/crw_web_controller_container_view.h"
-#import "ios/web/web_state/ui/crw_wk_web_view_web_controller.h"
 #include "ios/web/web_state/web_state_facade_delegate.h"
 #import "ios/web/webui/web_ui_ios_controller_factory_registry.h"
 #import "ios/web/webui/web_ui_ios_impl.h"
 #include "net/http/http_response_headers.h"
+#include "services/shell/public/cpp/interface_registry.h"
 
 namespace web {
+
+/* static */
+std::unique_ptr<WebState> WebState::Create(const CreateParams& params) {
+  std::unique_ptr<WebStateImpl> web_state(
+      new WebStateImpl(params.browser_state));
+
+  NSString* window_name = nil;
+  NSString* opener_id = nil;
+  BOOL opened_by_dom = NO;
+  int opener_navigation_index = 0;
+  web_state->GetNavigationManagerImpl().InitializeSession(
+      window_name, opener_id, opened_by_dom, opener_navigation_index);
+
+  return std::unique_ptr<WebState>(web_state.release());
+}
 
 WebStateImpl::WebStateImpl(BrowserState* browser_state)
     : delegate_(nullptr),
@@ -43,8 +61,7 @@ WebStateImpl::WebStateImpl(BrowserState* browser_state)
       interstitial_(nullptr),
       weak_factory_(this) {
   GlobalWebStateEventTracker::GetInstance()->OnWebStateCreated(this);
-  web_controller_.reset(
-      [[CRWWKWebViewWebController alloc] initWithWebState:this]);
+  web_controller_.reset([[CRWWebController alloc] initWithWebState:this]);
 }
 
 WebStateImpl::~WebStateImpl() {
@@ -183,6 +200,10 @@ void WebStateImpl::SetIsLoading(bool is_loading) {
 
 bool WebStateImpl::IsLoading() const {
   return is_loading_;
+}
+
+double WebStateImpl::GetLoadingProgress() const {
+  return [web_controller_ loadingProgress];
 }
 
 bool WebStateImpl::IsBeingDestroyed() const {
@@ -324,10 +345,6 @@ WebInterstitial* WebStateImpl::GetWebInterstitial() const {
   return interstitial_;
 }
 
-int WebStateImpl::GetCertGroupId() const {
-  return request_tracker_->identifier();
-}
-
 net::HttpResponseHeaders* WebStateImpl::GetHttpResponseHeaders() const {
   return http_response_headers_.get();
 }
@@ -403,6 +420,39 @@ void WebStateImpl::SendChangeLoadProgress(double progress) {
   }
 }
 
+bool WebStateImpl::HandleContextMenu(const web::ContextMenuParams& params) {
+  if (delegate_) {
+    return delegate_->HandleContextMenu(this, params);
+  }
+  return false;
+}
+
+void WebStateImpl::RunJavaScriptDialog(
+    const GURL& origin_url,
+    JavaScriptDialogType javascript_dialog_type,
+    NSString* message_text,
+    NSString* default_prompt_text,
+    const DialogClosedCallback& callback) {
+  JavaScriptDialogPresenter* presenter =
+      delegate_ ? delegate_->GetJavaScriptDialogPresenter(this) : nullptr;
+  if (!presenter) {
+    callback.Run(false, nil);
+    return;
+  }
+  presenter->RunJavaScriptDialog(this, origin_url, javascript_dialog_type,
+                                 message_text, default_prompt_text, callback);
+}
+
+void WebStateImpl::CancelActiveAndPendingDialogs() {
+  if (delegate_) {
+    JavaScriptDialogPresenter* presenter =
+        delegate_->GetJavaScriptDialogPresenter(this);
+    if (presenter) {
+      presenter->CancelActiveAndPendingDialogs(this);
+    }
+  }
+}
+
 WebUIIOS* WebStateImpl::CreateWebUIIOS(const GURL& url) {
   WebUIIOSControllerFactory* factory =
       WebUIIOSControllerFactoryRegistry::GetInstance();
@@ -422,12 +472,6 @@ WebUIIOS* WebStateImpl::CreateWebUIIOS(const GURL& url) {
 
 void WebStateImpl::SetContentsMimeType(const std::string& mime_type) {
   mime_type_ = mime_type;
-}
-
-void WebStateImpl::ExecuteJavaScriptAsync(const base::string16& javascript) {
-  DCHECK(Configured());
-  [web_controller_ evaluateJavaScript:base::SysUTF16ToNSString(javascript)
-                  stringResultHandler:nil];
 }
 
 bool WebStateImpl::ShouldAllowRequest(NSURLRequest* request) {
@@ -492,6 +536,13 @@ int WebStateImpl::DownloadImage(
                                               callback:callback];
 }
 
+shell::InterfaceRegistry* WebStateImpl::GetMojoInterfaceRegistry() {
+  if (!mojo_interface_registry_) {
+    mojo_interface_registry_.reset(new shell::InterfaceRegistry);
+  }
+  return mojo_interface_registry_.get();
+}
+
 base::WeakPtr<WebState> WebStateImpl::AsWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
@@ -506,6 +557,14 @@ void WebStateImpl::SetWebUsageEnabled(bool enabled) {
   [web_controller_ setWebUsageEnabled:enabled];
 }
 
+bool WebStateImpl::ShouldSuppressDialogs() const {
+  return [web_controller_ shouldSuppressDialogs];
+}
+
+void WebStateImpl::SetShouldSuppressDialogs(bool should_suppress) {
+  [web_controller_ setShouldSuppressDialogs:should_suppress];
+}
+
 UIView* WebStateImpl::GetView() {
   return [web_controller_ view];
 }
@@ -518,6 +577,10 @@ void WebStateImpl::OpenURL(const WebState::OpenURLParams& params) {
   DCHECK(Configured());
   ClearTransientContentView();
   [[web_controller_ delegate] openURLWithParams:params];
+}
+
+const NavigationManager* WebStateImpl::GetNavigationManager() const {
+  return &GetNavigationManagerImpl();
 }
 
 NavigationManager* WebStateImpl::GetNavigationManager() {
@@ -571,7 +634,12 @@ const GURL& WebStateImpl::GetLastCommittedURL() const {
 }
 
 GURL WebStateImpl::GetCurrentURL(URLVerificationTrustLevel* trust_level) const {
-  return [web_controller_ currentURLWithTrustLevel:trust_level];
+  GURL URL = [web_controller_ currentURLWithTrustLevel:trust_level];
+  bool equalURLs = web::GURLByRemovingRefFromGURL(URL) ==
+                   web::GURLByRemovingRefFromGURL(GetLastCommittedURL());
+  DCHECK(equalURLs);
+  UMA_HISTOGRAM_BOOLEAN("Web.CurrentURLEqualsLastCommittedURL", equalURLs);
+  return URL;
 }
 
 void WebStateImpl::AddScriptCommandCallback(

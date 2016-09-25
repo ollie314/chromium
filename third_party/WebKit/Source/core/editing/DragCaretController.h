@@ -30,17 +30,14 @@
 
 namespace blink {
 
-class CullRect;
-
-class DragCaretController final : public GarbageCollectedFinalized<DragCaretController>, private CaretBase {
+class DragCaretController final : public GarbageCollectedFinalized<DragCaretController> {
     WTF_MAKE_NONCOPYABLE(DragCaretController);
 public:
     static DragCaretController* create();
 
-    LayoutBlock* caretLayoutObject() const;
     void paintDragCaret(LocalFrame*, GraphicsContext&, const LayoutPoint&) const;
 
-    bool isContentEditable() const;
+    bool hasCaretIn(const LayoutBlock&) const;
     bool isContentRichlyEditable() const;
 
     bool hasCaret() const { return m_position.isNotNull(); }
@@ -56,6 +53,7 @@ private:
     DragCaretController();
 
     VisiblePosition m_position;
+    const Member<CaretBase> m_caretBase;
 };
 
 } // namespace blink

@@ -20,6 +20,11 @@ class AssemblyProgram;
 
 class DisassemblerElf32X86 : public DisassemblerElf32 {
  public:
+  // Returns true if a valid executable is detected using only quick checks.
+  static bool QuickDetect(const uint8_t* start, size_t length) {
+    return DisassemblerElf32::QuickDetect(start, length, EM_386);
+  }
+
   class TypedRVAX86 : public TypedRVA {
    public:
     explicit TypedRVAX86(RVA rva) : TypedRVA(rva) { }
@@ -28,11 +33,11 @@ class DisassemblerElf32X86 : public DisassemblerElf32 {
     // TypedRVA interfaces.
     CheckBool ComputeRelativeTarget(const uint8_t* op_pointer) override;
     CheckBool EmitInstruction(AssemblyProgram* program,
-                              RVA target_rva) override;
+                              Label* label) override;
     uint16_t op_size() const override;
   };
 
-  DisassemblerElf32X86(const void* start, size_t length);
+  DisassemblerElf32X86(const uint8_t* start, size_t length);
 
   ~DisassemblerElf32X86() override { }
 

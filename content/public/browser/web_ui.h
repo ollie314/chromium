@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
 #include "content/common/content_export.h"
 #include "ui/base/page_transition_types.h"
@@ -91,30 +92,42 @@ class CONTENT_EXPORT WebUI {
                                    const std::string& message,
                                    const base::ListValue& args) = 0;
 
+  // Returns true if this WebUI can currently call JavaScript.
+  virtual bool CanCallJavascript() = 0;
+
+  // Calling these functions directly is discouraged. It's generally preferred
+  // to call WebUIMessageHandler::CallJavascriptFunction, as that has
+  // lifecycle controls to prevent calling JavaScript before the page is ready.
+  //
   // Call a Javascript function by sending its name and arguments down to
   // the renderer.  This is asynchronous; there's no way to get the result
   // of the call, and should be thought of more like sending a message to
   // the page.
+  //
   // All function names in WebUI must consist of only ASCII characters.
   // There are variants for calls with more arguments.
-  virtual void CallJavascriptFunction(const std::string& function_name) = 0;
-  virtual void CallJavascriptFunction(const std::string& function_name,
-                                      const base::Value& arg) = 0;
-  virtual void CallJavascriptFunction(const std::string& function_name,
-                                      const base::Value& arg1,
-                                      const base::Value& arg2) = 0;
-  virtual void CallJavascriptFunction(const std::string& function_name,
-                                      const base::Value& arg1,
-                                      const base::Value& arg2,
-                                      const base::Value& arg3) = 0;
-  virtual void CallJavascriptFunction(const std::string& function_name,
-                                      const base::Value& arg1,
-                                      const base::Value& arg2,
-                                      const base::Value& arg3,
-                                      const base::Value& arg4) = 0;
-  virtual void CallJavascriptFunction(
+  virtual void CallJavascriptFunctionUnsafe(
+      const std::string& function_name) = 0;
+  virtual void CallJavascriptFunctionUnsafe(const std::string& function_name,
+                                            const base::Value& arg) = 0;
+  virtual void CallJavascriptFunctionUnsafe(const std::string& function_name,
+                                            const base::Value& arg1,
+                                            const base::Value& arg2) = 0;
+  virtual void CallJavascriptFunctionUnsafe(const std::string& function_name,
+                                            const base::Value& arg1,
+                                            const base::Value& arg2,
+                                            const base::Value& arg3) = 0;
+  virtual void CallJavascriptFunctionUnsafe(const std::string& function_name,
+                                            const base::Value& arg1,
+                                            const base::Value& arg2,
+                                            const base::Value& arg3,
+                                            const base::Value& arg4) = 0;
+  virtual void CallJavascriptFunctionUnsafe(
       const std::string& function_name,
       const std::vector<const base::Value*>& args) = 0;
+
+  // Allows mutable access to this WebUI's message handlers for testing.
+  virtual ScopedVector<WebUIMessageHandler>* GetHandlersForTesting() = 0;
 };
 
 }  // namespace content

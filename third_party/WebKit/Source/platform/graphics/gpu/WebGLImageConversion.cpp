@@ -4,14 +4,16 @@
 
 #include "platform/graphics/gpu/WebGLImageConversion.h"
 
-#include "platform/CheckedInt.h"
 #include "platform/graphics/ImageObserver.h"
 #include "platform/graphics/cpu/arm/WebGLImageConversionNEON.h"
+#include "platform/graphics/cpu/mips/WebGLImageConversionMSA.h"
 #include "platform/graphics/cpu/x86/WebGLImageConversionSSE.h"
+#include "platform/graphics/skia/SkiaUtils.h"
 #include "platform/image-decoders/ImageDecoder.h"
 #include "third_party/skia/include/core/SkImage.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/CheckedNumeric.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -425,6 +427,9 @@ template<> void unpack<WebGLImageConversion::DataFormatBGRA8, uint8_t, uint8_t>(
 #if CPU(X86) || CPU(X86_64)
     SIMD::unpackOneRowOfBGRA8LittleToRGBA8(source32, destination32, pixelsPerRow);
 #endif
+#if HAVE(MIPS_MSA_INTRINSICS)
+    SIMD::unpackOneRowOfBGRA8LittleToRGBA8MSA(source32, destination32, pixelsPerRow);
+#endif
     for (unsigned i = 0; i < pixelsPerRow; ++i) {
         uint32_t bgra = source32[i];
 #if CPU(BIG_ENDIAN)
@@ -447,6 +452,10 @@ template<> void unpack<WebGLImageConversion::DataFormatRGBA5551, uint16_t, uint8
 #if HAVE(ARM_NEON_INTRINSICS)
     SIMD::unpackOneRowOfRGBA5551ToRGBA8(source, destination, pixelsPerRow);
 #endif
+#if HAVE(MIPS_MSA_INTRINSICS)
+    SIMD::unpackOneRowOfRGBA5551ToRGBA8MSA(source, destination, pixelsPerRow);
+#endif
+
     for (unsigned i = 0; i < pixelsPerRow; ++i) {
         uint16_t packedValue = source[0];
         uint8_t r = packedValue >> 11;
@@ -468,6 +477,9 @@ template<> void unpack<WebGLImageConversion::DataFormatRGBA4444, uint16_t, uint8
 #endif
 #if HAVE(ARM_NEON_INTRINSICS)
     SIMD::unpackOneRowOfRGBA4444ToRGBA8(source, destination, pixelsPerRow);
+#endif
+#if HAVE(MIPS_MSA_INTRINSICS)
+    SIMD::unpackOneRowOfRGBA4444ToRGBA8MSA(source, destination, pixelsPerRow);
 #endif
     for (unsigned i = 0; i < pixelsPerRow; ++i) {
         uint16_t packedValue = source[0];
@@ -742,7 +754,10 @@ template<> void pack<WebGLImageConversion::DataFormatRGBA8, WebGLImageConversion
 {
 #if CPU(X86) || CPU(X86_64)
     SIMD::packOneRowOfRGBA8LittleToRGBA8(source, destination, pixelsPerRow);
-#else
+#endif
+#if HAVE(MIPS_MSA_INTRINSICS)
+    SIMD::packOneRowOfRGBA8LittleToRGBA8MSA(source, destination, pixelsPerRow);
+#endif
     for (unsigned i = 0; i < pixelsPerRow; ++i) {
         float scaleFactor = source[3] ? 255.0f / source[3] : 1.0f;
         uint8_t sourceR = static_cast<uint8_t>(static_cast<float>(source[0]) * scaleFactor);
@@ -755,7 +770,6 @@ template<> void pack<WebGLImageConversion::DataFormatRGBA8, WebGLImageConversion
         source += 4;
         destination += 4;
     }
-#endif
 }
 
 template<> void pack<WebGLImageConversion::DataFormatRGBA4444, WebGLImageConversion::AlphaDoNothing, uint8_t, uint16_t>(const uint8_t* source, uint16_t* destination, unsigned pixelsPerRow)
@@ -811,6 +825,9 @@ template<> void pack<WebGLImageConversion::DataFormatRGBA5551, WebGLImageConvers
 #if HAVE(ARM_NEON_INTRINSICS)
     SIMD::packOneRowOfRGBA8ToUnsignedShort5551(source, destination, pixelsPerRow);
 #endif
+#if HAVE(MIPS_MSA_INTRINSICS)
+    SIMD::packOneRowOfRGBA8ToUnsignedShort5551MSA(source, destination, pixelsPerRow);
+#endif
     for (unsigned i = 0; i < pixelsPerRow; ++i) {
         *destination = (((source[0] & 0xF8) << 8)
                         | ((source[1] & 0xF8) << 3)
@@ -858,6 +875,9 @@ template<> void pack<WebGLImageConversion::DataFormatRGB565, WebGLImageConversio
 {
 #if HAVE(ARM_NEON_INTRINSICS)
     SIMD::packOneRowOfRGBA8ToUnsignedShort565(source, destination, pixelsPerRow);
+#endif
+#if HAVE(MIPS_MSA_INTRINSICS)
+    SIMD::packOneRowOfRGBA8ToUnsignedShort565MSA(source, destination, pixelsPerRow);
 #endif
     for (unsigned i = 0; i < pixelsPerRow; ++i) {
         *destination = (((source[0] & 0xF8) << 8)
@@ -1429,7 +1449,7 @@ bool HasColor(int format)
 template<int Format>
 struct IsInt8Format {
     STATIC_ONLY(IsInt8Format);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA8_S
         || Format == WebGLImageConversion::DataFormatRGB8_S
         || Format == WebGLImageConversion::DataFormatRG8_S
@@ -1439,7 +1459,7 @@ struct IsInt8Format {
 template<int Format>
 struct IsInt16Format {
     STATIC_ONLY(IsInt16Format);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA16_S
         || Format == WebGLImageConversion::DataFormatRGB16_S
         || Format == WebGLImageConversion::DataFormatRG16_S
@@ -1449,7 +1469,7 @@ struct IsInt16Format {
 template<int Format>
 struct IsInt32Format {
     STATIC_ONLY(IsInt32Format);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA32_S
         || Format == WebGLImageConversion::DataFormatRGB32_S
         || Format == WebGLImageConversion::DataFormatRG32_S
@@ -1459,7 +1479,7 @@ struct IsInt32Format {
 template<int Format>
 struct IsUInt8Format {
     STATIC_ONLY(IsUInt8Format);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA8
         || Format == WebGLImageConversion::DataFormatRGB8
         || Format == WebGLImageConversion::DataFormatRG8
@@ -1476,7 +1496,7 @@ struct IsUInt8Format {
 template<int Format>
 struct IsUInt16Format {
     STATIC_ONLY(IsUInt16Format);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA16
         || Format == WebGLImageConversion::DataFormatRGB16
         || Format == WebGLImageConversion::DataFormatRG16
@@ -1486,7 +1506,7 @@ struct IsUInt16Format {
 template<int Format>
 struct IsUInt32Format {
     STATIC_ONLY(IsUInt32Format);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA32
         || Format == WebGLImageConversion::DataFormatRGB32
         || Format == WebGLImageConversion::DataFormatRG32
@@ -1496,7 +1516,7 @@ struct IsUInt32Format {
 template<int Format>
 struct IsFloatFormat {
     STATIC_ONLY(IsFloatFormat);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA32F
         || Format == WebGLImageConversion::DataFormatRGB32F
         || Format == WebGLImageConversion::DataFormatRA32F
@@ -1508,7 +1528,7 @@ struct IsFloatFormat {
 template<int Format>
 struct IsHalfFloatFormat {
     STATIC_ONLY(IsHalfFloatFormat);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA16F
         || Format == WebGLImageConversion::DataFormatRGB16F
         || Format == WebGLImageConversion::DataFormatRA16F
@@ -1520,7 +1540,7 @@ struct IsHalfFloatFormat {
 template<int Format>
 struct Is32bppFormat {
     STATIC_ONLY(Is32bppFormat);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA2_10_10_10
         || Format == WebGLImageConversion::DataFormatRGB5999
         || Format == WebGLImageConversion::DataFormatRGB10F11F11F;
@@ -1529,23 +1549,23 @@ struct Is32bppFormat {
 template<int Format>
 struct Is16bppFormat {
     STATIC_ONLY(Is16bppFormat);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA5551
         || Format == WebGLImageConversion::DataFormatRGBA4444
         || Format == WebGLImageConversion::DataFormatRGB565;
 };
 
 template<int Format,
-    bool IsInt8Format = IsInt8Format<Format>::Value,
-    bool IsUInt8Format = IsUInt8Format<Format>::Value,
-    bool IsInt16Format = IsInt16Format<Format>::Value,
-    bool IsUInt16Format = IsUInt16Format<Format>::Value,
-    bool IsInt32Format = IsInt32Format<Format>::Value,
-    bool IsUInt32Format = IsUInt32Format<Format>::Value,
-    bool IsFloat = IsFloatFormat<Format>::Value,
-    bool IsHalfFloat = IsHalfFloatFormat<Format>::Value,
-    bool Is16bpp = Is16bppFormat<Format>::Value,
-    bool Is32bpp = Is32bppFormat<Format>::Value>
+    bool IsInt8Format = IsInt8Format<Format>::value,
+    bool IsUInt8Format = IsUInt8Format<Format>::value,
+    bool IsInt16Format = IsInt16Format<Format>::value,
+    bool IsUInt16Format = IsUInt16Format<Format>::value,
+    bool IsInt32Format = IsInt32Format<Format>::value,
+    bool IsUInt32Format = IsUInt32Format<Format>::value,
+    bool IsFloat = IsFloatFormat<Format>::value,
+    bool IsHalfFloat = IsHalfFloatFormat<Format>::value,
+    bool Is16bpp = Is16bppFormat<Format>::value,
+    bool Is32bpp = Is32bppFormat<Format>::value>
 struct DataTypeForFormat {
     STATIC_ONLY(DataTypeForFormat);
     typedef double Type; // Use a type that's not used in unpack/pack.
@@ -1614,9 +1634,9 @@ struct DataTypeForFormat<Format, false, false, false, false, false, false, false
 template<int Format>
 struct UsesFloatIntermediateFormat {
     STATIC_ONLY(UsesFloatIntermediateFormat);
-    static const bool Value =
-        IsFloatFormat<Format>::Value
-        || IsHalfFloatFormat<Format>::Value
+    static const bool value =
+        IsFloatFormat<Format>::value
+        || IsHalfFloatFormat<Format>::value
         || Format == WebGLImageConversion::DataFormatRGBA2_10_10_10
         || Format == WebGLImageConversion::DataFormatRGB10F11F11F
         || Format == WebGLImageConversion::DataFormatRGB5999;
@@ -1625,13 +1645,13 @@ struct UsesFloatIntermediateFormat {
 template<int Format>
 struct IntermediateFormat {
     STATIC_ONLY(IntermediateFormat);
-    static const int Value =
-        UsesFloatIntermediateFormat<Format>::Value ? WebGLImageConversion::DataFormatRGBA32F
-        : IsInt32Format<Format>::Value ? WebGLImageConversion::DataFormatRGBA32_S
-        : IsUInt32Format<Format>::Value ? WebGLImageConversion::DataFormatRGBA32
-        : IsInt16Format<Format>::Value ? WebGLImageConversion::DataFormatRGBA16_S
-        : (IsUInt16Format<Format>::Value || Is32bppFormat<Format>::Value) ? WebGLImageConversion::DataFormatRGBA16
-        : IsInt8Format<Format>::Value ? WebGLImageConversion::DataFormatRGBA8_S : WebGLImageConversion::DataFormatRGBA8;
+    static const int value =
+        UsesFloatIntermediateFormat<Format>::value ? WebGLImageConversion::DataFormatRGBA32F
+        : IsInt32Format<Format>::value ? WebGLImageConversion::DataFormatRGBA32_S
+        : IsUInt32Format<Format>::value ? WebGLImageConversion::DataFormatRGBA32
+        : IsInt16Format<Format>::value ? WebGLImageConversion::DataFormatRGBA16_S
+        : (IsUInt16Format<Format>::value || Is32bppFormat<Format>::value) ? WebGLImageConversion::DataFormatRGBA16
+        : IsInt8Format<Format>::value ? WebGLImageConversion::DataFormatRGBA8_S : WebGLImageConversion::DataFormatRGBA8;
 };
 
 unsigned TexelBytesForFormat(WebGLImageConversion::DataFormat format)
@@ -1714,7 +1734,7 @@ public:
     {
         const unsigned MaxNumberOfComponents = 4;
         const unsigned MaxBytesPerComponent  = 4;
-        m_unpackedIntermediateSrcData = adoptArrayPtr(new uint8_t[m_width * MaxNumberOfComponents *MaxBytesPerComponent]);
+        m_unpackedIntermediateSrcData = wrapArrayUnique(new uint8_t[m_width * MaxNumberOfComponents *MaxBytesPerComponent]);
         ASSERT(m_unpackedIntermediateSrcData.get());
     }
 
@@ -1736,7 +1756,7 @@ private:
     void* const m_dstStart;
     const int m_srcStride, m_dstStride;
     bool m_success;
-    OwnPtr<uint8_t[]> m_unpackedIntermediateSrcData;
+    std::unique_ptr<uint8_t[]> m_unpackedIntermediateSrcData;
 };
 
 void FormatConverter::convert(WebGLImageConversion::DataFormat srcFormat, WebGLImageConversion::DataFormat dstFormat, WebGLImageConversion::AlphaOp alphaOp)
@@ -1825,7 +1845,7 @@ void FormatConverter::convert(WebGLImageConversion::AlphaOp alphaOp)
 template<int Format>
 struct SupportsConversionFromDomElements {
     STATIC_ONLY(SupportsConversionFromDomElements);
-    static const bool Value =
+    static const bool value =
         Format == WebGLImageConversion::DataFormatRGBA8
         || Format == WebGLImageConversion::DataFormatRGB8
         || Format == WebGLImageConversion::DataFormatRG8
@@ -1855,7 +1875,7 @@ void FormatConverter::convert()
         ASSERT_NOT_REACHED();
         return;
     }
-    if (!IsFloatFormat<DstFormat>::Value && IsFloatFormat<SrcFormat>::Value) {
+    if (!IsFloatFormat<DstFormat>::value && IsFloatFormat<SrcFormat>::value) {
         ASSERT_NOT_REACHED();
         return;
     }
@@ -1871,7 +1891,7 @@ void FormatConverter::convert()
         ASSERT_NOT_REACHED();
         return;
     }
-    if (srcFormatComesFromDOMElementOrImageData && alphaOp == WebGLImageConversion::AlphaDoUnmultiply && !SupportsConversionFromDomElements<DstFormat>::Value) {
+    if (srcFormatComesFromDOMElementOrImageData && alphaOp == WebGLImageConversion::AlphaDoUnmultiply && !SupportsConversionFromDomElements<DstFormat>::value) {
         ASSERT_NOT_REACHED();
         return;
     }
@@ -1889,7 +1909,7 @@ void FormatConverter::convert()
 
     typedef typename DataTypeForFormat<SrcFormat>::Type SrcType;
     typedef typename DataTypeForFormat<DstFormat>::Type DstType;
-    const int IntermFormat = IntermediateFormat<DstFormat>::Value;
+    const int IntermFormat = IntermediateFormat<DstFormat>::value;
     typedef typename DataTypeForFormat<IntermFormat>::Type IntermType;
     const ptrdiff_t srcStrideInElements = m_srcStride / sizeof(SrcType);
     const ptrdiff_t dstStrideInElements = m_dstStride / sizeof(DstType);
@@ -2042,77 +2062,77 @@ GLenum WebGLImageConversion::computeImageSizeInBytes(GLenum format, GLenum type,
     if (!computeFormatAndTypeParameters(format, type, &bytesPerComponent, &componentsPerPixel))
         return GL_INVALID_ENUM;
     unsigned bytesPerGroup = bytesPerComponent * componentsPerPixel;
-    CheckedInt<uint32_t> checkedValue = static_cast<uint32_t>(rowLength);
+    CheckedNumeric<uint32_t> checkedValue = static_cast<uint32_t>(rowLength);
     checkedValue *=  bytesPerGroup;
-    if (!checkedValue.isValid())
+    if (!checkedValue.IsValid())
         return GL_INVALID_VALUE;
 
     unsigned lastRowSize;
     if (params.rowLength > 0 && params.rowLength != width) {
-        CheckedInt<uint32_t> tmp = width;
+        CheckedNumeric<uint32_t> tmp = width;
         tmp *= bytesPerGroup;
-        if (!tmp.isValid())
+        if (!tmp.IsValid())
             return GL_INVALID_VALUE;
-        lastRowSize = tmp.value();
+        lastRowSize = tmp.ValueOrDie();
     } else {
-        lastRowSize = checkedValue.value();
+        lastRowSize = checkedValue.ValueOrDie();
     }
 
     unsigned padding = 0;
-    unsigned residual = checkedValue.value() % params.alignment;
+    unsigned residual = checkedValue.ValueOrDie() % params.alignment;
     if (residual) {
         padding = params.alignment - residual;
         checkedValue += padding;
     }
-    if (!checkedValue.isValid())
+    if (!checkedValue.IsValid())
         return GL_INVALID_VALUE;
-    unsigned paddedRowSize = checkedValue.value();
+    unsigned paddedRowSize = checkedValue.ValueOrDie();
 
-    CheckedInt<uint32_t> rows = imageHeight;
+    CheckedNumeric<uint32_t> rows = imageHeight;
     rows *= (depth - 1);
     // Last image is not affected by IMAGE_HEIGHT parameter.
     rows += height;
-    if (!rows.isValid())
+    if (!rows.IsValid())
         return GL_INVALID_VALUE;
-    checkedValue *= (rows.value() - 1);
+    checkedValue *= (rows.ValueOrDie() - 1);
     // Last row is not affected by ROW_LENGTH parameter.
     checkedValue += lastRowSize;
-    if (!checkedValue.isValid())
+    if (!checkedValue.IsValid())
         return GL_INVALID_VALUE;
-    *imageSizeInBytes = checkedValue.value();
+    *imageSizeInBytes = checkedValue.ValueOrDie();
     if (paddingInBytes)
         *paddingInBytes = padding;
 
-    CheckedInt<uint32_t> skipSize = 0;
+    CheckedNumeric<uint32_t> skipSize = 0;
     if (params.skipImages > 0) {
-        CheckedInt<uint32_t> tmp = paddedRowSize;
+        CheckedNumeric<uint32_t> tmp = paddedRowSize;
         tmp *= imageHeight;
         tmp *= params.skipImages;
-        if (!tmp.isValid())
+        if (!tmp.IsValid())
             return GL_INVALID_VALUE;
-        skipSize += tmp.value();
+        skipSize += tmp.ValueOrDie();
     }
     if (params.skipRows > 0) {
-        CheckedInt<uint32_t> tmp = paddedRowSize;
+        CheckedNumeric<uint32_t> tmp = paddedRowSize;
         tmp *= params.skipRows;
-        if (!tmp.isValid())
+        if (!tmp.IsValid())
             return GL_INVALID_VALUE;
-        skipSize += tmp.value();
+        skipSize += tmp.ValueOrDie();
     }
     if (params.skipPixels > 0) {
-        CheckedInt<uint32_t> tmp = bytesPerGroup;
+        CheckedNumeric<uint32_t> tmp = bytesPerGroup;
         tmp *= params.skipPixels;
-        if (!tmp.isValid())
+        if (!tmp.IsValid())
             return GL_INVALID_VALUE;
-        skipSize += tmp.value();
+        skipSize += tmp.ValueOrDie();
     }
-    if (!skipSize.isValid())
+    if (!skipSize.IsValid())
         return GL_INVALID_VALUE;
     if (skipSizeInBytes)
-        *skipSizeInBytes = skipSize.value();
+        *skipSizeInBytes = skipSize.ValueOrDie();
 
-    checkedValue += skipSize.value();
-    if (!checkedValue.isValid())
+    checkedValue += skipSize.ValueOrDie();
+    if (!checkedValue.IsValid())
         return GL_INVALID_VALUE;
     return GL_NO_ERROR;
 }
@@ -2131,7 +2151,7 @@ void WebGLImageConversion::ImageExtractor::extractImage(bool premultiplyAlpha, b
     if (!m_image)
         return;
 
-    RefPtr<SkImage> skiaImage = m_image->imageForCurrentFrame();
+    sk_sp<SkImage> skiaImage = m_image->imageForCurrentFrame();
     SkImageInfo info = skiaImage
         ? SkImageInfo::MakeN32Premul(m_image->width(), m_image->height())
         : SkImageInfo::MakeUnknown();
@@ -2140,13 +2160,10 @@ void WebGLImageConversion::ImageExtractor::extractImage(bool premultiplyAlpha, b
 
     if ((!skiaImage || ignoreGammaAndColorProfile || (hasAlpha && !premultiplyAlpha)) && m_image->data()) {
         // Attempt to get raw unpremultiplied image data.
-        OwnPtr<ImageDecoder> decoder(ImageDecoder::create(
-            *(m_image->data()), ImageDecoder::AlphaNotPremultiplied,
+        std::unique_ptr<ImageDecoder> decoder(ImageDecoder::create(
+            m_image->data(), true, ImageDecoder::AlphaNotPremultiplied,
             ignoreGammaAndColorProfile ? ImageDecoder::GammaAndColorProfileIgnored : ImageDecoder::GammaAndColorProfileApplied));
-        if (!decoder)
-            return;
-        decoder->setData(m_image->data(), true);
-        if (!decoder->frameCount())
+        if (!decoder || !decoder->frameCount())
             return;
         ImageFrame* frame = decoder->frameBufferAtIndex(0);
         if (!frame || frame->getStatus() != ImageFrame::FrameComplete)
@@ -2160,7 +2177,7 @@ void WebGLImageConversion::ImageExtractor::extractImage(bool premultiplyAlpha, b
         // only immutable/fully decoded frames make it through.  We could potentially relax this
         // and allow SkImage::NewFromBitmap to make a copy.
         ASSERT(bitmap.isImmutable());
-        skiaImage = adoptRef(SkImage::NewFromBitmap(bitmap));
+        skiaImage = SkImage::MakeFromBitmap(bitmap);
         info = bitmap.info();
 
         if (hasAlpha && premultiplyAlpha)
@@ -2188,7 +2205,7 @@ void WebGLImageConversion::ImageExtractor::extractImage(bool premultiplyAlpha, b
     if (m_imageWidth != (unsigned)m_image->width() || m_imageHeight != (unsigned)m_image->height())
         return;
 
-    m_imagePixelLocker.emplace(skiaImage, info.alphaType(), kN32_SkColorType);
+    m_imagePixelLocker.emplace(std::move(skiaImage), info.alphaType(), kN32_SkColorType);
 }
 
 unsigned WebGLImageConversion::getChannelBitsByFormat(GLenum format)
@@ -2313,6 +2330,7 @@ bool WebGLImageConversion::packImageData(
 
 bool WebGLImageConversion::extractImageData(
     const uint8_t* imageData,
+    DataFormat sourceDataFormat,
     const IntSize& imageDataSize,
     GLenum format,
     GLenum type,
@@ -2333,7 +2351,7 @@ bool WebGLImageConversion::extractImageData(
         return false;
     data.resize(packedSize);
 
-    if (!packPixels(imageData, DataFormatRGBA8, width, height, 0, format, type, premultiplyAlpha ? AlphaDoPremultiply : AlphaDoNothing, data.data(), flipY))
+    if (!packPixels(imageData, sourceDataFormat, width, height, 0, format, type, premultiplyAlpha ? AlphaDoPremultiply : AlphaDoNothing, data.data(), flipY))
         return false;
 
     return true;
@@ -2407,6 +2425,101 @@ bool WebGLImageConversion::packPixels(
     if (!converter.Success())
         return false;
     return true;
+}
+
+void WebGLImageConversion::unpackPixels(const uint16_t* sourceData,
+    DataFormat sourceDataFormat,
+    unsigned pixelsPerRow,
+    uint8_t* destinationData )
+{
+    switch (sourceDataFormat) {
+    case DataFormatRGBA4444:
+        {
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGBA4444>::Type SrcType;
+            const SrcType* srcRowStart = static_cast<const SrcType*>(sourceData);
+            unpack<WebGLImageConversion::DataFormatRGBA4444>(srcRowStart, destinationData, pixelsPerRow);
+        }
+        break;
+    case DataFormatRGBA5551:
+        {
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGBA5551>::Type SrcType;
+            const SrcType* srcRowStart = static_cast<const SrcType*>(sourceData);
+            unpack<WebGLImageConversion::DataFormatRGBA5551>(srcRowStart, destinationData, pixelsPerRow);
+        }
+        break;
+    case DataFormatBGRA8:
+        {
+            const uint8_t* psrc = (const uint8_t*)sourceData;
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatBGRA8>::Type SrcType;
+            const SrcType* srcRowStart = static_cast<const SrcType*>(psrc);
+            unpack<WebGLImageConversion::DataFormatBGRA8>(srcRowStart, destinationData, pixelsPerRow);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+void WebGLImageConversion::packPixels(const uint8_t* sourceData,
+    DataFormat sourceDataFormat,
+    unsigned pixelsPerRow,
+    uint8_t* destinationData )
+{
+    switch (sourceDataFormat) {
+    case DataFormatRA8:
+        {
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGBA8>::Type SrcType;
+            const SrcType* srcRowStart = static_cast<const SrcType*>(sourceData);
+            pack<WebGLImageConversion::DataFormatRA8, WebGLImageConversion::AlphaDoUnmultiply>(srcRowStart, destinationData, pixelsPerRow);
+        }
+        break;
+    case DataFormatR8:
+        {
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGBA8>::Type SrcType;
+            const SrcType* srcRowStart = static_cast<const SrcType*>(sourceData);
+            pack<WebGLImageConversion::DataFormatR8, WebGLImageConversion::AlphaDoUnmultiply>(srcRowStart, destinationData, pixelsPerRow);
+        }
+        break;
+    case DataFormatRGBA8:
+        {
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGBA8>::Type SrcType;
+            const SrcType* srcRowStart = static_cast<const SrcType*>(sourceData);
+            pack<WebGLImageConversion::DataFormatRGBA8, WebGLImageConversion::AlphaDoUnmultiply>(srcRowStart, destinationData, pixelsPerRow);
+        }
+        break;
+    case DataFormatRGBA4444:
+        {
+            uint16_t* pdst = (uint16_t*)destinationData;
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGBA8>::Type SrcType;
+            const SrcType* srcRowStart = static_cast<const SrcType*>(sourceData);
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGBA4444>::Type DstType;
+            DstType* dstRowStart = static_cast<DstType*>(pdst);
+            pack<WebGLImageConversion::DataFormatRGBA4444, WebGLImageConversion::AlphaDoNothing>(srcRowStart, dstRowStart, pixelsPerRow);
+        }
+        break;
+    case DataFormatRGBA5551:
+        {
+            uint16_t* pdst = (uint16_t*)destinationData;
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGBA8>::Type SrcType;
+            const SrcType* srcRowStart = static_cast<const SrcType*>(sourceData);
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGBA5551>::Type DstType;
+            DstType* dstRowStart = static_cast<DstType*>(pdst);
+            pack<WebGLImageConversion::DataFormatRGBA5551, WebGLImageConversion::AlphaDoNothing>(srcRowStart, dstRowStart, pixelsPerRow);
+        }
+        break;
+    case DataFormatRGB565:
+        {
+            uint16_t* pdst = (uint16_t*)destinationData;
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGBA8>::Type SrcType;
+            const SrcType* srcRowStart = static_cast<const SrcType*>(sourceData);
+            typedef typename DataTypeForFormat<WebGLImageConversion::DataFormatRGB565>::Type DstType;
+            DstType* dstRowStart = static_cast<DstType*>(pdst);
+            pack<WebGLImageConversion::DataFormatRGB565, WebGLImageConversion::AlphaDoNothing>(srcRowStart, dstRowStart, pixelsPerRow);
+        }
+        break;
+    default:
+        break;
+    }
 }
 
 } // namespace blink

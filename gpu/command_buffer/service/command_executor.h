@@ -14,7 +14,6 @@
 #include "base/atomicops.h"
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/shared_memory.h"
 #include "base/memory/weak_ptr.h"
@@ -92,6 +91,10 @@ class GPU_EXPORT CommandExecutor
   // Perform some idle work and return. HasMoreIdleWork() can be used to
   // determine if there's more idle work do be done after this has been called.
   void PerformIdleWork();
+
+  // Whether there is state that needs to be regularly polled.
+  bool HasPollingWork() const;
+  void PerformPollingWork();
 
   CommandParser* parser() const { return parser_.get(); }
 

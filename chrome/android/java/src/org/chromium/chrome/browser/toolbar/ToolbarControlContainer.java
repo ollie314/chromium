@@ -8,6 +8,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.PorterDuff;
 import android.graphics.Rect;
+import android.graphics.Region;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
@@ -16,8 +17,10 @@ import android.widget.FrameLayout;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeHandler;
 import org.chromium.chrome.browser.contextualsearch.SwipeRecognizer;
+import org.chromium.chrome.browser.util.ViewUtils;
 import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.DrawingInfo;
 import org.chromium.chrome.browser.widget.ControlContainer;
+import org.chromium.chrome.browser.widget.ToolbarProgressBar;
 import org.chromium.chrome.browser.widget.ViewResourceFrameLayout;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.resources.dynamics.ViewResourceAdapter;
@@ -55,9 +58,15 @@ public class ToolbarControlContainer extends FrameLayout implements ControlConta
     }
 
     @Override
+    public View getView() {
+        return this;
+    }
+
+    @Override
     public void getProgressBarDrawingInfo(DrawingInfo drawingInfoOut) {
         // TODO(yusufo): Avoid casting to the layout without making the interface bigger.
-        ((ToolbarLayout) mToolbar).getProgressBar().getDrawingInfo(drawingInfoOut);
+        ToolbarProgressBar progressBar = ((ToolbarLayout) mToolbar).getProgressBar();
+        if (progressBar != null) progressBar.getDrawingInfo(drawingInfoOut);
     }
 
     @Override
@@ -125,6 +134,12 @@ public class ToolbarControlContainer extends FrameLayout implements ControlConta
         @Override
         protected boolean isReadyForCapture() {
             return mReadyForBitmapCapture;
+        }
+
+        @Override
+        public boolean gatherTransparentRegion(Region region) {
+            ViewUtils.gatherTransparentRegionsForOpaqueView(this, region);
+            return true;
         }
     }
 

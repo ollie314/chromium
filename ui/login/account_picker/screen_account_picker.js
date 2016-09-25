@@ -28,6 +28,7 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
       'showBannerMessage',
       'showUserPodCustomIcon',
       'hideUserPodCustomIcon',
+      'disablePinKeyboardForUser',
       'setAuthType',
       'setTouchViewState',
       'setPublicSessionDisplayName',
@@ -176,21 +177,54 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
           chrome.send('firstIncorrectPasswordAttempt',
               [activatedPod.user.emailAddress]);
         }
+        // Update the pod row display if incorrect password.
+        $('pod-row').setFocusedPodErrorDisplay(true);
         // We want bubble's arrow to point to the first letter of input.
         /** @const */ var BUBBLE_OFFSET = 7;
         /** @const */ var BUBBLE_PADDING = 4;
-        $('bubble').showContentForElement(activatedPod.mainInput,
-                                          cr.ui.Bubble.Attachment.BOTTOM,
-                                          error,
-                                          BUBBLE_OFFSET, BUBBLE_PADDING);
+
+        // We want the bubble to point to where the input is after it is done
+        // tranisitioning.
+        var showBottomCallback = function() {
+          activatedPod.removeEventListener("webkitTransitionEnd",
+              showBottomCallback);
+          $('bubble').showContentForElement(activatedPod.mainInput,
+                                            cr.ui.Bubble.Attachment.BOTTOM,
+                                            error,
+                                            BUBBLE_OFFSET, BUBBLE_PADDING);
+        };
+        activatedPod.addEventListener("webkitTransitionEnd",
+            showBottomCallback);
+        ensureTransitionEndEvent(activatedPod);
+
         // Move error bubble up if it overlaps the shelf.
         var maxHeight =
             cr.ui.LoginUITools.getMaxHeightBeforeShelfOverlapping($('bubble'));
         if (maxHeight < $('bubble').offsetHeight) {
-          $('bubble').showContentForElement(activatedPod.mainInput,
-                                            cr.ui.Bubble.Attachment.TOP,
-                                            error,
-                                            BUBBLE_OFFSET, BUBBLE_PADDING);
+          var showTopCallback = function() {
+            activatedPod.removeEventListener("webkitTransitionEnd",
+                showTopCallback);
+            $('bubble').showContentForElement(activatedPod.mainInput,
+                                              cr.ui.Bubble.Attachment.TOP,
+                                              error,
+                                              BUBBLE_OFFSET, BUBBLE_PADDING);
+          };
+          activatedPod.addEventListener("webkitTransitionEnd", showTopCallback);
+          ensureTransitionEndEvent(activatedPod);
+        }
+      }
+    },
+
+    /**
+     * Loads the PIN keyboard if any of the users can login with a PIN.
+     * @param {array} users Array of user instances.
+     */
+    loadPinKeyboardIfNeeded_: function(users) {
+      for (var i = 0; i < users.length; ++i) {
+        var user = users[i];
+        if (user.showPin) {
+          showPinKeyboardAsync();
+          return;
         }
       }
     },
@@ -203,6 +237,11 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
     loadUsers: function(users, showGuest) {
       $('pod-row').loadPods(users);
       $('login-header-bar').showGuestButton = showGuest;
+      // On Desktop, #login-header-bar has a shadow if there are 8+ profiles.
+      if (Oobe.getInstance().displayType == DISPLAY_TYPE.DESKTOP_USER_MANAGER)
+        $('login-header-bar').classList.toggle('shadow', users.length > 8);
+
+      this.loadPinKeyboardIfNeeded_(users);
     },
 
     /**
@@ -332,6 +371,14 @@ login.createScreen('AccountPickerScreen', 'account-picker', function() {
      */
     setTouchViewState: function(isTouchViewEnabled) {
       $('pod-row').setTouchViewState(isTouchViewEnabled);
+    },
+
+    /**
+     * Removes the PIN keyboard so the user can no longer enter a PIN.
+     * @param {!user} user The user who can no longer enter a PIN.
+     */
+    disablePinKeyboardForUser: function(user) {
+      $('pod-row').removePinKeyboard(user);
     },
 
     /**

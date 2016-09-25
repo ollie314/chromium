@@ -17,10 +17,6 @@ namespace ui {
 // Stub implementations of platform-specific methods in events_util.h, built
 // on platforms that currently do not have a complete implementation of events.
 
-void UpdateDeviceList() {
-  NOTIMPLEMENTED();
-}
-
 EventType EventTypeFromNative(const base::NativeEvent& native_event) {
   NOTIMPLEMENTED();
   return ET_UNKNOWN;
@@ -31,9 +27,9 @@ int EventFlagsFromNative(const base::NativeEvent& native_event) {
   return 0;
 }
 
-base::TimeDelta EventTimeFromNative(const base::NativeEvent& native_event) {
+base::TimeTicks EventTimeFromNative(const base::NativeEvent& native_event) {
   NOTIMPLEMENTED();
-  return base::TimeDelta();
+  return base::TimeTicks();
 }
 
 gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {

@@ -8,15 +8,15 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_split.h"
 #include "ui/accessibility/ax_enums.h"
 #include "ui/accessibility/ax_export.h"
-#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 namespace gfx {
 class Transform;
@@ -99,28 +99,32 @@ struct AX_EXPORT AXNodeData {
   // Return a string representation of this data, for debugging.
   virtual std::string ToString() const;
 
-  bool IsRoot() const;
-  void SetRoot();
-
   // As much as possible this should behave as a simple, serializable,
   // copyable struct.
   int32_t id;
   AXRole role;
   uint32_t state;
-  std::vector<std::pair<AXStringAttribute, std::string> > string_attributes;
+  std::vector<std::pair<AXStringAttribute, std::string>> string_attributes;
   std::vector<std::pair<AXIntAttribute, int32_t>> int_attributes;
-  std::vector<std::pair<AXFloatAttribute, float> > float_attributes;
-  std::vector<std::pair<AXBoolAttribute, bool> > bool_attributes;
+  std::vector<std::pair<AXFloatAttribute, float>> float_attributes;
+  std::vector<std::pair<AXBoolAttribute, bool>> bool_attributes;
   std::vector<std::pair<AXIntListAttribute, std::vector<int32_t>>>
       intlist_attributes;
   base::StringPairs html_attributes;
   std::vector<int32_t> child_ids;
 
-  // The object's location relative to its window or frame.
-  gfx::Rect location;
+  // TODO(dmazzoni): replace the following three members with a single
+  // instance of AXRelativeBounds.
+
+  // The id of an ancestor node in the same AXTree that this object's
+  // bounding box is relative to, or -1 if there's no offset container.
+  int offset_container_id;
+
+  // The relative bounding box of this node.
+  gfx::RectF location;
 
   // An additional transform to apply to position this object and its subtree.
-  // NOTE: this member is a scoped_ptr because it's rare and gfx::Transform
+  // NOTE: this member is a std::unique_ptr because it's rare and gfx::Transform
   // takes up a fair amount of space. The assignment operator and copy
   // constructor both make a duplicate of the owned pointer, so it acts more
   // like a member than a pointer.

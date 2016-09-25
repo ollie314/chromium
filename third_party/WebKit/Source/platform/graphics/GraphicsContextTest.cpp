@@ -32,6 +32,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include <memory>
 
 namespace blink {
 
@@ -69,7 +70,7 @@ TEST(GraphicsContextTest, pictureRecording)
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
-    OwnPtr<PaintController> paintController = PaintController::create();
+    std::unique_ptr<PaintController> paintController = PaintController::create();
     GraphicsContext context(*paintController);
 
     Color opaque(1.0f, 0.0f, 0.0f, 1.0f);
@@ -77,7 +78,7 @@ TEST(GraphicsContextTest, pictureRecording)
 
     context.beginRecording(bounds);
     context.fillRect(FloatRect(0, 0, 50, 50), opaque, SkXfermode::kSrcOver_Mode);
-    RefPtr<const SkPicture> picture = context.endRecording();
+    sk_sp<const SkPicture> picture = context.endRecording();
     canvas.drawPicture(picture.get());
     EXPECT_OPAQUE_PIXELS_ONLY_IN_RECT(bitmap, IntRect(0, 0, 50, 50))
 
@@ -102,7 +103,7 @@ TEST(GraphicsContextTest, UnboundedDrawsAreClipped)
     Color alpha(0.0f, 0.0f, 0.0f, 0.0f);
     FloatRect bounds(0, 0, 100, 100);
 
-    OwnPtr<PaintController> paintController = PaintController::create();
+    std::unique_ptr<PaintController> paintController = PaintController::create();
     GraphicsContext context(*paintController);
     context.beginRecording(bounds);
 
@@ -120,7 +121,7 @@ TEST(GraphicsContextTest, UnboundedDrawsAreClipped)
 
     // Make the device opaque in 10,10 40x40.
     context.fillRect(FloatRect(10, 10, 40, 40), opaque, SkXfermode::kSrcOver_Mode);
-    RefPtr<const SkPicture> picture = context.endRecording();
+    sk_sp<const SkPicture> picture = context.endRecording();
     canvas.drawPicture(picture.get());
     EXPECT_OPAQUE_PIXELS_ONLY_IN_RECT(bitmap, IntRect(10, 10, 40, 40));
 

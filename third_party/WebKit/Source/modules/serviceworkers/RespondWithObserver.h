@@ -8,6 +8,7 @@
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
 #include "modules/ModulesExport.h"
+#include "modules/serviceworkers/WaitUntilObserver.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponseError.h"
@@ -27,10 +28,11 @@ class MODULES_EXPORT RespondWithObserver : public GarbageCollectedFinalized<Resp
 public:
     virtual ~RespondWithObserver();
 
-    static RespondWithObserver* create(ExecutionContext*, int eventID, const KURL& requestURL, WebURLRequest::FetchRequestMode, WebURLRequest::FrameType, WebURLRequest::RequestContext);
+    static RespondWithObserver* create(ExecutionContext*, int eventID, const KURL& requestURL, WebURLRequest::FetchRequestMode, WebURLRequest::FrameType, WebURLRequest::RequestContext, WaitUntilObserver*);
 
     void contextDestroyed() override;
 
+    void willDispatchEvent();
     void didDispatchEvent(DispatchEventResult dispatchResult);
 
     // Observes the promise and delays calling didHandleFetchEvent() until the
@@ -43,7 +45,7 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
 protected:
-    RespondWithObserver(ExecutionContext*, int eventID, const KURL& requestURL, WebURLRequest::FetchRequestMode, WebURLRequest::FrameType, WebURLRequest::RequestContext);
+    RespondWithObserver(ExecutionContext*, int eventID, const KURL& requestURL, WebURLRequest::FetchRequestMode, WebURLRequest::FrameType, WebURLRequest::RequestContext, WaitUntilObserver*);
 
 private:
     class ThenFunction;
@@ -54,8 +56,17 @@ private:
     WebURLRequest::FrameType m_frameType;
     WebURLRequest::RequestContext m_requestContext;
 
+    double m_eventDispatchTime = 0;
+
     enum State { Initial, Pending, Done };
     State m_state;
+
+    // RespondWith should ensure the ExtendableEvent is alive until the promise
+    // passed to RespondWith is resolved. The lifecycle of the ExtendableEvent
+    // is controlled by WaitUntilObserver, so not only
+    // WaitUntilObserver::ThenFunction but RespondWith needs to have a strong
+    // reference to the WaitUntilObserver.
+    Member<WaitUntilObserver> m_observer;
 };
 
 } // namespace blink

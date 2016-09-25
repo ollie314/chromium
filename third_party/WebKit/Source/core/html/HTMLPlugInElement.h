@@ -26,7 +26,6 @@
 #include "bindings/core/v8/SharedPersistent.h"
 #include "core/CoreExport.h"
 #include "core/html/HTMLFrameOwnerElement.h"
-#include "core/layout/api/LayoutEmbeddedItem.h"
 
 #include <v8.h>
 
@@ -34,6 +33,7 @@ namespace blink {
 
 class HTMLImageLoader;
 class LayoutPart;
+class LayoutEmbeddedItem;
 class Widget;
 
 enum PreferPlugInsForImagesOption {
@@ -104,10 +104,11 @@ private:
 
     // Node functions:
     bool canContainRangeEndPoint() const override { return false; }
+    bool canStartSelection() const override;
     bool willRespondToMouseClickEvents() final;
     void defaultEventHandler(Event*) final;
-    void attach(const AttachContext& = AttachContext()) final;
-    void detach(const AttachContext& = AttachContext()) final;
+    void attachLayoutTree(const AttachContext& = AttachContext()) final;
+    void detachLayoutTree(const AttachContext& = AttachContext()) final;
     void finishParsingChildren() final;
 
     // Element functions:
@@ -116,7 +117,6 @@ private:
     bool layoutObjectIsFocusable() const final;
     bool isKeyboardFocusable() const final;
     void didAddUserAgentShadowRoot(ShadowRoot&) final;
-    void willAddFirstAuthorShadowRoot() final;
 
     // HTMLElement function:
     bool hasCustomFocusLogic() const override;
@@ -137,9 +137,15 @@ private:
 
     void setPersistedPluginWidget(Widget*);
 
+    bool requestObjectInternal(const String& url, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues);
+
     mutable RefPtr<SharedPersistent<v8::Object>> m_pluginWrapper;
     bool m_needsWidgetUpdate;
     bool m_shouldPreferPlugInsForImages;
+    // Represents |layoutObject() && layoutObject()->isEmbeddedObject() &&
+    // !layoutEmbeddedItem().showsUnavailablePluginIndicator()|.  We want to
+    // avoid accessing |layoutObject()| in layoutObjectIsFocusable().
+    bool m_pluginIsAvailable = false;
 
     // Normally the Widget is stored in HTMLFrameOwnerElement::m_widget.
     // However, plugins can persist even when not rendered. In order to

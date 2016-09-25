@@ -41,6 +41,7 @@
 #include "platform/geometry/FloatPoint.h"
 #include "platform/graphics/StrokeData.h"
 #include "wtf/MathExtras.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -59,7 +60,7 @@ LayoutSVGShape::~LayoutSVGShape()
 void LayoutSVGShape::createPath()
 {
     if (!m_path)
-        m_path = adoptPtr(new Path());
+        m_path = wrapUnique(new Path());
     *m_path = toSVGGeometryElement(element())->asPath();
     if (m_rareData.get())
         m_rareData->m_cachedNonScalingStrokePath.clear();
@@ -79,6 +80,8 @@ void LayoutSVGShape::updateShapeFromElement()
 
     m_fillBoundingBox = calculateObjectBoundingBox();
     m_strokeBoundingBox = calculateStrokeBoundingBox();
+    if (element())
+        element()->setNeedsResizeObserverUpdate();
 }
 
 FloatRect LayoutSVGShape::hitTestStrokeBoundingBox() const
@@ -156,31 +159,40 @@ void LayoutSVGShape::updateLocalTransform()
 
 void LayoutSVGShape::layout()
 {
-    bool updateCachedBoundariesInParents = false;
     LayoutAnalyzer::Scope analyzer(*this);
-
-    if (m_needsShapeUpdate || m_needsBoundariesUpdate) {
-        updateShapeFromElement();
-        m_needsShapeUpdate = false;
-        updatePaintInvalidationBoundingBox();
-        m_needsBoundariesUpdate = false;
-        updateCachedBoundariesInParents = true;
-    }
-
-    if (m_needsTransformUpdate) {
-        updateLocalTransform();
-        m_needsTransformUpdate = false;
-        updateCachedBoundariesInParents = true;
-    }
 
     // Invalidate all resources of this client if our layout changed.
     if (everHadLayout() && selfNeedsLayout())
         SVGResourcesCache::clientLayoutChanged(this);
 
+    bool updateParentBoundaries = false;
+    // updateShapeFromElement() also updates the object & stroke bounds - which
+    // feeds into the paint invalidation rect - so we need to call it for both
+    // the shape-update and the bounds-update flag, since .
+    if (m_needsShapeUpdate || m_needsBoundariesUpdate) {
+        updateShapeFromElement();
+        m_needsShapeUpdate = false;
+
+        m_paintInvalidationBoundingBox = strokeBoundingBox();
+        SVGLayoutSupport::intersectPaintInvalidationRectWithResources(this, m_paintInvalidationBoundingBox);
+        m_needsBoundariesUpdate = false;
+
+        updateParentBoundaries = true;
+    }
+
+    if (m_needsTransformUpdate) {
+        updateLocalTransform();
+        m_needsTransformUpdate = false;
+        updateParentBoundaries = true;
+    }
+
     // If our bounds changed, notify the parents.
-    if (updateCachedBoundariesInParents)
+    if (updateParentBoundaries)
         LayoutSVGModelObject::setNeedsBoundariesUpdate();
 
+    ASSERT(!m_needsShapeUpdate);
+    ASSERT(!m_needsBoundariesUpdate);
+    ASSERT(!m_needsTransformUpdate);
     clearNeedsLayout();
 }
 
@@ -224,7 +236,7 @@ bool LayoutSVGShape::nodeAtFloatPoint(HitTestResult& result, const FloatPoint& p
         return false;
 
     FloatPoint localPoint;
-    if (!SVGLayoutSupport::transformToUserSpaceAndCheckClipping(this, localToSVGParentTransform(), pointInParent, localPoint))
+    if (!SVGLayoutSupport::transformToUserSpaceAndCheckClipping(*this, localToSVGParentTransform(), pointInParent, localPoint))
         return false;
 
     PointerEventsHitRules hitRules(PointerEventsHitRules::SVG_GEOMETRY_HITTESTING, result.hitTestRequest(), style()->pointerEvents());
@@ -240,7 +252,7 @@ bool LayoutSVGShape::nodeAtFloatPoint(HitTestResult& result, const FloatPoint& p
 
 bool LayoutSVGShape::nodeAtFloatPointInternal(const HitTestRequest& request, const FloatPoint& localPoint, PointerEventsHitRules hitRules)
 {
-    bool isVisible = (style()->visibility() == VISIBLE);
+    bool isVisible = (style()->visibility() == EVisibility::Visible);
     if (isVisible || !hitRules.requireVisible) {
         const SVGComputedStyle& svgStyle = style()->svgStyle();
         WindRule fillRule = svgStyle.fillRule();
@@ -283,12 +295,6 @@ FloatRect LayoutSVGShape::calculateStrokeBoundingBox() const
     return strokeBoundingBox;
 }
 
-void LayoutSVGShape::updatePaintInvalidationBoundingBox()
-{
-    m_paintInvalidationBoundingBox = strokeBoundingBox();
-    SVGLayoutSupport::intersectPaintInvalidationRectWithResources(this, m_paintInvalidationBoundingBox);
-}
-
 float LayoutSVGShape::strokeWidth() const
 {
     SVGLengthContext lengthContext(element());
@@ -298,7 +304,7 @@ float LayoutSVGShape::strokeWidth() const
 LayoutSVGShapeRareData& LayoutSVGShape::ensureRareData() const
 {
     if (!m_rareData)
-        m_rareData = adoptPtr(new LayoutSVGShapeRareData());
+        m_rareData = wrapUnique(new LayoutSVGShapeRareData());
     return *m_rareData.get();
 }
 

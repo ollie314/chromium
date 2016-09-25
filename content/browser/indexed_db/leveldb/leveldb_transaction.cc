@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "content/browser/indexed_db/indexed_db_tracing.h"
 #include "content/browser/indexed_db/leveldb/leveldb_database.h"
@@ -28,41 +28,36 @@ LevelDBTransaction::LevelDBTransaction(LevelDBDatabase* db)
 LevelDBTransaction::Record::Record() : deleted(false) {}
 LevelDBTransaction::Record::~Record() {}
 
-void LevelDBTransaction::Clear() {
-  for (const auto& it : data_)
-    delete it.second;
-  data_.clear();
-}
+LevelDBTransaction::~LevelDBTransaction() {}
 
-LevelDBTransaction::~LevelDBTransaction() { Clear(); }
-
-void LevelDBTransaction::Set(const StringPiece& key,
+bool LevelDBTransaction::Set(const StringPiece& key,
                              std::string* value,
                              bool deleted) {
   DCHECK(!finished_);
   DataType::iterator it = data_.find(key);
 
   if (it == data_.end()) {
-    Record* record = new Record();
+    std::unique_ptr<Record> record = base::MakeUnique<Record>();
     record->key.assign(key.begin(), key.end() - key.begin());
     record->value.swap(*value);
     record->deleted = deleted;
-    data_[record->key] = record;
+    data_[record->key] = std::move(record);
     NotifyIterators();
-    return;
+    return false;
   }
-
+  bool replaced_deleted_value = it->second->deleted;
   it->second->value.swap(*value);
   it->second->deleted = deleted;
+  return replaced_deleted_value;
 }
 
 void LevelDBTransaction::Put(const StringPiece& key, std::string* value) {
   Set(key, value, false);
 }
 
-void LevelDBTransaction::Remove(const StringPiece& key) {
+bool LevelDBTransaction::Remove(const StringPiece& key) {
   std::string empty;
-  Set(key, &empty, true);
+  return !Set(key, &empty, true);
 }
 
 leveldb::Status LevelDBTransaction::Get(const StringPiece& key,
@@ -106,8 +101,6 @@ leveldb::Status LevelDBTransaction::Commit() {
       write_batch->Put(it->first, it->second->value);
     else
       write_batch->Remove(it->first);
-
-    delete it->second;
     data_.erase(it++);
   }
 
@@ -125,7 +118,7 @@ leveldb::Status LevelDBTransaction::Commit() {
 void LevelDBTransaction::Rollback() {
   DCHECK(!finished_);
   finished_ = true;
-  Clear();
+  data_.clear();
 }
 
 std::unique_ptr<LevelDBIterator> LevelDBTransaction::CreateIterator() {

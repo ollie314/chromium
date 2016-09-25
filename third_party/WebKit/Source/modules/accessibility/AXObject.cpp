@@ -28,6 +28,8 @@
 
 #include "modules/accessibility/AXObject.h"
 
+#include "SkMatrix44.h"
+#include "core/css/resolver/StyleResolver.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/frame/FrameView.h"
@@ -36,9 +38,7 @@
 #include "core/html/HTMLDialogElement.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "core/layout/LayoutListItem.h"
-#include "core/layout/LayoutTheme.h"
-#include "core/layout/LayoutView.h"
+#include "core/layout/LayoutBox.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/text/PlatformLocale.h"
@@ -141,6 +141,7 @@ const InternalRoleEntry internalRoles[] = {
     { AnnotationRole, "Annotation" },
     { ApplicationRole, "Application" },
     { ArticleRole, "Article" },
+    { AudioRole, "Audio" },
     { BannerRole, "Banner" },
     { BlockquoteRole, "Blockquote" },
     // TODO(nektar): Delete busy_indicator role. It's used nowhere.
@@ -187,6 +188,7 @@ const InternalRoleEntry internalRoles[] = {
     { LabelRole, "Label" },
     { LegendRole, "Legend" },
     { LinkRole, "Link" },
+    { LineBreakRole, "LineBreak" },
     { ListBoxOptionRole, "ListBoxOption" },
     { ListBoxRole, "ListBox" },
     { ListItemRole, "ListItem" },
@@ -252,8 +254,8 @@ const InternalRoleEntry internalRoles[] = {
     { TreeItemRole, "TreeItem" },
     { TreeRole, "Tree" },
     { UserInterfaceTooltipRole, "UserInterfaceTooltip" },
+    { VideoRole, "Video" },
     { WebAreaRole, "WebArea" },
-    { LineBreakRole, "LineBreak" },
     { WindowRole, "Window" }
 };
 
@@ -381,6 +383,7 @@ AXObject::AXObject(AXObjectCacheImpl& axObjectCache)
     , m_haveChildren(false)
     , m_role(UnknownRole)
     , m_lastKnownIsIgnoredValue(DefaultBehavior)
+    , m_explicitContainerID(0)
     , m_parent(nullptr)
     , m_lastModificationCount(-1)
     , m_cachedIsIgnored(false)
@@ -514,15 +517,14 @@ void AXObject::updateCachedAttributeValuesIfNeeded() const
         return;
 
     m_lastModificationCount = cache.modificationCount();
+    m_cachedBackgroundColor = computeBackgroundColor();
     m_cachedIsInertOrAriaHidden = computeIsInertOrAriaHidden();
     m_cachedIsDescendantOfLeafNode = (leafNodeAncestor() != 0);
     m_cachedIsDescendantOfDisabledNode = (disabledAncestor() != 0);
     m_cachedHasInheritedPresentationalRole = (inheritsPresentationalRoleFrom() != 0);
     m_cachedIsPresentationalChild = (ancestorForWhichThisIsAPresentationalChild() != 0);
     m_cachedIsIgnored = computeAccessibilityIsIgnored();
-    m_cachedLiveRegionRoot = isLiveRegion() ?
-        this :
-        (parentObjectIfExists() ? parentObjectIfExists()->liveRegionRoot() : 0);
+    m_cachedLiveRegionRoot = isLiveRegion() ? const_cast<AXObject*>(this) : (parentObjectIfExists() ? parentObjectIfExists()->liveRegionRoot() : 0);
     m_cachedAncestorExposesActiveDescendant = computeAncestorExposesActiveDescendant();
 }
 
@@ -750,6 +752,9 @@ String AXObject::name(NameSources* nameSources) const
 
 String AXObject::recursiveTextAlternative(const AXObject& axObj, bool inAriaLabelledByTraversal, AXObjectSet& visited)
 {
+    if (visited.contains(&axObj) && !inAriaLabelledByTraversal)
+        return String();
+
     AXNameFrom tmpNameFrom;
     return axObj.textAlternative(true, inAriaLabelledByTraversal, visited, tmpNameFrom, nullptr, nullptr);
 }
@@ -760,7 +765,7 @@ bool AXObject::isHiddenForTextAlternativeCalculation() const
         return false;
 
     if (getLayoutObject())
-        return getLayoutObject()->style()->visibility() != VISIBLE;
+        return getLayoutObject()->style()->visibility() != EVisibility::Visible;
 
     // This is an obscure corner case: if a node has no LayoutObject, that means it's not rendered,
     // but we still may be exploring it as part of a text alternative calculation, for example if it
@@ -770,7 +775,7 @@ bool AXObject::isHiddenForTextAlternativeCalculation() const
     Document* doc = getDocument();
     if (doc && doc->frame() && getNode() && getNode()->isElementNode()) {
         RefPtr<ComputedStyle> style = doc->ensureStyleResolver().styleForElement(toElement(getNode()));
-        return style->display() == NONE || style->visibility() != VISIBLE;
+        return style->display() == NONE || style->visibility() != EVisibility::Visible;
     }
 
     return false;
@@ -804,8 +809,10 @@ String AXObject::ariaTextAlternative(bool recursive, bool inAriaLabelledByTraver
             if (nameSources)
                 nameSources->last().attributeValue = ariaLabelledby;
 
-            textAlternative = textFromAriaLabelledby(visited, relatedObjects);
-
+            // Operate on a copy of |visited| so that if |nameSources| is not null,
+            // the set of visited objects is preserved unmodified for future calculations.
+            AXObjectSet visitedCopy = visited;
+            textAlternative = textFromAriaLabelledby(visitedCopy, relatedObjects);
             if (!textAlternative.isNull()) {
                 if (nameSources) {
                     NameSource& source = nameSources->last();
@@ -863,7 +870,7 @@ String AXObject::textFromElements(bool inAriaLabelledbyTraversal, AXObjectSet& v
             localRelatedObjects.append(new NameSourceRelatedObject(axElement, result));
             if (!result.isEmpty()) {
                 if (!accumulatedText.isEmpty())
-                    accumulatedText.append(" ");
+                    accumulatedText.append(' ');
                 accumulatedText.append(result);
             }
         }
@@ -924,6 +931,12 @@ String AXObject::textFromAriaDescribedby(AXRelatedObjectVector* relatedObjects) 
     HeapVector<Member<Element>> elements;
     elementsFromAttribute(elements, aria_describedbyAttr);
     return textFromElements(true, visited, elements, relatedObjects);
+}
+
+RGBA32 AXObject::backgroundColor() const
+{
+    updateCachedAttributeValuesIfNeeded();
+    return m_cachedBackgroundColor;
 }
 
 AccessibilityOrientation AXObject::orientation() const
@@ -988,7 +1001,7 @@ bool AXObject::isMultiline() const
     if (isHTMLTextAreaElement(*node))
         return true;
 
-    if (node->hasEditableStyle())
+    if (hasEditableStyle(*node))
         return true;
 
     if (!isNativeTextControl() && !isNonNativeTextControl())
@@ -1061,8 +1074,10 @@ bool AXObject::supportsSetSizeAndPosInSet() const
         || (role == MenuItemRole && parentRole == MenuRole)
         || (role == RadioButtonRole)
         || (role == TabRole && parentRole == TabListRole)
-        || (role == TreeItemRole && parentRole == TreeRole))
+        || (role == TreeItemRole && parentRole == TreeRole)
+        || (role == TreeItemRole && parentRole == GroupRole)) {
         return true;
+    }
 
     return false;
 }
@@ -1089,7 +1104,7 @@ bool AXObject::isLiveRegion() const
     return equalIgnoringCase(liveRegion, "polite") || equalIgnoringCase(liveRegion, "assertive");
 }
 
-const AXObject* AXObject::liveRegionRoot() const
+AXObject* AXObject::liveRegionRoot() const
 {
     updateCachedAttributeValuesIfNeeded();
     return m_cachedLiveRegionRoot;
@@ -1110,60 +1125,20 @@ const AtomicString& AXObject::containerLiveRegionRelevant() const
 bool AXObject::containerLiveRegionAtomic() const
 {
     updateCachedAttributeValuesIfNeeded();
-    return m_cachedLiveRegionRoot ? m_cachedLiveRegionRoot->liveRegionAtomic() : false;
+    return m_cachedLiveRegionRoot && m_cachedLiveRegionRoot->liveRegionAtomic();
 }
 
 bool AXObject::containerLiveRegionBusy() const
 {
     updateCachedAttributeValuesIfNeeded();
-    return m_cachedLiveRegionRoot ? m_cachedLiveRegionRoot->liveRegionBusy() : false;
-}
-
-void AXObject::markCachedElementRectDirty() const
-{
-    for (const auto& child : m_children)
-        child->markCachedElementRectDirty();
-}
-
-IntPoint AXObject::clickPoint()
-{
-    LayoutRect rect = elementRect();
-    return roundedIntPoint(LayoutPoint(rect.x() + rect.width() / 2, rect.y() + rect.height() / 2));
-}
-
-SkMatrix44 AXObject::transformFromLocalParentFrame() const
-{
-    return SkMatrix44();
-}
-
-IntRect AXObject::boundingBoxForQuads(LayoutObject* obj, const Vector<FloatQuad>& quads)
-{
-    ASSERT(obj);
-    if (!obj)
-        return IntRect();
-
-    size_t count = quads.size();
-    if (!count)
-        return IntRect();
-
-    IntRect result;
-    for (size_t i = 0; i < count; ++i) {
-        IntRect r = quads[i].enclosingBoundingBox();
-        if (!r.isEmpty()) {
-            // TODO(pdr): Should this be using visualOverflowRect?
-            if (obj->style()->hasAppearance())
-                LayoutTheme::theme().addVisualOverflow(*obj, r);
-            result.unite(r);
-        }
-    }
-    return result;
+    return m_cachedLiveRegionRoot && m_cachedLiveRegionRoot->liveRegionBusy();
 }
 
 AXObject* AXObject::elementAccessibilityHitTest(const IntPoint& point) const
 {
     // Check if there are any mock elements that need to be handled.
     for (const auto& child : m_children) {
-        if (child->isMockObject() && child->elementRect().contains(point))
+        if (child->isMockObject() && child->getBoundsInFrameCoordinates().contains(point))
             return child->elementAccessibilityHitTest(point);
     }
 
@@ -1339,6 +1314,93 @@ void AXObject::setScrollOffset(const IntPoint& offset) const
     area->setScrollPosition(DoublePoint(offset.x(), offset.y()), ProgrammaticScroll);
 }
 
+void AXObject::getRelativeBounds(AXObject** outContainer, FloatRect& outBoundsInContainer, SkMatrix44& outContainerTransform) const
+{
+    *outContainer = nullptr;
+    outBoundsInContainer = FloatRect();
+    outContainerTransform.setIdentity();
+
+    // First check if it has explicit bounds, for example if this element is tied to a
+    // canvas path. When explicit coordinates are provided, the ID of the explicit container
+    // element that the coordinates are relative to must be provided too.
+    if (!m_explicitElementRect.isEmpty()) {
+        *outContainer = axObjectCache().objectFromAXID(m_explicitContainerID);
+        if (*outContainer) {
+            outBoundsInContainer = FloatRect(m_explicitElementRect);
+            return;
+        }
+    }
+
+    LayoutObject* layoutObject = layoutObjectForRelativeBounds();
+    if (!layoutObject)
+        return;
+
+    if (isWebArea()) {
+        if (layoutObject->frame()->view())
+            outBoundsInContainer.setSize(FloatSize(layoutObject->frame()->view()->contentsSize()));
+        return;
+    }
+
+    // First compute the container. The container must be an ancestor in the accessibility tree, and
+    // its LayoutObject must be an ancestor in the layout tree. Get the first such ancestor that's
+    // either scrollable or has a paint layer.
+    AXObject* container = parentObjectUnignored();
+    LayoutObject* containerLayoutObject = nullptr;
+    while (container) {
+        containerLayoutObject = container->getLayoutObject();
+        if (containerLayoutObject && containerLayoutObject->isBoxModelObject() && layoutObject->isDescendantOf(containerLayoutObject)) {
+            if (container->isScrollableContainer() || containerLayoutObject->hasLayer())
+                break;
+        }
+
+        container = container->parentObjectUnignored();
+    }
+
+    if (!container)
+        return;
+    *outContainer = container;
+    outBoundsInContainer = layoutObject->localBoundingBoxRectForAccessibility();
+
+    // If the container has a scroll offset, subtract that out because we want our
+    // bounds to be relative to the *unscrolled* position of the container object.
+    ScrollableArea* scrollableArea = container->getScrollableAreaIfScrollable();
+    if (scrollableArea && !container->isWebArea()) {
+        IntPoint scrollPosition = scrollableArea->scrollPosition();
+        outBoundsInContainer.move(FloatSize(scrollPosition.x(), scrollPosition.y()));
+    }
+
+    // Compute the transform between the container's coordinate space and this object.
+    // If the transform is just a simple translation, apply that to the bounding box, but
+    // if it's a non-trivial transformation like a rotation, scaling, etc. then return
+    // the full matrix instead.
+    TransformationMatrix transform = layoutObject->localToAncestorTransform(toLayoutBoxModelObject(containerLayoutObject));
+    if (transform.isIdentityOr2DTranslation()) {
+        outBoundsInContainer.move(transform.to2DTranslation());
+    } else {
+        outContainerTransform = TransformationMatrix::toSkMatrix44(transform);
+    }
+}
+
+LayoutRect AXObject::getBoundsInFrameCoordinates() const
+{
+    AXObject* container = nullptr;
+    FloatRect bounds;
+    SkMatrix44 transform;
+    getRelativeBounds(&container, bounds, transform);
+    FloatRect computedBounds(0, 0, bounds.width(), bounds.height());
+    while (container && container != this) {
+        computedBounds.move(bounds.x(), bounds.y());
+        if (!container->isWebArea())
+            computedBounds.move(-container->scrollOffset().x(), -container->scrollOffset().y());
+        if (!transform.isIdentity()) {
+            TransformationMatrix transformationMatrix(transform);
+            transformationMatrix.mapRect(computedBounds);
+        }
+        container->getRelativeBounds(&container, bounds, transform);
+    }
+    return LayoutRect(computedBounds);
+}
+
 //
 // Modify or take an action on an object.
 //
@@ -1355,7 +1417,7 @@ bool AXObject::press() const
 
 void AXObject::scrollToMakeVisible() const
 {
-    IntRect objectRect = pixelSnappedIntRect(elementRect());
+    IntRect objectRect = pixelSnappedIntRect(getBoundsInFrameCoordinates());
     objectRect.setLocation(IntPoint());
     scrollToMakeVisibleWithSubFocus(objectRect);
 }
@@ -1465,14 +1527,14 @@ void AXObject::scrollToMakeVisibleWithSubFocus(const IntRect& subfocus) const
     if (!scrollParent || !scrollableArea)
         return;
 
-    IntRect objectRect = pixelSnappedIntRect(elementRect());
+    IntRect objectRect = pixelSnappedIntRect(getBoundsInFrameCoordinates());
     IntPoint scrollPosition = scrollableArea->scrollPosition();
     IntRect scrollVisibleRect = scrollableArea->visibleContentRect();
 
     // Convert the object rect into local coordinates.
     if (!scrollParent->isWebArea()) {
         objectRect.moveBy(scrollPosition);
-        objectRect.moveBy(-pixelSnappedIntRect(scrollParent->elementRect()).location());
+        objectRect.moveBy(-pixelSnappedIntRect(scrollParent->getBoundsInFrameCoordinates()).location());
     }
 
     int desiredX = computeBestScrollOffset(
@@ -1490,8 +1552,8 @@ void AXObject::scrollToMakeVisibleWithSubFocus(const IntRect& subfocus) const
 
     // Convert the subfocus into the coordinates of the scroll parent.
     IntRect newSubfocus = subfocus;
-    IntRect newElementRect = pixelSnappedIntRect(elementRect());
-    IntRect scrollParentRect = pixelSnappedIntRect(scrollParent->elementRect());
+    IntRect newElementRect = pixelSnappedIntRect(getBoundsInFrameCoordinates());
+    IntRect scrollParentRect = pixelSnappedIntRect(scrollParent->getBoundsInFrameCoordinates());
     newSubfocus.move(newElementRect.x(), newElementRect.y());
     newSubfocus.move(-scrollParentRect.x(), -scrollParentRect.y());
 
@@ -1522,7 +1584,7 @@ void AXObject::scrollToGlobalPoint(const IntPoint& globalPoint) const
         const AXObject* inner = objects[i + 1];
         ScrollableArea* scrollableArea = outer->getScrollableAreaIfScrollable();
 
-        IntRect innerRect = inner->isWebArea() ? pixelSnappedIntRect(inner->parentObject()->elementRect()) : pixelSnappedIntRect(inner->elementRect());
+        IntRect innerRect = inner->isWebArea() ? pixelSnappedIntRect(inner->parentObject()->getBoundsInFrameCoordinates()) : pixelSnappedIntRect(inner->getBoundsInFrameCoordinates());
         IntRect objectRect = innerRect;
         IntPoint scrollPosition = scrollableArea->scrollPosition();
 
@@ -1697,6 +1759,7 @@ bool AXObject::nameFromContents() const
     case SwitchRole:
     case TabRole:
     case ToggleButtonRole:
+    case TreeItemRole:
         return true;
     default:
         return false;

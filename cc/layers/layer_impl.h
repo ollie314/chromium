@@ -18,6 +18,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/values.h"
+#include "cc/animation/element_id.h"
 #include "cc/animation/target_property.h"
 #include "cc/base/cc_export.h"
 #include "cc/base/region.h"
@@ -25,15 +26,16 @@
 #include "cc/input/input_handler.h"
 #include "cc/layers/draw_properties.h"
 #include "cc/layers/layer_collections.h"
+#include "cc/layers/layer_impl_test_properties.h"
 #include "cc/layers/layer_position_constraint.h"
 #include "cc/layers/performance_properties.h"
 #include "cc/layers/render_surface_impl.h"
-#include "cc/output/filter_operations.h"
 #include "cc/quads/shared_quad_state.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/tiles/tile_priority.h"
+#include "cc/trees/mutator_host_client.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/skia/include/core/SkImageFilter.h"
+#include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -50,6 +52,7 @@ class DictionaryValue;
 
 namespace cc {
 
+class AnimationHost;
 class LayerTreeHostImpl;
 class LayerTreeImpl;
 class MicroBenchmarkImpl;
@@ -80,8 +83,6 @@ class CC_EXPORT LayerImpl {
   typedef LayerImplList LayerListType;
   typedef RenderSurfaceImpl RenderSurfaceType;
 
-  enum RenderingContextConstants { NO_RENDERING_CONTEXT = 0 };
-
   static std::unique_ptr<LayerImpl> Create(LayerTreeImpl* tree_impl, int id) {
     return base::WrapUnique(new LayerImpl(tree_impl, id));
   }
@@ -92,35 +93,15 @@ class CC_EXPORT LayerImpl {
 
   // Interactions with attached animations.
   gfx::ScrollOffset ScrollOffsetForAnimation() const;
-  void OnFilterAnimated(const FilterOperations& filters);
-  void OnOpacityAnimated(float opacity);
-  void OnTransformAnimated(const gfx::Transform& transform);
-  void OnScrollOffsetAnimated(const gfx::ScrollOffset& scroll_offset);
-  void OnTransformIsPotentiallyAnimatingChanged(bool is_animating);
+  void OnTransformIsCurrentlyAnimatingChanged(bool is_currently_animating);
+  void OnTransformIsPotentiallyAnimatingChanged(bool has_potential_animation);
+  void OnOpacityIsCurrentlyAnimatingChanged(bool is_currently_animating);
+  void OnOpacityIsPotentiallyAnimatingChanged(bool has_potential_animation);
+  void OnFilterIsCurrentlyAnimatingChanged(bool is_currently_animating);
+  void OnFilterIsPotentiallyAnimatingChanged(bool has_potential_animation);
   bool IsActive() const;
-  bool OpacityCanAnimateOnImplThread() const { return false; }
-
-  // Tree structure.
-  LayerImpl* parent() { return parent_; }
-  LayerImplList& children() { return children_; }
-  LayerImpl* child_at(size_t index) const { return children_[index]; }
-  void AddChild(std::unique_ptr<LayerImpl> child);
-  std::unique_ptr<LayerImpl> RemoveChildForTesting(LayerImpl* child);
-  void SetParent(LayerImpl* parent);
-
-  void SetScrollParent(LayerImpl* parent);
-
-  LayerImpl* scroll_parent() { return scroll_parent_; }
-
-  void SetScrollChildren(std::set<LayerImpl*>* children);
-
-  std::set<LayerImpl*>* scroll_children() { return scroll_children_.get(); }
-  const std::set<LayerImpl*>* scroll_children() const {
-    return scroll_children_.get();
-  }
 
   void DistributeScroll(ScrollState* scroll_state);
-  void ApplyScroll(ScrollState* scroll_state);
 
   void set_property_tree_sequence_number(int sequence_number) {}
 
@@ -132,13 +113,13 @@ class CC_EXPORT LayerImpl {
 
   void SetEffectTreeIndex(int index);
   int effect_tree_index() const { return effect_tree_index_; }
+  int render_target_effect_tree_index() const;
 
   void SetScrollTreeIndex(int index);
   int scroll_tree_index() const { return scroll_tree_index_; }
 
   void set_offset_to_transform_parent(const gfx::Vector2dF& offset) {
     offset_to_transform_parent_ = offset;
-    SetNeedsPushProperties();
   }
   gfx::Vector2dF offset_to_transform_parent() const {
     return offset_to_transform_parent_;
@@ -146,7 +127,6 @@ class CC_EXPORT LayerImpl {
 
   void set_should_flatten_transform_from_property_tree(bool should_flatten) {
     should_flatten_transform_from_property_tree_ = should_flatten;
-    SetNeedsPushProperties();
   }
   bool should_flatten_transform_from_property_tree() const {
     return should_flatten_transform_from_property_tree_;
@@ -154,51 +134,11 @@ class CC_EXPORT LayerImpl {
 
   bool is_clipped() const { return draw_properties_.is_clipped; }
 
-  void UpdatePropertyTreeTransform();
   void UpdatePropertyTreeTransformIsAnimated(bool is_animated);
-  void UpdatePropertyTreeOpacity();
   void UpdatePropertyTreeScrollOffset();
 
   // For compatibility with Layer.
   bool has_render_surface() const { return !!render_surface(); }
-  bool force_render_surface() const { return force_render_surface_; }
-  void SetNumDescendantsThatDrawContent(int num_descendants);
-  void SetClipParent(LayerImpl* ancestor);
-
-  LayerImpl* clip_parent() {
-    return clip_parent_;
-  }
-
-  void SetClipChildren(std::set<LayerImpl*>* children);
-
-  std::set<LayerImpl*>* clip_children() { return clip_children_.get(); }
-  const std::set<LayerImpl*>* clip_children() const {
-    return clip_children_.get();
-  }
-
-  void PassCopyRequests(
-      std::vector<std::unique_ptr<CopyOutputRequest>>* requests);
-  // Can only be called when the layer has a copy request.
-  void TakeCopyRequestsAndTransformToTarget(
-      std::vector<std::unique_ptr<CopyOutputRequest>>* request);
-  bool HasCopyRequest() const { return !copy_requests_.empty(); }
-  bool InsideCopyRequest() const;
-
-  void SetMaskLayer(std::unique_ptr<LayerImpl> mask_layer);
-  LayerImpl* mask_layer() { return mask_layer_; }
-  const LayerImpl* mask_layer() const { return mask_layer_; }
-  std::unique_ptr<LayerImpl> TakeMaskLayer();
-
-  void SetReplicaLayer(std::unique_ptr<LayerImpl> replica_layer);
-  LayerImpl* replica_layer() { return replica_layer_; }
-  const LayerImpl* replica_layer() const { return replica_layer_; }
-  std::unique_ptr<LayerImpl> TakeReplicaLayer();
-
-  bool has_mask() const { return !!mask_layer_; }
-  bool has_replica() const { return !!replica_layer_; }
-  bool replica_has_mask() const {
-    return replica_layer_ && (mask_layer_ || replica_layer_->mask_layer_);
-  }
 
   LayerTreeImpl* layer_tree_impl() const { return layer_tree_impl_; }
 
@@ -234,12 +174,11 @@ class CC_EXPORT LayerImpl {
   void SetDrawsContent(bool draws_content);
   bool DrawsContent() const { return draws_content_; }
 
-  int NumDescendantsThatDrawContent() const;
-  void SetHideLayerAndSubtree(bool hide);
-  bool hide_layer_and_subtree() const { return hide_layer_and_subtree_; }
-
-  void SetTransformOrigin(const gfx::Point3F& transform_origin);
-  gfx::Point3F transform_origin() const { return transform_origin_; }
+  LayerImplTestProperties* test_properties() {
+    if (!test_properties_)
+      test_properties_.reset(new LayerImplTestProperties(this));
+    return test_properties_.get();
+  }
 
   void SetBackgroundColor(SkColor background_color);
   SkColor background_color() const { return background_color_; }
@@ -248,16 +187,8 @@ class CC_EXPORT LayerImpl {
   // non-opaque color.  Tries to return background_color(), if possible.
   SkColor SafeOpaqueBackgroundColor() const;
 
-  void SetFilters(const FilterOperations& filters);
-  const FilterOperations& filters() const { return filters_; }
   bool FilterIsAnimating() const;
   bool HasPotentiallyRunningFilterAnimation() const;
-  bool FilterIsAnimatingOnImplOnly() const;
-
-  void SetBackgroundFilters(const FilterOperations& filters);
-  const FilterOperations& background_filters() const {
-    return background_filters_;
-  }
 
   void SetMasksToBounds(bool masks_to_bounds);
   bool masks_to_bounds() const { return masks_to_bounds_; }
@@ -265,61 +196,26 @@ class CC_EXPORT LayerImpl {
   void SetContentsOpaque(bool opaque);
   bool contents_opaque() const { return contents_opaque_; }
 
-  void SetOpacity(float opacity);
-  float opacity() const { return opacity_; }
-  float EffectiveOpacity() const;
-  bool OpacityIsAnimating() const;
-  bool HasPotentiallyRunningOpacityAnimation() const;
-  bool OpacityIsAnimatingOnImplOnly() const;
+  float Opacity() const;
+  const gfx::Transform& Transform() const;
 
-  void SetElementId(uint64_t element_id);
-  uint64_t element_id() const { return element_id_; }
+  void SetElementId(ElementId element_id);
+  ElementId element_id() const { return element_id_; }
 
   void SetMutableProperties(uint32_t properties);
   uint32_t mutable_properties() const { return mutable_properties_; }
 
-  void SetBlendMode(SkXfermode::Mode);
-  SkXfermode::Mode blend_mode() const { return blend_mode_; }
   void set_draw_blend_mode(SkXfermode::Mode blend_mode) {
-    if (draw_blend_mode_ == blend_mode)
-      return;
     draw_blend_mode_ = blend_mode;
-    SetNeedsPushProperties();
   }
   SkXfermode::Mode draw_blend_mode() const { return draw_blend_mode_; }
-  bool uses_default_blend_mode() const {
-    return blend_mode_ == SkXfermode::kSrcOver_Mode;
-  }
-
-  void SetIsRootForIsolatedGroup(bool root);
-  bool is_root_for_isolated_group() const {
-    return is_root_for_isolated_group_;
-  }
 
   void SetPosition(const gfx::PointF& position);
   gfx::PointF position() const { return position_; }
 
-  void SetIsContainerForFixedPositionLayers(bool container) {
-    is_container_for_fixed_position_layers_ = container;
-  }
-  // This is a non-trivial function in Layer.
-  bool IsContainerForFixedPositionLayers() const {
-    return is_container_for_fixed_position_layers_;
-  }
-
   bool IsAffectedByPageScale() const;
 
   gfx::Vector2dF FixedContainerSizeDelta() const;
-
-  void SetPositionConstraint(const LayerPositionConstraint& constraint) {
-    position_constraint_ = constraint;
-  }
-  const LayerPositionConstraint& position_constraint() const {
-    return position_constraint_;
-  }
-
-  void SetShouldFlattenTransform(bool flatten);
-  bool should_flatten_transform() const { return should_flatten_transform_; }
 
   bool Is3dSorted() const { return sorting_context_id_ != 0; }
 
@@ -370,6 +266,8 @@ class CC_EXPORT LayerImpl {
     return performance_properties_;
   }
 
+  bool CanUseLCDText() const;
+
   // Setter for draw_properties_.
   void set_visible_layer_rect(const gfx::Rect& visible_rect) {
     draw_properties_.visible_layer_rect = visible_rect;
@@ -384,16 +282,12 @@ class CC_EXPORT LayerImpl {
   bool screen_space_transform_is_animating() const {
     return draw_properties_.screen_space_transform_is_animating;
   }
-  bool can_use_lcd_text() const { return draw_properties_.can_use_lcd_text; }
   gfx::Rect clip_rect() const { return draw_properties_.clip_rect; }
   gfx::Rect drawable_content_rect() const {
     return draw_properties_.drawable_content_rect;
   }
   gfx::Rect visible_layer_rect() const {
     return draw_properties_.visible_layer_rect;
-  }
-  size_t num_unclipped_descendants() const {
-    return draw_properties_.num_unclipped_descendants;
   }
 
   // The client should be responsible for setting bounds, content bounds and
@@ -434,7 +328,9 @@ class CC_EXPORT LayerImpl {
   bool user_scrollable(ScrollbarOrientation orientation) const;
 
   void set_main_thread_scrolling_reasons(
-      uint32_t main_thread_scrolling_reasons);
+      uint32_t main_thread_scrolling_reasons) {
+    main_thread_scrolling_reasons_ = main_thread_scrolling_reasons;
+  }
   uint32_t main_thread_scrolling_reasons() const {
     return main_thread_scrolling_reasons_;
   }
@@ -453,26 +349,8 @@ class CC_EXPORT LayerImpl {
     return touch_event_handler_region_;
   }
 
-  void SetDoubleSided(bool double_sided);
-  bool double_sided() const { return double_sided_; }
-
-  void SetTransform(const gfx::Transform& transform);
-  const gfx::Transform& transform() const { return transform_; }
   bool TransformIsAnimating() const;
   bool HasPotentiallyRunningTransformAnimation() const;
-  bool TransformIsAnimatingOnImplOnly() const;
-  bool HasOnlyTranslationTransforms() const;
-  bool AnimationsPreserveAxisAlignment() const;
-  void SetTransformAndInvertibility(const gfx::Transform& transform,
-                                    bool transform_is_invertible);
-  bool transform_is_invertible() const { return transform_is_invertible_; }
-
-  bool MaximumTargetScale(float* max_scale) const;
-  bool AnimationStartScale(float* start_scale) const;
-
-  // This includes all animations, even those that are finished but haven't yet
-  // been deleted.
-  bool HasAnyAnimationTargetingProperty(TargetProperty::Type property) const;
 
   bool HasFilterAnimationThatInflatesBounds() const;
   bool HasTransformAnimationThatInflatesBounds() const;
@@ -490,7 +368,7 @@ class CC_EXPORT LayerImpl {
   void AddDamageRect(const gfx::Rect& damage_rect);
   const gfx::Rect& damage_rect() const { return damage_rect_; }
 
-  virtual base::DictionaryValue* LayerTreeAsJson() const;
+  virtual std::unique_ptr<base::DictionaryValue> LayerTreeAsJson();
 
   bool LayerPropertyChanged() const;
 
@@ -526,13 +404,19 @@ class CC_EXPORT LayerImpl {
   void SetDebugInfo(
       std::unique_ptr<base::trace_event::ConvertableToTraceFormat> debug_info);
 
-  bool IsDrawnRenderSurfaceLayerListMember() const;
+  void set_is_drawn_render_surface_layer_list_member(bool is_member) {
+    is_drawn_render_surface_layer_list_member_ = is_member;
+  }
+
+  bool is_drawn_render_surface_layer_list_member() const {
+    return is_drawn_render_surface_layer_list_member_;
+  }
+
+  void set_may_contain_video(bool yes) { may_contain_video_ = yes; }
+  bool may_contain_video() const { return may_contain_video_; }
 
   void Set3dSortingContextId(int id);
   int sorting_context_id() { return sorting_context_id_; }
-
-  const SyncedScrollOffset* synced_scroll_offset() const;
-  SyncedScrollOffset* synced_scroll_offset();
 
   // Get the correct invalidation region instead of conservative Rect
   // for layers that provide it.
@@ -545,16 +429,6 @@ class CC_EXPORT LayerImpl {
   }
 
   bool scrolls_drawn_descendant() { return scrolls_drawn_descendant_; }
-
-  void set_layer_or_descendant_has_touch_handler(
-      bool layer_or_descendant_has_touch_handler) {
-    layer_or_descendant_has_touch_handler_ =
-        layer_or_descendant_has_touch_handler;
-  }
-
-  bool layer_or_descendant_has_touch_handler() {
-    return layer_or_descendant_has_touch_handler_;
-  }
 
   int num_copy_requests_in_target_subtree();
 
@@ -576,9 +450,14 @@ class CC_EXPORT LayerImpl {
 
   void NoteLayerPropertyChanged();
 
-  void PushLayerPropertyChangedForSubtree();
+  void SetHasWillChangeTransformHint(bool has_will_change);
+  bool has_will_change_transform_hint() const {
+    return has_will_change_transform_hint_;
+  }
 
-  void ClearLinksToOtherLayers();
+  AnimationHost* GetAnimationHost() const;
+
+  ElementListType GetElementTypeForAnimation() const;
 
  protected:
   LayerImpl(LayerTreeImpl* layer_impl,
@@ -603,44 +482,24 @@ class CC_EXPORT LayerImpl {
   gfx::Rect GetScaledEnclosingRectInTargetSpace(float scale) const;
 
  private:
-  // Warning: This does not preserve tree structure invariants.
-  void ClearChildList();
+  bool HasOnlyTranslationTransforms() const;
+
+  // This includes all animations, even those that are finished but haven't yet
+  // been deleted.
+  bool HasAnyAnimationTargetingProperty(TargetProperty::Type property) const;
 
   void ValidateQuadResourcesInternal(DrawQuad* quad) const;
 
-  void NoteLayerPropertyChangedForDescendantsInternal();
-  void PushLayerPropertyChangedForSubtreeInternal();
-
   virtual const char* LayerTypeAsString() const;
 
-  // Properties internal to LayerImpl
-  LayerImpl* parent_;
-  LayerImplList children_;
-
-  LayerImpl* scroll_parent_;
-
-  // Storing a pointer to a set rather than a set since this will be rarely
-  // used. If this pointer turns out to be too heavy, we could have this (and
-  // the scroll parent above) be stored in a LayerImpl -> scroll_info
-  // map somewhere.
-  std::unique_ptr<std::set<LayerImpl*>> scroll_children_;
-
-  LayerImpl* clip_parent_;
-  std::unique_ptr<std::set<LayerImpl*>> clip_children_;
-
-  // mask_layer_ can be temporarily stolen during tree sync, we need this ID to
-  // confirm newly assigned layer is still the previous one
-  int mask_layer_id_;
-  LayerImpl* mask_layer_;
-  int replica_layer_id_;  // ditto
-  LayerImpl* replica_layer_;
   int layer_id_;
   LayerTreeImpl* layer_tree_impl_;
+
+  std::unique_ptr<LayerImplTestProperties> test_properties_;
 
   gfx::Vector2dF bounds_delta_;
 
   // Properties synchronized from the associated Layer.
-  gfx::Point3F transform_origin_;
   gfx::Size bounds_;
   int scroll_clip_layer_id_;
 
@@ -649,30 +508,19 @@ class CC_EXPORT LayerImpl {
 
   bool user_scrollable_horizontal_ : 1;
   bool user_scrollable_vertical_ : 1;
-  // Whether the "back" of this layer should draw.
-  bool double_sided_ : 1;
-  bool should_flatten_transform_ : 1;
   bool should_flatten_transform_from_property_tree_ : 1;
 
   // Tracks if drawing-related properties have changed since last redraw.
   bool layer_property_changed_ : 1;
+  bool may_contain_video_ : 1;
 
   bool masks_to_bounds_ : 1;
   bool contents_opaque_ : 1;
-  bool is_root_for_isolated_group_ : 1;
   bool use_parent_backface_visibility_ : 1;
   bool use_local_transform_for_backface_visibility_ : 1;
   bool should_check_backface_visibility_ : 1;
   bool draws_content_ : 1;
-  bool hide_layer_and_subtree_ : 1;
-
-  // Cache transform_'s invertibility.
-  bool transform_is_invertible_ : 1;
-
-  // Set for the layer that other layers are fixed to.
-  bool is_container_for_fixed_position_layers_ : 1;
-
-  bool is_affected_by_page_scale_ : 1;
+  bool is_drawn_render_surface_layer_list_member_ : 1;
 
   // This is true if and only if the layer was ever ready since it last animated
   // (all content was complete).
@@ -683,30 +531,14 @@ class CC_EXPORT LayerImpl {
   SkColor background_color_;
   SkColor safe_opaque_background_color_;
 
-  float opacity_;
-  SkXfermode::Mode blend_mode_;
-  // draw_blend_mode may be different than blend_mode_,
-  // when a RenderSurface re-parents the layer's blend_mode.
   SkXfermode::Mode draw_blend_mode_;
   gfx::PointF position_;
-  gfx::Transform transform_;
-
-  LayerPositionConstraint position_constraint_;
-
-  int num_descendants_that_draw_content_;
 
   gfx::Rect clip_rect_in_target_space_;
   int transform_tree_index_;
   int effect_tree_index_;
   int clip_tree_index_;
   int scroll_tree_index_;
-
-  // The global depth value of the center of the layer. This value is used
-  // to sort layers from back to front.
-  float draw_depth_;
-
-  FilterOperations filters_;
-  FilterOperations background_filters_;
 
  protected:
   friend class TreeSynchronizer;
@@ -719,7 +551,7 @@ class CC_EXPORT LayerImpl {
   DrawMode current_draw_mode_;
 
  private:
-  uint64_t element_id_;
+  ElementId element_id_;
   uint32_t mutable_properties_;
   // Rect indicating what was repainted/updated during update.
   // Note that plugin layers bypass this and leave it empty.
@@ -729,8 +561,6 @@ class CC_EXPORT LayerImpl {
   // Denotes an area that is damaged and needs redraw. This is in the layer's
   // space.
   gfx::Rect damage_rect_;
-
-  std::vector<std::unique_ptr<CopyOutputRequest>> copy_requests_;
 
   // Group of properties that need to be computed based on the layer tree
   // hierarchy before layers can be drawn.
@@ -742,11 +572,9 @@ class CC_EXPORT LayerImpl {
   base::trace_event::ConvertableToTraceFormat* debug_info_;
   std::unique_ptr<RenderSurfaceImpl> render_surface_;
 
-  bool force_render_surface_;
-
-  bool scrolls_drawn_descendant_;
-  // If true, the layer or one of its descendants has a touch handler.
-  bool layer_or_descendant_has_touch_handler_;
+  bool scrolls_drawn_descendant_ : 1;
+  bool has_will_change_transform_hint_ : 1;
+  bool needs_push_properties_ : 1;
 
   DISALLOW_COPY_AND_ASSIGN(LayerImpl);
 };

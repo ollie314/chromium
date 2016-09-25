@@ -114,11 +114,9 @@ test("cacheinvalidation_unittests") {
   ]
 }
 
-# TODO(GYP) Test isolation stuff.
 if (is_android) {
   import("//build/config/android/rules.gni")
 
-  # GYP: //third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_proto_java
   proto_java_library("cacheinvalidation_proto_java") {
     proto_path = "src/proto"
     sources = [
@@ -133,7 +131,6 @@ if (is_android) {
     ]
   }
 
-  # GYP: //third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_javalib
   android_library("cacheinvalidation_javalib") {
     chromium_code = false
     emma_never_instrument = true

@@ -8,12 +8,9 @@
 #include "base/base64.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
-#include "extensions/common/cast/cast_cert_validator.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
-
-namespace cast_crypto = ::extensions::api::cast_crypto;
 
 }  // namespace
 
@@ -37,8 +34,8 @@ class NetworkingPrivateCryptoTest : public testing::Test {
 TEST_F(NetworkingPrivateCryptoTest, VerifyCredentials) {
   // This certificate chain and signature are duplicated from:
   //
-  //   extensions/test/data/cast_certificates/chromecast_gen1.pem
-  //   extensions/test/data/cast_signeddata/2ZZBG9_FA8FCA3EF91A.pem
+  //   components/test/data/cast_certificate/certificates/chromecast_gen1.pem
+  //   components/test/data/cast_certificate/signeddata/2ZZBG9_FA8FCA3EF91A.pem
   //
   // TODO(eroman): Avoid duplicating the data.
   static const char kCertData[] =
@@ -121,16 +118,21 @@ TEST_F(NetworkingPrivateCryptoTest, VerifyCredentials) {
   static const char kBadHotspotBssid[] = "bad bssid";
 
   // April 1, 2016
-  base::Time::Exploded time = {0};
-  time.year = 2016;
-  time.month = 4;
-  time.day_of_month = 1;
+  base::Time::Exploded time_exploded = {0};
+  time_exploded.year = 2016;
+  time_exploded.month = 4;
+  time_exploded.day_of_month = 1;
+  base::Time time;
+  ASSERT_TRUE(base::Time::FromUTCExploded(time_exploded, &time));
 
   // September 1, 2035
-  base::Time::Exploded expired_time = {0};
-  expired_time.year = 2035;
-  expired_time.month = 9;
-  expired_time.day_of_month = 1;
+  base::Time::Exploded expired_time_exploded = {0};
+  expired_time_exploded.year = 2035;
+  expired_time_exploded.month = 9;
+  expired_time_exploded.day_of_month = 1;
+  base::Time expired_time;
+  ASSERT_TRUE(
+      base::Time::FromUTCExploded(expired_time_exploded, &expired_time));
 
   std::string unsigned_data = std::string(std::begin(kData), std::end(kData));
   std::string signed_data =

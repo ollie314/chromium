@@ -121,6 +121,120 @@ private:
     int m_ordinalIteration;
 };
 
+// Helper methods for obtaining the last line, computing line counts and heights for line counts
+// (crawling into blocks).
+static bool shouldCheckLines(LayoutBlockFlow* blockFlow)
+{
+    return !blockFlow->isFloatingOrOutOfFlowPositioned() && blockFlow->style()->height().isAuto();
+}
+
+static int getHeightForLineCount(const LayoutBlockFlow* blockFlow, int lineCount, bool includeBottom, int& count)
+{
+    if (blockFlow->style()->visibility() != EVisibility::Visible)
+        return -1;
+    if (blockFlow->childrenInline()) {
+        for (RootInlineBox* box = blockFlow->firstRootBox(); box; box = box->nextRootBox()) {
+            if (++count == lineCount)
+                return (box->lineBottom() + (includeBottom ? (blockFlow->borderBottom() + blockFlow->paddingBottom()) : LayoutUnit())).toInt();
+        }
+        return -1;
+    }
+
+    LayoutBox* normalFlowChildWithoutLines = nullptr;
+    for (LayoutBox* obj = blockFlow->firstChildBox(); obj; obj = obj->nextSiblingBox()) {
+        if (obj->isLayoutBlockFlow() && shouldCheckLines(toLayoutBlockFlow(obj))) {
+            int result = getHeightForLineCount(toLayoutBlockFlow(obj), lineCount, false, count);
+            if (result != -1)
+                return (result + obj->location().y() + (includeBottom ? (blockFlow->borderBottom() + blockFlow->paddingBottom()) : LayoutUnit())).toInt();
+        } else if (!obj->isFloatingOrOutOfFlowPositioned()) {
+            normalFlowChildWithoutLines = obj;
+        }
+    }
+    if (normalFlowChildWithoutLines && lineCount == 0)
+        return (normalFlowChildWithoutLines->location().y() + normalFlowChildWithoutLines->size().height()).toInt();
+
+    return -1;
+}
+
+static RootInlineBox* lineAtIndex(const LayoutBlockFlow* blockFlow, int i)
+{
+    ASSERT(i >= 0);
+
+    if (blockFlow->style()->visibility() != EVisibility::Visible)
+        return nullptr;
+
+    if (blockFlow->childrenInline()) {
+        for (RootInlineBox* box = blockFlow->firstRootBox(); box; box = box->nextRootBox()) {
+            if (!i--)
+                return box;
+        }
+        return nullptr;
+    }
+    for (LayoutObject* child = blockFlow->firstChild(); child; child = child->nextSibling()) {
+        if (!child->isLayoutBlockFlow())
+            continue;
+        LayoutBlockFlow* childBlockFlow = toLayoutBlockFlow(child);
+        if (!shouldCheckLines(childBlockFlow))
+            continue;
+        if (RootInlineBox* box = lineAtIndex(childBlockFlow, i))
+            return box;
+    }
+
+    return nullptr;
+}
+
+static int lineCount(const LayoutBlockFlow* blockFlow, const RootInlineBox* stopRootInlineBox = nullptr, bool* found = nullptr)
+{
+    if (blockFlow->style()->visibility() != EVisibility::Visible)
+        return 0;
+    int count = 0;
+    if (blockFlow->childrenInline()) {
+        for (RootInlineBox* box = blockFlow->firstRootBox(); box; box = box->nextRootBox()) {
+            count++;
+            if (box == stopRootInlineBox) {
+                if (found)
+                    *found = true;
+                break;
+            }
+        }
+        return count;
+    }
+    for (LayoutObject* obj = blockFlow->firstChild(); obj; obj = obj->nextSibling()) {
+        if (!obj->isLayoutBlockFlow())
+            continue;
+        LayoutBlockFlow* childBlockFlow = toLayoutBlockFlow(obj);
+        if (!shouldCheckLines(childBlockFlow))
+            continue;
+        bool recursiveFound = false;
+        count += lineCount(childBlockFlow, stopRootInlineBox, &recursiveFound);
+        if (recursiveFound) {
+            if (found)
+                *found = true;
+            break;
+        }
+    }
+    return count;
+}
+
+static void clearTruncation(LayoutBlockFlow* blockFlow)
+{
+    if (blockFlow->style()->visibility() != EVisibility::Visible)
+        return;
+    if (blockFlow->childrenInline() && blockFlow->hasMarkupTruncation()) {
+        blockFlow->setHasMarkupTruncation(false);
+        for (RootInlineBox* box = blockFlow->firstRootBox(); box; box = box->nextRootBox())
+            box->clearTruncation();
+        return;
+    }
+    for (LayoutObject* obj = blockFlow->firstChild(); obj; obj = obj->nextSibling()) {
+        if (!obj->isLayoutBlockFlow())
+            continue;
+        LayoutBlockFlow* childBlockFlow = toLayoutBlockFlow(obj);
+        if (shouldCheckLines(childBlockFlow))
+            clearTruncation(childBlockFlow);
+    }
+}
+
 LayoutDeprecatedFlexibleBox::LayoutDeprecatedFlexibleBox(Element& element)
     : LayoutBlock(&element)
 {
@@ -159,7 +273,7 @@ static LayoutUnit marginWidthForChild(LayoutBox* child)
 static bool childDoesNotAffectWidthOrFlexing(LayoutObject* child)
 {
     // Positioned children and collapsed children don't affect the min/max width.
-    return child->isOutOfFlowPositioned() || child->style()->visibility() == COLLAPSE;
+    return child->isOutOfFlowPositioned() || child->style()->visibility() == EVisibility::Collapse;
 }
 
 static LayoutUnit contentWidthForChild(LayoutBox* child)
@@ -212,7 +326,7 @@ void LayoutDeprecatedFlexibleBox::computeIntrinsicLogicalWidths(LayoutUnit& minL
 
     maxLogicalWidth = std::max(minLogicalWidth, maxLogicalWidth);
 
-    LayoutUnit scrollbarWidth(intrinsicScrollbarLogicalWidth());
+    LayoutUnit scrollbarWidth(scrollbarLogicalWidth());
     maxLogicalWidth += scrollbarWidth;
     minLogicalWidth += scrollbarWidth;
 }
@@ -309,7 +423,7 @@ void LayoutDeprecatedFlexibleBox::layoutHorizontalBox(bool relayoutChildren)
     bool haveFlex = false, flexingChildren = false;
     gatherFlexChildrenInfo(iterator, relayoutChildren, highestFlexGroup, lowestFlexGroup, haveFlex);
 
-    LayoutBlock::startDelayUpdateScrollInfo();
+    PaintLayerScrollableArea::DelayScrollPositionClampScope delayClampScope;
 
     // We do 2 passes.  The first pass is simply to lay everyone out at
     // their preferred widths.  The second pass handles flexing the children.
@@ -331,7 +445,7 @@ void LayoutDeprecatedFlexibleBox::layoutHorizontalBox(bool relayoutChildren)
             SubtreeLayoutScope layoutScope(*child);
             // TODO(jchaffraix): It seems incorrect to check isAtomicInlineLevel in this file.
             // We probably want to check if the element is replaced.
-            if (relayoutChildren || (child->isAtomicInlineLevel() && (child->style()->width().hasPercent() || child->style()->height().hasPercent())))
+            if (relayoutChildren || (child->isAtomicInlineLevel() && (child->style()->width().isPercentOrCalc() || child->style()->height().isPercentOrCalc())))
                 layoutScope.setChildNeedsLayout(child);
 
             // Compute the child's vertical margins.
@@ -391,7 +505,7 @@ void LayoutDeprecatedFlexibleBox::layoutHorizontalBox(bool relayoutChildren)
                 continue;
             }
 
-            if (child->style()->visibility() == COLLAPSE) {
+            if (child->style()->visibility() == EVisibility::Collapse) {
                 // visibility: collapsed children do not participate in our positioning.
                 // But we need to lay them down.
                 child->layoutIfNeeded();
@@ -492,7 +606,7 @@ void LayoutDeprecatedFlexibleBox::layoutHorizontalBox(bool relayoutChildren)
 
                     // Now distribute the space to objects.
                     for (LayoutBox* child = iterator.first(); child && spaceAvailableThisPass && totalFlex; child = iterator.next()) {
-                        if (child->style()->visibility() == COLLAPSE)
+                        if (child->style()->visibility() == EVisibility::Collapse)
                             continue;
 
                         if (allowedChildFlex(child, expanding, i)) {
@@ -532,13 +646,11 @@ void LayoutDeprecatedFlexibleBox::layoutHorizontalBox(bool relayoutChildren)
         }
     } while (haveFlex);
 
-    LayoutBlock::finishDelayUpdateScrollInfo(nullptr, nullptr);
-
-    if (remainingSpace > 0 && ((style()->isLeftToRightDirection() && style()->boxPack() != Start)
-        || (!style()->isLeftToRightDirection() && style()->boxPack() != End))) {
+    if (remainingSpace > 0 && ((style()->isLeftToRightDirection() && style()->boxPack() != BoxPackStart)
+        || (!style()->isLeftToRightDirection() && style()->boxPack() != BoxPackEnd))) {
         // Children must be repositioned.
         LayoutUnit offset;
-        if (style()->boxPack() == Justify) {
+        if (style()->boxPack() == BoxPackJustify) {
             // Determine the total number of children.
             int totalChildren = 0;
             for (LayoutBox* child = iterator.first(); child; child = iterator.next()) {
@@ -569,7 +681,7 @@ void LayoutDeprecatedFlexibleBox::layoutHorizontalBox(bool relayoutChildren)
                 }
             }
         } else {
-            if (style()->boxPack() == Center)
+            if (style()->boxPack() == BoxPackCenter)
                 offset += remainingSpace / 2;
             else // END for LTR, START for RTL
                 offset += remainingSpace;
@@ -609,7 +721,7 @@ void LayoutDeprecatedFlexibleBox::layoutVerticalBox(bool relayoutChildren)
     if (haveLineClamp)
         applyLineClamp(iterator, relayoutChildren);
 
-    LayoutBlock::startDelayUpdateScrollInfo();
+    PaintLayerScrollableArea::DelayScrollPositionClampScope delayClampScope;
 
     // We do 2 passes.  The first pass is simply to lay everyone out at
     // their preferred widths.  The second pass handles flexing the children.
@@ -633,10 +745,10 @@ void LayoutDeprecatedFlexibleBox::layoutVerticalBox(bool relayoutChildren)
             }
 
             SubtreeLayoutScope layoutScope(*child);
-            if (!haveLineClamp && (relayoutChildren || (child->isAtomicInlineLevel() && (child->style()->width().hasPercent() || child->style()->height().hasPercent()))))
+            if (!haveLineClamp && (relayoutChildren || (child->isAtomicInlineLevel() && (child->style()->width().isPercentOrCalc() || child->style()->height().isPercentOrCalc()))))
                 layoutScope.setChildNeedsLayout(child);
 
-            if (child->style()->visibility() == COLLAPSE) {
+            if (child->style()->visibility() == EVisibility::Collapse) {
                 // visibility: collapsed children do not participate in our positioning.
                 // But we need to lay them down.
                 child->layoutIfNeeded();
@@ -783,12 +895,10 @@ void LayoutDeprecatedFlexibleBox::layoutVerticalBox(bool relayoutChildren)
         }
     } while (haveFlex);
 
-    LayoutBlock::finishDelayUpdateScrollInfo(nullptr, nullptr);
-
-    if (style()->boxPack() != Start && remainingSpace > 0) {
+    if (style()->boxPack() != BoxPackStart && remainingSpace > 0) {
         // Children must be repositioned.
         LayoutUnit offset;
-        if (style()->boxPack() == Justify) {
+        if (style()->boxPack() == BoxPackJustify) {
             // Determine the total number of children.
             int totalChildren = 0;
             for (LayoutBox* child = iterator.first(); child; child = iterator.next()) {
@@ -819,7 +929,7 @@ void LayoutDeprecatedFlexibleBox::layoutVerticalBox(bool relayoutChildren)
                 }
             }
         } else {
-            if (style()->boxPack() == Center)
+            if (style()->boxPack() == BoxPackCenter)
                 offset += remainingSpace / 2;
             else // END
                 offset += remainingSpace;
@@ -847,19 +957,19 @@ void LayoutDeprecatedFlexibleBox::applyLineClamp(FlexBoxIterator& iterator, bool
             continue;
 
         child->clearOverrideSize();
-        if (relayoutChildren || (child->isAtomicInlineLevel() && (child->style()->width().hasPercent() || child->style()->height().hasPercent()))
+        if (relayoutChildren || (child->isAtomicInlineLevel() && (child->style()->width().isPercentOrCalc() || child->style()->height().isPercentOrCalc()))
             || (child->style()->height().isAuto() && child->isLayoutBlock())) {
             child->setChildNeedsLayout(MarkOnlyThis);
 
             // Dirty all the positioned objects.
-            if (child->isLayoutBlock()) {
-                toLayoutBlock(child)->markPositionedObjectsForLayout();
-                toLayoutBlock(child)->clearTruncation();
+            if (child->isLayoutBlockFlow()) {
+                toLayoutBlockFlow(child)->markPositionedObjectsForLayout();
+                clearTruncation(toLayoutBlockFlow(child));
             }
         }
         child->layoutIfNeeded();
-        if (child->style()->height().isAuto() && child->isLayoutBlock())
-            maxLineCount = std::max(maxLineCount, toLayoutBlock(child)->lineCount());
+        if (child->style()->height().isAuto() && child->isLayoutBlockFlow())
+            maxLineCount = std::max(maxLineCount, lineCount(toLayoutBlockFlow(child)));
     }
 
     // Get the number of lines and then alter all block flow children with auto height to use the
@@ -870,15 +980,16 @@ void LayoutDeprecatedFlexibleBox::applyLineClamp(FlexBoxIterator& iterator, bool
         return;
 
     for (LayoutBox* child = iterator.first(); child; child = iterator.next()) {
-        if (childDoesNotAffectWidthOrFlexing(child) || !child->style()->height().isAuto() || !child->isLayoutBlock())
+        if (childDoesNotAffectWidthOrFlexing(child) || !child->style()->height().isAuto() || !child->isLayoutBlockFlow())
             continue;
 
-        LayoutBlock* blockChild = toLayoutBlock(child);
-        int lineCount = blockChild->lineCount();
+        LayoutBlockFlow* blockChild = toLayoutBlockFlow(child);
+        int lineCount = blink::lineCount(blockChild);
         if (lineCount <= numVisibleLines)
             continue;
 
-        LayoutUnit newHeight(blockChild->heightForLineCount(numVisibleLines));
+        int dummyCount = 0;
+        LayoutUnit newHeight(getHeightForLineCount(blockChild, numVisibleLines, true, dummyCount));
         if (newHeight == child->size().height())
             continue;
 
@@ -890,11 +1001,11 @@ void LayoutDeprecatedFlexibleBox::applyLineClamp(FlexBoxIterator& iterator, bool
             continue;
 
         // Get the last line
-        RootInlineBox* lastLine = blockChild->lineAtIndex(lineCount - 1);
+        RootInlineBox* lastLine = lineAtIndex(blockChild, lineCount - 1);
         if (!lastLine)
             continue;
 
-        RootInlineBox* lastVisibleLine = blockChild->lineAtIndex(numVisibleLines - 1);
+        RootInlineBox* lastVisibleLine = lineAtIndex(blockChild, numVisibleLines - 1);
         if (!lastVisibleLine)
             continue;
 
@@ -915,7 +1026,7 @@ void LayoutDeprecatedFlexibleBox::applyLineClamp(FlexBoxIterator& iterator, bool
             continue;
 
         LayoutUnit blockRightEdge = destBlock.logicalRightOffsetForLine(lastVisibleLine->y(), DoNotIndentText);
-        if (!lastVisibleLine->lineCanAccommodateEllipsis(leftToRight, blockRightEdge, lastVisibleLine->x() + lastVisibleLine->logicalWidth(), totalWidth))
+        if (!lastVisibleLine->lineCanAccommodateEllipsis(leftToRight, blockRightEdge.toInt(), (lastVisibleLine->x() + lastVisibleLine->logicalWidth()).toInt(), totalWidth))
             continue;
 
         // Let the truncation code kick in.
@@ -934,13 +1045,13 @@ void LayoutDeprecatedFlexibleBox::clearLineClamp()
             continue;
 
         child->clearOverrideSize();
-        if ((child->isAtomicInlineLevel() && (child->style()->width().hasPercent() || child->style()->height().hasPercent()))
+        if ((child->isAtomicInlineLevel() && (child->style()->width().isPercentOrCalc() || child->style()->height().isPercentOrCalc()))
             || (child->style()->height().isAuto() && child->isLayoutBlock())) {
             child->setChildNeedsLayout();
 
-            if (child->isLayoutBlock()) {
-                toLayoutBlock(child)->markPositionedObjectsForLayout();
-                toLayoutBlock(child)->clearTruncation();
+            if (child->isLayoutBlockFlow()) {
+                toLayoutBlockFlow(child)->markPositionedObjectsForLayout();
+                clearTruncation(toLayoutBlockFlow(child));
             }
         }
     }

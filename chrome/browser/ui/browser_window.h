@@ -146,6 +146,14 @@ class BrowserWindow : public ui::BaseWindow {
   // Returns true if the fullscreen bubble is visible.
   virtual bool IsFullscreenBubbleVisible() const = 0;
 
+  // Shows a notice teaching the user the new shortcut for going back or forward
+  // if the user has pressed the old shortcut more than once in three seconds
+  // and the bubble has been shown less than five times.
+  virtual void MaybeShowNewBackShortcutBubble(bool forward) = 0;
+
+  // Hides the new back shortcut bubble, if showing, by fading it out.
+  virtual void HideNewBackShortcutBubble() = 0;
+
   // Returns the size of WebContents in the browser. This may be called before
   // the TabStripModel has an active tab.
   virtual gfx::Size GetContentsSize() const = 0;
@@ -207,11 +215,6 @@ class BrowserWindow : public ui::BaseWindow {
   // rect to identify that there shouldn't be a resize corner (in the cases
   // where we take care of it ourselves at the browser level).
   virtual gfx::Rect GetRootWindowResizerRect() const = 0;
-
-  // Shows a confirmation dialog box for adding a search engine described by
-  // |template_url|. Takes ownership of |template_url|.
-  virtual void ConfirmAddSearchProvider(TemplateURL* template_url,
-                                        Profile* profile) = 0;
 
   // Shows the Update Recommended dialog box.
   virtual void ShowUpdateChromeDialog() = 0;
@@ -280,18 +283,18 @@ class BrowserWindow : public ui::BaseWindow {
       bool app_modal,
       const base::Callback<void(bool)>& callback) = 0;
 
-  // ThemeService calls this when a user has changed his or her theme,
-  // indicating that it's time to redraw everything.
+  // ThemeService calls this when a user has changed their theme, indicating
+  // that it's time to redraw everything.
   virtual void UserChangedTheme() = 0;
 
-  // Shows the website settings using the specified information. |url| is the
-  // url of the page/frame the info applies to, |ssl| is the SSL information for
-  // that page/frame.  If |show_history| is true, a section showing how many
-  // times that URL has been visited is added to the page info.
+  // Shows the website settings using the specified information. |virtual_url|
+  // is the virtual url of the page/frame the info applies to, |ssl| is the SSL
+  // information for that page/frame. If |show_history| is true, a section
+  // showing how many times that URL has been visited is added to the page info.
   virtual void ShowWebsiteSettings(
       Profile* profile,
       content::WebContents* web_contents,
-      const GURL& url,
+      const GURL& virtual_url,
       const security_state::SecurityStateModel::SecurityInfo&
           security_info) = 0;
 
@@ -378,6 +381,11 @@ class BrowserWindow : public ui::BaseWindow {
       const extensions::Extension* extension,
       const base::Callback<void(ImeWarningBubblePermissionStatus status)>&
           callback) = 0;
+
+  // Returns the platform-specific ID of the workspace the browser window
+  // currently resides in.
+  virtual std::string GetWorkspace() const = 0;
+  virtual bool IsVisibleOnAllWorkspaces() const = 0;
 
  protected:
   friend class BrowserCloseManager;

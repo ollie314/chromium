@@ -34,7 +34,6 @@
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/loader/DocumentLoader.h"
-#include "platform/Logging.h"
 
 namespace blink {
 
@@ -117,7 +116,7 @@ void ScriptedAnimationController::dispatchEvents(const AtomicString& eventInterf
         // special casting window.
         // FIXME: We should not fire events for nodes that are no longer in the tree.
         InspectorInstrumentation::AsyncTask asyncTask(eventTarget->getExecutionContext(), events[i]);
-        if (LocalDOMWindow* window = eventTarget->toDOMWindow())
+        if (LocalDOMWindow* window = eventTarget->toLocalDOMWindow())
             window->dispatchEvent(events[i], nullptr);
         else
             eventTarget->dispatchEvent(events[i]);

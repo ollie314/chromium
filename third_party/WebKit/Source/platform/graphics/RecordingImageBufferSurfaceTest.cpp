@@ -17,9 +17,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 using testing::Test;
 
@@ -38,6 +38,7 @@ public:
     // ImageBufferClient implementation
     void notifySurfaceInvalid() override { }
     bool isDirty() override { return m_isDirty; }
+    void didDisableAcceleration() override { }
     void didFinalizeFrame() override
     {
         if (m_isDirty) {
@@ -48,7 +49,7 @@ public:
     }
 
     // TaskObserver implementation
-    void willProcessTask() override { ASSERT_NOT_REACHED(); }
+    void willProcessTask() override { NOTREACHED(); }
     void didProcessTask() override
     {
         ASSERT_TRUE(m_isDirty);
@@ -78,10 +79,10 @@ class MockSurfaceFactory : public RecordingImageBufferFallbackSurfaceFactory {
 public:
     MockSurfaceFactory() : m_createSurfaceCount(0) { }
 
-    virtual PassOwnPtr<ImageBufferSurface> createSurface(const IntSize& size, OpacityMode opacityMode)
+    virtual std::unique_ptr<ImageBufferSurface> createSurface(const IntSize& size, OpacityMode opacityMode, sk_sp<SkColorSpace> colorSpace)
     {
         m_createSurfaceCount++;
-        return adoptPtr(new UnacceleratedImageBufferSurface(size, opacityMode));
+        return wrapUnique(new UnacceleratedImageBufferSurface(size, opacityMode, InitializeImagePixels, std::move(colorSpace)));
     }
 
     virtual ~MockSurfaceFactory() { }
@@ -96,15 +97,15 @@ class RecordingImageBufferSurfaceTest : public Test {
 protected:
     RecordingImageBufferSurfaceTest()
     {
-        OwnPtr<MockSurfaceFactory> surfaceFactory = adoptPtr(new MockSurfaceFactory());
+        std::unique_ptr<MockSurfaceFactory> surfaceFactory = wrapUnique(new MockSurfaceFactory());
         m_surfaceFactory = surfaceFactory.get();
-        OwnPtr<RecordingImageBufferSurface> testSurface = adoptPtr(new RecordingImageBufferSurface(IntSize(10, 10), surfaceFactory.release()));
+        std::unique_ptr<RecordingImageBufferSurface> testSurface = wrapUnique(new RecordingImageBufferSurface(IntSize(10, 10), std::move(surfaceFactory), NonOpaque, nullptr));
         m_testSurface = testSurface.get();
         // We create an ImageBuffer in order for the testSurface to be
         // properly initialized with a GraphicsContext
-        m_imageBuffer = ImageBuffer::create(testSurface.release());
+        m_imageBuffer = ImageBuffer::create(std::move(testSurface));
         EXPECT_FALSE(!m_imageBuffer);
-        m_fakeImageBufferClient = adoptPtr(new FakeImageBufferClient(m_imageBuffer.get()));
+        m_fakeImageBufferClient = wrapUnique(new FakeImageBufferClient(m_imageBuffer.get()));
         m_imageBuffer->setClient(m_fakeImageBufferClient.get());
     }
 
@@ -112,7 +113,7 @@ public:
     void testEmptyPicture()
     {
         m_testSurface->initializeCurrentFrame();
-        RefPtr<SkPicture> picture = m_testSurface->getPicture();
+        sk_sp<SkPicture> picture = m_testSurface->getPicture();
         EXPECT_TRUE((bool)picture.get());
         EXPECT_EQ(1, m_fakeImageBufferClient->frameCount());
         expectDisplayListEnabled(true);
@@ -226,126 +227,15 @@ public:
 private:
     MockSurfaceFactory* m_surfaceFactory;
     RecordingImageBufferSurface* m_testSurface;
-    OwnPtr<FakeImageBufferClient> m_fakeImageBufferClient;
-    OwnPtr<ImageBuffer> m_imageBuffer;
+    std::unique_ptr<FakeImageBufferClient> m_fakeImageBufferClient;
+    std::unique_ptr<ImageBuffer> m_imageBuffer;
 };
-
-namespace {
-
-// The following test helper class installs a mock platform that provides a mock WebThread
-// for the current thread. The Mock thread is capable of queuing a single non-delayed task
-// and registering a single task observer. The run loop exits immediately after running
-// the single task.
-
-class CurrentThreadPlatformMock : public TestingPlatformSupport {
-public:
-    CurrentThreadPlatformMock() { }
-    WebThread* currentThread() override { return &m_currentThread; }
-
-    void enterRunLoop() { m_currentThread.enterRunLoop(); }
-private:
-    class MockWebTaskRunner : public WebTaskRunner {
-    public:
-        MockWebTaskRunner() : m_task(0) { }
-        ~MockWebTaskRunner() override { }
-
-        void postTask(const WebTraceLocation&, Task* task) override
-        {
-            EXPECT_EQ((Task*)0, m_task);
-            m_task = task;
-        }
-
-        void postDelayedTask(const WebTraceLocation&, Task*, double delayMs) override { ASSERT_NOT_REACHED(); };
-
-        WebTaskRunner* clone() override
-        {
-            ASSERT_NOT_REACHED();
-            return nullptr;
-        }
-
-        double virtualTimeSeconds() const override
-        {
-            ASSERT_NOT_REACHED();
-            return 0.0;
-        }
-
-        double monotonicallyIncreasingVirtualTimeSeconds() const override
-        {
-            ASSERT_NOT_REACHED();
-            return 0.0;
-        }
-
-        Task* m_task;
-    };
-
-    class CurrentThreadMock : public WebThread {
-    public:
-        CurrentThreadMock() : m_taskObserver(0) { }
-
-        ~CurrentThreadMock() override
-        {
-            EXPECT_EQ((WebTaskRunner::Task*)0, m_taskRunner.m_task);
-        }
-
-        WebTaskRunner* getWebTaskRunner() override
-        {
-            return &m_taskRunner;
-        }
-
-        bool isCurrentThread() const override { return true; }
-
-        PlatformThreadId threadId() const override
-        {
-            ASSERT_NOT_REACHED();
-            return 0;
-        }
-
-        void addTaskObserver(TaskObserver* taskObserver) override
-        {
-            EXPECT_EQ(nullptr, m_taskObserver);
-            m_taskObserver = taskObserver;
-        }
-
-        void removeTaskObserver(TaskObserver* taskObserver) override
-        {
-            EXPECT_EQ(m_taskObserver, taskObserver);
-            m_taskObserver = 0;
-        }
-
-        WebScheduler* scheduler() const override
-        {
-            ASSERT_NOT_REACHED();
-            return nullptr;
-        }
-
-        void enterRunLoop()
-        {
-            if (m_taskObserver)
-                m_taskObserver->willProcessTask();
-            if (m_taskRunner.m_task) {
-                m_taskRunner.m_task->run();
-                delete m_taskRunner.m_task;
-                m_taskRunner.m_task = 0;
-            }
-            if (m_taskObserver)
-                m_taskObserver->didProcessTask();
-        }
-
-    private:
-        MockWebTaskRunner m_taskRunner;
-        TaskObserver* m_taskObserver;
-    };
-
-    CurrentThreadMock m_currentThread;
-};
-
-} // anonymous namespace
 
 #define CALL_TEST_TASK_WRAPPER(TEST_METHOD)                                                               \
     {                                                                                                     \
-        CurrentThreadPlatformMock ctpm;                                                                   \
-        Platform::current()->currentThread()->getWebTaskRunner()->postTask(BLINK_FROM_HERE, bind(&RecordingImageBufferSurfaceTest::TEST_METHOD, this)); \
-        ctpm.enterRunLoop();                                      \
+        TestingPlatformSupportWithMockScheduler testingPlatform;                                                                   \
+        Platform::current()->currentThread()->getWebTaskRunner()->postTask(BLINK_FROM_HERE, WTF::bind(&RecordingImageBufferSurfaceTest::TEST_METHOD, WTF::unretained(this))); \
+        testingPlatform.runUntilIdle();                                      \
     }
 
 TEST_F(RecordingImageBufferSurfaceTest, testEmptyPicture)

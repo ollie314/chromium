@@ -4,6 +4,7 @@
 
 #include "components/sessions/content/content_serialized_navigation_builder.h"
 
+#include "components/sessions/content/content_record_password_state.h"
 #include "components/sessions/core/serialized_navigation_entry.h"
 #include "components/sessions/core/serialized_navigation_entry_test_helper.h"
 #include "content/public/browser/favicon_status.h"
@@ -17,8 +18,8 @@ namespace sessions {
 namespace {
 // Create a NavigationEntry from the test_data constants in
 // serialized_navigation_entry_test_helper.h.
-scoped_ptr<content::NavigationEntry> MakeNavigationEntryForTest() {
-  scoped_ptr<content::NavigationEntry> navigation_entry(
+std::unique_ptr<content::NavigationEntry> MakeNavigationEntryForTest() {
+  std::unique_ptr<content::NavigationEntry> navigation_entry(
       content::NavigationEntry::Create());
   navigation_entry->SetReferrer(content::Referrer(
       test_data::kReferrerURL,
@@ -35,6 +36,8 @@ scoped_ptr<content::NavigationEntry> MakeNavigationEntryForTest() {
   navigation_entry->SetTimestamp(test_data::kTimestamp);
   navigation_entry->SetExtraData(kSearchTermsKey,
                                  test_data::kSearchTerms);
+  SetPasswordStateInNavigation(test_data::kPasswordState,
+                               navigation_entry.get());
   navigation_entry->GetFavicon().valid = true;
   navigation_entry->GetFavicon().url = test_data::kFaviconURL;
   navigation_entry->SetHttpStatusCode(test_data::kHttpStatusCode);
@@ -52,7 +55,7 @@ scoped_ptr<content::NavigationEntry> MakeNavigationEntryForTest() {
 // Create a SerializedNavigationEntry from a NavigationEntry.  All its fields
 // should match the NavigationEntry's.
 TEST(ContentSerializedNavigationBuilderTest, FromNavigationEntry) {
-  const scoped_ptr<content::NavigationEntry> navigation_entry(
+  const std::unique_ptr<content::NavigationEntry> navigation_entry(
       MakeNavigationEntryForTest());
 
   const SerializedNavigationEntry& navigation =
@@ -67,7 +70,8 @@ TEST(ContentSerializedNavigationBuilderTest, FromNavigationEntry) {
   EXPECT_EQ(test_data::kVirtualURL, navigation.virtual_url());
   EXPECT_EQ(test_data::kTitle, navigation.title());
   EXPECT_EQ(test_data::kEncodedPageState, navigation.encoded_page_state());
-  EXPECT_EQ(test_data::kTransitionType, navigation.transition_type());
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      navigation.transition_type(), test_data::kTransitionType));
   EXPECT_EQ(test_data::kHasPostData, navigation.has_post_data());
   EXPECT_EQ(test_data::kPostID, navigation.post_id());
   EXPECT_EQ(test_data::kOriginalRequestURL, navigation.original_request_url());
@@ -80,6 +84,7 @@ TEST(ContentSerializedNavigationBuilderTest, FromNavigationEntry) {
   EXPECT_EQ(test_data::kRedirectURL0, navigation.redirect_chain()[0]);
   EXPECT_EQ(test_data::kRedirectURL1, navigation.redirect_chain()[1]);
   EXPECT_EQ(test_data::kVirtualURL, navigation.redirect_chain()[2]);
+  EXPECT_EQ(test_data::kPasswordState, navigation.password_state());
 }
 
 // Create a NavigationEntry, then create another one by converting to
@@ -87,14 +92,14 @@ TEST(ContentSerializedNavigationBuilderTest, FromNavigationEntry) {
 // except for fields that aren't preserved, which should be set to
 // expected values.
 TEST(ContentSerializedNavigationBuilderTest, ToNavigationEntry) {
-  const scoped_ptr<content::NavigationEntry> old_navigation_entry(
+  const std::unique_ptr<content::NavigationEntry> old_navigation_entry(
       MakeNavigationEntryForTest());
 
   const SerializedNavigationEntry& navigation =
       ContentSerializedNavigationBuilder::FromNavigationEntry(
           test_data::kIndex, *old_navigation_entry);
 
-  const scoped_ptr<content::NavigationEntry> new_navigation_entry(
+  const std::unique_ptr<content::NavigationEntry> new_navigation_entry(
       ContentSerializedNavigationBuilder::ToNavigationEntry(
           &navigation, test_data::kPageID, NULL));
 
@@ -106,8 +111,8 @@ TEST(ContentSerializedNavigationBuilderTest, ToNavigationEntry) {
   EXPECT_EQ(test_data::kEncodedPageState,
             new_navigation_entry->GetPageState().ToEncodedData());
   EXPECT_EQ(test_data::kPageID, new_navigation_entry->GetPageID());
-  EXPECT_EQ(ui::PAGE_TRANSITION_RELOAD,
-            new_navigation_entry->GetTransitionType());
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      new_navigation_entry->GetTransitionType(), ui::PAGE_TRANSITION_RELOAD));
   EXPECT_EQ(test_data::kHasPostData, new_navigation_entry->GetHasPostData());
   EXPECT_EQ(test_data::kPostID, new_navigation_entry->GetPostID());
   EXPECT_EQ(test_data::kOriginalRequestURL,
@@ -126,6 +131,18 @@ TEST(ContentSerializedNavigationBuilderTest, ToNavigationEntry) {
             new_navigation_entry->GetRedirectChain()[1]);
   EXPECT_EQ(test_data::kVirtualURL,
             new_navigation_entry->GetRedirectChain()[2]);
+}
+
+TEST(ContentSerializedNavigationBuilderTest, SetPasswordState) {
+  std::unique_ptr<content::NavigationEntry> entry(
+      content::NavigationEntry::Create());
+
+  EXPECT_EQ(SerializedNavigationEntry::PASSWORD_STATE_UNKNOWN,
+            GetPasswordStateFromNavigation(*entry));
+  SetPasswordStateInNavigation(SerializedNavigationEntry::NO_PASSWORD_FIELD,
+                               entry.get());
+  EXPECT_EQ(SerializedNavigationEntry::NO_PASSWORD_FIELD,
+            GetPasswordStateFromNavigation(*entry));
 }
 
 }  // namespace sessions

@@ -64,24 +64,24 @@ std::string GetClientCertType(SSLClientCertType type) {
 
 void GetKeyExchangesList(int key_exchange, base::ListValue* values) {
   if (key_exchange & BaseTestServer::SSLOptions::KEY_EXCHANGE_RSA)
-    values->Append(new base::StringValue("rsa"));
+    values->AppendString("rsa");
   if (key_exchange & BaseTestServer::SSLOptions::KEY_EXCHANGE_DHE_RSA)
-    values->Append(new base::StringValue("dhe_rsa"));
+    values->AppendString("dhe_rsa");
   if (key_exchange & BaseTestServer::SSLOptions::KEY_EXCHANGE_ECDHE_RSA)
-    values->Append(new base::StringValue("ecdhe_rsa"));
+    values->AppendString("ecdhe_rsa");
 }
 
 void GetCiphersList(int cipher, base::ListValue* values) {
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_RC4)
-    values->Append(new base::StringValue("rc4"));
+    values->AppendString("rc4");
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_AES128)
-    values->Append(new base::StringValue("aes128"));
+    values->AppendString("aes128");
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_AES256)
-    values->Append(new base::StringValue("aes256"));
+    values->AppendString("aes256");
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_3DES)
-    values->Append(new base::StringValue("3des"));
+    values->AppendString("3des");
   if (cipher & BaseTestServer::SSLOptions::BULK_CIPHER_AES128GCM)
-    values->Append(new base::StringValue("aes128gcm"));
+    values->AppendString("aes128gcm");
 }
 
 base::StringValue* GetTLSIntoleranceType(
@@ -118,9 +118,49 @@ std::unique_ptr<base::ListValue> GetTokenBindingParams(
     std::vector<int> params) {
   std::unique_ptr<base::ListValue> values(new base::ListValue());
   for (int param : params) {
-    values->Append(new base::FundamentalValue(param));
+    values->AppendInteger(param);
   }
   return values;
+}
+
+std::string OCSPStatusToString(
+    const BaseTestServer::SSLOptions::OCSPStatus& ocsp_status) {
+  switch (ocsp_status) {
+    case BaseTestServer::SSLOptions::OCSP_OK:
+      return "ok";
+    case BaseTestServer::SSLOptions::OCSP_REVOKED:
+      return "revoked";
+    case BaseTestServer::SSLOptions::OCSP_INVALID_RESPONSE:
+      return "invalid";
+    case BaseTestServer::SSLOptions::OCSP_UNAUTHORIZED:
+      return "unauthorized";
+    case BaseTestServer::SSLOptions::OCSP_UNKNOWN:
+      return "unknown";
+    case BaseTestServer::SSLOptions::OCSP_TRY_LATER:
+      return "later";
+    case BaseTestServer::SSLOptions::OCSP_INVALID_RESPONSE_DATA:
+      return "invalid_data";
+    case BaseTestServer::SSLOptions::OCSP_MISMATCHED_SERIAL:
+      return "mismatched_serial";
+  }
+  NOTREACHED();
+  return std::string();
+}
+
+std::string OCSPDateToString(
+    const BaseTestServer::SSLOptions::OCSPDate& ocsp_date) {
+  switch (ocsp_date) {
+    case BaseTestServer::SSLOptions::OCSP_DATE_VALID:
+      return "valid";
+    case BaseTestServer::SSLOptions::OCSP_DATE_OLD:
+      return "old";
+    case BaseTestServer::SSLOptions::OCSP_DATE_EARLY:
+      return "early";
+    case BaseTestServer::SSLOptions::OCSP_DATE_LONG:
+      return "long";
+  }
+  NOTREACHED();
+  return std::string();
 }
 
 }  // namespace
@@ -128,6 +168,8 @@ std::unique_ptr<base::ListValue> GetTokenBindingParams(
 BaseTestServer::SSLOptions::SSLOptions()
     : server_certificate(CERT_OK),
       ocsp_status(OCSP_OK),
+      ocsp_date(OCSP_DATE_VALID),
+      ocsp_produced(OCSP_PRODUCED_VALID),
       cert_serial(0),
       request_client_certificate(false),
       key_exchanges(SSLOptions::KEY_EXCHANGE_ANY),
@@ -146,6 +188,8 @@ BaseTestServer::SSLOptions::SSLOptions(
     BaseTestServer::SSLOptions::ServerCertificate cert)
     : server_certificate(cert),
       ocsp_status(OCSP_OK),
+      ocsp_date(OCSP_DATE_VALID),
+      ocsp_produced(OCSP_PRODUCED_VALID),
       cert_serial(0),
       request_client_certificate(false),
       key_exchanges(SSLOptions::KEY_EXCHANGE_ANY),
@@ -191,17 +235,48 @@ std::string BaseTestServer::SSLOptions::GetOCSPArgument() const {
   if (server_certificate != CERT_AUTO)
     return std::string();
 
-  switch (ocsp_status) {
-    case OCSP_OK:
-      return "ok";
-    case OCSP_REVOKED:
-      return "revoked";
-    case OCSP_INVALID:
-      return "invalid";
-    case OCSP_UNAUTHORIZED:
-      return "unauthorized";
-    case OCSP_UNKNOWN:
-      return "unknown";
+  // |ocsp_responses| overrides when it is non-empty.
+  if (!ocsp_responses.empty()) {
+    std::string arg;
+    for (size_t i = 0; i < ocsp_responses.size(); i++) {
+      if (i != 0)
+        arg += ":";
+      arg += OCSPStatusToString(ocsp_responses[i].status);
+    }
+    return arg;
+  }
+
+  return OCSPStatusToString(ocsp_status);
+}
+
+std::string BaseTestServer::SSLOptions::GetOCSPDateArgument() const {
+  if (server_certificate != CERT_AUTO)
+    return std::string();
+
+  if (!ocsp_responses.empty()) {
+    std::string arg;
+    for (size_t i = 0; i < ocsp_responses.size(); i++) {
+      if (i != 0)
+        arg += ":";
+      arg += OCSPDateToString(ocsp_responses[i].date);
+    }
+    return arg;
+  }
+
+  return OCSPDateToString(ocsp_date);
+}
+
+std::string BaseTestServer::SSLOptions::GetOCSPProducedArgument() const {
+  if (server_certificate != CERT_AUTO)
+    return std::string();
+
+  switch (ocsp_produced) {
+    case OCSP_PRODUCED_VALID:
+      return "valid";
+    case OCSP_PRODUCED_BEFORE_CERT:
+      return "before";
+    case OCSP_PRODUCED_AFTER_CERT:
+      return "after";
     default:
       NOTREACHED();
       return std::string();
@@ -277,12 +352,9 @@ bool BaseTestServer::GetAddressList(AddressList* address_list) const {
   // IPv6 literal hostnames.
   info.set_address_family(ADDRESS_FAMILY_IPV4);
   TestCompletionCallback callback;
-  int rv = resolver->Resolve(info,
-                             DEFAULT_PRIORITY,
-                             address_list,
-                             callback.callback(),
-                             NULL,
-                             BoundNetLog());
+  std::unique_ptr<HostResolver::Request> request;
+  int rv = resolver->Resolve(info, DEFAULT_PRIORITY, address_list,
+                             callback.callback(), &request, NetLogWithSource());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
   if (rv != OK) {
@@ -502,7 +574,7 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
                    << " doesn't exist. Can't launch https server.";
         return false;
       }
-      ssl_client_certs->Append(new base::StringValue(it->value()));
+      ssl_client_certs->AppendString(it->value());
     }
 
     if (ssl_client_certs->GetSize())
@@ -510,8 +582,8 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
 
     std::unique_ptr<base::ListValue> client_cert_types(new base::ListValue());
     for (size_t i = 0; i < ssl_options_.client_cert_types.size(); i++) {
-      client_cert_types->Append(new base::StringValue(
-          GetClientCertType(ssl_options_.client_cert_types[i])));
+      client_cert_types->AppendString(
+          GetClientCertType(ssl_options_.client_cert_types[i]));
     }
     if (client_cert_types->GetSize())
       arguments->Set("ssl-client-cert-type", client_cert_types.release());
@@ -523,6 +595,14 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
     std::string ocsp_arg = ssl_options_.GetOCSPArgument();
     if (!ocsp_arg.empty())
       arguments->SetString("ocsp", ocsp_arg);
+
+    std::string ocsp_date_arg = ssl_options_.GetOCSPDateArgument();
+    if (!ocsp_date_arg.empty())
+      arguments->SetString("ocsp-date", ocsp_date_arg);
+
+    std::string ocsp_produced_arg = ssl_options_.GetOCSPProducedArgument();
+    if (!ocsp_produced_arg.empty())
+      arguments->SetString("ocsp-produced", ocsp_produced_arg);
 
     if (ssl_options_.cert_serial != 0) {
       arguments->SetInteger("cert-serial", ssl_options_.cert_serial);
@@ -559,10 +639,17 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
       arguments->Set("ocsp-server-unavailable",
                      base::Value::CreateNullValue());
     }
+    if (!ssl_options_.alpn_protocols.empty()) {
+      std::unique_ptr<base::ListValue> alpn_protocols(new base::ListValue());
+      for (const std::string& proto : ssl_options_.alpn_protocols) {
+        alpn_protocols->AppendString(proto);
+      }
+      arguments->Set("alpn-protocols", std::move(alpn_protocols));
+    }
     if (!ssl_options_.npn_protocols.empty()) {
       std::unique_ptr<base::ListValue> npn_protocols(new base::ListValue());
       for (const std::string& proto : ssl_options_.npn_protocols) {
-        npn_protocols->Append(new base::StringValue(proto));
+        npn_protocols->AppendString(proto);
       }
       arguments->Set("npn-protocols", std::move(npn_protocols));
     }

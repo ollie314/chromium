@@ -8,8 +8,8 @@
 #include <stdint.h>
 
 #include "base/macros.h"
-#include "net/quic/quic_config.h"
-#include "net/quic/quic_protocol.h"
+#include "net/quic/core/quic_config.h"
+#include "net/quic/core/quic_protocol.h"
 
 namespace net {
 
@@ -34,6 +34,17 @@ class QuicConfigPeer {
   static void SetReceivedBytesForConnectionId(QuicConfig* config,
                                               uint32_t bytes);
   static void SetReceivedDisableConnectionMigration(QuicConfig* config);
+
+  static void SetReceivedMaxIncomingDynamicStreams(QuicConfig* config,
+                                                   uint32_t max_streams);
+
+  static void SetConnectionOptionsToSend(QuicConfig* config,
+                                         const QuicTagVector& options);
+
+  static void SetReceivedForceHolBlocking(QuicConfig* config);
+
+  static void SetReceivedAlternateServerAddress(QuicConfig* config,
+                                                IPEndPoint addr);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConfigPeer);

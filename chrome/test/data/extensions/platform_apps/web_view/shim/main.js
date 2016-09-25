@@ -1228,6 +1228,52 @@ function testAddContentScriptWithCode() {
   document.body.appendChild(webview);
 }
 
+function testAddMultipleContentScriptsWithCodeAndCheckGeneratedScriptUrl() {
+  var webview = document.createElement('webview');
+
+  console.log('Step 1: call <webview>.addContentScripts.');
+  var getCode = function(id) {
+    return 'var e = new Error();\n' +
+           'var n = document.createElement("span");\n' +
+           'n.id = "textnode' + id + '";\n' +
+           'n.textContent = e.stack;\n' +
+           'document.body.appendChild(n);\n';
+  }
+  var code0 = getCode('0');
+  var code1 = getCode('1');
+  webview.addContentScripts(
+      [{name: 'myrule0',
+        matches: ['http://*/extensions/*'],
+        js: {code: code0},
+        run_at: 'document_end'}]);
+  webview.addContentScripts(
+      [{name: 'myrule1',
+        matches: ['http://*/extensions/*'],
+        js: {code: code1},
+        run_at: 'document_end'}]);
+
+  webview.addEventListener('loadstop', function() {
+    console.log('Step 2: call webview.executeScript() to check result.')
+    webview.executeScript({
+      code: '[document.getElementById("textnode0").textContent,' +
+            'document.getElementById("textnode1").textContent];'},
+      function(results) {
+        embedder.test.assertEq(1, results.length);
+        var contents = results[0];
+        embedder.test.assertEq(2, contents.length);
+        embedder.test.assertTrue(
+            contents[0].indexOf('generated_script_file:') != -1);
+        embedder.test.assertTrue(
+            contents[1].indexOf('generated_script_file:') != -1);
+        embedder.test.assertTrue(contents[0] != contents[1]);
+        embedder.test.succeed();
+    });
+  });
+
+  webview.src = embedder.emptyGuestURL;
+  document.body.appendChild(webview);
+}
+
 function testExecuteScriptFail() {
   var webview = document.createElement('webview');
   document.body.appendChild(webview);
@@ -1976,8 +2022,8 @@ function testLoadAbortChromeExtensionURLWrongPartition() {
   var localResource = chrome.runtime.getURL('guest.html');
   var webview = document.createElement('webview');
   webview.addEventListener('loadabort', function(e) {
-    embedder.test.assertEq(-109, e.code);
-    embedder.test.assertEq('ERR_ADDRESS_UNREACHABLE', e.reason);
+    embedder.test.assertEq(-20, e.code);
+    embedder.test.assertEq('ERR_BLOCKED_BY_CLIENT', e.reason);
     embedder.test.succeed();
   });
   webview.addEventListener('loadstop', function(e) {
@@ -2996,6 +3042,8 @@ embedder.test.testList = {
   'testContentScriptExistsAsLongAsWebViewTagExists':
       testContentScriptExistsAsLongAsWebViewTagExists,
   'testAddContentScriptWithCode': testAddContentScriptWithCode,
+  'testAddMultipleContentScriptsWithCodeAndCheckGeneratedScriptUrl':
+      testAddMultipleContentScriptsWithCodeAndCheckGeneratedScriptUrl,
   'testExecuteScriptFail': testExecuteScriptFail,
   'testExecuteScript': testExecuteScript,
   'testExecuteScriptIsAbortedWhenWebViewSourceIsChanged':

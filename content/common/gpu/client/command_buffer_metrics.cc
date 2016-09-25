@@ -4,9 +4,10 @@
 
 #include "content/common/gpu/client/command_buffer_metrics.h"
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 
 namespace content {
+namespace command_buffer_metrics {
 
 namespace {
 
@@ -63,6 +64,7 @@ CommandBufferContextLostReason GetContextLostReason(
       case gpu::error::kGenericError:
         return CONTEXT_PARSE_ERROR_GENERIC_ERROR;
       case gpu::error::kDeferCommandUntilLater:
+      case gpu::error::kDeferLaterCommands:
       case gpu::error::kNoError:
       case gpu::error::kLostContext:
         NOTREACHED();
@@ -72,7 +74,7 @@ CommandBufferContextLostReason GetContextLostReason(
   return CONTEXT_LOST_UNKNOWN;
 }
 
-void RecordContextLost(CommandBufferContextType type,
+void RecordContextLost(ContextType type,
                        CommandBufferContextLostReason reason) {
   switch (type) {
     case DISPLAY_COMPOSITOR_ONSCREEN_CONTEXT:
@@ -111,6 +113,16 @@ void RecordContextLost(CommandBufferContextType type,
       UMA_HISTOGRAM_ENUMERATION("GPU.ContextLost.WebGL", reason,
                                 CONTEXT_LOST_REASON_MAX_ENUM);
       break;
+    case MEDIA_CONTEXT:
+      UMA_HISTOGRAM_ENUMERATION("GPU.ContextLost.Media", reason,
+                                CONTEXT_LOST_REASON_MAX_ENUM);
+      break;
+    case BLIMP_RENDER_COMPOSITOR_CONTEXT:
+      UMA_HISTOGRAM_ENUMERATION("GPU.ContextLost.BlimpRenderCompositor", reason,
+                                CONTEXT_LOST_REASON_MAX_ENUM);
+    case BLIMP_RENDER_WORKER_CONTEXT:
+      UMA_HISTOGRAM_ENUMERATION("GPU.ContextLost.BlimpRenderWorker", reason,
+                                CONTEXT_LOST_REASON_MAX_ENUM);
     case CONTEXT_TYPE_UNKNOWN:
       UMA_HISTOGRAM_ENUMERATION("GPU.ContextLost.Unknown", reason,
                                 CONTEXT_LOST_REASON_MAX_ENUM);
@@ -120,7 +132,7 @@ void RecordContextLost(CommandBufferContextType type,
 
 }  // anonymous namespace
 
-std::string CommandBufferContextTypeToString(CommandBufferContextType type) {
+std::string ContextTypeToString(ContextType type) {
   switch (type) {
     case OFFSCREEN_CONTEXT_FOR_TESTING:
       return "Context-For-Testing";
@@ -142,17 +154,23 @@ std::string CommandBufferContextTypeToString(CommandBufferContextType type) {
       return "Offscreen-CaptureThread";
     case OFFSCREEN_CONTEXT_FOR_WEBGL:
       return "Offscreen-For-WebGL";
+    case MEDIA_CONTEXT:
+      return "Media";
+    case BLIMP_RENDER_COMPOSITOR_CONTEXT:
+      return "BlimpRenderCompositor";
+    case BLIMP_RENDER_WORKER_CONTEXT:
+      return "BlimpRenderWorker";
     default:
       NOTREACHED();
       return "unknown";
   }
 }
 
-void UmaRecordContextInitFailed(CommandBufferContextType type) {
+void UmaRecordContextInitFailed(ContextType type) {
   RecordContextLost(type, CONTEXT_INIT_FAILED);
 }
 
-void UmaRecordContextLost(CommandBufferContextType type,
+void UmaRecordContextLost(ContextType type,
                           gpu::error::Error error,
                           gpu::error::ContextLostReason reason) {
   CommandBufferContextLostReason converted_reason =
@@ -160,4 +178,5 @@ void UmaRecordContextLost(CommandBufferContextType type,
   RecordContextLost(type, converted_reason);
 }
 
+}  // namespace command_buffer_metrics
 }  // namespace content

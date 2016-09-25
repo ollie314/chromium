@@ -48,13 +48,13 @@ int LayoutSlider::baselinePosition(FontBaseline, bool /*firstLine*/, LineDirecti
 {
     ASSERT(linePositionMode == PositionOnContainingLine);
     // FIXME: Patch this function for writing-mode.
-    return size().height() + marginTop();
+    return (size().height() + marginTop()).toInt();
 }
 
 void LayoutSlider::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const
 {
     maxLogicalWidth = LayoutUnit(defaultTrackLength * style()->effectiveZoom());
-    if (!style()->width().hasPercent())
+    if (!style()->width().isPercentOrCalc())
         minLogicalWidth = maxLogicalWidth;
 }
 

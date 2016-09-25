@@ -29,8 +29,11 @@
 
 using ::testing::_;
 using ::testing::Assign;
+using ::testing::AtLeast;
 using ::testing::DoAll;
 using ::testing::NotNull;
+
+namespace content {
 
 namespace {
 const int kRenderProcessId = 1;
@@ -41,9 +44,18 @@ const char kDefaultDeviceId[] = "";
 const char kBadDeviceId[] =
     "badbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbadbad1";
 const char kInvalidDeviceId[] = "invalid-device-id";
-}  // namespace
 
-namespace content {
+void ValidateRenderFrameId(int render_process_id,
+                           int render_frame_id,
+                           const base::Callback<void(bool)>& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  const bool frame_exists = (render_process_id == kRenderProcessId &&
+                             render_frame_id == kRenderFrameId);
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(callback, frame_exists));
+}
+
+}  // namespace
 
 class MockAudioMirroringManager : public AudioMirroringManager {
  public:
@@ -66,14 +78,16 @@ class MockAudioRendererHost : public AudioRendererHost {
                         AudioMirroringManager* mirroring_manager,
                         MediaInternals* media_internals,
                         MediaStreamManager* media_stream_manager,
-                        const ResourceContext::SaltCallback& salt_callback)
+                        const std::string& salt)
       : AudioRendererHost(kRenderProcessId,
                           audio_manager,
                           mirroring_manager,
                           media_internals,
                           media_stream_manager,
-                          salt_callback),
-        shared_memory_length_(0) {}
+                          salt),
+        shared_memory_length_(0) {
+    set_render_frame_id_validate_function_for_testing(&ValidateRenderFrameId);
+  }
 
   // A list of mock methods.
   MOCK_METHOD4(OnDeviceAuthorized,
@@ -95,6 +109,9 @@ class MockAudioRendererHost : public AudioRendererHost {
   // This method is used to dispatch IPC messages to the renderer. We intercept
   // these messages here and dispatch to our mock methods to verify the
   // conversation between this object and the renderer.
+  // Note: this means that file descriptors won't be duplicated,
+  // leading to double-close errors from SyncSocket.
+  // See crbug.com/647659.
   virtual bool Send(IPC::Message* message) {
     CHECK(message);
 
@@ -170,18 +187,12 @@ class MockAudioRendererHost : public AudioRendererHost {
 };
 
 namespace {
-std::string ReturnMockSalt() {
-  return std::string();
-}
-
-ResourceContext::SaltCallback GetMockSaltCallback() {
-  return base::Bind(&ReturnMockSalt);
-}
 
 void WaitForEnumeration(base::RunLoop* loop,
                         const AudioOutputDeviceEnumeration& e) {
   loop->Quit();
 }
+
 }  // namespace
 
 class AudioRendererHostTest : public testing::Test {
@@ -202,10 +213,10 @@ class AudioRendererHostTest : public testing::Test {
         base::Bind(&WaitForEnumeration, &run_loop));
     run_loop.Run();
 
-    host_ = new MockAudioRendererHost(audio_manager_.get(), &mirroring_manager_,
-                                      MediaInternals::GetInstance(),
-                                      media_stream_manager_.get(),
-                                      GetMockSaltCallback());
+    host_ =
+        new MockAudioRendererHost(audio_manager_.get(), &mirroring_manager_,
+                                  MediaInternals::GetInstance(),
+                                  media_stream_manager_.get(), std::string());
 
     // Simulate IPC channel connected.
     host_->set_peer_process_for_testing(base::Process::Current());
@@ -270,6 +281,28 @@ class AudioRendererHostTest : public testing::Test {
           .RetiresOnSaturation();
     }
     SyncWithAudioThread();
+  }
+
+  void CreateWithInvalidRenderFrameId() {
+    // When creating a stream with an invalid render frame ID, the host will
+    // reply with a stream error message.
+    EXPECT_CALL(*host_, OnStreamError(kStreamId));
+
+    // However, validation does not block stream creation, so these method calls
+    // might be made:
+    EXPECT_CALL(*host_, OnStreamCreated(kStreamId, _)).Times(AtLeast(0));
+    EXPECT_CALL(mirroring_manager_, AddDiverter(_, _, _)).Times(AtLeast(0));
+    EXPECT_CALL(mirroring_manager_, RemoveDiverter(_)).Times(AtLeast(0));
+
+    // Provide a seemingly-valid render frame ID; and it should be rejected when
+    // AudioRendererHost calls ValidateRenderFrameId().
+    const int kInvalidRenderFrameId = kRenderFrameId + 1;
+    const media::AudioParameters params(
+        media::AudioParameters::AUDIO_FAKE, media::CHANNEL_LAYOUT_STEREO,
+        media::AudioParameters::kAudioCDSampleRate, 16,
+        media::AudioParameters::kAudioCDSampleRate / 10);
+    host_->OnCreateStream(kStreamId, kInvalidRenderFrameId, params);
+    base::RunLoop().RunUntilIdle();
   }
 
   void Close() {
@@ -408,6 +441,11 @@ TEST_F(AudioRendererHostTest, CreateUnauthorizedDevice) {
 
 TEST_F(AudioRendererHostTest, CreateInvalidDevice) {
   Create(false, kInvalidDeviceId, url::Origin(GURL(kSecurityOrigin)));
+  Close();
+}
+
+TEST_F(AudioRendererHostTest, CreateFailsForInvalidRenderFrame) {
+  CreateWithInvalidRenderFrameId();
   Close();
 }
 

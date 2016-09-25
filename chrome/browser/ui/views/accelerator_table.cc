@@ -13,7 +13,7 @@
 #include "ui/events/event_constants.h"
 
 #if defined(USE_ASH)
-#include "ash/accelerators/accelerator_table.h"
+#include "ash/common/accelerators/accelerator_table.h"  // nogncheck
 #endif
 
 namespace chrome {
@@ -35,7 +35,7 @@ const ui::EventFlags kPlatformModifier = ui::EF_CONTROL_DOWN;
 // http://blogs.msdn.com/b/oldnewthing/archive/2004/03/29/101121.aspx
 const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_LEFT, ui::EF_ALT_DOWN, IDC_BACK },
-  { ui::VKEY_BACK, ui::EF_NONE, IDC_BACK },
+  { ui::VKEY_BACK, ui::EF_NONE, IDC_BACKSPACE_BACK },
   { ui::VKEY_D, ui::EF_CONTROL_DOWN, IDC_BOOKMARK_PAGE },
   { ui::VKEY_D, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     IDC_BOOKMARK_ALL_TABS },
@@ -52,7 +52,7 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_B, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FOCUS_BOOKMARKS },
   { ui::VKEY_A, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FOCUS_INFOBARS },
   { ui::VKEY_RIGHT, ui::EF_ALT_DOWN, IDC_FORWARD },
-  { ui::VKEY_BACK, ui::EF_SHIFT_DOWN, IDC_FORWARD },
+  { ui::VKEY_BACK, ui::EF_SHIFT_DOWN, IDC_BACKSPACE_FORWARD },
   { ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_DEV_TOOLS },
   { ui::VKEY_F12, ui::EF_NONE, IDC_DEV_TOOLS_TOGGLE },
   { ui::VKEY_J, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
@@ -179,7 +179,7 @@ const AcceleratorMapping kAcceleratorMap[] = {
   // via WM_APPCOMMAND.
   { ui::VKEY_BROWSER_SEARCH, ui::EF_NONE, IDC_FOCUS_SEARCH },
   { ui::VKEY_M, ui::EF_SHIFT_DOWN | kPlatformModifier, IDC_SHOW_AVATAR_MENU},
-  // On ChromeOS, these keys are assigned to change UI scale.
+  // On Chrome OS, these keys are assigned to change UI scale.
   { ui::VKEY_OEM_PLUS, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_ZOOM_PLUS },
   { ui::VKEY_OEM_MINUS, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     IDC_ZOOM_MINUS },
@@ -197,6 +197,18 @@ const AcceleratorMapping kAcceleratorMap[] = {
 #endif
 };
 const size_t kAcceleratorMapLength = arraysize(kAcceleratorMap);
+
+const int kRepeatableCommandIds[] = {
+  IDC_FIND_NEXT,
+  IDC_FIND_PREVIOUS,
+  IDC_FOCUS_NEXT_PANE,
+  IDC_FOCUS_PREVIOUS_PANE,
+  IDC_MOVE_TAB_NEXT,
+  IDC_MOVE_TAB_PREVIOUS,
+  IDC_SELECT_NEXT_TAB,
+  IDC_SELECT_PREVIOUS_TAB,
+};
+const size_t kRepeatableCommandIdsLength = arraysize(kRepeatableCommandIds);
 
 #if defined(USE_ASH)
 // Below we map Chrome command ids to Ash action ids for commands that have
@@ -263,6 +275,14 @@ bool GetStandardAcceleratorForCommandId(int command_id,
       return true;
     case IDC_PASTE:
       *accelerator = ui::Accelerator(ui::VKEY_V, ui::EF_CONTROL_DOWN);
+      return true;
+  }
+  return false;
+}
+
+bool IsCommandRepeatable(int command_id) {
+  for (size_t i = 0; i < kRepeatableCommandIdsLength; ++i) {
+    if (kRepeatableCommandIds[i] == command_id)
       return true;
   }
   return false;

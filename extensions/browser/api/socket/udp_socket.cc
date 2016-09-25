@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/callback_helpers.h"
 #include "base/lazy_instance.h"
 #include "extensions/browser/api/api_resource.h"
 #include "net/base/ip_address.h"
@@ -45,7 +46,7 @@ void UDPSocket::Connect(const net::AddressList& address,
 
     // UDP API only connects to the first address received from DNS so
     // connection may not work even if other addresses are reachable.
-    net::IPEndPoint ip_end_point = address.front();
+    const net::IPEndPoint& ip_end_point = address.front();
     result = socket_.Open(ip_end_point.GetFamily());
     if (result != net::OK)
       break;
@@ -83,7 +84,11 @@ void UDPSocket::Disconnect() {
   is_connected_ = false;
   socket_.Close();
   read_callback_.Reset();
-  recv_from_callback_.Reset();
+  // TODO(devlin): Should we do this for all callbacks?
+  if (!recv_from_callback_.is_null()) {
+    base::ResetAndReturn(&recv_from_callback_)
+        .Run(net::ERR_CONNECTION_CLOSED, nullptr, std::string(), 0);
+  }
   send_to_callback_.Reset();
   multicast_groups_.clear();
 }

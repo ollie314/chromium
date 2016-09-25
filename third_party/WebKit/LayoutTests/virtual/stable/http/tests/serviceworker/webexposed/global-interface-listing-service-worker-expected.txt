@@ -3,6 +3,16 @@ interface Blob
     getter type
     method constructor
     method slice
+interface BroadcastChannel : EventTarget
+    getter name
+    getter onmessage
+    method close
+    method constructor
+    method postMessage
+    setter onmessage
+interface ByteLengthQueuingStrategy
+    method constructor
+    method size
 interface Cache
     method add
     method addAll
@@ -36,6 +46,9 @@ interface CloseEvent : Event
     getter reason
     getter wasClean
     method constructor
+interface CountQueuingStrategy
+    method constructor
+    method size
 interface Crypto
     getter subtle
     method constructor
@@ -126,6 +139,7 @@ interface Event
     getter bubbles
     getter cancelBubble
     getter cancelable
+    getter composed
     getter currentTarget
     getter defaultPrevented
     getter eventPhase
@@ -135,6 +149,7 @@ interface Event
     getter target
     getter timeStamp
     getter type
+    method composedPath
     method constructor
     method initEvent
     method preventDefault
@@ -183,21 +198,6 @@ interface File : Blob
     getter lastModifiedDate
     getter name
     getter webkitRelativePath
-    method constructor
-interface FileError : DOMError
-    attribute ABORT_ERR
-    attribute ENCODING_ERR
-    attribute INVALID_MODIFICATION_ERR
-    attribute INVALID_STATE_ERR
-    attribute NOT_FOUND_ERR
-    attribute NOT_READABLE_ERR
-    attribute NO_MODIFICATION_ALLOWED_ERR
-    attribute PATH_EXISTS_ERR
-    attribute QUOTA_EXCEEDED_ERR
-    attribute SECURITY_ERR
-    attribute SYNTAX_ERR
-    attribute TYPE_MISMATCH_ERR
-    getter code
     method constructor
 interface FileList
     getter length
@@ -308,6 +308,7 @@ interface IDBIndex
     method getKey
     method openCursor
     method openKeyCursor
+    setter name
 interface IDBKeyRange
     static method bound
     static method lowerBound
@@ -339,6 +340,7 @@ interface IDBObjectStore
     method openCursor
     method openKeyCursor
     method put
+    setter name
 interface IDBOpenDBRequest : IDBRequest
     getter onblocked
     getter onupgradeneeded
@@ -379,10 +381,13 @@ interface IDBVersionChangeEvent : Event
 interface ImageBitmap
     getter height
     getter width
+    method close
     method constructor
 interface ImageData
     getter height
     getter width
+    method constructor
+interface InstallEvent : ExtendableEvent
     method constructor
 interface MessageChannel
     getter port1
@@ -406,6 +411,8 @@ interface MessagePort : EventTarget
 interface Notification : EventTarget
     static getter maxActions
     static getter permission
+    getter actions
+    getter badge
     getter body
     getter data
     getter dir
@@ -421,6 +428,7 @@ interface Notification : EventTarget
     getter tag
     getter timestamp
     getter title
+    getter vibrate
     method close
     method constructor
     setter onclick
@@ -431,6 +439,11 @@ interface NotificationEvent : ExtendableEvent
     getter action
     getter notification
     method constructor
+interface PerformanceObserverEntryList
+    method constructor
+    method getEntries
+    method getEntriesByName
+    method getEntriesByType
 interface PermissionStatus : EventTarget
     getter onchange
     getter state
@@ -459,18 +472,21 @@ interface PushMessageData
     method text
 interface PushSubscription
     getter endpoint
+    getter options
     method constructor
     method getKey
     method toJSON
     method unsubscribe
-interface ReadableByteStream
-    method cancel
+interface PushSubscriptionOptions
+    getter applicationServerKey
+    getter userVisibleOnly
     method constructor
-    method getReader
 interface ReadableStream
+    getter locked
     method cancel
     method constructor
     method getReader
+    method tee
 interface Request
     getter bodyUsed
     getter credentials
@@ -480,6 +496,7 @@ interface Request
     getter mode
     getter redirect
     getter referrer
+    getter referrerPolicy
     getter url
     method arrayBuffer
     method blob
@@ -507,10 +524,13 @@ interface Response
 interface ServiceWorkerGlobalScope : WorkerGlobalScope
     method constructor
 interface ServiceWorkerRegistration : EventTarget
+    getter active
+    getter installing
     getter onupdatefound
     getter pushManager
     getter scope
     getter sync
+    getter waiting
     method constructor
     method getNotifications
     method showNotification
@@ -550,8 +570,6 @@ interface TextEncoder
     method constructor
     method encode
 interface URL
-    static method createObjectURL
-    static method revokeObjectURL
     getter hash
     getter host
     getter hostname
@@ -619,7 +637,7 @@ interface WindowClient : Client
     method focus
     method navigate
 interface WorkerGlobalScope : EventTarget
-    getter console
+    getter caches
     getter crypto
     getter indexedDB
     getter location
@@ -634,14 +652,12 @@ interface WorkerGlobalScope : EventTarget
     method btoa
     method clearInterval
     method clearTimeout
-    method close
     method constructor
     method createImageBitmap
     method fetch
     method importScripts
     method setInterval
     method setTimeout
-    setter console
     setter onerror
     setter onrejectionhandled
     setter onunhandledrejection
@@ -715,6 +731,7 @@ interface webkitIDBIndex
     method getKey
     method openCursor
     method openKeyCursor
+    setter name
 interface webkitIDBKeyRange
     static method bound
     static method lowerBound
@@ -746,6 +763,7 @@ interface webkitIDBObjectStore
     method openCursor
     method openKeyCursor
     method put
+    setter name
 interface webkitIDBRequest : EventTarget
     getter error
     getter onerror
@@ -772,7 +790,8 @@ interface webkitIDBTransaction : EventTarget
     setter oncomplete
     setter onerror
 global object
-    getter caches
+    attribute console
+    attribute internals
     getter clients
     getter onactivate
     getter onfetch
@@ -783,7 +802,6 @@ global object
     getter onpush
     getter onsync
     getter registration
-    method close
     method fetch
     method gc
     method skipWaiting
@@ -795,7 +813,8 @@ global object
     setter onnotificationclose
     setter onpush
     setter onsync
-This is a testharness.js-based test.
-PASS Verify the interface of ServiceWorkerGlobalScope 
-Harness: the test ran to completion.
+PASS Verify the interface of ServiceWorkerGlobalScope
+PASS successfullyParsed is true
+
+TEST COMPLETE
 

@@ -10,7 +10,6 @@
 #include "android_webview/browser/aw_form_database_service.h"
 #include "android_webview/browser/aw_metrics_service_client.h"
 #include "android_webview/browser/aw_permission_manager.h"
-#include "android_webview/browser/aw_pref_store.h"
 #include "android_webview/browser/aw_quota_manager_bridge.h"
 #include "android_webview/browser/aw_resource_context.h"
 #include "android_webview/browser/jni_dependency_factory.h"
@@ -18,20 +17,15 @@
 #include "android_webview/common/aw_content_client.h"
 #include "base/base_paths_android.h"
 #include "base/bind.h"
+#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/core/browser/data_store.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/metrics/metrics_service.h"
 #include "components/policy/core/browser/browser_policy_connector_base.h"
 #include "components/policy/core/browser/configuration_policy_pref_store.h"
 #include "components/policy/core/browser/url_blacklist_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/in_memory_pref_store.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/pref_service_factory.h"
 #include "components/url_formatter/url_fixer.h"
@@ -59,11 +53,11 @@ const char kAuthAndroidNegotiateAccountType[] =
 // Whitelist containing servers for which Integrated Authentication is enabled.
 const char kAuthServerWhitelist[] = "auth.server_whitelist";
 
+const char kWebRestrictionsAuthority[] = "web_restrictions_authority";
+
 }  // namespace prefs
 
 namespace {
-// Name of the preference that governs enabling the Data Reduction Proxy.
-const char kDataReductionProxyEnabled[] = "data_reduction_proxy.enabled";
 
 // Shows notifications which correspond to PersistentPrefStore's reading errors.
 void HandleReadError(PersistentPrefStore::PrefReadError error) {
@@ -82,7 +76,7 @@ AwBrowserContext* g_browser_context = NULL;
 std::unique_ptr<net::ProxyConfigService> CreateProxyConfigService() {
   std::unique_ptr<net::ProxyConfigService> config_service =
       net::ProxyService::CreateSystemProxyConfigService(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
+          BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
           nullptr /* Ignored on Android */);
 
   // TODO(csharrison) Architect the wrapper better so we don't need a cast for
@@ -107,7 +101,7 @@ policy::URLBlacklistManager* CreateURLBlackListManager(
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
       pool->GetSequencedTaskRunner(pool->GetSequenceToken());
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner =
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
 
   return new policy::URLBlacklistManager(pref_service, background_task_runner,
                                          io_task_runner, segment_url_callback,
@@ -115,9 +109,6 @@ policy::URLBlacklistManager* CreateURLBlackListManager(
 }
 
 }  // namespace
-
-// Data reduction proxy is disabled by default.
-bool AwBrowserContext::data_reduction_proxy_enabled_ = false;
 
 // Delete the legacy cache dir (in the app data dir) in 10 seconds after init.
 int AwBrowserContext::legacy_cache_removal_delay_ms_ = 10000;
@@ -156,26 +147,6 @@ AwBrowserContext* AwBrowserContext::FromWebContents(
 }
 
 // static
-void AwBrowserContext::SetDataReductionProxyEnabled(bool enabled) {
-  // Cache the setting value. It is possible that data reduction proxy is
-  // not created yet.
-  data_reduction_proxy_enabled_ = enabled;
-  AwBrowserContext* context = AwBrowserContext::GetDefault();
-  // Can't enable Data reduction proxy if user pref service is not ready.
-  if (context == NULL || context->user_pref_service_.get() == NULL)
-    return;
-  data_reduction_proxy::DataReductionProxySettings* proxy_settings =
-      context->GetDataReductionProxySettings();
-  if (proxy_settings == NULL)
-    return;
-  // At this point, context->PreMainMessageLoopRun() has run, so
-  // context->data_reduction_proxy_io_data() is valid.
-  DCHECK(context->GetDataReductionProxyIOData());
-  context->CreateDataReductionProxyStatisticsIfNecessary();
-  proxy_settings->SetDataReductionProxyEnabled(data_reduction_proxy_enabled_);
-}
-
-// static
 void AwBrowserContext::SetLegacyCacheRemovalDelayForTest(int delay_ms) {
   legacy_cache_removal_delay_ms_ = delay_ms;
 }
@@ -205,35 +176,11 @@ void AwBrowserContext::PreMainMessageLoopRun() {
   url_request_context_getter_ = new AwURLRequestContextGetter(
       cache_path, CreateProxyConfigService(), user_pref_service_.get());
 
-  data_reduction_proxy_io_data_.reset(
-      new data_reduction_proxy::DataReductionProxyIOData(
-          data_reduction_proxy::Client::WEBVIEW_ANDROID,
-          data_reduction_proxy::DataReductionProxyParams::kAllowed,
-          url_request_context_getter_->GetNetLog(),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-          false /* enable */,
-          false /* enable_quic */,
-          GetUserAgent()));
-  data_reduction_proxy_settings_.reset(
-      new data_reduction_proxy::DataReductionProxySettings());
-  std::unique_ptr<data_reduction_proxy::DataStore> store(
-      new data_reduction_proxy::DataStore());
   base::SequencedWorkerPool* pool = BrowserThread::GetBlockingPool();
   scoped_refptr<base::SequencedTaskRunner> db_task_runner =
       pool->GetSequencedTaskRunnerWithShutdownBehavior(
           pool->GetSequenceToken(),
           base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
-  data_reduction_proxy_service_.reset(
-      new data_reduction_proxy::DataReductionProxyService(
-          data_reduction_proxy_settings_.get(), nullptr,
-          GetAwURLRequestContext(), std::move(store),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
-          db_task_runner, base::TimeDelta()));
-  data_reduction_proxy_io_data_->SetDataReductionProxyService(
-      data_reduction_proxy_service_->GetWeakPtr());
-
   visitedlink_master_.reset(
       new visitedlink::VisitedLinkMaster(this, this, false));
   visitedlink_master_->Init();
@@ -241,15 +188,7 @@ void AwBrowserContext::PreMainMessageLoopRun() {
   form_database_service_.reset(
       new AwFormDatabaseService(context_storage_path_));
 
-  // Ensure the storage partition is initialized in time for DataReductionProxy.
   EnsureResourceContextInitialized(this);
-
-  // TODO(dgn) lazy init, see http://crbug.com/521542
-  data_reduction_proxy_settings_->InitDataReductionProxySettings(
-      kDataReductionProxyEnabled, user_pref_service_.get(),
-      data_reduction_proxy_io_data_.get(),
-      std::move(data_reduction_proxy_service_));
-  data_reduction_proxy_settings_->MaybeActivateDataReductionProxy(true);
 
   blacklist_manager_.reset(CreateURLBlackListManager(user_pref_service_.get()));
 
@@ -264,6 +203,19 @@ void AwBrowserContext::PreMainMessageLoopRun() {
       content::BrowserContext::GetDefaultStoragePartition(this)->
           GetURLRequestContext(),
       guid_file_path);
+  web_restriction_provider_.reset(
+      new web_restrictions::WebRestrictionsClient());
+  pref_change_registrar_.Add(
+      prefs::kWebRestrictionsAuthority,
+      base::Bind(&AwBrowserContext::OnWebRestrictionsAuthorityChanged,
+                 base::Unretained(this)));
+  web_restriction_provider_->SetAuthority(
+      user_pref_service_->GetString(prefs::kWebRestrictionsAuthority));
+}
+
+void AwBrowserContext::OnWebRestrictionsAuthorityChanged() {
+  web_restriction_provider_->SetAuthority(
+      user_pref_service_->GetString(prefs::kWebRestrictionsAuthority));
 }
 
 void AwBrowserContext::AddVisitedURLs(const std::vector<GURL>& urls) {
@@ -280,16 +232,6 @@ AwQuotaManagerBridge* AwBrowserContext::GetQuotaManagerBridge() {
 
 AwFormDatabaseService* AwBrowserContext::GetFormDatabaseService() {
   return form_database_service_.get();
-}
-
-data_reduction_proxy::DataReductionProxySettings*
-AwBrowserContext::GetDataReductionProxySettings() {
-  return data_reduction_proxy_settings_.get();
-}
-
-data_reduction_proxy::DataReductionProxyIOData*
-AwBrowserContext::GetDataReductionProxyIOData() {
-  return data_reduction_proxy_io_data_.get();
 }
 
 AwURLRequestContextGetter* AwBrowserContext::GetAwURLRequestContext() {
@@ -312,18 +254,19 @@ void AwBrowserContext::InitUserPrefService() {
   // the manager_delegate. We don't use the rest of Autofill, which is why it is
   // hardcoded as disabled here.
   pref_registry->RegisterBooleanPref(autofill::prefs::kAutofillEnabled, false);
-  pref_registry->RegisterBooleanPref(kDataReductionProxyEnabled, false);
-  data_reduction_proxy::RegisterSimpleProfilePrefs(pref_registry);
   policy::URLBlacklistManager::RegisterProfilePrefs(pref_registry);
 
   pref_registry->RegisterStringPref(prefs::kAuthServerWhitelist, std::string());
   pref_registry->RegisterStringPref(prefs::kAuthAndroidNegotiateAccountType,
                                     std::string());
+  pref_registry->RegisterStringPref(prefs::kWebRestrictionsAuthority,
+                                    std::string());
 
   metrics::MetricsService::RegisterPrefs(pref_registry);
 
   PrefServiceFactory pref_service_factory;
-  pref_service_factory.set_user_prefs(make_scoped_refptr(new AwPrefStore()));
+  pref_service_factory.set_user_prefs(make_scoped_refptr(
+      new InMemoryPrefStore()));
   pref_service_factory.set_managed_prefs(
       make_scoped_refptr(new policy::ConfigurationPolicyPrefStore(
           browser_policy_connector_->GetPolicyService(),
@@ -331,6 +274,7 @@ void AwBrowserContext::InitUserPrefService() {
           policy::POLICY_LEVEL_MANDATORY)));
   pref_service_factory.set_read_error_callback(base::Bind(&HandleReadError));
   user_pref_service_ = pref_service_factory.Create(pref_registry);
+  pref_change_registrar_.Init(user_pref_service_.get());
 
   user_prefs::UserPrefs::Set(this, user_pref_service_.get());
 }
@@ -438,29 +382,18 @@ policy::URLBlacklistManager* AwBrowserContext::GetURLBlacklistManager() {
   return blacklist_manager_.get();
 }
 
+web_restrictions::WebRestrictionsClient*
+AwBrowserContext::GetWebRestrictionProvider() {
+  DCHECK(web_restriction_provider_);
+  return web_restriction_provider_.get();
+}
+
 void AwBrowserContext::RebuildTable(
     const scoped_refptr<URLEnumerator>& enumerator) {
   // Android WebView rebuilds from WebChromeClient.getVisitedHistory. The client
   // can change in the lifetime of this WebView and may not yet be set here.
   // Therefore this initialization path is not used.
   enumerator->OnComplete(true);
-}
-
-void AwBrowserContext::CreateDataReductionProxyStatisticsIfNecessary() {
-  DCHECK(user_pref_service_.get());
-  DCHECK(GetDataReductionProxySettings());
-  data_reduction_proxy::DataReductionProxyService*
-      data_reduction_proxy_service =
-          GetDataReductionProxySettings()->data_reduction_proxy_service();
-  DCHECK(data_reduction_proxy_service);
-  if (data_reduction_proxy_service->compression_stats())
-    return;
-  // We don't care about commit_delay for now. It is just a dummy value.
-  base::TimeDelta commit_delay = base::TimeDelta::FromMinutes(60);
-  data_reduction_proxy_service->EnableCompressionStatisticsLogging(
-      user_pref_service_.get(),
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-      commit_delay);
 }
 
 }  // namespace android_webview

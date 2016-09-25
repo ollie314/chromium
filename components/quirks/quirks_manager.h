@@ -5,12 +5,12 @@
 #ifndef COMPONENTS_QUIRKS_QUIRKS_MANAGER_H_
 #define COMPONENTS_QUIRKS_QUIRKS_MANAGER_H_
 
+#include <memory>
 #include <set>
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -54,13 +54,8 @@ class QUIRKS_EXPORT QuirksManager {
  public:
   // Passed function to create a URLFetcher for tests.
   // Same parameters as URLFetcher::Create().
-  using FakeQuirksFetcherCreator =
-      base::Callback<scoped_ptr<net::URLFetcher>(const GURL&,
-                                                 net::URLFetcherDelegate*)>;
-
-  // Callback after getting days since OOBE on blocking pool.
-  // Parameter is returned number of days.
-  using DaysSinceOobeCallback = base::Callback<void(int)>;
+  using FakeQuirksFetcherCreator = base::Callback<
+      std::unique_ptr<net::URLFetcher>(const GURL&, net::URLFetcherDelegate*)>;
 
   // Delegate class, so implementation can access browser functionality.
   class Delegate {
@@ -81,15 +76,12 @@ class QUIRKS_EXPORT QuirksManager {
     // Whether downloads are allowed by enterprise device policy.
     virtual bool DevicePolicyEnabled() const = 0;
 
-    // Gets days since first login, returned via callback.
-    virtual void GetDaysSinceOobe(DaysSinceOobeCallback callback) const = 0;
-
    private:
     DISALLOW_ASSIGN(Delegate);
   };
 
   static void Initialize(
-      scoped_ptr<Delegate> delegate,
+      std::unique_ptr<Delegate> delegate,
       scoped_refptr<base::SequencedWorkerPool> blocking_pool,
       PrefService* local_state,
       scoped_refptr<net::URLRequestContextGetter> url_context_getter);
@@ -109,7 +101,7 @@ class QUIRKS_EXPORT QuirksManager {
   void ClientFinished(QuirksClient* client);
 
   // Creates a real URLFetcher for OS, and a fake one for tests.
-  scoped_ptr<net::URLFetcher> CreateURLFetcher(
+  std::unique_ptr<net::URLFetcher> CreateURLFetcher(
       const GURL& url,
       net::URLFetcherDelegate* delegate);
 
@@ -128,7 +120,7 @@ class QUIRKS_EXPORT QuirksManager {
   }
 
  private:
-  QuirksManager(scoped_ptr<Delegate> delegate,
+  QuirksManager(std::unique_ptr<Delegate> delegate,
                 scoped_refptr<base::SequencedWorkerPool> blocking_pool,
                 PrefService* local_state,
                 scoped_refptr<net::URLRequestContextGetter> url_context_getter);
@@ -140,16 +132,6 @@ class QUIRKS_EXPORT QuirksManager {
       const RequestFinishedCallback& on_request_finished,
       base::FilePath path);
 
-  // Callback after checking OOBE date; launch client if appropriate.
-  void OnDaysSinceOobeReceived(
-      int64_t product_id,
-      const RequestFinishedCallback& on_request_finished,
-      int days_since_oobe);
-
-  // Create and start a client to download file.
-  void CreateClient(int64_t product_id,
-                    const RequestFinishedCallback& on_request_finished);
-
   // Whether downloads allowed by cmd line flag and device policy.
   bool QuirksEnabled();
 
@@ -157,7 +139,7 @@ class QUIRKS_EXPORT QuirksManager {
   void SetLastServerCheck(int64_t product_id, const base::Time& last_check);
 
   // Set of active clients, each created to download a different Quirks file.
-  std::set<scoped_ptr<QuirksClient>> clients_;
+  std::set<std::unique_ptr<QuirksClient>> clients_;
 
   // Don't start downloads before first session login.
   bool waiting_for_login_;
@@ -166,7 +148,7 @@ class QUIRKS_EXPORT QuirksManager {
   base::ThreadChecker thread_checker_;
 
   // These objects provide resources from the browser.
-  scoped_ptr<Delegate> delegate_;  // Impl runs from chrome/browser.
+  std::unique_ptr<Delegate> delegate_;  // Impl runs from chrome/browser.
   scoped_refptr<base::SequencedWorkerPool> blocking_pool_;
   PrefService* local_state_;  // For local prefs.
   scoped_refptr<net::URLRequestContextGetter> url_context_getter_;

@@ -19,10 +19,11 @@
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chromecast/base/task_runner_impl.h"
 #include "chromecast/media/cma/base/decoder_buffer_adapter.h"
@@ -54,6 +55,9 @@ const base::TimeDelta kMonitorLoopDelay = base::TimeDelta::FromMilliseconds(20);
 const int64_t kStartPts = 1000 * 1000;
 // Amount that PTS is allowed to progress past the time that Pause() was called.
 const int kPausePtsSlackMs = 75;
+// Number of effects streams to open simultaneously when also playing a
+// non-effects stream.
+const int kNumEffectsStreams = 1;
 
 void IgnoreEos() {}
 
@@ -188,6 +192,7 @@ class AudioVideoPipelineDeviceTest : public testing::Test {
   void TearDown() override {
     // Pipeline must be destroyed before finalizing media shlib.
     backend_.reset();
+    effects_backends_.clear();
     CastMediaShlib::Finalize();
   }
 
@@ -626,7 +631,6 @@ void AudioVideoPipelineDeviceTest::PauseBeforeEos() {
 }
 
 void AudioVideoPipelineDeviceTest::AddEffectsStreams() {
-  const int kNumEffectsStreams = 3;
   for (int i = 0; i < kNumEffectsStreams; ++i) {
     MediaPipelineDeviceParams params(
         MediaPipelineDeviceParams::kModeIgnorePts,
@@ -746,9 +750,8 @@ void AudioVideoPipelineDeviceTest::OnEndOfStream() {
   if ((!audio_feeder_ || audio_feeder_->eos()) &&
       (!video_feeder_ || video_feeder_->eos())) {
     RunPlaybackChecks();
-    bool success = backend_->Stop();
+    backend_->Stop();
     stopped_ = true;
-    ASSERT_TRUE(success);
     RunStoppedChecks();
 
     for (auto& feeder : effects_feeders_)
@@ -845,36 +848,36 @@ void AudioVideoPipelineDeviceTest::OnPauseCompleted() {
 
 void AudioVideoPipelineDeviceTest::TestBackendStates() {
   ASSERT_TRUE(backend()->Initialize());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   RunStoppedChecks();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   const int64_t start_pts = 222;
   ASSERT_TRUE(backend()->Start(start_pts));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   RunPlaybackChecks();
 
   ASSERT_TRUE(backend()->Pause());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   RunPlaybackChecks();
 
   ASSERT_TRUE(backend()->Resume());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   RunPlaybackChecks();
 
-  ASSERT_TRUE(backend()->Stop());
-  base::MessageLoop::current()->RunUntilIdle();
+  backend()->Stop();
+  base::RunLoop().RunUntilIdle();
 
   RunStoppedChecks();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 void AudioVideoPipelineDeviceTest::StartImmediateEosTest() {
   RunStoppedChecks();
 
   ASSERT_TRUE(backend()->Initialize());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   Start();
 }
@@ -884,13 +887,13 @@ void AudioVideoPipelineDeviceTest::EndImmediateEosTest() {
   RunPlaybackChecks();
 
   ASSERT_TRUE(backend_->Pause());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(kStartPts, backend_->GetCurrentPts());
   RunPlaybackChecks();
 
-  ASSERT_TRUE(backend_->Stop());
-  base::MessageLoop::current()->RunUntilIdle();
+  backend_->Stop();
+  base::RunLoop().RunUntilIdle();
 
   RunStoppedChecks();
 
@@ -904,7 +907,7 @@ TEST_F(AudioVideoPipelineDeviceTest, Mp3Playback) {
   ConfigureForAudioOnly("sfx.mp3");
   PauseBeforeEos();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, AacPlayback) {
@@ -914,7 +917,7 @@ TEST_F(AudioVideoPipelineDeviceTest, AacPlayback) {
   ConfigureForAudioOnly("sfx.m4a");
   PauseBeforeEos();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, VorbisPlayback) {
@@ -923,7 +926,7 @@ TEST_F(AudioVideoPipelineDeviceTest, VorbisPlayback) {
   set_sync_type(MediaPipelineDeviceParams::kModeIgnorePts);
   ConfigureForAudioOnly("sfx.ogg");
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 // TODO(kmackay) FFmpegDemuxForTest can't handle AC3 or EAC3.
@@ -935,7 +938,7 @@ TEST_F(AudioVideoPipelineDeviceTest, OpusPlayback_Optional) {
   ConfigureForAudioOnly("bear-opus.ogg");
   PauseBeforeEos();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, FlacPlayback_Optional) {
@@ -945,7 +948,7 @@ TEST_F(AudioVideoPipelineDeviceTest, FlacPlayback_Optional) {
   ConfigureForAudioOnly("bear.flac");
   PauseBeforeEos();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, H264Playback) {
@@ -955,7 +958,7 @@ TEST_F(AudioVideoPipelineDeviceTest, H264Playback) {
   ConfigureForVideoOnly("bear.h264", true /* raw_h264 */);
   PauseBeforeEos();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, WebmPlaybackWithPause) {
@@ -968,7 +971,7 @@ TEST_F(AudioVideoPipelineDeviceTest, WebmPlaybackWithPause) {
 
   ConfigureForVideoOnly("bear-640x360.webm", false /* raw_h264 */);
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, Vp8Playback) {
@@ -977,7 +980,7 @@ TEST_F(AudioVideoPipelineDeviceTest, Vp8Playback) {
   set_sync_type(MediaPipelineDeviceParams::kModeSyncPts);
   ConfigureForVideoOnly("bear-vp8a.webm", false /* raw_h264 */);
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, WebmPlayback) {
@@ -987,7 +990,7 @@ TEST_F(AudioVideoPipelineDeviceTest, WebmPlayback) {
   ConfigureForFile("bear-640x360.webm");
   PauseBeforeEos();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 // TODO(kmackay) FFmpegDemuxForTest can't handle HEVC or VP9.
@@ -1084,7 +1087,7 @@ TEST_F(AudioVideoPipelineDeviceTest, Mp3Playback_WithEffectsStreams) {
   PauseBeforeEos();
   AddEffectsStreams();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, AacPlayback_WithEffectsStreams) {
@@ -1095,7 +1098,7 @@ TEST_F(AudioVideoPipelineDeviceTest, AacPlayback_WithEffectsStreams) {
   PauseBeforeEos();
   AddEffectsStreams();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, VorbisPlayback_WithEffectsStreams) {
@@ -1105,7 +1108,7 @@ TEST_F(AudioVideoPipelineDeviceTest, VorbisPlayback_WithEffectsStreams) {
   ConfigureForAudioOnly("sfx.ogg");
   AddEffectsStreams();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 // TODO(kmackay) FFmpegDemuxForTest can't handle AC3 or EAC3.
@@ -1118,7 +1121,7 @@ TEST_F(AudioVideoPipelineDeviceTest, OpusPlayback_WithEffectsStreams_Optional) {
   PauseBeforeEos();
   AddEffectsStreams();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, FlacPlayback_WithEffectsStreams_Optional) {
@@ -1129,7 +1132,7 @@ TEST_F(AudioVideoPipelineDeviceTest, FlacPlayback_WithEffectsStreams_Optional) {
   PauseBeforeEos();
   AddEffectsStreams();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, H264Playback_WithEffectsStreams) {
@@ -1140,7 +1143,7 @@ TEST_F(AudioVideoPipelineDeviceTest, H264Playback_WithEffectsStreams) {
   PauseBeforeEos();
   AddEffectsStreams();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, WebmPlaybackWithPause_WithEffectsStreams) {
@@ -1154,7 +1157,7 @@ TEST_F(AudioVideoPipelineDeviceTest, WebmPlaybackWithPause_WithEffectsStreams) {
   ConfigureForVideoOnly("bear-640x360.webm", false /* raw_h264 */);
   AddEffectsStreams();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, Vp8Playback_WithEffectsStreams) {
@@ -1164,7 +1167,7 @@ TEST_F(AudioVideoPipelineDeviceTest, Vp8Playback_WithEffectsStreams) {
   ConfigureForVideoOnly("bear-vp8a.webm", false /* raw_h264 */);
   AddEffectsStreams();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(AudioVideoPipelineDeviceTest, WebmPlayback_WithEffectsStreams) {
@@ -1175,7 +1178,7 @@ TEST_F(AudioVideoPipelineDeviceTest, WebmPlayback_WithEffectsStreams) {
   PauseBeforeEos();
   AddEffectsStreams();
   Start();
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 }  // namespace media

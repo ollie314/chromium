@@ -4,10 +4,10 @@
 
 #include "chrome/browser/page_load_metrics/observers/google_captcha_observer.h"
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
-#include "components/page_load_metrics/browser/page_load_metrics_util.h"
-#include "components/page_load_metrics/common/page_load_timing.h"
+#include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
+#include "chrome/common/page_load_metrics/page_load_timing.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
 namespace google_captcha_observer {

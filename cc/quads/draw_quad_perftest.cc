@@ -48,7 +48,7 @@ class DrawQuadPerfTest : public testing::Test {
     SharedQuadState* new_shared_state(
         CreateSharedQuadState(render_pass_.get()));
     shared_state_ = render_pass_->CreateAndAppendSharedQuadState();
-    shared_state_->CopyFrom(new_shared_state);
+    *shared_state_ = *new_shared_state;
   }
 
   void CleanUpRenderPass() {
@@ -73,7 +73,7 @@ class DrawQuadPerfTest : public testing::Test {
       quad->SetNew(shared_state_, rect, rect, rect, resource_id,
                    premultiplied_alpha, uv_top_left, uv_bottom_right,
                    background_color, vertex_opacity, y_flipped,
-                   nearest_neighbor);
+                   nearest_neighbor, false);
       quads->push_back(quad);
     }
   }

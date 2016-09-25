@@ -7,9 +7,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/callback_helpers.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "public/platform/WebCommon.h"
 
 #include <memory>
@@ -41,12 +39,9 @@ public:
     {
     }
 
-    explicit WebFunction(PassOwnPtr<WTFFunction> c)
+    explicit WebFunction(std::unique_ptr<WTFFunction> c)
     {
-        // Make the base::Callback own the WTF::Function, allowing it to call the
-        // WTF::Function more than once but destroy it when the base::Callback is
-        // destroyed.
-        m_callback = base::Bind(&RunWTFFunction<R, Args...>, base::Owned(c.leakPtr()));
+        m_callback = convertToBaseCallback(std::move(c));
     }
 #endif
 
@@ -78,14 +73,6 @@ public:
 #endif
 
 private:
-#if BLINK_IMPLEMENTATION
-    template <typename RunR, typename... RunArgs>
-    static RunR RunWTFFunction(WTFFunction* c, RunArgs... args)
-    {
-        return (*c)(std::forward<RunArgs>(args)...);
-    }
-#endif
-
 #if DCHECK_IS_ON()
     bool m_haveClosure = true;
 #endif

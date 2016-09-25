@@ -6,10 +6,11 @@
 
 #include "wtf/Allocator.h"
 #include "wtf/ContainerAnnotations.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/allocator/PartitionAlloc.h"
 #include "wtf/allocator/Partitions.h"
 #include <algorithm>
+#include <memory>
 
 namespace blink {
 
@@ -170,13 +171,21 @@ void ContiguousContainerBase::swap(ContiguousContainerBase& other)
     std::swap(m_maxObjectSize, other.m_maxObjectSize);
 }
 
+void ContiguousContainerBase::shrinkToFit()
+{
+    while (m_endIndex < m_buffers.size() - 1) {
+        DCHECK(m_buffers.last()->isEmpty());
+        m_buffers.removeLast();
+    }
+}
+
 ContiguousContainerBase::Buffer*
 ContiguousContainerBase::allocateNewBufferForNextAllocation(size_t bufferSize, const char* typeName)
 {
     ASSERT(m_buffers.isEmpty() || m_endIndex == m_buffers.size() - 1);
-    OwnPtr<Buffer> newBuffer = adoptPtr(new Buffer(bufferSize, typeName));
+    std::unique_ptr<Buffer> newBuffer = wrapUnique(new Buffer(bufferSize, typeName));
     Buffer* bufferToReturn = newBuffer.get();
-    m_buffers.append(newBuffer.release());
+    m_buffers.append(std::move(newBuffer));
     m_endIndex = m_buffers.size() - 1;
     return bufferToReturn;
 }

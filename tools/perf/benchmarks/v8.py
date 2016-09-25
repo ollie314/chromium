@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import os
-import shlex
 
 from core import path_util
 from core import perf_benchmark
@@ -15,20 +14,17 @@ from measurements import v8_gc_times
 import page_sets
 from telemetry import benchmark
 from telemetry import story
-from telemetry.timeline import tracing_category_filter
+from telemetry.timeline import chrome_trace_category_filter
 from telemetry.web_perf import timeline_based_measurement
-from telemetry.web_perf.metrics import v8_gc_latency
-from telemetry.web_perf.metrics import v8_execution
-from telemetry.web_perf.metrics import smoothness
-from telemetry.web_perf.metrics import memory_timeline
 
 
 def CreateV8TimelineBasedMeasurementOptions():
-  category_filter = tracing_category_filter.CreateMinimalOverheadFilter()
+  category_filter = chrome_trace_category_filter.ChromeTraceCategoryFilter()
   category_filter.AddIncludedCategory('v8')
   category_filter.AddIncludedCategory('blink.console')
+  category_filter.AddDisabledByDefault('disabled-by-default-v8.compile')
   options = timeline_based_measurement.Options(category_filter)
-  options.SetTimelineBasedMetric('executionMetric')
+  options.SetTimelineBasedMetrics(['executionMetric'])
   return options
 
 
@@ -85,52 +81,34 @@ class _InfiniteScrollBenchmark(perf_benchmark.PerfBenchmark):
   """
 
   def SetExtraBrowserOptions(self, options):
-    existing_js_flags = []
-    for extra_arg in options.extra_browser_args:
-      if extra_arg.startswith('--js-flags='):
-        existing_js_flags.extend(shlex.split(extra_arg[len('--js-flags='):]))
     options.AppendExtraBrowserArgs([
         # TODO(perezju): Temporary workaround to disable periodic memory dumps.
         # See: http://crbug.com/513692
         '--enable-memory-benchmarking',
         # Disable push notifications for Facebook.
         '--disable-notifications',
-        # This overrides any existing --js-flags, hence we have to include the
-        # previous flags as well.
-        '--js-flags=--heap-growing-percent=10 %s' %
-          (' '.join(existing_js_flags))
     ])
+    v8_helper.AppendJSFlags(options, '--heap-growing-percent=10')
 
   def CreateTimelineBasedMeasurementOptions(self):
     v8_categories = [
-        'blink.console', 'renderer.scheduler', 'v8', 'webkit.console']
+        'blink.console', 'disabled-by-default-v8.gc',
+        'renderer.scheduler', 'v8', 'webkit.console']
     smoothness_categories = [
         'webkit.console', 'blink.console', 'benchmark', 'trace_event_overhead']
-    categories = list(set(v8_categories + smoothness_categories))
-    memory_categories = 'blink.console,disabled-by-default-memory-infra'
-    category_filter = tracing_category_filter.TracingCategoryFilter(
-        memory_categories)
-    for category in categories:
-      category_filter.AddIncludedCategory(category)
+    memory_categories = ['blink.console', 'disabled-by-default-memory-infra']
+    category_filter = chrome_trace_category_filter.ChromeTraceCategoryFilter(
+        ','.join(['-*'] + v8_categories +
+                 smoothness_categories + memory_categories))
     options = timeline_based_measurement.Options(category_filter)
-    options.SetLegacyTimelineBasedMetrics([v8_gc_latency.V8GCLatency(),
-                                     v8_execution.V8ExecutionMetric(),
-                                     smoothness.SmoothnessMetric(),
-                                     memory_timeline.MemoryTimelineMetric()])
+    # TODO(ulan): Add frame time discrepancy once it is ported to TBMv2,
+    # see crbug.com/606841.
+    options.SetTimelineBasedMetrics(['v8AndMemoryMetrics'])
     return options
 
   @classmethod
   def ValueCanBeAddedPredicate(cls, value, _):
-    if value.tir_label in ['Load', 'Wait']:
-      return (value.name.startswith('v8_') and not
-              value.name.startswith('v8_gc'))
-    if value.tir_label in ['Begin', 'End']:
-      return (value.name.startswith('memory_') and
-              'v8_renderer' in value.name) or \
-             (value.name.startswith('v8_') and not
-              value.name.startswith('v8_gc'))
-    else:
-      return value.tir_label == 'Scrolling'
+    return 'v8' in value.name
 
   @classmethod
   def ShouldTearDownStateAfterEachStoryRun(cls):
@@ -147,6 +125,12 @@ class V8TodoMVC(perf_benchmark.PerfBenchmark):
   @classmethod
   def Name(cls):
     return 'v8.todomvc'
+
+  @classmethod
+  def ShouldDisable(cls, possible_browser):
+    # This benchmark is flaky on Samsung Galaxy S5s.
+    # http://crbug.com/644826
+    return possible_browser.platform.GetDeviceTypeName() == 'SM-G900H'
 
   @classmethod
   def ShouldTearDownStateAfterEachStoryRun(cls):
@@ -180,7 +164,7 @@ class V8InfiniteScroll(_InfiniteScrollBenchmark):
 
   @classmethod
   def Name(cls):
-    return 'v8.infinite_scroll'
+    return 'v8.infinite_scroll_tbmv2'
 
 
 # Disabled on reference builds because they don't support the new
@@ -195,7 +179,7 @@ class V8InfiniteScrollIgnition(V8InfiniteScroll):
 
   @classmethod
   def Name(cls):
-    return 'v8.infinite_scroll-ignition'
+    return 'v8.infinite_scroll-ignition_tbmv2'
 
 
 @benchmark.Enabled('android')
@@ -208,7 +192,7 @@ class V8MobileInfiniteScroll(_InfiniteScrollBenchmark):
 
   @classmethod
   def Name(cls):
-    return 'v8.mobile_infinite_scroll'
+    return 'v8.mobile_infinite_scroll_tbmv2'
 
   @classmethod
   def ShouldDisable(cls, possible_browser):  # http://crbug.com/597656
@@ -218,6 +202,8 @@ class V8MobileInfiniteScroll(_InfiniteScrollBenchmark):
 
 class V8Adword(perf_benchmark.PerfBenchmark):
   """Measures V8 Execution metrics on the Adword page."""
+
+  options = {'pageset_repeat': 3}
 
   def CreateTimelineBasedMeasurementOptions(self):
     return CreateV8TimelineBasedMeasurementOptions()
@@ -240,7 +226,13 @@ class V8Adword(perf_benchmark.PerfBenchmark):
 
   @classmethod
   def ShouldDisable(cls, possible_browser):
-    return cls.IsSvelte(possible_browser) # http://crbug.com/596556
+    if cls.IsSvelte(possible_browser): # http://crbug.com/596556
+      return True
+    # http://crbug.com/623576
+    if (possible_browser.platform.GetDeviceTypeName() == 'Nexus 5' or
+        possible_browser.platform.GetDeviceTypeName() == 'Nexus 7'):
+      return True
+    return False
 
   @classmethod
   def ShouldTearDownStateAfterEachStoryRun(cls):

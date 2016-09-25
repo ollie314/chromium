@@ -11,16 +11,16 @@ WebInspector.HeapProfilerModel = function(target)
     this._heapProfilerAgent = target.heapProfilerAgent();
 }
 
+/** @enum {symbol} */
 WebInspector.HeapProfilerModel.Events = {
-    HeapStatsUpdate: "HeapStatsUpdate",
-    LastSeenObjectId: "LastSeenObjectId",
-    AddHeapSnapshotChunk: "AddHeapSnapshotChunk",
-    ReportHeapSnapshotProgress: "ReportHeapSnapshotProgress",
-    ResetProfiles: "ResetProfiles"
+    HeapStatsUpdate: Symbol("HeapStatsUpdate"),
+    LastSeenObjectId: Symbol("LastSeenObjectId"),
+    AddHeapSnapshotChunk: Symbol("AddHeapSnapshotChunk"),
+    ReportHeapSnapshotProgress: Symbol("ReportHeapSnapshotProgress"),
+    ResetProfiles: Symbol("ResetProfiles")
 }
 
 WebInspector.HeapProfilerModel.prototype = {
-
     enable: function()
     {
         if (this._enabled)
@@ -28,6 +28,23 @@ WebInspector.HeapProfilerModel.prototype = {
 
         this._enabled = true;
         this._heapProfilerAgent.enable();
+    },
+
+    startSampling: function()
+    {
+        var defaultSamplingIntervalInBytes = 16384;
+        this._heapProfilerAgent.startSampling(defaultSamplingIntervalInBytes);
+    },
+
+    /**
+     * @return {!Promise.<?ProfilerAgent.Profile>}
+     */
+    stopSampling: function()
+    {
+        this._isRecording = false;
+        var currentProfile = null;
+        return this._heapProfilerAgent.stopSampling((error, profile) => { currentProfile = !error ? profile : null; })
+            .then(() => currentProfile);
     },
 
     /**

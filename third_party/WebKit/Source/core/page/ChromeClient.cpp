@@ -36,7 +36,7 @@
 
 namespace blink {
 
-void ChromeClient::setWindowRectWithAdjustment(const IntRect& pendingRect)
+void ChromeClient::setWindowRectWithAdjustment(const IntRect& pendingRect, LocalFrame& frame)
 {
     IntRect screen = screenInfo().availableRect;
     IntRect window = pendingRect;
@@ -52,7 +52,7 @@ void ChromeClient::setWindowRectWithAdjustment(const IntRect& pendingRect)
     // Constrain the window position within the valid screen area.
     window.setX(std::max(screen.x(), std::min(window.x(), screen.maxX() - window.width())));
     window.setY(std::max(screen.y(), std::min(window.y(), screen.maxY() - window.height())));
-    setWindowRect(window);
+    setWindowRect(window, frame);
 }
 
 bool ChromeClient::canOpenModalIfDuringPageDismissal(Frame* mainFrame, ChromeClient::DialogType dialog, const String& message)
@@ -83,10 +83,9 @@ static bool openJavaScriptDialog(LocalFrame* frame, const String& message, Chrom
     // otherwise cause the load to continue while we're in the middle of
     // executing JavaScript.
     ScopedPageLoadDeferrer deferrer;
-
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willRunJavaScriptDialog(frame, message, dialogType);
+    InspectorInstrumentation::willRunJavaScriptDialog(frame, message, dialogType);
     bool result = delegate();
-    InspectorInstrumentation::didRunJavaScriptDialog(cookie, result);
+    InspectorInstrumentation::didRunJavaScriptDialog(frame, result);
     return result;
 }
 
@@ -140,14 +139,9 @@ void ChromeClient::mouseDidMoveOverElement(const HitTestResult& result)
 
 void ChromeClient::setToolTip(const HitTestResult& result)
 {
-    // First priority is a potential toolTip representing a spelling or grammar
-    // error.
+    // First priority is a tooltip for element with "title" attribute.
     TextDirection toolTipDirection;
-    String toolTip = result.spellingToolTip(toolTipDirection);
-
-    // Next we'll consider a tooltip for element with "title" attribute.
-    if (toolTip.isEmpty())
-        toolTip = result.title(toolTipDirection);
+    String toolTip = result.title(toolTipDirection);
 
     // Lastly, some elements provide default tooltip strings.  e.g. <input
     // type="file" multiple> shows a tooltip for the selected filenames.

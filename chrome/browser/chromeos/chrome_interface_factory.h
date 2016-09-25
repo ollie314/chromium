@@ -5,34 +5,26 @@
 #ifndef CHROME_BROWSER_CHROMEOS_CHROME_INTERFACE_FACTORY_H_
 #define CHROME_BROWSER_CHROMEOS_CHROME_INTERFACE_FACTORY_H_
 
-#include "content/public/common/mojo_shell_connection.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/shell/public/cpp/interface_factory.h"
-#include "ui/keyboard/keyboard.mojom.h"
-
-class KeyboardUIService;
+#include "base/macros.h"
+#include "base/memory/ref_counted.h"
+#include "base/single_thread_task_runner.h"
+#include "content/public/common/connection_filter.h"
 
 namespace chromeos {
 
 // InterfaceFactory for creating all services provided by chrome.
-class ChromeInterfaceFactory
-    : public content::MojoShellConnection::Listener,
-      public shell::InterfaceFactory<keyboard::mojom::Keyboard> {
+class ChromeInterfaceFactory : public content::ConnectionFilter {
  public:
   ChromeInterfaceFactory();
   ~ChromeInterfaceFactory() override;
 
  private:
-  // content::MojoShellConnection::Listener:
-  bool AcceptConnection(shell::Connection* connection) override;
+  // content::ConnectionFilter:
+  bool OnConnect(const shell::Identity& remote_identity,
+                 shell::InterfaceRegistry* registry,
+                 shell::Connector* connector) override;
 
-  // shell::InterfaceFactory<keyboard::Keyboard>:
-  void Create(
-      shell::Connection* connection,
-      mojo::InterfaceRequest<keyboard::mojom::Keyboard> request) override;
-
-  std::unique_ptr<KeyboardUIService> keyboard_ui_service_;
-  mojo::BindingSet<keyboard::mojom::Keyboard> keyboard_bindings_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeInterfaceFactory);
 };

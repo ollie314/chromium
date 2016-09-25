@@ -36,8 +36,7 @@
 #include "platform/WebThreadSupportingGC.h"
 #include "wtf/Allocator.h"
 #include "wtf/Functional.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -50,7 +49,7 @@ public:
     // It is an error to call shared() before init() or after shutdown();
     static HTMLParserThread* shared();
 
-    void postTask(PassOwnPtr<CrossThreadClosure>);
+    void postTask(std::unique_ptr<CrossThreadClosure>);
 
 private:
     HTMLParserThread();
@@ -58,7 +57,7 @@ private:
     void setupHTMLParserThread();
     void cleanupHTMLParserThread(WaitableEvent*);
 
-    OwnPtr<WebThreadSupportingGC> m_thread;
+    std::unique_ptr<WebThreadSupportingGC> m_thread;
 };
 
 } // namespace blink

@@ -9,10 +9,11 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/extension_install_prompt_show_params.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/permissions_updater.h"
@@ -20,6 +21,8 @@
 #include "chrome/browser/ui/extensions/extension_install_ui_factory.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/extension_prefs.h"
@@ -38,8 +41,6 @@
 #include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_types.h"
@@ -101,7 +102,7 @@ static const int kAcceptButtonIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
     IDS_EXTENSION_PROMPT_LAUNCH_BUTTON,
     0,  // Remote installs use different strings for extensions/apps.
     0,  // Repairs use different strings for extensions/apps.
-    0,  // Delegated installs use different strings for extensions/apps/themes.
+    IDS_EXTENSION_PROMPT_INSTALL_BUTTON,
     IDS_EXTENSION_PROMPT_INSTALL_BUTTON,
 };
 static const int kAbortButtonIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
@@ -154,7 +155,7 @@ bool AutoConfirmPrompt(ExtensionInstallPrompt::DoneCallback* callback) {
     // the real implementations it's highly likely the message loop will be
     // pumping a few times before the user clicks accept or cancel.
     case extensions::ScopedTestDialogAutoConfirm::ACCEPT:
-      base::MessageLoop::current()->PostTask(
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE, base::Bind(base::ResetAndReturn(callback),
                                 ExtensionInstallPrompt::Result::ACCEPTED));
       return true;
@@ -326,8 +327,7 @@ int ExtensionInstallPrompt::Prompt::GetDialogButtons() const {
 base::string16 ExtensionInstallPrompt::Prompt::GetAcceptButtonLabel() const {
   int id = kAcceptButtonIds[type_];
 
-  if (type_ == INSTALL_PROMPT || type_ == INLINE_INSTALL_PROMPT ||
-      type_ == DELEGATED_PERMISSIONS_PROMPT) {
+  if (type_ == INSTALL_PROMPT || type_ == INLINE_INSTALL_PROMPT) {
     if (extension_->is_app())
       id = IDS_EXTENSION_INSTALL_PROMPT_ACCEPT_BUTTON_APP;
     else if (extension_->is_theme())
@@ -599,17 +599,13 @@ scoped_refptr<Extension>
   }
 
   return Extension::Create(
-      base::FilePath(),
-      Manifest::INTERNAL,
-      localized_manifest.get() ? *localized_manifest.get() : *manifest,
-      flags,
-      id,
+      base::FilePath(), Manifest::INTERNAL,
+      localized_manifest.get() ? *localized_manifest : *manifest, flags, id,
       error);
 }
 
 ExtensionInstallPrompt::ExtensionInstallPrompt(content::WebContents* contents)
     : profile_(ProfileForWebContents(contents)),
-      ui_loop_(base::MessageLoop::current()),
       extension_(NULL),
       install_ui_(extensions::CreateExtensionInstallUI(
           ProfileForWebContents(contents))),
@@ -621,7 +617,6 @@ ExtensionInstallPrompt::ExtensionInstallPrompt(content::WebContents* contents)
 ExtensionInstallPrompt::ExtensionInstallPrompt(Profile* profile,
                                                gfx::NativeWindow native_window)
     : profile_(profile),
-      ui_loop_(base::MessageLoop::current()),
       extension_(NULL),
       install_ui_(extensions::CreateExtensionInstallUI(profile)),
       show_params_(
@@ -639,8 +634,7 @@ void ExtensionInstallPrompt::ShowDialog(
     const SkBitmap* icon,
     const ShowDialogCallback& show_dialog_callback) {
   ShowDialog(done_callback, extension, icon,
-             base::WrapUnique(new Prompt(INSTALL_PROMPT)),
-             show_dialog_callback);
+             base::MakeUnique<Prompt>(INSTALL_PROMPT), show_dialog_callback);
 }
 
 void ExtensionInstallPrompt::ShowDialog(
@@ -660,7 +654,7 @@ void ExtensionInstallPrompt::ShowDialog(
     std::unique_ptr<Prompt> prompt,
     std::unique_ptr<const PermissionSet> custom_permissions,
     const ShowDialogCallback& show_dialog_callback) {
-  DCHECK(ui_loop_ == base::MessageLoop::current());
+  DCHECK(ui_thread_checker_.CalledOnValidThread());
   DCHECK(prompt);
   extension_ = extension;
   done_callback_ = done_callback;

@@ -5,6 +5,8 @@
 package org.chromium.webview_shell;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
@@ -21,12 +23,14 @@ import android.os.Bundle;
 import android.provider.Browser;
 import android.util.SparseArray;
 
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.View.OnKeyListener;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 
 import android.webkit.GeolocationPermissions;
@@ -37,6 +41,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.PopupMenu;
 import android.widget.TextView;
 
@@ -88,6 +93,7 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
 
     private EditText mUrlBar;
     private WebView mWebView;
+    private View mFullscreenView;
     private String mWebViewVersion;
 
     // Each time we make a request, store it here with an int key. onRequestPermissionsResult will
@@ -97,6 +103,7 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
 
     // Work around our wonky API by wrapping a geo permission prompt inside a regular
     // PermissionRequest.
+    @SuppressLint("NewApi") // GeoPermissionRequest class requires API level 21.
     private static class GeoPermissionRequest extends PermissionRequest {
         private String mOrigin;
         private GeolocationPermissions.Callback mCallback;
@@ -127,6 +134,7 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
 
     // For simplicity, also treat the read access needed for file:// URLs as a regular
     // PermissionRequest.
+    @SuppressLint("NewApi") // FilePermissionRequest class requires API level 21.
     private class FilePermissionRequest extends PermissionRequest {
         private String mOrigin;
 
@@ -175,10 +183,45 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
         createAndInitializeWebView();
 
         String url = getUrlFromIntent(getIntent());
-        if (url != null) {
-            setUrlBarText(url);
-            setUrlFail(false);
-            loadUrlFromUrlBar(mUrlBar);
+        if (url == null) {
+            mWebView.restoreState(savedInstanceState);
+            url = mWebView.getUrl();
+            if (url != null) {
+                // If we have restored state, and that state includes
+                // a loaded URL, we reload. This allows us to keep the
+                // scroll offset, and also doesn't add an additional
+                // navigation history entry.
+                setUrlBarText(url);
+                // The immediately previous loadUrlFromurlbar must
+                // have got as far as calling loadUrl, so there is no
+                // URI parsing error at this point.
+                setUrlFail(false);
+                hideKeyboard(mUrlBar);
+                mWebView.reload();
+                mWebView.requestFocus();
+                return;
+            }
+            // Make sure to load a blank page to make it immediately inspectable with
+            // chrome://inspect.
+            url = "about:blank";
+        }
+        setUrlBarText(url);
+        setUrlFail(false);
+        loadUrlFromUrlBar(mUrlBar);
+    }
+
+    @Override
+    public void onSaveInstanceState(Bundle savedInstanceState) {
+        // Deliberately don't catch TransactionTooLargeException here.
+        mWebView.saveState(savedInstanceState);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (mWebView.canGoBack()) {
+            mWebView.goBack();
+        } else {
+            super.onBackPressed();
         }
     }
 
@@ -220,6 +263,7 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
                 return startBrowsingIntent(WebViewBrowserActivity.this, url);
             }
 
+            @SuppressWarnings("deprecation") // because we support api level 19 and up.
             @Override
             public void onReceivedError(WebView view, int errorCode, String description,
                     String failingUrl) {
@@ -237,12 +281,41 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin,
                     GeolocationPermissions.Callback callback) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+                    // Pre Lollipop versions (< api level 21) do not have PermissionRequest,
+                    // hence grant here immediately.
+                    callback.invoke(origin, true, false);
+                    return;
+                }
+
                 onPermissionRequest(new GeoPermissionRequest(origin, callback));
             }
 
             @Override
             public void onPermissionRequest(PermissionRequest request) {
                 WebViewBrowserActivity.this.requestPermissionsForPage(request);
+            }
+
+            @Override
+            public void onShowCustomView(View view, WebChromeClient.CustomViewCallback callback) {
+                if (mFullscreenView != null) {
+                    ((ViewGroup) mFullscreenView.getParent()).removeView(mFullscreenView);
+                }
+                mFullscreenView = view;
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                getWindow().addContentView(mFullscreenView,
+                        new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
+            }
+
+            @Override
+            public void onHideCustomView() {
+                if (mFullscreenView == null) {
+                    return;
+                }
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                ((ViewGroup) mFullscreenView.getParent()).removeView(mFullscreenView);
+                mFullscreenView = null;
             }
         });
 
@@ -254,6 +327,7 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
 
     // WebKit permissions which can be granted because either they have no associated Android
     // permission or the associated Android permission has been granted
+    @TargetApi(Build.VERSION_CODES.M)
     private boolean canGrant(String webkitPermission) {
         String androidPermission = sPermissions.get(webkitPermission);
         if (androidPermission == NO_ANDROID_PERMISSION) {
@@ -262,6 +336,7 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
         return PackageManager.PERMISSION_GRANTED == checkSelfPermission(androidPermission);
     }
 
+    @SuppressLint("NewApi") // PermissionRequest#deny requires API level 21.
     private void requestPermissionsForPage(PermissionRequest request) {
         // Deny any unrecognized permissions.
         for (String webkitPermission : request.getResources()) {
@@ -307,6 +382,7 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
     }
 
     @Override
+    @SuppressLint("NewApi") // PermissionRequest#deny requires API level 21.
     public void onRequestPermissionsResult(int requestCode,
             String permissions[], int[] grantResults) {
         // Verify that we can now grant all the requested permissions. Note that although grant()
@@ -380,7 +456,6 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
         // configure local storage apis and their database paths.
         settings.setAppCachePath(getDir("appcache", 0).getPath());
         settings.setGeolocationDatabasePath(getDir("geolocation", 0).getPath());
-        settings.setDatabasePath(getDir("databases", 0).getPath());
 
         settings.setAppCacheEnabled(true);
         settings.setGeolocationEnabled(true);
@@ -407,7 +482,7 @@ public class WebViewBrowserActivity extends Activity implements PopupMenu.OnMenu
                 .setPositiveButton("OK", null)
                 .create();
         dialog.show();
-        dialog.getWindow().setLayout(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT);
+        dialog.getWindow().setLayout(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
     }
 
     // Returns true is a method has no arguments and returns either a boolean or a String.

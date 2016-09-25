@@ -11,8 +11,8 @@
 #include "base/memory/shared_memory.h"
 #include "base/time/time.h"
 #include "content/renderer/media/media_stream_audio_source.h"
-#include "media/audio/audio_parameters.h"
 #include "media/base/audio_fifo.h"
+#include "media/base/audio_parameters.h"
 
 namespace content {
 
@@ -162,7 +162,7 @@ void SpeechRecognitionAudioSink::OnData(
 }
 
 double SpeechRecognitionAudioSink::ProvideInput(media::AudioBus* audio_bus,
-                                                base::TimeDelta buffer_delay) {
+                                                uint32_t frames_delayed) {
   DCHECK(capture_thread_checker_.CalledOnValidThread());
   if (fifo_->frames() >= audio_bus->frames())
     fifo_->Consume(audio_bus, 0, audio_bus->frames());

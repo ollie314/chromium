@@ -22,6 +22,7 @@
 #define StyleElement_h
 
 #include "core/css/CSSStyleSheet.h"
+#include "core/dom/StyleEngineContext.h"
 #include "wtf/text/TextPosition.h"
 
 namespace blink {
@@ -30,7 +31,7 @@ class ContainerNode;
 class Document;
 class Element;
 
-class StyleElement : public GarbageCollectedMixin {
+class CORE_EXPORT StyleElement : public GarbageCollectedMixin {
 public:
     StyleElement(Document*, bool createdByParser);
     virtual ~StyleElement();
@@ -51,24 +52,24 @@ protected:
     bool sheetLoaded(Document&);
     void startLoadingDynamicSheet(Document&);
 
-    void insertedInto(Element*, ContainerNode* insertionPoint);
-    void removedFrom(Element*, ContainerNode* insertionPoint);
-    void clearDocumentData(Document&, Element*);
-    ProcessingResult processStyleSheet(Document&, Element*);
-    ProcessingResult childrenChanged(Element*);
-    ProcessingResult finishParsingChildren(Element*);
+    void insertedInto(const Element&, ContainerNode* insertionPoint);
+    void removedFrom(Element&, ContainerNode* insertionPoint);
+    ProcessingResult processStyleSheet(Document&, Element&);
+    ProcessingResult childrenChanged(Element&);
+    ProcessingResult finishParsingChildren(Element&);
 
     Member<CSSStyleSheet> m_sheet;
 
 private:
-    ProcessingResult createSheet(Element*, const String& text = String());
-    ProcessingResult process(Element*);
-    void clearSheet(Element* ownerElement = 0);
+    ProcessingResult createSheet(Element&, const String& text = String());
+    ProcessingResult process(Element&);
+    void clearSheet(Element& ownerElement);
 
     bool m_createdByParser : 1;
     bool m_loading : 1;
     bool m_registeredAsCandidate : 1;
     TextPosition m_startPosition;
+    StyleEngineContext m_styleEngineContext;
 };
 
 } // namespace blink

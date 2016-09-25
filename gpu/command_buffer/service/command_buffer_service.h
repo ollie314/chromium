@@ -53,7 +53,6 @@ class GPU_EXPORT CommandBufferService : public CommandBufferServiceBase {
   ~CommandBufferService() override;
 
   // CommandBuffer implementation:
-  bool Initialize() override;
   State GetLastState() override;
   int32_t GetLastToken() override;
   void Flush(int32_t put_offset) override;
@@ -96,6 +95,7 @@ class GPU_EXPORT CommandBufferService : public CommandBufferServiceBase {
   // to identify it in the command buffer.
   bool RegisterTransferBuffer(int32_t id,
                               std::unique_ptr<BufferBacking> buffer);
+  scoped_refptr<Buffer> CreateTransferBufferWithId(size_t size, int32_t id);
 
  private:
   int32_t ring_buffer_id_;

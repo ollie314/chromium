@@ -15,6 +15,7 @@
 #include "base/strings/stringprintf.h"
 #include "net/cert/ct_serialization.h"
 #include "net/cert/ct_verify_result.h"
+#include "net/cert/merkle_tree_leaf.h"
 #include "net/cert/signed_tree_head.h"
 #include "net/cert/x509_certificate.h"
 
@@ -78,6 +79,8 @@ const char kDefaultDerTbsCert[] =
     "41310e300c0603550408130557616c65733110300e060355040713074572772057656e8201"
     "0030090603551d1304023000";
 
+const char kDefaultExtensions[] = "666f6f626172"; // "foobar"
+
 const char kTestDigitallySigned[] =
     "0403004730450220606e10ae5c2d5a1b0aed49dc4937f48de71a4e9784e9c208dfbfe9ef53"
     "6cf7f2022100beb29c72d7d06d61d06bdb38a069469aa86fe12e18bb7cc45689a2c0187ef5"
@@ -96,6 +99,8 @@ const char kEcP256PublicKey[] =
 
 const char kTestKeyId[] =
     "df1c2ec11500945247a96168325ddc5c7959e8f7c6d388fc002e0bbd3f74d764";
+
+const int64_t kTestTimestamp = INT64_C(1396877277237);
 
 const char kTestSCTSignatureData[] =
     "30450220606e10ae5c2d5a1b0aed49dc4937f48de71a4e9784e9c208dfbfe9ef536cf7f202"
@@ -155,7 +160,6 @@ const char kFakeOCSPResponseIssuerCert[] =
     "3ea1e11df2ccb357a5fed5220f9c6239e8946b9b7517707631d51ab996833d58a022cff5a6"
     "2169ac9258ec110efee78da9ab4a641e3b3c9ee5e8bd291460";
 
-
 const char kFakeOCSPExtensionValue[] = "74657374";  // "test"
 
 // For the sample STH
@@ -166,13 +170,18 @@ const char kSampleSTHTreeHeadSignature[] =
     "6c7a20022100e38464f3c0fd066257b982074f7ac87655e0c8f714768a050b4be9a7b441cb"
     "d3";
 size_t kSampleSTHTreeSize = 21u;
-int64_t kSampleSTHTimestamp = INT64_C(1396877277237);
 
 }  // namespace
 
 void GetX509CertLogEntry(LogEntry* entry) {
   entry->type = ct::LogEntry::LOG_ENTRY_TYPE_X509;
   entry->leaf_certificate = HexToBytes(kDefaultDerCert);
+}
+
+void GetX509CertTreeLeaf(MerkleTreeLeaf* tree_leaf) {
+  tree_leaf->timestamp = base::Time::FromJsTime(kTestTimestamp);
+  GetX509CertLogEntry(&tree_leaf->log_entry);
+  tree_leaf->extensions = HexToBytes(kDefaultExtensions);
 }
 
 std::string GetDerEncodedX509Cert() { return HexToBytes(kDefaultDerCert); }
@@ -182,6 +191,12 @@ void GetPrecertLogEntry(LogEntry* entry) {
   std::string issuer_hash(HexToBytes(kDefaultIssuerKeyHash));
   memcpy(entry->issuer_key_hash.data, issuer_hash.data(), issuer_hash.size());
   entry->tbs_certificate = HexToBytes(kDefaultDerTbsCert);
+}
+
+void GetPrecertTreeLeaf(MerkleTreeLeaf* tree_leaf) {
+  tree_leaf->timestamp = base::Time::FromJsTime(kTestTimestamp);
+  GetPrecertLogEntry(&tree_leaf->log_entry);
+  tree_leaf->extensions = HexToBytes(kDefaultExtensions);
 }
 
 std::string GetTestDigitallySigned() {
@@ -204,7 +219,7 @@ void GetX509CertSCT(scoped_refptr<SignedCertificateTimestamp>* sct_ref) {
   CHECK(sct_ref != NULL);
   *sct_ref = new SignedCertificateTimestamp();
   SignedCertificateTimestamp *const sct(sct_ref->get());
-  sct->version = ct::SignedCertificateTimestamp::SCT_VERSION_1;
+  sct->version = ct::SignedCertificateTimestamp::V1;
   sct->log_id = HexToBytes(kTestKeyId);
   // Time the log issued a SCT for this certificate, which is
   // Fri Apr  5 10:04:16.089 2013
@@ -221,7 +236,7 @@ void GetPrecertSCT(scoped_refptr<SignedCertificateTimestamp>* sct_ref) {
   CHECK(sct_ref != NULL);
   *sct_ref = new SignedCertificateTimestamp();
   SignedCertificateTimestamp *const sct(sct_ref->get());
-  sct->version = ct::SignedCertificateTimestamp::SCT_VERSION_1;
+  sct->version = ct::SignedCertificateTimestamp::V1;
   sct->log_id = HexToBytes(kTestKeyId);
   // Time the log issued a SCT for this Precertificate, which is
   // Fri Apr  5 10:04:16.275 2013
@@ -258,10 +273,11 @@ std::string GetDerEncodedFakeOCSPResponseIssuerCert() {
 bool GetSampleSignedTreeHead(SignedTreeHead* sth) {
   sth->version = SignedTreeHead::V1;
   sth->timestamp = base::Time::UnixEpoch() +
-                   base::TimeDelta::FromMilliseconds(kSampleSTHTimestamp);
+                   base::TimeDelta::FromMilliseconds(kTestTimestamp);
   sth->tree_size = kSampleSTHTreeSize;
   std::string sha256_root_hash = GetSampleSTHSHA256RootHash();
   memcpy(sth->sha256_root_hash, sha256_root_hash.c_str(), kSthRootHashLength);
+  sth->log_id = GetTestPublicKeyId();
 
   return GetSampleSTHTreeHeadDecodedSignature(&(sth->signature));
 }
@@ -274,6 +290,7 @@ bool GetSampleEmptySignedTreeHead(SignedTreeHead* sth) {
   std::string empty_root_hash = HexToBytes(
       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
   memcpy(sth->sha256_root_hash, empty_root_hash.c_str(), kSthRootHashLength);
+  sth->log_id = GetTestPublicKeyId();
 
   std::string tree_head_signature = HexToBytes(
       "040300463044022046c26401de9416403da54762dc1f1687c38eafd791b15e484ab4c5f7"
@@ -289,6 +306,7 @@ bool GetBadEmptySignedTreeHead(SignedTreeHead* sth) {
                    base::TimeDelta::FromMilliseconds(INT64_C(1450870952897));
   sth->tree_size = 0;
   memset(sth->sha256_root_hash, 'f', kSthRootHashLength);
+  sth->log_id = GetTestPublicKeyId();
 
   std::string tree_head_signature = HexToBytes(
       "04030046304402207cab04c62dee5d1cbc95fec30cd8417313f71587b75f133ad2e6f324"
@@ -313,7 +331,7 @@ bool GetSampleSTHTreeHeadDecodedSignature(DigitallySigned* signature) {
 }
 
 std::string GetSampleSTHAsJson() {
-  return CreateSignedTreeHeadJsonString(kSampleSTHTreeSize, kSampleSTHTimestamp,
+  return CreateSignedTreeHeadJsonString(kSampleSTHTreeSize, kTestTimestamp,
                                         GetSampleSTHSHA256RootHash(),
                                         GetSampleSTHTreeHeadSignature());
 }
@@ -381,15 +399,19 @@ std::string GetSCTListWithInvalidSCT() {
 
 bool CheckForSingleVerifiedSCTInResult(const ct::CTVerifyResult& result,
                                        const std::string& log_description) {
-  return (result.verified_scts.size() == 1U) && result.invalid_scts.empty() &&
-         result.unknown_logs_scts.empty() &&
-         result.verified_scts[0]->log_description == log_description;
+  return (result.scts.size() == 1 &&
+          result.scts[0].status == ct::SCT_STATUS_OK &&
+          result.scts[0].sct->log_description == log_description);
 }
 
 bool CheckForSCTOrigin(const ct::CTVerifyResult& result,
                        ct::SignedCertificateTimestamp::Origin origin) {
-  return (result.verified_scts.size() > 0) &&
-         (result.verified_scts[0]->origin == origin);
+  for (const auto& sct_and_status : result.scts)
+    if (sct_and_status.status == SCT_STATUS_OK &&
+        sct_and_status.sct->origin == origin)
+      return true;
+
+  return false;
 }
 
 }  // namespace ct

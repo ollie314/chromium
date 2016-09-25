@@ -10,8 +10,8 @@
 #include <string>
 
 #include "base/macros.h"
-#include "net/quic/quic_protocol.h"
-#include "net/quic/quic_spdy_stream.h"
+#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_spdy_stream.h"
 #include "net/spdy/spdy_framer.h"
 
 namespace net {
@@ -31,6 +31,12 @@ class QuicSimpleServerStream : public QuicSpdyStream {
   // QuicSpdyStream
   void OnInitialHeadersComplete(bool fin, size_t frame_len) override;
   void OnTrailingHeadersComplete(bool fin, size_t frame_len) override;
+  void OnInitialHeadersComplete(bool fin,
+                                size_t frame_len,
+                                const QuicHeaderList& header_list) override;
+  void OnTrailingHeadersComplete(bool fin,
+                                 size_t frame_len,
+                                 const QuicHeaderList& header_list) override;
 
   // ReliableQuicStream implementation called by the sequencer when there is
   // data (or a FIN) to be read.
@@ -58,11 +64,11 @@ class QuicSimpleServerStream : public QuicSpdyStream {
   // for the body.
   void SendNotFoundResponse();
 
-  void SendHeadersAndBody(const SpdyHeaderBlock& response_headers,
+  void SendHeadersAndBody(SpdyHeaderBlock response_headers,
                           base::StringPiece body);
-  void SendHeadersAndBodyAndTrailers(const SpdyHeaderBlock& response_headers,
+  void SendHeadersAndBodyAndTrailers(SpdyHeaderBlock response_headers,
                                      base::StringPiece body,
-                                     const SpdyHeaderBlock& response_trailers);
+                                     SpdyHeaderBlock response_trailers);
 
   SpdyHeaderBlock* request_headers() { return &request_headers_; }
 

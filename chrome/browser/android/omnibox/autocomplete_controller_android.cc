@@ -30,8 +30,8 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/search/instant_search_prerenderer.h"
-#include "chrome/common/instant_types.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/search/instant_types.h"
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
@@ -60,7 +60,9 @@ using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF16;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertUTF16ToJavaString;
+using base::android::JavaParamRef;
 using base::android::JavaRef;
+using base::android::ScopedJavaLocalRef;
 using base::android::ToJavaIntArray;
 using bookmarks::BookmarkModel;
 using metrics::OmniboxEventProto;
@@ -92,7 +94,7 @@ class ZeroSuggestPrefetcher : public AutocompleteControllerDelegate {
 
 ZeroSuggestPrefetcher::ZeroSuggestPrefetcher(Profile* profile)
     : controller_(new AutocompleteController(
-          base::WrapUnique(new ChromeAutocompleteProviderClient(profile)),
+          base::MakeUnique<ChromeAutocompleteProviderClient>(profile),
           this,
           AutocompleteProvider::TYPE_ZERO_SUGGEST)) {
   // Creating an arbitrary fake_request_source to avoid passing in an invalid
@@ -177,7 +179,6 @@ void AutocompleteControllerAndroid::OnOmniboxFocused(
     const JavaParamRef<jobject>& obj,
     const JavaParamRef<jstring>& j_omnibox_text,
     const JavaParamRef<jstring>& j_current_url,
-    jboolean is_query_in_omnibox,
     jboolean focused_from_fakebox) {
   if (!autocomplete_controller_)
     return;
@@ -193,7 +194,7 @@ void AutocompleteControllerAndroid::OnOmniboxFocused(
 
   input_ = AutocompleteInput(
       omnibox_text, base::string16::npos, std::string(), current_url,
-      ClassifyPage(current_url, is_query_in_omnibox, focused_from_fakebox),
+      ClassifyPage(current_url, focused_from_fakebox),
       false, false, true, true, true,
       ChromeAutocompleteSchemeClassifier(profile_));
   autocomplete_controller_->Start(input_);
@@ -202,14 +203,14 @@ void AutocompleteControllerAndroid::OnOmniboxFocused(
 void AutocompleteControllerAndroid::Stop(JNIEnv* env,
                                          const JavaParamRef<jobject>& obj,
                                          bool clear_results) {
-  if (autocomplete_controller_ != NULL)
+  if (autocomplete_controller_ != nullptr)
     autocomplete_controller_->Stop(clear_results);
 }
 
 void AutocompleteControllerAndroid::ResetSession(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
-  if (autocomplete_controller_ != NULL)
+  if (autocomplete_controller_ != nullptr)
     autocomplete_controller_->ResetSession();
 }
 
@@ -218,7 +219,6 @@ void AutocompleteControllerAndroid::OnSuggestionSelected(
     const JavaParamRef<jobject>& obj,
     jint selected_index,
     const JavaParamRef<jstring>& j_current_url,
-    jboolean is_query_in_omnibox,
     jboolean focused_from_fakebox,
     jlong elapsed_time_since_first_modified,
     jint completed_length,
@@ -226,7 +226,7 @@ void AutocompleteControllerAndroid::OnSuggestionSelected(
   base::string16 url = ConvertJavaStringToUTF16(env, j_current_url);
   const GURL current_url = GURL(url);
   OmniboxEventProto::PageClassification current_page_classification =
-      ClassifyPage(current_url, is_query_in_omnibox, focused_from_fakebox);
+      ClassifyPage(current_url, focused_from_fakebox);
   const base::TimeTicks& now(base::TimeTicks::Now());
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(j_web_contents);
@@ -290,7 +290,7 @@ void AutocompleteControllerAndroid::Shutdown() {
   ScopedJavaLocalRef<jobject> java_bridge =
       weak_java_autocomplete_controller_android_.get(env);
   if (java_bridge.obj())
-    Java_AutocompleteController_notifyNativeDestroyed(env, java_bridge.obj());
+    Java_AutocompleteController_notifyNativeDestroyed(env, java_bridge);
 
   weak_java_autocomplete_controller_android_.reset();
 }
@@ -385,7 +385,7 @@ void AutocompleteControllerAndroid::NotifySuggestionsReceived(
     ScopedJavaLocalRef<jobject> j_omnibox_suggestion =
         BuildOmniboxSuggestion(env, autocomplete_result.match_at(i));
     Java_AutocompleteController_addOmniboxSuggestionToList(
-        env, suggestion_list_obj.obj(), j_omnibox_suggestion.obj());
+        env, suggestion_list_obj, j_omnibox_suggestion);
   }
 
   // Get the inline-autocomplete text.
@@ -399,16 +399,13 @@ void AutocompleteControllerAndroid::NotifySuggestionsReceived(
       ConvertUTF16ToJavaString(env, inline_autocomplete_text);
   jlong j_autocomplete_result =
       reinterpret_cast<intptr_t>(&(autocomplete_result));
-  Java_AutocompleteController_onSuggestionsReceived(env,
-                                                    java_bridge.obj(),
-                                                    suggestion_list_obj.obj(),
-                                                    inline_text.obj(),
-                                                    j_autocomplete_result);
+  Java_AutocompleteController_onSuggestionsReceived(
+      env, java_bridge, suggestion_list_obj, inline_text,
+      j_autocomplete_result);
 }
 
 OmniboxEventProto::PageClassification
 AutocompleteControllerAndroid::ClassifyPage(const GURL& gurl,
-                                            bool is_query_in_omnibox,
                                             bool focused_from_fakebox) const {
   if (!gurl.is_valid())
     return OmniboxEventProto::INVALID_SPEC;
@@ -431,9 +428,6 @@ AutocompleteControllerAndroid::ClassifyPage(const GURL& gurl,
 
   if (url == profile_->GetPrefs()->GetString(prefs::kHomePage))
     return OmniboxEventProto::HOME_PAGE;
-
-  if (is_query_in_omnibox)
-    return OmniboxEventProto::SEARCH_RESULT_PAGE_DOING_SEARCH_TERM_REPLACEMENT;
 
   bool is_search_url = TemplateURLServiceFactory::GetForProfile(profile_)->
       IsSearchResultsPageFromDefaultSearchProvider(gurl);
@@ -535,23 +529,16 @@ AutocompleteControllerAndroid::BuildOmniboxSuggestion(
       ConvertUTF16ToJavaString(env, match.fill_into_edit);
   ScopedJavaLocalRef<jstring> destination_url =
       ConvertUTF8ToJavaString(env, match.destination_url.spec());
-  BookmarkModel* bookmark_model = BookmarkModelFactory::GetForProfile(profile_);
+  BookmarkModel* bookmark_model =
+      BookmarkModelFactory::GetForBrowserContext(profile_);
   return Java_AutocompleteController_buildOmniboxSuggestion(
-      env,
-      match.type,
-      AutocompleteMatch::IsSearchType(match.type),
-      match.relevance,
-      match.transition,
-      jcontents.obj(),
-      ToJavaIntArray(env, contents_class_offsets).obj(),
-      ToJavaIntArray(env, contents_class_styles).obj(),
-      description.obj(),
-      ToJavaIntArray(env, description_class_offsets).obj(),
-      ToJavaIntArray(env, description_class_styles).obj(),
-      answer_contents.obj(),
-      answer_type.obj(),
-      fill_into_edit.obj(),
-      destination_url.obj(),
+      env, match.type, AutocompleteMatch::IsSearchType(match.type),
+      match.relevance, match.transition, jcontents,
+      ToJavaIntArray(env, contents_class_offsets),
+      ToJavaIntArray(env, contents_class_styles), description,
+      ToJavaIntArray(env, description_class_offsets),
+      ToJavaIntArray(env, description_class_styles), answer_contents,
+      answer_type, fill_into_edit, destination_url,
       bookmark_model && bookmark_model->IsBookmarked(match.destination_url),
       match.SupportsDeletion());
 }
@@ -570,8 +557,8 @@ AutocompleteControllerAndroid::GetTopSynchronousResult(
         obj,
         j_text,
         -1,
-        NULL,
-        NULL,
+        nullptr,
+        nullptr,
         prevent_inline_autocomplete,
         false,
         false,
@@ -612,7 +599,7 @@ static ScopedJavaLocalRef<jstring> QualifyPartialURLQuery(
       false,
       OmniboxEventProto::INVALID_SPEC,
       &match,
-      NULL);
+      nullptr);
   if (!match.destination_url.is_valid())
     return ScopedJavaLocalRef<jstring>();
 

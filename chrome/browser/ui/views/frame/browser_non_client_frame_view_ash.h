@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "ash/shell_observer.h"
+#include "ash/common/shell_observer.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
@@ -17,7 +17,6 @@ class TabIconView;
 class WebAppLeftHeaderView;
 
 namespace ash {
-class FrameBorderHitTestController;
 class FrameCaptionButton;
 class FrameCaptionButtonContainerView;
 class HeaderPainter;
@@ -65,6 +64,8 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   void ChildPreferredSizeChanged(views::View* child) override;
 
   // ash::ShellObserver:
+  void OnOverviewModeStarting() override;
+  void OnOverviewModeEnded() override;
   void OnMaximizeModeStarted() override;
   void OnMaximizeModeEnded() override;
 
@@ -74,7 +75,7 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
 
  protected:
   // BrowserNonClientFrameView:
-  void UpdateAvatar() override;
+  void UpdateProfileIcons() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest, WindowHeader);
@@ -84,13 +85,11 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
                            ImmersiveFullscreen);
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
                            ToggleMaximizeModeRelayout);
+  FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
+                           AvatarDisplayOnTeleportedWindow);
   FRIEND_TEST_ALL_PREFIXES(WebAppLeftHeaderViewTest, BackButton);
   FRIEND_TEST_ALL_PREFIXES(WebAppLeftHeaderViewTest, LocationIcon);
   friend class BrowserHeaderPainterAsh;
-
-  // views::NonClientFrameView:
-  bool DoesIntersectRect(const views::View* target,
-                         const gfx::Rect& rect) const override;
 
   // Distance between the left edge of the NonClientFrameView and the tab strip.
   int GetTabStripLeftInset() const;
@@ -114,8 +113,7 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   // accoutrements.
   bool UseWebAppHeaderStyle() const;
 
-  // Layout the avatar button.
-  void LayoutAvatar();
+  void LayoutProfileIndicatorIcon();
 
   // Returns true if there is anything to paint. Some fullscreen windows do not
   // need their frames painted.
@@ -135,10 +133,6 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
 
   // Helper class for painting the header.
   std::unique_ptr<ash::HeaderPainter> header_painter_;
-
-  // Updates the hittest bounds overrides based on the window show type.
-  std::unique_ptr<ash::FrameBorderHitTestController>
-      frame_border_hit_test_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserNonClientFrameViewAsh);
 };

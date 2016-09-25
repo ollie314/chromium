@@ -25,6 +25,7 @@
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/gpu_timing.h"
+#include "ui/gl/init/gl_factory.h"
 #include "ui/gl/scoped_make_current.h"
 
 #if defined(USE_OZONE)
@@ -183,13 +184,13 @@ class TextureUploadPerfTest : public testing::Test {
     // thread.
     base::MessageLoopForUI main_loop;
 #endif
-    static bool gl_initialized = gfx::GLSurface::InitializeOneOff();
+    static bool gl_initialized = gl::init::InitializeGLOneOff();
     DCHECK(gl_initialized);
     // Initialize an offscreen surface and a gl context.
-    surface_ = gfx::GLSurface::CreateOffscreenGLSurface(gfx::Size());
-    gl_context_ = gfx::GLContext::CreateGLContext(NULL,  // share_group
-                                                  surface_.get(),
-                                                  gfx::PreferIntegratedGpu);
+    surface_ = gl::init::CreateOffscreenGLSurface(gfx::Size());
+    gl_context_ =
+        gl::init::CreateGLContext(nullptr,  // share_group
+                                  surface_.get(), gl::PreferIntegratedGpu);
     ui::ScopedMakeCurrent smc(gl_context_.get(), surface_.get());
     glGenTextures(1, &color_texture_);
     glBindTexture(GL_TEXTURE_2D, color_texture_);
@@ -221,7 +222,7 @@ class TextureUploadPerfTest : public testing::Test {
     // used to draw a quad on the offscreen surface.
     vertex_shader_ = LoadShader(GL_VERTEX_SHADER, kVertexShader);
 
-    bool is_gles = gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2;
+    bool is_gles = gl_context_->GetVersionInfo()->is_es;
     fragment_shader_ = LoadShader(
         GL_FRAGMENT_SHADER,
         base::StringPrintf("%s%s", is_gles ? kShaderDefaultFloatPrecision : "",
@@ -379,7 +380,7 @@ class TextureUploadPerfTest : public testing::Test {
     CheckNoGlError("glReadPixels");
     EXPECT_TRUE(
         CompareBufferToRGBABuffer(format, size, pixels, pixels_rendered))
-        << "Format is: " << gfx::GLEnums::GetStringEnum(format);
+        << "Format is: " << gl::GLEnums::GetStringEnum(format);
 
     std::vector<Measurement> measurements;
     bool gpu_timer_errors =
@@ -407,7 +408,7 @@ class TextureUploadPerfTest : public testing::Test {
     for (int i = 0; i < kUploadPerfWarmupRuns + kUploadPerfTestRuns; ++i) {
       GenerateTextureData(size, GLFormatBytePerPixel(format), i + 1, &pixels);
       auto run = UploadAndDraw(texture_id, size, pixels, format, subimage);
-      if (i < kUploadPerfWarmupRuns || !run.size()) {
+      if (i < kUploadPerfWarmupRuns || run.empty()) {
         continue;
       }
       successful_runs++;
@@ -420,7 +421,7 @@ class TextureUploadPerfTest : public testing::Test {
     glDeleteTextures(1, &texture_id);
 
     std::string graph_name = base::StringPrintf(
-        "%d_%s", size.width(), gfx::GLEnums::GetStringEnum(format).c_str());
+        "%d_%s", size.width(), gl::GLEnums::GetStringEnum(format).c_str());
     if (subimage) {
       graph_name += "_sub";
     }
@@ -436,9 +437,9 @@ class TextureUploadPerfTest : public testing::Test {
   }
 
   const gfx::Size fbo_size_;  // for the fbo
-  scoped_refptr<gfx::GLContext> gl_context_;
-  scoped_refptr<gfx::GLSurface> surface_;
-  scoped_refptr<gfx::GPUTimingClient> gpu_timing_client_;
+  scoped_refptr<gl::GLContext> gl_context_;
+  scoped_refptr<gl::GLSurface> surface_;
+  scoped_refptr<gl::GPUTimingClient> gpu_timing_client_;
 
   GLuint color_texture_ = 0;
   GLuint framebuffer_object_ = 0;

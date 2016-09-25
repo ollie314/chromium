@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
@@ -25,6 +27,8 @@
 #include "chrome/browser/policy/schema_registry_service.h"
 #include "chrome/browser/policy/schema_registry_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/grit/policy_resources.h"
+#include "chrome/grit/policy_resources_map.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/browser/cloud/message_util.h"
 #include "components/policy/core/browser/configuration_policy_handler_list.h"
@@ -39,13 +43,11 @@
 #include "components/policy/core/common/remote_commands/remote_commands_service.h"
 #include "components/policy/core/common/schema.h"
 #include "components/policy/core/common/schema_map.h"
+#include "components/policy/policy_constants.h"
+#include "components/policy/proto/device_management_backend.pb.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
 #include "google_apis/gaia/gaia_auth_util.h"
-#include "grit/components_strings.h"
-#include "grit/policy_resources.h"
-#include "grit/policy_resources_map.h"
-#include "policy/policy_constants.h"
-#include "policy/proto/device_management_backend.pb.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
 
@@ -135,7 +137,7 @@ void GetStatusFromCore(const policy::CloudPolicyCore* core,
 
   base::TimeDelta refresh_interval =
       base::TimeDelta::FromMilliseconds(refresh_scheduler ?
-          refresh_scheduler->refresh_delay() :
+          refresh_scheduler->GetActualRefreshDelay() :
           policy::CloudPolicyRefreshScheduler::kDefaultRefreshDelayMs);
   base::Time last_refresh_time = refresh_scheduler ?
       refresh_scheduler->last_refresh() : base::Time();
@@ -172,7 +174,7 @@ std::unique_ptr<base::StringValue> DictionaryToJSONString(
   base::JSONWriter::WriteWithOptions(dict,
                                      base::JSONWriter::OPTIONS_PRETTY_PRINT,
                                      &json_string);
-  return base::WrapUnique(new base::StringValue(json_string));
+  return base::MakeUnique<base::StringValue>(json_string);
 }
 
 // Returns a copy of |value| with some values converted to a representation that
@@ -182,12 +184,12 @@ std::unique_ptr<base::Value> CopyAndConvert(const base::Value* value) {
   if (value->GetAsDictionary(&dict))
     return DictionaryToJSONString(*dict);
 
-  std::unique_ptr<base::Value> copy(value->DeepCopy());
+  std::unique_ptr<base::Value> copy = value->CreateDeepCopy();
   base::ListValue* list = NULL;
   if (copy->GetAsList(&list)) {
     for (size_t i = 0; i < list->GetSize(); ++i) {
       if (list->GetDictionary(i, &dict))
-        list->Set(i, DictionaryToJSONString(*dict).release());
+        list->Set(i, DictionaryToJSONString(*dict));
     }
   }
 
@@ -612,7 +614,7 @@ void PolicyUIHandler::SendPolicyNames() const {
   names.Set("extensionPolicyNames", extension_policy_names);
 #endif  // defined(ENABLE_EXTENSIONS)
 
-  web_ui()->CallJavascriptFunction("policy.Page.setPolicyNames", names);
+  web_ui()->CallJavascriptFunctionUnsafe("policy.Page.setPolicyNames", names);
 }
 
 void PolicyUIHandler::SendPolicyValues() const {
@@ -645,29 +647,29 @@ void PolicyUIHandler::SendPolicyValues() const {
   }
   all_policies.Set("extensionPolicies", extension_values);
 #endif
-  web_ui()->CallJavascriptFunction("policy.Page.setPolicyValues", all_policies);
+  web_ui()->CallJavascriptFunctionUnsafe("policy.Page.setPolicyValues",
+                                         all_policies);
 }
 
 void PolicyUIHandler::GetPolicyValues(const policy::PolicyMap& map,
                                       policy::PolicyErrorMap* errors,
                                       base::DictionaryValue* values) const {
-  for (policy::PolicyMap::const_iterator entry = map.begin();
-       entry != map.end(); ++entry) {
-    base::DictionaryValue* value = new base::DictionaryValue;
-    value->Set("value", CopyAndConvert(entry->second.value).release());
-    if (entry->second.scope == policy::POLICY_SCOPE_USER)
+  for (const auto& entry : map) {
+    std::unique_ptr<base::DictionaryValue> value(new base::DictionaryValue);
+    value->Set("value", CopyAndConvert(entry.second.value.get()));
+    if (entry.second.scope == policy::POLICY_SCOPE_USER)
       value->SetString("scope", "user");
     else
       value->SetString("scope", "machine");
-    if (entry->second.level == policy::POLICY_LEVEL_RECOMMENDED)
+    if (entry.second.level == policy::POLICY_LEVEL_RECOMMENDED)
       value->SetString("level", "recommended");
     else
       value->SetString("level", "mandatory");
-    value->SetString("source", kPolicySources[entry->second.source].key);
-    base::string16 error = errors->GetErrors(entry->first);
+    value->SetString("source", kPolicySources[entry.second.source].key);
+    base::string16 error = errors->GetErrors(entry.first);
     if (!error.empty())
       value->SetString("error", error);
-    values->Set(entry->first, value);
+    values->Set(entry.first, std::move(value));
   }
 }
 
@@ -712,7 +714,7 @@ void PolicyUIHandler::SendStatus() const {
   if (!user_status->empty())
     status.Set("user", user_status.release());
 
-  web_ui()->CallJavascriptFunction("policy.Page.setStatus", status);
+  web_ui()->CallJavascriptFunctionUnsafe("policy.Page.setStatus", status);
 }
 
 void PolicyUIHandler::HandleInitialized(const base::ListValue* args) {
@@ -741,7 +743,7 @@ void PolicyUIHandler::HandleReloadPolicies(const base::ListValue* args) {
 }
 
 void PolicyUIHandler::OnRefreshPoliciesDone() const {
-  web_ui()->CallJavascriptFunction("policy.Page.reloadPoliciesDone");
+  web_ui()->CallJavascriptFunctionUnsafe("policy.Page.reloadPoliciesDone");
 }
 
 policy::PolicyService* PolicyUIHandler::GetPolicyService() const {

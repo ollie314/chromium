@@ -16,7 +16,9 @@
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
 #include "chromecast/base/cast_constants.h"
@@ -31,15 +33,15 @@
 #include "chromecast/browser/cast_memory_pressure_monitor.h"
 #include "chromecast/browser/cast_net_log.h"
 #include "chromecast/browser/devtools/remote_debugging_server.h"
+#include "chromecast/browser/geolocation/cast_access_token_store.h"
+#include "chromecast/browser/media/media_caps_impl.h"
 #include "chromecast/browser/metrics/cast_metrics_prefs.h"
 #include "chromecast/browser/metrics/cast_metrics_service_client.h"
 #include "chromecast/browser/pref_service_helper.h"
 #include "chromecast/browser/url_request_context_factory.h"
 #include "chromecast/chromecast_features.h"
 #include "chromecast/common/platform_client_auth.h"
-#include "chromecast/media/audio/cast_audio_manager_factory.h"
 #include "chromecast/media/base/key_systems_common.h"
-#include "chromecast/media/base/media_message_loop.h"
 #include "chromecast/media/base/media_resource_tracker.h"
 #include "chromecast/media/base/video_plane_controller.h"
 #include "chromecast/media/cma/backend/media_pipeline_backend_manager.h"
@@ -53,9 +55,11 @@
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
+#include "device/geolocation/geolocation_delegate.h"
+#include "device/geolocation/geolocation_provider.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
-#include "media/audio/audio_manager.h"
 #include "media/base/media.h"
+#include "media/base/media_switches.h"
 #include "ui/compositor/compositor_switches.h"
 
 #if !defined(OS_ANDROID)
@@ -68,9 +72,7 @@
 
 #if defined(OS_ANDROID)
 #include "chromecast/app/android/crash_handler.h"
-#include "chromecast/browser/media/cast_media_client_android.h"
 #include "components/crash/content/browser/crash_dump_manager_android.h"
-#include "media/base/android/media_client_android.h"
 #include "net/android/network_change_notifier_factory_android.h"
 #else
 #include "chromecast/net/network_change_notifier_factory_cast.h"
@@ -81,7 +83,7 @@
 // header, but is exported to allow injecting the overlay-composited
 // callback.
 #include "chromecast/graphics/cast_screen.h"
-#include "ui/gfx/screen.h"
+#include "ui/display/screen.h"
 #include "ui/ozone/platform/cast/overlay_manager_cast.h"  // nogncheck
 #endif
 
@@ -187,6 +189,22 @@ namespace shell {
 
 namespace {
 
+// A provider of services for Geolocation.
+class CastGeolocationDelegate : public device::GeolocationDelegate {
+ public:
+  explicit CastGeolocationDelegate(CastBrowserContext* context)
+      : context_(context) {}
+
+  scoped_refptr<device::AccessTokenStore> CreateAccessTokenStore() override {
+    return new CastAccessTokenStore(context_);
+  }
+
+ private:
+  CastBrowserContext* context_;
+
+  DISALLOW_COPY_AND_ASSIGN(CastGeolocationDelegate);
+};
+
 struct DefaultCommandLineSwitch {
   const char* const switch_name;
   const char* const switch_value;
@@ -197,13 +215,14 @@ DefaultCommandLineSwitch g_default_switches[] = {
   // Disables Chromecast-specific WiFi-related features on ATV for now.
   { switches::kNoWifi, "" },
   { switches::kDisableGestureRequirementForMediaPlayback, ""},
+  { switches::kDisableMediaSuspend, ""},
 #else
   // GPU shader disk cache disabling is largely to conserve disk space.
   { switches::kDisableGpuShaderDiskCache, "" },
+  // Enable media sessions by default (even on non-Android platforms).
+  { switches::kEnableDefaultMediaSession, "" },
 #endif
-  // Always enable HTMLMediaElement logs.
-  { switches::kBlinkPlatformLogChannels, "Media"},
-#if BUILDFLAG(DISABLE_DISPLAY)
+#if BUILDFLAG(IS_CAST_AUDIO_ONLY)
   { switches::kDisableGpu, "" },
 #endif
 #if defined(OS_LINUX)
@@ -212,9 +231,7 @@ DefaultCommandLineSwitch g_default_switches[] = {
   // current Linux/NVidia OpenGL drivers.
   { switches::kIgnoreGpuBlacklist, ""},
 #elif defined(ARCH_CPU_ARM_FAMILY)
-  // On Linux arm, enable CMA pipeline by default.
-  { switches::kEnableCmaMediaPipeline, "" },
-#if !BUILDFLAG(DISABLE_DISPLAY)
+#if !BUILDFLAG(IS_CAST_AUDIO_ONLY)
   { switches::kEnableHardwareOverlays, "" },
 #endif
 #endif
@@ -249,7 +266,8 @@ CastBrowserMainParts::CastBrowserMainParts(
       cast_browser_process_(new CastBrowserProcess()),
       parameters_(parameters),
       url_request_context_factory_(url_request_context_factory),
-      net_log_(new CastNetLog()) {
+      net_log_(new CastNetLog()),
+      media_caps_(new media::MediaCapsImpl()) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   AddDefaultCommandLineSwitches(command_line);
 
@@ -259,12 +277,38 @@ CastBrowserMainParts::CastBrowserMainParts(
 }
 
 CastBrowserMainParts::~CastBrowserMainParts() {
+#if !defined(OS_ANDROID)
+  if (media_thread_ && media_pipeline_backend_manager_) {
+    // Make sure that media_pipeline_backend_manager_ is destroyed after any
+    // pending media thread tasks. The CastAudioOutputStream implementation
+    // calls into media_pipeline_backend_manager_ when the stream is closed;
+    // therefore, we must be sure that all CastAudioOutputStreams are gone
+    // before destroying media_pipeline_backend_manager_. This is guaranteed
+    // once the AudioManager is destroyed; the AudioManager destruction is
+    // posted to the media thread in the BrowserMainLoop destructor, just before
+    // the BrowserMainParts are destroyed (ie, here). Therefore, if we delete
+    // the media_pipeline_backend_manager_ using DeleteSoon on the media thread,
+    // it is guaranteed that the AudioManager and all AudioOutputStreams have
+    // been destroyed before media_pipeline_backend_manager_ is destroyed.
+    media_thread_->task_runner()->DeleteSoon(
+        FROM_HERE, media_pipeline_backend_manager_.release());
+  }
+#endif  // !defined(OS_ANDROID)
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
-CastBrowserMainParts::GetMediaTaskRunner() const {
-  // TODO(alokp): Obtain task runner from a local thread or mojo media app.
-  return media::MediaMessageLoop::GetTaskRunner();
+CastBrowserMainParts::GetMediaTaskRunner() {
+#if defined(OS_ANDROID)
+  return nullptr;
+#else
+  if (!media_thread_) {
+    media_thread_.reset(new base::Thread("CastMediaThread"));
+    base::Thread::Options options;
+    options.priority = base::ThreadPriority::REALTIME_AUDIO;
+    CHECK(media_thread_->StartWithOptions(options));
+  }
+  return media_thread_->task_runner();
+#endif
 }
 
 #if !defined(OS_ANDROID)
@@ -286,6 +330,10 @@ CastBrowserMainParts::media_pipeline_backend_manager() {
 }
 #endif
 
+media::MediaCapsImpl* CastBrowserMainParts::media_caps() {
+  return media_caps_.get();
+}
+
 void CastBrowserMainParts::PreMainMessageLoopStart() {
   // GroupedHistograms needs to be initialized before any threads are created
   // to prevent race conditions between calls to Preregister and those threads
@@ -304,8 +352,9 @@ void CastBrowserMainParts::PreMainMessageLoopStart() {
 }
 
 void CastBrowserMainParts::PostMainMessageLoopStart() {
-  cast_browser_process_->SetMetricsHelper(base::WrapUnique(
-      new metrics::CastMetricsHelper(base::ThreadTaskRunnerHandle::Get())));
+  cast_browser_process_->SetMetricsHelper(
+      base::MakeUnique<metrics::CastMetricsHelper>(
+          base::ThreadTaskRunnerHandle::Get()));
 
 #if defined(OS_ANDROID)
   base::MessageLoopForUI::current()->Start();
@@ -338,7 +387,7 @@ int CastBrowserMainParts::PreCreateThreads() {
     LOG(ERROR) << "Could not find crash dump location.";
   }
   cast_browser_process_->SetCrashDumpManager(
-      base::WrapUnique(new breakpad::CrashDumpManager(crash_dumps_dir)));
+      base::MakeUnique<breakpad::CrashDumpManager>(crash_dumps_dir));
 #else
   base::FilePath home_dir;
   CHECK(PathService::Get(DIR_CAST_HOME, &home_dir));
@@ -347,11 +396,6 @@ int CastBrowserMainParts::PreCreateThreads() {
 
   // Hook for internal code
   cast_browser_process_->browser_client()->PreCreateThreads();
-
-  // AudioManager is created immediately after threads are created, requiring
-  // AudioManagerFactory to be set beforehand.
-  ::media::AudioManager::SetFactory(
-      new media::CastAudioManagerFactory(media_pipeline_backend_manager()));
 
   // Set GL strings so GPU config code can make correct feature blacklisting/
   // whitelisting decisions.
@@ -363,13 +407,9 @@ int CastBrowserMainParts::PreCreateThreads() {
 #endif
 
 #if defined(USE_AURA)
-  // Screen can (and should) exist even with no displays connected. Its presence
-  // is assumed as an interface to access display information, e.g. from metrics
-  // code.  See CastContentWindow::CreateWindowTree for update when resolution
-  // is available.
-  cast_browser_process_->SetCastScreen(base::WrapUnique(new CastScreen));
-  DCHECK(!gfx::Screen::GetScreen());
-  gfx::Screen::SetScreenInstance(cast_browser_process_->cast_screen());
+  cast_browser_process_->SetCastScreen(base::WrapUnique(new CastScreen()));
+  DCHECK(!display::Screen::GetScreen());
+  display::Screen::SetScreenInstance(cast_browser_process_->cast_screen());
 #endif
 
   content::ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
@@ -383,23 +423,20 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   cast_browser_process_->SetPrefService(
       PrefServiceHelper::CreatePrefService(pref_registry.get()));
 
-#if defined(OS_ANDROID)
-  ::media::SetMediaClientAndroid(new media::CastMediaClientAndroid());
-#else
+#if !defined(OS_ANDROID)
   memory_pressure_monitor_.reset(new CastMemoryPressureMonitor());
 #endif  // defined(OS_ANDROID)
 
-  cast_browser_process_->SetConnectivityChecker(
-      ConnectivityChecker::Create(
-          content::BrowserThread::GetMessageLoopProxyForThread(
-              content::BrowserThread::IO)));
+  cast_browser_process_->SetConnectivityChecker(ConnectivityChecker::Create(
+      content::BrowserThread::GetTaskRunnerForThread(
+          content::BrowserThread::IO)));
 
   cast_browser_process_->SetNetLog(net_log_.get());
 
   url_request_context_factory_->InitializeOnUIThread(net_log_.get());
 
   cast_browser_process_->SetBrowserContext(
-      base::WrapUnique(new CastBrowserContext(url_request_context_factory_)));
+      base::MakeUnique<CastBrowserContext>(url_request_context_factory_));
   cast_browser_process_->SetMetricsServiceClient(
       metrics::CastMetricsServiceClient::Create(
           content::BrowserThread::GetBlockingPool(),
@@ -411,19 +448,19 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   if (!PlatformClientAuth::Initialize())
     LOG(ERROR) << "PlatformClientAuth::Initialize failed.";
 
-  cast_browser_process_->SetRemoteDebuggingServer(base::WrapUnique(
-      new RemoteDebuggingServer(cast_browser_process_->browser_client()
-                                    ->EnableRemoteDebuggingImmediately())));
+  cast_browser_process_->SetRemoteDebuggingServer(
+      base::MakeUnique<RemoteDebuggingServer>(
+          cast_browser_process_->browser_client()
+              ->EnableRemoteDebuggingImmediately()));
 
-#if defined(USE_AURA) && !BUILDFLAG(DISABLE_DISPLAY)
+#if defined(USE_AURA) && !BUILDFLAG(IS_CAST_AUDIO_ONLY)
   // TODO(halliwell) move audio builds to use ozone_platform_cast, then can
-  // simplify this by removing DISABLE_DISPLAY condition.  Should then also
+  // simplify this by removing IS_CAST_AUDIO_ONLY condition.  Should then also
   // assert(ozone_platform_cast) in BUILD.gn where it depends on //ui/ozone.
-  video_plane_controller_.reset(
-      new media::VideoPlaneController(GetMediaTaskRunner()));
-  cast_browser_process_->cast_screen()->SetDisplayResizeCallback(
-      base::Bind(&media::VideoPlaneController::SetGraphicsPlaneResolution,
-                 base::Unretained(video_plane_controller_.get())));
+  gfx::Size display_size =
+      display::Screen::GetScreen()->GetPrimaryDisplay().GetSizeInPixel();
+  video_plane_controller_.reset(new media::VideoPlaneController(
+      Size(display_size.width(), display_size.height()), GetMediaTaskRunner()));
   ui::OverlayManagerCast::SetOverlayCompositedCallback(
       base::Bind(&media::VideoPlaneController::SetGeometry,
                  base::Unretained(video_plane_controller_.get())));
@@ -441,6 +478,9 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   media_resource_tracker()->InitializeMediaLib();
 #endif
   ::media::InitializeMediaLibrary();
+
+  device::GeolocationProvider::SetGeolocationDelegate(
+      new CastGeolocationDelegate(cast_browser_process_->browser_context()));
 
   // Initializing metrics service and network delegates must happen after cast
   // service is intialized because CastMetricsServiceClient and
@@ -465,8 +505,8 @@ bool CastBrowserMainParts::MainMessageLoopRun(int* result_code) {
   // If parameters_.ui_task is not NULL, we are running browser tests.
   if (parameters_.ui_task) {
     base::MessageLoop* message_loop = base::MessageLoopForUI::current();
-    message_loop->PostTask(FROM_HERE, *parameters_.ui_task);
-    message_loop->PostTask(FROM_HERE, quit_closure);
+    message_loop->task_runner()->PostTask(FROM_HERE, *parameters_.ui_task);
+    message_loop->task_runner()->PostTask(FROM_HERE, quit_closure);
   }
 
   run_loop.Run();
@@ -499,7 +539,6 @@ void CastBrowserMainParts::PostDestroyThreads() {
 #if !defined(OS_ANDROID)
   media_resource_tracker_->FinalizeAndDestroy();
   media_resource_tracker_ = nullptr;
-  media_pipeline_backend_manager_.reset();
 #endif
 }
 

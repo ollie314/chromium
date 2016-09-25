@@ -19,22 +19,30 @@ namespace blink {
 // TODO(pdr): Support more effects than just opacity.
 class PLATFORM_EXPORT EffectPaintPropertyNode : public RefCounted<EffectPaintPropertyNode> {
 public:
-    static PassRefPtr<EffectPaintPropertyNode> create(float opacity, PassRefPtr<EffectPaintPropertyNode> parent = nullptr)
+    static PassRefPtr<EffectPaintPropertyNode> create(PassRefPtr<const EffectPaintPropertyNode> parent, float opacity)
     {
-        return adoptRef(new EffectPaintPropertyNode(opacity, parent));
+        return adoptRef(new EffectPaintPropertyNode(std::move(parent), opacity));
+    }
+
+    void update(PassRefPtr<const EffectPaintPropertyNode> parent, float opacity)
+    {
+        DCHECK(parent != this);
+        m_parent = parent;
+        m_opacity = opacity;
     }
 
     float opacity() const { return m_opacity; }
 
     // Parent effect or nullptr if this is the root effect.
     const EffectPaintPropertyNode* parent() const { return m_parent.get(); }
+    bool isRoot() const { return !m_parent; }
 
 private:
-    EffectPaintPropertyNode(float opacity, PassRefPtr<EffectPaintPropertyNode> parent)
-        : m_opacity(opacity), m_parent(parent) { }
+    EffectPaintPropertyNode(PassRefPtr<const EffectPaintPropertyNode> parent, float opacity)
+        : m_parent(parent), m_opacity(opacity) { }
 
-    const float m_opacity;
-    RefPtr<EffectPaintPropertyNode> m_parent;
+    RefPtr<const EffectPaintPropertyNode> m_parent;
+    float m_opacity;
 };
 
 // Redeclared here to avoid ODR issues.

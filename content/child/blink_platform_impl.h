@@ -37,20 +37,20 @@ class MessageLoop;
 class WaitableEvent;
 }
 
+namespace blink {
 namespace scheduler {
 class WebThreadBase;
+}
 }
 
 namespace content {
 class BackgroundSyncProvider;
 class FlingCurveConfiguration;
 class NotificationDispatcher;
-class PermissionDispatcher;
 class PushDispatcher;
 class ThreadSafeSender;
 class TraceLogObserverAdapter;
 class WebCryptoImpl;
-class WebGeofencingProviderImpl;
 
 class CONTENT_EXPORT BlinkPlatformImpl
     : NON_EXPORTED_BASE(public blink::Platform) {
@@ -85,14 +85,11 @@ class CONTENT_EXPORT BlinkPlatformImpl
 
   size_t maxDecodedImageBytes() override;
   uint32_t getUniqueIdForProcess() override;
-  blink::WebURLLoader* createURLLoader() override;
-  blink::WebSocketHandle* createWebSocketHandle() override;
   blink::WebString userAgent() override;
   blink::WebData parseDataURL(const blink::WebURL& url,
                               blink::WebString& mimetype,
                               blink::WebString& charset) override;
   blink::WebURLError cancelledError(const blink::WebURL& url) const override;
-  bool isReservedIPAddress(const blink::WebString& host) const override;
   bool parseMultipartHeadersFromBody(const char* bytes,
                                      size_t size,
                                      blink::WebURLResponse* response,
@@ -100,12 +97,6 @@ class CONTENT_EXPORT BlinkPlatformImpl
   blink::WebThread* createThread(const char* name) override;
   blink::WebThread* currentThread() override;
   void recordAction(const blink::UserMetricsAction&) override;
-  blink::Platform::WebMemoryAllocatorDumpGuid createWebMemoryAllocatorDumpGuid(
-      const blink::WebString& guidStr) override;
-  void addTraceLogEnabledStateObserver(
-      blink::Platform::TraceLogEnabledStateObserver* observer) override;
-  void removeTraceLogEnabledStateObserver(
-      blink::Platform::TraceLogEnabledStateObserver* observer) override;
 
   blink::WebData loadResource(const char* name) override;
   blink::WebString queryLocalizedString(
@@ -127,11 +118,11 @@ class CONTENT_EXPORT BlinkPlatformImpl
       const blink::WebSize& cumulative_scroll) override;
   void didStartWorkerThread() override;
   void willStopWorkerThread() override;
+  bool allowScriptExtensionForServiceWorker(
+      const blink::WebURL& script_url) override;
   blink::WebCrypto* crypto() override;
-  blink::WebGeofencingProvider* geofencingProvider() override;
   blink::WebNotificationManager* notificationManager() override;
   blink::WebPushProvider* pushProvider() override;
-  blink::WebPermissionClient* permissionClient() override;
   blink::WebSyncProvider* backgroundSyncProvider() override;
 
   blink::WebString domCodeStringFromEnum(int dom_code) override;
@@ -142,11 +133,11 @@ class CONTENT_EXPORT BlinkPlatformImpl
   // This class does *not* own the compositor thread. It is the responsibility
   // of the caller to ensure that the compositor thread is cleared before it is
   // destructed.
-  void SetCompositorThread(scheduler::WebThreadBase* compositor_thread);
+  void SetCompositorThread(blink::scheduler::WebThreadBase* compositor_thread);
 
  private:
   void InternalInit();
-  void WaitUntilWebThreadTLSUpdate(scheduler::WebThreadBase* thread);
+  void WaitUntilWebThreadTLSUpdate(blink::scheduler::WebThreadBase* thread);
   void UpdateWebThreadTLS(blink::WebThread* thread, base::WaitableEvent* event);
 
   bool IsMainThread() const;
@@ -156,18 +147,13 @@ class CONTENT_EXPORT BlinkPlatformImpl
   WebFallbackThemeEngineImpl fallback_theme_engine_;
   base::ThreadLocalStorage::Slot current_thread_slot_;
   webcrypto::WebCryptoImpl web_crypto_;
-  std::unique_ptr<WebGeofencingProviderImpl> geofencing_provider_;
-  base::ScopedPtrHashMap<blink::Platform::TraceLogEnabledStateObserver*,
-                         std::unique_ptr<TraceLogObserverAdapter>>
-      trace_log_observers_;
 
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
   scoped_refptr<NotificationDispatcher> notification_dispatcher_;
   scoped_refptr<PushDispatcher> push_dispatcher_;
-  std::unique_ptr<PermissionDispatcher> permission_client_;
   std::unique_ptr<BackgroundSyncProvider> main_thread_sync_provider_;
 
-  scheduler::WebThreadBase* compositor_thread_;
+  blink::scheduler::WebThreadBase* compositor_thread_;
 };
 
 }  // namespace content

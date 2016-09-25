@@ -219,9 +219,9 @@ WebInspector.TextRange.prototype = {
     {
         var relative = this.clone();
 
-        if (this.startLine == line)
+        if (this.startLine === line)
             relative.startColumn -= column;
-        if (this.endLine == line)
+        if (this.endLine === line)
             relative.endColumn -= column;
 
         relative.startLine -= line;
@@ -309,32 +309,6 @@ WebInspector.SourceRange = function(offset, length)
 {
     this.offset = offset;
     this.length = length;
-}
-
-WebInspector.SourceRange.prototype = {
-    /**
-     * @param {!WebInspector.Text} text
-     * @return {!WebInspector.TextRange}
-     */
-    toTextRange: function(text)
-    {
-        var p1 = fromOffset(text, this.offset);
-        var p2 = fromOffset(text, this.offset + this.length);
-        return new WebInspector.TextRange(p1.lineNumber, p1.columnNumber, p2.lineNumber, p2.columnNumber);
-
-        /**
-         * @param {!WebInspector.Text} text
-         * @param {number} offset
-         * @return {!{lineNumber: number, columnNumber: number}}
-         */
-        function fromOffset(text, offset)
-        {
-            var lineEndings = text.lineEndings();
-            var lineNumber = lineEndings.lowerBound(offset);
-            var columnNumber = lineNumber === 0 ? offset : offset - lineEndings[lineNumber - 1] - 1;
-            return {lineNumber: lineNumber, columnNumber: columnNumber};
-        }
-    }
 }
 
 /**

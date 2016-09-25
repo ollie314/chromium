@@ -11,11 +11,14 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "chrome/browser/predictors/predictor_table_base.h"
 #include "chrome/browser/predictors/resource_prefetch_common.h"
+#include "chrome/browser/predictors/resource_prefetch_predictor.pb.h"
 #include "content/public/common/resource_type.h"
+#include "net/base/request_priority.h"
 #include "url/gurl.h"
 
 namespace sql {
@@ -23,6 +26,8 @@ class Statement;
 }
 
 namespace predictors {
+
+using chrome_browser_predictors::ResourceData;
 
 // Interface for database tables used by the ResourcePrefetchPredictor.
 // All methods except the constructor and destructor need to be called on the DB
@@ -40,20 +45,19 @@ class ResourcePrefetchPredictorTables : public PredictorTableBase {
   struct ResourceRow {
     ResourceRow();
     ResourceRow(const ResourceRow& other);
-    ResourceRow(const std::string& main_frame_url,
-                const std::string& resource_url,
+    ResourceRow(const std::string& resource_url,
                 content::ResourceType resource_type,
                 int number_of_hits,
                 int number_of_misses,
                 int consecutive_misses,
-                double average_position);
+                double average_position,
+                net::RequestPriority priority,
+                bool has_validators,
+                bool always_revalidate);
     void UpdateScore();
     bool operator==(const ResourceRow& rhs) const;
-
-    // Stores the host for host based data, main frame Url for the Url based
-    // data. This field is cleared for efficiency reasons and the code outside
-    // this class should not assume it is set.
-    std::string primary_key;
+    static void FromProto(const ResourceData& proto, ResourceRow* row);
+    void ToProto(ResourceData* resource_data) const;
 
     GURL resource_url;
     content::ResourceType resource_type;
@@ -61,16 +65,17 @@ class ResourcePrefetchPredictorTables : public PredictorTableBase {
     size_t number_of_misses;
     size_t consecutive_misses;
     double average_position;
+    net::RequestPriority priority;
+    bool has_validators;
+    bool always_revalidate;
 
     // Not stored.
     float score;
   };
   typedef std::vector<ResourceRow> ResourceRows;
 
-  // Sorts the ResourceRows by score, descending.
-  struct ResourceRowSorter {
-    bool operator()(const ResourceRow& x, const ResourceRow& y) const;
-  };
+  // Sorts the resource rows by score, decreasing.
+  static void SortResourceRows(ResourceRows* rows);
 
   // Aggregated data for a Url or Host. Although the data differs slightly, we
   // store them in the same structure, because most of the fields are common and
@@ -116,11 +121,15 @@ class ResourcePrefetchPredictorTables : public PredictorTableBase {
   virtual void DeleteAllData();
 
   // The maximum length of the string that can be stored in the DB.
-  static const size_t kMaxStringLength;
+  static constexpr size_t kMaxStringLength = 1024;
 
  private:
   friend class PredictorDatabaseInternal;
   friend class MockResourcePrefetchPredictorTables;
+  FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTablesTest,
+                           DatabaseVersionIsSet);
+  FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTablesTest,
+                           DatabaseIsResetWhenIncompatible);
 
   ResourcePrefetchPredictorTables();
   ~ResourcePrefetchPredictorTables() override;
@@ -136,11 +145,19 @@ class ResourcePrefetchPredictorTables : public PredictorTableBase {
 
   // Returns true if the strings in the |data| are less than |kMaxStringLength|
   // in length.
-  bool StringsAreSmallerThanDBLimit(const PrefetchData& data) const;
+  static bool StringsAreSmallerThanDBLimit(const PrefetchData& data);
 
   // PredictorTableBase methods.
   void CreateTableIfNonExistent() override;
   void LogDatabaseStats() override;
+
+  // Database version. Always increment it when any change is made to the data
+  // schema (including the .proto).
+  static constexpr int kDatabaseVersion = 2;
+
+  static bool DropTablesIfOutdated(sql::Connection* db);
+  static int GetDatabaseVersion(sql::Connection* db);
+  static bool SetDatabaseVersion(sql::Connection* db, int version);
 
   // Helpers to return Statements for cached Statements. The caller must take
   // ownership of the return Statements.

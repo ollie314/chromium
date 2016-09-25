@@ -6,12 +6,11 @@
 
 #include <utility>
 
-#include "media/blink/buffered_resource_loader.h"
 #include "third_party/WebKit/public/platform/WebURLLoader.h"
 
 namespace media {
 
-ActiveLoader::ActiveLoader(scoped_ptr<blink::WebURLLoader> loader)
+ActiveLoader::ActiveLoader(std::unique_ptr<blink::WebURLLoader> loader)
     : loader_(std::move(loader)), deferred_(false) {}
 
 ActiveLoader::~ActiveLoader() {

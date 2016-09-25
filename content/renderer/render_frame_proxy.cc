@@ -10,8 +10,12 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "content/child/web_url_request_util.h"
 #include "content/child/webmessageportchannel_impl.h"
+#include "content/common/content_security_policy_header.h"
+#include "content/common/content_switches_internal.h"
 #include "content/common/frame_messages.h"
+#include "content/common/frame_owner_properties.h"
 #include "content/common/frame_replication_state.h"
 #include "content/common/input_messages.h"
 #include "content/common/page_messages.h"
@@ -166,15 +170,6 @@ RenderFrameProxy::RenderFrameProxy(int routing_id, int frame_routing_id)
 }
 
 RenderFrameProxy::~RenderFrameProxy() {
-  // TODO(nasko): Set the render_frame_proxy to null to avoid a double deletion
-  // when detaching the main frame. This can be removed once RenderFrameImpl and
-  // RenderFrameProxy have been completely decoupled. See
-  // https://crbug.com/357747.
-  RenderFrameImpl* render_frame =
-      RenderFrameImpl::FromRoutingID(frame_routing_id_);
-  if (render_frame)
-    render_frame->set_render_frame_proxy(nullptr);
-
   render_widget_->UnregisterRenderFrameProxy(this);
 
   CHECK(!web_frame_);
@@ -220,10 +215,13 @@ void RenderFrameProxy::SetReplicatedState(const FrameReplicationState& state) {
   web_frame_->setReplicatedSandboxFlags(state.sandbox_flags);
   web_frame_->setReplicatedName(blink::WebString::fromUTF8(state.name),
                                 blink::WebString::fromUTF8(state.unique_name));
-  web_frame_->setReplicatedShouldEnforceStrictMixedContentChecking(
-      state.should_enforce_strict_mixed_content_checking);
+  web_frame_->setReplicatedInsecureRequestPolicy(state.insecure_request_policy);
   web_frame_->setReplicatedPotentiallyTrustworthyUniqueOrigin(
       state.has_potentially_trustworthy_unique_origin);
+
+  web_frame_->resetReplicatedContentSecurityPolicy();
+  for (const auto& header : state.accumulated_csp_headers)
+    OnAddContentSecurityPolicy(header);
 }
 
 // Update the proxy's SecurityContext and FrameOwner with new sandbox flags
@@ -267,11 +265,18 @@ bool RenderFrameProxy::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(FrameMsg_DidUpdateSandboxFlags, OnDidUpdateSandboxFlags)
     IPC_MESSAGE_HANDLER(FrameMsg_DispatchLoad, OnDispatchLoad)
     IPC_MESSAGE_HANDLER(FrameMsg_DidUpdateName, OnDidUpdateName)
-    IPC_MESSAGE_HANDLER(FrameMsg_EnforceStrictMixedContentChecking,
-                        OnEnforceStrictMixedContentChecking)
+    IPC_MESSAGE_HANDLER(FrameMsg_AddContentSecurityPolicy,
+                        OnAddContentSecurityPolicy)
+    IPC_MESSAGE_HANDLER(FrameMsg_ResetContentSecurityPolicy,
+                        OnResetContentSecurityPolicy)
+    IPC_MESSAGE_HANDLER(FrameMsg_EnforceInsecureRequestPolicy,
+                        OnEnforceInsecureRequestPolicy)
+    IPC_MESSAGE_HANDLER(FrameMsg_SetFrameOwnerProperties,
+                        OnSetFrameOwnerProperties)
     IPC_MESSAGE_HANDLER(FrameMsg_DidUpdateOrigin, OnDidUpdateOrigin)
     IPC_MESSAGE_HANDLER(InputMsg_SetFocus, OnSetPageFocus)
     IPC_MESSAGE_HANDLER(FrameMsg_SetFocusedFrame, OnSetFocusedFrame)
+    IPC_MESSAGE_HANDLER(FrameMsg_WillEnterFullscreen, OnWillEnterFullscreen)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -337,10 +342,25 @@ void RenderFrameProxy::OnDidUpdateName(const std::string& name,
                                 blink::WebString::fromUTF8(unique_name));
 }
 
-void RenderFrameProxy::OnEnforceStrictMixedContentChecking(
-    bool should_enforce) {
-  web_frame_->setReplicatedShouldEnforceStrictMixedContentChecking(
-      should_enforce);
+void RenderFrameProxy::OnAddContentSecurityPolicy(
+    const ContentSecurityPolicyHeader& header) {
+  web_frame_->addReplicatedContentSecurityPolicyHeader(
+      blink::WebString::fromUTF8(header.header_value), header.type,
+      header.source);
+}
+
+void RenderFrameProxy::OnResetContentSecurityPolicy() {
+  web_frame_->resetReplicatedContentSecurityPolicy();
+}
+
+void RenderFrameProxy::OnEnforceInsecureRequestPolicy(
+    blink::WebInsecureRequestPolicy policy) {
+  web_frame_->setReplicatedInsecureRequestPolicy(policy);
+}
+
+void RenderFrameProxy::OnSetFrameOwnerProperties(
+    const FrameOwnerProperties& properties) {
+  web_frame_->setFrameOwnerProperties(properties.ToWebFrameOwnerProperties());
 }
 
 void RenderFrameProxy::OnDidUpdateOrigin(
@@ -359,6 +379,10 @@ void RenderFrameProxy::OnSetFocusedFrame() {
   // This uses focusDocumentView rather than setFocusedFrame so that blur
   // events are properly dispatched on any currently focused elements.
   render_view_->webview()->focusDocumentView(web_frame_);
+}
+
+void RenderFrameProxy::OnWillEnterFullscreen() {
+  web_frame_->willEnterFullscreen();
 }
 
 void RenderFrameProxy::frameDetached(DetachType type) {
@@ -384,7 +408,7 @@ void RenderFrameProxy::frameDetached(DetachType type) {
   delete this;
 }
 
-void RenderFrameProxy::postMessageEvent(
+void RenderFrameProxy::forwardPostMessage(
     blink::WebLocalFrame* source_frame,
     blink::WebRemoteFrame* target_frame,
     blink::WebSecurityOrigin target_origin,
@@ -415,21 +439,17 @@ void RenderFrameProxy::postMessageEvent(
   Send(new FrameHostMsg_RouteMessageEvent(routing_id_, params));
 }
 
-void RenderFrameProxy::initializeChildFrame(
-    float scale_factor) {
-  Send(new FrameHostMsg_InitializeChildFrame(
-      routing_id_, scale_factor));
-}
-
 void RenderFrameProxy::navigate(const blink::WebURLRequest& request,
                                 bool should_replace_current_entry) {
   FrameHostMsg_OpenURL_Params params;
   params.url = request.url();
+  params.uses_post = request.httpMethod().utf8() == "POST";
+  params.resource_request_body = GetRequestBodyForWebURLRequest(request);
   params.referrer = Referrer(
       blink::WebStringToGURL(
           request.httpHeaderField(blink::WebString::fromUTF8("Referer"))),
       request.referrerPolicy());
-  params.disposition = CURRENT_TAB;
+  params.disposition = WindowOpenDisposition::CURRENT_TAB;
   params.should_replace_current_entry = should_replace_current_entry;
   params.user_gesture =
       blink::WebUserGestureIndicator::isProcessingUserGesture();
@@ -442,7 +462,12 @@ void RenderFrameProxy::forwardInputEvent(const blink::WebInputEvent* event) {
 }
 
 void RenderFrameProxy::frameRectsChanged(const blink::WebRect& frame_rect) {
-  Send(new FrameHostMsg_FrameRectChanged(routing_id_, frame_rect));
+  gfx::Rect rect = frame_rect;
+  if (IsUseZoomForDSFEnabled()) {
+    rect = gfx::ScaleToEnclosingRect(
+        rect, 1.f / render_widget_->GetOriginalDeviceScaleFactor());
+  }
+  Send(new FrameHostMsg_FrameRectChanged(routing_id_, rect));
 }
 
 void RenderFrameProxy::visibilityChanged(bool visible) {

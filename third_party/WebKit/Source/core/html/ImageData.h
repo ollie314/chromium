@@ -59,14 +59,12 @@ public:
 
     // ImageBitmapSource implementation
     IntSize bitmapSourceSize() const override { return m_size; }
-    ScriptPromise createImageBitmap(ScriptState*, EventTarget&, int sx, int sy, int sw, int sh, const ImageBitmapOptions&, ExceptionState&) override;
+    ScriptPromise createImageBitmap(ScriptState*, EventTarget&, Optional<IntRect> cropRect, const ImageBitmapOptions&, ExceptionState&) override;
 
     DEFINE_INLINE_TRACE()
     {
         visitor->trace(m_data);
     }
-
-    void dispose();
 
     v8::Local<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Local<v8::Object> wrapper) override WARN_UNUSED_RETURN;
 

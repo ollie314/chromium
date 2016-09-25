@@ -24,8 +24,7 @@
 
 #include "public/platform/WebRTCStatsResponse.h"
 
-#include "platform/mediastream/RTCStatsResponseBase.h"
-#include "wtf/PassOwnPtr.h"
+#include "platform/peerconnection/RTCStatsResponseBase.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -50,16 +49,10 @@ WebRTCStatsResponse::operator RTCStatsResponseBase*() const
     return m_private.get();
 }
 
-size_t WebRTCStatsResponse::addReport(const WebString& id, const WebString& type, double timestamp)
+void WebRTCStatsResponse::addStats(const WebRTCLegacyStats& stats)
 {
     ASSERT(!m_private.isNull());
-    return m_private->addReport(id, type, timestamp);
-}
-
-void WebRTCStatsResponse::addStatistic(size_t report, const WebString& name, const WebString& value)
-{
-    ASSERT(!m_private.isNull());
-    m_private->addStatistic(report, name, value);
+    m_private->addStats(stats);
 }
 
 } // namespace blink

@@ -7,11 +7,13 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8Binding.h"
-#include "bindings/modules/v8/UnionTypesModules.h"
+#include "bindings/modules/v8/ArrayBufferOrArrayBufferViewOrUSVString.h"
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/fileapi/Blob.h"
 #include "platform/blob/BlobData.h"
+#include "wtf/Assertions.h"
 #include "wtf/text/TextEncoding.h"
+#include <memory>
 #include <v8.h>
 
 namespace blink {
@@ -41,7 +43,7 @@ PushMessageData* PushMessageData::create(const ArrayBufferOrArrayBufferViewOrUSV
         return new PushMessageData(encodedString.data(), encodedString.length());
     }
 
-    ASSERT(messageData.isNull());
+    DCHECK(messageData.isNull());
     return nullptr;
 }
 
@@ -61,14 +63,14 @@ DOMArrayBuffer* PushMessageData::arrayBuffer() const
 
 Blob* PushMessageData::blob() const
 {
-    OwnPtr<BlobData> blobData = BlobData::create();
+    std::unique_ptr<BlobData> blobData = BlobData::create();
     blobData->appendBytes(m_data.data(), m_data.size());
 
     // Note that the content type of the Blob object is deliberately not being
     // provided, following the specification.
 
     const long long byteLength = blobData->length();
-    return Blob::create(BlobDataHandle::create(blobData.release(), byteLength));
+    return Blob::create(BlobDataHandle::create(std::move(blobData), byteLength));
 }
 
 ScriptValue PushMessageData::json(ScriptState* scriptState, ExceptionState& exceptionState) const

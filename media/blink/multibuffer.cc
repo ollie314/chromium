@@ -299,20 +299,20 @@ void MultiBuffer::ReleaseBlocks(const std::vector<MultiBufferBlockId>& blocks) {
 
 void MultiBuffer::OnEmpty() {}
 
-void MultiBuffer::AddProvider(scoped_ptr<DataProvider> provider) {
+void MultiBuffer::AddProvider(std::unique_ptr<DataProvider> provider) {
   // If there is already a provider in the same location, we delete it.
   DCHECK(!provider->Available());
   BlockId pos = provider->Tell();
   writer_index_[pos] = std::move(provider);
 }
 
-scoped_ptr<MultiBuffer::DataProvider> MultiBuffer::RemoveProvider(
+std::unique_ptr<MultiBuffer::DataProvider> MultiBuffer::RemoveProvider(
     DataProvider* provider) {
   BlockId pos = provider->Tell();
   auto iter = writer_index_.find(pos);
   DCHECK(iter != writer_index_.end());
   DCHECK_EQ(iter->second.get(), provider);
-  scoped_ptr<DataProvider> ret = std::move(iter->second);
+  std::unique_ptr<DataProvider> ret = std::move(iter->second);
   writer_index_.erase(iter);
   return ret;
 }
@@ -363,7 +363,7 @@ void MultiBuffer::Prune(size_t max_to_free) {
 }
 
 void MultiBuffer::OnDataProviderEvent(DataProvider* provider_tmp) {
-  scoped_ptr<DataProvider> provider(RemoveProvider(provider_tmp));
+  std::unique_ptr<DataProvider> provider(RemoveProvider(provider_tmp));
   BlockId start_pos = provider->Tell();
   BlockId pos = start_pos;
   bool eof = false;
@@ -389,9 +389,13 @@ void MultiBuffer::OnDataProviderEvent(DataProvider* provider_tmp) {
     present_.SetInterval(start_pos, pos, 1);
     Interval<BlockId> expanded_range = present_.find(start_pos).interval();
     NotifyAvailableRange(expanded_range, expanded_range);
-
     lru_->IncrementDataSize(blocks_added);
     Prune(blocks_added * kMaxFreesPerAdd + 1);
+  } else {
+    // Make sure to give progress reports even when there
+    // aren't any new blocks yet.
+    NotifyAvailableRange(Interval<BlockId>(start_pos, start_pos + 1),
+                         Interval<BlockId>(start_pos, start_pos));
   }
 
   // Check that it's still there before we try to delete it.
@@ -516,6 +520,13 @@ void MultiBuffer::IncrementMaxSize(int32_t size) {
   lru_->IncrementMaxSize(size);
   DCHECK_GE(max_size_, 0);
   // Pruning only happens when blocks are added.
+}
+
+int64_t MultiBuffer::UncommittedBytesAt(const MultiBuffer::BlockId& block) {
+  auto i = writer_index_.find(block);
+  if (writer_index_.end() == i)
+    return 0;
+  return i->second->AvailableBytes();
 }
 
 }  // namespace media

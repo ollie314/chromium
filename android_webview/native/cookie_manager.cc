@@ -45,7 +45,9 @@ using base::FilePath;
 using base::WaitableEvent;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertJavaStringToUTF16;
+using base::android::JavaParamRef;
 using base::android::ScopedJavaGlobalRef;
+using base::android::ScopedJavaLocalRef;
 using content::BrowserThread;
 using net::CookieList;
 
@@ -77,8 +79,7 @@ class BoolCookieCallbackHolder {
   void Invoke(bool result) {
     if (!callback_.is_null()) {
       JNIEnv* env = base::android::AttachCurrentThread();
-      Java_AwCookieManager_invokeBooleanCookieCallback(env, callback_.obj(),
-                                                       result);
+      Java_AwCookieManager_invokeBooleanCookieCallback(env, callback_, result);
     }
   }
 
@@ -266,7 +267,8 @@ CookieManager::~CookieManager() {
 // Ignore a bool callback.
 void CookieManager::ExecCookieTaskSync(
     const base::Callback<void(BoolCallback)>& task) {
-  WaitableEvent completion(false, false);
+  WaitableEvent completion(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                           base::WaitableEvent::InitialState::NOT_SIGNALED);
   ExecCookieTask(
       base::Bind(task, BoolCallbackAdapter(SignalEventClosure(&completion))));
   ScopedAllowWaitForLegacyWebViewApi wait;
@@ -276,7 +278,8 @@ void CookieManager::ExecCookieTaskSync(
 // Ignore an int callback.
 void CookieManager::ExecCookieTaskSync(
     const base::Callback<void(IntCallback)>& task) {
-  WaitableEvent completion(false, false);
+  WaitableEvent completion(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                           base::WaitableEvent::InitialState::NOT_SIGNALED);
   ExecCookieTask(
       base::Bind(task, IntCallbackAdapter(SignalEventClosure(&completion))));
   ScopedAllowWaitForLegacyWebViewApi wait;
@@ -287,7 +290,8 @@ void CookieManager::ExecCookieTaskSync(
 // continue.
 void CookieManager::ExecCookieTaskSync(
     const base::Callback<void(base::Closure)>& task) {
-  WaitableEvent completion(false, false);
+  WaitableEvent completion(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                           base::WaitableEvent::InitialState::NOT_SIGNALED);
   ExecCookieTask(base::Bind(task, SignalEventClosure(&completion)));
   ScopedAllowWaitForLegacyWebViewApi wait;
   completion.Wait();

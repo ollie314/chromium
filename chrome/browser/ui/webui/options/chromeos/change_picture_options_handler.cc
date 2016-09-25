@@ -4,16 +4,16 @@
 
 #include "chrome/browser/ui/webui/options/chromeos/change_picture_options_handler.h"
 
-#include "ash/audio/sounds.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/camera_presence_notifier.h"
 #include "chrome/browser/chromeos/login/users/avatar/user_image_manager.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
@@ -25,6 +25,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/audio/chromeos_sounds.h"
 #include "components/user_manager/user.h"
@@ -34,7 +35,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/url_constants.h"
-#include "grit/browser_resources.h"
+#include "media/audio/sounds/sounds_manager.h"
 #include "net/base/data_url.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -180,8 +181,8 @@ void ChangePictureOptionsHandler::SendDefaultImages() {
                           default_user_image::GetDefaultImageDescription(i));
     image_urls.Append(image_data.release());
   }
-  web_ui()->CallJavascriptFunction("ChangePictureOptions.setDefaultImages",
-                                   image_urls);
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "ChangePictureOptions.setDefaultImages", image_urls);
 }
 
 void ChangePictureOptionsHandler::HandleChooseFile(
@@ -214,13 +215,15 @@ void ChangePictureOptionsHandler::HandleChooseFile(
 void ChangePictureOptionsHandler::HandleTakePhoto(
     const base::ListValue* args) {
   DCHECK(args->empty());
-  ash::PlaySystemSoundIfSpokenFeedback(SOUND_CAMERA_SNAP);
+  AccessibilityManager::Get()->PlayEarcon(
+      SOUND_CAMERA_SNAP, PlaySoundOption::SPOKEN_FEEDBACK_ENABLED);
 }
 
 void ChangePictureOptionsHandler::HandleDiscardPhoto(
     const base::ListValue* args) {
   DCHECK(args->empty());
-  ash::PlaySystemSoundIfSpokenFeedback(SOUND_OBJECT_DELETE);
+  AccessibilityManager::Get()->PlayEarcon(
+      SOUND_OBJECT_DELETE, PlaySoundOption::SPOKEN_FEEDBACK_ENABLED);
 }
 
 void ChangePictureOptionsHandler::HandlePhotoTaken(
@@ -286,7 +289,7 @@ void ChangePictureOptionsHandler::SendSelectedImage() {
         // User has image from the current set of default images.
         base::StringValue image_url(
             default_user_image::GetDefaultImageUrl(previous_image_index_));
-        web_ui()->CallJavascriptFunction(
+        web_ui()->CallJavascriptFunctionUnsafe(
             "ChangePictureOptions.setSelectedImage", image_url);
       } else {
         // User has an old default image, so present it in the same manner as a
@@ -302,8 +305,8 @@ void ChangePictureOptionsHandler::SendProfileImage(const gfx::ImageSkia& image,
                                                    bool should_select) {
   base::StringValue data_url(webui::GetBitmapDataUrl(*image.bitmap()));
   base::FundamentalValue select(should_select);
-  web_ui()->CallJavascriptFunction("ChangePictureOptions.setProfileImage",
-                                   data_url, select);
+  web_ui()->CallJavascriptFunctionUnsafe("ChangePictureOptions.setProfileImage",
+                                         data_url, select);
 }
 
 void ChangePictureOptionsHandler::UpdateProfileImage() {
@@ -321,7 +324,8 @@ void ChangePictureOptionsHandler::UpdateProfileImage() {
 void ChangePictureOptionsHandler::SendOldImage(const std::string& image_url) {
   previous_image_url_ = image_url;
   base::StringValue url(image_url);
-  web_ui()->CallJavascriptFunction("ChangePictureOptions.setOldImage", url);
+  web_ui()->CallJavascriptFunctionUnsafe("ChangePictureOptions.setOldImage",
+                                         url);
 }
 
 void ChangePictureOptionsHandler::HandleSelectImage(
@@ -421,8 +425,8 @@ void ChangePictureOptionsHandler::SetImageFromCamera(
 void ChangePictureOptionsHandler::SetCameraPresent(bool present) {
   base::FundamentalValue present_value(present);
 
-  web_ui()->CallJavascriptFunction("ChangePictureOptions.setCameraPresent",
-                                   present_value);
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "ChangePictureOptions.setCameraPresent", present_value);
 }
 
 void ChangePictureOptionsHandler::OnCameraPresenceCheckDone(

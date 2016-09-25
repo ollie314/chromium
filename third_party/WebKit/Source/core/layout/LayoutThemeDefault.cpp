@@ -25,36 +25,23 @@
 #include "core/layout/LayoutThemeDefault.h"
 
 #include "core/CSSValueKeywords.h"
-#include "core/layout/LayoutObject.h"
-#include "core/layout/LayoutProgress.h"
 #include "core/layout/LayoutThemeFontProvider.h"
 #include "core/paint/MediaControlsPainter.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/LayoutTestSupport.h"
 #include "platform/PlatformResourceLoader.h"
 #include "platform/graphics/Color.h"
-#include "platform/scroll/ScrollbarTheme.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThemeEngine.h"
+#include "wtf/text/StringBuilder.h"
 
 namespace blink {
-
-enum PaddingType {
-    TopPadding,
-    RightPadding,
-    BottomPadding,
-    LeftPadding
-};
-
-static const int styledMenuListInternalPadding[4] = { 1, 4, 1, 4 };
 
 // These values all match Safari/Win.
 static const float defaultControlFontPixelSize = 13;
 static const float defaultCancelButtonSize = 9;
 static const float minCancelButtonSize = 5;
 static const float maxCancelButtonSize = 21;
-static const float defaultSearchFieldResultsDecorationSize = 13;
-static const float minSearchFieldResultsDecorationSize = 9;
-static const float maxSearchFieldResultsDecorationSize = 30;
 static const int menuListArrowPaddingSize = 14;
 
 static bool useMockTheme()
@@ -110,12 +97,15 @@ Color LayoutThemeDefault::systemColor(CSSValueID cssValueId) const
 // Use the Windows style sheets to match their metrics.
 String LayoutThemeDefault::extraDefaultStyleSheet()
 {
-    return LayoutTheme::extraDefaultStyleSheet()
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
-        + loadResourceAsASCIIString("themeInputMultipleFields.css")
-#endif
-        + loadResourceAsASCIIString("themeWin.css");
-
+    String extraStyleSheet = LayoutTheme::extraDefaultStyleSheet();
+    String multipleFieldsStyleSheet = RuntimeEnabledFeatures::inputMultipleFieldsUIEnabled() ? loadResourceAsASCIIString("themeInputMultipleFields.css") : String();
+    String windowsStyleSheet = loadResourceAsASCIIString("themeWin.css");
+    StringBuilder builder;
+    builder.reserveCapacity(extraStyleSheet.length() + multipleFieldsStyleSheet.length() + windowsStyleSheet.length());
+    builder.append(extraStyleSheet);
+    builder.append(multipleFieldsStyleSheet);
+    builder.append(windowsStyleSheet);
+    return builder.toString();
 }
 
 String LayoutThemeDefault::extraQuirksStyleSheet()
@@ -202,11 +192,6 @@ void LayoutThemeDefault::adjustSliderThumbSize(ComputedStyle& style) const
     }
 }
 
-void LayoutThemeDefault::setCaretBlinkInterval(double interval)
-{
-    m_caretBlinkInterval = interval;
-}
-
 void LayoutThemeDefault::setSelectionColors(
     unsigned activeBackgroundColor,
     unsigned activeForegroundColor,
@@ -249,8 +234,9 @@ void LayoutThemeDefault::adjustInnerSpinButtonStyle(ComputedStyle& style) const
 {
     IntSize size = Platform::current()->themeEngine()->getSize(WebThemeEngine::PartInnerSpinButton);
 
-    style.setWidth(Length(size.width(), Fixed));
-    style.setMinWidth(Length(size.width(), Fixed));
+    float zoomLevel = style.effectiveZoom();
+    style.setWidth(Length(size.width() * zoomLevel, Fixed));
+    style.setMinWidth(Length(size.width() * zoomLevel, Fixed));
 }
 
 bool LayoutThemeDefault::shouldOpenPickerWithF4Key() const
@@ -287,7 +273,7 @@ double LayoutThemeDefault::caretBlinkInterval() const
     if (LayoutTestSupport::isRunningLayoutTest())
         return 0;
 
-    return m_caretBlinkInterval;
+    return LayoutTheme::caretBlinkInterval();
 }
 
 void LayoutThemeDefault::systemFont(CSSValueID systemFontID, FontStyle& fontStyle, FontWeight& fontWeight, float& fontSize, AtomicString& fontFamily) const
@@ -335,23 +321,6 @@ void LayoutThemeDefault::adjustSearchFieldCancelButtonStyle(ComputedStyle& style
     style.setHeight(Length(cancelButtonSize, Fixed));
 }
 
-void LayoutThemeDefault::adjustSearchFieldDecorationStyle(ComputedStyle& style) const
-{
-    IntSize emptySize(1, 11);
-    style.setWidth(Length(emptySize.width(), Fixed));
-    style.setHeight(Length(emptySize.height(), Fixed));
-}
-
-void LayoutThemeDefault::adjustSearchFieldResultsDecorationStyle(ComputedStyle& style) const
-{
-    // Scale the decoration size based on the font size
-    float fontScale = style.fontSize() / defaultControlFontPixelSize;
-    int magnifierSize = lroundf(std::min(std::max(minSearchFieldResultsDecorationSize, defaultSearchFieldResultsDecorationSize * fontScale),
-        maxSearchFieldResultsDecorationSize));
-    style.setWidth(Length(magnifierSize, Fixed));
-    style.setHeight(Length(magnifierSize, Fixed));
-}
-
 void LayoutThemeDefault::adjustMenuListStyle(ComputedStyle& style, Element*) const
 {
     // Height is locked to auto on all browsers.
@@ -363,24 +332,27 @@ void LayoutThemeDefault::adjustMenuListButtonStyle(ComputedStyle& style, Element
     adjustMenuListStyle(style, e);
 }
 
-int LayoutThemeDefault::popupInternalPaddingLeft(const ComputedStyle& style) const
+// The following internal paddings are in addition to the user-supplied padding.
+// Matches the Firefox behavior.
+
+int LayoutThemeDefault::popupInternalPaddingStart(const ComputedStyle& style) const
 {
-    return menuListInternalPadding(style, LeftPadding);
+    return menuListInternalPadding(style, 4);
 }
 
-int LayoutThemeDefault::popupInternalPaddingRight(const ComputedStyle& style) const
+int LayoutThemeDefault::popupInternalPaddingEnd(const ComputedStyle& style) const
 {
-    return menuListInternalPadding(style, RightPadding);
+    return menuListInternalPadding(style, 4 + menuListArrowPaddingSize);
 }
 
 int LayoutThemeDefault::popupInternalPaddingTop(const ComputedStyle& style) const
 {
-    return menuListInternalPadding(style, TopPadding);
+    return menuListInternalPadding(style, 1);
 }
 
 int LayoutThemeDefault::popupInternalPaddingBottom(const ComputedStyle& style) const
 {
-    return menuListInternalPadding(style, BottomPadding);
+    return menuListInternalPadding(style, 1);
 }
 
 // static
@@ -389,21 +361,10 @@ void LayoutThemeDefault::setDefaultFontSize(int fontSize)
     LayoutThemeFontProvider::setDefaultFontSize(fontSize);
 }
 
-int LayoutThemeDefault::menuListInternalPadding(const ComputedStyle& style, int paddingType) const
+int LayoutThemeDefault::menuListInternalPadding(const ComputedStyle& style, int padding) const
 {
     if (style.appearance() == NoControlPart)
         return 0;
-    // This internal padding is in addition to the user-supplied padding.
-    // Matches the FF behavior.
-    int padding = styledMenuListInternalPadding[paddingType];
-
-    // Reserve the space for right arrow here. The rest of the padding is
-    // set by adjustMenuListStyle, since PopMenuWin.cpp uses the padding from
-    // LayoutMenuList to lay out the individual items in the popup.
-    const int barType = style.direction() == LTR ? RightPadding : LeftPadding;
-    if (paddingType == barType)
-        padding += menuListArrowPaddingSize;
-
     return padding * style.effectiveZoom();
 }
 

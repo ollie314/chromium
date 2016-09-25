@@ -10,7 +10,7 @@
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/wifi_credentials_helper.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/browser_sync/common/browser_sync_switches.h"
+#include "components/browser_sync/browser_sync_switches.h"
 #include "components/wifi_sync/wifi_credential.h"
 #include "components/wifi_sync/wifi_security_class.h"
 
@@ -71,6 +71,6 @@ IN_PROC_BROWSER_TEST_F(SingleClientWifiCredentialsSyncTest, SingleCredential) {
   EXPECT_EQ(WifiCredential::MakeSsidBytesForTest(ssid),
             verifier_credentials.begin()->ssid());
 
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((profile_index))));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService(profile_index)));
   EXPECT_TRUE(wifi_credentials_helper::ProfileMatchesVerifier(profile_index));
 }

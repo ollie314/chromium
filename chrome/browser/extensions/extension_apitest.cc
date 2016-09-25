@@ -156,10 +156,7 @@ void ExtensionApiTest::SetUpInProcessBrowserTestFixture() {
   test_config_->SetString(kTestDataDirectory,
                           net::FilePathToFileURL(test_data_dir_).spec());
   test_config_->SetInteger(kTestWebSocketPort, 0);
-  bool isolate_extensions = base::CommandLine::ForCurrentProcess()->HasSwitch(
-                                switches::kSitePerProcess) ||
-                            base::CommandLine::ForCurrentProcess()->HasSwitch(
-                                extensions::switches::kIsolateExtensions);
+  bool isolate_extensions = true;
   test_config_->SetBoolean(kIsolateExtensions, isolate_extensions);
   extensions::TestGetConfigFunction::set_test_config_state(
       test_config_.get());
@@ -264,8 +261,7 @@ bool ExtensionApiTest::RunPlatformAppTest(const std::string& extension_name) {
 
 bool ExtensionApiTest::RunPlatformAppTestWithArg(
     const std::string& extension_name, const char* custom_arg) {
-  return RunExtensionTestImpl(
-      extension_name, std::string(), custom_arg, kFlagLaunchPlatformApp);
+  return RunPlatformAppTestWithFlags(extension_name, custom_arg, kFlagNone);
 }
 
 bool ExtensionApiTest::RunPlatformAppTestWithFlags(
@@ -273,6 +269,15 @@ bool ExtensionApiTest::RunPlatformAppTestWithFlags(
   return RunExtensionTestImpl(
       extension_name, std::string(), NULL, flags | kFlagLaunchPlatformApp);
 }
+
+bool ExtensionApiTest::RunPlatformAppTestWithFlags(
+    const std::string& extension_name,
+    const char* custom_arg,
+    int flags) {
+  return RunExtensionTestImpl(extension_name, std::string(), custom_arg,
+                              flags | kFlagLaunchPlatformApp);
+}
+
 
 // Load |extension_name| extension and/or |page_url| and wait for
 // PASSED or FAILED notification.
@@ -335,9 +340,9 @@ bool ExtensionApiTest::RunExtensionTestImpl(const std::string& extension_name,
     else
       ui_test_utils::NavigateToURL(browser(), url);
   } else if (launch_platform_app) {
-    AppLaunchParams params(browser()->profile(), extension,
-                           extensions::LAUNCH_CONTAINER_NONE, NEW_WINDOW,
-                           extensions::SOURCE_TEST);
+    AppLaunchParams params(
+        browser()->profile(), extension, extensions::LAUNCH_CONTAINER_NONE,
+        WindowOpenDisposition::NEW_WINDOW, extensions::SOURCE_TEST);
     params.command_line = *base::CommandLine::ForCurrentProcess();
     OpenApplication(params);
   }

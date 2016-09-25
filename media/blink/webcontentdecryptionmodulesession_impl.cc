@@ -12,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "media/base/cdm_key_information.h"
 #include "media/base/cdm_promise.h"
+#include "media/base/key_system_names.h"
 #include "media/base/key_systems.h"
 #include "media/base/limits.h"
 #include "media/base/media_keys.h"
@@ -19,7 +20,6 @@
 #include "media/blink/cdm_session_adapter.h"
 #include "media/blink/webmediaplayer_util.h"
 #include "media/cdm/json_web_key.h"
-#include "media/cdm/key_system_names.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebEncryptedMediaKeyInformation.h"
 #include "third_party/WebKit/public/platform/WebString.h"
@@ -104,6 +104,7 @@ static bool SanitizeInitData(EmeInitDataType init_data_type,
                              size_t init_data_length,
                              std::vector<uint8_t>* sanitized_init_data,
                              std::string* error_message) {
+  DCHECK_GT(init_data_length, 0u);
   if (init_data_length > limits::kMaxInitDataLength) {
     error_message->assign("Initialization data too long.");
     return false;
@@ -111,6 +112,11 @@ static bool SanitizeInitData(EmeInitDataType init_data_type,
 
   switch (init_data_type) {
     case EmeInitDataType::WEBM:
+      // |init_data| for WebM is a single key.
+      if (init_data_length > limits::kMaxKeyIdLength) {
+        error_message->assign("Initialization data for WebM is too long.");
+        return false;
+      }
       sanitized_init_data->assign(init_data, init_data + init_data_length);
       return true;
 
@@ -300,7 +306,7 @@ void WebContentDecryptionModuleSessionImpl::initializeNewSession(
   // 9.7 Use the cdm to execute the following steps:
   adapter_->InitializeNewSession(
       eme_init_data_type, sanitized_init_data, convertSessionType(session_type),
-      scoped_ptr<NewSessionCdmPromise>(new NewSessionCdmResultPromise(
+      std::unique_ptr<NewSessionCdmPromise>(new NewSessionCdmResultPromise(
           result, adapter_->GetKeySystemUMAPrefix() + kGenerateRequestUMAName,
           base::Bind(
               &WebContentDecryptionModuleSessionImpl::OnSessionInitialized,
@@ -327,7 +333,7 @@ void WebContentDecryptionModuleSessionImpl::load(
   // constructor (and removed from initializeNewSession()).
   adapter_->LoadSession(
       MediaKeys::PERSISTENT_LICENSE_SESSION, sanitized_session_id,
-      scoped_ptr<NewSessionCdmPromise>(new NewSessionCdmResultPromise(
+      std::unique_ptr<NewSessionCdmPromise>(new NewSessionCdmResultPromise(
           result, adapter_->GetKeySystemUMAPrefix() + kLoadSessionUMAName,
           base::Bind(
               &WebContentDecryptionModuleSessionImpl::OnSessionInitialized,
@@ -353,7 +359,7 @@ void WebContentDecryptionModuleSessionImpl::update(
 
   adapter_->UpdateSession(
       session_id_, sanitized_response,
-      scoped_ptr<SimpleCdmPromise>(new CdmResultPromise<>(
+      std::unique_ptr<SimpleCdmPromise>(new CdmResultPromise<>(
           result, adapter_->GetKeySystemUMAPrefix() + kUpdateSessionUMAName)));
 }
 
@@ -363,7 +369,7 @@ void WebContentDecryptionModuleSessionImpl::close(
   DCHECK(thread_checker_.CalledOnValidThread());
   adapter_->CloseSession(
       session_id_,
-      scoped_ptr<SimpleCdmPromise>(new CdmResultPromise<>(
+      std::unique_ptr<SimpleCdmPromise>(new CdmResultPromise<>(
           result, adapter_->GetKeySystemUMAPrefix() + kCloseSessionUMAName)));
 }
 
@@ -373,7 +379,7 @@ void WebContentDecryptionModuleSessionImpl::remove(
   DCHECK(thread_checker_.CalledOnValidThread());
   adapter_->RemoveSession(
       session_id_,
-      scoped_ptr<SimpleCdmPromise>(new CdmResultPromise<>(
+      std::unique_ptr<SimpleCdmPromise>(new CdmResultPromise<>(
           result, adapter_->GetKeySystemUMAPrefix() + kRemoveSessionUMAName)));
 }
 
@@ -393,7 +399,7 @@ void WebContentDecryptionModuleSessionImpl::OnSessionKeysChange(
   blink::WebVector<blink::WebEncryptedMediaKeyInformation> keys(
       keys_info.size());
   for (size_t i = 0; i < keys_info.size(); ++i) {
-    const auto& key_info = keys_info[i];
+    auto* key_info = keys_info[i];
     keys[i].setId(blink::WebData(reinterpret_cast<char*>(&key_info->key_id[0]),
                                  key_info->key_id.size()));
     keys[i].setStatus(convertStatus(key_info->status));

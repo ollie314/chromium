@@ -706,7 +706,31 @@ class IDLParsingTest(unittest.TestCase):
 class TryServerMasterTest(unittest.TestCase):
   def testTryServerMasters(self):
     bots = {
-        'tryserver.chromium.mac': [
+        'master.tryserver.chromium.android': [
+            'android_archive_rel_ng',
+            'android_arm64_dbg_recipe',
+            'android_blink_rel',
+            'android_chromium_variable',
+            'android_chromium_variable_archive',
+            'android_chromium_variable_arm64',
+            'android_chromium_variable_cast_shell',
+            'android_chromium_variable_clang',
+            'android_chromium_variable_gn',
+            'android_chromium_variable_nexus4',
+            'android_clang_dbg_recipe',
+            'android_compile_dbg',
+            'android_compile_mips_dbg',
+            'android_compile_rel',
+            'android_compile_x64_dbg',
+            'android_compile_x86_dbg',
+            'android_coverage',
+            'android_cronet_tester'
+            'android_swarming_rel',
+            'cast_shell_android',
+            'linux_android_dbg_ng',
+            'linux_android_rel_ng',
+        ],
+        'master.tryserver.chromium.mac': [
             'ios_dbg_simulator',
             'ios_rel_device',
             'ios_rel_device_ninja',
@@ -722,22 +746,7 @@ class TryServerMasterTest(unittest.TestCase):
             'mac_x64_rel',
             'mac_xcodebuild',
         ],
-        'tryserver.chromium.linux': [
-            'android_aosp',
-            'android_chromium_gn_compile_dbg',
-            'android_chromium_gn_compile_rel',
-            'android_clang_dbg',
-            'android_dbg',
-            'android_dbg_recipe',
-            'android_dbg_triggered_tests',
-            'android_dbg_triggered_tests_recipe',
-            'android_fyi_dbg',
-            'android_fyi_dbg_triggered_tests',
-            'android_rel',
-            'android_rel_triggered_tests',
-            'android_x86_dbg',
-            'blink_android_compile_dbg',
-            'blink_android_compile_rel',
+        'master.tryserver.chromium.linux': [
             'chromium_presubmit',
             'linux_arm_cross_compile',
             'linux_arm_tester',
@@ -772,7 +781,7 @@ class TryServerMasterTest(unittest.TestCase):
             'linux_valgrind',
             'tools_build_presubmit',
         ],
-        'tryserver.chromium.win': [
+        'master.tryserver.chromium.win': [
             'win8_aura',
             'win8_chromium_dbg',
             'win8_chromium_rel',
@@ -857,6 +866,10 @@ class PydepsNeedsUpdatingTest(unittest.TestCase):
                                                checker_for_tests=self.checker)
 
   def testAddedPydep(self):
+    # PRESUBMIT._CheckPydepsNeedsUpdating is only implemented for Android.
+    if self.mock_input_api.platform != 'linux2':
+      return []
+
     self.mock_input_api.files = [
       MockAffectedFile('new.pydeps', [], action='A'),
     ]
@@ -866,6 +879,10 @@ class PydepsNeedsUpdatingTest(unittest.TestCase):
     self.assertTrue('PYDEPS_FILES' in str(results[0]))
 
   def testRemovedPydep(self):
+    # PRESUBMIT._CheckPydepsNeedsUpdating is only implemented for Android.
+    if self.mock_input_api.platform != 'linux2':
+      return []
+
     self.mock_input_api.files = [
       MockAffectedFile(PRESUBMIT._ALL_PYDEPS_FILES[0], [], action='D'),
     ]
@@ -875,6 +892,10 @@ class PydepsNeedsUpdatingTest(unittest.TestCase):
     self.assertTrue('PYDEPS_FILES' in str(results[0]))
 
   def testRandomPyIgnored(self):
+    # PRESUBMIT._CheckPydepsNeedsUpdating is only implemented for Android.
+    if self.mock_input_api.platform != 'linux2':
+      return []
+
     self.mock_input_api.files = [
       MockAffectedFile('random.py', []),
     ]
@@ -883,6 +904,10 @@ class PydepsNeedsUpdatingTest(unittest.TestCase):
     self.assertEqual(0, len(results), 'Unexpected results: %r' % results)
 
   def testRelevantPyNoChange(self):
+    # PRESUBMIT._CheckPydepsNeedsUpdating is only implemented for Android.
+    if self.mock_input_api.platform != 'linux2':
+      return []
+
     self.mock_input_api.files = [
       MockAffectedFile('A.py', []),
     ]
@@ -897,6 +922,10 @@ class PydepsNeedsUpdatingTest(unittest.TestCase):
     self.assertEqual(0, len(results), 'Unexpected results: %r' % results)
 
   def testRelevantPyOneChange(self):
+    # PRESUBMIT._CheckPydepsNeedsUpdating is only implemented for Android.
+    if self.mock_input_api.platform != 'linux2':
+      return []
+
     self.mock_input_api.files = [
       MockAffectedFile('A.py', []),
     ]
@@ -912,6 +941,10 @@ class PydepsNeedsUpdatingTest(unittest.TestCase):
     self.assertTrue('File is stale' in str(results[0]))
 
   def testRelevantPyTwoChanges(self):
+    # PRESUBMIT._CheckPydepsNeedsUpdating is only implemented for Android.
+    if self.mock_input_api.platform != 'linux2':
+      return []
+
     self.mock_input_api.files = [
       MockAffectedFile('C.py', []),
     ]

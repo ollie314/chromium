@@ -18,12 +18,12 @@
 
 #include <list>
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -60,6 +60,17 @@ class QuotaService : public base::NonThreadSafe {
                      ExtensionFunction* function,
                      const base::ListValue* args,
                      const base::TimeTicks& event_time);
+
+  // An active ScopedDisablePurgeForTesting prevents QuotaService's constructor
+  // from starting a purge timer.
+  class ScopedDisablePurgeForTesting {
+   public:
+    ScopedDisablePurgeForTesting();
+    ~ScopedDisablePurgeForTesting();
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(ScopedDisablePurgeForTesting);
+  };
 
  private:
   typedef std::string ExtensionId;
@@ -192,7 +203,7 @@ class QuotaLimitHeuristic {
   const Config config_;
 
   // The mapper used in Map. Cannot be NULL.
-  scoped_ptr<BucketMapper> bucket_mapper_;
+  std::unique_ptr<BucketMapper> bucket_mapper_;
 
   // The name of the heuristic for formatting error messages.
   std::string name_;

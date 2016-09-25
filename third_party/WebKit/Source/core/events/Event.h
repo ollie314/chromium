@@ -43,35 +43,46 @@ class CORE_EXPORT Event : public GarbageCollectedFinalized<Event>,  public Scrip
     DEFINE_WRAPPERTYPEINFO();
 public:
     enum PhaseType {
-        NONE                = 0,
-        CAPTURING_PHASE     = 1,
-        AT_TARGET           = 2,
-        BUBBLING_PHASE      = 3
+        kNone               = 0,
+        kCapturingPhase     = 1,
+        kAtTarget           = 2,
+        kBubblingPhase      = 3
     };
 
     enum EventType {
-        MOUSEDOWN           = 1,
-        MOUSEUP             = 2,
-        MOUSEOVER           = 4,
-        MOUSEOUT            = 8,
-        MOUSEMOVE           = 16,
-        MOUSEDRAG           = 32,
-        CLICK               = 64,
-        DBLCLICK            = 128,
-        KEYDOWN             = 256,
-        KEYUP               = 512,
-        KEYPRESS            = 1024,
-        DRAGDROP            = 2048,
-        FOCUS               = 4096,
-        BLUR                = 8192,
-        SELECT              = 16384,
-        CHANGE              = 32768
+        kMousedown           = 1,
+        kMouseup             = 2,
+        kMouseover           = 4,
+        kMouseout            = 8,
+        kMousemove           = 16,
+        kMousedrag           = 32,
+        kClick               = 64,
+        kDblclick            = 128,
+        kKeydown             = 256,
+        kKeyup               = 512,
+        kKeypress            = 1024,
+        kDragdrop            = 2048,
+        kFocus               = 4096,
+        kBlur                = 8192,
+        kSelect              = 16384,
+        kChange              = 32768
     };
 
     enum RailsMode {
         RailsModeFree       = 0,
         RailsModeHorizontal = 1,
         RailsModeVertical   = 2
+    };
+
+    enum class ComposedMode {
+        Composed,
+        Scoped,
+    };
+
+    enum class PassiveMode {
+        NotPassive,
+        Passive,
+        PassiveForcedDocumentLevel,
     };
 
     static Event* create()
@@ -115,25 +126,28 @@ public:
     EventTarget* target() const { return m_target.get(); }
     void setTarget(EventTarget*);
 
-    EventTarget* currentTarget() const;
+    EventTarget* currentTarget() const { return m_currentTarget; }
     void setCurrentTarget(EventTarget* currentTarget) { m_currentTarget = currentTarget; }
+
+    // This callback is invoked when an event listener has been dispatched
+    // at the current target. It should only be used to influence UMA metrics
+    // and not change functionality since observing the presence of listeners
+    // is dangerous.
+    virtual void doneDispatchingEventAtCurrentTarget() {}
 
     unsigned short eventPhase() const { return m_eventPhase; }
     void setEventPhase(unsigned short eventPhase) { m_eventPhase = eventPhase; }
 
     bool bubbles() const { return m_canBubble; }
     bool cancelable() const { return m_cancelable; }
-    bool scoped() const { return m_scoped; }
-    bool relatedTargetScoped() const { return m_relatedTargetScoped; }
+    bool composed() const { return m_composed; }
+    bool isScopedInV0() const;
 
-    // Event creation timestamp in milliseconds. If |HiResEventTimeStamp|
-    // runtime feature is enabled it returns a DOMHighResTimeStamp using the
-    // platform timestamp (see |m_platformTimeStamp|) otherwise it returns a
-    // DOMTimeStamp that represents the current object's construction time (see
-    // |m_createTime|). For more info see http://crbug.com/160524
+    // Event creation timestamp in milliseconds. It returns a DOMHighResTimeStamp
+    // using the platform timestamp (see |m_platformTimeStamp|).
+    // For more info see http://crbug.com/160524
     double timeStamp(ScriptState*) const;
     double platformTimeStamp() const { return m_platformTimeStamp; }
-    DOMTimeStamp createTime() const { return m_createTime; }
 
     void stopPropagation() { m_propagationStopped = true; }
     void stopImmediatePropagation() { m_immediatePropagationStopped = true; }
@@ -170,6 +184,7 @@ public:
 
     bool propagationStopped() const { return m_propagationStopped || m_immediatePropagationStopped; }
     bool immediatePropagationStopped() const { return m_immediatePropagationStopped; }
+    bool wasInitialized() { return m_wasInitialized; }
 
     bool defaultPrevented() const { return m_defaultPrevented; }
     virtual void preventDefault();
@@ -178,17 +193,18 @@ public:
     bool defaultHandled() const { return m_defaultHandled; }
     void setDefaultHandled() { m_defaultHandled = true; }
 
-    bool cancelBubble() const { return m_cancelBubble; }
-    void setCancelBubble(bool cancel) { m_cancelBubble = cancel; }
+    bool cancelBubble(ExecutionContext* = nullptr) const { return m_cancelBubble; }
+    void setCancelBubble(ExecutionContext*, bool);
 
     Event* underlyingEvent() const { return m_underlyingEvent.get(); }
     void setUnderlyingEvent(Event*);
 
-    EventPath& eventPath() { ASSERT(m_eventPath); return *m_eventPath; }
+    bool hasEventPath() { return m_eventPath; }
+    EventPath& eventPath() { DCHECK(m_eventPath); return *m_eventPath; }
     void initEventPath(Node&);
 
     HeapVector<Member<EventTarget>> path(ScriptState*) const;
-    HeapVector<Member<EventTarget>> deepPath(ScriptState*) const;
+    HeapVector<Member<EventTarget>> composedPath(ScriptState*) const;
 
     bool isBeingDispatched() const { return eventPhase(); }
 
@@ -201,26 +217,29 @@ public:
     bool isTrusted() const { return m_isTrusted; }
     void setTrusted(bool value) { m_isTrusted = value; }
 
-    void setHandlingPassive(bool value) { m_handlingPassive = value; }
+    void setHandlingPassive(PassiveMode);
+
+    bool preventDefaultCalledDuringPassive() const { return m_preventDefaultCalledDuringPassive; }
+
+    bool preventDefaultCalledOnUncancelableEvent() const { return m_preventDefaultCalledOnUncancelableEvent; }
 
     DECLARE_VIRTUAL_TRACE();
 
 protected:
     Event();
-    Event(const AtomicString& type, bool canBubble, bool cancelable);
-    Event(const AtomicString& type, bool canBubble, bool cancelable, EventTarget* relatedTarget);
+    Event(const AtomicString& type, bool canBubble, bool cancelable, ComposedMode, double platformTimeStamp);
     Event(const AtomicString& type, bool canBubble, bool cancelable, double platformTimeStamp);
-    Event(const AtomicString& type, bool canBubble, bool cancelable, EventTarget* relatedTarget, double platformTimeStamp);
-    Event(const AtomicString& type, bool canBubble, bool cancelable, bool scoped);
-    Event(const AtomicString& type, bool canBubble, bool cancelable, bool scoped, bool relatedTargetScoped, double platformTimeStamp);
+    Event(const AtomicString& type, bool canBubble, bool cancelable, ComposedMode = ComposedMode::Scoped);
     Event(const AtomicString& type, const EventInit&);
 
     virtual void receivedTarget();
-    bool dispatched() const { return m_target; }
 
     void setCanBubble(bool bubble) { m_canBubble = bubble; }
 
+    PassiveMode handlingPassive() const { return m_handlingPassive; }
+
 private:
+
     enum EventPathMode {
         EmptyAfterDispatch,
         NonEmptyAfterDispatch
@@ -231,21 +250,27 @@ private:
     AtomicString m_type;
     unsigned m_canBubble:1;
     unsigned m_cancelable:1;
-    unsigned m_scoped:1;
-    unsigned m_relatedTargetScoped:1;
+    unsigned m_composed:1;
+    unsigned m_isEventTypeScopedInV0:1;
 
     unsigned m_propagationStopped:1;
     unsigned m_immediatePropagationStopped:1;
     unsigned m_defaultPrevented:1;
     unsigned m_defaultHandled:1;
     unsigned m_cancelBubble:1;
+    unsigned m_wasInitialized:1;
     unsigned m_isTrusted : 1;
-    unsigned m_handlingPassive : 1;
 
+    // Whether preventDefault was called when |m_handlingPassive| is
+    // true. This field is reset on each call to setHandlingPassive.
+    unsigned m_preventDefaultCalledDuringPassive : 1;
+    // Whether preventDefault was called on uncancelable event.
+    unsigned m_preventDefaultCalledOnUncancelableEvent : 1;
+
+    PassiveMode m_handlingPassive;
     unsigned short m_eventPhase;
     Member<EventTarget> m_currentTarget;
     Member<EventTarget> m_target;
-    DOMTimeStamp m_createTime;
     Member<Event> m_underlyingEvent;
     Member<EventPath> m_eventPath;
     // The monotonic platform time in seconds, for input events it is the

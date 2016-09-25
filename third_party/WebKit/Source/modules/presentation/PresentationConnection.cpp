@@ -21,11 +21,12 @@
 #include "modules/presentation/PresentationConnectionAvailableEvent.h"
 #include "modules/presentation/PresentationConnectionCloseEvent.h"
 #include "modules/presentation/PresentationController.h"
+#include "modules/presentation/PresentationReceiver.h"
 #include "modules/presentation/PresentationRequest.h"
 #include "public/platform/modules/presentation/WebPresentationConnectionClient.h"
 #include "wtf/Assertions.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/text/AtomicString.h"
+#include <memory>
 
 namespace blink {
 
@@ -123,9 +124,9 @@ class PresentationConnection::BlobLoader final : public GarbageCollectedFinalize
 public:
     BlobLoader(PassRefPtr<BlobDataHandle> blobDataHandle, PresentationConnection* PresentationConnection)
         : m_PresentationConnection(PresentationConnection)
-        , m_loader(FileReaderLoader::ReadAsArrayBuffer, this)
+        , m_loader(FileReaderLoader::create(FileReaderLoader::ReadAsArrayBuffer, this))
     {
-        m_loader.start(m_PresentationConnection->getExecutionContext(), blobDataHandle);
+        m_loader->start(m_PresentationConnection->getExecutionContext(), std::move(blobDataHandle));
     }
     ~BlobLoader() override { }
 
@@ -134,7 +135,7 @@ public:
     void didReceiveData() override { }
     void didFinishLoading() override
     {
-        m_PresentationConnection->didFinishLoadingBlob(m_loader.arrayBufferResult());
+        m_PresentationConnection->didFinishLoadingBlob(m_loader->arrayBufferResult());
     }
     void didFail(FileError::ErrorCode errorCode) override
     {
@@ -143,7 +144,7 @@ public:
 
     void cancel()
     {
-        m_loader.cancel();
+        m_loader->cancel();
     }
 
     DEFINE_INLINE_TRACE()
@@ -153,10 +154,10 @@ public:
 
 private:
     Member<PresentationConnection> m_PresentationConnection;
-    FileReaderLoader m_loader;
+    std::unique_ptr<FileReaderLoader> m_loader;
 };
 
-PresentationConnection::PresentationConnection(LocalFrame* frame, const String& id, const String& url)
+PresentationConnection::PresentationConnection(LocalFrame* frame, const String& id, const KURL& url)
     : DOMWindowProperty(frame)
     , m_id(id)
     , m_url(url)
@@ -171,7 +172,7 @@ PresentationConnection::~PresentationConnection()
 }
 
 // static
-PresentationConnection* PresentationConnection::take(ScriptPromiseResolver* resolver, PassOwnPtr<WebPresentationConnectionClient> client, PresentationRequest* request)
+PresentationConnection* PresentationConnection::take(ScriptPromiseResolver* resolver, std::unique_ptr<WebPresentationConnectionClient> client, PresentationRequest* request)
 {
     ASSERT(resolver);
     ASSERT(client);
@@ -186,11 +187,11 @@ PresentationConnection* PresentationConnection::take(ScriptPromiseResolver* reso
     if (!controller)
         return nullptr;
 
-    return take(controller, client, request);
+    return take(controller, std::move(client), request);
 }
 
 // static
-PresentationConnection* PresentationConnection::take(PresentationController* controller, PassOwnPtr<WebPresentationConnectionClient> client, PresentationRequest* request)
+PresentationConnection* PresentationConnection::take(PresentationController* controller, std::unique_ptr<WebPresentationConnectionClient> client, PresentationRequest* request)
 {
     ASSERT(controller);
     ASSERT(request);
@@ -198,6 +199,18 @@ PresentationConnection* PresentationConnection::take(PresentationController* con
     PresentationConnection* connection = new PresentationConnection(controller->frame(), client->getId(), client->getUrl());
     controller->registerConnection(connection);
     request->dispatchEvent(PresentationConnectionAvailableEvent::create(EventTypeNames::connectionavailable, connection));
+
+    return connection;
+}
+
+// static
+PresentationConnection* PresentationConnection::take(PresentationReceiver* receiver, std::unique_ptr<WebPresentationConnectionClient> client)
+{
+    DCHECK(receiver);
+    DCHECK(client);
+
+    PresentationConnection* connection = new PresentationConnection(receiver->frame(), client->getId(), client->getUrl());
+    receiver->registerConnection(connection);
 
     return connection;
 }
@@ -214,8 +227,9 @@ ExecutionContext* PresentationConnection::getExecutionContext() const
     return frame()->document();
 }
 
-bool PresentationConnection::addEventListenerInternal(const AtomicString& eventType, EventListener* listener, const EventListenerOptions& options)
+void PresentationConnection::addedEventListener(const AtomicString& eventType, RegisteredEventListener& registeredListener)
 {
+    EventTargetWithInlineData::addedEventListener(eventType, registeredListener);
     if (eventType == EventTypeNames::connect)
         UseCounter::count(getExecutionContext(), UseCounter::PresentationConnectionConnectEventListener);
     else if (eventType == EventTypeNames::close)
@@ -224,8 +238,6 @@ bool PresentationConnection::addEventListenerInternal(const AtomicString& eventT
         UseCounter::count(getExecutionContext(), UseCounter::PresentationConnectionTerminateEventListener);
     else if (eventType == EventTypeNames::message)
         UseCounter::count(getExecutionContext(), UseCounter::PresentationConnectionMessageEventListener);
-
-    return EventTarget::addEventListenerInternal(eventType, listener, options);
 }
 
 DEFINE_TRACE(PresentationConnection)
@@ -356,9 +368,9 @@ void PresentationConnection::didReceiveBinaryMessage(const uint8_t* data, size_t
 
     switch (m_binaryType) {
     case BinaryTypeBlob: {
-        OwnPtr<BlobData> blobData = BlobData::create();
+        std::unique_ptr<BlobData> blobData = BlobData::create();
         blobData->appendBytes(data, length);
-        Blob* blob = Blob::create(BlobDataHandle::create(blobData.release(), length));
+        Blob* blob = Blob::create(BlobDataHandle::create(std::move(blobData), length));
         dispatchEvent(MessageEvent::create(blob));
         return;
     }
@@ -394,7 +406,7 @@ void PresentationConnection::terminate()
 
 bool PresentationConnection::matches(WebPresentationConnectionClient* client) const
 {
-    return client && m_url == static_cast<String>(client->getUrl()) && m_id == static_cast<String>(client->getId());
+    return client && m_url == KURL(client->getUrl()) && m_id == static_cast<String>(client->getId());
 }
 
 void PresentationConnection::didChangeState(WebPresentationConnectionState state)

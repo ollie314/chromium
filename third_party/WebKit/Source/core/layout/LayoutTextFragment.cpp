@@ -27,7 +27,6 @@
 #include "core/dom/StyleChangeReason.h"
 #include "core/dom/Text.h"
 #include "core/layout/HitTestResult.h"
-#include "core/layout/LayoutBlock.h"
 
 namespace blink {
 
@@ -86,7 +85,7 @@ PassRefPtr<StringImpl> LayoutTextFragment::originalText() const
 
 void LayoutTextFragment::setText(PassRefPtr<StringImpl> text, bool force)
 {
-    LayoutText::setText(text, force);
+    LayoutText::setText(std::move(text), force);
 
     m_start = 0;
     m_fragmentLength = textLength();
@@ -102,7 +101,7 @@ void LayoutTextFragment::setText(PassRefPtr<StringImpl> text, bool force)
 
 void LayoutTextFragment::setTextFragment(PassRefPtr<StringImpl> text, unsigned start, unsigned length)
 {
-    LayoutText::setText(text, false);
+    LayoutText::setText(std::move(text), false);
 
     m_start = start;
     m_fragmentLength = length;

@@ -10,6 +10,7 @@
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/RemoteFrameView.h"
 #include "core/layout/LayoutPart.h"
+#include "core/layout/api/LayoutItem.h"
 #include "platform/exported/WrappedResourceRequest.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/SecurityPolicy.h"
@@ -17,6 +18,8 @@
 #include "web/WebInputEventConversion.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebRemoteFrameImpl.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -116,14 +119,6 @@ Frame* RemoteFrameClientImpl::lastChild() const
     return toCoreFrame(m_webFrame->lastChild());
 }
 
-bool RemoteFrameClientImpl::willCheckAndDispatchMessageEvent(
-    SecurityOrigin* target, MessageEvent* event, LocalFrame* sourceFrame) const
-{
-    if (m_webFrame->client())
-        m_webFrame->client()->postMessageEvent(WebLocalFrameImpl::fromFrame(sourceFrame), m_webFrame, WebSecurityOrigin(target), WebDOMMessageEvent(event));
-    return true;
-}
-
 void RemoteFrameClientImpl::frameFocused() const
 {
     if (m_webFrame->client())
@@ -138,7 +133,7 @@ void RemoteFrameClientImpl::navigate(const ResourceRequest& request, bool should
 
 void RemoteFrameClientImpl::reload(FrameLoadType loadType, ClientRedirectPolicy clientRedirectPolicy)
 {
-    ASSERT(loadType == FrameLoadTypeReload || loadType == FrameLoadTypeReloadBypassingCache);
+    DCHECK(isReloadLoadType(loadType));
     if (m_webFrame->client())
         m_webFrame->client()->reload(static_cast<WebFrameLoadType>(loadType), static_cast<WebClientRedirectPolicy>(clientRedirectPolicy));
 }
@@ -150,6 +145,13 @@ unsigned RemoteFrameClientImpl::backForwardLength()
     // navigation and the subsequent one moving the frame out-of-process.
     // See https://crbug.com/501116.
     return 2;
+}
+
+void RemoteFrameClientImpl::forwardPostMessage(
+    MessageEvent* event, PassRefPtr<SecurityOrigin> target, LocalFrame* sourceFrame) const
+{
+    if (m_webFrame->client())
+        m_webFrame->client()->forwardPostMessage(WebLocalFrameImpl::fromFrame(sourceFrame), m_webFrame, WebSecurityOrigin(std::move(target)), WebDOMMessageEvent(event));
 }
 
 // FIXME: Remove this code once we have input routing in the browser
@@ -172,13 +174,11 @@ void RemoteFrameClientImpl::forwardInputEvent(Event* event)
     // This is only called when we have out-of-process iframes, which
     // need to forward input events across processes.
     // FIXME: Add a check for out-of-process iframes enabled.
-    OwnPtr<WebInputEvent> webEvent;
+    std::unique_ptr<WebInputEvent> webEvent;
     if (event->isKeyboardEvent())
-        webEvent = adoptPtr(new WebKeyboardEventBuilder(*static_cast<KeyboardEvent*>(event)));
+        webEvent = wrapUnique(new WebKeyboardEventBuilder(*static_cast<KeyboardEvent*>(event)));
     else if (event->isMouseEvent())
-        webEvent = adoptPtr(new WebMouseEventBuilder(m_webFrame->frame()->view(), m_webFrame->toImplBase()->frame()->ownerLayoutObject(), *static_cast<MouseEvent*>(event)));
-    else if (event->isWheelEvent())
-        webEvent = adoptPtr(new WebMouseWheelEventBuilder(m_webFrame->frame()->view(), m_webFrame->toImplBase()->frame()->ownerLayoutObject(), *static_cast<WheelEvent*>(event)));
+        webEvent = wrapUnique(new WebMouseEventBuilder(m_webFrame->frame()->view(), LayoutItem(m_webFrame->toImplBase()->frame()->ownerLayoutObject()), *static_cast<MouseEvent*>(event)));
 
     // Other or internal Blink events should not be forwarded.
     if (!webEvent || webEvent->type == WebInputEvent::Undefined)

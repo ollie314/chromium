@@ -22,6 +22,15 @@ struct GPU_EXPORT GpuPreferences {
 
   ~GpuPreferences();
 
+  // Support for accelerated vpx decoding for various vendors,
+  // intended to be used as a bitfield.
+  // VPX_VENDOR_ALL should be updated whenever a new entry is added.
+  enum VpxDecodeVendors {
+    VPX_VENDOR_NONE = 0x00,
+    VPX_VENDOR_MICROSOFT = 0x01,
+    VPX_VENDOR_AMD = 0x02,
+    VPX_VENDOR_ALL = 0x03,
+  };
   // ===================================
   // Settings from //content/public/common/content_switches.h
 
@@ -49,7 +58,14 @@ struct GPU_EXPORT GpuPreferences {
 
 #if defined(OS_WIN)
   // Enables experimental hardware acceleration for VP8/VP9 video decoding.
-  bool enable_accelerated_vpx_decode = false;
+  // Bitmask - 0x1=Microsoft, 0x2=AMD, 0x03=Try all.
+  VpxDecodeVendors enable_accelerated_vpx_decode = VPX_VENDOR_MICROSOFT;
+
+  // Enables support for avoiding copying DXGI NV12 textures.
+  bool enable_zero_copy_dxgi_video = false;
+
+  // Enables support for outputting NV12 video frames.
+  bool enable_nv12_dxgi_video = false;
 #endif
 
   // ===================================
@@ -97,9 +113,6 @@ struct GPU_EXPORT GpuPreferences {
   // Allows async texture uploads (off main thread) via GL context sharing.
   bool enable_share_group_async_texture_upload = false;
 
-  // Enable WebGL subscribe uniform extension.
-  bool enable_subscribe_uniform_extension = false;
-
   // Simulates shared textures when share groups are not available.
   // Not available everywhere.
   bool enable_threaded_texture_mailboxes = false;
@@ -123,6 +136,10 @@ struct GPU_EXPORT GpuPreferences {
 
   // Enable OpenGL ES 3 APIs without proper service side validation.
   bool enable_unsafe_es3_apis = false;
+
+  // Use the Pass-through command decoder, skipping all validation and state
+  // tracking.
+  bool use_passthrough_cmd_decoder = false;
 };
 
 }  // namespace gpu

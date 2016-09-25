@@ -26,7 +26,6 @@ class Thread;
 namespace content {
 class BrowserChildProcessHostImpl;
 class InProcessChildThreadParams;
-class MojoApplicationHost;
 
 typedef base::Thread* (*UtilityMainThreadFactoryFunction)(
     const InProcessChildThreadParams&);
@@ -58,7 +57,7 @@ class CONTENT_EXPORT UtilityProcessHostImpl
   void SetEnv(const base::EnvironmentMap& env) override;
 #endif
   bool Start() override;
-  ServiceRegistry* GetServiceRegistry() override;
+  shell::InterfaceProvider* GetRemoteInterfaces() override;
   void SetName(const base::string16& name) override;
 
   void set_child_flags(int flags) { child_flags_ = flags; }
@@ -75,15 +74,16 @@ class CONTENT_EXPORT UtilityProcessHostImpl
 
   // BrowserChildProcessHost:
   bool OnMessageReceived(const IPC::Message& message) override;
-  void OnProcessLaunchFailed() override;
+  void OnProcessLaunchFailed(int error_code) override;
   void OnProcessCrashed(int exit_code) override;
 
   // Cleans up |this| as a result of a failed Start().
-  void NotifyAndDelete();
+  void NotifyAndDelete(int error_code);
 
   // Notifies the client that the launch failed and deletes |host|.
   static void NotifyLaunchFailedAndDelete(
-      base::WeakPtr<UtilityProcessHostImpl> host);
+      base::WeakPtr<UtilityProcessHostImpl> host,
+      int error_code);
 
   // A pointer to our client interface, who will be informed of progress.
   scoped_refptr<UtilityProcessHostClient> client_;
@@ -115,10 +115,6 @@ class CONTENT_EXPORT UtilityProcessHostImpl
 
   // Used in single-process mode instead of process_.
   std::unique_ptr<base::Thread> in_process_thread_;
-
-  // Browser-side Mojo endpoint which sets up a Mojo channel with the child
-  // process and contains the browser's ServiceRegistry.
-  std::unique_ptr<MojoApplicationHost> mojo_application_host_;
 
   // Used to vend weak pointers, and should always be declared last.
   base::WeakPtrFactory<UtilityProcessHostImpl> weak_ptr_factory_;

@@ -5,6 +5,7 @@
 #include "components/crash/content/app/breakpad_win.h"
 
 #include <windows.h>
+#include <intrin.h>
 #include <shellapi.h>
 #include <stddef.h>
 #include <tchar.h>
@@ -29,9 +30,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/synchronization/lock.h"
 #include "base/win/pe_image.h"
-#include "base/win/registry.h"
 #include "base/win/win_util.h"
 #include "breakpad/src/client/windows/common/ipc_protocol.h"
 #include "breakpad/src/client/windows/handler/exception_handler.h"
@@ -199,8 +198,6 @@ namespace {
 bool DumpDoneCallbackWhenNoCrash(const wchar_t*, const wchar_t*, void*,
                                  EXCEPTION_POINTERS* ex_info,
                                  MDRawAssertionInfo*, bool succeeded) {
-  GetCrashReporterClient()->RecordCrashDumpAttemptResult(
-      false /* is_real_crash */, succeeded);
   return true;
 }
 
@@ -213,8 +210,6 @@ bool DumpDoneCallbackWhenNoCrash(const wchar_t*, const wchar_t*, void*,
 bool DumpDoneCallback(const wchar_t*, const wchar_t*, void*,
                       EXCEPTION_POINTERS* ex_info,
                       MDRawAssertionInfo*, bool succeeded) {
-  GetCrashReporterClient()->RecordCrashDumpAttemptResult(
-      true /* is_real_crash */, succeeded);
   // Check if the exception is one of the kind which would not be solved
   // by simply restarting chrome. In this case we show a message box with
   // and exit silently. Remember that chrome is in a crashed state so we
@@ -246,7 +241,6 @@ volatile LONG handling_exception = 0;
 // to implement it.
 bool FilterCallbackWhenNoCrash(
     void*, EXCEPTION_POINTERS*, MDRawAssertionInfo*) {
-  GetCrashReporterClient()->RecordCrashDumpAttempt(false);
   return true;
 }
 
@@ -260,7 +254,6 @@ bool FilterCallback(void*, EXCEPTION_POINTERS*, MDRawAssertionInfo*) {
   if (::InterlockedCompareExchange(&handling_exception, 1, 0) == 1) {
     ::Sleep(INFINITE);
   }
-  GetCrashReporterClient()->RecordCrashDumpAttempt(true);
   return true;
 }
 
@@ -545,7 +538,7 @@ void InitCrashReporter(const std::string& process_type_switch) {
   GetModuleFileNameW(NULL, exe_path, MAX_PATH);
 
   bool is_per_user_install =
-      GetCrashReporterClient()->GetIsPerUserInstall(base::FilePath(exe_path));
+      GetCrashReporterClient()->GetIsPerUserInstall(exe_path);
 
   // This is intentionally leaked.
   CrashKeysWin* keeper = new CrashKeysWin();
@@ -580,9 +573,6 @@ void InitCrashReporter(const std::string& process_type_switch) {
 
   if (GetCrashReporterClient()->ShouldCreatePipeName(process_type))
     InitPipeNameEnvVar(is_per_user_install);
-
-  if (process_type == L"browser")
-    GetCrashReporterClient()->InitBrowserCrashDumpsRegKey();
 
   std::unique_ptr<base::Environment> env(base::Environment::Create());
   std::string pipe_name_ascii;

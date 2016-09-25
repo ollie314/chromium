@@ -24,39 +24,41 @@
 
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/ScriptState.h"
-#include "platform/PlatformKeyboardEvent.h"
 #include "platform/WindowsKeyboardCodes.h"
+#include "public/platform/Platform.h"
+#include "public/platform/WebInputEvent.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
-static inline const AtomicString& eventTypeForKeyboardEventType(PlatformEvent::EventType type)
+static inline const AtomicString& eventTypeForKeyboardEventType(WebInputEvent::Type type)
 {
     switch (type) {
-        case PlatformEvent::KeyUp:
-            return EventTypeNames::keyup;
-        case PlatformEvent::RawKeyDown:
-            return EventTypeNames::keydown;
-        case PlatformEvent::Char:
-            return EventTypeNames::keypress;
-        case PlatformEvent::KeyDown:
-            // The caller should disambiguate the combined event into RawKeyDown or Char events.
-            break;
-        default:
-            break;
+    case WebInputEvent::KeyUp:
+        return EventTypeNames::keyup;
+    case WebInputEvent::RawKeyDown:
+        return EventTypeNames::keydown;
+    case WebInputEvent::Char:
+        return EventTypeNames::keypress;
+    case WebInputEvent::KeyDown:
+        // The caller should disambiguate the combined event into RawKeyDown or Char events.
+        break;
+    default:
+        break;
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return EventTypeNames::keydown;
 }
 
-static inline KeyboardEvent::KeyLocationCode keyLocationCode(const PlatformKeyboardEvent& key)
+static inline KeyboardEvent::KeyLocationCode keyLocationCode(const WebInputEvent& key)
 {
-    if (key.isKeypad())
-        return KeyboardEvent::DOM_KEY_LOCATION_NUMPAD;
-    if (key.getModifiers() & PlatformEvent::IsLeft)
-        return KeyboardEvent::DOM_KEY_LOCATION_LEFT;
-    if (key.getModifiers() & PlatformEvent::IsRight)
-        return KeyboardEvent::DOM_KEY_LOCATION_RIGHT;
-    return KeyboardEvent::DOM_KEY_LOCATION_STANDARD;
+    if (key.modifiers & WebInputEvent::IsKeyPad)
+        return KeyboardEvent::kDomKeyLocationNumpad;
+    if (key.modifiers & WebInputEvent::IsLeft)
+        return KeyboardEvent::kDomKeyLocationLeft;
+    if (key.modifiers & WebInputEvent::IsRight)
+        return KeyboardEvent::kDomKeyLocationRight;
+    return KeyboardEvent::kDomKeyLocationStandard;
 }
 
 KeyboardEvent* KeyboardEvent::create(ScriptState* scriptState, const AtomicString& type, const KeyboardEventInit& initializer)
@@ -67,16 +69,16 @@ KeyboardEvent* KeyboardEvent::create(ScriptState* scriptState, const AtomicStrin
 }
 
 KeyboardEvent::KeyboardEvent()
-    : m_location(DOM_KEY_LOCATION_STANDARD)
+    : m_location(kDomKeyLocationStandard)
 {
 }
 
-KeyboardEvent::KeyboardEvent(const PlatformKeyboardEvent& key, AbstractView* view)
-    : UIEventWithKeyState(eventTypeForKeyboardEventType(key.type()), true, true, view, 0, key.getModifiers(), key.timestamp(), InputDeviceCapabilities::doesntFireTouchEventsSourceCapabilities())
-    , m_keyEvent(adoptPtr(new PlatformKeyboardEvent(key)))
-    , m_keyIdentifier(key.keyIdentifier())
-    , m_code(key.code())
-    , m_key(key.key())
+KeyboardEvent::KeyboardEvent(const WebKeyboardEvent& key, AbstractView* view)
+    : UIEventWithKeyState(eventTypeForKeyboardEventType(key.type), true, true, view, 0, static_cast<PlatformEvent::Modifiers>(key.modifiers), key.timeStampSeconds, InputDeviceCapabilities::doesntFireTouchEventsSourceCapabilities())
+    , m_keyEvent(wrapUnique(new WebKeyboardEvent(key)))
+    // TODO: BUG482880 Fix this initialization to lazy initialization.
+    , m_code(Platform::current()->domCodeStringFromEnum(key.domCode))
+    , m_key(Platform::current()->domKeyStringFromEnum(key.domKey))
     , m_location(keyLocationCode(key))
 {
     initLocationModifiers(m_location);
@@ -84,7 +86,6 @@ KeyboardEvent::KeyboardEvent(const PlatformKeyboardEvent& key, AbstractView* vie
 
 KeyboardEvent::KeyboardEvent(const AtomicString& eventType, const KeyboardEventInit& initializer)
     : UIEventWithKeyState(eventType, initializer)
-    , m_keyIdentifier(initializer.keyIdentifier())
     , m_code(initializer.code())
     , m_key(initializer.key())
     , m_location(initializer.location())
@@ -95,10 +96,9 @@ KeyboardEvent::KeyboardEvent(const AtomicString& eventType, const KeyboardEventI
 }
 
 KeyboardEvent::KeyboardEvent(const AtomicString& eventType, bool canBubble, bool cancelable, AbstractView* view,
-    const String& keyIdentifier, const String& code, const String& key, unsigned location, PlatformEvent::Modifiers modifiers,
+    const String& code, const String& key, unsigned location, PlatformEvent::Modifiers modifiers,
     double plaformTimeStamp)
     : UIEventWithKeyState(eventType, canBubble, cancelable, view, 0, modifiers, plaformTimeStamp, InputDeviceCapabilities::doesntFireTouchEventsSourceCapabilities())
-    , m_keyIdentifier(keyIdentifier)
     , m_code(code)
     , m_key(key)
     , m_location(location)
@@ -113,7 +113,7 @@ KeyboardEvent::~KeyboardEvent()
 void KeyboardEvent::initKeyboardEvent(ScriptState* scriptState, const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view,
     const String& keyIdentifier, unsigned location, bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
 {
-    if (dispatched())
+    if (isBeingDispatched())
         return;
 
     if (scriptState->world().isIsolatedWorld())
@@ -121,7 +121,6 @@ void KeyboardEvent::initKeyboardEvent(ScriptState* scriptState, const AtomicStri
 
     initUIEvent(type, canBubble, cancelable, view, 0);
 
-    m_keyIdentifier = keyIdentifier;
     m_location = location;
     initModifiers(ctrlKey, altKey, shiftKey, metaKey);
     initLocationModifiers(location);
@@ -138,12 +137,12 @@ int KeyboardEvent::keyCode() const
 #if OS(ANDROID)
     // FIXME: Check to see if this applies to other OS.
     // If the key event belongs to IME composition then propagate to JS.
-    if (m_keyEvent->nativeVirtualKeyCode() == 0xE5) // VKEY_PROCESSKEY
-        return m_keyEvent->nativeVirtualKeyCode();
+    if (m_keyEvent->nativeKeyCode == 0xE5) // VKEY_PROCESSKEY
+        return m_keyEvent->nativeKeyCode;
 #endif
 
     if (type() == EventTypeNames::keydown || type() == EventTypeNames::keyup)
-        return m_keyEvent->windowsVirtualKeyCode();
+        return m_keyEvent->windowsKeyCode;
 
     return charCode();
 }
@@ -156,8 +155,7 @@ int KeyboardEvent::charCode() const
 
     if (!m_keyEvent || (type() != EventTypeNames::keypress))
         return 0;
-    String text = m_keyEvent->text();
-    return static_cast<int>(text.characterStartingAt(0));
+    return m_keyEvent->text[0];
 }
 
 const AtomicString& KeyboardEvent::interfaceName() const
@@ -180,13 +178,13 @@ int KeyboardEvent::which() const
 void KeyboardEvent::initLocationModifiers(unsigned location)
 {
     switch (location) {
-    case KeyboardEvent::DOM_KEY_LOCATION_NUMPAD:
+    case KeyboardEvent::kDomKeyLocationNumpad:
         m_modifiers |= PlatformEvent::IsKeyPad;
         break;
-    case KeyboardEvent::DOM_KEY_LOCATION_LEFT:
+    case KeyboardEvent::kDomKeyLocationLeft:
         m_modifiers |= PlatformEvent::IsLeft;
         break;
-    case KeyboardEvent::DOM_KEY_LOCATION_RIGHT:
+    case KeyboardEvent::kDomKeyLocationRight:
         m_modifiers |= PlatformEvent::IsRight;
         break;
     }

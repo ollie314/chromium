@@ -5,6 +5,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "content/renderer/media/android/media_info_loader.h"
 #include "content/test/mock_webframeclient.h"
 #include "content/test/mock_weburlloader.h"
@@ -39,7 +40,7 @@ static const int kHttpNotFound = 404;
 class MediaInfoLoaderTest : public testing::Test {
  public:
   MediaInfoLoaderTest()
-      : view_(WebView::create(NULL)),
+      : view_(WebView::create(nullptr, blink::WebPageVisibilityStateVisible)),
         frame_(WebLocalFrame::create(blink::WebTreeScopeType::Document,
                                      &client_)) {
     view_->setMainFrame(frame_);
@@ -82,9 +83,9 @@ class MediaInfoLoaderTest : public testing::Test {
     blink::WebURLRequest new_request(redirect_url);
     blink::WebURLResponse redirect_response(gurl_);
 
-    loader_->willFollowRedirect(url_loader_, new_request, redirect_response);
+    loader_->willFollowRedirect(url_loader_, new_request, redirect_response, 0);
 
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void SendResponse(

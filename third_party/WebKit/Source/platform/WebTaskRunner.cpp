@@ -4,28 +4,26 @@
 
 #include "public/platform/WebTaskRunner.h"
 
-#include "platform/Task.h"
-
 namespace blink {
 
-void WebTaskRunner::postTask(const WebTraceLocation& location, PassOwnPtr<CrossThreadClosure> task)
+void WebTaskRunner::postTask(const WebTraceLocation& location, std::unique_ptr<CrossThreadClosure> task)
 {
-    postTask(location, new CrossThreadTask(std::move(task)));
+    toSingleThreadTaskRunner()->PostTask(location, convertToBaseCallback(std::move(task)));
 }
 
-void WebTaskRunner::postDelayedTask(const WebTraceLocation& location, PassOwnPtr<CrossThreadClosure> task, long long delayMs)
+void WebTaskRunner::postDelayedTask(const WebTraceLocation& location, std::unique_ptr<CrossThreadClosure> task, long long delayMs)
 {
-    postDelayedTask(location, new CrossThreadTask(std::move(task)), delayMs);
+    toSingleThreadTaskRunner()->PostDelayedTask(location, convertToBaseCallback(std::move(task)), base::TimeDelta::FromMilliseconds(delayMs));
 }
 
-void WebTaskRunner::postTask(const WebTraceLocation& location, PassOwnPtr<SameThreadClosure> task)
+void WebTaskRunner::postTask(const WebTraceLocation& location, std::unique_ptr<WTF::Closure> task)
 {
-    postTask(location, new SameThreadTask(std::move(task)));
+    toSingleThreadTaskRunner()->PostTask(location, convertToBaseCallback(std::move(task)));
 }
 
-void WebTaskRunner::postDelayedTask(const WebTraceLocation& location, PassOwnPtr <SameThreadClosure> task, long long delayMs)
+void WebTaskRunner::postDelayedTask(const WebTraceLocation& location, std::unique_ptr<WTF::Closure> task, long long delayMs)
 {
-    postDelayedTask(location, new SameThreadTask(std::move(task)), delayMs);
+    toSingleThreadTaskRunner()->PostDelayedTask(location, convertToBaseCallback(std::move(task)), base::TimeDelta::FromMilliseconds(delayMs));
 }
 
 } // namespace blink

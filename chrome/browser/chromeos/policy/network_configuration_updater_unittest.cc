@@ -12,6 +12,7 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/device_network_configuration_updater.h"
@@ -30,15 +31,15 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_service_impl.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/policy/policy_constants.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_type.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
-#include "net/base/test_data_directory.h"
 #include "net/cert/x509_certificate.h"
 #include "net/test/cert_test_util.h"
-#include "policy/policy_constants.h"
+#include "net/test/test_data_directory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -91,13 +92,19 @@ class FakeWebTrustedCertsObserver
 
 class FakeNetworkDeviceHandler : public chromeos::FakeNetworkDeviceHandler {
  public:
-  FakeNetworkDeviceHandler() : allow_roaming_(false) {}
+  FakeNetworkDeviceHandler()
+      : allow_roaming_(false), mac_addr_randomization_(false) {}
 
   void SetCellularAllowRoaming(bool allow_roaming) override {
     allow_roaming_ = allow_roaming;
   }
 
+  void SetMACAddressRandomizationEnabled(bool enabled) override {
+    mac_addr_randomization_ = enabled;
+  }
+
   bool allow_roaming_;
+  bool mac_addr_randomization_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeNetworkDeviceHandler);
@@ -349,12 +356,9 @@ TEST_F(NetworkConfigurationUpdaterTest, PolicyIsValidatedAndRepaired) {
   std::string onc_policy =
       chromeos::onc::test_utils::ReadTestData("toplevel_partially_invalid.onc");
   PolicyMap policy;
-  policy.Set(key::kOpenNetworkConfiguration,
-             POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER,
-             POLICY_SOURCE_CLOUD,
-             new base::StringValue(onc_policy),
-             NULL);
+  policy.Set(key::kOpenNetworkConfiguration, POLICY_LEVEL_MANDATORY,
+             POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
+             base::MakeUnique<base::StringValue>(onc_policy), nullptr);
   UpdateProviderPolicy(policy);
 
   EXPECT_CALL(network_config_handler_,
@@ -473,12 +477,9 @@ TEST_F(NetworkConfigurationUpdaterTest,
   // Change to any non-empty policy, so that updates are triggered. The actual
   // content of the policy is irrelevant.
   PolicyMap policy;
-  policy.Set(key::kOpenNetworkConfiguration,
-             POLICY_LEVEL_MANDATORY,
-             POLICY_SCOPE_USER,
-             POLICY_SOURCE_CLOUD,
-             new base::StringValue(kFakeONC),
-             NULL);
+  policy.Set(key::kOpenNetworkConfiguration, POLICY_LEVEL_MANDATORY,
+             POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
+             base::MakeUnique<base::StringValue>(kFakeONC), nullptr);
   UpdateProviderPolicy(policy);
   base::RunLoop().RunUntilIdle();
 
@@ -499,7 +500,7 @@ TEST_F(NetworkConfigurationUpdaterTest,
   PolicyMap policy;
   policy.Set(key::kOpenNetworkConfiguration, POLICY_LEVEL_MANDATORY,
              POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-             new base::StringValue(kFakeONC), nullptr);
+             base::MakeUnique<base::StringValue>(kFakeONC), nullptr);
   UpdateProviderPolicy(policy);
 
   EXPECT_CALL(network_config_handler_,
@@ -566,7 +567,8 @@ class NetworkConfigurationUpdaterTestWithParam
 TEST_P(NetworkConfigurationUpdaterTestWithParam, InitialUpdates) {
   PolicyMap policy;
   policy.Set(GetParam(), POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             POLICY_SOURCE_CLOUD, new base::StringValue(kFakeONC), nullptr);
+             POLICY_SOURCE_CLOUD, base::MakeUnique<base::StringValue>(kFakeONC),
+             nullptr);
   UpdateProviderPolicy(policy);
 
   EXPECT_CALL(network_config_handler_,
@@ -587,7 +589,8 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam,
        PolicyNotSetBeforePolicyProviderInitialized) {
   PolicyMap policy;
   policy.Set(GetParam(), POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             POLICY_SOURCE_CLOUD, new base::StringValue(kFakeONC), nullptr);
+             POLICY_SOURCE_CLOUD, base::MakeUnique<base::StringValue>(kFakeONC),
+             nullptr);
   UpdateProviderPolicy(policy);
 
   CreateNetworkConfigurationUpdater();
@@ -614,7 +617,8 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam,
 
   PolicyMap policy;
   policy.Set(GetParam(), POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             POLICY_SOURCE_CLOUD, new base::StringValue(kFakeONC), nullptr);
+             POLICY_SOURCE_CLOUD, base::MakeUnique<base::StringValue>(kFakeONC),
+             nullptr);
   UpdateProviderPolicy(policy);
 
   EXPECT_CALL(network_config_handler_,
@@ -653,7 +657,8 @@ TEST_P(NetworkConfigurationUpdaterTestWithParam, PolicyChange) {
 
   PolicyMap policy;
   policy.Set(GetParam(), POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             POLICY_SOURCE_CLOUD, new base::StringValue(kFakeONC), nullptr);
+             POLICY_SOURCE_CLOUD, base::MakeUnique<base::StringValue>(kFakeONC),
+             nullptr);
   UpdateProviderPolicy(policy);
   Mock::VerifyAndClearExpectations(&network_config_handler_);
   EXPECT_EQ(ExpectedImportCertificatesCallCount(),

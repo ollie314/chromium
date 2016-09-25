@@ -7,7 +7,10 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/scoped_vector.h"
+#include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "media/base/cdm_context.h"
 #include "media/base/media_log.h"
 #include "media/base/media_tracks.h"
@@ -47,16 +50,16 @@ PipelineIntegrationTestBase::PipelineIntegrationTestBase()
       ended_(false),
       pipeline_status_(PIPELINE_OK),
       last_video_frame_format_(PIXEL_FORMAT_UNKNOWN),
-      last_video_frame_color_space_(COLOR_SPACE_UNSPECIFIED),
-      hardware_config_(AudioParameters(), AudioParameters()) {
-  base::MD5Init(&md5_context_);
+      last_video_frame_color_space_(COLOR_SPACE_UNSPECIFIED) {
+  ResetVideoHash();
 }
 
 PipelineIntegrationTestBase::~PipelineIntegrationTestBase() {
-  if (!pipeline_->IsRunning())
-    return;
+  if (pipeline_->IsRunning())
+    Stop();
 
-  Stop();
+  pipeline_.reset();
+  base::RunLoop().RunUntilIdle();
 }
 
 // TODO(xhwang): Method definitions in this file needs to be reordered.
@@ -69,7 +72,8 @@ void PipelineIntegrationTestBase::OnSeeked(base::TimeDelta seek_time,
 
 void PipelineIntegrationTestBase::OnStatusCallback(PipelineStatus status) {
   pipeline_status_ = status;
-  message_loop_.PostTask(FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+  message_loop_.task_runner()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
 void PipelineIntegrationTestBase::DemuxerEncryptedMediaInitDataCB(
@@ -81,21 +85,30 @@ void PipelineIntegrationTestBase::DemuxerEncryptedMediaInitDataCB(
 }
 
 void PipelineIntegrationTestBase::DemuxerMediaTracksUpdatedCB(
-    scoped_ptr<MediaTracks> tracks) {
+    std::unique_ptr<MediaTracks> tracks) {
   CHECK(tracks);
+  CHECK_GT(tracks->tracks().size(), 0u);
+
+  // Verify that track ids are unique.
+  std::set<MediaTrack::Id> track_ids;
+  for (const auto& track : tracks->tracks()) {
+    EXPECT_EQ(track_ids.end(), track_ids.find(track->id()));
+    track_ids.insert(track->id());
+  }
 }
 
 void PipelineIntegrationTestBase::OnEnded() {
   DCHECK(!ended_);
   ended_ = true;
   pipeline_status_ = PIPELINE_OK;
-  message_loop_.PostTask(FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+  message_loop_.task_runner()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
 bool PipelineIntegrationTestBase::WaitUntilOnEnded() {
   if (ended_)
     return (pipeline_status_ == PIPELINE_OK);
-  message_loop_.Run();
+  base::RunLoop().Run();
   EXPECT_TRUE(ended_);
   return ended_ && (pipeline_status_ == PIPELINE_OK);
 }
@@ -103,18 +116,19 @@ bool PipelineIntegrationTestBase::WaitUntilOnEnded() {
 PipelineStatus PipelineIntegrationTestBase::WaitUntilEndedOrError() {
   if (ended_ || pipeline_status_ != PIPELINE_OK)
     return pipeline_status_;
-  message_loop_.Run();
+  base::RunLoop().Run();
   return pipeline_status_;
 }
 
 void PipelineIntegrationTestBase::OnError(PipelineStatus status) {
   DCHECK_NE(status, PIPELINE_OK);
   pipeline_status_ = status;
-  message_loop_.PostTask(FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+  message_loop_.task_runner()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
 PipelineStatus PipelineIntegrationTestBase::StartInternal(
-    scoped_ptr<DataSource> data_source,
+    std::unique_ptr<DataSource> data_source,
     CdmContext* cdm_context,
     uint8_t test_type) {
   hashing_enabled_ = test_type & kHashed;
@@ -123,10 +137,13 @@ PipelineStatus PipelineIntegrationTestBase::StartInternal(
   EXPECT_CALL(*this, OnMetadata(_))
       .Times(AtMost(1))
       .WillRepeatedly(SaveArg<0>(&metadata_));
-  EXPECT_CALL(*this, OnBufferingStateChanged(BUFFERING_HAVE_ENOUGH))
+  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
       .Times(AnyNumber());
-  EXPECT_CALL(*this, OnBufferingStateChanged(BUFFERING_HAVE_NOTHING))
+  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_NOTHING))
       .Times(AnyNumber());
+  EXPECT_CALL(*this, OnDurationChange()).Times(AtMost(1));
+  EXPECT_CALL(*this, OnVideoNaturalSizeChange(_)).Times(AtMost(1));
+  EXPECT_CALL(*this, OnVideoOpacityChange(_)).Times(AtMost(1));
   CreateDemuxer(std::move(data_source));
 
   if (cdm_context) {
@@ -140,21 +157,10 @@ PipelineStatus PipelineIntegrationTestBase::StartInternal(
   // media files are provided in advance.
   EXPECT_CALL(*this, OnWaitingForDecryptionKey()).Times(0);
 
-  pipeline_->Start(
-      demuxer_.get(), CreateRenderer(),
-      base::Bind(&PipelineIntegrationTestBase::OnEnded, base::Unretained(this)),
-      base::Bind(&PipelineIntegrationTestBase::OnError, base::Unretained(this)),
-      base::Bind(&PipelineIntegrationTestBase::OnStatusCallback,
-                 base::Unretained(this)),
-      base::Bind(&PipelineIntegrationTestBase::OnMetadata,
-                 base::Unretained(this)),
-      base::Bind(&PipelineIntegrationTestBase::OnBufferingStateChanged,
-                 base::Unretained(this)),
-      base::Closure(), base::Bind(&PipelineIntegrationTestBase::OnAddTextTrack,
-                                  base::Unretained(this)),
-      base::Bind(&PipelineIntegrationTestBase::OnWaitingForDecryptionKey,
-                 base::Unretained(this)));
-  message_loop_.Run();
+  pipeline_->Start(demuxer_.get(), CreateRenderer(), this,
+                   base::Bind(&PipelineIntegrationTestBase::OnStatusCallback,
+                              base::Unretained(this)));
+  base::RunLoop().Run();
   return pipeline_status_;
 }
 
@@ -162,7 +168,7 @@ PipelineStatus PipelineIntegrationTestBase::StartWithFile(
     const std::string& filename,
     CdmContext* cdm_context,
     uint8_t test_type) {
-  scoped_ptr<FileDataSource> file_data_source(new FileDataSource());
+  std::unique_ptr<FileDataSource> file_data_source(new FileDataSource());
   base::FilePath file_path(GetTestDataFilePath(filename));
   CHECK(file_data_source->Initialize(file_path)) << "Is " << file_path.value()
                                                  << " missing?";
@@ -186,8 +192,8 @@ PipelineStatus PipelineIntegrationTestBase::Start(const std::string& filename,
 PipelineStatus PipelineIntegrationTestBase::Start(const uint8_t* data,
                                                   size_t size,
                                                   uint8_t test_type) {
-  return StartInternal(make_scoped_ptr(new MemoryDataSource(data, size)),
-                       nullptr, test_type);
+  return StartInternal(base::MakeUnique<MemoryDataSource>(data, size), nullptr,
+                       test_type);
 }
 
 void PipelineIntegrationTestBase::Play() {
@@ -201,37 +207,38 @@ void PipelineIntegrationTestBase::Pause() {
 bool PipelineIntegrationTestBase::Seek(base::TimeDelta seek_time) {
   ended_ = false;
 
-  EXPECT_CALL(*this, OnBufferingStateChanged(BUFFERING_HAVE_ENOUGH))
+  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
       .WillOnce(InvokeWithoutArgs(&message_loop_, &base::MessageLoop::QuitNow));
   pipeline_->Seek(seek_time, base::Bind(&PipelineIntegrationTestBase::OnSeeked,
                                         base::Unretained(this), seek_time));
-  message_loop_.Run();
+  base::RunLoop().Run();
+  EXPECT_CALL(*this, OnBufferingStateChange(_)).Times(AnyNumber());
   return (pipeline_status_ == PIPELINE_OK);
 }
 
 bool PipelineIntegrationTestBase::Suspend() {
   pipeline_->Suspend(base::Bind(&PipelineIntegrationTestBase::OnStatusCallback,
                                 base::Unretained(this)));
-  message_loop_.Run();
+  base::RunLoop().Run();
   return (pipeline_status_ == PIPELINE_OK);
 }
 
 bool PipelineIntegrationTestBase::Resume(base::TimeDelta seek_time) {
   ended_ = false;
 
-  EXPECT_CALL(*this, OnBufferingStateChanged(BUFFERING_HAVE_ENOUGH))
+  EXPECT_CALL(*this, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
       .WillOnce(InvokeWithoutArgs(&message_loop_, &base::MessageLoop::QuitNow));
   pipeline_->Resume(CreateRenderer(), seek_time,
                     base::Bind(&PipelineIntegrationTestBase::OnSeeked,
                                base::Unretained(this), seek_time));
-  message_loop_.Run();
+  base::RunLoop().Run();
   return (pipeline_status_ == PIPELINE_OK);
 }
 
 void PipelineIntegrationTestBase::Stop() {
   DCHECK(pipeline_->IsRunning());
-  pipeline_->Stop(base::MessageLoop::QuitWhenIdleClosure());
-  message_loop_.Run();
+  pipeline_->Stop();
+  base::RunLoop().RunUntilIdle();
 }
 
 void PipelineIntegrationTestBase::FailTest(PipelineStatus status) {
@@ -247,7 +254,7 @@ void PipelineIntegrationTestBase::QuitAfterCurrentTimeTask(
     return;
   }
 
-  message_loop_.PostDelayedTask(
+  message_loop_.task_runner()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&PipelineIntegrationTestBase::QuitAfterCurrentTimeTask,
                  base::Unretained(this), quit_time),
@@ -260,39 +267,38 @@ bool PipelineIntegrationTestBase::WaitUntilCurrentTimeIsAfter(
   DCHECK_GT(pipeline_->GetPlaybackRate(), 0);
   DCHECK(wait_time <= pipeline_->GetMediaDuration());
 
-  message_loop_.PostDelayedTask(
+  message_loop_.task_runner()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&PipelineIntegrationTestBase::QuitAfterCurrentTimeTask,
                  base::Unretained(this), wait_time),
       base::TimeDelta::FromMilliseconds(10));
-  message_loop_.Run();
+  base::RunLoop().Run();
   return (pipeline_status_ == PIPELINE_OK);
 }
 
 void PipelineIntegrationTestBase::CreateDemuxer(
-    scoped_ptr<DataSource> data_source) {
+    std::unique_ptr<DataSource> data_source) {
   data_source_ = std::move(data_source);
 
-  Demuxer::MediaTracksUpdatedCB tracks_updated_cb =
-      base::Bind(&PipelineIntegrationTestBase::DemuxerMediaTracksUpdatedCB,
-                 base::Unretained(this));
-
 #if !defined(MEDIA_DISABLE_FFMPEG)
-  demuxer_ = scoped_ptr<Demuxer>(new FFmpegDemuxer(
+  demuxer_ = std::unique_ptr<Demuxer>(new FFmpegDemuxer(
       message_loop_.task_runner(), data_source_.get(),
       base::Bind(&PipelineIntegrationTestBase::DemuxerEncryptedMediaInitDataCB,
                  base::Unretained(this)),
-      tracks_updated_cb, new MediaLog()));
+      base::Bind(&PipelineIntegrationTestBase::DemuxerMediaTracksUpdatedCB,
+                 base::Unretained(this)),
+      new MediaLog()));
 #endif
 }
 
-scoped_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer() {
+std::unique_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer() {
   ScopedVector<VideoDecoder> video_decoders;
 #if !defined(MEDIA_DISABLE_LIBVPX)
   video_decoders.push_back(new VpxVideoDecoder());
 #endif  // !defined(MEDIA_DISABLE_LIBVPX)
 
-#if !defined(MEDIA_DISABLE_FFMPEG)
+// Android does not have an ffmpeg video decoder.
+#if !defined(MEDIA_DISABLE_FFMPEG) && !defined(OS_ANDROID)
   video_decoders.push_back(new FFmpegVideoDecoder());
 #endif
 
@@ -304,16 +310,10 @@ scoped_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer() {
       message_loop_.task_runner()));
 
   // Disable frame dropping if hashing is enabled.
-  scoped_ptr<VideoRenderer> video_renderer(new VideoRendererImpl(
+  std::unique_ptr<VideoRenderer> video_renderer(new VideoRendererImpl(
       message_loop_.task_runner(), message_loop_.task_runner().get(),
       video_sink_.get(), std::move(video_decoders), false, nullptr,
       new MediaLog()));
-
-  if (!clockless_playback_) {
-    audio_sink_ = new NullAudioSink(message_loop_.task_runner());
-  } else {
-    clockless_audio_sink_ = new ClocklessAudioSink();
-  }
 
   ScopedVector<AudioDecoder> audio_decoders;
 
@@ -324,19 +324,25 @@ scoped_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer() {
 
   audio_decoders.push_back(new OpusAudioDecoder(message_loop_.task_runner()));
 
-  // Don't allow the audio renderer to resample buffers if hashing is enabled.
-  if (!hashing_enabled_) {
-    AudioParameters out_params(AudioParameters::AUDIO_PCM_LOW_LATENCY,
-                               CHANNEL_LAYOUT_STEREO, 44100, 16, 512);
-    hardware_config_.UpdateOutputConfig(out_params);
+  if (!clockless_playback_) {
+    audio_sink_ = new NullAudioSink(message_loop_.task_runner());
+  } else {
+    clockless_audio_sink_ = new ClocklessAudioSink(OutputDeviceInfo(
+        "", OUTPUT_DEVICE_STATUS_OK,
+        // Don't allow the audio renderer to resample buffers if hashing is
+        // enabled:
+        hashing_enabled_
+            ? AudioParameters()
+            : AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY,
+                              CHANNEL_LAYOUT_STEREO, 44100, 16, 512)));
   }
 
-  scoped_ptr<AudioRenderer> audio_renderer(new AudioRendererImpl(
+  std::unique_ptr<AudioRenderer> audio_renderer(new AudioRendererImpl(
       message_loop_.task_runner(),
       (clockless_playback_)
           ? static_cast<AudioRendererSink*>(clockless_audio_sink_.get())
           : audio_sink_.get(),
-      std::move(audio_decoders), hardware_config_, new MediaLog()));
+      std::move(audio_decoders), new MediaLog()));
   if (hashing_enabled_) {
     if (clockless_playback_)
       clockless_audio_sink_->StartAudioHashForTesting();
@@ -344,7 +350,7 @@ scoped_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer() {
       audio_sink_->StartAudioHashForTesting();
   }
 
-  scoped_ptr<RendererImpl> renderer_impl(
+  std::unique_ptr<RendererImpl> renderer_impl(
       new RendererImpl(message_loop_.task_runner(), std::move(audio_renderer),
                        std::move(video_renderer)));
 
@@ -364,9 +370,16 @@ void PipelineIntegrationTestBase::OnVideoFramePaint(
   int result;
   if (frame->metadata()->GetInteger(VideoFrameMetadata::COLOR_SPACE, &result))
     last_video_frame_color_space_ = static_cast<ColorSpace>(result);
-  if (!hashing_enabled_)
+  if (!hashing_enabled_ || last_frame_ == frame)
     return;
+  last_frame_ = frame;
+  DVLOG(3) << __FUNCTION__ << " pts=" << frame->timestamp().InSecondsF();
   VideoFrame::HashFrameForTesting(&md5_context_, frame);
+}
+
+void PipelineIntegrationTestBase::ResetVideoHash() {
+  DVLOG(1) << __FUNCTION__;
+  base::MD5Init(&md5_context_);
 }
 
 std::string PipelineIntegrationTestBase::GetVideoHash() {

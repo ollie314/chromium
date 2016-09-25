@@ -20,14 +20,12 @@ namespace extensions {
 
 // A function that is only available in tests.
 // Prior to running, checks that we are in a testing process.
-class TestExtensionFunction : public SyncExtensionFunction {
+class TestExtensionFunction : public UIThreadExtensionFunction {
  protected:
   ~TestExtensionFunction() override;
 
-  // SyncExtensionFunction:
-  bool RunSync() override;
-
-  virtual bool RunSafe() = 0;
+  // ExtensionFunction:
+  bool PreRunValidation(std::string* error) override;
 };
 
 class TestNotifyPassFunction : public TestExtensionFunction {
@@ -37,8 +35,8 @@ class TestNotifyPassFunction : public TestExtensionFunction {
  protected:
   ~TestNotifyPassFunction() override;
 
-  // TestExtensionFunction:
-  bool RunSafe() override;
+  // ExtensionFunction:
+  ResponseAction Run() override;
 };
 
 class TestNotifyFailFunction : public TestExtensionFunction {
@@ -48,8 +46,8 @@ class TestNotifyFailFunction : public TestExtensionFunction {
  protected:
   ~TestNotifyFailFunction() override;
 
-  // TestExtensionFunction:
-  bool RunSafe() override;
+  // ExtensionFunction:
+  ResponseAction Run() override;
 };
 
 class TestLogFunction : public TestExtensionFunction {
@@ -59,12 +57,13 @@ class TestLogFunction : public TestExtensionFunction {
  protected:
   ~TestLogFunction() override;
 
-  // TestExtensionFunction:
-  bool RunSafe() override;
+  // ExtensionFunction:
+  ResponseAction Run() override;
 };
 
-class TestSendMessageFunction : public AsyncExtensionFunction {
+class TestSendMessageFunction : public UIThreadExtensionFunction {
  public:
+  TestSendMessageFunction();
   DECLARE_EXTENSION_FUNCTION("test.sendMessage", UNKNOWN)
 
   // Sends a reply back to the calling extension. Many extensions don't need
@@ -77,8 +76,13 @@ class TestSendMessageFunction : public AsyncExtensionFunction {
  protected:
   ~TestSendMessageFunction() override;
 
-  // ExtensionFunction:
-  bool RunAsync() override;
+  // UIExtensionFunction:
+  ResponseAction Run() override;
+
+  // Whether or not the function is currently waiting for a reply.
+  bool waiting_;
+
+  ResponseValue response_;
 };
 
 class TestGetConfigFunction : public TestExtensionFunction {
@@ -115,8 +119,8 @@ class TestGetConfigFunction : public TestExtensionFunction {
 
   ~TestGetConfigFunction() override;
 
-  // TestExtensionFunction:
-  bool RunSafe() override;
+  // ExtensionFunction:
+  ResponseAction Run() override;
 };
 
 class TestWaitForRoundTripFunction : public TestExtensionFunction {
@@ -126,8 +130,8 @@ class TestWaitForRoundTripFunction : public TestExtensionFunction {
  protected:
   ~TestWaitForRoundTripFunction() override;
 
-  // TestExtensionFunction:
-  bool RunSafe() override;
+  // ExtensionFunction:
+  ResponseAction Run() override;
 };
 
 }  // namespace extensions

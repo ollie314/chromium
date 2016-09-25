@@ -7,7 +7,6 @@
 #include "base/logging.h"
 #include "base/rand_util.h"
 #include "base/task_runner_util.h"
-#include "content/public/common/service_registry.h"
 #include "content/public/renderer/media_stream_utils.h"
 #include "content/public/renderer/media_stream_video_sink.h"
 #include "content/public/renderer/render_thread.h"
@@ -16,6 +15,7 @@
 #include "extensions/renderer/api/display_source/wifi_display/wifi_display_elementary_stream_info.h"
 #include "extensions/renderer/api/display_source/wifi_display/wifi_display_media_pipeline.h"
 #include "media/base/bind_to_current_loop.h"
+#include "services/shell/public/cpp/interface_provider.h"
 
 namespace extensions {
 
@@ -30,6 +30,33 @@ const char kErrorSinkCannotPlayAudio[] =
 const char kErrorMediaPipelineFailure[] =
     "Failed to initialize media pipeline for the session";
 }  // namespace
+
+class WiFiDisplayAudioSink {
+ public:
+  WiFiDisplayAudioSink(const blink::WebMediaStreamTrack& track,
+                       content::MediaStreamAudioSink* delegate)
+      : track_(track), delegate_(delegate), sink_added_(false) {}
+
+  ~WiFiDisplayAudioSink() { Stop(); }
+
+  void Start() {
+    DCHECK(!sink_added_);
+    sink_added_ = true;
+    delegate_->AddToAudioTrack(delegate_, track_);
+  }
+
+  void Stop() {
+    if (sink_added_) {
+      delegate_->RemoveFromAudioTrack(delegate_, track_);
+      sink_added_ = false;
+    }
+  }
+
+ private:
+  blink::WebMediaStreamTrack track_;
+  content::MediaStreamAudioSink* delegate_;
+  bool sink_added_;
+};
 
 class WiFiDisplayVideoSink : public content::MediaStreamVideoSink {
  public:
@@ -46,7 +73,7 @@ class WiFiDisplayVideoSink : public content::MediaStreamVideoSink {
 
   void Start() {
     // Callback is invoked on IO thread.
-    ConnectToTrack(track_, callback_);
+    ConnectToTrack(track_, callback_, false);
   }
 
  private:
@@ -59,20 +86,20 @@ WiFiDisplayMediaManager::WiFiDisplayMediaManager(
     const blink::WebMediaStreamTrack& video_track,
     const blink::WebMediaStreamTrack& audio_track,
     const std::string& sink_ip_address,
-    content::ServiceRegistry* service_registry,
+    shell::InterfaceProvider* interface_provider,
     const ErrorCallback& error_callback)
-  : video_track_(video_track),
-    audio_track_(audio_track),
-    service_registry_(service_registry),
-    sink_ip_address_(sink_ip_address),
-    player_(nullptr),
-    io_task_runner_(content::RenderThread::Get()->GetIOMessageLoopProxy()),
-    error_callback_(error_callback),
-    is_playing_(false),
-    is_initialized_(false),
-    weak_factory_(this) {
+    : video_track_(video_track),
+      audio_track_(audio_track),
+      interface_provider_(interface_provider),
+      sink_ip_address_(sink_ip_address),
+      player_(nullptr),
+      io_task_runner_(content::RenderThread::Get()->GetIOTaskRunner()),
+      error_callback_(error_callback),
+      is_playing_(false),
+      is_initialized_(false),
+      weak_factory_(this) {
   DCHECK(!video_track.isNull() || !audio_track.isNull());
-  DCHECK(service_registry_);
+  DCHECK(interface_provider_);
   DCHECK(!error_callback_.is_null());
 }
 
@@ -106,6 +133,12 @@ void WiFiDisplayMediaManager::Play() {
     return;  // Waiting for initialization being completed.
   }
 
+  if (!audio_track_.isNull()) {
+    audio_sink_.reset(
+        new WiFiDisplayAudioSink(audio_track_, player_->audio_sink()));
+    audio_sink_->Start();
+  }
+
   if (!video_track_.isNull()) {
     // To be called on IO thread.
     auto on_raw_video_frame = base::Bind(
@@ -129,6 +162,7 @@ void WiFiDisplayMediaManager::Teardown() {
 
 void WiFiDisplayMediaManager::Pause() {
   is_playing_ = false;
+  audio_sink_.reset();
   video_sink_.reset();
 }
 
@@ -250,26 +284,26 @@ bool FindRateResolution(const media::VideoCaptureFormat* format,
   return false;
 }
 
-bool FindOptimalFormat(
+void FindCompatibleFormats(
     const media::VideoCaptureFormat* capture_format,
     const std::vector<wds::H264VideoCodec>& sink_supported_codecs,
-    wds::H264VideoFormat* result /*out*/) {
+    std::vector<wds::H264VideoFormat>* result /*out*/) {
   DCHECK(result);
   for (const wds::H264VideoCodec& codec : sink_supported_codecs) {
+    wds::H264VideoFormat format;
     bool found =
         FindRateResolution<wds::CEA>(
-            capture_format, codec.cea_rr, cea_table, result) ||
+            capture_format, codec.cea_rr, cea_table, &format) ||
         FindRateResolution<wds::VESA>(
-            capture_format, codec.vesa_rr, vesa_table, result) ||
+            capture_format, codec.vesa_rr, vesa_table, &format) ||
         FindRateResolution<wds::HH>(
-            capture_format, codec.hh_rr, hh_table, result);
+            capture_format, codec.hh_rr, hh_table, &format);
     if (found) {
-      result->profile = codec.profile;
-      result->level = codec.level;
-      return true;
+      format.profile = codec.profile;
+      format.level = codec.level;
+      result->emplace_back(format);
     }
   }
-  return false;
 }
 
 }  // namespace
@@ -314,11 +348,48 @@ bool WiFiDisplayMediaManager::InitOptimalVideoFormat(
     return false;
   }
 
-  if (!FindOptimalFormat(
-      capture_format, sink_supported_codecs, &optimal_video_format_)) {
+  std::vector<wds::H264VideoFormat> compatible_formats;
+
+  FindCompatibleFormats(
+      capture_format, sink_supported_codecs, &compatible_formats);
+
+  if (compatible_formats.empty()) {
     error_callback_.Run(kErrorSinkCannotPlayVideo);
     return false;
   }
+
+  // The found compatible formats have the same frame rate and resolution but
+  // different video encoder profiles. Pick the appropriate profile from the
+  // supported by video encoder.
+  std::vector<wds::H264Profile> supported_profiles =
+      WiFiDisplayVideoEncoder::FindSupportedProfiles(
+          capture_format->frame_size,
+          capture_format->frame_rate);
+
+  if (supported_profiles.empty()) {
+    error_callback_.Run(kErrorSinkCannotPlayVideo);
+    return false;
+  }
+
+  bool profile_found = false;
+  for (wds::H264Profile profile : supported_profiles) {
+    if (profile_found)
+      break;
+
+    for (const auto& format : compatible_formats) {
+      if (format.profile == profile) {
+         optimal_video_format_ = format;
+         profile_found = true;
+         break;
+      }
+    }
+  }
+
+  if (!profile_found) {
+    error_callback_.Run(kErrorSinkCannotPlayVideo);
+    return false;
+  }
+
   video_encoder_parameters_.frame_size = capture_format->frame_size;
   video_encoder_parameters_.frame_rate =
       static_cast<int>(capture_format->frame_rate);
@@ -417,7 +488,7 @@ void WiFiDisplayMediaManager::RegisterMediaService(
 void WiFiDisplayMediaManager::ConnectToRemoteService(
     WiFiDisplayMediaServiceRequest request) {
   DCHECK(content::RenderThread::Get());
-  service_registry_->ConnectToRemoteService(std::move(request));
+  interface_provider_->GetInterface(std::move(request));
 }
 
 }  // namespace extensions

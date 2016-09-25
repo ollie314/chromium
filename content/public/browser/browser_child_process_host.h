@@ -21,6 +21,11 @@
 namespace base {
 class CommandLine;
 class FilePath;
+class SharedPersistentMemoryAllocator;
+}
+
+namespace shell {
+class InterfaceProvider;
 }
 
 namespace content {
@@ -28,7 +33,6 @@ namespace content {
 class BrowserChildProcessHostDelegate;
 class ChildProcessHost;
 class SandboxedProcessLauncherDelegate;
-class ServiceRegistry;
 struct ChildProcessData;
 
 // This represents child processes of the browser process, i.e. plugins. They
@@ -41,6 +45,14 @@ class CONTENT_EXPORT BrowserChildProcessHost : public IPC::Sender {
   static BrowserChildProcessHost* Create(
       content::ProcessType process_type,
       BrowserChildProcessHostDelegate* delegate);
+
+  // Used to create a child process host, connecting the process to the shell
+  // as a new service instance identified by |service_name| and (optional)
+  // |instance_id|.
+  static BrowserChildProcessHost* Create(
+      content::ProcessType process_type,
+      BrowserChildProcessHostDelegate* delegate,
+      const std::string& service_name);
 
   // Returns the child process host with unique id |child_process_id|, or
   // nullptr if it doesn't exist. |child_process_id| is NOT the process ID, but
@@ -71,6 +83,10 @@ class CONTENT_EXPORT BrowserChildProcessHost : public IPC::Sender {
   virtual base::TerminationStatus GetTerminationStatus(
       bool known_dead, int* exit_code) = 0;
 
+  // Take ownership of a "shared" metrics allocator (if one exists).
+  virtual std::unique_ptr<base::SharedPersistentMemoryAllocator>
+  TakeMetricsAllocator() = 0;
+
   // Sets the user-visible name of the process.
   virtual void SetName(const base::string16& name) = 0;
 
@@ -80,10 +96,6 @@ class CONTENT_EXPORT BrowserChildProcessHost : public IPC::Sender {
   // they need to call this method so that the process handle is associated with
   // this object.
   virtual void SetHandle(base::ProcessHandle handle) = 0;
-
-  // Get the Mojo service registry connected to the child process. Returns
-  // nullptr if no service registry exists.
-  virtual ServiceRegistry* GetServiceRegistry() = 0;
 
 #if defined(OS_MACOSX)
   // Returns a PortProvider used to get the task port for child processes.

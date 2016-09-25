@@ -56,8 +56,8 @@ public:
 
     virtual bool canAffectSelector() const { return false; }
 
-    void attach(const AttachContext& = AttachContext()) override;
-    void detach(const AttachContext& = AttachContext()) override;
+    void attachLayoutTree(const AttachContext& = AttachContext()) override;
+    void detachLayoutTree(const AttachContext& = AttachContext()) override;
 
     size_t distributedNodesSize() const { return m_distributedNodes.size(); }
     Node* distributedNodeAt(size_t index)  const { return m_distributedNodes.at(index); }
@@ -97,16 +97,15 @@ inline bool isActiveShadowInsertionPoint(const Node& node)
     return node.isInsertionPoint() && toInsertionPoint(node).isShadowInsertionPoint();
 }
 
-// TODO(hayato): The function name is confusing. This neither resolve a reprojection nor support v1 shadow trees.
-inline ElementShadow* shadowWhereNodeCanBeDistributed(const Node& node)
+inline ElementShadow* shadowWhereNodeCanBeDistributedForV0(const Node& node)
 {
     Node* parent = node.parentNode();
     if (!parent)
         return 0;
     if (parent->isShadowRoot() && !toShadowRoot(parent)->isYoungest())
-        return node.shadowHost()->shadow();
+        return node.ownerShadowHost()->shadow();
     if (isActiveInsertionPoint(*parent))
-        return node.shadowHost()->shadow();
+        return node.ownerShadowHost()->shadow();
     if (parent->isElementNode())
         return toElement(parent)->shadow();
     return 0;

@@ -32,10 +32,7 @@
 #define WebKit_h
 
 #include "../platform/Platform.h"
-
-namespace v8 {
-class Isolate;
-}
+#include <v8.h>
 
 namespace blink {
 
@@ -73,9 +70,6 @@ BLINK_EXPORT bool fontAntialiasingEnabledForTest();
 BLINK_EXPORT void setAlwaysUseComplexTextForTest(bool);
 BLINK_EXPORT bool alwaysUseComplexTextForTest();
 
-// Enables the named log channel. See WebCore/platform/Logging.h for details.
-BLINK_EXPORT void enableLogChannel(const char*);
-
 // Purge the plugin list cache. If |reloadPages| is true, any pages
 // containing plugins will be reloaded after refreshing the plugin list.
 BLINK_EXPORT void resetPluginCache(bool reloadPages = false);
@@ -83,6 +77,13 @@ BLINK_EXPORT void resetPluginCache(bool reloadPages = false);
 // The embedder should call this periodically in an attempt to balance overall
 // performance and memory usage.
 BLINK_EXPORT void decommitFreeableMemory();
+
+// Send memory pressure notification to worker thread isolate.
+BLINK_EXPORT void MemoryPressureNotificationToWorkerThreadIsolates(
+    v8::MemoryPressureLevel);
+
+// Set the RAIL performance mode on all worker thread isolates.
+BLINK_EXPORT void setRAILModeOnWorkerThreadIsolates(v8::RAILMode);
 
 } // namespace blink
 

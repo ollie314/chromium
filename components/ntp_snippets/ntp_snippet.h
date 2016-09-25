@@ -5,11 +5,14 @@
 #ifndef COMPONENTS_NTP_SNIPPETS_NTP_SNIPPET_H_
 #define COMPONENTS_NTP_SNIPPETS_NTP_SNIPPET_H_
 
+#include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/time/time.h"
+#include "components/ntp_snippets/category.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -18,36 +21,54 @@ class DictionaryValue;
 
 namespace ntp_snippets {
 
-// Stores and vend fresh content data for the NTP. This is a dumb class with no
-// smarts at all, all the logic is in the service.
+class SnippetProto;
+
+struct SnippetSource {
+  SnippetSource(const GURL& url,
+                const std::string& publisher_name,
+                const GURL& amp_url)
+      : url(url), publisher_name(publisher_name), amp_url(amp_url) {}
+  GURL url;
+  std::string publisher_name;
+  GURL amp_url;
+};
+
 class NTPSnippet {
  public:
-  // Creates a new snippet with the given URL. URL must be valid.
-  NTPSnippet(const GURL& url);
+  using PtrVector = std::vector<std::unique_ptr<NTPSnippet>>;
+
+  // Creates a new snippet with the given |id|.
+  // Public for testing only - create snippets using the Create* methods below.
+  // TODO(treib): Make this private and add a CreateSnippetForTest?
+  NTPSnippet(const std::string& id);
 
   ~NTPSnippet();
 
-  // Creates an NTPSnippet from a dictionary. Returns a null pointer if the
-  // dictionary doesn't contain at least a url. The keys in the dictionary are
-  // expected to be the same as the property name, with exceptions documented in
-  // the property comment.
-  static std::unique_ptr<NTPSnippet> CreateFromDictionary(
+  // Creates an NTPSnippet from a dictionary, as returned by Chrome Reader.
+  // Returns a null pointer if the dictionary doesn't correspond to a valid
+  // snippet. The keys in the dictionary are expected to be the same as the
+  // property name, with exceptions documented in the property comment.
+  static std::unique_ptr<NTPSnippet> CreateFromChromeReaderDictionary(
       const base::DictionaryValue& dict);
 
-  std::unique_ptr<base::DictionaryValue> ToDictionary() const;
+  // Creates an NTPSnippet from a dictionary, as returned by Chrome Content
+  // Suggestions. Returns a null pointer if the dictionary doesn't correspond to
+  // a valid snippet. Maps field names to Chrome Reader field names.
+  static std::unique_ptr<NTPSnippet> CreateFromContentSuggestionsDictionary(
+      const base::DictionaryValue& dict);
 
-  // URL of the page described by this snippet.
-  const GURL& url() const { return url_; }
+  // Creates an NTPSnippet from a protocol buffer. Returns a null pointer if the
+  // protocol buffer doesn't correspond to a valid snippet.
+  static std::unique_ptr<NTPSnippet> CreateFromProto(const SnippetProto& proto);
 
-  // Subtitle to identify the site the snippet is from.
-  const std::string& site_title() const { return site_title_; }
-  void set_site_title(const std::string& site_title) {
-    site_title_ = site_title;
-  }
+  // Creates a protocol buffer corresponding to this snippet, for persisting.
+  SnippetProto ToProto() const;
 
-  // Favicon for the site. Do not use to directly retrieve the favicon.
-  const GURL& favicon_url() const { return favicon_url_; }
-  void set_favicon_url(const GURL& favicon_url) { favicon_url_ = favicon_url; }
+  // A unique ID for identifying the snippet. If initialized by
+  // CreateFromChromeReaderDictionary() the relevant key is 'url'.
+  // TODO(treib): For now, the ID has to be a valid URL spec, otherwise
+  // fetching the salient image will fail. See TODO in ntp_snippets_service.cc.
+  const std::string& id() const { return id_; }
 
   // Title of the snippet.
   const std::string& title() const { return title_; }
@@ -58,15 +79,16 @@ class NTPSnippet {
   void set_snippet(const std::string& snippet) { snippet_ = snippet; }
 
   // Link to an image representative of the content. Do not fetch this image
-  // directly. If initialized by CreateFromDictionary() the relevant key is
-  // 'thumbnailUrl'
+  // directly. If initialized by CreateFromChromeReaderDictionary() the relevant
+  // key is 'thumbnailUrl'
   const GURL& salient_image_url() const { return salient_image_url_; }
   void set_salient_image_url(const GURL& salient_image_url) {
     salient_image_url_ = salient_image_url;
   }
 
   // When the page pointed by this snippet was published.  If initialized by
-  // CreateFromDictionary() the relevant key is 'creationTimestampSec'
+  // CreateFromChromeReaderDictionary() the relevant key is
+  // 'creationTimestampSec'
   const base::Time& publish_date() const { return publish_date_; }
   void set_publish_date(const base::Time& publish_date) {
     publish_date_ = publish_date;
@@ -79,23 +101,51 @@ class NTPSnippet {
     expiry_date_ = expiry_date;
   }
 
-  const GURL& amp_url() const { return amp_url_; }
-  void set_amp_url(const GURL& amp_url) { amp_url_ = amp_url; }
+  size_t source_index() const { return best_source_index_; }
+  void set_source_index(size_t index) { best_source_index_ = index; }
+
+  // We should never construct an NTPSnippet object if we don't have any sources
+  // so this should never fail
+  const SnippetSource& best_source() const {
+    return sources_[best_source_index_];
+  }
+
+  const std::vector<SnippetSource>& sources() const { return sources_; }
+  void add_source(const SnippetSource& source) { sources_.push_back(source); }
+
+  // If this snippet has all the data we need to show a full card to the user
+  bool is_complete() const {
+    return !id().empty() && !sources().empty() && !title().empty() &&
+           !snippet().empty() && salient_image_url().is_valid() &&
+           !publish_date().is_null() && !expiry_date().is_null() &&
+           !best_source().publisher_name.empty();
+  }
+
+  float score() const { return score_; }
+  void set_score(float score) { score_ = score; }
+
+  bool is_dismissed() const { return is_dismissed_; }
+  void set_dismissed(bool dismissed) { is_dismissed_ = dismissed; }
 
   // Public for testing.
   static base::Time TimeFromJsonString(const std::string& timestamp_str);
   static std::string TimeToJsonString(const base::Time& time);
 
  private:
-  const GURL url_;
-  std::string site_title_;
+  void FindBestSource();
+
+  std::string id_;
   std::string title_;
-  GURL favicon_url_;
   GURL salient_image_url_;
   std::string snippet_;
   base::Time publish_date_;
   base::Time expiry_date_;
-  GURL amp_url_;
+  float score_;
+  bool is_dismissed_;
+
+  size_t best_source_index_;
+
+  std::vector<SnippetSource> sources_;
 
   DISALLOW_COPY_AND_ASSIGN(NTPSnippet);
 };

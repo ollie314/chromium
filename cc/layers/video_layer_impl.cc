@@ -10,7 +10,6 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "cc/layers/video_frame_provider_client_impl.h"
-#include "cc/quads/io_surface_draw_quad.h"
 #include "cc/quads/stream_video_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/quads/yuv_video_draw_quad.h"
@@ -20,10 +19,7 @@
 #include "cc/trees/occlusion.h"
 #include "cc/trees/task_runner_provider.h"
 #include "media/base/video_frame.h"
-
-#if defined(VIDEO_HOLE)
-#include "cc/quads/solid_color_draw_quad.h"
-#endif  // defined(VIDEO_HOLE)
+#include "ui/gfx/color_space.h"
 
 namespace cc {
 
@@ -52,7 +48,9 @@ VideoLayerImpl::VideoLayerImpl(
     : LayerImpl(tree_impl, id),
       provider_client_impl_(std::move(provider_client_impl)),
       frame_(nullptr),
-      video_rotation_(video_rotation) {}
+      video_rotation_(video_rotation) {
+  set_may_contain_video(true);
+}
 
 VideoLayerImpl::~VideoLayerImpl() {
   if (!provider_client_impl_->Stopped()) {
@@ -121,6 +119,7 @@ bool VideoLayerImpl::WillDraw(DrawMode draw_mode,
   }
   frame_resource_offset_ = external_resources.offset;
   frame_resource_multiplier_ = external_resources.multiplier;
+  frame_bits_per_channel_ = external_resources.bits_per_channel;
 
   DCHECK_EQ(external_resources.mailboxes.size(),
             external_resources.release_callbacks.size());
@@ -217,18 +216,11 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
       bool nearest_neighbor = false;
       TextureDrawQuad* texture_quad =
           render_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
-      texture_quad->SetNew(shared_quad_state,
-                           quad_rect,
-                           opaque_rect,
-                           visible_quad_rect,
-                           software_resources_[0],
-                           premultiplied_alpha,
-                           uv_top_left,
-                           uv_bottom_right,
-                           SK_ColorTRANSPARENT,
-                           opacity,
-                           flipped,
-                           nearest_neighbor);
+      texture_quad->SetNew(shared_quad_state, quad_rect, opaque_rect,
+                           visible_quad_rect, software_resources_[0],
+                           premultiplied_alpha, uv_top_left, uv_bottom_right,
+                           SK_ColorTRANSPARENT, opacity, flipped,
+                           nearest_neighbor, false);
       ValidateQuadResources(texture_quad);
       break;
     }
@@ -289,7 +281,8 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
           frame_resources_.size() > 2 ? frame_resources_[2].id
                                       : frame_resources_[1].id,
           frame_resources_.size() > 3 ? frame_resources_[3].id : 0, color_space,
-          frame_resource_offset_, frame_resource_multiplier_);
+          frame_->ColorSpace(), frame_resource_offset_,
+          frame_resource_multiplier_, frame_bits_per_channel_);
       ValidateQuadResources(yuv_video_quad);
       break;
     }
@@ -313,7 +306,7 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
                            visible_quad_rect, frame_resources_[0].id,
                            premultiplied_alpha, uv_top_left, uv_bottom_right,
                            SK_ColorTRANSPARENT, opacity, flipped,
-                           nearest_neighbor);
+                           nearest_neighbor, false);
       ValidateQuadResources(texture_quad);
       break;
     }
@@ -325,51 +318,12 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
       scale.Scale(tex_width_scale, tex_height_scale);
       StreamVideoDrawQuad* stream_video_quad =
           render_pass->CreateAndAppendDrawQuad<StreamVideoDrawQuad>();
-      stream_video_quad->SetNew(
-          shared_quad_state, quad_rect, opaque_rect, visible_quad_rect,
-          frame_resources_[0].id, frame_resources_[0].size_in_pixels,
-          scale * provider_client_impl_->StreamTextureMatrix());
+      stream_video_quad->SetNew(shared_quad_state, quad_rect, opaque_rect,
+                                visible_quad_rect, frame_resources_[0].id,
+                                frame_resources_[0].size_in_pixels, scale);
       ValidateQuadResources(stream_video_quad);
       break;
     }
-    case VideoFrameExternalResources::IO_SURFACE: {
-      DCHECK_EQ(frame_resources_.size(), 1u);
-      if (frame_resources_.size() < 1u)
-        break;
-      IOSurfaceDrawQuad* io_surface_quad =
-          render_pass->CreateAndAppendDrawQuad<IOSurfaceDrawQuad>();
-      io_surface_quad->SetNew(shared_quad_state, quad_rect, opaque_rect,
-                              visible_quad_rect, visible_rect.size(),
-                              frame_resources_[0].id,
-                              IOSurfaceDrawQuad::UNFLIPPED);
-      ValidateQuadResources(io_surface_quad);
-      break;
-    }
-#if defined(VIDEO_HOLE)
-    // This block and other blocks wrapped around #if defined(VIDEO_HOLE) is not
-    // maintained by the general compositor team. Please contact the following
-    // people instead:
-    //
-    // wonsik@chromium.org
-    // lcwu@chromium.org
-    case VideoFrameExternalResources::HOLE: {
-      DCHECK_EQ(frame_resources_.size(), 0u);
-      SolidColorDrawQuad* solid_color_draw_quad =
-          render_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-
-      // Create a solid color quad with transparent black and force no
-      // blending / no anti-aliasing.
-      gfx::Rect opaque_rect = quad_rect;
-      solid_color_draw_quad->SetAll(shared_quad_state,
-                                    quad_rect,
-                                    opaque_rect,
-                                    visible_quad_rect,
-                                    false,
-                                    SK_ColorTRANSPARENT,
-                                    true);
-      break;
-    }
-#endif  // defined(VIDEO_HOLE)
     case VideoFrameExternalResources::NONE:
       NOTIMPLEMENTED();
       break;

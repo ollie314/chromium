@@ -37,7 +37,6 @@ class DataReductionProxyDelegate : public net::ProxyDelegate {
   // ProxyDelegate instance is owned by io_thread. |auth_handler| and |config|
   // outlives this class instance.
   explicit DataReductionProxyDelegate(
-      DataReductionProxyRequestOptions* request_options,
       DataReductionProxyConfig* config,
       const DataReductionProxyConfigurator* configurator,
       DataReductionProxyEventCreator* event_creator,
@@ -49,13 +48,9 @@ class DataReductionProxyDelegate : public net::ProxyDelegate {
   // net::ProxyDelegate implementation:
   void OnResolveProxy(const GURL& url,
                       const std::string& method,
-                      int load_flags,
                       const net::ProxyService& proxy_service,
                       net::ProxyInfo* result) override;
   void OnFallback(const net::ProxyServer& bad_proxy, int net_error) override;
-  void OnBeforeSendHeaders(net::URLRequest* request,
-                           const net::ProxyInfo& proxy_info,
-                           net::HttpRequestHeaders* headers) override;
   void OnBeforeTunnelRequest(const net::HostPortPair& proxy_server,
                              net::HttpRequestHeaders* extra_headers) override;
   void OnTunnelConnectCompleted(const net::HostPortPair& endpoint,
@@ -67,12 +62,41 @@ class DataReductionProxyDelegate : public net::ProxyDelegate {
       const net::HostPortPair& proxy_server,
       const net::HttpResponseHeaders& response_headers) override;
 
+ protected:
+  // Protected so that these methods are accessible for testing.
+  // net::ProxyDelegate implementation:
+  void GetAlternativeProxy(
+      const GURL& url,
+      const net::ProxyServer& resolved_proxy_server,
+      net::ProxyServer* alternative_proxy_server) const override;
+  void OnAlternativeProxyBroken(
+      const net::ProxyServer& alternative_proxy_server) override;
+
+  // Protected so that it can be overridden during testing.
+  // Returns true if |proxy_server| supports QUIC.
+  virtual bool SupportsQUIC(const net::ProxyServer& proxy_server) const;
+
+  // Availability status of data reduction QUIC proxy.
+  // Protected so that the enum values are accessible for testing.
+  enum QuicProxyStatus {
+    QUIC_PROXY_STATUS_AVAILABLE,
+    QUIC_PROXY_NOT_SUPPORTED,
+    QUIC_PROXY_STATUS_MARKED_AS_BROKEN,
+    QUIC_PROXY_STATUS_BOUNDARY
+  };
+
  private:
-  DataReductionProxyRequestOptions* request_options_;
+  // Records the availability status of data reduction proxy.
+  void RecordQuicProxyStatus(QuicProxyStatus status) const;
+
   const DataReductionProxyConfig* config_;
   const DataReductionProxyConfigurator* configurator_;
   DataReductionProxyEventCreator* event_creator_;
   DataReductionProxyBypassStats* bypass_stats_;
+
+  // True if the use of alternate proxies is disabled.
+  bool alternative_proxies_broken_;
+
   net::NetLog* net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyDelegate);
@@ -85,7 +109,6 @@ class DataReductionProxyDelegate : public net::ProxyDelegate {
 // This is visible for test purposes.
 void OnResolveProxyHandler(const GURL& url,
                            const std::string& method,
-                           int load_flags,
                            const net::ProxyConfig& data_reduction_proxy_config,
                            const net::ProxyRetryInfoMap& proxy_retry_info,
                            const DataReductionProxyConfig* config,

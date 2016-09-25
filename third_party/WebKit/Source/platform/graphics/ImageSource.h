@@ -27,16 +27,17 @@
 #define ImageSource_h
 
 #include "platform/PlatformExport.h"
+#include "platform/graphics/DeferredImageDecoder.h"
 #include "platform/graphics/ImageOrientation.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "wtf/Forward.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/OwnPtr.h"
+#include <memory>
 
 class SkImage;
 
 namespace blink {
 
-class DeferredImageDecoder;
 class ImageOrientation;
 class IntPoint;
 class IntSize;
@@ -69,7 +70,9 @@ public:
     // Returns the number of bytes of frame data actually cleared.
     size_t clearCacheExceptFrame(size_t);
 
-    void setData(SharedBuffer& data, bool allDataReceived);
+    PassRefPtr<SharedBuffer> data();
+    // Returns false when the decoder layer rejects the data.
+    bool setData(PassRefPtr<SharedBuffer> data, bool allDataReceived);
     String filenameExtension() const;
 
     bool isSizeAvailable();
@@ -83,7 +86,7 @@ public:
     size_t frameCount() const;
 
     // Attempts to create the requested frame.
-    PassRefPtr<SkImage> createFrameAtIndex(size_t);
+    sk_sp<SkImage> createFrameAtIndex(size_t);
 
     float frameDurationAtIndex(size_t) const;
     bool frameHasAlphaAtIndex(size_t) const; // Whether or not the frame actually used any alpha.
@@ -95,7 +98,7 @@ public:
     size_t frameBytesAtIndex(size_t) const;
 
 private:
-    OwnPtr<DeferredImageDecoder> m_decoder;
+    std::unique_ptr<DeferredImageDecoder> m_decoder;
 };
 
 } // namespace blink

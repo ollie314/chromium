@@ -17,31 +17,21 @@ namespace media {
 namespace cast {
 
 AudioSender::AudioSender(scoped_refptr<CastEnvironment> cast_environment,
-                         const AudioSenderConfig& audio_config,
+                         const FrameSenderConfig& audio_config,
                          const StatusChangeCallback& status_change_cb,
                          CastTransport* const transport_sender)
     : FrameSender(cast_environment,
-                  true,
                   transport_sender,
-                  audio_config.frequency,
-                  audio_config.ssrc,
-                  0,  // |max_frame_rate_| is set after encoder initialization.
-                  audio_config.min_playout_delay,
-                  audio_config.max_playout_delay,
-                  audio_config.animated_playout_delay,
-                  NewFixedCongestionControl(audio_config.bitrate)),
+                  audio_config,
+                  NewFixedCongestionControl(audio_config.max_bitrate)),
       samples_in_encoder_(0),
       weak_factory_(this) {
   if (!audio_config.use_external_encoder) {
-    audio_encoder_.reset(
-        new AudioEncoder(cast_environment,
-                         audio_config.channels,
-                         audio_config.frequency,
-                         audio_config.bitrate,
-                         audio_config.codec,
-                         base::Bind(&AudioSender::OnEncodedAudioFrame,
-                                    weak_factory_.GetWeakPtr(),
-                                    audio_config.bitrate)));
+    audio_encoder_.reset(new AudioEncoder(
+        cast_environment, audio_config.channels, audio_config.rtp_timebase,
+        audio_config.max_bitrate, audio_config.codec,
+        base::Bind(&AudioSender::OnEncodedAudioFrame,
+                   weak_factory_.GetWeakPtr(), audio_config.max_bitrate)));
   }
 
   // AudioEncoder provides no operational status changes during normal use.
@@ -58,26 +48,12 @@ AudioSender::AudioSender(scoped_refptr<CastEnvironment> cast_environment,
   // initialization parameters. Now that we have an encoder, we can calculate
   // the maximum frame rate.
   max_frame_rate_ =
-      audio_config.frequency / audio_encoder_->GetSamplesPerFrame();
-
-  media::cast::CastTransportRtpConfig transport_config;
-  transport_config.ssrc = audio_config.ssrc;
-  transport_config.feedback_ssrc = audio_config.receiver_ssrc;
-  transport_config.rtp_payload_type = audio_config.rtp_payload_type;
-  transport_config.aes_key = audio_config.aes_key;
-  transport_config.aes_iv_mask = audio_config.aes_iv_mask;
-
-  transport_sender->InitializeAudio(
-      transport_config, base::Bind(&AudioSender::OnReceivedCastFeedback,
-                                   weak_factory_.GetWeakPtr()),
-      base::Bind(&AudioSender::OnMeasuredRoundTripTime,
-                 weak_factory_.GetWeakPtr()),
-      base::Bind(&AudioSender::OnReceivedPli, weak_factory_.GetWeakPtr()));
+      audio_config.rtp_timebase / audio_encoder_->GetSamplesPerFrame();
 }
 
 AudioSender::~AudioSender() {}
 
-void AudioSender::InsertAudio(scoped_ptr<AudioBus> audio_bus,
+void AudioSender::InsertAudio(std::unique_ptr<AudioBus> audio_bus,
                               const base::TimeTicks& recorded_time) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
 
@@ -110,7 +86,7 @@ base::TimeDelta AudioSender::GetInFlightMediaDuration() const {
 
 void AudioSender::OnEncodedAudioFrame(
     int encoder_bitrate,
-    scoped_ptr<SenderEncodedFrame> encoded_frame,
+    std::unique_ptr<SenderEncodedFrame> encoded_frame,
     int samples_skipped) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
 

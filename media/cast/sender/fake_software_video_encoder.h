@@ -16,7 +16,7 @@ namespace cast {
 
 class FakeSoftwareVideoEncoder : public SoftwareVideoEncoder {
  public:
-  FakeSoftwareVideoEncoder(const VideoSenderConfig& video_config);
+  FakeSoftwareVideoEncoder(const FrameSenderConfig& video_config);
   ~FakeSoftwareVideoEncoder() final;
 
   // SoftwareVideoEncoder implementations.
@@ -28,10 +28,10 @@ class FakeSoftwareVideoEncoder : public SoftwareVideoEncoder {
   void GenerateKeyFrame() final;
 
  private:
-  VideoSenderConfig video_config_;
+  const FrameSenderConfig video_config_;
   gfx::Size last_frame_size_;
   bool next_frame_is_key_;
-  uint32_t frame_id_;
+  FrameId frame_id_;
   int frame_size_;
 };
 

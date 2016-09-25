@@ -6,7 +6,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/file_system_provider/queue.h"
 
 namespace chromeos {
@@ -59,7 +59,7 @@ void Queue::Complete(size_t token) {
 }
 
 void Queue::MaybeRun() {
-  if (executed_.size() == max_in_parallel_ || !pending_.size())
+  if (executed_.size() == max_in_parallel_ || pending_.empty())
     return;
 
   CHECK_GT(max_in_parallel_, executed_.size());

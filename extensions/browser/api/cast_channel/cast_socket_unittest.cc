@@ -9,13 +9,17 @@
 #include <utility>
 #include <vector>
 
+#include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
 #include "base/test/simple_test_clock.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/mock_timer.h"
 #include "extensions/browser/api/cast_channel/cast_auth_util.h"
 #include "extensions/browser/api/cast_channel/cast_framer.h"
@@ -31,6 +35,8 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/ssl/ssl_info.h"
+#include "net/test/cert_test_util.h"
+#include "net/test/test_data_directory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -107,9 +113,8 @@ class MockTCPSocket : public net::TCPClientSocket {
 
     if (connect_data_.mode == net::ASYNC) {
       CHECK_NE(connect_data_.result, net::ERR_IO_PENDING);
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(callback, connect_data_.result));
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(callback, connect_data_.result));
       return net::ERR_IO_PENDING;
     } else {
       return connect_data_.result;
@@ -168,35 +173,49 @@ class CompleteHandler {
 
 class TestCastSocket : public CastSocketImpl {
  public:
-  static scoped_ptr<TestCastSocket> Create(
+  static std::unique_ptr<TestCastSocket> Create(
       Logger* logger,
       uint64_t device_capabilities = cast_channel::CastDeviceCapability::NONE) {
-    return scoped_ptr<TestCastSocket>(
+    return std::unique_ptr<TestCastSocket>(
         new TestCastSocket(CreateIPEndPointForTest(), CHANNEL_AUTH_TYPE_SSL,
                            kDistantTimeoutMillis, logger, device_capabilities));
   }
 
-  static scoped_ptr<TestCastSocket> CreateSecure(
+  static std::unique_ptr<TestCastSocket> CreateSecure(
       Logger* logger,
       uint64_t device_capabilities = cast_channel::CastDeviceCapability::NONE) {
-    return scoped_ptr<TestCastSocket>(new TestCastSocket(
+    return std::unique_ptr<TestCastSocket>(new TestCastSocket(
         CreateIPEndPointForTest(), CHANNEL_AUTH_TYPE_SSL_VERIFIED,
         kDistantTimeoutMillis, logger, device_capabilities));
   }
 
-  explicit TestCastSocket(const net::IPEndPoint& ip_endpoint,
-                          ChannelAuthType channel_auth,
-                          int64_t timeout_ms,
-                          Logger* logger,
-                          uint64_t device_capabilities)
+  TestCastSocket(const net::IPEndPoint& ip_endpoint,
+                 ChannelAuthType channel_auth,
+                 int64_t timeout_ms,
+                 Logger* logger,
+                 uint64_t device_capabilities)
+      : TestCastSocket(ip_endpoint,
+                       channel_auth,
+                       timeout_ms,
+                       logger,
+                       new net::TestNetLog(),
+                       device_capabilities) {}
+
+  TestCastSocket(const net::IPEndPoint& ip_endpoint,
+                 ChannelAuthType channel_auth,
+                 int64_t timeout_ms,
+                 Logger* logger,
+                 net::TestNetLog* capturing_net_log,
+                 uint64_t device_capabilities)
       : CastSocketImpl("some_extension_id",
                        ip_endpoint,
                        channel_auth,
-                       &capturing_net_log_,
+                       capturing_net_log,
                        base::TimeDelta::FromMilliseconds(timeout_ms),
                        false,
                        logger,
                        device_capabilities),
+        capturing_net_log_(capturing_net_log),
         ip_(ip_endpoint),
         extract_cert_result_(true),
         verify_challenge_result_(true),
@@ -209,7 +228,7 @@ class TestCastSocket : public CastSocketImpl {
 
   void SetupMockTransport() {
     mock_transport_ = new MockCastTransport;
-    SetTransportForTesting(make_scoped_ptr(mock_transport_));
+    SetTransportForTesting(base::WrapUnique(mock_transport_));
   }
 
   // Socket connection helpers.
@@ -274,18 +293,19 @@ class TestCastSocket : public CastSocketImpl {
   }
 
  private:
-  scoped_ptr<net::TCPClientSocket> CreateTcpSocket() override {
+  std::unique_ptr<net::TCPClientSocket> CreateTcpSocket() override {
     if (tcp_unresponsive_) {
-      return scoped_ptr<net::TCPClientSocket>(new MockTCPSocket(true));
+      return std::unique_ptr<net::TCPClientSocket>(new MockTCPSocket(true));
     } else {
       net::MockConnect* connect_data = tcp_connect_data_.get();
       connect_data->peer_addr = ip_;
-      return scoped_ptr<net::TCPClientSocket>(new MockTCPSocket(*connect_data));
+      return std::unique_ptr<net::TCPClientSocket>(
+          new MockTCPSocket(*connect_data));
     }
   }
 
-  scoped_ptr<net::SSLClientSocket> CreateSslSocket(
-      scoped_ptr<net::StreamSocket> socket) override {
+  std::unique_ptr<net::SSLClientSocket> CreateSslSocket(
+      std::unique_ptr<net::StreamSocket> socket) override {
     net::MockConnect* connect_data = ssl_connect_data_.get();
     connect_data->peer_addr = ip_;
 
@@ -293,16 +313,15 @@ class TestCastSocket : public CastSocketImpl {
         reads_.data(), reads_.size(), writes_.data(), writes_.size()));
     ssl_data_->set_connect_data(*connect_data);
     // NOTE: net::MockTCPClientSocket inherits from net::SSLClientSocket !!
-    return scoped_ptr<net::SSLClientSocket>(
-        new net::MockTCPClientSocket(
-            net::AddressList(), &capturing_net_log_, ssl_data_.get()));
+    return std::unique_ptr<net::SSLClientSocket>(new net::MockTCPClientSocket(
+        net::AddressList(), capturing_net_log_.get(), ssl_data_.get()));
   }
 
   scoped_refptr<net::X509Certificate> ExtractPeerCert() override {
-    return extract_cert_result_ ? make_scoped_refptr<net::X509Certificate>(
-                                      new net::X509Certificate(
-                                          "", "", base::Time(), base::Time()))
-                                : nullptr;
+    return extract_cert_result_
+               ? net::ImportCertFromFile(net::GetTestCertsDirectory(),
+                                         "ok_cert.pem")
+               : nullptr;
   }
 
   bool VerifyChallengeReply() override {
@@ -312,15 +331,15 @@ class TestCastSocket : public CastSocketImpl {
 
   base::Timer* GetTimer() override { return mock_timer_.get(); }
 
-  net::TestNetLog capturing_net_log_;
+  std::unique_ptr<net::TestNetLog> capturing_net_log_;
   net::IPEndPoint ip_;
   // Simulated connect data
-  scoped_ptr<net::MockConnect> tcp_connect_data_;
-  scoped_ptr<net::MockConnect> ssl_connect_data_;
+  std::unique_ptr<net::MockConnect> tcp_connect_data_;
+  std::unique_ptr<net::MockConnect> ssl_connect_data_;
   // Simulated read / write data
   std::vector<net::MockWrite> writes_;
   std::vector<net::MockRead> reads_;
-  scoped_ptr<net::SocketDataProvider> ssl_data_;
+  std::unique_ptr<net::SocketDataProvider> ssl_data_;
   // Simulated result of peer cert extraction.
   bool extract_cert_result_;
   // Simulated result of verifying challenge reply.
@@ -328,7 +347,7 @@ class TestCastSocket : public CastSocketImpl {
   bool verify_challenge_disallow_;
   // If true, makes TCP connection process stall. For timeout testing.
   bool tcp_unresponsive_;
-  scoped_ptr<base::MockTimer> mock_timer_;
+  std::unique_ptr<base::MockTimer> mock_timer_;
   MockCastTransport* mock_transport_;
 
   DISALLOW_COPY_AND_ASSIGN(TestCastSocket);
@@ -338,7 +357,7 @@ class CastSocketTest : public testing::Test {
  public:
   CastSocketTest()
       : logger_(
-            new Logger(make_scoped_ptr<base::Clock>(new base::SimpleTestClock),
+            new Logger(base::WrapUnique<base::Clock>(new base::SimpleTestClock),
                        base::Time())),
         delegate_(new MockDelegate) {}
   ~CastSocketTest() override {}
@@ -385,9 +404,9 @@ class CastSocketTest : public testing::Test {
 
   base::MessageLoop message_loop_;
   Logger* logger_;
-  scoped_ptr<TestCastSocket> socket_;
+  std::unique_ptr<TestCastSocket> socket_;
   CompleteHandler handler_;
-  scoped_ptr<MockDelegate> delegate_;
+  std::unique_ptr<MockDelegate> delegate_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CastSocketTest);

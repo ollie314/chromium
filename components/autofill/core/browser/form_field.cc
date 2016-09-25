@@ -24,6 +24,7 @@
 #include "components/autofill/core/browser/name_field.h"
 #include "components/autofill/core/browser/phone_field.h"
 #include "components/autofill/core/common/autofill_regexes.h"
+#include "components/autofill/core/common/autofill_util.h"
 
 namespace autofill {
 namespace {
@@ -34,7 +35,7 @@ bool ShouldBeProcessed(const AutofillField* field) {
   // interferes with correctly understanding ADDRESS_LINE2.
   // Ignore fields marked as presentational. See
   // http://www.w3.org/TR/wai-aria/roles#presentation
-  return !(field->is_checkable ||
+  return !(IsCheckable(field->check_status) ||
            field->role == FormFieldData::ROLE_ATTRIBUTE_PRESENTATION);
 }
 

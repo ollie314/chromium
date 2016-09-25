@@ -5,6 +5,7 @@
 #ifndef MOJO_EDK_TEST_MOJO_TEST_BASE_H_
 #define MOJO_EDK_TEST_MOJO_TEST_BASE_H_
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -13,7 +14,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/test/multiprocess_test_helper.h"
 #include "mojo/public/c/system/types.h"
@@ -29,12 +29,17 @@ class MojoTestBase : public testing::Test {
   MojoTestBase();
   ~MojoTestBase() override;
 
+  using LaunchType = MultiprocessTestHelper::LaunchType;
+
  protected:
   using HandlerCallback = base::Callback<void(ScopedMessagePipeHandle)>;
 
   class ClientController {
    public:
-    ClientController(const std::string& client_name, MojoTestBase* test);
+    ClientController(const std::string& client_name,
+                     MojoTestBase* test,
+                     const ProcessErrorCallback& process_error_callback,
+                     LaunchType launch_type);
     ~ClientController();
 
     MojoHandle pipe() const { return pipe_.get().value(); }
@@ -44,7 +49,6 @@ class MojoTestBase : public testing::Test {
    private:
     friend class MojoTestBase;
 
-    MojoTestBase* test_;
 #if !defined(OS_IOS)
     MultiprocessTestHelper helper_;
 #endif
@@ -53,6 +57,13 @@ class MojoTestBase : public testing::Test {
 
     DISALLOW_COPY_AND_ASSIGN(ClientController);
   };
+
+  // Set the callback to handle bad messages received from test client
+  // processes. This can be set to a different callback before starting each
+  // client.
+  void set_process_error_callback(const ProcessErrorCallback& callback) {
+    process_error_callback_ = callback;
+  }
 
   ClientController& StartClient(const std::string& client_name);
 
@@ -140,10 +151,16 @@ class MojoTestBase : public testing::Test {
   // Reads data from a data pipe.
   static std::string ReadData(MojoHandle consumer, size_t size);
 
+  void set_launch_type(LaunchType launch_type) { launch_type_ = launch_type; }
+
  private:
   friend class ClientController;
 
-  std::vector<scoped_ptr<ClientController>> clients_;
+  std::vector<std::unique_ptr<ClientController>> clients_;
+
+  ProcessErrorCallback process_error_callback_;
+
+  LaunchType launch_type_ = LaunchType::CHILD;
 
   DISALLOW_COPY_AND_ASSIGN(MojoTestBase);
 };

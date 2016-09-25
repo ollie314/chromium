@@ -18,7 +18,7 @@
 #include "base/process/launch.h"
 #include "base/synchronization/lock.h"
 #include "base/task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/public/cpp/bindings/interface_ptr_info.h"
 #include "mojo/public/cpp/system/core.h"
@@ -26,7 +26,7 @@
 #include "services/shell/runner/common/client_util.h"
 #include "services/shell/runner/common/switches.h"
 
-#if defined(OS_LINUX) && !defined(OS_ANDROID)
+#if defined(OS_LINUX)
 #include "sandbox/linux/services/namespace_sandbox.h"
 #endif
 
@@ -50,9 +50,11 @@ ChildProcessHost::ChildProcessHost(base::TaskRunner* launch_process_runner,
       start_sandboxed_(start_sandboxed),
       target_(target),
       app_path_(app_path),
-      start_child_process_event_(false, false),
-      weak_factory_(this) {
-}
+      child_token_(mojo::edk::GenerateRandomToken()),
+      start_child_process_event_(
+          base::WaitableEvent::ResetPolicy::AUTOMATIC,
+          base::WaitableEvent::InitialState::NOT_SIGNALED),
+      weak_factory_(this) {}
 
 ChildProcessHost::~ChildProcessHost() {
   if (!app_path_.empty()) {
@@ -61,7 +63,7 @@ ChildProcessHost::~ChildProcessHost() {
   }
 }
 
-mojom::ShellClientPtr ChildProcessHost::Start(
+mojom::ServicePtr ChildProcessHost::Start(
     const Identity& target,
     const ProcessReadyCallback& callback,
     const base::Closure& quit_closure) {
@@ -71,7 +73,7 @@ mojom::ShellClientPtr ChildProcessHost::Start(
       base::CommandLine::ForCurrentProcess();
   base::FilePath target_path = parent_command_line->GetProgram();
   // |app_path_| can be empty in tests.
-  if (!app_path_.MatchesExtension(FILE_PATH_LITERAL(".mojo")) &&
+  if (!app_path_.MatchesExtension(FILE_PATH_LITERAL(".library")) &&
       !app_path_.empty()) {
     target_path = app_path_;
   }
@@ -96,8 +98,9 @@ mojom::ShellClientPtr ChildProcessHost::Start(
   mojo_ipc_channel_->PrepareToPassClientHandleToChildProcess(
       child_command_line.get(), &handle_passing_info_);
 
-  mojom::ShellClientPtr client =
-      PassShellClientRequestOnCommandLine(child_command_line.get());
+  mojom::ServicePtr client =
+      PassServiceRequestOnCommandLine(child_command_line.get(),
+                                          child_token_);
   launch_process_runner_->PostTaskAndReply(
       FROM_HERE,
       base::Bind(&ChildProcessHost::DoLaunch, base::Unretained(this),
@@ -154,9 +157,9 @@ void ChildProcessHost::DoLaunch(
   // that case, they're automatically inherited by child processes. See
   // https://msdn.microsoft.com/en-us/library/windows/desktop/ms682075.aspx
   // Trying to add them to the list of handles to inherit causes CreateProcess
-  // to fail. When this process is launched from Python
-  // (i.e. by apptest_runner.py) then a real handle is used. In that case, we do
-  // want to add it to the list of handles that is inherited.
+  // to fail. When this process is launched from Python then a real handle is
+  // used. In that case, we do want to add it to the list of handles that is
+  // inherited.
   if (options.stdout_handle &&
       GetFileType(options.stdout_handle) != FILE_TYPE_CHAR) {
     handle_passing_info_.push_back(options.stdout_handle);
@@ -174,7 +177,7 @@ void ChildProcessHost::DoLaunch(
 #endif
   DVLOG(2) << "Launching child with command line: "
            << child_command_line->GetCommandLineString();
-#if defined(OS_LINUX) && !defined(OS_ANDROID)
+#if defined(OS_LINUX)
   if (start_sandboxed_) {
     child_process_ =
         sandbox::NamespaceSandbox::LaunchProcess(*child_command_line, options);
@@ -189,7 +192,6 @@ void ChildProcessHost::DoLaunch(
     MachBroker* mach_broker = MachBroker::GetInstance();
     base::AutoLock locker(mach_broker->GetLock());
 #endif
-    LOG(WARNING) << "PATH: " << app_path_.value();
     child_process_ = base::LaunchProcess(*child_command_line, options);
 #if defined(OS_MACOSX)
     mach_broker->ExpectPid(child_process_.Handle());
@@ -197,12 +199,18 @@ void ChildProcessHost::DoLaunch(
   }
 
   if (child_process_.IsValid()) {
+    DVLOG(0) << "Launched child process pid=" << child_process_.Pid()
+             << ", instance=" << target_.instance()
+             << ", name=" << target_.name()
+             << ", user_id=" << target_.user_id();
+
     if (mojo_ipc_channel_.get()) {
       mojo_ipc_channel_->ChildProcessLaunched();
       mojo::edk::ChildProcessLaunched(
           child_process_.Handle(),
           mojo::edk::ScopedPlatformHandle(mojo::edk::PlatformHandle(
-              mojo_ipc_channel_->PassServerHandle().release().handle)));
+              mojo_ipc_channel_->PassServerHandle().release().handle)),
+          child_token_);
     }
   }
   start_child_process_event_.Signal();

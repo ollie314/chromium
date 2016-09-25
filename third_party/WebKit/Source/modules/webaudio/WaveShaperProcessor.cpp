@@ -22,8 +22,10 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "modules/webaudio/WaveShaperProcessor.h"
 #include "modules/webaudio/WaveShaperDSPKernel.h"
+#include "modules/webaudio/WaveShaperProcessor.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -39,17 +41,26 @@ WaveShaperProcessor::~WaveShaperProcessor()
         uninitialize();
 }
 
-PassOwnPtr<AudioDSPKernel> WaveShaperProcessor::createKernel()
+std::unique_ptr<AudioDSPKernel> WaveShaperProcessor::createKernel()
 {
-    return adoptPtr(new WaveShaperDSPKernel(this));
+    return wrapUnique(new WaveShaperDSPKernel(this));
 }
 
-void WaveShaperProcessor::setCurve(DOMFloat32Array* curve)
+void WaveShaperProcessor::setCurve(const float* curveData, unsigned curveLength)
 {
+    DCHECK(isMainThread());
+
     // This synchronizes with process().
     MutexLocker processLocker(m_processLock);
 
-    m_curve = curve;
+    if (curveLength == 0 || !curveData) {
+        m_curve = nullptr;
+        return;
+    }
+
+    // Copy the curve data, if any, to our internal buffer.
+    m_curve = wrapUnique(new Vector<float>(curveLength));
+    memcpy(m_curve->data(), curveData, sizeof(float)*curveLength);
 }
 
 void WaveShaperProcessor::setOversample(OverSampleType oversample)
@@ -75,7 +86,7 @@ void WaveShaperProcessor::process(const AudioBus* source, AudioBus* destination,
     }
 
     bool channelCountMatches = source->numberOfChannels() == destination->numberOfChannels() && source->numberOfChannels() == m_kernels.size();
-    ASSERT(channelCountMatches);
+    DCHECK(channelCountMatches);
     if (!channelCountMatches)
         return;
 

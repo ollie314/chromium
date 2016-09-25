@@ -34,16 +34,67 @@ class WebGamepadButton {
 public:
     WebGamepadButton()
         : pressed(false)
+        , touched(false)
         , value(0.)
     {
     }
-    WebGamepadButton(bool pressed, double value)
+    WebGamepadButton(bool pressed, bool touched, double value)
         : pressed(pressed)
+        , touched(touched)
         , value(value)
     {
     }
     bool pressed;
+    bool touched;
     double value;
+};
+
+class WebGamepadVector {
+public:
+    WebGamepadVector()
+        : notNull(false)
+    {
+    }
+
+    bool notNull;
+    float x, y, z;
+};
+
+class WebGamepadQuaternion {
+public:
+    WebGamepadQuaternion()
+        : notNull(false)
+    {
+    }
+
+    bool notNull;
+    float x, y, z, w;
+};
+
+class WebGamepadPose {
+public:
+    WebGamepadPose()
+        : notNull(false)
+    {
+    }
+
+    bool notNull;
+
+    bool hasOrientation;
+    bool hasPosition;
+
+    WebGamepadQuaternion orientation;
+    WebGamepadVector position;
+    WebGamepadVector angularVelocity;
+    WebGamepadVector linearVelocity;
+    WebGamepadVector angularAcceleration;
+    WebGamepadVector linearAcceleration;
+};
+
+enum WebGamepadHand {
+    GamepadHandNone = 0,
+    GamepadHandLeft = 1,
+    GamepadHandRight = 2
 };
 
 // This structure is intentionally POD and fixed size so that it can be shared
@@ -90,9 +141,13 @@ public:
 
     // Mapping type (for example "standard")
     WebUChar mapping[mappingLengthCap];
-};
 
-static_assert(sizeof(WebGamepad) == 721, "WebGamepad has wrong size");
+    WebGamepadPose pose;
+
+    WebGamepadHand hand;
+
+    unsigned displayId;
+};
 
 #pragma pack(pop)
 

@@ -4,38 +4,23 @@
 
 #import "chrome/browser/ui/cocoa/passwords/account_chooser_view_controller.h"
 
+#include <Carbon/Carbon.h>
+
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/utf_string_conversions.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/passwords/autosignin_prompt_view_controller.h"
-#include "chrome/browser/ui/passwords/password_dialog_controller.h"
+#include "chrome/browser/ui/passwords/password_dialog_controller_mock.h"
 #include "components/autofill/core/common/password_form.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#import "ui/events/test/cocoa_test_event_utils.h"
 
 
 namespace {
 
-const char kDialogTitle[] = "Auto signin";
-const char kDialogText[] = "bla bla";
-
-class PasswordDialogControllerMock : public PasswordDialogController {
- public:
-  MOCK_CONST_METHOD0(GetLocalForms, const FormsVector&());
-  MOCK_CONST_METHOD0(GetFederationsForms, const FormsVector&());
-  MOCK_CONST_METHOD0(GetAccoutChooserTitle,
-                     std::pair<base::string16, gfx::Range>());
-  MOCK_CONST_METHOD0(GetAutoSigninPromoTitle, base::string16());
-  MOCK_CONST_METHOD0(GetAutoSigninText,
-                     std::pair<base::string16, gfx::Range>());
-  MOCK_METHOD0(OnSmartLockLinkClicked, void());
-  MOCK_METHOD2(OnChooseCredentials, void(
-      const autofill::PasswordForm& password_form,
-      password_manager::CredentialType credential_type));
-  MOCK_METHOD0(OnAutoSigninOK, void());
-  MOCK_METHOD0(OnAutoSigninTurnOff, void());
-  MOCK_METHOD0(OnCloseDialog, void());
-};
+constexpr char kDialogTitle[] = "Auto signin";
+constexpr char kDialogText[] = "bla bla";
 
 // Tests for the autosignin dialog view.
 class AutoSigninPromptViewControllerTest : public PasswordPromptBridgeInterface,
@@ -118,6 +103,14 @@ TEST_F(AutoSigninPromptViewControllerTest, ClosePromptAndHandleClick) {
   [view_controller().contentText clickedOnLink:@"" atIndex:0];
   [view_controller().okButton performClick:nil];
   [view_controller().turnOffButton performClick:nil];
+}
+
+TEST_F(AutoSigninPromptViewControllerTest, CloseOnEsc) {
+  SetUpAutosigninFirstRun();
+  EXPECT_CALL(*this, OnPerformClose());
+  [[view_controller() view]
+      performKeyEquivalent:cocoa_test_event_utils::KeyEventWithKeyCode(
+                               kVK_Escape, '\e', NSKeyDown, 0)];
 }
 
 }  // namespace

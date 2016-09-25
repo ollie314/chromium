@@ -26,6 +26,7 @@
 #include "core/dom/Node.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/frame/FrameHost.h"
+#include "core/layout/api/LayoutViewItem.h"
 
 namespace blink {
 
@@ -45,8 +46,6 @@ StyleResolverState::StyleResolverState(Document& document, const ElementResolveC
         // TODO(jchaffraix): We should make m_parentStyle const (https://crbug.com/468152)
         m_parentStyle = const_cast<ComputedStyle*>(m_elementContext.parentStyle());
     }
-
-    ASSERT(document.isActive());
 }
 
 StyleResolverState::StyleResolverState(Document& document, Element* element, const ComputedStyle* parentStyle)
@@ -61,12 +60,19 @@ StyleResolverState::~StyleResolverState()
     m_animationUpdate.clear();
 }
 
+void StyleResolverState::setStyle(PassRefPtr<ComputedStyle> style)
+{
+    // FIXME: Improve RAII of StyleResolverState to remove this function.
+    m_style = style;
+    m_cssToLengthConversionData = CSSToLengthConversionData(m_style.get(), rootElementStyle(), document().layoutViewItem(), m_style->effectiveZoom());
+}
+
 CSSToLengthConversionData StyleResolverState::fontSizeConversionData() const
 {
     float em = parentStyle()->specifiedFontSize();
     float rem = rootElementStyle() ? rootElementStyle()->specifiedFontSize() : 1;
     CSSToLengthConversionData::FontSizes fontSizes(em, rem, &parentStyle()->font());
-    CSSToLengthConversionData::ViewportSize viewportSize(document().layoutView());
+    CSSToLengthConversionData::ViewportSize viewportSize(document().layoutViewItem());
 
     return CSSToLengthConversionData(style(), fontSizes, viewportSize, 1);
 }
@@ -84,6 +90,16 @@ void StyleResolverState::setCustomPropertySetForApplyAtRule(const String& string
 StylePropertySet* StyleResolverState::customPropertySetForApplyAtRule(const String& string)
 {
     return m_customPropertySetsForApplyAtRule.get(string);
+}
+
+HeapHashMap<CSSPropertyID, Member<const CSSValue>>& StyleResolverState::parsedPropertiesForPendingSubstitutionCache(const CSSPendingSubstitutionValue& value) const
+{
+    HeapHashMap<CSSPropertyID, Member<const CSSValue>>* map = m_parsedPropertiesForPendingSubstitutionCache.get(&value);
+    if (!map) {
+        map = new HeapHashMap<CSSPropertyID, Member<const CSSValue>>;
+        m_parsedPropertiesForPendingSubstitutionCache.set(&value, map);
+    }
+    return *map;
 }
 
 } // namespace blink

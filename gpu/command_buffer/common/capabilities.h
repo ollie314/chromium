@@ -115,6 +115,7 @@ struct GPU_EXPORT Capabilities {
   int uniform_buffer_offset_alignment;
 
   bool post_sub_buffer;
+  bool swap_buffers_with_damage;
   bool commit_overlay_planes;
   bool egl_image_external;
   bool texture_format_astc;
@@ -144,6 +145,9 @@ struct GPU_EXPORT Capabilities {
   bool surfaceless;
   bool flips_vertically;
   bool msaa_is_slow;
+  bool disable_one_component_textures;
+  bool disable_multisampling_color_mask_usage;
+  bool disable_webgl_rgb_multisampling_usage;
 
   // When this parameter is true, a CHROMIUM image created with RGB format will
   // actually have RGBA format. The client is responsible for handling most of
@@ -151,6 +155,10 @@ struct GPU_EXPORT Capabilities {
   // gpu/GLES2/extensions/CHROMIUM/CHROMIUM_gpu_memory_buffer_image.txt for more
   // details.
   bool chromium_image_rgb_emulation;
+
+  // When true, RGB framebuffer formats are unsupported. Emulate with RGBA to
+  // work around this. See https://crbug.com/449150 for an example.
+  bool emulate_rgb_buffer_with_rgba;
 
   int major_version;
   int minor_version;

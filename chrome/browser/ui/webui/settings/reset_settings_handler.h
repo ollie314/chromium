@@ -42,9 +42,11 @@ class ResetSettingsHandler : public SettingsPageUIHandler {
 
   // WebUIMessageHandler implementation.
   void RegisterMessages() override;
+  void OnJavascriptAllowed() override {}
+  void OnJavascriptDisallowed() override {}
 
  protected:
-  ResetSettingsHandler(Profile* profile, bool allow_powerwash);
+  explicit ResetSettingsHandler(Profile* profile);
 
   // Overriden in tests to substitute with a test version of ProfileResetter.
   virtual ProfileResetter* GetResetter();
@@ -53,6 +55,12 @@ class ResetSettingsHandler : public SettingsPageUIHandler {
   void HandleResetProfileSettings(const base::ListValue* args);
 
  private:
+  // Retrieves the settings that will be reported, called from Javascript.
+  void HandleGetReportedSettings(const base::ListValue* args);
+
+  // Called once the settings that will be reported have been retrieved.
+  void OnGetReportedSettingsDone(std::string callback_id);
+
   // Called when the reset profile dialog is shown.
   void OnShowResetProfileDialog(const base::ListValue* args);
 
@@ -66,26 +74,16 @@ class ResetSettingsHandler : public SettingsPageUIHandler {
   void OnSettingsFetched();
 
   // Resets profile settings to default values. |send_settings| is true if user
-  // gave his consent to upload broken settings to Google for analysis.
+  // gave their consent to upload broken settings to Google for analysis.
   void ResetProfile(std::string callback_id, bool send_settings);
 
   // Closes the dialog once all requested settings has been reset.
   void OnResetProfileSettingsDone(std::string callback_id,
                                   bool send_feedback);
 
-  // Sets new values for the feedback area.
-  void UpdateFeedbackUI();
-
 #if defined(OS_CHROMEOS)
   // Will be called when powerwash dialog is shown.
   void OnShowPowerwashDialog(const base::ListValue* args);
-
-  // Sets a pref indicating that a factory reset is requested and then requests
-  // a restart.
-  void HandleFactoryResetRestart(const base::ListValue* args);
-
-  // Whether factory reset can be performed.
-  bool allow_powerwash_ = false;
 #endif  // defined(OS_CHROMEOS)
 
   Profile* const profile_;

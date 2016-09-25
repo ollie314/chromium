@@ -55,7 +55,10 @@ enum VideoCodecProfile {
   VP9PROFILE_PROFILE1,
   VP9PROFILE_PROFILE2,
   VP9PROFILE_PROFILE3,
-  VIDEO_CODEC_PROFILE_MAX = VP9PROFILE_PROFILE3,
+  HEVCPROFILE_MAIN,
+  HEVCPROFILE_MAIN10,
+  HEVCPROFILE_MAIN_STILL_PICTURE,
+  VIDEO_CODEC_PROFILE_MAX = HEVCPROFILE_MAIN_STILL_PICTURE,
 };
 
 // Specification of a decoding profile supported by a hardware decoder.
@@ -116,10 +119,6 @@ struct GPU_EXPORT GPUInfo {
   GPUInfo(const GPUInfo& other);
   ~GPUInfo();
 
-  bool SupportsAccelerated2dCanvas() const {
-    return !can_lose_context && !software_rendering;
-  }
-
   // The amount of time taken to get from the process starting to the message
   // loop being pumped.
   base::TimeDelta initialization_time;
@@ -135,7 +134,7 @@ struct GPU_EXPORT GPUInfo {
 
   // Version of DisplayLink driver installed. Zero if not installed.
   // http://crbug.com/177611.
-  Version display_link_version;
+  base::Version display_link_version;
 
   // Primary GPU, for exmaple, the discrete GPU in a dual GPU machine.
   GPUDevice gpu;
@@ -205,10 +204,6 @@ struct GPU_EXPORT GPUInfo {
   // GL reset notification strategy as defined by GL_ARB_robustness. 0 if GPU
   // reset detection or notification not available.
   uint32_t gl_reset_notification_strategy;
-
-  // The device semantics, i.e. whether the Vista and Windows 7 specific
-  // semantics are available.
-  bool can_lose_context;
 
   bool software_rendering;
 

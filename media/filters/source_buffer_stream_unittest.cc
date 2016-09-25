@@ -143,7 +143,7 @@ class SourceBufferStreamTest : public testing::Test {
   }
 
   void NewCodedFrameGroupAppend(const std::string& buffers_to_append) {
-    AppendBuffers(buffers_to_append, true, kNoTimestamp(), false, true);
+    AppendBuffers(buffers_to_append, true, kNoTimestamp, false, true);
   }
 
   void NewCodedFrameGroupAppend(base::TimeDelta start_timestamp,
@@ -152,24 +152,24 @@ class SourceBufferStreamTest : public testing::Test {
   }
 
   void AppendBuffers(const std::string& buffers_to_append) {
-    AppendBuffers(buffers_to_append, false, kNoTimestamp(), false, true);
+    AppendBuffers(buffers_to_append, false, kNoTimestamp, false, true);
   }
 
   void NewCodedFrameGroupAppendOneByOne(const std::string& buffers_to_append) {
-    AppendBuffers(buffers_to_append, true, kNoTimestamp(), true, true);
+    AppendBuffers(buffers_to_append, true, kNoTimestamp, true, true);
   }
 
   void AppendBuffersOneByOne(const std::string& buffers_to_append) {
-    AppendBuffers(buffers_to_append, false, kNoTimestamp(), true, true);
+    AppendBuffers(buffers_to_append, false, kNoTimestamp, true, true);
   }
 
   void NewCodedFrameGroupAppend_ExpectFailure(
       const std::string& buffers_to_append) {
-    AppendBuffers(buffers_to_append, true, kNoTimestamp(), false, false);
+    AppendBuffers(buffers_to_append, true, kNoTimestamp, false, false);
   }
 
   void AppendBuffers_ExpectFailure(const std::string& buffers_to_append) {
-    AppendBuffers(buffers_to_append, false, kNoTimestamp(), false, false);
+    AppendBuffers(buffers_to_append, false, kNoTimestamp, false, false);
   }
 
   void Seek(int position) {
@@ -306,7 +306,7 @@ class SourceBufferStreamTest : public testing::Test {
         expected, " ", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     std::stringstream ss;
     const SourceBufferStream::Type type = stream_->GetType();
-    base::TimeDelta active_splice_timestamp = kNoTimestamp();
+    base::TimeDelta active_splice_timestamp = kNoTimestamp;
     for (size_t i = 0; i < timestamps.size(); i++) {
       scoped_refptr<StreamParserBuffer> buffer;
       SourceBufferStream::Status status = stream_->GetNextBuffer(&buffer);
@@ -372,7 +372,7 @@ class SourceBufferStreamTest : public testing::Test {
         ASSERT_EQ(buffer->timestamp(), preroll_buffer->timestamp());
         ASSERT_EQ(buffer->GetDecodeTimestamp(),
                   preroll_buffer->GetDecodeTimestamp());
-        ASSERT_EQ(kInfiniteDuration(), preroll_buffer->discard_padding().first);
+        ASSERT_EQ(kInfiniteDuration, preroll_buffer->discard_padding().first);
         ASSERT_EQ(base::TimeDelta(), preroll_buffer->discard_padding().second);
         ASSERT_TRUE(buffer->is_key_frame());
 
@@ -384,9 +384,9 @@ class SourceBufferStreamTest : public testing::Test {
       // Until the last splice frame is seen, indicated by a matching timestamp,
       // all buffers must have the same splice_timestamp().
       if (buffer->timestamp() == active_splice_timestamp) {
-        ASSERT_EQ(buffer->splice_timestamp(), kNoTimestamp());
+        ASSERT_EQ(buffer->splice_timestamp(), kNoTimestamp);
       } else {
-        ASSERT_TRUE(active_splice_timestamp == kNoTimestamp() ||
+        ASSERT_TRUE(active_splice_timestamp == kNoTimestamp ||
                     active_splice_timestamp == buffer->splice_timestamp());
       }
 
@@ -422,7 +422,7 @@ class SourceBufferStreamTest : public testing::Test {
 
   base::TimeDelta frame_duration() const { return frame_duration_; }
 
-  scoped_ptr<SourceBufferStream> stream_;
+  std::unique_ptr<SourceBufferStream> stream_;
   VideoDecoderConfig video_config_;
   AudioDecoderConfig audio_config_;
   scoped_refptr<StrictMock<MockMediaLog>> media_log_;
@@ -691,7 +691,7 @@ class SourceBufferStreamTest : public testing::Test {
 
     if (start_new_coded_frame_group) {
       base::TimeDelta start_timestamp = coded_frame_group_start_timestamp;
-      if (start_timestamp == kNoTimestamp())
+      if (start_timestamp == kNoTimestamp)
         start_timestamp = buffers[0]->timestamp();
 
       ASSERT_TRUE(start_timestamp <= buffers[0]->timestamp());
@@ -3534,6 +3534,76 @@ TEST_F(SourceBufferStreamTest, OverlapSplitAndMergeWhileWaitingForMoreData) {
   CheckExpectedBuffers("180K 210");
 }
 
+// Verify that a single coded frame at the current read position unblocks the
+// read even if the frame is buffered after the previously read position is
+// removed.
+TEST_F(SourceBufferStreamTest, AfterRemove_SingleFrameRange_Unblocks_Read) {
+  Seek(0);
+  NewCodedFrameGroupAppend("0K 30 60 90D30");
+  CheckExpectedRangesByTimestamp("{ [0,120) }");
+  CheckExpectedBuffers("0K 30 60 90");
+  CheckNoNextBuffer();
+
+  RemoveInMs(0, 120, 120);
+  CheckExpectedRangesByTimestamp("{ }");
+  NewCodedFrameGroupAppend("120D30K");
+  CheckExpectedRangesByTimestamp("{ [120,150) }");
+  CheckExpectedBuffers("120K");
+  CheckNoNextBuffer();
+}
+
+// Verify that multiple short (relative to max-inter-buffer-distance * 2) coded
+// frames at the current read position unblock the read even if the frames are
+// buffered after the previously read position is removed.
+TEST_F(SourceBufferStreamTest, AfterRemove_TinyFrames_Unblock_Read_1) {
+  Seek(0);
+  NewCodedFrameGroupAppend("0K 30 60 90D30");
+  CheckExpectedRangesByTimestamp("{ [0,120) }");
+  CheckExpectedBuffers("0K 30 60 90");
+  CheckNoNextBuffer();
+
+  RemoveInMs(0, 120, 120);
+  CheckExpectedRangesByTimestamp("{ }");
+  NewCodedFrameGroupAppend("120D1K 121D1");
+  CheckExpectedRangesByTimestamp("{ [120,122) }");
+  CheckExpectedBuffers("120K 121");
+  CheckNoNextBuffer();
+}
+
+// Verify that multiple short (relative to max-inter-buffer-distance * 2) coded
+// frames starting at the fudge room boundary unblock the read even if the
+// frames are buffered after the previously read position is removed.
+TEST_F(SourceBufferStreamTest, AfterRemove_TinyFrames_Unblock_Read_2) {
+  Seek(0);
+  NewCodedFrameGroupAppend("0K 30 60 90D30");
+  CheckExpectedRangesByTimestamp("{ [0,120) }");
+  CheckExpectedBuffers("0K 30 60 90");
+  CheckNoNextBuffer();
+
+  RemoveInMs(0, 120, 120);
+  CheckExpectedRangesByTimestamp("{ }");
+  NewCodedFrameGroupAppend("150D1K 151D1");
+  CheckExpectedRangesByTimestamp("{ [150,152) }");
+  CheckExpectedBuffers("150K 151");
+  CheckNoNextBuffer();
+}
+
+// Verify that coded frames starting after the fudge room boundary do not
+// unblock the read when buffered after the previously read position is removed.
+TEST_F(SourceBufferStreamTest, AfterRemove_BeyondFudge_Stalled) {
+  Seek(0);
+  NewCodedFrameGroupAppend("0K 30 60 90D30");
+  CheckExpectedRangesByTimestamp("{ [0,120) }");
+  CheckExpectedBuffers("0K 30 60 90");
+  CheckNoNextBuffer();
+
+  RemoveInMs(0, 120, 120);
+  CheckExpectedRangesByTimestamp("{ }");
+  NewCodedFrameGroupAppend("151D1K 152D1");
+  CheckExpectedRangesByTimestamp("{ [151,153) }");
+  CheckNoNextBuffer();
+}
+
 // Verify that non-keyframes with the same timestamp in the same
 // append are handled correctly.
 TEST_F(SourceBufferStreamTest, SameTimestamp_Video_SingleAppend) {
@@ -3720,7 +3790,7 @@ TEST_F(SourceBufferStreamTest, Remove_ZeroToInfinity) {
   NewCodedFrameGroupAppend("1000K 1030 1060K 1090 1120K");
   NewCodedFrameGroupAppend("2000K 2030 2060K 2090 2120K");
   CheckExpectedRangesByTimestamp("{ [10,160) [1000,1150) [2000,2150) }");
-  Remove(base::TimeDelta(), kInfiniteDuration(), kInfiniteDuration());
+  Remove(base::TimeDelta(), kInfiniteDuration, kInfiniteDuration);
   CheckExpectedRangesByTimestamp("{ }");
 }
 
@@ -4723,6 +4793,31 @@ TEST_F(SourceBufferStreamTest,
   Seek(0);
   CheckExpectedBuffers("0K 10 20 30K 40 2000K 2010");
   CheckNoNextBuffer();
+}
+
+TEST_F(SourceBufferStreamTest, GetHighestPresentationTimestamp) {
+  // TODO(wolenetz): Add coverage for when DTS != PTS once
+  // https://crbug.com/398130 is fixed.
+
+  EXPECT_EQ(base::TimeDelta(), stream_->GetHighestPresentationTimestamp());
+
+  NewCodedFrameGroupAppend("0K 10K");
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(10),
+            stream_->GetHighestPresentationTimestamp());
+
+  RemoveInMs(0, 10, 20);
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(10),
+            stream_->GetHighestPresentationTimestamp());
+
+  RemoveInMs(10, 20, 20);
+  EXPECT_EQ(base::TimeDelta(), stream_->GetHighestPresentationTimestamp());
+
+  NewCodedFrameGroupAppend("0K 10K");
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(10),
+            stream_->GetHighestPresentationTimestamp());
+
+  RemoveInMs(10, 20, 20);
+  EXPECT_EQ(base::TimeDelta(), stream_->GetHighestPresentationTimestamp());
 }
 
 // TODO(vrk): Add unit tests where keyframes are unaligned between streams.

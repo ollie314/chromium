@@ -6,6 +6,7 @@
 #define MOJO_COMMON_COMMON_TYPE_CONVERTERS_H_
 
 #include <stdint.h>
+#include <vector>
 
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
@@ -44,6 +45,11 @@ struct MOJO_COMMON_EXPORT TypeConverter<std::string, Array<uint8_t>> {
 template <>
 struct MOJO_COMMON_EXPORT TypeConverter<Array<uint8_t>, std::string> {
   static Array<uint8_t> Convert(const std::string& input);
+};
+
+template <>
+struct MOJO_COMMON_EXPORT TypeConverter<Array<uint8_t>, base::StringPiece> {
+  static Array<uint8_t> Convert(const base::StringPiece& input);
 };
 
 template <>

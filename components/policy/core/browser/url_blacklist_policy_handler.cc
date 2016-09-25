@@ -4,16 +4,16 @@
 
 #include "components/policy/core/browser/url_blacklist_policy_handler.h"
 
+#include <memory>
 #include <utility>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_pref_names.h"
+#include "components/policy/policy_constants.h"
 #include "components/prefs/pref_value_map.h"
 #include "grit/components_strings.h"
-#include "policy/policy_constants.h"
 
 namespace policy {
 
@@ -28,15 +28,13 @@ bool URLBlacklistPolicyHandler::CheckPolicySettings(const PolicyMap& policies,
   const base::Value* url_blacklist = policies.GetValue(key::kURLBlacklist);
 
   if (disabled_schemes && !disabled_schemes->IsType(base::Value::TYPE_LIST)) {
-    errors->AddError(key::kDisabledSchemes,
-                     IDS_POLICY_TYPE_ERROR,
-                     ValueTypeToString(base::Value::TYPE_LIST));
+    errors->AddError(key::kDisabledSchemes, IDS_POLICY_TYPE_ERROR,
+                     base::Value::GetTypeName(base::Value::TYPE_LIST));
   }
 
   if (url_blacklist && !url_blacklist->IsType(base::Value::TYPE_LIST)) {
-    errors->AddError(key::kURLBlacklist,
-                     IDS_POLICY_TYPE_ERROR,
-                     ValueTypeToString(base::Value::TYPE_LIST));
+    errors->AddError(key::kURLBlacklist, IDS_POLICY_TYPE_ERROR,
+                     base::Value::GetTypeName(base::Value::TYPE_LIST));
   }
 
   return true;
@@ -55,15 +53,14 @@ void URLBlacklistPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
   if (disabled_schemes_policy)
     disabled_schemes_policy->GetAsList(&disabled_schemes);
 
-  scoped_ptr<base::ListValue> merged_url_blacklist(new base::ListValue());
+  std::unique_ptr<base::ListValue> merged_url_blacklist(new base::ListValue());
 
   // We start with the DisabledSchemes because we have size limit when
   // handling URLBlacklists.
   if (disabled_schemes) {
-    for (base::ListValue::const_iterator entry(disabled_schemes->begin());
-         entry != disabled_schemes->end(); ++entry) {
+    for (const auto& entry : *disabled_schemes) {
       std::string entry_value;
-      if ((*entry)->GetAsString(&entry_value)) {
+      if (entry->GetAsString(&entry_value)) {
         entry_value.append("://*");
         merged_url_blacklist->AppendString(entry_value);
       }
@@ -71,10 +68,9 @@ void URLBlacklistPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
   }
 
   if (url_blacklist) {
-    for (base::ListValue::const_iterator entry(url_blacklist->begin());
-         entry != url_blacklist->end(); ++entry) {
-      if ((*entry)->IsType(base::Value::TYPE_STRING))
-        merged_url_blacklist->Append((*entry)->CreateDeepCopy());
+    for (const auto& entry : *url_blacklist) {
+      if (entry->IsType(base::Value::TYPE_STRING))
+        merged_url_blacklist->Append(entry->CreateDeepCopy());
     }
   }
 

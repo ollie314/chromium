@@ -39,6 +39,7 @@ struct NPObject;
 
 namespace blink {
 
+class WebDocument;
 class WebElement;
 class WebPlugin;
 class WebString;
@@ -59,6 +60,9 @@ public:
 
     // Returns the element containing this plugin.
     virtual WebElement element() = 0;
+
+    // Returns the owning document for the plugin.
+    virtual WebDocument document() = 0;
 
     // Synchronously dispatches the progress event.
     virtual void dispatchProgressEvent(const WebString& type, bool lengthComputable, unsigned long long loaded, unsigned long long total, const WebString& url) = 0;
@@ -131,6 +135,10 @@ public:
     // Sets the layer representing the plugin for compositing. The
     // WebPluginContainer does *not* take ownership.
     virtual void setWebLayer(WebLayer*) = 0;
+
+    virtual void requestFullscreen() = 0;
+    virtual bool isFullscreenElement() const = 0;
+    virtual void cancelFullscreen() = 0;
 
 protected:
     ~WebPluginContainer() { }

@@ -13,7 +13,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/stl_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/url_request/url_request_context.h"
 #include "storage/browser/blob/blob_url_request_job_factory.h"
 #include "storage/browser/blob/shareable_file_reference.h"
@@ -306,8 +306,8 @@ OperationID FileSystemOperationRunner::Truncate(
 void FileSystemOperationRunner::Cancel(
     OperationID id,
     const StatusCallback& callback) {
-  if (ContainsKey(finished_operations_, id)) {
-    DCHECK(!ContainsKey(stray_cancel_callbacks_, id));
+  if (base::ContainsKey(finished_operations_, id)) {
+    DCHECK(!base::ContainsKey(stray_cancel_callbacks_, id));
     stray_cancel_callbacks_[id] = callback;
     return;
   }

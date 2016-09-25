@@ -15,6 +15,7 @@
 #include "content/browser/service_worker/service_worker_navigation_handle.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_data.h"
 #include "content/public/browser/stream_handle.h"
 
 namespace content {
@@ -35,7 +36,7 @@ NavigationURLLoaderImpl::NavigationURLLoaderImpl(
   // FrameTreeNode id as a parameter.
   TRACE_EVENT_ASYNC_BEGIN_WITH_TIMESTAMP1(
       "navigation", "Navigation timeToResponseStarted", core_,
-      request_info->common_params.navigation_start.ToInternalValue(),
+      request_info->common_params.navigation_start,
       "FrameTreeNode id", request_info->frame_tree_node_id);
   ServiceWorkerNavigationHandleCore* service_worker_handle_core =
       service_worker_handle ? service_worker_handle->core() : nullptr;
@@ -81,10 +82,13 @@ void NavigationURLLoaderImpl::NotifyRequestRedirected(
 
 void NavigationURLLoaderImpl::NotifyResponseStarted(
     const scoped_refptr<ResourceResponse>& response,
-    std::unique_ptr<StreamHandle> body) {
+    std::unique_ptr<StreamHandle> body,
+    const SSLStatus& ssl_status,
+    std::unique_ptr<NavigationData> navigation_data) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  delegate_->OnResponseStarted(response, std::move(body));
+  delegate_->OnResponseStarted(response, std::move(body), ssl_status,
+                               std::move(navigation_data));
 }
 
 void NavigationURLLoaderImpl::NotifyRequestFailed(bool in_cache,

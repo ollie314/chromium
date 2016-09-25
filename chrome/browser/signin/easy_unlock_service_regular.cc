@@ -55,16 +55,16 @@
 
 #if defined(OS_CHROMEOS)
 #include "apps/app_lifetime_monitor_factory.h"
-#include "ash/display/display_info.h"
 #include "ash/display/display_manager.h"
 #include "ash/shell.h"
 #include "base/linux_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_reauth.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "components/user_manager/user_manager.h"
+#include "ui/display/manager/managed_display_info.h"
 #endif
 
 namespace {
@@ -629,7 +629,7 @@ cryptauth::GcmDeviceInfo EasyUnlockServiceRegular::GetGcmDeviceInfo() {
       ash::Shell::GetInstance()->display_manager();
   int64_t primary_display_id =
       display_manager->GetPrimaryDisplayCandidate().id();
-  ash::DisplayInfo display_info =
+  display::ManagedDisplayInfo display_info =
       display_manager->GetDisplayInfo(primary_display_id);
   gfx::Rect bounds = display_info.bounds_in_native();
 
@@ -661,16 +661,16 @@ void EasyUnlockServiceRegular::InitializeCryptAuth() {
   // Initialize enrollment manager.
   cryptauth::GcmDeviceInfo device_info;
   enrollment_manager_.reset(new proximity_auth::CryptAuthEnrollmentManager(
-      base::WrapUnique(new base::DefaultClock()),
-      base::WrapUnique(new proximity_auth::CryptAuthEnrollerFactoryImpl(
-          proximity_auth_client())),
+      base::MakeUnique<base::DefaultClock>(),
+      base::MakeUnique<proximity_auth::CryptAuthEnrollerFactoryImpl>(
+          proximity_auth_client()),
       proximity_auth_client()->CreateSecureMessageDelegate(),
       GetGcmDeviceInfo(), gcm_manager_.get(),
       proximity_auth_client()->GetPrefService()));
 
   // Initialize device manager.
   device_manager_.reset(new proximity_auth::CryptAuthDeviceManager(
-      base::WrapUnique(new base::DefaultClock()),
+      base::MakeUnique<base::DefaultClock>(),
       proximity_auth_client()->CreateCryptAuthClientFactory(),
       gcm_manager_.get(), proximity_auth_client()->GetPrefService()));
 

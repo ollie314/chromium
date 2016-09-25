@@ -10,13 +10,15 @@
 #include "base/values.h"
 #include "chrome/browser/supervised_user/legacy/supervised_user_shared_settings_service.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "net/base/escape.h"
 #include "url/gurl.h"
 
 const char kSupervisedUserAccessRequestKeyPrefix[] =
     "X-ManagedUser-AccessRequests";
+const char kSupervisedUserInstallRequestKeyPrefix[] =
+    "X-ManagedUser-InstallRequests";
 const char kSupervisedUserUpdateRequestKeyPrefix[] =
     "X-ManagedUser-UpdateRequests";
 const char kSupervisedUserAccessRequestTime[] = "timestamp";
@@ -30,15 +32,14 @@ const char kNotificationSetting[] = "custodian-notification-setting";
 PermissionRequestCreatorSync::PermissionRequestCreatorSync(
     SupervisedUserSettingsService* settings_service,
     SupervisedUserSharedSettingsService* shared_settings_service,
-    ProfileSyncService* sync_service,
+    browser_sync::ProfileSyncService* sync_service,
     const std::string& name,
     const std::string& supervised_user_id)
     : settings_service_(settings_service),
       shared_settings_service_(shared_settings_service),
       sync_service_(sync_service),
       name_(name),
-      supervised_user_id_(supervised_user_id) {
-}
+      supervised_user_id_(supervised_user_id) {}
 
 PermissionRequestCreatorSync::~PermissionRequestCreatorSync() {}
 
@@ -56,6 +57,12 @@ void PermissionRequestCreatorSync::CreateURLAccessRequest(
   CreateRequest(kSupervisedUserAccessRequestKeyPrefix,
                 net::EscapeQueryParamValue(url_requested.spec(), true),
                 callback);
+}
+
+void PermissionRequestCreatorSync::CreateExtensionInstallRequest(
+    const std::string& id,
+    const SuccessCallback& callback) {
+  CreateRequest(kSupervisedUserInstallRequestKeyPrefix, id, callback);
 }
 
 void PermissionRequestCreatorSync::CreateExtensionUpdateRequest(

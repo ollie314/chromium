@@ -16,16 +16,23 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 
 class LoginUIService;
-class ProfileSyncService;
 class SigninManagerBase;
+
+namespace browser_sync {
+class ProfileSyncService;
+}  // namespace browser_sync
 
 namespace content {
 class WebContents;
-}
+}  // namespace content
 
 namespace signin_metrics {
 enum class AccessPoint;
-}
+}  // namespace signin_metrics
+
+namespace sync_driver {
+class SyncSetupInProgressHandle;
+}  // namespace sync_driver
 
 class SyncSetupHandler : public options::OptionsPageUIHandler,
                          public SyncStartupTracker::Observer,
@@ -44,7 +51,6 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
 
   // LoginUIService::LoginUI implementation.
   void FocusUI() override;
-  void CloseUI() override;
 
   static void GetStaticLocalizedValues(
       base::DictionaryValue* localized_strings,
@@ -94,7 +100,7 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
 
   // Helper routine that gets the ProfileSyncService associated with the parent
   // profile.
-  ProfileSyncService* GetSyncService() const;
+  browser_sync::ProfileSyncService* GetSyncService() const;
 
   // Returns the LoginUIService for the parent profile.
   LoginUIService* GetLoginUIService() const;
@@ -137,6 +143,9 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
   // Displays an error dialog which shows timeout of starting the sync backend.
   void DisplayTimeout();
 
+  // Closes the associated sync settings page.
+  void CloseUI();
+
   // Returns true if this object is the active login object.
   bool IsActiveLogin() const;
 
@@ -152,6 +161,9 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
 
   // Helper object used to wait for the sync backend to startup.
   std::unique_ptr<SyncStartupTracker> sync_startup_tracker_;
+
+  // Prevents Sync from running until configuration is complete.
+  std::unique_ptr<sync_driver::SyncSetupInProgressHandle> sync_blocker_;
 
   // Set to true whenever the sync configure UI is visible. This is used to tell
   // what stage of the setup wizard the user was in and to update the UMA

@@ -26,10 +26,14 @@ var sendRequest = sendRequestHandler.sendRequest;
 // modify their behaviour (such as a custom way to handle requests to the
 // API, a custom callback, etc).
 function APIFunctions(namespace) {
-  this.apiFunctions_ = {};
-  this.unavailableApiFunctions_ = {};
+  this.apiFunctions_ = { __proto__: null };
+  this.unavailableApiFunctions_ = { __proto__: null };
   this.namespace = namespace;
 }
+
+APIFunctions.prototype = {
+  __proto__: null,
+};
 
 APIFunctions.prototype.register = function(apiName, apiFunction) {
   this.apiFunctions_[apiName] = apiFunction;
@@ -113,22 +117,6 @@ APIFunctions.prototype.setCustomCallback =
   return this.setHook_(apiName, 'customCallback', customizedFunction);
 };
 
-function CustomBindingsObject() {
-}
-
-CustomBindingsObject.prototype.setSchema = function(schema) {
-  // The functions in the schema are in list form, so we move them into a
-  // dictionary for easier access.
-  var self = this;
-  self.functionSchemas = {};
-  $Array.forEach(schema.functions, function(f) {
-    self.functionSchemas[f.name] = {
-      name: f.name,
-      definition: f
-    }
-  });
-};
-
 // Get the platform from navigator.appVersion.
 function getPlatform() {
   var platforms = [
@@ -166,13 +154,24 @@ function createCustomType(type) {
   var jsModuleName = type.js_module;
   logging.CHECK(jsModuleName, 'Custom type ' + type.id +
                 ' has no "js_module" property.');
+  // This list contains all types that has a js_module property. It is ugly to
+  // hard-code them here, but the number of APIs that use js_module has not
+  // changed since the introduction of js_modules in crbug.com/222156.
+  // This whitelist serves as an extra line of defence to avoid exposing
+  // arbitrary extension modules when the |type| definition is poisoned.
+  var whitelistedModules = [
+    'ChromeDirectSetting',
+    'ChromeSetting',
+    'ContentSetting',
+    'StorageArea',
+  ];
+  logging.CHECK($Array.indexOf(whitelistedModules, jsModuleName) !== -1,
+                'Module ' + jsModuleName + ' does not define a custom type.');
   var jsModule = require(jsModuleName);
   logging.CHECK(jsModule, 'No module ' + jsModuleName + ' found for ' +
                 type.id + '.');
   var customType = jsModule[jsModuleName];
   logging.CHECK(customType, jsModuleName + ' must export itself.');
-  customType.prototype = new CustomBindingsObject();
-  customType.prototype.setSchema(type);
   return customType;
 }
 
@@ -184,9 +183,13 @@ function Binding(apiName) {
   this.customHooks_ = [];
 };
 
-Binding.create = function(apiName) {
-  return new Binding(apiName);
-};
+$Object.defineProperty(Binding, 'create', {
+  __proto__: null,
+  configurable: false,
+  enumerable: false,
+  value: function(apiName) { return new Binding(apiName); },
+  writable: false,
+});
 
 Binding.prototype = {
   // Sneaky workaround for Object.prototype getters/setters - our prototype
@@ -232,6 +235,7 @@ Binding.prototype = {
         return;
 
       hook({
+        __proto__: null,
         apiFunctions: this.apiFunctions_,
         schema: schema,
         compiledApi: api
@@ -376,12 +380,11 @@ Binding.prototype = {
           return;
         }
 
-        var apiFunction = {};
+        var apiFunction = { __proto__: null };
         apiFunction.definition = functionDef;
-        var apiFunctionName = schema.namespace + '.' + functionDef.name;
-        apiFunction.name = apiFunctionName;
+        apiFunction.name = schema.namespace + '.' + functionDef.name;
 
-        if (!GetAvailability(apiFunctionName).is_available ||
+        if (!GetAvailability(apiFunction.name).is_available ||
             (checkUnprivileged && !isSchemaAccessAllowed(functionDef))) {
           this.apiFunctions_.registerUnavailable(functionDef.name);
           return;
@@ -419,6 +422,7 @@ Binding.prototype = {
             retval = $Function.apply(this.handleRequest, this, args);
           } else {
             var optArgs = {
+              __proto__: null,
               customCallback: this.customCallback
             };
             retval = sendRequest(this.name, args,
@@ -481,7 +485,17 @@ Binding.prototype = {
           return;
         }
 
-        var value = propertyDef.value;
+        // |value| is eventually added to |m|, the exposed API. Make copies
+        // of everything from the schema. (The schema is also frozen, so as long
+        // as we don't make any modifications, shallow copies are fine.)
+        var value;
+        if ($Array.isArray(propertyDef.value))
+          value = $Array.slice(propertyDef.value);
+        else if (typeof propertyDef.value === 'object')
+          value = $Object.assign({}, propertyDef.value);
+        else
+          value = propertyDef.value;
+
         if (value) {
           // Values may just have raw types as defined in the JSON, such
           // as "WINDOW_ID_NONE": { "value": -1 }. We handle this here.
@@ -498,6 +512,8 @@ Binding.prototype = {
             logging.CHECK(type, 'Schema for $ref type ' + ref + ' not found');
             var constructor = createCustomType(type);
             var args = value;
+            logging.DCHECK($Array.isArray(args));
+            $Array.push(args, type);
             // For an object propertyDef, |value| is an array of constructor
             // arguments, but we want to pass the arguments directly (i.e.
             // not as an array), so we have to fake calling |new| on the

@@ -6,7 +6,9 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <set>
+#include <stack>
 #include <vector>
 
 #include "base/bind.h"
@@ -40,7 +42,7 @@
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_util.h"
 #include "components/history/core/browser/history_db_task.h"
@@ -255,19 +257,19 @@ void SetFaviconImpl(Profile* profile,
                     const GURL& icon_url,
                     const gfx::Image& image,
                     bookmarks_helper::FaviconSource favicon_source) {
-    BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
+  BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(profile);
 
-    FaviconChangeObserver observer(model, node);
-    favicon::FaviconService* favicon_service =
-        FaviconServiceFactory::GetForProfile(
-            profile, ServiceAccessType::EXPLICIT_ACCESS);
-    if (favicon_source == bookmarks_helper::FROM_UI) {
-      favicon_service->SetFavicons(
-          node->url(), icon_url, favicon_base::FAVICON, image);
+  FaviconChangeObserver observer(model, node);
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
+  if (favicon_source == bookmarks_helper::FROM_UI) {
+    favicon_service->SetFavicons(node->url(), icon_url, favicon_base::FAVICON,
+                                 image);
     } else {
-      ProfileSyncService* pss =
+      browser_sync::ProfileSyncService* pss =
           ProfileSyncServiceFactory::GetForProfile(profile);
-      browser_sync::BookmarkChangeProcessor::ApplyBookmarkFavicon(
+      sync_bookmarks::BookmarkChangeProcessor::ApplyBookmarkFavicon(
           node, pss->GetSyncClient(), icon_url, image.As1xPNGBytes());
     }
 
@@ -317,7 +319,8 @@ void WaitForHistoryToProcessPendingTasks() {
     Profile* profile = profiles_which_need_to_wait[i];
     history::HistoryService* history_service =
         HistoryServiceFactory::GetForProfileWithoutCreating(profile);
-    base::WaitableEvent done(false, false);
+    base::WaitableEvent done(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                             base::WaitableEvent::InitialState::NOT_SIGNALED);
     base::CancelableTaskTracker task_tracker;
     history_service->ScheduleDBTask(
         std::unique_ptr<history::HistoryDBTask>(new HistoryEmptyTask(&done)),
@@ -453,7 +456,7 @@ void FindNodeInVerifier(BookmarkModel* foreign_model,
 namespace bookmarks_helper {
 
 BookmarkModel* GetBookmarkModel(int index) {
-  return BookmarkModelFactory::GetForProfile(
+  return BookmarkModelFactory::GetForBrowserContext(
       sync_datatype_helper::test()->GetProfile(index));
 }
 
@@ -476,7 +479,7 @@ const BookmarkNode* GetManagedNode(int index) {
 }
 
 BookmarkModel* GetVerifierBookmarkModel() {
-  return BookmarkModelFactory::GetForProfile(
+  return BookmarkModelFactory::GetForBrowserContext(
       sync_datatype_helper::test()->verifier());
 }
 
@@ -826,10 +829,11 @@ namespace {
 class CountBookmarksWithTitlesMatchingChecker
     : public SingleClientStatusChangeChecker {
  public:
-  CountBookmarksWithTitlesMatchingChecker(ProfileSyncService* service,
-                                          int profile_index,
-                                          const std::string& title,
-                                          int expected_count)
+  CountBookmarksWithTitlesMatchingChecker(
+      browser_sync::ProfileSyncService* service,
+      int profile_index,
+      const std::string& title,
+      int expected_count)
       : SingleClientStatusChangeChecker(service),
         profile_index_(profile_index),
         title_(title),
@@ -857,7 +861,7 @@ class CountBookmarksWithTitlesMatchingChecker
 bool AwaitCountBookmarksWithTitlesMatching(int profile,
                                            const std::string& title,
                                            int expected_count) {
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       sync_datatype_helper::test()->GetSyncService(profile);
   CountBookmarksWithTitlesMatchingChecker checker(service,
                                                   profile,
@@ -902,12 +906,12 @@ bool ContainsDuplicateBookmarks(int profile) {
       continue;
     std::vector<const BookmarkNode*> nodes;
     GetBookmarkModel(profile)->GetNodesByURL(node->url(), &nodes);
-    EXPECT_TRUE(nodes.size() >= 1);
+    EXPECT_GE(nodes.size(), 1U);
     for (std::vector<const BookmarkNode*>::const_iterator it = nodes.begin();
          it != nodes.end(); ++it) {
       if (node->id() != (*it)->id() &&
           node->parent() == (*it)->parent() &&
-          node->GetTitle() == (*it)->GetTitle()){
+          node->GetTitle() == (*it)->GetTitle()) {
         return true;
       }
     }

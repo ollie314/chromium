@@ -34,6 +34,7 @@
 #include "platform/scroll/ScrollTypes.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 class WebScrollbarLayer;
@@ -95,7 +96,7 @@ public:
     MainThreadScrollingReasons mainThreadScrollingReasons() const;
     bool shouldUpdateScrollLayerPositionOnMainThread() const { return mainThreadScrollingReasons() != 0; }
 
-    PassOwnPtr<WebScrollbarLayer> createSolidColorScrollbarLayer(ScrollbarOrientation, int thumbThickness, int trackStart, bool isLeftSideVerticalScrollbar);
+    std::unique_ptr<WebScrollbarLayer> createSolidColorScrollbarLayer(ScrollbarOrientation, int thumbThickness, int trackStart, bool isLeftSideVerticalScrollbar);
 
     void willDestroyScrollableArea(ScrollableArea*);
     // Returns true if the coordinator handled this change.
@@ -109,7 +110,6 @@ public:
     void updateScrollParentForGraphicsLayer(GraphicsLayer* child, const PaintLayer* parent);
     void updateClipParentForGraphicsLayer(GraphicsLayer* child, const PaintLayer* parent);
 
-    static String mainThreadScrollingReasonsAsText(MainThreadScrollingReasons);
     String mainThreadScrollingReasonsAsText() const;
     Region computeShouldHandleScrollGestureOnMainThreadRegion(const LocalFrame*, const IntPoint& frameLocation) const;
 
@@ -126,7 +126,6 @@ protected:
 
     bool isForRootLayer(ScrollableArea*) const;
     bool isForMainFrame(ScrollableArea*) const;
-    bool isForViewport(ScrollableArea*) const;
 
     Member<Page> m_page;
 
@@ -146,15 +145,15 @@ private:
     void setTouchEventTargetRects(LayerHitTestRects&);
     void computeTouchEventTargetRects(LayerHitTestRects&);
 
-    WebScrollbarLayer* addWebScrollbarLayer(ScrollableArea*, ScrollbarOrientation, PassOwnPtr<WebScrollbarLayer>);
+    WebScrollbarLayer* addWebScrollbarLayer(ScrollableArea*, ScrollbarOrientation, std::unique_ptr<WebScrollbarLayer>);
     WebScrollbarLayer* getWebScrollbarLayer(ScrollableArea*, ScrollbarOrientation);
     void removeWebScrollbarLayer(ScrollableArea*, ScrollbarOrientation);
 
     bool frameViewIsDirty() const;
 
-    OwnPtr<CompositorAnimationTimeline> m_programmaticScrollAnimatorTimeline;
+    std::unique_ptr<CompositorAnimationTimeline> m_programmaticScrollAnimatorTimeline;
 
-    using ScrollbarMap = HeapHashMap<Member<ScrollableArea>, OwnPtr<WebScrollbarLayer>>;
+    using ScrollbarMap = HeapHashMap<Member<ScrollableArea>, std::unique_ptr<WebScrollbarLayer>>;
     ScrollbarMap m_horizontalScrollbars;
     ScrollbarMap m_verticalScrollbars;
     HashSet<const PaintLayer*> m_layersWithTouchRects;

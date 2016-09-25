@@ -20,9 +20,9 @@ namespace blink {
 void ViewPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     // If we ever require layout but receive a paint anyway, something has gone horribly wrong.
-    ASSERT(!m_layoutView.needsLayout());
+    DCHECK(!m_layoutView.needsLayout());
     // LayoutViews should never be called to paint with an offset not on device pixels.
-    ASSERT(LayoutPoint(IntPoint(paintOffset.x(), paintOffset.y())) == paintOffset);
+    DCHECK(LayoutPoint(IntPoint(paintOffset.x().toInt(), paintOffset.y().toInt())) == paintOffset);
 
     const FrameView* frameView = m_layoutView.frameView();
     if (frameView->shouldThrottleRendering())
@@ -49,21 +49,21 @@ void ViewPainter::paintBoxDecorationBackground(const PaintInfo& paintInfo)
     //    culling and pre-blending optimization when possible.
 
     GraphicsContext& context = paintInfo.context;
-    if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(context, m_layoutView, DisplayItem::DocumentBackground))
+    if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(context, m_layoutView, DisplayItem::kDocumentBackground))
         return;
 
     // The background fill rect is the size of the LayoutView's main GraphicsLayer.
     IntRect backgroundRect = pixelSnappedIntRect(m_layoutView.layer()->boundingBoxForCompositing());
     const Document& document = m_layoutView.document();
     const FrameView& frameView = *m_layoutView.frameView();
-    bool isMainFrame = !document.ownerElement();
+    bool isMainFrame = document.isInMainFrame();
     bool paintsBaseBackground = isMainFrame && !frameView.isTransparent();
     bool shouldClearCanvas = paintsBaseBackground && (document.settings() && document.settings()->shouldClearDocumentBackground());
     Color baseBackgroundColor = paintsBaseBackground ? frameView.baseBackgroundColor() : Color();
     Color rootBackgroundColor = m_layoutView.style()->visitedDependentColor(CSSPropertyBackgroundColor);
     const LayoutObject* rootObject = document.documentElement() ? document.documentElement()->layoutObject() : nullptr;
 
-    LayoutObjectDrawingRecorder recorder(context, m_layoutView, DisplayItem::DocumentBackground, backgroundRect);
+    LayoutObjectDrawingRecorder recorder(context, m_layoutView, DisplayItem::kDocumentBackground, backgroundRect);
 
     // Special handling for print economy mode.
     bool forceBackgroundToWhite = BoxPainter::shouldForceWhiteBackgroundForPrintEconomy(m_layoutView.styleRef(), document);

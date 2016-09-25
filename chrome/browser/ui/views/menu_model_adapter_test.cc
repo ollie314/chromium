@@ -7,7 +7,7 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/view_event_test_base.h"
@@ -111,8 +111,8 @@ class SubMenuModel : public CommonMenuModel {
 
   void MenuWillShow() override { showing_ = true; }
 
-  // Called when the menu has been closed.
-  void MenuClosed() override { showing_ = false; }
+  // Called when the menu is about to close.
+  void MenuWillClose() override { showing_ = false; }
 
   bool showing_;
 

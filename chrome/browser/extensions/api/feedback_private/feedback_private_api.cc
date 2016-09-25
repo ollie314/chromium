@@ -20,15 +20,26 @@
 #include "chrome/browser/extensions/api/feedback_private/feedback_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/feedback/tracing_manager.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/strings/grit/components_strings.h"
+#include "content/public/browser/user_metrics.h"
 #include "extensions/browser/event_router.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "url/url_util.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/arc/arc_auth_service.h"
+#endif  // defined(OS_CHROMEOS)
+
+#if defined(OS_WIN)
+#include "base/feature_list.h"
+#include "chrome/browser/safe_browsing/srt_fetcher_win.h"
+#endif
 
 using extensions::api::feedback_private::SystemInformation;
 using feedback::FeedbackData;
@@ -44,6 +55,13 @@ std::string StripFakepath(const std::string& path) {
     return path.substr(arraysize(kFakePathStr) - 1);
   return path;
 }
+
+#if defined(OS_WIN)
+// Allows enabling/disabling SRT Prompt as a Variations feature.
+constexpr base::Feature kSrtPromptOnFeedbackForm {
+  "SrtPromptOnFeedbackForm", base::FEATURE_DISABLED_BY_DEFAULT
+};
+#endif
 
 }  // namespace
 
@@ -81,6 +99,17 @@ void FeedbackPrivateAPI::RequestFeedback(
     const std::string& description_template,
     const std::string& category_tag,
     const GURL& page_url) {
+#if defined(OS_WIN)
+  // Show prompt for Software Removal Tool if the Reporter component has found
+  // unwanted software, and the user has never run the cleaner before.
+  if (base::FeatureList::IsEnabled(kSrtPromptOnFeedbackForm) &&
+      safe_browsing::ReporterFoundUws() &&
+      !safe_browsing::UserHasRunCleaner()) {
+    RequestFeedbackForFlow(description_template, category_tag, page_url,
+                           FeedbackFlow::FEEDBACK_FLOW_SHOWSRTPROMPT);
+    return;
+  }
+#endif
   RequestFeedbackForFlow(description_template, category_tag, page_url,
                          FeedbackFlow::FEEDBACK_FLOW_REGULAR);
 }
@@ -93,14 +122,19 @@ void FeedbackPrivateAPI::RequestFeedbackForFlow(
   if (browser_context_ && EventRouter::Get(browser_context_)) {
     FeedbackInfo info;
     info.description = description_template;
-    info.category_tag = base::WrapUnique(new std::string(category_tag));
-    info.page_url = base::WrapUnique(new std::string(page_url.spec()));
+    info.category_tag = base::MakeUnique<std::string>(category_tag);
+    info.page_url = base::MakeUnique<std::string>(page_url.spec());
     info.system_information.reset(new SystemInformationList);
     // The manager is only available if tracing is enabled.
     if (TracingManager* manager = TracingManager::Get()) {
       info.trace_id.reset(new int(manager->RequestTrace()));
     }
     info.flow = flow;
+#if defined(OS_MACOSX)
+    info.use_system_window_frame = true;
+#else
+    info.use_system_window_frame = false;
+#endif
 
     std::unique_ptr<base::ListValue> args =
         feedback_private::OnFeedbackRequested::Create(info);
@@ -119,19 +153,25 @@ void FeedbackPrivateAPI::RequestFeedbackForFlow(
 // static
 base::Closure* FeedbackPrivateGetStringsFunction::test_callback_ = NULL;
 
-bool FeedbackPrivateGetStringsFunction::RunSync() {
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  SetResult(dict);
+ExtensionFunction::ResponseAction FeedbackPrivateGetStringsFunction::Run() {
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
 
 #define SET_STRING(id, idr) \
   dict->SetString(id, l10n_util::GetStringUTF16(idr))
   SET_STRING("page-title", IDS_FEEDBACK_REPORT_PAGE_TITLE);
+  SET_STRING("additionalInfo", IDS_FEEDBACK_ADDITIONAL_INFO_LABEL);
   SET_STRING("page-url", IDS_FEEDBACK_REPORT_URL_LABEL);
   SET_STRING("screenshot", IDS_FEEDBACK_SCREENSHOT_LABEL);
   SET_STRING("user-email", IDS_FEEDBACK_USER_EMAIL_LABEL);
 #if defined(OS_CHROMEOS)
-  SET_STRING("sys-info",
-             IDS_FEEDBACK_INCLUDE_SYSTEM_INFORMATION_AND_METRICS_CHKBOX);
+  const arc::ArcAuthService* auth_service = arc::ArcAuthService::Get();
+  if (auth_service && auth_service->IsArcEnabled()) {
+    SET_STRING("sys-info",
+               IDS_FEEDBACK_INCLUDE_SYSTEM_INFORMATION_AND_METRICS_CHKBOX_ARC);
+  } else {
+    SET_STRING("sys-info",
+               IDS_FEEDBACK_INCLUDE_SYSTEM_INFORMATION_AND_METRICS_CHKBOX);
+  }
 #else
   SET_STRING("sys-info", IDS_FEEDBACK_INCLUDE_SYSTEM_INFORMATION_CHKBOX);
 #endif
@@ -154,24 +194,29 @@ bool FeedbackPrivateGetStringsFunction::RunSync() {
   SET_STRING("sysinfoPageExpandBtn", IDS_ABOUT_SYS_EXPAND);
   SET_STRING("sysinfoPageCollapseBtn", IDS_ABOUT_SYS_COLLAPSE);
   SET_STRING("sysinfoPageStatusLoading", IDS_FEEDBACK_SYSINFO_PAGE_LOADING);
+  // And the localized strings needed for the SRT Download Prompt.
+  SET_STRING("srtPromptBody", IDS_FEEDBACK_SRT_PROMPT_BODY);
+  SET_STRING("srtPromptAcceptButton", IDS_FEEDBACK_SRT_PROMPT_ACCEPT_BUTTON);
+  SET_STRING("srtPromptDeclineButton",
+             IDS_FEEDBACK_SRT_PROMPT_DECLINE_BUTTON);
 #undef SET_STRING
 
   const std::string& app_locale = g_browser_process->GetApplicationLocale();
-  webui::SetLoadTimeDataDefaults(app_locale, dict);
+  webui::SetLoadTimeDataDefaults(app_locale, dict.get());
+
 
   if (test_callback_ && !test_callback_->is_null())
     test_callback_->Run();
 
-  return true;
+  return RespondNow(OneArgument(std::move(dict)));
 }
 
-bool FeedbackPrivateGetUserEmailFunction::RunSync() {
-  SigninManagerBase* signin_manager =
-      SigninManagerFactory::GetForProfile(GetProfile());
-  SetResult(new base::StringValue(
+ExtensionFunction::ResponseAction FeedbackPrivateGetUserEmailFunction::Run() {
+  SigninManagerBase* signin_manager = SigninManagerFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()));
+  return RespondNow(OneArgument(base::MakeUnique<base::StringValue>(
       signin_manager ? signin_manager->GetAuthenticatedAccountInfo().email
-                     : std::string()));
-  return true;
+                     : std::string())));
 }
 
 bool FeedbackPrivateGetSystemInformationFunction::RunAsync() {
@@ -194,43 +239,37 @@ void FeedbackPrivateGetSystemInformationFunction::OnCompleted(
 bool FeedbackPrivateSendFeedbackFunction::RunAsync() {
   std::unique_ptr<feedback_private::SendFeedback::Params> params(
       feedback_private::SendFeedback::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get());
+  EXTENSION_FUNCTION_VALIDATE(params);
 
   const FeedbackInfo &feedback_info = params->feedback;
-
-  std::string attached_file_uuid;
-  if (feedback_info.attached_file_blob_uuid.get() &&
-      !feedback_info.attached_file_blob_uuid->empty())
-    attached_file_uuid = *feedback_info.attached_file_blob_uuid;
-
-  std::string screenshot_uuid;
-  if (feedback_info.screenshot_blob_uuid.get() &&
-      !feedback_info.screenshot_blob_uuid->empty())
-    screenshot_uuid = *feedback_info.screenshot_blob_uuid;
 
   // Populate feedback data.
   scoped_refptr<FeedbackData> feedback_data(new FeedbackData());
   feedback_data->set_context(GetProfile());
   feedback_data->set_description(feedback_info.description);
 
-  if (feedback_info.category_tag.get())
-    feedback_data->set_category_tag(*feedback_info.category_tag.get());
-  if (feedback_info.page_url.get())
-    feedback_data->set_page_url(*feedback_info.page_url.get());
-  if (feedback_info.email.get())
-    feedback_data->set_user_email(*feedback_info.email.get());
+  if (feedback_info.product_id)
+    feedback_data->set_product_id(*feedback_info.product_id);
+  if (feedback_info.category_tag)
+    feedback_data->set_category_tag(*feedback_info.category_tag);
+  if (feedback_info.page_url)
+    feedback_data->set_page_url(*feedback_info.page_url);
+  if (feedback_info.email)
+    feedback_data->set_user_email(*feedback_info.email);
+  if (feedback_info.trace_id)
+    feedback_data->set_trace_id(*feedback_info.trace_id);
 
-  if (!attached_file_uuid.empty()) {
+  if (feedback_info.attached_file_blob_uuid &&
+      !feedback_info.attached_file_blob_uuid->empty()) {
     feedback_data->set_attached_filename(
-        StripFakepath((*feedback_info.attached_file.get()).name));
-    feedback_data->set_attached_file_uuid(attached_file_uuid);
+        StripFakepath((*feedback_info.attached_file).name));
+    feedback_data->set_attached_file_uuid(
+        *feedback_info.attached_file_blob_uuid);
   }
 
-  if (!screenshot_uuid.empty())
-    feedback_data->set_screenshot_uuid(screenshot_uuid);
-
-  if (feedback_info.trace_id.get()) {
-    feedback_data->set_trace_id(*feedback_info.trace_id.get());
+  if (feedback_info.screenshot_blob_uuid &&
+      !feedback_info.screenshot_blob_uuid->empty()) {
+    feedback_data->set_screenshot_uuid(*feedback_info.screenshot_blob_uuid);
   }
 
   std::unique_ptr<FeedbackData::SystemLogsMap> sys_logs(
@@ -267,6 +306,41 @@ void FeedbackPrivateSendFeedbackFunction::OnCompleted(
       success ? feedback_private::STATUS_SUCCESS :
                 feedback_private::STATUS_DELAYED);
   SendResponse(true);
+
+  if (!success) {
+    // Sending the feedback has been delayed as the user is offline. Show a
+    // message box to indicate that.
+    chrome::ShowWarningMessageBox(
+        nullptr, l10n_util::GetStringUTF16(IDS_FEEDBACK_OFFLINE_DIALOG_TITLE),
+        l10n_util::GetStringUTF16(IDS_FEEDBACK_OFFLINE_DIALOG_TEXT));
+  }
+}
+
+AsyncExtensionFunction::ResponseAction
+FeedbackPrivateLogSrtPromptResultFunction::Run() {
+  std::unique_ptr<feedback_private::LogSrtPromptResult::Params> params(
+      feedback_private::LogSrtPromptResult::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  const feedback_private::SrtPromptResult result = params->result;
+
+  switch (result) {
+    case feedback_private::SRT_PROMPT_RESULT_ACCEPTED:
+      content::RecordAction(
+          base::UserMetricsAction("Feedback.SrtPromptAccepted"));
+      break;
+    case feedback_private::SRT_PROMPT_RESULT_DECLINED:
+      content::RecordAction(
+          base::UserMetricsAction("Feedback.SrtPromptDeclined"));
+      break;
+    case feedback_private::SRT_PROMPT_RESULT_CLOSED:
+      content::RecordAction(
+          base::UserMetricsAction("Feedback.SrtPromptClosed"));
+      break;
+    default:
+      return RespondNow(Error("Invalid arugment."));
+  }
+  return RespondNow(NoArguments());
 }
 
 }  // namespace extensions

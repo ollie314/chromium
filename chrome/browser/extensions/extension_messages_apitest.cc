@@ -4,6 +4,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/base64.h"
@@ -65,11 +67,11 @@ class MessageSender : public content::NotificationObserver {
   static std::unique_ptr<base::ListValue> BuildEventArguments(
       const bool last_message,
       const std::string& data) {
-    base::DictionaryValue* event = new base::DictionaryValue();
+    std::unique_ptr<base::DictionaryValue> event(new base::DictionaryValue());
     event->SetBoolean("lastMessage", last_message);
     event->SetString("data", data);
     std::unique_ptr<base::ListValue> arguments(new base::ListValue());
-    arguments->Append(event);
+    arguments->Append(std::move(event));
     return arguments;
   }
 
@@ -129,7 +131,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_Messaging) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingCrash) {
   ASSERT_TRUE(StartEmbeddedTestServer());
-  ExtensionTestMessageListener ready_to_crash("ready_to_crash", true);
+  ExtensionTestMessageListener ready_to_crash("ready_to_crash", false);
   ASSERT_TRUE(LoadExtension(
           test_data_dir_.AppendASCII("messaging/connect_crash")));
   ui_test_utils::NavigateToURL(
@@ -184,18 +186,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingInterstitial) {
   ASSERT_TRUE(RunExtensionSubtest("messaging/interstitial_component",
                                   https_server.base_url().spec(),
                                   kFlagLoadAsComponent)) << message_;
-}
-
-// Tests connecting from a panel to its extension.
-class PanelMessagingTest : public ExtensionApiTest {
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnablePanels);
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(PanelMessagingTest, MessagingPanel) {
-  ASSERT_TRUE(RunExtensionTest("messaging/connect_panel")) << message_;
 }
 
 // XXX(kalman): All web messaging tests disabled on windows due to extreme
@@ -345,6 +335,10 @@ class ExternallyConnectableMessagingTest : public ExtensionApiTest {
     return GetURLForPath("www.chromium.org", "/chromium.org.html");
   }
 
+  GURL popup_opener_url() {
+    return GetURLForPath("www.chromium.org", "/popup_opener.html");
+  }
+
   GURL google_com_url() {
     return GetURLForPath("www.google.com", "/google.com.html");
   }
@@ -470,7 +464,7 @@ class ExternallyConnectableMessagingTest : public ExtensionApiTest {
     } else {
       dir->WriteFile(FILE_PATH_LITERAL("background.js"), "");
     }
-    return LoadExtension(dir->unpacked_path());
+    return LoadExtension(dir->UnpackedPath());
   }
 
   const char* common_manifest() {
@@ -1016,14 +1010,52 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   EXPECT_FALSE(AreAnyNonWebApisDefinedForIFrame());
 }
 
+IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest, FromPopup) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisablePopupBlocking);
+
+  InitializeTestServer();
+  scoped_refptr<const Extension> extension = LoadChromiumConnectableExtension();
+
+  // This will let us wait for the chromium.org.html page to load in a popup.
+  ui_test_utils::UrlLoadObserver url_observer(
+      chromium_org_url(), content::NotificationService::AllSources());
+
+  // The page at popup_opener_url() should open chromium_org_url() as a popup.
+  ui_test_utils::NavigateToURL(browser(), popup_opener_url());
+  url_observer.Wait();
+
+  // Find the WebContents that committed the chromium_org_url().
+  // TODO(devlin) - it would be nice if UrlLoadObserver handled this for
+  // us, which it could pretty easily do.
+  content::WebContents* popup_contents = nullptr;
+  for (int i = 0; i < browser()->tab_strip_model()->count(); i++) {
+    content::WebContents* contents =
+        browser()->tab_strip_model()->GetWebContentsAt(i);
+    if (contents->GetLastCommittedURL() == chromium_org_url()) {
+      popup_contents = contents;
+      break;
+    }
+  }
+  ASSERT_NE(nullptr, popup_contents) << "Could not find WebContents for popup";
+
+  // Make sure the popup can connect and send messages to the extension.
+  content::RenderFrameHost* popup_frame = popup_contents->GetMainFrame();
+
+  EXPECT_EQ(OK, CanConnectAndSendMessagesToFrame(popup_frame, extension.get(),
+                                                 nullptr));
+  EXPECT_FALSE(AreAnyNonWebApisDefinedForFrame(popup_frame));
+}
+
 // Tests externally_connectable between a web page and an extension with a
 // TLS channel ID created for the origin.
 class ExternallyConnectableMessagingWithTlsChannelIdTest :
   public ExternallyConnectableMessagingTest {
  public:
   ExternallyConnectableMessagingWithTlsChannelIdTest()
-      : tls_channel_id_created_(false, false) {
-  }
+      : tls_channel_id_created_(
+            base::WaitableEvent::ResetPolicy::AUTOMATIC,
+            base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 
   std::string CreateTlsChannelId() {
     scoped_refptr<net::URLRequestContextGetter> request_context_getter(
@@ -1176,13 +1208,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingUserGesture) {
       "    function(msg, sender, reply) {\n"
       "      reply({result:chrome.test.isProcessingUserGesture()});\n"
       "    });");
-  const Extension* receiver = LoadExtension(receiver_dir.unpacked_path());
+  const Extension* receiver = LoadExtension(receiver_dir.UnpackedPath());
   ASSERT_TRUE(receiver);
 
   TestExtensionDir sender_dir;
   sender_dir.WriteManifest(kManifest);
   sender_dir.WriteFile(FILE_PATH_LITERAL("background.js"), "");
-  const Extension* sender = LoadExtension(sender_dir.unpacked_path());
+  const Extension* sender = LoadExtension(sender_dir.UnpackedPath());
   ASSERT_TRUE(sender);
 
   EXPECT_EQ("false",

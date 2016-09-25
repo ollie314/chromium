@@ -48,8 +48,10 @@
 #include "public/web/WebDataSource.h"
 #include "web/WebLocalFrameImpl.h"
 #include "wtf/HashSet.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/text/WTFString.h"
 #include <limits.h>
+#include <memory>
 
 namespace blink {
 
@@ -59,8 +61,9 @@ class HTTPRequestHeaderValidator : public WebHTTPHeaderVisitor {
     WTF_MAKE_NONCOPYABLE(HTTPRequestHeaderValidator);
 public:
     HTTPRequestHeaderValidator() : m_isSafe(true) { }
+    ~HTTPRequestHeaderValidator() override { }
 
-    void visitHeader(const WebString& name, const WebString& value);
+    void visitHeader(const WebString& name, const WebString& value) override;
     bool isSafe() const { return m_isSafe; }
 
 private:
@@ -72,47 +75,6 @@ void HTTPRequestHeaderValidator::visitHeader(const WebString& name, const WebStr
     m_isSafe = m_isSafe && isValidHTTPToken(name) && !FetchUtils::isForbiddenHeaderName(name) && isValidHTTPHeaderValue(value);
 }
 
-// FIXME: Remove this and use WebCore code that does the same thing.
-class HTTPResponseHeaderValidator : public WebHTTPHeaderVisitor {
-    WTF_MAKE_NONCOPYABLE(HTTPResponseHeaderValidator);
-public:
-    HTTPResponseHeaderValidator(bool usingAccessControl) : m_usingAccessControl(usingAccessControl) { }
-
-    void visitHeader(const WebString& name, const WebString& value);
-    const HTTPHeaderSet& blockedHeaders();
-
-private:
-    HTTPHeaderSet m_exposedHeaders;
-    HTTPHeaderSet m_blockedHeaders;
-    bool m_usingAccessControl;
-};
-
-void HTTPResponseHeaderValidator::visitHeader(const WebString& name, const WebString& value)
-{
-    String headerName(name);
-    if (m_usingAccessControl) {
-        if (equalIgnoringCase(headerName, "access-control-expose-headers"))
-            parseAccessControlExposeHeadersAllowList(value, m_exposedHeaders);
-        else if (!isOnAccessControlResponseHeaderWhitelist(headerName))
-            m_blockedHeaders.add(static_cast<String>(name));
-    }
-}
-
-const HTTPHeaderSet& HTTPResponseHeaderValidator::blockedHeaders()
-{
-    // Remove exposed headers from the blocked set.
-    if (!m_exposedHeaders.isEmpty()) {
-        // Don't allow Set-Cookie headers to be exposed.
-        m_exposedHeaders.remove("set-cookie");
-        m_exposedHeaders.remove("set-cookie2");
-        // Block Access-Control-Expose-Header itself. It could be exposed later.
-        m_blockedHeaders.add("access-control-expose-headers");
-        m_blockedHeaders.removeAll(m_exposedHeaders);
-    }
-
-    return m_blockedHeaders;
-}
-
 } // namespace
 
 // This class bridges the interface differences between WebCore and WebKit loader clients.
@@ -120,11 +82,11 @@ const HTTPHeaderSet& HTTPResponseHeaderValidator::blockedHeaders()
 class AssociatedURLLoader::ClientAdapter final : public DocumentThreadableLoaderClient {
     WTF_MAKE_NONCOPYABLE(ClientAdapter);
 public:
-    static PassOwnPtr<ClientAdapter> create(AssociatedURLLoader*, WebURLLoaderClient*, const WebURLLoaderOptions&);
+    static std::unique_ptr<ClientAdapter> create(AssociatedURLLoader*, WebURLLoaderClient*, const WebURLLoaderOptions&);
 
     // ThreadableLoaderClient
     void didSendData(unsigned long long /*bytesSent*/, unsigned long long /*totalBytesToBeSent*/) override;
-    void didReceiveResponse(unsigned long, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
+    void didReceiveResponse(unsigned long, const ResourceResponse&, std::unique_ptr<WebDataConsumerHandle>) override;
     void didDownloadData(int /*dataLength*/) override;
     void didReceiveData(const char*, unsigned /*dataLength*/) override;
     void didReceiveCachedMetadata(const char*, int /*dataLength*/) override;
@@ -142,12 +104,17 @@ public:
     void enableErrorNotifications();
 
     // Stops loading and releases the DocumentThreadableLoader as early as possible.
-    void clearClient() { m_client = 0; }
+    WebURLLoaderClient* releaseClient()
+    {
+        WebURLLoaderClient* client = m_client;
+        m_client = nullptr;
+        return client;
+    }
 
 private:
     ClientAdapter(AssociatedURLLoader*, WebURLLoaderClient*, const WebURLLoaderOptions&);
 
-    void notifyError(Timer<ClientAdapter>*);
+    void notifyError(TimerBase*);
 
     AssociatedURLLoader* m_loader;
     WebURLLoaderClient* m_client;
@@ -159,9 +126,9 @@ private:
     bool m_didFail;
 };
 
-PassOwnPtr<AssociatedURLLoader::ClientAdapter> AssociatedURLLoader::ClientAdapter::create(AssociatedURLLoader* loader, WebURLLoaderClient* client, const WebURLLoaderOptions& options)
+std::unique_ptr<AssociatedURLLoader::ClientAdapter> AssociatedURLLoader::ClientAdapter::create(AssociatedURLLoader* loader, WebURLLoaderClient* client, const WebURLLoaderOptions& options)
 {
-    return adoptPtr(new ClientAdapter(loader, client, options));
+    return wrapUnique(new ClientAdapter(loader, client, options));
 }
 
 AssociatedURLLoader::ClientAdapter::ClientAdapter(AssociatedURLLoader* loader, WebURLLoaderClient* client, const WebURLLoaderOptions& options)
@@ -183,7 +150,8 @@ void AssociatedURLLoader::ClientAdapter::willFollowRedirect(ResourceRequest& new
 
     WrappedResourceRequest wrappedNewRequest(newRequest);
     WrappedResourceResponse wrappedRedirectResponse(redirectResponse);
-    m_client->willFollowRedirect(m_loader, wrappedNewRequest, wrappedRedirectResponse);
+    // TODO(ricea): Do we need to set encodedDataLength here?
+    m_client->willFollowRedirect(m_loader, wrappedNewRequest, wrappedRedirectResponse, 0);
 }
 
 void AssociatedURLLoader::ClientAdapter::didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent)
@@ -194,26 +162,36 @@ void AssociatedURLLoader::ClientAdapter::didSendData(unsigned long long bytesSen
     m_client->didSendData(m_loader, bytesSent, totalBytesToBeSent);
 }
 
-void AssociatedURLLoader::ClientAdapter::didReceiveResponse(unsigned long, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
+void AssociatedURLLoader::ClientAdapter::didReceiveResponse(unsigned long, const ResourceResponse& response, std::unique_ptr<WebDataConsumerHandle> handle)
 {
     ASSERT_UNUSED(handle, !handle);
     if (!m_client)
         return;
 
-    // Try to use the original ResourceResponse if possible.
-    WebURLResponse validatedResponse = WrappedResourceResponse(response);
-    HTTPResponseHeaderValidator validator(m_options.crossOriginRequestPolicy == WebURLLoaderOptions::CrossOriginRequestPolicyUseAccessControl);
-    if (!m_options.exposeAllResponseHeaders)
-        validatedResponse.visitHTTPHeaderFields(&validator);
+    if (m_options.exposeAllResponseHeaders || m_options.crossOriginRequestPolicy != WebURLLoaderOptions::CrossOriginRequestPolicyUseAccessControl) {
+        // Use the original ResourceResponse.
+        m_client->didReceiveResponse(m_loader, WrappedResourceResponse(response));
+        return;
+    }
+
+    HTTPHeaderSet exposedHeaders;
+    extractCorsExposedHeaderNamesList(response, exposedHeaders);
+    HTTPHeaderSet blockedHeaders;
+    for (const auto& header : response.httpHeaderFields()) {
+        if (FetchUtils::isForbiddenResponseHeaderName(header.key) || (!isOnAccessControlResponseHeaderWhitelist(header.key) && !exposedHeaders.contains(header.key)))
+            blockedHeaders.add(header.key);
+    }
+
+    if (blockedHeaders.isEmpty()) {
+        // Use the original ResourceResponse.
+        m_client->didReceiveResponse(m_loader, WrappedResourceResponse(response));
+        return;
+    }
 
     // If there are blocked headers, copy the response so we can remove them.
-    const HTTPHeaderSet& blockedHeaders = validator.blockedHeaders();
-    if (!blockedHeaders.isEmpty()) {
-        validatedResponse = WebURLResponse(validatedResponse);
-        HTTPHeaderSet::const_iterator end = blockedHeaders.end();
-        for (HTTPHeaderSet::const_iterator it = blockedHeaders.begin(); it != end; ++it)
-            validatedResponse.clearHTTPHeaderField(*it);
-    }
+    WebURLResponse validatedResponse = WrappedResourceResponse(response);
+    for (const auto& header : blockedHeaders)
+        validatedResponse.clearHTTPHeaderField(header);
     m_client->didReceiveResponse(m_loader, validatedResponse);
 }
 
@@ -232,7 +210,7 @@ void AssociatedURLLoader::ClientAdapter::didReceiveData(const char* data, unsign
 
     CHECK_LE(dataLength, static_cast<unsigned>(std::numeric_limits<int>::max()));
 
-    m_client->didReceiveData(m_loader, data, dataLength, -1);
+    m_client->didReceiveData(m_loader, data, dataLength, -1, dataLength);
 }
 
 void AssociatedURLLoader::ClientAdapter::didReceiveCachedMetadata(const char* data, int dataLength)
@@ -248,9 +226,10 @@ void AssociatedURLLoader::ClientAdapter::didFinishLoading(unsigned long identifi
     if (!m_client)
         return;
 
-    m_loader->disposeObserver();
+    m_loader->clientAdapterDone();
 
-    m_client->didFinishLoading(m_loader, finishTime, WebURLLoaderClient::kUnknownEncodedDataLength);
+    releaseClient()->didFinishLoading(m_loader, finishTime, WebURLLoaderClient::kUnknownEncodedDataLength);
+    // |this| may be dead here.
 }
 
 void AssociatedURLLoader::ClientAdapter::didFail(const ResourceError& error)
@@ -258,7 +237,7 @@ void AssociatedURLLoader::ClientAdapter::didFail(const ResourceError& error)
     if (!m_client)
         return;
 
-    m_loader->disposeObserver();
+    m_loader->clientAdapterDone();
 
     m_didFail = true;
     m_error = WebURLError(error);
@@ -280,17 +259,18 @@ void AssociatedURLLoader::ClientAdapter::enableErrorNotifications()
         m_errorTimer.startOneShot(0, BLINK_FROM_HERE);
 }
 
-void AssociatedURLLoader::ClientAdapter::notifyError(Timer<ClientAdapter>* timer)
+void AssociatedURLLoader::ClientAdapter::notifyError(TimerBase* timer)
 {
     ASSERT_UNUSED(timer, timer == &m_errorTimer);
 
     if (!m_client)
         return;
 
-    m_client->didFail(m_loader, m_error);
+    releaseClient()->didFail(m_loader, m_error);
+    // |this| may be dead here.
 }
 
-class AssociatedURLLoader::Observer final : public GarbageCollectedFinalized<Observer>, public ContextLifecycleObserver {
+class AssociatedURLLoader::Observer final : public GarbageCollected<Observer>, public ContextLifecycleObserver {
     USING_GARBAGE_COLLECTED_MIXIN(Observer);
 public:
     Observer(AssociatedURLLoader* parent, Document* document)
@@ -320,7 +300,8 @@ public:
 };
 
 AssociatedURLLoader::AssociatedURLLoader(WebLocalFrameImpl* frameImpl, const WebURLLoaderOptions& options)
-    : m_options(options)
+    : m_client(nullptr)
+    , m_options(options)
     , m_observer(new Observer(this, frameImpl->frame()->document()))
 {
 }
@@ -342,13 +323,14 @@ STATIC_ASSERT_ENUM(WebURLLoaderOptions::ConsiderPreflight, ConsiderPreflight);
 STATIC_ASSERT_ENUM(WebURLLoaderOptions::ForcePreflight, ForcePreflight);
 STATIC_ASSERT_ENUM(WebURLLoaderOptions::PreventPreflight, PreventPreflight);
 
-void AssociatedURLLoader::loadSynchronously(const WebURLRequest& request, WebURLResponse& response, WebURLError& error, WebData& data)
+void AssociatedURLLoader::loadSynchronously(const WebURLRequest& request, WebURLResponse& response, WebURLError& error, WebData& data, int64_t& encodedDataLength)
 {
     DCHECK(0); // Synchronous loading is not supported.
 }
 
 void AssociatedURLLoader::loadAsynchronously(const WebURLRequest& request, WebURLLoaderClient* client)
 {
+    DCHECK(!m_client);
     DCHECK(!m_loader);
     DCHECK(!m_clientAdapter);
 
@@ -367,6 +349,7 @@ void AssociatedURLLoader::loadAsynchronously(const WebURLRequest& request, WebUR
         }
     }
 
+    m_client = client;
     m_clientAdapter = ClientAdapter::create(this, client, m_options);
 
     if (allowLoad) {
@@ -402,18 +385,29 @@ void AssociatedURLLoader::loadAsynchronously(const WebURLRequest& request, WebUR
 void AssociatedURLLoader::cancel()
 {
     disposeObserver();
+    cancelLoader();
+    releaseClient();
+}
 
+void AssociatedURLLoader::clientAdapterDone()
+{
+    disposeObserver();
+    releaseClient();
+}
+
+void AssociatedURLLoader::cancelLoader()
+{
     if (!m_clientAdapter)
         return;
 
     // Prevent invocation of the WebURLLoaderClient methods.
-    m_clientAdapter->clearClient();
+    m_clientAdapter->releaseClient();
 
     if (m_loader) {
         m_loader->cancel();
-        m_loader.clear();
+        m_loader = nullptr;
     }
-    m_clientAdapter.clear();
+    m_clientAdapter.reset();
 }
 
 void AssociatedURLLoader::setDefersLoading(bool defersLoading)
@@ -429,9 +423,13 @@ void AssociatedURLLoader::setLoadingTaskRunner(blink::WebTaskRunner*)
 
 void AssociatedURLLoader::documentDestroyed()
 {
-    cancel();
+    disposeObserver();
+    cancelLoader();
 
-    m_client->didFail(this, ResourceError());
+    if (!m_client)
+        return;
+
+    releaseClient()->didFail(this, ResourceError());
     // |this| may be dead here.
 }
 

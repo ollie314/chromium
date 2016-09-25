@@ -28,6 +28,7 @@
 #include "net/base/escape.h"
 #include "ui/base/l10n/time_format.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "url/gurl.h"
 
@@ -119,8 +120,7 @@ class SuggestionsSource : public content::URLDataSource {
   std::string GetSource() const override;
   void StartDataRequest(
       const std::string& path,
-      int render_process_id,
-      int render_frame_id,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const content::URLDataSource::GotDataCallback& callback) override;
   std::string GetMimeType(const std::string& path) const override;
   base::MessageLoop* MessageLoopForRequestPath(
@@ -145,7 +145,7 @@ class SuggestionsSource : public content::URLDataSource {
 
   // Callback for responses from each Thumbnail request.
   void OnThumbnailAvailable(RequestContext* context, base::Closure barrier,
-                            const GURL& url, const SkBitmap* bitmap);
+                            const GURL& url, const gfx::Image& image);
 
   // Callback for when all requests are complete. Renders the output webpage and
   // passes the result to the original caller.
@@ -181,7 +181,8 @@ std::string SuggestionsSource::GetSource() const {
 }
 
 void SuggestionsSource::StartDataRequest(
-    const std::string& path, int render_process_id, int render_frame_id,
+    const std::string& path,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   // If this was called as "chrome://suggestions/refresh", we also trigger an
   // async update of the suggestions.
@@ -249,10 +250,10 @@ void SuggestionsSource::OnThumbnailsFetched(RequestContext* context) {
 void SuggestionsSource::OnThumbnailAvailable(RequestContext* context,
                                              base::Closure barrier,
                                              const GURL& url,
-                                             const SkBitmap* bitmap) {
-  if (bitmap) {
+                                             const gfx::Image& image) {
+  if (!image.IsEmpty()) {
     std::vector<unsigned char> output;
-    gfx::PNGCodec::EncodeBGRASkBitmap(*bitmap, false, &output);
+    gfx::PNGCodec::EncodeBGRASkBitmap(*image.ToSkBitmap(), false, &output);
 
     std::string encoded_output;
     base::Base64Encode(

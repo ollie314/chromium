@@ -65,7 +65,7 @@ HTMLDetailsElement* HTMLSummaryElement::detailsElement() const
     Node* parent = parentNode();
     if (isHTMLDetailsElement(parent))
         return toHTMLDetailsElement(parent);
-    Element* host = shadowHost();
+    Element* host = ownerShadowHost();
     if (isHTMLDetailsElement(host))
         return toHTMLDetailsElement(host);
     return nullptr;
@@ -91,7 +91,7 @@ static bool isClickableControl(Node* node)
     Element* element = toElement(node);
     if (element->isFormControlElement())
         return true;
-    Element* host = element->shadowHost();
+    Element* host = element->ownerShadowHost();
     return host && host->isFormControlElement();
 }
 
@@ -111,7 +111,7 @@ void HTMLSummaryElement::defaultEventHandler(Event* event)
         }
 
         if (event->isKeyboardEvent()) {
-            if (event->type() == EventTypeNames::keydown && toKeyboardEvent(event)->keyIdentifier() == "U+0020") {
+            if (event->type() == EventTypeNames::keydown && toKeyboardEvent(event)->key() == " ") {
                 setActive(true);
                 // No setDefaultHandled() - IE dispatches a keypress in this case.
                 return;
@@ -128,7 +128,7 @@ void HTMLSummaryElement::defaultEventHandler(Event* event)
                     return;
                 }
             }
-            if (event->type() == EventTypeNames::keyup && toKeyboardEvent(event)->keyIdentifier() == "U+0020") {
+            if (event->type() == EventTypeNames::keyup && toKeyboardEvent(event)->key() == " ") {
                 if (active())
                     dispatchSimulatedClick(event);
                 event->setDefaultHandled();

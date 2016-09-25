@@ -353,9 +353,18 @@ class Runner(object):
 
             # TODO: Add support for discovering setupProcess/teardownProcess?
 
-            test_set.parallel_tests = _sort_inputs(test_set.parallel_tests)
-            test_set.isolated_tests = _sort_inputs(test_set.isolated_tests)
-            test_set.tests_to_skip = _sort_inputs(test_set.tests_to_skip)
+            shard_index = args.shard_index
+            total_shards = args.total_shards
+            assert total_shards >= 1
+            assert shard_index >= 0 and shard_index < total_shards, (
+              'shard_index (%d) must be >= 0 and < total_shards (%d)' %
+              (shard_index, total_shards))
+            test_set.parallel_tests = _sort_inputs(
+                test_set.parallel_tests)[shard_index::total_shards]
+            test_set.isolated_tests = _sort_inputs(
+                test_set.isolated_tests)[shard_index::total_shards]
+            test_set.tests_to_skip = _sort_inputs(
+                test_set.tests_to_skip)[shard_index::total_shards]
             return 0, test_set
         finally:
             unittest.skip = orig_skip
@@ -398,6 +407,11 @@ class Runner(object):
                     add_tests(suite)
             else:
                 add_tests(loader.loadTestsFromName(name))
+        if hasattr(loader, 'errors') and loader.errors:
+            # In Python3's version of unittest, loader failures get converted
+            # into failed test cases, rather than raising exceptions. However,
+            # the errors also get recorded so you can err out immediately.
+            raise ImportError(loader.errors)
 
     def _run_tests(self, result_set, test_set):
         h = self.host
@@ -812,7 +826,7 @@ def _run_one_test(child, test_input):
 
     tests = list(suite)
     if len(tests) != 1:
-        err = 'Failed to load %s'
+        err = 'Failed to load %s' % test_name
         if tb_str:  # pragma: untested
             err += (' (traceback follows):\n  %s' %
                     '  \n'.join(tb_str.splitlines()))

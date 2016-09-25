@@ -31,12 +31,12 @@
 #include "core/dom/shadow/InsertionPoint.h"
 
 #include "core/HTMLNames.h"
-#include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/QualifiedName.h"
 #include "core/dom/StaticNodeList.h"
 #include "core/dom/StyleChangeReason.h"
 #include "core/dom/shadow/ElementShadow.h"
+#include "core/dom/shadow/ElementShadowV0.h"
 
 namespace blink {
 
@@ -98,7 +98,7 @@ void InsertionPoint::setDistributedNodes(DistributedNodes& distributedNodes)
     m_distributedNodes.shrinkToFit();
 }
 
-void InsertionPoint::attach(const AttachContext& context)
+void InsertionPoint::attachLayoutTree(const AttachContext& context)
 {
     // We need to attach the distribution here so that they're inserted in the right order
     // otherwise the n^2 protection inside LayoutTreeBuilder will cause them to be
@@ -106,26 +106,33 @@ void InsertionPoint::attach(const AttachContext& context)
     // the n^2 protection.
     for (size_t i = 0; i < m_distributedNodes.size(); ++i) {
         if (m_distributedNodes.at(i)->needsAttach())
-            m_distributedNodes.at(i)->attach(context);
+            m_distributedNodes.at(i)->attachLayoutTree(context);
     }
 
-    HTMLElement::attach(context);
+    HTMLElement::attachLayoutTree(context);
 }
 
-void InsertionPoint::detach(const AttachContext& context)
+void InsertionPoint::detachLayoutTree(const AttachContext& context)
 {
     for (size_t i = 0; i < m_distributedNodes.size(); ++i)
         m_distributedNodes.at(i)->lazyReattachIfAttached();
 
-    HTMLElement::detach(context);
+    HTMLElement::detachLayoutTree(context);
 }
 
 void InsertionPoint::willRecalcStyle(StyleRecalcChange change)
 {
-    if (change < Inherit && getStyleChangeType() < SubtreeStyleChange)
+    StyleChangeType styleChangeType = NoStyleChange;
+
+    if (change > Inherit || getStyleChangeType() > LocalStyleChange)
+        styleChangeType = SubtreeStyleChange;
+    else if (change > NoInherit)
+        styleChangeType = LocalStyleChange;
+    else
         return;
+
     for (size_t i = 0; i < m_distributedNodes.size(); ++i)
-        m_distributedNodes.at(i)->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::PropagateInheritChangeToDistributedNodes));
+        m_distributedNodes.at(i)->setNeedsStyleRecalc(styleChangeType, StyleChangeReasonForTracing::create(StyleChangeReason::PropagateInheritChangeToDistributedNodes));
 }
 
 bool InsertionPoint::canBeActive() const
@@ -197,13 +204,15 @@ Node::InsertionNotificationRequest InsertionPoint::insertedInto(ContainerNode* i
 {
     HTMLElement::insertedInto(insertionPoint);
     if (ShadowRoot* root = containingShadowRoot()) {
-        if (ElementShadow* rootOwner = root->owner()) {
-            rootOwner->setNeedsDistributionRecalc();
-            if (canBeActive() && !m_registeredWithShadowRoot && insertionPoint->treeScope().rootNode() == root) {
-                m_registeredWithShadowRoot = true;
-                root->didAddInsertionPoint(this);
-                if (canAffectSelector())
-                    rootOwner->willAffectSelector();
+        if (!root->isV1()) {
+            if (ElementShadow* rootOwner = root->owner()) {
+                rootOwner->setNeedsDistributionRecalc();
+                if (canBeActive() && !m_registeredWithShadowRoot && insertionPoint->treeScope().rootNode() == root) {
+                    m_registeredWithShadowRoot = true;
+                    root->didAddInsertionPoint(this);
+                    if (canAffectSelector())
+                        rootOwner->v0().willAffectSelector();
+                }
             }
         }
     }
@@ -236,9 +245,9 @@ void InsertionPoint::removedFrom(ContainerNode* insertionPoint)
         DCHECK(root);
         m_registeredWithShadowRoot = false;
         root->didRemoveInsertionPoint(this);
-        if (rootOwner) {
+        if (!root->isV1() && rootOwner) {
             if (canAffectSelector())
-                rootOwner->willAffectSelector();
+                rootOwner->v0().willAffectSelector();
         }
     }
 
@@ -258,11 +267,11 @@ const InsertionPoint* resolveReprojection(const Node* projectedNode)
     const Node* current = projectedNode;
     ElementShadow* lastElementShadow = 0;
     while (true) {
-        ElementShadow* shadow = shadowWhereNodeCanBeDistributed(*current);
-        if (!shadow || shadow == lastElementShadow)
+        ElementShadow* shadow = shadowWhereNodeCanBeDistributedForV0(*current);
+        if (!shadow || shadow->isV1() || shadow == lastElementShadow)
             break;
         lastElementShadow = shadow;
-        const InsertionPoint* insertedTo = shadow->finalDestinationInsertionPointFor(projectedNode);
+        const InsertionPoint* insertedTo = shadow->v0().finalDestinationInsertionPointFor(projectedNode);
         if (!insertedTo)
             break;
         DCHECK_NE(current, insertedTo);
@@ -277,11 +286,11 @@ void collectDestinationInsertionPoints(const Node& node, HeapVector<Member<Inser
     const Node* current = &node;
     ElementShadow* lastElementShadow = 0;
     while (true) {
-        ElementShadow* shadow = shadowWhereNodeCanBeDistributed(*current);
-        if (!shadow || shadow == lastElementShadow)
+        ElementShadow* shadow = shadowWhereNodeCanBeDistributedForV0(*current);
+        if (!shadow || shadow->isV1() || shadow == lastElementShadow)
             return;
         lastElementShadow = shadow;
-        const DestinationInsertionPoints* insertionPoints = shadow->destinationInsertionPointsFor(&node);
+        const DestinationInsertionPoints* insertionPoints = shadow->v0().destinationInsertionPointsFor(&node);
         if (!insertionPoints)
             return;
         for (size_t i = 0; i < insertionPoints->size(); ++i)

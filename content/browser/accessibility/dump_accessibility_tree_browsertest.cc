@@ -12,6 +12,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "content/browser/accessibility/accessibility_tree_formatter.h"
 #include "content/browser/accessibility/accessibility_tree_formatter_blink.h"
@@ -22,6 +23,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/test/accessibility_browser_test_utils.h"
 
@@ -69,35 +71,35 @@ class DumpAccessibilityTreeTest : public DumpAccessibilityTestBase {
   }
 
   void RunAriaTest(const base::FilePath::CharType* file_path) {
-    base::FilePath dir_test_data;
-    ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &dir_test_data));
-    base::FilePath test_path(dir_test_data.AppendASCII("accessibility")
-        .AppendASCII("aria"));
-    ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
-
+    base::FilePath test_path = GetTestFilePath("accessibility", "aria");
+    {
+      base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_setup;
+      ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
+    }
     base::FilePath aria_file = test_path.Append(base::FilePath(file_path));
+
     RunTest(aria_file, "accessibility/aria");
   }
 
   void RunCSSTest(const base::FilePath::CharType* file_path) {
-    base::FilePath dir_test_data;
-    ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &dir_test_data));
-    base::FilePath test_path(
-        dir_test_data.AppendASCII("accessibility").AppendASCII("css"));
-    ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
-
+    base::FilePath test_path = GetTestFilePath("accessibility", "css");
+    {
+      base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_setup;
+      ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
+    }
     base::FilePath css_file = test_path.Append(base::FilePath(file_path));
+
     RunTest(css_file, "accessibility/css");
   }
 
   void RunHtmlTest(const base::FilePath::CharType* file_path) {
-    base::FilePath dir_test_data;
-    ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &dir_test_data));
-    base::FilePath test_path(dir_test_data.AppendASCII("accessibility")
-        .AppendASCII("html"));
-    ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
-
+    base::FilePath test_path = GetTestFilePath("accessibility", "html");
+    {
+      base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_setup;
+      ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
+    }
     base::FilePath html_file = test_path.Append(base::FilePath(file_path));
+
     RunTest(html_file, "accessibility/html");
   }
 
@@ -242,6 +244,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaControls) {
   RunAriaTest(FILE_PATH_LITERAL("aria-controls.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaCurrent) {
+  RunAriaTest(FILE_PATH_LITERAL("aria-current.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaDefinition) {
@@ -402,14 +408,14 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaMenuItem) {
 // crbug.com/442278 will stop creating new text elements representing title.
 // Re-baseline after the Blink change goes in
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityAriaMenuItemCheckBox) {
+                       AccessibilityAriaMenuItemCheckBox) {
   RunAriaTest(FILE_PATH_LITERAL("aria-menuitemcheckbox.html"));
 }
 
 // crbug.com/442278 will stop creating new text elements representing title.
 // Re-baseline after the Blink change goes in
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityAriaMenuItemRadio) {
+                       AccessibilityAriaMenuItemRadio) {
   RunAriaTest(FILE_PATH_LITERAL("aria-menuitemradio.html"));
 }
 
@@ -794,6 +800,11 @@ IN_PROC_BROWSER_TEST_F(
       FILE_PATH_LITERAL("contenteditable-with-embedded-contenteditables.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityContenteditableWithNoDescendants) {
+  RunHtmlTest(FILE_PATH_LITERAL("contenteditable-with-no-descendants.html"));
+}
+
 #if defined(OS_ANDROID)
 // Flaky failures: http://crbug.com/515053.
 #define MAYBE_AccessibilityEm DISABLED_AccessibilityEm
@@ -824,11 +835,22 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityFooter) {
   RunHtmlTest(FILE_PATH_LITERAL("footer.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+    AccessibilityFooterInsideOtherSection) {
+  RunHtmlTest(FILE_PATH_LITERAL("footer-inside-other-section.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityForm) {
   RunHtmlTest(FILE_PATH_LITERAL("form.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityFrameset) {
+  RunHtmlTest(FILE_PATH_LITERAL("frameset.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityFramesetPostEnable) {
+  enable_accessibility_after_navigating_ = true;
   RunHtmlTest(FILE_PATH_LITERAL("frameset.html"));
 }
 
@@ -838,6 +860,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityHead) {
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityHeader) {
   RunHtmlTest(FILE_PATH_LITERAL("header.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+    AccessibilityHeaderInsideOtherSection) {
+  RunHtmlTest(FILE_PATH_LITERAL("header-inside-other-section.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityHeading) {
@@ -861,6 +888,12 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityIframe) {
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityIframePostEnable) {
+  enable_accessibility_after_navigating_ = true;
+  RunHtmlTest(FILE_PATH_LITERAL("iframe.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
                        AccessibilityIframeCrossProcess) {
   RunHtmlTest(FILE_PATH_LITERAL("iframe-cross-process.html"));
 }
@@ -875,8 +908,14 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunHtmlTest(FILE_PATH_LITERAL("iframe-coordinates-cross-process.html"));
 }
 
+// Flaky on Win7. http://crbug.com/610744
+#ifdef OS_WIN
+#define MAYBE_AccessibilityIframePresentational DISABLED_AccessibilityIframePresentational
+#else
+#define MAYBE_AccessibilityIframePresentational AccessibilityIframePresentational
+#endif
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       AccessibilityIframePresentational) {
+                       MAYBE_AccessibilityIframePresentational) {
   RunHtmlTest(FILE_PATH_LITERAL("iframe-presentational.html"));
 }
 
@@ -929,6 +968,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputCheckBox) {
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
                        AccessibilityInputCheckBoxInMenu) {
   RunHtmlTest(FILE_PATH_LITERAL("input-checkbox-in-menu.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityInputCheckBoxLabel) {
+  RunHtmlTest(FILE_PATH_LITERAL("input-checkbox-label.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputColor) {
@@ -1146,16 +1190,9 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunHtmlTest(FILE_PATH_LITERAL("modal-dialog-opened.html"));
 }
 
-// Flaky on Windows and Mac: crbug.com/593846
-#if defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_AccessibilityModalDialogInIframeClosed \
-    DISABLED_AccessibilityModalDialogInIframeClosed
-#else
-#define MAYBE_AccessibilityModalDialogInIframeClosed \
-    AccessibilityModalDialogInIframeClosed
-#endif
+// Flaky: crbug.com/593846, crbug.com/596514
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       MAYBE_AccessibilityModalDialogInIframeClosed) {
+                       DISABLED_AccessibilityModalDialogInIframeClosed) {
   RunHtmlTest(FILE_PATH_LITERAL("modal-dialog-in-iframe-closed.html"));
 }
 

@@ -42,8 +42,8 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/prefs/pref_service.h"
-#include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
@@ -60,18 +60,12 @@
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/launcher_page_info.h"
-#include "grit/theme_resources.h"
 #include "ui/app_list/app_list_switches.h"
-#include "ui/app_list/app_list_view_delegate_observer.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_controller.h"
 #include "ui/app_list/speech_ui_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/webview/webview.h"
-
-#if defined(TOOLKIT_VIEWS)
-#include "ui/views/controls/webview/webview.h"
-#endif
 
 #if defined(USE_AURA)
 #include "ui/keyboard/keyboard_util.h"
@@ -79,16 +73,6 @@
 
 #if defined(USE_ASH)
 #include "chrome/browser/ui/ash/app_list/app_sync_ui_state_watcher.h"
-#endif
-
-#if defined(OS_WIN)
-#include "chrome/browser/web_applications/web_app_win.h"
-#endif
-
-#if !defined(OS_CHROMEOS)
-#include "chrome/grit/chromium_strings.h"
-#include "chrome/grit/generated_resources.h"
-#include "ui/base/l10n/l10n_util.h"
 #endif
 
 namespace chrome {
@@ -99,26 +83,13 @@ namespace {
 
 const int kAutoLaunchDefaultTimeoutMilliSec = 50;
 
-#if defined(OS_WIN)
-void CreateShortcutInWebAppDir(
-    const base::FilePath& app_data_dir,
-    base::Callback<void(const base::FilePath&)> callback,
-    std::unique_ptr<web_app::ShortcutInfo> info) {
-  content::BrowserThread::PostTaskAndReplyWithResult(
-      content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(web_app::CreateShortcutInWebAppDir, app_data_dir,
-                 base::Passed(&info)),
-      callback);
-}
-#endif
-
 void PopulateUsers(const base::FilePath& active_profile_path,
                    app_list::AppListViewDelegate::Users* users) {
   users->clear();
   std::vector<ProfileAttributesEntry*> entries = g_browser_process->
       profile_manager()->GetProfileAttributesStorage().
       GetAllProfilesAttributesSortedByName();
-  for (const auto entry : entries) {
+  for (const auto* entry : entries) {
     app_list::AppListViewDelegate::User user;
     user.name = entry->GetName();
     user.email = entry->GetUserName();
@@ -135,8 +106,7 @@ void GetCustomLauncherPageUrls(content::BrowserContext* browser_context,
                                std::vector<GURL>* urls) {
   // First, check the command line.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (app_list::switches::IsExperimentalAppListEnabled() &&
-      command_line->HasSwitch(app_list::switches::kCustomLauncherPage)) {
+  if (command_line->HasSwitch(app_list::switches::kCustomLauncherPage)) {
     GURL custom_launcher_page_url(command_line->GetSwitchValueASCII(
         app_list::switches::kCustomLauncherPage));
 
@@ -260,6 +230,8 @@ void AppListViewDelegate::SetProfile(Profile* new_profile) {
     model_ = NULL;
   }
 
+  template_url_service_observer_.RemoveAll();
+
   profile_ = new_profile;
   if (!profile_) {
     speech_ui_->SetSpeechRecognitionState(app_list::SPEECH_RECOGNITION_OFF,
@@ -279,12 +251,9 @@ void AppListViewDelegate::SetProfile(Profile* new_profile) {
     tracked_objects::ScopedTracker tracking_profile(
         FROM_HERE_WITH_EXPLICIT_FUNCTION(
             "431326 AppListViewDelegate TemplateURL etc."));
-    template_url_service_observer_.RemoveAll();
-    if (app_list::switches::IsExperimentalAppListEnabled()) {
-      TemplateURLService* template_url_service =
-          TemplateURLServiceFactory::GetForProfile(profile_);
-      template_url_service_observer_.Add(template_url_service);
-    }
+    TemplateURLService* template_url_service =
+        TemplateURLServiceFactory::GetForProfile(profile_);
+    template_url_service_observer_.Add(template_url_service);
 
     model_ = app_list::AppListSyncableServiceFactory::GetForProfile(profile_)
                  ->GetModel();
@@ -336,9 +305,6 @@ void AppListViewDelegate::SetUpProfileSwitcher() {
 
   // Populate the app list users.
   PopulateUsers(profile_->GetPath(), &users_);
-
-  FOR_EACH_OBSERVER(
-      app_list::AppListViewDelegateObserver, observers_, OnProfilesChanged());
 }
 
 void AppListViewDelegate::SetUpCustomLauncherPages() {
@@ -451,32 +417,6 @@ app_list::SpeechUIModel* AppListViewDelegate::GetSpeechUI() {
   return speech_ui_.get();
 }
 
-void AppListViewDelegate::GetShortcutPathForApp(
-    const std::string& app_id,
-    const base::Callback<void(const base::FilePath&)>& callback) {
-#if defined(OS_WIN)
-  const extensions::Extension* extension =
-      extensions::ExtensionRegistry::Get(profile_)->GetExtensionById(
-          app_id, extensions::ExtensionRegistry::EVERYTHING);
-  if (!extension) {
-    callback.Run(base::FilePath());
-    return;
-  }
-
-  base::FilePath app_data_dir(
-      web_app::GetWebAppDataDirectory(profile_->GetPath(),
-                                      extension->id(),
-                                      GURL()));
-
-  web_app::GetShortcutInfoForApp(
-      extension,
-      profile_,
-      base::Bind(CreateShortcutInWebAppDir, app_data_dir, callback));
-#else
-  callback.Run(base::FilePath());
-#endif
-}
-
 void AppListViewDelegate::StartSearch() {
   if (search_controller_) {
     search_controller_->Start(is_voice_query_);
@@ -571,25 +511,12 @@ void AppListViewDelegate::ViewClosing() {
   }
 }
 
-void AppListViewDelegate::OpenSettings() {
-  const extensions::Extension* extension =
-      extensions::ExtensionRegistry::Get(profile_)->GetExtensionById(
-          extension_misc::kSettingsAppId,
-          extensions::ExtensionRegistry::EVERYTHING);
-  DCHECK(extension);
-  controller_->ActivateApp(profile_,
-                           extension,
-                           AppListControllerDelegate::LAUNCH_FROM_UNKNOWN,
-                           0);
-}
-
 void AppListViewDelegate::OpenHelp() {
   chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
   content::OpenURLParams params(GURL(chrome::kAppLauncherHelpURL),
                                 content::Referrer(),
-                                NEW_FOREGROUND_TAB,
-                                ui::PAGE_TRANSITION_LINK,
-                                false);
+                                WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                                ui::PAGE_TRANSITION_LINK, false);
   displayer.browser()->OpenURL(params);
 }
 
@@ -759,82 +686,14 @@ AppListViewDelegate::GetUsers() const {
   return users_;
 }
 
-bool AppListViewDelegate::ShouldCenterWindow() const {
-  // Some ChromeOS devices (those that support TouchView mode) turn this flag on
-  // by default, which ensures that the app list is consistently centered on
-  // those devices. This avoids having the app list change shape and position as
-  // the user enters and exits TouchView mode.
-  if (app_list::switches::IsCenteredAppListEnabled())
-    return true;
-
-  // keyboard depends upon Aura.
-#if defined(USE_AURA)
-  // If the virtual keyboard is enabled, use the new app list position. The old
-  // position is too tall, and doesn't fit in the left-over screen space.
-  if (keyboard::IsKeyboardEnabled())
-    return true;
-#endif
-
-  return false;
-}
-
-void AppListViewDelegate::AddObserver(
-    app_list::AppListViewDelegateObserver* observer) {
-  observers_.AddObserver(observer);
-}
-
-void AppListViewDelegate::RemoveObserver(
-    app_list::AppListViewDelegateObserver* observer) {
-  observers_.RemoveObserver(observer);
-}
-
-#if !defined(OS_CHROMEOS)
-base::string16 AppListViewDelegate::GetMessageTitle() const {
-  return l10n_util::GetStringUTF16(IDS_APP_LIST_MESSAGE_TITLE);
-}
-
-base::string16 AppListViewDelegate::GetMessageText(
-    size_t* message_break) const {
-  return l10n_util::GetStringFUTF16(IDS_APP_LIST_MESSAGE_TEXT, base::string16(),
-                                    message_break);
-}
-
-base::string16 AppListViewDelegate::GetAppsShortcutName() const {
-  return l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_APPS_SHORTCUT_NAME);
-}
-
-base::string16 AppListViewDelegate::GetLearnMoreText() const {
-  return l10n_util::GetStringUTF16(IDS_APP_LIST_MESSAGE_LEARN_MORE_TEXT);
-}
-
-base::string16 AppListViewDelegate::GetLearnMoreLink() const {
-  return l10n_util::GetStringUTF16(IDS_APP_LIST_MESSAGE_LEARN_MORE_LINK);
-}
-
-gfx::ImageSkia* AppListViewDelegate::GetAppsIcon() const {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  // Ensure it's backed by a native image type in the ResourceBundle cache.
-  rb.GetNativeImageNamed(IDR_BOOKMARK_BAR_APPS_SHORTCUT);
-  return rb.GetImageSkiaNamed(IDR_BOOKMARK_BAR_APPS_SHORTCUT);
-}
-
-void AppListViewDelegate::OpenLearnMoreLink() {
-  controller_->OpenURL(profile_, GURL(GetLearnMoreLink()),
-                       ui::PAGE_TRANSITION_LINK, CURRENT_TAB);
-}
-#endif  // !defined(OS_CHROMEOS)
-
 void AppListViewDelegate::OnTemplateURLServiceChanged() {
-  if (!app_list::switches::IsExperimentalAppListEnabled())
-    return;
-
   TemplateURLService* template_url_service =
       TemplateURLServiceFactory::GetForProfile(profile_);
   const TemplateURL* default_provider =
       template_url_service->GetDefaultSearchProvider();
   bool is_google =
-      TemplateURLPrepopulateData::GetEngineType(
-          *default_provider, template_url_service->search_terms_data()) ==
+      default_provider->GetEngineType(
+          template_url_service->search_terms_data()) ==
       SEARCH_ENGINE_GOOGLE;
 
   model_->SetSearchEngineIsGoogle(is_google);
@@ -848,19 +707,12 @@ void AppListViewDelegate::OnTemplateURLServiceChanged() {
 void AppListViewDelegate::Observe(int type,
                                   const content::NotificationSource& source,
                                   const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_APP_TERMINATING:
-      FOR_EACH_OBSERVER(
-          app_list::AppListViewDelegateObserver, observers_, OnShutdown());
+  DCHECK_EQ(chrome::NOTIFICATION_APP_TERMINATING, type);
 
-      SetProfile(NULL);  // Ensures launcher page web contents are torn down.
+  SetProfile(nullptr);  // Ensures launcher page web contents are torn down.
 
-      // SigninManagerFactory is not a leaky singleton (unlike this class), and
-      // its destructor will check that it has no remaining observers.
-      scoped_observer_.RemoveAll();
-      SigninManagerFactory::GetInstance()->RemoveObserver(this);
-      break;
-    default:
-      NOTREACHED();
-  }
+  // SigninManagerFactory is not a leaky singleton (unlike this class), and
+  // its destructor will check that it has no remaining observers.
+  scoped_observer_.RemoveAll();
+  SigninManagerFactory::GetInstance()->RemoveObserver(this);
 }

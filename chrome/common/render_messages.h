@@ -11,9 +11,8 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "chrome/common/instant_types.h"
-#include "chrome/common/ntp_logging_events.h"
-#include "chrome/common/search_provider.h"
+#include "chrome/common/search/instant_types.h"
+#include "chrome/common/search/ntp_logging_events.h"
 #include "chrome/common/web_application_info.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
@@ -33,11 +32,14 @@
 #ifndef CHROME_COMMON_RENDER_MESSAGES_H_
 #define CHROME_COMMON_RENDER_MESSAGES_H_
 
+// These are only used internally, so the order does not matter.
 enum class ChromeViewHostMsg_GetPluginInfo_Status {
   kAllowed,
   kBlocked,
   kBlockedByPolicy,
+  kComponentUpdateRequired,
   kDisabled,
+  kFlashHiddenPreferHtml,
   kNotFound,
   kOutdatedBlocked,
   kOutdatedDisallowed,
@@ -50,6 +52,7 @@ namespace IPC {
 template <>
 struct ParamTraits<ContentSettingsPattern> {
   typedef ContentSettingsPattern param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -68,11 +71,6 @@ IPC_ENUM_TRAITS_MAX_VALUE(ChromeViewHostMsg_GetPluginInfo_Status,
 IPC_ENUM_TRAITS_MAX_VALUE(OmniboxFocusChangeReason,
                           OMNIBOX_FOCUS_CHANGE_REASON_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(OmniboxFocusState, OMNIBOX_FOCUS_STATE_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(search_provider::OSDDType,
-                          search_provider::OSDD_TYPE_LAST)
-IPC_ENUM_TRAITS_MIN_MAX_VALUE(search_provider::InstallState,
-                              search_provider::DENIED,
-                              search_provider::INSTALLED_STATE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(ThemeBackgroundImageAlignment,
                           THEME_BKGRND_IMAGE_ALIGN_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(ThemeBackgroundImageTiling, THEME_BKGRND_IMAGE_LAST)
@@ -134,6 +132,7 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_TRAITS_BEGIN(RendererContentSettingRules)
   IPC_STRUCT_TRAITS_MEMBER(image_rules)
   IPC_STRUCT_TRAITS_MEMBER(script_rules)
+  IPC_STRUCT_TRAITS_MEMBER(autoplay_rules)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(RGBAColor)
@@ -162,6 +161,9 @@ IPC_STRUCT_TRAITS_END()
 
 IPC_ENUM_TRAITS_MAX_VALUE(NTPLoggingEventType,
                           NTP_EVENT_TYPE_LAST)
+
+IPC_ENUM_TRAITS_MAX_VALUE(NTPLoggingTileSource,
+                          NTPLoggingTileSource::LAST)
 
 IPC_ENUM_TRAITS_MAX_VALUE(WebApplicationInfo::MobileCapable,
                           WebApplicationInfo::MOBILE_CAPABLE_APPLE)
@@ -202,18 +204,14 @@ IPC_MESSAGE_CONTROL1(ChromeViewMsg_SetContentSettingRules,
 
 // Tells the renderer to create a FieldTrial, and by using a 100% probability
 // for the FieldTrial, forces the FieldTrial to have assigned group name.
-IPC_MESSAGE_CONTROL3(ChromeViewMsg_SetFieldTrialGroup,
+IPC_MESSAGE_CONTROL2(ChromeViewMsg_SetFieldTrialGroup,
                      std::string /* field trial name */,
-                     std::string /* group name that was assigned. */,
-                     base::ProcessId /* for debugging, the sender process id */)
+                     std::string /* group name that was assigned. */)
 
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetPageSequenceNumber,
                     int /* page_seq_no */)
 
 IPC_MESSAGE_ROUTED0(ChromeViewMsg_DetermineIfPageSupportsInstant)
-
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxSetDisplayInstantResults,
-                    bool /* display_instant_results */)
 
 IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxFocusChanged,
                     OmniboxFocusState /* new_focus_state */,
@@ -221,9 +219,6 @@ IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxFocusChanged,
 
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxMostVisitedItemsChanged,
                     std::vector<InstantMostVisitedItem> /* items */)
-
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxPromoInformation,
-                    bool /* is_app_launcher_enabled */)
 
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxSetInputInProgress,
                     bool /* input_in_progress */)
@@ -313,11 +308,6 @@ IPC_MESSAGE_CONTROL0(ChromeViewHostMsg_ShowBrowserAccountManagementUI)
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_NetErrorInfo,
                     int /* DNS probe status */)
 
-// Tells the renderer whether or not there is a local diagnostics service that
-// can be run via ChromeViewHostMsg_RunNetworkDiagnostics messages.
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SetCanShowNetworkDiagnosticsDialog,
-                    bool /* can_show_network_diagnostics_dialog */)
-
 #if defined(OS_ANDROID)
 // Tells the renderer whether or not offline pages exist. This is used to
 // decide if offline related button will be provided on certain error page.
@@ -333,9 +323,6 @@ IPC_MESSAGE_ROUTED5(ChromeViewMsg_SetNavigationCorrectionInfo,
                     std::string /* origin_country */,
                     std::string /* API key to use */,
                     GURL /* Google Search URL to use */)
-
-IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RunNetworkDiagnostics,
-                    GURL /* failed_url */)
 
 #if defined(OS_ANDROID)
 // Message sent from the renderer to the browser to show the UI for offline
@@ -416,6 +403,18 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_ErrorDownloadingPlugin,
                     std::string /* message */)
 #endif  // defined(ENABLE_PLUGIN_INSTALLATION)
 
+// Notifies a missing plugin placeholder that we have finished component-
+// updating the plug-in.
+IPC_MESSAGE_ROUTED0(ChromeViewMsg_PluginComponentUpdateSuccess)
+
+// Notifies a missing plugin placeholder that we have failed to component-update
+// the plug-in.
+IPC_MESSAGE_ROUTED0(ChromeViewMsg_PluginComponentUpdateFailure)
+
+// Notifies a missing plugin placeholder that we have started the component
+// download.
+IPC_MESSAGE_ROUTED0(ChromeViewMsg_PluginComponentUpdateDownloading)
+
 // Notifies a missing plugin placeholder that the user cancelled downloading
 // the plugin.
 IPC_MESSAGE_ROUTED0(ChromeViewMsg_CancelledDownloadingPlugin)
@@ -424,6 +423,9 @@ IPC_MESSAGE_ROUTED0(ChromeViewMsg_CancelledDownloadingPlugin)
 // message because renderer processes aren't allowed to directly navigate to
 // chrome:// URLs.
 IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_OpenAboutPlugins)
+
+// Tells the browser to show the Flash permission bubble in the same tab.
+IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_ShowFlashPermissionBubble)
 
 // Tells the browser that there was an error loading a plugin.
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_CouldNotLoadPlugin,
@@ -446,20 +448,18 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_AppBannerDismissed,
 
 // Notification that the page has an OpenSearch description document
 // associated with it.
-IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_PageHasOSDD,
+IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_PageHasOSDD,
                     GURL /* page_url */,
-                    GURL /* osdd_url */,
-                    search_provider::OSDDType)
-
-// Find out if the given url's security origin is installed as a search
-// provider.
-IPC_SYNC_MESSAGE_ROUTED2_1(ChromeViewHostMsg_GetSearchProviderInstallState,
-                           GURL /* page url */,
-                           GURL /* inquiry url */,
-                           search_provider::InstallState /* install */)
+                    GURL /* osdd_url */)
 
 // Notifies when a plugin couldn't be loaded because it's outdated.
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_BlockedOutdatedPlugin,
+                    int /* placeholder ID */,
+                    std::string /* plugin group identifier */)
+
+// Notifies when a plugin couldn't be loaded because it requires a component
+// update.
+IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_BlockedComponentUpdatedPlugin,
                     int /* placeholder ID */,
                     std::string /* plugin group identifier */)
 
@@ -488,14 +488,14 @@ IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_LogEvent,
 IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_LogMostVisitedImpression,
                     int /* page_seq_no */,
                     int /* position */,
-                    base::string16 /* provider */)
+                    NTPLoggingTileSource /* tile_source */)
 
 // Logs a navigation on one of the Most Visited tile on the InstantExtended
 // New Tab Page.
 IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_LogMostVisitedNavigation,
                     int /* page_seq_no */,
                     int /* position */,
-                    base::string16 /* provider */)
+                    NTPLoggingTileSource /* tile_source */)
 
 // The Instant page asks whether the user syncs its history.
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_HistorySyncCheck,
@@ -528,13 +528,6 @@ IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_InstantSupportDetermined,
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_SearchBoxDeleteMostVisitedItem,
                     int /* page_seq_no */,
                     GURL /* url */)
-
-// Tells InstantExtended to navigate the active tab to a possibly privileged
-// URL.
-IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_SearchBoxNavigate,
-                    int /* page_seq_no */,
-                    GURL /* destination */,
-                    WindowOpenDisposition /* disposition */)
 
 // Tells InstantExtended to undo all most visited item deletions.
 IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_SearchBoxUndoAllMostVisitedDeletions,

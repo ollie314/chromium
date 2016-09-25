@@ -13,7 +13,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/proximity_auth/switches.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -22,13 +21,12 @@ namespace chromeos {
 namespace settings {
 
 EasyUnlockSettingsHandler::EasyUnlockSettingsHandler(Profile* profile)
-    : profile_(profile), observers_registered_(false) {
+    : profile_(profile) {
   profile_pref_registrar_.Init(profile->GetPrefs());
 }
 
 EasyUnlockSettingsHandler::~EasyUnlockSettingsHandler() {
-  if (observers_registered_)
-    EasyUnlockService::Get(profile_)->RemoveObserver(this);
+  EasyUnlockService::Get(profile_)->RemoveObserver(this);
 }
 
 EasyUnlockSettingsHandler* EasyUnlockSettingsHandler::Create(
@@ -73,27 +71,28 @@ void EasyUnlockSettingsHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-void EasyUnlockSettingsHandler::RenderViewReused() {
-  // When the page is reloaded, we clear our observers and re-register when
-  // the new page's DOM is ready.
-  if (!observers_registered_)
-    return;
+void EasyUnlockSettingsHandler::OnJavascriptAllowed() {
+  EasyUnlockService::Get(profile_)->AddObserver(this);
 
+  profile_pref_registrar_.Add(
+      prefs::kEasyUnlockPairing,
+      base::Bind(&EasyUnlockSettingsHandler::SendEnabledStatus,
+                 base::Unretained(this)));
+}
+
+void EasyUnlockSettingsHandler::OnJavascriptDisallowed() {
   EasyUnlockService::Get(profile_)->RemoveObserver(this);
   profile_pref_registrar_.RemoveAll();
-
-  observers_registered_ = false;
 }
 
 void EasyUnlockSettingsHandler::OnTurnOffOperationStatusChanged() {
-  web_ui()->CallJavascriptFunction(
-      "cr.webUIListenerCallback",
-      base::StringValue("easy-unlock-turn-off-flow-status"),
-      base::StringValue(GetTurnOffFlowStatus()));
+  CallJavascriptFunction("cr.webUIListenerCallback",
+                         base::StringValue("easy-unlock-turn-off-flow-status"),
+                         base::StringValue(GetTurnOffFlowStatus()));
 }
 
 void EasyUnlockSettingsHandler::SendEnabledStatus() {
-  web_ui()->CallJavascriptFunction(
+  CallJavascriptFunction(
       "cr.webUIListenerCallback",
       base::StringValue("easy-unlock-enabled-status"),
       base::FundamentalValue(EasyUnlockService::Get(profile_)->IsEnabled()));
@@ -127,18 +126,7 @@ std::string EasyUnlockSettingsHandler::GetTurnOffFlowStatus() {
 
 void EasyUnlockSettingsHandler::HandleGetEnabledStatus(
     const base::ListValue* args) {
-  // This method is called when the DOM is first ready. Therefore we initialize
-  // our observers here.
-  if (!observers_registered_) {
-    EasyUnlockService::Get(profile_)->AddObserver(this);
-
-    profile_pref_registrar_.Add(
-        prefs::kEasyUnlockPairing,
-        base::Bind(&EasyUnlockSettingsHandler::SendEnabledStatus,
-                   base::Unretained(this)));
-
-    observers_registered_ = true;
-  }
+  AllowJavascript();
 
   CHECK_EQ(1U, args->GetSize());
   const base::Value* callback_id;

@@ -18,6 +18,7 @@
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/constants.h"
+#include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "gpu/gpu_export.h"
 #include "gpu/ipc/service/gpu_memory_manager.h"
@@ -26,16 +27,11 @@
 #include "ui/gl/gl_surface.h"
 #include "url/gurl.h"
 
-#if defined(OS_MACOSX)
-#include "base/callback.h"
-#include "base/containers/hash_tables.h"
-#endif
-
 namespace base {
 class WaitableEvent;
 }
 
-namespace gfx {
+namespace gl {
 class GLShareGroup;
 }
 
@@ -45,7 +41,6 @@ class PreemptionFlag;
 class SyncPointClient;
 class SyncPointManager;
 struct SyncToken;
-union ValueState;
 namespace gles2 {
 class FramebufferCompletenessCache;
 class MailboxManager;
@@ -62,21 +57,16 @@ namespace gpu {
 class GpuChannel;
 class GpuChannelManagerDelegate;
 class GpuMemoryBufferFactory;
-class GpuWatchdog;
+class GpuWatchdogThread;
 
 // A GpuChannelManager is a thread responsible for issuing rendering commands
 // managing the lifetimes of GPU channels and forwarding IPC requests from the
 // browser process to them based on the corresponding renderer ID.
 class GPU_EXPORT GpuChannelManager {
  public:
-#if defined(OS_MACOSX)
-  typedef base::Callback<
-      void(int32_t, const base::TimeTicks&, const base::TimeDelta&)>
-      BufferPresentedCallback;
-#endif
   GpuChannelManager(const GpuPreferences& gpu_preferences,
                     GpuChannelManagerDelegate* delegate,
-                    GpuWatchdog* watchdog,
+                    GpuWatchdogThread* watchdog,
                     base::SingleThreadTaskRunner* task_runner,
                     base::SingleThreadTaskRunner* io_task_runner,
                     base::WaitableEvent* shutdown_event,
@@ -96,9 +86,6 @@ class GPU_EXPORT GpuChannelManager {
   void DestroyGpuMemoryBuffer(gfx::GpuMemoryBufferId id,
                               int client_id,
                               const SyncToken& sync_token);
-  void UpdateValueState(int client_id,
-                        unsigned int target,
-                        const ValueState& state);
 #if defined(OS_ANDROID)
   void WakeUpGpu();
 #endif
@@ -109,15 +96,6 @@ class GPU_EXPORT GpuChannelManager {
 
   void LoseAllContexts();
   void MaybeExitOnContextLost();
-
-#if defined(OS_MACOSX)
-  void AddBufferPresentedCallback(int32_t routing_id,
-                                  const BufferPresentedCallback& callback);
-  void RemoveBufferPresentedCallback(int32_t routing_id);
-  void BufferPresented(int32_t surface_id,
-                       const base::TimeTicks& vsync_timebase,
-                       const base::TimeDelta& vsync_interval);
-#endif
 
   const GpuPreferences& gpu_preferences() const {
     return gpu_preferences_;
@@ -133,7 +111,7 @@ class GPU_EXPORT GpuChannelManager {
 
   GpuChannel* LookupChannel(int32_t client_id) const;
 
-  gfx::GLSurface* GetDefaultOffscreenSurface();
+  gl::GLSurface* GetDefaultOffscreenSurface();
 
   GpuMemoryBufferFactory* gpu_memory_buffer_factory() {
     return gpu_memory_buffer_factory_;
@@ -167,7 +145,7 @@ class GPU_EXPORT GpuChannelManager {
     return sync_point_manager_;
   }
 
-  gfx::GLShareGroup* share_group() const { return share_group_.get(); }
+  gl::GLShareGroup* share_group() const { return share_group_.get(); }
   gles2::MailboxManager* mailbox_manager() const {
     return mailbox_manager_.get();
   }
@@ -192,20 +170,16 @@ class GPU_EXPORT GpuChannelManager {
   void DoWakeUpGpu();
 #endif
 
-  const GpuPreferences& gpu_preferences_;
+  const GpuPreferences gpu_preferences_;
   GpuDriverBugWorkarounds gpu_driver_bug_workarounds_;
 
   GpuChannelManagerDelegate* const delegate_;
-#if defined(OS_MACOSX)
-  base::hash_map<int32_t, BufferPresentedCallback>
-      buffer_presented_callback_map_;
-#endif
 
-  GpuWatchdog* watchdog_;
+  GpuWatchdogThread* watchdog_;
 
   base::WaitableEvent* shutdown_event_;
 
-  scoped_refptr<gfx::GLShareGroup> share_group_;
+  scoped_refptr<gl::GLShareGroup> share_group_;
   scoped_refptr<gles2::MailboxManager> mailbox_manager_;
   scoped_refptr<PreemptionFlag> preemption_flag_;
   GpuMemoryManager gpu_memory_manager_;
@@ -216,7 +190,7 @@ class GPU_EXPORT GpuChannelManager {
   scoped_refptr<gles2::ShaderTranslatorCache> shader_translator_cache_;
   scoped_refptr<gles2::FramebufferCompletenessCache>
       framebuffer_completeness_cache_;
-  scoped_refptr<gfx::GLSurface> default_offscreen_surface_;
+  scoped_refptr<gl::GLSurface> default_offscreen_surface_;
   GpuMemoryBufferFactory* const gpu_memory_buffer_factory_;
 #if defined(OS_ANDROID)
   // Last time we know the GPU was powered on. Global for tracking across all

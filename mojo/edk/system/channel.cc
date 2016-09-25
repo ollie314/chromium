@@ -12,10 +12,13 @@
 
 #include "base/macros.h"
 #include "base/memory/aligned_memory.h"
+#include "base/process/process_handle.h"
 #include "mojo/edk/embedder/platform_handle.h"
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 #include "base/mac/mach_logging.h"
+#elif defined(OS_WIN)
+#include "base/win/win_util.h"
 #endif
 
 namespace mojo {
@@ -26,7 +29,7 @@ namespace {
 static_assert(sizeof(Channel::Message::Header) % kChannelMessageAlignment == 0,
     "Invalid Header size.");
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(MOJO_EDK_LEGACY_PROTOCOL)
 static_assert(sizeof(Channel::Message::Header) == 8,
               "Header must be 8 bytes on ChromeOS and Android");
 #endif
@@ -46,8 +49,8 @@ Channel::Message::Message(size_t payload_size,
 
   size_t extra_header_size = 0;
 #if defined(OS_WIN)
-  // On Windows we serialize platform handles into the extra header space.
-  extra_header_size = max_handles_ * sizeof(PlatformHandle);
+  // On Windows we serialize HANDLEs into the extra header space.
+  extra_header_size = max_handles_ * sizeof(HandleEntry);
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
   // On OSX, some of the platform handles may be mach ports, which are
   // serialised into the message buffer. Since there could be a mix of fds and
@@ -64,7 +67,7 @@ Channel::Message::Message(size_t payload_size,
                          (extra_header_size % kChannelMessageAlignment);
   }
   DCHECK_EQ(0u, extra_header_size % kChannelMessageAlignment);
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(MOJO_EDK_LEGACY_PROTOCOL)
   DCHECK_EQ(0u, extra_header_size);
 #endif
 
@@ -85,7 +88,7 @@ Channel::Message::Message(size_t payload_size,
   DCHECK_LE(sizeof(Header) + extra_header_size,
             std::numeric_limits<uint16_t>::max());
   header_->message_type = message_type;
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(MOJO_EDK_LEGACY_PROTOCOL)
   header_->num_handles = static_cast<uint16_t>(max_handles);
 #else
   header_->num_header_bytes =
@@ -94,10 +97,10 @@ Channel::Message::Message(size_t payload_size,
 
   if (max_handles_ > 0) {
 #if defined(OS_WIN)
-    handles_ = reinterpret_cast<PlatformHandle*>(mutable_extra_header());
+    handles_ = reinterpret_cast<HandleEntry*>(mutable_extra_header());
     // Initialize all handles to invalid values.
     for (size_t i = 0; i < max_handles_; ++i)
-      handles()[i] = PlatformHandle();
+      handles_[i].handle = base::win::HandleToUint32(INVALID_HANDLE_VALUE);
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
     mach_ports_header_ =
         reinterpret_cast<MachPortsExtraHeader*>(mutable_extra_header());
@@ -112,23 +115,12 @@ Channel::Message::Message(size_t payload_size,
 }
 
 Channel::Message::~Message() {
-#if defined(OS_WIN)
-  // On POSIX the ScopedPlatformHandleVectorPtr will do this for us.
-  for (size_t i = 0; i < header_->num_handles; ++i)
-    handles()[i].CloseIfNecessary();
-#endif
   base::AlignedFree(data_);
 }
 
 // static
 Channel::MessagePtr Channel::Message::Deserialize(const void* data,
                                                   size_t data_num_bytes) {
-#if !defined(OS_WIN) && !(defined(OS_MACOSX) && !defined(OS_IOS))
-  // We only serialize messages into other messages when performing message
-  // relay on Windows and OSX.
-  NOTREACHED();
-  return nullptr;
-#else
   if (data_num_bytes < sizeof(Header))
     return nullptr;
 
@@ -139,69 +131,82 @@ Channel::MessagePtr Channel::Message::Deserialize(const void* data,
     return nullptr;
   }
 
-  if (header->num_bytes < header->num_header_bytes) {
+#if defined(MOJO_EDK_LEGACY_PROTOCOL)
+  size_t payload_size = data_num_bytes - sizeof(Header);
+  const char* payload = static_cast<const char*>(data) + sizeof(Header);
+#else
+  if (header->num_bytes < header->num_header_bytes ||
+      header->num_header_bytes < sizeof(Header)) {
     DLOG(ERROR) << "Decoding invalid message: " << header->num_bytes << " < "
                 << header->num_header_bytes;
     return nullptr;
   }
 
   uint32_t extra_header_size = header->num_header_bytes - sizeof(Header);
+  size_t payload_size = data_num_bytes - header->num_header_bytes;
+  const char* payload =
+      static_cast<const char*>(data) + header->num_header_bytes;
+#endif  // defined(MOJO_EDK_LEGACY_PROTOCOL)
+
 #if defined(OS_WIN)
-  uint32_t max_handles = extra_header_size / sizeof(PlatformHandle);
+  uint32_t max_handles = extra_header_size / sizeof(HandleEntry);
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
-  uint32_t max_handles = extra_header_size / sizeof(MachPortsEntry);
-#endif
-  if (header->num_handles > max_handles) {
+  if (extra_header_size < sizeof(MachPortsExtraHeader)) {
+    DLOG(ERROR) << "Decoding invalid message: " << extra_header_size << " < "
+                << sizeof(MachPortsExtraHeader);
+    return nullptr;
+  }
+  uint32_t max_handles = (extra_header_size - sizeof(MachPortsExtraHeader)) /
+      sizeof(MachPortsEntry);
+#else
+  const uint32_t max_handles = 0;
+#endif  // defined(OS_WIN)
+
+  if (header->num_handles > max_handles || max_handles > kMaxAttachedHandles) {
     DLOG(ERROR) << "Decoding invalid message:" << header->num_handles
                 << " > " << max_handles;
     return nullptr;
   }
 
-  MessagePtr message(new Message(data_num_bytes - header->num_header_bytes,
-                                 max_handles));
+  MessagePtr message(new Message(payload_size, max_handles));
   DCHECK_EQ(message->data_num_bytes(), data_num_bytes);
+
+  // Copy all payload bytes.
+  if (payload_size)
+    memcpy(message->mutable_payload(), payload, payload_size);
+
+#if !defined(MOJO_EDK_LEGACY_PROTOCOL)
   DCHECK_EQ(message->extra_header_size(), extra_header_size);
   DCHECK_EQ(message->header_->num_header_bytes, header->num_header_bytes);
 
-  // Copy all payload bytes.
-  memcpy(message->mutable_payload(),
-         static_cast<const char*>(data) + header->num_header_bytes,
-         data_num_bytes - header->num_header_bytes);
-  // Copy extra header bytes.
-  memcpy(message->mutable_extra_header(),
-         static_cast<const char*>(data) + sizeof(Header),
-         message->extra_header_size());
+  if (message->extra_header_size()) {
+    // Copy extra header bytes.
+    memcpy(message->mutable_extra_header(),
+           static_cast<const char*>(data) + sizeof(Header),
+           message->extra_header_size());
+  }
+#endif
+
   message->header_->num_handles = header->num_handles;
+#if defined(OS_WIN)
+  ScopedPlatformHandleVectorPtr handles(
+      new PlatformHandleVector(header->num_handles));
+  for (size_t i = 0; i < header->num_handles; i++) {
+    (*handles)[i].handle =
+        base::win::Uint32ToHandle(message->handles_[i].handle);
+  }
+  message->SetHandles(std::move(handles));
+#endif
 
   return message;
-#endif
 }
 
 size_t Channel::Message::payload_size() const {
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(MOJO_EDK_LEGACY_PROTOCOL)
   return header_->num_bytes - sizeof(Header);
 #else
   return size_ - header_->num_header_bytes;
 #endif
-}
-
-PlatformHandle* Channel::Message::handles() {
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
-  // Old semantics for ChromeOS and Android.
-  if (header_->num_handles == 0)
-    return nullptr;
-  CHECK(handle_vector_);
-  return handle_vector_->data();
-#else
-  if (max_handles_ == 0)
-    return nullptr;
-#if defined(OS_WIN)
-  return handles_;
-#else
-  CHECK(handle_vector_);
-  return handle_vector_->data();
-#endif  // defined(OS_WIN)
-#endif  // defined(OS_CHROMEOS) || defined(OS_ANDROID)
 }
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -220,7 +225,7 @@ bool Channel::Message::has_mach_ports() const {
 #endif
 
 void Channel::Message::SetHandles(ScopedPlatformHandleVectorPtr new_handles) {
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(MOJO_EDK_LEGACY_PROTOCOL)
   // Old semantics for ChromeOS and Android
   if (header_->num_handles == 0) {
     CHECK(!new_handles || new_handles->size() == 0);
@@ -237,14 +242,13 @@ void Channel::Message::SetHandles(ScopedPlatformHandleVectorPtr new_handles) {
 
   CHECK(new_handles && new_handles->size() <= max_handles_);
   header_->num_handles = static_cast<uint16_t>(new_handles->size());
-#if defined(OS_WIN)
-  memcpy(handles(), new_handles->data(),
-         sizeof(PlatformHandle) * new_handles->size());
-  new_handles->clear();
-#else
   std::swap(handle_vector_, new_handles);
+#if defined(OS_WIN)
+  memset(handles_, 0, extra_header_size());
+  for (size_t i = 0; i < handle_vector_->size(); i++)
+    handles_[i].handle = base::win::HandleToUint32((*handle_vector_)[i].handle);
 #endif  // defined(OS_WIN)
-#endif  // defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#endif  // defined(MOJO_EDK_LEGACY_PROTOCOL)
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   size_t mach_port_index = 0;
@@ -268,16 +272,7 @@ void Channel::Message::SetHandles(ScopedPlatformHandleVectorPtr new_handles) {
 }
 
 ScopedPlatformHandleVectorPtr Channel::Message::TakeHandles() {
-#if defined(OS_WIN)
-  if (header_->num_handles == 0)
-    return ScopedPlatformHandleVectorPtr();
-  ScopedPlatformHandleVectorPtr moved_handles(
-      new PlatformHandleVector(header_->num_handles));
-  for (size_t i = 0; i < header_->num_handles; ++i)
-    std::swap(moved_handles->at(i), handles()[i]);
-  header_->num_handles = 0;
-  return moved_handles;
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
   if (mach_ports_header_) {
     for (size_t i = 0; i < max_handles_; ++i) {
       mach_ports_header_->entries[i] =
@@ -322,20 +317,29 @@ ScopedPlatformHandleVectorPtr Channel::Message::TakeHandlesForTransport() {
 // static
 bool Channel::Message::RewriteHandles(base::ProcessHandle from_process,
                                       base::ProcessHandle to_process,
-                                      PlatformHandle* handles,
-                                      size_t num_handles) {
+                                      PlatformHandleVector* handles) {
   bool success = true;
-  for (size_t i = 0; i < num_handles; ++i) {
-    if (!handles[i].is_valid()) {
+  for (size_t i = 0; i < handles->size(); ++i) {
+    if (!(*handles)[i].is_valid()) {
       DLOG(ERROR) << "Refusing to duplicate invalid handle.";
       continue;
     }
+    DCHECK_EQ((*handles)[i].owning_process, from_process);
     BOOL result = DuplicateHandle(
-        from_process, handles[i].handle, to_process,
-        reinterpret_cast<HANDLE*>(handles + i), 0, FALSE,
+        from_process, (*handles)[i].handle, to_process,
+        &(*handles)[i].handle, 0, FALSE,
         DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE);
-    if (!result)
+    if (result) {
+      (*handles)[i].owning_process = to_process;
+    } else {
       success = false;
+
+      // If handle duplication fails, the source handle will already be closed
+      // due to DUPLICATE_CLOSE_SOURCE. Replace the handle in the message with
+      // an invalid handle.
+      (*handles)[i].handle = INVALID_HANDLE_VALUE;
+      (*handles)[i].owning_process = base::GetCurrentProcessHandle();
+    }
   }
   return success;
 }
@@ -354,6 +358,9 @@ bool Channel::Message::RewriteHandles(base::ProcessHandle from_process,
 //
 // Discard() marks occupied bytes as discarded, signifying that their contents
 // can be forgotten or overwritten.
+//
+// Realign() moves occupied bytes to the front of the buffer so that those
+// occupied bytes are properly aligned.
 //
 // The most common Channel behavior in practice should result in very few
 // allocations and copies, as memory is claimed and discarded shortly after
@@ -437,6 +444,13 @@ class Channel::ReadBuffer {
     }
   }
 
+  void Realign() {
+    size_t num_bytes = num_occupied_bytes();
+    memmove(data_, occupied_bytes(), num_bytes);
+    num_discarded_bytes_ = 0;
+    num_occupied_bytes_ = num_bytes;
+  }
+
  private:
   char* data_ = nullptr;
 
@@ -478,6 +492,13 @@ bool Channel::OnReadComplete(size_t bytes_read, size_t *next_read_size_hint) {
   bool did_dispatch_message = false;
   read_buffer_->Claim(bytes_read);
   while (read_buffer_->num_occupied_bytes() >= sizeof(Message::Header)) {
+    // Ensure the occupied data is properly aligned. If it isn't, a SIGBUS could
+    // happen on architectures that don't allow misaligned words access (i.e.
+    // anything other than x86). Only re-align when necessary to avoid copies.
+    if (reinterpret_cast<uintptr_t>(read_buffer_->occupied_bytes()) %
+        kChannelMessageAlignment != 0)
+      read_buffer_->Realign();
+
     // We have at least enough data available for a MessageHeader.
     const Message::Header* header = reinterpret_cast<const Message::Header*>(
         read_buffer_->occupied_bytes());
@@ -495,28 +516,36 @@ bool Channel::OnReadComplete(size_t bytes_read, size_t *next_read_size_hint) {
       return true;
     }
 
-#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if defined(MOJO_EDK_LEGACY_PROTOCOL)
     size_t extra_header_size = 0;
     const void* extra_header = nullptr;
     size_t payload_size = header->num_bytes - sizeof(Message::Header);
     void* payload = payload_size ? const_cast<Message::Header*>(&header[1])
                                  : nullptr;
 #else
+    if (header->num_header_bytes < sizeof(Message::Header) ||
+        header->num_header_bytes > header->num_bytes) {
+      LOG(ERROR) << "Invalid message header size: " << header->num_header_bytes;
+      return false;
+    }
     size_t extra_header_size =
         header->num_header_bytes - sizeof(Message::Header);
-    const void* extra_header = header + 1;
+    const void* extra_header = extra_header_size ? header + 1 : nullptr;
     size_t payload_size = header->num_bytes - header->num_header_bytes;
     void* payload =
         payload_size ? reinterpret_cast<Message::Header*>(
                            const_cast<char*>(read_buffer_->occupied_bytes()) +
                            header->num_header_bytes)
                      : nullptr;
-#endif  // defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#endif  // defined(MOJO_EDK_LEGACY_PROTOCOL)
 
     ScopedPlatformHandleVectorPtr handles;
     if (header->num_handles > 0) {
-      handles = GetReadPlatformHandles(header->num_handles, extra_header,
-                                       extra_header_size);
+      if (!GetReadPlatformHandles(header->num_handles, extra_header,
+                                 extra_header_size, &handles)) {
+        return false;
+      }
+
       if (!handles) {
         // Not enough handles available for this message.
         break;
@@ -525,8 +554,10 @@ bool Channel::OnReadComplete(size_t bytes_read, size_t *next_read_size_hint) {
 
     // We've got a complete message! Dispatch it and try another.
     if (header->message_type != Message::Header::MessageType::NORMAL) {
-      OnControlMessage(header->message_type, payload, payload_size,
-                       std::move(handles));
+      if (!OnControlMessage(header->message_type, payload, payload_size,
+                            std::move(handles))) {
+        return false;
+      }
       did_dispatch_message = true;
     } else if (delegate_) {
       delegate_->OnChannelMessage(payload, payload_size, std::move(handles));
@@ -543,6 +574,13 @@ bool Channel::OnReadComplete(size_t bytes_read, size_t *next_read_size_hint) {
 void Channel::OnError() {
   if (delegate_)
     delegate_->OnChannelError();
+}
+
+bool Channel::OnControlMessage(Message::Header::MessageType message_type,
+                               const void* payload,
+                               size_t payload_size,
+                               ScopedPlatformHandleVectorPtr handles) {
+  return false;
 }
 
 }  // namespace edk

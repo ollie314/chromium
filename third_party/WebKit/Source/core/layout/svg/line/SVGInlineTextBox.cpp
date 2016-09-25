@@ -21,20 +21,12 @@
 
 #include "core/layout/svg/line/SVGInlineTextBox.h"
 
-#include "core/editing/Editor.h"
-#include "core/editing/markers/DocumentMarkerController.h"
-#include "core/editing/markers/RenderedDocumentMarker.h"
-#include "core/frame/LocalFrame.h"
 #include "core/layout/HitTestResult.h"
-#include "core/layout/LayoutInline.h"
-#include "core/layout/LayoutTheme.h"
 #include "core/layout/PointerEventsHitRules.h"
 #include "core/layout/api/LineLayoutSVGInlineText.h"
-#include "core/layout/line/InlineFlowBox.h"
 #include "core/layout/svg/LayoutSVGInlineText.h"
 #include "core/paint/SVGInlineTextBoxPainter.h"
-#include "platform/FloatConversion.h"
-#include "platform/fonts/FontCache.h"
+#include "wtf/MathExtras.h"
 
 namespace blink {
 
@@ -48,7 +40,6 @@ static_assert(sizeof(SVGInlineTextBox) == sizeof(ExpectedSVGInlineTextBoxSize), 
 
 SVGInlineTextBox::SVGInlineTextBox(LineLayoutItem item, int start, unsigned short length)
     : InlineTextBox(item, start, length)
-    , m_logicalHeight(0)
     , m_startsNewTextChunk(false)
 {
 }
@@ -90,7 +81,7 @@ int SVGInlineTextBox::offsetForPositionInFragment(const SVGTextFragment& fragmen
     // FIXME: Handle vertical text.
     if (fragment.isTransformed()) {
         AffineTransform fragmentTransform = fragment.buildFragmentTransform();
-        textRun.setHorizontalGlyphStretch(narrowPrecisionToFloat(fragmentTransform.xScale()));
+        textRun.setHorizontalGlyphStretch(clampTo<float>(fragmentTransform.xScale()));
     }
 
     return fragment.characterOffset - start() + lineLayoutItem.scaledFont().offsetForPosition(textRun, position * scalingFactor, includePartialGlyphs);
@@ -248,14 +239,13 @@ bool SVGInlineTextBox::nodeAtPoint(HitTestResult& result, const HitTestLocation&
     ASSERT(!isLineBreak());
 
     PointerEventsHitRules hitRules(PointerEventsHitRules::SVG_TEXT_HITTESTING, result.hitTestRequest(), getLineLayoutItem().style()->pointerEvents());
-    bool isVisible = getLineLayoutItem().style()->visibility() == VISIBLE;
+    bool isVisible = getLineLayoutItem().style()->visibility() == EVisibility::Visible;
     if (isVisible || !hitRules.requireVisible) {
         if (hitRules.canHitBoundingBox
             || (hitRules.canHitStroke && (getLineLayoutItem().style()->svgStyle().hasStroke() || !hitRules.requireStroke))
             || (hitRules.canHitFill && (getLineLayoutItem().style()->svgStyle().hasFill() || !hitRules.requireFill))) {
-            LayoutPoint boxOrigin(x(), y());
-            boxOrigin.moveBy(accumulatedOffset);
-            LayoutRect rect(boxOrigin, size());
+            LayoutRect rect(topLeft(), LayoutSize(logicalWidth(), logicalHeight()));
+            rect.moveBy(accumulatedOffset);
             if (locationInContainer.intersects(rect)) {
                 LineLayoutSVGInlineText lineLayoutItem = LineLayoutSVGInlineText(this->getLineLayoutItem());
                 ASSERT(lineLayoutItem.scalingFactor());

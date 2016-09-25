@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/api/display_source/display_source_connection_delegate_factory.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace {
 const char kErrorCannotHaveMultipleSessions[] =
@@ -19,10 +20,8 @@ namespace extensions {
 using namespace api::display_source;
 
 WiFiDisplaySessionServiceImpl::WiFiDisplaySessionServiceImpl(
-    DisplaySourceConnectionDelegate* delegate,
-    mojo::InterfaceRequest<WiFiDisplaySessionService> request)
-    : binding_(this, std::move(request)),
-      delegate_(delegate),
+    DisplaySourceConnectionDelegate* delegate)
+    : delegate_(delegate),
       sink_state_(SINK_STATE_NONE),
       sink_id_(DisplaySourceConnectionDelegate::kInvalidSinkId),
       weak_factory_(this) {
@@ -42,8 +41,9 @@ void WiFiDisplaySessionServiceImpl::BindToRequest(
       DisplaySourceConnectionDelegateFactory::GetForBrowserContext(
           browser_context);
   CHECK(delegate);
-
-  new WiFiDisplaySessionServiceImpl(delegate, std::move(request));
+  mojo::MakeStrongBinding(std::unique_ptr<WiFiDisplaySessionServiceImpl>(
+                              new WiFiDisplaySessionServiceImpl(delegate)),
+                          std::move(request));
 }
 
 void WiFiDisplaySessionServiceImpl::SetClient(
@@ -79,7 +79,7 @@ void WiFiDisplaySessionServiceImpl::Connect(int32_t sink_id,
   if (auth_method != AUTHENTICATION_METHOD_NONE) {
     DCHECK(auth_method <= AUTHENTICATION_METHOD_LAST);
     auth_info.method = static_cast<AuthenticationMethod>(auth_method);
-    auth_info.data = scoped_ptr<std::string>(new std::string(auth_data));
+    auth_info.data = std::unique_ptr<std::string>(new std::string(auth_data));
   }
   auto on_error = base::Bind(&WiFiDisplaySessionServiceImpl::OnConnectFailed,
                              weak_factory_.GetWeakPtr(), sink_id);

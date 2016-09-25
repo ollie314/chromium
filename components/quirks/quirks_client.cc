@@ -25,6 +25,8 @@ const char kQuirksUrlFormat[] =
     "https://chromeosquirksserver-pa.googleapis.com/v2/display/%s/clients"
     "/chromeos/M%d";
 
+const int kMaxServerFailures = 10;
+
 const net::BackoffEntry::Policy kDefaultBackoffPolicy = {
     1,                // Initial errors before applying backoff
     10000,            // 10 seconds.
@@ -111,6 +113,12 @@ void QuirksClient::OnURLFetchComplete(const net::URLFetcher* source) {
   }
 
   if (server_error) {
+    if (backoff_entry_.failure_count() >= kMaxServerFailures) {
+      // After 10 retires (5+ hours), give up, and try again in a month.
+      VLOG(1) << "Too many retries; Quirks Client shutting down.";
+      Shutdown(false);
+      return;
+    }
     url_fetcher_.reset();
     Retry();
     return;
@@ -153,7 +161,7 @@ void QuirksClient::Retry() {
 bool QuirksClient::ParseResult(const std::string& result, std::string* data) {
   std::string data64;
   const base::DictionaryValue* dict;
-  scoped_ptr<base::Value> json = base::JSONReader::Read(result);
+  std::unique_ptr<base::Value> json = base::JSONReader::Read(result);
   if (!json || !json->GetAsDictionary(&dict) ||
       !dict->GetString("icc", &data64)) {
     VLOG(1) << "Failed to parse JSON icc data";

@@ -15,13 +15,14 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/base/address_list.h"
 #include "net/base/ip_address.h"
@@ -34,6 +35,7 @@
 #include "net/dns/host_cache.h"
 #include "net/dns/host_resolver_impl.h"
 #include "net/log/net_log.h"
+#include "net/log/net_log_source_type.h"
 #include "net/tools/gdig/file_net_log.h"
 
 #if defined(OS_MACOSX)
@@ -230,6 +232,7 @@ class GDig {
   std::unique_ptr<FileNetLogObserver> log_observer_;
   std::unique_ptr<NetLog> log_;
   std::unique_ptr<HostResolver> resolver_;
+  std::unique_ptr<HostResolver::Request> request_;
 
 #if defined(OS_MACOSX)
   // Without this there will be a mem leak on osx.
@@ -274,7 +277,7 @@ GDig::Result GDig::Main(int argc, const char* argv[]) {
   result_ = RESULT_PENDING;
   Start();
   if (result_ == RESULT_PENDING)
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
 
   // Destroy it while MessageLoopForIO is alive.
   dns_config_service_.reset();
@@ -467,12 +470,8 @@ void GDig::ReplayNextEntry() {
     ++active_resolves_;
     ++replay_log_index_;
     int ret = resolver_->Resolve(
-        info,
-        DEFAULT_PRIORITY,
-        addrlist,
-        callback,
-        NULL,
-        BoundNetLog::Make(log_.get(), net::NetLog::SOURCE_NONE));
+        info, DEFAULT_PRIORITY, addrlist, callback, &request_,
+        NetLogWithSource::Make(log_.get(), net::NetLogSourceType::NONE));
     if (ret != ERR_IO_PENDING)
       callback.Run(ret);
   }

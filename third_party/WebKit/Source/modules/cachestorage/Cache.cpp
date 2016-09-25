@@ -12,7 +12,6 @@
 #include "bindings/core/v8/V8ThrowException.h"
 #include "bindings/modules/v8/V8Response.h"
 #include "core/dom/DOMException.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "modules/cachestorage/CacheStorageError.h"
 #include "modules/fetch/BodyStreamBuffer.h"
@@ -22,24 +21,12 @@
 #include "modules/fetch/Response.h"
 #include "platform/HTTPNames.h"
 #include "platform/Histogram.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerCache.h"
-
 #include <memory>
 
 namespace blink {
 
 namespace {
-
-void checkCacheQueryOptions(const CacheQueryOptions& options, ExecutionContext* context)
-{
-    if (!RuntimeEnabledFeatures::cacheIgnoreSearchOptionEnabled() && options.ignoreSearch())
-        context->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "Cache.match() does not support 'ignoreSearch' option yet. See http://crbug.com/520784"));
-    if (options.ignoreMethod())
-        context->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "Cache.match() does not support 'ignoreMethod' option yet. See http://crbug.com/482256"));
-    if (options.ignoreVary())
-        context->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "Cache.match() does not support 'ignoreVary' option yet. See http://crbug.com/499216"));
-}
 
 // FIXME: Consider using CallbackPromiseAdapter.
 class CacheMatchCallbacks : public WebServiceWorkerCache::CacheMatchCallbacks {
@@ -52,7 +39,8 @@ public:
     {
         if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
             return;
-        m_resolver->resolve(Response::create(m_resolver->getScriptState()->getExecutionContext(), webResponse));
+        ScriptState::Scope scope(m_resolver->getScriptState());
+        m_resolver->resolve(Response::create(m_resolver->getScriptState(), webResponse));
         m_resolver.clear();
     }
 
@@ -82,9 +70,10 @@ public:
     {
         if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
             return;
+        ScriptState::Scope scope(m_resolver->getScriptState());
         HeapVector<Member<Response>> responses;
         for (size_t i = 0; i < webResponses.size(); ++i)
-            responses.append(Response::create(m_resolver->getScriptState()->getExecutionContext(), webResponses[i]));
+            responses.append(Response::create(m_resolver->getScriptState(), webResponses[i]));
         m_resolver->resolve(responses);
         m_resolver.clear();
     }
@@ -142,9 +131,10 @@ public:
     {
         if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
             return;
+        ScriptState::Scope scope(m_resolver->getScriptState());
         HeapVector<Member<Request>> requests;
         for (size_t i = 0; i < webRequests.size(); ++i)
-            requests.append(Request::create(m_resolver->getScriptState()->getExecutionContext(), webRequests[i]));
+            requests.append(Request::create(m_resolver->getScriptState(), webRequests[i]));
         m_resolver->resolve(requests);
         m_resolver.clear();
     }
@@ -338,7 +328,7 @@ public:
         batchOperation.operationType = WebServiceWorkerCache::OperationTypePut;
         batchOperation.request = m_webRequest;
         batchOperation.response = m_webResponse;
-        batchOperation.response.setBlobDataHandle(handle);
+        batchOperation.response.setBlobDataHandle(std::move(handle));
         m_barrierCallback->onSuccess(m_index, batchOperation);
     }
 
@@ -361,9 +351,9 @@ private:
     WebServiceWorkerResponse m_webResponse;
 };
 
-Cache* Cache::create(GlobalFetch::ScopedFetcher* fetcher, PassOwnPtr<WebServiceWorkerCache> webCache)
+Cache* Cache::create(GlobalFetch::ScopedFetcher* fetcher, std::unique_ptr<WebServiceWorkerCache> webCache)
 {
-    return new Cache(fetcher, webCache);
+    return new Cache(fetcher, std::move(webCache));
 }
 
 ScriptPromise Cache::match(ScriptState* scriptState, const RequestInfo& request, const CacheQueryOptions& options, ExceptionState& exceptionState)
@@ -466,16 +456,16 @@ ScriptPromise Cache::keys(ScriptState* scriptState, const RequestInfo& request, 
 WebServiceWorkerCache::QueryParams Cache::toWebQueryParams(const CacheQueryOptions& options)
 {
     WebServiceWorkerCache::QueryParams webQueryParams;
-    webQueryParams.ignoreSearch = options.ignoreSearch() && RuntimeEnabledFeatures::cacheIgnoreSearchOptionEnabled();
+    webQueryParams.ignoreSearch = options.ignoreSearch();
     webQueryParams.ignoreMethod = options.ignoreMethod();
     webQueryParams.ignoreVary = options.ignoreVary();
     webQueryParams.cacheName = options.cacheName();
     return webQueryParams;
 }
 
-Cache::Cache(GlobalFetch::ScopedFetcher* fetcher, PassOwnPtr<WebServiceWorkerCache> webCache)
+Cache::Cache(GlobalFetch::ScopedFetcher* fetcher, std::unique_ptr<WebServiceWorkerCache> webCache)
     : m_scopedFetcher(fetcher)
-    , m_webCache(webCache)
+    , m_webCache(std::move(webCache))
 {
 }
 
@@ -488,10 +478,13 @@ ScriptPromise Cache::matchImpl(ScriptState* scriptState, const Request* request,
 {
     WebServiceWorkerRequest webRequest;
     request->populateWebServiceWorkerRequest(webRequest);
-    checkCacheQueryOptions(options, scriptState->getExecutionContext());
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
+    if (request->method() != HTTPNames::GET && !options.ignoreMethod()) {
+        resolver->resolve();
+        return promise;
+    }
     m_webCache->dispatchMatch(new CacheMatchCallbacks(resolver), webRequest, toWebQueryParams(options));
     return promise;
 }
@@ -508,10 +501,13 @@ ScriptPromise Cache::matchAllImpl(ScriptState* scriptState, const Request* reque
 {
     WebServiceWorkerRequest webRequest;
     request->populateWebServiceWorkerRequest(webRequest);
-    checkCacheQueryOptions(options, scriptState->getExecutionContext());
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
+    if (request->method() != HTTPNames::GET && !options.ignoreMethod()) {
+        resolver->resolve(HeapVector<Member<Response>>());
+        return promise;
+    }
     m_webCache->dispatchMatchAll(new CacheWithResponsesCallbacks(resolver), webRequest, toWebQueryParams(options));
     return promise;
 }
@@ -543,11 +539,14 @@ ScriptPromise Cache::deleteImpl(ScriptState* scriptState, const Request* request
     WebVector<WebServiceWorkerCache::BatchOperation> batchOperations(size_t(1));
     batchOperations[0].operationType = WebServiceWorkerCache::OperationTypeDelete;
     request->populateWebServiceWorkerRequest(batchOperations[0].request);
-    checkCacheQueryOptions(options, scriptState->getExecutionContext());
     batchOperations[0].matchParams = toWebQueryParams(options);
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
+    if (request->method() != HTTPNames::GET && !options.ignoreMethod()) {
+        resolver->resolve(false);
+        return promise;
+    }
     m_webCache->dispatchBatch(new CacheDeleteCallback(resolver), batchOperations);
     return promise;
 }
@@ -574,7 +573,10 @@ ScriptPromise Cache::putImpl(ScriptState* scriptState, const HeapVector<Member<R
             barrierCallback->onError("Vary header contains *");
             return promise;
         }
-
+        if (responses[i]->status() == 206) {
+            barrierCallback->onError("Partial response (status code 206) is unsupported");
+            return promise;
+        }
         if (responses[i]->isBodyLocked() || responses[i]->bodyUsed()) {
             barrierCallback->onError("Response body is already used");
             return promise;
@@ -585,7 +587,7 @@ ScriptPromise Cache::putImpl(ScriptState* scriptState, const HeapVector<Member<R
             // If the response has body, read the all data and create
             // the blob handle and dispatch the put batch asynchronously.
             FetchDataLoader* loader = FetchDataLoader::createLoaderAsBlobHandle(responses[i]->internalMIMEType());
-            buffer->startLoading(scriptState->getExecutionContext(), loader, new BlobHandleCallbackForPut(i, barrierCallback, requests[i], responses[i]));
+            buffer->startLoading(loader, new BlobHandleCallbackForPut(i, barrierCallback, requests[i], responses[i]));
             continue;
         }
 
@@ -603,7 +605,7 @@ ScriptPromise Cache::keysImpl(ScriptState* scriptState)
 {
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
-    m_webCache->dispatchKeys(new CacheWithRequestsCallbacks(resolver), 0, WebServiceWorkerCache::QueryParams());
+    m_webCache->dispatchKeys(new CacheWithRequestsCallbacks(resolver), WebServiceWorkerRequest(), WebServiceWorkerCache::QueryParams());
     return promise;
 }
 
@@ -611,11 +613,14 @@ ScriptPromise Cache::keysImpl(ScriptState* scriptState, const Request* request, 
 {
     WebServiceWorkerRequest webRequest;
     request->populateWebServiceWorkerRequest(webRequest);
-    checkCacheQueryOptions(options, scriptState->getExecutionContext());
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
-    m_webCache->dispatchKeys(new CacheWithRequestsCallbacks(resolver), 0, toWebQueryParams(options));
+    if (request->method() != HTTPNames::GET && !options.ignoreMethod()) {
+        resolver->resolve(HeapVector<Member<Request>>());
+        return promise;
+    }
+    m_webCache->dispatchKeys(new CacheWithRequestsCallbacks(resolver), webRequest, toWebQueryParams(options));
     return promise;
 }
 

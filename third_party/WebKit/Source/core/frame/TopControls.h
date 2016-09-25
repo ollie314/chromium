@@ -8,8 +8,6 @@
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebTopControlsState.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 class FrameHost;
@@ -19,14 +17,13 @@ class FloatSize;
 // duplicating cc::TopControlsManager behaviour.  Top controls' self-animation
 // to completion is still handled by compositor and kicks in when scrolling is
 // complete (i.e, upon ScrollEnd or FlingEnd).
-class CORE_EXPORT TopControls final : public GarbageCollectedFinalized<TopControls> {
+class CORE_EXPORT TopControls final : public GarbageCollected<TopControls> {
 public:
     static TopControls* create(const FrameHost& host)
     {
         return new TopControls(host);
     }
 
-    ~TopControls();
     DECLARE_TRACE();
 
     // The amount that the viewport was shrunk by to accommodate the top
@@ -42,7 +39,10 @@ public:
     float shownRatio() const { return m_shownRatio; }
     void setShownRatio(float);
 
-    void updateConstraints(WebTopControlsState constraints);
+    void updateConstraintsAndState(
+        WebTopControlsState constraints,
+        WebTopControlsState current,
+        bool animate);
 
     void scrollBegin();
 

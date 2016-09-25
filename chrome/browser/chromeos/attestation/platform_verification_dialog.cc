@@ -15,10 +15,10 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
-#include "grit/components_strings.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
@@ -143,7 +143,7 @@ void PlatformVerificationDialog::StyledLabelLinkClicked(
         Profile::FromBrowserContext(web_contents()->GetBrowserContext());
     chrome::NavigateParams params(
         profile, learn_more_url, ui::PAGE_TRANSITION_LINK);
-    params.disposition = SINGLETON_TAB;
+    params.disposition = WindowOpenDisposition::SINGLETON_TAB;
     chrome::Navigate(&params);
   } else {
     chrome::ShowSingletonTab(browser, learn_more_url);
@@ -152,7 +152,7 @@ void PlatformVerificationDialog::StyledLabelLinkClicked(
 
 void PlatformVerificationDialog::DidStartNavigationToPendingEntry(
     const GURL& url,
-    content::NavigationController::ReloadType reload_type) {
+    content::ReloadType reload_type) {
   views::Widget* widget = GetWidget();
   if (widget)
     widget->Close();

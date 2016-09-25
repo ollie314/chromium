@@ -38,14 +38,15 @@ class DesktopCapturerProxy : public webrtc::DesktopCapturer {
 
   // webrtc::DesktopCapturer interface.
   void Start(Callback* callback) override;
-  void SetSharedMemoryFactory(rtc::scoped_ptr<webrtc::SharedMemoryFactory>
+  void SetSharedMemoryFactory(std::unique_ptr<webrtc::SharedMemoryFactory>
                                   shared_memory_factory) override;
   void Capture(const webrtc::DesktopRegion& rect) override;
 
  private:
   class Core;
 
-  void OnFrameCaptured(std::unique_ptr<webrtc::DesktopFrame> frame);
+  void OnFrameCaptured(webrtc::DesktopCapturer::Result result,
+                       std::unique_ptr<webrtc::DesktopFrame> frame);
 
   base::ThreadChecker thread_checker_;
 

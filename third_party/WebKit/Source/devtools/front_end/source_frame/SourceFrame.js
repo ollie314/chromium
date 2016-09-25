@@ -30,21 +30,21 @@
 
 /**
  * @constructor
- * @extends {WebInspector.VBoxWithToolbarItems}
+ * @extends {WebInspector.SimpleView}
  * @implements {WebInspector.Searchable}
  * @implements {WebInspector.Replaceable}
- * @param {!WebInspector.ContentProvider} contentProvider
+ * @implements {WebInspector.SourcesTextEditorDelegate}
+ * @param {string} url
+ * @param {function(): !Promise<?string>} lazyContent
  */
-WebInspector.SourceFrame = function(contentProvider)
+WebInspector.SourceFrame = function(url, lazyContent)
 {
-    WebInspector.VBoxWithToolbarItems.call(this);
+    WebInspector.SimpleView.call(this, WebInspector.UIString("Source"));
 
-    this._url = contentProvider.contentURL();
-    this._contentProvider = contentProvider;
+    this._url = url;
+    this._lazyContent = lazyContent;
 
-    var textEditorDelegate = new WebInspector.TextEditorDelegateForSourceFrame(this);
-
-    this._textEditor = new WebInspector.CodeMirrorTextEditor(this._url, textEditorDelegate);
+    this._textEditor = new WebInspector.SourcesTextEditor(this);
 
     this._currentSearchResultIndex = -1;
     this._searchResults = [];
@@ -62,10 +62,11 @@ WebInspector.SourceFrame = function(contentProvider)
     this._searchableView = null;
 }
 
+/** @enum {symbol} */
 WebInspector.SourceFrame.Events = {
-    ScrollChanged: "ScrollChanged",
-    SelectionChanged: "SelectionChanged",
-    JumpHappened: "JumpHappened"
+    ScrollChanged: Symbol("ScrollChanged"),
+    SelectionChanged: Symbol("SelectionChanged"),
+    JumpHappened: Symbol("JumpHappened")
 }
 
 WebInspector.SourceFrame.prototype = {
@@ -78,6 +79,9 @@ WebInspector.SourceFrame.prototype = {
         this._shortcuts[key] = handler;
     },
 
+    /**
+     * @override
+     */
     wasShown: function()
     {
         this._ensureContentLoaded();
@@ -105,18 +109,9 @@ WebInspector.SourceFrame.prototype = {
      * @override
      * @return {!Array<!WebInspector.ToolbarItem>}
      */
-    toolbarItems: function()
+    syncToolbarItems: function()
     {
         return [this._sourcePosition];
-    },
-
-    /**
-     * @override
-     * @return {!Element}
-     */
-    defaultFocusedElement: function()
-    {
-        return this._textEditor.defaultFocusedElement();
     },
 
     get loaded()
@@ -133,7 +128,7 @@ WebInspector.SourceFrame.prototype = {
     {
         if (!this._contentRequested) {
             this._contentRequested = true;
-            this._contentProvider.requestContent().then(this.setContent.bind(this));
+            this._lazyContent().then(this.setContent.bind(this));
         }
     },
 
@@ -231,6 +226,7 @@ WebInspector.SourceFrame.prototype = {
     },
 
     /**
+     * @override
      * @param {!WebInspector.TextRange} oldRange
      * @param {!WebInspector.TextRange} newRange
      */
@@ -286,10 +282,10 @@ WebInspector.SourceFrame.prototype = {
             this._textEditor.setText(content || "");
             this._textEditor.markClean();
         } else {
-            var firstLine = this._textEditor.firstVisibleLine();
+            var scrollTop = this._textEditor.scrollTop();
             var selection = this._textEditor.selection();
             this._textEditor.setText(content || "");
-            this._textEditor.scrollToLine(firstLine);
+            this._textEditor.setScrollTop(scrollTop);
             this._textEditor.setSelection(selection);
         }
 
@@ -300,10 +296,10 @@ WebInspector.SourceFrame.prototype = {
             this._delayedFindSearchMatches();
             delete this._delayedFindSearchMatches;
         }
-        this.onTextEditorContentLoaded();
+        this.onTextEditorContentSet();
     },
 
-    onTextEditorContentLoaded: function() {},
+    onTextEditorContentSet: function() {},
 
     /**
      * @param {?WebInspector.SearchableView} view
@@ -361,9 +357,19 @@ WebInspector.SourceFrame.prototype = {
         this._ensureContentLoaded();
     },
 
-    _editorFocused: function()
+    /**
+     * @override
+     */
+    editorFocused: function()
     {
         this._resetCurrentSearchResultIndex();
+    },
+
+    /**
+     * @override
+     */
+    editorBlurred: function()
+    {
     },
 
     _resetCurrentSearchResultIndex: function()
@@ -448,7 +454,7 @@ WebInspector.SourceFrame.prototype = {
      * @override
      * @return {boolean}
      */
-    supportsCaseSensitiveSearch: function ()
+    supportsCaseSensitiveSearch: function()
     {
         return true;
     },
@@ -489,7 +495,7 @@ WebInspector.SourceFrame.prototype = {
             return;
         this._textEditor.highlightSearchResults(this._searchRegex, null);
 
-        var oldText = this._textEditor.copyRange(range);
+        var oldText = this._textEditor.text(range);
         var regex = searchConfig.toSearchRegex();
         var text;
         if (regex.__fromRegExpQuery)
@@ -511,7 +517,7 @@ WebInspector.SourceFrame.prototype = {
         this._resetCurrentSearchResultIndex();
 
         var text = this._textEditor.text();
-        var range = this._textEditor.range();
+        var range = this._textEditor.fullRange();
 
         var regex = searchConfig.toSearchRegex(true);
         if (regex.__fromRegExpQuery)
@@ -560,6 +566,7 @@ WebInspector.SourceFrame.prototype = {
     },
 
     /**
+     * @override
      * @return {!Promise}
      */
     populateLineGutterContextMenu: function(contextMenu, lineNumber)
@@ -568,6 +575,7 @@ WebInspector.SourceFrame.prototype = {
     },
 
     /**
+     * @override
      * @return {!Promise}
      */
     populateTextAreaContextMenu: function(contextMenu, lineNumber, columnNumber)
@@ -576,6 +584,7 @@ WebInspector.SourceFrame.prototype = {
     },
 
     /**
+     * @override
      * @param {?WebInspector.TextRange} from
      * @param {?WebInspector.TextRange} to
      */
@@ -596,13 +605,13 @@ WebInspector.SourceFrame.prototype = {
     },
 
     /**
+     * @override
      * @param {!WebInspector.TextRange} textRange
      */
     selectionChanged: function(textRange)
     {
         this._updateSourcePosition();
         this.dispatchEventToListeners(WebInspector.SourceFrame.Events.SelectionChanged, textRange);
-        WebInspector.notifications.dispatchEventToListeners(WebInspector.SourceFrame.Events.SelectionChanged, textRange);
     },
 
     _updateSourcePosition: function()
@@ -621,7 +630,7 @@ WebInspector.SourceFrame.prototype = {
         }
         textRange = textRange.normalize();
 
-        var selectedText = this._textEditor.copyRange(textRange);
+        var selectedText = this._textEditor.text(textRange);
         if (textRange.startLine === textRange.endLine)
             this._sourcePosition.setText(WebInspector.UIString("%d characters selected", selectedText.length));
         else
@@ -629,11 +638,14 @@ WebInspector.SourceFrame.prototype = {
     },
 
     /**
+     * @override
      * @param {number} lineNumber
      */
     scrollChanged: function(lineNumber)
     {
-        this.dispatchEventToListeners(WebInspector.SourceFrame.Events.ScrollChanged, lineNumber);
+        if (this._scrollTimer)
+            clearTimeout(this._scrollTimer);
+        this._scrollTimer = setTimeout(this.dispatchEventToListeners.bind(this, WebInspector.SourceFrame.Events.ScrollChanged, lineNumber), 100);
     },
 
     _handleKeyDown: function(e)
@@ -644,85 +656,5 @@ WebInspector.SourceFrame.prototype = {
             e.consume(true);
     },
 
-    __proto__: WebInspector.VBoxWithToolbarItems.prototype
-}
-
-/**
- * @implements {WebInspector.TextEditorDelegate}
- * @constructor
- */
-WebInspector.TextEditorDelegateForSourceFrame = function(sourceFrame)
-{
-    this._sourceFrame = sourceFrame;
-}
-
-WebInspector.TextEditorDelegateForSourceFrame.prototype = {
-    /**
-     * @override
-     * @param {!WebInspector.TextRange} oldRange
-     * @param {!WebInspector.TextRange} newRange
-     */
-    onTextChanged: function(oldRange, newRange)
-    {
-        this._sourceFrame.onTextChanged(oldRange, newRange);
-    },
-
-    /**
-     * @override
-     * @param {!WebInspector.TextRange} textRange
-     */
-    selectionChanged: function(textRange)
-    {
-        this._sourceFrame.selectionChanged(textRange);
-    },
-
-    /**
-     * @override
-     * @param {number} lineNumber
-     */
-    scrollChanged: function(lineNumber)
-    {
-        this._sourceFrame.scrollChanged(lineNumber);
-    },
-
-    /**
-     * @override
-     */
-    editorFocused: function()
-    {
-        this._sourceFrame._editorFocused();
-    },
-
-    /**
-     * @override
-     * @param {!WebInspector.ContextMenu} contextMenu
-     * @param {number} lineNumber
-     * @return {!Promise}
-     */
-    populateLineGutterContextMenu: function(contextMenu, lineNumber)
-    {
-        return this._sourceFrame.populateLineGutterContextMenu(contextMenu, lineNumber);
-    },
-
-    /**
-     * @override
-     * @param {!WebInspector.ContextMenu} contextMenu
-     * @param {number} lineNumber
-     * @param {number} columnNumber
-     * @return {!Promise}
-     */
-    populateTextAreaContextMenu: function(contextMenu, lineNumber, columnNumber)
-    {
-        return this._sourceFrame.populateTextAreaContextMenu(contextMenu, lineNumber, columnNumber);
-    },
-
-    /**
-     * @override
-     * @param {?WebInspector.TextRange} from
-     * @param {?WebInspector.TextRange} to
-     */
-    onJumpToPosition: function(from, to)
-    {
-        this._sourceFrame.onJumpToPosition(from, to);
-    }
+    __proto__: WebInspector.SimpleView.prototype
 }

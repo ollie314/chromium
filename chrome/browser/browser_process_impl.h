@@ -59,10 +59,6 @@ class BrowserPolicyConnector;
 class PolicyService;
 };
 
-namespace web_resource {
-class PromoResourceService;
-}
-
 // Real implementation of BrowserProcess that creates and returns the services.
 class BrowserProcessImpl : public BrowserProcess,
                            public base::NonThreadSafe,
@@ -103,16 +99,16 @@ class BrowserProcessImpl : public BrowserProcess,
   PrefService* local_state() override;
   net::URLRequestContextGetter* system_request_context() override;
   variations::VariationsService* variations_service() override;
-  web_resource::PromoResourceService* promo_resource_service() override;
   BrowserProcessPlatformPart* platform_part() override;
   extensions::EventRouterForwarder* extension_event_router_forwarder() override;
   NotificationUIManager* notification_ui_manager() override;
+  NotificationPlatformBridge* notification_platform_bridge() override;
   message_center::MessageCenter* message_center() override;
   policy::BrowserPolicyConnector* browser_policy_connector() override;
   policy::PolicyService* policy_service() override;
   IconManager* icon_manager() override;
-  GLStringManager* gl_string_manager() override;
   GpuModeManager* gpu_mode_manager() override;
+  GpuProfileCache* gpu_profile_cache() override;
   void CreateDevToolsHttpProtocolHandler(const std::string& ip,
                                          uint16_t port) override;
   void CreateDevToolsAutoOpener() override;
@@ -132,6 +128,8 @@ class BrowserProcessImpl : public BrowserProcess,
   StatusTray* status_tray() override;
   safe_browsing::SafeBrowsingService* safe_browsing_service() override;
   safe_browsing::ClientSideDetectionService* safe_browsing_detection_service()
+      override;
+  subresource_filter::RulesetService* subresource_filter_ruleset_service()
       override;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
@@ -169,12 +167,14 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateViewedPageTracker();
   void CreateIconManager();
   void CreateIntranetRedirectDetector();
+  void CreateNotificationPlatformBridge();
   void CreateNotificationUIManager();
   void CreateStatusTrayManager();
   void CreatePrintPreviewDialogController();
   void CreateBackgroundPrintingManager();
   void CreateSafeBrowsingService();
   void CreateSafeBrowsingDetectionService();
+  void CreateSubresourceFilterRulesetService();
   void CreateStatusTray();
   void CreateBackgroundModeManager();
   void CreateGCMDriver();
@@ -211,7 +211,7 @@ class BrowserProcessImpl : public BrowserProcess,
   bool created_icon_manager_;
   std::unique_ptr<IconManager> icon_manager_;
 
-  std::unique_ptr<GLStringManager> gl_string_manager_;
+  std::unique_ptr<GpuProfileCache> gpu_profile_cache_;
 
   std::unique_ptr<GpuModeManager> gpu_mode_manager_;
 
@@ -246,12 +246,19 @@ class BrowserProcessImpl : public BrowserProcess,
 
   std::unique_ptr<StatusTray> status_tray_;
 
+  bool created_notification_bridge_;
+  std::unique_ptr<NotificationPlatformBridge> notification_bridge_;
+
 #if BUILDFLAG(ENABLE_BACKGROUND)
   std::unique_ptr<BackgroundModeManager> background_mode_manager_;
 #endif
 
   bool created_safe_browsing_service_;
   scoped_refptr<safe_browsing::SafeBrowsingService> safe_browsing_service_;
+
+  bool created_subresource_filter_ruleset_service_;
+  std::unique_ptr<subresource_filter::RulesetService>
+      subresource_filter_ruleset_service_;
 
   bool shutting_down_;
 
@@ -281,8 +288,6 @@ class BrowserProcessImpl : public BrowserProcess,
 
   std::unique_ptr<ChromeResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
-
-  std::unique_ptr<web_resource::PromoResourceService> promo_resource_service_;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   base::RepeatingTimer autoupdate_timer_;
@@ -331,7 +336,7 @@ class BrowserProcessImpl : public BrowserProcess,
 
   std::unique_ptr<ChromeDeviceClient> device_client_;
 
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
   // Any change to this #ifdef must be reflected as well in
   // chrome/browser/memory/tab_manager_browsertest.cc
   std::unique_ptr<memory::TabManager> tab_manager_;

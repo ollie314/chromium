@@ -4,13 +4,18 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
+import android.content.Context;
 import android.test.InstrumentationTestCase;
 import android.test.suitebuilder.annotation.SmallTest;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.StreamUtil;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.test.util.AdvancedMockContext;
+import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabIdManager;
@@ -28,6 +33,8 @@ import java.util.concurrent.ExecutionException;
  */
 public class RestoreMigrateTest extends InstrumentationTestCase {
 
+    private Context mAppContext;
+
     private void writeStateFile(final TabModelSelector selector, int index) throws IOException {
         byte[] data = ThreadUtils.runOnUiThreadBlockingNoException(
                 new Callable<byte[]>() {
@@ -36,11 +43,11 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
                         return TabPersistentStore.serializeTabModelSelector(selector, null);
                     }
                 });
-        File f = TabPersistentStore.getStateDirectory(
-                getInstrumentation().getTargetContext(), index);
+        File f = TabbedModeTabPersistencePolicy.getOrCreateTabbedModeStateDirectory();
         FileOutputStream fos = null;
         try {
-            fos = new FileOutputStream(new File(f, TabPersistentStore.SAVED_STATE_FILE));
+            fos = new FileOutputStream(new File(
+                    f, TabbedModeTabPersistencePolicy.getStateFileName(index)));
             fos.write(data);
         } finally {
             StreamUtil.closeQuietly(fos);
@@ -57,6 +64,28 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         return maxId;
     }
 
+    @Override
+    protected void setUp() throws Exception {
+        super.setUp();
+        mAppContext = new AdvancedMockContext(
+                getInstrumentation().getTargetContext().getApplicationContext());
+        ContextUtils.initApplicationContextForTests(mAppContext);
+    }
+
+    private TabPersistentStore buildTabPersistentStore(
+            final TabModelSelector selector, final int selectorIndex) {
+        return ThreadUtils.runOnUiThreadBlockingNoException(new Callable<TabPersistentStore>() {
+            @Override
+            public TabPersistentStore call() throws Exception {
+                TabPersistencePolicy persistencePolicy = new TabbedModeTabPersistencePolicy(
+                        mAppContext, selectorIndex);
+                TabPersistentStore store = new TabPersistentStore(
+                        persistencePolicy, selector, mAppContext, null, null, false);
+                return store;
+            }
+        });
+    }
+
     /**
      * Test that normal migration of state files works.
      * @throws IOException
@@ -66,12 +95,13 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
     @SuppressWarnings("unused")
     @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @SmallTest
+    @Feature({"TabPersistentStore"})
     public void testMigrateData() throws IOException, InterruptedException, ExecutionException {
-        ApplicationData.clearAppData(getInstrumentation().getTargetContext());
+        ApplicationData.clearAppData(mAppContext);
 
         // Write old state files.
-        File filesDir = getInstrumentation().getTargetContext().getFilesDir();
-        File stateFile = new File(filesDir, TabPersistentStore.SAVED_STATE_FILE);
+        File filesDir = mAppContext.getFilesDir();
+        File stateFile = new File(filesDir, TabbedModeTabPersistencePolicy.LEGACY_SAVED_STATE_FILE);
         File tab0 = new File(filesDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "0");
         File tab1 = new File(filesDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "1");
         File tab2 = new File(filesDir, TabState.SAVED_TAB_STATE_FILE_PREFIX_INCOGNITO + "2");
@@ -85,14 +115,16 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
 
         // Build the TabPersistentStore which will try to move the files.
         MockTabModelSelector selector = new MockTabModelSelector(0, 0, null);
-        TabPersistentStore store = new TabPersistentStore(selector, 0,
-                getInstrumentation().getTargetContext(), null, null);
-        TabPersistentStore.waitForMigrationToFinish();
+        TabPersistentStore store = buildTabPersistentStore(selector, 0);
+        store.waitForMigrationToFinish();
+
+        // Make sure we don't hit the migration path again.
+        assertTrue(ContextUtils.getAppSharedPreferences().getBoolean(
+                TabbedModeTabPersistencePolicy.PREF_HAS_RUN_FILE_MIGRATION, false));
 
         // Check that the files were moved.
-        File newDir =
-                TabPersistentStore.getStateDirectory(getInstrumentation().getTargetContext(), 0);
-        File newStateFile = new File(newDir, TabPersistentStore.SAVED_STATE_FILE);
+        File newDir = TabbedModeTabPersistencePolicy.getOrCreateTabbedModeStateDirectory();
+        File newStateFile = new File(newDir, TabbedModeTabPersistencePolicy.getStateFileName(0));
         File newTab0 = new File(newDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "0");
         File newTab1 = new File(newDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "1");
         File newTab2 = new File(newDir, TabState.SAVED_TAB_STATE_FILE_PREFIX_INCOGNITO + "2");
@@ -110,7 +142,7 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         assertFalse("Could still find old tab 2 file", tab2.exists());
         assertFalse("Could still find old tab 3 file", tab3.exists());
 
-        ApplicationData.clearAppData(getInstrumentation().getTargetContext());
+        ApplicationData.clearAppData(mAppContext);
     }
 
     /**
@@ -122,12 +154,13 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
     @SuppressWarnings("unused")
     @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @SmallTest
+    @Feature({"TabPersistentStore"})
     public void testSkipMigrateData() throws IOException, InterruptedException, ExecutionException {
-        ApplicationData.clearAppData(getInstrumentation().getTargetContext());
+        ApplicationData.clearAppData(mAppContext);
 
         // Write old state files.
-        File filesDir = getInstrumentation().getTargetContext().getFilesDir();
-        File stateFile = new File(filesDir, TabPersistentStore.SAVED_STATE_FILE);
+        File filesDir = mAppContext.getFilesDir();
+        File stateFile = new File(filesDir, TabbedModeTabPersistencePolicy.LEGACY_SAVED_STATE_FILE);
         File tab0 = new File(filesDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "0");
         File tab1 = new File(filesDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "1");
         File tab2 = new File(filesDir, TabState.SAVED_TAB_STATE_FILE_PREFIX_INCOGNITO + "2");
@@ -140,9 +173,8 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         assertTrue("Could not create tab 3 file", tab3.createNewFile());
 
         // Write new state files
-        File newDir =
-                TabPersistentStore.getStateDirectory(getInstrumentation().getTargetContext(), 0);
-        File newStateFile = new File(newDir, TabPersistentStore.SAVED_STATE_FILE);
+        File newDir = TabbedModeTabPersistencePolicy.getOrCreateTabbedModeStateDirectory();
+        File newStateFile = new File(newDir, TabbedModeTabPersistencePolicy.getStateFileName(0));
         File newTab4 = new File(newDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "4");
 
         assertTrue("Could not create new tab 4 file", newTab4.createNewFile());
@@ -150,9 +182,8 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
 
         // Build the TabPersistentStore which will try to move the files.
         MockTabModelSelector selector = new MockTabModelSelector(0, 0, null);
-        TabPersistentStore store = new TabPersistentStore(selector, 0,
-                getInstrumentation().getTargetContext(), null, null);
-        TabPersistentStore.waitForMigrationToFinish();
+        TabPersistentStore store = buildTabPersistentStore(selector, 0);
+        store.waitForMigrationToFinish();
 
         assertTrue("Could not find new state file", newStateFile.exists());
         assertTrue("Could not find new tab 4 file", newTab4.exists());
@@ -168,7 +199,7 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         assertFalse("Could find new tab 2 file", newTab2.exists());
         assertFalse("Could find new tab 3 file", newTab3.exists());
 
-        ApplicationData.clearAppData(getInstrumentation().getTargetContext());
+        ApplicationData.clearAppData(mAppContext);
     }
 
     /**
@@ -180,13 +211,14 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
     @SuppressWarnings("unused")
     @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @SmallTest
+    @Feature({"TabPersistentStore"})
     public void testMigrationLeavesOtherFilesAlone() throws IOException, InterruptedException,
             ExecutionException {
-        ApplicationData.clearAppData(getInstrumentation().getTargetContext());
+        ApplicationData.clearAppData(mAppContext);
 
         // Write old state files.
-        File filesDir = getInstrumentation().getTargetContext().getFilesDir();
-        File stateFile = new File(filesDir, TabPersistentStore.SAVED_STATE_FILE);
+        File filesDir = mAppContext.getFilesDir();
+        File stateFile = new File(filesDir, TabbedModeTabPersistencePolicy.LEGACY_SAVED_STATE_FILE);
         File tab0 = new File(filesDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "0");
         File otherFile = new File(filesDir, "other.file");
 
@@ -196,18 +228,16 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
 
         // Build the TabPersistentStore which will try to move the files.
         MockTabModelSelector selector = new MockTabModelSelector(0, 0, null);
-        TabPersistentStore store = new TabPersistentStore(selector, 0,
-                getInstrumentation().getTargetContext(), null, null);
-        TabPersistentStore.waitForMigrationToFinish();
+        TabPersistentStore store = buildTabPersistentStore(selector, 0);
+        store.waitForMigrationToFinish();
 
         assertFalse("Could still find old state file", stateFile.exists());
         assertFalse("Could still find old tab 0 file", tab0.exists());
         assertTrue("Could not find other file", otherFile.exists());
 
         // Check that the files were moved.
-        File newDir =
-                TabPersistentStore.getStateDirectory(getInstrumentation().getTargetContext(), 0);
-        File newStateFile = new File(newDir, TabPersistentStore.SAVED_STATE_FILE);
+        File newDir = TabbedModeTabPersistencePolicy.getOrCreateTabbedModeStateDirectory();
+        File newStateFile = new File(newDir, TabbedModeTabPersistencePolicy.getStateFileName(0));
         File newTab0 = new File(newDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "0");
         File newOtherFile = new File(newDir, "other.file");
 
@@ -215,7 +245,7 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         assertTrue("Could not find new tab 0 file", newTab0.exists());
         assertFalse("Could find new other file", newOtherFile.exists());
 
-        ApplicationData.clearAppData(getInstrumentation().getTargetContext());
+        ApplicationData.clearAppData(mAppContext);
     }
 
     /**
@@ -223,6 +253,8 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
      * @throws IOException
      */
     @SmallTest
+    @Feature({"TabPersistentStore"})
+    @RetryOnFailure
     public void testFindsMaxIdProperly() throws IOException {
         TabModelSelector selector0 = new MockTabModelSelector(1, 1, null);
         TabModelSelector selector1 = new MockTabModelSelector(1, 1, null);
@@ -231,12 +263,11 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         writeStateFile(selector1, 1);
 
         TabModelSelector selectorIn = new MockTabModelSelector(0, 0, null);
-        TabPersistentStore storeIn = new TabPersistentStore(selectorIn, 0,
-                getInstrumentation().getTargetContext(), null, null);
+        TabPersistentStore storeIn = buildTabPersistentStore(selectorIn, 0);
 
         int maxId = Math.max(getMaxId(selector0), getMaxId(selector1));
         RecordHistogram.disableForTests();
-        storeIn.loadState();
+        storeIn.loadState(false /* ignoreIncognitoFiles */);
         assertEquals("Invalid next id", maxId + 1,
                 TabIdManager.getInstance().generateValidId(Tab.INVALID_TAB_ID));
     }
@@ -249,6 +280,7 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
      * @throws IOException
      */
     @SmallTest
+    @Feature({"TabPersistentStore"})
     public void testOnlyLoadsSingleModel() throws IOException {
         TabModelSelector selector0 = new MockTabModelSelector(3, 3, null);
         TabModelSelector selector1 = new MockTabModelSelector(2, 1, null);
@@ -259,17 +291,16 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         TabModelSelector selectorIn0 = new MockTabModelSelector(0, 0, null);
         TabModelSelector selectorIn1 = new MockTabModelSelector(0, 0, null);
 
-        TabPersistentStore storeIn0 = new TabPersistentStore(selectorIn0, 0,
-                getInstrumentation().getTargetContext(), null, null);
-        TabPersistentStore storeIn1 = new TabPersistentStore(selectorIn1, 1,
-                getInstrumentation().getTargetContext(), null, null);
+        TabPersistentStore storeIn0 = buildTabPersistentStore(selectorIn0, 0);
+
+        TabPersistentStore storeIn1 = buildTabPersistentStore(selectorIn1, 1);
 
         RecordHistogram.disableForTests();
-        storeIn0.loadState();
-        storeIn1.loadState();
+        storeIn0.loadState(false /* ignoreIncognitoFiles */);
+        storeIn1.loadState(false /* ignoreIncognitoFiles */);
 
         assertEquals("Unexpected number of tabs to load", 6, storeIn0.getRestoredTabCount());
-        assertEquals("Unexpected number of tabst o load", 3, storeIn1.getRestoredTabCount());
+        assertEquals("Unexpected number of tabs to load", 3, storeIn1.getRestoredTabCount());
 
     }
 }

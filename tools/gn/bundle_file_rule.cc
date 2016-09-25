@@ -10,9 +10,13 @@
 #include "tools/gn/substitution_writer.h"
 #include "tools/gn/target.h"
 
-BundleFileRule::BundleFileRule(const std::vector<SourceFile> sources,
+BundleFileRule::BundleFileRule(const Target* bundle_data_target,
+                               const std::vector<SourceFile> sources,
                                const SubstitutionPattern& pattern)
-    : sources_(sources), pattern_(pattern) {}
+    : target_(bundle_data_target), sources_(sources), pattern_(pattern) {
+  // target_ may be null during testing.
+  DCHECK(!target_ || target_->output_type() == Target::BUNDLE_DATA);
+}
 
 BundleFileRule::BundleFileRule(const BundleFileRule& other) = default;
 
@@ -29,16 +33,16 @@ SourceFile BundleFileRule::ApplyPatternToSource(
         output_path.append(subrange.literal);
         break;
       case SUBSTITUTION_BUNDLE_ROOT_DIR:
-        output_path.append(bundle_data.root_dir());
+        output_path.append(bundle_data.root_dir().value());
         break;
       case SUBSTITUTION_BUNDLE_RESOURCES_DIR:
-        output_path.append(bundle_data.resources_dir());
+        output_path.append(bundle_data.resources_dir().value());
         break;
       case SUBSTITUTION_BUNDLE_EXECUTABLE_DIR:
-        output_path.append(bundle_data.executable_dir());
+        output_path.append(bundle_data.executable_dir().value());
         break;
       case SUBSTITUTION_BUNDLE_PLUGINS_DIR:
-        output_path.append(bundle_data.plugins_dir());
+        output_path.append(bundle_data.plugins_dir().value());
         break;
       default:
         output_path.append(SubstitutionWriter::GetSourceSubstitution(

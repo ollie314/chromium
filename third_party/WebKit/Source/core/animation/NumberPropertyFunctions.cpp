@@ -120,14 +120,14 @@ double NumberPropertyFunctions::clampNumber(CSSPropertyID property, double value
         return clampTo<int>(round(value));
 
     default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return value;
     }
 }
 
 bool NumberPropertyFunctions::setNumber(CSSPropertyID property, ComputedStyle& style, double value)
 {
-    ASSERT(value == clampNumber(property, value));
+    DCHECK_EQ(value, clampNumber(property, value));
     switch (property) {
     case CSSPropertyFillOpacity:
         style.setFillOpacity(value);

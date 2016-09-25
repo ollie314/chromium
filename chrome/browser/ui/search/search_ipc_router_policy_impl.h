@@ -23,7 +23,6 @@ class SearchIPCRouterPolicyImpl : public SearchIPCRouter::Policy {
 
   // Overridden from SearchIPCRouter::Policy:
   bool ShouldProcessFocusOmnibox(bool is_active_tab) override;
-  bool ShouldProcessNavigateToURL(bool is_active_tab) override;
   bool ShouldProcessDeleteMostVisitedItem() override;
   bool ShouldProcessUndoMostVisitedDeletion() override;
   bool ShouldProcessUndoAllMostVisitedDeletions() override;
@@ -31,8 +30,6 @@ class SearchIPCRouterPolicyImpl : public SearchIPCRouter::Policy {
   bool ShouldProcessPasteIntoOmnibox(bool is_active_tab) override;
   bool ShouldProcessChromeIdentityCheck() override;
   bool ShouldProcessHistorySyncCheck() override;
-  bool ShouldSendSetPromoInformation() override;
-  bool ShouldSendSetDisplayInstantResults() override;
   bool ShouldSendSetSuggestionToPrefetch() override;
   bool ShouldSendSetInputInProgress(bool is_active_tab) override;
   bool ShouldSendOmniboxFocusChanged() override;

@@ -21,8 +21,6 @@
 <include src="../../../../../ui/login/display_manager.js">
 <include src="header_bar.js">
 
-<include src="../../../../../ui/login/account_picker/user_pod_template.js">
-
 <include src="../../../../../ui/login/account_picker/screen_account_picker.js">
 
 <include src="../../../../../ui/login/login_ui_tools.js">
@@ -337,7 +335,7 @@ cr.define('cr.ui', function() {
    */
   Oobe.authenticateForTesting = function(username, password) {
     Oobe.disableSigninUI();
-    chrome.send('authenticateUser', [username, password]);
+    chrome.send('authenticateUser', [username, password, false]);
   };
 
   /**
@@ -393,6 +391,13 @@ cr.define('cr.ui', function() {
    */
   Oobe.showControlBar = function(show) {
     Oobe.getInstance().headerHidden = !show;
+  };
+
+  /**
+   * Shows/hides pin keyboard on the lock screen.
+   */
+  Oobe.showPinKeyboard = function(show) {
+    Oobe.getInstance().pinHidden = !show;
   };
 
   /**

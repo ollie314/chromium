@@ -10,10 +10,12 @@ import name_utilities
 class CSSProperties(in_generator.Writer):
     defaults = {
         'alias_for': None,
+        'descriptor_only': None,
         'runtime_flag': None,
         'longhands': '',
         'interpolable': False,
         'inherited': False,
+        'independent': False,
         'font': False,
         'svg': False,
         'name_for_methods': None,
@@ -32,6 +34,7 @@ class CSSProperties(in_generator.Writer):
         # Typed OM annotations.
         'typedom_types': [],
         'keywords': [],
+        'keyword_only': False,
         'supports_percentage': False,
         'supports_multiple': False,
     }
@@ -39,6 +42,7 @@ class CSSProperties(in_generator.Writer):
     valid_values = {
         'interpolable': (True, False),
         'inherited': (True, False),
+        'independent': (True, False),
         'font': (True, False),
         'svg': (True, False),
         'custom_all': (True, False),
@@ -47,12 +51,14 @@ class CSSProperties(in_generator.Writer):
         'custom_value': (True, False),
         'builder_skip': (True, False),
         'direction_aware': (True, False),
+        'keyword_only': (True, False),
     }
 
     def __init__(self, file_paths):
         in_generator.Writer.__init__(self, file_paths)
 
         properties = self.in_file.name_dictionaries
+        self._descriptors = [property for property in properties if property['descriptor_only']]
 
         self._aliases = [property for property in properties if property['alias_for']]
         properties = [property for property in properties if not property['alias_for']]

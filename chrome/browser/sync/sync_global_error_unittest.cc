@@ -17,7 +17,7 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/sync_driver/sync_error_controller.h"
+#include "components/sync/driver/sync_error_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
@@ -47,14 +47,13 @@ class FakeLoginUI : public LoginUIService::LoginUI {
  private:
   // Overridden from LoginUIService::LoginUI:
   void FocusUI() override { ++focus_ui_call_count_; }
-  void CloseUI() override {}
 
   int focus_ui_call_count_;
 };
 
 std::unique_ptr<KeyedService> BuildMockLoginUIService(
     content::BrowserContext* profile) {
-  return base::WrapUnique(new FakeLoginUIService());
+  return base::MakeUnique<FakeLoginUIService>();
 }
 
 // Same as BrowserWithTestWindowTest, but uses MockBrowser to test calls to
@@ -80,7 +79,7 @@ class SyncGlobalErrorTest : public BrowserWithTestWindowTest {
 
 // Utility function to test that SyncGlobalError behaves correctly for the given
 // error condition.
-void VerifySyncGlobalErrorResult(ProfileSyncServiceMock* service,
+void VerifySyncGlobalErrorResult(browser_sync::ProfileSyncServiceMock* service,
                                  FakeLoginUIService* login_ui_service,
                                  Browser* browser,
                                  SyncErrorController* error,
@@ -126,7 +125,7 @@ void VerifySyncGlobalErrorResult(ProfileSyncServiceMock* service,
 
 // Test that SyncGlobalError shows an error if a passphrase is required.
 TEST_F(SyncGlobalErrorTest, PassphraseGlobalError) {
-  ProfileSyncServiceMock service(
+  browser_sync::ProfileSyncServiceMock service(
       CreateProfileSyncServiceParamsForTest(profile()));
 
   FakeLoginUIService* login_ui_service = static_cast<FakeLoginUIService*>(

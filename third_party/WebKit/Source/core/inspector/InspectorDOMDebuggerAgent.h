@@ -31,14 +31,15 @@
 #ifndef InspectorDOMDebuggerAgent_h
 #define InspectorDOMDebuggerAgent_h
 
-
+#include "bindings/core/v8/V8EventListenerInfo.h"
 #include "core/CoreExport.h"
 #include "core/inspector/InspectorBaseAgent.h"
 #include "core/inspector/InspectorDOMAgent.h"
-#include "platform/v8_inspector/public/V8EventListenerInfo.h"
+#include "core/inspector/protocol/DOMDebugger.h"
 #include "wtf/HashMap.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/text/WTFString.h"
+
+#include <v8-inspector.h>
 
 namespace blink {
 
@@ -47,26 +48,22 @@ class Event;
 class EventTarget;
 class InspectorDOMAgent;
 class Node;
-class V8DebuggerAgent;
-class V8RuntimeAgent;
 
 namespace protocol {
 class DictionaryValue;
 }
 
 class CORE_EXPORT InspectorDOMDebuggerAgent final
-    : public InspectorBaseAgent<InspectorDOMDebuggerAgent, protocol::Frontend::DOMDebugger>
-    , public protocol::Backend::DOMDebugger {
+    : public InspectorBaseAgent<protocol::DOMDebugger::Metainfo> {
     WTF_MAKE_NONCOPYABLE(InspectorDOMDebuggerAgent);
 public:
-    static InspectorDOMDebuggerAgent* create(v8::Isolate*, InspectorDOMAgent*, V8RuntimeAgent*, V8DebuggerAgent*);
-
     static void eventListenersInfoForTarget(v8::Isolate*, v8::Local<v8::Value>, V8EventListenerInfoList& listeners);
 
+    InspectorDOMDebuggerAgent(v8::Isolate*, InspectorDOMAgent*, v8_inspector::V8InspectorSession*);
     ~InspectorDOMDebuggerAgent() override;
     DECLARE_VIRTUAL_TRACE();
 
-    // DOMDebugger API for InspectorFrontend
+    // DOMDebugger API for frontend
     void setDOMBreakpoint(ErrorString*, int nodeId, const String& type) override;
     void removeDOMBreakpoint(ErrorString*, int nodeId, const String& type) override;
     void setEventListenerBreakpoint(ErrorString*, const String& eventName, const Maybe<String>& targetName) override;
@@ -75,37 +72,35 @@ public:
     void removeInstrumentationBreakpoint(ErrorString*, const String& eventName) override;
     void setXHRBreakpoint(ErrorString*, const String& url) override;
     void removeXHRBreakpoint(ErrorString*, const String& url) override;
-    void getEventListeners(ErrorString*, const String16& objectId, OwnPtr<protocol::Array<protocol::DOMDebugger::EventListener>>* listeners) override;
+    void getEventListeners(ErrorString*, const String& objectId, std::unique_ptr<protocol::Array<protocol::DOMDebugger::EventListener>>* listeners) override;
 
     // InspectorInstrumentation API
-    void allowNativeBreakpoint(const String& breakpointName, bool sync);
     void willInsertDOMNode(Node* parent);
     void didInvalidateStyleAttr(Node*);
     void didInsertDOMNode(Node*);
     void willRemoveDOMNode(Node*);
     void didRemoveDOMNode(Node*);
     void willModifyDOMAttr(Element*, const AtomicString&, const AtomicString&);
-    void willSendXMLHttpRequest(const String& url);
-    void willHandleEvent(EventTarget*, Event*, EventListener*, bool useCapture);
+    void willSendXMLHttpOrFetchNetworkRequest(const String& url);
     void didFireWebGLError(const String& errorName);
     void didFireWebGLWarning();
     void didFireWebGLErrorOrWarning(const String& message);
-    void cancelPauseOnNextStatement();
+    void allowNativeBreakpoint(const String& breakpointName, const String* targetName, bool sync);
+    void cancelNativeBreakpoint();
+    void scriptExecutionBlockedByCSP(const String& directiveText);
 
     void disable(ErrorString*) override;
     void restore() override;
     void didCommitLoadForLocalFrame(LocalFrame*) override;
 
 private:
-    InspectorDOMDebuggerAgent(v8::Isolate*, InspectorDOMAgent*, V8RuntimeAgent*, V8DebuggerAgent*);
-
-    void pauseOnNativeEventIfNeeded(PassOwnPtr<protocol::DictionaryValue> eventData, bool synchronous);
-    PassOwnPtr<protocol::DictionaryValue> preparePauseOnNativeEventData(const String& eventName, const String* targetName);
+    void pauseOnNativeEventIfNeeded(std::unique_ptr<protocol::DictionaryValue> eventData, bool synchronous);
+    std::unique_ptr<protocol::DictionaryValue> preparePauseOnNativeEventData(const String& eventName, const String* targetName);
 
     protocol::DictionaryValue* eventListenerBreakpoints();
     protocol::DictionaryValue* xhrBreakpoints();
 
-    void descriptionForDOMEvent(Node* target, int breakpointType, bool insertion, protocol::DictionaryValue* description);
+    void breakProgramOnDOMEvent(Node* target, int breakpointType, bool insertion);
     void updateSubtreeBreakpoints(Node*, uint32_t rootMask, bool set);
     bool hasBreakpoint(Node*, int type);
     void setBreakpoint(ErrorString*, const String& eventName, const String& targetName);
@@ -115,13 +110,11 @@ private:
     void didRemoveBreakpoint();
     void setEnabled(bool);
 
-    void eventListeners(v8::Local<v8::Context>, v8::Local<v8::Value>, const String16& objectGroup, protocol::Array<protocol::DOMDebugger::EventListener>* listenersArray);
-    PassOwnPtr<protocol::DOMDebugger::EventListener> buildObjectForEventListener(v8::Local<v8::Context>, const V8EventListenerInfo&, const String16& objectGroupId);
+    std::unique_ptr<protocol::DOMDebugger::EventListener> buildObjectForEventListener(v8::Local<v8::Context>, const V8EventListenerInfo&, const v8_inspector::StringView& objectGroupId);
 
     v8::Isolate* m_isolate;
     Member<InspectorDOMAgent> m_domAgent;
-    V8RuntimeAgent* m_runtimeAgent;
-    V8DebuggerAgent* m_debuggerAgent;
+    v8_inspector::V8InspectorSession* m_v8Session;
     HeapHashMap<Member<Node>, uint32_t> m_domBreakpoints;
 };
 

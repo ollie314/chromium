@@ -14,6 +14,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/logging.h"
+#include "content/browser/android/scoped_surface_request_manager.h"
 #include "content/browser/file_descriptor_info_impl.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/media/android/browser_media_player_manager.h"
@@ -30,6 +31,8 @@
 #include "ui/gl/android/surface_texture.h"
 
 using base::android::AttachCurrentThread;
+using base::android::JavaParamRef;
+using base::android::JavaRef;
 using base::android::ToJavaArrayOfStrings;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
@@ -84,7 +87,7 @@ static void SetSurfacePeer(
   }
 
   if (player != player_manager->GetFullscreenPlayer()) {
-    gfx::ScopedJavaSurface scoped_surface(surface);
+    gl::ScopedJavaSurface scoped_surface(surface);
     player->SetVideoSurface(std::move(scoped_surface));
   }
 }
@@ -101,7 +104,7 @@ void LaunchDownloadProcess(base::CommandLine* cmd_line) {
 
   // TODO(qinmin): pass download parameters here.
   Java_ChildProcessLauncher_startDownloadProcessIfNecessary(
-      env, base::android::GetApplicationContext(), j_argv.obj());
+      env, base::android::GetApplicationContext(), j_argv);
 }
 
 }  // anonymous namespace
@@ -165,7 +168,7 @@ void StartChildProcess(
   DCHECK(file_count > 0);
 
   ScopedJavaLocalRef<jclass> j_file_info_class = base::android::GetClass(
-      env, "org/chromium/content/browser/FileDescriptorInfo");
+      env, "org/chromium/content/common/FileDescriptorInfo");
   ScopedJavaLocalRef<jobjectArray> j_file_infos(
       env, env->NewObjectArray(file_count, j_file_info_class.obj(), NULL));
   base::android::CheckException(env);
@@ -193,8 +196,8 @@ void StartChildProcess(
   }
 
   Java_ChildProcessLauncher_start(
-      env, base::android::GetApplicationContext(), j_argv.obj(),
-      child_process_id, j_file_infos.obj(),
+      env, base::android::GetApplicationContext(), j_argv, child_process_id,
+      j_file_infos,
       reinterpret_cast<intptr_t>(new StartChildProcessCallback(callback)));
 }
 
@@ -235,7 +238,27 @@ void EstablishSurfacePeer(JNIEnv* env,
       &SetSurfacePeer, jsurface, pid, primary_id, secondary_id));
 }
 
-void RegisterViewSurface(int surface_id, jobject j_surface) {
+void CompleteScopedSurfaceRequest(JNIEnv* env,
+                                  const JavaParamRef<jclass>& clazz,
+                                  jlong request_token_high,
+                                  jlong request_token_low,
+                                  const JavaParamRef<jobject>& surface) {
+  if (request_token_high == 0 && request_token_low == 0) {
+    DLOG(ERROR) << "Received invalid surface request token.";
+    return;
+  }
+
+  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  ScopedJavaGlobalRef<jobject> jsurface;
+  jsurface.Reset(env, surface);
+  ScopedSurfaceRequestManager::GetInstance()->FulfillScopedSurfaceRequest(
+      base::UnguessableToken::Deserialize(request_token_high,
+                                          request_token_low),
+      gl::ScopedJavaSurface(jsurface));
+}
+
+void RegisterViewSurface(int surface_id, const JavaRef<jobject>& j_surface) {
   JNIEnv* env = AttachCurrentThread();
   DCHECK(env);
   Java_ChildProcessLauncher_registerViewSurface(env, surface_id, j_surface);
@@ -247,23 +270,20 @@ void UnregisterViewSurface(int surface_id) {
   Java_ChildProcessLauncher_unregisterViewSurface(env, surface_id);
 }
 
-gfx::ScopedJavaSurface GetViewSurface(int surface_id) {
+gl::ScopedJavaSurface GetViewSurface(int surface_id) {
   JNIEnv* env = AttachCurrentThread();
   DCHECK(env);
-  return gfx::ScopedJavaSurface::AcquireExternalSurface(
+  return gl::ScopedJavaSurface::AcquireExternalSurface(
       Java_ChildProcessLauncher_getViewSurface(env, surface_id).obj());
 }
 
 void CreateSurfaceTextureSurface(int surface_texture_id,
                                  int client_id,
-                                 gfx::SurfaceTexture* surface_texture) {
+                                 gl::SurfaceTexture* surface_texture) {
   JNIEnv* env = AttachCurrentThread();
   DCHECK(env);
   Java_ChildProcessLauncher_createSurfaceTextureSurface(
-      env,
-      surface_texture_id,
-      client_id,
-      surface_texture->j_surface_texture().obj());
+      env, surface_texture_id, client_id, surface_texture->j_surface_texture());
 }
 
 void DestroySurfaceTextureSurface(int surface_texture_id, int client_id) {
@@ -273,13 +293,14 @@ void DestroySurfaceTextureSurface(int surface_texture_id, int client_id) {
       env, surface_texture_id, client_id);
 }
 
-gfx::ScopedJavaSurface GetSurfaceTextureSurface(int surface_texture_id,
-                                                int client_id) {
+gl::ScopedJavaSurface GetSurfaceTextureSurface(int surface_texture_id,
+                                               int client_id) {
   JNIEnv* env = AttachCurrentThread();
   DCHECK(env);
-  return gfx::ScopedJavaSurface::AcquireExternalSurface(
+  return gl::ScopedJavaSurface::AcquireExternalSurface(
       Java_ChildProcessLauncher_getSurfaceTextureSurface(
-          env, surface_texture_id, client_id).obj());
+          env, surface_texture_id, client_id)
+          .obj());
 }
 
 jboolean IsSingleProcess(JNIEnv* env, const JavaParamRef<jclass>& clazz) {

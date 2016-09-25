@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_FUNCTION_H_
 #define CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_FUNCTION_H_
 
+#include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "extensions/browser/extension_function.h"
 
 class Browser;
@@ -57,8 +58,15 @@ class ChromeUIThreadExtensionFunction : public UIThreadExtensionFunction {
   // contents then defaults to the foremost one.
   content::WebContents* GetAssociatedWebContents() override;
 
+  // Responds with success/failure. |results_| or |error_| should be set
+  // accordingly.
+  void SendResponse(bool success);
+
  protected:
   ~ChromeUIThreadExtensionFunction() override;
+
+ private:
+  ChromeExtensionFunctionDetails chrome_details_;
 };
 
 // A chrome specific analog to AsyncExtensionFunction. This has access to a

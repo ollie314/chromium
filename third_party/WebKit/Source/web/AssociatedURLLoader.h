@@ -35,8 +35,8 @@
 #include "public/platform/WebURLLoader.h"
 #include "public/web/WebURLLoaderOptions.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -51,7 +51,7 @@ public:
     ~AssociatedURLLoader();
 
     // WebURLLoader methods:
-    void loadSynchronously(const WebURLRequest&, WebURLResponse&, WebURLError&, WebData&) override;
+    void loadSynchronously(const WebURLRequest&, WebURLResponse&, WebURLError&, WebData&, int64_t& encodedDataLength) override;
     void loadAsynchronously(const WebURLRequest&, WebURLLoaderClient*) override;
     void cancel() override;
     void setDefersLoading(bool) override;
@@ -60,19 +60,31 @@ public:
     // Called by |m_observer| to handle destruction of the Document associated
     // with the frame given to the constructor.
     void documentDestroyed();
-    void disposeObserver();
+
+    // Called by ClientAdapter to handle completion of loading.
+    void clientAdapterDone();
 
 private:
     class ClientAdapter;
     class Observer;
+
+    void cancelLoader();
+    void disposeObserver();
+
+    WebURLLoaderClient* releaseClient()
+    {
+        WebURLLoaderClient* client = m_client;
+        m_client = nullptr;
+        return client;
+    }
 
     WebURLLoaderClient* m_client;
     WebURLLoaderOptions m_options;
 
     // An adapter which converts the DocumentThreadableLoaderClient method
     // calls into the WebURLLoaderClient method calls.
-    OwnPtr<ClientAdapter> m_clientAdapter;
-    OwnPtr<DocumentThreadableLoader> m_loader;
+    std::unique_ptr<ClientAdapter> m_clientAdapter;
+    Persistent<DocumentThreadableLoader> m_loader;
 
     // A ContextLifecycleObserver for cancelling |m_loader| when the Document
     // is detached.

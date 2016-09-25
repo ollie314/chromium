@@ -37,6 +37,7 @@ blink::WebMediaPlayer::NetworkState PipelineErrorToNetworkState(
 
     case PIPELINE_ERROR_INITIALIZATION_FAILED:
     case PIPELINE_ERROR_COULD_NOT_RENDER:
+    case PIPELINE_ERROR_EXTERNAL_RENDERER_FAILED:
     case DEMUXER_ERROR_COULD_NOT_OPEN:
     case DEMUXER_ERROR_COULD_NOT_PARSE:
     case DEMUXER_ERROR_NO_SUPPORTED_STREAMS:
@@ -139,6 +140,20 @@ void ReportMetrics(blink::WebMediaPlayer::LoadType load_type,
   }
 }
 
+void ReportPipelineError(blink::WebMediaPlayer::LoadType load_type,
+                         const blink::WebSecurityOrigin& security_origin,
+                         PipelineStatus error) {
+  DCHECK_NE(PIPELINE_OK, error);
+
+  // Report the origin from where the media player is created.
+  if (!GetMediaClient())
+    return;
+
+  GetMediaClient()->RecordRapporURL(
+      "Media.OriginUrl." + LoadTypeToString(load_type) + ".PipelineError",
+      blink::WebStringToGURL(security_origin.toString()));
+}
+
 void RecordOriginOfHLSPlayback(const GURL& origin_url) {
   if (media::GetMediaClient())
     GetMediaClient()->RecordRapporURL("Media.OriginUrl.HLS", origin_url);
@@ -205,7 +220,7 @@ class SetSinkIdCallback {
  private:
   // Mutable is required so that Pass() can be called in the copy
   // constructor.
-  mutable scoped_ptr<blink::WebSetSinkIdCallbacks> web_callback_;
+  mutable std::unique_ptr<blink::WebSetSinkIdCallbacks> web_callback_;
 };
 
 void RunSetSinkIdCallback(const SetSinkIdCallback& callback,

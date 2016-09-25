@@ -14,7 +14,10 @@
 
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
+#include "components/autofill/content/public/interfaces/autofill_agent.mojom.h"
+#include "components/autofill/content/public/interfaces/autofill_driver.mojom.h"
 #include "content/public/renderer/render_frame_observer.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "url/gurl.h"
 
@@ -32,11 +35,25 @@ class PasswordAutofillAgent;
 // This class is responsible for controlling communication for password
 // generation between the browser (which shows the popup and generates
 // passwords) and WebKit (shows the generation icon in the password field).
-class PasswordGenerationAgent : public content::RenderFrameObserver {
+class PasswordGenerationAgent : public content::RenderFrameObserver,
+                                public mojom::PasswordGenerationAgent {
  public:
   PasswordGenerationAgent(content::RenderFrame* render_frame,
                           PasswordAutofillAgent* password_agent);
   ~PasswordGenerationAgent() override;
+
+  void BindRequest(mojom::PasswordGenerationAgentRequest request);
+
+  // mojom::PasswordGenerationAgent:
+  void FormNotBlacklisted(const PasswordForm& form) override;
+  void GeneratedPasswordAccepted(const base::string16& password) override;
+  void FoundFormsEligibleForGeneration(
+      const std::vector<PasswordFormGenerationData>& forms) override;
+  // Sets |generation_element_| to the focused password field and shows a
+  // generation popup at this field.
+  void UserTriggeredGeneratePassword() override;
+  // Enables the form classifier.
+  void AllowToRunFormClassifier() override;
 
   // Returns true if the field being changed is one where a generated password
   // is being offered. Updates the state of the popup if necessary.
@@ -55,9 +72,6 @@ class PasswordGenerationAgent : public content::RenderFrameObserver {
   // Returns true if the document for |render_frame()| is one that we should
   // consider analyzing. Virtual so that it can be overriden during testing.
   virtual bool ShouldAnalyzeDocument() const;
-
-  // RenderViewObserver:
-  bool OnMessageReceived(const IPC::Message& message) override;
 
   // Use to force enable during testing.
   void set_enabled(bool enabled) { enabled_ = enabled; }
@@ -78,12 +92,10 @@ class PasswordGenerationAgent : public content::RenderFrameObserver {
 
   // RenderFrameObserver:
   void DidFinishDocumentLoad() override;
+  void DidFinishLoad() override;
+  void OnDestruct() override;
 
-  // Message handlers.
-  void OnFormNotBlacklisted(const PasswordForm& form);
-  void OnPasswordAccepted(const base::string16& password);
-  void OnFormsEligibleForGenerationFound(
-      const std::vector<autofill::PasswordFormGenerationData>& forms);
+  const mojom::PasswordManagerDriverPtr& GetPasswordManagerDriver();
 
   // Helper function that will try and populate |password_elements_| and
   // |possible_account_creation_form_|.
@@ -103,9 +115,11 @@ class PasswordGenerationAgent : public content::RenderFrameObserver {
   // Hides a password generation popup if one exists.
   void HidePopup();
 
-  // Sets |generation_element_| to the focused password field and shows a
-  // generation popup at this field.
-  void OnUserTriggeredGeneratePassword();
+  // Runs HTML parsing based classifier and saves its outcome to proto.
+  // TODO(crbug.com/621442): Remove client-side form classifier when server-side
+  // classifier is ready.
+  void RunFormClassifierAndSaveVote(const blink::WebFormElement& web_form,
+                                    const PasswordForm& form);
 
   // Creates a password form to presave a generated password. It copies behavior
   // of CreatePasswordFormFromWebForm/FromUnownedInputElements, but takes
@@ -161,9 +175,14 @@ class PasswordGenerationAgent : public content::RenderFrameObserver {
   // If this feature is enabled. Controlled by Finch.
   bool enabled_;
 
+  // If the form classifier should run.
+  bool form_classifier_enabled_;
+
   // Unowned pointer. Used to notify PassowrdAutofillAgent when values
   // in password fields are updated.
   PasswordAutofillAgent* password_agent_;
+
+  mojo::Binding<mojom::PasswordGenerationAgent> binding_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordGenerationAgent);
 };

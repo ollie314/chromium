@@ -8,10 +8,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/callback.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "media/cast/common/rtp_time.h"
 #include "media/cast/net/cast_transport_defines.h"
@@ -24,15 +24,49 @@ enum Codec {
   CODEC_AUDIO_OPUS,
   CODEC_AUDIO_PCM16,
   CODEC_AUDIO_AAC,
+  CODEC_AUDIO_REMOTE,
   CODEC_VIDEO_FAKE,
   CODEC_VIDEO_VP8,
   CODEC_VIDEO_H264,
-  CODEC_LAST = CODEC_VIDEO_H264
+  CODEC_VIDEO_REMOTE,
+  CODEC_LAST = CODEC_VIDEO_REMOTE
+};
+
+// Describes the content being transported over RTP streams.
+enum class RtpPayloadType {
+  UNKNOWN = -1,
+
+  // Cast Streaming will encode raw audio frames using one of its available
+  // codec implementations, and transport encoded data in the RTP stream.
+  FIRST = 96,
+  AUDIO_OPUS = 96,
+  AUDIO_AAC = 97,
+  AUDIO_PCM16 = 98,
+
+  // Audio frame data is not modified, and should be transported reliably and
+  // in-sequence. No assumptions about the data can be made.
+  REMOTE_AUDIO = 99,
+
+  AUDIO_LAST = REMOTE_AUDIO,
+
+  // Cast Streaming will encode raw video frames using one of its available
+  // codec implementations, and transport encoded data in the RTP stream.
+  VIDEO_VP8 = 100,
+  VIDEO_H264 = 101,
+
+  // Video frame data is not modified, and should be transported reliably and
+  // in-sequence. No assumptions about the data can be made.
+  REMOTE_VIDEO = 102,
+
+  LAST = REMOTE_VIDEO
 };
 
 struct CastTransportRtpConfig {
   CastTransportRtpConfig();
   ~CastTransportRtpConfig();
+
+  // Identifier for the RTP stream.
+  int32_t rtp_stream_id;
 
   // Identifier refering to this sender.
   uint32_t ssrc;
@@ -41,7 +75,7 @@ struct CastTransportRtpConfig {
   uint32_t feedback_ssrc;
 
   // RTP payload type enum: Specifies the type/encoding of frame data.
-  int rtp_payload_type;
+  RtpPayloadType rtp_payload_type;
 
   // The AES crypto key and initialization vector.  Each of these strings
   // contains the data in binary form, of size kAesKeySize.  If they are empty
@@ -77,10 +111,10 @@ struct EncodedFrame {
   // Convenience accessors to data as an array of uint8_t elements.
   const uint8_t* bytes() const {
     return reinterpret_cast<uint8_t*>(
-        string_as_array(const_cast<std::string*>(&data)));
+        base::string_as_array(const_cast<std::string*>(&data)));
   }
   uint8_t* mutable_bytes() {
-    return reinterpret_cast<uint8_t*>(string_as_array(&data));
+    return reinterpret_cast<uint8_t*>(base::string_as_array(&data));
   }
 
   // Copies all data members except |data| to |dest|.
@@ -92,12 +126,12 @@ struct EncodedFrame {
 
   // The label associated with this frame.  Implies an ordering relative to
   // other frames in the same stream.
-  uint32_t frame_id;
+  FrameId frame_id;
 
   // The label associated with the frame upon which this frame depends.  If
   // this frame does not require any other frame in order to become decodable
   // (e.g., key frames), |referenced_frame_id| must equal |frame_id|.
-  uint32_t referenced_frame_id;
+  FrameId referenced_frame_id;
 
   // The stream timestamp, on the timeline of the signal data.  For example, RTP
   // timestamps for audio are usually defined as the total number of audio
@@ -123,8 +157,9 @@ struct EncodedFrame {
   std::string data;
 };
 
-typedef base::Callback<void(scoped_ptr<Packet> packet)> PacketReceiverCallback;
-typedef base::Callback<bool(scoped_ptr<Packet> packet)>
+typedef base::Callback<void(std::unique_ptr<Packet> packet)>
+    PacketReceiverCallback;
+typedef base::Callback<bool(std::unique_ptr<Packet> packet)>
     PacketReceiverCallbackWithStatus;
 
 class PacketTransport {

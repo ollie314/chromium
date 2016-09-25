@@ -29,18 +29,21 @@
 
 namespace blink {
 
-class AbstractAudioContext;
+class BaseAudioContext;
+class DelayOptions;
 class ExceptionState;
 
 class DelayNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static DelayNode* create(AbstractAudioContext&, float sampleRate, double maxDelayTime, ExceptionState&);
+    static DelayNode* create(BaseAudioContext&, ExceptionState&);
+    static DelayNode* create(BaseAudioContext&, double maxDelayTime, ExceptionState&);
+    static DelayNode* create(BaseAudioContext*, const DelayOptions&, ExceptionState&);
     DECLARE_VIRTUAL_TRACE();
     AudioParam* delayTime();
 
 private:
-    DelayNode(AbstractAudioContext&, float sampleRate, double maxDelayTime);
+    DelayNode(BaseAudioContext&, double maxDelayTime);
 
     Member<AudioParam> m_delayTime;
 };

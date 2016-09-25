@@ -22,11 +22,14 @@ component("x11") {
   configs += [ "//build/config/linux:x11" ]
 
   public_deps = [
+    "//ui/base/x",
     "//ui/events",
     "//ui/events:events_base",
     "//ui/events/devices",
+    "//ui/events/devices/x11",
     "//ui/events/platform",
     "//ui/events/x",
+    "//ui/gfx",
     "//ui/gfx/x",
   ]
 
@@ -46,5 +49,7 @@ component("x11") {
       "x11_event_source_libevent.cc",
       "x11_event_source_libevent.h",
     ]
+
+    deps += [ "//ui/events/keycodes:x11" ]
   }
 }

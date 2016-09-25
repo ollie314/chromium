@@ -42,10 +42,10 @@ class DiffParserTest(unittest.TestCase):
             parser = diff_parser.DiffParser(DIFF_TEST_DATA.splitlines())
         self.assertEqual(3, len(parser.files))
 
-        self.assertTrue('WebCore/style/StyleFlexibleBoxData.h' in parser.files)
+        self.assertIn('WebCore/style/StyleFlexibleBoxData.h', parser.files)
         diff = parser.files['WebCore/style/StyleFlexibleBoxData.h']
         self.assertEqual(7, len(diff.lines))
-        # The first two unchaged lines.
+        # The first two unchanged lines.
         self.assertEqual((47, 47), diff.lines[0][0:2])
         self.assertEqual('', diff.lines[0][2])
         self.assertEqual((48, 48), diff.lines[1][0:2])
@@ -55,7 +55,7 @@ class DiffParserTest(unittest.TestCase):
         self.assertEqual('    unsigned orient: 1; // EBoxOrient', diff.lines[3][2])
 
         # The first file looks OK. Let's check the next, more complicated file.
-        self.assertTrue('WebCore/style/StyleRareInheritedData.cpp' in parser.files)
+        self.assertIn('WebCore/style/StyleRareInheritedData.cpp', parser.files)
         diff = parser.files['WebCore/style/StyleRareInheritedData.cpp']
         # There are 3 chunks.
         self.assertEqual(7 + 7 + 9, len(diff.lines))
@@ -105,7 +105,8 @@ class DiffParserTest(unittest.TestCase):
         self.assertEqual(diff_parser.get_diff_converter(revision_lines + svn_diff_lines), diff_parser.svn_diff_to_svn_diff)
 
         git_diff_lines = [
-            "diff --git a/Tools/Scripts/webkitpy/common/checkout/diff_parser.py b/Tools/Scripts/webkitpy/common/checkout/diff_parser.py\n",
+            ("diff --git a/Tools/Scripts/webkitpy/common/checkout/diff_parser.py "
+             "b/Tools/Scripts/webkitpy/common/checkout/diff_parser.py\n"),
             "index 3c5b45b..0197ead 100644\n",
             "--- a/Tools/Scripts/webkitpy/common/checkout/diff_parser.py\n",
             "+++ b/Tools/Scripts/webkitpy/common/checkout/diff_parser.py\n",

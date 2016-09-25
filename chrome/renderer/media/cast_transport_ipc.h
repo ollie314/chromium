@@ -11,7 +11,7 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "media/cast/logging/logging_defines.h"
 #include "media/cast/net/cast_transport.h"
@@ -32,25 +32,20 @@ class CastTransportIPC : public media::cast::CastTransport {
   ~CastTransportIPC() override;
 
   // media::cast::CastTransport implementation.
-  void InitializeAudio(
+  void InitializeStream(
       const media::cast::CastTransportRtpConfig& config,
-      const media::cast::RtcpCastMessageCallback& cast_message_cb,
-      const media::cast::RtcpRttCallback& rtt_cb,
-      const media::cast::RtcpPliCallback& pli_cb) override;
-  void InitializeVideo(
-      const media::cast::CastTransportRtpConfig& config,
-      const media::cast::RtcpCastMessageCallback& cast_message_cb,
-      const media::cast::RtcpRttCallback& rtt_cb,
-      const media::cast::RtcpPliCallback& pli_cb) override;
+      std::unique_ptr<media::cast::RtcpObserver> rtcp_observer) override;
   void InsertFrame(uint32_t ssrc,
                    const media::cast::EncodedFrame& frame) override;
   void SendSenderReport(
       uint32_t ssrc,
       base::TimeTicks current_time,
       media::cast::RtpTimeTicks current_time_as_rtp_timestamp) override;
-  void CancelSendingFrames(uint32_t ssrc,
-                           const std::vector<uint32_t>& frame_ids) override;
-  void ResendFrameForKickstart(uint32_t ssrc, uint32_t frame_id) override;
+  void CancelSendingFrames(
+      uint32_t ssrc,
+      const std::vector<media::cast::FrameId>& frame_ids) override;
+  void ResendFrameForKickstart(uint32_t ssrc,
+                               media::cast::FrameId frame_id) override;
   void AddValidRtpReceiver(uint32_t rtp_sender_ssrc,
                            uint32_t rtp_receiver_ssrc) override;
   void InitializeRtpReceiverRtcpBuilder(
@@ -75,23 +70,14 @@ class CastTransportIPC : public media::cast::CastTransport {
   void OnReceivedPacket(const media::cast::Packet& packet);
 
  private:
-  struct ClientCallbacks {
-    ClientCallbacks();
-    ClientCallbacks(const ClientCallbacks& other);
-    ~ClientCallbacks();
-
-    media::cast::RtcpCastMessageCallback cast_message_cb;
-    media::cast::RtcpRttCallback rtt_cb;
-    media::cast::RtcpPliCallback pli_cb;
-  };
-
   void Send(IPC::Message* message);
 
   int32_t channel_id_;
   media::cast::PacketReceiverCallback packet_callback_;
   media::cast::CastTransportStatusCallback status_callback_;
   media::cast::BulkRawEventsCallback raw_events_callback_;
-  typedef std::map<uint32_t, ClientCallbacks> ClientMap;
+  using ClientMap =
+      std::map<uint32_t, std::unique_ptr<media::cast::RtcpObserver>>;
   ClientMap clients_;
 
   DISALLOW_COPY_AND_ASSIGN(CastTransportIPC);

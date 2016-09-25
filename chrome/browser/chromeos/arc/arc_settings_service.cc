@@ -10,14 +10,23 @@
 #include "base/json/json_writer.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/arc/arc_auth_service.h"
+#include "chrome/browser/chromeos/net/onc_utils.h"
+#include "chrome/browser/chromeos/proxy_config_service_impl.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/network/network_handler.h"
+#include "chromeos/network/network_state.h"
+#include "chromeos/network/network_state_handler.h"
+#include "chromeos/network/network_state_handler_observer.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "chromeos/settings/timezone_settings.h"
 #include "components/arc/intent_helper/font_size_util.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
+#include "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #include "components/proxy_config/proxy_config_dictionary.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
 #include "device/bluetooth/bluetooth_adapter.h"
@@ -29,11 +38,11 @@ using ::chromeos::system::TimezoneSettings;
 
 namespace {
 
-bool GetHttpProxyServer(const ProxyConfigDictionary& proxy_config_dict,
+bool GetHttpProxyServer(const ProxyConfigDictionary* proxy_config_dict,
                         std::string* host,
                         int* port) {
   std::string proxy_rules_string;
-  if (!proxy_config_dict.GetProxyServer(&proxy_rules_string))
+  if (!proxy_config_dict->GetProxyServer(&proxy_rules_string))
     return false;
 
   net::ProxyConfig::ProxyRules proxy_rules;
@@ -55,6 +64,14 @@ bool GetHttpProxyServer(const ProxyConfigDictionary& proxy_config_dict,
   return !host->empty() && *port;
 }
 
+// Returns whether kProxy pref proxy config is applied.
+bool IsPrefProxyConfigApplied() {
+  net::ProxyConfig config;
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  return PrefProxyConfigTrackerImpl::PrefPrecedes(
+      PrefProxyConfigTrackerImpl::ReadPrefConfig(profile->GetPrefs(), &config));
+}
+
 }  // namespace
 
 namespace arc {
@@ -63,7 +80,9 @@ namespace arc {
 // about and sends the new values to Android to keep the state in sync.
 class ArcSettingsServiceImpl
     : public chromeos::system::TimezoneSettings::Observer,
-      public device::BluetoothAdapter::Observer {
+      public device::BluetoothAdapter::Observer,
+      public ArcAuthService::Observer,
+      public chromeos::NetworkStateHandlerObserver {
  public:
   explicit ArcSettingsServiceImpl(ArcBridgeService* arc_bridge_service);
   ~ArcSettingsServiceImpl() override;
@@ -72,12 +91,18 @@ class ArcSettingsServiceImpl
   // Obtains the new pref value and sends it to Android.
   void OnPrefChanged(const std::string& pref_name) const;
 
-  // TimezoneSettings::Observer
+  // TimezoneSettings::Observer:
   void TimezoneChanged(const icu::TimeZone& timezone) override;
 
-  // BluetoothAdapter::Observer
+  // BluetoothAdapter::Observer:
   void AdapterPoweredChanged(device::BluetoothAdapter* adapter,
                              bool powered) override;
+
+  // ArcAuthService::Observer:
+  void OnInitialStart() override;
+
+  // NetworkStateHandlerObserver:
+  void DefaultNetworkChanged(const chromeos::NetworkState* network) override;
 
  private:
   // Registers to observe changes for Chrome settings we care about.
@@ -86,8 +111,12 @@ class ArcSettingsServiceImpl
   // Stops listening for Chrome settings changes.
   void StopObservingSettingsChanges();
 
-  // Retrives Chrome's state for the settings and send it to Android.
-  void SyncAllPrefs() const;
+  // Retrieves Chrome's state for the settings that need to be synced on each
+  // Android boot and send it to Android.
+  void SyncRuntimeSettings() const;
+  // Send settings that need to be synced only on Android first start to
+  // Android.
+  void SyncInitialSettings() const;
   void SyncFontSize() const;
   void SyncLocale() const;
   void SyncProxySettings() const;
@@ -95,6 +124,8 @@ class ArcSettingsServiceImpl
   void SyncSpokenFeedbackEnabled() const;
   void SyncTimeZone() const;
   void SyncUse24HourClock() const;
+  void SyncBackupEnabled() const;
+  void SyncLocationServiceEnabled() const;
 
   void OnBluetoothAdapterInitialized(
       scoped_refptr<device::BluetoothAdapter> adapter);
@@ -104,6 +135,10 @@ class ArcSettingsServiceImpl
 
   // Returns the integer value of the pref.  pref_name must exist.
   int GetIntegerPref(const std::string& pref_name) const;
+
+  // Sends boolean pref broadcast to the delegate.
+  void SendBoolPrefSettingsBroadcast(const std::string& pref_name,
+                                     const std::string& action) const;
 
   // Sends a broadcast to the delegate.
   void SendSettingsBroadcast(const std::string& action,
@@ -128,15 +163,20 @@ ArcSettingsServiceImpl::ArcSettingsServiceImpl(
     ArcBridgeService* arc_bridge_service)
     : arc_bridge_service_(arc_bridge_service), weak_factory_(this) {
   StartObservingSettingsChanges();
-  SyncAllPrefs();
+  SyncRuntimeSettings();
+  DCHECK(ArcAuthService::Get());
+  ArcAuthService::Get()->AddObserver(this);
 }
 
 ArcSettingsServiceImpl::~ArcSettingsServiceImpl() {
   StopObservingSettingsChanges();
 
-  if (bluetooth_adapter_) {
+  ArcAuthService* arc_auth_service = ArcAuthService::Get();
+  if (arc_auth_service)
+    arc_auth_service->RemoveObserver(this);
+
+  if (bluetooth_adapter_)
     bluetooth_adapter_->RemoveObserver(this);
-  }
 }
 
 void ArcSettingsServiceImpl::StartObservingSettingsChanges() {
@@ -148,7 +188,10 @@ void ArcSettingsServiceImpl::StartObservingSettingsChanges() {
   AddPrefToObserve(prefs::kWebKitMinimumFontSize);
   AddPrefToObserve(prefs::kAccessibilitySpokenFeedbackEnabled);
   AddPrefToObserve(prefs::kUse24HourClock);
+  AddPrefToObserve(prefs::kArcBackupRestoreEnabled);
   AddPrefToObserve(proxy_config::prefs::kProxy);
+  AddPrefToObserve(prefs::kDeviceOpenNetworkConfiguration);
+  AddPrefToObserve(prefs::kOpenNetworkConfiguration);
 
   reporting_consent_subscription_ = CrosSettings::Get()->AddSettingsObserver(
       chromeos::kStatsReportingPref,
@@ -162,6 +205,9 @@ void ArcSettingsServiceImpl::StartObservingSettingsChanges() {
         base::Bind(&ArcSettingsServiceImpl::OnBluetoothAdapterInitialized,
                    weak_factory_.GetWeakPtr()));
   }
+
+  chromeos::NetworkHandler::Get()->network_state_handler()->AddObserver(
+      this, FROM_HERE);
 }
 
 void ArcSettingsServiceImpl::OnBluetoothAdapterInitialized(
@@ -169,9 +215,15 @@ void ArcSettingsServiceImpl::OnBluetoothAdapterInitialized(
   DCHECK(adapter);
   bluetooth_adapter_ = adapter;
   bluetooth_adapter_->AddObserver(this);
+
+  AdapterPoweredChanged(adapter.get(), adapter->IsPowered());
 }
 
-void ArcSettingsServiceImpl::SyncAllPrefs() const {
+void ArcSettingsServiceImpl::OnInitialStart() {
+  SyncInitialSettings();
+}
+
+void ArcSettingsServiceImpl::SyncRuntimeSettings() const {
   SyncFontSize();
   SyncLocale();
   SyncProxySettings();
@@ -179,6 +231,18 @@ void ArcSettingsServiceImpl::SyncAllPrefs() const {
   SyncSpokenFeedbackEnabled();
   SyncTimeZone();
   SyncUse24HourClock();
+
+  const PrefService* const prefs =
+      ProfileManager::GetActiveUserProfile()->GetPrefs();
+  if (prefs->IsManagedPreference(prefs::kArcBackupRestoreEnabled))
+    SyncBackupEnabled();
+  if (prefs->IsManagedPreference(prefs::kArcLocationServiceEnabled))
+    SyncLocationServiceEnabled();
+}
+
+void ArcSettingsServiceImpl::SyncInitialSettings() const {
+  SyncBackupEnabled();
+  SyncLocationServiceEnabled();
 }
 
 void ArcSettingsServiceImpl::StopObservingSettingsChanges() {
@@ -186,6 +250,8 @@ void ArcSettingsServiceImpl::StopObservingSettingsChanges() {
   reporting_consent_subscription_.reset();
 
   TimezoneSettings::GetInstance()->RemoveObserver(this);
+  chromeos::NetworkHandler::Get()->network_state_handler()->RemoveObserver(
+      this, FROM_HERE);
 }
 
 void ArcSettingsServiceImpl::AddPrefToObserve(const std::string& pref_name) {
@@ -212,6 +278,15 @@ void ArcSettingsServiceImpl::OnPrefChanged(const std::string& pref_name) const {
   } else if (pref_name == prefs::kUse24HourClock) {
     SyncUse24HourClock();
   } else if (pref_name == proxy_config::prefs::kProxy) {
+    SyncProxySettings();
+  } else if (pref_name == prefs::kDeviceOpenNetworkConfiguration ||
+             pref_name == prefs::kOpenNetworkConfiguration) {
+    // Only update proxy settings if kProxy pref is not applied.
+    if (IsPrefProxyConfigApplied()) {
+      LOG(ERROR) << "Open Network Configuration proxy settings are not applied,"
+                 << " because kProxy preference is configured.";
+      return;
+    }
     SyncProxySettings();
   } else {
     LOG(ERROR) << "Unknown pref changed.";
@@ -246,17 +321,25 @@ void ArcSettingsServiceImpl::SyncFontSize() const {
                         extras);
 }
 
-void ArcSettingsServiceImpl::SyncSpokenFeedbackEnabled() const {
-  const PrefService::Preference* pref = registrar_.prefs()->FindPreference(
-      prefs::kAccessibilitySpokenFeedbackEnabled);
+void ArcSettingsServiceImpl::SendBoolPrefSettingsBroadcast(
+    const std::string& pref_name,
+    const std::string& action) const {
+  const PrefService::Preference* pref =
+      registrar_.prefs()->FindPreference(pref_name);
   DCHECK(pref);
   bool enabled = false;
   bool value_exists = pref->GetValue()->GetAsBoolean(&enabled);
   DCHECK(value_exists);
   base::DictionaryValue extras;
   extras.SetBoolean("enabled", enabled);
-  SendSettingsBroadcast(
-      "org.chromium.arc.intent_helper.SET_SPOKEN_FEEDBACK_ENABLED", extras);
+  extras.SetBoolean("managed", !pref->IsUserModifiable());
+  SendSettingsBroadcast(action, extras);
+}
+
+void ArcSettingsServiceImpl::SyncSpokenFeedbackEnabled() const {
+  SendBoolPrefSettingsBroadcast(
+      prefs::kAccessibilitySpokenFeedbackEnabled,
+      "org.chromium.arc.intent_helper.SET_SPOKEN_FEEDBACK_ENABLED");
 }
 
 void ArcSettingsServiceImpl::SyncLocale() const {
@@ -302,16 +385,14 @@ void ArcSettingsServiceImpl::SyncUse24HourClock() const {
 }
 
 void ArcSettingsServiceImpl::SyncProxySettings() const {
-  const PrefService::Preference* const pref =
-      registrar_.prefs()->FindPreference(proxy_config::prefs::kProxy);
-  const base::DictionaryValue* proxy_config_value;
-  bool value_exists = pref->GetValue()->GetAsDictionary(&proxy_config_value);
-  DCHECK(value_exists);
-
-  ProxyConfigDictionary proxy_config_dict(proxy_config_value);
+  std::unique_ptr<ProxyConfigDictionary> proxy_config_dict =
+      chromeos::ProxyConfigServiceImpl::GetActiveProxyConfigDictionary(
+          ProfileManager::GetActiveUserProfile()->GetPrefs());
+  if (!proxy_config_dict)
+    return;
 
   ProxyPrefs::ProxyMode mode;
-  if (!proxy_config_dict.GetMode(&mode))
+  if (!proxy_config_dict || !proxy_config_dict->GetMode(&mode))
     mode = ProxyPrefs::MODE_DIRECT;
 
   base::DictionaryValue extras;
@@ -321,14 +402,14 @@ void ArcSettingsServiceImpl::SyncProxySettings() const {
     case ProxyPrefs::MODE_DIRECT:
       break;
     case ProxyPrefs::MODE_SYSTEM:
-      LOG(WARNING) << "The system mode is not translated.";
+      VLOG(1) << "The system mode is not translated.";
       return;
     case ProxyPrefs::MODE_AUTO_DETECT:
       extras.SetString("pacUrl", "http://wpad/wpad.dat");
       break;
     case ProxyPrefs::MODE_PAC_SCRIPT: {
       std::string pac_url;
-      if (!proxy_config_dict.GetPacUrl(&pac_url)) {
+      if (!proxy_config_dict->GetPacUrl(&pac_url)) {
         LOG(ERROR) << "No pac URL for pac_script proxy mode.";
         return;
       }
@@ -338,7 +419,7 @@ void ArcSettingsServiceImpl::SyncProxySettings() const {
     case ProxyPrefs::MODE_FIXED_SERVERS: {
       std::string host;
       int port = 0;
-      if (!GetHttpProxyServer(proxy_config_dict, &host, &port)) {
+      if (!GetHttpProxyServer(proxy_config_dict.get(), &host, &port)) {
         LOG(ERROR) << "No Http proxy server is sent.";
         return;
       }
@@ -346,7 +427,7 @@ void ArcSettingsServiceImpl::SyncProxySettings() const {
       extras.SetInteger("port", port);
 
       std::string bypass_list;
-      if (proxy_config_dict.GetBypassList(&bypass_list) &&
+      if (proxy_config_dict->GetBypassList(&bypass_list) &&
           !bypass_list.empty()) {
         extras.SetString("bypassList", bypass_list);
       }
@@ -360,10 +441,22 @@ void ArcSettingsServiceImpl::SyncProxySettings() const {
   SendSettingsBroadcast("org.chromium.arc.intent_helper.SET_PROXY", extras);
 }
 
+void ArcSettingsServiceImpl::SyncBackupEnabled() const {
+  SendBoolPrefSettingsBroadcast(
+      prefs::kArcBackupRestoreEnabled,
+      "org.chromium.arc.intent_helper.SET_BACKUP_ENABLED");
+}
+
+void ArcSettingsServiceImpl::SyncLocationServiceEnabled() const {
+  SendBoolPrefSettingsBroadcast(
+      prefs::kArcLocationServiceEnabled,
+      "org.chromium.arc.intent_helper.SET_LOCATION_SERVICE_ENABLED");
+}
+
 void ArcSettingsServiceImpl::SendSettingsBroadcast(
     const std::string& action,
     const base::DictionaryValue& extras) const {
-  if (!arc_bridge_service_->intent_helper_instance()) {
+  if (!arc_bridge_service_->intent_helper()->instance()) {
     LOG(ERROR) << "IntentHelper instance is not ready.";
     return;
   }
@@ -372,27 +465,39 @@ void ArcSettingsServiceImpl::SendSettingsBroadcast(
   bool write_success = base::JSONWriter::Write(extras, &extras_json);
   DCHECK(write_success);
 
-  if (arc_bridge_service_->intent_helper_version() >= 1) {
-    arc_bridge_service_->intent_helper_instance()->SendBroadcast(
+  if (arc_bridge_service_->intent_helper()->version() >= 1) {
+    arc_bridge_service_->intent_helper()->instance()->SendBroadcast(
         action, "org.chromium.arc.intent_helper",
         "org.chromium.arc.intent_helper.SettingsReceiver", extras_json);
   }
 }
 
+void ArcSettingsServiceImpl::DefaultNetworkChanged(
+    const chromeos::NetworkState* network) {
+  // kProxy pref and ONC policy have more priority than the default network
+  // update.
+  Profile* profile = ProfileManager::GetActiveUserProfile();
+  if (!chromeos::onc::HasPolicyForNetwork(
+          profile->GetPrefs(), g_browser_process->local_state(), *network) &&
+      !IsPrefProxyConfigApplied()) {
+    SyncProxySettings();
+  }
+}
+
 ArcSettingsService::ArcSettingsService(ArcBridgeService* bridge_service)
     : ArcService(bridge_service) {
-  arc_bridge_service()->AddObserver(this);
+  arc_bridge_service()->intent_helper()->AddObserver(this);
 }
 
 ArcSettingsService::~ArcSettingsService() {
-  arc_bridge_service()->RemoveObserver(this);
+  arc_bridge_service()->intent_helper()->RemoveObserver(this);
 }
 
-void ArcSettingsService::OnIntentHelperInstanceReady() {
+void ArcSettingsService::OnInstanceReady() {
   impl_.reset(new ArcSettingsServiceImpl(arc_bridge_service()));
 }
 
-void ArcSettingsService::OnIntentHelperInstanceClosed() {
+void ArcSettingsService::OnInstanceClosed() {
   impl_.reset();
 }
 

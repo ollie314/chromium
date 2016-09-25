@@ -11,9 +11,10 @@
 #include "base/md5.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/common/cloud_print/cloud_print_constants.h"
 #include "chrome/service/cloud_print/cloud_print_service_helpers.h"
 #include "chrome/service/cloud_print/cloud_print_token_store.h"
@@ -505,7 +506,7 @@ void PrinterJobHandlerTest::SetUp() {
   ON_CALL(*print_system_.get(), GetPrinterCapsAndDefaults(_, _))
       .WillByDefault(Invoke(this, &PrinterJobHandlerTest::SendCapsAndDefaults));
 
-  CloudPrintURLFetcher::set_factory(&cloud_print_factory_);
+  CloudPrintURLFetcher::set_test_factory(&cloud_print_factory_);
 }
 
 void PrinterJobHandlerTest::MakeJobFetchReturnNoJobs() {
@@ -613,13 +614,12 @@ void PrinterJobHandlerTest::BeginTest(int timeout_seconds) {
 
   job_handler_->Initialize();
 
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&PrinterJobHandlerTest::MessageLoopQuitSoonHelper,
-                 base::MessageLoop::current()),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&PrinterJobHandlerTest::MessageLoopQuitSoonHelper,
+                            base::MessageLoop::current()),
       base::TimeDelta::FromSeconds(timeout_seconds));
 
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 }
 
 void PrinterJobHandlerTest::SendCapsAndDefaults(
@@ -635,11 +635,11 @@ bool PrinterJobHandlerTest::GetPrinterInfo(printing::PrinterBasicInfo* info) {
 
 void PrinterJobHandlerTest::TearDown() {
   IdleOut();
-  CloudPrintURLFetcher::set_factory(NULL);
+  CloudPrintURLFetcher::set_test_factory(nullptr);
 }
 
 void PrinterJobHandlerTest::IdleOut() {
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 MockPrintServerWatcher::MockPrintServerWatcher() : delegate_(NULL) {
@@ -677,7 +677,7 @@ MockPrintSystem::MockPrintSystem()
 
   ON_CALL(*this, ValidatePrintTicket(_, _, _)).
       WillByDefault(Return(true));
-};
+}
 
 // This test simulates an end-to-end printing of a document
 // but tests only non-failure cases.

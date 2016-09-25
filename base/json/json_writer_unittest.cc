@@ -61,7 +61,7 @@ TEST(JSONWriterTest, NestedTypes) {
   std::unique_ptr<DictionaryValue> inner_dict(new DictionaryValue());
   inner_dict->SetInteger("inner int", 10);
   list->Append(std::move(inner_dict));
-  list->Append(WrapUnique(new ListValue()));
+  list->Append(MakeUnique<ListValue>());
   list->AppendBoolean(true);
   root_dict.Set("list", std::move(list));
 
@@ -119,9 +119,9 @@ TEST(JSONWriterTest, BinaryValues) {
 
   ListValue binary_list;
   binary_list.Append(BinaryValue::CreateWithCopiedBuffer("asdf", 4));
-  binary_list.Append(WrapUnique(new FundamentalValue(5)));
+  binary_list.Append(MakeUnique<FundamentalValue>(5));
   binary_list.Append(BinaryValue::CreateWithCopiedBuffer("asdf", 4));
-  binary_list.Append(WrapUnique(new FundamentalValue(2)));
+  binary_list.Append(MakeUnique<FundamentalValue>(2));
   binary_list.Append(BinaryValue::CreateWithCopiedBuffer("asdf", 4));
   EXPECT_FALSE(JSONWriter::Write(binary_list, &output_js));
   EXPECT_TRUE(JSONWriter::WriteWithOptions(
@@ -129,14 +129,11 @@ TEST(JSONWriterTest, BinaryValues) {
   EXPECT_EQ("[5,2]", output_js);
 
   DictionaryValue binary_dict;
-  binary_dict.Set(
-      "a", WrapUnique(BinaryValue::CreateWithCopiedBuffer("asdf", 4)));
+  binary_dict.Set("a", BinaryValue::CreateWithCopiedBuffer("asdf", 4));
   binary_dict.SetInteger("b", 5);
-  binary_dict.Set(
-      "c", WrapUnique(BinaryValue::CreateWithCopiedBuffer("asdf", 4)));
+  binary_dict.Set("c", BinaryValue::CreateWithCopiedBuffer("asdf", 4));
   binary_dict.SetInteger("d", 2);
-  binary_dict.Set(
-      "e", WrapUnique(BinaryValue::CreateWithCopiedBuffer("asdf", 4)));
+  binary_dict.Set("e", BinaryValue::CreateWithCopiedBuffer("asdf", 4));
   EXPECT_FALSE(JSONWriter::Write(binary_dict, &output_js));
   EXPECT_TRUE(JSONWriter::WriteWithOptions(
       binary_dict, JSONWriter::OPTIONS_OMIT_BINARY_VALUES, &output_js));

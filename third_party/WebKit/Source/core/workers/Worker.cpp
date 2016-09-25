@@ -8,8 +8,8 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/frame/UseCounter.h"
-#include "core/workers/DedicatedWorkerGlobalScopeProxyProvider.h"
-#include "core/workers/InProcessWorkerGlobalScopeProxy.h"
+#include "core/workers/DedicatedWorkerMessagingProxyProvider.h"
+#include "core/workers/InProcessWorkerMessagingProxy.h"
 
 namespace blink {
 
@@ -20,7 +20,7 @@ Worker::Worker(ExecutionContext* context)
 
 Worker* Worker::create(ExecutionContext* context, const String& url, ExceptionState& exceptionState)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
     Document* document = toDocument(context);
     UseCounter::count(context, UseCounter::WorkerStart);
     if (!document->page()) {
@@ -35,7 +35,7 @@ Worker* Worker::create(ExecutionContext* context, const String& url, ExceptionSt
 
 Worker::~Worker()
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
 }
 
 const AtomicString& Worker::interfaceName() const
@@ -43,12 +43,12 @@ const AtomicString& Worker::interfaceName() const
     return EventTargetNames::Worker;
 }
 
-InProcessWorkerGlobalScopeProxy* Worker::createInProcessWorkerGlobalScopeProxy(ExecutionContext* context)
+InProcessWorkerMessagingProxy* Worker::createInProcessWorkerMessagingProxy(ExecutionContext* context)
 {
     Document* document = toDocument(context);
-    DedicatedWorkerGlobalScopeProxyProvider* proxyProvider = DedicatedWorkerGlobalScopeProxyProvider::from(*document->page());
-    ASSERT(proxyProvider);
-    return proxyProvider->createWorkerGlobalScopeProxy(this);
+    DedicatedWorkerMessagingProxyProvider* proxyProvider = DedicatedWorkerMessagingProxyProvider::from(*document->page());
+    DCHECK(proxyProvider);
+    return proxyProvider->createWorkerMessagingProxy(this);
 }
 
 } // namespace blink

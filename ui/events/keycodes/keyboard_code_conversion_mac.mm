@@ -20,6 +20,8 @@ namespace {
 
 // This value is not defined but shows up as 0x36.
 const int kVK_RightCommand = 0x36;
+// Context menu is not defined but shows up as 0x6E.
+const int kVK_ContextMenu = 0x6E;
 
 // A struct to hold a Windows keycode to Mac virtual keycode mapping.
 struct KeyCodeMap {
@@ -206,7 +208,7 @@ const KeyCodeMap kKeyCodesMap[] = {
   { VKEY_OEM_CLEAR /* 0xFE */, kVK_ANSI_KeypadClear, kClearCharCode }
 };
 
-bool IsKeypadEvent(NSEvent* event) {
+bool IsKeypadOrNumericKeyEvent(NSEvent* event) {
   // Check that this is the type of event that has a keyCode.
   switch ([event type]) {
     case NSKeyDown:
@@ -236,6 +238,16 @@ bool IsKeypadEvent(NSEvent* event) {
     case kVK_ANSI_Keypad7:
     case kVK_ANSI_Keypad8:
     case kVK_ANSI_Keypad9:
+    case kVK_ANSI_0:
+    case kVK_ANSI_1:
+    case kVK_ANSI_2:
+    case kVK_ANSI_3:
+    case kVK_ANSI_4:
+    case kVK_ANSI_5:
+    case kVK_ANSI_6:
+    case kVK_ANSI_7:
+    case kVK_ANSI_8:
+    case kVK_ANSI_9:
       return true;
   }
 
@@ -416,7 +428,7 @@ KeyboardCode KeyboardCodeFromKeyCode(unsigned short keyCode) {
     /* 0x6B */ VKEY_F14,
     /* 0x6C */ VKEY_UNKNOWN, // n/a
     /* 0x6D */ VKEY_F10,
-    /* 0x6E */ VKEY_UNKNOWN, // n/a (Windows95 key?)
+    /* 0x6E */ VKEY_APPS, // Context Menu key
     /* 0x6F */ VKEY_F12,
     /* 0x70 */ VKEY_UNKNOWN, // n/a
     /* 0x71 */ VKEY_F15,
@@ -535,6 +547,8 @@ DomKey DomKeyFromKeyCode(unsigned short keyCode) {
       return DomKey::ARROW_DOWN;
     case kVK_UpArrow:
       return DomKey::ARROW_UP;
+    case kVK_ContextMenu:
+      return DomKey::CONTEXT_MENU;
     default:
       return DomKey::NONE;
   }
@@ -771,8 +785,12 @@ int MacKeyCodeForWindowsKeyCode(KeyboardCode keycode,
 KeyboardCode KeyboardCodeFromNSEvent(NSEvent* event) {
   KeyboardCode code = VKEY_UNKNOWN;
 
-  if (!IsKeypadEvent(event) &&
+  // Numeric keys 0-9 should always return |keyCode| 0-9.
+  // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/keyCode#Printable_keys_in_standard_position
+  if (!IsKeypadOrNumericKeyEvent(event) &&
       ([event type] == NSKeyDown || [event type] == NSKeyUp)) {
+    // Handles Dvorak-QWERTY Cmd case.
+    // https://github.com/WebKit/webkit/blob/4d41c98b1de467f5d2a8fcba84d7c5268f11b0cc/Source/WebCore/platform/mac/PlatformEventFactoryMac.mm#L329
     NSString* characters = [event characters];
     if ([characters length] > 0)
       code = KeyboardCodeFromCharCode([characters characterAtIndex:0]);
@@ -788,7 +806,25 @@ KeyboardCode KeyboardCodeFromNSEvent(NSEvent* event) {
   return KeyboardCodeFromKeyCode([event keyCode]);
 }
 
+int ISOKeyboardKeyCodeMap(int nativeKeyCode) {
+  // OS X will swap 'Backquote' and 'IntlBackslash' if it's an ISO keyboard.
+  // https://crbug.com/600607
+  switch (nativeKeyCode) {
+    case kVK_ISO_Section:
+      return kVK_ANSI_Grave;
+    case kVK_ANSI_Grave:
+      return kVK_ISO_Section;
+    default:
+      return nativeKeyCode;
+  }
+}
+
 DomCode DomCodeFromNSEvent(NSEvent* event) {
+  if (KBGetLayoutType(LMGetKbdType()) == kKeyboardISO) {
+    return ui::KeycodeConverter::NativeKeycodeToDomCode(
+        ISOKeyboardKeyCodeMap([event keyCode]));
+  }
+
   return ui::KeycodeConverter::NativeKeycodeToDomCode([event keyCode]);
 }
 

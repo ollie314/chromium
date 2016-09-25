@@ -11,13 +11,14 @@
 #include "platform/graphics/ImageBuffer.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
-RecordingImageBufferSurface::RecordingImageBufferSurface(const IntSize& size, PassOwnPtr<RecordingImageBufferFallbackSurfaceFactory> fallbackFactory, OpacityMode opacityMode)
-    : ImageBufferSurface(size, opacityMode)
+RecordingImageBufferSurface::RecordingImageBufferSurface(const IntSize& size, std::unique_ptr<RecordingImageBufferFallbackSurfaceFactory> fallbackFactory, OpacityMode opacityMode, sk_sp<SkColorSpace> colorSpace)
+    : ImageBufferSurface(size, opacityMode, std::move(colorSpace))
     , m_imageBuffer(0)
     , m_currentFramePixelCount(0)
     , m_previousFramePixelCount(0)
@@ -36,7 +37,7 @@ RecordingImageBufferSurface::~RecordingImageBufferSurface()
 void RecordingImageBufferSurface::initializeCurrentFrame()
 {
     static SkRTreeFactory rTreeFactory;
-    m_currentFrame = adoptPtr(new SkPictureRecorder);
+    m_currentFrame = wrapUnique(new SkPictureRecorder);
     m_currentFrame->beginRecording(size().width(), size().height(), &rTreeFactory);
     if (m_imageBuffer) {
         m_imageBuffer->resetCanvas(m_currentFrame->getRecordingCanvas());
@@ -71,6 +72,7 @@ bool RecordingImageBufferSurface::writePixels(const SkImageInfo& origInfo, const
 void RecordingImageBufferSurface::fallBackToRasterCanvas(FallbackReason reason)
 {
     ASSERT(m_fallbackFactory);
+    CHECK(reason != FallbackReasonUnknown);
 
     if (m_fallbackSurface) {
         ASSERT(!m_currentFrame);
@@ -80,17 +82,17 @@ void RecordingImageBufferSurface::fallBackToRasterCanvas(FallbackReason reason)
     DEFINE_THREAD_SAFE_STATIC_LOCAL(EnumerationHistogram, canvasFallbackHistogram, new EnumerationHistogram("Canvas.DisplayListFallbackReason", FallbackReasonCount));
     canvasFallbackHistogram.count(reason);
 
-    m_fallbackSurface = m_fallbackFactory->createSurface(size(), getOpacityMode());
+    m_fallbackSurface = m_fallbackFactory->createSurface(size(), getOpacityMode(), colorSpace());
     m_fallbackSurface->setImageBuffer(m_imageBuffer);
 
     if (m_previousFrame) {
         m_previousFrame->playback(m_fallbackSurface->canvas());
-        m_previousFrame.clear();
+        m_previousFrame.reset();
     }
 
     if (m_currentFrame) {
         m_currentFrame->finishRecordingAsPicture()->playback(m_fallbackSurface->canvas());
-        m_currentFrame.clear();
+        m_currentFrame.reset();
     }
 
     if (m_imageBuffer) {
@@ -121,12 +123,20 @@ static RecordingImageBufferSurface::FallbackReason snapshotReasonToFallbackReaso
         return RecordingImageBufferSurface::FallbackReasonSnapshotForDrawImage;
     case SnapshotReasonCreatePattern:
         return RecordingImageBufferSurface::FallbackReasonSnapshotForCreatePattern;
+    case SnapshotReasonTransferToImageBitmap:
+        return RecordingImageBufferSurface::FallbackReasonSnapshotForTransferToImageBitmap;
+    case SnapshotReasonUnitTests:
+        return RecordingImageBufferSurface::FallbackReasonSnapshotForUnitTests;
+    case SnapshotReasonGetCopiedImage:
+        return RecordingImageBufferSurface::FallbackReasonSnapshotGetCopiedImage;
+    case SnapshotReasonWebGLDrawImageIntoBuffer:
+        return RecordingImageBufferSurface::FallbackReasonSnapshotWebGLDrawImageIntoBuffer;
     }
     ASSERT_NOT_REACHED();
     return RecordingImageBufferSurface::FallbackReasonUnknown;
 }
 
-PassRefPtr<SkImage> RecordingImageBufferSurface::newImageSnapshot(AccelerationHint hint, SnapshotReason reason)
+sk_sp<SkImage> RecordingImageBufferSurface::newImageSnapshot(AccelerationHint hint, SnapshotReason reason)
 {
     if (!m_fallbackSurface)
         fallBackToRasterCanvas(snapshotReasonToFallbackReason(reason));
@@ -157,6 +167,8 @@ static RecordingImageBufferSurface::FallbackReason disableDeferralReasonToFallba
         return RecordingImageBufferSurface::FallbackReasonDrawImageOfAnimated2dCanvas;
     case DisableDeferralReasonSubPixelTextAntiAliasingSupport:
         return RecordingImageBufferSurface::FallbackReasonSubPixelTextAntiAliasingSupport;
+    case DisableDeferralDrawImageWithTextureBackedSourceImage:
+        return RecordingImageBufferSurface::FallbackReasonDrawImageWithTextureBackedSourceImage;
     case DisableDeferralReasonCount:
         ASSERT_NOT_REACHED();
         break;
@@ -171,7 +183,7 @@ void RecordingImageBufferSurface::disableDeferral(DisableDeferralReason reason)
         fallBackToRasterCanvas(disableDeferralReasonToFallbackReason(reason));
 }
 
-PassRefPtr<SkPicture> RecordingImageBufferSurface::getPicture()
+sk_sp<SkPicture> RecordingImageBufferSurface::getPicture()
 {
     if (m_fallbackSurface)
         return nullptr;
@@ -227,7 +239,7 @@ void RecordingImageBufferSurface::flush(FlushReason reason)
 void RecordingImageBufferSurface::willOverwriteCanvas()
 {
     m_frameWasCleared = true;
-    m_previousFrame.clear();
+    m_previousFrame.reset();
     m_previousFrameHasExpensiveOp = false;
     m_previousFramePixelCount = 0;
     if (m_didRecordDrawCommandsInCurrentFrame) {
@@ -246,8 +258,8 @@ void RecordingImageBufferSurface::didDraw(const FloatRect& rect)
 
 bool RecordingImageBufferSurface::finalizeFrameInternal(FallbackReason* fallbackReason)
 {
-    ASSERT(!m_fallbackSurface);
-    ASSERT(m_currentFrame);
+    CHECK(!m_fallbackSurface);
+    CHECK(m_currentFrame);
     ASSERT(m_currentFrame->getRecordingCanvas());
     ASSERT(fallbackReason);
     ASSERT(*fallbackReason == FallbackReasonUnknown);
@@ -255,10 +267,11 @@ bool RecordingImageBufferSurface::finalizeFrameInternal(FallbackReason* fallback
     if (!m_imageBuffer->isDirty()) {
         if (!m_previousFrame) {
             // Create an initial blank frame
-            m_previousFrame = fromSkSp(m_currentFrame->finishRecordingAsPicture());
+            m_previousFrame = m_currentFrame->finishRecordingAsPicture();
             initializeCurrentFrame();
         }
-        return m_currentFrame.get();
+        CHECK(m_currentFrame);
+        return true;
     }
 
     if (!m_frameWasCleared) {
@@ -271,7 +284,7 @@ bool RecordingImageBufferSurface::finalizeFrameInternal(FallbackReason* fallback
         return false;
     }
 
-    m_previousFrame = fromSkSp(m_currentFrame->finishRecordingAsPicture());
+    m_previousFrame = m_currentFrame->finishRecordingAsPicture();
     m_previousFrameHasExpensiveOp = m_currentFrameHasExpensiveOp;
     m_previousFramePixelCount = m_currentFramePixelCount;
     initializeCurrentFrame();
@@ -287,9 +300,9 @@ void RecordingImageBufferSurface::draw(GraphicsContext& context, const FloatRect
         return;
     }
 
-    RefPtr<SkPicture> picture = getPicture();
+    sk_sp<SkPicture> picture = getPicture();
     if (picture) {
-        context.compositePicture(picture.get(), destRect, srcRect, op);
+        context.compositePicture(std::move(picture), destRect, srcRect, op);
     } else {
         ImageBufferSurface::draw(context, destRect, srcRect, op);
     }

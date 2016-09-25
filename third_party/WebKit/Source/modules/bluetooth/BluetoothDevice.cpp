@@ -8,31 +8,28 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/events/Event.h"
 #include "modules/bluetooth/BluetoothError.h"
 #include "modules/bluetooth/BluetoothRemoteGATTServer.h"
 #include "modules/bluetooth/BluetoothSupplement.h"
 #include "public/platform/modules/bluetooth/WebBluetooth.h"
+#include <memory>
 
 namespace blink {
 
-BluetoothDevice::BluetoothDevice(ExecutionContext* context, PassOwnPtr<WebBluetoothDevice> webDevice)
-    : ActiveDOMObject(context)
-    , m_webDevice(webDevice)
-    , m_adData(BluetoothAdvertisingData::create(m_webDevice->txPower, m_webDevice->rssi))
+BluetoothDevice::BluetoothDevice(ExecutionContext* context, std::unique_ptr<WebBluetoothDeviceInit> webDevice)
+    : ContextLifecycleObserver(context)
+    , m_webDevice(std::move(webDevice))
     , m_gatt(BluetoothRemoteGATTServer::create(this))
 {
     // See example in Source/platform/heap/ThreadState.h
     ThreadState::current()->registerPreFinalizer(this);
 }
 
-BluetoothDevice* BluetoothDevice::take(ScriptPromiseResolver* resolver, PassOwnPtr<WebBluetoothDevice> webDevice)
+BluetoothDevice* BluetoothDevice::take(ScriptPromiseResolver* resolver, std::unique_ptr<WebBluetoothDeviceInit> webDevice)
 {
     ASSERT(webDevice);
-    BluetoothDevice* device = new BluetoothDevice(resolver->getExecutionContext(), webDevice);
-    device->suspendIfNeeded();
-    return device;
+    return new BluetoothDevice(resolver->getExecutionContext(), std::move(webDevice));
 }
 
 void BluetoothDevice::dispose()
@@ -40,7 +37,7 @@ void BluetoothDevice::dispose()
     disconnectGATTIfConnected();
 }
 
-void BluetoothDevice::stop()
+void BluetoothDevice::contextDestroyed()
 {
     disconnectGATTIfConnected();
 }
@@ -49,6 +46,7 @@ bool BluetoothDevice::disconnectGATTIfConnected()
 {
     if (m_gatt->connected()) {
         m_gatt->setConnected(false);
+        m_gatt->ClearActiveAlgorithms();
         BluetoothSupplement::fromExecutionContext(getExecutionContext())->disconnect(id());
         return true;
     }
@@ -62,50 +60,23 @@ const WTF::AtomicString& BluetoothDevice::interfaceName() const
 
 ExecutionContext* BluetoothDevice::getExecutionContext() const
 {
-    return ActiveDOMObject::getExecutionContext();
+    return ContextLifecycleObserver::getExecutionContext();
+}
+
+void BluetoothDevice::dispatchGattServerDisconnected()
+{
+    if (m_gatt->connected()) {
+        m_gatt->setConnected(false);
+        m_gatt->ClearActiveAlgorithms();
+        dispatchEvent(Event::createBubble(EventTypeNames::gattserverdisconnected));
+    }
 }
 
 DEFINE_TRACE(BluetoothDevice)
 {
     EventTargetWithInlineData::trace(visitor);
-    ActiveDOMObject::trace(visitor);
-    visitor->trace(m_adData);
+    ContextLifecycleObserver::trace(visitor);
     visitor->trace(m_gatt);
-}
-
-unsigned BluetoothDevice::deviceClass(bool& isNull)
-{
-    isNull = false;
-    return m_webDevice->deviceClass;
-}
-
-String BluetoothDevice::vendorIDSource()
-{
-    switch (m_webDevice->vendorIDSource) {
-    case WebBluetoothDevice::VendorIDSource::Unknown: return String();
-    case WebBluetoothDevice::VendorIDSource::Bluetooth: return "bluetooth";
-    case WebBluetoothDevice::VendorIDSource::USB: return "usb";
-    }
-    ASSERT_NOT_REACHED();
-    return String();
-}
-
-unsigned BluetoothDevice::vendorID(bool& isNull)
-{
-    isNull = false;
-    return m_webDevice->vendorID;
-}
-
-unsigned BluetoothDevice::productID(bool& isNull)
-{
-    isNull = false;
-    return m_webDevice->productID;
-}
-
-unsigned BluetoothDevice::productVersion(bool& isNull)
-{
-    isNull = false;
-    return m_webDevice->productVersion;
 }
 
 Vector<String> BluetoothDevice::uuids()
@@ -114,11 +85,6 @@ Vector<String> BluetoothDevice::uuids()
     for (size_t i = 0; i < m_webDevice->uuids.size(); ++i)
         uuids[i] = m_webDevice->uuids[i];
     return uuids;
-}
-
-ScriptPromise BluetoothDevice::connectGATT(ScriptState* scriptState)
-{
-    return m_gatt->connect(scriptState);
 }
 
 } // namespace blink

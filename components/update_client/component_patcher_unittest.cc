@@ -17,7 +17,7 @@
 #include "components/update_client/component_patcher_unittest.h"
 #include "components/update_client/test_installer.h"
 #include "courgette/courgette.h"
-#include "courgette/third_party/bsdiff.h"
+#include "courgette/third_party/bsdiff/bsdiff.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -68,7 +68,7 @@ ComponentPatcherOperationTest::ComponentPatcherOperationTest() {
   EXPECT_TRUE(unpack_dir_.CreateUniqueTempDir());
   EXPECT_TRUE(input_dir_.CreateUniqueTempDir());
   EXPECT_TRUE(installed_dir_.CreateUniqueTempDir());
-  installer_ = new ReadOnlyTestInstaller(installed_dir_.path());
+  installer_ = new ReadOnlyTestInstaller(installed_dir_.GetPath());
   task_runner_ = base::MessageLoop::current()->task_runner();
 }
 
@@ -79,9 +79,10 @@ ComponentPatcherOperationTest::~ComponentPatcherOperationTest() {
 TEST_F(ComponentPatcherOperationTest, CheckCreateOperation) {
   EXPECT_TRUE(base::CopyFile(
       test_file("binary_output.bin"),
-      input_dir_.path().Append(FILE_PATH_LITERAL("binary_output.bin"))));
+      input_dir_.GetPath().Append(FILE_PATH_LITERAL("binary_output.bin"))));
 
-  scoped_ptr<base::DictionaryValue> command_args(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> command_args(
+      new base::DictionaryValue());
   command_args->SetString("output", "output.bin");
   command_args->SetString("sha256", binary_output_hash);
   command_args->SetString("op", "create");
@@ -89,7 +90,7 @@ TEST_F(ComponentPatcherOperationTest, CheckCreateOperation) {
 
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op = new DeltaUpdateOpCreate();
-  op->Run(command_args.get(), input_dir_.path(), unpack_dir_.path(), NULL,
+  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(), NULL,
           base::Bind(&TestCallback::Set, base::Unretained(&callback)),
           task_runner_);
   base::RunLoop().RunUntilIdle();
@@ -98,7 +99,7 @@ TEST_F(ComponentPatcherOperationTest, CheckCreateOperation) {
   EXPECT_EQ(ComponentUnpacker::kNone, callback.error_);
   EXPECT_EQ(0, callback.extra_code_);
   EXPECT_TRUE(base::ContentsEqual(
-      unpack_dir_.path().Append(FILE_PATH_LITERAL("output.bin")),
+      unpack_dir_.GetPath().Append(FILE_PATH_LITERAL("output.bin")),
       test_file("binary_output.bin")));
 }
 
@@ -106,9 +107,10 @@ TEST_F(ComponentPatcherOperationTest, CheckCreateOperation) {
 TEST_F(ComponentPatcherOperationTest, CheckCopyOperation) {
   EXPECT_TRUE(base::CopyFile(
       test_file("binary_output.bin"),
-      installed_dir_.path().Append(FILE_PATH_LITERAL("binary_output.bin"))));
+      installed_dir_.GetPath().Append(FILE_PATH_LITERAL("binary_output.bin"))));
 
-  scoped_ptr<base::DictionaryValue> command_args(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> command_args(
+      new base::DictionaryValue());
   command_args->SetString("output", "output.bin");
   command_args->SetString("sha256", binary_output_hash);
   command_args->SetString("op", "copy");
@@ -116,7 +118,7 @@ TEST_F(ComponentPatcherOperationTest, CheckCopyOperation) {
 
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op = new DeltaUpdateOpCopy();
-  op->Run(command_args.get(), input_dir_.path(), unpack_dir_.path(),
+  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(),
           installer_.get(),
           base::Bind(&TestCallback::Set, base::Unretained(&callback)),
           task_runner_);
@@ -126,7 +128,7 @@ TEST_F(ComponentPatcherOperationTest, CheckCopyOperation) {
   EXPECT_EQ(ComponentUnpacker::kNone, callback.error_);
   EXPECT_EQ(0, callback.extra_code_);
   EXPECT_TRUE(base::ContentsEqual(
-      unpack_dir_.path().Append(FILE_PATH_LITERAL("output.bin")),
+      unpack_dir_.GetPath().Append(FILE_PATH_LITERAL("output.bin")),
       test_file("binary_output.bin")));
 }
 
@@ -134,12 +136,13 @@ TEST_F(ComponentPatcherOperationTest, CheckCopyOperation) {
 TEST_F(ComponentPatcherOperationTest, CheckCourgetteOperation) {
   EXPECT_TRUE(base::CopyFile(
       test_file("binary_input.bin"),
-      installed_dir_.path().Append(FILE_PATH_LITERAL("binary_input.bin"))));
+      installed_dir_.GetPath().Append(FILE_PATH_LITERAL("binary_input.bin"))));
   EXPECT_TRUE(base::CopyFile(test_file("binary_courgette_patch.bin"),
-                             input_dir_.path().Append(FILE_PATH_LITERAL(
+                             input_dir_.GetPath().Append(FILE_PATH_LITERAL(
                                  "binary_courgette_patch.bin"))));
 
-  scoped_ptr<base::DictionaryValue> command_args(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> command_args(
+      new base::DictionaryValue());
   command_args->SetString("output", "output.bin");
   command_args->SetString("sha256", binary_output_hash);
   command_args->SetString("op", "courgette");
@@ -149,7 +152,7 @@ TEST_F(ComponentPatcherOperationTest, CheckCourgetteOperation) {
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op =
       CreateDeltaUpdateOp("courgette", NULL /* out_of_process_patcher */);
-  op->Run(command_args.get(), input_dir_.path(), unpack_dir_.path(),
+  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(),
           installer_.get(),
           base::Bind(&TestCallback::Set, base::Unretained(&callback)),
           task_runner_);
@@ -159,7 +162,7 @@ TEST_F(ComponentPatcherOperationTest, CheckCourgetteOperation) {
   EXPECT_EQ(ComponentUnpacker::kNone, callback.error_);
   EXPECT_EQ(0, callback.extra_code_);
   EXPECT_TRUE(base::ContentsEqual(
-      unpack_dir_.path().Append(FILE_PATH_LITERAL("output.bin")),
+      unpack_dir_.GetPath().Append(FILE_PATH_LITERAL("output.bin")),
       test_file("binary_output.bin")));
 }
 
@@ -167,12 +170,13 @@ TEST_F(ComponentPatcherOperationTest, CheckCourgetteOperation) {
 TEST_F(ComponentPatcherOperationTest, CheckBsdiffOperation) {
   EXPECT_TRUE(base::CopyFile(
       test_file("binary_input.bin"),
-      installed_dir_.path().Append(FILE_PATH_LITERAL("binary_input.bin"))));
-  EXPECT_TRUE(base::CopyFile(
-      test_file("binary_bsdiff_patch.bin"),
-      input_dir_.path().Append(FILE_PATH_LITERAL("binary_bsdiff_patch.bin"))));
+      installed_dir_.GetPath().Append(FILE_PATH_LITERAL("binary_input.bin"))));
+  EXPECT_TRUE(base::CopyFile(test_file("binary_bsdiff_patch.bin"),
+                             input_dir_.GetPath().Append(FILE_PATH_LITERAL(
+                                 "binary_bsdiff_patch.bin"))));
 
-  scoped_ptr<base::DictionaryValue> command_args(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> command_args(
+      new base::DictionaryValue());
   command_args->SetString("output", "output.bin");
   command_args->SetString("sha256", binary_output_hash);
   command_args->SetString("op", "courgette");
@@ -182,7 +186,7 @@ TEST_F(ComponentPatcherOperationTest, CheckBsdiffOperation) {
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op =
       CreateDeltaUpdateOp("bsdiff", NULL /* out_of_process_patcher */);
-  op->Run(command_args.get(), input_dir_.path(), unpack_dir_.path(),
+  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(),
           installer_.get(),
           base::Bind(&TestCallback::Set, base::Unretained(&callback)),
           task_runner_);
@@ -192,7 +196,7 @@ TEST_F(ComponentPatcherOperationTest, CheckBsdiffOperation) {
   EXPECT_EQ(ComponentUnpacker::kNone, callback.error_);
   EXPECT_EQ(0, callback.extra_code_);
   EXPECT_TRUE(base::ContentsEqual(
-      unpack_dir_.path().Append(FILE_PATH_LITERAL("output.bin")),
+      unpack_dir_.GetPath().Append(FILE_PATH_LITERAL("output.bin")),
       test_file("binary_output.bin")));
 }
 

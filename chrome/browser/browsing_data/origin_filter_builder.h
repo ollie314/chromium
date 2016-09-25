@@ -7,6 +7,7 @@
 
 #include <ostream>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "base/callback.h"
@@ -17,16 +18,17 @@
 // A class that constructs URL deletion filters (represented as GURL->bool
 // predicates) that match certain origins.
 //
-// IMPORTANT NOTE: While this class does define a cookie filtering method, as
-// required by the BrowsingDataFilterBuilder interface, it is not suitable for
-// cookie deletion (BrowsingDataRemover::REMOVE_COOKIES). Instead, use
-// RegistrableDomainFilterBuilder and see its documenation for more details.
+// IMPORTANT NOTE: While this class does define cookie, channel ID, and plugin
+// filtering methods, as required by the BrowsingDataFilterBuilder interface,
+// it is not suitable for deletion of those data types, as they are scoped
+// to eTLD+1. Instead, use RegistrableDomainFilterBuilder and see its
+// documenation for more details.
 class OriginFilterBuilder : public BrowsingDataFilterBuilder {
  public:
   // Constructs a filter with the given |mode| - whitelist or blacklist.
   explicit OriginFilterBuilder(Mode mode);
 
-  ~OriginFilterBuilder();
+  ~OriginFilterBuilder() override;
 
   // Adds the |origin| to the (white- or black-) list.
   void AddOrigin(const url::Origin& origin);
@@ -51,6 +53,20 @@ class OriginFilterBuilder : public BrowsingDataFilterBuilder {
   base::Callback<bool(const net::CanonicalCookie& cookie)>
       BuildCookieFilter() const override;
 
+  // Channel ID filter is not implemented in this subclasss. Please use
+  // a BrowsingDataFilterBuilder with different scoping,
+  // such as RegistrableDomainFilterBuilder.
+  base::Callback<bool(const std::string& channel_id_server_id)>
+      BuildChannelIDFilter() const override;
+
+  // Plugin site filter is not implemented in this subclass. Please use
+  // a BrowsingDataFilterBuilder with different scoping,
+  // such as RegistrableDomainFilterBuilder.
+  base::Callback<bool(const std::string& site)>
+      BuildPluginFilter() const override;
+
+  bool operator==(const OriginFilterBuilder& other) const;
+
  protected:
   bool IsEmpty() const override;
 
@@ -69,7 +85,6 @@ class OriginFilterBuilder : public BrowsingDataFilterBuilder {
   // The list of origins and whether they should be interpreted as a whitelist
   // or blacklist.
   std::set<url::Origin> origin_list_;
-  Mode mode_;
 
   DISALLOW_COPY_AND_ASSIGN(OriginFilterBuilder);
 };

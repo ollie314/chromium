@@ -64,8 +64,7 @@ bool ReadHistogramArguments(PickleIterator* iter,
   }
 
   // We use the arguments to find or create the local version of the histogram
-  // in this process, so we need to clear the IPC flag.
-  DCHECK(*flags & HistogramBase::kIPCSerializationSourceFlag);
+  // in this process, so we need to clear any IPC flag.
   *flags &= ~HistogramBase::kIPCSerializationSourceFlag;
 
   return true;
@@ -439,6 +438,8 @@ std::unique_ptr<HistogramSamples> Histogram::SnapshotSamples() const {
 }
 
 std::unique_ptr<HistogramSamples> Histogram::SnapshotDelta() {
+  DCHECK(!final_delta_created_);
+
   std::unique_ptr<HistogramSamples> snapshot = SnapshotSampleVector();
   if (!logged_samples_) {
     // If nothing has been previously logged, save this one as
@@ -450,6 +451,18 @@ std::unique_ptr<HistogramSamples> Histogram::SnapshotDelta() {
   // Subtract what was previously logged and update that information.
   snapshot->Subtract(*logged_samples_);
   logged_samples_->Add(*snapshot);
+  return snapshot;
+}
+
+std::unique_ptr<HistogramSamples> Histogram::SnapshotFinalDelta() const {
+  DCHECK(!final_delta_created_);
+  final_delta_created_ = true;
+
+  std::unique_ptr<HistogramSamples> snapshot = SnapshotSampleVector();
+
+  // Subtract what was previously logged and then return.
+  if (logged_samples_)
+    snapshot->Subtract(*logged_samples_);
   return snapshot;
 }
 
@@ -739,8 +752,7 @@ class LinearHistogram::Factory : public Histogram::Factory {
 
   std::unique_ptr<HistogramBase> HeapAlloc(
       const BucketRanges* ranges) override {
-    return WrapUnique(
-        new LinearHistogram(name_, minimum_, maximum_, ranges));
+    return WrapUnique(new LinearHistogram(name_, minimum_, maximum_, ranges));
   }
 
   void FillHistogram(HistogramBase* base_histogram) override {
@@ -1123,7 +1135,9 @@ bool CustomHistogram::SerializeInfoImpl(Pickle* pickle) const {
 }
 
 double CustomHistogram::GetBucketSize(Count current, uint32_t i) const {
-  return 1;
+  // If this is a histogram of enum values, normalizing the bucket count
+  // by the bucket range is not helpful, so just return the bucket count.
+  return current;
 }
 
 // static

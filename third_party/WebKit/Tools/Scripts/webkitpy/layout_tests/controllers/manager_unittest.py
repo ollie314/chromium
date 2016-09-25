@@ -29,7 +29,7 @@
 
 """Unit tests for manager.py."""
 
-import sys
+import optparse
 import time
 import unittest
 
@@ -37,7 +37,6 @@ from webkitpy.common.host_mock import MockHost
 from webkitpy.layout_tests.controllers.manager import Manager
 from webkitpy.layout_tests.models import test_expectations
 from webkitpy.layout_tests.models.test_run_results import TestRunResults
-from webkitpy.tool.mocktool import MockOptions
 
 
 class FakePrinter(object):
@@ -52,7 +51,7 @@ class ManagerTest(unittest.TestCase):
         def get_manager():
             host = MockHost()
             port = host.port_factory.get('test-mac-mac10.10')
-            manager = Manager(port, options=MockOptions(http=True, max_locked_shards=1), printer=FakePrinter())
+            manager = Manager(port, options=optparse.Values({'http': True, 'max_locked_shards': 1}), printer=FakePrinter())
             return manager
 
         manager = get_manager()
@@ -63,7 +62,7 @@ class ManagerTest(unittest.TestCase):
 
     def test_servers_started(self):
         def get_manager(port):
-            manager = Manager(port, options=MockOptions(http=True, max_locked_shards=1), printer=FakePrinter())
+            manager = Manager(port, options=optparse.Values({'http': True, 'max_locked_shards': 1}), printer=FakePrinter())
             return manager
 
         def start_http_server(additional_dirs, number_of_drivers):
@@ -114,7 +113,10 @@ class ManagerTest(unittest.TestCase):
         def get_manager():
             host = MockHost()
             port = host.port_factory.get('test-mac-mac10.10')
-            manager = Manager(port, options=MockOptions(test_list=None, http=True, max_locked_shards=1), printer=FakePrinter())
+            manager = Manager(
+                port,
+                options=optparse.Values({'test_list': None, 'http': True, 'max_locked_shards': 1}),
+                printer=FakePrinter())
             return manager
         host = MockHost()
         port = host.port_factory.get('test-mac-mac10.10')
@@ -133,7 +135,7 @@ class ManagerTest(unittest.TestCase):
         port = host.port_factory.get('test-mac-mac10.10')
 
         def get_manager():
-            manager = Manager(port, options=MockOptions(max_locked_shards=1), printer=FakePrinter())
+            manager = Manager(port, options=optparse.Values({'max_locked_shards': 1}), printer=FakePrinter())
             return manager
         self._make_fake_test_result(port.host, '/tmp/layout-test-results')
         self.assertTrue(port.host.filesystem.exists('/tmp/layout-test-results'))
@@ -150,7 +152,7 @@ class ManagerTest(unittest.TestCase):
         port = host.port_factory.get('test-mac-mac10.10')
 
         def get_manager():
-            manager = Manager(port, options=MockOptions(max_locked_shards=1), printer=FakePrinter())
+            manager = Manager(port, options=optparse.Values({'max_locked_shards': 1}), printer=FakePrinter())
             return manager
         self._make_fake_test_result(port.host, '/tmp/layout-test-results')
         self.assertTrue(port.host.filesystem.exists('/tmp/layout-test-results'))
@@ -163,7 +165,7 @@ class ManagerTest(unittest.TestCase):
         port = host.port_factory.get('test-mac-mac10.10')
 
         def get_manager():
-            manager = Manager(port, options=MockOptions(max_locked_shards=1), printer=FakePrinter())
+            manager = Manager(port, options=optparse.Values({'max_locked_shards': 1}), printer=FakePrinter())
             return manager
         for x in range(1, 31):
             dir_name = '/tmp/layout-test-results' + '_' + str(x)

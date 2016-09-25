@@ -17,6 +17,7 @@ public class MockDownloadNotificationService extends DownloadNotificationService
     private final List<Integer> mNotificationIds = new ArrayList<Integer>();
     private boolean mPaused = false;
     private Context mContext;
+    private int mLastNotificationId;
 
     void setContext(Context context) {
         mContext = context;
@@ -32,6 +33,7 @@ public class MockDownloadNotificationService extends DownloadNotificationService
     void updateNotification(int id, Notification notification) {
         if (!mNotificationIds.contains(id)) {
             mNotificationIds.add(id);
+            mLastNotificationId = id;
         }
     }
 
@@ -45,17 +47,17 @@ public class MockDownloadNotificationService extends DownloadNotificationService
 
     @Override
     public void cancelNotification(int notificationId, String downloadGuid) {
+        super.cancelNotification(notificationId, downloadGuid);
         mNotificationIds.remove(Integer.valueOf(notificationId));
+    }
+
+    public int getLastAddedNotificationId() {
+        return mLastNotificationId;
     }
 
     @Override
     public Context getApplicationContext() {
         return mContext == null ? super.getApplicationContext() : mContext;
-    }
-
-    @Override
-    String getDurationString(long timeRemainingInMillis) {
-        return "";
     }
 }
 

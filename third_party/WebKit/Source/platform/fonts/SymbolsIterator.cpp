@@ -4,6 +4,7 @@
 
 #include "SymbolsIterator.h"
 
+#include "wtf/PtrUtil.h"
 #include <unicode/uchar.h>
 #include <unicode/uniset.h>
 
@@ -12,7 +13,7 @@ namespace blink {
 using namespace WTF::Unicode;
 
 SymbolsIterator::SymbolsIterator(const UChar* buffer, unsigned bufferSize)
-    : m_utf16Iterator(adoptPtr(new UTF16TextIterator(buffer, bufferSize)))
+    : m_utf16Iterator(wrapUnique(new UTF16TextIterator(buffer, bufferSize)))
     , m_bufferSize(bufferSize)
     , m_nextChar(0)
     , m_atEnd(bufferSize == 0)
@@ -40,35 +41,11 @@ FontFallbackPriority SymbolsIterator::fontFallbackPriorityForCharacter(UChar32 c
     if (Character::isEmojiTextDefault(codepoint))
         return FontFallbackPriority::EmojiText;
 
-    UBlockCode block = ublock_getCode(codepoint);
-
-    switch (block) {
-    case UBLOCK_PLAYING_CARDS:
-    case UBLOCK_MISCELLANEOUS_SYMBOLS:
-    case UBLOCK_MISCELLANEOUS_SYMBOLS_AND_ARROWS:
-    case UBLOCK_MISCELLANEOUS_SYMBOLS_AND_PICTOGRAPHS:
-    case UBLOCK_TRANSPORT_AND_MAP_SYMBOLS:
-    case UBLOCK_ALCHEMICAL_SYMBOLS:
-    case UBLOCK_RUNIC:
-    case UBLOCK_DINGBATS:
-    case UBLOCK_GOTHIC:
-        return FontFallbackPriority::Symbols;
-    case UBLOCK_ARROWS:
-    case UBLOCK_MATHEMATICAL_OPERATORS:
-    case UBLOCK_MISCELLANEOUS_TECHNICAL:
-    case UBLOCK_GEOMETRIC_SHAPES:
-    case UBLOCK_MISCELLANEOUS_MATHEMATICAL_SYMBOLS_A:
-    case UBLOCK_SUPPLEMENTAL_ARROWS_A:
-    case UBLOCK_SUPPLEMENTAL_ARROWS_B:
-    case UBLOCK_MISCELLANEOUS_MATHEMATICAL_SYMBOLS_B:
-    case UBLOCK_SUPPLEMENTAL_MATHEMATICAL_OPERATORS:
-    case UBLOCK_MATHEMATICAL_ALPHANUMERIC_SYMBOLS:
-    case UBLOCK_ARABIC_MATHEMATICAL_ALPHABETIC_SYMBOLS:
-    case UBLOCK_GEOMETRIC_SHAPES_EXTENDED:
-        return FontFallbackPriority::Math;
-    default:
-        return FontFallbackPriority::Text;
-    }
+    // Here we could segment into Symbols and Math categories as well, similar
+    // to what the Windows font fallback does. Map the math Unicode and Symbols
+    // blocks to Text for now since we don't have a good cross-platform way to
+    // select suitable math fonts.
+    return FontFallbackPriority::Text;
 }
 
 bool SymbolsIterator::consume(unsigned *symbolsLimit, FontFallbackPriority* fontFallbackPriority)
@@ -83,16 +60,20 @@ bool SymbolsIterator::consume(unsigned *symbolsLimit, FontFallbackPriority* font
 
         // Except at the beginning, ZWJ just carries over the emoji or neutral
         // text type, VS15 & VS16 we just carry over as well, since we already
-        // resolved those through lookahead.  Also, the text presentation emoji
-        // are upgraded to emoji presentation when combined through ZWJ in the
-        // case of example U+1F441 U+200D U+1F5E8, eye + ZWJ + left speech
+        // resolved those through lookahead. Also, don't downgrade to text
+        // presentation for emoji that are part of a ZWJ sequence, example
+        // U+1F441 U+200D U+1F5E8, eye (text presentation) + ZWJ + left speech
         // bubble, see below.
         if ((!(m_nextChar == zeroWidthJoinerCharacter
             && m_previousFontFallbackPriority == FontFallbackPriority::EmojiEmoji)
             && m_nextChar != variationSelector15Character
             && m_nextChar != variationSelector16Character
             && !Character::isRegionalIndicator(m_nextChar)
-            && !(m_nextChar == leftSpeechBubbleCharacter
+            && !((m_nextChar == leftSpeechBubbleCharacter
+            || m_nextChar == rainbowCharacter
+            || m_nextChar == maleSignCharacter
+            || m_nextChar == femaleSignCharacter
+            || m_nextChar == staffOfAesculapiusCharacter)
             && m_previousFontFallbackPriority == FontFallbackPriority::EmojiEmoji))
             || m_currentFontFallbackPriority == FontFallbackPriority::Invalid) {
             m_currentFontFallbackPriority = fontFallbackPriorityForCharacter(m_nextChar);
@@ -133,7 +114,8 @@ bool SymbolsIterator::consume(unsigned *symbolsLimit, FontFallbackPriority* font
 
             // Upgrade text presentation emoji to emoji presentation when followed by ZWJ,
             // Example U+1F441 U+200D U+1F5E8, eye + ZWJ + left speech bubble.
-            if (m_nextChar == eyeCharacter && peekChar == zeroWidthJoinerCharacter) {
+            if ((m_nextChar == eyeCharacter || m_nextChar == wavingWhiteFlagCharacter)
+                && peekChar == zeroWidthJoinerCharacter) {
                 m_currentFontFallbackPriority = FontFallbackPriority::EmojiEmoji;
             }
         }

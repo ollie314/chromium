@@ -6,6 +6,7 @@
 #define MEDIA_BASE_ANDROID_MEDIA_DECODER_JOB_H_
 
 #include <stddef.h>
+#include <memory>
 
 #include "base/callback.h"
 #include "base/macros.h"
@@ -44,19 +45,12 @@ class MediaDecoderJob {
   // Callback when a decoder job finishes its work. Args: whether decode
   // finished successfully, a flag whether the frame is late for statistics,
   // cacurrent presentation time, max presentation time.
-  // If the current presentation time is equal to kNoTimestamp(), the decoder
+  // If the current presentation time is equal to kNoTimestamp, the decoder
   // job skipped rendering of the decoded output and the callback target should
   // ignore the timestamps provided. The late frame flag has no meaning in this
   // case.
   typedef base::Callback<void(MediaCodecStatus, bool, base::TimeDelta,
                               base::TimeDelta)> DecoderCallback;
-  // Callback when a decoder job finishes releasing the output buffer.
-  // Args: whether the frame is a late frame, current presentation time, max
-  // presentation time.
-  // If the current presentation time is equal to kNoTimestamp(), the callback
-  // target should ignore the timestamps provided and whether it is late.
-  typedef base::Callback<void(bool, base::TimeDelta, base::TimeDelta)>
-      ReleaseOutputCompletionCallback;
 
   virtual ~MediaDecoderJob();
 
@@ -136,7 +130,8 @@ class MediaDecoderJob {
       bool render_output,
       bool is_late_frame,
       base::TimeDelta current_presentation_timestamp,
-      const ReleaseOutputCompletionCallback& callback) = 0;
+      MediaCodecStatus status,
+      const DecoderCallback& callback) = 0;
 
   // Returns true if the "time to render" needs to be computed for frames in
   // this decoder job.
@@ -161,7 +156,7 @@ class MediaDecoderJob {
 
   bool need_to_reconfig_decoder_job_;
 
-  scoped_ptr<MediaCodecBridge> media_codec_bridge_;
+  std::unique_ptr<MediaCodecBridge> media_codec_bridge_;
 
  private:
   friend class MediaSourcePlayerTest;
@@ -253,8 +248,8 @@ class MediaDecoderJob {
 
   // Signals to decoder job that decoder has updated output format. Decoder job
   // may need to do internal reconfiguration in order to correctly interpret
-  // incoming buffers
-  virtual void OnOutputFormatChanged();
+  // incoming buffers. Returns true if this internal configuration succeeded.
+  virtual bool OnOutputFormatChanged();
 
   // Update the output format from the decoder, returns true if the output
   // format changes, or false otherwise.

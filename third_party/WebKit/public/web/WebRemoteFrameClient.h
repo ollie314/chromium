@@ -26,15 +26,11 @@ public:
     virtual void frameDetached(DetachType) { }
 
     // Notifies the embedder that a postMessage was issued to a remote frame.
-    virtual void postMessageEvent(
+    virtual void forwardPostMessage(
         WebLocalFrame* sourceFrame,
         WebRemoteFrame* targetFrame,
         WebSecurityOrigin targetOrigin,
-        WebDOMMessageEvent) { }
-
-    // Send initial drawing parameters to a child frame that is being rendered
-    // out of process.
-    virtual void initializeChildFrame(float deviceScaleFactor) { }
+        WebDOMMessageEvent) {}
 
     // A remote frame was asked to start a navigation.
     virtual void navigate(const WebURLRequest& request, bool shouldReplaceCurrentEntry) { }

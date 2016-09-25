@@ -5,6 +5,7 @@
 // IPC messages for the Media Session API.
 // Multiply-included message file, hence no include guard.
 
+#include "base/optional.h"
 #include "content/common/android/gin_java_bridge_errors.h"
 #include "content/common/content_export.h"
 #include "content/public/common/media_metadata.h"
@@ -18,6 +19,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::MediaMetadata)
   IPC_STRUCT_TRAITS_MEMBER(title)
   IPC_STRUCT_TRAITS_MEMBER(artist)
   IPC_STRUCT_TRAITS_MEMBER(album)
+  IPC_STRUCT_TRAITS_MEMBER(artwork)
 IPC_STRUCT_TRAITS_END()
 
 // Messages for notifying the render process of media session status -------
@@ -40,4 +42,4 @@ IPC_MESSAGE_ROUTED2(MediaSessionHostMsg_Deactivate,
 
 IPC_MESSAGE_ROUTED2(MediaSessionHostMsg_SetMetadata,
                     int /* request_id*/,
-                    content::MediaMetadata /* metadata */)
+                    base::Optional<content::MediaMetadata> /* metadata */)

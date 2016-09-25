@@ -37,6 +37,10 @@ extern const char kDefaultToolchain[];
 extern const char kDefaultToolchain_HelpShort[];
 extern const char kDefaultToolchain_Help[];
 
+extern const char kInvoker[];
+extern const char kInvoker_HelpShort[];
+extern const char kInvoker_Help[];
+
 extern const char kPythonPath[];
 extern const char kPythonPath_HelpShort[];
 extern const char kPythonPath_Help[];
@@ -56,6 +60,10 @@ extern const char kRootOutDir_Help[];
 extern const char kTargetCpu[];
 extern const char kTargetCpu_HelpShort[];
 extern const char kTargetCpu_Help[];
+
+extern const char kTargetName[];
+extern const char kTargetName_HelpShort[];
+extern const char kTargetName_Help[];
 
 extern const char kTargetOs[];
 extern const char kTargetOs_HelpShort[];
@@ -103,6 +111,10 @@ extern const char kBundleResourcesDir[];
 extern const char kBundleResourcesDir_HelpShort[];
 extern const char kBundleResourcesDir_Help[];
 
+extern const char kBundleDepsFilter[];
+extern const char kBundleDepsFilter_HelpShort[];
+extern const char kBundleDepsFilter_Help[];
+
 extern const char kBundleExecutableDir[];
 extern const char kBundleExecutableDir_HelpShort[];
 extern const char kBundleExecutableDir_Help[];
@@ -134,6 +146,22 @@ extern const char* kCflagsObjCC_Help;
 extern const char kCheckIncludes[];
 extern const char kCheckIncludes_HelpShort[];
 extern const char kCheckIncludes_Help[];
+
+extern const char kCodeSigningArgs[];
+extern const char kCodeSigningArgs_HelpShort[];
+extern const char kCodeSigningArgs_Help[];
+
+extern const char kCodeSigningScript[];
+extern const char kCodeSigningScript_HelpShort[];
+extern const char kCodeSigningScript_Help[];
+
+extern const char kCodeSigningSources[];
+extern const char kCodeSigningSources_HelpShort[];
+extern const char kCodeSigningSources_Help[];
+
+extern const char kCodeSigningOutputs[];
+extern const char kCodeSigningOutputs_HelpShort[];
+extern const char kCodeSigningOutputs_Help[];
 
 extern const char kCompleteStaticLib[];
 extern const char kCompleteStaticLib_HelpShort[];
@@ -214,6 +242,10 @@ extern const char kPrecompiledHeader_Help[];
 extern const char kPrecompiledSource[];
 extern const char kPrecompiledSource_HelpShort[];
 extern const char kPrecompiledSource_Help[];
+
+extern const char kProductType[];
+extern const char kProductType_HelpShort[];
+extern const char kProductType_Help[];
 
 extern const char kPublic[];
 extern const char kPublic_HelpShort[];

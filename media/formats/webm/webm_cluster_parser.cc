@@ -52,7 +52,7 @@ WebMClusterParser::WebMClusterParser(
       video_encryption_key_id_(video_encryption_key_id),
       audio_codec_(audio_codec),
       parser_(kWebMIdCluster, this),
-      cluster_start_time_(kNoTimestamp()),
+      cluster_start_time_(kNoTimestamp),
       audio_(audio_track_num, false, audio_default_duration, media_log),
       video_(video_track_num, true, video_default_duration, media_log),
       ready_buffer_upper_bound_(kNoDecodeTimestamp()),
@@ -61,7 +61,7 @@ WebMClusterParser::WebMClusterParser(
        it != text_tracks.end();
        ++it) {
     text_track_map_.insert(std::make_pair(
-        it->first, Track(it->first, false, kNoTimestamp(), media_log_)));
+        it->first, Track(it->first, false, kNoTimestamp, media_log_)));
   }
 }
 
@@ -70,7 +70,7 @@ WebMClusterParser::~WebMClusterParser() {}
 void WebMClusterParser::Reset() {
   last_block_timecode_ = -1;
   cluster_timecode_ = -1;
-  cluster_start_time_ = kNoTimestamp();
+  cluster_start_time_ = kNoTimestamp;
   cluster_ended_ = false;
   parser_.Reset();
   audio_.Reset();
@@ -96,7 +96,7 @@ int WebMClusterParser::Parse(const uint8_t* buf, int size) {
   if (cluster_ended_) {
     // If there were no buffers in this cluster, set the cluster start time to
     // be the |cluster_timecode_|.
-    if (cluster_start_time_ == kNoTimestamp()) {
+    if (cluster_start_time_ == kNoTimestamp) {
       // If the cluster did not even have a |cluster_timecode_|, signal parse
       // error.
       if (cluster_timecode_ < 0)
@@ -118,20 +118,6 @@ int WebMClusterParser::Parse(const uint8_t* buf, int size) {
   return result;
 }
 
-const WebMClusterParser::BufferQueue& WebMClusterParser::GetAudioBuffers() {
-  if (ready_buffer_upper_bound_ == kNoDecodeTimestamp())
-    UpdateReadyBuffers();
-
-  return audio_.ready_buffers();
-}
-
-const WebMClusterParser::BufferQueue& WebMClusterParser::GetVideoBuffers() {
-  if (ready_buffer_upper_bound_ == kNoDecodeTimestamp())
-    UpdateReadyBuffers();
-
-  return video_.ready_buffers();
-}
-
 const WebMClusterParser::TextBufferQueueMap&
 WebMClusterParser::GetTextBuffers() {
   if (ready_buffer_upper_bound_ == kNoDecodeTimestamp())
@@ -151,6 +137,25 @@ WebMClusterParser::GetTextBuffers() {
   return text_buffers_map_;
 }
 
+void WebMClusterParser::GetBuffers(StreamParser::BufferQueueMap* buffers) {
+  DCHECK(buffers->empty());
+  if (ready_buffer_upper_bound_ == kNoDecodeTimestamp())
+    UpdateReadyBuffers();
+  const BufferQueue& audio_buffers = audio_.ready_buffers();
+  if (!audio_buffers.empty()) {
+    buffers->insert(std::make_pair(audio_.track_num(), audio_buffers));
+  }
+  const BufferQueue& video_buffers = video_.ready_buffers();
+  if (!video_buffers.empty()) {
+    buffers->insert(std::make_pair(video_.track_num(), video_buffers));
+  }
+  const WebMClusterParser::TextBufferQueueMap& text_buffers = GetTextBuffers();
+  for (const auto& it : text_buffers) {
+    DCHECK(!it.second.empty());
+    buffers->insert(it);
+  }
+}
+
 base::TimeDelta WebMClusterParser::TryGetEncodedAudioDuration(
     const uint8_t* data,
     int size) {
@@ -168,7 +173,7 @@ base::TimeDelta WebMClusterParser::TryGetEncodedAudioDuration(
   // TODO(wolenetz/chcunningham): Implement duration reading for Vorbis. See
   // motivations in http://crbug.com/396634.
 
-  return kNoTimestamp();
+  return kNoTimestamp;
 }
 
 base::TimeDelta WebMClusterParser::ReadOpusDuration(const uint8_t* data,
@@ -186,7 +191,7 @@ base::TimeDelta WebMClusterParser::ReadOpusDuration(const uint8_t* data,
                       kMaxDurationErrorLogs)
         << "Invalid zero-byte Opus packet; demuxed block duration may be "
            "imprecise.";
-    return kNoTimestamp();
+    return kNoTimestamp;
   }
 
   // Frame count type described by last 2 bits of Opus TOC byte.
@@ -208,7 +213,7 @@ base::TimeDelta WebMClusterParser::ReadOpusDuration(const uint8_t* data,
                           kMaxDurationErrorLogs)
             << "Second byte missing from 'Code 3' Opus packet; demuxed block "
                "duration may be imprecise.";
-        return kNoTimestamp();
+        return kNoTimestamp;
       }
 
       frame_count = data[1] & kFrameCountMask;
@@ -218,7 +223,7 @@ base::TimeDelta WebMClusterParser::ReadOpusDuration(const uint8_t* data,
                           kMaxDurationErrorLogs)
             << "Illegal 'Code 3' Opus packet with frame count zero; demuxed "
                "block duration may be imprecise.";
-        return kNoTimestamp();
+        return kNoTimestamp;
       }
 
       break;
@@ -227,7 +232,7 @@ base::TimeDelta WebMClusterParser::ReadOpusDuration(const uint8_t* data,
                         kMaxDurationErrorLogs)
           << "Unexpected Opus frame count type: " << frame_count_type << "; "
           << "demuxed block duration may be imprecise.";
-      return kNoTimestamp();
+      return kNoTimestamp;
   }
 
   int opusConfig = (data[0] & kTocConfigMask) >> 3;
@@ -255,13 +260,14 @@ base::TimeDelta WebMClusterParser::ReadOpusDuration(const uint8_t* data,
 WebMParserClient* WebMClusterParser::OnListStart(int id) {
   if (id == kWebMIdCluster) {
     cluster_timecode_ = -1;
-    cluster_start_time_ = kNoTimestamp();
+    cluster_start_time_ = kNoTimestamp;
   } else if (id == kWebMIdBlockGroup) {
     block_data_.reset();
     block_data_size_ = -1;
     block_duration_ = -1;
     discard_padding_ = -1;
     discard_padding_set_ = false;
+    reference_block_set_ = false;
   } else if (id == kWebMIdBlockAdditions) {
     block_add_id_ = -1;
     block_additional_data_.reset();
@@ -281,10 +287,10 @@ bool WebMClusterParser::OnListEnd(int id) {
     return false;
   }
 
-  bool result = ParseBlock(false, block_data_.get(), block_data_size_,
-                           block_additional_data_.get(),
-                           block_additional_data_size_, block_duration_,
-                           discard_padding_set_ ? discard_padding_ : 0);
+  bool result = ParseBlock(
+      false, block_data_.get(), block_data_size_, block_additional_data_.get(),
+      block_additional_data_size_, block_duration_,
+      discard_padding_set_ ? discard_padding_ : 0, reference_block_set_);
   block_data_.reset();
   block_data_size_ = -1;
   block_duration_ = -1;
@@ -293,6 +299,7 @@ bool WebMClusterParser::OnListEnd(int id) {
   block_additional_data_size_ = 0;
   discard_padding_ = -1;
   discard_padding_set_ = false;
+  reference_block_set_ = false;
   return result;
 }
 
@@ -323,7 +330,8 @@ bool WebMClusterParser::ParseBlock(bool is_simple_block,
                                    const uint8_t* additional,
                                    int additional_size,
                                    int duration,
-                                   int64_t discard_padding) {
+                                   int64_t discard_padding,
+                                   bool reference_block_set) {
   if (size < 4)
     return false;
 
@@ -349,17 +357,24 @@ bool WebMClusterParser::ParseBlock(bool is_simple_block,
   if (timecode & 0x8000)
     timecode |= ~0xffff;
 
+  // The first bit of the flags is set when a SimpleBlock contains only
+  // keyframes. If this is a Block, then keyframe is inferred by the absence of
+  // the ReferenceBlock Element.
+  // http://www.matroska.org/technical/specs/index.html
+  bool is_keyframe =
+      is_simple_block ? (flags & 0x80) != 0 : !reference_block_set;
+
   const uint8_t* frame_data = buf + 4;
   int frame_size = size - (frame_data - buf);
-  return OnBlock(is_simple_block, track_num, timecode, duration, flags,
-                 frame_data, frame_size, additional, additional_size,
-                 discard_padding);
+  return OnBlock(is_simple_block, track_num, timecode, duration, frame_data,
+                 frame_size, additional, additional_size, discard_padding,
+                 is_keyframe);
 }
 
 bool WebMClusterParser::OnBinary(int id, const uint8_t* data, int size) {
   switch (id) {
     case kWebMIdSimpleBlock:
-      return ParseBlock(true, data, size, NULL, 0, -1, 0);
+      return ParseBlock(true, data, size, NULL, 0, -1, 0, false);
 
     case kWebMIdBlock:
       if (block_data_) {
@@ -406,6 +421,13 @@ bool WebMClusterParser::OnBinary(int id, const uint8_t* data, int size) {
 
       return true;
     }
+    case kWebMIdReferenceBlock: {
+      // We use ReferenceBlock to determine whether the current Block contains a
+      // keyframe or not. Other than that, we don't care about the value of the
+      // ReferenceBlock element itself.
+      reference_block_set_ = true;
+      return true;
+    }
     default:
       return true;
   }
@@ -415,12 +437,12 @@ bool WebMClusterParser::OnBlock(bool is_simple_block,
                                 int track_num,
                                 int timecode,
                                 int block_duration,
-                                int flags,
                                 const uint8_t* data,
                                 int size,
                                 const uint8_t* additional,
                                 int additional_size,
-                                int64_t discard_padding) {
+                                int64_t discard_padding,
+                                bool is_keyframe) {
   DCHECK_GE(size, 0);
   if (cluster_timecode_ == -1) {
     MEDIA_LOG(ERROR, media_log_) << "Got a block before cluster timecode.";
@@ -444,7 +466,7 @@ bool WebMClusterParser::OnBlock(bool is_simple_block,
   Track* track = NULL;
   StreamParserBuffer::Type buffer_type = DemuxerStream::AUDIO;
   std::string encryption_key_id;
-  base::TimeDelta encoded_duration = kNoTimestamp();
+  base::TimeDelta encoded_duration = kNoTimestamp;
   if (track_num == audio_.track_num()) {
     track = &audio_;
     encryption_key_id = audio_encryption_key_id_;
@@ -476,13 +498,6 @@ bool WebMClusterParser::OnBlock(bool is_simple_block,
 
   scoped_refptr<StreamParserBuffer> buffer;
   if (buffer_type != DemuxerStream::TEXT) {
-    // The first bit of the flags is set when a SimpleBlock contains only
-    // keyframes. If this is a Block, then inspection of the payload is
-    // necessary to determine whether it contains a keyframe or not.
-    // http://www.matroska.org/technical/specs/index.html
-    bool is_keyframe =
-        is_simple_block ? (flags & 0x80) != 0 : track->IsKeyframe(data, size);
-
     // Every encrypted Block has a signal byte and IV prepended to it. Current
     // encrypted WebM request for comments specification is here
     // http://wiki.webmproject.org/encryption/webm-encryption-rfc
@@ -528,10 +543,10 @@ bool WebMClusterParser::OnBlock(bool is_simple_block,
   }
 
   buffer->set_timestamp(timestamp);
-  if (cluster_start_time_ == kNoTimestamp())
+  if (cluster_start_time_ == kNoTimestamp)
     cluster_start_time_ = timestamp;
 
-  base::TimeDelta block_duration_time_delta = kNoTimestamp();
+  base::TimeDelta block_duration_time_delta = kNoTimestamp;
   if (block_duration >= 0) {
     block_duration_time_delta = base::TimeDelta::FromMicroseconds(
         block_duration * timecode_multiplier_);
@@ -548,15 +563,15 @@ bool WebMClusterParser::OnBlock(bool is_simple_block,
   // as Block Timecode deltas, or once the whole cluster is parsed in the case
   // of the last Block in the cluster. See Track::AddBuffer and
   // ApplyDurationEstimateIfNeeded().
-  if (encoded_duration != kNoTimestamp()) {
-    DCHECK(encoded_duration != kInfiniteDuration());
+  if (encoded_duration != kNoTimestamp) {
+    DCHECK(encoded_duration != kInfiniteDuration);
     DCHECK(encoded_duration > base::TimeDelta());
     buffer->set_duration(encoded_duration);
 
-    DVLOG(3) << __FUNCTION__ << " : "
+    DVLOG(3) << __func__ << " : "
              << "Using encoded duration " << encoded_duration.InSecondsF();
 
-    if (block_duration_time_delta != kNoTimestamp()) {
+    if (block_duration_time_delta != kNoTimestamp) {
       base::TimeDelta duration_difference =
           block_duration_time_delta - encoded_duration;
 
@@ -570,7 +585,7 @@ bool WebMClusterParser::OnBlock(bool is_simple_block,
             << encoded_duration.InMilliseconds() << "ms).";
       }
     }
-  } else if (block_duration_time_delta != kNoTimestamp()) {
+  } else if (block_duration_time_delta != kNoTimestamp) {
     buffer->set_duration(block_duration_time_delta);
   } else {
     DCHECK_NE(buffer_type, DemuxerStream::TEXT);
@@ -593,9 +608,9 @@ WebMClusterParser::Track::Track(int track_num,
     : track_num_(track_num),
       is_video_(is_video),
       default_duration_(default_duration),
-      estimated_next_frame_duration_(kNoTimestamp()),
+      estimated_next_frame_duration_(kNoTimestamp),
       media_log_(media_log) {
-  DCHECK(default_duration_ == kNoTimestamp() ||
+  DCHECK(default_duration_ == kNoTimestamp ||
          default_duration_ > base::TimeDelta());
 }
 
@@ -623,7 +638,7 @@ void WebMClusterParser::Track::ExtractReadyBuffers(
   if (buffers_.back()->GetDecodeTimestamp() < before_timestamp) {
     // All of |buffers_| are ready.
     ready_buffers_.swap(buffers_);
-    DVLOG(3) << __FUNCTION__ << " : " << track_num_ << " All "
+    DVLOG(3) << __func__ << " : " << track_num_ << " All "
              << ready_buffers_.size() << " are ready: before upper bound ts "
              << before_timestamp.InSecondsF();
     return;
@@ -640,7 +655,7 @@ void WebMClusterParser::Track::ExtractReadyBuffers(
     DCHECK(!buffers_.empty());
   }
 
-  DVLOG(3) << __FUNCTION__ << " : " << track_num_ << " Only "
+  DVLOG(3) << __func__ << " : " << track_num_ << " Only "
            << ready_buffers_.size() << " ready, " << buffers_.size()
            << " at or after upper bound ts " << before_timestamp.InSecondsF();
 }
@@ -672,7 +687,7 @@ bool WebMClusterParser::Track::AddBuffer(
       return false;
   }
 
-  if (buffer->duration() == kNoTimestamp()) {
+  if (buffer->duration() == kNoTimestamp) {
     last_added_buffer_missing_duration_ = buffer;
     DVLOG(2) << "AddBuffer() : holding back buffer that is missing duration";
     return true;
@@ -704,7 +719,7 @@ void WebMClusterParser::Track::ApplyDurationEstimateIfNeeded() {
          "BlockGroups with BlockDurations at the end of each Track in a "
          "Cluster to avoid estimation.";
 
-  DVLOG(2) << __FUNCTION__ << " new dur : ts "
+  DVLOG(2) << __func__ << " new dur : ts "
            << last_added_buffer_missing_duration_->timestamp().InSecondsF()
            << " dur "
            << last_added_buffer_missing_duration_->duration().InSecondsF()
@@ -729,29 +744,6 @@ void WebMClusterParser::Track::Reset() {
   last_added_buffer_missing_duration_ = NULL;
 }
 
-bool WebMClusterParser::Track::IsKeyframe(const uint8_t* data, int size) const {
-  // For now, assume that all blocks are keyframes for datatypes other than
-  // video. This is a valid assumption for Vorbis, WebVTT, & Opus.
-  if (!is_video_)
-    return true;
-
-  // Make sure the block is big enough for the minimal keyframe header size.
-  if (size < 7)
-    return false;
-
-  // The LSb of the first byte must be a 0 for a keyframe.
-  // http://tools.ietf.org/html/rfc6386 Section 19.1
-  if ((data[0] & 0x01) != 0)
-    return false;
-
-  // Verify VP8 keyframe startcode.
-  // http://tools.ietf.org/html/rfc6386 Section 19.1
-  if (data[3] != 0x9d || data[4] != 0x01 || data[5] != 0x2a)
-    return false;
-
-  return true;
-}
-
 bool WebMClusterParser::Track::QueueBuffer(
     const scoped_refptr<StreamParserBuffer>& buffer) {
   DCHECK(!last_added_buffer_missing_duration_.get());
@@ -764,7 +756,7 @@ bool WebMClusterParser::Track::QueueBuffer(
   CHECK(previous_buffers_timestamp <= buffer->GetDecodeTimestamp());
 
   base::TimeDelta duration = buffer->duration();
-  if (duration < base::TimeDelta() || duration == kNoTimestamp()) {
+  if (duration < base::TimeDelta() || duration == kNoTimestamp) {
     MEDIA_LOG(ERROR, media_log_)
         << "Invalid buffer duration: " << duration.InSecondsF();
     return false;
@@ -781,7 +773,7 @@ bool WebMClusterParser::Track::QueueBuffer(
   // estimated buffers are encountered.
   if (duration > base::TimeDelta()) {
     base::TimeDelta orig_duration_estimate = estimated_next_frame_duration_;
-    if (estimated_next_frame_duration_ == kNoTimestamp()) {
+    if (estimated_next_frame_duration_ == kNoTimestamp) {
       estimated_next_frame_duration_ = duration;
     } else if (is_video_) {
       estimated_next_frame_duration_ =
@@ -807,10 +799,10 @@ bool WebMClusterParser::Track::QueueBuffer(
 
 base::TimeDelta WebMClusterParser::Track::GetDurationEstimate() {
   base::TimeDelta duration = estimated_next_frame_duration_;
-  if (duration != kNoTimestamp()) {
-    DVLOG(3) << __FUNCTION__ << " : using estimated duration";
+  if (duration != kNoTimestamp) {
+    DVLOG(3) << __func__ << " : using estimated duration";
   } else {
-    DVLOG(3) << __FUNCTION__ << " : using hardcoded default duration";
+    DVLOG(3) << __func__ << " : using hardcoded default duration";
     if (is_video_) {
       duration = base::TimeDelta::FromMilliseconds(
           kDefaultVideoBufferDurationInMs);
@@ -821,7 +813,7 @@ base::TimeDelta WebMClusterParser::Track::GetDurationEstimate() {
   }
 
   DCHECK(duration > base::TimeDelta());
-  DCHECK(duration != kNoTimestamp());
+  DCHECK(duration != kNoTimestamp);
   return duration;
 }
 

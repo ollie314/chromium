@@ -39,33 +39,34 @@
 #include "platform/image-decoders/ImageDecoder.h"
 #include "platform/image-decoders/ImageFrame.h"
 #include "platform/image-decoders/SegmentReader.h"
-#include "platform/image-encoders/skia/PNGImageEncoder.h"
+#include "platform/image-encoders/PNGImageEncoder.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "third_party/skia/include/core/SkStream.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/HexNumber.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/text/Base64.h"
 #include "wtf/text/TextEncoding.h"
+#include <memory>
 
 namespace blink {
 
-PictureSnapshot::PictureSnapshot(PassRefPtr<const SkPicture> picture)
-    : m_picture(picture)
+PictureSnapshot::PictureSnapshot(sk_sp<const SkPicture> picture)
+    : m_picture(std::move(picture))
 {
 }
 
 static bool decodeBitmap(const void* data, size_t length, SkBitmap* result)
 {
-    OwnPtr<ImageDecoder> imageDecoder = ImageDecoder::create(static_cast<const char*>(data), length,
+    // No need to copy the data; this decodes immediately.
+    RefPtr<SegmentReader> segmentReader = SegmentReader::createFromSkData(SkData::MakeWithoutCopy(data, length));
+    std::unique_ptr<ImageDecoder> imageDecoder = ImageDecoder::create(segmentReader.release(), true,
         ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileIgnored);
     if (!imageDecoder)
         return false;
 
-    // No need to copy the data; this decodes immediately.
-    RefPtr<SegmentReader> segmentReader = SegmentReader::createFromSkData(adoptRef(SkData::NewWithoutCopy(data, length)));
-    imageDecoder->setData(segmentReader.release(), true);
     ImageFrame* frame = imageDecoder->frameBufferAtIndex(0);
     if (!frame)
         return true;
@@ -90,7 +91,7 @@ PassRefPtr<PictureSnapshot> PictureSnapshot::load(const Vector<RefPtr<TilePictur
         pictures.append(std::move(picture));
     }
     if (tiles.size() == 1)
-        return adoptRef(new PictureSnapshot(fromSkSp(std::move(pictures[0]))));
+        return adoptRef(new PictureSnapshot(std::move(pictures[0])));
     SkPictureRecorder recorder;
     SkCanvas* canvas = recorder.beginRecording(unionRect.width(), unionRect.height(), 0, 0);
     for (size_t i = 0; i < pictures.size(); ++i) {
@@ -99,7 +100,7 @@ PassRefPtr<PictureSnapshot> PictureSnapshot::load(const Vector<RefPtr<TilePictur
         pictures[i]->playback(canvas, 0);
         canvas->restore();
     }
-    return adoptRef(new PictureSnapshot(fromSkSp(recorder.finishRecordingAsPicture())));
+    return adoptRef(new PictureSnapshot(recorder.finishRecordingAsPicture()));
 }
 
 bool PictureSnapshot::isEmpty() const
@@ -107,7 +108,7 @@ bool PictureSnapshot::isEmpty() const
     return m_picture->cullRect().isEmpty();
 }
 
-PassOwnPtr<Vector<char>> PictureSnapshot::replay(unsigned fromStep, unsigned toStep, double scale) const
+std::unique_ptr<Vector<char>> PictureSnapshot::replay(unsigned fromStep, unsigned toStep, double scale) const
 {
     const SkIRect bounds = m_picture->cullRect().roundOut();
 
@@ -127,10 +128,10 @@ PassOwnPtr<Vector<char>> PictureSnapshot::replay(unsigned fromStep, unsigned toS
         canvas.resetStepCount();
         m_picture->playback(&canvas, &canvas);
     }
-    OwnPtr<Vector<char>> base64Data = adoptPtr(new Vector<char>());
+    std::unique_ptr<Vector<char>> base64Data = wrapUnique(new Vector<char>());
     Vector<char> encodedImage;
 
-    RefPtr<SkImage> image = adoptRef(SkImage::NewFromBitmap(bitmap));
+    sk_sp<SkImage> image = SkImage::MakeFromBitmap(bitmap);
     if (!image)
         return nullptr;
 
@@ -141,12 +142,12 @@ PassOwnPtr<Vector<char>> PictureSnapshot::replay(unsigned fromStep, unsigned toS
         return nullptr;
 
     base64Encode(encodedImage, *base64Data);
-    return base64Data.release();
+    return base64Data;
 }
 
-PassOwnPtr<PictureSnapshot::Timings> PictureSnapshot::profile(unsigned minRepeatCount, double minDuration, const FloatRect* clipRect) const
+std::unique_ptr<PictureSnapshot::Timings> PictureSnapshot::profile(unsigned minRepeatCount, double minDuration, const FloatRect* clipRect) const
 {
-    OwnPtr<PictureSnapshot::Timings> timings = adoptPtr(new PictureSnapshot::Timings());
+    std::unique_ptr<PictureSnapshot::Timings> timings = wrapUnique(new PictureSnapshot::Timings());
     timings->reserveCapacity(minRepeatCount);
     const SkIRect bounds = m_picture->cullRect().roundOut();
     SkBitmap bitmap;
@@ -169,10 +170,10 @@ PassOwnPtr<PictureSnapshot::Timings> PictureSnapshot::profile(unsigned minRepeat
         m_picture->playback(&canvas);
         now = WTF::monotonicallyIncreasingTime();
     }
-    return timings.release();
+    return timings;
 }
 
-PassRefPtr<JSONArray> PictureSnapshot::snapshotCommandLog() const
+std::unique_ptr<JSONArray> PictureSnapshot::snapshotCommandLog() const
 {
     const SkIRect bounds = m_picture->cullRect().roundOut();
     LoggingCanvas canvas(bounds.width(), bounds.height());

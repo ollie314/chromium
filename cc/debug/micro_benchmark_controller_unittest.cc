@@ -8,6 +8,7 @@
 
 #include "base/callback.h"
 #include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "cc/debug/micro_benchmark.h"
 #include "cc/layers/layer.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
@@ -22,22 +23,19 @@ namespace {
 
 class MicroBenchmarkControllerTest : public testing::Test {
  public:
-  MicroBenchmarkControllerTest()
-      : layer_tree_host_client_(FakeLayerTreeHostClient::DIRECT_3D) {}
-
   void SetUp() override {
     impl_task_runner_provider_ =
         base::WrapUnique(new FakeImplTaskRunnerProvider);
-    layer_tree_host_impl_ = base::WrapUnique(new FakeLayerTreeHostImpl(
+    layer_tree_host_impl_ = base::MakeUnique<FakeLayerTreeHostImpl>(
         impl_task_runner_provider_.get(), &shared_bitmap_manager_,
-        &task_graph_runner_));
+        &task_graph_runner_);
 
     layer_tree_host_ = FakeLayerTreeHost::Create(&layer_tree_host_client_,
                                                  &task_graph_runner_);
     layer_tree_host_->SetRootLayer(Layer::Create());
     layer_tree_host_->InitializeForTesting(
         TaskRunnerProvider::Create(nullptr, nullptr),
-        std::unique_ptr<Proxy>(new FakeProxy), nullptr);
+        std::unique_ptr<Proxy>(new FakeProxy));
   }
 
   void TearDown() override {
@@ -82,7 +80,6 @@ TEST_F(MicroBenchmarkControllerTest, BenchmarkRan) {
       base::Bind(&IncrementCallCount, base::Unretained(&run_count)));
   EXPECT_GT(id, 0);
 
-  layer_tree_host_->SetOutputSurfaceLostForTesting(false);
   layer_tree_host_->UpdateLayers();
 
   EXPECT_EQ(1, run_count);
@@ -101,7 +98,6 @@ TEST_F(MicroBenchmarkControllerTest, MultipleBenchmarkRan) {
       base::Bind(&IncrementCallCount, base::Unretained(&run_count)));
   EXPECT_GT(id, 0);
 
-  layer_tree_host_->SetOutputSurfaceLostForTesting(false);
   layer_tree_host_->UpdateLayers();
 
   EXPECT_EQ(2, run_count);
@@ -143,7 +139,7 @@ TEST_F(MicroBenchmarkControllerTest, BenchmarkImplRan) {
   layer_tree_host_impl_->CommitComplete();
 
   // Make sure all posted messages run.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(1, run_count);
 }

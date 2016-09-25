@@ -1,14 +1,15 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="it">
-<translation id="1008557486741366299">Non adesso</translation>
 <translation id="1047726139967079566">Aggiungi questa pagina ai Preferiti...</translation>
 <translation id="1172898394251786223">Campo successivo</translation>
 <translation id="2320166752086256636">Nascondi tastiera</translation>
 <translation id="2467815441875554965">Ricerca contestuale</translation>
+<translation id="2572712655377361602">Una norma relativa ai dispositivi ha impedito l'accesso alle tue foto</translation>
 <translation id="2704606927547763573">Copiata</translation>
 <translation id="2747003861858887689">Campo precedente</translation>
 <translation id="2780046210906776326">Nessun account email</translation>
+<translation id="3172213052701798825">Google Smart Lock per password</translation>
 <translation id="3244271242291266297">MM</translation>
 <translation id="3252394070589632019"><ph name="VALUE" />, <ph name="ADDITIONAL_INFO" />, <ph name="INDEX" /> di <ph name="NUM_SUGGESTIONS" /></translation>
 <translation id="3335947283844343239">Riapri scheda chiusa</translation>
@@ -19,7 +20,9 @@
 <translation id="4399225372525667111">Chrome non riesce a verificare l'esattezza dell'URL di questo sito.</translation>
 <translation id="4728558894243024398">Piattaforma</translation>
 <translation id="473775607612524610">Aggiorna</translation>
+<translation id="4875622588773761625">Vuoi che <ph name="PASSWORD_MANAGER_BRAND" /> aggiorni la password di questo sito?</translation>
 <translation id="5317780077021120954">Salva</translation>
+<translation id="6039694632319341016">Vuoi che <ph name="PASSWORD_MANAGER_BRAND" /> aggiorni la password di questo sito per l'account <ph name="USERNAME" />?</translation>
 <translation id="605721222689873409">AA</translation>
 <translation id="6149061208933997199">Utilizza password</translation>
 <translation id="6196207969502475924">Ricerca vocale</translation>

@@ -22,11 +22,11 @@
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
-#include "ui/gfx/screen.h"
+#include "ui/display/screen.h"
 
 #if defined(USE_X11)
 #include "ui/aura/window_tree_host_x11.h"
-#include "ui/base/x/x11_util.h"
+#include "ui/base/x/x11_util.h"  // nogncheck
 #endif
 
 namespace aura {
@@ -67,9 +67,12 @@ void AuraTestHelper::SetUp(ui::ContextFactory* context_factory) {
 
   ui::InitializeInputMethodForTesting();
 
-  gfx::Size host_size(800, 600);
+  display::Screen* screen = display::Screen::GetScreen();
+  gfx::Size host_size(screen ? screen->GetPrimaryDisplay().GetSizeInPixel()
+                             : gfx::Size(800, 600));
   test_screen_.reset(TestScreen::Create(host_size));
-  gfx::Screen::SetScreenInstance(test_screen_.get());
+  if (!screen)
+    display::Screen::SetScreenInstance(test_screen_.get());
   host_.reset(test_screen_->CreateHostForPrimaryDisplay());
 
   focus_client_.reset(new TestFocusClient);
@@ -90,8 +93,8 @@ void AuraTestHelper::TearDown() {
   client::SetFocusClient(root_window(), nullptr);
   host_.reset();
   ui::GestureRecognizer::Reset();
-  if (gfx::Screen::GetScreen() == test_screen_.get())
-    gfx::Screen::SetScreenInstance(nullptr);
+  if (display::Screen::GetScreen() == test_screen_.get())
+    display::Screen::SetScreenInstance(nullptr);
   test_screen_.reset();
 
 #if defined(USE_X11)

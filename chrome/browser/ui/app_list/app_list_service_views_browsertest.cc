@@ -22,12 +22,15 @@
 #include "ui/app_list/views/app_list_main_view.h"
 #include "ui/app_list/views/app_list_view.h"
 #include "ui/app_list/views/contents_view.h"
+#include "ui/app_list/views/test/app_list_view_test_api.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/shell.h"
+#include "chrome/browser/chromeos/arc/arc_auth_service.h"
 #include "chrome/browser/ui/ash/app_list/test/app_list_service_ash_test_api.h"
+#include "chromeos/chromeos_switches.h"
 #endif
 
 namespace {
@@ -41,27 +44,6 @@ app_list::AppListView* GetAppListView(AppListService* service) {
 }
 
 }  // namespace
-
-namespace test {
-
-// Allow access to private variables of the AppListView for testing.
-class AppListViewTestApi {
- public:
-  explicit AppListViewTestApi(app_list::AppListView* view) : view_(view) {}
-  virtual ~AppListViewTestApi() {}
-
-  bool is_overlay_visible() {
-    DCHECK(view_->overlay_view_);
-    return view_->overlay_view_->visible();
-  }
-
- private:
-  app_list::AppListView* view_;
-
-  DISALLOW_COPY_AND_ASSIGN(AppListViewTestApi);
-};
-
-}  // namespace test
 
 // Browser Test for AppListService on Views platforms.
 typedef InProcessBrowserTest AppListServiceViewsBrowserTest;
@@ -99,8 +81,8 @@ IN_PROC_BROWSER_TEST_F(AppListServiceViewsBrowserTest, NativeClose) {
 // Dismiss the app list via an accelerator when it is the only thing keeping
 // Chrome alive and expect everything to clean up properly. This is a regression
 // test for http://crbug.com/395937.
-// Flaky on Win and Linux. https://crbug.com/477697
-#if defined(OS_WIN) || defined(OS_LINUX)
+// Flaky on Linux. https://crbug.com/477697
+#if defined(OS_LINUX)
 #define MAYBE_AcceleratorClose DISABLED_AcceleratorClose
 #else
 #define MAYBE_AcceleratorClose AcceleratorClose
@@ -131,14 +113,35 @@ IN_PROC_BROWSER_TEST_F(AppListServiceViewsBrowserTest, MAYBE_AcceleratorClose) {
 }
 
 // Tests for opening the app info dialog from the app list.
-class AppListControllerAppInfoDialogBrowserTest : public ExtensionBrowserTest {
+class AppListControllerAppInfoDialogBrowserTest :
+    public ExtensionBrowserTest,
+    public testing::WithParamInterface<bool> {
  public:
   AppListControllerAppInfoDialogBrowserTest() {}
   ~AppListControllerAppInfoDialogBrowserTest() override {}
 
  protected:
   // content::BrowserTestBase:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ExtensionBrowserTest::SetUpCommandLine(command_line);
+#if defined(OS_CHROMEOS)
+    if (GetParam())
+      command_line->AppendSwitch(chromeos::switches::kEnableArc);
+#endif
+  }
+
+  void SetUpInProcessBrowserTestFixture() override {
+    ExtensionBrowserTest::SetUpInProcessBrowserTestFixture();
+#if defined(OS_CHROMEOS)
+    arc::ArcAuthService::DisableUIForTesting();
+#endif
+  }
+
   void SetUpOnMainThread() override {
+#if defined(OS_CHROMEOS)
+    if (GetParam())
+      arc::ArcAuthService::Get()->EnableArc();
+#endif
     // Install a test extension.
     base::FilePath test_extension_path;
     EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_extension_path));
@@ -159,11 +162,16 @@ class AppListControllerAppInfoDialogBrowserTest : public ExtensionBrowserTest {
     EXPECT_TRUE(native_view_);
   }
 
+  // Opens app info for default test extension.
   void OpenAppInfoDialog() {
+    OpenAppInfoDialog(extension_->id());
+  }
+
+  void OpenAppInfoDialog(const std::string& app_id) {
     AppListControllerDelegate* controller = service_->GetControllerDelegate();
     EXPECT_TRUE(controller);
     EXPECT_TRUE(controller->GetAppListWindow());
-    controller->DoShowAppInfoFlow(browser()->profile(), extension_->id());
+    controller->DoShowAppInfoFlow(browser()->profile(), app_id);
   }
 
   AppListService* service_;
@@ -177,9 +185,9 @@ class AppListControllerAppInfoDialogBrowserTest : public ExtensionBrowserTest {
 
 // Test the DoShowAppInfoFlow function of the controller delegate.
 // flaky: http://crbug.com/378251
-IN_PROC_BROWSER_TEST_F(AppListControllerAppInfoDialogBrowserTest,
+IN_PROC_BROWSER_TEST_P(AppListControllerAppInfoDialogBrowserTest,
                        DISABLED_DoShowAppInfoFlow) {
-  test::AppListViewTestApi test_api(app_list_view_);
+  app_list::test::AppListViewTestApi test_api(app_list_view_);
 
   views::Widget::Widgets owned_widgets;
   views::Widget::GetAllOwnedWidgets(native_view_, &owned_widgets);
@@ -205,7 +213,7 @@ IN_PROC_BROWSER_TEST_F(AppListControllerAppInfoDialogBrowserTest,
 
 // Check that the app list can be closed with the app info dialog
 // open without crashing. This is a regression test for http://crbug.com/443066.
-IN_PROC_BROWSER_TEST_F(AppListControllerAppInfoDialogBrowserTest,
+IN_PROC_BROWSER_TEST_P(AppListControllerAppInfoDialogBrowserTest,
                        CanCloseAppListWithAppInfoOpen) {
   OpenAppInfoDialog();
 
@@ -213,6 +221,22 @@ IN_PROC_BROWSER_TEST_F(AppListControllerAppInfoDialogBrowserTest,
   app_list_view_->GetWidget()->CloseNow();
   EXPECT_FALSE(GetAppListView(service_));
 }
+
+// Check that the app info can be safely opened for Chrome.
+IN_PROC_BROWSER_TEST_P(AppListControllerAppInfoDialogBrowserTest,
+                       OpenAppInfoForChrome) {
+  OpenAppInfoDialog(extension_misc::kChromeAppId);
+}
+
+#if defined(OS_CHROMEOS)
+INSTANTIATE_TEST_CASE_P(AppListControllerAppInfoDialogBrowserTestInstance,
+                        AppListControllerAppInfoDialogBrowserTest,
+                        testing::Bool());
+#else
+INSTANTIATE_TEST_CASE_P(AppListControllerAppInfoDialogBrowserTestInstance,
+                        AppListControllerAppInfoDialogBrowserTest,
+                        testing::Values(false));
+#endif
 
 using AppListServiceViewsExtensionBrowserTest = ExtensionBrowserTest;
 

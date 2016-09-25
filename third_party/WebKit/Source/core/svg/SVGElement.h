@@ -30,7 +30,6 @@
 #include "platform/heap/Handle.h"
 #include "wtf/Allocator.h"
 #include "wtf/HashMap.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
@@ -56,8 +55,8 @@ class CORE_EXPORT SVGElement : public Element {
     DEFINE_WRAPPERTYPEINFO();
 public:
     ~SVGElement() override;
-    void attach(const AttachContext&) override;
-    void detach(const AttachContext&) override;
+    void attachLayoutTree(const AttachContext&) override;
+    void detachLayoutTree(const AttachContext&) override;
 
     short tabIndex() const override;
     bool supportsFocus() const override { return false; }
@@ -89,6 +88,10 @@ public:
 
     void setWebAnimatedAttribute(const QualifiedName& attribute, SVGPropertyBase*);
     void clearWebAnimatedAttributes();
+
+    void setAnimatedAttribute(const QualifiedName&, SVGPropertyBase*);
+    void invalidateAnimatedAttribute(const QualifiedName&);
+    void clearAnimatedAttribute(const QualifiedName&);
 
     SVGSVGElement* ownerSVGElement() const;
     SVGElement* viewportElement() const;
@@ -124,7 +127,7 @@ public:
     void removeInstanceMapping(SVGElement*);
 
     void setCursorElement(SVGCursorElement*);
-    void setCursorImageValue(CSSCursorImageValue*);
+    void setCursorImageValue(const CSSCursorImageValue*);
 
     SVGElement* correspondingElement() const;
     void setCorrespondingElement(SVGElement*);
@@ -181,6 +184,7 @@ public:
     };
 
     void invalidateInstances();
+    void setNeedsStyleRecalcForInstances(StyleChangeType, const StyleChangeReasonForTracing&);
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -222,8 +226,8 @@ protected:
     void reportAttributeParsingError(SVGParsingError, const QualifiedName&, const AtomicString&);
     bool hasFocusEventListeners() const;
 
-    bool addEventListenerInternal(const AtomicString& eventType, EventListener*, const EventListenerOptions&) final;
-    bool removeEventListenerInternal(const AtomicString& eventType, EventListener*, const EventListenerOptions&) final;
+    void addedEventListener(const AtomicString& eventType, RegisteredEventListener&) final;
+    void removedEventListener(const AtomicString& eventType, const RegisteredEventListener&) final;
 
 private:
     bool isSVGElement() const = delete; // This will catch anyone doing an unnecessary check.

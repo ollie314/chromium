@@ -14,13 +14,19 @@
 namespace blimp {
 
 using BlobId = std::string;
-using BlobData = base::RefCountedData<const std::string>;
-using BlobDataPtr = scoped_refptr<BlobData>;
+using BlobData = base::RefCountedData<std::string>;
+
+// Immutable, ref-counted representation of blob payloads, suitable for sharing
+// across threads.
+using BlobDataPtr = scoped_refptr<const BlobData>;
 
 // An interface for a cache of blobs.
 class BLIMP_COMMON_EXPORT BlobCache {
  public:
   virtual ~BlobCache() {}
+
+  // Gets the keys of items stored by the cache.
+  virtual std::vector<BlobId> GetCachedBlobIds() const = 0;
 
   // Returns true if there is a cache item |id|.
   virtual bool Contains(const BlobId& id) const = 0;

@@ -54,10 +54,10 @@ public:
     void recalcTextStyle(StyleRecalcChange, Text* nextTextSibling);
     bool textLayoutObjectIsNeeded(const ComputedStyle&, const LayoutObject& parent) const;
     LayoutText* createTextLayoutObject(const ComputedStyle&);
-    void updateTextLayoutObject(unsigned offsetOfReplacedData, unsigned lengthOfReplacedData, RecalcStyleBehavior = DoNotRecalcStyle);
+    void updateTextLayoutObject(unsigned offsetOfReplacedData, unsigned lengthOfReplacedData);
 
-    void attach(const AttachContext& = AttachContext()) final;
-    void reattachIfNeeded(const AttachContext& = AttachContext());
+    void attachLayoutTree(const AttachContext& = AttachContext()) final;
+    void reattachLayoutTreeIfNeeded(const AttachContext& = AttachContext());
 
     bool canContainRangeEndPoint() const final { return true; }
     NodeType getNodeType() const override;
@@ -77,10 +77,6 @@ private:
     bool needsWhitespaceLayoutObject();
 
     virtual Text* cloneWithData(const String&);
-
-#ifndef NDEBUG
-    void formatForDebugger(char* buffer, unsigned length) const override;
-#endif
 };
 
 DEFINE_NODE_TYPE_CASTS(Text, isTextNode());

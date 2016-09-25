@@ -25,7 +25,7 @@
 
 #include "core/html/track/TrackEvent.h"
 
-#include "bindings/core/v8/UnionTypesCore.h"
+#include "bindings/core/v8/VideoTrackOrAudioTrackOrTextTrack.h"
 #include "core/html/track/AudioTrack.h"
 #include "core/html/track/TextTrack.h"
 #include "core/html/track/VideoTrack.h"
@@ -51,7 +51,7 @@ TrackEvent::TrackEvent(const AtomicString& type, const TrackEventInit& initializ
     else if (track.isTextTrack())
         m_track = track.getAsTextTrack();
     else
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
 }
 
 TrackEvent::~TrackEvent()
@@ -79,7 +79,7 @@ void TrackEvent::track(VideoTrackOrAudioTrackOrTextTrack& returnValue)
         returnValue.setVideoTrack(toVideoTrack(m_track.get()));
         break;
     default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
 }
 

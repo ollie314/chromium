@@ -13,7 +13,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/policy/core/browser/configuration_policy_handler_list.h"
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/prefs/pref_value_map.h"
@@ -31,6 +31,10 @@ void LogErrors(PolicyErrorMap* errors) {
     base::string16 policy = base::ASCIIToUTF16(iter->first);
     DLOG(WARNING) << "Policy " << policy << ": " << iter->second;
   }
+}
+
+bool IsLevel(PolicyLevel level, const PolicyMap::const_iterator iter) {
+  return iter->second.level == level;
 }
 
 }  // namespace
@@ -97,7 +101,7 @@ ConfigurationPolicyPrefStore::~ConfigurationPolicyPrefStore() {
 }
 
 void ConfigurationPolicyPrefStore::Refresh() {
-  scoped_ptr<PrefValueMap> new_prefs(CreatePreferencesFromPolicies());
+  std::unique_ptr<PrefValueMap> new_prefs(CreatePreferencesFromPolicies());
   std::vector<std::string> changed_prefs;
   new_prefs->GetDifferingKeys(prefs_.get(), &changed_prefs);
   prefs_.swap(new_prefs);
@@ -112,13 +116,13 @@ void ConfigurationPolicyPrefStore::Refresh() {
 }
 
 PrefValueMap* ConfigurationPolicyPrefStore::CreatePreferencesFromPolicies() {
-  scoped_ptr<PrefValueMap> prefs(new PrefValueMap);
+  std::unique_ptr<PrefValueMap> prefs(new PrefValueMap);
   PolicyMap filtered_policies;
   filtered_policies.CopyFrom(policy_service_->GetPolicies(
       PolicyNamespace(POLICY_DOMAIN_CHROME, std::string())));
-  filtered_policies.FilterLevel(level_);
+  filtered_policies.EraseNonmatching(base::Bind(&IsLevel, level_));
 
-  scoped_ptr<PolicyErrorMap> errors(new PolicyErrorMap);
+  std::unique_ptr<PolicyErrorMap> errors(new PolicyErrorMap);
 
   handler_list_->ApplyPolicySettings(filtered_policies,
                                      prefs.get(),

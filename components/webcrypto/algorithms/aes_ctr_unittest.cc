@@ -24,15 +24,13 @@ blink::WebCryptoAlgorithm CreateAesCtrAlgorithm(
     uint8_t length_bits) {
   return blink::WebCryptoAlgorithm::adoptParamsAndCreate(
       blink::WebCryptoAlgorithmIdAesCtr,
-      new blink::WebCryptoAesCtrParams(
-          length_bits, counter.data(),
-          static_cast<unsigned int>(counter.size())));
+      new blink::WebCryptoAesCtrParams(length_bits, counter));
 }
 
 class WebCryptoAesCtrTest : public WebCryptoTestBase {};
 
 TEST_F(WebCryptoAesCtrTest, EncryptDecryptKnownAnswer) {
-  scoped_ptr<base::ListValue> tests;
+  std::unique_ptr<base::ListValue> tests;
   ASSERT_TRUE(ReadJsonTestFileToList("aes_ctr.json", &tests));
 
   for (size_t test_index = 0; test_index < tests->GetSize(); ++test_index) {

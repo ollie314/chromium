@@ -18,6 +18,7 @@
 #include "base/time/time.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/decoder_buffer.h"
+#include "media/base/media_log.h"
 #include "media/base/media_track.h"
 #include "media/base/media_tracks.h"
 #include "media/base/stream_parser_buffer.h"
@@ -79,6 +80,8 @@ class Mp2tStreamParserTest : public testing::Test {
   DecodeTimestamp audio_max_dts_;
   DecodeTimestamp video_min_dts_;
   DecodeTimestamp video_max_dts_;
+  StreamParser::TrackId audio_track_id_;
+  StreamParser::TrackId video_track_id_;
 
   void ResetStats() {
     segment_count_ = 0;
@@ -117,40 +120,56 @@ class Mp2tStreamParserTest : public testing::Test {
 
   bool OnNewConfig(std::unique_ptr<MediaTracks> tracks,
                    const StreamParser::TextTrackConfigMap& tc) {
-    const AudioDecoderConfig& ac = tracks->getFirstAudioConfig();
-    const VideoDecoderConfig& vc = tracks->getFirstVideoConfig();
-    DVLOG(1) << "OnNewConfig: media tracks count=" << tracks->tracks().size()
-             << ", audio=" << ac.IsValidConfig()
-             << ", video=" << vc.IsValidConfig();
+    DVLOG(1) << "OnNewConfig: got " << tracks->tracks().size() << " tracks";
+    bool found_audio_track = false;
+    bool found_video_track = false;
+    for (const auto& track : tracks->tracks()) {
+      const auto& track_id = track->bytestream_track_id();
+      if (track->type() == MediaTrack::Audio) {
+        audio_track_id_ = track_id;
+        found_audio_track = true;
+        EXPECT_TRUE(tracks->getAudioConfig(track_id).IsValidConfig());
+      } else if (track->type() == MediaTrack::Video) {
+        video_track_id_ = track_id;
+        found_video_track = true;
+        EXPECT_TRUE(tracks->getVideoConfig(track_id).IsValidConfig());
+      } else {
+        // Unexpected track type.
+        LOG(ERROR) << "Unexpected track type " << track->type();
+        EXPECT_TRUE(false);
+      }
+    }
+    EXPECT_TRUE(found_audio_track);
+    EXPECT_EQ(has_video_, found_video_track);
     config_count_++;
-    EXPECT_TRUE(ac.IsValidConfig());
-    EXPECT_EQ(vc.IsValidConfig(), has_video_);
     return true;
   }
 
-
-  void DumpBuffers(const std::string& label,
-                   const StreamParser::BufferQueue& buffers) {
-    DVLOG(2) << "DumpBuffers: " << label << " size " << buffers.size();
-    for (StreamParser::BufferQueue::const_iterator buf = buffers.begin();
-         buf != buffers.end(); buf++) {
-      DVLOG(3) << "  n=" << buf - buffers.begin()
-               << ", size=" << (*buf)->data_size()
-               << ", dur=" << (*buf)->duration().InMilliseconds();
-    }
-  }
-
-  bool OnNewBuffers(const StreamParser::BufferQueue& audio_buffers,
-                    const StreamParser::BufferQueue& video_buffers,
-                    const StreamParser::TextBufferQueueMap& text_map) {
+  bool OnNewBuffers(const StreamParser::BufferQueueMap& buffer_queue_map) {
     EXPECT_GT(config_count_, 0);
-    DumpBuffers("audio_buffers", audio_buffers);
-    DumpBuffers("video_buffers", video_buffers);
+    // Ensure that track ids are properly assigned on all emitted buffers.
+    for (const auto& it : buffer_queue_map) {
+      DVLOG(3) << "Buffers for track_id=" << it.first;
+      for (const auto& buf : it.second) {
+        DVLOG(3) << "  track_id=" << buf->track_id()
+                 << ", size=" << buf->data_size()
+                 << ", pts=" << buf->timestamp().InSecondsF()
+                 << ", dts=" << buf->GetDecodeTimestamp().InSecondsF()
+                 << ", dur=" << buf->duration().InSecondsF();
+        EXPECT_EQ(it.first, buf->track_id());
+      }
+    }
 
-    // TODO(wolenetz/acolwell): Add text track support to more MSE parsers. See
-    // http://crbug.com/336926.
-    if (!text_map.empty())
-      return false;
+    const StreamParser::BufferQueue empty_buffers;
+    const auto& itr_audio = buffer_queue_map.find(audio_track_id_);
+    const StreamParser::BufferQueue& audio_buffers =
+        (itr_audio == buffer_queue_map.end()) ? empty_buffers
+                                              : itr_audio->second;
+
+    const auto& itr_video = buffer_queue_map.find(video_track_id_);
+    const StreamParser::BufferQueue& video_buffers =
+        (itr_video == buffer_queue_map.end()) ? empty_buffers
+                                              : itr_video->second;
 
     // Verify monotonicity.
     if (!IsMonotonic(video_buffers))
@@ -184,7 +203,8 @@ class Mp2tStreamParserTest : public testing::Test {
 
   void OnKeyNeeded(EmeInitDataType type,
                    const std::vector<uint8_t>& init_data) {
-    NOTREACHED() << "OnKeyNeeded not expected in the Mpeg2 TS parser";
+    LOG(ERROR) << "OnKeyNeeded not expected in the Mpeg2 TS parser";
+    EXPECT_TRUE(false);
   }
 
   void OnNewSegment() {
@@ -193,7 +213,8 @@ class Mp2tStreamParserTest : public testing::Test {
   }
 
   void OnEndOfSegment() {
-    NOTREACHED() << "OnEndOfSegment not expected in the Mpeg2 TS parser";
+    LOG(ERROR) << "OnEndOfSegment not expected in the Mpeg2 TS parser";
+    EXPECT_TRUE(false);
   }
 
   void InitializeParser() {

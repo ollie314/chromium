@@ -37,13 +37,14 @@
 #include "ui/android/window_android.h"
 #include "ui/gfx/android/java_bitmap.h"
 
+using base::android::JavaParamRef;
+
 namespace chrome {
 namespace android {
 
 jlong Init(JNIEnv* env,
            const JavaParamRef<jobject>& obj,
            jboolean low_mem_device,
-           jint empty_background_color,
            jlong native_window_android,
            const JavaParamRef<jobject>& jlayer_title_cache,
            const JavaParamRef<jobject>& jtab_content_manager) {
@@ -58,8 +59,7 @@ jlong Init(JNIEnv* env,
   DCHECK(tab_content_manager);
 
   // TODO(clholgat): Remove the compositor tabstrip flag.
-  view = new CompositorView(env, obj, empty_background_color, low_mem_device,
-                            window_android, layer_title_cache,
+  view = new CompositorView(env, obj, low_mem_device, window_android,
                             tab_content_manager);
 
   ui::UIResourceProvider* ui_resource_provider = view->GetUIResourceProvider();
@@ -75,32 +75,23 @@ jlong Init(JNIEnv* env,
 
 CompositorView::CompositorView(JNIEnv* env,
                                jobject obj,
-                               jint empty_background_color,
                                jboolean low_mem_device,
                                ui::WindowAndroid* window_android,
-                               LayerTitleCache* layer_title_cache,
                                TabContentManager* tab_content_manager)
-    : layer_title_cache_(layer_title_cache),
-      tab_content_manager_(tab_content_manager),
+    : tab_content_manager_(tab_content_manager),
       root_layer_(cc::SolidColorLayer::Create()),
       scene_layer_(nullptr),
       current_surface_format_(0),
       content_width_(0),
       content_height_(0),
       overlay_video_mode_(false),
-      empty_background_color_(empty_background_color),
       weak_factory_(this) {
   content::BrowserChildProcessObserver::Add(this);
   obj_.Reset(env, obj);
   compositor_.reset(content::Compositor::Create(this, window_android));
 
-  toolbar_layer_ = ToolbarLayer::Create(&(compositor_->GetResourceManager()));
-
   root_layer_->SetIsDrawable(true);
   root_layer_->SetBackgroundColor(SK_ColorWHITE);
-
-  toolbar_layer_->layer()->SetHideLayerAndSubtree(true);
-  root_layer_->AddChild(toolbar_layer_->layer());
 }
 
 CompositorView::~CompositorView() {
@@ -131,13 +122,12 @@ base::android::ScopedJavaLocalRef<jobject> CompositorView::GetResourceManager(
 void CompositorView::UpdateLayerTreeHost() {
   JNIEnv* env = base::android::AttachCurrentThread();
   // TODO(wkorman): Rename JNI interface to onCompositorUpdateLayerTreeHost.
-  Java_CompositorView_onCompositorLayout(env, obj_.obj());
+  Java_CompositorView_onCompositorLayout(env, obj_);
 }
 
 void CompositorView::OnSwapBuffersCompleted(int pending_swap_buffers) {
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_CompositorView_onSwapBuffersCompleted(env, obj_.obj(),
-                                             pending_swap_buffers);
+  Java_CompositorView_onSwapBuffersCompleted(env, obj_, pending_swap_buffers);
 }
 
 ui::UIResourceProvider* CompositorView::GetUIResourceProvider() {
@@ -244,51 +234,6 @@ void CompositorView::SetSceneLayer(JNIEnv* env,
   }
 }
 
-void CompositorView::UpdateToolbarLayer(JNIEnv* env,
-                                        const JavaParamRef<jobject>& object,
-                                        jint toolbar_resource_id,
-                                        jint toolbar_background_color,
-                                        jint url_bar_resource_id,
-                                        jfloat url_bar_alpha,
-                                        jfloat top_offset,
-                                        jfloat brightness,
-                                        bool visible,
-                                        bool show_shadow) {
-  toolbar_layer_->layer()->SetHideLayerAndSubtree(!visible);
-  if (visible) {
-    toolbar_layer_->layer()->SetPosition(gfx::PointF(0, top_offset));
-    // If we're at rest, hide the shadow.  The Android view should be drawing.
-    bool clip_shadow = top_offset >= 0.f && !show_shadow;
-    toolbar_layer_->PushResource(toolbar_resource_id, toolbar_background_color,
-                                 false, SK_ColorWHITE, url_bar_resource_id,
-                                 url_bar_alpha, false, brightness, clip_shadow);
-  }
-}
-
-void CompositorView::UpdateProgressBar(JNIEnv* env,
-                                       const JavaParamRef<jobject>& object,
-                                       jint progress_bar_x,
-                                       jint progress_bar_y,
-                                       jint progress_bar_width,
-                                       jint progress_bar_height,
-                                       jint progress_bar_color,
-                                       jint progress_bar_background_x,
-                                       jint progress_bar_background_y,
-                                       jint progress_bar_background_width,
-                                       jint progress_bar_background_height,
-                                       jint progress_bar_background_color) {
-  toolbar_layer_->UpdateProgressBar(progress_bar_x,
-                                    progress_bar_y,
-                                    progress_bar_width,
-                                    progress_bar_height,
-                                    progress_bar_color,
-                                    progress_bar_background_x,
-                                    progress_bar_background_y,
-                                    progress_bar_background_width,
-                                    progress_bar_background_height,
-                                    progress_bar_background_color);
-}
-
 void CompositorView::FinalizeLayers(JNIEnv* env,
                                     const JavaParamRef<jobject>& jobj) {
   UNSHIPPED_TRACE_EVENT0("compositor", "CompositorView::FinalizeLayers");
@@ -309,7 +254,7 @@ void CompositorView::BrowserChildProcessHostDisconnected(
     JNIEnv* env = base::android::AttachCurrentThread();
     compositor_->SetSurface(nullptr);
     Java_CompositorView_onJellyBeanSurfaceDisconnectWorkaround(
-        env, obj_.obj(), overlay_video_mode_);
+        env, obj_, overlay_video_mode_);
   }
 }
 

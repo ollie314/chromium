@@ -48,8 +48,8 @@ DEFINE_NODE_FACTORY(HTMLIFrameElement)
 DEFINE_TRACE(HTMLIFrameElement)
 {
     visitor->trace(m_sandbox);
+    visitor->trace(m_permissions);
     HTMLFrameElementBase::trace(visitor);
-    DOMTokenListObserver::trace(visitor);
 }
 
 HTMLIFrameElement::~HTMLIFrameElement()
@@ -59,6 +59,13 @@ HTMLIFrameElement::~HTMLIFrameElement()
 DOMTokenList* HTMLIFrameElement::sandbox() const
 {
     return m_sandbox.get();
+}
+
+DOMTokenList* HTMLIFrameElement::permissions() const
+{
+    if (!const_cast<HTMLIFrameElement*>(this)->initializePermissionsAttribute())
+        return nullptr;
+    return m_permissions.get();
 }
 
 bool HTMLIFrameElement::isPresentationAttribute(const QualifiedName& name) const
@@ -91,7 +98,7 @@ void HTMLIFrameElement::collectStyleForPresentationAttribute(const QualifiedName
 void HTMLIFrameElement::parseAttribute(const QualifiedName& name, const AtomicString& oldValue, const AtomicString& value)
 {
     if (name == nameAttr) {
-        if (inShadowIncludingDocument() && document().isHTMLDocument() && !isInShadowTree()) {
+        if (isInDocumentTree() && document().isHTMLDocument()) {
             HTMLDocument& document = toHTMLDocument(this->document());
             document.removeExtraNamedItem(m_name);
             document.addExtraNamedItem(value);
@@ -103,7 +110,15 @@ void HTMLIFrameElement::parseAttribute(const QualifiedName& name, const AtomicSt
     } else if (name == referrerpolicyAttr) {
         m_referrerPolicy = ReferrerPolicyDefault;
         if (!value.isNull())
-            SecurityPolicy::referrerPolicyFromString(value, &m_referrerPolicy);
+            SecurityPolicy::referrerPolicyFromStringWithLegacyKeywords(value, &m_referrerPolicy);
+    } else if (name == allowfullscreenAttr) {
+        bool oldAllowFullscreen = m_allowFullscreen;
+        m_allowFullscreen = !value.isNull();
+        if (m_allowFullscreen != oldAllowFullscreen)
+            frameOwnerPropertiesChanged();
+    } else if (name == permissionsAttr) {
+        if (initializePermissionsAttribute())
+            m_permissions->setValue(value);
     } else {
         if (name == srcAttr)
             logUpdateAttributeIfIsolatedWorldAndInDocument("iframe", srcAttr, oldValue, value);
@@ -124,7 +139,7 @@ LayoutObject* HTMLIFrameElement::createLayoutObject(const ComputedStyle&)
 Node::InsertionNotificationRequest HTMLIFrameElement::insertedInto(ContainerNode* insertionPoint)
 {
     InsertionNotificationRequest result = HTMLFrameElementBase::insertedInto(insertionPoint);
-    if (insertionPoint->inShadowIncludingDocument() && document().isHTMLDocument() && !insertionPoint->isInShadowTree())
+    if (insertionPoint->isInDocumentTree() && document().isHTMLDocument())
         toHTMLDocument(document()).addExtraNamedItem(m_name);
     logAddElementIfIsolatedWorldAndInDocument("iframe", srcAttr);
     return result;
@@ -133,7 +148,7 @@ Node::InsertionNotificationRequest HTMLIFrameElement::insertedInto(ContainerNode
 void HTMLIFrameElement::removedFrom(ContainerNode* insertionPoint)
 {
     HTMLFrameElementBase::removedFrom(insertionPoint);
-    if (insertionPoint->inShadowIncludingDocument() && document().isHTMLDocument() && !insertionPoint->isInShadowTree())
+    if (insertionPoint->isInDocumentTree() && document().isHTMLDocument())
         toHTMLDocument(document()).removeExtraNamedItem(m_name);
 }
 
@@ -142,7 +157,20 @@ bool HTMLIFrameElement::isInteractiveContent() const
     return true;
 }
 
-void HTMLIFrameElement::valueWasSet()
+void HTMLIFrameElement::permissionsValueWasSet()
+{
+    if (!initializePermissionsAttribute())
+        return;
+
+    String invalidTokens;
+    m_delegatedPermissions = m_permissions->parseDelegatedPermissions(invalidTokens);
+    if (!invalidTokens.isNull())
+        document().addConsoleMessage(ConsoleMessage::create(OtherMessageSource, ErrorMessageLevel, "Error while parsing the 'permissions' attribute: " + invalidTokens));
+    setSynchronizedLazyAttribute(permissionsAttr, m_permissions->value());
+    frameOwnerPropertiesChanged();
+}
+
+void HTMLIFrameElement::sandboxValueWasSet()
 {
     String invalidTokens;
     setSandboxFlags(m_sandbox->value().isNull() ? SandboxNone : parseSandboxPolicy(m_sandbox->tokens(), invalidTokens));
@@ -155,4 +183,15 @@ ReferrerPolicy HTMLIFrameElement::referrerPolicyAttribute()
 {
     return m_referrerPolicy;
 }
+
+bool HTMLIFrameElement::initializePermissionsAttribute()
+{
+    if (!RuntimeEnabledFeatures::permissionDelegationEnabled())
+        return false;
+
+    if (!m_permissions)
+        m_permissions = HTMLIFrameElementPermissions::create(this);
+    return true;
+}
+
 } // namespace blink

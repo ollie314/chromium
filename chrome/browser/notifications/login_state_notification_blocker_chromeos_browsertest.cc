@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/common/system/system_notifier.h"
 #include "ash/shell.h"
-#include "ash/system/system_notifier.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
@@ -13,6 +14,7 @@
 #include "content/public/test/test_utils.h"
 #include "ui/message_center/message_center.h"
 
+using base::UTF8ToUTF16;
 using namespace testing;
 
 namespace {
@@ -96,7 +98,12 @@ class LoginStateNotificationBlockerChromeOSBrowserTest
 
   bool ShouldShowNotificationAsPopup(
       const message_center::NotifierId& notifier_id) {
-    return blocker_->ShouldShowNotificationAsPopup(notifier_id);
+    message_center::Notification notification(
+        message_center::NOTIFICATION_TYPE_SIMPLE, "browser-id",
+        UTF8ToUTF16("browser-title"), UTF8ToUTF16("browser-message"),
+        gfx::Image(), UTF8ToUTF16("browser-source"), GURL(),
+        notifier_id, message_center::RichNotificationData(), NULL);
+    return blocker_->ShouldShowNotificationAsPopup(notification);
   }
 
  private:

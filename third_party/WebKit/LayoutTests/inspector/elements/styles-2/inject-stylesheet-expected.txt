@@ -13,6 +13,14 @@ background-image: none;
     initial - #main inject-stylesheet.html:5 -> inject-stylesheet.html:5:3
 background-origin: padding-box;
     initial - #main inject-stylesheet.html:5 -> inject-stylesheet.html:5:3
+background-position-x: 0%;
+    initial - #main inject-stylesheet.html:5 -> inject-stylesheet.html:5:3
+background-position-y: 0%;
+    initial - #main inject-stylesheet.html:5 -> inject-stylesheet.html:5:3
+background-repeat-x: ;
+    initial - #main inject-stylesheet.html:5 -> inject-stylesheet.html:5:3
+background-repeat-y: ;
+    initial - #main inject-stylesheet.html:5 -> inject-stylesheet.html:5:3
 background-size: auto;
     initial - #main inject-stylesheet.html:5 -> inject-stylesheet.html:5:3
 border-bottom-style: solid;
@@ -27,8 +35,8 @@ color: rgb(255, 0, 0);
     red - #main injected stylesheet
 display: block;
     block - div user agent stylesheet
--webkit-border-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAQAAAC1+jfqAAAAiElE…s+LS30CAhBN5nNxeT5hbJ1zwmji2k+aF6NENIPf/hs54f0sZFUVAMigAAAABJRU5ErkJggg==") 100% / 1 / 0px stretch;
-    url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAQAAAC1+jfqAAAAiElE…s+LS30CAhBN5nNxeT5hbJ1zwmji2k+aF6NENIPf/hs54f0sZFUVAMigAAAABJRU5ErkJggg==") - #main injected stylesheet
+-webkit-border-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAQAAAC1+jfqAAAAiElEQ…Ms+LS30CAhBN5nNxeT5hbJ1zwmji2k+aF6NENIPf/hs54f0sZFUVAMigAAAABJRU5ErkJggg==) 100% / 1 / 0px stretch;
+    url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAQAAAC1+jfqAAAAiElEQ…Ms+LS30CAhBN5nNxeT5hbJ1zwmji2k+aF6NENIPf/hs54f0sZFUVAMigAAAABJRU5ErkJggg==) - #main injected stylesheet
 [expanded] 
 element.style { ()
 
@@ -49,7 +57,7 @@ element.style { ()
 [expanded] 
 #main { (injected stylesheet)
     color: red;
-    -webkit-border-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAQAAAC1+jfqAAAAiElE…s+LS30CAhBN5nNxeT5hbJ1zwmji2k+aF6NENIPf/hs54f0sZFUVAMigAAAABJRU5ErkJggg==");
+    -webkit-border-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAQAAAC1+jfqAAAAiElEQ…Ms+LS30CAhBN5nNxeT5hbJ1zwmji2k+aF6NENIPf/hs54f0sZFUVAMigAAAABJRU5ErkJggg==);
     border-style: solid;
         border-top-style: solid;
         border-right-style: solid;
@@ -74,6 +82,18 @@ background-image: none;
     initial - #iframeBody injected stylesheet
     OVERLOADED initial - body inject-styleshe…me-data.html:4 -> inject-stylesheet-iframe-data.html:4:3
 background-origin: padding-box;
+    initial - #iframeBody injected stylesheet
+    OVERLOADED initial - body inject-styleshe…me-data.html:4 -> inject-stylesheet-iframe-data.html:4:3
+background-position-x: 0%;
+    initial - #iframeBody injected stylesheet
+    OVERLOADED initial - body inject-styleshe…me-data.html:4 -> inject-stylesheet-iframe-data.html:4:3
+background-position-y: 0%;
+    initial - #iframeBody injected stylesheet
+    OVERLOADED initial - body inject-styleshe…me-data.html:4 -> inject-stylesheet-iframe-data.html:4:3
+background-repeat-x: ;
+    initial - #iframeBody injected stylesheet
+    OVERLOADED initial - body inject-styleshe…me-data.html:4 -> inject-stylesheet-iframe-data.html:4:3
+background-repeat-y: ;
     initial - #iframeBody injected stylesheet
     OVERLOADED initial - body inject-styleshe…me-data.html:4 -> inject-stylesheet-iframe-data.html:4:3
 background-size: auto;

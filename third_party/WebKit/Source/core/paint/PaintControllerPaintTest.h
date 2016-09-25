@@ -11,57 +11,46 @@
 #include "core/paint/PaintLayer.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayer.h"
+#include "platform/graphics/paint/CullRect.h"
+#include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
 #include <gtest/gtest.h>
 
 namespace blink {
 
-class PaintControllerPaintTestBase : public RenderingTest {
+class PaintControllerPaintTestBase
+    : private ScopedSlimmingPaintV2ForTest
+    , public RenderingTest {
 public:
-    PaintControllerPaintTestBase(bool enableSlimmingPaintV2)
-        : m_originalSlimmingPaintInvalidationEnabled(RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled())
-        , m_originalSlimmingPaintV2Enabled(RuntimeEnabledFeatures::slimmingPaintV2Enabled())
-        , m_enableSlimmingPaintV2(enableSlimmingPaintV2)
-    { }
+    PaintControllerPaintTestBase(bool enableSlimmingPaintV2) : ScopedSlimmingPaintV2ForTest(enableSlimmingPaintV2) { }
 
 protected:
     LayoutView& layoutView() { return *document().layoutView(); }
-    PaintController& rootPaintController() { return layoutView().layer()->graphicsLayerBacking()->getPaintController(); }
+    PaintController& rootPaintController()
+    {
+        if (RuntimeEnabledFeatures::slimmingPaintV2Enabled())
+            return *document().view()->paintController();
+        return layoutView().layer()->graphicsLayerBacking()->getPaintController();
+    }
 
     void SetUp() override
     {
         RenderingTest::SetUp();
         enableCompositing();
-        GraphicsLayer::setDrawDebugRedFillForTesting(false);
-        RuntimeEnabledFeatures::setSlimmingPaintV2Enabled(m_enableSlimmingPaintV2);
-    }
-    void TearDown() override
-    {
-        RuntimeEnabledFeatures::setSlimmingPaintInvalidationEnabled(m_originalSlimmingPaintInvalidationEnabled);
-        RuntimeEnabledFeatures::setSlimmingPaintV2Enabled(m_originalSlimmingPaintV2Enabled);
-        GraphicsLayer::setDrawDebugRedFillForTesting(true);
-    }
-
-    // Expose some document lifecycle steps for checking new display items before commiting.
-    void updateLifecyclePhasesBeforePaint()
-    {
-        // This doesn't do all steps that FrameView does, but is enough for current tests.
-        FrameView* frameView = document().view();
-        frameView->updateLifecyclePhasesInternal(FrameView::OnlyUpToCompositingCleanPlusScrolling);
-        frameView->invalidateTreeIfNeededRecursive();
-        if (RuntimeEnabledFeatures::slimmingPaintV2Enabled())
-            document().view()->updatePaintProperties();
-    }
-
-    void updateLifecyclePhasesToPaintClean()
-    {
-        updateLifecyclePhasesBeforePaint();
-        document().view()->synchronizedPaint();
     }
 
     bool paintWithoutCommit(const IntRect* interestRect = nullptr)
     {
-        // Only root graphics layer is supported.
         document().view()->lifecycle().advanceTo(DocumentLifecycle::InPaint);
+        if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
+            if (layoutView().layer()->needsRepaint()) {
+                GraphicsContext graphicsContext(rootPaintController());
+                document().view()->paint(graphicsContext, CullRect(LayoutRect::infiniteIntRect()));
+                return true;
+            }
+            document().view()->lifecycle().advanceTo(DocumentLifecycle::PaintClean);
+            return false;
+        }
+        // Only root graphics layer is supported.
         if (!layoutView().layer()->graphicsLayerBacking()->paintWithoutCommit(interestRect)) {
             document().view()->lifecycle().advanceTo(DocumentLifecycle::PaintClean);
             return false;
@@ -92,10 +81,7 @@ protected:
         return false;
     }
 
-private:
-    bool m_originalSlimmingPaintInvalidationEnabled;
-    bool m_originalSlimmingPaintV2Enabled;
-    bool m_enableSlimmingPaintV2;
+    int numCachedNewItems() { return rootPaintController().m_numCachedNewItems; }
 };
 
 class PaintControllerPaintTest : public PaintControllerPaintTestBase {
@@ -145,12 +131,9 @@ public:
     } while (false);
 
 // Shorter names for frequently used display item types in tests.
-const DisplayItem::Type backgroundType = DisplayItem::BoxDecorationBackground;
-const DisplayItem::Type cachedBackgroundType = DisplayItem::drawingTypeToCachedDrawingType(backgroundType);
+const DisplayItem::Type backgroundType = DisplayItem::kBoxDecorationBackground;
 const DisplayItem::Type foregroundType = DisplayItem::paintPhaseToDrawingType(PaintPhaseForeground);
-const DisplayItem::Type cachedForegroundType = DisplayItem::drawingTypeToCachedDrawingType(foregroundType);
-const DisplayItem::Type documentBackgroundType = DisplayItem::DocumentBackground;
-const DisplayItem::Type cachedDocumentBackgroundType = DisplayItem::drawingTypeToCachedDrawingType(DisplayItem::DocumentBackground);
+const DisplayItem::Type documentBackgroundType = DisplayItem::kDocumentBackground;
 
 } // namespace blink
 

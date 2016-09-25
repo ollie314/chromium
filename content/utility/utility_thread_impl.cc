@@ -16,8 +16,9 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/utility/content_utility_client.h"
 #include "content/utility/utility_blink_platform_impl.h"
-#include "content/utility/utility_process_control_impl.h"
+#include "content/utility/utility_service_factory.h"
 #include "ipc/ipc_sync_channel.h"
+#include "services/shell/public/cpp/interface_registry.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 
 #if defined(OS_POSIX) && defined(ENABLE_PLUGINS)
@@ -46,6 +47,7 @@ UtilityThreadImpl::UtilityThreadImpl()
 UtilityThreadImpl::UtilityThreadImpl(const InProcessChildThreadParams& params)
     : ChildThreadImpl(ChildThreadImpl::Options::Builder()
                           .InBrowserProcess(params)
+                          .UseMojoChannel(true)
                           .Build()) {
   Init();
 }
@@ -55,9 +57,6 @@ UtilityThreadImpl::~UtilityThreadImpl() {
 
 void UtilityThreadImpl::Shutdown() {
   ChildThreadImpl::Shutdown();
-
-  if (blink_platform_impl_)
-    blink::Platform::shutdown();
 }
 
 void UtilityThreadImpl::ReleaseProcessIfNeeded() {
@@ -93,11 +92,12 @@ void UtilityThreadImpl::Init() {
   ChildProcess::current()->AddRefProcess();
   GetContentClient()->utility()->UtilityThreadStarted();
 
-  process_control_.reset(new UtilityProcessControlImpl);
-  service_registry()->AddService(base::Bind(
-      &UtilityThreadImpl::BindProcessControlRequest, base::Unretained(this)));
+  service_factory_.reset(new UtilityServiceFactory);
+  GetInterfaceRegistry()->AddInterface(base::Bind(
+      &UtilityThreadImpl::BindServiceFactoryRequest, base::Unretained(this)));
 
-  GetContentClient()->utility()->RegisterMojoServices(service_registry());
+  GetContentClient()->utility()->ExposeInterfacesToBrowser(
+      GetInterfaceRegistry());
 }
 
 bool UtilityThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
@@ -122,10 +122,10 @@ void UtilityThreadImpl::OnBatchModeFinished() {
   ReleaseProcessIfNeeded();
 }
 
-void UtilityThreadImpl::BindProcessControlRequest(
-    mojo::InterfaceRequest<mojom::ProcessControl> request) {
-  DCHECK(process_control_);
-  process_control_bindings_.AddBinding(process_control_.get(),
+void UtilityThreadImpl::BindServiceFactoryRequest(
+    shell::mojom::ServiceFactoryRequest request) {
+  DCHECK(service_factory_);
+  service_factory_bindings_.AddBinding(service_factory_.get(),
                                        std::move(request));
 }
 

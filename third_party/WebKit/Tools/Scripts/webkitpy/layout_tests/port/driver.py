@@ -27,13 +27,11 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import base64
-import copy
 import logging
 import re
 import shlex
 import sys
 import time
-import os
 
 from webkitpy.common.system import path
 from webkitpy.common.system.profiler import ProfilerFactory
@@ -57,7 +55,8 @@ class DriverInput(object):
 
 class DriverOutput(object):
     """Groups information about a output from driver for easy passing
-    and post-processing of data."""
+    and post-processing of data.
+    """
 
     def __init__(self, text, image, image_hash, audio, crash=False,
                  test_time=0, measurements=None, timeout=False, error='', crashed_process_name='??',
@@ -133,8 +132,11 @@ class Driver(object):
         self._measurements = {}
         if self._port.get_option("profile"):
             profiler_name = self._port.get_option("profiler")
-            self._profiler = ProfilerFactory.create_profiler(self._port.host,
-                                                             self._port._path_to_driver(), self._port.results_directory(), profiler_name)
+            self._profiler = ProfilerFactory.create_profiler(
+                self._port.host,
+                self._port._path_to_driver(),  # pylint: disable=protected-access
+                self._port.results_directory(),
+                profiler_name)
         else:
             self._profiler = None
 
@@ -225,16 +227,13 @@ class Driver(object):
 
     HTTP_DIR = "http/tests/"
     HTTP_LOCAL_DIR = "http/tests/local/"
-    WPT_DIR = "imported/web-platform-tests/"
+    WPT_DIR = "imported/wpt/"
 
     def is_http_test(self, test_name):
         return test_name.startswith(self.HTTP_DIR) and not test_name.startswith(self.HTTP_LOCAL_DIR)
 
-    def _should_treat_as_wpt_test(self, test_name):
-        return self._port.is_wpt_enabled() and self._port.is_wpt_test(test_name)
-
     def _get_http_host_and_ports_for_test(self, test_name):
-        if self._should_treat_as_wpt_test(test_name):
+        if self._port.should_use_wptserve(test_name):
             # TODO(burnik): Read from config or args.
             return ("web-platform.test", 8001, 8444)
         else:
@@ -248,12 +247,12 @@ class Driver(object):
         their name (e.g. 'http/tests/security/mixedContent/test1.https.html') will
         be loaded over HTTPS; all other tests over HTTP.
         """
-        is_wpt_test = self._should_treat_as_wpt_test(test_name)
+        using_wptserve = self._port.should_use_wptserve(test_name)
 
-        if not self.is_http_test(test_name) and not is_wpt_test:
+        if not self.is_http_test(test_name) and not using_wptserve:
             return path.abspath_to_uri(self._port.host.platform, self._port.abspath_for_test(test_name))
 
-        if is_wpt_test:
+        if using_wptserve:
             test_dir_prefix = self.WPT_DIR
         else:
             test_dir_prefix = self.HTTP_DIR
@@ -271,7 +270,6 @@ class Driver(object):
         This returns the test name for a given URI, e.g., if you passed in
         "file:///src/LayoutTests/fast/html/keygen.html" it would return
         "fast/html/keygen.html".
-
         """
 
         # This looks like a bit of a hack, since the uri is used instead of test name.
@@ -314,7 +312,7 @@ class Driver(object):
         self.stop()
         self._driver_tempdir = self._port._filesystem.mkdtemp(prefix='%s-' % self._port.driver_name())
         server_name = self._port.driver_name()
-        environment = self._port.setup_environ_for_server(server_name)
+        environment = self._port.setup_environ_for_server()
         environment = self._setup_environ_for_driver(environment)
         self._crashed_process_name = None
         self._crashed_pid = None
@@ -322,7 +320,7 @@ class Driver(object):
         self._leak_log = None
         cmd_line = self.cmd_line(pixel_tests, per_test_args)
         self._server_process = self._port._server_process_constructor(
-            self._port, server_name, cmd_line, environment, logging=self._port.get_option("driver_logging"))
+            self._port, server_name, cmd_line, environment, more_logging=self._port.get_option("driver_logging"))
         self._server_process.start()
         self._current_cmd_line = cmd_line
 
@@ -339,7 +337,7 @@ class Driver(object):
             line = server_process.read_stdout_line(deadline)
 
         if server_process.timed_out or server_process.has_crashed():
-            _log.error('Failed to start the %s process: \n%s' % (server_process.name(), output))
+            _log.error('Failed to start the %s process: \n%s', server_process.name(), output)
             return False
 
         return True
@@ -388,13 +386,13 @@ class Driver(object):
         elif (error_line.startswith("#CRASHED - ")
               or error_line.startswith("#PROCESS UNRESPONSIVE - ")):
             # WebKitTestRunner uses this to report that the WebProcess subprocess crashed.
-            match = re.match('#(?:CRASHED|PROCESS UNRESPONSIVE) - (\S+)', error_line)
+            match = re.match(r'#(?:CRASHED|PROCESS UNRESPONSIVE) - (\S+)', error_line)
             self._crashed_process_name = match.group(1) if match else 'WebProcess'
-            match = re.search('pid (\d+)', error_line)
+            match = re.search(r'pid (\d+)', error_line)
             pid = int(match.group(1)) if match else None
             self._crashed_pid = pid
             # FIXME: delete this after we're sure this code is working :)
-            _log.debug('%s crash, pid = %s, error_line = %s' % (self._crashed_process_name, str(pid), error_line))
+            _log.debug('%s crash, pid = %s, error_line = %s', self._crashed_process_name, str(pid), error_line)
             if error_line.startswith("#PROCESS UNRESPONSIVE - "):
                 self._subprocess_was_unresponsive = True
                 self._port.sample_process(self._crashed_process_name, self._crashed_pid)
@@ -406,15 +404,16 @@ class Driver(object):
     def _check_for_leak(self, error_line):
         if error_line.startswith("#LEAK - "):
             self._leaked = True
-            match = re.match('#LEAK - (\S+) pid (\d+) (.+)\n', error_line)
+            match = re.match(r'#LEAK - (\S+) pid (\d+) (.+)\n', error_line)
             self._leak_log = match.group(3)
         return self._leaked
 
     def _command_from_driver_input(self, driver_input):
         # FIXME: performance tests pass in full URLs instead of test names.
-        if driver_input.test_name.startswith('http://') or driver_input.test_name.startswith('https://') or driver_input.test_name == ('about:blank'):
+        if driver_input.test_name.startswith(
+                'http://') or driver_input.test_name.startswith('https://') or driver_input.test_name == ('about:blank'):
             command = driver_input.test_name
-        elif self.is_http_test(driver_input.test_name) or self._should_treat_as_wpt_test(driver_input.test_name):
+        elif self.is_http_test(driver_input.test_name) or self._port.should_use_wptserve(driver_input.test_name):
             command = self.test_to_uri(driver_input.test_name)
         else:
             command = self._port.abspath_for_test(driver_input.test_name)
@@ -461,12 +460,12 @@ class Driver(object):
 
     def _process_stdout_line(self, block, line):
         if (self._read_header(block, line, 'Content-Type: ', 'content_type')
-            or self._read_header(block, line, 'Content-Transfer-Encoding: ', 'encoding')
-            or self._read_header(block, line, 'Content-Length: ', '_content_length', int)
-            or self._read_header(block, line, 'ActualHash: ', 'content_hash')
-            or self._read_header(block, line, 'DumpMalloc: ', 'malloc')
-            or self._read_header(block, line, 'DumpJSHeap: ', 'js_heap')
-            or self._read_header(block, line, 'StdinPath', 'stdin_path')):
+                or self._read_header(block, line, 'Content-Transfer-Encoding: ', 'encoding')
+                or self._read_header(block, line, 'Content-Length: ', '_content_length', int)
+                or self._read_header(block, line, 'ActualHash: ', 'content_hash')
+                or self._read_header(block, line, 'DumpMalloc: ', 'malloc')
+                or self._read_header(block, line, 'DumpJSHeap: ', 'js_heap')
+                or self._read_header(block, line, 'StdinPath', 'stdin_path')):
             return
         # Note, we're not reading ExpectedHash: here, but we could.
         # If the line wasn't a header, we just append it to the content.
@@ -509,7 +508,8 @@ class Driver(object):
 
             if out_line:
                 if out_line[-1] != "\n":
-                    _log.error("Last character read from DRT stdout line was not a newline!  This indicates either a NRWT or DRT bug.")
+                    _log.error(
+                        "Last character read from DRT stdout line was not a newline!  This indicates either a NRWT or DRT bug.")
                 content_length_before_header_check = block._content_length
                 self._process_stdout_line(block, out_line)
                 # FIXME: Unlike HTTP, DRT dumps the content right after printing a Content-Length header.

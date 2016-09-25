@@ -76,6 +76,17 @@ body.platform-linux {
     display: flex;
     align-items: center;
     cursor: default;
+    overflow: hidden;
+}
+
+#paused-in-debugger {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+#reloading-blanket {
+    background-color: rgb(255, 255, 255);
 }
 
 .controls-line > * {
@@ -90,6 +101,8 @@ body.platform-linux {
     margin-left: -1px;
     margin-right: 0;
     padding: 0;
+    flex-shrink: 0;
+    flex-grow: 0;
 }
 
 .controls-line .button:hover {
@@ -465,6 +478,12 @@ function drawPausedInDebuggerMessage(message)
     document.body.classList.add("dimmed");
 }
 
+function showReloadingBlanket()
+{
+    var element = document.getElementById("reloading-blanket");
+    element.style.display = "block";
+}
+
 function _drawGrid(context, rulerAtRight, rulerAtBottom)
 {
     if (window._gridPainted)
@@ -650,6 +669,7 @@ function reset(resetData)
     window._controlsVisible = false;
     document.querySelector(".controls-line").style.visibility = "hidden";
     document.getElementById("element-title").style.visibility = "hidden";
+    document.getElementById("reloading-blanket").style.display = "none";
     document.getElementById("tooltip-container").removeChildren();
 
     document.body.classList.remove("dimmed");
@@ -1002,9 +1022,9 @@ function onDocumentKeyDown(event)
 {
     if (!window._controlsVisible)
         return;
-    if (event.keyIdentifier == "F8" || eventHasCtrlOrMeta(event) && event.keyCode == 220 /* backslash */)
+    if (event.key == "F8" || eventHasCtrlOrMeta(event) && event.keyCode == 220 /* backslash */)
         InspectorOverlayHost.resume();
-    else if (event.keyIdentifier == "F10" || eventHasCtrlOrMeta(event) && event.keyCode == 222 /* single quote */)
+    else if (event.key == "F10" || eventHasCtrlOrMeta(event) && event.keyCode == 222 /* single quote */)
         InspectorOverlayHost.stepOver();
 }
 
@@ -1352,7 +1372,7 @@ LayoutEditor.prototype = {
             wallPosition += (minSide === growsInside) ? - handleHalf - LayoutEditor._wallWidth : handleHalf;
             wallElement.style[description.border1] = wallPosition + "px";
             wallElement.style[description.border2] = border2Position + "px";
-            
+
             this._wallsElements.set(anchorName, wallElement);
 
             var labelElement = this._createLabel(parent, anchorElement, anchorInfo);
@@ -1534,7 +1554,7 @@ LayoutEditor.prototype = {
             return;
 
         // Clear selection on Esc.
-        if (event.keyIdentifier === "U+001B") {
+        if (event.key === "Escape") {
             event.preventDefault();
             InspectorOverlayHost.clearSelection(false);
         }
@@ -1638,6 +1658,7 @@ document.addEventListener("keydown", onDocumentKeyDown);
 </div>
 <div id="tooltip-container"></div>
 <div id="editor" class="fill"></div>
+<div id="reloading-blanket" class="fill" style="display: none"></div>
 <div class="controls-line">
     <div class="message-box"><div id="paused-in-debugger"></div></div>
     <div class="button" id="resume-button" title="Resume script execution (F8)."><div class="glyph"></div></div>

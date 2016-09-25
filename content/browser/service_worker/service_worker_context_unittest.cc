@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/time/time.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/service_worker/embedded_worker_registry.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
@@ -59,7 +60,7 @@ void ExpectRegisteredWorkers(
     bool expect_waiting,
     bool expect_active,
     ServiceWorkerStatusCode status,
-    const scoped_refptr<ServiceWorkerRegistration>& registration) {
+    scoped_refptr<ServiceWorkerRegistration> registration) {
   ASSERT_EQ(expect_status, status);
   if (status != SERVICE_WORKER_OK) {
     EXPECT_FALSE(registration.get());
@@ -85,10 +86,9 @@ class RejectInstallTestHelper : public EmbeddedWorkerTestHelper {
 
   void OnInstallEvent(int embedded_worker_id,
                       int request_id) override {
-    SimulateSend(
-        new ServiceWorkerHostMsg_InstallEventFinished(
-            embedded_worker_id, request_id,
-            blink::WebServiceWorkerEventResultRejected));
+    SimulateSend(new ServiceWorkerHostMsg_InstallEventFinished(
+        embedded_worker_id, request_id,
+        blink::WebServiceWorkerEventResultRejected, true, base::Time::Now()));
   }
 };
 
@@ -97,10 +97,9 @@ class RejectActivateTestHelper : public EmbeddedWorkerTestHelper {
   RejectActivateTestHelper() : EmbeddedWorkerTestHelper(base::FilePath()) {}
 
   void OnActivateEvent(int embedded_worker_id, int request_id) override {
-    SimulateSend(
-        new ServiceWorkerHostMsg_ActivateEventFinished(
-            embedded_worker_id, request_id,
-            blink::WebServiceWorkerEventResultRejected));
+    SimulateSend(new ServiceWorkerHostMsg_ActivateEventFinished(
+        embedded_worker_id, request_id,
+        blink::WebServiceWorkerEventResultRejected, base::Time::Now()));
   }
 };
 
@@ -533,25 +532,33 @@ TEST_F(ServiceWorkerContextTest, ProviderHostIterator) {
   // Host1 (provider_id=1): process_id=1, origin1.
   ServiceWorkerProviderHost* host1(new ServiceWorkerProviderHost(
       kRenderProcessId1, MSG_ROUTING_NONE, provider_id++,
-      SERVICE_WORKER_PROVIDER_FOR_WINDOW, context()->AsWeakPtr(), nullptr));
+      SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+      ServiceWorkerProviderHost::FrameSecurityLevel::SECURE,
+      context()->AsWeakPtr(), nullptr));
   host1->SetDocumentUrl(kOrigin1);
 
   // Host2 (provider_id=2): process_id=2, origin2.
   ServiceWorkerProviderHost* host2(new ServiceWorkerProviderHost(
       kRenderProcessId2, MSG_ROUTING_NONE, provider_id++,
-      SERVICE_WORKER_PROVIDER_FOR_WINDOW, context()->AsWeakPtr(), nullptr));
+      SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+      ServiceWorkerProviderHost::FrameSecurityLevel::SECURE,
+      context()->AsWeakPtr(), nullptr));
   host2->SetDocumentUrl(kOrigin2);
 
   // Host3 (provider_id=3): process_id=2, origin1.
   ServiceWorkerProviderHost* host3(new ServiceWorkerProviderHost(
       kRenderProcessId2, MSG_ROUTING_NONE, provider_id++,
-      SERVICE_WORKER_PROVIDER_FOR_WINDOW, context()->AsWeakPtr(), nullptr));
+      SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+      ServiceWorkerProviderHost::FrameSecurityLevel::SECURE,
+      context()->AsWeakPtr(), nullptr));
   host3->SetDocumentUrl(kOrigin1);
 
   // Host4 (provider_id=4): process_id=2, origin2, for ServiceWorker.
   ServiceWorkerProviderHost* host4(new ServiceWorkerProviderHost(
       kRenderProcessId2, MSG_ROUTING_NONE, provider_id++,
-      SERVICE_WORKER_PROVIDER_FOR_CONTROLLER, context()->AsWeakPtr(), nullptr));
+      SERVICE_WORKER_PROVIDER_FOR_CONTROLLER,
+      ServiceWorkerProviderHost::FrameSecurityLevel::SECURE,
+      context()->AsWeakPtr(), nullptr));
   host4->SetDocumentUrl(kOrigin2);
 
   context()->AddProviderHost(base::WrapUnique(host1));
@@ -618,7 +625,7 @@ TEST_P(ServiceWorkerContextRecoveryTest, DeleteAndStartOver) {
     // Reinitialize the helper to test on-disk storage.
     base::ScopedTempDir user_data_directory;
     ASSERT_TRUE(user_data_directory.CreateUniqueTempDir());
-    helper_.reset(new EmbeddedWorkerTestHelper(user_data_directory.path()));
+    helper_.reset(new EmbeddedWorkerTestHelper(user_data_directory.GetPath()));
     helper_->context_wrapper()->AddObserver(this);
   }
 

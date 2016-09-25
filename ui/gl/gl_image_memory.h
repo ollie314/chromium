@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/numerics/safe_math.h"
 #include "ui/gfx/buffer_types.h"
+#include "ui/gl/gl_export.h"
 
 namespace gl {
 
@@ -38,6 +39,7 @@ class GL_EXPORT GLImageMemory : public GLImage {
                             gfx::OverlayTransform transform,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect) override;
+  void Flush() override {}
 
   static unsigned GetInternalFormatForTesting(gfx::BufferFormat format);
 

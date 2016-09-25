@@ -26,6 +26,7 @@
 
 #include "core/css/CSSMarkup.h"
 
+#include "core/css/parser/CSSParserIdioms.h"
 #include "wtf/HexNumber.h"
 #include "wtf/text/StringBuffer.h"
 #include "wtf/text/StringBuilder.h"
@@ -42,13 +43,13 @@ static inline bool isCSSTokenizerIdentifier(const CharacterType* characters, uns
         ++characters;
 
     // {nmstart}
-    if (characters == end || !(characters[0] == '_' || characters[0] >= 128 || isASCIIAlpha(characters[0])))
+    if (characters == end || !isNameStartCodePoint(characters[0]))
         return false;
     ++characters;
 
     // {nmchar}*
     for (; characters != end; ++characters) {
-        if (!(characters[0] == '_' || characters[0] == '-' || characters[0] >= 128 || isASCIIAlphanumeric(characters[0])))
+        if (!isNameCodePoint(characters[0]))
             return false;
     }
 
@@ -81,9 +82,9 @@ static void serializeCharacterAsCodePoint(UChar32 c, StringBuilder& appendTo)
     appendTo.append(' ');
 }
 
-void serializeIdentifier(const String& identifier, StringBuilder& appendTo)
+void serializeIdentifier(const String& identifier, StringBuilder& appendTo, bool skipStartChecks)
 {
-    bool isFirst = true;
+    bool isFirst = !skipStartChecks;
     bool isSecond = false;
     bool isFirstCharHyphen = false;
     unsigned index = 0;

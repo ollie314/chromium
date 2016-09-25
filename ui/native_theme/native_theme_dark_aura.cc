@@ -18,7 +18,10 @@ SkColor NativeThemeDarkAura::GetSystemColor(ColorId color_id) const {
   if (!ui::MaterialDesignController::IsModeMaterial())
     return NativeThemeAura::GetSystemColor(color_id);
 
-  static const SkColor kLinkEnabledColor = gfx::kGoogleBlue300;
+  static const SkColor kPrimaryTextColor = SK_ColorWHITE;
+  static const SkColor kDefaultDarkBackground = SkColorSetRGB(0x3C, 0x3C, 0x3E);
+
+  static const SkColor kButtonEnabledColor = SK_ColorWHITE;
 
   static const SkColor kTextfieldDefaultColor = SK_ColorWHITE;
   static const SkColor kTextfieldDefaultBackground =
@@ -34,13 +37,21 @@ SkColor NativeThemeDarkAura::GetSystemColor(ColorId color_id) const {
 
   switch (color_id) {
     // Button
+    case kColorId_ButtonEnabledColor:
+      return kButtonEnabledColor;
     case kColorId_CallToActionColor:
-      return kLinkEnabledColor;
+      return gfx::kGoogleBlue300;
+
+    // Label
+    case kColorId_LabelEnabledColor:
+      return kPrimaryTextColor;
+    case kColorId_LabelBackgroundColor:
+      return kDefaultDarkBackground;
 
     // Link
     case kColorId_LinkEnabled:
     case kColorId_LinkPressed:
-      return kLinkEnabledColor;
+      return gfx::kGoogleBlue300;
 
     // Textfield
     case kColorId_TextfieldDefaultColor:
@@ -57,18 +68,28 @@ SkColor NativeThemeDarkAura::GetSystemColor(ColorId color_id) const {
     case kColorId_ResultsTableNormalText:
     case kColorId_ResultsTableHoveredText:
     case kColorId_ResultsTableSelectedText:
-    case kColorId_ResultsTableNormalHeadline:
-    case kColorId_ResultsTableHoveredHeadline:
-    case kColorId_ResultsTableSelectedHeadline:
       return kResultsTableText;
     case kColorId_ResultsTableNormalDimmedText:
     case kColorId_ResultsTableHoveredDimmedText:
     case kColorId_ResultsTableSelectedDimmedText:
       return kResultsTableDimmedText;
 
+    // FocusableBorder
+    case kColorId_FocusedBorderColor:
+      return gfx::kGoogleBlue300;
+
+    // Alert icons
+    case kColorId_AlertSeverityLow:
+      return gfx::kGoogleGreen300;
+    case kColorId_AlertSeverityMedium:
+      return gfx::kGoogleYellow300;
+    case kColorId_AlertSeverityHigh:
+      return gfx::kGoogleRed300;
+
     // Intentional pass-throughs to NativeThemeAura.
-    case kColorId_ButtonEnabledColor:
+    case kColorId_LabelDisabledColor:
     case kColorId_TextOnCallToActionColor:
+    case kColorId_ButtonPressedShade:
     case kColorId_ResultsTableHoveredBackground:
     case kColorId_ResultsTableSelectedBackground:
     case kColorId_ResultsTableNormalUrl:
@@ -80,7 +101,6 @@ SkColor NativeThemeDarkAura::GetSystemColor(ColorId color_id) const {
     case kColorId_WindowBackground:
     case kColorId_DialogBackground:
     case kColorId_BubbleBackground:
-    case kColorId_FocusedBorderColor:
     case kColorId_UnfocusedBorderColor:
     case kColorId_ButtonBackgroundColor:
     case kColorId_ButtonDisabledColor:
@@ -104,9 +124,6 @@ SkColor NativeThemeDarkAura::GetSystemColor(ColorId color_id) const {
     case kColorId_EnabledMenuButtonBorderColor:
     case kColorId_FocusedMenuButtonBorderColor:
     case kColorId_HoverMenuButtonBorderColor:
-    case kColorId_LabelEnabledColor:
-    case kColorId_LabelDisabledColor:
-    case kColorId_LabelBackgroundColor:
     case kColorId_LinkDisabled:
     case kColorId_TextfieldReadOnlyColor:
     case kColorId_TextfieldReadOnlyBackground:

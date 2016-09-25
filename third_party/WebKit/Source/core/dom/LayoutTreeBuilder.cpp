@@ -82,6 +82,7 @@ LayoutObject* LayoutTreeBuilderForElement::parentLayoutObject() const
     return m_layoutObjectParent;
 }
 
+DISABLE_CFI_PERF
 bool LayoutTreeBuilderForElement::shouldCreateLayoutObject() const
 {
     if (!m_layoutObjectParent)
@@ -112,6 +113,7 @@ ComputedStyle& LayoutTreeBuilderForElement::style() const
     return *m_style;
 }
 
+DISABLE_CFI_PERF
 void LayoutTreeBuilderForElement::createLayoutObject()
 {
     ComputedStyle& style = this->style();
@@ -135,7 +137,7 @@ void LayoutTreeBuilderForElement::createLayoutObject()
     m_node->setLayoutObject(newLayoutObject);
     newLayoutObject->setStyle(&style); // setStyle() can depend on layoutObject() already being set.
 
-    if (Fullscreen::isActiveFullScreenElement(*m_node)) {
+    if (Fullscreen::isCurrentFullScreenElement(*m_node)) {
         newLayoutObject = LayoutFullScreen::wrapLayoutObject(newLayoutObject, parentLayoutObject, &m_node->document());
         if (!newLayoutObject)
             return;

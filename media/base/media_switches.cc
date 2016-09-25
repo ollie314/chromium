@@ -17,18 +17,14 @@ const char kVideoThreads[] = "video-threads";
 const char kEnableMediaSuspend[] = "enable-media-suspend";
 const char kDisableMediaSuspend[] = "disable-media-suspend";
 
-#if defined(OS_ANDROID)
-// Sets the MediaSource player that uses UI thread for frame processing.
-const char kDisableMediaThreadForMediaPlayback[] =
-    "disable-media-thread-for-media-playback";
+// Force to report VP9 as an unsupported MIME type.
+const char kReportVp9AsAnUnsupportedMimeType[] =
+    "report-vp9-as-an-unsupported-mime-type";
 
+#if defined(OS_ANDROID)
 // Use WebMediaPlayerAndroid instead of WebMediaPlayerImpl. This is a temporary
 // switch for holding back the new unified media pipeline.
 const char kDisableUnifiedMediaPipeline[] = "disable-unified-media-pipeline";
-
-// Sets the MediaSource player that uses the separate media thread
-const char kEnableMediaThreadForMediaPlayback[] =
-    "enable-media-thread-for-media-playback";
 #endif
 
 #if defined(OS_LINUX) || defined(OS_FREEBSD) || defined(OS_SOLARIS)
@@ -93,7 +89,8 @@ const char kUseFileForFakeVideoCapture[] = "use-file-for-fake-video-capture";
 // the bits as if they came from the microphone, which means you should disable
 // audio processing (lest your audio file will play back distorted). The input
 // file is converted to suit Chrome's audio buses if necessary, so most sane
-// .wav files should work.
+// .wav files should work. You can pass either <path> to play the file looping
+// or <path>%noloop to stop after playing the file to completion.
 const char kUseFileForFakeAudioCapture[] = "use-file-for-fake-audio-capture";
 
 // Enables support for inband text tracks in media content.
@@ -114,12 +111,66 @@ const char kVideoUnderflowThresholdMs[] = "video-underflow-threshold-ms";
 const char kDisableRTCSmoothnessAlgorithm[] =
     "disable-rtc-smoothness-algorithm";
 
+// Enables demuxing of vp9 in mp4. Note that this flag will not have any effect
+// if MP4 demuxing is not enabled in the build.
+const char kEnableVp9InMp4[] = "enable-vp9-in-mp4";
+
+// Force media player using SurfaceView instead of SurfaceTexture on Android.
+const char kForceVideoOverlays[] = "force-video-overlays";
+
+// Allows explicitly specifying MSE audio/video buffer sizes.
+// Default values are 150M for video and 12M for audio.
+const char kMSEAudioBufferSizeLimit[] = "mse-audio-buffer-size-limit";
+const char kMSEVideoBufferSizeLimit[] = "mse-video-buffer-size-limit";
+
 }  // namespace switches
 
 namespace media {
 
+#if defined(OS_WIN)
+// Enables H264 HW encode acceleration using Media Foundation for Windows.
+const base::Feature kMediaFoundationH264Encoding{
+    "MediaFoundationH264Encoding", base::FEATURE_DISABLED_BY_DEFAULT};
+#endif  // defined(OS_WIN)
+
+#if defined(ENABLE_PLUGINS)
+// Let flash join and be controlled by media session, only valid when
+// |kEnableDefaultMediaSession| is on.
+const base::Feature kFlashJoinsMediaSession{"flash-join-media-session",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
+#endif  // defined(ENABLE_PLUGINS)
+
+// Use new audio rendering mixer.
+const base::Feature kNewAudioRenderingMixingStrategy{
+    "NewAudioRenderingMixingStrategy", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Only used for disabling overlay fullscreen (aka SurfaceView) in Clank.
+const base::Feature kOverlayFullscreenVideo{"overlay-fullscreen-video",
+                                            base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Let videos be resumed via remote controls (for example, the notification)
+// when in background.
+const base::Feature kResumeBackgroundVideo {
+  "resume-background-video",
+#if defined(OS_ANDROID)
+      base::FEATURE_ENABLED_BY_DEFAULT
+#else
+      base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+};
+
 // Use shared block-based buffering for media.
 const base::Feature kUseNewMediaCache{"use-new-media-cache",
-                                      base::FEATURE_DISABLED_BY_DEFAULT};
+                                      base::FEATURE_ENABLED_BY_DEFAULT};
+
+// Correct video colors based on output display?
+const base::Feature kVideoColorManagement{"video-color-management",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables support for External Clear Key (ECK) key system for testing on
+// supported platforms. On platforms that do not support ECK, this feature has
+// no effect.
+const base::Feature kExternalClearKeyForTesting{
+    "external-clear-key-for-testing", base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace media

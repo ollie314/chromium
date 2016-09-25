@@ -5,6 +5,8 @@
 #include "components/cronet/ios/cronet_c_for_grpc.h"
 
 #include <stdbool.h>
+
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,7 +15,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "components/cronet/ios/cronet_bidirectional_stream.h"
@@ -77,7 +78,7 @@ class CronetBidirectionalStreamAdapter
 
   virtual ~CronetBidirectionalStreamAdapter();
 
-  void OnHeadersSent() override;
+  void OnStreamReady() override;
 
   void OnHeadersReceived(const net::SpdyHeaderBlock& headers_block,
                          const char* negotiated_protocol) override;
@@ -125,9 +126,9 @@ CronetBidirectionalStreamAdapter::CronetBidirectionalStreamAdapter(
 
 CronetBidirectionalStreamAdapter::~CronetBidirectionalStreamAdapter() {}
 
-void CronetBidirectionalStreamAdapter::OnHeadersSent() {
+void CronetBidirectionalStreamAdapter::OnStreamReady() {
   DCHECK(callback_->on_response_headers_received);
-  callback_->on_request_headers_sent(stream_);
+  callback_->on_stream_ready(stream_);
 }
 
 void CronetBidirectionalStreamAdapter::OnHeadersReceived(
@@ -217,6 +218,26 @@ cronet_bidirectional_stream* cronet_bidirectional_stream_create(
   return stream;
 }
 
+int cronet_bidirectional_stream_destroy(cronet_bidirectional_stream* stream) {
+  CronetBidirectionalStreamAdapter::DestroyAdapterForStream(stream);
+  delete stream;
+  return 1;
+}
+
+void cronet_bidirectional_stream_disable_auto_flush(
+    cronet_bidirectional_stream* stream,
+    bool disable_auto_flush) {
+  CronetBidirectionalStreamAdapter::GetCronetStream(stream)->disable_auto_flush(
+      disable_auto_flush);
+}
+
+void cronet_bidirectional_stream_delay_request_headers_until_flush(
+    cronet_bidirectional_stream* stream,
+    bool delay_headers_until_flush) {
+  CronetBidirectionalStreamAdapter::GetCronetStream(stream)
+      ->delay_headers_until_flush(delay_headers_until_flush);
+}
+
 int cronet_bidirectional_stream_start(
     cronet_bidirectional_stream* stream,
     const char* url,
@@ -258,13 +279,10 @@ int cronet_bidirectional_stream_write(cronet_bidirectional_stream* stream,
       buffer, count, end_of_stream);
 }
 
-int cronet_bidirectional_stream_cancel(cronet_bidirectional_stream* stream) {
-  CronetBidirectionalStreamAdapter::GetCronetStream(stream)->Cancel();
-  return 1;
+void cronet_bidirectional_stream_flush(cronet_bidirectional_stream* stream) {
+  return CronetBidirectionalStreamAdapter::GetCronetStream(stream)->Flush();
 }
 
-int cronet_bidirectional_stream_destroy(cronet_bidirectional_stream* stream) {
-  CronetBidirectionalStreamAdapter::DestroyAdapterForStream(stream);
-  delete stream;
-  return 1;
+void cronet_bidirectional_stream_cancel(cronet_bidirectional_stream* stream) {
+  CronetBidirectionalStreamAdapter::GetCronetStream(stream)->Cancel();
 }

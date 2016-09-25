@@ -5,14 +5,15 @@
 #ifndef MEDIA_BASE_VIDEO_FRAME_METADATA_H_
 #define MEDIA_BASE_VIDEO_FRAME_METADATA_H_
 
+#include <memory>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "media/base/media_export.h"
+#include "media/base/video_rotation.h"
 
 namespace media {
 
@@ -106,6 +107,9 @@ class MEDIA_EXPORT VideoFrameMetadata {
     // should use read lock fences.
     READ_LOCK_FENCES_ENABLED,
 
+    // Indicates that the frame is rotated.
+    ROTATION,
+
     NUM_KEYS
   };
 
@@ -120,15 +124,17 @@ class MEDIA_EXPORT VideoFrameMetadata {
   void SetBoolean(Key key, bool value);
   void SetInteger(Key key, int value);
   void SetDouble(Key key, double value);
+  void SetRotation(Key key, VideoRotation value);
   void SetString(Key key, const std::string& value);
   void SetTimeDelta(Key key, const base::TimeDelta& value);
   void SetTimeTicks(Key key, const base::TimeTicks& value);
-  void SetValue(Key key, scoped_ptr<base::Value> value);
+  void SetValue(Key key, std::unique_ptr<base::Value> value);
 
   // Getters.  Returns true if |key| is present, and its value has been set.
   bool GetBoolean(Key key, bool* value) const WARN_UNUSED_RESULT;
   bool GetInteger(Key key, int* value) const WARN_UNUSED_RESULT;
   bool GetDouble(Key key, double* value) const WARN_UNUSED_RESULT;
+  bool GetRotation(Key key, VideoRotation* value) const WARN_UNUSED_RESULT;
   bool GetString(Key key, std::string* value) const WARN_UNUSED_RESULT;
   bool GetTimeDelta(Key key, base::TimeDelta* value) const WARN_UNUSED_RESULT;
   bool GetTimeTicks(Key key, base::TimeTicks* value) const WARN_UNUSED_RESULT;

@@ -25,14 +25,13 @@
 
 #include "modules/mediastream/MediaStreamTrackSourcesRequestImpl.h"
 
-#include "core/dom/CrossThreadTask.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/dom/ExecutionContextTask.h"
 #include "modules/mediastream/MediaStreamTrackSourcesCallback.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/WebSourceInfo.h"
 #include "public/platform/WebTraceLocation.h"
 #include "wtf/Functional.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -51,9 +50,9 @@ MediaStreamTrackSourcesRequestImpl::~MediaStreamTrackSourcesRequestImpl()
 {
 }
 
-String MediaStreamTrackSourcesRequestImpl::origin()
+PassRefPtr<SecurityOrigin> MediaStreamTrackSourcesRequestImpl::origin()
 {
-    return m_executionContext->getSecurityOrigin()->toString();
+    return m_executionContext->getSecurityOrigin()->isolatedCopy();
 }
 
 void MediaStreamTrackSourcesRequestImpl::requestSucceeded(const WebVector<WebSourceInfo>& webSourceInfos)
@@ -62,7 +61,7 @@ void MediaStreamTrackSourcesRequestImpl::requestSucceeded(const WebVector<WebSou
 
     for (size_t i = 0; i < webSourceInfos.size(); ++i)
         m_sourceInfos.append(SourceInfo::create(webSourceInfos[i]));
-    m_executionContext->postTask(BLINK_FROM_HERE, createCrossThreadTask(&MediaStreamTrackSourcesRequestImpl::performCallback, this));
+    m_executionContext->postTask(BLINK_FROM_HERE, createCrossThreadTask(&MediaStreamTrackSourcesRequestImpl::performCallback, wrapCrossThreadPersistent(this)));
 }
 
 void MediaStreamTrackSourcesRequestImpl::performCallback()

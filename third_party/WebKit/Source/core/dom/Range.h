@@ -64,7 +64,7 @@ public:
     int endOffset() const { return m_end.offset(); }
 
     bool collapsed() const { return m_start == m_end; }
-    bool inShadowIncludingDocument() const;
+    bool isConnected() const;
 
     Node* commonAncestorContainer() const;
     static Node* commonAncestorContainer(const Node* containerA, const Node* containerB);
@@ -75,7 +75,7 @@ public:
     bool isPointInRange(Node* refNode, int offset, ExceptionState&) const;
     short comparePoint(Node* refNode, int offset, ExceptionState&) const;
     enum CompareResults { NODE_BEFORE, NODE_AFTER, NODE_BEFORE_AND_AFTER, NODE_INSIDE };
-    enum CompareHow { START_TO_START, START_TO_END, END_TO_END, END_TO_START };
+    enum CompareHow { kStartToStart, kStartToEnd, kEndToEnd, kEndToStart };
     short compareBoundaryPoints(unsigned how, const Range* sourceRange, ExceptionState&) const;
     static short compareBoundaryPoints(Node* containerA, int offsetA, Node* containerB, int offsetB, ExceptionState&);
     static short compareBoundaryPoints(const RangeBoundaryPoint& boundaryA, const RangeBoundaryPoint& boundaryB, ExceptionState&);
@@ -112,8 +112,6 @@ public:
     Node* firstNode() const;
     Node* pastLastNode() const;
 
-    ShadowRoot* shadowRoot() const;
-
     // Not transform-friendly
     void textRects(Vector<IntRect>&, bool useSelectionHeight = false) const;
     IntRect boundingBox() const;
@@ -123,7 +121,6 @@ public:
     void getBorderAndTextQuads(Vector<FloatQuad>&) const;
     FloatRect boundingRect() const;
 
-    void nodeChildrenChanged(ContainerNode*);
     void nodeChildrenWillBeRemoved(ContainerNode&);
     void nodeWillBeRemoved(Node&);
 
@@ -141,9 +138,7 @@ public:
     ClientRectList* getClientRects() const;
     ClientRect* getBoundingClientRect() const;
 
-#ifndef NDEBUG
-    void formatForDebugger(char* buffer, unsigned length) const;
-#endif
+    static Node* checkNodeWOffset(Node*, int offset, ExceptionState&);
 
     DECLARE_TRACE();
 
@@ -153,7 +148,6 @@ private:
 
     void setDocument(Document&);
 
-    Node* checkNodeWOffset(Node*, int offset, ExceptionState&) const;
     void checkNodeBA(Node*, ExceptionState&) const;
     void checkExtractPrecondition(ExceptionState&);
 
@@ -170,6 +164,8 @@ private:
 };
 
 CORE_EXPORT bool areRangesEqual(const Range*, const Range*);
+
+using RangeVector = HeapVector<Member<Range>>;
 
 } // namespace blink
 

@@ -1,14 +1,15 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="fr">
-<translation id="1008557486741366299">Pas maintenant</translation>
 <translation id="1047726139967079566">Ajouter cette page aux favoris</translation>
 <translation id="1172898394251786223">Champ suivant</translation>
 <translation id="2320166752086256636">Masquer le clavier</translation>
 <translation id="2467815441875554965">Recherche contextuelle</translation>
+<translation id="2572712655377361602">Les règles relatives aux appareils ont bloqué l'accès à vos photos.</translation>
 <translation id="2704606927547763573">Copié</translation>
 <translation id="2747003861858887689">Champ précédent</translation>
 <translation id="2780046210906776326">Aucun compte messag.</translation>
+<translation id="3172213052701798825">Google Smart Lock pour les mots de passe</translation>
 <translation id="3244271242291266297">MM</translation>
 <translation id="3252394070589632019"><ph name="VALUE" />, <ph name="ADDITIONAL_INFO" />, <ph name="INDEX" /> sur <ph name="NUM_SUGGESTIONS" /></translation>
 <translation id="3335947283844343239">Rouvrir l'onglet fermé</translation>
@@ -19,7 +20,9 @@
 <translation id="4399225372525667111">Impossible de vérifier dans Google Chrome que l'URL de ce site est correcte.</translation>
 <translation id="4728558894243024398">Plate-forme</translation>
 <translation id="473775607612524610">Mettre à jour</translation>
+<translation id="4875622588773761625">Voulez-vous que <ph name="PASSWORD_MANAGER_BRAND" /> modifie votre mot de passe pour ce site ?</translation>
 <translation id="5317780077021120954">Enregistrer</translation>
+<translation id="6039694632319341016">Voulez-vous que <ph name="PASSWORD_MANAGER_BRAND" /> mette à jour le mot de passe de <ph name="USERNAME" /> pour ce site ?</translation>
 <translation id="605721222689873409">AA</translation>
 <translation id="6149061208933997199">Utiliser mot de passe</translation>
 <translation id="6196207969502475924">Recherche vocale</translation>

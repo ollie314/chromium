@@ -18,9 +18,10 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/browser_sync/common/browser_sync_switches.h"
+#include "components/browser_sync/browser_sync_switches.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/fake_signin_manager.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -96,11 +97,11 @@ class OneClickSigninSyncStarterTest : public ChromeRenderViewHostTestHarness {
   static std::unique_ptr<KeyedService> BuildSigninManager(
       content::BrowserContext* context) {
     Profile* profile = static_cast<Profile*>(context);
-    return base::WrapUnique(new FakeSigninManager(
+    return base::MakeUnique<FakeSigninManager>(
         ChromeSigninClientFactory::GetForProfile(profile),
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
         AccountTrackerServiceFactory::GetForProfile(profile),
-        GaiaCookieManagerServiceFactory::GetForProfile(profile)));
+        GaiaCookieManagerServiceFactory::GetForProfile(profile));
   }
 
   DISALLOW_COPY_AND_ASSIGN(OneClickSigninSyncStarterTest);
@@ -128,6 +129,13 @@ TEST_F(OneClickSigninSyncStarterTest, CallbackNull) {
 
 // Verifies that the continue URL is loaded once signin completes.
 TEST_F(OneClickSigninSyncStarterTest, LoadContinueUrl) {
+  // This test would need to be a browser test to work under the password
+  // separated signin flow since it expects a full browser down the line.
+  // However, that flow doesn't support continue_url so this test is irrelevant
+  // there.
+  if (switches::UsePasswordSeparatedSigninFlow())
+    return;
+
   content::NavigationController& controller = web_contents()->GetController();
   EXPECT_FALSE(controller.GetPendingEntry());
 

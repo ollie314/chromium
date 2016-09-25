@@ -30,6 +30,12 @@ class ResourceRequestInfo {
 
   // Allocates a new, dummy ResourceRequestInfo and associates it with the
   // given URLRequest.
+  //
+  // The RenderView routing ID must correspond to the RenderView of the
+  // RenderFrame, both of which share the same RenderProcess. This may be a
+  // different RenderView than the WebContents' main RenderView. If the
+  // download is not associated with a frame, the IDs can be all -1.
+  //
   // NOTE: Add more parameters if you need to initialize other fields.
   CONTENT_EXPORT static void AllocateForTesting(net::URLRequest* request,
                                                 ResourceType resource_type,
@@ -88,6 +94,10 @@ class ResourceRequestInfo {
   // The pid of the originating process, if the request is sent on behalf of a
   // another process.  Otherwise it is 0.
   virtual int GetOriginPID() const = 0;
+
+  // Returns the FrameTreeNode ID for this frame. This ID is browser-global and
+  // uniquely identifies a frame that hosts content.
+  virtual int GetFrameTreeNodeId() const = 0;
 
   // The IPC route identifier of the RenderFrame.
   // To get a WebContents, use GetWebContentsGetterForRequest instead.

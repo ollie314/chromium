@@ -22,20 +22,26 @@
 #include "base/synchronization/waitable_event.h"
 #include "build/build_config.h"
 #include "content/browser/browser_child_process_host_impl.h"
-#include "content/browser/mojo/mojo_application_host.h"
+#include "content/browser/mojo/mojo_shell_context.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/in_process_child_thread_params.h"
+#include "content/common/mojo/mojo_child_connection.h"
 #include "content/common/utility_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/utility_process_host_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/mojo_channel_switches.h"
+#include "content/public/common/mojo_shell_connection.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandbox_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+#include "content/public/common/service_names.h"
 #include "ipc/ipc_switches.h"
+#include "mojo/edk/embedder/embedder.h"
+#include "services/shell/public/cpp/connection.h"
+#include "services/shell/public/cpp/interface_provider.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
@@ -158,8 +164,9 @@ UtilityProcessHostImpl::UtilityProcessHostImpl(
 #endif
       started_(false),
       name_(base::ASCIIToUTF16("utility process")),
-      mojo_application_host_(new MojoApplicationHost),
       weak_ptr_factory_(this) {
+  process_.reset(new BrowserChildProcessHostImpl(
+      PROCESS_TYPE_UTILITY, this, kUtilityMojoApplicationName));
 }
 
 UtilityProcessHostImpl::~UtilityProcessHostImpl() {
@@ -223,9 +230,8 @@ bool UtilityProcessHostImpl::Start() {
   return StartProcess();
 }
 
-ServiceRegistry* UtilityProcessHostImpl::GetServiceRegistry() {
-  DCHECK(mojo_application_host_);
-  return mojo_application_host_->service_registry();
+shell::InterfaceProvider* UtilityProcessHostImpl::GetRemoteInterfaces() {
+  return process_->child_connection()->GetRemoteInterfaces();
 }
 
 void UtilityProcessHostImpl::SetName(const base::string16& name) {
@@ -248,16 +254,8 @@ bool UtilityProcessHostImpl::StartProcess() {
   if (is_batch_mode_)
     return true;
 
-  // Name must be set or metrics_service will crash in any test which
-  // launches a UtilityProcessHost.
-  process_.reset(new BrowserChildProcessHostImpl(PROCESS_TYPE_UTILITY, this));
   process_->SetName(name_);
-
-  std::string channel_id = process_->GetHost()->CreateChannel();
-  if (channel_id.empty()) {
-    NotifyAndDelete();
-    return false;
-  }
+  process_->GetHost()->CreateChannelMojo();
 
   if (RenderProcessHost::run_renderer_in_process()) {
     DCHECK(g_utility_main_thread_factory);
@@ -265,9 +263,9 @@ bool UtilityProcessHostImpl::StartProcess() {
     // support single process mode this way.
     in_process_thread_.reset(
         g_utility_main_thread_factory(InProcessChildThreadParams(
-            channel_id, BrowserThread::UnsafeGetMessageLoopForThread(
+            std::string(), BrowserThread::UnsafeGetMessageLoopForThread(
                             BrowserThread::IO)->task_runner(),
-            std::string(), mojo_application_host_->GetToken())));
+            process_->child_connection()->service_token())));
     in_process_thread_->Start();
   } else {
     const base::CommandLine& browser_command_line =
@@ -304,13 +302,11 @@ bool UtilityProcessHostImpl::StartProcess() {
 
     cmd_line->AppendSwitchASCII(switches::kProcessType,
                                 switches::kUtilityProcess);
-    cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id);
     std::string locale = GetContentClient()->browser()->GetApplicationLocale();
     cmd_line->AppendSwitchASCII(switches::kLang, locale);
 
 #if defined(OS_WIN)
-    if (GetContentClient()->browser()->ShouldUseWindowsPrefetchArgument())
-      cmd_line->AppendArg(switches::kPrefetchArgumentOther);
+    cmd_line->AppendArg(switches::kPrefetchArgumentOther);
 #endif  // defined(OS_WIN)
 
     if (no_sandbox_)
@@ -345,9 +341,6 @@ bool UtilityProcessHostImpl::StartProcess() {
       cmd_line->AppendSwitch(switches::kUtilityProcessRunningElevated);
 #endif
 
-    cmd_line->AppendSwitchASCII(switches::kMojoApplicationChannelToken,
-                                mojo_application_host_->GetToken());
-
     process_->Launch(
         new UtilitySandboxedProcessLauncherDelegate(exposed_dir_,
                                                     run_elevated_,
@@ -374,14 +367,15 @@ bool UtilityProcessHostImpl::OnMessageReceived(const IPC::Message& message) {
   return true;
 }
 
-void UtilityProcessHostImpl::OnProcessLaunchFailed() {
+void UtilityProcessHostImpl::OnProcessLaunchFailed(int error_code) {
   if (!client_.get())
     return;
 
   client_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&UtilityProcessHostClient::OnProcessLaunchFailed,
-                 client_.get()));
+                 client_,
+                 error_code));
 }
 
 void UtilityProcessHostImpl::OnProcessCrashed(int exit_code) {
@@ -390,24 +384,26 @@ void UtilityProcessHostImpl::OnProcessCrashed(int exit_code) {
 
   client_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&UtilityProcessHostClient::OnProcessCrashed, client_.get(),
+      base::Bind(&UtilityProcessHostClient::OnProcessCrashed, client_,
             exit_code));
 }
 
-void UtilityProcessHostImpl::NotifyAndDelete() {
+void UtilityProcessHostImpl::NotifyAndDelete(int error_code) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&UtilityProcessHostImpl::NotifyLaunchFailedAndDelete,
-                 weak_ptr_factory_.GetWeakPtr()));
+                 weak_ptr_factory_.GetWeakPtr(),
+                 error_code));
 }
 
 // static
 void UtilityProcessHostImpl::NotifyLaunchFailedAndDelete(
-    base::WeakPtr<UtilityProcessHostImpl> host) {
+    base::WeakPtr<UtilityProcessHostImpl> host,
+    int error_code) {
   if (!host)
     return;
 
-  host->OnProcessLaunchFailed();
+  host->OnProcessLaunchFailed(error_code);
   delete host.get();
 }
 

@@ -51,13 +51,11 @@ aura::Window* AppListPresenterImpl::GetWindow() {
   return is_visible_ && view_ ? view_->GetWidget()->GetNativeWindow() : nullptr;
 }
 
-void AppListPresenterImpl::Show(aura::Window* window) {
+void AppListPresenterImpl::Show(int64_t display_id) {
   if (is_visible_)
     return;
 
-  DCHECK(window);
   is_visible_ = true;
-  aura::Window* root_window = window->GetRootWindow();
   if (view_) {
     ScheduleAnimation();
   } else {
@@ -67,10 +65,10 @@ void AppListPresenterImpl::Show(aura::Window* window) {
     // Note the AppListViewDelegate outlives the AppListView. For Ash, the view
     // is destroyed when dismissed.
     AppListView* view = new AppListView(view_delegate);
-    presenter_delegate_->Init(view, root_window, current_apps_page_);
+    presenter_delegate_->Init(view, display_id, current_apps_page_);
     SetView(view);
   }
-  presenter_delegate_->OnShown(root_window);
+  presenter_delegate_->OnShown(display_id);
 }
 
 void AppListPresenterImpl::Dismiss() {
@@ -82,15 +80,25 @@ void AppListPresenterImpl::Dismiss() {
 
   is_visible_ = false;
 
-  // Our widget is currently active. When the animation completes we'll hide
-  // the widget, changing activation. If a menu is shown before the animation
-  // completes then the activation change triggers the menu to close. By
-  // deactivating now we ensure there is no activation change when the
-  // animation completes and any menus stay open.
-  view_->GetWidget()->Deactivate();
+  // The dismissal may have occurred in response to the app list losing
+  // activation. Otherwise, our widget is currently active. When the animation
+  // completes we'll hide the widget, changing activation. If a menu is shown
+  // before the animation completes then the activation change triggers the menu
+  // to close. By deactivating now we ensure there is no activation change when
+  // the animation completes and any menus stay open.
+  if (view_->GetWidget()->IsActive())
+    view_->GetWidget()->Deactivate();
 
   presenter_delegate_->OnDismissed();
   ScheduleAnimation();
+}
+
+void AppListPresenterImpl::ToggleAppList(int64_t display_id) {
+  if (IsVisible()) {
+    Dismiss();
+    return;
+  }
+  Show(display_id);
 }
 
 bool AppListPresenterImpl::IsVisible() const {

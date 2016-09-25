@@ -68,7 +68,7 @@ DEFINE_TRACE(FEImage)
 
 FEImage* FEImage::createWithImage(Filter* filter, PassRefPtr<Image> image, SVGPreserveAspectRatio* preserveAspectRatio)
 {
-    return new FEImage(filter, image, preserveAspectRatio);
+    return new FEImage(filter, std::move(image), preserveAspectRatio);
 }
 
 FEImage* FEImage::createWithIRIReference(Filter* filter, TreeScope& treeScope, const String& href, SVGPreserveAspectRatio* preserveAspectRatio)
@@ -90,15 +90,11 @@ AffineTransform makeMapBetweenRects(const FloatRect& source, const FloatRect& de
     return transform;
 }
 
-FloatRect FEImage::determineAbsolutePaintRect(const FloatRect& originalRequestedRect)
+FloatRect FEImage::mapInputs(const FloatRect&) const
 {
     LayoutObject* layoutObject = referencedLayoutObject();
     if (!m_image && !layoutObject)
         return FloatRect();
-
-    FloatRect requestedRect = originalRequestedRect;
-    if (clipsToBounds())
-        requestedRect.intersect(maxEffectRect());
 
     FloatRect destRect = getFilter()->mapLocalRectToAbsoluteRect(filterPrimitiveSubregion());
     FloatRect srcRect;
@@ -122,9 +118,6 @@ FloatRect FEImage::determineAbsolutePaintRect(const FloatRect& originalRequested
         srcRect = FloatRect(FloatPoint(), FloatSize(m_image->size()));
         m_preserveAspectRatio->transformRect(destRect, srcRect);
     }
-
-    destRect.intersect(requestedRect);
-    addAbsolutePaintRect(destRect);
     return destRect;
 }
 
@@ -178,7 +171,7 @@ sk_sp<SkImageFilter> FEImage::createImageFilterForLayoutObject(const LayoutObjec
         SVGPaintContext::paintSubtree(filterPicture.context(), &layoutObject);
     }
 
-    return SkPictureImageFilter::Make(toSkSp(filterPicture.endRecording()), dstRect);
+    return SkPictureImageFilter::Make(filterPicture.endRecording(), dstRect);
 }
 
 sk_sp<SkImageFilter> FEImage::createImageFilter()
@@ -186,7 +179,7 @@ sk_sp<SkImageFilter> FEImage::createImageFilter()
     if (auto* layoutObject = referencedLayoutObject())
         return createImageFilterForLayoutObject(*layoutObject);
 
-    sk_sp<SkImage> image = m_image ? toSkSp(m_image->imageForCurrentFrame()) : nullptr;
+    sk_sp<SkImage> image = m_image ? m_image->imageForCurrentFrame() : nullptr;
     if (!image) {
         // "A href reference that is an empty image (zero width or zero height), that fails
         // to download, is non-existent, or that cannot be displayed (e.g. because it is

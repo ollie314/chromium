@@ -5,7 +5,12 @@
 #ifndef CONTENT_COMMON_FRAME_REPLICATION_STATE_H_
 #define CONTENT_COMMON_FRAME_REPLICATION_STATE_H_
 
+#include <string>
+#include <vector>
+
 #include "content/common/content_export.h"
+#include "content/common/content_security_policy_header.h"
+#include "third_party/WebKit/public/platform/WebInsecureRequestPolicy.h"
 #include "url/origin.h"
 
 namespace blink {
@@ -23,7 +28,7 @@ struct CONTENT_EXPORT FrameReplicationState {
                         const std::string& name,
                         const std::string& unique_name,
                         blink::WebSandboxFlags sandbox_flags,
-                        bool should_enforce_strict_mixed_content_checking,
+                        blink::WebInsecureRequestPolicy insecure_request_policy,
                         bool has_potentially_trustworthy_unique_origin);
   FrameReplicationState(const FrameReplicationState& other);
   ~FrameReplicationState();
@@ -79,6 +84,10 @@ struct CONTENT_EXPORT FrameReplicationState {
   // scratch.
   std::string unique_name;
 
+  // Accumulated CSP headers - gathered from http headers, <meta> elements,
+  // parent frames (in case of about:blank frames).
+  std::vector<ContentSecurityPolicyHeader> accumulated_csp_headers;
+
   // Whether the frame is in a document tree or a shadow tree, per the Shadow
   // DOM spec: https://w3c.github.io/webcomponents/spec/shadow/
   // Note: This should really be const, as it can never change once a frame is
@@ -87,10 +96,10 @@ struct CONTENT_EXPORT FrameReplicationState {
   // operator.
   blink::WebTreeScopeType scope;
 
-  // True if a frame's current document should strictly block all mixed
-  // content. Updates are immediately sent to all frame proxies when
-  // frames live in different processes.
-  bool should_enforce_strict_mixed_content_checking;
+  // The insecure request policy that a frame's current document is enforcing.
+  // Updates are immediately sent to all frame proxies when frames live in
+  // different processes.
+  blink::WebInsecureRequestPolicy insecure_request_policy;
 
   // True if a frame's origin is unique and should be considered potentially
   // trustworthy.

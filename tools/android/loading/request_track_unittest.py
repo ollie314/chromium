@@ -4,9 +4,11 @@
 
 import copy
 import json
+import sys
 import unittest
 
-from request_track import (TimeBetween, Request, RequestTrack, TimingFromDict)
+from request_track import (TimeBetween, Request, CachingPolicy, RequestTrack,
+                           Timing, _ParseStringToInt)
 
 
 class TimeBetweenTestCase(unittest.TestCase):
@@ -15,17 +17,17 @@ class TimeBetweenTestCase(unittest.TestCase):
                                    'frame_id': '123.1',
                                    'initiator': {'type': 'other'},
                                    'timestamp': 2,
-                                   'timing': TimingFromDict({})})
+                                   'timing': {}})
   def setUp(self):
     super(TimeBetweenTestCase, self).setUp()
     self.first = copy.deepcopy(self._REQUEST)
-    self.first.timing = TimingFromDict({'requestTime': 123456,
-                                        'receiveHeadersEnd': 100,
-                                        'loadingFinished': 500})
+    self.first.timing = Timing.FromDevToolsDict({'requestTime': 123456,
+                                                 'receiveHeadersEnd': 100,
+                                                 'loadingFinished': 500})
     self.second = copy.deepcopy(self._REQUEST)
-    self.second.timing = TimingFromDict({'requestTime': 123456 + 1,
-                                        'receiveHeadersEnd': 200,
-                                        'loadingFinished': 600})
+    self.second.timing = Timing.FromDevToolsDict({'requestTime': 123456 + 1,
+                                                  'receiveHeadersEnd': 200,
+                                                  'loadingFinished': 600})
 
   def testTimeBetweenParser(self):
     self.assertEquals(900, TimeBetween(self.first, self.second, 'parser'))
@@ -72,6 +74,186 @@ class RequestTestCase(unittest.TestCase):
     self.assertEquals('Bar', r.GetHTTPResponseHeader('Foo'))
     r.response_headers = {'foo': 'Bar', 'Baz': 'Foo'}
     self.assertEquals('Bar', r.GetHTTPResponseHeader('Foo'))
+
+  def testGetRawResponseHeaders(self):
+    r = Request()
+    r.protocol = 'http/1.1'
+    r.status = 200
+    r.status_text = 'Hello world'
+    r.response_headers = {'Foo': 'Bar', 'Baz': 'Foo'}
+    self.assertEquals('HTTP/1.1 200 Hello world\x00Baz: Foo\x00Foo: Bar\x00',
+                      r.GetRawResponseHeaders())
+
+
+class ParseStringToIntTestCase(unittest.TestCase):
+  def runTest(self):
+    MININT = -sys.maxint - 1
+    # Same test cases as in string_number_conversions_unittest.cc
+    CASES = [
+        ("0", 0),
+        ("42", 42),
+        ("-2147483648", -2147483648),
+        ("2147483647", 2147483647),
+        ("-2147483649", -2147483649),
+        ("-99999999999", -99999999999),
+        ("2147483648", 2147483648),
+        ("99999999999", 99999999999),
+        ("9223372036854775807", sys.maxint),
+        ("-9223372036854775808", MININT),
+        ("09", 9),
+        ("-09", -9),
+        ("", 0),
+        (" 42", 42),
+        ("42 ", 42),
+        ("0x42", 0),
+        ("\t\n\v\f\r 42", 42),
+        ("blah42", 0),
+        ("42blah", 42),
+        ("blah42blah", 0),
+        ("-273.15", -273),
+        ("+98.6", 98),
+        ("--123", 0),
+        ("++123", 0),
+        ("-+123", 0),
+        ("+-123", 0),
+        ("-", 0),
+        ("-9223372036854775809", MININT),
+        ("-99999999999999999999", MININT),
+        ("9223372036854775808", sys.maxint),
+        ("99999999999999999999", sys.maxint)]
+    for string, expected_int in CASES:
+      parsed_int = _ParseStringToInt(string)
+      self.assertEquals(expected_int, parsed_int)
+
+
+class CachingPolicyTestCase(unittest.TestCase):
+  _REQUEST = {
+      'encoded_data_length': 14726,
+      'request_id': '2291.1',
+      'response_headers': {
+          'Age': '866',
+          'Content-Length': '14187',
+          'Date': 'Fri, 22 Apr 2016 08:56:19 -0200',
+          'Vary': 'Accept-Encoding',
+      },
+      'timestamp': 5535648.730768,
+      'timing': {
+          'connect_end': 34.0510001406074,
+          'connect_start': 21.6859998181462,
+          'dns_end': 21.6859998181462,
+          'dns_start': 0,
+          'loading_finished': 58.76399949193001,
+          'receive_headers_end': 47.0650000497699,
+          'request_time': 5535648.73264,
+          'send_end': 34.6099995076656,
+          'send_start': 34.2979999259114
+      },
+      'url': 'http://www.example.com/',
+      'status': 200,
+      'wall_time': 1461322579.59422}
+
+  def testHasValidators(self):
+    r = self._MakeRequest()
+    self.assertFalse(CachingPolicy(r).HasValidators())
+    r.response_headers['Last-Modified'] = 'Yesterday all my troubles'
+    self.assertTrue(CachingPolicy(r).HasValidators())
+    r = self._MakeRequest()
+    r.response_headers['ETAG'] = 'ABC'
+    self.assertTrue(CachingPolicy(r).HasValidators())
+
+  def testIsCacheable(self):
+    r = self._MakeRequest()
+    self.assertTrue(CachingPolicy(r).IsCacheable())
+    r.response_headers['Cache-Control'] = 'Whatever,no-store'
+    self.assertFalse(CachingPolicy(r).IsCacheable())
+
+  def testPolicyNoStore(self):
+    r = self._MakeRequest()
+    r.response_headers['Cache-Control'] = 'Whatever,no-store'
+    self.assertEqual(CachingPolicy.FETCH, CachingPolicy(r).PolicyAtDate(0))
+
+  def testPolicyMaxAge(self):
+    r = self._MakeRequest()
+    r.response_headers['Cache-Control'] = 'whatever,max-age=  1000,whatever'
+    self.assertEqual(
+        CachingPolicy.VALIDATION_NONE,
+        CachingPolicy(r).PolicyAtDate(r.wall_time))
+    self.assertEqual(
+        CachingPolicy.VALIDATION_SYNC,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 10000))
+    # Take current age into account.
+    self.assertEqual(
+        CachingPolicy.VALIDATION_SYNC,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 500))
+    # Max-Age before Expires.
+    r.response_headers['Expires'] = 'Thu, 21 Apr 2016 00:00:00 -0200'
+    self.assertEqual(
+        CachingPolicy.VALIDATION_NONE,
+        CachingPolicy(r).PolicyAtDate(r.wall_time))
+    # Max-Age < age
+    r.response_headers['Cache-Control'] = 'whatever,max-age=100crap,whatever'
+    self.assertEqual(
+        CachingPolicy.VALIDATION_SYNC,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 2))
+
+  def testPolicyExpires(self):
+    r = self._MakeRequest()
+    # Already expired
+    r.response_headers['Expires'] = 'Thu, 21 Apr 2016 00:00:00 -0200'
+    self.assertEqual(
+        CachingPolicy.VALIDATION_SYNC,
+        CachingPolicy(r).PolicyAtDate(r.wall_time))
+    r.response_headers['Expires'] = 'Thu, 25 Apr 2016 00:00:00 -0200'
+    self.assertEqual(
+        CachingPolicy.VALIDATION_NONE,\
+        CachingPolicy(r).PolicyAtDate(r.wall_time))
+    self.assertEqual(
+        CachingPolicy.VALIDATION_NONE,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 86400))
+    self.assertEqual(CachingPolicy.VALIDATION_SYNC,
+                     CachingPolicy(r).PolicyAtDate(r.wall_time + 86400 * 5))
+
+  def testStaleWhileRevalidate(self):
+    r = self._MakeRequest()
+    r.response_headers['Cache-Control'] = (
+        'whatever,max-age=1000,stale-while-revalidate=2000')
+    self.assertEqual(
+        CachingPolicy.VALIDATION_ASYNC,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 200))
+    self.assertEqual(
+        CachingPolicy.VALIDATION_ASYNC,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 2000))
+    self.assertEqual(
+        CachingPolicy.VALIDATION_SYNC,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 3100))
+    # must-revalidate overrides stale-while-revalidate.
+    r.response_headers['Cache-Control'] += ',must-revalidate'
+    self.assertEqual(
+        CachingPolicy.VALIDATION_SYNC,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 200))
+
+  def test301NeverExpires(self):
+    r = self._MakeRequest()
+    r.status = 301
+    self.assertEqual(
+        CachingPolicy.VALIDATION_NONE,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 2000))
+
+  def testLastModifiedHeuristic(self):
+    r = self._MakeRequest()
+    # 8 hours ago.
+    r.response_headers['Last-Modified'] = 'Fri, 22 Apr 2016 00:56:19 -0200'
+    del r.response_headers['Age']
+    self.assertEqual(
+        CachingPolicy.VALIDATION_NONE,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 60))
+    self.assertEqual(
+        CachingPolicy.VALIDATION_SYNC,
+        CachingPolicy(r).PolicyAtDate(r.wall_time + 3600))
+
+  @classmethod
+  def _MakeRequest(cls):
+    return Request.FromJsonDict(copy.deepcopy(cls._REQUEST))
 
 
 class RequestTrackTestCase(unittest.TestCase):
@@ -218,11 +400,24 @@ class RequestTrackTestCase(unittest.TestCase):
           "encodedDataLength": 32768,
           "requestId": "32493.1",
           "timestamp": 5571441.893121}}
+  _SERVED_FROM_CACHE = {
+      "method": "Network.requestServedFromCache",
+      "params": {
+          "requestId": "32493.1"}}
   _LOADING_FINISHED = {'method': 'Network.loadingFinished',
                        'params': {
                            'encodedDataLength': 101829,
                            'requestId': '32493.1',
                            'timestamp': 5571441.891189}}
+  _LOADING_FAILED = {'method': 'Network.loadingFailed',
+                     'params': {
+                         'canceled': False,
+                         'blockedReason': None,
+                         'encodedDataLength': 101829,
+                         'errorText': 'net::ERR_TOO_MANY_REDIRECTS',
+                         'requestId': '32493.1',
+                         'timestamp': 5571441.891189,
+                         'type': 'Document'}}
 
   def setUp(self):
     self.request_track = RequestTrack(None)
@@ -297,6 +492,24 @@ class RequestTrackTestCase(unittest.TestCase):
     with self.assertRaises(AssertionError):
       self.request_track.Handle('Network.requestWillBeSent', msg)
 
+  def testIgnoreCompletedDuplicates(self):
+    self.request_track.Handle('Network.requestWillBeSent',
+                              RequestTrackTestCase._REQUEST_WILL_BE_SENT)
+    self.request_track.Handle('Network.responseReceived',
+                              RequestTrackTestCase._RESPONSE_RECEIVED)
+    self.request_track.Handle('Network.loadingFinished',
+                              RequestTrackTestCase._LOADING_FINISHED)
+    # Should not raise an AssertionError.
+    self.request_track.Handle('Network.requestWillBeSent',
+                              RequestTrackTestCase._REQUEST_WILL_BE_SENT)
+
+  def testSequenceOfGeneratedResponse(self):
+    self.request_track.Handle('Network.requestServedFromCache',
+                              RequestTrackTestCase._SERVED_FROM_CACHE)
+    self.request_track.Handle('Network.loadingFinished',
+                              RequestTrackTestCase._LOADING_FINISHED)
+    self.assertEquals(0, len(self.request_track.GetEvents()))
+
   def testInvalidSequence(self):
     msg1 = RequestTrackTestCase._REQUEST_WILL_BE_SENT
     msg2 = RequestTrackTestCase._LOADING_FINISHED
@@ -329,11 +542,11 @@ class RequestTrackTestCase(unittest.TestCase):
     self.assertEquals(False, r.served_from_cache)
     self.assertEquals(False, r.from_disk_cache)
     self.assertEquals(False, r.from_service_worker)
-    timing = TimingFromDict(response['timing'])
+    timing = Timing.FromDevToolsDict(response['timing'])
     loading_finished = RequestTrackTestCase._LOADING_FINISHED['params']
     loading_finished_offset = r._TimestampOffsetFromStartMs(
         loading_finished['timestamp'])
-    timing = timing._replace(loading_finished=loading_finished_offset)
+    timing.loading_finished = loading_finished_offset
     self.assertEquals(timing, r.timing)
     self.assertEquals(200, r.status)
     self.assertEquals(
@@ -366,6 +579,17 @@ class RequestTrackTestCase(unittest.TestCase):
     self.assertEquals(1, self.request_track.duplicates_count)
     with self.assertRaises(AssertionError):
       self.request_track.Handle('Network.responseReceived', msg2_different)
+
+  def testLoadingFailed(self):
+    self.request_track.Handle('Network.requestWillBeSent',
+                              RequestTrackTestCase._REQUEST_WILL_BE_SENT)
+    self.request_track.Handle('Network.responseReceived',
+                              RequestTrackTestCase._RESPONSE_RECEIVED)
+    self.request_track.Handle('Network.loadingFailed',
+                              RequestTrackTestCase._LOADING_FAILED)
+    r = self.request_track.GetEvents()[0]
+    self.assertTrue(r.failed)
+    self.assertEquals('net::ERR_TOO_MANY_REDIRECTS', r.error_text)
 
   def testCanSerialize(self):
     self._ValidSequence(self.request_track)

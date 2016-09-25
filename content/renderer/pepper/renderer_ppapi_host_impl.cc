@@ -10,7 +10,7 @@
 #include "base/logging.h"
 #include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/renderer/pepper/fullscreen_container.h"
 #include "content/renderer/pepper/host_globals.h"
 #include "content/renderer/pepper/pepper_browser_connection.h"
@@ -213,8 +213,10 @@ gfx::Point RendererPpapiHostImpl::PluginPointToRenderFrame(
     // dedicated window.  So, do not offset the point.
     return pt;
   }
-  return gfx::Point(pt.x() + plugin_instance->view_data().rect.point.x,
-                    pt.y() + plugin_instance->view_data().rect.point.y);
+  return gfx::Point((pt.x() + plugin_instance->view_data().rect.point.x) /
+                        viewport_to_dip_scale_,
+                    (pt.y() + plugin_instance->view_data().rect.point.y) /
+                        viewport_to_dip_scale_);
 }
 
 IPC::PlatformFileForTransit RendererPpapiHostImpl::ShareHandleWithRemote(

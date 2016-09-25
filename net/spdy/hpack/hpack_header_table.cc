@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "net/spdy/hpack/hpack_constants.h"
 #include "net/spdy/hpack/hpack_static_table.h"
+#include "net/spdy/spdy_flags.h"
 
 namespace net {
 
@@ -52,7 +53,11 @@ const HpackEntry* HpackHeaderTable::GetByIndex(size_t index) {
   }
   index -= static_entries_.size();
   if (index < dynamic_entries_.size()) {
-    return &dynamic_entries_[index];
+    const HpackEntry* result = &dynamic_entries_[index];
+    if (debug_visitor_ != nullptr) {
+      debug_visitor_->OnUseEntry(*result);
+    }
+    return result;
   }
   return NULL;
 }
@@ -67,7 +72,11 @@ const HpackEntry* HpackHeaderTable::GetByName(StringPiece name) {
   {
     NameToEntryMap::const_iterator it = dynamic_name_index_.find(name);
     if (it != dynamic_name_index_.end()) {
-      return it->second;
+      const HpackEntry* result = it->second;
+      if (debug_visitor_ != nullptr) {
+        debug_visitor_->OnUseEntry(*result);
+      }
+      return result;
     }
   }
   return NULL;
@@ -85,7 +94,11 @@ const HpackEntry* HpackHeaderTable::GetByNameAndValue(StringPiece name,
   {
     UnorderedEntrySet::const_iterator it = dynamic_index_.find(&query);
     if (it != dynamic_index_.end()) {
-      return *it;
+      const HpackEntry* result = *it;
+      if (debug_visitor_ != nullptr) {
+        debug_visitor_->OnUseEntry(*result);
+      }
+      return result;
     }
   }
   return NULL;
@@ -113,7 +126,11 @@ void HpackHeaderTable::SetMaxSize(size_t max_size) {
 
 void HpackHeaderTable::SetSettingsHeaderTableSize(size_t settings_size) {
   settings_size_bound_ = settings_size;
-  if (settings_size_bound_ < max_size_) {
+  if (!FLAGS_chromium_reloadable_flag_increase_hpack_table_size) {
+    if (settings_size_bound_ < max_size_) {
+      SetMaxSize(settings_size_bound_);
+    }
+  } else {
     SetMaxSize(settings_size_bound_);
   }
 }
@@ -220,6 +237,11 @@ const HpackEntry* HpackHeaderTable::TryAddEntry(StringPiece name,
 
   size_ += entry_size;
   ++total_insertions_;
+  if (debug_visitor_ != nullptr) {
+    // Call |debug_visitor_->OnNewEntry()| to get the current time.
+    HpackEntry& entry = dynamic_entries_.front();
+    entry.set_time_added(debug_visitor_->OnNewEntry(entry));
+  }
 
   return &dynamic_entries_.front();
 }
@@ -231,7 +253,7 @@ void HpackHeaderTable::DebugLogTableState() const {
     DVLOG(2) << "  " << it->GetDebugString();
   }
   DVLOG(2) << "Full Static Index:";
-  for (const auto entry : static_index_) {
+  for (auto* entry : static_index_) {
     DVLOG(2) << "  " << entry->GetDebugString();
   }
   DVLOG(2) << "Full Static Name Index:";
@@ -239,7 +261,7 @@ void HpackHeaderTable::DebugLogTableState() const {
     DVLOG(2) << "  " << it.first << ": " << it.second->GetDebugString();
   }
   DVLOG(2) << "Full Dynamic Index:";
-  for (const auto entry : dynamic_index_) {
+  for (auto* entry : dynamic_index_) {
     DVLOG(2) << "  " << entry->GetDebugString();
   }
   DVLOG(2) << "Full Dynamic Name Index:";

@@ -9,7 +9,9 @@
 #include <memory>
 #include <set>
 
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "build/build_config.h"
@@ -56,7 +58,7 @@ void AssertIntercepted(
                           base::Bind(AssertInterceptedIO,
                                      url,
                                      base::Unretained(interceptor)));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // FakeURLRequestJobFactory returns NULL for all job creation requests and false
@@ -117,21 +119,24 @@ void AssertWillHandle(
                                      scheme,
                                      expected,
                                      base::Unretained(interceptor)));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
-base::DictionaryValue* GetProtocolHandlerValue(std::string protocol,
-                                               std::string url) {
-  base::DictionaryValue* value = new base::DictionaryValue();
+std::unique_ptr<base::DictionaryValue> GetProtocolHandlerValue(
+    const std::string& protocol,
+    const std::string& url) {
+  auto value = base::MakeUnique<base::DictionaryValue>();
   value->SetString("protocol", protocol);
   value->SetString("url", url);
   return value;
 }
 
-base::DictionaryValue* GetProtocolHandlerValueWithDefault(std::string protocol,
-                                                          std::string url,
-                                                          bool is_default) {
-  base::DictionaryValue* value = GetProtocolHandlerValue(protocol, url);
+std::unique_ptr<base::DictionaryValue> GetProtocolHandlerValueWithDefault(
+    const std::string& protocol,
+    const std::string& url,
+    bool is_default) {
+  std::unique_ptr<base::DictionaryValue> value =
+      GetProtocolHandlerValue(protocol, url);
   value->SetBoolean("default", is_default);
   return value;
 }
@@ -738,7 +743,7 @@ TEST_F(ProtocolHandlerRegistryTest, TestOSRegistration) {
 
   registry()->OnAcceptRegisterProtocolHandler(ph_do1);
   registry()->OnDenyRegisterProtocolHandler(ph_dont);
-  base::MessageLoop::current()->Run();  // FILE thread needs to run.
+  base::RunLoop().Run();  // FILE thread needs to run.
   ASSERT_TRUE(delegate()->IsFakeRegisteredWithOS("do"));
   ASSERT_FALSE(delegate()->IsFakeRegisteredWithOS("dont"));
 
@@ -768,10 +773,10 @@ TEST_F(ProtocolHandlerRegistryTest, MAYBE_TestOSRegistrationFailure) {
   ASSERT_FALSE(registry()->IsHandledProtocol("dont"));
 
   registry()->OnAcceptRegisterProtocolHandler(ph_do);
-  base::MessageLoop::current()->Run();  // FILE thread needs to run.
+  base::RunLoop().Run();  // FILE thread needs to run.
   delegate()->set_force_os_failure(true);
   registry()->OnAcceptRegisterProtocolHandler(ph_dont);
-  base::MessageLoop::current()->Run();  // FILE thread needs to run.
+  base::RunLoop().Run();  // FILE thread needs to run.
   ASSERT_TRUE(registry()->IsHandledProtocol("do"));
   ASSERT_EQ(static_cast<size_t>(1), registry()->GetHandlersFor("do").size());
   ASSERT_FALSE(registry()->IsHandledProtocol("dont"));

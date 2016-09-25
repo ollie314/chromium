@@ -54,13 +54,17 @@ class OfflinePageArchiver {
     ERROR_CANCELED,                 // Caller canceled the request.
     ERROR_CONTENT_UNAVAILABLE,      // Content to archive is not available.
     ERROR_ARCHIVE_CREATION_FAILED,  // Creation of archive failed.
+    ERROR_SECURITY_CERTIFICATE,     // Page was loaded on secure connection, but
+                                    // there was a security error.
   };
 
   typedef base::Callback<void(OfflinePageArchiver* /* archiver */,
                               ArchiverResult /* result */,
                               const GURL& /* url */,
                               const base::FilePath& /* file_path */,
-                              int64_t /* file_size */)> CreateArchiveCallback;
+                              const base::string16& /* title */,
+                              int64_t /* file_size */)>
+      CreateArchiveCallback;
 
   virtual ~OfflinePageArchiver() {}
 

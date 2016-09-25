@@ -4,6 +4,8 @@
 
 #include "content/browser/media/android/media_web_contents_observer_android.h"
 
+#include <utility>
+
 #include "base/memory/ptr_util.h"
 #include "content/browser/media/android/browser_media_player_manager.h"
 #include "content/browser/media/android/browser_media_session_manager.h"
@@ -80,6 +82,12 @@ MediaWebContentsObserverAndroid::GetSurfaceViewManager(
   return manager;
 }
 
+void MediaWebContentsObserverAndroid::SetMediaSessionManagerForTest(
+    RenderFrameHost* render_frame_host,
+    std::unique_ptr<BrowserMediaSessionManager> manager) {
+  media_session_managers_.set(render_frame_host, std::move(manager));
+}
+
 void MediaWebContentsObserverAndroid::SuspendAllMediaPlayers() {
   web_contents()->ForEachFrame(
       base::Bind(&SuspendAllMediaPlayersInRenderFrame));
@@ -90,10 +98,10 @@ bool MediaWebContentsObserverAndroid::RequestPlay(
     int delegate_id,
     bool has_audio,
     bool is_remote,
-    base::TimeDelta duration) {
+    media::MediaContentType media_content_type) {
   return session_controllers_manager()->RequestPlay(
-      MediaPlayerId(render_frame_host, delegate_id),
-      has_audio, is_remote, duration);
+      MediaPlayerId(render_frame_host, delegate_id), has_audio, is_remote,
+      media_content_type);
 }
 
 void MediaWebContentsObserverAndroid::DisconnectMediaSession(
@@ -102,15 +110,6 @@ void MediaWebContentsObserverAndroid::DisconnectMediaSession(
   session_controllers_manager()->OnEnd(
       MediaPlayerId(render_frame_host, delegate_id));
 }
-
-#if defined(VIDEO_HOLE)
-void MediaWebContentsObserverAndroid::OnFrameInfoUpdated() {
-  for (auto it = media_player_managers_.begin();
-       it != media_player_managers_.end(); ++it) {
-    it->second->OnFrameInfoUpdated();
-  }
-}
-#endif  // defined(VIDEO_HOLE)
 
 void MediaWebContentsObserverAndroid::RenderFrameDeleted(
     RenderFrameHost* render_frame_host) {
@@ -193,11 +192,6 @@ bool MediaWebContentsObserverAndroid::OnMediaPlayerMessageReceived(
         MediaPlayerHostMsg_RequestRemotePlaybackControl,
         GetMediaPlayerManager(render_frame_host),
         BrowserMediaPlayerManager::OnRequestRemotePlaybackControl)
-#if defined(VIDEO_HOLE)
-    IPC_MESSAGE_FORWARD(MediaPlayerHostMsg_NotifyExternalSurface,
-                        GetMediaPlayerManager(render_frame_host),
-                        BrowserMediaPlayerManager::OnNotifyExternalSurface)
-#endif  // defined(VIDEO_HOLE)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;

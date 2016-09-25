@@ -6,6 +6,7 @@
 #define IOS_PUBLIC_PROVIDER_CHROME_BROWSER_CHROME_BROWSER_PROVIDER_H_
 
 #include <CoreGraphics/CoreGraphics.h>
+#import <Foundation/Foundation.h>
 #include <stddef.h>
 
 #include <memory>
@@ -21,19 +22,18 @@ class GURL;
 class InfoBarViewDelegate;
 class PrefRegistrySimple;
 class PrefService;
-class ProfileOAuth2TokenServiceIOSProvider;
 
 namespace autofill {
 class CardUnmaskPromptController;
 class CardUnmaskPromptView;
 }
 
-namespace browser_sync {
-class SyncedWindowDelegatesGetter;
-}
-
 namespace net {
 class URLRequestContextGetter;
+}
+
+namespace sync_sessions {
+class SyncedWindowDelegatesGetter;
 }
 
 namespace user_prefs {
@@ -71,18 +71,18 @@ class ChromeBrowserProvider {
   // Registers all prefs that will be used via a PrefService attached to a
   // Profile.
   virtual void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
-  // Returns an instance of profile OAuth2 token service provider.
-  virtual ProfileOAuth2TokenServiceIOSProvider*
-  GetProfileOAuth2TokenServiceIOSProvider();
   // Returns an UpdatableResourceProvider instance.
   virtual UpdatableResourceProvider* GetUpdatableResourceProvider();
   // Returns an infobar view conforming to the InfoBarViewProtocol. The returned
   // object is retained.
   virtual InfoBarViewPlaceholder CreateInfoBarView(
       CGRect frame,
-      InfoBarViewDelegate* delegate);
+      InfoBarViewDelegate* delegate) NS_RETURNS_RETAINED;
   // Returns an instance of a signin resources provider.
   virtual SigninResourcesProvider* GetSigninResourcesProvider();
+  // Sets the current instance of Chrome identity service. Used for testing.
+  virtual void SetChromeIdentityServiceForTesting(
+      std::unique_ptr<ChromeIdentityService> service);
   // Returns an instance of a Chrome identity service.
   virtual ChromeIdentityService* GetChromeIdentityService();
   // Returns an instance of a LiveTabContextProvider.
@@ -115,7 +115,7 @@ class ChromeBrowserProvider {
   virtual bool IsSafeBrowsingEnabled(const base::Closure& on_update_callback);
 
   // Returns the SyncedWindowDelegatesGetter implementation.
-  virtual std::unique_ptr<browser_sync::SyncedWindowDelegatesGetter>
+  virtual std::unique_ptr<sync_sessions::SyncedWindowDelegatesGetter>
   CreateSyncedWindowDelegatesGetter(ios::ChromeBrowserState* browser_state);
 };
 

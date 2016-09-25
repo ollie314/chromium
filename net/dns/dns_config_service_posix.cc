@@ -16,7 +16,7 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
@@ -40,20 +40,19 @@ namespace internal {
 
 namespace {
 
-#if !defined(OS_ANDROID)
-const base::FilePath::CharType* kFilePathHosts =
-    FILE_PATH_LITERAL("/etc/hosts");
-#else
-const base::FilePath::CharType* kFilePathHosts =
+#if defined(OS_ANDROID)
+const base::FilePath::CharType kFilePathHosts[] =
     FILE_PATH_LITERAL("/system/etc/hosts");
+#else
+const base::FilePath::CharType kFilePathHosts[] =
+    FILE_PATH_LITERAL("/etc/hosts");
 #endif
 
 #if defined(OS_IOS)
-
 // There is no public API to watch the DNS configuration on iOS.
 class DnsConfigWatcher {
  public:
-  typedef base::Callback<void(bool succeeded)> CallbackType;
+  using CallbackType = base::Callback<void(bool succeeded)>;
 
   bool Watch(const CallbackType& callback) {
     return false;
@@ -61,10 +60,13 @@ class DnsConfigWatcher {
 };
 
 #elif defined(OS_ANDROID)
+
 // On Android, assume DNS config may have changed on every network change.
 class DnsConfigWatcher {
  public:
-  bool Watch(const base::Callback<void(bool succeeded)>& callback) {
+  using CallbackType = base::Callback<void(bool succeeded)>;
+
+  bool Watch(const CallbackType& callback) {
     callback_ = callback;
     return true;
   }
@@ -75,21 +77,25 @@ class DnsConfigWatcher {
   }
 
  private:
-  base::Callback<void(bool succeeded)> callback_;
+  CallbackType callback_;
 };
-#elif !defined(OS_MACOSX)
+
+#elif defined(OS_MACOSX)
+
 // DnsConfigWatcher for OS_MACOSX is in dns_config_watcher_mac.{hh,cc}.
+
+#else  // !defined(OS_IOS) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
 
 #ifndef _PATH_RESCONF  // Normally defined in <resolv.h>
 #define _PATH_RESCONF "/etc/resolv.conf"
 #endif
 
-static const base::FilePath::CharType* kFilePathConfig =
+const base::FilePath::CharType kFilePathConfig[] =
     FILE_PATH_LITERAL(_PATH_RESCONF);
 
 class DnsConfigWatcher {
  public:
-  typedef base::Callback<void(bool succeeded)> CallbackType;
+  using CallbackType = base::Callback<void(bool succeeded)>;
 
   bool Watch(const CallbackType& callback) {
     callback_ = callback;
@@ -106,7 +112,7 @@ class DnsConfigWatcher {
   base::FilePathWatcher watcher_;
   CallbackType callback_;
 };
-#endif
+#endif  // defined(OS_IOS)
 
 #if !defined(OS_ANDROID)
 ConfigParsePosixResult ReadDnsConfig(DnsConfig* config) {
@@ -134,8 +140,8 @@ ConfigParsePosixResult ReadDnsConfig(DnsConfig* config) {
   res_ndestroy(&res);
 #else
   res_nclose(&res);
-#endif
-#endif
+#endif  // defined(OS_MACOSX) || defined(OS_FREEBSD)
+#endif  // defined(OS_OPENBSD)
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   ConfigParsePosixResult error = DnsConfigWatcher::CheckDnsConfig();
@@ -164,16 +170,16 @@ ConfigParsePosixResult ReadDnsConfig(DnsConfig* config) {
 // TODO(juliatuttle): Depend on libcutils, then switch this (and other uses of
 //                    __system_property_get) to property_get.
 ConfigParsePosixResult ReadDnsConfig(DnsConfig* dns_config) {
-   std::string dns1_string, dns2_string;
   char property_value[PROP_VALUE_MAX];
   __system_property_get("net.dns1", property_value);
-  dns1_string = property_value;
+  std::string dns1_string = property_value;
   __system_property_get("net.dns2", property_value);
-  dns2_string = property_value;
-  if (dns1_string.length() == 0 && dns2_string.length() == 0)
+  std::string dns2_string = property_value;
+  if (dns1_string.empty() && dns2_string.empty())
     return CONFIG_PARSE_POSIX_NO_NAMESERVERS;
 
-  IPAddress dns1_address, dns2_address;
+  IPAddress dns1_address;
+  IPAddress dns2_address;
   bool parsed1 = dns1_address.AssignFromIPLiteral(dns1_string);
   bool parsed2 = dns2_address.AssignFromIPLiteral(dns2_string);
   if (!parsed1 && !parsed2)
@@ -190,7 +196,7 @@ ConfigParsePosixResult ReadDnsConfig(DnsConfig* dns_config) {
 
   return CONFIG_PARSE_POSIX_OK;
 }
-#endif
+#endif  // !defined(OS_ANDROID)
 
 }  // namespace
 
@@ -210,7 +216,9 @@ class DnsConfigServicePosix::Watcher {
                                 DNS_CONFIG_WATCH_FAILED_TO_START_CONFIG,
                                 DNS_CONFIG_WATCH_MAX);
     }
-#if !defined(OS_IOS)
+// Hosts file should never change on Android or iOS (and watching it on Android
+// is problematic; see http://crbug.com/600442), so don't watch it there.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
     if (!hosts_watcher_.Watch(
             base::FilePath(service_->file_path_hosts_), false,
             base::Bind(&Watcher::OnHostsChanged, base::Unretained(this)))) {
@@ -220,7 +228,7 @@ class DnsConfigServicePosix::Watcher {
                                 DNS_CONFIG_WATCH_FAILED_TO_START_HOSTS,
                                 DNS_CONFIG_WATCH_MAX);
     }
-#endif
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
     return success;
   }
 
@@ -242,18 +250,20 @@ class DnsConfigServicePosix::Watcher {
                               weak_factory_.GetWeakPtr(), succeeded),
         kDelay);
   }
+
   void OnConfigChangedDelayed(bool succeeded) {
     service_->OnConfigChanged(succeeded);
   }
+
   void OnHostsChanged(const base::FilePath& path, bool error) {
     service_->OnHostsChanged(!error);
   }
 
-  DnsConfigServicePosix* service_;
+  DnsConfigServicePosix* const service_;
   DnsConfigWatcher config_watcher_;
-#if !defined(OS_IOS)
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
   base::FilePathWatcher hosts_watcher_;
-#endif
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
   base::WeakPtrFactory<Watcher> weak_factory_;
 
@@ -445,7 +455,8 @@ void DnsConfigServicePosix::SetHostsFilePathForTesting(
 #if !defined(OS_ANDROID)
 ConfigParsePosixResult ConvertResStateToDnsConfig(const struct __res_state& res,
                                                   DnsConfig* dns_config) {
-  CHECK(dns_config != NULL);
+  DCHECK(dns_config);
+
   if (!(res.options & RES_INIT))
     return CONFIG_PARSE_POSIX_RES_INIT_UNSET;
 
@@ -475,12 +486,12 @@ ConfigParsePosixResult ConvertResStateToDnsConfig(const struct __res_state& res,
   // but we have to combine the two arrays ourselves.
   for (int i = 0; i < res.nscount; ++i) {
     IPEndPoint ipe;
-    const struct sockaddr* addr = NULL;
+    const struct sockaddr* addr = nullptr;
     size_t addr_len = 0;
     if (res.nsaddr_list[i].sin_family) {  // The indicator used by res_nsend.
       addr = reinterpret_cast<const struct sockaddr*>(&res.nsaddr_list[i]);
       addr_len = sizeof res.nsaddr_list[i];
-    } else if (res._u._ext.nsaddrs[i] != NULL) {
+    } else if (res._u._ext.nsaddrs[i]) {
       addr = reinterpret_cast<const struct sockaddr*>(res._u._ext.nsaddrs[i]);
       addr_len = sizeof *res._u._ext.nsaddrs[i];
     } else {
@@ -501,7 +512,7 @@ ConfigParsePosixResult ConvertResStateToDnsConfig(const struct __res_state& res,
     }
     dns_config->nameservers.push_back(ipe);
   }
-#endif
+#endif  // defined(OS_MACOSX) || defined(OS_FREEBSD)
 
   dns_config->search.clear();
   for (int i = 0; (i < MAXDNSRCH) && res.dnsrch[i]; ++i) {
@@ -525,13 +536,13 @@ ConfigParsePosixResult ConvertResStateToDnsConfig(const struct __res_state& res,
 
   // The current implementation assumes these options are set. They normally
   // cannot be overwritten by /etc/resolv.conf
-  unsigned kRequiredOptions = RES_RECURSE | RES_DEFNAMES | RES_DNSRCH;
+  const unsigned kRequiredOptions = RES_RECURSE | RES_DEFNAMES | RES_DNSRCH;
   if ((res.options & kRequiredOptions) != kRequiredOptions) {
     dns_config->unhandled_options = true;
     return CONFIG_PARSE_POSIX_MISSING_OPTIONS;
   }
 
-  unsigned kUnhandledOptions = RES_USEVC | RES_IGNTC | RES_USE_DNSSEC;
+  const unsigned kUnhandledOptions = RES_USEVC | RES_IGNTC | RES_USE_DNSSEC;
   if (res.options & kUnhandledOptions) {
     dns_config->unhandled_options = true;
     return CONFIG_PARSE_POSIX_UNHANDLED_OPTIONS;
@@ -554,24 +565,7 @@ ConfigParsePosixResult ConvertResStateToDnsConfig(const struct __res_state& res,
 bool DnsConfigServicePosix::SeenChangeSince(
     const base::Time& since_time) const {
   DCHECK(CalledOnValidThread());
-  if (seen_config_change_)
-    return true;
-  base::File hosts(base::FilePath(file_path_hosts_),
-                   base::File::FLAG_OPEN | base::File::FLAG_READ);
-  base::File::Info hosts_info;
-  // File last modified times are not nearly as accurate as Time::Now() and are
-  // rounded down.  This means a file modified at 1:23.456 might only
-  // be given a last modified time of 1:23.450.  If we compared the last
-  // modified time directly to |since_time| we might miss changes to the hosts
-  // file because of this rounding down.  To account for this the |since_time|
-  // is pushed back by 1s which should more than account for any rounding.
-  // In practice file modified times on Android are two orders of magnitude
-  // more accurate than this 1s.  In practice the hosts file on Android always
-  // contains "127.0.0.1 localhost" and is never modified after Android is
-  // installed.
-  return !hosts.GetInfo(&hosts_info) ||
-         hosts_info.last_modified >=
-             (since_time - base::TimeDelta::FromSeconds(1));
+  return seen_config_change_;
 }
 
 void DnsConfigServicePosix::OnNetworkChanged(
@@ -580,7 +574,7 @@ void DnsConfigServicePosix::OnNetworkChanged(
   DCHECK(watcher_);
   watcher_->OnNetworkChanged(type);
 }
-#endif  // defined(OS_ANDROID)
+#endif  // !defined(OS_ANDROID)
 
 }  // namespace internal
 

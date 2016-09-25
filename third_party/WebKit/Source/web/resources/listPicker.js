@@ -169,7 +169,7 @@ ListPicker.prototype._handleWindowTouchEnd = function(event) {
     if (!touch)
         return;
     var target = document.elementFromPoint(touch.clientX, touch.clientY)
-    if (target.tagName === "OPTION")
+    if (target.tagName === "OPTION" && !target.disabled)
         window.pagePopupController.setValueAndClosePopup(0, this._selectElement.value);
     this._exitTouchSelectMode();
 };
@@ -183,7 +183,7 @@ ListPicker.prototype._getTouchForId = function (touchList, id) {
 };
 
 ListPicker.prototype._highlightOption = function(target) {
-    if (target.tagName !== "OPTION" || target.selected)
+    if (target.tagName !== "OPTION" || target.selected || target.disabled)
         return;
     var savedScrollTop = this._selectElement.scrollTop;
     // TODO(tkent): Updating HTMLOptionElement::selected is not efficient. We
@@ -198,14 +198,14 @@ ListPicker.prototype._handleChange = function(event) {
 };
 
 ListPicker.prototype._handleKeyDown = function(event) {
-    var key = event.keyIdentifier;
-    if (key === "U+001B") { // ESC
+    var key = event.key;
+    if (key === "Escape") {
         window.pagePopupController.closePopup();
         event.preventDefault();
-    } else if (key === "U+0009" /* TAB */ || key === "Enter") {
+    } else if (key === "Tab" || key === "Enter") {
         window.pagePopupController.setValueAndClosePopup(0, this._selectElement.value);
         event.preventDefault();
-    } else if (event.altKey && (key === "Down" || key === "Up")) {
+    } else if (event.altKey && (key === "ArrowDown" || key === "ArrowUp")) {
         // We need to add a delay here because, if we do it immediately the key
         // press event will be handled by HTMLSelectElement and this popup will
         // be reopened.
@@ -225,6 +225,9 @@ ListPicker.prototype._fixWindowSize = function() {
     var elementOffsetWidth = this._selectElement.offsetWidth * zoom;
     var desiredWindowHeight = noScrollHeight;
     var desiredWindowWidth = elementOffsetWidth;
+    // If we already have a vertical scrollbar, subtract it out, it will get re-added below.
+    if (this._selectElement.scrollHeight > this._selectElement.clientHeight)
+      desiredWindowWidth -= scrollbarWidth;
     var expectingScrollbar = false;
     if (desiredWindowHeight > maxHeight) {
         desiredWindowHeight = maxHeight;

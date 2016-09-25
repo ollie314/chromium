@@ -5,7 +5,6 @@
 #include "media/blink/webmediaplayer_cast_android.h"
 
 #include "gpu/GLES2/gl2extchromium.h"
-#include "gpu/blink/webgraphicscontext3d_impl.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "media/base/android/media_common_android.h"
@@ -13,14 +12,11 @@
 #include "media/blink/webmediaplayer_impl.h"
 #include "media/blink/webmediaplayer_params.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayerClient.h"
-#include "third_party/WebKit/public/platform/modules/mediasession/WebMediaSession.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkTypeface.h"
-#include "third_party/skia/include/gpu/GrContext.h"
-#include "third_party/skia/include/gpu/SkGrPixelRef.h"
 
 using gpu::gles2::GLES2Interface;
 
@@ -68,7 +64,8 @@ scoped_refptr<VideoFrame> MakeTextFrameForCast(
   paint.setAntiAlias(true);
   paint.setFilterQuality(kHigh_SkFilterQuality);
   paint.setColor(SK_ColorWHITE);
-  paint.setTypeface(SkTypeface::CreateFromName("sans", SkTypeface::kBold));
+  paint.setTypeface(SkTypeface::MakeFromName(
+      "sans", SkFontStyle::FromOldStyle(SkTypeface::kBold)));
   paint.setTextSize(kTextSize);
 
   // Calculate the vertical margin from the top
@@ -145,10 +142,11 @@ scoped_refptr<VideoFrame> MakeTextFrameForCast(
   gl->GenUnverifiedSyncTokenCHROMIUM(fence_sync,
                                      texture_mailbox_sync_token.GetData());
 
-  return VideoFrame::WrapNativeTexture(
-      media::PIXEL_FORMAT_ARGB,
+  gpu::MailboxHolder holders[media::VideoFrame::kMaxPlanes] = {
       gpu::MailboxHolder(texture_mailbox, texture_mailbox_sync_token,
-                         texture_target),
+                         texture_target)};
+  return VideoFrame::WrapNativeTextures(
+      media::PIXEL_FORMAT_ARGB, holders,
       media::BindToCurrentLoop(base::Bind(&OnReleaseTexture, context_3d_cb,
                                           remote_playback_texture_id)),
       canvas_size /* coded_size */, gfx::Rect(canvas_size) /* visible_rect */,
@@ -175,8 +173,7 @@ void WebMediaPlayerCast::Initialize(const GURL& url,
                                     int delegate_id) {
   player_manager_->Initialize(MEDIA_PLAYER_TYPE_REMOTE_ONLY, player_id_, url,
                               frame->document().firstPartyForCookies(), 0,
-                              frame->document().url(), true, delegate_id,
-                              blink::WebMediaSession::DefaultID);
+                              frame->document().url(), true, delegate_id);
   is_player_initialized_ = true;
 }
 
@@ -343,16 +340,6 @@ bool WebMediaPlayerCast::paused() const {
   return paused_;
 }
 
-#if defined(VIDEO_HOLE)
-bool WebMediaPlayerCast::UpdateBoundaryRectangle() {
-  return false;
-}
-
-const gfx::RectF WebMediaPlayerCast::GetBoundaryRectangle() {
-  return gfx::RectF();
-}
-#endif  // defined(VIDEO_HOLE)
-
 void WebMediaPlayerCast::SetDeviceScaleFactor(float scale_factor) {
   device_scale_factor_ = scale_factor;
 }
@@ -379,6 +366,10 @@ scoped_refptr<VideoFrame> WebMediaPlayerCast::GetCastingBanner() {
   return MakeTextFrameForCast(remote_playback_message_, canvas_size,
                               webmediaplayer_->naturalSize(),
                               base::Bind(&GLCBShim, context_3d_cb_));
+}
+
+void WebMediaPlayerCast::setPoster(const blink::WebURL& poster) {
+  player_manager_->SetPoster(player_id_, poster);
 }
 
 }  // namespace media

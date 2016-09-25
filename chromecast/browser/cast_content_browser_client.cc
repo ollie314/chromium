@@ -16,7 +16,9 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chromecast/base/cast_constants.h"
 #include "chromecast/base/cast_paths.h"
@@ -27,11 +29,12 @@
 #include "chromecast/browser/cast_network_delegate.h"
 #include "chromecast/browser/cast_quota_permission_context.h"
 #include "chromecast/browser/cast_resource_dispatcher_host_delegate.h"
-#include "chromecast/browser/geolocation/cast_access_token_store.h"
-#include "chromecast/browser/media/cma_message_filter_host.h"
+#include "chromecast/browser/devtools/cast_devtools_delegate.h"
+#include "chromecast/browser/media/media_caps_impl.h"
 #include "chromecast/browser/service/cast_service_simple.h"
 #include "chromecast/browser/url_request_context_factory.h"
 #include "chromecast/common/global_descriptors.h"
+#include "chromecast/media/audio/cast_audio_manager.h"
 #include "chromecast/media/cma/backend/media_pipeline_backend_manager.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
 #include "components/crash/content/app/breakpad_linux.h"
@@ -49,16 +52,18 @@
 #include "content/public/common/web_preferences.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/shell/public/cpp/interface_registry.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gl/gl_switches.h"
 
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-#include "chromecast/browser/media/cast_mojo_media_application.h"
 #include "chromecast/browser/media/cast_mojo_media_client.h"
+#include "media/mojo/services/mojo_media_application.h"  // nogncheck
 #endif  // ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS
 
 #if defined(OS_ANDROID)
 #include "components/crash/content/browser/crash_dump_manager_android.h"
-#include "components/external_video_surface/browser/android/external_video_surface_container_impl.h"
 #else
 #include "chromecast/browser/media/cast_browser_cdm_factory.h"
 #endif  // defined(OS_ANDROID)
@@ -68,17 +73,23 @@ namespace shell {
 
 namespace {
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-static std::unique_ptr<::shell::ShellClient> CreateCastMojoMediaApplication(
-    CastContentBrowserClient* browser_client) {
+static std::unique_ptr<::shell::Service> CreateMojoMediaApplication(
+    CastContentBrowserClient* browser_client,
+    const base::Closure& quit_closure) {
   std::unique_ptr<media::CastMojoMediaClient> mojo_media_client(
       new media::CastMojoMediaClient(
           base::Bind(&CastContentBrowserClient::CreateMediaPipelineBackend,
-                     base::Unretained(browser_client))));
-  return std::unique_ptr<::shell::ShellClient>(
-      new media::CastMojoMediaApplication(
-          std::move(mojo_media_client), browser_client->GetMediaTaskRunner()));
+                     base::Unretained(browser_client)),
+          base::Bind(&CastContentBrowserClient::CreateCdmFactory,
+                     base::Unretained(browser_client)),
+          browser_client->GetVideoResolutionPolicy(),
+          browser_client->media_resource_tracker()));
+  return std::unique_ptr<::shell::Service>(
+      new ::media::MojoMediaApplication(std::move(mojo_media_client),
+                                        quit_closure));
 }
-#endif  // ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS
+#endif  // defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
+
 }  // namespace
 
 CastContentBrowserClient::CastContentBrowserClient()
@@ -94,6 +105,20 @@ CastContentBrowserClient::~CastContentBrowserClient() {
 
 void CastContentBrowserClient::AppendExtraCommandLineSwitches(
     base::CommandLine* command_line) {
+  std::string process_type =
+      command_line->GetSwitchValueNative(switches::kProcessType);
+  if (process_type == switches::kGpuProcess) {
+    gfx::Size res =
+        display::Screen::GetScreen()->GetPrimaryDisplay().GetSizeInPixel();
+    if (!command_line->HasSwitch(switches::kCastInitialScreenWidth)) {
+      command_line->AppendSwitchASCII(switches::kCastInitialScreenWidth,
+                                      base::IntToString(res.width()));
+    }
+    if (!command_line->HasSwitch(switches::kCastInitialScreenHeight)) {
+      command_line->AppendSwitchASCII(switches::kCastInitialScreenHeight,
+                                      base::IntToString(res.height()));
+    }
+  }
 }
 
 void CastContentBrowserClient::PreCreateThreads() {
@@ -104,10 +129,15 @@ std::unique_ptr<CastService> CastContentBrowserClient::CreateCastService(
     PrefService* pref_service,
     net::URLRequestContextGetter* request_context_getter,
     media::VideoPlaneController* video_plane_controller) {
-  return base::WrapUnique(new CastServiceSimple(browser_context, pref_service));
+  return base::MakeUnique<CastServiceSimple>(browser_context, pref_service);
 }
 
 #if !defined(OS_ANDROID)
+media::VideoResolutionPolicy*
+CastContentBrowserClient::GetVideoResolutionPolicy() {
+  return nullptr;
+}
+
 scoped_refptr<base::SingleThreadTaskRunner>
 CastContentBrowserClient::GetMediaTaskRunner() {
   DCHECK(cast_browser_main_parts_);
@@ -116,7 +146,8 @@ CastContentBrowserClient::GetMediaTaskRunner() {
 
 std::unique_ptr<media::MediaPipelineBackend>
 CastContentBrowserClient::CreateMediaPipelineBackend(
-    const media::MediaPipelineDeviceParams& params) {
+    const media::MediaPipelineDeviceParams& params,
+    const std::string& audio_device_id) {
   return media_pipeline_backend_manager()->CreateMediaPipelineBackend(params);
 }
 
@@ -131,6 +162,11 @@ CastContentBrowserClient::media_pipeline_backend_manager() {
   return cast_browser_main_parts_->media_pipeline_backend_manager();
 }
 #endif  // !defined(OS_ANDROID)
+
+media::MediaCapsImpl* CastContentBrowserClient::media_caps() {
+  DCHECK(cast_browser_main_parts_);
+  return cast_browser_main_parts_->media_caps();
+}
 
 void CastContentBrowserClient::SetMetricsClientId(
     const std::string& client_id) {
@@ -155,16 +191,6 @@ content::BrowserMainParts* CastContentBrowserClient::CreateBrowserMainParts(
 
 void CastContentBrowserClient::RenderProcessWillLaunch(
     content::RenderProcessHost* host) {
-#if !defined(OS_ANDROID)
-  scoped_refptr<media::CmaMessageFilterHost> cma_message_filter(
-      new media::CmaMessageFilterHost(
-          host->GetID(),
-          base::Bind(&CastContentBrowserClient::CreateMediaPipelineBackend,
-                     base::Unretained(this)),
-          GetMediaTaskRunner(), media_resource_tracker()));
-  host->AddFilter(cma_message_filter.get());
-#endif  // !defined(OS_ANDROID)
-
   // Forcibly trigger I/O-thread URLRequestContext initialization before
   // getting HostResolver.
   content::BrowserThread::PostTaskAndReplyWithResult(
@@ -237,9 +263,6 @@ void CastContentBrowserClient::AppendExtraCommandLineSwitches(
   if (process_type == switches::kRendererProcess) {
     // Any browser command-line switches that should be propagated to
     // the renderer go here.
-
-    if (browser_command_line->HasSwitch(switches::kEnableCmaMediaPipeline))
-      command_line->AppendSwitch(switches::kEnableCmaMediaPipeline);
     if (browser_command_line->HasSwitch(switches::kAllowHiddenMediaPlayback))
       command_line->AppendSwitch(switches::kAllowHiddenMediaPlayback);
   }
@@ -256,11 +279,6 @@ void CastContentBrowserClient::AppendExtraCommandLineSwitches(
   AppendExtraCommandLineSwitches(command_line);
 }
 
-content::AccessTokenStore* CastContentBrowserClient::CreateAccessTokenStore() {
-  return new CastAccessTokenStore(
-      CastBrowserProcess::GetInstance()->browser_context());
-}
-
 void CastContentBrowserClient::OverrideWebkitPrefs(
     content::RenderViewHost* render_view_host,
     content::WebPreferences* prefs) {
@@ -273,6 +291,16 @@ void CastContentBrowserClient::OverrideWebkitPrefs(
 
   // Enable 5% margins for WebVTT cues to keep within title-safe area
   prefs->text_track_margin_percentage = 5;
+
+  prefs->hide_scrollbars = true;
+
+#if defined(OS_ANDROID)
+  // Enable the television style for viewport so that all cast apps have a
+  // 1280px wide layout viewport by default.
+  DCHECK(prefs->viewport_enabled);
+  DCHECK(prefs->viewport_meta_enabled);
+  prefs->viewport_style = content::ViewportStyle::TELEVISION;
+#endif  // defined(OS_ANDROID)
 }
 
 void CastContentBrowserClient::ResourceDispatcherHostCreated() {
@@ -301,11 +329,13 @@ void CastContentBrowserClient::AllowCertificateError(
     bool overridable,
     bool strict_enforcement,
     bool expired_previous_decision,
-    const base::Callback<void(bool)>& callback,
-    content::CertificateRequestResultType* result) {
+    const base::Callback<void(content::CertificateRequestResultType)>&
+        callback) {
   // Allow developers to override certificate errors.
   // Otherwise, any fatal certificate errors will cause an abort.
-  *result = content::CERTIFICATE_REQUEST_RESULT_TYPE_CANCEL;
+  if (!callback.is_null()) {
+    callback.Run(content::CERTIFICATE_REQUEST_RESULT_TYPE_CANCEL);
+  }
   return;
 }
 
@@ -367,6 +397,7 @@ bool CastContentBrowserClient::CanCreateWindow(
     WindowContainerType container_type,
     const GURL& target_url,
     const content::Referrer& referrer,
+    const std::string& frame_name,
     WindowOpenDisposition disposition,
     const blink::WebWindowFeatures& features,
     bool user_gesture,
@@ -380,12 +411,23 @@ bool CastContentBrowserClient::CanCreateWindow(
   return false;
 }
 
+void CastContentBrowserClient::ExposeInterfacesToRenderer(
+    ::shell::InterfaceRegistry* registry,
+    content::RenderProcessHost* render_process_host) {
+  registry->AddInterface(
+      base::Bind(&media::MediaCapsImpl::AddBinding,
+                 base::Unretained(cast_browser_main_parts_->media_caps())),
+      base::ThreadTaskRunnerHandle::Get());
+}
+
 void CastContentBrowserClient::RegisterInProcessMojoApplications(
     StaticMojoApplicationMap* apps) {
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-  apps->insert(std::make_pair(
-      "mojo:media",
-      base::Bind(&CreateCastMojoMediaApplication, base::Unretained(this))));
+  content::MojoApplicationInfo app_info;
+  app_info.application_factory =
+      base::Bind(&CreateMojoMediaApplication, base::Unretained(this));
+  app_info.application_task_runner = GetMediaTaskRunner();
+  apps->insert(std::make_pair("mojo:media", app_info));
 #endif
 }
 
@@ -418,15 +460,19 @@ void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
 }
 
 #else
+::media::ScopedAudioManagerPtr CastContentBrowserClient::CreateAudioManager(
+    ::media::AudioLogFactory* audio_log_factory) {
+  return ::media::ScopedAudioManagerPtr(new media::CastAudioManager(
+      GetMediaTaskRunner(), GetMediaTaskRunner(), audio_log_factory,
+      media_pipeline_backend_manager()));
+}
 
 std::unique_ptr<::media::CdmFactory>
 CastContentBrowserClient::CreateCdmFactory() {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableCmaMediaPipeline)) {
-    return base::WrapUnique(new media::CastBrowserCdmFactory(
-        GetMediaTaskRunner(), media_resource_tracker()));
-  }
-
+#if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
+  return base::MakeUnique<media::CastBrowserCdmFactory>(
+      GetMediaTaskRunner(), media_resource_tracker());
+#endif  // defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
   return nullptr;
 }
 
@@ -447,14 +493,10 @@ void CastContentBrowserClient::GetAdditionalWebUISchemes(
   additional_schemes->push_back(kChromeResourceScheme);
 }
 
-#if defined(OS_ANDROID) && defined(VIDEO_HOLE)
-content::ExternalVideoSurfaceContainer*
-CastContentBrowserClient::OverrideCreateExternalVideoSurfaceContainer(
-    content::WebContents* web_contents) {
-  return external_video_surface::ExternalVideoSurfaceContainerImpl::Create(
-      web_contents);
+content::DevToolsManagerDelegate*
+CastContentBrowserClient::GetDevToolsManagerDelegate() {
+  return new CastDevToolsDelegate();
 }
-#endif  // defined(OS_ANDROID) && defined(VIDEO_HOLE)
 
 #if !defined(OS_ANDROID)
 int CastContentBrowserClient::GetCrashSignalFD(

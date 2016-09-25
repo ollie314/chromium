@@ -23,7 +23,9 @@
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/bluetooth_low_energy_device_mac.h"
 #include "device/bluetooth/bluetooth_low_energy_discovery_manager_mac.h"
+#include "device/bluetooth/bluetooth_uuid.h"
 
+@class CBUUID;
 @class IOBluetoothDevice;
 @class NSArray;
 @class NSDate;
@@ -48,6 +50,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
       std::string name,
       std::string address,
       scoped_refptr<base::SequencedTaskRunner> ui_task_runner);
+
+  // Converts CBUUID into BluetoothUUID
+  static BluetoothUUID BluetoothUUIDWithCBUUID(CBUUID* UUID);
 
   // BluetoothAdapter overrides:
   std::string GetAddress() const override;
@@ -84,7 +89,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   void RegisterAdvertisement(
       std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
       const CreateAdvertisementCallback& callback,
-      const CreateAdvertisementErrorCallback& error_callback) override;
+      const AdvertisementErrorCallback& error_callback) override;
+  BluetoothLocalGattService* GetGattService(
+      const std::string& identifier) const override;
 
   // BluetoothDiscoveryManagerMac::Observer overrides:
   void ClassicDeviceFound(IOBluetoothDevice* device) override;
@@ -120,7 +127,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   // |low_energy_central_manager_delegate_| as the manager's delegate. Should
   // be called only when |IsLowEnergyAvailable()|.
   void SetCentralManagerForTesting(CBCentralManager* central_manager);
-  CBCentralManager* GetCentralManagerForTesting();
+
+  // Returns the CBCentralManager instance.
+  CBCentralManager* GetCentralManager();
 
   // The length of time that must elapse since the last Inquiry response (on
   // Classic devices) or call to BluetoothLowEnergyDevice::Update() (on Low
@@ -167,10 +176,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
 
   // Updates |devices_| when there is a change to the CBCentralManager's state.
   void LowEnergyCentralManagerUpdatedState();
-
-  // Removes from |devices_| any previously paired, connected or seen devices
-  // which are no longer present. Notifies observers.
-  void RemoveTimedOutDevices();
 
   // Updates |devices_| to include the currently paired devices and notifies
   // observers.

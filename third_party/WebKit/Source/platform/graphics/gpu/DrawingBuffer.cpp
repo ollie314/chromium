@@ -30,9 +30,13 @@
 
 #include "platform/graphics/gpu/DrawingBuffer.h"
 
+#include "cc/resources/shared_bitmap.h"
+#include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "gpu/command_buffer/common/capabilities.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TraceEvent.h"
+#include "platform/graphics/AcceleratedStaticBitmapImage.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/gpu/Extensions3DUtil.h"
@@ -40,11 +44,15 @@
 #include "public/platform/WebCompositorSupport.h"
 #include "public/platform/WebExternalBitmap.h"
 #include "public/platform/WebExternalTextureLayer.h"
-#include "public/platform/WebGraphicsContext3D.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
+#include "skia/ext/texture_handle.h"
+#include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/gpu/gl/GrGLTypes.h"
 #include "wtf/CheckedNumeric.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/typed_arrays/ArrayBufferContents.h"
 #include <algorithm>
+#include <memory>
 
 namespace blink {
 
@@ -79,7 +87,10 @@ static bool shouldFailDrawingBufferCreationForTesting = false;
 
 } // namespace
 
-PassRefPtr<DrawingBuffer> DrawingBuffer::create(PassOwnPtr<WebGraphicsContext3DProvider> contextProvider, const IntSize& size, bool premultipliedAlpha, bool wantAlphaChannel, bool wantDepthBuffer, bool wantStencilBuffer, bool wantAntialiasing, PreserveDrawingBuffer preserve)
+PassRefPtr<DrawingBuffer> DrawingBuffer::create(std::unique_ptr<WebGraphicsContext3DProvider> contextProvider,
+    const IntSize& size, bool premultipliedAlpha, bool wantAlphaChannel,
+    bool wantDepthBuffer, bool wantStencilBuffer, bool wantAntialiasing,
+    PreserveDrawingBuffer preserve, WebGLVersion webGLVersion)
 {
     ASSERT(contextProvider);
 
@@ -88,7 +99,7 @@ PassRefPtr<DrawingBuffer> DrawingBuffer::create(PassOwnPtr<WebGraphicsContext3DP
         return nullptr;
     }
 
-    OwnPtr<Extensions3DUtil> extensionsUtil = Extensions3DUtil::create(contextProvider->contextGL());
+    std::unique_ptr<Extensions3DUtil> extensionsUtil = Extensions3DUtil::create(contextProvider->contextGL());
     if (!extensionsUtil->isValid()) {
         // This might be the first time we notice that the GL context is lost.
         return nullptr;
@@ -110,8 +121,10 @@ PassRefPtr<DrawingBuffer> DrawingBuffer::create(PassOwnPtr<WebGraphicsContext3DP
     if (discardFramebufferSupported)
         extensionsUtil->ensureExtensionEnabled("GL_EXT_discard_framebuffer");
 
-    RefPtr<DrawingBuffer> drawingBuffer = adoptRef(new DrawingBuffer(std::move(contextProvider), extensionsUtil.release(), discardFramebufferSupported, wantAlphaChannel, premultipliedAlpha, preserve));
-    if (!drawingBuffer->initialize(size, wantDepthBuffer, wantStencilBuffer, multisampleSupported)) {
+    RefPtr<DrawingBuffer> drawingBuffer = adoptRef(new DrawingBuffer(std::move(contextProvider), std::move(extensionsUtil),
+        discardFramebufferSupported, wantAlphaChannel, premultipliedAlpha,
+        preserve, webGLVersion, wantDepthBuffer, wantStencilBuffer));
+    if (!drawingBuffer->initialize(size, multisampleSupported)) {
         drawingBuffer->beginDestruction();
         return PassRefPtr<DrawingBuffer>();
     }
@@ -124,42 +137,29 @@ void DrawingBuffer::forceNextDrawingBufferCreationToFail()
 }
 
 DrawingBuffer::DrawingBuffer(
-    PassOwnPtr<WebGraphicsContext3DProvider> contextProvider,
-    PassOwnPtr<Extensions3DUtil> extensionsUtil,
+    std::unique_ptr<WebGraphicsContext3DProvider> contextProvider,
+    std::unique_ptr<Extensions3DUtil> extensionsUtil,
     bool discardFramebufferSupported,
     bool wantAlphaChannel,
     bool premultipliedAlpha,
-    PreserveDrawingBuffer preserve)
+    PreserveDrawingBuffer preserve,
+    WebGLVersion webGLVersion,
+    bool wantDepth,
+    bool wantStencil)
     : m_preserveDrawingBuffer(preserve)
-    , m_scissorEnabled(false)
-    , m_texture2DBinding(0)
-    , m_drawFramebufferBinding(0)
-    , m_readFramebufferBinding(0)
-    , m_activeTextureUnit(GL_TEXTURE0)
+    , m_webGLVersion(webGLVersion)
     , m_contextProvider(std::move(contextProvider))
-    , m_context(m_contextProvider->context3d())
     , m_gl(m_contextProvider->contextGL())
     , m_extensionsUtil(std::move(extensionsUtil))
-    , m_size(-1, -1)
     , m_discardFramebufferSupported(discardFramebufferSupported)
     , m_wantAlphaChannel(wantAlphaChannel)
     , m_premultipliedAlpha(premultipliedAlpha)
-    , m_hasImplicitStencilBuffer(false)
-    , m_fbo(0)
-    , m_depthStencilBuffer(0)
-    , m_multisampleFBO(0)
-    , m_multisampleColorBuffer(0)
-    , m_contentsChanged(true)
-    , m_contentsChangeCommitted(false)
-    , m_bufferClearNeeded(false)
-    , m_antiAliasingMode(None)
-    , m_maxTextureSize(0)
-    , m_sampleCount(0)
-    , m_packAlignment(4)
-    , m_destructionInProgress(false)
-    , m_isHidden(false)
-    , m_filterQuality(kLow_SkFilterQuality)
+    , m_softwareRendering(m_contextProvider->isSoftwareRendering())
+    , m_wantDepth(wantDepth)
+    , m_wantStencil(wantStencil)
 {
+    memset(m_colorMask, 0, 4 * sizeof(GLboolean));
+    memset(m_clearColor, 0, 4 * sizeof(GLfloat));
     // Used by browser tests to detect the use of a DrawingBuffer.
     TRACE_EVENT_INSTANT0("test_gpu", "DrawingBufferCreation", TRACE_EVENT_SCOPE_GLOBAL);
 }
@@ -168,8 +168,8 @@ DrawingBuffer::~DrawingBuffer()
 {
     ASSERT(m_destructionInProgress);
     ASSERT(m_textureMailboxes.isEmpty());
-    m_layer.clear();
-    m_contextProvider.clear();
+    m_layer.reset();
+    m_contextProvider.reset();
 }
 
 void DrawingBuffer::markContentsChanged()
@@ -190,11 +190,6 @@ void DrawingBuffer::setBufferClearNeeded(bool flag)
     } else {
         ASSERT(!m_bufferClearNeeded);
     }
-}
-
-WebGraphicsContext3D* DrawingBuffer::context()
-{
-    return m_context;
 }
 
 gpu::gles2::GLES2Interface* DrawingBuffer::contextGL()
@@ -225,15 +220,59 @@ void DrawingBuffer::setFilterQuality(SkFilterQuality filterQuality)
     }
 }
 
-void DrawingBuffer::freeRecycledMailboxes()
+bool DrawingBuffer::requiresAlphaChannelToBePreserved()
 {
-    if (m_recycledMailboxQueue.isEmpty())
-        return;
-    while (!m_recycledMailboxQueue.isEmpty())
-        deleteMailbox(m_recycledMailboxQueue.takeLast());
+    return !m_drawFramebufferBinding && defaultBufferRequiresAlphaChannelToBePreserved();
 }
 
-bool DrawingBuffer::prepareMailbox(WebExternalTextureMailbox* outMailbox, WebExternalBitmap* bitmap)
+bool DrawingBuffer::defaultBufferRequiresAlphaChannelToBePreserved()
+{
+    if (wantExplicitResolve()) {
+        return !m_wantAlphaChannel && getMultisampledRenderbufferFormat() == GL_RGBA8_OES;
+    }
+
+    bool rgbEmulation = contextProvider()->getCapabilities().emulate_rgb_buffer_with_rgba
+        || (RuntimeEnabledFeatures::webGLImageChromiumEnabled() && contextProvider()->getCapabilities().chromium_image_rgb_emulation);
+    return !m_wantAlphaChannel && rgbEmulation;
+}
+
+void DrawingBuffer::freeRecycledMailboxes()
+{
+    while (!m_recycledMailboxQueue.isEmpty()) {
+        RefPtr<RecycledMailbox> recycled = m_recycledMailboxQueue.takeLast();
+        deleteMailbox(recycled->mailbox, recycled->syncToken);
+    }
+}
+
+std::unique_ptr<cc::SharedBitmap> DrawingBuffer::createOrRecycleBitmap()
+{
+    size_t i = 0;
+    while (i < m_recycledBitmaps.size()) {
+        if (m_recycledBitmaps[i].size != m_size)
+            m_recycledBitmaps.remove(i); // Removed this position so iterate on it again.
+        else
+            ++i;
+    }
+    if (!m_recycledBitmaps.isEmpty()) {
+        RecycledBitmap recycled = std::move(m_recycledBitmaps.last());
+        m_recycledBitmaps.removeLast();
+        DCHECK(recycled.size == m_size);
+        return std::move(recycled.bitmap);
+    }
+
+    return Platform::current()->allocateSharedBitmap(m_size);
+}
+
+bool DrawingBuffer::PrepareTextureMailbox(cc::TextureMailbox* outMailbox, std::unique_ptr<cc::SingleReleaseCallback>* outReleaseCallback)
+{
+    bool forceGpuResult = false;
+    return prepareTextureMailboxInternal(outMailbox, outReleaseCallback, forceGpuResult);
+}
+
+bool DrawingBuffer::prepareTextureMailboxInternal(
+    cc::TextureMailbox* outMailbox,
+    std::unique_ptr<cc::SingleReleaseCallback>* outReleaseCallback,
+    bool forceGpuResult)
 {
     if (m_destructionInProgress) {
         // It can be hit in the following sequence.
@@ -247,6 +286,14 @@ bool DrawingBuffer::prepareMailbox(WebExternalTextureMailbox* outMailbox, WebExt
     if (!m_contentsChanged)
         return false;
 
+    // If the context is lost, we don't know if we should be producing GPU or
+    // software frames, until we get a new context, since the compositor will
+    // be trying to get a new context and may change modes.
+    if (m_gl->GetGraphicsResetStatusKHR() != GL_NO_ERROR)
+        return false;
+
+    TRACE_EVENT0("blink,rail", "DrawingBuffer::prepareMailbox");
+
     if (m_newMailboxCallback)
         (*m_newMailboxCallback)();
 
@@ -254,14 +301,33 @@ bool DrawingBuffer::prepareMailbox(WebExternalTextureMailbox* outMailbox, WebExt
     if (m_antiAliasingMode != None)
         commit();
 
-    if (bitmap) {
-        bitmap->setSize(size());
-
+    if (m_softwareRendering && !forceGpuResult) {
+        std::unique_ptr<cc::SharedBitmap> bitmap = createOrRecycleBitmap();
+        if (!bitmap)
+            return false;
         unsigned char* pixels = bitmap->pixels();
+        DCHECK(pixels);
+
         bool needPremultiply = m_wantAlphaChannel && !m_premultipliedAlpha;
         WebGLImageConversion::AlphaOp op = needPremultiply ? WebGLImageConversion::AlphaDoPremultiply : WebGLImageConversion::AlphaDoNothing;
-        if (pixels)
-            readBackFramebuffer(pixels, size().width(), size().height(), ReadbackSkia, op);
+        readBackFramebuffer(pixels, size().width(), size().height(), ReadbackSkia, op);
+
+        *outMailbox = cc::TextureMailbox(bitmap.get(), m_size);
+
+        // This holds a ref on the DrawingBuffer that will keep it alive until the
+        // mailbox is released (and while the release callback is running). It also
+        // owns the SharedBitmap.
+        auto func = WTF::bind(&DrawingBuffer::softwareMailboxReleased,
+            RefPtr<DrawingBuffer>(this),
+            WTF::passed(std::move(bitmap)),
+            m_size);
+        *outReleaseCallback = cc::SingleReleaseCallback::Create(
+            convertToBaseCallback(std::move(func)));
+        return true;
+    }
+
+    if (m_webGLVersion > WebGL1) {
+        m_gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     }
 
     // We must restore the texture binding since creating new textures,
@@ -269,71 +335,148 @@ bool DrawingBuffer::prepareMailbox(WebExternalTextureMailbox* outMailbox, WebExt
     ScopedTextureUnit0BindingRestorer restorer(m_gl, m_activeTextureUnit, m_texture2DBinding);
 
     // First try to recycle an old buffer.
-    RefPtr<MailboxInfo> frontColorBufferMailbox = recycledMailbox();
+    RefPtr<MailboxInfo> mailboxInfo = takeRecycledMailbox();
 
     // No buffer available to recycle, create a new one.
-    if (!frontColorBufferMailbox)
-        frontColorBufferMailbox = createNewMailbox(createTextureAndAllocateMemory(m_size));
+    if (!mailboxInfo)
+        mailboxInfo = createNewMailbox(createTextureAndAllocateMemory(m_size));
 
     if (m_preserveDrawingBuffer == Discard) {
-        std::swap(frontColorBufferMailbox->textureInfo, m_colorBuffer);
-        // It appears safe to overwrite the context's framebuffer binding in the Discard case since there will always be a
-        // WebGLRenderingContext::clearIfComposited() call made before the next draw call which restores the framebuffer binding.
-        // If this stops being true at some point, we should track the current framebuffer binding in the DrawingBuffer and restore
-        // it after attaching the new back buffer here.
-        m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-        attachColorBufferToCurrentFBO();
+        std::swap(mailboxInfo->textureInfo, m_colorBuffer);
+        attachColorBufferToReadFramebuffer();
 
         if (m_discardFramebufferSupported) {
             // Explicitly discard framebuffer to save GPU memory bandwidth for tile-based GPU arch.
-            const GLenum attachments[3] = { GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
+            const GLenum attachments[3] = { GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
+            m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
             m_gl->DiscardFramebufferEXT(GL_FRAMEBUFFER, 3, attachments);
         }
     } else {
-        m_gl->CopyTextureCHROMIUM(m_colorBuffer.textureId, frontColorBufferMailbox->textureInfo.textureId, frontColorBufferMailbox->textureInfo.parameters.internalColorFormat, GL_UNSIGNED_BYTE, GL_FALSE, GL_FALSE, GL_FALSE);
+        m_gl->CopySubTextureCHROMIUM(m_colorBuffer.textureId, mailboxInfo->textureInfo.textureId,
+            0, 0, 0, 0, m_size.width(), m_size.height(), GL_FALSE, GL_FALSE, GL_FALSE);
     }
 
     restoreFramebufferBindings();
+    restorePixelUnpackBufferBindings();
     m_contentsChanged = false;
 
-    m_gl->ProduceTextureDirectCHROMIUM(frontColorBufferMailbox->textureInfo.textureId, frontColorBufferMailbox->textureInfo.parameters.target, frontColorBufferMailbox->mailbox.name);
+    m_gl->ProduceTextureDirectCHROMIUM(mailboxInfo->textureInfo.textureId, mailboxInfo->textureInfo.parameters.target, mailboxInfo->mailbox.name);
     const GLuint64 fenceSync = m_gl->InsertFenceSyncCHROMIUM();
+#if OS(MACOSX)
+    m_gl->DescheduleUntilFinishedCHROMIUM();
+#endif
     m_gl->Flush();
-    m_gl->GenSyncTokenCHROMIUM(fenceSync, frontColorBufferMailbox->mailbox.syncToken);
-    frontColorBufferMailbox->mailbox.validSyncToken = true;
-    frontColorBufferMailbox->mailbox.allowOverlay = frontColorBufferMailbox->textureInfo.imageId != 0;
-    frontColorBufferMailbox->mailbox.textureTarget = frontColorBufferMailbox->textureInfo.parameters.target;
-    frontColorBufferMailbox->mailbox.textureSize = WebSize(m_size.width(), m_size.height());
-    setBufferClearNeeded(true);
+    gpu::SyncToken syncToken;
+    m_gl->GenSyncTokenCHROMIUM(fenceSync, syncToken.GetData());
 
-    // set m_parentDrawingBuffer to make sure 'this' stays alive as long as it has live mailboxes
-    ASSERT(!frontColorBufferMailbox->m_parentDrawingBuffer);
-    frontColorBufferMailbox->m_parentDrawingBuffer = this;
-    *outMailbox = frontColorBufferMailbox->mailbox;
-    m_frontColorBuffer = { frontColorBufferMailbox->textureInfo, frontColorBufferMailbox->mailbox };
+    bool isOverlayCandidate = mailboxInfo->textureInfo.imageId != 0;
+    bool secureOutputOnly = false;
+    *outMailbox = cc::TextureMailbox(
+        mailboxInfo->mailbox, syncToken,
+        mailboxInfo->textureInfo.parameters.target,
+        gfx::Size(m_size.width(), m_size.height()),
+        isOverlayCandidate,
+        secureOutputOnly);
+
+    // This holds a ref on the DrawingBuffer that will keep it alive until the
+    // mailbox is released (and while the release callback is running).
+    auto func = WTF::bind(&DrawingBuffer::gpuMailboxReleased,
+        RefPtr<DrawingBuffer>(this),
+        mailboxInfo->mailbox);
+    *outReleaseCallback = cc::SingleReleaseCallback::Create(
+        convertToBaseCallback(std::move(func)));
+
+    m_frontColorBuffer = { mailboxInfo->mailbox, syncToken, mailboxInfo->textureInfo };
+    setBufferClearNeeded(true);
     return true;
 }
 
-void DrawingBuffer::mailboxReleased(const WebExternalTextureMailbox& mailbox, bool lostResource)
+void DrawingBuffer::gpuMailboxReleased(const gpu::Mailbox& mailbox, const gpu::SyncToken& syncToken,
+    bool lostResource)
 {
     if (m_destructionInProgress || m_gl->GetGraphicsResetStatusKHR() != GL_NO_ERROR || lostResource || m_isHidden) {
-        mailboxReleasedWithoutRecycling(mailbox);
+        deleteMailbox(mailbox, syncToken);
         return;
     }
 
     for (size_t i = 0; i < m_textureMailboxes.size(); i++) {
         RefPtr<MailboxInfo> mailboxInfo = m_textureMailboxes[i];
-        if (nameEquals(mailboxInfo->mailbox, mailbox)) {
-            memcpy(mailboxInfo->mailbox.syncToken, mailbox.syncToken,
-                sizeof(mailboxInfo->mailbox.syncToken));
-            mailboxInfo->mailbox.validSyncToken = mailbox.validSyncToken;
-            ASSERT(mailboxInfo->m_parentDrawingBuffer.get() == this);
-            mailboxInfo->m_parentDrawingBuffer.clear();
-            m_recycledMailboxQueue.prepend(mailboxInfo->mailbox);
+        if (mailboxInfo->mailbox == mailbox) {
+            m_recycledMailboxQueue.prepend(adoptRef(new RecycledMailbox(mailbox, syncToken)));
             return;
         }
     }
     ASSERT_NOT_REACHED();
+}
+
+void DrawingBuffer::softwareMailboxReleased(std::unique_ptr<cc::SharedBitmap> bitmap, const IntSize& size, const gpu::SyncToken& syncToken, bool lostResource)
+{
+    DCHECK(!syncToken.HasData()); // No sync tokens for software resources.
+    if (m_destructionInProgress || lostResource || m_isHidden || size != m_size)
+        return; // Just delete the bitmap.
+
+    RecycledBitmap recycled = { std::move(bitmap), m_size };
+    m_recycledBitmaps.append(std::move(recycled));
+}
+
+PassRefPtr<StaticBitmapImage> DrawingBuffer::transferToStaticBitmapImage()
+{
+    // This can be null if the context is lost before the first call to grContext().
+    GrContext* grContext = m_contextProvider->grContext();
+
+    cc::TextureMailbox textureMailbox;
+    std::unique_ptr<cc::SingleReleaseCallback> releaseCallback;
+    bool success = false;
+    if (grContext) {
+        bool forceGpuResult = true;
+        success = prepareTextureMailboxInternal(&textureMailbox, &releaseCallback, forceGpuResult);
+    }
+    if (!success) {
+        // If we can't get a mailbox, return an transparent black ImageBitmap.
+        // The only situation this could happen is when two or more calls to transferToImageBitmap are made back-to-back, or when the context gets lost.
+        sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(m_size.width(), m_size.height());
+        return StaticBitmapImage::create(surface->makeImageSnapshot());
+    }
+
+    DCHECK_EQ(m_size.width(), textureMailbox.size_in_pixels().width());
+    DCHECK_EQ(m_size.height(), textureMailbox.size_in_pixels().height());
+
+    // Make our own textureId that is a reference on the same texture backing being used as the front
+    // buffer (which was returned from PrepareTextureMailbox()).
+    // We do not need to wait on the sync token in |textureMailbox| since the mailbox was produced on
+    // the same |m_gl| context that we are using here. Similarly, the |releaseCallback| will run on
+    // the same context so we don't need to send a sync token for this consume action back to it.
+    // TODO(danakj): Instead of using PrepareTextureMailbox(), we could just use the actual texture id and
+    // avoid needing to produce/consume a mailbox.
+    GLuint textureId = m_gl->CreateAndConsumeTextureCHROMIUM(GL_TEXTURE_2D, textureMailbox.name());
+    // Return the mailbox but report that the resource is lost to prevent trying to use
+    // the backing for future frames. We keep it alive with our own reference to the
+    // backing via our |textureId|.
+    releaseCallback->Run(gpu::SyncToken(), true /* lostResource */);
+
+    // Store that texture id as the backing for an SkImage.
+    GrGLTextureInfo textureInfo;
+    textureInfo.fTarget = GL_TEXTURE_2D;
+    textureInfo.fID = textureId;
+    GrBackendTextureDesc backendTexture;
+    backendTexture.fOrigin = kBottomLeft_GrSurfaceOrigin;
+    backendTexture.fWidth = m_size.width();
+    backendTexture.fHeight = m_size.height();
+    backendTexture.fConfig = kSkia8888_GrPixelConfig;
+    backendTexture.fTextureHandle = skia::GrGLTextureInfoToGrBackendObject(textureInfo);
+    sk_sp<SkImage> skImage = SkImage::MakeFromAdoptedTexture(grContext, backendTexture);
+
+    // We reuse the same mailbox name from above since our texture id was consumed from it.
+    const auto& skImageMailbox = textureMailbox.mailbox();
+    // Use the sync token generated after producing the mailbox. Waiting for this before trying to use
+    // the mailbox with some other context will ensure it is valid. We wouldn't need to wait for the
+    // consume done in this function because the texture id it generated would only be valid for the
+    // DrawingBuffer's context anyways.
+    const auto& skImageSyncToken = textureMailbox.sync_token();
+
+    // TODO(xidachen): Create a small pool of recycled textures from ImageBitmapRenderingContext's
+    // transferFromImageBitmap, and try to use them in DrawingBuffer.
+    return AcceleratedStaticBitmapImage::createFromWebGLContextImage(std::move(skImage), skImageMailbox, skImageSyncToken);
 }
 
 DrawingBuffer::TextureParameters DrawingBuffer::chromiumImageTextureParameters()
@@ -343,9 +486,21 @@ DrawingBuffer::TextureParameters DrawingBuffer::chromiumImageTextureParameters()
     // on OSX.
     TextureParameters parameters;
     parameters.target = GC3D_TEXTURE_RECTANGLE_ARB;
-    parameters.internalColorFormat = GL_RGBA;
-    parameters.internalRenderbufferFormat = GL_RGBA8_OES;
-    parameters.colorFormat = GL_RGBA;
+
+    if (m_wantAlphaChannel) {
+        parameters.creationInternalColorFormat = GL_RGBA;
+        parameters.internalColorFormat = GL_RGBA;
+    } else if (contextProvider()->getCapabilities().chromium_image_rgb_emulation) {
+        parameters.creationInternalColorFormat = GL_RGB;
+        parameters.internalColorFormat = GL_RGBA;
+    } else {
+        GLenum format = defaultBufferRequiresAlphaChannelToBePreserved() ? GL_RGBA : GL_RGB;
+        parameters.creationInternalColorFormat = format;
+        parameters.internalColorFormat = format;
+    }
+
+    // Unused when CHROMIUM_image is being used.
+    parameters.colorFormat = 0;
     return parameters;
 #else
     return defaultTextureParameters();
@@ -358,50 +513,50 @@ DrawingBuffer::TextureParameters DrawingBuffer::defaultTextureParameters()
     parameters.target = GL_TEXTURE_2D;
     if (m_wantAlphaChannel) {
         parameters.internalColorFormat = GL_RGBA;
+        parameters.creationInternalColorFormat = GL_RGBA;
         parameters.colorFormat = GL_RGBA;
-        parameters.internalRenderbufferFormat = GL_RGBA8_OES;
+    } else if (contextProvider()->getCapabilities().emulate_rgb_buffer_with_rgba) {
+        parameters.internalColorFormat = GL_RGBA;
+        parameters.creationInternalColorFormat = GL_RGBA;
+        parameters.colorFormat = GL_RGBA;
     } else {
-        parameters.internalColorFormat = GL_RGB;
-        parameters.colorFormat = GL_RGB;
-        parameters.internalRenderbufferFormat = GL_RGB8_OES;
+        GLenum format = defaultBufferRequiresAlphaChannelToBePreserved() ? GL_RGBA : GL_RGB;
+        parameters.creationInternalColorFormat = format;
+        parameters.internalColorFormat = format;
+        parameters.colorFormat = format;
     }
     return parameters;
 }
 
-void DrawingBuffer::mailboxReleasedWithoutRecycling(const WebExternalTextureMailbox& mailbox)
-{
-    ASSERT(m_textureMailboxes.size());
-    // Ensure not to call the destructor until deleteMailbox() is completed.
-    RefPtr<DrawingBuffer> self = this;
-    deleteMailbox(mailbox);
-}
-
-PassRefPtr<DrawingBuffer::MailboxInfo> DrawingBuffer::recycledMailbox()
+PassRefPtr<DrawingBuffer::MailboxInfo> DrawingBuffer::takeRecycledMailbox()
 {
     if (m_recycledMailboxQueue.isEmpty())
-        return PassRefPtr<MailboxInfo>();
+        return nullptr;
 
-    WebExternalTextureMailbox mailbox;
-    while (!m_recycledMailboxQueue.isEmpty()) {
-        mailbox = m_recycledMailboxQueue.takeLast();
-        // Never have more than one mailbox in the released state.
-        if (!m_recycledMailboxQueue.isEmpty())
-            deleteMailbox(mailbox);
+    // Creation of image backed mailboxes is very expensive, so be less
+    // aggressive about pruning them.
+    size_t cacheLimit = 1;
+    if (RuntimeEnabledFeatures::webGLImageChromiumEnabled())
+        cacheLimit = 4;
+
+    RefPtr<RecycledMailbox> recycled;
+    while (m_recycledMailboxQueue.size() > cacheLimit) {
+        recycled = m_recycledMailboxQueue.takeLast();
+        deleteMailbox(recycled->mailbox, recycled->syncToken);
     }
+    recycled = m_recycledMailboxQueue.takeLast();
+
+    if (recycled->syncToken.HasData())
+        m_gl->WaitSyncTokenCHROMIUM(recycled->syncToken.GetData());
 
     RefPtr<MailboxInfo> mailboxInfo;
     for (size_t i = 0; i < m_textureMailboxes.size(); i++) {
-        if (nameEquals(m_textureMailboxes[i]->mailbox, mailbox)) {
+        if (m_textureMailboxes[i]->mailbox == recycled->mailbox) {
             mailboxInfo = m_textureMailboxes[i];
             break;
         }
     }
     ASSERT(mailboxInfo);
-
-    if (mailboxInfo->mailbox.validSyncToken) {
-        m_gl->WaitSyncTokenCHROMIUM(mailboxInfo->mailbox.syncToken);
-        mailboxInfo->mailbox.validSyncToken = false;
-    }
 
     if (mailboxInfo->size != m_size) {
         resizeTextureMemory(&mailboxInfo->textureInfo, m_size);
@@ -413,7 +568,7 @@ PassRefPtr<DrawingBuffer::MailboxInfo> DrawingBuffer::recycledMailbox()
 
 PassRefPtr<DrawingBuffer::MailboxInfo> DrawingBuffer::createNewMailbox(const TextureInfo& info)
 {
-    RefPtr<MailboxInfo> returnMailbox = adoptRef(new MailboxInfo());
+    RefPtr<MailboxInfo> returnMailbox = adoptRef(new MailboxInfo);
     m_gl->GenMailboxCHROMIUM(returnMailbox->mailbox.name);
     returnMailbox->textureInfo = info;
     returnMailbox->size = m_size;
@@ -421,15 +576,13 @@ PassRefPtr<DrawingBuffer::MailboxInfo> DrawingBuffer::createNewMailbox(const Tex
     return returnMailbox.release();
 }
 
-void DrawingBuffer::deleteMailbox(const WebExternalTextureMailbox& mailbox)
+void DrawingBuffer::deleteMailbox(const gpu::Mailbox& mailbox, const gpu::SyncToken& syncToken)
 {
+    if (syncToken.HasData())
+        m_gl->WaitSyncTokenCHROMIUM(syncToken.GetConstData());
     for (size_t i = 0; i < m_textureMailboxes.size(); i++) {
-        if (nameEquals(m_textureMailboxes[i]->mailbox, mailbox)) {
-            if (mailbox.validSyncToken)
-                m_gl->WaitSyncTokenCHROMIUM(mailbox.syncToken);
-
+        if (m_textureMailboxes[i]->mailbox == mailbox) {
             deleteChromiumImageForTexture(&m_textureMailboxes[i]->textureInfo);
-
             m_gl->DeleteTextures(1, &m_textureMailboxes[i]->textureInfo.textureId);
             m_textureMailboxes.remove(i);
             return;
@@ -438,7 +591,7 @@ void DrawingBuffer::deleteMailbox(const WebExternalTextureMailbox& mailbox)
     ASSERT_NOT_REACHED();
 }
 
-bool DrawingBuffer::initialize(const IntSize& size, bool wantDepthBuffer, bool wantStencilBuffer, bool useMultisampling)
+bool DrawingBuffer::initialize(const IntSize& size, bool useMultisampling)
 {
     if (m_gl->GetGraphicsResetStatusKHR() != GL_NO_ERROR) {
         // Need to try to restore the context again later.
@@ -458,18 +611,28 @@ bool DrawingBuffer::initialize(const IntSize& size, bool wantDepthBuffer, bool w
             m_antiAliasingMode = ScreenSpaceAntialiasing;
         }
     }
+    // TODO(dshwang): enable storage texture on all platform. crbug.com/557848
+    // Linux ATI bot fails WebglConformance.conformance_textures_misc_tex_image_webgl
+    // So use storage texture only if ScreenSpaceAntialiasing is enabled,
+    // because ScreenSpaceAntialiasing is much faster with storage texture.
+    m_storageTextureSupported = (m_webGLVersion > WebGL1
+        ||  m_extensionsUtil->supportsExtension("GL_EXT_texture_storage"))
+        && m_antiAliasingMode == ScreenSpaceAntialiasing;
     m_sampleCount = std::min(4, maxSampleCount);
 
     m_gl->GenFramebuffers(1, &m_fbo);
-
     m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-    createSecondaryBuffers();
-    if (!reset(size, wantDepthBuffer || wantStencilBuffer))
+    if (wantExplicitResolve()) {
+        m_gl->GenFramebuffers(1, &m_multisampleFBO);
+        m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_multisampleFBO);
+        m_gl->GenRenderbuffers(1, &m_multisampleRenderbuffer);
+    }
+    if (!reset(size))
         return false;
 
     if (m_depthStencilBuffer) {
-        DCHECK(wantDepthBuffer || wantStencilBuffer);
-        m_hasImplicitStencilBuffer = !wantStencilBuffer;
+        DCHECK(wantDepthOrStencil());
+        m_hasImplicitStencilBuffer = !m_wantStencil;
     }
 
     if (m_gl->GetGraphicsResetStatusKHR() != GL_NO_ERROR) {
@@ -480,7 +643,7 @@ bool DrawingBuffer::initialize(const IntSize& size, bool wantDepthBuffer, bool w
     return true;
 }
 
-bool DrawingBuffer::copyToPlatformTexture(WebGraphicsContext3D* context, gpu::gles2::GLES2Interface* gl, GLuint texture, GLenum internalFormat,
+bool DrawingBuffer::copyToPlatformTexture(gpu::gles2::GLES2Interface* gl, GLuint texture, GLenum internalFormat,
     GLenum destType, GLint level, bool premultiplyAlpha, bool flipY, SourceDrawingBuffer sourceBuffer)
 {
     if (m_contentsChanged) {
@@ -496,13 +659,15 @@ bool DrawingBuffer::copyToPlatformTexture(WebGraphicsContext3D* context, gpu::gl
         return false;
 
     // Contexts may be in a different share group. We must transfer the texture through a mailbox first
-    WebExternalTextureMailbox mailbox;
     GLint textureId = 0;
     GLenum target = 0;
+    gpu::Mailbox mailbox;
+    gpu::SyncToken produceSyncToken;
     if (sourceBuffer == FrontBuffer && m_frontColorBuffer.texInfo.textureId) {
         textureId = m_frontColorBuffer.texInfo.textureId;
-        mailbox = m_frontColorBuffer.mailbox;
         target = m_frontColorBuffer.texInfo.parameters.target;
+        mailbox = m_frontColorBuffer.mailbox;
+        produceSyncToken = m_frontColorBuffer.produceSyncToken;
     } else {
         textureId = m_colorBuffer.textureId;
         target = m_colorBuffer.parameters.target;
@@ -510,12 +675,11 @@ bool DrawingBuffer::copyToPlatformTexture(WebGraphicsContext3D* context, gpu::gl
         m_gl->ProduceTextureDirectCHROMIUM(textureId, target, mailbox.name);
         const GLuint64 fenceSync = m_gl->InsertFenceSyncCHROMIUM();
         m_gl->Flush();
-        m_gl->GenSyncTokenCHROMIUM(fenceSync, mailbox.syncToken);
-        mailbox.validSyncToken = true;
+        m_gl->GenSyncTokenCHROMIUM(fenceSync, produceSyncToken.GetData());
     }
 
-    if (mailbox.validSyncToken)
-        gl->WaitSyncTokenCHROMIUM(mailbox.syncToken);
+    DCHECK(produceSyncToken.HasData());
+    gl->WaitSyncTokenCHROMIUM(produceSyncToken.GetConstData());
     GLuint sourceTexture = gl->CreateAndConsumeTextureCHROMIUM(target, mailbox.name);
 
     GLboolean unpackPremultiplyAlphaNeeded = GL_FALSE;
@@ -532,9 +696,9 @@ bool DrawingBuffer::copyToPlatformTexture(WebGraphicsContext3D* context, gpu::gl
     const GLuint64 fenceSync = gl->InsertFenceSyncCHROMIUM();
 
     gl->Flush();
-    GLbyte syncToken[24];
-    gl->GenSyncTokenCHROMIUM(fenceSync, syncToken);
-    m_gl->WaitSyncTokenCHROMIUM(syncToken);
+    gpu::SyncToken syncToken;
+    gl->GenSyncTokenCHROMIUM(fenceSync, syncToken.GetData());
+    m_gl->WaitSyncTokenCHROMIUM(syncToken.GetData());
 
     return true;
 }
@@ -547,7 +711,7 @@ GLuint DrawingBuffer::framebuffer() const
 WebLayer* DrawingBuffer::platformLayer()
 {
     if (!m_layer) {
-        m_layer = adoptPtr(Platform::current()->compositorSupport()->createExternalTextureLayer(this));
+        m_layer = wrapUnique(Platform::current()->compositorSupport()->createExternalTextureLayer(this));
 
         m_layer->setOpaque(!m_wantAlphaChannel);
         m_layer->setBlendBackgroundColor(m_wantAlphaChannel);
@@ -573,9 +737,7 @@ void DrawingBuffer::beginDestruction()
     m_destructionInProgress = true;
 
     clearPlatformLayer();
-
-    while (!m_recycledMailboxQueue.isEmpty())
-        deleteMailbox(m_recycledMailboxQueue.takeLast());
+    freeRecycledMailboxes();
 
     if (m_multisampleFBO)
         m_gl->DeleteFramebuffers(1, &m_multisampleFBO);
@@ -583,8 +745,8 @@ void DrawingBuffer::beginDestruction()
     if (m_fbo)
         m_gl->DeleteFramebuffers(1, &m_fbo);
 
-    if (m_multisampleColorBuffer)
-        m_gl->DeleteRenderbuffers(1, &m_multisampleColorBuffer);
+    if (m_multisampleRenderbuffer)
+        m_gl->DeleteRenderbuffers(1, &m_multisampleRenderbuffer);
 
     if (m_depthStencilBuffer)
         m_gl->DeleteRenderbuffers(1, &m_depthStencilBuffer);
@@ -598,7 +760,7 @@ void DrawingBuffer::beginDestruction()
 
     m_colorBuffer = TextureInfo();
     m_frontColorBuffer = FrontBufferInfo();
-    m_multisampleColorBuffer = 0;
+    m_multisampleRenderbuffer = 0;
     m_depthStencilBuffer = 0;
     m_multisampleFBO = 0;
     m_fbo = 0;
@@ -619,50 +781,24 @@ GLuint DrawingBuffer::createColorTexture(const TextureParameters& parameters)
     return offscreenColorTexture;
 }
 
-void DrawingBuffer::createSecondaryBuffers()
+bool DrawingBuffer::resizeMultisampleFramebuffer(const IntSize& size)
 {
-    // create a multisample FBO
-    if (m_antiAliasingMode == MSAAExplicitResolve) {
-        m_gl->GenFramebuffers(1, &m_multisampleFBO);
-        m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_multisampleFBO);
-        m_gl->GenRenderbuffers(1, &m_multisampleColorBuffer);
-    }
-}
+    DCHECK(wantExplicitResolve());
+    m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_multisampleFBO);
+    m_gl->BindRenderbuffer(GL_RENDERBUFFER, m_multisampleRenderbuffer);
+    m_gl->RenderbufferStorageMultisampleCHROMIUM(GL_RENDERBUFFER, m_sampleCount, getMultisampledRenderbufferFormat(), size.width(), size.height());
 
-bool DrawingBuffer::resizeFramebuffer(const IntSize& size, bool wantDepthOrStencilBuffer)
-{
-    m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-    if (m_antiAliasingMode != MSAAExplicitResolve && wantDepthOrStencilBuffer)
-        resizeDepthStencil(size);
-    if (m_gl->CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    if (m_gl->GetError() == GL_OUT_OF_MEMORY)
         return false;
 
-    return true;
-}
-
-bool DrawingBuffer::resizeMultisampleFramebuffer(const IntSize& size, bool wantDepthOrStencilBuffer)
-{
-    if (m_antiAliasingMode == MSAAExplicitResolve) {
-        m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_multisampleFBO);
-
-        m_gl->BindRenderbuffer(GL_RENDERBUFFER, m_multisampleColorBuffer);
-        m_gl->RenderbufferStorageMultisampleCHROMIUM(GL_RENDERBUFFER, m_sampleCount, m_colorBuffer.parameters.internalRenderbufferFormat, size.width(), size.height());
-
-        if (m_gl->GetError() == GL_OUT_OF_MEMORY)
-            return false;
-
-        m_gl->FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, m_multisampleColorBuffer);
-        if (wantDepthOrStencilBuffer)
-            resizeDepthStencil(size);
-        if (m_gl->CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            return false;
-    }
+    m_gl->FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, m_multisampleRenderbuffer);
 
     return true;
 }
 
 void DrawingBuffer::resizeDepthStencil(const IntSize& size)
 {
+    m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_multisampleFBO ? m_multisampleFBO : m_fbo);
     if (!m_depthStencilBuffer)
         m_gl->GenRenderbuffers(1, &m_depthStencilBuffer);
     m_gl->BindRenderbuffer(GL_RENDERBUFFER, m_depthStencilBuffer);
@@ -678,7 +814,34 @@ void DrawingBuffer::resizeDepthStencil(const IntSize& size)
     m_gl->BindRenderbuffer(GL_RENDERBUFFER, 0);
 }
 
+bool DrawingBuffer::resizeDefaultFramebuffer(const IntSize& size)
+{
+    // Resize or create m_colorBuffer.
+    if (m_colorBuffer.textureId) {
+        resizeTextureMemory(&m_colorBuffer, size);
+    } else {
+        m_colorBuffer = createTextureAndAllocateMemory(size);
+    }
 
+    attachColorBufferToReadFramebuffer();
+
+    if (wantExplicitResolve()) {
+        if (!resizeMultisampleFramebuffer(size))
+            return false;
+    }
+
+    if (wantDepthOrStencil())
+        resizeDepthStencil(size);
+
+    if (wantExplicitResolve()) {
+        m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_multisampleFBO);
+        if (m_gl->CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            return false;
+    }
+
+    m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    return m_gl->CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+}
 
 void DrawingBuffer::clearFramebuffers(GLbitfield clearMask)
 {
@@ -714,27 +877,16 @@ IntSize DrawingBuffer::adjustSize(const IntSize& desiredSize, const IntSize& cur
     return adjustedSize;
 }
 
-bool DrawingBuffer::reset(const IntSize& newSize, bool wantDepthOrStencilBuffer)
+bool DrawingBuffer::reset(const IntSize& newSize)
 {
-    ASSERT(!newSize.isEmpty());
+    CHECK(!newSize.isEmpty());
     IntSize adjustedSize = adjustSize(newSize, m_size, m_maxTextureSize);
     if (adjustedSize.isEmpty())
         return false;
 
     if (adjustedSize != m_size) {
         do {
-            if (m_colorBuffer.textureId) {
-                resizeTextureMemory(&m_colorBuffer, adjustedSize);
-            } else {
-                m_colorBuffer = createTextureAndAllocateMemory(adjustedSize);
-            }
-
-            m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-            attachColorBufferToCurrentFBO();
-
-            // resize multisample FBO
-            if (!resizeMultisampleFramebuffer(adjustedSize, wantDepthOrStencilBuffer)
-                || !resizeFramebuffer(adjustedSize, wantDepthOrStencilBuffer)) {
+            if (!resizeDefaultFramebuffer(adjustedSize)) {
                 adjustedSize.scale(s_resourceAdjustedRatio);
                 continue;
             }
@@ -748,7 +900,7 @@ bool DrawingBuffer::reset(const IntSize& newSize, bool wantDepthOrStencilBuffer)
     }
 
     m_gl->Disable(GL_SCISSOR_TEST);
-    m_gl->ClearColor(0, 0, 0, 0);
+    m_gl->ClearColor(0, 0, 0, defaultBufferRequiresAlphaChannelToBePreserved() ? 1 : 0);
     m_gl->ColorMask(true, true, true, true);
 
     GLbitfield clearMask = GL_COLOR_BUFFER_BIT;
@@ -769,7 +921,7 @@ bool DrawingBuffer::reset(const IntSize& newSize, bool wantDepthOrStencilBuffer)
 
 void DrawingBuffer::commit()
 {
-    if (m_multisampleFBO && !m_contentsChangeCommitted) {
+    if (wantExplicitResolve() && !m_contentsChangeCommitted) {
         m_gl->BindFramebuffer(GL_READ_FRAMEBUFFER_ANGLE, m_multisampleFBO);
         m_gl->BindFramebuffer(GL_DRAW_FRAMEBUFFER_ANGLE, m_fbo);
 
@@ -779,7 +931,22 @@ void DrawingBuffer::commit()
         int width = m_size.width();
         int height = m_size.height();
         // Use NEAREST, because there is no scale performed during the blit.
-        m_gl->BlitFramebufferCHROMIUM(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        GLuint filter = GL_NEAREST;
+
+        m_gl->BlitFramebufferCHROMIUM(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, filter);
+
+        // On old AMD GPUs on OS X, glColorMask doesn't work correctly for
+        // multisampled renderbuffers and the alpha channel can be overwritten.
+        // Clear the alpha channel of |m_fbo|.
+        if (defaultBufferRequiresAlphaChannelToBePreserved()
+            && contextProvider()->getCapabilities().disable_multisampling_color_mask_usage) {
+            m_gl->ClearColor(0, 0, 0, 1);
+            m_gl->ColorMask(false, false, false, true);
+            m_gl->Clear(GL_COLOR_BUFFER_BIT);
+
+            m_gl->ClearColor(m_clearColor[0], m_clearColor[1], m_clearColor[2], m_clearColor[3]);
+            m_gl->ColorMask(m_colorMask[0], m_colorMask[1], m_colorMask[2], m_colorMask[3]);
+        }
 
         if (m_scissorEnabled)
             m_gl->Enable(GL_SCISSOR_TEST);
@@ -790,6 +957,13 @@ void DrawingBuffer::commit()
         m_gl->ApplyScreenSpaceAntialiasingCHROMIUM();
     }
     m_contentsChangeCommitted = true;
+}
+
+void DrawingBuffer::restorePixelUnpackBufferBindings()
+{
+    if (m_webGLVersion > WebGL1) {
+        m_gl->BindBuffer(GL_PIXEL_UNPACK_BUFFER, m_pixelUnpackBufferBinding);
+    }
 }
 
 void DrawingBuffer::restoreFramebufferBindings()
@@ -823,10 +997,7 @@ bool DrawingBuffer::multisample() const
 
 void DrawingBuffer::bind(GLenum target)
 {
-    if (target != GL_READ_FRAMEBUFFER)
-        m_gl->BindFramebuffer(target, m_multisampleFBO ? m_multisampleFBO : m_fbo);
-    else
-        m_gl->BindFramebuffer(target, m_fbo);
+    m_gl->BindFramebuffer(target, wantExplicitResolve() ? m_multisampleFBO : m_fbo);
 }
 
 void DrawingBuffer::setPackAlignment(GLint param)
@@ -917,10 +1088,21 @@ void DrawingBuffer::flipVertically(uint8_t* framebuffer, int width, int height)
     }
 }
 
-void DrawingBuffer::texImage2DResourceSafe(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, GLint unpackAlignment)
+void DrawingBuffer::allocateConditionallyImmutableTexture(GLenum target, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type)
 {
-    ASSERT(unpackAlignment == 1 || unpackAlignment == 2 || unpackAlignment == 4 || unpackAlignment == 8);
-    m_gl->TexImage2D(target, level, internalformat, width, height, border, format, type, 0);
+    if (m_storageTextureSupported) {
+        GLenum internalStorageFormat = GL_NONE;
+        if (internalformat == GL_RGB) {
+            internalStorageFormat = GL_RGB8;
+        } else if (internalformat == GL_RGBA) {
+            internalStorageFormat = GL_RGBA8;
+        } else {
+            NOTREACHED();
+        }
+        m_gl->TexStorage2DEXT(GL_TEXTURE_2D, 1, internalStorageFormat, width, height);
+        return;
+    }
+    m_gl->TexImage2D(target, 0, internalformat, width, height, border, format, type, 0);
 }
 
 void DrawingBuffer::deleteChromiumImageForTexture(TextureInfo* info)
@@ -933,79 +1115,134 @@ void DrawingBuffer::deleteChromiumImageForTexture(TextureInfo* info)
     }
 }
 
+void DrawingBuffer::clearChromiumImageAlpha(const TextureInfo& info)
+{
+    if (m_wantAlphaChannel)
+        return;
+    if (!contextProvider()->getCapabilities().chromium_image_rgb_emulation)
+        return;
+
+    GLuint fbo = 0;
+    m_gl->GenFramebuffers(1, &fbo);
+    m_gl->BindFramebuffer(GL_FRAMEBUFFER, fbo);
+    m_gl->FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, info.parameters.target, info.textureId, 0);
+    m_gl->ClearColor(0, 0, 0, 1);
+    m_gl->ColorMask(false, false, false, true);
+    m_gl->Clear(GL_COLOR_BUFFER_BIT);
+    m_gl->FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, info.parameters.target, 0, 0);
+    m_gl->DeleteFramebuffers(1, &fbo);
+    restoreFramebufferBindings();
+    m_gl->ClearColor(m_clearColor[0], m_clearColor[1], m_clearColor[2], m_clearColor[3]);
+    m_gl->ColorMask(m_colorMask[0], m_colorMask[1], m_colorMask[2], m_colorMask[3]);
+}
+
 DrawingBuffer::TextureInfo DrawingBuffer::createTextureAndAllocateMemory(const IntSize& size)
 {
-    // TODO(erikchen): Add support for a CHROMIUM_image back buffer whose
-    // behavior mimics a texture with internal format GL_RGB.
-    // https://crbug.com/581777.
-    if (!m_wantAlphaChannel)
-        return createDefaultTextureAndAllocateMemory(size);
-
     if (!RuntimeEnabledFeatures::webGLImageChromiumEnabled())
         return createDefaultTextureAndAllocateMemory(size);
 
-    // First, try to allocate a CHROMIUM_image. This always has the potential to
-    // fail.
     TextureParameters parameters = chromiumImageTextureParameters();
-    GLuint imageId = m_gl->CreateGpuMemoryBufferImageCHROMIUM(size.width(), size.height(), parameters.internalColorFormat, GC3D_SCANOUT_CHROMIUM);
-    if (!imageId)
-        return createDefaultTextureAndAllocateMemory(size);
-
+    GLuint imageId = m_gl->CreateGpuMemoryBufferImageCHROMIUM(size.width(), size.height(), parameters.creationInternalColorFormat, GC3D_SCANOUT_CHROMIUM);
     GLuint textureId = createColorTexture(parameters);
-    m_gl->BindTexImage2DCHROMIUM(parameters.target, imageId);
+    if (imageId) {
+        m_gl->BindTexImage2DCHROMIUM(parameters.target, imageId);
+    }
 
     TextureInfo info;
     info.textureId = textureId;
     info.imageId = imageId;
     info.parameters = parameters;
+    clearChromiumImageAlpha(info);
     return info;
 }
 
 DrawingBuffer::TextureInfo DrawingBuffer::createDefaultTextureAndAllocateMemory(const IntSize& size)
 {
-    TextureParameters parameters = defaultTextureParameters();
-    GLuint textureId = createColorTexture(parameters);
-    texImage2DResourceSafe(parameters.target, 0, parameters.internalColorFormat, size.width(), size.height(), 0, parameters.colorFormat, GL_UNSIGNED_BYTE);
-
     DrawingBuffer::TextureInfo info;
-    info.textureId = textureId;
+    TextureParameters parameters = defaultTextureParameters();
     info.parameters = parameters;
+    info.textureId = createColorTexture(parameters);
+    allocateConditionallyImmutableTexture(parameters.target, parameters.creationInternalColorFormat,
+        size.width(), size.height(), 0, parameters.colorFormat, GL_UNSIGNED_BYTE);
+    info.immutable = m_storageTextureSupported;
     return info;
 }
 
 void DrawingBuffer::resizeTextureMemory(TextureInfo* info, const IntSize& size)
 {
     ASSERT(info->textureId);
-    if (info->imageId) {
-        deleteChromiumImageForTexture(info);
-        info->imageId = m_gl->CreateGpuMemoryBufferImageCHROMIUM(size.width(), size.height(), info->parameters.internalColorFormat, GC3D_SCANOUT_CHROMIUM);
-        if (info->imageId) {
-            m_gl->BindTexture(info->parameters.target, info->textureId);
-            m_gl->BindTexImage2DCHROMIUM(info->parameters.target, info->imageId);
-            return;
+    if (!RuntimeEnabledFeatures::webGLImageChromiumEnabled()) {
+        if (info->immutable) {
+            DCHECK(m_storageTextureSupported);
+            m_gl->DeleteTextures(1, &info->textureId);
+            info->textureId = createColorTexture(info->parameters);
         }
-
-        // If the desired texture target is different, there's no way to fall back
-        // to a non CHROMIUM_image texture.
-        if (chromiumImageTextureParameters().target != defaultTextureParameters().target)
-            return;
+        m_gl->BindTexture(info->parameters.target, info->textureId);
+        allocateConditionallyImmutableTexture(info->parameters.target, info->parameters.creationInternalColorFormat,
+            size.width(), size.height(), 0, info->parameters.colorFormat, GL_UNSIGNED_BYTE);
+        info->immutable = m_storageTextureSupported;
+        return;
     }
 
-    m_gl->BindTexture(info->parameters.target, info->textureId);
-    texImage2DResourceSafe(info->parameters.target, 0, info->parameters.internalColorFormat, size.width(), size.height(), 0, info->parameters.colorFormat, GL_UNSIGNED_BYTE);
+    DCHECK(!info->immutable);
+    deleteChromiumImageForTexture(info);
+    info->imageId = m_gl->CreateGpuMemoryBufferImageCHROMIUM(size.width(), size.height(), info->parameters.creationInternalColorFormat, GC3D_SCANOUT_CHROMIUM);
+    if (info->imageId) {
+        m_gl->BindTexture(info->parameters.target, info->textureId);
+        m_gl->BindTexImage2DCHROMIUM(info->parameters.target, info->imageId);
+        clearChromiumImageAlpha(*info);
+    } else {
+        // At this point, the texture still exists, but has no allocated
+        // storage. This is intentional, and mimics the behavior of a texImage2D
+        // failure.
+    }
 }
 
-void DrawingBuffer::attachColorBufferToCurrentFBO()
+void DrawingBuffer::attachColorBufferToReadFramebuffer()
 {
-    GLenum target = m_colorBuffer.parameters.target;
+    m_gl->BindFramebuffer(GL_FRAMEBUFFER, m_fbo);
 
-    m_gl->BindTexture(target, m_colorBuffer.textureId);
+    GLenum target = m_colorBuffer.parameters.target;
+    GLenum id = m_colorBuffer.textureId;
+
+    m_gl->BindTexture(target, id);
 
     if (m_antiAliasingMode == MSAAImplicitResolve)
-        m_gl->FramebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, m_colorBuffer.textureId, 0, m_sampleCount);
+        m_gl->FramebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, id, 0, m_sampleCount);
     else
-        m_gl->FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, m_colorBuffer.textureId, 0);
+        m_gl->FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, id, 0);
 
+    restoreTextureBindings();
+    restoreFramebufferBindings();
+}
+
+bool DrawingBuffer::wantExplicitResolve()
+{
+    return m_antiAliasingMode == MSAAExplicitResolve;
+}
+
+bool DrawingBuffer::wantDepthOrStencil()
+{
+    return m_wantDepth || m_wantStencil;
+}
+
+GLenum DrawingBuffer::getMultisampledRenderbufferFormat()
+{
+    DCHECK(wantExplicitResolve());
+    if (m_wantAlphaChannel)
+        return GL_RGBA8_OES;
+    if (RuntimeEnabledFeatures::webGLImageChromiumEnabled() && contextProvider()->getCapabilities().chromium_image_rgb_emulation)
+        return GL_RGBA8_OES;
+    if (contextProvider()->getCapabilities().disable_webgl_rgb_multisampling_usage)
+        return GL_RGBA8_OES;
+    return GL_RGB8_OES;
+}
+
+void DrawingBuffer::restoreTextureBindings()
+{
+    // This class potentially modifies the bindings for GL_TEXTURE_2D and
+    // GL_TEXTURE_RECTANGLE. Only GL_TEXTURE_2D needs to be restored since
+    // the public interface for WebGL does not support GL_TEXTURE_RECTANGLE.
     m_gl->BindTexture(GL_TEXTURE_2D, m_texture2DBinding);
 }
 

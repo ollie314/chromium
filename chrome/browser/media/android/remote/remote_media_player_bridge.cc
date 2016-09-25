@@ -17,11 +17,13 @@
 #include "media/base/android/media_common_android.h"
 #include "media/base/android/media_resource_getter.h"
 #include "media/base/timestamp_constants.h"
+#include "net/base/escape.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/android/java_bitmap.h"
 
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertJavaStringToUTF8;
+using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 using base::android::AttachCurrentThread;
 using content::BrowserThread;
@@ -41,20 +43,14 @@ namespace remote_media {
 RemoteMediaPlayerBridge::RemoteMediaPlayerBridge(
     int player_id,
     const std::string& user_agent,
-    bool hide_url_log,
     RemoteMediaPlayerManager* manager)
     : MediaPlayerAndroid(
           player_id,
           manager,
           base::Bind(&DoNothing),
-          manager->GetLocalPlayer(player_id)->frame_url(),
-          // TODO(davve): Media session interaction with remote
-          // playback not defined. Use invalid session id for now.
-          // https://github.com/whatwg/mediasession/issues/123
-          media::kInvalidMediaSessionId),
+          manager->GetLocalPlayer(player_id)->frame_url()),
       width_(0),
       height_(0),
-      hide_url_log_(hide_url_log),
       url_(manager->GetLocalPlayer(player_id)->GetUrl()),
       first_party_for_cookies_(
           manager->GetLocalPlayer(player_id)->GetFirstPartyForCookies()),
@@ -65,8 +61,11 @@ RemoteMediaPlayerBridge::RemoteMediaPlayerBridge(
   CHECK(env);
   ScopedJavaLocalRef<jstring> j_url_string;
   if (url_.is_valid()) {
+    // Escape the URL to make it safe to use. Don't escape existing escape
+    // sequences though.
+    std::string escaped_url = net::EscapeExternalHandlerValue(url_.spec());
     // Create a Java String for the URL.
-    j_url_string = ConvertUTF8ToJavaString(env, url_.spec());
+    j_url_string = ConvertUTF8ToJavaString(env, escaped_url);
   }
   ScopedJavaLocalRef<jstring> j_frame_url_string;
   GURL frameUrl = GetLocalPlayer()->frame_url();
@@ -75,15 +74,14 @@ RemoteMediaPlayerBridge::RemoteMediaPlayerBridge(
     j_frame_url_string = ConvertUTF8ToJavaString(env, frameUrl.spec());
   }
   java_bridge_.Reset(Java_RemoteMediaPlayerBridge_create(
-      env, reinterpret_cast<intptr_t>(this), j_url_string.obj(),
-      j_frame_url_string.obj(),
-      ConvertUTF8ToJavaString(env, user_agent).obj()));
+      env, reinterpret_cast<intptr_t>(this), j_url_string, j_frame_url_string,
+      ConvertUTF8ToJavaString(env, user_agent)));
 }
 
 RemoteMediaPlayerBridge::~RemoteMediaPlayerBridge() {
   JNIEnv* env = base::android::AttachCurrentThread();
   CHECK(env);
-  Java_RemoteMediaPlayerBridge_destroy(env, java_bridge_.obj());
+  Java_RemoteMediaPlayerBridge_destroy(env, java_bridge_);
   Release();
 }
 
@@ -127,7 +125,7 @@ void RemoteMediaPlayerBridge::OnMediaInterrupted() {}
 void RemoteMediaPlayerBridge::StartInternal() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
-  Java_RemoteMediaPlayerBridge_start(env, java_bridge_.obj());
+  Java_RemoteMediaPlayerBridge_start(env, java_bridge_);
   if (!time_update_timer_.IsRunning()) {
     time_update_timer_.Start(
         FROM_HERE,
@@ -139,7 +137,7 @@ void RemoteMediaPlayerBridge::StartInternal() {
 void RemoteMediaPlayerBridge::PauseInternal() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
-  Java_RemoteMediaPlayerBridge_pause(env, java_bridge_.obj());
+  Java_RemoteMediaPlayerBridge_pause(env, java_bridge_);
   time_update_timer_.Stop();
 }
 
@@ -202,12 +200,12 @@ void RemoteMediaPlayerBridge::Pause(bool is_media_related_action) {
   if (is_media_related_action) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     JNIEnv* env = AttachCurrentThread();
-    Java_RemoteMediaPlayerBridge_pause(env, java_bridge_.obj());
+    Java_RemoteMediaPlayerBridge_pause(env, java_bridge_);
     time_update_timer_.Stop();
   }
 }
 
-void RemoteMediaPlayerBridge::SetVideoSurface(gfx::ScopedJavaSurface surface) {
+void RemoteMediaPlayerBridge::SetVideoSurface(gl::ScopedJavaSurface surface) {
   // The surface is reset whenever the fullscreen view is destroyed or created.
   // Since the remote player doesn't use it, we forward it to the local player
   // for the time when user disconnects and resumes local playback
@@ -267,7 +265,7 @@ void RemoteMediaPlayerBridge::RequestRemotePlayback() {
   CHECK(env);
 
   Java_RemoteMediaPlayerBridge_requestRemotePlayback(
-      env, java_bridge_.obj(), local_player->GetCurrentTime().InMilliseconds());
+      env, java_bridge_, local_player->GetCurrentTime().InMilliseconds());
 }
 
 void RemoteMediaPlayerBridge::RequestRemotePlaybackControl() {
@@ -275,8 +273,7 @@ void RemoteMediaPlayerBridge::RequestRemotePlaybackControl() {
   JNIEnv* env = AttachCurrentThread();
   CHECK(env);
 
-  Java_RemoteMediaPlayerBridge_requestRemotePlaybackControl(
-      env, java_bridge_.obj());
+  Java_RemoteMediaPlayerBridge_requestRemotePlaybackControl(env, java_bridge_);
 }
 
 void RemoteMediaPlayerBridge::SetNativePlayer() {
@@ -284,8 +281,7 @@ void RemoteMediaPlayerBridge::SetNativePlayer() {
   JNIEnv* env = AttachCurrentThread();
   CHECK(env);
 
-  Java_RemoteMediaPlayerBridge_setNativePlayer(
-      env, java_bridge_.obj());
+  Java_RemoteMediaPlayerBridge_setNativePlayer(env, java_bridge_);
 }
 
 void RemoteMediaPlayerBridge::OnPlayerCreated() {
@@ -293,8 +289,7 @@ void RemoteMediaPlayerBridge::OnPlayerCreated() {
   JNIEnv* env = AttachCurrentThread();
   CHECK(env);
 
-  Java_RemoteMediaPlayerBridge_onPlayerCreated(
-      env, java_bridge_.obj());
+  Java_RemoteMediaPlayerBridge_onPlayerCreated(env, java_bridge_);
 }
 
 void RemoteMediaPlayerBridge::OnPlayerDestroyed() {
@@ -302,8 +297,7 @@ void RemoteMediaPlayerBridge::OnPlayerDestroyed() {
   JNIEnv* env = AttachCurrentThread();
   CHECK(env);
 
-  Java_RemoteMediaPlayerBridge_onPlayerDestroyed(
-      env, java_bridge_.obj());
+  Java_RemoteMediaPlayerBridge_onPlayerDestroyed(env, java_bridge_);
 }
 
 std::string RemoteMediaPlayerBridge::GetCastingMessage() {
@@ -318,13 +312,13 @@ void RemoteMediaPlayerBridge::SetPosterBitmap(
   CHECK(env);
 
   if (bitmaps.empty()) {
-    Java_RemoteMediaPlayerBridge_setPosterBitmap(env, java_bridge_.obj(), NULL);
+    Java_RemoteMediaPlayerBridge_setPosterBitmap(env, java_bridge_, nullptr);
   } else {
     ScopedJavaLocalRef<jobject> j_poster_bitmap;
     j_poster_bitmap = gfx::ConvertToJavaBitmap(&(bitmaps[0]));
 
-    Java_RemoteMediaPlayerBridge_setPosterBitmap(env, java_bridge_.obj(),
-                                                 j_poster_bitmap.obj());
+    Java_RemoteMediaPlayerBridge_setPosterBitmap(env, java_bridge_,
+                                                 j_poster_bitmap);
   }
 }
 
@@ -350,14 +344,14 @@ void RemoteMediaPlayerBridge::SeekTo(base::TimeDelta time) {
   JNIEnv* env = AttachCurrentThread();
   CHECK(env);
   int time_msec = static_cast<int>(time.InMilliseconds());
-  Java_RemoteMediaPlayerBridge_seekTo(env, java_bridge_.obj(), time_msec);
+  Java_RemoteMediaPlayerBridge_seekTo(env, java_bridge_, time_msec);
 }
 
 void RemoteMediaPlayerBridge::Release() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   time_update_timer_.Stop();
   JNIEnv* env = AttachCurrentThread();
-  Java_RemoteMediaPlayerBridge_release(env, java_bridge_.obj());
+  Java_RemoteMediaPlayerBridge_release(env, java_bridge_);
   DetachListener();
 }
 
@@ -366,23 +360,22 @@ void RemoteMediaPlayerBridge::UpdateEffectiveVolumeInternal(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   CHECK(env);
-  Java_RemoteMediaPlayerBridge_setVolume(
-      env, java_bridge_.obj(), GetEffectiveVolume());
+  Java_RemoteMediaPlayerBridge_setVolume(env, java_bridge_,
+                                         GetEffectiveVolume());
 }
 
 base::TimeDelta RemoteMediaPlayerBridge::GetCurrentTime() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   return base::TimeDelta::FromMilliseconds(
-      Java_RemoteMediaPlayerBridge_getCurrentPosition(
-          env, java_bridge_.obj()));
+      Java_RemoteMediaPlayerBridge_getCurrentPosition(env, java_bridge_));
 }
 
 base::TimeDelta RemoteMediaPlayerBridge::GetDuration() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   const int duration_ms =
-      Java_RemoteMediaPlayerBridge_getDuration(env, java_bridge_.obj());
+      Java_RemoteMediaPlayerBridge_getDuration(env, java_bridge_);
   // Sometimes we can't get the duration remotely, but the local media player
   // knows it.
   // TODO (aberent) This is for YouTube. Remove it when the YouTube receiver is
@@ -390,10 +383,10 @@ base::TimeDelta RemoteMediaPlayerBridge::GetDuration() {
   if (duration_ms == 0) {
     MediaPlayerAndroid* local_player = GetLocalPlayer();
     if (!local_player)
-      return media::kInfiniteDuration();
+      return media::kInfiniteDuration;
     return local_player->GetDuration();
   }
-  return duration_ms < 0 ? media::kInfiniteDuration()
+  return duration_ms < 0 ? media::kInfiniteDuration
                          : base::TimeDelta::FromMilliseconds(duration_ms);
 }
 
@@ -401,8 +394,7 @@ bool RemoteMediaPlayerBridge::IsPlaying() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   CHECK(env);
-  jboolean result = Java_RemoteMediaPlayerBridge_isPlaying(
-      env, java_bridge_.obj());
+  jboolean result = Java_RemoteMediaPlayerBridge_isPlaying(env, java_bridge_);
   return result;
 }
 
@@ -478,7 +470,7 @@ void RemoteMediaPlayerBridge::OnCookiesRetrieved(const std::string& cookies) {
   JNIEnv* env = AttachCurrentThread();
   CHECK(env);
   Java_RemoteMediaPlayerBridge_setCookies(
-      env, java_bridge_.obj(), ConvertUTF8ToJavaString(env, cookies).obj());
+      env, java_bridge_, ConvertUTF8ToJavaString(env, cookies));
 }
 
 MediaPlayerAndroid* RemoteMediaPlayerBridge::GetLocalPlayer() {

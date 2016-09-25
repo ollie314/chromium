@@ -5,6 +5,7 @@
 #include "components/history/core/browser/typed_url_syncable_service.h"
 
 #include <stddef.h>
+
 #include <utility>
 
 #include "base/auto_reset.h"
@@ -12,9 +13,9 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/history/core/browser/history_backend.h"
+#include "components/sync/protocol/sync.pb.h"
+#include "components/sync/protocol/typed_url_specifics.pb.h"
 #include "net/base/url_util.h"
-#include "sync/protocol/sync.pb.h"
-#include "sync/protocol/typed_url_specifics.pb.h"
 
 namespace history {
 
@@ -79,8 +80,8 @@ TypedUrlSyncableService::~TypedUrlSyncableService() {
 syncer::SyncMergeResult TypedUrlSyncableService::MergeDataAndStartSyncing(
     syncer::ModelType type,
     const syncer::SyncDataList& initial_sync_data,
-    scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-    scoped_ptr<syncer::SyncErrorFactory> error_handler) {
+    std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
+    std::unique_ptr<syncer::SyncErrorFactory> error_handler) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!sync_processor_.get());
   DCHECK(sync_processor.get());
@@ -149,6 +150,9 @@ syncer::SyncMergeResult TypedUrlSyncableService::MergeDataAndStartSyncing(
     // Extract specifics
     const sync_pb::EntitySpecifics& specifics = sync_iter->GetSpecifics();
     const sync_pb::TypedUrlSpecifics& typed_url(specifics.typed_url());
+
+    if (ShouldIgnoreUrl(GURL(typed_url.url())))
+      continue;
 
     // Add url to cache of sync state. Note that this is done irrespective of
     // whether the synced url is ignored locally, so that we know what to delete
@@ -747,6 +751,12 @@ bool TypedUrlSyncableService::ShouldIgnoreUrl(const GURL& url) {
   if (net::IsLocalhost(url.host()))
     return true;
 
+  // Ignore username and password, sonce history backend will remove user name
+  // and password in URLDatabase::GURLToDatabaseURL and send username/password
+  // removed url to sync later.
+  if (url.has_username() || url.has_password())
+    return true;
+
   return false;
 }
 
@@ -872,14 +882,16 @@ void TypedUrlSyncableService::WriteToTypedUrlSpecifics(
     // Walk the passed-in visit vector and count the # of typed visits.
     for (VisitVector::const_iterator visit = visits.begin();
          visit != visits.end(); ++visit) {
-      ui::PageTransition transition = ui::PageTransitionFromInt(
-          visit->transition & ui::PAGE_TRANSITION_CORE_MASK);
       // We ignore reload visits.
-      if (transition == ui::PAGE_TRANSITION_RELOAD)
+      if (PageTransitionCoreTypeIs(visit->transition,
+                                   ui::PAGE_TRANSITION_RELOAD)) {
         continue;
+      }
       ++total;
-      if (transition == ui::PAGE_TRANSITION_TYPED)
+      if (PageTransitionCoreTypeIs(visit->transition,
+                                   ui::PAGE_TRANSITION_TYPED)) {
         ++typed_count;
+      }
     }
     // We should have at least one typed visit. This can sometimes happen if
     // the history DB has an inaccurate count for some reason (there's been
@@ -897,20 +909,23 @@ void TypedUrlSyncableService::WriteToTypedUrlSpecifics(
 
   for (VisitVector::const_iterator visit = visits.begin();
        visit != visits.end(); ++visit) {
-    ui::PageTransition transition =
-        ui::PageTransitionStripQualifier(visit->transition);
     // Skip reload visits.
-    if (transition == ui::PAGE_TRANSITION_RELOAD)
+    if (PageTransitionCoreTypeIs(visit->transition, ui::PAGE_TRANSITION_RELOAD))
       continue;
 
     // If we only have room for typed visits, then only add typed visits.
-    if (only_typed && transition != ui::PAGE_TRANSITION_TYPED)
+    if (only_typed &&
+        !PageTransitionCoreTypeIs(visit->transition,
+                                  ui::PAGE_TRANSITION_TYPED)) {
       continue;
+    }
 
     if (skip_count > 0) {
       // We have too many entries to fit, so we need to skip the oldest ones.
       // Only skip typed URLs if there are too many typed URLs to fit.
-      if (only_typed || transition != ui::PAGE_TRANSITION_TYPED) {
+      if (only_typed ||
+          !PageTransitionCoreTypeIs(visit->transition,
+                                    ui::PAGE_TRANSITION_TYPED)) {
         --skip_count;
         continue;
       }

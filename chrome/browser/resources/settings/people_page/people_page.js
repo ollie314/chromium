@@ -5,31 +5,20 @@
 /**
  * @fileoverview
  * 'settings-people-page' is the settings page containing sign-in settings.
- *
- * Example:
- *
- *    <iron-animated-pages>
- *      <settings-people-page prefs="{{prefs}}"></settings-people-page>
- *      ... other pages ...
- *    </iron-animated-pages>
  */
 Polymer({
   is: 'settings-people-page',
 
   behaviors: [
+    settings.RouteObserverBehavior,
     I18nBehavior,
     WebUIListenerBehavior,
+<if expr="chromeos">
+    LockStateBehavior,
+</if>
   ],
 
   properties: {
-    /**
-     * The current active route.
-     */
-    currentRoute: {
-      type: Object,
-      notify: true,
-    },
-
     /**
      * Preferences state.
      */
@@ -39,7 +28,7 @@ Polymer({
     },
 
     /**
-     * The current sync status, supplied by settings.SyncPrivateApi.
+     * The current sync status, supplied by SyncBrowserProxy.
      * @type {?settings.SyncStatus}
      */
     syncStatus: Object,
@@ -54,8 +43,33 @@ Polymer({
      */
     profileName_: String,
 
+    /**
+     * True if the current profile manages supervised users.
+     */
+    profileManagesSupervisedUsers_: Boolean,
+
+    /** @private {!settings.SyncBrowserProxy} */
+    syncBrowserProxy_: {
+      type: Object,
+      value: function() {
+        return settings.SyncBrowserProxyImpl.getInstance();
+      },
+    },
+
 <if expr="chromeos">
-    /** @private {!settings.EasyUnlockBrowserProxyImpl} */
+    /**
+     * True if quick unlock settings should be displayed on this machine.
+     * @private
+     */
+    quickUnlockEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('quickUnlockEnabled');
+      },
+      readOnly: true,
+    },
+
+    /** @private {!settings.EasyUnlockBrowserProxy} */
     easyUnlockBrowserProxy_: {
       type: Object,
       value: function() {
@@ -100,13 +114,20 @@ Polymer({
 
   /** @override */
   attached: function() {
-    settings.ProfileInfoBrowserProxyImpl.getInstance().getProfileInfo().then(
-        this.handleProfileInfo_.bind(this));
+    var profileInfoProxy = settings.ProfileInfoBrowserProxyImpl.getInstance();
+    profileInfoProxy.getProfileInfo().then(this.handleProfileInfo_.bind(this));
     this.addWebUIListener('profile-info-changed',
                           this.handleProfileInfo_.bind(this));
 
-    settings.SyncPrivateApi.getSyncStatus(
-        this.handleSyncStatusFetched_.bind(this));
+    profileInfoProxy.getProfileManagesSupervisedUsers().then(
+        this.handleProfileManagesSupervisedUsers_.bind(this));
+    this.addWebUIListener('profile-manages-supervised-users-changed',
+                          this.handleProfileManagesSupervisedUsers_.bind(this));
+
+    this.syncBrowserProxy_.getSyncStatus().then(
+        this.handleSyncStatus_.bind(this));
+    this.addWebUIListener('sync-status-changed',
+                          this.handleSyncStatus_.bind(this));
 
 <if expr="chromeos">
     if (this.easyUnlockAllowed_) {
@@ -119,6 +140,25 @@ Polymer({
 </if>
   },
 
+  /** @protected */
+  currentRouteChanged: function() {
+    if (settings.getCurrentRoute() == settings.Route.SIGN_OUT)
+      this.$.disconnectDialog.showModal();
+    else if (this.$.disconnectDialog.open)
+      this.$.disconnectDialog.close();
+  },
+
+<if expr="chromeos">
+  /** @private */
+  getPasswordState_: function(hasPin, enableScreenLock) {
+    if (!enableScreenLock)
+      return this.i18n('lockScreenNone');
+    if (hasPin)
+      return this.i18n('lockScreenPinOrPassword');
+    return this.i18n('lockScreenPasswordOnly');
+  },
+</if>
+
   /**
    * Handler for when the profile's icon and name is updated.
    * @private
@@ -130,15 +170,24 @@ Polymer({
   },
 
   /**
-   * Handler for when the sync state is pushed from settings.SyncPrivateApi.
+   * Handler for when the profile starts or stops managing supervised users.
+   * @private
+   * @param {boolean} managesSupervisedUsers
+   */
+  handleProfileManagesSupervisedUsers_: function(managesSupervisedUsers) {
+    this.profileManagesSupervisedUsers_ = managesSupervisedUsers;
+  },
+
+  /**
+   * Handler for when the sync state is pushed from the browser.
+   * @param {?settings.SyncStatus} syncStatus
    * @private
    */
-  handleSyncStatusFetched_: function(syncStatus) {
+  handleSyncStatus_: function(syncStatus) {
+    if (!this.syncStatus && syncStatus && !syncStatus.signedIn) {
+      chrome.metricsPrivate.recordUserAction('Signin_Impression_FromSettings');
+    }
     this.syncStatus = syncStatus;
-
-    // TODO(tommycli): Remove once we figure out how to refactor the sync
-    // code to not include HTML in the status messages.
-    this.$.syncStatusText.innerHTML = syncStatus.statusText;
   },
 
 <if expr="chromeos">
@@ -152,51 +201,74 @@ Polymer({
 </if>
 
   /** @private */
-  onActionLinkTap_: function() {
-    settings.SyncPrivateApi.showSetupUI();
-  },
-
-  /** @private */
   onPictureTap_: function() {
 <if expr="chromeos">
-    this.$.pages.setSubpageChain(['changePicture']);
+    settings.navigateTo(settings.Route.CHANGE_PICTURE);
 </if>
 <if expr="not chromeos">
-    this.$.pages.setSubpageChain(['manageProfile']);
+    settings.navigateTo(settings.Route.MANAGE_PROFILE);
 </if>
   },
 
 <if expr="not chromeos">
   /** @private */
   onProfileNameTap_: function() {
-    this.$.pages.setSubpageChain(['manageProfile']);
+    settings.navigateTo(settings.Route.MANAGE_PROFILE);
   },
 </if>
 
   /** @private */
+  onActivityControlsTap_: function() {
+    this.syncBrowserProxy_.openActivityControlsUrl();
+  },
+
+  /** @private */
   onSigninTap_: function() {
-    settings.SyncPrivateApi.startSignIn();
+    this.syncBrowserProxy_.startSignIn();
+  },
+
+  /** @private */
+  onDisconnectClosed_: function() {
+    if (settings.getCurrentRoute() == settings.Route.SIGN_OUT)
+      settings.navigateToPreviousRoute();
   },
 
   /** @private */
   onDisconnectTap_: function() {
-    this.$.disconnectDialog.open();
+    settings.navigateTo(settings.Route.SIGN_OUT);
+  },
+
+  /** @private */
+  onDisconnectCancel_: function() {
+    this.$.disconnectDialog.close();
   },
 
   /** @private */
   onDisconnectConfirm_: function() {
-    var deleteProfile = this.$.deleteProfile && this.$.deleteProfile.checked;
-    settings.SyncPrivateApi.disconnect(deleteProfile);
+    var deleteProfile = !!this.syncStatus.domain ||
+        (this.$.deleteProfile && this.$.deleteProfile.checked);
+    this.syncBrowserProxy_.signOut(deleteProfile);
 
-    // Dialog automatically closed because button has dialog-confirm attribute.
+    this.$.disconnectDialog.close();
   },
 
   /** @private */
   onSyncTap_: function() {
-    this.$.pages.setSubpageChain(['sync']);
+    assert(this.syncStatus.signedIn);
+    assert(this.syncStatus.syncSystemEnabled);
+
+    if (this.syncStatus.managed)
+      return;
+
+    settings.navigateTo(settings.Route.SYNC);
   },
 
 <if expr="chromeos">
+  /** @private */
+  onConfigureLockTap_: function() {
+    settings.navigateTo(settings.Route.LOCK_SCREEN);
+  },
+
   /** @private */
   onEasyUnlockSetupTap_: function() {
     this.easyUnlockBrowserProxy_.startTurnOnFlow();
@@ -211,27 +283,79 @@ Polymer({
   /** @private */
   onManageOtherPeople_: function() {
 <if expr="not chromeos">
-    settings.SyncPrivateApi.manageOtherPeople();
+    this.syncBrowserProxy_.manageOtherPeople();
 </if>
 <if expr="chromeos">
-    this.$.pages.setSubpageChain(['users']);
+    settings.navigateTo(settings.Route.ACCOUNTS);
 </if>
   },
 
+  /** @private */
+  onManageSupervisedUsers_: function() {
+    window.open(loadTimeData.getString('supervisedUsersUrl'));
+  },
+
+<if expr="not chromeos">
   /**
    * @private
-   * @return {boolean}
+   * @param {string} domain
+   * @return {string}
    */
-  isStatusTextSet_: function(syncStatus) {
-    return syncStatus && syncStatus.statusText.length > 0;
+  getDomainHtml_: function(domain) {
+    var innerSpan =
+        '<span id="managed-by-domain-name">' + domain + '</span>';
+    return loadTimeData.getStringF('domainManagedProfile', innerSpan);
+  },
+</if>
+
+  /**
+   * @private
+   * @param {string} domain
+   * @return {string}
+   */
+  getDisconnectExplanationHtml_: function(domain) {
+<if expr="not chromeos">
+    if (domain) {
+      return loadTimeData.getStringF(
+          'syncDisconnectManagedProfileExplanation',
+          '<span id="managed-by-domain-name">' + domain + '</span>');
+    }
+</if>
+    return loadTimeData.getString('syncDisconnectExplanation');
   },
 
   /**
    * @private
+   * @param {?settings.SyncStatus} syncStatus
    * @return {boolean}
    */
   isAdvancedSyncSettingsVisible_: function(syncStatus) {
-    return syncStatus && syncStatus.signedIn && !syncStatus.managed &&
-           syncStatus.syncSystemEnabled;
+    return !!syncStatus && !!syncStatus.signedIn &&
+        !!syncStatus.syncSystemEnabled;
+  },
+
+  /**
+   * @private
+   * @param {?settings.SyncStatus} syncStatus
+   * @return {string}
+   */
+  getSyncIcon_: function(syncStatus) {
+    if (!syncStatus)
+      return '';
+    if (syncStatus.hasError)
+      return 'settings:sync-problem';
+    if (syncStatus.managed)
+      return 'settings:sync-disabled';
+
+    return 'settings:done';
+  },
+
+  /**
+   * @param {string} iconUrl
+   * @return {string} A CSS imageset for multiple scale factors.
+   * @private
+   */
+  getIconImageset_: function(iconUrl) {
+    return cr.icon.getImage(iconUrl);
   },
 });

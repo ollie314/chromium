@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
@@ -183,21 +184,28 @@ void FileManagerPrivateInternalGetFileTasksFunction::
         directory_paths->find(local_paths_[i]) != directory_paths->end()));
   }
 
-  std::vector<file_manager::file_tasks::FullTaskDescriptor> tasks;
   file_manager::file_tasks::FindAllTypesOfTasks(
       GetProfile(), drive::util::GetDriveAppRegistryByProfile(GetProfile()),
-      entries, urls_, &tasks);
+      entries, urls_,
+      base::Bind(
+          &FileManagerPrivateInternalGetFileTasksFunction::OnFileTasksListed,
+          this));
+}
 
+void FileManagerPrivateInternalGetFileTasksFunction::OnFileTasksListed(
+    std::unique_ptr<std::vector<file_manager::file_tasks::FullTaskDescriptor>>
+        tasks) {
   // Convert the tasks into JSON compatible objects.
   using api::file_manager_private::FileTask;
   std::vector<FileTask> results;
-  for (const file_manager::file_tasks::FullTaskDescriptor& task : tasks) {
+  for (const file_manager::file_tasks::FullTaskDescriptor& task : *tasks) {
     FileTask converted;
     converted.task_id =
         file_manager::file_tasks::TaskDescriptorToId(task.task_descriptor());
     if (!task.icon_url().is_empty())
       converted.icon_url = task.icon_url().spec();
     converted.title = task.task_title();
+    converted.verb = task.task_verb();
     converted.is_default = task.is_default();
     converted.is_generic_file_handler = task.is_generic_file_handler();
     results.push_back(std::move(converted));
@@ -208,14 +216,16 @@ void FileManagerPrivateInternalGetFileTasksFunction::
   SendResponse(true);
 }
 
-bool FileManagerPrivateInternalSetDefaultTaskFunction::RunSync() {
+ExtensionFunction::ResponseAction
+FileManagerPrivateInternalSetDefaultTaskFunction::Run() {
   using extensions::api::file_manager_private_internal::SetDefaultTask::Params;
   const std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
+  Profile* profile = Profile::FromBrowserContext(browser_context());
   const scoped_refptr<storage::FileSystemContext> file_system_context =
       file_manager::util::GetFileSystemContextForRenderFrameHost(
-          GetProfile(), render_frame_host());
+          profile, render_frame_host());
 
   const std::set<std::string> suffixes =
       GetUniqueSuffixes(params->urls, file_system_context.get());
@@ -229,13 +239,13 @@ bool FileManagerPrivateInternalSetDefaultTaskFunction::RunSync() {
   // TODO(gspencer): Fix file manager so that it never tries to set default in
   // cases where extensionless local files are part of the selection.
   if (suffixes.empty() && mime_types.empty()) {
-    SetResult(new base::FundamentalValue(true));
-    return true;
+    return RespondNow(
+        OneArgument(base::MakeUnique<base::FundamentalValue>(true)));
   }
 
   file_manager::file_tasks::UpdateDefaultTask(
-      GetProfile()->GetPrefs(), params->task_id, suffixes, mime_types);
-  return true;
+      profile->GetPrefs(), params->task_id, suffixes, mime_types);
+  return RespondNow(NoArguments());
 }
 
 }  // namespace extensions

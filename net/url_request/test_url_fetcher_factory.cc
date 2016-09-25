@@ -14,8 +14,8 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -255,10 +255,6 @@ const URLRequestStatus& TestURLFetcher::GetStatus() const {
 
 int TestURLFetcher::GetResponseCode() const {
   return fake_response_code_;
-}
-
-const ResponseCookies& TestURLFetcher::GetCookies() const {
-  return fake_cookies_;
 }
 
 void TestURLFetcher::ReceivedContentWasMalformed() {

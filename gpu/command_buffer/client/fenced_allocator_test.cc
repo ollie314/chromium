@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/aligned_memory.h"
+#include "base/run_loop.h"
 #include "gpu/command_buffer/client/cmd_buffer_helper.h"
 #include "gpu/command_buffer/client/fenced_allocator.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
@@ -54,7 +55,6 @@ class BaseFencedAllocatorTest : public testing::Test {
     }
     command_buffer_.reset(
         new CommandBufferService(transfer_buffer_manager_.get()));
-    EXPECT_TRUE(command_buffer_->Initialize());
 
     executor_.reset(
         new CommandExecutor(command_buffer_.get(), api_mock_.get(), NULL));
@@ -96,7 +96,7 @@ class FencedAllocatorTest : public BaseFencedAllocatorTest {
 
   void TearDown() override {
     // If the CommandExecutor posts any tasks, this forces them to run.
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
 
     EXPECT_TRUE(allocator_->CheckConsistency());
 
@@ -408,7 +408,7 @@ class FencedAllocatorWrapperTest : public BaseFencedAllocatorTest {
 
   void TearDown() override {
     // If the CommandExecutor posts any tasks, this forces them to run.
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
 
     EXPECT_TRUE(allocator_->CheckConsistency());
 

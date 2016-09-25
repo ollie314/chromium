@@ -322,7 +322,9 @@ class ChromeTests:
     return self.SimpleTest("chrome", "cast_unittests")
 
   def TestCC(self):
-    return self.SimpleTest("cc", "cc_unittests")
+    return self.SimpleTest("cc", "cc_unittests",
+                           cmd_args=[
+                               "--cc-layer-tree-test-long-timeout"])
 
   def TestChromeApp(self):
     return self.SimpleTest("chrome_app", "chrome_app_unittests")
@@ -388,6 +390,9 @@ class ChromeTests:
   def TestInstallerUtil(self):
     return self.SimpleTest("installer_util", "installer_util_unittests")
 
+  def TestInstallStatic(self):
+    return self.SimpleTest("install_static", "install_static_unittests")
+
   def TestJingle(self):
     return self.SimpleTest("chrome", "jingle_unittests")
 
@@ -447,9 +452,6 @@ class ChromeTests:
 
   def TestSql(self):
     return self.SimpleTest("chrome", "sql_unittests")
-
-  def TestSync(self):
-    return self.SimpleTest("chrome", "sync_unit_tests")
 
   def TestLinuxSandbox(self):
     return self.SimpleTest("sandbox", "sandbox_linux_unittests")
@@ -676,6 +678,7 @@ class ChromeTests:
     "ipc": TestIpc,              "ipc_tests": TestIpc,
     "installer_util": TestInstallerUtil,
     "installer_util_unittests": TestInstallerUtil,
+    "install_static_unittests": TestInstallStatic,
     "interactive_ui": TestInteractiveUI,
     "jingle": TestJingle,        "jingle_unittests": TestJingle,
     "keyboard": TestKeyboard,    "keyboard_unittests": TestKeyboard,
@@ -703,7 +706,6 @@ class ChromeTests:
     "sandbox": TestLinuxSandbox, "sandbox_linux_unittests": TestLinuxSandbox,
     "skia": TestSkia,            "skia_unittests": TestSkia,
     "sql": TestSql,              "sql_unittests": TestSql,
-    "sync": TestSync,            "sync_unit_tests": TestSync,
     "sync_integration_tests": TestSyncIntegration,
     "sync_integration": TestSyncIntegration,
     "ui_base_unit": TestUIBaseUnit,       "ui_base_unittests": TestUIBaseUnit,
@@ -729,6 +731,8 @@ def _main():
                          "as well.")
   parser.add_option("--baseline", action="store_true", default=False,
                     help="generate baseline data instead of validating")
+  parser.add_option("-f", "--force", action="store_true", default=False,
+                    help="run a broken test anyway")
   parser.add_option("--gtest_filter",
                     help="additional arguments to --gtest_filter")
   parser.add_option("--gtest_repeat", help="argument for --gtest_repeat")
@@ -787,7 +791,59 @@ def _main():
   if len(options.test) != 1 and options.gtest_filter:
     parser.error("--gtest_filter and multiple tests don't make sense together")
 
+  BROKEN_TESTS = {
+    'drmemory_light': [
+      'addressinput',
+      'aura',
+      'base_unittests',
+      'cc',
+      'components', # x64 only?
+      'content',
+      'gfx',
+      'mojo_public_bindings',
+    ],
+    'drmemory_full': [
+      'addressinput',
+      'aura',
+      'base_unittests',
+      'blink_heap',
+      'blink_platform',
+      'browser_tests',
+      'cast',
+      'cc',
+      'chromedriver',
+      'compositor',
+      'content',
+      'content_browsertests',
+      'device',
+      'events',
+      'extensions',
+      'gfx',
+      'google_apis',
+      'gpu',
+      'ipc_tests',
+      'jingle',
+      'keyboard',
+      'media',
+      'midi',
+      'mojo_common',
+      'mojo_public_bindings',
+      'mojo_public_sysperf',
+      'mojo_public_system',
+      'mojo_system',
+      'net',
+      'remoting',
+      'unit',
+      'url',
+    ],
+  }
+
   for t in options.test:
+    if t in BROKEN_TESTS[options.valgrind_tool] and not options.force:
+      logging.info("Skipping broken %s test %s -- see crbug.com/633693" %
+                   (options.valgrind_tool, t))
+      return 0
+
     tests = ChromeTests(options, args, t)
     ret = tests.Run()
     if ret: return ret

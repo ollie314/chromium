@@ -36,19 +36,9 @@ namespace blink {
 
 class SimpleFontData;
 
-class FontDataForRangeSet final {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-    explicit FontDataForRangeSet(PassRefPtr<SimpleFontData> fontData)
-        : m_fontData(fontData)
-    {
-    }
-
-    FontDataForRangeSet()
-        : m_fontData(nullptr)
-    {
-    }
-
-    explicit FontDataForRangeSet(PassRefPtr<SimpleFontData> fontData, PassRefPtr<UnicodeRangeSet> rangeSet)
+class PLATFORM_EXPORT FontDataForRangeSet : public RefCounted<FontDataForRangeSet> {
+public:
+    explicit FontDataForRangeSet(PassRefPtr<SimpleFontData> fontData = nullptr, PassRefPtr<UnicodeRangeSet> rangeSet = nullptr)
         : m_fontData(fontData)
         , m_rangeSet(rangeSet)
     {
@@ -64,16 +54,29 @@ class FontDataForRangeSet final {
         m_rangeSet = adoptRef(new UnicodeRangeSet(rangeVector));
     }
 
+    FontDataForRangeSet(const FontDataForRangeSet& other);
 
-    bool contains(UChar32 testChar) const { return m_rangeSet->contains(testChar); }
-    bool isEntireRange() const { return m_rangeSet->isEntireRange(); }
-    PassRefPtr<UnicodeRangeSet> ranges() const { return m_rangeSet; }
+    virtual ~FontDataForRangeSet() { };
+
+    bool contains(UChar32 testChar) const { return !m_rangeSet || m_rangeSet->contains(testChar); }
+    bool isEntireRange() const { return !m_rangeSet || m_rangeSet->isEntireRange(); }
+    UnicodeRangeSet* ranges() const { return m_rangeSet.get(); }
     bool hasFontData() const { return m_fontData.get(); }
-    PassRefPtr<SimpleFontData> fontData() const { return m_fontData; }
+    const SimpleFontData* fontData() const { return m_fontData.get(); }
 
-private:
+protected:
     RefPtr<SimpleFontData> m_fontData;
     RefPtr<UnicodeRangeSet> m_rangeSet;
+};
+
+class PLATFORM_EXPORT FontDataForRangeSetFromCache : public FontDataForRangeSet {
+public:
+    explicit FontDataForRangeSetFromCache(PassRefPtr<SimpleFontData> fontData,
+        PassRefPtr<UnicodeRangeSet> rangeSet = nullptr)
+        : FontDataForRangeSet(std::move(fontData), std::move(rangeSet))
+    {
+    }
+    virtual ~FontDataForRangeSetFromCache();
 };
 
 } // namespace blink

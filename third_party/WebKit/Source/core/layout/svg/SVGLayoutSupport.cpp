@@ -42,6 +42,7 @@
 #include "core/svg/SVGElement.h"
 #include "platform/geometry/TransformState.h"
 #include "platform/graphics/StrokeData.h"
+#include "wtf/MathExtras.h"
 
 namespace blink {
 
@@ -66,7 +67,7 @@ FloatRect SVGLayoutSupport::localOverflowRectForPaintInvalidation(const LayoutOb
     ASSERT(!object.isSVGRoot());
 
     // Return early for any cases where we don't actually paint
-    if (object.styleRef().visibility() != VISIBLE && !object.enclosingLayer()->hasVisibleContent())
+    if (object.styleRef().visibility() != EVisibility::Visible && !object.enclosingLayer()->hasVisibleContent())
         return FloatRect();
 
     FloatRect paintInvalidationRect = object.paintInvalidationRectInLocalSVGCoordinates();
@@ -128,7 +129,7 @@ bool SVGLayoutSupport::mapToVisualRectInAncestorSpace(const LayoutObject& object
 
     // Apply initial viewport clip.
     if (svgRoot.shouldApplyViewportClip()) {
-        LayoutRect clipRect(svgRoot.pixelSnappedBorderBoxRect());
+        LayoutRect clipRect(svgRoot.overflowClipRect(LayoutPoint()));
         if (visualRectFlags & EdgeInclusive) {
             if (!resultRect.inclusiveIntersect(clipRect))
                 return false;
@@ -139,7 +140,7 @@ bool SVGLayoutSupport::mapToVisualRectInAncestorSpace(const LayoutObject& object
     return svgRoot.mapToVisualRectInAncestorSpace(ancestor, resultRect, visualRectFlags);
 }
 
-void SVGLayoutSupport::mapLocalToAncestor(const LayoutObject* object, const LayoutBoxModelObject* ancestor, TransformState& transformState)
+void SVGLayoutSupport::mapLocalToAncestor(const LayoutObject* object, const LayoutBoxModelObject* ancestor, TransformState& transformState, MapCoordinatesFlags flags)
 {
     transformState.applyTransform(object->localToSVGParentTransform());
 
@@ -151,8 +152,7 @@ void SVGLayoutSupport::mapLocalToAncestor(const LayoutObject* object, const Layo
     if (parent->isSVGRoot())
         transformState.applyTransform(toLayoutSVGRoot(parent)->localToBorderBoxTransform());
 
-    MapCoordinatesFlags mode = UseTransforms;
-    parent->mapLocalToAncestor(ancestor, transformState, mode);
+    parent->mapLocalToAncestor(ancestor, transformState, flags);
 }
 
 void SVGLayoutSupport::mapAncestorToLocal(const LayoutObject& object, const LayoutBoxModelObject* ancestor, TransformState& transformState)
@@ -259,25 +259,29 @@ bool SVGLayoutSupport::layoutSizeOfNearestViewportChanged(const LayoutObject* st
     return false;
 }
 
-bool SVGLayoutSupport::transformToRootChanged(const LayoutObject* ancestor)
+bool SVGLayoutSupport::screenScaleFactorChanged(const LayoutObject* ancestor)
 {
-    while (ancestor && !ancestor->isSVGRoot()) {
+    for (; ancestor; ancestor = ancestor->parent()) {
+        if (ancestor->isSVGRoot())
+            return toLayoutSVGRoot(ancestor)->didScreenScaleFactorChange();
         if (ancestor->isSVGTransformableContainer())
-            return toLayoutSVGTransformableContainer(ancestor)->didTransformToRootUpdate();
+            return toLayoutSVGTransformableContainer(ancestor)->didScreenScaleFactorChange();
         if (ancestor->isSVGViewportContainer())
-            return toLayoutSVGViewportContainer(ancestor)->didTransformToRootUpdate();
-        ancestor = ancestor->parent();
+            return toLayoutSVGViewportContainer(ancestor)->didScreenScaleFactorChange();
     }
+    ASSERT_NOT_REACHED();
     return false;
 }
 
-void SVGLayoutSupport::layoutChildren(LayoutObject* firstChild, bool forceLayout, bool transformChanged, bool layoutSizeChanged)
+void SVGLayoutSupport::layoutChildren(
+    LayoutObject* firstChild, bool forceLayout, bool screenScalingFactorChanged, bool layoutSizeChanged)
 {
     for (LayoutObject* child = firstChild; child; child = child->nextSibling()) {
         bool forceChildLayout = forceLayout;
 
-        if (transformChanged) {
-            // If the transform changed we need to update the text metrics (note: this also happens for layoutSizeChanged=true).
+        if (screenScalingFactorChanged) {
+            // If the screen scaling factor changed we need to update the text
+            // metrics (note: this also happens for layoutSizeChanged=true).
             if (child->isSVGText())
                 toLayoutSVGText(child)->setNeedsTextMetricsUpdate();
             forceChildLayout = true;
@@ -353,7 +357,7 @@ void SVGLayoutSupport::intersectPaintInvalidationRectWithResources(const LayoutO
         paintInvalidationRect = filter->resourceBoundingBox(layoutObject);
 
     if (LayoutSVGResourceClipper* clipper = resources->clipper())
-        paintInvalidationRect.intersect(clipper->resourceBoundingBox(layoutObject));
+        paintInvalidationRect.intersect(clipper->resourceBoundingBox(layoutObject->objectBoundingBox()));
 
     if (LayoutSVGResourceMasker* masker = resources->masker())
         paintInvalidationRect.intersect(masker->resourceBoundingBox(layoutObject));
@@ -365,23 +369,23 @@ bool SVGLayoutSupport::hasFilterResource(const LayoutObject& object)
     return resources && resources->filter();
 }
 
-bool SVGLayoutSupport::pointInClippingArea(const LayoutObject* object, const FloatPoint& point)
+bool SVGLayoutSupport::pointInClippingArea(const LayoutObject& object, const FloatPoint& point)
 {
-    ASSERT(object);
-
-    // We just take clippers into account to determine if a point is on the node. The Specification may
-    // change later and we also need to check maskers.
-    SVGResources* resources = SVGResourcesCache::cachedResourcesForLayoutObject(object);
-    if (!resources)
+    ClipPathOperation* clipPathOperation = object.styleRef().clipPath();
+    if (!clipPathOperation)
         return true;
-
-    if (LayoutSVGResourceClipper* clipper = resources->clipper())
-        return clipper->hitTestClipContent(object->objectBoundingBox(), point);
-
-    return true;
+    if (clipPathOperation->type() == ClipPathOperation::SHAPE) {
+        ShapeClipPathOperation& clipPath = toShapeClipPathOperation(*clipPathOperation);
+        return clipPath.path(object.objectBoundingBox()).contains(point);
+    }
+    DCHECK_EQ(clipPathOperation->type(), ClipPathOperation::REFERENCE);
+    SVGResources* resources = SVGResourcesCache::cachedResourcesForLayoutObject(&object);
+    if (!resources || !resources->clipper())
+        return true;
+    return resources->clipper()->hitTestClipContent(object.objectBoundingBox(), point);
 }
 
-bool SVGLayoutSupport::transformToUserSpaceAndCheckClipping(const LayoutObject* object, const AffineTransform& localTransform, const FloatPoint& pointInParent, FloatPoint& localPoint)
+bool SVGLayoutSupport::transformToUserSpaceAndCheckClipping(const LayoutObject& object, const AffineTransform& localTransform, const FloatPoint& pointInParent, FloatPoint& localPoint)
 {
     if (!localTransform.isInvertible())
         return false;
@@ -434,7 +438,7 @@ bool SVGLayoutSupport::willIsolateBlendingDescendantsForStyle(const ComputedStyl
     const SVGComputedStyle& svgStyle = style.svgStyle();
 
     return style.hasIsolation() || style.opacity() < 1 || style.hasBlendMode()
-        || svgStyle.hasFilter() || svgStyle.hasMasker() || svgStyle.hasClipper();
+        || style.hasFilter() || svgStyle.hasMasker() || style.clipPath();
 }
 
 bool SVGLayoutSupport::willIsolateBlendingDescendantsForObject(const LayoutObject* object)
@@ -504,9 +508,9 @@ float SVGLayoutSupport::calculateScreenFontSizeScalingFactor(const LayoutObject*
     // FIXME: trying to compute a device space transform at record time is wrong. All clients
     // should be updated to avoid relying on this information, and the method should be removed.
     AffineTransform ctm = deprecatedCalculateTransformToLayer(layoutObject) * SubtreeContentTransformScope::currentContentTransformation();
-    ctm.scale(layoutObject->document().frameHost()->deviceScaleFactor());
+    ctm.scale(layoutObject->document().frameHost()->deviceScaleFactorDeprecated());
 
-    return narrowPrecisionToFloat(sqrt((pow(ctm.xScale(), 2) + pow(ctm.yScale(), 2)) / 2));
+    return clampTo<float>(sqrt((ctm.xScaleSquared() + ctm.yScaleSquared()) / 2));
 }
 
 static inline bool compareCandidateDistance(const SearchCandidate& r1, const SearchCandidate& r2)

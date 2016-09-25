@@ -6,8 +6,9 @@
 
 #include "base/memory/ptr_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons.h"
+#include "ui/gfx/vector_icons_public.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/label_button_border.h"
@@ -16,12 +17,21 @@
 #include "ui/views/style/mac/combobox_background_mac.h"
 #include "ui/views/style/mac/dialog_button_border_mac.h"
 
+#import <Cocoa/Cocoa.h>
+
 namespace views {
 
+const int PlatformStyle::kComboboxNormalArrowPadding = 0;
 const int PlatformStyle::kMinLabelButtonWidth = 32;
 const int PlatformStyle::kMinLabelButtonHeight = 30;
 const bool PlatformStyle::kDefaultLabelButtonHasBoldFont = false;
+const bool PlatformStyle::kDialogDefaultButtonCanBeCancel = false;
 const bool PlatformStyle::kTextfieldDragVerticallyDragsToEnd = true;
+const bool PlatformStyle::kTreeViewSelectionPaintsEntireRow = true;
+const bool PlatformStyle::kUseRipples = false;
+
+const CustomButton::NotifyAction PlatformStyle::kMenuNotifyActivationAction =
+    CustomButton::NOTIFY_ON_PRESS;
 
 // static
 gfx::ImageSkia PlatformStyle::CreateComboboxArrow(bool is_enabled,
@@ -32,10 +42,11 @@ gfx::ImageSkia PlatformStyle::CreateComboboxArrow(bool is_enabled,
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     return *rb.GetImageSkiaNamed(IDR_MENU_DROPARROW);
   }
-  const int kComboboxArrowWidth = 13;
-  return gfx::CreateVectorIcon(gfx::VectorIconId::COMBOBOX_ARROW_MAC,
-                               kComboboxArrowWidth,
-                               is_enabled ? SK_ColorWHITE : SK_ColorBLACK);
+  const int kComboboxArrowWidth = 24;
+  return gfx::CreateVectorIcon(
+      is_enabled ? gfx::VectorIconId::COMBOBOX_ARROW_MAC_ENABLED
+                 : gfx::VectorIconId::COMBOBOX_ARROW_MAC_DISABLED,
+      kComboboxArrowWidth, SK_ColorBLACK);
 }
 
 // static
@@ -44,22 +55,23 @@ std::unique_ptr<FocusableBorder> PlatformStyle::CreateComboboxBorder() {
 }
 
 // static
-std::unique_ptr<Background> PlatformStyle::CreateComboboxBackground() {
-  return base::WrapUnique(new ComboboxBackgroundMac);
+std::unique_ptr<Background> PlatformStyle::CreateComboboxBackground(
+    int shoulder_width) {
+  return base::MakeUnique<ComboboxBackgroundMac>(shoulder_width);
 }
 
 // static
 std::unique_ptr<LabelButtonBorder> PlatformStyle::CreateLabelButtonBorder(
     Button::ButtonStyle style) {
   if (style == Button::STYLE_BUTTON)
-    return base::WrapUnique(new DialogButtonBorderMac());
+    return base::MakeUnique<DialogButtonBorderMac>();
 
-  return base::WrapUnique(new LabelButtonAssetBorder(style));
+  return base::MakeUnique<LabelButtonAssetBorder>(style);
 }
 
 // static
 std::unique_ptr<ScrollBar> PlatformStyle::CreateScrollBar(bool is_horizontal) {
-  return base::WrapUnique(new CocoaScrollBar(is_horizontal));
+  return base::MakeUnique<CocoaScrollBar>(is_horizontal);
 }
 
 // static
@@ -84,6 +96,11 @@ void PlatformStyle::ApplyLabelButtonTextStyle(
   ButtonColorByState& colors = *color_by_state;
   colors[Button::STATE_PRESSED] =
       theme->GetSystemColor(ui::NativeTheme::kColorId_ButtonHighlightColor);
+}
+
+// static
+void PlatformStyle::OnTextfieldKeypressUnhandled() {
+  NSBeep();
 }
 
 }  // namespace views

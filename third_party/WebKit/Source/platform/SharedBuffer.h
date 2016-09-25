@@ -28,11 +28,10 @@
 #define SharedBuffer_h
 
 #include "platform/PlatformExport.h"
-#include "platform/PurgeableVector.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "wtf/Forward.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/RefCounted.h"
+#include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -64,13 +63,6 @@ public:
     {
         STRICT_ARG_TYPE(size_t);
         return adoptRef(new SharedBuffer(data, size));
-    }
-
-    HAS_STRICTLY_TYPED_ARG
-    static PassRefPtr<SharedBuffer> createPurgeable(const char* data, STRICTLY_TYPED_ARG(size))
-    {
-        STRICT_ARG_TYPE(size_t);
-        return adoptRef(new SharedBuffer(data, size, PurgeableVector::Purgeable));
     }
 
     static PassRefPtr<SharedBuffer> adoptVector(Vector<char>&);
@@ -126,22 +118,25 @@ public:
     bool getAsBytes(void* dest, STRICTLY_TYPED_ARG(byteLength)) const
     {
         STRICT_ARG_TYPE(size_t);
-        return getAsBytesInternal(dest, byteLength);
+        if (byteLength != size())
+            return false;
+
+        return getAsBytesInternal(dest, 0, byteLength);
+    }
+
+    // Copies "byteLength" bytes from "position"-th bytes (0 origin) of the content
+    // data into "dest" as a flat buffer,
+    // Returns true on success, otherwise the content of "dest" is not guaranteed.
+    HAS_STRICTLY_TYPED_ARG
+    bool getPartAsBytes(void* dest, STRICTLY_TYPED_ARG(position), STRICTLY_TYPED_ARG(byteLength)) const
+    {
+        STRICT_ARG_TYPE(size_t);
+        return getAsBytesInternal(dest, position, byteLength);
     }
 
     // Creates an SkData and copies this SharedBuffer's contents to that
     // SkData without merging segmented buffers into a flat buffer.
-    PassRefPtr<SkData> getAsSkData() const;
-
-    // See PurgeableVector::lock().
-    bool lock();
-
-    // WARNING: Calling unlock() on a SharedBuffer that wasn't created with the
-    // purgeability option does an extra memcpy(). Please use
-    // SharedBuffer::createPurgeable() if you intend to call unlock().
-    void unlock();
-
-    bool isLocked() const;
+    sk_sp<SkData> getAsSkData() const;
 
     void onMemoryDump(const String& dumpPrefix, WebProcessMemoryDump*) const;
 
@@ -150,17 +145,16 @@ private:
     explicit SharedBuffer(size_t);
     SharedBuffer(const char*, size_t);
     SharedBuffer(const unsigned char*, size_t);
-    SharedBuffer(const char*, size_t, PurgeableVector::PurgeableOption);
 
     // See SharedBuffer::data().
     void mergeSegmentsIntoBuffer() const;
 
     void appendInternal(const char* data, size_t);
-    bool getAsBytesInternal(void* dest, size_t) const;
+    bool getAsBytesInternal(void* dest, size_t, size_t) const;
     size_t getSomeDataInternal(const char*& data, size_t position) const;
 
     size_t m_size;
-    mutable PurgeableVector m_buffer;
+    mutable Vector<char> m_buffer;
     mutable Vector<char*> m_segments;
 };
 

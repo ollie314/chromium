@@ -1,5 +1,13 @@
 {% extends 'interface_base.cpp' %}
 
+{% set has_prepare_prototype_and_interface_object =
+    unscopables or has_conditional_attributes_on_prototype or
+    methods | conditionally_exposed(is_partial) %}
+{% set prepare_prototype_and_interface_object_func =
+    '%s::preparePrototypeAndInterfaceObject' % v8_class
+    if has_prepare_prototype_and_interface_object
+    else 'nullptr' %}
+
 
 {##############################################################################}
 {% block indexed_property_getter %}
@@ -7,26 +15,29 @@
 {% set getter = indexed_property_getter %}
 static void indexedPropertyGetter(uint32_t index, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
     {% if getter.is_raises_exception %}
-    ExceptionState exceptionState(ExceptionState::IndexedGetterContext, "{{interface_name}}", info.Holder(), info.GetIsolate());
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::IndexedGetterContext, "{{interface_name}}");
     {% endif %}
+
+    {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
+
+    // We assume that all the implementations support length() method, although
+    // the spec doesn't require that length() must exist.  It's okay that
+    // the interface does not have length attribute as long as the
+    // implementation supports length() member function.
+    if (index >= impl->length())
+        return;  // Returns undefined due to out-of-range.
+
     {% set getter_name = getter.name or 'anonymousIndexedGetter' %}
     {% set getter_arguments = ['index'] %}
     {% if getter.is_call_with_script_state %}
-    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
+    ScriptState* scriptState = ScriptState::forReceiverObject(info);
     {% set getter_arguments = ['scriptState'] + getter_arguments %}
     {% endif %}
     {% if getter.is_raises_exception %}
     {% set getter_arguments = getter_arguments + ['exceptionState'] %}
     {% endif %}
     {{getter.cpp_type}} result = impl->{{getter_name}}({{getter_arguments | join(', ')}});
-    {% if getter.is_raises_exception %}
-    if (exceptionState.throwIfNeeded())
-        return;
-    {% endif %}
-    if ({{getter.is_null_expression}})
-        return;
     {{getter.v8_set_return_value}};
 }
 
@@ -36,15 +47,29 @@ static void indexedPropertyGetter(uint32_t index, const v8::PropertyCallbackInfo
 
 {##############################################################################}
 {% block indexed_property_getter_callback %}
-{% if indexed_property_getter %}
-{% set getter = indexed_property_getter %}
-static void indexedPropertyGetterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Value>& info)
+{% if indexed_property_getter or named_property_getter %}
+{% set getter = indexed_property_getter or named_property_getter %}
+void indexedPropertyGetterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
+    {% if indexed_property_getter %}
+
     {% if getter.is_custom %}
     {{v8_class}}::indexedPropertyGetterCustom(index, info);
     {% else %}
     {{cpp_class}}V8Internal::indexedPropertyGetter(index, info);
     {% endif %}
+
+    {% else %}{# otherwise, named property #}
+
+    const AtomicString& propertyName = AtomicString::number(index);
+
+    {% if getter.is_custom %}
+    {{v8_class}}::namedPropertyGetterCustom(propertyName, info);
+    {% else %}
+    {{cpp_class}}V8Internal::namedPropertyGetter(propertyName, info);
+    {% endif %}
+
+    {% endif %}{# indexed_property_getter #}
 }
 
 {% endif %}
@@ -58,24 +83,25 @@ static void indexedPropertyGetterCallback(uint32_t index, const v8::PropertyCall
 {% set setter = indexed_property_setter %}
 static void indexedPropertySetter(uint32_t index, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
+    {% if setter.has_exception_state %}
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::IndexedSetterContext, "{{interface_name}}");
+    {% endif %}
+
     {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
     {{v8_value_to_local_cpp_value(setter) | indent}}
-    {% if setter.has_exception_state %}
-    ExceptionState exceptionState(ExceptionState::IndexedSetterContext, "{{interface_name}}", info.Holder(), info.GetIsolate());
-    {% endif %}
     {% if setter.has_type_checking_interface %}
     {# Type checking for interface types (if interface not implemented, throw
        TypeError), per http://www.w3.org/TR/WebIDL/#es-interface #}
     if (!propertyValue{% if setter.is_nullable %} && !isUndefinedOrNull(v8Value){% endif %}) {
         exceptionState.throwTypeError("The provided value is not of type '{{setter.idl_type}}'.");
-        exceptionState.throwIfNeeded();
         return;
     }
     {% endif %}
+
     {% set setter_name = setter.name or 'anonymousIndexedSetter' %}
     {% set setter_arguments = ['index', 'propertyValue'] %}
     {% if setter.is_call_with_script_state %}
-    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
+    ScriptState* scriptState = ScriptState::forReceiverObject(info);
     {% set setter_arguments = ['scriptState'] + setter_arguments %}
     {% endif %}
     {% if setter.is_raises_exception %}
@@ -83,7 +109,7 @@ static void indexedPropertySetter(uint32_t index, v8::Local<v8::Value> v8Value, 
     {% endif %}
     bool result = impl->{{setter_name}}({{setter_arguments | join(', ')}});
     {% if setter.is_raises_exception %}
-    if (exceptionState.throwIfNeeded())
+    if (exceptionState.hadException())
         return;
     {% endif %}
     if (!result)
@@ -97,15 +123,33 @@ static void indexedPropertySetter(uint32_t index, v8::Local<v8::Value> v8Value, 
 
 {##############################################################################}
 {% block indexed_property_setter_callback %}
-{% if indexed_property_setter %}
-{% set setter = indexed_property_setter %}
-static void indexedPropertySetterCallback(uint32_t index, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
+{% if indexed_property_setter or named_property_setter %}
+{% set setter = indexed_property_setter or named_property_setter %}
+void indexedPropertySetterCallback(uint32_t index, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
+    {% if setter.is_ce_reactions %}
+    CEReactionsScope ceReactionsScope;
+    {% endif %}
+
+    {% if indexed_property_setter %}
+
     {% if setter.is_custom %}
     {{v8_class}}::indexedPropertySetterCustom(index, v8Value, info);
     {% else %}
     {{cpp_class}}V8Internal::indexedPropertySetter(index, v8Value, info);
     {% endif %}
+
+    {% else %}{# otherwise, named property #}
+
+    const AtomicString& propertyName = AtomicString::number(index);
+
+    {% if setter.is_custom %}
+    {{v8_class}}::namedPropertySetterCustom(propertyName, v8Value, info);
+    {% else %}
+    {{cpp_class}}V8Internal::namedPropertySetter(propertyName, v8Value, info);
+    {% endif %}
+
+    {% endif %}{# indexed_property_setter #}
 }
 
 {% endif %}
@@ -118,14 +162,16 @@ static void indexedPropertySetterCallback(uint32_t index, v8::Local<v8::Value> v
 {% set deleter = indexed_property_deleter %}
 static void indexedPropertyDeleter(uint32_t index, const v8::PropertyCallbackInfo<v8::Boolean>& info)
 {
-    {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
     {% if deleter.is_raises_exception %}
-    ExceptionState exceptionState(ExceptionState::IndexedDeletionContext, "{{interface_name}}", info.Holder(), info.GetIsolate());
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::IndexedDeletionContext, "{{interface_name}}");
     {% endif %}
+
+    {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
+
     {% set deleter_name = deleter.name or 'anonymousIndexedDeleter' %}
     {% set deleter_arguments = ['index'] %}
     {% if deleter.is_call_with_script_state %}
-    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
+    ScriptState* scriptState = ScriptState::forReceiverObject(info);
     {% set deleter_arguments = ['scriptState'] + deleter_arguments %}
     {% endif %}
     {% if deleter.is_raises_exception %}
@@ -133,11 +179,12 @@ static void indexedPropertyDeleter(uint32_t index, const v8::PropertyCallbackInf
     {% endif %}
     DeleteResult result = impl->{{deleter_name}}({{deleter_arguments | join(', ')}});
     {% if deleter.is_raises_exception %}
-    if (exceptionState.throwIfNeeded())
+    if (exceptionState.hadException())
         return;
     {% endif %}
-    if (result != DeleteUnknownProperty)
-        return v8SetReturnValueBool(info, result == DeleteSuccess);
+    if (result == DeleteUnknownProperty)
+        return;
+    v8SetReturnValue(info, result == DeleteSuccess);
 }
 
 {% endif %}
@@ -146,15 +193,33 @@ static void indexedPropertyDeleter(uint32_t index, const v8::PropertyCallbackInf
 
 {##############################################################################}
 {% block indexed_property_deleter_callback %}
-{% if indexed_property_deleter %}
-{% set deleter = indexed_property_deleter %}
-static void indexedPropertyDeleterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Boolean>& info)
+{% if indexed_property_deleter or named_property_deleter %}
+{% set deleter = indexed_property_deleter or named_property_deleter %}
+void indexedPropertyDeleterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Boolean>& info)
 {
+    {% if deleter.is_ce_reactions %}
+    CEReactionsScope ceReactionsScope;
+    {% endif %}
+
+    {% if indexed_property_deleter %}
+
     {% if deleter.is_custom %}
     {{v8_class}}::indexedPropertyDeleterCustom(index, info);
     {% else %}
     {{cpp_class}}V8Internal::indexedPropertyDeleter(index, info);
     {% endif %}
+
+    {% else %}{# otherwise, named property #}
+
+    const AtomicString& propertyName = AtomicString::number(index);
+
+    {% if deleter.is_custom %}
+    {{v8_class}}::namedPropertyDeleterCustom(propertyName, info);
+    {% else %}
+    {{cpp_class}}V8Internal::namedPropertyDeleter(propertyName, info);
+    {% endif %}
+
+    {% endif %}{# indexed_property_deleter #}
 }
 
 {% endif %}
@@ -165,27 +230,22 @@ static void indexedPropertyDeleterCallback(uint32_t index, const v8::PropertyCal
 {% block named_property_getter %}
 {% if named_property_getter and not named_property_getter.is_custom %}
 {% set getter = named_property_getter %}
-static void namedPropertyGetter(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
+static void namedPropertyGetter(const AtomicString& name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    auto nameString = name.As<v8::String>();
-    {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
-    AtomicString propertyName = toCoreAtomicString(nameString);
     {% if getter.is_raises_exception %}
-    v8::String::Utf8Value namedProperty(nameString);
-    ExceptionState exceptionState(ExceptionState::GetterContext, *namedProperty, "{{interface_name}}", info.Holder(), info.GetIsolate());
+    const CString& nameInUtf8 = name.utf8();
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::GetterContext, "{{interface_name}}", nameInUtf8.data());
     {% endif %}
     {% if getter.is_call_with_script_state %}
-    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
+    ScriptState* scriptState = ScriptState::forReceiverObject(info);
     {% endif %}
+
+    {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
     {% if getter.use_output_parameter_for_result %}
     {{getter.cpp_type}} result;
     {{getter.cpp_value}};
     {% else %}
     {{getter.cpp_type}} result = {{getter.cpp_value}};
-    {% endif %}
-    {% if getter.is_raises_exception %}
-    if (exceptionState.throwIfNeeded())
-        return;
     {% endif %}
     if ({{getter.is_null_expression}})
         return;
@@ -200,12 +260,16 @@ static void namedPropertyGetter(v8::Local<v8::Name> name, const v8::PropertyCall
 {% block named_property_getter_callback %}
 {% if named_property_getter %}
 {% set getter = named_property_getter %}
-static void namedPropertyGetterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
+void namedPropertyGetterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
+    if (!name->IsString())
+        return;
+    const AtomicString& propertyName = toCoreAtomicString(name.As<v8::String>());
+
     {% if getter.is_custom %}
-    {{v8_class}}::namedPropertyGetterCustom(name, info);
+    {{v8_class}}::namedPropertyGetterCustom(propertyName, info);
     {% else %}
-    {{cpp_class}}V8Internal::namedPropertyGetter(name, info);
+    {{cpp_class}}V8Internal::namedPropertyGetter(propertyName, info);
     {% endif %}
 }
 
@@ -218,33 +282,29 @@ static void namedPropertyGetterCallback(v8::Local<v8::Name> name, const v8::Prop
 {% from 'utilities.cpp' import v8_value_to_local_cpp_value %}
 {% if named_property_setter and not named_property_setter.is_custom %}
 {% set setter = named_property_setter %}
-static void namedPropertySetter(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
+static void namedPropertySetter(const AtomicString& name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    auto nameString = name.As<v8::String>();
     {% if setter.has_exception_state %}
-    v8::String::Utf8Value namedProperty(nameString);
-    ExceptionState exceptionState(ExceptionState::SetterContext, *namedProperty, "{{interface_name}}", info.Holder(), info.GetIsolate());
+    const CString& nameInUtf8 = name.utf8();
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::SetterContext, "{{interface_name}}", nameInUtf8.data());
     {% endif %}
+    {% if setter.is_call_with_script_state %}
+    ScriptState* scriptState = ScriptState::forReceiverObject(info);
+    {% endif %}
+
     {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
-    {# v8_value_to_local_cpp_value('DOMString', 'nameString', 'propertyName') #}
-    V8StringResource<> propertyName(nameString);
-    if (!propertyName.prepare())
-        return;
     {{v8_value_to_local_cpp_value(setter) | indent}}
     {% if setter.has_type_checking_interface %}
     {# Type checking for interface types (if interface not implemented, throw
        TypeError), per http://www.w3.org/TR/WebIDL/#es-interface #}
     if (!propertyValue{% if setter.is_nullable %} && !isUndefinedOrNull(v8Value){% endif %}) {
         exceptionState.throwTypeError("The provided value is not of type '{{setter.idl_type}}'.");
-        exceptionState.throwIfNeeded();
         return;
     }
     {% endif %}
-    {% if setter.is_call_with_script_state %}
-    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
-    {% endif %}
+
     {% set setter_name = setter.name or 'anonymousNamedSetter' %}
-    {% set setter_arguments = ['propertyName', 'propertyValue'] %}
+    {% set setter_arguments = ['name', 'propertyValue'] %}
     {% if setter.is_call_with_script_state %}
     {% set setter_arguments = ['scriptState'] + setter_arguments %}
     {% endif %}
@@ -253,7 +313,7 @@ static void namedPropertySetter(v8::Local<v8::Name> name, v8::Local<v8::Value> v
     {% endif %}
     bool result = impl->{{setter_name}}({{setter_arguments | join(', ')}});
     {% if setter.is_raises_exception %}
-    if (exceptionState.throwIfNeeded())
+    if (exceptionState.hadException())
         return;
     {% endif %}
     if (!result)
@@ -269,12 +329,83 @@ static void namedPropertySetter(v8::Local<v8::Name> name, v8::Local<v8::Value> v
 {% block named_property_setter_callback %}
 {% if named_property_setter %}
 {% set setter = named_property_setter %}
-static void namedPropertySetterCallback(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
+void namedPropertySetterCallback(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
+    if (!name->IsString())
+        return;
+    const AtomicString& propertyName = toCoreAtomicString(name.As<v8::String>());
+
+    {% if setter.is_ce_reactions %}
+    CEReactionsScope ceReactionsScope;
+    {% endif %}
+
     {% if setter.is_custom %}
-    {{v8_class}}::namedPropertySetterCustom(name, v8Value, info);
+    {{v8_class}}::namedPropertySetterCustom(propertyName, v8Value, info);
     {% else %}
-    {{cpp_class}}V8Internal::namedPropertySetter(name, v8Value, info);
+    {{cpp_class}}V8Internal::namedPropertySetter(propertyName, v8Value, info);
+    {% endif %}
+}
+
+{% endif %}
+{% endblock %}
+
+
+{##############################################################################}
+{% block named_property_deleter %}
+{% if named_property_deleter and not named_property_deleter.is_custom %}
+{% set deleter = named_property_deleter %}
+static void namedPropertyDeleter(const AtomicString& name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
+{
+    {% if deleter.is_raises_exception %}
+    const CString& nameInUtf8 = name.utf8();
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::DeletionContext, "{{interface_name}}", nameInUtf8.data());
+    {% endif %}
+    {% if deleter.is_call_with_script_state %}
+    ScriptState* scriptState = ScriptState::forReceiverObject(info);
+    {% endif %}
+
+    {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
+
+    {% set deleter_name = deleter.name or 'anonymousNamedDeleter' %}
+    {% set deleter_arguments = ['name'] %}
+    {% if deleter.is_call_with_script_state %}
+    {% set deleter_arguments = ['scriptState'] + deleter_arguments %}
+    {% endif %}
+    {% if deleter.is_raises_exception %}
+    {% set deleter_arguments = deleter_arguments + ['exceptionState'] %}
+    {% endif %}
+    DeleteResult result = impl->{{deleter_name}}({{deleter_arguments | join(', ')}});
+    {% if deleter.is_raises_exception %}
+    if (exceptionState.hadException())
+        return;
+    {% endif %}
+    if (result == DeleteUnknownProperty)
+        return;
+    v8SetReturnValue(info, result == DeleteSuccess);
+}
+
+{% endif %}
+{% endblock %}
+
+
+{##############################################################################}
+{% block named_property_deleter_callback %}
+{% if named_property_deleter %}
+{% set deleter = named_property_deleter %}
+void namedPropertyDeleterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
+{
+    if (!name->IsString())
+        return;
+    const AtomicString& propertyName = toCoreAtomicString(name.As<v8::String>());
+
+    {% if deleter.is_ce_reactions %}
+    CEReactionsScope ceReactionsScope;
+    {% endif %}
+
+    {% if deleter.is_custom %}
+    {{v8_class}}::namedPropertyDeleterCustom(propertyName, info);
+    {% else %}
+    {{cpp_class}}V8Internal::namedPropertyDeleter(propertyName, info);
     {% endif %}
 }
 
@@ -289,20 +420,21 @@ static void namedPropertySetterCallback(v8::Local<v8::Name> name, v8::Local<v8::
 {% set getter = named_property_getter %}
 {# If there is an enumerator, there MUST be a query method to properly
    communicate property attributes. #}
-static void namedPropertyQuery(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
+static void namedPropertyQuery(const AtomicString& name, const v8::PropertyCallbackInfo<v8::Integer>& info)
 {
-    {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
-    AtomicString propertyName = toCoreAtomicString(name.As<v8::String>());
-    v8::String::Utf8Value namedProperty(name);
-    ExceptionState exceptionState(ExceptionState::GetterContext, *namedProperty, "{{interface_name}}", info.Holder(), info.GetIsolate());
-    {% set getter_arguments = ['propertyName', 'exceptionState'] %}
+    const CString& nameInUtf8 = name.utf8();
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::GetterContext, "{{interface_name}}", nameInUtf8.data());
     {% if getter.is_call_with_script_state %}
-    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
+    ScriptState* scriptState = ScriptState::forReceiverObject(info);
+    {% endif %}
+
+    {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
+
+    {% set getter_arguments = ['name', 'exceptionState'] %}
+    {% if getter.is_call_with_script_state %}
     {% set getter_arguments = ['scriptState'] + getter_arguments %}
     {% endif %}
     bool result = impl->namedPropertyQuery({{getter_arguments | join(', ')}});
-    if (exceptionState.throwIfNeeded())
-        return;
     if (!result)
         return;
     v8SetReturnValueInt(info, v8::None);
@@ -316,65 +448,16 @@ static void namedPropertyQuery(v8::Local<v8::Name> name, const v8::PropertyCallb
 {% block named_property_query_callback %}
 {% if named_property_getter and named_property_getter.is_enumerable %}
 {% set getter = named_property_getter %}
-static void namedPropertyQueryCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
+void namedPropertyQueryCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
 {
-    {% if getter.is_custom_property_query %}
-    {{v8_class}}::namedPropertyQueryCustom(name, info);
-    {% else %}
-    {{cpp_class}}V8Internal::namedPropertyQuery(name, info);
-    {% endif %}
-}
-
-{% endif %}
-{% endblock %}
-
-
-{##############################################################################}
-{% block named_property_deleter %}
-{% if named_property_deleter and not named_property_deleter.is_custom %}
-{% set deleter = named_property_deleter %}
-static void namedPropertyDeleter(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
-{
-    {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
-    AtomicString propertyName = toCoreAtomicString(name.As<v8::String>());
-    {% if deleter.is_raises_exception %}
-    v8::String::Utf8Value namedProperty(name);
-    ExceptionState exceptionState(ExceptionState::DeletionContext, *namedProperty, "{{interface_name}}", info.Holder(), info.GetIsolate());
-    {% endif %}
-    {% if deleter.is_call_with_script_state %}
-    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
-    {% endif %}
-    {% set deleter_name = deleter.name or 'anonymousNamedDeleter' %}
-    {% set deleter_arguments = ['propertyName'] %}
-    {% if deleter.is_call_with_script_state %}
-    {% set deleter_arguments = ['scriptState'] + deleter_arguments %}
-    {% endif %}
-    {% if deleter.is_raises_exception %}
-    {% set deleter_arguments = deleter_arguments + ['exceptionState'] %}
-    {% endif %}
-    DeleteResult result = impl->{{deleter_name}}({{deleter_arguments | join(', ')}});
-    {% if deleter.is_raises_exception %}
-    if (exceptionState.throwIfNeeded())
+    if (!name->IsString())
         return;
-    {% endif %}
-    if (result != DeleteUnknownProperty)
-        return v8SetReturnValueBool(info, result == DeleteSuccess);
-}
+    const AtomicString& propertyName = toCoreAtomicString(name.As<v8::String>());
 
-{% endif %}
-{% endblock %}
-
-
-{##############################################################################}
-{% block named_property_deleter_callback %}
-{% if named_property_deleter %}
-{% set deleter = named_property_deleter %}
-static void namedPropertyDeleterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
-{
-    {% if deleter.is_custom %}
-    {{v8_class}}::namedPropertyDeleterCustom(name, info);
+    {% if getter.is_custom_property_query %}
+    {{v8_class}}::namedPropertyQueryCustom(propertyName, info);
     {% else %}
-    {{cpp_class}}V8Internal::namedPropertyDeleter(name, info);
+    {{cpp_class}}V8Internal::namedPropertyQuery(propertyName, info);
     {% endif %}
 }
 
@@ -388,18 +471,15 @@ static void namedPropertyDeleterCallback(v8::Local<v8::Name> name, const v8::Pro
       not named_property_getter.is_custom_property_enumerator %}
 static void namedPropertyEnumerator(const v8::PropertyCallbackInfo<v8::Array>& info)
 {
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::EnumerationContext, "{{interface_name}}");
+
     {{cpp_class}}* impl = {{v8_class}}::toImpl(info.Holder());
+
     Vector<String> names;
-    ExceptionState exceptionState(ExceptionState::EnumerationContext, "{{interface_name}}", info.Holder(), info.GetIsolate());
     impl->namedPropertyEnumerator(names, exceptionState);
-    if (exceptionState.throwIfNeeded())
+    if (exceptionState.hadException())
         return;
-    v8::Local<v8::Array> v8names = v8::Array::New(info.GetIsolate(), names.size());
-    for (size_t i = 0; i < names.size(); ++i) {
-        if (!v8CallBoolean(v8names->Set(info.GetIsolate()->GetCurrentContext(), v8::Integer::New(info.GetIsolate(), i), v8String(info.GetIsolate(), names[i]))))
-            return;
-    }
-    v8SetReturnValue(info, v8names);
+    v8SetReturnValue(info, toV8(names, info.Holder(), info.GetIsolate()).As<v8::Array>());
 }
 
 {% endif %}
@@ -410,7 +490,7 @@ static void namedPropertyEnumerator(const v8::PropertyCallbackInfo<v8::Array>& i
 {% block named_property_enumerator_callback %}
 {% if named_property_getter and named_property_getter.is_enumerable %}
 {% set getter = named_property_getter %}
-static void namedPropertyEnumeratorCallback(const v8::PropertyCallbackInfo<v8::Array>& info)
+void namedPropertyEnumeratorCallback(const v8::PropertyCallbackInfo<v8::Array>& info)
 {
     {% if getter.is_custom_property_enumerator %}
     {{v8_class}}::namedPropertyEnumeratorCustom(info);
@@ -428,22 +508,23 @@ static void namedPropertyEnumeratorCallback(const v8::PropertyCallbackInfo<v8::A
 {% if has_origin_safe_method_setter %}
 static void {{cpp_class}}OriginSafeMethodSetter(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Local<v8::Object> holder = {{v8_class}}::findInstanceInPrototypeChain(info.This(), info.GetIsolate());
+    if (!name->IsString())
+        return;
+    v8::Local<v8::Object> holder = {{v8_class}}::findInstanceInPrototypeChain(info.Holder(), info.GetIsolate());
     if (holder.IsEmpty())
         return;
     {{cpp_class}}* impl = {{v8_class}}::toImpl(holder);
     v8::String::Utf8Value attributeName(name);
     ExceptionState exceptionState(ExceptionState::SetterContext, *attributeName, "{{interface_name}}", info.Holder(), info.GetIsolate());
-    if (!BindingSecurity::shouldAllowAccessTo(info.GetIsolate(), callingDOMWindow(info.GetIsolate()), impl, exceptionState)) {
-        exceptionState.throwIfNeeded();
+    if (!BindingSecurity::shouldAllowAccessTo(currentDOMWindow(info.GetIsolate()), impl, exceptionState)) {
         return;
     }
 
-    {# The findInstanceInPrototypeChain() call above only returns a non-empty handle if info.This() is an Object. #}
-    V8HiddenValue::setHiddenValue(ScriptState::current(info.GetIsolate()), v8::Local<v8::Object>::Cast(info.This()), name.As<v8::String>(), v8Value);
+    {# The findInstanceInPrototypeChain() call above only returns a non-empty handle if info.Holder() is an Object. #}
+    V8HiddenValue::setHiddenValue(ScriptState::current(info.GetIsolate()), v8::Local<v8::Object>::Cast(info.Holder()), name.As<v8::String>(), v8Value);
 }
 
-static void {{cpp_class}}OriginSafeMethodSetterCallback(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
+void {{cpp_class}}OriginSafeMethodSetterCallback(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
     {{cpp_class}}V8Internal::{{cpp_class}}OriginSafeMethodSetter(name, v8Value, info);
 }
@@ -456,15 +537,17 @@ static void {{cpp_class}}OriginSafeMethodSetterCallback(v8::Local<v8::Name> name
 {% block named_constructor %}
 {% from 'methods.cpp' import generate_constructor with context %}
 {% if named_constructor %}
-{% set to_active_scriptwrappable = '%s::toActiveScriptWrappable' % v8_class
-                                   if active_scriptwrappable else '0' %}
+{% set active_scriptwrappable_inheritance =
+    'InheritFromActiveScriptWrappable'
+    if active_scriptwrappable else
+    'NotInheritFromActiveScriptWrappable' %}
 // Suppress warning: global constructors, because struct WrapperTypeInfo is trivial
 // and does not depend on another global objects.
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo {{v8_class}}Constructor::wrapperTypeInfo = { gin::kEmbedderBlink, {{v8_class}}Constructor::domTemplate, {{v8_class}}::trace, {{to_active_scriptwrappable}}, 0, {{v8_class}}::preparePrototypeAndInterfaceObject, {{v8_class}}::installConditionallyEnabledProperties, "{{interface_name}}", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::{{wrapper_class_id}}, WrapperTypeInfo::{{event_target_inheritance}}, WrapperTypeInfo::{{lifetime}} };
+const WrapperTypeInfo {{v8_class}}Constructor::wrapperTypeInfo = { gin::kEmbedderBlink, {{v8_class}}Constructor::domTemplate, {{v8_class}}::trace, {{v8_class}}::traceWrappers, 0, {{prepare_prototype_and_interface_object_func}}, "{{interface_name}}", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::{{wrapper_class_id}}, WrapperTypeInfo::{{active_scriptwrappable_inheritance}}, WrapperTypeInfo::{{event_target_inheritance}}, WrapperTypeInfo::{{lifetime}} };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -495,7 +578,7 @@ v8::Local<v8::FunctionTemplate> {{v8_class}}Constructor::domTemplate(v8::Isolate
 {% if constructor_overloads %}
 static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    ExceptionState exceptionState(ExceptionState::ConstructionContext, "{{interface_name}}", info.Holder(), info.GetIsolate());
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::ConstructionContext, "{{interface_name}}");
     {# 2. Initialize argcount to be min(maxarg, n). #}
     switch (std::min({{constructor_overloads.maxarg}}, info.Length())) {
     {# 3. Remove from S all entries whose type list is not of length argcount. #}
@@ -516,19 +599,16 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
         {# Report full list of valid arities if gaps and above minimum #}
         {% if constructor_overloads.valid_arities %}
         if (info.Length() >= {{constructor_overloads.length}}) {
-            setArityTypeError(exceptionState, "{{constructor_overloads.valid_arities}}", info.Length());
-            exceptionState.throwIfNeeded();
+            exceptionState.throwTypeError(ExceptionMessages::invalidArity("{{constructor_overloads.valid_arities}}", info.Length()));
             return;
         }
         {% endif %}
         {# Otherwise just report "not enough arguments" #}
         exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments({{constructor_overloads.length}}, info.Length()));
-        exceptionState.throwIfNeeded();
         return;
     }
     {# No match, throw error #}
     exceptionState.throwTypeError("No matching constructor signature.");
-    exceptionState.throwIfNeeded();
 }
 
 {% endif %}
@@ -537,17 +617,19 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
 
 {##############################################################################}
 {% block visit_dom_wrapper %}
-{% if set_wrapper_reference_from or set_wrapper_reference_to %}
+{% if has_visit_dom_wrapper %}
 void {{v8_class}}::visitDOMWrapper(v8::Isolate* isolate, ScriptWrappable* scriptWrappable, const v8::Persistent<v8::Object>& wrapper)
 {
+    {% if has_visit_dom_wrapper_custom %}
+    {{v8_class}}::visitDOMWrapperCustom(isolate, scriptWrappable, wrapper);
+    {% endif %}
+    {% if set_wrapper_reference_to or set_wrapper_reference_from %}
     {{cpp_class}}* impl = scriptWrappable->toImpl<{{cpp_class}}>();
+    {% endif %}
     {% if set_wrapper_reference_to %}
-    v8::Local<v8::Object> context = v8::Local<v8::Object>::New(isolate, wrapper);
-    v8::Context::Scope scope(context->CreationContext());
     {{set_wrapper_reference_to.cpp_type}} {{set_wrapper_reference_to.name}} = impl->{{set_wrapper_reference_to.name}}();
     if ({{set_wrapper_reference_to.name}}) {
-        if (DOMDataStore::containsWrapper({{set_wrapper_reference_to.name}}, isolate))
-            DOMDataStore::setWrapperReference(wrapper, {{set_wrapper_reference_to.name}}, isolate);
+        DOMWrapperWorld::setWrapperReferencesInAllWorlds(wrapper, {{set_wrapper_reference_to.name}}, isolate);
     }
     {% endif %}
     {% if set_wrapper_reference_from %}
@@ -632,11 +714,11 @@ V8DOMConfiguration::installAttribute(isolate, world, {{instance_template}}, {{pr
        '%sV8Internal::indexedPropertyGetterCallback' % cpp_class %}
 {% set indexed_property_setter_callback =
        '%sV8Internal::indexedPropertySetterCallback' % cpp_class
-       if indexed_property_setter else '0' %}
+       if indexed_property_setter or named_property_setter else '0' %}
 {% set indexed_property_query_callback = '0' %}{# Unused #}
 {% set indexed_property_deleter_callback =
        '%sV8Internal::indexedPropertyDeleterCallback' % cpp_class
-       if indexed_property_deleter else '0' %}
+       if indexed_property_deleter or named_property_deleter else '0' %}
 {% set indexed_property_enumerator_callback =
        'indexedPropertyEnumerator<%s>' % cpp_class
        if indexed_property_getter.is_enumerable else '0' %}
@@ -703,7 +785,7 @@ v8::Local<v8::FunctionTemplate> {{v8_class}}::domTemplateForNamedPropertiesObjec
 {
     v8::Local<v8::FunctionTemplate> parentTemplate = V8{{parent_interface}}::domTemplate(isolate, world);
 
-    v8::Local<v8::FunctionTemplate> namedPropertiesObjectFunctionTemplate = v8::FunctionTemplate::New(isolate);
+    v8::Local<v8::FunctionTemplate> namedPropertiesObjectFunctionTemplate = v8::FunctionTemplate::New(isolate, V8ObjectConstructor::isValidConstructorMode);
     namedPropertiesObjectFunctionTemplate->SetClassName(v8AtomicString(isolate, "{{interface_name}}Properties"));
     namedPropertiesObjectFunctionTemplate->Inherit(parentTemplate);
 
@@ -721,16 +803,13 @@ v8::Local<v8::FunctionTemplate> {{v8_class}}::domTemplateForNamedPropertiesObjec
 
 {##############################################################################}
 {% block has_instance %}
+{% if not is_array_buffer_or_view %}
+
 bool {{v8_class}}::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
-    {% if is_array_buffer_or_view %}
-    return v8Value->Is{{interface_name}}();
-    {% else %}
     return V8PerIsolateData::from(isolate)->hasInstance(&wrapperTypeInfo, v8Value);
-    {% endif %}
 }
 
-{% if not is_array_buffer_or_view %}
 v8::Local<v8::Object> {{v8_class}}::findInstanceInPrototypeChain(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->findInstanceInPrototypeChain(&wrapperTypeInfo, v8Value);
@@ -830,39 +909,30 @@ v8::Local<v8::Object> {{v8_class}}::findInstanceInPrototypeChain(v8::Local<v8::V
 {% block to_impl_with_type_check %}
 {{cpp_class}}* {{v8_class}}::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
-    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
-}
-
-{% endblock %}
-
-
-{##############################################################################}
-{% block install_conditional_attributes %}
-{% from 'attributes.cpp' import attribute_configuration with context %}
-{% if has_conditional_attributes_on_instance %}
-void {{v8_class}}::installConditionallyEnabledProperties(v8::Local<v8::Object> instanceObject, v8::Isolate* isolate)
-{
-#error TODO(yukishiino): Rename this function to prepareInstanceObject (c.f. preparePrototypeAndInterfaceObject) and implement this function if necessary.  http://crbug.com/503508
-}
-
+{% if is_array_buffer_or_view %}
+    return value->Is{{interface_name}}() ? toImpl(v8::Local<v8::Object>::Cast(value)) : nullptr;
+{% else %}
+    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : nullptr;
 {% endif %}
+}
+
 {% endblock %}
 
 
 {##############################################################################}
 {% block prepare_prototype_and_interface_object %}
 {% from 'methods.cpp' import install_conditionally_enabled_methods with context %}
-{% if unscopeables or has_conditional_attributes_on_prototype or conditionally_enabled_methods %}
+{% if has_prepare_prototype_and_interface_object %}
 void {{v8_class}}::preparePrototypeAndInterfaceObject(v8::Local<v8::Context> context, const DOMWrapperWorld& world, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate)
 {
     v8::Isolate* isolate = context->GetIsolate();
-{% if unscopeables %}
-    {{install_unscopeables() | indent}}
+{% if unscopables %}
+    {{install_unscopables() | indent}}
 {% endif %}
 {% if has_conditional_attributes_on_prototype %}
     {{install_conditionally_enabled_attributes_on_prototype() | indent}}
 {% endif %}
-{% if conditionally_enabled_methods %}
+{% if methods | conditionally_exposed(is_partial) %}
     {{install_conditionally_enabled_methods() | indent}}
 {% endif %}
 }
@@ -872,19 +942,19 @@ void {{v8_class}}::preparePrototypeAndInterfaceObject(v8::Local<v8::Context> con
 
 
 {##############################################################################}
-{% macro install_unscopeables() %}
+{% macro install_unscopables() %}
 v8::Local<v8::Name> unscopablesSymbol(v8::Symbol::GetUnscopables(isolate));
-v8::Local<v8::Object> unscopeables;
+v8::Local<v8::Object> unscopables;
 if (v8CallBoolean(prototypeObject->HasOwnProperty(context, unscopablesSymbol)))
-    unscopeables = prototypeObject->Get(context, unscopablesSymbol).ToLocalChecked().As<v8::Object>();
+    unscopables = prototypeObject->Get(context, unscopablesSymbol).ToLocalChecked().As<v8::Object>();
 else
-    unscopeables = v8::Object::New(isolate);
-{% for name, runtime_enabled_function in unscopeables %}
+    unscopables = v8::Object::New(isolate);
+{% for name, runtime_enabled_function in unscopables %}
 {% filter runtime_enabled(runtime_enabled_function) %}
-unscopeables->CreateDataProperty(context, v8AtomicString(isolate, "{{name}}"), v8::True(isolate)).FromJust();
+unscopables->CreateDataProperty(context, v8AtomicString(isolate, "{{name}}"), v8::True(isolate)).FromJust();
 {% endfilter %}
 {% endfor %}
-prototypeObject->CreateDataProperty(context, unscopablesSymbol, unscopeables).FromJust();
+prototypeObject->CreateDataProperty(context, unscopablesSymbol, unscopables).FromJust();
 {% endmacro %}
 
 
@@ -893,25 +963,17 @@ prototypeObject->CreateDataProperty(context, unscopablesSymbol, unscopeables).Fr
 {% from 'attributes.cpp' import attribute_configuration with context %}
 ExecutionContext* executionContext = toExecutionContext(context);
 v8::Local<v8::Signature> signature = v8::Signature::New(isolate, interfaceTemplate);
-{% for attribute in attributes if attribute.exposed_test and attribute.on_prototype %}
+{% for attribute in attributes if (attribute.exposed_test or attribute.secure_context_test) and attribute.on_prototype %}
 {% filter exposed(attribute.exposed_test) %}
+{% filter secure_context(attribute.secure_context_test) %}
+{% filter runtime_enabled(attribute.runtime_enabled_function) %}
 const V8DOMConfiguration::AccessorConfiguration accessorConfiguration = {{attribute_configuration(attribute)}};
 V8DOMConfiguration::installAccessor(isolate, world, v8::Local<v8::Object>(), prototypeObject, interfaceObject, signature, accessorConfiguration);
-{% endfilter %}
+{% endfilter %}{# runtime_enabled #}
+{% endfilter %}{# secure_context #}
+{% endfilter %}{# exposed #}
 {% endfor %}
 {% endmacro %}
-
-
-{##############################################################################}
-{% block to_active_scriptwrappable %}
-{% if active_scriptwrappable %}
-ActiveScriptWrappable* {{v8_class}}::toActiveScriptWrappable(v8::Local<v8::Object> wrapper)
-{
-    return toImpl(wrapper);
-}
-
-{% endif %}
-{% endblock %}
 
 
 {##############################################################################}

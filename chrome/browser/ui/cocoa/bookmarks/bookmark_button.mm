@@ -10,7 +10,9 @@
 #include "base/mac/foundation_util.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/mac/sdk_forward_declarations.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_folder_window.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_view_cocoa.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button_cell.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_folder_target.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -20,6 +22,7 @@
 #include "ui/base/clipboard/clipboard_util_mac.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/nsview_additions.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 using base::UserMetricsAction;
@@ -56,6 +59,7 @@ BookmarkButton* gDraggedButton = nil; // Weak
 
 @synthesize delegate = delegate_;
 @synthesize acceptsTrackIn = acceptsTrackIn_;
+@synthesize backgroundColor = backgroundColor_;
 
 - (id)initWithFrame:(NSRect)frameRect {
   // BookmarkButton's ViewID may be changed to VIEW_ID_OTHER_BOOKMARKS in
@@ -77,6 +81,8 @@ BookmarkButton* gDraggedButton = nil; // Weak
     [self removeTrackingArea:area_];
     [area_ release];
   }
+
+  [backgroundColor_ release];
 
   [super dealloc];
 }
@@ -191,9 +197,7 @@ BookmarkButton* gDraggedButton = nil; // Weak
     NSWindow* window = [[self delegate] browserWindow];
     visibilityDelegate_ =
         [BrowserWindowController browserWindowControllerForWindow:window];
-    [visibilityDelegate_ lockBarVisibilityForOwner:self
-                                     withAnimation:NO
-                                             delay:NO];
+    [visibilityDelegate_ lockBarVisibilityForOwner:self withAnimation:NO];
   }
   const BookmarkNode* node = [self bookmarkNode];
   const BookmarkNode* parent = node->parent();
@@ -252,9 +256,7 @@ BookmarkButton* gDraggedButton = nil; // Weak
   gDraggedButton = nil;
 
   // visibilityDelegate_ can be nil if we're detached, and that's fine.
-  [visibilityDelegate_ releaseBarVisibilityForOwner:self
-                                      withAnimation:YES
-                                              delay:YES];
+  [visibilityDelegate_ releaseBarVisibilityForOwner:self withAnimation:YES];
   visibilityDelegate_ = nil;
 
   return kDraggableButtonImplUseBase;
@@ -421,8 +423,47 @@ BookmarkButton* gDraggedButton = nil; // Weak
 
 - (void)drawRect:(NSRect)rect {
   NSView* bookmarkBarToolbarView = [[self superview] superview];
-  [self cr_drawUsingAncestor:bookmarkBarToolbarView inRect:(NSRect)rect];
+  if (backgroundColor_) {
+    [backgroundColor_ set];
+    NSRectFill(rect);
+  } else {
+    [self cr_drawUsingAncestor:bookmarkBarToolbarView inRect:(NSRect)rect];
+  }
   [super drawRect:rect];
+}
+
+- (void)updateIconToMatchTheme {
+  if (!ui::MaterialDesignController::IsModeMaterial()) {
+    return;
+  }
+
+  // During testing, the window might not be a browser window, and the
+  // superview might not be a BookmarkBarView.
+  if (![[self window] respondsToSelector:@selector(hasDarkTheme)] ||
+      ![[self superview] isKindOfClass:[BookmarkBarView class]]) {
+    return;
+  }
+
+  BookmarkBarView* bookmarkBarView =
+      base::mac::ObjCCastStrict<BookmarkBarView>([self superview]);
+  BookmarkBarController* bookmarkBarController = [bookmarkBarView controller];
+
+  // The apps page shortcut button does not need to be updated.
+  if (self == [bookmarkBarController appsPageShortcutButton]) {
+    return;
+  }
+
+  BOOL darkTheme = [[self window] hasDarkTheme];
+  NSImage* theImage = nil;
+  // Make sure the "off the side" button gets the chevron icon.
+  if ([bookmarkBarController offTheSideButton] == self) {
+    theImage = [bookmarkBarController offTheSideButtonImage:darkTheme];
+  } else {
+    theImage = [bookmarkBarController faviconForNode:[self bookmarkNode]
+                                       forADarkTheme:darkTheme];
+  }
+
+  [[self cell] setImage:theImage];
 }
 
 - (void)viewDidMoveToWindow {
@@ -431,6 +472,7 @@ BookmarkButton* gDraggedButton = nil; // Weak
     // The new window may have different main window status.
     // This happens when the view is moved into a TabWindowOverlayWindow for
     // tab dragging.
+    [self updateIconToMatchTheme];
     [self windowDidChangeActive];
   }
 }
@@ -438,6 +480,7 @@ BookmarkButton* gDraggedButton = nil; // Weak
 // ThemedWindowDrawing implementation.
 
 - (void)windowDidChangeTheme {
+  [self updateIconToMatchTheme];
   [self setNeedsDisplay:YES];
 }
 

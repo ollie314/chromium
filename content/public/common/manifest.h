@@ -30,6 +30,8 @@ struct CONTENT_EXPORT Manifest {
     Icon(const Icon& other);
     ~Icon();
 
+    bool operator==(const Icon& other) const;
+
     // MUST be a valid url. If an icon doesn't have a valid URL, it will not be
     // successfully parsed, thus will not be represented in the Manifest.
     GURL src;
@@ -40,15 +42,9 @@ struct CONTENT_EXPORT Manifest {
     // supported type.
     base::NullableString16 type;
 
-    // Default value is 1.0 if the value is missing or invalid.
-    double density;
-
     // Empty if the parsing failed, the field was not present or empty.
     // The special value "any" is represented by gfx::Size(0, 0).
     std::vector<gfx::Size> sizes;
-
-    // Default density. Set to 1.0.
-    static const double kDefaultDensity;
   };
 
   // Structure representing a related application.
@@ -128,6 +124,9 @@ struct CONTENT_EXPORT Manifest {
   // is okay to use this entry.
   // Null if parsing failed or the field was not present.
   base::NullableString16 gcm_sender_id;
+
+  // Empty if the parsing failed or the field was not present.
+  GURL scope;
 
   // Maximum length for all the strings inside the Manifest when it is sent over
   // IPC. The renderer process should truncate the strings before sending the

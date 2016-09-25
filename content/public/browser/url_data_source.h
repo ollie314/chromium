@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/resource_request_info.h"
 
 namespace base {
 class MessageLoop;
@@ -53,10 +54,13 @@ class CONTENT_EXPORT URLDataSource {
   // the path of the request. The child class should run |callback| when the
   // data is available or if the request could not be satisfied. This can be
   // called either in this callback or asynchronously with the response.
-  virtual void StartDataRequest(const std::string& path,
-                                int render_process_id,
-                                int render_frame_id,
-                                const GotDataCallback& callback) = 0;
+  // |wc_getter| can be called to return the WebContents for this request, but
+  // only on the UI thread. If this method is called on the UI thread, then it's
+  // guaranteed that wc_getter will return a non-null WebContents.
+  virtual void StartDataRequest(
+      const std::string& path,
+      const ResourceRequestInfo::WebContentsGetter& wc_getter,
+      const GotDataCallback& callback) = 0;
 
   // Return the mimetype that should be sent with this response, or empty
   // string to specify no mime type.
@@ -86,22 +90,33 @@ class CONTENT_EXPORT URLDataSource {
   // Returns true if responses from this URLDataSource can be cached.
   virtual bool AllowCaching() const;
 
-  // If you are overriding this, then you have a bug.
+  // If you are overriding the following two methods, then you have a bug.
   // It is not acceptable to disable content-security-policy on chrome:// pages
   // to permit functionality excluded by CSP, such as inline script.
   // Instead, you must go back and change your WebUI page so that it is
   // compliant with the policy. This typically involves ensuring that all script
-  // is delivered through the data manager backend. Talk to tsepez for more
-  // info.
+  // is delivered through the data manager backend. Do not disable CSP on your
+  // page without first contacting the chrome security team.
   virtual bool ShouldAddContentSecurityPolicy() const;
+  // For pre-existing code, enabling CSP with relaxed script-src attributes
+  // may be marginally better than disabling CSP outright.
+  // Do not override this method without first contacting the chrome security
+  // team.
+  // By default, "script-src chrome://resources 'self' 'unsafe-eval';" is added
+  // to CSP. Override to change this.
+  virtual std::string GetContentSecurityPolicyScriptSrc() const;
 
-  // It is OK to override the following two methods to a custom CSP directive
+  // It is OK to override the following methods to a custom CSP directive
   // thereby slightly reducing the protection applied to the page.
 
   // By default, "object-src 'none';" is added to CSP. Override to change this.
   virtual std::string GetContentSecurityPolicyObjectSrc() const;
-  // By default, "frame-src 'none';" is added to CSP. Override to change this.
-  virtual std::string GetContentSecurityPolicyFrameSrc() const;
+  // By default, "child-src 'none';" is added to CSP. Override to change this.
+  virtual std::string GetContentSecurityPolicyChildSrc() const;
+  // By default empty. Override to change this.
+  virtual std::string GetContentSecurityPolicyStyleSrc() const;
+  // By default empty. Override to change this.
+  virtual std::string GetContentSecurityPolicyImgSrc() const;
 
   // By default, the "X-Frame-Options: DENY" header is sent. To stop this from
   // happening, return false. It is OK to return false as needed.
@@ -136,6 +151,9 @@ class CONTENT_EXPORT URLDataSource {
   virtual void WillServiceRequest(
       const net::URLRequest* request,
       std::string* path) const {}
+
+  // Whether |path| is gzipped (and should be transmitted gzipped).
+  virtual bool IsGzipped(const std::string& path) const;
 };
 
 }  // namespace content

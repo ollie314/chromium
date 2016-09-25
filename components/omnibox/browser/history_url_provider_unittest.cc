@@ -7,11 +7,13 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -157,11 +159,10 @@ struct TestURLInfo {
 class FakeAutocompleteProviderClient : public MockAutocompleteProviderClient {
  public:
   FakeAutocompleteProviderClient(bool create_history_db) {
-    set_template_url_service(
-        make_scoped_ptr(new TemplateURLService(nullptr, 0)));
+    set_template_url_service(base::MakeUnique<TemplateURLService>(nullptr, 0));
     if (history_dir_.CreateUniqueTempDir()) {
-      history_service_ = history::CreateHistoryService(
-          history_dir_.path(), create_history_db);
+      history_service_ = history::CreateHistoryService(history_dir_.GetPath(),
+                                                       create_history_db);
     }
   }
 
@@ -181,7 +182,7 @@ class FakeAutocompleteProviderClient : public MockAutocompleteProviderClient {
   TestSchemeClassifier scheme_classifier_;
   SearchTermsData search_terms_data_;
   base::ScopedTempDir history_dir_;
-  scoped_ptr<history::HistoryService> history_service_;
+  std::unique_ptr<history::HistoryService> history_service_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeAutocompleteProviderClient);
 };
@@ -242,7 +243,7 @@ class HistoryURLProviderTest : public testing::Test,
 
   base::MessageLoop message_loop_;
   ACMatches matches_;
-  scoped_ptr<FakeAutocompleteProviderClient> client_;
+  std::unique_ptr<FakeAutocompleteProviderClient> client_;
   scoped_refptr<HistoryURLProvider> autocomplete_;
   // Should the matches be sorted and duplicates removed?
   bool sort_matches_;
@@ -327,7 +328,7 @@ void HistoryURLProviderTest::RunTest(
   *identified_input_type = input.type();
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
 
   matches_ = autocomplete_->matches();
   if (sort_matches_) {
@@ -340,6 +341,7 @@ void HistoryURLProviderTest::RunTest(
     std::sort(matches_.begin(), matches_.end(),
               &AutocompleteMatch::MoreRelevant);
   }
+  SCOPED_TRACE(base::ASCIIToUTF16("input = ") + text);
   ASSERT_EQ(num_results, matches_.size()) << "Input text: " << text
                                           << "\nTLD: \"" << desired_tld << "\"";
   for (size_t i = 0; i < num_results; ++i) {
@@ -569,13 +571,13 @@ TEST_F(HistoryURLProviderTest, WhatYouTyped) {
           arraysize(results_1));
 
   const UrlAndLegalDefault results_2[] = {
-    { "http://wytmatch%20foo%20bar/", true }
+    { "http://wytmatch%20foo%20bar/", false }
   };
   RunTest(ASCIIToUTF16("http://wytmatch foo bar"), std::string(), false,
           results_2, arraysize(results_2));
 
   const UrlAndLegalDefault results_3[] = {
-    { "https://wytmatch%20foo%20bar/", true }
+    { "https://wytmatch%20foo%20bar/", false }
   };
   RunTest(ASCIIToUTF16("https://wytmatch foo bar"), std::string(), false,
           results_3, arraysize(results_3));
@@ -587,7 +589,7 @@ TEST_F(HistoryURLProviderTest, Fixup) {
   RunTest(ASCIIToUTF16("#"), std::string(), false, NULL, 0);
   RunTest(ASCIIToUTF16("%20"), std::string(), false, NULL, 0);
   const UrlAndLegalDefault fixup_crash[] = {
-    { "http://%EF%BD%A5@s/", true }
+    { "http://%EF%BD%A5@s/", false }
   };
   RunTest(base::WideToUTF16(L"\uff65@s"), std::string(), false, fixup_crash,
           arraysize(fixup_crash));
@@ -663,7 +665,7 @@ TEST_F(HistoryURLProviderTest, EmptyVisits) {
   int pandora_relevance = matches_[0].relevance;
 
   // Run the message loop. When |autocomplete_| finishes the loop is quit.
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_TRUE(autocomplete_->done());
   matches_ = autocomplete_->matches();
   ASSERT_GT(matches_.size(), 0u);
@@ -681,7 +683,7 @@ TEST_F(HistoryURLProviderTestNoDB, NavigateWithoutDB) {
           arraysize(navigation_1));
 
   UrlAndLegalDefault navigation_2[] = {
-    { "http://slash/", true }
+    { "http://slash/", false }
   };
   RunTest(ASCIIToUTF16("slash"), std::string(), false, navigation_2,
           arraysize(navigation_2));
@@ -696,7 +698,7 @@ TEST_F(HistoryURLProviderTest, DontAutocompleteOnTrailingWhitespace) {
       TestSchemeClassifier());
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
 
   // None of the matches should attempt to autocomplete.
   matches_ = autocomplete_->matches();
@@ -708,10 +710,10 @@ TEST_F(HistoryURLProviderTest, DontAutocompleteOnTrailingWhitespace) {
 
 TEST_F(HistoryURLProviderTest, TreatEmailsAsSearches) {
   // Visiting foo.com should not make this string be treated as a navigation.
-  // That means the result should be scored around 1200 ("what you typed")
-  // and not 1400+.
+  // That means the result should not be allowed to be default, and it should
+  // be scored around 1200 rather than 1400+.
   const UrlAndLegalDefault expected[] = {
-    { "http://user@foo.com/", true }
+    { "http://user@foo.com/", false }
   };
   ASSERT_NO_FATAL_FAILURE(RunTest(ASCIIToUTF16("user@foo.com"), std::string(),
                                   false, expected, arraysize(expected)));
@@ -723,15 +725,16 @@ TEST_F(HistoryURLProviderTest, IntranetURLsWithPaths) {
   struct TestCase {
     const char* input;
     int relevance;
+    bool allowed_to_be_default_match;
   } test_cases[] = {
-    { "fooey", 0 },
-    { "fooey/", 1200 },     // 1200 for URL would still navigate by default.
-    { "fooey/a", 1200 },    // 1200 for UNKNOWN would not.
-    { "fooey/a b", 1200 },  // Also UNKNOWN.
-    { "gooey", 1410 },
-    { "gooey/", 1410 },
-    { "gooey/a", 1400 },
-    { "gooey/a b", 1400 },
+    { "fooey", 0, false },
+    { "fooey/", 1200, true },  // 1200 for URL would still navigate by default.
+    { "fooey/a", 1200, false },    // 1200 for UNKNOWN would not.
+    { "fooey/a b", 1200, false },  // Also UNKNOWN.
+    { "gooey", 1410, true },
+    { "gooey/", 1410, true },
+    { "gooey/a", 1400, true },
+    { "gooey/a b", 1400, true },
   };
   for (size_t i = 0; i < arraysize(test_cases); ++i) {
     SCOPED_TRACE(test_cases[i].input);
@@ -740,7 +743,7 @@ TEST_F(HistoryURLProviderTest, IntranetURLsWithPaths) {
     } else {
       const UrlAndLegalDefault output[] = {
           {url_formatter::FixupURL(test_cases[i].input, std::string()).spec(),
-           true}};
+           test_cases[i].allowed_to_be_default_match}};
       ASSERT_NO_FATAL_FAILURE(RunTest(ASCIIToUTF16(test_cases[i].input),
                               std::string(), false, output, arraysize(output)));
       // Actual relevance should be at least what test_cases expects and
@@ -834,7 +837,7 @@ TEST_F(HistoryURLProviderTest, CrashDueToFixup) {
         true, false, TestSchemeClassifier());
     autocomplete_->Start(input, false);
     if (!autocomplete_->done())
-      base::MessageLoop::current()->Run();
+      base::RunLoop().Run();
   }
 }
 
@@ -904,8 +907,8 @@ TEST_F(HistoryURLProviderTest, CullSearchResults) {
   data.SetKeyword(ASCIIToUTF16("TestEngine"));
   data.SetURL("http://testsearch.com/?q={searchTerms}");
   TemplateURLService* template_url_service = client_->GetTemplateURLService();
-  TemplateURL* template_url = new TemplateURL(data);
-  template_url_service->Add(template_url);
+  TemplateURL* template_url =
+      template_url_service->Add(base::MakeUnique<TemplateURL>(data));
   template_url_service->SetUserSelectedDefaultSearchProvider(template_url);
   template_url_service->Load();
 

@@ -11,23 +11,52 @@
 #include "base/metrics/persistent_histogram_allocator.h"
 #include "base/metrics/persistent_memory_allocator.h"
 #include "components/metrics/metrics_service.h"
+#include "content/public/browser/browser_child_process_host.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/child_process_data.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 
+namespace {
+
+// This is used by tests that don't have an easy way to access the global
+// instance of this class.
+SubprocessMetricsProvider* g_subprocess_metrics_provider_for_testing;
+
+}  // namespace
+
 SubprocessMetricsProvider::SubprocessMetricsProvider()
-    : scoped_observer_(this) {
+    : scoped_observer_(this), weak_ptr_factory_(this) {
+  content::BrowserChildProcessObserver::Add(this);
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
                  content::NotificationService::AllBrowserContextsAndSources());
+  g_subprocess_metrics_provider_for_testing = this;
 }
 
-SubprocessMetricsProvider::~SubprocessMetricsProvider() {}
+SubprocessMetricsProvider::~SubprocessMetricsProvider() {
+  // Safe even if this object has never been added as an observer.
+  content::BrowserChildProcessObserver::Remove(this);
+  g_subprocess_metrics_provider_for_testing = nullptr;
+}
+
+// static
+void SubprocessMetricsProvider::MergeHistogramDeltasForTesting() {
+  DCHECK(g_subprocess_metrics_provider_for_testing);
+  g_subprocess_metrics_provider_for_testing->MergeHistogramDeltas();
+}
 
 void SubprocessMetricsProvider::RegisterSubprocessAllocator(
     int id,
     std::unique_ptr<base::PersistentHistogramAllocator> allocator) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!allocators_by_id_.Lookup(id));
+
+  // Stop now if this was called without an allocator, typically because
+  // GetSubprocessHistogramAllocatorOnIOThread exited early and returned
+  // null.
+  if (!allocator)
+    return;
 
   // Map is "MapOwnPointer" so transfer ownership to it.
   allocators_by_id_.AddWithID(allocator.release(), id);
@@ -39,36 +68,18 @@ void SubprocessMetricsProvider::DeregisterSubprocessAllocator(int id) {
   if (!allocators_by_id_.Lookup(id))
     return;
 
-  // Extract the matching allocator from the list of active ones.
+  // Extract the matching allocator from the list of active ones. It will
+  // be automatically released when this method exits.
   std::unique_ptr<base::PersistentHistogramAllocator> allocator(
       allocators_by_id_.Replace(id, nullptr));
   allocators_by_id_.Remove(id);
   DCHECK(allocator);
 
-  // If metrics recording is enabled, transfer the allocator to the "release"
-  // list. The allocator will continue to live (and keep the associated shared
-  // memory alive) until the next upload after which it will be released.
-  // Otherwise, the allocator and its memory will be released when the
-  // unique_ptr goes out of scope at the end of this method.
-  if (metrics_recording_enabled_)
-    allocators_to_release_.push_back(std::move(allocator));
+  // Merge the last deltas from the allocator before it is released.
+  MergeHistogramDeltasFromAllocator(id, allocator.get());
 }
 
-void SubprocessMetricsProvider::OnRecordingEnabled() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  metrics_recording_enabled_ = true;
-}
-
-void SubprocessMetricsProvider::OnRecordingDisabled() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  metrics_recording_enabled_ = false;
-  allocators_to_release_.clear();
-}
-
-void SubprocessMetricsProvider::RecordHistogramSnapshotsFromAllocator(
-    base::HistogramSnapshotManager* snapshot_manager,
+void SubprocessMetricsProvider::MergeHistogramDeltasFromAllocator(
     int id,
     base::PersistentHistogramAllocator* allocator) {
   DCHECK(allocator);
@@ -79,7 +90,7 @@ void SubprocessMetricsProvider::RecordHistogramSnapshotsFromAllocator(
     std::unique_ptr<base::HistogramBase> histogram = hist_iter.GetNext();
     if (!histogram)
       break;
-    snapshot_manager->PrepareDeltaTakingOwnership(std::move(histogram));
+    allocator->MergeHistogramDeltaToStatisticsRecorder(histogram.get());
     ++histogram_count;
   }
 
@@ -87,28 +98,56 @@ void SubprocessMetricsProvider::RecordHistogramSnapshotsFromAllocator(
            << id;
 }
 
-void SubprocessMetricsProvider::RecordHistogramSnapshots(
-    base::HistogramSnapshotManager* snapshot_manager) {
+void SubprocessMetricsProvider::MergeHistogramDeltas() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   for (AllocatorByIdMap::iterator iter(&allocators_by_id_); !iter.IsAtEnd();
        iter.Advance()) {
-    RecordHistogramSnapshotsFromAllocator(
-        snapshot_manager, iter.GetCurrentKey(), iter.GetCurrentValue());
+    MergeHistogramDeltasFromAllocator(iter.GetCurrentKey(),
+                                      iter.GetCurrentValue());
   }
-
-  for (auto& allocator : allocators_to_release_)
-    RecordHistogramSnapshotsFromAllocator(snapshot_manager, 0, allocator.get());
 
   UMA_HISTOGRAM_COUNTS_100(
       "UMA.SubprocessMetricsProvider.SubprocessCount",
-      allocators_by_id_.size() + allocators_to_release_.size());
+      allocators_by_id_.size());
+}
 
-  // The snapshot-manager has taken ownership of the histograms but needs
-  // access to only the histogram objects, not "sample" data it uses. Thus,
-  // it is safe to release shared-memory segments without waiting for the
-  // snapshot-manager to "finish".
-  allocators_to_release_.clear();
+void SubprocessMetricsProvider::BrowserChildProcessHostConnected(
+    const content::ChildProcessData& data) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  // It's necessary to access the BrowserChildProcessHost object that is
+  // managing the child in order to extract the metrics memory from it.
+  // Unfortunately, the required lookup can only be performed on the IO
+  // thread so do the necessary dance.
+  content::BrowserThread::PostTaskAndReplyWithResult(
+      content::BrowserThread::IO, FROM_HERE,
+      base::Bind(&SubprocessMetricsProvider::
+                     GetSubprocessHistogramAllocatorOnIOThread,
+                 data.id),
+      base::Bind(&SubprocessMetricsProvider::
+                     RegisterSubprocessAllocator,
+                 weak_ptr_factory_.GetWeakPtr(), data.id));
+}
+
+void SubprocessMetricsProvider::BrowserChildProcessHostDisconnected(
+    const content::ChildProcessData& data) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DeregisterSubprocessAllocator(data.id);
+}
+
+void SubprocessMetricsProvider::BrowserChildProcessCrashed(
+    const content::ChildProcessData& data,
+    int exit_code) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DeregisterSubprocessAllocator(data.id);
+}
+
+void SubprocessMetricsProvider::BrowserChildProcessKilled(
+    const content::ChildProcessData& data,
+    int exit_code) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DeregisterSubprocessAllocator(data.id);
 }
 
 void SubprocessMetricsProvider::Observe(
@@ -137,9 +176,8 @@ void SubprocessMetricsProvider::RenderProcessReady(
       host->TakeMetricsAllocator();
   if (allocator) {
     RegisterSubprocessAllocator(
-        host->GetID(),
-        WrapUnique(new base::PersistentHistogramAllocator(
-            std::move(allocator))));
+        host->GetID(), base::MakeUnique<base::PersistentHistogramAllocator>(
+                           std::move(allocator)));
   }
 }
 
@@ -162,4 +200,23 @@ void SubprocessMetricsProvider::RenderProcessHostDestroyed(
 
   DeregisterSubprocessAllocator(host->GetID());
   scoped_observer_.Remove(host);
+}
+
+// static
+std::unique_ptr<base::PersistentHistogramAllocator>
+SubprocessMetricsProvider::GetSubprocessHistogramAllocatorOnIOThread(int id) {
+  // See if the new process has a memory allocator and take control of it if so.
+  // This call can only be made on the browser's IO thread.
+  content::BrowserChildProcessHost* host =
+      content::BrowserChildProcessHost::FromID(id);
+  if (!host)
+    return nullptr;
+
+  std::unique_ptr<base::SharedPersistentMemoryAllocator> allocator =
+      host->TakeMetricsAllocator();
+  if (!allocator)
+    return nullptr;
+
+  return base::MakeUnique<base::PersistentHistogramAllocator>(
+      std::move(allocator));
 }

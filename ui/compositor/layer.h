@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
+#include "base/observer_list.h"
 #include "cc/base/region.h"
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/layer_client.h"
@@ -51,6 +52,7 @@ namespace ui {
 
 class Compositor;
 class LayerAnimator;
+class LayerObserver;
 class LayerOwner;
 class LayerThreadedAnimationDelegate;
 
@@ -92,6 +94,9 @@ class COMPOSITOR_EXPORT Layer
   void set_delegate(LayerDelegate* delegate) { delegate_ = delegate; }
 
   LayerOwner* owner() { return owner_; }
+
+  void AddObserver(LayerObserver* observer);
+  void RemoveObserver(LayerObserver* observer);
 
   // Adds a new Layer to this Layer.
   void Add(Layer* child);
@@ -282,7 +287,7 @@ class COMPOSITOR_EXPORT Layer
   bool TextureFlipped() const;
 
   // Begins showing content from a surface with a particular id.
-  void SetShowSurface(cc::SurfaceId surface_id,
+  void SetShowSurface(const cc::SurfaceId& surface_id,
                       const cc::SurfaceLayer::SatisfyCallback& satisfy_callback,
                       const cc::SurfaceLayer::RequireCallback& require_callback,
                       gfx::Size surface_size,
@@ -306,6 +311,9 @@ class COMPOSITOR_EXPORT Layer
   void UpdateNinePatchLayerImage(const gfx::ImageSkia& image);
   void UpdateNinePatchLayerAperture(const gfx::Rect& aperture_in_dip);
   void UpdateNinePatchLayerBorder(const gfx::Rect& border);
+  // Updates the area completely occluded by another layer, this can be an
+  // empty rectangle if nothing is occluded.
+  void UpdateNinePatchOcclusion(const gfx::Rect& occlusion);
 
   // Adds |invalid_rect| to the Layer's pending invalid rect and calls
   // ScheduleDraw(). Returns false if the paint request is ignored.
@@ -319,7 +327,6 @@ class COMPOSITOR_EXPORT Layer
   // Uses damaged rectangles recorded in |damaged_region_| to invalidate the
   // |cc_layer_|.
   void SendDamagedRects();
-  void ClearDamagedRects();
 
   const cc::Region& damaged_region() const { return damaged_region_; }
 
@@ -338,6 +345,14 @@ class COMPOSITOR_EXPORT Layer
   // Requets a copy of the layer's output as a texture or bitmap.
   void RequestCopyOfOutput(std::unique_ptr<cc::CopyOutputRequest> request);
 
+  // Makes this Layer scrollable, clipping to |parent_clip_layer|. |on_scroll|
+  // is invoked when scrolling performed by the cc::InputHandler is committed.
+  void SetScrollable(Layer* parent_clip_layer, const base::Closure& on_scroll);
+
+  // Gets and sets the current scroll offset of the layer.
+  gfx::ScrollOffset CurrentScrollOffset() const;
+  void SetScrollOffset(const gfx::ScrollOffset& offset);
+
   // ContentLayerClient
   gfx::Rect PaintableRegion() override;
   scoped_refptr<cc::DisplayItemList> PaintContentsToDisplayList(
@@ -350,25 +365,21 @@ class COMPOSITOR_EXPORT Layer
   // TextureLayerClient
   bool PrepareTextureMailbox(
       cc::TextureMailbox* mailbox,
-      std::unique_ptr<cc::SingleReleaseCallback>* release_callback,
-      bool use_shared_memory) override;
+      std::unique_ptr<cc::SingleReleaseCallback>* release_callback) override;
 
   float device_scale_factor() const { return device_scale_factor_; }
-
-  // Forces a render surface to be used on this layer. This has no positive
-  // impact, and is only used for benchmarking/testing purpose.
-  void SetForceRenderSurface(bool force);
-  bool force_render_surface() const { return force_render_surface_; }
 
   // LayerClient
   std::unique_ptr<base::trace_event::ConvertableToTraceFormat> TakeDebugInfo(
       cc::Layer* layer) override;
-
-  // Whether this layer has animations waiting to get sent to its cc::Layer.
-  bool HasPendingThreadedAnimationsForTesting() const;
+  void didUpdateMainThreadScrollingReasons() override;
 
   // Triggers a call to SwitchToLayer.
   void SwitchCCLayerForTest();
+
+  const cc::Region& damaged_region_for_testing() const {
+    return damaged_region_;
+  }
 
  private:
   friend class LayerOwner;
@@ -437,14 +448,16 @@ class COMPOSITOR_EXPORT Layer
   // Visibility of this layer. See SetVisible/IsDrawn for more details.
   bool visible_;
 
-  bool force_render_surface_;
-
   bool fills_bounds_opaquely_;
   bool fills_bounds_completely_;
 
+  // Union of damaged rects, in layer space, that SetNeedsDisplayRect should
+  // be called on.
+  cc::Region damaged_region_;
+
   // Union of damaged rects, in layer space, to be used when compositor is ready
   // to paint the content.
-  cc::Region damaged_region_;
+  cc::Region paint_region_;
 
   int background_blur_radius_;
 
@@ -475,6 +488,8 @@ class COMPOSITOR_EXPORT Layer
   std::string name_;
 
   LayerDelegate* delegate_;
+
+  base::ObserverList<LayerObserver> observer_list_;
 
   LayerOwner* owner_;
 

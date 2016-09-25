@@ -5,8 +5,12 @@
 #include <functional>
 
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "mojo/edk/system/request_context.h"
 #include "mojo/edk/test/mojo_test_base.h"
 #include "mojo/public/c/system/functions.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -28,7 +32,7 @@ class WatchHelper {
   using Callback =
       std::function<void(MojoResult result, MojoHandleSignalsState state)>;
 
-  WatchHelper() {}
+  WatchHelper() : task_runner_(base::ThreadTaskRunnerHandle::Get()) {}
   ~WatchHelper() {
     CHECK(!watching_);
   }
@@ -60,13 +64,23 @@ class WatchHelper {
                        MojoHandleSignalsState state,
                        MojoWatchNotificationFlags flags) {
     WatchHelper* watcher = reinterpret_cast<WatchHelper*>(context);
+    watcher->task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&NotifyOnMainThread, context, result, state, flags));
+  }
+
+  static void NotifyOnMainThread(uintptr_t context,
+                                 MojoResult result,
+                                 MojoHandleSignalsState state,
+                                 MojoWatchNotificationFlags flags) {
+    WatchHelper* watcher = reinterpret_cast<WatchHelper*>(context);
     CHECK(watcher->watching_);
     if (result == MOJO_RESULT_CANCELLED)
       watcher->watching_ = false;
-    CHECK_EQ(flags, MOJO_WATCH_NOTIFICATION_FLAG_NONE);
     watcher->callback_(result, state);
   }
 
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   bool watching_ = false;
   MojoHandle handle_;
   Callback callback_;
@@ -243,6 +257,7 @@ TEST_F(WatchTest, WatchWhileSatisfied) {
   WriteMessage(a, "hey");
   bool signaled = false;
   WatchHelper b_watcher;
+  base::RunLoop loop;
   b_watcher.Watch(
       b, MOJO_HANDLE_SIGNAL_READABLE,
       [&] (MojoResult result, MojoHandleSignalsState state) {
@@ -250,7 +265,9 @@ TEST_F(WatchTest, WatchWhileSatisfied) {
         EXPECT_EQ(MOJO_HANDLE_SIGNAL_READABLE,
                   state.satisfied_signals & MOJO_HANDLE_SIGNAL_READABLE);
         signaled = true;
+        loop.Quit();
       });
+  loop.Run();
   EXPECT_TRUE(signaled);
   b_watcher.Cancel();
 
@@ -402,6 +419,60 @@ TEST_F(WatchTest, WakeUpSelfWithinWatchCallback) {
 
   CloseHandle(a);
   CloseHandle(b);
+}
+
+TEST_F(WatchTest, NestedCancellation) {
+  // Verifies that cancellations in nested system request contexts preempt
+  // other notifications for the same watcher. This tests against the condition
+  // hit by http://crbug.com/622298.
+
+  MojoHandle a, b, c, d;
+  CreateMessagePipe(&a, &b);
+  CreateMessagePipe(&c, &d);
+
+  base::RunLoop loop;
+  bool a_watcher_run = false;
+  WatchHelper a_watcher;
+  a_watcher.Watch(
+      a, MOJO_HANDLE_SIGNAL_READABLE,
+      [&](MojoResult result, MojoHandleSignalsState state) {
+        a_watcher_run = true;
+      });
+
+  WatchHelper c_watcher;
+  c_watcher.Watch(
+      c, MOJO_HANDLE_SIGNAL_READABLE,
+      [&](MojoResult result, MojoHandleSignalsState state) {
+        // This will trigger a notification on |a_watcher| above to be executed
+        // once this handler finishes running...
+        CloseHandle(b);
+
+        // ...but this should prevent that notification from dispatching because
+        // |a_watcher| is now cancelled.
+        a_watcher.Cancel();
+
+        loop.Quit();
+      });
+
+  {
+    // Force "system" notifications for the synchronous behavior required to
+    // test this case.
+    mojo::edk::RequestContext request_context(
+        mojo::edk::RequestContext::Source::SYSTEM);
+
+    // Trigger the |c_watcher| callback above.
+    CloseHandle(d);
+  }
+
+  loop.Run();
+
+  EXPECT_FALSE(a_watcher.is_watching());
+  EXPECT_FALSE(a_watcher_run);
+
+  c_watcher.Cancel();
+
+  CloseHandle(a);
+  CloseHandle(c);
 }
 
 }  // namespace

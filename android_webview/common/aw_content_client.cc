@@ -4,6 +4,8 @@
 
 #include "android_webview/common/aw_content_client.h"
 
+#include "android_webview/common/aw_media_client_android.h"
+#include "android_webview/common/aw_resource.h"
 #include "android_webview/common/aw_version_info_values.h"
 #include "base/command_line.h"
 #include "content/public/common/content_switches.h"
@@ -71,6 +73,14 @@ void AwContentClient::SetGpuInfo(const gpu::GPUInfo& gpu_info) {
                      gpu_info.gl_renderer;
   std::replace_if(gpu_fingerprint_.begin(), gpu_fingerprint_.end(),
                   [](char c) { return !::isprint(c); }, '_');
+}
+
+bool AwContentClient::UsingSynchronousCompositing() {
+  return true;
+}
+
+media::MediaClientAndroid* AwContentClient::GetMediaClientAndroid() {
+  return new AwMediaClientAndroid(AwResource::GetConfigKeySystemUuidMapping());
 }
 
 }  // namespace android_webview

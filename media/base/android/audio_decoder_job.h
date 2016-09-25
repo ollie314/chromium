@@ -8,6 +8,7 @@
 #include <jni.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <memory>
 #include <vector>
 
 #include "base/callback.h"
@@ -43,18 +44,18 @@ class AudioDecoderJob : public MediaDecoderJob {
 
  private:
   // MediaDecoderJob implementation.
-  void ReleaseOutputBuffer(
-      int output_buffer_index,
-      size_t offset,
-      size_t size,
-      bool render_output,
-      bool is_late_frame,
-      base::TimeDelta current_presentation_timestamp,
-      const ReleaseOutputCompletionCallback& callback) override;
+  void ReleaseOutputBuffer(int output_buffer_index,
+                           size_t offset,
+                           size_t size,
+                           bool render_output,
+                           bool is_late_frame,
+                           base::TimeDelta current_presentation_timestamp,
+                           MediaCodecStatus status,
+                           const DecoderCallback& callback) override;
   bool ComputeTimeToRender() const override;
   bool AreDemuxerConfigsChanged(const DemuxerConfigs& configs) const override;
   MediaDecoderJobStatus CreateMediaCodecBridgeInternal() override;
-  void OnOutputFormatChanged() override;
+  bool OnOutputFormatChanged() override;
 
   // Helper method to set the audio output volume.
   void SetVolumeInternal();
@@ -63,25 +64,27 @@ class AudioDecoderJob : public MediaDecoderJob {
 
   // Audio configs from the demuxer.
   AudioCodec audio_codec_;
-  int num_channels_;
+  int config_num_channels_;
   int config_sampling_rate_;
   std::vector<uint8_t> audio_extra_data_;
   int64_t audio_codec_delay_ns_;
   int64_t audio_seek_preroll_ns_;
   double volume_;
-  int bytes_per_frame_;
 
-  // Audio output sample rate
+  // Audio output sample rate.
   int output_sampling_rate_;
 
-  // Frame count to sync with audio codec output
+  // Number of output audio channels.
+  int output_num_channels_;
+
+  // Frame count to sync with audio codec output.
   int64_t frame_count_;
 
   // Base timestamp for the |audio_timestamp_helper_|.
   base::TimeDelta base_timestamp_;
 
   // Object to calculate the current audio timestamp for A/V sync.
-  scoped_ptr<AudioTimestampHelper> audio_timestamp_helper_;
+  std::unique_ptr<AudioTimestampHelper> audio_timestamp_helper_;
 
   // The time limit for the next frame to avoid underrun.
   base::TimeTicks next_frame_time_limit_;

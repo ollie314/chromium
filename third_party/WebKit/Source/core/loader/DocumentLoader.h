@@ -41,6 +41,7 @@
 #include "core/loader/DocumentLoadTiming.h"
 #include "core/loader/DocumentWriter.h"
 #include "core/loader/FrameLoaderTypes.h"
+#include "core/loader/LinkLoader.h"
 #include "core/loader/NavigationPolicy.h"
 #include "platform/SharedBuffer.h"
 #include "platform/network/ResourceError.h"
@@ -49,6 +50,7 @@
 #include "public/platform/WebLoadingBehaviorFlag.h"
 #include "wtf/HashSet.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -57,9 +59,11 @@ class ResourceFetcher;
 class DocumentInit;
 class LocalFrame;
 class FrameLoader;
-class ResourceLoader;
+class WebDocumentSubresourceFilter;
+struct ViewportDescriptionWrapper;
 
 class CORE_EXPORT DocumentLoader : public GarbageCollectedFinalized<DocumentLoader>, private RawResourceClient {
+    USING_GARBAGE_COLLECTED_MIXIN(DocumentLoader);
 public:
     static DocumentLoader* create(LocalFrame* frame, const ResourceRequest& request, const SubstituteData& data)
     {
@@ -83,6 +87,9 @@ public:
 
     ResourceFetcher* fetcher() const { return m_fetcher.get(); }
 
+    void setSubresourceFilter(std::unique_ptr<WebDocumentSubresourceFilter>);
+    WebDocumentSubresourceFilter* subresourceFilter() const { return m_subresourceFilter.get(); }
+
     const SubstituteData& substituteData() const { return m_substituteData; }
 
     const KURL& url() const;
@@ -100,13 +107,15 @@ public:
     bool replacesCurrentHistoryItem() const { return m_replacesCurrentHistoryItem; }
     void setReplacesCurrentHistoryItem(bool replacesCurrentHistoryItem) { m_replacesCurrentHistoryItem = replacesCurrentHistoryItem; }
 
-    bool isCommittedButEmpty() const { return m_state == Committed; }
+    bool isCommittedButEmpty() const { return m_state >= Committed && !m_dataReceived; }
 
     void setSentDidFinishLoad() { m_state = SentDidFinishLoad; }
     bool sentDidFinishLoad() const { return m_state == SentDidFinishLoad; }
 
     NavigationType getNavigationType() const { return m_navigationType; }
     void setNavigationType(NavigationType navigationType) { m_navigationType = navigationType; }
+
+    void upgradeInsecureRequest();
 
     void startLoadingMainResource();
 
@@ -139,6 +148,8 @@ public:
     void setWasBlockedAfterXFrameOptionsOrCSP() { m_wasBlockedAfterXFrameOptionsOrCSP = true; }
     bool wasBlockedAfterXFrameOptionsOrCSP() { return m_wasBlockedAfterXFrameOptionsOrCSP; }
 
+    void dispatchLinkHeaderPreloads(ViewportDescriptionWrapper*, LinkLoader::MediaPreloadPolicy);
+
     Resource* startPreload(Resource::Type, FetchRequest&);
 
     DECLARE_VIRTUAL_TRACE();
@@ -146,10 +157,12 @@ public:
 protected:
     DocumentLoader(LocalFrame*, const ResourceRequest&, const SubstituteData&);
 
+    void didRedirect(const KURL& oldURL, const KURL& newURL);
+
     Vector<KURL> m_redirectChain;
 
 private:
-    static DocumentWriter* createWriterFor(const DocumentInit&, const AtomicString& mimeType, const AtomicString& encoding, bool dispatch, ParserSynchronizationPolicy);
+    static DocumentWriter* createWriterFor(const DocumentInit&, const AtomicString& mimeType, const AtomicString& encoding, bool dispatchWindowObjectAvailable, ParserSynchronizationPolicy, const KURL& overridingURL = KURL());
 
     void ensureWriter(const AtomicString& mimeType, const KURL& overridingURL = KURL());
     void endWriting(DocumentWriter*);
@@ -158,7 +171,6 @@ private:
 
     void commitIfReady();
     void commitData(const char* bytes, size_t length);
-    ResourceLoader* mainResourceLoader() const;
     void clearMainResourceHandle();
 
     bool maybeCreateArchive();
@@ -166,7 +178,7 @@ private:
     void finishedLoading(double finishTime);
     void cancelLoadAfterXFrameOptionsOrCSPDenied(const ResourceResponse&);
     void redirectReceived(Resource*, ResourceRequest&, const ResourceResponse&) final;
-    void responseReceived(Resource*, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) final;
+    void responseReceived(Resource*, const ResourceResponse&, std::unique_ptr<WebDataConsumerHandle>) final;
     void dataReceived(Resource*, const char* data, size_t length) final;
     void processData(const char* data, size_t length);
     void notifyFinished(Resource*) final;
@@ -180,6 +192,7 @@ private:
 
     Member<LocalFrame> m_frame;
     Member<ResourceFetcher> m_fetcher;
+    std::unique_ptr<WebDocumentSubresourceFilter> m_subresourceFilter;
 
     Member<RawResource> m_mainResource;
 
@@ -201,6 +214,7 @@ private:
 
     bool m_isClientRedirect;
     bool m_replacesCurrentHistoryItem;
+    bool m_dataReceived;
 
     NavigationType m_navigationType;
 
@@ -220,7 +234,6 @@ private:
         NotStarted,
         Provisional,
         Committed,
-        DataReceived,
         MainResourceDone,
         SentDidFinishLoad
     };

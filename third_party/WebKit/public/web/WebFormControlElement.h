@@ -67,6 +67,9 @@ public:
     // element it finds the option with value matches the given parameter and make the
     // option as the current selection.
     BLINK_EXPORT void setValue(const WebString&, bool sendEvents = false);
+    // Sets the autofilled value for input element, textarea element and select
+    // element and sends a sequence of events to the element.
+    BLINK_EXPORT void setAutofillValue(const WebString&);
     // Returns value of element. For select element, it returns the value of
     // the selected option if present. If no selected option, an empty string
     // is returned. If element doesn't fall into input element, textarea element
@@ -96,6 +99,9 @@ public:
     // selection's end for text input field or textarea. If neither input
     // element nor textarea element, 0 is returned.
     BLINK_EXPORT int selectionEnd() const;
+
+    // Returns text-align(only left and right are supported. see crbug.com/482339) of text of element.
+    BLINK_EXPORT WebString alignmentForFormData() const;
 
     // Returns direction of text of element.
     BLINK_EXPORT WebString directionForFormData() const;

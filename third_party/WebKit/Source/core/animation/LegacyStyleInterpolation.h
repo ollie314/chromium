@@ -7,6 +7,7 @@
 
 #include "core/animation/StyleInterpolation.h"
 #include "core/css/resolver/AnimatedStyleBuilder.h"
+#include <memory>
 
 namespace blink {
 
@@ -14,7 +15,7 @@ class LegacyStyleInterpolation : public StyleInterpolation {
 public:
     static PassRefPtr<LegacyStyleInterpolation> create(PassRefPtr<AnimatableValue> start, PassRefPtr<AnimatableValue> end, CSSPropertyID id)
     {
-        return adoptRef(new LegacyStyleInterpolation(InterpolableAnimatableValue::create(start), InterpolableAnimatableValue::create(end), id));
+        return adoptRef(new LegacyStyleInterpolation(InterpolableAnimatableValue::create(std::move(start)), InterpolableAnimatableValue::create(std::move(end)), id));
     }
 
     void apply(StyleResolverState& state) const override
@@ -29,7 +30,7 @@ public:
     }
 
 private:
-    LegacyStyleInterpolation(PassOwnPtr<InterpolableValue> start, PassOwnPtr<InterpolableValue> end, CSSPropertyID id)
+    LegacyStyleInterpolation(std::unique_ptr<InterpolableValue> start, std::unique_ptr<InterpolableValue> end, CSSPropertyID id)
         : StyleInterpolation(std::move(start), std::move(end), id)
     {
     }

@@ -21,6 +21,7 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/variations/active_field_trials.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/background_tracing_config.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -36,17 +37,23 @@ void ChromeTracingDelegate::RegisterPrefs(PrefRegistrySimple* registry) {
 
 ChromeTracingDelegate::ChromeTracingDelegate() : incognito_launched_(false) {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+#if !defined(OS_ANDROID)
   BrowserList::AddObserver(this);
+#endif
 }
 
 ChromeTracingDelegate::~ChromeTracingDelegate() {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+#if !defined(OS_ANDROID)
   BrowserList::RemoveObserver(this);
+#endif
 }
 
 void ChromeTracingDelegate::OnBrowserAdded(Browser* browser) {
+#if !defined(OS_ANDROID)
   if (browser->profile()->IsOffTheRecord())
     incognito_launched_ = true;
+#endif
 }
 
 std::unique_ptr<content::TraceUploader> ChromeTracingDelegate::GetTraceUploader(
@@ -77,18 +84,25 @@ bool ProfileAllowsScenario(const content::BackgroundTracingConfig& config,
       return true;
   }
 
+#if !defined(OS_ANDROID)
   // Safeguard, in case background tracing is responsible for a crash on
   // startup.
   if (profile->GetLastSessionExitType() == Profile::EXIT_CRASHED)
     return false;
+#else
+  // In case of Android the exit state is always set as EXIT_CRASHED. So,
+  // preemptive mode cannot be used safely.
+  if (config.tracing_mode() == content::BackgroundTracingConfig::PREEMPTIVE)
+    return false;
+#endif
 
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
 
-#if !defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
   if (!local_state->GetBoolean(metrics::prefs::kMetricsReportingEnabled))
     return false;
-#endif // OS_CHROMEOS
+#endif // !OS_CHROMEOS && OFFICIAL_BUILD
 
   if (config.tracing_mode() == content::BackgroundTracingConfig::PREEMPTIVE) {
     const base::Time last_upload_time = base::Time::FromInternalValue(
@@ -110,10 +124,16 @@ bool ProfileAllowsScenario(const content::BackgroundTracingConfig& config,
 bool ChromeTracingDelegate::IsAllowedToBeginBackgroundScenario(
     const content::BackgroundTracingConfig& config,
     bool requires_anonymized_data) {
+#if defined(OS_ANDROID)
+  // TODO(oysteine): Support preemptive mode safely in Android.
+  if (config.tracing_mode() == content::BackgroundTracingConfig::PREEMPTIVE)
+    return false;
+#endif
+
   if (!ProfileAllowsScenario(config, PROFILE_NOT_REQUIRED))
     return false;
 
-  if (requires_anonymized_data && chrome::IsOffTheRecordSessionActive())
+  if (requires_anonymized_data && chrome::IsIncognitoSessionActive())
     return false;
 
   return true;
@@ -122,8 +142,10 @@ bool ChromeTracingDelegate::IsAllowedToBeginBackgroundScenario(
 bool ChromeTracingDelegate::IsAllowedToEndBackgroundScenario(
     const content::BackgroundTracingConfig& config,
     bool requires_anonymized_data) {
-  if (requires_anonymized_data && incognito_launched_)
+  if (requires_anonymized_data &&
+      (incognito_launched_ || chrome::IsIncognitoSessionActive())) {
     return false;
+  }
 
   if (!ProfileAllowsScenario(config, PROFILE_REQUIRED))
     return false;
@@ -150,9 +172,10 @@ void ChromeTracingDelegate::GenerateMetadataDict(
 
   std::unique_ptr<base::ListValue> variations_list(new base::ListValue());
   for (const auto& it : variations)
-    variations_list->Append(new base::StringValue(it));
+    variations_list->AppendString(it);
 
   metadata_dict->Set("field-trials", std::move(variations_list));
+  metadata_dict->SetString("revision", version_info::GetLastChange());
 }
 
 content::MetadataFilterPredicate

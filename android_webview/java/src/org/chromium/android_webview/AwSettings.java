@@ -87,8 +87,7 @@ public class AwSettings {
     private boolean mSpatialNavigationEnabled;  // Default depends on device features.
     private boolean mEnableSupportedHardwareAcceleratedFeatures = false;
     private int mMixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW;
-    private boolean mVideoOverlayForEmbeddedVideoEnabled = false;
-    private boolean mForceVideoOverlayForTests = false;
+
     private boolean mOffscreenPreRaster = false;
     private int mDisabledMenuItems = MENU_ITEM_NONE;
 
@@ -1637,10 +1636,9 @@ public class AwSettings {
     }
 
     @CalledByNative
-    private boolean getAllowDisplayingInsecureContentLocked() {
+    private boolean getUseStricMixedContentCheckingLocked() {
         assert Thread.holdsLock(mAwSettingsLock);
-        return mMixedContentMode == WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                || mMixedContentMode == WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE;
+        return mMixedContentMode == WebSettings.MIXED_CONTENT_NEVER_ALLOW;
     }
 
     public boolean getOffscreenPreRaster() {
@@ -1696,59 +1694,6 @@ public class AwSettings {
         }
     }
 
-    /**
-     * Sets whether to use the video overlay for the embedded video.
-     * @param flag whether to enable the video overlay for the embedded video.
-     */
-    public void setVideoOverlayForEmbeddedVideoEnabled(final boolean enabled) {
-        synchronized (mAwSettingsLock) {
-            if (mVideoOverlayForEmbeddedVideoEnabled != enabled) {
-                mVideoOverlayForEmbeddedVideoEnabled = enabled;
-                mEventHandler.runOnUiThreadBlockingAndLocked(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (mNativeAwSettings != 0) {
-                            nativeUpdateRendererPreferencesLocked(mNativeAwSettings);
-                        }
-                    }
-                });
-            }
-        }
-    }
-
-    /**
-     * Gets whether to use the video overlay for the embedded video.
-     * @return true if the WebView enables the video overlay for the embedded video.
-     */
-    public boolean getVideoOverlayForEmbeddedVideoEnabled() {
-        synchronized (mAwSettingsLock) {
-            return getVideoOverlayForEmbeddedVideoEnabledLocked();
-        }
-    }
-
-    @CalledByNative
-    private boolean getVideoOverlayForEmbeddedVideoEnabledLocked() {
-        assert Thread.holdsLock(mAwSettingsLock);
-        return mVideoOverlayForEmbeddedVideoEnabled;
-    }
-
-    @VisibleForTesting
-    public void setForceVideoOverlayForTests(final boolean enabled) {
-        synchronized (mAwSettingsLock) {
-            if (mForceVideoOverlayForTests != enabled) {
-                mForceVideoOverlayForTests = enabled;
-                mEventHandler.runOnUiThreadBlockingAndLocked(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (mNativeAwSettings != 0) {
-                            nativeUpdateRendererPreferencesLocked(mNativeAwSettings);
-                        }
-                    }
-                });
-            }
-        }
-    }
-
     @VisibleForTesting
     public void updateAcceptLanguages() {
         synchronized (mAwSettingsLock) {
@@ -1761,12 +1706,6 @@ public class AwSettings {
                 }
             });
         }
-    }
-
-    @CalledByNative
-    private boolean getForceVideoOverlayForTests() {
-        assert Thread.holdsLock(mAwSettingsLock);
-        return mForceVideoOverlayForTests;
     }
 
     @CalledByNative

@@ -14,9 +14,10 @@
 #include "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
+#include "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
 #include "ui/base/cocoa/nsgraphics_context_additions.h"
 #import "ui/base/cocoa/nsview_additions.h"
@@ -44,6 +45,7 @@ const CGFloat kWindowGradientHeight = 24.0;
 - (void)adjustZoomButton:(NSNotification*)notification;
 - (void)adjustButton:(NSButton*)button
               ofKind:(NSWindowButton)kind;
+- (void)childWindowsDidChange;
 
 @end
 
@@ -159,6 +161,11 @@ const CGFloat kWindowGradientHeight = 24.0;
       break;
   }
 
+  if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout()) {
+    buttonFrame.origin.x =
+        NSWidth([self frame]) - buttonFrame.origin.x - NSWidth([button frame]);
+  }
+
   BOOL didPost = [button postsBoundsChangedNotifications];
   [button setPostsFrameChangedNotifications:NO];
   [button setFrame:buttonFrame];
@@ -211,21 +218,6 @@ const CGFloat kWindowGradientHeight = 24.0;
     return frame;
 
   return [super constrainFrameRect:frame toScreen:screen];
-}
-
-// This method is overridden in order to send the toggle fullscreen message
-// through the cross-platform browser framework before going fullscreen.  The
-// message will eventually come back as a call to |-toggleSystemFullScreen|,
-// which in turn calls AppKit's |NSWindow -toggleFullScreen:|.
-- (void)toggleFullScreen:(id)sender {
-  id delegate = [self delegate];
-  if ([delegate respondsToSelector:@selector(handleLionToggleFullscreen)])
-    [delegate handleLionToggleFullscreen];
-}
-
-- (void)toggleSystemFullScreen {
-  if ([super respondsToSelector:@selector(toggleFullScreen:)])
-    [super toggleFullScreen:nil];
 }
 
 - (NSPoint)fullScreenButtonOriginAdjustment {
@@ -357,6 +349,23 @@ const CGFloat kWindowGradientHeight = 24.0;
     return [NSColor whiteColor];
   else
     return [NSColor windowFrameTextColor];
+}
+
+- (void)addChildWindow:(NSWindow*)childWindow
+               ordered:(NSWindowOrderingMode)orderingMode {
+  [super addChildWindow:childWindow ordered:orderingMode];
+  [self childWindowsDidChange];
+}
+
+- (void)removeChildWindow:(NSWindow*)childWindow {
+  [super removeChildWindow:childWindow];
+  [self childWindowsDidChange];
+}
+
+- (void)childWindowsDidChange {
+  id delegate = [self delegate];
+  if ([delegate respondsToSelector:@selector(childWindowsDidChange)])
+    [delegate childWindowsDidChange];
 }
 
 @end

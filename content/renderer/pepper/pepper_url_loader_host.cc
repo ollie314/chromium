@@ -123,7 +123,8 @@ int32_t PepperURLLoaderHost::OnResourceMessageReceived(
 void PepperURLLoaderHost::willFollowRedirect(
     WebURLLoader* loader,
     WebURLRequest& new_request,
-    const WebURLResponse& redirect_response) {
+    const WebURLResponse& redirect_response,
+    int64_t encoded_data_length) {
   DCHECK(out_of_order_replies_.empty());
   if (!request_data_.follow_redirects) {
     SaveResponse(redirect_response);
@@ -160,7 +161,8 @@ void PepperURLLoaderHost::didDownloadData(WebURLLoader* loader,
 void PepperURLLoaderHost::didReceiveData(WebURLLoader* loader,
                                          const char* data,
                                          int data_length,
-                                         int encoded_data_length) {
+                                         int encoded_data_length,
+                                         int encoded_body_length) {
   // Note that |loader| will be NULL for document loads.
   bytes_received_ += data_length;
   UpdateProgress();
@@ -264,7 +266,9 @@ int32_t PepperURLLoaderHost::InternalOnHostMsgOpen(
   // The requests from the plugins with private permission which can bypass same
   // origin must skip the ServiceWorker.
   web_request.setSkipServiceWorker(
-      host()->permissions().HasPermission(ppapi::PERMISSION_PRIVATE));
+      host()->permissions().HasPermission(ppapi::PERMISSION_PRIVATE)
+          ? blink::WebURLRequest::SkipServiceWorker::All
+          : blink::WebURLRequest::SkipServiceWorker::None);
 
   WebURLLoaderOptions options;
   if (has_universal_access_) {
@@ -385,7 +389,7 @@ blink::WebLocalFrame* PepperURLLoaderHost::GetFrame() {
           renderer_ppapi_host_->GetPluginInstance(pp_instance()));
   if (!instance_object || instance_object->is_deleted())
     return NULL;
-  return instance_object->GetContainer()->element().document().frame();
+  return instance_object->GetContainer()->document().frame();
 }
 
 void PepperURLLoaderHost::SetDefersLoading(bool defers_loading) {

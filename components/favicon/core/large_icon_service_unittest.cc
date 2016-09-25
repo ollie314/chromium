@@ -5,12 +5,13 @@
 #include "components/favicon/core/large_icon_service.h"
 
 #include <deque>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "components/favicon/core/favicon_client.h"
 #include "components/favicon/core/favicon_service.h"
@@ -141,12 +142,13 @@ class LargeIconServiceTest : public testing::Test {
  protected:
   base::MessageLoopForIO loop_;
 
-  scoped_ptr<MockFaviconService> mock_favicon_service_;
-  scoped_ptr<TestLargeIconService> large_icon_service_;
+  std::unique_ptr<MockFaviconService> mock_favicon_service_;
+  std::unique_ptr<TestLargeIconService> large_icon_service_;
   base::CancelableTaskTracker cancelable_task_tracker_;
 
   favicon_base::FaviconRawBitmapResult expected_bitmap_;
-  scoped_ptr<favicon_base::FallbackIconStyle> expected_fallback_icon_style_;
+  std::unique_ptr<favicon_base::FallbackIconStyle>
+      expected_fallback_icon_style_;
 
   bool is_callback_invoked_;
 
@@ -163,7 +165,7 @@ TEST_F(LargeIconServiceTest, SameSize) {
       24,  // |desired_size_in_pixel|
       base::Bind(&LargeIconServiceTest::ResultCallback, base::Unretained(this)),
       &cancelable_task_tracker_);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(is_callback_invoked_);
 }
 
@@ -176,7 +178,7 @@ TEST_F(LargeIconServiceTest, ScaleDown) {
       24,
       base::Bind(&LargeIconServiceTest::ResultCallback, base::Unretained(this)),
       &cancelable_task_tracker_);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(is_callback_invoked_);
 }
 
@@ -189,7 +191,7 @@ TEST_F(LargeIconServiceTest, ScaleUp) {
       24,
       base::Bind(&LargeIconServiceTest::ResultCallback, base::Unretained(this)),
       &cancelable_task_tracker_);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(is_callback_invoked_);
 }
 
@@ -203,7 +205,7 @@ TEST_F(LargeIconServiceTest, NoScale) {
       0,
       base::Bind(&LargeIconServiceTest::ResultCallback, base::Unretained(this)),
       &cancelable_task_tracker_);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(is_callback_invoked_);
 }
 
@@ -217,7 +219,7 @@ TEST_F(LargeIconServiceTest, FallbackSinceIconTooSmall) {
       24,
       base::Bind(&LargeIconServiceTest::ResultCallback, base::Unretained(this)),
       &cancelable_task_tracker_);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(is_callback_invoked_);
 }
 
@@ -231,7 +233,7 @@ TEST_F(LargeIconServiceTest, FallbackSinceIconNotSquare) {
       24,
       base::Bind(&LargeIconServiceTest::ResultCallback, base::Unretained(this)),
       &cancelable_task_tracker_);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(is_callback_invoked_);
 }
 
@@ -245,7 +247,7 @@ TEST_F(LargeIconServiceTest, FallbackSinceIconMissing) {
       24,
       base::Bind(&LargeIconServiceTest::ResultCallback, base::Unretained(this)),
       &cancelable_task_tracker_);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(is_callback_invoked_);
 }
 
@@ -259,7 +261,7 @@ TEST_F(LargeIconServiceTest, FallbackSinceIconMissingNoScale) {
       0,
       base::Bind(&LargeIconServiceTest::ResultCallback, base::Unretained(this)),
       &cancelable_task_tracker_);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(is_callback_invoked_);
 }
 
@@ -275,7 +277,7 @@ TEST_F(LargeIconServiceTest, FallbackSinceTooPicky) {
       24,
       base::Bind(&LargeIconServiceTest::ResultCallback, base::Unretained(this)),
       &cancelable_task_tracker_);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(is_callback_invoked_);
 }
 

@@ -23,7 +23,6 @@
 #import "ios/web/history_state_util.h"
 #import "ios/web/net/crw_request_tracker_delegate.h"
 #include "ios/web/public/browser_state.h"
-#include "ios/web/public/cert_store.h"
 #include "ios/web/public/certificate_policy_cache.h"
 #include "ios/web/public/ssl_status.h"
 #include "ios/web/public/url_util.h"
@@ -32,6 +31,10 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 
@@ -254,7 +257,7 @@ struct TrackerCounts {
 }
 
 - (void)errorCallback:(BOOL)flag {
-  base::scoped_nsobject<CRWSSLCarrier> scoped([self retain]);
+  base::scoped_nsobject<CRWSSLCarrier> scoped(self);
   web::WebThread::PostTask(web::WebThread::IO, FROM_HERE,
                            base::Bind(&web::RequestTrackerImpl::ErrorCallback,
                                       tracker_, scoped, flag));
@@ -265,8 +268,7 @@ struct TrackerCounts {
   if (!sslInfo_.is_valid())
     return;
 
-  status_.cert_id = web::CertStore::GetInstance()->StoreCert(
-      sslInfo_.cert.get(), tracker_->identifier());
+  status_.certificate = sslInfo_.cert;
 
   status_.cert_status = sslInfo_.cert_status;
   if (status_.cert_status & net::CERT_STATUS_COMMON_NAME_INVALID) {
@@ -368,7 +370,7 @@ RequestTrackerImpl::CreateTrackerForRequestGroupID(
 
 void RequestTrackerImpl::StartPageLoad(const GURL& url, id user_info) {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  base::scoped_nsobject<id> scoped_user_info([user_info retain]);
+  base::scoped_nsobject<id> scoped_user_info(user_info);
   web::WebThread::PostTask(
       web::WebThread::IO, FROM_HERE,
       base::Bind(&RequestTrackerImpl::TrimToURL, this, url, scoped_user_info));
@@ -409,8 +411,6 @@ void RequestTrackerImpl::Close() {
   delegate_ = nil;
   // The user_info is no longer needed.
   user_info_.reset();
-  // Get rid of the stored certificates
-  web::CertStore::GetInstance()->RemoveCertsForGroup(identifier_);
 }
 
 // static
@@ -812,7 +812,7 @@ void RequestTrackerImpl::SSLNotify() {
   if (is_closing_)
     return;
 
-  if (!counts_.size())
+  if (counts_.empty())
     return;  // Nothing yet to notify.
 
   if (!page_url_.SchemeIsCryptographic())
@@ -1227,7 +1227,7 @@ void RequestTrackerImpl::TrimToURL(const GURL& full_url, id user_info) {
 
   has_mixed_content_ = new_url_has_mixed_content;
   page_url_ = url;
-  user_info_.reset([user_info retain]);
+  user_info_.reset(user_info);
   estimate_start_index_ = 0;
   is_loading_ = true;
   previous_estimate_ = 0.0f;

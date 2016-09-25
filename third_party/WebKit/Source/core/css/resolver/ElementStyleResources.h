@@ -24,6 +24,7 @@
 #define ElementStyleResources_h
 
 #include "core/CSSPropertyNames.h"
+#include "core/css/CSSPropertyIDTemplates.h"
 #include "platform/CrossOriginAttributeValue.h"
 #include "platform/graphics/Color.h"
 #include "platform/heap/Handle.h"
@@ -36,9 +37,10 @@ class CSSCursorImageValue;
 class CSSImageGeneratorValue;
 class CSSImageSetValue;
 class CSSImageValue;
-class CSSSVGDocumentValue;
+class CSSURIValue;
 class CSSValue;
 class ComputedStyle;
+class Document;
 class FilterOperation;
 class StyleImage;
 class StylePendingImage;
@@ -57,7 +59,7 @@ public:
 
     void loadPendingResources(ComputedStyle*);
 
-    void addPendingSVGDocument(FilterOperation*, CSSSVGDocumentValue*);
+    void addPendingSVGDocument(FilterOperation*, const CSSURIValue*);
 
 private:
     StyleImage* cursorOrPendingFromValue(CSSPropertyID, const CSSCursorImageValue&);
@@ -66,11 +68,11 @@ private:
     void loadPendingSVGDocuments(ComputedStyle*);
     void loadPendingImages(ComputedStyle*);
 
-    StyleImage* loadPendingImage(StylePendingImage*, CrossOriginAttributeValue = CrossOriginAttributeNotSet);
+    StyleImage* loadPendingImage(ComputedStyle*, StylePendingImage*, CrossOriginAttributeValue = CrossOriginAttributeNotSet);
 
     Member<Document> m_document;
     HashSet<CSSPropertyID> m_pendingImageProperties;
-    HeapHashMap<Member<FilterOperation>, Member<CSSSVGDocumentValue>> m_pendingSVGDocuments;
+    HeapHashMap<Member<FilterOperation>, Member<const CSSURIValue>> m_pendingSVGDocuments;
     float m_deviceScaleFactor;
 };
 

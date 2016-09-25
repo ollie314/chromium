@@ -28,6 +28,7 @@
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/dom/Document.h"
 #include "core/dom/Text.h"
+#include "core/editing/EditingUtilities.h"
 #include "core/frame/Settings.h"
 #include "core/layout/LayoutText.h"
 
@@ -48,9 +49,9 @@ void InsertIntoTextNodeCommand::doApply(EditingState*)
 {
     bool passwordEchoEnabled = document().settings() && document().settings()->passwordEchoEnabled();
     if (passwordEchoEnabled)
-        document().updateLayoutIgnorePendingStylesheets();
+        document().updateStyleAndLayoutIgnorePendingStylesheets();
 
-    if (!m_node->hasEditableStyle())
+    if (!hasEditableStyle(*m_node))
         return;
 
     if (passwordEchoEnabled) {
@@ -59,15 +60,17 @@ void InsertIntoTextNodeCommand::doApply(EditingState*)
             layoutText->momentarilyRevealLastTypedCharacter(m_offset + m_text.length() - 1);
     }
 
-    m_node->insertData(m_offset, m_text, IGNORE_EXCEPTION, CharacterData::DeprecatedRecalcStyleImmediatlelyForEditing);
+    m_node->insertData(m_offset, m_text, IGNORE_EXCEPTION);
+    document().updateStyleAndLayout();
 }
 
 void InsertIntoTextNodeCommand::doUnapply()
 {
-    if (!m_node->hasEditableStyle())
+    if (!hasEditableStyle(*m_node))
         return;
 
-    m_node->deleteData(m_offset, m_text.length(), IGNORE_EXCEPTION, CharacterData::DeprecatedRecalcStyleImmediatlelyForEditing);
+    m_node->deleteData(m_offset, m_text.length(), IGNORE_EXCEPTION);
+    document().updateStyleAndLayout();
 }
 
 DEFINE_TRACE(InsertIntoTextNodeCommand)

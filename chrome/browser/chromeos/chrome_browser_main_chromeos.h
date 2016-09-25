@@ -23,14 +23,14 @@ class ArcServiceLauncher;
 
 namespace chromeos {
 
-class ChromeInterfaceFactory;
 class DataPromoNotification;
 class EventRewriter;
 class EventRewriterController;
 class IdleActionWarningObserver;
+class LoginLockStateNotifier;
+class LowDiskNotification;
 class MagnificationManager;
 class PeripheralBatteryObserver;
-class PowerButtonObserver;
 class PowerPrefs;
 class RendererFreezer;
 class SessionManagerObserver;
@@ -70,7 +70,7 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   std::unique_ptr<default_app_order::ExternalLoader> app_order_loader_;
   std::unique_ptr<PeripheralBatteryObserver> peripheral_battery_observer_;
   std::unique_ptr<PowerPrefs> power_prefs_;
-  std::unique_ptr<PowerButtonObserver> power_button_observer_;
+  std::unique_ptr<LoginLockStateNotifier> login_lock_state_notifier_;
   std::unique_ptr<IdleActionWarningObserver> idle_action_warning_observer_;
   std::unique_ptr<DataPromoNotification> data_promo_notification_;
   std::unique_ptr<RendererFreezer> renderer_freezer_;
@@ -86,9 +86,7 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   std::unique_ptr<arc::ArcServiceLauncher> arc_service_launcher_;
 
-#if defined(MOJO_SHELL_CLIENT)
-  std::unique_ptr<ChromeInterfaceFactory> interface_factory_;
-#endif
+  std::unique_ptr<LowDiskNotification> low_disk_notification_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsChromeos);
 };

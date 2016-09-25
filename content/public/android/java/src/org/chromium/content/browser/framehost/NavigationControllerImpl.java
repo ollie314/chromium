@@ -13,6 +13,7 @@ import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.NavigationHistory;
+import org.chromium.content_public.common.ResourceRequestBody;
 
 /**
  * The NavigationControllerImpl Java wrapper to allow communicating with the native
@@ -124,13 +125,6 @@ import org.chromium.content_public.browser.NavigationHistory;
     public void reloadBypassingCache(boolean checkForRepost) {
         if (mNativeNavigationControllerAndroid != 0) {
             nativeReloadBypassingCache(mNativeNavigationControllerAndroid, checkForRepost);
-        }
-    }
-
-    @Override
-    public void reloadDisableLoFi(boolean checkForRepost) {
-        if (mNativeNavigationControllerAndroid != 0) {
-            nativeReloadDisableLoFi(mNativeNavigationControllerAndroid, checkForRepost);
         }
     }
 
@@ -314,13 +308,12 @@ import org.chromium.content_public.browser.NavigationHistory;
             boolean checkForRepost);
     private native void nativeReloadBypassingCache(long nativeNavigationControllerAndroid,
             boolean checkForRepost);
-    private native void nativeReloadDisableLoFi(long nativeNavigationControllerAndroid,
-            boolean checkForRepost);
     private native void nativeLoadUrl(long nativeNavigationControllerAndroid, String url,
             int loadUrlType, int transitionType, String referrerUrl, int referrerPolicy,
-            int uaOverrideOption, String extraHeaders, byte[] postData, String baseUrlForDataUrl,
-            String virtualUrlForDataUrl, String dataUrlAsString, boolean canLoadLocalResources,
-            boolean isRendererInitiated, boolean shouldReplaceCurrentEntry);
+            int uaOverrideOption, String extraHeaders, ResourceRequestBody postData,
+            String baseUrlForDataUrl, String virtualUrlForDataUrl, String dataUrlAsString,
+            boolean canLoadLocalResources, boolean isRendererInitiated,
+            boolean shouldReplaceCurrentEntry);
     private native void nativeClearHistory(long nativeNavigationControllerAndroid);
     private native int nativeGetNavigationHistory(long nativeNavigationControllerAndroid,
             Object history);

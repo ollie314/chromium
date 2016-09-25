@@ -32,6 +32,7 @@
 #include "platform/graphics/ImageObserver.h"
 #include "platform/graphics/ImageOrientation.h"
 #include "wtf/HashMap.h"
+#include <memory>
 
 namespace blink {
 
@@ -43,6 +44,10 @@ class ResourceClient;
 class ResourceFetcher;
 class SecurityOrigin;
 
+// ImageResource class represents an image type resource.
+//
+// As for the lifetimes of m_image and m_data, see this document:
+// https://docs.google.com/document/d/1v0yTAZ6wkqX2U_M6BNIGUJpM1s0TIw1VsqpxoL7aciY/edit?usp=sharing
 class CORE_EXPORT ImageResource final : public Resource, public ImageObserver, public MultipartImageResourceParser::Client {
     friend class MemoryCache;
     USING_GARBAGE_COLLECTED_MIXIN(ImageResource);
@@ -56,7 +61,6 @@ public:
         return new ImageResource(image, ResourceLoaderOptions());
     }
 
-    // Exposed for testing
     static ImageResource* create(const ResourceRequest& request)
     {
         return new ImageResource(request, ResourceLoaderOptions());
@@ -91,18 +95,22 @@ public:
     // the Lo-Fi state set to off and bypassing the cache.
     void reloadIfLoFi(ResourceFetcher*);
 
+    void didAddClient(ResourceClient*) override;
+
     void addObserver(ImageResourceObserver*);
     void removeObserver(ImageResourceObserver*);
-    bool hasClientsOrObservers() const override { return Resource::hasClientsOrObservers() || !m_observers.isEmpty() || !m_finishedObservers.isEmpty(); }
 
     ResourcePriority priorityFromObservers() override;
 
     void allClientsAndObserversRemoved() override;
 
+    PassRefPtr<const SharedBuffer> resourceBuffer() const override;
     void appendData(const char*, size_t) override;
-    void error(Resource::Status) override;
-    void responseReceived(const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
-    void finish() override;
+    void error(const ResourceError&) override;
+    void responseReceived(const ResourceResponse&, std::unique_ptr<WebDataConsumerHandle>) override;
+    void finish(double finishTime = 0.0) override;
+
+    void onMemoryDump(WebMemoryDumpLevelOfDetail, WebProcessMemoryDump*) const override;
 
     // For compatibility, images keep loading even if there are HTTP errors.
     bool shouldIgnoreHTTPStatusCodeErrors() const override { return true; }
@@ -122,11 +130,6 @@ public:
     void multipartDataReceived(const char*, size_t) final;
 
     DECLARE_VIRTUAL_TRACE();
-
-protected:
-    bool isSafeToUnlock() const override;
-    void destroyDecodedDataIfPossible() override;
-    void destroyDecodedDataForFailedRevalidation() override;
 
 private:
     explicit ImageResource(blink::Image*, const ResourceLoaderOptions&);
@@ -149,16 +152,26 @@ private:
     };
     ImageResource(const ResourceRequest&, const ResourceLoaderOptions&);
 
+    bool hasClientsOrObservers() const override { return Resource::hasClientsOrObservers() || !m_observers.isEmpty() || !m_finishedObservers.isEmpty(); }
     void clear();
 
     void createImage();
     void updateImage(bool allDataReceived);
+    void updateImageAndClearBuffer();
     void clearImage();
     // If not null, changeRect is the changed part of the image.
     void notifyObservers(const IntRect* changeRect = nullptr);
 
+    void ensureImage();
+
     void checkNotify() override;
-    void markClientsAndObserversFinished() override;
+    void notifyObserversInternal(MarkFinishedOption);
+    void markObserverFinished(ImageResourceObserver*);
+
+    void doResetAnimation();
+
+    void destroyDecodedDataIfPossible() override;
+    void destroyDecodedDataForFailedRevalidation() override;
 
     float m_devicePixelRatioHeaderValue;
 

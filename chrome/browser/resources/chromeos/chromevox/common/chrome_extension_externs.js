@@ -36,6 +36,7 @@ chrome.automation.EventType = {
   checkedStateChanged: '',
   childrenChanged: '',
   documentSelectionChanged: '',
+  expandedChanged: '',
   focus: '',
   hide: '',
   hover: '',
@@ -205,7 +206,6 @@ chrome.automation.StateType = {
   default: '',
   disabled: '',
   editable: '',
-  enabled: '',
   expanded: '',
   focusable: '',
   focused: '',
@@ -227,6 +227,31 @@ chrome.automation.StateType = {
   selected: '',
   vertical: '',
   visited: '',
+};
+
+/**
+ * @enum {number}
+ */
+chrome.automation.NameFromType = {
+  0: '',
+  1: 'uninitialized',
+  2: 'attribute',
+  3: 'contents',
+  4: 'placeholder',
+  5: 'relatedElement',
+  6: 'value'
+};
+
+/**
+ * @enum {number}
+ */
+chrome.automation.DescriptionFromType = {
+  0: '',
+  1: 'uninitialized',
+  2: 'attribute',
+  3: 'contents',
+  4: 'placeholder',
+  5: 'relatedElement'
 };
 
 /**
@@ -260,8 +285,11 @@ chrome.automation.FindParams;
 
 /**
  * @constructor
+ * @param {chrome.automation.EventType} type
+ * @param {chrome.automation.AutomationNode} node
+ * @param {string} eventFrom
  */
-chrome.automation.AutomationEvent = function() {};
+chrome.automation.AutomationEvent = function(type, node, eventFrom) {};
 
 /**
  * @type {!chrome.automation.AutomationNode}
@@ -272,6 +300,11 @@ chrome.automation.AutomationEvent.prototype.target;
  * @type {!chrome.automation.EventType}
  */
 chrome.automation.AutomationEvent.prototype.type;
+
+/**
+ * @type {string}
+ */
+chrome.automation.AutomationEvent.prototype.eventFrom;
 
 chrome.automation.AutomationEvent.prototype.stopPropagation = function() {};
 
@@ -329,6 +362,18 @@ chrome.automation.AutomationNode.prototype.role;
  * @type {!Object<chrome.automation.StateType, boolean>}
  */
 chrome.automation.AutomationNode.prototype.state;
+
+
+/**
+ * @type {chrome.automation.NameFromType}
+ */
+chrome.automation.AutomationNode.prototype.nameFrom;
+
+
+/**
+ * @type {chrome.automation.DescriptionFromType}
+ */
+chrome.automation.AutomationNode.prototype.descriptionFrom;
 
 
 /**
@@ -391,7 +436,7 @@ chrome.automation.AutomationNode.prototype.wordEnds;
 
 
 /**
- * @type {!chrome.automation.AutomationNode}
+ * @type {chrome.automation.AutomationRootNode}
  */
 chrome.automation.AutomationNode.prototype.root;
 
@@ -497,7 +542,6 @@ chrome.automation.AutomationNode.prototype.showContextMenu = function() {};
 chrome.automation.AutomationNode.prototype.setSelection =
     function(start, end) {};
 
-
 /** @type {string} */
 chrome.automation.AutomationNode.prototype.containerLiveStatus;
 
@@ -509,6 +553,9 @@ chrome.automation.AutomationNode.prototype.containerLiveAtomic;
 
 /** @type {boolean} */
 chrome.automation.AutomationNode.prototype.containerLiveBusy;
+
+/** @type {string} */
+chrome.automation.AutomationNode.prototype.language;
 
 /** @type {string} */
 chrome.automation.AutomationNode.prototype.liveStatus;
@@ -527,6 +574,12 @@ chrome.automation.AutomationNode.prototype.liveBusy;
  * @param {Object} findParams
  */
 chrome.automation.AutomationNode.prototype.find = function(findParams) {};
+
+/**
+ * @param {Object} findParams
+ * @return {Array<chrome.automation.AutomationNode>}
+ */
+chrome.automation.AutomationNode.prototype.findAll = function(findParams) {};
 
 /**
  * @type {string}
@@ -559,12 +612,68 @@ chrome.automation.AutomationNode.prototype.focusObject;
 /**
  * @type {(Array<number>|undefined)}
  */
-chrome.automation.AutomationNode.prototype.lineBreaks;
+chrome.automation.AutomationNode.prototype.lineStartOffsets;
 
 /**
  * @type {(number|undefined)}
  */
 chrome.automation.focusOffset;
+
+/**
+ * @type {(chrome.automation.AutomationNode|undefined)}
+ */
+chrome.automation.AutomationNode.prototype.activeDescendant;
+
+/** @type {number} */
+chrome.automation.AutomationNode.prototype.tableCellColumnIndex;
+
+/** @type {number} */
+chrome.automation.AutomationNode.prototype.tableCellRowIndex;
+
+/** @type {number} */
+chrome.automation.AutomationNode.prototype.tableColumnCount;
+
+/** @type {number} */
+chrome.automation.AutomationNode.prototype.tableRowCount;
+
+/** @type {number} */
+chrome.automation.AutomationNode.prototype.hierarchicalLevel;
+
+/** @type {Array<number>} */
+chrome.automation.AutomationNode.prototype.markerTypes;
+/** @type {Array<number>} */
+chrome.automation.AutomationNode.prototype.markerStarts;
+/** @type {Array<number>} */
+chrome.automation.AutomationNode.prototype.markerEnds;
+
+/** @type {boolean} */
+chrome.automation.AutomationNode.prototype.ariaReadonly;
+
+/**
+ * @extends {chrome.automation.AutomationNode}
+ * @constructor
+ */
+chrome.automation.AutomationRootNode = function() {};
+
+/**
+ * @type {chrome.automation.AutomationNode}
+ */
+chrome.automation.AutomationRootNode.prototype.anchorObject;
+
+/**
+ * @type {number}
+ */
+chrome.automation.AutomationRootNode.prototype.anchorOffset;
+
+/**
+ * @type {chrome.automation.AutomationNode}
+ */
+chrome.automation.AutomationRootNode.prototype.focusObject;
+
+/**
+ * @type {number}
+ */
+chrome.automation.AutomationRootNode.prototype.focusOffset;
 
 /** @type {function() : !Object} */
 chrome.app.getDetails;

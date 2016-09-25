@@ -2,14 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TODO(eroman): Because VerifySignedData() is only implemented for BoringSSL
-// these tests also depend on BoringSSL.
-#if defined(USE_OPENSSL)
-
 #include "net/cert/internal/verify_certificate_chain.h"
 
-#include "net/cert/internal/parse_certificate.h"
+#include "net/cert/internal/parsed_certificate.h"
 #include "net/cert/internal/signature_policy.h"
+#include "net/cert/internal/trust_store.h"
 #include "net/der/input.h"
 
 // Disable tests that require DSA signatures (DSA signatures are intentionally
@@ -47,18 +44,6 @@ namespace net {
 
 namespace {
 
-// Adds the certificate |cert_der| as a trust anchor to |trust_store|.
-void AddCertificateToTrustStore(const std::string& cert_der,
-                                TrustStore* trust_store) {
-  ParsedCertificate cert;
-  ASSERT_TRUE(ParseCertificate(der::Input(&cert_der), &cert));
-
-  ParsedTbsCertificate tbs;
-  ASSERT_TRUE(ParseTbsCertificate(cert.tbs_certificate_tlv, &tbs));
-  TrustAnchor anchor = {tbs.spki_tlv.AsString(), tbs.subject_tlv.AsString()};
-  trust_store->anchors.push_back(anchor);
-}
-
 class VerifyCertificateChainPkitsTestDelegate {
  public:
   static bool Verify(std::vector<std::string> cert_ders,
@@ -67,23 +52,36 @@ class VerifyCertificateChainPkitsTestDelegate {
       ADD_FAILURE() << "cert_ders is empty";
       return false;
     }
-    // First entry in the PKITS chain is the trust anchor.
-    TrustStore trust_store;
-    AddCertificateToTrustStore(cert_ders[0], &trust_store);
 
     // PKITS lists chains from trust anchor to target, VerifyCertificateChain
     // takes them starting with the target and not including the trust anchor.
-    std::vector<der::Input> input_chain;
-    for (size_t i = cert_ders.size() - 1; i > 0; --i)
-      input_chain.push_back(der::Input(&cert_ders[i]));
+    std::vector<scoped_refptr<net::ParsedCertificate>> input_chain;
+    CertErrors errors;
+    for (auto i = cert_ders.rbegin(); i != cert_ders.rend(); ++i) {
+      if (!net::ParsedCertificate::CreateAndAddToVector(*i, {}, &input_chain,
+                                                        &errors)) {
+        ADD_FAILURE() << "Cert failed to parse:\n" << errors.ToDebugString();
+        return false;
+      }
+    }
+
+    scoped_refptr<TrustAnchor> trust_anchor =
+        TrustAnchor::CreateFromCertificateNoConstraints(input_chain.back());
+    input_chain.pop_back();
 
     SimpleSignaturePolicy signature_policy(1024);
 
     // Run all tests at the time the PKITS was published.
     der::GeneralizedTime time = {2011, 4, 15, 0, 0, 0};
 
-    return VerifyCertificateChain(input_chain, trust_store, &signature_policy,
-                                  time);
+    bool result = VerifyCertificateChain(input_chain, trust_anchor.get(),
+                                         &signature_policy, time, &errors);
+
+    //  TODO(crbug.com/634443): Test errors on failure?
+    if (!result)
+      EXPECT_FALSE(errors.empty());
+
+    return result;
   }
 };
 
@@ -219,5 +217,3 @@ INSTANTIATE_TYPED_TEST_CASE_P(VerifyCertificateChain,
 // PkitsTest11InhibitPolicyMapping, PkitsTest12InhibitAnyPolicy
 
 }  // namespace net
-
-#endif  // USE_OPENSSL

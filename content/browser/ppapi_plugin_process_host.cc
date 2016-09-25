@@ -26,11 +26,14 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandbox_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
+#include "content/public/common/service_names.h"
 #include "ipc/ipc_switches.h"
+#include "mojo/edk/embedder/embedder.h"
 #include "net/base/network_change_notifier.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ui/base/ui_base_switches.h"
@@ -45,6 +48,7 @@
 #include "sandbox/win/src/process_mitigations.h"
 #include "sandbox/win/src/sandbox_policy.h"
 #include "ui/display/win/dpi.h"
+#include "ui/gfx/font_render_params.h"
 #endif
 
 namespace content {
@@ -60,14 +64,16 @@ class PpapiPluginSandboxedProcessLauncherDelegate
   PpapiPluginSandboxedProcessLauncherDelegate(bool is_broker,
                                               const PepperPluginInfo& info,
                                               ChildProcessHost* host)
-      :
 #if defined(OS_WIN)
-        info_(info),
-#endif // OS_WIN
-#if defined(OS_POSIX)
-        ipc_fd_(host->TakeClientFileDescriptor()),
-#endif  // OS_POSIX
-        is_broker_(is_broker) {}
+      : info_(info), is_broker_(is_broker) {
+#elif defined(OS_MACOSX) || defined(OS_ANDROID)
+      : ipc_fd_(host->TakeClientFileDescriptor()) {
+#elif defined(OS_POSIX)
+      : ipc_fd_(host->TakeClientFileDescriptor()), is_broker_(is_broker) {
+#else
+  {
+#endif
+  }
 
   ~PpapiPluginSandboxedProcessLauncherDelegate() override {}
 
@@ -97,7 +103,8 @@ class PpapiPluginSandboxedProcessLauncherDelegate
       for (const auto& mime_type : info_.mime_types) {
         if (browser_client->IsWin32kLockdownEnabledForMimeType(
                 mime_type.mime_type)) {
-          if (!AddWin32kLockdownPolicy(policy))
+          result = AddWin32kLockdownPolicy(policy, true);
+          if (result != sandbox::SBOX_ALL_OK)
             return false;
           break;
         }
@@ -139,7 +146,10 @@ class PpapiPluginSandboxedProcessLauncherDelegate
 #if defined(OS_POSIX)
   base::ScopedFD ipc_fd_;
 #endif  // OS_POSIX
+#if (defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)) || \
+    defined(OS_WIN)
   bool is_broker_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(PpapiPluginSandboxedProcessLauncherDelegate);
 };
@@ -321,7 +331,7 @@ PpapiPluginProcessHost::PpapiPluginProcessHost(
   permissions_ = ppapi::PpapiPermissions::GetForCommandLine(base_permissions);
 
   process_.reset(new BrowserChildProcessHostImpl(
-      PROCESS_TYPE_PPAPI_PLUGIN, this));
+      PROCESS_TYPE_PPAPI_PLUGIN, this, kPluginMojoApplicationName));
 
   host_impl_.reset(new BrowserPpapiHostImpl(this, permissions_, info.name,
                                             info.path, profile_data_directory,
@@ -342,10 +352,9 @@ PpapiPluginProcessHost::PpapiPluginProcessHost(
     network_observer_.reset(new PluginNetworkObserver(this));
 }
 
-PpapiPluginProcessHost::PpapiPluginProcessHost()
-    : is_broker_(true) {
+PpapiPluginProcessHost::PpapiPluginProcessHost() : is_broker_(true) {
   process_.reset(new BrowserChildProcessHostImpl(
-      PROCESS_TYPE_PPAPI_BROKER, this));
+      PROCESS_TYPE_PPAPI_BROKER, this, kPluginMojoApplicationName));
 
   ppapi::PpapiPermissions permissions;  // No permissions.
   // The plugin name, path and profile data directory shouldn't be needed for
@@ -365,11 +374,7 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
     process_->SetName(base::UTF8ToUTF16(info.name));
   }
 
-  std::string channel_id = process_->GetHost()->CreateChannel();
-  if (channel_id.empty()) {
-    VLOG(1) << "Could not create pepper host channel.";
-    return false;
-  }
+  process_->GetHost()->CreateChannelMojo();
 
   const base::CommandLine& browser_command_line =
       *base::CommandLine::ForCurrentProcess();
@@ -392,13 +397,10 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
   cmd_line->AppendSwitchASCII(switches::kProcessType,
                               is_broker_ ? switches::kPpapiBrokerProcess
                                          : switches::kPpapiPluginProcess);
-  cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id);
 
 #if defined(OS_WIN)
-  if (GetContentClient()->browser()->ShouldUseWindowsPrefetchArgument()) {
-    cmd_line->AppendArg(is_broker_ ? switches::kPrefetchArgumentPpapiBroker
-                                   : switches::kPrefetchArgumentPpapi);
-  }
+  cmd_line->AppendArg(is_broker_ ? switches::kPrefetchArgumentPpapiBroker
+                                 : switches::kPrefetchArgumentPpapi);
 #endif  // defined(OS_WIN)
 
   // These switches are forwarded to both plugin and broker pocesses.
@@ -438,6 +440,13 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
   cmd_line->AppendSwitchASCII(
       switches::kDeviceScaleFactor,
       base::DoubleToString(display::win::GetDPIScale()));
+  const gfx::FontRenderParams font_params =
+      gfx::GetFontRenderParams(gfx::FontRenderParamsQuery(), nullptr);
+  cmd_line->AppendSwitchASCII(switches::kPpapiAntialiasedTextEnabled,
+                              base::IntToString(font_params.antialiasing));
+  cmd_line->AppendSwitchASCII(
+      switches::kPpapiSubpixelRenderingSetting,
+      base::IntToString(font_params.subpixel_rendering));
 #endif
 
   if (!plugin_launcher.empty())
@@ -460,13 +469,17 @@ void PpapiPluginProcessHost::RequestPluginChannel(Client* client) {
   int renderer_child_id;
   client->GetPpapiChannelInfo(&process_handle, &renderer_child_id);
 
-  base::ProcessId process_id = (process_handle == base::kNullProcessHandle) ?
-      0 : base::GetProcId(process_handle);
+  base::ProcessId process_id = base::kNullProcessId;
+  if (process_handle != base::kNullProcessHandle) {
+    // This channel is not used by the browser itself.
+    process_id = base::GetProcId(process_handle);
+    CHECK_NE(base::kNullProcessId, process_id);
+  }
 
   // We can't send any sync messages from the browser because it might lead to
   // a hang. See the similar code in PluginProcessHost for more description.
   PpapiMsg_CreateChannel* msg = new PpapiMsg_CreateChannel(
-      process_id, renderer_child_id, client->OffTheRecord());
+      process_id, renderer_child_id, client->Incognito());
   msg->set_unblock(true);
   if (Send(msg)) {
     sent_requests_.push(client);

@@ -8,7 +8,7 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "device/serial/serial_io_handler.h"
 
 namespace device {
@@ -48,6 +48,11 @@ class SerialIoHandlerPosix : public SerialIoHandler,
       scoped_refptr<base::SingleThreadTaskRunner> file_thread_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_thread_task_runner);
   ~SerialIoHandlerPosix() override;
+
+  bool AttemptRead(bool within_read);
+  void RunReadCompleted(bool within_read,
+                        int bytes_read,
+                        serial::ReceiveError error);
 
   // base::MessageLoopForIO::Watcher implementation.
   void OnFileCanWriteWithoutBlocking(int fd) override;

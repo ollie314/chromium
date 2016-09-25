@@ -14,6 +14,8 @@
 #import "base/mac/sdk_forward_declarations.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
+#include "base/threading/thread_task_runner_handle.h"
 
 // This method exists on NSWindowDelegate on 10.7+.
 // To build on 10.6, we just need to declare it somewhere. We'll test
@@ -115,7 +117,8 @@ class ScopedFakeNSWindowFullscreen::Impl {
     [[NSNotificationCenter defaultCenter]
         postNotificationName:NSWindowWillStartLiveResizeNotification
                       object:window];
-    base::MessageLoopForUI::current()->PostTask(
+    DCHECK(base::MessageLoopForUI::IsCurrent());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(&Impl::FinishEnterFullscreen,
                               base::Unretained(this), fullscreen_content_size));
   }
@@ -153,7 +156,8 @@ class ScopedFakeNSWindowFullscreen::Impl {
         postNotificationName:NSWindowWillExitFullScreenNotification
                       object:window_];
 
-    base::MessageLoopForUI::current()->PostTask(
+    DCHECK(base::MessageLoopForUI::IsCurrent());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&Impl::FinishExitFullscreen, base::Unretained(this)));
   }
@@ -174,6 +178,8 @@ class ScopedFakeNSWindowFullscreen::Impl {
     is_in_transition_ = false;
     style_as_fullscreen_ = false;
   }
+
+  bool is_in_transition() { return is_in_transition_; }
 
  private:
   base::mac::ScopedObjCClassSwizzler toggle_fullscreen_swizzler_;
@@ -203,6 +209,13 @@ ScopedFakeNSWindowFullscreen::ScopedFakeNSWindowFullscreen() {
 
 ScopedFakeNSWindowFullscreen::~ScopedFakeNSWindowFullscreen() {
   g_fake_fullscreen_impl = nullptr;
+}
+
+void ScopedFakeNSWindowFullscreen::FinishTransition() {
+  if (impl_->is_in_transition())
+    base::RunLoop().RunUntilIdle();
+
+  DCHECK(!impl_->is_in_transition());
 }
 
 }  // namespace test

@@ -12,6 +12,7 @@
 #include "core/dom/StyleEngine.h"
 #include "core/events/ScopedEventQueue.h"
 #include "core/frame/FrameView.h"
+#include "core/frame/LocalFrame.h"
 #include "core/html/HTMLHRElement.h"
 #include "core/html/HTMLOptGroupElement.h"
 #include "core/html/HTMLOptionElement.h"
@@ -51,18 +52,6 @@ const char* fontWeightToString(FontWeight weight)
         return "800";
     case FontWeight900:
         return "900";
-    }
-    NOTREACHED();
-    return nullptr;
-}
-
-const char* fontVariantToString(FontVariant variant)
-{
-    switch (variant) {
-    case FontVariantNormal:
-        return "normal";
-    case FontVariantSmallCaps:
-        return "small-caps";
     }
     NOTREACHED();
     return nullptr;
@@ -186,7 +175,7 @@ public:
         addProperty("textTransform", String(textTransformToString(baseStyle().textTransform())), m_buffer);
         addProperty("fontSize", baseFont().specifiedSize(), m_buffer);
         addProperty("fontStyle", String(fontStyleToString(baseFont().style())), m_buffer);
-        addProperty("fontVariant", String(fontVariantToString(baseFont().variant())), m_buffer);
+        addProperty("fontVariant", baseFont().variantCaps() == FontDescription::SmallCaps ? String("small-caps") : String(), m_buffer);
 
         PagePopupClient::addString("fontFamily: [", m_buffer);
         for (const FontFamily* f = &baseFont().family(); f; f = f->next()) {
@@ -258,14 +247,14 @@ DEFINE_TRACE(PopupMenuImpl)
 void PopupMenuImpl::writeDocument(SharedBuffer* data)
 {
     HTMLSelectElement& ownerElement = *m_ownerElement;
-    IntRect anchorRectInScreen = m_chromeClient->viewportToScreen(ownerElement.elementRectRelativeToViewport(), ownerElement.document().view());
+    IntRect anchorRectInScreen = m_chromeClient->viewportToScreen(ownerElement.visibleBoundsInVisualViewport(), ownerElement.document().view());
 
     PagePopupClient::addString("<!DOCTYPE html><head><meta charset='UTF-8'><style>\n", data);
     data->append(Platform::current()->loadResource("pickerCommon.css"));
     data->append(Platform::current()->loadResource("listPicker.css"));
     PagePopupClient::addString("</style></head><body><div id=main>Loading...</div><script>\n"
         "window.dialogArguments = {\n", data);
-    addProperty("selectedIndex", ownerElement.optionToListIndex(ownerElement.selectedIndex()), data);
+    addProperty("selectedIndex", ownerElement.selectedListIndex(), data);
     const ComputedStyle* ownerStyle = ownerElement.computedStyle();
     ItemIterationContext context(*ownerStyle, data);
     context.serializeBaseStyle();
@@ -306,7 +295,7 @@ void PopupMenuImpl::addElementStyle(ItemIterationContext& context, HTMLElement& 
     // TODO(tkent): We generate unnecessary "style: {\n},\n" even if no
     // additional style.
     PagePopupClient::addString("style: {\n", data);
-    if (style->visibility() == HIDDEN)
+    if (style->visibility() == EVisibility::Hidden)
         addProperty("visibility", String("hidden"), data);
     if (style->display() == NONE)
         addProperty("display", String("none"), data);
@@ -342,8 +331,10 @@ void PopupMenuImpl::addElementStyle(ItemIterationContext& context, HTMLElement& 
     }
     if (baseFont.style() != fontDescription.style())
         addProperty("fontStyle", String(fontStyleToString(fontDescription.style())), data);
-    if (baseFont.variant() != fontDescription.variant())
-        addProperty("fontVariant", String(fontVariantToString(fontDescription.variant())), data);
+
+    if (baseFont.variantCaps() != fontDescription.variantCaps() && fontDescription.variantCaps() == FontDescription::SmallCaps)
+        addProperty("fontVariant", String("small-caps"), data);
+
     if (baseStyle.textTransform() != style->textTransform())
         addProperty("textTransform", String(textTransformToString(style->textTransform())), data);
 
@@ -403,17 +394,21 @@ void PopupMenuImpl::setValueAndClosePopup(int numValue, const String& stringValu
 {
     DCHECK(m_popup);
     DCHECK(m_ownerElement);
-    bool success;
-    int listIndex = stringValue.toInt(&success);
-    DCHECK(success);
-    {
+    if (!stringValue.isEmpty()) {
+        bool success;
+        int listIndex = stringValue.toInt(&success);
+        DCHECK(success);
+
         EventQueueScope scope;
-        m_ownerElement->valueChanged(listIndex);
+        m_ownerElement->selectOptionByPopup(listIndex);
         if (m_popup)
             m_chromeClient->closePagePopup(m_popup);
         // 'change' event is dispatched here.  For compatbility with
         // Angular 1.2, we need to dispatch a change event before
         // mouseup/click events.
+    } else {
+        if (m_popup)
+            m_chromeClient->closePagePopup(m_popup);
     }
     // We dispatch events on the owner element to match the legacy behavior.
     // Other browsers dispatch click events before and after showing the popup.
@@ -478,19 +473,19 @@ void PopupMenuImpl::hide()
         m_chromeClient->closePagePopup(m_popup);
 }
 
-void PopupMenuImpl::updateFromElement()
+void PopupMenuImpl::updateFromElement(UpdateReason)
 {
     if (m_needsUpdate)
         return;
     m_needsUpdate = true;
-    ownerElement().document().postTask(BLINK_FROM_HERE, createSameThreadTask(&PopupMenuImpl::update, this));
+    ownerElement().document().postTask(BLINK_FROM_HERE, createSameThreadTask(&PopupMenuImpl::update, wrapPersistent(this)));
 }
 
 void PopupMenuImpl::update()
 {
     if (!m_popup || !m_ownerElement)
         return;
-    ownerElement().document().updateLayoutTree();
+    ownerElement().document().updateStyleAndLayoutTree();
     // disconnectClient() might have been called.
     if (!m_ownerElement)
         return;
@@ -521,7 +516,7 @@ void PopupMenuImpl::update()
     }
     context.finishGroupIfNecessary();
     PagePopupClient::addString("],\n", data.get());
-    IntRect anchorRectInScreen = m_chromeClient->viewportToScreen(m_ownerElement->elementRectRelativeToViewport(), ownerElement().document().view());
+    IntRect anchorRectInScreen = m_chromeClient->viewportToScreen(m_ownerElement->visibleBoundsInVisualViewport(), ownerElement().document().view());
     addProperty("anchorRectInScreen", anchorRectInScreen, data.get());
     PagePopupClient::addString("}\n", data.get());
     m_popup->postMessage(String::fromUTF8(data->data(), data->size()));

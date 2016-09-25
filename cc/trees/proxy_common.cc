@@ -9,8 +9,7 @@
 
 namespace cc {
 
-BeginMainFrameAndCommitState::BeginMainFrameAndCommitState()
-    : memory_allocation_limit_bytes(0), evicted_ui_resources(false) {}
+BeginMainFrameAndCommitState::BeginMainFrameAndCommitState() {}
 
 BeginMainFrameAndCommitState::~BeginMainFrameAndCommitState() {}
 

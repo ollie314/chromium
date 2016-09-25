@@ -48,6 +48,7 @@
 #include "public/platform/WebFrameScheduler.h"
 #include "public/platform/WebScreenInfo.h"
 #include "wtf/Forward.h"
+#include <memory>
 #include <v8.h>
 
 /*
@@ -73,8 +74,8 @@ public:
     void chromeDestroyed() override {}
 
     void* webView() const override { return nullptr; }
-    void setWindowRect(const IntRect&) override {}
-    IntRect windowRect() override { return IntRect(); }
+    void setWindowRect(const IntRect&, LocalFrame&) override {}
+    IntRect rootWindowRect() override { return IntRect(); }
 
     IntRect pageRect() override { return IntRect(); }
 
@@ -84,10 +85,12 @@ public:
     void takeFocus(WebFocusType) override {}
 
     void focusedNodeChanged(Node*, Node*) override {}
-    Page* createWindow(LocalFrame*, const FrameLoadRequest&, const WindowFeatures&, NavigationPolicy, ShouldSetOpener) override { return nullptr; }
+    Page* createWindow(LocalFrame*, const FrameLoadRequest&, const WindowFeatures&, NavigationPolicy) override { return nullptr; }
     void show(NavigationPolicy) override {}
 
     void didOverscroll(const FloatSize&, const FloatSize&, const FloatPoint&, const FloatSize&) override {}
+
+    void beginLifecycleUpdates() override { }
 
     bool hadFormInteraction() const override { return false; }
 
@@ -128,7 +131,7 @@ public:
 
     bool tabsToLinks() override { return false; }
 
-    IntRect windowResizerRect() const override { return IntRect(); }
+    IntRect windowResizerRect(LocalFrame&) const override { return IntRect(); }
 
     void invalidateRect(const IntRect&) override {}
     void scheduleAnimation(Widget*) override {}
@@ -156,6 +159,7 @@ public:
     Cursor lastSetCursorForTesting() const override { return pointerCursor(); }
 
     void attachRootGraphicsLayer(GraphicsLayer*, LocalFrame* localRoot) override {}
+    void attachRootLayer(WebLayer*, LocalFrame* localRoot) override {}
 
     void setEventListenerProperties(WebEventListenerClass, WebEventListenerProperties) override {}
     WebEventListenerProperties eventListenerProperties(WebEventListenerClass) const override { return WebEventListenerProperties::Nothing; }
@@ -164,15 +168,17 @@ public:
 
     void setTouchAction(TouchAction) override {}
 
-    void didAssociateFormControls(const HeapVector<Member<Element>>&, LocalFrame*) override {}
+    void didAssociateFormControlsAfterLoad(LocalFrame*) override {}
 
     void annotatedRegionsChanged() override {}
     String acceptLanguages() override;
 
+    CompositorProxyClient* createCompositorProxyClient(LocalFrame*) override { return nullptr; }
+
     void registerPopupOpeningObserver(PopupOpeningObserver*) override {}
     void unregisterPopupOpeningObserver(PopupOpeningObserver*) override {}
 
-    PassOwnPtr<WebFrameScheduler> createFrameScheduler(BlameContext*) override;
+    std::unique_ptr<WebFrameScheduler> createFrameScheduler(BlameContext*) override;
 };
 
 class CORE_EXPORT EmptyFrameLoaderClient : public FrameLoaderClient {
@@ -198,9 +204,8 @@ public:
     void detached(FrameDetachType) override {}
     void frameFocused() const override {}
 
-    void dispatchWillSendRequest(DocumentLoader*, unsigned long, ResourceRequest&, const ResourceResponse&) override {}
-    void dispatchDidReceiveResponse(DocumentLoader*, unsigned long, const ResourceResponse&) override {}
-    void dispatchDidFinishLoading(DocumentLoader*, unsigned long) override {}
+    void dispatchWillSendRequest(ResourceRequest&) override {}
+    void dispatchDidReceiveResponse(const ResourceResponse&) override {}
     void dispatchDidLoadResourceFromMemoryCache(const ResourceRequest&, const ResourceResponse&) override {}
 
     void dispatchDidHandleOnloadEvents() override {}
@@ -217,7 +222,6 @@ public:
     void dispatchDidChangeThemeColor() override {}
 
     NavigationPolicy decidePolicyForNavigation(const ResourceRequest&, DocumentLoader*, NavigationType, NavigationPolicy, bool, bool) override;
-    bool hasPendingNavigation() override;
 
     void dispatchWillSendSubmitEvent(HTMLFormElement*) override;
     void dispatchWillSubmitForm(HTMLFormElement*) override;
@@ -241,14 +245,14 @@ public:
     void didRunInsecureContent(SecurityOrigin*, const KURL&) override {}
     void didDetectXSS(const KURL&, bool) override {}
     void didDispatchPingLoader(const KURL&) override {}
-    void didDisplayContentWithCertificateErrors(const KURL&, const CString&, const WebURL& mainResourceUrl, const CString& mainResourceSecurityInfo) override {}
-    void didRunContentWithCertificateErrors(const KURL&, const CString&, const WebURL& mainResourceUrl, const CString& mainResourceSecurityInfo) override {}
+    void didDisplayContentWithCertificateErrors(const KURL&) override {}
+    void didRunContentWithCertificateErrors(const KURL&) override {}
     void selectorMatchChanged(const Vector<String>&, const Vector<String>&) override {}
     LocalFrame* createFrame(const FrameLoadRequest&, const AtomicString&, HTMLFrameOwnerElement*) override;
     Widget* createPlugin(HTMLPlugInElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool, DetachedPluginPolicy) override;
     bool canCreatePluginWithoutRenderer(const String& mimeType) const override { return false; }
-    PassOwnPtr<WebMediaPlayer> createWebMediaPlayer(HTMLMediaElement&, const WebMediaPlayerSource&, WebMediaPlayerClient*) override;
-    PassOwnPtr<WebMediaSession> createWebMediaSession() override;
+    std::unique_ptr<WebMediaPlayer> createWebMediaPlayer(HTMLMediaElement&, const WebMediaPlayerSource&, WebMediaPlayerClient*) override;
+    std::unique_ptr<WebMediaSession> createWebMediaSession() override;
 
     ObjectContentType getObjectContentType(const KURL&, const String&, bool) override { return ObjectContentType(); }
 
@@ -264,12 +268,10 @@ public:
 
     WebCookieJar* cookieJar() const override { return 0; }
 
-    void didRequestAutocomplete(HTMLFormElement*) override;
-
-    PassOwnPtr<WebServiceWorkerProvider> createServiceWorkerProvider() override;
+    std::unique_ptr<WebServiceWorkerProvider> createServiceWorkerProvider() override;
     bool isControlledByServiceWorker(DocumentLoader&) override { return false; }
     int64_t serviceWorkerID(DocumentLoader&) override { return -1; }
-    PassOwnPtr<WebApplicationCacheHost> createApplicationCacheHost(WebApplicationCacheHostClient*) override;
+    std::unique_ptr<WebApplicationCacheHost> createApplicationCacheHost(WebApplicationCacheHostClient*) override;
 
 protected:
     EmptyFrameLoaderClient() {}
@@ -281,18 +283,19 @@ public:
     ~EmptyTextCheckerClient() { }
 
     void checkSpellingOfString(const String&, int*, int*) override {}
-    void checkGrammarOfString(const String&, Vector<GrammarDetail>&, int*, int*) override {}
     void requestCheckingOfString(TextCheckingRequest*) override;
+    void cancelAllPendingRequests() override;
 };
 
 class EmptySpellCheckerClient : public SpellCheckerClient {
-    WTF_MAKE_NONCOPYABLE(EmptySpellCheckerClient); USING_FAST_MALLOC(EmptySpellCheckerClient);
+    WTF_MAKE_NONCOPYABLE(EmptySpellCheckerClient);
+    USING_FAST_MALLOC(EmptySpellCheckerClient);
 public:
     EmptySpellCheckerClient() {}
     ~EmptySpellCheckerClient() override {}
 
-    bool isContinuousSpellCheckingEnabled() override { return false; }
-    void toggleContinuousSpellChecking() override {}
+    bool isSpellCheckingEnabled() override { return false; }
+    void toggleSpellCheckingEnabled() override {}
 
     TextCheckerClient& textChecker() override { return m_textCheckerClient; }
 
@@ -305,7 +308,8 @@ private:
 };
 
 class EmptyEditorClient final : public EditorClient {
-    WTF_MAKE_NONCOPYABLE(EmptyEditorClient); USING_FAST_MALLOC(EmptyEditorClient);
+    WTF_MAKE_NONCOPYABLE(EmptyEditorClient);
+    USING_FAST_MALLOC(EmptyEditorClient);
 public:
     EmptyEditorClient() {}
     ~EmptyEditorClient() override {}
@@ -316,15 +320,16 @@ public:
     bool canCopyCut(LocalFrame*, bool defaultValue) const override { return defaultValue; }
     bool canPaste(LocalFrame*, bool defaultValue) const override { return defaultValue; }
 
-    bool handleKeyboardEvent() override { return false; }
+    bool handleKeyboardEvent(LocalFrame*) override { return false; }
 };
 
 class EmptyContextMenuClient final : public ContextMenuClient {
-    WTF_MAKE_NONCOPYABLE(EmptyContextMenuClient); USING_FAST_MALLOC(EmptyContextMenuClient);
+    WTF_MAKE_NONCOPYABLE(EmptyContextMenuClient);
+    USING_FAST_MALLOC(EmptyContextMenuClient);
 public:
     EmptyContextMenuClient() {}
     ~EmptyContextMenuClient() override {}
-    void showContextMenu(const ContextMenu*) override {}
+    bool showContextMenu(const ContextMenu*, bool) override { return false; }
     void clearContextMenu() override {}
 };
 

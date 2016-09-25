@@ -12,13 +12,12 @@
 #include "base/i18n/case_conversion.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -40,6 +39,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/language_usage_metrics/language_usage_metrics.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
@@ -53,7 +53,6 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/one_shot_event.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -176,7 +175,7 @@ void RecordErrorMetrics(int error_message) {
 
 void RecordHotwordEnabledMetric(HotwordService *service, Profile* profile) {
   HotwordEnabled enabled_state = DISABLED;
-  auto prefs = profile->GetPrefs();
+  auto* prefs = profile->GetPrefs();
   if (!prefs->HasPrefPath(prefs::kHotwordSearchEnabled) &&
       !prefs->HasPrefPath(prefs::kHotwordAlwaysOnSearchEnabled)) {
     enabled_state = UNSET;
@@ -367,7 +366,7 @@ HotwordService::HotwordService(Profile* profile)
                  weak_factory_.GetWeakPtr()));
 
   SetAudioHistoryHandler(new HotwordAudioHistoryHandler(
-      profile_, base::MessageLoop::current()->task_runner()));
+      profile_, base::ThreadTaskRunnerHandle::Get()));
 
   if (HotwordServiceFactory::IsAlwaysOnAvailable() &&
       IsHotwordAllowed()) {
@@ -402,7 +401,7 @@ HotwordService::HotwordService(Profile* profile)
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,
       base::Bind(&HotwordService::InitializeMicrophoneObserver,
-                 base::Unretained(this)));
+                 weak_factory_.GetWeakPtr()));
 }
 
 HotwordService::~HotwordService() {
@@ -711,9 +710,9 @@ void HotwordService::LaunchHotwordAudioVerificationApp(
   if (!extension)
     return;
 
-  OpenApplication(
-      AppLaunchParams(profile_, extension, extensions::LAUNCH_CONTAINER_WINDOW,
-                      NEW_WINDOW, extensions::SOURCE_CHROME_INTERNAL));
+  OpenApplication(AppLaunchParams(
+      profile_, extension, extensions::LAUNCH_CONTAINER_WINDOW,
+      WindowOpenDisposition::NEW_WINDOW, extensions::SOURCE_CHROME_INTERNAL));
 }
 
 HotwordService::LaunchMode

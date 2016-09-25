@@ -33,10 +33,6 @@ bool GetBoolMetaData(const SkCanvas& canvas, const char* key) {
 
 namespace skia {
 
-SkBaseDevice* GetTopDevice(const SkCanvas& canvas) {
-  return canvas.getTopDevice(true);
-}
-
 SkBitmap ReadPixels(SkCanvas* canvas) {
   SkBitmap bitmap;
   bitmap.setInfo(canvas->imageInfo());
@@ -62,7 +58,7 @@ bool GetWritablePixels(SkCanvas* canvas, SkPixmap* result) {
 }
 
 bool SupportsPlatformPaint(const SkCanvas* canvas) {
-  return GetPlatformDevice(GetTopDevice(*canvas)) != nullptr;
+  return GetPlatformDevice(canvas->getTopDevice(true)) != nullptr;
 }
 
 size_t PlatformCanvasStrideForWidth(unsigned width) {
@@ -95,9 +91,13 @@ bool IsPreviewMetafile(const SkCanvas& canvas) {
 }
 
 CGContextRef GetBitmapContext(const SkCanvas& canvas) {
-  SkBaseDevice* device = GetTopDevice(canvas);
-  PlatformDevice* platform_device = GetPlatformDevice(device);
-  return platform_device ?  platform_device->GetBitmapContext() :
+  PlatformDevice* platform_device =
+      GetPlatformDevice(canvas.getTopDevice(true));
+  SkIRect clip_bounds;
+  canvas.getClipDeviceBounds(&clip_bounds);
+  return platform_device ?
+      platform_device->GetBitmapContext(
+          canvas.getTotalMatrix(), clip_bounds) :
       nullptr;
 }
 
@@ -106,9 +106,15 @@ CGContextRef GetBitmapContext(const SkCanvas& canvas) {
 ScopedPlatformPaint::ScopedPlatformPaint(SkCanvas* canvas) :
     canvas_(canvas),
     platform_surface_(nullptr) {
-  PlatformDevice* platform_device = GetPlatformDevice(GetTopDevice(*canvas));
-  if (platform_device)
-    platform_surface_ = platform_device->BeginPlatformPaint();
+  // TODO(tomhudson) we're assuming non-null canvas?
+  PlatformDevice* platform_device = GetPlatformDevice(canvas->getTopDevice(true));
+  if (platform_device) {
+    // Compensate for drawing to a layer rather than the entire canvas
+    SkMatrix ctm;
+    SkIRect clip_bounds;
+    canvas->temporary_internal_describeTopLayer(&ctm, &clip_bounds);
+    platform_surface_ = platform_device->BeginPlatformPaint(ctm, clip_bounds);
+  }
 }
 
 }  // namespace skia

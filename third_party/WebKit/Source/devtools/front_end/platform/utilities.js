@@ -42,31 +42,6 @@ console.assert = function(value, message)
 var ArrayLike;
 
 /**
- * @param {!Object} obj
- * @return {boolean}
- */
-Object.isEmpty = function(obj)
-{
-    for (var i in obj)
-        return false;
-    return true;
-}
-
-/**
- * @param {!Object.<string,!T>} obj
- * @return {!Array.<!T>}
- * @template T
- */
-Object.values = function(obj)
-{
-    var result = Object.keys(obj);
-    var length = result.length;
-    for (var i = 0; i < length; ++i)
-        result[i] = obj[result[i]];
-    return result;
-}
-
-/**
  * @param {number} m
  * @param {number} n
  * @return {number}
@@ -167,7 +142,7 @@ String.prototype.escapeForRegExp = function()
  */
 String.prototype.escapeHTML = function()
 {
-    return this.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); //" doublequotes just for editor
+    return this.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); // " doublequotes just for editor
 }
 
 /**
@@ -257,7 +232,7 @@ String.prototype.compareTo = function(other)
 String.prototype.removeURLFragment = function()
 {
     var fragmentIndex = this.indexOf("#");
-    if (fragmentIndex == -1)
+    if (fragmentIndex === -1)
         fragmentIndex = this.length;
     return this.substring(0, fragmentIndex);
 }
@@ -284,7 +259,7 @@ String.hashCode = function(string)
         zi = (zi * z) % p;
     }
     s = (s + zi * (p - 1)) % p;
-    return Math.abs(s|0);
+    return Math.abs(s | 0);
 }
 
 /**
@@ -295,7 +270,7 @@ String.hashCode = function(string)
 String.isDigitAt = function(string, index)
 {
     var c = string.charCodeAt(index);
-    return 48 <= c && c <= 57;
+    return (48 <= c && c <= 57);
 }
 
 /**
@@ -485,8 +460,7 @@ Date.prototype.toConsoleTime = function()
            leadZero3(this.getMilliseconds());
 }
 
-Object.defineProperty(Array.prototype, "remove",
-{
+Object.defineProperty(Array.prototype, "remove", {
     /**
      * @param {!T} value
      * @param {boolean=} firstOnly
@@ -512,23 +486,7 @@ Object.defineProperty(Array.prototype, "remove",
     }
 });
 
-Object.defineProperty(Array.prototype, "keySet",
-{
-    /**
-     * @return {!Object.<string, boolean>}
-     * @this {Array.<*>}
-     */
-    value: function()
-    {
-        var keys = {};
-        for (var i = 0; i < this.length; ++i)
-            keys[this[i]] = true;
-        return keys;
-    }
-});
-
-Object.defineProperty(Array.prototype, "pushAll",
-{
+Object.defineProperty(Array.prototype, "pushAll", {
     /**
      * @param {!Array.<!T>} array
      * @this {Array.<!T>}
@@ -540,8 +498,7 @@ Object.defineProperty(Array.prototype, "pushAll",
     }
 });
 
-Object.defineProperty(Array.prototype, "rotate",
-{
+Object.defineProperty(Array.prototype, "rotate", {
     /**
      * @param {number} index
      * @return {!Array.<!T>}
@@ -557,8 +514,7 @@ Object.defineProperty(Array.prototype, "rotate",
     }
 });
 
-Object.defineProperty(Array.prototype, "sortNumbers",
-{
+Object.defineProperty(Array.prototype, "sortNumbers", {
     /**
      * @this {Array.<number>}
      */
@@ -583,75 +539,74 @@ Object.defineProperty(Uint32Array.prototype, "sort", {
 });
 
 (function() {
-var partition = {
-    /**
-     * @this {Array.<number>}
-     * @param {function(number, number): number} comparator
-     * @param {number} left
-     * @param {number} right
-     * @param {number} pivotIndex
-     */
-    value: function(comparator, left, right, pivotIndex)
-    {
-        function swap(array, i1, i2)
+    var partition = {
+        /**
+         * @this {Array.<number>}
+         * @param {function(number, number): number} comparator
+         * @param {number} left
+         * @param {number} right
+         * @param {number} pivotIndex
+         */
+        value: function(comparator, left, right, pivotIndex)
         {
-            var temp = array[i1];
-            array[i1] = array[i2];
-            array[i2] = temp;
-        }
-
-        var pivotValue = this[pivotIndex];
-        swap(this, right, pivotIndex);
-        var storeIndex = left;
-        for (var i = left; i < right; ++i) {
-            if (comparator(this[i], pivotValue) < 0) {
-                swap(this, storeIndex, i);
-                ++storeIndex;
+            function swap(array, i1, i2)
+            {
+                var temp = array[i1];
+                array[i1] = array[i2];
+                array[i2] = temp;
             }
-        }
-        swap(this, right, storeIndex);
-        return storeIndex;
-    }
-};
-Object.defineProperty(Array.prototype, "partition", partition);
-Object.defineProperty(Uint32Array.prototype, "partition", partition);
 
-var sortRange = {
-    /**
-     * @param {function(number, number): number} comparator
-     * @param {number} leftBound
-     * @param {number} rightBound
-     * @param {number} sortWindowLeft
-     * @param {number} sortWindowRight
-     * @return {!Array.<number>}
-     * @this {Array.<number>}
-     */
-    value: function(comparator, leftBound, rightBound, sortWindowLeft, sortWindowRight)
-    {
-        function quickSortRange(array, comparator, left, right, sortWindowLeft, sortWindowRight)
-        {
-            if (right <= left)
-                return;
-            var pivotIndex = Math.floor(Math.random() * (right - left)) + left;
-            var pivotNewIndex = array.partition(comparator, left, right, pivotIndex);
-            if (sortWindowLeft < pivotNewIndex)
-                quickSortRange(array, comparator, left, pivotNewIndex - 1, sortWindowLeft, sortWindowRight);
-            if (pivotNewIndex < sortWindowRight)
-                quickSortRange(array, comparator, pivotNewIndex + 1, right, sortWindowLeft, sortWindowRight);
+            var pivotValue = this[pivotIndex];
+            swap(this, right, pivotIndex);
+            var storeIndex = left;
+            for (var i = left; i < right; ++i) {
+                if (comparator(this[i], pivotValue) < 0) {
+                    swap(this, storeIndex, i);
+                    ++storeIndex;
+                }
+            }
+            swap(this, right, storeIndex);
+            return storeIndex;
         }
-        if (leftBound === 0 && rightBound === (this.length - 1) && sortWindowLeft === 0 && sortWindowRight >= rightBound)
-            this.sort(comparator);
-        else
-            quickSortRange(this, comparator, leftBound, rightBound, sortWindowLeft, sortWindowRight);
-        return this;
+    };
+    Object.defineProperty(Array.prototype, "partition", partition);
+    Object.defineProperty(Uint32Array.prototype, "partition", partition);
+
+    var sortRange = {
+        /**
+         * @param {function(number, number): number} comparator
+         * @param {number} leftBound
+         * @param {number} rightBound
+         * @param {number} sortWindowLeft
+         * @param {number} sortWindowRight
+         * @return {!Array.<number>}
+         * @this {Array.<number>}
+         */
+        value: function(comparator, leftBound, rightBound, sortWindowLeft, sortWindowRight)
+        {
+            function quickSortRange(array, comparator, left, right, sortWindowLeft, sortWindowRight)
+            {
+                if (right <= left)
+                    return;
+                var pivotIndex = Math.floor(Math.random() * (right - left)) + left;
+                var pivotNewIndex = array.partition(comparator, left, right, pivotIndex);
+                if (sortWindowLeft < pivotNewIndex)
+                    quickSortRange(array, comparator, left, pivotNewIndex - 1, sortWindowLeft, sortWindowRight);
+                if (pivotNewIndex < sortWindowRight)
+                    quickSortRange(array, comparator, pivotNewIndex + 1, right, sortWindowLeft, sortWindowRight);
+            }
+            if (leftBound === 0 && rightBound === (this.length - 1) && sortWindowLeft === 0 && sortWindowRight >= rightBound)
+                this.sort(comparator);
+            else
+                quickSortRange(this, comparator, leftBound, rightBound, sortWindowLeft, sortWindowRight);
+            return this;
+        }
     }
-}
-Object.defineProperty(Array.prototype, "sortRange", sortRange);
-Object.defineProperty(Uint32Array.prototype, "sortRange", sortRange);
+    Object.defineProperty(Array.prototype, "sortRange", sortRange);
+    Object.defineProperty(Uint32Array.prototype, "sortRange", sortRange);
 })();
 
-Object.defineProperty(Array.prototype, "stableSort",
-{
+Object.defineProperty(Array.prototype, "stableSort", {
     /**
      * @param {function(?T, ?T): number=} comparator
      * @return {!Array.<?T>}
@@ -703,8 +658,7 @@ Object.defineProperty(Array.prototype, "stableSort",
     }
 });
 
-Object.defineProperty(Array.prototype, "qselect",
-{
+Object.defineProperty(Array.prototype, "qselect", {
     /**
      * @param {number} k
      * @param {function(number, number): number=} comparator
@@ -732,8 +686,7 @@ Object.defineProperty(Array.prototype, "qselect",
     }
 });
 
-Object.defineProperty(Array.prototype, "lowerBound",
-{
+Object.defineProperty(Array.prototype, "lowerBound", {
     /**
      * Return index of the leftmost element that is equal or greater
      * than the specimen object. If there's no such element (i.e. all
@@ -770,8 +723,7 @@ Object.defineProperty(Array.prototype, "lowerBound",
     }
 });
 
-Object.defineProperty(Array.prototype, "upperBound",
-{
+Object.defineProperty(Array.prototype, "upperBound", {
     /**
      * Return index of the leftmost element that is greater
      * than the specimen object. If there's no such element (i.e. all
@@ -820,8 +772,7 @@ Object.defineProperty(Float64Array.prototype, "lowerBound", {
     value: Array.prototype.lowerBound
 });
 
-Object.defineProperty(Array.prototype, "binaryIndexOf",
-{
+Object.defineProperty(Array.prototype, "binaryIndexOf", {
     /**
      * @param {!T} value
      * @param {function(!T,!S):number} comparator
@@ -836,8 +787,7 @@ Object.defineProperty(Array.prototype, "binaryIndexOf",
     }
 });
 
-Object.defineProperty(Array.prototype, "select",
-{
+Object.defineProperty(Array.prototype, "select", {
     /**
      * @param {string} field
      * @return {!Array.<!T>}
@@ -853,8 +803,7 @@ Object.defineProperty(Array.prototype, "select",
     }
 });
 
-Object.defineProperty(Array.prototype, "peekLast",
-{
+Object.defineProperty(Array.prototype, "peekLast", {
     /**
      * @return {!T|undefined}
      * @this {Array.<!T>}
@@ -867,69 +816,65 @@ Object.defineProperty(Array.prototype, "peekLast",
 });
 
 (function(){
-
-/**
- * @param {!Array.<T>} array1
- * @param {!Array.<T>} array2
- * @param {function(T,T):number} comparator
- * @param {boolean} mergeNotIntersect
- * @return {!Array.<T>}
- * @template T
- */
-function mergeOrIntersect(array1, array2, comparator, mergeNotIntersect)
-{
-    var result = [];
-    var i = 0;
-    var j = 0;
-    while (i < array1.length && j < array2.length) {
-        var compareValue = comparator(array1[i], array2[j]);
-        if (mergeNotIntersect || !compareValue)
-            result.push(compareValue <= 0 ? array1[i] : array2[j]);
-        if (compareValue <= 0)
-            i++;
-        if (compareValue >= 0)
-            j++;
-    }
-    if (mergeNotIntersect) {
-        while (i < array1.length)
-            result.push(array1[i++]);
-        while (j < array2.length)
-            result.push(array2[j++]);
-    }
-    return result;
-}
-
-Object.defineProperty(Array.prototype, "intersectOrdered",
-{
     /**
-     * @param {!Array.<T>} array
+     * @param {!Array.<T>} array1
+     * @param {!Array.<T>} array2
      * @param {function(T,T):number} comparator
+     * @param {boolean} mergeNotIntersect
      * @return {!Array.<T>}
-     * @this {!Array.<T>}
      * @template T
      */
-    value: function(array, comparator)
+    function mergeOrIntersect(array1, array2, comparator, mergeNotIntersect)
     {
-        return mergeOrIntersect(this, array, comparator, false);
+        var result = [];
+        var i = 0;
+        var j = 0;
+        while (i < array1.length && j < array2.length) {
+            var compareValue = comparator(array1[i], array2[j]);
+            if (mergeNotIntersect || !compareValue)
+                result.push(compareValue <= 0 ? array1[i] : array2[j]);
+            if (compareValue <= 0)
+                i++;
+            if (compareValue >= 0)
+                j++;
+        }
+        if (mergeNotIntersect) {
+            while (i < array1.length)
+                result.push(array1[i++]);
+            while (j < array2.length)
+                result.push(array2[j++]);
+        }
+        return result;
     }
-});
 
-Object.defineProperty(Array.prototype, "mergeOrdered",
-{
-    /**
-     * @param {!Array.<T>} array
-     * @param {function(T,T):number} comparator
-     * @return {!Array.<T>}
-     * @this {!Array.<T>}
-     * @template T
-     */
-    value: function(array, comparator)
-    {
-        return mergeOrIntersect(this, array, comparator, true);
-    }
-});
+    Object.defineProperty(Array.prototype, "intersectOrdered", {
+        /**
+         * @param {!Array.<T>} array
+         * @param {function(T,T):number} comparator
+         * @return {!Array.<T>}
+         * @this {!Array.<T>}
+         * @template T
+         */
+        value: function(array, comparator)
+        {
+            return mergeOrIntersect(this, array, comparator, false);
+        }
+    });
 
-}());
+    Object.defineProperty(Array.prototype, "mergeOrdered", {
+        /**
+         * @param {!Array.<T>} array
+         * @param {function(T,T):number} comparator
+         * @return {!Array.<T>}
+         * @this {!Array.<T>}
+         * @template T
+         */
+        value: function(array, comparator)
+        {
+            return mergeOrIntersect(this, array, comparator, true);
+        }
+    });
+})();
 
 /**
  * @param {string} format
@@ -1169,12 +1114,12 @@ function createSearchRegex(query, caseSensitive, isRegex)
  */
 function createPlainTextSearchRegex(query, flags)
 {
-    // This should be kept the same as the one in V8StringUtil.cpp.
+    // This should be kept the same as the one in StringUtil.cpp.
     var regexSpecialCharacters = String.regexSpecialCharacters();
     var regex = "";
     for (var i = 0; i < query.length; ++i) {
         var c = query.charAt(i);
-        if (regexSpecialCharacters.indexOf(c) != -1)
+        if (regexSpecialCharacters.indexOf(c) !== -1)
             regex += "\\";
         regex += c;
     }
@@ -1538,8 +1483,58 @@ Promise.prototype.spread = function(callback)
  * @template T
  */
 Promise.prototype.catchException = function(defaultValue) {
-    return this.catch(function (error) {
+    return this.catch(function(error) {
         console.error(error);
         return defaultValue;
     });
+}
+
+/**
+ * @param {!Map<number, ?>} other
+ * @param {function(!VALUE,?):boolean} isEqual
+ * @return {!{removed: !Array<!VALUE>, added: !Array<?>, equal: !Array<!VALUE>}}
+ * @this {Map<number, VALUE>}
+ */
+Map.prototype.diff = function(other, isEqual)
+{
+    var leftKeys = this.keysArray();
+    var rightKeys = other.keysArray();
+    leftKeys.sort((a, b) => a - b);
+    rightKeys.sort((a, b) => a - b);
+
+    var removed = [];
+    var added = [];
+    var equal = [];
+    var leftIndex = 0;
+    var rightIndex = 0;
+    while (leftIndex < leftKeys.length && rightIndex < rightKeys.length) {
+        var leftKey = leftKeys[leftIndex];
+        var rightKey = rightKeys[rightIndex];
+        if (leftKey === rightKey && isEqual(this.get(leftKey), other.get(rightKey))) {
+            equal.push(this.get(leftKey));
+            ++leftIndex;
+            ++rightIndex;
+            continue;
+        }
+        if (leftKey <= rightKey) {
+            removed.push(this.get(leftKey));
+            ++leftIndex;
+            continue;
+        }
+        added.push(other.get(rightKey));
+        ++rightIndex;
+    }
+    while (leftIndex < leftKeys.length) {
+        var leftKey = leftKeys[leftIndex++];
+        removed.push(this.get(leftKey));
+    }
+    while (rightIndex < rightKeys.length) {
+        var rightKey = rightKeys[rightIndex++];
+        added.push(other.get(rightKey));
+    }
+    return {
+        added: added,
+        removed: removed,
+        equal: equal
+    }
 }

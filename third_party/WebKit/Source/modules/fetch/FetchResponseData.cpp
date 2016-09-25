@@ -4,14 +4,14 @@
 
 #include "modules/fetch/FetchResponseData.h"
 
+#include "bindings/core/v8/ScriptState.h"
 #include "core/dom/DOMArrayBuffer.h"
-#include "core/fetch/CrossOriginAccessControl.h"
 #include "core/fetch/FetchUtils.h"
 #include "modules/fetch/BodyStreamBuffer.h"
 #include "modules/fetch/DataConsumerHandleUtil.h"
-#include "modules/fetch/DataConsumerTee.h"
 #include "modules/fetch/FetchHeaderList.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponse.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -43,6 +43,17 @@ WebServiceWorkerResponseType fetchTypeToWebType(FetchResponseData::Type fetchTyp
     return webType;
 }
 
+WebVector<WebString> headerSetToWebVector(const HTTPHeaderSet& headers)
+{
+    // Can't just pass *headers to the WebVector constructor because HashSet
+    // iterators are not stl iterator compatible.
+    WebVector<WebString> result(static_cast<size_t>(headers.size()));
+    int idx = 0;
+    for (const auto& header : headers)
+        result[idx++] = header;
+    return result;
+}
+
 } // namespace
 
 FetchResponseData* FetchResponseData::create()
@@ -67,8 +78,9 @@ FetchResponseData* FetchResponseData::createWithBuffer(BodyStreamBuffer* buffer)
     return response;
 }
 
-FetchResponseData* FetchResponseData::createBasicFilteredResponse()
+FetchResponseData* FetchResponseData::createBasicFilteredResponse() const
 {
+    DCHECK_EQ(m_type, DefaultType);
     // "A basic filtered response is a filtered response whose type is |basic|,
     // header list excludes any headers in internal response's header list whose
     // name is `Set-Cookie` or `Set-Cookie2`."
@@ -82,12 +94,23 @@ FetchResponseData* FetchResponseData::createBasicFilteredResponse()
     }
     response->m_buffer = m_buffer;
     response->m_mimeType = m_mimeType;
-    response->m_internalResponse = this;
+    response->m_internalResponse = const_cast<FetchResponseData*>(this);
     return response;
 }
 
-FetchResponseData* FetchResponseData::createCORSFilteredResponse()
+FetchResponseData* FetchResponseData::createCORSFilteredResponse() const
 {
+    DCHECK_EQ(m_type, DefaultType);
+    HTTPHeaderSet accessControlExposeHeaderSet;
+    String accessControlExposeHeaders;
+    if (m_headerList->get(HTTPNames::Access_Control_Expose_Headers, accessControlExposeHeaders))
+        parseAccessControlExposeHeadersAllowList(accessControlExposeHeaders, accessControlExposeHeaderSet);
+    return createCORSFilteredResponse(accessControlExposeHeaderSet);
+}
+
+FetchResponseData* FetchResponseData::createCORSFilteredResponse(const HTTPHeaderSet& exposedHeaders) const
+{
+    DCHECK_EQ(m_type, DefaultType);
     // "A CORS filtered response is a filtered response whose type is |CORS|,
     // header list excludes all headers in internal response's header list,
     // except those whose name is either one of `Cache-Control`,
@@ -97,24 +120,25 @@ FetchResponseData* FetchResponseData::createCORSFilteredResponse()
     // list."
     FetchResponseData* response = new FetchResponseData(CORSType, m_status, m_statusMessage);
     response->m_url = m_url;
-    HTTPHeaderSet accessControlExposeHeaderSet;
-    String accessControlExposeHeaders;
-    if (m_headerList->get("access-control-expose-headers", accessControlExposeHeaders))
-        parseAccessControlExposeHeadersAllowList(accessControlExposeHeaders, accessControlExposeHeaderSet);
     for (size_t i = 0; i < m_headerList->size(); ++i) {
         const FetchHeaderList::Header* header = m_headerList->list()[i].get();
         const String& name = header->first;
-        if (isOnAccessControlResponseHeaderWhitelist(name) || (accessControlExposeHeaderSet.contains(name) && !FetchUtils::isForbiddenResponseHeaderName(name)))
+        const bool explicitlyExposed = exposedHeaders.contains(name);
+        if (isOnAccessControlResponseHeaderWhitelist(name) || (explicitlyExposed && !FetchUtils::isForbiddenResponseHeaderName(name))) {
+            if (explicitlyExposed)
+                response->m_corsExposedHeaderNames.add(name);
             response->m_headerList->append(name, header->second);
+        }
     }
     response->m_buffer = m_buffer;
     response->m_mimeType = m_mimeType;
-    response->m_internalResponse = this;
+    response->m_internalResponse = const_cast<FetchResponseData*>(this);
     return response;
 }
 
-FetchResponseData* FetchResponseData::createOpaqueFilteredResponse()
+FetchResponseData* FetchResponseData::createOpaqueFilteredResponse() const
 {
+    DCHECK_EQ(m_type, DefaultType);
     // "An opaque filtered response is a filtered response whose type is
     // 'opaque', url list is the empty list, status is 0, status message is the
     // empty byte sequence, header list is the empty list, body is null, and
@@ -122,12 +146,13 @@ FetchResponseData* FetchResponseData::createOpaqueFilteredResponse()
     //
     // https://fetch.spec.whatwg.org/#concept-filtered-response-opaque
     FetchResponseData* response = new FetchResponseData(OpaqueType, 0, "");
-    response->m_internalResponse = this;
+    response->m_internalResponse = const_cast<FetchResponseData*>(this);
     return response;
 }
 
-FetchResponseData* FetchResponseData::createOpaqueRedirectFilteredResponse()
+FetchResponseData* FetchResponseData::createOpaqueRedirectFilteredResponse() const
 {
+    DCHECK_EQ(m_type, DefaultType);
     // "An opaque filtered response is a filtered response whose type is
     // 'opaqueredirect', status is 0, status message is the empty byte sequence,
     // header list is the empty list, body is null, and cache state is 'none'."
@@ -135,7 +160,7 @@ FetchResponseData* FetchResponseData::createOpaqueRedirectFilteredResponse()
     // https://fetch.spec.whatwg.org/#concept-filtered-response-opaque-redirect
     FetchResponseData* response = new FetchResponseData(OpaqueRedirectType, 0, "");
     response->m_url = m_url;
-    response->m_internalResponse = this;
+    response->m_internalResponse = const_cast<FetchResponseData*>(this);
     return response;
 }
 
@@ -160,12 +185,12 @@ String FetchResponseData::internalMIMEType() const
     return m_mimeType;
 }
 
-FetchResponseData* FetchResponseData::clone(ExecutionContext* executionContext)
+FetchResponseData* FetchResponseData::clone(ScriptState* scriptState)
 {
     FetchResponseData* newResponse = create();
     newResponse->m_type = m_type;
     if (m_terminationReason) {
-        newResponse->m_terminationReason = adoptPtr(new TerminationReason);
+        newResponse->m_terminationReason = wrapUnique(new TerminationReason);
         *newResponse->m_terminationReason = *m_terminationReason;
     }
     newResponse->m_url = m_url;
@@ -175,6 +200,7 @@ FetchResponseData* FetchResponseData::clone(ExecutionContext* executionContext)
     newResponse->m_mimeType = m_mimeType;
     newResponse->m_responseTime = m_responseTime;
     newResponse->m_cacheStorageCacheName = m_cacheStorageCacheName;
+    newResponse->m_corsExposedHeaderNames = m_corsExposedHeaderNames;
 
     switch (m_type) {
     case BasicType:
@@ -182,17 +208,18 @@ FetchResponseData* FetchResponseData::clone(ExecutionContext* executionContext)
         ASSERT(m_internalResponse);
         ASSERT(m_buffer == m_internalResponse->m_buffer);
         ASSERT(m_internalResponse->m_type == DefaultType);
-        newResponse->m_internalResponse = m_internalResponse->clone(executionContext);
+        newResponse->m_internalResponse = m_internalResponse->clone(scriptState);
         m_buffer = m_internalResponse->m_buffer;
         newResponse->m_buffer = newResponse->m_internalResponse->m_buffer;
         break;
     case DefaultType: {
         ASSERT(!m_internalResponse);
         if (m_buffer) {
-            OwnPtr<WebDataConsumerHandle> handle1, handle2;
-            DataConsumerTee::create(executionContext, m_buffer->releaseHandle(executionContext), &handle1, &handle2);
-            m_buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle1.release()));
-            newResponse->m_buffer = new BodyStreamBuffer(createFetchDataConsumerHandleFromWebHandle(handle2.release()));
+            BodyStreamBuffer* new1 = nullptr;
+            BodyStreamBuffer* new2 = nullptr;
+            m_buffer->tee(&new1, &new2);
+            m_buffer = new1;
+            newResponse->m_buffer = new2;
         }
         break;
     }
@@ -205,7 +232,7 @@ FetchResponseData* FetchResponseData::clone(ExecutionContext* executionContext)
         ASSERT(m_internalResponse);
         ASSERT(!m_buffer);
         ASSERT(m_internalResponse->m_type == DefaultType);
-        newResponse->m_internalResponse = m_internalResponse->clone(executionContext);
+        newResponse->m_internalResponse = m_internalResponse->clone(scriptState);
         break;
     }
     return newResponse;
@@ -216,6 +243,7 @@ void FetchResponseData::populateWebServiceWorkerResponse(WebServiceWorkerRespons
     if (m_internalResponse) {
         m_internalResponse->populateWebServiceWorkerResponse(response);
         response.setResponseType(fetchTypeToWebType(m_type));
+        response.setCorsExposedHeaderNames(headerSetToWebVector(m_corsExposedHeaderNames));
         return;
     }
 
@@ -225,6 +253,7 @@ void FetchResponseData::populateWebServiceWorkerResponse(WebServiceWorkerRespons
     response.setResponseType(fetchTypeToWebType(m_type));
     response.setResponseTime(responseTime());
     response.setCacheStorageCacheName(cacheStorageCacheName());
+    response.setCorsExposedHeaderNames(headerSetToWebVector(m_corsExposedHeaderNames));
     for (size_t i = 0; i < headerList()->size(); ++i) {
         const FetchHeaderList::Header* header = headerList()->list()[i].get();
         response.appendHeader(header->first, header->second);

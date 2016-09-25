@@ -5,12 +5,12 @@
 #ifndef COMPONENTS_SEARCH_ENGINES_SEARCH_ENGINE_DATA_TYPE_CONTROLLER_H__
 #define COMPONENTS_SEARCH_ENGINES_SEARCH_ENGINE_DATA_TYPE_CONTROLLER_H__
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "components/search_engines/template_url_service.h"
-#include "components/sync_driver/ui_data_type_controller.h"
+#include "components/sync/driver/ui_data_type_controller.h"
 
 class Profile;
 
@@ -22,31 +22,26 @@ namespace browser_sync {
 class SearchEngineDataTypeController
     : public sync_driver::UIDataTypeController {
  public:
-  SearchEngineDataTypeController(
-      const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
-      const base::Closure& error_callback,
-      sync_driver::SyncClient* sync_client,
-      TemplateURLService* template_url_service);
+  // |dump_stack| is called when an unrecoverable error occurs.
+  SearchEngineDataTypeController(const base::Closure& dump_stack,
+                                 sync_driver::SyncClient* sync_client,
+                                 TemplateURLService* template_url_service);
+  ~SearchEngineDataTypeController() override;
 
   TemplateURLService::Subscription* GetSubscriptionForTesting();
 
  private:
-  ~SearchEngineDataTypeController() override;
-
   // FrontendDataTypeController:
   bool StartModels() override;
   void StopModels() override;
 
   void OnTemplateURLServiceLoaded();
 
-  // A reference to the UI thread's task runner.
-  const scoped_refptr<base::SingleThreadTaskRunner> ui_thread_;
-
   // A pointer to the template URL service that this data type will use.
   TemplateURLService* template_url_service_;
 
   // A subscription to the OnLoadedCallback so it can be cleared if necessary.
-  scoped_ptr<TemplateURLService::Subscription> template_url_subscription_;
+  std::unique_ptr<TemplateURLService::Subscription> template_url_subscription_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchEngineDataTypeController);
 };

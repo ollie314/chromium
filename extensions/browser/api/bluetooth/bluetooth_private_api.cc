@@ -13,6 +13,7 @@
 #include "base/strings/string_util.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
+#include "device/bluetooth/bluetooth_common.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
 #include "extensions/browser/api/bluetooth/bluetooth_api.h"
 #include "extensions/browser/api/bluetooth/bluetooth_api_pairing_delegate.h"
@@ -101,8 +102,8 @@ bool ValidatePairingResponseOptions(
     const device::BluetoothDevice* device,
     const bt_private::SetPairingResponseOptions& options) {
   bool response = options.response != bt_private::PAIRING_RESPONSE_NONE;
-  bool pincode = options.pincode.get() != nullptr;
-  bool passkey = options.passkey.get() != nullptr;
+  bool pincode = options.pincode != nullptr;
+  bool passkey = options.passkey != nullptr;
 
   if (!response && !pincode && !passkey)
     return false;
@@ -142,7 +143,7 @@ BluetoothPrivateSetAdapterStateFunction::
 
 bool BluetoothPrivateSetAdapterStateFunction::DoWork(
     scoped_refptr<device::BluetoothAdapter> adapter) {
-  scoped_ptr<bt_private::SetAdapterState::Params> params(
+  std::unique_ptr<bt_private::SetAdapterState::Params> params(
       bt_private::SetAdapterState::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -178,6 +179,8 @@ bool BluetoothPrivateSetAdapterStateFunction::DoWork(
         CreatePropertyErrorCallback(kDiscoverableProperty));
   }
 
+  parsed_ = true;
+
   if (pending_properties_.empty())
     SendResponse(true);
   return true;
@@ -205,7 +208,7 @@ void BluetoothPrivateSetAdapterStateFunction::OnAdapterPropertySet(
   DCHECK(failed_properties_.find(property) == failed_properties_.end());
 
   pending_properties_.erase(property);
-  if (pending_properties_.empty()) {
+  if (pending_properties_.empty() && parsed_) {
     if (failed_properties_.empty())
       SendResponse(true);
     else
@@ -217,10 +220,9 @@ void BluetoothPrivateSetAdapterStateFunction::OnAdapterPropertyError(
     const std::string& property) {
   DCHECK(pending_properties_.find(property) != pending_properties_.end());
   DCHECK(failed_properties_.find(property) == failed_properties_.end());
-
   pending_properties_.erase(property);
   failed_properties_.insert(property);
-  if (pending_properties_.empty())
+  if (pending_properties_.empty() && parsed_)
     SendError();
 }
 
@@ -250,7 +252,7 @@ BluetoothPrivateSetPairingResponseFunction::
 
 bool BluetoothPrivateSetPairingResponseFunction::DoWork(
     scoped_refptr<device::BluetoothAdapter> adapter) {
-  scoped_ptr<bt_private::SetPairingResponse::Params> params(
+  std::unique_ptr<bt_private::SetPairingResponse::Params> params(
       bt_private::SetPairingResponse::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   const bt_private::SetPairingResponseOptions& options = params->options;
@@ -278,9 +280,9 @@ bool BluetoothPrivateSetPairingResponseFunction::DoWork(
   }
 
   if (options.pincode.get()) {
-    device->SetPinCode(*options.pincode.get());
+    device->SetPinCode(*options.pincode);
   } else if (options.passkey.get()) {
-    device->SetPasskey(*options.passkey.get());
+    device->SetPasskey(*options.passkey);
   } else {
     switch (options.response) {
       case bt_private::PAIRING_RESPONSE_CONFIRM:
@@ -311,7 +313,7 @@ BluetoothPrivateDisconnectAllFunction::
 
 bool BluetoothPrivateDisconnectAllFunction::DoWork(
     scoped_refptr<device::BluetoothAdapter> adapter) {
-  scoped_ptr<bt_private::DisconnectAll::Params> params(
+  std::unique_ptr<bt_private::DisconnectAll::Params> params(
       bt_private::DisconnectAll::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -364,7 +366,7 @@ BluetoothPrivateForgetDeviceFunction::~BluetoothPrivateForgetDeviceFunction() {}
 
 bool BluetoothPrivateForgetDeviceFunction::DoWork(
     scoped_refptr<device::BluetoothAdapter> adapter) {
-  scoped_ptr<bt_private::ForgetDevice::Params> params(
+  std::unique_ptr<bt_private::ForgetDevice::Params> params(
       bt_private::ForgetDevice::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -399,28 +401,27 @@ void BluetoothPrivateForgetDeviceFunction::OnErrorCallback(
 
 bool BluetoothPrivateSetDiscoveryFilterFunction::DoWork(
     scoped_refptr<device::BluetoothAdapter> adapter) {
-  scoped_ptr<SetDiscoveryFilter::Params> params(
+  std::unique_ptr<SetDiscoveryFilter::Params> params(
       SetDiscoveryFilter::Params::Create(*args_));
   auto& df_param = params->discovery_filter;
 
-  scoped_ptr<device::BluetoothDiscoveryFilter> discovery_filter;
+  std::unique_ptr<device::BluetoothDiscoveryFilter> discovery_filter;
 
   // If all filter fields are empty, we are clearing filter. If any field is
   // set, then create proper filter.
   if (df_param.uuids.get() || df_param.rssi.get() || df_param.pathloss.get() ||
       df_param.transport != bt_private::TransportType::TRANSPORT_TYPE_NONE) {
-    uint8_t transport;
+    device::BluetoothTransport transport;
 
     switch (df_param.transport) {
       case bt_private::TransportType::TRANSPORT_TYPE_LE:
-        transport = device::BluetoothDiscoveryFilter::Transport::TRANSPORT_LE;
+        transport = device::BLUETOOTH_TRANSPORT_LE;
         break;
       case bt_private::TransportType::TRANSPORT_TYPE_BREDR:
-        transport =
-            device::BluetoothDiscoveryFilter::Transport::TRANSPORT_CLASSIC;
+        transport = device::BLUETOOTH_TRANSPORT_CLASSIC;
         break;
       default:  // TRANSPORT_TYPE_NONE is included here
-        transport = device::BluetoothDiscoveryFilter::Transport::TRANSPORT_DUAL;
+        transport = device::BLUETOOTH_TRANSPORT_DUAL;
         break;
     }
 
@@ -475,7 +476,7 @@ BluetoothPrivateConnectFunction::~BluetoothPrivateConnectFunction() {}
 
 bool BluetoothPrivateConnectFunction::DoWork(
     scoped_refptr<device::BluetoothAdapter> adapter) {
-  scoped_ptr<bt_private::Connect::Params> params(
+  std::unique_ptr<bt_private::Connect::Params> params(
       bt_private::Connect::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -577,7 +578,7 @@ BluetoothPrivatePairFunction::~BluetoothPrivatePairFunction() {}
 
 bool BluetoothPrivatePairFunction::DoWork(
     scoped_refptr<device::BluetoothAdapter> adapter) {
-  scoped_ptr<bt_private::Pair::Params> params(
+  std::unique_ptr<bt_private::Pair::Params> params(
       bt_private::Pair::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 

@@ -51,35 +51,6 @@ TEST_P(GLES2DecoderTest1, BindBufferInvalidArgs0_0) {
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
 }
 
-TEST_P(GLES2DecoderTest1, BindBufferRangeValidArgs) {
-  EXPECT_CALL(*gl_, BindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 2,
-                                    kServiceBufferId, 4, 4));
-  SpecializedSetup<cmds::BindBufferRange, 0>(true);
-  cmds::BindBufferRange cmd;
-  cmd.Init(GL_TRANSFORM_FEEDBACK_BUFFER, 2, client_buffer_id_, 4, 4);
-  decoder_->set_unsafe_es3_apis_enabled(true);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
-}
-
-TEST_P(GLES2DecoderTest1, BindBufferRangeValidArgsNewId) {
-  EXPECT_CALL(*gl_, BindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 2,
-                                    kNewServiceId, 4, 4));
-  EXPECT_CALL(*gl_, GenBuffersARB(1, _))
-      .WillOnce(SetArgumentPointee<1>(kNewServiceId));
-  SpecializedSetup<cmds::BindBufferRange, 0>(true);
-  cmds::BindBufferRange cmd;
-  cmd.Init(GL_TRANSFORM_FEEDBACK_BUFFER, 2, kNewClientId, 4, 4);
-  decoder_->set_unsafe_es3_apis_enabled(true);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  EXPECT_TRUE(GetBuffer(kNewClientId) != NULL);
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
-}
-
 TEST_P(GLES2DecoderTest1, BindFramebufferValidArgs) {
   EXPECT_CALL(*gl_, BindFramebufferEXT(GL_FRAMEBUFFER, kServiceFramebufferId));
   SpecializedSetup<cmds::BindFramebuffer, 0>(true);
@@ -146,58 +117,6 @@ TEST_P(GLES2DecoderTest1, BindSamplerValidArgs) {
   SpecializedSetup<cmds::BindSampler, 0>(true);
   cmds::BindSampler cmd;
   cmd.Init(1, client_sampler_id_);
-  decoder_->set_unsafe_es3_apis_enabled(true);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
-}
-
-TEST_P(GLES2DecoderTest1, BindTextureValidArgs) {
-  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_2D, kServiceTextureId));
-  SpecializedSetup<cmds::BindTexture, 0>(true);
-  cmds::BindTexture cmd;
-  cmd.Init(GL_TEXTURE_2D, client_texture_id_);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-}
-
-TEST_P(GLES2DecoderTest1, BindTextureValidArgsNewId) {
-  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_2D, kNewServiceId));
-  EXPECT_CALL(*gl_, GenTextures(1, _))
-      .WillOnce(SetArgumentPointee<1>(kNewServiceId));
-  SpecializedSetup<cmds::BindTexture, 0>(true);
-  cmds::BindTexture cmd;
-  cmd.Init(GL_TEXTURE_2D, kNewClientId);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  EXPECT_TRUE(GetTexture(kNewClientId) != NULL);
-}
-
-TEST_P(GLES2DecoderTest1, BindTextureInvalidArgs0_0) {
-  EXPECT_CALL(*gl_, BindTexture(_, _)).Times(0);
-  SpecializedSetup<cmds::BindTexture, 0>(false);
-  cmds::BindTexture cmd;
-  cmd.Init(GL_TEXTURE_1D, client_texture_id_);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
-}
-
-TEST_P(GLES2DecoderTest1, BindTextureInvalidArgs0_1) {
-  EXPECT_CALL(*gl_, BindTexture(_, _)).Times(0);
-  SpecializedSetup<cmds::BindTexture, 0>(false);
-  cmds::BindTexture cmd;
-  cmd.Init(GL_TEXTURE_3D, client_texture_id_);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
-}
-
-TEST_P(GLES2DecoderTest1, BindTransformFeedbackValidArgs) {
-  EXPECT_CALL(*gl_, BindTransformFeedback(GL_TRANSFORM_FEEDBACK,
-                                          kServiceTransformFeedbackId));
-  SpecializedSetup<cmds::BindTransformFeedback, 0>(true);
-  cmds::BindTransformFeedback cmd;
-  cmd.Init(GL_TRANSFORM_FEEDBACK, client_transformfeedback_id_);
   decoder_->set_unsafe_es3_apis_enabled(true);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
@@ -398,18 +317,6 @@ TEST_P(GLES2DecoderTest1, CopyTexSubImage2DInvalidArgs7_0) {
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
 }
 
-TEST_P(GLES2DecoderTest1, CopyTexSubImage3DValidArgs) {
-  EXPECT_CALL(*gl_, CopyTexSubImage3D(GL_TEXTURE_3D, 2, 3, 4, 5, 6, 7, 8, 9));
-  SpecializedSetup<cmds::CopyTexSubImage3D, 0>(true);
-  cmds::CopyTexSubImage3D cmd;
-  cmd.Init(GL_TEXTURE_3D, 2, 3, 4, 5, 6, 7, 8, 9);
-  decoder_->set_unsafe_es3_apis_enabled(true);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
-}
-
 TEST_P(GLES2DecoderTest1, CreateProgramValidArgs) {
   EXPECT_CALL(*gl_, CreateProgram()).WillOnce(Return(kNewServiceId));
   SpecializedSetup<cmds::CreateProgram, 0>(true);
@@ -590,37 +497,6 @@ TEST_P(GLES2DecoderTest1, DeleteTexturesImmediateInvalidArgs) {
   EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, sizeof(temp)));
 }
 
-TEST_P(GLES2DecoderTest1, DeleteTransformFeedbacksImmediateValidArgs) {
-  EXPECT_CALL(*gl_,
-              DeleteTransformFeedbacks(1, Pointee(kServiceTransformFeedbackId)))
-      .Times(1);
-  cmds::DeleteTransformFeedbacksImmediate& cmd =
-      *GetImmediateAs<cmds::DeleteTransformFeedbacksImmediate>();
-  SpecializedSetup<cmds::DeleteTransformFeedbacksImmediate, 0>(true);
-  cmd.Init(1, &client_transformfeedback_id_);
-  decoder_->set_unsafe_es3_apis_enabled(true);
-  EXPECT_EQ(error::kNoError,
-            ExecuteImmediateCmd(cmd, sizeof(client_transformfeedback_id_)));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  EXPECT_FALSE(
-      GetTransformFeedbackServiceId(client_transformfeedback_id_, NULL));
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand,
-            ExecuteImmediateCmd(cmd, sizeof(client_transformfeedback_id_)));
-}
-
-TEST_P(GLES2DecoderTest1, DeleteTransformFeedbacksImmediateInvalidArgs) {
-  cmds::DeleteTransformFeedbacksImmediate& cmd =
-      *GetImmediateAs<cmds::DeleteTransformFeedbacksImmediate>();
-  SpecializedSetup<cmds::DeleteTransformFeedbacksImmediate, 0>(false);
-  GLuint temp = kInvalidClientId;
-  cmd.Init(1, &temp);
-  decoder_->set_unsafe_es3_apis_enabled(true);
-  EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, sizeof(temp)));
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteImmediateCmd(cmd, sizeof(temp)));
-}
-
 TEST_P(GLES2DecoderTest1, DepthFuncValidArgs) {
   EXPECT_CALL(*gl_, DepthFunc(GL_NEVER));
   SpecializedSetup<cmds::DepthFunc, 0>(true);
@@ -795,20 +671,6 @@ TEST_P(GLES2DecoderTest1, FramebufferRenderbufferInvalidArgs2_0) {
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
 }
 
-TEST_P(GLES2DecoderTest1, FramebufferTextureLayerValidArgs) {
-  EXPECT_CALL(*gl_,
-              FramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                                      kServiceTextureId, 4, 5));
-  SpecializedSetup<cmds::FramebufferTextureLayer, 0>(true);
-  cmds::FramebufferTextureLayer cmd;
-  cmd.Init(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, client_texture_id_, 4, 5);
-  decoder_->set_unsafe_es3_apis_enabled(true);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
-}
-
 TEST_P(GLES2DecoderTest1, FrontFaceValidArgs) {
   EXPECT_CALL(*gl_, FrontFace(GL_CW));
   SpecializedSetup<cmds::FrontFace, 0>(true);
@@ -828,6 +690,21 @@ TEST_P(GLES2DecoderTest1, GenBuffersImmediateValidArgs) {
   EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(*cmd, sizeof(temp)));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(GetBuffer(kNewClientId) != NULL);
+}
+
+TEST_P(GLES2DecoderTest1, GenBuffersImmediateDuplicateOrNullIds) {
+  EXPECT_CALL(*gl_, GenBuffersARB(_, _)).Times(0);
+  cmds::GenBuffersImmediate* cmd = GetImmediateAs<cmds::GenBuffersImmediate>();
+  GLuint temp[3] = {kNewClientId, kNewClientId + 1, kNewClientId};
+  SpecializedSetup<cmds::GenBuffersImmediate, 1>(true);
+  cmd->Init(3, temp);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetBuffer(kNewClientId) == NULL);
+  EXPECT_TRUE(GetBuffer(kNewClientId + 1) == NULL);
+  GLuint null_id[2] = {kNewClientId, 0};
+  cmd->Init(2, null_id);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetBuffer(kNewClientId) == NULL);
 }
 
 TEST_P(GLES2DecoderTest1, GenBuffersImmediateInvalidArgs) {
@@ -879,6 +756,22 @@ TEST_P(GLES2DecoderTest1, GenFramebuffersImmediateValidArgs) {
   EXPECT_TRUE(GetFramebuffer(kNewClientId) != NULL);
 }
 
+TEST_P(GLES2DecoderTest1, GenFramebuffersImmediateDuplicateOrNullIds) {
+  EXPECT_CALL(*gl_, GenFramebuffersEXT(_, _)).Times(0);
+  cmds::GenFramebuffersImmediate* cmd =
+      GetImmediateAs<cmds::GenFramebuffersImmediate>();
+  GLuint temp[3] = {kNewClientId, kNewClientId + 1, kNewClientId};
+  SpecializedSetup<cmds::GenFramebuffersImmediate, 1>(true);
+  cmd->Init(3, temp);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetFramebuffer(kNewClientId) == NULL);
+  EXPECT_TRUE(GetFramebuffer(kNewClientId + 1) == NULL);
+  GLuint null_id[2] = {kNewClientId, 0};
+  cmd->Init(2, null_id);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetFramebuffer(kNewClientId) == NULL);
+}
+
 TEST_P(GLES2DecoderTest1, GenFramebuffersImmediateInvalidArgs) {
   EXPECT_CALL(*gl_, GenFramebuffersEXT(_, _)).Times(0);
   cmds::GenFramebuffersImmediate* cmd =
@@ -900,6 +793,22 @@ TEST_P(GLES2DecoderTest1, GenRenderbuffersImmediateValidArgs) {
   EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(*cmd, sizeof(temp)));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(GetRenderbuffer(kNewClientId) != NULL);
+}
+
+TEST_P(GLES2DecoderTest1, GenRenderbuffersImmediateDuplicateOrNullIds) {
+  EXPECT_CALL(*gl_, GenRenderbuffersEXT(_, _)).Times(0);
+  cmds::GenRenderbuffersImmediate* cmd =
+      GetImmediateAs<cmds::GenRenderbuffersImmediate>();
+  GLuint temp[3] = {kNewClientId, kNewClientId + 1, kNewClientId};
+  SpecializedSetup<cmds::GenRenderbuffersImmediate, 1>(true);
+  cmd->Init(3, temp);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetRenderbuffer(kNewClientId) == NULL);
+  EXPECT_TRUE(GetRenderbuffer(kNewClientId + 1) == NULL);
+  GLuint null_id[2] = {kNewClientId, 0};
+  cmd->Init(2, null_id);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetRenderbuffer(kNewClientId) == NULL);
 }
 
 TEST_P(GLES2DecoderTest1, GenRenderbuffersImmediateInvalidArgs) {
@@ -924,6 +833,23 @@ TEST_P(GLES2DecoderTest1, GenSamplersImmediateValidArgs) {
   EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(*cmd, sizeof(temp)));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(GetSampler(kNewClientId) != NULL);
+}
+
+TEST_P(GLES2DecoderTest1, GenSamplersImmediateDuplicateOrNullIds) {
+  EXPECT_CALL(*gl_, GenSamplers(_, _)).Times(0);
+  cmds::GenSamplersImmediate* cmd =
+      GetImmediateAs<cmds::GenSamplersImmediate>();
+  GLuint temp[3] = {kNewClientId, kNewClientId + 1, kNewClientId};
+  SpecializedSetup<cmds::GenSamplersImmediate, 1>(true);
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  cmd->Init(3, temp);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetSampler(kNewClientId) == NULL);
+  EXPECT_TRUE(GetSampler(kNewClientId + 1) == NULL);
+  GLuint null_id[2] = {kNewClientId, 0};
+  cmd->Init(2, null_id);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetSampler(kNewClientId) == NULL);
 }
 
 TEST_P(GLES2DecoderTest1, GenSamplersImmediateInvalidArgs) {
@@ -951,6 +877,22 @@ TEST_P(GLES2DecoderTest1, GenTexturesImmediateValidArgs) {
   EXPECT_TRUE(GetTexture(kNewClientId) != NULL);
 }
 
+TEST_P(GLES2DecoderTest1, GenTexturesImmediateDuplicateOrNullIds) {
+  EXPECT_CALL(*gl_, GenTextures(_, _)).Times(0);
+  cmds::GenTexturesImmediate* cmd =
+      GetImmediateAs<cmds::GenTexturesImmediate>();
+  GLuint temp[3] = {kNewClientId, kNewClientId + 1, kNewClientId};
+  SpecializedSetup<cmds::GenTexturesImmediate, 1>(true);
+  cmd->Init(3, temp);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetTexture(kNewClientId) == NULL);
+  EXPECT_TRUE(GetTexture(kNewClientId + 1) == NULL);
+  GLuint null_id[2] = {kNewClientId, 0};
+  cmd->Init(2, null_id);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetTexture(kNewClientId) == NULL);
+}
+
 TEST_P(GLES2DecoderTest1, GenTexturesImmediateInvalidArgs) {
   EXPECT_CALL(*gl_, GenTextures(_, _)).Times(0);
   cmds::GenTexturesImmediate* cmd =
@@ -972,11 +914,24 @@ TEST_P(GLES2DecoderTest1, GenTransformFeedbacksImmediateValidArgs) {
   cmd->Init(1, &temp);
   EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(*cmd, sizeof(temp)));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  GLuint service_id;
-  EXPECT_TRUE(GetTransformFeedbackServiceId(kNewClientId, &service_id));
-  EXPECT_EQ(kNewServiceId, service_id);
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetTransformFeedback(kNewClientId) != NULL);
+}
+
+TEST_P(GLES2DecoderTest1, GenTransformFeedbacksImmediateDuplicateOrNullIds) {
+  EXPECT_CALL(*gl_, GenTransformFeedbacks(_, _)).Times(0);
+  cmds::GenTransformFeedbacksImmediate* cmd =
+      GetImmediateAs<cmds::GenTransformFeedbacksImmediate>();
+  GLuint temp[3] = {kNewClientId, kNewClientId + 1, kNewClientId};
+  SpecializedSetup<cmds::GenTransformFeedbacksImmediate, 1>(true);
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  cmd->Init(3, temp);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetTransformFeedback(kNewClientId) == NULL);
+  EXPECT_TRUE(GetTransformFeedback(kNewClientId + 1) == NULL);
+  GLuint null_id[2] = {kNewClientId, 0};
+  cmd->Init(2, null_id);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteImmediateCmd(*cmd, sizeof(temp)));
+  EXPECT_TRUE(GetTransformFeedback(kNewClientId) == NULL);
 }
 
 TEST_P(GLES2DecoderTest1, GenTransformFeedbacksImmediateInvalidArgs) {
@@ -1279,48 +1234,6 @@ TEST_P(GLES2DecoderTest1, GetInteger64vValidArgs) {
   decoder_->set_unsafe_es3_apis_enabled(true);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(decoder_->GetGLES2Util()->GLGetNumValuesReturned(GL_ACTIVE_TEXTURE),
-            result->GetNumResults());
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
-}
-
-TEST_P(GLES2DecoderTest1, GetIntegeri_vValidArgs) {
-  EXPECT_CALL(*gl_, GetError()).WillRepeatedly(Return(GL_NO_ERROR));
-  SpecializedSetup<cmds::GetIntegeri_v, 0>(true);
-  typedef cmds::GetIntegeri_v::Result Result;
-  Result* result = static_cast<Result*>(shared_memory_address_);
-  EXPECT_CALL(*gl_, GetIntegeri_v(GL_TRANSFORM_FEEDBACK_BUFFER_BINDING, 2,
-                                  result->GetData()));
-  result->size = 0;
-  cmds::GetIntegeri_v cmd;
-  cmd.Init(GL_TRANSFORM_FEEDBACK_BUFFER_BINDING, 2, shared_memory_id_,
-           shared_memory_offset_);
-  decoder_->set_unsafe_es3_apis_enabled(true);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(decoder_->GetGLES2Util()->GLGetNumValuesReturned(
-                GL_TRANSFORM_FEEDBACK_BUFFER_BINDING),
-            result->GetNumResults());
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  decoder_->set_unsafe_es3_apis_enabled(false);
-  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
-}
-
-TEST_P(GLES2DecoderTest1, GetInteger64i_vValidArgs) {
-  EXPECT_CALL(*gl_, GetError()).WillRepeatedly(Return(GL_NO_ERROR));
-  SpecializedSetup<cmds::GetInteger64i_v, 0>(true);
-  typedef cmds::GetInteger64i_v::Result Result;
-  Result* result = static_cast<Result*>(shared_memory_address_);
-  EXPECT_CALL(*gl_, GetInteger64i_v(GL_TRANSFORM_FEEDBACK_BUFFER_BINDING, 2,
-                                    result->GetData()));
-  result->size = 0;
-  cmds::GetInteger64i_v cmd;
-  cmd.Init(GL_TRANSFORM_FEEDBACK_BUFFER_BINDING, 2, shared_memory_id_,
-           shared_memory_offset_);
-  decoder_->set_unsafe_es3_apis_enabled(true);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(decoder_->GetGLES2Util()->GLGetNumValuesReturned(
-                GL_TRANSFORM_FEEDBACK_BUFFER_BINDING),
             result->GetNumResults());
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   decoder_->set_unsafe_es3_apis_enabled(false);

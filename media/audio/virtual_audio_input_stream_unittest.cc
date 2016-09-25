@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <list>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -34,7 +35,8 @@ const AudioParameters kParams(
 class MockInputCallback : public AudioInputStream::AudioInputCallback {
  public:
   MockInputCallback()
-      : data_pushed_(false, false) {
+      : data_pushed_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                     base::WaitableEvent::InitialState::NOT_SIGNALED) {
     ON_CALL(*this, OnData(_, _, _, _)).WillByDefault(
         InvokeWithoutArgs(&data_pushed_, &base::WaitableEvent::Signal));
   }
@@ -63,9 +65,11 @@ class MockInputCallback : public AudioInputStream::AudioInputCallback {
 class TestAudioSource : public SineWaveAudioSource {
  public:
   TestAudioSource()
-      : SineWaveAudioSource(
-            kParams.channel_layout(), 200.0, kParams.sample_rate()),
-        data_pulled_(false, false) {}
+      : SineWaveAudioSource(kParams.channel_layout(),
+                            200.0,
+                            kParams.sample_rate()),
+        data_pulled_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                     base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 
   ~TestAudioSource() override {}
 
@@ -98,7 +102,8 @@ class VirtualAudioInputStreamTest : public testing::TestWithParam<bool> {
       : audio_thread_(new base::Thread("AudioThread")),
         worker_thread_(new base::Thread("AudioWorkerThread")),
         stream_(NULL),
-        closed_stream_(false, false) {
+        closed_stream_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED) {
     audio_thread_->Start();
     audio_task_runner_ = audio_thread_->task_runner();
   }
@@ -221,16 +226,17 @@ class VirtualAudioInputStreamTest : public testing::TestWithParam<bool> {
 
  private:
   void SyncWithAudioThread() {
-    base::WaitableEvent done(false, false);
+    base::WaitableEvent done(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                             base::WaitableEvent::InitialState::NOT_SIGNALED);
     audio_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
     done.Wait();
   }
 
-  scoped_ptr<base::Thread> audio_thread_;
+  std::unique_ptr<base::Thread> audio_thread_;
   scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
-  scoped_ptr<base::Thread> worker_thread_;
+  std::unique_ptr<base::Thread> worker_thread_;
   scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner_;
 
   VirtualAudioInputStream* stream_;

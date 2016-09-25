@@ -39,6 +39,10 @@ bool PushMessagingDispatcher::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
+void PushMessagingDispatcher::OnDestruct() {
+  delete this;
+}
+
 void PushMessagingDispatcher::subscribe(
     blink::WebServiceWorkerRegistration* service_worker_registration,
     const blink::WebPushSubscriptionOptions& options,
@@ -67,7 +71,9 @@ void PushMessagingDispatcher::DidGetManifest(
     blink::WebServiceWorkerRegistration* service_worker_registration,
     const blink::WebPushSubscriptionOptions& options,
     blink::WebPushSubscriptionCallbacks* callbacks,
-    const Manifest& manifest) {
+    const GURL& manifest_url,
+    const Manifest& manifest,
+    const ManifestDebugInfo&) {
   // Get the sender_info from the manifest since it wasn't provided by
   // the caller.
   if (manifest.IsEmpty()) {
@@ -102,21 +108,23 @@ void PushMessagingDispatcher::DoSubscribe(
                                  PUSH_REGISTRATION_STATUS_NO_SENDER_ID);
     return;
   }
-  Send(new PushMessagingHostMsg_SubscribeFromDocument(
-      routing_id(), request_id, options, service_worker_registration_id));
+  Send(new PushMessagingHostMsg_Subscribe(
+      routing_id(), request_id, service_worker_registration_id, options));
 }
 
 void PushMessagingDispatcher::OnSubscribeFromDocumentSuccess(
     int32_t request_id,
     const GURL& endpoint,
+    const PushSubscriptionOptions& options,
     const std::vector<uint8_t>& p256dh,
     const std::vector<uint8_t>& auth) {
   blink::WebPushSubscriptionCallbacks* callbacks =
       subscription_callbacks_.Lookup(request_id);
   DCHECK(callbacks);
 
-  callbacks->onSuccess(
-      base::WrapUnique(new blink::WebPushSubscription(endpoint, p256dh, auth)));
+  callbacks->onSuccess(base::MakeUnique<blink::WebPushSubscription>(
+      endpoint, options.user_visible_only,
+      blink::WebString::fromLatin1(options.sender_info), p256dh, auth));
 
   subscription_callbacks_.Remove(request_id);
 }
@@ -130,7 +138,7 @@ void PushMessagingDispatcher::OnSubscribeFromDocumentError(
 
   blink::WebPushError::ErrorType error_type =
       status == PUSH_REGISTRATION_STATUS_PERMISSION_DENIED
-          ? blink::WebPushError::ErrorTypePermissionDenied
+          ? blink::WebPushError::ErrorTypeNotAllowed
           : blink::WebPushError::ErrorTypeAbort;
 
   callbacks->onError(blink::WebPushError(

@@ -86,7 +86,7 @@
 namespace blink {
 
 // Figure out the URL of a page or subframe. Returns |page_type| as the type,
-// which indicates page or subframe, or ContextNodeType::NONE if the URL could not
+// which indicates page or subframe, or ContextNodeType::kNone if the URL could not
 // be determined for some reason.
 static WebURL urlFromFrame(LocalFrame* frame)
 {
@@ -109,7 +109,7 @@ static bool IsWhiteSpaceOrPunctuation(UChar c)
 static String selectMisspellingAsync(LocalFrame* selectedFrame, String& description, uint32_t& hash)
 {
     VisibleSelection selection = selectedFrame->selection().selection();
-    if (!selection.isCaretOrRange())
+    if (selection.isNone())
         return String();
 
     // Caret and range selections always return valid normalized ranges.
@@ -131,7 +131,16 @@ static String selectMisspellingAsync(LocalFrame* selectedFrame, String& descript
     return markerRange->text();
 }
 
-void ContextMenuClientImpl::showContextMenu(const ContextMenu* defaultMenu)
+bool ContextMenuClientImpl::shouldShowContextMenuFromTouch(const WebContextMenuData& data)
+{
+    return m_webView->page()->settings().alwaysShowContextMenuOnTouch()
+        || !data.linkURL.isEmpty()
+        || data.mediaType == WebContextMenuData::MediaTypeImage
+        || data.mediaType == WebContextMenuData::MediaTypeVideo
+        || data.isEditable;
+}
+
+bool ContextMenuClientImpl::showContextMenu(const ContextMenu* defaultMenu, bool fromTouch)
 {
     // Displaying the context menu in this function is a big hack as we don't
     // have context, i.e. whether this is being invoked via a script or in
@@ -139,7 +148,7 @@ void ContextMenuClientImpl::showContextMenu(const ContextMenu* defaultMenu)
     // Keyboard events KeyVK_APPS, Shift+F10). Check if this is being invoked
     // in response to the above input events before popping up the context menu.
     if (!ContextMenuAllowedScope::isContextMenuAllowed())
-        return;
+        return false;
 
     HitTestResult r = m_webView->page()->contextMenuController().hitTestResult();
 
@@ -224,7 +233,7 @@ void ContextMenuClientImpl::showContextMenu(const ContextMenu* defaultMenu)
         // controls for audio then the player disappears, and there is no way to
         // return it back. Don't set this bit for fullscreen video, since
         // toggling is ignored in that case.
-        if (mediaElement->hasVideo() && !mediaElement->isFullscreen())
+        if (mediaElement->isHTMLVideoElement() && mediaElement->hasVideo() && !mediaElement->isFullscreen())
             data.mediaFlags |= WebContextMenuData::MediaCanToggleControls;
         if (mediaElement->shouldShowControls())
             data.mediaFlags |= WebContextMenuData::MediaControls;
@@ -321,12 +330,6 @@ void ContextMenuClientImpl::showContextMenu(const ContextMenu* defaultMenu)
     if (selectedFrame->editor().selectionHasStyle(CSSPropertyDirection, "rtl") != FalseTriState)
         data.writingDirectionRightToLeft |= WebContextMenuData::CheckableMenuItemChecked;
 
-    // Now retrieve the security info.
-    DocumentLoader* dl = selectedFrame->loader().documentLoader();
-    WebDataSource* ds = WebDataSourceImpl::fromDocumentLoader(dl);
-    if (ds)
-        data.securityInfo = ds->response().securityInfo();
-
     data.referrerPolicy = static_cast<WebReferrerPolicy>(selectedFrame->document()->getReferrerPolicy());
 
     // Filter out custom menu elements and add them into the data.
@@ -358,11 +361,16 @@ void ContextMenuClientImpl::showContextMenu(const ContextMenu* defaultMenu)
         data.inputFieldType = WebContextMenuData::InputFieldTypeNone;
     }
 
-    data.node = r.innerNodeOrImageMapImage();
+    if (fromTouch && !shouldShowContextMenuFromTouch(data))
+        return false;
 
     WebLocalFrameImpl* selectedWebFrame = WebLocalFrameImpl::fromFrame(selectedFrame);
-    if (selectedWebFrame->client())
-        selectedWebFrame->client()->showContextMenu(data);
+    selectedWebFrame->setContextMenuNode(r.innerNodeOrImageMapImage());
+    if (!selectedWebFrame->client())
+        return false;
+
+    selectedWebFrame->client()->showContextMenu(data);
+    return true;
 }
 
 void ContextMenuClientImpl::clearContextMenu()
@@ -373,8 +381,7 @@ void ContextMenuClientImpl::clearContextMenu()
         return;
 
     WebLocalFrameImpl* selectedWebFrame = WebLocalFrameImpl::fromFrame(selectedFrame);
-    if (selectedWebFrame->client())
-        selectedWebFrame->client()->clearContextMenu();
+    selectedWebFrame->clearContextMenuNode();
 }
 
 static void populateSubMenuItems(const Vector<ContextMenuItem>& inputMenu, WebVector<WebMenuItemInfo>& subMenuItems)

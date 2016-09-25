@@ -60,6 +60,7 @@ generates a bar.typemap containing
 import argparse
 import json
 import os
+import re
 
 
 def ReadTypemap(path):
@@ -83,10 +84,33 @@ def ParseTypemap(typemap):
     key, _, value = line.partition('=')
     values[key].append(value.lstrip('/'))
   result = {}
+  mapping_pattern = \
+      re.compile(r"""^([^=]+)           # mojom type
+                     =
+                     ([^[]+)            # native type
+                     (?:\[([^]]+)\])?$  # optional attribute in square brackets
+                 """, re.X)
   for typename in values['type_mappings']:
-    mojom_type, _, native_type = typename.partition('=')
+    match_result = mapping_pattern.match(typename)
+    assert match_result, (
+        "Cannot parse entry in the \"type_mappings\" section: %s" % typename)
+
+    mojom_type = match_result.group(1)
+    native_type = match_result.group(2)
+    attributes = []
+    if match_result.group(3):
+      attributes = match_result.group(3).split(',')
+
+    assert mojom_type not in result, (
+        "Cannot map multiple native types (%s, %s) to the same mojom type: %s" %
+        (result[mojom_type]['typename'], native_type, mojom_type))
+
     result[mojom_type] = {
         'typename': native_type,
+        'move_only': 'move_only' in attributes,
+        'copyable_pass_by_value': 'copyable_pass_by_value' in attributes,
+        'nullable_is_same_type': 'nullable_is_same_type' in attributes,
+        'hashable': 'hashable' in attributes,
         'public_headers': values['public_headers'],
         'traits_headers': values['traits_headers'],
     }

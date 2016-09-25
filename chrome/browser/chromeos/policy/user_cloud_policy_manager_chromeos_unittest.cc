@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
@@ -33,6 +34,8 @@
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/core/common/schema_registry.h"
+#include "components/policy/policy_constants.h"
+#include "components/policy/proto/device_management_backend.pb.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
@@ -44,12 +47,11 @@
 #include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
-#include "policy/policy_constants.h"
-#include "policy/proto/device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -113,21 +115,22 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
     // Set up a policy map for testing.
     policy_map_.Set(key::kHomepageLocation, POLICY_LEVEL_MANDATORY,
                     POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                    new base::StringValue("http://chromium.org"), nullptr);
-    policy_map_.Set(key::kChromeOsMultiProfileUserBehavior,
-                    POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                    POLICY_SOURCE_ENTERPRISE_DEFAULT,
-                    new base::StringValue("primary-only"), nullptr);
+                    base::MakeUnique<base::StringValue>("http://chromium.org"),
+                    nullptr);
+    policy_map_.Set(
+        key::kChromeOsMultiProfileUserBehavior, POLICY_LEVEL_MANDATORY,
+        POLICY_SCOPE_USER, POLICY_SOURCE_ENTERPRISE_DEFAULT,
+        base::MakeUnique<base::StringValue>("primary-only"), nullptr);
     policy_map_.Set(key::kEasyUnlockAllowed, POLICY_LEVEL_MANDATORY,
                     POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                    new base::FundamentalValue(false), nullptr);
+                    base::MakeUnique<base::FundamentalValue>(false), nullptr);
     policy_map_.Set(key::kCaptivePortalAuthenticationIgnoresProxy,
                     POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                    POLICY_SOURCE_CLOUD, new base::FundamentalValue(false),
-                    nullptr);
+                    POLICY_SOURCE_CLOUD,
+                    base::MakeUnique<base::FundamentalValue>(false), nullptr);
     policy_map_.Set(key::kAllowDinosaurEasterEgg, POLICY_LEVEL_MANDATORY,
                     POLICY_SCOPE_USER, POLICY_SOURCE_ENTERPRISE_DEFAULT,
-                    new base::FundamentalValue(false), nullptr);
+                    base::MakeUnique<base::FundamentalValue>(false), nullptr);
     expected_bundle_.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
         .CopyFrom(policy_map_);
 
@@ -236,10 +239,11 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
       fetcher = PrepareOAuthFetcher(gaia_urls->client_login_to_oauth2_url());
       if (!fetcher)
         return NULL;
-      net::ResponseCookies cookies;
-      cookies.push_back(kOAuthCodeCookie);
 
-      fetcher->set_cookies(cookies);
+      scoped_refptr<net::HttpResponseHeaders> reponse_headers =
+          new net::HttpResponseHeaders("");
+      reponse_headers->AddCookie(kOAuthCodeCookie);
+      fetcher->set_response_headers(reponse_headers);
       fetcher->delegate()->OnURLFetchComplete(fetcher);
 
       // Issue the refresh token.

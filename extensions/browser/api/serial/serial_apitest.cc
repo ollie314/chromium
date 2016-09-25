@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -18,6 +19,7 @@
 #include "extensions/common/api/serial.h"
 #include "extensions/common/switches.h"
 #include "extensions/test/result_catcher.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using testing::_;
@@ -29,14 +31,14 @@ namespace {
 class FakeSerialGetDevicesFunction : public AsyncExtensionFunction {
  public:
   bool RunAsync() override {
-    base::ListValue* devices = new base::ListValue();
-    base::DictionaryValue* device0 = new base::DictionaryValue();
+    std::unique_ptr<base::ListValue> devices(new base::ListValue());
+    std::unique_ptr<base::DictionaryValue> device0(new base::DictionaryValue());
     device0->SetString("path", "/dev/fakeserial");
-    base::DictionaryValue* device1 = new base::DictionaryValue();
+    std::unique_ptr<base::DictionaryValue> device1(new base::DictionaryValue());
     device1->SetString("path", "\\\\COM800\\");
-    devices->Append(device0);
-    devices->Append(device1);
-    SetResult(devices);
+    devices->Append(std::move(device0));
+    devices->Append(std::move(device1));
+    SetResult(std::move(devices));
     SendResponse(true);
     return true;
   }
@@ -134,14 +136,14 @@ ExtensionFunction* FakeSerialConnectFunctionFactory() {
 void CreateTestSerialServiceOnFileThread(
     mojo::InterfaceRequest<device::serial::SerialService> request) {
   auto io_handler_factory = base::Bind(&FakeEchoSerialIoHandler::Create);
-  auto connection_factory = new device::SerialConnectionFactory(
-      io_handler_factory,
-      content::BrowserThread::GetMessageLoopProxyForThread(
-          content::BrowserThread::IO));
-  scoped_ptr<device::SerialDeviceEnumerator> device_enumerator(
+  auto* connection_factory = new device::SerialConnectionFactory(
+      io_handler_factory, content::BrowserThread::GetTaskRunnerForThread(
+                              content::BrowserThread::IO));
+  std::unique_ptr<device::SerialDeviceEnumerator> device_enumerator(
       new FakeSerialDeviceEnumerator);
-  new device::SerialServiceImpl(
-      connection_factory, std::move(device_enumerator), std::move(request));
+  mojo::MakeStrongBinding(base::MakeUnique<device::SerialServiceImpl>(
+                              connection_factory, std::move(device_enumerator)),
+                          std::move(request));
 }
 
 void CreateTestSerialService(

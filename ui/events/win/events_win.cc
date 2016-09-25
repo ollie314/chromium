@@ -19,9 +19,12 @@ namespace ui {
 namespace {
 
 // From MSDN: "Mouse" events are flagged with 0xFF515700 if they come
-// from a touch or stylus device.  In Vista or later, they are also flagged
-// with 0x80 if they come from touch.
-#define MOUSEEVENTF_FROMTOUCH (0xFF515700 | 0x80)
+// from a touch or stylus device.  In Vista or later, the eighth bit,
+// masked by 0x80, is used to differentiate touch input from pen input
+// (0 = pen, 1 = touch).
+#define MOUSEEVENTF_FROMTOUCHPEN 0xFF515700
+#define MOUSEEVENTF_FROMTOUCH (MOUSEEVENTF_FROMTOUCHPEN | 0x80)
+#define SIGNATURE_MASK 0xFFFFFF00
 
 // Get the native mouse key state from the native event message type.
 int GetNativeMouseKey(const base::NativeEvent& native_event) {
@@ -139,10 +142,6 @@ int MouseStateFlagsFromNative(const base::NativeEvent& native_event) {
 
 }  // namespace
 
-void UpdateDeviceList() {
-  NOTIMPLEMENTED();
-}
-
 EventType EventTypeFromNative(const base::NativeEvent& native_event) {
   switch (native_event.message) {
     case WM_KEYDOWN:
@@ -216,7 +215,7 @@ int EventFlagsFromNative(const base::NativeEvent& native_event) {
   return flags;
 }
 
-base::TimeDelta EventTimeFromNative(const base::NativeEvent& native_event) {
+base::TimeTicks EventTimeFromNative(const base::NativeEvent& native_event) {
   // On Windows, the native input event timestamp (|native_event.time|) is
   // coming from |GetTickCount()| clock [1], while in platform independent code
   // path we get timestamps by calling |TimeTicks::Now()|, which, if using high-
@@ -225,6 +224,7 @@ base::TimeDelta EventTimeFromNative(const base::NativeEvent& native_event) {
   // |TimeTicks::Now()| for event timestamp instead of the native timestamp to
   // ensure computed input latency and web exposed timestamp is consistent with
   // other components.
+  // It is unnecessary to invoke |ValidateEventTimeClock| here because of above.
   // [1] http://blogs.msdn.com/b/oldnewthing/archive/2014/01/22/10491576.aspx
   return EventTimeForNow();
 }
@@ -296,7 +296,12 @@ int GetChangedMouseButtonFlagsFromNative(
 
 PointerDetails GetMousePointerDetailsFromNative(
     const base::NativeEvent& native_event) {
-  return PointerDetails(EventPointerType::POINTER_TYPE_MOUSE);
+  // We should filter out all the mouse events Synthesized from touch events.
+  // TODO(lanwei): Will set the pointer ID, see https://crbug.com/616771.
+  if ((GetMessageExtraInfo() & SIGNATURE_MASK) != MOUSEEVENTF_FROMTOUCHPEN)
+    return PointerDetails(EventPointerType::POINTER_TYPE_MOUSE);
+
+  return PointerDetails(EventPointerType::POINTER_TYPE_PEN);
 }
 
 gfx::Vector2d GetMouseWheelOffset(const base::NativeEvent& native_event) {

@@ -5,6 +5,7 @@
 #include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/message_loop/message_loop.h"
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -15,7 +16,7 @@
 #include "gpu/config/gpu_info_collector.h"
 #include "gpu/config/gpu_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "ui/gl/gl_surface.h"
+#include "ui/gl/init/gl_factory.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_android.h"
@@ -30,11 +31,12 @@ int RunHelper(base::TestSuite* testSuite) {
 #else
   base::MessageLoopForIO message_loop;
 #endif
+  base::FeatureList::InitializeInstance(std::string(), std::string());
   gpu::GPUInfo gpu_info;
   gpu::CollectBasicGraphicsInfo(&gpu_info);
   gpu::ApplyGpuDriverBugWorkarounds(gpu_info,
                                     base::CommandLine::ForCurrentProcess());
-  gfx::GLSurface::InitializeOneOff();
+  gl::init::InitializeGLOneOff();
   ::gles2::Initialize();
   return testSuite->Run();
 }

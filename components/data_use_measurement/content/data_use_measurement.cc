@@ -14,6 +14,10 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 
+#if defined(OS_ANDROID)
+#include "net/android/traffic_stats.h"
+#endif
+
 namespace data_use_measurement {
 
 namespace {
@@ -52,31 +56,58 @@ DataUseMeasurement::DataUseMeasurement(
       app_state_(base::android::APPLICATION_STATE_HAS_RUNNING_ACTIVITIES),
       app_listener_(new base::android::ApplicationStatusListener(
           base::Bind(&DataUseMeasurement::OnApplicationStateChange,
-                     base::Unretained(this))))
+                     base::Unretained(this)))),
+      rx_bytes_os_(0),
+      tx_bytes_os_(0),
+      bytes_transferred_since_last_traffic_stats_query_(0)
 #endif
 {
 }
 
 DataUseMeasurement::~DataUseMeasurement(){};
 
-void DataUseMeasurement::ReportDataUseUMA(
-    const net::URLRequest* request) const {
-  const content::ResourceRequestInfo* info =
-      content::ResourceRequestInfo::ForRequest(request);
-  // Having |info| is the sign of a request for a web content from user. For now
-  // we could add a condition to check ProcessType in info is
-  // content::PROCESS_TYPE_RENDERER, but it won't be compatible with upcoming
-  // PlzNavigate architecture. So just existence of |info| is verified, and the
-  // current check should be compatible with upcoming changes in PlzNavigate.
-  bool is_user_traffic = info != nullptr;
+void DataUseMeasurement::OnBeforeRedirect(const net::URLRequest& request,
+                                          const GURL& new_location) {
+  // Recording data use of request on redirects.
+  ReportDataUseUMA(request);
+}
 
+void DataUseMeasurement::OnNetworkBytesReceived(const net::URLRequest& request,
+                                                int64_t bytes_received) {
+  UMA_HISTOGRAM_COUNTS("DataUse.BytesReceived.Delegate", bytes_received);
+#if defined(OS_ANDROID)
+  bytes_transferred_since_last_traffic_stats_query_ += bytes_received;
+#endif
+}
+
+void DataUseMeasurement::OnNetworkBytesSent(const net::URLRequest& request,
+                                            int64_t bytes_sent) {
+  UMA_HISTOGRAM_COUNTS("DataUse.BytesSent.Delegate", bytes_sent);
+#if defined(OS_ANDROID)
+  bytes_transferred_since_last_traffic_stats_query_ += bytes_sent;
+#endif
+}
+
+void DataUseMeasurement::OnCompleted(const net::URLRequest& request,
+                                     bool started) {
+  // TODO(amohammadkhan): Verify that there is no double recording in data use
+  // of redirected requests.
+  ReportDataUseUMA(request);
+#if defined(OS_ANDROID)
+  MaybeRecordNetworkBytesOS();
+#endif
+}
+
+void DataUseMeasurement::ReportDataUseUMA(
+    const net::URLRequest& request) const {
   // Counts rely on URLRequest::GetTotalReceivedBytes() and
   // URLRequest::GetTotalSentBytes(), which does not include the send path,
   // network layer overhead, TLS overhead, and DNS.
   // TODO(amohammadkhan): Make these measured bytes more in line with number of
   // bytes in lower levels.
-  int64_t total_upload_bytes = request->GetTotalSentBytes();
-  int64_t total_received_bytes = request->GetTotalReceivedBytes();
+  int64_t total_upload_bytes = request.GetTotalSentBytes();
+  int64_t total_received_bytes = request.GetTotalReceivedBytes();
+  bool is_user_traffic = IsUserInitiatedRequest(request);
 
   bool is_connection_cellular =
       net::NetworkChangeNotifier::IsConnectionCellular(
@@ -93,7 +124,7 @@ void DataUseMeasurement::ReportDataUseUMA(
       total_received_bytes);
 
   DataUseUserData* attached_service_data = reinterpret_cast<DataUseUserData*>(
-      request->GetUserData(DataUseUserData::kUserDataKey));
+      request.GetUserData(DataUseUserData::kUserDataKey));
   DataUseUserData::ServiceName service_name =
       attached_service_data ? attached_service_data->service_name()
                             : DataUseUserData::NOT_TAGGED;
@@ -110,6 +141,20 @@ void DataUseMeasurement::ReportDataUseUMA(
         attached_service_data->GetServiceNameAsString(service_name),
         total_upload_bytes + total_received_bytes, is_connection_cellular);
   }
+}
+
+// static
+bool DataUseMeasurement::IsUserInitiatedRequest(
+    const net::URLRequest& request) {
+  // Having ResourceRequestInfo in the URL request is a sign that the request is
+  // for a web content from user. For now we could add a condition to check
+  // ProcessType in info is content::PROCESS_TYPE_RENDERER, but it won't be
+  // compatible with upcoming PlzNavigate architecture. So just existence of
+  // ResourceRequestInfo is verified, and the current check should be compatible
+  // with upcoming changes in PlzNavigate.
+  // TODO(rajendrant): Verify this condition for different use cases. See
+  // crbug.com/626063.
+  return content::ResourceRequestInfo::ForRequest(&request) != nullptr;
 }
 
 #if defined(OS_ANDROID)
@@ -143,6 +188,40 @@ std::string DataUseMeasurement::GetHistogramName(
 void DataUseMeasurement::OnApplicationStateChange(
     base::android::ApplicationState application_state) {
   app_state_ = application_state;
+  if (app_state_ != base::android::APPLICATION_STATE_HAS_RUNNING_ACTIVITIES)
+    MaybeRecordNetworkBytesOS();
+}
+
+void DataUseMeasurement::MaybeRecordNetworkBytesOS() {
+  // Minimum number of bytes that should be reported by the network delegate
+  // before Android's TrafficStats API is queried (if Chrome is not in
+  // background). This reduces the overhead of repeatedly calling the API.
+  static const int64_t kMinDelegateBytes = 25000;
+
+  if (bytes_transferred_since_last_traffic_stats_query_ < kMinDelegateBytes &&
+      CurrentAppState() == FOREGROUND) {
+    return;
+  }
+  bytes_transferred_since_last_traffic_stats_query_ = 0;
+  int64_t bytes = 0;
+  // Query Android traffic stats directly instead of registering with the
+  // DataUseAggregator since the latter does not provide notifications for
+  // the incognito traffic.
+  if (net::android::traffic_stats::GetCurrentUidRxBytes(&bytes)) {
+    if (rx_bytes_os_ != 0) {
+      DCHECK_GE(bytes, rx_bytes_os_);
+      UMA_HISTOGRAM_COUNTS("DataUse.BytesReceived.OS", bytes - rx_bytes_os_);
+    }
+    rx_bytes_os_ = bytes;
+  }
+
+  if (net::android::traffic_stats::GetCurrentUidTxBytes(&bytes)) {
+    if (tx_bytes_os_ != 0) {
+      DCHECK_GE(bytes, tx_bytes_os_);
+      UMA_HISTOGRAM_COUNTS("DataUse.BytesSent.OS", bytes - tx_bytes_os_);
+    }
+    tx_bytes_os_ = bytes;
+  }
 }
 #endif
 

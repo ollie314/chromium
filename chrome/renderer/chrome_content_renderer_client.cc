@@ -21,29 +21,32 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/common/channel_info.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_isolated_world_ids.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/pepper_permission_util.h"
+#include "chrome/common/prerender_types.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/secure_origin_whitelist.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "chrome/grit/renderer_resources.h"
+#include "chrome/renderer/app_categorizer.h"
 #include "chrome/renderer/banners/app_banner_client.h"
 #include "chrome/renderer/benchmarking_extension.h"
 #include "chrome/renderer/chrome_render_frame_observer.h"
 #include "chrome/renderer/chrome_render_thread_observer.h"
 #include "chrome/renderer/chrome_render_view_observer.h"
 #include "chrome/renderer/content_settings_observer.h"
-#include "chrome/renderer/external_extension.h"
 #include "chrome/renderer/loadtimes_extension_bindings.h"
 #include "chrome/renderer/media/chrome_key_systems.h"
 #include "chrome/renderer/net/net_error_helper.h"
 #include "chrome/renderer/net_benchmarking_extension.h"
 #include "chrome/renderer/page_load_histograms.h"
+#include "chrome/renderer/page_load_metrics/metrics_render_frame_observer.h"
 #include "chrome/renderer/pepper/pepper_helper.h"
 #include "chrome/renderer/plugins/non_loadable_plugin_placeholder.h"
 #include "chrome/renderer/plugins/plugin_preroller.h"
@@ -66,18 +69,20 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/dom_distiller/content/renderer/distillability_agent.h"
 #include "components/dom_distiller/content/renderer/distiller_js_render_frame_observer.h"
+#include "components/dom_distiller/core/dom_distiller_switches.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/error_page/common/localized_error.h"
 #include "components/network_hints/renderer/prescient_networking_dispatcher.h"
-#include "components/page_load_metrics/renderer/metrics_render_frame_observer.h"
 #include "components/password_manager/content/renderer/credential_manager_client.h"
 #include "components/pdf/renderer/pepper_pdf_host.h"
 #include "components/plugins/renderer/mobile_youtube_plugin.h"
 #include "components/signin/core/common/profile_management_switches.h"
-#include "components/startup_metric_utils/common/startup_metric_messages.h"
+#include "components/startup_metric_utils/common/startup_metric.mojom.h"
+#include "components/subresource_filter/content/renderer/ruleset_dealer.h"
+#include "components/subresource_filter/content/renderer/subresource_filter_agent.h"
 #include "components/version_info/version_info.h"
 #include "components/visitedlink/renderer/visitedlink_slave.h"
-#include "components/web_cache/renderer/web_cache_render_thread_observer.h"
+#include "components/web_cache/renderer/web_cache_impl.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
@@ -91,6 +96,7 @@
 #include "net/base/net_errors.h"
 #include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/shared_impl/ppapi_switches.h"
+#include "services/shell/public/cpp/interface_provider.h"
 #include "third_party/WebKit/public/platform/URLConversion.h"
 #include "third_party/WebKit/public/platform/WebCachePolicy.h"
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
@@ -110,7 +116,6 @@
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
-#include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
 #if !defined(DISABLE_NACL)
 #include "components/nacl/common/nacl_constants.h"
@@ -126,11 +131,8 @@
 #include "extensions/renderer/renderer_extension_registry.h"
 #endif
 
-#if defined(ENABLE_IPC_FUZZER)
-#include "chrome/common/external_ipc_dumper.h"
-#endif
-
 #if defined(ENABLE_PLUGINS)
+#include "chrome/common/plugin_utils.h"
 #include "chrome/renderer/plugins/chrome_plugin_placeholder.h"
 #include "chrome/renderer/plugins/power_saver_info.h"
 #endif
@@ -147,8 +149,8 @@
 #endif
 
 #if defined(ENABLE_SPELLCHECK)
-#include "chrome/renderer/spellchecker/spellcheck.h"
-#include "chrome/renderer/spellchecker/spellcheck_provider.h"
+#include "components/spellcheck/renderer/spellcheck.h"
+#include "components/spellcheck/renderer/spellcheck_provider.h"
 #endif
 
 #if defined(ENABLE_WEBRTC)
@@ -183,7 +185,16 @@ using content::RenderThread;
 using content::WebPluginInfo;
 using extensions::Extension;
 
+namespace internal {
+const char kFlashYouTubeRewriteUMA[] = "Plugin.Flash.YouTubeRewrite";
+}  // namespace internal
+
 namespace {
+
+void RecordYouTubeRewriteUMA(internal::YouTubeRewriteStatus status) {
+  UMA_HISTOGRAM_ENUMERATION(internal::kFlashYouTubeRewriteUMA, status,
+                            internal::NUM_PLUGIN_ERROR);
+}
 
 // Whitelist PPAPI for Android Runtime for Chromium. (See crbug.com/383937)
 #if defined(ENABLE_PLUGINS)
@@ -224,30 +235,6 @@ void AppendParams(const std::vector<base::string16>& additional_names,
 
   existing_names->swap(names);
   existing_values->swap(values);
-}
-
-// For certain sandboxed Pepper plugins, use the JavaScript Content Settings.
-bool ShouldUseJavaScriptSettingForPlugin(const WebPluginInfo& plugin) {
-  if (plugin.type != WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS &&
-      plugin.type != WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS) {
-    return false;
-  }
-
-#if !defined(DISABLE_NACL)
-  // Treat Native Client invocations like JavaScript.
-  if (plugin.name == ASCIIToUTF16(nacl::kNaClPluginName))
-    return true;
-#endif
-
-#if defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS)
-  // Treat CDM invocations like JavaScript.
-  if (plugin.name == ASCIIToUTF16(kWidevineCdmDisplayName)) {
-    DCHECK(plugin.type == WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS);
-    return true;
-  }
-#endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS)
-
-  return false;
 }
 #endif  // defined(ENABLE_PLUGINS)
 
@@ -294,6 +281,7 @@ class MediaLoadDeferrer : public content::RenderFrameObserver {
     continue_loading_cb_.Run();
     delete this;
   }
+  void OnDestruct() override { delete this; }
 
   const base::Closure continue_loading_cb_;
 
@@ -328,11 +316,14 @@ ChromeContentRendererClient::~ChromeContentRendererClient() {
 void ChromeContentRendererClient::RenderThreadStarted() {
   RenderThread* thread = RenderThread::Get();
 
-  thread->Send(new StartupMetricHostMsg_RecordRendererMainEntryTime(
-      main_entry_time_));
+  {
+    startup_metric_utils::mojom::StartupMetricHostPtr startup_metric_host;
+    thread->GetRemoteInterfaces()->GetInterface(&startup_metric_host);
+    startup_metric_host->RecordRendererMainEntryTime(main_entry_time_);
+  }
 
   chrome_observer_.reset(new ChromeRenderThreadObserver());
-  web_cache_observer_.reset(new web_cache::WebCacheRenderThreadObserver());
+  web_cache_impl_.reset(new web_cache::WebCacheImpl());
 
 #if defined(ENABLE_EXTENSIONS)
   ChromeExtensionsRendererClient::GetInstance()->RenderThreadStarted();
@@ -348,29 +339,29 @@ void ChromeContentRendererClient::RenderThreadStarted() {
     thread->AddObserver(spellcheck_.get());
   }
 #endif
-  visited_link_slave_.reset(new visitedlink::VisitedLinkSlave());
 #if defined(FULL_SAFE_BROWSING)
   phishing_classifier_.reset(safe_browsing::PhishingClassifierFilter::Create());
 #endif
   prerender_dispatcher_.reset(new prerender::PrerenderDispatcher());
+  subresource_filter_ruleset_dealer_.reset(
+      new subresource_filter::RulesetDealer());
 #if defined(ENABLE_WEBRTC)
-  webrtc_logging_message_filter_ = new WebRtcLoggingMessageFilter(
-      thread->GetIOMessageLoopProxy());
+  webrtc_logging_message_filter_ =
+      new WebRtcLoggingMessageFilter(thread->GetIOTaskRunner());
 #endif
 
   thread->AddObserver(chrome_observer_.get());
 #if defined(FULL_SAFE_BROWSING)
   thread->AddObserver(phishing_classifier_.get());
 #endif
-  thread->AddObserver(visited_link_slave_.get());
   thread->AddObserver(prerender_dispatcher_.get());
+  thread->AddObserver(subresource_filter_ruleset_dealer_.get());
   thread->AddObserver(SearchBouncer::GetInstance());
 
 #if defined(ENABLE_WEBRTC)
   thread->AddFilter(webrtc_logging_message_filter_.get());
 #endif
 
-  thread->RegisterExtension(extensions_v8::ExternalExtension::Get());
   thread->RegisterExtension(extensions_v8::LoadTimesExtension::Get());
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -406,16 +397,6 @@ void ChromeContentRendererClient::RenderThreadStarted() {
       WebString::fromUTF8(chrome::kAndroidAppScheme));
 #endif
 
-#if defined(ENABLE_IPC_FUZZER)
-  if (command_line->HasSwitch(switches::kIpcDumpDirectory)) {
-    base::FilePath dump_directory =
-        command_line->GetSwitchValuePath(switches::kIpcDumpDirectory);
-    IPC::ChannelProxy::OutgoingMessageFilter* filter =
-        LoadExternalIPCDumper(dump_directory);
-    thread->GetChannel()->set_outgoing_message_filter(filter);
-  }
-#endif
-
   // chrome-search: pages should not be accessible by bookmarklets
   // or javascript: URLs typed in the omnibox.
   WebSecurityPolicy::registerURLSchemeAsNotAllowingJavascriptURLs(
@@ -444,6 +425,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
     WebSecurityPolicy::addSchemeToBypassSecureContextWhitelist(
         WebString::fromUTF8(scheme));
   }
+
+#if defined(OS_CHROMEOS)
+  leak_detector_remote_client_.reset(new LeakDetectorRemoteClient());
+  thread->AddObserver(leak_detector_remote_client_.get());
+#endif
 }
 
 void ChromeContentRendererClient::RenderFrameCreated(
@@ -501,9 +487,12 @@ void ChromeContentRendererClient::RenderFrameCreated(
   new dom_distiller::DistillerJsRenderFrameObserver(
       render_frame, chrome::ISOLATED_WORLD_ID_CHROME_INTERNAL);
 
-  // Create DistillabilityAgent to send distillability updates to
-  // DistillabilityDriver in the browser process.
-  new dom_distiller::DistillabilityAgent(render_frame);
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableDistillabilityService)) {
+    // Create DistillabilityAgent to send distillability updates to
+    // DistillabilityDriver in the browser process.
+    new dom_distiller::DistillabilityAgent(render_frame);
+  }
 
   // Set up a mojo service to test if this page is a contextual search page.
   new contextual_search::OverlayJsRenderFrameObserver(render_frame);
@@ -514,6 +503,12 @@ void ChromeContentRendererClient::RenderFrameCreated(
       new PasswordGenerationAgent(render_frame, password_autofill_agent);
   new AutofillAgent(render_frame, password_autofill_agent,
                     password_generation_agent);
+
+  // There is no render thread, thus no RulesetDealer in ChromeRenderViewTests.
+  if (subresource_filter_ruleset_dealer_) {
+    new subresource_filter::SubresourceFilterAgent(
+        render_frame, subresource_filter_ruleset_dealer_.get());
+  }
 }
 
 void ChromeContentRendererClient::RenderViewCreated(
@@ -536,7 +531,7 @@ void ChromeContentRendererClient::RenderViewCreated(
   if (command_line->HasSwitch(switches::kInstantProcess))
     new SearchBox(render_view);
 
-  new ChromeRenderViewObserver(render_view, web_cache_observer_.get());
+  new ChromeRenderViewObserver(render_view, web_cache_impl_.get());
 
   new password_manager::CredentialManagerClient(render_view);
 }
@@ -768,8 +763,15 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
         PowerSaverInfo power_saver_info =
             PowerSaverInfo::Get(render_frame, power_saver_setting_on, params,
                                 info, frame->document().url());
+        // Prevent small plugins from loading by using a placeholder until
+        // we can determine the unobscured size of the object.
+        bool blocked_for_tinyness =
+            ChromePluginPlaceholder::IsSmallContentFilterEnabled() &&
+            power_saver_info.power_saver_enabled;
+
         if (power_saver_info.blocked_for_background_tab || is_prerendering ||
-            !power_saver_info.poster_attribute.empty()) {
+            !power_saver_info.poster_attribute.empty() ||
+            blocked_for_tinyness) {
           placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
               render_frame, frame, params, info, identifier, group_name,
               power_saver_info.poster_attribute.empty()
@@ -778,13 +780,15 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
               l10n_util::GetStringFUTF16(IDS_PLUGIN_BLOCKED, group_name),
               power_saver_info);
           placeholder->set_blocked_for_prerendering(is_prerendering);
+          placeholder->set_blocked_for_tinyness(blocked_for_tinyness);
           placeholder->AllowLoading();
           break;
         }
 
         std::unique_ptr<content::PluginInstanceThrottler> throttler;
         if (power_saver_info.power_saver_enabled) {
-          throttler = PluginInstanceThrottler::Create();
+          throttler =
+              PluginInstanceThrottler::Create(RenderFrame::RECORD_DECISION);
           // PluginPreroller manages its own lifetime.
           new PluginPreroller(
               render_frame, frame, params, info, identifier, group_name,
@@ -801,6 +805,13 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
         placeholder = create_blocked_plugin(
             IDR_DISABLED_PLUGIN_HTML,
             l10n_util::GetStringFUTF16(IDS_PLUGIN_DISABLED, group_name));
+        break;
+      }
+      case ChromeViewHostMsg_GetPluginInfo_Status::kFlashHiddenPreferHtml: {
+        placeholder = create_blocked_plugin(
+            IDR_PREFER_HTML_PLUGIN_HTML,
+            l10n_util::GetStringFUTF16(IDS_PLUGIN_PREFER_HTML_BY_DEFAULT,
+                                       group_name));
         break;
       }
       case ChromeViewHostMsg_GetPluginInfo_Status::kOutdatedBlocked: {
@@ -852,6 +863,16 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
         observer->DidBlockContentType(content_type, group_name);
         break;
       }
+      case ChromeViewHostMsg_GetPluginInfo_Status::kComponentUpdateRequired: {
+        placeholder = create_blocked_plugin(
+            IDR_BLOCKED_PLUGIN_HTML,
+            l10n_util::GetStringFUTF16(IDS_PLUGIN_OUTDATED, group_name));
+        placeholder->AllowLoading();
+        render_frame->Send(new ChromeViewHostMsg_BlockedComponentUpdatedPlugin(
+            render_frame->GetRoutingID(), placeholder->CreateRoutingId(),
+            identifier));
+        break;
+      }
     }
   }
   placeholder->SetStatus(status);
@@ -890,43 +911,8 @@ bool ChromeContentRendererClient::IsNaClAllowed(
     const Extension* extension,
     WebPluginParams* params) {
   // Temporarily allow these whitelisted apps and WebUIs to use NaCl.
-  std::string app_url_host = app_url.host();
-  std::string manifest_url_path = manifest_url.path();
-
   bool is_whitelisted_web_ui =
       app_url.spec() == chrome::kChromeUIAppListStartPageURL;
-
-  bool is_photo_app =
-      // Whitelisted apps must be served over https.
-      app_url.SchemeIsCryptographic() && manifest_url.SchemeIsCryptographic() &&
-      (base::EndsWith(app_url_host, "plus.google.com",
-                      base::CompareCase::INSENSITIVE_ASCII) ||
-       base::EndsWith(app_url_host, "plus.sandbox.google.com",
-                      base::CompareCase::INSENSITIVE_ASCII)) &&
-      manifest_url.DomainIs("ssl.gstatic.com") &&
-      (manifest_url_path.find("s2/oz/nacl/") == 1 ||
-       manifest_url_path.find("photos/nacl/") == 1);
-
-  std::string manifest_fs_host;
-  if (manifest_url.SchemeIsFileSystem() && manifest_url.inner_url()) {
-    manifest_fs_host = manifest_url.inner_url()->host();
-  }
-  bool is_hangouts_app =
-      // Whitelisted apps must be served over secure scheme.
-      app_url.SchemeIsCryptographic() && manifest_url.SchemeIsFileSystem() &&
-      manifest_url.inner_url()->SchemeIsCryptographic() &&
-      (base::EndsWith(app_url_host, "talkgadget.google.com",
-                      base::CompareCase::INSENSITIVE_ASCII) ||
-       base::EndsWith(app_url_host, "plus.google.com",
-                      base::CompareCase::INSENSITIVE_ASCII) ||
-       base::EndsWith(app_url_host, "plus.sandbox.google.com",
-                      base::CompareCase::INSENSITIVE_ASCII) ||
-       base::EndsWith(app_url_host, "hangouts.google.com",
-                      base::CompareCase::INSENSITIVE_ASCII)) &&
-      // The manifest must be loaded from the host's FileSystem.
-      (manifest_fs_host == app_url_host);
-
-  bool is_whitelisted_app = is_photo_app || is_hangouts_app;
 
   bool is_invoked_by_webstore_installed_extension = false;
   bool is_extension_unrestricted = false;
@@ -960,7 +946,7 @@ bool ChromeContentRendererClient::IsNaClAllowed(
   //  5) --enable-nacl is set.
   bool is_nacl_allowed_by_location =
       is_whitelisted_web_ui ||
-      is_whitelisted_app ||
+      AppCategorizer::IsWhitelistedApp(manifest_url, app_url) ||
       is_extension_unrestricted ||
       is_extension_force_installed ||
       is_invoked_by_webstore_installed_extension;
@@ -1090,13 +1076,6 @@ bool ChromeContentRendererClient::ShouldFork(WebLocalFrame* frame,
     return true;
   }
 
-  // For now, we skip the rest for POST submissions.  This is because
-  // http://crbug.com/101395 is more likely to cause compatibility issues
-  // with hosted apps and extensions than WebUI pages.  We will remove this
-  // check when cross-process POST submissions are supported.
-  if (http_method != "GET")
-    return false;
-
   // If |url| matches one of the prerendered URLs, stop this navigation and try
   // to swap in the prerendered page on the browser process. If the prerendered
   // page no longer exists by the time the OpenURL IPC is handled, a normal
@@ -1153,13 +1132,21 @@ bool ChromeContentRendererClient::WillSendRequest(
   return false;
 }
 
+bool ChromeContentRendererClient::IsPrefetchOnly(
+    content::RenderFrame* render_frame,
+    const blink::WebURLRequest& request) {
+  return prerender::PrerenderHelper::GetPrerenderMode(render_frame) ==
+         prerender::PREFETCH_ONLY;
+}
+
 unsigned long long ChromeContentRendererClient::VisitedLinkHash(
     const char* canonical_url, size_t length) {
-  return visited_link_slave_->ComputeURLFingerprint(canonical_url, length);
+  return chrome_observer_->visited_link_slave()->ComputeURLFingerprint(
+      canonical_url, length);
 }
 
 bool ChromeContentRendererClient::IsLinkVisited(unsigned long long link_hash) {
-  return visited_link_slave_->IsVisited(link_hash);
+  return chrome_observer_->visited_link_slave()->IsVisited(link_hash);
 }
 
 blink::WebPrescientNetworking*
@@ -1216,33 +1203,24 @@ ChromeContentRendererClient::OverrideSpeechSynthesizer(
 
 bool ChromeContentRendererClient::AllowPepperMediaStreamAPI(
     const GURL& url) {
-#if !defined(OS_ANDROID)
-  // Allow only the Hangouts app to use the MediaStream APIs. It's OK to check
-  // the whitelist in the renderer, since we're only preventing access until
-  // these APIs are public and stable.
-  std::string url_host = url.host();
-  if (url.SchemeIs("https") &&
-      (base::EndsWith(url_host, "talkgadget.google.com",
-                      base::CompareCase::INSENSITIVE_ASCII) ||
-       base::EndsWith(url_host, "plus.google.com",
-                      base::CompareCase::INSENSITIVE_ASCII) ||
-       base::EndsWith(url_host, "plus.sandbox.google.com",
-                      base::CompareCase::INSENSITIVE_ASCII)) &&
-      base::StartsWith(url.path(), "/hangouts/",
-                       base::CompareCase::INSENSITIVE_ASCII)) {
-    return true;
-  }
+#if defined(OS_ANDROID)
+  return false;
+#else
   // Allow access for tests.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnablePepperTesting)) {
     return true;
   }
+
+  // Allow only the Hangouts app to use the MediaStream APIs. It's OK to check
+  // the whitelist in the renderer, since we're only preventing access until
+  // these APIs are public and stable.
+  return (AppCategorizer::IsHangoutsUrl(url));
 #endif  // !defined(OS_ANDROID)
-  return false;
 }
 
-void ChromeContentRendererClient::AddKeySystems(
-    std::vector<media::KeySystemInfo>* key_systems) {
+void ChromeContentRendererClient::AddSupportedKeySystems(
+    std::vector<std::unique_ptr<::media::KeySystemProperties>>* key_systems) {
   AddChromeKeySystems(key_systems);
 }
 
@@ -1387,22 +1365,26 @@ void ChromeContentRendererClient::RunScriptsAtDocumentEnd(
 #endif
 }
 
-void
-ChromeContentRendererClient::DidInitializeServiceWorkerContextOnWorkerThread(
-    v8::Local<v8::Context> context,
-    const GURL& url) {
+void ChromeContentRendererClient::
+    DidInitializeServiceWorkerContextOnWorkerThread(
+        v8::Local<v8::Context> context,
+        int embedded_worker_id,
+        const GURL& url) {
 #if defined(ENABLE_EXTENSIONS)
-  extensions::Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
-      context, url);
+  ChromeExtensionsRendererClient::GetInstance()
+      ->extension_dispatcher()
+      ->DidInitializeServiceWorkerContextOnWorkerThread(
+          context, embedded_worker_id, url);
 #endif
 }
 
 void ChromeContentRendererClient::WillDestroyServiceWorkerContextOnWorkerThread(
     v8::Local<v8::Context> context,
+    int embedded_worker_id,
     const GURL& url) {
 #if defined(ENABLE_EXTENSIONS)
-  extensions::Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(context,
-                                                                        url);
+  extensions::Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(
+      context, embedded_worker_id, url);
 #endif
 }
 
@@ -1416,4 +1398,71 @@ bool ChromeContentRendererClient::ShouldEnforceWebRTCRoutingPreferences() {
 #else
   return true;
 #endif
+}
+
+GURL ChromeContentRendererClient::OverrideFlashEmbedWithHTML(const GURL& url) {
+  if (!base::FeatureList::IsEnabled(features::kOverrideYouTubeFlashEmbed))
+    return GURL();
+
+  if (!url.is_valid())
+    return GURL();
+
+  // We'll only modify YouTube Flash embeds. The URLs can be recognized since
+  // they're in the following form: youtube.com/v/VIDEO_ID. So, we check to see
+  // if the given URL does follow that format.
+  if (!url.DomainIs("youtube.com") && !url.DomainIs("youtube-nocookie.com"))
+    return GURL();
+  if (url.path().find("/v/") != 0)
+    return GURL();
+
+  std::string url_str = url.spec();
+  internal::YouTubeRewriteStatus result = internal::NUM_PLUGIN_ERROR;
+
+  // If the website is using an invalid YouTube URL, we'll try and
+  // fix the URL by ensuring that if there are multiple parameters,
+  // the parameter string begins with a "?" and then follows with a "&"
+  // for each subsequent parameter. We do this because the Flash video player
+  // has some URL correction capabilities so we don't want this move to HTML5
+  // to break webpages that used to work.
+  size_t index = url_str.find_first_of("&?");
+  bool invalid_url = index != std::string::npos && url_str.at(index) == '&';
+
+  if (invalid_url) {
+    // ? should appear first before all parameters
+    url_str.replace(index, 1, "?");
+
+    // Replace all instances of ? (after the first) with &
+    for (size_t pos = index + 1;
+         (pos = url_str.find("?", pos)) != std::string::npos; pos += 1) {
+      url_str.replace(pos, 1, "&");
+    }
+  }
+
+  GURL corrected_url = GURL(url_str);
+  // Unless we're on an Android device, we don't modify any URLs that contain
+  // the enablejsapi=1 parameter since the page may be interacting with the
+  // YouTube Flash player in Javascript and we don't want to break working
+  // content. If we're on an Android device and the URL contains the
+  // enablejsapi=1 parameter, we do override the URL.
+  if (corrected_url.query().find("enablejsapi=1") != std::string::npos) {
+#if defined(OS_ANDROID)
+    result = internal::SUCCESS_ENABLEJSAPI;
+#else
+    RecordYouTubeRewriteUMA(internal::FAILURE_ENABLEJSAPI);
+    return GURL();
+#endif
+  }
+
+  // Change the path to use the YouTube HTML5 API
+  std::string path = corrected_url.path();
+  path.replace(path.find("/v/"), 3, "/embed/");
+
+  url::Replacements<char> r;
+  r.SetPath(path.c_str(), url::Component(0, path.length()));
+
+  if (result == internal::NUM_PLUGIN_ERROR)
+    result = invalid_url ? internal::SUCCESS_PARAMS_REWRITE : internal::SUCCESS;
+
+  RecordYouTubeRewriteUMA(result);
+  return corrected_url.ReplaceComponents(r);
 }

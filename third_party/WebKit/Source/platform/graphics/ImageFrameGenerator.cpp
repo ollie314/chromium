@@ -29,6 +29,9 @@
 #include "platform/TraceEvent.h"
 #include "platform/graphics/ImageDecodingStore.h"
 #include "platform/image-decoders/ImageDecoder.h"
+#include "third_party/skia/include/core/SkYUVSizeInfo.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -121,15 +124,18 @@ bool ImageFrameGenerator::decodeAndScale(SegmentReader* data, bool allDataReceiv
 
     TRACE_EVENT1("blink", "ImageFrameGenerator::decodeAndScale", "frame index", static_cast<int>(index));
 
-    RefPtr<ExternalMemoryAllocator> externalAllocator = adoptRef(new ExternalMemoryAllocator(info, pixels, rowBytes));
-
     // This implementation does not support scaling so check the requested size.
     SkISize scaledSize = SkISize::Make(info.width(), info.height());
     ASSERT(m_fullSize == scaledSize);
 
-    // TODO (scroggo): Convert tryToResumeDecode() and decode() to take a
-    // PassRefPtr<SkBitmap::Allocator> instead of a bare pointer.
-    SkBitmap bitmap = tryToResumeDecode(data, allDataReceived, index, scaledSize, externalAllocator.get());
+    // It is okay to allocate ref-counted ExternalMemoryAllocator on the stack,
+    // because 1) it contains references to memory that will be invalid after
+    // returning (i.e. a pointer to |pixels|) and therefore 2) should not live
+    // longer than the call to the current method.
+    ExternalMemoryAllocator externalAllocator(info, pixels, rowBytes);
+    SkBitmap bitmap = tryToResumeDecode(data, allDataReceived, index, scaledSize, &externalAllocator);
+    DCHECK(externalAllocator.unique()); // Verify we have the only ref-count.
+
     if (bitmap.isNull())
         return false;
 
@@ -157,14 +163,13 @@ bool ImageFrameGenerator::decodeToYUV(SegmentReader* data, size_t index, const S
         return false;
     }
 
-    OwnPtr<ImageDecoder> decoder = ImageDecoder::create(*data, ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileApplied);
+    std::unique_ptr<ImageDecoder> decoder = ImageDecoder::create(data, true,
+        ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileApplied);
     // getYUVComponentSizes was already called and was successful, so ImageDecoder::create must succeed.
     ASSERT(decoder);
 
-    decoder->setData(data, true);
-
-    OwnPtr<ImagePlanes> imagePlanes = adoptPtr(new ImagePlanes(planes, rowBytes));
-    decoder->setImagePlanes(imagePlanes.release());
+    std::unique_ptr<ImagePlanes> imagePlanes = wrapUnique(new ImagePlanes(planes, rowBytes));
+    decoder->setImagePlanes(std::move(imagePlanes));
 
     ASSERT(decoder->canDecodeToYUV());
 
@@ -198,9 +203,9 @@ SkBitmap ImageFrameGenerator::tryToResumeDecode(SegmentReader* data, bool allDat
     // If we are not resuming decoding that means the decoder is freshly
     // created and we have ownership. If we are resuming decoding then
     // the decoder is owned by ImageDecodingStore.
-    OwnPtr<ImageDecoder> decoderContainer;
+    std::unique_ptr<ImageDecoder> decoderContainer;
     if (!resumeDecoding)
-        decoderContainer = adoptPtr(decoder);
+        decoderContainer = wrapUnique(decoder);
 
     if (fullSizeImage.isNull()) {
         // If decoding has failed, we can save work in the future by
@@ -233,7 +238,7 @@ SkBitmap ImageFrameGenerator::tryToResumeDecode(SegmentReader* data, bool allDat
         else
             ImageDecodingStore::instance().unlockDecoder(this, decoder);
     } else if (!removeDecoder) {
-        ImageDecodingStore::instance().insertDecoder(this, decoderContainer.release());
+        ImageDecodingStore::instance().insertDecoder(this, std::move(decoderContainer));
     }
     return fullSizeImage;
 }
@@ -258,13 +263,17 @@ bool ImageFrameGenerator::decode(SegmentReader* data, bool allDataReceived, size
     // Try to create an ImageDecoder if we are not given one.
     ASSERT(decoder);
     bool newDecoder = false;
+    bool shouldCallSetData = true;
     if (!*decoder) {
         newDecoder = true;
         if (m_imageDecoderFactory)
-            *decoder = m_imageDecoderFactory->create().leakPtr();
+            *decoder = m_imageDecoderFactory->create().release();
 
-        if (!*decoder)
-            *decoder = ImageDecoder::create(*data, ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileApplied).leakPtr();
+        if (!*decoder) {
+            *decoder = ImageDecoder::create(data, allDataReceived, ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileApplied).release();
+            // The newly created decoder just grabbed the data.  No need to reset it.
+            shouldCallSetData = false;
+        }
 
         if (!*decoder)
             return false;
@@ -277,7 +286,8 @@ bool ImageFrameGenerator::decode(SegmentReader* data, bool allDataReceived, size
         (*decoder)->setMemoryAllocator(allocator);
     }
 
-    (*decoder)->setData(data, allDataReceived);
+    if (shouldCallSetData)
+        (*decoder)->setData(data, allDataReceived);
     ImageFrame* frame = (*decoder)->frameBufferAtIndex(index);
 
     // For multi-frame image decoders, we need to know how many frames are
@@ -324,14 +334,14 @@ bool ImageFrameGenerator::getYUVComponentSizes(SegmentReader* data, SkYUVSizeInf
     if (m_yuvDecodingFailed)
         return false;
 
-    OwnPtr<ImageDecoder> decoder = ImageDecoder::create(*data, ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileApplied);
+    std::unique_ptr<ImageDecoder> decoder = ImageDecoder::create(data, true,
+        ImageDecoder::AlphaPremultiplied, ImageDecoder::GammaAndColorProfileApplied);
     if (!decoder)
         return false;
 
     // Setting a dummy ImagePlanes object signals to the decoder that we want to do YUV decoding.
-    decoder->setData(data, true);
-    OwnPtr<ImagePlanes> dummyImagePlanes = adoptPtr(new ImagePlanes);
-    decoder->setImagePlanes(dummyImagePlanes.release());
+    std::unique_ptr<ImagePlanes> dummyImagePlanes = wrapUnique(new ImagePlanes);
+    decoder->setImagePlanes(std::move(dummyImagePlanes));
 
     return updateYUVComponentSizes(decoder.get(), sizeInfo->fSizes, sizeInfo->fWidthBytes);
 }

@@ -35,29 +35,13 @@
 #include "core/dom/Document.h"
 #include "core/dom/Node.h"
 #include "core/frame/LocalFrame.h"
+#include "core/page/ChromeClient.h"
 
 namespace blink {
 
 class InstrumentingAgents;
+class ThreadDebugger;
 class WorkerGlobalScope;
-
-#define FAST_RETURN_IF_NO_FRONTENDS(value) if (!hasFrontends()) return value;
-
-class CORE_EXPORT InspectorInstrumentationCookie {
-    STACK_ALLOCATED();
-public:
-    InspectorInstrumentationCookie();
-    explicit InspectorInstrumentationCookie(InstrumentingAgents*);
-    InspectorInstrumentationCookie(const InspectorInstrumentationCookie&);
-    InspectorInstrumentationCookie& operator=(const InspectorInstrumentationCookie&);
-    ~InspectorInstrumentationCookie();
-
-    InstrumentingAgents* instrumentingAgents() const { return m_instrumentingAgents.get(); }
-    bool isValid() const { return !!m_instrumentingAgents; }
-
-private:
-    Member<InstrumentingAgents> m_instrumentingAgents;
-};
 
 namespace InspectorInstrumentation {
 
@@ -69,27 +53,21 @@ public:
     ~AsyncTask();
 
 private:
-    Member<InstrumentingAgents> m_instrumentingAgents;
+    ThreadDebugger* m_debugger;
     void* m_task;
 };
 
-class CORE_EXPORT FrontendCounter {
-    STATIC_ONLY(FrontendCounter);
+class CORE_EXPORT NativeBreakpoint {
+    STACK_ALLOCATED();
+public:
+    NativeBreakpoint(ExecutionContext*, const char* name, bool sync);
+    NativeBreakpoint(ExecutionContext*, EventTarget*, Event*);
+    ~NativeBreakpoint();
+
 private:
-    friend void frontendCreated();
-    friend void frontendDeleted();
-    friend bool hasFrontends();
-    static int s_frontendCounter;
+    Member<InstrumentingAgents> m_instrumentingAgents;
+    bool m_sync;
 };
-
-inline void frontendCreated() { atomicIncrement(&FrontendCounter::s_frontendCounter); }
-inline void frontendDeleted() { atomicDecrement(&FrontendCounter::s_frontendCounter); }
-inline bool hasFrontends() { return acquireLoad(&FrontendCounter::s_frontendCounter); }
-
-CORE_EXPORT void registerInstrumentingAgents(InstrumentingAgents*);
-CORE_EXPORT void unregisterInstrumentingAgents(InstrumentingAgents*);
-
-CORE_EXPORT extern const char kInspectorEmulateNetworkConditionsClientId[];
 
 // Called from generated instrumentation code.
 CORE_EXPORT InstrumentingAgents* instrumentingAgentsFor(WorkerGlobalScope*);

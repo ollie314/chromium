@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_ANDROID_DATA_USAGE_DATA_USE_UI_TAB_MODEL_H_
 #define CHROME_BROWSER_ANDROID_DATA_USAGE_DATA_USE_UI_TAB_MODEL_H_
 
+#include <memory>
 #include <string>
 
 #include "base/containers/hash_tables.h"
@@ -17,8 +18,11 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/sessions/core/session_id.h"
 #include "ui/base/page_transition_types.h"
+#include "url/gurl.h"
 
-class GURL;
+namespace content {
+class NavigationEntry;
+}
 
 namespace chrome {
 
@@ -26,7 +30,7 @@ namespace android {
 
 // DataUseUITabModel tracks data use tracking start and end transitions on the
 // browser's tabs. It serves as a bridge between the DataUseTabModel, which
-// lives on the IO thread, browser navigation events and tab closure events,
+// lives on the UI thread, browser navigation events and tab closure events,
 // which are generated on the UI thread, and UI elements that appear when data
 // use tracking starts and ends in a Tab. DataUseUITabModel forwards navigation
 // and tab closure events to the DataUseTabModel, and receives tab tracking
@@ -46,10 +50,13 @@ class DataUseUITabModel : public KeyedService,
 
   // Reports a browser navigation to the DataUseTabModel on IO thread. Includes
   // the |page_transition|, |tab_id|, and |gurl| for the navigation. Tabs that
-  // are restored when Chromium restarts are not reported.
+  // are restored when Chromium restarts are not reported. |navigation_entry|
+  // corresponds to the navigation entry of the current navigation in
+  // back-forward navigation history, and should not be null.
   void ReportBrowserNavigation(const GURL& gurl,
                                ui::PageTransition page_transition,
-                               SessionID::id_type tab_id) const;
+                               SessionID::id_type tab_id,
+                               content::NavigationEntry* navigation_entry);
 
   // Reports a tab closure for the tab with |tab_id| to the DataUseTabModel on
   // IO thread. The tab could either have been closed or evicted from the memory
@@ -77,10 +84,14 @@ class DataUseUITabModel : public KeyedService,
   // Returns true if the tab with id |tab_id| is currently tracked, and
   // starting the navigation to |url| with transition type |page_transition|
   // would end tracking of data use. Should only be called before the navigation
-  // starts.
-  bool WouldDataUseTrackingEnd(const std::string& url,
-                               int page_transition,
-                               SessionID::id_type tab_id) const;
+  // starts. |navigation_entry| corresponds to the navigation entry of the
+  // current navigation in back-forward navigation history, and should not be
+  // null.
+  bool WouldDataUseTrackingEnd(
+      const std::string& url,
+      int page_transition,
+      SessionID::id_type tab_id,
+      const content::NavigationEntry* navigation_entry) const;
 
   // Notifies that user clicked "Continue" when the dialog box with data use
   // warning was shown. Includes the |tab_id| on which the warning was shown.
@@ -108,11 +119,29 @@ class DataUseUITabModel : public KeyedService,
     DATA_USE_CONTINUE_CLICKED,
   };
 
+  // Contains the details of a single UI navigation event.
+  struct DataUseUINavigationEvent {
+    DataUseUINavigationEvent(SessionID::id_type tab_id,
+                             DataUseTabModel::TransitionType transition_type,
+                             GURL url,
+                             std::string package)
+        : tab_id(tab_id),
+          transition_type(transition_type),
+          url(url),
+          package(package) {}
+
+    const SessionID::id_type tab_id;
+    const DataUseTabModel::TransitionType transition_type;
+    const GURL url;
+    const std::string package;
+  };
+
   typedef base::hash_map<SessionID::id_type, DataUseTrackingEvent> TabEvents;
 
   // DataUseTabModel::TabDataUseObserver implementation:
   void NotifyTrackingStarting(SessionID::id_type tab_id) override;
   void NotifyTrackingEnding(SessionID::id_type tab_id) override;
+  void OnDataUseTabModelReady() override;
 
   // Creates |event| for tab with id |tab_id| and value |event|, if there is no
   // existing entry for |tab_id|, and returns true. Otherwise, returns false
@@ -133,12 +162,34 @@ class DataUseUITabModel : public KeyedService,
       const GURL& gurl,
       DataUseTabModel::TransitionType* transition_type) const;
 
+  // Buffers the navigation event for later processing.
+  void BufferNavigationEvent(SessionID::id_type tab_id,
+                             DataUseTabModel::TransitionType transition,
+                             const GURL& url,
+                             const std::string& package);
+
+  // Processes the UI navigation events buffered in |data_use_ui_navigations_|
+  // and deletes |data_use_ui_navigations_| so that navigation events will not
+  // be buffered any more.
+  void ProcessBufferedNavigationEvents();
+
   // |tab_events_| stores tracking events of multiple tabs.
   TabEvents tab_events_;
 
   // |data_use_tab_model_| is notified by |this| about browser navigations
   // and tab closures on UI thread.
   base::WeakPtr<DataUseTabModel> data_use_tab_model_;
+
+  // Buffer of UI navigation events that occurred until the
+  // |data_use_tab_model_| pointer is set in |SetDataUseTabModel| and
+  // |data_use_tab_model_| is ready to process the navigation events, or until
+  // |kDefaultMaxNavigationEventsBuffered| navigation events were buffered,
+  // whichever occurs first. Existence of the vector in unique_ptr indicates
+  // that the UI navigation events need to be buffered. Only if
+  // |data_use_ui_navigations_| is non-null, navigation events will be added to
+  // it.
+  std::unique_ptr<std::vector<DataUseUINavigationEvent>>
+      data_use_ui_navigations_;
 
   base::ThreadChecker thread_checker_;
 

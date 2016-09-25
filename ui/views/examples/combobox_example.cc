@@ -23,7 +23,7 @@ int ComboboxModelExample::GetItemCount() const {
 }
 
 base::string16 ComboboxModelExample::GetItemAt(int index) {
-  return base::UTF8ToUTF16(base::StringPrintf("Item %d", index));
+  return base::UTF8ToUTF16(base::StringPrintf("%c item", 'A' + index));
 }
 
 ComboboxExample::ComboboxExample() : ExampleBase("Combo Box") {
@@ -49,15 +49,14 @@ void ComboboxExample::CreateExampleView(View* container) {
   disabled_combobox_->SetSelectedIndex(4);
   disabled_combobox_->SetEnabled(false);
 
-  action_combobox_ = new Combobox(&combobox_model_);
+  action_combobox_ = new Combobox(&combobox_model_, Combobox::STYLE_ACTION);
   action_combobox_->set_listener(this);
-  action_combobox_->SetStyle(Combobox::STYLE_ACTION);
   // Note: STYLE_ACTION comboboxes always have the first item selected by
   // default.
 
   container->SetLayoutManager(new BoxLayout(
       BoxLayout::kVertical,
-      1, 1, 1));
+      0, 10, 5));
   container->AddChildView(combobox_);
   container->AddChildView(disabled_combobox_);
   container->AddChildView(action_combobox_);

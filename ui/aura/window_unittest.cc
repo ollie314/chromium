@@ -21,6 +21,7 @@
 #include "ui/aura/client/focus_change_observer.h"
 #include "ui/aura/client/visibility_client.h"
 #include "ui/aura/client/window_tree_client.h"
+#include "ui/aura/layout_manager.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/test/aura_test_utils.h"
 #include "ui/aura/test/test_window_delegate.h"
@@ -37,6 +38,7 @@
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/compositor/test/test_layers.h"
+#include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
@@ -44,12 +46,57 @@
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/vector2d.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/skia_util.h"
 
 DECLARE_WINDOW_PROPERTY_TYPE(const char*)
 
 namespace {
+
+enum class DeletionOrder {
+  LAYOUT_MANAGER_FIRST,
+  PROPERTY_FIRST,
+  UNKNOWN,
+};
+
+class DeletionTracker {
+ public:
+  DeletionTracker() {}
+  ~DeletionTracker() {}
+
+  DeletionOrder order() const { return order_; }
+  bool property_deleted() const { return property_deleted_; }
+  bool layout_manager_deleted() const { return layout_manager_deleted_; }
+
+  void PropertyDeleted() {
+    property_deleted_ = true;
+    if (order_ == DeletionOrder::UNKNOWN)
+      order_ = DeletionOrder::PROPERTY_FIRST;
+  }
+
+  void LayoutManagerDeleted() {
+    layout_manager_deleted_ = true;
+    if (order_ == DeletionOrder::UNKNOWN)
+      order_ = DeletionOrder::LAYOUT_MANAGER_FIRST;
+  }
+
+ private:
+  bool property_deleted_ = false;
+  bool layout_manager_deleted_ = false;
+  DeletionOrder order_ = DeletionOrder::UNKNOWN;
+
+  DISALLOW_COPY_AND_ASSIGN(DeletionTracker);
+};
+
+class DeletionTestProperty {
+ public:
+  explicit DeletionTestProperty(DeletionTracker* tracker) : tracker_(tracker) {}
+  ~DeletionTestProperty() { tracker_->PropertyDeleted(); }
+
+ private:
+  DeletionTracker* tracker_;
+
+  DISALLOW_COPY_AND_ASSIGN(DeletionTestProperty);
+};
 
 class TestProperty {
  public:
@@ -67,10 +114,15 @@ class TestProperty {
 TestProperty* TestProperty::last_deleted_ = nullptr;
 
 DEFINE_OWNED_WINDOW_PROPERTY_KEY(TestProperty, kOwnedKey, NULL);
+DEFINE_OWNED_WINDOW_PROPERTY_KEY(DeletionTestProperty,
+                                 kDeletionTestPropertyKey,
+                                 nullptr);
 
 }  // namespace
 
 DECLARE_WINDOW_PROPERTY_TYPE(TestProperty*);
+
+DECLARE_WINDOW_PROPERTY_TYPE(DeletionTestProperty*);
 
 namespace aura {
 namespace test {
@@ -239,7 +291,7 @@ class GestureTrackPositionDelegate : public TestWindowDelegate {
   DISALLOW_COPY_AND_ASSIGN(GestureTrackPositionDelegate);
 };
 
-base::TimeDelta getTime() {
+base::TimeTicks getTime() {
   return ui::EventTimeForNow();
 }
 
@@ -355,19 +407,19 @@ TEST_F(WindowTest, MoveCursorTo) {
   Window* root = root_window();
   root->MoveCursorTo(gfx::Point(10, 10));
   EXPECT_EQ("10,10",
-      gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
   w1->MoveCursorTo(gfx::Point(10, 10));
   EXPECT_EQ("20,20",
-      gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
   w11->MoveCursorTo(gfx::Point(10, 10));
   EXPECT_EQ("25,25",
-      gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
   w111->MoveCursorTo(gfx::Point(10, 10));
   EXPECT_EQ("30,30",
-      gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
   w1111->MoveCursorTo(gfx::Point(10, 10));
   EXPECT_EQ("35,35",
-      gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
 }
 
 TEST_F(WindowTest, ContainsMouse) {
@@ -395,7 +447,7 @@ TEST_F(WindowTest, MoveCursorToWithTransformRootWindow) {
   EXPECT_EQ("50,120", QueryLatestMousePositionRequestInHost(host()).ToString());
 #endif
   EXPECT_EQ("10,10",
-            gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
 }
 
 // Tests Window::ConvertPointToWindow() with transform to non-root windows.
@@ -408,21 +460,21 @@ TEST_F(WindowTest, MoveCursorToWithTransformWindow) {
   w1->SetTransform(transform1);
   w1->MoveCursorTo(gfx::Point(10, 10));
   EXPECT_EQ("30,30",
-      gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
 
   gfx::Transform transform2;
   transform2.Translate(-10, 20);
   w1->SetTransform(transform2);
   w1->MoveCursorTo(gfx::Point(10, 10));
   EXPECT_EQ("10,40",
-      gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
 
   gfx::Transform transform3;
   transform3.Rotate(90.0);
   w1->SetTransform(transform3);
   w1->MoveCursorTo(gfx::Point(5, 5));
   EXPECT_EQ("5,15",
-      gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
 
   gfx::Transform transform4;
   transform4.Translate(100.0, 100.0);
@@ -431,7 +483,7 @@ TEST_F(WindowTest, MoveCursorToWithTransformWindow) {
   w1->SetTransform(transform4);
   w1->MoveCursorTo(gfx::Point(10, 10));
   EXPECT_EQ("60,130",
-      gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
 }
 
 // Test Window::ConvertPointToWindow() with complex transforms to both root and
@@ -471,7 +523,7 @@ TEST_F(WindowTest, MoveCursorToWithComplexTransform) {
   EXPECT_EQ("169,80", QueryLatestMousePositionRequestInHost(host()).ToString());
 #endif
   EXPECT_EQ("20,53",
-      gfx::Screen::GetScreen()->GetCursorScreenPoint().ToString());
+            display::Screen::GetScreen()->GetCursorScreenPoint().ToString());
 }
 
 // Tests that we do not crash when a Window is destroyed by going out of
@@ -511,7 +563,7 @@ TEST_F(WindowTest, GetEventHandlerForPoint) {
 }
 
 TEST_F(WindowTest, GetEventHandlerForPointWithOverride) {
-  // If our child is flush to our top-left corner he gets events just inside the
+  // If our child is flush to our top-left corner it gets events just inside the
   // window edges.
   std::unique_ptr<Window> parent(CreateTestWindow(
       SK_ColorWHITE, 1, gfx::Rect(10, 20, 400, 500), root_window()));
@@ -883,7 +935,7 @@ TEST_F(WindowTest, TouchCaptureDoesntCancelCapturedTouches) {
   CaptureWindowDelegateImpl delegate;
   std::unique_ptr<Window> window(CreateTestWindowWithDelegate(
       &delegate, 0, gfx::Rect(0, 0, 50, 50), root_window()));
-  base::TimeDelta time = getTime();
+  base::TimeTicks time = getTime();
   const int kTimeDelta = 100;
 
   ui::TouchEvent press(
@@ -1559,9 +1611,9 @@ TEST_F(WindowTest, IgnoreEventsTest) {
 // Tests transformation on the root window.
 TEST_F(WindowTest, Transform) {
   gfx::Size size = host()->GetBounds().size();
-  EXPECT_EQ(gfx::Rect(size),
-            gfx::Screen::GetScreen()->GetDisplayNearestPoint(
-                gfx::Point()).bounds());
+  EXPECT_EQ(gfx::Rect(size), display::Screen::GetScreen()
+                                 ->GetDisplayNearestPoint(gfx::Point())
+                                 .bounds());
 
   // Rotate it clock-wise 90 degrees.
   gfx::Transform transform;
@@ -1573,10 +1625,11 @@ TEST_F(WindowTest, Transform) {
   gfx::Size transformed_size(size.height(), size.width());
   EXPECT_EQ(transformed_size.ToString(),
             root_window()->bounds().size().ToString());
-  EXPECT_EQ(
-      gfx::Rect(transformed_size).ToString(),
-      gfx::Screen::GetScreen()->GetDisplayNearestPoint(
-          gfx::Point()).bounds().ToString());
+  EXPECT_EQ(gfx::Rect(transformed_size).ToString(),
+            display::Screen::GetScreen()
+                ->GetDisplayNearestPoint(gfx::Point())
+                .bounds()
+                .ToString());
 
   // Host size shouldn't change.
   EXPECT_EQ(size.ToString(), host()->GetBounds().size().ToString());
@@ -1669,6 +1722,44 @@ TEST_F(WindowTest, OwnedProperty) {
   EXPECT_EQ(p2, TestProperty::last_deleted());
   w.reset();
   EXPECT_EQ(p3, TestProperty::last_deleted());
+}
+
+namespace {
+
+class DeletionTestLayoutManager : public LayoutManager {
+ public:
+  explicit DeletionTestLayoutManager(DeletionTracker* tracker)
+      : tracker_(tracker) {}
+  ~DeletionTestLayoutManager() override { tracker_->LayoutManagerDeleted(); }
+
+ private:
+  // LayoutManager:
+  void OnWindowResized() override {}
+  void OnWindowAddedToLayout(Window* child) override {}
+  void OnWillRemoveWindowFromLayout(Window* child) override {}
+  void OnWindowRemovedFromLayout(Window* child) override {}
+  void OnChildWindowVisibilityChanged(Window* child, bool visible) override {}
+  void SetChildBounds(Window* child,
+                      const gfx::Rect& requested_bounds) override {}
+
+  DeletionTracker* tracker_;
+
+  DISALLOW_COPY_AND_ASSIGN(DeletionTestLayoutManager);
+};
+
+}  // namespace
+
+TEST_F(WindowTest, DeleteLayoutManagerBeforeOwnedProps) {
+  DeletionTracker tracker;
+  {
+    Window w(nullptr);
+    w.Init(ui::LAYER_NOT_DRAWN);
+    w.SetLayoutManager(new DeletionTestLayoutManager(&tracker));
+    w.SetProperty(kDeletionTestPropertyKey, new DeletionTestProperty(&tracker));
+  }
+  EXPECT_TRUE(tracker.property_deleted());
+  EXPECT_TRUE(tracker.layout_manager_deleted());
+  EXPECT_EQ(DeletionOrder::LAYOUT_MANAGER_FIRST, tracker.order());
 }
 
 TEST_F(WindowTest, SetBoundsInternalShouldCheckTargetBounds) {
@@ -2105,8 +2196,6 @@ TEST_F(WindowTest, VisibilityClientIsVisible) {
 // Tests the mouse events seen by WindowDelegates in a Window hierarchy when
 // changing the properties of a leaf Window.
 TEST_F(WindowTest, MouseEventsOnLeafWindowChange) {
-  gfx::Size size = host()->GetBounds().size();
-
   ui::test::EventGenerator generator(root_window());
   generator.MoveMouseTo(50, 50);
 
@@ -2206,8 +2295,6 @@ TEST_F(WindowTest, MouseEventsOnLeafWindowChange) {
 // Tests the mouse events seen by WindowDelegates in a Window hierarchy when
 // deleting a non-leaf Window.
 TEST_F(WindowTest, MouseEventsOnNonLeafWindowDelete) {
-  gfx::Size size = host()->GetBounds().size();
-
   ui::test::EventGenerator generator(root_window());
   generator.MoveMouseTo(50, 50);
 

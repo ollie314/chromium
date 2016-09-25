@@ -37,29 +37,30 @@
 #include "public/platform/WebFileSystemEntry.h"
 #include "public/platform/WebFileWriter.h"
 #include "public/platform/WebString.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefCounted.h"
+#include <memory>
 
 namespace blink {
 
 class WebFileSystemCallbacksPrivate : public RefCounted<WebFileSystemCallbacksPrivate> {
 public:
-    static PassRefPtr<WebFileSystemCallbacksPrivate> create(const PassOwnPtr<AsyncFileSystemCallbacks>& callbacks)
+    static PassRefPtr<WebFileSystemCallbacksPrivate> create(std::unique_ptr<AsyncFileSystemCallbacks> callbacks)
     {
-        return adoptRef(new WebFileSystemCallbacksPrivate(callbacks));
+        return adoptRef(new WebFileSystemCallbacksPrivate(std::move(callbacks)));
     }
 
     AsyncFileSystemCallbacks* callbacks() { return m_callbacks.get(); }
 
 private:
-    WebFileSystemCallbacksPrivate(const PassOwnPtr<AsyncFileSystemCallbacks>& callbacks) : m_callbacks(callbacks) { }
-    OwnPtr<AsyncFileSystemCallbacks> m_callbacks;
+    WebFileSystemCallbacksPrivate(std::unique_ptr<AsyncFileSystemCallbacks> callbacks) : m_callbacks(std::move(callbacks)) { }
+    std::unique_ptr<AsyncFileSystemCallbacks> m_callbacks;
 };
 
-WebFileSystemCallbacks::WebFileSystemCallbacks(const PassOwnPtr<AsyncFileSystemCallbacks>& callbacks)
+WebFileSystemCallbacks::WebFileSystemCallbacks(std::unique_ptr<AsyncFileSystemCallbacks>&& callbacks)
 {
-    m_private = WebFileSystemCallbacksPrivate::create(callbacks);
+    m_private = WebFileSystemCallbacksPrivate::create(std::move(callbacks));
 }
 
 void WebFileSystemCallbacks::reset()
@@ -96,9 +97,9 @@ void WebFileSystemCallbacks::didCreateSnapshotFile(const WebFileInfo& webFileInf
     ASSERT(!m_private.isNull());
     // It's important to create a BlobDataHandle that refers to the platform file path prior
     // to return from this method so the underlying file will not be deleted.
-    OwnPtr<BlobData> blobData = BlobData::create();
+    std::unique_ptr<BlobData> blobData = BlobData::create();
     blobData->appendFile(webFileInfo.platformPath, 0, webFileInfo.length, invalidFileTime());
-    RefPtr<BlobDataHandle> snapshotBlob = BlobDataHandle::create(blobData.release(), webFileInfo.length);
+    RefPtr<BlobDataHandle> snapshotBlob = BlobDataHandle::create(std::move(blobData), webFileInfo.length);
 
     FileMetadata fileMetadata;
     fileMetadata.modificationTime = webFileInfo.modificationTime;
@@ -135,7 +136,7 @@ void WebFileSystemCallbacks::didResolveURL(const WebString& name, const WebURL& 
 void WebFileSystemCallbacks::didCreateFileWriter(WebFileWriter* webFileWriter, long long length)
 {
     ASSERT(!m_private.isNull());
-    m_private->callbacks()->didCreateFileWriter(adoptPtr(webFileWriter), length);
+    m_private->callbacks()->didCreateFileWriter(wrapUnique(webFileWriter), length);
     m_private.reset();
 }
 

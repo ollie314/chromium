@@ -16,33 +16,27 @@
  * @const
  */
 var LOG_TYPE = {
-  // The suggestion is coming from the server. Unused here.
+  // The suggestion is coming from the server.
   NTP_SERVER_SIDE_SUGGESTION: 0,
   // The suggestion is coming from the client.
   NTP_CLIENT_SIDE_SUGGESTION: 1,
   // Indicates a tile was rendered, no matter if it's a thumbnail, a gray tile
   // or an external tile.
   NTP_TILE: 2,
-  // The tile uses a local thumbnail image.
-  NTP_THUMBNAIL_TILE: 3,
-  // Used when no thumbnail is specified and a gray tile with the domain is used
-  // as the main tile. Unused here.
-  NTP_GRAY_TILE: 4,
-  // The visuals of that tile are handled externally by the page itself.
-  // Unused here.
-  NTP_EXTERNAL_TILE: 5,
-  // There was an error in loading both the thumbnail image and the fallback
-  // (if it was provided), resulting in a gray tile.
-  NTP_THUMBNAIL_ERROR: 6,
-  // Used a gray tile with the domain as the fallback for a failed thumbnail.
-  // Unused here.
-  NTP_GRAY_TILE_FALLBACK: 7,
-  // The visuals of that tile's fallback are handled externally. Unused here.
-  NTP_EXTERNAL_TILE_FALLBACK: 8,
-  // The user moused over an NTP tile.
-  NTP_MOUSEOVER: 9,
-  // A NTP Tile has finished loading (successfully or failing).
-  NTP_TILE_LOADED: 10,
+  // All NTP Tiles have finished loading (successfully or failing).
+  NTP_ALL_TILES_LOADED: 11,
+};
+
+
+/**
+ * The different sources that an NTP tile can have.
+ * Note: Keep in sync with common/ntp_logging_events.h
+ * @enum {number}
+ * @const
+ */
+var NTPLoggingTileSource = {
+  CLIENT: 0,
+  SERVER: 1,
 };
 
 
@@ -110,6 +104,25 @@ var logEvent = function(eventType) {
   chrome.embeddedSearch.newTabPage.logEvent(eventType);
 };
 
+/**
+ * Log impression of an NTP tile.
+ * @param {number} tileIndex Position of the tile, >= 0 and < NUMBER_OF_TILES.
+ * @param {number} tileSource The source from NTPLoggingTileSource.
+ */
+function logMostVisitedImpression(tileIndex, tileSource) {
+  chrome.embeddedSearch.newTabPage.logMostVisitedImpression(tileIndex,
+                                                            tileSource);
+}
+
+/**
+ * Log click on an NTP tile.
+ * @param {number} tileIndex Position of the tile, >= 0 and < NUMBER_OF_TILES.
+ * @param {number} tileSource The source from NTPLoggingTileSource.
+ */
+function logMostVisitedNavigation(tileIndex, tileSource) {
+  chrome.embeddedSearch.newTabPage.logMostVisitedNavigation(tileIndex,
+                                                            tileSource);
+}
 
 /**
  * Down counts the DOM elements that we are waiting for the page to load.
@@ -120,7 +133,7 @@ var countLoad = function() {
   loadedCounter -= 1;
   if (loadedCounter <= 0) {
     showTiles();
-    logEvent(LOG_TYPE.NTP_TILE_LOADED);
+    logEvent(LOG_TYPE.NTP_ALL_TILES_LOADED);
     window.parent.postMessage({cmd: 'loaded'}, DOMAIN_ORIGIN);
     loadedCounter = 1;
   }
@@ -245,9 +258,12 @@ var showTiles = function() {
 
   var parent = document.querySelector('#most-visited');
 
-  // Mark old tile DIV for removal after the transition animation is done.
+  // Only fade in the new tiles if there were tiles before.
+  var fadeIn = false;
   var old = parent.querySelector('#mv-tiles');
   if (old) {
+    fadeIn = true;
+    // Mark old tile DIV for removal after the transition animation is done.
     old.removeAttribute('id');
     old.classList.add('mv-tiles-old');
     old.style.opacity = 0.0;
@@ -261,11 +277,12 @@ var showTiles = function() {
   // Add new tileset.
   cur.id = 'mv-tiles';
   parent.appendChild(cur);
-  // We want the CSS transition to trigger, so need to add to the DOM before
-  // setting the style.
-  setTimeout(function() {
-    cur.style.opacity = 1.0;
-  }, 0);
+  // getComputedStyle causes the initial style (opacity 0) to be applied, so
+  // that when we then set it to 1, that triggers the CSS transition.
+  if (fadeIn) {
+    window.getComputedStyle(cur).opacity;
+  }
+  cur.style.opacity = 1.0;
 
   // Make sure the tiles variable contain the next tileset we may use.
   tiles = document.createElement('div');
@@ -284,21 +301,33 @@ var showTiles = function() {
  * @param {object} args Data for the tile to be rendered.
  */
 var addTile = function(args) {
-  if (args.rid) {
+  if (isFinite(args.rid)) {
+    // If a valid number passed in |args.rid|: a local chrome suggestion.
     var data = chrome.embeddedSearch.searchBox.getMostVisitedItemData(args.rid);
+    if (!data)
+      return;
+
     data.tid = data.rid;
+    data.tileSource = NTPLoggingTileSource.CLIENT;
     if (!data.faviconUrl) {
       data.faviconUrl = 'chrome-search://favicon/size/16@' +
           window.devicePixelRatio + 'x/' + data.renderViewId + '/' + data.tid;
     }
+    logEvent(LOG_TYPE.NTP_CLIENT_SIDE_SUGGESTION);
     tiles.appendChild(renderTile(data));
-  } else if (args.id) {
+  } else if (args.url) {
+    // If a URL is passed: a server-side suggestion.
+    args.tileSource = NTPLoggingTileSource.SERVER;
+    // check sanity of the arguments
+    if (/^javascript:/i.test(args.url) ||
+        /^javascript:/i.test(args.thumbnailUrl))
+      return;
+    logEvent(LOG_TYPE.NTP_SERVER_SIDE_SUGGESTION);
     tiles.appendChild(renderTile(args));
-  } else {
+  } else {  // an empty tile
     tiles.appendChild(renderTile(null));
   }
 };
-
 
 /**
  * Called when the user decided to add a tile to the blacklist.
@@ -343,6 +372,9 @@ var renderTile = function(data) {
   }
 
   logEvent(LOG_TYPE.NTP_TILE);
+  // The tile will be appended to tiles.
+  var position = tiles.children.length;
+  logMostVisitedImpression(position, data.tileSource);
 
   tile.className = 'mv-tile';
   tile.setAttribute('data-tid', data.tid);
@@ -351,13 +383,14 @@ var renderTile = function(data) {
     html.push('<div class="mv-favicon"></div>');
   }
   html.push('<div class="mv-title"></div><div class="mv-thumb"></div>');
-  html.push('<div class="mv-x"></div>');
+  html.push('<div class="mv-x" role="button"></div>');
   tile.innerHTML = html.join('');
   tile.lastElementChild.title = queryArgs['removeTooltip'] || '';
 
   if (isSchemeAllowed(data.url)) {
     tile.href = data.url;
   }
+  tile.setAttribute('aria-label', data.title);
   tile.title = data.title;
   if (data.impressionUrl) {
     impressionUrl = data.impressionUrl;
@@ -367,19 +400,10 @@ var renderTile = function(data) {
       navigator.sendBeacon(data.pingUrl);
     });
   }
-  // For local suggestions, we use navigateContentWindow instead of the default
-  // action, since it includes support for file:// urls.
-  if (data.rid) {
-    tile.addEventListener('click', function(ev) {
-      ev.preventDefault();
-      var disp = chrome.embeddedSearch.newTabPage.getDispositionFromClick(
-        ev.button == 1,  // MIDDLE BUTTON
-        ev.altKey, ev.ctrlKey, ev.metaKey, ev.shiftKey);
 
-      window.chrome.embeddedSearch.newTabPage.navigateContentWindow(data.rid,
-                                                                    disp);
-    });
-  }
+  tile.addEventListener('click', function(ev) {
+    logMostVisitedNavigation(position, data.tileSource);
+  });
 
   tile.addEventListener('keydown', function(event) {
     if (event.keyCode == 46 /* DELETE */ ||
@@ -392,66 +416,35 @@ var renderTile = function(data) {
       event.preventDefault();
       this.click();
     } else if (event.keyCode >= 37 && event.keyCode <= 40 /* ARROWS */) {
-      var tiles = document.querySelectorAll('#mv-tiles .mv-tile');
-      var nextTile = null;
-      // Use the location of the tile to find the next one in the
-      // appropriate direction.
-      // For LEFT and UP we keep iterating until we find the last element
-      // that fulfills the conditions.
-      // For RIGHT and DOWN we accept the first element that works.
-      if (event.keyCode == 37 /* LEFT */) {
-        for (var i = 0; i < tiles.length; i++) {
-          var tile = tiles[i];
-          if (tile.offsetTop == this.offsetTop &&
-              tile.offsetLeft < this.offsetLeft) {
-            if (!nextTile || tile.offsetLeft > nextTile.offsetLeft) {
-              nextTile = tile;
-            }
-          }
-        }
-      }
-      if (event.keyCode == 38 /* UP */) {
-        for (var i = 0; i < tiles.length; i++) {
-          var tile = tiles[i];
-          if (tile.offsetTop < this.offsetTop &&
-              tile.offsetLeft == this.offsetLeft) {
-            if (!nextTile || tile.offsetTop > nextTile.offsetTop) {
-              nextTile = tile;
-            }
-          }
-        }
-      }
-      if (event.keyCode == 39 /* RIGHT */) {
-        for (var i = 0; i < tiles.length; i++) {
-          var tile = tiles[i];
-          if (tile.offsetTop == this.offsetTop &&
-              tile.offsetLeft > this.offsetLeft) {
-            if (!nextTile || tile.offsetLeft < nextTile.offsetLeft) {
-              nextTile = tile;
-            }
-          }
-        }
-      }
-      if (event.keyCode == 40 /* DOWN */) {
-        for (var i = 0; i < tiles.length; i++) {
-          var tile = tiles[i];
-          if (tile.offsetTop > this.offsetTop &&
-              tile.offsetLeft == this.offsetLeft) {
-            if (!nextTile || tile.offsetTop < nextTile.offsetTop) {
-              nextTile = tile;
-            }
-          }
-        }
-      }
+      // specify the direction of movement
+      var inArrowDirection = function(origin, target) {
+        return (event.keyCode == 37 /* LEFT */ &&
+                origin.offsetTop == target.offsetTop &&
+                origin.offsetLeft > target.offsetLeft) ||
+                (event.keyCode == 38 /* UP */ &&
+                origin.offsetTop > target.offsetTop &&
+                origin.offsetLeft == target.offsetLeft) ||
+                (event.keyCode == 39 /* RIGHT */ &&
+                origin.offsetTop == target.offsetTop &&
+                origin.offsetLeft < target.offsetLeft) ||
+                (event.keyCode == 40 /* DOWN */ &&
+                origin.offsetTop < target.offsetTop &&
+                origin.offsetLeft == target.offsetLeft);
+      };
 
+      var nonEmptyTiles = document.querySelectorAll('#mv-tiles .mv-tile');
+      var nextTile = null;
+      // Find the closest tile in the appropriate direction.
+      for (var i = 0; i < nonEmptyTiles.length; i++) {
+        if (inArrowDirection(this, nonEmptyTiles[i]) &&
+            (!nextTile || inArrowDirection(nonEmptyTiles[i], nextTile))) {
+          nextTile = nonEmptyTiles[i];
+        }
+      }
       if (nextTile) {
         nextTile.focus();
       }
     }
-  });
-  // TODO(fserb): remove this or at least change to mouseenter.
-  tile.addEventListener('mouseover', function() {
-    logEvent(LOG_TYPE.NTP_MOUSEOVER);
   });
 
   var title = tile.querySelector('.mv-title');
@@ -477,10 +470,8 @@ var renderTile = function(data) {
       img.addEventListener('error', function(ev) {
         thumb.classList.add('failed-img');
         thumb.removeChild(img);
-        logEvent(LOG_TYPE.NTP_THUMBNAIL_ERROR);
       });
       thumb.appendChild(img);
-      logEvent(LOG_TYPE.NTP_THUMBNAIL_TILE);
     } else {
       thumb.classList.add('failed-img');
     }
@@ -513,7 +504,6 @@ var renderTile = function(data) {
       }
       thumb.classList.add('failed-img');
       thumb.removeChild(img);
-      logEvent(LOG_TYPE.NTP_THUMBNAIL_ERROR);
       countLoad();
     };
 
@@ -539,10 +529,8 @@ var renderTile = function(data) {
     img.addEventListener('error', function(ev) {
       thumb.classList.add('failed-img');
       thumb.removeChild(img);
-      logEvent(LOG_TYPE.NTP_THUMBNAIL_ERROR);
     });
     thumb.appendChild(img);
-    logEvent(LOG_TYPE.NTP_THUMBNAIL_TILE);
 
     if (data.thumbnailUrl) {
       img.src = data.thumbnailUrl;

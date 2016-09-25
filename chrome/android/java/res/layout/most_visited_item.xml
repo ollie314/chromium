@@ -28,9 +28,9 @@
         android:layout_marginStart="48dp"
         android:visibility="gone"
         android:background="@drawable/offline_badge_background"
-        android:contentDescription="@null"
-        chrome:tint="#4285f4"
-        android:src="@drawable/offline_bolt" />
+        android:contentDescription="@string/accessibility_ntp_offline_badge"
+        chrome:tint="@color/most_visited_offline_badge_tint"
+        android:src="@drawable/offline_pin" />
 
     <View
         android:layout_width="@dimen/most_visited_icon_size"
@@ -49,7 +49,7 @@
         android:gravity="center_horizontal"
         android:lines="2"
         android:lineSpacingMultiplier="1.17"
-        android:textColor="#787878"
+        android:textColor="@color/most_visited_text"
         android:textSize="12sp" />
 
 </org.chromium.chrome.browser.ntp.MostVisitedItemView>

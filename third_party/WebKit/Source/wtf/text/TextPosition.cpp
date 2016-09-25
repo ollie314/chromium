@@ -24,15 +24,16 @@
 
 #include "wtf/text/TextPosition.h"
 
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/StdLibExtras.h"
 #include <algorithm>
+#include <memory>
 
 namespace WTF {
 
-PassOwnPtr<Vector<unsigned>> lineEndings(const String& text)
+std::unique_ptr<Vector<unsigned>> lineEndings(const String& text)
 {
-    OwnPtr<Vector<unsigned>> result(adoptPtr(new Vector<unsigned>()));
+    std::unique_ptr<Vector<unsigned>> result(wrapUnique(new Vector<unsigned>()));
 
     unsigned start = 0;
     while (start < text.length()) {
@@ -45,7 +46,7 @@ PassOwnPtr<Vector<unsigned>> lineEndings(const String& text)
     }
     result->append(text.length());
 
-    return result.release();
+    return result;
 }
 
 OrdinalNumber TextPosition::toOffset(const Vector<unsigned>& lineEndings)

@@ -17,6 +17,11 @@
 #include "components/gcm_driver/instance_id/instance_id.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_ANDROID)
+#include "components/gcm_driver/instance_id/instance_id_android.h"
+#include "components/gcm_driver/instance_id/scoped_use_fake_instance_id_android.h"
+#endif  // OS_ANDROID
+
 namespace instance_id {
 
 namespace {
@@ -52,6 +57,7 @@ class InstanceIDDriverTest : public testing::Test {
 
   // testing::Test:
   void SetUp() override;
+  void TearDown() override;
 
   void WaitForAsyncOperation();
 
@@ -82,8 +88,13 @@ class InstanceIDDriverTest : public testing::Test {
   void DeleteTokenCompleted(InstanceID::Result result);
 
   base::MessageLoopForUI message_loop_;
-  scoped_ptr<FakeGCMDriverForInstanceID> gcm_driver_;
-  scoped_ptr<InstanceIDDriver> driver_;
+  std::unique_ptr<FakeGCMDriverForInstanceID> gcm_driver_;
+  std::unique_ptr<InstanceIDDriver> driver_;
+
+#if defined(OS_ANDROID)
+  InstanceIDAndroid::ScopedBlockOnAsyncTasksForTesting block_async_;
+  ScopedUseFakeInstanceIDAndroid use_fake_;
+#endif  // OS_ANDROID
 
   std::string id_;
   base::Time creation_time_;
@@ -107,6 +118,14 @@ InstanceIDDriverTest::~InstanceIDDriverTest() {
 void InstanceIDDriverTest::SetUp() {
   gcm_driver_.reset(new FakeGCMDriverForInstanceID);
   RecreateInstanceIDDriver();
+}
+
+void InstanceIDDriverTest::TearDown() {
+  driver_.reset();
+  gcm_driver_.reset();
+  // |gcm_driver_| owns a GCMKeyStore that owns a ProtoDatabaseImpl whose
+  // destructor deletes the underlying LevelDB on the task runner.
+  base::RunLoop().RunUntilIdle();
 }
 
 void InstanceIDDriverTest::RecreateInstanceIDDriver() {

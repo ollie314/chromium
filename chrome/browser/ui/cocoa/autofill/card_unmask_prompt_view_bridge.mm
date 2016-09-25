@@ -3,10 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_models.h"
-#include "chrome/browser/ui/autofill/autofill_dialog_types.h"
 #include "chrome/browser/ui/chrome_style.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_pop_up_button.h"
 #import "chrome/browser/ui/cocoa/autofill/autofill_textfield.h"
@@ -20,15 +19,16 @@
 #import "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/spinner_view.h"
 #include "chrome/browser/ui/cocoa/themed_window.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/browser/ui/card_unmask_prompt_controller.h"
+#include "components/grit/components_scaled_resources.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/components_scaled_resources.h"
-#include "grit/components_strings.h"
-#include "grit/generated_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/controls/hyperlink_button_cell.h"
 #include "ui/base/cocoa/window_size_constants.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/native_theme/native_theme_mac.h"
 
 namespace {
@@ -58,12 +58,6 @@ const SkColor kSubtleBorderColor = SkColorSetRGB(0xdf, 0xdf, 0xdf);
 }  // namespace
 
 namespace autofill {
-
-CardUnmaskPromptView* CreateCardUnmaskPromptView(
-    CardUnmaskPromptController* controller,
-    content::WebContents* web_contents) {
-  return new CardUnmaskPromptViewBridge(controller, web_contents);
-}
 
 #pragma mark CardUnmaskPromptViewBridge
 
@@ -112,7 +106,7 @@ void CardUnmaskPromptViewBridge::GotVerificationResult(
                               IDS_AUTOFILL_CARD_UNMASK_VERIFICATION_SUCCESS)
                                  showSpinner:NO];
 
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, base::Bind(&CardUnmaskPromptViewBridge::PerformClose,
                               weak_ptr_factory_.GetWeakPtr()),
         base::TimeDelta::FromSeconds(1));
@@ -133,7 +127,7 @@ void CardUnmaskPromptViewBridge::OnConstrainedWindowClosed(
     ConstrainedWindowMac* window) {
   if (controller_)
     controller_->OnUnmaskDialogClosed();
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
 }
 
 CardUnmaskPromptController* CardUnmaskPromptViewBridge::GetController() {
@@ -304,8 +298,8 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   if (!text.empty()) {
     if (!permanentErrorBox_) {
       permanentErrorBox_ = [CardUnmaskPromptViewCocoa createPlainBox];
-      [permanentErrorBox_ setFillColor:skia::SkColorToCalibratedNSColor(
-                                           autofill::kWarningColor)];
+      [permanentErrorBox_
+          setFillColor:skia::SkColorToCalibratedNSColor(gfx::kGoogleRed700)];
       [permanentErrorBox_
           setContentViewMargins:NSMakeSize(kPermanentErrorHorizontalPadding,
                                            kPermanentErrorVerticalPadding)];
@@ -479,7 +473,7 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   storageView_.reset([[NSView alloc] initWithFrame:NSZeroRect]);
   [storageView_ setAutoresizingMask:NSViewWidthSizable];
 
-  base::scoped_nsobject<NSBox> box = [CardUnmaskPromptViewCocoa createPlainBox];
+  base::scoped_nsobject<NSBox> box([CardUnmaskPromptViewCocoa createPlainBox]);
   [box setAutoresizingMask:NSViewWidthSizable];
   [box setFillColor:skia::SkColorToCalibratedNSColor(kShadingColor)];
   [box setContentViewMargins:NSMakeSize(chrome_style::kHorizontalPadding,
@@ -512,8 +506,8 @@ void CardUnmaskPromptViewBridge::PerformClose() {
       NSMakePoint(NSMaxX([storageCheckbox_ frame]) + kButtonGap, 0)];
 
   // Add horizontal separator.
-  base::scoped_nsobject<NSBox> separator =
-      [CardUnmaskPromptViewCocoa createPlainBox];
+  base::scoped_nsobject<NSBox> separator(
+      [CardUnmaskPromptViewCocoa createPlainBox]);
   [separator setAutoresizingMask:NSViewWidthSizable];
   [separator setFillColor:skia::SkColorToCalibratedNSColor(kSubtleBorderColor)];
   [storageView_ addSubview:separator];
@@ -712,7 +706,7 @@ void CardUnmaskPromptViewBridge::PerformClose() {
   // Add error message label.
   errorLabel_.reset([constrained_window::CreateLabel() retain]);
   [errorLabel_
-      setTextColor:skia::SkColorToCalibratedNSColor(autofill::kWarningColor)];
+      setTextColor:skia::SkColorToCalibratedNSColor(gfx::kGoogleRed700)];
   [mainView addSubview:errorLabel_];
 
   // Add cancel button.

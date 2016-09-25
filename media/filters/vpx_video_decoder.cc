@@ -18,7 +18,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -45,6 +44,7 @@ extern "C" {
 }
 
 #include "third_party/libyuv/include/libyuv/convert.h"
+#include "third_party/libyuv/include/libyuv/planar_functions.h"
 
 namespace media {
 
@@ -71,7 +71,8 @@ class VpxOffloadThread {
     DCHECK(thread_checker_.CalledOnValidThread());
     DCHECK(offload_thread_users_);
     DCHECK(offload_thread_.IsRunning());
-    base::WaitableEvent waiter(false, false);
+    base::WaitableEvent waiter(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                               base::WaitableEvent::InitialState::NOT_SIGNALED);
     offload_thread_.task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&base::WaitableEvent::Signal, base::Unretained(&waiter)));
@@ -184,9 +185,12 @@ class VpxVideoDecoder::MemoryPool
                                    vpx_codec_frame_buffer* fb);
 
   // Callback that will be called by libvpx when the frame buffer is no longer
-  // being used by libvpx. Parameters:
+  // being used by libvpx. Can be called with NULL user data when decode stops
+  // because of an invalid bitstream.
+  // Parameters:
   // |user_priv|  Private data passed to libvpx (pointer to memory pool).
   // |fb|         Pointer to the frame buffer that's being released.
+  // Returns 0 on success. Returns < 0 on failure.
   static int32_t ReleaseVP9FrameBuffer(void* user_priv,
                                        vpx_codec_frame_buffer* fb);
 
@@ -197,21 +201,19 @@ class VpxVideoDecoder::MemoryPool
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                     base::trace_event::ProcessMemoryDump* pmd) override;
 
-  int NumberOfFrameBuffersInUseByDecoder() const;
-  int NumberOfFrameBuffersInUseByDecoderAndVideoFrame() const;
-
- private:
-  friend class base::RefCountedThreadSafe<VpxVideoDecoder::MemoryPool>;
-  ~MemoryPool() override;
-
   // Reference counted frame buffers used for VP9 decoding. Reference counting
   // is done manually because both chromium and libvpx has to release this
   // before a buffer can be re-used.
   struct VP9FrameBuffer {
     VP9FrameBuffer() : ref_cnt(0) {}
     std::vector<uint8_t> data;
+    std::vector<uint8_t> alpha_data;
     uint32_t ref_cnt;
   };
+
+ private:
+  friend class base::RefCountedThreadSafe<VpxVideoDecoder::MemoryPool>;
+  ~MemoryPool() override;
 
   // Gets the next available frame buffer for use by libvpx.
   VP9FrameBuffer* GetFreeFrameBuffer(size_t min_size);
@@ -223,11 +225,6 @@ class VpxVideoDecoder::MemoryPool
   // Frame buffers to be used by libvpx for VP9 Decoding.
   std::vector<VP9FrameBuffer*> frame_buffers_;
 
-  // Number of VP9FrameBuffer currently in use by the decoder.
-  int in_use_by_decoder_ = 0;
-  // Number of VP9FrameBuffer currently in use by the decoder and a video frame.
-  int in_use_by_decoder_and_video_frame_ = 0;
-
   DISALLOW_COPY_AND_ASSIGN(MemoryPool);
 };
 
@@ -237,7 +234,7 @@ VpxVideoDecoder::MemoryPool::MemoryPool() {
 }
 
 VpxVideoDecoder::MemoryPool::~MemoryPool() {
-  STLDeleteElements(&frame_buffers_);
+  base::STLDeleteElements(&frame_buffers_);
   base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
       this);
 }
@@ -279,7 +276,6 @@ int32_t VpxVideoDecoder::MemoryPool::GetVP9FrameBuffer(
   fb->data = &fb_to_use->data[0];
   fb->size = fb_to_use->data.size();
   ++fb_to_use->ref_cnt;
-  ++memory_pool->in_use_by_decoder_;
 
   // Set the frame buffer's private data to point at the external frame buffer.
   fb->priv = static_cast<void*>(fb_to_use);
@@ -291,14 +287,12 @@ int32_t VpxVideoDecoder::MemoryPool::ReleaseVP9FrameBuffer(
     vpx_codec_frame_buffer* fb) {
   DCHECK(user_priv);
   DCHECK(fb);
+
+  if (!fb->priv)
+    return -1;
+
   VP9FrameBuffer* frame_buffer = static_cast<VP9FrameBuffer*>(fb->priv);
   --frame_buffer->ref_cnt;
-
-  VpxVideoDecoder::MemoryPool* memory_pool =
-      static_cast<VpxVideoDecoder::MemoryPool*>(user_priv);
-  --memory_pool->in_use_by_decoder_;
-  if (frame_buffer->ref_cnt)
-    --memory_pool->in_use_by_decoder_and_video_frame_;
   return 0;
 }
 
@@ -306,8 +300,6 @@ base::Closure VpxVideoDecoder::MemoryPool::CreateFrameCallback(
     void* fb_priv_data) {
   VP9FrameBuffer* frame_buffer = static_cast<VP9FrameBuffer*>(fb_priv_data);
   ++frame_buffer->ref_cnt;
-  if (frame_buffer->ref_cnt > 1)
-    ++in_use_by_decoder_and_video_frame_;
   return BindToCurrentLoop(
       base::Bind(&MemoryPool::OnVideoFrameDestroyed, this, frame_buffer));
 }
@@ -341,20 +333,9 @@ bool VpxVideoDecoder::MemoryPool::OnMemoryDump(
   return true;
 }
 
-int VpxVideoDecoder::MemoryPool::NumberOfFrameBuffersInUseByDecoder() const {
-  return in_use_by_decoder_;
-}
-
-int VpxVideoDecoder::MemoryPool::
-    NumberOfFrameBuffersInUseByDecoderAndVideoFrame() const {
-  return in_use_by_decoder_and_video_frame_;
-}
-
 void VpxVideoDecoder::MemoryPool::OnVideoFrameDestroyed(
     VP9FrameBuffer* frame_buffer) {
   --frame_buffer->ref_cnt;
-  if (frame_buffer->ref_cnt)
-    --in_use_by_decoder_and_video_frame_;
 }
 
 VpxVideoDecoder::VpxVideoDecoder()
@@ -391,7 +372,7 @@ void VpxVideoDecoder::Initialize(const VideoDecoderConfig& config,
   // Success!
   config_ = config;
   state_ = kNormal;
-  output_cb_ = BindToCurrentLoop(output_cb);
+  output_cb_ = offload_task_runner_ ? BindToCurrentLoop(output_cb) : output_cb;
   bound_init_cb.Run(true);
 }
 
@@ -467,11 +448,11 @@ bool VpxVideoDecoder::ConfigureDecoder(const VideoDecoderConfig& config) {
     return false;
 
   // These are the combinations of codec-pixel format supported in principle.
-  // Note that VP9 does not support Alpha in the current implementation.
   DCHECK(
       (config.codec() == kCodecVP8 && config.format() == PIXEL_FORMAT_YV12) ||
       (config.codec() == kCodecVP8 && config.format() == PIXEL_FORMAT_YV12A) ||
       (config.codec() == kCodecVP9 && config.format() == PIXEL_FORMAT_YV12) ||
+      (config.codec() == kCodecVP9 && config.format() == PIXEL_FORMAT_YV12A) ||
       (config.codec() == kCodecVP9 && config.format() == PIXEL_FORMAT_YV24));
 
 #if !defined(DISABLE_FFMPEG_VIDEO_DECODERS)
@@ -487,9 +468,10 @@ bool VpxVideoDecoder::ConfigureDecoder(const VideoDecoderConfig& config) {
   if (!vpx_codec_)
     return false;
 
-  // Configure VP9 to decode on our buffers to skip a data copy on decoding.
+  // Configure VP9 to decode on our buffers to skip a data copy on
+  // decoding. For YV12A-VP9, we use our buffers for the Y, U and V planes and
+  // copy the A plane.
   if (config.codec() == kCodecVP9) {
-    DCHECK_NE(PIXEL_FORMAT_YV12A, config.format());
     DCHECK(vpx_codec_get_caps(vpx_codec_->iface) &
            VPX_CODEC_CAP_EXTERNAL_FRAME_BUFFER);
 
@@ -570,8 +552,26 @@ bool VpxVideoDecoder::VpxDecode(const scoped_refptr<DecoderBuffer>& buffer,
     return false;
   }
 
-  if (!CopyVpxImageToVideoFrame(vpx_image, video_frame))
+  const vpx_image_t* vpx_image_alpha = nullptr;
+  AlphaDecodeStatus alpha_decode_status =
+      DecodeAlphaPlane(vpx_image, &vpx_image_alpha, buffer);
+  if (alpha_decode_status == kAlphaPlaneError) {
     return false;
+  } else if (alpha_decode_status == kNoAlphaPlaneData) {
+    *video_frame = nullptr;
+    return true;
+  }
+  if (!CopyVpxImageToVideoFrame(vpx_image, vpx_image_alpha, video_frame)) {
+    return false;
+  }
+  if (vpx_image_alpha && config_.codec() == kCodecVP8) {
+    libyuv::CopyPlane(vpx_image_alpha->planes[VPX_PLANE_Y],
+                      vpx_image_alpha->stride[VPX_PLANE_Y],
+                      (*video_frame)->visible_data(VideoFrame::kAPlane),
+                      (*video_frame)->stride(VideoFrame::kAPlane),
+                      (*video_frame)->visible_rect().width(),
+                      (*video_frame)->visible_rect().height());
+  }
 
   (*video_frame)->set_timestamp(base::TimeDelta::FromMicroseconds(timestamp));
 
@@ -580,34 +580,84 @@ bool VpxVideoDecoder::VpxDecode(const scoped_refptr<DecoderBuffer>& buffer,
   ColorSpace color_space = config_.color_space();
   if (vpx_image->cs == VPX_CS_BT_709)
     color_space = COLOR_SPACE_HD_REC709;
-  else if (vpx_image->cs == VPX_CS_BT_601)
+  else if (vpx_image->cs == VPX_CS_BT_601 || vpx_image->cs == VPX_CS_SMPTE_170)
     color_space = COLOR_SPACE_SD_REC601;
   (*video_frame)
       ->metadata()
       ->SetInteger(VideoFrameMetadata::COLOR_SPACE, color_space);
 
-  if (!vpx_codec_alpha_)
-    return true;
+  gfx::ColorSpace::PrimaryID primaries =
+      gfx::ColorSpace::PrimaryID::UNSPECIFIED;
+  gfx::ColorSpace::TransferID transfer =
+      gfx::ColorSpace::TransferID::UNSPECIFIED;
+  gfx::ColorSpace::MatrixID matrix = gfx::ColorSpace::MatrixID::UNSPECIFIED;
+  gfx::ColorSpace::RangeID range = vpx_image->range == VPX_CR_FULL_RANGE
+                                       ? gfx::ColorSpace::RangeID::FULL
+                                       : gfx::ColorSpace::RangeID::LIMITED;
 
-  if (buffer->side_data_size() < 8) {
-    // TODO(mcasas): Is this a warning or an error?
-    DLOG(WARNING) << "Making Alpha channel opaque due to missing input";
-    const uint32_t kAlphaOpaqueValue = 255;
-    libyuv::SetPlane((*video_frame)->visible_data(VideoFrame::kAPlane),
-                     (*video_frame)->stride(VideoFrame::kAPlane),
-                     (*video_frame)->visible_rect().width(),
-                     (*video_frame)->visible_rect().height(),
-                     kAlphaOpaqueValue);
-    return true;
+  switch (vpx_image->cs) {
+    case VPX_CS_BT_601:
+    case VPX_CS_SMPTE_170:
+      primaries = gfx::ColorSpace::PrimaryID::SMPTE170M;
+      transfer = gfx::ColorSpace::TransferID::SMPTE170M;
+      matrix = gfx::ColorSpace::MatrixID::SMPTE170M;
+      break;
+    case VPX_CS_SMPTE_240:
+      primaries = gfx::ColorSpace::PrimaryID::SMPTE240M;
+      transfer = gfx::ColorSpace::TransferID::SMPTE240M;
+      matrix = gfx::ColorSpace::MatrixID::SMPTE240M;
+      break;
+    case VPX_CS_BT_709:
+      primaries = gfx::ColorSpace::PrimaryID::BT709;
+      transfer = gfx::ColorSpace::TransferID::BT709;
+      matrix = gfx::ColorSpace::MatrixID::BT709;
+      break;
+    case VPX_CS_BT_2020:
+      primaries = gfx::ColorSpace::PrimaryID::BT2020;
+      if (vpx_image->bit_depth >= 12) {
+        transfer = gfx::ColorSpace::TransferID::BT2020_12;
+      } else if (vpx_image->bit_depth >= 10) {
+        transfer = gfx::ColorSpace::TransferID::BT2020_10;
+      } else {
+        transfer = gfx::ColorSpace::TransferID::BT709;
+      }
+      matrix = gfx::ColorSpace::MatrixID::BT2020_NCL;  // is this right?
+      break;
+    case VPX_CS_SRGB:
+      primaries = gfx::ColorSpace::PrimaryID::BT709;
+      transfer = gfx::ColorSpace::TransferID::IEC61966_2_1;
+      matrix = gfx::ColorSpace::MatrixID::BT709;
+      break;
+
+    default:
+      break;
+  }
+
+  if (primaries != gfx::ColorSpace::PrimaryID::UNSPECIFIED) {
+    (*video_frame)
+        ->set_color_space(gfx::ColorSpace(primaries, transfer, matrix, range));
+  }
+
+  return true;
+}
+
+VpxVideoDecoder::AlphaDecodeStatus VpxVideoDecoder::DecodeAlphaPlane(
+    const struct vpx_image* vpx_image,
+    const struct vpx_image** vpx_image_alpha,
+    const scoped_refptr<DecoderBuffer>& buffer) {
+  if (!vpx_codec_alpha_ || buffer->side_data_size() < 8) {
+    return kAlphaPlaneProcessed;
   }
 
   // First 8 bytes of side data is |side_data_id| in big endian.
   const uint64_t side_data_id = base::NetToHost64(
       *(reinterpret_cast<const uint64_t*>(buffer->side_data())));
-  if (side_data_id != 1)
-    return true;
+  if (side_data_id != 1) {
+    return kAlphaPlaneProcessed;
+  }
 
-  // Try and decode buffer->side_data() minus the first 8 bytes as a full frame.
+  // Try and decode buffer->side_data() minus the first 8 bytes as a full
+  // frame.
   int64_t timestamp_alpha = buffer->timestamp().InMicroseconds();
   void* user_priv_alpha = reinterpret_cast<void*>(&timestamp_alpha);
   {
@@ -619,52 +669,102 @@ bool VpxVideoDecoder::VpxDecode(const scoped_refptr<DecoderBuffer>& buffer,
     if (status != VPX_CODEC_OK) {
       DLOG(ERROR) << "vpx_codec_decode() failed for the alpha: "
                   << vpx_codec_error(vpx_codec_);
-      return false;
+      return kAlphaPlaneError;
     }
   }
 
   vpx_codec_iter_t iter_alpha = NULL;
-  const vpx_image_t* vpx_image_alpha =
-      vpx_codec_get_frame(vpx_codec_alpha_, &iter_alpha);
-  if (!vpx_image_alpha) {
-    *video_frame = nullptr;
-    return true;
+  *vpx_image_alpha = vpx_codec_get_frame(vpx_codec_alpha_, &iter_alpha);
+  if (!(*vpx_image_alpha)) {
+    return kNoAlphaPlaneData;
   }
 
-  if (vpx_image_alpha->user_priv != user_priv_alpha) {
+  if ((*vpx_image_alpha)->user_priv != user_priv_alpha) {
     DLOG(ERROR) << "Invalid output timestamp on alpha.";
-    return false;
+    return kAlphaPlaneError;
   }
 
-  if (vpx_image_alpha->d_h != vpx_image->d_h ||
-      vpx_image_alpha->d_w != vpx_image->d_w) {
+  if ((*vpx_image_alpha)->d_h != vpx_image->d_h ||
+      (*vpx_image_alpha)->d_w != vpx_image->d_w) {
     DLOG(ERROR) << "The alpha plane dimensions are not the same as the "
                    "image dimensions.";
-    return false;
+    return kAlphaPlaneError;
   }
 
-  libyuv::CopyPlane(vpx_image_alpha->planes[VPX_PLANE_Y],
-                    vpx_image_alpha->stride[VPX_PLANE_Y],
-                    (*video_frame)->visible_data(VideoFrame::kAPlane),
-                    (*video_frame)->stride(VideoFrame::kAPlane),
-                    (*video_frame)->visible_rect().width(),
-                    (*video_frame)->visible_rect().height());
-  return true;
+  if (config_.codec() == kCodecVP9) {
+    VpxVideoDecoder::MemoryPool::VP9FrameBuffer* frame_buffer =
+        static_cast<VpxVideoDecoder::MemoryPool::VP9FrameBuffer*>(
+            vpx_image->fb_priv);
+    uint64_t alpha_plane_size =
+        (*vpx_image_alpha)->stride[VPX_PLANE_Y] * (*vpx_image_alpha)->d_h;
+    if (frame_buffer->alpha_data.size() < alpha_plane_size) {
+      frame_buffer->alpha_data.resize(alpha_plane_size);
+    }
+    libyuv::CopyPlane((*vpx_image_alpha)->planes[VPX_PLANE_Y],
+                      (*vpx_image_alpha)->stride[VPX_PLANE_Y],
+                      &frame_buffer->alpha_data[0],
+                      (*vpx_image_alpha)->stride[VPX_PLANE_Y],
+                      (*vpx_image_alpha)->d_w, (*vpx_image_alpha)->d_h);
+  }
+  return kAlphaPlaneProcessed;
 }
 
 bool VpxVideoDecoder::CopyVpxImageToVideoFrame(
     const struct vpx_image* vpx_image,
+    const struct vpx_image* vpx_image_alpha,
     scoped_refptr<VideoFrame>* video_frame) {
   DCHECK(vpx_image);
 
   VideoPixelFormat codec_format;
   switch (vpx_image->fmt) {
     case VPX_IMG_FMT_I420:
-      codec_format = vpx_codec_alpha_ ? PIXEL_FORMAT_YV12A : PIXEL_FORMAT_YV12;
+      codec_format = vpx_image_alpha ? PIXEL_FORMAT_YV12A : PIXEL_FORMAT_YV12;
       break;
 
     case VPX_IMG_FMT_I444:
       codec_format = PIXEL_FORMAT_YV24;
+      break;
+
+    case VPX_IMG_FMT_I42016:
+      switch (vpx_image->bit_depth) {
+        case 9:
+          codec_format = PIXEL_FORMAT_YUV420P9;
+          break;
+        case 10:
+          codec_format = PIXEL_FORMAT_YUV420P10;
+          break;
+        default:
+          DLOG(ERROR) << "Unsupported bit depth: " << vpx_image->bit_depth;
+          return false;
+      }
+      break;
+
+    case VPX_IMG_FMT_I42216:
+      switch (vpx_image->bit_depth) {
+        case 9:
+          codec_format = PIXEL_FORMAT_YUV422P9;
+          break;
+        case 10:
+          codec_format = PIXEL_FORMAT_YUV422P10;
+          break;
+        default:
+          DLOG(ERROR) << "Unsupported bit depth: " << vpx_image->bit_depth;
+          return false;
+      }
+      break;
+
+    case VPX_IMG_FMT_I44416:
+      switch (vpx_image->bit_depth) {
+        case 9:
+          codec_format = PIXEL_FORMAT_YUV444P9;
+          break;
+        case 10:
+          codec_format = PIXEL_FORMAT_YUV444P10;
+          break;
+        default:
+          DLOG(ERROR) << "Unsupported bit depth: " << vpx_image->bit_depth;
+          return false;
+      }
       break;
 
     default:
@@ -681,38 +781,39 @@ bool VpxVideoDecoder::CopyVpxImageToVideoFrame(
 
   if (memory_pool_.get()) {
     DCHECK_EQ(kCodecVP9, config_.codec());
-    DCHECK(!vpx_codec_alpha_) << "Uh-oh, VP9 and Alpha shouldn't coexist.";
-    *video_frame = VideoFrame::WrapExternalYuvData(
-        codec_format,
-        coded_size, gfx::Rect(visible_size), config_.natural_size(),
-        vpx_image->stride[VPX_PLANE_Y],
-        vpx_image->stride[VPX_PLANE_U],
-        vpx_image->stride[VPX_PLANE_V],
-        vpx_image->planes[VPX_PLANE_Y],
-        vpx_image->planes[VPX_PLANE_U],
-        vpx_image->planes[VPX_PLANE_V],
-        kNoTimestamp());
+    if (vpx_image_alpha) {
+      VpxVideoDecoder::MemoryPool::VP9FrameBuffer* frame_buffer =
+          static_cast<VpxVideoDecoder::MemoryPool::VP9FrameBuffer*>(
+              vpx_image->fb_priv);
+      *video_frame = VideoFrame::WrapExternalYuvaData(
+          codec_format, coded_size, gfx::Rect(visible_size),
+          config_.natural_size(), vpx_image->stride[VPX_PLANE_Y],
+          vpx_image->stride[VPX_PLANE_U], vpx_image->stride[VPX_PLANE_V],
+          vpx_image_alpha->stride[VPX_PLANE_Y], vpx_image->planes[VPX_PLANE_Y],
+          vpx_image->planes[VPX_PLANE_U], vpx_image->planes[VPX_PLANE_V],
+          &frame_buffer->alpha_data[0], kNoTimestamp);
+    } else {
+      *video_frame = VideoFrame::WrapExternalYuvData(
+          codec_format, coded_size, gfx::Rect(visible_size),
+          config_.natural_size(), vpx_image->stride[VPX_PLANE_Y],
+          vpx_image->stride[VPX_PLANE_U], vpx_image->stride[VPX_PLANE_V],
+          vpx_image->planes[VPX_PLANE_Y], vpx_image->planes[VPX_PLANE_U],
+          vpx_image->planes[VPX_PLANE_V], kNoTimestamp);
+    }
     if (!(*video_frame))
       return false;
 
     video_frame->get()->AddDestructionObserver(
         memory_pool_->CreateFrameCallback(vpx_image->fb_priv));
-
-    UMA_HISTOGRAM_COUNTS("Media.Vpx.VideoDecoderBuffersInUseByDecoder",
-                         memory_pool_->NumberOfFrameBuffersInUseByDecoder());
-    UMA_HISTOGRAM_COUNTS(
-        "Media.Vpx.VideoDecoderBuffersInUseByDecoderAndVideoFrame",
-        memory_pool_->NumberOfFrameBuffersInUseByDecoderAndVideoFrame());
-
     return true;
   }
 
   DCHECK(codec_format == PIXEL_FORMAT_YV12 ||
          codec_format == PIXEL_FORMAT_YV12A);
 
-  *video_frame = frame_pool_.CreateFrame(
-      codec_format, visible_size, gfx::Rect(visible_size),
-      config_.natural_size(), kNoTimestamp());
+  *video_frame = frame_pool_.CreateFrame(codec_format, visible_size,
+                                         gfx::Rect(visible_size),
+                                         config_.natural_size(), kNoTimestamp);
   if (!(*video_frame))
     return false;
 

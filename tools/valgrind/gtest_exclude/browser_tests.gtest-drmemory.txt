@@ -85,19 +85,12 @@ CrSettingsBrowserTest.CrSettingsTest
 # https://crbug.com/550653
 CrashRecoveryBrowserTest.LoadInNewTab
 
-# https://crbug.com/561085
-DistillablePageUtilsBrowserTestAdaboost.TestDelegate
-
 # https://crbug.com/561088
 CrExtensionsBrowserTestWithMultipleExtensionTypesInstalled.ExtensionManagerSplitSectionsTest
 CrExtensionsBrowserTestWithMultipleExtensionTypesInstalled.ExtensionManagerAppSectionVisibilityTest
 
 # https://crbug.com/562434
 AppearanceSettingsBrowserTest.uiTests
-
-# https://crbug.com/571263
-DistillablePageUtilsBrowserTestAlways.TestDelegate
-DistillablePageUtilsBrowserTestOG.TestDelegate
 
 # https://crbug.com/577850
 LoginPromptBrowserTest.ShouldReplaceExistingInterstitialWhenNavigated
@@ -113,6 +106,7 @@ ZoomControllerBrowserTest.SettingsZoomAfterSigninWorks
 
 # https://crbug.com/581368
 TracingBrowserTest.TestMemoryInfra
+TracingBrowserTest.TestBackgroundMemoryInfra
 
 # https://crbug.com/581575
 PredictorBrowserTest.PreconnectCORSAndFetchNonCORS
@@ -129,6 +123,7 @@ BasicExtensionSettingsWebUITest.testNonEmptyExtensionList
 BookmarkBubbleSignInDelegateTest.OnSignInLinkClickedReusesBlank
 BrowserOptionsOverlayWebUITest.testNavigationInBackground
 ChromeSitePerProcessTest*
+ChromeUIOverridesBrowserTest.BookmarkShortcutOverrides
 CrashRecoveryBrowserTest*
 CrExtensions*
 CrSettings*
@@ -141,6 +136,7 @@ HostedAppTest*
 ImageWriterPrivateApiTest.TestWriteFromFile
 InlineInstallPrivateApiTestApp*
 InstallGoodExtensionSettingsWebUITest.showOptions
+ManageProfileUITestAsync.CreateExistingSupervisedUser
 MaterialHistoryBrowserTest*
 MimeHandlerViewTest.Abort
 MimeHandlerViewTest.EmbeddedDataUrlObject
@@ -148,13 +144,18 @@ MultilanguageOptionsWebUI*
 PDFExtensionTest*
 PasswordsPrivateApiTest.RequestPlaintextPassword
 PolicyPref*
+PredictorBrowserTest*
 ProfileWindow*
 PushMessagingBrowserTest.SubscribeWithoutKeySuccessNotificationsGranted
 SubframeTaskBrowserTest.TaskManagerShowsSubframeTasks
 SyncSetupWebUITestAsync.RestoreSyncDataTypes
+WebRtcDisableEncryptionFlagBrowserTest.VerifyEncryption
 WebUIWebView*
 WebrtcEventLogApiTest*
 ZoomControllerBrowserTest.NavigationResetsManualMode
 
 # https://crbug.com/603334
 AppViewTests/AppViewTest.KillGuestCommunicatingWithWrongAppView/*
+
+# https://crbug.com/620370
+MdSettingsUITest.BackForwardDoesntCrash

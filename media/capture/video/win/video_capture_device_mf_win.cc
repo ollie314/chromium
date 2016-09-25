@@ -24,12 +24,6 @@ using base::win::ScopedComPtr;
 
 namespace media {
 
-// In Windows device identifiers, the USB VID and PID are preceded by the string
-// "vid_" or "pid_".  The identifiers are each 4 bytes long.
-const char kVidPrefix[] = "vid_";  // Also contains '\0'.
-const char kPidPrefix[] = "pid_";  // Also contains '\0'.
-const size_t kVidPidSize = 4;
-
 static bool GetFrameSize(IMFMediaType* type, gfx::Size* frame_size) {
   UINT32 width32, height32;
   if (FAILED(MFGetAttributeSize(type, MF_MT_FRAME_SIZE, &width32, &height32)))
@@ -109,14 +103,17 @@ class MFReaderCallback final
     return 1U;
   }
 
-  STDMETHOD(OnReadSample)(HRESULT status,
-                          DWORD stream_index,
-                          DWORD stream_flags,
-                          LONGLONG time_stamp,
-                          IMFSample* sample) override {
-    base::TimeTicks stamp(base::TimeTicks::Now());
+  STDMETHOD(OnReadSample)
+  (HRESULT status,
+   DWORD stream_index,
+   DWORD stream_flags,
+   LONGLONG raw_time_stamp,
+   IMFSample* sample) override {
+    base::TimeTicks reference_time(base::TimeTicks::Now());
+    base::TimeDelta timestamp =
+        base::TimeDelta::FromMicroseconds(raw_time_stamp / 10);
     if (!sample) {
-      observer_->OnIncomingCapturedData(NULL, 0, 0, stamp);
+      observer_->OnIncomingCapturedData(NULL, 0, 0, reference_time, timestamp);
       return S_OK;
     }
 
@@ -130,7 +127,8 @@ class MFReaderCallback final
         DWORD length = 0, max_length = 0;
         BYTE* data = NULL;
         buffer->Lock(&data, &max_length, &length);
-        observer_->OnIncomingCapturedData(data, length, 0, stamp);
+        observer_->OnIncomingCapturedData(data, length, 0, reference_time,
+                                          timestamp);
         buffer->Unlock();
       }
     }
@@ -184,28 +182,9 @@ bool VideoCaptureDeviceMFWin::FormatFromGuid(const GUID& guid,
   return false;
 }
 
-const std::string VideoCaptureDevice::Name::GetModel() const {
-  const size_t vid_prefix_size = sizeof(kVidPrefix) - 1;
-  const size_t pid_prefix_size = sizeof(kPidPrefix) - 1;
-  const size_t vid_location = unique_id_.find(kVidPrefix);
-  if (vid_location == std::string::npos ||
-      vid_location + vid_prefix_size + kVidPidSize > unique_id_.size()) {
-    return std::string();
-  }
-  const size_t pid_location = unique_id_.find(kPidPrefix);
-  if (pid_location == std::string::npos ||
-      pid_location + pid_prefix_size + kVidPidSize > unique_id_.size()) {
-    return std::string();
-  }
-  std::string id_vendor =
-      unique_id_.substr(vid_location + vid_prefix_size, kVidPidSize);
-  std::string id_product =
-      unique_id_.substr(pid_location + pid_prefix_size, kVidPidSize);
-  return id_vendor + ":" + id_product;
-}
-
-VideoCaptureDeviceMFWin::VideoCaptureDeviceMFWin(const Name& device_name)
-    : name_(device_name), capture_(0) {
+VideoCaptureDeviceMFWin::VideoCaptureDeviceMFWin(
+    const VideoCaptureDeviceDescriptor& device_descriptor)
+    : descriptor_(device_descriptor), capture_(0) {
   DetachFromThread();
 }
 
@@ -231,7 +210,7 @@ bool VideoCaptureDeviceMFWin::Init(
 
 void VideoCaptureDeviceMFWin::AllocateAndStart(
     const VideoCaptureParams& params,
-    scoped_ptr<VideoCaptureDevice::Client> client) {
+    std::unique_ptr<VideoCaptureDevice::Client> client) {
   DCHECK(CalledOnValidThread());
 
   base::AutoLock lock(lock_);
@@ -269,7 +248,8 @@ void VideoCaptureDeviceMFWin::AllocateAndStart(
 
 void VideoCaptureDeviceMFWin::StopAndDeAllocate() {
   DCHECK(CalledOnValidThread());
-  base::WaitableEvent flushed(false, false);
+  base::WaitableEvent flushed(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED);
   const int kFlushTimeOutInMs = 1000;
   bool wait = false;
   {
@@ -299,11 +279,12 @@ void VideoCaptureDeviceMFWin::OnIncomingCapturedData(
     const uint8_t* data,
     int length,
     int rotation,
-    const base::TimeTicks& time_stamp) {
+    base::TimeTicks reference_time,
+    base::TimeDelta timestamp) {
   base::AutoLock lock(lock_);
   if (data && client_.get()) {
     client_->OnIncomingCapturedData(data, length, capture_format_, rotation,
-                                    time_stamp);
+                                    reference_time, timestamp);
   }
 
   if (capture_) {

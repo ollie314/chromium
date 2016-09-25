@@ -38,16 +38,20 @@ FETile* FETile::create(Filter* filter)
     return new FETile(filter);
 }
 
-FloatRect FETile::mapPaintRect(const FloatRect& rect, bool forward) const
+FloatRect FETile::mapInputs(const FloatRect& rect) const
 {
-    return forward ? maxEffectRect() : inputEffect(0)->maxEffectRect();
+    return absoluteBounds();
 }
 
 sk_sp<SkImageFilter> FETile::createImageFilter()
 {
     sk_sp<SkImageFilter> input(SkiaImageFilterBuilder::build(inputEffect(0), operatingColorSpace()));
-    FloatRect srcRect = inputEffect(0)->filterPrimitiveSubregion();
-    FloatRect dstRect = applyEffectBoundaries(getFilter()->filterRegion());
+    FloatRect srcRect;
+    if (inputEffect(0)->getFilterEffectType() == FilterEffectTypeSourceInput)
+        srcRect = getFilter()->filterRegion();
+    else
+        srcRect = inputEffect(0)->filterPrimitiveSubregion();
+    FloatRect dstRect = filterPrimitiveSubregion();
     return SkTileImageFilter::Make(srcRect, dstRect, std::move(input));
 }
 

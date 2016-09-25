@@ -7,7 +7,8 @@
 
 #include <stdint.h>
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "media/cdm/api/content_decryption_module.h"
 #include "media/cdm/ppapi/external_clear_key/clear_key_cdm_common.h"
 
@@ -34,11 +35,12 @@ class CdmVideoDecoder {
                                   cdm::VideoFrame* decoded_frame) = 0;
 };
 
-// Initializes appropriate video decoder based on GYP flags and the value of
-// |config.codec|. Returns a scoped_ptr containing a non-null initialized
-// CdmVideoDecoder* upon success.
-scoped_ptr<CdmVideoDecoder> CreateVideoDecoder(
-    ClearKeyCdmHost* host, const cdm::VideoDecoderConfig& config);
+// Initializes the appropriate video decoder based on build flags and the value
+// of |config.codec|. Returns a scoped_ptr containing a non-null initialized
+// CdmVideoDecoder pointer upon success.
+std::unique_ptr<CdmVideoDecoder> CreateVideoDecoder(
+    ClearKeyCdmHost* host,
+    const cdm::VideoDecoderConfig& config);
 
 }  // namespace media
 

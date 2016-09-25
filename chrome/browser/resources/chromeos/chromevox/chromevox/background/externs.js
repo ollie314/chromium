@@ -68,7 +68,5 @@ chrome.accessibilityPrivate.onControlHover;
 /** @type ChromeEvent */
 chrome.accessibilityPrivate.onTextChanged;
 
-/** @type ChromeEvent */
-chrome.accessibilityPrivate.onChromeVoxLoadStateChanged;
-/** @type {function()} */
-chrome.accessibilityPrivate.onChromeVoxLoadStateChanged.destroy_;
+/** @type {ChromeEvent|!Object} */
+chrome.accessibilityPrivate.onAccessibilityGesture;

@@ -32,24 +32,51 @@
 #define ResourceOwner_h
 
 #include "core/fetch/Resource.h"
+#include <type_traits>
 
 namespace blink {
 
+template <typename Client, bool isClientGarbageCollectedMixin>
+class ResourceOwnerBase;
+
+template <typename Client>
+class ResourceOwnerBase<Client, true> : public Client {
+public:
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        Client::trace(visitor);
+    }
+};
+
+// TODO(yhirano): Remove this template once all ResourceClients become
+// GarbageCollectedMixin.
+template <typename Client>
+class ResourceOwnerBase<Client, false> : public GarbageCollectedMixin, public Client {
+public:
+    DEFINE_INLINE_VIRTUAL_TRACE() {}
+};
+
 template<class R, class C = typename R::ClientType>
-class ResourceOwner : public GarbageCollectedMixin, public C {
+class ResourceOwner : public ResourceOwnerBase<C, std::is_base_of<GarbageCollectedMixin, C>::value> {
     USING_PRE_FINALIZER(ResourceOwner, clearResource);
 public:
     using ResourceType = R;
+    ~ResourceOwner() override {}
+    ResourceType* resource() const { return m_resource; }
 
-    virtual ~ResourceOwner();
-    ResourceType* resource() const { return m_resource.get(); }
-
-    DEFINE_INLINE_VIRTUAL_TRACE() { visitor->trace(m_resource); }
+    DEFINE_INLINE_TRACE()
+    {
+        visitor->trace(m_resource);
+        ResourceOwnerBase<C, std::is_base_of<GarbageCollectedMixin, C>::value>::trace(visitor);
+    }
 
 protected:
-    ResourceOwner();
+    ResourceOwner()
+    {
+        ThreadState::current()->registerPreFinalizer(this);
+    }
 
-    void setResource(ResourceType*);
+    void setResource(ResourceType*, Resource::PreloadReferencePolicy = Resource::MarkAsReferenced);
     void clearResource() { setResource(nullptr); }
 
 private:
@@ -57,18 +84,7 @@ private:
 };
 
 template<class R, class C>
-inline ResourceOwner<R, C>::ResourceOwner()
-{
-    ThreadState::current()->registerPreFinalizer(this);
-}
-
-template<class R, class C>
-inline ResourceOwner<R, C>::~ResourceOwner()
-{
-}
-
-template<class R, class C>
-inline void ResourceOwner<R, C>::setResource(R* newResource)
+inline void ResourceOwner<R, C>::setResource(R* newResource, Resource::PreloadReferencePolicy preloadReferencePolicy)
 {
     if (newResource == m_resource)
         return;
@@ -80,7 +96,7 @@ inline void ResourceOwner<R, C>::setResource(R* newResource)
 
     if (newResource) {
         m_resource = newResource;
-        m_resource->addClient(this);
+        m_resource->addClient(this, preloadReferencePolicy);
     }
 }
 

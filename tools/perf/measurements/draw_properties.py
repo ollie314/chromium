@@ -2,13 +2,13 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.page import page_test
+from telemetry.page import legacy_page_test
 from telemetry.timeline import model
 from telemetry.timeline import tracing_config
 from telemetry.value import scalar
 
 
-class DrawProperties(page_test.PageTest):
+class DrawProperties(legacy_page_test.LegacyPageTest):
 
   def __init__(self):
     super(DrawProperties, self).__init__()
@@ -19,8 +19,9 @@ class DrawProperties(page_test.PageTest):
     ])
 
   def WillNavigateToPage(self, page, tab):
+    del page  # unused
     config = tracing_config.TracingConfig()
-    config.tracing_category_filter.AddDisabledByDefault(
+    config.chrome_trace_config.category_filter.AddDisabledByDefault(
         'disabled-by-default-cc.debug.cdp-perf')
     config.enable_chrome_trace = True
     tab.browser.platform.tracing_controller.StartTracing(config)
@@ -36,6 +37,7 @@ class DrawProperties(page_test.PageTest):
     return duration_avg
 
   def ValidateAndMeasurePage(self, page, tab, results):
+    del page  # unused
     timeline_data = tab.browser.platform.tracing_controller.StopTracing()
     timeline_model = model.TimelineModel(timeline_data)
 

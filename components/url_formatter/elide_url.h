@@ -18,6 +18,10 @@ namespace gfx {
 class FontList;
 }
 
+namespace url {
+class Origin;
+}
+
 namespace url_formatter {
 
 // ElideUrl and Elide host require
@@ -76,6 +80,20 @@ enum class SchemeDisplay {
 // example), the scheme may be the only indicator.
 base::string16 FormatUrlForSecurityDisplay(
     const GURL& origin,
+    const SchemeDisplay scheme_display = SchemeDisplay::SHOW);
+
+// This is a convenience function for formatting a url::Origin in a concise and
+// human-friendly way, to help users make security-related decisions.
+//
+// - Omits the port if it is 0 or the default for the scheme.
+//
+// Do not use this for origins which will be parsed or sent to other
+// applications.
+//
+// Generally, prefer SchemeDisplay::SHOW to omitting the scheme unless there is
+// plenty of indication as to whether the origin is secure elsewhere in the UX.
+base::string16 FormatOriginForSecurityDisplay(
+    const url::Origin& origin,
     const SchemeDisplay scheme_display = SchemeDisplay::SHOW);
 
 }  // namespace url_formatter

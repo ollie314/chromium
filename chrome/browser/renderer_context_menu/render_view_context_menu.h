@@ -14,6 +14,7 @@
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
+#include "chrome/browser/ui/browser.h"
 #include "components/renderer_context_menu/context_menu_content_type.h"
 #include "components/renderer_context_menu/render_view_context_menu_base.h"
 #include "components/renderer_context_menu/render_view_context_menu_observer.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/extensions/menu_manager.h"
 #endif
 
+class OpenWithMenuObserver;
 class PrintPreviewContextMenuObserver;
 class Profile;
 class SpellingMenuObserver;
@@ -91,6 +93,10 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
 #endif
   void RecordUsedItem(int id) override;
 
+  // Returns true if the browser is in HTML fullscreen mode, initiated by the
+  // page (as opposed to the user). Used to determine which shortcut to display.
+  bool IsHTML5Fullscreen() const;
+
  private:
   friend class RenderViewContextMenuTest;
   friend class TestRenderViewContextMenu;
@@ -122,6 +128,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendDeveloperItems();
   void AppendDevtoolsForUnpackedExtensions();
   void AppendLinkItems();
+  void AppendOpenWithLinkItems();
   void AppendImageItems();
   void AppendAudioItems();
   void AppendCanvasItems();
@@ -129,6 +136,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendMediaItems();
   void AppendPluginItems();
   void AppendPageItems();
+  void AppendExitFullscreenItem();
   void AppendCopyItem();
   void AppendPrintItem();
   void AppendMediaRouterItem();
@@ -146,17 +154,46 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendProtocolHandlerSubMenu();
   void AppendPasswordItems();
 
-  // Copy to the clipboard an image located at a point in the RenderView
-  void CopyImageAt(int x, int y);
+  // Command enabled query functions.
+  bool IsReloadEnabled() const;
+  bool IsViewSourceEnabled() const;
+  bool IsDevCommandEnabled(int id) const;
+  bool IsTranslateEnabled() const;
+  bool IsSaveLinkAsEnabled() const;
+  bool IsSaveImageAsEnabled() const;
+  bool IsSaveAsEnabled() const;
+  bool IsSavePageEnabled() const;
+  bool IsPasteEnabled() const;
+  bool IsPasteAndMatchStyleEnabled() const;
+  bool IsPrintPreviewEnabled() const;
+  bool IsRouteMediaEnabled() const;
 
-  // Load the original image located at a point in the RenderView.
-  void LoadOriginalImage();
-
-  // Get an image located at a point in the RenderView for search.
-  void GetImageThumbnailForSearch();
-
-  // Launch the inspector targeting a point in the RenderView
-  void Inspect(int x, int y);
+  // Command execution functions.
+  void ExecOpenLinkNewTab();
+  void ExecProtocolHandler(int event_flags, int handler_index);
+  void ExecOpenLinkInProfile(int profile_index);
+  void ExecInspectElement();
+  void ExecInspectBackgroundPage();
+  void ExecSaveLinkAs();
+  void ExecSaveAs();
+  void ExecExitFullscreen();
+  void ExecCopyLinkText();
+  void ExecCopyImageAt();
+  void ExecSearchWebForImage();
+  void ExecLoadOriginalImage();
+  void ExecPlayPause();
+  void ExecMute();
+  void ExecLoop();
+  void ExecControls();
+  void ExecRotateCW();
+  void ExecRotateCCW();
+  void ExecReloadPackagedApp();
+  void ExecRestartPackagedApp();
+  void ExecPrint();
+  void ExecRouteMedia();
+  void ExecTranslate();
+  void ExecLanguageSettings(int event_flags);
+  void ExecProtocolHandlerSettings(int event_flags);
 
   // Writes the specified text/url to the system clipboard
   void WriteURLToClipboard(const GURL& url);
@@ -166,7 +203,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void PluginActionAt(const gfx::Point& location,
                       const blink::WebPluginAction& action);
 
-  bool IsDevCommandEnabled(int id) const;
+  Browser* GetBrowser() const;
 
   // Returns a list of registered ProtocolHandlers that can handle the clicked
   // on URL.
@@ -192,6 +229,9 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   std::unique_ptr<SpellingOptionsSubMenuObserver>
       spelling_options_submenu_observer_;
 #endif
+
+  // An observer that handles "Open with <app>" items.
+  std::unique_ptr<RenderViewContextMenuObserver> open_with_menu_observer_;
 
 #if defined(ENABLE_PRINT_PREVIEW)
   // An observer that disables menu items when print preview is active.

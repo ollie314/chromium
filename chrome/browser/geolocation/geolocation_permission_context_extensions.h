@@ -30,6 +30,7 @@ class GeolocationPermissionContextExtensions {
                         const PermissionRequestID& request_id,
                         int bridge_id,
                         const GURL& requesting_frame,
+                        bool user_gesture,
                         const base::Callback<void(ContentSetting)>& callback,
                         bool* permission_set,
                         bool* new_permission);
@@ -39,7 +40,9 @@ class GeolocationPermissionContextExtensions {
                                int bridge_id);
 
  private:
+#if defined(ENABLE_EXTENSIONS)
   Profile* profile_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(GeolocationPermissionContextExtensions);
 };

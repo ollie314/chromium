@@ -5,20 +5,20 @@
 package org.chromium.chrome.browser.media.ui;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.media.AudioManager;
-import android.os.Build;
 import android.text.TextUtils;
 
-import org.chromium.base.ApplicationStatus;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.metrics.MediaNotificationUma;
 import org.chromium.chrome.browser.metrics.MediaSessionUMA;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
-import org.chromium.chrome.browser.util.UrlUtilities;
+import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.content_public.common.MediaMetadata;
@@ -35,6 +35,7 @@ public class MediaSessionTabHelper {
     private static final String TAG = "MediaSession";
 
     private static final String UNICODE_PLAY_CHARACTER = "\u25B6";
+    private static final int MINIMAL_FAVICON_SIZE = 114;
 
     private Tab mTab;
     private Bitmap mFavicon = null;
@@ -103,12 +104,18 @@ public class MediaSessionTabHelper {
 
                 // The page's title is used as a placeholder if no title is specified in the
                 // metadata.
-                if (TextUtils.isEmpty(metadata.getTitle())) {
+                if (metadata == null || TextUtils.isEmpty(metadata.getTitle())) {
                     mFallbackMetadata = new MediaMetadata(
                             sanitizeMediaTitle(mTab.getTitle()),
-                            metadata.getArtist(),
-                            metadata.getAlbum());
+                            metadata == null ? "" : metadata.getArtist(),
+                            metadata == null ? "" : metadata.getAlbum());
                     metadata = mFallbackMetadata;
+                }
+
+                Intent contentIntent = Tab.createBringTabToFrontIntent(mTab.getId());
+                if (contentIntent != null) {
+                    contentIntent.putExtra(MediaNotificationUma.INTENT_EXTRA_NAME,
+                            MediaNotificationUma.SOURCE_MEDIA);
                 }
 
                 mNotificationInfoBuilder =
@@ -120,13 +127,14 @@ public class MediaSessionTabHelper {
                                 .setPrivate(mTab.isIncognito())
                                 .setIcon(R.drawable.audio_playing)
                                 .setLargeIcon(mFavicon)
+                                .setDefaultLargeIcon(R.drawable.audio_playing_square)
                                 .setActions(MediaNotificationInfo.ACTION_PLAY_PAUSE
                                         | MediaNotificationInfo.ACTION_SWIPEAWAY)
-                                .setContentIntent(Tab.createBringTabToFrontIntent(mTab.getId()))
+                                .setContentIntent(contentIntent)
                                 .setId(R.id.media_playback_notification)
                                 .setListener(mControlsListener);
 
-                MediaNotificationManager.show(ApplicationStatus.getApplicationContext(),
+                MediaNotificationManager.show(ContextUtils.getApplicationContext(),
                         mNotificationInfoBuilder.build());
 
                 Activity activity = getActivityFromTab(mTab);
@@ -161,9 +169,6 @@ public class MediaSessionTabHelper {
         @Override
         public void onFaviconUpdated(Tab tab, Bitmap icon) {
             assert tab == mTab;
-            // Don't update the large icon if using customized notification. Otherwise, the
-            // lockscreen art will be the favicon.
-            if (!ChromeFeatureList.isEnabled(ChromeFeatureList.MEDIA_STYLE_NOTIFICATION)) return;
 
             if (!updateFavicon(icon)) return;
 
@@ -171,7 +176,7 @@ public class MediaSessionTabHelper {
 
             mNotificationInfoBuilder.setLargeIcon(mFavicon);
             MediaNotificationManager.show(
-                    ApplicationStatus.getApplicationContext(), mNotificationInfoBuilder.build());
+                    ContextUtils.getApplicationContext(), mNotificationInfoBuilder.build());
         }
 
         @Override
@@ -180,7 +185,7 @@ public class MediaSessionTabHelper {
 
             String origin = mTab.getUrl();
             try {
-                origin = UrlUtilities.formatUrlForSecurityDisplay(new URI(origin), true);
+                origin = UrlFormatter.formatUrlForSecurityDisplay(new URI(origin), true);
             } catch (URISyntaxException e) {
                 Log.e(TAG, "Unable to parse the origin from the URL. "
                                 + "Using the full URL instead.");
@@ -195,7 +200,7 @@ public class MediaSessionTabHelper {
             mNotificationInfoBuilder.setOrigin(mOrigin);
             mNotificationInfoBuilder.setLargeIcon(mFavicon);
             MediaNotificationManager.show(
-                    ApplicationStatus.getApplicationContext(), mNotificationInfoBuilder.build());
+                    ContextUtils.getApplicationContext(), mNotificationInfoBuilder.build());
         }
 
         @Override
@@ -207,7 +212,7 @@ public class MediaSessionTabHelper {
             mFallbackMetadata.setTitle(sanitizeMediaTitle(mTab.getTitle()));
             mNotificationInfoBuilder.setMetadata(mFallbackMetadata);
 
-            MediaNotificationManager.show(ApplicationStatus.getApplicationContext(),
+            MediaNotificationManager.show(ContextUtils.getApplicationContext(),
                     mNotificationInfoBuilder.build());
         }
 
@@ -288,23 +293,14 @@ public class MediaSessionTabHelper {
     private boolean updateFavicon(Bitmap icon) {
         if (icon == null) return false;
 
-        int largeIconSizeInDp = 0;
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.M) {
-            largeIconSizeInDp = 128;
-        } else {
-            // TODO(zqzhang): Get this value via Resource.getDimension() if N has a resource id.
-            largeIconSizeInDp = 96;
-        }
-        int minimalIconSizeInPx = Math.round(largeIconSizeInDp * 0.75f);
-
-        if (icon.getWidth() < minimalIconSizeInPx || icon.getHeight() < minimalIconSizeInPx) {
+        if (icon.getWidth() < MINIMAL_FAVICON_SIZE || icon.getHeight() < MINIMAL_FAVICON_SIZE) {
             return false;
         }
         if (mFavicon != null && (icon.getWidth() < mFavicon.getWidth()
                                         || icon.getHeight() < mFavicon.getHeight())) {
             return false;
         }
-        mFavicon = icon;
+        mFavicon = MediaNotificationManager.scaleIconForDisplay(icon);
         return true;
     }
 }

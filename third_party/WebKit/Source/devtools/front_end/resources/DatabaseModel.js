@@ -119,7 +119,7 @@ WebInspector.Database.prototype = {
                 var message;
                 if (errorObj.message)
                     message = errorObj.message;
-                else if (errorObj.code == 2)
+                else if (errorObj.code === 2)
                     message = WebInspector.UIString("Database no longer has expected version.");
                 else
                     message = WebInspector.UIString("An unexpected error %s occurred.", errorObj.code);
@@ -143,10 +143,13 @@ WebInspector.DatabaseModel = function(target)
 
     this._databases = [];
     this._agent = target.databaseAgent();
+    this.target().registerDatabaseDispatcher(new WebInspector.DatabaseDispatcher(this));
 }
 
+/** @enum {symbol} */
 WebInspector.DatabaseModel.Events = {
-    DatabaseAdded: "DatabaseAdded"
+    DatabaseAdded: Symbol("DatabaseAdded"),
+    DatabasesRemoved: Symbol("DatabasesRemoved")
 }
 
 WebInspector.DatabaseModel.prototype = {
@@ -154,9 +157,18 @@ WebInspector.DatabaseModel.prototype = {
     {
         if (this._enabled)
             return;
-        this.target().registerDatabaseDispatcher(new WebInspector.DatabaseDispatcher(this));
         this._agent.enable();
         this._enabled = true;
+    },
+
+    disable: function()
+    {
+        if (!this._enabled)
+            return;
+        this._enabled = false;
+        this._databases = [];
+        this._agent.disable();
+        this.dispatchEventToListeners(WebInspector.DatabaseModel.Events.DatabasesRemoved);
     },
 
     /**

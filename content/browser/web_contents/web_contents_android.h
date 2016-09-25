@@ -117,9 +117,6 @@ class CONTENT_EXPORT WebContentsAndroid
       const base::android::JavaParamRef<jobject>& obj,
       jint start_adjust,
       jint end_adjust);
-  void InsertCSS(JNIEnv* env,
-                 const base::android::JavaParamRef<jobject>& jobj,
-                 const base::android::JavaParamRef<jstring>& jcss);
   void EvaluateJavaScript(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj,
                           const base::android::JavaParamRef<jstring>& script,
@@ -153,9 +150,7 @@ class CONTENT_EXPORT WebContentsAndroid
   void RequestAccessibilitySnapshot(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jobject>& callback,
-      jfloat y_offset,
-      jfloat x_scroll);
+      const base::android::JavaParamRef<jobject>& callback);
 
   void ResumeMediaSession(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj);
@@ -192,6 +187,14 @@ class CONTENT_EXPORT WebContentsAndroid
     return synchronous_compositor_client_;
   }
 
+  int DownloadImage(JNIEnv* env,
+                    const base::android::JavaParamRef<jobject>& obj,
+                    const base::android::JavaParamRef<jstring>& url,
+                    jboolean is_fav_icon,
+                    jint max_bitmap_size,
+                    jboolean bypass_cache,
+                    const base::android::JavaParamRef<jobject>& jcallback);
+
  private:
   RenderWidgetHostViewAndroid* GetRenderWidgetHostViewAndroid();
 
@@ -200,6 +203,15 @@ class CONTENT_EXPORT WebContentsAndroid
       base::android::ScopedJavaGlobalRef<jobject>* callback,
       const SkBitmap& bitmap,
       ReadbackResponse response);
+
+  void OnFinishDownloadImage(
+      base::android::ScopedJavaGlobalRef<jobject>* obj,
+      base::android::ScopedJavaGlobalRef<jobject>* callback,
+      int id,
+      int http_status_code,
+      const GURL& url,
+      const std::vector<SkBitmap>& bitmaps,
+      const std::vector<gfx::Size>& sizes);
 
   WebContentsImpl* web_contents_;
   NavigationControllerAndroid navigation_controller_;

@@ -22,6 +22,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
+class AntiVirusMetricsProvider;
 class ChromeOSMetricsProvider;
 class GoogleUpdateMetricsProviderWin;
 class PluginMetricsProvider;
@@ -50,8 +51,7 @@ class ChromeMetricsServiceClient
 
   // Factory function.
   static std::unique_ptr<ChromeMetricsServiceClient> Create(
-      metrics::MetricsStateManager* state_manager,
-      PrefService* local_state);
+      metrics::MetricsStateManager* state_manager);
 
   // Registers local state prefs used by this class.
   static void RegisterPrefs(PrefRegistrySimple* registry);
@@ -59,7 +59,6 @@ class ChromeMetricsServiceClient
   // metrics::MetricsServiceClient:
   metrics::MetricsService* GetMetricsService() override;
   void SetMetricsClientId(const std::string& client_id) override;
-  void OnRecordingDisabled() override;
   bool IsOffTheRecordSessionActive() override;
   int32_t GetProduct() override;
   std::string GetApplicationLocale() override;
@@ -76,8 +75,14 @@ class ChromeMetricsServiceClient
   base::string16 GetRegistryBackupKey() override;
   void OnPluginLoadingError(const base::FilePath& plugin_path) override;
   bool IsReportingPolicyManaged() override;
-  EnableMetricsDefault GetDefaultOptIn() override;
+  metrics::EnableMetricsDefault GetMetricsReportingDefaultState() override;
   bool IsUMACellularUploadLogicEnabled() override;
+
+  // Persistent browser metrics need to be persisted somewhere. This constant
+  // provides a known string to be used for both the allocator's internal name
+  // and for a file on disk (relative to chrome::DIR_USER_DATA) to which they
+  // can be saved.
+  static const char kBrowserMetricsName[];
 
  private:
   explicit ChromeMetricsServiceClient(
@@ -97,8 +102,12 @@ class ChromeMetricsServiceClient
   void OnInitTaskGotPluginInfo();
 
   // Called after GoogleUpdate init task has been completed that continues the
-  // init task by loading drive metrics.
+  // init task by loading AntiVirus metrics.
   void OnInitTaskGotGoogleUpdateData();
+
+  // Called after AntiVirus init task has been completed that continues the
+  // init task by loading drive metrics.
+  void OnInitTaskGotAntiVirusData();
 
   // Called after the drive metrics init task has been completed that continues
   // the init task by loading profiler data.
@@ -119,6 +128,7 @@ class ChromeMetricsServiceClient
   // Callbacks for various stages of final log info collection. Do not call
   // these directly.
   void CollectFinalHistograms();
+  void MergeHistogramDeltas();
   void OnMemoryDetailCollectionDone();
   void OnHistogramSynchronizationDone();
 
@@ -184,6 +194,10 @@ class ChromeMetricsServiceClient
   // The GoogleUpdateMetricsProviderWin instance that was registered with
   // MetricsService. Has the same lifetime as |metrics_service_|.
   GoogleUpdateMetricsProviderWin* google_update_metrics_provider_;
+
+  // The AntiVirusMetricsProvider instance that was registered with
+  // MetricsService. Has the same lifetime as |metrics_service_|.
+  AntiVirusMetricsProvider* antivirus_metrics_provider_;
 #endif
 
   // The DriveMetricsProvider instance that was registered with MetricsService.

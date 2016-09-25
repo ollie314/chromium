@@ -19,8 +19,8 @@
 
 namespace views {
 
-class InkDropAnimation;
-class InkDropHover;
+class InkDropRipple;
+class InkDropHighlight;
 class LabelButtonBorder;
 class Painter;
 
@@ -41,7 +41,7 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
 
   // Gets or sets the image shown for the specified button state.
   // GetImage returns the image for STATE_NORMAL if the state's image is empty.
-  virtual const gfx::ImageSkia& GetImage(ButtonState for_state);
+  virtual gfx::ImageSkia GetImage(ButtonState for_state) const;
   void SetImage(ButtonState for_state, const gfx::ImageSkia& image);
 
   // Gets or sets the text shown on the button.
@@ -52,7 +52,7 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
   void SetTextColor(ButtonState for_state, SkColor color);
 
   // Sets the text colors shown for the non-disabled states to |color|.
-  void SetEnabledTextColors(SkColor color);
+  virtual void SetEnabledTextColors(SkColor color);
 
   // Sets drop shadows underneath the text.
   void SetTextShadows(const gfx::ShadowValues& shadows);
@@ -62,7 +62,11 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
 
   // Gets or sets the font list used by this button.
   const gfx::FontList& GetFontList() const;
-  void SetFontList(const gfx::FontList& font_list);
+  // TODO(estade): make this function protected.
+  virtual void SetFontList(const gfx::FontList& font_list);
+
+  // Adjusts the font size up or down by the given amount.
+  virtual void AdjustFontSize(int font_size_delta);
 
   // Sets the elide behavior of this button.
   void SetElideBehavior(gfx::ElideBehavior elide_behavior);
@@ -104,13 +108,16 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
   void EnableCanvasFlippingForRTLUI(bool flip) override;
   void AddInkDropLayer(ui::Layer* ink_drop_layer) override;
   void RemoveInkDropLayer(ui::Layer* ink_drop_layer) override;
-  std::unique_ptr<InkDropAnimation> CreateInkDropAnimation() const override;
-  std::unique_ptr<InkDropHover> CreateInkDropHover() const override;
-  gfx::Point GetInkDropCenter() const override;
+  std::unique_ptr<InkDropRipple> CreateInkDropRipple() const override;
+  std::unique_ptr<InkDropHighlight> CreateInkDropHighlight() const override;
 
  protected:
   ImageView* image() const { return image_; }
   Label* label() const { return label_; }
+
+  bool explicitly_set_normal_color() const {
+    return explicitly_set_colors_[STATE_NORMAL];
+  }
 
   // Returns the available area for the label and image. Subclasses can change
   // these bounds if they need room to do manual painting.
@@ -131,6 +138,10 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
   // Resets colors from the NativeTheme, explicitly set colors are unchanged.
   virtual void ResetColorsFromNativeTheme();
 
+  // Changes the visual styling of this button to reflect the state of
+  // |is_default()|.
+  virtual void UpdateStyleToIndicateDefaultStatus();
+
   // Updates the image view to contain the appropriate button state image.
   void UpdateImage();
 
@@ -147,6 +158,7 @@ class VIEWS_EXPORT LabelButton : public CustomButton,
   FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, Image);
   FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, LabelAndImage);
   FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, FontList);
+  FRIEND_TEST_ALL_PREFIXES(LabelButtonTest, ResetColorsFromNativeTheme);
 
   void SetTextInternal(const base::string16& text);
 

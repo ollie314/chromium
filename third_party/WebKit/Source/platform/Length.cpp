@@ -49,7 +49,7 @@ public:
         while (m_map.contains(m_index))
             m_index++;
 
-        m_map.set(m_index, calcValue);
+        m_map.set(m_index, std::move(calcValue));
 
         return m_index;
     }
@@ -95,7 +95,7 @@ Length::Length(PassRefPtr<CalculationValue> calc)
     , m_type(Calculated)
     , m_isFloat(false)
 {
-    m_intValue = calcHandles().insert(calc);
+    m_intValue = calcHandles().insert(std::move(calc));
 }
 
 Length Length::blendMixedTypes(const Length& from, double progress, ValueRange range) const

@@ -5,12 +5,12 @@
 #ifndef EXTENSIONS_BROWSER_UPDATER_UPDATE_SERVICE_H_
 #define EXTENSIONS_BROWSER_UPDATER_UPDATE_SERVICE_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "components/keyed_service/core/keyed_service.h"
 
 namespace base {
@@ -48,7 +48,7 @@ class UpdateService : public KeyedService {
   // updates available, they will be downloaded, checked for integrity,
   // unpacked, and then passed off to the ExtensionSystem::InstallUpdate method
   // for install completion.
-  void StartUpdateCheck(std::vector<std::string> extension_ids);
+  void StartUpdateCheck(const std::vector<std::string>& extension_ids);
 
  private:
   friend class UpdateServiceFactory;

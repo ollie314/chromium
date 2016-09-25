@@ -29,6 +29,7 @@
 #include "core/css/CSSValue.h"
 #include "core/fetch/FontResource.h"
 #include "core/fetch/ResourceOwner.h"
+#include "platform/weborigin/Referrer.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/text/WTFString.h"
 
@@ -52,6 +53,7 @@ public:
     bool isLocal() const { return m_isLocal; }
 
     void setFormat(const String& format) { m_format = format; }
+    void setReferrer(const Referrer& referrer) { m_referrer = referrer; }
 
     bool isSupportedFormat() const;
 
@@ -59,7 +61,7 @@ public:
 
     bool hasFailedOrCanceledSubresources() const;
 
-    FontResource* fetch(Document*);
+    FontResource* fetch(Document*) const;
 
     bool equals(const CSSFontFaceSrcValue&) const;
 
@@ -79,11 +81,12 @@ private:
     {
     }
 
-    void restoreCachedResourceIfNeeded(Document*);
+    void restoreCachedResourceIfNeeded(Document*) const;
 
     String m_absoluteResource;
     String m_specifiedResource;
     String m_format;
+    Referrer m_referrer;
     bool m_isLocal;
     ContentSecurityPolicyDisposition m_shouldCheckContentSecurityPolicy;
 
@@ -106,7 +109,7 @@ private:
 
         String debugName() const override { return "CSSFontFaceSrcValue::FontResourceHelper"; }
     };
-    Member<FontResourceHelper> m_fetched;
+    mutable Member<FontResourceHelper> m_fetched;
 };
 
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSFontFaceSrcValue, isFontFaceSrcValue());

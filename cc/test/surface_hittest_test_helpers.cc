@@ -44,7 +44,7 @@ void CreateRenderPassDrawQuad(RenderPass* pass,
   render_pass_quad->SetNew(pass->shared_quad_state_list.back(), quad_rect,
                            quad_rect, render_pass_id, ResourceId(),
                            gfx::Vector2dF(), gfx::Size(), FilterOperations(),
-                           gfx::Vector2dF(), FilterOperations());
+                           gfx::Vector2dF(), gfx::PointF(), FilterOperations());
 }
 
 void CreateSurfaceDrawQuad(RenderPass* pass,
@@ -68,28 +68,26 @@ void CreateRenderPass(const RenderPassId& render_pass_id,
   render_pass_list->push_back(std::move(render_pass));
 }
 
-std::unique_ptr<CompositorFrame> CreateCompositorFrameWithRenderPassList(
+CompositorFrame CreateCompositorFrameWithRenderPassList(
     RenderPassList* render_pass_list) {
   std::unique_ptr<DelegatedFrameData> root_delegated_frame_data(
       new DelegatedFrameData);
   root_delegated_frame_data->render_pass_list.swap(*render_pass_list);
-  std::unique_ptr<CompositorFrame> root_frame(new CompositorFrame);
-  root_frame->delegated_frame_data = std::move(root_delegated_frame_data);
+  CompositorFrame root_frame;
+  root_frame.delegated_frame_data = std::move(root_delegated_frame_data);
   return root_frame;
 }
 
-std::unique_ptr<CompositorFrame> CreateCompositorFrame(
-    const gfx::Rect& root_rect,
-    RenderPass** render_pass) {
+CompositorFrame CreateCompositorFrame(const gfx::Rect& root_rect,
+                                      RenderPass** render_pass) {
   RenderPassList render_pass_list;
   RenderPassId root_id(1, 1);
   CreateRenderPass(root_id, root_rect, gfx::Transform(), &render_pass_list);
 
-  std::unique_ptr<CompositorFrame> root_frame =
+  CompositorFrame root_frame =
       CreateCompositorFrameWithRenderPassList(&render_pass_list);
 
-  *render_pass =
-      root_frame->delegated_frame_data->render_pass_list.back().get();
+  *render_pass = root_frame.delegated_frame_data->render_pass_list.back().get();
   return root_frame;
 }
 

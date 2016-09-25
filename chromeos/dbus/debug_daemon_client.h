@@ -6,8 +6,11 @@
 #define CHROMEOS_DBUS_DEBUG_DAEMON_CLIENT_H_
 
 #include <stdint.h>
+#include <sys/types.h>
 
 #include <map>
+#include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/files/file.h"
@@ -32,12 +35,13 @@ class CHROMEOS_EXPORT DebugDaemonClient
   // - succeeded: was the logs stored successfully.
   typedef base::Callback<void(bool succeeded)> GetDebugLogsCallback;
 
-  // Requests to store debug logs into |file| and calls |callback|
+  // Requests to store debug logs into |file_descriptor| and calls |callback|
   // when completed. Debug logs will be stored in the .tgz if
   // |is_compressed| is true, otherwise in logs will be stored in .tar format.
+  // This method duplicates |file_descriptor| so it's OK to close the FD without
+  // waiting for the result.
   virtual void DumpDebugLogs(bool is_compressed,
-                             base::File file,
-                             scoped_refptr<base::TaskRunner> task_runner,
+                             int file_descriptor,
                              const GetDebugLogsCallback& callback) = 0;
 
   // Called once SetDebugMode() is complete. Takes one parameter:
@@ -89,21 +93,22 @@ class CHROMEOS_EXPORT DebugDaemonClient
   virtual void GetNetworkInterfaces(
       const GetNetworkInterfacesCallback& callback) = 0;
 
-  // Called once GetPerfOutput() is complete only if the the data is
-  // successfully obtained from debugd.
-  // Arguments:
-  // - The status from running perf.
-  // - Output from "perf record", in PerfDataProto format.
-  // - Output from "perf stat", in PerfStatProto format.
-  using GetPerfOutputCallback =
-      base::Callback<void(int status,
-                          const std::vector<uint8_t>& perf_data,
-                          const std::vector<uint8_t>& perf_stat)>;
+  using DBusMethodErrorCallback =
+      base::Callback<void(const std::string& error_name,
+                          const std::string& error_message)>;
 
-  // Runs perf with arguments for |duration| seconds and returns data collected.
-  virtual void GetPerfOutput(uint32_t duration,
+  // Runs perf (via quipper) with arguments for |duration| (converted to
+  // seconds) and returns data collected over the passed |file_descriptor|.
+  // |error_callback| is called if there is an error with the DBus call.
+  // Note that quipper failures may occur after successfully running the DBus
+  // method. Such errors can be detected by |file_descriptor| and all its
+  // duplicates being closed with no data written.
+  // This method duplicates |file_descriptor| so it's OK to close the FD without
+  // waiting for the result.
+  virtual void GetPerfOutput(base::TimeDelta duration,
                              const std::vector<std::string>& perf_args,
-                             const GetPerfOutputCallback& callback) = 0;
+                             int file_descriptor,
+                             const DBusMethodErrorCallback& error_callback) = 0;
 
   // Callback type for GetScrubbedLogs(), GetAllLogs() or GetUserLogFiles().
   using GetLogsCallback =
@@ -191,6 +196,45 @@ class CHROMEOS_EXPORT DebugDaemonClient
   // Runs the callback as soon as the service becomes available.
   virtual void WaitForServiceToBeAvailable(
       const WaitForServiceToBeAvailableCallback& callback) = 0;
+
+  // A callback for SetOomScoreAdj().
+  typedef base::Callback<void(bool success, const std::string& output)>
+      SetOomScoreAdjCallback;
+
+  // Set OOM score oom_score_adj for some process.
+  // Note that the corresponding DBus configuration of the debugd method
+  // "SetOomScoreAdj" only permits setting OOM score for processes running by
+  // user chronos or Android apps.
+  virtual void SetOomScoreAdj(
+      const std::map<pid_t, int32_t>& pid_to_oom_score_adj,
+      const SetOomScoreAdjCallback& callback) = 0;
+
+  // A callback to handle the result of CupsAddPrinter.
+  using CupsAddPrinterCallback = base::Callback<void(bool success)>;
+
+  // Calls CupsAddPrinter.  |name| is the printer name. |uri| is the device
+  // uri. |ppd_path| is the absolute path to the PPD file. |ipp_everywhere|
+  // is true for autoconf of IPP Everywhere printers.  |callback| is called with
+  // true if adding the printer to CUPS was successful and false if there was an
+  // error.  |error_callback| will be called if there was an error in
+  // communicating with debugd.
+  virtual void CupsAddPrinter(const std::string& name,
+                              const std::string& uri,
+                              const std::string& ppd_path,
+                              bool ipp_everywhere,
+                              const CupsAddPrinterCallback& callback,
+                              const base::Closure& error_callback) = 0;
+
+  // A callback to handle the result of CupsRemovePrinter.
+  using CupsRemovePrinterCallback = base::Callback<void(bool success)>;
+
+  // Calls CupsRemovePrinter.  |name| is the printer name as registered in
+  // CUPS.  |callback| is called with true if removing the printer from CUPS was
+  // successful and false if there was an error.  |error_callback| will be
+  // called if there was an error in communicating with debugd.
+  virtual void CupsRemovePrinter(const std::string& name,
+                                 const CupsRemovePrinterCallback& callback,
+                                 const base::Closure& error_callback) = 0;
 
   // Factory function, creates a new instance and returns ownership.
   // For normal usage, access the singleton via DBusThreadManager::Get().

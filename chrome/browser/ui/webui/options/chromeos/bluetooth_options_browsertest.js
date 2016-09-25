@@ -24,7 +24,7 @@ BluetoothWebUITestAsync.prototype = {
     address: '00:11:22:33:44:55',
     connectable: true,
     connected: false,
-    name: 'Fake Device',
+    name: 'Fake Device (alias)',
     paired: true
   },
 
@@ -32,7 +32,7 @@ BluetoothWebUITestAsync.prototype = {
     address: '20:7D:74:00:00:04',
     connectable: false,
     connected: false,
-    name: 'Paired Unconnectable Device',
+    name: 'Paired Unconnectable Device (alias)',
     paired: true
   },
 
@@ -232,7 +232,8 @@ TEST_F('BluetoothWebUITestAsync', 'testDevicePairing', function() {
   }.bind(this));
 });
 
-TEST_F('BluetoothWebUITestAsync', 'testConnect', function() {
+// TODO(crbug.com/608126) Test is flaky.
+TEST_F('BluetoothWebUITestAsync', 'DISABLED_testConnect', function() {
   assertEquals(this.browsePreload, document.location.href);
 
   // Enable bluetooth.
@@ -312,7 +313,8 @@ TEST_F('BluetoothWebUITestAsync', 'testDisconnect', function() {
   }.bind(this));
 });
 
-TEST_F('BluetoothWebUITestAsync', 'testForget', function() {
+// TODO(crbug.com/605090): Disabled because of flakiness.
+TEST_F('BluetoothWebUITestAsync', 'DISABLED_testForget', function() {
   assertEquals(this.browsePreload, document.location.href);
 
   // Enable bluetooth.

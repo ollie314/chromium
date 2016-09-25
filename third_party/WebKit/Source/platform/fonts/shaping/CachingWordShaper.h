@@ -30,7 +30,6 @@
 #include "platform/geometry/FloatRect.h"
 #include "platform/text/TextRun.h"
 #include "wtf/Allocator.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 
 namespace blink {
@@ -52,7 +51,7 @@ public:
     float width(const Font*, const TextRun&,
         HashSet<const SimpleFontData*>* fallbackFonts,
         FloatRect* glyphBounds);
-    int offsetForPosition(const Font*, const TextRun&, float targetX);
+    int offsetForPosition(const Font*, const TextRun&, float targetX, bool includePartialGlyphs);
     float fillGlyphBuffer(const Font*, const TextRun&,
         HashSet<const SimpleFontData*>*, GlyphBuffer*,
         unsigned from, unsigned to);

@@ -4,14 +4,18 @@
 
 #include "chrome/browser/ui/ash/multi_user/user_switch_animator_chromeos.h"
 
-#include "ash/desktop_background/user_wallpaper_delegate.h"
+#include "ash/aura/wm_window_aura.h"
+#include "ash/common/shelf/shelf_layout_manager.h"
+#include "ash/common/shelf/shelf_widget.h"
+#include "ash/common/shelf/wm_shelf.h"
+#include "ash/common/wallpaper/wallpaper_delegate.h"
+#include "ash/common/wm/mru_window_tracker.h"
+#include "ash/common/wm/window_positioner.h"
+#include "ash/common/wm/window_state.h"
+#include "ash/common/wm_shell.h"
+#include "ash/common/wm_window.h"
 #include "ash/root_window_controller.h"
-#include "ash/shelf/shelf_layout_manager.h"
-#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
-#include "ash/wm/mru_window_tracker.h"
-#include "ash/wm/window_positioner.h"
-#include "ash/wm/window_state.h"
 #include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
 #include "base/macros.h"
@@ -21,6 +25,7 @@
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_chromeos.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/layer_tree_owner.h"
+#include "ui/display/display.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
 
@@ -37,13 +42,12 @@ class UserChangeActionDisabler {
  public:
   UserChangeActionDisabler() {
     ash::WindowPositioner::DisableAutoPositioning(true);
-    ash::Shell::GetInstance()->mru_window_tracker()->SetIgnoreActivations(true);
+    ash::WmShell::Get()->mru_window_tracker()->SetIgnoreActivations(true);
   }
 
   ~UserChangeActionDisabler() {
     ash::WindowPositioner::DisableAutoPositioning(false);
-    ash::Shell::GetInstance()->mru_window_tracker()->SetIgnoreActivations(
-        false);
+    ash::WmShell::Get()->mru_window_tracker()->SetIgnoreActivations(false);
   }
  private:
 
@@ -89,7 +93,7 @@ class MaximizedWindowAnimationWatcher : public ui::LayerAnimationObserver {
 // any, and if it exists in |window_list|) will be the last window in the list.
 void PutMruWindowLast(std::vector<aura::Window*>* window_list) {
   DCHECK(window_list);
-  auto active_window = ash::wm::GetActiveWindow();
+  auto* active_window = ash::wm::GetActiveWindow();
   if (!active_window)
     return;
 
@@ -112,7 +116,7 @@ UserSwitchAnimatorChromeOS::UserSwitchAnimatorChromeOS(
       animation_step_(ANIMATION_STEP_HIDE_OLD_USER),
       screen_cover_(GetScreenCover(NULL)),
       windows_by_account_id_() {
-  ash::Shell::GetInstance()->DismissAppList();
+  ash::WmShell::Get()->DismissAppList();
   BuildUserToWindowsListMap();
   AdvanceUserTransitionAnimation();
 
@@ -143,7 +147,7 @@ bool UserSwitchAnimatorChromeOS::CoversScreen(aura::Window* window) {
     return true;
   gfx::Rect bounds = window->GetBoundsInRootWindow();
   gfx::Rect work_area =
-      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window).work_area();
+      display::Screen::GetScreen()->GetDisplayNearestWindow(window).work_area();
   bounds.Intersect(work_area);
   return work_area == bounds;
 }
@@ -166,6 +170,7 @@ void UserSwitchAnimatorChromeOS::AdvanceUserTransitionAnimation() {
     case ANIMATION_STEP_FINALIZE:
       user_changed_animation_timer_.reset();
       animation_step_ = ANIMATION_STEP_ENDED;
+      owner_->NotifyAfterUserSwitchAnimationFinished();
       break;
     case ANIMATION_STEP_ENDED:
       NOTREACHED();
@@ -186,8 +191,8 @@ void UserSwitchAnimatorChromeOS::FinalizeAnimation() {
 void UserSwitchAnimatorChromeOS::TransitionWallpaper(
     AnimationStep animation_step) {
   // Handle the wallpaper switch.
-  ash::UserWallpaperDelegate* wallpaper_delegate =
-      ash::Shell::GetInstance()->user_wallpaper_delegate();
+  ash::WallpaperDelegate* wallpaper_delegate =
+      ash::WmShell::Get()->wallpaper_delegate();
   if (animation_step == ANIMATION_STEP_HIDE_OLD_USER) {
     // Set the wallpaper cross dissolve animation duration to our complete
     // animation cycle for a fade in and fade out.
@@ -227,8 +232,8 @@ void UserSwitchAnimatorChromeOS::TransitionUserShelf(
       chrome_launcher_controller->ActiveUserChanged(
           new_account_id_.GetUserEmail());
     // Hide the black rectangle on top of each shelf again.
-    for (aura::Window* window : ash::Shell::GetAllRootWindows()) {
-      ash::ShelfWidget* shelf = ash::Shelf::ForWindow(window)->shelf_widget();
+    for (ash::WmWindow* window : ash::WmShell::Get()->GetAllRootWindows()) {
+      ash::ShelfWidget* shelf = ash::WmShelf::ForWindow(window)->shelf_widget();
       shelf->HideShelfBehindBlackBar(false, duration_override);
     }
     // We kicked off the shelf animation above and the override can be
@@ -260,11 +265,12 @@ void UserSwitchAnimatorChromeOS::TransitionUserShelf(
     // CPU usage and therefore effect jank, we should avoid hiding the shelf if
     // the start and end location are the same and cover the shelf instead with
     // a black rectangle on top.
-    ash::Shelf* shelf = ash::Shelf::ForWindow(window);
+    ash::WmShelf* shelf =
+        ash::WmShelf::ForWindow(ash::WmWindowAura::Get(window));
     if (GetScreenCover(window) != NO_USER_COVERS_SCREEN &&
         (!chrome_launcher_controller ||
          !chrome_launcher_controller->ShelfBoundsChangesProbablyWithUser(
-             shelf, new_account_id_.GetUserEmail()))) {
+             shelf, new_account_id_))) {
       shelf->shelf_widget()->HideShelfBehindBlackBar(true, duration_override);
     } else {
       // This shelf change is only part of the animation and will be updated by
@@ -299,8 +305,8 @@ void UserSwitchAnimatorChromeOS::TransitionWindows(
         // activateable window to restore focus to, and so we don't change
         // window order (crbug.com/424307).
         PutMruWindowLast(&(user_pair.second));
-        for (auto& window : user_pair.second) {
-          auto window_state = ash::wm::GetWindowState(window);
+        for (auto* window : user_pair.second) {
+          auto* window_state = ash::wm::GetWindowState(window);
 
           // Minimized visiting windows (minimized windows with an owner
           // different than that of the for_show_account_id) should retrun to
@@ -328,7 +334,7 @@ void UserSwitchAnimatorChromeOS::TransitionWindows(
             // window we encounter.
             found_foreground_maximized_window = true;
             ui::LayerTreeOwner* old_layer =
-                wm::RecreateLayers(window).release();
+                wm::RecreateLayers(window, nullptr).release();
             window->layer()->parent()->StackAtBottom(old_layer->root());
             new MaximizedWindowAnimationWatcher(window->layer()->GetAnimator(),
                                                 old_layer);
@@ -343,7 +349,7 @@ void UserSwitchAnimatorChromeOS::TransitionWindows(
       if (new_user_itr == windows_by_account_id_.end())
         return;
 
-      for (auto& window : new_user_itr->second) {
+      for (auto* window : new_user_itr->second) {
         auto entry = owner_->window_to_entry().find(window);
         DCHECK(entry != owner_->window_to_entry().end());
 
@@ -361,8 +367,8 @@ void UserSwitchAnimatorChromeOS::TransitionWindows(
     }
     case ANIMATION_STEP_FINALIZE: {
       // Reactivate the MRU window of the new user.
-      ash::MruWindowTracker::WindowList mru_list =
-          ash::Shell::GetInstance()->mru_window_tracker()->BuildMruWindowList();
+      aura::Window::Windows mru_list = ash::WmWindowAura::ToAuraWindows(
+          ash::WmShell::Get()->mru_window_tracker()->BuildMruWindowList());
       if (!mru_list.empty()) {
         aura::Window* window = mru_list[0];
         ash::wm::WindowState* window_state = ash::wm::GetWindowState(window);
@@ -426,7 +432,7 @@ void UserSwitchAnimatorChromeOS::BuildUserToWindowsListMap() {
     aura::Window* parent_window = window_entry_pair.first->parent();
     if (parent_windows.find(parent_window) == parent_windows.end()) {
       parent_windows.insert(parent_window);
-      for (auto& child_window : parent_window->children()) {
+      for (auto* child_window : parent_window->children()) {
         auto itr = window_to_entry_map.find(child_window);
         if (itr != window_to_entry_map.end()) {
           windows_by_account_id_[itr->second->show_for_user()].push_back(

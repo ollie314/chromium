@@ -21,7 +21,6 @@ IPC_ENUM_TRAITS_MAX_VALUE(media::ResolutionChangePolicy,
                           media::RESOLUTION_POLICY_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(media::VideoFrame::StorageType,
                           media::VideoFrame::STORAGE_LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(media::VideoPixelStorage, media::PIXEL_STORAGE_MAX)
 IPC_ENUM_TRAITS_MAX_VALUE(media::PowerLineFrequency,
                           media::PowerLineFrequency::FREQUENCY_MAX)
 
@@ -34,7 +33,7 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_BEGIN(VideoCaptureMsg_BufferReady_Params)
   IPC_STRUCT_MEMBER(int, device_id)
   IPC_STRUCT_MEMBER(int, buffer_id)
-  IPC_STRUCT_MEMBER(base::TimeTicks, timestamp)
+  IPC_STRUCT_MEMBER(base::TimeDelta, timestamp)
   IPC_STRUCT_MEMBER(base::DictionaryValue, metadata)
   IPC_STRUCT_MEMBER(media::VideoPixelFormat, pixel_format)
   IPC_STRUCT_MEMBER(media::VideoFrame::StorageType, storage_type)

@@ -7,7 +7,6 @@
 #include <stddef.h>
 
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -20,7 +19,6 @@
 #include "chrome/browser/search/instant_service_observer.h"
 #include "chrome/browser/search/most_visited_iframe_source.h"
 #include "chrome/browser/search/search.h"
-#include "chrome/browser/search/suggestions/suggestions_service_factory.h"
 #include "chrome/browser/search/thumbnail_source.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
@@ -31,6 +29,7 @@
 #include "chrome/browser/ui/webui/large_icon_source.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/favicon/core/fallback_icon_service.h"
 #include "components/favicon/core/large_icon_service.h"
 #include "components/history/core/browser/top_sites.h"
@@ -45,7 +44,6 @@
 #include "content/public/browser/url_data_source.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
-#include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image_skia.h"
@@ -61,39 +59,9 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #endif  // defined(ENABLE_THEMES)
 
-namespace {
-
-// Used in a histogram; don't reorder, insert new values only at the end, and
-// keep in sync with "NtpMostVisitedScheme" in histograms.xml.
-enum class HistogramScheme {
-  OTHER,
-  OTHER_WEBSAFE,
-  HTTP,
-  HTTPS,
-  FTP,
-  FILE,
-  CHROME,
-  EXTENSION,
-  JAVASCRIPT,
-  // Insert new values here.
-  COUNT
-};
-
-const char kLocalNTPSuggestionService[] = "LocalNTPSuggestionsService";
-const char kLocalNTPSuggestionServiceEnabled[] = "Enabled";
-
-bool IsLocalNTPSuggestionServiceEnabled() {
-  return base::StartsWith(
-      base::FieldTrialList::FindFullName(kLocalNTPSuggestionService),
-      kLocalNTPSuggestionServiceEnabled, base::CompareCase::INSENSITIVE_ASCII);
-}
-
-}  // namespace
-
 InstantService::InstantService(Profile* profile)
     : profile_(profile),
       template_url_service_(TemplateURLServiceFactory::GetForProfile(profile_)),
-      suggestions_service_(NULL),
       weak_ptr_factory_(this) {
   // The initialization below depends on a typical set of browser threads. Skip
   // it if we are running in a unit test without the full suite.
@@ -173,19 +141,6 @@ InstantService::InstantService(Profile* profile)
   content::URLDataSource::Add(
       profile_, new LargeIconSource(fallback_icon_service, large_icon_service));
   content::URLDataSource::Add(profile_, new MostVisitedIframeSource());
-
-  if (IsLocalNTPSuggestionServiceEnabled()) {
-    suggestions_service_ =
-        suggestions::SuggestionsServiceFactory::GetForProfile(profile_);
-  }
-
-  if (suggestions_service_) {
-    suggestions_subscription_ = suggestions_service_->AddCallback(
-        base::Bind(&InstantService::OnSuggestionsAvailable,
-                   base::Unretained(this)));
-    suggestions_service_->FetchSuggestionsData();
-    // TODO(treib): Also re-fetch suggestions on local NTP loads.
-  }
 }
 
 InstantService::~InstantService() {
@@ -221,9 +176,6 @@ void InstantService::DeleteMostVisitedItem(const GURL& url) {
       TopSitesFactory::GetForProfile(profile_);
   if (top_sites)
     top_sites->AddBlacklistedURL(url);
-
-  if (suggestions_service_)
-    suggestions_service_->BlacklistURL(url);
 }
 
 void InstantService::UndoMostVisitedDeletion(const GURL& url) {
@@ -231,9 +183,6 @@ void InstantService::UndoMostVisitedDeletion(const GURL& url) {
       TopSitesFactory::GetForProfile(profile_);
   if (top_sites)
     top_sites->RemoveBlacklistedURL(url);
-
-  if (suggestions_service_)
-    suggestions_service_->UndoBlacklistURL(url);
 }
 
 void InstantService::UndoAllMostVisitedDeletions() {
@@ -241,9 +190,6 @@ void InstantService::UndoAllMostVisitedDeletions() {
       TopSitesFactory::GetForProfile(profile_);
   if (top_sites)
     top_sites->ClearBlacklistedURLs();
-
-  if (suggestions_service_)
-    suggestions_service_->ClearBlacklist();
 }
 
 void InstantService::UpdateThemeInfo() {
@@ -308,53 +254,6 @@ void InstantService::SendSearchURLsToRenderer(content::RenderProcessHost* rph) {
       search::GetSearchURLs(profile_), search::GetNewTabPageURL(profile_)));
 }
 
-bool InstantService::IsValidURLForNavigation(const GURL& url) const {
-  HistogramScheme scheme = HistogramScheme::OTHER;
-  if (url.SchemeIs(url::kHttpScheme)) {
-    scheme = HistogramScheme::HTTP;
-  } else if (url.SchemeIs(url::kHttpsScheme)) {
-    scheme = HistogramScheme::HTTPS;
-  } else if (url.SchemeIs(url::kFtpScheme)) {
-    scheme = HistogramScheme::FTP;
-  } else if (url.SchemeIsFile()) {
-    scheme = HistogramScheme::FILE;
-  } else if (url.SchemeIs(content::kChromeUIScheme)) {
-    scheme = HistogramScheme::CHROME;
-  } else if (url.SchemeIs(extensions::kExtensionScheme)) {
-    scheme = HistogramScheme::EXTENSION;
-  } else if (url.SchemeIs(url::kJavaScriptScheme)) {
-    scheme = HistogramScheme::JAVASCRIPT;
-  } else if (content::ChildProcessSecurityPolicy::GetInstance()
-                 ->IsWebSafeScheme(url.scheme())) {
-    scheme = HistogramScheme::OTHER_WEBSAFE;
-  }
-  UMA_HISTOGRAM_ENUMERATION("NewTabPage.MostVisitedScheme",
-                            static_cast<int32_t>(scheme),
-                            static_cast<int32_t>(HistogramScheme::COUNT));
-
-  // Certain URLs are privileged and should never be considered valid
-  // navigation targets.
-  // TODO(treib): Ideally this should deny by default and only allow if the
-  // scheme passes the content::ChildProcessSecurityPolicy::IsWebSafeScheme()
-  // check.
-  if (url.SchemeIs(content::kChromeUIScheme))
-    return false;
-
-  // javascript: URLs never make sense as a most visited item either.
-  if (url.SchemeIs(url::kJavaScriptScheme))
-    return false;
-
-  for (const auto& item : most_visited_items_) {
-    if (item.url == url)
-      return true;
-  }
-  for (const auto& item : suggestions_items_) {
-    if (item.url == url)
-      return true;
-  }
-  return false;
-}
-
 void InstantService::OnRendererProcessTerminated(int process_id) {
   process_ids_.erase(process_id);
 
@@ -366,59 +265,23 @@ void InstantService::OnRendererProcessTerminated(int process_id) {
   }
 }
 
-void InstantService::OnSuggestionsAvailable(
-    const suggestions::SuggestionsProfile& profile) {
-  std::vector<InstantMostVisitedItem> new_suggestions_items;
-  for (int i = 0; i < profile.suggestions_size(); ++i) {
-    const suggestions::ChromeSuggestion& suggestion = profile.suggestions(i);
-
-    InstantMostVisitedItem item;
-    item.url = GURL(suggestion.url());
-    item.title = base::UTF8ToUTF16(suggestion.title());
-    if (suggestion.has_thumbnail()) {
-      item.thumbnail = GURL(suggestion.thumbnail());
-    }
-    if (suggestion.has_favicon_url()) {
-      item.favicon = GURL(suggestion.favicon_url());
-    }
-    if (suggestion.has_impression_url()) {
-      item.impression_url = GURL(suggestion.impression_url());
-    }
-    if (suggestion.has_click_url()) {
-      item.click_url = GURL(suggestion.click_url());
-    }
-    item.is_server_side_suggestion = true;
-    new_suggestions_items.push_back(item);
-  }
-  suggestions_items_ = new_suggestions_items;
-  NotifyAboutMostVisitedItems();
-}
-
 void InstantService::OnMostVisitedItemsReceived(
     const history::MostVisitedURLList& data) {
-  history::MostVisitedURLList reordered_data(data);
-  std::vector<InstantMostVisitedItem> new_most_visited_items;
-  for (size_t i = 0; i < reordered_data.size(); i++) {
-    const history::MostVisitedURL& url = reordered_data[i];
+  most_visited_items_.clear();
+  for (const history::MostVisitedURL& mv_url : data) {
     InstantMostVisitedItem item;
-    item.url = url.url;
-    item.title = url.title;
+    item.url = mv_url.url;
+    item.title = mv_url.title;
     item.is_server_side_suggestion = false;
-    new_most_visited_items.push_back(item);
+    most_visited_items_.push_back(item);
   }
 
-  most_visited_items_ = new_most_visited_items;
   NotifyAboutMostVisitedItems();
 }
 
 void InstantService::NotifyAboutMostVisitedItems() {
-  if (suggestions_service_ && !suggestions_items_.empty()) {
-    FOR_EACH_OBSERVER(InstantServiceObserver, observers_,
-                      MostVisitedItemsChanged(suggestions_items_));
-  } else {
-    FOR_EACH_OBSERVER(InstantServiceObserver, observers_,
-                      MostVisitedItemsChanged(most_visited_items_));
-  }
+  FOR_EACH_OBSERVER(InstantServiceObserver, observers_,
+                    MostVisitedItemsChanged(most_visited_items_));
 }
 
 #if defined(ENABLE_THEMES)

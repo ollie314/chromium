@@ -29,6 +29,7 @@
 #include "core/editing/FrameSelection.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/shadow/ShadowElementNames.h"
+#include "core/input/KeyboardEventManager.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutTheme.h"
@@ -36,7 +37,6 @@
 #include "core/paint/PaintInfo.h"
 #include "core/paint/PaintLayer.h"
 #include "core/paint/ThemePainter.h"
-#include "platform/PlatformKeyboardEvent.h"
 #include "platform/fonts/SimpleFontData.h"
 
 namespace blink {
@@ -189,7 +189,7 @@ void LayoutTextControlSingleLine::capsLockStateMayHaveChanged()
     bool shouldDrawCapsLockIndicator = false;
 
     if (LocalFrame* frame = document().frame())
-        shouldDrawCapsLockIndicator = inputElement()->type() == InputTypeNames::password && frame->selection().isFocusedAndActive() && document().focusedElement() == node() && PlatformKeyboardEvent::currentCapsLockState();
+        shouldDrawCapsLockIndicator = inputElement()->type() == InputTypeNames::password && frame->selection().isFocusedAndActive() && document().focusedElement() == node() && KeyboardEventManager::currentCapsLockState();
 
     if (shouldDrawCapsLockIndicator != m_shouldDrawCapsLockIndicator) {
         m_shouldDrawCapsLockIndicator = shouldDrawCapsLockIndicator;
@@ -231,15 +231,16 @@ LayoutUnit LayoutTextControlSingleLine::preferredContentLogicalWidth(float charW
     LayoutUnit result = LayoutUnit::fromFloatCeil(charWidth * factor);
 
     float maxCharWidth = 0.f;
-    AtomicString family = styleRef().font().getFontDescription().family().family();
+    const Font& font = style()->font();
+    AtomicString family = font.getFontDescription().family().family();
     // Match the default system font to the width of MS Shell Dlg, the default
     // font for textareas in Firefox, Safari Win and IE for some encodings (in
     // IE, the default font is encoding specific). 4027 is the (xMax - xMin)
     // value in the "head" font table for MS Shell Dlg.
     if (LayoutTheme::theme().needsHackForTextControlWithFontFamily(family))
         maxCharWidth = scaleEmToUnits(4027);
-    else if (hasValidAvgCharWidth(family))
-        maxCharWidth = roundf(styleRef().font().primaryFont()->maxCharWidth());
+    else if (hasValidAvgCharWidth(font.primaryFont(), family))
+        maxCharWidth = roundf(font.primaryFont()->maxCharWidth());
 
     // For text inputs, IE adds some extra width.
     if (maxCharWidth > 0.f)
@@ -273,8 +274,21 @@ PassRefPtr<ComputedStyle> LayoutTextControlSingleLine::createInnerEditorStyle(co
     textBlockStyle->setOverflowWrap(NormalOverflowWrap);
     textBlockStyle->setTextOverflow(textShouldBeTruncated() ? TextOverflowEllipsis : TextOverflowClip);
 
+    int computedLineHeight = lineHeight(true, HorizontalLine, PositionOfInteriorLineBoxes).toInt();
     // Do not allow line-height to be smaller than our default.
-    if (textBlockStyle->fontSize() >= lineHeight(true, HorizontalLine, PositionOfInteriorLineBoxes) || !startStyle.logicalHeight().isIntrinsicOrAuto())
+    if (textBlockStyle->fontSize() >= computedLineHeight)
+        textBlockStyle->setLineHeight(ComputedStyle::initialLineHeight());
+
+    // We'd like to remove line-height if it's unnecessary because
+    // overflow:scroll clips editing text by line-height.
+    Length logicalHeight = startStyle.logicalHeight();
+    // Here, we remove line-height if the INPUT fixed height is taller than the
+    // line-height.  It's not the precise condition because logicalHeight
+    // includes border and padding if box-sizing:border-box, and there are cases
+    // in which we don't want to remove line-height with percent or calculated
+    // length.
+    // TODO(tkent): This should be done during layout.
+    if (logicalHeight.isPercentOrCalc() || (logicalHeight.isFixed() && logicalHeight.getFloatValue() > computedLineHeight))
         textBlockStyle->setLineHeight(ComputedStyle::initialLineHeight());
 
     textBlockStyle->setDisplay(BLOCK);
@@ -284,6 +298,7 @@ PassRefPtr<ComputedStyle> LayoutTextControlSingleLine::createInnerEditorStyle(co
         textBlockStyle->setTextSecurity(TSNONE);
 
     textBlockStyle->setOverflowX(OverflowScroll);
+    // overflow-y:visible doesn't work because overflow-x:scroll makes a layer.
     textBlockStyle->setOverflowY(OverflowScroll);
     RefPtr<ComputedStyle> noScrollbarStyle = ComputedStyle::create();
     noScrollbarStyle->setStyleType(PseudoIdScrollbar);

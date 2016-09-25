@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "android_webview/browser/child_frame.h"
+#include "android_webview/browser/compositor_frame_producer.h"
+#include "android_webview/browser/compositor_id.h"
 #include "android_webview/browser/deferred_gpu_command_service.h"
 #include "android_webview/browser/hardware_renderer.h"
 #include "android_webview/browser/render_thread_manager_client.h"
@@ -16,15 +18,16 @@
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 
 namespace android_webview {
 
 namespace internal {
 
-class RequestDrawGLTracker {
+class RequestInvokeGLTracker {
  public:
-  RequestDrawGLTracker();
+  RequestInvokeGLTracker();
   bool ShouldRequestOnNonUiThread(RenderThreadManager* state);
   bool ShouldRequestOnUiThread(RenderThreadManager* state);
   void ResetPending();
@@ -36,11 +39,10 @@ class RequestDrawGLTracker {
   RenderThreadManager* pending_non_ui_;
 };
 
-RequestDrawGLTracker::RequestDrawGLTracker()
-    : pending_ui_(NULL), pending_non_ui_(NULL) {
-}
+RequestInvokeGLTracker::RequestInvokeGLTracker()
+    : pending_ui_(NULL), pending_non_ui_(NULL) {}
 
-bool RequestDrawGLTracker::ShouldRequestOnNonUiThread(
+bool RequestInvokeGLTracker::ShouldRequestOnNonUiThread(
     RenderThreadManager* state) {
   base::AutoLock lock(lock_);
   if (pending_ui_ || pending_non_ui_)
@@ -49,28 +51,30 @@ bool RequestDrawGLTracker::ShouldRequestOnNonUiThread(
   return true;
 }
 
-bool RequestDrawGLTracker::ShouldRequestOnUiThread(RenderThreadManager* state) {
+bool RequestInvokeGLTracker::ShouldRequestOnUiThread(
+    RenderThreadManager* state) {
   base::AutoLock lock(lock_);
   if (pending_non_ui_) {
-    pending_non_ui_->ResetRequestDrawGLCallback();
+    pending_non_ui_->ResetRequestInvokeGLCallback();
     pending_non_ui_ = NULL;
   }
-  // At this time, we could have already called RequestDrawGL on the UI thread,
+  // At this time, we could have already called RequestInvokeGL on the UI
+  // thread,
   // but the corresponding GL mode process hasn't happened yet. In this case,
-  // don't schedule another requestDrawGL on the UI thread.
+  // don't schedule another requestInvokeGL on the UI thread.
   if (pending_ui_)
     return false;
   pending_ui_ = state;
   return true;
 }
 
-void RequestDrawGLTracker::ResetPending() {
+void RequestInvokeGLTracker::ResetPending() {
   base::AutoLock lock(lock_);
   pending_non_ui_ = NULL;
   pending_ui_ = NULL;
 }
 
-void RequestDrawGLTracker::SetQueuedFunctorOnUi(RenderThreadManager* state) {
+void RequestInvokeGLTracker::SetQueuedFunctorOnUi(RenderThreadManager* state) {
   base::AutoLock lock(lock_);
   DCHECK(state);
   pending_ui_ = state;
@@ -81,9 +85,8 @@ void RequestDrawGLTracker::SetQueuedFunctorOnUi(RenderThreadManager* state) {
 
 namespace {
 
-base::LazyInstance<internal::RequestDrawGLTracker> g_request_draw_gl_tracker =
-    LAZY_INSTANCE_INITIALIZER;
-
+base::LazyInstance<internal::RequestInvokeGLTracker>
+    g_request_invoke_gl_tracker = LAZY_INSTANCE_INITIALIZER;
 }
 
 RenderThreadManager::RenderThreadManager(
@@ -91,6 +94,7 @@ RenderThreadManager::RenderThreadManager(
     const scoped_refptr<base::SingleThreadTaskRunner>& ui_loop)
     : ui_loop_(ui_loop),
       client_(client),
+      compositor_frame_producer_(nullptr),
       renderer_manager_key_(GLViewRendererManager::GetInstance()->NullKey()),
       hardware_renderer_has_frame_(false),
       inside_hardware_release_(false),
@@ -98,21 +102,24 @@ RenderThreadManager::RenderThreadManager(
   DCHECK(ui_loop_->BelongsToCurrentThread());
   DCHECK(client_);
   ui_thread_weak_ptr_ = weak_factory_on_ui_thread_.GetWeakPtr();
-  ResetRequestDrawGLCallback();
+  ResetRequestInvokeGLCallback();
 }
 
 RenderThreadManager::~RenderThreadManager() {
   DCHECK(ui_loop_->BelongsToCurrentThread());
+  if (compositor_frame_producer_) {
+    compositor_frame_producer_->RemoveCompositorFrameConsumer(this);
+  }
   DCHECK(!hardware_renderer_.get());
 }
 
-void RenderThreadManager::ClientRequestDrawGL(bool for_idle) {
+void RenderThreadManager::ClientRequestInvokeGL(bool for_idle) {
   if (ui_loop_->BelongsToCurrentThread()) {
-    if (!g_request_draw_gl_tracker.Get().ShouldRequestOnUiThread(this))
+    if (!g_request_invoke_gl_tracker.Get().ShouldRequestOnUiThread(this))
       return;
-    ClientRequestDrawGLOnUI();
+    ClientRequestInvokeGLOnUI();
   } else {
-    if (!g_request_draw_gl_tracker.Get().ShouldRequestOnNonUiThread(this))
+    if (!g_request_invoke_gl_tracker.Get().ShouldRequestOnNonUiThread(this))
       return;
     base::Closure callback;
     {
@@ -128,31 +135,33 @@ void RenderThreadManager::ClientRequestDrawGL(bool for_idle) {
   }
 }
 
-void RenderThreadManager::DidDrawGLProcess() {
-  g_request_draw_gl_tracker.Get().ResetPending();
+void RenderThreadManager::DidInvokeGLProcess() {
+  g_request_invoke_gl_tracker.Get().ResetPending();
 }
 
-void RenderThreadManager::ResetRequestDrawGLCallback() {
+void RenderThreadManager::ResetRequestInvokeGLCallback() {
   DCHECK(ui_loop_->BelongsToCurrentThread());
   base::AutoLock lock(lock_);
   request_draw_gl_cancelable_closure_.Reset(base::Bind(
-      &RenderThreadManager::ClientRequestDrawGLOnUI, base::Unretained(this)));
+      &RenderThreadManager::ClientRequestInvokeGLOnUI, base::Unretained(this)));
   request_draw_gl_closure_ = request_draw_gl_cancelable_closure_.callback();
 }
 
-void RenderThreadManager::ClientRequestDrawGLOnUI() {
+void RenderThreadManager::ClientRequestInvokeGLOnUI() {
   DCHECK(ui_loop_->BelongsToCurrentThread());
-  ResetRequestDrawGLCallback();
-  g_request_draw_gl_tracker.Get().SetQueuedFunctorOnUi(this);
-  if (!client_->RequestDrawGL(false)) {
-    g_request_draw_gl_tracker.Get().ResetPending();
+  ResetRequestInvokeGLCallback();
+  g_request_invoke_gl_tracker.Get().SetQueuedFunctorOnUi(this);
+  if (!client_->RequestInvokeGL(false)) {
+    g_request_invoke_gl_tracker.Get().ResetPending();
     LOG(ERROR) << "Failed to request GL process. Deadlock likely";
   }
 }
 
 void RenderThreadManager::UpdateParentDrawConstraintsOnUI() {
   DCHECK(ui_loop_->BelongsToCurrentThread());
-  client_->OnParentDrawConstraintsUpdated();
+  if (compositor_frame_producer_) {
+    compositor_frame_producer_->OnParentDrawConstraintsUpdated(this);
+  }
 }
 
 void RenderThreadManager::SetScrollOffsetOnUI(gfx::Vector2d scroll_offset) {
@@ -214,23 +223,23 @@ bool RenderThreadManager::IsInsideHardwareRelease() const {
 }
 
 RenderThreadManager::ReturnedResources::ReturnedResources()
-    : output_surface_id(0u) {}
+    : compositor_frame_sink_id(0u) {}
 
 RenderThreadManager::ReturnedResources::~ReturnedResources() {}
 
 void RenderThreadManager::InsertReturnedResourcesOnRT(
     const cc::ReturnedResourceArray& resources,
-    uint32_t compositor_id,
-    uint32_t output_surface_id) {
+    const CompositorID& compositor_id,
+    uint32_t compositor_frame_sink_id) {
   base::AutoLock lock(lock_);
   ReturnedResources& returned_resources =
       returned_resources_map_[compositor_id];
-  if (returned_resources.output_surface_id != output_surface_id) {
+  if (returned_resources.compositor_frame_sink_id != compositor_frame_sink_id) {
     returned_resources.resources.clear();
   }
   returned_resources.resources.insert(returned_resources.resources.end(),
                                       resources.begin(), resources.end());
-  returned_resources.output_surface_id = output_surface_id;
+  returned_resources.compositor_frame_sink_id = compositor_frame_sink_id;
 }
 
 void RenderThreadManager::SwapReturnedResourcesOnUI(
@@ -262,7 +271,7 @@ void RenderThreadManager::DrawGL(AwDrawGLInfo* draw_info) {
   // corruption.
   if (draw_info->mode == AwDrawGLInfo::kModeProcess ||
       draw_info->mode == AwDrawGLInfo::kModeProcessNoContext) {
-    DidDrawGLProcess();
+    DidInvokeGLProcess();
   }
 
   {
@@ -280,17 +289,19 @@ void RenderThreadManager::DrawGL(AwDrawGLInfo* draw_info) {
   // Set the correct FBO before kModeDraw. The GL commands run in kModeDraw
   // require a correctly bound FBO. The FBO remains until the next kModeDraw.
   // So kModeProcess between kModeDraws has correctly bound FBO, too.
-  if (draw_info->mode == AwDrawGLInfo::kModeDraw && !hardware_renderer_ &&
-      HasFrameForHardwareRendererOnRT()) {
-    hardware_renderer_.reset(new HardwareRenderer(this));
-    hardware_renderer_->CommitFrame();
-  }
   if (hardware_renderer_) {
     hardware_renderer_->SetBackingFrameBufferObject(
         state_restore.framebuffer_binding_ext());
   }
 
   ScopedAllowGL allow_gl;
+  if (!hardware_renderer_ && draw_info->mode == AwDrawGLInfo::kModeDraw &&
+      !IsInsideHardwareRelease() && HasFrameForHardwareRendererOnRT()) {
+    hardware_renderer_.reset(new HardwareRenderer(this));
+    hardware_renderer_->SetBackingFrameBufferObject(
+        state_restore.framebuffer_binding_ext());
+    hardware_renderer_->CommitFrame();
+  }
 
   if (draw_info->mode == AwDrawGLInfo::kModeProcessNoContext) {
     LOG(ERROR) << "Received unexpected kModeProcessNoContext";
@@ -321,13 +332,15 @@ void RenderThreadManager::DeleteHardwareRendererOnUI() {
 
   InsideHardwareReleaseReset auto_inside_hardware_release_reset(this);
 
-  client_->DetachFunctorFromView();
-
   // If the WebView gets onTrimMemory >= MODERATE twice in a row, the 2nd
-  // onTrimMemory will result in an unnecessary Render Thread DrawGL call.
+  // onTrimMemory will result in an unnecessary Render Thread InvokeGL call.
   bool hardware_initialized = HasFrameOnUI();
   if (hardware_initialized) {
-    bool draw_functor_succeeded = client_->RequestDrawGL(true);
+    // The functor has only been attached to the view hierarchy if a compositor
+    // frame has been generated. Thus, it should only be detached in this case.
+    client_->DetachFunctorFromView();
+
+    bool draw_functor_succeeded = client_->RequestInvokeGL(true);
     if (!draw_functor_succeeded) {
       LOG(ERROR) << "Unable to free GL resources. Has the Window leaked?";
       // Calling release on wrong thread intentionally.
@@ -349,8 +362,16 @@ void RenderThreadManager::DeleteHardwareRendererOnUI() {
 
   if (hardware_initialized) {
     // Flush any invoke functors that's caused by ReleaseHardware.
-    client_->RequestDrawGL(true);
+    client_->RequestInvokeGL(true);
   }
+}
+
+void RenderThreadManager::SetCompositorFrameProducer(
+    CompositorFrameProducer* compositor_frame_producer) {
+  DCHECK(compositor_frame_producer == compositor_frame_producer_ ||
+         compositor_frame_producer_ == nullptr ||
+         compositor_frame_producer == nullptr);
+  compositor_frame_producer_ = compositor_frame_producer;
 }
 
 bool RenderThreadManager::HasFrameOnUI() const {

@@ -13,6 +13,7 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "remoting/base/auto_thread.h"
 #include "remoting/client/chromoting_client_runtime.h"
+#include "remoting/client/client_telemetry_logger.h"
 #include "remoting/client/jni/chromoting_jni_instance.h"
 #include "remoting/protocol/connection_to_host.h"
 
@@ -50,69 +51,16 @@ class ChromotingJniRuntime {
     return runtime_->url_requester();
   }
 
-  // Initiates a connection with the specified host. Only call when a host
-  // connection is active (i.e. between a call to Connect() and the
-  // corresponding call to Disconnect()). To skip the attempt at pair-based
-  // authentication, leave |pairing_id| and |pairing_secret| as empty strings.
-  void ConnectToHost(const std::string& username,
-                     const std::string& auth_token,
-                     const std::string& host_jid,
-                     const std::string& host_id,
-                     const std::string& host_pubkey,
-                     const std::string& pairing_id,
-                     const std::string& pairing_secret,
-                     const std::string& capabilities,
-                     const std::string& flags);
-
-  // Terminates any ongoing connection attempt and cleans up by nullifying
-  // |session_|. This is a no-op unless |session| is currently non-null.
-  void DisconnectFromHost();
-
-  // Returns the client for the currently-active session. Do not call if
-  // |session| is null.
-  scoped_refptr<ChromotingJniInstance> session() {
-    DCHECK(session_.get());
-    return session_;
+  // The runtime handles authentication and the caller should not call SetAuth*.
+  // The runtime itself will not send out any logs. Used on the network thread.
+  ClientTelemetryLogger* logger() {
+    DCHECK(runtime_->network_task_runner()->BelongsToCurrentThread());
+    DCHECK(logger_);
+    return logger_.get();
   }
 
-  // Notifies Java code of the current connection status. Call on UI thread.
-  void OnConnectionState(protocol::ConnectionToHost::State state,
-                         protocol::ErrorCode error);
-
-  // Pops up a dialog box asking the user to enter a PIN. Call on UI thread.
-  void DisplayAuthenticationPrompt(bool pairing_supported);
-
-  // Saves new pairing credentials to permanent storage. Call on UI thread.
-  void CommitPairingCredentials(const std::string& host,
-                                const std::string& id,
-                                const std::string& secret);
-
-  // Pops up a third party login page to fetch token required for
-  // authentication. Call on UI thread.
-  void FetchThirdPartyToken(const std::string& token_url,
-                            const std::string& client_id,
-                            const std::string& scope);
-
-  // Pass on the set of negotiated capabilities to the client.
-  void SetCapabilities(const std::string& capabilities);
-
-  // Passes on the deconstructed ExtensionMessage to the client to handle
-  // appropriately.
-  void HandleExtensionMessage(const std::string& type,
-                              const std::string& message);
-
-  // Creates a new Bitmap object to store a video frame.
-  base::android::ScopedJavaLocalRef<jobject> NewBitmap(int width, int height);
-
-  // Updates video frame bitmap. |bitmap| must be an instance of
-  // android.graphics.Bitmap. Call on the display thread.
-  void UpdateFrameBitmap(jobject bitmap);
-
-  // Updates cursor shape. Call on display thread.
-  void UpdateCursorShape(const protocol::CursorShapeInfo& cursor_shape);
-
-  // Draws the latest image buffer onto the canvas. Call on the display thread.
-  void RedrawCanvas();
+  // Fetch OAuth token for the telemetry logger. Call on UI thread.
+  void FetchAuthToken();
 
  private:
   ChromotingJniRuntime();
@@ -127,6 +75,9 @@ class ChromotingJniRuntime {
   // Detaches JVM from the current thread, then signals. Doesn't own |waiter|.
   void DetachFromVmAndSignal(base::WaitableEvent* waiter);
 
+  // Starts the logger on the network thread.
+  void StartLoggerOnNetworkThread();
+
   // Chromium code's connection to the app message loop. Once created the
   // MessageLoop will live for the life of the program.
   std::unique_ptr<base::MessageLoopForUI> ui_loop_;
@@ -135,8 +86,8 @@ class ChromotingJniRuntime {
   //
   std::unique_ptr<ChromotingClientRuntime> runtime_;
 
-  // Contains all connection-specific state.
-  scoped_refptr<ChromotingJniInstance> session_;
+  // For logging session stage changes and stats.
+  std::unique_ptr<ClientTelemetryLogger> logger_;
 
   friend struct base::DefaultSingletonTraits<ChromotingJniRuntime>;
 

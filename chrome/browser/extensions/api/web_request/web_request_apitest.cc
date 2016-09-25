@@ -14,11 +14,13 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/login/login_handler.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension_process_policy.h"
+#include "chrome/test/base/search_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -159,6 +161,47 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestTypes) {
   ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_types.html")) << message_;
 }
 
+// Test that a request to an OpenSearch description document (OSDD) generates
+// an event with the expected details.
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestTestOSDD) {
+  // An OSDD request is only generated when a main frame at is loaded at /, so
+  // serve osdd/index.html from the root of the test server:
+  embedded_test_server()->ServeFilesFromDirectory(
+      test_data_dir_.AppendASCII("webrequest/osdd"));
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  search_test_utils::WaitForTemplateURLServiceToLoad(
+      TemplateURLServiceFactory::GetForProfile(profile()));
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_osdd.html")) << message_;
+}
+
+// Test that the webRequest events are dispatched with the expected details when
+// a frame or tab is removed while a response is being received.
+// Flaky: https://crbug.com/617865
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
+                       DISABLED_WebRequestUnloadAfterRequest) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_unload.html?1")) <<
+      message_;
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_unload.html?2")) <<
+      message_;
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_unload.html?3")) <<
+      message_;
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_unload.html?4")) <<
+      message_;
+}
+
+// Test that the webRequest events are dispatched with the expected details when
+// a frame or tab is immediately removed after starting a request.
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
+                       WebRequestUnloadImmediately) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_unload.html?5")) <<
+      message_;
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_unload.html?6")) <<
+      message_;
+}
+
 // Flaky (sometimes crash): http://crbug.com/140976
 IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
                        DISABLED_WebRequestAuthRequired) {
@@ -210,7 +253,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, MAYBE_WebRequestNewTab) {
   // new tab.
   blink::WebMouseEvent mouse_event;
   mouse_event.type = blink::WebInputEvent::MouseDown;
-  mouse_event.button = blink::WebMouseEvent::ButtonLeft;
+  mouse_event.button = blink::WebMouseEvent::Button::Left;
   mouse_event.x = 7;
   mouse_event.y = 7;
   mouse_event.clickCount = 1;
@@ -227,14 +270,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestDeclarative1) {
       << message_;
 }
 
-// This test times out on XP. See http://crbug.com/178296
-#if defined(OS_WIN)
-#define MAYBE_WebRequestDeclarative2 DISABLED_WebRequestDeclarative2
-#else
-#define MAYBE_WebRequestDeclarative2 WebRequestDeclarative2
-#endif
-IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
-                       MAYBE_WebRequestDeclarative2) {
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestDeclarative2) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_declarative2.html"))
       << message_;
@@ -252,8 +288,8 @@ void ExtensionWebRequestApiTest::RunPermissionTest(
   catcher_incognito.RestrictToBrowserContext(
       browser()->profile()->GetOffTheRecordProfile());
 
-  ExtensionTestMessageListener listener("done", true);
-  ExtensionTestMessageListener listener_incognito("done_incognito", true);
+  ExtensionTestMessageListener listener("done", false);
+  ExtensionTestMessageListener listener_incognito("done_incognito", false);
 
   int load_extension_flags = kFlagNone;
   if (load_extension_with_incognito_permission)
@@ -364,8 +400,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
 IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, IncognitoSplitModeReload) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   // Wait for rules to be set up.
-  ExtensionTestMessageListener listener("done", true);
-  ExtensionTestMessageListener listener_incognito("done_incognito", true);
+  ExtensionTestMessageListener listener("done", false);
+  ExtensionTestMessageListener listener_incognito("done_incognito", false);
 
   const Extension* extension = LoadExtensionWithFlags(
       test_data_dir_.AppendASCII("webrequest_reload"), kFlagEnableIncognito);
@@ -377,8 +413,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, IncognitoSplitModeReload) {
 
   // Reload extension and wait for rules to be set up again. This should not
   // crash the browser.
-  ExtensionTestMessageListener listener2("done", true);
-  ExtensionTestMessageListener listener_incognito2("done_incognito", true);
+  ExtensionTestMessageListener listener2("done", false);
+  ExtensionTestMessageListener listener_incognito2("done_incognito", false);
 
   ReloadExtension(extension->id());
 
@@ -392,7 +428,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, ExtensionRequests) {
   ExtensionTestMessageListener listener_main2("web_request_status2", true);
 
   ExtensionTestMessageListener listener_app("app_done", false);
-  ExtensionTestMessageListener listener_extension("extension_done", true);
+  ExtensionTestMessageListener listener_extension("extension_done", false);
 
   // Set up webRequest listener
   ASSERT_TRUE(LoadExtension(
@@ -506,7 +542,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest,
   const std::string kHost = "example.com";
   GURL url = embedded_test_server()->GetURL(kHost, "/empty.html");
   chrome::NavigateParams params(browser(), url, ui::PAGE_TRANSITION_LINK);
-  params.disposition = NEW_FOREGROUND_TAB;
+  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   ui_test_utils::NavigateToURL(&params);
 
   content::WebContents* web_contents =

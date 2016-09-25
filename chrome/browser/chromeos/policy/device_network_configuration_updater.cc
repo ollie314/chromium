@@ -15,7 +15,7 @@
 #include "chromeos/network/network_device_handler.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "chromeos/settings/cros_settings_provider.h"
-#include "policy/policy_constants.h"
+#include "components/policy/policy_constants.h"
 
 namespace policy {
 
@@ -72,6 +72,10 @@ void DeviceNetworkConfigurationUpdater::Init() {
     // Apply the roaming setting initially.
     OnDataRoamingSettingChanged();
   }
+
+  // Set up MAC address randomization if we are not enterprise managed.
+  network_device_handler_->SetMACAddressRandomizationEnabled(
+      !connector->IsEnterpriseManaged());
 }
 
 void DeviceNetworkConfigurationUpdater::ImportCertificates(

@@ -9,10 +9,9 @@
 namespace blink {
 
 AudioTrack::AudioTrack(const String& id, const AtomicString& kind, const AtomicString& label, const AtomicString& language, bool enabled)
-    : TrackBase(WebMediaPlayer::AudioTrack, label, language, id)
+    : TrackBase(WebMediaPlayer::AudioTrack, kind, label, language, id)
     , m_enabled(enabled)
 {
-    setKind(kind);
 }
 
 AudioTrack::~AudioTrack()
@@ -32,7 +31,7 @@ void AudioTrack::setEnabled(bool enabled)
     m_enabled = enabled;
 
     if (mediaElement())
-        mediaElement()->audioTrackChanged(trackId(), enabled);
+        mediaElement()->audioTrackChanged(this);
 }
 
 const AtomicString& AudioTrack::alternativeKeyword()
@@ -73,18 +72,13 @@ const AtomicString& AudioTrack::commentaryKeyword()
 
 bool AudioTrack::isValidKindKeyword(const String& kind)
 {
-    return (kind == alternativeKeyword())
-        || (kind == descriptionsKeyword())
-        || (kind == mainKeyword())
-        || (kind == mainDescriptionsKeyword())
-        || (kind == translationKeyword())
-        || (kind == commentaryKeyword())
-        || (kind == emptyAtom);
-}
-
-AtomicString AudioTrack::defaultKind() const
-{
-    return emptyAtom;
+    return kind == alternativeKeyword()
+        || kind == descriptionsKeyword()
+        || kind == mainKeyword()
+        || kind == mainDescriptionsKeyword()
+        || kind == translationKeyword()
+        || kind == commentaryKeyword()
+        || kind == emptyAtom;
 }
 
 } // namespace blink

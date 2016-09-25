@@ -16,7 +16,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/fileapi/browser_file_system_helper.h"
-#include "content/browser/geofencing/geofencing_manager.h"
 #include "content/browser/gpu/shader_disk_cache.h"
 #include "content/browser/host_zoom_map_impl.h"
 #include "content/browser/notifications/platform_notification_context_impl.h"
@@ -35,6 +34,10 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "storage/browser/database/database_tracker.h"
 #include "storage/browser/quota/quota_manager.h"
+
+#if defined(ENABLE_PLUGINS)
+#include "content/browser/plugin_private_storage_helper.h"
+#endif  // defined(ENABLE_PLUGINS)
 
 namespace content {
 
@@ -315,7 +318,7 @@ struct StoragePartitionImpl::DataDeletionHelper {
       DOMStorageContextWrapper* dom_storage_context,
       storage::QuotaManager* quota_manager,
       storage::SpecialStoragePolicy* special_storage_policy,
-      WebRTCIdentityStore* webrtc_identity_store,
+      storage::FileSystemContext* filesystem_context,
       const base::Time begin,
       const base::Time end);
 
@@ -367,12 +370,11 @@ StoragePartitionImpl::StoragePartitionImpl(
     IndexedDBContextImpl* indexed_db_context,
     CacheStorageContextImpl* cache_storage_context,
     ServiceWorkerContextWrapper* service_worker_context,
-    WebRTCIdentityStore* webrtc_identity_store,
     storage::SpecialStoragePolicy* special_storage_policy,
-    GeofencingManager* geofencing_manager,
     HostZoomLevelContext* host_zoom_level_context,
     PlatformNotificationContextImpl* platform_notification_context,
-    BackgroundSyncContextImpl* background_sync_context)
+    BackgroundSyncContext* background_sync_context,
+    scoped_refptr<BroadcastChannelProvider> broadcast_channel_provider)
     : partition_path_(partition_path),
       quota_manager_(quota_manager),
       appcache_service_(appcache_service),
@@ -382,14 +384,12 @@ StoragePartitionImpl::StoragePartitionImpl(
       indexed_db_context_(indexed_db_context),
       cache_storage_context_(cache_storage_context),
       service_worker_context_(service_worker_context),
-      webrtc_identity_store_(webrtc_identity_store),
       special_storage_policy_(special_storage_policy),
-      geofencing_manager_(geofencing_manager),
       host_zoom_level_context_(host_zoom_level_context),
       platform_notification_context_(platform_notification_context),
       background_sync_context_(background_sync_context),
-      browser_context_(browser_context) {
-}
+      broadcast_channel_provider_(std::move(broadcast_channel_provider)),
+      browser_context_(browser_context) {}
 
 StoragePartitionImpl::~StoragePartitionImpl() {
   browser_context_ = nullptr;
@@ -415,9 +415,6 @@ StoragePartitionImpl::~StoragePartitionImpl() {
   if (GetCacheStorageContext())
     GetCacheStorageContext()->Shutdown();
 
-  if (GetGeofencingManager())
-    GetGeofencingManager()->Shutdown();
-
   if (GetPlatformNotificationContext())
     GetPlatformNotificationContext()->Shutdown();
 
@@ -425,7 +422,7 @@ StoragePartitionImpl::~StoragePartitionImpl() {
     GetBackgroundSyncContext()->Shutdown();
 }
 
-StoragePartitionImpl* StoragePartitionImpl::Create(
+std::unique_ptr<StoragePartitionImpl> StoragePartitionImpl::Create(
     BrowserContext* context,
     bool in_memory,
     const base::FilePath& relative_partition_path) {
@@ -443,10 +440,9 @@ StoragePartitionImpl* StoragePartitionImpl::Create(
   // that utilizes the QuotaManager.
   scoped_refptr<storage::QuotaManager> quota_manager =
       new storage::QuotaManager(
-          in_memory,
-          partition_path,
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get(),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB).get(),
+          in_memory, partition_path,
+          BrowserThread::GetTaskRunnerForThread(BrowserThread::IO).get(),
+          BrowserThread::GetTaskRunnerForThread(BrowserThread::DB).get(),
           context->GetSpecialStoragePolicy());
 
   // Each consumer is responsible for registering its QuotaClient during
@@ -456,16 +452,14 @@ StoragePartitionImpl* StoragePartitionImpl::Create(
           context, partition_path, in_memory, quota_manager->proxy());
 
   scoped_refptr<storage::DatabaseTracker> database_tracker =
-      new storage::DatabaseTracker(partition_path,
-                                   in_memory,
-                                   context->GetSpecialStoragePolicy(),
-                                   quota_manager->proxy(),
-                                   BrowserThread::GetMessageLoopProxyForThread(
-                                       BrowserThread::FILE).get());
+      new storage::DatabaseTracker(
+          partition_path, in_memory, context->GetSpecialStoragePolicy(),
+          quota_manager->proxy(),
+          BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE).get());
 
   scoped_refptr<DOMStorageContextWrapper> dom_storage_context =
       new DOMStorageContextWrapper(
-          BrowserContext::GetMojoConnectorFor(context),
+          BrowserContext::GetShellConnectorFor(context),
           in_memory ? base::FilePath() : context->GetPath(),
           relative_partition_path, context->GetSpecialStoragePolicy());
 
@@ -499,15 +493,8 @@ StoragePartitionImpl* StoragePartitionImpl::Create(
   scoped_refptr<ChromeAppCacheService> appcache_service =
       new ChromeAppCacheService(quota_manager->proxy());
 
-  scoped_refptr<WebRTCIdentityStore> webrtc_identity_store(
-      new WebRTCIdentityStore(path, context->GetSpecialStoragePolicy()));
-
   scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy(
       context->GetSpecialStoragePolicy());
-
-  scoped_refptr<GeofencingManager> geofencing_manager =
-      new GeofencingManager(service_worker_context);
-  geofencing_manager->Init();
 
   scoped_refptr<HostZoomLevelContext> host_zoom_level_context(
       new HostZoomLevelContext(
@@ -518,20 +505,24 @@ StoragePartitionImpl* StoragePartitionImpl::Create(
                                           service_worker_context);
   platform_notification_context->Initialize();
 
-  scoped_refptr<BackgroundSyncContextImpl> background_sync_context =
-      new BackgroundSyncContextImpl();
+  scoped_refptr<BackgroundSyncContext> background_sync_context =
+      new BackgroundSyncContext();
   background_sync_context->Init(service_worker_context);
 
-  StoragePartitionImpl* storage_partition = new StoragePartitionImpl(
-      context, partition_path, quota_manager.get(), appcache_service.get(),
-      filesystem_context.get(), database_tracker.get(),
-      dom_storage_context.get(), indexed_db_context.get(),
-      cache_storage_context.get(), service_worker_context.get(),
-      webrtc_identity_store.get(), special_storage_policy.get(),
-      geofencing_manager.get(), host_zoom_level_context.get(),
-      platform_notification_context.get(), background_sync_context.get());
+  scoped_refptr<BroadcastChannelProvider>
+      broadcast_channel_provider = new BroadcastChannelProvider();
 
-  service_worker_context->set_storage_partition(storage_partition);
+  std::unique_ptr<StoragePartitionImpl> storage_partition(
+      new StoragePartitionImpl(
+          context, partition_path, quota_manager.get(), appcache_service.get(),
+          filesystem_context.get(), database_tracker.get(),
+          dom_storage_context.get(), indexed_db_context.get(),
+          cache_storage_context.get(), service_worker_context.get(),
+          special_storage_policy.get(), host_zoom_level_context.get(),
+          platform_notification_context.get(), background_sync_context.get(),
+          std::move(broadcast_channel_provider)));
+
+  service_worker_context->set_storage_partition(storage_partition.get());
 
   return storage_partition;
 }
@@ -581,10 +572,6 @@ ServiceWorkerContextWrapper* StoragePartitionImpl::GetServiceWorkerContext() {
   return service_worker_context_.get();
 }
 
-GeofencingManager* StoragePartitionImpl::GetGeofencingManager() {
-  return geofencing_manager_.get();
-}
-
 HostZoomMap* StoragePartitionImpl::GetHostZoomMap() {
   DCHECK(host_zoom_level_context_.get());
   return host_zoom_level_context_->GetHostZoomMap();
@@ -604,8 +591,12 @@ StoragePartitionImpl::GetPlatformNotificationContext() {
   return platform_notification_context_.get();
 }
 
-BackgroundSyncContextImpl* StoragePartitionImpl::GetBackgroundSyncContext() {
+BackgroundSyncContext* StoragePartitionImpl::GetBackgroundSyncContext() {
   return background_sync_context_.get();
+}
+
+BroadcastChannelProvider* StoragePartitionImpl::GetBroadcastChannelProvider() {
+  return broadcast_channel_provider_.get();
 }
 
 void StoragePartitionImpl::OpenLocalStorage(
@@ -635,7 +626,7 @@ void StoragePartitionImpl::ClearDataImpl(
   helper->ClearDataOnUIThread(
       storage_origin, origin_matcher, cookie_matcher, GetPath(), rq_context,
       dom_storage_context_.get(), quota_manager_.get(),
-      special_storage_policy_.get(), webrtc_identity_store_.get(), begin, end);
+      special_storage_policy_.get(), filesystem_context_.get(), begin, end);
 }
 
 void StoragePartitionImpl::
@@ -713,7 +704,7 @@ StoragePartitionImpl::QuotaManagedDataDeletionHelper::ClearOriginsOnIOThread(
   // and SessionStorage. This loop wipes out most HTML5 storage for the given
   // origins.
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (!origins.size()) {
+  if (origins.empty()) {
     callback.Run();
     return;
   }
@@ -774,7 +765,7 @@ void StoragePartitionImpl::DataDeletionHelper::ClearDataOnUIThread(
     DOMStorageContextWrapper* dom_storage_context,
     storage::QuotaManager* quota_manager,
     storage::SpecialStoragePolicy* special_storage_policy,
-    WebRTCIdentityStore* webrtc_identity_store,
+    storage::FileSystemContext* filesystem_context,
     const base::Time begin,
     const base::Time end) {
   DCHECK_NE(remove_mask, 0u);
@@ -843,17 +834,15 @@ void StoragePartitionImpl::DataDeletionHelper::ClearDataOnUIThread(
                    path, begin, end, decrement_callback));
   }
 
-  if (remove_mask & REMOVE_DATA_MASK_WEBRTC_IDENTITY) {
+#if defined(ENABLE_PLUGINS)
+  if (remove_mask & REMOVE_DATA_MASK_PLUGIN_PRIVATE_DATA) {
     IncrementTaskCountOnUI();
-    BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&WebRTCIdentityStore::DeleteBetween,
-                   webrtc_identity_store,
-                   begin,
-                   end,
-                   decrement_callback));
+    filesystem_context->default_file_task_runner()->PostTask(
+        FROM_HERE, base::Bind(&ClearPluginPrivateDataOnFileTaskRunner,
+                              make_scoped_refptr(filesystem_context),
+                              storage_origin, begin, end, decrement_callback));
   }
+#endif  // defined(ENABLE_PLUGINS)
 
   DecrementTaskCountOnUI();
 }
@@ -900,10 +889,6 @@ void StoragePartitionImpl::Flush() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (GetDOMStorageContext())
     GetDOMStorageContext()->Flush();
-}
-
-WebRTCIdentityStore* StoragePartitionImpl::GetWebRTCIdentityStore() {
-  return webrtc_identity_store_.get();
 }
 
 BrowserContext* StoragePartitionImpl::browser_context() const {

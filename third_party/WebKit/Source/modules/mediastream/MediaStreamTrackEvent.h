@@ -26,6 +26,7 @@
 #define MediaStreamTrackEvent_h
 
 #include "modules/EventModules.h"
+#include "modules/mediastream/MediaStreamTrackEventInit.h"
 #include "wtf/text/AtomicString.h"
 
 namespace blink {
@@ -37,8 +38,8 @@ class MediaStreamTrackEvent final : public Event {
 public:
     ~MediaStreamTrackEvent() override;
 
-    static MediaStreamTrackEvent* create();
-    static MediaStreamTrackEvent* create(const AtomicString& type, bool canBubble, bool cancelable, MediaStreamTrack*);
+    static MediaStreamTrackEvent* create(const AtomicString& type, MediaStreamTrack*);
+    static MediaStreamTrackEvent* create(const AtomicString& type, const MediaStreamTrackEventInit&);
 
     MediaStreamTrack* track() const;
 
@@ -48,8 +49,8 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
 private:
-    MediaStreamTrackEvent();
-    MediaStreamTrackEvent(const AtomicString& type, bool canBubble, bool cancelable, MediaStreamTrack*);
+    MediaStreamTrackEvent(const AtomicString& type, MediaStreamTrack*);
+    MediaStreamTrackEvent(const AtomicString& type, const MediaStreamTrackEventInit&);
 
     Member<MediaStreamTrack> m_track;
 };

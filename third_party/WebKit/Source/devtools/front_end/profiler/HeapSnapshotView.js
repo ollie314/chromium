@@ -32,13 +32,13 @@
  * @constructor
  * @implements {WebInspector.ProfileType.DataDisplayDelegate}
  * @implements {WebInspector.Searchable}
- * @extends {WebInspector.VBox}
+ * @extends {WebInspector.SimpleView}
  * @param {!WebInspector.ProfileType.DataDisplayDelegate} dataDisplayDelegate
  * @param {!WebInspector.HeapProfileHeader} profile
  */
 WebInspector.HeapSnapshotView = function(dataDisplayDelegate, profile)
 {
-    WebInspector.VBox.call(this);
+    WebInspector.SimpleView.call(this, WebInspector.UIString("Heap Snapshot"));
 
     this.element.classList.add("heap-snapshot-view");
 
@@ -86,7 +86,6 @@ WebInspector.HeapSnapshotView = function(dataDisplayDelegate, profile)
         this._allocationStackView.setMinimumSize(50, 25);
 
         this._tabbedPane = new WebInspector.TabbedPane();
-        this._tabbedPane.headerElement().classList.add("heap-object-details-header");
     }
 
     this._retainmentDataGrid = new WebInspector.HeapSnapshotRetainmentDataGrid(this);
@@ -97,7 +96,6 @@ WebInspector.HeapSnapshotView = function(dataDisplayDelegate, profile)
     var splitWidgetResizer;
     if (this._allocationStackView) {
         this._tabbedPane = new WebInspector.TabbedPane();
-        this._tabbedPane.headerElement().classList.add("heap-object-details-header");
 
         this._tabbedPane.appendTab("retainers", WebInspector.UIString("Retainers"), this._retainmentWidget);
         this._tabbedPane.appendTab("allocation-stack", WebInspector.UIString("Allocation stack"), this._allocationStackView);
@@ -269,7 +267,7 @@ WebInspector.HeapSnapshotView.SummaryPerspective.prototype = {
         return true;
     },
 
-   __proto__: WebInspector.HeapSnapshotView.Perspective.prototype
+    __proto__: WebInspector.HeapSnapshotView.Perspective.prototype
 }
 
 /**
@@ -314,7 +312,7 @@ WebInspector.HeapSnapshotView.ComparisonPerspective.prototype = {
         return true;
     },
 
-   __proto__: WebInspector.HeapSnapshotView.Perspective.prototype
+    __proto__: WebInspector.HeapSnapshotView.Perspective.prototype
 }
 
 /**
@@ -348,7 +346,7 @@ WebInspector.HeapSnapshotView.ContainmentPerspective.prototype = {
         return heapSnapshotView._containmentDataGrid;
     },
 
-   __proto__: WebInspector.HeapSnapshotView.Perspective.prototype
+    __proto__: WebInspector.HeapSnapshotView.Perspective.prototype
 }
 
 /**
@@ -412,7 +410,7 @@ WebInspector.HeapSnapshotView.AllocationPerspective.prototype = {
         return heapSnapshotView._allocationDataGrid;
     },
 
-   __proto__: WebInspector.HeapSnapshotView.Perspective.prototype
+    __proto__: WebInspector.HeapSnapshotView.Perspective.prototype
 }
 
 /**
@@ -444,7 +442,7 @@ WebInspector.HeapSnapshotView.StatisticsPerspective.prototype = {
         return null;
     },
 
-   __proto__: WebInspector.HeapSnapshotView.Perspective.prototype
+    __proto__: WebInspector.HeapSnapshotView.Perspective.prototype
 }
 
 
@@ -523,9 +521,10 @@ WebInspector.HeapSnapshotView.prototype = {
     },
 
     /**
+     * @override
      * @return {!Array.<!WebInspector.ToolbarItem>}
      */
-    toolbarItems: function()
+    syncToolbarItems: function()
     {
         var result = [this._perspectiveSelect, this._classNameFilter];
         if (this._profile.profileType() !== WebInspector.ProfileTypeRegistry.instance.trackingHeapSnapshotProfileType)
@@ -838,14 +837,14 @@ WebInspector.HeapSnapshotView.prototype = {
             if (dataGrid === this._diffDataGrid) {
                 if (!this._baseProfile)
                     this._baseProfile = this._profiles()[this._baseSelect.selectedIndex()];
-                this._baseProfile._loadPromise.then(didLoadBaseSnaphot.bind(this));
+                this._baseProfile._loadPromise.then(didLoadBaseSnapshot.bind(this));
             }
         }
 
         /**
          * @this {WebInspector.HeapSnapshotView}
          */
-        function didLoadBaseSnaphot(baseSnapshotProxy)
+        function didLoadBaseSnapshot(baseSnapshotProxy)
         {
             if (this._diffDataGrid.baseSnapshot !== baseSnapshotProxy)
                 this._diffDataGrid.setBaseDataSource(baseSnapshotProxy);
@@ -1010,7 +1009,7 @@ WebInspector.HeapSnapshotView.prototype = {
             this._trackingOverviewGrid.dispose();
     },
 
-    __proto__: WebInspector.VBox.prototype
+    __proto__: WebInspector.SimpleView.prototype
 }
 
 /**
@@ -1177,7 +1176,7 @@ WebInspector.HeapSnapshotProfileType.prototype = {
  */
 WebInspector.TrackingHeapSnapshotProfileType = function()
 {
-    WebInspector.HeapSnapshotProfileType.call(this, WebInspector.TrackingHeapSnapshotProfileType.TypeId, WebInspector.UIString("Record Heap Allocations"));
+    WebInspector.HeapSnapshotProfileType.call(this, WebInspector.TrackingHeapSnapshotProfileType.TypeId, WebInspector.UIString("Record Allocation Timeline"));
 }
 
 WebInspector.TrackingHeapSnapshotProfileType.TypeId = "HEAP-RECORD";
@@ -1239,7 +1238,7 @@ WebInspector.TrackingHeapSnapshotProfileType.prototype = {
         var index;
         for (var i = 0; i < samples.length; i += 3) {
             index = samples[i];
-            var size  = samples[i+2];
+            var size  = samples[i + 2];
             this._profileSamples.sizes[index] = size;
             if (!this._profileSamples.max[index])
                 this._profileSamples.max[index] = size;
@@ -1364,12 +1363,12 @@ WebInspector.TrackingHeapSnapshotProfileType.prototype = {
 
     get treeItemTitle()
     {
-        return WebInspector.UIString("HEAP TIMELINES");
+        return WebInspector.UIString("ALLOCATION TIMELINES");
     },
 
     get description()
     {
-        return WebInspector.UIString("Record JavaScript object allocations over time. Use this profile type to isolate memory leaks.");
+        return WebInspector.UIString("Allocation timelines show memory allocations from your heap over time. Use this profile type to isolate memory leaks.");
     },
 
     /**
@@ -1687,7 +1686,7 @@ WebInspector.HeapSnapshotLoadFromFileDelegate.prototype = {
     onError: function(reader, e)
     {
         var subtitle;
-        switch(e.target.error.code) {
+        switch (e.target.error.code) {
         case e.target.error.NOT_FOUND_ERR:
             subtitle = WebInspector.UIString("'%s' not found.", reader.fileName());
             break;
@@ -2101,7 +2100,7 @@ WebInspector.HeapTrackingOverviewGrid.OverviewCalculator.prototype = {
      * @param {number=} precision
      * @return {string}
      */
-    formatTime: function(value, precision)
+    formatValue: function(value, precision)
     {
         return Number.secondsToString(value / 1000, !!precision);
     },
@@ -2209,7 +2208,7 @@ WebInspector.HeapSnapshotStatisticsView.prototype = {
 WebInspector.HeapAllocationStackView = function(target)
 {
     WebInspector.Widget.call(this);
-    this._target = target;;
+    this._target = target;
     this._linkifier = new WebInspector.Linkifier();
 }
 

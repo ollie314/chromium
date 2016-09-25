@@ -22,16 +22,15 @@
 
 #include "core/fetch/MemoryCache.h"
 
-#include "core/fetch/WebCacheMemoryDumpProvider.h"
-#include "platform/Logging.h"
+#include "core/fetch/ResourceLoadingLog.h"
 #include "platform/TraceEvent.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/SecurityOriginHash.h"
 #include "public/platform/Platform.h"
 #include "wtf/Assertions.h"
+#include "wtf/AutoReset.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/MathExtras.h"
-#include "wtf/TemporaryChange.h"
 #include "wtf/text/CString.h"
 
 namespace blink {
@@ -46,7 +45,7 @@ static const float cTargetPrunePercentage = .95f; // Percentage of capacity towa
 
 MemoryCache* memoryCache()
 {
-    ASSERT(WTF::isMainThread());
+    DCHECK(WTF::isMainThread());
     if (!gMemoryCache)
         gMemoryCache = new Persistent<MemoryCache>(MemoryCache::create());
     return gMemoryCache->get();
@@ -57,23 +56,35 @@ MemoryCache* replaceMemoryCacheForTesting(MemoryCache* cache)
     memoryCache();
     MemoryCache* oldCache = gMemoryCache->release();
     *gMemoryCache = cache;
-    WebCacheMemoryDumpProvider::instance()->setMemoryCache(cache);
+    MemoryCacheDumpProvider::instance()->setMemoryCache(cache);
     return oldCache;
 }
 
 DEFINE_TRACE(MemoryCacheEntry)
 {
-    visitor->trace(m_resource);
+    visitor->template registerWeakMembers<MemoryCacheEntry, &MemoryCacheEntry::clearResourceWeak>(this);
     visitor->trace(m_previousInLiveResourcesList);
     visitor->trace(m_nextInLiveResourcesList);
     visitor->trace(m_previousInAllResourcesList);
     visitor->trace(m_nextInAllResourcesList);
 }
 
+void MemoryCacheEntry::clearResourceWeak(Visitor* visitor)
+{
+    if (!m_resource || ThreadHeap::isHeapObjectAlive(m_resource))
+        return;
+    memoryCache()->remove(m_resource.get());
+    m_resource.clear();
+}
+
 void MemoryCacheEntry::dispose()
 {
-    m_resource->removedFromMemoryCache();
     m_resource.clear();
+}
+
+Resource* MemoryCacheEntry::resource()
+{
+    return m_resource.get();
 }
 
 DEFINE_TRACE(MemoryCacheLRUList)
@@ -96,15 +107,10 @@ inline MemoryCache::MemoryCache()
     , m_delayBeforeLiveDecodedPrune(cMinDelayBeforeLiveDecodedPrune)
     , m_liveSize(0)
     , m_deadSize(0)
-#ifdef MEMORY_CACHE_STATS
-    , m_statsTimer(this, &MemoryCache::dumpStats)
-#endif
 {
-    WebCacheMemoryDumpProvider::instance()->setMemoryCache(this);
-#ifdef MEMORY_CACHE_STATS
-    const double statsIntervalInSeconds = 15;
-    m_statsTimer.startRepeating(statsIntervalInSeconds, BLINK_FROM_HERE);
-#endif
+    MemoryCacheDumpProvider::instance()->setMemoryCache(this);
+    if (ProcessHeap::isLowEndDevice())
+        MemoryCoordinator::instance().registerClient(this);
 }
 
 MemoryCache* MemoryCache::create()
@@ -123,6 +129,8 @@ DEFINE_TRACE(MemoryCache)
     visitor->trace(m_allResources);
     visitor->trace(m_liveDecodedResources);
     visitor->trace(m_resourceMaps);
+    MemoryCacheDumpClient::trace(visitor);
+    MemoryCoordinatorClient::trace(visitor);
 }
 
 KURL MemoryCache::removeFragmentIdentifierIfNeeded(const KURL& originalURL)
@@ -148,22 +156,22 @@ MemoryCache::ResourceMap* MemoryCache::ensureResourceMap(const String& cacheIden
 {
     if (!m_resourceMaps.contains(cacheIdentifier)) {
         ResourceMapIndex::AddResult result = m_resourceMaps.add(cacheIdentifier, new ResourceMap);
-        RELEASE_ASSERT(result.isNewEntry);
+        CHECK(result.isNewEntry);
     }
     return m_resourceMaps.get(cacheIdentifier);
 }
 
 void MemoryCache::add(Resource* resource)
 {
-    ASSERT(WTF::isMainThread());
-    ASSERT(resource->url().isValid());
+    DCHECK(WTF::isMainThread());
+    DCHECK(resource->url().isValid());
     ResourceMap* resources = ensureResourceMap(resource->cacheIdentifier());
     KURL url = removeFragmentIdentifierIfNeeded(resource->url());
-    RELEASE_ASSERT(!resources->contains(url));
+    CHECK(!contains(resource));
     resources->set(url, MemoryCacheEntry::create(resource));
     update(resource, 0, resource->size(), true);
 
-    WTF_LOG(ResourceLoading, "MemoryCache::add Added '%s', resource %p\n", resource->url().getString().latin1().data(), resource);
+    RESOURCE_LOADING_DVLOG(1) << "MemoryCache::add Added " << resource->url().getString() << ", resource " << resource;
 }
 
 void MemoryCache::remove(Resource* resource)
@@ -186,10 +194,10 @@ Resource* MemoryCache::resourceForURL(const KURL& resourceURL)
 
 Resource* MemoryCache::resourceForURL(const KURL& resourceURL, const String& cacheIdentifier)
 {
-    ASSERT(WTF::isMainThread());
+    DCHECK(WTF::isMainThread());
     if (!resourceURL.isValid() || resourceURL.isNull())
         return nullptr;
-    ASSERT(!cacheIdentifier.isNull());
+    DCHECK(!cacheIdentifier.isNull());
     ResourceMap* resources = m_resourceMaps.get(cacheIdentifier);
     if (!resources)
         return nullptr;
@@ -197,20 +205,20 @@ Resource* MemoryCache::resourceForURL(const KURL& resourceURL, const String& cac
     MemoryCacheEntry* entry = resources->get(url);
     if (!entry)
         return nullptr;
-    Resource* resource = entry->m_resource.get();
-    if (resource && !resource->lock())
-        return nullptr;
-    return resource;
+    return entry->resource();
 }
 
 HeapVector<Member<Resource>> MemoryCache::resourcesForURL(const KURL& resourceURL)
 {
-    ASSERT(WTF::isMainThread());
+    DCHECK(WTF::isMainThread());
     KURL url = removeFragmentIdentifierIfNeeded(resourceURL);
     HeapVector<Member<Resource>> results;
     for (const auto& resourceMapIter : m_resourceMaps) {
-        if (MemoryCacheEntry* entry = resourceMapIter.value->get(url))
-            results.append(entry->m_resource.get());
+        if (MemoryCacheEntry* entry = resourceMapIter.value->get(url)) {
+            Resource* resource = entry->resource();
+            DCHECK(resource);
+            results.append(resource);
+        }
     }
     return results;
 }
@@ -232,7 +240,7 @@ size_t MemoryCache::liveCapacity() const
 
 void MemoryCache::pruneLiveResources(PruneStrategy strategy)
 {
-    ASSERT(!m_prunePending);
+    DCHECK(!m_prunePending);
     size_t capacity = liveCapacity();
     if (strategy == MaximalPrune)
         capacity = 0;
@@ -253,9 +261,11 @@ void MemoryCache::pruneLiveResources(PruneStrategy strategy)
 
     MemoryCacheEntry* current = m_liveDecodedResources.m_tail;
     while (current) {
+        Resource* resource = current->resource();
         MemoryCacheEntry* previous = current->m_previousInLiveResourcesList;
-        ASSERT(current->m_resource->hasClientsOrObservers());
-        if (current->m_resource->isLoaded() && current->m_resource->decodedSize()) {
+        DCHECK(resource->isAlive());
+
+        if (resource->isLoaded() && resource->decodedSize()) {
             // Check to see if the remaining resources are too new to prune.
             double elapsedTime = m_pruneFrameTimeStamp - current->m_lastDecodedAccessTime;
             if (strategy == AutomaticPrune && elapsedTime < m_delayBeforeLiveDecodedPrune)
@@ -264,7 +274,7 @@ void MemoryCache::pruneLiveResources(PruneStrategy strategy)
             // Destroy our decoded data if possible. This will remove us
             // from m_liveDecodedResources, and possibly move us to a
             // different LRU list in m_allResources.
-            current->m_resource->prune();
+            resource->prune();
 
             if (targetSize && m_liveSize <= targetSize)
                 return;
@@ -291,53 +301,46 @@ void MemoryCache::pruneDeadResources(PruneStrategy strategy)
     for (int i = size - 1; i >= 0; i--) {
         // Remove from the tail, since this is the least frequently accessed of the objects.
         MemoryCacheEntry* current = m_allResources[i].m_tail;
-        if (current) {
-            ASSERT(current->m_resource);
-            ASSERT(contains(current->m_resource.get()));
-        }
 
         // First flush all the decoded data in this queue.
         while (current) {
+            Resource* resource = current->resource();
             MemoryCacheEntry* previous = current->m_previousInAllResourcesList;
-            if (previous) {
-                ASSERT(previous->m_resource);
-                ASSERT(contains(previous->m_resource.get()));
+
+            // Decoded data may reference other resources. Skip |current| if
+            // |current| somehow got kicked out of cache during
+            // destroyDecodedData().
+            if (!resource || !contains(resource)) {
+                current = previous;
+                continue;
             }
-            if (!current->m_resource->hasClientsOrObservers() && !current->m_resource->isPreloaded() && current->m_resource->isLoaded()) {
+
+            if (!resource->isAlive() && !resource->isPreloaded() && resource->isLoaded()) {
                 // Destroy our decoded data. This will remove us from
                 // m_liveDecodedResources, and possibly move us to a different
                 // LRU list in m_allResources.
-                current->m_resource->prune();
+                resource->prune();
 
                 if (targetSize && m_deadSize <= targetSize)
                     return;
             }
-            // Decoded data may reference other resources. Stop iterating if 'previous' somehow got
-            // kicked out of cache during destroyDecodedData().
-            if (!previous || !previous->m_resource || !contains(previous->m_resource.get()))
-                break;
             current = previous;
         }
 
         // Now evict objects from this queue.
         current = m_allResources[i].m_tail;
-        if (current) {
-            ASSERT(current->m_resource);
-            ASSERT(contains(current->m_resource.get()));
-        }
         while (current) {
+            Resource* resource = current->resource();
             MemoryCacheEntry* previous = current->m_previousInAllResourcesList;
-            if (previous) {
-                ASSERT(previous->m_resource);
-                ASSERT(contains(previous->m_resource.get()));
+            if (!resource || !contains(resource)) {
+                current = previous;
+                continue;
             }
-            if (!current->m_resource->hasClientsOrObservers() && !current->m_resource->isPreloaded()) {
+            if (!resource->isAlive() && !resource->isPreloaded()) {
                 evict(current);
                 if (targetSize && m_deadSize <= targetSize)
                     return;
             }
-            if (!previous || !previous->m_resource || !contains(previous->m_resource.get()))
-                break;
             current = previous;
         }
 
@@ -352,8 +355,8 @@ void MemoryCache::pruneDeadResources(PruneStrategy strategy)
 
 void MemoryCache::setCapacities(size_t minDeadBytes, size_t maxDeadBytes, size_t totalBytes)
 {
-    ASSERT(minDeadBytes <= maxDeadBytes);
-    ASSERT(maxDeadBytes <= totalBytes);
+    DCHECK_LE(minDeadBytes, maxDeadBytes);
+    DCHECK_LE(maxDeadBytes, totalBytes);
     m_minDeadCapacity = minDeadBytes;
     m_maxDeadCapacity = maxDeadBytes;
     m_maxDeferredPruneDeadCapacity = cDeferredPruneDeadCapacityFactor * maxDeadBytes;
@@ -363,20 +366,22 @@ void MemoryCache::setCapacities(size_t minDeadBytes, size_t maxDeadBytes, size_t
 
 void MemoryCache::evict(MemoryCacheEntry* entry)
 {
-    ASSERT(WTF::isMainThread());
+    DCHECK(WTF::isMainThread());
 
-    Resource* resource = entry->m_resource.get();
-    WTF_LOG(ResourceLoading, "Evicting resource %p for '%s' from cache", resource, resource->url().getString().latin1().data());
+    Resource* resource = entry->resource();
+    DCHECK(resource);
+    RESOURCE_LOADING_DVLOG(1) << "Evicting resource " << resource << " for " << resource->url().getString() << " from cache";
+    TRACE_EVENT1("blink", "MemoryCache::evict", "resource", resource->url().getString().utf8());
     // The resource may have already been removed by someone other than our caller,
     // who needed a fresh copy for a reload. See <http://bugs.webkit.org/show_bug.cgi?id=12479#c6>.
     update(resource, resource->size(), 0, false);
     removeFromLiveDecodedResourcesList(entry);
 
     ResourceMap* resources = m_resourceMaps.get(resource->cacheIdentifier());
-    ASSERT(resources);
+    DCHECK(resources);
     KURL url = removeFragmentIdentifierIfNeeded(resource->url());
     ResourceMap::iterator it = resources->find(url);
-    ASSERT(it != resources->end());
+    DCHECK_NE(it, resources->end());
 
     MemoryCacheEntry* entryPtr = it->value;
     resources->remove(it);
@@ -386,21 +391,21 @@ void MemoryCache::evict(MemoryCacheEntry* entry)
 
 MemoryCacheEntry* MemoryCache::getEntryForResource(const Resource* resource) const
 {
-    if (resource->url().isNull() || resource->url().isEmpty())
+    if (!resource || resource->url().isNull() || resource->url().isEmpty())
         return nullptr;
     ResourceMap* resources = m_resourceMaps.get(resource->cacheIdentifier());
     if (!resources)
         return nullptr;
     KURL url = removeFragmentIdentifierIfNeeded(resource->url());
     MemoryCacheEntry* entry = resources->get(url);
-    if (!entry || entry->m_resource != resource)
+    if (!entry || entry->resource() != resource)
         return nullptr;
     return entry;
 }
 
 MemoryCacheLRUList* MemoryCache::lruListFor(unsigned accessCount, size_t size)
 {
-    ASSERT(accessCount > 0);
+    DCHECK_GT(accessCount, 0u);
     unsigned queueIndex = WTF::fastLog2(size / accessCount);
     if (m_allResources.size() <= queueIndex)
         m_allResources.grow(queueIndex + 1);
@@ -409,7 +414,7 @@ MemoryCacheLRUList* MemoryCache::lruListFor(unsigned accessCount, size_t size)
 
 void MemoryCache::removeFromLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList* list)
 {
-    ASSERT(containedInLRUList(entry, list));
+    DCHECK(containedInLRUList(entry, list));
 
     MemoryCacheEntry* next = entry->m_nextInAllResourcesList;
     MemoryCacheEntry* previous = entry->m_previousInAllResourcesList;
@@ -426,12 +431,12 @@ void MemoryCache::removeFromLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList*
     else
         list->m_head = next;
 
-    ASSERT(!containedInLRUList(entry, list));
+    DCHECK(!containedInLRUList(entry, list));
 }
 
 void MemoryCache::insertInLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList* list)
 {
-    ASSERT(!containedInLRUList(entry, list));
+    DCHECK(!containedInLRUList(entry, list));
 
     entry->m_nextInAllResourcesList = list->m_head;
     list->m_head = entry;
@@ -441,7 +446,7 @@ void MemoryCache::insertInLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList* l
     else
         list->m_tail = entry;
 
-    ASSERT(containedInLRUList(entry, list));
+    DCHECK(containedInLRUList(entry, list));
 }
 
 bool MemoryCache::containedInLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList* list)
@@ -450,7 +455,8 @@ bool MemoryCache::containedInLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList
         if (current == entry)
             return true;
     }
-    ASSERT(!entry->m_nextInAllResourcesList && !entry->m_previousInAllResourcesList);
+    DCHECK(!entry->m_nextInAllResourcesList);
+    DCHECK(!entry->m_previousInAllResourcesList);
     return false;
 }
 
@@ -459,7 +465,7 @@ void MemoryCache::removeFromLiveDecodedResourcesList(MemoryCacheEntry* entry)
     // If we've never been accessed, then we're brand new and not in any list.
     if (!entry->m_inLiveDecodedResourcesList)
         return;
-    ASSERT(containedInLiveDecodedResourcesList(entry));
+    DCHECK(containedInLiveDecodedResourcesList(entry));
 
     entry->m_inLiveDecodedResourcesList = false;
 
@@ -479,12 +485,12 @@ void MemoryCache::removeFromLiveDecodedResourcesList(MemoryCacheEntry* entry)
     else
         m_liveDecodedResources.m_head = next;
 
-    ASSERT(!containedInLiveDecodedResourcesList(entry));
+    DCHECK(!containedInLiveDecodedResourcesList(entry));
 }
 
 void MemoryCache::insertInLiveDecodedResourcesList(MemoryCacheEntry* entry)
 {
-    ASSERT(!containedInLiveDecodedResourcesList(entry));
+    DCHECK(!containedInLiveDecodedResourcesList(entry));
 
     entry->m_inLiveDecodedResourcesList = true;
 
@@ -496,18 +502,20 @@ void MemoryCache::insertInLiveDecodedResourcesList(MemoryCacheEntry* entry)
     if (!entry->m_nextInLiveResourcesList)
         m_liveDecodedResources.m_tail = entry;
 
-    ASSERT(containedInLiveDecodedResourcesList(entry));
+    DCHECK(containedInLiveDecodedResourcesList(entry));
 }
 
 bool MemoryCache::containedInLiveDecodedResourcesList(MemoryCacheEntry* entry)
 {
     for (MemoryCacheEntry* current = m_liveDecodedResources.m_head; current; current = current->m_nextInLiveResourcesList) {
         if (current == entry) {
-            ASSERT(entry->m_inLiveDecodedResourcesList);
+            DCHECK(entry->m_inLiveDecodedResourcesList);
             return true;
         }
     }
-    ASSERT(!entry->m_nextInLiveResourcesList && !entry->m_previousInLiveResourcesList && !entry->m_inLiveDecodedResourcesList);
+    DCHECK(!entry->m_nextInLiveResourcesList);
+    DCHECK(!entry->m_previousInLiveResourcesList);
+    DCHECK(!entry->m_inLiveDecodedResourcesList);
     return false;
 }
 
@@ -515,7 +523,7 @@ void MemoryCache::makeLive(Resource* resource)
 {
     if (!contains(resource))
         return;
-    ASSERT(m_deadSize >= resource->size());
+    DCHECK_GE(m_deadSize, resource->size());
     m_liveSize += resource->size();
     m_deadSize -= resource->size();
 }
@@ -545,11 +553,11 @@ void MemoryCache::update(Resource* resource, size_t oldSize, size_t newSize, boo
         insertInLRUList(entry, lruListFor(entry->m_accessCount, newSize));
 
     ptrdiff_t delta = newSize - oldSize;
-    if (resource->hasClientsOrObservers()) {
-        ASSERT(delta >= 0 || m_liveSize >= static_cast<size_t>(-delta) );
+    if (resource->isAlive()) {
+        DCHECK(delta >= 0 || m_liveSize >= static_cast<size_t>(-delta) );
         m_liveSize += delta;
     } else {
-        ASSERT(delta >= 0 || m_deadSize >= static_cast<size_t>(-delta) );
+        DCHECK(delta >= 0 || m_deadSize >= static_cast<size_t>(-delta) );
         m_deadSize += delta;
     }
 }
@@ -561,7 +569,7 @@ void MemoryCache::updateDecodedResource(Resource* resource, UpdateReason reason)
         return;
 
     removeFromLiveDecodedResourcesList(entry);
-    if (resource->decodedSize() && resource->hasClientsOrObservers())
+    if (resource->decodedSize() && resource->isAlive())
         insertInLiveDecodedResourcesList(entry);
 
     if (reason != UpdateForAccess)
@@ -582,15 +590,13 @@ void MemoryCache::removeURLFromCache(const KURL& url)
 
 void MemoryCache::TypeStatistic::addResource(Resource* o)
 {
-    bool purgeable = o->isPurgeable();
-    size_t pageSize = (o->encodedSize() + o->overheadSize() + 4095) & ~4095;
     count++;
     size += o->size();
-    liveSize += o->hasClientsOrObservers() ? o->size() : 0;
+    liveSize += o->isAlive() ? o->size() : 0;
     decodedSize += o->decodedSize();
     encodedSize += o->encodedSize();
+    overheadSize += o->overheadSize();
     encodedSizeDuplicatedInDataURLs += o->url().protocolIsData() ? o->encodedSize() : 0;
-    purgeableSize += purgeable ? pageSize : 0;
 }
 
 MemoryCache::Statistics MemoryCache::getStatistics()
@@ -598,7 +604,8 @@ MemoryCache::Statistics MemoryCache::getStatistics()
     Statistics stats;
     for (const auto& resourceMapIter : m_resourceMaps) {
         for (const auto& resourceIter : *resourceMapIter.value) {
-            Resource* resource = resourceIter.value->m_resource.get();
+            Resource* resource = resourceIter.value->resource();
+            DCHECK(resource);
             switch (resource->getType()) {
             case Resource::Image:
                 stats.images.addResource(resource);
@@ -695,7 +702,7 @@ void MemoryCache::willProcessTask()
 void MemoryCache::didProcessTask()
 {
     // Perform deferred pruning
-    ASSERT(m_prunePending);
+    DCHECK(m_prunePending);
     pruneNow(WTF::currentTime(), AutomaticPrune);
 }
 
@@ -712,7 +719,7 @@ void MemoryCache::pruneNow(double currentTime, PruneStrategy strategy)
         Platform::current()->currentThread()->removeTaskObserver(this);
     }
 
-    TemporaryChange<bool> reentrancyProtector(m_inPruneResources, true);
+    AutoReset<bool> reentrancyProtector(&m_inPruneResources, true);
     pruneDeadResources(strategy); // Prune dead first, in case it was "borrowing" capacity from live.
     pruneLiveResources(strategy);
     m_pruneFrameTimeStamp = m_lastFramePaintTimeStamp;
@@ -724,67 +731,46 @@ void MemoryCache::updateFramePaintTimestamp()
     m_lastFramePaintTimeStamp = currentTime();
 }
 
-void MemoryCache::onMemoryDump(WebMemoryDumpLevelOfDetail levelOfDetail, WebProcessMemoryDump* memoryDump)
+bool MemoryCache::onMemoryDump(WebMemoryDumpLevelOfDetail levelOfDetail, WebProcessMemoryDump* memoryDump)
 {
+    if (levelOfDetail == WebMemoryDumpLevelOfDetail::Background) {
+        Statistics stats = getStatistics();
+        WebMemoryAllocatorDump* dump1 = memoryDump->createMemoryAllocatorDump("web_cache/Image_resources");
+        dump1->addScalar("size", "bytes", stats.images.encodedSize + stats.images.overheadSize);
+        WebMemoryAllocatorDump* dump2 = memoryDump->createMemoryAllocatorDump("web_cache/CSS stylesheet_resources");
+        dump2->addScalar("size", "bytes", stats.cssStyleSheets.encodedSize + stats.cssStyleSheets.overheadSize);
+        WebMemoryAllocatorDump* dump3 = memoryDump->createMemoryAllocatorDump("web_cache/Script_resources");
+        dump3->addScalar("size", "bytes", stats.scripts.encodedSize + stats.scripts.overheadSize);
+        WebMemoryAllocatorDump* dump4 = memoryDump->createMemoryAllocatorDump("web_cache/XSL stylesheet_resources");
+        dump4->addScalar("size", "bytes", stats.xslStyleSheets.encodedSize + stats.xslStyleSheets.overheadSize);
+        WebMemoryAllocatorDump* dump5 = memoryDump->createMemoryAllocatorDump("web_cache/Font_resources");
+        dump5->addScalar("size", "bytes", stats.fonts.encodedSize + stats.fonts.overheadSize);
+        WebMemoryAllocatorDump* dump6 = memoryDump->createMemoryAllocatorDump("web_cache/Other_resources");
+        dump6->addScalar("size", "bytes", stats.other.encodedSize + stats.other.overheadSize);
+        return true;
+    }
+
     for (const auto& resourceMapIter : m_resourceMaps) {
         for (const auto& resourceIter : *resourceMapIter.value) {
-            Resource* resource = resourceIter.value->m_resource.get();
+            Resource* resource = resourceIter.value->resource();
             resource->onMemoryDump(levelOfDetail, memoryDump);
         }
     }
+    return true;
+}
+
+void MemoryCache::onMemoryPressure(WebMemoryPressureLevel level)
+{
+    pruneAll();
 }
 
 bool MemoryCache::isInSameLRUListForTest(const Resource* x, const Resource* y)
 {
     MemoryCacheEntry* ex = getEntryForResource(x);
     MemoryCacheEntry* ey = getEntryForResource(y);
-    ASSERT(ex);
-    ASSERT(ey);
+    DCHECK(ex);
+    DCHECK(ey);
     return lruListFor(ex->m_accessCount, x->size()) == lruListFor(ey->m_accessCount, y->size());
 }
-
-#ifdef MEMORY_CACHE_STATS
-
-void MemoryCache::dumpStats(Timer<MemoryCache>*)
-{
-    Statistics s = getStatistics();
-    printf("%-13s %-13s %-13s %-13s %-13s %-13s %-13s\n", "", "Count", "Size", "LiveSize", "DecodedSize", "PurgeableSize", "PurgedSize");
-    printf("%-13s %-13s %-13s %-13s %-13s %-13s %-13s\n", "-------------", "-------------", "-------------", "-------------", "-------------", "-------------", "-------------");
-    printf("%-13s %13d %13d %13d %13d %13d %13d\n", "Images", s.images.count, s.images.size, s.images.liveSize, s.images.decodedSize, s.images.purgeableSize, s.images.purgedSize);
-    printf("%-13s %13d %13d %13d %13d %13d %13d\n", "CSS", s.cssStyleSheets.count, s.cssStyleSheets.size, s.cssStyleSheets.liveSize, s.cssStyleSheets.decodedSize, s.cssStyleSheets.purgeableSize, s.cssStyleSheets.purgedSize);
-    printf("%-13s %13d %13d %13d %13d %13d %13d\n", "XSL", s.xslStyleSheets.count, s.xslStyleSheets.size, s.xslStyleSheets.liveSize, s.xslStyleSheets.decodedSize, s.xslStyleSheets.purgeableSize, s.xslStyleSheets.purgedSize);
-    printf("%-13s %13d %13d %13d %13d %13d %13d\n", "JavaScript", s.scripts.count, s.scripts.size, s.scripts.liveSize, s.scripts.decodedSize, s.scripts.purgeableSize, s.scripts.purgedSize);
-    printf("%-13s %13d %13d %13d %13d %13d %13d\n", "Fonts", s.fonts.count, s.fonts.size, s.fonts.liveSize, s.fonts.decodedSize, s.fonts.purgeableSize, s.fonts.purgedSize);
-    printf("%-13s %13d %13d %13d %13d %13d %13d\n", "Other", s.other.count, s.other.size, s.other.liveSize, s.other.decodedSize, s.other.purgeableSize, s.other.purgedSize);
-    printf("%-13s %-13s %-13s %-13s %-13s %-13s %-13s\n\n", "-------------", "-------------", "-------------", "-------------", "-------------", "-------------", "-------------");
-
-    printf("Duplication of encoded data from data URLs\n");
-    printf("%-13s %13d of %13d\n", "Images",     s.images.encodedSizeDuplicatedInDataURLs,         s.images.encodedSize);
-    printf("%-13s %13d of %13d\n", "CSS",        s.cssStyleSheets.encodedSizeDuplicatedInDataURLs, s.cssStyleSheets.encodedSize);
-    printf("%-13s %13d of %13d\n", "XSL",        s.xslStyleSheets.encodedSizeDuplicatedInDataURLs, s.xslStyleSheets.encodedSize);
-    printf("%-13s %13d of %13d\n", "JavaScript", s.scripts.encodedSizeDuplicatedInDataURLs,        s.scripts.encodedSize);
-    printf("%-13s %13d of %13d\n", "Fonts",      s.fonts.encodedSizeDuplicatedInDataURLs,          s.fonts.encodedSize);
-    printf("%-13s %13d of %13d\n", "Other",      s.other.encodedSizeDuplicatedInDataURLs,          s.other.encodedSize);
-}
-
-void MemoryCache::dumpLRULists(bool includeLive) const
-{
-    printf("LRU-SP lists in eviction order (Kilobytes decoded, Kilobytes encoded, Access count, Referenced, isPurgeable):\n");
-
-    int size = m_allResources.size();
-    for (int i = size - 1; i >= 0; i--) {
-        printf("\n\nList %d: ", i);
-        MemoryCacheEntry* current = m_allResources[i].m_tail;
-        while (current) {
-            Resource* currentResource = current->m_resource;
-            if (includeLive || !currentResource->hasClientsOrObservers())
-                printf("(%.1fK, %.1fK, %uA, %dR, %d); ", currentResource->decodedSize() / 1024.0f, (currentResource->encodedSize() + currentResource->overheadSize()) / 1024.0f, current->m_accessCount, currentResource->hasClientsOrObservers(), currentResource->isPurgeable());
-
-            current = current->m_previousInAllResourcesList;
-        }
-    }
-}
-
-#endif // MEMORY_CACHE_STATS
 
 } // namespace blink

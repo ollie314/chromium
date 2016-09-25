@@ -86,13 +86,10 @@ size_t LocalSharedObjectsContainer::GetObjectCountForDomain(
   for (OriginCookieSetMap::const_iterator it = origin_cookies_set_map.begin();
        it != origin_cookies_set_map.end();
        ++it) {
-    const canonical_cookie::CookieHashSet* cookie_list = it->second;
-    for (canonical_cookie::CookieHashSet::const_iterator cookie =
-             cookie_list->begin();
-         cookie != cookie_list->end();
-         ++cookie) {
+    const canonical_cookie::CookieHashSet* cookie_list = it->second.get();
+    for (const auto& cookie : *cookie_list) {
       // Strip leading '.'s.
-      std::string cookie_domain = cookie->Domain();
+      std::string cookie_domain = cookie.Domain();
       if (cookie_domain[0] == '.')
         cookie_domain = cookie_domain.substr(1);
       // The |domain_url| is only created in order to use the
@@ -221,8 +218,8 @@ std::unique_ptr<CookiesTreeModel>
 LocalSharedObjectsContainer::CreateCookiesTreeModel() const {
   LocalDataContainer* container = new LocalDataContainer(
       cookies(), databases(), local_storages(), session_storages(), appcaches(),
-      indexed_dbs(), file_systems(), NULL, channel_ids(), service_workers(),
-      cache_storages(), NULL);
+      indexed_dbs(), file_systems(), nullptr, channel_ids(), service_workers(),
+      cache_storages(), nullptr);
 
-  return base::WrapUnique(new CookiesTreeModel(container, NULL, true));
+  return base::MakeUnique<CookiesTreeModel>(container, nullptr);
 }

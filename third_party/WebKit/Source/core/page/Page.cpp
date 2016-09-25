@@ -19,15 +19,15 @@
 
 #include "core/page/Page.h"
 
+#include "bindings/core/v8/ScriptController.h"
 #include "core/css/resolver/ViewportStyleResolver.h"
 #include "core/dom/ClientRectList.h"
 #include "core/dom/StyleChangeReason.h"
+#include "core/dom/StyleEngine.h"
 #include "core/dom/VisitedLinkState.h"
 #include "core/editing/DragCaretController.h"
-#include "core/editing/commands/UndoStack.h"
 #include "core/editing/markers/DocumentMarkerController.h"
 #include "core/events/Event.h"
-#include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/frame/DOMTimer.h"
 #include "core/frame/FrameConsole.h"
@@ -36,9 +36,10 @@
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/RemoteFrameView.h"
 #include "core/frame/Settings.h"
+#include "core/frame/VisualViewport.h"
 #include "core/html/HTMLMediaElement.h"
+#include "core/inspector/ConsoleMessageStorage.h"
 #include "core/inspector/InspectorInstrumentation.h"
-#include "core/layout/LayoutView.h"
 #include "core/layout/TextAutosizer.h"
 #include "core/page/AutoscrollController.h"
 #include "core/page/ChromeClient.h"
@@ -46,12 +47,12 @@
 #include "core/page/DragController.h"
 #include "core/page/FocusController.h"
 #include "core/page/PointerLockController.h"
+#include "core/page/ScopedPageLoadDeferrer.h"
 #include "core/page/ValidationMessageClient.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 #include "core/paint/PaintLayer.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/plugins/PluginData.h"
-#include "platform/text/CompressibleString.h"
 #include "public/platform/Platform.h"
 
 namespace blink {
@@ -90,12 +91,6 @@ void Page::networkStateChanged(bool online)
     }
 }
 
-void Page::onMemoryPressure()
-{
-    for (Page* page : ordinaryPages())
-        page->memoryPurgeController().purgeMemory();
-}
-
 float deviceScaleFactor(LocalFrame* frame)
 {
     if (!frame)
@@ -110,7 +105,8 @@ Page* Page::createOrdinary(PageClients& pageClients)
 {
     Page* page = create(pageClients);
     ordinaryPages().add(page);
-    page->memoryPurgeController().registerClient(page);
+    if (ScopedPageLoadDeferrer::isActive())
+        page->setDefersLoading(true);
     return page;
 }
 
@@ -124,10 +120,10 @@ Page::Page(PageClients& pageClients)
     , m_focusController(FocusController::create(this))
     , m_contextMenuController(ContextMenuController::create(this, pageClients.contextMenuClient))
     , m_pointerLockController(PointerLockController::create(this))
-    , m_undoStack(UndoStack::create())
     , m_mainFrame(nullptr)
     , m_editorClient(pageClients.editorClient)
     , m_spellCheckerClient(pageClients.spellCheckerClient)
+    , m_useCounter(pageClients.chromeClient && pageClients.chromeClient->isSVGImageChromeClient() ? UseCounter::SVGImageContext : UseCounter::DefaultContext)
     , m_openedByDOM(false)
     , m_tabKeyCyclesThroughElements(true)
     , m_defersLoading(false)
@@ -138,7 +134,6 @@ Page::Page(PageClients& pageClients)
     , m_isPainting(false)
 #endif
     , m_frameHost(FrameHost::create(*this))
-    , m_timerForCompressStrings(this, &Page::compressStrings)
 {
     ASSERT(m_editorClient);
 
@@ -163,14 +158,6 @@ ScrollingCoordinator* Page::scrollingCoordinator()
         m_scrollingCoordinator = ScrollingCoordinator::create(this);
 
     return m_scrollingCoordinator.get();
-}
-
-MemoryPurgeController& Page::memoryPurgeController()
-{
-    if (!m_memoryPurgeController)
-        m_memoryPurgeController = MemoryPurgeController::create();
-
-    return *m_memoryPurgeController;
 }
 
 String Page::mainThreadScrollingReasonsAsText()
@@ -212,7 +199,7 @@ void Page::documentDetached(Document* document)
     m_contextMenuController->documentDetached(document);
     if (m_validationMessageClient)
         m_validationMessageClient->documentDetached(*document);
-    m_originsUsingFeatures.documentDetached(*document);
+    m_hostsUsingFeatures.documentDetached(*document);
 }
 
 bool Page::openedByDOM() const
@@ -244,10 +231,7 @@ void Page::setNeedsRecalcStyleInAllFrames()
 
 void Page::refreshPlugins()
 {
-    if (allPages().isEmpty())
-        return;
-
-    PluginData::refresh();
+    PluginData::refreshBrowserSidePluginCache();
 
     for (const Page* page : allPages()) {
         // Clear out the page's plugin data.
@@ -256,27 +240,11 @@ void Page::refreshPlugins()
     }
 }
 
-PluginData* Page::pluginData() const
+PluginData* Page::pluginData(SecurityOrigin* mainFrameOrigin) const
 {
-    if (!mainFrame()->isLocalFrame()
-        || !deprecatedLocalMainFrame()->loader().allowPlugins(NotAboutToInstantiatePlugin))
-        return nullptr;
-    if (!m_pluginData)
-        m_pluginData = PluginData::create(this);
+    if (!m_pluginData || !mainFrameOrigin->isSameSchemeHostPort(m_pluginData->origin()))
+        m_pluginData = PluginData::create(mainFrameOrigin);
     return m_pluginData.get();
-}
-
-void Page::unmarkAllTextMatches()
-{
-    if (!mainFrame())
-        return;
-
-    Frame* frame = mainFrame();
-    do {
-        if (frame->isLocalFrame())
-            toLocalFrame(frame)->document()->markers().removeMarkers(DocumentMarker::TextMatch);
-        frame = frame->tree().traverseNextWithWrap(false);
-    } while (frame);
 }
 
 void Page::setValidationMessageClient(ValidationMessageClient* client)
@@ -317,16 +285,6 @@ void Page::setDeviceScaleFactor(float scaleFactor)
         deprecatedLocalMainFrame()->deviceScaleFactorChanged();
 }
 
-void Page::setDeviceColorProfile(const Vector<char>& profile)
-{
-    // FIXME: implement.
-}
-
-void Page::resetDeviceColorProfileForTesting()
-{
-    RuntimeEnabledFeatures::setImageColorProfilesEnabled(false);
-}
-
 void Page::allVisitedStateChanged(bool invalidateVisitedLinkHashes)
 {
     for (const Page* page : ordinaryPages()) {
@@ -349,8 +307,6 @@ void Page::visitedStateChanged(LinkHash linkHash)
 
 void Page::setVisibilityState(PageVisibilityState visibilityState, bool isInitialState)
 {
-    static const double waitingTimeBeforeCompressingString = 10;
-
     if (m_visibilityState == visibilityState)
         return;
     m_visibilityState = visibilityState;
@@ -358,17 +314,8 @@ void Page::setVisibilityState(PageVisibilityState visibilityState, bool isInitia
     if (!isInitialState)
         notifyPageVisibilityChanged();
 
-    if (!isInitialState && m_mainFrame && m_mainFrame->isLocalFrame())
-        deprecatedLocalMainFrame()->didChangeVisibilityState();
-
-    // Compress CompressibleStrings when 10 seconds have passed since the page
-    // went to background.
-    if (m_visibilityState == PageVisibilityStateHidden) {
-        if (!m_timerForCompressStrings.isActive())
-            m_timerForCompressStrings.startOneShot(waitingTimeBeforeCompressingString, BLINK_FROM_HERE);
-    } else if (m_timerForCompressStrings.isActive()) {
-        m_timerForCompressStrings.stop();
-    }
+    if (!isInitialState && m_mainFrame)
+        m_mainFrame->didChangeVisibilityState();
 }
 
 PageVisibilityState Page::visibilityState() const
@@ -393,8 +340,12 @@ void Page::settingsChanged(SettingsDelegate::ChangeType changeType)
         setNeedsRecalcStyleInAllFrames();
         break;
     case SettingsDelegate::ViewportDescriptionChange:
-        if (mainFrame() && mainFrame()->isLocalFrame())
+        if (mainFrame() && mainFrame()->isLocalFrame()) {
             deprecatedLocalMainFrame()->document()->updateViewportDescription();
+            // The text autosizer has dependencies on the viewport.
+            if (TextAutosizer* textAutosizer = deprecatedLocalMainFrame()->document()->textAutosizer())
+                textAutosizer->updatePageInfoInAllFrames();
+        }
         break;
     case SettingsDelegate::DNSPrefetchingChange:
         for (Frame* frame = mainFrame(); frame; frame = frame->tree().traverseNext()) {
@@ -455,6 +406,20 @@ void Page::settingsChanged(SettingsDelegate::ChangeType changeType)
             }
         }
         break;
+    case SettingsDelegate::DOMWorldsChange:
+        {
+            if (!settings().forceMainWorldInitialization())
+                break;
+            if (!mainFrame() || !mainFrame()->isLocalFrame())
+                break;
+            if (!toLocalFrame(mainFrame())->loader().stateMachine()->committedFirstRealDocumentLoad())
+                break;
+            for (Frame* frame = mainFrame(); frame; frame = frame->tree().traverseNext()) {
+                if (frame->isLocalFrame())
+                    toLocalFrame(frame)->script().initializeMainWorld();
+            }
+        }
+        break;
     }
 }
 
@@ -470,13 +435,19 @@ void Page::updateAcceleratedCompositingSettings()
 
 void Page::didCommitLoad(LocalFrame* frame)
 {
-    notifyDidCommitLoad(frame);
     if (m_mainFrame == frame) {
-        frame->console().clearMessages();
+        // TODO(rbyers): Most of this doesn't appear to take into account that each
+        // SVGImage gets it's own Page instance.
+        frameHost().consoleMessageStorage().clear();
         useCounter().didCommitLoad();
         deprecation().clearSuppression();
         frameHost().visualViewport().sendUMAMetrics();
-        m_originsUsingFeatures.updateMeasurementsAndClear();
+
+        // Need to reset visual viewport position here since before commit load we would update the previous history item,
+        // Page::didCommitLoad is called after a new history item is created in FrameLoader.
+        // fix for crbug.com/642279
+        frameHost().visualViewport().setScrollPosition(DoublePoint(), ProgrammaticScroll);
+        m_hostsUsingFeatures.updateMeasurementsAndClear();
         UserGestureIndicator::clearProcessedUserGestureSinceLoad();
     }
 }
@@ -496,12 +467,6 @@ void Page::acceptLanguagesChanged()
         frames[i]->localDOMWindow()->acceptLanguagesChanged();
 }
 
-void Page::purgeMemory(DeviceKind deviceKind)
-{
-    if (deviceKind == DeviceKind::LowEnd)
-        memoryCache()->pruneAll();
-}
-
 DEFINE_TRACE(Page)
 {
     visitor->trace(m_animator);
@@ -513,14 +478,11 @@ DEFINE_TRACE(Page)
     visitor->trace(m_contextMenuController);
     visitor->trace(m_pointerLockController);
     visitor->trace(m_scrollingCoordinator);
-    visitor->trace(m_undoStack);
     visitor->trace(m_mainFrame);
     visitor->trace(m_validationMessageClient);
     visitor->trace(m_frameHost);
-    visitor->trace(m_memoryPurgeController);
     Supplementable<Page>::trace(visitor);
-    PageLifecycleNotifier::trace(visitor);
-    MemoryPurgeClient::trace(visitor);
+    PageVisibilityNotifier::trace(visitor);
 }
 
 void Page::layerTreeViewInitialized(WebLayerTreeView& layerTreeView)
@@ -558,14 +520,7 @@ void Page::willBeDestroyed()
         m_validationMessageClient->willBeDestroyed();
     m_mainFrame = nullptr;
 
-    PageLifecycleNotifier::notifyContextDestroyed();
-}
-
-void Page::compressStrings(Timer<Page>* timer)
-{
-    ASSERT_UNUSED(timer, timer == &m_timerForCompressStrings);
-    if (m_visibilityState == PageVisibilityStateHidden)
-        CompressibleStringImpl::compressAll();
+    PageVisibilityNotifier::notifyContextDestroyed();
 }
 
 Page::PageClients::PageClients()

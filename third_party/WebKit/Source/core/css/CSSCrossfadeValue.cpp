@@ -60,7 +60,7 @@ static bool subimageKnownToBeOpaque(CSSValue* value, const LayoutObject& layoutO
     return false;
 }
 
-static ImageResource* cachedImageForCSSValue(CSSValue* value, Document* document)
+static ImageResource* cachedImageForCSSValue(CSSValue* value, const Document& document)
 {
     if (!value)
         return nullptr;
@@ -86,7 +86,7 @@ static ImageResource* cachedImageForCSSValue(CSSValue* value, Document* document
 
 static Image* renderableImageForCSSValue(CSSValue* value, const LayoutObject& layoutObject)
 {
-    ImageResource* cachedImage = cachedImageForCSSValue(value, &layoutObject.document());
+    ImageResource* cachedImage = cachedImageForCSSValue(value, layoutObject.document());
 
     if (!cachedImage || cachedImage->errorOccurred() || cachedImage->getImage()->isNull())
         return nullptr;
@@ -133,11 +133,11 @@ void CSSCrossfadeValue::dispose()
 String CSSCrossfadeValue::customCSSText() const
 {
     StringBuilder result;
-    result.appendLiteral("-webkit-cross-fade(");
+    result.append("-webkit-cross-fade(");
     result.append(m_fromValue->cssText());
-    result.appendLiteral(", ");
+    result.append(", ");
     result.append(m_toValue->cssText());
-    result.appendLiteral(", ");
+    result.append(", ");
     result.append(m_percentageValue->cssText());
     result.append(')');
     return result.toString();
@@ -193,7 +193,7 @@ bool CSSCrossfadeValue::knownToBeOpaque(const LayoutObject& layoutObject) const
     return subimageKnownToBeOpaque(m_fromValue.get(), layoutObject) && subimageKnownToBeOpaque(m_toValue.get(), layoutObject);
 }
 
-void CSSCrossfadeValue::loadSubimages(Document* document)
+void CSSCrossfadeValue::loadSubimages(const Document& document)
 {
     ImageResource* oldCachedFromImage = m_cachedFromImage;
     ImageResource* oldCachedToImage = m_cachedToImage;
@@ -249,10 +249,26 @@ void CSSCrossfadeValue::crossfadeChanged(const IntRect&)
     }
 }
 
+bool CSSCrossfadeValue::willRenderImage() const
+{
+    for (const auto& curr : clients()) {
+        if (const_cast<LayoutObject*>(curr.key)->willRenderImage())
+            return true;
+    }
+    return false;
+}
+
 void CSSCrossfadeValue::CrossfadeSubimageObserverProxy::imageChanged(ImageResource*, const IntRect* rect)
 {
     if (m_ready)
         m_ownerValue->crossfadeChanged(*rect);
+}
+
+bool CSSCrossfadeValue::CrossfadeSubimageObserverProxy::willRenderImage()
+{
+    // If the images are not ready/loaded we won't paint them. If the images
+    // are ready then ask the clients.
+    return m_ready && m_ownerValue->willRenderImage();
 }
 
 bool CSSCrossfadeValue::hasFailedOrCanceledSubresources() const

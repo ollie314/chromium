@@ -31,13 +31,12 @@
 #include "components/undo/bookmark_undo_service.h"
 #include "components/undo/undo_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "grit/components_strings.h"
 #include "jni/BookmarkBridge_jni.h"
-#include "ui/base/l10n/l10n_util.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertUTF16ToJavaString;
+using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ToJavaIntArray;
@@ -100,7 +99,7 @@ BookmarkBridge::BookmarkBridge(JNIEnv* env, jobject obj, jobject j_profile)
       partner_bookmarks_shim_(NULL) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   profile_ = ProfileAndroid::FromProfileAndroid(j_profile);
-  bookmark_model_ = BookmarkModelFactory::GetForProfile(profile_);
+  bookmark_model_ = BookmarkModelFactory::GetForBrowserContext(profile_);
   managed_bookmark_service_ =
       ManagedBookmarkServiceFactory::GetForProfile(profile_);
 
@@ -580,8 +579,8 @@ void BookmarkBridge::GetBookmarksForFolder(
   }
 
   if (j_callback_obj) {
-    Java_BookmarksCallback_onBookmarksAvailable(
-        env, j_callback_obj, folder_id_obj.obj(), j_result_obj);
+    Java_BookmarksCallback_onBookmarksAvailable(env, j_callback_obj,
+                                                folder_id_obj, j_result_obj);
   }
 }
 
@@ -630,7 +629,7 @@ void BookmarkBridge::GetCurrentFolderHierarchy(
   }
 
   Java_BookmarksCallback_onBookmarksFolderHierarchyAvailable(
-      env, j_callback_obj, folder_id_obj.obj(), j_result_obj);
+      env, j_callback_obj, folder_id_obj, j_result_obj);
 }
 
 void BookmarkBridge::SearchBookmarks(JNIEnv* env,
@@ -665,10 +664,10 @@ void BookmarkBridge::SearchBookmarks(JNIEnv* env,
 
     Java_BookmarkBridge_addToBookmarkMatchList(
         env, j_list, node->id(), node->type(),
-        ToJavaIntArray(env, title_match_start_positions).obj(),
-        ToJavaIntArray(env, title_match_end_positions).obj(),
-        ToJavaIntArray(env, url_match_start_positions).obj(),
-        ToJavaIntArray(env, url_match_end_positions).obj());
+        ToJavaIntArray(env, title_match_start_positions),
+        ToJavaIntArray(env, title_match_end_positions),
+        ToJavaIntArray(env, url_match_start_positions),
+        ToJavaIntArray(env, url_match_end_positions));
   }
 }
 
@@ -818,16 +817,10 @@ ScopedJavaLocalRef<jobject> BookmarkBridge::CreateJavaBookmark(
     url = node->url().spec();
 
   return Java_BookmarkBridge_createBookmarkItem(
-      env,
-      node->id(),
-      GetBookmarkType(node),
-      ConvertUTF16ToJavaString(env, GetTitle(node)).obj(),
-      ConvertUTF8ToJavaString(env, url).obj(),
-      node->is_folder(),
-      parent_id,
-      GetBookmarkType(parent),
-      IsEditable(node),
-      IsManaged(node));
+      env, node->id(), GetBookmarkType(node),
+      ConvertUTF16ToJavaString(env, GetTitle(node)),
+      ConvertUTF8ToJavaString(env, url), node->is_folder(), parent_id,
+      GetBookmarkType(parent), IsEditable(node), IsManaged(node));
 }
 
 void BookmarkBridge::ExtractBookmarkNodeInformation(const BookmarkNode* node,
@@ -835,8 +828,7 @@ void BookmarkBridge::ExtractBookmarkNodeInformation(const BookmarkNode* node,
   JNIEnv* env = AttachCurrentThread();
   if (!IsReachable(node))
     return;
-  Java_BookmarkBridge_addToList(
-      env, j_result_obj, CreateJavaBookmark(node).obj());
+  Java_BookmarkBridge_addToList(env, j_result_obj, CreateJavaBookmark(node));
 }
 
 const BookmarkNode* BookmarkBridge::GetNodeByID(long node_id, int type) {
@@ -873,7 +865,7 @@ void BookmarkBridge::EditBookmarksEnabledChanged() {
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_editBookmarksEnabledChanged(env, obj.obj());
+  Java_BookmarkBridge_editBookmarksEnabledChanged(env, obj);
 }
 
 bool BookmarkBridge::IsEditable(const BookmarkNode* node) const {
@@ -944,7 +936,7 @@ void BookmarkBridge::NotifyIfDoneLoading() {
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_bookmarkModelLoaded(env, obj.obj());
+  Java_BookmarkBridge_bookmarkModelLoaded(env, obj);
 }
 
 // ------------- Observer-related methods ------------- //
@@ -959,7 +951,7 @@ void BookmarkBridge::BookmarkModelChanged() {
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_bookmarkModelChanged(env, obj.obj());
+  Java_BookmarkBridge_bookmarkModelChanged(env, obj);
 }
 
 void BookmarkBridge::BookmarkModelLoaded(BookmarkModel* model,
@@ -975,7 +967,7 @@ void BookmarkBridge::BookmarkModelBeingDeleted(BookmarkModel* model) {
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_bookmarkModelDeleted(env, obj.obj());
+  Java_BookmarkBridge_bookmarkModelDeleted(env, obj);
 }
 
 void BookmarkBridge::BookmarkNodeMoved(BookmarkModel* model,
@@ -991,12 +983,8 @@ void BookmarkBridge::BookmarkNodeMoved(BookmarkModel* model,
   if (obj.is_null())
     return;
   Java_BookmarkBridge_bookmarkNodeMoved(
-      env,
-      obj.obj(),
-      CreateJavaBookmark(old_parent).obj(),
-      old_index,
-      CreateJavaBookmark(new_parent).obj(),
-      new_index);
+      env, obj, CreateJavaBookmark(old_parent), old_index,
+      CreateJavaBookmark(new_parent), new_index);
 }
 
 void BookmarkBridge::BookmarkNodeAdded(BookmarkModel* model,
@@ -1009,11 +997,8 @@ void BookmarkBridge::BookmarkNodeAdded(BookmarkModel* model,
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_bookmarkNodeAdded(
-      env,
-      obj.obj(),
-      CreateJavaBookmark(parent).obj(),
-      index);
+  Java_BookmarkBridge_bookmarkNodeAdded(env, obj, CreateJavaBookmark(parent),
+                                        index);
 }
 
 void BookmarkBridge::BookmarkNodeRemoved(BookmarkModel* model,
@@ -1028,12 +1013,8 @@ void BookmarkBridge::BookmarkNodeRemoved(BookmarkModel* model,
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_bookmarkNodeRemoved(
-      env,
-      obj.obj(),
-      CreateJavaBookmark(parent).obj(),
-      old_index,
-      CreateJavaBookmark(node).obj());
+  Java_BookmarkBridge_bookmarkNodeRemoved(env, obj, CreateJavaBookmark(parent),
+                                          old_index, CreateJavaBookmark(node));
 }
 
 void BookmarkBridge::BookmarkAllUserNodesRemoved(
@@ -1046,7 +1027,7 @@ void BookmarkBridge::BookmarkAllUserNodesRemoved(
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_bookmarkAllUserNodesRemoved(env, obj.obj());
+  Java_BookmarkBridge_bookmarkAllUserNodesRemoved(env, obj);
 }
 
 void BookmarkBridge::BookmarkNodeChanged(BookmarkModel* model,
@@ -1058,10 +1039,7 @@ void BookmarkBridge::BookmarkNodeChanged(BookmarkModel* model,
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_bookmarkNodeChanged(
-      env,
-      obj.obj(),
-      CreateJavaBookmark(node).obj());
+  Java_BookmarkBridge_bookmarkNodeChanged(env, obj, CreateJavaBookmark(node));
 }
 
 void BookmarkBridge::BookmarkNodeChildrenReordered(BookmarkModel* model,
@@ -1073,10 +1051,8 @@ void BookmarkBridge::BookmarkNodeChildrenReordered(BookmarkModel* model,
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_bookmarkNodeChildrenReordered(
-      env,
-      obj.obj(),
-      CreateJavaBookmark(node).obj());
+  Java_BookmarkBridge_bookmarkNodeChildrenReordered(env, obj,
+                                                    CreateJavaBookmark(node));
 }
 
 void BookmarkBridge::ExtensiveBookmarkChangesBeginning(BookmarkModel* model) {
@@ -1087,7 +1063,7 @@ void BookmarkBridge::ExtensiveBookmarkChangesBeginning(BookmarkModel* model) {
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_extensiveBookmarkChangesBeginning(env, obj.obj());
+  Java_BookmarkBridge_extensiveBookmarkChangesBeginning(env, obj);
 }
 
 void BookmarkBridge::ExtensiveBookmarkChangesEnded(BookmarkModel* model) {
@@ -1098,7 +1074,7 @@ void BookmarkBridge::ExtensiveBookmarkChangesEnded(BookmarkModel* model) {
   ScopedJavaLocalRef<jobject> obj = weak_java_ref_.get(env);
   if (obj.is_null())
     return;
-  Java_BookmarkBridge_extensiveBookmarkChangesEnded(env, obj.obj());
+  Java_BookmarkBridge_extensiveBookmarkChangesEnded(env, obj);
 }
 
 void BookmarkBridge::PartnerShimChanged(PartnerBookmarksShim* shim) {

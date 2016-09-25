@@ -6,14 +6,14 @@
 
 #include <vector>
 
-#include "ash/ash_switches.h"
+#include "ash/common/system/tray/system_tray_notifier.h"
+#include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
+#include "ash/common/wm_shell.h"
 #include "ash/shell.h"
-#include "ash/wm/maximize_mode/maximize_mode_controller.h"
 #include "base/command_line.h"
 #include "base/strings/string_util.h"
-#include "ui/events/devices/device_data_manager.h"
 #include "ui/events/devices/input_device.h"
-#include "ui/events/devices/keyboard_device.h"
+#include "ui/events/devices/input_device_manager.h"
 #include "ui/events/devices/touchscreen_device.h"
 #include "ui/keyboard/keyboard_switches.h"
 #include "ui/keyboard/keyboard_util.h"
@@ -37,14 +37,14 @@ VirtualKeyboardController::VirtualKeyboardController()
       has_internal_keyboard_(false),
       has_touchscreen_(false),
       ignore_external_keyboard_(false) {
-  Shell::GetInstance()->AddShellObserver(this);
-  ui::DeviceDataManager::GetInstance()->AddObserver(this);
+  WmShell::Get()->AddShellObserver(this);
+  ui::InputDeviceManager::GetInstance()->AddObserver(this);
   UpdateDevices();
 }
 
 VirtualKeyboardController::~VirtualKeyboardController() {
-  Shell::GetInstance()->RemoveShellObserver(this);
-  ui::DeviceDataManager::GetInstance()->RemoveObserver(this);
+  WmShell::Get()->RemoveShellObserver(this);
+  ui::InputDeviceManager::GetInstance()->RemoveObserver(this);
 }
 
 void VirtualKeyboardController::OnMaximizeModeStarted() {
@@ -77,17 +77,17 @@ void VirtualKeyboardController::ToggleIgnoreExternalKeyboard() {
 }
 
 void VirtualKeyboardController::UpdateDevices() {
-  ui::DeviceDataManager* device_data_manager =
-      ui::DeviceDataManager::GetInstance();
+  ui::InputDeviceManager* device_data_manager =
+      ui::InputDeviceManager::GetInstance();
 
   // Checks for touchscreens.
-  has_touchscreen_ = device_data_manager->touchscreen_devices().size() > 0;
+  has_touchscreen_ = device_data_manager->GetTouchscreenDevices().size() > 0;
 
   // Checks for keyboards.
   has_external_keyboard_ = false;
   has_internal_keyboard_ = false;
-  for (const ui::KeyboardDevice& device :
-       device_data_manager->keyboard_devices()) {
+  for (const ui::InputDevice& device :
+       device_data_manager->GetKeyboardDevices()) {
     if (has_internal_keyboard_ && has_external_keyboard_)
       break;
     ui::InputDeviceType type = device.type;
@@ -102,19 +102,19 @@ void VirtualKeyboardController::UpdateDevices() {
 
 void VirtualKeyboardController::UpdateKeyboardEnabled() {
   if (!IsSmartVirtualKeyboardEnabled()) {
-    SetKeyboardEnabled(Shell::GetInstance()
+    SetKeyboardEnabled(WmShell::Get()
                            ->maximize_mode_controller()
                            ->IsMaximizeModeWindowManagerEnabled());
     return;
   }
-  bool ignore_internal_keyboard = Shell::GetInstance()
+  bool ignore_internal_keyboard = WmShell::Get()
                                       ->maximize_mode_controller()
                                       ->IsMaximizeModeWindowManagerEnabled();
   bool is_internal_keyboard_active =
       has_internal_keyboard_ && !ignore_internal_keyboard;
   SetKeyboardEnabled(!is_internal_keyboard_active && has_touchscreen_ &&
                      (!has_external_keyboard_ || ignore_external_keyboard_));
-  ash::Shell::GetInstance()
+  WmShell::Get()
       ->system_tray_notifier()
       ->NotifyVirtualKeyboardSuppressionChanged(!is_internal_keyboard_active &&
                                                 has_touchscreen_ &&

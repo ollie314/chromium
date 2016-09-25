@@ -10,12 +10,13 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
@@ -24,7 +25,6 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/webrtc_ip_handling_policy.h"
@@ -143,7 +143,7 @@ void Shell::CloseAllWindows() {
   std::vector<Shell*> open_windows(windows_);
   for (size_t i = 0; i < open_windows.size(); ++i)
     open_windows[i]->Close();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   PlatformExit();
 }
 
@@ -265,6 +265,11 @@ void Shell::Reload() {
   web_contents_->Focus();
 }
 
+void Shell::ReloadBypassingCache() {
+  web_contents_->GetController().ReloadBypassingCache(false);
+  web_contents_->Focus();
+}
+
 void Shell::Stop() {
   web_contents_->Stop();
   web_contents_->Focus();
@@ -281,12 +286,14 @@ void Shell::UpdateNavigationControls(bool to_different_document) {
 }
 
 void Shell::ShowDevTools() {
-  InnerShowDevTools();
-}
+  if (!devtools_frontend_) {
+    devtools_frontend_ = ShellDevToolsFrontend::Show(web_contents());
+    devtools_observer_.reset(new DevToolsWebContentsObserver(
+        this, devtools_frontend_->frontend_shell()->web_contents()));
+  }
 
-void Shell::ShowDevToolsForElementAt(int x, int y) {
-  InnerShowDevTools();
-  devtools_frontend_->InspectElementAt(x, y);
+  devtools_frontend_->Activate();
+  devtools_frontend_->Focus();
 }
 
 void Shell::CloseDevTools() {
@@ -306,7 +313,7 @@ gfx::NativeView Shell::GetContentView() {
 WebContents* Shell::OpenURLFromTab(WebContents* source,
                                    const OpenURLParams& params) {
   // This implementation only handles CURRENT_TAB.
-  if (params.disposition != CURRENT_TAB)
+  if (params.disposition != WindowOpenDisposition::CURRENT_TAB)
     return nullptr;
 
   NavigationController::LoadURLParams load_url_params(params.url);
@@ -320,12 +327,9 @@ WebContents* Shell::OpenURLFromTab(WebContents* source,
   load_url_params.should_replace_current_entry =
       params.should_replace_current_entry;
 
-  // Only allows the browser-initiated navigation to use POST.
-  if (params.uses_post && !params.is_renderer_initiated) {
-    load_url_params.load_type =
-        NavigationController::LOAD_TYPE_BROWSER_INITIATED_HTTP_POST;
-    load_url_params.browser_initiated_post_data =
-        params.browser_initiated_post_data;
+  if (params.uses_post) {
+    load_url_params.load_type = NavigationController::LOAD_TYPE_HTTP_POST;
+    load_url_params.post_data = params.post_data;
   }
 
   source->GetController().LoadURLWithParams(load_url_params);
@@ -436,10 +440,6 @@ void Shell::ActivateContents(WebContents* contents) {
   contents->GetRenderViewHost()->GetWidget()->Focus();
 }
 
-bool Shell::HandleContextMenu(const content::ContextMenuParams& params) {
-  return PlatformHandleContextMenu(params);
-}
-
 gfx::Size Shell::GetShellDefaultSize() {
   static gfx::Size default_shell_size;
   if (!default_shell_size.IsEmpty())
@@ -458,26 +458,9 @@ gfx::Size Shell::GetShellDefaultSize() {
   return default_shell_size;
 }
 
-void Shell::RenderViewCreated(RenderViewHost* render_view_host) {
-  // All RenderViewHosts in layout tests should get Mojo bindings.
-  if (switches::IsRunLayoutTestSwitchPresent())
-    render_view_host->AllowBindings(BINDINGS_POLICY_MOJO);
-}
-
 void Shell::TitleWasSet(NavigationEntry* entry, bool explicit_set) {
   if (entry)
     PlatformSetTitle(entry->GetTitle());
-}
-
-void Shell::InnerShowDevTools() {
-  if (!devtools_frontend_) {
-    devtools_frontend_ = ShellDevToolsFrontend::Show(web_contents());
-    devtools_observer_.reset(new DevToolsWebContentsObserver(
-        this, devtools_frontend_->frontend_shell()->web_contents()));
-  }
-
-  devtools_frontend_->Activate();
-  devtools_frontend_->Focus();
 }
 
 void Shell::OnDevToolsWebContentsDestroyed() {

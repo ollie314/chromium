@@ -75,7 +75,7 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewTest, PrintCommands) {
 
   content::TestNavigationObserver reload_observer(
       browser()->tab_strip_model()->GetActiveWebContents());
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
   reload_observer.Wait();
 
   ASSERT_TRUE(chrome::IsCommandEnabled(browser(), IDC_PRINT));
@@ -91,10 +91,6 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewTest, PrintCommands) {
 #define MAYBE_TaskManagerNewPrintPreview TaskManagerNewPrintPreview
 #endif
 IN_PROC_BROWSER_TEST_F(PrintPreviewTest, MAYBE_TaskManagerNewPrintPreview) {
-  // This test is for the old implementation of the task manager. We must
-  // explicitly disable the new one.
-  task_manager::browsertest_util::EnableOldTaskManager();
-
   chrome::ShowTaskManager(browser());  // Show task manager BEFORE print dialog.
 
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchAboutBlankTab()));
@@ -114,10 +110,6 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewTest, MAYBE_TaskManagerNewPrintPreview) {
 // http://crbug/367665.
 IN_PROC_BROWSER_TEST_F(PrintPreviewTest,
                        DISABLED_TaskManagerExistingPrintPreview) {
-  // This test is for the old implementation of the task manager. We must
-  // explicitly disable the new one.
-  task_manager::browsertest_util::EnableOldTaskManager();
-
   // Create the print preview dialog.
   Print();
 
@@ -137,7 +129,7 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewTest, DISABLED_NoCrashOnCloseWithOtherTabs) {
   Print();
 
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), GURL("about:blank"), NEW_FOREGROUND_TAB,
+      browser(), GURL("about:blank"), WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   browser()->tab_strip_model()->ActivateTabAt(0, true);

@@ -13,6 +13,7 @@ namespace blink {
 
 class LayoutPoint;
 class LayoutSize;
+class LayoutUnit;
 
 class LayoutBoxItem : public LayoutBoxModel {
 public:
@@ -49,6 +50,41 @@ public:
     LayoutPoint location() const
     {
         return toBox()->location();
+    }
+
+    LayoutUnit logicalWidth() const
+    {
+        return toBox()->logicalWidth();
+    }
+
+    LayoutUnit logicalHeight() const
+    {
+        return toBox()->logicalHeight();
+    }
+
+    LayoutUnit minPreferredLogicalWidth() const
+    {
+        return toBox()->minPreferredLogicalWidth();
+    }
+
+    LayoutRect overflowClipRect(const LayoutPoint& location, OverlayScrollbarClipBehavior behavior = IgnoreOverlayScrollbarSize) const
+    {
+        return toBox()->overflowClipRect(location, behavior);
+    }
+
+    LayoutSize contentBoxOffset() const
+    {
+        return toBox()->contentBoxOffset();
+    }
+
+    void mapLocalToAncestor(const LayoutBoxModelObject* ancestor, TransformState& state, MapCoordinatesFlags flags = ApplyContainerFlip) const
+    {
+        toBox()->mapLocalToAncestor(ancestor, state, flags);
+    }
+
+    FloatQuad absoluteContentQuad() const
+    {
+        return toBox()->absoluteContentQuad();
     }
 
 private:

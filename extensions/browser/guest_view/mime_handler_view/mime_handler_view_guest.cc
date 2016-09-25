@@ -14,7 +14,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/stream_handle.h"
 #include "content/public/browser/stream_info.h"
-#include "content/public/common/service_registry.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/api/mime_handler_private/mime_handler_private.h"
@@ -29,6 +28,7 @@
 #include "extensions/strings/grit/extensions_strings.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/base/url_util.h"
+#include "services/shell/public/cpp/interface_registry.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 
 using content::WebContents;
@@ -36,7 +36,7 @@ using guest_view::GuestViewBase;
 
 namespace extensions {
 
-StreamContainer::StreamContainer(scoped_ptr<content::StreamInfo> stream,
+StreamContainer::StreamContainer(std::unique_ptr<content::StreamInfo> stream,
                                  int tab_id,
                                  bool embedded,
                                  const GURL& handler_url,
@@ -80,6 +80,10 @@ MimeHandlerViewGuest::MimeHandlerViewGuest(WebContents* owner_web_contents)
           this)) {}
 
 MimeHandlerViewGuest::~MimeHandlerViewGuest() {
+}
+
+bool MimeHandlerViewGuest::CanUseCrossProcessFrames() {
+  return false;
 }
 
 const char* MimeHandlerViewGuest::GetAPINamespace() const {
@@ -141,7 +145,7 @@ void MimeHandlerViewGuest::DidAttachToEmbedder() {
   web_contents()->GetController().LoadURL(
       stream_->handler_url(), content::Referrer(),
       ui::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
-  web_contents()->GetMainFrame()->GetServiceRegistry()->AddService(
+  web_contents()->GetMainFrame()->GetInterfaceRegistry()->AddInterface(
       base::Bind(&MimeHandlerServiceImpl::Create, stream_->GetWeakPtr()));
 }
 
@@ -182,7 +186,8 @@ void MimeHandlerViewGuest::NavigationStateChanged(
   content::NavigationEntry* last_committed_entry =
       embedder_web_contents()->GetController().GetLastCommittedEntry();
   if (last_committed_entry) {
-    last_committed_entry->SetTitle(source->GetTitle());
+    embedder_web_contents()->UpdateTitleForEntry(last_committed_entry,
+                                                 source->GetTitle());
     embedder_web_contents()->GetDelegate()->NavigationStateChanged(
         embedder_web_contents(), changed_flags);
   }
@@ -212,8 +217,17 @@ bool MimeHandlerViewGuest::PreHandleGestureEvent(
 content::JavaScriptDialogManager*
 MimeHandlerViewGuest::GetJavaScriptDialogManager(
     WebContents* source) {
+  // WebContentsDelegates often service multiple WebContentses, and use the
+  // WebContents* parameter to tell which WebContents made the request. If we
+  // pass in our own pointer to the delegate call, the delegate will be asked,
+  // "What's the JavaScriptDialogManager of this WebContents for which you are
+  // not a delegate?" And it won't be able to answer that.
+  //
+  // So we pretend to be our owner WebContents, but only for the request to
+  // obtain the JavaScriptDialogManager. During calls to the
+  // JavaScriptDialogManager we will be honest about who we are.
   return owner_web_contents()->GetDelegate()->GetJavaScriptDialogManager(
-      web_contents());
+      owner_web_contents());
 }
 
 bool MimeHandlerViewGuest::SaveFrame(const GURL& url,

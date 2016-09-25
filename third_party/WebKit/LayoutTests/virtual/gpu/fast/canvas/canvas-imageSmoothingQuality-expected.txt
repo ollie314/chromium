@@ -1,7 +1,7 @@
-CONSOLE WARNING: The provided value '3223' is not a valid enum value of type ImageSmoothingQuality.
-CONSOLE WARNING: The provided value 'bad_input' is not a valid enum value of type ImageSmoothingQuality.
-CONSOLE WARNING: The provided value 'LOW' is not a valid enum value of type ImageSmoothingQuality.
-CONSOLE WARNING: The provided value 'Medium' is not a valid enum value of type ImageSmoothingQuality.
+CONSOLE WARNING: line 46: The provided value '3223' is not a valid enum value of type ImageSmoothingQuality.
+CONSOLE WARNING: line 46: The provided value 'bad_input' is not a valid enum value of type ImageSmoothingQuality.
+CONSOLE WARNING: line 46: The provided value 'LOW' is not a valid enum value of type ImageSmoothingQuality.
+CONSOLE WARNING: line 46: The provided value 'Medium' is not a valid enum value of type ImageSmoothingQuality.
 Tests for the imageSmoothingQuality attribute.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -16,7 +16,7 @@ FAIL lowData should not be {"0":0,"1":0,"2":0,"3":201}.
 PASS mediumData is highData
 FAIL lowData should not be {"0":0,"1":0,"2":0,"3":201}.
 
-FAIL sampleAlpha(noFilterData) should be > sampleAlpha(lowData). Was 201 (of type number).
+PASS sampleAlpha(noFilterData) is sampleAlpha(lowData)
 FAIL sampleAlpha(lowData) should be > sampleAlpha(mediumData). Was 201 (of type number).
 PASS sampleAlpha(mediumData) is sampleAlpha(highData)
 

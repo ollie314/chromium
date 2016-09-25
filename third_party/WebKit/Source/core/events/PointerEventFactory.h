@@ -31,13 +31,13 @@ public:
 
     PointerEvent* create(
         const AtomicString& mouseEventName, const PlatformMouseEvent&,
-        EventTarget* relatedTarget,
-        AbstractView*);
+        LocalDOMWindow*);
 
     PointerEvent* create(const AtomicString& type,
         const PlatformTouchPoint&, PlatformEvent::Modifiers,
-        const double width, const double height,
-        const double clientX, const double clientY);
+        const FloatSize& pointRadius,
+        const FloatPoint& clientPoint,
+        DOMWindow*);
 
     PointerEvent* createPointerCancelEvent(
         const int pointerId, const WebPointerProperties::PointerType);
@@ -47,8 +47,8 @@ public:
         PointerEvent*,
         const AtomicString&);
 
-    // For creating transition events (i.e pointerout/leave/over/enter)
-    PointerEvent* createPointerTransitionEvent(
+    // For creating boundary events (i.e pointerout/leave/over/enter)
+    PointerEvent* createPointerBoundaryEvent(
         PointerEvent*,
         const AtomicString&,
         EventTarget*);
@@ -62,16 +62,19 @@ public:
     bool remove(const int);
 
     // Returns all ids of the given pointerType.
-    HeapVector<int> getPointerIdsOfType(WebPointerProperties::PointerType);
+    Vector<int> getPointerIdsOfType(WebPointerProperties::PointerType) const;
 
-    // Returns whether a pointer id exists and active
-    bool isActive(const int);
+    // Returns whether a pointer id exists and active.
+    bool isActive(const int) const;
 
-    // Returns type of pointer id if exists, otherwise Unknown
-    WebPointerProperties::PointerType getPointerType(const int);
+    // Returns whether a pointer id exists and has at least one pressed button.
+    bool isActiveButtonsState(const int) const;
 
-    // Returns whether a pointer id exists and has at least one pressed button
-    bool isActiveButtonsState(const int);
+    // Returns the id of the pointer event corresponding to the given pointer
+    // properties if exists otherwise s_invalidId.
+    int getPointerEventId(const WebPointerProperties&) const;
+
+    static const int s_mouseId;
 
 private:
     typedef WTF::UnsignedWithZeroKeyHashTraits<int> UnsignedHash;
@@ -98,8 +101,12 @@ private:
         unsigned buttons);
     void setBubblesAndCancelable(PointerEventInit&, const AtomicString& type);
 
+    // Creates pointerevents like boundary and capture events from another
+    // pointerevent (i.e. up/down/move events).
+    PointerEvent* createPointerEventFrom(
+        PointerEvent*, const AtomicString&, EventTarget*);
+
     static const int s_invalidId;
-    static const int s_mouseId;
 
     int m_currentId;
     HashMap<IncomingId, int, WTF::PairHash<int, int>, WTF::PairHashTraits<UnsignedHash, UnsignedHash>> m_pointerIncomingIdMapping;

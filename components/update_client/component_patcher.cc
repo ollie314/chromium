@@ -31,7 +31,7 @@ base::ListValue* ReadCommands(const base::FilePath& unpack_path) {
     return NULL;
 
   JSONFileValueDeserializer deserializer(commands);
-  scoped_ptr<base::Value> root = deserializer.Deserialize(NULL, NULL);
+  std::unique_ptr<base::Value> root = deserializer.Deserialize(NULL, NULL);
 
   return (root.get() && root->IsType(base::Value::TYPE_LIST))
              ? static_cast<base::ListValue*>(root.release())
@@ -78,12 +78,11 @@ void ComponentPatcher::PatchNextFile() {
     DonePatching(ComponentUnpacker::kNone, 0);
     return;
   }
-  if (!(*next_command_)->IsType(base::Value::TYPE_DICTIONARY)) {
+  const base::DictionaryValue* command_args;
+  if (!(*next_command_)->GetAsDictionary(&command_args)) {
     DonePatching(ComponentUnpacker::kDeltaBadCommands, 0);
     return;
   }
-  const base::DictionaryValue* command_args =
-      static_cast<base::DictionaryValue*>(*next_command_);
 
   std::string operation;
   if (command_args->GetString(kOp, &operation)) {

@@ -13,6 +13,57 @@
 #include "cc/base/cc_export.h"
 
 namespace cc {
+class Task;
+
+// This class provides states to manage life cycle of a task and given below is
+// how it is used by TaskGraphWorkQueue to process life cycle of a task.
+// Task is in NEW state when it is created. When task is added to
+// |ready_to_run_tasks| then its state is changed to SCHEDULED. Task can be
+// canceled from NEW state (not yet scheduled to run) or from SCHEDULED state,
+// when new ScheduleTasks() is triggered and its state is changed to CANCELED.
+// When task is about to run it is added |running_tasks| and its state is
+// changed to RUNNING. Once task finishes running, its state is changed to
+// FINISHED. Both CANCELED and FINISHED tasks are added to |completed_tasks|.
+//                ╔═════╗
+//         +------║ NEW ║------+
+//         |      ╚═════╝      |
+//         v                   v
+//   ┌───────────┐        ╔══════════╗
+//   │ SCHEDULED │------> ║ CANCELED ║
+//   └───────────┘        ╚══════════╝
+//         |
+//         v
+//    ┌─────────┐         ╔══════════╗
+//    │ RUNNING │-------> ║ FINISHED ║
+//    └─────────┘         ╚══════════╝
+class CC_EXPORT TaskState {
+ public:
+  bool IsScheduled() const;
+  bool IsRunning() const;
+  bool IsFinished() const;
+  bool IsCanceled() const;
+
+  // Functions to change the state of task. These functions should be called
+  // only from TaskGraphWorkQueue where the life cycle of a task is decided or
+  // from tests. These functions are not thread-safe. Caller is responsible for
+  // thread safety.
+  void Reset();  // Sets state to NEW.
+  void DidSchedule();
+  void DidStart();
+  void DidFinish();
+  void DidCancel();
+
+ private:
+  friend class Task;
+
+  // Let only Task class create the TaskState.
+  TaskState();
+  ~TaskState();
+
+  enum class Value : uint16_t { NEW, SCHEDULED, RUNNING, FINISHED, CANCELED };
+
+  Value value_;
+};
 
 // A task which can be run by a TaskGraphRunner. To run a Task, it should be
 // inserted into a TaskGraph, which can then be scheduled on the
@@ -21,14 +72,12 @@ class CC_EXPORT Task : public base::RefCountedThreadSafe<Task> {
  public:
   typedef std::vector<scoped_refptr<Task>> Vector;
 
+  TaskState& state() { return state_; }
+
   // Subclasses should implement this method. RunOnWorkerThread may be called
   // on any thread, and subclasses are responsible for locking and thread
   // safety.
   virtual void RunOnWorkerThread() = 0;
-
-  void WillRun();
-  void DidRun();
-  bool HasFinishedRunning() const;
 
  protected:
   friend class base::RefCountedThreadSafe<Task>;
@@ -36,8 +85,8 @@ class CC_EXPORT Task : public base::RefCountedThreadSafe<Task> {
   Task();
   virtual ~Task();
 
-  bool will_run_;
-  bool did_run_;
+ private:
+  TaskState state_;
 };
 
 // A task dependency graph describes the order in which to execute a set
@@ -49,22 +98,25 @@ class CC_EXPORT Task : public base::RefCountedThreadSafe<Task> {
 // category. A TaskGraphRunner implementation may chose to prioritize certain
 // categories over others, regardless of the individual priorities of tasks.
 struct CC_EXPORT TaskGraph {
-  struct Node {
+  struct CC_EXPORT Node {
     typedef std::vector<Node> Vector;
 
-    Node(Task* task,
+    Node(scoped_refptr<Task> task,
          uint16_t category,
          uint16_t priority,
-         uint32_t dependencies)
-        : task(task),
-          category(category),
-          priority(priority),
-          dependencies(dependencies) {}
+         uint32_t dependencies);
+    Node(Node&& other);
+    ~Node();
 
-    Task* task;
+    Node& operator=(Node&& other) = default;
+
+    scoped_refptr<Task> task;
     uint16_t category;
     uint16_t priority;
     uint32_t dependencies;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(Node);
   };
 
   struct Edge {
@@ -78,7 +130,7 @@ struct CC_EXPORT TaskGraph {
   };
 
   TaskGraph();
-  TaskGraph(const TaskGraph& other);
+  TaskGraph(TaskGraph&& other);
   ~TaskGraph();
 
   void Swap(TaskGraph* other);
@@ -86,6 +138,9 @@ struct CC_EXPORT TaskGraph {
 
   Node::Vector nodes;
   Edge::Vector edges;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TaskGraph);
 };
 
 }  // namespace cc

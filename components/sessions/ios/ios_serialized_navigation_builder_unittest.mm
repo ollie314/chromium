@@ -16,8 +16,8 @@ namespace sessions {
 namespace {
 // Creates a NavigationItem from the test_data constants in
 // serialized_navigation_entry_test_helper.h.
-scoped_ptr<web::NavigationItem> MakeNavigationItemForTest() {
-  scoped_ptr<web::NavigationItem> navigation_item(
+std::unique_ptr<web::NavigationItem> MakeNavigationItemForTest() {
+  std::unique_ptr<web::NavigationItem> navigation_item(
       web::NavigationItem::Create());
   navigation_item->SetReferrer(web::Referrer(
       test_data::kReferrerURL,
@@ -37,7 +37,7 @@ scoped_ptr<web::NavigationItem> MakeNavigationItemForTest() {
 // Create a SerializedNavigationEntry from a NavigationItem.  All its fields
 // should match the NavigationItem's.
 TEST(IOSSerializedNavigationBuilderTest, FromNavigationItem) {
-  const scoped_ptr<web::NavigationItem> navigation_item(
+  const std::unique_ptr<web::NavigationItem> navigation_item(
       MakeNavigationItemForTest());
 
   const SerializedNavigationEntry& navigation =
@@ -51,7 +51,8 @@ TEST(IOSSerializedNavigationBuilderTest, FromNavigationItem) {
   EXPECT_EQ(test_data::kReferrerPolicy, navigation.referrer_policy());
   EXPECT_EQ(test_data::kVirtualURL, navigation.virtual_url());
   EXPECT_EQ(test_data::kTitle, navigation.title());
-  EXPECT_EQ(test_data::kTransitionType, navigation.transition_type());
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      navigation.transition_type(), test_data::kTransitionType));
   EXPECT_EQ(test_data::kTimestamp, navigation.timestamp());
   EXPECT_EQ(test_data::kFaviconURL, navigation.favicon_url());
 
@@ -75,14 +76,14 @@ TEST(IOSSerializedNavigationBuilderTest, FromNavigationItem) {
 // except for fields that aren't preserved, which should be set to
 // expected values.
 TEST(IOSSerializedNavigationBuilderTest, ToNavigationItem) {
-  const scoped_ptr<web::NavigationItem> old_navigation_item(
+  const std::unique_ptr<web::NavigationItem> old_navigation_item(
       MakeNavigationItemForTest());
 
   const SerializedNavigationEntry& navigation =
       IOSSerializedNavigationBuilder::FromNavigationItem(
           test_data::kIndex, *old_navigation_item);
 
-  const scoped_ptr<web::NavigationItem> new_navigation_item(
+  const std::unique_ptr<web::NavigationItem> new_navigation_item(
       IOSSerializedNavigationBuilder::ToNavigationItem(&navigation));
 
   EXPECT_EQ(old_navigation_item->GetURL(),
@@ -95,8 +96,9 @@ TEST(IOSSerializedNavigationBuilderTest, ToNavigationItem) {
             new_navigation_item->GetVirtualURL());
   EXPECT_EQ(old_navigation_item->GetTitle(),
             new_navigation_item->GetTitle());
-  EXPECT_EQ(ui::PAGE_TRANSITION_RELOAD,
-            new_navigation_item->GetTransitionType());
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+                  new_navigation_item->GetTransitionType(),
+                  ui::PAGE_TRANSITION_RELOAD));
   EXPECT_EQ(old_navigation_item->GetTimestamp(),
             new_navigation_item->GetTimestamp());
 }

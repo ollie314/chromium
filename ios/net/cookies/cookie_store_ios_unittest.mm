@@ -12,6 +12,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #import "net/base/mac/url_conversions.h"
 #include "net/cookies/cookie_store_unittest.h"
@@ -52,7 +53,7 @@ struct CookieStoreIOSTestTraits {
 
 struct InactiveCookieStoreIOSTestTraits {
   static std::unique_ptr<net::CookieStore> Create() {
-    return base::WrapUnique(new CookieStoreIOS(nullptr));
+    return base::MakeUnique<CookieStoreIOS>(nullptr);
   }
 
   static const bool is_cookie_monster = false;
@@ -204,7 +205,7 @@ class RoundTripTestCookieStore : public net::CookieStore {
 struct RoundTripTestCookieStoreTraits {
   static std::unique_ptr<net::CookieStore> Create() {
     ClearCookies();
-    return base::WrapUnique(new RoundTripTestCookieStore());
+    return base::MakeUnique<RoundTripTestCookieStore>();
   }
 
   static const bool is_cookie_monster = false;
@@ -258,16 +259,17 @@ class TestPersistentCookieStore
 
     // Some canonical cookies cannot be converted into System cookies, for
     // example if value is not valid utf8. Such cookies are ignored.
-    net::CanonicalCookie* bad_canonical_cookie = new net::CanonicalCookie(
-        kTestCookieURL, "name", "\x81r\xe4\xbd\xa0\xe5\xa5\xbd", "domain",
-        "path/",
-        base::Time(),  // creation
-        base::Time(),  // expires
-        base::Time(),  // last_access
-        false,         // secure
-        false,         // httponly
-        net::CookieSameSite::DEFAULT_MODE, net::COOKIE_PRIORITY_DEFAULT);
-    cookies.push_back(bad_canonical_cookie);
+    std::unique_ptr<net::CanonicalCookie> bad_canonical_cookie(
+        net::CanonicalCookie::Create(GURL("http://domain/"), "name",
+                                     "\x81r\xe4\xbd\xa0\xe5\xa5\xbd",
+                                     std::string(), "/path/",
+                                     base::Time(),  // creation
+                                     base::Time(),  // expires
+                                     false,         // secure
+                                     false,         // httponly
+                                     net::CookieSameSite::DEFAULT_MODE, false,
+                                     net::COOKIE_PRIORITY_DEFAULT));
+    cookies.push_back(bad_canonical_cookie.release());
     loaded_callback_.Run(cookies);
   }
 
@@ -394,7 +396,7 @@ class CookieStoreIOSWithBackend : public testing::Test {
                                       base::Bind(&IgnoreBoolean));
     net::CookieStoreIOS::NotifySystemCookiesChanged();
     // Wait until the flush is posted.
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void SetSystemCookie(const GURL& url,
@@ -409,7 +411,7 @@ class CookieStoreIOSWithBackend : public testing::Test {
       NSHTTPCookieDomain : base::SysUTF8ToNSString(url.host()),
     }]];
     net::CookieStoreIOS::NotifySystemCookiesChanged();
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void DeleteSystemCookie(const GURL& gurl, const std::string& name) {
@@ -424,7 +426,7 @@ class CookieStoreIOSWithBackend : public testing::Test {
       }
     }
     net::CookieStoreIOS::NotifySystemCookiesChanged();
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
  protected:
@@ -452,7 +454,7 @@ TEST_F(CookieStoreIOSWithBackend, SetCookieCallsHookWhenNotSynchronized) {
   EXPECT_EQ(0U, cookies_changed_.size());
   EXPECT_EQ(0U, cookies_removed_.size());
   backend_->RunLoadedCallback();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1U, cookies_changed_.size());
   EXPECT_EQ(1U, cookies_removed_.size());
   EXPECT_EQ("abc", cookies_changed_[0].Name());
@@ -478,7 +480,7 @@ TEST_F(CookieStoreIOSWithBackend, SetCookieCallsHookWhenSynchronized) {
   CookieStoreIOS::SwitchSynchronizedStore(nullptr, store_.get());
   GetCookies(base::Bind(&IgnoreString));
   backend_->RunLoadedCallback();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ClearCookies();
   SetCookie("abc=def");
   EXPECT_EQ(1U, cookies_changed_.size());
@@ -505,7 +507,7 @@ TEST_F(CookieStoreIOSWithBackend, DeleteCallsHook) {
   CookieStoreIOS::SwitchSynchronizedStore(nullptr, store_.get());
   GetCookies(base::Bind(&IgnoreString));
   backend_->RunLoadedCallback();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ClearCookies();
   SetCookie("abc=def");
   EXPECT_EQ(1U, cookies_changed_.size());
@@ -513,7 +515,7 @@ TEST_F(CookieStoreIOSWithBackend, DeleteCallsHook) {
   store_->DeleteCookieAsync(kTestCookieURL, "abc",
                             base::Bind(&IgnoreBoolean, false));
   CookieStoreIOS::NotifySystemCookiesChanged();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   store_->UnSynchronize();
 }
 
@@ -522,7 +524,7 @@ TEST_F(CookieStoreIOSWithBackend, SameValueDoesNotCallHook) {
   GetCookieCallback callback;
   GetCookies(base::Bind(&IgnoreString));
   backend_->RunLoadedCallback();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ClearCookies();
   SetCookie("abc=def");
   EXPECT_EQ(1U, cookies_changed_.size());

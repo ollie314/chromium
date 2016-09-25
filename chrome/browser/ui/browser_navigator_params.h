@@ -9,11 +9,11 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/ref_counted_memory.h"
 #include "build/build_config.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/common/referrer.h"
+#include "content/public/common/resource_request_body.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/rect.h"
@@ -72,6 +72,9 @@ struct NavigateParams {
   GURL url;
   content::Referrer referrer;
 
+  // The frame name to be used for the main frame.
+  std::string frame_name;
+
   // The browser-global ID of the frame to navigate, or -1 for the main frame.
   int frame_tree_node_id;
 
@@ -80,13 +83,10 @@ struct NavigateParams {
   std::vector<GURL> redirect_chain;
 
   // Indicates whether this navigation will be sent using POST.
-  // The POST method is limited support for basic POST data by leveraging
-  // NavigationController::LOAD_TYPE_BROWSER_INITIATED_HTTP_POST.
-  // It is not for things like file uploads.
   bool uses_post;
 
   // The post data when the navigation uses POST.
-  scoped_refptr<base::RefCountedMemory> browser_initiated_post_data;
+  scoped_refptr<content::ResourceRequestBody> post_data;
 
   // Extra headers to add to the request for this page.  Headers are
   // represented as "<name>: <value>" and separated by \r\n.  The entire string
@@ -214,7 +214,7 @@ struct NavigateParams {
   // [out] Specifies the Browser object where the navigation occurred or the
   //       tab was added. Guaranteed non-NULL unless the disposition did not
   //       require a navigation, in which case this is set to NULL
-  //       (SUPPRESS_OPEN, SAVE_TO_DISK, IGNORE_ACTION).
+  //       (SAVE_TO_DISK, IGNORE_ACTION).
   // Note: If |show_window| is set to false and a new Browser is created by
   //       Navigate(), the caller is responsible for showing it so that its
   //       window can assume responsibility for the Browser's lifetime (Browser

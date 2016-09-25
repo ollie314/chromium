@@ -7,7 +7,10 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/vector_icons_public.h"
 
 // Base class for decorations at the left and right of the location
 // bar.  For instance, the location icon.
@@ -21,10 +24,8 @@
 
 class LocationBarDecoration {
  public:
-  LocationBarDecoration()
-      : visible_(false) {
-  }
-  virtual ~LocationBarDecoration() {}
+  LocationBarDecoration();
+  virtual ~LocationBarDecoration();
 
   // Determines whether the decoration is visible.
   virtual bool IsVisible() const;
@@ -83,10 +84,18 @@ class LocationBarDecoration {
   // Gets the font used to draw text in the decoration.
   virtual NSFont* GetFont() const;
 
+  // Gets the accessibility NSView for this decoration. This NSView is
+  // a transparent button that is positioned over this decoration to allow it to
+  // accept keyboard focus and keyboard activations.
+  virtual NSView* GetAccessibilityView();
+
   // Helper to get where the bubble point should land. |frame| specifies the
   // decorations' image rectangle. Defaults to |frame.origin| if not overriden.
   // The return value is in the same coordinate system as |frame|.
   virtual NSPoint GetBubblePointInFrame(NSRect frame);
+
+  // Gets the Material Design vector-based icon.
+  NSImage* GetMaterialIcon(bool location_bar_is_dark) const;
 
   static void DrawLabel(NSString* label,
                         NSDictionary* attributes,
@@ -96,12 +105,35 @@ class LocationBarDecoration {
   static NSSize GetLabelSize(NSString* label,
                              NSDictionary* attributes);
 
+  // Called when the accessibility view receives an action via a keyboard button
+  // press or VoiceOver activation. This method is public so it can be exposed
+  // to the private DecorationAccessibilityView helper class.
+  void OnAccessibilityViewAction();
+
   // Width returned by |GetWidthForSpace()| when the item should be
   // omitted for this width;
   static const CGFloat kOmittedWidth;
 
+  // Material text color if the location bar is dark.
+  static const SkColor kMaterialDarkModeTextColor;
+
+ protected:
+  // Gets the color used to draw the Material Design icon. The default
+  // implementation satisfies most cases - few subclasses should need to
+  // override.
+  virtual SkColor GetMaterialIconColor(bool location_bar_is_dark) const;
+
+  // Gets the id of the decoration's Material Design vector icon. Subclasses
+  // should override to return the correct id. Not an abstract method because
+  // some decorations are assigned their icon (vs. creating it themselves).
+  virtual gfx::VectorIconId GetMaterialVectorIconId() const;
+
+  // Gets the color used for the divider. Only used in Material design.
+  NSColor* GetDividerColor(bool location_bar_is_dark) const;
+
  private:
-  bool visible_;
+  bool visible_ = false;
+  base::scoped_nsobject<NSView> accessibility_view_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationBarDecoration);
 };

@@ -5,11 +5,15 @@
 #include "ui/views/widget/native_widget_aura.h"
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/screen_position_client.h"
@@ -22,10 +26,11 @@
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font_list.h"
-#include "ui/gfx/screen.h"
 #include "ui/native_theme/native_theme_aura.h"
 #include "ui/views/drag_utils.h"
 #include "ui/views/views_delegate.h"
@@ -92,6 +97,23 @@ void NativeWidgetAura::RegisterNativeWidgetForWindow(
   window->set_user_data(native_widget);
 }
 
+// static
+void NativeWidgetAura::AssignIconToAuraWindow(aura::Window* window,
+                                              const gfx::ImageSkia& window_icon,
+                                              const gfx::ImageSkia& app_icon) {
+  if (!window)
+    return;
+
+  if (window_icon.isNull() && app_icon.isNull()) {
+    window->ClearProperty(aura::client::kWindowIconKey);
+    return;
+  }
+
+  window->SetProperty(
+      aura::client::kWindowIconKey,
+      new gfx::ImageSkia(!window_icon.isNull() ? window_icon : app_icon));
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetAura, internal::NativeWidgetPrivate implementation:
 
@@ -101,7 +123,6 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   DCHECK(params.parent || params.context);
 
   ownership_ = params.ownership;
-  name_ = params.name;
 
   RegisterNativeWidgetForWindow(this, window_);
   window_->SetType(GetAuraWindowTypeForWidgetType(params.type));
@@ -111,6 +132,8 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
   window_->SetTransparent(
       params.opacity == Widget::InitParams::TRANSLUCENT_WINDOW);
   window_->Init(params.layer_type);
+  // Set name after layer init so it propagates to layer.
+  window_->SetName(params.name);
   if (params.shadow_type == Widget::InitParams::SHADOW_TYPE_NONE)
     SetShadowType(window_, wm::SHADOW_TYPE_NONE);
   else if (params.shadow_type == Widget::InitParams::SHADOW_TYPE_DROP)
@@ -139,8 +162,9 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
       // If a parent is specified but no bounds are given,
       // use the origin of the parent's display so that the widget
       // will be added to the same display as the parent.
-      gfx::Rect bounds =
-          gfx::Screen::GetScreen()->GetDisplayNearestWindow(parent).bounds();
+      gfx::Rect bounds = display::Screen::GetScreen()
+                             ->GetDisplayNearestWindow(parent)
+                             .bounds();
       window_bounds.set_origin(bounds.origin());
     }
   }
@@ -285,8 +309,9 @@ void NativeWidgetAura::CenterWindow(const gfx::Size& size) {
   // When centering window, we take the intersection of the host and
   // the parent. We assume the root window represents the visible
   // rect of a single screen.
-  gfx::Rect work_area =
-      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window_).work_area();
+  gfx::Rect work_area = display::Screen::GetScreen()
+                            ->GetDisplayNearestWindow(window_)
+                            .work_area();
 
   aura::client::ScreenPositionClient* screen_position_client =
       aura::client::GetScreenPositionClient(window_->GetRootWindow());
@@ -347,7 +372,7 @@ bool NativeWidgetAura::SetWindowTitle(const base::string16& title) {
 
 void NativeWidgetAura::SetWindowIcons(const gfx::ImageSkia& window_icon,
                                       const gfx::ImageSkia& app_icon) {
-  // Aura doesn't have window icons.
+  AssignIconToAuraWindow(window_, window_icon, app_icon);
 }
 
 void NativeWidgetAura::InitModalType(ui::ModalType modal_type) {
@@ -396,6 +421,10 @@ gfx::Rect NativeWidgetAura::GetRestoredBounds() const {
   return bounds;
 }
 
+std::string NativeWidgetAura::GetWorkspace() const {
+  return std::string();
+}
+
 void NativeWidgetAura::SetBounds(const gfx::Rect& bounds) {
   if (!window_)
     return;
@@ -405,8 +434,8 @@ void NativeWidgetAura::SetBounds(const gfx::Rect& bounds) {
     aura::client::ScreenPositionClient* screen_position_client =
         aura::client::GetScreenPositionClient(root);
     if (screen_position_client) {
-      gfx::Display dst_display =
-          gfx::Screen::GetScreen()->GetDisplayMatching(bounds);
+      display::Display dst_display =
+          display::Screen::GetScreen()->GetDisplayMatching(bounds);
       screen_position_client->SetBounds(window_, bounds, dst_display);
       return;
     }
@@ -436,11 +465,9 @@ void NativeWidgetAura::StackBelow(gfx::NativeView native_view) {
     window_->parent()->StackChildBelow(window_, native_view);
 }
 
-void NativeWidgetAura::SetShape(SkRegion* region) {
+void NativeWidgetAura::SetShape(std::unique_ptr<SkRegion> region) {
   if (window_)
-    window_->layer()->SetAlphaShape(base::WrapUnique(region));
-  else
-    delete region;
+    window_->layer()->SetAlphaShape(std::move(region));
 }
 
 void NativeWidgetAura::Close() {
@@ -456,10 +483,9 @@ void NativeWidgetAura::Close() {
   }
 
   if (!close_widget_factory_.HasWeakPtrs()) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&NativeWidgetAura::CloseNow,
-                   close_widget_factory_.GetWeakPtr()));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&NativeWidgetAura::CloseNow,
+                              close_widget_factory_.GetWeakPtr()));
   }
 }
 
@@ -551,6 +577,10 @@ void NativeWidgetAura::SetVisibleOnAllWorkspaces(bool always_visible) {
   // Not implemented on chromeos or for child widgets.
 }
 
+bool NativeWidgetAura::IsVisibleOnAllWorkspaces() const {
+  return false;
+}
+
 void NativeWidgetAura::Maximize() {
   if (window_)
     window_->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
@@ -595,9 +625,9 @@ bool NativeWidgetAura::IsFullscreen() const {
       ui::SHOW_STATE_FULLSCREEN;
 }
 
-void NativeWidgetAura::SetOpacity(unsigned char opacity) {
+void NativeWidgetAura::SetOpacity(float opacity) {
   if (window_)
-    window_->layer()->SetOpacity(opacity / 255.0);
+    window_->layer()->SetOpacity(opacity);
 }
 
 void NativeWidgetAura::FlashFrame(bool flash) {
@@ -644,7 +674,9 @@ void NativeWidgetAura::ClearNativeFocus() {
 gfx::Rect NativeWidgetAura::GetWorkAreaBoundsInScreen() const {
   if (!window_)
     return gfx::Rect();
-  return gfx::Screen::GetScreen()->GetDisplayNearestWindow(window_).work_area();
+  return display::Screen::GetScreen()
+      ->GetDisplayNearestWindow(window_)
+      .work_area();
 }
 
 Widget::MoveLoopResult NativeWidgetAura::RunMoveLoop(
@@ -740,7 +772,7 @@ void NativeWidgetAura::RepostNativeEvent(gfx::NativeEvent native_event) {
 }
 
 std::string NativeWidgetAura::GetName() const {
-  return name_;
+  return window_ ? window_->name() : std::string();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1174,6 +1206,16 @@ gfx::FontList NativeWidgetPrivate::GetWindowTitleFontList() {
 #else
   return gfx::FontList();
 #endif
+}
+
+// static
+gfx::NativeView NativeWidgetPrivate::GetGlobalCapture(
+    gfx::NativeView native_view) {
+  aura::client::CaptureClient* capture_client =
+      aura::client::GetCaptureClient(native_view->GetRootWindow());
+  if (!capture_client)
+    return nullptr;
+  return capture_client->GetGlobalCaptureWindow();
 }
 
 }  // namespace internal

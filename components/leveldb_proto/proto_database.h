@@ -5,12 +5,12 @@
 #ifndef COMPONENTS_LEVELDB_PROTO_PROTO_DATABASE_H_
 #define COMPONENTS_LEVELDB_PROTO_PROTO_DATABASE_H_
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/memory/scoped_ptr.h"
 
 namespace base {
 class FilePath;
@@ -26,7 +26,8 @@ class ProtoDatabase {
   using InitCallback = base::Callback<void(bool success)>;
   using UpdateCallback = base::Callback<void(bool success)>;
   using LoadCallback =
-      base::Callback<void(bool success, scoped_ptr<std::vector<T>>)>;
+      base::Callback<void(bool success, std::unique_ptr<std::vector<T>>)>;
+  using GetCallback = base::Callback<void(bool success, std::unique_ptr<T>)>;
   using DestroyCallback = base::Callback<void(bool success)>;
 
   // A list of key-value (string, T) tuples.
@@ -44,13 +45,19 @@ class ProtoDatabase {
   // |keys_to_remove| from the database. |callback| will be invoked on the
   // calling thread when complete.
   virtual void UpdateEntries(
-      scoped_ptr<KeyEntryVector> entries_to_save,
-      scoped_ptr<std::vector<std::string>> keys_to_remove,
+      std::unique_ptr<KeyEntryVector> entries_to_save,
+      std::unique_ptr<std::vector<std::string>> keys_to_remove,
       const UpdateCallback& callback) = 0;
 
   // Asynchronously loads all entries from the database and invokes |callback|
   // when complete.
   virtual void LoadEntries(const LoadCallback& callback) = 0;
+
+  // Asynchronously loads a single entry, identified by |key|, from the database
+  // and invokes |callback| when complete. If no entry with |key| is found,
+  // a nullptr is passed to the callback, but the success flag is still true.
+  virtual void GetEntry(const std::string& key,
+                        const GetCallback& callback) = 0;
 
   // Asynchronously destroys the database.
   virtual void Destroy(const DestroyCallback& callback) = 0;

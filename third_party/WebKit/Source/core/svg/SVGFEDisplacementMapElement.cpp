@@ -21,7 +21,6 @@
 
 #include "core/SVGNames.h"
 #include "core/svg/graphics/filters/SVGFilterBuilder.h"
-#include "platform/graphics/filters/FilterEffect.h"
 
 namespace blink {
 
@@ -74,8 +73,7 @@ bool SVGFEDisplacementMapElement::setFilterEffectAttribute(FilterEffect* effect,
     if (attrName == SVGNames::scaleAttr)
         return displacementMap->setScale(m_scale->currentValue()->value());
 
-    ASSERT_NOT_REACHED();
-    return false;
+    return SVGFilterPrimitiveStandardAttributes::setFilterEffectAttribute(effect, attrName);
 }
 
 void SVGFEDisplacementMapElement::svgAttributeChanged(const QualifiedName& attrName)

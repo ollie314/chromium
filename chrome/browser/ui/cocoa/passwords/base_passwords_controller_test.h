@@ -5,47 +5,58 @@
 #ifndef CHROME_BROWSER_UI_COCOA_PASSWORDS_BASE_PASSWORDS_CONTROLLER_TEST_H_
 #define CHROME_BROWSER_UI_COCOA_PASSWORDS_BASE_PASSWORDS_CONTROLLER_TEST_H_
 
+#include <memory>
+
+#include "base/mac/scoped_nsobject.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #import "chrome/browser/ui/cocoa/passwords/base_passwords_content_view_controller.h"
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
+#include "chrome/browser/ui/passwords/passwords_model_delegate_mock.h"
 
 namespace content {
 class WebContents;
 }  // namespace content
-
-class ManagePasswordsUIControllerMock;
-class ManagePasswordsBubbleModel;
-
-class ManagePasswordsControllerTest : public CocoaProfileTest {
- public:
-  ManagePasswordsControllerTest();
-  ~ManagePasswordsControllerTest() override;
-  void SetUp() override;
-
-  ManagePasswordsUIControllerMock* ui_controller() { return ui_controller_; }
-  ManagePasswordsBubbleModel* GetModelAndCreateIfNull();
-
-  // Sets the appropriate state for ManagePasswordsBubbleModel.
-  void SetUpSavePendingState(bool empty_username);
-  void SetUpUpdatePendingState(bool multiple_forms);
-  void SetUpConfirmationState();
-  void SetUpManageState();
-
-  // An opportunity for tests to override the constructor parameter of
-  // ManagePasswordsBubbleModel.
-  virtual ManagePasswordsBubbleModel::DisplayReason GetDisplayReason() const;
-
- private:
-  ManagePasswordsUIControllerMock* ui_controller_;
-  std::unique_ptr<content::WebContents> test_web_contents_;
-  std::unique_ptr<ManagePasswordsBubbleModel> model_;
-};
+class PasswordsModelDelegateMock;
 
 // Helper delegate for testing the views of the password management bubble.
 @interface ContentViewDelegateMock : NSObject<BasePasswordsContentViewDelegate>
 @property(nonatomic) ManagePasswordsBubbleModel* model;
 @property(readonly, nonatomic) BOOL dismissed;
 @end
+
+class ManagePasswordsControllerTest : public CocoaProfileTest {
+ public:
+  using VectorConstFormPtr =
+      std::vector<std::unique_ptr<autofill::PasswordForm>>;
+
+  ManagePasswordsControllerTest();
+  ~ManagePasswordsControllerTest() override;
+  void SetUp() override;
+
+  PasswordsModelDelegateMock* ui_controller() {
+    return ui_controller_.get();
+  }
+  ContentViewDelegateMock* delegate() { return delegate_.get(); }
+  ManagePasswordsBubbleModel* GetModelAndCreateIfNull();
+
+  // Sets the appropriate state for ManagePasswordsBubbleModel.
+  void SetUpSavePendingState(bool empty_username);
+  void SetUpUpdatePendingState(bool multiple_forms);
+  void SetUpConfirmationState();
+  void SetUpManageState(const VectorConstFormPtr& forms);
+
+  // An opportunity for tests to override the constructor parameter of
+  // ManagePasswordsBubbleModel.
+  virtual ManagePasswordsBubbleModel::DisplayReason GetDisplayReason() const;
+
+ private:
+  std::unique_ptr<PasswordsModelDelegateMock> ui_controller_;
+  std::unique_ptr<content::WebContents> test_web_contents_;
+  std::unique_ptr<ManagePasswordsBubbleModel> model_;
+  base::scoped_nsobject<ContentViewDelegateMock> delegate_;
+
+  DISALLOW_COPY_AND_ASSIGN(ManagePasswordsControllerTest);
+};
 
 #endif // CHROME_BROWSER_UI_COCOA_PASSWORDS_BASE_PASSWORDS_CONTROLLER_TEST_H_

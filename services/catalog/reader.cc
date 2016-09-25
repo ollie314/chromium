@@ -9,9 +9,10 @@
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/json/json_reader.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/task_runner_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "services/catalog/constants.h"
 #include "services/catalog/entry.h"
 #include "services/catalog/manifest_provider.h"
@@ -26,7 +27,7 @@ base::FilePath GetManifestPath(const base::FilePath& package_dir,
   std::string type = shell::GetNameType(name);
   std::string path = shell::GetNamePath(name);
   if (type == shell::kNameType_Mojo) {
-    return package_dir.AppendASCII(kMojoApplicationsDirName).AppendASCII(
+    return package_dir.AppendASCII(kPackagesDirName).AppendASCII(
         path + "/manifest.json");
   }
   if (type == shell::kNameType_Exe)
@@ -35,13 +36,13 @@ base::FilePath GetManifestPath(const base::FilePath& package_dir,
 }
 
 
-base::FilePath GetPackagePath(const base::FilePath& package_dir,
-                              const std::string& name) {
+base::FilePath GetExecutablePath(const base::FilePath& package_dir,
+                                 const std::string& name) {
   std::string type = shell::GetNameType(name);
   if (type == shell::kNameType_Mojo) {
     // It's still a mojo: URL, use the default mapping scheme.
     const std::string host = shell::GetNamePath(name);
-    return package_dir.AppendASCII(host + "/" + host + ".mojo");
+    return package_dir.AppendASCII(host + "/" + host + ".library");
   }
   if (type == shell::kNameType_Exe) {
 #if defined OS_WIN
@@ -54,8 +55,9 @@ base::FilePath GetPackagePath(const base::FilePath& package_dir,
   return base::FilePath();
 }
 
-scoped_ptr<Entry> ProcessManifest(scoped_ptr<base::Value> manifest_root,
-                                  const base::FilePath& package_dir) {
+std::unique_ptr<Entry> ProcessManifest(
+    std::unique_ptr<base::Value> manifest_root,
+    const base::FilePath& package_dir) {
   // Manifest was malformed or did not exist.
   if (!manifest_root)
     return nullptr;
@@ -64,14 +66,14 @@ scoped_ptr<Entry> ProcessManifest(scoped_ptr<base::Value> manifest_root,
   if (!manifest_root->GetAsDictionary(&dictionary))
     return nullptr;
 
-  scoped_ptr<Entry> entry = Entry::Deserialize(*dictionary);
+  std::unique_ptr<Entry> entry = Entry::Deserialize(*dictionary);
   if (!entry)
     return nullptr;
-  entry->set_path(GetPackagePath(package_dir, entry->name()));
+  entry->set_path(GetExecutablePath(package_dir, entry->name()));
   return entry;
 }
 
-scoped_ptr<Entry> CreateEntryForManifestAt(
+std::unique_ptr<Entry> CreateEntryForManifestAt(
     const base::FilePath& manifest_path,
     const base::FilePath& package_dir) {
   JSONFileValueDeserializer deserializer(manifest_path);
@@ -96,7 +98,7 @@ void ScanDir(
     if (path.empty())
       break;
     base::FilePath manifest_path = path.AppendASCII("manifest.json");
-    scoped_ptr<Entry> entry =
+    std::unique_ptr<Entry> entry =
         CreateEntryForManifestAt(manifest_path, package_dir);
     if (!entry)
       continue;
@@ -104,9 +106,11 @@ void ScanDir(
     // Skip over subdirs that contain only manifests, they're artifacts of the
     // build (e.g. for applications that are packaged into others) and are not
     // valid standalone packages.
-    base::FilePath package_path = GetPackagePath(package_dir, entry->name());
-    if (!base::PathExists(package_path))
+    base::FilePath package_path = GetExecutablePath(package_dir, entry->name());
+    if (entry->name() != "mojo:shell" && entry->name() != "mojo:catalog" &&
+        !base::PathExists(package_path)) {
       continue;
+    }
 
     original_thread_task_runner->PostTask(
         FROM_HERE,
@@ -116,21 +120,22 @@ void ScanDir(
   original_thread_task_runner->PostTask(FROM_HERE, read_complete_closure);
 }
 
-scoped_ptr<Entry> ReadManifest(const base::FilePath& package_dir,
-                               const std::string& mojo_name) {
-  scoped_ptr<Entry> entry = CreateEntryForManifestAt(
+std::unique_ptr<Entry> ReadManifest(const base::FilePath& package_dir,
+                                    const std::string& mojo_name) {
+  std::unique_ptr<Entry> entry = CreateEntryForManifestAt(
       GetManifestPath(package_dir, mojo_name), package_dir);
   if (!entry) {
     entry.reset(new Entry(mojo_name));
-    entry->set_path(GetPackagePath(
-        package_dir.AppendASCII(kMojoApplicationsDirName), mojo_name));
+    entry->set_path(GetExecutablePath(
+        package_dir.AppendASCII(kPackagesDirName), mojo_name));
   }
   return entry;
 }
 
-void AddEntryToCache(EntryCache* cache, scoped_ptr<Entry> entry) {
-  for (auto child : entry->applications())
-    AddEntryToCache(cache, make_scoped_ptr(child));
+void AddEntryToCache(EntryCache* cache, std::unique_ptr<Entry> entry) {
+  std::vector<std::unique_ptr<Entry>> children = entry->TakeChildren();
+  for (auto& child : children)
+    AddEntryToCache(cache, std::move(child));
   (*cache)[entry->name()] = std::move(entry);
 }
 
@@ -138,13 +143,23 @@ void DoNothing(shell::mojom::ResolveResultPtr) {}
 
 }  // namespace
 
-Reader::Reader(base::TaskRunner* file_task_runner,
+// A sequenced task runner is used to guarantee requests are serviced in the
+// order requested. To do otherwise means we may run callbacks in an
+// unpredictable order, leading to flake.
+Reader::Reader(base::SequencedWorkerPool* worker_pool,
                ManifestProvider* manifest_provider)
-    : file_task_runner_(file_task_runner),
-      manifest_provider_(manifest_provider),
-      weak_factory_(this) {
-  PathService::Get(base::DIR_MODULE, &system_package_dir_);
+    : Reader(manifest_provider) {
+  file_task_runner_ = worker_pool->GetSequencedTaskRunnerWithShutdownBehavior(
+      base::SequencedWorkerPool::GetSequenceToken(),
+      base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
 }
+
+Reader::Reader(base::SingleThreadTaskRunner* task_runner,
+               ManifestProvider* manifest_provider)
+    : Reader(manifest_provider) {
+  file_task_runner_ = task_runner;
+}
+
 Reader::~Reader() {}
 
 void Reader::Read(const base::FilePath& package_dir,
@@ -163,32 +178,37 @@ void Reader::CreateEntryForName(
     const std::string& mojo_name,
     EntryCache* cache,
     const CreateEntryForNameCallback& entry_created_callback) {
-  std::string manifest_contents;
-  if (manifest_provider_ &&
-      manifest_provider_->GetApplicationManifest(mojo_name,
-                                                 &manifest_contents)) {
-    scoped_ptr<base::Value> manifest_root =
-        base::JSONReader::Read(manifest_contents);
-    base::PostTaskAndReplyWithResult(
-        file_task_runner_, FROM_HERE,
-        base::Bind(&ProcessManifest, base::Passed(&manifest_root),
-                   system_package_dir_),
-        base::Bind(&Reader::OnReadManifest, weak_factory_.GetWeakPtr(),
-                   cache, entry_created_callback));
-  } else {
-    base::PostTaskAndReplyWithResult(
-        file_task_runner_, FROM_HERE,
-        base::Bind(&ReadManifest, system_package_dir_, mojo_name),
-        base::Bind(&Reader::OnReadManifest, weak_factory_.GetWeakPtr(),
-                   cache, entry_created_callback));
-
+  if (manifest_provider_) {
+    std::unique_ptr<base::Value> manifest_root =
+        manifest_provider_->GetManifest(mojo_name);
+    if (manifest_root) {
+      base::PostTaskAndReplyWithResult(
+          file_task_runner_.get(), FROM_HERE,
+          base::Bind(&ProcessManifest, base::Passed(&manifest_root),
+                     system_package_dir_),
+          base::Bind(&Reader::OnReadManifest, weak_factory_.GetWeakPtr(), cache,
+                     entry_created_callback));
+      return;
+    }
   }
+  base::PostTaskAndReplyWithResult(
+      file_task_runner_.get(), FROM_HERE,
+      base::Bind(&ReadManifest, system_package_dir_, mojo_name),
+      base::Bind(&Reader::OnReadManifest, weak_factory_.GetWeakPtr(), cache,
+                  entry_created_callback));
+}
+
+Reader::Reader(ManifestProvider* manifest_provider)
+    : manifest_provider_(manifest_provider), weak_factory_(this) {
+  PathService::Get(base::DIR_MODULE, &system_package_dir_);
 }
 
 void Reader::OnReadManifest(
     EntryCache* cache,
     const CreateEntryForNameCallback& entry_created_callback,
-    scoped_ptr<Entry> entry) {
+    std::unique_ptr<Entry> entry) {
+  if (!entry)
+    return;
   shell::mojom::ResolveResultPtr result =
       shell::mojom::ResolveResult::From(*entry);
   AddEntryToCache(cache, std::move(entry));

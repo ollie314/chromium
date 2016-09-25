@@ -30,6 +30,7 @@ class WebString;
 namespace media {
 class MediaLog;
 class VideoFrame;
+enum VideoRotation;
 }
 
 namespace cc_blink {
@@ -45,7 +46,7 @@ class GLES2Interface;
 namespace content {
 class MediaStreamAudioRenderer;
 class MediaStreamRendererFactory;
-class VideoFrameProvider;
+class MediaStreamVideoRenderer;
 class WebMediaPlayerMSCompositor;
 class RenderFrameObserver;
 
@@ -57,7 +58,7 @@ class RenderFrameObserver;
 //
 // WebMediaPlayerMS works with multiple objects, the most important ones are:
 //
-// VideoFrameProvider
+// MediaStreamVideoRenderer
 //   provides video frames for rendering.
 //
 // blink::WebMediaPlayerClient
@@ -68,7 +69,7 @@ class CONTENT_EXPORT WebMediaPlayerMS
       public NON_EXPORTED_BASE(base::SupportsWeakPtr<WebMediaPlayerMS>) {
  public:
   // Construct a WebMediaPlayerMS with reference to the client, and
-  // a MediaStreamClient which provides VideoFrameProvider.
+  // a MediaStreamClient which provides MediaStreamVideoRenderer.
   WebMediaPlayerMS(
       blink::WebFrame* frame,
       blink::WebMediaPlayerClient* client,
@@ -105,10 +106,12 @@ class CONTENT_EXPORT WebMediaPlayerMS
   // Methods for painting.
   void paint(blink::WebCanvas* canvas,
              const blink::WebRect& rect,
-             unsigned char alpha,
-             SkXfermode::Mode mode) override;
+             SkPaint& paint) override;
   media::SkCanvasVideoRenderer* GetSkCanvasVideoRenderer();
   void ResetCanvasCache();
+
+  // Methods to trigger resize event.
+  void TriggerResize();
 
   // True if the loaded media has a playable video/audio track.
   bool hasVideo() const override;
@@ -158,7 +161,8 @@ class CONTENT_EXPORT WebMediaPlayerMS
  private:
   friend class WebMediaPlayerMSTest;
 
-  // The callback for VideoFrameProvider to signal a new frame is available.
+  // The callback for MediaStreamVideoRenderer to signal a new frame is
+  // available.
   void OnFrameAvailable(const scoped_refptr<media::VideoFrame>& frame);
   // Need repaint due to state change.
   void RepaintInternal();
@@ -190,17 +194,18 @@ class CONTENT_EXPORT WebMediaPlayerMS
   const base::WeakPtr<media::WebMediaPlayerDelegate> delegate_;
   int delegate_id_;
 
-  // Specify content:: to disambiguate from cc::.
-  scoped_refptr<content::VideoFrameProvider> video_frame_provider_;  // Weak
+  scoped_refptr<MediaStreamVideoRenderer> video_frame_provider_; // Weak
 
   std::unique_ptr<cc_blink::WebLayerImpl> video_weblayer_;
 
-  scoped_refptr<MediaStreamAudioRenderer> audio_renderer_;  // Weak
+  scoped_refptr<MediaStreamAudioRenderer> audio_renderer_; // Weak
   media::SkCanvasVideoRenderer video_renderer_;
 
+  bool last_frame_opaque_;
   bool paused_;
   bool render_frame_suspended_;
   bool received_first_frame_;
+  media::VideoRotation video_rotation_;
 
   scoped_refptr<media::MediaLog> media_log_;
 

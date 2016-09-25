@@ -6,16 +6,17 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/URLSearchParams.h"
 #include "core/frame/FrameView.h"
 #include "core/html/FormData.h"
-#include "core/html/HTMLDocument.h"
 #include "core/html/HTMLFormElement.h"
 #include "core/html/forms/FormController.h"
 #include "core/testing/DummyPageHolder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/text/StringBuilder.h"
+#include <memory>
 
 namespace blink {
 
@@ -24,19 +25,19 @@ protected:
     void SetUp() override
     {
         m_dummyPageHolder = DummyPageHolder::create();
-        m_document = toHTMLDocument(&m_dummyPageHolder->document());
+        m_document = &m_dummyPageHolder->document();
     }
 
-    HTMLDocument& document() const { return *m_document; }
+    Document& document() const { return *m_document; }
 
     HTMLFormElement* populateForm(const char* enctype, const char* html)
     {
         StringBuilder b;
-        b.appendLiteral("<!DOCTYPE html><html><body><form id='theForm' enctype='");
+        b.append("<!DOCTYPE html><html><body><form id='theForm' enctype='");
         b.append(enctype);
-        b.appendLiteral("'>");
+        b.append("'>");
         b.append(html);
-        b.appendLiteral("</form></body></html>");
+        b.append("</form></body></html>");
         document().documentElement()->setInnerHTML(b.toString(), ASSERT_NO_EXCEPTION);
         document().view()->updateAllLifecyclePhases();
         HTMLFormElement* form = toHTMLFormElement(document().getElementById("theForm"));
@@ -45,8 +46,8 @@ protected:
     }
 
 private:
-    OwnPtr<DummyPageHolder> m_dummyPageHolder;
-    Persistent<HTMLDocument> m_document;
+    std::unique_ptr<DummyPageHolder> m_dummyPageHolder;
+    Persistent<Document> m_document;
 };
 
 TEST_F(PasswordCredentialTest, CreateFromMultipartForm)

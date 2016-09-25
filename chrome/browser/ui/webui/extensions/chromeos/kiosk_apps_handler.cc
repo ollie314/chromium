@@ -24,12 +24,12 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/crx_file/id_util.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/grit/extensions_browser_resources.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -223,8 +223,8 @@ void KioskAppsHandler::OnGetConsumerKioskAutoLaunchStatus(
     base::DictionaryValue kiosk_params;
     kiosk_params.SetBoolean("kioskEnabled", is_kiosk_enabled_);
     kiosk_params.SetBoolean("autoLaunchEnabled", is_auto_launch_enabled_);
-    web_ui()->CallJavascriptFunction("extensions.KioskAppsOverlay.enableKiosk",
-                                     kiosk_params);
+    web_ui()->CallJavascriptFunctionUnsafe(
+        "extensions.KioskAppsOverlay.enableKiosk", kiosk_params);
   }
 }
 
@@ -262,8 +262,8 @@ void KioskAppsHandler::SendKioskAppSettings() {
   }
   settings.SetWithoutPathExpansion("apps", apps_list.release());
 
-  web_ui()->CallJavascriptFunction("extensions.KioskAppsOverlay.setSettings",
-                                   settings);
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "extensions.KioskAppsOverlay.setSettings", settings);
 }
 
 void KioskAppsHandler::HandleInitializeKioskAppSettings(
@@ -351,14 +351,14 @@ void KioskAppsHandler::UpdateApp(const std::string& app_id) {
   base::DictionaryValue app_dict;
   PopulateAppDict(app_data, &app_dict);
 
-  web_ui()->CallJavascriptFunction("extensions.KioskAppsOverlay.updateApp",
-                                   app_dict);
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "extensions.KioskAppsOverlay.updateApp", app_dict);
 }
 
 void KioskAppsHandler::ShowError(const std::string& app_id) {
   base::StringValue app_id_value(app_id);
-  web_ui()->CallJavascriptFunction("extensions.KioskAppsOverlay.showError",
-                                   app_id_value);
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "extensions.KioskAppsOverlay.showError", app_id_value);
 
   kiosk_app_manager_->RemoveApp(app_id, owner_settings_service_);
 }

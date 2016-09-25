@@ -6,8 +6,7 @@
  * FileManager constructor.
  *
  * FileManager objects encapsulate the functionality of the file selector
- * dialogs, as well as the full screen file manager application (though the
- * latter is not yet implemented).
+ * dialogs, as well as the full screen file manager application.
  *
  * @constructor
  * @struct
@@ -59,6 +58,11 @@ function FileManager() {
   this.metadataModel_ = null;
 
   /**
+   * @private {!FileMetadataFormatter}
+   */
+  this.fileMetadataFormatter_ = new FileMetadataFormatter();
+
+  /**
    * @private {ThumbnailModel}
    */
   this.thumbnailModel_ = null;
@@ -98,6 +102,13 @@ function FileManager() {
    * @private
    */
   this.providersModel_ = null;
+
+  /**
+   * Model for quick view.
+   * @type {QuickViewModel}
+   * @private
+   */
+  this.quickViewModel_ = null;
 
   /**
    * Controller for actions for current selection.
@@ -253,6 +264,24 @@ function FileManager() {
 
   /** @private {ColumnVisibilityController} */
   this.columnVisibilityController_ = null;
+
+  /**
+   * @type {QuickViewUma}
+   * @private
+   */
+  this.quickViewUma_ = null;
+
+  /**
+   * @type {QuickViewController}
+   * @private
+   */
+  this.quickViewController_ = null;
+
+  /**
+   * @type {MetadataBoxController}
+   * @private
+   */
+  this.metadataBoxController_ = null;
 
   // --------------------------------------------------------------------------
   // DOM elements.
@@ -509,6 +538,30 @@ FileManager.prototype = /** @struct */ {
         assert(this.folderShortcutsModel_),
         this.backgroundPage_.background.driveSyncHandler,
         this.selectionHandler_, assert(this.ui_));
+
+    this.quickViewModel_ = new QuickViewModel();
+    /**@private {!FilesQuickView} */
+    var quickView = /** @type {!FilesQuickView} */
+        (queryRequiredElement('#quick-view'));
+    var fileListSelectionModel = /** @type {!cr.ui.ListSelectionModel} */ (
+        this.directoryModel_.getFileListSelection());
+    chrome.commandLinePrivate.hasSwitch(
+        'disable-files-quick-view', function(disabled) {
+          if (!disabled) {
+            this.quickViewUma_ =
+                new QuickViewUma(assert(this.volumeManager_));
+            this.quickViewController_ = new QuickViewController(
+                quickView, assert(this.metadataModel_),
+                assert(this.selectionHandler_),
+                assert(this.ui_.listContainer), assert(this.quickViewModel_),
+                assert(this.taskController_),
+                fileListSelectionModel,
+                assert(this.quickViewUma_));
+            this.metadataBoxController_ = new MetadataBoxController(
+                this.metadataModel_, quickView.getFilesMetadataBox(),
+                quickView, this.quickViewModel_, this.fileMetadataFormatter_);
+          }
+        }.bind(this));
 
     if (this.dialogType === DialogType.FULL_PAGE) {
       importer.importEnabled().then(
@@ -815,7 +868,6 @@ FileManager.prototype = /** @struct */ {
     assert(this.volumeManager_);
     assert(this.historyLoader_);
     assert(this.dialogDom_);
-    assert(this.metadataModel_);
 
     // Cache nodes we'll be manipulating.
     var dom = this.dialogDom_;
@@ -993,7 +1045,8 @@ FileManager.prototype = /** @struct */ {
         this.ui_.listContainer,
         assert(this.ui_.detailsContainer),
         this.directoryModel_,
-        this.metadataModel_);
+        this.metadataModel_,
+        this.fileMetadataFormatter_);
 
     // Create task controller.
     this.taskController_ = new TaskController(

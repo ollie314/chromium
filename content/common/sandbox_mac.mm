@@ -32,14 +32,14 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
-#include "content/common/gpu/media/vt_video_decode_accelerator_mac.h"
 #include "content/grit/content_resources.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
+#include "media/gpu/vt_video_decode_accelerator_mac.h"
 #include "sandbox/mac/seatbelt.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
 #include "ui/base/layout.h"
-#include "ui/gl/gl_surface.h"
+#include "ui/gl/init/gl_factory.h"
 
 extern "C" {
 void CGSSetDenyWindowServerConnections(bool);
@@ -329,10 +329,10 @@ void Sandbox::SandboxWarmup(int sandbox_type) {
   if (sandbox_type == SANDBOX_TYPE_GPU) {
     // Preload either the desktop GL or the osmesa so, depending on the
     // --use-gl flag.
-    gfx::GLSurface::InitializeOneOff();
+    gl::init::InitializeGLOneOff();
 
     // Preload VideoToolbox.
-    InitializeVideoToolbox();
+    media::InitializeVideoToolbox();
   }
 
   if (sandbox_type == SANDBOX_TYPE_PPAPI) {
@@ -341,14 +341,11 @@ void Sandbox::SandboxWarmup(int sandbox_type) {
     [color colorUsingColorSpaceName:NSCalibratedRGBColorSpace];
   }
 
-  if (sandbox_type == SANDBOX_TYPE_RENDERER &&
-      base::mac::IsOSMountainLionOrLater()) {
+  if (sandbox_type == SANDBOX_TYPE_RENDERER) {
     // Now disconnect from WindowServer, after all objects have been warmed up.
     // Shutting down the connection requires connecting to WindowServer,
-    // so do this before actually engaging the sandbox. This is only done on
-    // 10.8 and higher because doing it on earlier OSes causes layout tests to
-    // fail <http://crbug.com/397642#c48>. This may cause two log messages to
-    // be printed to the system logger on certain OS versions.
+    // so do this before actually engaging the sandbox. This may cause two log
+    // messages to be printed to the system logger on certain OS versions.
     CGSSetDenyWindowServerConnections(true);
     CGSShutdownServerConnections();
   }
@@ -474,10 +471,7 @@ bool Sandbox::EnableSandbox(int sandbox_type,
   if (!compiler.InsertStringParam("USER_HOMEDIR_AS_LITERAL", quoted_home_dir))
     return false;
 
-  bool lion_or_later = base::mac::IsOSLionOrLater();
-  if (!compiler.InsertBooleanParam("LION_OR_LATER", lion_or_later))
-    return false;
-  bool elcap_or_later = base::mac::IsOSElCapitanOrLater();
+  bool elcap_or_later = base::mac::IsAtLeastOS10_11();
   if (!compiler.InsertBooleanParam("ELCAP_OR_LATER", elcap_or_later))
     return false;
 

@@ -15,6 +15,7 @@
 #include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/system_clock_client.h"
@@ -23,7 +24,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "grit/browser_resources.h"
 
 namespace chromeos {
 
@@ -59,15 +59,15 @@ class SetTimeMessageHandler : public content::WebUIMessageHandler,
  private:
   // system::SystemClockClient::Observer:
   void SystemClockUpdated() override {
-    web_ui()->CallJavascriptFunction("settime.TimeSetter.updateTime");
+    web_ui()->CallJavascriptFunctionUnsafe("settime.TimeSetter.updateTime");
   }
 
   // system::TimezoneSettings::Observer:
   void TimezoneChanged(const icu::TimeZone& timezone) override {
     base::StringValue timezone_id(
         system::TimezoneSettings::GetTimezoneID(timezone));
-    web_ui()->CallJavascriptFunction("settime.TimeSetter.setTimezone",
-                                     timezone_id);
+    web_ui()->CallJavascriptFunctionUnsafe("settime.TimeSetter.setTimezone",
+                                           timezone_id);
   }
 
   // Handler for Javascript call to set the system clock when the user sets a

@@ -6,7 +6,9 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -29,8 +31,10 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
@@ -39,8 +43,6 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "content/public/common/webplugininfo.h"
-#include "grit/browser_resources.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_WIN)
@@ -159,10 +161,10 @@ void NaClDomHandler::RegisterMessages() {
 void AddPair(base::ListValue* list,
              const base::string16& key,
              const base::string16& value) {
-  base::DictionaryValue* results = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> results(new base::DictionaryValue());
   results->SetString("key", key);
   results->SetString("value", value);
-  list->Append(results);
+  list->Append(std::move(results));
 }
 
 // Generate an empty data-pair which acts as a line break.
@@ -372,7 +374,7 @@ void NaClDomHandler::MaybeRespondToPage() {
 
   base::DictionaryValue naclInfo;
   PopulatePageInformation(&naclInfo);
-  web_ui()->CallJavascriptFunction("nacl.returnNaClInfo", naclInfo);
+  web_ui()->CallJavascriptFunctionUnsafe("nacl.returnNaClInfo", naclInfo);
 }
 
 }  // namespace

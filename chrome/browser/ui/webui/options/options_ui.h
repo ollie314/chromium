@@ -20,14 +20,12 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "ui/base/layout.h"
 
 class AutocompleteResult;
 
 namespace base {
 class DictionaryValue;
 class ListValue;
-class RefCountedMemory;
 }
 
 #if defined(OS_CHROMEOS)
@@ -43,9 +41,6 @@ namespace options {
 // The base class handler of Javascript messages of options pages.
 class OptionsPageUIHandler : public content::WebUIMessageHandler {
  public:
-  // Key for identifying the Settings App localized_strings in loadTimeData.
-  static const char kSettingsAppKey[];
-
   OptionsPageUIHandler();
   ~OptionsPageUIHandler() override;
 
@@ -132,9 +127,6 @@ class OptionsUI : public content::WebUIController,
   static void ProcessAutocompleteSuggestions(
       const AutocompleteResult& result,
       base::ListValue* const suggestions);
-
-  static base::RefCountedMemory* GetFaviconResourceBytes(
-      ui::ScaleFactor scale_factor);
 
   // Overridden from content::WebContentsObserver:
   void DidStartProvisionalLoadForFrame(

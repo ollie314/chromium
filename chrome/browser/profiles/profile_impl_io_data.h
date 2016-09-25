@@ -147,8 +147,6 @@ class ProfileImplIOData : public ProfileIOData {
   };
 
  private:
-  friend class base::RefCountedThreadSafe<ProfileImplIOData>;
-
   struct LazyParams {
     LazyParams();
     ~LazyParams();
@@ -199,6 +197,7 @@ class ProfileImplIOData : public ProfileIOData {
   net::URLRequestContext* AcquireIsolatedMediaRequestContext(
       net::URLRequestContext* app_context,
       const StoragePartitionDescriptor& partition_descriptor) const override;
+  chrome_browser_net::Predictor* GetPredictor() override;
 
   // Deletes all network related data since |time|. It deletes transport
   // security state since |time| and also deletes HttpServerProperties data.

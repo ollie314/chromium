@@ -19,7 +19,6 @@
 #include "core/xml/DOMParser.h"
 
 #include "core/dom/DOMImplementation.h"
-#include "core/dom/ExceptionCode.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -28,6 +27,7 @@ Document* DOMParser::parseFromString(const String& str, const String& type)
 {
     Document* doc = DOMImplementation::createDocument(type, DocumentInit(KURL(), nullptr, m_contextDocument), false);
     doc->setContent(str);
+    doc->setSecurityOrigin(m_contextDocument->getSecurityOrigin());
     return doc;
 }
 

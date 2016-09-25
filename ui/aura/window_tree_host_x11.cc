@@ -34,9 +34,11 @@
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/base/x/x11_window_event_manager.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
+#include "ui/display/screen.h"
 #include "ui/events/devices/x11/device_data_manager_x11.h"
 #include "ui/events/devices/x11/device_list_cache_x11.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
@@ -47,7 +49,6 @@
 #include "ui/events/platform/platform_event_observer.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/events/platform/x11/x11_event_source.h"
-#include "ui/gfx/screen.h"
 
 using std::max;
 using std::min;
@@ -62,6 +63,14 @@ const char* kAtomsToCache[] = {
   "_NET_WM_PID",
   NULL
 };
+
+constexpr uint32_t kInputEventMask =
+    ButtonPressMask | ButtonReleaseMask | FocusChangeMask | KeyPressMask |
+    KeyReleaseMask | EnterWindowMask | LeaveWindowMask | PointerMotionMask;
+
+constexpr uint32_t kEventMask = kInputEventMask | ExposureMask |
+                                VisibilityChangeMask | StructureNotifyMask |
+                                PropertyChangeMask;
 
 ::Window FindEventTarget(const base::NativeEvent& xev) {
   ::Window target = xev->xany.window;
@@ -132,13 +141,7 @@ WindowTreeHostX11::WindowTreeHostX11(const gfx::Rect& bounds)
   if (ui::PlatformEventSource::GetInstance())
     ui::PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
 
-  long event_mask = ButtonPressMask | ButtonReleaseMask | FocusChangeMask |
-                    KeyPressMask | KeyReleaseMask |
-                    EnterWindowMask | LeaveWindowMask |
-                    ExposureMask | VisibilityChangeMask |
-                    StructureNotifyMask | PropertyChangeMask |
-                    PointerMotionMask;
-  XSelectInput(xdisplay_, xwindow_, event_mask);
+  xwindow_events_.reset(new ui::XScopedEventSelector(xwindow_, kEventMask));
   XFlush(xdisplay_);
 
   if (ui::IsXInput2Available()) {
@@ -257,8 +260,9 @@ uint32_t WindowTreeHostX11::DispatchEvent(const ui::PlatformEvent& event) {
           client::CursorClient* cursor_client =
               client::GetCursorClient(root_window);
           if (cursor_client) {
-            const gfx::Display display =
-                gfx::Screen::GetScreen()->GetDisplayNearestWindow(root_window);
+            const display::Display display =
+                display::Screen::GetScreen()->GetDisplayNearestWindow(
+                    root_window);
             cursor_client->SetDisplay(display);
           }
           // EnterNotify creates ET_MOUSE_MOVE. Mark as synthesized as this is
@@ -399,7 +403,7 @@ void WindowTreeHostX11::SetBounds(const gfx::Rect& bounds) {
   // Even if the host window's size doesn't change, aura's root window
   // size, which is in DIP, changes when the scale changes.
   float current_scale = compositor()->device_scale_factor();
-  float new_scale = gfx::Screen::GetScreen()
+  float new_scale = display::Screen::GetScreen()
                         ->GetDisplayNearestWindow(window())
                         .device_scale_factor();
   bool origin_changed = bounds_.origin() != bounds.origin();
@@ -467,6 +471,17 @@ void WindowTreeHostX11::MoveCursorToNative(const gfx::Point& location) {
 }
 
 void WindowTreeHostX11::OnCursorVisibilityChangedNative(bool show) {
+}
+
+void WindowTreeHostX11::DisableInput() {
+  xwindow_events_.reset(
+      new ui::XScopedEventSelector(xwindow_, kEventMask & ~kInputEventMask));
+  unsigned char mask[XIMaskLen(XI_LASTEVENT)] = {0};
+  XIEventMask evmask;
+  evmask.deviceid = XIAllDevices;
+  evmask.mask_len = sizeof(mask);
+  evmask.mask = mask;
+  XISelectEvents(gfx::GetXDisplay(), xwindow_, &evmask, 1);
 }
 
 void WindowTreeHostX11::DispatchXI2Event(const base::NativeEvent& event) {

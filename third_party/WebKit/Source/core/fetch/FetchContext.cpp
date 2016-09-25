@@ -47,10 +47,6 @@ void FetchContext::addAdditionalRequestHeaders(ResourceRequest&, FetchResourceTy
 {
 }
 
-void FetchContext::setFirstPartyForCookies(ResourceRequest&)
-{
-}
-
 CachePolicy FetchContext::getCachePolicy() const
 {
     return CachePolicyVerify;
@@ -65,11 +61,11 @@ void FetchContext::dispatchWillSendRequest(unsigned long, ResourceRequest&, cons
 {
 }
 
-void FetchContext::dispatchDidLoadResourceFromMemoryCache(const Resource*, WebURLRequest::FrameType, WebURLRequest::RequestContext)
+void FetchContext::dispatchDidLoadResourceFromMemoryCache(unsigned long, Resource*, WebURLRequest::FrameType, WebURLRequest::RequestContext)
 {
 }
 
-void FetchContext::dispatchDidReceiveResponse(unsigned long, const ResourceResponse&, WebURLRequest::FrameType, WebURLRequest::RequestContext, ResourceLoader*)
+void FetchContext::dispatchDidReceiveResponse(unsigned long, const ResourceResponse&, WebURLRequest::FrameType, WebURLRequest::RequestContext, Resource*)
 {
 }
 
@@ -89,7 +85,7 @@ void FetchContext::dispatchDidFail(unsigned long, const ResourceError&, bool)
 {
 }
 
-void FetchContext::willStartLoadingResource(Resource*, ResourceRequest&)
+void FetchContext::willStartLoadingResource(unsigned long, ResourceRequest&, Resource::Type)
 {
 }
 
@@ -105,11 +101,11 @@ void FetchContext::sendImagePing(const KURL&)
 {
 }
 
-void FetchContext::addConsoleMessage(const String&) const
+void FetchContext::addConsoleMessage(const String&, FetchContext::LogMessageType) const
 {
 }
 
-void FetchContext::upgradeInsecureRequest(FetchRequest&)
+void FetchContext::upgradeInsecureRequest(ResourceRequest&)
 {
 }
 
@@ -118,6 +114,10 @@ void FetchContext::addClientHintsIfNecessary(FetchRequest&)
 }
 
 void FetchContext::addCSPHeaderIfNecessary(Resource::Type, FetchRequest&)
+{
+}
+
+void FetchContext::populateRequestData(ResourceRequest&)
 {
 }
 

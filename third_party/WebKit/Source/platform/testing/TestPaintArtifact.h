@@ -10,9 +10,9 @@
 #include "platform/graphics/paint/DisplayItemList.h"
 #include "platform/graphics/paint/PaintArtifact.h"
 #include "wtf/Allocator.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace cc {
 class Layer;
@@ -24,6 +24,7 @@ class ClipPaintPropertyNode;
 class EffectPaintPropertyNode;
 class FloatRect;
 class PaintArtifact;
+class ScrollPaintPropertyNode;
 class TransformPaintPropertyNode;
 
 // Useful for quickly making a paint artifact in unit tests.
@@ -45,7 +46,7 @@ public:
     ~TestPaintArtifact();
 
     // Add to the artifact.
-    TestPaintArtifact& chunk(PassRefPtr<TransformPaintPropertyNode>, PassRefPtr<ClipPaintPropertyNode>, PassRefPtr<EffectPaintPropertyNode>);
+    TestPaintArtifact& chunk(PassRefPtr<TransformPaintPropertyNode>, PassRefPtr<ClipPaintPropertyNode>, PassRefPtr<EffectPaintPropertyNode>, PassRefPtr<ScrollPaintPropertyNode> = nullptr);
     TestPaintArtifact& chunk(const PaintChunkProperties&);
     TestPaintArtifact& rectDrawing(const FloatRect& bounds, Color);
     TestPaintArtifact& foreignLayer(const FloatPoint&, const IntSize&, scoped_refptr<cc::Layer>);
@@ -55,7 +56,7 @@ public:
 
 private:
     class DummyRectClient;
-    Vector<OwnPtr<DummyRectClient>> m_dummyClients;
+    Vector<std::unique_ptr<DummyRectClient>> m_dummyClients;
 
     // Exists if m_built is false.
     DisplayItemList m_displayItemList;
@@ -65,9 +66,6 @@ private:
     PaintArtifact m_paintArtifact;
 
     bool m_built;
-
-    // To make MSVC happy.
-    friend struct WTF::OwnedPtrDeleter<DummyRectClient>;
 };
 
 } // namespace blink

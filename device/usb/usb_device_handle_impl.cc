@@ -17,7 +17,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/device_event_log/device_event_log.h"
 #include "device/usb/usb_context.h"
 #include "device/usb/usb_descriptors.h"
@@ -612,7 +612,7 @@ void UsbDeviceHandleImpl::ClaimInterface(int interface_number,
     callback.Run(false);
     return;
   }
-  if (ContainsKey(claimed_interfaces_, interface_number)) {
+  if (base::ContainsKey(claimed_interfaces_, interface_number)) {
     callback.Run(true);
     return;
   }
@@ -626,7 +626,7 @@ void UsbDeviceHandleImpl::ClaimInterface(int interface_number,
 void UsbDeviceHandleImpl::ReleaseInterface(int interface_number,
                                            const ResultCallback& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!device_ || !ContainsKey(claimed_interfaces_, interface_number)) {
+  if (!device_ || !base::ContainsKey(claimed_interfaces_, interface_number)) {
     task_runner_->PostTask(FROM_HERE, base::Bind(callback, false));
     return;
   }
@@ -652,7 +652,7 @@ void UsbDeviceHandleImpl::SetInterfaceAlternateSetting(
     int alternate_setting,
     const ResultCallback& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (!device_ || !ContainsKey(claimed_interfaces_, interface_number)) {
+  if (!device_ || !base::ContainsKey(claimed_interfaces_, interface_number)) {
     callback.Run(false);
     return;
   }
@@ -862,7 +862,7 @@ void UsbDeviceHandleImpl::ClaimInterfaceComplete(
         interface_claimer;
     RefreshEndpointMap();
   }
-  callback.Run(interface_claimer);
+  callback.Run(static_cast<bool>(interface_claimer));
 }
 
 void UsbDeviceHandleImpl::SetInterfaceAlternateSettingOnBlockingThread(
@@ -920,7 +920,7 @@ void UsbDeviceHandleImpl::ClearHaltOnBlockingThread(
 void UsbDeviceHandleImpl::RefreshEndpointMap() {
   DCHECK(thread_checker_.CalledOnValidThread());
   endpoint_map_.clear();
-  const UsbConfigDescriptor* config = device_->GetActiveConfiguration();
+  const UsbConfigDescriptor* config = device_->active_configuration();
   if (config) {
     for (const auto& map_entry : claimed_interfaces_) {
       int interface_number = map_entry.first;
@@ -1113,7 +1113,8 @@ void UsbDeviceHandleImpl::SubmitTransfer(std::unique_ptr<Transfer> transfer) {
 void UsbDeviceHandleImpl::TransferComplete(Transfer* transfer,
                                            const base::Closure& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(ContainsKey(transfers_, transfer)) << "Missing transfer completed";
+  DCHECK(base::ContainsKey(transfers_, transfer))
+      << "Missing transfer completed";
   transfers_.erase(transfer);
 
   if (transfer->callback_task_runner()->RunsTasksOnCurrentThread()) {

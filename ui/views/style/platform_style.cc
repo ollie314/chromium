@@ -34,10 +34,16 @@ const SkColor kStyleButtonShadowColor = SK_ColorWHITE;
 
 #if !defined(OS_MACOSX)
 
+const int PlatformStyle::kComboboxNormalArrowPadding = 7;
 const int PlatformStyle::kMinLabelButtonWidth = 70;
 const int PlatformStyle::kMinLabelButtonHeight = 33;
 const bool PlatformStyle::kDefaultLabelButtonHasBoldFont = true;
+const bool PlatformStyle::kDialogDefaultButtonCanBeCancel = true;
 const bool PlatformStyle::kTextfieldDragVerticallyDragsToEnd = false;
+const CustomButton::NotifyAction PlatformStyle::kMenuNotifyActivationAction =
+    CustomButton::NOTIFY_ON_RELEASE;
+const bool PlatformStyle::kTreeViewSelectionPaintsEntireRow = false;
+const bool PlatformStyle::kUseRipples = true;
 
 // static
 gfx::ImageSkia PlatformStyle::CreateComboboxArrow(bool is_enabled,
@@ -48,11 +54,12 @@ gfx::ImageSkia PlatformStyle::CreateComboboxArrow(bool is_enabled,
 
 // static
 std::unique_ptr<FocusableBorder> PlatformStyle::CreateComboboxBorder() {
-  return base::WrapUnique(new FocusableBorder());
+  return base::MakeUnique<FocusableBorder>();
 }
 
 // static
-std::unique_ptr<Background> PlatformStyle::CreateComboboxBackground() {
+std::unique_ptr<Background> PlatformStyle::CreateComboboxBackground(
+    int shoulder_width) {
   return nullptr;
 }
 
@@ -61,7 +68,7 @@ std::unique_ptr<LabelButtonBorder> PlatformStyle::CreateLabelButtonBorder(
     Button::ButtonStyle style) {
   if (!ui::MaterialDesignController::IsModeMaterial() ||
       style != Button::STYLE_TEXTBUTTON) {
-    return base::WrapUnique(new LabelButtonAssetBorder(style));
+    return base::MakeUnique<LabelButtonAssetBorder>(style);
   }
 
   std::unique_ptr<LabelButtonBorder> border(new views::LabelButtonBorder());
@@ -72,7 +79,7 @@ std::unique_ptr<LabelButtonBorder> PlatformStyle::CreateLabelButtonBorder(
 
 // static
 std::unique_ptr<ScrollBar> PlatformStyle::CreateScrollBar(bool is_horizontal) {
-  return base::WrapUnique(new NativeScrollBar(is_horizontal));
+  return base::MakeUnique<NativeScrollBar>(is_horizontal);
 }
 
 // static
@@ -81,6 +88,9 @@ SkColor PlatformStyle::TextColorForButton(
     const LabelButton& button) {
   return color_by_state[button.state()];
 }
+
+// static
+void PlatformStyle::OnTextfieldKeypressUnhandled() {}
 
 #endif  // OS_MACOSX
 

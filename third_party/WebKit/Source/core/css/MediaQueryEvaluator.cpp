@@ -47,7 +47,6 @@
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "core/inspector/InspectorInstrumentation.h"
-#include "core/layout/LayoutView.h"
 #include "core/style/ComputedStyle.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/geometry/FloatRect.h"
@@ -169,6 +168,20 @@ bool compareValue(T a, T b, MediaFeaturePrefix op)
         return a <= b;
     case NoPrefix:
         return a == b;
+    }
+    return false;
+}
+
+bool compareDoubleValue(double a, double b, MediaFeaturePrefix op)
+{
+    const double precision = std::numeric_limits<double>::epsilon();
+    switch (op) {
+    case MinPrefix:
+        return a >= (b - precision);
+    case MaxPrefix:
+        return a <= (b + precision);
+    case NoPrefix:
+        return std::abs(a - b) <= precision;
     }
     return false;
 }
@@ -374,7 +387,7 @@ static bool computeLength(const MediaQueryExpValue& value, const MediaValues& me
 static bool computeLengthAndCompare(const MediaQueryExpValue& value, MediaFeaturePrefix op, const MediaValues& mediaValues, double compareToValue)
 {
     double length;
-    return computeLength(value, mediaValues, length) && compareValue(compareToValue, length, op);
+    return computeLength(value, mediaValues, length) && compareDoubleValue(compareToValue, length, op);
 }
 
 static bool deviceHeightMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePrefix op, const MediaValues& mediaValues)
@@ -644,7 +657,7 @@ static bool scanMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePr
     return (value.id == CSSValueProgressive);
 }
 
-static void createFunctionMap()
+void MediaQueryEvaluator::init()
 {
     // Create the table.
     gFunctionMap = new FunctionMap;
@@ -659,8 +672,7 @@ bool MediaQueryEvaluator::eval(const MediaQueryExp* expr) const
     if (!m_mediaValues || !m_mediaValues->hasValues())
         return m_expectedResult;
 
-    if (!gFunctionMap)
-        createFunctionMap();
+    DCHECK(gFunctionMap);
 
     // Call the media feature evaluation function. Assume no prefix and let
     // trampoline functions override the prefix if prefix is used.

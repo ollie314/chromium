@@ -12,13 +12,14 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
+#include "base/threading/thread_checker.h"
 #include "remoting/protocol/client_authentication_config.h"
 #include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/input_stub.h"
 #include "remoting/protocol/mouse_input_filter.h"
-#include "remoting/protocol/performance_tracker.h"
 #include "remoting/protocol/session_config.h"
 #include "remoting/protocol/video_stub.h"
 #include "remoting/signaling/signal_strategy.h"
@@ -36,8 +37,8 @@ class TransportContext;
 class VideoRenderer;
 }  // namespace protocol
 
+class AudioConsumer;
 class AudioDecodeScheduler;
-class AudioPlayer;
 class ClientContext;
 class ClientUserInterface;
 class FrameConsumerProxy;
@@ -47,12 +48,12 @@ class ChromotingClient : public SignalStrategy::Listener,
                          public protocol::ClientStub {
  public:
   // |client_context|, |user_interface| and |video_renderer| must outlive the
-  // client. |audio_player| may be null, in which case audio will not be
+  // client. |audio_consumer| may be null, in which case audio will not be
   // requested.
   ChromotingClient(ClientContext* client_context,
                    ClientUserInterface* user_interface,
                    protocol::VideoRenderer* video_renderer,
-                   std::unique_ptr<AudioPlayer> audio_player);
+                   base::WeakPtr<AudioConsumer> audio_consumer);
 
   ~ChromotingClient() override;
 
@@ -102,7 +103,7 @@ class ChromotingClient : public SignalStrategy::Listener,
                       const protocol::TransportRoute& route) override;
 
  private:
-   // SignalStrategy::StatusObserver interface.
+  // SignalStrategy::StatusObserver interface.
   void OnSignalStrategyStateChange(SignalStrategy::State state) override;
   bool OnSignalStrategyIncomingStanza(const buzz::XmlElement* stanza) override;
 
@@ -142,9 +143,6 @@ class ChromotingClient : public SignalStrategy::Listener,
 
   // True if |protocol::Capabilities| message has been received.
   bool host_capabilities_received_ = false;
-
-  // Record the statistics of the connection.
-  protocol::PerformanceTracker perf_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingClient);
 };

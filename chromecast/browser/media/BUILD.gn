@@ -2,24 +2,19 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//chromecast/chromecast.gni")
 import("//media/media_options.gni")
 
 source_set("media") {
   sources = [
     "cast_browser_cdm_factory.cc",
     "cast_browser_cdm_factory.h",
-    "cast_media_client_android.cc",
-    "cast_media_client_android.h",
+    "media_caps_impl.cc",
+    "media_caps_impl.h",
     "media_pipeline_backend_factory.h",
-    "media_pipeline_host.cc",
-    "media_pipeline_host.h",
   ]
 
   if (mojo_media_host == "browser") {
     sources += [
-      "cast_mojo_media_application.cc",
-      "cast_mojo_media_application.h",
       "cast_mojo_media_client.cc",
       "cast_mojo_media_client.h",
       "cast_renderer.cc",
@@ -27,14 +22,10 @@ source_set("media") {
     ]
   }
 
-  if (use_playready) {
-    public_configs = [ "//chromecast:playready_config" ]
-  }
-
   if (mojo_media_host == "browser") {
     public_deps = [
       "//media/mojo/interfaces",
-      "//media/mojo/services:application",
+      "//media/mojo/services",
       "//services/shell/public/cpp",
     ]
   }
@@ -43,17 +34,17 @@ source_set("media") {
     "//base",
     "//chromecast/base",
     "//chromecast/common/media",
+    "//chromecast/common/media:interfaces",
     "//chromecast/media",
     "//content/public/browser",
     "//media",
+    "//ui/gfx/geometry",
   ]
 
-  if (is_android) {
-    deps += [ "//components/cdm/browser" ]
-  } else {
+  if (!is_android) {
     sources += [
-      "cma_message_filter_host.cc",
-      "cma_message_filter_host.h",
+      "video_resolution_policy.cc",
+      "video_resolution_policy.h",
     ]
   }
 }

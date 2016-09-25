@@ -5,17 +5,18 @@
 #include "core/animation/ShadowInterpolationFunctions.h"
 
 #include "core/animation/CSSColorInterpolationType.h"
-#include "core/animation/CSSLengthInterpolationType.h"
 #include "core/animation/InterpolationValue.h"
+#include "core/animation/LengthInterpolationFunctions.h"
 #include "core/animation/NonInterpolableValue.h"
 #include "core/css/CSSShadowValue.h"
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/style/ShadowData.h"
 #include "platform/geometry/FloatPoint.h"
+#include <memory>
 
 namespace blink {
 
-enum ShadowComponentIndex {
+enum ShadowComponentIndex : unsigned {
     ShadowX,
     ShadowY,
     ShadowBlur,
@@ -53,22 +54,22 @@ bool ShadowInterpolationFunctions::nonInterpolableValuesAreCompatible(const NonI
     return toShadowNonInterpolableValue(*a).style() == toShadowNonInterpolableValue(*b).style();
 }
 
-PairwiseInterpolationValue ShadowInterpolationFunctions::mergeSingleConversions(InterpolationValue&& start, InterpolationValue&& end)
+PairwiseInterpolationValue ShadowInterpolationFunctions::maybeMergeSingles(InterpolationValue&& start, InterpolationValue&& end)
 {
     if (!nonInterpolableValuesAreCompatible(start.nonInterpolableValue.get(), end.nonInterpolableValue.get()))
         return nullptr;
-    return PairwiseInterpolationValue(start.interpolableValue.release(), end.interpolableValue.release(), start.nonInterpolableValue.release());
+    return PairwiseInterpolationValue(std::move(start.interpolableValue), std::move(end.interpolableValue), start.nonInterpolableValue.release());
 }
 
 InterpolationValue ShadowInterpolationFunctions::convertShadowData(const ShadowData& shadowData, double zoom)
 {
-    OwnPtr<InterpolableList> interpolableList = InterpolableList::create(ShadowComponentIndexCount);
-    interpolableList->set(ShadowX, CSSLengthInterpolationType::createInterpolablePixels(shadowData.x() / zoom));
-    interpolableList->set(ShadowY, CSSLengthInterpolationType::createInterpolablePixels(shadowData.y() / zoom));
-    interpolableList->set(ShadowBlur, CSSLengthInterpolationType::createInterpolablePixels(shadowData.blur() / zoom));
-    interpolableList->set(ShadowSpread, CSSLengthInterpolationType::createInterpolablePixels(shadowData.spread() / zoom));
+    std::unique_ptr<InterpolableList> interpolableList = InterpolableList::create(ShadowComponentIndexCount);
+    interpolableList->set(ShadowX, LengthInterpolationFunctions::createInterpolablePixels(shadowData.x() / zoom));
+    interpolableList->set(ShadowY, LengthInterpolationFunctions::createInterpolablePixels(shadowData.y() / zoom));
+    interpolableList->set(ShadowBlur, LengthInterpolationFunctions::createInterpolablePixels(shadowData.blur() / zoom));
+    interpolableList->set(ShadowSpread, LengthInterpolationFunctions::createInterpolablePixels(shadowData.spread() / zoom));
     interpolableList->set(ShadowColor, CSSColorInterpolationType::createInterpolableColor(shadowData.color()));
-    return InterpolationValue(interpolableList.release(), ShadowNonInterpolableValue::create(shadowData.style()));
+    return InterpolationValue(std::move(interpolableList), ShadowNonInterpolableValue::create(shadowData.style()));
 }
 
 InterpolationValue ShadowInterpolationFunctions::maybeConvertCSSValue(const CSSValue& value)
@@ -85,7 +86,7 @@ InterpolationValue ShadowInterpolationFunctions::maybeConvertCSSValue(const CSSV
             return nullptr;
     }
 
-    OwnPtr<InterpolableList> interpolableList = InterpolableList::create(ShadowComponentIndexCount);
+    std::unique_ptr<InterpolableList> interpolableList = InterpolableList::create(ShadowComponentIndexCount);
     static_assert(ShadowX == 0, "Enum ordering check.");
     static_assert(ShadowY == 1, "Enum ordering check.");
     static_assert(ShadowBlur == 2, "Enum ordering check.");
@@ -98,36 +99,36 @@ InterpolationValue ShadowInterpolationFunctions::maybeConvertCSSValue(const CSSV
     };
     for (size_t i = 0; i < WTF_ARRAY_LENGTH(lengths); i++) {
         if (lengths[i]) {
-            InterpolationValue lengthField = CSSLengthInterpolationType::maybeConvertCSSValue(*lengths[i]);
+            InterpolationValue lengthField = LengthInterpolationFunctions::maybeConvertCSSValue(*lengths[i]);
             if (!lengthField)
                 return nullptr;
-            ASSERT(!lengthField.nonInterpolableValue);
-            interpolableList->set(i, lengthField.interpolableValue.release());
+            DCHECK(!lengthField.nonInterpolableValue);
+            interpolableList->set(i, std::move(lengthField.interpolableValue));
         } else {
-            interpolableList->set(i, CSSLengthInterpolationType::createInterpolablePixels(0));
+            interpolableList->set(i, LengthInterpolationFunctions::createInterpolablePixels(0));
         }
     }
 
     if (shadow.color) {
-        OwnPtr<InterpolableValue> interpolableColor = CSSColorInterpolationType::maybeCreateInterpolableColor(*shadow.color);
+        std::unique_ptr<InterpolableValue> interpolableColor = CSSColorInterpolationType::maybeCreateInterpolableColor(*shadow.color);
         if (!interpolableColor)
             return nullptr;
-        interpolableList->set(ShadowColor, interpolableColor.release());
+        interpolableList->set(ShadowColor, std::move(interpolableColor));
     } else {
         interpolableList->set(ShadowColor, CSSColorInterpolationType::createInterpolableColor(StyleColor::currentColor()));
     }
 
-    return InterpolationValue(interpolableList.release(), ShadowNonInterpolableValue::create(style));
+    return InterpolationValue(std::move(interpolableList), ShadowNonInterpolableValue::create(style));
 }
 
-PassOwnPtr<InterpolableValue> ShadowInterpolationFunctions::createNeutralInterpolableValue()
+std::unique_ptr<InterpolableValue> ShadowInterpolationFunctions::createNeutralInterpolableValue()
 {
-    return convertShadowData(ShadowData(FloatPoint(0, 0), 0, 0, Normal, StyleColor(Color::transparent)), 1).interpolableValue.release();
+    return convertShadowData(ShadowData(FloatPoint(0, 0), 0, 0, Normal, StyleColor(Color::transparent)), 1).interpolableValue;
 }
 
-void ShadowInterpolationFunctions::composite(OwnPtr<InterpolableValue>& underlyingInterpolableValue, RefPtr<NonInterpolableValue>& underlyingNonInterpolableValue, double underlyingFraction, const InterpolableValue& interpolableValue, const NonInterpolableValue* nonInterpolableValue)
+void ShadowInterpolationFunctions::composite(std::unique_ptr<InterpolableValue>& underlyingInterpolableValue, RefPtr<NonInterpolableValue>& underlyingNonInterpolableValue, double underlyingFraction, const InterpolableValue& interpolableValue, const NonInterpolableValue* nonInterpolableValue)
 {
-    ASSERT(nonInterpolableValuesAreCompatible(underlyingNonInterpolableValue.get(), nonInterpolableValue));
+    DCHECK(nonInterpolableValuesAreCompatible(underlyingNonInterpolableValue.get(), nonInterpolableValue));
     InterpolableList& underlyingInterpolableList = toInterpolableList(*underlyingInterpolableValue);
     const InterpolableList& interpolableList = toInterpolableList(interpolableValue);
     underlyingInterpolableList.scaleAndAdd(underlyingFraction, interpolableList);
@@ -138,11 +139,11 @@ ShadowData ShadowInterpolationFunctions::createShadowData(const InterpolableValu
     const InterpolableList& interpolableList = toInterpolableList(interpolableValue);
     const ShadowNonInterpolableValue& shadowNonInterpolableValue = toShadowNonInterpolableValue(*nonInterpolableValue);
     const CSSToLengthConversionData& conversionData = state.cssToLengthConversionData();
-    Length shadowX = CSSLengthInterpolationType::resolveInterpolableLength(*interpolableList.get(ShadowX), nullptr, conversionData);
-    Length shadowY = CSSLengthInterpolationType::resolveInterpolableLength(*interpolableList.get(ShadowY), nullptr, conversionData);
-    Length shadowBlur = CSSLengthInterpolationType::resolveInterpolableLength(*interpolableList.get(ShadowBlur), nullptr, conversionData, ValueRangeNonNegative);
-    Length shadowSpread = CSSLengthInterpolationType::resolveInterpolableLength(*interpolableList.get(ShadowSpread), nullptr, conversionData);
-    ASSERT(shadowX.isFixed() && shadowY.isFixed() && shadowBlur.isFixed() && shadowSpread.isFixed());
+    Length shadowX = LengthInterpolationFunctions::createLength(*interpolableList.get(ShadowX), nullptr, conversionData, ValueRangeAll);
+    Length shadowY = LengthInterpolationFunctions::createLength(*interpolableList.get(ShadowY), nullptr, conversionData, ValueRangeAll);
+    Length shadowBlur = LengthInterpolationFunctions::createLength(*interpolableList.get(ShadowBlur), nullptr, conversionData, ValueRangeNonNegative);
+    Length shadowSpread = LengthInterpolationFunctions::createLength(*interpolableList.get(ShadowSpread), nullptr, conversionData, ValueRangeAll);
+    DCHECK(shadowX.isFixed() && shadowY.isFixed() && shadowBlur.isFixed() && shadowSpread.isFixed());
     return ShadowData(
         FloatPoint(shadowX.value(), shadowY.value()), shadowBlur.value(), shadowSpread.value(), shadowNonInterpolableValue.style(),
         CSSColorInterpolationType::resolveInterpolableColor(*interpolableList.get(ShadowColor), state));

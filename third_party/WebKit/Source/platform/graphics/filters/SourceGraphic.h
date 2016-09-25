@@ -25,8 +25,6 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/filters/FilterEffect.h"
 
-class SkPicture;
-
 namespace blink {
 
 class PLATFORM_EXPORT SourceGraphic final : public FilterEffect {
@@ -34,20 +32,17 @@ public:
     static SourceGraphic* create(Filter*);
     ~SourceGraphic() override;
 
-    FloatRect determineAbsolutePaintRect(const FloatRect& requestedRect) override;
-
-    FilterEffectType getFilterEffectType() const override { return FilterEffectTypeSourceInput; }
-
     TextStream& externalRepresentation(TextStream&, int indention) const override;
-    sk_sp<SkImageFilter> createImageFilter() override;
 
-    void setPicture(sk_sp<SkPicture>);
     void setSourceRect(const IntRect&);
 
 private:
     explicit SourceGraphic(Filter*);
 
-    sk_sp<SkPicture> m_picture;
+    FilterEffectType getFilterEffectType() const override { return FilterEffectTypeSourceInput; }
+
+    FloatRect mapInputs(const FloatRect&) const override;
+
     IntRect m_sourceRect;
 };
 

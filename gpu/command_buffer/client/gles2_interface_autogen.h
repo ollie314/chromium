@@ -676,6 +676,7 @@ virtual GLuint CreateGpuMemoryBufferImageCHROMIUM(GLsizei width,
                                                   GLsizei height,
                                                   GLenum internalformat,
                                                   GLenum usage) = 0;
+virtual void DescheduleUntilFinishedCHROMIUM() = 0;
 virtual void GetTranslatedShaderSourceANGLE(GLuint shader,
                                             GLsizei bufsize,
                                             GLsizei* length,
@@ -684,11 +685,6 @@ virtual void PostSubBufferCHROMIUM(GLint x,
                                    GLint y,
                                    GLint width,
                                    GLint height) = 0;
-virtual void TexImageIOSurface2DCHROMIUM(GLenum target,
-                                         GLsizei width,
-                                         GLsizei height,
-                                         GLuint ioSurfaceId,
-                                         GLuint plane) = 0;
 virtual void CopyTextureCHROMIUM(GLenum source_id,
                                  GLenum dest_id,
                                  GLint internalformat,
@@ -730,16 +726,6 @@ virtual GLuint CreateAndConsumeTextureCHROMIUM(GLenum target,
 virtual void BindUniformLocationCHROMIUM(GLuint program,
                                          GLint location,
                                          const char* name) = 0;
-virtual void GenValuebuffersCHROMIUM(GLsizei n, GLuint* buffers) = 0;
-virtual void DeleteValuebuffersCHROMIUM(GLsizei n,
-                                        const GLuint* valuebuffers) = 0;
-virtual GLboolean IsValuebufferCHROMIUM(GLuint valuebuffer) = 0;
-virtual void BindValuebufferCHROMIUM(GLenum target, GLuint valuebuffer) = 0;
-virtual void SubscribeValueCHROMIUM(GLenum target, GLenum subscription) = 0;
-virtual void PopulateSubscribedValuesCHROMIUM(GLenum target) = 0;
-virtual void UniformValuebufferCHROMIUM(GLint location,
-                                        GLenum target,
-                                        GLenum subscription) = 0;
 virtual void BindTexImage2DCHROMIUM(GLenum target, GLint imageId) = 0;
 virtual void ReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId) = 0;
 virtual void TraceBeginCHROMIUM(const char* category_name,
@@ -768,17 +754,19 @@ virtual void ScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
                                           GLfloat uv_y,
                                           GLfloat uv_width,
                                           GLfloat uv_height) = 0;
+virtual void ScheduleCALayerSharedStateCHROMIUM(GLfloat opacity,
+                                                GLboolean is_clipped,
+                                                const GLfloat* clip_rect,
+                                                GLint sorting_context_id,
+                                                const GLfloat* transform) = 0;
 virtual void ScheduleCALayerCHROMIUM(GLuint contents_texture_id,
                                      const GLfloat* contents_rect,
-                                     GLfloat opacity,
                                      GLuint background_color,
                                      GLuint edge_aa_mask,
                                      const GLfloat* bounds_rect,
-                                     GLboolean is_clipped,
-                                     const GLfloat* clip_rect,
-                                     GLint sorting_context_id,
-                                     const GLfloat* transform,
                                      GLuint filter) = 0;
+virtual void ScheduleCALayerInUseQueryCHROMIUM(GLsizei count,
+                                               const GLuint* textures) = 0;
 virtual void CommitOverlayPlanesCHROMIUM() = 0;
 virtual void SwapInterval(GLint interval) = 0;
 virtual void FlushDriverCachesCHROMIUM() = 0;
@@ -891,5 +879,9 @@ virtual GLint GetFragDataIndexEXT(GLuint program, const char* name) = 0;
 virtual void UniformMatrix4fvStreamTextureMatrixCHROMIUM(
     GLint location,
     GLboolean transpose,
-    const GLfloat* default_value) = 0;
+    const GLfloat* transform) = 0;
+virtual void SwapBuffersWithDamageCHROMIUM(GLint x,
+                                           GLint y,
+                                           GLint width,
+                                           GLint height) = 0;
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_INTERFACE_AUTOGEN_H_

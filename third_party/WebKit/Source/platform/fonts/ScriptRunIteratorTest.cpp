@@ -4,7 +4,6 @@
 
 #include "platform/fonts/ScriptRunIterator.h"
 
-#include "platform/Logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/Assertions.h"
 #include "wtf/Threading.h"
@@ -363,6 +362,12 @@ TEST_F(ScriptRunIteratorTest, Common)
 {
     CHECK_RUNS({ { " ... !?", USCRIPT_COMMON } });
 }
+
+TEST_F(ScriptRunIteratorTest, CombiningCircle)
+{
+    CHECK_RUNS({ { "◌́◌̀◌̈◌̂◌̄◌̊", USCRIPT_COMMON } });
+}
+
 
 TEST_F(ScriptRunIteratorTest, Latin)
 {

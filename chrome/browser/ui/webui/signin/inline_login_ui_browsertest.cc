@@ -4,6 +4,9 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
+#include "base/memory/ref_counted.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
@@ -50,6 +53,7 @@
 #include "google_apis/gaia/gaia_switches.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/url_util.h"
+#include "net/http/http_response_headers.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -117,11 +121,6 @@ class FooWebUIProvider
  public:
   MOCK_METHOD2(NewWebUI, content::WebUIController*(content::WebUI* web_ui,
                                                    const GURL& url));
-};
-
-class MockLoginUIObserver : public LoginUIService::Observer {
- public:
-  MOCK_METHOD0(OnUntrustedLoginUIShown, void());
 };
 
 const char kFooWebUIURL[] = "chrome://foo/";
@@ -289,7 +288,7 @@ void InlineLoginUIBrowserTest::AddEmailToOneClickRejectedList(
   PrefService* pref_service = browser()->profile()->GetPrefs();
   ListPrefUpdate updater(pref_service,
                          prefs::kReverseAutologinRejectedEmailList);
-  updater->AppendIfNotPresent(new base::StringValue(email));
+  updater->AppendIfNotPresent(base::MakeUnique<base::StringValue>(email));
 }
 
 void InlineLoginUIBrowserTest::AllowSigninCookies(bool enable) {
@@ -312,8 +311,8 @@ void InlineLoginUIBrowserTest::SetAllowedUsernamePattern(
 #define MAYBE_DifferentStorageId DifferentStorageId
 #endif
 IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, MAYBE_DifferentStorageId) {
-  ContentInfo info =
-      NavigateAndGetInfo(browser(), GetSigninPromoURL(), CURRENT_TAB);
+  ContentInfo info = NavigateAndGetInfo(browser(), GetSigninPromoURL(),
+                                        WindowOpenDisposition::CURRENT_TAB);
   WaitUntilUIReady(browser());
 
   // Make sure storage partition of embedded webview is different from
@@ -342,12 +341,12 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, OneProcessLimit) {
   // still be given its own process and storage partition.
   content::RenderProcessHost::SetMaxRendererProcessCount(1);
 
-  ContentInfo info1 =
-      NavigateAndGetInfo(browser(), test_url_1, CURRENT_TAB);
-  ContentInfo info2 =
-      NavigateAndGetInfo(browser(), test_url_2, CURRENT_TAB);
-  ContentInfo info3 =
-      NavigateAndGetInfo(browser(), GetSigninPromoURL(), CURRENT_TAB);
+  ContentInfo info1 = NavigateAndGetInfo(browser(), test_url_1,
+                                         WindowOpenDisposition::CURRENT_TAB);
+  ContentInfo info2 = NavigateAndGetInfo(browser(), test_url_2,
+                                         WindowOpenDisposition::CURRENT_TAB);
+  ContentInfo info3 = NavigateAndGetInfo(browser(), GetSigninPromoURL(),
+                                         WindowOpenDisposition::CURRENT_TAB);
 
   ASSERT_EQ(info1.pid, info2.pid);
   ASSERT_NE(info1.pid, info3.pid);
@@ -476,11 +475,12 @@ class InlineLoginHelperBrowserTest : public InProcessBrowserTest {
       const std::string& cookie_string) {
     net::TestURLFetcher* fetcher = url_fetcher_factory_.GetFetcherByID(0);
     ASSERT_TRUE(fetcher);
-    net::ResponseCookies cookies;
-    cookies.push_back(cookie_string);
+    scoped_refptr<net::HttpResponseHeaders> reponse_headers =
+        new net::HttpResponseHeaders("");
+    reponse_headers->AddCookie(cookie_string);
     fetcher->set_status(net::URLRequestStatus());
     fetcher->set_response_code(net::HTTP_OK);
-    fetcher->set_cookies(cookies);
+    fetcher->set_response_headers(reponse_headers);
     fetcher->delegate()->OnURLFetchComplete(fetcher);
   }
 
@@ -595,7 +595,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginHelperBrowserTest,
                         OneClickSigninSyncStarter::CONFIRM_AFTER_SIGNIN));
 
   SimulateOnClientOAuthSuccess(helper, "refresh_token");
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Test signin helper creates sync starter with correct confirmation when
@@ -629,7 +629,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginHelperBrowserTest,
                            OneClickSigninSyncStarter::CONFIRM_AFTER_SIGNIN));
 
   SimulateOnClientOAuthSuccess(helper, "refresh_token");
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Test signin helper creates sync starter with correct confirmation when
@@ -664,7 +664,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginHelperBrowserTest,
                         OneClickSigninSyncStarter::CONFIRM_UNTRUSTED_SIGNIN));
 
   SimulateOnClientOAuthSuccess(helper, "refresh_token");
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Test signin helper creates sync starter with correct confirmation during
@@ -701,7 +701,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginHelperBrowserTest,
                            OneClickSigninSyncStarter::CONFIRM_AFTER_SIGNIN));
 
   SimulateOnClientOAuthSuccess(helper, "refresh_token");
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Test signin helper does not create sync starter when reauthenticating.
@@ -727,7 +727,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginHelperBrowserTest,
                             false);  // confirm untrusted signin
   SimulateOnClientOAuthSuccess(&helper, "refresh_token");
   ASSERT_EQ(1ul, token_service()->GetAccounts().size());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Test signin helper does not create sync starter when adding another account
@@ -754,7 +754,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginHelperBrowserTest,
                             false);  // confirm untrusted signin
   SimulateOnClientOAuthSuccess(&helper, "refresh_token");
   ASSERT_EQ(1ul, token_service()->GetAccounts().size());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 class InlineLoginUISafeIframeBrowserTest : public InProcessBrowserTest {
@@ -855,33 +855,4 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUISafeIframeBrowserTest,
   navigation_observer.Wait();
 
   EXPECT_EQ(GURL("about:blank"), contents->GetVisibleURL());
-}
-
-IN_PROC_BROWSER_TEST_F(InlineLoginUISafeIframeBrowserTest,
-    ConfirmationRequiredForNonsecureSignin) {
-  FakeGaia fake_gaia;
-  fake_gaia.Initialize();
-
-  embedded_test_server()->RegisterRequestHandler(
-      base::Bind(&FakeGaia::HandleRequest,
-                 base::Unretained(&fake_gaia)));
-  fake_gaia.SetFakeMergeSessionParams(
-      "email@gmail.com", "fake-sid-cookie", "fake-lsid-cookie");
-
-  // Navigates to the Chrome signin page which loads the fake gaia auth page.
-  // Since the fake gaia auth page is served over HTTP, thus expects to see an
-  // untrusted signin confirmation dialog upon submitting credentials below.
-  ui_test_utils::NavigateToURL(browser(), GetSigninPromoURL());
-  WaitUntilUIReady(browser());
-
-  MockLoginUIObserver observer;
-  LoginUIServiceFactory::GetForProfile(browser()->profile())
-      ->AddObserver(&observer);
-  base::RunLoop run_loop;
-  EXPECT_CALL(observer, OnUntrustedLoginUIShown())
-      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
-
-  ExecuteJsToSigninInSigninFrame(browser(), "email@gmail.com", "password");
-  run_loop.Run();
-  base::MessageLoop::current()->RunUntilIdle();
 }

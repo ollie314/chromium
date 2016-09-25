@@ -10,16 +10,12 @@
 #include "base/macros.h"
 #include "media/mojo/interfaces/service_factory.mojom.h"
 #include "media/mojo/services/mojo_cdm_service_context.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/shell/public/cpp/connector.h"
-#include "services/shell/public/cpp/message_loop_ref.h"
+#include "services/shell/public/cpp/service_context_ref.h"
 
-namespace mojo {
-class MessageLoopRef;
 namespace shell {
 namespace mojom {
 class InterfaceProvider;
-}
 }
 }
 
@@ -30,41 +26,43 @@ class MediaLog;
 class MojoMediaClient;
 class RendererFactory;
 
-class ServiceFactoryImpl : public interfaces::ServiceFactory {
+class ServiceFactoryImpl : public mojom::ServiceFactory {
  public:
-  ServiceFactoryImpl(mojo::InterfaceRequest<interfaces::ServiceFactory> request,
-                     shell::mojom::InterfaceProvider* interfaces,
+  ServiceFactoryImpl(shell::mojom::InterfaceProviderPtr interfaces,
                      scoped_refptr<MediaLog> media_log,
-                     std::unique_ptr<shell::MessageLoopRef> parent_app_refcount,
+                     std::unique_ptr<shell::ServiceContextRef> connection_ref,
                      MojoMediaClient* mojo_media_client);
   ~ServiceFactoryImpl() final;
 
-  // interfaces::ServiceFactory implementation.
-  void CreateAudioDecoder(
-      mojo::InterfaceRequest<interfaces::AudioDecoder> audio_decoder) final;
-  void CreateRenderer(
-      mojo::InterfaceRequest<interfaces::Renderer> renderer) final;
-  void CreateCdm(
-      mojo::InterfaceRequest<interfaces::ContentDecryptionModule> cdm) final;
+  // mojom::ServiceFactory implementation.
+  void CreateAudioDecoder(mojom::AudioDecoderRequest request) final;
+  void CreateVideoDecoder(mojom::VideoDecoderRequest request) final;
+  void CreateRenderer(const mojo::String& audio_device_id,
+                      mojom::RendererRequest request) final;
+  void CreateCdm(mojom::ContentDecryptionModuleRequest request) final;
 
  private:
 #if defined(ENABLE_MOJO_RENDERER)
   RendererFactory* GetRendererFactory();
-
-  std::unique_ptr<RendererFactory> renderer_factory_;
 #endif  // defined(ENABLE_MOJO_RENDERER)
 
 #if defined(ENABLE_MOJO_CDM)
   CdmFactory* GetCdmFactory();
-
-  std::unique_ptr<CdmFactory> cdm_factory_;
 #endif  // defined(ENABLE_MOJO_CDM)
 
   MojoCdmServiceContext cdm_service_context_;
-  mojo::StrongBinding<interfaces::ServiceFactory> binding_;
-  shell::mojom::InterfaceProvider* interfaces_;
+
+#if defined(ENABLE_MOJO_RENDERER)
+  std::unique_ptr<RendererFactory> renderer_factory_;
+#endif  // defined(ENABLE_MOJO_RENDERER)
+
+#if defined(ENABLE_MOJO_CDM)
+  std::unique_ptr<CdmFactory> cdm_factory_;
+  shell::mojom::InterfaceProviderPtr interfaces_;
+#endif  // defined(ENABLE_MOJO_CDM)
+
   scoped_refptr<MediaLog> media_log_;
-  std::unique_ptr<shell::MessageLoopRef> parent_app_refcount_;
+  std::unique_ptr<shell::ServiceContextRef> connection_ref_;
   MojoMediaClient* mojo_media_client_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceFactoryImpl);

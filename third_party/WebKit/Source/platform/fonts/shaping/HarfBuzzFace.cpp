@@ -30,112 +30,133 @@
 
 #include "platform/fonts/shaping/HarfBuzzFace.h"
 
-#include "hb-ot.h"
-#include "hb.h"
-#if OS(MACOSX)
-#include "hb-coretext.h"
-#endif
-#include "SkPaint.h"
-#include "SkPath.h"
-#include "SkPoint.h"
-#include "SkRect.h"
-#include "SkTypeface.h"
+#include "platform/Histogram.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/fonts/FontPlatformData.h"
 #include "platform/fonts/SimpleFontData.h"
 #include "platform/fonts/UnicodeRangeSet.h"
 #include "platform/fonts/shaping/HarfBuzzShaper.h"
+#include "platform/fonts/skia/SkiaTextMetrics.h"
 #include "wtf/HashMap.h"
 #include "wtf/MathExtras.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
+
+#include <hb-ot.h>
+#include <hb.h>
+#if OS(MACOSX)
+#include <hb-coretext.h>
+#endif
+
+#include <SkPaint.h>
+#include <SkPath.h>
+#include <SkPoint.h>
+#include <SkRect.h>
+#include <SkStream.h>
+#include <SkTypeface.h>
+
 
 namespace blink {
 
-const hb_tag_t HarfBuzzFace::vertTag = HB_TAG('v', 'e', 'r', 't');
-
-// Though we have FontCache class, which provides the cache mechanism for
-// WebKit's font objects, we also need additional caching layer for HarfBuzz
-// to reduce the memory consumption because hb_face_t should be associated with
-// underling font data (e.g. CTFontRef, FTFace).
-
-class FaceCacheEntry : public RefCounted<FaceCacheEntry> {
-public:
-    static PassRefPtr<FaceCacheEntry> create(hb_face_t* face)
+struct HbFontDeleter {
+    void operator()(hb_font_t* font)
     {
-        ASSERT(face);
-        return adoptRef(new FaceCacheEntry(face));
+        if (font)
+            hb_font_destroy(font);
     }
-    ~FaceCacheEntry()
-    {
-        hb_face_destroy(m_face);
-    }
-
-    hb_face_t* face() { return m_face; }
-    HashMap<uint32_t, uint16_t>* glyphCache() { return &m_glyphCache; }
-
-private:
-    explicit FaceCacheEntry(hb_face_t* face)
-        : m_face(face)
-    { }
-
-    hb_face_t* m_face;
-    HashMap<uint32_t, uint16_t> m_glyphCache;
 };
 
-typedef HashMap<uint64_t, RefPtr<FaceCacheEntry>, WTF::IntHash<uint64_t>, WTF::UnsignedWithZeroKeyHashTraits<uint64_t>> HarfBuzzFaceCache;
+using HbFontUniquePtr = std::unique_ptr<hb_font_t, HbFontDeleter>;
 
-static HarfBuzzFaceCache* harfBuzzFaceCache()
+struct HbFaceDeleter {
+    void operator()(hb_face_t* face)
+    {
+        if (face)
+            hb_face_destroy(face);
+    }
+};
+
+using HbFaceUniquePtr = std::unique_ptr<hb_face_t, HbFaceDeleter>;
+
+// struct to carry user-pointer data for hb_font_t callback functions.
+struct HarfBuzzFontData {
+    USING_FAST_MALLOC(HarfBuzzFontData);
+    WTF_MAKE_NONCOPYABLE(HarfBuzzFontData);
+public:
+
+    HarfBuzzFontData()
+        : m_paint()
+        , m_simpleFontData(nullptr)
+        , m_rangeSet(nullptr)
+    {
+    }
+
+    SkPaint m_paint;
+    SimpleFontData* m_simpleFontData;
+    RefPtr<UnicodeRangeSet> m_rangeSet;
+};
+
+// Though we have FontCache class, which provides the cache mechanism for
+// WebKit's font objects, we also need additional caching layer for HarfBuzz to
+// reduce the number of hb_font_t objects created. Without it, we would create
+// an hb_font_t object for every FontPlatformData object. But insted, we only
+// need one for each unique SkTypeface.
+// FIXME, crbug.com/609099: We should fix the FontCache to only keep one
+// FontPlatformData object independent of size, then consider using this here.
+class HbFontCacheEntry : public RefCounted<HbFontCacheEntry> {
+public:
+    static PassRefPtr<HbFontCacheEntry> create(hb_font_t* hbFont)
+    {
+        ASSERT(hbFont);
+        return adoptRef(new HbFontCacheEntry(hbFont));
+    }
+
+    hb_font_t* hbFont() { return m_hbFont.get(); }
+    HarfBuzzFontData* hbFontData() { return m_hbFontData.get(); }
+
+private:
+    explicit HbFontCacheEntry(hb_font_t* font)
+        : m_hbFont(HbFontUniquePtr(font))
+        , m_hbFontData(wrapUnique(new HarfBuzzFontData()))
+    { };
+
+    HbFontUniquePtr m_hbFont;
+    std::unique_ptr<HarfBuzzFontData> m_hbFontData;
+};
+
+typedef HashMap<uint64_t, RefPtr<HbFontCacheEntry>, WTF::IntHash<uint64_t>, WTF::UnsignedWithZeroKeyHashTraits<uint64_t>> HarfBuzzFontCache;
+
+static HarfBuzzFontCache* harfBuzzFontCache()
 {
-    DEFINE_STATIC_LOCAL(HarfBuzzFaceCache, s_harfBuzzFaceCache, ());
-    return &s_harfBuzzFaceCache;
+    DEFINE_STATIC_LOCAL(HarfBuzzFontCache, s_harfBuzzFontCache, ());
+    return &s_harfBuzzFontCache;
 }
+
+static PassRefPtr<HbFontCacheEntry> createHbFontCacheEntry(hb_face_t*);
 
 HarfBuzzFace::HarfBuzzFace(FontPlatformData* platformData, uint64_t uniqueID)
     : m_platformData(platformData)
     , m_uniqueID(uniqueID)
 {
-    HarfBuzzFaceCache::AddResult result = harfBuzzFaceCache()->add(m_uniqueID, nullptr);
-    if (result.isNewEntry)
-        result.storedValue->value = FaceCacheEntry::create(createFace());
+    HarfBuzzFontCache::AddResult result = harfBuzzFontCache()->add(m_uniqueID, nullptr);
+    if (result.isNewEntry) {
+        HbFaceUniquePtr face(createFace());
+        result.storedValue->value = createHbFontCacheEntry(face.get());
+    }
     result.storedValue->value->ref();
-    m_face = result.storedValue->value->face();
-    m_glyphCacheForFaceCacheEntry = result.storedValue->value->glyphCache();
+    m_unscaledFont = result.storedValue->value->hbFont();
+    m_harfBuzzFontData = result.storedValue->value->hbFontData();
 }
 
 HarfBuzzFace::~HarfBuzzFace()
 {
-    HarfBuzzFaceCache::iterator result = harfBuzzFaceCache()->find(m_uniqueID);
-    ASSERT_WITH_SECURITY_IMPLICATION(result != harfBuzzFaceCache()->end());
+    HarfBuzzFontCache::iterator result = harfBuzzFontCache()->find(m_uniqueID);
+    ASSERT_WITH_SECURITY_IMPLICATION(result != harfBuzzFontCache()->end());
     ASSERT(result.get()->value->refCount() > 1);
     result.get()->value->deref();
     if (result.get()->value->refCount() == 1)
-        harfBuzzFaceCache()->remove(m_uniqueID);
+        harfBuzzFontCache()->remove(m_uniqueID);
 }
-
-struct HarfBuzzFontData {
-    USING_FAST_MALLOC(HarfBuzzFontData);
-    WTF_MAKE_NONCOPYABLE(HarfBuzzFontData);
-public:
-    HarfBuzzFontData(WTF::HashMap<uint32_t, uint16_t>* glyphCacheForFaceCacheEntry, hb_face_t* face, PassRefPtr<UnicodeRangeSet> rangeSet)
-        : m_glyphCacheForFaceCacheEntry(glyphCacheForFaceCacheEntry)
-        , m_face(face)
-        , m_hbOpenTypeFont(nullptr)
-        , m_rangeSet(rangeSet)
-    {
-    }
-
-    ~HarfBuzzFontData()
-    {
-        if (m_hbOpenTypeFont)
-            hb_font_destroy(m_hbOpenTypeFont);
-    }
-
-    SkPaint m_paint;
-    RefPtr<SimpleFontData> m_simpleFontData;
-    WTF::HashMap<uint32_t, uint16_t>* m_glyphCacheForFaceCacheEntry;
-    hb_face_t* m_face;
-    hb_font_t* m_hbOpenTypeFont;
-    RefPtr<UnicodeRangeSet> m_rangeSet;
-};
 
 static hb_position_t SkiaScalarToHarfBuzzPosition(SkScalar value)
 {
@@ -143,41 +164,6 @@ static hb_position_t SkiaScalarToHarfBuzzPosition(SkScalar value)
     static const int kHbPosition1 = 1 << 16;
     return clampTo<int>(value * kHbPosition1);
 }
-
-static void SkiaGetGlyphWidthAndExtents(SkPaint* paint, hb_codepoint_t codepoint, hb_position_t* width, hb_glyph_extents_t* extents)
-{
-    ASSERT(codepoint <= 0xFFFF);
-    paint->setTextEncoding(SkPaint::kGlyphID_TextEncoding);
-
-    SkScalar skWidth;
-    SkRect skBounds;
-    uint16_t glyph = codepoint;
-
-    paint->getTextWidths(&glyph, sizeof(glyph), &skWidth, &skBounds);
-    if (width) {
-        if (!paint->isSubpixelText())
-            skWidth = SkScalarRoundToInt(skWidth);
-        *width = SkiaScalarToHarfBuzzPosition(skWidth);
-    }
-    if (extents) {
-        if (!paint->isSubpixelText()) {
-            // Use roundOut() rather than round() to avoid rendering glyphs
-            // outside the visual overflow rect. crbug.com/452914.
-            SkIRect ir;
-            skBounds.roundOut(&ir);
-            skBounds.set(ir);
-        }
-        // Invert y-axis because Skia is y-grows-down but we set up HarfBuzz to be y-grows-up.
-        extents->x_bearing = SkiaScalarToHarfBuzzPosition(skBounds.fLeft);
-        extents->y_bearing = SkiaScalarToHarfBuzzPosition(-skBounds.fTop);
-        extents->width = SkiaScalarToHarfBuzzPosition(skBounds.width());
-        extents->height = SkiaScalarToHarfBuzzPosition(-skBounds.height());
-    }
-}
-
-#if !defined(HB_VERSION_ATLEAST)
-#define HB_VERSION_ATLEAST(major, minor, micro) 0
-#endif
 
 static hb_bool_t harfBuzzGetGlyph(hb_font_t* hbFont, void* fontData, hb_codepoint_t unicode, hb_codepoint_t variationSelector, hb_codepoint_t* glyph, void* userData)
 {
@@ -187,34 +173,7 @@ static hb_bool_t harfBuzzGetGlyph(hb_font_t* hbFont, void* fontData, hb_codepoin
     if (hbFontData->m_rangeSet && !hbFontData->m_rangeSet->contains(unicode))
         return false;
 
-    if (variationSelector) {
-#if !HB_VERSION_ATLEAST(0, 9, 28)
-        return false;
-#else
-        // Skia does not support variation selectors, but hb does.
-        // We're not fully ready to switch to hb-ot-font yet,
-        // but are good enough to get glyph IDs for OpenType fonts.
-        if (!hbFontData->m_hbOpenTypeFont) {
-            hbFontData->m_hbOpenTypeFont = hb_font_create(hbFontData->m_face);
-            hb_ot_font_set_funcs(hbFontData->m_hbOpenTypeFont);
-        }
-        return hb_font_get_glyph(hbFontData->m_hbOpenTypeFont, unicode, variationSelector, glyph);
-        // When not found, glyph_func should return false rather than fallback to the base.
-        // http://lists.freedesktop.org/archives/harfbuzz/2015-May/004888.html
-#endif
-    }
-
-    WTF::HashMap<uint32_t, uint16_t>::AddResult result = hbFontData->m_glyphCacheForFaceCacheEntry->add(unicode, 0);
-    if (result.isNewEntry) {
-        SkPaint* paint = &hbFontData->m_paint;
-        paint->setTextEncoding(SkPaint::kUTF32_TextEncoding);
-        uint16_t glyph16;
-        paint->textToGlyphs(&unicode, sizeof(hb_codepoint_t), &glyph16);
-        result.storedValue->value = glyph16;
-        *glyph = glyph16;
-    }
-    *glyph = result.storedValue->value;
-    return !!*glyph;
+    return hb_font_get_glyph(hb_font_get_parent(hbFont), unicode, variationSelector, glyph);
 }
 
 static hb_position_t harfBuzzGetGlyphHorizontalAdvance(hb_font_t* hbFont, void* fontData, hb_codepoint_t glyph, void* userData)
@@ -222,15 +181,8 @@ static hb_position_t harfBuzzGetGlyphHorizontalAdvance(hb_font_t* hbFont, void* 
     HarfBuzzFontData* hbFontData = reinterpret_cast<HarfBuzzFontData*>(fontData);
     hb_position_t advance = 0;
 
-    SkiaGetGlyphWidthAndExtents(&hbFontData->m_paint, glyph, &advance, 0);
+    SkiaTextMetrics(&hbFontData->m_paint).getGlyphWidthForHarfBuzz(glyph, &advance);
     return advance;
-}
-
-static hb_bool_t harfBuzzGetGlyphHorizontalOrigin(hb_font_t* hbFont, void* fontData, hb_codepoint_t glyph, hb_position_t* x, hb_position_t* y, void* userData)
-{
-    // Just return true, following the way that HarfBuzz-FreeType
-    // implementation does.
-    return true;
 }
 
 static hb_bool_t harfBuzzGetGlyphVerticalOrigin(hb_font_t* hbFont, void* fontData, hb_codepoint_t glyph, hb_position_t* x, hb_position_t* y, void* userData)
@@ -242,7 +194,7 @@ static hb_bool_t harfBuzzGetGlyphVerticalOrigin(hb_font_t* hbFont, void* fontDat
 
     float result[] = { 0, 0 };
     Glyph theGlyph = glyph;
-    verticalData->getVerticalTranslationsForGlyphs(hbFontData->m_simpleFontData.get(), &theGlyph, 1, result);
+    verticalData->getVerticalTranslationsForGlyphs(hbFontData->m_simpleFontData, &theGlyph, 1, result);
     *x = SkiaScalarToHarfBuzzPosition(-result[0]);
     *y = SkiaScalarToHarfBuzzPosition(-result[1]);
     return true;
@@ -256,7 +208,7 @@ static hb_position_t harfBuzzGetGlyphVerticalAdvance(hb_font_t* hbFont, void* fo
         return SkiaScalarToHarfBuzzPosition(hbFontData->m_simpleFontData->getFontMetrics().height());
 
     Glyph theGlyph = glyph;
-    float advanceHeight = -verticalData->advanceHeight(hbFontData->m_simpleFontData.get(), theGlyph);
+    float advanceHeight = -verticalData->advanceHeight(hbFontData->m_simpleFontData, theGlyph);
     return SkiaScalarToHarfBuzzPosition(SkFloatToScalar(advanceHeight));
 }
 
@@ -286,7 +238,7 @@ static hb_bool_t harfBuzzGetGlyphExtents(hb_font_t* hbFont, void* fontData, hb_c
 {
     HarfBuzzFontData* hbFontData = reinterpret_cast<HarfBuzzFontData*>(fontData);
 
-    SkiaGetGlyphWidthAndExtents(&hbFontData->m_paint, glyph, 0, extents);
+    SkiaTextMetrics(&hbFontData->m_paint).getGlyphExtentsForHarfBuzz(glyph, extents);
     return true;
 }
 
@@ -301,7 +253,6 @@ static hb_font_funcs_t* harfBuzzSkiaGetFontFuncs()
         hb_font_funcs_set_glyph_func(harfBuzzSkiaFontFuncs, harfBuzzGetGlyph, 0, 0);
         hb_font_funcs_set_glyph_h_advance_func(harfBuzzSkiaFontFuncs, harfBuzzGetGlyphHorizontalAdvance, 0, 0);
         hb_font_funcs_set_glyph_h_kerning_func(harfBuzzSkiaFontFuncs, harfBuzzGetGlyphHorizontalKerning, 0, 0);
-        hb_font_funcs_set_glyph_h_origin_func(harfBuzzSkiaFontFuncs, harfBuzzGetGlyphHorizontalOrigin, 0, 0);
         hb_font_funcs_set_glyph_v_advance_func(harfBuzzSkiaFontFuncs, harfBuzzGetGlyphVerticalAdvance, 0, 0);
         hb_font_funcs_set_glyph_v_origin_func(harfBuzzSkiaFontFuncs, harfBuzzGetGlyphVerticalOrigin, 0, 0);
         hb_font_funcs_set_glyph_extents_func(harfBuzzSkiaFontFuncs, harfBuzzGetGlyphExtents, 0, 0);
@@ -328,41 +279,77 @@ static hb_blob_t* harfBuzzSkiaGetTable(hb_face_t* face, hb_tag_t tag, void* user
         WTF::Partitions::fastFree(buffer);
         return nullptr;
     }
-
     return hb_blob_create(const_cast<char*>(buffer), tableSize, HB_MEMORY_MODE_WRITABLE, buffer, WTF::Partitions::fastFree);
 }
 #endif
 
-static void destroyHarfBuzzFontData(void* userData)
+#if !OS(MACOSX)
+static void deleteTypefaceStream(void* streamAssetPtr)
 {
-    HarfBuzzFontData* hbFontData = reinterpret_cast<HarfBuzzFontData*>(userData);
-    delete hbFontData;
+    SkStreamAsset* streamAsset = reinterpret_cast<SkStreamAsset*>(streamAssetPtr);
+    delete streamAsset;
 }
+#endif
 
 hb_face_t* HarfBuzzFace::createFace()
 {
 #if OS(MACOSX)
     hb_face_t* face = hb_coretext_face_create(m_platformData->cgFont());
 #else
-    hb_face_t* face = hb_face_create_for_tables(harfBuzzSkiaGetTable, m_platformData->typeface(), 0);
+    hb_face_t* face = nullptr;
+
+    DEFINE_STATIC_LOCAL(BooleanHistogram,
+        zeroCopySuccessHistogram,
+        ("Blink.Fonts.HarfBuzzFaceZeroCopyAccess"));
+    SkTypeface* typeface = m_platformData->typeface();
+    CHECK(typeface);
+    int ttcIndex = 0;
+    SkStreamAsset* typefaceStream = typeface->openStream(&ttcIndex);
+    if (typefaceStream && typefaceStream->getMemoryBase()) {
+        std::unique_ptr<hb_blob_t, void(*)(hb_blob_t*)> faceBlob(hb_blob_create(
+            reinterpret_cast<const char*>(typefaceStream->getMemoryBase()),
+            typefaceStream->getLength(),
+            HB_MEMORY_MODE_READONLY,
+            typefaceStream,
+            deleteTypefaceStream),
+            hb_blob_destroy);
+        face = hb_face_create(faceBlob.get(), ttcIndex);
+    }
+
+    // Fallback to table copies if there is no in-memory access.
+    if (!face) {
+        face = hb_face_create_for_tables(harfBuzzSkiaGetTable, m_platformData->typeface(), 0);
+        zeroCopySuccessHistogram.count(false);
+    } else {
+        zeroCopySuccessHistogram.count(true);
+    }
 #endif
     ASSERT(face);
     return face;
 }
 
-hb_font_t* HarfBuzzFace::createFont(PassRefPtr<UnicodeRangeSet> rangeSet) const
+PassRefPtr<HbFontCacheEntry> createHbFontCacheEntry(hb_face_t* face)
 {
-    HarfBuzzFontData* hbFontData = new HarfBuzzFontData(m_glyphCacheForFaceCacheEntry, m_face, rangeSet);
-    m_platformData->setupPaint(&hbFontData->m_paint);
-    hbFontData->m_simpleFontData = FontCache::fontCache()->fontDataFromFontPlatformData(m_platformData);
-    ASSERT(hbFontData->m_simpleFontData);
-    hb_font_t* font = hb_font_create(m_face);
-    hb_font_set_funcs(font, harfBuzzSkiaGetFontFuncs(), hbFontData, destroyHarfBuzzFontData);
-    float size = m_platformData->size();
-    int scale = SkiaScalarToHarfBuzzPosition(size);
-    hb_font_set_scale(font, scale, scale);
-    hb_font_make_immutable(font);
-    return font;
+    HbFontUniquePtr otFont(hb_font_create(face));
+    hb_ot_font_set_funcs(otFont.get());
+    // Creating a sub font means that non-available functions
+    // are found from the parent.
+    hb_font_t* unscaledFont = hb_font_create_sub_font(otFont.get());
+    RefPtr<HbFontCacheEntry> cacheEntry = HbFontCacheEntry::create(unscaledFont);
+    hb_font_set_funcs(unscaledFont, harfBuzzSkiaGetFontFuncs(), cacheEntry->hbFontData(), nullptr);
+    return cacheEntry;
+}
+
+hb_font_t* HarfBuzzFace::getScaledFont(PassRefPtr<UnicodeRangeSet> rangeSet) const
+{
+    m_platformData->setupPaint(&m_harfBuzzFontData->m_paint);
+    m_harfBuzzFontData->m_paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+    m_harfBuzzFontData->m_rangeSet = rangeSet;
+    m_harfBuzzFontData->m_simpleFontData = FontCache::fontCache()->fontDataFromFontPlatformData(m_platformData).get();
+    ASSERT(m_harfBuzzFontData->m_simpleFontData);
+    int scale = SkiaScalarToHarfBuzzPosition(m_platformData->size());
+    hb_font_set_scale(m_unscaledFont, scale, scale);
+    return m_unscaledFont;
 }
 
 } // namespace blink

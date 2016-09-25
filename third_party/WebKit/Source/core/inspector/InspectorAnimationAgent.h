@@ -9,8 +9,10 @@
 #include "core/animation/Animation.h"
 #include "core/css/CSSKeyframesRule.h"
 #include "core/inspector/InspectorBaseAgent.h"
-#include "wtf/PassOwnPtr.h"
+#include "core/inspector/protocol/Animation.h"
 #include "wtf/text/WTFString.h"
+
+#include <v8-inspector.h>
 
 namespace blink {
 
@@ -21,15 +23,11 @@ class InspectedFrames;
 class InspectorCSSAgent;
 class InspectorDOMAgent;
 class TimingFunction;
-class V8RuntimeAgent;
 
-class CORE_EXPORT InspectorAnimationAgent final : public InspectorBaseAgent<InspectorAnimationAgent, protocol::Frontend::Animation>, public protocol::Backend::Animation {
+class CORE_EXPORT InspectorAnimationAgent final : public InspectorBaseAgent<protocol::Animation::Metainfo> {
     WTF_MAKE_NONCOPYABLE(InspectorAnimationAgent);
 public:
-    static InspectorAnimationAgent* create(InspectedFrames* inspectedFrames, InspectorDOMAgent* domAgent, InspectorCSSAgent* cssAgent, V8RuntimeAgent* runtimeAgent)
-    {
-        return new InspectorAnimationAgent(inspectedFrames, domAgent, cssAgent, runtimeAgent);
-    }
+    InspectorAnimationAgent(InspectedFrames*, InspectorDOMAgent*, InspectorCSSAgent*, v8_inspector::V8InspectorSession*);
 
     // Base agent methods.
     void restore() override;
@@ -41,11 +39,11 @@ public:
     void getPlaybackRate(ErrorString*, double* playbackRate) override;
     void setPlaybackRate(ErrorString*, double playbackRate) override;
     void getCurrentTime(ErrorString*, const String& id, double* currentTime) override;
-    void setPaused(ErrorString*, PassOwnPtr<protocol::Array<String>> animations, bool paused) override;
+    void setPaused(ErrorString*, std::unique_ptr<protocol::Array<String>> animations, bool paused) override;
     void setTiming(ErrorString*, const String& animationId, double duration, double delay) override;
-    void seekAnimations(ErrorString*, PassOwnPtr<protocol::Array<String>> animations, double currentTime) override;
-    void releaseAnimations(ErrorString*, PassOwnPtr<protocol::Array<String>> animations) override;
-    void resolveAnimation(ErrorString*, const String& animationId, OwnPtr<protocol::Runtime::RemoteObject>*) override;
+    void seekAnimations(ErrorString*, std::unique_ptr<protocol::Array<String>> animations, double currentTime) override;
+    void releaseAnimations(ErrorString*, std::unique_ptr<protocol::Array<String>> animations) override;
+    void resolveAnimation(ErrorString*, const String& animationId, std::unique_ptr<v8_inspector::protocol::Runtime::API::RemoteObject>*) override;
 
     // API for InspectorInstrumentation
     void didCreateAnimation(unsigned);
@@ -58,12 +56,10 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
 private:
-    InspectorAnimationAgent(InspectedFrames*, InspectorDOMAgent*, InspectorCSSAgent*, V8RuntimeAgent*);
-
     using AnimationType = protocol::Animation::Animation::TypeEnum;
 
-    PassOwnPtr<protocol::Animation::Animation> buildObjectForAnimation(blink::Animation&);
-    PassOwnPtr<protocol::Animation::Animation> buildObjectForAnimation(blink::Animation&, String, PassOwnPtr<protocol::Animation::KeyframesRule> keyframeRule = nullptr);
+    std::unique_ptr<protocol::Animation::Animation> buildObjectForAnimation(blink::Animation&);
+    std::unique_ptr<protocol::Animation::Animation> buildObjectForAnimation(blink::Animation&, String, std::unique_ptr<protocol::Animation::KeyframesRule> keyframeRule = nullptr);
     double normalizedStartTime(blink::Animation&);
     AnimationTimeline& referenceTimeline();
     blink::Animation* animationClone(blink::Animation*);
@@ -72,10 +68,10 @@ private:
     Member<InspectedFrames> m_inspectedFrames;
     Member<InspectorDOMAgent> m_domAgent;
     Member<InspectorCSSAgent> m_cssAgent;
-    V8RuntimeAgent* m_runtimeAgent;
+    v8_inspector::V8InspectorSession* m_v8Session;
     HeapHashMap<String, Member<blink::Animation>> m_idToAnimation;
     HeapHashMap<String, Member<blink::Animation>> m_idToAnimationClone;
-    HeapHashMap<String, String> m_idToAnimationType;
+    HashMap<String, String> m_idToAnimationType;
     bool m_isCloning;
     HashSet<String> m_clearedAnimations;
 };

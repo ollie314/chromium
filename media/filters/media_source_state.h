@@ -9,10 +9,14 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "media/base/audio_codecs.h"
+#include "media/base/demuxer.h"
 #include "media/base/demuxer_stream.h"
 #include "media/base/media_export.h"
+#include "media/base/media_log.h"
 #include "media/base/stream_parser.h"
 #include "media/base/stream_parser_buffer.h"
+#include "media/base/video_codecs.h"
 
 namespace media {
 
@@ -31,16 +35,15 @@ class MEDIA_EXPORT MediaSourceState {
   typedef base::Callback<void(ChunkDemuxerStream*, const TextTrackConfig&)>
       NewTextTrackCB;
 
-  MediaSourceState(scoped_ptr<StreamParser> stream_parser,
-                   scoped_ptr<FrameProcessor> frame_processor,
+  MediaSourceState(std::unique_ptr<StreamParser> stream_parser,
+                   std::unique_ptr<FrameProcessor> frame_processor,
                    const CreateDemuxerStreamCB& create_demuxer_stream_cb,
                    const scoped_refptr<MediaLog>& media_log);
 
   ~MediaSourceState();
 
   void Init(const StreamParser::InitCB& init_cb,
-            bool allow_audio,
-            bool allow_video,
+            const std::string& expected_codecs,
             const StreamParser::EncryptedMediaInitDataCB&
                 encrypted_media_init_data_cb,
             const NewTextTrackCB& new_text_track_cb);
@@ -87,6 +90,10 @@ class MEDIA_EXPORT MediaSourceState {
   // end of stream range logic needs to be executed.
   Ranges<TimeDelta> GetBufferedRanges(TimeDelta duration, bool ended) const;
 
+  // Returns the highest PTS of currently buffered frames in this source, or
+  // base::TimeDelta() if none of the streams contain buffered data.
+  TimeDelta GetHighestPresentationTimestamp() const;
+
   // Returns the highest buffered duration across all streams managed
   // by this object.
   // Returns TimeDelta() if none of the streams contain buffered data.
@@ -108,9 +115,9 @@ class MEDIA_EXPORT MediaSourceState {
   void SetMemoryLimits(DemuxerStream::Type type, size_t memory_limit);
   bool IsSeekWaitingForData() const;
 
-  typedef std::list<Ranges<TimeDelta>> RangesList;
+  using RangesList = std::vector<Ranges<TimeDelta>>;
   static Ranges<TimeDelta> ComputeRangesIntersection(
-      const RangesList& activeRanges,
+      const RangesList& active_ranges,
       bool ended);
 
   void SetTracksWatcher(const Demuxer::MediaTracksUpdatedCB& tracks_updated_cb);
@@ -130,9 +137,8 @@ class MEDIA_EXPORT MediaSourceState {
   // encountered.
   // Returns true on a successful call. Returns false if an error occurred while
   // processing decoder configurations.
-  bool OnNewConfigs(bool allow_audio,
-                    bool allow_video,
-                    scoped_ptr<MediaTracks> tracks,
+  bool OnNewConfigs(std::string expected_codecs,
+                    std::unique_ptr<MediaTracks> tracks,
                     const StreamParser::TextTrackConfigMap& text_configs);
 
   // Called by the |stream_parser_| at the beginning of a new media segment.
@@ -147,17 +153,12 @@ class MEDIA_EXPORT MediaSourceState {
   // frame's track.
   // Returns true on a successful call. Returns false if an error occurred while
   // processing the buffers.
-  bool OnNewBuffers(const StreamParser::BufferQueue& audio_buffers,
-                    const StreamParser::BufferQueue& video_buffers,
-                    const StreamParser::TextBufferQueueMap& text_map);
+  bool OnNewBuffers(const StreamParser::BufferQueueMap& buffer_queue_map);
 
   void OnSourceInitDone(const StreamParser::InitParameters& params);
 
-  // EstimateVideoDataSize uses some heuristics to estimate the size of the
-  // video size in the chunk of muxed audio/video data without parsing it.
-  // This is used by EvictCodedFrames algorithm, which happens before Append
-  // (and therefore before parsing is performed) to prepare space for new data.
-  size_t EstimateVideoDataSize(size_t muxed_data_chunk_size) const;
+  // Sets memory limits for all demuxer streams.
+  void SetStreamMemoryLimits();
 
   // Tracks the number of MEDIA_LOGs emitted for segments missing expected audio
   // or video blocks. Useful to prevent log spam.
@@ -182,23 +183,22 @@ class MEDIA_EXPORT MediaSourceState {
   bool parsing_media_segment_;
 
   // Valid only while |parsing_media_segment_| is true. These flags enable
-  // warning when at least one frame for each A/V track is not in a parsed media
-  // segment.
-  bool media_segment_contained_audio_frame_;
-  bool media_segment_contained_video_frame_;
+  // warning when the parsed media segment doesn't have frames for some track.
+  std::map<StreamParser::TrackId, bool> media_segment_has_data_for_track_;
 
   // The object used to parse appended data.
-  scoped_ptr<StreamParser> stream_parser_;
+  std::unique_ptr<StreamParser> stream_parser_;
 
-  scoped_ptr<MediaTracks> media_tracks_;
-
-  ChunkDemuxerStream* audio_;  // Not owned by |this|.
-  ChunkDemuxerStream* video_;  // Not owned by |this|.
+  // Note that ChunkDemuxerStreams are created and owned by the parent
+  // ChunkDemuxer. They are not owned by |this|.
+  using DemuxerStreamMap = std::map<StreamParser::TrackId, ChunkDemuxerStream*>;
+  DemuxerStreamMap audio_streams_;
+  DemuxerStreamMap video_streams_;
 
   typedef std::map<StreamParser::TrackId, ChunkDemuxerStream*> TextStreamMap;
   TextStreamMap text_stream_map_;  // |this| owns the map's stream pointers.
 
-  scoped_ptr<FrameProcessor> frame_processor_;
+  std::unique_ptr<FrameProcessor> frame_processor_;
   scoped_refptr<MediaLog> media_log_;
   StreamParser::InitCB init_cb_;
 
@@ -212,6 +212,10 @@ class MEDIA_EXPORT MediaSourceState {
   // invoke this callback.
   Demuxer::MediaTracksUpdatedCB init_segment_received_cb_;
   bool append_in_progress_ = false;
+  bool first_init_segment_received_ = false;
+
+  std::vector<AudioCodec> expected_audio_codecs_;
+  std::vector<VideoCodec> expected_video_codecs_;
 
   // Indicates that timestampOffset should be updated automatically during
   // OnNewBuffers() based on the earliest end timestamp of the buffers provided.

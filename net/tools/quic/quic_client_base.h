@@ -14,14 +14,15 @@
 #include "base/macros.h"
 #include "net/base/ip_endpoint.h"
 #include "net/log/net_log.h"
-#include "net/quic/crypto/crypto_handshake.h"
-#include "net/quic/crypto/quic_crypto_client_config.h"
-#include "net/quic/quic_bandwidth.h"
-#include "net/quic/quic_client_push_promise_index.h"
-#include "net/quic/quic_config.h"
-#include "net/quic/quic_connection.h"
-#include "net/quic/quic_packet_writer.h"
-#include "net/quic/quic_protocol.h"
+#include "net/quic/core/crypto/crypto_handshake.h"
+#include "net/quic/core/crypto/quic_crypto_client_config.h"
+#include "net/quic/core/quic_alarm_factory.h"
+#include "net/quic/core/quic_bandwidth.h"
+#include "net/quic/core/quic_client_push_promise_index.h"
+#include "net/quic/core/quic_config.h"
+#include "net/quic/core/quic_connection.h"
+#include "net/quic/core/quic_packet_writer.h"
+#include "net/quic/core/quic_protocol.h"
 #include "net/tools/quic/quic_client_session.h"
 #include "net/tools/quic/quic_spdy_client_stream.h"
 
@@ -36,7 +37,8 @@ class QuicClientBase {
                  const QuicVersionVector& supported_versions,
                  const QuicConfig& config,
                  QuicConnectionHelperInterface* helper,
-                 ProofVerifier* proof_verifier);
+                 QuicAlarmFactory* alarm_factory,
+                 std::unique_ptr<ProofVerifier> proof_verifier);
 
   ~QuicClientBase();
 
@@ -52,7 +54,7 @@ class QuicClientBase {
 
   // Returns a newly created QuicSpdyClientStream, owned by the
   // QuicSimpleClient.
-  QuicSpdyClientStream* CreateReliableClientStream();
+  virtual QuicSpdyClientStream* CreateReliableClientStream();
 
   // Wait for events until the stream with the given ID is closed.
   void WaitForStreamToClose(QuicStreamId id);
@@ -84,6 +86,17 @@ class QuicClientBase {
   // |source|.
   void SetChannelIDSource(ChannelIDSource* source) {
     crypto_config_.SetChannelIDSource(source);
+  }
+
+  // UseTokenBinding enables token binding negotiation in the client.  This
+  // should only be called before the initial Connect().  The client will still
+  // need to check that token binding is negotiated with the server, and add
+  // token binding headers to requests if so.  server, and add token binding
+  // headers to requests if so.  The negotiated token binding parameters can be
+  // found on the QuicCryptoNegotiatedParameters object in
+  // token_binding_key_param.
+  void UseTokenBinding() {
+    crypto_config_.tb_key_params = QuicTagVector{kP256};
   }
 
   const QuicVersionVector& supported_versions() const {
@@ -163,6 +176,7 @@ class QuicClientBase {
   }
 
  protected:
+  // Takes ownership of |connection|.
   virtual QuicClientSession* CreateQuicClientSession(
       QuicConnection* connection);
 
@@ -180,6 +194,8 @@ class QuicClientBase {
   virtual QuicConnectionId GenerateNewConnectionId();
 
   QuicConnectionHelperInterface* helper() { return helper_.get(); }
+
+  QuicAlarmFactory* alarm_factory() { return alarm_factory_.get(); }
 
   void set_num_sent_client_hellos(int num_sent_client_hellos) {
     num_sent_client_hellos_ = num_sent_client_hellos;
@@ -200,6 +216,9 @@ class QuicClientBase {
 
   // Helper to be used by created connections. Needs to outlive |session_|.
   std::unique_ptr<QuicConnectionHelperInterface> helper_;
+
+  // Helper to be used by created connections. Needs to outlive |session_|.
+  std::unique_ptr<QuicAlarmFactory> alarm_factory_;
 
   // Writer used to actually send packets to the wire. Needs to outlive
   // |session_|.

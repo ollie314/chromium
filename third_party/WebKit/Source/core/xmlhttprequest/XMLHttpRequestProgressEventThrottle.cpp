@@ -27,10 +27,14 @@
 #include "core/xmlhttprequest/XMLHttpRequestProgressEventThrottle.h"
 
 #include "core/EventTypeNames.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/ProgressEvent.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/xmlhttprequest/XMLHttpRequest.h"
+#include "public/platform/Platform.h"
+#include "public/platform/WebScheduler.h"
+#include "public/platform/WebThread.h"
 #include "wtf/Assertions.h"
 #include "wtf/text/AtomicString.h"
 
@@ -63,7 +67,7 @@ void XMLHttpRequestProgressEventThrottle::DeferredEvent::clear()
 
 Event* XMLHttpRequestProgressEventThrottle::DeferredEvent::take()
 {
-    ASSERT(m_isSet);
+    DCHECK(m_isSet);
 
     Event* event = ProgressEvent::create(EventTypeNames::progress, m_lengthComputable, m_loaded, m_total);
     clear();
@@ -71,10 +75,11 @@ Event* XMLHttpRequestProgressEventThrottle::DeferredEvent::take()
 }
 
 XMLHttpRequestProgressEventThrottle::XMLHttpRequestProgressEventThrottle(XMLHttpRequest* target)
-    : m_target(target)
+    : TimerBase(TaskRunnerHelper::get(TaskType::Networking, target->getExecutionContext()))
+    , m_target(target)
     , m_hasDispatchedProgressProgressEvent(false)
 {
-    ASSERT(target);
+    DCHECK(target);
 }
 
 XMLHttpRequestProgressEventThrottle::~XMLHttpRequestProgressEventThrottle()
@@ -127,7 +132,7 @@ void XMLHttpRequestProgressEventThrottle::dispatchReadyStateChangeEvent(Event* e
 void XMLHttpRequestProgressEventThrottle::dispatchProgressProgressEvent(Event* progressEvent)
 {
     XMLHttpRequest::State state = m_target->readyState();
-    if (m_target->readyState() == XMLHttpRequest::LOADING && m_hasDispatchedProgressProgressEvent) {
+    if (m_target->readyState() == XMLHttpRequest::kLoading && m_hasDispatchedProgressProgressEvent) {
         TRACE_EVENT1("devtools.timeline", "XHRReadyStateChange", "data", InspectorXhrReadyStateChangeEvent::data(m_target->getExecutionContext(), m_target));
         InspectorInstrumentation::AsyncTask asyncTask(m_target->getExecutionContext(), m_target, m_target->isAsync());
         m_target->dispatchEvent(Event::create(EventTypeNames::readystatechange));

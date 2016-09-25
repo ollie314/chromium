@@ -9,13 +9,19 @@
 
 namespace gl {
 
+struct GLVersionInfo;
+
 class YUVToRGBConverter {
  public:
-  YUVToRGBConverter();
+  explicit YUVToRGBConverter(const GLVersionInfo& gl_version_info);
   ~YUVToRGBConverter();
+
+  // The input Y and UV textures should be bound to these texture objects
+  // prior to calling CopyYUV420ToRGB.
+  unsigned y_texture() const { return y_texture_; }
+  unsigned uv_texture() const { return uv_texture_; }
+
   void CopyYUV420ToRGB(unsigned target,
-                       unsigned y_texture,
-                       unsigned uv_texture,
                        const gfx::Size& size,
                        unsigned rgb_texture);
 
@@ -26,6 +32,8 @@ class YUVToRGBConverter {
   unsigned program_ = 0;
   int size_location_ = -1;
   unsigned vertex_buffer_ = 0;
+  unsigned y_texture_ = 0;
+  unsigned uv_texture_ = 0;
 };
 
 }  // namespace gl

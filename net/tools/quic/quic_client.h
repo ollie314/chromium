@@ -8,8 +8,7 @@
 #ifndef NET_TOOLS_QUIC_QUIC_CLIENT_H_
 #define NET_TOOLS_QUIC_QUIC_CLIENT_H_
 
-#include <stddef.h>
-
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -18,9 +17,9 @@
 #include "base/strings/string_piece.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
-#include "net/quic/quic_client_push_promise_index.h"
-#include "net/quic/quic_config.h"
-#include "net/quic/quic_spdy_stream.h"
+#include "net/quic/core/quic_client_push_promise_index.h"
+#include "net/quic/core/quic_config.h"
+#include "net/quic/core/quic_spdy_stream.h"
 #include "net/tools/balsa/balsa_headers.h"
 #include "net/tools/epoll_server/epoll_server.h"
 #include "net/tools/quic/quic_client_base.h"
@@ -87,19 +86,20 @@ class QuicClient : public QuicClientBase,
              const QuicServerId& server_id,
              const QuicVersionVector& supported_versions,
              EpollServer* epoll_server,
-             ProofVerifier* proof_verifier);
+             std::unique_ptr<ProofVerifier> proof_verifier);
   QuicClient(IPEndPoint server_address,
              const QuicServerId& server_id,
              const QuicVersionVector& supported_versions,
              const QuicConfig& config,
              EpollServer* epoll_server,
-             ProofVerifier* proof_verifier);
+             std::unique_ptr<ProofVerifier> proof_verifier);
 
   ~QuicClient() override;
 
   // From QuicClientBase
   bool Initialize() override;
   bool WaitForEvents() override;
+  QuicSpdyClientStream* CreateReliableClientStream() override;
 
   // "Connect" to the QUIC server, including performing synchronous crypto
   // handshake.
@@ -123,7 +123,7 @@ class QuicClient : public QuicClientBase,
                                      base::StringPiece body,
                                      bool fin);
 
-  // Sends a request simple GET for each URL in |args|, and then waits for
+  // Sends a request simple GET for each URL in |url_list|, and then waits for
   // each to complete.
   void SendRequestsAndWaitForResponse(const std::vector<std::string>& url_list);
 
@@ -171,7 +171,11 @@ class QuicClient : public QuicClientBase,
 
   const IPEndPoint& server_address() const { return server_address_; }
 
-  // Takes ownership of the listener.
+  void set_server_address(const IPEndPoint& server_address) {
+    server_address_ = server_address;
+  }
+
+  // Takes ownership of the std::listener.
   void set_response_listener(ResponseListener* listener) {
     response_listener_.reset(listener);
   }
@@ -183,6 +187,7 @@ class QuicClient : public QuicClientBase,
   const std::string& latest_response_body() const;
   const std::string& latest_response_trailers() const;
 
+ protected:
   // Implements ProcessPacketInterface. This will be called for each received
   // packet.
   void ProcessPacket(const IPEndPoint& self_address,
@@ -245,7 +250,7 @@ class QuicClient : public QuicClientBase,
                            bool fin);
 
   // Address of the server.
-  const IPEndPoint server_address_;
+  IPEndPoint server_address_;
 
   // If initialized, the address to bind to.
   IPAddress bind_to_address_;

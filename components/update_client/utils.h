@@ -5,10 +5,11 @@
 #ifndef COMPONENTS_UPDATE_CLIENT_UTILS_H_
 #define COMPONENTS_UPDATE_CLIENT_UTILS_H_
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
 
 class GURL;
 
@@ -28,13 +29,18 @@ class Configurator;
 struct CrxComponent;
 struct CrxUpdateItem;
 
+// Defines a name-value pair that represents an installer attribute.
+// Installer attributes are component-specific metadata, which may be serialized
+// in an update check request.
+using InstallerAttribute = std::pair<std::string, std::string>;
+
 // An update protocol request starts with a common preamble which includes
 // version and platform information for Chrome and the operating system,
 // followed by a request body, which is the actual payload of the request.
 // For example:
 //
 // <?xml version="1.0" encoding="UTF-8"?>
-// <request protocol="3.0" version="chrome-32.0.1.0"  prodversion="32.0.1.0"
+// <request protocol="3.0" version="chrome-32.0.1.0" prodversion="32.0.1.0"
 //        requestid="{7383396D-B4DD-46E1-9104-AAC6B918E792}"
 //        updaterchannel="canary" arch="x86" nacl_arch="x86-64"
 //        ADDITIONAL ATTRIBUTES>
@@ -50,7 +56,8 @@ struct CrxUpdateItem;
 // If specified, |additional_attributes| are appended as attributes of the
 // request element. The additional attributes have to be well-formed for
 // insertion in the request element.
-std::string BuildProtocolRequest(const std::string& browser_version,
+std::string BuildProtocolRequest(const std::string& prod_id,
+                                 const std::string& browser_version,
                                  const std::string& channel,
                                  const std::string& lang,
                                  const std::string& os_long_name,
@@ -61,7 +68,7 @@ std::string BuildProtocolRequest(const std::string& browser_version,
 // Sends a protocol request to the the service endpoint specified by |url|.
 // The body of the request is provided by |protocol_request| and it is
 // expected to contain XML data. The caller owns the returned object.
-scoped_ptr<net::URLFetcher> SendProtocolRequest(
+std::unique_ptr<net::URLFetcher> SendProtocolRequest(
     const GURL& url,
     const std::string& protocol_request,
     net::URLFetcherDelegate* url_fetcher_delegate,
@@ -99,8 +106,10 @@ bool VerifyFileHash256(const base::FilePath& filepath,
 // Returns true if the |brand| parameter matches ^[a-zA-Z]{4}?$ .
 bool IsValidBrand(const std::string& brand);
 
-// Returns true if the |ap| parameter matches ^[-+_=a-zA-Z0-9]{0,256}$ .
-bool IsValidAp(const std::string& ap);
+// Returns true if the name part of the |attr| parameter matches
+// ^[-_a-zA-Z0-9]{1,256}$ and the value part of the |attr| parameter
+// matches ^[-.,;+_=a-zA-Z0-9]{0,256}$ .
+bool IsValidInstallerAttribute(const InstallerAttribute& attr);
 
 // Removes the unsecure urls in the |urls| parameter.
 void RemoveUnsecureUrls(std::vector<GURL>* urls);

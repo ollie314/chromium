@@ -6,9 +6,9 @@
 
 #include "core/frame/LocalFrame.h"
 #include "core/page/Page.h"
-
 #include "modules/device_orientation/DeviceOrientationController.h"
 #include "modules/device_orientation/DeviceOrientationData.h"
+#include "wtf/Assertions.h"
 
 namespace blink {
 
@@ -30,29 +30,28 @@ DeviceOrientationInspectorAgent::~DeviceOrientationInspectorAgent()
 }
 
 DeviceOrientationInspectorAgent::DeviceOrientationInspectorAgent(Page& page)
-    : InspectorBaseAgent<DeviceOrientationInspectorAgent, protocol::Frontend::DeviceOrientation>("DeviceOrientation")
-    , m_page(&page)
+    : m_page(&page)
 {
 }
 
 DEFINE_TRACE(DeviceOrientationInspectorAgent)
 {
     visitor->trace(m_page);
-    InspectorBaseAgent<DeviceOrientationInspectorAgent, protocol::Frontend::DeviceOrientation>::trace(visitor);
+    InspectorBaseAgent::trace(visitor);
 }
 
 DeviceOrientationController& DeviceOrientationInspectorAgent::controller()
 {
-    ASSERT(toLocalFrame(m_page->mainFrame())->document());
+    DCHECK(toLocalFrame(m_page->mainFrame())->document());
     return DeviceOrientationController::from(*m_page->deprecatedLocalMainFrame()->document());
 }
 
 void DeviceOrientationInspectorAgent::setDeviceOrientationOverride(ErrorString* error, double alpha, double beta, double gamma)
 {
     m_state->setBoolean(DeviceOrientationInspectorAgentState::overrideEnabled, true);
-    m_state->setNumber(DeviceOrientationInspectorAgentState::alpha, alpha);
-    m_state->setNumber(DeviceOrientationInspectorAgentState::beta, beta);
-    m_state->setNumber(DeviceOrientationInspectorAgentState::gamma, gamma);
+    m_state->setDouble(DeviceOrientationInspectorAgentState::alpha, alpha);
+    m_state->setDouble(DeviceOrientationInspectorAgentState::beta, beta);
+    m_state->setDouble(DeviceOrientationInspectorAgentState::gamma, gamma);
     controller().setOverride(DeviceOrientationData::create(alpha, beta, gamma, false));
 }
 
@@ -72,11 +71,11 @@ void DeviceOrientationInspectorAgent::restore()
 {
     if (m_state->booleanProperty(DeviceOrientationInspectorAgentState::overrideEnabled, false)) {
         double alpha = 0;
-        m_state->getNumber(DeviceOrientationInspectorAgentState::alpha, &alpha);
+        m_state->getDouble(DeviceOrientationInspectorAgentState::alpha, &alpha);
         double beta = 0;
-        m_state->getNumber(DeviceOrientationInspectorAgentState::beta, &beta);
+        m_state->getDouble(DeviceOrientationInspectorAgentState::beta, &beta);
         double gamma = 0;
-        m_state->getNumber(DeviceOrientationInspectorAgentState::gamma, &gamma);
+        m_state->getDouble(DeviceOrientationInspectorAgentState::gamma, &gamma);
         controller().setOverride(DeviceOrientationData::create(alpha, beta, gamma, false));
     }
 }

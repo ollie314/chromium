@@ -66,8 +66,6 @@ class ResourcePrefetcherManager;
 // * ResourcePrefetcher - Lives entirely on the IO thread, owned by the
 //   ResourcePrefetcherManager, and issues net::URLRequest to fetch resources.
 //
-// TODO(shishir): Do speculative prefetching for https resources and/or https
-// main frame urls.
 // TODO(zhenw): Currently only main frame requests/redirects/responses are
 // recorded. Consider recording sub-frame responses independently or together
 // with main frame.
@@ -85,11 +83,20 @@ class ResourcePrefetchPredictor
     NavigationID navigation_id;
     GURL resource_url;
     content::ResourceType resource_type;
+    net::RequestPriority priority;
 
     // Only for responses.
     std::string mime_type;
     bool was_cached;
     GURL redirect_url;  // Empty unless request was redirected to a valid url.
+
+    bool has_validators;
+    bool always_revalidate;
+
+    // Initializes a |URLRequestSummary| from a |URLRequest| response.
+    // Returns true for success.
+    static bool SummarizeResponse(const net::URLRequest& request,
+                                  URLRequestSummary* summary);
   };
 
   ResourcePrefetchPredictor(const ResourcePrefetchPredictorConfig& config,
@@ -101,6 +108,12 @@ class ResourcePrefetchPredictor
                                   content::ResourceType resource_type);
   static bool ShouldRecordResponse(net::URLRequest* response);
   static bool ShouldRecordRedirect(net::URLRequest* response);
+
+  // Determines the resource type from the declared one, falling back to MIME
+  // type detection when it is not explicit.
+  static content::ResourceType GetResourceType(
+      content::ResourceType resource_type,
+      const std::string& mime_type);
 
   // Determines the ResourceType from the mime type, defaulting to the
   // |fallback| if the ResourceType could not be determined.
@@ -117,13 +130,6 @@ class ResourcePrefetchPredictor
 
   // Called when the main frame of a page completes loading.
   void RecordMainFrameLoadComplete(const NavigationID& navigation_id);
-
-  // Called by ResourcePrefetcherManager to notify that prefetching has finished
-  // for a navigation. Should take ownership of |requests|.
-  virtual void FinishedPrefetchForNavigation(
-      const NavigationID& navigation_id,
-      PrefetchKeyType key_type,
-      ResourcePrefetcher::RequestVector* requests);
 
  private:
   friend class ::PredictorsHandler;
@@ -145,25 +151,12 @@ class ResourcePrefetchPredictor
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest,
                            OnSubresourceResponse);
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest, GetCorrectPLT);
+  FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest, HandledResourceTypes);
 
   enum InitializationState {
     NOT_INITIALIZED = 0,
     INITIALIZING = 1,
     INITIALIZED = 2
-  };
-
-  // Stores prefetching results.
-  struct Result {
-    // Takes ownership of requests.
-    Result(PrefetchKeyType key_type,
-           ResourcePrefetcher::RequestVector* requests);
-    ~Result();
-
-    PrefetchKeyType key_type;
-    std::unique_ptr<ResourcePrefetcher::RequestVector> requests;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Result);
   };
 
   typedef ResourcePrefetchPredictorTables::ResourceRow ResourceRow;
@@ -172,16 +165,20 @@ class ResourcePrefetchPredictor
   typedef ResourcePrefetchPredictorTables::PrefetchDataMap PrefetchDataMap;
   typedef std::map<NavigationID, linked_ptr<std::vector<URLRequestSummary> > >
       NavigationMap;
-  typedef std::map<NavigationID, std::unique_ptr<Result>> ResultsMap;
 
   // Returns true if the main page request is supported for prediction.
   static bool IsHandledMainPage(net::URLRequest* request);
 
   // Returns true if the subresource request is supported for prediction.
-  static bool IsHandledSubresource(net::URLRequest* request);
+  static bool IsHandledSubresource(net::URLRequest* request,
+                                   content::ResourceType resource_type);
 
-  // Returns true if the request (should have a response in it) is cacheable.
-  static bool IsCacheable(const net::URLRequest* request);
+  // Returns true if the subresource has a supported type.
+  static bool IsHandledResourceType(content::ResourceType resource_type,
+                                    const std::string& mime_type);
+
+  // Returns true if the request (should have a response in it) is "no-store".
+  static bool IsNoStore(const net::URLRequest* request);
 
   // KeyedService methods override.
   void Shutdown() override;
@@ -195,21 +192,19 @@ class ResourcePrefetchPredictor
 
   // Called when onload completes for a navigation. We treat this point as the
   // "completion" of the navigation. The resources requested by the page up to
-  // this point are the only ones considered for prefetching. Return the page
-  // load time for testing.
-  base::TimeDelta OnNavigationComplete(
-      const NavigationID& nav_id_without_timing_info);
+  // this point are the only ones considered for prefetching.
+  void OnNavigationComplete(const NavigationID& nav_id_without_timing_info);
 
   // Returns true if there is PrefetchData that can be used for the
   // navigation and fills in the |prefetch_data| to resources that need to be
   // prefetched.
   bool GetPrefetchData(const NavigationID& navigation_id,
-                       ResourcePrefetcher::RequestVector* prefetch_requests,
+                       std::vector<GURL>* urls,
                        PrefetchKeyType* key_type);
 
-  // Converts a PrefetchData into a ResourcePrefetcher::RequestVector.
+  // Converts a PrefetchData into a list of URLs.
   void PopulatePrefetcherRequest(const PrefetchData& data,
-                                 ResourcePrefetcher::RequestVector* requests);
+                                 std::vector<GURL>* urls);
 
   // Starts prefetching if it is enabled and prefetching data exists for the
   // NavigationID either at the URL or at the host level.
@@ -232,7 +227,7 @@ class ResourcePrefetchPredictor
   void OnHistoryAndCacheLoaded();
 
   // Removes data for navigations where the onload never fired. Will cleanup
-  // inflight_navigations_ and results_map_.
+  // inflight_navigations_.
   void CleanupAbandonedNavigations(const NavigationID& navigation_id);
 
   // Deletes all URLs from the predictor database, the caches and removes all
@@ -271,25 +266,6 @@ class ResourcePrefetchPredictor
       base::Callback<void(int)> report_network_type_callback,
       PrefetchKeyType key_type) const;
 
-  // Reports accuracy by comparing prefetched resources with resources that are
-  // actually used by the page.
-  void ReportAccuracyStats(PrefetchKeyType key_type,
-                           const std::vector<URLRequestSummary>& actual,
-                           ResourcePrefetcher::RequestVector* prefetched) const;
-
-  // Reports predicted accuracy i.e. by comparing resources that are actually
-  // used by the page with those that may have been prefetched.
-  void ReportPredictedAccuracyStats(
-      PrefetchKeyType key_type,
-      const std::vector<URLRequestSummary>& actual,
-      const ResourcePrefetcher::RequestVector& predicted) const;
-  void ReportPredictedAccuracyStatsHelper(
-      PrefetchKeyType key_type,
-      const ResourcePrefetcher::RequestVector& predicted,
-      const std::map<GURL, bool>& actual,
-      size_t total_resources_fetched_from_network,
-      size_t max_assumed_prefetched) const;
-
   // history::HistoryServiceObserver:
   void OnURLsDeleted(history::HistoryService* history_service,
                      bool all_history,
@@ -321,8 +297,6 @@ class ResourcePrefetchPredictor
   // Copy of the data in the predictor tables.
   std::unique_ptr<PrefetchDataMap> url_table_cache_;
   std::unique_ptr<PrefetchDataMap> host_table_cache_;
-
-  ResultsMap results_map_;
 
   ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
       history_service_observer_;

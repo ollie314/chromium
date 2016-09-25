@@ -30,19 +30,21 @@
 
 #include "modules/crypto/NormalizeAlgorithm.h"
 
+#include "bindings/core/v8/ArrayBufferOrArrayBufferView.h"
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/V8ArrayBuffer.h"
 #include "bindings/core/v8/V8ArrayBufferView.h"
-#include "bindings/modules/v8/UnionTypesModules.h"
 #include "bindings/modules/v8/V8CryptoKey.h"
 #include "core/dom/DOMArrayPiece.h"
 #include "core/dom/DOMTypedArray.h"
 #include "public/platform/WebCryptoAlgorithmParams.h"
 #include "public/platform/WebString.h"
 #include "wtf/MathExtras.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/Vector.h"
 #include "wtf/text/StringBuilder.h"
 #include <algorithm>
+#include <memory>
 
 namespace blink {
 
@@ -268,11 +270,16 @@ private:
     Vector<const char*, 10> m_messages;
 };
 
+static WebVector<uint8_t> copyBytes(const DOMArrayPiece& source)
+{
+    return WebVector<uint8_t>(static_cast<const uint8_t*>(source.data()), source.byteLength());
+}
+
 // Defined by the WebCrypto spec as:
 //
 //     typedef (ArrayBuffer or ArrayBufferView) BufferSource;
 //
-bool getOptionalBufferSource(const Dictionary& raw, const char* propertyName, bool& hasProperty, BufferSource& buffer, const ErrorContext& context, AlgorithmError* error)
+bool getOptionalBufferSource(const Dictionary& raw, const char* propertyName, bool& hasProperty, WebVector<uint8_t>& bytes, const ErrorContext& context, AlgorithmError* error)
 {
     hasProperty = false;
     v8::Local<v8::Value> v8Value;
@@ -281,12 +288,12 @@ bool getOptionalBufferSource(const Dictionary& raw, const char* propertyName, bo
     hasProperty = true;
 
     if (v8Value->IsArrayBufferView()) {
-        buffer.setArrayBufferView(V8ArrayBufferView::toImpl(v8::Local<v8::Object>::Cast(v8Value)));
+        bytes = copyBytes(V8ArrayBufferView::toImpl(v8::Local<v8::Object>::Cast(v8Value)));
         return true;
     }
 
     if (v8Value->IsArrayBuffer()) {
-        buffer.setArrayBuffer(V8ArrayBuffer::toImpl(v8::Local<v8::Object>::Cast(v8Value)));
+        bytes = copyBytes(V8ArrayBuffer::toImpl(v8::Local<v8::Object>::Cast(v8Value)));
         return true;
     }
 
@@ -297,10 +304,10 @@ bool getOptionalBufferSource(const Dictionary& raw, const char* propertyName, bo
     return true;
 }
 
-bool getBufferSource(const Dictionary& raw, const char* propertyName, BufferSource& buffer, const ErrorContext& context, AlgorithmError* error)
+bool getBufferSource(const Dictionary& raw, const char* propertyName, WebVector<uint8_t>& bytes, const ErrorContext& context, AlgorithmError* error)
 {
     bool hasProperty;
-    bool ok = getOptionalBufferSource(raw, propertyName, hasProperty, buffer, context, error);
+    bool ok = getOptionalBufferSource(raw, propertyName, hasProperty, bytes, context, error);
     if (!hasProperty) {
         setTypeError(context.toString(propertyName, "Missing required property"), error);
         return false;
@@ -308,26 +315,29 @@ bool getBufferSource(const Dictionary& raw, const char* propertyName, BufferSour
     return ok;
 }
 
-bool getUint8Array(const Dictionary& raw, const char* propertyName, DOMUint8Array*& array, const ErrorContext& context, AlgorithmError* error)
+bool getUint8Array(const Dictionary& raw, const char* propertyName, WebVector<uint8_t>& bytes, const ErrorContext& context, AlgorithmError* error)
 {
+    DOMUint8Array* array = nullptr;
     if (!DictionaryHelper::get(raw, propertyName, array) || !array) {
         setTypeError(context.toString(propertyName, "Missing or not a Uint8Array"), error);
         return false;
     }
+    bytes = copyBytes(array);
     return true;
 }
 
 // Defined by the WebCrypto spec as:
 //
 //     typedef Uint8Array BigInteger;
-bool getBigInteger(const Dictionary& raw, const char* propertyName, DOMUint8Array*& array, const ErrorContext& context, AlgorithmError* error)
+bool getBigInteger(const Dictionary& raw, const char* propertyName, WebVector<uint8_t>& bytes, const ErrorContext& context, AlgorithmError* error)
 {
-    if (!getUint8Array(raw, propertyName, array, context, error))
+    if (!getUint8Array(raw, propertyName, bytes, context, error))
         return false;
 
-    if (!array->byteLength()) {
+    if (bytes.isEmpty()) {
         // Empty BigIntegers represent 0 according to the spec
-        array = DOMUint8Array::create(1);
+        bytes = WebVector<uint8_t>(static_cast<size_t>(1u));
+        DCHECK_EQ(0u, bytes[0]);
     }
 
     return true;
@@ -447,15 +457,13 @@ bool getAlgorithmIdentifier(const Dictionary& raw, const char* propertyName, Alg
 //    dictionary AesCbcParams : Algorithm {
 //      required BufferSource iv;
 //    };
-bool parseAesCbcParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseAesCbcParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
-    BufferSource ivBufferSource;
-    if (!getBufferSource(raw, "iv", ivBufferSource, context, error))
+    WebVector<uint8_t> iv;
+    if (!getBufferSource(raw, "iv", iv, context, error))
         return false;
 
-    DOMArrayPiece iv(ivBufferSource);
-
-    params = adoptPtr(new WebCryptoAesCbcParams(iv.bytes(), iv.byteLength()));
+    params = wrapUnique(new WebCryptoAesCbcParams(std::move(iv)));
     return true;
 }
 
@@ -464,13 +472,13 @@ bool parseAesCbcParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& 
 //    dictionary AesKeyGenParams : Algorithm {
 //      [EnforceRange] required unsigned short length;
 //    };
-bool parseAesKeyGenParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseAesKeyGenParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     uint16_t length;
     if (!getUint16(raw, "length", length, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoAesKeyGenParams(length));
+    params = wrapUnique(new WebCryptoAesKeyGenParams(length));
     return true;
 }
 
@@ -489,14 +497,10 @@ bool parseHash(const Dictionary& raw, WebCryptoAlgorithm& hash, ErrorContext con
 // Defined by the WebCrypto spec as:
 //
 //    dictionary HmacImportParams : Algorithm {
-//      HashAlgorithmIdentifier hash;
+//      required HashAlgorithmIdentifier hash;
 //      [EnforceRange] unsigned long length;
 //    };
-//
-// FIXME: http://crbug.com/438475: The current implementation differs from the
-// spec in that the "hash" parameter is required. This seems more sensible, and
-// is being proposed as a change to the spec. (https://www.w3.org/Bugs/Public/show_bug.cgi?id=27448).
-bool parseHmacImportParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseHmacImportParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     WebCryptoAlgorithm hash;
     if (!parseHash(raw, hash, context, error))
@@ -507,7 +511,7 @@ bool parseHmacImportParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParam
     if (!getOptionalUint32(raw, "length", hasLength, length, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoHmacImportParams(hash, hasLength, length));
+    params = wrapUnique(new WebCryptoHmacImportParams(hash, hasLength, length));
     return true;
 }
 
@@ -517,7 +521,7 @@ bool parseHmacImportParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParam
 //      required HashAlgorithmIdentifier hash;
 //      [EnforceRange] unsigned long length;
 //    };
-bool parseHmacKeyGenParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseHmacKeyGenParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     WebCryptoAlgorithm hash;
     if (!parseHash(raw, hash, context, error))
@@ -528,7 +532,7 @@ bool parseHmacKeyGenParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParam
     if (!getOptionalUint32(raw, "length", hasLength, length, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoHmacKeyGenParams(hash, hasLength, length));
+    params = wrapUnique(new WebCryptoHmacKeyGenParams(hash, hasLength, length));
     return true;
 }
 
@@ -537,13 +541,13 @@ bool parseHmacKeyGenParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParam
 //    dictionary RsaHashedImportParams : Algorithm {
 //      required HashAlgorithmIdentifier hash;
 //    };
-bool parseRsaHashedImportParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseRsaHashedImportParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     WebCryptoAlgorithm hash;
     if (!parseHash(raw, hash, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoRsaHashedImportParams(hash));
+    params = wrapUnique(new WebCryptoRsaHashedImportParams(hash));
     return true;
 }
 
@@ -557,13 +561,13 @@ bool parseRsaHashedImportParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithm
 //    dictionary RsaHashedKeyGenParams : RsaKeyGenParams {
 //      required HashAlgorithmIdentifier hash;
 //    };
-bool parseRsaHashedKeyGenParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseRsaHashedKeyGenParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     uint32_t modulusLength;
     if (!getUint32(raw, "modulusLength", modulusLength, context, error))
         return false;
 
-    DOMUint8Array* publicExponent = nullptr;
+    WebVector<uint8_t> publicExponent;
     if (!getBigInteger(raw, "publicExponent", publicExponent, context, error))
         return false;
 
@@ -571,7 +575,7 @@ bool parseRsaHashedKeyGenParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithm
     if (!parseHash(raw, hash, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoRsaHashedKeyGenParams(hash, modulusLength, static_cast<const unsigned char*>(publicExponent->baseAddress()), publicExponent->byteLength()));
+    params = wrapUnique(new WebCryptoRsaHashedKeyGenParams(hash, modulusLength, std::move(publicExponent)));
     return true;
 }
 
@@ -581,18 +585,17 @@ bool parseRsaHashedKeyGenParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithm
 //      required BufferSource counter;
 //      [EnforceRange] required octet length;
 //    };
-bool parseAesCtrParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseAesCtrParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
-    BufferSource counterBufferSource;
-    if (!getBufferSource(raw, "counter", counterBufferSource, context, error))
+    WebVector<uint8_t> counter;
+    if (!getBufferSource(raw, "counter", counter, context, error))
         return false;
 
-    DOMArrayPiece counter(counterBufferSource);
     uint8_t length;
     if (!getUint8(raw, "length", length, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoAesCtrParams(length, counter.bytes(), counter.byteLength()));
+    params = wrapUnique(new WebCryptoAesCtrParams(length, std::move(counter)));
     return true;
 }
 
@@ -603,15 +606,15 @@ bool parseAesCtrParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& 
 //       BufferSource additionalData;
 //       [EnforceRange] octet tagLength;
 //     }
-bool parseAesGcmParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseAesGcmParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
-    BufferSource ivBufferSource;
-    if (!getBufferSource(raw, "iv", ivBufferSource, context, error))
+    WebVector<uint8_t> iv;
+    if (!getBufferSource(raw, "iv", iv, context, error))
         return false;
 
     bool hasAdditionalData;
-    BufferSource additionalDataBufferSource;
-    if (!getOptionalBufferSource(raw, "additionalData", hasAdditionalData, additionalDataBufferSource, context, error))
+    WebVector<uint8_t> additionalData;
+    if (!getOptionalBufferSource(raw, "additionalData", hasAdditionalData, additionalData, context, error))
         return false;
 
     uint8_t tagLength = 0;
@@ -619,10 +622,7 @@ bool parseAesGcmParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& 
     if (!getOptionalUint8(raw, "tagLength", hasTagLength, tagLength, context, error))
         return false;
 
-    DOMArrayPiece iv(ivBufferSource);
-    DOMArrayPiece additionalData(additionalDataBufferSource, DOMArrayPiece::AllowNullPointToNullWithZeroSize);
-
-    params = adoptPtr(new WebCryptoAesGcmParams(iv.bytes(), iv.byteLength(), hasAdditionalData, additionalData.bytes(), additionalData.byteLength(), hasTagLength, tagLength));
+    params = wrapUnique(new WebCryptoAesGcmParams(std::move(iv), hasAdditionalData, std::move(additionalData), hasTagLength, tagLength));
     return true;
 }
 
@@ -631,15 +631,14 @@ bool parseAesGcmParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& 
 //     dictionary RsaOaepParams : Algorithm {
 //       BufferSource label;
 //     };
-bool parseRsaOaepParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseRsaOaepParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     bool hasLabel;
-    BufferSource labelBufferSource;
-    if (!getOptionalBufferSource(raw, "label", hasLabel, labelBufferSource, context, error))
+    WebVector<uint8_t> label;
+    if (!getOptionalBufferSource(raw, "label", hasLabel, label, context, error))
         return false;
 
-    DOMArrayPiece label(labelBufferSource, DOMArrayPiece::AllowNullPointToNullWithZeroSize);
-    params = adoptPtr(new WebCryptoRsaOaepParams(hasLabel, label.bytes(), label.byteLength()));
+    params = wrapUnique(new WebCryptoRsaOaepParams(hasLabel, std::move(label)));
     return true;
 }
 
@@ -648,13 +647,13 @@ bool parseRsaOaepParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>&
 //     dictionary RsaPssParams : Algorithm {
 //       [EnforceRange] required unsigned long saltLength;
 //     };
-bool parseRsaPssParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseRsaPssParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     uint32_t saltLengthBytes;
     if (!getUint32(raw, "saltLength", saltLengthBytes, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoRsaPssParams(saltLengthBytes));
+    params = wrapUnique(new WebCryptoRsaPssParams(saltLengthBytes));
     return true;
 }
 
@@ -663,13 +662,13 @@ bool parseRsaPssParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& 
 //     dictionary EcdsaParams : Algorithm {
 //       required HashAlgorithmIdentifier hash;
 //     };
-bool parseEcdsaParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseEcdsaParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     WebCryptoAlgorithm hash;
     if (!parseHash(raw, hash, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoEcdsaParams(hash));
+    params = wrapUnique(new WebCryptoEcdsaParams(hash));
     return true;
 }
 
@@ -711,13 +710,13 @@ bool parseNamedCurve(const Dictionary& raw, WebCryptoNamedCurve& namedCurve, Err
 //     dictionary EcKeyGenParams : Algorithm {
 //       required NamedCurve namedCurve;
 //     };
-bool parseEcKeyGenParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseEcKeyGenParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     WebCryptoNamedCurve namedCurve;
     if (!parseNamedCurve(raw, namedCurve, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoEcKeyGenParams(namedCurve));
+    params = wrapUnique(new WebCryptoEcKeyGenParams(namedCurve));
     return true;
 }
 
@@ -726,13 +725,13 @@ bool parseEcKeyGenParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>
 //     dictionary EcKeyImportParams : Algorithm {
 //       required NamedCurve namedCurve;
 //     };
-bool parseEcKeyImportParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseEcKeyImportParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     WebCryptoNamedCurve namedCurve;
     if (!parseNamedCurve(raw, namedCurve, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoEcKeyImportParams(namedCurve));
+    params = wrapUnique(new WebCryptoEcKeyImportParams(namedCurve));
     return true;
 }
 
@@ -741,7 +740,7 @@ bool parseEcKeyImportParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmPara
 //     dictionary EcdhKeyDeriveParams : Algorithm {
 //       required CryptoKey public;
 //     };
-bool parseEcdhKeyDeriveParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseEcdhKeyDeriveParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     v8::Local<v8::Value> v8Value;
     if (!raw.get("public", v8Value)) {
@@ -755,7 +754,7 @@ bool parseEcdhKeyDeriveParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmPa
         return false;
     }
 
-    params = adoptPtr(new WebCryptoEcdhKeyDeriveParams(cryptoKey->key()));
+    params = wrapUnique(new WebCryptoEcdhKeyDeriveParams(cryptoKey->key()));
     return true;
 }
 
@@ -766,13 +765,11 @@ bool parseEcdhKeyDeriveParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmPa
 //       [EnforceRange] required unsigned long iterations;
 //       required HashAlgorithmIdentifier hash;
 //     };
-bool parsePbkdf2Params(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parsePbkdf2Params(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
-    BufferSource saltBufferSource;
-    if (!getBufferSource(raw, "salt", saltBufferSource, context, error))
+    WebVector<uint8_t> salt;
+    if (!getBufferSource(raw, "salt", salt, context, error))
         return false;
-
-    DOMArrayPiece salt(saltBufferSource);
 
     uint32_t iterations;
     if (!getUint32(raw, "iterations", iterations, context, error))
@@ -781,7 +778,7 @@ bool parsePbkdf2Params(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& 
     WebCryptoAlgorithm hash;
     if (!parseHash(raw, hash, context, error))
         return false;
-    params = adoptPtr(new WebCryptoPbkdf2Params(hash, salt.bytes(), salt.byteLength(), iterations));
+    params = wrapUnique(new WebCryptoPbkdf2Params(hash, std::move(salt), iterations));
     return true;
 }
 
@@ -790,48 +787,40 @@ bool parsePbkdf2Params(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& 
 //    dictionary AesDerivedKeyParams : Algorithm {
 //      [EnforceRange] required unsigned short length;
 //    };
-bool parseAesDerivedKeyParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseAesDerivedKeyParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     uint16_t length;
     if (!getUint16(raw, "length", length, context, error))
         return false;
 
-    params = adoptPtr(new WebCryptoAesDerivedKeyParams(length));
+    params = wrapUnique(new WebCryptoAesDerivedKeyParams(length));
     return true;
 }
 
-// FIXME: once the spec has been updated, check that the implementation is
-// still correct and update this comment. http://crbug.com/399095
-//
-// The WebCrypto spec hasn't been updated yet to define HKDF
-// (https://www.w3.org/Bugs/Public/show_bug.cgi?id=27425). The assumed
-// parameters are:
+// Defined by the WebCrypto spec as:
 //
 //    dictionary HkdfParams : Algorithm {
 //      required HashAlgorithmIdentifier hash;
 //      required BufferSource salt;
 //      required BufferSource info;
 //    };
-bool parseHkdfParams(const Dictionary& raw, OwnPtr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
+bool parseHkdfParams(const Dictionary& raw, std::unique_ptr<WebCryptoAlgorithmParams>& params, const ErrorContext& context, AlgorithmError* error)
 {
     WebCryptoAlgorithm hash;
     if (!parseHash(raw, hash, context, error))
         return false;
-    BufferSource saltBufferSource;
-    if (!getBufferSource(raw, "salt", saltBufferSource, context, error))
+    WebVector<uint8_t> salt;
+    if (!getBufferSource(raw, "salt", salt, context, error))
         return false;
-    BufferSource infoBufferSource;
-    if (!getBufferSource(raw, "info", infoBufferSource, context, error))
+    WebVector<uint8_t> info;
+    if (!getBufferSource(raw, "info", info, context, error))
         return false;
 
-    DOMArrayPiece salt(saltBufferSource);
-    DOMArrayPiece info(infoBufferSource);
-
-    params = adoptPtr(new WebCryptoHkdfParams(hash, salt.bytes(), salt.byteLength(), info.bytes(), info.byteLength()));
+    params = wrapUnique(new WebCryptoHkdfParams(hash, std::move(salt), std::move(info)));
     return true;
 }
 
-bool parseAlgorithmParams(const Dictionary& raw, WebCryptoAlgorithmParamsType type, OwnPtr<WebCryptoAlgorithmParams>& params, ErrorContext& context, AlgorithmError* error)
+bool parseAlgorithmParams(const Dictionary& raw, WebCryptoAlgorithmParamsType type, std::unique_ptr<WebCryptoAlgorithmParams>& params, ErrorContext& context, AlgorithmError* error)
 {
     switch (type) {
     case WebCryptoAlgorithmParamsTypeNone:
@@ -942,11 +931,11 @@ bool parseAlgorithmDictionary(const String& algorithmName, const Dictionary& raw
 
     WebCryptoAlgorithmParamsType paramsType = static_cast<WebCryptoAlgorithmParamsType>(algorithmInfo->operationToParamsType[op]);
 
-    OwnPtr<WebCryptoAlgorithmParams> params;
+    std::unique_ptr<WebCryptoAlgorithmParams> params;
     if (!parseAlgorithmParams(raw, paramsType, params, context, error))
         return false;
 
-    algorithm = WebCryptoAlgorithm(algorithmId, params.release());
+    algorithm = WebCryptoAlgorithm(algorithmId, std::move(params));
     return true;
 }
 

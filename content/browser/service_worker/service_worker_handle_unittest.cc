@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <tuple>
 #include <vector>
 
 #include "base/macros.h"
@@ -36,8 +37,8 @@ void VerifyStateChangedMessage(int expected_handle_id,
   ServiceWorkerMsg_ServiceWorkerStateChanged::Param param;
   ASSERT_TRUE(ServiceWorkerMsg_ServiceWorkerStateChanged::Read(
       message, &param));
-  EXPECT_EQ(expected_handle_id, base::get<1>(param));
-  EXPECT_EQ(expected_state, base::get<2>(param));
+  EXPECT_EQ(expected_handle_id, std::get<1>(param));
+  EXPECT_EQ(expected_state, std::get<2>(param));
 }
 
 }  // namespace
@@ -92,6 +93,9 @@ class ServiceWorkerHandleTest : public testing::Test {
     records.push_back(
         ServiceWorkerDatabase::ResourceRecord(10, version_->script_url(), 100));
     version_->script_cache_map()->SetResources(records);
+    version_->set_fetch_handler_existence(
+        ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
+    version_->SetStatus(ServiceWorkerVersion::INSTALLING);
 
     // Make the registration findable via storage functions.
     helper_->context()->storage()->LazyInitialize(base::Bind(&base::DoNothing));
@@ -106,8 +110,9 @@ class ServiceWorkerHandleTest : public testing::Test {
 
     provider_host_.reset(new ServiceWorkerProviderHost(
         helper_->mock_render_process_id(), kRenderFrameId, 1,
-        SERVICE_WORKER_PROVIDER_FOR_WINDOW, helper_->context()->AsWeakPtr(),
-        dispatcher_host_.get()));
+        SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+        ServiceWorkerProviderHost::FrameSecurityLevel::SECURE,
+        helper_->context()->AsWeakPtr(), dispatcher_host_.get()));
 
     helper_->SimulateAddProcessToPattern(pattern,
                                          helper_->mock_render_process_id());
@@ -148,26 +153,19 @@ TEST_F(ServiceWorkerHandleTest, OnVersionStateChanged) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(SERVICE_WORKER_OK, status);
 
-  // ...update state to installing...
-  version_->SetStatus(ServiceWorkerVersion::INSTALLING);
-
-  // ...and update state to installed.
+  // ...update state to installed.
   version_->SetStatus(ServiceWorkerVersion::INSTALLED);
 
-  ASSERT_EQ(3UL, ipc_sink()->message_count());
+  ASSERT_EQ(2UL, ipc_sink()->message_count());
   ASSERT_EQ(0L, dispatcher_host_->bad_message_received_count_);
 
   // We should be sending 1. StartWorker,
   EXPECT_EQ(EmbeddedWorkerMsg_StartWorker::ID,
             ipc_sink()->GetMessageAt(0)->type());
-  // 2. StateChanged (state == Installing),
-  VerifyStateChangedMessage(handle->handle_id(),
-                            blink::WebServiceWorkerStateInstalling,
-                            ipc_sink()->GetMessageAt(1));
-  // 3. StateChanged (state == Installed).
+  // 2. StateChanged (state == Installed).
   VerifyStateChangedMessage(handle->handle_id(),
                             blink::WebServiceWorkerStateInstalled,
-                            ipc_sink()->GetMessageAt(2));
+                            ipc_sink()->GetMessageAt(1));
 }
 
 }  // namespace content

@@ -10,6 +10,7 @@
 #include "base/debug/leak_annotations.h"
 #include "base/json/string_escape.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/metrics/persistent_histogram_allocator.h"
@@ -92,6 +93,17 @@ StatisticsRecorder::~StatisticsRecorder() {
 
 // static
 void StatisticsRecorder::Initialize() {
+  // Tests sometimes create local StatisticsRecorders in order to provide a
+  // contained environment of histograms that can be later discarded. If a
+  // true global instance gets created in this environment then it will
+  // eventually get disconnected when the local instance destructs and
+  // restores the previous state, resulting in no StatisticsRecorder at all.
+  // The global lazy instance, however, will remain valid thus ensuring that
+  // another never gets installed via this method. If a |histograms_| map
+  // exists then assume the StatisticsRecorder is already "initialized".
+  if (histograms_)
+    return;
+
   // Ensure that an instance of the StatisticsRecorder object is created.
   g_statistics_recorder_.Get();
 }
@@ -287,7 +299,7 @@ void StatisticsRecorder::GetBucketRanges(
     return;
 
   for (const auto& entry : *ranges_) {
-    for (const auto& range_entry : *entry.second) {
+    for (auto* range_entry : *entry.second) {
       output->push_back(range_entry);
     }
   }
@@ -334,6 +346,14 @@ StatisticsRecorder::HistogramIterator StatisticsRecorder::end() {
     iter_end = histograms_->end();
   }
   return HistogramIterator(iter_end, true);
+}
+
+// static
+void StatisticsRecorder::InitLogOnShutdown() {
+  if (lock_ == nullptr)
+    return;
+  base::AutoLock auto_lock(*lock_);
+  g_statistics_recorder_.Get().InitLogOnShutdownWithoutLock();
 }
 
 // static
@@ -421,6 +441,12 @@ void StatisticsRecorder::ForgetHistogramForTesting(base::StringPiece name) {
 }
 
 // static
+std::unique_ptr<StatisticsRecorder>
+StatisticsRecorder::CreateTemporaryForTesting() {
+  return WrapUnique(new StatisticsRecorder());
+}
+
+// static
 void StatisticsRecorder::UninitializeForTesting() {
   // Stop now if it's never been initialized.
   if (lock_ == NULL || histograms_ == NULL)
@@ -475,8 +501,14 @@ StatisticsRecorder::StatisticsRecorder() {
   callbacks_ = new CallbackMap;
   ranges_ = new RangesMap;
 
-  if (VLOG_IS_ON(1))
+  InitLogOnShutdownWithoutLock();
+}
+
+void StatisticsRecorder::InitLogOnShutdownWithoutLock() {
+  if (!vlog_initialized_ && VLOG_IS_ON(1)) {
+    vlog_initialized_ = true;
     AtExitManager::RegisterCallback(&DumpHistogramsToVlog, this);
+  }
 }
 
 // static

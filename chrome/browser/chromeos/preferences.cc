@@ -7,11 +7,13 @@
 #include <vector>
 
 #include "ash/autoclick/autoclick_controller.h"
+#include "ash/common/accessibility_types.h"
+#include "ash/common/wm_shell.h"
 #include "ash/display/display_manager.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -44,11 +46,11 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "third_party/cros_system_api/dbus/update_engine/dbus-constants.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
-#include "ui/chromeos/accessibility_types.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_utils.h"
 #include "url/gurl.h"
@@ -64,8 +66,8 @@ Preferences::Preferences()
       user_is_primary_(false) {
   // Do not observe shell, if there is no shell instance; e.g., in some unit
   // tests.
-  if (ash::Shell::HasInstance())
-    ash::Shell::GetInstance()->AddShellObserver(this);
+  if (ash::WmShell::HasInstance())
+    ash::WmShell::Get()->AddShellObserver(this);
 }
 
 Preferences::Preferences(input_method::InputMethodManager* input_method_manager)
@@ -75,8 +77,8 @@ Preferences::Preferences(input_method::InputMethodManager* input_method_manager)
       user_is_primary_(false) {
   // Do not observe shell, if there is no shell instance; e.g., in some unit
   // tests.
-  if (ash::Shell::HasInstance())
-    ash::Shell::GetInstance()->AddShellObserver(this);
+  if (ash::WmShell::HasInstance())
+    ash::WmShell::Get()->AddShellObserver(this);
 }
 
 Preferences::~Preferences() {
@@ -84,8 +86,8 @@ Preferences::~Preferences() {
   user_manager::UserManager::Get()->RemoveSessionStateObserver(this);
   // If shell instance is destoryed before this preferences instance, there is
   // no need to remove this shell observer.
-  if (ash::Shell::HasInstance())
-    ash::Shell::GetInstance()->RemoveShellObserver(this);
+  if (ash::WmShell::HasInstance())
+    ash::WmShell::Get()->RemoveShellObserver(this);
 }
 
 // static
@@ -166,8 +168,7 @@ void Preferences::RegisterProfilePrefs(
       prefs::kAccessibilityScreenMagnifierEnabled, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterIntegerPref(
-      prefs::kAccessibilityScreenMagnifierType,
-      ui::kDefaultMagnifierType,
+      prefs::kAccessibilityScreenMagnifierType, ash::kDefaultMagnifierType,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterDoublePref(prefs::kAccessibilityScreenMagnifierScale,
                                std::numeric_limits<double>::min());
@@ -177,7 +178,8 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterIntegerPref(
       prefs::kAccessibilityAutoclickDelayMs,
-      ash::AutoclickController::kDefaultAutoclickDelayMs,
+      int{ash::AutoclickController::GetDefaultAutoclickDelay()
+              .InMilliseconds()},
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kAccessibilityVirtualKeyboardEnabled,
@@ -254,8 +256,13 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterIntegerPref(prefs::kLanguageRemapCapsLockKeyTo,
                                 input_method::kCapsLockKey);
   registry->RegisterIntegerPref(
-      prefs::kLanguageRemapDiamondKeyTo,
-      input_method::kControlKey,
+      prefs::kLanguageRemapEscapeKeyTo, input_method::kEscapeKey,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+  registry->RegisterIntegerPref(
+      prefs::kLanguageRemapBackspaceKeyTo, input_method::kBackspaceKey,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
+  registry->RegisterIntegerPref(
+      prefs::kLanguageRemapDiamondKeyTo, input_method::kControlKey,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
   // The following pref isn't synced since the user may desire a different value
   // depending on whether an external keyboard is attached to a particular
@@ -272,6 +279,13 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterIntegerPref(
       prefs::kLanguageXkbAutoRepeatInterval,
       language_prefs::kXkbAutoRepeatIntervalInMs,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+
+  registry->RegisterBooleanPref(
+      prefs::kEnableStylusTools, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kLaunchPaletteOnEjectEvent, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 
   // We don't sync wake-on-wifi related prefs because they are device specific.
@@ -294,6 +308,8 @@ void Preferences::RegisterProfilePrefs(
 
   registry->RegisterBooleanPref(prefs::kExternalStorageDisabled, false);
 
+  registry->RegisterBooleanPref(prefs::kExternalStorageReadOnly, false);
+
   registry->RegisterStringPref(prefs::kTermsOfServiceURL, "");
 
   registry->RegisterBooleanPref(prefs::kTouchHudProjectionEnabled, false);
@@ -312,6 +328,17 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterBooleanPref(prefs::kForceMaximizeOnFirstRun, false);
 
   registry->RegisterBooleanPref(prefs::kLanguageImeMenuActivated, false);
+
+  registry->RegisterInt64Pref(prefs::kHatsLastInteractionTimestamp,
+                              base::Time().ToInternalValue());
+
+  registry->RegisterBooleanPref(prefs::kQuickUnlockFeatureNotificationShown,
+                                false);
+
+  // We don't sync EOL related prefs because they are device specific.
+  registry->RegisterBooleanPref(prefs::kEolNotificationDismissed, false);
+  registry->RegisterIntegerPref(prefs::kEolStatus,
+                                update_engine::EndOfLifeStatus::kSupported);
 }
 
 void Preferences::InitUserPrefs(syncable_prefs::PrefServiceSyncable* prefs) {

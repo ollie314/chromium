@@ -11,7 +11,6 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.preference.PreferenceManager;
 import android.support.v7.app.AlertDialog;
 import android.text.SpannableString;
 import android.text.method.LinkMovementMethod;
@@ -19,6 +18,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.TextView;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
@@ -43,16 +43,11 @@ public class OtherFormsOfHistoryDialogFragment extends DialogFragment implements
     private static final String TAG = "OtherFormsOfHistoryDialogFragment";
 
     /**
-     * Create and show the dialog.
+     * Show the dialog.
+     * @param activity The activity in which to show the dialog.
      */
-    public static OtherFormsOfHistoryDialogFragment show(Activity activity) {
-        OtherFormsOfHistoryDialogFragment dialog = new OtherFormsOfHistoryDialogFragment();
-        dialog.show(activity.getFragmentManager(), TAG);
-        return dialog;
-    }
-
-    private OtherFormsOfHistoryDialogFragment() {
-        super();
+    public void show(Activity activity) {
+        show(activity.getFragmentManager(), TAG);
     }
 
     @Override
@@ -107,7 +102,7 @@ public class OtherFormsOfHistoryDialogFragment extends DialogFragment implements
      */
     private static void recordDialogWasShown(Activity activity, boolean shown) {
         SharedPreferences preferences =
-                PreferenceManager.getDefaultSharedPreferences(activity);
+                ContextUtils.getAppSharedPreferences();
         SharedPreferences.Editor editor = preferences.edit();
         editor.putBoolean(PREF_OTHER_FORMS_OF_HISTORY_DIALOG_SHOWN, shown);
         editor.apply();
@@ -117,7 +112,7 @@ public class OtherFormsOfHistoryDialogFragment extends DialogFragment implements
      * @return Whether the dialog has already been shown to the user before.
      */
     static boolean wasDialogShown(Context context) {
-        return PreferenceManager.getDefaultSharedPreferences(context).getBoolean(
+        return ContextUtils.getAppSharedPreferences().getBoolean(
                 PREF_OTHER_FORMS_OF_HISTORY_DIALOG_SHOWN, false);
     }
 

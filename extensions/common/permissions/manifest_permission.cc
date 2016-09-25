@@ -20,17 +20,22 @@ ManifestPermission* ManifestPermission::Clone() const {
 }
 
 bool ManifestPermission::Contains(const ManifestPermission* rhs) const {
-  return scoped_ptr<ManifestPermission>(Intersect(rhs))->Equal(rhs);
+  return std::unique_ptr<ManifestPermission>(Intersect(rhs))->Equal(rhs);
 }
 
 bool ManifestPermission::Equal(const ManifestPermission* rhs) const {
   return ToValue()->Equals(rhs->ToValue().get());
 }
 
+void ManifestPermission::GetSize(base::PickleSizer* s) const {
+  base::ListValue singleton;
+  singleton.Append(ToValue());
+  IPC::GetParamSize(s, singleton);
+}
+
 void ManifestPermission::Write(base::Pickle* m) const {
   base::ListValue singleton;
-  base::Value* value = ToValue().release();
-  singleton.Append(value);
+  singleton.Append(ToValue());
   IPC::WriteParam(m, singleton);
 }
 

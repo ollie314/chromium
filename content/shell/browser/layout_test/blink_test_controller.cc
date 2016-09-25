@@ -20,7 +20,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/dom_storage_context.h"
@@ -37,10 +37,12 @@
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/shell/browser/layout_test/layout_test_bluetooth_chooser_factory.h"
 #include "content/shell/browser/layout_test/layout_test_devtools_frontend.h"
+#include "content/shell/browser/layout_test/layout_test_first_device_bluetooth_chooser.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_content_browser_client.h"
@@ -276,8 +278,8 @@ bool BlinkTestController::PrepareForLayoutTest(
   accumulated_layout_test_runtime_flags_changes_.Clear();
   ShellBrowserContext* browser_context =
       ShellContentBrowserClient::Get()->browser_context();
-  if (test_url.spec().find("compositing/") != std::string::npos)
-    is_compositing_test_ = true;
+  is_compositing_test_ =
+      test_url.spec().find("compositing/") != std::string::npos;
   initial_size_ = Shell::GetShellDefaultSize();
   // The W3C SVG layout tests use a different size than the other layout tests.
   if (test_url.spec().find("W3C-SVG-1.1") != std::string::npos)
@@ -290,6 +292,8 @@ bool BlinkTestController::PrepareForLayoutTest(
         initial_size_);
     WebContentsObserver::Observe(main_window_->web_contents());
     current_pid_ = base::kNullProcessId;
+    default_prefs_ =
+      main_window_->web_contents()->GetRenderViewHost()->GetWebkitPreferences();
     main_window_->LoadURL(test_url);
   } else {
 #if defined(OS_MACOSX)
@@ -307,9 +311,13 @@ bool BlinkTestController::PrepareForLayoutTest(
         ->WasResized();
     RenderViewHost* render_view_host =
         main_window_->web_contents()->GetRenderViewHost();
-    WebPreferences prefs = render_view_host->GetWebkitPreferences();
-    OverrideWebkitPrefs(&prefs);
-    render_view_host->UpdateWebkitPreferences(prefs);
+
+    // Compositing tests override the default preferences (see
+    // BlinkTestController::OverrideWebkitPrefs) so we force them to be
+    // calculated again to ensure is_compositing_test_ changes are picked up.
+    OverrideWebkitPrefs(&default_prefs_);
+
+    render_view_host->UpdateWebkitPreferences(default_prefs_);
     HandleNewRenderFrameHost(render_view_host->GetMainFrame());
 
     NavigationController::LoadURLParams params(test_url);
@@ -381,10 +389,10 @@ void BlinkTestController::OpenURL(const GURL& url) {
 }
 
 void BlinkTestController::OnTestFinishedInSecondaryRenderer() {
-  RenderViewHost* render_view_host =
+  RenderViewHost* main_render_view_host =
       main_window_->web_contents()->GetRenderViewHost();
-  render_view_host->Send(
-      new ShellViewMsg_NotifyDone(render_view_host->GetRoutingID()));
+  main_render_view_host->Send(new ShellViewMsg_TestFinishedInSecondaryRenderer(
+      main_render_view_host->GetRoutingID()));
 }
 
 bool BlinkTestController::IsMainWindow(WebContents* web_contents) const {
@@ -398,7 +406,7 @@ std::unique_ptr<BluetoothChooser> BlinkTestController::RunBluetoothChooser(
     return bluetooth_chooser_factory_->RunBluetoothChooser(frame,
                                                            event_handler);
   }
-  return nullptr;
+  return base::MakeUnique<LayoutTestFirstDeviceBluetoothChooser>(event_handler);
 }
 
 bool BlinkTestController::OnMessageReceived(const IPC::Message& message) {
@@ -469,12 +477,6 @@ void BlinkTestController::RenderFrameCreated(
     RenderFrameHost* render_frame_host) {
   DCHECK(CalledOnValidThread());
   HandleNewRenderFrameHost(render_frame_host);
-}
-
-void BlinkTestController::RenderFrameHostChanged(RenderFrameHost* old_host,
-                                                 RenderFrameHost* new_host) {
-  DCHECK(CalledOnValidThread());
-  HandleNewRenderFrameHost(new_host);
 }
 
 void BlinkTestController::DevToolsProcessCrashed() {
@@ -577,6 +579,11 @@ void BlinkTestController::DiscardMainWindow() {
 }
 
 void BlinkTestController::HandleNewRenderFrameHost(RenderFrameHost* frame) {
+  // All RenderViewHosts in layout tests should get Mojo bindings.
+  RenderViewHost* rvh = frame->GetRenderViewHost();
+  if (!(rvh->GetEnabledBindings() & BINDINGS_POLICY_MOJO))
+    rvh->AllowBindings(BINDINGS_POLICY_MOJO);
+
   RenderProcessHost* process = frame->GetProcess();
   bool main_window =
       WebContents::FromRenderFrameHost(frame) == main_window_->web_contents();
@@ -589,7 +596,8 @@ void BlinkTestController::HandleNewRenderFrameHost(RenderFrameHost* frame) {
   }
 
   // Is this the 1st time this renderer contains parts of the main test window?
-  if (main_window && !ContainsKey(main_window_render_process_hosts_, process)) {
+  if (main_window &&
+      !base::ContainsKey(main_window_render_process_hosts_, process)) {
     main_window_render_process_hosts_.insert(process);
 
     // Make sure the new renderer process has a test configuration shared with
@@ -733,7 +741,7 @@ void BlinkTestController::OnLayoutDumpResponse(RenderFrameHost* sender,
 
   // Stitch the frame-specific results in the right order.
   std::string stitched_layout_dump;
-  for (const auto& render_frame_host : web_contents()->GetAllFrames()) {
+  for (auto* render_frame_host : web_contents()->GetAllFrames()) {
     auto it =
         frame_to_layout_dump_map_.find(render_frame_host->GetFrameTreeNodeId());
     if (it != frame_to_layout_dump_map_.end()) {
@@ -756,6 +764,15 @@ void BlinkTestController::OnPrintMessage(const std::string& message) {
 void BlinkTestController::OnOverridePreferences(const WebPreferences& prefs) {
   should_override_prefs_ = true;
   prefs_ = prefs;
+
+  // Notifies the main RenderViewHost that Blink preferences changed so
+  // immediately apply the new settings and to avoid re-usage of cached
+  // preferences that are now stale. RenderViewHost::UpdateWebkitPreferences is
+  // not used here because it would send an unneeded preferences update to the
+  // renderer.
+  RenderViewHost* main_render_view_host =
+      main_window_->web_contents()->GetRenderViewHost();
+  main_render_view_host->OnWebkitPreferencesChanged();
 }
 
 void BlinkTestController::OnClearDevToolsLocalStorage() {
@@ -764,7 +781,7 @@ void BlinkTestController::OnClearDevToolsLocalStorage() {
   StoragePartition* storage_partition =
       BrowserContext::GetStoragePartition(browser_context, NULL);
   storage_partition->GetDOMStorageContext()->DeleteLocalStorage(
-      content::LayoutTestDevToolsFrontend::GetDevToolsPathAsURL("", "")
+      content::LayoutTestDevToolsFrontend::GetDevToolsPathAsURL("")
           .GetOrigin());
 }
 
@@ -855,7 +872,7 @@ void BlinkTestController::OnCloseRemainingWindows() {
     if (open_windows[i] != main_window_ && open_windows[i] != devtools_shell)
       open_windows[i]->Close();
   }
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 void BlinkTestController::OnResetDone() {

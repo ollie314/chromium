@@ -7,19 +7,19 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
+#include "components/policy/proto/cloud_policy.pb.h"
+#include "components/policy/proto/device_management_backend.pb.h"
 #include "crypto/rsa_private_key.h"
-#include "policy/proto/cloud_policy.pb.h"
-#include "policy/proto/device_management_backend.pb.h"
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
-#include "policy/proto/chrome_extension_policy.pb.h"
+#include "components/policy/proto/chrome_extension_policy.pb.h"
 #endif
 
 namespace policy {
@@ -59,7 +59,7 @@ class PolicyBuilder {
     return policy_;
   }
 
-  scoped_ptr<crypto::RSAPrivateKey> GetSigningKey();
+  std::unique_ptr<crypto::RSAPrivateKey> GetSigningKey();
   void SetSigningKey(const crypto::RSAPrivateKey& key);
   void SetDefaultSigningKey();
   void UnsetSigningKey();
@@ -69,7 +69,7 @@ class PolicyBuilder {
   // new_public_key field, as if it were an initial key provision.
   void SetDefaultInitialSigningKey();
 
-  scoped_ptr<crypto::RSAPrivateKey> GetNewSigningKey();
+  std::unique_ptr<crypto::RSAPrivateKey> GetNewSigningKey();
   void SetDefaultNewSigningKey();
   void UnsetNewSigningKey();
 
@@ -78,14 +78,14 @@ class PolicyBuilder {
   virtual void Build();
 
   // Returns a copy of policy().
-  scoped_ptr<enterprise_management::PolicyFetchResponse> GetCopy();
+  std::unique_ptr<enterprise_management::PolicyFetchResponse> GetCopy();
 
   // Returns a binary policy blob, i.e. an encoded PolicyFetchResponse.
   std::string GetBlob();
 
   // These return hard-coded testing keys. Don't use in production!
-  static scoped_ptr<crypto::RSAPrivateKey> CreateTestSigningKey();
-  static scoped_ptr<crypto::RSAPrivateKey> CreateTestOtherSigningKey();
+  static std::unique_ptr<crypto::RSAPrivateKey> CreateTestSigningKey();
+  static std::unique_ptr<crypto::RSAPrivateKey> CreateTestOtherSigningKey();
 
   // Verification signatures for the two hard-coded testing keys above. These
   // signatures are valid only for the kFakeDomain domain.
@@ -102,7 +102,7 @@ class PolicyBuilder {
                 std::string* signature);
 
   enterprise_management::PolicyFetchResponse policy_;
-  scoped_ptr<enterprise_management::PolicyData> policy_data_;
+  std::unique_ptr<enterprise_management::PolicyData> policy_data_;
   std::string payload_data_;
 
   // The keys cannot be stored in NSS. Temporary keys are not guaranteed to
@@ -145,7 +145,7 @@ class TypedPolicyBuilder : public PolicyBuilder {
   }
 
  private:
-  scoped_ptr<PayloadProto> payload_;
+  std::unique_ptr<PayloadProto> payload_;
 
   DISALLOW_COPY_AND_ASSIGN(TypedPolicyBuilder);
 };

@@ -462,7 +462,7 @@ Visit.prototype.loadFavicon_ = function(faviconDiv) {
     img.onload = this.onLargeFaviconLoadedAndroid_.bind(this, faviconDiv);
     img.src = 'chrome://large-icon/' + desiredPixelSize + '/' + this.url_;
   } else {
-    faviconDiv.style.backgroundImage = getFaviconImageSet(this.url_);
+    faviconDiv.style.backgroundImage = cr.icon.getFavicon(this.url_);
   }
 };
 
@@ -501,7 +501,7 @@ Visit.prototype.showMoreFromSite_ = function() {
  */
 Visit.prototype.handleKeydown_ = function(e) {
   // Delete or Backspace should delete the entry if allowed.
-  if (e.keyIdentifier == 'U+0008' || e.keyIdentifier == 'U+007F')
+  if (e.key == 'Backspace' || e.key == 'Delete')
     this.removeEntryFromHistory_(e);
 };
 
@@ -939,6 +939,7 @@ function HistoryView(model) {
   this.model_ = model;
   this.pageIndex_ = 0;
   this.lastDisplayed_ = [];
+  this.hasRenderedResults_ = false;
 
   this.model_.setView(this);
 
@@ -1121,6 +1122,15 @@ HistoryView.prototype.onModelReady = function(doneLoading) {
     // Hide the search field if it is empty and there are no results.
     var isSearch = this.model_.getSearchText().length > 0;
     $('search-field').hidden = !(hasResults || isSearch);
+  }
+
+  if (!this.hasRenderedResults_) {
+    this.hasRenderedResults_ = true;
+    setTimeout(function() {
+      chrome.send(
+          'metricsHandler:recordTime',
+          ['History.ResultsRenderedTime', window.performance.now()]);
+    });
   }
 };
 
@@ -1391,8 +1401,9 @@ HistoryView.prototype.getGroupedVisitsDOM_ = function(
   var numberOfVisits = createElementWithClassName('span', 'number-visits');
   var domainElement = document.createElement('span');
 
-  numberOfVisits.textContent = loadTimeData.getStringF('numberVisits',
-                                                       domainVisits.length);
+  numberOfVisits.textContent =
+      loadTimeData.getStringF('numberVisits',
+                              domainVisits.length.toLocaleString());
   siteDomain.appendChild(numberOfVisits);
 
   domainVisits[0].loadFavicon_(siteFavicon);

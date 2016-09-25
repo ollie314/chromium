@@ -33,22 +33,23 @@ class DistillerJsRenderFrameObserver : public content::RenderFrameObserver {
                               int extension_group,
                               int world_id) override;
 
-  // Add the mojo service to a RenderFrame's service registry.
-  void RegisterMojoService();
+  // Add the mojo interface to a RenderFrame's shell::InterfaceRegistry.
+  void RegisterMojoInterface();
   // Flag the current page as a distiller page.
   void SetIsDistillerPage();
 
  private:
   void CreateDistillerPageNotifierService(
-      mojo::InterfaceRequest<DistillerPageNotifierService> request);
+      mojo::InterfaceRequest<mojom::DistillerPageNotifierService> request);
+
+  // RenderFrameObserver implementation.
+  void OnDestruct() override;
 
   // The isolated world that the distiller object should be written to.
   int distiller_isolated_world_id_;
 
   // Track if the current page is distilled. This is needed for testing.
   bool is_distiller_page_;
-
-  //mojo::StrongBinding<DistillerPageNotifierService> binding_;
 
   // Handle to "distiller" JavaScript object functionality.
   std::unique_ptr<DistillerNativeJavaScript> native_javascript_handle_;

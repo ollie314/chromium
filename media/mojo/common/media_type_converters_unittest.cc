@@ -126,10 +126,9 @@ scoped_refptr<VideoFrame> CreateMojoSharedBufferColorFrame() {
   // |color_frame|'s data.
   const size_t allocation_size = VideoFrame::AllocationSize(
       color_frame->format(), color_frame->coded_size());
-  mojo::ScopedSharedBufferHandle handle;
-  const MojoResult mojo_result =
-      mojo::CreateSharedBuffer(nullptr, allocation_size, &handle);
-  EXPECT_EQ(mojo_result, MOJO_RESULT_OK);
+  mojo::ScopedSharedBufferHandle handle =
+      mojo::SharedBufferHandle::Create(allocation_size);
+  EXPECT_TRUE(handle.is_valid());
 
   // Create a MojoSharedBufferVideoFrame whose dimensions match |color_frame|.
   const size_t y_plane_size = color_frame->rows(VideoFrame::kYPlane) *
@@ -191,7 +190,7 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_Normal) {
                                     base::TimeDelta::FromMilliseconds(6)));
 
   // Convert from and back.
-  interfaces::DecoderBufferPtr ptr(interfaces::DecoderBuffer::From(buffer));
+  mojom::DecoderBufferPtr ptr(mojom::DecoderBuffer::From(buffer));
   scoped_refptr<DecoderBuffer> result(ptr.To<scoped_refptr<DecoderBuffer>>());
 
   // Compare.
@@ -216,7 +215,7 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_EOS) {
   scoped_refptr<DecoderBuffer> buffer(DecoderBuffer::CreateEOSBuffer());
 
   // Convert from and back.
-  interfaces::DecoderBufferPtr ptr(interfaces::DecoderBuffer::From(buffer));
+  mojom::DecoderBufferPtr ptr(mojom::DecoderBuffer::From(buffer));
   scoped_refptr<DecoderBuffer> result(ptr.To<scoped_refptr<DecoderBuffer>>());
 
   // Compare.
@@ -234,7 +233,7 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_KeyFrame) {
   EXPECT_TRUE(buffer->is_key_frame());
 
   // Convert from and back.
-  interfaces::DecoderBufferPtr ptr(interfaces::DecoderBuffer::From(buffer));
+  mojom::DecoderBufferPtr ptr(mojom::DecoderBuffer::From(buffer));
   scoped_refptr<DecoderBuffer> result(ptr.To<scoped_refptr<DecoderBuffer>>());
 
   // Compare.
@@ -259,10 +258,10 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_EncryptedBuffer) {
   scoped_refptr<DecoderBuffer> buffer(DecoderBuffer::CopyFrom(
       reinterpret_cast<const uint8_t*>(&kData), kDataSize));
   buffer->set_decrypt_config(
-      base::WrapUnique(new DecryptConfig(kKeyId, kIv, subsamples)));
+      base::MakeUnique<DecryptConfig>(kKeyId, kIv, subsamples));
 
   // Convert from and back.
-  interfaces::DecoderBufferPtr ptr(interfaces::DecoderBuffer::From(buffer));
+  mojom::DecoderBufferPtr ptr(mojom::DecoderBuffer::From(buffer));
   scoped_refptr<DecoderBuffer> result(ptr.To<scoped_refptr<DecoderBuffer>>());
 
   // Compare.
@@ -272,10 +271,10 @@ TEST(MediaTypeConvertersTest, ConvertDecoderBuffer_EncryptedBuffer) {
   EXPECT_TRUE(buffer->decrypt_config()->Matches(*result->decrypt_config()));
 
   // Test empty IV. This is used for clear buffer in an encrypted stream.
-  buffer->set_decrypt_config(base::WrapUnique(
-      new DecryptConfig(kKeyId, "", std::vector<SubsampleEntry>())));
-  result = interfaces::DecoderBuffer::From(buffer)
-               .To<scoped_refptr<DecoderBuffer>>();
+  buffer->set_decrypt_config(base::MakeUnique<DecryptConfig>(
+      kKeyId, "", std::vector<SubsampleEntry>()));
+  result =
+      mojom::DecoderBuffer::From(buffer).To<scoped_refptr<DecoderBuffer>>();
   EXPECT_TRUE(buffer->decrypt_config()->Matches(*result->decrypt_config()));
   EXPECT_TRUE(buffer->decrypt_config()->iv().empty());
 }
@@ -290,8 +289,7 @@ TEST(MediaTypeConvertersTest, ConvertAudioDecoderConfig_Normal) {
   AudioDecoderConfig config;
   config.Initialize(kCodecAAC, kSampleFormatU8, CHANNEL_LAYOUT_SURROUND, 48000,
                     kExtraDataVector, Unencrypted(), base::TimeDelta(), 0);
-  interfaces::AudioDecoderConfigPtr ptr(
-      interfaces::AudioDecoderConfig::From(config));
+  mojom::AudioDecoderConfigPtr ptr(mojom::AudioDecoderConfig::From(config));
   EXPECT_FALSE(ptr->extra_data.is_null());
   AudioDecoderConfig result(ptr.To<AudioDecoderConfig>());
   EXPECT_TRUE(result.Matches(config));
@@ -301,8 +299,7 @@ TEST(MediaTypeConvertersTest, ConvertAudioDecoderConfig_EmptyExtraData) {
   AudioDecoderConfig config;
   config.Initialize(kCodecAAC, kSampleFormatU8, CHANNEL_LAYOUT_SURROUND, 48000,
                     EmptyExtraData(), Unencrypted(), base::TimeDelta(), 0);
-  interfaces::AudioDecoderConfigPtr ptr(
-      interfaces::AudioDecoderConfig::From(config));
+  mojom::AudioDecoderConfigPtr ptr(mojom::AudioDecoderConfig::From(config));
   EXPECT_TRUE(ptr->extra_data.is_null());
   AudioDecoderConfig result(ptr.To<AudioDecoderConfig>());
   EXPECT_TRUE(result.Matches(config));
@@ -313,8 +310,7 @@ TEST(MediaTypeConvertersTest, ConvertAudioDecoderConfig_Encrypted) {
   config.Initialize(kCodecAAC, kSampleFormatU8, CHANNEL_LAYOUT_SURROUND, 48000,
                     EmptyExtraData(), AesCtrEncryptionScheme(),
                     base::TimeDelta(), 0);
-  interfaces::AudioDecoderConfigPtr ptr(
-      interfaces::AudioDecoderConfig::From(config));
+  mojom::AudioDecoderConfigPtr ptr(mojom::AudioDecoderConfig::From(config));
   AudioDecoderConfig result(ptr.To<AudioDecoderConfig>());
   EXPECT_TRUE(result.Matches(config));
 }
@@ -327,8 +323,7 @@ TEST(MediaTypeConvertersTest, ConvertVideoDecoderConfig_Normal) {
   VideoDecoderConfig config(kCodecVP8, VP8PROFILE_ANY, PIXEL_FORMAT_YV12,
                             COLOR_SPACE_UNSPECIFIED, kCodedSize, kVisibleRect,
                             kNaturalSize, kExtraDataVector, Unencrypted());
-  interfaces::VideoDecoderConfigPtr ptr(
-      interfaces::VideoDecoderConfig::From(config));
+  mojom::VideoDecoderConfigPtr ptr(mojom::VideoDecoderConfig::From(config));
   EXPECT_FALSE(ptr->extra_data.is_null());
   VideoDecoderConfig result(ptr.To<VideoDecoderConfig>());
   EXPECT_TRUE(result.Matches(config));
@@ -338,8 +333,7 @@ TEST(MediaTypeConvertersTest, ConvertVideoDecoderConfig_EmptyExtraData) {
   VideoDecoderConfig config(kCodecVP8, VP8PROFILE_ANY, PIXEL_FORMAT_YV12,
                             COLOR_SPACE_UNSPECIFIED, kCodedSize, kVisibleRect,
                             kNaturalSize, EmptyExtraData(), Unencrypted());
-  interfaces::VideoDecoderConfigPtr ptr(
-      interfaces::VideoDecoderConfig::From(config));
+  mojom::VideoDecoderConfigPtr ptr(mojom::VideoDecoderConfig::From(config));
   EXPECT_TRUE(ptr->extra_data.is_null());
   VideoDecoderConfig result(ptr.To<VideoDecoderConfig>());
   EXPECT_TRUE(result.Matches(config));
@@ -350,8 +344,7 @@ TEST(MediaTypeConvertersTest, ConvertVideoDecoderConfig_Encrypted) {
                             COLOR_SPACE_UNSPECIFIED, kCodedSize, kVisibleRect,
                             kNaturalSize, EmptyExtraData(),
                             AesCtrEncryptionScheme());
-  interfaces::VideoDecoderConfigPtr ptr(
-      interfaces::VideoDecoderConfig::From(config));
+  mojom::VideoDecoderConfigPtr ptr(mojom::VideoDecoderConfig::From(config));
   VideoDecoderConfig result(ptr.To<VideoDecoderConfig>());
   EXPECT_TRUE(result.Matches(config));
 }
@@ -362,7 +355,7 @@ TEST(MediaTypeConvertersTest, ConvertCdmConfig) {
   config.allow_persistent_state = false;
   config.use_hw_secure_codecs = true;
 
-  interfaces::CdmConfigPtr ptr(interfaces::CdmConfig::From(config));
+  mojom::CdmConfigPtr ptr(mojom::CdmConfig::From(config));
   CdmConfig result(ptr.To<CdmConfig>());
 
   EXPECT_EQ(config.allow_distinctive_identifier,
@@ -376,7 +369,7 @@ TEST(MediaTypeConvertersTest, ConvertAudioBuffer_EOS) {
   scoped_refptr<AudioBuffer> buffer(AudioBuffer::CreateEOSBuffer());
 
   // Convert to and back.
-  interfaces::AudioBufferPtr ptr(interfaces::AudioBuffer::From(buffer));
+  mojom::AudioBufferPtr ptr(mojom::AudioBuffer::From(buffer));
   scoped_refptr<AudioBuffer> result(ptr.To<scoped_refptr<AudioBuffer>>());
 
   // Compare.
@@ -393,7 +386,7 @@ TEST(MediaTypeConvertersTest, ConvertAudioBuffer_MONO) {
       kSampleRate / 100, base::TimeDelta());
 
   // Convert to and back.
-  interfaces::AudioBufferPtr ptr(interfaces::AudioBuffer::From(buffer));
+  mojom::AudioBufferPtr ptr(mojom::AudioBuffer::From(buffer));
   scoped_refptr<AudioBuffer> result(ptr.To<scoped_refptr<AudioBuffer>>());
 
   // Compare.
@@ -410,7 +403,7 @@ TEST(MediaTypeConvertersTest, ConvertAudioBuffer_FLOAT) {
       ChannelLayoutToChannelCount(kChannelLayout), kSampleRate, 0.0f, 1.0f,
       kSampleRate / 10, start_time);
   // Convert to and back.
-  interfaces::AudioBufferPtr ptr(interfaces::AudioBuffer::From(buffer));
+  mojom::AudioBufferPtr ptr(mojom::AudioBuffer::From(buffer));
   scoped_refptr<AudioBuffer> result(ptr.To<scoped_refptr<AudioBuffer>>());
 
   // Compare.
@@ -422,7 +415,7 @@ TEST(MediaTypeConvertersTest, ConvertVideoFrame_EOS) {
   scoped_refptr<VideoFrame> buffer(VideoFrame::CreateEOSFrame());
 
   // Convert to and back.
-  interfaces::VideoFramePtr ptr(interfaces::VideoFrame::From(buffer));
+  mojom::VideoFramePtr ptr(mojom::VideoFrame::From(buffer));
   scoped_refptr<VideoFrame> result(ptr.To<scoped_refptr<VideoFrame>>());
 
   // Compare.
@@ -435,7 +428,7 @@ TEST(MediaTypeConvertersTest, ConvertVideoFrame_EmptyFrame) {
       gfx::Size(100, 100), base::TimeDelta::FromSeconds(100)));
 
   // Convert to and back.
-  interfaces::VideoFramePtr ptr(interfaces::VideoFrame::From(frame));
+  mojom::VideoFramePtr ptr(mojom::VideoFrame::From(frame));
   scoped_refptr<VideoFrame> result(ptr.To<scoped_refptr<VideoFrame>>());
   EXPECT_NE(result.get(), nullptr);
 
@@ -447,7 +440,7 @@ TEST(MediaTypeConvertersTest, ConvertVideoFrame_ColorFrame) {
   scoped_refptr<VideoFrame> frame(CreateMojoSharedBufferColorFrame());
 
   // Convert to and back.
-  interfaces::VideoFramePtr ptr(interfaces::VideoFrame::From(frame));
+  mojom::VideoFramePtr ptr(mojom::VideoFrame::From(frame));
   scoped_refptr<VideoFrame> result(ptr.To<scoped_refptr<VideoFrame>>());
   EXPECT_NE(result.get(), nullptr);
 
@@ -461,8 +454,7 @@ TEST(MediaTypeConvertersTest, ConvertEncryptionSchemeAesCbcWithPattern) {
                           EncryptionScheme::Pattern(1, 9));
 
   // Convert to and back.
-  interfaces::EncryptionSchemePtr ptr(
-      interfaces::EncryptionScheme::From(scheme));
+  mojom::EncryptionSchemePtr ptr(mojom::EncryptionScheme::From(scheme));
   EncryptionScheme result(ptr.To<EncryptionScheme>());
 
   EXPECT_TRUE(result.Matches(scheme));

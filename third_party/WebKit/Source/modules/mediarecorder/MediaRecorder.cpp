@@ -14,11 +14,14 @@
 #include "platform/blob/BlobData.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebMediaStream.h"
+#include "wtf/PtrUtil.h"
 #include <algorithm>
 
 namespace blink {
 
 namespace {
+
+const char* kDefaultMimeType = "video/webm";
 
 // Boundaries of Opus bitrate from https://www.opus-codec.org/.
 const int kSmallestPossibleOpusBitRate = 6000;
@@ -135,7 +138,7 @@ MediaRecorder::MediaRecorder(ExecutionContext* context, MediaStream* stream, con
     , ActiveDOMObject(context)
     , m_stream(stream)
     , m_streamAmountOfTracks(stream->getTracks().size())
-    , m_mimeType(options.mimeType())
+    , m_mimeType(options.hasMimeType() ? options.mimeType() : kDefaultMimeType)
     , m_stopped(true)
     , m_ignoreMutedMedia(true)
     , m_audioBitsPerSecond(0)
@@ -145,7 +148,7 @@ MediaRecorder::MediaRecorder(ExecutionContext* context, MediaStream* stream, con
 {
     DCHECK(m_stream->getTracks().size());
 
-    m_recorderHandler = adoptPtr(Platform::current()->createMediaRecorderHandler());
+    m_recorderHandler = wrapUnique(Platform::current()->createMediaRecorderHandler());
     DCHECK(m_recorderHandler);
 
     if (!m_recorderHandler) {
@@ -280,7 +283,7 @@ void MediaRecorder::stop()
 
     m_stopped = true;
     m_stream.clear();
-    m_recorderHandler.clear();
+    m_recorderHandler.reset();
 }
 
 void MediaRecorder::writeData(const char* data, size_t length, bool lastInSlice)
@@ -296,8 +299,10 @@ void MediaRecorder::writeData(const char* data, size_t length, bool lastInSlice)
 
     // TODO(mcasas): Act as |m_ignoredMutedMedia| instructs if |m_stream| track(s) is in muted() state.
 
-    if (!m_blobData)
+    if (!m_blobData) {
         m_blobData = BlobData::create();
+        m_blobData->setContentType(m_mimeType);
+    }
     if (data)
         m_blobData->appendBytes(data, length);
 
@@ -306,7 +311,7 @@ void MediaRecorder::writeData(const char* data, size_t length, bool lastInSlice)
 
     // Cache |m_blobData->length()| before release()ng it.
     const long long blobDataLength = m_blobData->length();
-    createBlobEvent(Blob::create(BlobDataHandle::create(m_blobData.release(), blobDataLength)));
+    createBlobEvent(Blob::create(BlobDataHandle::create(std::move(m_blobData), blobDataLength)));
 }
 
 void MediaRecorder::onError(const WebString& message)

@@ -28,6 +28,7 @@
 
 #include "core/html/canvas/CanvasRenderingContextFactory.h"
 #include "modules/webgl/WebGLRenderingContextBase.h"
+#include <memory>
 
 namespace blink {
 
@@ -43,6 +44,7 @@ public:
         ~Factory() override {}
 
         CanvasRenderingContext* create(HTMLCanvasElement*, const CanvasContextCreationAttributes&, Document&) override;
+        CanvasRenderingContext* create(ScriptState*, OffscreenCanvas*, const CanvasContextCreationAttributes&) override;
         CanvasRenderingContext::ContextType getContextType() const override { return CanvasRenderingContext::ContextWebgl; }
         void onError(HTMLCanvasElement*, const String& error) override;
     };
@@ -50,20 +52,23 @@ public:
     ~WebGLRenderingContext() override;
 
     CanvasRenderingContext::ContextType getContextType() const override { return CanvasRenderingContext::ContextWebgl; }
-    unsigned version() const override { return 1; }
+    ImageBitmap* transferToImageBitmap(ExceptionState&) final;
     String contextName() const override { return "WebGLRenderingContext"; }
     void registerContextExtensions() override;
     void setCanvasGetContextResult(RenderingContext&) final;
+    void setOffscreenCanvasGetContextResult(OffscreenRenderingContext&) final;
 
     EAGERLY_FINALIZE();
     DECLARE_VIRTUAL_TRACE();
 
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
+
 private:
-    WebGLRenderingContext(HTMLCanvasElement*, PassOwnPtr<WebGraphicsContext3DProvider>, const WebGLContextAttributes&);
+    WebGLRenderingContext(HTMLCanvasElement*, std::unique_ptr<WebGraphicsContext3DProvider>, const CanvasContextCreationAttributes&);
+    WebGLRenderingContext(OffscreenCanvas*, std::unique_ptr<WebGraphicsContext3DProvider>, const CanvasContextCreationAttributes&);
 
     // Enabled extension objects.
     Member<ANGLEInstancedArrays> m_angleInstancedArrays;
-    Member<CHROMIUMSubscribeUniform> m_chromiumSubscribeUniform;
     Member<EXTBlendMinMax> m_extBlendMinMax;
     Member<EXTDisjointTimerQuery> m_extDisjointTimerQuery;
     Member<EXTFragDepth> m_extFragDepth;
@@ -83,9 +88,11 @@ private:
     Member<WebGLDrawBuffers> m_webglDrawBuffers;
     Member<WebGLCompressedTextureASTC> m_webglCompressedTextureASTC;
     Member<WebGLCompressedTextureATC> m_webglCompressedTextureATC;
+    Member<WebGLCompressedTextureES30> m_webglCompressedTextureES30;
     Member<WebGLCompressedTextureETC1> m_webglCompressedTextureETC1;
     Member<WebGLCompressedTexturePVRTC> m_webglCompressedTexturePVRTC;
     Member<WebGLCompressedTextureS3TC> m_webglCompressedTextureS3TC;
+    Member<WebGLCompressedTextureS3TCsRGB> m_webglCompressedTextureS3TCsRGB;
     Member<WebGLDepthTexture> m_webglDepthTexture;
 };
 

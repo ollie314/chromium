@@ -38,21 +38,17 @@ class GestureProviderAuraTest : public testing::Test,
 };
 
 TEST_F(GestureProviderAuraTest, IgnoresExtraPressEvents) {
-  base::TimeDelta time = ui::EventTimeForNow();
+  base::TimeTicks time = ui::EventTimeForNow();
   TouchEvent press1(ET_TOUCH_PRESSED, gfx::Point(10, 10), 0, time);
   EXPECT_TRUE(provider()->OnTouchEvent(&press1));
 
   time += base::TimeDelta::FromMilliseconds(10);
   TouchEvent press2(ET_TOUCH_PRESSED, gfx::Point(30, 40), 0, time);
-  // TODO(tdresser): this redundant press with same id should be
-  // ignored; however, there is at least one case where we need to
-  // allow a touch press from a currently used touch id. See
-  // crbug.com/373125 for details.
-  EXPECT_TRUE(provider()->OnTouchEvent(&press2));
+  EXPECT_FALSE(provider()->OnTouchEvent(&press2));
 }
 
 TEST_F(GestureProviderAuraTest, IgnoresExtraMoveOrReleaseEvents) {
-  base::TimeDelta time = ui::EventTimeForNow();
+  base::TimeTicks time = ui::EventTimeForNow();
   TouchEvent press1(ET_TOUCH_PRESSED, gfx::Point(10, 10), 0, time);
   EXPECT_TRUE(provider()->OnTouchEvent(&press1));
 
@@ -77,7 +73,7 @@ TEST_F(GestureProviderAuraTest, IgnoresIdenticalMoveEvents) {
   const int kTouchId0 = 5;
   const int kTouchId1 = 3;
 
-  base::TimeDelta time = ui::EventTimeForNow();
+  base::TimeTicks time = ui::EventTimeForNow();
   TouchEvent press0_1(ET_TOUCH_PRESSED, gfx::Point(9, 10), kTouchId0, time);
   EXPECT_TRUE(provider()->OnTouchEvent(&press0_1));
 

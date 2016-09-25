@@ -12,6 +12,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -32,7 +33,6 @@ using ::testing::Values;
 namespace media {
 
 typedef StreamParser::BufferQueue BufferQueue;
-typedef StreamParser::TextBufferQueueMap TextBufferQueueMap;
 typedef StreamParser::TrackId TrackId;
 
 // Used for setting expectations on callbacks. Using a StrictMock also lets us
@@ -48,8 +48,8 @@ class FrameProcessorTestCallbackHelper {
   // |new_duration|.
   void OnPossibleDurationIncrease(base::TimeDelta new_duration) {
     PossibleDurationIncrease(new_duration);
-    ASSERT_NE(kNoTimestamp(), new_duration);
-    ASSERT_NE(kInfiniteDuration(), new_duration);
+    ASSERT_NE(kNoTimestamp, new_duration);
+    ASSERT_NE(kInfiniteDuration, new_duration);
   }
 
  private:
@@ -66,10 +66,10 @@ class FrameProcessorTest : public testing::TestWithParam<bool> {
                 &FrameProcessorTestCallbackHelper::OnPossibleDurationIncrease,
                 base::Unretained(&callbacks_)),
             new MediaLog())),
-        append_window_end_(kInfiniteDuration()),
-        audio_id_(FrameProcessor::kAudioTrackId),
-        video_id_(FrameProcessor::kVideoTrackId),
-        frame_duration_(base::TimeDelta::FromMilliseconds(10)) {}
+        append_window_end_(kInfiniteDuration),
+        frame_duration_(base::TimeDelta::FromMilliseconds(10)),
+        audio_id_(1),
+        video_id_(2) {}
 
   enum StreamFlags {
     HAS_AUDIO = 1 << 0,
@@ -85,15 +85,13 @@ class FrameProcessorTest : public testing::TestWithParam<bool> {
       CreateAndConfigureStream(DemuxerStream::AUDIO);
       ASSERT_TRUE(audio_);
       EXPECT_TRUE(frame_processor_->AddTrack(audio_id_, audio_.get()));
-      audio_->Seek(base::TimeDelta());
-      audio_->StartReturningData();
+      seek(audio_.get(), base::TimeDelta());
     }
     if (has_video) {
       CreateAndConfigureStream(DemuxerStream::VIDEO);
       ASSERT_TRUE(video_);
       EXPECT_TRUE(frame_processor_->AddTrack(video_id_, video_.get()));
-      video_->Seek(base::TimeDelta());
-      video_->StartReturningData();
+      seek(video_.get(), base::TimeDelta());
     }
   }
 
@@ -153,17 +151,24 @@ class FrameProcessorTest : public testing::TestWithParam<bool> {
 
   void ProcessFrames(const std::string& audio_timestamps,
                      const std::string& video_timestamps) {
+    StreamParser::BufferQueueMap buffer_queue_map;
+    const auto& audio_buffers =
+        StringToBufferQueue(audio_timestamps, audio_id_, DemuxerStream::AUDIO);
+    if (!audio_buffers.empty())
+      buffer_queue_map.insert(std::make_pair(audio_id_, audio_buffers));
+    const auto& video_buffers =
+        StringToBufferQueue(video_timestamps, video_id_, DemuxerStream::VIDEO);
+    if (!video_buffers.empty())
+      buffer_queue_map.insert(std::make_pair(video_id_, video_buffers));
     ASSERT_TRUE(frame_processor_->ProcessFrames(
-        StringToBufferQueue(audio_timestamps, audio_id_, DemuxerStream::AUDIO),
-        StringToBufferQueue(video_timestamps, video_id_, DemuxerStream::VIDEO),
-        empty_text_buffers_, append_window_start_, append_window_end_,
+        buffer_queue_map, append_window_start_, append_window_end_,
         &timestamp_offset_));
   }
 
   void CheckExpectedRangesByTimestamp(ChunkDemuxerStream* stream,
                                       const std::string& expected) {
     // Note, DemuxerStream::TEXT streams return [0,duration (==infinity here))
-    Ranges<base::TimeDelta> r = stream->GetBufferedRanges(kInfiniteDuration());
+    Ranges<base::TimeDelta> r = stream->GetBufferedRanges(kInfiniteDuration);
 
     std::stringstream ss;
     ss << "{ ";
@@ -183,7 +188,7 @@ class FrameProcessorTest : public testing::TestWithParam<bool> {
       read_callback_called_ = false;
       stream->Read(base::Bind(&FrameProcessorTest::StoreStatusAndBuffer,
                               base::Unretained(this)));
-      message_loop_.RunUntilIdle();
+      base::RunLoop().RunUntilIdle();
     } while (++loop_count < 2 && read_callback_called_ &&
              last_read_status_ == DemuxerStream::kAborted);
 
@@ -209,7 +214,7 @@ class FrameProcessorTest : public testing::TestWithParam<bool> {
         read_callback_called_ = false;
         stream->Read(base::Bind(&FrameProcessorTest::StoreStatusAndBuffer,
                                 base::Unretained(this)));
-        message_loop_.RunUntilIdle();
+        base::RunLoop().RunUntilIdle();
         EXPECT_TRUE(read_callback_called_);
       } while (++loop_count < 2 &&
                last_read_status_ == DemuxerStream::kAborted);
@@ -234,8 +239,8 @@ class FrameProcessorTest : public testing::TestWithParam<bool> {
         ss << ":" << original_time_in_ms;
 
       // Detect full-discard preroll buffer.
-      if (last_read_buffer_->discard_padding().first == kInfiniteDuration() &&
-          last_read_buffer_->discard_padding().second == base::TimeDelta()) {
+      if (last_read_buffer_->discard_padding().first == kInfiniteDuration &&
+          last_read_buffer_->discard_padding().second.is_zero()) {
         ss << "P";
       }
     }
@@ -248,23 +253,29 @@ class FrameProcessorTest : public testing::TestWithParam<bool> {
   // thereof of new coded frame group by the FrameProcessor. See
   // https://crbug.com/580613.
   bool in_coded_frame_group() {
-    return frame_processor_->in_coded_frame_group_;
+    return frame_processor_->coded_frame_group_last_dts_ !=
+           kNoDecodeTimestamp();
+  }
+
+  void seek(ChunkDemuxerStream* stream, base::TimeDelta seek_time) {
+    stream->AbortReads();
+    stream->Seek(seek_time);
+    stream->StartReturningData();
   }
 
   base::MessageLoop message_loop_;
   StrictMock<FrameProcessorTestCallbackHelper> callbacks_;
 
-  scoped_ptr<FrameProcessor> frame_processor_;
+  std::unique_ptr<FrameProcessor> frame_processor_;
   base::TimeDelta append_window_start_;
   base::TimeDelta append_window_end_;
   base::TimeDelta timestamp_offset_;
-  scoped_ptr<ChunkDemuxerStream> audio_;
-  scoped_ptr<ChunkDemuxerStream> video_;
+  base::TimeDelta frame_duration_;
+  std::unique_ptr<ChunkDemuxerStream> audio_;
+  std::unique_ptr<ChunkDemuxerStream> video_;
   const TrackId audio_id_;
   const TrackId video_id_;
-  const base::TimeDelta frame_duration_;  // Currently the same for all streams.
   const BufferQueue empty_queue_;
-  const TextBufferQueueMap empty_text_buffers_;
 
   // StoreStatusAndBuffer's most recent result.
   DemuxerStream::Status last_read_status_;
@@ -291,7 +302,7 @@ class FrameProcessorTest : public testing::TestWithParam<bool> {
     switch (type) {
       case DemuxerStream::AUDIO: {
         ASSERT_FALSE(audio_);
-        audio_.reset(new ChunkDemuxerStream(DemuxerStream::AUDIO, true));
+        audio_.reset(new ChunkDemuxerStream(DemuxerStream::AUDIO, true, "1"));
         AudioDecoderConfig decoder_config(kCodecVorbis, kSampleFormatPlanarF32,
                                           CHANNEL_LAYOUT_STEREO, 1000,
                                           EmptyExtraData(), Unencrypted());
@@ -301,7 +312,7 @@ class FrameProcessorTest : public testing::TestWithParam<bool> {
       }
       case DemuxerStream::VIDEO: {
         ASSERT_FALSE(video_);
-        video_.reset(new ChunkDemuxerStream(DemuxerStream::VIDEO, true));
+        video_.reset(new ChunkDemuxerStream(DemuxerStream::VIDEO, true, "2"));
         ASSERT_TRUE(video_->UpdateVideoConfig(TestVideoConfig::Normal(),
                                               new MediaLog()));
         break;
@@ -322,10 +333,13 @@ TEST_F(FrameProcessorTest, WrongTypeInAppendedBuffer) {
   AddTestTracks(HAS_AUDIO);
   EXPECT_FALSE(in_coded_frame_group());
 
-  ASSERT_FALSE(frame_processor_->ProcessFrames(
-      StringToBufferQueue("0K", audio_id_, DemuxerStream::VIDEO), empty_queue_,
-      empty_text_buffers_, append_window_start_, append_window_end_,
-      &timestamp_offset_));
+  StreamParser::BufferQueueMap buffer_queue_map;
+  const auto& audio_buffers =
+      StringToBufferQueue("0K", audio_id_, DemuxerStream::VIDEO);
+  buffer_queue_map.insert(std::make_pair(audio_id_, audio_buffers));
+  ASSERT_FALSE(
+      frame_processor_->ProcessFrames(buffer_queue_map, append_window_start_,
+                                      append_window_end_, &timestamp_offset_));
   EXPECT_FALSE(in_coded_frame_group());
   EXPECT_EQ(base::TimeDelta(), timestamp_offset_);
   CheckExpectedRangesByTimestamp(audio_.get(), "{ }");
@@ -335,10 +349,13 @@ TEST_F(FrameProcessorTest, WrongTypeInAppendedBuffer) {
 TEST_F(FrameProcessorTest, NonMonotonicallyIncreasingTimestampInOneCall) {
   AddTestTracks(HAS_AUDIO);
 
-  ASSERT_FALSE(frame_processor_->ProcessFrames(
-      StringToBufferQueue("10K 0K", audio_id_, DemuxerStream::AUDIO),
-      empty_queue_, empty_text_buffers_, append_window_start_,
-      append_window_end_, &timestamp_offset_));
+  StreamParser::BufferQueueMap buffer_queue_map;
+  const auto& audio_buffers =
+      StringToBufferQueue("10K 0K", audio_id_, DemuxerStream::AUDIO);
+  buffer_queue_map.insert(std::make_pair(audio_id_, audio_buffers));
+  ASSERT_FALSE(
+      frame_processor_->ProcessFrames(buffer_queue_map, append_window_start_,
+                                      append_window_end_, &timestamp_offset_));
   EXPECT_FALSE(in_coded_frame_group());
   EXPECT_EQ(base::TimeDelta(), timestamp_offset_);
   CheckExpectedRangesByTimestamp(audio_.get(), "{ }");
@@ -508,12 +525,9 @@ TEST_P(FrameProcessorTest, AudioOnly_NonSequentialProcessFrames) {
   } else {
     CheckExpectedRangesByTimestamp(audio_.get(), "{ [0,40) }");
     EXPECT_EQ(base::TimeDelta(), timestamp_offset_);
-    // TODO(wolenetz): Fix this need to seek to 0ms, possibly by having
-    // SourceBufferStream defer initial seek until next read. See
-    // http://crbug.com/371493.
-    audio_->AbortReads();
-    audio_->Seek(base::TimeDelta());
-    audio_->StartReturningData();
+    // Re-seek to 0ms now that we've appended data earlier than what has already
+    // satisfied our initial seek to start, above.
+    seek(audio_.get(), base::TimeDelta());
     CheckReadsThenReadStalls(audio_.get(), "0 10 20 30");
   }
 }
@@ -575,10 +589,105 @@ TEST_P(FrameProcessorTest, AudioVideo_Discontinuity) {
     CheckExpectedRangesByTimestamp(video_.get(), "{ [0,20) [50,60) }");
     CheckReadsThenReadStalls(audio_.get(), "0 10 30 40 50");
     CheckReadsThenReadStalls(video_.get(), "0 10");
-    video_->AbortReads();
-    video_->Seek(frame_duration_ * 5);
-    video_->StartReturningData();
+    seek(video_.get(), frame_duration_ * 5);
     CheckReadsThenReadStalls(video_.get(), "50");
+  }
+}
+
+TEST_P(FrameProcessorTest, AudioVideo_Discontinuity_TimestampOffset) {
+  // If in 'sequence' mode, a new coded frame group is *only* started if the
+  // processed frame sequence outputs something that goes backwards in DTS
+  // order. This helps retain the intent of 'sequence' mode: it both collapses
+  // gaps as well as allows app to override the timeline placement and so needs
+  // to handle overlap-appends, too.
+  InSequence s;
+  AddTestTracks(HAS_AUDIO | HAS_VIDEO);
+  bool using_sequence_mode = GetParam();
+  frame_processor_->SetSequenceMode(using_sequence_mode);
+
+  // Start a coded frame group at time 100ms. Note the jagged start still uses
+  // the coded frame group's start time as the range start for both streams.
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(frame_duration_ * 14));
+  SetTimestampOffset(frame_duration_ * 10);
+  ProcessFrames("0K 10K 20K", "10K 20K 30K");
+  EXPECT_EQ(frame_duration_ * 10, timestamp_offset_);
+  EXPECT_TRUE(in_coded_frame_group());
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ [100,130) }");
+  CheckExpectedRangesByTimestamp(video_.get(), "{ [100,140) }");
+
+  // Test the differentiation between 'sequence' and 'segments' mode results if
+  // the coded frame sequence jumps forward beyond the normal discontinuity
+  // threshold.
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(frame_duration_ * 24));
+  SetTimestampOffset(frame_duration_ * 20);
+  ProcessFrames("0K 10K 20K", "10K 20K 30K");
+  EXPECT_EQ(frame_duration_ * 20, timestamp_offset_);
+  EXPECT_TRUE(in_coded_frame_group());
+  if (using_sequence_mode) {
+    CheckExpectedRangesByTimestamp(audio_.get(), "{ [100,230) }");
+    CheckExpectedRangesByTimestamp(video_.get(), "{ [100,240) }");
+  } else {
+    CheckExpectedRangesByTimestamp(audio_.get(), "{ [100,130) [200,230) }");
+    CheckExpectedRangesByTimestamp(video_.get(), "{ [100,140) [200,240) }");
+  }
+
+  // Test the behavior when timestampOffset adjustment causes next frames to be
+  // in the past relative to the previously processed frame and triggers a new
+  // coded frame group, even in 'sequence' mode.
+  base::TimeDelta fifty_five_ms = base::TimeDelta::FromMilliseconds(55);
+  EXPECT_CALL(callbacks_,
+              PossibleDurationIncrease(fifty_five_ms + frame_duration_ * 4));
+  SetTimestampOffset(fifty_five_ms);
+  ProcessFrames("0K 10K 20K", "10K 20K 30K");
+  EXPECT_EQ(fifty_five_ms, timestamp_offset_);
+  EXPECT_TRUE(in_coded_frame_group());
+  // The new audio range is not within SourceBufferStream's coalescing threshold
+  // relative to the next range, but the new video range is within the
+  // threshold.
+  if (using_sequence_mode) {
+    // TODO(wolenetz/chcunningham): The large explicit-timestampOffset-induced
+    // jump forward (from timestamp 130 to 200) while in a sequence mode coded
+    // frame group makes our adjacency threshold in SourceBuffer, based on
+    // max-interbuffer-distance-within-coded-frame-group, very lenient.
+    // This causes [55,85) to merge with [100,230) here for audio, and similar
+    // for video. See also https://crbug.com/620523.
+    CheckExpectedRangesByTimestamp(audio_.get(), "{ [55,230) }");
+    CheckExpectedRangesByTimestamp(video_.get(), "{ [55,240) }");
+  } else {
+    CheckExpectedRangesByTimestamp(audio_.get(),
+                                   "{ [55,85) [100,130) [200,230) }");
+    // Note that the range adjacency logic used in this case is doesn't consider
+    // DTS 85 to be close enough to [100,140), since the first DTS in video
+    // range [100,140) is actually 110. The muxed data started a coded frame
+    // group at time 100, but actual DTS is used for adjacency checks while
+    // appending.
+    CheckExpectedRangesByTimestamp(video_.get(),
+                                   "{ [55,95) [100,140) [200,240) }");
+  }
+
+  // Verify the buffers.
+  // Re-seek now that we've appended data earlier than what already satisfied
+  // our initial seek to start.
+  seek(audio_.get(), fifty_five_ms);
+  seek(video_.get(), fifty_five_ms);
+  if (using_sequence_mode) {
+    CheckReadsThenReadStalls(
+        audio_.get(),
+        "55:0 65:10 75:20 100:0 110:10 120:20 200:0 210:10 220:20");
+    CheckReadsThenReadStalls(
+        video_.get(),
+        "65:10 75:20 85:30 110:10 120:20 130:30 210:10 220:20 230:30");
+  } else {
+    CheckReadsThenReadStalls(audio_.get(), "55:0 65:10 75:20");
+    CheckReadsThenReadStalls(video_.get(), "65:10 75:20 85:30");
+    seek(audio_.get(), frame_duration_ * 10);
+    seek(video_.get(), frame_duration_ * 10);
+    CheckReadsThenReadStalls(audio_.get(), "100:0 110:10 120:20");
+    CheckReadsThenReadStalls(video_.get(), "110:10 120:20 130:30");
+    seek(audio_.get(), frame_duration_ * 20);
+    seek(video_.get(), frame_duration_ * 20);
+    CheckReadsThenReadStalls(audio_.get(), "200:0 210:10 220:20");
+    CheckReadsThenReadStalls(video_.get(), "210:10 220:20 230:30");
   }
 }
 
@@ -739,6 +848,58 @@ TEST_F(FrameProcessorTest, AudioOnly_SequenceModeContinuityAcrossReset) {
   EXPECT_TRUE(in_coded_frame_group());
   CheckExpectedRangesByTimestamp(audio_.get(), "{ [0,20) }");
   CheckReadsThenReadStalls(audio_.get(), "0 10:100");
+}
+
+TEST_P(FrameProcessorTest, PartialAppendWindowZeroDurationPreroll) {
+  InSequence s;
+  AddTestTracks(HAS_AUDIO);
+  bool is_sequence_mode = GetParam();
+  frame_processor_->SetSequenceMode(is_sequence_mode);
+
+  append_window_start_ = base::TimeDelta::FromMilliseconds(5);
+
+  // Append a 0 duration frame that falls just before the append window.
+  frame_duration_ = base::TimeDelta::FromMilliseconds(0);
+  EXPECT_FALSE(in_coded_frame_group());
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(frame_duration_));
+  ProcessFrames("4K", "");
+  // Verify buffer is not part of ranges. It should be silently saved for
+  // preroll for future append.
+  CheckExpectedRangesByTimestamp(audio_.get(), "{ }");
+  CheckReadsThenReadStalls(audio_.get(), "");
+  EXPECT_FALSE(in_coded_frame_group());
+
+  // Abort the reads from last stall. We don't want those reads to "complete"
+  // when we append below. We will initiate new reads to confirm the buffer
+  // looks as we expect.
+  seek(audio_.get(), base::TimeDelta());
+
+  // Append a frame with 10ms duration, with 9ms falling after the window start.
+  base::TimeDelta expected_duration =
+      base::TimeDelta::FromMilliseconds(is_sequence_mode ? 10 : 14);
+  EXPECT_CALL(callbacks_, PossibleDurationIncrease(expected_duration));
+  frame_duration_ = base::TimeDelta::FromMilliseconds(10);
+  ProcessFrames("4K", "");
+  EXPECT_TRUE(in_coded_frame_group());
+
+  // Verify range updated to reflect last append was processed and trimmed, and
+  // also that zero duration buffer was saved and attached as preroll.
+  if (is_sequence_mode) {
+    // For sequence mode, append window trimming is applied after the append
+    // is adjusted for timestampOffset. Basically, everything gets rebased to 0
+    // and trimming then removes 5 seconds from the front.
+    CheckExpectedRangesByTimestamp(audio_.get(), "{ [5,10) }");
+    CheckReadsThenReadStalls(audio_.get(), "5:4P 5:4");
+  } else {  // segments mode
+    CheckExpectedRangesByTimestamp(audio_.get(), "{ [5,14) }");
+    CheckReadsThenReadStalls(audio_.get(), "5:4P 5:4");
+  }
+
+  // Verify the preroll buffer still has zero duration.
+  StreamParserBuffer* last_read_parser_buffer =
+      static_cast<StreamParserBuffer*>(last_read_buffer_.get());
+  ASSERT_EQ(base::TimeDelta::FromMilliseconds(0),
+            last_read_parser_buffer->preroll_buffer()->duration());
 }
 
 INSTANTIATE_TEST_CASE_P(SequenceMode, FrameProcessorTest, Values(true));

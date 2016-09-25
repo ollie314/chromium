@@ -17,18 +17,19 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
-#include "content/browser/devtools/devtools_netlog_observer.h"
 #include "content/browser/host_zoom_map_impl.h"
+#include "content/browser/loader/netlog_observer.h"
 #include "content/browser/loader/resource_buffer.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/loader/resource_request_info_impl.h"
-#include "content/browser/resource_context_impl.h"
 #include "content/common/resource_messages.h"
+#include "content/common/resource_request_completion_status.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/resource_response.h"
+#include "ipc/ipc_message_macros.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/log/net_log.h"
@@ -46,7 +47,7 @@ static int kMaxAllocationSize = 1024 * 32;
 // The interval for calls to ReportUploadProgress.
 static int kUploadProgressIntervalMsec = 10;
 
-// Used when kOptimizeIPCForSmallResource is enabled.
+// Used when kOptimizeLoadingIPCForSmallResources is enabled.
 // Small resource typically issues two Read call: one for the content itself
 // and another for getting zero response to detect EOF.
 // Inline these two into the IPC message to avoid allocating an expensive
@@ -72,9 +73,17 @@ void InitializeResourceBufferConstants() {
   GetNumericArg("resource-buffer-max-allocation-size", &kMaxAllocationSize);
 }
 
+// Updates |*cached| to |updated| and returns the difference from the old
+// value.
+int TrackDifference(int64_t updated, int64_t* cached) {
+  int difference = updated - *cached;
+  *cached = updated;
+  return difference;
+}
+
 }  // namespace
 
-// Used when kOptimizeIPCForSmallResource is enabled.
+// Used when kOptimizeLoadingIPCForSmallResources is enabled.
 // The instance hooks the buffer allocation of AsyncResourceHandler, and
 // determine if we should use SharedMemory or should inline the data into
 // the IPC message.
@@ -103,7 +112,8 @@ class AsyncResourceHandler::InliningHelper {
     // fall back to the regular resource loading path in that case.
     if (!inlining_applicable_ ||
         num_allocation_ > kNumLeadingChunk ||
-        !base::FeatureList::IsEnabled(features::kOptimizeIPCForSmallResource)) {
+        !base::FeatureList::IsEnabled(
+            features::kOptimizeLoadingIPCForSmallResources)) {
       return false;
     }
 
@@ -116,6 +126,7 @@ class AsyncResourceHandler::InliningHelper {
   // Returns true if the received data is sent to the consumer.
   bool SendInlinedDataIfApplicable(int bytes_read,
                                    int encoded_data_length,
+                                   int encoded_body_length,
                                    IPC::Sender* sender,
                                    int request_id) {
     DCHECK(sender);
@@ -128,7 +139,7 @@ class AsyncResourceHandler::InliningHelper {
     leading_chunk_buffer_ = nullptr;
 
     sender->Send(new ResourceMsg_InlinedDataChunkReceived(
-        request_id, data, encoded_data_length));
+        request_id, data, encoded_data_length, encoded_body_length));
     return true;
   }
 
@@ -205,7 +216,8 @@ AsyncResourceHandler::AsyncResourceHandler(
       inlining_helper_(new InliningHelper),
       last_upload_position_(0),
       waiting_for_upload_progress_ack_(false),
-      reported_transfer_size_(0) {
+      reported_transfer_size_(0),
+      reported_encoded_body_length_(0) {
   InitializeResourceBufferConstants();
 }
 
@@ -296,12 +308,7 @@ bool AsyncResourceHandler::OnRequestRedirected(
   *defer = did_defer_ = true;
   OnDefer();
 
-  if (rdh_->delegate()) {
-    rdh_->delegate()->OnRequestRedirected(
-        redirect_info.new_url, request(), info->GetContext(), response);
-  }
-
-  DevToolsNetLogObserver::PopulateResponseInfo(request(), response);
+  NetLogObserver::PopulateResponseInfo(request(), response);
   response->head.encoded_data_length = request()->GetTotalReceivedBytes();
   reported_transfer_size_ = 0;
   response->head.request_start = request()->creation_time();
@@ -338,11 +345,12 @@ bool AsyncResourceHandler::OnResponseStarted(ResourceResponse* response,
   }
 
   if (rdh_->delegate()) {
-    rdh_->delegate()->OnResponseStarted(
-        request(), info->GetContext(), response, info->filter());
+    rdh_->delegate()->OnResponseStarted(request(), info->GetContext(),
+                                        response);
   }
 
-  DevToolsNetLogObserver::PopulateResponseInfo(request(), response);
+  NetLogObserver::PopulateResponseInfo(request(), response);
+  response->head.encoded_data_length = request()->raw_header_size();
 
   const HostZoomMapImpl* host_zoom_map =
       static_cast<const HostZoomMapImpl*>(info->filter()->GetHostZoomMap());
@@ -398,10 +406,6 @@ bool AsyncResourceHandler::OnWillStart(const GURL& url, bool* defer) {
   return true;
 }
 
-bool AsyncResourceHandler::OnBeforeNetworkStart(const GURL& url, bool* defer) {
-  return true;
-}
-
 bool AsyncResourceHandler::OnWillRead(scoped_refptr<net::IOBuffer>* buf,
                                       int* buf_size,
                                       int min_size) {
@@ -439,10 +443,16 @@ bool AsyncResourceHandler::OnReadCompleted(int bytes_read, bool* defer) {
     return false;
 
   int encoded_data_length = CalculateEncodedDataLengthToReport();
+  if (!first_chunk_read_)
+    encoded_data_length -= request()->raw_header_size();
+
+  int encoded_body_length = CalculateEncodedBodyLengthToReport();
+  first_chunk_read_ = true;
 
   // Return early if InliningHelper handled the received data.
   if (inlining_helper_->SendInlinedDataIfApplicable(
-          bytes_read, encoded_data_length, filter, GetRequestID()))
+          bytes_read, encoded_data_length, encoded_body_length, filter,
+          GetRequestID()))
     return true;
 
   buffer_->ShrinkLastAllocation(bytes_read);
@@ -460,8 +470,9 @@ bool AsyncResourceHandler::OnReadCompleted(int bytes_read, bool* defer) {
 
   int data_offset = buffer_->GetLastAllocationOffset();
 
-  filter->Send(new ResourceMsg_DataReceived(
-      GetRequestID(), data_offset, bytes_read, encoded_data_length));
+  filter->Send(new ResourceMsg_DataReceived(GetRequestID(), data_offset,
+                                            bytes_read, encoded_data_length,
+                                            encoded_body_length));
   ++pending_data_count_;
 
   if (!buffer_->CanAllocate()) {
@@ -484,7 +495,6 @@ void AsyncResourceHandler::OnDataDownloaded(int bytes_downloaded) {
 
 void AsyncResourceHandler::OnResponseCompleted(
     const net::URLRequestStatus& status,
-    const std::string& security_info,
     bool* defer) {
   const ResourceRequestInfoImpl* info = GetRequestInfo();
   if (!info->filter())
@@ -513,21 +523,10 @@ void AsyncResourceHandler::OnResponseCompleted(
   // the ERR_ABORTED error code).
   DCHECK(!was_ignored_by_handler || error_code == net::ERR_ABORTED);
 
-  // TODO(mkosiba): Fix up cases where we create a URLRequestStatus
-  // with a status() != SUCCESS and an error_code() == net::OK.
-  if (status.status() == net::URLRequestStatus::CANCELED &&
-      error_code == net::OK) {
-    error_code = net::ERR_ABORTED;
-  } else if (status.status() == net::URLRequestStatus::FAILED &&
-             error_code == net::OK) {
-    error_code = net::ERR_FAILED;
-  }
-
-  ResourceMsg_RequestCompleteData request_complete_data;
+  ResourceRequestCompletionStatus request_complete_data;
   request_complete_data.error_code = error_code;
   request_complete_data.was_ignored_by_handler = was_ignored_by_handler;
   request_complete_data.exists_in_cache = request()->response_info().was_cached;
-  request_complete_data.security_info = security_info;
   request_complete_data.completion_time = TimeTicks::Now();
   request_complete_data.encoded_data_length =
       request()->GetTotalReceivedBytes();
@@ -575,10 +574,13 @@ bool AsyncResourceHandler::CheckForSufficientResource() {
 }
 
 int AsyncResourceHandler::CalculateEncodedDataLengthToReport() {
-  int64_t current_transfer_size = request()->GetTotalReceivedBytes();
-  int encoded_data_length = current_transfer_size - reported_transfer_size_;
-  reported_transfer_size_ = current_transfer_size;
-  return encoded_data_length;
+  return TrackDifference(request()->GetTotalReceivedBytes(),
+                         &reported_transfer_size_);
+}
+
+int AsyncResourceHandler::CalculateEncodedBodyLengthToReport() {
+  return TrackDifference(request()->GetRawBodyBytes(),
+                         &reported_encoded_body_length_);
 }
 
 void AsyncResourceHandler::RecordHistogram() {

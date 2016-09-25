@@ -39,15 +39,15 @@ class SpdyStream;
 class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
                                                  public SpdyStream::Delegate {
  public:
-  // Create a socket on top of the |spdy_stream| by sending a SYN_STREAM
-  // CONNECT frame for |endpoint|.  After the SYN_REPLY is received,
-  // any data read/written to the socket will be transferred in data
-  // frames. This object will set itself as |spdy_stream|'s delegate.
+  // Create a socket on top of the |spdy_stream| by sending a HEADERS CONNECT
+  // frame for |endpoint|.  After the response HEADERS frame is received, any
+  // data read/written to the socket will be transferred in data frames. This
+  // object will set itself as |spdy_stream|'s delegate.
   SpdyProxyClientSocket(const base::WeakPtr<SpdyStream>& spdy_stream,
                         const std::string& user_agent,
                         const HostPortPair& endpoint,
                         const HostPortPair& proxy_server,
-                        const BoundNetLog& source_net_log,
+                        const NetLogWithSource& source_net_log,
                         HttpAuthController* auth_controller);
 
   // On destruction Disconnect() is called.
@@ -59,14 +59,14 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   const scoped_refptr<HttpAuthController>& GetAuthController() const override;
   int RestartWithAuth(const CompletionCallback& callback) override;
   bool IsUsingSpdy() const override;
-  NextProto GetProtocolNegotiated() const override;
+  NextProto GetProxyNegotiatedProtocol() const override;
 
   // StreamSocket implementation.
   int Connect(const CompletionCallback& callback) override;
   void Disconnect() override;
   bool IsConnected() const override;
   bool IsConnectedAndIdle() const override;
-  const BoundNetLog& NetLog() const override;
+  const NetLogWithSource& NetLog() const override;
   void SetSubresourceSpeculation() override;
   void SetOmniboxSpeculation() override;
   bool WasEverUsed() const override;
@@ -169,7 +169,7 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   bool redirect_has_load_timing_info_;
   LoadTimingInfo redirect_load_timing_info_;
 
-  const BoundNetLog net_log_;
+  const NetLogWithSource net_log_;
 
   // The default weak pointer factory.
   base::WeakPtrFactory<SpdyProxyClientSocket> weak_factory_;

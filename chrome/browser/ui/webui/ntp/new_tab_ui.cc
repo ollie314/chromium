@@ -23,6 +23,7 @@
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "extensions/browser/extension_system.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -96,7 +97,8 @@ void NewTabUI::OnShowBookmarkBarChanged() {
   base::StringValue attached(
       GetProfile()->GetPrefs()->GetBoolean(bookmarks::prefs::kShowBookmarkBar) ?
           "true" : "false");
-  web_ui()->CallJavascriptFunction("ntp.setBookmarkBarAttached", attached);
+  web_ui()->CallJavascriptFunctionUnsafe("ntp.setBookmarkBarAttached",
+                                         attached);
 }
 
 // static
@@ -179,15 +181,14 @@ std::string NewTabUI::NewTabHTMLSource::GetSource() const {
 
 void NewTabUI::NewTabHTMLSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   std::map<std::string, std::pair<std::string, int> >::iterator it =
     resource_map_.find(path);
   if (it != resource_map_.end()) {
-    scoped_refptr<base::RefCountedStaticMemory> resource_bytes(
+    scoped_refptr<base::RefCountedMemory> resource_bytes(
         it->second.second ?
             ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
                 it->second.second) :
@@ -205,7 +206,7 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(
   }
 
   content::RenderProcessHost* render_host =
-      content::RenderProcessHost::FromID(render_process_id);
+      wc_getter.Run()->GetRenderProcessHost();
   NTPResourceCache::WindowType win_type = NTPResourceCache::GetWindowType(
       profile_, render_host);
   scoped_refptr<base::RefCountedMemory> html_bytes(
@@ -228,8 +229,27 @@ bool NewTabUI::NewTabHTMLSource::ShouldReplaceExistingSource() const {
   return false;
 }
 
-bool NewTabUI::NewTabHTMLSource::ShouldAddContentSecurityPolicy() const {
-  return false;
+std::string NewTabUI::NewTabHTMLSource::GetContentSecurityPolicyScriptSrc()
+    const {
+  // 'unsafe-inline' and google resources are added to script-src.
+  return "script-src chrome://resources 'self' 'unsafe-eval' 'unsafe-inline' "
+      "*.google.com *.gstatic.com;";
+}
+
+std::string NewTabUI::NewTabHTMLSource::GetContentSecurityPolicyStyleSrc()
+    const {
+  return "style-src 'self' chrome://resources 'unsafe-inline' chrome://theme;";
+}
+
+std::string NewTabUI::NewTabHTMLSource::GetContentSecurityPolicyImgSrc()
+    const {
+  return "img-src chrome-search://thumb chrome-search://thumb2 "
+      "chrome-search://theme chrome://theme data:;";
+}
+
+std::string NewTabUI::NewTabHTMLSource::GetContentSecurityPolicyChildSrc()
+    const {
+  return "child-src chrome-search://most-visited;";
 }
 
 void NewTabUI::NewTabHTMLSource::AddResource(const char* resource,

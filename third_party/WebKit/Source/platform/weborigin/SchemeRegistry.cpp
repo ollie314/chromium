@@ -65,50 +65,38 @@ static URLSchemesSet& displayIsolatedURLSchemes()
 
 static URLSchemesSet& mixedContentRestrictingSchemes()
 {
-    DEFINE_STATIC_LOCAL_WITH_LOCK(URLSchemesSet, mixedContentRestrictingSchemes, ());
-
-    if (mixedContentRestrictingSchemes.isEmpty())
-        mixedContentRestrictingSchemes.add("https");
-
+    DEFINE_STATIC_LOCAL_WITH_LOCK(URLSchemesSet, mixedContentRestrictingSchemes, ({
+        "https",
+    }));
     return mixedContentRestrictingSchemes;
 }
 
 static URLSchemesSet& secureSchemes()
 {
-    DEFINE_STATIC_LOCAL_WITH_LOCK(URLSchemesSet, secureSchemes, ());
-
-    if (secureSchemes.isEmpty()) {
-        secureSchemes.add("https");
-        secureSchemes.add("about");
-        secureSchemes.add("data");
-        secureSchemes.add("wss");
-    }
-
+    DEFINE_STATIC_LOCAL_WITH_LOCK(URLSchemesSet, secureSchemes, ({
+        "https",
+        "about",
+        "data",
+        "wss",
+    }));
     return secureSchemes;
 }
 
 static URLSchemesSet& schemesWithUniqueOrigins()
 {
-    DEFINE_STATIC_LOCAL_WITH_LOCK(URLSchemesSet, schemesWithUniqueOrigins, ());
-
-    if (schemesWithUniqueOrigins.isEmpty()) {
-        schemesWithUniqueOrigins.add("about");
-        schemesWithUniqueOrigins.add("javascript");
-        // This is a willful violation of HTML5.
-        // See https://bugs.webkit.org/show_bug.cgi?id=11885
-        schemesWithUniqueOrigins.add("data");
-    }
-
+    DEFINE_STATIC_LOCAL_WITH_LOCK(URLSchemesSet, schemesWithUniqueOrigins, ({
+        "about",
+        "javascript",
+        "data",
+    }));
     return schemesWithUniqueOrigins;
 }
 
 static URLSchemesSet& emptyDocumentSchemes()
 {
-    DEFINE_STATIC_LOCAL_WITH_LOCK(URLSchemesSet, emptyDocumentSchemes, ());
-
-    if (emptyDocumentSchemes.isEmpty())
-        emptyDocumentSchemes.add("about");
-
+    DEFINE_STATIC_LOCAL_WITH_LOCK(URLSchemesSet, emptyDocumentSchemes, ({
+        "about",
+    }));
     return emptyDocumentSchemes;
 }
 
@@ -312,7 +300,7 @@ bool SchemeRegistry::isDomainRelaxationForbiddenForURLScheme(const String& schem
 
 bool SchemeRegistry::canDisplayOnlyIfCanRequest(const String& scheme)
 {
-    return equalIgnoringCase("blob", scheme) || equalIgnoringCase("filesystem", scheme);
+    return equalIgnoringASCIICase("blob", scheme) || equalIgnoringASCIICase("filesystem", scheme);
 }
 
 void SchemeRegistry::registerURLSchemeAsNotAllowingJavascriptURLs(const String& scheme)
@@ -354,7 +342,7 @@ String SchemeRegistry::listOfCORSEnabledURLSchemes()
     }
     for (const auto& scheme : schemes) {
         if (addSeparator)
-            builder.appendLiteral(", ");
+            builder.append(", ");
         else
             addSeparator = true;
 
@@ -365,7 +353,7 @@ String SchemeRegistry::listOfCORSEnabledURLSchemes()
 
 bool SchemeRegistry::shouldTreatURLSchemeAsLegacy(const String& scheme)
 {
-    return equalIgnoringCase("ftp", scheme) || equalIgnoringCase("gopher", scheme);
+    return equalIgnoringASCIICase("ftp", scheme) || equalIgnoringASCIICase("gopher", scheme);
 }
 
 void SchemeRegistry::registerURLSchemeAsAllowingServiceWorkers(const String& scheme)
@@ -400,6 +388,12 @@ void SchemeRegistry::registerURLSchemeAsFirstPartyWhenTopLevel(const String& sch
 {
     MutexLocker locker(mutex());
     firstPartyWhenTopLevelSchemes().add(scheme);
+}
+
+void SchemeRegistry::removeURLSchemeAsFirstPartyWhenTopLevel(const String& scheme)
+{
+    MutexLocker locker(mutex());
+    firstPartyWhenTopLevelSchemes().remove(scheme);
 }
 
 bool SchemeRegistry::shouldTreatURLSchemeAsFirstPartyWhenTopLevel(const String& scheme)

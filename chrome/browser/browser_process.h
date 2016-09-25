@@ -24,12 +24,13 @@ class BackgroundModeManager;
 class CRLSetFetcher;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
-class GLStringManager;
 class GpuModeManager;
+class GpuProfileCache;
 class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
 class MediaFileSystemRegistry;
+class NotificationPlatformBridge;
 class NotificationUIManager;
 class PrefRegistrySimple;
 class PrefService;
@@ -43,6 +44,10 @@ class WebRtcLogUploader;
 
 namespace safe_browsing {
 class SafeBrowsingService;
+}
+
+namespace subresource_filter {
+class RulesetService;
 }
 
 namespace variations {
@@ -110,10 +115,6 @@ namespace safe_browsing {
 class ClientSideDetectionService;
 }
 
-namespace web_resource {
-class PromoResourceService;
-}
-
 // NOT THREAD SAFE, call only from the main thread.
 // These functions shouldn't return NULL unless otherwise noted.
 class BrowserProcess {
@@ -142,7 +143,6 @@ class BrowserProcess {
   virtual PrefService* local_state() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
   virtual variations::VariationsService* variations_service() = 0;
-  virtual web_resource::PromoResourceService* promo_resource_service() = 0;
 
   virtual BrowserProcessPlatformPart* platform_part() = 0;
 
@@ -150,7 +150,10 @@ class BrowserProcess {
       extension_event_router_forwarder() = 0;
 
   // Returns the manager for desktop notifications.
+  // TODO(miguelg) This is in the process of being deprecated in favour of
+  // NotificationPlatformBridge + NotificationDisplayService
   virtual NotificationUIManager* notification_ui_manager() = 0;
+  virtual NotificationPlatformBridge* notification_platform_bridge() = 0;
 
   // MessageCenter is a global list of currently displayed notifications.
   virtual message_center::MessageCenter* message_center() = 0;
@@ -177,9 +180,9 @@ class BrowserProcess {
 
   virtual IconManager* icon_manager() = 0;
 
-  virtual GLStringManager* gl_string_manager() = 0;
-
   virtual GpuModeManager* gpu_mode_manager() = 0;
+
+  virtual GpuProfileCache* gpu_profile_cache() = 0;
 
   // Create and bind remote debugging server to a given |ip| and |port|.
   // Passing empty |ip| results in binding to localhost:
@@ -198,7 +201,10 @@ class BrowserProcess {
 
   virtual IntranetRedirectDetector* intranet_redirect_detector() = 0;
 
-  // Returns the locale used by the application.
+  // Returns the locale used by the application. It is the IETF language tag,
+  // defined in BCP 47. The region subtag is not included when it adds no
+  // distinguishing information to the language tag (e.g. both "en-US" and "fr"
+  // are correct here).
   virtual const std::string& GetApplicationLocale() = 0;
   virtual void SetApplicationLocale(const std::string& locale) = 0;
 
@@ -222,6 +228,11 @@ class BrowserProcess {
   // client-side detection servers.
   virtual safe_browsing::ClientSideDetectionService*
       safe_browsing_detection_service() = 0;
+
+  // Returns the service providing versioned storage for rules used by the Safe
+  // Browsing subresource filter.
+  virtual subresource_filter::RulesetService*
+  subresource_filter_ruleset_service() = 0;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   // This will start a timer that, if Chrome is in persistent mode, will check
@@ -258,7 +269,7 @@ class BrowserProcess {
 
   virtual gcm::GCMDriver* gcm_driver() = 0;
 
-  // Returns the tab manager if it exists, null otherwise.
+  // Returns the tab manager. On non-supported platforms, this returns null.
   virtual memory::TabManager* GetTabManager() = 0;
 
   // Returns the default web client state of Chrome (i.e., was it the user's

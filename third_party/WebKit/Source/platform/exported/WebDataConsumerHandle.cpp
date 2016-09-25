@@ -5,8 +5,9 @@
 #include "public/platform/WebDataConsumerHandle.h"
 
 #include "platform/heap/Handle.h"
-
+#include "wtf/PtrUtil.h"
 #include <algorithm>
+#include <memory>
 #include <string.h>
 
 namespace blink {
@@ -19,12 +20,6 @@ WebDataConsumerHandle::WebDataConsumerHandle()
 WebDataConsumerHandle::~WebDataConsumerHandle()
 {
     ASSERT(ThreadState::current());
-}
-
-PassOwnPtr<WebDataConsumerHandle::Reader> WebDataConsumerHandle::obtainReader(WebDataConsumerHandle::Client* client)
-{
-    ASSERT(ThreadState::current());
-    return adoptPtr(obtainReaderInternal(client));
 }
 
 WebDataConsumerHandle::Result WebDataConsumerHandle::Reader::read(void* data, size_t size, Flags flags, size_t* readSize)
@@ -41,4 +36,3 @@ WebDataConsumerHandle::Result WebDataConsumerHandle::Reader::read(void* data, si
 }
 
 } // namespace blink
-

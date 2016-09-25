@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "ui/views/controls/button/button.h"
+#include "ui/views/controls/button/custom_button.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/views_export.h"
 
@@ -27,6 +28,10 @@ class VIEWS_EXPORT PlatformStyle {
   // Type used by LabelButton to map button states to text colors.
   using ButtonColorByState = SkColor[Button::STATE_COUNT];
 
+  // Padding to use on either side of the arrow for a Combobox when in
+  // Combobox::STYLE_NORMAL.
+  static const int kComboboxNormalArrowPadding;
+
   // Minimum size for platform-styled buttons (Button::STYLE_BUTTON).
   static const int kMinLabelButtonWidth;
   static const int kMinLabelButtonHeight;
@@ -34,9 +39,22 @@ class VIEWS_EXPORT PlatformStyle {
   // Whether dialog-default buttons are given a bold font style.
   static const bool kDefaultLabelButtonHasBoldFont;
 
+  // Whether the default button for a dialog can be the Cancel button.
+  static const bool kDialogDefaultButtonCanBeCancel;
+
   // Whether dragging vertically above or below a textfield's bounds selects to
   // the left or right end of the text from the cursor, respectively.
   static const bool kTextfieldDragVerticallyDragsToEnd;
+
+  // The menu button's action to show the menu.
+  static const CustomButton::NotifyAction kMenuNotifyActivationAction;
+
+  // Whether selecting a row in a TreeView selects the entire row or only the
+  // label for that row.
+  static const bool kTreeViewSelectionPaintsEntireRow;
+
+  // Whether ripples should be used for visual feedback on control activation.
+  static const bool kUseRipples;
 
   // Creates an ImageSkia containing the image to use for the combobox arrow.
   // The |is_enabled| argument is true if the control the arrow is for is
@@ -49,7 +67,8 @@ class VIEWS_EXPORT PlatformStyle {
   static std::unique_ptr<FocusableBorder> CreateComboboxBorder();
 
   // Creates the appropriate background for a Combobox.
-  static std::unique_ptr<Background> CreateComboboxBackground();
+  static std::unique_ptr<Background> CreateComboboxBackground(
+      int shoulder_width);
 
   // Creates the default label button border for the given |style|. Used when a
   // custom default border is not provided for a particular LabelButton class.
@@ -72,6 +91,10 @@ class VIEWS_EXPORT PlatformStyle {
   // Applies the current system theme to the default border created by |button|.
   static std::unique_ptr<Border> CreateThemedLabelButtonBorder(
       LabelButton* button);
+
+  // Called whenever a textfield keypress is unhandled for any reason. Gives
+  // visual/audio feedback about the unhandled key if platform-appropriate.
+  static void OnTextfieldKeypressUnhandled();
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(PlatformStyle);

@@ -21,7 +21,7 @@ AudioOutputDeviceClient* AudioOutputDeviceClient::from(ExecutionContext* context
         return nullptr;
 
     const Document* document = toDocument(context);
-    if (!document->frame() || !document->frame()->isLocalFrame())
+    if (!document->frame())
         return nullptr;
 
     return static_cast<AudioOutputDeviceClient*>(Supplement<LocalFrame>::from(document->frame(), supplementName()));
@@ -30,6 +30,11 @@ AudioOutputDeviceClient* AudioOutputDeviceClient::from(ExecutionContext* context
 void provideAudioOutputDeviceClientTo(LocalFrame& frame, AudioOutputDeviceClient* client)
 {
     frame.provideSupplement(AudioOutputDeviceClient::supplementName(), client);
+}
+
+DEFINE_TRACE(AudioOutputDeviceClient)
+{
+    Supplement<LocalFrame>::trace(visitor);
 }
 
 } // namespace blink

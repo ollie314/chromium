@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_CHROMEOS_PROFILES_PROFILE_HELPER_H_
 #define CHROME_BROWSER_CHROMEOS_PROFILES_PROFILE_HELPER_H_
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
 #include "components/user_manager/user_manager.h"
 
+class ArcAppTest;
 class Profile;
 
 namespace base {
@@ -27,11 +29,19 @@ namespace extensions {
 class ExtensionGarbageCollectorChromeOSUnitTest;
 }
 
+namespace arc {
+class SyncArcPackageHelper;
+}
+
 namespace ash {
 namespace test {
 class MultiUserWindowManagerChromeOSTest;
 }  // namespace test
 }  // namespace ash
+
+namespace test {
+class BrowserFinderChromeOSTest;
+}  // namespace test
 
 namespace chromeos {
 
@@ -120,7 +130,7 @@ class ProfileHelper
 
   // DEPRECATED
   // Returns profile of the |user| if user's profile is created and fully
-  // initialized. Otherwise, if some user is active, returns his profile.
+  // initialized. Otherwise, if some user is active, returns their profile.
   // Otherwise, returns signin profile.
   // Behaviour of this function does not correspond to its name and can be
   // very surprising, that's why it should not be used anymore.
@@ -154,7 +164,10 @@ class ProfileHelper
   friend class ProfileListChromeOSTest;
   friend class SessionStateDelegateChromeOSTest;
   friend class SystemTrayDelegateChromeOSTest;
+  friend class arc::SyncArcPackageHelper;
   friend class ash::test::MultiUserWindowManagerChromeOSTest;
+  friend class ::ArcAppTest;
+  friend class ::test::BrowserFinderChromeOSTest;
 
   // Called when signin profile is cleared.
   void OnSigninProfileCleared();
@@ -186,6 +199,9 @@ class ProfileHelper
   // Associates |profile| with |user|, for GetProfileByUser() testing.
   void SetUserToProfileMappingForTesting(const user_manager::User* user,
                                          Profile* profile);
+
+  // Removes |account_id| user from |user_to_profile_for_testing_| for testing.
+  void RemoveUserFromListForTesting(const AccountId& account_id);
 
   // Identifies path to active user profile on Chrome OS.
   std::string active_user_id_hash_;
@@ -222,6 +238,6 @@ class ProfileHelper
   DISALLOW_COPY_AND_ASSIGN(ProfileHelper);
 };
 
-} // namespace chromeos
+}  // namespace chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_PROFILES_PROFILE_HELPER_H_

@@ -7,11 +7,14 @@ package org.chromium.chrome.browser.download;
 import android.content.Context;
 import android.test.suitebuilder.annotation.SmallTest;
 
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
-import org.chromium.content.browser.DownloadInfo;
+
+import java.util.concurrent.Callable;
 
 /**
  * Tests for ChromeDownloadDelegate class.
@@ -46,10 +49,18 @@ public class ChromeDownloadDelegateTest extends ChromeActivityTestCaseBase<Chrom
      */
     @SmallTest
     @Feature({"Download"})
-    public void testShouldInterceptContextMenuDownload() {
-        Tab tab = new Tab(0, false, getActivity().getWindowAndroid());
-        ChromeDownloadDelegate delegate =
-                new MockChromeDownloadDelegate(getInstrumentation().getTargetContext(), tab);
+    @RetryOnFailure
+    public void testShouldInterceptContextMenuDownload() throws InterruptedException {
+        final Tab tab = getActivity().getActivityTab();
+        loadUrl("about:blank");
+        ChromeDownloadDelegate delegate = ThreadUtils.runOnUiThreadBlockingNoException(
+                new Callable<ChromeDownloadDelegate>() {
+                    @Override
+                    public ChromeDownloadDelegate call() {
+                        return new MockChromeDownloadDelegate(
+                                getInstrumentation().getTargetContext(), tab);
+                    }
+                });
         assertFalse(delegate.shouldInterceptContextMenuDownload("file://test/test.html"));
         assertFalse(delegate.shouldInterceptContextMenuDownload("http://test/test.html"));
         assertFalse(delegate.shouldInterceptContextMenuDownload("ftp://test/test.dm"));
@@ -57,5 +68,15 @@ public class ChromeDownloadDelegateTest extends ChromeActivityTestCaseBase<Chrom
         assertFalse(delegate.shouldInterceptContextMenuDownload("http://test.dd"));
         assertFalse(delegate.shouldInterceptContextMenuDownload("http://test/test.dd"));
         assertTrue(delegate.shouldInterceptContextMenuDownload("https://test/test.dm"));
+    }
+
+    @SmallTest
+    @Feature({"Download"})
+    public void testGetFileExtension() {
+        assertEquals("ext", ChromeDownloadDelegate.getFileExtension("", "file.ext"));
+        assertEquals("ext", ChromeDownloadDelegate.getFileExtension("http://file.ext", ""));
+        assertEquals("txt", ChromeDownloadDelegate.getFileExtension("http://file.ext", "file.txt"));
+        assertEquals("txt", ChromeDownloadDelegate.getFileExtension(
+                "http://file.ext", "file name.txt"));
     }
 }

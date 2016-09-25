@@ -15,7 +15,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -27,6 +27,8 @@
 #include "chrome/browser/themes/theme_syncable_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/theme_resources.h"
+#include "components/grit/components_scaled_resources.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
@@ -36,8 +38,6 @@
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
-#include "grit/components_scaled_resources.h"
-#include "grit/theme_resources.h"
 #include "ui/base/layout.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -121,6 +121,10 @@ gfx::ImageSkia* ThemeService::BrowserThemeProvider::GetImageSkiaNamed(
 
 SkColor ThemeService::BrowserThemeProvider::GetColor(int id) const {
   return theme_service_.GetColor(id, incognito_);
+}
+
+color_utils::HSL ThemeService::BrowserThemeProvider::GetTint(int id) const {
+  return theme_service_.GetTint(id, incognito_);
 }
 
 int ThemeService::BrowserThemeProvider::GetDisplayProperty(int id) const {
@@ -441,6 +445,11 @@ SkColor ThemeService::GetDefaultColor(int id, bool incognito) const {
       separator_color_cache_[key] = separator_color;
       return separator_color;
     }
+    case ThemeProperties::COLOR_TOOLBAR_VERTICAL_SEPARATOR: {
+      return SkColorSetA(
+          GetColor(ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON, incognito),
+          0x4D);
+    }
     case ThemeProperties::COLOR_BACKGROUND_TAB: {
       // The tints here serve a different purpose than TINT_BACKGROUND_TAB.
       // That tint is used to create background tab images for custom themes by
@@ -455,6 +464,10 @@ SkColor ThemeService::GetDefaultColor(int id, bool incognito) const {
           GetColor(ThemeProperties::COLOR_TOOLBAR, incognito),
           incognito ? kTintIncognito : kTint);
     }
+    case ThemeProperties::COLOR_BOOKMARK_BAR_INSTRUCTIONS_TEXT:
+      if (UsingDefaultTheme())
+        break;
+      return GetColor(ThemeProperties::COLOR_BOOKMARK_TEXT, incognito);
     case ThemeProperties::COLOR_DETACHED_BOOKMARK_BAR_BACKGROUND:
       if (UsingDefaultTheme())
         break;
@@ -568,7 +581,8 @@ void ThemeService::LoadThemePrefs() {
                            ? chrome::kThemePackMaterialDesignFilename
                            : chrome::kThemePackFilename);
     SwapThemeSupplier(BrowserThemePack::BuildFromDataPack(path, current_id));
-    loaded_pack = theme_supplier_ != nullptr;
+    if (theme_supplier_)
+      loaded_pack = true;
   }
 
   if (loaded_pack) {

@@ -48,7 +48,7 @@ struct ShapeCacheEntry {
     {
         m_shapeResult = nullptr;
     }
-    RefPtr<ShapeResult> m_shapeResult;
+    RefPtr<const ShapeResult> m_shapeResult;
 };
 
 class ShapeCache {
@@ -137,7 +137,7 @@ public:
 
     ShapeCacheEntry* add(const TextRun& run, ShapeCacheEntry entry)
     {
-        if (static_cast<unsigned>(run.length()) > SmallStringKey::capacity())
+        if (run.length() > SmallStringKey::capacity())
             return 0;
 
         return addSlowCase(run, entry);
@@ -182,7 +182,7 @@ public:
 private:
     ShapeCacheEntry* addSlowCase(const TextRun& run, ShapeCacheEntry entry)
     {
-        int length = run.length();
+        unsigned length = run.length();
         bool isNewEntry;
         ShapeCacheEntry *value;
         if (length == 1) {

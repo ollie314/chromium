@@ -34,7 +34,7 @@ AppLaunchSigninScreen::~AppLaunchSigninScreen() {
 
 void AppLaunchSigninScreen::Show() {
   InitOwnerUserList();
-  oobe_ui_->web_ui()->CallJavascriptFunction(
+  oobe_ui_->web_ui()->CallJavascriptFunctionUnsafe(
       "login.AccountPickerScreen.setShouldShowApps",
       base::FundamentalValue(false));
   oobe_ui_->ShowSigninScreen(LoginScreenContext(), this, NULL);
@@ -157,6 +157,18 @@ bool AppLaunchSigninScreen::IsShowGuest() const {
 
 bool AppLaunchSigninScreen::IsShowUsers() const {
   return true;
+}
+
+bool AppLaunchSigninScreen::ShowUsersHasChanged() const {
+  return false;
+}
+
+bool AppLaunchSigninScreen::IsAllowNewUser() const {
+  return true;
+}
+
+bool AppLaunchSigninScreen::AllowNewUserChanged() const {
+  return false;
 }
 
 bool AppLaunchSigninScreen::IsSigninInProgress() const {

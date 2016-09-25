@@ -12,12 +12,11 @@
 #include <utility>
 
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_handle.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/prerender_types.h"
 #include "content/public/browser/render_process_host.h"
@@ -272,7 +271,6 @@ PrerenderLinkManager::LinkPrerender::LinkPrerender(
       creation_time(creation_time),
       deferred_launcher(deferred_launcher),
       handle(NULL),
-      is_match_complete_replacement(false),
       has_been_abandoned(false) {}
 
 PrerenderLinkManager::LinkPrerender::LinkPrerender(const LinkPrerender& other) =
@@ -383,9 +381,10 @@ void PrerenderLinkManager::StartPrerenders() {
       continue;
     }
 
-    PrerenderHandle* handle = manager_->AddPrerenderFromLinkRelPrerender(
-        (*i)->launcher_child_id, (*i)->render_view_route_id,
-        (*i)->url, (*i)->rel_types, (*i)->referrer, (*i)->size);
+    std::unique_ptr<PrerenderHandle> handle =
+        manager_->AddPrerenderFromLinkRelPrerender(
+            (*i)->launcher_child_id, (*i)->render_view_route_id, (*i)->url,
+            (*i)->rel_types, (*i)->referrer, (*i)->size);
     if (!handle) {
       // This prerender couldn't be launched, it's gone.
       prerenders_.erase(*i);
@@ -393,11 +392,11 @@ void PrerenderLinkManager::StartPrerenders() {
     }
 
     // We have successfully started a new prerender.
-    (*i)->handle = handle;
+    (*i)->handle = handle.release();
     ++total_started_prerender_count;
-    handle->SetObserver(this);
-    if (handle->IsPrerendering())
-      OnPrerenderStart(handle);
+    (*i)->handle->SetObserver(this);
+    if ((*i)->handle->IsPrerendering())
+      OnPrerenderStart((*i)->handle);
     RecordLinkManagerStarting((*i)->rel_types);
 
     running_launcher_and_render_view_routes.insert(
@@ -521,29 +520,10 @@ void PrerenderLinkManager::OnPrerenderStop(
   if (!prerender)
     return;
 
-  // If the prerender became a match complete replacement, the stop
-  // message has already been sent.
-  if (!prerender->is_match_complete_replacement) {
-    Send(prerender->launcher_child_id,
-         new PrerenderMsg_OnPrerenderStop(prerender->prerender_id));
-  }
-  RemovePrerender(prerender);
-  StartPrerenders();
-}
-
-void PrerenderLinkManager::OnPrerenderCreatedMatchCompleteReplacement(
-    PrerenderHandle* prerender_handle) {
-  LinkPrerender* prerender = FindByPrerenderHandle(prerender_handle);
-  if (!prerender)
-    return;
-
-  DCHECK(!prerender->is_match_complete_replacement);
-  prerender->is_match_complete_replacement = true;
   Send(prerender->launcher_child_id,
        new PrerenderMsg_OnPrerenderStop(prerender->prerender_id));
-  // Do not call RemovePrerender here. The replacement needs to stay connected
-  // to the HTMLLinkElement in the renderer so it notices renderer-triggered
-  // cancelations.
+  RemovePrerender(prerender);
+  StartPrerenders();
 }
 
 }  // namespace prerender

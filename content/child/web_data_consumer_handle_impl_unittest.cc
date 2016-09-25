@@ -18,8 +18,8 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -70,17 +70,20 @@ class ReadDataOperation : public ReadDataOperationBase {
 
   const std::string& result() const { return result_; }
 
-  void ReadMore() override { ReadData(); }
+  void ReadMore() override {
+    // We may have drained the pipe while this task was waiting to run.
+    if (reader_)
+      ReadData();
+  }
 
   void ReadData() {
     if (!client_) {
       client_.reset(new ClientImpl(this));
-      reader_ = handle_->ObtainReader(client_.get());
+      reader_ = handle_->obtainReader(client_.get());
     }
 
     Result rv = kOk;
     size_t readSize = 0;
-
     while (true) {
       char buffer[16];
       rv = reader_->read(&buffer, sizeof(buffer), kNone, &readSize);
@@ -126,13 +129,15 @@ class TwoPhaseReadDataOperation : public ReadDataOperationBase {
   const std::string& result() const { return result_; }
 
   void ReadMore() override {
-    ReadData();
+    // We may have drained the pipe while this task was waiting to run.
+    if (reader_)
+      ReadData();
   }
 
   void ReadData() {
     if (!client_) {
       client_.reset(new ClientImpl(this));
-      reader_ = handle_->ObtainReader(client_.get());
+      reader_ = handle_->obtainReader(client_.get());
     }
 
     Result rv;
@@ -231,8 +236,8 @@ class WebDataConsumerHandleImplTest : public ::testing::Test {
 
 TEST_F(WebDataConsumerHandleImplTest, ReadData) {
   base::RunLoop run_loop;
-  auto operation = base::WrapUnique(new ReadDataOperation(
-      std::move(consumer_), &message_loop_, run_loop.QuitClosure()));
+  auto operation = base::MakeUnique<ReadDataOperation>(
+      std::move(consumer_), &message_loop_, run_loop.QuitClosure());
 
   base::Thread t("DataConsumerHandle test thread");
   ASSERT_TRUE(t.Start());
@@ -252,8 +257,8 @@ TEST_F(WebDataConsumerHandleImplTest, ReadData) {
 
 TEST_F(WebDataConsumerHandleImplTest, TwoPhaseReadData) {
   base::RunLoop run_loop;
-  auto operation = base::WrapUnique(new TwoPhaseReadDataOperation(
-      std::move(consumer_), &message_loop_, run_loop.QuitClosure()));
+  auto operation = base::MakeUnique<TwoPhaseReadDataOperation>(
+      std::move(consumer_), &message_loop_, run_loop.QuitClosure());
 
   base::Thread t("DataConsumerHandle test thread");
   ASSERT_TRUE(t.Start());

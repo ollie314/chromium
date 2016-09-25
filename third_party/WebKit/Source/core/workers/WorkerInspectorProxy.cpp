@@ -4,11 +4,13 @@
 
 #include "core/workers/WorkerInspectorProxy.h"
 
-#include "core/dom/CrossThreadTask.h"
+#include "core/dom/ExecutionContextTask.h"
+#include "core/frame/FrameConsole.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/inspector/WorkerInspectorController.h"
+#include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerThread.h"
 #include "platform/TraceEvent.h"
 #include "platform/weborigin/KURL.h"
@@ -76,10 +78,11 @@ void WorkerInspectorProxy::workerThreadCreated(Document* document, WorkerThread*
 void WorkerInspectorProxy::workerThreadTerminated()
 {
     if (m_workerThread) {
-        ASSERT(inspectorProxies().contains(this));
+        DCHECK(inspectorProxies().contains(this));
         inspectorProxies().remove(this);
         InspectorInstrumentation::workerTerminated(m_document, this);
     }
+
     m_workerThread = nullptr;
     m_pageInspector = nullptr;
     m_document = nullptr;
@@ -91,15 +94,15 @@ void WorkerInspectorProxy::dispatchMessageFromWorker(const String& message)
         m_pageInspector->dispatchMessageFromWorker(this, message);
 }
 
-void WorkerInspectorProxy::workerConsoleAgentEnabled()
+void WorkerInspectorProxy::addConsoleMessageFromWorker(MessageLevel level, const String& message, std::unique_ptr<SourceLocation> location)
 {
-    if (m_pageInspector)
-        m_pageInspector->workerConsoleAgentEnabled(this);
+    if (LocalFrame* frame = m_document->frame())
+        frame->console().addMessageFromWorker(level, message, std::move(location), m_inspectorId);
 }
 
 static void connectToWorkerGlobalScopeInspectorTask(WorkerThread* workerThread)
 {
-    if (WorkerInspectorController* inspector = workerThread->workerGlobalScope()->workerInspectorController())
+    if (WorkerInspectorController* inspector = workerThread->workerInspectorController())
         inspector->connectFrontend();
 }
 
@@ -107,35 +110,35 @@ void WorkerInspectorProxy::connectToInspector(WorkerInspectorProxy::PageInspecto
 {
     if (!m_workerThread)
         return;
-    ASSERT(!m_pageInspector);
+    DCHECK(!m_pageInspector);
     m_pageInspector = pageInspector;
-    m_workerThread->appendDebuggerTask(threadSafeBind(connectToWorkerGlobalScopeInspectorTask, AllowCrossThreadAccess(m_workerThread)));
+    m_workerThread->appendDebuggerTask(crossThreadBind(connectToWorkerGlobalScopeInspectorTask, crossThreadUnretained(m_workerThread)));
 }
 
 static void disconnectFromWorkerGlobalScopeInspectorTask(WorkerThread* workerThread)
 {
-    if (WorkerInspectorController* inspector = workerThread->workerGlobalScope()->workerInspectorController())
+    if (WorkerInspectorController* inspector = workerThread->workerInspectorController())
         inspector->disconnectFrontend();
 }
 
 void WorkerInspectorProxy::disconnectFromInspector(WorkerInspectorProxy::PageInspector* pageInspector)
 {
-    ASSERT(m_pageInspector == pageInspector);
+    DCHECK(m_pageInspector == pageInspector);
     m_pageInspector = nullptr;
     if (m_workerThread)
-        m_workerThread->appendDebuggerTask(threadSafeBind(disconnectFromWorkerGlobalScopeInspectorTask, AllowCrossThreadAccess(m_workerThread)));
+        m_workerThread->appendDebuggerTask(crossThreadBind(disconnectFromWorkerGlobalScopeInspectorTask, crossThreadUnretained(m_workerThread)));
 }
 
 static void dispatchOnInspectorBackendTask(const String& message, WorkerThread* workerThread)
 {
-    if (WorkerInspectorController* inspector = workerThread->workerGlobalScope()->workerInspectorController())
+    if (WorkerInspectorController* inspector = workerThread->workerInspectorController())
         inspector->dispatchMessageFromFrontend(message);
 }
 
 void WorkerInspectorProxy::sendMessageToInspector(const String& message)
 {
     if (m_workerThread)
-        m_workerThread->appendDebuggerTask(threadSafeBind(dispatchOnInspectorBackendTask, message, AllowCrossThreadAccess(m_workerThread)));
+        m_workerThread->appendDebuggerTask(crossThreadBind(dispatchOnInspectorBackendTask, message, crossThreadUnretained(m_workerThread)));
 }
 
 void WorkerInspectorProxy::writeTimelineStartedEvent(const String& sessionId)

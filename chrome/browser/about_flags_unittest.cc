@@ -168,8 +168,7 @@ std::string FilePathStringTypeToString(const base::FilePath::StringType& path) {
 }
 
 // Get all associated switches corresponding to defined about_flags.cc entries.
-// Does not include information about FEATURE_VALUE entries.
-std::set<std::string> GetAllSwitchesForTesting() {
+std::set<std::string> GetAllSwitchesAndFeaturesForTesting() {
   std::set<std::string> result;
 
   size_t num_entries = 0;
@@ -184,8 +183,8 @@ std::set<std::string> GetAllSwitchesForTesting() {
         result.insert(entry.command_line_switch);
         break;
       case flags_ui::FeatureEntry::MULTI_VALUE:
-        for (int j = 0; j < entry.num_choices; ++j) {
-          result.insert(entry.choices[j].command_line_switch);
+        for (int j = 0; j < entry.num_options; ++j) {
+          result.insert(entry.ChoiceForOption(j).command_line_switch);
         }
         break;
       case flags_ui::FeatureEntry::ENABLE_DISABLE_VALUE:
@@ -193,6 +192,9 @@ std::set<std::string> GetAllSwitchesForTesting() {
         result.insert(entry.disable_command_line_switch);
         break;
       case flags_ui::FeatureEntry::FEATURE_VALUE:
+      case flags_ui::FeatureEntry::FEATURE_WITH_VARIATIONS_VALUE:
+        result.insert(std::string(entry.feature->name) + ":enabled");
+        result.insert(std::string(entry.feature->name) + ":disabled");
         break;
     }
   }
@@ -281,8 +283,8 @@ TEST_F(AboutFlagsHistogramTest, CheckHistograms) {
   }
 
   // Check that all flags in about_flags.cc have entries in login_custom_flags.
-  std::set<std::string> all_switches = GetAllSwitchesForTesting();
-  for (const std::string& flag : all_switches) {
+  std::set<std::string> all_flags = GetAllSwitchesAndFeaturesForTesting();
+  for (const std::string& flag : all_flags) {
     // Skip empty placeholders.
     if (flag.empty())
       continue;

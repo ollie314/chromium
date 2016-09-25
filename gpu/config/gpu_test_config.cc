@@ -13,9 +13,7 @@
 #include "gpu/config/gpu_info_collector.h"
 #include "gpu/config/gpu_test_expectations_parser.h"
 
-#if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
-#elif defined(OS_WIN)
+#if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #endif
 
@@ -66,6 +64,8 @@ GPUTestConfig::OS GetCurrentOS() {
         return GPUTestConfig::kOsMacYosemite;
       case 11:
         return GPUTestConfig::kOsMacElCapitan;
+      case 12:
+        return GPUTestConfig::kOsMacSierra;
     }
   }
 #elif defined(OS_ANDROID)
@@ -191,6 +191,7 @@ bool GPUTestBotConfig::IsValid() const {
     case kOsMacMavericks:
     case kOsMacYosemite:
     case kOsMacElCapitan:
+    case kOsMacSierra:
     case kOsLinux:
     case kOsChromeOS:
     case kOsAndroid:
@@ -302,12 +303,7 @@ bool GPUTestBotConfig::CurrentConfigMatches(
 
 // static
 bool GPUTestBotConfig::GpuBlacklistedOnBot() {
-#if defined(OS_MACOSX)
-  // Blacklist rule #81 disables all Gpu acceleration on Mac < 10.8 bots.
-  if (CurrentConfigMatches("MAC VMWARE") && base::mac::IsOSLionOrEarlier()) {
-    return true;
-  }
-#elif defined(OS_WIN)
+#if defined(OS_WIN)
   // Blacklist rule #79 disables all Gpu acceleration before Windows 7.
   if (base::win::GetVersion() <= base::win::VERSION_VISTA) {
     return true;

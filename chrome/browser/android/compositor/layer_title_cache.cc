@@ -18,6 +18,8 @@
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/size.h"
 
+using base::android::JavaParamRef;
+
 namespace chrome {
 namespace android {
 
@@ -60,7 +62,7 @@ void LayerTitleCache::UpdateLayer(JNIEnv* env,
   if (title_layer == NULL) {
     layer_cache_.AddWithID(
         new DecorationTitle(
-            this, resource_manager_, title_resource_id, favicon_resource_id,
+            resource_manager_, title_resource_id, favicon_resource_id,
             spinner_resource_id_, spinner_incognito_resource_id_, fade_width_,
             favicon_start_padding_, favicon_end_padding_, is_incognito, is_rtl),
         tab_id);
@@ -97,6 +99,12 @@ void LayerTitleCache::ClearExcept(JNIEnv* env,
 }
 
 DecorationTitle* LayerTitleCache::GetTitleLayer(int tab_id) {
+  if (!layer_cache_.Lookup(tab_id)) {
+    JNIEnv* env = base::android::AttachCurrentThread();
+    Java_LayerTitleCache_buildUpdatedTitle(env, weak_java_title_cache_.get(env),
+        tab_id);
+  }
+
   return layer_cache_.Lookup(tab_id);
 }
 

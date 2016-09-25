@@ -5,7 +5,9 @@
 #include "ui/display/chromeos/test/test_native_display_delegate.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "ui/display/chromeos/test/action_logger.h"
 #include "ui/display/types/display_mode.h"
 
@@ -63,8 +65,8 @@ void TestNativeDisplayDelegate::ForceDPMSOn() {
 void TestNativeDisplayDelegate::GetDisplays(
     const GetDisplaysCallback& callback) {
   if (run_async_) {
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::Bind(callback, outputs_));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(callback, outputs_));
   } else {
     callback.Run(outputs_);
   }
@@ -95,8 +97,8 @@ void TestNativeDisplayDelegate::Configure(const DisplaySnapshot& output,
                                           const ConfigureCallback& callback) {
   bool result = Configure(output, mode, origin);
   if (run_async_) {
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::Bind(callback, result));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  base::Bind(callback, result));
   } else {
     callback.Run(result);
   }
@@ -104,8 +106,8 @@ void TestNativeDisplayDelegate::Configure(const DisplaySnapshot& output,
 
 void TestNativeDisplayDelegate::CreateFrameBuffer(const gfx::Size& size) {
   log_->AppendAction(
-      GetFramebufferAction(size, outputs_.size() >= 1 ? outputs_[0] : NULL,
-                           outputs_.size() >= 2 ? outputs_[1] : NULL));
+      GetFramebufferAction(size, outputs_.size() >= 1 ? outputs_[0] : nullptr,
+                           outputs_.size() >= 2 ? outputs_[1] : nullptr));
 }
 
 void TestNativeDisplayDelegate::GetHDCPState(
@@ -149,6 +151,11 @@ void TestNativeDisplayDelegate::AddObserver(NativeDisplayObserver* observer) {
 
 void TestNativeDisplayDelegate::RemoveObserver(
     NativeDisplayObserver* observer) {
+}
+
+display::FakeDisplayController*
+TestNativeDisplayDelegate::GetFakeDisplayController() {
+  return nullptr;
 }
 
 }  // namespace test

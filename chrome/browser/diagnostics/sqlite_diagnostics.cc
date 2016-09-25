@@ -13,7 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -245,10 +245,16 @@ DiagnosticsTest* MakeSqliteNssKeyDbTest() {
 }
 #endif  // defined(OS_CHROMEOS)
 
-DiagnosticsTest* MakeSqliteThumbnailsDbTest() {
+DiagnosticsTest* MakeSqliteFaviconsDbTest() {
   return new SqliteIntegrityTest(SqliteIntegrityTest::NO_FLAGS_SET,
-                                 DIAGNOSTICS_SQLITE_INTEGRITY_THUMBNAILS_TEST,
-                                 base::FilePath(history::kThumbnailsFilename));
+                                 DIAGNOSTICS_SQLITE_INTEGRITY_FAVICONS_TEST,
+                                 base::FilePath(history::kFaviconsFilename));
+}
+
+DiagnosticsTest* MakeSqliteTopSitesDbTest() {
+  return new SqliteIntegrityTest(SqliteIntegrityTest::NO_FLAGS_SET,
+                                 DIAGNOSTICS_SQLITE_INTEGRITY_TOPSITES_TEST,
+                                 base::FilePath(history::kTopSitesFilename));
 }
 
 DiagnosticsTest* MakeSqliteWebDataDbTest() {

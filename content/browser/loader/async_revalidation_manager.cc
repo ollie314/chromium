@@ -13,6 +13,7 @@
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/loader/resource_scheduler.h"
 #include "content/common/resource_messages.h"
+#include "content/common/resource_request.h"
 #include "content/public/browser/resource_throttle.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_transaction_factory.h"
@@ -88,8 +89,8 @@ void AsyncRevalidationManager::BeginAsyncRevalidation(
 
   // The embedder of //content needs to ensure that the URLRequestContext object
   // remains valid until after the ResourceContext object is destroyed.
-  info->filter()->GetContexts(info->GetResourceType(), info->GetOriginPID(),
-                              &resource_context, &request_context);
+  info->filter()->GetContexts(info->GetResourceType(), &resource_context,
+                              &request_context);
 
   AsyncRevalidationKey async_revalidation_key(
       resource_context, request_context->http_transaction_factory()->GetCache(),
@@ -121,7 +122,8 @@ void AsyncRevalidationManager::BeginAsyncRevalidation(
 
   new_request->SetExtraRequestHeaders(headers);
 
-  // Remove LOAD_SUPPORT_ASYNC_REVALIDATION and LOAD_MAIN_FRAME flags.
+  // Remove LOAD_SUPPORT_ASYNC_REVALIDATION and LOAD_MAIN_FRAME_DEPRECATED
+  // flags.
   // Also remove things which shouldn't have been there to begin with,
   // and unrecognised flags.
   int load_flags =
@@ -164,7 +166,7 @@ void AsyncRevalidationManager::CancelAsyncRevalidationsForResourceContext(
 }
 
 bool AsyncRevalidationManager::QualifiesForAsyncRevalidation(
-    const ResourceHostMsg_Request& request) {
+    const ResourceRequest& request) {
   if (request.load_flags &
       (net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE |
        net::LOAD_VALIDATE_CACHE | net::LOAD_PREFERRING_CACHE |

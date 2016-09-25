@@ -6,6 +6,7 @@ package org.chromium.components.invalidation;
 
 import android.accounts.Account;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.test.ServiceTestCase;
 import android.test.suitebuilder.annotation.SmallTest;
@@ -17,17 +18,18 @@ import com.google.ipc.invalidation.external.client.types.Invalidation;
 import com.google.ipc.invalidation.external.client.types.ObjectId;
 
 import org.chromium.base.CollectionUtil;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.PathUtils;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.Feature;
-import org.chromium.sync.ModelType;
-import org.chromium.sync.ModelTypeHelper;
-import org.chromium.sync.notifier.InvalidationIntentProtocol;
-import org.chromium.sync.notifier.InvalidationPreferences;
-import org.chromium.sync.notifier.InvalidationPreferences.EditContext;
-import org.chromium.sync.signin.AccountManagerHelper;
+import org.chromium.components.sync.ModelType;
+import org.chromium.components.sync.ModelTypeHelper;
+import org.chromium.components.sync.notifier.InvalidationIntentProtocol;
+import org.chromium.components.sync.notifier.InvalidationPreferences;
+import org.chromium.components.sync.notifier.InvalidationPreferences.EditContext;
+import org.chromium.components.sync.signin.AccountManagerHelper;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -56,8 +58,6 @@ public class InvalidationClientServiceTest extends
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX,
-                getContext());
         mStartServiceIntents = new ArrayList<Intent>();
         setContext(new AdvancedMockContext(getContext()) {
             @Override
@@ -66,6 +66,9 @@ public class InvalidationClientServiceTest extends
                 return new ComponentName(this, InvalidationClientServiceTest.class);
             }
         });
+        Context appContext = getContext().getApplicationContext();
+        ContextUtils.initApplicationContextForTests(appContext);
+        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX, appContext);
         LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER).ensureInitialized(getContext());
         setupService();
     }
@@ -139,7 +142,7 @@ public class InvalidationClientServiceTest extends
         */
 
         // Persist some registrations.
-        InvalidationPreferences invPrefs = new InvalidationPreferences(getContext());
+        InvalidationPreferences invPrefs = new InvalidationPreferences();
         EditContext editContext = invPrefs.edit();
         invPrefs.setSyncTypes(editContext, CollectionUtil.newArrayList("BOOKMARK", "SESSION"));
         ObjectId objectId = ObjectId.newInstance(1, "obj".getBytes());
@@ -174,7 +177,7 @@ public class InvalidationClientServiceTest extends
         assertTrue(getService().mRegistrations.isEmpty());
 
         // Persist some registrations.
-        InvalidationPreferences invPrefs = new InvalidationPreferences(getContext());
+        InvalidationPreferences invPrefs = new InvalidationPreferences();
         EditContext editContext = invPrefs.edit();
         invPrefs.setSyncTypes(editContext, CollectionUtil.newArrayList("BOOKMARK", "SESSION"));
         ObjectId objectId = ObjectId.newInstance(1, "obj".getBytes());
@@ -202,7 +205,7 @@ public class InvalidationClientServiceTest extends
          * 4. Unregistration of desired object. Registration issued.
          */
         // Initial test setup: persist a single registration into preferences.
-        InvalidationPreferences invPrefs = new InvalidationPreferences(getContext());
+        InvalidationPreferences invPrefs = new InvalidationPreferences();
         EditContext editContext = invPrefs.edit();
         invPrefs.setSyncTypes(editContext, CollectionUtil.newArrayList("SESSION"));
         ObjectId desiredObjectId = ObjectId.newInstance(1, "obj1".getBytes());
@@ -263,7 +266,7 @@ public class InvalidationClientServiceTest extends
          */
 
         // Initial test setup: persist a single registration into preferences.
-        InvalidationPreferences invPrefs = new InvalidationPreferences(getContext());
+        InvalidationPreferences invPrefs = new InvalidationPreferences();
         EditContext editContext = invPrefs.edit();
         invPrefs.setSyncTypes(editContext, CollectionUtil.newArrayList("SESSION"));
         ObjectId desiredObjectId = ObjectId.newInstance(1, "obj1".getBytes());
@@ -533,7 +536,7 @@ public class InvalidationClientServiceTest extends
 
         // Verify client started and state written.
         assertTrue(InvalidationClientService.getIsClientStartedForTest());
-        InvalidationPreferences invPrefs = new InvalidationPreferences(getContext());
+        InvalidationPreferences invPrefs = new InvalidationPreferences();
         assertEquals(account, invPrefs.getSavedSyncedAccount());
         assertEquals(modelTypesToNotificationTypes(desiredRegistrations),
                 invPrefs.getSavedSyncedTypes());
@@ -573,7 +576,7 @@ public class InvalidationClientServiceTest extends
             Set<ObjectId> expectedObjectIds, boolean isReady) {
         // Get synced types saved to preferences.
         Set<String> expectedSyncTypes = modelTypesToNotificationTypes(expectedTypes);
-        InvalidationPreferences invPrefs = new InvalidationPreferences(getContext());
+        InvalidationPreferences invPrefs = new InvalidationPreferences();
         Set<String> actualSyncTypes = invPrefs.getSavedSyncedTypes();
         if (actualSyncTypes == null) {
             actualSyncTypes = new HashSet<String>();
@@ -685,7 +688,7 @@ public class InvalidationClientServiceTest extends
 
         // Verify client started and state written.
         assertTrue(InvalidationClientService.getIsClientStartedForTest());
-        InvalidationPreferences invPrefs = new InvalidationPreferences(getContext());
+        InvalidationPreferences invPrefs = new InvalidationPreferences();
         assertEquals(account, invPrefs.getSavedSyncedAccount());
         assertEquals(
                 CollectionUtil.newHashSet("PROXY_TABS", "SESSION"), invPrefs.getSavedSyncedTypes());
@@ -716,7 +719,7 @@ public class InvalidationClientServiceTest extends
 
         // Verify client started and state written.
         assertTrue(InvalidationClientService.getIsClientStartedForTest());
-        InvalidationPreferences invPrefs = new InvalidationPreferences(getContext());
+        InvalidationPreferences invPrefs = new InvalidationPreferences();
         assertEquals(account, invPrefs.getSavedSyncedAccount());
         assertEquals(new HashSet<String>(), invPrefs.getSavedSyncedTypes());
         assertEquals(1, mStartServiceIntents.size());
@@ -756,7 +759,7 @@ public class InvalidationClientServiceTest extends
 
         // Verify state written but client not started.
         assertFalse(InvalidationClientService.getIsClientStartedForTest());
-        InvalidationPreferences invPrefs = new InvalidationPreferences(getContext());
+        InvalidationPreferences invPrefs = new InvalidationPreferences();
         assertEquals(account, invPrefs.getSavedSyncedAccount());
         assertEquals(modelTypesToNotificationTypes(desiredRegistrations),
                 invPrefs.getSavedSyncedTypes());
@@ -785,7 +788,7 @@ public class InvalidationClientServiceTest extends
         assertTrue(InvalidationClientService.getIsClientStartedForTest());
         assertEquals(1, mStartServiceIntents.size());
         assertTrue(isAndroidListenerStartIntent(mStartServiceIntents.get(0)));
-        InvalidationPreferences invPrefs = new InvalidationPreferences(getContext());
+        InvalidationPreferences invPrefs = new InvalidationPreferences();
         assertEquals(modelTypesToNotificationTypes(desiredRegistrations),
                 invPrefs.getSavedSyncedTypes());
         assertEquals(desiredObjectIds, getService().readRegistrationsFromPrefs());

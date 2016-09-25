@@ -44,11 +44,11 @@ public class AwSecondBrowserProcessTest extends AwTestBase {
     /*
      * @LargeTest
      * @Feature({"AndroidWebView"})
-     * See crbug.com/582146. We can't test that creating second browser
+     * We can't test that creating second browser
      * process succeeds either, because in debug it will crash due to an assert
      * in the SQL DB code.
      */
-    @DisabledTest
+    @DisabledTest(message = "crbug.com/582146")
     public void testCreatingSecondBrowserProcessFails() throws Throwable {
         startSecondBrowserProcess();
         assertFalse(tryStartingBrowserProcess());
@@ -117,14 +117,15 @@ public class AwSecondBrowserProcessTest extends AwTestBase {
     }
 
     private boolean tryStartingBrowserProcess() {
-        final Context context = getActivity();
         final Boolean success[] = new Boolean[1];
+        // The activity must be launched in order for proper webview statics to be setup.
+        getActivity();
         // runOnMainSync does not catch RuntimeExceptions, they just terminate the test.
         getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
                 try {
-                    AwBrowserProcess.start(context);
+                    AwBrowserProcess.start();
                     success[0] = true;
                 } catch (RuntimeException e) {
                     success[0] = false;

@@ -3,10 +3,11 @@
 // found in the LICENSE file.
 
 #include <stdint.h>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "gpu/command_buffer/client/gles2_interface_stub.h"
 #include "media/base/video_frame.h"
 #include "media/renderers/mock_gpu_video_accelerator_factories.h"
@@ -122,14 +123,14 @@ class GpuMemoryBufferVideoFramePoolTest : public ::testing::Test {
   }
 
  protected:
-  scoped_ptr<MockGpuVideoAcceleratorFactories> mock_gpu_factories_;
-  scoped_ptr<GpuMemoryBufferVideoFramePool> gpu_memory_buffer_pool_;
+  std::unique_ptr<MockGpuVideoAcceleratorFactories> mock_gpu_factories_;
+  std::unique_ptr<GpuMemoryBufferVideoFramePool> gpu_memory_buffer_pool_;
   scoped_refptr<base::TestSimpleTaskRunner> media_task_runner_;
   scoped_refptr<base::TestSimpleTaskRunner> copy_task_runner_;
   // GpuMemoryBufferVideoFramePool uses BindToCurrentLoop(), which requires
   // ThreadTaskRunnerHandle initialization.
-  scoped_ptr<base::ThreadTaskRunnerHandle> media_task_runner_handle_;
-  scoped_ptr<TestGLES2Interface> gles2_;
+  std::unique_ptr<base::ThreadTaskRunnerHandle> media_task_runner_handle_;
+  std::unique_ptr<TestGLES2Interface> gles2_;
 };
 
 void MaybeCreateHardwareFrameCallback(
@@ -193,55 +194,6 @@ TEST_F(GpuMemoryBufferVideoFramePoolTest, ReuseFirstResource) {
   EXPECT_NE(software_frame.get(), frame.get());
   EXPECT_EQ(6u, gles2_->gen_textures);
   EXPECT_EQ(frame->mailbox_holder(0).mailbox, mailbox);
-  EXPECT_NE(frame->mailbox_holder(0).sync_token, sync_token);
-}
-
-TEST_F(GpuMemoryBufferVideoFramePoolTest, DoNotReuseInUse) {
-  scoped_refptr<VideoFrame> software_frame = CreateTestYUVVideoFrame(10);
-  scoped_refptr<VideoFrame> frame;
-  scoped_refptr<VideoFrame> frame2;
-
-  // Allocate a frame.
-  gpu_memory_buffer_pool_->MaybeCreateHardwareFrame(
-      software_frame, base::Bind(MaybeCreateHardwareFrameCallback, &frame));
-  RunUntilIdle();
-  EXPECT_NE(software_frame.get(), frame.get());
-  gpu::Mailbox mailbox = frame->mailbox_holder(0).mailbox;
-  const gpu::SyncToken sync_token = frame->mailbox_holder(0).sync_token;
-  EXPECT_EQ(3u, gles2_->gen_textures);
-
-  // Allocate a second frame.
-  gpu_memory_buffer_pool_->MaybeCreateHardwareFrame(
-      software_frame, base::Bind(MaybeCreateHardwareFrameCallback, &frame2));
-  RunUntilIdle();
-  EXPECT_NE(software_frame.get(), frame2.get());
-  EXPECT_NE(mailbox, frame2->mailbox_holder(0).mailbox);
-  EXPECT_EQ(6u, gles2_->gen_textures);
-
-  // Allow the frames to be recycled.
-  frame = nullptr;
-  frame2 = nullptr;
-  RunUntilIdle();
-
-  // Set all buffers to be in use, so the next hardware frame will require
-  // a new allocation.
-  mock_gpu_factories_->SetGpuMemoryBuffersInUseByMacOSWindowServer(true);
-  gpu_memory_buffer_pool_->MaybeCreateHardwareFrame(
-      software_frame, base::Bind(MaybeCreateHardwareFrameCallback, &frame));
-  RunUntilIdle();
-  EXPECT_NE(software_frame.get(), frame.get());
-  EXPECT_EQ(9u, gles2_->gen_textures);
-  EXPECT_NE(frame->mailbox_holder(0).mailbox, mailbox);
-  EXPECT_NE(frame->mailbox_holder(0).sync_token, sync_token);
-
-  // Set the buffers no longer in use, so no new allocations will be made.
-  mock_gpu_factories_->SetGpuMemoryBuffersInUseByMacOSWindowServer(false);
-  gpu_memory_buffer_pool_->MaybeCreateHardwareFrame(
-      software_frame, base::Bind(MaybeCreateHardwareFrameCallback, &frame2));
-  RunUntilIdle();
-  EXPECT_NE(software_frame.get(), frame2.get());
-  EXPECT_EQ(9u, gles2_->gen_textures);
-  EXPECT_NE(frame->mailbox_holder(0).mailbox, mailbox);
   EXPECT_NE(frame->mailbox_holder(0).sync_token, sync_token);
 }
 

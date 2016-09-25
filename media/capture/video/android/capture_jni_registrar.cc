@@ -7,17 +7,13 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
 #include "base/macros.h"
-
 #include "media/capture/video/android/video_capture_device_android.h"
-#include "media/capture/video/android/video_capture_device_factory_android.h"
 
 namespace media {
 
 static base::android::RegistrationMethod kCaptureRegisteredMethods[] = {
     {"VideoCaptureDevice",
      VideoCaptureDeviceAndroid::RegisterVideoCaptureDevice},
-    {"VideoCaptureDeviceFactory",
-     VideoCaptureDeviceFactoryAndroid::RegisterVideoCaptureDeviceFactory},
 };
 
 bool RegisterCaptureJni(JNIEnv* env) {

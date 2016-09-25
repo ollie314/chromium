@@ -36,11 +36,11 @@ Status StubWebView::Load(const std::string& url, const Timeout* timeout) {
   return Status(kOk);
 }
 
-Status StubWebView::Reload() {
+Status StubWebView::Reload(const Timeout* timeout) {
   return Status(kOk);
 }
 
-Status StubWebView::TraverseHistory(int delta) {
+Status StubWebView::TraverseHistory(int delta, const Timeout* timeout) {
   return Status(kOk);
 }
 
@@ -170,5 +170,17 @@ Status StubWebView::SynthesizeScrollGesture(int x,
 }
 
 Status StubWebView::SynthesizePinchGesture(int x, int y, double scale_factor) {
+  return Status(kOk);
+}
+
+Status StubWebView::GetScreenOrientation(std::string* orientation) {
+  return Status(kOk);
+}
+
+Status StubWebView::SetScreenOrientation(std::string orientation) {
+  return Status(kOk);
+}
+
+Status StubWebView::DeleteScreenOrientation() {
   return Status(kOk);
 }

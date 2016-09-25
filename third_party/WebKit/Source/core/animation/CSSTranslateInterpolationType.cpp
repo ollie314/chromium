@@ -4,10 +4,12 @@
 
 #include "core/animation/CSSTranslateInterpolationType.h"
 
-#include "core/animation/CSSLengthInterpolationType.h"
+#include "core/animation/LengthInterpolationFunctions.h"
 #include "core/css/CSSValueList.h"
 #include "core/css/resolver/StyleResolverState.h"
 #include "platform/transforms/TranslateTransformOperation.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -17,9 +19,9 @@ class ParentTranslateChecker : public InterpolationType::ConversionChecker {
 public:
     ~ParentTranslateChecker() {}
 
-    static PassOwnPtr<ParentTranslateChecker> create(PassRefPtr<TranslateTransformOperation> parentTranslate)
+    static std::unique_ptr<ParentTranslateChecker> create(PassRefPtr<TranslateTransformOperation> parentTranslate)
     {
-        return adoptPtr(new ParentTranslateChecker(parentTranslate));
+        return wrapUnique(new ParentTranslateChecker(std::move(parentTranslate)));
     }
 
     bool isValid(const InterpolationEnvironment& environment, const InterpolationValue& underlying) const final
@@ -40,7 +42,7 @@ private:
     RefPtr<TransformOperation> m_parentTranslate;
 };
 
-enum TranslateComponentIndex {
+enum TranslateComponentIndex : unsigned {
     TranslateX,
     TranslateY,
     TranslateZ,
@@ -49,11 +51,11 @@ enum TranslateComponentIndex {
 
 InterpolationValue createNeutralValue()
 {
-    OwnPtr<InterpolableList> result = InterpolableList::create(TranslateComponentIndexCount);
-    result->set(TranslateX, CSSLengthInterpolationType::createNeutralInterpolableValue());
-    result->set(TranslateY, CSSLengthInterpolationType::createNeutralInterpolableValue());
-    result->set(TranslateZ, CSSLengthInterpolationType::createNeutralInterpolableValue());
-    return InterpolationValue(result.release());
+    std::unique_ptr<InterpolableList> result = InterpolableList::create(TranslateComponentIndexCount);
+    result->set(TranslateX, LengthInterpolationFunctions::createNeutralInterpolableValue());
+    result->set(TranslateY, LengthInterpolationFunctions::createNeutralInterpolableValue());
+    result->set(TranslateZ, LengthInterpolationFunctions::createNeutralInterpolableValue());
+    return InterpolationValue(std::move(result));
 }
 
 InterpolationValue convertTranslateOperation(const TranslateTransformOperation* translate, double zoom)
@@ -61,11 +63,11 @@ InterpolationValue convertTranslateOperation(const TranslateTransformOperation* 
     if (!translate)
         return createNeutralValue();
 
-    OwnPtr<InterpolableList> result = InterpolableList::create(TranslateComponentIndexCount);
-    result->set(TranslateX, CSSLengthInterpolationType::maybeConvertLength(translate->x(), zoom).interpolableValue.release());
-    result->set(TranslateY, CSSLengthInterpolationType::maybeConvertLength(translate->y(), zoom).interpolableValue.release());
-    result->set(TranslateZ, CSSLengthInterpolationType::maybeConvertLength(Length(translate->z(), Fixed), zoom).interpolableValue.release());
-    return InterpolationValue(result.release());
+    std::unique_ptr<InterpolableList> result = InterpolableList::create(TranslateComponentIndexCount);
+    result->set(TranslateX, LengthInterpolationFunctions::maybeConvertLength(translate->x(), zoom).interpolableValue);
+    result->set(TranslateY, LengthInterpolationFunctions::maybeConvertLength(translate->y(), zoom).interpolableValue);
+    result->set(TranslateZ, LengthInterpolationFunctions::maybeConvertLength(Length(translate->z(), Fixed), zoom).interpolableValue);
+    return InterpolationValue(std::move(result));
 }
 
 } // namespace
@@ -75,7 +77,7 @@ InterpolationValue CSSTranslateInterpolationType::maybeConvertNeutral(const Inte
     return createNeutralValue();
 }
 
-InterpolationValue CSSTranslateInterpolationType::maybeConvertInitial(const StyleResolverState&) const
+InterpolationValue CSSTranslateInterpolationType::maybeConvertInitial(const StyleResolverState&, ConversionCheckers&) const
 {
     return createNeutralValue();
 }
@@ -96,19 +98,19 @@ InterpolationValue CSSTranslateInterpolationType::maybeConvertValue(const CSSVal
     if (list.length() < 1 || list.length() > 3)
         return nullptr;
 
-    OwnPtr<InterpolableList> result = InterpolableList::create(TranslateComponentIndexCount);
+    std::unique_ptr<InterpolableList> result = InterpolableList::create(TranslateComponentIndexCount);
     for (size_t i = 0; i < TranslateComponentIndexCount; i++) {
         InterpolationValue component = nullptr;
         if (i < list.length()) {
-            component = CSSLengthInterpolationType::maybeConvertCSSValue(*list.item(i));
+            component = LengthInterpolationFunctions::maybeConvertCSSValue(list.item(i));
             if (!component)
                 return nullptr;
         } else {
-            component = InterpolationValue(CSSLengthInterpolationType::createNeutralInterpolableValue());
+            component = InterpolationValue(LengthInterpolationFunctions::createNeutralInterpolableValue());
         }
-        result->set(i, component.interpolableValue.release());
+        result->set(i, std::move(component.interpolableValue));
     }
-    return InterpolationValue(result.release());
+    return InterpolationValue(std::move(result));
 }
 
 InterpolationValue CSSTranslateInterpolationType::maybeConvertUnderlyingValue(const InterpolationEnvironment& environment) const
@@ -120,9 +122,9 @@ void CSSTranslateInterpolationType::apply(const InterpolableValue& interpolableV
 {
     const InterpolableList& list = toInterpolableList(interpolableValue);
     const CSSToLengthConversionData& conversionData = environment.state().cssToLengthConversionData();
-    Length x = CSSLengthInterpolationType::resolveInterpolableLength(*list.get(TranslateX), nullptr, conversionData, ValueRangeAll);
-    Length y = CSSLengthInterpolationType::resolveInterpolableLength(*list.get(TranslateY), nullptr, conversionData, ValueRangeAll);
-    float z = CSSLengthInterpolationType::resolveInterpolableLength(*list.get(TranslateZ), nullptr, conversionData, ValueRangeAll).pixels();
+    Length x = LengthInterpolationFunctions::createLength(*list.get(TranslateX), nullptr, conversionData, ValueRangeAll);
+    Length y = LengthInterpolationFunctions::createLength(*list.get(TranslateY), nullptr, conversionData, ValueRangeAll);
+    float z = LengthInterpolationFunctions::createLength(*list.get(TranslateZ), nullptr, conversionData, ValueRangeAll).pixels();
 
     RefPtr<TranslateTransformOperation> result = nullptr;
     if (!x.isZero() || !y.isZero() || z != 0)

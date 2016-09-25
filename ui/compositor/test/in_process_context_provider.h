@@ -15,7 +15,6 @@
 #include "base/threading/thread_checker.h"
 #include "cc/output/context_provider.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
-#include "skia/ext/refptr.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace gpu {
@@ -46,19 +45,22 @@ class InProcessContextProvider : public cc::ContextProvider {
       gpu::ImageFactory* image_factory,
       InProcessContextProvider* shared_context);
 
-  // cc::ContextProvider:
+  // cc::ContextProvider implementation.
   bool BindToCurrentThread() override;
   void DetachFromThread() override;
-  Capabilities ContextCapabilities() override;
+  gpu::Capabilities ContextCapabilities() override;
   gpu::gles2::GLES2Interface* ContextGL() override;
   gpu::ContextSupport* ContextSupport() override;
   class GrContext* GrContext() override;
+  cc::ContextCacheController* CacheController() override;
   void InvalidateGrContext(uint32_t state) override;
-  void SetupLock() override;
   base::Lock* GetLock() override;
-  void DeleteCachedResources() override;
   void SetLostContextCallback(
       const LostContextCallback& lost_context_callback) override;
+
+  // Gives the GL internal format that should be used for calling CopyTexImage2D
+  // on the default framebuffer.
+  uint32_t GetCopyTextureInternalFormat();
 
  private:
   InProcessContextProvider(
@@ -75,6 +77,7 @@ class InProcessContextProvider : public cc::ContextProvider {
 
   std::unique_ptr<gpu::GLInProcessContext> context_;
   std::unique_ptr<skia_bindings::GrContextForGLES2Interface> gr_context_;
+  std::unique_ptr<cc::ContextCacheController> cache_controller_;
 
   gpu::gles2::ContextCreationAttribHelper attribs_;
   InProcessContextProvider* shared_context_;
@@ -82,7 +85,6 @@ class InProcessContextProvider : public cc::ContextProvider {
   gpu::ImageFactory* image_factory_;
   gfx::AcceleratedWidget window_;
   std::string debug_name_;
-  cc::ContextProvider::Capabilities capabilities_;
 
   base::Lock context_lock_;
 

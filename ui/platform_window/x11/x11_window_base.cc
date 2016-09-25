@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/strings/utf_string_conversions.h"
+#include "ui/base/x/x11_window_event_manager.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
@@ -19,8 +20,6 @@
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/x/x11_atom_cache.h"
-#include "ui/gfx/x/x11_types.h"
 #include "ui/platform_window/platform_window_delegate.h"
 
 namespace ui {
@@ -85,13 +84,15 @@ void X11WindowBase::Create() {
       CopyFromParent,  // visual
       CWBackPixmap | CWBitGravity | CWOverrideRedirect, &swa);
 
+  // Setup XInput event mask.
   long event_mask = ButtonPressMask | ButtonReleaseMask | FocusChangeMask |
                     KeyPressMask | KeyReleaseMask | EnterWindowMask |
                     LeaveWindowMask | ExposureMask | VisibilityChangeMask |
                     StructureNotifyMask | PropertyChangeMask |
                     PointerMotionMask;
-  XSelectInput(xdisplay_, xwindow_, event_mask);
+  xwindow_events_.reset(new ui::XScopedEventSelector(xwindow_, event_mask));
 
+  // Setup XInput2 event mask.
   unsigned char mask[XIMaskLen(XI_LASTEVENT)];
   memset(mask, 0, sizeof(mask));
 
@@ -103,6 +104,7 @@ void X11WindowBase::Create() {
   XISetMask(mask, XI_Motion);
   XISetMask(mask, XI_KeyPress);
   XISetMask(mask, XI_KeyRelease);
+  XISetMask(mask, XI_HierarchyChanged);
 
   XIEventMask evmask;
   evmask.deviceid = XIAllDevices;
@@ -251,7 +253,18 @@ void X11WindowBase::ProcessXWindowEvent(XEvent* xev) {
     case ConfigureNotify: {
       DCHECK_EQ(xwindow_, xev->xconfigure.event);
       DCHECK_EQ(xwindow_, xev->xconfigure.window);
-      gfx::Rect bounds(xev->xconfigure.x, xev->xconfigure.y,
+      // It's possible that the X window may be resized by some other means than
+      // from within aura (e.g. the X window manager can change the size). Make
+      // sure the root window size is maintained properly.
+      int translated_x_in_pixels = xev->xconfigure.x;
+      int translated_y_in_pixels = xev->xconfigure.y;
+      if (!xev->xconfigure.send_event && !xev->xconfigure.override_redirect) {
+        Window unused;
+        XTranslateCoordinates(xdisplay_, xwindow_, xroot_window_, 0, 0,
+                              &translated_x_in_pixels, &translated_y_in_pixels,
+                              &unused);
+      }
+      gfx::Rect bounds(translated_x_in_pixels, translated_y_in_pixels,
                        xev->xconfigure.width, xev->xconfigure.height);
       if (confirmed_bounds_ != bounds) {
         confirmed_bounds_ = bounds;

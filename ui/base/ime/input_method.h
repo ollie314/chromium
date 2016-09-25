@@ -8,11 +8,17 @@
 #include <stdint.h>
 
 #include <string>
+#include <vector>
 
 #include "base/event_types.h"
+#include "base/memory/scoped_vector.h"
 #include "build/build_config.h"
 #include "ui/base/ime/text_input_mode.h"
 #include "ui/base/ime/text_input_type.h"
+
+namespace extensions {
+class InputImeApiTest;
+}  // namespace extensions
 
 namespace ui {
 
@@ -48,6 +54,7 @@ class TextInputClient;
 // ui::InputMethod and owns it.
 class InputMethod {
  public:
+  InputMethod() : track_key_events_for_testing_(false) {}
 
 #if defined(OS_WIN)
   typedef LRESULT NativeEventResult;
@@ -118,9 +125,9 @@ class InputMethod {
   // TODO(ime): Consider to take a parameter of TextInputClient.
   virtual void OnInputLocaleChanged() = 0;
 
-  // Returns the locale of current keyboard layout or input method, as a BCP-47
-  // tag, or an empty string if the input method cannot provide it.
-  virtual std::string GetInputLocale() = 0;
+  // Returns whether the system input locale is in CJK languages.
+  // This is only used in Windows platforms.
+  virtual bool IsInputLocaleCJK() const = 0;
 
   // TODO(yoichio): Following 3 methods(GetTextInputType, GetTextInputMode and
   // CanComposeInline) calls client's same method and returns its value. It is
@@ -152,6 +159,16 @@ class InputMethod {
   // Management of the observer list.
   virtual void AddObserver(InputMethodObserver* observer) = 0;
   virtual void RemoveObserver(InputMethodObserver* observer) = 0;
+
+ protected:
+  friend class extensions::InputImeApiTest;
+
+  // Gets the tracked key events of using input.ime.sendKeyEvents API.
+  virtual const std::vector<std::unique_ptr<ui::KeyEvent>>&
+  GetKeyEventsForTesting() = 0;
+
+  // Whether the key events will be tracked. Only used for testing.
+  bool track_key_events_for_testing_;
 };
 
 }  // namespace ui

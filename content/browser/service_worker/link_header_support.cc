@@ -7,9 +7,12 @@
 #include "base/command_line.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "components/link_header_util/link_header_util.h"
 #include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
+#include "content/browser/service_worker/service_worker_request_handler.h"
+#include "content/common/origin_trials/trial_token_validator.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -23,147 +26,6 @@ namespace content {
 
 namespace {
 
-// A variation of base::StringTokenizer and net::HttpUtil::ValuesIterator.
-// Takes the parsing of StringTokenizer and adds support for quoted strings that
-// are quoted by matching <> (and does not support escaping in those strings).
-// Also has the behavior of ValuesIterator where it strips whitespace from all
-// values and only outputs non-empty values.
-// Only supports ',' as separator and supports '' "" and <> as quote chars.
-// TODO(mek): Figure out if there is a way to share this with the parsing code
-// in blink::LinkHeader.
-class ValueTokenizer {
- public:
-  ValueTokenizer(std::string::const_iterator begin,
-                 std::string::const_iterator end)
-      : token_begin_(begin), token_end_(begin), end_(end) {}
-
-  std::string::const_iterator token_begin() const { return token_begin_; }
-  std::string::const_iterator token_end() const { return token_end_; }
-
-  bool GetNext() {
-    while (GetNextInternal()) {
-      net::HttpUtil::TrimLWS(&token_begin_, &token_end_);
-
-      // Only return non-empty values.
-      if (token_begin_ != token_end_)
-        return true;
-    }
-    return false;
-  }
-
- private:
-  // Updates token_begin_ and token_end_ to point to the (possibly empty) next
-  // token. Returns false if end-of-string was reached first.
-  bool GetNextInternal() {
-    // First time this is called token_end_ points to the first character in the
-    // input. Every other time token_end_ points to the delimiter at the end of
-    // the last returned token (which could be the end of the string).
-
-    // End of string, return false.
-    if (token_end_ == end_)
-      return false;
-
-    // Skip past the delimiter.
-    if (*token_end_ == ',')
-      ++token_end_;
-
-    // Make token_begin_ point to the beginning of the next token, and search
-    // for the end of the token in token_end_.
-    token_begin_ = token_end_;
-
-    // Set to true if we're currently inside a quoted string.
-    bool in_quote = false;
-    // Set to true if we're currently inside a quoted string, and have just
-    // encountered an escape character. In this case a closing quote will be
-    // ignored.
-    bool in_escape = false;
-    // If currently in a quoted string, this is the character that (when not
-    // escaped) indicates the end of the string.
-    char quote_close_char = '\0';
-    // If currently in a quoted string, this is set to true if it is possible to
-    // escape the closing quote using '\'.
-    bool quote_allows_escape = false;
-
-    while (token_end_ != end_) {
-      char c = *token_end_;
-      if (in_quote) {
-        if (in_escape) {
-          in_escape = false;
-        } else if (quote_allows_escape && c == '\\') {
-          in_escape = true;
-        } else if (c == quote_close_char) {
-          in_quote = false;
-        }
-      } else {
-        if (c == ',')
-          break;
-        if (c == '\'' || c == '"' || c == '<') {
-          in_quote = true;
-          quote_close_char = (c == '<' ? '>' : c);
-          quote_allows_escape = (c != '<');
-        }
-      }
-      ++token_end_;
-    }
-    return true;
-  }
-
-  std::string::const_iterator token_begin_;
-  std::string::const_iterator token_end_;
-  std::string::const_iterator end_;
-};
-
-// Parses one link in a link header into its url and parameters.
-// A link is of the form "<some-url>; param1=value1; param2=value2".
-// Returns false if parsing the link failed, returns true on success. This
-// method is more lenient than the RFC. It doesn't fail on things like invalid
-// characters in the URL, and also doesn't verify that certain parameters should
-// or shouldn't be quoted strings.
-// If a parameter occurs more than once in the link, only the first value is
-// returned in params as this is the required behavior for all attributes chrome
-// currently cares about in link headers.
-bool ParseLink(std::string::const_iterator begin,
-               std::string::const_iterator end,
-               std::string* url,
-               std::unordered_map<std::string, std::string>* params) {
-  // Can't parse an empty string.
-  if (begin == end)
-    return false;
-
-  // Extract the URL part (everything between '<' and first '>' character).
-  if (*begin != '<')
-    return false;
-  ++begin;
-  std::string::const_iterator url_begin = begin;
-  std::string::const_iterator url_end = std::find(begin, end, '>');
-  // Fail if we did not find a '>'.
-  if (url_end == end)
-    return false;
-  begin = url_end;
-  net::HttpUtil::TrimLWS(&url_begin, &url_end);
-  *url = std::string(url_begin, url_end);
-
-  // Skip the '>' at the end of the URL, trim any remaining whitespace, and make
-  // sure it is followed by a ';' to indicate the start of parameters.
-  ++begin;
-  net::HttpUtil::TrimLWS(&begin, &end);
-  if (begin != end && *begin != ';')
-    return false;
-
-  // Parse all the parameters.
-  net::HttpUtil::NameValuePairsIterator params_iterator(
-      begin, end, ';', net::HttpUtil::NameValuePairsIterator::VALUES_OPTIONAL);
-  while (params_iterator.GetNext()) {
-    if (!net::HttpUtil::IsToken(params_iterator.name_begin(),
-                                params_iterator.name_end()))
-      return false;
-    std::string name = base::ToLowerASCII(base::StringPiece(
-        params_iterator.name_begin(), params_iterator.name_end()));
-    params->insert(std::make_pair(name, params_iterator.value()));
-  }
-  return params_iterator.valid();
-}
-
 void RegisterServiceWorkerFinished(int64_t trace_id, bool result) {
   TRACE_EVENT_ASYNC_END1("ServiceWorker",
                          "LinkHeaderResourceThrottle::HandleServiceWorkerLink",
@@ -173,13 +35,14 @@ void RegisterServiceWorkerFinished(int64_t trace_id, bool result) {
 void HandleServiceWorkerLink(
     const net::URLRequest* request,
     const std::string& url,
-    const std::unordered_map<std::string, std::string>& params,
+    const std::unordered_map<std::string, base::Optional<std::string>>& params,
     ServiceWorkerContextWrapper* service_worker_context_for_testing) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalWebPlatformFeatures)) {
-    // TODO(mek): Integrate with experimental framework.
+          switches::kEnableExperimentalWebPlatformFeatures) &&
+      !TrialTokenValidator::RequestEnablesFeature(request, "ForeignFetch")) {
+    // TODO(mek): Log attempt to use without having correct token?
     return;
   }
 
@@ -195,14 +58,19 @@ void HandleServiceWorkerLink(
   if (!service_worker_context)
     return;
 
-  // TODO(mek): serviceworker links should only be supported on requests from
-  // secure contexts. For now just check the initiator origin, even though that
-  // is not correct: 1) the initiator isn't the origin that matters in case of
-  // navigations, and 2) more than just a secure origin this needs to be a
-  // secure context.
-  if (!request->initiator().unique() &&
-      !IsOriginSecure(GURL(request->initiator().Serialize())))
-    return;
+  if (ServiceWorkerUtils::IsMainResourceType(request_info->GetResourceType())) {
+    // In case of navigations, make sure the navigation will actually result in
+    // a secure context.
+    ServiceWorkerProviderHost* provider_host =
+        ServiceWorkerRequestHandler::GetProviderHost(request);
+    if (!provider_host || !provider_host->IsContextSecureForServiceWorker())
+      return;
+  } else {
+    // If this is not a navigation, make sure the request was initiated from a
+    // secure context.
+    if (!request_info->initiated_in_secure_context())
+      return;
+  }
 
   // TODO(mek): support for a serviceworker link on a request that wouldn't ever
   // be able to be intercepted by a serviceworker isn't very useful, so this
@@ -215,7 +83,7 @@ void HandleServiceWorkerLink(
   auto scope_param = params.find("scope");
   GURL scope_url = scope_param == params.end()
                        ? script_url.Resolve("./")
-                       : context_url.Resolve(scope_param->second);
+                       : context_url.Resolve(scope_param->second.value_or(""));
 
   if (!context_url.is_valid() || !script_url.is_valid() ||
       !scope_url.is_valid())
@@ -255,13 +123,17 @@ void ProcessLinkHeaderValueForRequest(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   std::string url;
-  std::unordered_map<std::string, std::string> params;
-  if (!ParseLink(value_begin, value_end, &url, &params))
+  std::unordered_map<std::string, base::Optional<std::string>> params;
+  if (!link_header_util::ParseLinkHeaderValue(value_begin, value_end, &url,
+                                              &params))
     return;
 
-  for (const auto& rel :
-       base::SplitStringPiece(params["rel"], HTTP_LWS, base::TRIM_WHITESPACE,
-                              base::SPLIT_WANT_NONEMPTY)) {
+  auto rel_param = params.find("rel");
+  if (rel_param == params.end() || !rel_param->second)
+    return;
+  for (const auto& rel : base::SplitStringPiece(rel_param->second.value(),
+                                                HTTP_LWS, base::TRIM_WHITESPACE,
+                                                base::SPLIT_WANT_NONEMPTY)) {
     if (base::EqualsCaseInsensitiveASCII(rel, "serviceworker"))
       HandleServiceWorkerLink(request, url, params,
                               service_worker_context_for_testing);
@@ -283,29 +155,10 @@ void ProcessLinkHeaderForRequest(
     const net::URLRequest* request,
     const std::string& link_header,
     ServiceWorkerContextWrapper* service_worker_context_for_testing) {
-  ValueTokenizer tokenizer(link_header.begin(), link_header.end());
-  while (tokenizer.GetNext()) {
-    ProcessLinkHeaderValueForRequest(request, tokenizer.token_begin(),
-                                     tokenizer.token_end(),
+  for (const auto& value : link_header_util::SplitLinkHeader(link_header)) {
+    ProcessLinkHeaderValueForRequest(request, value.first, value.second,
                                      service_worker_context_for_testing);
   }
-}
-
-void SplitLinkHeaderForTesting(const std::string& header,
-                               std::vector<std::string>* values) {
-  values->clear();
-  ValueTokenizer tokenizer(header.begin(), header.end());
-  while (tokenizer.GetNext()) {
-    values->push_back(
-        std::string(tokenizer.token_begin(), tokenizer.token_end()));
-  }
-}
-
-bool ParseLinkHeaderValueForTesting(
-    const std::string& link,
-    std::string* url,
-    std::unordered_map<std::string, std::string>* params) {
-  return ParseLink(link.begin(), link.end(), url, params);
 }
 
 }  // namespace content

@@ -279,7 +279,7 @@ void RecoverDatabaseOrRaze(sql::Connection* db, const base::FilePath& db_path) {
   int64_t original_size = 0;
   base::GetFileSize(db_path, &original_size);
 
-  scoped_ptr<sql::Recovery> recovery = sql::Recovery::Begin(db, db_path);
+  std::unique_ptr<sql::Recovery> recovery = sql::Recovery::Begin(db, db_path);
   if (!recovery) {
     // TODO(shess): Unable to create recovery connection.  This
     // implies something substantial is wrong.  At this point |db| has
@@ -433,7 +433,7 @@ void DatabaseErrorCallback(sql::Connection* db,
   }
 
   // The default handling is to assert on debug and to ignore on release.
-  if (!sql::Connection::ShouldIgnoreSqliteError(extended_error))
+  if (!sql::Connection::IsExpectedSqliteError(extended_error))
     DLOG(FATAL) << db->GetErrorMessage();
 }
 

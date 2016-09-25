@@ -97,10 +97,10 @@ class GpuJpegDecodeAcceleratorHost::Receiver : public IPC::Listener,
 };
 
 GpuJpegDecodeAcceleratorHost::GpuJpegDecodeAcceleratorHost(
-    gpu::GpuChannelHost* channel,
+    scoped_refptr<gpu::GpuChannelHost> channel,
     int32_t route_id,
     const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner)
-    : channel_(channel),
+    : channel_(std::move(channel)),
       decoder_route_id_(route_id),
       io_task_runner_(io_task_runner) {
   DCHECK(channel_);
@@ -116,7 +116,8 @@ GpuJpegDecodeAcceleratorHost::~GpuJpegDecodeAcceleratorHost() {
 
     // Invalidate weak ptr of |receiver_|. After that, no more messages will be
     // routed to |receiver_| on IO thread.
-    base::WaitableEvent event(false, false);
+    base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED);
     io_task_runner_->PostTask(FROM_HERE,
                               base::Bind(&Receiver::InvalidateWeakPtr,
                                          base::Unretained(receiver_.get()),

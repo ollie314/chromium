@@ -65,10 +65,12 @@ WebInspector.DockController.State = {
 // Use BeforeDockSideChanged to do something before all the UI bits are updated,
 // DockSideChanged to update UI, and AfterDockSideChanged to perform actions
 // after frontend is docked/undocked in the browser.
+
+/** @enum {symbol} */
 WebInspector.DockController.Events = {
-    BeforeDockSideChanged: "BeforeDockSideChanged",
-    DockSideChanged: "DockSideChanged",
-    AfterDockSideChanged: "AfterDockSideChanged"
+    BeforeDockSideChanged: Symbol("BeforeDockSideChanged"),
+    DockSideChanged: Symbol("DockSideChanged"),
+    AfterDockSideChanged: Symbol("AfterDockSideChanged")
 }
 
 WebInspector.DockController.prototype = {
@@ -123,6 +125,8 @@ WebInspector.DockController.prototype = {
 
         if (this._dockSide)
             this._lastDockStateSetting.set(this._dockSide);
+
+        WebInspector.DockController._previousFocusedElement = WebInspector.currentFocusElement();
         var eventData = { from: this._dockSide, to: dockSide };
         this.dispatchEventToListeners(WebInspector.DockController.Events.BeforeDockSideChanged, eventData);
         console.timeStamp("DockController.setIsDocked");
@@ -139,6 +143,10 @@ WebInspector.DockController.prototype = {
     _setIsDockedResponse: function(eventData)
     {
         this.dispatchEventToListeners(WebInspector.DockController.Events.AfterDockSideChanged, eventData);
+
+        if (WebInspector.DockController._previousFocusedElement)
+            WebInspector.DockController._previousFocusedElement.focus();
+        delete WebInspector.DockController._previousFocusedElement;
     },
 
     /**

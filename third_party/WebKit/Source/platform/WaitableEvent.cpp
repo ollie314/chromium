@@ -5,17 +5,23 @@
 #include "platform/WaitableEvent.h"
 
 #include "base/synchronization/waitable_event.h"
-#include "wtf/PassOwnPtr.h"
-
+#include "platform/heap/SafePoint.h"
+#include "platform/heap/ThreadState.h"
+#include "wtf/Optional.h"
+#include "wtf/PtrUtil.h"
 #include <vector>
 
 namespace blink {
 
 WaitableEvent::WaitableEvent(ResetPolicy policy, InitialState state)
 {
-    bool manualReset = policy == ResetPolicy::Manual;
-    bool initiallySignaled = state == InitialState::Signaled;
-    m_impl = adoptPtr(new base::WaitableEvent(manualReset, initiallySignaled));
+    m_impl = wrapUnique(new base::WaitableEvent(
+        policy == ResetPolicy::Manual
+            ? base::WaitableEvent::ResetPolicy::MANUAL
+            : base::WaitableEvent::ResetPolicy::AUTOMATIC,
+        state == InitialState::Signaled
+            ? base::WaitableEvent::InitialState::SIGNALED
+            : base::WaitableEvent::InitialState::NOT_SIGNALED));
 }
 
 WaitableEvent::~WaitableEvent() {}
@@ -27,7 +33,15 @@ void WaitableEvent::reset()
 
 void WaitableEvent::wait()
 {
-    m_impl->Wait();
+    if (ThreadState::current()) {
+        // We only enter a safe point scope if the thread is attached, ex. never
+        // during shutdown.
+        // TODO(esprehn): Why can't SafePointScope do this for us?
+        SafePointScope scope(BlinkGC::HeapPointersOnStack);
+        m_impl->Wait();
+    } else {
+        m_impl->Wait();
+    }
 }
 
 void WaitableEvent::signal()

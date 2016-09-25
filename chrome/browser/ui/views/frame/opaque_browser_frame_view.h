@@ -80,9 +80,8 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   int GetIconSize() const override;
   gfx::Size GetBrowserViewMinimumSize() const override;
   bool ShouldShowCaptionButtons() const override;
-  bool ShouldShowAvatar() const override;
   bool IsRegularOrGuestSession() const override;
-  gfx::ImageSkia GetOTRAvatarIcon() const override;
+  gfx::ImageSkia GetIncognitoAvatarIcon() const override;
   bool IsMaximized() const override;
   bool IsMinimized() const override;
   bool IsFullscreen() const override;
@@ -90,7 +89,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   int GetTabStripHeight() const override;
   bool IsToolbarVisible() const override;
   gfx::Size GetTabstripPreferredSize() const override;
-  int GetToolbarLeadingCornerClientWidth() const override;
 
  protected:
   views::ImageButton* minimize_button() const { return minimize_button_; }
@@ -103,13 +101,9 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
 
   // BrowserNonClientFrameView:
   bool ShouldPaintAsThemed() const override;
-  void UpdateAvatar() override;
+  void UpdateProfileIcons() override;
 
  private:
-  // views::NonClientFrameView:
-  bool DoesIntersectRect(const views::View* target,
-                         const gfx::Rect& rect) const override;
-
   // Creates, adds and returns a new image button with |this| as its listener.
   // Memory is owned by the caller.
   views::ImageButton* InitWindowCaptionButton(int normal_image_id,

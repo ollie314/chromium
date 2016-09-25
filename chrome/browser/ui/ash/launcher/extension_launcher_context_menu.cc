@@ -4,18 +4,19 @@
 
 #include "chrome/browser/ui/ash/launcher/extension_launcher_context_menu.h"
 
-#include "ash/shelf/shelf.h"
-#include "ash/shelf/shelf_item_delegate.h"
+#include "ash/common/shelf/shelf_item_delegate.h"
+#include "ash/common/wm_shell.h"
 #include "base/bind.h"
 #include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/browser/ui/ash/launcher/browser_shortcut_launcher_item_controller.h"
+#include "chrome/browser/ui/ash/launcher/chrome_launcher_controller_impl.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/common/context_menu_params.h"
-#include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -27,10 +28,10 @@ bool MenuItemHasLauncherContext(const extensions::MenuItem* item) {
 }  // namespace
 
 ExtensionLauncherContextMenu::ExtensionLauncherContextMenu(
-    ChromeLauncherController* controller,
+    ChromeLauncherControllerImpl* controller,
     const ash::ShelfItem* item,
-    ash::Shelf* shelf)
-    : LauncherContextMenu(controller, item, shelf) {
+    ash::WmShelf* wm_shelf)
+    : LauncherContextMenu(controller, item, wm_shelf) {
   Init();
 }
 
@@ -38,7 +39,7 @@ ExtensionLauncherContextMenu::~ExtensionLauncherContextMenu() {}
 
 void ExtensionLauncherContextMenu::Init() {
   extension_items_.reset(new extensions::ContextMenuMatcher(
-      controller()->profile(), this, this,
+      controller()->GetProfile(), this, this,
       base::Bind(MenuItemHasLauncherContext)));
   if (item().type == ash::TYPE_APP_SHORTCUT ||
       item().type == ash::TYPE_WINDOWED_APP) {
@@ -75,21 +76,27 @@ void ExtensionLauncherContextMenu::Init() {
     }
   } else if (item().type == ash::TYPE_BROWSER_SHORTCUT) {
     AddItemWithStringId(MENU_NEW_WINDOW, IDS_APP_LIST_NEW_WINDOW);
-    if (!controller()->IsLoggedInAsGuest()) {
+    if (!controller()->GetProfile()->IsGuestSession()) {
       AddItemWithStringId(MENU_NEW_INCOGNITO_WINDOW,
                           IDS_APP_LIST_NEW_INCOGNITO_WINDOW);
+    }
+    if (!BrowserShortcutLauncherItemController(
+             controller(), ash::WmShell::Get()->shelf_model())
+             .IsListOfActiveBrowserEmpty()) {
+      AddItem(MENU_CLOSE,
+              l10n_util::GetStringUTF16(IDS_LAUNCHER_CONTEXT_MENU_CLOSE));
     }
   } else if (item().type == ash::TYPE_DIALOG) {
     AddItemWithStringId(MENU_CLOSE, IDS_LAUNCHER_CONTEXT_MENU_CLOSE);
   } else {
     if (item().type == ash::TYPE_PLATFORM_APP)
-      AddItemWithStringId(MENU_PIN, IDS_LAUNCHER_CONTEXT_MENU_PIN);
+      AddPinMenu();
     bool show_close_button = controller()->IsOpen(item().id);
-#if defined(OS_CHROMEOS)
     if (extension_misc::IsImeMenuExtensionId(
-            controller()->GetAppIDForShelfID(item().id)))
+            controller()->GetAppIDForShelfID(item().id))) {
       show_close_button = false;
-#endif
+    }
+
     if (show_close_button)
       AddItemWithStringId(MENU_CLOSE, IDS_LAUNCHER_CONTEXT_MENU_CLOSE);
   }
@@ -162,12 +169,12 @@ bool ExtensionLauncherContextMenu::IsCommandIdEnabled(int command_id) const {
     case MENU_NEW_WINDOW:
       // "Normal" windows are not allowed when incognito is enforced.
       return IncognitoModePrefs::GetAvailability(
-                 controller()->profile()->GetPrefs()) !=
+                 controller()->GetProfile()->GetPrefs()) !=
              IncognitoModePrefs::FORCED;
     case MENU_NEW_INCOGNITO_WINDOW:
       // Incognito windows are not allowed when incognito is disabled.
       return IncognitoModePrefs::GetAvailability(
-                 controller()->profile()->GetPrefs()) !=
+                 controller()->GetProfile()->GetPrefs()) !=
              IncognitoModePrefs::DISABLED;
     default:
       if (command_id < MENU_ITEM_COUNT)
@@ -206,10 +213,11 @@ void ExtensionLauncherContextMenu::ExecuteCommand(int command_id,
                                   extensions::LAUNCH_TYPE_FULLSCREEN);
       break;
     case MENU_NEW_WINDOW:
-      controller()->CreateNewWindow();
+      chrome::NewEmptyWindow(controller()->GetProfile());
       break;
     case MENU_NEW_INCOGNITO_WINDOW:
-      controller()->CreateNewIncognitoWindow();
+      chrome::NewEmptyWindow(
+          controller()->GetProfile()->GetOffTheRecordProfile());
       break;
     default:
       if (extension_items_) {

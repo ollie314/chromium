@@ -23,6 +23,7 @@
 #define ProcessingInstruction_h
 
 #include "core/dom/CharacterData.h"
+#include "core/dom/StyleEngineContext.h"
 #include "core/fetch/ResourceOwner.h"
 #include "core/fetch/StyleSheetResource.h"
 #include "core/fetch/StyleSheetResourceClient.h"
@@ -94,6 +95,7 @@ private:
     String m_title;
     String m_media;
     Member<StyleSheet> m_sheet;
+    StyleEngineContext m_styleEngineContext;
     bool m_loading;
     bool m_alternate;
     bool m_isCSS;
@@ -102,11 +104,11 @@ private:
     Member<DetachableEventListener> m_listenerForXSLT;
 };
 
-DEFINE_NODE_TYPE_CASTS(ProcessingInstruction, getNodeType() == Node::PROCESSING_INSTRUCTION_NODE);
+DEFINE_NODE_TYPE_CASTS(ProcessingInstruction, getNodeType() == Node::kProcessingInstructionNode);
 
 inline bool isXSLStyleSheet(const Node& node)
 {
-    return node.getNodeType() == Node::PROCESSING_INSTRUCTION_NODE && toProcessingInstruction(node).isXSL();
+    return node.getNodeType() == Node::kProcessingInstructionNode && toProcessingInstruction(node).isXSL();
 }
 
 } // namespace blink

@@ -11,7 +11,7 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 
 namespace storage {
 
@@ -153,7 +153,9 @@ void DatabaseConnectionsWrapper::RemoveOpenConnection(
 
 bool DatabaseConnectionsWrapper::WaitForAllDatabasesToClose(
     base::TimeDelta timeout) {
-  base::WaitableEvent waitable_event(true, false);
+  base::WaitableEvent waitable_event(
+      base::WaitableEvent::ResetPolicy::MANUAL,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
   {
     base::AutoLock auto_lock(open_connections_lock_);
     if (open_connections_.IsEmpty())

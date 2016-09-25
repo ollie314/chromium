@@ -29,13 +29,15 @@ AutofillWebDataBackendImpl::AutofillWebDataBackendImpl(
     scoped_refptr<WebDatabaseBackend> web_database_backend,
     scoped_refptr<base::SingleThreadTaskRunner> ui_thread,
     scoped_refptr<base::SingleThreadTaskRunner> db_thread,
-    const base::Closure& on_changed_callback)
+    const base::Closure& on_changed_callback,
+    const base::Callback<void(syncer::ModelType)>& on_sync_started_callback)
     : base::RefCountedDeleteOnMessageLoop<AutofillWebDataBackendImpl>(
           db_thread),
       ui_thread_(ui_thread),
       db_thread_(db_thread),
       web_database_backend_(web_database_backend),
-      on_changed_callback_(on_changed_callback) {
+      on_changed_callback_(on_changed_callback),
+      on_sync_started_callback_(on_sync_started_callback) {
 }
 
 void AutofillWebDataBackendImpl::AddObserver(
@@ -74,6 +76,18 @@ void AutofillWebDataBackendImpl::NotifyOfMultipleAutofillChanges() {
 
   // UI thread notification.
   ui_thread_->PostTask(FROM_HERE, on_changed_callback_);
+}
+
+void AutofillWebDataBackendImpl::NotifyThatSyncHasStarted(
+    syncer::ModelType model_type) {
+  DCHECK(db_thread_->BelongsToCurrentThread());
+
+  if (on_sync_started_callback_.is_null())
+    return;
+
+  // UI thread notification.
+  ui_thread_->PostTask(FROM_HERE,
+                       base::Bind(on_sync_started_callback_, model_type));
 }
 
 base::SupportsUserData* AutofillWebDataBackendImpl::GetDBUserData() {
@@ -406,6 +420,22 @@ WebDatabase::State AutofillWebDataBackendImpl::UpdateServerAddressUsageStats(
   return WebDatabase::COMMIT_NEEDED;
 }
 
+WebDatabase::State AutofillWebDataBackendImpl::UpdateServerCardBillingAddress(
+    const CreditCard& card,
+    WebDatabase* db) {
+  DCHECK(db_thread_->BelongsToCurrentThread());
+  if (!AutofillTable::FromWebDatabase(db)->UpdateServerCardBillingAddress(
+          card)) {
+    return WebDatabase::COMMIT_NOT_NEEDED;
+  }
+
+  FOR_EACH_OBSERVER(AutofillWebDataServiceObserverOnDBThread, db_observer_list_,
+                    CreditCardChanged(CreditCardChange(CreditCardChange::UPDATE,
+                                                       card.guid(), &card)));
+
+  return WebDatabase::COMMIT_NEEDED;
+}
+
 WebDatabase::State AutofillWebDataBackendImpl::ClearAllServerData(
     WebDatabase* db) {
   DCHECK(db_thread_->BelongsToCurrentThread());
@@ -495,7 +525,7 @@ void AutofillWebDataBackendImpl::DestroyAutofillProfileResult(
   const WDResult<std::vector<AutofillProfile*> >* r =
       static_cast<const WDResult<std::vector<AutofillProfile*> >*>(result);
   std::vector<AutofillProfile*> profiles = r->GetValue();
-  STLDeleteElements(&profiles);
+  base::STLDeleteElements(&profiles);
 }
 
 void AutofillWebDataBackendImpl::DestroyAutofillCreditCardResult(
@@ -505,7 +535,7 @@ void AutofillWebDataBackendImpl::DestroyAutofillCreditCardResult(
       static_cast<const WDResult<std::vector<CreditCard*> >*>(result);
 
   std::vector<CreditCard*> credit_cards = r->GetValue();
-  STLDeleteElements(&credit_cards);
+  base::STLDeleteElements(&credit_cards);
 }
 
 }  // namespace autofill

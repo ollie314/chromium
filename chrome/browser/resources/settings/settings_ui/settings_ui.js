@@ -16,7 +16,6 @@ Polymer({
   properties: {
     /**
      * Preferences state.
-     * @type {?CrSettingsPrefsElement}
      */
     prefs: Object,
 
@@ -25,10 +24,92 @@ Polymer({
       observer: 'directionDelegateChanged_',
       type: Object,
     },
+
+    /** @private {boolean} */
+    toolbarSpinnerActive_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
+     * Dictionary defining page visibility.
+     * @private {!GuestModePageVisibility}
+     */
+    pageVisibility_: Object,
+  },
+
+  /**
+   * @override
+   * @suppress {es5Strict} Object literals cannot contain duplicate keys in ES5
+   *     strict mode.
+   */
+  ready: function() {
+    this.$$('cr-toolbar').addEventListener('search-changed', function(e) {
+      this.$$('settings-main').searchContents(e.detail);
+    }.bind(this));
+
+    // Lazy-create the drawer the first time it is opened or swiped into view.
+    var drawer = assert(this.$$('app-drawer'));
+    listenOnce(drawer, 'track opened-changed', function() {
+      this.$.drawerTemplate.if = true;
+    }.bind(this));
+
+    window.addEventListener('popstate', function(e) {
+      drawer.close();
+    }.bind(this));
+
+    if (loadTimeData.getBoolean('isGuest')) {
+      this.pageVisibility_ = {
+        people: false,
+        onStartup: false,
+        reset: false,
+<if expr="not chromeos">
+        appearance: false,
+        defaultBrowser: false,
+        advancedSettings: false,
+</if>
+<if expr="chromeos">
+        appearance: {
+          setWallpaper: false,
+          setTheme: false,
+          homeButton: false,
+          bookmarksBar: false,
+          pageZoom: false,
+        },
+        advancedSettings: true,
+        dateTime: {
+          timeZoneSelector: false,
+        },
+        privacy: {
+          searchPrediction: false,
+          networkPrediction: false,
+        },
+        passwordsAndForms: false,
+        downloads: {
+          googleDrive: false,
+        },
+</if>
+      };
+    }
+  },
+
+  /**
+   * @param {Event} event
+   * @private
+   */
+  onIronActivate_: function(event) {
+    if (event.detail.item.id != 'advancedPage')
+      this.$$('app-drawer').close();
+  },
+
+  /** @private */
+  onMenuButtonTap_: function() {
+    this.$$('app-drawer').toggle();
   },
 
   /** @private */
   directionDelegateChanged_: function() {
-    this.$.panel.rightDrawer = this.directionDelegate.isRtl();
+    this.$$('app-drawer').align = this.directionDelegate.isRtl() ?
+        'right' : 'left';
   },
 });

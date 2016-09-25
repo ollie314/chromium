@@ -37,7 +37,7 @@ CloudPolicyCore::CloudPolicyCore(
 
 CloudPolicyCore::~CloudPolicyCore() {}
 
-void CloudPolicyCore::Connect(scoped_ptr<CloudPolicyClient> client) {
+void CloudPolicyCore::Connect(std::unique_ptr<CloudPolicyClient> client) {
   CHECK(!client_);
   CHECK(client);
   client_ = std::move(client);
@@ -57,7 +57,7 @@ void CloudPolicyCore::Disconnect() {
 }
 
 void CloudPolicyCore::StartRemoteCommandsService(
-    scoped_ptr<RemoteCommandsFactory> factory) {
+    std::unique_ptr<RemoteCommandsFactory> factory) {
   DCHECK(client_);
   DCHECK(factory);
 
@@ -105,7 +105,7 @@ void CloudPolicyCore::RemoveObserver(CloudPolicyCore::Observer* observer) {
 
 void CloudPolicyCore::UpdateRefreshDelayFromPref() {
   if (refresh_scheduler_ && refresh_delay_)
-    refresh_scheduler_->SetRefreshDelay(refresh_delay_->GetValue());
+    refresh_scheduler_->SetDesiredRefreshDelay(refresh_delay_->GetValue());
 }
 
 }  // namespace policy

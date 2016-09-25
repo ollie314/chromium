@@ -37,7 +37,6 @@
 #include "core/layout/LayoutObject.h"
 #include "core/page/Page.h"
 #include "platform/PlatformEvent.h"
-#include "platform/PlatformKeyboardEvent.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/CullRect.h"
 #include "platform/graphics/paint/ForeignLayerDisplayItem.h"
@@ -66,6 +65,8 @@
 #include "web/WebViewImpl.h"
 #include "web/tests/FakeWebPlugin.h"
 #include "web/tests/FrameTestHelpers.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 using blink::testing::runPendingTasks;
 
@@ -312,8 +313,42 @@ TEST_F(WebPluginContainerTest, Copy)
     webView->updateAllLifecyclePhases();
     runPendingTasks();
 
-    WebElement pluginContainerOneElement = webView->mainFrame()->document().getElementById(WebString::fromUTF8("translated-plugin"));
-    EXPECT_TRUE(webView->mainFrame()->executeCommand("Copy",  pluginContainerOneElement));
+    webView->mainFrame()->document().unwrap<Document>()->body()->getElementById("translated-plugin")->focus();
+    EXPECT_TRUE(webView->mainFrame()->toWebLocalFrame()->executeCommand("Copy"));
+    EXPECT_EQ(WebString("x"), Platform::current()->clipboard()->readPlainText(WebClipboard::Buffer()));
+}
+
+TEST_F(WebPluginContainerTest, CopyFromContextMenu)
+{
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("plugin_container.html"));
+    TestPluginWebFrameClient pluginWebFrameClient; // Must outlive webViewHelper.
+    FrameTestHelpers::WebViewHelper webViewHelper;
+    WebView* webView = webViewHelper.initializeAndLoad(m_baseURL + "plugin_container.html", true, &pluginWebFrameClient);
+    DCHECK(webView);
+    webView->settings()->setPluginsEnabled(true);
+    webView->resize(WebSize(300, 300));
+    webView->updateAllLifecyclePhases();
+    runPendingTasks();
+
+    auto event = FrameTestHelpers::createMouseEvent(WebMouseEvent::MouseDown, WebMouseEvent::Button::Right, WebPoint(30, 30), 0);
+    event.clickCount = 1;
+
+    // Make sure the right-click + Copy works in common scenario.
+    webView->handleInputEvent(event);
+    EXPECT_TRUE(webView->mainFrame()->toWebLocalFrame()->executeCommand("Copy"));
+    EXPECT_EQ(WebString("x"), Platform::current()->clipboard()->readPlainText(WebClipboard::Buffer()));
+
+    // Clear the clipboard buffer.
+    Platform::current()->clipboard()->writePlainText(WebString(""));
+    EXPECT_EQ(WebString(""), Platform::current()->clipboard()->readPlainText(WebClipboard::Buffer()));
+
+    // Now, let's try a more complex scenario:
+    // 1) open the context menu. This will focus the plugin.
+    webView->handleInputEvent(event);
+    // 2) document blurs the plugin, because it can.
+    webView->clearFocusedElement();
+    // 3) Copy should still operate on the context node, even though the focus had shifted.
+    EXPECT_TRUE(webView->mainFrame()->toWebLocalFrame()->executeCommand("Copy"));
     EXPECT_EQ(WebString("x"), Platform::current()->clipboard()->readPlainText(WebClipboard::Buffer()));
 }
 
@@ -334,12 +369,15 @@ TEST_F(WebPluginContainerTest, CopyInsertKeyboardEventsTest)
     runPendingTasks();
 
     WebElement pluginContainerOneElement = webView->mainFrame()->document().getElementById(WebString::fromUTF8("translated-plugin"));
-    PlatformEvent::Modifiers modifierKey = static_cast<PlatformEvent::Modifiers>(PlatformEvent::CtrlKey | PlatformEvent::NumLockOn | PlatformEvent::IsLeft);
+    WebInputEvent::Modifiers modifierKey = static_cast<WebInputEvent::Modifiers>(WebInputEvent::ControlKey | WebInputEvent::NumLockOn | WebInputEvent::IsLeft);
 #if OS(MACOSX)
-    modifierKey = static_cast<PlatformEvent::Modifiers>(PlatformEvent::MetaKey | PlatformEvent::NumLockOn | PlatformEvent::IsLeft);
+    modifierKey = static_cast<WebInputEvent::Modifiers>(WebInputEvent::MetaKey | WebInputEvent::NumLockOn | WebInputEvent::IsLeft);
 #endif
-    PlatformKeyboardEvent platformKeyboardEventC(PlatformEvent::RawKeyDown, "", "", "67", "", "", 67, 0, false, modifierKey, 0.0);
-    KeyboardEvent* keyEventC = KeyboardEvent::create(platformKeyboardEventC, 0);
+    WebKeyboardEvent webKeyboardEventC;
+    webKeyboardEventC.type = WebInputEvent::RawKeyDown;
+    webKeyboardEventC.modifiers = modifierKey;
+    webKeyboardEventC.windowsKeyCode = 67;
+    KeyboardEvent* keyEventC = KeyboardEvent::create(webKeyboardEventC, 0);
     toWebPluginContainerImpl(pluginContainerOneElement.pluginContainer())->handleEvent(keyEventC);
     EXPECT_EQ(WebString("x"), Platform::current()->clipboard()->readPlainText(WebClipboard::Buffer()));
 
@@ -347,8 +385,11 @@ TEST_F(WebPluginContainerTest, CopyInsertKeyboardEventsTest)
     Platform::current()->clipboard()->writePlainText(WebString(""));
     EXPECT_EQ(WebString(""), Platform::current()->clipboard()->readPlainText(WebClipboard::Buffer()));
 
-    PlatformKeyboardEvent platformKeyboardEventInsert(PlatformEvent::RawKeyDown, "", "", "45", "", "", 45, 0, false, modifierKey, 0.0);
-    KeyboardEvent* keyEventInsert = KeyboardEvent::create(platformKeyboardEventInsert, 0);
+    WebKeyboardEvent webKeyboardEventInsert;
+    webKeyboardEventInsert.type = WebInputEvent::RawKeyDown;
+    webKeyboardEventInsert.modifiers = modifierKey;
+    webKeyboardEventInsert.windowsKeyCode = 45;
+    KeyboardEvent* keyEventInsert = KeyboardEvent::create(webKeyboardEventInsert, 0);
     toWebPluginContainerImpl(pluginContainerOneElement.pluginContainer())->handleEvent(keyEventInsert);
     EXPECT_EQ(WebString("x"), Platform::current()->clipboard()->readPlainText(WebClipboard::Buffer()));
 }
@@ -469,14 +510,13 @@ TEST_F(WebPluginContainerTest, ClippedRectsForIframedElement)
     WebPluginContainerImpl* pluginContainerImpl = toWebPluginContainerImpl(pluginElement.pluginContainer());
 
     DCHECK(pluginContainerImpl);
-    pluginContainerImpl->setFrameRect(IntRect(0, 0, 300, 300));
 
     IntRect windowRect, clipRect, unobscuredRect;
     Vector<IntRect> cutOutRects;
     calculateGeometry(pluginContainerImpl, windowRect, clipRect, unobscuredRect, cutOutRects);
-    EXPECT_RECT_EQ(IntRect(10, 210, 300, 300), windowRect);
-    EXPECT_RECT_EQ(IntRect(0, 0, 240, 90), clipRect);
-    EXPECT_RECT_EQ(IntRect(0, 0, 240, 160), unobscuredRect);
+    EXPECT_RECT_EQ(IntRect(20, 220, 40, 40), windowRect);
+    EXPECT_RECT_EQ(IntRect(0, 0, 40, 40), clipRect);
+    EXPECT_RECT_EQ(IntRect(0, 0, 40, 40), unobscuredRect);
 
     // Cause the plugin's frame to be detached.
     webViewHelper.reset();
@@ -504,11 +544,9 @@ TEST_F(WebPluginContainerTest, ClippedRectsForSubpixelPositionedPlugin)
     Vector<IntRect> cutOutRects;
 
     calculateGeometry(pluginContainerImpl, windowRect, clipRect, unobscuredRect, cutOutRects);
-    // TODO(chrishtr): these values should not be -1, they should be 0. They are -1 because WebPluginContainerImpl currently uses an IntRect for
-    // frameRect() to determine the position of the plugin, which results in a loss of precision if it is actually subpixel positioned.
     EXPECT_RECT_EQ(IntRect(0, 0, 40, 40), windowRect);
-    EXPECT_RECT_EQ(IntRect(-1, -1, 41, 41), clipRect);
-    EXPECT_RECT_EQ(IntRect(-1, -1, 41, 41), unobscuredRect);
+    EXPECT_RECT_EQ(IntRect(0, 0, 40, 40), clipRect);
+    EXPECT_RECT_EQ(IntRect(0, 0, 40, 40), unobscuredRect);
 
     // Cause the plugin's frame to be detached.
     webViewHelper.reset();
@@ -568,7 +606,7 @@ class CompositedPlugin : public FakeWebPlugin {
 public:
     CompositedPlugin(WebLocalFrame* frame, const WebPluginParams& params)
         : FakeWebPlugin(frame, params)
-        , m_layer(adoptPtr(Platform::current()->compositorSupport()->createLayer()))
+        , m_layer(wrapUnique(Platform::current()->compositorSupport()->createLayer()))
     {
     }
 
@@ -591,7 +629,7 @@ public:
     }
 
 private:
-    OwnPtr<WebLayer> m_layer;
+    std::unique_ptr<WebLayer> m_layer;
 };
 
 class ScopedSPv2 {
@@ -622,7 +660,7 @@ TEST_F(WebPluginContainerTest, CompositedPluginSPv2)
     Element* element = static_cast<Element*>(container->element());
     const auto* plugin = static_cast<const CompositedPlugin*>(container->plugin());
 
-    OwnPtr<PaintController> paintController = PaintController::create();
+    std::unique_ptr<PaintController> paintController = PaintController::create();
     GraphicsContext graphicsContext(*paintController);
     container->paint(graphicsContext, CullRect(IntRect(10, 10, 400, 300)));
     paintController->commitNewDisplayItems();
@@ -630,7 +668,7 @@ TEST_F(WebPluginContainerTest, CompositedPluginSPv2)
     const auto& displayItems = paintController->paintArtifact().getDisplayItemList();
     ASSERT_EQ(1u, displayItems.size());
     EXPECT_EQ(element->layoutObject(), &displayItems[0].client());
-    ASSERT_EQ(DisplayItem::ForeignLayerPlugin, displayItems[0].getType());
+    ASSERT_EQ(DisplayItem::kForeignLayerPlugin, displayItems[0].getType());
     const auto& foreignLayerDisplayItem = static_cast<const ForeignLayerDisplayItem&>(displayItems[0]);
     EXPECT_EQ(plugin->getWebLayer()->ccLayer(), foreignLayerDisplayItem.layer());
 }

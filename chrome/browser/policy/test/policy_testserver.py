@@ -290,10 +290,13 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     # device_management_backend.proto.
     if (self.GetUniqueParam('devicetype') != '2' or
         self.GetUniqueParam('apptype') != 'Chrome' or
-        len(self.GetUniqueParam('deviceid')) >= 64):
+        (self.GetUniqueParam('deviceid') is not None and
+         len(self.GetUniqueParam('deviceid')) >= 64)):
       return (400, 'Invalid request parameter')
     if request_type == 'register':
       response = self.ProcessRegister(rmsg.register_request)
+    elif request_type == 'cert_based_register':
+      response = self.ProcessCertBasedRegister(rmsg.register_request)
     elif request_type == 'api_authorization':
       response = self.ProcessApiAuthorization(rmsg.service_api_access_request)
     elif request_type == 'unregister':
@@ -314,6 +317,10 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       response = self.ProcessDeviceAttributeUpdateRequest()
     elif request_type == 'remote_commands':
       response = self.ProcessRemoteCommandsRequest()
+    elif request_type == 'check_android_management':
+      response = self.ProcessCheckAndroidManagementRequest(
+          rmsg.check_android_management_request,
+          str(self.GetUniqueParam('oauth_token')))
     else:
       return (400, 'Invalid request parameter')
 
@@ -383,12 +390,46 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 
     policy = self.server.GetPolicies()
     if ('managed_users' not in policy):
-      return (500, 'error in config - no managed users')
+      return (500, 'Error in config - no managed users')
     username = self.server.ResolveUser(auth)
     if ('*' not in policy['managed_users'] and
         username not in policy['managed_users']):
       return (403, 'Unmanaged')
 
+    return self.RegisterDeviceAndSendResponse(msg, username)
+
+  def ProcessCertBasedRegister(self, signed_msg):
+    """Handles a certificate based register request.
+
+    Checks the query for the cert and device identifier, registers the
+    device with the server and constructs a response.
+
+    Args:
+      msg: The CertificateBasedDeviceRegisterRequest message received from
+           the client.
+
+    Returns:
+      A tuple of HTTP status code and response data to send to the client.
+    """
+    # Unwrap the request
+    try:
+      req = self.UnwrapCertificateBasedDeviceRegistrationData(signed_msg)
+    except (Error):
+      return(400, 'Invalid request')
+
+    # TODO(drcrash): Check the certificate itself.
+    if req.certificate_type != dm.CertificateBasedDeviceRegistrationData.\
+        ENTERPRISE_ENROLLMENT_CERTIFICATE:
+      return(403, 'Invalid registration certificate type')
+
+    return self.RegisterDeviceAndSendResponse(req.device_register_request, None)
+
+  def RegisterDeviceAndSendResponse(self, msg, username):
+    """Registers a device and send a response to the client.
+
+    Checks that a device identifier was sent, registers the device
+    with the server and constructs a response.
+    """
     device_id = self.GetUniqueParam('deviceid')
     if not device_id:
       return (400, 'Missing device identifier')
@@ -404,6 +445,16 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     response.register_response.enrollment_type = token_info['enrollment_mode']
 
     return (200, response)
+
+  def UnwrapCertificateBasedDeviceRegistrationData(self, msg):
+    """Verifies the signature of |msg| and if it is valid, return the
+    certificate based device registration data. If not, throws an
+    exception.
+    """
+    # TODO(drcrash): Verify signature.
+    rdata = dm.CertificateBasedDeviceRegistrationData()
+    rdata.ParseFromString(msg.data[:len(msg.data) - msg.extra_data_bytes])
+    return rdata
 
   def ProcessApiAuthorization(self, msg):
     """Handles an API authorization request.
@@ -623,6 +674,24 @@ class PolicyRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
       A tuple of HTTP status code and response data to send to the client.
     """
     return (200, '')
+
+  def ProcessCheckAndroidManagementRequest(self, msg, oauth_token):
+    """Handles a check Android management request.
+
+    Returns:
+      A tuple of HTTP status code and response data to send to the client.
+    """
+    check_android_management_response = dm.CheckAndroidManagementResponse()
+
+    response = dm.DeviceManagementResponse()
+    response.check_android_management_response.CopyFrom(
+        check_android_management_response)
+    if oauth_token == 'managed-auth-token':
+      return (409, response)
+    elif oauth_token == 'unmanaged-auth-token':
+      return (200, response)
+    else:
+      return (403, response)
 
   def SetProtobufMessageField(self, group_message, field, field_value):
     """Sets a field in a protobuf message.

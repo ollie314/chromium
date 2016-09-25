@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-#include "./encode.h"
+#include "./compressor.h"
 #include "./buffer.h"
 #include "./font.h"
 #include "./normalize.h"
@@ -145,14 +145,6 @@ size_t ComputeWoff2Length(const FontCollection& font_collection,
   size = Round4(size);
 
   size += extended_metadata_length;
-  return size;
-}
-
-size_t ComputeTTFLength(const std::vector<Table>& tables) {
-  size_t size = 12 + 16 * tables.size();  // sfnt header
-  for (const auto& table : tables) {
-    size += Round4(table.src_length);
-  }
   return size;
 }
 
@@ -280,20 +272,22 @@ bool ConvertTTFToWOFF2(const uint8_t *data, size_t length,
   std::vector<uint8_t> compression_buf(compression_buffer_size);
   uint32_t total_compressed_length = compression_buffer_size;
 
-  // Collect all transformed data into one place.
+  // Collect all transformed data into one place in output order.
   std::vector<uint8_t> transform_buf(total_transform_length);
   size_t transform_offset = 0;
   for (const auto& font : font_collection.fonts) {
-    for (const auto& i : font.tables) {
-      const Font::Table* table = font.FindTable(i.second.tag ^ 0x80808080);
-      if (i.second.IsReused()) continue;
-      if (i.second.tag & 0x80808080) continue;
+    for (const auto tag : font.OutputOrderedTags()) {
+      const Font::Table& original = font.tables.at(tag);
+      if (original.IsReused()) continue;
+      if (tag & 0x80808080) continue;
+      const Font::Table* table_to_store = font.FindTable(tag ^ 0x80808080);
+      if (table_to_store == NULL) table_to_store = &original;
 
-      if (table == NULL) table = &i.second;
-      StoreBytes(table->data, table->length,
+      StoreBytes(table_to_store->data, table_to_store->length,
                  &transform_offset, &transform_buf[0]);
     }
   }
+
   // Compress all transformed data in one stream.
   if (!Woff2Compress(transform_buf.data(), total_transform_length,
                      &compression_buf[0],

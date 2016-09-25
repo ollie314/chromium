@@ -14,6 +14,7 @@
 #include "content/renderer/pepper/fullscreen_container.h"
 #include "content/renderer/render_widget_fullscreen.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
+#include "url/gurl.h"
 
 namespace blink {
 class WebLayer;
@@ -33,7 +34,7 @@ class RenderWidgetFullscreenPepper : public RenderWidgetFullscreen,
       CompositorDependencies* compositor_deps,
       PepperPluginInstanceImpl* plugin,
       const GURL& active_url,
-      const blink::WebScreenInfo& screen_info);
+      const ScreenInfo& screen_info);
 
   // pepper::FullscreenContainer API.
   void Invalidate() override;
@@ -58,7 +59,7 @@ class RenderWidgetFullscreenPepper : public RenderWidgetFullscreen,
   RenderWidgetFullscreenPepper(CompositorDependencies* compositor_deps,
                                PepperPluginInstanceImpl* plugin,
                                const GURL& active_url,
-                               const blink::WebScreenInfo& screen_info);
+                               const ScreenInfo& screen_info);
   ~RenderWidgetFullscreenPepper() override;
 
   // RenderWidget API.

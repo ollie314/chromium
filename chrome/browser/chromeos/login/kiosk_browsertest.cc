@@ -5,9 +5,9 @@
 #include <memory>
 #include <vector>
 
-#include "ash/desktop_background/desktop_background_controller.h"
-#include "ash/desktop_background/desktop_background_controller_observer.h"
-#include "ash/shell.h"
+#include "ash/common/wallpaper/wallpaper_controller.h"
+#include "ash/common/wallpaper/wallpaper_controller_observer.h"
+#include "ash/common/wm_shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_util.h"
@@ -78,6 +78,7 @@
 #include "google_apis/gaia/gaia_switches.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "ui/aura/window.h"
 #include "ui/base/accelerators/accelerator.h"
 
 namespace em = enterprise_management;
@@ -360,7 +361,8 @@ class KioskFakeDiskMountManager : public file_manager::FakeDiskMountManager {
 
   void MountUsbStick() {
     DCHECK(!usb_mount_path_.empty());
-    MountPath(usb_mount_path_, "", "", chromeos::MOUNT_TYPE_DEVICE);
+    MountPath(usb_mount_path_, "", "", chromeos::MOUNT_TYPE_DEVICE,
+              chromeos::MOUNT_ACCESS_MODE_READ_ONLY);
   }
 
   void UnMountUsbStick() {
@@ -559,10 +561,9 @@ class KioskTest : public OobeBaseTest {
 
   void LaunchApp(const std::string& app_id, bool diagnostic_mode) {
     bool new_kiosk_ui = KioskAppMenuHandler::EnableNewKioskUI();
-    GetLoginUI()->CallJavascriptFunction(new_kiosk_ui ?
-        kLaunchAppForTestNewAPI : kLaunchAppForTestOldAPI,
-        base::StringValue(app_id),
-        base::FundamentalValue(diagnostic_mode));
+    GetLoginUI()->CallJavascriptFunctionUnsafe(
+        new_kiosk_ui ? kLaunchAppForTestNewAPI : kLaunchAppForTestOldAPI,
+        base::StringValue(app_id), base::FundamentalValue(diagnostic_mode));
   }
 
   void ReloadKioskApps() {
@@ -642,7 +643,7 @@ class KioskTest : public OobeBaseTest {
         extension_service()->GetInstalledExtension(test_app_id_);
   }
 
-  const Version& GetInstalledAppVersion() {
+  const base::Version& GetInstalledAppVersion() {
     return *GetInstalledApp()->version();
   }
 
@@ -966,7 +967,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppWithNetworkConfigAccelerator) {
   // A network error screen should be shown after authenticating.
   OobeScreenWaiter error_screen_waiter(OobeScreen::SCREEN_ERROR_MESSAGE);
   // Simulate Ctrl+Alt+N accelerator.
-  GetLoginUI()->CallJavascriptFunction(
+  GetLoginUI()->CallJavascriptFunctionUnsafe(
       "cr.ui.Oobe.handleAccelerator",
       base::StringValue("app_launch_network_config"));
   error_screen_waiter.Wait();
@@ -1030,8 +1031,8 @@ IN_PROC_BROWSER_TEST_F(KioskTest, DISABLED_LaunchAppNetworkPortal) {
 IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppUserCancel) {
   // Make fake_cws_ return empty update response.
   set_test_app_version("");
-  StartAppLaunchFromLoginScreen(SimulateNetworkOfflineClosure());
   OobeScreenWaiter splash_waiter(OobeScreen::SCREEN_APP_LAUNCH_SPLASH);
+  StartAppLaunchFromLoginScreen(SimulateNetworkOfflineClosure());
   splash_waiter.Wait();
 
   settings_helper_.SetBoolean(
@@ -1039,8 +1040,8 @@ IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppUserCancel) {
   content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_APP_TERMINATING,
       content::NotificationService::AllSources());
-  GetLoginUI()->CallJavascriptFunction("cr.ui.Oobe.handleAccelerator",
-                                       base::StringValue("app_launch_bailout"));
+  GetLoginUI()->CallJavascriptFunctionUnsafe(
+      "cr.ui.Oobe.handleAccelerator", base::StringValue("app_launch_bailout"));
   signal.Wait();
   EXPECT_EQ(chromeos::KioskAppLaunchError::USER_CANCEL,
             chromeos::KioskAppLaunchError::Get());
@@ -1092,7 +1093,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, AutolaunchWarningCancel) {
   content::WindowedNotificationObserver(
       chrome::NOTIFICATION_KIOSK_AUTOLAUNCH_WARNING_VISIBLE,
       content::NotificationService::AllSources()).Wait();
-  GetLoginUI()->CallJavascriptFunction(
+  GetLoginUI()->CallJavascriptFunctionUnsafe(
       "login.AutolaunchScreen.confirmAutoLaunchForTesting",
       base::FundamentalValue(false));
 
@@ -1124,7 +1125,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, AutolaunchWarningConfirm) {
   content::WindowedNotificationObserver(
       chrome::NOTIFICATION_KIOSK_AUTOLAUNCH_WARNING_VISIBLE,
       content::NotificationService::AllSources()).Wait();
-  GetLoginUI()->CallJavascriptFunction(
+  GetLoginUI()->CallJavascriptFunctionUnsafe(
       "login.AutolaunchScreen.confirmAutoLaunchForTesting",
       base::FundamentalValue(true));
 
@@ -1157,14 +1158,14 @@ IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableCancel) {
   // Wait for the login UI to come up and switch to the kiosk_enable screen.
   wizard_controller->SkipToLoginForTesting(LoginScreenContext());
   OobeScreenWaiter(OobeScreen::SCREEN_GAIA_SIGNIN).Wait();
-  GetLoginUI()->CallJavascriptFunction("cr.ui.Oobe.handleAccelerator",
-                                       base::StringValue("kiosk_enable"));
+  GetLoginUI()->CallJavascriptFunctionUnsafe("cr.ui.Oobe.handleAccelerator",
+                                             base::StringValue("kiosk_enable"));
 
   // Wait for the kiosk_enable screen to show and cancel the screen.
   content::WindowedNotificationObserver(
       chrome::NOTIFICATION_KIOSK_ENABLE_WARNING_VISIBLE,
       content::NotificationService::AllSources()).Wait();
-  GetLoginUI()->CallJavascriptFunction(
+  GetLoginUI()->CallJavascriptFunctionUnsafe(
       "login.KioskEnableScreen.enableKioskForTesting",
       base::FundamentalValue(false));
 
@@ -1192,14 +1193,14 @@ IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableConfirmed) {
   // Wait for the login UI to come up and switch to the kiosk_enable screen.
   wizard_controller->SkipToLoginForTesting(LoginScreenContext());
   OobeScreenWaiter(OobeScreen::SCREEN_GAIA_SIGNIN).Wait();
-  GetLoginUI()->CallJavascriptFunction("cr.ui.Oobe.handleAccelerator",
-                                       base::StringValue("kiosk_enable"));
+  GetLoginUI()->CallJavascriptFunctionUnsafe("cr.ui.Oobe.handleAccelerator",
+                                             base::StringValue("kiosk_enable"));
 
   // Wait for the kiosk_enable screen to show and cancel the screen.
   content::WindowedNotificationObserver(
       chrome::NOTIFICATION_KIOSK_ENABLE_WARNING_VISIBLE,
       content::NotificationService::AllSources()).Wait();
-  GetLoginUI()->CallJavascriptFunction(
+  GetLoginUI()->CallJavascriptFunctionUnsafe(
       "login.KioskEnableScreen.enableKioskForTesting",
       base::FundamentalValue(true));
 
@@ -1224,14 +1225,14 @@ IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableAfter2ndSigninScreen) {
   // Wait for the login UI to come up and switch to the kiosk_enable screen.
   wizard_controller->SkipToLoginForTesting(LoginScreenContext());
   OobeScreenWaiter(OobeScreen::SCREEN_GAIA_SIGNIN).Wait();
-  GetLoginUI()->CallJavascriptFunction("cr.ui.Oobe.handleAccelerator",
-                                       base::StringValue("kiosk_enable"));
+  GetLoginUI()->CallJavascriptFunctionUnsafe("cr.ui.Oobe.handleAccelerator",
+                                             base::StringValue("kiosk_enable"));
 
   // Wait for the kiosk_enable screen to show and cancel the screen.
   content::WindowedNotificationObserver(
       chrome::NOTIFICATION_KIOSK_ENABLE_WARNING_VISIBLE,
       content::NotificationService::AllSources()).Wait();
-  GetLoginUI()->CallJavascriptFunction(
+  GetLoginUI()->CallJavascriptFunctionUnsafe(
       "login.KioskEnableScreen.enableKioskForTesting",
       base::FundamentalValue(false));
 
@@ -1245,8 +1246,8 @@ IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableAfter2ndSigninScreen) {
   OobeScreenWaiter(OobeScreen::SCREEN_GAIA_SIGNIN).Wait();
 
   // Show kiosk enable screen again.
-  GetLoginUI()->CallJavascriptFunction("cr.ui.Oobe.handleAccelerator",
-                                       base::StringValue("kiosk_enable"));
+  GetLoginUI()->CallJavascriptFunctionUnsafe("cr.ui.Oobe.handleAccelerator",
+                                             base::StringValue("kiosk_enable"));
 
   // And it should show up.
   content::WindowedNotificationObserver(
@@ -1294,7 +1295,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, NoConsumerAutoLaunchWhenUntrusted) {
   content::WindowedNotificationObserver(
       chrome::NOTIFICATION_KIOSK_AUTOLAUNCH_WARNING_VISIBLE,
       content::NotificationService::AllSources()).Wait();
-  GetLoginUI()->CallJavascriptFunction(
+  GetLoginUI()->CallJavascriptFunctionUnsafe(
       "login.AutolaunchScreen.confirmAutoLaunchForTesting",
       base::FundamentalValue(true));
 
@@ -2332,7 +2333,7 @@ IN_PROC_BROWSER_TEST_F(KioskEnterpriseTest, PrivateStore) {
 // Specialized test fixture for testing kiosk mode on the
 // hidden WebUI initialization flow for slow hardware.
 class KioskHiddenWebUITest : public KioskTest,
-                             public ash::DesktopBackgroundControllerObserver {
+                             public ash::WallpaperControllerObserver {
  public:
   KioskHiddenWebUITest() : wallpaper_loaded_(false) {}
 
@@ -2346,13 +2347,11 @@ class KioskHiddenWebUITest : public KioskTest,
     LoginDisplayHostImpl::DisableRestrictiveProxyCheckForTest();
 
     KioskTest::SetUpOnMainThread();
-    ash::Shell::GetInstance()->desktop_background_controller()
-        ->AddObserver(this);
+    ash::WmShell::Get()->wallpaper_controller()->AddObserver(this);
   }
 
   void TearDownOnMainThread() override {
-    ash::Shell::GetInstance()->desktop_background_controller()
-        ->RemoveObserver(this);
+    ash::WmShell::Get()->wallpaper_controller()->RemoveObserver(this);
     KioskTest::TearDownOnMainThread();
   }
 
@@ -2365,7 +2364,7 @@ class KioskHiddenWebUITest : public KioskTest,
 
   bool wallpaper_loaded() const { return wallpaper_loaded_; }
 
-  // ash::DesktopBackgroundControllerObserver overrides:
+  // ash::WallpaperControllerObserver overrides:
   void OnWallpaperDataChanged() override {
     wallpaper_loaded_ = true;
     if (runner_.get())

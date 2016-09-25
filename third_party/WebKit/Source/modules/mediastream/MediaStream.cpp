@@ -27,6 +27,7 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/frame/Deprecation.h"
 #include "modules/mediastream/MediaStreamRegistry.h"
 #include "modules/mediastream/MediaStreamTrackEvent.h"
 #include "platform/mediastream/MediaStreamCenter.h"
@@ -286,19 +287,23 @@ void MediaStream::trackEnded()
 
 void MediaStream::streamEnded()
 {
-    if (m_stopped || m_descriptor->ended())
+    if (m_stopped)
         return;
 
     if (active()) {
         m_descriptor->setActive(false);
         scheduleDispatchEvent(Event::create(EventTypeNames::inactive));
     }
+}
 
-    // TODO(guidou): remove firing of this event. See crbug.com/586924
-    if (!m_descriptor->ended()) {
-        m_descriptor->setEnded();
-        scheduleDispatchEvent(Event::create(EventTypeNames::ended));
-    }
+bool MediaStream::addEventListenerInternal(const AtomicString& eventType, EventListener* listener, const AddEventListenerOptionsResolved& options)
+{
+    if (eventType == EventTypeNames::active)
+        UseCounter::count(getExecutionContext(), UseCounter::MediaStreamOnActive);
+    else if (eventType == EventTypeNames::inactive)
+        UseCounter::count(getExecutionContext(), UseCounter::MediaStreamOnInactive);
+
+    return EventTargetWithInlineData::addEventListenerInternal(eventType, listener, options);
 }
 
 void MediaStream::contextDestroyed()
@@ -335,7 +340,7 @@ void MediaStream::addRemoteTrack(MediaStreamComponent* component)
     track->registerMediaStream(this);
     m_descriptor->addComponent(component);
 
-    scheduleDispatchEvent(MediaStreamTrackEvent::create(EventTypeNames::addtrack, false, false, track));
+    scheduleDispatchEvent(MediaStreamTrackEvent::create(EventTypeNames::addtrack, track));
 
     if (!active() && !track->ended()) {
         m_descriptor->setActive(true);
@@ -374,7 +379,7 @@ void MediaStream::removeRemoteTrack(MediaStreamComponent* component)
     MediaStreamTrack* track = (*tracks)[index];
     track->unregisterMediaStream(this);
     tracks->remove(index);
-    scheduleDispatchEvent(MediaStreamTrackEvent::create(EventTypeNames::removetrack, false, false, track));
+    scheduleDispatchEvent(MediaStreamTrackEvent::create(EventTypeNames::removetrack, track));
 
     if (active() && emptyOrOnlyEndedTracks()) {
         m_descriptor->setActive(false);
@@ -390,7 +395,7 @@ void MediaStream::scheduleDispatchEvent(Event* event)
         m_scheduledEventTimer.startOneShot(0, BLINK_FROM_HERE);
 }
 
-void MediaStream::scheduledEventTimerFired(Timer<MediaStream>*)
+void MediaStream::scheduledEventTimerFired(TimerBase*)
 {
     if (m_stopped)
         return;

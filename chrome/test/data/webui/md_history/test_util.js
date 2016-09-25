@@ -6,9 +6,41 @@
  * Waits for queued up tasks to finish before proceeding. Inspired by:
  * https://github.com/Polymer/web-component-tester/blob/master/browser/environment/helpers.js#L97
  */
-function flush(callback) {
+function flush() {
   Polymer.dom.flush();
-  window.setTimeout(callback, 0);
+  // Promises have microtask timing, so we use setTimeout to explicity force a
+  // new task.
+  return new Promise(function(resolve, reject) {
+    window.setTimeout(resolve, 0);
+  });
+}
+
+/**
+ * Replace the current primary element of the test with a new element. Useful
+ * as an alternative to PolymerTest.clearBody() which preserves styling.
+ * @param {Element} element
+ */
+function replaceBody(element) {
+  var body = document.body;
+  var currentBody =
+      body.querySelector('history-app') || body.querySelector('.test-body');
+  body.removeChild(currentBody);
+
+  element.classList.add('test-body');
+  body.appendChild(element);
+}
+
+/**
+ * Replace the document body with a new instance of <history-app>.
+ * @return {HistoryAppElement} The app which was created.
+ */
+function replaceApp() {
+  var app = document.createElement('history-app');
+  app.id = 'history-app';
+  // Disable querying for tests by default.
+  app.queryState_.queryingDisabled = true;
+  replaceBody(app);
+  return app;
 }
 
 /**
@@ -54,4 +86,122 @@ function createSearchEntry(timestamp, urlStr) {
   entry.dateRelativeDay = '';
 
   return entry;
+}
+
+/**
+ * Create a simple HistoryInfo.
+ * @param {?string} searchTerm The search term that the info has. Will be empty
+ *     string if not specified.
+ * @return {!HistoryInfo}
+ */
+function createHistoryInfo(searchTerm) {
+  return {
+    finished: true,
+    hasSyncedResults: false,
+    queryEndTime: 'Monday',
+    queryStartTime: 'Tuesday',
+    term: searchTerm || ''
+  };
+}
+
+/**
+ * @param {Element} element
+ * @param {string} selector
+ * @return {Element}
+ */
+function polymerSelectAll(element, selector) {
+  return Polymer.dom(element.root).querySelectorAll(selector);
+}
+
+/**
+ * Returns a promise which is resolved when |eventName| is fired on |element|
+ * and |predicate| is true.
+ * @param {HTMLElement} element
+ * @param {string} eventName
+ * @param {function(Event): boolean} predicate
+ * @return {Promise}
+ */
+function waitForEvent(element, eventName, predicate) {
+  if (!predicate)
+    predicate = function() { return true; };
+
+  return new Promise(function(resolve) {
+    var listener = function(e) {
+      if (!predicate(e))
+        return;
+
+      resolve();
+      element.removeEventListener(eventName, listener);
+    }
+
+    element.addEventListener(eventName, listener);
+  });
+}
+
+/**
+ * Sends a shift click event to |element|.
+ * @param {HTMLElement} element
+ */
+function shiftClick(element) {
+  var xy = MockInteractions.middleOfNode(element);
+  var props = {
+    bubbles: true,
+    cancelable: true,
+    clientX: xy.x,
+    clientY: xy.y,
+    buttons: 1,
+    shiftKey: true,
+  };
+
+  element.dispatchEvent(new MouseEvent('mousedown', props));
+  element.dispatchEvent(new MouseEvent('mouseup', props));
+  element.dispatchEvent(new MouseEvent('click', props));
+}
+
+function disableLinkClicks() {
+  document.addEventListener('click', function(e) {
+    if (e.defaultPrevented)
+      return;
+
+    var eventPath = e.path;
+    var anchor = null;
+    if (eventPath) {
+      for (var i = 0; i < eventPath.length; i++) {
+        var element = eventPath[i];
+        if (element.tagName === 'A' && element.href) {
+          anchor = element;
+          break;
+        }
+      }
+    }
+
+    if (!anchor)
+      return;
+
+    e.preventDefault();
+  });
+}
+
+function createSession(name, windows) {
+  return {
+    collapsed: false,
+    deviceType: '',
+    name: name,
+    modifiedTime: '2 seconds ago',
+    tag: name,
+    timestamp: 0,
+    windows: windows
+  };
+}
+
+function createWindow(tabUrls) {
+  var tabs = tabUrls.map(function(tabUrl) {
+    return {sessionId: 456, timestamp: 0, title: tabUrl, url: tabUrl};
+  });
+
+  return {
+    tabs: tabs,
+    sessionId: '123',
+    userVisibleTimestamp: "A while ago"
+  };
 }

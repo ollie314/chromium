@@ -11,7 +11,9 @@
 #include <string>
 
 #include "base/memory/scoped_vector.h"
+#include "base/optional.h"
 #include "base/strings/string16.h"
+#include "device/bluetooth/bluetooth_common.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_uuid.h"
 #include "device/bluetooth/test/mock_bluetooth_gatt_service.h"
@@ -19,38 +21,39 @@
 
 namespace device {
 
-class BluetoothGattService;
+class BluetoothRemoteGattService;
 class MockBluetoothAdapter;
 
 class MockBluetoothDevice : public BluetoothDevice {
  public:
   MockBluetoothDevice(MockBluetoothAdapter* adapter,
                       uint32_t bluetooth_class,
-                      const std::string& name,
+                      const char* name,
                       const std::string& address,
                       bool paired,
                       bool connected);
   virtual ~MockBluetoothDevice();
 
   MOCK_CONST_METHOD0(GetBluetoothClass, uint32_t());
-  MOCK_CONST_METHOD0(GetDeviceName, std::string());
+  MOCK_CONST_METHOD0(GetType, BluetoothTransport());
   MOCK_CONST_METHOD0(GetIdentifier, std::string());
   MOCK_CONST_METHOD0(GetAddress, std::string());
   MOCK_CONST_METHOD0(GetVendorIDSource, BluetoothDevice::VendorIDSource());
   MOCK_CONST_METHOD0(GetVendorID, uint16_t());
   MOCK_CONST_METHOD0(GetProductID, uint16_t());
   MOCK_CONST_METHOD0(GetDeviceID, uint16_t());
-  MOCK_CONST_METHOD0(GetName, base::string16());
-  MOCK_CONST_METHOD0(GetDeviceType, BluetoothDevice::DeviceType());
   MOCK_CONST_METHOD0(GetAppearance, uint16_t());
+  MOCK_CONST_METHOD0(GetName, base::Optional<std::string>());
+  MOCK_CONST_METHOD0(GetNameForDisplay, base::string16());
+  MOCK_CONST_METHOD0(GetDeviceType, BluetoothDevice::DeviceType());
   MOCK_CONST_METHOD0(IsPaired, bool());
   MOCK_CONST_METHOD0(IsConnected, bool());
   MOCK_CONST_METHOD0(IsGattConnected, bool());
   MOCK_CONST_METHOD0(IsConnectable, bool());
   MOCK_CONST_METHOD0(IsConnecting, bool());
-  MOCK_CONST_METHOD0(GetUUIDs, UUIDList());
-  MOCK_CONST_METHOD0(GetInquiryRSSI, int16_t());
-  MOCK_CONST_METHOD0(GetInquiryTxPower, int16_t());
+  MOCK_CONST_METHOD0(GetUUIDs, UUIDSet());
+  MOCK_CONST_METHOD0(GetInquiryRSSI, base::Optional<int8_t>());
+  MOCK_CONST_METHOD0(GetInquiryTxPower, base::Optional<int8_t>());
   MOCK_CONST_METHOD0(ExpectingPinCode, bool());
   MOCK_CONST_METHOD0(ExpectingPasskey, bool());
   MOCK_CONST_METHOD0(ExpectingConfirmation, bool());
@@ -88,8 +91,13 @@ class MockBluetoothDevice : public BluetoothDevice {
                void(const GattConnectionCallback& callback,
                     const ConnectErrorCallback& error_callback));
 
-  MOCK_CONST_METHOD0(GetGattServices, std::vector<BluetoothGattService*>());
-  MOCK_CONST_METHOD1(GetGattService, BluetoothGattService*(const std::string&));
+  MOCK_METHOD1(SetGattServicesDiscoveryComplete, void(bool));
+  MOCK_CONST_METHOD0(IsGattServicesDiscoveryComplete, bool());
+
+  MOCK_CONST_METHOD0(GetGattServices,
+                     std::vector<BluetoothRemoteGattService*>());
+  MOCK_CONST_METHOD1(GetGattService,
+                     BluetoothRemoteGattService*(const std::string&));
   MOCK_METHOD0(CreateGattConnectionImpl, void());
   MOCK_METHOD0(DisconnectGatt, void());
 
@@ -102,14 +110,20 @@ class MockBluetoothDevice : public BluetoothDevice {
   //   .WillByDefault(Invoke(*mock_device,
   //                         &MockBluetoothDevice::GetMockServices));
   void AddMockService(std::unique_ptr<MockBluetoothGattService> mock_device);
-  std::vector<BluetoothGattService*> GetMockServices() const;
-  BluetoothGattService* GetMockService(const std::string& identifier) const;
+  std::vector<BluetoothRemoteGattService*> GetMockServices() const;
+  BluetoothRemoteGattService* GetMockService(
+      const std::string& identifier) const;
+
+  void AddUUID(const BluetoothUUID& uuid) { uuids_.insert(uuid); }
+
+  void SetConnected(bool connected) { connected_ = connected; }
 
  private:
   uint32_t bluetooth_class_;
-  std::string name_;
+  base::Optional<std::string> name_;
   std::string address_;
-  BluetoothDevice::UUIDList uuids_;
+  BluetoothDevice::UUIDSet uuids_;
+  bool connected_;
 
   ScopedVector<MockBluetoothGattService> mock_services_;
 };

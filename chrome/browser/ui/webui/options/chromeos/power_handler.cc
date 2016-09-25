@@ -4,15 +4,16 @@
 
 #include "chrome/browser/ui/webui/options/chromeos/power_handler.h"
 
+#include "ash/resources/grit/ash_resources.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/ash_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -24,9 +25,11 @@ namespace chromeos {
 namespace options {
 
 PowerHandler::PowerHandler() {
-  this->show_power_status_ = switches::PowerOverlayEnabled() ||
-                             (PowerStatus::Get()->IsBatteryPresent() &&
-                              PowerStatus::Get()->SupportsDualRoleDevices());
+  // TODO(mash): Support Chrome power settings in Mash. crbug.com/644348
+  this->show_power_status_ = !chrome::IsRunningInMash() &&
+                             (switches::PowerOverlayEnabled() ||
+                              (PowerStatus::Get()->IsBatteryPresent() &&
+                               PowerStatus::Get()->SupportsDualRoleDevices()));
 }
 
 PowerHandler::~PowerHandler() {
@@ -80,7 +83,7 @@ void PowerHandler::RegisterMessages() {
 }
 
 void PowerHandler::OnPowerStatusChanged() {
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "options.PowerOverlay.setBatteryStatusText",
       base::StringValue(GetStatusValue()));
   UpdatePowerSources();
@@ -158,9 +161,8 @@ void PowerHandler::UpdatePowerSources() {
     sources_list.Append(dict.release());
   }
 
-  web_ui()->CallJavascriptFunction(
-      "options.PowerOverlay.setPowerSources",
-      sources_list,
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "options.PowerOverlay.setPowerSources", sources_list,
       base::StringValue(status->GetCurrentPowerSourceID()),
       base::FundamentalValue(status->IsUsbChargerConnected()),
       base::FundamentalValue(status->IsBatteryTimeBeingCalculated()));

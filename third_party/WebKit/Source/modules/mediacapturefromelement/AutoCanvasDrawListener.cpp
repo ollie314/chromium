@@ -4,17 +4,19 @@
 
 #include "modules/mediacapturefromelement/AutoCanvasDrawListener.h"
 
+#include <memory>
+
 namespace blink {
 
-AutoCanvasDrawListener::AutoCanvasDrawListener(const PassOwnPtr<WebCanvasCaptureHandler>& handler)
-    : CanvasDrawListener(handler)
+AutoCanvasDrawListener::AutoCanvasDrawListener(std::unique_ptr<WebCanvasCaptureHandler> handler)
+    : CanvasDrawListener(std::move(handler))
 {
 }
 
 // static
-AutoCanvasDrawListener* AutoCanvasDrawListener::create(const PassOwnPtr<WebCanvasCaptureHandler>& handler)
+AutoCanvasDrawListener* AutoCanvasDrawListener::create(std::unique_ptr<WebCanvasCaptureHandler> handler)
 {
-    return new AutoCanvasDrawListener(handler);
+    return new AutoCanvasDrawListener(std::move(handler));
 }
 
 } // namespace blink

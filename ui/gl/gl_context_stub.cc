@@ -4,9 +4,13 @@
 
 #include "ui/gl/gl_context_stub.h"
 
-namespace gfx {
+#include "ui/gl/gl_gl_api_implementation.h"
+
+namespace gl {
 
 GLContextStub::GLContextStub() : GLContextReal(nullptr) {}
+GLContextStub::GLContextStub(GLShareGroup* share_group)
+    : GLContextReal(share_group) {}
 
 bool GLContextStub::Initialize(
     GLSurface* compatible_surface, GpuPreference gpu_preference) {
@@ -14,8 +18,9 @@ bool GLContextStub::Initialize(
 }
 
 bool GLContextStub::MakeCurrent(GLSurface* surface) {
+  SetGLToStubGLApi();
   SetCurrent(surface);
-  SetRealGLApi();
+  InitializeDynamicBindings();
   return true;
 }
 
@@ -24,7 +29,7 @@ void GLContextStub::ReleaseCurrent(GLSurface* surface) {
 }
 
 bool GLContextStub::IsCurrent(GLSurface* surface) {
-  return true;
+  return GetRealCurrent() == this;
 }
 
 void* GLContextStub::GetHandle() {
@@ -40,4 +45,4 @@ std::string GLContextStub::GetGLRenderer() {
 
 GLContextStub::~GLContextStub() {}
 
-}  // namespace gfx
+}  // namespace gl

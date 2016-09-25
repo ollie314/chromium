@@ -9,7 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "device/serial/serial.mojom.h"
 #include "device/serial/test_serial_io_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -78,9 +78,8 @@ class BattOrConnectionImplTest : public testing::Test,
     scoped_refptr<net::IOBuffer> buffer(
         new net::IOBuffer((size_t)bytes_to_read));
 
-    connection_->GetIoHandler()->Read(
-        base::WrapUnique(new device::ReceiveBuffer(
-            buffer, bytes_to_read, base::Bind(&NullReadCallback))));
+    connection_->GetIoHandler()->Read(base::MakeUnique<device::ReceiveBuffer>(
+        buffer, bytes_to_read, base::Bind(&NullReadCallback)));
     task_runner_->RunUntilIdle();
 
     return buffer;
@@ -98,8 +97,8 @@ class BattOrConnectionImplTest : public testing::Test,
   // Writes the specified bytes directly to the serial connection.
   void SendBytesRaw(const char* data, uint16_t bytes_to_send) {
     std::vector<char> data_vector(data, data + bytes_to_send);
-    connection_->GetIoHandler()->Write(base::WrapUnique(
-        new device::SendBuffer(data_vector, base::Bind(&NullWriteCallback))));
+    connection_->GetIoHandler()->Write(base::MakeUnique<device::SendBuffer>(
+        data_vector, base::Bind(&NullWriteCallback)));
     task_runner_->RunUntilIdle();
   }
 
@@ -230,8 +229,9 @@ TEST_F(BattOrConnectionImplTest, ReadMessageEndsMidMessageByte) {
   SendBytesRaw(data, 5);
   ReadMessage(BATTOR_MESSAGE_TYPE_CONTROL);
 
-  ASSERT_TRUE(IsReadComplete());
-  ASSERT_FALSE(GetReadSuccess());
+  // The first read should recognize that a second read is necessary, but the
+  // second read will hang because no bytes ever come in.
+  ASSERT_FALSE(IsReadComplete());
 }
 
 TEST_F(BattOrConnectionImplTest, ReadMessageMissingEndByte) {
@@ -251,8 +251,9 @@ TEST_F(BattOrConnectionImplTest, ReadMessageMissingEndByte) {
   SendBytesRaw(data, 6);
   ReadMessage(BATTOR_MESSAGE_TYPE_CONTROL);
 
-  ASSERT_TRUE(IsReadComplete());
-  ASSERT_FALSE(GetReadSuccess());
+  // The first read should recognize that a second read is necessary, but the
+  // second read will hang because no bytes ever come in.
+  ASSERT_FALSE(IsReadComplete());
 }
 
 TEST_F(BattOrConnectionImplTest, ReadMessageWithEscapeCharacters) {

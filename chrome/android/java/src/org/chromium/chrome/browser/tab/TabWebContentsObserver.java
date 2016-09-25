@@ -4,8 +4,7 @@
 
 package org.chromium.chrome.browser.tab;
 
-import android.content.Context;
-import android.graphics.Color;
+import android.os.SystemClock;
 import android.support.annotation.IntDef;
 import android.view.View;
 
@@ -22,10 +21,8 @@ import org.chromium.chrome.browser.metrics.UmaSessionStats;
 import org.chromium.chrome.browser.metrics.UmaUtils;
 import org.chromium.chrome.browser.policy.PolicyAuditor;
 import org.chromium.chrome.browser.policy.PolicyAuditor.AuditEvent;
-import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
-import org.chromium.ui.base.DeviceFormFactor;
 
 import java.util.concurrent.TimeUnit;
 
@@ -64,12 +61,10 @@ public class TabWebContentsObserver extends WebContentsObserver {
     private static final int TAB_RENDERER_EXIT_STATUS_MAX = 6;
 
     private final Tab mTab;
-    private int mThemeColor;
 
     public TabWebContentsObserver(WebContents webContents, Tab tab) {
         super(webContents);
         mTab = tab;
-        mThemeColor = mTab.getDefaultThemeColor();
     }
 
     @Override
@@ -169,6 +164,7 @@ public class TabWebContentsObserver extends WebContentsObserver {
     @Override
     public void didFailLoad(boolean isProvisionalLoad, boolean isMainFrame, int errorCode,
             String description, String failingUrl, boolean wasIgnoredByHandler) {
+        mTab.updateThemeColorIfNeeded(true);
         RewindableIterator<TabObserver> observers = mTab.getTabObservers();
         while (observers.hasNext()) {
             observers.next().onDidFailLoad(mTab, isProvisionalLoad, isMainFrame, errorCode,
@@ -212,8 +208,8 @@ public class TabWebContentsObserver extends WebContentsObserver {
             //   s = 1.05
             //   s^b = 60000
             //   b = ln(60000) / ln(1.05) ~= 225
-            RecordHistogram.recordCustomTimesHistogram("Startup.FirstCommitNavigationTime",
-                    System.currentTimeMillis() - UmaUtils.getMainEntryPointTime(),
+            RecordHistogram.recordCustomTimesHistogram("Startup.FirstCommitNavigationTime2",
+                    SystemClock.uptimeMillis() - UmaUtils.getForegroundStartTime(),
                     1, 60000 /* 1 minute */, TimeUnit.MILLISECONDS, 225);
             UmaUtils.setRunningApplicationStart(false);
         }
@@ -266,32 +262,14 @@ public class TabWebContentsObserver extends WebContentsObserver {
 
     @Override
     public void didChangeThemeColor(int color) {
-        int securityLevel = mTab.getSecurityLevel();
-        if (securityLevel == ConnectionSecurityLevel.SECURITY_ERROR
-                || securityLevel == ConnectionSecurityLevel.SECURITY_WARNING
-                || securityLevel == ConnectionSecurityLevel.SECURITY_POLICY_WARNING) {
-            color = mTab.getDefaultThemeColor();
-        }
-        if (mTab.isShowingInterstitialPage()) color = mTab.getDefaultThemeColor();
-        if (!isThemeColorEnabled(mTab.getApplicationContext())) {
-            color = mTab.getDefaultThemeColor();
-        }
-        if (color == Color.TRANSPARENT) color = mTab.getDefaultThemeColor();
-        if (mTab.isIncognito()) color = mTab.getDefaultThemeColor();
-        color |= 0xFF000000;
-        if (mTab.getThemeColor() == color) return;
-        mThemeColor = color;
-        RewindableIterator<TabObserver> observers = mTab.getTabObservers();
-        while (observers.hasNext()) {
-            observers.next().onDidChangeThemeColor(mTab, mTab.getThemeColor());
-        }
+        mTab.updateThemeColorIfNeeded(true);
     }
 
     @Override
     public void didAttachInterstitialPage() {
         mTab.getInfoBarContainer().setVisibility(View.INVISIBLE);
         mTab.showRenderedPage();
-        didChangeThemeColor(mTab.getDefaultThemeColor());
+        mTab.updateThemeColorIfNeeded(false);
 
         RewindableIterator<TabObserver> observers = mTab.getTabObservers();
         while (observers.hasNext()) {
@@ -303,13 +281,15 @@ public class TabWebContentsObserver extends WebContentsObserver {
 
         PolicyAuditor auditor =
                 ((ChromeApplication) mTab.getApplicationContext()).getPolicyAuditor();
-        auditor.notifyCertificateFailure(mTab.getWebContents(), mTab.getApplicationContext());
+        auditor.notifyCertificateFailure(
+                PolicyAuditor.nativeGetCertificateFailure(mTab.getWebContents()),
+                mTab.getApplicationContext());
     }
 
     @Override
     public void didDetachInterstitialPage() {
         mTab.getInfoBarContainer().setVisibility(View.VISIBLE);
-        didChangeThemeColor(mTab.getWebContents().getThemeColor(mTab.getDefaultThemeColor()));
+        mTab.updateThemeColorIfNeeded(false);
 
         RewindableIterator<TabObserver> observers = mTab.getTabObservers();
         while (observers.hasNext()) {
@@ -335,18 +315,7 @@ public class TabWebContentsObserver extends WebContentsObserver {
     @Override
     public void destroy() {
         MediaCaptureNotificationService.updateMediaNotificationForTab(
-                mTab.getApplicationContext(), mTab.getId(), false, false, mTab.getUrl());
+                mTab.getApplicationContext(), mTab.getId(), 0, mTab.getUrl());
         super.destroy();
-    }
-
-    /**
-     * @return The theme-color for this web contents.
-     */
-    int getThemeColor() {
-        return mThemeColor;
-    }
-
-    private static boolean isThemeColorEnabled(Context context) {
-        return !DeviceFormFactor.isTablet(context);
     }
 }

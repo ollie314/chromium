@@ -7,7 +7,9 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -20,6 +22,8 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "url/gurl.h"
+
+using base::android::JavaParamRef;
 
 namespace chrome {
 namespace android {
@@ -52,7 +56,7 @@ void ExecuteCallbackFromRef(
 void PostCallback(JNIEnv* env,
                   jobject j_callback,
                   ConnectivityCheckResult result) {
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&ExecuteCallbackFromRef,
                  base::Owned(new base::android::ScopedJavaGlobalRef<jobject>(
@@ -120,7 +124,7 @@ void ConnectivityChecker::OnURLFetchComplete(const net::URLFetcher* source) {
                     CONNECTIVITY_CHECK_RESULT_NOT_CONNECTED);
   }
 
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
 }
 
 ConnectivityChecker::ConnectivityChecker(
@@ -157,7 +161,7 @@ void ConnectivityChecker::OnTimeout() {
   is_being_destroyed_ = true;
   url_fetcher_.reset();
   ExecuteCallback(java_callback_.obj(), CONNECTIVITY_CHECK_RESULT_TIMEOUT);
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
 }
 
 }  // namespace

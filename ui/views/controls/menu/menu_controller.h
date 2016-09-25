@@ -25,9 +25,6 @@
 #include "ui/views/controls/menu/menu_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
-namespace gfx {
-class Screen;
-}
 namespace ui {
 class OSExchangeData;
 class ScopedEventDispatcher;
@@ -43,7 +40,7 @@ class SubmenuView;
 class View;
 
 #if defined(USE_AURA)
-class MenuKeyEventHandler;
+class MenuPreTargetHandler;
 #endif
 
 namespace internal {
@@ -135,7 +132,7 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   ExitType exit_type() const { return exit_type_; }
 
   // Returns the time from the event which closed the menu - or 0.
-  base::TimeDelta closing_event_time() const { return closing_event_time_; }
+  base::TimeTicks closing_event_time() const { return closing_event_time_; }
 
   void set_is_combobox(bool is_combobox) { is_combobox_ = is_combobox; }
 
@@ -179,11 +176,8 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   void OnDragComplete(bool should_close);
 
   // Called while dispatching messages to intercept key events.
-  // If |character| is other than 0, it is handled as a mnemonic.
-  // Otherwise, |key_code| is handled as a menu navigation command.
   // Returns ui::POST_DISPATCH_NONE if the event was swallowed by the menu.
-  ui::PostDispatchAction OnWillDispatchKeyEvent(base::char16 character,
-                                                ui::KeyboardCode key_code);
+  ui::PostDispatchAction OnWillDispatchKeyEvent(ui::KeyEvent* event);
 
   // Update the submenu's selection based on the current mouse location
   void UpdateSubmenuSelection(SubmenuView* source);
@@ -201,7 +195,6 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   friend class internal::MenuRunnerImpl;
   friend class test::MenuControllerTest;
   friend class test::MenuControllerTestApi;
-  friend class MenuKeyEventHandler;
   friend class MenuHostRootView;
   friend class MenuItemView;
   friend class SubmenuView;
@@ -324,10 +317,8 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
 
   ~MenuController() override;
 
-  // Runs the platform specific bits of the message loop. If |nested_menu| is
-  // true we're being asked to run a menu from within a menu (eg a context
-  // menu).
-  void RunMessageLoop(bool nested_menu);
+  // Runs the platform specific bits of the message loop.
+  void RunMessageLoop();
 
   // Invokes AcceleratorPressed() on the hot tracked view if there is one.
   // Returns true if AcceleratorPressed() was invoked.
@@ -674,7 +665,7 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   int message_loop_depth_;
 
   // The timestamp of the event which closed the menu - or 0 otherwise.
-  base::TimeDelta closing_event_time_;
+  base::TimeTicks closing_event_time_;
 
   // Time when the menu is first shown.
   base::TimeTicks menu_start_time_;
@@ -706,7 +697,7 @@ class VIEWS_EXPORT MenuController : public WidgetObserver {
   std::unique_ptr<MenuMessageLoop> message_loop_;
 
 #if defined(USE_AURA)
-  std::unique_ptr<MenuKeyEventHandler> key_event_handler_;
+  std::unique_ptr<MenuPreTargetHandler> menu_pre_target_handler_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(MenuController);

@@ -16,7 +16,6 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/registry.h"
@@ -25,12 +24,7 @@
 #include "base/win/windows_version.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/platform_util_internal.h"
-#include "chrome/common/chrome_utility_messages.h"
-#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/utility_process_host.h"
-#include "content/public/browser/utility_process_host_client.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/win/shell.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
@@ -41,8 +35,6 @@ namespace platform_util {
 
 namespace {
 
-// TODO(asanka): Move this to ui/base/win/shell.{h,cc} and invoke it from the
-// utility process.
 void ShowItemInFolderOnFileThread(const base::FilePath& full_path) {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   base::FilePath dir = full_path.DirName().AsEndingWithSeparator();
@@ -68,7 +60,7 @@ void ShowItemInFolderOnFileThread(const base::FilePath& full_path) {
     // the process.
     HMODULE shell32_base = GetModuleHandle(L"shell32.dll");
     if (!shell32_base) {
-      NOTREACHED() << " " << __FUNCTION__ << "(): Can't open shell32.dll";
+      NOTREACHED() << " " << __func__ << "(): Can't open shell32.dll";
       return;
     }
     open_folder_and_select_itemsPtr =
@@ -111,7 +103,7 @@ void ShowItemInFolderOnFileThread(const base::FilePath& full_path) {
     if (hr == ERROR_FILE_NOT_FOUND) {
       ShellExecute(NULL, L"open", dir.value().c_str(), NULL, NULL, SW_SHOW);
     } else {
-      LOG(WARNING) << " " << __FUNCTION__ << "(): Can't open full_path = \""
+      LOG(WARNING) << " " << __func__ << "(): Can't open full_path = \""
                    << full_path.value() << "\""
                    << " hr = " << logging::SystemErrorCodeToString(hr);
     }
@@ -167,26 +159,6 @@ void OpenExternalOnFileThread(const GURL& url) {
   }
 }
 
-void OpenItemViaShellInUtilityProcess(const base::FilePath& full_path,
-                                      OpenItemType type) {
-  base::WeakPtr<content::UtilityProcessHost> utility_process_host(
-      content::UtilityProcessHost::Create(NULL, NULL)->AsWeakPtr());
-  utility_process_host->SetName(l10n_util::GetStringUTF16(
-      IDS_UTILITY_PROCESS_FILE_DIALOG_NAME));
-  utility_process_host->DisableSandbox();
-  switch (type) {
-    case OPEN_FILE:
-      utility_process_host->Send(
-          new ChromeUtilityMsg_OpenFileViaShell(full_path));
-      return;
-
-    case OPEN_FOLDER:
-      utility_process_host->Send(
-          new ChromeUtilityMsg_OpenFolderViaShell(full_path));
-      return;
-  }
-}
-
 }  // namespace
 
 void ShowItemInFolder(Profile* profile, const base::FilePath& full_path) {
@@ -197,21 +169,14 @@ void ShowItemInFolder(Profile* profile, const base::FilePath& full_path) {
 namespace internal {
 
 void PlatformOpenVerifiedItem(const base::FilePath& path, OpenItemType type) {
-  if (base::FieldTrialList::FindFullName("IsolateShellOperations") ==
-      "Enabled") {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(&OpenItemViaShellInUtilityProcess, path, type));
-  } else {
-    switch (type) {
-      case OPEN_FILE:
-        ui::win::OpenFileViaShell(path);
-        break;
+  switch (type) {
+    case OPEN_FILE:
+      ui::win::OpenFileViaShell(path);
+      break;
 
-      case OPEN_FOLDER:
-        ui::win::OpenFolderViaShell(path);
-        break;
-    }
+    case OPEN_FOLDER:
+      ui::win::OpenFolderViaShell(path);
+      break;
   }
 }
 

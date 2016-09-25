@@ -36,7 +36,6 @@ namespace blink {
 LayoutMultiColumnFlowThread::LayoutMultiColumnFlowThread()
     : m_lastSetWorkedOn(nullptr)
     , m_columnCount(1)
-    , m_columnHeightAvailable(0)
     , m_columnHeightsChanged(false)
     , m_progressionIsInline(true)
     , m_isBeingEvacuated(false)
@@ -81,12 +80,25 @@ static inline bool isMultiColumnContainer(const LayoutObject& object)
     return toLayoutBlockFlow(object).multiColumnFlowThread();
 }
 
+// Return true if there's nothing that prevents the specified object from being in the ancestor
+// chain between some column spanner and its containing multicol container. A column spanner needs
+// the multicol container to be its containing block, so that the spanner is able to escape the flow
+// thread. (Everything contained by the flow thread is split into columns, but this is precisely
+// what shouldn't be done to a spanner, since it's supposed to span all columns.)
+//
+// We require that the parent of the spanner participate in the block formatting context established
+// by the multicol container (i.e. that there are no BFCs or other formatting contexts
+// in-between). We also require that there be no transforms, since transforms insist on being in the
+// containing block chain for everything inside it, which conflicts with a spanners's need to have
+// the multicol container as its direct containing block. We may also not put spanners inside
+// objects that don't support fragmentation.
 static inline bool canContainSpannerInParentFragmentationContext(const LayoutObject& object)
 {
     if (!object.isLayoutBlockFlow())
         return false;
     const LayoutBlockFlow& blockFlow = toLayoutBlockFlow(object);
     return !blockFlow.createsNewFormattingContext()
+        && !blockFlow.hasTransformRelatedProperty()
         && blockFlow.getPaginationBreakability() != LayoutBox::ForbidBreaks
         && !isMultiColumnContainer(blockFlow);
 }
@@ -295,19 +307,14 @@ LayoutUnit LayoutMultiColumnFlowThread::maxColumnLogicalHeight() const
 
 LayoutUnit LayoutMultiColumnFlowThread::tallestUnbreakableLogicalHeight(LayoutUnit offsetInFlowThread) const
 {
-    if (LayoutMultiColumnSet* multicolSet = columnSetAtBlockOffset(offsetInFlowThread))
+    if (LayoutMultiColumnSet* multicolSet = columnSetAtBlockOffset(offsetInFlowThread, AssociateWithLatterPage))
         return multicolSet->tallestUnbreakableLogicalHeight();
     return LayoutUnit();
 }
 
 LayoutSize LayoutMultiColumnFlowThread::columnOffset(const LayoutPoint& point) const
 {
-    if (!hasValidColumnSetInfo())
-        return LayoutSize(0, 0);
-
-    LayoutPoint flowThreadPoint = flipForWritingMode(point);
-    LayoutUnit blockOffset = isHorizontalWritingMode() ? flowThreadPoint.y() : flowThreadPoint.x();
-    return flowThreadTranslationAtOffset(blockOffset);
+    return flowThreadTranslationAtPoint(point, CoordinateSpaceConversion::Containing);
 }
 
 bool LayoutMultiColumnFlowThread::needsNewWidth() const
@@ -325,12 +332,31 @@ bool LayoutMultiColumnFlowThread::isPageLogicalHeightKnown() const
     return false;
 }
 
-LayoutSize LayoutMultiColumnFlowThread::flowThreadTranslationAtOffset(LayoutUnit offsetInFlowThread) const
+LayoutSize LayoutMultiColumnFlowThread::flowThreadTranslationAtOffset(LayoutUnit offsetInFlowThread, PageBoundaryRule rule, CoordinateSpaceConversion mode) const
 {
-    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(offsetInFlowThread);
+    if (!hasValidColumnSetInfo())
+        return LayoutSize(0, 0);
+    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(offsetInFlowThread, rule);
     if (!columnSet)
         return LayoutSize(0, 0);
-    return columnSet->flowThreadTranslationAtOffset(offsetInFlowThread);
+    return columnSet->flowThreadTranslationAtOffset(offsetInFlowThread, rule, mode);
+}
+
+LayoutSize LayoutMultiColumnFlowThread::flowThreadTranslationAtPoint(const LayoutPoint& flowThreadPoint, CoordinateSpaceConversion mode) const
+{
+    LayoutPoint flippedPoint = flipForWritingMode(flowThreadPoint);
+    LayoutUnit blockOffset = isHorizontalWritingMode() ? flippedPoint.y() : flippedPoint.x();
+
+    // If block direction is flipped, points at a column boundary belong in the former column, not
+    // the latter.
+    PageBoundaryRule rule = hasFlippedBlocksWritingMode() ? AssociateWithFormerPage : AssociateWithLatterPage;
+
+    return flowThreadTranslationAtOffset(blockOffset, rule, mode);
+}
+
+LayoutPoint LayoutMultiColumnFlowThread::flowThreadPointToVisualPoint(const LayoutPoint& flowThreadPoint) const
+{
+    return flowThreadPoint + flowThreadTranslationAtPoint(flowThreadPoint, CoordinateSpaceConversion::Visual);
 }
 
 LayoutPoint LayoutMultiColumnFlowThread::visualPointToFlowThreadPoint(const LayoutPoint& visualPoint) const
@@ -348,17 +374,18 @@ LayoutPoint LayoutMultiColumnFlowThread::visualPointToFlowThreadPoint(const Layo
 int LayoutMultiColumnFlowThread::inlineBlockBaseline(LineDirectionMode lineDirection) const
 {
     LayoutUnit baselineInFlowThread = LayoutUnit(LayoutFlowThread::inlineBlockBaseline(lineDirection));
-    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(baselineInFlowThread);
+    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(baselineInFlowThread, AssociateWithLatterPage);
     if (!columnSet)
         return baselineInFlowThread.toInt();
     return (baselineInFlowThread - columnSet->pageLogicalTopForOffset(baselineInFlowThread)).ceil();
 }
 
-LayoutMultiColumnSet* LayoutMultiColumnFlowThread::columnSetAtBlockOffset(LayoutUnit offset) const
+LayoutMultiColumnSet* LayoutMultiColumnFlowThread::columnSetAtBlockOffset(LayoutUnit offset, PageBoundaryRule pageBoundaryRule) const
 {
-    if (LayoutMultiColumnSet* columnSet = m_lastSetWorkedOn) {
+    LayoutMultiColumnSet* columnSet = m_lastSetWorkedOn;
+    if (columnSet) {
         // Layout in progress. We are calculating the set heights as we speak, so the column set range
-        // information is not up-to-date.
+        // information is not up to date.
         while (columnSet->logicalTopInFlowThread() > offset) {
             // Sometimes we have to use a previous set. This happens when we're working with a block
             // that contains a spanner (so that there's a column set both before and after the
@@ -368,22 +395,29 @@ LayoutMultiColumnSet* LayoutMultiColumnFlowThread::columnSetAtBlockOffset(Layout
                 break;
             columnSet = previousSet;
         }
-        return columnSet;
+    } else {
+        DCHECK(!m_columnSetsInvalidated);
+        if (m_multiColumnSetList.isEmpty())
+            return nullptr;
+        if (offset < LayoutUnit())
+            return m_multiColumnSetList.first();
+
+        MultiColumnSetSearchAdapter adapter(offset);
+        m_multiColumnSetIntervalTree.allOverlapsWithAdapter<MultiColumnSetSearchAdapter>(adapter);
+
+        // If no set was found, the offset is in the flow thread overflow.
+        if (!adapter.result() && !m_multiColumnSetList.isEmpty())
+            return m_multiColumnSetList.last();
+        columnSet = adapter.result();
     }
-
-    ASSERT(!m_columnSetsInvalidated);
-    if (m_multiColumnSetList.isEmpty())
-        return nullptr;
-    if (offset <= 0)
-        return m_multiColumnSetList.first();
-
-    MultiColumnSetSearchAdapter adapter(offset);
-    m_multiColumnSetIntervalTree.allOverlapsWithAdapter<MultiColumnSetSearchAdapter>(adapter);
-
-    // If no set was found, the offset is in the flow thread overflow.
-    if (!adapter.result() && !m_multiColumnSetList.isEmpty())
-        return m_multiColumnSetList.last();
-    return adapter.result();
+    if (pageBoundaryRule == AssociateWithFormerPage && columnSet && offset == columnSet->logicalTopInFlowThread()) {
+        // The column set that we found starts at the exact same flow thread offset as we specified.
+        // Since we are to associate offsets at boundaries with the former fragmentainer, the
+        // fragmentainer we're looking for is in the previous column set.
+        if (LayoutMultiColumnSet* previousSet = columnSet->previousSiblingMultiColumnSet())
+            return previousSet;
+    }
+    return columnSet;
 }
 
 void LayoutMultiColumnFlowThread::layoutColumns(SubtreeLayoutScope& layoutScope)
@@ -489,12 +523,7 @@ void LayoutMultiColumnFlowThread::appendNewFragmentainerGroupIfNeeded(LayoutUnit
         // Its height is indefinite for now.
         return;
     }
-    // TODO(mstensho): If pageBoundaryRule is AssociateWithFormerPage, offsetInFlowThread is an
-    // endpoint-exclusive offset, i.e. the offset just after the bottom of some object. So, ideally,
-    // columnSetAtBlockOffset() should be informed about this (i.e. take a PageBoundaryRule
-    // argument). This is not the only place with this issue; see also
-    // pageRemainingLogicalHeightForOffset().
-    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(offsetInFlowThread);
+    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(offsetInFlowThread, pageBoundaryRule);
     if (columnSet->isInitialHeightCalculated()) {
         // We only insert additional fragmentainer groups in the initial layout pass. We only want
         // to balance columns in the last fragmentainer group (if we need to balance at all), so we
@@ -564,10 +593,10 @@ void LayoutMultiColumnFlowThread::calculateColumnCountAndWidth(LayoutUnit& width
         count = computedColumnCount;
         width = ((availableWidth - ((count - 1) * columnGap)) / count).clampNegativeToZero();
     } else if (!columnStyle->hasAutoColumnWidth() && columnStyle->hasAutoColumnCount()) {
-        count = std::max(LayoutUnit(1), (availableWidth + columnGap) / (computedColumnWidth + columnGap));
+        count = std::max(LayoutUnit(1), (availableWidth + columnGap) / (computedColumnWidth + columnGap)).toUnsigned();
         width = ((availableWidth + columnGap) / count) - columnGap;
     } else {
-        count = std::max(std::min(LayoutUnit(computedColumnCount), (availableWidth + columnGap) / (computedColumnWidth + columnGap)), LayoutUnit(1));
+        count = std::max(std::min(LayoutUnit(computedColumnCount), (availableWidth + columnGap) / (computedColumnWidth + columnGap)), LayoutUnit(1)).toUnsigned();
         width = ((availableWidth + columnGap) / count) - columnGap;
     }
 }
@@ -1024,6 +1053,16 @@ bool LayoutMultiColumnFlowThread::canSkipLayout(const LayoutBox& root) const
             next = object->nextInPreOrderAfterChildren(&root);
     }
     return true;
+}
+
+MultiColumnLayoutState LayoutMultiColumnFlowThread::multiColumnLayoutState() const
+{
+    return MultiColumnLayoutState(m_lastSetWorkedOn);
+}
+
+void LayoutMultiColumnFlowThread::restoreMultiColumnLayoutState(const MultiColumnLayoutState& state)
+{
+    m_lastSetWorkedOn = state.columnSet();
 }
 
 } // namespace blink

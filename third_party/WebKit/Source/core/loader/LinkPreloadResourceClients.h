@@ -9,7 +9,6 @@
 #include "core/fetch/FontResource.h"
 #include "core/fetch/ImageResource.h"
 #include "core/fetch/RawResource.h"
-#include "core/fetch/ResourceLoader.h"
 #include "core/fetch/ResourceOwner.h"
 #include "core/fetch/ScriptResource.h"
 #include "core/fetch/StyleSheetResourceClient.h"
@@ -34,7 +33,7 @@ protected:
     LinkPreloadResourceClient(LinkLoader* loader)
         : m_loader(loader)
     {
-        ASSERT(loader);
+        DCHECK(loader);
     }
 
 private:
@@ -56,7 +55,7 @@ public:
 
     void notifyFinished(Resource* resource) override
     {
-        ASSERT(this->resource() == resource);
+        DCHECK_EQ(this->resource(), resource);
         triggerEvents(resource);
     }
 
@@ -70,7 +69,7 @@ private:
     LinkPreloadScriptResourceClient(LinkLoader* loader, ScriptResource* resource)
         : LinkPreloadResourceClient(loader)
     {
-        setResource(resource);
+        setResource(resource, Resource::DontMarkAsReferenced);
     }
 };
 
@@ -89,7 +88,7 @@ public:
 
     void setCSSStyleSheet(const String&, const KURL&, const String&, const CSSStyleSheetResource* resource) override
     {
-        ASSERT(this->resource() == resource);
+        DCHECK_EQ(this->resource(), resource);
         triggerEvents(static_cast<const Resource*>(resource));
     }
 
@@ -103,7 +102,7 @@ private:
     LinkPreloadStyleResourceClient(LinkLoader* loader, CSSStyleSheetResource* resource)
         : LinkPreloadResourceClient(loader)
     {
-        setResource(resource);
+        setResource(resource, Resource::DontMarkAsReferenced);
     }
 };
 
@@ -122,7 +121,7 @@ public:
 
     void notifyFinished(Resource* resource) override
     {
-        ASSERT(this->resource() == toImageResource(resource));
+        DCHECK_EQ(this->resource(), toImageResource(resource));
         triggerEvents(resource);
     }
 
@@ -136,7 +135,7 @@ private:
     LinkPreloadImageResourceClient(LinkLoader* loader, ImageResource* resource)
         : LinkPreloadResourceClient(loader)
     {
-        setResource(resource);
+        setResource(resource, Resource::DontMarkAsReferenced);
     }
 };
 
@@ -155,7 +154,7 @@ public:
 
     void notifyFinished(Resource* resource) override
     {
-        ASSERT(this->resource() == toFontResource(resource));
+        DCHECK_EQ(this->resource(), toFontResource(resource));
         triggerEvents(resource);
     }
 
@@ -169,7 +168,7 @@ private:
     LinkPreloadFontResourceClient(LinkLoader* loader, FontResource* resource)
         : LinkPreloadResourceClient(loader)
     {
-        setResource(resource);
+        setResource(resource, Resource::DontMarkAsReferenced);
     }
 };
 
@@ -188,7 +187,7 @@ public:
 
     void notifyFinished(Resource* resource) override
     {
-        ASSERT(this->resource() == toRawResource(resource));
+        DCHECK_EQ(this->resource(), toRawResource(resource));
         triggerEvents(resource);
     }
 
@@ -202,7 +201,7 @@ private:
     LinkPreloadRawResourceClient(LinkLoader* loader, RawResource* resource)
         : LinkPreloadResourceClient(loader)
     {
-        setResource(resource);
+        setResource(resource, Resource::DontMarkAsReferenced);
     }
 };
 

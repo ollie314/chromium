@@ -9,17 +9,19 @@
 #include <utility>
 #include <vector>
 
-#include "ash/ash_constants.h"
-#include "ash/ash_switches.h"
-#include "ash/shell.h"
+#include "ash/common/ash_constants.h"
+#include "ash/common/wallpaper/wallpaper_controller.h"
+#include "ash/common/wm_shell.h"
+#include "ash/public/interfaces/wallpaper.mojom.h"
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
@@ -36,6 +38,7 @@
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -57,6 +60,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/mojo_shell_connection.h"
+#include "services/shell/public/cpp/connector.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/image/image_skia_operations.h"
@@ -103,7 +108,7 @@ base::FilePath GetCustomizedWallpaperDefaultRescaledFileName(
       default_downloaded_file_name.BaseName().value() + suffix);
 }
 
-// Whether DesktopBackgroundController should start with customized default
+// Whether WallpaperController should start with customized default
 // wallpaper in WallpaperManager::InitializeWallpaper() or not.
 bool ShouldUseCustomizedDefaultWallpaper() {
   PrefService* pref_service = g_browser_process->local_state();
@@ -165,11 +170,59 @@ wallpaper::WallpaperFilesId HashWallpaperFilesIdStr(
   return wallpaper::WallpaperFilesId::FromString(result);
 }
 
+// Returns true if HashWallpaperFilesIdStr will not assert().
+bool CanGetFilesId() {
+  return SystemSaltGetter::Get()->GetRawSalt();
+}
+
+// Call |closure| when HashWallpaperFilesIdStr will not assert().
+void CallWhenCanGetFilesId(const base::Closure& closure) {
+  SystemSaltGetter::Get()->AddOnSystemSaltReady(closure);
+}
+
 void SetKnownUserWallpaperFilesId(
     const AccountId& account_id,
     const wallpaper::WallpaperFilesId& wallpaper_files_id) {
   user_manager::known_user::SetStringPref(account_id, kWallpaperFilesId,
                                           wallpaper_files_id.id());
+}
+
+ash::mojom::WallpaperLayout WallpaperLayoutToMojo(
+    wallpaper::WallpaperLayout layout) {
+  switch (layout) {
+    case wallpaper::WALLPAPER_LAYOUT_CENTER:
+      return ash::mojom::WallpaperLayout::CENTER;
+    case wallpaper::WALLPAPER_LAYOUT_CENTER_CROPPED:
+      return ash::mojom::WallpaperLayout::CENTER_CROPPED;
+    case wallpaper::WALLPAPER_LAYOUT_STRETCH:
+      return ash::mojom::WallpaperLayout::STRETCH;
+    case wallpaper::WALLPAPER_LAYOUT_TILE:
+      return ash::mojom::WallpaperLayout::TILE;
+    case wallpaper::NUM_WALLPAPER_LAYOUT:
+      NOTREACHED();
+      return ash::mojom::WallpaperLayout::CENTER;
+  }
+  NOTREACHED();
+  return ash::mojom::WallpaperLayout::CENTER;
+}
+
+// A helper to set the wallpaper image for Ash and Mash.
+void SetWallpaper(const gfx::ImageSkia& image,
+                  wallpaper::WallpaperLayout layout) {
+  if (chrome::IsRunningInMash()) {
+    shell::Connector* connector =
+        content::MojoShellConnection::GetForProcess()->GetConnector();
+    ash::mojom::WallpaperControllerPtr wallpaper_controller;
+    connector->ConnectToInterface("mojo:ash", &wallpaper_controller);
+    wallpaper_controller->SetWallpaper(*image.bitmap(),
+                                       WallpaperLayoutToMojo(layout));
+    return;
+  }
+  // Avoid loading unnecessary wallpapers in tests without a shell instance.
+  if (ash::WmShell::HasInstance()) {
+    ash::WmShell::Get()->wallpaper_controller()->SetWallpaperImage(image,
+                                                                   layout);
+  }
 }
 
 }  // namespace
@@ -202,8 +255,7 @@ class WallpaperManager::PendingWallpaper :
   // There are 4 cases in SetUserWallpaper:
   // 1) gfx::ImageSkia is found in cache.
   //    - Schedule task to (probably) resize it and install:
-  //    call ash::Shell::GetInstance()->desktop_background_controller()->
-  //          SetCustomWallpaper(user_wallpaper, layout);
+  //    call SetWallpaper(user_wallpaper, layout);
   // 2) WallpaperInfo is found in cache
   //    - need to LoadWallpaper(), resize and install.
   // 3) wallpaper path is not NULL, load image URL, then resize, etc...
@@ -257,9 +309,7 @@ class WallpaperManager::PendingWallpaper :
     if (default_) {
       manager->DoSetDefaultWallpaper(account_id_, std::move(on_finish_));
     } else if (!user_wallpaper_.isNull()) {
-      ash::Shell::GetInstance()
-          ->desktop_background_controller()
-          ->SetWallpaperImage(user_wallpaper_, info_.layout);
+      SetWallpaper(user_wallpaper_, info_.layout);
     } else if (!wallpaper_path_.empty()) {
       manager->task_runner_->PostTask(
           FROM_HERE,
@@ -353,8 +403,7 @@ void WallpaperManager::Shutdown() {
 WallpaperManager::WallpaperResolution
 WallpaperManager::GetAppropriateResolution() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  gfx::Size size =
-      ash::DesktopBackgroundController::GetMaxDisplaySizeInNative();
+  gfx::Size size = ash::WallpaperController::GetMaxDisplaySizeInNative();
   return (size.width() > wallpaper::kSmallWallpaperMaxWidth ||
           size.height() > wallpaper::kSmallWallpaperMaxHeight)
              ? WALLPAPER_RESOLUTION_LARGE
@@ -373,7 +422,7 @@ void WallpaperManager::EnsureLoggedInUserWallpaperLoaded() {
   // Some browser tests do not have a shell instance. As no wallpaper is needed
   // in these tests anyway, avoid loading one, preventing crashes and speeding
   // up the tests.
-  if (!ash::Shell::HasInstance())
+  if (!ash::WmShell::HasInstance())
     return;
 
   WallpaperInfo info;
@@ -415,8 +464,7 @@ void WallpaperManager::InitializeWallpaper() {
   // Zero delays is also set in autotests.
   if (WizardController::IsZeroDelayEnabled()) {
     // Ensure tests have some sort of wallpaper.
-    ash::Shell::GetInstance()->desktop_background_controller()->
-        CreateEmptyWallpaper();
+    ash::WmShell::Get()->wallpaper_controller()->CreateEmptyWallpaper();
     return;
   }
 
@@ -514,7 +562,7 @@ void WallpaperManager::SetCustomWallpaper(
     bool update_wallpaper) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  // There is no visible background in kiosk mode.
+  // There is no visible wallpaper in kiosk mode.
   if (user_manager::UserManager::Get()->IsLoggedInAsKioskApp())
     return;
 
@@ -594,15 +642,10 @@ void WallpaperManager::SetDefaultWallpaperDelayed(const AccountId& account_id) {
 void WallpaperManager::DoSetDefaultWallpaper(
     const AccountId& account_id,
     MovableOnDestroyCallbackHolder on_finish) {
-  // There is no visible background in kiosk mode.
+  // There is no visible wallpaper in kiosk mode.
   if (user_manager::UserManager::Get()->IsLoggedInAsKioskApp())
     return;
   wallpaper_cache_.erase(account_id);
-  // Some browser tests do not have a shell instance. As no wallpaper is needed
-  // in these tests anyway, avoid loading one, preventing crashes and speeding
-  // up the tests.
-  if (!ash::Shell::HasInstance())
-    return;
 
   WallpaperResolution resolution = GetAppropriateResolution();
   const bool use_small = (resolution == WALLPAPER_RESOLUTION_SMALL);
@@ -643,8 +686,7 @@ void WallpaperManager::DoSetDefaultWallpaper(
       default_wallpaper_image_->image().height() == 1)
     layout = wallpaper::WALLPAPER_LAYOUT_STRETCH;
 
-  ash::Shell::GetInstance()->desktop_background_controller()->SetWallpaperImage(
-      default_wallpaper_image_->image(), layout);
+  SetWallpaper(default_wallpaper_image_->image(), layout);
 }
 
 void WallpaperManager::SetUserWallpaperInfo(const AccountId& account_id,
@@ -681,7 +723,7 @@ void WallpaperManager::ScheduleSetUserWallpaper(const AccountId& account_id,
   const user_manager::User* user =
       user_manager::UserManager::Get()->FindUser(account_id);
 
-  // User is unknown or there is no visible background in kiosk mode.
+  // User is unknown or there is no visible wallpaper in kiosk mode.
   if (!user || user->GetType() == user_manager::USER_TYPE_KIOSK_APP)
     return;
 
@@ -761,7 +803,7 @@ void WallpaperManager::SetWallpaperFromImageSkia(
     bool update_wallpaper) {
   DCHECK(user_manager::UserManager::Get()->IsUserLoggedIn());
 
-  // There is no visible background in kiosk mode.
+  // There is no visible wallpaper in kiosk mode.
   if (user_manager::UserManager::Get()->IsLoggedInAsKioskApp())
     return;
   WallpaperInfo info;
@@ -846,6 +888,14 @@ void WallpaperManager::RemovePendingWallpaperFromList(
 void WallpaperManager::SetPolicyControlledWallpaper(
     const AccountId& account_id,
     std::unique_ptr<user_manager::UserImage> user_image) {
+  if (!CanGetFilesId()) {
+    CallWhenCanGetFilesId(
+        base::Bind(&WallpaperManager::SetPolicyControlledWallpaper,
+                   weak_factory_.GetWeakPtr(), account_id,
+                   base::Passed(std::move(user_image))));
+    return;
+  }
+
   const wallpaper::WallpaperFilesId wallpaper_files_id = GetFilesId(account_id);
 
   if (!wallpaper_files_id.is_valid())
@@ -959,11 +1009,8 @@ void WallpaperManager::OnWallpaperDecoded(
   // Update the image, but keep the path which was set earlier.
   wallpaper_cache_[account_id].second = user_image->image();
 
-  if (update_wallpaper) {
-    ash::Shell::GetInstance()
-        ->desktop_background_controller()
-        ->SetWallpaperImage(user_image->image(), layout);
-  }
+  if (update_wallpaper)
+    SetWallpaper(user_image->image(), layout);
 }
 
 void WallpaperManager::StartLoad(const AccountId& account_id,
@@ -1068,8 +1115,7 @@ void WallpaperManager::OnDefaultWallpaperDecoded(
     MovableOnDestroyCallbackHolder on_finish,
     std::unique_ptr<user_manager::UserImage> user_image) {
   *result_out = std::move(user_image);
-  ash::Shell::GetInstance()->desktop_background_controller()->SetWallpaperImage(
-      (*result_out)->image(), layout);
+  SetWallpaper((*result_out)->image(), layout);
 }
 
 void WallpaperManager::StartLoadAndSetDefaultWallpaper(
@@ -1094,8 +1140,8 @@ void WallpaperManager::SetDefaultWallpaperPath(
   default_small_wallpaper_file_ = default_small_wallpaper_file;
   default_large_wallpaper_file_ = default_large_wallpaper_file;
 
-  ash::DesktopBackgroundController* dbc =
-      ash::Shell::GetInstance()->desktop_background_controller();
+  ash::WallpaperController* controller =
+      ash::WmShell::Get()->wallpaper_controller();
 
   // |need_update_screen| is true if the previous default wallpaper is visible
   // now, so we need to update wallpaper on the screen.
@@ -1104,9 +1150,9 @@ void WallpaperManager::SetDefaultWallpaperPath(
   // as a placeholder only.
   const bool need_update_screen =
       default_wallpaper_image_.get() &&
-      dbc->WallpaperIsAlreadyLoaded(default_wallpaper_image_->image(),
-                                    false /* compare_layouts */,
-                                    wallpaper::WALLPAPER_LAYOUT_CENTER);
+      controller->WallpaperIsAlreadyLoaded(default_wallpaper_image_->image(),
+                                           false /* compare_layouts */,
+                                           wallpaper::WALLPAPER_LAYOUT_CENTER);
 
   default_wallpaper_image_.reset();
   if (GetAppropriateResolution() == WALLPAPER_RESOLUTION_SMALL) {
@@ -1123,9 +1169,8 @@ void WallpaperManager::SetDefaultWallpaperPath(
     }
   }
 
-  if (need_update_screen) {
+  if (need_update_screen)
     DoSetDefaultWallpaper(EmptyAccountId(), MovableOnDestroyCallbackHolder());
-  }
 }
 
 wallpaper::WallpaperFilesId WallpaperManager::GetFilesId(

@@ -171,7 +171,9 @@ bool HandleAsanDebugURL(const GURL& url) {
 
 void HangCurrentThread() {
   ScopedAllowWaitForDebugURL allow_wait;
-  base::WaitableEvent(false, false).Wait();
+  base::WaitableEvent(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                      base::WaitableEvent::InitialState::NOT_SIGNALED)
+      .Wait();
 }
 
 }  // namespace
@@ -259,7 +261,8 @@ bool IsRendererDebugURL(const GURL& url) {
          url == GURL(kChromeUIDumpURL) ||
          url == GURL(kChromeUIKillURL) ||
          url == GURL(kChromeUIHangURL) ||
-         url == GURL(kChromeUIShorthangURL);
+         url == GURL(kChromeUIShorthangURL) ||
+         url == GURL(kChromeUIMemoryExhaustURL);
 }
 
 }  // namespace content

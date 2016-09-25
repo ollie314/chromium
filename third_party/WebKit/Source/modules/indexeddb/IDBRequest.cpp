@@ -44,6 +44,7 @@
 #include "modules/indexeddb/IDBValue.h"
 #include "platform/SharedBuffer.h"
 #include "public/platform/WebBlobInfo.h"
+#include <memory>
 
 using blink::WebIDBCursor;
 
@@ -70,7 +71,7 @@ IDBRequest::IDBRequest(ScriptState* scriptState, IDBAny* source, IDBTransaction*
 
 IDBRequest::~IDBRequest()
 {
-    ASSERT(m_readyState == DONE || m_readyState == EarlyDeath || !getExecutionContext());
+    DCHECK(m_readyState == DONE || m_readyState == EarlyDeath || !getExecutionContext());
 }
 
 DEFINE_TRACE(IDBRequest)
@@ -90,11 +91,14 @@ DEFINE_TRACE(IDBRequest)
 ScriptValue IDBRequest::result(ExceptionState& exceptionState)
 {
     if (m_readyState != DONE) {
+        // Must throw if returning an empty value. Message is arbitrary since it will never be seen.
         exceptionState.throwDOMException(InvalidStateError, IDBDatabase::requestNotFinishedErrorMessage);
         return ScriptValue();
     }
-    if (m_contextStopped || !getExecutionContext())
+    if (m_contextStopped || !getExecutionContext()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::databaseClosedErrorMessage);
         return ScriptValue();
+    }
     m_resultDirty = false;
     ScriptValue value = ScriptValue::from(m_scriptState.get(), m_result);
     return value;
@@ -119,7 +123,7 @@ ScriptValue IDBRequest::source() const
 
 const String& IDBRequest::readyState() const
 {
-    ASSERT(m_readyState == PENDING || m_readyState == DONE);
+    DCHECK(m_readyState == PENDING || m_readyState == DONE);
 
     if (m_readyState == PENDING)
         return IndexedDBNames::pending;
@@ -129,10 +133,10 @@ const String& IDBRequest::readyState() const
 
 void IDBRequest::abort()
 {
-    ASSERT(!m_requestAborted);
+    DCHECK(!m_requestAborted);
     if (m_contextStopped || !getExecutionContext())
         return;
-    ASSERT(m_readyState == PENDING || m_readyState == DONE);
+    DCHECK(m_readyState == PENDING || m_readyState == DONE);
     if (m_readyState == DONE)
         return;
 
@@ -151,19 +155,19 @@ void IDBRequest::abort()
 
 void IDBRequest::setCursorDetails(IndexedDB::CursorType cursorType, WebIDBCursorDirection direction)
 {
-    ASSERT(m_readyState == PENDING);
-    ASSERT(!m_pendingCursor);
+    DCHECK_EQ(m_readyState, PENDING);
+    DCHECK(!m_pendingCursor);
     m_cursorType = cursorType;
     m_cursorDirection = direction;
 }
 
 void IDBRequest::setPendingCursor(IDBCursor* cursor)
 {
-    ASSERT(m_readyState == DONE);
-    ASSERT(getExecutionContext());
-    ASSERT(m_transaction);
-    ASSERT(!m_pendingCursor);
-    ASSERT(cursor == getResultCursor());
+    DCHECK_EQ(m_readyState, DONE);
+    DCHECK(getExecutionContext());
+    DCHECK(m_transaction);
+    DCHECK(!m_pendingCursor);
+    DCHECK_EQ(cursor, getResultCursor());
 
     m_hasPendingActivity = true;
     m_pendingCursor = cursor;
@@ -186,7 +190,7 @@ IDBCursor* IDBRequest::getResultCursor() const
 
 void IDBRequest::setResultCursor(IDBCursor* cursor, IDBKey* key, IDBKey* primaryKey, PassRefPtr<IDBValue> value)
 {
-    ASSERT(m_readyState == PENDING);
+    DCHECK_EQ(m_readyState, PENDING);
     m_cursorKey = key;
     m_cursorPrimaryKey = primaryKey;
     m_cursorValue = value;
@@ -214,11 +218,11 @@ bool IDBRequest::shouldEnqueueEvent() const
 {
     if (m_contextStopped || !getExecutionContext())
         return false;
-    ASSERT(m_readyState == PENDING || m_readyState == DONE);
+    DCHECK(m_readyState == PENDING || m_readyState == DONE);
     if (m_requestAborted)
         return false;
-    ASSERT(m_readyState == PENDING);
-    ASSERT(!m_error && !m_result);
+    DCHECK_EQ(m_readyState, PENDING);
+    DCHECK(!m_error && !m_result);
     return true;
 }
 
@@ -246,25 +250,25 @@ void IDBRequest::onSuccess(const Vector<String>& stringList)
     onSuccessInternal(IDBAny::create(domStringList));
 }
 
-void IDBRequest::onSuccess(PassOwnPtr<WebIDBCursor> backend, IDBKey* key, IDBKey* primaryKey, PassRefPtr<IDBValue> value)
+void IDBRequest::onSuccess(std::unique_ptr<WebIDBCursor> backend, IDBKey* key, IDBKey* primaryKey, PassRefPtr<IDBValue> value)
 {
     IDB_TRACE("IDBRequest::onSuccess(IDBCursor)");
     if (!shouldEnqueueEvent())
         return;
 
-    ASSERT(!m_pendingCursor);
+    DCHECK(!m_pendingCursor);
     IDBCursor* cursor = nullptr;
     switch (m_cursorType) {
     case IndexedDB::CursorKeyOnly:
-        cursor = IDBCursor::create(backend, m_cursorDirection, this, m_source.get(), m_transaction.get());
+        cursor = IDBCursor::create(std::move(backend), m_cursorDirection, this, m_source.get(), m_transaction.get());
         break;
     case IndexedDB::CursorKeyAndValue:
-        cursor = IDBCursorWithValue::create(backend, m_cursorDirection, this, m_source.get(), m_transaction.get());
+        cursor = IDBCursorWithValue::create(std::move(backend), m_cursorDirection, this, m_source.get(), m_transaction.get());
         break;
     default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
-    setResultCursor(cursor, key, primaryKey, value);
+    setResultCursor(cursor, key, primaryKey, std::move(value));
 }
 
 void IDBRequest::onSuccess(IDBKey* idbKey)
@@ -289,7 +293,7 @@ void IDBRequest::onSuccess(const Vector<RefPtr<IDBValue>>& values)
     onSuccessInternal(IDBAny::create(values));
 }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 static IDBObjectStore* effectiveObjectStore(IDBAny* source)
 {
     if (source->getType() == IDBAny::IDBObjectStoreType)
@@ -297,10 +301,10 @@ static IDBObjectStore* effectiveObjectStore(IDBAny* source)
     if (source->getType() == IDBAny::IDBIndexType)
         return source->idbIndex()->objectStore();
 
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return nullptr;
 }
-#endif
+#endif // DCHECK_IS_ON()
 
 void IDBRequest::onSuccess(PassRefPtr<IDBValue> prpValue)
 {
@@ -313,18 +317,18 @@ void IDBRequest::onSuccess(PassRefPtr<IDBValue> prpValue)
 
     if (m_pendingCursor) {
         // Value should be null, signifying the end of the cursor's range.
-        ASSERT(value->isNull());
-        ASSERT(!value->blobInfo()->size());
+        DCHECK(value->isNull());
+        DCHECK(!value->blobInfo()->size());
         m_pendingCursor->close();
         m_pendingCursor.clear();
     }
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     if (value->primaryKey()) {
-        ASSERT(value->keyPath() == effectiveObjectStore(m_source)->metadata().keyPath);
+        DCHECK(value->keyPath() == effectiveObjectStore(m_source)->idbKeyPath());
         assertPrimaryKeyValidOrInjectable(m_scriptState.get(), value.get());
     }
-#endif
+#endif // DCHECK_IS_ON()
 
     onSuccessInternal(IDBAny::create(value.release()));
 }
@@ -347,8 +351,8 @@ void IDBRequest::onSuccess()
 
 void IDBRequest::onSuccessInternal(IDBAny* result)
 {
-    ASSERT(!m_contextStopped);
-    ASSERT(!m_pendingCursor);
+    DCHECK(!m_contextStopped);
+    DCHECK(!m_pendingCursor);
     setResult(result);
     enqueueEvent(Event::create(EventTypeNames::success));
 }
@@ -365,8 +369,8 @@ void IDBRequest::onSuccess(IDBKey* key, IDBKey* primaryKey, PassRefPtr<IDBValue>
     if (!shouldEnqueueEvent())
         return;
 
-    ASSERT(m_pendingCursor);
-    setResultCursor(m_pendingCursor.release(), key, primaryKey, value);
+    DCHECK(m_pendingCursor);
+    setResultCursor(m_pendingCursor.release(), key, primaryKey, std::move(value));
 }
 
 bool IDBRequest::hasPendingActivity() const
@@ -416,10 +420,10 @@ DispatchEventResult IDBRequest::dispatchEventInternal(Event* event)
     IDB_TRACE("IDBRequest::dispatchEvent");
     if (m_contextStopped || !getExecutionContext())
         return DispatchEventResult::CanceledBeforeDispatch;
-    ASSERT(m_readyState == PENDING);
-    ASSERT(m_hasPendingActivity);
-    ASSERT(m_enqueuedEvents.size());
-    ASSERT(event->target() == this);
+    DCHECK_EQ(m_readyState, PENDING);
+    DCHECK(m_hasPendingActivity);
+    DCHECK(m_enqueuedEvents.size());
+    DCHECK_EQ(event->target(), this);
 
     ScriptState::Scope scope(m_scriptState.get());
 
@@ -447,7 +451,7 @@ DispatchEventResult IDBRequest::dispatchEventInternal(Event* event)
     }
 
     if (event->type() == EventTypeNames::upgradeneeded) {
-        ASSERT(!m_didFireUpgradeNeededEvent);
+        DCHECK(!m_didFireUpgradeNeededEvent);
         m_didFireUpgradeNeededEvent = true;
     }
 
@@ -497,11 +501,11 @@ void IDBRequest::uncaughtExceptionInEventHandler()
 
 void IDBRequest::transactionDidFinishAndDispatch()
 {
-    ASSERT(m_transaction);
-    ASSERT(m_transaction->isVersionChange());
-    ASSERT(m_didFireUpgradeNeededEvent);
-    ASSERT(m_readyState == DONE);
-    ASSERT(getExecutionContext());
+    DCHECK(m_transaction);
+    DCHECK(m_transaction->isVersionChange());
+    DCHECK(m_didFireUpgradeNeededEvent);
+    DCHECK_EQ(m_readyState, DONE);
+    DCHECK(getExecutionContext());
     m_transaction.clear();
 
     if (m_contextStopped)
@@ -512,7 +516,7 @@ void IDBRequest::transactionDidFinishAndDispatch()
 
 void IDBRequest::enqueueEvent(Event* event)
 {
-    ASSERT(m_readyState == PENDING || m_readyState == DONE);
+    DCHECK(m_readyState == PENDING || m_readyState == DONE);
 
     if (m_contextStopped || !getExecutionContext())
         return;

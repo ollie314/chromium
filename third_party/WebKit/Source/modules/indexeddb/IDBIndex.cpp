@@ -37,6 +37,7 @@
 #include "modules/indexeddb/IDBTransaction.h"
 #include "modules/indexeddb/WebIDBCallbacksImpl.h"
 #include "public/platform/modules/indexeddb/WebIDBKeyRange.h"
+#include <memory>
 
 using blink::WebIDBCallbacks;
 using blink::WebIDBCursor;
@@ -49,9 +50,9 @@ IDBIndex::IDBIndex(const IDBIndexMetadata& metadata, IDBObjectStore* objectStore
     , m_objectStore(objectStore)
     , m_transaction(transaction)
 {
-    ASSERT(m_objectStore);
-    ASSERT(m_transaction);
-    ASSERT(m_metadata.id != IDBIndexMetadata::InvalidId);
+    DCHECK(m_objectStore);
+    DCHECK(m_transaction);
+    DCHECK_NE(id(), IDBIndexMetadata::InvalidId);
 }
 
 IDBIndex::~IDBIndex()
@@ -64,9 +65,49 @@ DEFINE_TRACE(IDBIndex)
     visitor->trace(m_transaction);
 }
 
+void IDBIndex::setName(const String& name, ExceptionState& exceptionState)
+{
+    if (!RuntimeEnabledFeatures::indexedDBExperimentalEnabled())
+        return;
+
+    IDB_TRACE("IDBIndex::setName");
+    if (!m_transaction->isVersionChange()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::notVersionChangeTransactionErrorMessage);
+        return;
+    }
+    if (isDeleted()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::indexDeletedErrorMessage);
+        return;
+    }
+    if (m_transaction->isFinished() || m_transaction->isFinishing()) {
+        exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionFinishedErrorMessage);
+        return;
+    }
+    if (!m_transaction->isActive()) {
+        exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionInactiveErrorMessage);
+        return;
+    }
+
+    if (this->name() == name)
+        return;
+    if (m_objectStore->containsIndex(name)) {
+        exceptionState.throwDOMException(ConstraintError, IDBDatabase::indexNameTakenErrorMessage);
+        return;
+    }
+    if (!backendDB()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::databaseClosedErrorMessage);
+        return;
+    }
+
+    backendDB()->renameIndex(m_transaction->id(), m_objectStore->id(), id(), name);
+    m_metadata.name = name;
+    m_objectStore->indexRenamed(m_metadata.id, name);
+    m_transaction->db()->indexRenamed(m_objectStore->id(), id(), name);
+}
+
 ScriptValue IDBIndex::keyPath(ScriptState* scriptState) const
 {
-    return ScriptValue::from(scriptState, m_metadata.keyPath);
+    return ScriptValue::from(scriptState, metadata().keyPath);
 }
 
 IDBRequest* IDBIndex::openCursor(ScriptState* scriptState, const ScriptValue& range, const String& directionString, ExceptionState& exceptionState)
@@ -101,7 +142,7 @@ IDBRequest* IDBIndex::openCursor(ScriptState* scriptState, IDBKeyRange* keyRange
 {
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
     request->setCursorDetails(IndexedDB::CursorKeyAndValue, direction);
-    backendDB()->openCursor(m_transaction->id(), m_objectStore->id(), m_metadata.id, keyRange, direction, false, WebIDBTaskTypeNormal, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->openCursor(m_transaction->id(), m_objectStore->id(), id(), keyRange, direction, false, WebIDBTaskTypeNormal, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
@@ -131,7 +172,7 @@ IDBRequest* IDBIndex::count(ScriptState* scriptState, const ScriptValue& range, 
     }
 
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
-    backendDB()->count(m_transaction->id(), m_objectStore->id(), m_metadata.id, keyRange, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->count(m_transaction->id(), m_objectStore->id(), id(), keyRange, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
@@ -161,7 +202,7 @@ IDBRequest* IDBIndex::openKeyCursor(ScriptState* scriptState, const ScriptValue&
 
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
     request->setCursorDetails(IndexedDB::CursorKeyOnly, direction);
-    backendDB()->openCursor(m_transaction->id(), m_objectStore->id(), m_metadata.id, keyRange, direction, true, WebIDBTaskTypeNormal, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->openCursor(m_transaction->id(), m_objectStore->id(), id(), keyRange, direction, true, WebIDBTaskTypeNormal, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
@@ -227,7 +268,7 @@ IDBRequest* IDBIndex::getInternal(ScriptState* scriptState, const ScriptValue& k
     }
 
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
-    backendDB()->get(m_transaction->id(), m_objectStore->id(), m_metadata.id, keyRange, keyOnly, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->get(m_transaction->id(), m_objectStore->id(), id(), keyRange, keyOnly, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
@@ -258,7 +299,7 @@ IDBRequest* IDBIndex::getAllInternal(ScriptState* scriptState, const ScriptValue
     }
 
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
-    backendDB()->getAll(m_transaction->id(), m_objectStore->id(), m_metadata.id, keyRange, maxCount, keyOnly, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->getAll(m_transaction->id(), m_objectStore->id(), id(), keyRange, maxCount, keyOnly, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 

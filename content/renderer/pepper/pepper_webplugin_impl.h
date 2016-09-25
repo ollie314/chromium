@@ -70,7 +70,7 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   bool startFind(const blink::WebString& search_text,
                  bool case_sensitive,
                  int identifier) override;
-  void selectFindResult(bool forward) override;
+  void selectFindResult(bool forward, int identifier) override;
   void stopFind() override;
   bool supportsPaginatedPrint() override;
   bool isPrintScalingDisabled() override;
@@ -99,9 +99,6 @@ class PepperWebPluginImpl : public blink::WebPlugin {
   gfx::Rect plugin_rect_;
   PP_Var instance_object_;
   blink::WebPluginContainer* container_;
-
-  // TODO(tommycli): Remove once we fix https://crbug.com/588624.
-  bool destroyed_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperWebPluginImpl);
 };

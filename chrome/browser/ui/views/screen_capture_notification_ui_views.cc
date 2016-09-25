@@ -6,17 +6,17 @@
 
 #include "base/macros.h"
 #include "build/build_config.h"
-#include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/ui/views/chrome_views_export.h"
 #include "chrome/grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/screen.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/controls/button/blue_button.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/controls/link_listener.h"
@@ -30,7 +30,7 @@
 #endif
 
 #if defined(USE_ASH)
-#include "ash/shell.h"
+#include "ash/shell.h"  // nogncheck
 #endif
 
 namespace {
@@ -119,7 +119,7 @@ class ScreenCaptureNotificationUIViews
   NotificationBarClientView* client_view_;
   views::ImageView* gripper_;
   views::Label* label_;
-  views::BlueButton* stop_button_;
+  views::Button* stop_button_;
   views::Link* hide_link_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenCaptureNotificationUIViews);
@@ -128,11 +128,11 @@ class ScreenCaptureNotificationUIViews
 ScreenCaptureNotificationUIViews::ScreenCaptureNotificationUIViews(
     const base::string16& text)
     : text_(text),
-      client_view_(NULL),
-      gripper_(NULL),
-      label_(NULL),
-      stop_button_(NULL),
-      hide_link_(NULL) {
+      client_view_(nullptr),
+      gripper_(nullptr),
+      label_(nullptr),
+      stop_button_(nullptr),
+      hide_link_(nullptr) {
   set_owned_by_client();
 
   gripper_ = new views::ImageView();
@@ -146,7 +146,8 @@ ScreenCaptureNotificationUIViews::ScreenCaptureNotificationUIViews(
 
   base::string16 stop_text =
       l10n_util::GetStringUTF16(IDS_MEDIA_SCREEN_CAPTURE_NOTIFICATION_STOP);
-  stop_button_ = new views::BlueButton(this, stop_text);
+  stop_button_ =
+      views::MdTextButton::CreateSecondaryUiBlueButton(this, stop_text);
   AddChildView(stop_button_);
 
   // TODO(jiayl): IDS_PASSWORDS_PAGE_VIEW_HIDE_BUTTON is used for the need to
@@ -195,7 +196,7 @@ gfx::NativeViewId ScreenCaptureNotificationUIViews::OnStarted(
   set_background(views::Background::CreateSolidBackground(GetNativeTheme()->
       GetSystemColor(ui::NativeTheme::kColorId_DialogBackground)));
 
-  gfx::Screen* screen = gfx::Screen::GetScreen();
+  display::Screen* screen = display::Screen::GetScreen();
   // TODO(sergeyu): Move the notification to the display being captured when
   // per-display screen capture is supported.
   gfx::Rect work_area = screen->GetPrimaryDisplay().work_area();
@@ -209,7 +210,7 @@ gfx::NativeViewId ScreenCaptureNotificationUIViews::OnStarted(
   widget->SetBounds(bounds);
   widget->Show();
   // This has to be called after Show() to have effect.
-  widget->SetOpacity(0xFF * kWindowAlphaValue);
+  widget->SetOpacity(kWindowAlphaValue);
   widget->SetVisibleOnAllWorkspaces(true);
 
 #if defined(OS_WIN)

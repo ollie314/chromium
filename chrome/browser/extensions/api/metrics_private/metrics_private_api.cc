@@ -8,8 +8,9 @@
 
 #include <algorithm>
 
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/common/extensions/api/metrics_private.h"
@@ -41,47 +42,51 @@ const size_t kMaxBuckets = 10000; // We don't ever want more than these many
                                   // and would cause crazy memory usage
 } // namespace
 
-bool MetricsPrivateGetIsCrashReportingEnabledFunction::RunSync() {
-  SetResult(new base::FundamentalValue(
-      ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled()));
-  return true;
+ExtensionFunction::ResponseAction
+MetricsPrivateGetIsCrashReportingEnabledFunction::Run() {
+  return RespondNow(OneArgument(base::MakeUnique<base::FundamentalValue>(
+      ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled())));
 }
 
-bool MetricsPrivateGetFieldTrialFunction::RunSync() {
+ExtensionFunction::ResponseAction MetricsPrivateGetFieldTrialFunction::Run() {
   std::string name;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &name));
 
-  SetResult(new base::StringValue(base::FieldTrialList::FindFullName(name)));
-  return true;
+  return RespondNow(OneArgument(base::MakeUnique<base::StringValue>(
+      base::FieldTrialList::FindFullName(name))));
 }
 
-bool MetricsPrivateGetVariationParamsFunction::RunSync() {
+ExtensionFunction::ResponseAction
+MetricsPrivateGetVariationParamsFunction::Run() {
   std::unique_ptr<GetVariationParams::Params> params(
       GetVariationParams::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   GetVariationParams::Results::Params result;
+  std::unique_ptr<base::DictionaryValue> dict;
   if (variations::GetVariationParams(params->name,
                                      &result.additional_properties)) {
-    SetResult(result.ToValue().release());
+    dict = result.ToValue();
   }
-  return true;
+  return RespondNow(dict ? OneArgument(std::move(dict)) : NoArguments());
 }
 
-bool MetricsPrivateRecordUserActionFunction::RunSync() {
+ExtensionFunction::ResponseAction
+MetricsPrivateRecordUserActionFunction::Run() {
   std::unique_ptr<RecordUserAction::Params> params(
       RecordUserAction::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   content::RecordComputedAction(params->name);
-  return true;
+  return RespondNow(NoArguments());
 }
 
-bool MetricsHistogramHelperFunction::RecordValue(
-    const std::string& name,
-    base::HistogramType type,
-    int min, int max, size_t buckets,
-    int sample) {
+void MetricsHistogramHelperFunction::RecordValue(const std::string& name,
+                                                 base::HistogramType type,
+                                                 int min,
+                                                 int max,
+                                                 size_t buckets,
+                                                 int sample) {
   // Make sure toxic values don't get to internal code.
   // Fix for maximums
   min = std::min(min, INT_MAX - 3);
@@ -110,10 +115,9 @@ bool MetricsHistogramHelperFunction::RecordValue(
   // that data for this API.  An error message will be logged.
   if (counter)
     counter->Add(sample);
-  return true;
 }
 
-bool MetricsPrivateRecordValueFunction::RunSync() {
+ExtensionFunction::ResponseAction MetricsPrivateRecordValueFunction::Run() {
   std::unique_ptr<RecordValue::Params> params(
       RecordValue::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -123,78 +127,89 @@ bool MetricsPrivateRecordValueFunction::RunSync() {
 
   base::HistogramType histogram_type(type == "histogram-linear" ?
       base::LINEAR_HISTOGRAM : base::HISTOGRAM);
-  return RecordValue(params->metric.metric_name, histogram_type,
-                     params->metric.min, params->metric.max,
-                     params->metric.buckets, params->value);
+  RecordValue(params->metric.metric_name, histogram_type, params->metric.min,
+              params->metric.max, params->metric.buckets, params->value);
+  return RespondNow(NoArguments());
 }
 
-bool MetricsPrivateRecordSparseValueFunction::RunSync() {
+ExtensionFunction::ResponseAction
+MetricsPrivateRecordSparseValueFunction::Run() {
   std::unique_ptr<RecordSparseValue::Params> params(
       RecordSparseValue::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   // This particular UMA_HISTOGRAM_ macro is okay for
   // non-runtime-constant strings.
   UMA_HISTOGRAM_SPARSE_SLOWLY(params->metric_name, params->value);
-  return true;
+  return RespondNow(NoArguments());
 }
 
-bool MetricsPrivateRecordPercentageFunction::RunSync() {
+ExtensionFunction::ResponseAction
+MetricsPrivateRecordPercentageFunction::Run() {
   std::unique_ptr<RecordPercentage::Params> params(
       RecordPercentage::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
-  return RecordValue(params->metric_name, base::LINEAR_HISTOGRAM,
-                     1, 101, 102, params->value);
+  RecordValue(params->metric_name, base::LINEAR_HISTOGRAM, 1, 101, 102,
+              params->value);
+  return RespondNow(NoArguments());
 }
 
-bool MetricsPrivateRecordCountFunction::RunSync() {
+ExtensionFunction::ResponseAction MetricsPrivateRecordCountFunction::Run() {
   std::unique_ptr<RecordCount::Params> params(
       RecordCount::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
-  return RecordValue(params->metric_name, base::HISTOGRAM,
-                     1, 1000000, 50, params->value);
+  RecordValue(params->metric_name, base::HISTOGRAM, 1, 1000000, 50,
+              params->value);
+  return RespondNow(NoArguments());
 }
 
-bool MetricsPrivateRecordSmallCountFunction::RunSync() {
+ExtensionFunction::ResponseAction
+MetricsPrivateRecordSmallCountFunction::Run() {
   std::unique_ptr<RecordSmallCount::Params> params(
       RecordSmallCount::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
-  return RecordValue(params->metric_name, base::HISTOGRAM,
-                     1, 100, 50, params->value);
+  RecordValue(params->metric_name, base::HISTOGRAM, 1, 100, 50, params->value);
+  return RespondNow(NoArguments());
 }
 
-bool MetricsPrivateRecordMediumCountFunction::RunSync() {
+ExtensionFunction::ResponseAction
+MetricsPrivateRecordMediumCountFunction::Run() {
   std::unique_ptr<RecordMediumCount::Params> params(
       RecordMediumCount::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
-  return RecordValue(params->metric_name, base::HISTOGRAM,
-                     1, 10000, 50, params->value);
+  RecordValue(params->metric_name, base::HISTOGRAM, 1, 10000, 50,
+              params->value);
+  return RespondNow(NoArguments());
 }
 
-bool MetricsPrivateRecordTimeFunction::RunSync() {
+ExtensionFunction::ResponseAction MetricsPrivateRecordTimeFunction::Run() {
   std::unique_ptr<RecordTime::Params> params(
       RecordTime::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   static const int kTenSecMs = 10 * 1000;
-  return RecordValue(params->metric_name, base::HISTOGRAM,
-                     1, kTenSecMs, 50, params->value);
+  RecordValue(params->metric_name, base::HISTOGRAM, 1, kTenSecMs, 50,
+              params->value);
+  return RespondNow(NoArguments());
 }
 
-bool MetricsPrivateRecordMediumTimeFunction::RunSync() {
+ExtensionFunction::ResponseAction
+MetricsPrivateRecordMediumTimeFunction::Run() {
   std::unique_ptr<RecordMediumTime::Params> params(
       RecordMediumTime::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   static const int kThreeMinMs = 3 * 60 * 1000;
-  return RecordValue(params->metric_name, base::HISTOGRAM,
-                     1, kThreeMinMs, 50, params->value);
+  RecordValue(params->metric_name, base::HISTOGRAM, 1, kThreeMinMs, 50,
+              params->value);
+  return RespondNow(NoArguments());
 }
 
-bool MetricsPrivateRecordLongTimeFunction::RunSync() {
+ExtensionFunction::ResponseAction MetricsPrivateRecordLongTimeFunction::Run() {
   std::unique_ptr<RecordLongTime::Params> params(
       RecordLongTime::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   static const int kOneHourMs = 60 * 60 * 1000;
-  return RecordValue(params->metric_name, base::HISTOGRAM,
-                     1, kOneHourMs, 50, params->value);
+  RecordValue(params->metric_name, base::HISTOGRAM, 1, kOneHourMs, 50,
+              params->value);
+  return RespondNow(NoArguments());
 }
 
 } // namespace extensions

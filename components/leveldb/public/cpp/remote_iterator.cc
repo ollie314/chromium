@@ -8,11 +8,12 @@
 
 namespace leveldb {
 
-RemoteIterator::RemoteIterator(LevelDBDatabase* database, uint64_t iterator_id)
+RemoteIterator::RemoteIterator(mojom::LevelDBDatabase* database,
+                               uint64_t iterator_id)
     : database_(database),
       iterator_id_(iterator_id),
       valid_(false),
-      status_(DatabaseError::OK) {}
+      status_(mojom::DatabaseError::OK) {}
 
 RemoteIterator::~RemoteIterator() {
   database_->ReleaseIterator(iterator_id_);
@@ -33,7 +34,7 @@ void RemoteIterator::SeekToLast() {
 }
 
 void RemoteIterator::Seek(const Slice& target) {
-  database_->IteratorSeek(iterator_id_, GetArrayFor(target), &valid_, &status_,
+  database_->IteratorSeek(iterator_id_, GetVectorFor(target), &valid_, &status_,
                           &key_, &value_);
 }
 
@@ -46,15 +47,19 @@ void RemoteIterator::Prev() {
 }
 
 Slice RemoteIterator::key() const {
-  return GetSliceFor(key_);
+  if (!key_)
+    return leveldb::Slice();
+  return GetSliceFor(*key_);
 }
 
 Slice RemoteIterator::value() const {
-  return GetSliceFor(value_);
+  if (!value_)
+    return leveldb::Slice();
+  return GetSliceFor(*value_);
 }
 
 Status RemoteIterator::status() const {
-  return DatabaseErrorToStatus(status_, GetSliceFor(key_), GetSliceFor(value_));
+  return DatabaseErrorToStatus(status_, key(), value());
 }
 
 }  // namespace leveldb

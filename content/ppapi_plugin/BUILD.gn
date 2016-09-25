@@ -21,6 +21,7 @@ source_set("ppapi_plugin_sources") {
   visibility = [
     ":ppapi_plugin",
     "//content",  # For the component build.
+    "//content/app:*",
     "//gin",
   ]
 
@@ -45,9 +46,15 @@ source_set("ppapi_plugin_sources") {
   deps = [
     "//base",
     "//content:export",
+    "//content/child",
     "//content/public/child:child_sources",
     "//content/public/common:common_sources",
+    "//gin",
+    "//ppapi/c",
+    "//ppapi/proxy",
     "//ppapi/proxy:ipc",
+    "//ppapi/shared_impl",
+    "//sandbox",
     "//services/shell/public/interfaces",
     "//skia",
     "//third_party/WebKit/public:blink",
@@ -56,4 +63,8 @@ source_set("ppapi_plugin_sources") {
     "//ui/gfx",
     "//ui/gfx/geometry",
   ]
+
+  if (is_win) {
+    deps += [ "//ui/display" ]
+  }
 }

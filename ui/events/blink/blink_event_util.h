@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "ui/events/gesture_detection/motion_event.h"
 
 namespace base {
@@ -25,6 +25,7 @@ class PointF;
 }
 
 namespace ui {
+enum class DomCode;
 struct GestureEventData;
 struct GestureEventDetails;
 class MotionEvent;
@@ -34,10 +35,11 @@ blink::WebTouchEvent CreateWebTouchEventFromMotionEvent(
     bool may_cause_scrolling);
 
 blink::WebGestureEvent CreateWebGestureEvent(const GestureEventDetails& details,
-                                             base::TimeDelta timestamp,
+                                             base::TimeTicks timestamp,
                                              const gfx::PointF& location,
                                              const gfx::PointF& raw_location,
-                                             int flags);
+                                             int flags,
+                                             uint32_t unique_touch_event_id);
 
 // Convenience wrapper for |CreateWebGestureEvent| using the supplied |data|.
 blink::WebGestureEvent CreateWebGestureEventFromGestureEventData(
@@ -51,6 +53,11 @@ std::unique_ptr<blink::WebInputEvent> ScaleWebInputEvent(
 
 blink::WebPointerProperties::PointerType ToWebPointerType(
     MotionEvent::ToolType tool_type);
+
+int WebEventModifiersToEventFlags(int modifiers);
+
+blink::WebInputEvent::Modifiers DomCodeToWebInputEventModifiers(
+    ui::DomCode code);
 
 }  // namespace ui
 

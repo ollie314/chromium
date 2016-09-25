@@ -45,8 +45,9 @@
 #ifndef PaintLayerClipper_h
 #define PaintLayerClipper_h
 
+#include "core/CoreExport.h"
 #include "core/layout/ClipRectsCache.h"
-#include "core/layout/LayoutBox.h"
+#include "core/layout/ScrollEnums.h"
 #include "wtf/Allocator.h"
 
 namespace blink {
@@ -61,9 +62,9 @@ enum ShouldRespectOverflowClipType {
 class ClipRectsContext {
     STACK_ALLOCATED();
 public:
-    ClipRectsContext(const PaintLayer* root, ClipRectsCacheSlot slot, OverlayScrollbarSizeRelevancy relevancy = IgnoreOverlayScrollbarSize, const LayoutSize& accumulation = LayoutSize())
+    ClipRectsContext(const PaintLayer* root, ClipRectsCacheSlot slot, OverlayScrollbarClipBehavior overlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize, const LayoutSize& accumulation = LayoutSize())
         : rootLayer(root)
-        , scrollbarRelevancy(relevancy)
+        , overlayScrollbarClipBehavior(overlayScrollbarClipBehavior)
         , m_cacheSlot(slot)
         , subPixelAccumulation(accumulation)
         , respectOverflowClip(slot == PaintingClipRectsIgnoringOverflowClip ? IgnoreOverflowClip : RespectOverflowClip)
@@ -91,7 +92,7 @@ public:
     }
 
     const PaintLayer* rootLayer;
-    const OverlayScrollbarSizeRelevancy scrollbarRelevancy;
+    const OverlayScrollbarClipBehavior overlayScrollbarClipBehavior;
 
 private:
     friend class PaintLayerClipper;

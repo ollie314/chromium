@@ -42,6 +42,7 @@
 #include "core/animation/css/CSSAnimatableValueFactory.h"
 #include "core/animation/css/CSSAnimations.h"
 #include "core/css/CSSCalculationValue.h"
+#include "core/css/CSSCustomIdentValue.h"
 #include "core/css/CSSDefaultStyleSheets.h"
 #include "core/css/CSSFontSelector.h"
 #include "core/css/CSSKeyframeRule.h"
@@ -51,7 +52,6 @@
 #include "core/css/CSSSelector.h"
 #include "core/css/CSSStyleRule.h"
 #include "core/css/CSSValueList.h"
-#include "core/css/CSSValuePool.h"
 #include "core/css/ElementRuleCollector.h"
 #include "core/css/FontFace.h"
 #include "core/css/MediaQueryEvaluator.h"
@@ -80,11 +80,12 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/html/HTMLSlotElement.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/layout/GeneratedChildren.h"
-#include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/style/StyleVariableData.h"
 #include "core/svg/SVGDocumentExtensions.h"
 #include "core/svg/SVGElement.h"
@@ -116,7 +117,7 @@ bool cacheCustomPropertiesForApplyAtRules(StyleResolverState& state, const Match
             StylePropertySet::PropertyReference current = properties.propertyAt(i);
             if (current.id() != CSSPropertyApplyAtRule)
                 continue;
-            AtomicString name(toCSSCustomIdentValue(current.value())->value());
+            AtomicString name(toCSSCustomIdentValue(current.value()).value());
             CSSVariableData* variableData = state.style()->variables()->getVariable(name);
             if (!variableData)
                 continue;
@@ -226,10 +227,10 @@ void StyleResolver::removePendingAuthorStyleSheets(const HeapVector<Member<CSSSt
 
 void StyleResolver::appendCSSStyleSheet(CSSStyleSheet& cssSheet)
 {
-    ASSERT(!cssSheet.disabled());
-    ASSERT(cssSheet.ownerDocument());
-    ASSERT(cssSheet.ownerNode());
-    ASSERT(isHTMLStyleElement(cssSheet.ownerNode()) || isSVGStyleElement(cssSheet.ownerNode()) || cssSheet.ownerNode()->treeScope() == cssSheet.ownerDocument());
+    DCHECK(!cssSheet.disabled());
+    DCHECK(cssSheet.ownerDocument());
+    DCHECK(cssSheet.ownerNode());
+    DCHECK(isHTMLStyleElement(cssSheet.ownerNode()) || isSVGStyleElement(cssSheet.ownerNode()) || cssSheet.ownerNode()->isConnected());
 
     if (cssSheet.mediaQueries() && !m_medium->eval(cssSheet.mediaQueries(), &m_viewportDependentMediaQueryResults, &m_deviceDependentMediaQueryResults))
         return;
@@ -272,8 +273,8 @@ void StyleResolver::finishAppendAuthorStyleSheets()
 {
     collectFeatures();
 
-    if (document().layoutView() && document().layoutView()->style())
-        document().layoutView()->style()->font().update(document().styleEngine().fontSelector());
+    if (!document().layoutViewItem().isNull() && document().layoutViewItem().style())
+        document().layoutViewItem().style()->font().update(document().styleEngine().fontSelector());
 
     m_viewportStyleResolver->collectViewportRules();
 
@@ -420,7 +421,7 @@ static void matchHostRules(const Element& element, ElementRuleCollector& collect
     if (!shadow)
         return;
 
-    for (ShadowRoot* shadowRoot = shadow->oldestShadowRoot(); shadowRoot; shadowRoot = shadowRoot->youngerShadowRoot()) {
+    for (ShadowRoot* shadowRoot = &shadow->oldestShadowRoot(); shadowRoot; shadowRoot = shadowRoot->youngerShadowRoot()) {
         if (!shadowRoot->numberOfStyles())
             continue;
         if (ScopedStyleResolver* resolver = shadowRoot->scopedStyleResolver()) {
@@ -479,7 +480,7 @@ static bool shouldCheckScope(const Element& element, const Node& scopingNode, bo
         const TreeScope* scope = &scopingNode.treeScope();
         while (scope && scope->parentTreeScope() != &element.treeScope())
             scope = scope->parentTreeScope();
-        Element* shadowHost = scope ? scope->rootNode().shadowHost() : nullptr;
+        Element* shadowHost = scope ? scope->rootNode().ownerShadowHost() : nullptr;
         return shadowHost && element.isDescendantOf(shadowHost);
     }
 
@@ -512,15 +513,15 @@ void StyleResolver::matchScopedRules(const Element& element, ElementRuleCollecto
     bool matchElementScopeDone = !elementScopeResolver && !element.inlineStyle();
 
     for (auto it = m_treeBoundaryCrossingScopes.rbegin(); it != m_treeBoundaryCrossingScopes.rend(); ++it) {
-        const TreeScope& scope = (*it)->treeScope();
+        const TreeScope& scope = (*it)->containingTreeScope();
         ScopedStyleResolver* resolver = scope.scopedStyleResolver();
         ASSERT(resolver);
 
-        bool isInnerTreeScope = element.treeScope().isInclusiveAncestorOf(scope);
+        bool isInnerTreeScope = element.containingTreeScope().isInclusiveAncestorOf(scope);
         if (!shouldCheckScope(element, **it, isInnerTreeScope))
             continue;
 
-        if (!matchElementScopeDone && scope.isInclusiveAncestorOf(element.treeScope())) {
+        if (!matchElementScopeDone && scope.isInclusiveAncestorOf(element.containingTreeScope())) {
 
             matchElementScopeDone = true;
 
@@ -660,7 +661,7 @@ void StyleResolver::collectTreeBoundaryCrossingRules(const Element& element, Ele
     for (const auto& scopingNode : m_treeBoundaryCrossingScopes) {
         // Skip rule collection for element when tree boundary crossing rules of scopingNode's
         // scope can never apply to it.
-        bool isInnerTreeScope = element.treeScope().isInclusiveAncestorOf(scopingNode->treeScope());
+        bool isInnerTreeScope = element.containingTreeScope().isInclusiveAncestorOf(scopingNode->containingTreeScope());
         if (!shouldCheckScope(element, *scopingNode, isInnerTreeScope))
             continue;
 
@@ -680,9 +681,10 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForDocument(Document& document)
     documentStyle->setRTLOrdering(document.visuallyOrdered() ? VisualOrder : LogicalOrder);
     documentStyle->setZoom(frame && !document.printing() ? frame->pageZoomFactor() : 1);
     FontDescription documentFontDescription = documentStyle->getFontDescription();
-    documentFontDescription.setLocale(document.contentLanguage());
+    documentFontDescription.setLocale(LayoutLocale::get(document.contentLanguage()));
     documentStyle->setFontDescription(documentFontDescription);
     documentStyle->setZIndex(0);
+    documentStyle->setIsStackingContext(true);
     documentStyle->setUserModify(document.inDesignMode() ? READ_WRITE : READ_ONLY);
     // These are designed to match the user-agent stylesheet values for the document element
     // so that the common case doesn't need to create a new ComputedStyle in
@@ -697,8 +699,7 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForDocument(Document& document)
 
 void StyleResolver::adjustComputedStyle(StyleResolverState& state, Element* element)
 {
-    StyleAdjuster adjuster;
-    adjuster.adjustComputedStyle(state.mutableStyleRef(), *state.parentStyle(), element);
+    StyleAdjuster::adjustComputedStyle(state.mutableStyleRef(), *state.parentStyle(), element);
 }
 
 // Start loading resources referenced by this style.
@@ -710,7 +711,6 @@ void StyleResolver::loadPendingResources(StyleResolverState& state)
 PassRefPtr<ComputedStyle> StyleResolver::styleForElement(Element* element, const ComputedStyle* defaultParent, StyleSharingBehavior sharingBehavior,
     RuleMatchingBehavior matchingBehavior)
 {
-    ASSERT(document().frame());
     ASSERT(document().settings());
     ASSERT(!hasPendingAuthorStyleSheets());
     ASSERT(!m_needCollectFeatures);
@@ -753,7 +753,7 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForElement(Element* element, const
     } else {
         if (state.parentStyle()) {
             RefPtr<ComputedStyle> style = ComputedStyle::create();
-            style->inheritFrom(*state.parentStyle(), isAtShadowBoundary(element) ? ComputedStyle::AtShadowBoundary : ComputedStyle::NotAtShadowBoundary);
+            style->inheritFrom(*state.parentStyle(), isAtShadowBoundary(element) ? ComputedStyleBase::AtShadowBoundary : ComputedStyleBase::NotAtShadowBoundary);
             state.setStyle(style.release());
         } else {
             state.setStyle(initialStyleForElement());
@@ -791,6 +791,16 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForElement(Element* element, const
         ElementRuleCollector collector(state.elementContext(), m_selectorFilter, state.style());
 
         matchAllRules(state, collector, matchingBehavior != MatchAllRulesExcludingSMIL);
+
+        // TODO(dominicc): Remove this counter when Issue 590014 is fixed.
+        if (element->hasTagName(HTMLNames::summaryTag)) {
+            MatchedPropertiesRange properties = collector.matchedResult().authorRules();
+            for (auto it = properties.begin(); it != properties.end(); ++it) {
+                const CSSValue* value = it->properties->getPropertyCSSValue(CSSPropertyDisplay);
+                if (value && value->isPrimitiveValue() && toCSSPrimitiveValue(*value).getValueID() == CSSValueBlock)
+                    UseCounter::count(element->document(), UseCounter::SummaryElementWithDisplayBlockAuthorRule);
+            }
+        }
 
         if (element->computedStyle() && element->computedStyle()->textAutosizingMultiplier() != state.style()->textAutosizingMultiplier()) {
             // Preserve the text autosizing multiplier on style recalc. Autosizer will update it during layout if needed.
@@ -839,19 +849,14 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForElement(Element* element, const
     return state.takeStyle();
 }
 
-// This function is used by the WebAnimations JavaScript API method animate().
-// FIXME: Remove this when animate() switches away from resolution-dependent parsing.
-PassRefPtr<AnimatableValue> StyleResolver::createAnimatableValueSnapshot(Element& element, const ComputedStyle* baseStyle, CSSPropertyID property, CSSValue* value)
+// TODO(alancutter): Create compositor keyframe values directly instead of intermediate AnimatableValues.
+PassRefPtr<AnimatableValue> StyleResolver::createAnimatableValueSnapshot(Element& element, const ComputedStyle& baseStyle, const ComputedStyle* parentStyle, CSSPropertyID property, const CSSValue* value)
 {
-    StyleResolverState state(element.document(), &element);
-    state.setStyle(baseStyle ? ComputedStyle::clone(*baseStyle) : ComputedStyle::create());
-    return createAnimatableValueSnapshot(state, property, value);
-}
-
-PassRefPtr<AnimatableValue> StyleResolver::createAnimatableValueSnapshot(StyleResolverState& state, CSSPropertyID property, CSSValue* value)
-{
+    // TODO(alancutter): Avoid creating a StyleResolverState just to apply a single value on a ComputedStyle.
+    StyleResolverState state(element.document(), &element, parentStyle);
+    state.setStyle(ComputedStyle::clone(baseStyle));
     if (value) {
-        StyleBuilder::applyProperty(property, state, value);
+        StyleBuilder::applyProperty(property, state, *value);
         state.fontBuilder().createFont(state.document().styleEngine().fontSelector(), state.mutableStyleRef());
     }
     return CSSAnimatableValueFactory::create(property, *state.style());
@@ -1120,6 +1125,8 @@ bool StyleResolver::applyAnimatedProperties(StyleResolverState& state, const Ele
     if (state.animationUpdate().isEmpty())
         return false;
 
+    CSSAnimations::snapshotCompositorKeyframes(*element, state.animationUpdate(), *state.style(), state.parentStyle());
+
     if (state.style()->insideLink() != NotInsideLink) {
         ASSERT(state.applyPropertyToRegularStyle());
         state.setApplyPropertyToVisitedLinkStyle(true);
@@ -1278,6 +1285,7 @@ static inline bool isValidFirstLetterStyleProperty(CSSPropertyID id)
     case CSSPropertyFontVariant:
     case CSSPropertyFontVariantCaps:
     case CSSPropertyFontVariantLigatures:
+    case CSSPropertyFontVariantNumeric:
     case CSSPropertyFontWeight:
     case CSSPropertyLetterSpacing:
     case CSSPropertyLineHeight:
@@ -1383,7 +1391,7 @@ static inline bool isPropertyInWhitelist(PropertyWhitelistType propertyWhitelist
 // This method expands the 'all' shorthand property to longhand properties
 // and applies the expanded longhand properties.
 template <CSSPropertyPriority priority>
-void StyleResolver::applyAllProperty(StyleResolverState& state, CSSValue* allValue, bool inheritedOnly, PropertyWhitelistType propertyWhitelistType)
+void StyleResolver::applyAllProperty(StyleResolverState& state, const CSSValue& allValue, bool inheritedOnly, PropertyWhitelistType propertyWhitelistType)
 {
     // The 'all' property doesn't apply to variables:
     // https://drafts.csswg.org/css-variables/#defining-variables
@@ -1422,12 +1430,14 @@ void StyleResolver::applyAllProperty(StyleResolverState& state, CSSValue* allVal
 }
 
 template <CSSPropertyPriority priority>
-void StyleResolver::applyPropertiesForApplyAtRule(StyleResolverState& state, const CSSValue* value, bool isImportant, bool inheritedOnly, PropertyWhitelistType propertyWhitelistType)
+void StyleResolver::applyPropertiesForApplyAtRule(StyleResolverState& state, const CSSValue& value, bool isImportant, PropertyWhitelistType propertyWhitelistType)
 {
+    state.style()->setHasVariableReferenceFromNonInheritedProperty();
     if (!state.style()->variables())
         return;
-    const String& name = toCSSCustomIdentValue(value)->value();
+    const String& name = toCSSCustomIdentValue(value).value();
     const StylePropertySet* propertySet = state.customPropertySetForApplyAtRule(name);
+    bool inheritedOnly = false;
     if (propertySet)
         applyProperties<priority>(state, propertySet, isImportant, inheritedOnly, propertyWhitelistType);
 }
@@ -1441,7 +1451,8 @@ void StyleResolver::applyProperties(StyleResolverState& state, const StyleProper
         CSSPropertyID property = current.id();
 
         if (property == CSSPropertyApplyAtRule) {
-            applyPropertiesForApplyAtRule<priority>(state, current.value(), isImportant, inheritedOnly, propertyWhitelistType);
+            DCHECK(!inheritedOnly);
+            applyPropertiesForApplyAtRule<priority>(state, current.value(), isImportant, propertyWhitelistType);
             continue;
         }
 
@@ -1460,7 +1471,7 @@ void StyleResolver::applyProperties(StyleResolverState& state, const StyleProper
             // If the property value is explicitly inherited, we need to apply further non-inherited properties
             // as they might override the value inherited here. For this reason we don't allow declarations with
             // explicitly inherited properties to be cached.
-            ASSERT(!current.value()->isInheritedValue());
+            DCHECK(!current.value().isInheritedValue());
             continue;
         }
 
@@ -1521,7 +1532,7 @@ void StyleResolver::applyMatchedProperties(StyleResolverState& state, const Matc
     bool applyInheritedOnly = false;
     const CachedMatchedProperties* cachedMatchedProperties = cacheHash ? m_matchedPropertiesCache.find(cacheHash, state, matchResult.matchedProperties()) : nullptr;
 
-    if (cachedMatchedProperties && MatchedPropertiesCache::isCacheable(*state.style(), *state.parentStyle())) {
+    if (cachedMatchedProperties && MatchedPropertiesCache::isCacheable(state)) {
         INCREMENT_STYLE_STATS_COUNTER(document().styleEngine(), matchedPropertyCacheHit, 1);
         // We can build up the style by copying non-inherited properties from an earlier style object built using the same exact
         // style declarations. We then only need to apply the inherited properties, if any, as their values can depend on the
@@ -1547,18 +1558,16 @@ void StyleResolver::applyMatchedProperties(StyleResolverState& state, const Matc
     }
 
     // TODO(leviw): We need the proper bit for tracking whether we need to do this work.
-    if (RuntimeEnabledFeatures::cssVariablesEnabled()) {
-        applyMatchedProperties<ResolveVariables>(state, matchResult.authorRules(), false, applyInheritedOnly);
-        applyMatchedProperties<ResolveVariables>(state, matchResult.authorRules(), true, applyInheritedOnly);
-        // TODO(leviw): stop recalculating every time
-        CSSVariableResolver::resolveVariableDefinitions(state.style()->variables());
-    }
+    applyMatchedProperties<ResolveVariables>(state, matchResult.authorRules(), false, applyInheritedOnly);
+    applyMatchedProperties<ResolveVariables>(state, matchResult.authorRules(), true, applyInheritedOnly);
+    // TODO(leviw): stop recalculating every time
+    CSSVariableResolver::resolveVariableDefinitions(state);
 
     if (RuntimeEnabledFeatures::cssApplyAtRulesEnabled()) {
         if (cacheCustomPropertiesForApplyAtRules(state, matchResult.authorRules())) {
             applyMatchedProperties<ResolveVariables>(state, matchResult.authorRules(), false, applyInheritedOnly);
             applyMatchedProperties<ResolveVariables>(state, matchResult.authorRules(), true, applyInheritedOnly);
-            CSSVariableResolver::resolveVariableDefinitions(state.style()->variables());
+            CSSVariableResolver::resolveVariableDefinitions(state);
         }
     }
 
@@ -1617,7 +1626,7 @@ void StyleResolver::applyMatchedProperties(StyleResolverState& state, const Matc
 
     loadPendingResources(state);
 
-    if (!cachedMatchedProperties && cacheHash && MatchedPropertiesCache::isCacheable(*state.style(), *state.parentStyle())) {
+    if (!cachedMatchedProperties && cacheHash && MatchedPropertiesCache::isCacheable(state)) {
         ASSERT(RuntimeEnabledFeatures::styleMatchedPropertiesCacheEnabled());
         INCREMENT_STYLE_STATS_COUNTER(document().styleEngine(), matchedPropertyCacheAdded, 1);
         m_matchedPropertiesCache.add(*state.style(), *state.parentStyle(), cacheHash, matchResult.matchedProperties());
@@ -1676,7 +1685,7 @@ void StyleResolver::computeFont(ComputedStyle* style, const StylePropertySet& pr
         CSSPropertyFontFamily,
         CSSPropertyFontStretch,
         CSSPropertyFontStyle,
-        CSSPropertyFontVariant,
+        CSSPropertyFontVariantCaps,
         CSSPropertyFontWeight,
         CSSPropertyLineHeight,
     };
@@ -1688,7 +1697,7 @@ void StyleResolver::computeFont(ComputedStyle* style, const StylePropertySet& pr
     for (CSSPropertyID property : properties) {
         if (property == CSSPropertyLineHeight)
             updateFont(state);
-        StyleBuilder::applyProperty(property, state, propertySet.getPropertyCSSValue(property));
+        StyleBuilder::applyProperty(property, state, *propertySet.getPropertyCSSValue(property));
     }
 }
 

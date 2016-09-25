@@ -7,6 +7,7 @@
 
 #include "base/files/file_path.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_metrics.h"
 
 namespace content {
 class WebUI;
@@ -17,7 +18,9 @@ namespace webui {
 void OpenNewWindowForProfile(Profile* profile, Profile::CreateStatus status);
 
 // Deletes the profile at the given |file_path|.
-void DeleteProfileAtPath(base::FilePath file_path, content::WebUI* web_ui);
+void DeleteProfileAtPath(base::FilePath file_path,
+                         content::WebUI* web_ui,
+                         ProfileMetrics::ProfileDelete deletion_source);
 
 }  // namespace webui
 

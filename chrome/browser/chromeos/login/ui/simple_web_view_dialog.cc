@@ -4,8 +4,8 @@
 
 #include "chrome/browser/chromeos/login/ui/simple_web_view_dialog.h"
 
+#include "ash/common/shell_window_ids.h"
 #include "ash/shell.h"
-#include "ash/shell_window_ids.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -25,12 +25,12 @@
 #include "chrome/grit/theme_resources.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/security_state/security_state_model.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/toolbar/toolbar_model_impl.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_constants.h"
-#include "grit/components_strings.h"
 #include "ipc/ipc_message.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/theme_provider.h"
@@ -303,7 +303,7 @@ SimpleWebViewDialog::GetContentSettingBubbleModelDelegate() {
 
 void SimpleWebViewDialog::ShowWebsiteSettings(
     content::WebContents* web_contents,
-    const GURL& url,
+    const GURL& virtual_url,
     const security_state::SecurityStateModel::SecurityInfo& security_info) {
   NOTIMPLEMENTED();
   // TODO (markusheintz@): implement this

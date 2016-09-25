@@ -50,8 +50,6 @@ public:
     DECLARE_NODE_FACTORY(SVGSVGElement);
 
     // 'SVGSVGElement' functions
-    SVGRectTearOff* viewport() const;
-
     bool useCurrentView() const { return m_useCurrentView; }
     SVGViewSpec* currentView();
 
@@ -59,6 +57,7 @@ public:
     float intrinsicHeight() const;
     FloatSize currentViewportSize() const;
     FloatRect currentViewBoxRect() const;
+    SVGPreserveAspectRatio* currentPreserveAspectRatio() const;
 
     float currentScale() const;
     void setCurrentScale(float scale);
@@ -133,6 +132,7 @@ private:
 
     void inheritViewAttributes(SVGViewElement*);
 
+    bool shouldSynthesizeViewBox() const;
     void updateUserTransform();
 
     void finishParsingChildren() override;

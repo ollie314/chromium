@@ -28,7 +28,7 @@ class VideoDecoderJob : public MediaDecoderJob {
 
   // Passes a java surface object to the codec. Returns true if the surface
   // can be used by the decoder, or false otherwise.
-  bool SetVideoSurface(gfx::ScopedJavaSurface surface);
+  bool SetVideoSurface(gl::ScopedJavaSurface surface);
 
   // MediaDecoderJob implementation.
   bool HasStream() const override;
@@ -40,14 +40,14 @@ class VideoDecoderJob : public MediaDecoderJob {
 
  private:
   // MediaDecoderJob implementation.
-  void ReleaseOutputBuffer(
-      int output_buffer_index,
-      size_t offset,
-      size_t size,
-      bool render_output,
-      bool is_late_frame,
-      base::TimeDelta current_presentation_timestamp,
-      const ReleaseOutputCompletionCallback& callback) override;
+  void ReleaseOutputBuffer(int output_buffer_index,
+                           size_t offset,
+                           size_t size,
+                           bool render_output,
+                           bool is_late_frame,
+                           base::TimeDelta current_presentation_timestamp,
+                           MediaCodecStatus status,
+                           const DecoderCallback& callback) override;
   bool ComputeTimeToRender() const override;
   bool IsCodecReconfigureNeeded(const DemuxerConfigs& configs) const override;
   bool AreDemuxerConfigsChanged(const DemuxerConfigs& configs) const override;
@@ -67,7 +67,7 @@ class VideoDecoderJob : public MediaDecoderJob {
   int output_height_;
 
   // The surface object currently owned by the player.
-  gfx::ScopedJavaSurface surface_;
+  gl::ScopedJavaSurface surface_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoDecoderJob);
 };

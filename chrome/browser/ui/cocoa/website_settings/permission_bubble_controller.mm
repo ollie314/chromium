@@ -10,6 +10,7 @@
 #include "base/macros.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/permissions/permission_request.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -25,14 +26,18 @@
 #include "chrome/browser/ui/cocoa/website_settings/permission_selector_button.h"
 #include "chrome/browser/ui/cocoa/website_settings/split_block_button.h"
 #include "chrome/browser/ui/cocoa/website_settings/website_settings_utils_cocoa.h"
-#include "chrome/browser/ui/website_settings/permission_bubble_request.h"
-#include "chrome/browser/ui/website_settings/permission_bubble_view.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
+#include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/website_settings/permission_menu_model.h"
+#include "chrome/browser/ui/website_settings/permission_prompt.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_service.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/elide_url.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/components_strings.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/controls/hyperlink_text_view.h"
@@ -60,20 +65,7 @@ const CGFloat kTitlePaddingX = 50.0f;
 const CGFloat kBubbleMinWidth = 315.0f;
 const NSSize kPermissionIconSize = {18, 18};
 
-class MenuDelegate : public ui::SimpleMenuModel::Delegate {
- public:
-  explicit MenuDelegate(PermissionBubbleController* bubble)
-      : bubble_controller_(bubble) {}
-  bool IsCommandIdChecked(int command_id) const override { return false; }
-  bool IsCommandIdEnabled(int command_id) const override { return true; }
-  bool GetAcceleratorForCommandId(int command_id,
-                                  ui::Accelerator* accelerator) override {
-    return false;
-  }
- private:
-  PermissionBubbleController* bubble_controller_;  // Weak, owns us.
-  DISALLOW_COPY_AND_ASSIGN(MenuDelegate);
-};
+const NSInteger kFullscreenLeftOffset = 40;
 
 }  // namespace
 
@@ -89,7 +81,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 - (id)initForURL:(const GURL&)url
          allowed:(BOOL)allow
            index:(int)index
-        delegate:(PermissionBubbleView::Delegate*)delegate;
+        delegate:(PermissionPrompt::Delegate*)delegate;
 
 // Returns the maximum width of its possible titles.
 - (CGFloat)maximumTitleWidth;
@@ -100,14 +92,14 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 - (id)initForURL:(const GURL&)url
          allowed:(BOOL)allow
            index:(int)index
-        delegate:(PermissionBubbleView::Delegate*)delegate {
+        delegate:(PermissionPrompt::Delegate*)delegate {
   if (self = [super initWithFrame:NSZeroRect pullsDown:NO]) {
     ContentSetting setting =
         allow ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
     [self setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
     [self setBordered:NO];
 
-    __block PermissionBubbleView::Delegate* blockDelegate = delegate;
+    __block PermissionPrompt::Delegate* blockDelegate = delegate;
     __block AllowBlockMenuButton* blockSelf = self;
     PermissionMenuModel::ChangeCallback changeCallback =
         base::BindBlock(^(const WebsiteSettingsUI::PermissionInfo& permission) {
@@ -184,7 +176,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 - (NSWindow*)getExpectedParentWindow;
 
 // Returns an autoreleased NSView displaying the icon and label for |request|.
-- (NSView*)labelForRequest:(PermissionBubbleRequest*)request;
+- (NSView*)labelForRequest:(PermissionRequest*)request;
 
 // Returns an autoreleased NSView displaying the title for the bubble
 // requesting settings for |host|.
@@ -192,7 +184,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 
 // Returns an autoreleased NSView displaying a menu for |request|.  The
 // menu will be initialized as 'allow' if |allow| is YES.
-- (NSView*)menuForRequest:(PermissionBubbleRequest*)request
+- (NSView*)menuForRequest:(PermissionRequest*)request
                   atIndex:(int)index
                     allow:(BOOL)allow;
 
@@ -217,6 +209,10 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 
 // Called when the 'close' button is pressed.
 - (void)onClose:(id)sender;
+
+// Returns the constant offset from the left to use for fullscreen permission
+// bubbles. Only used in tests.
++ (NSInteger)getFullscreenLeftOffset;
 
 // Sets the width of both |viewA| and |viewB| to be the larger of the
 // two views' widths.  Does not change either view's origin or height.
@@ -258,6 +254,46 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   return self;
 }
 
++ (NSPoint)getAnchorPointForBrowser:(Browser*)browser {
+  NSPoint anchor;
+  NSWindow* parentWindow = browser->window()->GetNativeWindow();
+  if ([PermissionBubbleController hasVisibleLocationBarForBrowser:browser]) {
+    LocationBarViewMac* location_bar =
+        [[parentWindow windowController] locationBarBridge];
+    anchor = location_bar->GetPageInfoBubblePoint();
+  } else {
+    // Position the bubble on the left of the screen if there is no page info
+    // button to point at.
+    NSRect contentFrame = [[parentWindow contentView] frame];
+    anchor = NSMakePoint(NSMinX(contentFrame) + kFullscreenLeftOffset,
+                         NSMaxY(contentFrame));
+  }
+
+  return ui::ConvertPointFromWindowToScreen(parentWindow, anchor);
+}
+
++ (bool)hasVisibleLocationBarForBrowser:(Browser*)browser {
+  if (!browser->SupportsWindowFeature(Browser::FEATURE_LOCATIONBAR))
+    return false;
+
+  if (!browser->exclusive_access_manager()->context()->IsFullscreen())
+    return true;
+
+  // If the browser is in browser-initiated full screen, a preference can cause
+  // the toolbar to be hidden.
+  if (browser->exclusive_access_manager()
+          ->fullscreen_controller()
+          ->IsFullscreenForBrowser()) {
+    PrefService* prefs = browser->profile()->GetPrefs();
+    bool show_toolbar = prefs->GetBoolean(prefs::kShowFullscreenToolbar);
+    return show_toolbar;
+  }
+
+  // Otherwise this is fullscreen without a toolbar, so there is no visible
+  // location bar.
+  return false;
+}
+
 - (void)windowWillClose:(NSNotification*)notification {
   [[NSNotificationCenter defaultCenter]
       removeObserver:self
@@ -272,8 +308,9 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 }
 
 - (void)parentWindowDidResize:(NSNotification*)notification {
-  DCHECK(bridge_);
-  [self setAnchorPoint:[self getExpectedAnchorPoint]];
+  // Override the base class implementation, which sets the anchor point. But
+  // it's not necessary since BrowserWindowController will notify the
+  // PermissionRequestManager to update the anchor position on a resize.
 }
 
 - (void)parentWindowDidMove:(NSNotification*)notification {
@@ -281,8 +318,8 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   [self setAnchorPoint:[self getExpectedAnchorPoint]];
 }
 
-- (void)showWithDelegate:(PermissionBubbleView::Delegate*)delegate
-             forRequests:(const std::vector<PermissionBubbleRequest*>&)requests
+- (void)showWithDelegate:(PermissionPrompt::Delegate*)delegate
+             forRequests:(const std::vector<PermissionRequest*>&)requests
             acceptStates:(const std::vector<bool>&)acceptStates {
   DCHECK(!requests.empty());
   DCHECK(delegate);
@@ -443,30 +480,19 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 - (void)updateAnchorPosition {
   [self setParentWindow:[self getExpectedParentWindow]];
   [self setAnchorPoint:[self getExpectedAnchorPoint]];
+  [[self bubble] setArrowLocation:[self getExpectedArrowLocation]];
 }
 
 - (NSPoint)getExpectedAnchorPoint {
-  NSPoint anchor;
-  if ([self hasLocationBar]) {
-    LocationBarViewMac* location_bar =
-        [[[self getExpectedParentWindow] windowController] locationBarBridge];
-    anchor = location_bar->GetPageInfoBubblePoint();
-  } else {
-    // Center the bubble if there's no location bar.
-    NSRect contentFrame = [[[self getExpectedParentWindow] contentView] frame];
-    anchor = NSMakePoint(NSMidX(contentFrame), NSMaxY(contentFrame));
-  }
-
-  return ui::ConvertPointFromWindowToScreen([self getExpectedParentWindow],
-                                            anchor);
+  return [PermissionBubbleController getAnchorPointForBrowser:browser_];
 }
 
-- (bool)hasLocationBar {
-  return browser_->SupportsWindowFeature(Browser::FEATURE_LOCATIONBAR);
+- (bool)hasVisibleLocationBar {
+  return [PermissionBubbleController hasVisibleLocationBarForBrowser:browser_];
 }
 
 - (info_bubble::BubbleArrowLocation)getExpectedArrowLocation {
-  return [self hasLocationBar] ? info_bubble::kTopLeft : info_bubble::kNoArrow;
+  return info_bubble::kTopLeft;
 }
 
 - (NSWindow*)getExpectedParentWindow {
@@ -474,7 +500,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   return browser_->window()->GetNativeWindow();
 }
 
-- (NSView*)labelForRequest:(PermissionBubbleRequest*)request {
+- (NSView*)labelForRequest:(PermissionRequest*)request {
   DCHECK(request);
   base::scoped_nsobject<NSView> permissionView(
       [[NSView alloc] initWithFrame:NSZeroRect]);
@@ -540,7 +566,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   return titleView.autorelease();
 }
 
-- (NSView*)menuForRequest:(PermissionBubbleRequest*)request
+- (NSView*)menuForRequest:(PermissionRequest*)request
                   atIndex:(int)index
                     allow:(BOOL)allow {
   DCHECK(request);
@@ -601,11 +627,15 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   delegate_->Closing();
 }
 
++ (NSInteger)getFullscreenLeftOffset {
+  return kFullscreenLeftOffset;
+}
+
 - (void)activateTabWithContents:(content::WebContents*)newContents
                previousContents:(content::WebContents*)oldContents
                         atIndex:(NSInteger)index
                          reason:(int)reason {
-  // The show/hide of this bubble is handled by the PermissionBubbleManager.
+  // The show/hide of this bubble is handled by the PermissionRequestManager.
   // So bypass the base class, which would close the bubble here.
 }
 

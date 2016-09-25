@@ -4,8 +4,8 @@
 
 #include "base/command_line.h"
 #include "base/debug/leak_annotations.h"
-#include "base/feature_list.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/threading/platform_thread.h"
 #include "base/timer/hi_res_timer_manager.h"
 #include "build/build_config.h"
@@ -37,12 +37,6 @@ int UtilityMain(const MainFunctionParams& parameters) {
     LinuxSandbox::InitializeSandbox();
 #endif
 
-  std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-  feature_list->InitializeFromCommandLine(
-      parameters.command_line.GetSwitchValueASCII(switches::kEnableFeatures),
-      parameters.command_line.GetSwitchValueASCII(switches::kDisableFeatures));
-  base::FeatureList::SetInstance(std::move(feature_list));
-
   ChildProcess utility_process;
   utility_process.set_main_thread(new UtilityThreadImpl());
 
@@ -63,7 +57,7 @@ int UtilityMain(const MainFunctionParams& parameters) {
   }
 #endif
 
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
 #if defined(LEAK_SANITIZER)
   // Invoke LeakSanitizer before shutting down the utility thread, to avoid

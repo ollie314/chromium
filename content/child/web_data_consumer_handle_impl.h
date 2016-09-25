@@ -10,8 +10,8 @@
 #include <memory>
 
 #include "content/common/content_export.h"
-#include "mojo/message_pump/handle_watcher.h"
 #include "mojo/public/cpp/system/data_pipe.h"
+#include "mojo/public/cpp/system/watcher.h"
 #include "third_party/WebKit/public/platform/WebDataConsumerHandle.h"
 
 namespace content {
@@ -41,16 +41,15 @@ class CONTENT_EXPORT WebDataConsumerHandleImpl final
     void OnHandleGotReadable(MojoResult);
 
     scoped_refptr<Context> context_;
-    mojo::common::HandleWatcher handle_watcher_;
+    mojo::Watcher handle_watcher_;
     Client* client_;
   };
-  std::unique_ptr<Reader> ObtainReader(Client* client);
+  std::unique_ptr<Reader> obtainReader(Client* client) override;
 
   explicit WebDataConsumerHandleImpl(Handle handle);
   ~WebDataConsumerHandleImpl() override;
 
  private:
-  ReaderImpl* obtainReaderInternal(Client* client) override;
   const char* debugName() const override;
 
   scoped_refptr<Context> context_;

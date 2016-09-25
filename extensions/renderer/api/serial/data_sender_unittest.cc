@@ -22,7 +22,7 @@ class DataSenderTest : public ApiTestBase {
 
   void SetUp() override {
     ApiTestBase::SetUp();
-    service_provider()->AddService(
+    interface_provider()->AddInterface(
         base::Bind(&DataSenderTest::CreateDataSink, base::Unretained(this)));
   }
 
@@ -49,7 +49,7 @@ class DataSenderTest : public ApiTestBase {
         base::Bind(base::DoNothing));
   }
 
-  void ReadyToReceive(scoped_ptr<device::ReadOnlyBuffer> buffer) {
+  void ReadyToReceive(std::unique_ptr<device::ReadOnlyBuffer> buffer) {
     std::string data(buffer->GetData(), buffer->GetSize());
     if (expected_data_.empty()) {
       buffer_ = std::move(buffer);
@@ -73,9 +73,9 @@ class DataSenderTest : public ApiTestBase {
       error_to_report_.pop();
     }
     if (error)
-      buffer->DoneWithError(data.size(), error);
+      buffer->DoneWithError(static_cast<uint32_t>(data.size()), error);
     else
-      buffer->Done(data.size());
+      buffer->Done(static_cast<uint32_t>(data.size()));
   }
 
   void OnCancel(int32_t error) {
@@ -85,7 +85,7 @@ class DataSenderTest : public ApiTestBase {
   }
 
   scoped_refptr<device::DataSinkReceiver> receiver_;
-  scoped_ptr<device::ReadOnlyBuffer> buffer_;
+  std::unique_ptr<device::ReadOnlyBuffer> buffer_;
 
   DISALLOW_COPY_AND_ASSIGN(DataSenderTest);
 };

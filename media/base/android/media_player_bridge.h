@@ -7,13 +7,13 @@
 
 #include <jni.h>
 #include <stdint.h>
+
 #include <map>
 #include <string>
 
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
@@ -52,15 +52,14 @@ class MEDIA_EXPORT MediaPlayerBridge : public MediaPlayerAndroid {
       MediaPlayerManager* manager,
       const OnDecoderResourcesReleasedCB& on_decoder_resources_released_cb,
       const GURL& frame_url,
-      bool allow_credentials,
-      int media_session_id);
+      bool allow_credentials);
   ~MediaPlayerBridge() override;
 
   // Initialize this object and extract the metadata from the media.
   virtual void Initialize();
 
   // MediaPlayerAndroid implementation.
-  void SetVideoSurface(gfx::ScopedJavaSurface surface) override;
+  void SetVideoSurface(gl::ScopedJavaSurface surface) override;
   void Start() override;
   void Pause(bool is_media_related_action) override;
   void SeekTo(base::TimeDelta timestamp) override;
@@ -189,7 +188,7 @@ class MEDIA_EXPORT MediaPlayerBridge : public MediaPlayerAndroid {
   std::string cookies_;
 
   // The surface object currently owned by the player.
-  gfx::ScopedJavaSurface surface_;
+  gl::ScopedJavaSurface surface_;
 
   // Java MediaPlayerBridge instance.
   base::android::ScopedJavaGlobalRef<jobject> j_media_player_bridge_;

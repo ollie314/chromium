@@ -36,6 +36,7 @@
 #include "platform/heap/Handle.h"
 #include "public/platform/WebContentDecryptionModuleSession.h"
 #include "public/platform/WebEncryptedMediaTypes.h"
+#include <memory>
 
 namespace blink {
 
@@ -69,12 +70,15 @@ class MediaKeySession final
     USING_PRE_FINALIZER(MediaKeySession, dispose);
 public:
     static MediaKeySession* create(ScriptState*, MediaKeys*, WebEncryptedMediaSessionType);
+
     ~MediaKeySession() override;
 
     String sessionId() const;
     double expiration() const { return m_expiration; }
     ScriptPromise closed(ScriptState*);
     MediaKeyStatusMap* keyStatuses();
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(keystatuseschange);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
 
     ScriptPromise generateRequest(ScriptState*, const String& initDataType, const DOMArrayPiece& initData);
     ScriptPromise load(ScriptState*, const String& sessionId);
@@ -87,7 +91,7 @@ public:
     const AtomicString& interfaceName() const override;
     ExecutionContext* getExecutionContext() const override;
 
-    // ActiveScriptWrappable
+    // ScriptWrappable
     bool hasPendingActivity() const final;
 
     // ActiveDOMObject
@@ -103,7 +107,7 @@ private:
     MediaKeySession(ScriptState*, MediaKeys*, WebEncryptedMediaSessionType);
     void dispose();
 
-    void actionTimerFired(Timer<MediaKeySession>*);
+    void actionTimerFired(TimerBase*);
 
     // WebContentDecryptionModuleSession::Client
     void message(MessageType, const unsigned char* message, size_t messageLength) override;
@@ -118,7 +122,7 @@ private:
     void finishLoad();
 
     Member<GenericEventQueue> m_asyncEventQueue;
-    OwnPtr<WebContentDecryptionModuleSession> m_session;
+    std::unique_ptr<WebContentDecryptionModuleSession> m_session;
 
     // Used to determine if MediaKeys is still active.
     WeakMember<MediaKeys> m_mediaKeys;

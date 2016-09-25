@@ -12,6 +12,7 @@
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/download_shelf.h"
+#include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -25,19 +26,21 @@
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/options/content_settings_handler.h"
+#include "chrome/browser/ui/webui/site_settings_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/extension_prefs.h"
 #include "extensions/common/constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/url_util.h"
 #include "ui/base/window_open_disposition.h"
 
 #if defined(OS_WIN)
-#include "chrome/browser/enumerate_modules_model_win.h"
+#include "chrome/browser/win/enumerate_modules_model.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -101,8 +104,11 @@ void ShowHelpImpl(Browser* browser, Profile* profile, HelpSource source) {
     default:
       NOTREACHED() << "Unhandled help source" << source;
   }
-  OpenApplication(CreateAppLaunchParamsUserContainer(
-      profile, extension, NEW_FOREGROUND_TAB, app_launch_source));
+  OpenApplication(AppLaunchParams(
+      profile, extension,
+      extensions::GetLaunchContainer(extensions::ExtensionPrefs::Get(profile),
+                                     extension),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB, app_launch_source, true));
 #else
   GURL url;
   switch (source) {
@@ -129,7 +135,7 @@ void ShowHelpImpl(Browser* browser, Profile* profile, HelpSource source) {
 
 std::string GenerateContentSettingsExceptionsSubPage(ContentSettingsType type) {
   return kContentSettingsExceptionsSubPage + std::string(kHashMark) +
-         options::ContentSettingsHandler::ContentSettingsTypeToGroupName(type);
+         site_settings::ContentSettingsTypeToGroupName(type);
 }
 
 }  // namespace
@@ -183,13 +189,11 @@ void ShowExtensions(Browser* browser,
 void ShowConflicts(Browser* browser) {
 #if defined(OS_WIN)
   EnumerateModulesModel* model = EnumerateModulesModel::GetInstance();
-  if (model->modules_to_notify_about() > 0) {
-    GURL help_center_url = model->GetFirstNotableConflict();
-    if (help_center_url.is_valid()) {
-      ShowSingletonTab(browser, help_center_url);
-      model->AcknowledgeConflictNotification();
-      return;
-    }
+  GURL conflict_url = model->GetConflictUrl();
+  if (conflict_url.is_valid()) {
+    ShowSingletonTab(browser, conflict_url);
+    model->AcknowledgeConflictNotification();
+    return;
   }
 #endif
 
@@ -305,8 +309,7 @@ void ShowContentSettings(Browser* browser,
   ShowSettingsSubPage(
       browser,
       kContentSettingsSubPage + std::string(kHashMark) +
-          options::ContentSettingsHandler::ContentSettingsTypeToGroupName(
-              content_settings_type));
+          site_settings::ContentSettingsTypeToGroupName(content_settings_type));
 }
 
 void ShowClearBrowsingDataDialog(Browser* browser) {

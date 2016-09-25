@@ -54,6 +54,7 @@ class CORE_EXPORT FlatTreeTraversal {
     STATIC_ONLY(FlatTreeTraversal);
 public:
     typedef LayoutTreeBuilderTraversal::ParentDetails ParentTraversalDetails;
+    using TraversalNodeType = Node;
 
     static Node* next(const Node&);
     static Node* next(const Node&, const Node* stayWithin);
@@ -125,10 +126,8 @@ private:
 
     static void assertPrecondition(const Node& node)
     {
-#if DCHECK_IS_ON()
         DCHECK(!node.needsDistributionRecalc());
         DCHECK(node.canParticipateInFlatTree());
-#endif
     }
 
     static void assertPostcondition(const Node* node)

@@ -11,7 +11,9 @@ import android.os.Handler;
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.VisibleForTesting;
+
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.compositor.LayerTitleCache;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayContentProgressObserver;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelContent;
@@ -19,8 +21,9 @@ import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager.PanelPriority;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPromoControl.ContextualSearchPromoHost;
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
+import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilterHost;
 import org.chromium.chrome.browser.compositor.scene_layer.ContextualSearchSceneLayer;
-import org.chromium.chrome.browser.compositor.scene_layer.SceneLayer;
+import org.chromium.chrome.browser.compositor.scene_layer.SceneOverlayLayer;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManagementDelegate;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.ui.resources.ResourceManager;
@@ -72,12 +75,12 @@ public class ContextualSearchPanel extends OverlayPanel {
     /**
      * @param context The current Android {@link Context}.
      * @param updateHost The {@link LayoutUpdateHost} used to request updates in the Layout.
+     * @param eventHost The {@link EventFilterHost} for propagating events.
      * @param panelManager The object managing the how different panels are shown.
      */
     public ContextualSearchPanel(Context context, LayoutUpdateHost updateHost,
-                OverlayPanelManager panelManager) {
-        super(context, updateHost, panelManager);
-
+                EventFilterHost eventHost, OverlayPanelManager panelManager) {
+        super(context, updateHost, eventHost, panelManager);
         mSceneLayer = createNewContextualSearchSceneLayer();
         mPanelMetrics = new ContextualSearchPanelMetrics();
 
@@ -124,30 +127,26 @@ public class ContextualSearchPanel extends OverlayPanel {
     }
 
     // ============================================================================================
-    // Scene layer
+    // Scene Overlay
     // ============================================================================================
-
-    @Override
-    public SceneLayer getSceneLayer() {
-        return mSceneLayer;
-    }
-
-    @Override
-    public void updateSceneLayer(ResourceManager resourceManager) {
-        if (mSceneLayer == null) return;
-
-        mSceneLayer.update(resourceManager, this,
-                getSearchBarControl(),
-                getPeekPromoControl(),
-                getPromoControl(),
-                getIconSpriteControl());
-    }
 
     /**
      * Create a new scene layer for this panel. This should be overridden by tests as necessary.
      */
     protected ContextualSearchSceneLayer createNewContextualSearchSceneLayer() {
         return new ContextualSearchSceneLayer(mContext.getResources().getDisplayMetrics().density);
+    }
+
+    @Override
+    public SceneOverlayLayer getUpdatedSceneOverlayTree(LayerTitleCache layerTitleCache,
+            ResourceManager resourceManager, float yOffset) {
+        mSceneLayer.update(resourceManager, this,
+                getSearchBarControl(),
+                getPeekPromoControl(),
+                getPromoControl(),
+                getImageControl());
+
+        return mSceneLayer;
     }
 
     // ============================================================================================
@@ -183,11 +182,7 @@ public class ContextualSearchPanel extends OverlayPanel {
 
     @Override
     public void setPanelState(PanelState toState, StateChangeReason reason) {
-        // Store the previous state of the panel for when super changes it. 'super' should be the
-        // first thing with significant logic that runs in this method which is why
-        // onPanelStateChanged is not called here.
         PanelState fromState = getPanelState();
-        super.setPanelState(toState, reason);
 
         mPanelMetrics.onPanelStateChanged(fromState, toState, reason);
 
@@ -197,9 +192,9 @@ public class ContextualSearchPanel extends OverlayPanel {
             if (getPeekPromoControl().isVisible()) {
                 getPeekPromoControl().animateAppearance();
             }
-            if (getIconSpriteControl().shouldAnimateAppearance()) {
+            if (getImageControl().getIconSpriteControl().shouldAnimateAppearance()) {
                 mPanelMetrics.setWasIconSpriteAnimated(true);
-                getIconSpriteControl().animateApperance();
+                getImageControl().getIconSpriteControl().animateApperance();
             } else {
                 mPanelMetrics.setWasIconSpriteAnimated(false);
             }
@@ -211,6 +206,8 @@ public class ContextualSearchPanel extends OverlayPanel {
             // the promo should disappear.
             getPeekPromoControl().hide();
         }
+
+        super.setPanelState(toState, reason);
     }
 
     @Override
@@ -255,8 +252,11 @@ public class ContextualSearchPanel extends OverlayPanel {
 
         setProgressBarCompletion(0);
         setProgressBarVisible(false);
+        getImageControl().hideThumbnail(false);
 
         super.onClosed(reason);
+
+        if (mSceneLayer != null) mSceneLayer.hideTree();
     }
 
     // ============================================================================================
@@ -326,11 +326,6 @@ public class ContextualSearchPanel extends OverlayPanel {
         // The selected text on the page is lost when the panel is closed, thus, this panel cannot
         // be restored if it is suppressed.
         return false;
-    }
-
-    @Override
-    public boolean supportsContextualSearchLayout() {
-        return mManagementDelegate != null && !mManagementDelegate.isRunningInCompatibilityMode();
     }
 
     @Override
@@ -493,6 +488,7 @@ public class ContextualSearchPanel extends OverlayPanel {
      * @param searchTerm The string that represents the search term.
      */
     public void setSearchTerm(String searchTerm) {
+        getImageControl().hideThumbnail(true);
         getSearchBarControl().setSearchTerm(searchTerm);
         mPanelMetrics.onSearchRequestStarted();
     }
@@ -503,6 +499,7 @@ public class ContextualSearchPanel extends OverlayPanel {
      * @param end The portion of the context from the selection to its end.
      */
     public void setSearchContext(String selection, String end) {
+        getImageControl().hideThumbnail(true);
         getSearchBarControl().setSearchContext(selection, end);
         mPanelMetrics.onSearchRequestStarted();
     }
@@ -519,11 +516,13 @@ public class ContextualSearchPanel extends OverlayPanel {
     /**
      * Handles showing the resolved search term in the SearchBar.
      * @param searchTerm The string that represents the search term.
+     * @param thumbnailUrl The URL of the thumbnail to display.
      */
-    public void onSearchTermResolved(String searchTerm) {
+    public void onSearchTermResolved(String searchTerm, String thumbnailUrl) {
         mPanelMetrics.onSearchTermResolved();
         getSearchBarControl().setSearchTerm(searchTerm);
         getSearchBarControl().animateSearchTermResolution();
+        getImageControl().setThumbnailUrl(thumbnailUrl);
     }
 
     // ============================================================================================
@@ -590,7 +589,7 @@ public class ContextualSearchPanel extends OverlayPanel {
     }
 
     @Override
-    protected void updatePanelForOrientationChange() {
+    protected void updatePanelForSizeChange() {
         if (getPromoControl().isVisible()) {
             getPromoControl().invalidate(true);
         }
@@ -602,7 +601,7 @@ public class ContextualSearchPanel extends OverlayPanel {
         updateBasePageSelectionYPx(0.f);
         updateBasePageTargetY();
 
-        super.updatePanelForOrientationChange();
+        super.updatePanelForSizeChange();
     }
 
     // ============================================================================================
@@ -663,30 +662,19 @@ public class ContextualSearchPanel extends OverlayPanel {
     }
 
     // ============================================================================================
-    // Search Provider Icon Sprite
+    // Image Control
     // ============================================================================================
 
-    private ContextualSearchIconSpriteControl mIconSpriteControl;
+    private ContextualSearchImageControl mImageControl;
 
     /**
-     * @return The {@link ContextualSearchIconSpriteControl} for the panel.
+     * @return The {@link ContextualSearchImageControl} for the panel.
      */
-    public ContextualSearchIconSpriteControl getIconSpriteControl() {
-        if (mIconSpriteControl == null) {
-            mIconSpriteControl = new ContextualSearchIconSpriteControl(this, mContext);
+    public ContextualSearchImageControl getImageControl() {
+        if (mImageControl == null) {
+            mImageControl = new ContextualSearchImageControl(this, mContext);
         }
-        return mIconSpriteControl;
-    }
-
-    /**
-     * @param shouldAnimateIconSprite Whether the search provider icon sprite should be animated.
-     * @param isAnimationDisabledByTrial Whether animating the search provider icon is disabled by a
-     *                                   field trial.
-     */
-    public void setShouldAnimateIconSprite(boolean shouldAnimateIconSprite,
-                                           boolean isAnimationDisabledByTrial) {
-        getIconSpriteControl().setShouldAnimateAppearance(shouldAnimateIconSprite,
-                isAnimationDisabledByTrial);
+        return mImageControl;
     }
 
     // ============================================================================================

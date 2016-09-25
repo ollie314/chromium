@@ -14,14 +14,6 @@ Polymer({
 
   properties: {
     /**
-     * The current active route.
-     */
-    currentRoute: {
-      type: Object,
-      notify: true,
-    },
-
-    /**
      * The category selected by the user.
      */
     categorySelected: {
@@ -35,24 +27,33 @@ Polymer({
     this.ALL_SITES = settings.ALL_SITES;
 
     // Look up the default value for each category and show it.
+    this.setDefaultValue_(this.ContentSettingsTypes.AUTOMATIC_DOWNLOADS,
+        '#automaticDownloads');
+    this.setDefaultValue_(this.ContentSettingsTypes.BACKGROUND_SYNC,
+        '#backgroundSync');
+    this.setDefaultValue_(this.ContentSettingsTypes.CAMERA, '#camera');
     this.setDefaultValue_(this.ContentSettingsTypes.COOKIES, '#cookies');
     this.setDefaultValue_(this.ContentSettingsTypes.GEOLOCATION,
         '#geolocation');
-    this.setDefaultValue_(this.ContentSettingsTypes.CAMERA, '#camera');
-    this.setDefaultValue_(this.ContentSettingsTypes.MIC, '#mic');
+    this.setDefaultValue_(this.ContentSettingsTypes.IMAGES, '#images');
     this.setDefaultValue_(this.ContentSettingsTypes.JAVASCRIPT,
         '#javascript');
-    this.setDefaultValue_(this.ContentSettingsTypes.POPUPS, '#popups');
+    this.setDefaultValue_(this.ContentSettingsTypes.KEYGEN, '#keygen');
+    this.setDefaultValue_(this.ContentSettingsTypes.MIC, '#mic');
     this.setDefaultValue_(this.ContentSettingsTypes.NOTIFICATIONS,
         '#notifications');
-    this.setDefaultValue_(this.ContentSettingsTypes.IMAGES, '#images');
-
+    this.setDefaultValue_(this.ContentSettingsTypes.PLUGINS, '#plugins');
+    this.setDefaultValue_(this.ContentSettingsTypes.POPUPS, '#popups');
+    this.setDefaultValue_(this.ContentSettingsTypes.PROTOCOL_HANDLERS,
+        '#handlers');
+    this.setDefaultValue_(this.ContentSettingsTypes.UNSANDBOXED_PLUGINS,
+        '#unsandboxedPlugins');
   },
 
   setDefaultValue_: function(category, id) {
     this.browserProxy.getDefaultValueForContentType(
-        category).then(function(enabled) {
-          var description = this.computeCategoryDesc(category, enabled, false);
+        category).then(function(setting) {
+          var description = this.computeCategoryDesc(category, setting, false);
           this.$$(id).innerText = description;
         }.bind(this));
   },
@@ -63,21 +64,10 @@ Polymer({
    * @param {!Event} event The tap event.
    */
   onTapCategory: function(event) {
-    var category = parseInt(event.currentTarget.getAttribute('category'), 10);
-    if (category == -1) {
-      this.currentRoute = {
-        page: this.currentRoute.page,
-        section: 'privacy',
-        subpage: ['site-settings', 'all-sites'],
-      };
-    } else {
-      this.categorySelected = this.computeCategoryTextId(category);
-      this.currentRoute = {
-        page: this.currentRoute.page,
-        section: 'privacy',
-        subpage: ['site-settings', 'site-settings-category-' +
-            this.categorySelected],
-      };
-    }
+    var category = event.currentTarget.getAttribute('category');
+    if (category == settings.ALL_SITES)
+      settings.navigateTo(settings.Route.SITE_SETTINGS_ALL);
+    else
+      settings.navigateTo(this.computeCategoryRoute(category));
   },
 });

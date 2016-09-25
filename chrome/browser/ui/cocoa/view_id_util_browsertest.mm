@@ -56,7 +56,7 @@ class ViewIDTest : public InProcessBrowserTest {
 
     // Create a bookmark to test VIEW_ID_BOOKMARK_BAR_ELEMENT
     BookmarkModel* bookmark_model =
-        BookmarkModelFactory::GetForProfile(browser()->profile());
+        BookmarkModelFactory::GetForBrowserContext(browser()->profile());
     if (bookmark_model) {
       if (!bookmark_model->loaded())
         bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model);
@@ -104,8 +104,7 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Basic) {
 // Flaky on Mac: http://crbug.com/90557.
 IN_PROC_BROWSER_TEST_F(ViewIDTest, DISABLED_Fullscreen) {
   browser()->exclusive_access_manager()->context()->EnterFullscreen(
-      GURL(), EXCLUSIVE_ACCESS_BUBBLE_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION,
-      false);
+      GURL(), EXCLUSIVE_ACCESS_BUBBLE_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION);
   ASSERT_NO_FATAL_FAILURE(DoTest());
 }
 
@@ -116,21 +115,17 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Tab) {
   // Open 9 new tabs.
   for (int i = 1; i <= 9; ++i) {
     CheckViewID(static_cast<ViewID>(VIEW_ID_TAB_0 + i), false);
-    browser()->OpenURL(OpenURLParams(GURL(url::kAboutBlankURL),
-                                     Referrer(),
-                                     NEW_BACKGROUND_TAB,
-                                     ui::PAGE_TRANSITION_TYPED,
-                                     false));
+    browser()->OpenURL(OpenURLParams(GURL(url::kAboutBlankURL), Referrer(),
+                                     WindowOpenDisposition::NEW_BACKGROUND_TAB,
+                                     ui::PAGE_TRANSITION_TYPED, false));
     CheckViewID(static_cast<ViewID>(VIEW_ID_TAB_0 + i), true);
     // VIEW_ID_TAB_LAST should always be available.
     CheckViewID(VIEW_ID_TAB_LAST, true);
   }
 
   // Open the 11th tab.
-  browser()->OpenURL(OpenURLParams(GURL(url::kAboutBlankURL),
-                                   Referrer(),
-                                   NEW_BACKGROUND_TAB,
-                                   ui::PAGE_TRANSITION_TYPED,
-                                   false));
+  browser()->OpenURL(OpenURLParams(GURL(url::kAboutBlankURL), Referrer(),
+                                   WindowOpenDisposition::NEW_BACKGROUND_TAB,
+                                   ui::PAGE_TRANSITION_TYPED, false));
   CheckViewID(VIEW_ID_TAB_LAST, true);
 }

@@ -6,14 +6,16 @@
 
 #include <memory>
 
+#include "base/memory/memory_coordinator_client_registry.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "cc/base/container_util.h"
 #include "cc/debug/traced_value.h"
 #include "cc/resources/scoped_resource.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "ui/gfx/gpu_memory_buffer_tracing.h"
 
 namespace cc {
 namespace {
@@ -120,22 +122,13 @@ void StagingBuffer::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
   pmd->AddOwnershipEdge(buffer_dump->guid(), shared_buffer_guid, kImportance);
 }
 
-// static
-std::unique_ptr<StagingBufferPool> StagingBufferPool::Create(
-    base::SequencedTaskRunner* task_runner,
-    ResourceProvider* resource_provider,
-    bool use_partial_raster,
-    int max_staging_buffer_usage_in_bytes) {
-  return base::WrapUnique(
-      new StagingBufferPool(task_runner, resource_provider, use_partial_raster,
-                            max_staging_buffer_usage_in_bytes));
-}
-
 StagingBufferPool::StagingBufferPool(base::SequencedTaskRunner* task_runner,
+                                     ContextProvider* worker_context_provider,
                                      ResourceProvider* resource_provider,
                                      bool use_partial_raster,
                                      int max_staging_buffer_usage_in_bytes)
     : task_runner_(task_runner),
+      worker_context_provider_(worker_context_provider),
       resource_provider_(resource_provider),
       use_partial_raster_(use_partial_raster),
       max_staging_buffer_usage_in_bytes_(max_staging_buffer_usage_in_bytes),
@@ -145,15 +138,21 @@ StagingBufferPool::StagingBufferPool(base::SequencedTaskRunner* task_runner,
           base::TimeDelta::FromMilliseconds(kStagingBufferExpirationDelayMs)),
       reduce_memory_usage_pending_(false),
       weak_ptr_factory_(this) {
+  DCHECK(worker_context_provider_);
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       this, "cc::StagingBufferPool", base::ThreadTaskRunnerHandle::Get());
   reduce_memory_usage_callback_ = base::Bind(
       &StagingBufferPool::ReduceMemoryUsage, weak_ptr_factory_.GetWeakPtr());
+
+  // Register this component with base::MemoryCoordinatorClientRegistry.
+  base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
 }
 
 StagingBufferPool::~StagingBufferPool() {
   base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
       this);
+  // Unregister this component with memory_coordinator::ClientRegistry.
+  base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
 }
 
 void StagingBufferPool::Shutdown() {
@@ -243,11 +242,7 @@ std::unique_ptr<StagingBuffer> StagingBufferPool::AcquireStagingBuffer(
 
   std::unique_ptr<StagingBuffer> staging_buffer;
 
-  ContextProvider* context_provider =
-      resource_provider_->output_surface()->worker_context_provider();
-  DCHECK(context_provider);
-
-  ContextProvider::ScopedContextLock scoped_context(context_provider);
+  ContextProvider::ScopedContextLock scoped_context(worker_context_provider_);
 
   gpu::gles2::GLES2Interface* gl = scoped_context.ContextGL();
   DCHECK(gl);
@@ -317,8 +312,8 @@ std::unique_ptr<StagingBuffer> StagingBufferPool::AcquireStagingBuffer(
 
   // Create new staging buffer if necessary.
   if (!staging_buffer) {
-    staging_buffer = base::WrapUnique(
-        new StagingBuffer(resource->size(), resource->format()));
+    staging_buffer =
+        base::MakeUnique<StagingBuffer>(resource->size(), resource->format());
     AddStagingBuffer(staging_buffer.get(), resource->format());
   }
 
@@ -392,12 +387,8 @@ void StagingBufferPool::ReduceMemoryUsage() {
 void StagingBufferPool::ReleaseBuffersNotUsedSince(base::TimeTicks time) {
   lock_.AssertAcquired();
 
-  ContextProvider* context_provider =
-      resource_provider_->output_surface()->worker_context_provider();
-  DCHECK(context_provider);
-
   {
-    ContextProvider::ScopedContextLock scoped_context(context_provider);
+    ContextProvider::ScopedContextLock scoped_context(worker_context_provider_);
 
     gpu::gles2::GLES2Interface* gl = scoped_context.ContextGL();
     DCHECK(gl);
@@ -422,6 +413,25 @@ void StagingBufferPool::ReleaseBuffersNotUsedSince(base::TimeTicks time) {
       RemoveStagingBuffer(busy_buffers_.front().get());
       busy_buffers_.pop_front();
     }
+  }
+}
+
+void StagingBufferPool::OnMemoryStateChange(base::MemoryState state) {
+  switch (state) {
+    case base::MemoryState::NORMAL:
+      // TODO(tasak): go back to normal state.
+      break;
+    case base::MemoryState::THROTTLED:
+      // TODO(tasak): make the limits of this component's caches smaller to
+      // save memory usage.
+      break;
+    case base::MemoryState::SUSPENDED:
+      // TODO(tasak): free this component's caches as much as possible before
+      // suspending renderer.
+      break;
+    case base::MemoryState::UNKNOWN:
+      // NOT_REACHED.
+      break;
   }
 }
 

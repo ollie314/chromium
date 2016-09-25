@@ -7,6 +7,7 @@
 #include "core/layout/LayoutPart.h"
 #include "core/paint/BoxPainter.h"
 #include "core/paint/LayoutObjectDrawingRecorder.h"
+#include "core/paint/ObjectPainter.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/PaintLayer.h"
 #include "core/paint/ReplacedPainter.h"
@@ -62,7 +63,10 @@ void PartPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffs
     if (paintInfo.phase != PaintPhaseForeground)
         return;
 
-    {
+    if (m_layoutPart.widget()) {
+        // TODO(schenney) crbug.com/93805 Speculative release assert to verify that the crashes
+        // we see in widget painting are due to a destroyed LayoutPart object.
+        RELEASE_ASSERT(m_layoutPart.node());
         Optional<RoundedInnerRectClipper> clipper;
         if (m_layoutPart.style()->hasBorderRadius()) {
             if (borderRect.isEmpty())
@@ -78,8 +82,7 @@ void PartPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffs
             clipper.emplace(m_layoutPart, paintInfo, borderRect, roundedInnerRect, ApplyToDisplayList);
         }
 
-        if (m_layoutPart.widget())
-            m_layoutPart.paintContents(paintInfo, paintOffset);
+        m_layoutPart.paintContents(paintInfo, paintOffset);
     }
 
     // Paint a partially transparent wash over selected widgets.
@@ -102,17 +105,14 @@ void PartPainter::paintContents(const PaintInfo& paintInfo, const LayoutPoint& p
     Widget* widget = m_layoutPart.widget();
     RELEASE_ASSERT(widget);
 
-    // Tell the widget to paint now. This is the only time the widget is allowed
-    // to paint itself. That way it will composite properly with z-indexed layers.
-    IntPoint widgetLocation = widget->frameRect().location();
-    IntPoint paintLocation(roundedIntPoint(adjustedPaintOffset + m_layoutPart.contentBoxOffset()));
+    IntPoint paintLocation(roundedIntPoint(adjustedPaintOffset + m_layoutPart.replacedContentRect().location()));
 
-    IntSize widgetPaintOffset = paintLocation - widgetLocation;
-    // When painting widgets into compositing layers, tx and ty are relative to the enclosing compositing layer,
-    // not the root. In this case, shift the CTM and adjust the CullRect to be root-relative to fix plugin drawing.
+    // Widgets don't support painting with a paint offset, but instead offset themselves using the
+    // frame rect location. To paint widgets at our desired location, we need to apply paint offset
+    // as a transform, with the frame rect neutralized.
+    IntSize widgetPaintOffset = paintLocation - widget->frameRect().location();
     TransformRecorder transform(paintInfo.context, m_layoutPart,
         AffineTransform::translation(widgetPaintOffset.width(), widgetPaintOffset.height()));
-
     CullRect adjustedCullRect(paintInfo.cullRect(), -widgetPaintOffset);
     widget->paint(paintInfo.context, adjustedCullRect);
 }

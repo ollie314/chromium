@@ -8,39 +8,50 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
-#include "mash/shelf/public/interfaces/shelf.mojom.h"
+#include "ash/public/interfaces/shelf.mojom.h"
+#include "chrome/browser/ui/app_icon_loader.h"
+#include "chrome/browser/ui/ash/launcher/launcher_controller_helper.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 
 class ChromeShelfItemDelegate;
 
 // ChromeMashShelfController manages chrome's interaction with the mash shelf.
-class ChromeMashShelfController : public mash::shelf::mojom::ShelfObserver {
+class ChromeMashShelfController : public ash::mojom::ShelfObserver,
+                                  public AppIconLoaderDelegate {
  public:
+  ChromeMashShelfController();
   ~ChromeMashShelfController() override;
 
-  // Creates an instance.
-  static ChromeMashShelfController* CreateInstance();
-
-  // Returns the single ChromeMashShelfController instance.
-  static ChromeMashShelfController* instance() { return instance_; }
+  void LaunchItem(const std::string& app_id);
 
  private:
-  ChromeMashShelfController();
-
   void Init();
 
-  // mash::shelf::mojom::ShelfObserver:
-  void OnAlignmentChanged(mash::shelf::mojom::Alignment alignment) override;
-  void OnAutoHideBehaviorChanged(
-      mash::shelf::mojom::AutoHideBehavior auto_hide) override;
+  void PinAppsFromPrefs();
 
-  static ChromeMashShelfController* instance_;
+  AppIconLoader* GetAppIconLoaderForApp(const std::string& app_id);
 
-  mash::shelf::mojom::ShelfControllerPtr shelf_controller_;
-  mojo::AssociatedBinding<mash::shelf::mojom::ShelfObserver> observer_binding_;
+  // ash::mojom::ShelfObserver:
+  void OnShelfCreated(int64_t display_id) override;
+  void OnAlignmentChanged(ash::ShelfAlignment alignment,
+                          int64_t display_id) override;
+  void OnAutoHideBehaviorChanged(ash::ShelfAutoHideBehavior auto_hide,
+                                 int64_t display_id) override;
+
+  // AppIconLoaderDelegate:
+  void OnAppImageUpdated(const std::string& app_id,
+                         const gfx::ImageSkia& image) override;
+
+  LauncherControllerHelper helper_;
+  ash::mojom::ShelfControllerPtr shelf_controller_;
+  mojo::AssociatedBinding<ash::mojom::ShelfObserver> observer_binding_;
   std::map<std::string, std::unique_ptr<ChromeShelfItemDelegate>>
       app_id_to_item_delegate_;
+
+  // Used to load the images for app items.
+  std::vector<std::unique_ptr<AppIconLoader>> app_icon_loaders_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeMashShelfController);
 };

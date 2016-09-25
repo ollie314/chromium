@@ -55,7 +55,7 @@ class GCMProfileService::IdentityObserver : public IdentityProvider::Observer {
 
   GCMDriver* driver_;
   IdentityProvider* identity_provider_;
-  scoped_ptr<GCMAccountTracker> gcm_account_tracker_;
+  std::unique_ptr<GCMAccountTracker> gcm_account_tracker_;
 
   // The account ID that this service is responsible for. Empty when the service
   // is not running.
@@ -108,7 +108,7 @@ void GCMProfileService::IdentityObserver::StartAccountTracker(
   if (gcm_account_tracker_)
     return;
 
-  scoped_ptr<gaia::AccountTracker> gaia_account_tracker(
+  std::unique_ptr<gaia::AccountTracker> gaia_account_tracker(
       new gaia::AccountTracker(identity_provider_, request_context));
 
   gcm_account_tracker_.reset(
@@ -141,24 +141,26 @@ GCMProfileService::GCMProfileService(
     base::FilePath path,
     net::URLRequestContextGetter* request_context,
     version_info::Channel channel,
-    scoped_ptr<ProfileIdentityProvider> identity_provider,
-    scoped_ptr<GCMClientFactory> gcm_client_factory,
+    const std::string& product_category_for_subtypes,
+    std::unique_ptr<ProfileIdentityProvider> identity_provider,
+    std::unique_ptr<GCMClientFactory> gcm_client_factory,
     const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
     const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,
     scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner)
-    : request_context_(request_context),
-      profile_identity_provider_(std::move(identity_provider)) {
-  driver_ = CreateGCMDriverDesktop(std::move(gcm_client_factory), prefs,
-                                   path.Append(gcm_driver::kGCMStoreDirname),
-                                   request_context_, channel, ui_task_runner,
-                                   io_task_runner, blocking_task_runner);
+    : profile_identity_provider_(std::move(identity_provider)),
+      request_context_(request_context) {
+  driver_ = CreateGCMDriverDesktop(
+      std::move(gcm_client_factory), prefs,
+      path.Append(gcm_driver::kGCMStoreDirname), request_context_, channel,
+      product_category_for_subtypes, ui_task_runner, io_task_runner,
+      blocking_task_runner);
 
   identity_observer_.reset(new IdentityObserver(
       profile_identity_provider_.get(), request_context_, driver_.get()));
 }
 #endif  // defined(OS_ANDROID)
 
-GCMProfileService::GCMProfileService() : request_context_(nullptr) {}
+GCMProfileService::GCMProfileService() {}
 
 GCMProfileService::~GCMProfileService() {}
 

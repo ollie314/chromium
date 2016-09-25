@@ -8,6 +8,8 @@ import logging
 import os
 import re
 import shutil
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -80,12 +82,69 @@ def DeserializeAttributesFromJsonDict(json_dict, instance, attributes):
 
 
 @contextlib.contextmanager
-def TemporaryDirectory():
+def TemporaryDirectory(suffix='', prefix='tmp'):
   """Returns a freshly-created directory that gets automatically deleted after
   usage.
   """
-  name = tempfile.mkdtemp()
+  name = tempfile.mkdtemp(suffix=suffix, prefix=prefix)
   try:
     yield name
   finally:
     shutil.rmtree(name)
+
+
+def EnsureParentDirectoryExists(path):
+  """Verifies that the parent directory exists or creates it if missing."""
+  parent_directory_path = os.path.abspath(os.path.dirname(path))
+  if not os.path.isdir(parent_directory_path):
+    os.makedirs(parent_directory_path)
+
+
+def GetCommandLineForLogging(cmd, env_diff=None):
+  """Get command line string.
+
+  Args:
+    cmd: Command line argument
+    env_diff: Environment modification for the command line.
+
+  Returns:
+    Command line string.
+  """
+  cmd_str = ''
+  if env_diff:
+    for key, value in env_diff.iteritems():
+      cmd_str += '{}={} '.format(key, value)
+  return cmd_str + subprocess.list2cmdline(cmd)
+
+
+# TimeoutError inherit from BaseException to pass through DevUtils' retries
+# decorator that catches only exceptions inheriting from Exception.
+class TimeoutError(BaseException):
+  pass
+
+
+# If this exception is ever raised, then might be better to replace this
+# implementation with Thread.join(timeout=XXX).
+class TimeoutCollisionError(Exception):
+  pass
+
+
+@contextlib.contextmanager
+def TimeoutScope(seconds, error_name):
+  """Raises TimeoutError if the with statement is finished within |seconds|."""
+  assert seconds > 0
+  def _signal_callback(signum, frame):
+    del signum, frame # unused.
+    raise TimeoutError(error_name)
+
+  try:
+    signal.signal(signal.SIGALRM, _signal_callback)
+    if signal.alarm(seconds) != 0:
+      raise TimeoutCollisionError(
+          'Discarding an alarm that was scheduled before.')
+    yield
+  finally:
+    signal.alarm(0)
+    if signal.getsignal(signal.SIGALRM) != _signal_callback:
+      raise TimeoutCollisionError('Looks like there is a signal.signal(signal.'
+          'SIGALRM) made within the with statement.')

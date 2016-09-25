@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<grit latest_public_release="0" current_release="1">
+<grit latest_public_release="0" current_release="1" output_all_resource_defines="false">
   <outputs>
     <output filename="grit/ash_resources.h" type="rc_header" context="default_100_percent">
       <emit emit_type='prepend'></emit>
@@ -16,7 +16,6 @@
       <structure type="chrome_scaled_image" name="IDR_ASH_SHELF_CORNER" file="common/shelf/shelf_corner.png" />
       <structure type="chrome_scaled_image" name="IDR_ASH_SHELF_DIMMING" file="common/shelf/shelf_dimming.png" />
       <structure type="chrome_scaled_image" name="IDR_ASH_SHELF_ICON_APPLIST" file="common/shelf/status_launcher_menu_icon.png" />
-      <structure type="chrome_scaled_image" name="IDR_ASH_SHELF_ICON_APPLIST_CLASSIC" file="common/shelf/status_app_menu_icon.png" />
       <structure type="chrome_scaled_image" name="IDR_ASH_SHELF_LIST_BROWSER" file="common/shelf/window_switcher_icon_normal.png" />
       <structure type="chrome_scaled_image" name="IDR_ASH_SHELF_LIST_INCOGNITO_BROWSER" file="common/shelf/window_switcher_icon_incognito.png" />
       <structure type="chrome_scaled_image" name="IDR_ASH_SHELF_OVERFLOW" file="common/shelf/shelf_overflow.png" />
@@ -27,6 +26,9 @@
       <structure type="chrome_scaled_image" name="IDR_ASH_SHELF_ICON_TASK_MANAGER" file="common/shelf/task_manager.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_MULTI_WINDOW_RESIZE_H" file="common/multi_window_resize_horizontal.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_MULTI_WINDOW_RESIZE_V" file="common/multi_window_resize_vertical.png" />
+      <structure type="chrome_scaled_image" name="IDR_AURA_LAUNCHER_BACKGROUND_NORMAL" file="common/shelf/status_launcher_icon_background_normal.png" />
+      <structure type="chrome_scaled_image" name="IDR_AURA_LAUNCHER_BACKGROUND_ON_BLACK" file="common/shelf/status_launcher_icon_background_onblack_normal.png" />
+      <structure type="chrome_scaled_image" name="IDR_AURA_LAUNCHER_BACKGROUND_PRESSED" file="common/shelf/status_launcher_icon_background_pressed.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_NOTIFICATION_BACKGROUND_NORMAL" file="common/shelf/status_icon_background_normal.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_NOTIFICATION_BACKGROUND_ON_BLACK" file="common/shelf/status_icon_background_onblack_normal.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_NOTIFICATION_BACKGROUND_PRESSED" file="common/shelf/status_icon_background_pressed.png" />
@@ -113,7 +115,6 @@
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_AUDIO_HDMI" file="cros/status/status_audio_device_hdmi.png" />
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_AUDIO_HEADPHONE" file="cros/status/status_audio_device_headphones.png" />
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_AUDIO_USB" file="cros/status/status_audio_device_usb.png" />
-        <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_AUTO_ROTATION" file="cros/status/status_auto_rotate.png" />
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_AUTO_ROTATION_DARK" file="cros/status/status_auto_rotate_dark.png" />
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_AUTO_ROTATION_LOCKED" file="cros/status/status_auto_rotate_locked.png" />
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_AUTO_ROTATION_LOCKED_DARK" file="cros/status/status_auto_rotate_locked_dark.png" />
@@ -126,7 +127,6 @@
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_CELLULAR_ENABLED" file="cros/network/status_cellular_enabled.png" />
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_CELLULAR_ENABLED_HOVER" file="cros/network/status_cellular_enabled_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_CHILD_USER" file="cros/status/status_child_user.png" />
-        <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_DISPLAY" file="cros/status/status_display_dark.png" />
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_ENTERPRISE" file="cros/status/status_managed.png" />
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_LOGOUT_BUTTON_NORMAL_BOTTOM" file="cros/status/status_logout_button_normal_bottom.png" />
         <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_LOGOUT_BUTTON_NORMAL_BOTTOM_LEFT" file="cros/status/status_logout_button_normal_bottom_left.png" />

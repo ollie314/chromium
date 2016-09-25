@@ -39,13 +39,13 @@ namespace blink {
 
 PassRefPtr<Pattern> Pattern::createImagePattern(PassRefPtr<Image> tileImage, RepeatMode repeatMode)
 {
-    return ImagePattern::create(tileImage, repeatMode);
+    return ImagePattern::create(std::move(tileImage), repeatMode);
 }
 
-PassRefPtr<Pattern> Pattern::createPicturePattern(PassRefPtr<SkPicture> picture,
+PassRefPtr<Pattern> Pattern::createPicturePattern(sk_sp<SkPicture> picture,
     RepeatMode repeatMode)
 {
-    return PicturePattern::create(picture, repeatMode);
+    return PicturePattern::create(std::move(picture), repeatMode);
 }
 
 Pattern::Pattern(RepeatMode repeatMode, int64_t externalMemoryAllocated)
@@ -60,21 +60,17 @@ Pattern::~Pattern()
     adjustExternalMemoryAllocated(-m_externalMemoryAllocated);
 }
 
-void Pattern::applyToPaint(SkPaint& paint)
+void Pattern::applyToPaint(SkPaint& paint, const SkMatrix& localMatrix)
 {
-    if (!m_pattern)
-        m_pattern = createShader();
+    if (!m_cachedShader || isLocalMatrixChanged(localMatrix))
+        m_cachedShader = createShader(localMatrix);
 
-    paint.setShader(m_pattern);
+    paint.setShader(m_cachedShader);
 }
 
-void Pattern::setPatternSpaceTransform(const AffineTransform& patternSpaceTransformation)
+bool Pattern::isLocalMatrixChanged(const SkMatrix& localMatrix) const
 {
-    if (patternSpaceTransformation == m_patternSpaceTransformation)
-        return;
-
-    m_patternSpaceTransformation = patternSpaceTransformation;
-    m_pattern.reset();
+    return localMatrix != m_cachedShader->getLocalMatrix();
 }
 
 void Pattern::adjustExternalMemoryAllocated(int64_t delta)

@@ -34,15 +34,15 @@
 #include "bindings/core/v8/V8HTMLEmbedElement.h"
 #include "bindings/core/v8/V8HTMLObjectElement.h"
 #include "core/frame/UseCounter.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
 namespace {
 
-template <typename ElementType, typename PropertyType>
-void getScriptableObjectProperty(PropertyType property, const v8::PropertyCallbackInfo<v8::Value>& info)
+template <typename ElementType>
+void getScriptableObjectProperty(const AtomicString& name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
     HTMLPlugInElement* impl = ElementType::toImpl(info.Holder());
     RefPtr<SharedPersistent<v8::Object>> wrapper = impl->pluginWrapper();
@@ -53,20 +53,19 @@ void getScriptableObjectProperty(PropertyType property, const v8::PropertyCallba
     if (instance.IsEmpty())
         return;
 
-    v8::Local<v8::Value> value;
-    if (!instance->Get(info.GetIsolate()->GetCurrentContext(), property).ToLocal(&value))
+    v8::Local<v8::String> v8Name = v8String(info.GetIsolate(), name);
+    if (!v8CallBoolean(instance->HasOwnProperty(info.GetIsolate()->GetCurrentContext(), v8Name)))
         return;
 
-    // We quit here to allow the binding code to look up general HTMLObjectElement properties
-    // if they are not overriden by plugin.
-    if (value->IsUndefined() && !v8CallBoolean(instance->Has(info.GetIsolate()->GetCurrentContext(), property)))
+    v8::Local<v8::Value> value;
+    if (!instance->Get(info.GetIsolate()->GetCurrentContext(), v8Name).ToLocal(&value))
         return;
 
     v8SetReturnValue(info, value);
 }
 
-template <typename ElementType, typename PropertyType>
-void setScriptableObjectProperty(PropertyType property, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
+template <typename ElementType>
+void setScriptableObjectProperty(const AtomicString& name, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
     ASSERT(!value.IsEmpty());
     HTMLPlugInElement* impl = ElementType::toImpl(info.Holder());
@@ -78,6 +77,11 @@ void setScriptableObjectProperty(PropertyType property, v8::Local<v8::Value> val
     if (instance.IsEmpty())
         return;
 
+    // Don't intercept any of the properties of the HTMLPluginElement.
+    v8::Local<v8::String> v8Name = v8String(info.GetIsolate(), name);
+    if (v8CallBoolean(info.Holder()->Has(info.GetIsolate()->GetCurrentContext(), v8Name)))
+        return;
+
     // FIXME: The gTalk pepper plugin is the only plugin to make use of
     // SetProperty and that is being deprecated. This can be removed as soon as
     // it goes away.
@@ -87,57 +91,30 @@ void setScriptableObjectProperty(PropertyType property, v8::Local<v8::Value> val
     // DOM element will also be set. For plugin's that don't intercept the call
     // (all except gTalk) this makes no difference at all. For gTalk the fact
     // that the property on the DOM element also gets set is inconsequential.
-    v8::Maybe<bool> unused = instance->Set(info.GetIsolate()->GetCurrentContext(), property, value);
-    ALLOW_UNUSED_LOCAL(unused);
+    v8CallBoolean(instance->CreateDataProperty(info.GetIsolate()->GetCurrentContext(), v8Name, value));
+    v8SetReturnValue(info, value);
 }
+
 } // namespace
 
-void V8HTMLEmbedElement::namedPropertyGetterCustom(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
+void V8HTMLEmbedElement::namedPropertyGetterCustom(const AtomicString& name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (!name->IsString())
-        return;
-    getScriptableObjectProperty<V8HTMLEmbedElement>(name.As<v8::String>(), info);
+    getScriptableObjectProperty<V8HTMLEmbedElement>(name, info);
 }
 
-void V8HTMLObjectElement::namedPropertyGetterCustom(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
+void V8HTMLObjectElement::namedPropertyGetterCustom(const AtomicString& name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (!name->IsString())
-        return;
-    getScriptableObjectProperty<V8HTMLObjectElement>(name.As<v8::String>(), info);
+    getScriptableObjectProperty<V8HTMLObjectElement>(name, info);
 }
 
-void V8HTMLEmbedElement::namedPropertySetterCustom(v8::Local<v8::Name> name, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
+void V8HTMLEmbedElement::namedPropertySetterCustom(const AtomicString& name, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (!name->IsString())
-        return;
-    setScriptableObjectProperty<V8HTMLEmbedElement>(name.As<v8::String>(), value, info);
+    setScriptableObjectProperty<V8HTMLEmbedElement>(name, value, info);
 }
 
-void V8HTMLObjectElement::namedPropertySetterCustom(v8::Local<v8::Name> name, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
+void V8HTMLObjectElement::namedPropertySetterCustom(const AtomicString& name, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (!name->IsString())
-        return;
-    setScriptableObjectProperty<V8HTMLObjectElement>(name.As<v8::String>(), value, info);
-}
-
-void V8HTMLEmbedElement::indexedPropertyGetterCustom(uint32_t index, const v8::PropertyCallbackInfo<v8::Value>& info)
-{
-    getScriptableObjectProperty<V8HTMLEmbedElement>(index, info);
-}
-
-void V8HTMLObjectElement::indexedPropertyGetterCustom(uint32_t index, const v8::PropertyCallbackInfo<v8::Value>& info)
-{
-    getScriptableObjectProperty<V8HTMLObjectElement>(index, info);
-}
-
-void V8HTMLEmbedElement::indexedPropertySetterCustom(uint32_t index, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
-{
-    setScriptableObjectProperty<V8HTMLEmbedElement>(index, value, info);
-}
-
-void V8HTMLObjectElement::indexedPropertySetterCustom(uint32_t index, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
-{
-    setScriptableObjectProperty<V8HTMLObjectElement>(index, value, info);
+    setScriptableObjectProperty<V8HTMLObjectElement>(name, value, info);
 }
 
 namespace {
@@ -154,12 +131,12 @@ void invokeOnScriptableObject(const v8::FunctionCallbackInfo<v8::Value>& info)
     if (instance.IsEmpty())
         return;
 
-    WTF::OwnPtr<v8::Local<v8::Value>[] > arguments = adoptArrayPtr(new v8::Local<v8::Value>[info.Length()]);
+    std::unique_ptr<v8::Local<v8::Value>[] > arguments = wrapArrayUnique(new v8::Local<v8::Value>[info.Length()]);
     for (int i = 0; i < info.Length(); ++i)
         arguments[i] = info[i];
 
     v8::Local<v8::Value> retVal;
-    if (!instance->CallAsFunction(info.GetIsolate()->GetCurrentContext(), info.This(), info.Length(), arguments.get()).ToLocal(&retVal))
+    if (!instance->CallAsFunction(info.GetIsolate()->GetCurrentContext(), info.Holder(), info.Length(), arguments.get()).ToLocal(&retVal))
         return;
     v8SetReturnValue(info, retVal);
 }

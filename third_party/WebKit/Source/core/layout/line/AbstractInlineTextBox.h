@@ -79,7 +79,7 @@ public:
     LineLayoutText getLineLayoutItem() const { return m_lineLayoutItem; }
 
     PassRefPtr<AbstractInlineTextBox> nextInlineTextBox() const;
-    LayoutRect bounds() const;
+    LayoutRect localBounds() const;
     unsigned len() const;
     Direction getDirection() const;
     void characterWidths(Vector<float>&) const;

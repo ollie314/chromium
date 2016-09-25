@@ -31,7 +31,6 @@
 #include "modules/filesystem/DOMFileSystemSync.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/fileapi/File.h"
 #include "core/fileapi/FileError.h"
 #include "modules/filesystem/DOMFilePath.h"
@@ -44,6 +43,8 @@
 #include "platform/FileMetadata.h"
 #include "public/platform/WebFileSystem.h"
 #include "public/platform/WebFileSystemCallbacks.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -64,9 +65,9 @@ DOMFileSystemSync::~DOMFileSystemSync()
 {
 }
 
-void DOMFileSystemSync::reportError(ErrorCallback* errorCallback, FileError* fileError)
+void DOMFileSystemSync::reportError(ErrorCallbackBase* errorCallback, FileError::ErrorCode fileError)
 {
-    errorCallback->handleEvent(fileError);
+    errorCallback->invoke(fileError);
 }
 
 DirectoryEntrySync* DOMFileSystemSync::root()
@@ -78,7 +79,7 @@ namespace {
 
 class CreateFileHelper final : public AsyncFileSystemCallbacks {
 public:
-    class CreateFileResult : public GarbageCollectedFinalized<CreateFileResult> {
+    class CreateFileResult : public GarbageCollected<CreateFileResult> {
       public:
         static CreateFileResult* create()
         {
@@ -102,9 +103,9 @@ public:
         }
     };
 
-    static PassOwnPtr<AsyncFileSystemCallbacks> create(CreateFileResult* result, const String& name, const KURL& url, FileSystemType type)
+    static std::unique_ptr<AsyncFileSystemCallbacks> create(CreateFileResult* result, const String& name, const KURL& url, FileSystemType type)
     {
-        return adoptPtr(static_cast<AsyncFileSystemCallbacks*>(new CreateFileHelper(result, name, url, type)));
+        return wrapUnique(static_cast<AsyncFileSystemCallbacks*>(new CreateFileHelper(result, name, url, type)));
     }
 
     void didFail(int code) override
@@ -180,17 +181,17 @@ private:
     }
 };
 
-class LocalErrorCallback final : public ErrorCallback {
+class LocalErrorCallback final : public ErrorCallbackBase {
 public:
     static LocalErrorCallback* create(FileError::ErrorCode& errorCode)
     {
         return new LocalErrorCallback(errorCode);
     }
 
-    void handleEvent(FileError* error) override
+    void invoke(FileError::ErrorCode error) override
     {
-        ASSERT(error->code() != FileError::OK);
-        m_errorCode = error->code();
+        DCHECK_NE(error, FileError::kOK);
+        m_errorCode = error;
     }
 
 private:
@@ -210,14 +211,14 @@ FileWriterSync* DOMFileSystemSync::createWriter(const FileEntrySync* fileEntry, 
 
     FileWriterSync* fileWriter = FileWriterSync::create();
     ReceiveFileWriterCallback* successCallback = ReceiveFileWriterCallback::create();
-    FileError::ErrorCode errorCode = FileError::OK;
+    FileError::ErrorCode errorCode = FileError::kOK;
     LocalErrorCallback* errorCallback = LocalErrorCallback::create(errorCode);
 
-    OwnPtr<AsyncFileSystemCallbacks> callbacks = FileWriterBaseCallbacks::create(fileWriter, successCallback, errorCallback, m_context);
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks = FileWriterBaseCallbacks::create(fileWriter, successCallback, errorCallback, m_context);
     callbacks->setShouldBlockUntilCompletion(true);
 
-    fileSystem()->createFileWriter(createFileSystemURL(fileEntry), fileWriter, callbacks.release());
-    if (errorCode != FileError::OK) {
+    fileSystem()->createFileWriter(createFileSystemURL(fileEntry), fileWriter, std::move(callbacks));
+    if (errorCode != FileError::kOK) {
         FileError::throwDOMException(exceptionState, errorCode);
         return 0;
     }

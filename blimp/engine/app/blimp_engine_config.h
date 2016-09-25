@@ -17,6 +17,9 @@ class CommandLine;
 namespace blimp {
 namespace engine {
 
+// Set internal command line switches for Blimp engine.
+void SetCommandLineDefaults(base::CommandLine* command_line);
+
 // Class to hold all of the configuration bits necessary for the Blimp engine.
 //
 // The BlimpEngineConfig class is initialized from parameters provided on the
@@ -39,15 +42,15 @@ class BlimpEngineConfig {
   // Creates a BlimpEngineConfig based on individual components. Should only
   // be used for testing.
   static std::unique_ptr<BlimpEngineConfig> CreateForTest(
-      const std::string& client_token);
+      const std::string& client_auth_token);
 
   // Returns the client token.
-  const std::string& client_token() const;
+  const std::string& client_auth_token() const;
 
  private:
-  explicit BlimpEngineConfig(const std::string& client_token);
+  explicit BlimpEngineConfig(const std::string& client_auth_token);
 
-  const std::string client_token_;
+  const std::string client_auth_token_;
 
   DISALLOW_COPY_AND_ASSIGN(BlimpEngineConfig);
 };

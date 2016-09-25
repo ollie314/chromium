@@ -12,42 +12,41 @@
 #include "components/font_service/public/interfaces/font_service.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/shell/public/cpp/interface_factory.h"
-#include "services/shell/public/cpp/shell_client.h"
-#include "services/tracing/public/cpp/tracing_impl.h"
+#include "services/shell/public/cpp/service.h"
+#include "services/tracing/public/cpp/provider.h"
 #include "skia/ext/skia_utils_base.h"
 
 namespace font_service {
 
-class FontServiceApp : public shell::ShellClient,
-                       public shell::InterfaceFactory<FontService>,
-                       public FontService {
+class FontServiceApp : public shell::Service,
+                       public shell::InterfaceFactory<mojom::FontService>,
+                       public mojom::FontService {
  public:
   FontServiceApp();
   ~FontServiceApp() override;
 
  private:
-  // shell::ShellClient:
-  void Initialize(shell::Connector* connector,
-                  const shell::Identity& identity,
-                  uint32_t id) override;
-  bool AcceptConnection(shell::Connection* connection) override;
+  // shell::Service:
+  void OnStart(const shell::Identity& identity) override;
+  bool OnConnect(const shell::Identity& remote_identity,
+                 shell::InterfaceRegistry* registry) override;
 
-  // shell::InterfaceFactory<FontService>:
-  void Create(shell::Connection* connection,
-              mojo::InterfaceRequest<FontService> request) override;
+  // shell::InterfaceFactory<mojom::FontService>:
+  void Create(const shell::Identity& remote_identity,
+              mojo::InterfaceRequest<mojom::FontService> request) override;
 
   // FontService:
   void MatchFamilyName(const mojo::String& family_name,
-                       TypefaceStylePtr requested_style,
+                       mojom::TypefaceStylePtr requested_style,
                        const MatchFamilyNameCallback& callback) override;
   void OpenStream(uint32_t id_number,
                   const OpenStreamCallback& callback) override;
 
   int FindOrAddPath(const SkString& path);
 
-  mojo::BindingSet<FontService> bindings_;
+  mojo::BindingSet<mojom::FontService> bindings_;
 
-  mojo::TracingImpl tracing_;
+  tracing::Provider tracing_;
 
   // We don't want to leak paths to our callers; we thus enumerate the paths of
   // fonts.

@@ -57,11 +57,18 @@ component("shell_dialogs") {
     ]
     deps += [
       "//ui/android",
-      "//ui/android:ui_java",
       "//ui/base:ui_base_jni_headers",
     ]
     include_dirs = [ "$root_gen_dir/ui" ]
     libs = [ "jnigraphics" ]
+  }
+
+  if (is_mac) {
+    libs = [
+      "CoreServices.framework",
+      "Foundation.framework",
+      "AppKit.framework",
+    ]
   }
 }
 

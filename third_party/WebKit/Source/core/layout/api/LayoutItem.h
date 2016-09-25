@@ -7,11 +7,16 @@
 
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/layout/LayoutObject.h"
+
 #include "wtf/Allocator.h"
 
 namespace blink {
 
 class FrameView;
+class LayoutAPIShim;
+class LayoutViewItem;
+class Node;
+class ObjectPaintProperties;
 
 class LayoutItem {
     DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
@@ -28,15 +33,21 @@ public:
 
     LayoutItem() : m_layoutObject(0) { }
 
-    // TODO(leviw): This should be an UnspecifiedBoolType, but
+    // TODO(leviw): This should be "explicit operator bool", but
     // using this operator allows the API to be landed in pieces.
     // https://crbug.com/499321
     operator LayoutObject*() const { return m_layoutObject; }
 
-    // TODO(pilgrim): Remove this when we replace the operator above with UnspecifiedBoolType.
+    // TODO(pilgrim): Remove this when we replace the operator above with
+    // operator bool.
     bool isNull() const
     {
         return !m_layoutObject;
+    }
+
+    String debugName() const
+    {
+        return m_layoutObject->debugName();
     }
 
     bool isDescendantOf(LayoutItem item) const
@@ -129,6 +140,11 @@ public:
         return m_layoutObject->needsLayout();
     }
 
+    void setNeedsLayout(LayoutInvalidationReasonForTracing reason, MarkingBehavior marking = MarkContainerChain, SubtreeLayoutScope* scope = nullptr)
+    {
+        m_layoutObject->setNeedsLayout(reason, marking, scope);
+    }
+
     void layout()
     {
         m_layoutObject->layout();
@@ -139,15 +155,52 @@ public:
         return LayoutItem(m_layoutObject->container());
     }
 
+    Node* node() const
+    {
+        return m_layoutObject->node();
+    }
+
+    Document& document() const
+    {
+        return m_layoutObject->document();
+    }
+
+    LayoutItem nextInPreOrder() const
+    {
+        return LayoutItem(m_layoutObject->nextInPreOrder());
+    }
+
+    void updateStyleAndLayout()
+    {
+        return m_layoutObject->document().updateStyleAndLayout();
+    }
+
     const ComputedStyle& styleRef() const
     {
         return m_layoutObject->styleRef();
+    }
+
+    ComputedStyle* mutableStyle() const
+    {
+        return m_layoutObject->mutableStyle();
+    }
+
+    ComputedStyle& mutableStyleRef() const
+    {
+        return m_layoutObject->mutableStyleRef();
+    }
+
+    void setStyle(PassRefPtr<ComputedStyle> style)
+    {
+        m_layoutObject->setStyle(std::move(style));
     }
 
     LayoutSize offsetFromContainer(const LayoutItem& item) const
     {
         return m_layoutObject->offsetFromContainer(item.layoutObject());
     }
+
+    LayoutViewItem view() const;
 
     FrameView* frameView() const
     {
@@ -164,9 +217,19 @@ public:
         return m_layoutObject->style();
     }
 
+    PaintLayer* enclosingLayer() const
+    {
+        return m_layoutObject->enclosingLayer();
+    }
+
     bool hasLayer() const
     {
         return m_layoutObject->hasLayer();
+    }
+
+    void setShouldDoFullPaintInvalidation(PaintInvalidationReason reason = PaintInvalidationFull)
+    {
+        m_layoutObject->setShouldDoFullPaintInvalidation(reason);
     }
 
     void setShouldDoFullPaintInvalidationIncludingNonCompositingDescendants()
@@ -174,14 +237,74 @@ public:
         m_layoutObject->setShouldDoFullPaintInvalidationIncludingNonCompositingDescendants();
     }
 
+    void computeLayerHitTestRects(LayerHitTestRects& layerRects) const
+    {
+        m_layoutObject->computeLayerHitTestRects(layerRects);
+    }
+
+    FloatQuad localToAbsoluteQuad(const FloatQuad& quad, MapCoordinatesFlags mode = 0) const
+    {
+        return m_layoutObject->localToAbsoluteQuad(quad, mode);
+    }
+
+    FloatPoint absoluteToLocal(const FloatPoint& point, MapCoordinatesFlags mode = 0) const
+    {
+        return m_layoutObject->absoluteToLocal(point, mode);
+    }
+
+    void setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReasonForTracing reason, MarkingBehavior behavior = MarkContainerChain, SubtreeLayoutScope* scope = nullptr)
+    {
+        m_layoutObject->setNeedsLayoutAndFullPaintInvalidation(reason, behavior, scope);
+    }
+
     void setNeedsLayoutAndPrefWidthsRecalc(LayoutInvalidationReasonForTracing reason)
     {
         m_layoutObject->setNeedsLayoutAndPrefWidthsRecalc(reason);
     }
 
-    void computeLayerHitTestRects(LayerHitTestRects& layerRects) const
+    bool wasNotifiedOfSubtreeChange() const
     {
-        m_layoutObject->computeLayerHitTestRects(layerRects);
+        return m_layoutObject->wasNotifiedOfSubtreeChange();
+    }
+
+    void handleSubtreeModifications()
+    {
+        m_layoutObject->handleSubtreeModifications();
+    }
+
+    bool needsOverflowRecalcAfterStyleChange() const
+    {
+        return m_layoutObject->needsOverflowRecalcAfterStyleChange();
+    }
+
+    void invalidateTreeIfNeeded(const PaintInvalidationState& state)
+    {
+        m_layoutObject->invalidateTreeIfNeeded(state);
+    }
+
+    CompositingState compositingState() const
+    {
+        return m_layoutObject->compositingState();
+    }
+
+    bool mapToVisualRectInAncestorSpace(const LayoutBoxModelObject* ancestor, LayoutRect& layoutRect, VisualRectFlags flags = DefaultVisualRectFlags) const
+    {
+        return m_layoutObject->mapToVisualRectInAncestorSpace(ancestor, layoutRect, flags);
+    }
+
+    Color resolveColor(int colorProperty) const
+    {
+        return m_layoutObject->resolveColor(colorProperty);
+    }
+
+    const ObjectPaintProperties* objectPaintProperties() const
+    {
+        return m_layoutObject->objectPaintProperties();
+    }
+
+    void invalidatePaintRectangle(const LayoutRect& dirtyRect) const
+    {
+        m_layoutObject->invalidatePaintRectangle(dirtyRect);
     }
 
 protected:
@@ -190,6 +313,8 @@ protected:
 
 private:
     LayoutObject* m_layoutObject;
+
+    friend class LayoutAPIShim;
 };
 
 } // namespace blink

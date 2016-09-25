@@ -22,7 +22,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/cloud_external_data_store.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
@@ -237,7 +237,7 @@ bool CloudExternalDataManagerBase::Backend::OnDownloadSuccess(
   const FetchCallbackList& pending_callbacks = pending_downloads_[policy];
   for (FetchCallbackList::const_iterator it = pending_callbacks.begin();
        it != pending_callbacks.end(); ++it) {
-    RunCallback(*it, base::WrapUnique(new std::string(data)));
+    RunCallback(*it, base::MakeUnique<std::string>(data));
   }
   pending_downloads_.erase(policy);
   return true;

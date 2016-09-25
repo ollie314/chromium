@@ -33,22 +33,24 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/StaticBitmapImage.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkImage.h"
 
 class SkPicture;
 
 namespace blink {
 
-ImageBufferSurface::ImageBufferSurface(const IntSize& size, OpacityMode opacityMode)
+ImageBufferSurface::ImageBufferSurface(const IntSize& size, OpacityMode opacityMode, sk_sp<SkColorSpace> colorSpace)
     : m_opacityMode(opacityMode)
     , m_size(size)
+    , m_colorSpace(colorSpace)
 {
     setIsHidden(false);
 }
 
 ImageBufferSurface::~ImageBufferSurface() { }
 
-PassRefPtr<SkPicture> ImageBufferSurface::getPicture()
+sk_sp<SkPicture> ImageBufferSurface::getPicture()
 {
     return nullptr;
 }
@@ -70,12 +72,12 @@ void ImageBufferSurface::clear()
 
 void ImageBufferSurface::draw(GraphicsContext& context, const FloatRect& destRect, const FloatRect& srcRect, SkXfermode::Mode op)
 {
-    RefPtr<SkImage> snapshot = newImageSnapshot(PreferNoAcceleration, SnapshotReasonPaint);
+    sk_sp<SkImage> snapshot = newImageSnapshot(PreferNoAcceleration, SnapshotReasonPaint);
     if (!snapshot)
         return;
 
-    RefPtr<Image> image = StaticBitmapImage::create(snapshot.release());
-    context.drawImage(image.get(), destRect, srcRect, op);
+    RefPtr<Image> image = StaticBitmapImage::create(std::move(snapshot));
+    context.drawImage(image.get(), destRect, &srcRect, op);
 }
 
 void ImageBufferSurface::flush(FlushReason)

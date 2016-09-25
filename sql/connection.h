@@ -39,6 +39,7 @@ class Statement;
 // To allow some test classes to be friended.
 namespace test {
 class ScopedCommitHook;
+class ScopedErrorExpecter;
 class ScopedScalarFunction;
 class ScopedMockTimeSource;
 }
@@ -149,11 +150,8 @@ class SQL_EXPORT Connection {
   // other platforms.
   void set_restrict_to_user() { restrict_to_user_ = true; }
 
-  // Call to opt out of memory-mapped file I/O on per connection basis.
+  // Call to opt out of memory-mapped file I/O.
   void set_mmap_disabled() { mmap_disabled_ = true; }
-
-  // Call to opt out of memory-mapped file I/O on all connections.
-  static void set_mmap_disabled_by_default();
 
   // Set an error-handling callback.  On errors, the error number (and
   // statement, if available) will be passed to the callback.
@@ -240,6 +238,10 @@ class SQL_EXPORT Connection {
   // interprets the results returning true if the the statement executes
   // without error and results in a single "ok" value.
   bool QuickIntegrityCheck() WARN_UNUSED_RESULT;
+
+  // Meant to be called from a client error callback so that it's able to
+  // get diagnostic information about the database.
+  std::string GetDiagnosticInfo(int extended_error, Statement* statement);
 
   // Initialization ------------------------------------------------------------
 
@@ -477,15 +479,12 @@ class SQL_EXPORT Connection {
   //   SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY 1, 2, 3, 4;
   std::string GetSchema() const;
 
-  // Clients which provide an error_callback don't see the
-  // error-handling at the end of OnSqliteError().  Expose to allow
-  // those clients to work appropriately with ScopedErrorIgnorer in
-  // tests.
-  static bool ShouldIgnoreSqliteError(int error);
-
-  // Additionally ignores errors which are unlikely to be caused by problems
-  // with the syntax of a SQL statement, or problems with the database schema.
-  static bool ShouldIgnoreSqliteCompileError(int error);
+  // Returns |true| if there is an error expecter (see SetErrorExpecter), and
+  // that expecter returns |true| when passed |error|.  Clients which provide an
+  // |error_callback| should use IsExpectedSqliteError() to check for unexpected
+  // errors; if one is detected, DLOG(FATAL) is generally appropriate (see
+  // OnSqliteError implementation).
+  static bool IsExpectedSqliteError(int error);
 
   // Collect various diagnostic information and post a crash dump to aid
   // debugging.  Dump rate per database is limited to prevent overwhelming the
@@ -496,8 +495,8 @@ class SQL_EXPORT Connection {
   // For recovery module.
   friend class Recovery;
 
-  // Allow test-support code to set/reset error ignorer.
-  friend class ScopedErrorIgnorer;
+  // Allow test-support code to set/reset error expecter.
+  friend class test::ScopedErrorExpecter;
 
   // Statement accesses StatementRef which we don't want to expose to everybody
   // (they should go through Statement).
@@ -539,12 +538,12 @@ class SQL_EXPORT Connection {
   // Internal helper for DoesTableExist and DoesIndexExist.
   bool DoesTableOrIndexExist(const char* name, const char* type) const;
 
-  // Accessors for global error-ignorer, for injecting behavior during tests.
-  // See test/scoped_error_ignorer.h.
-  typedef base::Callback<bool(int)> ErrorIgnorerCallback;
-  static ErrorIgnorerCallback* current_ignorer_cb_;
-  static void SetErrorIgnorer(ErrorIgnorerCallback* ignorer);
-  static void ResetErrorIgnorer();
+  // Accessors for global error-expecter, for injecting behavior during tests.
+  // See test/scoped_error_expecter.h.
+  typedef base::Callback<bool(int)> ErrorExpecterCallback;
+  static ErrorExpecterCallback* current_expecter_cb_;
+  static void SetErrorExpecter(ErrorExpecterCallback* expecter);
+  static void ResetErrorExpecter();
 
   // A StatementRef is a refcounted wrapper around a sqlite statement pointer.
   // Refcounting allows us to give these statements out to sql::Statement
@@ -627,18 +626,24 @@ class SQL_EXPORT Connection {
   // error handlers to transparently convert errors into success.
   // Unfortunately, transactions are not generally restartable, so
   // this did not work out.
-  int OnSqliteError(int err, Statement* stmt, const char* sql);
+  int OnSqliteError(int err, Statement* stmt, const char* sql) const;
 
   // Like |Execute()|, but retries if the database is locked.
   bool ExecuteWithTimeout(const char* sql, base::TimeDelta ms_timeout)
       WARN_UNUSED_RESULT;
 
-  // Internal helper for const functions.  Like GetUniqueStatement(),
-  // except the statement is not entered into open_statements_,
-  // allowing this function to be const.  Open statements can block
-  // closing the database, so only use in cases where the last ref is
-  // released before close could be called (which should always be the
-  // case for const functions).
+  // Implementation helper for GetUniqueStatement() and GetUntrackedStatement().
+  // |tracking_db| is the db the resulting ref should register with for
+  // outstanding statement tracking, which should be |this| to track or NULL to
+  // not track.
+  scoped_refptr<StatementRef> GetStatementImpl(
+      sql::Connection* tracking_db, const char* sql) const;
+
+  // Helper for implementing const member functions.  Like GetUniqueStatement(),
+  // except the StatementRef is not entered into |open_statements_|, so an
+  // outstanding StatementRef from this function can block closing the database.
+  // The StatementRef will not call OnSqliteError(), because that can call
+  // |error_callback_| which can close the database.
   scoped_refptr<StatementRef> GetUntrackedStatement(const char* sql) const;
 
   bool IntegrityCheckHelper(

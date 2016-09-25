@@ -40,6 +40,7 @@
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/ViewportDescription.h"
 #include "core/frame/Settings.h"
+#include "core/layout/api/LayoutViewItem.h"
 
 namespace blink {
 
@@ -145,11 +146,11 @@ float ViewportStyleResolver::viewportArgumentValue(CSSPropertyID id) const
     if (id == CSSPropertyUserZoom)
         defaultValue = 1;
 
-    CSSValue* value = m_propertySet->getPropertyCSSValue(id);
+    const CSSValue* value = m_propertySet->getPropertyCSSValue(id);
     if (!value || !value->isPrimitiveValue())
         return defaultValue;
 
-    CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value);
+    const CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value);
 
     if (primitiveValue->isNumber() || primitiveValue->isPx())
         return primitiveValue->getFloatValue();
@@ -195,11 +196,11 @@ Length ViewportStyleResolver::viewportLengthValue(CSSPropertyID id) const
         || id == CSSPropertyMaxWidth
         || id == CSSPropertyMinWidth);
 
-    CSSValue* value = m_propertySet->getPropertyCSSValue(id);
+    const CSSValue* value = m_propertySet->getPropertyCSSValue(id);
     if (!value || !value->isPrimitiveValue())
         return Length(); // auto
 
-    CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value);
+    const CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value);
 
     if (primitiveValue->getValueID() == CSSValueInternalExtendToZoom)
         return Length(ExtendToZoom);
@@ -211,7 +212,7 @@ Length ViewportStyleResolver::viewportLengthValue(CSSPropertyID id) const
     documentStyle->setHasViewportUnits(false);
 
     CSSToLengthConversionData::FontSizes fontSizes(documentStyle, documentStyle);
-    CSSToLengthConversionData::ViewportSize viewportSize(m_document->layoutView());
+    CSSToLengthConversionData::ViewportSize viewportSize(m_document->layoutViewItem());
 
     if (primitiveValue->getValueID() == CSSValueAuto)
         return Length(Auto);

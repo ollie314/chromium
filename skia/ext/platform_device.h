@@ -18,7 +18,6 @@
 
 class SkMatrix;
 class SkPath;
-class SkRegion;
 
 namespace skia {
 
@@ -30,13 +29,12 @@ class ScopedPlatformPaint;
 // All calls to PlatformDevice::* should be routed through these 
 // helper functions.
 
-// Bind a PlatformDevice instance, |platform_device| to |device|.  Subsequent
-// calls to the functions exported below will forward the request to the
-// corresponding method on the bound PlatformDevice instance.    If no
-// PlatformDevice has been bound to the SkBaseDevice passed, then the 
-// routines are NOPS.
-SK_API void SetPlatformDevice(SkBaseDevice* device,
-                              PlatformDevice* platform_device);
+// DEPRECATED
+// Bind a PlatformDevice instance, |platform_device|, to |device|.
+SK_API void SetPlatformDevice(SkBaseDevice* device, PlatformDevice* platform_device);
+
+// DEPRECATED
+// Retrieve the previous argument to SetPlatformDevice().
 SK_API PlatformDevice* GetPlatformDevice(SkBaseDevice* device);
 
 // A SkBitmapDevice is basically a wrapper around SkBitmap that provides a 
@@ -59,23 +57,16 @@ class SK_API PlatformDevice {
   // The CGContext that corresponds to the bitmap, used for CoreGraphics
   // operations drawing into the bitmap. This is possibly heavyweight, so it
   // should exist only during one pass of rendering.
-  virtual CGContextRef GetBitmapContext() = 0;
-#endif
-
-#if defined(OS_WIN)
-  // Draws to the given screen DC, if the bitmap DC doesn't exist, this will
-  // temporarily create it. However, if you have created the bitmap DC, it will
-  // be more efficient if you don't free it until after this call so it doesn't
-  // have to be created twice.  If src_rect is null, then the entirety of the
-  // source device will be copied.
-  virtual void DrawToHDC(HDC, int x, int y, const RECT* src_rect);
+  virtual CGContextRef GetBitmapContext(const SkMatrix& transform,
+                                        const SkIRect& clip_bounds) = 0;
 #endif
 
  private:
   // The DC that corresponds to the bitmap, used for GDI operations drawing
   // into the bitmap. This is possibly heavyweight, so it should be existant
   // only during one pass of rendering.
-  virtual PlatformSurface BeginPlatformPaint();
+  virtual PlatformSurface BeginPlatformPaint(const SkMatrix& transform,
+                                             const SkIRect& clip_bounds);
 
   friend class ScopedPlatformPaint;
 };

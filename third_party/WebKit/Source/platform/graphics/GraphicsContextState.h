@@ -30,15 +30,15 @@
 #define GraphicsContextState_h
 
 #include "platform/graphics/DrawLooperBuilder.h"
-#include "platform/graphics/Gradient.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/graphics/StrokeData.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 #include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/PassOwnPtr.h"
-#include "wtf/RefPtr.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -47,14 +47,14 @@ namespace blink {
 class PLATFORM_EXPORT GraphicsContextState final {
     USING_FAST_MALLOC(GraphicsContextState);
 public:
-    static PassOwnPtr<GraphicsContextState> create()
+    static std::unique_ptr<GraphicsContextState> create()
     {
-        return adoptPtr(new GraphicsContextState());
+        return wrapUnique(new GraphicsContextState());
     }
 
-    static PassOwnPtr<GraphicsContextState> createAndCopy(const GraphicsContextState& other)
+    static std::unique_ptr<GraphicsContextState> createAndCopy(const GraphicsContextState& other)
     {
-        return adoptPtr(new GraphicsContextState(other));
+        return wrapUnique(new GraphicsContextState(other));
     }
 
     void copy(const GraphicsContextState&);
@@ -62,7 +62,7 @@ public:
     // SkPaint objects that reflect the current state. If the length of the
     // path to be stroked is known, pass it in for correct dash or dot placement.
     const SkPaint& strokePaint(int strokedPathLength = 0) const;
-    const SkPaint& fillPaint() const;
+    const SkPaint& fillPaint() const { return m_fillPaint; }
 
     uint16_t saveCount() const { return m_saveCount; }
     void incrementSaveCount() { ++m_saveCount; }
@@ -71,9 +71,6 @@ public:
     // Stroke data
     Color strokeColor() const { return m_strokePaint.getColor(); }
     void setStrokeColor(const Color&);
-
-    Gradient* strokeGradient() const { return m_strokeGradient.get(); }
-    void setStrokeGradient(const PassRefPtr<Gradient>, float);
 
     const StrokeData& getStrokeData() const { return m_strokeData; }
     void setStrokeStyle(StrokeStyle);
@@ -87,27 +84,24 @@ public:
     Color fillColor() const { return m_fillPaint.getColor(); }
     void setFillColor(const Color&);
 
-    Gradient* fillGradient() const { return m_fillGradient.get(); }
-    void setFillGradient(const PassRefPtr<Gradient>, float);
-
     // Shadow. (This will need tweaking if we use draw loopers for other things.)
     SkDrawLooper* drawLooper() const
     {
         DCHECK_EQ(m_fillPaint.getLooper(), m_strokePaint.getLooper());
         return m_fillPaint.getLooper();
     }
-    void setDrawLooper(PassRefPtr<SkDrawLooper>);
+    void setDrawLooper(sk_sp<SkDrawLooper>);
 
     // Text. (See TextModeFill & friends.)
     TextDrawingModeFlags textDrawingMode() const { return m_textDrawingMode; }
     void setTextDrawingMode(TextDrawingModeFlags mode) { m_textDrawingMode = mode; }
 
-    SkColorFilter* colorFilter() const
+    SkColorFilter* getColorFilter() const
     {
         DCHECK_EQ(m_fillPaint.getColorFilter(), m_strokePaint.getColorFilter());
         return m_fillPaint.getColorFilter();
     }
-    void setColorFilter(PassRefPtr<SkColorFilter>);
+    void setColorFilter(sk_sp<SkColorFilter>);
 
     // Image interpolation control.
     InterpolationQuality getInterpolationQuality() const { return m_interpolationQuality; }
@@ -121,14 +115,11 @@ private:
     explicit GraphicsContextState(const GraphicsContextState&);
     GraphicsContextState& operator=(const GraphicsContextState&);
 
-    // These are mutbale to enable gradient updates when the paints are fetched for use.
+    // This is mutable to enable dash path effect updates when the paint is fetched for use.
     mutable SkPaint m_strokePaint;
-    mutable SkPaint m_fillPaint;
+    SkPaint m_fillPaint;
 
     StrokeData m_strokeData;
-
-    RefPtr<Gradient> m_strokeGradient;
-    RefPtr<Gradient> m_fillGradient;
 
     TextDrawingModeFlags m_textDrawingMode;
 

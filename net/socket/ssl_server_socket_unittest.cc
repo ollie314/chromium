@@ -20,6 +20,10 @@
 #include <queue>
 #include <utility>
 
+#include <openssl/evp.h>
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
+
 #include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
@@ -28,8 +32,9 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "crypto/rsa_private_key.h"
@@ -42,8 +47,10 @@
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/test_data_directory.h"
 #include "net/cert/cert_status_flags.h"
+#include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/ct_policy_status.h"
+#include "net/cert/ct_verifier.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/cert/mock_client_cert_verifier.h"
 #include "net/cert/x509_certificate.h"
@@ -62,14 +69,14 @@
 #include "net/ssl/ssl_server_config.h"
 #include "net/ssl/test_ssl_private_key.h"
 #include "net/test/cert_test_util.h"
+#include "net/test/gtest_util.h"
+#include "net/test/test_data_directory.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
-#if defined(USE_OPENSSL)
-#include <openssl/evp.h>
-#include <openssl/ssl.h>
-#include <openssl/x509.h>
-#endif
+using net::test::IsError;
+using net::test::IsOk;
 
 namespace net {
 
@@ -80,6 +87,42 @@ const char kClientPrivateKeyFileName[] = "client_1.pk8";
 const char kWrongClientCertFileName[] = "client_2.pem";
 const char kWrongClientPrivateKeyFileName[] = "client_2.pk8";
 const char kClientCertCAFileName[] = "client_1_ca.pem";
+
+class MockCTVerifier : public CTVerifier {
+ public:
+  MockCTVerifier() = default;
+  ~MockCTVerifier() override = default;
+
+  int Verify(X509Certificate* cert,
+             const std::string& stapled_ocsp_response,
+             const std::string& sct_list_from_tls_extension,
+             ct::CTVerifyResult* result,
+             const NetLogWithSource& net_log) override {
+    return net::OK;
+  }
+
+  void SetObserver(Observer* observer) override {}
+};
+
+class MockCTPolicyEnforcer : public CTPolicyEnforcer {
+ public:
+  MockCTPolicyEnforcer() = default;
+  ~MockCTPolicyEnforcer() override = default;
+  ct::CertPolicyCompliance DoesConformToCertPolicy(
+      X509Certificate* cert,
+      const SCTList& verified_scts,
+      const NetLogWithSource& net_log) override {
+    return ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS;
+  }
+
+  ct::EVPolicyCompliance DoesConformToCTEVPolicy(
+      X509Certificate* cert,
+      const ct::EVCertsWhitelist* ev_whitelist,
+      const SCTList& verified_scts,
+      const NetLogWithSource& net_log) override {
+    return ct::EVPolicyCompliance::EV_POLICY_COMPLIES_VIA_SCTS;
+  }
+};
 
 class FakeDataChannel {
  public:
@@ -250,7 +293,7 @@ class FakeSocket : public StreamSocket {
     return OK;
   }
 
-  const BoundNetLog& NetLog() const override { return net_log_; }
+  const NetLogWithSource& NetLog() const override { return net_log_; }
 
   void SetSubresourceSpeculation() override {}
   void SetOmniboxSpeculation() override {}
@@ -277,7 +320,7 @@ class FakeSocket : public StreamSocket {
   }
 
  private:
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
   FakeDataChannel* incoming_;
   FakeDataChannel* outgoing_;
 
@@ -332,7 +375,9 @@ class SSLServerSocketTest : public PlatformTest {
       : socket_factory_(ClientSocketFactory::GetDefaultFactory()),
         cert_verifier_(new MockCertVerifier()),
         client_cert_verifier_(new MockClientCertVerifier()),
-        transport_security_state_(new TransportSecurityState) {}
+        transport_security_state_(new TransportSecurityState),
+        ct_verifier_(new MockCTVerifier),
+        ct_policy_enforcer_(new MockCTPolicyEnforcer) {}
 
   void SetUp() override {
     PlatformTest::SetUp();
@@ -350,13 +395,8 @@ class SSLServerSocketTest : public PlatformTest {
     client_ssl_config_.channel_id_enabled = false;
 
     // Certificate provided by the host doesn't need authority.
-    SSLConfig::CertAndStatus cert_and_status;
-    cert_and_status.cert_status = CERT_STATUS_AUTHORITY_INVALID;
-    std::string server_cert_der;
-    ASSERT_TRUE(X509Certificate::GetDEREncoded(server_cert_->os_cert_handle(),
-                                               &server_cert_der));
-    cert_and_status.der_cert = server_cert_der;
-    client_ssl_config_.allowed_bad_certs.push_back(cert_and_status);
+    client_ssl_config_.allowed_bad_certs.emplace_back(
+        server_cert_, CERT_STATUS_AUTHORITY_INVALID);
   }
 
  protected:
@@ -386,6 +426,8 @@ class SSLServerSocketTest : public PlatformTest {
     SSLClientSocketContext context;
     context.cert_verifier = cert_verifier_.get();
     context.transport_security_state = transport_security_state_.get();
+    context.cert_transparency_verifier = ct_verifier_.get();
+    context.ct_policy_enforcer = ct_policy_enforcer_.get();
 
     client_socket_ = socket_factory_->CreateSSLClientSocket(
         std::move(client_connection), host_and_pair, client_ssl_config_,
@@ -397,7 +439,6 @@ class SSLServerSocketTest : public PlatformTest {
     ASSERT_TRUE(server_socket_);
   }
 
-#if defined(USE_OPENSSL)
   void ConfigureClientCertsForClient(const char* cert_file_name,
                                      const char* private_key_file_name) {
     client_ssl_config_.send_client_cert = true;
@@ -409,8 +450,9 @@ class SSLServerSocketTest : public PlatformTest {
         ReadTestKey(private_key_file_name);
     ASSERT_TRUE(key);
 
-    client_ssl_config_.client_private_key = WrapOpenSSLPrivateKey(
-        crypto::ScopedEVP_PKEY(EVP_PKEY_up_ref(key->key())));
+    EVP_PKEY_up_ref(key->key());
+    client_ssl_config_.client_private_key =
+        WrapOpenSSLPrivateKey(crypto::ScopedEVP_PKEY(key->key()));
   }
 
   void ConfigureClientCertsForServer() {
@@ -458,7 +500,6 @@ class SSLServerSocketTest : public PlatformTest {
         crypto::RSAPrivateKey::CreateFromPrivateKeyInfo(key_vector));
     return key;
   }
-#endif
 
   std::unique_ptr<FakeDataChannel> channel_1_;
   std::unique_ptr<FakeDataChannel> channel_2_;
@@ -470,6 +511,8 @@ class SSLServerSocketTest : public PlatformTest {
   std::unique_ptr<MockCertVerifier> cert_verifier_;
   std::unique_ptr<MockClientCertVerifier> client_cert_verifier_;
   std::unique_ptr<TransportSecurityState> transport_security_state_;
+  std::unique_ptr<MockCTVerifier> ct_verifier_;
+  std::unique_ptr<MockCTPolicyEnforcer> ct_policy_enforcer_;
   std::unique_ptr<SSLServerContext> server_context_;
   std::unique_ptr<crypto::RSAPrivateKey> server_private_key_;
   scoped_refptr<X509Certificate> server_cert_;
@@ -499,8 +542,8 @@ TEST_F(SSLServerSocketTest, Handshake) {
   client_ret = connect_callback.GetResult(client_ret);
   server_ret = handshake_callback.GetResult(server_ret);
 
-  ASSERT_EQ(OK, client_ret);
-  ASSERT_EQ(OK, server_ret);
+  ASSERT_THAT(client_ret, IsOk());
+  ASSERT_THAT(server_ret, IsOk());
 
   // Make sure the cert status is expected.
   SSLInfo ssl_info;
@@ -520,9 +563,6 @@ TEST_F(SSLServerSocketTest, Handshake) {
   EXPECT_TRUE(is_aead);
 }
 
-// NSS ports don't support client certificates and have a global session cache.
-#if defined(USE_OPENSSL)
-
 // This test makes sure the session cache is working.
 TEST_F(SSLServerSocketTest, HandshakeCached) {
   ASSERT_NO_FATAL_FAILURE(CreateContext());
@@ -537,8 +577,8 @@ TEST_F(SSLServerSocketTest, HandshakeCached) {
   client_ret = connect_callback.GetResult(client_ret);
   server_ret = handshake_callback.GetResult(server_ret);
 
-  ASSERT_EQ(OK, client_ret);
-  ASSERT_EQ(OK, server_ret);
+  ASSERT_THAT(client_ret, IsOk());
+  ASSERT_THAT(server_ret, IsOk());
 
   // Make sure the cert status is expected.
   SSLInfo ssl_info;
@@ -559,8 +599,8 @@ TEST_F(SSLServerSocketTest, HandshakeCached) {
   client_ret2 = connect_callback2.GetResult(client_ret2);
   server_ret2 = handshake_callback2.GetResult(server_ret2);
 
-  ASSERT_EQ(OK, client_ret2);
-  ASSERT_EQ(OK, server_ret2);
+  ASSERT_THAT(client_ret2, IsOk());
+  ASSERT_THAT(server_ret2, IsOk());
 
   // Make sure the cert status is expected.
   SSLInfo ssl_info2;
@@ -585,8 +625,8 @@ TEST_F(SSLServerSocketTest, HandshakeCachedContextSwitch) {
   client_ret = connect_callback.GetResult(client_ret);
   server_ret = handshake_callback.GetResult(server_ret);
 
-  ASSERT_EQ(OK, client_ret);
-  ASSERT_EQ(OK, server_ret);
+  ASSERT_THAT(client_ret, IsOk());
+  ASSERT_THAT(server_ret, IsOk());
 
   // Make sure the cert status is expected.
   SSLInfo ssl_info;
@@ -609,8 +649,8 @@ TEST_F(SSLServerSocketTest, HandshakeCachedContextSwitch) {
   client_ret2 = connect_callback2.GetResult(client_ret2);
   server_ret2 = handshake_callback2.GetResult(server_ret2);
 
-  ASSERT_EQ(OK, client_ret2);
-  ASSERT_EQ(OK, server_ret2);
+  ASSERT_THAT(client_ret2, IsOk());
+  ASSERT_THAT(server_ret2, IsOk());
 
   // Make sure the cert status is expected.
   SSLInfo ssl_info2;
@@ -642,8 +682,8 @@ TEST_F(SSLServerSocketTest, HandshakeWithClientCert) {
   client_ret = connect_callback.GetResult(client_ret);
   server_ret = handshake_callback.GetResult(server_ret);
 
-  ASSERT_EQ(OK, client_ret);
-  ASSERT_EQ(OK, server_ret);
+  ASSERT_THAT(client_ret, IsOk());
+  ASSERT_THAT(server_ret, IsOk());
 
   // Make sure the cert status is expected.
   SSLInfo ssl_info;
@@ -676,8 +716,8 @@ TEST_F(SSLServerSocketTest, HandshakeWithClientCertCached) {
   client_ret = connect_callback.GetResult(client_ret);
   server_ret = handshake_callback.GetResult(server_ret);
 
-  ASSERT_EQ(OK, client_ret);
-  ASSERT_EQ(OK, server_ret);
+  ASSERT_THAT(client_ret, IsOk());
+  ASSERT_THAT(server_ret, IsOk());
 
   // Make sure the cert status is expected.
   SSLInfo ssl_info;
@@ -702,8 +742,8 @@ TEST_F(SSLServerSocketTest, HandshakeWithClientCertCached) {
   client_ret2 = connect_callback2.GetResult(client_ret2);
   server_ret2 = handshake_callback2.GetResult(server_ret2);
 
-  ASSERT_EQ(OK, client_ret2);
-  ASSERT_EQ(OK, server_ret2);
+  ASSERT_THAT(client_ret2, IsOk());
+  ASSERT_THAT(server_ret2, IsOk());
 
   // Make sure the cert status is expected.
   SSLInfo ssl_info2;
@@ -746,7 +786,7 @@ TEST_F(SSLServerSocketTest, HandshakeWithClientCertRequiredNotSupplied) {
 
   client_socket_->Disconnect();
 
-  EXPECT_EQ(ERR_FAILED, handshake_callback.GetResult(server_ret));
+  EXPECT_THAT(handshake_callback.GetResult(server_ret), IsError(ERR_FAILED));
 }
 
 TEST_F(SSLServerSocketTest, HandshakeWithClientCertRequiredNotSuppliedCached) {
@@ -779,7 +819,7 @@ TEST_F(SSLServerSocketTest, HandshakeWithClientCertRequiredNotSuppliedCached) {
 
   client_socket_->Disconnect();
 
-  EXPECT_EQ(ERR_FAILED, handshake_callback.GetResult(server_ret));
+  EXPECT_THAT(handshake_callback.GetResult(server_ret), IsError(ERR_FAILED));
   server_socket_->Disconnect();
 
   // Below, check that the cache didn't store the result of a failed handshake.
@@ -801,7 +841,7 @@ TEST_F(SSLServerSocketTest, HandshakeWithClientCertRequiredNotSuppliedCached) {
 
   client_socket_->Disconnect();
 
-  EXPECT_EQ(ERR_FAILED, handshake_callback2.GetResult(server_ret2));
+  EXPECT_THAT(handshake_callback2.GetResult(server_ret2), IsError(ERR_FAILED));
 }
 
 TEST_F(SSLServerSocketTest, HandshakeWithWrongClientCertSupplied) {
@@ -865,7 +905,6 @@ TEST_F(SSLServerSocketTest, HandshakeWithWrongClientCertSuppliedCached) {
   EXPECT_EQ(ERR_BAD_SSL_CLIENT_AUTH_CERT,
             handshake_callback2.GetResult(server_ret2));
 }
-#endif  // defined(USE_OPENSSL)
 
 TEST_F(SSLServerSocketTest, DataTransfer) {
   ASSERT_NO_FATAL_FAILURE(CreateContext());
@@ -881,9 +920,9 @@ TEST_F(SSLServerSocketTest, DataTransfer) {
   ASSERT_TRUE(server_ret == OK || server_ret == ERR_IO_PENDING);
 
   client_ret = connect_callback.GetResult(client_ret);
-  ASSERT_EQ(OK, client_ret);
+  ASSERT_THAT(client_ret, IsOk());
   server_ret = handshake_callback.GetResult(server_ret);
-  ASSERT_EQ(OK, server_ret);
+  ASSERT_THAT(server_ret, IsOk());
 
   const int kReadBufSize = 1024;
   scoped_refptr<StringIOBuffer> write_buf =
@@ -965,9 +1004,9 @@ TEST_F(SSLServerSocketTest, ClientWriteAfterServerClose) {
   ASSERT_TRUE(server_ret == OK || server_ret == ERR_IO_PENDING);
 
   client_ret = connect_callback.GetResult(client_ret);
-  ASSERT_EQ(OK, client_ret);
+  ASSERT_THAT(client_ret, IsOk());
   server_ret = handshake_callback.GetResult(server_ret);
-  ASSERT_EQ(OK, server_ret);
+  ASSERT_THAT(server_ret, IsOk());
 
   scoped_refptr<StringIOBuffer> write_buf = new StringIOBuffer("testing123");
 
@@ -996,7 +1035,7 @@ TEST_F(SSLServerSocketTest, ClientWriteAfterServerClose) {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       base::TimeDelta::FromMilliseconds(10));
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 }
 
 // This test executes ExportKeyingMaterial() on the client and server sockets,
@@ -1015,10 +1054,10 @@ TEST_F(SSLServerSocketTest, ExportKeyingMaterial) {
   ASSERT_TRUE(server_ret == OK || server_ret == ERR_IO_PENDING);
 
   if (client_ret == ERR_IO_PENDING) {
-    ASSERT_EQ(OK, connect_callback.WaitForResult());
+    ASSERT_THAT(connect_callback.WaitForResult(), IsOk());
   }
   if (server_ret == ERR_IO_PENDING) {
-    ASSERT_EQ(OK, handshake_callback.WaitForResult());
+    ASSERT_THAT(handshake_callback.WaitForResult(), IsOk());
   }
 
   const int kKeyingMaterialSize = 32;
@@ -1027,12 +1066,12 @@ TEST_F(SSLServerSocketTest, ExportKeyingMaterial) {
   unsigned char server_out[kKeyingMaterialSize];
   int rv = server_socket_->ExportKeyingMaterial(
       kKeyingLabel, false, kKeyingContext, server_out, sizeof(server_out));
-  ASSERT_EQ(OK, rv);
+  ASSERT_THAT(rv, IsOk());
 
   unsigned char client_out[kKeyingMaterialSize];
   rv = client_socket_->ExportKeyingMaterial(kKeyingLabel, false, kKeyingContext,
                                             client_out, sizeof(client_out));
-  ASSERT_EQ(OK, rv);
+  ASSERT_THAT(rv, IsOk());
   EXPECT_EQ(0, memcmp(server_out, client_out, sizeof(server_out)));
 
   const char kKeyingLabelBad[] = "EXPERIMENTAL-server-socket-test-bad";
@@ -1076,8 +1115,8 @@ TEST_F(SSLServerSocketTest, RequireEcdheFlag) {
   client_ret = connect_callback.GetResult(client_ret);
   server_ret = handshake_callback.GetResult(server_ret);
 
-  ASSERT_EQ(ERR_SSL_VERSION_OR_CIPHER_MISMATCH, client_ret);
-  ASSERT_EQ(ERR_SSL_VERSION_OR_CIPHER_MISMATCH, server_ret);
+  ASSERT_THAT(client_ret, IsError(ERR_SSL_VERSION_OR_CIPHER_MISMATCH));
+  ASSERT_THAT(server_ret, IsError(ERR_SSL_VERSION_OR_CIPHER_MISMATCH));
 }
 
 }  // namespace net

@@ -7,21 +7,33 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/metrics/field_trial.h"
 #include "build/build_config.h"
 #include "content/public/common/content_switches.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
-#include "ui/gfx/win/direct_write.h"
 #endif
 
 namespace content {
 
 namespace {
 
+#if defined(OS_WIN)
+const base::Feature kUseZoomForDsfEnabledByDefault {
+  "use-zoom-for-dsf enabled by default", base::FEATURE_ENABLED_BY_DEFAULT
+};
+#endif
+
 bool IsUseZoomForDSFEnabledByDefault() {
+#if defined(OS_CHROMEOS)
+  return true;
+#elif defined(OS_WIN)
+  return base::FeatureList::IsEnabled(kUseZoomForDsfEnabledByDefault);
+#else
   return false;
+#endif
 }
 
 }  // namespace
@@ -38,8 +50,6 @@ bool IsPinchToZoomEnabled() {
 
 bool IsWin32kRendererLockdownEnabled() {
   if (base::win::GetVersion() < base::win::VERSION_WIN8)
-    return false;
-  if (!gfx::win::ShouldUseDirectWrite())
     return false;
   const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
   if (cmd_line->HasSwitch(switches::kDisableWin32kRendererLockDown))
@@ -78,6 +88,26 @@ bool IsUseZoomForDSFEnabled() {
           switches::kEnableUseZoomForDSF) != "false";
 
   return enabled;
+}
+
+ProgressBarCompletion GetProgressBarCompletionPolicy() {
+#if defined(OS_ANDROID)
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  std::string progress_bar_completion =
+      command_line.GetSwitchValueASCII(switches::kProgressBarCompletion);
+  if (progress_bar_completion == "loadEvent")
+    return ProgressBarCompletion::LOAD_EVENT;
+  if (progress_bar_completion == "resourcesBeforeDOMContentLoaded")
+    return ProgressBarCompletion::RESOURCES_BEFORE_DCL;
+  if (progress_bar_completion == "domContentLoaded")
+    return ProgressBarCompletion::DOM_CONTENT_LOADED;
+  if (progress_bar_completion ==
+      "resourcesBeforeDOMContentLoadedAndSameOriginIframes") {
+    return ProgressBarCompletion::RESOURCES_BEFORE_DCL_AND_SAME_ORIGIN_IFRAMES;
+  }
+#endif
+  return ProgressBarCompletion::LOAD_EVENT;
 }
 
 } // namespace content

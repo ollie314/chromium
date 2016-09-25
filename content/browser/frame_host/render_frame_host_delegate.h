@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <string>
 #include <vector>
 
 #include "base/i18n/rtl.h"
@@ -17,6 +18,7 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/common/javascript_message_type.h"
 #include "content/public/common/media_stream_request.h"
+#include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
 #include "net/http/http_response_headers.h"
 
 #if defined(OS_WIN)
@@ -29,15 +31,21 @@ namespace IPC {
 class Message;
 }
 
-namespace content {
+namespace device {
 class GeolocationServiceContext;
+}
+
+namespace content {
+class FrameTreeNode;
 class InterstitialPage;
 class PageState;
 class RenderFrameHost;
 class WakeLockServiceContext;
 class WebContents;
 struct AXEventNotificationDetails;
+struct AXLocationChangeNotificationDetails;
 struct ContextMenuParams;
+struct FileChooserParams;
 struct TransitionLayerData;
 
 // An interface implemented by an object interested in knowing about the state
@@ -47,6 +55,12 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // This is used to give the delegate a chance to filter IPC messages.
   virtual bool OnMessageReceived(RenderFrameHost* render_frame_host,
                                  const IPC::Message& message);
+
+  // Allows the delegate to filter incoming associated inteface requests.
+  virtual void OnAssociatedInterfaceRequest(
+      RenderFrameHost* render_frame_host,
+      const std::string& interface_name,
+      mojo::ScopedInterfaceEndpointHandle handle) {}
 
   // Gets the last committed URL. See WebContents::GetLastCommittedURL for a
   // description of the semantics.
@@ -64,9 +78,6 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Informs the delegate whenever a RenderFrameHost is deleted.
   virtual void RenderFrameDeleted(RenderFrameHost* render_frame_host) {}
 
-  // The RenderFrameHost has been swapped out.
-  virtual void SwappedOut(RenderFrameHost* render_frame_host) {}
-
   // A context menu should be shown, to be built using the context information
   // provided in the supplied params.
   virtual void ShowContextMenu(RenderFrameHost* render_frame_host,
@@ -83,6 +94,10 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   virtual void RunBeforeUnloadConfirm(RenderFrameHost* render_frame_host,
                                       bool is_reload,
                                       IPC::Message* reply_msg) {}
+
+  // Called when a file selection is to be done.
+  virtual void RunFileChooser(RenderFrameHost* render_frame_host,
+                              const FileChooserParams& params) {}
 
   // Another page accessed the top-level initial empty document, which means it
   // is no longer safe to display a pending URL without risking a URL spoof.
@@ -136,9 +151,12 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Get the accessibility mode for the WebContents that owns this frame.
   virtual AccessibilityMode GetAccessibilityMode() const;
 
-  // Invoked when an accessibility event is received from the renderer.
+  // Forward accessibility messages to other potential listeners like
+  // the automation extension API.
   virtual void AccessibilityEventReceived(
       const std::vector<AXEventNotificationDetails>& details) {}
+  virtual void AccessibilityLocationChangesReceived(
+      const std::vector<AXLocationChangeNotificationDetails>& details) {}
 
   // Find a guest RenderFrameHost by its parent |render_frame_host| and
   // |browser_plugin_instance_id|.
@@ -147,7 +165,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
       int browser_plugin_instance_id);
 
   // Gets the GeolocationServiceContext associated with this delegate.
-  virtual GeolocationServiceContext* GetGeolocationServiceContext();
+  virtual device::GeolocationServiceContext* GetGeolocationServiceContext();
 
   // Gets the WakeLockServiceContext associated with this delegate.
   virtual WakeLockServiceContext* GetWakeLockServiceContext();
@@ -181,6 +199,10 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // refactoring for --site-per-process mode is further along.  See
   // https://crbug.com/330264.
   virtual void EnsureOpenerProxiesExist(RenderFrameHost* source_rfh) {}
+
+  // Set the |node| frame as focused in the current FrameTree as well as
+  // possibly changing focus in distinct but related inner/outer WebContents.
+  virtual void SetFocusedFrame(FrameTreeNode* node, SiteInstance* source) {}
 
   // Creates a WebUI object for a frame navigating to |url|. If no WebUI
   // applies, returns null.

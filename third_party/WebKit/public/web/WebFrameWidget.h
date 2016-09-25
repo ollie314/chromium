@@ -53,7 +53,7 @@ public:
     // We still track page-level visibility, but additionally we need to notify a WebFrameWidget
     // when its owning RenderWidget receives a Show or Hide directive, so that it knows whether
     // it needs to draw or not.
-    virtual void setVisibilityState(WebPageVisibilityState visibilityState, bool isInitialState) { }
+    virtual void setVisibilityState(WebPageVisibilityState visibilityState) {}
 
     // Makes the WebFrameWidget transparent.  This is useful if you want to have
     // some custom background rendered behind it.
@@ -70,12 +70,11 @@ public:
     // first call to this method.
     virtual void setBaseBackgroundColor(WebColor) = 0;
 
-    // TODO(dcheng): Temporary: there should only be one WebFrameWidget
-    // implementation but the Blink API is currently in a transition state.
-    // See https://goo.gl/7yVrnb. These methods should only be used inside
-    // blink.
-    virtual bool forSubframe() const { return true; }
-    virtual void scheduleAnimation() = 0;
+    // Returns the local root of this WebFrameWidget.
+    virtual WebLocalFrame* localRoot() = 0;
+
+    // WebWidget implementation.
+    bool isWebFrameWidget() const final { return true; }
 };
 
 } // namespace blink

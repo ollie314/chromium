@@ -4,14 +4,12 @@
 
 #include "chrome/browser/chrome_browser_main_android.h"
 
-#include "base/android/build_info.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/trace_event/trace_event.h"
-#include "chrome/browser/android/chrome_media_client_android.h"
 #include "chrome/browser/android/seccomp_support_detector.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/chrome_paths.h"
@@ -21,7 +19,6 @@
 #include "content/public/browser/android/compositor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/main_function_params.h"
-#include "media/base/android/media_client_android.h"
 #include "net/android/network_change_notifier_factory_android.h"
 #include "net/base/network_change_notifier.h"
 #include "ui/base/resource/resource_bundle_android.h"
@@ -72,9 +69,7 @@ int ChromeBrowserMainPartsAndroid::PreCreateThreads() {
     crash_dump_manager_.reset(new breakpad::CrashDumpManager(crash_dump_dir));
   }
 
-  bool has_language_splits =
-      base::android::BuildInfo::GetInstance()->has_language_apk_splits();
-  ui::SetLocalePaksStoredInApk(has_language_splits);
+  ui::SetLocalePaksStoredInApk(false);
 
   return ChromeBrowserMainParts::PreCreateThreads();
 }
@@ -120,12 +115,6 @@ void ChromeBrowserMainPartsAndroid::PreEarlyInitialization() {
   }
 
   ChromeBrowserMainParts::PreEarlyInitialization();
-}
-
-void ChromeBrowserMainPartsAndroid::PreMainMessageLoopRun() {
-  media::SetMediaClientAndroid(new ChromeMediaClientAndroid);
-
-  ChromeBrowserMainParts::PreMainMessageLoopRun();
 }
 
 void ChromeBrowserMainPartsAndroid::PostBrowserStart() {

@@ -16,7 +16,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "storage/browser/fileapi/quota/open_file_handle.h"
 #include "storage/browser/fileapi/quota/quota_reservation.h"
 #include "storage/browser/fileapi/quota/quota_reservation_manager.h"
@@ -190,7 +190,7 @@ class QuotaReservationManagerTest : public testing::Test {
 
   void SetUp() override {
     ASSERT_TRUE(work_dir_.CreateUniqueTempDir());
-    file_path_ = work_dir_.path().Append(FILE_PATH_LITERAL("hoge"));
+    file_path_ = work_dir_.GetPath().Append(FILE_PATH_LITERAL("hoge"));
     SetFileSize(file_path_, kInitialFileSize);
 
     std::unique_ptr<QuotaReservationManager::QuotaBackend> backend(

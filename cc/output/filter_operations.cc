@@ -21,10 +21,18 @@ FilterOperations::FilterOperations() {}
 FilterOperations::FilterOperations(const FilterOperations& other)
     : operations_(other.operations_) {}
 
+FilterOperations::FilterOperations(std::vector<FilterOperation>&& operations)
+    : operations_(std::move(operations)) {}
+
 FilterOperations::~FilterOperations() {}
 
 FilterOperations& FilterOperations::operator=(const FilterOperations& other) {
   operations_ = other.operations_;
+  return *this;
+}
+
+FilterOperations& FilterOperations::operator=(FilterOperations&& other) {
+  operations_ = std::move(other.operations_);
   return *this;
 }
 
@@ -51,18 +59,27 @@ bool FilterOperations::IsEmpty() const {
 }
 
 static int SpreadForStdDeviation(float std_deviation) {
-  // https://dvcs.w3.org/hg/FXTF/raw-file/tip/filters/index.html#feGaussianBlurElement
-  // provides this approximation for evaluating a gaussian blur by a triple box
-  // filter.
-  float d = floorf(std_deviation * 3.f * sqrt(8.f * atan(1.f)) / 4.f + 0.5f);
-  return static_cast<int>(ceilf(d * 3.f / 2.f));
+  // Corresponds to MapStdDeviation in filter_operation.cc.
+  return std_deviation * 3;
 }
 
-gfx::Rect FilterOperations::MapRect(const gfx::Rect& rect) const {
-  auto accumulate_rect = [](const gfx::Rect& rect, const FilterOperation& op) {
-    return op.MapRect(rect);
+gfx::Rect FilterOperations::MapRect(const gfx::Rect& rect,
+                                    const SkMatrix& matrix) const {
+  auto accumulate_rect = [matrix](const gfx::Rect& rect,
+                                  const FilterOperation& op) {
+    return op.MapRect(rect, matrix);
   };
   return std::accumulate(operations_.begin(), operations_.end(), rect,
+                         accumulate_rect);
+}
+
+gfx::Rect FilterOperations::MapRectReverse(const gfx::Rect& rect,
+                                           const SkMatrix& matrix) const {
+  auto accumulate_rect = [&matrix](const gfx::Rect& rect,
+                                   const FilterOperation& op) {
+    return op.MapRectReverse(rect, matrix);
+  };
+  return std::accumulate(operations_.rbegin(), operations_.rend(), rect,
                          accumulate_rect);
 }
 
@@ -93,10 +110,10 @@ void FilterOperations::GetOutsets(int* top,
           *bottom += spread;
           *left += spread;
         } else {
-          *top += spread - op.drop_shadow_offset().y();
-          *right += spread + op.drop_shadow_offset().x();
-          *bottom += spread + op.drop_shadow_offset().y();
-          *left += spread - op.drop_shadow_offset().x();
+          *top += std::max(0, spread - op.drop_shadow_offset().y());
+          *right += std::max(0, spread + op.drop_shadow_offset().x());
+          *bottom += std::max(0, spread + op.drop_shadow_offset().y());
+          *left += std::max(0, spread - op.drop_shadow_offset().x());
         }
       }
     }

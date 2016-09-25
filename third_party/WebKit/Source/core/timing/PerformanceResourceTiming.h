@@ -44,14 +44,14 @@ class ResourceTimingInfo;
 class PerformanceResourceTiming final : public PerformanceEntry {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PerformanceResourceTiming* create(const ResourceTimingInfo& info, double timeOrigin, double startTime, double lastRedirectEndTime, bool m_allowTimingDetails, bool m_allowRedirectDetails)
+    static PerformanceResourceTiming* create(const ResourceTimingInfo& info, double timeOrigin, double startTime, double lastRedirectEndTime, bool allowTimingDetails, bool allowRedirectDetails)
     {
-        return new PerformanceResourceTiming(info, timeOrigin, startTime, lastRedirectEndTime, m_allowTimingDetails, m_allowRedirectDetails);
+        return new PerformanceResourceTiming(info, timeOrigin, startTime, lastRedirectEndTime, allowTimingDetails, allowRedirectDetails);
     }
 
-    static PerformanceResourceTiming* create(const ResourceTimingInfo& info, double timeOrigin, double startTime, bool m_allowTimingDetails)
+    static PerformanceResourceTiming* create(const ResourceTimingInfo& info, double timeOrigin, double startTime, bool allowTimingDetails)
     {
-        return new PerformanceResourceTiming(info, timeOrigin, startTime, 0.0, m_allowTimingDetails, false);
+        return new PerformanceResourceTiming(info, timeOrigin, startTime, 0.0, allowTimingDetails, false);
     }
 
     AtomicString initiatorType() const;
@@ -68,6 +68,9 @@ public:
     double requestStart() const;
     double responseStart() const;
     double responseEnd() const;
+    unsigned long long transferSize() const;
+    unsigned long long encodedBodySize() const;
+    unsigned long long decodedBodySize() const;
 
 protected:
     void buildJSONValue(V8ObjectBuilder&) const override;
@@ -83,6 +86,9 @@ private:
     RefPtr<ResourceLoadTiming> m_timing;
     double m_lastRedirectEndTime;
     double m_finishTime;
+    unsigned long long m_transferSize;
+    unsigned long long m_encodedBodySize;
+    unsigned long long m_decodedBodySize;
     bool m_didReuseConnection;
     bool m_allowTimingDetails;
     bool m_allowRedirectDetails;

@@ -47,12 +47,12 @@ class CredentialManagerPendingRequireUserMediationTask
 
   // PasswordStoreConsumer implementation.
   void OnGetPasswordStoreResults(
-      ScopedVector<autofill::PasswordForm> results) override;
+      std::vector<std::unique_ptr<autofill::PasswordForm>> results) override;
 
  private:
   CredentialManagerPendingRequireUserMediationTaskDelegate* const
       delegate_;  // Weak.
-  std::set<std::string> origins_;
+  std::set<std::string> registrable_domains_;
   std::set<std::string> affiliated_realms_;
 
   DISALLOW_COPY_AND_ASSIGN(CredentialManagerPendingRequireUserMediationTask);

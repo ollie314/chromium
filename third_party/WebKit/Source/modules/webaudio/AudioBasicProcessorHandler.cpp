@@ -27,20 +27,21 @@
 #include "modules/webaudio/AudioNodeOutput.h"
 #include "platform/audio/AudioBus.h"
 #include "platform/audio/AudioProcessor.h"
+#include <memory>
 
 namespace blink {
 
-AudioBasicProcessorHandler::AudioBasicProcessorHandler(NodeType nodeType, AudioNode& node, float sampleRate, PassOwnPtr<AudioProcessor> processor)
+AudioBasicProcessorHandler::AudioBasicProcessorHandler(NodeType nodeType, AudioNode& node, float sampleRate, std::unique_ptr<AudioProcessor> processor)
     : AudioHandler(nodeType, node, sampleRate)
-    , m_processor(processor)
+    , m_processor(std::move(processor))
 {
     addInput();
     addOutput(1);
 }
 
-PassRefPtr<AudioBasicProcessorHandler> AudioBasicProcessorHandler::create(NodeType nodeType, AudioNode& node, float sampleRate, PassOwnPtr<AudioProcessor> processor)
+PassRefPtr<AudioBasicProcessorHandler> AudioBasicProcessorHandler::create(NodeType nodeType, AudioNode& node, float sampleRate, std::unique_ptr<AudioProcessor> processor)
 {
-    return adoptRef(new AudioBasicProcessorHandler(nodeType, node, sampleRate, processor));
+    return adoptRef(new AudioBasicProcessorHandler(nodeType, node, sampleRate, std::move(processor)));
 }
 
 AudioBasicProcessorHandler::~AudioBasicProcessorHandler()
@@ -54,7 +55,7 @@ void AudioBasicProcessorHandler::initialize()
     if (isInitialized())
         return;
 
-    ASSERT(processor());
+    DCHECK(processor());
     processor()->initialize();
 
     AudioHandler::initialize();
@@ -65,7 +66,7 @@ void AudioBasicProcessorHandler::uninitialize()
     if (!isInitialized())
         return;
 
-    ASSERT(processor());
+    DCHECK(processor());
     processor()->uninitialize();
 
     AudioHandler::uninitialize();
@@ -100,14 +101,14 @@ void AudioBasicProcessorHandler::pullInputs(size_t framesToProcess)
 // uninitialize and then re-initialize with the new channel count.
 void AudioBasicProcessorHandler::checkNumberOfChannelsForInput(AudioNodeInput* input)
 {
-    ASSERT(context()->isAudioThread());
+    DCHECK(context()->isAudioThread());
     ASSERT(context()->isGraphOwner());
 
-    ASSERT(input == &this->input(0));
+    DCHECK_EQ(input, &this->input(0));
     if (input != &this->input(0))
         return;
 
-    ASSERT(processor());
+    DCHECK(processor());
     if (!processor())
         return;
 

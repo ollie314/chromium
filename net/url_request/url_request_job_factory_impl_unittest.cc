@@ -10,13 +10,19 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/request_priority.h"
+#include "net/test/gtest_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_test_util.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using net::test::IsError;
+using net::test::IsOk;
 
 namespace net {
 
@@ -62,9 +68,8 @@ TEST(URLRequestJobFactoryTest, NoProtocolHandler) {
       GURL("foo://bar"), DEFAULT_PRIORITY, &delegate));
   request->Start();
 
-  base::MessageLoop::current()->Run();
-  EXPECT_EQ(URLRequestStatus::FAILED, request->status().status());
-  EXPECT_EQ(ERR_UNKNOWN_URL_SCHEME, request->status().error());
+  base::RunLoop().Run();
+  EXPECT_EQ(ERR_UNKNOWN_URL_SCHEME, delegate.request_status());
 }
 
 TEST(URLRequestJobFactoryTest, BasicProtocolHandler) {
@@ -78,9 +83,8 @@ TEST(URLRequestJobFactoryTest, BasicProtocolHandler) {
       GURL("foo://bar"), DEFAULT_PRIORITY, &delegate));
   request->Start();
 
-  base::MessageLoop::current()->Run();
-  EXPECT_EQ(URLRequestStatus::SUCCESS, request->status().status());
-  EXPECT_EQ(OK, request->status().error());
+  base::RunLoop().Run();
+  EXPECT_EQ(OK, delegate.request_status());
 }
 
 TEST(URLRequestJobFactoryTest, DeleteProtocolHandler) {

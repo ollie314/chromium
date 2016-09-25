@@ -59,7 +59,7 @@ static void initializeLogFileOnce()
     snprintf(actualFilename, sizeof(actualFilename), "%s.%d.txt", filename, getpid());
 
     if (filename) {
-        file = FilePrintStream::open(actualFilename, "w").leakPtr();
+        file = FilePrintStream::open(actualFilename, "w").release();
         if (!file)
             fprintf(stderr, "Warning: Could not open log file %s for writing.\n", actualFilename);
     }
@@ -97,11 +97,6 @@ void dataLogF(const char* format, ...)
     va_start(argList, format);
     dataLogFV(format, argList);
     va_end(argList);
-}
-
-void dataLogFString(const char* str)
-{
-    dataFile().printf("%s", str);
 }
 
 } // namespace WTF

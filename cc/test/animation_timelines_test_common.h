@@ -23,12 +23,13 @@ class TestLayer {
 
   void ClearMutatedProperties();
 
-  int transform_x() const { return transform_x_; }
-  int transform_y() const { return transform_y_; }
+  int transform_x() const;
+  int transform_y() const;
+  float brightness() const;
 
-  void set_transform(int transform_x, int transform_y) {
-    transform_x_ = transform_x;
-    transform_y_ = transform_y;
+  const gfx::Transform& transform() const { return transform_; }
+  void set_transform(const gfx::Transform& transform) {
+    transform_ = transform;
     mutated_properties_[TargetProperty::TRANSFORM] = true;
   }
 
@@ -38,9 +39,9 @@ class TestLayer {
     mutated_properties_[TargetProperty::OPACITY] = true;
   }
 
-  float brightness() const { return brightness_; }
-  void set_brightness(float brightness) {
-    brightness_ = brightness;
+  FilterOperations filters() const { return filters_; }
+  void set_filters(const FilterOperations& filters) {
+    filters_ = filters;
     mutated_properties_[TargetProperty::FILTER] = true;
   }
 
@@ -50,6 +51,48 @@ class TestLayer {
     mutated_properties_[TargetProperty::SCROLL_OFFSET] = true;
   }
 
+  bool transform_is_currently_animating() const {
+    return transform_is_currently_animating_;
+  }
+  void set_transform_is_currently_animating(bool is_animating) {
+    transform_is_currently_animating_ = is_animating;
+  }
+
+  bool has_potential_transform_animation() const {
+    return has_potential_transform_animation_;
+  }
+  void set_has_potential_transform_animation(bool is_animating) {
+    has_potential_transform_animation_ = is_animating;
+  }
+
+  bool opacity_is_currently_animating() const {
+    return opacity_is_currently_animating_;
+  }
+  void set_opacity_is_currently_animating(bool is_animating) {
+    opacity_is_currently_animating_ = is_animating;
+  }
+
+  bool has_potential_opacity_animation() const {
+    return has_potential_opacity_animation_;
+  }
+  void set_has_potential_opacity_animation(bool is_animating) {
+    has_potential_opacity_animation_ = is_animating;
+  }
+
+  bool filter_is_currently_animating() const {
+    return filter_is_currently_animating_;
+  }
+  void set_filter_is_currently_animating(bool is_animating) {
+    filter_is_currently_animating_ = is_animating;
+  }
+
+  bool has_potential_filter_animation() const {
+    return has_potential_filter_animation_;
+  }
+  void set_has_potential_filter_animation(bool is_animating) {
+    has_potential_filter_animation_ = is_animating;
+  }
+
   bool is_property_mutated(TargetProperty::Type property) const {
     return mutated_properties_[property];
   }
@@ -57,12 +100,16 @@ class TestLayer {
  private:
   TestLayer();
 
-  int transform_x_;
-  int transform_y_;
-
+  gfx::Transform transform_;
   float opacity_;
-  float brightness_;
+  FilterOperations filters_;
   gfx::ScrollOffset scroll_offset_;
+  bool has_potential_transform_animation_;
+  bool transform_is_currently_animating_;
+  bool has_potential_opacity_animation_;
+  bool opacity_is_currently_animating_;
+  bool has_potential_filter_animation_;
+  bool filter_is_currently_animating_;
 
   bool mutated_properties_[TargetProperty::LAST_TARGET_PROPERTY + 1];
 };
@@ -74,72 +121,108 @@ class TestHostClient : public MutatorHostClient {
 
   void ClearMutatedProperties();
 
-  bool IsLayerInTree(int layer_id, LayerTreeType tree_type) const override;
+  bool IsElementInList(ElementId element_id,
+                       ElementListType list_type) const override;
 
   void SetMutatorsNeedCommit() override;
   void SetMutatorsNeedRebuildPropertyTrees() override;
 
-  void SetLayerFilterMutated(int layer_id,
-                             LayerTreeType tree_type,
-                             const FilterOperations& filters) override;
+  void SetElementFilterMutated(ElementId element_id,
+                               ElementListType list_type,
+                               const FilterOperations& filters) override;
 
-  void SetLayerOpacityMutated(int layer_id,
-                              LayerTreeType tree_type,
-                              float opacity) override;
+  void SetElementOpacityMutated(ElementId element_id,
+                                ElementListType list_type,
+                                float opacity) override;
 
-  void SetLayerTransformMutated(int layer_id,
-                                LayerTreeType tree_type,
-                                const gfx::Transform& transform) override;
+  void SetElementTransformMutated(ElementId element_id,
+                                  ElementListType list_type,
+                                  const gfx::Transform& transform) override;
 
-  void SetLayerScrollOffsetMutated(
-      int layer_id,
-      LayerTreeType tree_type,
+  void SetElementScrollOffsetMutated(
+      ElementId element_id,
+      ElementListType list_type,
       const gfx::ScrollOffset& scroll_offset) override;
 
-  void LayerTransformIsPotentiallyAnimatingChanged(int layer_id,
-                                                   LayerTreeType tree_type,
-                                                   bool is_animating) override {
-  }
+  void ElementTransformIsAnimatingChanged(ElementId element_id,
+                                          ElementListType list_type,
+                                          AnimationChangeType change_type,
+                                          bool is_animating) override;
+
+  void ElementOpacityIsAnimatingChanged(ElementId element_id,
+                                        ElementListType list_type,
+                                        AnimationChangeType change_type,
+                                        bool is_animating) override;
+
+  void ElementFilterIsAnimatingChanged(ElementId element_id,
+                                       ElementListType list_type,
+                                       AnimationChangeType change_type,
+                                       bool is_animating) override;
 
   void ScrollOffsetAnimationFinished() override {}
-  gfx::ScrollOffset GetScrollOffsetForAnimation(int layer_id) const override;
+
+  void SetScrollOffsetForAnimation(const gfx::ScrollOffset& scroll_offset);
+  gfx::ScrollOffset GetScrollOffsetForAnimation(
+      ElementId element_id) const override;
 
   bool mutators_need_commit() const { return mutators_need_commit_; }
   void set_mutators_need_commit(bool need) { mutators_need_commit_ = need; }
 
-  void RegisterLayer(int layer_id, LayerTreeType tree_type);
-  void UnregisterLayer(int layer_id, LayerTreeType tree_type);
+  void RegisterElement(ElementId element_id, ElementListType list_type);
+  void UnregisterElement(ElementId element_id, ElementListType list_type);
 
   AnimationHost* host() {
     DCHECK(host_);
     return host_.get();
   }
 
-  bool IsPropertyMutated(int layer_id,
-                         LayerTreeType tree_type,
+  bool IsPropertyMutated(ElementId element_id,
+                         ElementListType list_type,
                          TargetProperty::Type property) const;
 
-  void ExpectFilterPropertyMutated(int layer_id,
-                                   LayerTreeType tree_type,
+  FilterOperations GetFilters(ElementId element_id,
+                              ElementListType list_type) const;
+  float GetOpacity(ElementId element_id, ElementListType list_type) const;
+  gfx::Transform GetTransform(ElementId element_id,
+                              ElementListType list_type) const;
+  gfx::ScrollOffset GetScrollOffset(ElementId element_id,
+                                    ElementListType list_type) const;
+  bool GetHasPotentialTransformAnimation(ElementId element_id,
+                                         ElementListType list_type) const;
+  bool GetTransformIsCurrentlyAnimating(ElementId element_id,
+                                        ElementListType list_type) const;
+  bool GetOpacityIsCurrentlyAnimating(ElementId element_id,
+                                      ElementListType list_type) const;
+  bool GetHasPotentialOpacityAnimation(ElementId element_id,
+                                       ElementListType list_type) const;
+  bool GetHasPotentialFilterAnimation(ElementId element_id,
+                                      ElementListType list_type) const;
+  bool GetFilterIsCurrentlyAnimating(ElementId element_id,
+                                     ElementListType list_type) const;
+
+  void ExpectFilterPropertyMutated(ElementId element_id,
+                                   ElementListType list_type,
                                    float brightness) const;
-  void ExpectOpacityPropertyMutated(int layer_id,
-                                    LayerTreeType tree_type,
+  void ExpectOpacityPropertyMutated(ElementId element_id,
+                                    ElementListType list_type,
                                     float opacity) const;
-  void ExpectTransformPropertyMutated(int layer_id,
-                                      LayerTreeType tree_type,
+  void ExpectTransformPropertyMutated(ElementId element_id,
+                                      ElementListType list_type,
                                       int transform_x,
                                       int transform_y) const;
 
-  TestLayer* FindTestLayer(int layer_id, LayerTreeType tree_type) const;
+  TestLayer* FindTestLayer(ElementId element_id,
+                           ElementListType list_type) const;
 
  private:
   std::unique_ptr<AnimationHost> host_;
 
-  using LayerIdToTestLayer =
-      std::unordered_map<int, std::unique_ptr<TestLayer>>;
-  LayerIdToTestLayer layers_in_active_tree_;
-  LayerIdToTestLayer layers_in_pending_tree_;
+  using ElementIdToTestLayer =
+      std::unordered_map<ElementId, std::unique_ptr<TestLayer>, ElementIdHash>;
+  ElementIdToTestLayer layers_in_active_tree_;
+  ElementIdToTestLayer layers_in_pending_tree_;
 
+  gfx::ScrollOffset scroll_offset_;
   bool mutators_need_commit_;
 };
 
@@ -155,14 +238,28 @@ class TestAnimationDelegate : public AnimationDelegate {
                                int group) override;
   void NotifyAnimationAborted(base::TimeTicks monotonic_time,
                               TargetProperty::Type target_property,
-                              int group) override {}
+                              int group) override;
   void NotifyAnimationTakeover(base::TimeTicks monotonic_time,
                                TargetProperty::Type target_property,
                                double animation_start_time,
-                               std::unique_ptr<AnimationCurve> curve) override {
-  }
+                               std::unique_ptr<AnimationCurve> curve) override;
+
+  bool started() { return started_; }
+
+  bool finished() { return finished_; }
+
+  bool aborted() { return aborted_; }
+
+  bool takeover() { return takeover_; }
+
+  base::TimeTicks start_time() { return start_time_; }
+
+ private:
   bool started_;
   bool finished_;
+  bool aborted_;
+  bool takeover_;
+  base::TimeTicks start_time_;
 };
 
 class AnimationTimelinesTest : public testing::Test {
@@ -176,15 +273,30 @@ class AnimationTimelinesTest : public testing::Test {
 
   void GetImplTimelineAndPlayerByID();
 
+  void CreateTestLayer(bool needs_active_value_observations,
+                       bool needs_pending_value_observations);
+  void AttachTimelinePlayerLayer();
+  void CreateImplTimelineAndPlayer();
+
+  void CreateTestMainLayer();
+  void CreateTestImplLayer(ElementListType element_list_type);
+
+  scoped_refptr<ElementAnimations> element_animations() const;
+  scoped_refptr<ElementAnimations> element_animations_impl() const;
+
   void ReleaseRefPtrs();
 
   void AnimateLayersTransferEvents(base::TimeTicks time,
                                    unsigned expect_events);
 
-  AnimationPlayer* GetPlayerForLayerId(int layer_id);
-  AnimationPlayer* GetImplPlayerForLayerId(int layer_id);
+  AnimationPlayer* GetPlayerForElementId(ElementId element_id);
+  AnimationPlayer* GetImplPlayerForLayerId(ElementId element_id);
 
   int NextTestLayerId();
+
+  bool CheckPlayerTimelineNeedsPushProperties(bool needs_push_properties) const;
+
+  void PushProperties();
 
   TestHostClient client_;
   TestHostClient client_impl_;
@@ -194,7 +306,7 @@ class AnimationTimelinesTest : public testing::Test {
 
   const int timeline_id_;
   const int player_id_;
-  int layer_id_;
+  ElementId element_id_;
 
   int next_test_layer_id_;
 

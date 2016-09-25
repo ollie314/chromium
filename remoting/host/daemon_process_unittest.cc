@@ -13,6 +13,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/process/process.h"
+#include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
@@ -185,7 +187,7 @@ void DaemonProcessTest::SetUp() {
 
 void DaemonProcessTest::TearDown() {
   daemon_process_->Stop();
-  message_loop_.Run();
+  base::RunLoop().Run();
 }
 
 DesktopSession* DaemonProcessTest::DoCreateDesktopSession(int terminal_id) {
@@ -210,7 +212,8 @@ void DaemonProcessTest::DeleteDaemonProcess() {
 }
 
 void DaemonProcessTest::QuitMessageLoop() {
-  message_loop_.PostTask(FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+  message_loop_.task_runner()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
 void DaemonProcessTest::StartDaemonProcess() {

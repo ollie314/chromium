@@ -15,6 +15,7 @@
 #include "base/containers/mru_cache.h"
 #include "base/hash.h"
 #include "base/memory/discardable_memory_allocator.h"
+#include "base/memory/memory_coordinator_client.h"
 #include "base/memory/ref_counted.h"
 #include "base/numerics/safe_math.h"
 #include "base/threading/thread_checker.h"
@@ -22,9 +23,10 @@
 #include "cc/base/cc_export.h"
 #include "cc/playback/decoded_draw_image.h"
 #include "cc/playback/draw_image.h"
-#include "cc/raster/tile_task_runner.h"
+#include "cc/resources/resource_format.h"
 #include "cc/tiles/image_decode_controller.h"
-#include "skia/ext/refptr.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace cc {
 
@@ -60,6 +62,7 @@ class CC_EXPORT ImageDecodeControllerKey {
   gfx::Size target_size() const { return target_size_; }
 
   bool can_use_original_decode() const { return can_use_original_decode_; }
+  bool should_use_subrect() const { return should_use_subrect_; }
   size_t get_hash() const { return hash_; }
 
   // Helper to figure out how much memory the locked image represented by this
@@ -79,13 +82,15 @@ class CC_EXPORT ImageDecodeControllerKey {
                            const gfx::Rect& src_rect,
                            const gfx::Size& size,
                            SkFilterQuality filter_quality,
-                           bool can_use_original_decode);
+                           bool can_use_original_decode,
+                           bool should_use_subrect);
 
   uint32_t image_id_;
   gfx::Rect src_rect_;
   gfx::Size target_size_;
   SkFilterQuality filter_quality_;
   bool can_use_original_decode_;
+  bool should_use_subrect_;
   size_t hash_;
 };
 
@@ -98,18 +103,19 @@ struct ImageDecodeControllerKeyHash {
 
 class CC_EXPORT SoftwareImageDecodeController
     : public ImageDecodeController,
-      public base::trace_event::MemoryDumpProvider {
+      public base::trace_event::MemoryDumpProvider,
+      public base::MemoryCoordinatorClient {
  public:
   using ImageKey = ImageDecodeControllerKey;
   using ImageKeyHash = ImageDecodeControllerKeyHash;
 
-  explicit SoftwareImageDecodeController(ResourceFormat format);
-  SoftwareImageDecodeController();
+  SoftwareImageDecodeController(ResourceFormat format,
+                                size_t locked_memory_limit_bytes);
   ~SoftwareImageDecodeController() override;
 
   // ImageDecodeController overrides.
   bool GetTaskForImageAndRef(const DrawImage& image,
-                             uint64_t prepare_tiles_id,
+                             const TracingInfo& tracing_info,
                              scoped_refptr<TileTask>* task) override;
   void UnrefImage(const DrawImage& image) override;
   DecodedDrawImage GetDecodedImageForDraw(const DrawImage& image) override;
@@ -141,9 +147,9 @@ class CC_EXPORT SoftwareImageDecodeController
                  uint64_t tracing_id);
     ~DecodedImage();
 
-    SkImage* image() const {
+    const sk_sp<SkImage>& image() const {
       DCHECK(locked_);
-      return image_.get();
+      return image_;
     }
 
     const SkSize& src_rect_offset() const { return src_rect_offset_; }
@@ -157,14 +163,28 @@ class CC_EXPORT SoftwareImageDecodeController
     // An ID which uniquely identifies this DecodedImage within the image decode
     // controller. Used in memory tracing.
     uint64_t tracing_id() const { return tracing_id_; }
+    // Mark this image as being used in either a draw or as a source for a
+    // scaled image. Either case represents this decode as being valuable and
+    // not wasted.
+    void mark_used() { usage_stats_.used = true; }
 
    private:
+    struct UsageStats {
+      // We can only create a decoded image in a locked state, so the initial
+      // lock count is 1.
+      int lock_count = 1;
+      bool used = false;
+      bool last_lock_failed = false;
+      bool first_lock_wasted = false;
+    };
+
     bool locked_;
     SkImageInfo image_info_;
     std::unique_ptr<base::DiscardableMemory> memory_;
-    skia::RefPtr<SkImage> image_;
+    sk_sp<SkImage> image_;
     SkSize src_rect_offset_;
     uint64_t tracing_id_;
+    UsageStats usage_stats_;
   };
 
   // MemoryBudget is a convenience class for memory bookkeeping and ensuring
@@ -177,6 +197,7 @@ class CC_EXPORT SoftwareImageDecodeController
     void AddUsage(size_t usage);
     void SubtractUsage(size_t usage);
     void ResetUsage();
+    size_t total_limit_bytes() const { return limit_bytes_; }
 
    private:
     size_t GetCurrentUsageSafe() const;
@@ -214,32 +235,39 @@ class CC_EXPORT SoftwareImageDecodeController
   // GetOriginalImageDecode is called by DecodeImageInternal when the quality
   // does not scale the image. Like DecodeImageInternal, it should be called
   // with no lock acquired and it returns nullptr if the decoding failed.
-  std::unique_ptr<DecodedImage> GetOriginalImageDecode(const ImageKey& key,
-                                                       const SkImage& image);
+  std::unique_ptr<DecodedImage> GetOriginalImageDecode(
+      sk_sp<const SkImage> image);
+
+  // GetSubrectImageDecode is similar to GetOriginalImageDecode in that no scale
+  // is performed on the image. However, we extract a subrect (copy it out) and
+  // only return this subrect in order to cache a smaller amount of memory. Note
+  // that this uses GetOriginalImageDecode to get the initial data, which
+  // ensures that we cache an unlocked version of the original image in case we
+  // need to extract multiple subrects (as would be the case in an atlas).
+  std::unique_ptr<DecodedImage> GetSubrectImageDecode(
+      const ImageKey& key,
+      sk_sp<const SkImage> image);
 
   // GetScaledImageDecode is called by DecodeImageInternal when the quality
   // requires the image be scaled. Like DecodeImageInternal, it should be
   // called with no lock acquired and it returns nullptr if the decoding or
   // scaling failed.
-  std::unique_ptr<DecodedImage> GetScaledImageDecode(const ImageKey& key,
-                                                     const SkImage& image);
+  std::unique_ptr<DecodedImage> GetScaledImageDecode(
+      const ImageKey& key,
+      sk_sp<const SkImage> image);
 
   void SanityCheckState(int line, bool lock_acquired);
   void RefImage(const ImageKey& key);
   void RefAtRasterImage(const ImageKey& key);
   void UnrefAtRasterImage(const ImageKey& key);
 
-  // These functions indicate whether the images can be handled and cached by
-  // ImageDecodeController or whether they will fall through to Skia (with
-  // exception of possibly prerolling them). Over time these should return
-  // "false" in less cases, as the ImageDecodeController should start handling
-  // more of them.
-  bool CanHandleImage(const ImageKey& key);
-
   // Helper function which dumps all images in a specific ImageMRUCache.
   void DumpImageMemoryForCache(const ImageMRUCache& cache,
                                const char* cache_name,
                                base::trace_event::ProcessMemoryDump* pmd) const;
+
+  // Overriden from base::MemoryCoordinatorClient.
+  void OnMemoryStateChange(base::MemoryState state) override;
 
   std::unordered_map<ImageKey, scoped_refptr<TileTask>, ImageKeyHash>
       pending_image_tasks_;
@@ -259,12 +287,8 @@ class CC_EXPORT SoftwareImageDecodeController
 
   MemoryBudget locked_images_budget_;
 
-  // Note that this is used for cases where the only thing we do is preroll the
-  // image the first time we see it. This mimics the previous behavior and
-  // should over time change as the compositor starts to handle more cases.
-  std::unordered_set<uint32_t> prerolled_images_;
-
   ResourceFormat format_;
+  size_t max_items_in_cache_;
 
   // Used to uniquely identify DecodedImages for memory traces.
   base::AtomicSequenceNumber next_tracing_id_;

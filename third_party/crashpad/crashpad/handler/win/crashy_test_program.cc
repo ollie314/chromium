@@ -178,6 +178,7 @@ int CrashyMain(int argc, wchar_t* argv[]) {
   } else if (argc == 3) {
     if (!client.StartHandler(base::FilePath(argv[1]),
                              base::FilePath(argv[2]),
+                             base::FilePath(),
                              std::string(),
                              std::map<std::string, std::string>(),
                              std::vector<std::string>(),
@@ -223,7 +224,8 @@ int CrashyMain(int argc, wchar_t* argv[]) {
   printf("%p, %p\n", offset_pointer, &offset_pointer);
 
   crashpad::CrashpadInfo::GetCrashpadInfo()
-      ->set_gather_indirectly_referenced_memory(TriState::kEnabled);
+      ->set_gather_indirectly_referenced_memory(
+          TriState::kEnabled, std::numeric_limits<uint32_t>::max());
 
   std::vector<uint8_t> data_stream1(128, 'x');
   crashpad::CrashpadInfo::GetCrashpadInfo()->AddUserDataMinidumpStream(

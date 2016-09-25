@@ -612,6 +612,7 @@ void WifiConfigView::ContentsChanged(views::Textfield* sender,
 bool WifiConfigView::HandleKeyEvent(views::Textfield* sender,
                                     const ui::KeyEvent& key_event) {
   if (sender == passphrase_textfield_ &&
+      key_event.type() == ui::ET_KEY_PRESSED &&
       key_event.key_code() == ui::VKEY_RETURN) {
     parent_->GetDialogClientView()->AcceptWindow();
   }
@@ -1109,7 +1110,8 @@ void WifiConfigView::Init(bool show_8021x) {
   } else {
     // Password visible button.
     passphrase_visible_button_ = new views::ToggleImageButton(this);
-    passphrase_visible_button_->SetFocusable(true);
+    passphrase_visible_button_->SetFocusForPlatform();
+    passphrase_visible_button_->set_request_focus_on_press(true);
     passphrase_visible_button_->SetTooltipText(
         l10n_util::GetStringUTF16(
             IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PASSPHRASE_SHOW));

@@ -4,15 +4,12 @@
 
 """Monitor tracing events on chrome via chrome remote debugging."""
 
-import bisect
 import itertools
 import logging
 import operator
 
+import clovis_constants
 import devtools_monitor
-
-
-DEFAULT_CATEGORIES = None
 
 
 class TracingTrack(devtools_monitor.Track):
@@ -20,16 +17,14 @@ class TracingTrack(devtools_monitor.Track):
 
   See https://goo.gl/Qabkqk for details on the protocol.
   """
-  def __init__(self, connection,
-               categories=DEFAULT_CATEGORIES,
-               fetch_stream=False):
+  def __init__(self, connection, categories, fetch_stream=False):
     """Initialize this TracingTrack.
 
     Args:
       connection: a DevToolsConnection.
-      categories: None, or a string, or list of strings, of tracing categories
-        to filter.
-
+      categories: ([str] or None) If set, a list of categories to enable or
+                  disable in Chrome tracing. Categories prefixed with '-' are
+                  disabled.
       fetch_stream: if true, use a websocket stream to fetch tracing data rather
         than dataCollected events. It appears based on very limited testing that
         a stream is slower than the default reporting as dataCollected events.
@@ -37,10 +32,10 @@ class TracingTrack(devtools_monitor.Track):
     super(TracingTrack, self).__init__(connection)
     if connection:
       connection.RegisterListener('Tracing.dataCollected', self)
+
+    self._categories = set(categories)
     params = {}
-    if categories:
-      params['categories'] = (categories if type(categories) is str
-                              else ','.join(categories))
+    params['categories'] = ','.join(self._categories)
     if fetch_stream:
       params['transferMode'] = 'ReturnAsStream'
 
@@ -62,15 +57,9 @@ class TracingTrack(devtools_monitor.Track):
     # update.
     self._interval_tree = None
 
-  def _GetMainFrameID(self):
-    """Returns the main frame ID."""
-    if not self._main_frame_id:
-      navigation_start_events = [e for e in self.GetEvents()
-          if e.Matches('blink.user_timing', 'navigationStart')]
-      first_event = min(navigation_start_events, key=lambda e: e.start_msec)
-      self._main_frame_id = first_event.args['frame']
-
-    return self._main_frame_id
+  def Categories(self):
+    """Returns the set of categories in this trace."""
+    return self._categories
 
   def GetFirstEventMillis(self):
     """Find the canonical start time for this track.
@@ -81,6 +70,7 @@ class TracingTrack(devtools_monitor.Track):
     return self._base_msec
 
   def GetEvents(self):
+    """Returns a list of tracing.Event. Not sorted."""
     return self._events
 
   def GetMatchingEvents(self, category, name):
@@ -89,10 +79,33 @@ class TracingTrack(devtools_monitor.Track):
 
   def GetMatchingMainFrameEvents(self, category, name):
     """Gets events matching |category| and |name| that occur in the main frame.
-    Assumes that the events in question have a 'frame' key in their |args|."""
+
+    Events without a 'frame' key in their |args| are discarded.
+    """
     matching_events = self.GetMatchingEvents(category, name)
     return [e for e in matching_events
-        if e.args['frame'] == self._GetMainFrameID()]
+        if 'frame' in e.args and e.args['frame'] == self.GetMainFrameID()]
+
+  def GetMainFrameRoutingID(self):
+    """Returns the main frame routing ID."""
+    for event in self.GetMatchingEvents(
+        'navigation', 'RenderFrameImpl::OnNavigate'):
+      return event.args['id']
+    assert False
+
+  def GetMainFrameID(self):
+    """Returns the main frame ID."""
+    if not self._main_frame_id:
+      navigation_start_events = self.GetMatchingEvents(
+          'blink.user_timing', 'navigationStart')
+      first_event = min(navigation_start_events, key=lambda e: e.start_msec)
+      self._main_frame_id = first_event.args['frame']
+
+    return self._main_frame_id
+
+  def SetMainFrameID(self, frame_id):
+    """Set the main frame ID. Normally this is used only for testing."""
+    self._main_frame_id = frame_id
 
   def EventsAt(self, msec):
     """Gets events active at a timestamp.
@@ -109,9 +122,6 @@ class TracingTrack(devtools_monitor.Track):
     """
     self._IndexEvents()
     return self._interval_tree.EventsAt(msec)
-
-  def ToJsonDict(self):
-    return {'events': [e.ToJsonDict() for e in self._events]}
 
   def Filter(self, pid=None, tid=None, categories=None):
     """Returns a new TracingTrack with a subset of the events.
@@ -131,9 +141,16 @@ class TracingTrack(devtools_monitor.Track):
       events = filter(
           lambda e : set(e.category.split(',')).intersection(categories),
           events)
-    tracing_track = TracingTrack(None)
+    tracing_track = TracingTrack(None, clovis_constants.DEFAULT_CATEGORIES)
     tracing_track._events = events
+    tracing_track._categories = self._categories
+    if categories is not None:
+      tracing_track._categories = self._categories.intersection(categories)
     return tracing_track
+
+  def ToJsonDict(self):
+    return {'categories': list(self._categories),
+            'events': [e.ToJsonDict() for e in self._events]}
 
   @classmethod
   def FromJsonDict(cls, json_dict):
@@ -141,7 +158,8 @@ class TracingTrack(devtools_monitor.Track):
       return None
     assert 'events' in json_dict
     events = [Event(e) for e in json_dict['events']]
-    tracing_track = TracingTrack(None)
+    tracing_track = TracingTrack(None, clovis_constants.DEFAULT_CATEGORIES)
+    tracing_track._categories = set(json_dict.get('categories', []))
     tracing_track._events = events
     tracing_track._base_msec = events[0].start_msec if events else 0
     for e in events[1:]:
@@ -213,6 +231,19 @@ class TracingTrack(devtools_monitor.Track):
   def _GetEvents(self):
     self._IndexEvents()
     return self._interval_tree.GetEvents()
+
+  def HasLoadingSucceeded(self):
+    """Returns whether the loading has succeed at recording time."""
+    main_frame_id = self.GetMainFrameRoutingID()
+    for event in self.GetMatchingEvents(
+        'navigation', 'RenderFrameImpl::didFailProvisionalLoad'):
+      if event.args['id'] == main_frame_id:
+        return False
+    for event in self.GetMatchingEvents(
+        'navigation', 'RenderFrameImpl::didFailLoad'):
+      if event.args['id'] == main_frame_id:
+        return False
+    return True
 
   class _SpanningEvents(object):
     def __init__(self):

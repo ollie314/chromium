@@ -39,13 +39,13 @@ void ByteQueue::Push(const uint8_t* data, int size) {
     // Sanity check to make sure we didn't overflow.
     CHECK_GT(new_size, size_);
 
-    scoped_ptr<uint8_t[]> new_buffer(new uint8_t[new_size]);
+    std::unique_ptr<uint8_t[]> new_buffer(new uint8_t[new_size]);
 
     // Copy the data from the old buffer to the start of the new one.
     if (used_ > 0)
       memcpy(new_buffer.get(), front(), used_);
 
-    buffer_.reset(new_buffer.release());
+    buffer_ = std::move(new_buffer);
     size_ = new_size;
     offset_ = 0;
   } else if ((offset_ + used_ + size) > size_) {

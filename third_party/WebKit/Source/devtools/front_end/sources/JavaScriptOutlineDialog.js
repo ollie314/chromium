@@ -16,9 +16,7 @@ WebInspector.JavaScriptOutlineDialog = function(uiSourceCode, selectItemCallback
 
     this._functionItems = [];
     this._selectItemCallback = selectItemCallback;
-    this._outlineWorker = new WorkerRuntime.Worker("formatter_worker");
-    this._outlineWorker.onmessage = this._didBuildOutlineChunk.bind(this);
-    this._outlineWorker.postMessage({ method: "javaScriptOutline", params: { content: uiSourceCode.workingCopy() } });
+    WebInspector.formatterWorkerPool.runChunkedTask("javaScriptOutline", {content: uiSourceCode.workingCopy() }, this._didBuildOutlineChunk.bind(this));
 }
 
 /**
@@ -27,15 +25,21 @@ WebInspector.JavaScriptOutlineDialog = function(uiSourceCode, selectItemCallback
  */
 WebInspector.JavaScriptOutlineDialog.show = function(uiSourceCode, selectItemCallback)
 {
-    new WebInspector.FilteredListWidget(new WebInspector.JavaScriptOutlineDialog(uiSourceCode, selectItemCallback), false).showAsDialog();
+    WebInspector.JavaScriptOutlineDialog._instanceForTests = new WebInspector.JavaScriptOutlineDialog(uiSourceCode, selectItemCallback);
+    new WebInspector.FilteredListWidget(WebInspector.JavaScriptOutlineDialog._instanceForTests).showAsDialog();
 }
 
 WebInspector.JavaScriptOutlineDialog.prototype = {
     /**
-     * @param {!MessageEvent} event
+     * @param {?MessageEvent} event
      */
     _didBuildOutlineChunk: function(event)
     {
+        if (!event) {
+            this.dispose();
+            this.refresh();
+            return;
+        }
         var data = /** @type {!WebInspector.JavaScriptOutlineDialog.MessageEventData} */ (event.data);
         var chunk = data.chunk;
         for (var i = 0; i < chunk.length; ++i)
@@ -76,7 +80,10 @@ WebInspector.JavaScriptOutlineDialog.prototype = {
     itemScoreAt: function(itemIndex, query)
     {
         var item = this._functionItems[itemIndex];
-        return -item.line;
+        var methodName = query.split("(")[0];
+        if (methodName.toLowerCase() === item.name.toLowerCase())
+            return 1 / (1 + item.line);
+        return -item.line - 1;
     },
 
     /**
@@ -110,10 +117,6 @@ WebInspector.JavaScriptOutlineDialog.prototype = {
 
     dispose: function()
     {
-        if (this._outlineWorker) {
-            this._outlineWorker.terminate();
-            delete this._outlineWorker;
-        }
     },
 
     __proto__: WebInspector.FilteredListWidget.Delegate.prototype

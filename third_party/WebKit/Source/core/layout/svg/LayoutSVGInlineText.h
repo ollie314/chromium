@@ -23,7 +23,7 @@
 #define LayoutSVGInlineText_h
 
 #include "core/layout/LayoutText.h"
-#include "core/layout/svg/SVGTextLayoutAttributes.h"
+#include "core/layout/svg/SVGCharacterData.h"
 #include "core/layout/svg/SVGTextMetrics.h"
 #include "wtf/Vector.h"
 
@@ -34,8 +34,8 @@ public:
     LayoutSVGInlineText(Node*, PassRefPtr<StringImpl>);
 
     bool characterStartsNewTextChunk(int position) const;
-    SVGTextLayoutAttributes* layoutAttributes() { return &m_layoutAttributes; }
-    const SVGTextLayoutAttributes* layoutAttributes() const { return &m_layoutAttributes; }
+    SVGCharacterDataMap& characterDataMap() { return m_characterDataMap; }
+    const SVGCharacterDataMap& characterDataMap() const { return m_characterDataMap; }
 
     const Vector<SVGTextMetrics>& metricsList() const { return m_metrics; }
 
@@ -64,7 +64,7 @@ private:
 
     PositionWithAffinity positionForPoint(const LayoutPoint&) override;
     LayoutRect localCaretRect(InlineBox*, int caretOffset, LayoutUnit* extraWidthToEndOfLine = nullptr) override;
-    IntRect linesBoundingBox() const override;
+    LayoutRect linesBoundingBox() const override;
     InlineTextBox* createTextBox(int start, unsigned short length) override;
 
     LayoutRect absoluteClippedOverflowRect() const final;
@@ -72,7 +72,7 @@ private:
 
     float m_scalingFactor;
     Font m_scaledFont;
-    SVGTextLayoutAttributes m_layoutAttributes;
+    SVGCharacterDataMap m_characterDataMap;
     Vector<SVGTextMetrics> m_metrics;
 };
 

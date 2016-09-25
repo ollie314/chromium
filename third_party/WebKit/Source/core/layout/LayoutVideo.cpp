@@ -28,8 +28,8 @@
 #include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/html/HTMLVideoElement.h"
+#include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutFullScreen.h"
-#include "core/layout/LayoutView.h"
 #include "core/paint/VideoPainter.h"
 #include "public/platform/WebLayer.h"
 
@@ -90,7 +90,7 @@ LayoutSize LayoutVideo::calculateIntrinsicSize()
     // of the video resource, if that is available; otherwise it is the intrinsic
     // height of the poster frame, if that is available; otherwise it is 150 CSS pixels.
     WebMediaPlayer* webMediaPlayer = mediaElement()->webMediaPlayer();
-    if (webMediaPlayer && video->getReadyState() >= HTMLVideoElement::HAVE_METADATA) {
+    if (webMediaPlayer && video->getReadyState() >= HTMLVideoElement::kHaveMetadata) {
         IntSize size = webMediaPlayer->naturalSize();
         if (!size.isEmpty())
             return LayoutSize(size);
@@ -122,15 +122,6 @@ void LayoutVideo::imageChanged(WrappedImagePtr newImage, const IntRect* rect)
     // The intrinsic size is now that of the image, but in case we already had the
     // intrinsic size of the video we call this here to restore the video size.
     updateIntrinsicSize();
-}
-
-IntRect LayoutVideo::videoBox() const
-{
-    const LayoutSize* overriddenIntrinsicSize = nullptr;
-    if (videoElement()->shouldDisplayPosterImage())
-        overriddenIntrinsicSize = &m_cachedImageSize;
-
-    return pixelSnappedIntRect(replacedContentRect(overriddenIntrinsicSize));
 }
 
 bool LayoutVideo::shouldDisplayVideo() const
@@ -182,14 +173,28 @@ LayoutUnit LayoutVideo::computeReplacedLogicalWidth(ShouldComputePreferred shoul
     return LayoutReplaced::computeReplacedLogicalWidth(shouldComputePreferred);
 }
 
-LayoutUnit LayoutVideo::computeReplacedLogicalHeight() const
+LayoutUnit LayoutVideo::computeReplacedLogicalHeight(LayoutUnit estimatedUsedWidth) const
 {
-    return LayoutReplaced::computeReplacedLogicalHeight();
+    return LayoutReplaced::computeReplacedLogicalHeight(estimatedUsedWidth);
 }
 
 LayoutUnit LayoutVideo::minimumReplacedHeight() const
 {
     return LayoutReplaced::minimumReplacedHeight();
+}
+
+LayoutRect LayoutVideo::replacedContentRect() const
+{
+    if (shouldDisplayVideo()) {
+        // Video codecs may need to restart from an I-frame when the output is resized.
+        // Round size in advance to avoid 1px snap difference.
+        // TODO(trchen): The way of rounding is different from LayoutPart just to match
+        // existing behavior. This is probably a bug and We should unify it with LayoutPart.
+        return LayoutRect(pixelSnappedIntRect(computeObjectFit()));
+    }
+    // If we are displaying the poster image no pre-rounding is needed, but the size of
+    // the image should be used for fitting instead.
+    return computeObjectFit(&m_cachedImageSize);
 }
 
 bool LayoutVideo::supportsAcceleratedRendering() const
@@ -210,18 +215,18 @@ static const LayoutBlock* layoutObjectPlaceholder(const LayoutObject* layoutObje
     return fullScreen->placeholder();
 }
 
-LayoutUnit LayoutVideo::offsetLeft() const
+LayoutUnit LayoutVideo::offsetLeft(const Element* parent) const
 {
     if (const LayoutBlock* block = layoutObjectPlaceholder(this))
-        return block->offsetLeft();
-    return LayoutMedia::offsetLeft();
+        return block->offsetLeft(parent);
+    return LayoutMedia::offsetLeft(parent);
 }
 
-LayoutUnit LayoutVideo::offsetTop() const
+LayoutUnit LayoutVideo::offsetTop(const Element* parent) const
 {
     if (const LayoutBlock* block = layoutObjectPlaceholder(this))
-        return block->offsetTop();
-    return LayoutMedia::offsetTop();
+        return block->offsetTop(parent);
+    return LayoutMedia::offsetTop(parent);
 }
 
 LayoutUnit LayoutVideo::offsetWidth() const

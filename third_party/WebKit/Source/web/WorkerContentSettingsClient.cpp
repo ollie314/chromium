@@ -33,13 +33,13 @@
 #include "core/workers/WorkerGlobalScope.h"
 #include "public/platform/WebString.h"
 #include "public/web/WebWorkerContentSettingsClientProxy.h"
-#include "wtf/PassOwnPtr.h"
+#include <memory>
 
 namespace blink {
 
-WorkerContentSettingsClient* WorkerContentSettingsClient::create(PassOwnPtr<WebWorkerContentSettingsClientProxy> proxy)
+WorkerContentSettingsClient* WorkerContentSettingsClient::create(std::unique_ptr<WebWorkerContentSettingsClientProxy> proxy)
 {
-    return new WorkerContentSettingsClient(proxy);
+    return new WorkerContentSettingsClient(std::move(proxy));
 }
 
 WorkerContentSettingsClient::~WorkerContentSettingsClient()
@@ -72,15 +72,15 @@ WorkerContentSettingsClient* WorkerContentSettingsClient::from(ExecutionContext&
     return static_cast<WorkerContentSettingsClient*>(Supplement<WorkerClients>::from(*clients, supplementName()));
 }
 
-WorkerContentSettingsClient::WorkerContentSettingsClient(PassOwnPtr<WebWorkerContentSettingsClientProxy> proxy)
-    : m_proxy(proxy)
+WorkerContentSettingsClient::WorkerContentSettingsClient(std::unique_ptr<WebWorkerContentSettingsClientProxy> proxy)
+    : m_proxy(std::move(proxy))
 {
 }
 
-void provideContentSettingsClientToWorker(WorkerClients* clients, PassOwnPtr<WebWorkerContentSettingsClientProxy> proxy)
+void provideContentSettingsClientToWorker(WorkerClients* clients, std::unique_ptr<WebWorkerContentSettingsClientProxy> proxy)
 {
     DCHECK(clients);
-    WorkerContentSettingsClient::provideTo(*clients, WorkerContentSettingsClient::supplementName(), WorkerContentSettingsClient::create(proxy));
+    WorkerContentSettingsClient::provideTo(*clients, WorkerContentSettingsClient::supplementName(), WorkerContentSettingsClient::create(std::move(proxy)));
 }
 
 } // namespace blink

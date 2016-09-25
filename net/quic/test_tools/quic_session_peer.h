@@ -10,9 +10,9 @@
 #include <map>
 
 #include "base/macros.h"
-#include "net/quic/quic_protocol.h"
-#include "net/quic/quic_session.h"
-#include "net/quic/quic_write_blocked_list.h"
+#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_session.h"
+#include "net/quic/core/quic_write_blocked_list.h"
 
 namespace net {
 
@@ -38,10 +38,10 @@ class QuicSessionPeer {
                                                       QuicStreamId stream_id);
   static std::map<QuicStreamId, QuicStreamOffset>&
   GetLocallyClosedStreamsHighestOffset(QuicSession* session);
-  static QuicSession::StreamMap& static_streams(QuicSession* session);
-  static QuicSession::StreamMap& dynamic_streams(QuicSession* session);
+  static QuicSession::StaticStreamMap& static_streams(QuicSession* session);
   static std::unordered_set<QuicStreamId>* GetDrainingStreams(
       QuicSession* session);
+  static void ActivateStream(QuicSession* session, ReliableQuicStream* stream);
 
   // Discern the state of a stream.  Exactly one of these should be true at a
   // time for any stream id > 0 (other than the special streams 1 and 3).

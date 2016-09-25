@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 
+#include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/memory_mapped_file.h"
@@ -44,20 +45,21 @@ bool IsChildProcessOomProtected(base::ProcessHandle handle);
 void SetChildProcessInForeground(base::ProcessHandle handle,
                                  bool in_foreground);
 
-void RegisterViewSurface(int surface_id, jobject j_surface);
+void RegisterViewSurface(int surface_id,
+                         const base::android::JavaRef<jobject>& j_surface);
 
 void UnregisterViewSurface(int surface_id);
 
-gfx::ScopedJavaSurface GetViewSurface(int surface_id);
+gl::ScopedJavaSurface GetViewSurface(int surface_id);
 
 void CreateSurfaceTextureSurface(int surface_texture_id,
                                  int client_id,
-                                 gfx::SurfaceTexture* surface_texture);
+                                 gl::SurfaceTexture* surface_texture);
 
 void DestroySurfaceTextureSurface(int surface_texture_id, int client_id);
 
-gfx::ScopedJavaSurface GetSurfaceTextureSurface(int surface_texture_id,
-                                                int client_id);
+gl::ScopedJavaSurface GetSurfaceTextureSurface(int surface_texture_id,
+                                               int client_id);
 
 bool RegisterChildProcessLauncher(JNIEnv* env);
 

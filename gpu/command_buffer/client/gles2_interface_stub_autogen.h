@@ -655,6 +655,7 @@ GLuint CreateGpuMemoryBufferImageCHROMIUM(GLsizei width,
                                           GLsizei height,
                                           GLenum internalformat,
                                           GLenum usage) override;
+void DescheduleUntilFinishedCHROMIUM() override;
 void GetTranslatedShaderSourceANGLE(GLuint shader,
                                     GLsizei bufsize,
                                     GLsizei* length,
@@ -663,11 +664,6 @@ void PostSubBufferCHROMIUM(GLint x,
                            GLint y,
                            GLint width,
                            GLint height) override;
-void TexImageIOSurface2DCHROMIUM(GLenum target,
-                                 GLsizei width,
-                                 GLsizei height,
-                                 GLuint ioSurfaceId,
-                                 GLuint plane) override;
 void CopyTextureCHROMIUM(GLenum source_id,
                          GLenum dest_id,
                          GLint internalformat,
@@ -708,15 +704,6 @@ GLuint CreateAndConsumeTextureCHROMIUM(GLenum target,
 void BindUniformLocationCHROMIUM(GLuint program,
                                  GLint location,
                                  const char* name) override;
-void GenValuebuffersCHROMIUM(GLsizei n, GLuint* buffers) override;
-void DeleteValuebuffersCHROMIUM(GLsizei n, const GLuint* valuebuffers) override;
-GLboolean IsValuebufferCHROMIUM(GLuint valuebuffer) override;
-void BindValuebufferCHROMIUM(GLenum target, GLuint valuebuffer) override;
-void SubscribeValueCHROMIUM(GLenum target, GLenum subscription) override;
-void PopulateSubscribedValuesCHROMIUM(GLenum target) override;
-void UniformValuebufferCHROMIUM(GLint location,
-                                GLenum target,
-                                GLenum subscription) override;
 void BindTexImage2DCHROMIUM(GLenum target, GLint imageId) override;
 void ReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId) override;
 void TraceBeginCHROMIUM(const char* category_name,
@@ -745,17 +732,19 @@ void ScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
                                   GLfloat uv_y,
                                   GLfloat uv_width,
                                   GLfloat uv_height) override;
+void ScheduleCALayerSharedStateCHROMIUM(GLfloat opacity,
+                                        GLboolean is_clipped,
+                                        const GLfloat* clip_rect,
+                                        GLint sorting_context_id,
+                                        const GLfloat* transform) override;
 void ScheduleCALayerCHROMIUM(GLuint contents_texture_id,
                              const GLfloat* contents_rect,
-                             GLfloat opacity,
                              GLuint background_color,
                              GLuint edge_aa_mask,
                              const GLfloat* bounds_rect,
-                             GLboolean is_clipped,
-                             const GLfloat* clip_rect,
-                             GLint sorting_context_id,
-                             const GLfloat* transform,
                              GLuint filter) override;
+void ScheduleCALayerInUseQueryCHROMIUM(GLsizei count,
+                                       const GLuint* textures) override;
 void CommitOverlayPlanesCHROMIUM() override;
 void SwapInterval(GLint interval) override;
 void FlushDriverCachesCHROMIUM() override;
@@ -864,5 +853,9 @@ GLint GetFragDataIndexEXT(GLuint program, const char* name) override;
 void UniformMatrix4fvStreamTextureMatrixCHROMIUM(
     GLint location,
     GLboolean transpose,
-    const GLfloat* default_value) override;
+    const GLfloat* transform) override;
+void SwapBuffersWithDamageCHROMIUM(GLint x,
+                                   GLint y,
+                                   GLint width,
+                                   GLint height) override;
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_INTERFACE_STUB_AUTOGEN_H_

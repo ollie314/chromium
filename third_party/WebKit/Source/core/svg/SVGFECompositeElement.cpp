@@ -22,7 +22,6 @@
 
 #include "core/SVGNames.h"
 #include "core/svg/graphics/filters/SVGFilterBuilder.h"
-#include "platform/graphics/filters/FilterEffect.h"
 
 namespace blink {
 
@@ -93,8 +92,7 @@ bool SVGFECompositeElement::setFilterEffectAttribute(FilterEffect* effect, const
     if (attrName == SVGNames::k4Attr)
         return composite->setK4(m_k4->currentValue()->value());
 
-    ASSERT_NOT_REACHED();
-    return false;
+    return SVGFilterPrimitiveStandardAttributes::setFilterEffectAttribute(effect, attrName);
 }
 
 

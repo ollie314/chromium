@@ -30,9 +30,7 @@
 
 #include "core/svg/SVGTransformListTearOff.h"
 
-#include "bindings/core/v8/ExceptionState.h"
-#include "core/dom/ExceptionCode.h"
-#include "core/svg/SVGSVGElement.h"
+#include "core/svg/SVGTransformTearOff.h"
 
 namespace blink {
 
@@ -47,17 +45,21 @@ SVGTransformListTearOff::~SVGTransformListTearOff()
 
 SVGTransformTearOff* SVGTransformListTearOff::createSVGTransformFromMatrix(SVGMatrixTearOff* matrix) const
 {
-    return SVGSVGElement::createSVGTransformFromMatrix(matrix);
+    return SVGTransformTearOff::create(matrix);
 }
 
 SVGTransformTearOff* SVGTransformListTearOff::consolidate(ExceptionState& exceptionState)
 {
     if (isImmutable()) {
-        exceptionState.throwDOMException(NoModificationAllowedError, "The attribute is read-only.");
+        throwReadOnly(exceptionState);
         return nullptr;
     }
-
     return createItemTearOff(target()->consolidate());
+}
+
+DEFINE_TRACE_WRAPPERS(SVGTransformListTearOff)
+{
+    visitor->traceWrappers(contextElement());
 }
 
 } // namespace blink

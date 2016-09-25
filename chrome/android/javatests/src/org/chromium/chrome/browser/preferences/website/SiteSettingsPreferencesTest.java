@@ -12,8 +12,8 @@ import android.test.suitebuilder.annotation.SmallTest;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreference;
@@ -23,10 +23,7 @@ import org.chromium.chrome.browser.preferences.LocationSettings;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
-import org.chromium.chrome.browser.preferences.PreferencesTest;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
-import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -36,6 +33,7 @@ import java.util.concurrent.Callable;
 /**
  * Tests for everything under Settings > Site Settings.
  */
+@RetryOnFailure
 public class SiteSettingsPreferencesTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     private EmbeddedTestServer mTestServer;
@@ -129,6 +127,15 @@ public class SiteSettingsPreferencesTest extends ChromeActivityTestCaseBase<Chro
 
         // No infobars are expected.
         assertTrue(getInfoBars().isEmpty());
+    }
+
+    private Preferences startSiteSettingsMenu(String category) {
+        Bundle fragmentArgs = new Bundle();
+        fragmentArgs.putString(SingleCategoryPreferences.EXTRA_CATEGORY, category);
+        Intent intent = PreferencesLauncher.createIntentForSettingsPage(
+                getInstrumentation().getTargetContext(), SiteSettingsPreferences.class.getName());
+        intent.putExtra(Preferences.EXTRA_SHOW_FRAGMENT_ARGUMENTS, fragmentArgs);
+        return (Preferences) getInstrumentation().startActivitySync(intent);
     }
 
     private Preferences startSiteSettingsCategory(String category) {
@@ -255,33 +262,9 @@ public class SiteSettingsPreferencesTest extends ChromeActivityTestCaseBase<Chro
         preferenceActivity.finish();
     }
 
-    private void setAutoDetectEncoding(final boolean enabled) {
-        Intent intent = PreferencesLauncher.createIntentForSettingsPage(
-                getInstrumentation().getTargetContext(), LanguagePreferences.class.getName());
-        final Preferences preferenceActivity =
-                (Preferences) getInstrumentation().startActivitySync(intent);
-
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                LanguagePreferences languagePreferences =
-                        (LanguagePreferences) preferenceActivity.getFragmentForTest();
-                ChromeBaseCheckBoxPreference checkbox = (ChromeBaseCheckBoxPreference)
-                        languagePreferences.findPreference(
-                                LanguagePreferences.PREF_AUTO_DETECT_CHECKBOX);
-                if (checkbox.isChecked() != enabled) {
-                    PreferencesTest.clickPreference(languagePreferences, checkbox);
-                }
-                assertEquals("Auto detect encoding should be " + (enabled ? "enabled" : "disabled"),
-                        enabled, PrefServiceBridge.getInstance().isAutoDetectEncodingEnabled());
-            }
-        });
-
-        preferenceActivity.finish();
-    }
-
     private void setEnableKeygen(final String origin, final boolean enabled) {
-        Website website = new Website(WebsiteAddress.create(origin));
+        WebsiteAddress address = WebsiteAddress.create(origin);
+        Website website = new Website(address, address);
         website.setKeygenInfo(new KeygenInfo(origin, origin, false));
         final Preferences preferenceActivity = startSingleWebsitePreferences(website);
 
@@ -317,6 +300,8 @@ public class SiteSettingsPreferencesTest extends ChromeActivityTestCaseBase<Chro
             }
         });
     }
+
+    // TODO(finnur): Write test for Autoplay.
 
     /**
      * Tests that disabling cookies turns off the third-party cookie toggle.
@@ -427,7 +412,8 @@ public class SiteSettingsPreferencesTest extends ChromeActivityTestCaseBase<Chro
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                Website site = new Website(WebsiteAddress.create(origin));
+                WebsiteAddress address = WebsiteAddress.create(origin);
+                Website site = new Website(address, address);
                 site.setKeygenInfo(new KeygenInfo(origin, origin, false));
                 assertEquals(site.getKeygenPermission(), ContentSetting.BLOCK);
             }
@@ -447,9 +433,53 @@ public class SiteSettingsPreferencesTest extends ChromeActivityTestCaseBase<Chro
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                Website site = new Website(WebsiteAddress.create(origin));
+                WebsiteAddress address = WebsiteAddress.create(origin);
+                Website site = new Website(address, address);
                 site.setKeygenInfo(new KeygenInfo(origin, origin, false));
                 assertEquals(site.getKeygenPermission(), ContentSetting.ALLOW);
+            }
+        });
+    }
+
+    /**
+     * Test that showing the Site Settings menu doesn't crash (crbug.com/610576).
+     * @throws Exception
+     */
+    @SmallTest
+    @Feature({"Preferences"})
+    public void testSiteSettingsMenu() throws Exception {
+        final Preferences preferenceActivity = startSiteSettingsMenu("");
+        preferenceActivity.finish();
+    }
+
+    /**
+     * Test the Media Menu.
+     * @throws Exception
+     */
+    @SmallTest
+    @Feature({"Preferences"})
+    public void testMediaMenu() throws Exception {
+        final Preferences preferenceActivity =
+                startSiteSettingsMenu(SiteSettingsPreferences.MEDIA_KEY);
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                SiteSettingsPreferences siteSettings = (SiteSettingsPreferences)
+                        preferenceActivity.getFragmentForTest();
+
+                SiteSettingsPreference allSites  = (SiteSettingsPreference)
+                        siteSettings.findPreference(SiteSettingsPreferences.ALL_SITES_KEY);
+                assertEquals(null, allSites);
+
+                SiteSettingsPreference autoplay  = (SiteSettingsPreference)
+                        siteSettings.findPreference(SiteSettingsPreferences.AUTOPLAY_KEY);
+                assertFalse(autoplay == null);
+
+                SiteSettingsPreference protectedContent = (SiteSettingsPreference)
+                        siteSettings.findPreference(SiteSettingsPreferences.PROTECTED_CONTENT_KEY);
+                assertFalse(protectedContent == null);
+
+                preferenceActivity.finish();
             }
         });
     }
@@ -461,7 +491,8 @@ public class SiteSettingsPreferencesTest extends ChromeActivityTestCaseBase<Chro
     @SmallTest
     @Feature({"Preferences"})
     public void testResetCrash600232() throws Exception {
-        Website website = new Website(WebsiteAddress.create("example.com"));
+        WebsiteAddress address = WebsiteAddress.create("example.com");
+        Website website = new Website(address, address);
         final Preferences preferenceActivity = startSingleWebsitePreferences(website);
 
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
@@ -552,39 +583,10 @@ public class SiteSettingsPreferencesTest extends ChromeActivityTestCaseBase<Chro
     }
 
     /**
-     * Toggles auto detect encoding, makes sure it is set correctly, and makes sure the page is
-     * encoded correctly.
-     */
-    @SmallTest
-    @Feature({"Preferences"})
-    public void testToggleAutoDetectEncoding() throws Exception {
-        String testUrl = mTestServer.getURL(
-                "/chrome/test/data/encoding_tests/auto_detect/"
-                + "Big5_with_no_encoding_specified.html");
-
-        setAutoDetectEncoding(false);
-        loadUrl(testUrl);
-        assertEquals("Wrong page encoding while auto detect encoding disabled", "windows-1252",
-                getActivity().getCurrentContentViewCore().getWebContents().getEncoding());
-
-        setAutoDetectEncoding(true);
-        ThreadUtils.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                getActivity().getActivityTab().reload();
-            }
-        });
-        ChromeTabUtils.waitForTabPageLoaded(getActivity().getActivityTab(), testUrl);
-        assertEquals("Wrong page encoding while auto detect encoding enabled", "Big5",
-                getActivity().getCurrentContentViewCore().getWebContents().getEncoding());
-
-    }
-
-    /**
      * Helper function to test allowing and blocking background sync.
      * @param enabled true to test enabling background sync, false to test disabling the feature.
      */
-    private void testBackgroundSyncPermission(final boolean enabled) {
+    private void doTestBackgroundSyncPermission(final boolean enabled) {
         setEnableBackgroundSync(enabled);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -598,24 +600,20 @@ public class SiteSettingsPreferencesTest extends ChromeActivityTestCaseBase<Chro
     @SmallTest
     @Feature({"Preferences"})
     public void testAllowBackgroundSync() {
-        testBackgroundSyncPermission(true);
+        doTestBackgroundSyncPermission(true);
     }
 
     @SmallTest
     @Feature({"Preferences"})
     public void testBlockBackgroundSync() {
-        testBackgroundSyncPermission(false);
+        doTestBackgroundSyncPermission(false);
     }
 
     private int getTabCount() {
         return ThreadUtils.runOnUiThreadBlockingNoException(new Callable<Integer>() {
             @Override
             public Integer call() throws Exception {
-                if (FeatureUtilities.isDocumentMode(getInstrumentation().getTargetContext())) {
-                    return ChromeApplication.getDocumentTabModelSelector().getTotalTabCount();
-                } else {
-                    return getActivity().getTabModelSelector().getTotalTabCount();
-                }
+                return getActivity().getTabModelSelector().getTotalTabCount();
             }
         });
     }

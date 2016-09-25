@@ -33,12 +33,12 @@ class MEDIA_EXPORT BitstreamBuffer {
   // is |size| bytes. When not provided, the default value for |offset| is 0.
   // |presentation_timestamp| is when the decoded frame should be displayed.
   // When not provided, |presentation_timestamp| will be
-  // |media::kNoTimestamp()|.
+  // |media::kNoTimestamp|.
   BitstreamBuffer(int32_t id,
                   base::SharedMemoryHandle handle,
                   size_t size,
                   off_t offset = 0,
-                  base::TimeDelta presentation_timestamp = kNoTimestamp());
+                  base::TimeDelta presentation_timestamp = kNoTimestamp);
 
   BitstreamBuffer(const BitstreamBuffer& other);
 
@@ -56,7 +56,7 @@ class MEDIA_EXPORT BitstreamBuffer {
   // The offset to the start of actual bitstream data in the shared memory.
   off_t offset() const { return offset_; }
 
-  // The timestamp is only valid if it's not equal to |media::kNoTimestamp()|.
+  // The timestamp is only valid if it's not equal to |media::kNoTimestamp|.
   base::TimeDelta presentation_timestamp() const {
     return presentation_timestamp_;
   }
@@ -82,7 +82,7 @@ class MEDIA_EXPORT BitstreamBuffer {
 
   // The following fields come from DecryptConfig.
   // TODO(timav): Try to DISALLOW_COPY_AND_ASSIGN and include these params as
-  // scoped_ptr<DecryptConfig> or explain why copy & assign is needed.
+  // std::unique_ptr<DecryptConfig> or explain why copy & assign is needed.
 
   std::string key_id_;                      // key ID.
   std::string iv_;                          // initialization vector

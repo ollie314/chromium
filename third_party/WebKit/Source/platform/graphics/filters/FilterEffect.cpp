@@ -24,19 +24,13 @@
 #include "platform/graphics/filters/FilterEffect.h"
 
 #include "platform/graphics/filters/Filter.h"
-#include "platform/graphics/filters/SkiaImageFilterBuilder.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 #include "third_party/skia/include/effects/SkColorFilterImageFilter.h"
-#include "third_party/skia/include/effects/SkPictureImageFilter.h"
 
 namespace blink {
 
 FilterEffect::FilterEffect(Filter* filter)
     : m_filter(filter)
-    , m_hasX(false)
-    , m_hasY(false)
-    , m_hasWidth(false)
-    , m_hasHeight(false)
     , m_clipsToBounds(true)
     , m_originTainted(false)
     , m_operatingColorSpace(ColorSpaceLinearRGB)
@@ -54,47 +48,48 @@ DEFINE_TRACE(FilterEffect)
     visitor->trace(m_filter);
 }
 
-FloatRect FilterEffect::determineAbsolutePaintRect(const FloatRect& originalRequestedRect)
+FloatRect FilterEffect::absoluteBounds() const
 {
-    FloatRect requestedRect = originalRequestedRect;
-    // Filters in SVG clip to primitive subregion, while CSS doesn't.
-    if (m_clipsToBounds)
-        requestedRect.intersect(maxEffectRect());
+    FloatRect computedBounds = getFilter()->filterRegion();
+    if (!filterPrimitiveSubregion().isEmpty())
+        computedBounds.intersect(filterPrimitiveSubregion());
+    return getFilter()->mapLocalRectToAbsoluteRect(computedBounds);
+}
 
-    // We may be called multiple times if result is used more than once. Return
-    // quickly if if nothing new is required.
-    if (absolutePaintRect().contains(enclosingIntRect(requestedRect)))
-        return requestedRect;
-
-    FloatRect inputRect = mapPaintRect(requestedRect, false);
-    FloatRect inputUnion;
-    unsigned size = m_inputEffects.size();
-
-    for (unsigned i = 0; i < size; ++i)
-        inputUnion.unite(m_inputEffects.at(i)->determineAbsolutePaintRect(inputRect));
-    inputUnion = mapPaintRect(inputUnion, true);
-
-    if (affectsTransparentPixels() || !size) {
-        inputUnion = requestedRect;
-    } else {
-        // Rect may have inflated. Re-intersect with request.
-        inputUnion.intersect(requestedRect);
+FloatRect FilterEffect::mapInputs(const FloatRect& rect) const
+{
+    if (!m_inputEffects.size()) {
+        if (clipsToBounds())
+            return absoluteBounds();
+        return rect;
     }
-
-    addAbsolutePaintRect(inputUnion);
+    FloatRect inputUnion;
+    for (const auto& effect : m_inputEffects)
+        inputUnion.unite(effect->mapRect(rect));
     return inputUnion;
 }
 
-FloatRect FilterEffect::mapRectRecursive(const FloatRect& rect) const
+FloatRect FilterEffect::mapEffect(const FloatRect& rect) const
 {
-    FloatRect result;
-    if (m_inputEffects.size() > 0) {
-        result = m_inputEffects.at(0)->mapRectRecursive(rect);
-        for (unsigned i = 1; i < m_inputEffects.size(); ++i)
-            result.unite(m_inputEffects.at(i)->mapRectRecursive(rect));
-    } else
-        result = rect;
-    return mapRect(result);
+    return rect;
+}
+
+FloatRect FilterEffect::applyBounds(const FloatRect& rect) const
+{
+    // Filters in SVG clip to primitive subregion, while CSS doesn't.
+    if (!clipsToBounds())
+        return rect;
+    FloatRect bounds = absoluteBounds();
+    if (affectsTransparentPixels())
+        return bounds;
+    return intersection(rect, bounds);
+}
+
+FloatRect FilterEffect::mapRect(const FloatRect& rect) const
+{
+    FloatRect result = mapInputs(rect);
+    result = mapEffect(result);
+    return applyBounds(result);
 }
 
 FilterEffect* FilterEffect::inputEffect(unsigned number) const
@@ -103,23 +98,10 @@ FilterEffect* FilterEffect::inputEffect(unsigned number) const
     return m_inputEffects.at(number).get();
 }
 
-void FilterEffect::addAbsolutePaintRect(const FloatRect& paintRect)
-{
-    IntRect intPaintRect(enclosingIntRect(paintRect));
-    if (m_absolutePaintRect.contains(intPaintRect))
-        return;
-    intPaintRect.unite(m_absolutePaintRect);
-    // Make sure we are not holding on to a smaller rendering.
-    clearResult();
-    m_absolutePaintRect = intPaintRect;
-}
-
 void FilterEffect::clearResult()
 {
-    m_absolutePaintRect = IntRect();
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 4; i++)
         m_imageFilters[i] = nullptr;
-    }
 }
 
 Color FilterEffect::adaptColorToOperatingColorSpace(const Color& deviceColor)
@@ -133,60 +115,6 @@ TextStream& FilterEffect::externalRepresentation(TextStream& ts, int) const
     // FIXME: We should dump the subRegions of the filter primitives here later. This isn't
     // possible at the moment, because we need more detailed informations from the target object.
     return ts;
-}
-
-FloatRect FilterEffect::applyEffectBoundaries(const FloatRect& rect) const
-{
-    FloatRect clippedRect = rect;
-    if (hasX())
-        clippedRect.setX(effectBoundaries().x());
-    if (hasY())
-        clippedRect.setY(effectBoundaries().y());
-    if (hasWidth())
-        clippedRect.setWidth(effectBoundaries().width());
-    if (hasHeight())
-        clippedRect.setHeight(effectBoundaries().height());
-    return clippedRect;
-}
-
-FloatRect FilterEffect::determineFilterPrimitiveSubregion(DetermineSubregionFlags flags)
-{
-    Filter* filter = this->getFilter();
-    ASSERT(filter);
-
-    // FETile, FETurbulence, FEFlood don't have input effects, take the filter region as unite rect.
-    FloatRect subregion;
-    if (unsigned numberOfInputEffects = inputEffects().size()) {
-        subregion = inputEffect(0)->determineFilterPrimitiveSubregion(flags);
-        for (unsigned i = 1; i < numberOfInputEffects; ++i)
-            subregion.unite(inputEffect(i)->determineFilterPrimitiveSubregion(flags));
-    } else {
-        subregion = filter->filterRegion();
-    }
-
-    // After calling determineFilterPrimitiveSubregion on the target effect, reset the subregion again for <feTile>.
-    if (getFilterEffectType() == FilterEffectTypeTile)
-        subregion = filter->filterRegion();
-
-    if (flags & MapRectForward) {
-        // mapRect works on absolute rectangles.
-        subregion = filter->mapAbsoluteRectToLocalRect(mapRect(
-            filter->mapLocalRectToAbsoluteRect(subregion)));
-    }
-
-    subregion = applyEffectBoundaries(subregion);
-
-    setFilterPrimitiveSubregion(subregion);
-
-    FloatRect absoluteSubregion = filter->mapLocalRectToAbsoluteRect(subregion);
-
-    // Clip every filter effect to the filter region.
-    if (flags & ClipToFilterRegion) {
-        absoluteSubregion.intersect(filter->absoluteFilterRegion());
-    }
-
-    setMaxEffectRect(absoluteSubregion);
-    return subregion;
 }
 
 sk_sp<SkImageFilter> FilterEffect::createImageFilter()
@@ -218,8 +146,7 @@ sk_sp<SkImageFilter> FilterEffect::createTransparentBlack() const
 SkImageFilter::CropRect FilterEffect::getCropRect() const
 {
     if (!filterPrimitiveSubregion().isEmpty()) {
-        FloatRect rect = filterPrimitiveSubregion();
-        rect.scale(getFilter()->scale());
+        FloatRect rect = getFilter()->mapLocalRectToAbsoluteRect(filterPrimitiveSubregion());
         return SkImageFilter::CropRect(rect);
     } else {
         return SkImageFilter::CropRect(SkRect::MakeEmpty(), 0);

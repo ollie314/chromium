@@ -38,12 +38,17 @@
 #include "core/frame/VisualViewport.h"
 #include "core/html/HTMLTextAreaElement.h"
 #include "core/layout/LayoutBlock.h"
+#include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutListItem.h"
 #include "core/layout/LayoutListMarker.h"
+#include "core/layout/LayoutTable.h"
 #include "core/layout/LayoutTableCell.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/line/InlineIterator.h"
+#include "core/layout/api/LayoutAPIShim.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/page/Page.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 #ifdef AUTOSIZING_DOM_DEBUG_INFO
 #include "core/dom/ExecutionContextTask.h"
@@ -79,7 +84,7 @@ static void writeDebugInfo(LayoutObject* layoutObject, const AtomicString& outpu
         node = toDocument(node)->documentElement();
     if (!node->isElementNode())
         return;
-    node->document().postTask(adoptPtr(new WriteDebugInfoTask(toElement(node), output)));
+    node->document().postTask(BLINK_FROM_HERE, wrapUnique(new WriteDebugInfoTask(toElement(node), output)));
 }
 
 void TextAutosizer::writeClusterDebugInfo(Cluster* cluster)
@@ -104,8 +109,8 @@ void TextAutosizer::writeClusterDebugInfo(Cluster* cluster)
     }
     String pageInfo = "";
     if (cluster->m_root->isLayoutView()) {
-        pageInfo = String::format("; pageinfo: bm %f * (lw %d / fw %d)",
-            m_pageInfo.m_baseMultiplier, m_pageInfo.m_layoutWidth, m_pageInfo.m_frameWidth);
+        pageInfo = String::format("; pageinfo: afsf %f * dsa %f * (lw %d / fw %d)",
+            m_pageInfo.m_accessibilityFontScaleFactor, m_pageInfo.m_deviceScaleAdjustment, m_pageInfo.m_layoutWidth, m_pageInfo.m_frameWidth);
     }
     float multiplier = cluster->m_flags & SUPPRESSING ? 1.0 : cluster->m_multiplier;
     writeDebugInfo(const_cast<LayoutBlock*>(cluster->m_root),
@@ -293,6 +298,10 @@ TextAutosizer::TextAutosizer(const Document* document)
 {
 }
 
+TextAutosizer::~TextAutosizer()
+{
+}
+
 void TextAutosizer::record(const LayoutBlock* block)
 {
     if (!m_pageInfo.m_settingEnabled)
@@ -354,7 +363,7 @@ void TextAutosizer::prepareClusterStack(const LayoutObject* layoutObject)
         m_blocksThatHaveBegunLayout.add(block);
 #endif
         if (Cluster* cluster = maybeCreateCluster(block))
-            m_clusterStack.append(adoptPtr(cluster));
+            m_clusterStack.append(wrapUnique(cluster));
     }
 }
 
@@ -368,7 +377,7 @@ void TextAutosizer::beginLayout(LayoutBlock* block, SubtreeLayoutScope* layouter
     ASSERT(!m_clusterStack.isEmpty() || block->isLayoutView());
 
     if (Cluster* cluster = maybeCreateCluster(block))
-        m_clusterStack.append(adoptPtr(cluster));
+        m_clusterStack.append(wrapUnique(cluster));
 
     ASSERT(!m_clusterStack.isEmpty());
 
@@ -398,8 +407,6 @@ void TextAutosizer::inflateAutoTable(LayoutTable* table)
                 if (!cell->needsLayout())
                     continue;
 
-                // TODO(kojii): Callers should pass SubtreeLayoutScope to give
-                // to beginLayout/inflate.
                 beginLayout(cell, nullptr);
                 inflate(cell, nullptr, DescendToInnerBlocks);
                 endLayout(cell);
@@ -482,6 +489,9 @@ float TextAutosizer::inflate(LayoutObject* parent, SubtreeLayoutScope* layouter,
         }
     }
 
+    if (m_pageInfo.m_hasAutosized)
+        UseCounter::count(*m_document, UseCounter::TextAutosizing);
+
     return multiplier;
 }
 
@@ -523,8 +533,8 @@ void TextAutosizer::updatePageInfo()
     if (!m_pageInfo.m_settingEnabled || m_document->printing()) {
         m_pageInfo.m_pageNeedsAutosizing = false;
     } else {
-        LayoutView* layoutView = m_document->layoutView();
-        bool horizontalWritingMode = isHorizontalWritingMode(layoutView->style()->getWritingMode());
+        LayoutViewItem layoutViewItem = m_document->layoutViewItem();
+        bool horizontalWritingMode = isHorizontalWritingMode(layoutViewItem.style()->getWritingMode());
 
         // FIXME: With out-of-process iframes, the top frame can be remote and
         // doesn't have sizing information. Just return if this is the case.
@@ -542,24 +552,27 @@ void TextAutosizer::updatePageInfo()
         IntSize layoutSize = mainFrame->view()->layoutSize();
         m_pageInfo.m_layoutWidth = horizontalWritingMode ? layoutSize.width() : layoutSize.height();
 
-        // Compute the base font scale multiplier based on device and accessibility settings.
-        m_pageInfo.m_baseMultiplier = m_document->settings()->accessibilityFontScaleFactor();
-        // If the page has a meta viewport or @viewport, don't apply the device scale adjustment.
-        const ViewportDescription& viewportDescription = mainFrame->document()->viewportDescription();
-        if (!viewportDescription.isSpecifiedByAuthor()) {
-            float deviceScaleAdjustment = m_document->settings()->deviceScaleAdjustment();
-            m_pageInfo.m_baseMultiplier *= deviceScaleAdjustment;
-        }
+        // TODO(pdr): Accessibility should be moved out of the text autosizer. See: crbug.com/645717.
+        m_pageInfo.m_accessibilityFontScaleFactor = m_document->settings()->accessibilityFontScaleFactor();
 
+        // If the page has a meta viewport or @viewport, don't apply the device scale adjustment.
+        if (!mainFrame->document()->viewportDescription().isSpecifiedByAuthor())
+            m_pageInfo.m_deviceScaleAdjustment = m_document->settings()->deviceScaleAdjustment();
+        else
+            m_pageInfo.m_deviceScaleAdjustment = 1.0f;
+
+        // TODO(pdr): pageNeedsAutosizing should take into account whether text-size-adjust is used
+        // anywhere on the page because that also needs to trigger autosizing. See: crbug.com/646237.
         m_pageInfo.m_pageNeedsAutosizing = !!m_pageInfo.m_frameWidth
-            && (m_pageInfo.m_baseMultiplier * (static_cast<float>(m_pageInfo.m_layoutWidth) / m_pageInfo.m_frameWidth) > 1.0f);
+            && (m_pageInfo.m_accessibilityFontScaleFactor * m_pageInfo.m_deviceScaleAdjustment * (static_cast<float>(m_pageInfo.m_layoutWidth) / m_pageInfo.m_frameWidth) > 1.0f);
     }
 
     if (m_pageInfo.m_pageNeedsAutosizing) {
         // If page info has changed, multipliers may have changed. Force a layout to recompute them.
         if (m_pageInfo.m_frameWidth != previousPageInfo.m_frameWidth
             || m_pageInfo.m_layoutWidth != previousPageInfo.m_layoutWidth
-            || m_pageInfo.m_baseMultiplier != previousPageInfo.m_baseMultiplier
+            || m_pageInfo.m_accessibilityFontScaleFactor != previousPageInfo.m_accessibilityFontScaleFactor
+            || m_pageInfo.m_deviceScaleAdjustment != previousPageInfo.m_deviceScaleAdjustment
             || m_pageInfo.m_settingEnabled != previousPageInfo.m_settingEnabled)
             setAllTextNeedsLayout();
     } else if (previousPageInfo.m_hasAutosized) {
@@ -579,7 +592,7 @@ IntSize TextAutosizer::windowSize() const
 
 void TextAutosizer::resetMultipliers()
 {
-    LayoutObject* layoutObject = m_document->layoutView();
+    LayoutObject* layoutObject = LayoutAPIShim::layoutObjectFrom(m_document->layoutViewItem());
     while (layoutObject) {
         if (const ComputedStyle* style = layoutObject->style()) {
             if (style->textAutosizingMultiplier() != 1)
@@ -591,11 +604,11 @@ void TextAutosizer::resetMultipliers()
 
 void TextAutosizer::setAllTextNeedsLayout()
 {
-    LayoutObject* layoutObject = m_document->layoutView();
-    while (layoutObject) {
-        if (layoutObject->isText())
-            layoutObject->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::TextAutosizing);
-        layoutObject = layoutObject->nextInPreOrder();
+    LayoutItem layoutItem = m_document->layoutViewItem();
+    while (!layoutItem.isNull()) {
+        if (layoutItem.isText())
+            layoutItem.setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::TextAutosizing);
+        layoutItem = layoutItem.nextInPreOrder();
     }
 }
 
@@ -703,7 +716,7 @@ TextAutosizer::Fingerprint TextAutosizer::computeFingerprint(const LayoutObject*
     if (const ComputedStyle* style = layoutObject->style()) {
         data.m_packedStyleProperties = style->direction();
         data.m_packedStyleProperties |= (style->position() << 1);
-        data.m_packedStyleProperties |= (style->floating() << 4);
+        data.m_packedStyleProperties |= (static_cast<unsigned>(style->floating()) << 4);
         data.m_packedStyleProperties |= (style->display() << 6);
         data.m_packedStyleProperties |= (style->width().type() << 11);
         // packedStyleProperties effectively using 15 bits now.
@@ -757,12 +770,12 @@ TextAutosizer::Supercluster* TextAutosizer::getSupercluster(const LayoutBlock* b
     if (!roots || roots->size() < 2 || !roots->contains(block))
         return nullptr;
 
-    SuperclusterMap::AddResult addResult = m_superclusters.add(fingerprint, PassOwnPtr<Supercluster>());
+    SuperclusterMap::AddResult addResult = m_superclusters.add(fingerprint, std::unique_ptr<Supercluster>());
     if (!addResult.isNewEntry)
         return addResult.storedValue->value.get();
 
     Supercluster* supercluster = new Supercluster(roots);
-    addResult.storedValue->value = adoptPtr(supercluster);
+    addResult.storedValue->value = wrapUnique(supercluster);
     return supercluster;
 }
 
@@ -870,7 +883,7 @@ float TextAutosizer::widthFromBlock(const LayoutBlock* block) const
             if ((width = specifiedWidth.value()) > 0)
                 return width;
         }
-        if (specifiedWidth.hasPercent()) {
+        if (specifiedWidth.isPercentOrCalc()) {
             if (float containerWidth = block->containingBlock()->contentLogicalWidth().toFloat()) {
                 if ((width = floatValueForLength(specifiedWidth, containerWidth)) > 0)
                     return width;
@@ -891,9 +904,10 @@ float TextAutosizer::multiplierFromBlock(const LayoutBlock* block)
 
     // Block width, in CSS pixels.
     float blockWidth = widthFromBlock(block);
-    float multiplier = m_pageInfo.m_frameWidth ? std::min(blockWidth, static_cast<float>(m_pageInfo.m_layoutWidth)) / m_pageInfo.m_frameWidth : 1.0f;
-
-    return std::max(m_pageInfo.m_baseMultiplier * multiplier, 1.0f);
+    float layoutWidth = std::min(blockWidth, static_cast<float>(m_pageInfo.m_layoutWidth));
+    float multiplier = m_pageInfo.m_frameWidth ? layoutWidth / m_pageInfo.m_frameWidth : 1.0f;
+    multiplier *= m_pageInfo.m_accessibilityFontScaleFactor * m_pageInfo.m_deviceScaleAdjustment;
+    return std::max(multiplier, 1.0f);
 }
 
 const LayoutBlock* TextAutosizer::deepestBlockContainingAllText(Cluster* cluster)
@@ -978,6 +992,15 @@ void TextAutosizer::applyMultiplier(LayoutObject* layoutObject, float multiplier
 {
     ASSERT(layoutObject);
     ComputedStyle& currentStyle = layoutObject->mutableStyleRef();
+    if (!currentStyle.getTextSizeAdjust().isAuto()) {
+        // The accessibility font scale factor is applied by the autosizer so we need to apply that
+        // scale factor on top of the text-size-adjust multiplier.
+        multiplier = currentStyle.getTextSizeAdjust().multiplier() * m_pageInfo.m_accessibilityFontScaleFactor;
+    } else if (multiplier < 1) {
+        // Unlike text-size-adjust, the text autosizer should only inflate fonts.
+        multiplier = 1;
+    }
+
     if (currentStyle.textAutosizingMultiplier() == multiplier)
         return;
 
@@ -993,8 +1016,6 @@ void TextAutosizer::applyMultiplier(LayoutObject* layoutObject, float multiplier
         m_stylesRetainedDuringLayout.append(&currentStyle);
 
         layoutObject->setStyleInternal(style.release());
-        // TODO(kojii): layouter should not be nullptr once all callers are
-        // fixed to pass SubtreeLayoutScope.
         DCHECK(!layouter || layoutObject->isDescendantOf(&layouter->root()));
         layoutObject->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::TextAutosizing, MarkContainerChain, layouter);
         break;
@@ -1044,6 +1065,18 @@ TextAutosizer::Cluster* TextAutosizer::currentCluster() const
     return m_clusterStack.last().get();
 }
 
+TextAutosizer::Cluster::Cluster(const LayoutBlock* root, BlockFlags flags, Cluster* parent, Supercluster* supercluster)
+    : m_root(root)
+    , m_flags(flags)
+    , m_deepestBlockContainingAllText(nullptr)
+    , m_parent(parent)
+    , m_multiplier(0)
+    , m_hasEnoughTextToAutosize(UnknownAmountOfText)
+    , m_supercluster(supercluster)
+    , m_hasTableAncestor(root->isTableCell() || (m_parent && m_parent->m_hasTableAncestor))
+{
+}
+
 #if ENABLE(ASSERT)
 void TextAutosizer::FingerprintMapper::assertMapsAreConsistent()
 {
@@ -1075,9 +1108,9 @@ void TextAutosizer::FingerprintMapper::addTentativeClusterRoot(const LayoutBlock
 {
     add(block, fingerprint);
 
-    ReverseFingerprintMap::AddResult addResult = m_blocksForFingerprint.add(fingerprint, PassOwnPtr<BlockSet>());
+    ReverseFingerprintMap::AddResult addResult = m_blocksForFingerprint.add(fingerprint, std::unique_ptr<BlockSet>());
     if (addResult.isNewEntry)
-        addResult.storedValue->value = adoptPtr(new BlockSet);
+        addResult.storedValue->value = wrapUnique(new BlockSet);
     addResult.storedValue->value->add(block);
 #if ENABLE(ASSERT)
     assertMapsAreConsistent();
@@ -1163,6 +1196,8 @@ TextAutosizer::DeferUpdatePageInfo::~DeferUpdatePageInfo()
 
 float TextAutosizer::computeAutosizedFontSize(float specifiedSize, float multiplier)
 {
+    DCHECK_GE(multiplier, 0);
+
     // Somewhat arbitrary "pleasant" font size.
     const float pleasantSize = 16;
 
@@ -1179,7 +1214,8 @@ float TextAutosizer::computeAutosizedFontSize(float specifiedSize, float multipl
     const float gradientAfterPleasantSize = 0.5;
 
     float computedSize;
-    if (specifiedSize <= pleasantSize) {
+    // Skip linear backoff for multipliers that shrink the size or when the font sizes are small.
+    if (multiplier <= 1 || specifiedSize <= pleasantSize) {
         computedSize = multiplier * specifiedSize;
     } else {
         computedSize = multiplier * pleasantSize + gradientAfterPleasantSize * (specifiedSize - pleasantSize);

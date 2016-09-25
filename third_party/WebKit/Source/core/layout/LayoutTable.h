@@ -30,6 +30,7 @@
 #include "core/layout/LayoutBlock.h"
 #include "core/style/CollapsedBorderValue.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
@@ -213,7 +214,6 @@ public:
     void recalcBordersInRowDirection();
 
     void addChild(LayoutObject* child, LayoutObject* beforeChild = nullptr) override;
-    void addChildIgnoringContinuation(LayoutObject* newChild, LayoutObject* beforeChild = nullptr) override;
 
     struct ColumnStruct {
         DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
@@ -261,23 +261,23 @@ public:
 
     unsigned absoluteColumnToEffectiveColumn(unsigned absoluteColumnIndex) const
     {
-        if (!m_hasCellColspanThatDeterminesTableWidth)
+        if (absoluteColumnIndex < m_noCellColspanAtLeast)
             return absoluteColumnIndex;
 
-        unsigned effectiveColumn = 0;
+        unsigned effectiveColumn = m_noCellColspanAtLeast;
         unsigned numColumns = numEffectiveColumns();
-        for (unsigned c = 0; effectiveColumn < numColumns && c + m_effectiveColumns[effectiveColumn].span - 1 < absoluteColumnIndex; ++effectiveColumn)
+        for (unsigned c = m_noCellColspanAtLeast; effectiveColumn < numColumns && c + m_effectiveColumns[effectiveColumn].span - 1 < absoluteColumnIndex; ++effectiveColumn)
             c += m_effectiveColumns[effectiveColumn].span;
         return effectiveColumn;
     }
 
     unsigned effectiveColumnToAbsoluteColumn(unsigned effectiveColumnIndex) const
     {
-        if (!m_hasCellColspanThatDeterminesTableWidth)
+        if (effectiveColumnIndex < m_noCellColspanAtLeast)
             return effectiveColumnIndex;
 
-        unsigned c = 0;
-        for (unsigned i = 0; i < effectiveColumnIndex; i++)
+        unsigned c = m_noCellColspanAtLeast;
+        for (unsigned i = m_noCellColspanAtLeast; i < effectiveColumnIndex; i++)
             c += m_effectiveColumns[i].span;
         return c;
     }
@@ -299,8 +299,8 @@ public:
     LayoutUnit paddingRight() const override;
 
     // Override paddingStart/End to return pixel values to match behavor of LayoutTableCell.
-    LayoutUnit paddingEnd() const override { return LayoutUnit(static_cast<int>(LayoutBlock::paddingEnd())); }
-    LayoutUnit paddingStart() const override { return LayoutUnit(static_cast<int>(LayoutBlock::paddingStart())); }
+    LayoutUnit paddingEnd() const override { return LayoutUnit(LayoutBlock::paddingEnd().toInt()); }
+    LayoutUnit paddingStart() const override { return LayoutUnit(LayoutBlock::paddingStart().toInt()); }
 
     LayoutUnit bordersPaddingAndSpacingInRowDirection() const
     {
@@ -398,12 +398,16 @@ public:
     // For simplicity, just conservatively assume foreground of all tables are not opaque.
     bool foregroundIsKnownToBeOpaqueInRect(const LayoutRect&, unsigned) const override { return false; }
 
+    enum WhatToMarkAllCells { MarkDirtyOnly, MarkDirtyAndNeedsLayout };
+    void markAllCellsWidthsDirtyAndOrNeedsLayout(WhatToMarkAllCells);
+
 protected:
     void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
     void simplifiedNormalFlowLayout() override;
     bool recalcChildOverflowAfterStyleChange() override;
+    void ensureIsReadyForPaintInvalidation() override;
     PaintInvalidationReason invalidatePaintIfNeeded(const PaintInvalidationState&) override;
-    void invalidatePaintOfSubtreesIfNeeded(const PaintInvalidationState&) override;
+    PaintInvalidationReason invalidatePaintIfNeeded(const PaintInvalidatorContext&) const override;
 
 private:
     bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectTable || LayoutBlock::isOfType(type); }
@@ -428,7 +432,7 @@ private:
     LayoutUnit convertStyleLogicalWidthToComputedWidth(const Length& styleLogicalWidth, LayoutUnit availableWidth);
     LayoutUnit convertStyleLogicalHeightToComputedHeight(const Length& styleLogicalHeight);
 
-    LayoutRect overflowClipRect(const LayoutPoint& location, OverlayScrollbarSizeRelevancy = IgnoreOverlayScrollbarSize) const override;
+    LayoutRect overflowClipRect(const LayoutPoint& location, OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const override;
 
     void addOverflowFromChildren() override;
 
@@ -475,7 +479,7 @@ private:
     //
     // As the algorithm is dependent on the style, this field is nullptr before
     // the first style is applied in styleDidChange().
-    OwnPtr<TableLayoutAlgorithm> m_tableLayout;
+    std::unique_ptr<TableLayoutAlgorithm> m_tableLayout;
 
     // A sorted list of all unique border values that we want to paint.
     //
@@ -491,14 +495,14 @@ private:
 
     bool m_columnLogicalWidthChanged : 1;
     mutable bool m_columnLayoutObjectsValid: 1;
-    mutable bool m_hasCellColspanThatDeterminesTableWidth : 1;
-    bool hasCellColspanThatDeterminesTableWidth() const
+    mutable unsigned m_noCellColspanAtLeast;
+    unsigned calcNoCellColspanAtLeast() const
     {
         for (unsigned c = 0; c < numEffectiveColumns(); c++) {
             if (m_effectiveColumns[c].span > 1)
-                return true;
+                return c;
         }
-        return false;
+        return numEffectiveColumns();
     }
 
     short m_hSpacing;

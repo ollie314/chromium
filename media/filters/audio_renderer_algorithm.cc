@@ -76,8 +76,9 @@ AudioRendererAlgorithm::AudioRendererAlgorithm()
       target_block_index_(0),
       ola_window_size_(0),
       ola_hop_size_(0),
-      num_complete_frames_(0) {
-}
+      num_complete_frames_(0),
+      initial_capacity_(0),
+      max_capacity_(0) {}
 
 AudioRendererAlgorithm::~AudioRendererAlgorithm() {}
 
@@ -86,7 +87,11 @@ void AudioRendererAlgorithm::Initialize(const AudioParameters& params) {
 
   channels_ = params.channels();
   samples_per_second_ = params.sample_rate();
-  capacity_ = ConvertMillisecondsToFrames(kStartingCapacityInMs);
+  initial_capacity_ = capacity_ =
+      std::max(params.frames_per_buffer() * 2,
+               ConvertMillisecondsToFrames(kStartingCapacityInMs));
+  max_capacity_ =
+      std::max(initial_capacity_, kMaxCapacityInSeconds * samples_per_second_);
   num_candidate_blocks_ = ConvertMillisecondsToFrames(kWsolaSearchIntervalMs);
   ola_window_size_ = ConvertMillisecondsToFrames(kOlaWindowSizeMs);
 
@@ -141,6 +146,7 @@ int AudioRendererAlgorithm::FillBuffer(AudioBus* dest,
   if (playback_rate == 0)
     return 0;
 
+  DCHECK_GT(playback_rate, 0);
   DCHECK_EQ(channels_, dest->channels());
 
   // Optimize the muted case to issue a single clear instead of performing
@@ -155,7 +161,10 @@ int AudioRendererAlgorithm::FillBuffer(AudioBus* dest,
     // only skip over complete frames, so a partial frame may remain for next
     // time.
     muted_partial_frame_ += frames_to_render * playback_rate;
-    int seek_frames = static_cast<int>(muted_partial_frame_);
+    // Handle the case where muted_partial_frame_ rounds up to
+    // audio_buffer_.frames()+1.
+    int seek_frames = std::min(static_cast<int>(muted_partial_frame_),
+                               audio_buffer_.frames());
     dest->ZeroFramesPartial(dest_offset, frames_to_render);
     audio_buffer_.SeekFrames(seek_frames);
 
@@ -203,7 +212,7 @@ void AudioRendererAlgorithm::FlushBuffers() {
 
   // Reset |capacity_| so growth triggered by underflows doesn't penalize seek
   // time.
-  capacity_ = ConvertMillisecondsToFrames(kStartingCapacityInMs);
+  capacity_ = initial_capacity_;
 }
 
 void AudioRendererAlgorithm::EnqueueBuffer(
@@ -217,10 +226,8 @@ bool AudioRendererAlgorithm::IsQueueFull() {
 }
 
 void AudioRendererAlgorithm::IncreaseQueueCapacity() {
-  int max_capacity = kMaxCapacityInSeconds * samples_per_second_;
-  DCHECK_LE(capacity_, max_capacity);
-
-  capacity_ = std::min(2 * capacity_, max_capacity);
+  DCHECK_LE(capacity_, max_capacity_);
+  capacity_ = std::min(2 * capacity_, max_capacity_);
 }
 
 int64_t AudioRendererAlgorithm::GetMemoryUsage() const {

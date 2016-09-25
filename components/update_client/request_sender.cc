@@ -13,7 +13,7 @@
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/client_update_protocol/ecdsa.h"
 #include "components/update_client/configurator.h"
 #include "components/update_client/utils.h"
@@ -207,7 +207,7 @@ GURL RequestSender::BuildUpdateUrl(const GURL& url,
 
 std::string RequestSender::GetStringHeaderValue(const net::URLFetcher* source,
                                                 const char* header_name) {
-  const auto response_headers(source->GetResponseHeaders());
+  auto* response_headers(source->GetResponseHeaders());
   if (!response_headers)
     return std::string();
 
@@ -219,7 +219,7 @@ std::string RequestSender::GetStringHeaderValue(const net::URLFetcher* source,
 
 int64_t RequestSender::GetInt64HeaderValue(const net::URLFetcher* source,
                                            const char* header_name) {
-  const auto response_headers(source->GetResponseHeaders());
+  auto* response_headers(source->GetResponseHeaders());
   return response_headers ? response_headers->GetInt64HeaderValue(header_name)
                           : -1;
 }

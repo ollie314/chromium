@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- 
+<!--
      Any copyright is dedicated to the Public Domain.
      http://creativecommons.org/publicdomain/zero/1.0/
- -->
+-->
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head>
     <title>CSS Reftest Reference</title>
@@ -21,6 +21,7 @@
         border-radius: 0;
         border: 1px dotted green;
         padding: 0;
+        margin: 0;
       }
     </style>
   </head>
@@ -29,7 +30,8 @@
       <textarea/>
     </div>
 
-    <div class="flexbox" style="height: 24px">
+    <div class="flexbox"
+         style="height: 22px"><!-- height of textarea's border-box -->
       some words
       <textarea style="float:right"/>
     </div>

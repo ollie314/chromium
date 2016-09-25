@@ -7,13 +7,13 @@
 
 #include <deque>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -78,7 +78,8 @@ class AccountConsistencyService : public KeyedService,
   // Does nothing if the cookie is not set on |domain|.
   void RemoveChromeConnectedCookieFromDomain(const std::string& domain);
 
-  // Notifies the AccountConsistencyService that browsing data has been removed.
+  // Notifies the AccountConsistencyService that browsing data has been removed
+  // for any time period.
   void OnBrowsingDataRemoved();
 
  private:
@@ -115,7 +116,7 @@ class AccountConsistencyService : public KeyedService,
   // Can return nil if the browser state is not active.
   WKWebView* GetWKWebView();
   // Actually creates a WKWebView. Virtual for testing.
-  virtual WKWebView* CreateWKWebView();
+  virtual WKWebView* CreateWKWebView() NS_RETURNS_RETAINED;
   // Stops any page loading in the WKWebView currently in use and releases it.
   void ResetWKWebView();
 
@@ -138,6 +139,7 @@ class AccountConsistencyService : public KeyedService,
       const GoogleServiceAuthError& error) override;
   void OnGaiaAccountsInCookieUpdated(
       const std::vector<gaia::ListedAccount>& accounts,
+      const std::vector<gaia::ListedAccount>& signed_out_accounts,
       const GoogleServiceAuthError& error) override;
 
   // SigninManagerBase::Observer implementation.
@@ -184,7 +186,7 @@ class AccountConsistencyService : public KeyedService,
 
   // Handlers reacting on GAIA responses with the X-Chrome-Manage-Accounts
   // header set.
-  std::map<web::WebState*, scoped_ptr<web::WebStatePolicyDecider>>
+  std::map<web::WebState*, std::unique_ptr<web::WebStatePolicyDecider>>
       web_state_handlers_;
 
   DISALLOW_COPY_AND_ASSIGN(AccountConsistencyService);

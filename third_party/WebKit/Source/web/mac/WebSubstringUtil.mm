@@ -50,11 +50,12 @@
 #include "platform/fonts/Font.h"
 #include "platform/mac/ColorMac.h"
 #include "public/platform/WebRect.h"
+#include "public/web/WebFrameWidget.h"
 #include "public/web/WebHitTestResult.h"
+#include "public/web/WebLocalFrame.h"
 #include "public/web/WebRange.h"
-#include "public/web/WebView.h"
+#include "web/WebFrameWidgetBase.h"
 #include "web/WebLocalFrameImpl.h"
-#include "web/WebViewImpl.h"
 
 using namespace blink;
 
@@ -65,6 +66,11 @@ static NSAttributedString* attributedSubstringFromRange(const EphemeralRange& ra
     size_t length = range.endPosition().computeOffsetInContainerNode() - range.startPosition().computeOffsetInContainerNode();
 
     unsigned position = 0;
+
+    // TODO(dglazkov): The use of updateStyleAndLayoutIgnorePendingStylesheets needs to be audited.
+    // see http://crbug.com/590369 for more details.
+    range.startPosition().document()->updateStyleAndLayoutIgnorePendingStylesheets();
+
     for (TextIterator it(range.startPosition(), range.endPosition()); !it.atEnd() && [string length] < length; it.advance()) {
         unsigned numCharacters = it.length();
         if (!numCharacters)
@@ -118,7 +124,7 @@ WebPoint getBaselinePoint(FrameView* frameView, const EphemeralRange& range, NSA
     // TODO(shuchen): Support page-zoom for getting the baseline point.
     IntRect stringRect = frameView->contentsToRootFrame(createRange(range)->boundingBox());
     IntPoint stringPoint = stringRect.minXMaxYCorner();
-    stringPoint.setY(frameView->height() - stringPoint.y());
+    stringPoint.setY(frameView->root()->height() - stringPoint.y());
 
     // Adjust for the font's descender. AppKit wants the baseline point.
     if ([string length]) {
@@ -131,9 +137,10 @@ WebPoint getBaselinePoint(FrameView* frameView, const EphemeralRange& range, NSA
 
 namespace blink {
 
-NSAttributedString* WebSubstringUtil::attributedWordAtPoint(WebView* view, WebPoint point, WebPoint& baselinePoint)
+NSAttributedString* WebSubstringUtil::attributedWordAtPoint(WebFrameWidget* frameWidget, WebPoint point, WebPoint& baselinePoint)
 {
-    HitTestResult result = static_cast<WebViewImpl*>(view)->coreHitTestResultAt(point);
+    HitTestResult result = static_cast<WebFrameWidgetBase*>(frameWidget)->coreHitTestResultAt(point);
+
     if (!result.innerNode())
         return nil;
     LocalFrame* frame = result.innerNode()->document().frame();

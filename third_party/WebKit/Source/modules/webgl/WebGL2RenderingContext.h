@@ -7,6 +7,7 @@
 
 #include "core/html/canvas/CanvasRenderingContextFactory.h"
 #include "modules/webgl/WebGL2RenderingContextBase.h"
+#include <memory>
 
 namespace blink {
 
@@ -30,26 +31,30 @@ public:
     ~WebGL2RenderingContext() override;
 
     CanvasRenderingContext::ContextType getContextType() const override { return CanvasRenderingContext::ContextWebgl2; }
-    unsigned version() const override { return 2; }
+    ImageBitmap* transferToImageBitmap(ExceptionState&) final;
     String contextName() const override { return "WebGL2RenderingContext"; }
     void registerContextExtensions() override;
     void setCanvasGetContextResult(RenderingContext&) final;
+    void setOffscreenCanvasGetContextResult(OffscreenRenderingContext&) final;
 
     DECLARE_VIRTUAL_TRACE();
 
-protected:
-    WebGL2RenderingContext(HTMLCanvasElement* passedCanvas, PassOwnPtr<WebGraphicsContext3DProvider>, const WebGLContextAttributes& requestedAttributes);
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
-    Member<CHROMIUMSubscribeUniform> m_chromiumSubscribeUniform;
+protected:
+    WebGL2RenderingContext(HTMLCanvasElement* passedCanvas, std::unique_ptr<WebGraphicsContext3DProvider>, const CanvasContextCreationAttributes& requestedAttributes);
+
     Member<EXTColorBufferFloat> m_extColorBufferFloat;
     Member<EXTDisjointTimerQuery> m_extDisjointTimerQuery;
     Member<EXTTextureFilterAnisotropic> m_extTextureFilterAnisotropic;
     Member<OESTextureFloatLinear> m_oesTextureFloatLinear;
     Member<WebGLCompressedTextureASTC> m_webglCompressedTextureASTC;
     Member<WebGLCompressedTextureATC> m_webglCompressedTextureATC;
+    Member<WebGLCompressedTextureES30> m_webglCompressedTextureES30;
     Member<WebGLCompressedTextureETC1> m_webglCompressedTextureETC1;
     Member<WebGLCompressedTexturePVRTC> m_webglCompressedTexturePVRTC;
     Member<WebGLCompressedTextureS3TC> m_webglCompressedTextureS3TC;
+    Member<WebGLCompressedTextureS3TCsRGB> m_webglCompressedTextureS3TCsRGB;
     Member<WebGLDebugRendererInfo> m_webglDebugRendererInfo;
     Member<WebGLDebugShaders> m_webglDebugShaders;
     Member<WebGLLoseContext> m_webglLoseContext;

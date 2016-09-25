@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <tuple>
+
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "content/common/frame_messages.h"
@@ -45,7 +47,8 @@ TEST_F(PluginPowerSaverHelperTest, TemporaryOriginWhitelist) {
   EXPECT_EQ(RenderFrame::CONTENT_STATUS_PERIPHERAL,
             frame()->GetPeripheralContentStatus(
                 url::Origin(GURL("http://same.com")),
-                url::Origin(GURL("http://other.com")), gfx::Size(100, 100)));
+                url::Origin(GURL("http://other.com")), gfx::Size(100, 100),
+                RenderFrame::DONT_RECORD_DECISION));
 
   // Clear out other messages so we find just the plugin power saver IPCs.
   sink_->ClearMessages();
@@ -55,7 +58,8 @@ TEST_F(PluginPowerSaverHelperTest, TemporaryOriginWhitelist) {
   EXPECT_EQ(RenderFrame::CONTENT_STATUS_ESSENTIAL_CROSS_ORIGIN_WHITELISTED,
             frame()->GetPeripheralContentStatus(
                 url::Origin(GURL("http://same.com")),
-                url::Origin(GURL("http://other.com")), gfx::Size(100, 100)));
+                url::Origin(GURL("http://other.com")), gfx::Size(100, 100),
+                RenderFrame::DONT_RECORD_DECISION));
 
   // Test that we've sent an IPC to the browser.
   ASSERT_EQ(1u, sink_->message_count());
@@ -64,7 +68,7 @@ TEST_F(PluginPowerSaverHelperTest, TemporaryOriginWhitelist) {
   FrameHostMsg_PluginContentOriginAllowed::Param params;
   FrameHostMsg_PluginContentOriginAllowed::Read(msg, &params);
   EXPECT_TRUE(url::Origin(GURL("http://other.com"))
-                  .IsSameOriginWith(base::get<0>(params)));
+                  .IsSameOriginWith(std::get<0>(params)));
 }
 
 TEST_F(PluginPowerSaverHelperTest, UnthrottleOnExPostFactoWhitelist) {
@@ -87,14 +91,16 @@ TEST_F(PluginPowerSaverHelperTest, ClearWhitelistOnNavigate) {
   EXPECT_EQ(RenderFrame::CONTENT_STATUS_ESSENTIAL_CROSS_ORIGIN_WHITELISTED,
             frame()->GetPeripheralContentStatus(
                 url::Origin(GURL("http://same.com")),
-                url::Origin(GURL("http://other.com")), gfx::Size(100, 100)));
+                url::Origin(GURL("http://other.com")), gfx::Size(100, 100),
+                RenderFrame::DONT_RECORD_DECISION));
 
   LoadHTML("<html></html>");
 
   EXPECT_EQ(RenderFrame::CONTENT_STATUS_PERIPHERAL,
             frame()->GetPeripheralContentStatus(
                 url::Origin(GURL("http://same.com")),
-                url::Origin(GURL("http://other.com")), gfx::Size(100, 100)));
+                url::Origin(GURL("http://other.com")), gfx::Size(100, 100),
+                RenderFrame::DONT_RECORD_DECISION));
 }
 
 }  // namespace content

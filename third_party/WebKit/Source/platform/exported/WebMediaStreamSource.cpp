@@ -35,8 +35,9 @@
 #include "public/platform/WebAudioDestinationConsumer.h"
 #include "public/platform/WebMediaConstraints.h"
 #include "public/platform/WebString.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
@@ -44,12 +45,12 @@ namespace {
 
 class ExtraDataContainer : public MediaStreamSource::ExtraData {
 public:
-    ExtraDataContainer(PassOwnPtr<WebMediaStreamSource::ExtraData> extraData) : m_extraData(std::move(extraData)) { }
+    ExtraDataContainer(std::unique_ptr<WebMediaStreamSource::ExtraData> extraData) : m_extraData(std::move(extraData)) { }
 
     WebMediaStreamSource::ExtraData* getExtraData() { return m_extraData.get(); }
 
 private:
-    OwnPtr<WebMediaStreamSource::ExtraData> m_extraData;
+    std::unique_ptr<WebMediaStreamSource::ExtraData> m_extraData;
 };
 
 } // namespace
@@ -94,12 +95,12 @@ WebMediaStreamSource::operator MediaStreamSource*() const
 
 void WebMediaStreamSource::initialize(const WebString& id, Type type, const WebString& name)
 {
-    m_private = MediaStreamSource::create(id, static_cast<MediaStreamSource::StreamType>(type), name, false, true);
+    m_private = MediaStreamSource::create(id, static_cast<MediaStreamSource::StreamType>(type), name, false);
 }
 
-void WebMediaStreamSource::initialize(const WebString& id, Type type, const WebString& name, bool remote, bool readonly)
+void WebMediaStreamSource::initialize(const WebString& id, Type type, const WebString& name, bool remote)
 {
-    m_private = MediaStreamSource::create(id, static_cast<MediaStreamSource::StreamType>(type), name, remote, readonly);
+    m_private = MediaStreamSource::create(id, static_cast<MediaStreamSource::StreamType>(type), name, remote);
 }
 
 WebString WebMediaStreamSource::id() const
@@ -154,7 +155,7 @@ void WebMediaStreamSource::setExtraData(ExtraData* extraData)
     if (extraData)
         extraData->setOwner(m_private.get());
 
-    m_private->setExtraData(adoptPtr(new ExtraDataContainer(adoptPtr(extraData))));
+    m_private->setExtraData(wrapUnique(new ExtraDataContainer(wrapUnique(extraData))));
 }
 
 WebMediaConstraints WebMediaStreamSource::constraints()

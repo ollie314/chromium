@@ -4,8 +4,10 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <memory>
 
 #include "base/message_loop/message_loop.h"
+#include "cc/base/math_util.h"
 #include "cc/output/gl_renderer.h"
 #include "cc/quads/draw_quad.h"
 #include "cc/quads/picture_draw_quad.h"
@@ -19,6 +21,7 @@
 #include "third_party/skia/include/core/SkColorPriv.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
 #include "third_party/skia/include/core/SkMatrix.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/effects/SkColorFilterImageFilter.h"
 #include "third_party/skia/include/effects/SkColorMatrixFilter.h"
@@ -93,15 +96,13 @@ void CreateTestRenderPassDrawQuad(const SharedQuadState* shared_state,
                                   RenderPass* render_pass) {
   RenderPassDrawQuad* quad =
       render_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  quad->SetNew(shared_state,
-               rect,
-               rect,
-               pass_id,
+  quad->SetNew(shared_state, rect, rect, pass_id,
                0,                    // mask_resource_id
                gfx::Vector2dF(),     // mask_uv_scale
                gfx::Size(),          // mask_texture_size
                FilterOperations(),   // foreground filters
                gfx::Vector2dF(),     // filters scale
+               gfx::PointF(),        // filter origin
                FilterOperations());  // background filters
 }
 
@@ -133,7 +134,8 @@ void CreateTestTwoColoredTextureDrawQuad(const gfx::Rect& rect,
     }
   }
   ResourceId resource = resource_provider->CreateResource(
-      rect.size(), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
+      rect.size(), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888,
+      gfx::ColorSpace());
   resource_provider->CopyToResource(
       resource, reinterpret_cast<uint8_t*>(&pixels.front()), rect.size());
 
@@ -146,7 +148,8 @@ void CreateTestTwoColoredTextureDrawQuad(const gfx::Rect& rect,
       render_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
   quad->SetNew(shared_state, rect, gfx::Rect(), rect, resource,
                premultiplied_alpha, uv_top_left, uv_bottom_right,
-               background_color, vertex_opacity, flipped, nearest_neighbor);
+               background_color, vertex_opacity, flipped, nearest_neighbor,
+               false);
 }
 
 void CreateTestTextureDrawQuad(const gfx::Rect& rect,
@@ -166,7 +169,8 @@ void CreateTestTextureDrawQuad(const gfx::Rect& rect,
   std::vector<uint32_t> pixels(num_pixels, pixel_color);
 
   ResourceId resource = resource_provider->CreateResource(
-      rect.size(), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
+      rect.size(), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888,
+      gfx::ColorSpace());
   resource_provider->CopyToResource(
       resource, reinterpret_cast<uint8_t*>(&pixels.front()), rect.size());
 
@@ -180,7 +184,8 @@ void CreateTestTextureDrawQuad(const gfx::Rect& rect,
       render_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
   quad->SetNew(shared_state, rect, gfx::Rect(), rect, resource,
                premultiplied_alpha, uv_top_left, uv_bottom_right,
-               background_color, vertex_opacity, flipped, nearest_neighbor);
+               background_color, vertex_opacity, flipped, nearest_neighbor,
+               false);
 }
 
 void CreateTestYUVVideoDrawQuad_FromVideoFrame(
@@ -201,6 +206,8 @@ void CreateTestYUVVideoDrawQuad_FromVideoFrame(
       video_frame_color_space == media::COLOR_SPACE_JPEG) {
     color_space = YUVVideoDrawQuad::JPEG;
   }
+
+  gfx::ColorSpace video_color_space = video_frame->ColorSpace();
 
   const gfx::Rect opaque_rect(0, 0, 0, 0);
 
@@ -264,10 +271,18 @@ void CreateTestYUVVideoDrawQuad_FromVideoFrame(
 
   YUVVideoDrawQuad* yuv_quad =
       render_pass->CreateAndAppendDrawQuad<YUVVideoDrawQuad>();
+  uint32_t bits_per_channel = 8;
+  if (video_frame->format() == media::PIXEL_FORMAT_YUV420P10 ||
+      video_frame->format() == media::PIXEL_FORMAT_YUV422P10 ||
+      video_frame->format() == media::PIXEL_FORMAT_YUV444P10) {
+    bits_per_channel = 10;
+  }
+
   yuv_quad->SetNew(shared_state, rect, opaque_rect, visible_rect,
                    ya_tex_coord_rect, uv_tex_coord_rect, ya_tex_size,
                    uv_tex_size, y_resource, u_resource, v_resource, a_resource,
-                   color_space, 0.0f, 1.0f);
+                   color_space, video_color_space, 0.0f, 1.0f,
+                   bits_per_channel);
 }
 
 // Upshift video frame to 10 bit.
@@ -472,6 +487,7 @@ void CreateTestYUVVideoDrawQuad_Solid(
 
 void CreateTestYUVVideoDrawQuad_NV12(const SharedQuadState* shared_state,
                                      media::ColorSpace video_frame_color_space,
+                                     const gfx::ColorSpace& video_color_space,
                                      const gfx::RectF& tex_coord_rect,
                                      uint8_t y,
                                      uint8_t u,
@@ -492,9 +508,10 @@ void CreateTestYUVVideoDrawQuad_NV12(const SharedQuadState* shared_state,
 
   ResourceId y_resource = resource_provider->CreateResource(
       rect.size(), ResourceProvider::TEXTURE_HINT_DEFAULT,
-      resource_provider->YuvResourceFormat(8));
+      resource_provider->YuvResourceFormat(8), gfx::ColorSpace());
   ResourceId u_resource = resource_provider->CreateResource(
-      uv_tex_size, ResourceProvider::TEXTURE_HINT_DEFAULT, RGBA_8888);
+      uv_tex_size, ResourceProvider::TEXTURE_HINT_DEFAULT, RGBA_8888,
+      gfx::ColorSpace());
   ResourceId v_resource = u_resource;
   ResourceId a_resource = 0;
 
@@ -521,7 +538,7 @@ void CreateTestYUVVideoDrawQuad_NV12(const SharedQuadState* shared_state,
   yuv_quad->SetNew(shared_state, rect, opaque_rect, visible_rect,
                    ya_tex_coord_rect, uv_tex_coord_rect, ya_tex_size,
                    uv_tex_size, y_resource, u_resource, v_resource, a_resource,
-                   color_space, 0.0f, 1.0f);
+                   color_space, video_color_space, 0.0f, 1.0f, 8);
 }
 
 typedef ::testing::Types<GLRenderer,
@@ -1213,15 +1230,16 @@ TEST_F(VideoGLRendererPixelTest, SimpleNV12JRect) {
   gfx::Rect rect(this->device_viewport_size_);
 
   RenderPassId id(1, 1);
-  scoped_ptr<RenderPass> pass = CreateTestRootRenderPass(id, rect);
+  std::unique_ptr<RenderPass> pass = CreateTestRootRenderPass(id, rect);
 
   SharedQuadState* shared_state =
       CreateTestSharedQuadState(gfx::Transform(), rect, pass.get());
 
   // YUV of (149,43,21) should be green (0,255,0) in RGB.
   CreateTestYUVVideoDrawQuad_NV12(
-      shared_state, media::COLOR_SPACE_JPEG, gfx::RectF(0.0f, 0.0f, 1.0f, 1.0f),
-      149, 43, 21, pass.get(), rect, rect, resource_provider_.get());
+      shared_state, media::COLOR_SPACE_JPEG, gfx::ColorSpace::CreateJpeg(),
+      gfx::RectF(0.0f, 0.0f, 1.0f, 1.0f), 149, 43, 21, pass.get(), rect, rect,
+      resource_provider_.get());
 
   RenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -1389,24 +1407,16 @@ TYPED_TEST(RendererPixelTest, FastPassColorFilterAlpha) {
   matrix[13] = matrix[14] = 0;
   matrix[15] = matrix[16] = matrix[17] = matrix[19] = 0;
   matrix[18] = 1;
-  sk_sp<SkColorFilter> color_filter =
-      SkColorFilter::MakeMatrixFilterRowMajor255(matrix);
-  skia::RefPtr<SkImageFilter> filter = skia::AdoptRef(
-      SkColorFilterImageFilter::Create(color_filter.get(), NULL));
   FilterOperations filters;
-  filters.Append(FilterOperation::CreateReferenceFilter(filter));
+  filters.Append(
+      FilterOperation::CreateReferenceFilter(SkColorFilterImageFilter::Make(
+          SkColorFilter::MakeMatrixFilterRowMajor255(matrix), nullptr)));
 
   RenderPassDrawQuad* render_pass_quad =
       root_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  render_pass_quad->SetNew(pass_shared_state,
-                           pass_rect,
-                           pass_rect,
-                           child_pass_id,
-                           0,
-                           gfx::Vector2dF(),
-                           gfx::Size(),
-                           filters,
-                           gfx::Vector2dF(),
+  render_pass_quad->SetNew(pass_shared_state, pass_rect, pass_rect,
+                           child_pass_id, 0, gfx::Vector2dF(), gfx::Size(),
+                           filters, gfx::Vector2dF(), gfx::PointF(),
                            FilterOperations());
 
   RenderPassList pass_list;
@@ -1470,15 +1480,9 @@ TYPED_TEST(RendererPixelTest, FastPassSaturateFilter) {
 
   RenderPassDrawQuad* render_pass_quad =
       root_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  render_pass_quad->SetNew(pass_shared_state,
-                           pass_rect,
-                           pass_rect,
-                           child_pass_id,
-                           0,
-                           gfx::Vector2dF(),
-                           gfx::Size(),
-                           filters,
-                           gfx::Vector2dF(),
+  render_pass_quad->SetNew(pass_shared_state, pass_rect, pass_rect,
+                           child_pass_id, 0, gfx::Vector2dF(), gfx::Size(),
+                           filters, gfx::Vector2dF(), gfx::PointF(),
                            FilterOperations());
 
   RenderPassList pass_list;
@@ -1542,15 +1546,9 @@ TYPED_TEST(RendererPixelTest, FastPassFilterChain) {
 
   RenderPassDrawQuad* render_pass_quad =
       root_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  render_pass_quad->SetNew(pass_shared_state,
-                           pass_rect,
-                           pass_rect,
-                           child_pass_id,
-                           0,
-                           gfx::Vector2dF(),
-                           gfx::Size(),
-                           filters,
-                           gfx::Vector2dF(),
+  render_pass_quad->SetNew(pass_shared_state, pass_rect, pass_rect,
+                           child_pass_id, 0, gfx::Vector2dF(), gfx::Size(),
+                           filters, gfx::Vector2dF(), gfx::PointF(),
                            FilterOperations());
 
   RenderPassList pass_list;
@@ -1628,24 +1626,16 @@ TYPED_TEST(RendererPixelTest, FastPassColorFilterAlphaTranslation) {
   matrix[14] = 1.5f;
   matrix[15] = matrix[16] = matrix[17] = matrix[19] = 0;
   matrix[18] = 1;
-  sk_sp<SkColorFilter> color_filter =
-      SkColorFilter::MakeMatrixFilterRowMajor255(matrix);
-  skia::RefPtr<SkImageFilter> filter = skia::AdoptRef(
-      SkColorFilterImageFilter::Create(color_filter.get(), NULL));
   FilterOperations filters;
-  filters.Append(FilterOperation::CreateReferenceFilter(filter));
+  filters.Append(
+      FilterOperation::CreateReferenceFilter(SkColorFilterImageFilter::Make(
+          SkColorFilter::MakeMatrixFilterRowMajor255(matrix), nullptr)));
 
   RenderPassDrawQuad* render_pass_quad =
       root_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  render_pass_quad->SetNew(pass_shared_state,
-                           pass_rect,
-                           pass_rect,
-                           child_pass_id,
-                           0,
-                           gfx::Vector2dF(),
-                           gfx::Size(),
-                           filters,
-                           gfx::Vector2dF(),
+  render_pass_quad->SetNew(pass_shared_state, pass_rect, pass_rect,
+                           child_pass_id, 0, gfx::Vector2dF(), gfx::Size(),
+                           filters, gfx::Vector2dF(), gfx::PointF(),
                            FilterOperations());
 
   RenderPassList pass_list;
@@ -1702,7 +1692,7 @@ TYPED_TEST(RendererPixelTest, EnlargedRenderPassTexture) {
   pass_list.push_back(std::move(child_pass));
   pass_list.push_back(std::move(root_pass));
 
-  this->renderer_->SetEnlargePassTextureAmountForTesting(gfx::Vector2d(50, 75));
+  this->renderer_->SetEnlargePassTextureAmountForTesting(gfx::Size(50, 75));
 
   EXPECT_TRUE(this->RunPixelTest(
       &pass_list,
@@ -1764,7 +1754,7 @@ TYPED_TEST(RendererPixelTest, EnlargedRenderPassTextureWithAntiAliasing) {
   pass_list.push_back(std::move(child_pass));
   pass_list.push_back(std::move(root_pass));
 
-  this->renderer_->SetEnlargePassTextureAmountForTesting(gfx::Vector2d(50, 75));
+  this->renderer_->SetEnlargePassTextureAmountForTesting(gfx::Size(50, 75));
 
   EXPECT_TRUE(this->RunPixelTest(
       &pass_list,
@@ -1818,7 +1808,8 @@ TYPED_TEST(RendererPixelTest, RenderPassAndMaskWithPartialQuad) {
   }
 
   ResourceId mask_resource_id = this->resource_provider_->CreateResource(
-      mask_rect.size(), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
+      mask_rect.size(), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888,
+      gfx::ColorSpace());
   {
     SkAutoLockPixels lock(bitmap);
     this->resource_provider_->CopyToResource(
@@ -1844,6 +1835,7 @@ TYPED_TEST(RendererPixelTest, RenderPassAndMaskWithPartialQuad) {
                     gfx::Size(mask_rect.size()),  // mask_texture_size
                     FilterOperations(),           // foreground filters
                     gfx::Vector2dF(),             // filters scale
+                    gfx::PointF(),                // filter origin
                     FilterOperations());          // background filters
 
   // White background behind the masked render pass.
@@ -1911,7 +1903,8 @@ TYPED_TEST(RendererPixelTest, RenderPassAndMaskWithPartialQuad2) {
   }
 
   ResourceId mask_resource_id = this->resource_provider_->CreateResource(
-      mask_rect.size(), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
+      mask_rect.size(), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888,
+      gfx::ColorSpace());
   {
     SkAutoLockPixels lock(bitmap);
     this->resource_provider_->CopyToResource(
@@ -1937,6 +1930,7 @@ TYPED_TEST(RendererPixelTest, RenderPassAndMaskWithPartialQuad2) {
                     gfx::Size(mask_rect.size()),  // mask_texture_size
                     FilterOperations(),           // foreground filters
                     gfx::Vector2dF(),             // filters scale
+                    gfx::PointF(),                // filter origin
                     FilterOperations());          // background filters
 
   // White background behind the masked render pass.
@@ -1997,6 +1991,7 @@ class RendererPixelTestWithBackgroundFilter
                                gfx::Size(),                 // mask_texture_size
                                FilterOperations(),          // filters
                                gfx::Vector2dF(1.0f, 1.0f),  // filters_scale
+                               gfx::PointF(),               // filters_origin
                                this->background_filters_);
     }
 
@@ -2084,7 +2079,7 @@ class ExternalStencilPixelTest : public GLRendererPixelTest {
   void ClearBackgroundToGreen() {
     GLES2Interface* gl = output_surface_->context_provider()->ContextGL();
     output_surface_->EnsureBackbuffer();
-    output_surface_->Reshape(device_viewport_size_, 1, true);
+    output_surface_->Reshape(device_viewport_size_, 1, gfx::ColorSpace(), true);
     gl->ClearColor(0.f, 1.f, 0.f, 1.f);
     gl->Clear(GL_COLOR_BUFFER_BIT);
   }
@@ -2093,7 +2088,7 @@ class ExternalStencilPixelTest : public GLRendererPixelTest {
     // Set two quadrants of the stencil buffer to 1.
     GLES2Interface* gl = output_surface_->context_provider()->ContextGL();
     output_surface_->EnsureBackbuffer();
-    output_surface_->Reshape(device_viewport_size_, 1, true);
+    output_surface_->Reshape(device_viewport_size_, 1, gfx::ColorSpace(), true);
     gl->ClearStencil(0);
     gl->Clear(GL_STENCIL_BUFFER_BIT);
     gl->Enable(GL_SCISSOR_TEST);
@@ -2569,13 +2564,13 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadDisableImageFiltering) {
   canvas->drawPoint(0, 1, SK_ColorBLUE);
   canvas->drawPoint(1, 0, SK_ColorBLUE);
   canvas->drawPoint(1, 1, SK_ColorGREEN);
-  skia::RefPtr<SkImage> image = skia::AdoptRef(surface->newImageSnapshot());
 
   std::unique_ptr<FakeRecordingSource> recording =
       FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
   SkPaint paint;
   paint.setFilterQuality(kLow_SkFilterQuality);
-  recording->add_draw_image_with_paint(image.get(), gfx::Point(), paint);
+  recording->add_draw_image_with_paint(surface->makeImageSnapshot(),
+                                       gfx::Point(), paint);
   recording->Rerecord();
   scoped_refptr<FakeRasterSource> raster_source =
       FakeRasterSource::CreateFromRecordingSource(recording.get(), false);
@@ -2618,13 +2613,13 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadNearestNeighbor) {
   canvas->drawPoint(0, 1, SK_ColorBLUE);
   canvas->drawPoint(1, 0, SK_ColorBLUE);
   canvas->drawPoint(1, 1, SK_ColorGREEN);
-  skia::RefPtr<SkImage> image = skia::AdoptRef(surface->newImageSnapshot());
 
   std::unique_ptr<FakeRecordingSource> recording =
       FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
   SkPaint paint;
   paint.setFilterQuality(kLow_SkFilterQuality);
-  recording->add_draw_image_with_paint(image.get(), gfx::Point(), paint);
+  recording->add_draw_image_with_paint(surface->makeImageSnapshot(),
+                                       gfx::Point(), paint);
   recording->Rerecord();
   scoped_refptr<FakeRasterSource> raster_source =
       FakeRasterSource::CreateFromRecordingSource(recording.get(), false);
@@ -2666,7 +2661,8 @@ TYPED_TEST(RendererPixelTest, TileDrawQuadNearestNeighbor) {
 
   gfx::Size tile_size(2, 2);
   ResourceId resource = this->resource_provider_->CreateResource(
-      tile_size, ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
+      tile_size, ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888,
+      gfx::ColorSpace());
 
   {
     SkAutoLockPixels lock(bitmap);
@@ -2716,7 +2712,8 @@ TYPED_TEST(SoftwareRendererPixelTest, TextureDrawQuadNearestNeighbor) {
 
   gfx::Size tile_size(2, 2);
   ResourceId resource = this->resource_provider_->CreateResource(
-      tile_size, ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
+      tile_size, ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888,
+      gfx::ColorSpace());
 
   {
     SkAutoLockPixels lock(bitmap);
@@ -2737,7 +2734,7 @@ TYPED_TEST(SoftwareRendererPixelTest, TextureDrawQuadNearestNeighbor) {
   TextureDrawQuad* quad = pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
   quad->SetNew(shared_state, viewport, gfx::Rect(), viewport, resource, false,
                gfx::PointF(0, 0), gfx::PointF(1, 1), SK_ColorBLACK,
-               vertex_opacity, false, nearest_neighbor);
+               vertex_opacity, false, nearest_neighbor, false);
 
   RenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -2767,7 +2764,8 @@ TYPED_TEST(SoftwareRendererPixelTest, TextureDrawQuadLinear) {
 
   gfx::Size tile_size(2, 2);
   ResourceId resource = this->resource_provider_->CreateResource(
-      tile_size, ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
+      tile_size, ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888,
+      gfx::ColorSpace());
 
   {
     SkAutoLockPixels lock(bitmap);
@@ -2788,7 +2786,7 @@ TYPED_TEST(SoftwareRendererPixelTest, TextureDrawQuadLinear) {
   TextureDrawQuad* quad = pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
   quad->SetNew(shared_state, viewport, gfx::Rect(), viewport, resource, false,
                gfx::PointF(0, 0), gfx::PointF(1, 1), SK_ColorBLACK,
-               vertex_opacity, false, nearest_neighbor);
+               vertex_opacity, false, nearest_neighbor, false);
 
   RenderPassList pass_list;
   pass_list.push_back(std::move(pass));
@@ -2903,8 +2901,6 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadNonIdentityScale) {
   scoped_refptr<FakeRasterSource> raster_source =
       FakeRasterSource::CreateFromRecordingSource(recording.get(), false);
 
-  gfx::Rect content_rect(
-      gfx::ScaleToEnclosingRect(layer_rect, contents_scale));
   gfx::Rect content_union_rect(
       gfx::ToEnclosingRect(gfx::ScaleRect(union_layer_rect, contents_scale)));
 
@@ -3132,7 +3128,8 @@ TEST_F(GLRendererPixelTest, TextureQuadBatching) {
   }
 
   ResourceId resource = this->resource_provider_->CreateResource(
-      mask_rect.size(), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
+      mask_rect.size(), ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888,
+      gfx::ColorSpace());
   {
     SkAutoLockPixels lock(bitmap);
     this->resource_provider_->CopyToResource(
@@ -3167,7 +3164,7 @@ TEST_F(GLRendererPixelTest, TextureQuadBatching) {
       texture_quad->SetNew(shared_state, layer_rect, layer_rect, layer_rect,
                            resource, true, uv_rect.origin(),
                            uv_rect.bottom_right(), SK_ColorWHITE,
-                           vertex_opacity, false, false);
+                           vertex_opacity, false, false, false);
     }
   }
 

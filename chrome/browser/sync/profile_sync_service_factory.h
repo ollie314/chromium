@@ -13,16 +13,23 @@ template <typename T>
 struct DefaultSingletonTraits;
 }
 
+namespace browser_sync {
+class ProfileSyncService;
+}  // namespace browser_sync
+
 namespace sync_driver {
+class SyncClient;
 class SyncService;
 }
 
 class Profile;
-class ProfileSyncService;
 
 class ProfileSyncServiceFactory : public BrowserContextKeyedServiceFactory {
  public:
-  static ProfileSyncService* GetForProfile(Profile* profile);
+  typedef base::Callback<std::unique_ptr<sync_driver::SyncClient>(Profile*)>
+      SyncClientFactory;
+
+  static browser_sync::ProfileSyncService* GetForProfile(Profile* profile);
   static bool HasProfileSyncService(Profile* profile);
 
   // Convenience method that returns the ProfileSyncService as a
@@ -31,6 +38,9 @@ class ProfileSyncServiceFactory : public BrowserContextKeyedServiceFactory {
       content::BrowserContext* context);
 
   static ProfileSyncServiceFactory* GetInstance();
+
+  // Overrides how the SyncClient is created for testing purposes.
+  static void SetSyncClientFactoryForTest(SyncClientFactory* client_factory);
 
  private:
   friend struct base::DefaultSingletonTraits<ProfileSyncServiceFactory>;
@@ -41,6 +51,10 @@ class ProfileSyncServiceFactory : public BrowserContextKeyedServiceFactory {
   // BrowserContextKeyedServiceFactory:
   KeyedService* BuildServiceInstanceFor(
       content::BrowserContext* context) const override;
+
+  // A factory function for overriding the way the SyncClient is created.
+  // This is a raw pointer so it can be statically initialized.
+  static SyncClientFactory* client_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncServiceFactory);
 };

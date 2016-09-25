@@ -45,8 +45,7 @@ class FileSystemBrowserTest : public ContentBrowserTest {
     if (result != "pass") {
       std::string js_result;
       ASSERT_TRUE(ExecuteScriptAndExtractString(
-          the_browser->web_contents(),
-          "window.domAutomationController.send(getLog())",
+          the_browser, "window.domAutomationController.send(getLog())",
           &js_result));
       FAIL() << "Failed: " << js_result;
     }
@@ -77,7 +76,7 @@ class FileSystemBrowserTestWithLowQuota : public FileSystemBrowserTest {
     qm->SetTemporaryGlobalOverrideQuota(bytes, storage::QuotaCallback());
     // Don't return until the quota has been set.
     scoped_refptr<base::ThreadTestHelper> helper(new base::ThreadTestHelper(
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB).get()));
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::DB).get()));
     ASSERT_TRUE(helper->Run());
   }
 };

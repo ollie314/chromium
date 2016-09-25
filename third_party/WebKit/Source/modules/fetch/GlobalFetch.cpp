@@ -6,12 +6,12 @@
 
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/UseCounter.h"
+#include "core/inspector/InspectorInstrumentation.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "modules/fetch/FetchManager.h"
 #include "modules/fetch/Request.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
@@ -33,6 +33,11 @@ public:
 
     ScriptPromise fetch(ScriptState* scriptState, const RequestInfo& input, const Dictionary& init, ExceptionState& exceptionState) override
     {
+        if (!scriptState->contextIsValid()) {
+            // TODO(yhirano): Should this be moved to bindings?
+            exceptionState.throwTypeError("The global scope is shutting down.");
+            return ScriptPromise();
+        }
         if (m_fetchManager->isStopped()) {
             exceptionState.throwTypeError("The global scope is shutting down.");
             return ScriptPromise();
@@ -44,7 +49,10 @@ public:
         Request* r = Request::create(scriptState, input, init, exceptionState);
         if (exceptionState.hadException())
             return ScriptPromise();
-        return m_fetchManager->fetch(scriptState, r->passRequestData());
+
+        if (ExecutionContext* executionContext = m_fetchManager->getExecutionContext())
+            InspectorInstrumentation::willSendXMLHttpOrFetchNetworkRequest(executionContext, r->url());
+        return m_fetchManager->fetch(scriptState, r->passRequestData(scriptState));
     }
 
     DEFINE_INLINE_VIRTUAL_TRACE()

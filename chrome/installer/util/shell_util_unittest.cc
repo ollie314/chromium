@@ -61,16 +61,16 @@ class ShellUtilShortcutTest : public testing::Test {
     product_.reset(new installer::Product(dist_));
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    chrome_exe_ = temp_dir_.path().Append(installer::kChromeExe);
+    chrome_exe_ = temp_dir_.GetPath().Append(installer::kChromeExe);
     EXPECT_EQ(0, base::WriteFile(chrome_exe_, "", 0));
 
-    manganese_exe_ = temp_dir_.path().Append(kManganeseExe);
+    manganese_exe_ = temp_dir_.GetPath().Append(kManganeseExe);
     EXPECT_EQ(0, base::WriteFile(manganese_exe_, "", 0));
 
-    iron_exe_ = temp_dir_.path().Append(kIronExe);
+    iron_exe_ = temp_dir_.GetPath().Append(kIronExe);
     EXPECT_EQ(0, base::WriteFile(iron_exe_, "", 0));
 
-    other_ico_ = temp_dir_.path().Append(kOtherIco);
+    other_ico_ = temp_dir_.GetPath().Append(kOtherIco);
     EXPECT_EQ(0, base::WriteFile(other_ico_, "", 0));
 
     ASSERT_TRUE(fake_user_desktop_.CreateUniqueTempDir());
@@ -96,7 +96,7 @@ class ShellUtilShortcutTest : public testing::Test {
                                      fake_common_start_menu_.path()));
 
     base::FilePath icon_path;
-    base::CreateTemporaryFileInDir(temp_dir_.path(), &icon_path);
+    base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &icon_path);
     test_properties_.set_target(chrome_exe_);
     test_properties_.set_arguments(L"--test --chrome");
     test_properties_.set_description(L"Makes polar bears dance.");
@@ -135,9 +135,9 @@ class ShellUtilShortcutTest : public testing::Test {
         return base::FilePath();
     }
 
-    base::string16 shortcut_name = properties.has_shortcut_name() ?
-        properties.shortcut_name :
-        dist_->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME);
+    base::string16 shortcut_name = properties.has_shortcut_name()
+                                       ? properties.shortcut_name
+                                       : dist_->GetShortcutName();
     shortcut_name.append(installer::kLnkExt);
     return expected_path.Append(shortcut_name);
   }
@@ -175,7 +175,7 @@ class ShellUtilShortcutTest : public testing::Test {
     if (properties.has_icon()) {
       expected_properties.set_icon(properties.icon, properties.icon_index);
     } else {
-      int icon_index = dist->GetIconIndex(BrowserDistribution::SHORTCUT_CHROME);
+      int icon_index = dist->GetIconIndex();
       expected_properties.set_icon(chrome_exe_, icon_index);
     }
 
@@ -358,9 +358,7 @@ TEST_F(ShellUtilShortcutTest, CreateIfNoSystemLevel) {
 }
 
 TEST_F(ShellUtilShortcutTest, CreateIfNoSystemLevelWithSystemLevelPresent) {
-  base::string16 shortcut_name(
-      dist_->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME) +
-      installer::kLnkExt);
+  base::string16 shortcut_name(dist_->GetShortcutName() + installer::kLnkExt);
 
   test_properties_.level = ShellUtil::SYSTEM_LEVEL;
   ASSERT_TRUE(ShellUtil::CreateOrUpdateShortcut(
@@ -388,9 +386,7 @@ TEST_F(ShellUtilShortcutTest, CreateIfNoSystemLevelStartMenu) {
 }
 
 TEST_F(ShellUtilShortcutTest, CreateAlwaysUserWithSystemLevelPresent) {
-  base::string16 shortcut_name(
-      dist_->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME) +
-      installer::kLnkExt);
+  base::string16 shortcut_name(dist_->GetShortcutName() + installer::kLnkExt);
 
   test_properties_.level = ShellUtil::SYSTEM_LEVEL;
   ASSERT_TRUE(ShellUtil::CreateOrUpdateShortcut(
@@ -777,9 +773,7 @@ TEST_F(ShellUtilShortcutTest,
                   dist_, test_properties_,
                   ShellUtil::SHELL_SHORTCUT_CREATE_ALWAYS));
 
-  base::string16 shortcut_name(
-      dist_->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME) +
-      installer::kLnkExt);
+  base::string16 shortcut_name(dist_->GetShortcutName() + installer::kLnkExt);
   base::FilePath shortcut_path(
       fake_start_menu_.path().Append(shortcut_name));
 
@@ -798,7 +792,7 @@ TEST_F(ShellUtilShortcutTest, DontRemoveChromeShortcutIfPointsToAnotherChrome) {
   base::ScopedTempDir other_exe_dir;
   ASSERT_TRUE(other_exe_dir.CreateUniqueTempDir());
   base::FilePath other_chrome_exe =
-      other_exe_dir.path().Append(installer::kChromeExe);
+      other_exe_dir.GetPath().Append(installer::kChromeExe);
   EXPECT_EQ(0, base::WriteFile(other_chrome_exe, "", 0));
 
   test_properties_.set_target(other_chrome_exe);
@@ -806,9 +800,7 @@ TEST_F(ShellUtilShortcutTest, DontRemoveChromeShortcutIfPointsToAnotherChrome) {
                   ShellUtil::SHORTCUT_LOCATION_DESKTOP, dist_, test_properties_,
                   ShellUtil::SHELL_SHORTCUT_CREATE_ALWAYS));
 
-  base::string16 shortcut_name(
-      dist_->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME) +
-      installer::kLnkExt);
+  base::string16 shortcut_name(dist_->GetShortcutName() + installer::kLnkExt);
   base::FilePath shortcut_path(fake_user_desktop_.path().Append(shortcut_name));
   ASSERT_TRUE(base::PathExists(shortcut_path));
 
@@ -1013,16 +1005,3 @@ TEST(ShellUtilTest, GetOldUserSpecificRegistrySuffix) {
   ASSERT_STREQ(user_name, suffix.substr(1).c_str());
 }
 
-TEST(ShellUtilTest, ByteArrayToBase32) {
-  // Tests from http://tools.ietf.org/html/rfc4648#section-10.
-  const unsigned char test_array[] = { 'f', 'o', 'o', 'b', 'a', 'r' };
-
-  const base::string16 expected[] = { L"", L"MY", L"MZXQ", L"MZXW6", L"MZXW6YQ",
-                                L"MZXW6YTB", L"MZXW6YTBOI"};
-
-  // Run the tests, with one more letter in the input every pass.
-  for (size_t i = 0; i < arraysize(expected); ++i) {
-    ASSERT_EQ(expected[i],
-              ShellUtil::ByteArrayToBase32(test_array, i));
-  }
-}

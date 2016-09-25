@@ -25,6 +25,7 @@
 #include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/search_engines/search_engines_switches.h"
 #include "components/search_engines/search_terms_data.h"
+#include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/url_formatter/url_formatter.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
@@ -96,26 +97,49 @@ bool TryEncoding(const base::string16& terms,
   return true;
 }
 
+// Returns true if the search term placeholder is present, and also produces
+// the constant prefix/suffix found.
+bool TryMatchSearchParam(base::StringPiece text,
+                         base::StringPiece pattern,
+                         std::string* prefix,
+                         std::string* suffix) {
+  auto pos = text.find(pattern);
+  if (pos == base::StringPiece::npos)
+    return false;
+  text.substr(0, pos).CopyToString(prefix);
+  text.substr(pos + pattern.length()).CopyToString(suffix);
+  return true;
+}
+
 // Extract query key and host given a list of parameters coming from the URL
 // query or ref.
-std::string FindSearchTermsKey(const std::string& params) {
+struct SearchTermsKeyResult {
+  std::string key;
+  std::string value_prefix;
+  std::string value_suffix;
+  bool found() const { return !key.empty(); }
+};
+SearchTermsKeyResult FindSearchTermsKey(const std::string& params) {
+  SearchTermsKeyResult result;
   if (params.empty())
-    return std::string();
+    return result;
   url::Component query, key, value;
   query.len = static_cast<int>(params.size());
   while (url::ExtractQueryKeyValue(params.c_str(), &query, &key, &value)) {
     if (key.is_nonempty() && value.is_nonempty()) {
       const base::StringPiece value_string(params.c_str() + value.begin,
                                            value.len);
-      if (value_string.find(kSearchTermsParameterFull, 0) !=
-          base::StringPiece::npos ||
-          value_string.find(kGoogleUnescapedSearchTermsParameterFull, 0) !=
-          base::StringPiece::npos) {
-        return params.substr(key.begin, key.len);
+      if (TryMatchSearchParam(value_string, kSearchTermsParameterFull,
+                              &result.value_prefix, &result.value_suffix) ||
+          TryMatchSearchParam(value_string,
+                              kGoogleUnescapedSearchTermsParameterFull,
+                              &result.value_prefix, &result.value_suffix)) {
+        result.key = params.substr(key.begin, key.len);
+        break;
       }
     }
   }
-  return std::string();
+  return result;
 }
 
 // Extract the position of the search terms' parameter in the URL path.
@@ -164,33 +188,29 @@ TemplateURLRef::SearchTermsArgs::ContextualSearchParams::
     : version(-1),
       start(base::string16::npos),
       end(base::string16::npos),
-      resolve(true) {
-}
+      now_on_tap_version(0) {}
 
-TemplateURLRef::SearchTermsArgs::ContextualSearchParams::
-    ContextualSearchParams(
-        const int version,
-        const std::string& selection,
-        const std::string& base_page_url,
-        const bool resolve)
+TemplateURLRef::SearchTermsArgs::ContextualSearchParams::ContextualSearchParams(
+    int version,
+    const std::string& selection,
+    const std::string& base_page_url,
+    int now_on_tap_version)
     : version(version),
       start(base::string16::npos),
       end(base::string16::npos),
       selection(selection),
       base_page_url(base_page_url),
-      resolve(resolve) {
-}
+      now_on_tap_version(now_on_tap_version) {}
 
-TemplateURLRef::SearchTermsArgs::ContextualSearchParams::
-    ContextualSearchParams(
-        const int version,
-        const size_t start,
-        const size_t end,
-        const std::string& selection,
-        const std::string& content,
-        const std::string& base_page_url,
-        const std::string& encoding,
-        const bool resolve)
+TemplateURLRef::SearchTermsArgs::ContextualSearchParams::ContextualSearchParams(
+    int version,
+    size_t start,
+    size_t end,
+    const std::string& selection,
+    const std::string& content,
+    const std::string& base_page_url,
+    const std::string& encoding,
+    int now_on_tap_version)
     : version(version),
       start(start),
       end(end),
@@ -198,8 +218,7 @@ TemplateURLRef::SearchTermsArgs::ContextualSearchParams::
       content(content),
       base_page_url(base_page_url),
       encoding(encoding),
-      resolve(resolve) {
-}
+      now_on_tap_version(now_on_tap_version) {}
 
 TemplateURLRef::SearchTermsArgs::ContextualSearchParams::ContextualSearchParams(
     const ContextualSearchParams& other) = default;
@@ -506,8 +525,19 @@ bool TemplateURLRef::ExtractSearchTermsFromURL(
           // Fail if search term key is found twice.
           if (key_found)
             return false;
+
+          // If the query parameter does not contain the expected prefix and
+          // suffix, then this is not a match.
+          base::StringPiece search_term =
+              base::StringPiece(source).substr(value.begin, value.len);
+          if (!search_term.starts_with(search_term_value_prefix_) ||
+              !search_term.ends_with(search_term_value_suffix_))
+            continue;
+
           key_found = true;
-          position = value;
+          position =
+              url::MakeRange(value.begin + search_term_value_prefix_.size(),
+                             value.end() - search_term_value_suffix_.size());
         }
       }
     }
@@ -516,8 +546,8 @@ bool TemplateURLRef::ExtractSearchTermsFromURL(
   }
 
   // Extract the search term.
-  *search_terms = SearchTermToString16(
-      source.substr(position.begin, position.len));
+  *search_terms =
+      SearchTermToString16(source.substr(position.begin, position.len));
   if (search_terms_component)
     *search_terms_component = search_term_key_location_;
   if (search_terms_position)
@@ -783,11 +813,11 @@ void TemplateURLRef::ParseHostAndSearchTermKey(
   if (!url.is_valid())
     return;
 
-  std::string query_key = FindSearchTermsKey(url.query());
-  std::string ref_key = FindSearchTermsKey(url.ref());
+  auto query_result = FindSearchTermsKey(url.query());
+  auto ref_result = FindSearchTermsKey(url.ref());
   url::Component parameter_position;
-  const bool in_query = !query_key.empty();
-  const bool in_ref = !ref_key.empty();
+  const bool in_query = query_result.found();
+  const bool in_ref = ref_result.found();
   const bool in_path = FindSearchTermsInPath(url.path(), &parameter_position);
   if (in_query ? (in_ref || in_path) : (in_ref == in_path))
     return;  // No key or multiple keys found.  We only handle having one key.
@@ -796,11 +826,15 @@ void TemplateURLRef::ParseHostAndSearchTermKey(
   port_ = url.port();
   path_ = url.path();
   if (in_query) {
-    search_term_key_ = query_key;
+    search_term_key_ = query_result.key;
     search_term_key_location_ = url::Parsed::QUERY;
+    search_term_value_prefix_ = query_result.value_prefix;
+    search_term_value_suffix_ = query_result.value_suffix;
   } else if (in_ref) {
-    search_term_key_ = ref_key;
+    search_term_key_ = ref_result.key;
     search_term_key_location_ = url::Parsed::REF;
+    search_term_value_prefix_ = ref_result.value_prefix;
+    search_term_value_suffix_ = ref_result.value_suffix;
   } else {
     DCHECK(in_path);
     DCHECK_GE(parameter_position.begin, 1);  // Path must start with '/'.
@@ -981,8 +1015,10 @@ std::string TemplateURLRef::HandleReplacements(
           context_data.append("ctxs_encoding=" + params.encoding + "&");
         }
 
-        context_data.append(
-            params.resolve ? "ctxsl_resolve=1" : "ctxsl_resolve=0");
+        // The above parameters all add a trailing "&" so there must be one last
+        // parameter that's always added at the end.
+        context_data.append("ctxsl_coca=" +
+                            base::IntToString(params.now_on_tap_version));
 
         HandleReplacement(std::string(), context_data, *i, &url);
         break;
@@ -1146,27 +1182,22 @@ std::string TemplateURLRef::HandleReplacements(
 // TemplateURL ----------------------------------------------------------------
 
 TemplateURL::AssociatedExtensionInfo::AssociatedExtensionInfo(
-    Type type,
     const std::string& extension_id)
-    : type(type),
-      extension_id(extension_id),
-      wants_to_be_default_engine(false) {
-  DCHECK_NE(NORMAL, type);
-}
+    : extension_id(extension_id), wants_to_be_default_engine(false) {}
 
 TemplateURL::AssociatedExtensionInfo::~AssociatedExtensionInfo() {
 }
 
-TemplateURL::TemplateURL(const TemplateURLData& data)
+TemplateURL::TemplateURL(const TemplateURLData& data, Type type)
     : data_(data),
       url_ref_(nullptr),
-      suggestions_url_ref_(this,
-                           TemplateURLRef::SUGGEST),
-      instant_url_ref_(this,
-                       TemplateURLRef::INSTANT),
+      suggestions_url_ref_(this, TemplateURLRef::SUGGEST),
+      instant_url_ref_(this, TemplateURLRef::INSTANT),
       image_url_ref_(this, TemplateURLRef::IMAGE),
       new_tab_url_ref_(this, TemplateURLRef::NEW_TAB),
-      contextual_search_url_ref_(this, TemplateURLRef::CONTEXTUAL_SEARCH) {
+      contextual_search_url_ref_(this, TemplateURLRef::CONTEXTUAL_SEARCH),
+      type_(type),
+      engine_type_(SEARCH_ENGINE_UNKNOWN) {
   ResizeURLRefVector();
   SetPrepopulateId(data_.prepopulate_id);
 
@@ -1270,7 +1301,7 @@ bool TemplateURL::HasGoogleBaseURLs(
 
 bool TemplateURL::IsGoogleSearchURLWithReplaceableKeyword(
     const SearchTermsData& search_terms_data) const {
-  return (GetType() == NORMAL) &&
+  return (type_ == NORMAL) &&
       url_ref_->HasGoogleBaseURLs(search_terms_data) &&
       google_util::IsGoogleHostname(base::UTF16ToUTF8(data_.keyword()),
                                     google_util::DISALLOW_SUBDOMAIN);
@@ -1285,13 +1316,20 @@ bool TemplateURL::HasSameKeywordAs(
            search_terms_data));
 }
 
-TemplateURL::Type TemplateURL::GetType() const {
-  return extension_info_ ? extension_info_->type : NORMAL;
-}
-
 std::string TemplateURL::GetExtensionId() const {
   DCHECK(extension_info_);
   return extension_info_->extension_id;
+}
+
+SearchEngineType TemplateURL::GetEngineType(
+    const SearchTermsData& search_terms_data) const {
+  if (engine_type_ == SEARCH_ENGINE_UNKNOWN) {
+    const GURL url = GenerateSearchURL(search_terms_data);
+    engine_type_ = url.is_valid() ?
+        TemplateURLPrepopulateData::GetEngineType(url) : SEARCH_ENGINE_OTHER;
+    DCHECK_NE(SEARCH_ENGINE_UNKNOWN, engine_type_);
+  }
+  return engine_type_;
 }
 
 bool TemplateURL::ExtractSearchTermsFromURL(
@@ -1431,22 +1469,27 @@ void TemplateURL::CopyFrom(const TemplateURL& other) {
 
 void TemplateURL::SetURL(const std::string& url) {
   data_.SetURL(url);
+  engine_type_ = SEARCH_ENGINE_UNKNOWN;
   url_ref_->InvalidateCachedValues();
 }
 
 void TemplateURL::SetPrepopulateId(int id) {
   data_.prepopulate_id = id;
   const bool prepopulated = id > 0;
-  url_ref_->prepopulated_ = prepopulated;
+  for (TemplateURLRef& ref : url_refs_)
+    ref.prepopulated_ = prepopulated;
   suggestions_url_ref_.prepopulated_ = prepopulated;
   instant_url_ref_.prepopulated_ = prepopulated;
+  image_url_ref_.prepopulated_ = prepopulated;
+  new_tab_url_ref_.prepopulated_ = prepopulated;
+  contextual_search_url_ref_.prepopulated_ = prepopulated;
 }
 
 void TemplateURL::ResetKeywordIfNecessary(
     const SearchTermsData& search_terms_data,
     bool force) {
   if (IsGoogleSearchURLWithReplaceableKeyword(search_terms_data) || force) {
-    DCHECK(GetType() != OMNIBOX_API_EXTENSION);
+    DCHECK_NE(OMNIBOX_API_EXTENSION, type_);
     GURL url(GenerateSearchURL(search_terms_data));
     if (url.is_valid())
       data_.SetKeyword(GenerateKeyword(url));

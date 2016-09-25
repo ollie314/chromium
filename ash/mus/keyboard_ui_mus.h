@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "ash/keyboard/keyboard_ui.h"
+#include "ash/common/keyboard/keyboard_ui.h"
 #include "base/macros.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "ui/keyboard/keyboard.mojom.h"
@@ -21,10 +21,10 @@ namespace ash {
 class KeyboardUIMus : public KeyboardUI,
                       public keyboard::mojom::KeyboardObserver {
  public:
-  explicit KeyboardUIMus(shell::Connector* connector);
+  explicit KeyboardUIMus(::shell::Connector* connector);
   ~KeyboardUIMus() override;
 
-  static std::unique_ptr<KeyboardUI> Create(shell::Connector* connector);
+  static std::unique_ptr<KeyboardUI> Create(::shell::Connector* connector);
 
   // KeyboardUI:
   void Hide() override;
@@ -35,7 +35,7 @@ class KeyboardUIMus : public KeyboardUI,
   void OnKeyboardStateChanged(bool is_enabled,
                               bool is_visible,
                               uint64_t display_id,
-                              mojo::RectPtr bounds) override;
+                              const gfx::Rect& bounds) override;
 
  private:
   bool is_enabled_;

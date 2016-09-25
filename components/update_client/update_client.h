@@ -6,12 +6,14 @@
 #define COMPONENTS_UPDATE_CLIENT_UPDATE_CLIENT_H_
 
 #include <stdint.h>
+
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/version.h"
 
 // The UpdateClient class is a facade with a simple interface. The interface
@@ -48,7 +50,7 @@
 // of this code has already implemented the observer interface as needed, and
 // can provide an installer, as described below.
 //
-//    scoped_ptr<UpdateClient> update_client(UpdateClientFactory(...));
+//    std::unique_ptr<UpdateClient> update_client(UpdateClientFactory(...));
 //    update_client->AddObserver(&observer);
 //    std::vector<std::string> ids;
 //    ids.push_back(...));
@@ -181,6 +183,10 @@ class CrxInstaller : public base::RefCountedThreadSafe<CrxInstaller> {
   virtual ~CrxInstaller() {}
 };
 
+// A dictionary of installer-specific, arbitrary name-value pairs, which
+// may be used in the update checks requests.
+using InstallerAttributes = std::map<std::string, std::string>;
+
 // TODO(sorin): this structure will be refactored soon.
 struct CrxComponent {
   CrxComponent();
@@ -193,11 +199,17 @@ struct CrxComponent {
 
   // The current version if the CRX is updated. Otherwise, "0" or "0.0" if
   // the CRX is installed.
-  Version version;
+  base::Version version;
 
   std::string fingerprint;  // Optional.
   std::string name;         // Optional.
-  std::string ap;           // Optional. Must match ^[-+_=a-zA-Z0-9]{0,256}$
+  std::vector<std::string> handled_mime_types;
+
+  // Optional.
+  // Valid values for the name part of an attribute match
+  // ^[-_a-zA-Z0-9]{1,256}$ and valid values the value part of an attribute
+  // match ^[-.,;+_=a-zA-Z0-9]{0,256}$ .
+  InstallerAttributes installer_attributes;
 
   // Specifies that the CRX can be background-downloaded in some cases.
   // The default for this value is |true|.
@@ -208,6 +220,12 @@ struct CrxComponent {
   // note, the confidentiality of the downloads is enforced by the server,
   // which only returns secure download URLs in this case.
   bool requires_network_encryption;
+
+  // True if the component allows enabling or disabling updates by group policy.
+  // This member should be set to |false| for data, non-binary components, such
+  // as CRLSet, Supervised User Whitelists, STH Set, Origin Trials, and File
+  // Type Policies.
+  bool supports_group_policy_enable_component_updates;
 };
 
 // All methods are safe to call only from the browser's main thread. Once an
@@ -303,7 +321,7 @@ class UpdateClient : public base::RefCounted<UpdateClient> {
   // other side effects regarding installs or updates done through an instance
   // of this class.
   virtual void SendUninstallPing(const std::string& id,
-                                 const Version& version,
+                                 const base::Version& version,
                                  int reason) = 0;
 
   // Returns status details about a CRX update. The function returns true in

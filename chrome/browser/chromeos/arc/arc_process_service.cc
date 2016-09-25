@@ -9,10 +9,15 @@
 
 #include "chrome/browser/chromeos/arc/arc_process_service.h"
 
+#include <algorithm>
 #include <queue>
-#include <set>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 
+#include "base/callback.h"
+#include "base/logging.h"
 #include "base/process/process.h"
 #include "base/process/process_iterator.h"
 #include "base/task_runner_util.h"
@@ -21,167 +26,74 @@
 
 namespace arc {
 
-namespace {
-
-const char kSequenceToken[] = "arc_process_service";
-
-// Weak pointer.  This class is owned by ArcServiceManager.
-ArcProcessService* g_arc_process_service = nullptr;
-
-}  // namespace
-
 using base::kNullProcessId;
 using base::Process;
 using base::ProcessId;
 using base::SequencedWorkerPool;
-using std::map;
-using std::set;
 using std::vector;
 
-ArcProcessService::ArcProcessService(ArcBridgeService* bridge_service)
-    : ArcService(bridge_service),
-      worker_pool_(new SequencedWorkerPool(1, "arc_process_manager")),
-      weak_ptr_factory_(this) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  arc_bridge_service()->AddObserver(this);
-  DCHECK(!g_arc_process_service);
-  g_arc_process_service = this;
-  // Not intended to be used from the creating thread.
-  thread_checker_.DetachFromThread();
-}
+namespace {
 
-ArcProcessService::~ArcProcessService() {
-  DCHECK(g_arc_process_service == this);
-  g_arc_process_service = nullptr;
-  arc_bridge_service()->RemoveObserver(this);
-  worker_pool_->Shutdown();
-}
+// Weak pointer.  This class is owned by ArcServiceManager.
+ArcProcessService* g_arc_process_service = nullptr;
+static constexpr char kInitName[] = "/init";
+static constexpr bool kNotFocused = false;
+static constexpr int64_t kNoActivityTimeInfo = 0L;
 
-// static
-ArcProcessService* ArcProcessService::Get() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  return g_arc_process_service;
-}
-
-void ArcProcessService::OnProcessInstanceReady() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  worker_pool_->PostNamedSequencedWorkerTask(
-      kSequenceToken,
-      FROM_HERE,
-      base::Bind(&ArcProcessService::Reset,
-                 weak_ptr_factory_.GetWeakPtr()));
-}
-
-void ArcProcessService::Reset() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  nspid_to_pid_.clear();
-}
-
-bool ArcProcessService::RequestProcessList(
-    RequestProcessListCallback callback) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-  arc::mojom::ProcessInstance* process_instance =
-      arc_bridge_service()->process_instance();
-  if (!process_instance) {
-    return false;
-  }
-  process_instance->RequestProcessList(
-      base::Bind(&ArcProcessService::OnReceiveProcessList,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 callback));
-  return true;
-}
-
-void ArcProcessService::OnReceiveProcessList(
-    const RequestProcessListCallback& callback,
-    mojo::Array<arc::mojom::RunningAppProcessInfoPtr> mojo_processes) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-
-  auto raw_processes = new vector<mojom::RunningAppProcessInfoPtr>();
-  mojo_processes.Swap(raw_processes);
-
-  auto ret_processes = new vector<ArcProcess>();
-  // Post to its dedicated worker thread to avoid race condition.
-  // Since no two tasks with the same token should be run at the same.
-  // Note: GetSequencedTaskRunner's shutdown behavior defaults to
-  // SKIP_ON_SHUTDOWN (ongoing task blocks shutdown).
-  // So in theory using Unretained(this) should be fine since the life cycle
-  // of |this| is the same as the main browser.
-  // To be safe I still use weak pointers, but weak_ptrs can only bind to
-  // methods without return values. That's why I can't use
-  // PostTaskAndReplyWithResult but handle the return object by myself.
-  auto runner = worker_pool_->GetSequencedTaskRunner(
-      worker_pool_->GetNamedSequenceToken(kSequenceToken));
-  runner->PostTaskAndReply(
-      FROM_HERE,
-      base::Bind(&ArcProcessService::UpdateAndReturnProcessList,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Owned(raw_processes),
-                 base::Unretained(ret_processes)),
-      base::Bind(&ArcProcessService::CallbackRelay,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 callback,
-                 base::Owned(ret_processes)));
-}
-
-void ArcProcessService::CallbackRelay(
-    const RequestProcessListCallback& callback,
-    const vector<ArcProcess>* ret_processes) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  callback.Run(*ret_processes);
-}
-
-void ArcProcessService::UpdateAndReturnProcessList(
-    const vector<arc::mojom::RunningAppProcessInfoPtr>* raw_processes,
-    vector<ArcProcess>* ret_processes) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  // Cleanup dead pids in the cache |nspid_to_pid_|.
-  set<ProcessId> nspid_to_remove;
-  for (const auto& entry : nspid_to_pid_) {
-    nspid_to_remove.insert(entry.first);
-  }
-  bool unmapped_nspid = false;
-  for (const auto& entry : *raw_processes) {
-    // erase() returns 0 if coudln't find the key. It means a new process.
-    if (nspid_to_remove.erase(entry->pid) == 0) {
-      nspid_to_pid_[entry->pid] = kNullProcessId;
-      unmapped_nspid = true;
+// Matches the process name "/init" in the process tree and get the
+// corresponding process ID.
+base::ProcessId GetArcInitProcessId(
+    const base::ProcessIterator::ProcessEntries& entry_list) {
+  for (const base::ProcessEntry& entry : entry_list) {
+    if (entry.cmd_line_args().empty()) {
+      continue;
+    }
+    // TODO(nya): Add more constraints to avoid mismatches.
+    const std::string& process_name = entry.cmd_line_args()[0];
+    if (process_name == kInitName) {
+      return entry.pid();
     }
   }
-  for (const auto& entry : nspid_to_remove) {
-    nspid_to_pid_.erase(entry);
-  }
-
-  // The operation is costly so avoid calling it when possible.
-  if (unmapped_nspid) {
-    UpdateNspidToPidMap();
-  }
-
-  PopulateProcessList(raw_processes, ret_processes);
+  return base::kNullProcessId;
 }
 
-void ArcProcessService::PopulateProcessList(
-    const vector<arc::mojom::RunningAppProcessInfoPtr>* raw_processes,
-    vector<ArcProcess>* ret_processes) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  for (const auto& entry : *raw_processes) {
-    const auto it = nspid_to_pid_.find(entry->pid);
-    // In case the process already dies so couldn't find corresponding pid.
-    if (it != nspid_to_pid_.end() && it->second != kNullProcessId) {
-      ArcProcess arc_process = {
-          entry->pid, it->second, entry->process_name, entry->process_state};
-      ret_processes->push_back(arc_process);
+std::vector<arc::ArcProcess> GetArcSystemProcessList() {
+  std::vector<arc::ArcProcess> ret_processes;
+  const base::ProcessIterator::ProcessEntries& entry_list =
+      base::ProcessIterator(nullptr).Snapshot();
+  const base::ProcessId arc_init_pid = GetArcInitProcessId(entry_list);
+
+  if (arc_init_pid == base::kNullProcessId) {
+    return ret_processes;
+  }
+
+  // Enumerate the child processes of ARC init for gathering ARC System
+  // Processes.
+  for (const base::ProcessEntry& entry : entry_list) {
+    if (entry.cmd_line_args().empty()) {
+      continue;
+    }
+    // TODO(hctsai): For now, we only gather direct child process of init, need
+    // to get the processes below. For example, installd might fork dex2oat and
+    // it can be executed for minutes.
+    if (entry.parent_pid() == arc_init_pid) {
+      const base::ProcessId child_pid = entry.pid();
+      const base::ProcessId child_nspid =
+          base::Process(child_pid).GetPidInNamespace();
+      if (child_nspid != base::kNullProcessId) {
+        const std::string& process_name = entry.cmd_line_args()[0];
+        // The is_focused and last_activity_time is not needed thus mocked
+        ret_processes.emplace_back(child_nspid, child_pid, process_name,
+                                   mojom::ProcessState::PERSISTENT, kNotFocused,
+                                   kNoActivityTimeInfo);
+      }
     }
   }
+  return ret_processes;
 }
 
-// Computes a map from PID in ARC namespace to PID in system namespace.
-// The returned map contains ARC processes only.
-void ArcProcessService::UpdateNspidToPidMap() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
+void UpdateNspidToPidMap(
+    scoped_refptr<ArcProcessService::NSPidToPidMap> pid_map) {
   TRACE_EVENT0("browser", "ArcProcessService::UpdateNspidToPidMap");
 
   // NB: Despite of its name, ProcessIterator::Snapshot() may return
@@ -190,32 +102,18 @@ void ArcProcessService::UpdateNspidToPidMap() {
   const base::ProcessIterator::ProcessEntries& entry_list =
       base::ProcessIterator(nullptr).Snapshot();
 
-  // System may contain many different namespaces so several different
-  // processes may have the same nspid. We need to get the proper subset of
-  // processes to create correct nspid -> pid map.
-
   // Construct the process tree.
   // NB: This can contain a loop in case of race conditions.
-  map<ProcessId, vector<ProcessId> > process_tree;
+  std::unordered_map<ProcessId, std::vector<ProcessId>> process_tree;
   for (const base::ProcessEntry& entry : entry_list)
     process_tree[entry.parent_pid()].push_back(entry.pid());
 
-  // Find the ARC init process.
-  ProcessId arc_init_pid = kNullProcessId;
-  for (const base::ProcessEntry& entry : entry_list) {
-    // TODO(nya): Add more constraints to avoid mismatches.
-    std::string process_name =
-        !entry.cmd_line_args().empty() ? entry.cmd_line_args()[0] : "";
-    if (process_name == "/init") {
-      arc_init_pid = entry.pid();
-      break;
-    }
-  }
+  ProcessId arc_init_pid = GetArcInitProcessId(entry_list);
 
   // Enumerate all processes under ARC init and create nspid -> pid map.
   if (arc_init_pid != kNullProcessId) {
     std::queue<ProcessId> queue;
-    std::set<ProcessId> visited;
+    std::unordered_set<ProcessId> visited;
     queue.push(arc_init_pid);
     while (!queue.empty()) {
       ProcessId pid = queue.front();
@@ -225,20 +123,156 @@ void ArcProcessService::UpdateNspidToPidMap() {
       if (!visited.insert(pid).second)
         continue;
 
-      ProcessId nspid = base::Process(pid).GetPidInNamespace();
+      const ProcessId nspid = base::Process(pid).GetPidInNamespace();
 
       // All ARC processes should be in namespace so nspid is usually non-null,
       // but this can happen if the process has already gone.
       // Only add processes we're interested in (those appear as keys in
-      // |nspid_to_pid_|).
-      if (nspid != kNullProcessId &&
-          nspid_to_pid_.find(nspid) != nspid_to_pid_.end())
-        nspid_to_pid_[nspid] = pid;
+      // |pid_map|).
+      if (nspid != kNullProcessId && pid_map->find(nspid) != pid_map->end())
+        (*pid_map)[nspid] = pid;
 
       for (ProcessId child_pid : process_tree[pid])
         queue.push(child_pid);
     }
   }
 }
+
+std::vector<ArcProcess> FilterProcessList(
+    const ArcProcessService::NSPidToPidMap& pid_map,
+    mojo::Array<arc::mojom::RunningAppProcessInfoPtr> processes) {
+  std::vector<ArcProcess> ret_processes;
+  for (const auto& entry : processes) {
+    const auto it = pid_map.find(entry->pid);
+    // The nspid could be missing due to race condition. For example, the
+    // process is still running when we get the process snapshot and ends when
+    // we update the nspid to pid mapping.
+    if (it == pid_map.end() || it->second == base::kNullProcessId) {
+      continue;
+    }
+    // Constructs the ArcProcess instance if the mapping is found.
+    ArcProcess arc_process(entry->pid, pid_map.at(entry->pid),
+                           entry->process_name, entry->process_state,
+                           entry->is_focused, entry->last_activity_time);
+    // |entry->packages| is provided only when process.mojom's verion is >=4.
+    if (entry->packages) {
+      for (const auto& package : entry->packages) {
+        arc_process.packages().push_back(package.get());
+      }
+    }
+    ret_processes.push_back(std::move(arc_process));
+  }
+  return ret_processes;
+}
+
+std::vector<ArcProcess> UpdateAndReturnProcessList(
+    scoped_refptr<ArcProcessService::NSPidToPidMap> nspid_map,
+    mojo::Array<arc::mojom::RunningAppProcessInfoPtr> processes) {
+  ArcProcessService::NSPidToPidMap& pid_map = *nspid_map;
+  // Cleanup dead pids in the cache |pid_map|.
+  std::unordered_set<ProcessId> nspid_to_remove;
+  for (const auto& entry : pid_map) {
+    nspid_to_remove.insert(entry.first);
+  }
+  bool unmapped_nspid = false;
+  for (const auto& entry : processes) {
+    // erase() returns 0 if coudln't find the key. It means a new process.
+    if (nspid_to_remove.erase(entry->pid) == 0) {
+      pid_map[entry->pid] = base::kNullProcessId;
+      unmapped_nspid = true;
+    }
+  }
+  for (const auto& entry : nspid_to_remove) {
+    pid_map.erase(entry);
+  }
+
+  // The operation is costly so avoid calling it when possible.
+  if (unmapped_nspid) {
+    UpdateNspidToPidMap(nspid_map);
+  }
+
+  return FilterProcessList(pid_map, std::move(processes));
+}
+
+void Reset(scoped_refptr<ArcProcessService::NSPidToPidMap> pid_map) {
+  if (pid_map.get())
+    pid_map->clear();
+}
+
+}  // namespace
+
+ArcProcessService::ArcProcessService(ArcBridgeService* bridge_service)
+    : ArcService(bridge_service),
+      heavy_task_thread_("ArcProcessServiceThread"),
+      nspid_to_pid_(new NSPidToPidMap()),
+      weak_ptr_factory_(this) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  arc_bridge_service()->process()->AddObserver(this);
+  DCHECK(!g_arc_process_service);
+  g_arc_process_service = this;
+  heavy_task_thread_.Start();
+}
+
+ArcProcessService::~ArcProcessService() {
+  DCHECK(g_arc_process_service == this);
+  heavy_task_thread_.Stop();
+  g_arc_process_service = nullptr;
+  arc_bridge_service()->process()->RemoveObserver(this);
+}
+
+// static
+ArcProcessService* ArcProcessService::Get() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  return g_arc_process_service;
+}
+
+void ArcProcessService::OnInstanceReady() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  GetTaskRunner()->PostTask(FROM_HERE, base::Bind(&Reset, nspid_to_pid_));
+}
+
+void ArcProcessService::RequestSystemProcessList(
+    RequestProcessListCallback callback) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  base::PostTaskAndReplyWithResult(GetTaskRunner().get(), FROM_HERE,
+                                   base::Bind(&GetArcSystemProcessList),
+                                   callback);
+}
+
+bool ArcProcessService::RequestAppProcessList(
+    RequestProcessListCallback callback) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  arc::mojom::ProcessInstance* process_instance =
+      arc_bridge_service()->process()->instance();
+  if (!process_instance) {
+    return false;
+  }
+  process_instance->RequestProcessList(
+      base::Bind(&ArcProcessService::OnReceiveProcessList,
+                 weak_ptr_factory_.GetWeakPtr(), callback));
+  return true;
+}
+
+void ArcProcessService::OnReceiveProcessList(
+    const RequestProcessListCallback& callback,
+    mojo::Array<arc::mojom::RunningAppProcessInfoPtr> instance_processes) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  base::PostTaskAndReplyWithResult(
+      GetTaskRunner().get(), FROM_HERE,
+      base::Bind(&UpdateAndReturnProcessList, nspid_to_pid_,
+                 base::Passed(&instance_processes)),
+      callback);
+}
+
+scoped_refptr<base::SingleThreadTaskRunner> ArcProcessService::GetTaskRunner() {
+  return heavy_task_thread_.task_runner();
+}
+
+inline ArcProcessService::NSPidToPidMap::NSPidToPidMap() {}
+
+inline ArcProcessService::NSPidToPidMap::~NSPidToPidMap() {}
 
 }  // namespace arc

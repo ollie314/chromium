@@ -11,18 +11,22 @@
 #include "content/browser/compositor/image_transport_factory.h"
 #include "content/common/content_export.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
+#include "ui/compositor/compositor.h"
+
+namespace display_compositor {
+class GLHelper;
+}
 
 namespace content {
 
-class GLHelper;
 
 // This class holds a texture id and gpu::Mailbox, and deletes the texture
 // id when the object itself is destroyed. Should only be created if a GLHelper
 // exists on the ImageTransportFactory.
 class CONTENT_EXPORT OwnedMailbox : public base::RefCounted<OwnedMailbox>,
-                                    public ImageTransportFactoryObserver {
+                                    public ui::ContextFactoryObserver {
  public:
-  explicit OwnedMailbox(GLHelper* gl_helper);
+  explicit OwnedMailbox(display_compositor::GLHelper* gl_helper);
 
   const gpu::MailboxHolder& holder() const { return mailbox_holder_; }
   const gpu::Mailbox& mailbox() const { return mailbox_holder_.mailbox; }
@@ -45,7 +49,7 @@ class CONTENT_EXPORT OwnedMailbox : public base::RefCounted<OwnedMailbox>,
 
   uint32_t texture_id_;
   gpu::MailboxHolder mailbox_holder_;
-  GLHelper* gl_helper_;
+  display_compositor::GLHelper* gl_helper_;
 };
 
 }  // namespace content

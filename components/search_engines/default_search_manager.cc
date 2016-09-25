@@ -15,7 +15,6 @@
 #include "base/compiler_specific.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -108,7 +107,7 @@ void DefaultSearchManager::RegisterProfilePrefs(
 
 // static
 void DefaultSearchManager::AddPrefValueToMap(
-    scoped_ptr<base::DictionaryValue> value,
+    std::unique_ptr<base::DictionaryValue> value,
     PrefValueMap* pref_value_map) {
   pref_value_map->SetValue(kDefaultSearchProviderDataPrefName,
                            std::move(value));
@@ -189,7 +188,7 @@ void DefaultSearchManager::SetUserSelectedDefaultSearchEngine(
                      base::Int64ToString(data.last_modified.ToInternalValue()));
   url_dict.SetInteger(kUsageCount, data.usage_count);
 
-  scoped_ptr<base::ListValue> alternate_urls(new base::ListValue);
+  std::unique_ptr<base::ListValue> alternate_urls(new base::ListValue);
   for (std::vector<std::string>::const_iterator it =
            data.alternate_urls.begin();
        it != data.alternate_urls.end(); ++it) {
@@ -197,7 +196,7 @@ void DefaultSearchManager::SetUserSelectedDefaultSearchEngine(
   }
   url_dict.Set(kAlternateURLs, alternate_urls.release());
 
-  scoped_ptr<base::ListValue> encodings(new base::ListValue);
+  std::unique_ptr<base::ListValue> encodings(new base::ListValue);
   for (std::vector<std::string>::const_iterator it =
            data.input_encodings.begin();
        it != data.input_encodings.end(); ++it) {
@@ -263,27 +262,26 @@ void DefaultSearchManager::MergePrefsDataWithPrepopulated() {
     return;
 
   size_t default_search_index;
-  ScopedVector<TemplateURLData> prepopulated_urls =
+  std::vector<std::unique_ptr<TemplateURLData>> prepopulated_urls =
       TemplateURLPrepopulateData::GetPrepopulatedEngines(pref_service_,
                                                          &default_search_index);
 
-  for (size_t i = 0; i < prepopulated_urls.size(); ++i) {
-    if (prepopulated_urls[i]->prepopulate_id ==
-        prefs_default_search_->prepopulate_id) {
-      if (!prefs_default_search_->safe_for_autoreplace) {
-        prepopulated_urls[i]->safe_for_autoreplace = false;
-        prepopulated_urls[i]->SetKeyword(prefs_default_search_->keyword());
-        prepopulated_urls[i]->SetShortName(prefs_default_search_->short_name());
-      }
-      prepopulated_urls[i]->id = prefs_default_search_->id;
-      prepopulated_urls[i]->sync_guid = prefs_default_search_->sync_guid;
-      prepopulated_urls[i]->date_created = prefs_default_search_->date_created;
-      prepopulated_urls[i]->last_modified =
-          prefs_default_search_->last_modified;
-      prefs_default_search_.reset(prepopulated_urls[i]);
-      prepopulated_urls.weak_erase(prepopulated_urls.begin() + i);
-      return;
+  for (auto& engine : prepopulated_urls) {
+    if (engine->prepopulate_id != prefs_default_search_->prepopulate_id)
+      continue;
+
+    if (!prefs_default_search_->safe_for_autoreplace) {
+      engine->safe_for_autoreplace = false;
+      engine->SetKeyword(prefs_default_search_->keyword());
+      engine->SetShortName(prefs_default_search_->short_name());
     }
+    engine->id = prefs_default_search_->id;
+    engine->sync_guid = prefs_default_search_->sync_guid;
+    engine->date_created = prefs_default_search_->date_created;
+    engine->last_modified = prefs_default_search_->last_modified;
+
+    prefs_default_search_ = std::move(engine);
+    return;
   }
 }
 
@@ -405,7 +403,7 @@ void DefaultSearchManager::LoadDefaultSearchEngineFromPrefs() {
 }
 
 void DefaultSearchManager::LoadPrepopulatedDefaultSearch() {
-  scoped_ptr<TemplateURLData> data =
+  std::unique_ptr<TemplateURLData> data =
       TemplateURLPrepopulateData::GetPrepopulatedDefaultSearch(pref_service_);
   fallback_default_search_ = std::move(data);
   MergePrefsDataWithPrepopulated();

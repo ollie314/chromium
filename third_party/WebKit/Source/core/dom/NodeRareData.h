@@ -26,8 +26,6 @@
 #include "core/dom/NodeListsNodeData.h"
 #include "platform/heap/Handle.h"
 #include "wtf/HashSet.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -48,11 +46,21 @@ public:
         visitor->trace(transientRegistry);
     }
 
+    DECLARE_TRACE_WRAPPERS()
+    {
+        for (auto registration : registry) {
+            visitor->traceWrappers(registration);
+        }
+        for (auto registration : transientRegistry) {
+            visitor->traceWrappers(registration);
+        }
+    }
+
 private:
     NodeMutationObserverData() { }
 };
 
-class NodeRareData : public GarbageCollectedFinalized<NodeRareData>, public NodeRareDataBase {
+class CORE_EXPORT NodeRareData : public GarbageCollectedFinalized<NodeRareData>, public NodeRareDataBase {
     WTF_MAKE_NONCOPYABLE(NodeRareData);
 public:
     static NodeRareData* create(LayoutObject* layoutObject)
@@ -85,6 +93,8 @@ public:
         --m_connectedFrameCount;
     }
 
+    bool isElementRareData() const { return m_isElementRareData; }
+
     bool hasElementFlag(ElementFlags mask) const { return m_elementFlags & mask; }
     void setElementFlag(ElementFlags mask, bool value) { m_elementFlags = (m_elementFlags & ~mask) | (-(int32_t)value & mask); }
     void clearElementFlag(ElementFlags mask) { m_elementFlags &= ~mask; }
@@ -102,6 +112,9 @@ public:
 
     DECLARE_TRACE_AFTER_DISPATCH();
     void finalizeGarbageCollectedObject();
+
+    DECLARE_TRACE_WRAPPERS();
+    DECLARE_TRACE_WRAPPERS_AFTER_DISPATCH();
 
 protected:
     explicit NodeRareData(LayoutObject* layoutObject)

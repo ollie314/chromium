@@ -5,9 +5,9 @@
 #ifndef CSSTransformOriginInterpolationType_h
 #define CSSTransformOriginInterpolationType_h
 
-#include "core/animation/CSSLengthInterpolationType.h"
 #include "core/animation/CSSLengthListInterpolationType.h"
 #include "core/animation/CSSPositionAxisListInterpolationType.h"
+#include "core/animation/LengthInterpolationFunctions.h"
 #include "core/animation/ListInterpolationFunctions.h"
 #include "core/css/CSSValueList.h"
 
@@ -23,12 +23,12 @@ private:
     InterpolationValue maybeConvertValue(const CSSValue& value, const StyleResolverState&, ConversionCheckers&) const final
     {
         const CSSValueList& list = toCSSValueList(value);
-        ASSERT(list.length() == 3);
+        DCHECK_EQ(list.length(), 3U);
         return ListInterpolationFunctions::createList(list.length(), [&list](size_t index) {
-            const CSSValue& item = *list.item(index);
+            const CSSValue& item = list.item(index);
             if (index < 2)
                 return CSSPositionAxisListInterpolationType::convertPositionAxisCSSValue(item);
-            return CSSLengthInterpolationType::maybeConvertCSSValue(item);
+            return LengthInterpolationFunctions::maybeConvertCSSValue(item);
         });
     }
 };

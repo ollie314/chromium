@@ -9,7 +9,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
@@ -26,6 +26,7 @@
 #include "components/guest_view/browser/guest_view_manager_factory.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
@@ -227,6 +228,7 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
     ASSERT_TRUE(done_listener);
     ASSERT_TRUE(done_listener->WaitUntilSatisfied());
 
+    embedder_web_contents_ = embedder_web_contents;
     guest_web_contents_ = GetGuestViewManager()->WaitForSingleGuestCreated();
   }
 
@@ -376,8 +378,9 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
     popup_observer.Init();
     // Press alt+DOWN to open popup.
     bool alt = true;
-    content::SimulateKeyPress(
-        guest_web_contents(), ui::VKEY_DOWN, false, false, alt, false);
+    content::SimulateKeyPress(guest_web_contents(), ui::DomKey::ARROW_DOWN,
+                              ui::DomCode::ARROW_DOWN, ui::VKEY_DOWN, false,
+                              false, alt, false);
     popup_observer.Wait();
 
     content::RenderWidgetHost* popup_rwh =
@@ -392,8 +395,8 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
     LOG(INFO) << "DIFF: x = " << diff.x() << ", y = " << diff.y();
 
     const int left_spacing = 40 + padding.x();  // div.style.paddingLeft = 40px.
-    // div.style.paddingTop = 50px + (input box height = 26px).
-    const int top_spacing = 50 + 26 + padding.y();
+    // div.style.paddingTop = 60px + (input box height = 26px).
+    const int top_spacing = 60 + 26 + padding.y();
 
     // If the popup is placed within |threshold_px| of the expected position,
     // then we consider the test as a pass.
@@ -403,8 +406,9 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
     EXPECT_LE(std::abs(diff.y() - top_spacing), threshold_px);
 
     // Close the popup.
-    content::SimulateKeyPress(
-        guest_web_contents(), ui::VKEY_ESCAPE, false, false, false, false);
+    content::SimulateKeyPress(guest_web_contents(), ui::DomKey::ESCAPE,
+                              ui::DomCode::ESCAPE, ui::VKEY_ESCAPE, false,
+                              false, false, false);
   }
 
   void DragTestStep1() {
@@ -471,7 +475,7 @@ class WebViewInteractiveTestBase : public extensions::PlatformAppBrowserTest {
     passed_listener.set_failure_message("TEST_FAILED");
     content::SimulateMouseClickAt(guest_web_contents(),
                                   0,
-                                  blink::WebMouseEvent::ButtonLeft,
+                                  blink::WebMouseEvent::Button::Left,
                                   gfx::Point(20, 20));
     ASSERT_TRUE(passed_listener.WaitUntilSatisfied());
   }
@@ -503,12 +507,14 @@ class WebViewInteractiveTest : public WebViewInteractiveTestBase,
 
 class WebViewNewWindowInteractiveTest : public WebViewInteractiveTest {};
 
+// The tests below aren't needed in --use-cross-process-frames-for-guests.
+class WebViewContextMenuInteractiveTest : public WebViewInteractiveTestBase {};
+
 // The following class of tests do not work for OOPIF <webview>.
 // TODO(ekaramad): Make this tests work with OOPIF and replace the test classes
 // with WebViewInteractiveTest (see crbug.com/582562).
 class WebViewFocusInteractiveTest : public WebViewInteractiveTestBase {};
 class WebViewPopupInteractiveTest : public WebViewInteractiveTestBase {};
-class WebViewContextMenuInteractiveTest : public WebViewInteractiveTestBase {};
 class WebViewPointerLockInteractiveTest : public WebViewInteractiveTestBase {};
 class WebViewDragDropInteractiveTest : public WebViewInteractiveTestBase {};
 
@@ -675,9 +681,10 @@ IN_PROC_BROWSER_TEST_F(WebViewFocusInteractiveTest, Focus_AdvanceFocus) {
     listener.set_failure_message("TEST_FAILED");
     SimulateRWHMouseClick(
         embedder_web_contents->GetRenderViewHost()->GetWidget(),
-        blink::WebMouseEvent::ButtonLeft, 200, 20);
-    content::SimulateKeyPress(embedder_web_contents, ui::VKEY_TAB,
-        false, false, false, false);
+        blink::WebMouseEvent::Button::Left, 200, 20);
+    content::SimulateKeyPress(embedder_web_contents, ui::DomKey::TAB,
+                              ui::DomCode::TAB, ui::VKEY_TAB, false, false,
+                              false, false);
     ASSERT_TRUE(listener.WaitUntilSatisfied());
   }
 
@@ -691,12 +698,15 @@ IN_PROC_BROWSER_TEST_F(WebViewFocusInteractiveTest, Focus_AdvanceFocus) {
     // element. The initial element is dependent upon tab direction which blink
     // does not propagate to the plugin.
     // See http://crbug.com/147644.
-    content::SimulateKeyPress(embedder_web_contents, ui::VKEY_TAB,
-        false, false, false, false);
-    content::SimulateKeyPress(embedder_web_contents, ui::VKEY_TAB,
-        false, false, false, false);
-    content::SimulateKeyPress(embedder_web_contents, ui::VKEY_TAB,
-        false, false, false, false);
+    content::SimulateKeyPress(embedder_web_contents, ui::DomKey::TAB,
+                              ui::DomCode::TAB, ui::VKEY_TAB, false, false,
+                              false, false);
+    content::SimulateKeyPress(embedder_web_contents, ui::DomKey::TAB,
+                              ui::DomCode::TAB, ui::VKEY_TAB, false, false,
+                              false, false);
+    content::SimulateKeyPress(embedder_web_contents, ui::DomKey::TAB,
+                              ui::DomCode::TAB, ui::VKEY_TAB, false, false,
+                              false, false);
     ASSERT_TRUE(listener.WaitUntilSatisfied());
   }
 }
@@ -896,6 +906,12 @@ IN_PROC_BROWSER_TEST_P(WebViewNewWindowInteractiveTest,
 // Tests whether <webview> context menu sees <webview> local coordinates
 // in its RenderViewContextMenu params.
 // Local coordinates are required for plugin actions to work properly.
+//
+// This test is not needed in --use-cross-process-frames-for-guests,
+// since it tests that the <webview> sees local coordinates, which is not
+// true with the out-of-process iframes architecture. In that case, the
+// <webview> sees transformed coordinates, the point is transformed in
+// CrossProcessFrameConnector::TransformPointToRootCoordSpace.
 IN_PROC_BROWSER_TEST_F(WebViewContextMenuInteractiveTest,
                        ContextMenuParamCoordinates) {
   TestHelper("testCoordinates", "web_view/context_menus/coordinates",
@@ -904,7 +920,7 @@ IN_PROC_BROWSER_TEST_F(WebViewContextMenuInteractiveTest,
 
   ContextMenuWaiter menu_observer(content::NotificationService::AllSources());
   SimulateRWHMouseClick(guest_web_contents()->GetRenderViewHost()->GetWidget(),
-                        blink::WebMouseEvent::ButtonRight, 10, 20);
+                        blink::WebMouseEvent::Button::Right, 10, 20);
   // Wait until the context menu is opened and closed.
   menu_observer.WaitForMenuOpenAndClose();
   ASSERT_EQ(10, menu_observer.params().x);
@@ -913,8 +929,15 @@ IN_PROC_BROWSER_TEST_F(WebViewContextMenuInteractiveTest,
 
 // Tests whether <webview> context menu sees <webview> local coordinates in its
 // RenderViewContextMenu params, when it is subject to CSS transforms.
+//
+// This test doesn't makes sense in --use-cross-process-frames-for-guests, since
+// it tests that events forwarded from the embedder are properly transformed,
+// and in oopif-mode the events are sent directly to the child process without
+// the forwarding code path (relying on surface-based hittesting).
+
+// Flaky.  http://crbug.com/613258
 IN_PROC_BROWSER_TEST_F(WebViewContextMenuInteractiveTest,
-                       ContextMenuParamsAfterCSSTransforms) {
+                       DISABLED_ContextMenuParamsAfterCSSTransforms) {
   LoadAndLaunchPlatformApp("web_view/context_menus/coordinates_with_transforms",
                            "Launched");
 
@@ -951,7 +974,7 @@ IN_PROC_BROWSER_TEST_F(WebViewContextMenuInteractiveTest,
     embedder_window_point -= embedder_view_bounds.OffsetFromOrigin();
     SimulateRWHMouseClick(
         embedder_web_contents()->GetRenderViewHost()->GetWidget(),
-        blink::WebMouseEvent::ButtonRight,
+        blink::WebMouseEvent::Button::Right,
         /* Using window coordinates for the embedder */
         embedder_window_point.x(), embedder_window_point.y());
 
@@ -982,9 +1005,9 @@ IN_PROC_BROWSER_TEST_F(WebViewPopupInteractiveTest,
   // make sure we keep rendering popups correct in webview.
 }
 
-// Flaky on ChromeOS: http://crbug.com/526886
-// Causes problems on windows: http://crbug.com/544037
-#if defined(OS_CHROMEOS) || defined(OS_WIN)
+// Flaky on ChromeOS and Linux: http://crbug.com/526886
+// Causes problems on windows: http://crbug.com/544998
+#if defined(OS_CHROMEOS) || defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_PopupPositioningMoved DISABLED_PopupPositioningMoved
 #else
 #define MAYBE_PopupPositioningMoved PopupPositioningMoved
@@ -1020,7 +1043,7 @@ IN_PROC_BROWSER_TEST_F(WebViewDragDropInteractiveTest, DragDropWithinWebView) {
   for (;;) {
     base::RunLoop run_loop;
     quit_closure_ = run_loop.QuitClosure();
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(&WebViewInteractiveTestBase::DragTestStep1,
                               base::Unretained(this)));
     run_loop.Run();
@@ -1136,7 +1159,7 @@ IN_PROC_BROWSER_TEST_F(WebViewFocusInteractiveTest, Focus_FocusRestored) {
   {
     content::SimulateMouseClickAt(guest_web_contents(),
                                   0,
-                                  blink::WebMouseEvent::ButtonLeft,
+                                  blink::WebMouseEvent::Button::Left,
                                   gfx::Point(10, 10));
     EXPECT_TRUE(content::ExecuteScript(
                     embedder_web_contents,
@@ -1151,7 +1174,7 @@ IN_PROC_BROWSER_TEST_F(WebViewFocusInteractiveTest, Focus_FocusRestored) {
   {
     content::SimulateMouseClickAt(embedder_web_contents,
                                   0,
-                                  blink::WebMouseEvent::ButtonLeft,
+                                  blink::WebMouseEvent::Button::Left,
                                   gfx::Point(200, 20));
     EXPECT_TRUE(content::ExecuteScript(
                     embedder_web_contents,
@@ -1166,7 +1189,7 @@ IN_PROC_BROWSER_TEST_F(WebViewFocusInteractiveTest, Focus_FocusRestored) {
   {
     content::SimulateMouseClickAt(guest_web_contents(),
                                   0,
-                                  blink::WebMouseEvent::ButtonLeft,
+                                  blink::WebMouseEvent::Button::Left,
                                   gfx::Point(10, 10));
     EXPECT_TRUE(content::ExecuteScript(
                     embedder_web_contents,
@@ -1281,7 +1304,7 @@ IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, TextSelection) {
   ExtensionTestMessageListener ctx_listener("MSG_CONTEXTMENU", false);
   ContextMenuNotificationObserver menu_observer(IDC_CONTENT_CONTEXT_COPY);
   SimulateRWHMouseClick(guest_web_contents()->GetRenderViewHost()->GetWidget(),
-                        blink::WebMouseEvent::ButtonRight, 20, 20);
+                        blink::WebMouseEvent::Button::Right, 20, 20);
   ASSERT_TRUE(ctx_listener.WaitUntilSatisfied());
 
   // Now verify that the selection text propagates properly to RWHV.
@@ -1331,4 +1354,43 @@ IN_PROC_BROWSER_TEST_F(WebViewFocusInteractiveTest, FocusAndVisibility) {
       "WebViewInteractiveTest.WebViewButtonWasFocused");
   SendMessageToEmbedder("verify");
   EXPECT_TRUE(webview_button_not_focused_listener.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_P(WebViewInteractiveTest, KeyboardFocus) {
+  TestHelper("testKeyboardFocus", "web_view/focus", NO_TEST_SERVER);
+
+  EXPECT_EQ(embedder_web_contents()->GetFocusedFrame(),
+            embedder_web_contents()->GetMainFrame());
+  content::FrameFocusedObserver focus_observer(
+      guest_web_contents()->GetMainFrame());
+  ExtensionTestMessageListener next_step_listener("TEST_STEP_PASSED", false);
+  next_step_listener.set_failure_message("TEST_STEP_FAILED");
+  {
+    gfx::Rect offset = embedder_web_contents()->GetContainerBounds();
+    // Click the <input> element inside the <webview>.
+    // If we wanted, we could ask the embedder to compute an appropriate point.
+    MoveMouseInsideWindow(gfx::Point(offset.x() + 40, offset.y() + 40));
+    SendMouseClick(ui_controls::LEFT);
+  }
+
+  // Waits for the renderer to know the input has focus.
+  ASSERT_TRUE(next_step_listener.WaitUntilSatisfied());
+  // Wait for the browser to know which frame has focus.
+  focus_observer.Wait();
+  if (GetParam())
+    EXPECT_EQ(embedder_web_contents()->GetFocusedFrame(), nullptr);
+
+  ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+      GetPlatformAppWindow(), ui::VKEY_A, false, false, false, false));
+  ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+      GetPlatformAppWindow(), ui::VKEY_B, false, true, false, false));
+  ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+      GetPlatformAppWindow(), ui::VKEY_C, false, false, false, false));
+
+  next_step_listener.Reset();
+  EXPECT_TRUE(content::ExecuteScript(
+      embedder_web_contents(),
+      "window.runCommand('testKeyboardFocusRunNextStep', 'aBc');"));
+
+  ASSERT_TRUE(next_step_listener.WaitUntilSatisfied());
 }

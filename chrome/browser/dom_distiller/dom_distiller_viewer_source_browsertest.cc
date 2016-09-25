@@ -35,13 +35,13 @@
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/dom_distiller/core/url_utils.h"
 #include "components/leveldb_proto/testing/fake_db.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/isolated_world_ids.h"
 #include "content/public/test/browser_test_utils.h"
-#include "grit/components_strings.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -195,8 +195,14 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
 
 // The DomDistillerViewerSource renders untrusted content, so ensure no bindings
 // are enabled when requesting to view an arbitrary URL.
+// Flaky on Linux: see http://crbug.com/606040.
+#if defined(OS_LINUX)
+#define MAYBE_NoWebUIBindingsViewUrl DISABLED_NoWebUIBindingsViewUrl
+#else
+#define MAYBE_NoWebUIBindingsViewUrl NoWebUIBindingsViewUrl
+#endif
 IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
-                       NoWebUIBindingsViewUrl) {
+                       MAYBE_NoWebUIBindingsViewUrl) {
   // We should expect distillation for any valid URL.
   expect_distillation_ = true;
   expect_distiller_page_ = true;
@@ -512,7 +518,14 @@ IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, MultiPageArticle) {
   EXPECT_THAT(result, HasSubstr("Page 2 content"));
 }
 
-IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest, PrefChange) {
+// Flaky on Ubuntu-12.04 bots: https://crbug.com/606037
+#if defined(OS_LINUX)
+#define MAYBE_PrefChange DISABLED_PrefChange
+#else
+#define MAYBE_PrefChange PrefChange
+#endif
+IN_PROC_BROWSER_TEST_F(DomDistillerViewerSourceBrowserTest,
+                       MAYBE_PrefChange) {
   PrefTest(false);
 }
 

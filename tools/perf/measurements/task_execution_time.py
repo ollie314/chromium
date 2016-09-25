@@ -2,14 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.page import page_test
+from telemetry.page import legacy_page_test
 from telemetry.timeline.model import TimelineModel
 from telemetry.timeline import tracing_config
 from telemetry.util import statistics
 from telemetry.value import scalar
 
 
-class TaskExecutionTime(page_test.PageTest):
+class TaskExecutionTime(legacy_page_test.LegacyPageTest):
 
   IDLE_SECTION_TRIGGER = 'SingleThreadIdleTaskRunner::RunTask'
   IDLE_SECTION = 'IDLE'
@@ -41,15 +41,18 @@ class TaskExecutionTime(page_test.PageTest):
     self._results = None
 
   def WillNavigateToPage(self, page, tab):
+    del page  # unused
     config = tracing_config.TracingConfig()
     for category in self._CATEGORIES:
-      config.tracing_category_filter.AddIncludedCategory(category)
+      config.chrome_trace_config.category_filter.AddIncludedCategory(
+          category)
     config.enable_chrome_trace = True
 
     tab.browser.platform.tracing_controller.StartTracing(
         config, self._TIME_OUT_IN_SECONDS)
 
   def ValidateAndMeasurePage(self, page, tab, results):
+    del page  # unused
     trace_data = tab.browser.platform.tracing_controller.StopTracing()
     timeline_model = TimelineModel(trace_data)
 

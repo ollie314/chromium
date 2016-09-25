@@ -27,7 +27,7 @@
 
 #include "core/CoreExport.h"
 #include "core/css/StyleColor.h"
-#include "core/style/DataRef.h"
+#include "core/style/TextSizeAdjust.h"
 #include "platform/Length.h"
 #include "platform/graphics/Color.h"
 #include "platform/heap/Handle.h"
@@ -52,6 +52,9 @@ typedef HeapVector<CursorData> CursorList;
 // This struct is for rarely used inherited CSS3, CSS2, and WebKit-specific properties.
 // By grouping them together, we save space, and only allocate this object when someone
 // actually uses one of these properties.
+// TODO(sashab): Move this into a private class on ComputedStyle, and remove
+// all methods on it, merging them into copy/creation methods on ComputedStyle
+// instead. Keep the allocation logic, only allocating a new object if needed.
 class CORE_EXPORT StyleRareInheritedData : public RefCounted<StyleRareInheritedData> {
 public:
     static PassRefPtr<StyleRareInheritedData> create() { return adoptRef(new StyleRareInheritedData); }
@@ -102,7 +105,6 @@ public:
     // Paged media properties.
     short widows;
     short orphans;
-    unsigned m_hasAutoOrphans : 1;
 
     unsigned m_textStrokeColorIsCurrentColor : 1;
     unsigned m_textFillColorIsCurrentColor : 1;
@@ -159,6 +161,7 @@ public:
     TabSize m_tabSize;
 
     RefPtr<StyleVariableData> variables;
+    TextSizeAdjust m_textSizeAdjust;
 
 private:
     StyleRareInheritedData();

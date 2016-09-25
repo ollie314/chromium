@@ -31,7 +31,7 @@
 /**
  * @constructor
  * @extends {WebInspector.ThrottledWidget}
- * @param {!WebInspector.SharedSidebarModel} sharedModel
+ * @param {!WebInspector.ComputedStyleModel} sharedModel
  */
 WebInspector.PlatformFontsWidget = function(sharedModel)
 {
@@ -39,22 +39,13 @@ WebInspector.PlatformFontsWidget = function(sharedModel)
     this.registerRequiredCSS("elements/platformFontsWidget.css");
 
     this._sharedModel = sharedModel;
-    this._sharedModel.addEventListener(WebInspector.SharedSidebarModel.Events.ComputedStyleChanged, this.update, this);
+    this._sharedModel.addEventListener(WebInspector.ComputedStyleModel.Events.ComputedStyleChanged, this.update, this);
 
     this._sectionTitle = createElementWithClass("div", "title");
+    this.contentElement.classList.add("platform-fonts");
     this.contentElement.appendChild(this._sectionTitle);
     this._sectionTitle.textContent = WebInspector.UIString("Rendered Fonts");
     this._fontStatsSection = this.contentElement.createChild("div", "stats-section");
-}
-
-/**
- * @param {!WebInspector.SharedSidebarModel} sharedModel
- * @return {!WebInspector.ElementsSidebarViewWrapperPane}
- */
-WebInspector.PlatformFontsWidget.createSidebarWrapper = function(sharedModel)
-{
-    var widget = new WebInspector.PlatformFontsWidget(sharedModel);
-    return new WebInspector.ElementsSidebarViewWrapperPane(WebInspector.UIString("Fonts"), widget)
 }
 
 WebInspector.PlatformFontsWidget.prototype = {
@@ -90,7 +81,7 @@ WebInspector.PlatformFontsWidget.prototype = {
         if (isEmptySection)
             return;
 
-        platformFonts.sort(function (a, b) {
+        platformFonts.sort(function(a, b) {
             return b.glyphCount - a.glyphCount;
         });
         for (var i = 0; i < platformFonts.length; ++i) {
@@ -103,7 +94,7 @@ WebInspector.PlatformFontsWidget.prototype = {
             fontDelimeterElement.textContent = "\u2014";
 
             var fontOrigin = fontStatElement.createChild("span");
-            fontOrigin.textContent = platformFonts[i].isCustomFont? WebInspector.UIString("Network resource") : WebInspector.UIString("Local file");
+            fontOrigin.textContent = platformFonts[i].isCustomFont ? WebInspector.UIString("Network resource") : WebInspector.UIString("Local file");
 
             var fontUsageElement = fontStatElement.createChild("span", "font-usage");
             var usage = platformFonts[i].glyphCount;

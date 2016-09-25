@@ -5,9 +5,10 @@
 #ifndef UI_GL_GL_SURFACE_STUB_H_
 #define UI_GL_GL_SURFACE_STUB_H_
 
+#include "ui/gl/gl_export.h"
 #include "ui/gl/gl_surface.h"
 
-namespace gfx {
+namespace gl {
 
 // A GLSurface that does nothing for unit tests.
 class GL_EXPORT GLSurfaceStub : public GLSurface {
@@ -34,6 +35,6 @@ class GL_EXPORT GLSurfaceStub : public GLSurface {
   bool buffers_flipped_ = false;
 };
 
-}  // namespace gfx
+}  // namespace gl
 
 #endif  // UI_GL_GL_SURFACE_STUB_H_

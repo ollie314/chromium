@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "mojo/public/cpp/bindings/bindings_export.h"
 #include "mojo/public/cpp/bindings/lib/message_internal.h"
 #include "mojo/public/cpp/bindings/message.h"
 
@@ -16,7 +17,7 @@ class Message;
 
 namespace internal {
 
-class MessageBuilder {
+class MOJO_CPP_BINDINGS_EXPORT MessageBuilder {
  public:
   MessageBuilder(uint32_t name, size_t payload_size);
   ~MessageBuilder();
@@ -33,7 +34,8 @@ class MessageBuilder {
   DISALLOW_COPY_AND_ASSIGN(MessageBuilder);
 };
 
-class MessageWithRequestIDBuilder : public MessageBuilder {
+class MOJO_CPP_BINDINGS_EXPORT MessageWithRequestIDBuilder
+    : public MessageBuilder {
  public:
   MessageWithRequestIDBuilder(uint32_t name,
                               size_t payload_size,
@@ -46,7 +48,7 @@ class RequestMessageBuilder : public MessageWithRequestIDBuilder {
   RequestMessageBuilder(uint32_t name, size_t payload_size)
       : MessageWithRequestIDBuilder(name,
                                     payload_size,
-                                    kMessageExpectsResponse,
+                                    Message::kFlagExpectsResponse,
                                     0) {}
 
   RequestMessageBuilder(uint32_t name,
@@ -54,7 +56,7 @@ class RequestMessageBuilder : public MessageWithRequestIDBuilder {
                         uint32_t extra_flags)
       : MessageWithRequestIDBuilder(name,
                                     payload_size,
-                                    kMessageExpectsResponse | extra_flags,
+                                    Message::kFlagExpectsResponse | extra_flags,
                                     0) {}
 };
 
@@ -65,7 +67,7 @@ class ResponseMessageBuilder : public MessageWithRequestIDBuilder {
                          uint64_t request_id)
       : MessageWithRequestIDBuilder(name,
                                     payload_size,
-                                    kMessageIsResponse,
+                                    Message::kFlagIsResponse,
                                     request_id) {}
 
   ResponseMessageBuilder(uint32_t name,
@@ -74,7 +76,7 @@ class ResponseMessageBuilder : public MessageWithRequestIDBuilder {
                          uint32_t extra_flags)
       : MessageWithRequestIDBuilder(name,
                                     payload_size,
-                                    kMessageIsResponse | extra_flags,
+                                    Message::kFlagIsResponse | extra_flags,
                                     request_id) {}
 };
 

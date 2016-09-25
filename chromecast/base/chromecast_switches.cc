@@ -14,11 +14,10 @@ const char kSwitchValueTrue[] = "true";
 // Value indicating whether flag from command line switch is false.
 const char kSwitchValueFalse[] = "false";
 
-// Enable the CMA media pipeline.
-const char kEnableCmaMediaPipeline[] = "enable-cma-media-pipeline";
-
-// The bitmask of codecs (media_caps.h) supported by the current HDMI sink.
-const char kHdmiSinkSupportedCodecs[] = "hdmi-sink-supported-codecs";
+// Server url to upload crash data to.
+// Default is "http://clients2.google.com/cr/report" for prod devices.
+// Default is "http://clients2.google.com/cr/staging_report" for non prod.
+const char kCrashServerUrl[] = "crash-server-url";
 
 // Enable file accesses. It should not be enabled for most Cast devices.
 const char kEnableLocalFileAccesses[] = "enable-local-file-accesses";
@@ -64,12 +63,28 @@ const char kAlsaOutputAvailMin[] = "alsa-output-avail-min";
 // remain. Assumed to be 0 if --accept-resource-provider is present.
 const char kAlsaCheckCloseTimeout[] = "alsa-check-close-timeout";
 
-// Number of channels on the alsa output device that the stream mixer uses.
-// Default is 2 channels.
-const char kAlsaNumOutputChannels[] = "alsa-num-output-channels";
+// Flag that enables resampling audio with sample rate below 32kHz up to 48kHz.
+// Should be set to true for internal audio products.
+const char kAlsaEnableUpsampling[] = "alsa-enable-upsampling";
 
 // Optional flag to set a fixed sample rate for the alsa device.
 const char kAlsaFixedOutputSampleRate[] = "alsa-fixed-output-sample-rate";
+
+// Some platforms typically have very little 'free' memory, but plenty is
+// available in buffers+cached.  For such platforms, configure this amount
+// as the portion of buffers+cached memory that should be treated as
+// unavailable.  If this switch is not used, a simple pressure heuristic based
+// purely on free memory will be used.
+const char kMemPressureSystemReservedKb[] = "mem-pressure-system-reserved-kb";
+
+// Used to pass initial screen resolution to GPU process.  This allows us to set
+// screen size correctly (so no need to resize when first window is created).
+const char kCastInitialScreenWidth[] = "cast-initial-screen-width";
+const char kCastInitialScreenHeight[] = "cast-initial-screen-height";
+
+// When present, desktop cast_shell will create 1080p window (provided display
+// resolution is high enough).  Otherwise, cast_shell defaults to 720p.
+const char kDesktopWindow1080p[] = "desktop-window-1080p";
 
 }  // namespace switches
 

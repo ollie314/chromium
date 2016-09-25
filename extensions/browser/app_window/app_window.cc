@@ -13,10 +13,11 @@
 
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
@@ -53,8 +54,10 @@
 #include "extensions/grit/extensions_browser_resources.h"
 #include "third_party/skia/include/core/SkRegion.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/screen.h"
+#include "ui/gfx/image/image_skia_operations.h"
 
 #if !defined(OS_MACOSX)
 #include "components/prefs/pref_service.h"
@@ -88,7 +91,7 @@ void SetBoundsProperties(const gfx::Rect& bounds,
                          const gfx::Size& max_size,
                          const std::string& bounds_name,
                          base::DictionaryValue* window_properties) {
-  scoped_ptr<base::DictionaryValue> bounds_properties(
+  std::unique_ptr<base::DictionaryValue> bounds_properties(
       new base::DictionaryValue());
 
   bounds_properties->SetInteger("left", bounds.x());
@@ -171,8 +174,8 @@ AppWindow::CreateParams::CreateParams()
       resizable(true),
       focused(true),
       always_on_top(false),
-      visible_on_all_workspaces(false) {
-}
+      visible_on_all_workspaces(false),
+      show_in_shelf(false) {}
 
 AppWindow::CreateParams::CreateParams(const CreateParams& other) = default;
 
@@ -253,6 +256,7 @@ AppWindow::AppWindow(BrowserContext* context,
       cached_always_on_top_(false),
       requested_alpha_enabled_(false),
       is_ime_window_(false),
+      show_in_shelf_(false),
       image_loader_ptr_factory_(this) {
   ExtensionsBrowserClient* client = ExtensionsBrowserClient::Get();
   CHECK(!client->IsGuestSession(context) || context->IsOffTheRecord())
@@ -293,8 +297,9 @@ void AppWindow::Init(const GURL& url,
     new_params.always_on_top = false;
 
   requested_alpha_enabled_ = new_params.alpha_enabled;
-
   is_ime_window_ = params.is_ime_window;
+  show_in_shelf_ = params.show_in_shelf;
+  window_icon_url_ = params.window_icon_url;
 
   AppWindowClient* app_window_client = AppWindowClient::Get();
   native_app_window_.reset(
@@ -304,6 +309,17 @@ void AppWindow::Init(const GURL& url,
       browser_context_, extension_id_, web_contents(), app_delegate_.get()));
 
   UpdateExtensionAppIcon();
+  // Download showInShelf=true window icon.
+  if (window_icon_url_.is_valid()) {
+    image_loader_ptr_factory_.InvalidateWeakPtrs();
+    web_contents()->DownloadImage(
+        window_icon_url_,
+        true,   // is a favicon
+        0,      // no maximum size
+        false,  // normal cache policy
+        base::Bind(&AppWindow::DidDownloadFavicon,
+                   image_loader_ptr_factory_.GetWeakPtr()));
+  }
   AppWindowRegistry::Get(browser_context_)->AddAppWindow(this);
 
   if (new_params.hidden) {
@@ -440,6 +456,13 @@ void AppWindow::RequestToLockMouse(WebContents* web_contents,
 bool AppWindow::PreHandleGestureEvent(WebContents* source,
                                       const blink::WebGestureEvent& event) {
   return AppWebContentsHelper::ShouldSuppressGestureEvent(event);
+}
+
+std::unique_ptr<content::BluetoothChooser> AppWindow::RunBluetoothChooser(
+    content::RenderFrameHost* frame,
+    const content::BluetoothChooser::EventHandler& event_handler) {
+  return ExtensionsBrowserClient::Get()->CreateBluetoothChooser(frame,
+                                                                event_handler);
 }
 
 void AppWindow::RenderViewCreated(content::RenderViewHost* render_view_host) {
@@ -583,7 +606,7 @@ void AppWindow::SetAppIconUrl(const GURL& url) {
                  image_loader_ptr_factory_.GetWeakPtr()));
 }
 
-void AppWindow::UpdateShape(scoped_ptr<SkRegion> region) {
+void AppWindow::UpdateShape(std::unique_ptr<SkRegion> region) {
   native_app_window_->UpdateShape(std::move(region));
 }
 
@@ -593,9 +616,23 @@ void AppWindow::UpdateDraggableRegions(
 }
 
 void AppWindow::UpdateAppIcon(const gfx::Image& image) {
-  if (image.IsEmpty())
-    return;
-  app_icon_ = image;
+  // Set the showInShelf=true window icon and add the app_icon_image_
+  // as a badge. If the image is empty, set the default app icon placeholder
+  // as the base image.
+  if (window_icon_url_.is_valid() && !app_icon_image_->image().IsEmpty()) {
+    gfx::Image base_image =
+        !image.IsEmpty()
+            ? image
+            : gfx::Image(*ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+                  IDR_APP_DEFAULT_ICON));
+    app_icon_ = gfx::Image(gfx::ImageSkiaOperations::CreateIconWithBadge(
+        base_image.AsImageSkia(), app_icon_image_->image_skia()));
+  } else {
+    if (image.IsEmpty())
+      return;
+
+    app_icon_ = image;
+  }
   native_app_window_->UpdateWindowIcon();
   AppWindowRegistry::Get(browser_context_)->AppWindowIconChanged(this);
 }
@@ -804,8 +841,10 @@ void AppWindow::DidDownloadFavicon(
     const GURL& image_url,
     const std::vector<SkBitmap>& bitmaps,
     const std::vector<gfx::Size>& original_bitmap_sizes) {
-  if (image_url != app_icon_url_ || bitmaps.empty())
+  if (((image_url != app_icon_url_) && (image_url != window_icon_url_)) ||
+      bitmaps.empty()) {
     return;
+  }
 
   // Bitmaps are ordered largest to smallest. Choose the smallest bitmap
   // whose height >= the preferred size.
@@ -857,13 +896,12 @@ void AppWindow::SetNativeWindowFullscreen() {
 
 bool AppWindow::IntersectsWithTaskbar() const {
 #if defined(OS_WIN)
-  gfx::Screen* screen = gfx::Screen::GetScreen();
+  display::Screen* screen = display::Screen::GetScreen();
   gfx::Rect window_bounds = native_app_window_->GetRestoredBounds();
-  std::vector<gfx::Display> displays = screen->GetAllDisplays();
+  std::vector<display::Display> displays = screen->GetAllDisplays();
 
-  for (std::vector<gfx::Display>::const_iterator it = displays.begin();
-       it != displays.end();
-       ++it) {
+  for (std::vector<display::Display>::const_iterator it = displays.begin();
+       it != displays.end(); ++it) {
     gfx::Rect taskbar_bounds = it->bounds();
     taskbar_bounds.Subtract(it->work_area());
     if (taskbar_bounds.IsEmpty())
@@ -919,7 +957,7 @@ content::ColorChooser* AppWindow::OpenColorChooser(
   return app_delegate_->ShowColorChooser(web_contents, initial_color);
 }
 
-void AppWindow::RunFileChooser(WebContents* tab,
+void AppWindow::RunFileChooser(content::RenderFrameHost* render_frame_host,
                                const content::FileChooserParams& params) {
   if (window_type_is_panel()) {
     // Panels can't host a file dialog, abort. TODO(stevenjb): allow file
@@ -929,7 +967,7 @@ void AppWindow::RunFileChooser(WebContents* tab,
     return;
   }
 
-  app_delegate_->RunFileChooser(tab, params);
+  app_delegate_->RunFileChooser(render_frame_host, params);
 }
 
 bool AppWindow::IsPopupOrPanel(const WebContents* source) const { return true; }
@@ -1018,7 +1056,7 @@ void AppWindow::SaveWindowPosition() {
 
   gfx::Rect bounds = native_app_window_->GetRestoredBounds();
   gfx::Rect screen_bounds =
-      gfx::Screen::GetScreen()->GetDisplayMatching(bounds).work_area();
+      display::Screen::GetScreen()->GetDisplayMatching(bounds).work_area();
   ui::WindowShowState window_state = native_app_window_->GetRestoredState();
   cache->SaveGeometry(
       extension_id(), window_key_, bounds, screen_bounds, window_state);
@@ -1084,8 +1122,8 @@ AppWindow::CreateParams AppWindow::LoadDefaults(CreateParams params)
                            &cached_state)) {
       // App window has cached screen bounds, make sure it fits on screen in
       // case the screen resolution changed.
-      gfx::Screen* screen = gfx::Screen::GetScreen();
-      gfx::Display display = screen->GetDisplayMatching(cached_bounds);
+      display::Screen* screen = display::Screen::GetScreen();
+      display::Display display = screen->GetDisplayMatching(cached_bounds);
       gfx::Rect current_screen_bounds = display.work_area();
       SizeConstraints constraints(params.GetWindowMinimumSize(gfx::Insets()),
                                   params.GetWindowMaximumSize(gfx::Insets()));

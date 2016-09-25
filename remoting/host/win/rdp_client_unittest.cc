@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/win/scoped_com_initializer.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/win/rdp_client.h"
@@ -34,6 +35,8 @@ namespace {
 // Default width and hight of the RDP client window.
 const long kDefaultWidth = 1024;
 const long kDefaultHeight = 768;
+
+const DWORD kDefaultRdpPort = 3389;
 
 class MockRdpClientEventHandler : public RdpClient::EventHandler {
  public:
@@ -138,8 +141,9 @@ void RdpClientTest::OnRdpConnected() {
   EXPECT_TRUE(WtsTerminalMonitor::LookupTerminalId(session_id, &id));
   EXPECT_EQ(id, terminal_id_);
 
-  message_loop_.PostTask(FROM_HERE, base::Bind(&RdpClientTest::CloseRdpClient,
-                                               base::Unretained(this)));
+  message_loop_.task_runner()->PostTask(
+      FROM_HERE,
+      base::Bind(&RdpClientTest::CloseRdpClient, base::Unretained(this)));
 }
 
 void RdpClientTest::CloseRdpClient() {
@@ -162,10 +166,10 @@ TEST_F(RdpClientTest, Basic) {
       .Times(AtMost(1))
       .WillOnce(InvokeWithoutArgs(this, &RdpClientTest::CloseRdpClient));
 
-  rdp_client_.reset(new RdpClient(
-      task_runner_, task_runner_,
-      webrtc::DesktopSize(kDefaultWidth, kDefaultHeight),
-      terminal_id_, &event_handler_));
+  rdp_client_.reset(
+      new RdpClient(task_runner_, task_runner_,
+                    webrtc::DesktopSize(kDefaultWidth, kDefaultHeight),
+                    terminal_id_, kDefaultRdpPort, &event_handler_));
   task_runner_ = nullptr;
 
   run_loop_.Run();

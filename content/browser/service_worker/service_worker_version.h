@@ -13,6 +13,7 @@
 #include <queue>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/callback.h"
@@ -23,16 +24,20 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/optional.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "content/browser/service_worker/embedded_worker_instance.h"
+#include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/browser/service_worker/service_worker_metrics.h"
 #include "content/browser/service_worker/service_worker_script_cache_map.h"
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
-#include "content/public/common/service_registry.h"
 #include "ipc/ipc_message.h"
+#include "mojo/public/cpp/bindings/interface_ptr.h"
+#include "services/shell/public/cpp/interface_provider.h"
 #include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerEventResult.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -55,7 +60,6 @@ class ServiceWorkerRegistration;
 class ServiceWorkerURLRequestJob;
 struct ServiceWorkerClientInfo;
 struct ServiceWorkerVersionInfo;
-struct TransferredMessagePort;
 
 // This class corresponds to a specific version of a ServiceWorker
 // script for a given pattern. When a script is upgraded, there may be
@@ -66,14 +70,7 @@ class CONTENT_EXPORT ServiceWorkerVersion
     : NON_EXPORTED_BASE(public base::RefCounted<ServiceWorkerVersion>),
       public EmbeddedWorkerInstance::Listener {
  public:
-  typedef base::Callback<void(ServiceWorkerStatusCode)> StatusCallback;
-
-  enum RunningStatus {
-    STOPPED = EmbeddedWorkerInstance::STOPPED,
-    STARTING = EmbeddedWorkerInstance::STARTING,
-    RUNNING = EmbeddedWorkerInstance::RUNNING,
-    STOPPING = EmbeddedWorkerInstance::STOPPING,
-  };
+  using StatusCallback = base::Callback<void(ServiceWorkerStatusCode)>;
 
   // Current version status; some of the status (e.g. INSTALLED and ACTIVATED)
   // should be persisted unlike running status.
@@ -92,6 +89,13 @@ class CONTENT_EXPORT ServiceWorkerVersion
     KILL_ON_TIMEOUT,     // Kill the worker if this request times out.
     CONTINUE_ON_TIMEOUT  // Keep the worker alive, only abandon the request that
                          // timed out.
+  };
+
+  // Whether the version has fetch handlers or not.
+  enum class FetchHandlerExistence {
+    UNKNOWN,  // This version is a new version and not installed yet.
+    EXISTS,
+    DOES_NOT_EXIST,
   };
 
   class Listener {
@@ -116,8 +120,8 @@ class CONTENT_EXPORT ServiceWorkerVersion
     virtual void OnControlleeRemoved(ServiceWorkerVersion* version,
                                      ServiceWorkerProviderHost* provider_host) {
     }
-    // Fires when a version transitions from having a controllee to not.
     virtual void OnNoControllees(ServiceWorkerVersion* version) {}
+    virtual void OnNoWork(ServiceWorkerVersion* version) {}
     virtual void OnCachedMetadataUpdated(ServiceWorkerVersion* version) {}
 
    protected:
@@ -133,11 +137,22 @@ class CONTENT_EXPORT ServiceWorkerVersion
   int64_t registration_id() const { return registration_id_; }
   const GURL& script_url() const { return script_url_; }
   const GURL& scope() const { return scope_; }
-  RunningStatus running_status() const {
-    return static_cast<RunningStatus>(embedded_worker_->status());
+  EmbeddedWorkerStatus running_status() const {
+    return embedded_worker_->status();
   }
   ServiceWorkerVersionInfo GetInfo();
   Status status() const { return status_; }
+
+  // This status is set to EXISTS or DOES_NOT_EXIST when the install event has
+  // been executed in a new version or when an installed version is loaded from
+  // the storage. When a new version is not installed yet, it is  UNKNOW.
+  FetchHandlerExistence fetch_handler_existence() const {
+    return fetch_handler_existence_;
+  }
+  // This also updates |site_for_uma_| when it was Site::OTHER.
+  void set_fetch_handler_existence(FetchHandlerExistence existence);
+
+  bool should_exclude_from_uma() const { return should_exclude_from_uma_; }
 
   const std::vector<GURL>& foreign_fetch_scopes() const {
     return foreign_fetch_scopes_;
@@ -152,6 +167,8 @@ class CONTENT_EXPORT ServiceWorkerVersion
   void set_foreign_fetch_origins(const std::vector<url::Origin>& origins) {
     foreign_fetch_origins_ = origins;
   }
+
+  ServiceWorkerMetrics::Site site_for_uma() const { return site_for_uma_; }
 
   // This sets the new status and also run status change callbacks
   // if there're any (see RegisterStatusChangeCallback).
@@ -171,6 +188,9 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // Stops an embedded worker for this version.
   // This returns OK (success) if the worker is already stopped.
   void StopWorker(const StatusCallback& callback);
+
+  // Skips waiting and forces this version to become activated.
+  void SkipWaitingFromDevTools();
 
   // Schedules an update to be run 'soon'.
   void ScheduleUpdate();
@@ -192,12 +212,18 @@ class CONTENT_EXPORT ServiceWorkerVersion
                            const StatusCallback& error_callback);
 
   // Call this while the worker is running before dispatching an event to the
-  // worker. This informs ServiceWorkerVersion about the event in progress.
-  // Returns a request id, which should later be passed to FinishRequest when
-  // the event finished.
+  // worker. This informs ServiceWorkerVersion about the event in progress. The
+  // worker attempts to keep running until the event finishes.
+  //
+  // Returns a request id, which must later be passed to FinishRequest when the
+  // event finished. The caller is responsible for ensuring FinishRequest is
+  // called. If FinishRequest is not called the request will eventually time
+  // out and the worker will be forcibly terminated.
+  //
   // The |error_callback| is called if either ServiceWorkerVersion decides the
   // event is taking too long, or if for some reason the worker stops or is
-  // killed before the request finishes.
+  // killed before the request finishes. In this case, the caller should not
+  // call FinishRequest.
   int StartRequest(ServiceWorkerMetrics::EventType event_type,
                    const StatusCallback& error_callback);
 
@@ -214,7 +240,9 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // Pass the result of the event to |was_handled|, which is used to record
   // statistics based on the event status.
   // TODO(mek): Use something other than a bool for event status.
-  bool FinishRequest(int request_id, bool was_handled);
+  bool FinishRequest(int request_id,
+                     bool was_handled,
+                     base::Time dispatch_event_time);
 
   // Connects to a specific mojo service exposed by the (running) service
   // worker. If a connection to a service for the same Interface already exists
@@ -226,19 +254,40 @@ class CONTENT_EXPORT ServiceWorkerVersion
   template <typename Interface>
   base::WeakPtr<Interface> GetMojoServiceForRequest(int request_id);
 
-  // Dispatches an event. If dispatching the event fails, the error callback
-  // associated with the |request_id| is called. Any messages sent back in
-  // response to this event are passed on to the response |callback|.
+  // Dispatches an event. If dispatching the event fails, all of the error
+  // callbacks that were associated with |request_ids| via StartRequest are
+  // called.
+  // Use RegisterRequestCallback or RegisterSimpleRequest to register a callback
+  // to receive messages sent back in response to this event before calling this
+  // method.
+  // This must be called when the worker is running.
+  void DispatchEvent(const std::vector<int>& request_ids,
+                     const IPC::Message& message);
+
+  // This method registers a callback to receive messages sent back from the
+  // service worker in response to |request_id|.
   // ResponseMessage is the type of the IPC message that is used for the
   // response, and its first argument MUST be the request_id.
-  // This must be called when the worker is running.
+  // Callback registration should be done once for one request_id.
   template <typename ResponseMessage, typename ResponseCallbackType>
-  void DispatchEvent(int request_id,
-                     const IPC::Message& message,
-                     const ResponseCallbackType& callback);
+  void RegisterRequestCallback(int request_id,
+                               const ResponseCallbackType& callback);
 
-  // For simple events where the full functionality of DispatchEvent is not
-  // needed, this method can be used instead. The ResponseMessage must consist
+  // You can use this method instead of RegisterRequestCallback when the
+  // response message sent back from the service worker consists of just
+  // a request_id and a blink::WebServiceWorkerEventResult field. The result
+  // field is converted to a ServiceWorkerStatusCode and passed to the error
+  // handler associated with the request_id which is registered by StartRequest.
+  // Additionally if you use this method, FinishRequest will be called before
+  // passing the reply to the callback.
+  // Callback registration should be done once for one request_id.
+  template <typename ResponseMessage>
+  void RegisterSimpleRequest(int request_id);
+
+  // This is a wrapper method equivalent to one RegisterSimpleRequest and one
+  // DispatchEvent. For simple events where the full functionality of
+  // RegisterRequestCallback/DispatchEvent is not needed, this method can be
+  // used instead. The ResponseMessage must consist
   // of just a request_id and a blink::WebServiceWorkerEventResult field. The
   // result is converted to a ServiceWorkerStatusCode and passed to the error
   // handler associated with the request. Additionally this methods calls
@@ -247,8 +296,6 @@ class CONTENT_EXPORT ServiceWorkerVersion
   void DispatchSimpleEvent(int request_id, const IPC::Message& message);
 
   // Adds and removes |provider_host| as a controllee of this ServiceWorker.
-  // A potential controllee is a host having the version as its .installing
-  // or .waiting version.
   void AddControllee(ServiceWorkerProviderHost* provider_host);
   void RemoveControllee(ServiceWorkerProviderHost* provider_host);
 
@@ -289,6 +336,10 @@ class CONTENT_EXPORT ServiceWorkerVersion
   bool skip_waiting() const { return skip_waiting_; }
   void set_skip_waiting(bool skip_waiting) { skip_waiting_ = skip_waiting; }
 
+  bool skip_recording_startup_time() const {
+    return skip_recording_startup_time_;
+  }
+
   bool force_bypass_cache_for_scripts() const {
     return force_bypass_cache_for_scripts_;
   }
@@ -313,6 +364,10 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // Simulate ping timeout. Should be used for tests-only.
   void SimulatePingTimeoutForTesting();
 
+  // Returns true if the service worker has work to do: it has pending
+  // requests, in-progress streaming URLRequestJobs, or pending start callbacks.
+  bool HasWork() const;
+
  private:
   friend class base::RefCounted<ServiceWorkerVersion>;
   friend class ServiceWorkerMetrics;
@@ -324,6 +379,8 @@ class CONTENT_EXPORT ServiceWorkerVersion
 
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerControlleeRequestHandlerTest,
                            ActivateWaitingVersion);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerControlleeRequestHandlerTest,
+                           FallbackWithNoFetchHandler);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerVersionTest, IdleTimeout);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerVersionTest, SetDevToolsAttached);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerVersionTest, StaleUpdate_FreshWorker);
@@ -347,6 +404,11 @@ class CONTENT_EXPORT ServiceWorkerVersion
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerVersionTest,
                            RequestCustomizedTimeoutKill);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerVersionTest, MixedRequestTimeouts);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerURLRequestJobTest, EarlyResponse);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerURLRequestJobTest, CancelRequest);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerActivationTest, SkipWaiting);
+  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerActivationTest,
+                           SkipWaitingWithInflightRequest);
 
   class Metrics;
   class PingController;
@@ -364,22 +426,38 @@ class CONTENT_EXPORT ServiceWorkerVersion
     TimeoutBehavior timeout_behavior;
   };
 
-  template <typename CallbackType>
   struct PendingRequest {
-    PendingRequest(const CallbackType& callback,
-                   const base::TimeTicks& time,
+    PendingRequest(const StatusCallback& error_callback,
+                   base::Time time,
+                   const base::TimeTicks& time_ticks,
                    ServiceWorkerMetrics::EventType event_type);
-    ~PendingRequest() {}
+    ~PendingRequest();
 
-    CallbackType callback;
-    base::TimeTicks start_time;
+    // ------------------------------------------------------------------------
+    // For all requests. Set by StartRequest.
+    // ------------------------------------------------------------------------
+    StatusCallback error_callback;
+    base::Time start_time;
+    base::TimeTicks start_time_ticks;
     ServiceWorkerMetrics::EventType event_type;
+
+    // -------------------------------------------------------------------------
+    // For Mojo requests.
+    // -------------------------------------------------------------------------
     // Name of the mojo service this request is associated with. Used to call
-    // the callback when a connection closes with outstanding requests.
-    // Compared as pointer, so should only contain static strings. Typically
-    // this would be Interface::Name_ for some mojo interface.
+    // the callback when a connection closes with outstanding requests. Compared
+    // as pointer, so should only contain static strings. Typically this would
+    // be Interface::Name_ for some mojo interface.
     const char* mojo_service = nullptr;
+
+    // ------------------------------------------------------------------------
+    // For IPC message requests.
+    // ------------------------------------------------------------------------
+    // Set by RegisterRequestCallback. Receives IPC responses to the request via
+    // OnMessageReceived.
     std::unique_ptr<EmbeddedWorkerInstance::Listener> listener;
+    // True if an IPC message was sent to dispatch the event for this request.
+    bool is_dispatched = false;
   };
 
   // Base class to enable storing a list of mojo interface pointers for
@@ -404,9 +482,9 @@ class CONTENT_EXPORT ServiceWorkerVersion
   class MojoServiceWrapper : public BaseMojoServiceWrapper {
    public:
     MojoServiceWrapper(ServiceWorkerVersion* worker,
-                       mojo::InterfacePtr<Interface> interface)
+                       mojo::InterfacePtr<Interface> interface_ptr)
         : BaseMojoServiceWrapper(worker, Interface::Name_),
-          interface_(std::move(interface)),
+          interface_(std::move(interface_ptr)),
           weak_ptr_factory_(interface_.get()) {}
 
     base::WeakPtr<Interface> GetWeakPtr() {
@@ -424,6 +502,8 @@ class CONTENT_EXPORT ServiceWorkerVersion
       std::priority_queue<RequestInfo,
                           std::vector<RequestInfo>,
                           std::greater<RequestInfo>>;
+  using WebStatusCallback =
+      base::Callback<void(int, blink::WebServiceWorkerEventResult)>;
 
   // EmbeddedWorkerInstance Listener implementation which calls a callback
   // on receiving a particular IPC message. ResponseMessage is the type of
@@ -470,8 +550,8 @@ class CONTENT_EXPORT ServiceWorkerVersion
   void OnStarting() override;
   void OnStarted() override;
   void OnStopping() override;
-  void OnStopped(EmbeddedWorkerInstance::Status old_status) override;
-  void OnDetached(EmbeddedWorkerInstance::Status old_status) override;
+  void OnStopped(EmbeddedWorkerStatus old_status) override;
+  void OnDetached(EmbeddedWorkerStatus old_status) override;
   void OnScriptLoaded() override;
   void OnScriptLoadFailed() override;
   void OnReportException(const base::string16& error_message,
@@ -497,7 +577,8 @@ class CONTENT_EXPORT ServiceWorkerVersion
                     const ServiceWorkerClientQueryOptions& options);
 
   void OnSimpleEventResponse(int request_id,
-                             blink::WebServiceWorkerEventResult result);
+                             blink::WebServiceWorkerEventResult result,
+                             base::Time dispatch_event_time);
   void OnOpenWindow(int request_id, GURL url);
   void OnOpenWindowFinished(int request_id,
                             ServiceWorkerStatusCode status,
@@ -508,10 +589,9 @@ class CONTENT_EXPORT ServiceWorkerVersion
   void OnClearCachedMetadata(const GURL& url);
   void OnClearCachedMetadataFinished(int64_t callback_id, int result);
 
-  void OnPostMessageToClient(
-      const std::string& client_uuid,
-      const base::string16& message,
-      const std::vector<TransferredMessagePort>& sent_message_ports);
+  void OnPostMessageToClient(const std::string& client_uuid,
+                             const base::string16& message,
+                             const std::vector<int>& sent_message_ports);
   void OnFocusClient(int request_id, const std::string& client_uuid);
   void OnNavigateClient(int request_id,
                         const std::string& client_uuid,
@@ -535,7 +615,7 @@ class CONTENT_EXPORT ServiceWorkerVersion
       bool is_browser_startup_complete,
       const StatusCallback& callback,
       ServiceWorkerStatusCode status,
-      const scoped_refptr<ServiceWorkerRegistration>& registration);
+      scoped_refptr<ServiceWorkerRegistration> registration);
   void StartWorkerInternal();
 
   void DidSkipWaiting(int request_id);
@@ -559,7 +639,6 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // Stops the worker if it is idle (has no in-flight requests) or timed out
   // ping.
   void StopWorkerIfIdle();
-  bool HasInflightRequests() const;
 
   // RecordStartWorkerResult is added as a start callback by StartTimeoutTimer
   // and records metrics about startup.
@@ -584,9 +663,9 @@ class CONTENT_EXPORT ServiceWorkerVersion
 
   void FoundRegistrationForUpdate(
       ServiceWorkerStatusCode status,
-      const scoped_refptr<ServiceWorkerRegistration>& registration);
+      scoped_refptr<ServiceWorkerRegistration> registration);
 
-  void OnStoppedInternal(EmbeddedWorkerInstance::Status old_status);
+  void OnStoppedInternal(EmbeddedWorkerStatus old_status);
 
   // Called when the remote side of a connection to a mojo service is lost.
   void OnMojoConnectionError(const char* service_name);
@@ -596,12 +675,18 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // event ended).
   void OnBeginEvent();
 
+  // Resets |start_worker_first_purpose_| and fires and clears all start
+  // callbacks.
+  void FinishStartWorker(ServiceWorkerStatusCode status);
+
   const int64_t version_id_;
   const int64_t registration_id_;
   const GURL script_url_;
   const GURL scope_;
   std::vector<GURL> foreign_fetch_scopes_;
   std::vector<url::Origin> foreign_fetch_origins_;
+  FetchHandlerExistence fetch_handler_existence_;
+  ServiceWorkerMetrics::Site site_for_uma_;
 
   Status status_ = NEW;
   std::unique_ptr<EmbeddedWorkerInstance> embedded_worker_;
@@ -609,9 +694,9 @@ class CONTENT_EXPORT ServiceWorkerVersion
   std::vector<StatusCallback> stop_callbacks_;
   std::vector<base::Closure> status_change_callbacks_;
 
-  // Message callbacks. (Update HasInflightRequests() too when you update this
-  // list.)
-  IDMap<PendingRequest<StatusCallback>, IDMapOwnPointer> custom_requests_;
+  // Holds in-flight requests, including requests due to outstanding push,
+  // fetch, sync, etc. events.
+  IDMap<PendingRequest, IDMapOwnPointer> pending_requests_;
 
   // Stores all open connections to mojo services. Maps the service name to
   // the actual interface pointer. When a connection is closed it is removed
@@ -644,12 +729,12 @@ class CONTENT_EXPORT ServiceWorkerVersion
   // long.
   base::TimeTicks stale_time_;
 
-  // New requests are added to |requests_| along with their entry in a callback
-  // map. Requests are sorted by their expiration time (soonest to expire on top
-  // of the priority queue). The timeout timer periodically checks |requests_|
-  // for entries that should time out or have already been fulfilled (i.e.,
-  // removed from the callback map).
-  RequestInfoPriorityQueue requests_;
+  // Keeps track of requests for timeout purposes. Requests are sorted by
+  // their expiration time (soonest to expire on top of the priority queue). The
+  // timeout timer periodically checks |timeout_queue_| for entries that should
+  // time out or have already been fulfilled (i.e., removed from
+  // |pending_requests_|).
+  RequestInfoPriorityQueue timeout_queue_;
 
   bool skip_waiting_ = false;
   bool skip_recording_startup_time_ = false;
@@ -669,6 +754,12 @@ class CONTENT_EXPORT ServiceWorkerVersion
   std::unique_ptr<Metrics> metrics_;
   const bool should_exclude_from_uma_ = false;
 
+  bool stop_when_devtools_detached_ = false;
+
+  // Keeps the first purpose of starting the worker for UMA. Cleared in
+  // FinishStartWorker().
+  base::Optional<ServiceWorkerMetrics::EventType> start_worker_first_purpose_;
+
   base::WeakPtrFactory<ServiceWorkerVersion> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerVersion);
@@ -677,8 +768,8 @@ class CONTENT_EXPORT ServiceWorkerVersion
 template <typename Interface>
 base::WeakPtr<Interface> ServiceWorkerVersion::GetMojoServiceForRequest(
     int request_id) {
-  DCHECK_EQ(RUNNING, running_status());
-  PendingRequest<StatusCallback>* request = custom_requests_.Lookup(request_id);
+  DCHECK_EQ(EmbeddedWorkerStatus::RUNNING, running_status());
+  PendingRequest* request = pending_requests_.Lookup(request_id);
   DCHECK(request) << "Invalid request id";
   DCHECK(!request->mojo_service)
       << "Request is already associated with a mojo service";
@@ -687,45 +778,42 @@ base::WeakPtr<Interface> ServiceWorkerVersion::GetMojoServiceForRequest(
       static_cast<MojoServiceWrapper<Interface>*>(
           mojo_services_.get(Interface::Name_));
   if (!service) {
-    mojo::InterfacePtr<Interface> interface;
-    embedded_worker_->GetServiceRegistry()->ConnectToRemoteService(
-        mojo::GetProxy(&interface));
-    interface.set_connection_error_handler(
+    mojo::InterfacePtr<Interface> interface_ptr;
+    embedded_worker_->GetRemoteInterfaces()->GetInterface(&interface_ptr);
+    interface_ptr.set_connection_error_handler(
         base::Bind(&ServiceWorkerVersion::OnMojoConnectionError,
                    weak_factory_.GetWeakPtr(), Interface::Name_));
-    service = new MojoServiceWrapper<Interface>(this, std::move(interface));
+    service = new MojoServiceWrapper<Interface>(this, std::move(interface_ptr));
     mojo_services_.add(Interface::Name_, base::WrapUnique(service));
   }
   request->mojo_service = Interface::Name_;
   return service->GetWeakPtr();
 }
 
-template <typename ResponseMessage, typename ResponseCallbackType>
-void ServiceWorkerVersion::DispatchEvent(int request_id,
-                                         const IPC::Message& message,
-                                         const ResponseCallbackType& callback) {
-  DCHECK_EQ(RUNNING, running_status());
-  PendingRequest<StatusCallback>* request = custom_requests_.Lookup(request_id);
-  DCHECK(request) << "Invalid request id";
-  DCHECK(!request->listener) << "Request already dispatched an IPC event";
-
-  ServiceWorkerStatusCode status = embedded_worker_->SendMessage(message);
-  if (status != SERVICE_WORKER_OK) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(request->callback, status));
-    custom_requests_.Remove(request_id);
-  } else {
-    request->listener.reset(
-        new EventResponseHandler<ResponseMessage, ResponseCallbackType>(
-            embedded_worker()->AsWeakPtr(), request_id, callback));
-  }
-}
-
 template <typename ResponseMessage>
 void ServiceWorkerVersion::DispatchSimpleEvent(int request_id,
                                                const IPC::Message& message) {
-  DispatchEvent<ResponseMessage>(
-      request_id, message,
+  RegisterSimpleRequest<ResponseMessage>(request_id);
+  DispatchEvent({request_id}, message);
+}
+
+template <typename ResponseMessage, typename ResponseCallbackType>
+void ServiceWorkerVersion::RegisterRequestCallback(
+    int request_id,
+    const ResponseCallbackType& callback) {
+  PendingRequest* request = pending_requests_.Lookup(request_id);
+  DCHECK(request) << "Invalid request id";
+  DCHECK(!request->listener) << "Callback was already registered";
+  DCHECK(!request->is_dispatched) << "Request already dispatched an IPC event";
+  request->listener.reset(
+      new EventResponseHandler<ResponseMessage, ResponseCallbackType>(
+          embedded_worker()->AsWeakPtr(), request_id, callback));
+}
+
+template <typename ResponseMessage>
+void ServiceWorkerVersion::RegisterSimpleRequest(int request_id) {
+  RegisterRequestCallback<ResponseMessage>(
+      request_id,
       base::Bind(&ServiceWorkerVersion::OnSimpleEventResponse, this));
 }
 

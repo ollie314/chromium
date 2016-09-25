@@ -7,7 +7,9 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
@@ -23,20 +25,22 @@ struct PP_Size;
 class SkBitmap;
 
 namespace content {
+class PepperPluginInstance;
+class RenderFrame;
 class RendererPpapiHost;
 }
 
 namespace ppapi {
 class HostResource;
-}
 
-namespace ppapi {
 namespace host {
 struct HostMessageContext;
-}
-}
+}  // namespace host
+}  // namespace ppapi
 
 namespace pdf {
+
+class PdfAccessibilityTree;
 
 class PepperPDFHost : public ppapi::host::ResourceHost {
  public:
@@ -68,6 +72,7 @@ class PepperPDFHost : public ppapi::host::ResourceHost {
   // PPB_PDF_Impl instance.
   static void SetPrintClient(PrintClient* print_client);
 
+  // ppapi::host::ResourceHost:
   int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
       ppapi::host::HostMessageContext* context) override;
@@ -89,8 +94,25 @@ class PepperPDFHost : public ppapi::host::ResourceHost {
                                    const base::string16& selected_text);
   int32_t OnHostMsgSetLinkUnderCursor(ppapi::host::HostMessageContext* context,
                                       const std::string& url);
+  int32_t OnHostMsgSetAccessibilityViewportInfo(
+      ppapi::host::HostMessageContext* context,
+      const PP_PrivateAccessibilityViewportInfo& viewport_info);
+  int32_t OnHostMsgSetAccessibilityDocInfo(
+      ppapi::host::HostMessageContext* context,
+      const PP_PrivateAccessibilityDocInfo& doc_info);
+  int32_t OnHostMsgSetAccessibilityPageInfo(
+      ppapi::host::HostMessageContext* context,
+      const PP_PrivateAccessibilityPageInfo& page_info,
+      const std::vector<PP_PrivateAccessibilityTextRunInfo>& text_runs,
+      const std::vector<PP_PrivateAccessibilityCharInfo>& chars);
 
-  content::RendererPpapiHost* host_;
+  void CreatePdfAccessibilityTreeIfNeeded();
+
+  content::RenderFrame* GetRenderFrame();
+
+  std::unique_ptr<PdfAccessibilityTree> pdf_accessibility_tree_;
+
+  content::RendererPpapiHost* const host_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperPDFHost);
 };

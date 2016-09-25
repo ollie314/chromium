@@ -26,12 +26,12 @@ struct CC_EXPORT BeginMainFrameAndCommitState {
   BeginMainFrameAndCommitState();
   ~BeginMainFrameAndCommitState();
 
-  unsigned int begin_frame_id;
+  unsigned int begin_frame_id = 0;
   BeginFrameArgs begin_frame_args;
   std::unique_ptr<BeginFrameCallbackList> begin_frame_callbacks;
   std::unique_ptr<ScrollAndScaleSet> scroll_info;
-  size_t memory_allocation_limit_bytes;
-  bool evicted_ui_resources;
+  size_t memory_allocation_limit_bytes = 0;
+  bool evicted_ui_resources = false;
 
   void ToProtobuf(proto::BeginMainFrameAndCommitState* proto) const;
   void FromProtobuf(const proto::BeginMainFrameAndCommitState& proto);

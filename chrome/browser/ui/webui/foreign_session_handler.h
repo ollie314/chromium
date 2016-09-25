@@ -11,7 +11,7 @@
 #include "base/scoped_observer.h"
 #include "base/time/time.h"
 #include "chrome/browser/sessions/session_service.h"
-#include "components/sync_driver/sync_service_observer.h"
+#include "components/sync/driver/sync_service_observer.h"
 #include "components/sync_sessions/open_tabs_ui_delegate.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -56,7 +56,7 @@ class ForeignSessionHandler : public content::WebUIMessageHandler,
                                         SessionID::id_type window_num);
 
   // Returns a pointer to the current session model associator or NULL.
-  static sync_driver::OpenTabsUIDelegate* GetOpenTabsUIDelegate(
+  static sync_sessions::OpenTabsUIDelegate* GetOpenTabsUIDelegate(
       content::WebUI* web_ui);
 
  private:

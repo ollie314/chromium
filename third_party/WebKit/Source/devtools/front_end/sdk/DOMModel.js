@@ -53,7 +53,7 @@ WebInspector.DOMNode = function(domModel, doc, isInShadowTree, payload)
     this._nodeValue = payload.nodeValue;
     this._pseudoType = payload.pseudoType;
     this._shadowRootType = payload.shadowRootType;
-    this._frameId = payload.frameId || null;
+    this._frameOwnerFrameId = payload.frameId || null;
     this._xmlVersion = payload.xmlVersion;
 
     this._shadowRoots = [];
@@ -141,6 +141,9 @@ WebInspector.DOMNode.ShadowRootTypes = {
     Open: "open",
     Closed: "closed"
 }
+
+/** @typedef {{name: string, value: string, _node: WebInspector.DOMNode}} */
+WebInspector.DOMNode.Attribute;
 
 WebInspector.DOMNode.prototype = {
     /**
@@ -272,7 +275,7 @@ WebInspector.DOMNode.prototype = {
      */
     isInsertionPoint: function()
     {
-        return !this.isXMLNode() && (this._nodeName === "SHADOW" || this._nodeName === "CONTENT");
+        return !this.isXMLNode() && (this._nodeName === "SHADOW" || this._nodeName === "CONTENT" || this._nodeName === "SLOT");
     },
 
     /**
@@ -349,7 +352,17 @@ WebInspector.DOMNode.prototype = {
         var shadowRootType = this.shadowRootType();
         if (shadowRootType)
             return "#shadow-root (" + shadowRootType + ")";
-        return this.isXMLNode() ? this.nodeName() : this.nodeName().toLowerCase();
+
+        // If there is no local name, it's case sensitive
+        if (!this.localName())
+            return this.nodeName();
+
+        // If the names are different lengths, there is a prefix and it's case sensitive
+        if (this.localName().length !== this.nodeName().length)
+            return this.nodeName();
+
+        // Return the localname, which will be case insensitive if its an html node
+        return this.localName();
     },
 
     /**
@@ -417,7 +430,7 @@ WebInspector.DOMNode.prototype = {
     },
 
     /**
-     * @return {!Object}
+     * @return {!Array<!WebInspector.DOMNode.Attribute>}
      */
     attributes: function()
     {
@@ -590,10 +603,10 @@ WebInspector.DOMNode.prototype = {
      */
     frameId: function()
     {
-        var node = this;
-        while (!node._frameId && node.parentNode)
+        var node = this.parentNode || this;
+        while (!node._frameOwnerFrameId && node.parentNode)
             node = node.parentNode;
-        return node._frameId;
+        return node._frameOwnerFrameId;
     },
 
     /**
@@ -617,7 +630,7 @@ WebInspector.DOMNode.prototype = {
                 continue;
 
             if (!oldAttributesMap[name] || oldAttributesMap[name].value !== value)
-              attributesChanged = true;
+                attributesChanged = true;
         }
         return attributesChanged;
     },
@@ -705,7 +718,7 @@ WebInspector.DOMNode.prototype = {
     _renumber: function()
     {
         this._childNodeCount = this._children.length;
-        if (this._childNodeCount == 0) {
+        if (this._childNodeCount === 0) {
             this.firstChild = null;
             this.lastChild = null;
             return;
@@ -951,6 +964,20 @@ WebInspector.DOMNode.prototype = {
         this._agent.setInspectedNode(node.id);
     },
 
+    /**
+     *  @return {?WebInspector.DOMNode}
+     */
+    enclosingElementOrSelf: function()
+    {
+        var node = this;
+        if (node && node.nodeType() === Node.TEXT_NODE && node.parentNode)
+            node = node.parentNode;
+
+        if (node && node.nodeType() !== Node.ELEMENT_NODE)
+            node = null;
+        return node;
+    },
+
     __proto__: WebInspector.SDKObject.prototype
 }
 
@@ -1085,25 +1112,25 @@ WebInspector.DOMModel = function(target) {
     this._agent.enable();
 }
 
+/** @enum {symbol} */
 WebInspector.DOMModel.Events = {
-    AttrModified: "AttrModified",
-    AttrRemoved: "AttrRemoved",
-    CharacterDataModified: "CharacterDataModified",
-    DOMMutated: "DOMMutated",
-    NodeInserted: "NodeInserted",
-    NodeInspected: "NodeInspected",
-    NodeHighlightedInOverlay: "NodeHighlightedInOverlay",
-    NodeRemoved: "NodeRemoved",
-    DocumentUpdated: "DocumentUpdated",
-    ChildNodeCountUpdated: "ChildNodeCountUpdated",
-    UndoRedoRequested: "UndoRedoRequested",
-    UndoRedoCompleted: "UndoRedoCompleted",
-    DistributedNodesChanged: "DistributedNodesChanged",
-    ModelSuspended: "ModelSuspended",
-    InspectModeWillBeToggled: "InspectModeWillBeToggled",
-    MarkersChanged: "MarkersChanged"
+    AttrModified: Symbol("AttrModified"),
+    AttrRemoved: Symbol("AttrRemoved"),
+    CharacterDataModified: Symbol("CharacterDataModified"),
+    DOMMutated: Symbol("DOMMutated"),
+    NodeInserted: Symbol("NodeInserted"),
+    NodeInspected: Symbol("NodeInspected"),
+    NodeHighlightedInOverlay: Symbol("NodeHighlightedInOverlay"),
+    NodeRemoved: Symbol("NodeRemoved"),
+    DocumentUpdated: Symbol("DocumentUpdated"),
+    ChildNodeCountUpdated: Symbol("ChildNodeCountUpdated"),
+    UndoRedoRequested: Symbol("UndoRedoRequested"),
+    UndoRedoCompleted: Symbol("UndoRedoCompleted"),
+    DistributedNodesChanged: Symbol("DistributedNodesChanged"),
+    ModelSuspended: Symbol("ModelSuspended"),
+    InspectModeWillBeToggled: Symbol("InspectModeWillBeToggled"),
+    MarkersChanged: Symbol("MarkersChanged")
 }
-
 
 /**
  * @param {!WebInspector.RemoteObject} object
@@ -1133,6 +1160,17 @@ WebInspector.DOMModel.hideDOMNodeHighlight = function()
 {
     for (var domModel of WebInspector.DOMModel.instances())
         domModel.highlightDOMNode(0);
+}
+
+WebInspector.DOMModel.muteHighlight = function()
+{
+    WebInspector.DOMModel.hideDOMNodeHighlight();
+    WebInspector.DOMModel._highlightDisabled = true;
+}
+
+WebInspector.DOMModel.unmuteHighlight = function()
+{
+    WebInspector.DOMModel._highlightDisabled = false;
 }
 
 WebInspector.DOMModel.cancelSearch = function()
@@ -1246,7 +1284,7 @@ WebInspector.DOMModel.prototype = {
      */
     pushNodesByBackendIdsToFrontend: function(backendNodeIds, callback)
     {
-        var backendNodeIdsArray = Array.from(backendNodeIds.values());
+        var backendNodeIdsArray = backendNodeIds.valuesArray();
         /**
          * @param {?Array<!DOMAgent.NodeId>} nodeIds
          * @this {!WebInspector.DOMModel}
@@ -1683,7 +1721,7 @@ WebInspector.DOMModel.prototype = {
                 callback(null);
                 return;
             }
-            if (nodeIds.length != 1)
+            if (nodeIds.length !== 1)
                 return;
 
             callback(this.nodeForId(nodeIds[0]));
@@ -1737,6 +1775,8 @@ WebInspector.DOMModel.prototype = {
      */
     highlightDOMNodeWithConfig: function(nodeId, config, backendNodeId, objectId)
     {
+        if (WebInspector.DOMModel._highlightDisabled)
+            return;
         config = config || { mode: "all", showInfo: undefined, selectors: undefined };
         if (this._hideDOMNodeHighlightTimeout) {
             clearTimeout(this._hideDOMNodeHighlightTimeout);
@@ -1764,6 +1804,8 @@ WebInspector.DOMModel.prototype = {
      */
     highlightFrame: function(frameId)
     {
+        if (WebInspector.DOMModel._highlightDisabled)
+            return;
         this._highlighter.highlightFrame(frameId);
     },
 

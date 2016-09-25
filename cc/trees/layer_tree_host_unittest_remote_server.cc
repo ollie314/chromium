@@ -5,11 +5,12 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "cc/animation/animation_host.h"
 #include "cc/test/fake_image_serialization_processor.h"
 #include "cc/test/test_task_graph_runner.h"
-#include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_host_client.h"
+#include "cc/trees/layer_tree_host_in_process.h"
 #include "cc/trees/proxy_common.h"
 #include "cc/trees/proxy_main.h"
 #include "cc/trees/remote_proto_channel.h"
@@ -26,13 +27,16 @@ class LayerTreeHostTestRemoteServer : public testing::Test,
       : calls_received_(0),
         image_serialization_processor_(
             base::WrapUnique(new FakeImageSerializationProcessor)) {
-    LayerTreeHost::InitParams params;
+    LayerTreeHostInProcess::InitParams params;
     params.client = this;
     params.task_graph_runner = &task_graph_runner_;
     params.settings = &settings_;
     params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
     params.image_serialization_processor = image_serialization_processor_.get();
-    layer_tree_host_ = LayerTreeHost::CreateRemoteServer(this, &params);
+    params.animation_host =
+        AnimationHost::CreateForTesting(ThreadInstance::MAIN);
+    layer_tree_host_ =
+        LayerTreeHostInProcess::CreateRemoteServer(this, &params);
   }
 
   ~LayerTreeHostTestRemoteServer() override {}
@@ -48,15 +52,14 @@ class LayerTreeHostTestRemoteServer : public testing::Test,
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override {}
-  void RequestNewOutputSurface() override { NOTREACHED(); }
-  void DidInitializeOutputSurface() override { NOTREACHED(); }
-  void DidFailToInitializeOutputSurface() override { NOTREACHED(); }
+  void RequestNewCompositorFrameSink() override { NOTREACHED(); }
+  void DidInitializeCompositorFrameSink() override { NOTREACHED(); }
+  void DidFailToInitializeCompositorFrameSink() override { NOTREACHED(); }
   void WillCommit() override {}
   void DidCommit() override {}
   void DidCommitAndDrawFrame() override {}
   void DidCompleteSwapBuffers() override {}
   void DidCompletePageScaleAnimation() override {}
-  void SendBeginFramesToChildren(const BeginFrameArgs& args) override {}
 
   // RemoteProtoChannel implementation
   void SetProtoReceiver(RemoteProtoChannel::ProtoReceiver* receiver) override {
@@ -67,7 +70,7 @@ class LayerTreeHostTestRemoteServer : public testing::Test,
   int calls_received_;
   TestTaskGraphRunner task_graph_runner_;
   LayerTreeSettings settings_;
-  std::unique_ptr<LayerTreeHost> layer_tree_host_;
+  std::unique_ptr<LayerTreeHostInProcess> layer_tree_host_;
   RemoteProtoChannel::ProtoReceiver* receiver_;
   std::unique_ptr<FakeImageSerializationProcessor>
       image_serialization_processor_;

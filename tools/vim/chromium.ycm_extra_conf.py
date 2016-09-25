@@ -63,6 +63,10 @@ _default_flags = [
   'c++',
 ]
 
+_extension_flags = {
+  '.m': ['-x', 'objective-c'],
+  '.mm': ['-x', 'objective-c++'],
+}
 
 def PathExists(*args):
   return os.path.exists(os.path.join(*args))
@@ -80,7 +84,7 @@ def FindChromeSrcFromFilename(filename):
     (String) Path of 'src/', or None if unable to find.
   """
   curdir = os.path.normpath(os.path.dirname(filename))
-  while not (os.path.basename(os.path.realpath(curdir)) == 'src'
+  while not (os.path.basename(curdir) == 'src'
              and PathExists(curdir, 'DEPS')
              and (PathExists(curdir, '..', '.gclient')
                   or PathExists(curdir, '.git'))):
@@ -108,6 +112,8 @@ def GetDefaultSourceFile(chrome_root, filename):
   if filename.startswith(blink_root):
     return os.path.join(blink_root, 'Source', 'core', 'Init.cpp')
   else:
+    if 'test.' in filename:
+      return os.path.join(chrome_root, 'base', 'logging_unittest.cc')
     return os.path.join(chrome_root, 'base', 'logging.cc')
 
 
@@ -157,12 +163,13 @@ def GetNinjaBuildOutputsForSourceFile(out_dir, filename):
   """
   # Ninja needs the path to the source file relative to the output build
   # directory.
-  rel_filename = os.path.relpath(os.path.realpath(filename), out_dir)
+  rel_filename = os.path.relpath(filename, out_dir)
 
   p = subprocess.Popen(['ninja', '-C', out_dir, '-t', 'query', rel_filename],
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       universal_newlines=True)
   stdout, _ = p.communicate()
-  if p.returncode:
+  if p.returncode != 0:
     return []
 
   # The output looks like:
@@ -194,9 +201,9 @@ def GetClangCommandLineForNinjaOutput(out_dir, build_target):
   """
   p = subprocess.Popen(['ninja', '-v', '-C', out_dir,
                         '-t', 'commands', build_target],
-                       stdout=subprocess.PIPE)
+                       stdout=subprocess.PIPE, universal_newlines=True)
   stdout, stderr = p.communicate()
-  if p.returncode:
+  if p.returncode != 0:
     return None
 
   # Ninja will return multiple build steps for all dependencies up to
@@ -317,7 +324,7 @@ def GetClangOptionsFromNinjaForFilename(chrome_root, filename):
 
   sys.path.append(os.path.join(chrome_root, 'tools', 'vim'))
   from ninja_output import GetNinjaOutputDirectory
-  out_dir = os.path.realpath(GetNinjaOutputDirectory(chrome_root))
+  out_dir = GetNinjaOutputDirectory(chrome_root)
 
   clang_line = GetClangCommandLineFromNinjaForSource(
       out_dir, GetBuildableSourceFile(chrome_root, filename))
@@ -329,7 +336,7 @@ def GetClangOptionsFromNinjaForFilename(chrome_root, filename):
         out_dir, GetDefaultSourceFile(chrome_root, filename))
 
   if not clang_line:
-    return (additional_flags, [])
+    return additional_flags
 
   return GetClangOptionsFromCommandLine(clang_line, out_dir, additional_flags)
 
@@ -345,6 +352,7 @@ def FlagsForFile(filename):
       'flags': (List of Strings) Command line flags.
       'do_cache': (Boolean) True if the result should be cached.
   """
+  ext = os.path.splitext(filename)[1]
   abs_filename = os.path.abspath(filename)
   chrome_root = FindChromeSrcFromFilename(abs_filename)
   clang_flags = GetClangOptionsFromNinjaForFilename(chrome_root, abs_filename)
@@ -354,7 +362,7 @@ def FlagsForFile(filename):
   # determine the flags again.
   should_cache_flags_for_file = bool(clang_flags)
 
-  final_flags = _default_flags + clang_flags
+  final_flags = _default_flags + _extension_flags.get(ext, []) + clang_flags
 
   return {
     'flags': final_flags,

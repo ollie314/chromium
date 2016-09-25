@@ -88,7 +88,7 @@
 //<include src="ui/commandbutton.js">
 //<include src="ui/file_manager_dialog_base.js">
 //<include src="metadata/metadata_cache_set.js">
-//<include src="metadata/new_metadata_provider.js">
+//<include src="metadata/metadata_provider.js">
 //
 //<include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/app_installer.js">
 //<include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_webview_client.js">
@@ -107,6 +107,7 @@
 //<include src="empty_folder_controller.js">
 //<include src="file_manager.js">
 //<include src="file_manager_commands.js">
+//<include src="file_list_model.js">
 //<include src="file_selection.js">
 //<include src="file_tasks.js">
 //<include src="file_transfer_controller.js">
@@ -124,10 +125,14 @@
 //<include src="metadata/metadata_model.js">
 //<include src="metadata/multi_metadata_provider.js">
 //<include src="metadata/thumbnail_model.js">
+//<include src="metadata_box_controller.js">
 //<include src="metadata_update_controller.js">
 //<include src="naming_controller.js">
 //<include src="navigation_list_model.js">
 //<include src="progress_center_item_group.js">
+//<include src="quick_view_controller.js">
+//<include src="quick_view_model.js">
+//<include src="quick_view_uma.js">
 //<include src="scan_controller.js">
 //<include src="search_controller.js">
 //<include src="share_client.js">

@@ -22,9 +22,9 @@
 #include "core/svg/SVGGraphicsElement.h"
 
 #include "core/SVGNames.h"
-#include "core/css/resolver/StyleResolver.h"
 #include "core/layout/svg/LayoutSVGPath.h"
 #include "core/svg/SVGElementRareData.h"
+#include "core/svg/SVGMatrixTearOff.h"
 #include "platform/transforms/AffineTransform.h"
 
 namespace blink {
@@ -60,7 +60,7 @@ AffineTransform SVGGraphicsElement::computeCTM(SVGElement::CTMScope mode,
     SVGGraphicsElement::StyleUpdateStrategy styleUpdateStrategy, const SVGGraphicsElement* ancestor) const
 {
     if (styleUpdateStrategy == AllowStyleUpdate)
-        document().updateLayoutIgnorePendingStylesheets();
+        document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     AffineTransform ctm;
     bool done = false;
@@ -213,7 +213,7 @@ SVGElement* SVGGraphicsElement::farthestViewportElement() const
 
 FloatRect SVGGraphicsElement::getBBox()
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     // FIXME: Eventually we should support getBBox for detached elements.
     if (!layoutObject())

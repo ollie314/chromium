@@ -67,6 +67,10 @@ class FileManagerPrivateInternalGetFileTasksFunction
       std::unique_ptr<std::vector<std::string>> mime_types,
       std::unique_ptr<std::set<base::FilePath>> path_directory_set);
 
+  void OnFileTasksListed(
+      std::unique_ptr<std::vector<file_manager::file_tasks::FullTaskDescriptor>>
+          tasks);
+
   std::unique_ptr<app_file_handler_util::IsDirectoryCollector>
       is_directory_collector_;
   std::unique_ptr<app_file_handler_util::MimeTypeCollector>
@@ -77,7 +81,7 @@ class FileManagerPrivateInternalGetFileTasksFunction
 
 // Implements the chrome.fileManagerPrivateInternal.setDefaultTask method.
 class FileManagerPrivateInternalSetDefaultTaskFunction
-    : public ChromeSyncExtensionFunction {
+    : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.setDefaultTask",
                              FILEMANAGERPRIVATEINTERNAL_SETDEFAULTTASK)
@@ -85,8 +89,8 @@ class FileManagerPrivateInternalSetDefaultTaskFunction
  protected:
   ~FileManagerPrivateInternalSetDefaultTaskFunction() override {}
 
-  // SyncExtensionFunction overrides.
-  bool RunSync() override;
+  // ExtensionFunction:
+  ResponseAction Run() override;
 };
 
 }  // namespace extensions

@@ -6,11 +6,18 @@
 
 #include <string>
 
+#include "base/command_line.h"
 #include "base/macros.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
+#include "content/browser/service_worker/service_worker_response_info.h"
 #include "content/browser/service_worker/service_worker_url_request_job.h"
-#include "content/common/resource_request_body.h"
+#include "content/common/resource_request_body_impl.h"
 #include "content/common/service_worker/service_worker_utils.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/resource_request_info.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/common/origin_trial_policy.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "storage/browser/blob/blob_storage_context.h"
@@ -44,33 +51,54 @@ class ForeignFetchRequestInterceptor : public net::URLRequestInterceptor {
 
 }  // namespace
 
+bool ForeignFetchRequestHandler::IsForeignFetchEnabled() {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExperimentalWebPlatformFeatures)) {
+    return true;
+  }
+  OriginTrialPolicy* origin_trial_policy =
+      GetContentClient()->GetOriginTrialPolicy();
+  return origin_trial_policy &&
+         !origin_trial_policy->IsFeatureDisabled("ForeignFetch");
+}
+
 void ForeignFetchRequestHandler::InitializeHandler(
     net::URLRequest* request,
     ServiceWorkerContextWrapper* context_wrapper,
     storage::BlobStorageContext* blob_storage_context,
     int process_id,
     int provider_id,
-    bool skip_service_worker,
+    SkipServiceWorker skip_service_worker,
     FetchRequestMode request_mode,
     FetchCredentialsMode credentials_mode,
     FetchRedirectMode redirect_mode,
     ResourceType resource_type,
     RequestContextType request_context_type,
     RequestContextFrameType frame_type,
-    scoped_refptr<ResourceRequestBody> body) {
-  if (!context_wrapper) {
+    scoped_refptr<ResourceRequestBodyImpl> body,
+    bool initiated_in_secure_context) {
+  if (!IsForeignFetchEnabled())
     return;
-  }
+
+  if (!context_wrapper)
+    return;
+
+  if (skip_service_worker == SkipServiceWorker::ALL)
+    return;
+
+  if (!initiated_in_secure_context)
+    return;
+
+  if (ServiceWorkerUtils::IsMainResourceType(resource_type))
+    return;
+
+  if (request->initiator().IsSameOriginWith(url::Origin(request->url())))
+    return;
 
   if (!context_wrapper->OriginHasForeignFetchRegistrations(
           request->url().GetOrigin())) {
     return;
   }
-
-  if (request->initiator().IsSameOriginWith(url::Origin(request->url())))
-    return;
-  if (ServiceWorkerUtils::IsMainResourceType(resource_type))
-    return;
 
   // Any more precise checks to see if the request should be intercepted are
   // asynchronous, so just create our handler in all cases.
@@ -102,6 +130,7 @@ net::URLRequestJob* ForeignFetchRequestHandler::MaybeCreateJob(
     net::NetworkDelegate* network_delegate,
     ResourceContext* resource_context) {
   ClearJob();
+  ServiceWorkerResponseInfo::ResetDataForRequest(request);
 
   if (!context_) {
     // We can't do anything other than to fall back to network.
@@ -132,6 +161,7 @@ net::URLRequestJob* ForeignFetchRequestHandler::MaybeCreateJob(
       resource_type_, request_context_type_, frame_type_, body_,
       ServiceWorkerFetchType::FOREIGN_FETCH, this);
   job_ = job->GetWeakPtr();
+  resource_context_ = resource_context;
 
   context_->FindReadyRegistrationForDocument(
       request->url(),
@@ -150,7 +180,7 @@ ForeignFetchRequestHandler::ForeignFetchRequestHandler(
     ResourceType resource_type,
     RequestContextType request_context_type,
     RequestContextFrameType frame_type,
-    scoped_refptr<ResourceRequestBody> body)
+    scoped_refptr<ResourceRequestBodyImpl> body)
     : context_(context),
       blob_storage_context_(blob_storage_context),
       resource_type_(resource_type),
@@ -165,7 +195,7 @@ ForeignFetchRequestHandler::ForeignFetchRequestHandler(
 void ForeignFetchRequestHandler::DidFindRegistration(
     const base::WeakPtr<ServiceWorkerURLRequestJob>& job,
     ServiceWorkerStatusCode status,
-    const scoped_refptr<ServiceWorkerRegistration>& registration) {
+    scoped_refptr<ServiceWorkerRegistration> registration) {
   if (!job || job.get() != job_.get()) {
     // No more job to handle, or job changed somehow, so just return.
     return;
@@ -200,26 +230,28 @@ void ForeignFetchRequestHandler::DidFindRegistration(
     return;
   }
 
+  int render_process_id;
+  int render_frame_id;
+  if (!ResourceRequestInfo::GetRenderFrameForRequest(
+          job->request(), &render_process_id, &render_frame_id)) {
+    render_process_id = -1;
+    render_frame_id = -1;
+  }
+  if (!GetContentClient()->browser()->AllowServiceWorker(
+          registration->pattern(), job->request()->first_party_for_cookies(),
+          resource_context_, render_process_id, render_frame_id)) {
+    job->FallbackToNetwork();
+    return;
+  }
+
   target_worker_ = active_version;
   job->ForwardToServiceWorker();
 }
 
-void ForeignFetchRequestHandler::OnPrepareToRestart(
-    base::TimeTicks service_worker_start_time,
-    base::TimeTicks service_worker_ready_time) {
+void ForeignFetchRequestHandler::OnPrepareToRestart() {
   use_network_ = true;
   ClearJob();
 }
-
-void ForeignFetchRequestHandler::OnStartCompleted(
-    bool was_fetched_via_service_worker,
-    bool was_fallback_required,
-    const GURL& original_url_via_service_worker,
-    blink::WebServiceWorkerResponseType response_type_via_service_worker,
-    base::TimeTicks service_worker_start_time,
-    base::TimeTicks service_worker_ready_time,
-    bool response_is_in_cache_storage,
-    const std::string& response_cache_storage_cache_name) {}
 
 ServiceWorkerVersion* ForeignFetchRequestHandler::GetServiceWorkerVersion(
     ServiceWorkerMetrics::URLRequestJobResult* result) {
@@ -235,6 +267,7 @@ ServiceWorkerVersion* ForeignFetchRequestHandler::GetServiceWorkerVersion(
 void ForeignFetchRequestHandler::ClearJob() {
   job_.reset();
   target_worker_ = nullptr;
+  resource_context_ = nullptr;
 }
 
 }  // namespace content

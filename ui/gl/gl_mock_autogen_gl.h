@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -41,6 +41,8 @@ MOCK_METHOD2(BindRenderbufferEXT, void(GLenum target, GLuint renderbuffer));
 MOCK_METHOD2(BindSampler, void(GLuint unit, GLuint sampler));
 MOCK_METHOD2(BindTexture, void(GLenum target, GLuint texture));
 MOCK_METHOD2(BindTransformFeedback, void(GLenum target, GLuint id));
+MOCK_METHOD3(BindUniformLocationCHROMIUM,
+             void(GLuint program, GLint location, const char* name));
 MOCK_METHOD1(BindVertexArrayOES, void(GLuint array));
 MOCK_METHOD0(BlendBarrierKHR, void());
 MOCK_METHOD4(BlendColor,
@@ -112,6 +114,8 @@ MOCK_METHOD4(
     ColorMask,
     void(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha));
 MOCK_METHOD1(CompileShader, void(GLuint shader));
+MOCK_METHOD2(CompressedCopyTextureCHROMIUM,
+             void(GLuint sourceId, GLuint destId));
 MOCK_METHOD8(CompressedTexImage2D,
              void(GLenum target,
                   GLint level,
@@ -149,6 +153,8 @@ MOCK_METHOD5(CopyBufferSubData,
                   GLintptr readOffset,
                   GLintptr writeOffset,
                   GLsizeiptr size));
+// TODO(zmo): crbug.com/456340
+// glCopySubTextureCHROMIUM cannot be mocked because it has 11 args.
 MOCK_METHOD8(CopyTexImage2D,
              void(GLenum target,
                   GLint level,
@@ -177,6 +183,14 @@ MOCK_METHOD9(CopyTexSubImage3D,
                   GLint y,
                   GLsizei width,
                   GLsizei height));
+MOCK_METHOD7(CopyTextureCHROMIUM,
+             void(GLuint sourceId,
+                  GLuint destId,
+                  GLint internalFormat,
+                  GLenum destType,
+                  GLboolean unpackFlipY,
+                  GLboolean unpackPremultiplyAlpha,
+                  GLboolean unpackUnmultiplyAlpha));
 MOCK_METHOD1(CoverageModulationNV, void(GLenum components));
 MOCK_METHOD7(CoverFillPathInstancedNV,
              void(GLsizei numPaths,

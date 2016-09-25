@@ -19,9 +19,7 @@ namespace extensions {
 // An event router that observes changes to saved passwords and password
 // exceptions and notifies listeners to the onSavedPasswordsListChanged and
 // onPasswordExceptionsListChanged events of changes.
-class PasswordsPrivateEventRouter :
-    public KeyedService,
-    public EventRouter::Observer {
+class PasswordsPrivateEventRouter : public KeyedService {
  public:
   static PasswordsPrivateEventRouter* Create(
       content::BrowserContext* browser_context);
@@ -35,7 +33,7 @@ class PasswordsPrivateEventRouter :
   // Notifies listeners of updated exceptions.
   // |exceptions| The new list of password exceptions.
   void OnPasswordExceptionsListChanged(
-      const std::vector<std::string>& exceptions);
+      const std::vector<api::passwords_private::ExceptionPair>& exceptions);
 
   // Notifies listeners after fetching a plain-text password.
   // |origin_url| The origin which the password is saved for.
@@ -48,12 +46,6 @@ class PasswordsPrivateEventRouter :
 
  protected:
   explicit PasswordsPrivateEventRouter(content::BrowserContext* context);
-
-  // KeyedService overrides:
-  void Shutdown() override;
-
-  // EventRouter::Observer overrides:
-  void OnListenerAdded(const EventListenerInfo& details) override;
 
  private:
   void SendSavedPasswordListToListeners();

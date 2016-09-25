@@ -16,7 +16,6 @@
 struct DevToolsMessageData;
 
 namespace base {
-class MessageLoop;
 class SingleThreadTaskRunner;
 }
 
@@ -46,13 +45,16 @@ class DevToolsAgentFilter : public IPC::MessageFilter {
   ~DevToolsAgentFilter() override;
 
  private:
-  void OnDispatchOnInspectorBackend(int session_id, const std::string& message);
+  void OnDispatchOnInspectorBackend(
+      int session_id,
+      int call_id,
+      const std::string& method,
+      const std::string& message);
 
   // Called on IO thread
   void AddEmbeddedWorkerRoute(int32_t routing_id);
   void RemoveEmbeddedWorkerRoute(int32_t routing_id);
 
-  base::MessageLoop* render_thread_loop_;
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   int current_routing_id_;
 

@@ -23,9 +23,7 @@
 #ifndef SVGRootInlineBox_h
 #define SVGRootInlineBox_h
 
-#include "core/layout/api/LineLayoutBlockFlow.h"
 #include "core/layout/line/RootInlineBox.h"
-#include "core/layout/svg/SVGTextLayoutEngine.h"
 
 namespace blink {
 
@@ -33,7 +31,6 @@ class SVGRootInlineBox final : public RootInlineBox {
 public:
     SVGRootInlineBox(LineLayoutItem block)
         : RootInlineBox(block)
-        , m_logicalHeight(0)
     {
     }
 
@@ -53,7 +50,7 @@ public:
     bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) final;
 
 private:
-    void reorderValueLists(Vector<SVGTextLayoutAttributes*>&);
+    void reorderValueLists();
     void layoutChildBoxes(InlineFlowBox*, LayoutRect* = nullptr);
     void layoutRootBox(const LayoutRect&);
 

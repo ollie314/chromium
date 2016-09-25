@@ -9,13 +9,15 @@
 #include <stdint.h>
 
 #include <memory>
+#include <tuple>
 
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/input/gesture_event_queue.h"
 #include "content/browser/renderer_host/input/input_router_client.h"
@@ -25,13 +27,13 @@
 #include "content/common/edit_command.h"
 #include "content/common/input/synthetic_web_input_event_builders.h"
 #include "content/common/input/touch_action.h"
-#include "content/common/input/web_input_event_traits.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/events/blink/web_input_event_traits.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 #if defined(USE_AURA)
@@ -39,7 +41,6 @@
 #include "ui/events/event.h"
 #endif
 
-using base::TimeDelta;
 using blink::WebGestureDevice;
 using blink::WebGestureEvent;
 using blink::WebKeyboardEvent;
@@ -48,6 +49,8 @@ using blink::WebMouseEvent;
 using blink::WebMouseWheelEvent;
 using blink::WebTouchEvent;
 using blink::WebTouchPoint;
+using ui::DidOverscrollParams;
+using ui::WebInputEventTraits;
 
 namespace content {
 
@@ -90,7 +93,7 @@ void ExpectIPCMessageWithArg1(const IPC::Message* msg, const ARG_T1& arg1) {
   ASSERT_EQ(MSG_T::ID, msg->type());
   typename MSG_T::Schema::Param param;
   ASSERT_TRUE(MSG_T::Read(msg, &param));
-  EXPECT_EQ(arg1, base::get<0>(param));
+  EXPECT_EQ(arg1, std::get<0>(param));
 }
 
 template<typename MSG_T, typename ARG_T1, typename ARG_T2>
@@ -100,8 +103,8 @@ void ExpectIPCMessageWithArg2(const IPC::Message* msg,
   ASSERT_EQ(MSG_T::ID, msg->type());
   typename MSG_T::Schema::Param param;
   ASSERT_TRUE(MSG_T::Read(msg, &param));
-  EXPECT_EQ(arg1, base::get<0>(param));
-  EXPECT_EQ(arg2, base::get<1>(param));
+  EXPECT_EQ(arg1, std::get<0>(param));
+  EXPECT_EQ(arg2, std::get<1>(param));
 }
 
 #if defined(USE_AURA)
@@ -113,7 +116,7 @@ bool TouchEventsAreEquivalent(const ui::TouchEvent& first,
     return false;
   if (first.touch_id() != second.touch_id())
     return false;
-  if (second.time_stamp().InSeconds() != first.time_stamp().InSeconds())
+  if (second.time_stamp() != first.time_stamp())
     return false;
   return true;
 }
@@ -161,24 +164,12 @@ class InputRouterImplTest : public testing::Test {
 
   void TearDown() override {
     // Process all pending tasks to avoid leaks.
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
 
     input_router_.reset();
     client_.reset();
     process_.reset();
     browser_context_.reset();
-  }
-
-  void SetUpForGestureBasedWheelScrolling(bool enabled) {
-    CHECK(!base::CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kDisableWheelGestures) &&
-          !base::CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kEnableWheelGestures));
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        enabled ? switches::kEnableWheelGestures
-                : switches::kDisableWheelGestures);
-    TearDown();
-    SetUp();
   }
 
   void SetUpForTouchAckTimeoutTest(int desktop_timeout_ms,
@@ -265,7 +256,7 @@ class InputRouterImplTest : public testing::Test {
         velocity_x, velocity_y, source_device));
   }
 
-  void SetTouchTimestamp(base::TimeDelta timestamp) {
+  void SetTouchTimestamp(base::TimeTicks timestamp) {
     touch_event_.SetTimestamp(timestamp);
   }
 
@@ -350,7 +341,7 @@ class InputRouterImplTest : public testing::Test {
   static void RunTasksAndWait(base::TimeDelta delay) {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(), delay);
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
   }
 
   InputRouterImpl::Config config_;
@@ -730,7 +721,7 @@ TEST_F(InputRouterImplTest, CoalescesWheelEvents) {
   // The coalesced events can queue up a delayed ack
   // so that additional input events can be processed before
   // we turn off coalescing.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1U, ack_handler_->GetAndResetAckCount());
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
           InputMsg_HandleInputEvent::ID));
@@ -744,7 +735,7 @@ TEST_F(InputRouterImplTest, CoalescesWheelEvents) {
   // Ack the second event (which had the third coalesced into it).
   SendInputEventACK(WebInputEvent::MouseWheel,
                     INPUT_EVENT_ACK_STATE_CONSUMED);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1U, ack_handler_->GetAndResetAckCount());
   EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
                   InputMsg_HandleInputEvent::ID));
@@ -758,7 +749,7 @@ TEST_F(InputRouterImplTest, CoalescesWheelEvents) {
   // Ack the fourth event.
   SendInputEventACK(WebInputEvent::MouseWheel,
                     INPUT_EVENT_ACK_STATE_CONSUMED);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1U, ack_handler_->GetAndResetAckCount());
   EXPECT_TRUE(
       process_->sink().GetUniqueMessageMatching(InputMsg_HandleInputEvent::ID));
@@ -771,7 +762,7 @@ TEST_F(InputRouterImplTest, CoalescesWheelEvents) {
 
   // Ack the fifth event.
   SendInputEventACK(WebInputEvent::MouseWheel, INPUT_EVENT_ACK_STATE_CONSUMED);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1U, ack_handler_->GetAndResetAckCount());
   EXPECT_TRUE(
       process_->sink().GetUniqueMessageMatching(InputMsg_HandleInputEvent::ID));
@@ -785,7 +776,7 @@ TEST_F(InputRouterImplTest, CoalescesWheelEvents) {
 
   // After the final ack, the queue should be empty.
   SendInputEventACK(WebInputEvent::MouseWheel, INPUT_EVENT_ACK_STATE_CONSUMED);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1U, ack_handler_->GetAndResetAckCount());
   EXPECT_EQ(0U, GetSentMessageCountAndResetSink());
 }
@@ -869,7 +860,7 @@ TEST_F(InputRouterImplTest, AckedTouchEventState) {
 
   // Use a custom timestamp for all the events to test that the acked events
   // have the same timestamp;
-  base::TimeDelta timestamp = base::Time::NowFromSystemTime() - base::Time();
+  base::TimeTicks timestamp = base::TimeTicks::Now();
   timestamp -= base::TimeDelta::FromSeconds(600);
 
   // Press the first finger.
@@ -946,44 +937,6 @@ TEST_F(InputRouterImplTest, AckedTouchEventState) {
 #endif  // defined(USE_AURA)
 
 TEST_F(InputRouterImplTest, UnhandledWheelEvent) {
-  SetUpForGestureBasedWheelScrolling(false);
-
-  // Simulate wheel events.
-  SimulateWheelEvent(0, 0, 0, -5, 0, false);   // sent directly
-  SimulateWheelEvent(0, 0, 0, -10, 0, false);  // enqueued
-
-  // Check that only the first event was sent.
-  EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
-                  InputMsg_HandleInputEvent::ID));
-  EXPECT_EQ(1U, GetSentMessageCountAndResetSink());
-
-  // Indicate that the wheel event was unhandled.
-  SendInputEventACK(WebInputEvent::MouseWheel,
-                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
-
-  // Check that the correct unhandled wheel event was received.
-  EXPECT_EQ(1U, ack_handler_->GetAndResetAckCount());
-  EXPECT_EQ(INPUT_EVENT_ACK_STATE_NOT_CONSUMED, ack_handler_->ack_state());
-  EXPECT_EQ(ack_handler_->acked_wheel_event().deltaY, -5);
-
-  // Check that the second event was sent.
-  EXPECT_TRUE(process_->sink().GetUniqueMessageMatching(
-                  InputMsg_HandleInputEvent::ID));
-  EXPECT_EQ(1U, GetSentMessageCountAndResetSink());
-
-  // Indicate that the wheel event was unhandled.
-  SendInputEventACK(WebInputEvent::MouseWheel,
-                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
-
-  // Check that the correct unhandled wheel event was received.
-  EXPECT_EQ(1U, ack_handler_->GetAndResetAckCount());
-  EXPECT_EQ(INPUT_EVENT_ACK_STATE_NOT_CONSUMED, ack_handler_->ack_state());
-  EXPECT_EQ(ack_handler_->acked_wheel_event().deltaY, -10);
-}
-
-TEST_F(InputRouterImplTest, UnhandledWheelEventWithGestureScrolling) {
-  SetUpForGestureBasedWheelScrolling(true);
-
   // Simulate wheel events.
   SimulateWheelEvent(0, 0, 0, -5, 0, false);   // sent directly
   SimulateWheelEvent(0, 0, 0, -10, 0, false);  // enqueued
@@ -1925,7 +1878,7 @@ class InputRouterImplScaleEventTest : public InputRouterImplTest {
 
     InputMsg_HandleInputEvent::Schema::Param param;
     InputMsg_HandleInputEvent::Read(process_->sink().GetMessageAt(0), &param);
-    return static_cast<const T*>(base::get<0>(param));
+    return static_cast<const T*>(std::get<0>(param));
   }
 
   template <typename T>
@@ -2213,8 +2166,8 @@ TEST_F(InputRouterImplScaleGestureEventTest, GestureScrollUpdate) {
 }
 
 TEST_F(InputRouterImplScaleGestureEventTest, GestureScrollBegin) {
-  SimulateGestureEvent(
-      SyntheticWebGestureEventBuilder::BuildScrollBegin(10.f, 20.f));
+  SimulateGestureEvent(SyntheticWebGestureEventBuilder::BuildScrollBegin(
+      10.f, 20.f, blink::WebGestureDeviceTouchscreen));
   const WebGestureEvent* sent_event = GetSentWebInputEvent<WebGestureEvent>();
   EXPECT_EQ(20.f, sent_event->data.scrollBegin.deltaXHint);
   EXPECT_EQ(40.f, sent_event->data.scrollBegin.deltaYHint);

@@ -377,6 +377,8 @@ public class LoadUrlTest extends AwTestBase {
         }
     }
 
+    @SmallTest
+    @Feature({"AndroidWebView"})
     public void testOnReceivedTitleForUnchangingTitle() throws Throwable {
         final TestAwContentsClient contentsClient = new TestAwContentsClient();
         final AwTestContainerView testContainerView =
@@ -402,6 +404,37 @@ public class LoadUrlTest extends AwTestBase {
             loadUrlSync(awContents, contentsClient.getOnPageFinishedHelper(), url2);
             onReceivedTitleHelper.waitForCallback(onReceivedTitleCallCount);
             assertEquals(title, onReceivedTitleHelper.getTitle());
+        } finally {
+            webServer.shutdown();
+        }
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testCrossDomainNavigation() throws Throwable {
+        final TestAwContentsClient contentsClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentsClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        final String data = "<html><head><title>foo</title></head></html>";
+
+        TestAwContentsClient.OnReceivedTitleHelper onReceivedTitleHelper =
+                contentsClient.getOnReceivedTitleHelper();
+        int onReceivedTitleCallCount = onReceivedTitleHelper.getCallCount();
+
+        loadDataSync(
+                awContents, contentsClient.getOnPageFinishedHelper(), data, "text/html", false);
+        onReceivedTitleHelper.waitForCallback(onReceivedTitleCallCount);
+        assertEquals("foo", onReceivedTitleHelper.getTitle());
+        TestWebServer webServer = TestWebServer.start();
+
+        try {
+            final String url =
+                    webServer.setResponse("/page.html", CommonResources.ABOUT_HTML, null);
+            onReceivedTitleCallCount = onReceivedTitleHelper.getCallCount();
+            loadUrlSync(awContents, contentsClient.getOnPageFinishedHelper(), url);
+            onReceivedTitleHelper.waitForCallback(onReceivedTitleCallCount);
+            assertEquals(CommonResources.ABOUT_TITLE, onReceivedTitleHelper.getTitle());
         } finally {
             webServer.shutdown();
         }

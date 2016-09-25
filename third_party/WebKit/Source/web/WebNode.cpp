@@ -30,13 +30,14 @@
 
 #include "public/web/WebNode.h"
 
-#include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/Node.h"
 #include "core/dom/NodeList.h"
 #include "core/dom/StaticNodeList.h"
 #include "core/dom/TagCollection.h"
+#include "core/editing/EditingUtilities.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/events/Event.h"
 #include "core/html/HTMLCollection.h"
@@ -57,6 +58,7 @@
 #include "web/FrameLoaderClientImpl.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebPluginContainerImpl.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -140,11 +142,6 @@ WebNode WebNode::nextSibling() const
     return WebNode(m_private->nextSibling());
 }
 
-bool WebNode::hasChildNodes() const
-{
-    return m_private->hasChildren();
-}
-
 bool WebNode::isLink() const
 {
     return m_private->isLink();
@@ -157,20 +154,21 @@ bool WebNode::isTextNode() const
 
 bool WebNode::isCommentNode() const
 {
-    return m_private->getNodeType() == Node::COMMENT_NODE;
+    return m_private->getNodeType() == Node::kCommentNode;
 }
 
 bool WebNode::isFocusable() const
 {
     if (!m_private->isElementNode())
         return false;
-    m_private->document().updateLayoutIgnorePendingStylesheets();
+    m_private->document().updateStyleAndLayoutIgnorePendingStylesheets();
     return toElement(m_private.get())->isFocusable();
 }
 
 bool WebNode::isContentEditable() const
 {
-    return m_private->isContentEditable();
+    m_private->document().updateStyleAndLayoutTree();
+    return hasEditableStyle(*m_private);
 }
 
 bool WebNode::isInsideFocusableElementOrARIAWidget() const
@@ -190,12 +188,12 @@ bool WebNode::isDocumentNode() const
 
 bool WebNode::isDocumentTypeNode() const
 {
-    return m_private->getNodeType() == Node::DOCUMENT_TYPE_NODE;
+    return m_private->getNodeType() == Node::kDocumentTypeNode;
 }
 
 void WebNode::simulateClick()
 {
-    m_private->getExecutionContext()->postSuspendableTask(adoptPtr(new NodeDispatchSimulatedClickTask(m_private)));
+    m_private->getExecutionContext()->postSuspendableTask(wrapUnique(new NodeDispatchSimulatedClickTask(m_private)));
 }
 
 WebElementCollection WebNode::getElementsByHTMLTagName(const WebString& tag) const
@@ -205,14 +203,11 @@ WebElementCollection WebNode::getElementsByHTMLTagName(const WebString& tag) con
     return WebElementCollection();
 }
 
-WebElement WebNode::querySelector(const WebString& selector, WebExceptionCode& ec) const
+WebElement WebNode::querySelector(const WebString& selector) const
 {
     if (!m_private->isContainerNode())
         return WebElement();
-    TrackExceptionState exceptionState;
-    WebElement element = toContainerNode(m_private.get())->querySelector(selector, exceptionState);
-    ec = exceptionState.code();
-    return element;
+    return toContainerNode(m_private.get())->querySelector(selector, IGNORE_EXCEPTION);
 }
 
 bool WebNode::focused() const
@@ -220,20 +215,27 @@ bool WebNode::focused() const
     return m_private->focused();
 }
 
+WebPluginContainer* WebNode::pluginContainerFromNode(const Node* node)
+{
+    if (!node)
+        return nullptr;
+
+    if (!isHTMLObjectElement(node) && !isHTMLEmbedElement(node))
+        return nullptr;
+
+    LayoutObject* object = node->layoutObject();
+    if (object && object->isLayoutPart()) {
+        Widget* widget = toLayoutPart(object)->widget();
+        if (widget && widget->isPluginContainer())
+            return toWebPluginContainerImpl(widget);
+    }
+
+    return nullptr;
+}
+
 WebPluginContainer* WebNode::pluginContainer() const
 {
-    if (isNull())
-        return 0;
-    const Node& coreNode = *constUnwrap<Node>();
-    if (isHTMLObjectElement(coreNode) || isHTMLEmbedElement(coreNode)) {
-        LayoutObject* object = coreNode.layoutObject();
-        if (object && object->isLayoutPart()) {
-            Widget* widget = toLayoutPart(object)->widget();
-            if (widget && widget->isPluginContainer())
-                return toWebPluginContainerImpl(widget);
-        }
-    }
-    return 0;
+    return pluginContainerFromNode(constUnwrap<Node>());
 }
 
 WebAXObject WebNode::accessibilityObject()

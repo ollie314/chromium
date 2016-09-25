@@ -48,7 +48,9 @@ AudioOutputController::AudioOutputController(
 }
 
 AudioOutputController::~AudioOutputController() {
-  DCHECK_EQ(kClosed, state_);
+  CHECK_EQ(kClosed, state_);
+  CHECK_EQ(nullptr, stream_);
+  CHECK(duplication_targets_.empty());
 }
 
 // static
@@ -58,10 +60,11 @@ scoped_refptr<AudioOutputController> AudioOutputController::Create(
     const AudioParameters& params,
     const std::string& output_device_id,
     SyncReader* sync_reader) {
-  DCHECK(audio_manager);
+  CHECK(audio_manager);
+  CHECK_EQ(AudioManager::Get(), audio_manager);
   DCHECK(sync_reader);
 
-  if (!params.IsValid() || !audio_manager)
+  if (!params.IsValid())
     return NULL;
 
   scoped_refptr<AudioOutputController> controller(new AudioOutputController(
@@ -72,28 +75,33 @@ scoped_refptr<AudioOutputController> AudioOutputController::Create(
 }
 
 void AudioOutputController::Play() {
+  CHECK_EQ(AudioManager::Get(), audio_manager_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
       &AudioOutputController::DoPlay, this));
 }
 
 void AudioOutputController::Pause() {
+  CHECK_EQ(AudioManager::Get(), audio_manager_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
       &AudioOutputController::DoPause, this));
 }
 
 void AudioOutputController::Close(const base::Closure& closed_task) {
+  CHECK_EQ(AudioManager::Get(), audio_manager_);
   DCHECK(!closed_task.is_null());
   message_loop_->PostTaskAndReply(FROM_HERE, base::Bind(
       &AudioOutputController::DoClose, this), closed_task);
 }
 
 void AudioOutputController::SetVolume(double volume) {
+  CHECK_EQ(AudioManager::Get(), audio_manager_);
   message_loop_->PostTask(FROM_HERE, base::Bind(
       &AudioOutputController::DoSetVolume, this, volume));
 }
 
 void AudioOutputController::GetOutputDeviceId(
     base::Callback<void(const std::string&)> callback) const {
+  CHECK_EQ(AudioManager::Get(), audio_manager_);
   base::PostTaskAndReplyWithResult(
       message_loop_.get(),
       FROM_HERE,
@@ -103,6 +111,7 @@ void AudioOutputController::GetOutputDeviceId(
 
 void AudioOutputController::SwitchOutputDevice(
     const std::string& output_device_id, const base::Closure& callback) {
+  CHECK_EQ(AudioManager::Get(), audio_manager_);
   message_loop_->PostTaskAndReply(
       FROM_HERE,
       base::Bind(&AudioOutputController::DoSwitchOutputDevice, this,
@@ -301,10 +310,48 @@ int AudioOutputController::OnMoreData(AudioBus* dest,
   sync_reader_->UpdatePendingBytes(
       total_bytes_delay + frames * params_.GetBytesPerFrame(), frames_skipped);
 
+  bool need_to_duplicate = false;
+  {
+    base::AutoLock lock(duplication_targets_lock_);
+    need_to_duplicate = !duplication_targets_.empty();
+  }
+  if (need_to_duplicate) {
+    const base::TimeTicks reference_time =
+        base::TimeTicks::Now() +
+        base::TimeDelta::FromMicroseconds(base::Time::kMicrosecondsPerSecond *
+                                          total_bytes_delay /
+                                          params_.GetBytesPerSecond());
+    std::unique_ptr<AudioBus> copy(AudioBus::Create(params_));
+    dest->CopyTo(copy.get());
+    message_loop_->PostTask(
+        FROM_HERE,
+        base::Bind(&AudioOutputController::BroadcastDataToDuplicationTargets,
+                   this, base::Passed(&copy), reference_time));
+  }
+
   if (will_monitor_audio_levels())
     power_monitor_.Scan(*dest, frames);
 
   return frames;
+}
+
+void AudioOutputController::BroadcastDataToDuplicationTargets(
+    std::unique_ptr<AudioBus> audio_bus,
+    base::TimeTicks reference_time) {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  if (state_ != kPlaying || duplication_targets_.empty())
+    return;
+
+  // Note: Do not need to acquire lock since this is running on the same thread
+  // as where the set is modified.
+  for (auto target = std::next(duplication_targets_.begin(), 1);
+       target != duplication_targets_.end(); ++target) {
+    std::unique_ptr<AudioBus> copy(AudioBus::Create(params_));
+    audio_bus->CopyTo(copy.get());
+    (*target)->OnData(std::move(copy), reference_time);
+  }
+
+  (*duplication_targets_.begin())->OnData(std::move(audio_bus), reference_time);
 }
 
 void AudioOutputController::OnError(AudioOutputStream* stream) {
@@ -336,6 +383,7 @@ void AudioOutputController::DoStopCloseAndClearStream() {
 
     StopStream();
     stream_->Close();
+
     if (stream_ == diverting_to_stream_)
       diverting_to_stream_ = NULL;
     stream_ = NULL;
@@ -392,6 +440,18 @@ void AudioOutputController::StopDiverting() {
       FROM_HERE, base::Bind(&AudioOutputController::DoStopDiverting, this));
 }
 
+void AudioOutputController::StartDuplicating(AudioPushSink* sink) {
+  message_loop_->PostTask(
+      FROM_HERE,
+      base::Bind(&AudioOutputController::DoStartDuplicating, this, sink));
+}
+
+void AudioOutputController::StopDuplicating(AudioPushSink* sink) {
+  message_loop_->PostTask(
+      FROM_HERE,
+      base::Bind(&AudioOutputController::DoStopDuplicating, this, sink));
+}
+
 void AudioOutputController::DoStartDiverting(AudioOutputStream* to_stream) {
   DCHECK(message_loop_->BelongsToCurrentThread());
 
@@ -417,6 +477,23 @@ void AudioOutputController::DoStopDiverting() {
   // back to NULL.
   OnDeviceChange();
   DCHECK(!diverting_to_stream_);
+}
+
+void AudioOutputController::DoStartDuplicating(AudioPushSink* to_stream) {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  if (state_ == kClosed)
+    return;
+
+  base::AutoLock lock(duplication_targets_lock_);
+  duplication_targets_.insert(to_stream);
+}
+
+void AudioOutputController::DoStopDuplicating(AudioPushSink* to_stream) {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  to_stream->Close();
+
+  base::AutoLock lock(duplication_targets_lock_);
+  duplication_targets_.erase(to_stream);
 }
 
 std::pair<float, bool> AudioOutputController::ReadCurrentPowerAndClip() {

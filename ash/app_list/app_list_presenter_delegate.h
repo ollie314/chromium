@@ -5,10 +5,11 @@
 #ifndef ASH_APP_LIST_APP_LIST_PRESENTER_DELEGATE_H_
 #define ASH_APP_LIST_APP_LIST_PRESENTER_DELEGATE_H_
 
+#include <stdint.h>
+
 #include "ash/ash_export.h"
-#include "ash/shelf/shelf_icon_observer.h"
-#include "ash/shell_observer.h"
-#include "base/compiler_specific.h"
+#include "ash/common/shelf/wm_shelf_observer.h"
+#include "ash/common/shell_observer.h"
 #include "base/macros.h"
 #include "ui/app_list/presenter/app_list_presenter_delegate.h"
 #include "ui/events/event_handler.h"
@@ -16,11 +17,9 @@
 
 namespace app_list {
 class ApplicationDragAndDropHost;
-class AppListView;
-}
-
-namespace app_list {
 class AppListPresenter;
+class AppListView;
+class AppListViewDelegateFactory;
 }
 
 namespace ui {
@@ -33,8 +32,7 @@ namespace test {
 class AppListPresenterAshTestApi;
 }
 
-class AppListViewDelegateFactory;
-
+// Non-Mus+ash implementation of AppListPresetnerDelegate.
 // Responsible for laying out the app list UI as well as updating the Shelf
 // launch icon as the state of the app list changes. Listens to shell events
 // and touches/mouse clicks outside the app list to auto dismiss the UI or
@@ -44,18 +42,19 @@ class ASH_EXPORT AppListPresenterDelegate
       public ui::EventHandler,
       public keyboard::KeyboardControllerObserver,
       public ShellObserver,
-      public ShelfIconObserver {
+      public WmShelfObserver {
  public:
-  AppListPresenterDelegate(app_list::AppListPresenter* presenter,
-                           AppListViewDelegateFactory* view_delegate_factory);
+  AppListPresenterDelegate(
+      app_list::AppListPresenter* presenter,
+      app_list::AppListViewDelegateFactory* view_delegate_factory);
   ~AppListPresenterDelegate() override;
 
   // app_list::AppListPresenterDelegate:
   app_list::AppListViewDelegate* GetViewDelegate() override;
   void Init(app_list::AppListView* view,
-            aura::Window* root_window,
+            int64_t display_id,
             int current_apps_page) override;
-  void OnShown(aura::Window* root_window) override;
+  void OnShown(int64_t display_id) override;
   void OnDismissed() override;
   void UpdateBounds() override;
   gfx::Vector2d GetVisibilityAnimationOffset(
@@ -70,28 +69,26 @@ class ASH_EXPORT AppListPresenterDelegate
 
   // KeyboardControllerObserver overrides:
   void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
+  void OnKeyboardClosed() override;
 
   // ShellObserver overrides:
-  void OnShelfAlignmentChanged(aura::Window* root_window) override;
+  void OnOverviewModeStarting() override;
   void OnMaximizeModeStarted() override;
   void OnMaximizeModeEnded() override;
 
-  // ShelfIconObserver overrides:
+  // WmShelfObserver overrides:
   void OnShelfIconPositionsChanged() override;
 
   // Whether the app list is visible (or in the process of being shown).
   bool is_visible_ = false;
 
-  // Whether the app list should remain centered.
-  bool is_centered_ = false;
-
   // Not owned. Pointer is guaranteed to be valid while this object is alive.
   app_list::AppListPresenter* presenter_;
 
   // Not owned. Pointer is guaranteed to be valid while this object is alive.
-  AppListViewDelegateFactory* view_delegate_factory_;
+  app_list::AppListViewDelegateFactory* view_delegate_factory_;
 
-  // The AppListView this class manages, owned by its widget.
+  // Owned by its widget.
   app_list::AppListView* view_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(AppListPresenterDelegate);

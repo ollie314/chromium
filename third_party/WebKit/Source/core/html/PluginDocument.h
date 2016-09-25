@@ -45,7 +45,7 @@ public:
     Widget* pluginWidget();
     Node* pluginNode();
 
-    void detach(const AttachContext& = AttachContext()) override;
+    void shutdown() override;
 
     DECLARE_VIRTUAL_TRACE();
 

@@ -4,6 +4,9 @@
 
 #include <stddef.h>
 
+#include <map>
+#include <set>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -27,10 +30,11 @@
 #include "components/autofill/core/browser/webdata/autofill_change.h"
 #include "components/autofill/core/browser/webdata/autofill_entry.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
+#include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/autofill_util.h"
 #include "components/autofill/core/common/form_field_data.h"
-#include "components/os_crypt/os_crypt.h"
+#include "components/os_crypt/os_crypt_mocker.h"
 #include "components/webdata/common/web_database.h"
 #include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -122,17 +126,17 @@ class AutofillTableTest : public testing::Test {
 
  protected:
   void SetUp() override {
-#if defined(OS_MACOSX)
-    OSCrypt::UseMockKeychain(true);
-#endif
+    OSCryptMocker::SetUpWithSingleton();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    file_ = temp_dir_.path().AppendASCII("TestWebDatabase");
+    file_ = temp_dir_.GetPath().AppendASCII("TestWebDatabase");
 
     table_.reset(new AutofillTable);
     db_.reset(new WebDatabase);
     db_->AddTable(table_.get());
     ASSERT_EQ(sql::INIT_OK, db_->Init(file_));
   }
+
+  void TearDown() override { OSCryptMocker::TearDown(); }
 
   base::FilePath file_;
   base::ScopedTempDir temp_dir_;
@@ -788,7 +792,7 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   EXPECT_FALSE(s_billing_updated.Step());
 
   // Update the 'Billing' profile.
-  billing_profile.set_origin("Chrome settings");
+  billing_profile.set_origin(kSettingsOrigin);
   billing_profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Janice"));
   billing_profile.SetRawInfo(NAME_MIDDLE, ASCIIToUTF16("C."));
   billing_profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Joplin"));
@@ -1401,7 +1405,7 @@ TEST_F(AutofillTableTest, RemoveOriginURLsModifiedBetween) {
   EXPECT_EQ(std::string(), s_autofill_profiles_bounded.ColumnString(1));
   ASSERT_TRUE(s_autofill_profiles_bounded.Step());
   EXPECT_EQ(31, s_autofill_profiles_bounded.ColumnInt64(0));
-  EXPECT_EQ("Chrome settings", s_autofill_profiles_bounded.ColumnString(1));
+  EXPECT_EQ(kSettingsOrigin, s_autofill_profiles_bounded.ColumnString(1));
   sql::Statement s_credit_cards_bounded(
       db_->GetSQLConnection()->GetUniqueStatement(
           "SELECT date_modified, origin FROM credit_cards"));
@@ -1415,7 +1419,7 @@ TEST_F(AutofillTableTest, RemoveOriginURLsModifiedBetween) {
             s_credit_cards_bounded.ColumnString(1));
   ASSERT_TRUE(s_credit_cards_bounded.Step());
   EXPECT_EQ(37, s_credit_cards_bounded.ColumnInt64(0));
-  EXPECT_EQ("Chrome settings", s_credit_cards_bounded.ColumnString(1));
+  EXPECT_EQ(kSettingsOrigin, s_credit_cards_bounded.ColumnString(1));
 
   // Remove all origin URLS.
   profiles.clear();
@@ -1433,7 +1437,7 @@ TEST_F(AutofillTableTest, RemoveOriginURLsModifiedBetween) {
   EXPECT_EQ(std::string(), s_autofill_profiles_all.ColumnString(1));
   ASSERT_TRUE(s_autofill_profiles_all.Step());
   EXPECT_EQ(31, s_autofill_profiles_all.ColumnInt64(0));
-  EXPECT_EQ("Chrome settings", s_autofill_profiles_all.ColumnString(1));
+  EXPECT_EQ(kSettingsOrigin, s_autofill_profiles_all.ColumnString(1));
   sql::Statement s_credit_cards_all(
       db_->GetSQLConnection()->GetUniqueStatement(
           "SELECT date_modified, origin FROM credit_cards"));
@@ -1446,7 +1450,7 @@ TEST_F(AutofillTableTest, RemoveOriginURLsModifiedBetween) {
   EXPECT_EQ(std::string(), s_credit_cards_all.ColumnString(1));
   ASSERT_TRUE(s_credit_cards_all.Step());
   EXPECT_EQ(37, s_credit_cards_all.ColumnInt64(0));
-  EXPECT_EQ("Chrome settings", s_credit_cards_all.ColumnString(1));
+  EXPECT_EQ(kSettingsOrigin, s_credit_cards_all.ColumnString(1));
 }
 
 TEST_F(AutofillTableTest, Autofill_GetAllAutofillEntries_NoResults) {
@@ -1604,7 +1608,7 @@ TEST_F(AutofillTableTest, SetGetServerCards) {
   EXPECT_EQ(CreditCard::OK, outputs[0]->GetServerStatus());
   EXPECT_EQ(CreditCard::EXPIRED, outputs[1]->GetServerStatus());
 
-  STLDeleteContainerPointers(outputs.begin(), outputs.end());
+  base::STLDeleteContainerPointers(outputs.begin(), outputs.end());
 }
 
 TEST_F(AutofillTableTest, MaskUnmaskServerCards) {
@@ -1629,7 +1633,7 @@ TEST_F(AutofillTableTest, MaskUnmaskServerCards) {
   EXPECT_TRUE(CreditCard::FULL_SERVER_CARD == outputs[0]->record_type());
   EXPECT_EQ(full_number, outputs[0]->GetRawInfo(CREDIT_CARD_NUMBER));
 
-  STLDeleteContainerPointers(outputs.begin(), outputs.end());
+  base::STLDeleteContainerPointers(outputs.begin(), outputs.end());
   outputs.clear();
 
   // Re-mask the number, we should only get the last 4 digits out.
@@ -1639,7 +1643,7 @@ TEST_F(AutofillTableTest, MaskUnmaskServerCards) {
   EXPECT_TRUE(CreditCard::MASKED_SERVER_CARD == outputs[0]->record_type());
   EXPECT_EQ(masked_number, outputs[0]->GetRawInfo(CREDIT_CARD_NUMBER));
 
-  STLDeleteContainerPointers(outputs.begin(), outputs.end());
+  base::STLDeleteContainerPointers(outputs.begin(), outputs.end());
   outputs.clear();
 }
 
@@ -1670,7 +1674,7 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   EXPECT_TRUE(outputs[0]->record_type() == CreditCard::FULL_SERVER_CARD);
   EXPECT_EQ(full_number, outputs[0]->GetRawInfo(CREDIT_CARD_NUMBER));
 
-  STLDeleteContainerPointers(outputs.begin(), outputs.end());
+  base::STLDeleteContainerPointers(outputs.begin(), outputs.end());
   outputs.clear();
 
   // Call set again with the masked number.
@@ -1683,7 +1687,7 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   EXPECT_TRUE(outputs[0]->record_type() == CreditCard::FULL_SERVER_CARD);
   EXPECT_EQ(full_number, outputs[0]->GetRawInfo(CREDIT_CARD_NUMBER));
 
-  STLDeleteContainerPointers(outputs.begin(), outputs.end());
+  base::STLDeleteContainerPointers(outputs.begin(), outputs.end());
   outputs.clear();
 
   // Set inputs that do not include our old card.
@@ -1703,7 +1707,7 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   EXPECT_EQ(random_card.server_id(), outputs[0]->server_id());
   EXPECT_EQ(ASCIIToUTF16("2222"), outputs[0]->GetRawInfo(CREDIT_CARD_NUMBER));
 
-  STLDeleteContainerPointers(outputs.begin(), outputs.end());
+  base::STLDeleteContainerPointers(outputs.begin(), outputs.end());
   outputs.clear();
 
   // Putting back the original card masked should make it masked (this tests
@@ -1716,7 +1720,7 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   EXPECT_EQ(masked_card.server_id(), outputs[0]->server_id());
   EXPECT_EQ(ASCIIToUTF16("1111"), outputs[0]->GetRawInfo(CREDIT_CARD_NUMBER));
 
-  STLDeleteContainerPointers(outputs.begin(), outputs.end());
+  base::STLDeleteContainerPointers(outputs.begin(), outputs.end());
   outputs.clear();
 }
 
@@ -1738,19 +1742,23 @@ TEST_F(AutofillTableTest, SetServerCardUpdateUsageStats) {
   table_->GetServerCreditCards(&outputs.get());
   ASSERT_EQ(1u, outputs.size());
   EXPECT_EQ(masked_card.server_id(), outputs[0]->server_id());
-  EXPECT_EQ(0U, outputs[0]->use_count());
-  EXPECT_EQ(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(1U, outputs[0]->use_count());
+  EXPECT_NE(base::Time(), outputs[0]->use_date());
+  // We don't track modification date for server cards. It should always be
+  // base::Time().
+  EXPECT_EQ(base::Time(), outputs[0]->modification_date());
   outputs.clear();
 
   // Update the usage stats; make sure they're reflected in GetServerProfiles.
   inputs.back().set_use_count(4U);
-  inputs.back().set_use_date(base::Time::Now());
+  inputs.back().set_use_date(base::Time());
   table_->UpdateServerCardUsageStats(inputs.back());
   table_->GetServerCreditCards(&outputs.get());
   ASSERT_EQ(1u, outputs.size());
   EXPECT_EQ(masked_card.server_id(), outputs[0]->server_id());
   EXPECT_EQ(4U, outputs[0]->use_count());
-  EXPECT_NE(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(base::Time(), outputs[0]->modification_date());
   outputs.clear();
 
   // Setting the cards again shouldn't delete the usage stats.
@@ -1759,7 +1767,8 @@ TEST_F(AutofillTableTest, SetServerCardUpdateUsageStats) {
   ASSERT_EQ(1u, outputs.size());
   EXPECT_EQ(masked_card.server_id(), outputs[0]->server_id());
   EXPECT_EQ(4U, outputs[0]->use_count());
-  EXPECT_NE(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(base::Time(), outputs[0]->modification_date());
   outputs.clear();
 
   // Set a card list where the card is missing --- this should clear metadata.
@@ -1773,9 +1782,37 @@ TEST_F(AutofillTableTest, SetServerCardUpdateUsageStats) {
   table_->GetServerCreditCards(&outputs.get());
   ASSERT_EQ(1u, outputs.size());
   EXPECT_EQ(masked_card.server_id(), outputs[0]->server_id());
-  EXPECT_EQ(0U, outputs[0]->use_count());
-  EXPECT_EQ(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(1U, outputs[0]->use_count());
+  EXPECT_NE(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(base::Time(), outputs[0]->modification_date());
   outputs.clear();
+}
+
+TEST_F(AutofillTableTest, UpdateServerCardBillingAddress) {
+  // Add a masked card.
+  CreditCard masked_card(CreditCard::MASKED_SERVER_CARD, "a123");
+  masked_card.SetRawInfo(CREDIT_CARD_NAME_FULL,
+                         ASCIIToUTF16("Paul F. Tompkins"));
+  masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
+  masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
+  masked_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
+  masked_card.set_billing_address_id("billing-address-id-1");
+  masked_card.SetTypeForMaskedCard(kVisaCard);
+  test::SetServerCreditCards(table_.get(),
+                             std::vector<CreditCard>(1, masked_card));
+  ScopedVector<CreditCard> outputs;
+  table_->GetServerCreditCards(&outputs.get());
+  ASSERT_EQ(1u, outputs.size());
+
+  EXPECT_EQ("billing-address-id-1", outputs[0]->billing_address_id());
+
+  masked_card.set_billing_address_id("billing-address-id-2");
+  table_->UpdateServerCardBillingAddress(masked_card);
+  outputs.clear();
+  table_->GetServerCreditCards(&outputs.get());
+  ASSERT_EQ(1u, outputs.size());
+
+  EXPECT_EQ("billing-address-id-2", outputs[0]->billing_address_id());
 }
 
 TEST_F(AutofillTableTest, SetServerProfile) {
@@ -1789,7 +1826,7 @@ TEST_F(AutofillTableTest, SetServerProfile) {
   ASSERT_EQ(1u, outputs.size());
   EXPECT_EQ(one.server_id(), outputs[0]->server_id());
 
-  STLDeleteContainerPointers(outputs.begin(), outputs.end());
+  base::STLDeleteContainerPointers(outputs.begin(), outputs.end());
   outputs.clear();
 
   // Set a different profile.
@@ -1802,7 +1839,7 @@ TEST_F(AutofillTableTest, SetServerProfile) {
   ASSERT_EQ(1u, outputs.size());
   EXPECT_EQ(two.server_id(), outputs[0]->server_id());
 
-  STLDeleteContainerPointers(outputs.begin(), outputs.end());
+  base::STLDeleteContainerPointers(outputs.begin(), outputs.end());
   outputs.clear();
 }
 
@@ -1818,6 +1855,9 @@ TEST_F(AutofillTableTest, SetServerProfileUpdateUsageStats) {
   EXPECT_EQ(one.server_id(), outputs[0]->server_id());
   EXPECT_EQ(0U, outputs[0]->use_count());
   EXPECT_EQ(base::Time(), outputs[0]->use_date());
+  // We don't track modification date for server profiles. It should always be
+  // base::Time().
+  EXPECT_EQ(base::Time(), outputs[0]->modification_date());
   outputs.clear();
 
   // Update the usage stats; make sure they're reflected in GetServerProfiles.
@@ -1829,6 +1869,7 @@ TEST_F(AutofillTableTest, SetServerProfileUpdateUsageStats) {
   EXPECT_EQ(one.server_id(), outputs[0]->server_id());
   EXPECT_EQ(4U, outputs[0]->use_count());
   EXPECT_NE(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(base::Time(), outputs[0]->modification_date());
   outputs.clear();
 
   // Setting the profiles again shouldn't delete the usage stats.
@@ -1838,6 +1879,7 @@ TEST_F(AutofillTableTest, SetServerProfileUpdateUsageStats) {
   EXPECT_EQ(one.server_id(), outputs[0]->server_id());
   EXPECT_EQ(4U, outputs[0]->use_count());
   EXPECT_NE(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(base::Time(), outputs[0]->modification_date());
   outputs.clear();
 
   // Set a null profile list --- this should clear metadata.
@@ -1849,6 +1891,7 @@ TEST_F(AutofillTableTest, SetServerProfileUpdateUsageStats) {
   EXPECT_EQ(one.server_id(), outputs[0]->server_id());
   EXPECT_EQ(0U, outputs[0]->use_count());
   EXPECT_EQ(base::Time(), outputs[0]->use_date());
+  EXPECT_EQ(base::Time(), outputs[0]->modification_date());
   outputs.clear();
 }
 

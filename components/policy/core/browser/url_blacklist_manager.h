@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/callback_forward.h"
@@ -16,7 +17,6 @@
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/policy/policy_export.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -40,6 +40,15 @@ namespace policy {
 // against this set. The filters are currently kept in memory.
 class POLICY_EXPORT URLBlacklist {
  public:
+  // Indicates if the URL matches a pattern defined in blacklist, in whitelist
+  // or doesn't match anything in either list as defined in URLBlacklist and
+  // URLWhitelist policies.
+  enum URLBlacklistState {
+    URL_IN_WHITELIST,
+    URL_IN_BLACKLIST,
+    URL_NEUTRAL_STATE,
+  };
+
   // This is meant to be bound to url_formatter::SegmentURL. See that function
   // for documentation on the parameters and return value.
   typedef std::string (*SegmentURLCallback)(const std::string&, url::Parsed*);
@@ -62,12 +71,15 @@ class POLICY_EXPORT URLBlacklist {
   // Returns true if the URL is blocked.
   bool IsURLBlocked(const GURL& url) const;
 
+  URLBlacklistState GetURLBlacklistState(const GURL& url) const;
+
   // Returns the number of items in the list.
   size_t Size() const;
 
   // Splits a URL filter into its components. A GURL isn't used because these
   // can be invalid URLs e.g. "google.com".
-  // Returns false if the URL couldn't be parsed.
+  // Returns false if the URL couldn't be parsed. In case false is returned,
+  // the values of output parameters are undefined.
   // The |host| is preprocessed so it can be passed to URLMatcher for the
   // appropriate condition.
   // The optional username and password are ignored.
@@ -76,6 +88,7 @@ class POLICY_EXPORT URLBlacklist {
   // |port| is 0 if none is explicitly defined.
   // |path| does not include query parameters.
   // |query| contains the query parameters ('?' not included).
+  // All arguments are mandatory.
   static bool FilterToComponents(SegmentURLCallback segment_url,
                                  const std::string& filter,
                                  std::string* scheme,
@@ -110,7 +123,7 @@ class POLICY_EXPORT URLBlacklist {
   SegmentURLCallback segment_url_;
   url_matcher::URLMatcherConditionSet::ID id_;
   std::map<url_matcher::URLMatcherConditionSet::ID, FilterComponents> filters_;
-  scoped_ptr<url_matcher::URLMatcher> url_matcher_;
+  std::unique_ptr<url_matcher::URLMatcher> url_matcher_;
 
   DISALLOW_COPY_AND_ASSIGN(URLBlacklist);
 };
@@ -160,6 +173,8 @@ class POLICY_EXPORT URLBlacklistManager {
   // from the IO thread.
   bool IsURLBlocked(const GURL& url) const;
 
+  URLBlacklist::URLBlacklistState GetURLBlacklistState(const GURL& url) const;
+
   // Returns true if a request for |url| is blocked by the current blacklist.
   //
   // Should only be called for requests for frames (Main frames or subframes).
@@ -174,7 +189,7 @@ class POLICY_EXPORT URLBlacklistManager {
 
   // Replaces the current blacklist. Must be called on the IO thread.
   // Virtual for testing.
-  virtual void SetBlacklist(scoped_ptr<URLBlacklist> blacklist);
+  virtual void SetBlacklist(std::unique_ptr<URLBlacklist> blacklist);
 
   // Registers the preferences related to blacklisting in the given PrefService.
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -190,8 +205,8 @@ class POLICY_EXPORT URLBlacklistManager {
 
   // Starts the blacklist update on the IO thread, using the filters in
   // |block| and |allow|. Protected for testing.
-  void UpdateOnIO(scoped_ptr<base::ListValue> block,
-                  scoped_ptr<base::ListValue> allow);
+  void UpdateOnIO(std::unique_ptr<base::ListValue> block,
+                  std::unique_ptr<base::ListValue> allow);
 
  private:
   // ---------
@@ -222,7 +237,7 @@ class POLICY_EXPORT URLBlacklistManager {
   scoped_refptr<base::SequencedTaskRunner> ui_task_runner_;
 
   // The current blacklist.
-  scoped_ptr<URLBlacklist> blacklist_;
+  std::unique_ptr<URLBlacklist> blacklist_;
 
   // Used to post update tasks to the UI thread.
   base::WeakPtrFactory<URLBlacklistManager> ui_weak_ptr_factory_;

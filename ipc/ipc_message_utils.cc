@@ -9,16 +9,17 @@
 
 #include "base/files/file_path.h"
 #include "base/json/json_writer.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/nullable_string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "base/unguessable_token.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_attachment.h"
 #include "ipc/ipc_message_attachment_set.h"
+#include "ipc/ipc_mojo_param_traits.h"
 
 #if defined(OS_POSIX)
 #include "ipc/ipc_platform_file_attachment_posix.h"
@@ -127,9 +128,8 @@ void GetValueSize(base::PickleSizer* sizer,
     case base::Value::TYPE_LIST: {
       sizer->AddInt();
       const base::ListValue* list = static_cast<const base::ListValue*>(value);
-      for (base::ListValue::const_iterator it = list->begin();
-           it != list->end(); ++it) {
-        GetValueSize(sizer, *it, recursion + 1);
+      for (const auto& entry : *list) {
+        GetValueSize(sizer, entry.get(), recursion + 1);
       }
       break;
     }
@@ -200,9 +200,8 @@ void WriteValue(base::Pickle* m, const base::Value* value, int recursion) {
     case base::Value::TYPE_LIST: {
       const base::ListValue* list = static_cast<const base::ListValue*>(value);
       WriteParam(m, static_cast<int>(list->GetSize()));
-      for (base::ListValue::const_iterator it = list->begin();
-           it != list->end(); ++it) {
-        WriteValue(m, *it, recursion + 1);
+      for (const auto& entry : *list) {
+        WriteValue(m, entry.get(), recursion + 1);
       }
       break;
     }
@@ -301,18 +300,20 @@ bool ReadValue(const base::Pickle* m,
       int length;
       if (!iter->ReadData(&data, &length))
         return false;
-      *value = base::BinaryValue::CreateWithCopiedBuffer(data, length);
+      std::unique_ptr<base::BinaryValue> val =
+          base::BinaryValue::CreateWithCopiedBuffer(data, length);
+      *value = val.release();
       break;
     }
     case base::Value::TYPE_DICTIONARY: {
-      scoped_ptr<base::DictionaryValue> val(new base::DictionaryValue());
+      std::unique_ptr<base::DictionaryValue> val(new base::DictionaryValue());
       if (!ReadDictionaryValue(m, iter, val.get(), recursion))
         return false;
       *value = val.release();
       break;
     }
     case base::Value::TYPE_LIST: {
-      scoped_ptr<base::ListValue> val(new base::ListValue());
+      std::unique_ptr<base::ListValue> val(new base::ListValue());
       if (!ReadListValue(m, iter, val.get(), recursion))
         return false;
       *value = val.release();
@@ -636,6 +637,13 @@ void ParamTraits<base::DictionaryValue>::Log(const param_type& p,
 }
 
 #if defined(OS_POSIX)
+void ParamTraits<base::FileDescriptor>::GetSize(base::PickleSizer* sizer,
+                                                const param_type& p) {
+  GetParamSize(sizer, p.fd >= 0);
+  if (p.fd >= 0)
+    sizer->AddAttachment();
+}
+
 void ParamTraits<base::FileDescriptor>::Write(base::Pickle* m,
                                               const param_type& p) {
   const bool valid = p.fd >= 0;
@@ -688,6 +696,13 @@ void ParamTraits<base::FileDescriptor>::Log(const param_type& p,
 #endif  // defined(OS_POSIX)
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
+void ParamTraits<base::SharedMemoryHandle>::GetSize(base::PickleSizer* sizer,
+                                                    const param_type& p) {
+  GetParamSize(sizer, p.GetMemoryObject());
+  uint32_t dummy = 0;
+  GetParamSize(sizer, dummy);
+}
+
 void ParamTraits<base::SharedMemoryHandle>::Write(base::Pickle* m,
                                                   const param_type& p) {
   MachPortMac mach_port_mac(p.GetMemoryObject());
@@ -727,6 +742,16 @@ void ParamTraits<base::SharedMemoryHandle>::Log(const param_type& p,
 }
 
 #elif defined(OS_WIN)
+void ParamTraits<base::SharedMemoryHandle>::GetSize(base::PickleSizer* s,
+                                                    const param_type& p) {
+  GetParamSize(s, p.NeedsBrokering());
+  if (p.NeedsBrokering()) {
+    GetParamSize(s, p.GetHandle());
+  } else {
+    GetParamSize(s, HandleToLong(p.GetHandle()));
+  }
+}
+
 void ParamTraits<base::SharedMemoryHandle>::Write(base::Pickle* m,
                                                   const param_type& p) {
   m->WriteBool(p.NeedsBrokering());
@@ -974,6 +999,54 @@ void ParamTraits<base::TimeTicks>::Log(const param_type& p, std::string* l) {
   ParamTraits<int64_t>::Log(p.ToInternalValue(), l);
 }
 
+// If base::UnguessableToken is no longer 128 bits, the IPC serialization logic
+// below should be updated.
+static_assert(sizeof(base::UnguessableToken) == 2 * sizeof(uint64_t),
+              "base::UnguessableToken should be of size 2 * sizeof(uint64_t).");
+
+void ParamTraits<base::UnguessableToken>::GetSize(base::PickleSizer* sizer,
+                                                  const param_type& p) {
+  sizer->AddBytes(2 * sizeof(uint64_t));
+}
+
+void ParamTraits<base::UnguessableToken>::Write(base::Pickle* m,
+                                                const param_type& p) {
+  DCHECK(!p.is_empty());
+
+  ParamTraits<uint64_t>::Write(m, p.GetHighForSerialization());
+  ParamTraits<uint64_t>::Write(m, p.GetLowForSerialization());
+}
+
+bool ParamTraits<base::UnguessableToken>::Read(const base::Pickle* m,
+                                               base::PickleIterator* iter,
+                                               param_type* r) {
+  uint64_t high, low;
+  if (!ParamTraits<uint64_t>::Read(m, iter, &high) ||
+      !ParamTraits<uint64_t>::Read(m, iter, &low))
+    return false;
+
+  // Receiving a zeroed UnguessableToken is a security issue.
+  if (high == 0 && low == 0)
+    return false;
+
+  *r = base::UnguessableToken::Deserialize(high, low);
+  return true;
+}
+
+void ParamTraits<base::UnguessableToken>::Log(const param_type& p,
+                                              std::string* l) {
+  l->append(p.ToString());
+}
+
+void ParamTraits<IPC::ChannelHandle>::GetSize(base::PickleSizer* sizer,
+                                              const param_type& p) {
+  GetParamSize(sizer, p.name);
+#if defined(OS_POSIX)
+  GetParamSize(sizer, p.socket);
+#endif
+  GetParamSize(sizer, p.mojo_handle);
+}
+
 void ParamTraits<IPC::ChannelHandle>::Write(base::Pickle* m,
                                             const param_type& p) {
 #if defined(OS_WIN)
@@ -984,6 +1057,7 @@ void ParamTraits<IPC::ChannelHandle>::Write(base::Pickle* m,
 #if defined(OS_POSIX)
   WriteParam(m, p.socket);
 #endif
+  WriteParam(m, p.mojo_handle);
 }
 
 bool ParamTraits<IPC::ChannelHandle>::Read(const base::Pickle* m,
@@ -993,7 +1067,7 @@ bool ParamTraits<IPC::ChannelHandle>::Read(const base::Pickle* m,
 #if defined(OS_POSIX)
       && ReadParam(m, iter, &r->socket)
 #endif
-      ;
+      && ReadParam(m, iter, &r->mojo_handle);
 }
 
 void ParamTraits<IPC::ChannelHandle>::Log(const param_type& p,
@@ -1003,6 +1077,8 @@ void ParamTraits<IPC::ChannelHandle>::Log(const param_type& p,
   l->append(", ");
   ParamTraits<base::FileDescriptor>::Log(p.socket, l);
 #endif
+  l->append(", ");
+  LogParam(p.mojo_handle, l);
   l->append(")");
 }
 

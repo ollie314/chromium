@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<grit current_release="1" latest_public_release="0">
+<grit current_release="1" latest_public_release="0" output_all_resource_defines="false">
   <outputs>
     <output filename="values-am/android_blimp_strings.xml" lang="am" type="android" />
     <output filename="values-ar/android_blimp_strings.xml" lang="ar" type="android" />
@@ -148,6 +148,21 @@
       <message name="IDS_VERSION_INFO" desc="Show version info.">
         Version Info
       </message>
+      <message name="IDS_SHOW_DEBUG_INFO" desc="Show debug info.">
+        Show Debug Info
+      </message>
+      <message name="IDS_HIDE_DEBUG_INFO" desc="Hide debug info.">
+        Hide Debug Info
+      </message>
+      <message name="IDS_RECEIVED_BYTES_TITLE" desc="Label text for bytes received.">
+        Received (KB)
+      </message>
+      <message name="IDS_SENT_BYTES_TITLE" desc="Label text for bytes sent.">
+        Sent (KB)
+      </message>
+      <message name="IDS_COMMIT_COUNT_TITLE" desc="Label text for commit count.">
+        Commits
+      </message>
       <message name="IDS_SUBTITLE_FOR_VERSION_NUMBER" desc="Version number.">
         Blimp %1$s
       </message>
@@ -160,14 +175,65 @@
       <message name="IDS_ABOUT_BLIMP_PREFERENCES" desc="About blimp preferences.">
         About Blimp
       </message>
-      <message name="IDS_BLIMP_ENGINE_IP" desc="Blimp Engine IP.">
+      <message name="IDS_RESTART_BLIMP" desc="Blimp restart message.">
+        Restart Blimp
+      </message>
+      <message name="IDS_RESTART_NOW" desc="Restart now message">
+        Restart Now
+      </message>
+
+  <!-- Blimp UI strings, should prefix with blimp  -->
+  <!-- TODO(xingliu): Clean resources files in the future. http://crbug.com/630687 -->
+      <message name="IDS_BLIMP_ABOUT_BLIMP_PREFERENCES" desc="About blimp preferences.">
+        Blimp Settings
+      </message>
+      <message name="IDS_BLIMP_SWITCH" desc="Blimp Switch.">
+        Blimp Switch
+      </message>
+      <message name="IDS_BLIMP_ENGINE_IP" desc="Blimp Engine ip.">
         Engine IP
+      </message>
+      <message name="IDS_BLIMP_ENGINE_INFO" desc="Blimp Engine info.">
+        Engine Info
       </message>
       <message name="IDS_BLIMP_ENGINE_VERSION" desc="Blimp Engine Version.">
         Engine Version
       </message>
       <message name="IDS_BLIMP_ASSIGNER_URL" desc="Blimp Assigner URL.">
         Assigner URL
+      </message>
+      <message name="IDS_BLIMP_ASSIGNER_CHANGED_PLEASE_RESTART" desc="Blimp assigner changed, restart message.">
+        Please restart the application to use the new assigner configuration.
+      </message>
+      <message name="IDS_BLIMP_SIGN_OUT_RESTART" desc="User sign out, restart message.">
+        Please restart the application.
+      </message>
+      <message name="IDS_BLIMP_SWITCH_CHANGED_PLEASE_RESTART" desc="Blimp switch changed, restart message.">
+        Blimp switch changed, Please restart the application.
+      </message>
+        <message name="IDS_BLIMP_RESTART_BLIMP" desc="Blimp restart message.">
+        Restart Blimp
+      </message>
+      <message name="IDS_BLIMP_RESTART_NOW" desc="Restart now message">
+        Restart Now
+      </message>
+      <message name="IDS_BLIMP_IME_DIALOG_TITLE" desc="Label for the title text for IME dialog.">
+        Enter Text
+      </message>
+      <message name="IDS_BLIMP_FORM_INPUT_OK" desc="Label for a confirm button. Used in multiple contexts. [CHAR-LIMIT=20]">
+        OK
+      </message>
+      <message name="IDS_BLIMP_FORM_INPUT_CANCEL" desc="Label for a cancel button. Used in multiple contexts. [CHAR-LIMIT=20]">
+        Cancel
+      </message>
+      <message name="IDS_BLIMP_SIGN_IN_TITLE" desc="Sign in.">
+        Please sign in
+      </message>
+      <message name="IDS_BLIMP_SIGN_IN_MSG" desc="Sign in message.">
+        Please sign in to google account to enable Blimp.
+      </message>
+      <message name="IDS_BLIMP_SIGN_IN_BTN" desc="Sign in button.">
+        Sign in now
       </message>
     </messages>
   </release>

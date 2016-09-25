@@ -21,6 +21,8 @@
 namespace cc {
 namespace {
 
+static constexpr uint32_t kArbitraryClientId = 1u;
+
 class EmptySurfaceFactoryClient : public SurfaceFactoryClient {
  public:
   void ReturnResources(const ReturnedResourceArray& resources) override {}
@@ -29,7 +31,8 @@ class EmptySurfaceFactoryClient : public SurfaceFactoryClient {
 
 class SurfacesPixelTest : public RendererPixelTest<GLRenderer> {
  public:
-  SurfacesPixelTest() : allocator_(1u), factory_(&manager_, &client_) {}
+  SurfacesPixelTest()
+      : allocator_(kArbitraryClientId), factory_(&manager_, &client_) {}
 
  protected:
   SurfaceManager manager_;
@@ -77,8 +80,8 @@ TEST_F(SurfacesPixelTest, DrawSimpleFrame) {
       new DelegatedFrameData);
   delegated_frame_data->render_pass_list.push_back(std::move(pass));
 
-  std::unique_ptr<CompositorFrame> root_frame(new CompositorFrame);
-  root_frame->delegated_frame_data = std::move(delegated_frame_data);
+  CompositorFrame root_frame;
+  root_frame.delegated_frame_data = std::move(delegated_frame_data);
 
   SurfaceId root_surface_id = allocator_.GenerateId();
   factory_.Create(root_surface_id);
@@ -86,14 +89,13 @@ TEST_F(SurfacesPixelTest, DrawSimpleFrame) {
                                  SurfaceFactory::DrawCallback());
 
   SurfaceAggregator aggregator(&manager_, resource_provider_.get(), true);
-  std::unique_ptr<CompositorFrame> aggregated_frame =
-      aggregator.Aggregate(root_surface_id);
+  CompositorFrame aggregated_frame = aggregator.Aggregate(root_surface_id);
   factory_.Destroy(root_surface_id);
 
   bool discard_alpha = false;
   ExactPixelComparator pixel_comparator(discard_alpha);
   RenderPassList* pass_list =
-      &aggregated_frame->delegated_frame_data->render_pass_list;
+      &aggregated_frame.delegated_frame_data->render_pass_list;
   EXPECT_TRUE(RunPixelTest(pass_list,
                            base::FilePath(FILE_PATH_LITERAL("green.png")),
                            pixel_comparator));
@@ -135,8 +137,8 @@ TEST_F(SurfacesPixelTest, DrawSimpleAggregatedFrame) {
         new DelegatedFrameData);
     delegated_frame_data->render_pass_list.push_back(std::move(pass));
 
-    std::unique_ptr<CompositorFrame> root_frame(new CompositorFrame);
-    root_frame->delegated_frame_data = std::move(delegated_frame_data);
+    CompositorFrame root_frame;
+    root_frame.delegated_frame_data = std::move(delegated_frame_data);
 
     factory_.SubmitCompositorFrame(root_surface_id, std::move(root_frame),
                                    SurfaceFactory::DrawCallback());
@@ -164,21 +166,20 @@ TEST_F(SurfacesPixelTest, DrawSimpleAggregatedFrame) {
         new DelegatedFrameData);
     delegated_frame_data->render_pass_list.push_back(std::move(pass));
 
-    std::unique_ptr<CompositorFrame> child_frame(new CompositorFrame);
-    child_frame->delegated_frame_data = std::move(delegated_frame_data);
+    CompositorFrame child_frame;
+    child_frame.delegated_frame_data = std::move(delegated_frame_data);
 
     factory_.SubmitCompositorFrame(child_surface_id, std::move(child_frame),
                                    SurfaceFactory::DrawCallback());
   }
 
   SurfaceAggregator aggregator(&manager_, resource_provider_.get(), true);
-  std::unique_ptr<CompositorFrame> aggregated_frame =
-      aggregator.Aggregate(root_surface_id);
+  CompositorFrame aggregated_frame = aggregator.Aggregate(root_surface_id);
 
   bool discard_alpha = false;
   ExactPixelComparator pixel_comparator(discard_alpha);
   RenderPassList* pass_list =
-      &aggregated_frame->delegated_frame_data->render_pass_list;
+      &aggregated_frame.delegated_frame_data->render_pass_list;
   EXPECT_TRUE(RunPixelTest(pass_list,
                            base::FilePath(FILE_PATH_LITERAL("blue_yellow.png")),
                            pixel_comparator));
@@ -236,8 +237,8 @@ TEST_F(SurfacesPixelTest, DrawAggregatedFrameWithSurfaceTransforms) {
         new DelegatedFrameData);
     delegated_frame_data->render_pass_list.push_back(std::move(pass));
 
-    std::unique_ptr<CompositorFrame> root_frame(new CompositorFrame);
-    root_frame->delegated_frame_data = std::move(delegated_frame_data);
+    CompositorFrame root_frame;
+    root_frame.delegated_frame_data = std::move(delegated_frame_data);
 
     factory_.SubmitCompositorFrame(root_surface_id, std::move(root_frame),
                                    SurfaceFactory::DrawCallback());
@@ -273,8 +274,8 @@ TEST_F(SurfacesPixelTest, DrawAggregatedFrameWithSurfaceTransforms) {
         new DelegatedFrameData);
     delegated_frame_data->render_pass_list.push_back(std::move(pass));
 
-    std::unique_ptr<CompositorFrame> child_frame(new CompositorFrame);
-    child_frame->delegated_frame_data = std::move(delegated_frame_data);
+    CompositorFrame child_frame;
+    child_frame.delegated_frame_data = std::move(delegated_frame_data);
 
     factory_.SubmitCompositorFrame(left_child_id, std::move(child_frame),
                                    SurfaceFactory::DrawCallback());
@@ -310,21 +311,20 @@ TEST_F(SurfacesPixelTest, DrawAggregatedFrameWithSurfaceTransforms) {
         new DelegatedFrameData);
     delegated_frame_data->render_pass_list.push_back(std::move(pass));
 
-    std::unique_ptr<CompositorFrame> child_frame(new CompositorFrame);
-    child_frame->delegated_frame_data = std::move(delegated_frame_data);
+    CompositorFrame child_frame;
+    child_frame.delegated_frame_data = std::move(delegated_frame_data);
 
     factory_.SubmitCompositorFrame(right_child_id, std::move(child_frame),
                                    SurfaceFactory::DrawCallback());
   }
 
   SurfaceAggregator aggregator(&manager_, resource_provider_.get(), true);
-  std::unique_ptr<CompositorFrame> aggregated_frame =
-      aggregator.Aggregate(root_surface_id);
+  CompositorFrame aggregated_frame = aggregator.Aggregate(root_surface_id);
 
   bool discard_alpha = false;
   ExactPixelComparator pixel_comparator(discard_alpha);
   RenderPassList* pass_list =
-      &aggregated_frame->delegated_frame_data->render_pass_list;
+      &aggregated_frame.delegated_frame_data->render_pass_list;
   EXPECT_TRUE(RunPixelTest(
       pass_list,
       base::FilePath(FILE_PATH_LITERAL("four_blue_green_checkers.png")),

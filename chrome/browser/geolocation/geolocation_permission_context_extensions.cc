@@ -22,19 +22,22 @@ using extensions::ExtensionRegistry;
 
 namespace {
 
-#if ENABLE_EXTENSIONS
+#if defined(ENABLE_EXTENSIONS)
 void CallbackContentSettingWrapper(
     const base::Callback<void(ContentSetting)>& callback,
     bool allowed) {
   callback.Run(allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK);
 }
-#endif // ENABLE_EXTENSIONS
+#endif  // defined(ENABLE_EXTENSIONS)
 
 }  // anonymous namespace
 
-GeolocationPermissionContextExtensions::
-GeolocationPermissionContextExtensions(Profile* profile)
-    : profile_(profile) {
+GeolocationPermissionContextExtensions::GeolocationPermissionContextExtensions(
+    Profile* profile)
+#if defined(ENABLE_EXTENSIONS)
+    : profile_(profile)
+#endif
+{
 }
 
 GeolocationPermissionContextExtensions::
@@ -46,6 +49,7 @@ bool GeolocationPermissionContextExtensions::DecidePermission(
     const PermissionRequestID& request_id,
     int bridge_id,
     const GURL& requesting_frame,
+    bool user_gesture,
     const base::Callback<void(ContentSetting)>& callback,
     bool* permission_set,
     bool* new_permission) {
@@ -56,7 +60,7 @@ bool GeolocationPermissionContextExtensions::DecidePermission(
       extensions::WebViewPermissionHelper::FromWebContents(web_contents);
   if (web_view_permission_helper) {
     web_view_permission_helper->RequestGeolocationPermission(
-        bridge_id, requesting_frame,
+        bridge_id, requesting_frame, user_gesture,
         base::Bind(&CallbackContentSettingWrapper, callback));
     *permission_set = false;
     *new_permission = false;

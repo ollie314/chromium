@@ -90,12 +90,32 @@ WebInspector.Geometry.Point.prototype = {
     },
 
     /**
+     * @param {!WebInspector.Geometry.Point} line
+     * @return {!WebInspector.Geometry.Point}
+     */
+    projectOn: function(line)
+    {
+        if (line.x === 0 && line.y === 0)
+            return new WebInspector.Geometry.Point(0, 0);
+        return line.scale((this.x * line.x + this.y * line.y) / (Math.pow(line.x, 2) + Math.pow(line.y, 2)));
+    },
+
+    /**
+     * @param {number} scalar
+     * @return {!WebInspector.Geometry.Point}
+     */
+    scale: function(scalar)
+    {
+        return new WebInspector.Geometry.Point(this.x * scalar, this.y * scalar);
+    },
+
+    /**
      * @override
      * @return {string}
      */
     toString: function()
     {
-       return Math.round(this.x * 100) / 100 + ", " + Math.round(this.y * 100) / 100;
+        return Math.round(this.x * 100) / 100 + ", " + Math.round(this.y * 100) / 100;
     }
 }
 
@@ -108,6 +128,9 @@ WebInspector.Geometry.CubicBezier = function(point1, point2)
 {
     this.controlPoints = [point1, point2];
 }
+
+/** @type {!RegExp} */
+WebInspector.Geometry.CubicBezier.Regex = /((cubic-bezier\([^)]+\))|\b(linear|ease-in-out|ease-in|ease-out|ease)\b)/g;
 
 WebInspector.Geometry.CubicBezier.KeywordValues = {
     "linear": "cubic-bezier(0, 0, 1, 1)",
@@ -125,7 +148,7 @@ WebInspector.Geometry.CubicBezier.parse = function(text)
 {
     var keywordValues = WebInspector.Geometry.CubicBezier.KeywordValues;
     var value = text.toLowerCase().replace(/\s+/g, "");
-    if (Object.keys(keywordValues).indexOf(value) != -1)
+    if (Object.keys(keywordValues).indexOf(value) !== -1)
         return WebInspector.Geometry.CubicBezier.parse(keywordValues[value]);
     var bezierRegex = /^cubic-bezier\(([^,]+),([^,]+),([^,]+),([^,]+)\)$/;
     var match = value.match(bezierRegex);
@@ -197,7 +220,26 @@ WebInspector.Geometry.EulerAngles.fromRotationMatrix = function(rotationMatrix)
     var beta = Math.atan2(rotationMatrix.m23, rotationMatrix.m33);
     var gamma = Math.atan2(-rotationMatrix.m13, Math.sqrt(rotationMatrix.m11 * rotationMatrix.m11 + rotationMatrix.m12 * rotationMatrix.m12));
     var alpha = Math.atan2(rotationMatrix.m12, rotationMatrix.m11);
-    return new WebInspector.Geometry.EulerAngles(WebInspector.Geometry.radToDeg(alpha), WebInspector.Geometry.radToDeg(beta), WebInspector.Geometry.radToDeg(gamma));
+    return new WebInspector.Geometry.EulerAngles(WebInspector.Geometry.radiansToDegrees(alpha), WebInspector.Geometry.radiansToDegrees(beta), WebInspector.Geometry.radiansToDegrees(gamma));
+}
+
+WebInspector.Geometry.EulerAngles.prototype = {
+    /**
+     * @return {string}
+     */
+    toRotate3DString: function()
+    {
+        var gammaAxisY = -Math.sin(WebInspector.Geometry.degreesToRadians(this.beta));
+        var gammaAxisZ = Math.cos(WebInspector.Geometry.degreesToRadians(this.beta));
+        var axis = {
+            alpha: [0, 1, 0],
+            beta: [-1, 0, 0],
+            gamma: [0, gammaAxisY, gammaAxisZ]
+        };
+        return "rotate3d(" + axis.alpha.join(",") + "," + this.alpha + "deg) "
+            + "rotate3d(" + axis.beta.join(",") + "," + this.beta + "deg) "
+            + "rotate3d(" + axis.gamma.join(",") + "," + this.gamma + "deg)";
+    }
 }
 
 /**
@@ -264,14 +306,23 @@ WebInspector.Geometry.calculateAngle = function(u, v)
     var cos = WebInspector.Geometry.scalarProduct(u, v) / uLength / vLength;
     if (Math.abs(cos) > 1)
         return 0;
-    return WebInspector.Geometry.radToDeg(Math.acos(cos));
+    return WebInspector.Geometry.radiansToDegrees(Math.acos(cos));
+}
+
+/**
+ * @param {number} deg
+ * @return {number}
+ */
+WebInspector.Geometry.degreesToRadians = function(deg)
+{
+    return deg * Math.PI / 180;
 }
 
 /**
  * @param {number} rad
  * @return {number}
  */
-WebInspector.Geometry.radToDeg = function(rad)
+WebInspector.Geometry.radiansToDegrees = function(rad)
 {
     return rad * 180 / Math.PI;
 }
@@ -378,7 +429,7 @@ Insets.prototype = {
      */
     isEqual: function(insets)
     {
-        return !!insets && this.left === insets.left && this.top === insets.top && this.right == insets.right && this.bottom == insets.bottom;
+        return !!insets && this.left === insets.left && this.top === insets.top && this.right === insets.right && this.bottom === insets.bottom;
     }
 }
 
@@ -405,7 +456,7 @@ WebInspector.Rect.prototype = {
      */
     isEqual: function(rect)
     {
-        return !!rect && this.left === rect.left && this.top === rect.top && this.width == rect.width && this.height == rect.height;
+        return !!rect && this.left === rect.left && this.top === rect.top && this.width === rect.width && this.height === rect.height;
     },
 
     /**

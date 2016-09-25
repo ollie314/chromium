@@ -25,6 +25,7 @@
 
 #include "modules/accessibility/AXMenuListOption.h"
 
+#include "SkMatrix44.h"
 #include "modules/accessibility/AXMenuListPopup.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 
@@ -93,7 +94,7 @@ bool AXMenuListOption::isSelected() const
 {
     AXMenuListPopup* parent = static_cast<AXMenuListPopup*>(parentObject());
     if (parent && !parent->isOffScreen())
-        return parent->activeChild() == this;
+        return parent->activeDescendant() == this;
     return m_element && m_element->selected();
 }
 
@@ -115,19 +116,22 @@ bool AXMenuListOption::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReas
     return accessibilityIsIgnoredByDefault(ignoredReasons);
 }
 
-LayoutRect AXMenuListOption::elementRect() const
+void AXMenuListOption::getRelativeBounds(AXObject** outContainer, FloatRect& outBoundsInContainer, SkMatrix44& outContainerTransform) const
 {
+    *outContainer = nullptr;
+    outBoundsInContainer = FloatRect();
+    outContainerTransform.setIdentity();
+
     AXObject* parent = parentObject();
     if (!parent)
-        return LayoutRect();
+        return;
     ASSERT(parent->isMenuListPopup());
 
     AXObject* grandparent = parent->parentObject();
     if (!grandparent)
-        return LayoutRect();
+        return;
     ASSERT(grandparent->isMenuList());
-
-    return grandparent->elementRect();
+    grandparent->getRelativeBounds(outContainer, outBoundsInContainer, outContainerTransform);
 }
 
 String AXMenuListOption::textAlternative(bool recursive, bool inAriaLabelledByTraversal, AXObjectSet& visited, AXNameFrom& nameFrom, AXRelatedObjectVector* relatedObjects, NameSources* nameSources) const

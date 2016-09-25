@@ -50,7 +50,8 @@ public:
         EventTarget* relatedTarget,
         double platformTimeStamp,
         PlatformMouseEvent::SyntheticEventType,
-        const String& region);
+        const String& region,
+        const PlatformMouseEvent*);
 
     static MouseEvent* create(const AtomicString& eventType, AbstractView*, const PlatformMouseEvent&, int detail, Node* relatedTarget);
 
@@ -61,7 +62,6 @@ public:
     ~MouseEvent() override;
 
     static unsigned short platformModifiersToButtons(unsigned modifiers);
-    static unsigned short buttonToButtons(short button);
 
     void initMouseEvent(ScriptState*, const AtomicString& type, bool canBubble, bool cancelable, AbstractView*,
         int detail, int screenX, int screenY, int clientX, int clientY,
@@ -93,12 +93,9 @@ public:
 
     EventDispatchMediator* createMediator() override;
 
-    enum class Buttons : unsigned {
-        None = 0,
-        Left = 1 << 0,
-        Right = 1 << 1,
-        Middle = 1 << 2
-    };
+    int clickCount() { return detail(); }
+
+    const PlatformMouseEvent* mouseEvent() const { return m_mouseEvent.get(); }
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -110,7 +107,8 @@ protected:
         EventTarget* relatedTarget,
         double platformTimeStamp,
         PlatformMouseEvent::SyntheticEventType,
-        const String& region);
+        const String& region,
+        const PlatformMouseEvent*);
 
     MouseEvent(const AtomicString& type, const MouseEventInit&);
 
@@ -130,6 +128,7 @@ private:
     Member<EventTarget> m_relatedTarget;
     PlatformMouseEvent::SyntheticEventType m_syntheticEventType;
     String m_region;
+    std::unique_ptr<PlatformMouseEvent> m_mouseEvent;
 };
 
 class MouseEventDispatchMediator final : public EventDispatchMediator {

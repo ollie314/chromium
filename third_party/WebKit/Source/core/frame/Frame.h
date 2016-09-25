@@ -46,6 +46,7 @@ class FrameHost;
 class FrameOwner;
 class HTMLFrameOwnerElement;
 class LayoutPart;
+class LayoutPartItem;
 class KURL;
 class Page;
 class SecurityContext;
@@ -68,8 +69,8 @@ public:
 
     DECLARE_VIRTUAL_TRACE();
 
-    virtual bool isLocalFrame() const { return false; }
-    virtual bool isRemoteFrame() const { return false; }
+    virtual bool isLocalFrame() const = 0;
+    virtual bool isRemoteFrame() const = 0;
 
     virtual DOMWindow* domWindow() const = 0;
     virtual WindowProxy* windowProxy(DOMWrapperWorld&) = 0;
@@ -81,7 +82,6 @@ public:
     virtual void reload(FrameLoadType, ClientRedirectPolicy) = 0;
 
     virtual void detach(FrameDetachType);
-    void detachChildren();
     void disconnectOwnerElement();
     virtual bool shouldClose() = 0;
 
@@ -117,7 +117,10 @@ public:
     bool canNavigate(const Frame&);
     virtual void printNavigationErrorMessage(const Frame&, const char* reason) = 0;
 
+    // TODO(pilgrim) replace all instances of ownerLayoutObject() with ownerLayoutItem()
+    // https://crbug.com/499321
     LayoutPart* ownerLayoutObject() const; // LayoutObject for the element that contains this frame.
+    LayoutPartItem ownerLayoutItem() const;
 
     Settings* settings() const; // can be null
 
@@ -129,6 +132,8 @@ public:
     bool isLoading() const { return m_isLoading; }
 
     virtual WindowProxyManager* getWindowProxyManager() const = 0;
+
+    virtual void didChangeVisibilityState();
 
 protected:
     Frame(FrameClient*, FrameHost*, FrameOwner*);
@@ -161,7 +166,7 @@ inline FrameTree& Frame::tree() const
 }
 
 // Allow equality comparisons of Frames by reference or pointer, interchangeably.
-DEFINE_COMPARISON_OPERATORS_WITH_REFERENCES_REFCOUNTED(Frame)
+DEFINE_COMPARISON_OPERATORS_WITH_REFERENCES(Frame)
 
 } // namespace blink
 

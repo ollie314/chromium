@@ -37,12 +37,12 @@ namespace blink {
 
 class LayoutObject;
 
-struct SameSizeAsInlineBox {
+struct SameSizeAsInlineBox : DisplayItemClient {
     virtual ~SameSizeAsInlineBox() { }
+    uint32_t bitfields;
     void* a[4];
     LayoutPoint b;
     LayoutUnit c;
-    uint32_t d : 32;
 #if ENABLE(ASSERT)
     bool f;
 #endif
@@ -60,12 +60,18 @@ InlineBox::~InlineBox()
 
 #endif
 
+DISABLE_CFI_PERF
 void InlineBox::destroy()
 {
     // We do not need to issue invalidations if the page is being destroyed
     // since these objects will never be repainted.
-    if (!m_lineLayoutItem.documentBeingDestroyed())
-        m_lineLayoutItem.invalidateDisplayItemClient(*this);
+    if (!m_lineLayoutItem.documentBeingDestroyed()) {
+        setLineLayoutItemShouldDoFullPaintInvalidationIfNeeded();
+
+        // TODO(crbug.com/619630): Make this fast.
+        m_lineLayoutItem.slowSetPaintingLayerNeedsRepaint();
+    }
+
     delete this;
 }
 
@@ -212,6 +218,8 @@ void InlineBox::move(const LayoutSize& delta)
 
     if (getLineLayoutItem().isAtomicInlineLevel())
         LineLayoutBox(getLineLayoutItem()).move(delta.width(), delta.height());
+
+    setLineLayoutItemShouldDoFullPaintInvalidationIfNeeded();
 }
 
 void InlineBox::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit /* lineTop */, LayoutUnit /* lineBottom */) const
@@ -305,7 +313,7 @@ bool InlineBox::canAccommodateEllipsis(bool ltr, int blockEdge, int ellipsisWidt
     if (!getLineLayoutItem().isAtomicInlineLevel())
         return true;
 
-    IntRect boxRect(left(), 0, m_logicalWidth, 10);
+    IntRect boxRect(left().toInt(), 0, m_logicalWidth.toInt(), 10);
     IntRect ellipsisRect(ltr ? blockEdge - ellipsisWidth : blockEdge, 0, ellipsisWidth, 10);
     return !(boxRect.intersects(ellipsisRect));
 }
@@ -381,13 +389,21 @@ LayoutPoint InlineBox::flipForWritingMode(const LayoutPoint& point) const
     return root().block().flipForWritingMode(point);
 }
 
-void InlineBox::invalidateDisplayItemClientsRecursively()
+void InlineBox::setShouldDoFullPaintInvalidationRecursively()
 {
-    getLineLayoutItem().invalidateDisplayItemClient(*this);
+    getLineLayoutItem().setShouldDoFullPaintInvalidation();
     if (!isInlineFlowBox())
         return;
     for (InlineBox* child = toInlineFlowBox(this)->firstChild(); child; child = child->nextOnLine())
-        child->invalidateDisplayItemClientsRecursively();
+        child->setShouldDoFullPaintInvalidationRecursively();
+}
+
+void InlineBox::setLineLayoutItemShouldDoFullPaintInvalidationIfNeeded()
+{
+    // For RootInlineBox, we only need to invalidate if it's using the first line style.
+    // otherwise it paints nothing so we don't need to invalidate it.
+    if (!isRootInlineBox() || isFirstLineStyle())
+        m_lineLayoutItem.setShouldDoFullPaintInvalidation();
 }
 
 } // namespace blink

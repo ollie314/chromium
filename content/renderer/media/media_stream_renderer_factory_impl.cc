@@ -11,9 +11,9 @@
 #include "content/renderer/media/media_stream_video_track.h"
 #include "content/renderer/media/track_audio_renderer.h"
 #include "content/renderer/media/webrtc/peer_connection_dependency_factory.h"
+#include "content/renderer/media/webrtc/peer_connection_remote_audio_source.h"
 #include "content/renderer/media/webrtc_audio_renderer.h"
 #include "content/renderer/render_thread_impl.h"
-#include "media/base/audio_hardware_config.h"
 #include "third_party/WebKit/public/platform/WebMediaStream.h"
 #include "third_party/webrtc/api/mediastreaminterface.h"
 
@@ -56,17 +56,17 @@ MediaStreamRendererFactoryImpl::MediaStreamRendererFactoryImpl() {
 MediaStreamRendererFactoryImpl::~MediaStreamRendererFactoryImpl() {
 }
 
-scoped_refptr<VideoFrameProvider>
-MediaStreamRendererFactoryImpl::GetVideoFrameProvider(
+scoped_refptr<MediaStreamVideoRenderer>
+MediaStreamRendererFactoryImpl::GetVideoRenderer(
     const blink::WebMediaStream& web_stream,
     const base::Closure& error_cb,
-    const VideoFrameProvider::RepaintCB& repaint_cb,
+    const MediaStreamVideoRenderer::RepaintCB& repaint_cb,
     const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
     const scoped_refptr<base::TaskRunner>& worker_task_runner,
     media::GpuVideoAcceleratorFactories* gpu_factories) {
   DCHECK(!web_stream.isNull());
 
-  DVLOG(1) << "MediaStreamRendererFactoryImpl::GetVideoFrameProvider stream:"
+  DVLOG(1) << "MediaStreamRendererFactoryImpl::GetVideoRenderer stream:"
            << base::UTF16ToUTF8(base::StringPiece16(web_stream.id()));
 
   blink::WebVector<blink::WebMediaStreamTrack> video_tracks;
@@ -114,11 +114,7 @@ MediaStreamRendererFactoryImpl::GetAudioRenderer(
 
   // If the track has a local source, or is a remote track that does not use the
   // WebRTC audio pipeline, return a new TrackAudioRenderer instance.
-  //
-  // TODO(miu): In a soon up-coming change, I'll introduce a cleaner way (i.e.,
-  // rather than calling GetAudioAdapter()) to determine whether a remote source
-  // is via WebRTC or something else.
-  if (audio_track->is_local_track() || !audio_track->GetAudioAdapter()) {
+  if (!PeerConnectionRemoteAudioTrack::From(audio_track)) {
     // TODO(xians): Add support for the case where the media stream contains
     // multiple audio tracks.
     DVLOG(1) << "Creating TrackAudioRenderer for "

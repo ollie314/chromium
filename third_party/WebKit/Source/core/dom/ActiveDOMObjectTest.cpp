@@ -34,6 +34,7 @@
 #include "core/testing/DummyPageHolder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include <memory>
 
 namespace blink {
 
@@ -61,8 +62,8 @@ protected:
     MockActiveDOMObject& activeDOMObject() { return *m_activeDOMObject; }
 
 private:
-    OwnPtr<DummyPageHolder> m_srcPageHolder;
-    OwnPtr<DummyPageHolder> m_destPageHolder;
+    std::unique_ptr<DummyPageHolder> m_srcPageHolder;
+    std::unique_ptr<DummyPageHolder> m_destPageHolder;
     Persistent<MockActiveDOMObject> m_activeDOMObject;
 };
 
@@ -102,7 +103,7 @@ TEST_F(ActiveDOMObjectTest, MoveToSuspendedDocument)
 
 TEST_F(ActiveDOMObjectTest, MoveToStoppedDocument)
 {
-    destDocument().detach();
+    destDocument().shutdown();
 
     EXPECT_CALL(activeDOMObject(), stop());
     activeDOMObject().didMoveToNewExecutionContext(&destDocument());

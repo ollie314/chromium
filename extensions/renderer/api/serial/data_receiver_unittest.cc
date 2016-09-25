@@ -99,7 +99,7 @@ class DataReceiverTest : public ApiTestBase {
         base::Bind(base::DoNothing));
   }
 
-  void ReadyToSend(scoped_ptr<device::WritableBuffer> buffer) {
+  void ReadyToSend(std::unique_ptr<device::WritableBuffer> buffer) {
     if (data_to_send_.empty() && error_to_send_.empty())
       return;
 
@@ -116,9 +116,9 @@ class DataReceiverTest : public ApiTestBase {
     DCHECK(buffer->GetSize() >= static_cast<uint32_t>(data.size()));
     memcpy(buffer->GetData(), data.c_str(), data.size());
     if (error)
-      buffer->DoneWithError(data.size(), error);
+      buffer->DoneWithError(static_cast<uint32_t>(data.size()), error);
     else
-      buffer->Done(data.size());
+      buffer->Done(static_cast<uint32_t>(data.size()));
   }
 
   scoped_refptr<device::DataSourceSender> sender_;

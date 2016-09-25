@@ -2,13 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/common/login_status.h"
+#include "ash/common/system/date/date_default_view.h"
+#include "ash/common/system/date/date_view.h"
+#include "ash/common/wm_shell.h"
 #include "ash/shell.h"
-#include "ash/system/date/date_default_view.h"
-#include "ash/system/date/date_view.h"
-#include "ash/system/user/login_status.h"
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
@@ -43,27 +47,27 @@ class SystemUse24HourClockPolicyTest
   void TearDownOnMainThread() override {
     // If the login display is still showing, exit gracefully.
     if (LoginDisplayHost::default_host()) {
-      base::MessageLoop::current()->PostTask(FROM_HERE,
-                                             base::Bind(&chrome::AttemptExit));
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::Bind(&chrome::AttemptExit));
       content::RunMessageLoop();
     }
   }
 
  protected:
   void RefreshPolicyAndWaitDeviceSettingsUpdated() {
+    base::RunLoop run_loop;
     std::unique_ptr<CrosSettings::ObserverSubscription> observer =
         CrosSettings::Get()->AddSettingsObserver(
-            kSystemUse24HourClock,
-            base::MessageLoop::current()->QuitWhenIdleClosure());
+            kSystemUse24HourClock, run_loop.QuitWhenIdleClosure());
 
     RefreshDevicePolicy();
-    base::MessageLoop::current()->Run();
+    run_loop.Run();
   }
 
   static bool GetSystemTrayDelegateShouldUse24HourClock() {
     chromeos::SystemTrayDelegateChromeOS* tray_delegate =
         static_cast<chromeos::SystemTrayDelegateChromeOS*>(
-            ash::Shell::GetInstance()->system_tray_delegate());
+            ash::WmShell::Get()->system_tray_delegate());
     return tray_delegate->GetShouldUse24HourClockForTesting();
   }
 
@@ -89,7 +93,7 @@ class SystemUse24HourClockPolicyTest
     ash::TrayDate* tray_date = ash::Shell::GetInstance()
                                    ->GetPrimarySystemTray()
                                    ->GetTrayDateForTesting();
-    tray_date->CreateDefaultViewForTesting(ash::user::LOGGED_IN_NONE);
+    tray_date->CreateDefaultViewForTesting(ash::LoginStatus::NOT_LOGGED_IN);
   }
 
   static base::HourClockType TestGetPrimarySystemTrayDateHourType() {

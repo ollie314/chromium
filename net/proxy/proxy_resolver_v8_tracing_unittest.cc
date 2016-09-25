@@ -13,7 +13,6 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/test/histogram_tester.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_checker.h"
 #include "base/values.h"
@@ -24,8 +23,13 @@
 #include "net/log/net_log.h"
 #include "net/proxy/proxy_info.h"
 #include "net/test/event_waiter.h"
+#include "net/test/gtest_util.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+
+using net::test::IsError;
+using net::test::IsOk;
 
 namespace net {
 
@@ -39,23 +43,6 @@ class ProxyResolverV8TracingTest : public testing::Test {
     // spilling into the next test's execution.
     base::RunLoop().RunUntilIdle();
   }
-
- protected:
-  // TODO(eroman): Remove when done gathering data for crbug.com/593759
-  void ExpectHistogramBucketCount(PacResultForStrippedUrl bucket,
-                                  size_t expected_total) {
-    histograms_.ExpectUniqueSample(kHistogramPacResultForStrippedUrl,
-                                   static_cast<int>(bucket), expected_total);
-  }
-
-  // TODO(eroman): Remove when done gathering data for crbug.com/593759
-  void ExpectHistogramTotal(size_t expected_total) {
-    histograms_.ExpectTotalCount(kHistogramPacResultForStrippedUrl,
-                                 expected_total);
-  }
-
- private:
-  base::HistogramTester histograms_;
 };
 
 scoped_refptr<ProxyResolverScriptData> LoadScriptData(const char* filename) {
@@ -108,7 +95,7 @@ class MockBindings {
   }
 
   std::unique_ptr<ProxyResolverV8Tracing::Bindings> CreateBindings() {
-    return base::WrapUnique(new ForwardingBindings(this));
+    return base::MakeUnique<ForwardingBindings>(this);
   }
 
  private:
@@ -127,9 +114,9 @@ class MockBindings {
       bindings_->OnError(line_number, error);
     }
 
-    BoundNetLog GetBoundNetLog() override {
+    NetLogWithSource GetNetLogWithSource() override {
       DCHECK(thread_checker_.CalledOnValidThread());
-      return BoundNetLog();
+      return NetLogWithSource();
     }
 
     HostResolver* GetHostResolver() override {
@@ -164,7 +151,7 @@ std::unique_ptr<ProxyResolverV8Tracing> CreateResolver(
   factory->CreateProxyResolverV8Tracing(LoadScriptData(filename),
                                         std::move(bindings), &resolver,
                                         callback.callback(), &request);
-  EXPECT_EQ(OK, callback.WaitForResult());
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
   EXPECT_TRUE(resolver);
   return resolver;
 }
@@ -179,14 +166,11 @@ TEST_F(ProxyResolverV8TracingTest, Simple) {
   TestCompletionCallback callback;
   ProxyInfo proxy_info;
 
-  resolver->GetProxyForURL(GURL("https://foo/"), &proxy_info,
+  resolver->GetProxyForURL(GURL("http://foo/"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
 
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  ExpectHistogramBucketCount(PacResultForStrippedUrl::SUCCESS, 1);
-  ExpectHistogramTotal(1);
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   EXPECT_EQ("foo:99", proxy_info.proxy_server().ToURI());
 
@@ -194,36 +178,6 @@ TEST_F(ProxyResolverV8TracingTest, Simple) {
 
   // There were no alerts or errors.
   EXPECT_TRUE(mock_bindings.GetAlerts().empty());
-  EXPECT_TRUE(mock_bindings.GetErrors().empty());
-}
-
-TEST_F(ProxyResolverV8TracingTest, AlertUrl) {
-  MockCachingHostResolver host_resolver;
-  MockBindings mock_bindings(&host_resolver);
-
-  std::unique_ptr<ProxyResolverV8Tracing> resolver =
-      CreateResolver(mock_bindings.CreateBindings(), "alert_url.js");
-
-  TestCompletionCallback callback;
-  ProxyInfo proxy_info;
-
-  resolver->GetProxyForURL(GURL("https://foo/path"), &proxy_info,
-                           callback.callback(), NULL,
-                           mock_bindings.CreateBindings());
-
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  ExpectHistogramBucketCount(PacResultForStrippedUrl::SUCCESS_DIFFERENT_ALERTS,
-                             1);
-  ExpectHistogramTotal(1);
-
-  EXPECT_EQ("foobar:99", proxy_info.proxy_server().ToURI());
-
-  EXPECT_EQ(0u, host_resolver.num_resolve());
-
-  // There was 1 alerts and no errors.
-  EXPECT_EQ(1u, mock_bindings.GetAlerts().size());
-  EXPECT_EQ("https://foo/path", mock_bindings.GetAlerts()[0]);
   EXPECT_TRUE(mock_bindings.GetErrors().empty());
 }
 
@@ -237,13 +191,11 @@ TEST_F(ProxyResolverV8TracingTest, JavascriptError) {
   TestCompletionCallback callback;
   ProxyInfo proxy_info;
 
-  resolver->GetProxyForURL(GURL("https://throw-an-error/"), &proxy_info,
+  resolver->GetProxyForURL(GURL("http://throw-an-error/"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
 
-  EXPECT_EQ(ERR_PAC_SCRIPT_FAILED, callback.WaitForResult());
-
-  ExpectHistogramTotal(0);
+  EXPECT_THAT(callback.WaitForResult(), IsError(ERR_PAC_SCRIPT_FAILED));
 
   EXPECT_EQ(0u, host_resolver.num_resolve());
 
@@ -266,15 +218,11 @@ TEST_F(ProxyResolverV8TracingTest, TooManyAlerts) {
   TestCompletionCallback callback;
   ProxyInfo proxy_info;
 
-  resolver->GetProxyForURL(GURL("https://foo/"), &proxy_info,
+  resolver->GetProxyForURL(GURL("http://foo/"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
 
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  ExpectHistogramBucketCount(
-      PacResultForStrippedUrl::SKIPPED_FALLBACK_BLOCKING_DNS, 1);
-  ExpectHistogramTotal(1);
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   // Iteration1 does a DNS resolve
   // Iteration2 exceeds the alert buffer
@@ -306,15 +254,11 @@ TEST_F(ProxyResolverV8TracingTest, TooManyEmptyAlerts) {
   TestCompletionCallback callback;
   ProxyInfo proxy_info;
 
-  resolver->GetProxyForURL(GURL("https://foo/"), &proxy_info,
+  resolver->GetProxyForURL(GURL("http://foo/"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
 
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  ExpectHistogramBucketCount(
-      PacResultForStrippedUrl::SKIPPED_FALLBACK_BLOCKING_DNS, 1);
-  ExpectHistogramTotal(1);
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   EXPECT_EQ("foo:3", proxy_info.proxy_server().ToURI());
 
@@ -356,14 +300,11 @@ TEST_F(ProxyResolverV8TracingTest, Dns) {
   TestCompletionCallback callback;
   ProxyInfo proxy_info;
 
-  resolver->GetProxyForURL(GURL("https://foo/"), &proxy_info,
+  resolver->GetProxyForURL(GURL("http://foo/"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
 
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  ExpectHistogramBucketCount(PacResultForStrippedUrl::SUCCESS, 1);
-  ExpectHistogramTotal(1);
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   // The test does 13 DNS resolution, however only 7 of them are unique.
   EXPECT_EQ(7u, host_resolver.num_resolve());
@@ -411,17 +352,11 @@ TEST_F(ProxyResolverV8TracingTest, DnsChecksCache) {
   TestCompletionCallback callback2;
   ProxyInfo proxy_info;
 
-  resolver->GetProxyForURL(GURL("https://foopy/req1"), &proxy_info,
+  resolver->GetProxyForURL(GURL("http://foopy/req1"), &proxy_info,
                            callback1.callback(), NULL,
                            mock_bindings.CreateBindings());
 
-  EXPECT_EQ(OK, callback1.WaitForResult());
-
-  // This fails because executing FindProxyForURL() PAC script modifies global
-  // state each time, changing the result that is returned.
-  ExpectHistogramBucketCount(PacResultForStrippedUrl::FAIL_DIFFERENT_PROXY_LIST,
-                             1);
-  ExpectHistogramTotal(1);
+  EXPECT_THAT(callback1.WaitForResult(), IsOk());
 
   // The test does 2 DNS resolutions.
   EXPECT_EQ(2u, host_resolver.num_resolve());
@@ -433,21 +368,12 @@ TEST_F(ProxyResolverV8TracingTest, DnsChecksCache) {
                            callback2.callback(), NULL,
                            mock_bindings.CreateBindings());
 
-  EXPECT_EQ(OK, callback2.WaitForResult());
-
-  // The histograms are unchanged because the second invocation is for an
-  // http:// URL.
-  ExpectHistogramBucketCount(PacResultForStrippedUrl::FAIL_DIFFERENT_PROXY_LIST,
-                             1);
-  ExpectHistogramTotal(1);
+  EXPECT_THAT(callback2.WaitForResult(), IsOk());
 
   EXPECT_EQ(4u, host_resolver.num_resolve());
 
   // This time no restarts were required, so g_iteration incremented by 1.
-  // TODO(eroman): Additionally the counter was incremented once by the
-  // diagnostics code that ran FindProxyForURL() with a stripped URL
-  // (should really be :4 and not :5).
-  EXPECT_EQ("166.155.144.11:5", proxy_info.proxy_server().ToURI());
+  EXPECT_EQ("166.155.144.11:4", proxy_info.proxy_server().ToURI());
 
   // There were no alerts or errors.
   EXPECT_TRUE(mock_bindings.GetAlerts().empty());
@@ -471,14 +397,10 @@ TEST_F(ProxyResolverV8TracingTest, FallBackToSynchronous1) {
   TestCompletionCallback callback;
   ProxyInfo proxy_info;
 
-  resolver->GetProxyForURL(GURL("https://foo/"), &proxy_info,
+  resolver->GetProxyForURL(GURL("http://foo/"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  ExpectHistogramBucketCount(
-      PacResultForStrippedUrl::SKIPPED_FALLBACK_BLOCKING_DNS, 1);
-  ExpectHistogramTotal(1);
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   // The script itself only does 2 DNS resolves per execution, however it
   // constructs the hostname using a global counter which changes on each
@@ -514,14 +436,10 @@ TEST_F(ProxyResolverV8TracingTest, FallBackToSynchronous2) {
   TestCompletionCallback callback;
   ProxyInfo proxy_info;
 
-  resolver->GetProxyForURL(GURL("https://foo/"), &proxy_info,
+  resolver->GetProxyForURL(GURL("http://foo/"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  ExpectHistogramBucketCount(
-      PacResultForStrippedUrl::SKIPPED_FALLBACK_BLOCKING_DNS, 1);
-  ExpectHistogramTotal(1);
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   EXPECT_EQ(3u, host_resolver.num_resolve());
 
@@ -552,10 +470,7 @@ TEST_F(ProxyResolverV8TracingTest, InfiniteDNSSequence) {
   resolver->GetProxyForURL(GURL("http://foo/"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  // Was not called because this is an http:// URL.
-  ExpectHistogramTotal(0);
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   EXPECT_EQ(20u, host_resolver.num_resolve());
 
@@ -595,10 +510,7 @@ TEST_F(ProxyResolverV8TracingTest, InfiniteDNSSequence2) {
   resolver->GetProxyForURL(GURL("http://foo/"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  // Was not called because this is an http:// URL.
-  ExpectHistogramTotal(0);
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   EXPECT_EQ(20u, host_resolver.num_resolve());
 
@@ -610,94 +522,6 @@ TEST_F(ProxyResolverV8TracingTest, InfiniteDNSSequence2) {
   // 1 alert.
   EXPECT_EQ(1u, mock_bindings.GetAlerts().size());
   EXPECT_EQ("iteration: 21", mock_bindings.GetAlerts()[0]);
-}
-
-TEST_F(ProxyResolverV8TracingTest, DifferentResultBasedOnUrl) {
-  MockCachingHostResolver host_resolver;
-  MockBindings mock_bindings(&host_resolver);
-
-  std::unique_ptr<ProxyResolverV8Tracing> resolver =
-      CreateResolver(mock_bindings.CreateBindings(), "return_url_as_proxy.js");
-
-  TestCompletionCallback callback;
-  ProxyInfo proxy_info;
-
-  resolver->GetProxyForURL(GURL("https://foo/path1"), &proxy_info,
-                           callback.callback(), NULL,
-                           mock_bindings.CreateBindings());
-
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  ExpectHistogramTotal(1);
-  ExpectHistogramBucketCount(PacResultForStrippedUrl::FAIL_DIFFERENT_PROXY_LIST,
-                             1);
-
-  EXPECT_EQ("httpsx3Ax2Fx2Ffoox2Fpath1:99", proxy_info.proxy_server().ToURI());
-
-  EXPECT_EQ(0u, host_resolver.num_resolve());
-
-  // There were no alerts or errors.
-  EXPECT_TRUE(mock_bindings.GetAlerts().empty());
-  EXPECT_TRUE(mock_bindings.GetErrors().empty());
-}
-
-TEST_F(ProxyResolverV8TracingTest, ErrorDependingOnUrl) {
-  MockCachingHostResolver host_resolver;
-  MockBindings mock_bindings(&host_resolver);
-
-  std::unique_ptr<ProxyResolverV8Tracing> resolver = CreateResolver(
-      mock_bindings.CreateBindings(), "error_depending_on_url.js");
-
-  TestCompletionCallback callback;
-  ProxyInfo proxy_info;
-
-  resolver->GetProxyForURL(GURL("https://foo/DontThrowError"), &proxy_info,
-                           callback.callback(), NULL,
-                           mock_bindings.CreateBindings());
-
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  ExpectHistogramTotal(1);
-  ExpectHistogramBucketCount(PacResultForStrippedUrl::FAIL_ERROR, 1);
-
-  EXPECT_EQ("foopy:42", proxy_info.proxy_server().ToURI());
-
-  EXPECT_EQ(0u, host_resolver.num_resolve());
-
-  // There were no alerts or errors.
-  EXPECT_TRUE(mock_bindings.GetAlerts().empty());
-  EXPECT_TRUE(mock_bindings.GetErrors().empty());
-}
-
-TEST_F(ProxyResolverV8TracingTest, DnsDependingOnUrl) {
-  MockCachingHostResolver host_resolver;
-  MockBindings mock_bindings(&host_resolver);
-
-  host_resolver.rules()->AddRule("host", "166.155.144.55");
-
-  // Catch-all that will be used for myIpAddress().
-  host_resolver.rules()->AddRule("*", "133.122.100.200");
-
-  std::unique_ptr<ProxyResolverV8Tracing> resolver =
-      CreateResolver(mock_bindings.CreateBindings(), "dns_depending_on_url.js");
-
-  TestCompletionCallback callback;
-  ProxyInfo proxy_info;
-
-  resolver->GetProxyForURL(GURL("https://foo/UseMyIpAddress"), &proxy_info,
-                           callback.callback(), NULL,
-                           mock_bindings.CreateBindings());
-
-  EXPECT_EQ(OK, callback.WaitForResult());
-
-  ExpectHistogramBucketCount(PacResultForStrippedUrl::FAIL_ABANDONED, 1);
-  ExpectHistogramTotal(1);
-
-  EXPECT_EQ("foopy:47", proxy_info.proxy_server().ToURI());
-
-  // No errors.
-  EXPECT_TRUE(mock_bindings.GetErrors().empty());
-  ASSERT_EQ(0u, mock_bindings.GetAlerts().size());
 }
 
 void DnsDuringInitHelper(bool synchronous_host_resolver) {
@@ -726,7 +550,7 @@ void DnsDuringInitHelper(bool synchronous_host_resolver) {
   resolver->GetProxyForURL(GURL("http://foo/"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
-  EXPECT_EQ(OK, callback.WaitForResult());
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   // Fetched host1 and host2 again, since the ones done during initialization
   // should not have been cached.
@@ -809,7 +633,7 @@ TEST_F(ProxyResolverV8TracingTest, CancelSome) {
 
   resolver->CancelRequest(request1);
 
-  EXPECT_EQ(OK, callback.WaitForResult());
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 }
 
 // Cancel a request after it has finished running on the worker thread, and has
@@ -845,7 +669,7 @@ TEST_F(ProxyResolverV8TracingTest, CancelWhilePendingCompletionTask) {
                            &proxy_info2, callback.callback(), &request2,
                            mock_bindings.CreateBindings());
 
-  EXPECT_EQ(OK, callback.WaitForResult());
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   EXPECT_EQ("i-approve-this-message:42", proxy_info2.proxy_server().ToURI());
 }
@@ -861,8 +685,8 @@ class BlockableHostResolver : public HostResolver {
               RequestPriority priority,
               AddressList* addresses,
               const CompletionCallback& callback,
-              RequestHandle* out_req,
-              const BoundNetLog& net_log) override {
+              std::unique_ptr<Request>* out_req,
+              const NetLogWithSource& net_log) override {
     EXPECT_FALSE(callback.is_null());
     EXPECT_TRUE(out_req);
 
@@ -876,7 +700,7 @@ class BlockableHostResolver : public HostResolver {
     // This line is intentionally after action_.Run(), since one of the
     // tests does a cancellation inside of Resolve(), and it is more
     // interesting if *out_req hasn't been written yet at that point.
-    *out_req = reinterpret_cast<RequestHandle*>(1);  // Magic value.
+    out_req->reset(new RequestImpl(this));
 
     // Return ERR_IO_PENDING as this request will NEVER be completed.
     // Expectation is for the caller to later cancel the request.
@@ -885,15 +709,12 @@ class BlockableHostResolver : public HostResolver {
 
   int ResolveFromCache(const RequestInfo& info,
                        AddressList* addresses,
-                       const BoundNetLog& net_log) override {
+                       const NetLogWithSource& net_log) override {
     NOTREACHED();
     return ERR_DNS_CACHE_MISS;
   }
 
-  void CancelRequest(RequestHandle req) override {
-    EXPECT_EQ(reinterpret_cast<RequestHandle*>(1), req);
-    num_cancelled_requests_++;
-  }
+  void IncreaseNumOfCancelledRequests() { num_cancelled_requests_++; }
 
   void SetAction(const base::Callback<void(void)>& action) {
     action_ = action;
@@ -902,7 +723,7 @@ class BlockableHostResolver : public HostResolver {
   // Waits until Resolve() has been called.
   void WaitUntilRequestIsReceived() {
     waiting_for_resolve_ = true;
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
     DCHECK(waiting_for_resolve_);
     waiting_for_resolve_ = false;
   }
@@ -912,6 +733,23 @@ class BlockableHostResolver : public HostResolver {
   }
 
  private:
+  class RequestImpl : public HostResolver::Request {
+   public:
+    RequestImpl(BlockableHostResolver* resolver) : resolver_(resolver) {}
+
+    ~RequestImpl() override {
+      if (resolver_)
+        resolver_->IncreaseNumOfCancelledRequests();
+    }
+
+    void ChangeRequestPriority(RequestPriority priority) override {}
+
+   private:
+    BlockableHostResolver* resolver_;
+
+    DISALLOW_COPY_AND_ASSIGN(RequestImpl);
+  };
+
   int num_cancelled_requests_;
   bool waiting_for_resolve_;
   base::Callback<void(void)> action_;
@@ -1061,7 +899,7 @@ TEST_F(ProxyResolverV8TracingTest, ErrorLoadingScript) {
       LoadScriptData("error_on_load.js"), mock_bindings.CreateBindings(),
       &resolver, callback.callback(), &request);
 
-  EXPECT_EQ(ERR_PAC_SCRIPT_FAILED, callback.WaitForResult());
+  EXPECT_THAT(callback.WaitForResult(), IsError(ERR_PAC_SCRIPT_FAILED));
   EXPECT_FALSE(resolver);
 }
 
@@ -1083,7 +921,7 @@ TEST_F(ProxyResolverV8TracingTest, Terminate) {
   resolver->GetProxyForURL(GURL("http://foopy/req1"), &proxy_info,
                            callback.callback(), NULL,
                            mock_bindings.CreateBindings());
-  EXPECT_EQ(OK, callback.WaitForResult());
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
 
   // The test does 2 DNS resolutions.
   EXPECT_EQ(2u, host_resolver.num_resolve());
@@ -1184,7 +1022,7 @@ TEST_F(ProxyResolverV8TracingTest, MultipleResolvers) {
 
   for (size_t i = 0; i < kNumResults; ++i) {
     size_t resolver_i = i % kNumResolvers;
-    EXPECT_EQ(OK, callback[i].WaitForResult());
+    EXPECT_THAT(callback[i].WaitForResult(), IsOk());
 
     std::string proxy_uri = proxy_info[i].proxy_server().ToURI();
 

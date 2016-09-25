@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<grit base_dir="." current_release="1" enc_check="möl" latest_public_release="0" source_lang_id="en">
+<grit base_dir="." latest_public_release="0" current_release="1"
+      output_all_resource_defines="false" enc_check="möl" source_lang_id="en">
   <outputs>
     <output filename="remoting/base/string_resources.h" type="rc_header">
       <emit emit_type="prepend"/>
@@ -564,12 +565,6 @@
       </message>
 
       <if expr="is_android or is_ios">
-        <message desc="Pressing this button switches the view of the remote desktop to a Virtual Reality representation which is compatible with Google Cardboard." name="IDS_SHOW_CARDBOARD" formatter_data="android_java">
-          Show Cardboard view
-        </message>
-        <message desc="This message is shown in a dialog to warn the user they are about to switch to a Virtual Reality view which will not function properly unless the user has a Google Cardboard compatible device." name="IDS_CARDBOARD_WARNING_MESSAGE" formatter_data="android_java">
-          You have enabled Google Cardboard integration mode. To use this mode, insert your device into a Google Cardboard-compatible viewer.
-        </message>
         <message desc="Button to show or hide the on-screen keyboard." name="IDS_SHOW_HIDE_KEYBOARD" formatter_data="android_java">
           Show/hide keyboard.
         </message>
@@ -654,9 +649,10 @@ Remote computers with non US-English keyboards may receive incorrect text input.
 For information about privacy, please see the Google Privacy Policy (http://goo.gl/SyrVzj) and the Chrome Privacy Policy (http://goo.gl/0uXE5d).
         </message>
         <message name="IDS_PLAY_STORE_CHANGES" desc="List of what's changed in this release of Chrome Remote Desktop for Android. [CHAR-LIMIT=500] [NAME=play_store_changes]">
-• Material Design UI updates.
-• Third-party licensing credits.
-• Information shown for remote computers that are offline.
+• Listen to audio from Windows or Linux computers.
+• Remove unwanted connections by long-pressing on the computer name.
+• Smoother pinch-to-zoom and two-finger scrolling.
+• New Help &amp; Feedback screen.
         </message>
       </if>  <!-- is_android or is_ios -->
 
@@ -708,6 +704,9 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       <message desc="Confirmation prompt shown when a user attempts to delete a Me2Me host from their host list." name="IDS_CONFIRM_HOST_DELETE">
         Are you sure you want to disable remote connections to <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph>? If you change your mind, you'll need to visit that computer to re-enable connections.
       </message>
+      <message desc="Confirmation prompt shown when a user attempts remove or deactivate a machine from the list of their remotely-accessible machines." name="IDS_CONFIRM_HOST_DELETE_ANDROID" formatter_data="android_java">
+        Are you sure you want to disable remote connections to <ph name="HOSTNAME">%1$s<ex>My Linux desktop</ex></ph>?
+      </message>
       <message desc="Column header in the connection history table showing the email address of the client end of the connection (the initiator) which may be this or another computer." name="IDS_CONNECTION_FROM_HEADER">
         From
       </message>
@@ -736,7 +735,7 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
         Duration
       </message>
       <message desc="Error that is shown on the client side when the host is blocking all connections due to failed authentication attempts." name="IDS_ERROR_HOST_OVERLOAD" formatter_data="android_java">
-        Connections to the remote computer are temporarily blocked because somebody was trying to connect to it with invalid PIN. Please try again later.
+        Connections to the remote computer are temporarily blocked because somebody was trying to connect to it with an invalid PIN. Please try again later.
       </message>
       <message desc="Error that is shown on the client side after the host has terminated connection that lasted more than maximum allowed duration." name="IDS_ERROR_MAX_SESSION_LENGTH" formatter_data="android_java">
         The remote session has expired.
@@ -750,6 +749,9 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       </message>
       <message desc="Error displayed if an invalid access code is entered." name="IDS_ERROR_INVALID_ACCESS_CODE" formatter_data="android_java">
         The access code is invalid. Please try again.
+      </message>
+      <message desc="Error displayed if the host security policies do not allow connections from client." name="IDS_ERROR_INVALID_ACCOUNT" formatter_data="android_java">
+        Security policies on the remote computer do not allow connections from your account.
       </message>
       <message desc="Error displayed when the host is online, but we are unable to connect to it due to network configuration." name="IDS_ERROR_P2P_FAILURE" formatter_data="android_java">
         Unable to reach the host. This is probably due to the configuration of the network you are using.
@@ -1086,6 +1088,9 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       <message name="IDS_REMOTING_HOST_COMMAND_DESCRIPTION" desc="The file description specified in the version information of remoting_host_command.exe. The Chrome Remote Desktop host allows a user to connect to their computer remotely (it 'hosts' a connection from a remote computer).">
         Application to issue commands to Chrome remote desktop host.
       </message>
+      <message name="IDS_REMOTING_START_HOST_DESCRIPTION" desc="The file description specified in the version information of remoting_start_host.exe.">
+        Host Provisioning Utility
+      </message>
       <message name="IDS_VERIFY_PIN_DIALOG_EMAIL_LABEL" desc="The message displayed by the PIN verification dialog.">
         Account
       </message>
@@ -1112,6 +1117,9 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       </message>
       <message desc="Link to allow a host's paired clients to be viewed or edited." name="IDS_HOME_DAEMON_MANAGE_PAIRINGS">
         View/edit
+      </message>
+      <message desc="This text is used on a button or context-menu or similar control. When chosen or pressed, it deletes a selected item from a list." meaning="Delete an item from a list." name="IDS_DELETE_LIST_ITEM" formatter_data="android_java">
+        Delete
       </message>
       <message desc="Link to delete a specific paired client." name="IDS_DELETE_PAIRED_CLIENT">
         Delete
@@ -1155,6 +1163,9 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       <message desc="Message displayed before sharing computer in 'It2Me' mode." name="IDS_SHARE_CONFIRM_DIALOG_MESSAGE" >
         Would you like to share this computer for another user to see and control?
       </message>
+      <message desc="Message displayed before sharing computer in 'It2Me' mode when the email of the remote user attempting to connect is known." name="IDS_SHARE_CONFIRM_DIALOG_MESSAGE_WITH_USERNAME" >
+        Would you like to allow <ph name="CLIENT_USERNAME">{0}<ex>client@email.com</ex></ph> to see and control your computer?
+      </message>
       <message desc="Label for the button to accept sharing the computer in 'It2Me' mode." name="IDS_SHARE_CONFIRM_DIALOG_CONFIRM" >
         Share
       </message>
@@ -1165,10 +1176,10 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
         This setting is managed by your domain policy.
       </message>
       <message desc="Platform-specific text indicating that a component is for the Windows OS." name="IDS_FOR_PLATFORM_WINDOWS">
-        For Windows (XP and above)
+        For Windows 7 and above
       </message>
       <message desc="Platform-specific text indicating that a component is for the Mac OS." name="IDS_FOR_PLATFORM_MAC">
-        For Mac (OS X 10.6 and above)
+        For Mac (OS X Mavericks 10.9 and above)
       </message>
       <message desc="Text for the button the user clicks to indicate that they agree to the terms of service and want to proceed with downloading the installer." name="IDS_ACCEPT_AND_INSTALL">
         Accept and Install

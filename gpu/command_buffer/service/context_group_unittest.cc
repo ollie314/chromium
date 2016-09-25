@@ -8,13 +8,11 @@
 
 #include <memory>
 
-#include "gpu/command_buffer/common/value_state.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_mock.h"
 #include "gpu/command_buffer/service/gpu_service_test.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
-#include "gpu/command_buffer/service/valuebuffer_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_mock.h"
 
@@ -46,7 +44,7 @@ class ContextGroupTest : public GpuServiceTest {
     scoped_refptr<FeatureInfo> feature_info = new FeatureInfo;
     group_ = scoped_refptr<ContextGroup>(
         new ContextGroup(gpu_preferences_, NULL, NULL, NULL, NULL, feature_info,
-                         NULL, NULL, kBindGeneratesResource));
+                         kBindGeneratesResource, nullptr));
   }
 
   GpuPreferences gpu_preferences_;
@@ -73,7 +71,8 @@ TEST_F(ContextGroupTest, Basic) {
 
 TEST_F(ContextGroupTest, InitializeNoExtensions) {
   TestHelper::SetupContextGroupInitExpectations(
-      gl_.get(), DisallowedFeatures(), "", "", kBindGeneratesResource);
+      gl_.get(), DisallowedFeatures(), "", "",
+      CONTEXT_TYPE_OPENGLES2, kBindGeneratesResource);
   group_->Initialize(decoder_.get(), CONTEXT_TYPE_OPENGLES2,
                      DisallowedFeatures());
   EXPECT_EQ(static_cast<uint32_t>(TestHelper::kNumVertexAttribs),
@@ -109,7 +108,8 @@ TEST_F(ContextGroupTest, InitializeNoExtensions) {
 TEST_F(ContextGroupTest, MultipleContexts) {
   std::unique_ptr<MockGLES2Decoder> decoder2_(new MockGLES2Decoder());
   TestHelper::SetupContextGroupInitExpectations(
-      gl_.get(), DisallowedFeatures(), "", "", kBindGeneratesResource);
+      gl_.get(), DisallowedFeatures(), "", "",
+      CONTEXT_TYPE_OPENGLES2, kBindGeneratesResource);
   EXPECT_TRUE(group_->Initialize(decoder_.get(), CONTEXT_TYPE_OPENGLES2,
                                  DisallowedFeatures()));
   EXPECT_FALSE(group_->Initialize(decoder2_.get(), CONTEXT_TYPE_WEBGL1,

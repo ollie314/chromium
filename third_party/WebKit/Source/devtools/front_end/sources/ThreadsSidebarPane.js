@@ -4,13 +4,12 @@
 
 /**
  * @constructor
- * @extends {WebInspector.SidebarPane}
+ * @extends {WebInspector.VBox}
  * @implements {WebInspector.TargetManager.Observer}
  */
 WebInspector.ThreadsSidebarPane = function()
 {
-    WebInspector.SidebarPane.call(this, WebInspector.UIString("Threads"));
-    this.setVisible(false);
+    WebInspector.VBox.call(this);
 
     /** @type {!Map.<!WebInspector.DebuggerModel, !WebInspector.UIList.Item>} */
     this._debuggerModelToListItems = new Map();
@@ -22,6 +21,7 @@ WebInspector.ThreadsSidebarPane = function()
     this.threadList.show(this.element);
     WebInspector.targetManager.addModelListener(WebInspector.DebuggerModel, WebInspector.DebuggerModel.Events.DebuggerPaused, this._onDebuggerStateChanged, this);
     WebInspector.targetManager.addModelListener(WebInspector.DebuggerModel, WebInspector.DebuggerModel.Events.DebuggerResumed, this._onDebuggerStateChanged, this);
+    WebInspector.targetManager.addModelListener(WebInspector.RuntimeModel, WebInspector.RuntimeModel.Events.ExecutionContextChanged, this._onExecutionContextChanged, this);
     WebInspector.context.addFlavorChangeListener(WebInspector.Target, this._targetChanged, this);
     WebInspector.targetManager.observeTargets(this);
 }
@@ -34,11 +34,12 @@ WebInspector.ThreadsSidebarPane.prototype = {
     targetAdded: function(target)
     {
         var debuggerModel = WebInspector.DebuggerModel.fromTarget(target)
-        if (!debuggerModel) {
-            this._updateVisibility();
+        if (!debuggerModel)
             return;
-        }
-        var listItem = new WebInspector.UIList.Item(target.name(), "");
+
+        var executionContext = target.runtimeModel.defaultExecutionContext();
+        var label = executionContext && executionContext.label() ? executionContext.label() : target.name();
+        var listItem = new WebInspector.UIList.Item(label, "");
         listItem.element.addEventListener("click", this._onListItemClick.bind(this, listItem), false);
         var currentTarget = WebInspector.context.flavor(WebInspector.Target);
         if (currentTarget === target)
@@ -48,13 +49,6 @@ WebInspector.ThreadsSidebarPane.prototype = {
         this._listItemsToTargets.set(listItem, target);
         this.threadList.addItem(listItem);
         this._updateDebuggerState(debuggerModel);
-        this._updateVisibility();
-    },
-
-    _updateVisibility: function()
-    {
-        this._wasVisibleAtLeastOnce = this._wasVisibleAtLeastOnce || this._debuggerModelToListItems.size > 1;
-        this.setVisible(this._wasVisibleAtLeastOnce);
     },
 
     /**
@@ -71,7 +65,6 @@ WebInspector.ThreadsSidebarPane.prototype = {
             this._listItemsToTargets.remove(listItem);
             this.threadList.removeItem(listItem);
         }
-        this._updateVisibility();
     },
 
     /**
@@ -94,6 +87,20 @@ WebInspector.ThreadsSidebarPane.prototype = {
     {
         var debuggerModel = /** @type {!WebInspector.DebuggerModel} */ (event.target);
         this._updateDebuggerState(debuggerModel);
+    },
+
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _onExecutionContextChanged: function(event)
+    {
+        var executionContext = /** @type {!WebInspector.ExecutionContext} */ (event.data);
+        if (!executionContext.isDefault)
+            return;
+        var debuggerModel = /** @type {!WebInspector.DebuggerModel} */ (WebInspector.DebuggerModel.fromTarget(executionContext.target()));
+        var listItem = this._debuggerModelToListItems.get(debuggerModel);
+        if (listItem && executionContext.label())
+            listItem.setTitle(executionContext.label());
     },
 
     /**
@@ -130,5 +137,5 @@ WebInspector.ThreadsSidebarPane.prototype = {
     },
 
 
-    __proto__: WebInspector.SidebarPane.prototype
+    __proto__: WebInspector.VBox.prototype
 }

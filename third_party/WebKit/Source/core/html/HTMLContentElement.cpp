@@ -31,6 +31,7 @@
 #include "core/css/parser/CSSParser.h"
 #include "core/dom/QualifiedName.h"
 #include "core/dom/shadow/ElementShadow.h"
+#include "core/dom/shadow/ElementShadowV0.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "platform/RuntimeEnabledFeatures.h"
 
@@ -63,9 +64,9 @@ DEFINE_TRACE(HTMLContentElement)
 
 void HTMLContentElement::parseSelect()
 {
-    ASSERT(m_shouldParseSelect);
+    DCHECK(m_shouldParseSelect);
 
-    m_selectorList = CSSParser::parseSelector(CSSParserContext(document(), 0), nullptr, m_select);
+    m_selectorList = CSSParser::parseSelector(CSSParserContext(document(), nullptr), nullptr, m_select);
     m_shouldParseSelect = false;
     m_isValidSelector = validateSelect();
     if (!m_isValidSelector)
@@ -76,8 +77,8 @@ void HTMLContentElement::parseAttribute(const QualifiedName& name, const AtomicS
 {
     if (name == selectAttr) {
         if (ShadowRoot* root = containingShadowRoot()) {
-            if (root->owner())
-                root->owner()->willAffectSelector();
+            if (!root->isV1() && root->owner())
+                root->owner()->v0().willAffectSelector();
         }
         m_shouldParseSelect = true;
         m_select = value;
@@ -97,7 +98,7 @@ static inline bool includesDisallowedPseudoClass(const CSSSelector& selector)
 
 bool HTMLContentElement::validateSelect() const
 {
-    ASSERT(!m_shouldParseSelect);
+    DCHECK(!m_shouldParseSelect);
 
     if (m_select.isNull() || m_select.isEmpty())
         return true;

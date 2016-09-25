@@ -22,14 +22,15 @@
 #include "base/process/process_iterator.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_byteorder.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/win/windows_version.h"
 #include "build/build_config.h"
 #include "components/nacl/browser/nacl_browser.h"
@@ -49,10 +50,12 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_switches.h"
+#include "mojo/edk/embedder/embedder.h"
 #include "net/socket/socket_descriptor.h"
 #include "ppapi/host/host_factory.h"
 #include "ppapi/host/ppapi_host.h"
@@ -77,7 +80,6 @@
 #include "base/win/scoped_handle.h"
 #include "components/nacl/browser/nacl_broker_service_win.h"
 #include "components/nacl/common/nacl_debug_exception_handler_win.h"
-#include "components/startup_metric_utils/common/pre_read_field_trial_utils_win.h"
 #include "content/public/common/sandbox_init.h"
 #endif
 
@@ -216,8 +218,6 @@ unsigned NaClProcessHost::keepalive_throttle_interval_milliseconds_ =
 // that this only takes a transferred IPC::ChannelHandle or one to be
 // transferred via IPC.
 class NaClProcessHost::ScopedChannelHandle {
-  MOVE_ONLY_TYPE_FOR_CPP_03(ScopedChannelHandle);
-
  public:
   ScopedChannelHandle() {
   }
@@ -275,6 +275,8 @@ class NaClProcessHost::ScopedChannelHandle {
   }
 
   IPC::ChannelHandle handle_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedChannelHandle);
 };
 
 NaClProcessHost::NaClProcessHost(
@@ -308,9 +310,11 @@ NaClProcessHost::NaClProcessHost(
       process_type_(process_type),
       profile_directory_(profile_directory),
       render_view_id_(render_view_id),
+      mojo_child_token_(mojo::edk::GenerateRandomToken()),
       weak_factory_(this) {
   process_.reset(content::BrowserChildProcessHost::Create(
-      static_cast<content::ProcessType>(PROCESS_TYPE_NACL_LOADER), this));
+      static_cast<content::ProcessType>(PROCESS_TYPE_NACL_LOADER), this,
+      mojo_child_token_));
 
   // Set the display name so the user knows what plugin the process is running.
   // We aren't on the UI thread so getting the pref locale for language
@@ -578,9 +582,13 @@ void NaClProcessHost::LaunchNaClGdb() {
 }
 
 bool NaClProcessHost::LaunchSelLdr() {
-  std::string channel_id = process_->GetHost()->CreateChannel();
-  if (channel_id.empty()) {
-    SendErrorToRenderer("CreateChannel() failed");
+  DCHECK(!mojo_child_token_.empty());
+  std::string mojo_channel_token =
+      process_->GetHost()->CreateChannelMojo(mojo_child_token_);
+  // |mojo_child_token_| is no longer used.
+  base::STLClearObject(&mojo_child_token_);
+  if (mojo_channel_token.empty()) {
+    SendErrorToRenderer("CreateChannelMojo() failed");
     return false;
   }
 
@@ -611,7 +619,7 @@ bool NaClProcessHost::LaunchSelLdr() {
     // x86 CRT DLLs are in e.g. out\Debug for chrome.exe etc., so the x64 ones
     // are put in out\Debug\x64 which we add to the PATH here so that loader
     // can find them. See http://crbug.com/346034.
-    scoped_ptr<base::Environment> env(base::Environment::Create());
+    std::unique_ptr<base::Environment> env(base::Environment::Create());
     static const char kPath[] = "PATH";
     std::string old_path;
     base::FilePath module_path;
@@ -633,27 +641,26 @@ bool NaClProcessHost::LaunchSelLdr() {
   }
 #endif
 
-  scoped_ptr<base::CommandLine> cmd_line(new base::CommandLine(exe_path));
+  std::unique_ptr<base::CommandLine> cmd_line(new base::CommandLine(exe_path));
   CopyNaClCommandLineArguments(cmd_line.get());
 
   cmd_line->AppendSwitchASCII(switches::kProcessType,
                               (uses_nonsfi_mode_ ?
                                switches::kNaClLoaderNonSfiProcess :
                                switches::kNaClLoaderProcess));
-  cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id);
+  cmd_line->AppendSwitchASCII(switches::kMojoChannelToken, mojo_channel_token);
   if (NaClBrowser::GetDelegate()->DialogsAreSuppressed())
     cmd_line->AppendSwitch(switches::kNoErrorDialogs);
 
 #if defined(OS_WIN)
-  if (startup_metric_utils::GetPreReadOptions().use_prefetch_argument)
-    cmd_line->AppendArg(switches::kPrefetchArgumentOther);
+  cmd_line->AppendArg(switches::kPrefetchArgumentOther);
 #endif  // defined(OS_WIN)
 
 // On Windows we might need to start the broker process to launch a new loader
 #if defined(OS_WIN)
   if (RunningOnWOW64()) {
     if (!NaClBrokerService::GetInstance()->LaunchLoader(
-            weak_factory_.GetWeakPtr(), channel_id)) {
+            weak_factory_.GetWeakPtr(), mojo_channel_token)) {
       SendErrorToRenderer("broker service did not launch process");
       return false;
     }
@@ -1088,7 +1095,7 @@ bool NaClProcessHost::StartPPAPIProxy(ScopedChannelHandle channel_handle) {
   }
 
   ppapi_host_->GetPpapiHost()->AddHostFactoryFilter(
-      scoped_ptr<ppapi::host::HostFactory>(
+      std::unique_ptr<ppapi::host::HostFactory>(
           NaClBrowser::GetDelegate()->CreatePpapiHostFactory(
               ppapi_host_.get())));
 

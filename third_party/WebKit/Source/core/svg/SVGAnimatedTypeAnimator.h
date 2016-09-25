@@ -23,9 +23,6 @@
 
 #include "core/svg/properties/SVGPropertyInfo.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassOwnPtr.h"
-#include "wtf/RefPtr.h"
-#include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -35,9 +32,6 @@ class SVGPropertyBase;
 class SVGElement;
 class SVGAnimationElement;
 
-// The size of SVGElementInstances is 1 unless there is a <use> instance of the element.
-using SVGElementInstances = HeapVector<Member<SVGElement>, 1u>;
-
 class SVGAnimatedTypeAnimator final {
     DISALLOW_NEW();
 public:
@@ -46,11 +40,8 @@ public:
     void clear();
     void reset(SVGElement* contextElement);
 
-    SVGPropertyBase* constructFromString(const String&);
-
-    SVGPropertyBase* startAnimValAnimation(const SVGElementInstances&);
-    void stopAnimValAnimation(const SVGElementInstances&);
-    SVGPropertyBase* resetAnimValToBaseVal(const SVGElementInstances&);
+    SVGPropertyBase* createAnimatedValue();
+    SVGPropertyBase* createAnimatedValueFromString(const String&);
 
     void calculateAnimatedValue(float percentage, unsigned repeatCount, SVGPropertyBase*, SVGPropertyBase*, SVGPropertyBase*, SVGPropertyBase*);
     float calculateDistance(const String& fromString, const String& toString);
@@ -69,7 +60,6 @@ public:
 private:
     friend class ParsePropertyFromString;
     SVGPropertyBase* createPropertyForAnimation(const String&);
-    SVGPropertyBase* resetAnimation(const SVGElementInstances&);
 
     Member<SVGAnimationElement> m_animationElement;
     Member<SVGElement> m_contextElement;

@@ -32,6 +32,7 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/frame/VisualViewport.h"
 #include "platform/Histogram.h"
 #include "platform/weborigin/KURL.h"
 
@@ -256,9 +257,7 @@ void ViewportDescription::reportMobilePageStats(const LocalFrame* mainFrame) con
 
 bool ViewportDescription::matchesHeuristicsForGpuRasterization() const
 {
-    return maxWidth == Length(DeviceWidth)
-        && minZoom == 1.0
-        && minZoomIsExplicit;
+    return isSpecifiedByAuthor();
 }
 
 } // namespace blink

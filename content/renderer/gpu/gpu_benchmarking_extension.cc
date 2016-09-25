@@ -38,13 +38,18 @@
 #include "third_party/WebKit/public/web/WebImageCache.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
+#include "third_party/WebKit/public/web/WebPrintParams.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkGraphics.h"
 #include "third_party/skia/include/core/SkPicture.h"
+#include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
 #include "third_party/skia/include/core/SkPixelSerializer.h"
 #include "third_party/skia/include/core/SkStream.h"
+// Note that headers in third_party/skia/src are fragile.  This is
+// an experimental, fragile, and diagnostic-only document type.
+#include "third_party/skia/src/utils/SkMultiPictureDocument.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "v8/include/v8.h"
 
@@ -95,7 +100,7 @@ class EncodingSerializer : public SkPixelSerializer {
         // interesting.
         vector.push_back(pixmap.colorType());
         vector.push_back(pixmap.alphaType());
-        return SkData::NewWithCopy(&vector.front(), vector.size());
+        return SkData::MakeWithCopy(&vector.front(), vector.size()).release();
     } else {
       SkBitmap bm;
       // The const_cast is fine, since we only read from the bitmap.
@@ -103,7 +108,7 @@ class EncodingSerializer : public SkPixelSerializer {
                            const_cast<void*>(pixmap.addr()),
                            pixmap.rowBytes())) {
         if (gfx::PNGCodec::EncodeBGRASkBitmap(bm, false, &vector)) {
-          return SkData::NewWithCopy(&vector.front(), vector.size());
+          return SkData::MakeWithCopy(&vector.front(), vector.size()).release();
         }
       }
     }
@@ -124,29 +129,27 @@ class SkPictureSerializer {
   // Recursively serializes the layer tree.
   // Each layer in the tree is serialized into a separate skp file
   // in the given directory.
-  void Serialize(const cc::Layer* layer) {
-    const cc::LayerList& children = layer->children();
-    for (size_t i = 0; i < children.size(); ++i) {
-      Serialize(children[i].get());
+  void Serialize(const cc::Layer* root_layer) {
+    for (auto* layer : *root_layer->GetLayerTree()) {
+      sk_sp<SkPicture> picture = layer->GetPicture();
+      if (!picture)
+        continue;
+
+      // Serialize picture to file.
+      // TODO(alokp): Note that for this to work Chrome needs to be launched
+      // with
+      // --no-sandbox command-line flag. Get rid of this limitation.
+      // CRBUG: 139640.
+      std::string filename = "layer_" + base::IntToString(layer_id_++) + ".skp";
+      std::string filepath = dirpath_.AppendASCII(filename).MaybeAsASCII();
+      DCHECK(!filepath.empty());
+      SkFILEWStream file(filepath.c_str());
+      DCHECK(file.isValid());
+
+      EncodingSerializer serializer;
+      picture->serialize(&file, &serializer);
+      file.fsync();
     }
-
-    sk_sp<SkPicture> picture = layer->GetPicture();
-    if (!picture)
-      return;
-
-    // Serialize picture to file.
-    // TODO(alokp): Note that for this to work Chrome needs to be launched with
-    // --no-sandbox command-line flag. Get rid of this limitation.
-    // CRBUG: 139640.
-    std::string filename = "layer_" + base::IntToString(layer_id_++) + ".skp";
-    std::string filepath = dirpath_.AppendASCII(filename).MaybeAsASCII();
-    DCHECK(!filepath.empty());
-    SkFILEWStream file(filepath.c_str());
-    DCHECK(file.isValid());
-
-    EncodingSerializer serializer;
-    picture->serialize(&file, &serializer);
-    file.fsync();
   }
 
  private:
@@ -310,10 +313,11 @@ void OnSyntheticGestureCompleted(CallbackAndContext* callback_and_context) {
   v8::HandleScope scope(isolate);
   v8::Local<v8::Context> context = callback_and_context->GetContext();
   v8::Context::Scope context_scope(context);
+  v8::Local<v8::Function> callback = callback_and_context->GetCallback();
   WebLocalFrame* frame = WebLocalFrame::frameForContext(context);
-  if (frame) {
+  if (frame && !callback.IsEmpty()) {
     frame->callFunctionEvenIfScriptDisabled(
-        callback_and_context->GetCallback(), v8::Object::New(isolate), 0, NULL);
+        callback, v8::Object::New(isolate), 0, NULL);
   }
 }
 
@@ -487,6 +491,8 @@ gin::ObjectTemplateBuilder GpuBenchmarking::GetObjectTemplateBuilder(
       .SetMethod("setRasterizeOnlyVisibleContent",
                  &GpuBenchmarking::SetRasterizeOnlyVisibleContent)
       .SetMethod("printToSkPicture", &GpuBenchmarking::PrintToSkPicture)
+      .SetMethod("printPagesToSkPictures",
+                 &GpuBenchmarking::PrintPagesToSkPictures)
       .SetValue("DEFAULT_INPUT", 0)
       .SetValue("TOUCH_INPUT", 1)
       .SetValue("MOUSE_INPUT", 2)
@@ -527,6 +533,45 @@ void GpuBenchmarking::SetRasterizeOnlyVisibleContent() {
     return;
 
   context.compositor()->SetRasterizeOnlyVisibleContent();
+}
+
+void GpuBenchmarking::PrintPagesToSkPictures(v8::Isolate* isolate,
+                                             const std::string& filename) {
+  GpuBenchmarkingContext context;
+  if (!context.Init(true))
+    return;
+
+  base::FilePath path = base::FilePath::FromUTF8Unsafe(filename);
+  if (!base::PathIsWritable(path.DirName())) {
+    std::string msg("Path is not writable: ");
+    msg.append(path.DirName().MaybeAsASCII());
+    isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8(
+        isolate, msg.c_str(), v8::String::kNormalString, msg.length())));
+    return;
+  }
+  const int kWidth = 612;          // 8.5 inch
+  const int kHeight = 792;         // 11 inch
+  const int kMarginTop = 29;       // 0.40 inch
+  const int kMarginLeft = 29;      // 0.40 inch
+  const int kContentWidth = 555;   // 7.71 inch
+  const int kContentHeight = 735;  // 10.21 inch
+  blink::WebPrintParams params(blink::WebSize(kWidth, kHeight));
+  params.printerDPI = 72;
+  params.printScalingOption = blink::WebPrintScalingOptionSourceSize;
+  params.printContentArea =
+      blink::WebRect(kMarginLeft, kMarginTop, kContentWidth, kContentHeight);
+  SkFILEWStream wStream(path.MaybeAsASCII().c_str());
+  sk_sp<SkDocument> doc = SkMakeMultiPictureDocument(&wStream);
+  int page_count = context.web_frame()->printBegin(params);
+  for (int i = 0; i < page_count; ++i) {
+    SkCanvas* canvas =
+        doc->beginPage(SkIntToScalar(kWidth), SkIntToScalar(kHeight));
+    SkAutoCanvasRestore auto_restore(canvas, true);
+    canvas->translate(SkIntToScalar(kMarginLeft), SkIntToScalar(kMarginTop));
+    context.web_frame()->printPage(i, canvas);
+  }
+  context.web_frame()->printEnd();
+  doc->close();
 }
 
 void GpuBenchmarking::PrintToSkPicture(v8::Isolate* isolate,
@@ -911,7 +956,7 @@ int GpuBenchmarking::RunMicroBenchmark(gin::Arguments* args) {
       base::WrapUnique(V8ValueConverter::create());
   v8::Local<v8::Context> v8_context = callback_and_context->GetContext();
   std::unique_ptr<base::Value> value =
-      base::WrapUnique(converter->FromV8Value(arguments, v8_context));
+      converter->FromV8Value(arguments, v8_context);
 
   return context.compositor()->ScheduleMicroBenchmark(
       name, std::move(value),
@@ -931,7 +976,7 @@ bool GpuBenchmarking::SendMessageToMicroBenchmark(
   v8::Local<v8::Context> v8_context =
       context.web_frame()->mainWorldScriptContext();
   std::unique_ptr<base::Value> value =
-      base::WrapUnique(converter->FromV8Value(message, v8_context));
+      converter->FromV8Value(message, v8_context);
 
   return context.compositor()->SendMessageToMicroBenchmark(id,
                                                            std::move(value));
@@ -956,7 +1001,8 @@ void GpuBenchmarking::GetGpuDriverBugWorkarounds(gin::Arguments* args) {
   std::vector<std::string> gpu_driver_bug_workarounds;
   gpu::GpuChannelHost* gpu_channel =
       RenderThreadImpl::current()->GetGpuChannel();
-  if (!gpu_channel->Send(new GpuChannelMsg_GetDriverBugWorkArounds(
+  if (!gpu_channel ||
+      !gpu_channel->Send(new GpuChannelMsg_GetDriverBugWorkArounds(
           &gpu_driver_bug_workarounds))) {
     return;
   }

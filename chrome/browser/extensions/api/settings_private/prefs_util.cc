@@ -67,12 +67,16 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["bookmark_bar.show_on_all_tabs"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["browser.custom_chrome_frame"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["browser.show_home_button"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
 
   // Appearance settings.
   (*s_whitelist)["extensions.theme.id"] =
       settings_private::PrefType::PREF_TYPE_STRING;
+  (*s_whitelist)["webkit.webprefs.default_fixed_font_size"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
   (*s_whitelist)["webkit.webprefs.default_font_size"] =
       settings_private::PrefType::PREF_TYPE_NUMBER;
   (*s_whitelist)["webkit.webprefs.minimum_font_size"] =
@@ -96,6 +100,10 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
   (*s_whitelist)["gdata.disabled"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
 
+  // Printing settings.
+  (*s_whitelist)["local_discovery.notifications_enabled"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+
   (*s_whitelist)["enable_do_not_track"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["homepage"] = settings_private::PrefType::PREF_TYPE_URL;
@@ -106,6 +114,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
   (*s_whitelist)["net.network_prediction_options"] =
       settings_private::PrefType::PREF_TYPE_NUMBER;
   (*s_whitelist)["profile.password_manager_enabled"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["credentials_enable_autosignin"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["safebrowsing.enabled"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
@@ -126,6 +136,10 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
   (*s_whitelist)["translate_blocked_languages"] =
       settings_private::PrefType::PREF_TYPE_LIST;
 
+  // Site Settings prefs.
+  (*s_whitelist)["profile.block_third_party_cookies"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+
   // Clear browsing data settings.
   (*s_whitelist)["browser.clear_data.browsing_history"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
@@ -141,7 +155,7 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["browser.clear_data.hosted_apps_data"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
-  (*s_whitelist)["browser.clear_data.content_licenses"] =
+  (*s_whitelist)["browser.clear_data.media_licenses"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["browser.clear_data.time_period"] =
       settings_private::PrefType::PREF_TYPE_NUMBER;
@@ -231,6 +245,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["cros.metrics.reportingEnabled"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["cros.device.allow_bluetooth"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["cros.device.attestation_for_content_protection_enabled"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["settings.internet.wake_on_wifi_darkconnect"] =
@@ -238,11 +254,29 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
   (*s_whitelist)["settings.enable_screen_lock"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
 
-  // Input settings.
+  // Ash settings.
+  (*s_whitelist)["settings.enable_stylus_tools"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["settings.launch_palette_on_eject_event"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+
+  // Input method settings.
+  (*s_whitelist)["settings.language.preload_engines"] =
+      settings_private::PrefType::PREF_TYPE_STRING;
+  (*s_whitelist)["settings.language.enabled_extension_imes"] =
+      settings_private::PrefType::PREF_TYPE_STRING;
+
+  // Device settings.
   (*s_whitelist)["settings.touchpad.enable_tap_to_click"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["settings.touchpad.natural_scroll"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["settings.touchpad.sensitivity2"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["settings.mouse.primary_right"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["settings.mouse.sensitivity2"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
   (*s_whitelist)["settings.language.xkb_remap_search_key_to"] =
       settings_private::PrefType::PREF_TYPE_NUMBER;
   (*s_whitelist)["settings.language.xkb_remap_control_key_to"] =
@@ -255,6 +289,12 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_NUMBER;
   (*s_whitelist)["settings.language.send_function_keys"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["settings.language.xkb_auto_repeat_enabled_r2"] =
+      settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["settings.language.xkb_auto_repeat_delay_r2"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
+  (*s_whitelist)["settings.language.xkb_auto_repeat_interval_r2"] =
+      settings_private::PrefType::PREF_TYPE_NUMBER;
 #else
   (*s_whitelist)["intl.accept_languages"] =
       settings_private::PrefType::PREF_TYPE_STRING;
@@ -264,6 +304,7 @@ const PrefsUtil::TypedPrefMap& PrefsUtil::GetWhitelistedKeys() {
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
   (*s_whitelist)["hardware_acceleration_mode.enabled"] =
       settings_private::PrefType::PREF_TYPE_BOOLEAN;
+  (*s_whitelist)["proxy"] = settings_private::PrefType::PREF_TYPE_DICTIONARY;
 #endif
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -301,7 +342,7 @@ std::unique_ptr<settings_private::PrefObject> PrefsUtil::GetCrosSettingsPref(
 
 #if defined(OS_CHROMEOS)
   const base::Value* value = CrosSettings::Get()->GetPref(name);
-  DCHECK(value);
+  DCHECK(value) << "Pref not found: " << name;
   pref_object->key = name;
   pref_object->type = GetType(name, value->GetType());
   pref_object->value.reset(value->DeepCopy());

@@ -14,6 +14,7 @@
 #include "base/threading/thread_checker.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/generic_shared_memory_id.h"
+#include "ui/gl/gl_export.h"
 #include "ui/gl/gl_image.h"
 
 #if defined(__OBJC__)
@@ -55,6 +56,7 @@ class GL_EXPORT GLImageIOSurface : public GLImage {
                             gfx::OverlayTransform transform,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect) override;
+  void Flush() override {}
   void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                     uint64_t process_tracing_id,
                     const std::string& dump_name) override;
@@ -64,12 +66,20 @@ class GL_EXPORT GLImageIOSurface : public GLImage {
   base::ScopedCFTypeRef<IOSurfaceRef> io_surface();
   base::ScopedCFTypeRef<CVPixelBufferRef> cv_pixel_buffer();
 
+  // Whether checking IOSurfaceIsInUse() will actually provide a meaningful
+  // signal about whether the Window Server is still using the IOSurface.
+  bool CanCheckIOSurfaceIsInUse() const;
+
   static unsigned GetInternalFormatForTesting(gfx::BufferFormat format);
+
+  // Downcasts from |image|. Returns |nullptr| on failure.
+  static GLImageIOSurface* FromGLImage(GLImage* image);
 
  protected:
   ~GLImageIOSurface() override;
 
  private:
+  Type GetType() const override;
   class RGBConverter;
 
   const gfx::Size size_;

@@ -42,6 +42,11 @@ void VideoFrameMetadata::SetDouble(Key key, double value) {
   dictionary_.SetDoubleWithoutPathExpansion(ToInternalKey(key), value);
 }
 
+void VideoFrameMetadata::SetRotation(Key key, VideoRotation value) {
+  DCHECK_EQ(ROTATION, key);
+  dictionary_.SetIntegerWithoutPathExpansion(ToInternalKey(key), value);
+}
+
 void VideoFrameMetadata::SetString(Key key, const std::string& value) {
   dictionary_.SetWithoutPathExpansion(
       ToInternalKey(key),
@@ -73,7 +78,7 @@ void VideoFrameMetadata::SetTimeTicks(Key key, const base::TimeTicks& value) {
   SetTimeValue(key, value, &dictionary_);
 }
 
-void VideoFrameMetadata::SetValue(Key key, scoped_ptr<base::Value> value) {
+void VideoFrameMetadata::SetValue(Key key, std::unique_ptr<base::Value> value) {
   dictionary_.SetWithoutPathExpansion(ToInternalKey(key), std::move(value));
 }
 
@@ -90,6 +95,17 @@ bool VideoFrameMetadata::GetInteger(Key key, int* value) const {
 bool VideoFrameMetadata::GetDouble(Key key, double* value) const {
   DCHECK(value);
   return dictionary_.GetDoubleWithoutPathExpansion(ToInternalKey(key), value);
+}
+
+bool VideoFrameMetadata::GetRotation(Key key, VideoRotation* value) const {
+  DCHECK_EQ(ROTATION, key);
+  DCHECK(value);
+  int int_value;
+  const bool rv = dictionary_.GetIntegerWithoutPathExpansion(ToInternalKey(key),
+                                                             &int_value);
+  if (rv)
+    *value = static_cast<VideoRotation>(int_value);
+  return rv;
 }
 
 bool VideoFrameMetadata::GetString(Key key, std::string* value) const {

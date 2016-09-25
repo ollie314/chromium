@@ -31,6 +31,8 @@
 #include "platform/graphics/paint/PaintController.h"
 #include "platform/graphics/paint/SkPictureBuilder.h"
 #include "third_party/skia/include/core/SkPicture.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -75,7 +77,7 @@ PatternData* LayoutSVGResourcePattern::patternForLayoutObject(const LayoutObject
     return m_patternMap.set(&object, buildPatternData(object)).storedValue->value.get();
 }
 
-PassOwnPtr<PatternData> LayoutSVGResourcePattern::buildPatternData(const LayoutObject& object)
+std::unique_ptr<PatternData> LayoutSVGResourcePattern::buildPatternData(const LayoutObject& object)
 {
     // If we couldn't determine the pattern content element root, stop here.
     const PatternAttributes& attributes = this->attributes();
@@ -103,18 +105,18 @@ PassOwnPtr<PatternData> LayoutSVGResourcePattern::buildPatternData(const LayoutO
             attributes.preserveAspectRatio(), tileBounds.width(), tileBounds.height());
     } else {
         // A viewbox overrides patternContentUnits, per spec.
-        if (attributes.patternContentUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
+        if (attributes.patternContentUnits() == SVGUnitTypes::kSvgUnitTypeObjectboundingbox)
             tileTransform.scale(clientBoundingBox.width(), clientBoundingBox.height());
     }
 
-    OwnPtr<PatternData> patternData = adoptPtr(new PatternData);
+    std::unique_ptr<PatternData> patternData = wrapUnique(new PatternData);
     patternData->pattern = Pattern::createPicturePattern(asPicture(tileBounds, tileTransform));
 
     // Compute pattern space transformation.
     patternData->transform.translate(tileBounds.x(), tileBounds.y());
     patternData->transform.preMultiply(attributes.patternTransform());
 
-    return patternData.release();
+    return patternData;
 }
 
 SVGPaintServer LayoutSVGResourcePattern::preparePaintServer(const LayoutObject& object)
@@ -136,16 +138,14 @@ SVGPaintServer LayoutSVGResourcePattern::preparePaintServer(const LayoutObject& 
     // Spec: When the geometry of the applicable element has no width or height and objectBoundingBox is specified,
     // then the given effect (e.g. a gradient or a filter) will be ignored.
     FloatRect objectBoundingBox = object.objectBoundingBox();
-    if (attributes().patternUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX && objectBoundingBox.isEmpty())
+    if (attributes().patternUnits() == SVGUnitTypes::kSvgUnitTypeObjectboundingbox && objectBoundingBox.isEmpty())
         return SVGPaintServer::invalid();
 
     PatternData* patternData = patternForLayoutObject(object);
     if (!patternData || !patternData->pattern)
         return SVGPaintServer::invalid();
 
-    patternData->pattern->setPatternSpaceTransform(patternData->transform);
-
-    return SVGPaintServer(patternData->pattern);
+    return SVGPaintServer(patternData->pattern, patternData->transform);
 }
 
 const LayoutSVGResourceContainer* LayoutSVGResourcePattern::resolveContentElement() const
@@ -173,13 +173,13 @@ const LayoutSVGResourceContainer* LayoutSVGResourcePattern::resolveContentElemen
     return this;
 }
 
-PassRefPtr<SkPicture> LayoutSVGResourcePattern::asPicture(const FloatRect& tileBounds,
+sk_sp<SkPicture> LayoutSVGResourcePattern::asPicture(const FloatRect& tileBounds,
     const AffineTransform& tileTransform) const
 {
     ASSERT(!m_shouldCollectPatternAttributes);
 
     AffineTransform contentTransform;
-    if (attributes().patternContentUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
+    if (attributes().patternContentUnits() == SVGUnitTypes::kSvgUnitTypeObjectboundingbox)
         contentTransform = tileTransform;
 
     FloatRect bounds(FloatPoint(), tileBounds.size());

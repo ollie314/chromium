@@ -43,10 +43,11 @@ public:
 
     static CanvasPattern* create(PassRefPtr<Image> image, Pattern::RepeatMode repeat, bool originClean)
     {
-        return new CanvasPattern(image, repeat, originClean);
+        return new CanvasPattern(std::move(image), repeat, originClean);
     }
 
     Pattern* getPattern() const { return m_pattern.get(); }
+    const AffineTransform& getTransform() const { return m_patternTransform; }
 
     bool originClean() const { return m_originClean; }
 
@@ -58,6 +59,7 @@ private:
     CanvasPattern(PassRefPtr<Image>, Pattern::RepeatMode, bool originClean);
 
     RefPtr<Pattern> m_pattern;
+    AffineTransform m_patternTransform;
     bool m_originClean;
 };
 

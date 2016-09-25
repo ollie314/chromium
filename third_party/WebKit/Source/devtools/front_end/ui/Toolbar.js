@@ -73,6 +73,11 @@ WebInspector.Toolbar.prototype = {
         this._contentElement.classList.add("toolbar-toggled-gray");
     },
 
+    renderAsLinks: function()
+    {
+        this._contentElement.classList.add("toolbar-render-as-links");
+    },
+
     /**
      * @param {boolean} enabled
      */
@@ -168,6 +173,55 @@ WebInspector.Toolbar.prototype = {
             lastSeparator.setVisible(false);
 
         this.element.classList.toggle("hidden", !!lastSeparator && lastSeparator.visible() && !nonSeparatorVisible);
+    },
+
+    /**
+     * @param {string} location
+     */
+    appendLocationItems: function(location)
+    {
+        var extensions = self.runtime.extensions(WebInspector.ToolbarItem.Provider);
+        var promises = [];
+        for (var i = 0; i < extensions.length; ++i) {
+            if (extensions[i].descriptor()["location"] === location)
+                promises.push(resolveItem(extensions[i]));
+        }
+        Promise.all(promises).then(appendItemsInOrder.bind(this));
+
+        /**
+         * @param {!Runtime.Extension} extension
+         * @return {!Promise.<?WebInspector.ToolbarItem>}
+         */
+        function resolveItem(extension)
+        {
+            var descriptor = extension.descriptor();
+            if (descriptor["separator"])
+                return Promise.resolve(/** @type {?WebInspector.ToolbarItem} */(new WebInspector.ToolbarSeparator()));
+            if (descriptor["actionId"])
+                return Promise.resolve(WebInspector.Toolbar.createActionButtonForId(descriptor["actionId"]));
+            return extension.instance().then(fetchItemFromProvider);
+
+            /**
+             * @param {!Object} provider
+             */
+            function fetchItemFromProvider(provider)
+            {
+                return /** @type {!WebInspector.ToolbarItem.Provider} */ (provider).item();
+            }
+        }
+
+        /**
+         * @param {!Array.<?WebInspector.ToolbarItem>} items
+         * @this {WebInspector.Toolbar}
+         */
+        function appendItemsInOrder(items)
+        {
+            for (var i = 0; i < items.length; ++i) {
+                var item = items[i];
+                if (item)
+                    this.appendToolbarItem(item);
+            }
+        }
     }
 }
 
@@ -617,6 +671,16 @@ WebInspector.Toolbar.createActionButton = function(action, toggledOptions, untog
 }
 
 /**
+ * @param {string} actionId
+ * @return {?WebInspector.ToolbarItem}
+ */
+WebInspector.Toolbar.createActionButtonForId = function(actionId)
+{
+    var action = WebInspector.actionRegistry.action(actionId);
+    return /** @type {?WebInspector.ToolbarItem} */(action ? WebInspector.Toolbar.createActionButton(action) : null);
+}
+
+/**
  * @constructor
  * @extends {WebInspector.ToolbarButton}
  * @param {function(!WebInspector.ContextMenu)} contextMenuHandler
@@ -739,6 +803,20 @@ WebInspector.ToolbarItem.Provider.prototype = {
      * @return {?WebInspector.ToolbarItem}
      */
     item: function() {}
+}
+
+/**
+ * @interface
+ */
+WebInspector.ToolbarItem.ItemsProvider = function()
+{
+}
+
+WebInspector.ToolbarItem.ItemsProvider.prototype = {
+    /**
+     * @return {!Array<!WebInspector.ToolbarItem>}
+     */
+    toolbarItems: function() {}
 }
 
 /**
@@ -881,8 +959,9 @@ WebInspector.ToolbarComboBox.prototype = {
  * @param {string} text
  * @param {string=} title
  * @param {!WebInspector.Setting=} setting
+ * @param {function()=} listener
  */
-WebInspector.ToolbarCheckbox = function(text, title, setting)
+WebInspector.ToolbarCheckbox = function(text, title, setting, listener)
 {
     WebInspector.ToolbarItem.call(this, createCheckboxLabel(text));
     this.element.classList.add("checkbox");
@@ -891,6 +970,8 @@ WebInspector.ToolbarCheckbox = function(text, title, setting)
         this.element.title = title;
     if (setting)
         WebInspector.SettingsUI.bindCheckbox(this.inputElement, setting);
+    if (listener)
+        this.inputElement.addEventListener("click", listener, false);
 }
 
 WebInspector.ToolbarCheckbox.prototype = {
@@ -902,78 +983,14 @@ WebInspector.ToolbarCheckbox.prototype = {
         return this.inputElement.checked;
     },
 
+    /**
+     * @param {boolean} value
+     */
+    setChecked: function(value)
+    {
+        this.inputElement.checked = value;
+    },
+
     __proto__: WebInspector.ToolbarItem.prototype
 }
 
-/**
- * @constructor
- * @extends {WebInspector.Toolbar}
- * @param {string} location
- * @param {!Element=} parentElement
- */
-WebInspector.ExtensibleToolbar = function(location, parentElement)
-{
-    WebInspector.Toolbar.call(this, "", parentElement);
-    this._loadItems(location);
-}
-
-WebInspector.ExtensibleToolbar.prototype = {
-    /**
-     * @param {string} location
-     */
-    _loadItems: function(location)
-    {
-        var extensions = self.runtime.extensions(WebInspector.ToolbarItem.Provider);
-        var promises = [];
-        for (var i = 0; i < extensions.length; ++i) {
-            if (extensions[i].descriptor()["location"] === location)
-                promises.push(resolveItem(extensions[i]));
-        }
-        this._promise = Promise.all(promises).then(appendItemsInOrder.bind(this));
-
-        /**
-         * @param {!Runtime.Extension} extension
-         * @return {!Promise.<?WebInspector.ToolbarItem>}
-         */
-        function resolveItem(extension)
-        {
-            var descriptor = extension.descriptor();
-            if (descriptor["separator"])
-                return Promise.resolve(/** @type {?WebInspector.ToolbarItem} */(new WebInspector.ToolbarSeparator()));
-            if (descriptor["actionId"])
-                return Promise.resolve(/** @type {?WebInspector.ToolbarItem} */(WebInspector.Toolbar.createActionButton(WebInspector.actionRegistry.action(descriptor["actionId"]))));
-            return extension.instancePromise().then(fetchItemFromProvider);
-
-            /**
-             * @param {!Object} provider
-             */
-            function fetchItemFromProvider(provider)
-            {
-                return /** @type {!WebInspector.ToolbarItem.Provider} */ (provider).item();
-            }
-        }
-
-        /**
-         * @param {!Array.<?WebInspector.ToolbarItem>} items
-         * @this {WebInspector.ExtensibleToolbar}
-         */
-        function appendItemsInOrder(items)
-        {
-            for (var i = 0; i < items.length; ++i) {
-                var item = items[i];
-                if (item)
-                    this.appendToolbarItem(item);
-            }
-        }
-    },
-
-    /**
-     * @return {!Promise}
-     */
-    onLoad: function()
-    {
-        return this._promise;
-    },
-
-    __proto__: WebInspector.Toolbar.prototype
-}

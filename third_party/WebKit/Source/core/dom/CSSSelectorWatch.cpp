@@ -66,7 +66,7 @@ CSSSelectorWatch* CSSSelectorWatch::fromIfExists(Document& document)
     return static_cast<CSSSelectorWatch*>(Supplement<Document>::from(document, kSupplementName));
 }
 
-void CSSSelectorWatch::callbackSelectorChangeTimerFired(Timer<CSSSelectorWatch>*)
+void CSSSelectorWatch::callbackSelectorChangeTimerFired(TimerBase*)
 {
     // Should be ensured by updateSelectorMatches():
     DCHECK(!m_addedSelectors.isEmpty() || !m_removedSelectors.isEmpty());
@@ -149,7 +149,7 @@ void CSSSelectorWatch::watchCSSSelectors(const Vector<String>& selectors)
     StylePropertySet* callbackPropertySet = ImmutableStylePropertySet::create(nullptr, 0, UASheetMode);
 
     for (unsigned i = 0; i < selectors.size(); ++i) {
-        CSSSelectorList selectorList = CSSParser::parseSelector(CSSParserContext(UASheetMode, 0), nullptr, selectors[i]);
+        CSSSelectorList selectorList = CSSParser::parseSelector(CSSParserContext(UASheetMode, nullptr), nullptr, selectors[i]);
         if (!selectorList.isValid())
             continue;
 

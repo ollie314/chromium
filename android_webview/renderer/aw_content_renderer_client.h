@@ -5,12 +5,19 @@
 #ifndef ANDROID_WEBVIEW_RENDERER_AW_CONTENT_RENDERER_CLIENT_H_
 #define ANDROID_WEBVIEW_RENDERER_AW_CONTENT_RENDERER_CLIENT_H_
 
-#include "content/public/renderer/content_renderer_client.h"
-
-#include <stddef.h>
+#include <memory>
+#include <string>
 
 #include "android_webview/renderer/aw_render_thread_observer.h"
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
+#include "components/web_restrictions/interfaces/web_restrictions.mojom.h"
+#include "content/public/renderer/content_renderer_client.h"
+
+#if defined(ENABLE_SPELLCHECK)
+class SpellCheck;
+class SpellCheckProvider;
+#endif
 
 namespace visitedlink {
 class VisitedLinkSlave;
@@ -36,7 +43,9 @@ class AwContentRendererClient : public content::ContentRendererClient {
   unsigned long long VisitedLinkHash(const char* canonical_url,
                                      size_t length) override;
   bool IsLinkVisited(unsigned long long link_hash) override;
-  void AddKeySystems(std::vector<media::KeySystemInfo>* key_systems) override;
+  void AddSupportedKeySystems(
+      std::vector<std::unique_ptr<::media::KeySystemProperties>>* key_systems)
+      override;
 
   bool HandleNavigation(content::RenderFrame* render_frame,
                         bool is_content_initiated,
@@ -47,14 +56,17 @@ class AwContentRendererClient : public content::ContentRendererClient {
                         blink::WebNavigationPolicy default_policy,
                         bool is_redirect) override;
   bool ShouldUseMediaPlayerForURL(const GURL& url) override;
-  bool ShouldOverridePageVisibilityState(
-      const content::RenderFrame* render_frame,
-      blink::WebPageVisibilityState* override_state) override;
 
  private:
   std::unique_ptr<AwRenderThreadObserver> aw_render_thread_observer_;
   std::unique_ptr<visitedlink::VisitedLinkSlave> visited_link_slave_;
-  const bool disable_page_visibility_;
+  web_restrictions::mojom::WebRestrictionsPtr web_restrictions_service_;
+
+#if defined(ENABLE_SPELLCHECK)
+  std::unique_ptr<SpellCheck> spellcheck_;
+#endif
+
+  DISALLOW_COPY_AND_ASSIGN(AwContentRendererClient);
 };
 
 }  // namespace android_webview

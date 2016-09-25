@@ -17,6 +17,7 @@
 #include "base/i18n/time_formatting.h"
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringize_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/values.h"
@@ -36,7 +37,9 @@
 #include "content/public/common/url_constants.h"
 #include "gpu/config/gpu_feature_type.h"
 #include "gpu/config/gpu_info.h"
+#include "skia/ext/skia_commit_hash.h"
 #include "third_party/angle/src/common/version.h"
+#include "third_party/skia/include/core/SkMilestone.h"
 #include "ui/gl/gpu_switching_manager.h"
 
 #if defined(OS_LINUX) && defined(USE_X11)
@@ -48,7 +51,7 @@
 #endif
 
 #if defined(OS_LINUX) && defined(USE_X11)
-#include "ui/base/x/x11_util.h"
+#include "ui/base/x/x11_util.h"       // nogncheck
 #include "ui/gfx/x/x11_atom_cache.h"  // nogncheck
 #endif
 
@@ -61,20 +64,23 @@ WebUIDataSource* CreateGpuHTMLSource() {
   source->SetJsonPath("strings.js");
   source->AddResourcePath("gpu_internals.js", IDR_GPU_INTERNALS_JS);
   source->SetDefaultResource(IDR_GPU_INTERNALS_HTML);
+  source->DisableI18nAndUseGzipForAllPaths();
   return source;
 }
 
-base::DictionaryValue* NewDescriptionValuePair(const std::string& desc,
+std::unique_ptr<base::DictionaryValue> NewDescriptionValuePair(
+    const std::string& desc,
     const std::string& value) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("description", desc);
   dict->SetString("value", value);
   return dict;
 }
 
-base::DictionaryValue* NewDescriptionValuePair(const std::string& desc,
+std::unique_ptr<base::DictionaryValue> NewDescriptionValuePair(
+    const std::string& desc,
     base::Value* value) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("description", desc);
   dict->Set("value", value);
   return dict;
@@ -264,6 +270,8 @@ const char* BufferFormatToString(gfx::BufferFormat format) {
       return "ETC1";
     case gfx::BufferFormat::R_8:
       return "R_8";
+    case gfx::BufferFormat::BGR_565:
+      return "BGR_565";
     case gfx::BufferFormat::RGBA_4444:
       return "RGBA_4444";
     case gfx::BufferFormat::RGBX_8888:
@@ -274,8 +282,8 @@ const char* BufferFormatToString(gfx::BufferFormat format) {
       return "BGRX_8888";
     case gfx::BufferFormat::BGRA_8888:
       return "BGRA_8888";
-    case gfx::BufferFormat::YUV_420:
-      return "YUV_420";
+    case gfx::BufferFormat::YVU_420:
+      return "YVU_420";
     case gfx::BufferFormat::YUV_420_BIPLANAR:
       return "YUV_420_BIPLANAR";
     case gfx::BufferFormat::UYVY_422:
@@ -423,8 +431,7 @@ void GpuMessageHandler::OnCallAsync(const base::ListValue* args) {
     ok = args->Get(i, &arg);
     DCHECK(ok);
 
-    base::Value* argCopy = arg->DeepCopy();
-    submessageArgs->Append(argCopy);
+    submessageArgs->Append(arg->CreateDeepCopy());
   }
 
   // call the submessage handler
@@ -442,13 +449,12 @@ void GpuMessageHandler::OnCallAsync(const base::ListValue* args) {
 
   // call BrowserBridge.onCallAsyncReply with result
   if (ret) {
-    web_ui()->CallJavascriptFunction("browserBridge.onCallAsyncReply",
-        *requestId,
-        *ret);
+    web_ui()->CallJavascriptFunctionUnsafe("browserBridge.onCallAsyncReply",
+                                           *requestId, *ret);
     delete ret;
   } else {
-    web_ui()->CallJavascriptFunction("browserBridge.onCallAsyncReply",
-        *requestId);
+    web_ui()->CallJavascriptFunctionUnsafe("browserBridge.onCallAsyncReply",
+                                           *requestId);
   }
 }
 
@@ -485,7 +491,9 @@ base::Value* GpuMessageHandler::OnRequestClientInfo(
                   base::SysInfo::OperatingSystemName() + " " +
                   base::SysInfo::OperatingSystemVersion());
   dict->SetString("angle_commit_id", ANGLE_COMMIT_HASH);
-  dict->SetString("graphics_backend", "Skia");
+  dict->SetString("graphics_backend",
+                  std::string("Skia/" STRINGIZE(SK_MILESTONE)
+                              " " SKIA_COMMIT_HASH));
   dict->SetString("blacklist_version",
       GpuDataManagerImpl::GetInstance()->GetBlacklistVersion());
   dict->SetString("driver_bug_list_version",
@@ -518,8 +526,8 @@ void GpuMessageHandler::OnGpuInfoUpdate() {
   gpu_info_val->Set("gpuMemoryBufferInfo", GpuMemoryBufferInfo());
 
   // Send GPU Info to javascript.
-  web_ui()->CallJavascriptFunction("browserBridge.onGpuInfoUpdate",
-      *(gpu_info_val.get()));
+  web_ui()->CallJavascriptFunctionUnsafe("browserBridge.onGpuInfoUpdate",
+                                         *(gpu_info_val.get()));
 }
 
 void GpuMessageHandler::OnGpuSwitched() {

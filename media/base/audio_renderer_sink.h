@@ -11,8 +11,8 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "media/audio/audio_parameters.h"
 #include "media/base/audio_bus.h"
+#include "media/base/audio_parameters.h"
 #include "media/base/output_device_info.h"
 #include "url/origin.h"
 
@@ -69,6 +69,11 @@ class AudioRendererSink
   // OutputDeviceInfo should be set to OUTPUT_DEVICE_STATUS_ERROR_INTERNAL.
   // Must never be called on the IO thread.
   virtual OutputDeviceInfo GetOutputDeviceInfo() = 0;
+
+  // If DCHECKs are enabled, this function returns true if called on rendering
+  // thread, otherwise false. With DCHECKs disabled, it returns true. Thus, it
+  // is intended to be used for DCHECKing.
+  virtual bool CurrentThreadIsRenderingThread() = 0;
 
  protected:
   friend class base::RefCountedThreadSafe<AudioRendererSink>;

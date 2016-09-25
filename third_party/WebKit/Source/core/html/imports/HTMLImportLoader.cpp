@@ -33,12 +33,13 @@
 #include "core/dom/Document.h"
 #include "core/dom/DocumentParser.h"
 #include "core/dom/StyleEngine.h"
-#include "core/dom/custom/CustomElementSyncMicrotaskQueue.h"
+#include "core/dom/custom/V0CustomElementSyncMicrotaskQueue.h"
 #include "core/html/HTMLDocument.h"
 #include "core/html/imports/HTMLImportChild.h"
 #include "core/html/imports/HTMLImportsController.h"
 #include "core/loader/DocumentWriter.h"
 #include "platform/network/ContentSecurityPolicyResponseHeaders.h"
+#include <memory>
 
 
 namespace blink {
@@ -46,7 +47,7 @@ namespace blink {
 HTMLImportLoader::HTMLImportLoader(HTMLImportsController* controller)
     : m_controller(controller)
     , m_state(StateLoading)
-    , m_microtaskQueue(CustomElementSyncMicrotaskQueue::create())
+    , m_microtaskQueue(V0CustomElementSyncMicrotaskQueue::create())
 {
 }
 
@@ -71,9 +72,9 @@ void HTMLImportLoader::startLoading(RawResource* resource)
     setResource(resource);
 }
 
-void HTMLImportLoader::responseReceived(Resource* resource, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
+void HTMLImportLoader::responseReceived(Resource* resource, const ResourceResponse& response, std::unique_ptr<WebDataConsumerHandle> handle)
 {
-    ASSERT_UNUSED(handle, !handle);
+    DCHECK(!handle);
     // Resource may already have been loaded with the import loader
     // being added as a client later & now being notified. Fail early.
     if (resource->loadFailedOrCanceled() || response.httpStatusCode() >= 400 || !response.httpHeaderField(HTTPNames::Content_Disposition).isNull()) {
@@ -102,15 +103,15 @@ void HTMLImportLoader::notifyFinished(Resource* resource)
 
 HTMLImportLoader::State HTMLImportLoader::startWritingAndParsing(const ResourceResponse& response)
 {
-    ASSERT(m_controller);
-    ASSERT(!m_imports.isEmpty());
+    DCHECK(m_controller);
+    DCHECK(!m_imports.isEmpty());
     DocumentInit init = DocumentInit(response.url(), 0, m_controller->master()->contextDocument(), m_controller)
         .withRegistrationContext(m_controller->master()->registrationContext());
     m_document = HTMLDocument::create(init);
     m_writer = DocumentWriter::create(m_document.get(), AllowAsynchronousParsing, response.mimeType(), "UTF-8");
 
     DocumentParser* parser = m_document->parser();
-    ASSERT(parser);
+    DCHECK(parser);
     parser->addClient(this);
 
     return StateLoading;
@@ -157,7 +158,7 @@ void HTMLImportLoader::notifyParserStopped()
         setState(finishLoading());
 
     DocumentParser* parser = m_document->parser();
-    ASSERT(parser);
+    DCHECK(parser);
     parser->removeClient(this);
 }
 
@@ -169,7 +170,7 @@ void HTMLImportLoader::didRemoveAllPendingStylesheet()
 
 bool HTMLImportLoader::hasPendingResources() const
 {
-    return m_document && m_document->styleEngine().hasPendingSheets();
+    return m_document && m_document->styleEngine().hasPendingScriptBlockingSheets();
 }
 
 void HTMLImportLoader::didFinishLoading()
@@ -179,20 +180,20 @@ void HTMLImportLoader::didFinishLoading()
 
     clearResource();
 
-    ASSERT(!m_document || !m_document->parsing());
+    DCHECK(!m_document || !m_document->parsing());
 }
 
 void HTMLImportLoader::moveToFirst(HTMLImportChild* import)
 {
     size_t position = m_imports.find(import);
-    ASSERT(kNotFound != position);
+    DCHECK_NE(kNotFound, position);
     m_imports.remove(position);
     m_imports.insert(0, import);
 }
 
 void HTMLImportLoader::addImport(HTMLImportChild* import)
 {
-    ASSERT(kNotFound == m_imports.find(import));
+    DCHECK_EQ(kNotFound, m_imports.find(import));
 
     m_imports.append(import);
     import->normalize();
@@ -202,7 +203,7 @@ void HTMLImportLoader::addImport(HTMLImportChild* import)
 
 void HTMLImportLoader::removeImport(HTMLImportChild* client)
 {
-    ASSERT(kNotFound != m_imports.find(client));
+    DCHECK_NE(kNotFound, m_imports.find(client));
     m_imports.remove(m_imports.find(client));
 }
 
@@ -211,7 +212,7 @@ bool HTMLImportLoader::shouldBlockScriptExecution() const
     return firstImport()->state().shouldBlockScriptExecution();
 }
 
-CustomElementSyncMicrotaskQueue* HTMLImportLoader::microtaskQueue() const
+V0CustomElementSyncMicrotaskQueue* HTMLImportLoader::microtaskQueue() const
 {
     return m_microtaskQueue;
 }

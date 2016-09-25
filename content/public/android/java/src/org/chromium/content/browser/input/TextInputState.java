@@ -18,9 +18,10 @@ public class TextInputState {
     private final Range mComposition;
     private final boolean mSingleLine;
     private final boolean mFromIme;
+    private final boolean mInBatchEditMode;
 
     public TextInputState(CharSequence text, Range selection, Range composition, boolean singleLine,
-            boolean fromIme) {
+            boolean fromIme, boolean inBatchEditMode) {
         selection.clamp(0, text.length());
         if (composition.start() != -1 || composition.end() != -1) {
             composition.clamp(0, text.length());
@@ -30,6 +31,7 @@ public class TextInputState {
         mComposition = composition;
         mSingleLine = singleLine;
         mFromIme = fromIme;
+        mInBatchEditMode = inBatchEditMode;
     }
 
     public CharSequence text() {
@@ -52,7 +54,12 @@ public class TextInputState {
         return mFromIme;
     }
 
+    public boolean inBatchEditMode() {
+        return mInBatchEditMode;
+    }
+
     public CharSequence getSelectedText() {
+        if (mSelection.start() == mSelection.end()) return null;
         return TextUtils.substring(mText, mSelection.start(), mSelection.end());
     }
 
@@ -89,8 +96,8 @@ public class TextInputState {
 
     @Override
     public String toString() {
-        return String.format(Locale.US, "TextInputState {[%s] SEL%s COM%s %s %s}", mText,
+        return String.format(Locale.US, "TextInputState {[%s] SEL%s COM%s %s %s%s}", mText,
                 mSelection, mComposition, mSingleLine ? "SIN" : "MUL",
-                mFromIme ? "fromIME" : "NOTfromIME");
+                mFromIme ? "fromIME" : "NOTfromIME", mInBatchEditMode ? " BatchEdit" : "");
     }
 }

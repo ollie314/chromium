@@ -49,13 +49,13 @@ class CreateVisualElementsManifestTest : public testing::Test {
     // Create a temp directory for testing.
     ASSERT_TRUE(test_dir_.CreateUniqueTempDir());
 
-    version_ = Version("0.0.0.0");
+    version_ = base::Version("0.0.0.0");
 
-    version_dir_ = test_dir_.path().AppendASCII(version_.GetString());
+    version_dir_ = test_dir_.GetPath().AppendASCII(version_.GetString());
     ASSERT_TRUE(base::CreateDirectory(version_dir_));
 
     manifest_path_ =
-        test_dir_.path().Append(installer::kVisualElementsManifest);
+        test_dir_.GetPath().Append(installer::kVisualElementsManifest);
   }
 
   void TearDown() override {
@@ -67,7 +67,7 @@ class CreateVisualElementsManifestTest : public testing::Test {
   base::ScopedTempDir test_dir_;
 
   // A dummy version number used to create the version directory.
-  Version version_;
+  base::Version version_;
 
   // The path to |test_dir_|\|version_|.
   base::FilePath version_dir_;
@@ -99,7 +99,7 @@ class InstallShortcutTest : public testing::Test {
     product_.reset(new installer::Product(dist_));
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    chrome_exe_ = temp_dir_.path().Append(installer::kChromeExe);
+    chrome_exe_ = temp_dir_.GetPath().Append(installer::kChromeExe);
     EXPECT_EQ(0, base::WriteFile(chrome_exe_, "", 0));
 
     ShellUtil::ShortcutProperties chrome_properties(ShellUtil::CURRENT_USER);
@@ -137,9 +137,7 @@ class InstallShortcutTest : public testing::Test {
         new base::ScopedPathOverride(base::DIR_COMMON_START_MENU,
                                      fake_common_start_menu_.path()));
 
-    base::string16 shortcut_name(
-        dist_->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME) +
-        installer::kLnkExt);
+    base::string16 shortcut_name(dist_->GetShortcutName() + installer::kLnkExt);
 
     user_desktop_shortcut_ =
         fake_user_desktop_.path().Append(shortcut_name);
@@ -208,7 +206,7 @@ class InstallShortcutTest : public testing::Test {
     for (size_t i = 0; i < num_test_cases; ++i) {
       // Make sure that the target exists.
       const base::FilePath target_path =
-          temp_dir_.path().Append(test_cases[i].target_path);
+          temp_dir_.GetPath().Append(test_cases[i].target_path);
       if (!base::PathExists(target_path)) {
         ASSERT_TRUE(base::CreateDirectory(target_path.DirName()));
         base::File file(target_path, base::File::FLAG_CREATE_ALWAYS |
@@ -223,7 +221,8 @@ class InstallShortcutTest : public testing::Test {
       // Create the shortcut.
       base::win::ShortcutProperties properties;
       properties.set_target(target_path);
-      properties.set_icon(temp_dir_.path().Append(test_cases[i].icon_path), 1);
+      properties.set_icon(temp_dir_.GetPath().Append(test_cases[i].icon_path),
+                          1);
       ASSERT_TRUE(base::win::CreateOrUpdateShortcutLink(
           user_desktop_shortcut_.InsertBeforeExtension(
               base::SizeTToString16(i)),
@@ -232,7 +231,7 @@ class InstallShortcutTest : public testing::Test {
 
     // Update shortcuts.
     const base::FilePath new_target_path =
-        temp_dir_.path().Append(new_target_path_relative);
+        temp_dir_.GetPath().Append(new_target_path_relative);
     installer::UpdatePerUserShortcutsInLocation(
         ShellUtil::SHORTCUT_LOCATION_DESKTOP, dist_,
         new_target_path.DirName().DirName(), new_target_path.BaseName(),
@@ -251,7 +250,7 @@ class InstallShortcutTest : public testing::Test {
                   GetNormalizedFilePath(target_path));
       } else {
         EXPECT_EQ(GetNormalizedFilePath(
-                      temp_dir_.path().Append(test_cases[i].target_path)),
+                      temp_dir_.GetPath().Append(test_cases[i].target_path)),
                   GetNormalizedFilePath(target_path));
       }
     }
@@ -292,7 +291,7 @@ class InstallShortcutTest : public testing::Test {
 // not present.
 TEST_F(CreateVisualElementsManifestTest, VisualElementsManifestNotCreated) {
   ASSERT_TRUE(
-      installer::CreateVisualElementsManifest(test_dir_.path(), version_));
+      installer::CreateVisualElementsManifest(test_dir_.GetPath(), version_));
   ASSERT_FALSE(base::PathExists(manifest_path_));
 }
 
@@ -302,7 +301,7 @@ TEST_F(CreateVisualElementsManifestTest, VisualElementsManifestCreated) {
   ASSERT_TRUE(base::CreateDirectory(
       version_dir_.Append(installer::kVisualElements)));
   ASSERT_TRUE(
-      installer::CreateVisualElementsManifest(test_dir_.path(), version_));
+      installer::CreateVisualElementsManifest(test_dir_.GetPath(), version_));
   ASSERT_TRUE(base::PathExists(manifest_path_));
 
   std::string read_manifest;
@@ -314,8 +313,9 @@ TEST_F(CreateVisualElementsManifestTest, VisualElementsManifestCreated) {
       "      ShowNameOnSquare150x150Logo='on'\r\n"
       "      Square150x150Logo='0.0.0.0\\VisualElements\\Logo.png'\r\n"
       "      Square70x70Logo='0.0.0.0\\VisualElements\\SmallLogo.png'\r\n"
+      "      Square44x44Logo='0.0.0.0\\VisualElements\\SmallLogo.png'\r\n"
       "      ForegroundText='light'\r\n"
-      "      BackgroundColor='#323232'/>\r\n"
+      "      BackgroundColor='#212121'/>\r\n"
       "</Application>\r\n";
 
   ASSERT_STREQ(kExpectedManifest, read_manifest.c_str());
@@ -373,7 +373,8 @@ TEST_F(InstallShortcutTest, CreateAllShortcutsButQuickLaunchShortcut) {
 TEST_F(InstallShortcutTest, ReplaceAll) {
   base::win::ShortcutProperties dummy_properties;
   base::FilePath dummy_target;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &dummy_target));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &dummy_target));
   dummy_properties.set_target(dummy_target);
   dummy_properties.set_working_dir(fake_user_desktop_.path());
   dummy_properties.set_arguments(L"--dummy --args");
@@ -403,7 +404,8 @@ TEST_F(InstallShortcutTest, ReplaceAll) {
 TEST_F(InstallShortcutTest, ReplaceExisting) {
   base::win::ShortcutProperties dummy_properties;
   base::FilePath dummy_target;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &dummy_target));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &dummy_target));
   dummy_properties.set_target(dummy_target);
   dummy_properties.set_working_dir(fake_user_desktop_.path());
   dummy_properties.set_arguments(L"--dummy --args");
@@ -442,7 +444,8 @@ class MigrateShortcutTest : public InstallShortcutTest,
 TEST_P(MigrateShortcutTest, MigrateAwayFromDeprecatedStartMenuTest) {
   base::win::ShortcutProperties dummy_properties;
   base::FilePath dummy_target;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &dummy_target));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &dummy_target));
   dummy_properties.set_target(expected_properties_.target);
   dummy_properties.set_working_dir(fake_user_desktop_.path());
   dummy_properties.set_arguments(L"--dummy --args");
@@ -488,7 +491,8 @@ INSTANTIATE_TEST_CASE_P(
 TEST_F(InstallShortcutTest, CreateIfNoSystemLevelAllSystemShortcutsExist) {
   base::win::ShortcutProperties dummy_properties;
   base::FilePath dummy_target;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &dummy_target));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &dummy_target));
   dummy_properties.set_target(dummy_target);
 
   ASSERT_TRUE(base::win::CreateOrUpdateShortcutLink(
@@ -524,7 +528,8 @@ TEST_F(InstallShortcutTest, CreateIfNoSystemLevelNoSystemShortcutsExist) {
 TEST_F(InstallShortcutTest, CreateIfNoSystemLevelSomeSystemShortcutsExist) {
   base::win::ShortcutProperties dummy_properties;
   base::FilePath dummy_target;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &dummy_target));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &dummy_target));
   dummy_properties.set_target(dummy_target);
 
   ASSERT_TRUE(base::win::CreateOrUpdateShortcutLink(

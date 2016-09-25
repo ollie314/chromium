@@ -28,7 +28,7 @@
 
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptState.h"
-#include "bindings/modules/v8/UnionTypesModules.h"
+#include "bindings/modules/v8/StringOrStringSequenceOrDOMStringList.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/dom/DOMStringList.h"
 #include "modules/EventModules.h"
@@ -43,10 +43,9 @@
 #include "modules/indexeddb/IndexedDB.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/modules/indexeddb/WebIDBDatabase.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -61,15 +60,17 @@ class MODULES_EXPORT IDBDatabase final
     USING_GARBAGE_COLLECTED_MIXIN(IDBDatabase);
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static IDBDatabase* create(ExecutionContext*, PassOwnPtr<WebIDBDatabase>, IDBDatabaseCallbacks*);
+    static IDBDatabase* create(ExecutionContext*, std::unique_ptr<WebIDBDatabase>, IDBDatabaseCallbacks*);
     ~IDBDatabase() override;
     DECLARE_VIRTUAL_TRACE();
 
     void setMetadata(const IDBDatabaseMetadata& metadata) { m_metadata = metadata; }
     void indexCreated(int64_t objectStoreId, const IDBIndexMetadata&);
     void indexDeleted(int64_t objectStoreId, int64_t indexId);
+    void indexRenamed(int64_t objectStoreId, int64_t indexId, const String& newName);
     void transactionCreated(IDBTransaction*);
     void transactionFinished(const IDBTransaction*);
+    const String& getObjectStoreName(int64_t objectStoreId) const;
 
     // Implement the IDL
     const String& name() const { return m_metadata.name; }
@@ -77,7 +78,7 @@ public:
     DOMStringList* objectStoreNames() const;
 
     IDBObjectStore* createObjectStore(const String& name, const IDBObjectStoreParameters& options, ExceptionState& exceptionState) { return createObjectStore(name, IDBKeyPath(options.keyPath()), options.autoIncrement(), exceptionState); }
-    IDBTransaction* transaction(ScriptState*, const StringOrStringSequenceOrDOMStringList&, const String& mode, ExceptionState&);
+    IDBTransaction* transaction(ScriptState*, const StringOrStringSequenceOrDOMStringList& storeNames, const String& mode, ExceptionState&);
     void deleteObjectStore(const String& name, ExceptionState&);
     void close();
 
@@ -91,7 +92,7 @@ public:
     void onAbort(int64_t, DOMException*);
     void onComplete(int64_t);
 
-    // ActiveScriptWrappable
+    // ScriptWrappable
     bool hasPendingActivity() const final;
 
     // ActiveDOMObject
@@ -111,6 +112,7 @@ public:
     {
         return findObjectStoreId(name) != IDBObjectStoreMetadata::InvalidId;
     }
+    void objectStoreRenamed(int64_t storeId, const String& newName);
 
     // Will return nullptr if this database is stopped.
     WebIDBDatabase* backend() const { return m_backend.get(); }
@@ -118,6 +120,7 @@ public:
     static int64_t nextTransactionId();
 
     static const char indexDeletedErrorMessage[];
+    static const char indexNameTakenErrorMessage[];
     static const char isKeyCursorErrorMessage[];
     static const char noKeyOrKeyRangeErrorMessage[];
     static const char noSuchIndexErrorMessage[];
@@ -126,6 +129,7 @@ public:
     static const char notValidKeyErrorMessage[];
     static const char notVersionChangeTransactionErrorMessage[];
     static const char objectStoreDeletedErrorMessage[];
+    static const char objectStoreNameTakenErrorMessage[];
     static const char requestNotFinishedErrorMessage[];
     static const char sourceDeletedErrorMessage[];
     static const char transactionFinishedErrorMessage[];
@@ -140,13 +144,13 @@ protected:
     DispatchEventResult dispatchEventInternal(Event*) override;
 
 private:
-    IDBDatabase(ExecutionContext*, PassOwnPtr<WebIDBDatabase>, IDBDatabaseCallbacks*);
+    IDBDatabase(ExecutionContext*, std::unique_ptr<WebIDBDatabase>, IDBDatabaseCallbacks*);
 
     IDBObjectStore* createObjectStore(const String& name, const IDBKeyPath&, bool autoIncrement, ExceptionState&);
     void closeConnection();
 
     IDBDatabaseMetadata m_metadata;
-    OwnPtr<WebIDBDatabase> m_backend;
+    std::unique_ptr<WebIDBDatabase> m_backend;
     Member<IDBTransaction> m_versionChangeTransaction;
     HeapHashMap<int64_t, Member<IDBTransaction>> m_transactions;
 

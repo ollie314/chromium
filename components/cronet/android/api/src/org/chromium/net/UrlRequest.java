@@ -46,6 +46,8 @@ public interface UrlRequest {
                 new ArrayList<Pair<String, String>>();
         // Disable the cache for just this request.
         boolean mDisableCache;
+        // Disable connection migration for just this request.
+        boolean mDisableConnectionMigration;
         // Priority of request. Default is medium.
         @RequestPriority int mPriority = REQUEST_PRIORITY_MEDIUM;
         // Request reporting annotations. Avoid extra object creation if no annotations added.
@@ -54,6 +56,7 @@ public interface UrlRequest {
         UploadDataProvider mUploadDataProvider;
         // Executor to call upload data provider back on.
         Executor mUploadDataProviderExecutor;
+        private boolean mAllowDirectExecutor = false;
 
         /**
          * Creates a builder for {@link UrlRequest} objects. All callbacks for
@@ -140,6 +143,18 @@ public interface UrlRequest {
             return this;
         }
 
+        /**
+         * Disables connection migration for the request if enabled for
+         * the session.
+         * @return the builder to facilitate chaining.
+         *
+         * @hide as experimental.
+         */
+        public Builder disableConnectionMigration() {
+            mDisableConnectionMigration = true;
+            return this;
+        }
+
         /** @hide */
         @IntDef({
                 REQUEST_PRIORITY_IDLE, REQUEST_PRIORITY_LOWEST, REQUEST_PRIORITY_LOW,
@@ -213,12 +228,27 @@ public interface UrlRequest {
         }
 
         /**
-         * Associates the annotation object with this request. May add more than one.
-         * Passed through to a {@link CronetEngine.RequestFinishedListener},
-         * see {@link CronetEngine.UrlRequestInfo#getAnnotations}.
+         * Marks that the executors this request will use to notify callbacks (for
+         * {@code UploadDataProvider}s and {@code UrlRequest.Callback}s) is intentionally performing
+         * inline execution, like Guava's directExecutor or
+         * {@link java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy}.
          *
-         * @param annotation an object to pass on to the
-         * {@link CronetEngine.RequestFinishedListener} with a {@link CronetEngine.UrlRequestInfo}.
+         * <p><b>Warning:</b> This option makes it easy to accidentally block the network thread.
+         * It should not be used if your callbacks perform disk I/O, acquire locks, or call into
+         * other code you don't carefully control and audit.
+         */
+        public Builder allowDirectExecutor() {
+            mAllowDirectExecutor = true;
+            return this;
+        }
+
+        /**
+         * Associates the annotation object with this request. May add more than one.
+         * Passed through to a {@link RequestFinishedInfo.Listener},
+         * see {@link RequestFinishedInfo#getAnnotations}.
+         *
+         * @param annotation an object to pass on to the {@link RequestFinishedInfo.Listener} with a
+         * {@link RequestFinishedInfo}.
          * @return the builder to facilitate chaining.
          *
          * @hide as it's a prototype.
@@ -243,13 +273,11 @@ public interface UrlRequest {
          *         this {@link Builder}.
          */
         public UrlRequest build() {
-            final UrlRequest request = mCronetEngine.createRequest(
-                    mUrl, mCallback, mExecutor, mPriority, mRequestAnnotations);
+            final UrlRequest request = mCronetEngine.createRequest(mUrl, mCallback, mExecutor,
+                    mPriority, mRequestAnnotations, mDisableCache, mDisableConnectionMigration,
+                    mAllowDirectExecutor);
             if (mMethod != null) {
                 request.setHttpMethod(mMethod);
-            }
-            if (mDisableCache) {
-                request.disableCache();
             }
             for (Pair<String, String> header : mRequestHeaders) {
                 request.addHeader(header.first, header.second);
@@ -299,8 +327,8 @@ public interface UrlRequest {
          * With the exception of {@link Callback#onCanceled onCanceled()},
          * no other {@link Callback} method will be invoked for the request,
          * including {@link Callback#onSucceeded onSucceeded()} and {@link
-         * Callback#onFailed onFailed()}, until {@link UrlRequest#readNew
-         * UrlRequest.readNew()} is called to attempt to start reading the response
+         * Callback#onFailed onFailed()}, until {@link UrlRequest#read
+         * UrlRequest.read()} is called to attempt to start reading the response
          * body.
          *
          * @param request Request that started to get response.
@@ -321,13 +349,13 @@ public interface UrlRequest {
          * no other {@link Callback} method will be invoked for the request,
          * including {@link Callback#onSucceeded onSucceeded()} and {@link
          * Callback#onFailed onFailed()}, until {@link
-         * UrlRequest#readNew UrlRequest.readNew()} is called to attempt to continue
+         * UrlRequest#read UrlRequest.read()} is called to attempt to continue
          * reading the response body.
          *
          * @param request Request that received data.
          * @param info Response information.
          * @param byteBuffer The buffer that was passed in to
-         *         {@link UrlRequest#readNew UrlRequest.readNew()}, now containing the
+         *         {@link UrlRequest#read UrlRequest.read()}, now containing the
          *         received data. The buffer's position is updated to the end of
          *         the received data. The buffer's limit is not changed.
          * @throws Exception if an error occurs while processing a read completion.
@@ -395,7 +423,7 @@ public interface UrlRequest {
          * This state corresponds to a resource load that has either not yet begun
          * or is idle waiting for the consumer to do something to move things along
          * (e.g. when the consumer of a {@link UrlRequest} has not called
-         * {@link UrlRequest#readNew readNew()} yet).
+         * {@link UrlRequest#read read()} yet).
          */
         public static final int IDLE = 0;
         /**
@@ -484,7 +512,7 @@ public interface UrlRequest {
          * the period after the response headers have been received and before all
          * of the response body has been downloaded. (NOTE: This state only applies
          * for an {@link UrlRequest} while there is an outstanding
-         * {@link UrlRequest#readNew readNew()} operation.)
+         * {@link UrlRequest#read read()} operation.)
          */
         public static final int READING_RESPONSE = 14;
 
@@ -494,9 +522,10 @@ public interface UrlRequest {
          * Convert a LoadState int to one of values listed above.
          * @param loadState a LoadState to convert.
          * @return static int Status.
+         * @hide only used by internal implementation.
          */
         @StatusValues
-        static int convertLoadState(int loadState) {
+        public static int convertLoadState(int loadState) {
             assert loadState >= LoadState.IDLE && loadState <= LoadState.READING_RESPONSE;
             switch (loadState) {
                 case (LoadState.IDLE):
@@ -636,8 +665,7 @@ public interface UrlRequest {
      *     position, limit, or data between its position and limit until the
      *     request calls back into the {@link Callback}.
      */
-    // TODO(pauljensen): Rename to read() once original read() is removed.
-    public void readNew(ByteBuffer buffer);
+    public void read(ByteBuffer buffer);
 
     /**
      * Cancels the request. Can be called at any time.
@@ -662,17 +690,6 @@ public interface UrlRequest {
     public boolean isDone();
 
     /**
-     * Disables cache for the request. If context is not set up to use cache,
-     * this call has no effect.
-     * @deprecated Use {@link Builder#disableCache}.
-     * @hide
-     */
-    // TODO(pauljensen): When all callers shifted to Builder.disableCache(),
-    // remove this method and instead add constructor argument and make
-    // CronetUrlRequest.mDisableCache final.
-    @Deprecated public void disableCache();
-
-    /**
      * Queries the status of the request.
      * @param listener a {@link StatusListener} that will be invoked with
      *         the request's current status. {@code listener} will be invoked
@@ -685,4 +702,3 @@ public interface UrlRequest {
     // here. Having none removes any ambiguity over when they are populated,
     // particularly in the redirect case.
 }
-

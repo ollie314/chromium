@@ -37,11 +37,36 @@ NameInfo& NameInfo::operator=(const NameInfo& info) {
   return *this;
 }
 
+bool NameInfo::operator==(const NameInfo& other) const {
+  if (this == &other)
+    return true;
+  return given_ == other.given_ && middle_ == other.middle_ &&
+         family_ == other.family_ && full_ == other.full_;
+}
+
 bool NameInfo::ParsedNamesAreEqual(const NameInfo& info) const {
-  l10n::CaseInsensitiveCompare compare;
-  return compare.StringsEqual(given_, info.given_) &&
-         compare.StringsEqual(middle_, info.middle_) &&
-         compare.StringsEqual(family_, info.family_);
+  return given_ == info.given_ && middle_ == info.middle_ &&
+         family_ == info.family_;
+}
+
+void NameInfo::OverwriteName(const NameInfo& new_name) {
+  if (!new_name.given_.empty())
+    given_ = new_name.given_;
+
+  // For the middle name, don't overwrite a full middle name with an initial.
+  if (!new_name.middle_.empty() &&
+      (middle_.size() <= 1 || new_name.middle_.size() > 1))
+    middle_ = new_name.middle_;
+
+  if (!new_name.family_.empty())
+    family_ = new_name.family_;
+
+  if (!new_name.full_.empty())
+    full_ = new_name.full_;
+}
+
+bool NameInfo::NamePartsAreEmpty() const {
+  return given_.empty() && middle_.empty() && family_.empty();
 }
 
 void NameInfo::GetSupportedTypes(ServerFieldTypeSet* supported_types) const {
@@ -128,17 +153,7 @@ base::string16 NameInfo::FullName() const {
   if (!full_.empty())
     return full_;
 
-  std::vector<base::string16> full_name;
-  if (!given_.empty())
-    full_name.push_back(given_);
-
-  if (!middle_.empty())
-    full_name.push_back(middle_);
-
-  if (!family_.empty())
-    full_name.push_back(family_);
-
-  return base::JoinString(full_name, base::ASCIIToUTF16(" "));
+  return data_util::JoinNameParts(given_, middle_, family_);
 }
 
 base::string16 NameInfo::MiddleInitial() const {
@@ -181,6 +196,10 @@ EmailInfo& EmailInfo::operator=(const EmailInfo& info) {
   return *this;
 }
 
+bool EmailInfo::operator==(const EmailInfo& other) const {
+  return this == &other || email_ == other.email_;
+}
+
 void EmailInfo::GetSupportedTypes(ServerFieldTypeSet* supported_types) const {
   supported_types->insert(EMAIL_ADDRESS);
 }
@@ -211,6 +230,10 @@ CompanyInfo& CompanyInfo::operator=(const CompanyInfo& info) {
 
   company_name_ = info.company_name_;
   return *this;
+}
+
+bool CompanyInfo::operator==(const CompanyInfo& other) const {
+  return this == &other || company_name_ == other.company_name_;
 }
 
 void CompanyInfo::GetSupportedTypes(ServerFieldTypeSet* supported_types) const {

@@ -22,7 +22,7 @@ SourceListDirective::SourceListDirective(const String& name, const String& value
     m_sourceList.parse(characters.data(), characters.data() + characters.size());
 }
 
-bool SourceListDirective::allows(const KURL& url, ContentSecurityPolicy::RedirectStatus redirectStatus) const
+bool SourceListDirective::allows(const KURL& url, ResourceRequest::RedirectStatus redirectStatus) const
 {
     return m_sourceList.matches(url, redirectStatus);
 }
@@ -50,6 +50,11 @@ bool SourceListDirective::allowNonce(const String& nonce) const
 bool SourceListDirective::allowHash(const CSPHashValue& hashValue) const
 {
     return m_sourceList.allowHash(hashValue);
+}
+
+bool SourceListDirective::allowHashedAttributes() const
+{
+    return m_sourceList.allowHashedAttributes();
 }
 
 bool SourceListDirective::isHashOrNoncePresent() const

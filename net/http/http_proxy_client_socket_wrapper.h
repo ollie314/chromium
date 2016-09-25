@@ -69,7 +69,7 @@ class HttpProxyClientSocketWrapper : public ProxyClientSocket {
       SpdySessionPool* spdy_session_pool,
       bool tunnel,
       ProxyDelegate* proxy_delegate,
-      const BoundNetLog& net_log);
+      const NetLogWithSource& net_log);
 
   // On destruction Disconnect() is called.
   ~HttpProxyClientSocketWrapper() override;
@@ -86,14 +86,14 @@ class HttpProxyClientSocketWrapper : public ProxyClientSocket {
   int RestartWithAuth(const CompletionCallback& callback) override;
   const scoped_refptr<HttpAuthController>& GetAuthController() const override;
   bool IsUsingSpdy() const override;
-  NextProto GetProtocolNegotiated() const override;
+  NextProto GetProxyNegotiatedProtocol() const override;
 
   // StreamSocket implementation.
   int Connect(const CompletionCallback& callback) override;
   void Disconnect() override;
   bool IsConnected() const override;
   bool IsConnectedAndIdle() const override;
-  const BoundNetLog& NetLog() const override;
+  const NetLogWithSource& NetLog() const override;
   void SetSubresourceSpeculation() override;
   void SetOmniboxSpeculation() override;
   bool WasEverUsed() const override;
@@ -179,15 +179,13 @@ class HttpProxyClientSocketWrapper : public ProxyClientSocket {
 
   const std::string user_agent_;
   const HostPortPair endpoint_;
-  HttpAuthCache* const http_auth_cache_;
-  HttpAuthHandlerFactory* const http_auth_handler_factory_;
   SpdySessionPool* const spdy_session_pool_;
 
   const bool tunnel_;
   ProxyDelegate* const proxy_delegate_;
 
   bool using_spdy_;
-  NextProto protocol_negotiated_;
+  NextProto negotiated_protocol_;
 
   std::unique_ptr<HttpResponseInfo> error_response_info_;
 
@@ -203,7 +201,7 @@ class HttpProxyClientSocketWrapper : public ProxyClientSocket {
 
   scoped_refptr<HttpAuthController> http_auth_controller_;
 
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
 
   base::OneShotTimer connect_timer_;
 

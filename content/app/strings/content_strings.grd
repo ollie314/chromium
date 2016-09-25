@@ -35,7 +35,7 @@ below:
 -->
 
 <grit base_dir="." latest_public_release="0" current_release="1"
-      source_lang_id="en" enc_check="möl">
+      output_all_resource_defines="false" source_lang_id="en" enc_check="möl">
   <outputs>
     <!-- TODO add each of your output files.  Modify the three below, and add
     your own for your various languages.  See the user's guide
@@ -544,10 +544,6 @@ below:
         Day
       </message>
 
-      <message name="IDS_AX_DATE_TIME_FIELD_EMPTY_VALUE_TEXT" desc="Accessible description of empty value of field in a date/time control">
-        blank
-      </message>
-
       <message name="IDS_AX_HOUR_FIELD_TEXT" desc="Accessible description of the hour field in a date/time control">
         Hours
       </message>
@@ -854,6 +850,47 @@ below:
       </message>
       <message name="IDS_FORM_VALIDATION_TOO_SHORT" desc="Heading or short sentence shown when a form control in a webpage needs to be longer than a length specified by the page author, but a user specified short value.">
         Please lengthen this text to <ph name="MIN_CHARACTERS">$2<ex>101</ex></ph> characters or more (you are currently using <ph name="CURRENT_LENGTH">$1<ex>100</ex></ph> characters).
+      </message>
+
+      <message name="IDS_AX_MEDIA_OVERFLOW_BUTTON" desc="Media controls overflow menu.">
+        Overflow menu
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_CLOSED_CAPTIONS" desc="Media controls overflow menu item label for a closed captions button. The text for this overflow menu should be short.">
+        Captions
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_CAST" desc="Media controls overflow menu item label for a cast button.">
+        Cast
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_ENTER_FULLSCREEN" desc="Media controls overflow menu item label for a button to enter fullscreen.">
+        Fullscreen
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_EXIT_FULLSCREEN" desc="Media controls overflow menu item label for a button to exit fullscreen.">
+        Exit fullscreen
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_STOP_CAST" desc="Media controls overflow menu item label for a button to stop casting.">
+        Stop casting
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_MUTE" desc="Media controls overflow menu item label for a mute button.">
+        Mute
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_UNMUTE" desc="Media controls overflow menu item label for an unmute button.">
+        Unmute
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_PLAY" desc="Media controls overflow menu item label for a play button.">
+        Play
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_PAUSE" desc="Media controls overflow menu item label for a pause button.">
+        Pause
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_DOWNLOAD" desc="Media controls overflow menu item label for a download button.">
+       Download
+      </message>
+      <message name="IDS_MEDIA_TRACKS_NO_LABEL" desc="Menu item label for a text track that has no name specified">
+        Unknown
+      </message>
+
+      <message name="IDS_MEDIA_TRACKS_OFF" desc="Menu item label for a text track that represents disabling closed captions">
+        Off
       </message>
 
       <message name="IDS_PLUGIN_INITIALIZATION_ERROR" desc="A message displayed when a plugin failed to load">

@@ -13,12 +13,12 @@ import random
 from core import perf_benchmark
 
 from telemetry.value import scalar
-from telemetry.page import page_test
+from telemetry.page import legacy_page_test
 
 from page_sets import dummy_story_set
 
 
-class _DummyTest(page_test.PageTest):
+class _DummyTest(legacy_page_test.LegacyPageTest):
 
   def __init__(self, avg, std):
     super(_DummyTest, self).__init__()
@@ -26,6 +26,7 @@ class _DummyTest(page_test.PageTest):
     self._std = std
 
   def ValidateAndMeasurePage(self, page, tab, results):
+    del tab  # unused
     results.AddValue(scalar.ScalarValue(
         page=page,
         name='gaussian-value', units='ms',
@@ -42,7 +43,7 @@ class DummyBenchmarkOne(_DummyBenchmark):
   """A low noise benchmark with mean=100 & std=1."""
 
   def CreatePageTest(self, options):
-    return _DummyTest(120, 1)
+    return _DummyTest(168, 1)
 
   @classmethod
   def Name(cls):

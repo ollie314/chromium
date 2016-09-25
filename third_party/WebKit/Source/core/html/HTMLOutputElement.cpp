@@ -63,6 +63,11 @@ bool HTMLOutputElement::isDisabledFormControl() const
     return false;
 }
 
+bool HTMLOutputElement::matchesEnabledPseudoClass() const
+{
+    return false;
+}
+
 bool HTMLOutputElement::supportsFocus() const
 {
     return HTMLElement::supportsFocus();
@@ -140,6 +145,10 @@ void HTMLOutputElement::setDefaultValue(const String& value)
         setTextContent(value);
 }
 
+short HTMLOutputElement::tabIndex() const
+{
+    return HTMLElement::tabIndex();
+}
 
 DEFINE_TRACE(HTMLOutputElement)
 {

@@ -13,6 +13,7 @@ WebViewFrameWidget::WebViewFrameWidget(WebWidgetClient* client, WebViewImpl& web
     : m_client(client), m_webView(&webView), m_mainFrame(&mainFrame)
 {
     m_mainFrame->setFrameWidget(this);
+    m_webView->setCompositorVisibility(true);
 }
 
 WebViewFrameWidget::~WebViewFrameWidget()
@@ -25,6 +26,7 @@ void WebViewFrameWidget::close()
     // a frame swap, the swapped frame is detached *after* the frame tree is
     // updated. If the main frame is being swapped, then
     // m_webView()->mainFrameImpl() will no longer point to the original frame.
+    m_webView->setCompositorVisibility(false);
     m_mainFrame->setFrameWidget(nullptr);
     m_mainFrame = nullptr;
     m_webView = nullptr;
@@ -51,14 +53,14 @@ void WebViewFrameWidget::resizeVisualViewport(const WebSize& size)
     return m_webView->resizeVisualViewport(size);
 }
 
-void WebViewFrameWidget::didEnterFullScreen()
+void WebViewFrameWidget::didEnterFullscreen()
 {
-    return m_webView->didEnterFullScreen();
+    return m_webView->didEnterFullscreen();
 }
 
-void WebViewFrameWidget::didExitFullScreen()
+void WebViewFrameWidget::didExitFullscreen()
 {
-    return m_webView->didExitFullScreen();
+    return m_webView->didExitFullscreen();
 }
 
 void WebViewFrameWidget::beginFrame(double lastFrameTimeMonotonic)
@@ -74,11 +76,6 @@ void WebViewFrameWidget::updateAllLifecyclePhases()
 void WebViewFrameWidget::paint(WebCanvas* canvas, const WebRect& viewPort)
 {
     return m_webView->paint(canvas, viewPort);
-}
-
-void WebViewFrameWidget::paintCompositedDeprecated(WebCanvas* canvas, const WebRect& viewPort)
-{
-    return m_webView->paintCompositedDeprecated(canvas, viewPort);
 }
 
 void WebViewFrameWidget::layoutAndPaintAsync(WebLayoutAndPaintAsyncCallback* callback)
@@ -140,24 +137,19 @@ bool WebViewFrameWidget::setComposition(
     return m_webView->setComposition(text, underlines, selectionStart, selectionEnd);
 }
 
-bool WebViewFrameWidget::confirmComposition()
+bool WebViewFrameWidget::finishComposingText(ConfirmCompositionBehavior selectionBehavior)
 {
-    return m_webView->confirmComposition();
+    return m_webView->finishComposingText(selectionBehavior);
 }
 
-bool WebViewFrameWidget::confirmComposition(ConfirmCompositionBehavior selectionBehavior)
+bool WebViewFrameWidget::commitText(const WebString& text, int relativeCaretPosition)
 {
-    return m_webView->confirmComposition(selectionBehavior);
+    return m_webView->commitText(text, relativeCaretPosition);
 }
 
-bool WebViewFrameWidget::confirmComposition(const WebString& text)
+WebRange WebViewFrameWidget::compositionRange()
 {
-    return m_webView->confirmComposition(text);
-}
-
-bool WebViewFrameWidget::compositionRange(size_t* location, size_t* length)
-{
-    return m_webView->compositionRange(location, length);
+    return m_webView->compositionRange();
 }
 
 WebTextInputInfo WebViewFrameWidget::textInputInfo()
@@ -185,9 +177,9 @@ bool WebViewFrameWidget::isSelectionAnchorFirst() const
     return m_webView->isSelectionAnchorFirst();
 }
 
-bool WebViewFrameWidget::caretOrSelectionRange(size_t* location, size_t* length)
+WebRange WebViewFrameWidget::caretOrSelectionRange()
 {
-    return m_webView->caretOrSelectionRange(location, length);
+    return m_webView->caretOrSelectionRange();
 }
 
 void WebViewFrameWidget::setTextDirection(WebTextDirection direction)
@@ -235,9 +227,14 @@ WebPagePopup* WebViewFrameWidget::pagePopup() const
     return m_webView->pagePopup();
 }
 
-void WebViewFrameWidget::setTopControlsHeight(float height, bool topControlsShrinkLayoutSize)
+bool WebViewFrameWidget::getCompositionCharacterBounds(WebVector<WebRect>& bounds)
 {
-    return m_webView->setTopControlsHeight(height, topControlsShrinkLayoutSize);
+    return m_webView->getCompositionCharacterBounds(bounds);
+}
+
+void WebViewFrameWidget::applyReplacementRange(const WebRange& range)
+{
+    m_webView->applyReplacementRange(range);
 }
 
 void WebViewFrameWidget::updateTopControlsState(WebTopControlsState constraints, WebTopControlsState current, bool animate)
@@ -245,9 +242,9 @@ void WebViewFrameWidget::updateTopControlsState(WebTopControlsState constraints,
     return m_webView->updateTopControlsState(constraints, current, animate);
 }
 
-void WebViewFrameWidget::setVisibilityState(WebPageVisibilityState visibilityState, bool isInitialState)
+void WebViewFrameWidget::setVisibilityState(WebPageVisibilityState visibilityState)
 {
-    return m_webView->setVisibilityState(visibilityState, isInitialState);
+    return m_webView->setVisibilityState(visibilityState, false);
 }
 
 void WebViewFrameWidget::setIsTransparent(bool isTransparent)
@@ -265,9 +262,44 @@ void WebViewFrameWidget::setBaseBackgroundColor(WebColor color)
     m_webView->setBaseBackgroundColor(color);
 }
 
+WebLocalFrameImpl* WebViewFrameWidget::localRoot()
+{
+    return m_webView->mainFrameImpl();
+}
+
 void WebViewFrameWidget::scheduleAnimation()
 {
-    m_webView->scheduleAnimation();
+    m_webView->scheduleAnimationForWidget();
+}
+
+CompositorProxyClient* WebViewFrameWidget::createCompositorProxyClient()
+{
+    return m_webView->createCompositorProxyClient();
+}
+
+void WebViewFrameWidget::setRootGraphicsLayer(GraphicsLayer* layer)
+{
+    m_webView->setRootGraphicsLayer(layer);
+}
+
+void WebViewFrameWidget::setRootLayer(WebLayer* layer)
+{
+    m_webView->setRootLayer(layer);
+}
+
+void WebViewFrameWidget::attachCompositorAnimationTimeline(CompositorAnimationTimeline* compositorTimeline)
+{
+    m_webView->attachCompositorAnimationTimeline(compositorTimeline);
+}
+
+void WebViewFrameWidget::detachCompositorAnimationTimeline(CompositorAnimationTimeline* compositorTimeline)
+{
+    m_webView->detachCompositorAnimationTimeline(compositorTimeline);
+}
+
+HitTestResult WebViewFrameWidget::coreHitTestResultAt(const WebPoint& point)
+{
+    return m_webView->coreHitTestResultAt(point);
 }
 
 } // namespace blink

@@ -26,6 +26,9 @@ class _ThreadTimes(perf_benchmark.PerfBenchmark):
     # Default to only reporting per-frame metrics.
     return 'per_second' not in value.name
 
+  def SetExtraBrowserOptions(self, options):
+    silk_flags.CustomizeBrowserOptionsForThreadTimes(options)
+
   def CreatePageTest(self, options):
     return thread_times.ThreadTimes(options.report_silk_details)
 
@@ -76,7 +79,6 @@ class ThreadTimesSimpleMobileSites(_ThreadTimes):
     return 'thread_times.simple_mobile_sites'
 
 
-@benchmark.Disabled('win')  # crbug.com/443781
 class ThreadTimesCompositorCases(_ThreadTimes):
   """Measures timeline metrics while performing smoothness action on
   tough compositor cases, using software rasterization.
@@ -85,6 +87,7 @@ class ThreadTimesCompositorCases(_ThreadTimes):
   page_set = page_sets.ToughCompositorCasesPageSet
 
   def SetExtraBrowserOptions(self, options):
+    super(ThreadTimesCompositorCases, self).SetExtraBrowserOptions(options)
     silk_flags.CustomizeBrowserOptionsForSoftwareRasterization(options)
 
   @classmethod
@@ -135,7 +138,6 @@ class ThreadTimesKeyNoOpCases(_ThreadTimes):
     return 'per_frame' not in value.name and 'mean_frame' not in value.name
 
 
-@benchmark.Disabled('win')  # crbug.com/568175
 class ThreadTimesToughScrollingCases(_ThreadTimes):
   """Measure timeline metrics while performing smoothness action on tough
   scrolling cases."""

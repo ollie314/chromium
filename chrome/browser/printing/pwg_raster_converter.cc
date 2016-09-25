@@ -17,6 +17,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/chrome_utility_printing_messages.h"
 #include "chrome/grit/generated_resources.h"
@@ -51,11 +52,11 @@ class FileHandlers {
   bool IsValid();
 
   base::FilePath GetPwgPath() const {
-    return temp_dir_.path().AppendASCII("output.pwg");
+    return temp_dir_.GetPath().AppendASCII("output.pwg");
   }
 
   base::FilePath GetPdfPath() const {
-    return temp_dir_.path().AppendASCII("input.pdf");
+    return temp_dir_.GetPath().AppendASCII("input.pdf");
   }
 
   IPC::PlatformFileForTransit GetPdfForProcess() {
@@ -211,8 +212,8 @@ void PwgUtilityProcessHostClient::OnFilesReadyOnUIThread() {
 void PwgUtilityProcessHostClient::StartProcessOnIOThread() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   content::UtilityProcessHost* utility_process_host =
-      content::UtilityProcessHost::Create(
-          this, base::MessageLoop::current()->task_runner());
+      content::UtilityProcessHost::Create(this,
+                                          base::ThreadTaskRunnerHandle::Get());
   utility_process_host->SetName(l10n_util::GetStringUTF16(
       IDS_UTILITY_PROCESS_PWG_RASTER_CONVERTOR_NAME));
   utility_process_host->Send(new ChromeUtilityMsg_RenderPDFPagesToPWGRaster(

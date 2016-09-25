@@ -49,6 +49,7 @@ class MockFileSystem(object):
                 not exist.
         """
         self.files = files or {}
+        self.executable_files = set()
         self.written_files = {}
         self.last_tmpdir = None
         self.current_tmpno = 0
@@ -74,6 +75,9 @@ class MockFileSystem(object):
         if self.sep in path:
             return path.rsplit(self.sep, 1)
         return ('', path)
+
+    def make_executable(self, file_path):
+        self.executable_files.add(file_path)
 
     def abspath(self, path):
         if os.path.isabs(path):
@@ -201,7 +205,7 @@ class MockFileSystem(object):
         return path
 
     def listdir(self, path):
-        root, dirs, files = list(self.walk(path))[0]
+        _, dirs, files = list(self.walk(path))[0]
         return dirs + files
 
     def walk(self, top):
@@ -223,7 +227,12 @@ class MockFileSystem(object):
                         dirs.append(dir)
                 else:
                     files.append(remaining)
-        return [(top[:-1], dirs, files)]
+        file_system_tuples = [(top[:-1], dirs, files)]
+        for dir in dirs:
+            dir = top + dir
+            tuples_from_subdirs = self.walk(dir)
+            file_system_tuples += tuples_from_subdirs
+        return file_system_tuples
 
     def mtime(self, path):
         if self.exists(path):

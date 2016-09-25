@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "ash/common/system/chromeos/devicetype_utils.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
@@ -56,9 +57,11 @@ std::string EnrollmentModeToUIMode(policy::EnrollmentConfig::Mode mode) {
     case policy::EnrollmentConfig::MODE_MANUAL_REENROLLMENT:
     case policy::EnrollmentConfig::MODE_LOCAL_ADVERTISED:
     case policy::EnrollmentConfig::MODE_SERVER_ADVERTISED:
+    case policy::EnrollmentConfig::MODE_ATTESTATION:
       return kEnrollmentModeUIManual;
     case policy::EnrollmentConfig::MODE_LOCAL_FORCED:
     case policy::EnrollmentConfig::MODE_SERVER_FORCED:
+    case policy::EnrollmentConfig::MODE_ATTESTATION_FORCED:
       return kEnrollmentModeUIForced;
     case policy::EnrollmentConfig::MODE_RECOVERY:
       return kEnrollmentModeUIRecovery;
@@ -89,6 +92,14 @@ bool IsProxyError(NetworkStateInformer::State state,
   return state == NetworkStateInformer::PROXY_AUTH_REQUIRED ||
          reason == NetworkError::ERROR_REASON_PROXY_AUTH_CANCELLED ||
          reason == NetworkError::ERROR_REASON_PROXY_CONNECTION_FAILED;
+}
+
+
+// Returns the enterprise domain after enrollment, or an empty string.
+std::string GetEnterpriseDomain() {
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  return connector->GetEnterpriseDomain();
 }
 
 }  // namespace
@@ -143,7 +154,7 @@ void EnrollmentScreenHandler::RegisterMessages() {
 void EnrollmentScreenHandler::SetParameters(
     Controller* controller,
     const policy::EnrollmentConfig& config) {
-  CHECK_NE(policy::EnrollmentConfig::MODE_NONE, config.mode);
+  CHECK(config.should_enroll());
   controller_ = controller;
   config_ = config;
 }
@@ -176,13 +187,18 @@ void EnrollmentScreenHandler::ShowEnrollmentSpinnerScreen() {
   ShowStep(kEnrollmentStepWorking);
 }
 
+void EnrollmentScreenHandler::ShowAttestationBasedEnrollmentSuccessScreen(
+    const std::string& enterprise_domain) {
+  CallJS("showAttestationBasedEnrollmentSuccess", ash::GetChromeOSDeviceName(),
+         enterprise_domain);
+}
+
 void EnrollmentScreenHandler::ShowAuthError(
     const GoogleServiceAuthError& error) {
   switch (error.state()) {
     case GoogleServiceAuthError::NONE:
     case GoogleServiceAuthError::CAPTCHA_REQUIRED:
     case GoogleServiceAuthError::TWO_FACTOR:
-    case GoogleServiceAuthError::HOSTED_NOT_ALLOWED:
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
     case GoogleServiceAuthError::REQUEST_CANCELED:
     case GoogleServiceAuthError::UNEXPECTED_SERVICE_RESPONSE:
@@ -199,6 +215,7 @@ void EnrollmentScreenHandler::ShowAuthError(
     case GoogleServiceAuthError::SERVICE_UNAVAILABLE:
       ShowError(IDS_ENTERPRISE_ENROLLMENT_AUTH_NETWORK_ERROR, true);
       return;
+    case GoogleServiceAuthError::HOSTED_NOT_ALLOWED_DEPRECATED:
     case GoogleServiceAuthError::NUM_STATES:
       break;
   }
@@ -222,7 +239,10 @@ void EnrollmentScreenHandler::ShowEnrollmentStatus(
     policy::EnrollmentStatus status) {
   switch (status.status()) {
     case policy::EnrollmentStatus::STATUS_SUCCESS:
-      ShowStep(kEnrollmentStepSuccess);
+      if (config_.is_mode_attestation())
+        ShowAttestationBasedEnrollmentSuccessScreen(GetEnterpriseDomain());
+      else
+        ShowStep(kEnrollmentStepSuccess);
       return;
     case policy::EnrollmentStatus::STATUS_NO_STATE_KEYS:
       ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_NO_STATE_KEYS, false);
@@ -261,6 +281,10 @@ void EnrollmentScreenHandler::ShowEnrollmentStatus(
       return;
     case policy::EnrollmentStatus::STATUS_REGISTRATION_BAD_MODE:
       ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_REGISTRATION_BAD_MODE, false);
+      return;
+    case policy::EnrollmentStatus::STATUS_REGISTRATION_CERTIFICATE_FETCH_FAILED:
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_REGISTRATION_CERT_FETCH_FAILED,
+                true);
       return;
     case policy::EnrollmentStatus::STATUS_POLICY_FETCH_FAILED:
       ShowErrorMessage(
@@ -319,7 +343,7 @@ void EnrollmentScreenHandler::ShowEnrollmentStatus(
       NOTREACHED();
       return;
     case policy::EnrollmentStatus::STATUS_ATTRIBUTE_UPDATE_FAILED:
-      ShowError(IDS_ENTERPRISE_ENROLLMENT_ATTRIBUTE_ERROR, false);
+      ShowErrorForDevice(IDS_ENTERPRISE_ENROLLMENT_ATTRIBUTE_ERROR, false);
       return;
   }
   NOTREACHED();
@@ -342,10 +366,11 @@ void EnrollmentScreenHandler::DeclareLocalizedValues(
   builder->Add("oauthEnrollDone", IDS_ENTERPRISE_ENROLLMENT_DONE);
   builder->Add("oauthEnrollNextBtn", IDS_OFFLINE_LOGIN_NEXT_BUTTON_TEXT);
   builder->Add("oauthEnrollSkip", IDS_ENTERPRISE_ENROLLMENT_SKIP);
-  builder->Add("oauthEnrollSuccess", IDS_ENTERPRISE_ENROLLMENT_SUCCESS);
+  builder->AddF("oauthEnrollSuccess", IDS_ENTERPRISE_ENROLLMENT_SUCCESS,
+                ash::GetChromeOSDeviceName());
   builder->Add("oauthEnrollDeviceInformation",
                IDS_ENTERPRISE_ENROLLMENT_DEVICE_INFORMATION);
-  builder->Add("oauthEnrollExplaneAttributeLink",
+  builder->Add("oauthEnrollExplainAttributeLink",
                IDS_ENTERPRISE_ENROLLMENT_EXPLAIN_ATTRIBUTE_LINK);
   builder->Add("oauthEnrollAttributeExplanation",
                IDS_ENTERPRISE_ENROLLMENT_ATTRIBUTE_EXPLANATION);
@@ -353,6 +378,9 @@ void EnrollmentScreenHandler::DeclareLocalizedValues(
                IDS_ENTERPRISE_ENROLLMENT_ASSET_ID_LABEL);
   builder->Add("oauthEnrollLocationLabel",
                IDS_ENTERPRISE_ENROLLMENT_LOCATION_LABEL);
+  builder->Add("oauthEnrollWorking", IDS_ENTERPRISE_ENROLLMENT_WORKING_MESSAGE);
+  // Do not use AddF for this string as it will be rendered by the JS code.
+  builder->Add("oauthEnrollAbeSuccess", IDS_ENTERPRISE_ENROLLMENT_ABE_SUCCESS);
 }
 
 bool EnrollmentScreenHandler::IsOnEnrollmentScreen() const {
@@ -512,6 +540,12 @@ void EnrollmentScreenHandler::ShowStep(const char* step) {
 
 void EnrollmentScreenHandler::ShowError(int message_id, bool retry) {
   ShowErrorMessage(l10n_util::GetStringUTF8(message_id), retry);
+}
+
+void EnrollmentScreenHandler::ShowErrorForDevice(int message_id, bool retry) {
+  ShowErrorMessage(
+      l10n_util::GetStringFUTF8(message_id, ash::GetChromeOSDeviceName()),
+      retry);
 }
 
 void EnrollmentScreenHandler::ShowErrorMessage(const std::string& message,

@@ -65,8 +65,12 @@ NSString* const NSAccessibilityLoadCompleteNotification =
     @"AXLoadComplete";
 NSString* const NSAccessibilityInvalidStatusChangedNotification =
     @"AXInvalidStatusChanged";
+NSString* const NSAccessibilityLiveRegionCreatedNotification =
+    @"AXLiveRegionCreated";
 NSString* const NSAccessibilityLiveRegionChangedNotification =
     @"AXLiveRegionChanged";
+NSString* const NSAccessibilityExpandedChanged =
+    @"AXExpandedChanged";
 NSString* const NSAccessibilityMenuItemSelectedNotification =
     @"AXMenuItemSelected";
 
@@ -103,6 +107,11 @@ BrowserAccessibilityManager* BrowserAccessibilityManager::Create(
       NULL, initial_tree, delegate, factory);
 }
 
+BrowserAccessibilityManagerMac*
+BrowserAccessibilityManager::ToBrowserAccessibilityManagerMac() {
+  return static_cast<BrowserAccessibilityManagerMac*>(this);
+}
+
 BrowserAccessibilityManagerMac::BrowserAccessibilityManagerMac(
     NSView* parent_view,
     const ui::AXTreeUpdate& initial_tree,
@@ -124,40 +133,34 @@ ui::AXTreeUpdate
   empty_document.state =
       1 << ui::AX_STATE_READ_ONLY;
   ui::AXTreeUpdate update;
+  update.root_id = empty_document.id;
   update.nodes.push_back(empty_document);
   return update;
 }
 
 BrowserAccessibility* BrowserAccessibilityManagerMac::GetFocus() {
+  BrowserAccessibility* focus = BrowserAccessibilityManager::GetFocus();
+
   // On Mac, list boxes should always get focus on the whole list, otherwise
   // information about the number of selected items will never be reported.
-  BrowserAccessibility* node = BrowserAccessibilityManager::GetFocus();
-  if (node && node->GetRole() == ui::AX_ROLE_LIST_BOX)
-    return node;
+  // For editable combo boxes, focus should stay on the combo box so the user
+  // will not be taken out of the combo box while typing.
+  if (focus && (focus->GetRole() == ui::AX_ROLE_LIST_BOX ||
+                (focus->GetRole() == ui::AX_ROLE_COMBO_BOX &&
+                 focus->HasState(ui::AX_STATE_EDITABLE)))) {
+    return focus;
+  }
 
   // For other roles, follow the active descendant.
-  return GetActiveDescendantFocus(node);
+  return GetActiveDescendant(focus);
 }
 
 void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
+    BrowserAccessibilityEvent::Source source,
     ui::AXEvent event_type,
     BrowserAccessibility* node) {
   if (!node->IsNative())
     return;
-
-  if (event_type == ui::AX_EVENT_FOCUS) {
-    BrowserAccessibility* active_descendant = GetActiveDescendantFocus(node);
-    if (active_descendant)
-      node = active_descendant;
-
-    if (node->GetRole() == ui::AX_ROLE_LIST_BOX_OPTION &&
-        node->HasState(ui::AX_STATE_SELECTED) &&
-        node->GetParent() &&
-        node->GetParent()->GetRole() == ui::AX_ROLE_LIST_BOX) {
-      node = node->GetParent();
-      SetFocus(*node);
-    }
-  }
 
   auto native_node = ToBrowserAccessibilityCocoa(node);
   DCHECK(native_node);
@@ -174,7 +177,10 @@ void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
         // the combo box where the user might be typing.
         mac_notification = NSAccessibilitySelectedChildrenChangedNotification;
       } else {
-        mac_notification = NSAccessibilityFocusedUIElementChangedNotification;
+        // In all other cases we should post
+        // |NSAccessibilityFocusedUIElementChangedNotification|, but this is
+        // handled elsewhere.
+        return;
       }
       break;
     case ui::AX_EVENT_AUTOCORRECTION_OCCURED:
@@ -187,7 +193,14 @@ void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
       mac_notification = NSAccessibilityLayoutCompleteNotification;
       break;
     case ui::AX_EVENT_LOAD_COMPLETE:
-      mac_notification = NSAccessibilityLoadCompleteNotification;
+      // This notification should only be fired on the top document.
+      // Iframes should use |AX_EVENT_LAYOUT_COMPLETE| to signify that they have
+      // finished loading.
+      if (IsRootTree()) {
+        mac_notification = NSAccessibilityLoadCompleteNotification;
+      } else {
+        mac_notification = NSAccessibilityLayoutCompleteNotification;
+      }
       break;
     case ui::AX_EVENT_INVALID_STATUS_CHANGED:
       mac_notification = NSAccessibilityInvalidStatusChangedNotification;
@@ -209,7 +222,7 @@ void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
       NSAccessibilityPostNotification(ToBrowserAccessibilityCocoa(focus),
                                       mac_notification);
 
-      if (base::mac::IsOSElCapitanOrLater()) {
+      if (base::mac::IsAtLeastOS10_11()) {
         // |NSAccessibilityPostNotificationWithUserInfo| should be used on OS X
         // 10.11 or later to notify Voiceover about text selection changes. This
         // API has been present on versions of OS X since 10.7 but doesn't
@@ -234,7 +247,7 @@ void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
       break;
     case ui::AX_EVENT_VALUE_CHANGED:
       mac_notification = NSAccessibilityValueChangedNotification;
-      if (base::mac::IsOSElCapitanOrLater() && text_edits_.size()) {
+      if (base::mac::IsAtLeastOS10_11() && text_edits_.size()) {
         // It seems that we don't need to distinguish between deleted and
         // inserted text for now.
         base::string16 deleted_text;
@@ -257,7 +270,9 @@ void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
         return;
       }
       break;
-    // TODO(nektar): Need to add an event for live region created.
+    case ui::AX_EVENT_ALERT:
+      mac_notification = NSAccessibilityLiveRegionCreatedNotification;
+      break;
     case ui::AX_EVENT_LIVE_REGION_CHANGED:
       mac_notification = NSAccessibilityLiveRegionChangedNotification;
       break;
@@ -270,14 +285,16 @@ void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
     case ui::AX_EVENT_ROW_COLLAPSED:
       mac_notification = NSAccessibilityRowCollapsedNotification;
       break;
-    // TODO(nektar): Add events for busy and expanded changed.
+    // TODO(nektar): Add events for busy.
+    case ui::AX_EVENT_EXPANDED_CHANGED:
+      mac_notification = NSAccessibilityExpandedChanged;
+      break;
     // TODO(nektar): Support menu open/close notifications.
     case ui::AX_EVENT_MENU_LIST_ITEM_SELECTED:
       mac_notification = NSAccessibilityMenuItemSelectedNotification;
       break;
 
     // These events are not used on Mac for now.
-    case ui::AX_EVENT_ALERT:
     case ui::AX_EVENT_TEXT_CHANGED:
     case ui::AX_EVENT_CHILDREN_CHANGED:
     case ui::AX_EVENT_MENU_LIST_VALUE_CHANGED:
@@ -366,7 +383,6 @@ void BrowserAccessibilityManagerMac::OnAtomicUpdateFinished(
   BrowserAccessibilityManager::OnAtomicUpdateFinished(
       tree, root_changed, changes);
 
-  bool created_live_region = false;
   for (size_t i = 0; i < changes.size(); ++i) {
     if (changes[i].type != NODE_CREATED && changes[i].type != SUBTREE_CREATED)
       continue;
@@ -375,24 +391,9 @@ void BrowserAccessibilityManagerMac::OnAtomicUpdateFinished(
     DCHECK(changed_node);
     BrowserAccessibility* obj = GetFromAXNode(changed_node);
     if (obj && obj->HasStringAttribute(ui::AX_ATTR_LIVE_STATUS)) {
-      created_live_region = true;
-      break;
+      NotifyAccessibilityEvent(BrowserAccessibilityEvent::FromTreeChange,
+                               ui::AX_EVENT_ALERT, obj);
     }
-  }
-
-  if (!created_live_region)
-    return;
-
-  // This code is to work around a bug in VoiceOver, where a new live
-  // region that gets added is ignored. VoiceOver seems to only scan the
-  // page for live regions once. By recreating the NSAccessibility
-  // object for the root of the tree, we force VoiceOver to clear out its
-  // internal state and find newly-added live regions this time.
-  BrowserAccessibilityMac* root =
-      static_cast<BrowserAccessibilityMac*>(GetRoot());
-  if (root) {
-    root->RecreateNativeObject();
-    NotifyAccessibilityEvent(ui::AX_EVENT_CHILDREN_CHANGED, root);
   }
 }
 
@@ -415,10 +416,14 @@ NSDictionary* BrowserAccessibilityManagerMac::
     focus_object = focus_object->GetClosestPlatformObject();
     auto native_focus_object = ToBrowserAccessibilityCocoa(focus_object);
     if (native_focus_object && [native_focus_object instanceActive]) {
-      [user_info setObject:[native_focus_object selectedTextMarkerRange]
-                    forKey:NSAccessibilitySelectedTextMarkerRangeAttribute];
       [user_info setObject:native_focus_object
                     forKey:NSAccessibilityTextChangeElement];
+
+      id selected_text = [native_focus_object selectedTextMarkerRange];
+      if (selected_text) {
+        [user_info setObject:selected_text
+                      forKey:NSAccessibilitySelectedTextMarkerRangeAttribute];
+      }
     }
   }
 

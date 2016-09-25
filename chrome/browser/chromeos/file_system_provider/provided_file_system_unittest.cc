@@ -15,7 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/file_system_provider/mount_path_util.h"
 #include "chrome/browser/chromeos/file_system_provider/notification_manager.h"
@@ -98,7 +98,7 @@ class FakeEventRouter : public extensions::EventRouter {
           false /* has_more */);
     } else {
       file_system_->GetRequestManager()->RejectRequest(
-          request_id, base::WrapUnique(new RequestValue()), reply_result_);
+          request_id, base::MakeUnique<RequestValue>(), reply_result_);
     }
   }
 

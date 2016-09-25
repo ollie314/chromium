@@ -30,8 +30,7 @@
 #include "core/editing/FrameSelection.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/UseCounter.h"
-#include "core/layout/LayoutObject.h"
-#include "core/layout/api/LineLayoutAPIShim.h"
+#include "core/layout/api/LineLayoutItem.h"
 #include "core/layout/svg/SVGTextQuery.h"
 
 namespace blink {
@@ -91,19 +90,19 @@ DEFINE_TRACE(SVGTextContentElement)
 
 unsigned SVGTextContentElement::getNumberOfChars()
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     return SVGTextQuery(layoutObject()).numberOfCharacters();
 }
 
 float SVGTextContentElement::getComputedTextLength()
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     return SVGTextQuery(layoutObject()).textLength();
 }
 
 float SVGTextContentElement::getSubStringLength(unsigned charnum, unsigned nchars, ExceptionState& exceptionState)
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     unsigned numberOfChars = getNumberOfChars();
     if (charnum >= numberOfChars) {
@@ -119,7 +118,7 @@ float SVGTextContentElement::getSubStringLength(unsigned charnum, unsigned nchar
 
 SVGPointTearOff* SVGTextContentElement::getStartPositionOfChar(unsigned charnum, ExceptionState& exceptionState)
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     if (charnum >= getNumberOfChars()) {
         exceptionState.throwDOMException(IndexSizeError, ExceptionMessages::indexExceedsMaximumBound("charnum", charnum, getNumberOfChars()));
@@ -132,7 +131,7 @@ SVGPointTearOff* SVGTextContentElement::getStartPositionOfChar(unsigned charnum,
 
 SVGPointTearOff* SVGTextContentElement::getEndPositionOfChar(unsigned charnum, ExceptionState& exceptionState)
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     if (charnum >= getNumberOfChars()) {
         exceptionState.throwDOMException(IndexSizeError, ExceptionMessages::indexExceedsMaximumBound("charnum", charnum, getNumberOfChars()));
@@ -145,7 +144,7 @@ SVGPointTearOff* SVGTextContentElement::getEndPositionOfChar(unsigned charnum, E
 
 SVGRectTearOff* SVGTextContentElement::getExtentOfChar(unsigned charnum, ExceptionState& exceptionState)
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     if (charnum >= getNumberOfChars()) {
         exceptionState.throwDOMException(IndexSizeError, ExceptionMessages::indexExceedsMaximumBound("charnum", charnum, getNumberOfChars()));
@@ -158,7 +157,7 @@ SVGRectTearOff* SVGTextContentElement::getExtentOfChar(unsigned charnum, Excepti
 
 float SVGTextContentElement::getRotationOfChar(unsigned charnum, ExceptionState& exceptionState)
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     if (charnum >= getNumberOfChars()) {
         exceptionState.throwDOMException(IndexSizeError, ExceptionMessages::indexExceedsMaximumBound("charnum", charnum, getNumberOfChars()));
@@ -170,7 +169,7 @@ float SVGTextContentElement::getRotationOfChar(unsigned charnum, ExceptionState&
 
 int SVGTextContentElement::getCharNumAtPosition(SVGPointTearOff* point, ExceptionState& exceptionState)
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     return SVGTextQuery(layoutObject()).characterNumberAtPosition(point->target()->value());
 }
 
@@ -188,7 +187,7 @@ void SVGTextContentElement::selectSubString(unsigned charnum, unsigned nchars, E
     ASSERT(document().frame());
 
     // Find selection start
-    VisiblePosition start = createVisiblePosition(firstPositionInNode(const_cast<SVGTextContentElement*>(this)));
+    VisiblePosition start = VisiblePosition::firstPositionInNode(const_cast<SVGTextContentElement*>(this));
     for (unsigned i = 0; i < charnum; ++i)
         start = nextPositionOf(start);
 
@@ -251,7 +250,7 @@ bool SVGTextContentElement::selfHasRelativeLengths() const
     return true;
 }
 
-SVGTextContentElement* SVGTextContentElement::elementFromLineLayoutItem(LineLayoutItem lineLayoutItem)
+SVGTextContentElement* SVGTextContentElement::elementFromLineLayoutItem(const LineLayoutItem& lineLayoutItem)
 {
     if (!lineLayoutItem || (!lineLayoutItem.isSVGText() && !lineLayoutItem.isSVGInline()))
         return nullptr;

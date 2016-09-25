@@ -25,7 +25,10 @@
 
 #include "core/fetch/Resource.h"
 #include "core/fetch/ResourceClient.h"
+#include "core/fetch/TextResource.h"
 #include "core/html/parser/TextResourceDecoder.h"
+#include "platform/heap/Handle.h"
+#include <memory>
 
 namespace blink {
 
@@ -33,7 +36,7 @@ class Document;
 class FetchRequest;
 class ResourceFetcher;
 
-class CORE_EXPORT DocumentResource final : public Resource {
+class CORE_EXPORT DocumentResource final : public TextResource {
 public:
     using ClientType = ResourceClient;
 
@@ -43,8 +46,6 @@ public:
 
     Document* document() const { return m_document.get(); }
 
-    void setEncoding(const String&) override;
-    String encoding() const override;
     void checkNotify() override;
 
 private:
@@ -64,7 +65,6 @@ private:
     Document* createDocument(const KURL&);
 
     Member<Document> m_document;
-    OwnPtr<TextResourceDecoder> m_decoder;
 };
 
 DEFINE_TYPE_CASTS(DocumentResource, Resource, resource, resource->getType() == Resource::SVGDocument, resource.getType() == Resource::SVGDocument);

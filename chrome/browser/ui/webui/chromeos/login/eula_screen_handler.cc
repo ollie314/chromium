@@ -21,8 +21,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/login/localized_values_builder.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
@@ -49,7 +49,7 @@ class CreditsWebDialog : public chromeos::LoginWebDialog {
     // Remove visual elements that we can handle in EULA page.
     bool is_loading = source->IsLoading();
     if (!is_loading && source->GetWebUI()) {
-      source->GetWebUI()->CallJavascriptFunction(
+      source->GetWebUI()->CallJavascriptFunctionUnsafe(
           "(function () {"
           "  document.body.classList.toggle('dialog', true);"
           "  keyboard.initializeKeyboardFlow();"
@@ -69,7 +69,6 @@ void ShowCreditsDialog(Profile* profile,
                                                   parent_window,
                                                   title_id,
                                                   credits_url);
-  gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size()));
   dialog->SetDialogSize(l10n_util::GetLocalizedContentsWidthInPixels(
                             IDS_CREDITS_APP_DIALOG_WIDTH_PIXELS),
                         l10n_util::GetLocalizedContentsWidthInPixels(
@@ -147,6 +146,11 @@ void EulaScreenHandler::DeclareLocalizedValues(
 
   builder->Add("chromeCreditsLink", IDS_ABOUT_VERSION_LICENSE_EULA);
   builder->Add("chromeosCreditsLink", IDS_ABOUT_CROS_VERSION_LICENSE_EULA);
+
+  /* MD-OOBE */
+  builder->Add("oobeEulaSectionTitle", IDS_OOBE_EULA_SECTION_TITLE);
+  builder->Add("oobeEulaAcceptAndContinueButtonText",
+               IDS_OOBE_EULA_ACCEPT_AND_CONTINUE_BUTTON_TEXT);
 }
 
 void EulaScreenHandler::DeclareJSCallbacks() {

@@ -8,21 +8,24 @@
 #include <stdint.h>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "sync/api/attachments/attachment_id.h"
-#include "sync/api/sync_change_processor_wrapper_for_test.h"
-#include "sync/api/sync_error_factory_mock.h"
-#include "sync/api/time.h"
-#include "sync/internal_api/public/attachments/attachment_service_proxy_for_test.h"
-#include "sync/protocol/favicon_image_specifics.pb.h"
-#include "sync/protocol/favicon_tracking_specifics.pb.h"
-#include "sync/protocol/sync.pb.h"
+#include "components/sync/api/attachments/attachment_id.h"
+#include "components/sync/api/sync_change_processor_wrapper_for_test.h"
+#include "components/sync/api/sync_error_factory_mock.h"
+#include "components/sync/api/time.h"
+#include "components/sync/core/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/protocol/favicon_image_specifics.pb.h"
+#include "components/sync/protocol/favicon_tracking_specifics.pb.h"
+#include "components/sync/protocol/sync.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace browser_sync {
+namespace sync_sessions {
 
 namespace {
 
@@ -243,7 +246,7 @@ int GetFaviconId(const syncer::SyncChange change) {
   std::string tag = syncer::SyncDataLocal(change.sync_data()).GetTag();
   const std::string kPrefix = "http://bla.com/";
   const std::string kSuffix = ".ico";
-  if (tag.find(kPrefix) != 0)
+  if (!base::StartsWith(tag, kPrefix, base::CompareCase::SENSITIVE))
     return -1;
   std::string temp = tag.substr(kPrefix.length());
   if (temp.rfind(kSuffix) <= 0)
@@ -276,8 +279,8 @@ class SyncFaviconCacheTest : public testing::Test {
   testing::AssertionResult VerifyLocalCustomIcons(
       const std::vector<TestFaviconData>& expected_icons);
 
-  scoped_ptr<syncer::SyncChangeProcessor> CreateAndPassProcessor();
-  scoped_ptr<syncer::SyncErrorFactory> CreateAndPassSyncErrorFactory();
+  std::unique_ptr<syncer::SyncChangeProcessor> CreateAndPassProcessor();
+  std::unique_ptr<syncer::SyncErrorFactory> CreateAndPassSyncErrorFactory();
 
   FaviconCache* cache() { return &cache_; }
   TestChangeProcessor* processor() { return sync_processor_.get(); }
@@ -297,8 +300,9 @@ class SyncFaviconCacheTest : public testing::Test {
   FaviconCache cache_;
 
   // Our dummy ChangeProcessor used to inspect changes pushed to Sync.
-  scoped_ptr<TestChangeProcessor> sync_processor_;
-  scoped_ptr<syncer::SyncChangeProcessorWrapperForTest> sync_processor_wrapper_;
+  std::unique_ptr<TestChangeProcessor> sync_processor_;
+  std::unique_ptr<syncer::SyncChangeProcessorWrapperForTest>
+      sync_processor_wrapper_;
 };
 
 SyncFaviconCacheTest::SyncFaviconCacheTest()
@@ -397,16 +401,15 @@ testing::AssertionResult SyncFaviconCacheTest::VerifyLocalCustomIcons(
   return testing::AssertionSuccess();
 }
 
-scoped_ptr<syncer::SyncChangeProcessor>
+std::unique_ptr<syncer::SyncChangeProcessor>
 SyncFaviconCacheTest::CreateAndPassProcessor() {
-  return scoped_ptr<syncer::SyncChangeProcessor>(
-      new syncer::SyncChangeProcessorWrapperForTest(sync_processor_.get()));
+  return base::MakeUnique<syncer::SyncChangeProcessorWrapperForTest>(
+      sync_processor_.get());
 }
 
-scoped_ptr<syncer::SyncErrorFactory> SyncFaviconCacheTest::
-    CreateAndPassSyncErrorFactory() {
-  return scoped_ptr<syncer::SyncErrorFactory>(
-      new syncer::SyncErrorFactoryMock());
+std::unique_ptr<syncer::SyncErrorFactory>
+SyncFaviconCacheTest::CreateAndPassSyncErrorFactory() {
+  return base::WrapUnique(new syncer::SyncErrorFactoryMock);
 }
 
 void SyncFaviconCacheTest::OnCustomFaviconDataAvailable(
@@ -454,7 +457,7 @@ void SyncFaviconCacheTest::TriggerSyncFaviconReceived(
                                  icon_url,
                                  icon_bytes,
                                  last_visit_time_ms);
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // A freshly constructed cache should be empty.
@@ -1932,4 +1935,4 @@ TEST_F(SyncFaviconCacheTest, MixedThreshold) {
   EXPECT_EQ(0, GetFaviconId(changes[5]));
 }
 
-}  // namespace browser_sync
+}  // namespace sync_sessions

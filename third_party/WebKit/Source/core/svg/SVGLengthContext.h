@@ -32,22 +32,6 @@ class SVGElement;
 class SVGLength;
 class UnzoomedLength;
 
-enum SVGLengthType {
-    LengthTypeUnknown = 0,
-    LengthTypeNumber,
-    LengthTypePercentage,
-    LengthTypeEMS,
-    LengthTypeEXS,
-    LengthTypePX,
-    LengthTypeCM,
-    LengthTypeMM,
-    LengthTypeIN,
-    LengthTypePT,
-    LengthTypePC,
-    LengthTypeREMS,
-    LengthTypeCHS
-};
-
 enum class SVGLengthMode {
     Width,
     Height,
@@ -77,6 +61,7 @@ public:
     static float valueForLength(const Length&, const ComputedStyle&, float dimension);
 
     bool determineViewport(FloatSize&) const;
+    float resolveValue(const CSSPrimitiveValue&, SVGLengthMode) const;
 
 private:
     float valueForLength(const Length&, float zoom, SVGLengthMode) const;

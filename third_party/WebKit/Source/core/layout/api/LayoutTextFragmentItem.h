@@ -1,4 +1,3 @@
-
 // Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -32,7 +31,7 @@ public:
 
     void setTextFragment(PassRefPtr<StringImpl> text, unsigned start, unsigned length)
     {
-        toTextFragment()->setTextFragment(text, start, length);
+        toTextFragment()->setTextFragment(std::move(text), start, length);
     }
 
     FirstLetterPseudoElement* firstLetterPseudoElement() const
@@ -47,4 +46,4 @@ private:
 
 } // namespace blink
 
-#endif // LayoutTextItem_h
+#endif // LayoutTextFragmentItem_h

@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -26,13 +27,13 @@
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
-#include "policy/policy_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -204,7 +205,7 @@ void PreferencesBrowserTest::SetUserPolicies(
   policy::PolicyMap map;
   for (size_t i = 0; i < names.size(); ++i) {
     map.Set(names[i], level, policy::POLICY_SCOPE_USER,
-            policy::POLICY_SOURCE_CLOUD, values[i]->DeepCopy(), nullptr);
+            policy::POLICY_SOURCE_CLOUD, values[i]->CreateDeepCopy(), nullptr);
   }
   policy_provider_.UpdateChromePolicy(map);
 }
@@ -468,8 +469,8 @@ void PreferencesBrowserTest::UseDefaultTestPrefs(bool includeListPref) {
     pref_names_.push_back(prefs::kURLsToRestoreOnStartup);
     policy_names_.push_back(policy::key::kRestoreOnStartupURLs);
     base::ListValue* list = new base::ListValue;
-    list->Append(new base::StringValue("http://www.example.com"));
-    list->Append(new base::StringValue("http://example.com"));
+    list->AppendString("http://www.example.com");
+    list->AppendString("http://example.com");
     non_default_values_.push_back(list);
   }
 
@@ -880,12 +881,9 @@ class ProxyPreferencesBrowserTest : public PreferencesBrowserTest {
         "}";
 
     policy::PolicyMap map;
-    map.Set(policy_name,
-            policy::POLICY_LEVEL_MANDATORY,
-            scope,
+    map.Set(policy_name, policy::POLICY_LEVEL_MANDATORY, scope,
             policy::POLICY_SOURCE_CLOUD,
-            new base::StringValue(onc_policy),
-            NULL);
+            base::MakeUnique<base::StringValue>(onc_policy), nullptr);
     policy_provider_.UpdateChromePolicy(map);
 
     content::RunAllPendingInMessageLoop();

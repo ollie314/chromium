@@ -56,7 +56,7 @@ void ConvertPlistToElements(NSArray* input,
   NSUInteger len = [input count];
   for (NSUInteger i = 0; i < len; ++i) {
     NSDictionary* pboardBookmark = [input objectAtIndex:i];
-    scoped_ptr<BookmarkNode> new_node(new BookmarkNode(GURL()));
+    std::unique_ptr<BookmarkNode> new_node(new BookmarkNode(GURL()));
     int64_t node_id =
         [[pboardBookmark objectForKey:kChromiumBookmarkId] longLongValue];
     new_node->set_id(node_id);
@@ -228,7 +228,7 @@ base::scoped_nsobject<NSPasteboardItem> WriteSimplifiedBookmarkTypes(
   }
 
   if (!item) {
-    item = [[NSPasteboardItem alloc] init];
+    item.reset([[NSPasteboardItem alloc] init]);
   }
 
   [item setString:[toplevel_string_data componentsJoinedByString:@"\n"]

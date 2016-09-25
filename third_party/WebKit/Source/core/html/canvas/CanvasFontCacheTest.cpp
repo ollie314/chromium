@@ -4,8 +4,8 @@
 
 #include "core/html/canvas/CanvasFontCache.h"
 
+#include "core/dom/Document.h"
 #include "core/frame/FrameView.h"
-#include "core/html/HTMLDocument.h"
 #include "core/html/canvas/CanvasContextCreationAttributes.h"
 #include "core/html/canvas/CanvasRenderingContext.h"
 #include "core/loader/EmptyClients.h"
@@ -13,6 +13,7 @@
 #include "platform/graphics/UnacceleratedImageBufferSurface.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include <memory>
 
 using ::testing::Mock;
 
@@ -24,14 +25,14 @@ protected:
     void SetUp() override;
 
     DummyPageHolder& page() const { return *m_dummyPageHolder; }
-    HTMLDocument& document() const { return *m_document; }
+    Document& document() const { return *m_document; }
     HTMLCanvasElement& canvasElement() const { return *m_canvasElement; }
     CanvasRenderingContext* context2d() const;
     CanvasFontCache* cache() { return m_document->canvasFontCache(); }
 
 private:
-    OwnPtr<DummyPageHolder> m_dummyPageHolder;
-    Persistent<HTMLDocument> m_document;
+    std::unique_ptr<DummyPageHolder> m_dummyPageHolder;
+    Persistent<Document> m_document;
     Persistent<HTMLCanvasElement> m_canvasElement;
 };
 
@@ -52,7 +53,7 @@ void CanvasFontCacheTest::SetUp()
     Page::PageClients pageClients;
     fillWithEmptyClients(pageClients);
     m_dummyPageHolder = DummyPageHolder::create(IntSize(800, 600), &pageClients);
-    m_document = toHTMLDocument(&m_dummyPageHolder->document());
+    m_document = &m_dummyPageHolder->document();
     m_document->documentElement()->setInnerHTML("<body><canvas id='c'></canvas></body>", ASSERT_NO_EXCEPTION);
     m_document->view()->updateAllLifecyclePhases();
     m_canvasElement = toHTMLCanvasElement(m_document->getElementById("c"));

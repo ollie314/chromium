@@ -61,7 +61,7 @@ class ManagementSetEnabledFunctionInstallPromptDelegate
                        OnInstallPromptDone,
                    weak_factory_.GetWeakPtr()),
         extension, nullptr,
-        base::WrapUnique(new ExtensionInstallPrompt::Prompt(type)),
+        base::MakeUnique<ExtensionInstallPrompt::Prompt>(type),
         ExtensionInstallPrompt::GetDefaultShowDialogCallback());
   }
   ~ManagementSetEnabledFunctionInstallPromptDelegate() override {}
@@ -171,7 +171,7 @@ ChromeManagementAPIDelegate::ChromeManagementAPIDelegate() {
 ChromeManagementAPIDelegate::~ChromeManagementAPIDelegate() {
 }
 
-bool ChromeManagementAPIDelegate::LaunchAppFunctionDelegate(
+void ChromeManagementAPIDelegate::LaunchAppFunctionDelegate(
     const extensions::Extension* extension,
     content::BrowserContext* context) const {
   // Look at prefs to find the right launch container.
@@ -179,13 +179,12 @@ bool ChromeManagementAPIDelegate::LaunchAppFunctionDelegate(
   // returned.
   extensions::LaunchContainer launch_container =
       GetLaunchContainer(extensions::ExtensionPrefs::Get(context), extension);
-  OpenApplication(AppLaunchParams(
-      Profile::FromBrowserContext(context), extension, launch_container,
-      NEW_FOREGROUND_TAB, extensions::SOURCE_MANAGEMENT_API));
+  OpenApplication(AppLaunchParams(Profile::FromBrowserContext(context),
+                                  extension, launch_container,
+                                  WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                                  extensions::SOURCE_MANAGEMENT_API));
   extensions::RecordAppLaunchType(extension_misc::APP_LAUNCH_EXTENSION_API,
                                   extension->GetType());
-
-  return true;
 }
 
 GURL ChromeManagementAPIDelegate::GetFullLaunchURL(
@@ -228,7 +227,7 @@ ChromeManagementAPIDelegate::SetEnabledFunctionDelegate(
 
 std::unique_ptr<extensions::RequirementsChecker>
 ChromeManagementAPIDelegate::CreateRequirementsChecker() const {
-  return base::WrapUnique(new extensions::ChromeRequirementsChecker());
+  return base::MakeUnique<extensions::ChromeRequirementsChecker>();
 }
 
 std::unique_ptr<extensions::UninstallDialogDelegate>
@@ -296,9 +295,15 @@ bool ChromeManagementAPIDelegate::IsNewBookmarkAppsEnabled() const {
 void ChromeManagementAPIDelegate::EnableExtension(
     content::BrowserContext* context,
     const std::string& extension_id) const {
+  const extensions::Extension* extension =
+      extensions::ExtensionRegistry::Get(context)->GetExtensionById(
+          extension_id, extensions::ExtensionRegistry::EVERYTHING);
+  // If the extension was disabled for a permissions increase, the Management
+  // API will have displayed a re-enable prompt to the user, so we know it's
+  // safe to grant permissions here.
   extensions::ExtensionSystem::Get(context)
       ->extension_service()
-      ->EnableExtension(extension_id);
+      ->GrantPermissionsAndEnableExtension(extension);
 }
 
 void ChromeManagementAPIDelegate::DisableExtension(

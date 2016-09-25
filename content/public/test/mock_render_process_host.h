@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <memory>
 #include <utility>
 
 #include "base/macros.h"
@@ -15,8 +16,8 @@
 #include "base/observer_list.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_factory.h"
-#include "content/public/common/service_registry.h"
 #include "ipc/ipc_test_sink.h"
+#include "services/shell/public/cpp/interface_provider.h"
 
 class StoragePartition;
 
@@ -81,8 +82,8 @@ class MockRenderProcessHost : public RenderProcessHost {
 #if defined(ENABLE_WEBRTC)
   void EnableAudioDebugRecordings(const base::FilePath& file) override;
   void DisableAudioDebugRecordings() override;
-  void EnableEventLogRecordings(const base::FilePath& file) override;
-  void DisableEventLogRecordings() override;
+  bool StartWebRTCEventLog(const base::FilePath& file_path) override;
+  bool StopWebRTCEventLog() override;
   void SetWebRtcLogMessageCallback(
       base::Callback<void(const std::string&)> callback) override;
   void ClearWebRtcLogMessageCallback() override;
@@ -92,24 +93,22 @@ class MockRenderProcessHost : public RenderProcessHost {
       const WebRtcRtpPacketCallback& packet_callback) override;
 #endif
   void ResumeDeferredNavigation(const GlobalRequestID& request_id) override;
-  void NotifyTimezoneChange(const std::string& zone_id) override;
-  ServiceRegistry* GetServiceRegistry() override;
-  shell::Connection* GetChildConnection() override;
+  shell::InterfaceProvider* GetRemoteInterfaces() override;
   std::unique_ptr<base::SharedPersistentMemoryAllocator> TakeMetricsAllocator()
       override;
   const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
-  bool SubscribeUniformEnabled() const override;
-  void OnAddSubscription(unsigned int target) override;
-  void OnRemoveSubscription(unsigned int target) override;
-  void SendUpdateValueState(
-      unsigned int target, const gpu::ValueState& state) override;
 #if defined(ENABLE_BROWSER_CDMS)
   scoped_refptr<media::MediaKeys> GetCdm(int render_frame_id,
                                          int cdm_id) const override;
 #endif
   bool IsProcessBackgrounded() const override;
-  void IncrementWorkerRefCount() override;
-  void DecrementWorkerRefCount() override;
+  void IncrementServiceWorkerRefCount() override;
+  void DecrementServiceWorkerRefCount() override;
+  void IncrementSharedWorkerRefCount() override;
+  void DecrementSharedWorkerRefCount() override;
+  void ForceReleaseWorkerRefCounts() override;
+  bool IsWorkerRefCountDisabled() override;
+  void PurgeAndSuspend() override;
 
   // IPC::Sender via RenderProcessHost.
   bool Send(IPC::Message* msg) override;
@@ -141,8 +140,9 @@ class MockRenderProcessHost : public RenderProcessHost {
 
   int worker_ref_count() const { return worker_ref_count_; }
 
-  void SetServiceRegistry(std::unique_ptr<ServiceRegistry> service_registry) {
-    service_registry_ = std::move(service_registry);
+  void SetRemoteInterfaces(
+      std::unique_ptr<shell::InterfaceProvider> remote_interfaces) {
+    remote_interfaces_ = std::move(remote_interfaces);
   }
 
  private:
@@ -164,7 +164,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   bool is_process_backgrounded_;
   std::unique_ptr<base::ProcessHandle> process_handle;
   int worker_ref_count_;
-  std::unique_ptr<ServiceRegistry> service_registry_;
+  std::unique_ptr<shell::InterfaceProvider> remote_interfaces_;
 
   DISALLOW_COPY_AND_ASSIGN(MockRenderProcessHost);
 };

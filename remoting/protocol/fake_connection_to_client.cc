@@ -6,7 +6,11 @@
 
 #include <utility>
 
+#include "remoting/codec/video_encoder.h"
+#include "remoting/protocol/audio_source.h"
+#include "remoting/protocol/audio_stream.h"
 #include "remoting/protocol/session.h"
+#include "remoting/protocol/video_frame_pump.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capturer.h"
 
 namespace remoting {
@@ -23,8 +27,8 @@ void FakeVideoStream::SetLosslessEncode(bool want_lossless) {}
 
 void FakeVideoStream::SetLosslessColor(bool want_lossless) {}
 
-void FakeVideoStream::SetSizeCallback(const SizeCallback& size_callback) {
-  size_callback_ = size_callback;
+void FakeVideoStream::SetObserver(Observer* observer) {
+  observer_ = observer;
 }
 
 base::WeakPtr<FakeVideoStream> FakeVideoStream::GetWeakPtr() {
@@ -42,13 +46,28 @@ void FakeConnectionToClient::SetEventHandler(EventHandler* event_handler) {
 
 std::unique_ptr<VideoStream> FakeConnectionToClient::StartVideoStream(
     std::unique_ptr<webrtc::DesktopCapturer> desktop_capturer) {
+  if (video_stub_ && video_encode_task_runner_) {
+    std::unique_ptr<VideoEncoder> video_encoder =
+        VideoEncoder::Create(session_->config());
+
+    std::unique_ptr<protocol::VideoFramePump> pump(
+        new protocol::VideoFramePump(video_encode_task_runner_,
+                                     std::move(desktop_capturer),
+                                     std::move(video_encoder),
+                                     video_stub_));
+    video_feedback_stub_ = pump->video_feedback_stub();
+    return std::move(pump);
+  }
+
   std::unique_ptr<FakeVideoStream> result(new FakeVideoStream());
   last_video_stream_ = result->GetWeakPtr();
   return std::move(result);
 }
 
-AudioStub* FakeConnectionToClient::audio_stub() {
-  return audio_stub_;
+std::unique_ptr<AudioStream> FakeConnectionToClient::StartAudioStream(
+    std::unique_ptr<AudioSource> audio_source) {
+  NOTIMPLEMENTED();
+  return nullptr;
 }
 
 ClientStub* FakeConnectionToClient::client_stub() {
@@ -67,8 +86,6 @@ void FakeConnectionToClient::Disconnect(ErrorCode disconnect_error) {
 Session* FakeConnectionToClient::session() {
   return session_.get();
 }
-
-void FakeConnectionToClient::OnInputEventReceived(int64_t timestamp) {}
 
 void FakeConnectionToClient::set_clipboard_stub(ClipboardStub* clipboard_stub) {
   clipboard_stub_ = clipboard_stub;

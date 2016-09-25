@@ -290,6 +290,10 @@ gfx::Rect DesktopWindowTreeHostWin::GetRestoredBounds() const {
   return display::win::ScreenWin::ScreenToDIPRect(GetHWND(), pixel_bounds);
 }
 
+std::string DesktopWindowTreeHostWin::GetWorkspace() const {
+  return std::string();
+}
+
 gfx::Rect DesktopWindowTreeHostWin::GetWorkAreaBoundsInScreen() const {
   MONITORINFO monitor_info;
   monitor_info.cbSize = sizeof(monitor_info);
@@ -300,35 +304,35 @@ gfx::Rect DesktopWindowTreeHostWin::GetWorkAreaBoundsInScreen() const {
   return display::win::ScreenWin::ScreenToDIPRect(GetHWND(), pixel_bounds);
 }
 
-void DesktopWindowTreeHostWin::SetShape(SkRegion* native_region) {
-  if (native_region) {
-    // TODO(wez): This would be a lot simpler if we were passed an SkPath.
-    // See crbug.com/410593.
-    SkRegion* shape = native_region;
-    SkRegion device_region;
-    if (display::win::GetDPIScale() > 1.0) {
-      shape = &device_region;
-      const float& scale = display::win::GetDPIScale();
-      std::vector<SkIRect> rects;
-      for (SkRegion::Iterator it(*native_region); !it.done(); it.next()) {
-        const SkIRect& rect = it.rect();
-        SkRect scaled_rect =
-            SkRect::MakeLTRB(rect.left() * scale, rect.top() * scale,
-                             rect.right() * scale, rect.bottom() * scale);
-        SkIRect rounded_scaled_rect;
-        scaled_rect.roundOut(&rounded_scaled_rect);
-        rects.push_back(rounded_scaled_rect);
-      }
-      if (!rects.empty())
-        device_region.setRects(&rects[0], rects.size());
-    }
-
-    message_handler_->SetRegion(gfx::CreateHRGNFromSkRegion(*shape));
-  } else {
-    message_handler_->SetRegion(NULL);
+void DesktopWindowTreeHostWin::SetShape(
+    std::unique_ptr<SkRegion> native_region) {
+  if (!native_region) {
+    message_handler_->SetRegion(nullptr);
+    return;
   }
 
-  delete native_region;
+  // TODO(wez): This would be a lot simpler if we were passed an SkPath.
+  // See crbug.com/410593.
+  SkRegion* shape = native_region.get();
+  SkRegion device_region;
+  const float scale = display::win::ScreenWin::GetScaleFactorForHWND(GetHWND());
+  if (scale > 1.0) {
+    shape = &device_region;
+    std::vector<SkIRect> rects;
+    for (SkRegion::Iterator it(*native_region); !it.done(); it.next()) {
+      const SkIRect& rect = it.rect();
+      SkRect scaled_rect =
+          SkRect::MakeLTRB(rect.left() * scale, rect.top() * scale,
+                           rect.right() * scale, rect.bottom() * scale);
+      SkIRect rounded_scaled_rect;
+      scaled_rect.roundOut(&rounded_scaled_rect);
+      rects.push_back(rounded_scaled_rect);
+    }
+    if (!rects.empty())
+      device_region.setRects(&rects[0], rects.size());
+  }
+
+  message_handler_->SetRegion(gfx::CreateHRGNFromSkRegion(*shape));
 }
 
 void DesktopWindowTreeHostWin::Activate() {
@@ -376,7 +380,11 @@ bool DesktopWindowTreeHostWin::IsAlwaysOnTop() const {
 }
 
 void DesktopWindowTreeHostWin::SetVisibleOnAllWorkspaces(bool always_visible) {
-  // Windows does not have the concept of workspaces.
+  // Chrome does not yet support Windows 10 desktops.
+}
+
+bool DesktopWindowTreeHostWin::IsVisibleOnAllWorkspaces() const {
+  return false;
 }
 
 bool DesktopWindowTreeHostWin::SetWindowTitle(const base::string16& title) {
@@ -441,8 +449,8 @@ bool DesktopWindowTreeHostWin::IsFullscreen() const {
   return message_handler_->fullscreen_handler()->fullscreen();
 }
 
-void DesktopWindowTreeHostWin::SetOpacity(unsigned char opacity) {
-  content_window_->layer()->SetOpacity(opacity / 255.0);
+void DesktopWindowTreeHostWin::SetOpacity(float opacity) {
+  content_window_->layer()->SetOpacity(opacity);
 }
 
 void DesktopWindowTreeHostWin::SetWindowIcons(
@@ -523,7 +531,6 @@ void DesktopWindowTreeHostWin::SetBounds(const gfx::Rect& bounds) {
   // If the window bounds have to be expanded we need to subtract the
   // window_expansion_top_left_delta_ from the origin and add the
   // window_expansion_bottom_right_delta_ to the width and height
-  gfx::Size old_hwnd_size(message_handler_->GetClientAreaBounds().size());
   gfx::Size old_content_size = GetBounds().size();
 
   gfx::Rect expanded(
@@ -925,7 +932,7 @@ void DesktopWindowTreeHostWin::HandleWindowSizeChanging() {
     compositor()->DisableSwapUntilResize();
 }
 
-void DesktopWindowTreeHostWin::HandleWindowSizeChanged() {
+void DesktopWindowTreeHostWin::HandleWindowSizeUnchanged() {
   // A resize may not have occurred if the window size happened not to have
   // changed (can occur on Windows 10 when snapping a window to the side of
   // the screen). In that case do a resize to the current size to reenable
@@ -933,6 +940,15 @@ void DesktopWindowTreeHostWin::HandleWindowSizeChanged() {
   if (compositor()) {
     compositor()->SetScaleAndSize(
         compositor()->device_scale_factor(),
+        message_handler_->GetClientAreaBounds().size());
+  }
+}
+
+void DesktopWindowTreeHostWin::HandleWindowScaleFactorChanged(
+    float window_scale_factor) {
+  if (compositor()) {
+    compositor()->SetScaleAndSize(
+        window_scale_factor,
         message_handler_->GetClientAreaBounds().size());
   }
 }

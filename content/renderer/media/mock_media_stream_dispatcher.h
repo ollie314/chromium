@@ -9,7 +9,7 @@
 
 #include "base/macros.h"
 #include "content/renderer/media/media_stream_dispatcher.h"
-#include "url/gurl.h"
+#include "url/origin.h"
 
 namespace content {
 
@@ -23,7 +23,7 @@ class MockMediaStreamDispatcher : public MediaStreamDispatcher {
       int request_id,
       const base::WeakPtr<MediaStreamDispatcherEventHandler>& event_handler,
       const StreamControls& controls,
-      const GURL& url) override;
+      const url::Origin& url) override;
   void CancelGenerateStream(
       int request_id,
       const base::WeakPtr<MediaStreamDispatcherEventHandler>& event_handler)
@@ -32,7 +32,7 @@ class MockMediaStreamDispatcher : public MediaStreamDispatcher {
       int request_id,
       const base::WeakPtr<MediaStreamDispatcherEventHandler>& event_handler,
       MediaStreamType type,
-      const GURL& security_origin) override;
+      const url::Origin& security_origin) override;
   void StopStreamDevice(const StreamDeviceInfo& device_info) override;
   bool IsStream(const std::string& label) override;
   int video_session_id(const std::string& label, int index) override;
@@ -43,6 +43,7 @@ class MockMediaStreamDispatcher : public MediaStreamDispatcher {
   int video_request_id() const { return video_request_id_; }
   int request_stream_counter() const { return request_stream_counter_; }
   void IncrementSessionId() { ++session_id_; }
+  void TestSameId() { test_same_id_ = true; }
 
   int stop_audio_device_counter() const { return stop_audio_device_counter_; }
   int stop_video_device_counter() const { return stop_video_device_counter_; }
@@ -55,6 +56,9 @@ class MockMediaStreamDispatcher : public MediaStreamDispatcher {
     return audio_output_array_;
   }
   const StreamDeviceInfoArray& video_array() const { return video_array_; }
+  size_t NumDeviceChangeSubscribers() const {
+    return MediaStreamDispatcher::NumDeviceChangeSubscribers();
+  }
 
  private:
   void AddAudioInputDeviceToArray(bool matched_output);
@@ -71,6 +75,7 @@ class MockMediaStreamDispatcher : public MediaStreamDispatcher {
 
   std::string stream_label_;
   int session_id_;
+  bool test_same_id_;
   StreamDeviceInfoArray audio_input_array_;
   StreamDeviceInfoArray audio_output_array_;
   StreamDeviceInfoArray video_array_;

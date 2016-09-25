@@ -4,8 +4,11 @@
 
 #include "media/muxers/webm_muxer.h"
 
+#include <algorithm>
+
 #include "base/bind.h"
-#include "media/audio/audio_parameters.h"
+#include "base/memory/ptr_util.h"
+#include "media/base/audio_parameters.h"
 #include "media/base/limits.h"
 #include "media/base/video_frame.h"
 #include "media/filters/opus_constants.h"
@@ -68,13 +71,29 @@ static double GetFrameRate(const scoped_refptr<VideoFrame>& video_frame) {
   return frame_rate;
 }
 
+static const char kH264CodecId[] = "V_MPEG4/ISO/AVC";
+
+static const char* MkvCodeIcForMediaVideoCodecId(VideoCodec video_codec) {
+  switch (video_codec) {
+    case kCodecVP8:
+      return mkvmuxer::Tracks::kVp8CodecId;
+    case kCodecVP9:
+      return mkvmuxer::Tracks::kVp9CodecId;
+    case kCodecH264:
+      return kH264CodecId;
+    default:
+      NOTREACHED() << "Unsupported codec " << GetCodecName(video_codec);
+      return "";
+  }
+}
+
 }  // anonymous namespace
 
 WebmMuxer::WebmMuxer(VideoCodec codec,
                      bool has_video,
                      bool has_audio,
                      const WriteDataCB& write_data_callback)
-    : use_vp9_(codec == kCodecVP9),
+    : video_codec_(codec),
       video_track_index_(0),
       audio_track_index_(0),
       has_video_(has_video),
@@ -83,8 +102,8 @@ WebmMuxer::WebmMuxer(VideoCodec codec,
       position_(0) {
   DCHECK(has_video_ || has_audio_);
   DCHECK(!write_data_callback_.is_null());
-  DCHECK(codec == kCodecVP8 || codec == kCodecVP9)
-      << " Only Vp8 and VP9 are supported in WebmMuxer";
+  DCHECK(codec == kCodecVP8 || codec == kCodecVP9 || codec == kCodecH264)
+      << " Unsupported codec: " << GetCodecName(codec);
 
   segment_.Init(this);
   segment_.set_mode(mkvmuxer::Segment::kLive);
@@ -106,10 +125,10 @@ WebmMuxer::~WebmMuxer() {
 }
 
 void WebmMuxer::OnEncodedVideo(const scoped_refptr<VideoFrame>& video_frame,
-                               scoped_ptr<std::string> encoded_data,
+                               std::unique_ptr<std::string> encoded_data,
                                base::TimeTicks timestamp,
                                bool is_key_frame) {
-  DVLOG(1) << __FUNCTION__ << " - " << encoded_data->size() << "B";
+  DVLOG(1) << __func__ << " - " << encoded_data->size() << "B";
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (!video_track_index_) {
@@ -123,12 +142,12 @@ void WebmMuxer::OnEncodedVideo(const scoped_refptr<VideoFrame>& video_frame,
 
   // TODO(ajose): Support multiple tracks: http://crbug.com/528523
   if (has_audio_ && !audio_track_index_) {
-    DVLOG(1) << __FUNCTION__ << ": delaying until audio track ready.";
+    DVLOG(1) << __func__ << ": delaying until audio track ready.";
     if (is_key_frame)  // Upon Key frame reception, empty the encoded queue.
       encoded_frames_queue_.clear();
 
-    encoded_frames_queue_.push_back(make_scoped_ptr(new EncodedVideoFrame(
-        std::move(encoded_data), timestamp, is_key_frame)));
+    encoded_frames_queue_.push_back(base::MakeUnique<EncodedVideoFrame>(
+        std::move(encoded_data), timestamp, is_key_frame));
     return;
   }
 
@@ -146,9 +165,9 @@ void WebmMuxer::OnEncodedVideo(const scoped_refptr<VideoFrame>& video_frame,
 }
 
 void WebmMuxer::OnEncodedAudio(const media::AudioParameters& params,
-                               scoped_ptr<std::string> encoded_data,
+                               std::unique_ptr<std::string> encoded_data,
                                base::TimeTicks timestamp) {
-  DVLOG(2) << __FUNCTION__ << " - " << encoded_data->size() << "B";
+  DVLOG(2) << __func__ << " - " << encoded_data->size() << "B";
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (!audio_track_index_) {
@@ -160,7 +179,7 @@ void WebmMuxer::OnEncodedAudio(const media::AudioParameters& params,
   // TODO(ajose): Don't drop audio data: http://crbug.com/547948
   // TODO(ajose): Support multiple tracks: http://crbug.com/528523
   if (has_video_ && !video_track_index_) {
-    DVLOG(1) << __FUNCTION__ << ": delaying until video track ready.";
+    DVLOG(1) << __func__ << ": delaying until video track ready.";
     return;
   }
 
@@ -179,14 +198,14 @@ void WebmMuxer::OnEncodedAudio(const media::AudioParameters& params,
 }
 
 void WebmMuxer::Pause() {
-  DVLOG(1) << __FUNCTION__;
+  DVLOG(1) << __func__;
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!elapsed_time_in_pause_)
     elapsed_time_in_pause_.reset(new base::ElapsedTimer());
 }
 
 void WebmMuxer::Resume() {
-  DVLOG(1) << __FUNCTION__;
+  DVLOG(1) << __func__;
   DCHECK(thread_checker_.CalledOnValidThread());
   if (elapsed_time_in_pause_) {
     total_time_in_pause_ += elapsed_time_in_pause_->Elapsed();
@@ -201,14 +220,16 @@ void WebmMuxer::AddVideoTrack(const gfx::Size& frame_size, double frame_rate) {
 
   video_track_index_ =
       segment_.AddVideoTrack(frame_size.width(), frame_size.height(), 0);
-  DCHECK_GT(video_track_index_, 0u);
+  if (video_track_index_ <= 0) {  // See https://crbug.com/616391.
+    NOTREACHED() << "Error adding video track";
+    return;
+  }
 
   mkvmuxer::VideoTrack* const video_track =
       reinterpret_cast<mkvmuxer::VideoTrack*>(
           segment_.GetTrackByNumber(video_track_index_));
   DCHECK(video_track);
-  video_track->set_codec_id(use_vp9_ ? mkvmuxer::Tracks::kVp9CodecId
-                                     : mkvmuxer::Tracks::kVp8CodecId);
+  video_track->set_codec_id(MkvCodeIcForMediaVideoCodecId(video_codec_));
   DCHECK_EQ(0ull, video_track->crop_right());
   DCHECK_EQ(0ull, video_track->crop_left());
   DCHECK_EQ(0ull, video_track->crop_top());
@@ -223,14 +244,17 @@ void WebmMuxer::AddVideoTrack(const gfx::Size& frame_size, double frame_rate) {
 }
 
 void WebmMuxer::AddAudioTrack(const media::AudioParameters& params) {
-  DVLOG(1) << __FUNCTION__ << " " << params.AsHumanReadableString();
+  DVLOG(1) << __func__ << " " << params.AsHumanReadableString();
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK_EQ(0u, audio_track_index_)
       << "WebmMuxer audio can only be initialised once.";
 
   audio_track_index_ =
       segment_.AddAudioTrack(params.sample_rate(), params.channels(), 0);
-  DCHECK_GT(audio_track_index_, 0u);
+  if (audio_track_index_ <= 0) {  // See https://crbug.com/616391.
+    NOTREACHED() << "Error adding audio track";
+    return;
+  }
 
   mkvmuxer::AudioTrack* const audio_track =
       reinterpret_cast<mkvmuxer::AudioTrack*>(
@@ -245,7 +269,7 @@ void WebmMuxer::AddAudioTrack(const media::AudioParameters& params) {
   WriteOpusHeader(params, opus_header);
 
   if (!audio_track->SetCodecPrivate(opus_header, OPUS_EXTRADATA_SIZE))
-    LOG(ERROR) << __FUNCTION__ << ": failed to set opus header.";
+    LOG(ERROR) << __func__ << ": failed to set opus header.";
 
   // Segment's timestamps should be in milliseconds, DCHECK it. See
   // http://www.webmproject.org/docs/container/#muxer-guidelines
@@ -281,7 +305,7 @@ void WebmMuxer::ElementStartNotify(mkvmuxer::uint64 element_id,
       << "Can't go back in a live WebM stream.";
 }
 
-void WebmMuxer::AddFrame(scoped_ptr<std::string> encoded_data,
+void WebmMuxer::AddFrame(std::unique_ptr<std::string> encoded_data,
                          uint8_t track_index,
                          base::TimeDelta timestamp,
                          bool is_key_frame) {
@@ -299,9 +323,10 @@ void WebmMuxer::AddFrame(scoped_ptr<std::string> encoded_data,
                     is_key_frame);
 }
 
-WebmMuxer::EncodedVideoFrame::EncodedVideoFrame(scoped_ptr<std::string> data,
-                                                base::TimeTicks timestamp,
-                                                bool is_keyframe)
+WebmMuxer::EncodedVideoFrame::EncodedVideoFrame(
+    std::unique_ptr<std::string> data,
+    base::TimeTicks timestamp,
+    bool is_keyframe)
     : data(std::move(data)), timestamp(timestamp), is_keyframe(is_keyframe) {}
 
 WebmMuxer::EncodedVideoFrame::~EncodedVideoFrame() {}

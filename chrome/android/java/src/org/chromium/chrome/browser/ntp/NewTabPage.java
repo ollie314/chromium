@@ -5,16 +5,14 @@
 package org.chromium.chrome.browser.ntp;
 
 import android.annotation.TargetApi;
-import android.app.Activity;
-import android.app.ActivityManager;
-import android.app.Dialog;
 import android.content.Context;
-import android.content.Intent;
 import android.graphics.Canvas;
-import android.graphics.Color;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
+import android.os.SystemClock;
+import android.support.v4.view.ViewCompat;
 import android.view.ContextMenu;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -22,19 +20,21 @@ import android.view.MenuItem.OnMenuItemClickListener;
 import android.view.View;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.Callback;
 import org.chromium.base.CommandLine;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeApplication;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.NativePage;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.bookmarks.BookmarkUtils;
 import org.chromium.chrome.browser.compositor.layouts.content.InvalidationAwareThumbnailProvider;
-import org.chromium.chrome.browser.document.DocumentUtils;
+import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.favicon.FaviconHelper;
 import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
 import org.chromium.chrome.browser.favicon.FaviconHelper.IconAvailabilityCallback;
@@ -45,16 +45,14 @@ import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.ntp.LogoBridge.Logo;
 import org.chromium.chrome.browser.ntp.LogoBridge.LogoObserver;
 import org.chromium.chrome.browser.ntp.NewTabPageView.NewTabPageManager;
-import org.chromium.chrome.browser.ntp.interests.InterestsPage;
-import org.chromium.chrome.browser.ntp.interests.InterestsPage.InterestsClickListener;
+import org.chromium.chrome.browser.ntp.snippets.KnownCategories;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.ntp.snippets.SnippetsBridge;
-import org.chromium.chrome.browser.ntp.snippets.SnippetsBridge.SnippetsObserver;
+import org.chromium.chrome.browser.ntp.snippets.SnippetsConfig;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.profiles.MostVisitedSites;
 import org.chromium.chrome.browser.profiles.MostVisitedSites.MostVisitedURLsObserver;
-import org.chromium.chrome.browser.profiles.MostVisitedSites.ThumbnailCallback;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService.TemplateUrlServiceObserver;
@@ -68,17 +66,17 @@ import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
-import org.chromium.chrome.browser.tabmodel.document.ActivityDelegate;
-import org.chromium.chrome.browser.tabmodel.document.DocumentTabModel;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.common.Referrer;
 import org.chromium.net.NetworkChangeNotifier;
-import org.chromium.sync.signin.ChromeSigninController;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.PageTransition;
+import org.chromium.ui.mojom.WindowOpenDisposition;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import jp.tomorrowkey.android.gifplayer.BaseGifImage;
@@ -95,11 +93,24 @@ public class NewTabPage
     static final int ID_OPEN_IN_INCOGNITO_TAB = 2;
     static final int ID_REMOVE = 3;
 
+    // UMA enum constants. CTA means the "click-to-action" icon.
+    private static final String LOGO_SHOWN_UMA_NAME = "NewTabPage.LogoShown";
+    private static final int STATIC_LOGO_SHOWN = 0;
+    private static final int CTA_IMAGE_SHOWN = 1;
+
+    private static final String LOGO_CLICK_UMA_NAME = "NewTabPage.LogoClick";
+    private static final int STATIC_LOGO_CLICKED = 0;
+    private static final int CTA_IMAGE_CLICKED = 1;
+    private static final int ANIMATED_LOGO_CLICKED = 2;
+
+    private static final String CHROME_CONTENT_SUGGESTIONS_REFERRER =
+            "https://www.googleapis.com/auth/chrome-content-suggestions";
+
     private static MostVisitedSites sMostVisitedSitesForTests;
 
     private final Tab mTab;
     private final TabModelSelector mTabModelSelector;
-    private final Activity mActivity;
+    private final ChromeActivity mActivity;
 
     private final Profile mProfile;
     private final String mTitle;
@@ -117,7 +128,6 @@ public class NewTabPage
     private String mOnLogoClickUrl;
     private String mAnimatedLogoUrl;
     private FakeboxDelegate mFakeboxDelegate;
-    private OfflinePageBridge mOfflinePageBridge;
     private SnippetsBridge mSnippetsBridge;
 
     // The timestamp at which the constructor was called.
@@ -127,9 +137,6 @@ public class NewTabPage
     private long mLastShownTimeNs;
 
     private boolean mIsLoaded;
-
-    // Whether the NTP has loaded once and is in the foreground.
-    private boolean mIsVisible;
 
     // Whether destroy() has been called.
     private boolean mIsDestroyed;
@@ -165,6 +172,11 @@ public class NewTabPage
         boolean isVoiceSearchEnabled();
 
         /**
+         * @return Whether the URL bar is currently focused.
+         */
+        boolean isUrlBarFocused();
+
+        /**
          * Focuses the URL bar when the user taps the fakebox, types in the fakebox, or pastes text
          * into the fakebox.
          *
@@ -179,34 +191,10 @@ public class NewTabPage
      * @return Whether the passed in URL is used to render the NTP.
      */
     public static boolean isNTPUrl(String url) {
-        return url != null && url.startsWith(UrlConstants.NTP_URL);
-    }
-
-    public static void launchInterestsDialog(Activity activity, final Tab tab) {
-        InterestsPage page =
-                new InterestsPage(activity, tab, Profile.getLastUsedProfile());
-        final Dialog dialog = new NativePageDialog(activity, page);
-
-        InterestsClickListener listener = new InterestsClickListener() {
-            @Override
-            public void onInterestClicked(String name) {
-                tab.loadUrl(new LoadUrlParams(
-                        TemplateUrlService.getInstance().getUrlForSearchQuery(name)));
-                dialog.dismiss();
-            }
-        };
-
-        page.setListener(listener);
-        dialog.show();
-    }
-
-    public static void launchRecentTabsDialog(Activity activity, Tab tab) {
-        DocumentRecentTabsManager manager = new DocumentRecentTabsManager(tab, activity);
-        NativePage page = new RecentTabsPage(activity, manager);
-        page.updateForUrl(UrlConstants.RECENT_TABS_URL);
-        Dialog dialog = new NativePageDialog(activity, page);
-        manager.setDialog(dialog);
-        dialog.show();
+        // Also handle the legacy chrome://newtab URL since that will redirect to
+        // chrome-native://newtab natively.
+        return url != null
+                && (url.startsWith(UrlConstants.NTP_URL) || url.startsWith("chrome://newtab"));
     }
 
     @VisibleForTesting
@@ -218,8 +206,7 @@ public class NewTabPage
         private static final String NTP_OFFLINE_PAGES_FEATURE_NAME = "NTPOfflinePages";
 
         private boolean isNtpOfflinePagesEnabled() {
-            return OfflinePageBridge.isEnabled()
-                    && ChromeFeatureList.isEnabled(NTP_OFFLINE_PAGES_FEATURE_NAME);
+            return ChromeFeatureList.isEnabled(NTP_OFFLINE_PAGES_FEATURE_NAME);
         }
 
         @Override
@@ -236,18 +223,6 @@ public class NewTabPage
         }
 
         @Override
-        public boolean isInterestsEnabled() {
-            return CommandLine.getInstance().hasSwitch(ChromeSwitches.ENABLE_INTERESTS)
-                    && ChromeSigninController.get(mActivity).isSignedIn();
-        }
-
-        @Override
-        public boolean isToolbarEnabled() {
-            return ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_TOOLBAR)
-                    && !ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_SNIPPETS);
-        }
-
-        @Override
         public boolean isFakeOmniboxTextEnabledTablet() {
             return ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_FAKE_OMNIBOX_TEXT);
         }
@@ -259,15 +234,28 @@ public class NewTabPage
                     item.getUrl(), NewTabPageUma.RAPPOR_ACTION_VISITED_SUGGESTED_TILE);
             RecordHistogram.recordMediumTimesHistogram("NewTabPage.MostVisitedTime",
                     System.nanoTime() - mLastShownTimeNs, TimeUnit.NANOSECONDS);
-            mMostVisitedSites.recordOpenedMostVisitedItem(item.getIndex(), item.getTileType());
+            mMostVisitedSites.recordOpenedMostVisitedItem(
+                    item.getIndex(), item.getTileType(), item.getSource());
         }
 
         @Override
-        public void open(MostVisitedItem item) {
+        public void openMostVisitedItem(MostVisitedItem item) {
             if (mIsDestroyed) return;
             recordOpenedMostVisitedItem(item);
             String url = item.getUrl();
-            if (!switchToExistingTab(url)) open(url);
+            if (!switchToExistingTab(url)) {
+                openUrlMostVisited(WindowOpenDisposition.CURRENT_TAB, url);
+            }
+        }
+
+        @Override
+        public void onLearnMoreClicked() {
+            if (mIsDestroyed) return;
+            NewTabPageUma.recordAction(NewTabPageUma.ACTION_CLICKED_LEARN_MORE);
+            String url = "https://support.google.com/chrome/?p=new_tab";
+            // TODO(mastiz): Change this to LINK?
+            openUrl(WindowOpenDisposition.CURRENT_TAB,
+                    new LoadUrlParams(url, PageTransition.AUTO_BOOKMARK));
         }
 
         @TargetApi(Build.VERSION_CODES.LOLLIPOP)
@@ -282,27 +270,12 @@ public class NewTabPage
             } else {
                 return false;
             }
-            if (FeatureUtilities.isDocumentMode(mActivity)) {
-                ActivityManager am =
-                        (ActivityManager) mActivity.getSystemService(Activity.ACTIVITY_SERVICE);
-                DocumentTabModel tabModel =
-                        ChromeApplication.getDocumentTabModelSelector().getModel(false);
-                for (ActivityManager.AppTask task : am.getAppTasks()) {
-                    Intent baseIntent = DocumentUtils.getBaseIntentFromTask(task);
-                    int tabId = ActivityDelegate.getTabIdFromIntent(baseIntent);
-                    String tabUrl = tabModel.getCurrentUrlForDocument(tabId);
-                    if (matchURLs(tabUrl, url, matchByHost)) {
-                        task.moveToFront();
-                        return true;
-                    }
-                }
-            } else {
-                TabModel tabModel = mTabModelSelector.getModel(false);
-                for (int i = tabModel.getCount() - 1; i >= 0; --i) {
-                    if (matchURLs(tabModel.getTabAt(i).getUrl(), url, matchByHost)) {
-                        TabModelUtils.setIndex(tabModel, i);
-                        return true;
-                    }
+
+            TabModel tabModel = mTabModelSelector.getModel(false);
+            for (int i = tabModel.getCount() - 1; i >= 0; --i) {
+                if (matchURLs(tabModel.getTabAt(i).getUrl(), url, matchByHost)) {
+                    TabModelUtils.setIndex(tabModel, i);
+                    return true;
                 }
             }
             return false;
@@ -313,32 +286,92 @@ public class NewTabPage
             return matchByHost ? UrlUtilities.sameHost(url1, url2) : url1.equals(url2);
         }
 
-        private String getLaunchUrl(String url) {
-            if (!isNtpOfflinePagesEnabled()) return url;
-
-            if (mOfflinePageBridge == null) {
-                mOfflinePageBridge = OfflinePageBridge.getForProfile(mProfile);
-            }
-            return mOfflinePageBridge.getLaunchUrlFromOnlineUrl(url);
+        @Override
+        public void trackSnippetsPageImpression(int[] categories, int[] suggestionsPerCategory) {
+            mSnippetsBridge.onPageShown(categories, suggestionsPerCategory);
         }
 
         @Override
-        public void open(String url) {
-            if (mIsDestroyed) return;
-            mTab.loadUrl(new LoadUrlParams(getLaunchUrl(url), PageTransition.AUTO_BOOKMARK));
+        public void trackSnippetImpression(SnippetArticle article) {
+            mSnippetsBridge.onSuggestionShown(article.mGlobalPosition, article.mCategory,
+                    article.mPosition, article.mPublishTimestampMilliseconds, article.mScore);
+        }
+
+        @Override
+        public void trackSnippetMenuOpened(SnippetArticle article) {
+            mSnippetsBridge.onSuggestionMenuOpened(article.mGlobalPosition, article.mCategory,
+                    article.mPosition, article.mPublishTimestampMilliseconds, article.mScore);
+        }
+
+        @Override
+        public void trackSnippetCategoryActionImpression(int category, int position) {
+            mSnippetsBridge.onMoreButtonShown(category, position);
+        }
+
+        @Override
+        public void trackSnippetCategoryActionClick(int category, int position) {
+            mSnippetsBridge.onMoreButtonClicked(category, position);
+        }
+
+        @Override
+        public void openSnippet(int windowOpenDisposition, SnippetArticle article) {
+            mSnippetsBridge.onSuggestionOpened(article.mGlobalPosition, article.mCategory,
+                    article.mPosition, article.mPublishTimestampMilliseconds, article.mScore,
+                    windowOpenDisposition);
+            NewTabPageUma.monitorContentSuggestionVisit(mTab, article.mCategory);
+            LoadUrlParams loadUrlParams =
+                    new LoadUrlParams(article.mUrl, PageTransition.AUTO_BOOKMARK);
+
+            // For article suggestions, we set the referrer. This is exploited
+            // to filter out these history entries for NTP tiles.
+            // TODO(mastiz): Extend this with support for other categories.
+            if (article.mCategory == KnownCategories.ARTICLES) {
+                loadUrlParams.setReferrer(new Referrer(
+                        CHROME_CONTENT_SUGGESTIONS_REFERRER, Referrer.REFERRER_POLICY_ALWAYS));
+            }
+
+            openUrl(windowOpenDisposition, loadUrlParams);
+        }
+
+        // TODO(mastiz): Merge with openMostVisitedItem().
+        private void openUrlMostVisited(int windowOpenDisposition, String url) {
+            openUrl(windowOpenDisposition, new LoadUrlParams(url, PageTransition.AUTO_BOOKMARK));
+        }
+
+        private void openUrl(int windowOpenDisposition, LoadUrlParams loadUrlParams) {
+            assert !mIsDestroyed;
+            switch (windowOpenDisposition) {
+                case WindowOpenDisposition.CURRENT_TAB:
+                    mTab.loadUrl(loadUrlParams);
+                    break;
+                case WindowOpenDisposition.NEW_FOREGROUND_TAB:
+                    openUrlInNewTab(loadUrlParams, false);
+                    break;
+                case WindowOpenDisposition.OFF_THE_RECORD:
+                    openUrlInNewTab(loadUrlParams, true);
+                    break;
+                case WindowOpenDisposition.NEW_WINDOW:
+                    openUrlInNewWindow(loadUrlParams);
+                    break;
+                case WindowOpenDisposition.SAVE_TO_DISK:
+                    saveUrlForOffline(loadUrlParams.getUrl());
+                    break;
+                default:
+                    assert false;
+            }
         }
 
         @Override
         public void onCreateContextMenu(ContextMenu menu, OnMenuItemClickListener listener) {
             if (mIsDestroyed) return;
-            if (MultiWindowUtils.getInstance().isOpenInOtherWindowSupported(mActivity)) {
+            if (isOpenInNewWindowEnabled()) {
                 menu.add(Menu.NONE, ID_OPEN_IN_NEW_WINDOW, Menu.NONE,
                         R.string.contextmenu_open_in_other_window)
                         .setOnMenuItemClickListener(listener);
             }
             menu.add(Menu.NONE, ID_OPEN_IN_NEW_TAB, Menu.NONE, R.string.contextmenu_open_in_new_tab)
                     .setOnMenuItemClickListener(listener);
-            if (PrefServiceBridge.getInstance().isIncognitoModeEnabled()) {
+            if (isOpenInIncognitoEnabled()) {
                 menu.add(Menu.NONE, ID_OPEN_IN_INCOGNITO_TAB, Menu.NONE,
                         R.string.contextmenu_open_in_incognito_tab).setOnMenuItemClickListener(
                         listener);
@@ -352,22 +385,16 @@ public class NewTabPage
             if (mIsDestroyed) return false;
             switch (menuId) {
                 case ID_OPEN_IN_NEW_WINDOW:
-                    TabDelegate tabDelegate = new TabDelegate(false);
-                    LoadUrlParams loadUrlParams = new LoadUrlParams(getLaunchUrl(item.getUrl()));
-                    tabDelegate.createTabInOtherWindow(loadUrlParams, mActivity,
-                            mTab.getParentId());
+                    // TODO(treib): Should we call recordOpenedMostVisitedItem here?
+                    openUrlMostVisited(WindowOpenDisposition.NEW_WINDOW, item.getUrl());
                     return true;
                 case ID_OPEN_IN_NEW_TAB:
                     recordOpenedMostVisitedItem(item);
-                    mTabModelSelector.openNewTab(new LoadUrlParams(getLaunchUrl(item.getUrl()),
-                            PageTransition.AUTO_BOOKMARK), TabLaunchType.FROM_LONGPRESS_BACKGROUND,
-                            mTab, false);
+                    openUrlMostVisited(WindowOpenDisposition.NEW_FOREGROUND_TAB, item.getUrl());
                     return true;
                 case ID_OPEN_IN_INCOGNITO_TAB:
                     recordOpenedMostVisitedItem(item);
-                    mTabModelSelector.openNewTab(new LoadUrlParams(getLaunchUrl(item.getUrl()),
-                            PageTransition.AUTO_BOOKMARK), TabLaunchType.FROM_LONGPRESS_FOREGROUND,
-                            mTab, true);
+                    openUrlMostVisited(WindowOpenDisposition.OFF_THE_RECORD, item.getUrl());
                     return true;
                 case ID_REMOVE:
                     mMostVisitedSites.addBlacklistedUrl(item.getUrl());
@@ -376,6 +403,31 @@ public class NewTabPage
                 default:
                     return false;
             }
+        }
+
+        @Override
+        public boolean isOpenInNewWindowEnabled() {
+            return MultiWindowUtils.getInstance().isOpenInOtherWindowSupported(mActivity);
+        }
+
+        @Override
+        public boolean isOpenInIncognitoEnabled() {
+            return PrefServiceBridge.getInstance().isIncognitoModeEnabled();
+        }
+
+        private void openUrlInNewWindow(LoadUrlParams loadUrlParams) {
+            TabDelegate tabDelegate = new TabDelegate(false);
+            tabDelegate.createTabInOtherWindow(loadUrlParams, mActivity, mTab.getParentId());
+        }
+
+        private void openUrlInNewTab(LoadUrlParams loadUrlParams, boolean incognito) {
+            mTabModelSelector.openNewTab(
+                    loadUrlParams, TabLaunchType.FROM_LONGPRESS_BACKGROUND, mTab, incognito);
+        }
+
+        private void saveUrlForOffline(String url) {
+            OfflinePageBridge.getForProfile(mProfile)
+                    .savePageLater(url, "ntp_suggestions", true /* userRequested */);
         }
 
         @Override
@@ -389,19 +441,15 @@ public class NewTabPage
         public void navigateToRecentTabs() {
             if (mIsDestroyed) return;
             RecordUserAction.record("MobileNTPSwitchToOpenTabs");
-            if (FeatureUtilities.isDocumentMode(mActivity)) {
-                launchRecentTabsDialog(mActivity, mTab);
-            } else {
-                mTab.loadUrl(new LoadUrlParams(UrlConstants.RECENT_TABS_URL));
-            }
+            mTab.loadUrl(new LoadUrlParams(UrlConstants.RECENT_TABS_URL));
         }
 
         @Override
-        public void navigateToInterests() {
+        public void navigateToDownloadManager() {
             if (mIsDestroyed) return;
-            RecordUserAction.record("MobileNTP.Interests.OpenDialog");
-            // TODO(peconn): Make this load a native page on tablets.
-            launchInterestsDialog(mActivity, mTab);
+            assert ChromeFeatureList.isEnabled("DownloadsUi");
+            RecordUserAction.record("MobileNTPSwitchToDownloadManager");
+            DownloadUtils.showDownloadManager(mActivity, mTab);
         }
 
         @Override
@@ -423,18 +471,6 @@ public class NewTabPage
         }
 
         @Override
-        public void setSnippetsObserver(SnippetsObserver observer) {
-            if (mIsDestroyed) return;
-            mSnippetsBridge.setObserver(observer);
-        }
-
-        @Override
-        public void getURLThumbnail(String url, ThumbnailCallback thumbnailCallback) {
-            if (mIsDestroyed) return;
-            mMostVisitedSites.getURLThumbnail(url, thumbnailCallback);
-        }
-
-        @Override
         public void getLocalFaviconImageForURL(
                 String url, int size, FaviconImageCallback faviconCallback) {
             if (mIsDestroyed) return;
@@ -451,11 +487,11 @@ public class NewTabPage
 
         @Override
         public void ensureIconIsAvailable(String pageUrl, String iconUrl, boolean isLargeIcon,
-                IconAvailabilityCallback callback) {
+                boolean isTemporary, IconAvailabilityCallback callback) {
             if (mIsDestroyed) return;
             if (mFaviconHelper == null) mFaviconHelper = new FaviconHelper();
-            mFaviconHelper.ensureIconIsAvailable(
-                    mProfile, mTab.getWebContents(), pageUrl, iconUrl, isLargeIcon, callback);
+            mFaviconHelper.ensureIconIsAvailable(mProfile, mTab.getWebContents(), pageUrl, iconUrl,
+                    isLargeIcon, isTemporary, callback);
         }
 
         private boolean isLocalUrl(String url) {
@@ -463,13 +499,52 @@ public class NewTabPage
         }
 
         @Override
-        public boolean isOfflineAvailable(String pageUrl) {
-            if (mIsDestroyed || !isNtpOfflinePagesEnabled()) return false;
-            if (isLocalUrl(pageUrl)) return true;
-            if (mOfflinePageBridge == null) {
-                mOfflinePageBridge = OfflinePageBridge.getForProfile(mProfile);
+        public void getUrlsAvailableOffline(
+                Set<String> pageUrls, final Callback<Set<String>> callback) {
+            final Set<String> urlsAvailableOffline = new HashSet<>();
+            if (mIsDestroyed || !isNtpOfflinePagesEnabled()) {
+                callback.onResult(urlsAvailableOffline);
+                return;
             }
-            return mOfflinePageBridge.getOfflineUrlForOnlineUrl(pageUrl) != null;
+
+            HashSet<String> urlsToCheckForOfflinePage = new HashSet<>();
+
+            for (String pageUrl : pageUrls) {
+                if (isLocalUrl(pageUrl)) {
+                    urlsAvailableOffline.add(pageUrl);
+                } else {
+                    urlsToCheckForOfflinePage.add(pageUrl);
+                }
+            }
+
+            final long offlineQueryStartTime = SystemClock.elapsedRealtime();
+
+            OfflinePageBridge offlinePageBridge = OfflinePageBridge.getForProfile(mProfile);
+
+            // TODO(dewittj): Remove this code by making the NTP badging available after the NTP is
+            // fully loaded.
+            if (offlinePageBridge == null || !offlinePageBridge.isOfflinePageModelLoaded()) {
+                // Posting a task to avoid potential re-entrancy issues.
+                ThreadUtils.postOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        callback.onResult(urlsAvailableOffline);
+                    }
+                });
+                return;
+            }
+
+            offlinePageBridge.checkPagesExistOffline(
+                    urlsToCheckForOfflinePage, new Callback<Set<String>>() {
+                        @Override
+                        public void onResult(Set<String> urlsWithOfflinePages) {
+                            urlsAvailableOffline.addAll(urlsWithOfflinePages);
+                            callback.onResult(urlsAvailableOffline);
+                            RecordHistogram.recordTimesHistogram("NewTabPage.OfflineUrlsLoadTime",
+                                    SystemClock.elapsedRealtime() - offlineQueryStartTime,
+                                    TimeUnit.MILLISECONDS);
+                        }
+                    });
         }
 
         @Override
@@ -477,6 +552,7 @@ public class NewTabPage
             if (mIsDestroyed) return;
 
             if (!isAnimatedLogoShowing && mAnimatedLogoUrl != null) {
+                RecordHistogram.recordSparseSlowlyHistogram(LOGO_CLICK_UMA_NAME, CTA_IMAGE_CLICKED);
                 mNewTabPageView.showLogoLoadingView();
                 mLogoBridge.getAnimatedLogo(new LogoBridge.AnimatedLogoCallback() {
                     @Override
@@ -486,6 +562,8 @@ public class NewTabPage
                     }
                 }, mAnimatedLogoUrl);
             } else if (mOnLogoClickUrl != null) {
+                RecordHistogram.recordSparseSlowlyHistogram(LOGO_CLICK_UMA_NAME,
+                        isAnimatedLogoShowing ? ANIMATED_LOGO_CLICKED : STATIC_LOGO_CLICKED);
                 mTab.loadUrl(new LoadUrlParams(mOnLogoClickUrl, PageTransition.LINK));
             }
         }
@@ -499,6 +577,10 @@ public class NewTabPage
                     if (mIsDestroyed) return;
                     mOnLogoClickUrl = logo != null ? logo.onClickUrl : null;
                     mAnimatedLogoUrl = logo != null ? logo.animatedLogoUrl : null;
+                    if (logo != null) {
+                        RecordHistogram.recordSparseSlowlyHistogram(LOGO_SHOWN_UMA_NAME,
+                                logo.animatedLogoUrl == null ? STATIC_LOGO_SHOWN : CTA_IMAGE_SHOWN);
+                    }
                     logoObserver.onLogoAvailable(logo, fromCache);
                 }
             };
@@ -507,23 +589,26 @@ public class NewTabPage
 
         @Override
         public void onLoadingComplete(MostVisitedItem[] items) {
+            if (mIsDestroyed) return;
+
             long loadTimeMs = (System.nanoTime() - mConstructedTimeNs) / 1000000;
             RecordHistogram.recordTimesHistogram(
                     "Tab.NewTabOnload", loadTimeMs, TimeUnit.MILLISECONDS);
             mIsLoaded = true;
-            mIsVisible = true;
             StartupMetrics.getInstance().recordOpenedNTP();
             NewTabPageUma.recordNTPImpression(NewTabPageUma.NTP_IMPRESSION_REGULAR);
-
-            if (mIsDestroyed) return;
-
-            recordNTPShown();
+            // If not visible when loading completes, wait until onShown is received.
+            if (!mTab.isHidden()) recordNTPShown();
 
             int tileTypes[] = new int[items.length];
+            int sources[] = new int[items.length];
+
             for (int i = 0; i < items.length; i++) {
                 tileTypes[i] = items[i].getTileType();
+                sources[i] = items[i].getSource();
             }
-            mMostVisitedSites.recordTileTypeMetrics(tileTypes);
+
+            mMostVisitedSites.recordTileTypeMetrics(tileTypes, sources);
 
             if (isNtpOfflinePagesEnabled()) {
                 final int maxNumTiles = 12;
@@ -538,16 +623,14 @@ public class NewTabPage
         }
 
         @Override
-        public void onSnippetDismissed(SnippetArticle dismissedSnippet) {
-            if (mIsDestroyed) return;
-            NewTabPageUma.recordSnippetAction(NewTabPageUma.SNIPPETS_ACTION_DISMISSED);
-            mSnippetsBridge.discardSnippet(dismissedSnippet);
+        public void addContextMenuCloseCallback(Callback<Menu> callback) {
+            mActivity.addContextMenuCloseCallback(callback);
+
         }
 
         @Override
-        public void addTabObserver(TabObserver tabObserver) {
-            if (mIsDestroyed) return;
-            mTab.addObserver(tabObserver);
+        public void removeContextMenuCloseCallback(Callback<Menu> callback) {
+            mActivity.removeContextMenuCloseCallback(callback);
         }
     };
 
@@ -557,7 +640,7 @@ public class NewTabPage
      * @param tab The Tab that is showing this new tab page.
      * @param tabModelSelector The TabModelSelector used to open tabs.
      */
-    public NewTabPage(Activity activity, Tab tab, TabModelSelector tabModelSelector) {
+    public NewTabPage(ChromeActivity activity, Tab tab, TabModelSelector tabModelSelector) {
         mConstructedTimeNs = System.nanoTime();
 
         mTab = tab;
@@ -566,9 +649,7 @@ public class NewTabPage
         mProfile = tab.getProfile();
 
         mTitle = activity.getResources().getString(R.string.button_new_tab);
-        mBackgroundColor = ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_SNIPPETS)
-                ? ApiCompatibilityUtils.getColor(activity.getResources(), R.color.ntp_with_cards_bg)
-                : ApiCompatibilityUtils.getColor(activity.getResources(), R.color.ntp_bg);
+        mBackgroundColor = NtpColorUtils.getBackgroundColorResource(activity.getResources(), false);
         mThemeColor = ApiCompatibilityUtils.getColor(
                 activity.getResources(), R.color.default_primary_color);
         TemplateUrlService.getInstance().addObserver(this);
@@ -578,13 +659,11 @@ public class NewTabPage
             public void onShown(Tab tab) {
                 // Showing the NTP is only meaningful when the page has been loaded already.
                 if (mIsLoaded) recordNTPShown();
-                mIsVisible = true;
             }
 
             @Override
             public void onHidden(Tab tab) {
-                recordNTPInteractionTime();
-                mIsVisible = false;
+                if (mIsLoaded) recordNTPInteractionTime();
             }
         };
         mTab.addObserver(mTabObserver);
@@ -592,14 +671,13 @@ public class NewTabPage
         mLogoBridge = new LogoBridge(mProfile);
         updateSearchProviderHasLogo();
 
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_SNIPPETS)) {
+        if (SnippetsConfig.isEnabled()) {
             mSnippetsBridge = new SnippetsBridge(mProfile);
         }
 
         LayoutInflater inflater = LayoutInflater.from(activity);
-        mNewTabPageView = (NewTabPageView) inflater.inflate(R.layout.new_tab_page, null);
-        mNewTabPageView.initialize(mNewTabPageManager, mSearchProviderHasLogo,
-                mSnippetsBridge != null);
+        mNewTabPageView = (NewTabPageView) inflater.inflate(R.layout.new_tab_page_view, null);
+        mNewTabPageView.initialize(mNewTabPageManager, mSearchProviderHasLogo, mSnippetsBridge);
 
         RecordHistogram.recordBooleanHistogram(
                 "NewTabPage.MobileIsUserOnline", NetworkChangeNotifier.isOnline());
@@ -629,8 +707,10 @@ public class NewTabPage
             };
         }
         Context context = mNewTabPageView.getContext();
-        Snackbar snackbar = Snackbar.make(context.getString(R.string.most_visited_item_removed),
-                mMostVisitedItemRemovedController, Snackbar.TYPE_ACTION)
+        Snackbar snackbar = Snackbar
+                .make(context.getString(R.string.most_visited_item_removed),
+                        mMostVisitedItemRemovedController, Snackbar.TYPE_ACTION,
+                        Snackbar.UMA_NTP_MOST_VISITED_DELETE_UNDO)
                 .setAction(context.getString(R.string.undo), url);
         mTab.getSnackbarManager().showSnackbar(snackbar);
     }
@@ -639,6 +719,11 @@ public class NewTabPage
     @VisibleForTesting
     NewTabPageView getNewTabPageView() {
         return mNewTabPageView;
+    }
+
+    /** @return whether the NTP is using the cards UI. */
+    public boolean isCardsUiEnabled() {
+        return SnippetsConfig.isEnabled();
     }
 
     /**
@@ -679,16 +764,30 @@ public class NewTabPage
     /**
      * Get the bounds of the search box in relation to the top level NewTabPage view.
      *
-     * @param originalBounds The bounding region of the search box without external transforms
-     *                       applied.  The delta between this and the transformed bounds determines
-     *                       the amount of scroll applied to this view.
-     * @param transformedBounds The bounding region of the search box including any transforms
-     *                          applied by the parent view hierarchy up to the NewTabPage view.
-     *                          This more accurately reflects the current drawing location of the
-     *                          search box.
+     * @param bounds The current drawing location of the search box.
+     * @param translation The translation applied to the search box by the parent view hierarchy up
+     *                    to the NewTabPage view.
      */
-    public void getSearchBoxBounds(Rect originalBounds, Rect transformedBounds) {
-        mNewTabPageView.getSearchBoxBounds(originalBounds, transformedBounds);
+    public void getSearchBoxBounds(Rect bounds, Point translation) {
+        mNewTabPageView.getSearchBoxBounds(bounds, translation);
+    }
+
+    /**
+     * Updates the opacity of the search box when scrolling.
+     *
+     * @param alpha opacity (alpha) value to use.
+     */
+    public void setSearchBoxAlpha(float alpha) {
+        mNewTabPageView.setSearchBoxAlpha(alpha);
+    }
+
+    /**
+     * Updates the opacity of the search provider logo when scrolling.
+     *
+     * @param alpha opacity (alpha) value to use.
+     */
+    public void setSearchProviderLogoAlpha(float alpha) {
+        mNewTabPageView.setSearchProviderLogoAlpha(alpha);
     }
 
     /**
@@ -713,6 +812,13 @@ public class NewTabPage
         mFakeboxDelegate = fakeboxDelegate;
         if (mFakeboxDelegate != null) {
             mNewTabPageView.updateVoiceSearchButtonVisibility();
+
+            // The toolbar can't get the reference to the native page until its initialization is
+            // finished, so we can't cache it here and transfer it to the view later. We pull that
+            // state from the location bar when we get a reference to it as a workaround.
+            if (fakeboxDelegate.isUrlBarFocused()) {
+                mNewTabPageView.setUrlFocusChangeAnimationPercent(1f);
+            }
         }
     }
 
@@ -750,12 +856,10 @@ public class NewTabPage
     @Override
     public void destroy() {
         assert !mIsDestroyed;
-        assert getView().getParent() == null : "Destroy called before removed from window";
-        if (mIsVisible) recordNTPInteractionTime();
+        assert !ViewCompat
+                .isAttachedToWindow(getView()) : "Destroy called before removed from window";
+        if (mIsLoaded && !mTab.isHidden()) recordNTPInteractionTime();
 
-        if (mOfflinePageBridge != null) {
-            mOfflinePageBridge = null;
-        }
         if (mFaviconHelper != null) {
             mFaviconHelper.destroy();
             mFaviconHelper = null;
@@ -802,7 +906,14 @@ public class NewTabPage
 
     @Override
     public int getThemeColor() {
-        return isLocationBarShownInNTP() ? Color.WHITE : mThemeColor;
+        return isLocationBarShownInNTP()
+                ? NtpColorUtils.getBackgroundColorResource(mActivity.getResources(), false)
+                : mThemeColor;
+    }
+
+    @Override
+    public boolean needsToolbarShadow() {
+        return !mSearchProviderHasLogo;
     }
 
     @Override

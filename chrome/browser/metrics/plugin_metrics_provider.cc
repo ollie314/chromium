@@ -6,11 +6,13 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
+#include <utility>
 
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
@@ -141,14 +143,12 @@ void PluginMetricsProvider::ProvideStabilityMetrics(
 
   metrics::SystemProfileProto::Stability* stability =
       system_profile_proto->mutable_stability();
-  for (base::ListValue::const_iterator iter = plugin_stats_list->begin();
-       iter != plugin_stats_list->end(); ++iter) {
-    if (!(*iter)->IsType(base::Value::TYPE_DICTIONARY)) {
+  for (const auto& value : *plugin_stats_list) {
+    base::DictionaryValue* plugin_dict;
+    if (!value->GetAsDictionary(&plugin_dict)) {
       NOTREACHED();
       continue;
     }
-    base::DictionaryValue* plugin_dict =
-        static_cast<base::DictionaryValue*>(*iter);
 
     // Note that this search is potentially a quadratic operation, but given the
     // low number of plugins installed on a "reasonable" setup, this should be
@@ -210,15 +210,13 @@ void PluginMetricsProvider::RecordCurrentState() {
   base::ListValue* plugins = update.Get();
   DCHECK(plugins);
 
-  for (base::ListValue::iterator value_iter = plugins->begin();
-       value_iter != plugins->end(); ++value_iter) {
-    if (!(*value_iter)->IsType(base::Value::TYPE_DICTIONARY)) {
+  for (const auto& value : *plugins) {
+    base::DictionaryValue* plugin_dict;
+    if (!value->GetAsDictionary(&plugin_dict)) {
       NOTREACHED();
       continue;
     }
 
-    base::DictionaryValue* plugin_dict =
-        static_cast<base::DictionaryValue*>(*value_iter);
     base::string16 plugin_name;
     plugin_dict->GetString(prefs::kStabilityPluginName, &plugin_name);
     if (plugin_name.empty()) {
@@ -272,7 +270,8 @@ void PluginMetricsProvider::RecordCurrentState() {
     if (!IsPluginProcess(stats.process_type))
       continue;
 
-    base::DictionaryValue* plugin_dict = new base::DictionaryValue;
+    std::unique_ptr<base::DictionaryValue> plugin_dict(
+        new base::DictionaryValue);
 
     plugin_dict->SetString(prefs::kStabilityPluginName, cache_iter->first);
     plugin_dict->SetInteger(prefs::kStabilityPluginLaunches,
@@ -283,7 +282,7 @@ void PluginMetricsProvider::RecordCurrentState() {
                             stats.instances);
     plugin_dict->SetInteger(prefs::kStabilityPluginLoadingErrors,
                             stats.loading_errors);
-    plugins->Append(plugin_dict);
+    plugins->Append(std::move(plugin_dict));
   }
   child_process_stats_buffer_.clear();
 }
@@ -335,7 +334,7 @@ PluginMetricsProvider::ChildProcessStats&
 PluginMetricsProvider::GetChildProcessStats(
     const content::ChildProcessData& data) {
   const base::string16& child_name = data.name;
-  if (!ContainsKey(child_process_stats_buffer_, child_name)) {
+  if (!base::ContainsKey(child_process_stats_buffer_, child_name)) {
     child_process_stats_buffer_[child_name] =
         ChildProcessStats(data.process_type);
   }

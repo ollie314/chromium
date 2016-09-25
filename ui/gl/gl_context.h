@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/cancellation_flag.h"
+#include "ui/gl/gl_export.h"
 #include "ui/gl/gl_share_group.h"
 #include "ui/gl/gl_state_restorer.h"
 #include "ui/gl/gpu_preference.h"
@@ -25,12 +26,11 @@ namespace gpu {
 class GLContextVirtual;
 }  // namespace gpu
 
-namespace gfx {
+namespace gl {
 
 class GLSurface;
 class GPUTiming;
 class GPUTimingClient;
-class VirtualGLApi;
 struct GLVersionInfo;
 
 // Encapsulates an OpenGL context, hiding platform specific management.
@@ -59,7 +59,7 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   virtual void* GetHandle() = 0;
 
   // Creates a GPUTimingClient class which abstracts various GPU Timing exts.
-  virtual scoped_refptr<gfx::GPUTimingClient> CreateGPUTimingClient() = 0;
+  virtual scoped_refptr<GPUTimingClient> CreateGPUTimingClient() = 0;
 
   // Gets the GLStateRestorer for the context.
   GLStateRestorer* GetGLStateRestorer();
@@ -102,6 +102,7 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   // Create a GL context that is compatible with the given surface.
   // |share_group|, if non-NULL, is a group of contexts which the
   // internally created OpenGL context shares textures and other resources.
+  // DEPRECATED(kylechar): Use gl::init::CreateGLContext from gl_factory.h.
   static scoped_refptr<GLContext> CreateGLContext(
       GLShareGroup* share_group,
       GLSurface* compatible_surface,
@@ -113,9 +114,6 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   static GLContext* GetCurrent();
 
   virtual bool WasAllocatedUsingRobustnessExtension();
-
-  // Use this context for virtualization.
-  void SetupForVirtualization();
 
   // Make this context current when used for context virtualization.
   bool MakeVirtuallyCurrent(GLContext* virtual_context, GLSurface* surface);
@@ -131,7 +129,7 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   virtual std::string GetGLRenderer();
 
   // Returns a helper structure to convert YUV textures to RGB textures.
-  virtual gl::YUVToRGBConverter* GetYUVToRGBConverter();
+  virtual YUVToRGBConverter* GetYUVToRGBConverter();
 
  protected:
   virtual ~GLContext();
@@ -155,7 +153,7 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   // Initialize function pointers to functions where the bound version depends
   // on GL version or supported extensions. Should be called immediately after
   // this context is made current.
-  bool InitializeDynamicBindings();
+  void InitializeDynamicBindings();
 
   // Returns the last real (non-virtual) GLContext made current.
   static GLContext* GetRealCurrent();
@@ -166,11 +164,10 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
   friend class base::RefCounted<GLContext>;
 
   // For GetRealCurrent.
-  friend class VirtualGLApi;
   friend class gpu::GLContextVirtual;
 
   scoped_refptr<GLShareGroup> share_group_;
-  std::unique_ptr<VirtualGLApi> virtual_gl_api_;
+  GLContext* current_virtual_context_;
   bool state_dirtied_externally_;
   std::unique_ptr<GLStateRestorer> state_restorer_;
   std::unique_ptr<GLVersionInfo> version_info_;
@@ -184,7 +181,7 @@ class GL_EXPORT GLContext : public base::RefCounted<GLContext> {
 class GL_EXPORT GLContextReal : public GLContext {
  public:
   explicit GLContextReal(GLShareGroup* share_group);
-  scoped_refptr<gfx::GPUTimingClient> CreateGPUTimingClient() override;
+  scoped_refptr<GPUTimingClient> CreateGPUTimingClient() override;
 
  protected:
   ~GLContextReal() override;
@@ -192,10 +189,18 @@ class GL_EXPORT GLContextReal : public GLContext {
   void SetCurrent(GLSurface* surface) override;
 
  private:
-  std::unique_ptr<gfx::GPUTiming> gpu_timing_;
+  std::unique_ptr<GPUTiming> gpu_timing_;
   DISALLOW_COPY_AND_ASSIGN(GLContextReal);
 };
 
-}  // namespace gfx
+// Wraps GLContext in scoped_refptr and tries to initializes it. Returns a
+// scoped_refptr containing the initialized GLContext or nullptr if
+// initialization fails.
+GL_EXPORT scoped_refptr<GLContext> InitializeGLContext(
+    scoped_refptr<GLContext> context,
+    GLSurface* compatible_surface,
+    GpuPreference gpu_preference);
+
+}  // namespace gl
 
 #endif  // UI_GL_GL_CONTEXT_H_

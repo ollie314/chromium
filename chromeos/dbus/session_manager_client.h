@@ -15,6 +15,7 @@
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/dbus_client.h"
 #include "chromeos/dbus/dbus_client_implementation_type.h"
+#include "chromeos/dbus/dbus_method_call_status.h"
 
 namespace cryptohome {
 class Identification;
@@ -47,6 +48,11 @@ class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
 
     // Called after EmitLoginPromptVisible is called.
     virtual void EmitLoginPromptVisibleCalled() {}
+
+    // Called when the ARC instance is stopped after it had already started.
+    // |clean| is true if the instance was stopped as a result of an explicit
+    // request, false if it died unexpectedly.
+    virtual void ArcInstanceStopped(bool clean) {}
   };
 
   // Interface for performing actions on behalf of the stub implementation.
@@ -79,7 +85,15 @@ class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
   virtual void EmitLoginPromptVisible() = 0;
 
   // Restarts the browser job, passing |argv| as the updated command line.
-  virtual void RestartJob(const std::vector<std::string>& argv) = 0;
+  // The session manager requires a RestartJob caller to open a socket pair and
+  // pass one end while holding the local end open for the duration of the call.
+  // The session manager uses this to determine whether the PID the restart
+  // request originates from belongs to the browser itself.
+  // This method duplicates |socket_fd| so it's OK to close the FD without
+  // waiting for the result.
+  virtual void RestartJob(int socket_fd,
+                          const std::vector<std::string>& argv,
+                          const VoidDBusMethodCallback& callback) = 0;
 
   // Starts the session for the user.
   virtual void StartSession(
@@ -199,23 +213,54 @@ class CHROMEOS_EXPORT SessionManagerClient : public DBusClient {
   // will be invoked with an empty state key vector in case of errors.
   virtual void GetServerBackedStateKeys(const StateKeysCallback& callback) = 0;
 
-  // Used for CheckArcAvailability.  Takes a boolean indicating whether the
+  // Used for several ARC methods.  Takes a boolean indicating whether the
   // operation was successful or not.
   typedef base::Callback<void(bool)> ArcCallback;
 
+  // Used for GetArcStartTime. Takes a boolean indicating whether the
+  // operation was successful or not and the ticks of ARC start time if it
+  // is successful.
+  typedef base::Callback<void(bool success, base::TimeTicks ticks)>
+      GetArcStartTimeCallback;
+
   // Asynchronously checks if starting the ARC instance is available.
   // The result of the operation is reported through |callback|.
+  // If the operation fails, it is reported as unavailable.
   virtual void CheckArcAvailability(const ArcCallback& callback) = 0;
 
-  // Asynchronously starts the ARC instance using |socket_path| as the IPC
-  // socket for communication with the instance.  Upon completion, invokes
-  // |callback| with the result.
-  virtual void StartArcInstance(const std::string& socket_path,
+  // Asynchronously starts the ARC instance for the user whose cryptohome is
+  // located by |cryptohome_id|.  Upon completion, invokes |callback| with
+  // the result; true on success, false on failure (either session manager
+  // failed to start an instance or session manager can not be reached).
+  virtual void StartArcInstance(const cryptohome::Identification& cryptohome_id,
                                 const ArcCallback& callback) = 0;
 
   // Asynchronously stops the ARC instance.  Upon completion, invokes
-  // |callback| with the result.
+  // |callback| with the result; true on success, false on failure (either
+  // session manager failed to stop an instance or session manager can not be
+  // reached).
   virtual void StopArcInstance(const ArcCallback& callback) = 0;
+
+  // Prioritizes the ARC instance by removing cgroups restrictions that
+  // session_manager applies to the instance by default. Upon completion,
+  // invokes |callback| with the result; true on success, false on failure.
+  // Calling this multiple times is okay. Such calls except the first one
+  // will be ignored.
+  virtual void PrioritizeArcInstance(const ArcCallback& callback) = 0;
+
+  // Emits the "arc-booted" upstart signal.
+  virtual void EmitArcBooted() = 0;
+
+  // Asynchronously retrieves the timestamp which ARC instance is invoked or
+  // returns false if there is no ARC instance or ARC is not available.
+  virtual void GetArcStartTime(const GetArcStartTimeCallback& callback) = 0;
+
+  // Asynchronously removes all ARC user data for the user whose cryptohome is
+  // located by |cryptohome_id|. Upon completion, invokes |callback| with the
+  // result; true on success, false on failure (either session manager failed
+  // to remove user data or session manager can not be reached).
+  virtual void RemoveArcData(const cryptohome::Identification& cryptohome_id,
+                             const ArcCallback& callback) = 0;
 
   // Creates the instance.
   static SessionManagerClient* Create(DBusClientImplementationType type);

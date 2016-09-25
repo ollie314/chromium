@@ -9,6 +9,7 @@ import android.test.suitebuilder.annotation.SmallTest;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -67,6 +68,7 @@ public class PopupWindowTest extends AwTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @RetryOnFailure
     public void testOnPageFinishedCalledOnDomModificationAfterNavigation() throws Throwable {
         final String popupPath = "/popup.html";
         final String parentPageHtml = CommonResources.makeHtmlPageFrom("", "<script>"
@@ -77,19 +79,28 @@ public class PopupWindowTest extends AwTestBase {
                         + "  window.popupWindow.document.body.innerHTML = 'Hello from the parent!';"
                         + "}</script>");
 
+        final String popupPageHtml = CommonResources.makeHtmlPageFrom(
+                "<title>" + POPUP_TITLE + "</title>",
+                "This is a popup window");
+
         triggerPopup(mParentContents, mParentContentsClient, mWebServer, parentPageHtml,
-                null, popupPath, "tryOpenWindow()");
+                popupPageHtml, popupPath, "tryOpenWindow()");
+        PopupInfo popupInfo = connectPendingPopup(mParentContents);
+        assertEquals(POPUP_TITLE, getTitleOnUiThread(popupInfo.popupContents));
+
         TestCallbackHelperContainer.OnPageFinishedHelper onPageFinishedHelper =
-                connectPendingPopup(mParentContents).popupContentsClient.getOnPageFinishedHelper();
+                popupInfo.popupContentsClient.getOnPageFinishedHelper();
         final int onPageFinishedCallCount = onPageFinishedHelper.getCallCount();
+
         executeJavaScriptAndWaitForResult(mParentContents, mParentContentsClient,
                 "modifyDomOfPopup()");
+        // Test that |waitForCallback| does not time out.
         onPageFinishedHelper.waitForCallback(onPageFinishedCallCount);
-        assertEquals("about:blank", onPageFinishedHelper.getUrl());
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @RetryOnFailure
     public void testPopupWindowTextHandle() throws Throwable {
         final String popupPath = "/popup.html";
         final String parentPageHtml = CommonResources.makeHtmlPageFrom("", "<script>"

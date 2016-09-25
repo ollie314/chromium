@@ -6,15 +6,15 @@ cr.define('chrome.popular_sites_internals', function() {
   'use strict';
 
   function initialize() {
-    function submitDownload(event) {
+    function submitUpdate(event) {
       $('download-result').textContent = '';
-      chrome.send('download', [$('url-input').value,
-                               $('country-input').value,
-                               $('version-input').value]);
+      chrome.send('update', [$('override-url').value,
+                             $('override-country').value,
+                             $('override-version').value]);
       event.preventDefault();
     }
 
-    $('submit-download').addEventListener('click', submitDownload);
+    $('submit-update').addEventListener('click', submitUpdate);
 
     function viewJson(event) {
       $('json-value').textContent = '';
@@ -25,6 +25,12 @@ cr.define('chrome.popular_sites_internals', function() {
     $('view-json').addEventListener('click', viewJson);
 
     chrome.send('registerForEvents');
+  }
+
+  function receiveOverrides(url, country, version) {
+    $('override-url').value = url;
+    $('override-country').value = country;
+    $('override-version').value = version;
   }
 
   function receiveDownloadResult(result) {
@@ -44,6 +50,7 @@ cr.define('chrome.popular_sites_internals', function() {
   // Return an object with all of the exports.
   return {
     initialize: initialize,
+    receiveOverrides: receiveOverrides,
     receiveDownloadResult: receiveDownloadResult,
     receiveSites: receiveSites,
     receiveJson: receiveJson,

@@ -4,27 +4,32 @@
 
 #include "platform/animation/CompositorTransformKeyframe.h"
 
+#include <memory>
+
 namespace blink {
 
-CompositorTransformKeyframe::CompositorTransformKeyframe(double time, PassOwnPtr<CompositorTransformOperations> value)
-    : m_time(time)
-    , m_value(std::move(value))
+CompositorTransformKeyframe::CompositorTransformKeyframe(double time, CompositorTransformOperations value, const TimingFunction& timingFunction)
+    : m_transformKeyframe(cc::TransformKeyframe::Create(base::TimeDelta::FromSecondsD(time), value.releaseCcTransformOperations(), timingFunction.cloneToCC()))
 {
 }
 
 CompositorTransformKeyframe::~CompositorTransformKeyframe()
 {
-    m_value.clear();
 }
 
 double CompositorTransformKeyframe::time() const
 {
-    return m_time;
+    return m_transformKeyframe->Time().InSecondsF();
 }
 
-const CompositorTransformOperations& CompositorTransformKeyframe::value() const
+const cc::TimingFunction* CompositorTransformKeyframe::ccTimingFunction() const
 {
-    return *m_value.get();
+    return m_transformKeyframe->timing_function();
+}
+
+std::unique_ptr<cc::TransformKeyframe> CompositorTransformKeyframe::cloneToCC() const
+{
+    return m_transformKeyframe->Clone();
 }
 
 } // namespace blink

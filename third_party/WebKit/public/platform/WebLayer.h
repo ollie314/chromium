@@ -31,6 +31,7 @@
 #include "WebCommon.h"
 #include "WebDoublePoint.h"
 #include "WebFloatPoint3D.h"
+#include "WebFloatSize.h"
 #include "WebPoint.h"
 #include "WebRect.h"
 #include "WebSize.h"
@@ -44,6 +45,7 @@ namespace cc {
 class Layer;
 class LayerClient;
 class FilterOperations;
+struct ElementId;
 }
 
 namespace blink {
@@ -51,6 +53,7 @@ namespace blink {
 class WebLayerScrollClient;
 struct WebFloatPoint;
 struct WebLayerPositionConstraint;
+struct WebLayerStickyPositionConstraint;
 
 class WebLayer {
 public:
@@ -134,6 +137,9 @@ public:
     // FilterOperations object.
     virtual void setFilters(const cc::FilterOperations&) = 0;
 
+    // The position of the original primitive inside the total bounds.
+    virtual void setFiltersOrigin(const WebFloatPoint&) = 0;
+
     // Clear the background filters in use by passing in a newly instantiated
     // FilterOperations object.
     // TODO(loyso): This should use CompositorFilterOperation. crbug.com/584551
@@ -183,16 +189,17 @@ public:
     virtual void setPositionConstraint(const WebLayerPositionConstraint&) = 0;
     virtual WebLayerPositionConstraint positionConstraint() const = 0;
 
+    // Sets the sticky position constraint. This will be used to adjust sticky
+    // position objects during threaded scrolling.
+    virtual void setStickyPositionConstraint(const WebLayerStickyPositionConstraint&) = 0;
+    virtual WebLayerStickyPositionConstraint stickyPositionConstraint() const = 0;
+
     // The scroll client is notified when the scroll position of the WebLayer
     // changes. Only a single scroll client can be set for a WebLayer at a time.
     // The WebLayer does not take ownership of the scroll client, and it is the
     // responsibility of the client to reset the layer's scroll client before
     // deleting the scroll client.
     virtual void setScrollClient(WebLayerScrollClient*) = 0;
-
-    // Forces this layer to use a render surface. There is no benefit in doing
-    // so, but this is to facilitate benchmarks and tests.
-    virtual void setForceRenderSurface(bool) = 0;
 
     // Sets the cc-side layer client.
     virtual void setLayerClient(cc::LayerClient*) = 0;
@@ -201,11 +208,13 @@ public:
     virtual const cc::Layer* ccLayer() const = 0;
     virtual cc::Layer* ccLayer() = 0;
 
-    virtual void setElementId(uint64_t) = 0;
-    virtual uint64_t elementId() const = 0;
+    virtual void setElementId(const cc::ElementId&) = 0;
+    virtual cc::ElementId elementId() const = 0;
 
     virtual void setCompositorMutableProperties(uint32_t) = 0;
     virtual uint32_t compositorMutableProperties() const = 0;
+
+    virtual void setHasWillChangeTransformHint(bool) = 0;
 };
 
 } // namespace blink

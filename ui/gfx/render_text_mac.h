@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 
-#include "base/gtest_prod_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/macros.h"
 #include "ui/gfx/gfx_export.h"
@@ -60,7 +59,7 @@ class GFX_EXPORT RenderTextMac : public RenderText {
   void DrawVisualText(internal::SkiaTextRenderer* renderer) override;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, Mac_ElidedText);
+  friend class RenderTextMacTest;
 
   struct TextRun {
     CTRunRef ct_run;
@@ -68,14 +67,16 @@ class GFX_EXPORT RenderTextMac : public RenderText {
     std::vector<uint16_t> glyphs;
     std::vector<SkPoint> glyph_positions;
     SkScalar width;
-    Font font;
+    base::ScopedCFTypeRef<CTFontRef> ct_font;
+    sk_sp<SkTypeface> typeface;
     SkColor foreground;
     bool underline;
     bool strike;
     bool diagonal_strike;
 
     TextRun();
-    TextRun(const TextRun& other);
+    TextRun(const TextRun& other) = delete;
+    TextRun(TextRun&& other);
     ~TextRun();
   };
 

@@ -6,7 +6,7 @@
 #include <Foundation/Foundation.h>
 
 #include "base/macros.h"
-#import "ios/web/test/web_test.h"
+#import "ios/web/public/test/web_test_with_web_state.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
 
@@ -27,7 +27,7 @@ struct TextFieldTestElement {
 namespace web {
 
 // Test fixture to test common.js.
-typedef web::WebTestWithWebController CommonJsTest;
+typedef web::WebTestWithWebState CommonJsTest;
 
 // Tests __gCrWeb.common.isTextField JavaScript API.
 TEST_F(CommonJsTest, IsTestField) {
@@ -77,11 +77,11 @@ TEST_F(CommonJsTest, IsTestField) {
       {"submit", 0, false}};
   for (size_t i = 0; i < arraysize(testElements); ++i) {
     TextFieldTestElement element = testElements[i];
-    NSString* result = EvaluateJavaScriptAsString([NSString
+    id result = ExecuteJavaScript([NSString
         stringWithFormat:@"__gCrWeb.common.isTextField("
                           "window.document.getElementsByName('%s')[%d])",
                          element.element_name, element.element_index]);
-    EXPECT_NSEQ(element.expected_is_text_field ? @"true" : @"false", result)
+    EXPECT_NSEQ(element.expected_is_text_field ? @YES : @NO, result)
         << element.element_name << " with index " << element.element_index
         << " isTextField(): " << element.expected_is_text_field;
   }

@@ -10,7 +10,6 @@ namespace blink {
 // Extension names are needed to properly wrap instances in JavaScript objects.
 enum WebGLExtensionName {
     ANGLEInstancedArraysName,
-    CHROMIUMSubscribeUniformName,
     EXTBlendMinMaxName,
     EXTColorBufferFloatName,
     EXTDisjointTimerQueryName,
@@ -27,9 +26,11 @@ enum WebGLExtensionName {
     OESVertexArrayObjectName,
     WebGLCompressedTextureASTCName,
     WebGLCompressedTextureATCName,
+    WebGLCompressedTextureES30Name,
     WebGLCompressedTextureETC1Name,
     WebGLCompressedTexturePVRTCName,
     WebGLCompressedTextureS3TCName,
+    WebGLCompressedTextureS3TCsRGBName,
     WebGLDebugRendererInfoName,
     WebGLDebugShadersName,
     WebGLDepthTextureName,

@@ -42,6 +42,7 @@
 #include "wtf/text/TextCodecUTF8.h"
 #include "wtf/text/TextCodecUserDefined.h"
 #include "wtf/text/TextEncoding.h"
+#include <memory>
 
 namespace WTF {
 
@@ -243,7 +244,7 @@ static void extendTextCodecMaps()
     pruneBlacklistedCodecs();
 }
 
-PassOwnPtr<TextCodec> newTextCodec(const TextEncoding& encoding)
+std::unique_ptr<TextCodec> newTextCodec(const TextEncoding& encoding)
 {
     MutexLocker lock(encodingRegistryMutex());
 
@@ -292,7 +293,7 @@ const char* atomicCanonicalTextEncodingName(const String& alias)
     if (!alias.length())
         return 0;
 
-    if (alias.contains(static_cast<UChar>('\0')))
+    if (alias.contains('\0'))
         return 0;
 
     if (alias.is8Bit())

@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ui/base/material_design/material_design_controller.h"
+
 #include <string>
 
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/trace_event/trace_event.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_CHROMEOS)
@@ -18,6 +19,7 @@
 #include <fcntl.h>
 
 #include "base/files/file_enumerator.h"
+#include "base/threading/thread_restrictions.h"
 #include "ui/events/ozone/evdev/event_device_info.h"
 #endif  // defined(USE_OZONE)
 
@@ -28,25 +30,22 @@ namespace ui {
 bool MaterialDesignController::is_mode_initialized_ = false;
 
 MaterialDesignController::Mode MaterialDesignController::mode_ =
-    MaterialDesignController::Mode::NON_MATERIAL;
+    MaterialDesignController::MATERIAL_NORMAL;
+
+bool MaterialDesignController::include_secondary_ui_ = false;
 
 // static
 void MaterialDesignController::Initialize() {
   TRACE_EVENT0("startup", "MaterialDesignController::InitializeMode");
   CHECK(!is_mode_initialized_);
-#if !defined(ENABLE_TOPCHROME_MD)
-  SetMode(Mode::NON_MATERIAL);
-#else
   const std::string switch_value =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kTopChromeMD);
 
   if (switch_value == switches::kTopChromeMDMaterial) {
-    SetMode(Mode::MATERIAL_NORMAL);
+    SetMode(MATERIAL_NORMAL);
   } else if (switch_value == switches::kTopChromeMDMaterialHybrid) {
-    SetMode(Mode::MATERIAL_HYBRID);
-  } else if (switch_value == switches::kTopChromeMDNonMaterial) {
-    SetMode(Mode::NON_MATERIAL);
+    SetMode(MATERIAL_HYBRID);
   } else {
     if (!switch_value.empty()) {
       LOG(ERROR) << "Invalid value='" << switch_value
@@ -55,7 +54,9 @@ void MaterialDesignController::Initialize() {
     }
     SetMode(DefaultMode());
   }
-#endif  // !defined(ENABLE_TOPCHROME_MD)
+
+  include_secondary_ui_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kExtendMdToSecondaryUi);
 }
 
 // static
@@ -66,20 +67,30 @@ MaterialDesignController::Mode MaterialDesignController::GetMode() {
 
 // static
 bool MaterialDesignController::IsModeMaterial() {
-  return GetMode() == Mode::MATERIAL_NORMAL ||
-         GetMode() == Mode::MATERIAL_HYBRID;
+  return true;
+}
+
+// static
+bool MaterialDesignController::IsSecondaryUiMaterial() {
+  return IsModeMaterial() && include_secondary_ui_;
 }
 
 // static
 MaterialDesignController::Mode MaterialDesignController::DefaultMode() {
 #if defined(OS_CHROMEOS)
+  // If a scan of available devices has already completed, use material-hybrid
+  // if a touchscreen is present.
   if (DeviceDataManager::HasInstance() &&
-      DeviceDataManager::GetInstance()->device_lists_complete()) {
-    return GetTouchScreensAvailability() == TouchScreensAvailability::ENABLED ?
-        Mode::MATERIAL_HYBRID : Mode::MATERIAL_NORMAL;
+      DeviceDataManager::GetInstance()->AreDeviceListsComplete()) {
+    return GetTouchScreensAvailability() == TouchScreensAvailability::ENABLED
+               ? MATERIAL_HYBRID
+               : MATERIAL_NORMAL;
   }
 
 #if defined(USE_OZONE)
+  // Otherwise perform our own scan to determine the presence of a touchscreen.
+  // Note this is a one-time call that occurs during device startup or restart.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   base::FileEnumerator file_enum(
       base::FilePath(FILE_PATH_LITERAL("/dev/input")), false,
       base::FileEnumerator::FILES, FILE_PATH_LITERAL("event*[0-9]"));
@@ -90,18 +101,15 @@ MaterialDesignController::Mode MaterialDesignController::DefaultMode() {
     if (fd >= 0) {
       if (devinfo.Initialize(fd, path) && devinfo.HasTouchscreen()) {
         close(fd);
-        return Mode::MATERIAL_HYBRID;
+        return MATERIAL_HYBRID;
       }
       close(fd);
     }
   }
 #endif  // defined(USE_OZONE)
-  return Mode::MATERIAL_NORMAL;
-#elif defined(OS_LINUX)
-  return Mode::MATERIAL_NORMAL;
-#else
-  return Mode::NON_MATERIAL;
 #endif  // defined(OS_CHROMEOS)
+
+  return MATERIAL_NORMAL;
 }
 
 // static

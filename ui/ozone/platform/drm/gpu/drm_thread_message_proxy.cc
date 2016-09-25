@@ -4,7 +4,7 @@
 
 #include "ui/ozone/platform/drm/gpu/drm_thread_message_proxy.h"
 
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_sender.h"
 #include "ui/ozone/common/gpu/ozone_gpu_messages.h"
@@ -21,8 +21,8 @@ void DrmThreadMessageProxy::SetDrmThread(DrmThread* thread) {
   drm_thread_ = thread;
 }
 
-void DrmThreadMessageProxy::OnFilterAdded(IPC::Sender* sender) {
-  sender_ = sender;
+void DrmThreadMessageProxy::OnFilterAdded(IPC::Channel* channel) {
+  sender_ = channel;
 
   // The DRM thread needs to be started late since we need to wait for the
   // sandbox to start.

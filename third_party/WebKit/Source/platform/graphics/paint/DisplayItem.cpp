@@ -9,7 +9,7 @@ namespace blink {
 struct SameSizeAsDisplayItem {
     virtual ~SameSizeAsDisplayItem() { } // Allocate vtable pointer.
     void* pointer;
-    int ints[2]; // Make sure other fields are packed into two ints.
+    int i;
 #ifndef NDEBUG
     WTF::String m_debugString;
 #endif
@@ -33,7 +33,7 @@ static WTF::String paintPhaseAsDebugString(int paintPhase)
     case 8: return "PaintPhaseSelection";
     case 9: return "PaintPhaseTextClip";
     case 10: return "PaintPhaseMask";
-    case DisplayItem::PaintPhaseMax: return "PaintPhaseClippingMask";
+    case DisplayItem::kPaintPhaseMax: return "PaintPhaseClippingMask";
     default:
         ASSERT_NOT_REACHED();
         return "Unknown";
@@ -41,20 +41,20 @@ static WTF::String paintPhaseAsDebugString(int paintPhase)
 }
 
 #define PAINT_PHASE_BASED_DEBUG_STRINGS(Category) \
-    if (type >= DisplayItem::Category##PaintPhaseFirst && type <= DisplayItem::Category##PaintPhaseLast) \
-        return #Category + paintPhaseAsDebugString(type - DisplayItem::Category##PaintPhaseFirst);
+    if (type >= DisplayItem::k##Category##PaintPhaseFirst && type <= DisplayItem::k##Category##PaintPhaseLast) \
+        return #Category + paintPhaseAsDebugString(type - DisplayItem::k##Category##PaintPhaseFirst);
 
 #define DEBUG_STRING_CASE(DisplayItemName) \
-    case DisplayItem::DisplayItemName: return #DisplayItemName
+    case DisplayItem::k##DisplayItemName: return #DisplayItemName
 
 #define DEFAULT_CASE default: ASSERT_NOT_REACHED(); return "Unknown"
 
 static WTF::String specialDrawingTypeAsDebugString(DisplayItem::Type type)
 {
-    if (type >= DisplayItem::TableCollapsedBorderUnalignedBase) {
-        if (type <= DisplayItem::TableCollapsedBorderBase)
+    if (type >= DisplayItem::kTableCollapsedBorderUnalignedBase) {
+        if (type <= DisplayItem::kTableCollapsedBorderBase)
             return "TableCollapsedBorderAlignment";
-        if (type <= DisplayItem::TableCollapsedBorderLast) {
+        if (type <= DisplayItem::kTableCollapsedBorderLast) {
             StringBuilder sb;
             sb.append("TableCollapsedBorder");
             if (type & DisplayItem::TableCollapsedBorderTop)
@@ -72,11 +72,13 @@ static WTF::String specialDrawingTypeAsDebugString(DisplayItem::Type type)
         DEBUG_STRING_CASE(BoxDecorationBackground);
         DEBUG_STRING_CASE(Caret);
         DEBUG_STRING_CASE(ColumnRules);
-        DEBUG_STRING_CASE(DebugRedFill);
+        DEBUG_STRING_CASE(DebugDrawing);
         DEBUG_STRING_CASE(DocumentBackground);
         DEBUG_STRING_CASE(DragImage);
+        DEBUG_STRING_CASE(DragCaret);
         DEBUG_STRING_CASE(SVGImage);
         DEBUG_STRING_CASE(LinkHighlight);
+        DEBUG_STRING_CASE(ImageAreaFocusRing);
         DEBUG_STRING_CASE(PageOverlay);
         DEBUG_STRING_CASE(PageWidgetDelegateBackgroundFallback);
         DEBUG_STRING_CASE(PopupContainerBorder);
@@ -107,9 +109,14 @@ static WTF::String specialDrawingTypeAsDebugString(DisplayItem::Type type)
         DEBUG_STRING_CASE(TableCellBackgroundFromColumn);
         DEBUG_STRING_CASE(TableCellBackgroundFromSection);
         DEBUG_STRING_CASE(TableCellBackgroundFromRow);
+        DEBUG_STRING_CASE(TableSectionBoxShadowInset);
+        DEBUG_STRING_CASE(TableSectionBoxShadowNormal);
+        DEBUG_STRING_CASE(TableRowBoxShadowInset);
+        DEBUG_STRING_CASE(TableRowBoxShadowNormal);
         DEBUG_STRING_CASE(VideoBitmap);
         DEBUG_STRING_CASE(WebPlugin);
         DEBUG_STRING_CASE(WebFont);
+        DEBUG_STRING_CASE(ReflectionMask);
 
         DEFAULT_CASE;
     }
@@ -124,7 +131,9 @@ static WTF::String drawingTypeAsDebugString(DisplayItem::Type type)
 static String foreignLayerTypeAsDebugString(DisplayItem::Type type)
 {
     switch (type) {
+        DEBUG_STRING_CASE(ForeignLayerCanvas);
         DEBUG_STRING_CASE(ForeignLayerPlugin);
+        DEBUG_STRING_CASE(ForeignLayerVideo);
         DEFAULT_CASE;
     }
 }
@@ -176,8 +185,6 @@ WTF::String DisplayItem::typeAsDebugString(Type type)
 {
     if (isDrawingType(type))
         return drawingTypeAsDebugString(type);
-    if (isCachedDrawingType(type))
-        return "Cached" + drawingTypeAsDebugString(cachedDrawingTypeToDrawingType(type));
 
     if (isForeignLayerType(type))
         return foreignLayerTypeAsDebugString(type);
@@ -186,9 +193,6 @@ WTF::String DisplayItem::typeAsDebugString(Type type)
         return clipTypeAsDebugString(type);
     if (isEndClipType(type))
         return "End" + clipTypeAsDebugString(endClipTypeToClipType(type));
-
-    if (type == UninitializedType)
-        return "UninitializedType";
 
     PAINT_PHASE_BASED_DEBUG_STRINGS(FloatClip);
     if (isEndFloatClipType(type))
@@ -215,7 +219,6 @@ WTF::String DisplayItem::typeAsDebugString(Type type)
         DEBUG_STRING_CASE(EndClipPath);
         DEBUG_STRING_CASE(Subsequence);
         DEBUG_STRING_CASE(EndSubsequence);
-        DEBUG_STRING_CASE(CachedSubsequence);
         DEBUG_STRING_CASE(UninitializedType);
         DEFAULT_CASE;
     }
@@ -249,8 +252,6 @@ void DisplayItem::dumpPropertiesAsDebugString(WTF::StringBuilder& stringBuilder)
     stringBuilder.append('"');
     if (m_skippedCache)
         stringBuilder.append(", skippedCache: true");
-    if (m_scope)
-        stringBuilder.append(String::format(", scope: %d", m_scope));
 }
 
 #endif

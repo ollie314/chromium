@@ -11,7 +11,6 @@
 
 #include "base/strings/stringprintf.h"
 #include "cc/output/output_surface.h"
-#include "cc/output/renderer.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/resources/platform_color.h"
@@ -111,7 +110,8 @@ bool TextureLayerImpl::WillDraw(DrawMode draw_mode,
     if (!texture_copy_->id()) {
       texture_copy_->Allocate(texture_mailbox_.size_in_pixels(),
                               ResourceProvider::TEXTURE_HINT_IMMUTABLE,
-                              resource_provider->best_texture_format());
+                              resource_provider->best_texture_format(),
+                              gfx::ColorSpace());
     }
 
     if (texture_copy_->id()) {
@@ -165,25 +165,22 @@ void TextureLayerImpl::AppendQuads(RenderPass* render_pass,
   if (visible_quad_rect.IsEmpty())
     return;
 
-  if (!texture_mailbox_.secure_output_only() ||
-      (layer_tree_impl()->OutputIsSecure() && !InsideCopyRequest())) {
-    TextureDrawQuad* quad =
-        render_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
-    ResourceId id =
-        valid_texture_copy_ ? texture_copy_->id() : external_texture_resource_;
-    quad->SetNew(shared_quad_state, quad_rect, opaque_rect, visible_quad_rect,
-                 id, premultiplied_alpha_, uv_top_left_, uv_bottom_right_,
-                 bg_color, vertex_opacity_, flipped_, nearest_neighbor_);
-    if (!valid_texture_copy_) {
-      quad->set_resource_size_in_pixels(texture_mailbox_.size_in_pixels());
-    }
-    ValidateQuadResources(quad);
-  } else {
-    SolidColorDrawQuad* quad =
-        render_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
-    quad->SetNew(shared_quad_state, quad_rect, visible_quad_rect, SK_ColorBLACK,
-                 false);
+  if (!vertex_opacity_[0] && !vertex_opacity_[1] && !vertex_opacity_[2] &&
+      !vertex_opacity_[3])
+    return;
+
+  TextureDrawQuad* quad =
+      render_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
+  ResourceId id =
+      valid_texture_copy_ ? texture_copy_->id() : external_texture_resource_;
+  quad->SetNew(shared_quad_state, quad_rect, opaque_rect, visible_quad_rect, id,
+               premultiplied_alpha_, uv_top_left_, uv_bottom_right_, bg_color,
+               vertex_opacity_, flipped_, nearest_neighbor_,
+               texture_mailbox_.secure_output_only());
+  if (!valid_texture_copy_) {
+    quad->set_resource_size_in_pixels(texture_mailbox_.size_in_pixels());
   }
+  ValidateQuadResources(quad);
 }
 
 SimpleEnclosedRegion TextureLayerImpl::VisibleOpaqueRegion() const {

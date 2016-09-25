@@ -14,14 +14,16 @@
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "base/run_loop.h"
+#include "base/test/test_discardable_memory_allocator.h"
 #include "build/build_config.h"
+#include "cc/surfaces/surface_manager.h"
 #include "ui/base/ime/input_method_initializer.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/compositor/test/in_process_context_factory.h"
-#include "ui/gfx/screen.h"
-#include "ui/gl/gl_surface.h"
+#include "ui/display/screen.h"
+#include "ui/gl/init/gl_factory.h"
 #include "ui/views/examples/example_base.h"
 #include "ui/views/examples/examples_window.h"
 #include "ui/views/test/desktop_test_views_delegate.h"
@@ -44,6 +46,9 @@
 #include "ui/gfx/x/x11_connection.h"  // nogncheck
 #endif
 
+base::LazyInstance<base::TestDiscardableMemoryAllocator>
+    g_discardable_memory_allocator = LAZY_INSTANCE_INITIALIZER;
+
 int main(int argc, char** argv) {
 #if defined(OS_WIN)
   ui::ScopedOleInitializer ole_initializer_;
@@ -59,12 +64,14 @@ int main(int argc, char** argv) {
   gfx::InitializeThreadedX11();
 #endif
 
-  gfx::GLSurface::InitializeOneOff();
+  gl::init::InitializeGLOneOff();
 
   // The ContextFactory must exist before any Compositors are created.
   bool context_factory_for_test = false;
+  cc::SurfaceManager surface_manager;
   std::unique_ptr<ui::InProcessContextFactory> context_factory(
-      new ui::InProcessContextFactory(context_factory_for_test, nullptr));
+      new ui::InProcessContextFactory(context_factory_for_test,
+                                      &surface_manager));
   context_factory->set_use_test_surface(false);
 
   base::MessageLoopForUI message_loop;
@@ -77,11 +84,14 @@ int main(int argc, char** argv) {
   CHECK(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
   ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
 
+  base::DiscardableMemoryAllocator::SetInstance(
+      g_discardable_memory_allocator.Pointer());
+
   base::PowerMonitor power_monitor(
       base::WrapUnique(new base::PowerMonitorDeviceSource));
 
 #if defined(OS_WIN)
-    gfx::win::MaybeInitializeDirectWrite();
+  gfx::win::MaybeInitializeDirectWrite();
 #endif
 
 #if defined(USE_AURA)
@@ -97,13 +107,13 @@ int main(int argc, char** argv) {
     wm::WMState wm_state;
 #endif
 #if !defined(OS_CHROMEOS) && defined(USE_AURA)
-    std::unique_ptr<gfx::Screen> desktop_screen(views::CreateDesktopScreen());
-    gfx::Screen::SetScreenInstance(desktop_screen.get());
+    std::unique_ptr<display::Screen> desktop_screen(
+        views::CreateDesktopScreen());
+    display::Screen::SetScreenInstance(desktop_screen.get());
 #endif
 
-    views::examples::ShowExamplesWindow(
-        views::examples::QUIT_ON_CLOSE, nullptr,
-        std::unique_ptr<ScopedVector<views::examples::ExampleBase>>());
+    views::examples::ShowExamplesWindow(views::examples::QUIT_ON_CLOSE, nullptr,
+                                        nullptr);
 
     base::RunLoop().Run();
 

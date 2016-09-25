@@ -41,6 +41,39 @@ class TestURLFetcherCallback {
   MOCK_METHOD1(OnRequestDone, void(const GURL&));
 };
 
+// A Widget observer class used to observe bubbles closing.
+class BubbleCloseObserver : public views::WidgetObserver {
+ public:
+  explicit BubbleCloseObserver(views::DialogDelegateView* bubble);
+  ~BubbleCloseObserver() override;
+
+  bool widget_closed() const { return !widget_; }
+
+ private:
+  // WidgetObserver:
+  void OnWidgetClosing(views::Widget* widget) override;
+
+  views::Widget* widget_;
+
+  DISALLOW_COPY_AND_ASSIGN(BubbleCloseObserver);
+};
+
+BubbleCloseObserver::BubbleCloseObserver(views::DialogDelegateView* bubble)
+    : widget_(bubble->GetWidget()) {
+  widget_->AddObserver(this);
+}
+
+BubbleCloseObserver::~BubbleCloseObserver() {
+  if (widget_)
+    widget_->RemoveObserver(this);
+}
+
+void BubbleCloseObserver::OnWidgetClosing(views::Widget* widget) {
+  DCHECK_EQ(widget_, widget);
+  widget_->RemoveObserver(this);
+  widget_ = nullptr;
+}
+
 // ManagePasswordsUIController subclass to capture the dialog instance
 class TestManagePasswordsUIController : public ManagePasswordsUIController {
  public:
@@ -138,7 +171,8 @@ void PasswordDialogViewTest::SetupChooseCredentials(
     const GURL& origin) {
   client()->PromptUserToChooseCredentials(
       std::move(local_credentials), std::move(federated_credentials), origin,
-      base::Bind(&PasswordDialogViewTest::OnChooseCredential, this));
+      base::Bind(&PasswordDialogViewTest::OnChooseCredential,
+                 base::Unretained(this)));
   EXPECT_EQ(password_manager::ui::CREDENTIAL_REQUEST_STATE,
             controller()->GetState());
 }
@@ -257,6 +291,27 @@ IN_PROC_BROWSER_TEST_F(PasswordDialogViewTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PasswordDialogViewTest,
+                       PopupAccountChooserWithSingleCredentialClickSignIn) {
+  GURL origin("https://example.com");
+  ScopedVector<autofill::PasswordForm> local_credentials;
+  autofill::PasswordForm form;
+  form.origin = origin;
+  form.display_name = base::ASCIIToUTF16("Peter");
+  form.username_value = base::ASCIIToUTF16("peter@pan.test");
+  local_credentials.push_back(new autofill::PasswordForm(form));
+
+  SetupChooseCredentials(std::move(local_credentials),
+                         ScopedVector<autofill::PasswordForm>(), origin);
+
+  EXPECT_TRUE(controller()->current_account_chooser());
+  views::DialogDelegateView* dialog = controller()->current_account_chooser();
+  BubbleCloseObserver bubble_observer(dialog);
+  EXPECT_CALL(*this, OnChooseCredential(testing::Pointee(form)));
+  dialog->Accept();
+  EXPECT_TRUE(bubble_observer.widget_closed());
+}
+
+IN_PROC_BROWSER_TEST_F(PasswordDialogViewTest,
                        PopupAccountChooserWithSingleCredentialReturnNonEmpty) {
   GURL origin("https://example.com");
   ScopedVector<autofill::PasswordForm> local_credentials;
@@ -336,7 +391,8 @@ IN_PROC_BROWSER_TEST_F(PasswordDialogViewTest,
   client->PromptUserToChooseCredentials(
       std::move(local_credentials), ScopedVector<autofill::PasswordForm>(),
       origin,
-      base::Bind(&PasswordDialogViewTest::OnChooseCredential, this));
+      base::Bind(&PasswordDialogViewTest::OnChooseCredential,
+                 base::Unretained(this)));
   EXPECT_EQ(password_manager::ui::CREDENTIAL_REQUEST_STATE,
             controller()->GetState());
   EXPECT_TRUE(controller()->current_account_chooser());
@@ -358,9 +414,11 @@ IN_PROC_BROWSER_TEST_F(PasswordDialogViewTest, PopupAutoSigninPrompt) {
   EXPECT_EQ(password_manager::ui::INACTIVE_STATE, controller()->GetState());
   AutoSigninFirstRunDialogView* dialog =
       controller()->current_autosignin_prompt();
+  BubbleCloseObserver bubble_observer(dialog);
   ui::Accelerator esc(ui::VKEY_ESCAPE, 0);
   EXPECT_CALL(*controller(), OnDialogClosed());
   EXPECT_TRUE(dialog->GetWidget()->client_view()->AcceleratorPressed(esc));
+  EXPECT_TRUE(bubble_observer.widget_closed());
   content::RunAllPendingInMessageLoop();
   testing::Mock::VerifyAndClearExpectations(controller());
   EXPECT_TRUE(

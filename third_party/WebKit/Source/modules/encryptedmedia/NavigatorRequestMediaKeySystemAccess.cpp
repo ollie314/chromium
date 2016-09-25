@@ -10,7 +10,6 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/frame/Deprecation.h"
-#include "core/frame/OriginsUsingFeatures.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "modules/encryptedmedia/EncryptedMediaUtils.h"
 #include "modules/encryptedmedia/MediaKeySession.h"
@@ -18,15 +17,16 @@
 #include "modules/encryptedmedia/MediaKeysController.h"
 #include "platform/EncryptedMediaRequest.h"
 #include "platform/Histogram.h"
-#include "platform/Logging.h"
 #include "platform/network/ParsedContentType.h"
 #include "public/platform/WebEncryptedMediaClient.h"
 #include "public/platform/WebEncryptedMediaRequest.h"
 #include "public/platform/WebMediaKeySystemConfiguration.h"
 #include "public/platform/WebMediaKeySystemMediaCapability.h"
 #include "public/platform/WebVector.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
+#include <algorithm>
 
 namespace blink {
 
@@ -67,7 +67,7 @@ static WebMediaKeySystemConfiguration::Requirement convertMediaKeysRequirement(c
         return WebMediaKeySystemConfiguration::Requirement::NotAllowed;
 
     // Everything else gets the default value.
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return WebMediaKeySystemConfiguration::Requirement::Optional;
 }
 
@@ -77,6 +77,11 @@ static WebVector<WebEncryptedMediaSessionType> convertSessionTypes(const Vector<
     for (size_t i = 0; i < sessionTypes.size(); ++i)
         result[i] = EncryptedMediaUtils::convertToSessionType(sessionTypes[i]);
     return result;
+}
+
+static bool AreCodecsSpecified(const WebMediaKeySystemMediaCapability& capability)
+{
+    return !capability.codecs.isEmpty();
 }
 
 // This class allows capabilities to be checked and a MediaKeySystemAccess
@@ -111,6 +116,12 @@ private:
     // See http://crbug.com/482277
     void checkVideoCapabilityRobustness() const;
 
+    // Generate deprecation warning and log UseCounter if configuration
+    // contains only container-only contentType strings.
+    // TODO(jrummell): Remove once this is no longer allowed.
+    // See http://crbug.com/605661.
+    void checkEmptyCodecs(const WebMediaKeySystemConfiguration&);
+
     Member<ScriptPromiseResolver> m_resolver;
     const String m_keySystem;
     WebVector<WebMediaKeySystemConfiguration> m_supportedConfigurations;
@@ -136,9 +147,9 @@ MediaKeySystemAccessInitializer::MediaKeySystemAccessInitializer(ScriptState* sc
             webConfig.hasVideoCapabilities = true;
             webConfig.videoCapabilities = convertCapabilities(config.videoCapabilities());
         }
-        ASSERT(config.hasDistinctiveIdentifier());
+        DCHECK(config.hasDistinctiveIdentifier());
         webConfig.distinctiveIdentifier = convertMediaKeysRequirement(config.distinctiveIdentifier());
-        ASSERT(config.hasPersistentState());
+        DCHECK(config.hasPersistentState());
         webConfig.persistentState = convertMediaKeysRequirement(config.persistentState());
         if (config.hasSessionTypes()) {
             webConfig.hasSessionTypes = true;
@@ -154,7 +165,9 @@ MediaKeySystemAccessInitializer::MediaKeySystemAccessInitializer(ScriptState* sc
 
 void MediaKeySystemAccessInitializer::requestSucceeded(WebContentDecryptionModuleAccess* access)
 {
-    m_resolver->resolve(new MediaKeySystemAccess(m_keySystem, adoptPtr(access)));
+    checkEmptyCodecs(access->getConfiguration());
+
+    m_resolver->resolve(new MediaKeySystemAccess(m_keySystem, wrapUnique(access)));
     m_resolver.clear();
 }
 
@@ -202,6 +215,33 @@ void MediaKeySystemAccessInitializer::checkVideoCapabilityRobustness() const
     }
 }
 
+void MediaKeySystemAccessInitializer::checkEmptyCodecs(const WebMediaKeySystemConfiguration& config)
+{
+    // This is only checking for empty codecs in the selected configuration,
+    // as apps may pass container only contentType strings for compatibility
+    // with other implementations.
+    // This will only check that all returned capabilities do not contain
+    // codecs. This avoids alerting on configurations that will continue
+    // to succeed in the future once strict checking is enforced.
+    bool areAllAudioCodecsEmpty = false;
+    if (config.hasAudioCapabilities && !config.audioCapabilities.isEmpty()) {
+        areAllAudioCodecsEmpty = std::find_if(config.audioCapabilities.begin(), config.audioCapabilities.end(), AreCodecsSpecified)
+            == config.audioCapabilities.end();
+    }
+
+    bool areAllVideoCodecsEmpty = false;
+    if (config.hasVideoCapabilities && !config.videoCapabilities.isEmpty()) {
+        areAllVideoCodecsEmpty = std::find_if(config.videoCapabilities.begin(), config.videoCapabilities.end(), AreCodecsSpecified)
+            == config.videoCapabilities.end();
+    }
+
+    if (areAllAudioCodecsEmpty || areAllVideoCodecsEmpty) {
+        Deprecation::countDeprecation(m_resolver->getExecutionContext(), UseCounter::EncryptedMediaAllSelectedContentTypesMissingCodecs);
+    } else {
+        UseCounter::count(m_resolver->getExecutionContext(), UseCounter::EncryptedMediaAllSelectedContentTypesHaveCodecs);
+    }
+}
+
 } // namespace
 
 ScriptPromise NavigatorRequestMediaKeySystemAccess::requestMediaKeySystemAccess(
@@ -210,7 +250,7 @@ ScriptPromise NavigatorRequestMediaKeySystemAccess::requestMediaKeySystemAccess(
     const String& keySystem,
     const HeapVector<MediaKeySystemConfiguration>& supportedConfigurations)
 {
-    WTF_LOG(Media, "NavigatorRequestMediaKeySystemAccess::requestMediaKeySystemAccess()");
+    DVLOG(3) << __func__;
 
     // From https://w3c.github.io/encrypted-media/#requestMediaKeySystemAccess
     // When this method is invoked, the user agent must run the following steps:

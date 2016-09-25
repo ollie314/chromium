@@ -112,3 +112,35 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleTest, TabChangeTogglesIcon) {
   browser()->tab_strip_model()->ActivateTabAt(firstTab, true);
   EXPECT_TRUE(decoration()->IsVisible());
 }
+
+IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleTest, DoubleOpenBubble) {
+  // Open the bubble first.
+  DoWithSwizzledNSWindow(^{ SetupPendingPassword(); });
+  base::scoped_nsobject<ManagePasswordsBubbleController> bubble_controller(
+      [controller() retain]);
+  EXPECT_TRUE(bubble_controller);
+  EXPECT_TRUE(view()->active());
+
+  // Open the bubble again, the first one should be replaced.
+  DoWithSwizzledNSWindow(^{ SetupPendingPassword(); });
+  EXPECT_NSNE(bubble_controller, controller());
+  EXPECT_TRUE(controller());
+  EXPECT_TRUE(view()->active());
+}
+
+IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleTest, DoubleOpenDifferentBubbles) {
+  // Open the autosignin bubble first.
+  DoWithSwizzledNSWindow(^{
+    std::vector<std::unique_ptr<autofill::PasswordForm>> local_credentials;
+    local_credentials.emplace_back(new autofill::PasswordForm(*test_form()));
+    SetupAutoSignin(std::move(local_credentials));
+  });
+  EXPECT_TRUE(controller());
+  EXPECT_TRUE(view()->active());
+
+  // Open the save bubble. The previous one is closed twice (with and without
+  // animation). It shouldn't cause DCHECK.
+  DoWithSwizzledNSWindow(^{ SetupPendingPassword(); });
+  EXPECT_TRUE(controller());
+  EXPECT_TRUE(view()->active());
+}

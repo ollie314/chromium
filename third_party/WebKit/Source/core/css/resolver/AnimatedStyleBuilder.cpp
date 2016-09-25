@@ -287,7 +287,7 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
 {
     ASSERT(CSSPropertyMetadata::isInterpolableProperty(property));
     if (value->isUnknown()) {
-        StyleBuilder::applyProperty(property, state, toAnimatableUnknown(value)->toCSSValue());
+        StyleBuilder::applyProperty(property, state, *toAnimatableUnknown(value)->toCSSValue());
         return;
     }
     ComputedStyle* style = state.style();
@@ -542,7 +542,7 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
     case CSSPropertyWebkitBorderVerticalSpacing:
         style->setVerticalBorderSpacing(animatableValueClampTo<unsigned short>(value));
         return;
-    case CSSPropertyWebkitClipPath:
+    case CSSPropertyClipPath:
         style->setClipPath(toAnimatableClipPathOperation(value)->getClipPathOperation());
         return;
     case CSSPropertyColumnCount:
@@ -561,7 +561,7 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
     case CSSPropertyColumnRuleWidth:
         style->setColumnRuleWidth(animatableLineWidthClamp<unsigned short>(value));
         return;
-    case CSSPropertyWebkitFilter:
+    case CSSPropertyFilter:
         style->setFilter(toAnimatableFilterOperations(value)->operations());
         return;
     case CSSPropertyBackdropFilter:
@@ -641,13 +641,19 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
     case CSSPropertyTransformOrigin:
         style->setTransformOrigin(animatableValueToTransformOrigin(value, state));
         return;
-    case CSSPropertyMotionOffset:
-        style->setMotionOffset(animatableValueToLength(value, state));
+    case CSSPropertyOffsetAnchor:
+        style->setOffsetAnchor(animatableValueToLengthPoint(value, state));
         return;
-    case CSSPropertyMotionRotation:
-        style->setMotionRotation(StyleMotionRotation(
+    case CSSPropertyOffsetDistance:
+        style->setOffsetDistance(animatableValueToLength(value, state));
+        return;
+    case CSSPropertyOffsetPosition:
+        style->setOffsetPosition(animatableValueToLengthPoint(value, state));
+        return;
+    case CSSPropertyOffsetRotation:
+        style->setOffsetRotation(StyleOffsetRotation(
             toAnimatableDoubleAndBool(value)->toDouble(),
-            toAnimatableDoubleAndBool(value)->flag() ? MotionRotationAuto : MotionRotationFixed));
+            toAnimatableDoubleAndBool(value)->flag() ? OffsetRotationAuto : OffsetRotationFixed));
         return;
     case CSSPropertyWebkitPerspectiveOriginX:
         style->setPerspectiveOriginX(animatableValueToLength(value, state));

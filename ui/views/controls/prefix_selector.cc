@@ -9,6 +9,7 @@
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/range/range.h"
 #include "ui/views/controls/prefix_delegate.h"
+#include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
@@ -27,8 +28,8 @@ void ConvertRectToScreen(const views::View* src, gfx::Rect* r) {
 
 }  // namespace
 
-PrefixSelector::PrefixSelector(PrefixDelegate* delegate)
-    : prefix_delegate_(delegate) {
+PrefixSelector::PrefixSelector(PrefixDelegate* delegate, View* host_view)
+    : prefix_delegate_(delegate), host_view_(host_view) {
 }
 
 PrefixSelector::~PrefixSelector() {
@@ -64,6 +65,10 @@ ui::TextInputMode PrefixSelector::GetTextInputMode() const {
   return ui::TEXT_INPUT_MODE_DEFAULT;
 }
 
+base::i18n::TextDirection PrefixSelector::GetTextDirection() const {
+  return base::i18n::UNKNOWN_DIRECTION;
+}
+
 int PrefixSelector::GetTextInputFlags() const {
   return 0;
 }
@@ -73,10 +78,10 @@ bool PrefixSelector::CanComposeInline() const {
 }
 
 gfx::Rect PrefixSelector::GetCaretBounds() const {
-  gfx::Rect rect(prefix_delegate_->GetVisibleBounds().origin(), gfx::Size());
+  gfx::Rect rect(host_view_->GetVisibleBounds().origin(), gfx::Size());
   // TextInputClient::GetCaretBounds is expected to return a value in screen
   // coordinates.
-  ConvertRectToScreen(prefix_delegate_, &rect);
+  ConvertRectToScreen(host_view_, &rect);
   return rect;
 }
 
@@ -135,12 +140,13 @@ void PrefixSelector::ExtendSelectionAndDelete(size_t before, size_t after) {
 void PrefixSelector::EnsureCaretInRect(const gfx::Rect& rect) {
 }
 
-bool PrefixSelector::IsEditCommandEnabled(int command_id) {
+bool PrefixSelector::IsTextEditCommandEnabled(
+    ui::TextEditCommand command) const {
   return false;
 }
 
-void PrefixSelector::SetEditCommandForNextKeyEvent(int command_id) {
-}
+void PrefixSelector::SetTextEditCommandForNextKeyEvent(
+    ui::TextEditCommand command) {}
 
 void PrefixSelector::OnTextInput(const base::string16& text) {
   // Small hack to filter out 'tab' and 'enter' input, as the expectation is

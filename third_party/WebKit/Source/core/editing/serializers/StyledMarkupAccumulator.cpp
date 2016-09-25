@@ -100,14 +100,14 @@ void StyledMarkupAccumulator::appendTextWithInlineStyle(Text& text, EditingStyle
         DCHECK(!shouldAnnotate() || propertyMissingOrEqualToNone(inlineStyle->style(), CSSPropertyWebkitTextDecorationsInEffect));
         DCHECK(m_document);
 
-        m_result.appendLiteral("<span style=\"");
+        m_result.append("<span style=\"");
         MarkupFormatter::appendAttributeValue(m_result, inlineStyle->style()->asText(), m_document->isHTMLDocument());
-        m_result.appendLiteral("\">");
+        m_result.append("\">");
     }
     if (!shouldAnnotate()) {
         appendText(text);
     } else {
-        const bool useRenderedText = !enclosingElementWithTag(firstPositionInNode(&text), selectTag);
+        const bool useRenderedText = !enclosingElementWithTag(Position::firstPositionInNode(&text), selectTag);
         String content = useRenderedText ? renderedText(text) : stringValueForRange(text);
         StringBuilder buffer;
         MarkupFormatter::appendCharactersReplacingEntities(buffer, content, 0, content.length(), EntityMaskInPCDATA);
@@ -134,7 +134,7 @@ void StyledMarkupAccumulator::appendElementWithInlineStyle(StringBuilder& out, c
         m_formatter.appendAttribute(out, element, attribute, nullptr);
     }
     if (style && !style->isEmpty()) {
-        out.appendLiteral(" style=\"");
+        out.append(" style=\"");
         MarkupFormatter::appendAttributeValue(out, style->style()->asText(), documentIsHTML);
         out.append('\"');
     }
@@ -162,9 +162,9 @@ void StyledMarkupAccumulator::wrapWithStyleNode(StylePropertySet* style)
     DCHECK(m_document);
 
     StringBuilder openTag;
-    openTag.appendLiteral("<div style=\"");
+    openTag.append("<div style=\"");
     MarkupFormatter::appendAttributeValue(openTag, style->asText(), m_document->isHTMLDocument());
-    openTag.appendLiteral("\">");
+    openTag.append("\">");
     m_reversedPrecedingMarkup.append(openTag.toString());
 
     m_result.append("</div>");

@@ -41,7 +41,6 @@ class InputMethodEngine : public InputMethodEngineBase,
   void HideImeWindow(int window_id);
   void CloseImeWindows();
 
- private:
   // input_method::InputMethodEngineBase:
   void FocusOut() override;
   void SetCompositionBounds(const std::vector<gfx::Rect>& bounds) override;
@@ -52,10 +51,17 @@ class InputMethodEngine : public InputMethodEngineBase,
                                 const std::string& text) override;
   bool SendKeyEvent(ui::KeyEvent* ui_event, const std::string& code) override;
 
+ private:
   // ui::ImeWindowObserver:
   void OnWindowDestroyed(ui::ImeWindow* ime_window) override;
 
   ui::ImeWindow* FindWindowById(int window_id) const;
+
+  // Checks if the page is special page that we want to disable some key events.
+  bool IsSpecialPage(ui::InputMethod* method);
+
+  // Checks if the key event are whitelisted key for all pages.
+  bool IsValidKeyForAllPages(ui::KeyEvent* ui_event);
 
   // Holds the IME window instances for properly closing in the destructor.
   // The follow-cursor window is singleton.

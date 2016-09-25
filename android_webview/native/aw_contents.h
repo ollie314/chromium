@@ -27,6 +27,7 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/callback_forward.h"
 #include "base/macros.h"
+#include "content/public/browser/web_contents_observer.h"
 
 class SkBitmap;
 class TabContents;
@@ -64,7 +65,8 @@ class AwContents : public FindHelper::Listener,
                    public AwRenderViewHostExtClient,
                    public BrowserViewRendererClient,
                    public PermissionRequestHandlerClient,
-                   public AwBrowserPermissionRequestDelegate {
+                   public AwBrowserPermissionRequestDelegate,
+                   public content::WebContentsObserver {
  public:
   // Returns the AwContents instance associated with |web_contents|, or NULL.
   static AwContents* FromWebContents(content::WebContents* web_contents);
@@ -238,9 +240,6 @@ class AwContents : public FindHelper::Listener,
       const base::Callback<void(bool)>& callback) override;
   void CancelMIDISysexPermissionRequests(const GURL& origin) override;
 
-  // ex-SharedRendererStateClient implementation.
-  void OnParentDrawConstraintsUpdated();
-
   // Find-in-page API and related methods.
   void FindAllAsync(JNIEnv* env,
                     const base::android::JavaParamRef<jobject>& obj,
@@ -281,6 +280,7 @@ class AwContents : public FindHelper::Listener,
                          float max_page_scale_factor) override;
   void DidOverscroll(const gfx::Vector2d& overscroll_delta,
                      const gfx::Vector2dF& overscroll_velocity) override;
+  ui::TouchHandleDrawable* CreateDrawable() override;
 
   void ClearCache(JNIEnv* env,
                   const base::android::JavaParamRef<jobject>& obj,
@@ -305,7 +305,7 @@ class AwContents : public FindHelper::Listener,
   void SetSaveFormData(bool enabled);
 
   // Sets the java client
-  void SetAwAutofillClient(jobject client);
+  void SetAwAutofillClient(const base::android::JavaRef<jobject>& client);
 
   void SetJsOnlineProperty(JNIEnv* env,
                            const base::android::JavaParamRef<jobject>& obj,
@@ -336,6 +336,10 @@ class AwContents : public FindHelper::Listener,
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
+  // content::WebContentsObserver overrides
+  void RenderViewHostChanged(content::RenderViewHost* old_host,
+                             content::RenderViewHost* new_host) override;
+
  private:
   void InitAutofillIfNecessary(bool enabled);
 
@@ -350,9 +354,9 @@ class AwContents : public FindHelper::Listener,
   JavaObjectWeakGlobalRef java_ref_;
   AwGLFunctor* functor_;
   BrowserViewRenderer browser_view_renderer_;  // Must outlive |web_contents_|.
+  std::unique_ptr<content::WebContents> web_contents_;
   std::unique_ptr<AwWebContentsDelegate> web_contents_delegate_;
   std::unique_ptr<AwContentsClientBridge> contents_client_bridge_;
-  std::unique_ptr<content::WebContents> web_contents_;
   std::unique_ptr<AwRenderViewHostExt> render_view_host_ext_;
   std::unique_ptr<FindHelper> find_helper_;
   std::unique_ptr<IconHelper> icon_helper_;

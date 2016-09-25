@@ -6,13 +6,13 @@
 
 #include <Foundation/Foundation.h>
 
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -177,11 +177,11 @@ ProfileOAuth2TokenServiceIOSDelegate::AccountStatus::GetAuthStatus() const {
 
 ProfileOAuth2TokenServiceIOSDelegate::ProfileOAuth2TokenServiceIOSDelegate(
     SigninClient* client,
-    ProfileOAuth2TokenServiceIOSProvider* provider,
+    std::unique_ptr<ProfileOAuth2TokenServiceIOSProvider> provider,
     AccountTrackerService* account_tracker_service,
     SigninErrorController* signin_error_controller)
     : client_(client),
-      provider_(provider),
+      provider_(std::move(provider)),
       account_tracker_service_(account_tracker_service),
       signin_error_controller_(signin_error_controller) {
   DCHECK(client_);
@@ -302,7 +302,7 @@ ProfileOAuth2TokenServiceIOSDelegate::CreateAccessTokenFetcher(
     OAuth2AccessTokenConsumer* consumer) {
   AccountInfo account_info =
       account_tracker_service_->GetAccountInfo(account_id);
-  return new SSOAccessTokenFetcher(consumer, provider_, account_info);
+  return new SSOAccessTokenFetcher(consumer, provider_.get(), account_info);
 }
 
 std::vector<std::string> ProfileOAuth2TokenServiceIOSDelegate::GetAccounts() {

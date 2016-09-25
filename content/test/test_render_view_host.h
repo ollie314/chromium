@@ -13,6 +13,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "cc/surfaces/surface_id_allocator.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/public/common/web_preferences.h"
@@ -31,7 +32,6 @@
 // To use, derive your test base class from RenderViewHostImplTestHarness.
 
 struct FrameHostMsg_DidCommitProvisionalLoad_Params;
-struct ViewHostMsg_TextInputState_Params;
 
 namespace gfx {
 class Rect;
@@ -43,6 +43,7 @@ class SiteInstance;
 class TestRenderFrameHost;
 class TestWebContents;
 struct FrameReplicationState;
+struct TextInputState;
 
 // Utility function to initialize FrameHostMsg_DidCommitProvisionalLoad_Params
 // with given parameters.
@@ -69,7 +70,6 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   void SetBounds(const gfx::Rect& rect) override {}
   gfx::Vector2dF GetLastScrollOffset() const override;
   gfx::NativeView GetNativeView() const override;
-  gfx::NativeViewId GetNativeViewId() const override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
   ui::TextInputClient* GetTextInputClient() override;
   bool HasFocus() const override;
@@ -81,6 +81,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   void WasOccluded() override;
   gfx::Rect GetViewBounds() const override;
 #if defined(OS_MACOSX)
+  ui::AcceleratedWidgetMac* GetAcceleratedWidgetMac() const override;
   void SetActive(bool active) override;
   void ShowDefinitionForSelection() override {}
   bool SupportsSpeech() const override;
@@ -88,10 +89,10 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   bool IsSpeaking() const override;
   void StopSpeaking() override;
 #endif  // defined(OS_MACOSX)
-  void OnSwapCompositorFrame(
-      uint32_t output_surface_id,
-      std::unique_ptr<cc::CompositorFrame> frame) override;
+  void OnSwapCompositorFrame(uint32_t compositor_frame_sink_id,
+                             cc::CompositorFrame frame) override;
   void ClearCompositorFrame() override {}
+  void SetNeedsBeginFrames(bool needs_begin_frames) override {}
 
   // RenderWidgetHostViewBase implementation.
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -100,18 +101,10 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   void Focus() override {}
   void SetIsLoading(bool is_loading) override {}
   void UpdateCursor(const WebCursor& cursor) override {}
-  void TextInputStateChanged(
-      const ViewHostMsg_TextInputState_Params& params) override {}
-  void ImeCancelComposition() override {}
-  void ImeCompositionRangeChanged(
-      const gfx::Range& range,
-      const std::vector<gfx::Rect>& character_bounds) override {}
   void RenderProcessGone(base::TerminationStatus status,
                          int error_code) override;
   void Destroy() override;
   void SetTooltipText(const base::string16& tooltip_text) override {}
-  void SelectionBoundsChanged(
-      const ViewHostMsg_SelectionBounds_Params& params) override {}
   void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
@@ -125,11 +118,10 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   bool HasAcceleratedSurface(const gfx::Size& desired_size) override;
   void LockCompositingSurface() override {}
   void UnlockCompositingSurface() override {}
-  void GetScreenInfo(blink::WebScreenInfo* results) override {}
-  bool GetScreenColorProfile(std::vector<char>* color_profile) override;
   gfx::Rect GetBoundsInRootWindow() override;
   bool LockMouse() override;
   void UnlockMouse() override;
+  uint32_t GetSurfaceClientId() override;
 
   bool is_showing() const { return is_showing_; }
   bool is_occluded() const { return is_occluded_; }
@@ -139,6 +131,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   RenderWidgetHostImpl* rwh_;
 
  private:
+  std::unique_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
   bool is_showing_;
   bool is_occluded_;
   bool did_swap_compositor_frame_;

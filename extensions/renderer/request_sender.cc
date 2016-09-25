@@ -4,10 +4,11 @@
 
 #include "extensions/renderer/request_sender.h"
 
+#include "base/metrics/histogram_macros.h"
+#include "base/timer/elapsed_timer.h"
 #include "base/values.h"
 #include "content/public/renderer/render_frame.h"
 #include "extensions/common/extension_messages.h"
-#include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/script_context.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -43,22 +44,22 @@ RequestSender::ScopedTabID::~ScopedTabID() {
   request_sender_->source_tab_id_ = previous_tab_id_;
 }
 
-RequestSender::RequestSender(Dispatcher* dispatcher)
-    : dispatcher_(dispatcher), source_tab_id_(-1) {}
+RequestSender::RequestSender() : source_tab_id_(-1) {}
 
 RequestSender::~RequestSender() {}
 
-void RequestSender::InsertRequest(int request_id,
-                                  PendingRequest* pending_request) {
+void RequestSender::InsertRequest(
+    int request_id,
+    std::unique_ptr<PendingRequest> pending_request) {
   DCHECK_EQ(0u, pending_requests_.count(request_id));
-  pending_requests_[request_id].reset(pending_request);
+  pending_requests_[request_id] = std::move(pending_request);
 }
 
-linked_ptr<PendingRequest> RequestSender::RemoveRequest(int request_id) {
+std::unique_ptr<PendingRequest> RequestSender::RemoveRequest(int request_id) {
   PendingRequestMap::iterator i = pending_requests_.find(request_id);
   if (i == pending_requests_.end())
-    return linked_ptr<PendingRequest>();
-  linked_ptr<PendingRequest> result = i->second;
+    return std::unique_ptr<PendingRequest>();
+  std::unique_ptr<PendingRequest> result = std::move(i->second);
   pending_requests_.erase(i);
   return result;
 }
@@ -68,7 +69,7 @@ int RequestSender::GetNextRequestId() const {
   return next_request_id++;
 }
 
-void RequestSender::StartRequest(Source* source,
+bool RequestSender::StartRequest(Source* source,
                                  const std::string& name,
                                  int request_id,
                                  bool has_callback,
@@ -76,24 +77,33 @@ void RequestSender::StartRequest(Source* source,
                                  base::ListValue* value_args) {
   ScriptContext* context = source->GetContext();
   if (!context)
-    return;
+    return false;
 
+  bool for_service_worker =
+      context->context_type() == Feature::SERVICE_WORKER_CONTEXT;
   // Get the current RenderFrame so that we can send a routed IPC message from
   // the correct source.
+  // Note that |render_frame| would be nullptr for Service Workers. Service
+  // Workers use control IPC instead.
   content::RenderFrame* render_frame = context->GetRenderFrame();
-  if (!render_frame)
-    return;
+  if (!for_service_worker && !render_frame) {
+    // It is important to early exit here for non Service Worker contexts so
+    // that we do not create orphaned PendingRequests below.
+    return false;
+  }
 
   // TODO(koz): See if we can make this a CHECK.
   if (!context->HasAccessOrThrowError(name))
-    return;
+    return false;
 
   GURL source_url;
   if (blink::WebLocalFrame* webframe = context->web_frame())
     source_url = webframe->document().url();
 
-  InsertRequest(request_id, new PendingRequest(name, source,
-      blink::WebUserGestureIndicator::currentUserGestureToken()));
+  InsertRequest(request_id,
+                base::MakeUnique<PendingRequest>(
+                    name, source,
+                    blink::WebUserGestureIndicator::currentUserGestureToken()));
 
   ExtensionHostMsg_Request_Params params;
   params.name = name;
@@ -105,6 +115,18 @@ void RequestSender::StartRequest(Source* source,
   params.has_callback = has_callback;
   params.user_gesture =
       blink::WebUserGestureIndicator::isProcessingUserGesture();
+
+  // Set Service Worker specific params to default values.
+  params.worker_thread_id = -1;
+  params.embedded_worker_id = -1;
+
+  SendRequest(render_frame, for_io_thread, params);
+  return true;
+}
+
+void RequestSender::SendRequest(content::RenderFrame* render_frame,
+                                bool for_io_thread,
+                                ExtensionHostMsg_Request_Params& params) {
   if (for_io_thread) {
     render_frame->Send(new ExtensionHostMsg_RequestForIOThread(
         render_frame->GetRoutingID(), params));
@@ -118,16 +140,21 @@ void RequestSender::HandleResponse(int request_id,
                                    bool success,
                                    const base::ListValue& response,
                                    const std::string& error) {
-  linked_ptr<PendingRequest> request = RemoveRequest(request_id);
+  base::ElapsedTimer timer;
+  std::unique_ptr<PendingRequest> request = RemoveRequest(request_id);
 
   if (!request.get()) {
     // This can happen if a context is destroyed while a request is in flight.
     return;
   }
 
+  // TODO(devlin): Would it be useful to partition this data based on
+  // extension function once we have a suitable baseline? crbug.com/608561.
   blink::WebScopedUserGesture gesture(request->token);
   request->source->OnResponseReceived(
       request->name, request_id, success, response, error);
+  UMA_HISTOGRAM_TIMES("Extensions.Functions.HandleResponseElapsedTime",
+                      timer.Elapsed());
 }
 
 void RequestSender::InvalidateSource(Source* source) {

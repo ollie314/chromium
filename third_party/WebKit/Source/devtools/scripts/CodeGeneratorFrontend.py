@@ -53,14 +53,18 @@ except Exception:
     # Work with python 2 and 3 http://docs.python.org/py3k/howto/pyporting.html
     exc = sys.exc_info()[1]
     sys.stderr.write("Failed to parse command-line arguments: %s\n\n" % exc)
-    sys.stderr.write("Usage: <script> protocol.json --output_js_dir <output_js_dir>\n")
+    sys.stderr.write("Usage: <script> some.json --output_js_dir <output_js_dir>\n")
     exit(1)
 
 
 def fix_camel_case(name):
+    prefix = ""
+    if name[0] == "-":
+        prefix = "Negative"
+        name = name[1:]
     refined = re.sub(r'-(\w)', lambda pat: pat.group(1).upper(), name)
     refined = to_title_case(refined)
-    return re.sub(r'(?i)HTML|XML|WML|API', lambda pat: pat.group(0).upper(), refined)
+    return prefix + re.sub(r'(?i)HTML|XML|WML|API', lambda pat: pat.group(0).upper(), refined)
 
 
 def to_title_case(name):
@@ -186,6 +190,8 @@ class Generator:
         for json_domain in json_api["domains"]:
             domain_name = json_domain["domain"]
             domain_name_lower = domain_name.lower()
+            if domain_name_lower == "console":
+                continue
 
             Generator.backend_js_domain_initializer_list.append("// %s.\n" % domain_name)
 

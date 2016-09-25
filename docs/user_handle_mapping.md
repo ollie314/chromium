@@ -33,6 +33,7 @@ For Chromium contributors that have different nicks on other domains.
 | feng              | feng            | fqian           |
 | fmeawad           | fmeawad-cr      | fmeawad         |
 | gab               | gabc            | gab             |
+| gsathya           | gsathya         | gunasekaran     |
 | hans              | hwennborg       | hwennborg       |
 | haven             | periodic        | haven           |
 | ian               | ifette          | ifette          |
@@ -66,6 +67,7 @@ For Chromium contributors that have different nicks on other domains.
 | mmeade            | mmeade          | mmeade          |
 | mednik            | mednik          | mednik          |
 | mgaba             | mgaba           | mgaba           |
+| mlamouri          | mounir          | mlamouri        |
 | mlinck            | dullb0yj4ck     | mlinck          |
 | msw               | msw\_           | msw             |
 | nick              | nickcarter      | ncarter         |
@@ -76,6 +78,7 @@ For Chromium contributors that have different nicks on other domains.
 | patrick           | pjohnson        | pjohnson        |
 | peter             | beverloo        | beverloo        |
 | phajdan.jr        | phajdan-jr      | phajdan         |
+| pwnall            | pwnall          | costan          |
 | rch               | RyanHamilton    | rch             |
 | rdevlin.cronin    | rdcronin        | rdcronin        |
 | reillyg           | reillyeon       | reillyg         |

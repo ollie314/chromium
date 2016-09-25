@@ -4,7 +4,9 @@
 
 #include "content/browser/devtools/worker_devtools_agent_host.h"
 
+#include "base/guid.h"
 #include "content/browser/devtools/devtools_protocol_handler.h"
+#include "content/browser/devtools/protocol/schema_handler.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 
@@ -46,12 +48,14 @@ bool WorkerDevToolsAgentHost::DispatchProtocolMessage(
     return true;
 
   int call_id;
-  if (protocol_handler_->HandleOptionalMessage(session_id(), message, &call_id))
+  std::string method;
+  if (protocol_handler_->HandleOptionalMessage(session_id(), message, &call_id,
+                                               &method))
     return true;
 
   if (RenderProcessHost* host = RenderProcessHost::FromID(worker_id_.first)) {
     host->Send(new DevToolsAgentMsg_DispatchOnInspectorBackend(
-        worker_id_.second, session_id(), message));
+        worker_id_.second, session_id(), call_id, method, message));
   }
   return true;
 }
@@ -117,11 +121,14 @@ bool WorkerDevToolsAgentHost::IsTerminated() {
 }
 
 WorkerDevToolsAgentHost::WorkerDevToolsAgentHost(WorkerId worker_id)
-    : protocol_handler_(new DevToolsProtocolHandler(this)),
+    : DevToolsAgentHostImpl(base::GenerateGUID()),
+      schema_handler_(new devtools::schema::SchemaHandler()),
+      protocol_handler_(new DevToolsProtocolHandler(this)),
       chunk_processor_(base::Bind(&WorkerDevToolsAgentHost::SendMessageToClient,
                                   base::Unretained(this))),
       state_(WORKER_UNINSPECTED),
       worker_id_(worker_id) {
+  protocol_handler_->dispatcher()->SetSchemaHandler(schema_handler_.get());
   WorkerCreated();
 }
 

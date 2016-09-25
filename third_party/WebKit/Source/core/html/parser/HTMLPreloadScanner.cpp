@@ -34,7 +34,9 @@
 #include "core/css/MediaValuesCached.h"
 #include "core/css/parser/SizesAttributeParser.h"
 #include "core/dom/Document.h"
+#include "core/dom/ScriptLoader.h"
 #include "core/fetch/IntegrityMetadata.h"
+#include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/frame/SubresourceIntegrity.h"
 #include "core/html/CrossOriginAttribute.h"
@@ -44,11 +46,13 @@
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/parser/HTMLSrcsetParser.h"
 #include "core/html/parser/HTMLTokenizer.h"
+#include "core/html/parser/ResourcePreloader.h"
 #include "core/loader/LinkLoader.h"
 #include "platform/ContentType.h"
 #include "platform/Histogram.h"
 #include "platform/MIMETypeRegistry.h"
 #include "platform/TraceEvent.h"
+#include <memory>
 
 namespace blink {
 
@@ -139,11 +143,10 @@ public:
     StartTagScanner(const StringImpl* tagImpl, MediaValuesCached* mediaValues)
         : m_tagImpl(tagImpl)
         , m_linkIsStyleSheet(false)
-        , m_linkTypeIsMissingOrSupportedStyleSheet(true)
         , m_linkIsPreconnect(false)
         , m_linkIsPreload(false)
         , m_linkIsImport(false)
-        , m_matchedMediaAttribute(true)
+        , m_matched(true)
         , m_inputIsImage(false)
         , m_sourceSize(0)
         , m_sourceSizeSet(false)
@@ -192,8 +195,12 @@ public:
 
     void handlePictureSourceURL(PictureData& pictureData)
     {
-        if (match(m_tagImpl, sourceTag) && m_matchedMediaAttribute && pictureData.sourceURL.isEmpty()) {
-            pictureData.sourceURL = m_srcsetImageCandidate.toString();
+        if (match(m_tagImpl, sourceTag) && m_matched && pictureData.sourceURL.isEmpty()) {
+            // Must create an isolatedCopy() since the srcset attribute value will
+            // get sent back to the main thread between when we set this, and when we
+            // process the closing tag which would clear m_pictureData. Having any
+            // ref to a string we're going to send will fail isSafeToSendToAnotherThread().
+            pictureData.sourceURL = m_srcsetImageCandidate.toString().isolatedCopy();
             pictureData.sourceSizeSet = m_sourceSizeSet;
             pictureData.sourceSize = m_sourceSize;
             pictureData.picked = true;
@@ -202,15 +209,19 @@ public:
         }
     }
 
-    PassOwnPtr<PreloadRequest> createPreloadRequest(const KURL& predictedBaseURL, const SegmentedString& source, const ClientHintsPreferences& clientHintsPreferences, const PictureData& pictureData, const ReferrerPolicy documentReferrerPolicy)
+    std::unique_ptr<PreloadRequest> createPreloadRequest(const KURL& predictedBaseURL, const SegmentedString& source, const ClientHintsPreferences& clientHintsPreferences, const PictureData& pictureData, const ReferrerPolicy documentReferrerPolicy)
     {
         PreloadRequest::RequestType requestType = PreloadRequest::RequestTypePreload;
-        if (shouldPreconnect())
+        if (shouldPreconnect()) {
             requestType = PreloadRequest::RequestTypePreconnect;
-        else if (isLinkRelPreload())
-            requestType = PreloadRequest::RequestTypeLinkRelPreload;
-        else if (!shouldPreload() || !m_matchedMediaAttribute)
-            return nullptr;
+        } else {
+            if (isLinkRelPreload()) {
+                requestType = PreloadRequest::RequestTypeLinkRelPreload;
+            }
+            if (!shouldPreload()) {
+                return nullptr;
+            }
+        }
 
         TextPosition position = TextPosition(source.currentLine(), source.currentColumn());
         FetchRequest::ResourceWidth resourceWidth;
@@ -231,12 +242,18 @@ public:
 
         // The element's 'referrerpolicy' attribute (if present) takes precedence over the document's referrer policy.
         ReferrerPolicy referrerPolicy = (m_referrerPolicy != ReferrerPolicyDefault) ? m_referrerPolicy : documentReferrerPolicy;
-        OwnPtr<PreloadRequest> request = PreloadRequest::create(initiatorFor(m_tagImpl), position, m_urlToLoad, predictedBaseURL, type, referrerPolicy, resourceWidth, clientHintsPreferences, requestType);
+        std::unique_ptr<PreloadRequest> request = PreloadRequest::create(initiatorFor(m_tagImpl), position, m_urlToLoad, predictedBaseURL, type, referrerPolicy, resourceWidth, clientHintsPreferences, requestType);
         request->setCrossOrigin(m_crossOrigin);
+        request->setNonce(m_nonce);
         request->setCharset(charset());
         request->setDefer(m_defer);
         request->setIntegrityMetadata(m_integrityMetadata);
-        return request.release();
+
+        // TODO(csharrison): Once this is deprecated, just abort the request
+        // here.
+        if (match(m_tagImpl, scriptTag) && !ScriptLoader::isValidScriptTypeAndLanguage(m_typeAttributeValue, m_languageAttributeValue, ScriptLoader::AllowLegacyTypeInTypeAttribute))
+            request->setScriptHasInvalidTypeOrLanguage();
+        return request;
     }
 
 private:
@@ -248,6 +265,8 @@ private:
             setUrlToLoad(attributeValue, DisallowURLReplacement);
         else if (match(attributeName, crossoriginAttr))
             setCrossOrigin(attributeValue);
+        else if (match(attributeName, nonceAttr))
+            setNonce(attributeValue);
         else if (match(attributeName, asyncAttr))
             setDefer(FetchRequest::LazyLoad);
         else if (match(attributeName, deferAttr))
@@ -262,6 +281,10 @@ private:
         // explanation.
         else if (match(attributeName, integrityAttr))
             SubresourceIntegrity::parseIntegrityAttribute(attributeValue, m_integrityMetadata);
+        else if (match(attributeName, typeAttr))
+            m_typeAttributeValue = attributeValue;
+        else if (match(attributeName, languageAttr))
+            m_languageAttributeValue = attributeValue;
     }
 
     template<typename NameType>
@@ -285,7 +308,7 @@ private:
             }
         } else if (!m_referrerPolicySet && match(attributeName, referrerpolicyAttr) && !attributeValue.isNull()) {
             m_referrerPolicySet = true;
-            SecurityPolicy::referrerPolicyFromString(attributeValue, &m_referrerPolicy);
+            SecurityPolicy::referrerPolicyFromStringWithLegacyKeywords(attributeValue, &m_referrerPolicy);
         }
     }
 
@@ -302,13 +325,15 @@ private:
             m_linkIsPreload = rel.isLinkPreload();
             m_linkIsImport = rel.isImport();
         } else if (match(attributeName, mediaAttr)) {
-            m_matchedMediaAttribute = mediaAttributeMatches(*m_mediaValues, attributeValue);
+            m_matched &= mediaAttributeMatches(*m_mediaValues, attributeValue);
         } else if (match(attributeName, crossoriginAttr)) {
             setCrossOrigin(attributeValue);
+        } else if (match(attributeName, nonceAttr)) {
+            setNonce(attributeValue);
         } else if (match(attributeName, asAttr)) {
             m_asAttributeValue = attributeValue;
         } else if (match(attributeName, typeAttr)) {
-            m_linkTypeIsMissingOrSupportedStyleSheet = MIMETypeRegistry::isSupportedStyleSheetMIMEType(ContentType(attributeValue).type());
+            m_matched &= MIMETypeRegistry::isSupportedStyleSheetMIMEType(ContentType(attributeValue).type());
         }
     }
 
@@ -336,7 +361,9 @@ private:
             }
         } else if (match(attributeName, mediaAttr)) {
             // FIXME - Don't match media multiple times.
-            m_matchedMediaAttribute = mediaAttributeMatches(*m_mediaValues, attributeValue);
+            m_matched &= mediaAttributeMatches(*m_mediaValues, attributeValue);
+        } else if (match(attributeName, typeAttr)) {
+            m_matched &= MIMETypeRegistry::isSupportedImagePrefixedMIMEType(ContentType(attributeValue).type());
         }
     }
 
@@ -422,9 +449,9 @@ private:
     {
         if (m_urlToLoad.isEmpty())
             return false;
-        if (match(m_tagImpl, linkTag) && !m_linkIsStyleSheet && !m_linkIsImport && !m_linkIsPreload)
+        if (!m_matched)
             return false;
-        if (match(m_tagImpl, linkTag) && m_linkIsStyleSheet && !m_linkTypeIsMissingOrSupportedStyleSheet)
+        if (match(m_tagImpl, linkTag) && !m_linkIsStyleSheet && !m_linkIsImport && !m_linkIsPreload)
             return false;
         if (match(m_tagImpl, inputTag) && !m_inputIsImage)
             return false;
@@ -434,6 +461,11 @@ private:
     void setCrossOrigin(const String& corsSetting)
     {
         m_crossOrigin = crossOriginAttributeValue(corsSetting);
+    }
+
+    void setNonce(const String& nonce)
+    {
+        m_nonce = nonce;
     }
 
     void setDefer(FetchRequest::DeferOption defer)
@@ -451,39 +483,41 @@ private:
     ImageCandidate m_srcsetImageCandidate;
     String m_charset;
     bool m_linkIsStyleSheet;
-    bool m_linkTypeIsMissingOrSupportedStyleSheet;
     bool m_linkIsPreconnect;
     bool m_linkIsPreload;
     bool m_linkIsImport;
-    bool m_matchedMediaAttribute;
+    bool m_matched;
     bool m_inputIsImage;
     String m_imgSrcUrl;
     String m_srcsetAttributeValue;
     String m_asAttributeValue;
+    String m_typeAttributeValue;
+    String m_languageAttributeValue;
     float m_sourceSize;
     bool m_sourceSizeSet;
     FetchRequest::DeferOption m_defer;
     CrossOriginAttributeValue m_crossOrigin;
+    String m_nonce;
     Member<MediaValuesCached> m_mediaValues;
     bool m_referrerPolicySet;
     ReferrerPolicy m_referrerPolicy;
     IntegrityMetadataSet m_integrityMetadata;
 };
 
-TokenPreloadScanner::TokenPreloadScanner(const KURL& documentURL, PassOwnPtr<CachedDocumentParameters> documentParameters, const MediaValuesCached::MediaValuesCachedData& mediaValuesCachedData)
+TokenPreloadScanner::TokenPreloadScanner(const KURL& documentURL, std::unique_ptr<CachedDocumentParameters> documentParameters, const MediaValuesCached::MediaValuesCachedData& mediaValuesCachedData)
     : m_documentURL(documentURL)
     , m_inStyle(false)
     , m_inPicture(false)
     , m_inScript(false)
-    , m_isAppCacheEnabled(false)
-    , m_isCSPEnabled(false)
     , m_templateCount(0)
-    , m_documentParameters(documentParameters)
+    , m_documentParameters(std::move(documentParameters))
     , m_mediaValues(MediaValuesCached::create(mediaValuesCachedData))
     , m_didRewind(false)
 {
-    ASSERT(m_documentParameters.get());
-    ASSERT(m_mediaValues.get());
+    DCHECK(m_documentParameters.get());
+    DCHECK(m_mediaValues.get());
+    DCHECK(documentURL.isValid());
+    m_cssScanner.setReferrerPolicy(m_documentParameters->referrerPolicy);
 }
 
 TokenPreloadScanner::~TokenPreloadScanner()
@@ -493,7 +527,7 @@ TokenPreloadScanner::~TokenPreloadScanner()
 TokenPreloadScannerCheckpoint TokenPreloadScanner::createCheckpoint()
 {
     TokenPreloadScannerCheckpoint checkpoint = m_checkpoints.size();
-    m_checkpoints.append(Checkpoint(m_predictedBaseElementURL, m_inStyle, m_inScript, m_isAppCacheEnabled, m_isCSPEnabled, m_templateCount));
+    m_checkpoints.append(Checkpoint(m_predictedBaseElementURL, m_inStyle, m_inScript, m_templateCount));
     return checkpoint;
 }
 
@@ -503,8 +537,6 @@ void TokenPreloadScanner::rewindTo(TokenPreloadScannerCheckpoint checkpointIndex
     const Checkpoint& checkpoint = m_checkpoints[checkpointIndex];
     m_predictedBaseElementURL = checkpoint.predictedBaseElementURL;
     m_inStyle = checkpoint.inStyle;
-    m_isAppCacheEnabled = checkpoint.isAppCacheEnabled;
-    m_isCSPEnabled = checkpoint.isCSPEnabled;
     m_templateCount = checkpoint.templateCount;
 
     m_didRewind = true;
@@ -514,14 +546,14 @@ void TokenPreloadScanner::rewindTo(TokenPreloadScannerCheckpoint checkpointIndex
     m_checkpoints.clear();
 }
 
-void TokenPreloadScanner::scan(const HTMLToken& token, const SegmentedString& source, PreloadRequestStream& requests, ViewportDescriptionWrapper* viewport)
+void TokenPreloadScanner::scan(const HTMLToken& token, const SegmentedString& source, PreloadRequestStream& requests, ViewportDescriptionWrapper* viewport, bool* isCSPMetaTag)
 {
-    scanCommon(token, source, requests, viewport, nullptr);
+    scanCommon(token, source, requests, viewport, isCSPMetaTag, nullptr);
 }
 
-void TokenPreloadScanner::scan(const CompactHTMLToken& token, const SegmentedString& source, PreloadRequestStream& requests, ViewportDescriptionWrapper* viewport, bool* likelyDocumentWriteScript)
+void TokenPreloadScanner::scan(const CompactHTMLToken& token, const SegmentedString& source, PreloadRequestStream& requests, ViewportDescriptionWrapper* viewport, bool* isCSPMetaTag, bool* likelyDocumentWriteScript)
 {
-    scanCommon(token, source, requests, viewport, likelyDocumentWriteScript);
+    scanCommon(token, source, requests, viewport, isCSPMetaTag, likelyDocumentWriteScript);
 }
 
 static void handleMetaViewport(const String& attributeValue, const CachedDocumentParameters* documentParameters, MediaValuesCached* mediaValues, ViewportDescriptionWrapper* viewport)
@@ -541,8 +573,9 @@ static void handleMetaViewport(const String& attributeValue, const CachedDocumen
 
 static void handleMetaReferrer(const String& attributeValue, CachedDocumentParameters* documentParameters, CSSPreloadScanner* cssScanner)
 {
-    if (attributeValue.isEmpty() || attributeValue.isNull() || !SecurityPolicy::referrerPolicyFromString(attributeValue, &documentParameters->referrerPolicy)) {
-        documentParameters->referrerPolicy = ReferrerPolicyDefault;
+    ReferrerPolicy metaReferrerPolicy = ReferrerPolicyDefault;
+    if (!attributeValue.isEmpty() && !attributeValue.isNull() && SecurityPolicy::referrerPolicyFromStringWithLegacyKeywords(attributeValue, &metaReferrerPolicy)) {
+        documentParameters->referrerPolicy = metaReferrerPolicy;
     }
     cssScanner->setReferrerPolicy(documentParameters->referrerPolicy);
 }
@@ -629,17 +662,9 @@ bool TokenPreloadScanner::shouldEvaluateForDocumentWrite(const String& source)
 }
 
 template <typename Token>
-void TokenPreloadScanner::scanCommon(const Token& token, const SegmentedString& source, PreloadRequestStream& requests, ViewportDescriptionWrapper* viewport, bool* likelyDocumentWriteScript)
+void TokenPreloadScanner::scanCommon(const Token& token, const SegmentedString& source, PreloadRequestStream& requests, ViewportDescriptionWrapper* viewport, bool* isCSPMetaTag, bool* likelyDocumentWriteScript)
 {
     if (!m_documentParameters->doHtmlPreloadScanning)
-        return;
-
-    // Disable preload for documents with AppCache.
-    if (m_isAppCacheEnabled)
-        return;
-
-    // http://crbug.com/434230 Disable preload for documents with CSP <meta> tags
-    if (m_isCSPEnabled)
         return;
 
     switch (token.type()) {
@@ -701,16 +726,12 @@ void TokenPreloadScanner::scanCommon(const Token& token, const SegmentedString& 
             updatePredictedBaseURL(token);
             return;
         }
-        if (match(tagImpl, htmlTag) && token.getAttributeItem(manifestAttr)) {
-            m_isAppCacheEnabled = true;
-            return;
-        }
         if (match(tagImpl, metaTag)) {
             const typename Token::Attribute* equivAttribute = token.getAttributeItem(http_equivAttr);
             if (equivAttribute) {
                 String equivAttributeValue(equivAttribute->value());
                 if (equalIgnoringCase(equivAttributeValue, "content-security-policy")) {
-                    m_isCSPEnabled = true;
+                    *isCSPMetaTag = true;
                 } else if (equalIgnoringCase(equivAttributeValue, "accept-ch")) {
                     const typename Token::Attribute* contentAttribute = token.getAttributeItem(contentAttr);
                     if (contentAttribute)
@@ -732,9 +753,9 @@ void TokenPreloadScanner::scanCommon(const Token& token, const SegmentedString& 
         scanner.processAttributes(token.attributes());
         if (m_inPicture)
             scanner.handlePictureSourceURL(m_pictureData);
-        OwnPtr<PreloadRequest> request = scanner.createPreloadRequest(m_predictedBaseElementURL, source, m_clientHintsPreferences, m_pictureData, m_documentParameters->referrerPolicy);
+        std::unique_ptr<PreloadRequest> request = scanner.createPreloadRequest(m_predictedBaseElementURL, source, m_clientHintsPreferences, m_pictureData, m_documentParameters->referrerPolicy);
         if (request)
-            requests.append(request.release());
+            requests.append(std::move(request));
         return;
     }
     default: {
@@ -753,8 +774,8 @@ void TokenPreloadScanner::updatePredictedBaseURL(const Token& token)
     }
 }
 
-HTMLPreloadScanner::HTMLPreloadScanner(const HTMLParserOptions& options, const KURL& documentURL, PassOwnPtr<CachedDocumentParameters> documentParameters, const MediaValuesCached::MediaValuesCachedData& mediaValuesCachedData)
-    : m_scanner(documentURL, documentParameters, mediaValuesCachedData)
+HTMLPreloadScanner::HTMLPreloadScanner(const HTMLParserOptions& options, const KURL& documentURL, std::unique_ptr<CachedDocumentParameters> documentParameters, const MediaValuesCached::MediaValuesCachedData& mediaValuesCachedData)
+    : m_scanner(documentURL, std::move(documentParameters), mediaValuesCachedData)
     , m_tokenizer(HTMLTokenizer::create(options))
 {
 }
@@ -783,8 +804,14 @@ void HTMLPreloadScanner::scanAndPreload(ResourcePreloader* preloader, const KURL
     while (m_tokenizer->nextToken(m_source, m_token)) {
         if (m_token.type() == HTMLToken::StartTag)
             m_tokenizer->updateStateFor(attemptStaticStringCreation(m_token.name(), Likely8Bit));
-        m_scanner.scan(m_token, m_source, requests, viewport);
+        bool isCSPMetaTag = false;
+        m_scanner.scan(m_token, m_source, requests, viewport, &isCSPMetaTag);
         m_token.clear();
+        // Don't preload anything if a CSP meta tag is found. We should never
+        // really find them here because the HTMLPreloadScanner is only used for
+        // dynamically added markup.
+        if (isCSPMetaTag)
+            return;
     }
 
     preloader->takeAndPreload(requests);
@@ -799,7 +826,7 @@ CachedDocumentParameters::CachedDocumentParameters(Document* document)
     defaultViewportMinWidth = document->viewportDefaultMinWidth();
     viewportMetaZeroValuesQuirk = document->settings() && document->settings()->viewportMetaZeroValuesQuirk();
     viewportMetaEnabled = document->settings() && document->settings()->viewportMetaEnabled();
-    referrerPolicy = ReferrerPolicyDefault;
+    referrerPolicy = document->getReferrerPolicy();
 }
 
 } // namespace blink

@@ -16,7 +16,7 @@
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "chrome/grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMFadeTruncatingTextFieldCell.h"
 #import "ui/base/cocoa/nsgraphics_context_additions.h"
@@ -27,6 +27,12 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
+namespace {
+
+// The color of the icons in dark mode theme.
+const SkColor kDarkModeIconColor = SkColorSetARGB(0xFF, 0xC4, 0xC4, 0xC4);
+
+}  // namespace
 
 // The amount of time in seconds during which each type of glow increases, holds
 // steady, and decreases, respectively.
@@ -45,12 +51,20 @@ const NSTimeInterval kGlowUpdateInterval = 0.025;
 // has moved less than the threshold, we want to close the tab.
 const CGFloat kRapidCloseDist = 2.5;
 
-@interface TabView(MaterialDesign)
+// This class contains the logic for drawing Material Design tab images. The
+// |setTabEdgeStrokeColor| method is overridden by |TabHeavyImageMaker| to draw
+// high-contrast tabs.
+@interface TabImageMaker : NSObject
 + (void)drawTabLeftMaskImage;
 + (void)drawTabRightMaskImage;
 + (void)drawTabLeftEdgeImage;
 + (void)drawTabMiddleEdgeImage;
 + (void)drawTabRightEdgeImage;
++ (void)setTabEdgeStrokeColor;
+@end
+
+@interface TabHeavyImageMaker : TabImageMaker
++ (void)setTabEdgeStrokeColor;
 @end
 
 @interface TabController(Private)
@@ -58,14 +72,16 @@ const CGFloat kRapidCloseDist = 2.5;
 - (HoverCloseButton*)closeButton;
 @end
 
+extern NSString* const _Nonnull NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification;
+
 namespace {
 
-NSImage* imageForResourceID(int resource_id) {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    return [rb.GetNativeImageNamed(resource_id).CopyNSImage() autorelease];
-  }
+enum StrokeType {
+  STROKE_NORMAL,
+  STROKE_HEAVY,
+};
 
+NSImage* imageForResourceID(int resource_id, StrokeType stroke_type) {
   CGFloat imageWidth = resource_id == IDR_TAB_ACTIVE_CENTER ? 1 : 18;
   SEL theSelector = 0;
   switch (resource_id) {
@@ -91,10 +107,11 @@ NSImage* imageForResourceID(int resource_id) {
   }
   DCHECK(theSelector);
 
-  base::scoped_nsobject<NSCustomImageRep> imageRep =
-      [[NSCustomImageRep alloc]
-          initWithDrawSelector:theSelector
-                      delegate:[TabView class]];
+  Class makerClass = stroke_type == STROKE_HEAVY ? [TabHeavyImageMaker class]
+                                                 : [TabImageMaker class];
+  base::scoped_nsobject<NSCustomImageRep> imageRep([[NSCustomImageRep alloc]
+      initWithDrawSelector:theSelector
+                  delegate:makerClass]);
 
   NSImage* newTabButtonImage =
       [[[NSImage alloc] initWithSize:NSMakeSize(imageWidth, 29)] autorelease];
@@ -105,29 +122,27 @@ NSImage* imageForResourceID(int resource_id) {
 }
 
 ui::ThreePartImage& GetMaskImage() {
-  CR_DEFINE_STATIC_LOCAL(ui::ThreePartImage, mask,
-      (imageForResourceID(IDR_TAB_ALPHA_LEFT), nullptr,
-          imageForResourceID(IDR_TAB_ALPHA_RIGHT)));
+  CR_DEFINE_STATIC_LOCAL(
+      ui::ThreePartImage, mask,
+      (imageForResourceID(IDR_TAB_ALPHA_LEFT, STROKE_NORMAL), nullptr,
+       imageForResourceID(IDR_TAB_ALPHA_RIGHT, STROKE_NORMAL)));
 
   return mask;
 }
 
-ui::ThreePartImage& GetStrokeImage(bool active) {
-  if (!ui::MaterialDesignController::IsModeMaterial() && !active) {
-    CR_DEFINE_STATIC_LOCAL(
-        ui::ThreePartImage, inactiveStroke,
-            (imageForResourceID(IDR_TAB_INACTIVE_LEFT),
-             imageForResourceID(IDR_TAB_INACTIVE_CENTER),
-             imageForResourceID(IDR_TAB_INACTIVE_RIGHT)));
-    return inactiveStroke;
-  }
+ui::ThreePartImage& GetStrokeImage(bool active, StrokeType stroke_type) {
   CR_DEFINE_STATIC_LOCAL(
       ui::ThreePartImage, stroke,
-          (imageForResourceID(IDR_TAB_ACTIVE_LEFT),
-           imageForResourceID(IDR_TAB_ACTIVE_CENTER),
-           imageForResourceID(IDR_TAB_ACTIVE_RIGHT)));
+      (imageForResourceID(IDR_TAB_ACTIVE_LEFT, STROKE_NORMAL),
+       imageForResourceID(IDR_TAB_ACTIVE_CENTER, STROKE_NORMAL),
+       imageForResourceID(IDR_TAB_ACTIVE_RIGHT, STROKE_NORMAL)));
+  CR_DEFINE_STATIC_LOCAL(
+      ui::ThreePartImage, heavyStroke,
+      (imageForResourceID(IDR_TAB_ACTIVE_LEFT, STROKE_HEAVY),
+       imageForResourceID(IDR_TAB_ACTIVE_CENTER, STROKE_HEAVY),
+       imageForResourceID(IDR_TAB_ACTIVE_RIGHT, STROKE_HEAVY)));
 
-  return stroke;
+  return stroke_type == STROKE_HEAVY ? heavyStroke : stroke;
 }
 
 CGFloat LineWidthFromContext(CGContextRef context) {
@@ -174,16 +189,21 @@ CGFloat LineWidthFromContext(CGContextRef context) {
     base::scoped_nsobject<GTMFadeTruncatingTextFieldCell> labelCell(
         [[GTMFadeTruncatingTextFieldCell alloc] initTextCell:@"Label"]);
     [labelCell setControlSize:NSSmallControlSize];
-    // Font size is 12, per Material Design spec.
-    CGFloat fontSize = 12;
-    if (!ui::MaterialDesignController::IsModeMaterial()) {
-      fontSize = [NSFont systemFontSizeForControlSize:NSSmallControlSize];
-    }
-    [labelCell setFont:[NSFont systemFontOfSize:fontSize]];
     [titleView_ setCell:labelCell];
     titleViewCell_ = labelCell;
 
     [self setWantsLayer:YES];  // -drawFill: needs a layer.
+
+    if (&NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification) {
+      NSNotificationCenter* center =
+          [[NSWorkspace sharedWorkspace] notificationCenter];
+      [center
+          addObserver:self
+             selector:@selector(accessibilityOptionsDidChange:)
+                 name:
+                     NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+               object:nil];
+    }
   }
   return self;
 }
@@ -191,6 +211,11 @@ CGFloat LineWidthFromContext(CGContextRef context) {
 - (void)dealloc {
   // Cancel any delayed requests that may still be pending (drags or hover).
   [NSObject cancelPreviousPerformRequestsWithTarget:self];
+  if (&NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification) {
+    NSNotificationCenter* center =
+        [[NSWorkspace sharedWorkspace] notificationCenter];
+    [center removeObserver:self];
+  }
   [super dealloc];
 }
 
@@ -199,11 +224,6 @@ CGFloat LineWidthFromContext(CGContextRef context) {
 // control-click.)
 - (NSMenu*)menu {
   if ([self isClosing])
-    return nil;
-
-  // Sheets, being window-modal, should block contextual menus. For some reason
-  // they do not. Disallow them ourselves.
-  if ([[self window] attachedSheet])
     return nil;
 
   return [controller_ menu];
@@ -328,15 +348,11 @@ CGFloat LineWidthFromContext(CGContextRef context) {
     }
   }
 
-  // Fire the action to select the tab.
-  [controller_ selectTab:self];
-
-  // Messaging the drag controller with |-endDrag:| would seem like the right
-  // thing to do here. But, when a tab has been detached, the controller's
-  // target is nil until the drag is finalized. Since |-mouseUp:| gets called
-  // via the manual event loop inside -[TabStripDragController
-  // maybeStartDrag:forTab:], the drag controller can end the dragging session
-  // itself directly after calling this.
+  // Except in the rapid tab closure case, mouseDown: triggers a nested run loop
+  // that swallows the mouseUp: event. There's a bug in AppKit that sends
+  // mouseUp: callbacks to inappropriate views, so it's doubly important that
+  // this method doesn't do anything. https://crbug.com/511095.
+  [super mouseUp:theEvent];
 }
 
 - (void)otherMouseUp:(NSEvent*)theEvent {
@@ -394,9 +410,6 @@ CGFloat LineWidthFromContext(CGContextRef context) {
     // Background tabs should not paint over the tab strip separator, which is
     // two pixels high in both lodpi and hidpi, and one pixel high in MD.
     CGFloat tabStripSeparatorLineWidth = [self cr_lineWidth];
-    if (!ui::MaterialDesignController::IsModeMaterial()) {
-      tabStripSeparatorLineWidth *= 2;
-    }
     clippingRect.origin.y = tabStripSeparatorLineWidth;
     clippingRect.size.height -= tabStripSeparatorLineWidth;
   }
@@ -452,9 +465,8 @@ CGFloat LineWidthFromContext(CGContextRef context) {
     if (hoverAlpha > 0) {
       if (themeProvider && !hasCustomTheme) {
         CGFloat whiteValue = 1;
-        // In MD Incognito mode, give the glow a darker value.
-        if (ui::MaterialDesignController::IsModeMaterial() && themeProvider
-            && themeProvider->InIncognitoMode()) {
+        // In Incognito mode, give the glow a darker value.
+        if (themeProvider && themeProvider->InIncognitoMode()) {
           whiteValue = 0.5;
         }
         base::scoped_nsobject<NSGradient> glow([NSGradient alloc]);
@@ -479,18 +491,19 @@ CGFloat LineWidthFromContext(CGContextRef context) {
 
 // Draws the tab outline.
 - (void)drawStroke:(NSRect)dirtyRect {
-  CGFloat alpha = [[self window] isMainWindow] ? 1.0 : tabs::kImageNoFocusAlpha;
+  // In MD, the tab stroke is always opaque.
+  CGFloat alpha = 1;
   NSRect bounds = [self bounds];
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    // In Material Design the tab strip separator is always 1 pixel high -
-    // add a clip rect to avoid drawing the tab edge over it.
-    NSRect clipRect = bounds;
-    clipRect.origin.y += [self cr_lineWidth];
-    NSRectClip(clipRect);
-    // In MD, the tab stroke is always opaque.
-    alpha = 1;
-  }
-  GetStrokeImage(state_ == NSOnState)
+  // In Material Design the tab strip separator is always 1 pixel high -
+  // add a clip rect to avoid drawing the tab edge over it.
+  NSRect clipRect = bounds;
+  clipRect.origin.y += [self cr_lineWidth];
+  NSRectClip(clipRect);
+  const ui::ThemeProvider* provider = [[self window] themeProvider];
+  GetStrokeImage(state_ == NSOnState,
+                 provider && provider->ShouldIncreaseContrast()
+                     ? STROKE_HEAVY
+                     : STROKE_NORMAL)
       .DrawInRect(bounds, NSCompositeSourceOver, alpha);
 }
 
@@ -595,15 +608,47 @@ CGFloat LineWidthFromContext(CGContextRef context) {
   [self setNeedsDisplayInRect:[titleView_ frame]];
 }
 
-- (SkColor)closeButtonColor {
-  return [[controller_ closeButton] iconColor];
+- (SkColor)iconColor {
+  if ([[self window] hasDarkTheme])
+    return kDarkModeIconColor;
+
+  const ui::ThemeProvider* themeProvider = [[self window] themeProvider];
+  if (themeProvider) {
+    bool useActiveTabTextColor = [self isActiveTab];
+
+    const SkColor titleColor =
+        useActiveTabTextColor
+            ? themeProvider->GetColor(ThemeProperties::COLOR_TAB_TEXT)
+            : themeProvider->GetColor(
+                  ThemeProperties::COLOR_BACKGROUND_TAB_TEXT);
+    return SkColorSetA(titleColor, 0xA0);
+  }
+
+  return tabs::kDefaultTabTextColor;
+}
+
+- (void)accessibilityOptionsDidChange:(id)ignored {
+  [self updateLabelFont];
+  [self setNeedsDisplay:YES];
+}
+
+- (void)updateLabelFont {
+  CGFloat fontSize = [titleViewCell_ font].pointSize;
+  const ui::ThemeProvider* provider = [[self window] themeProvider];
+  if (provider && provider->ShouldIncreaseContrast() && state_ == NSOnState) {
+    [titleViewCell_ setFont:[NSFont boldSystemFontOfSize:fontSize]];
+  } else {
+    [titleViewCell_ setFont:[NSFont systemFontOfSize:fontSize]];
+  }
 }
 
 - (void)setState:(NSCellStateValue)state {
   if (state_ == state)
     return;
   state_ = state;
+  [self updateLabelFont];
   [self setNeedsDisplay:YES];
+  [closeButton_ setNeedsDisplay:YES];
 }
 
 - (void)setClosing:(BOOL)closing {
@@ -822,8 +867,7 @@ CGFloat LineWidthFromContext(CGContextRef context) {
 
 @end  // @implementation TabView(Private)
 
-
-@implementation TabView(MaterialDesign)
+@implementation TabImageMaker
 
 + (NSBezierPath*)tabLeftEdgeBezierPathForContext:(CGContextRef)context {
   NSBezierPath* bezierPath = [NSBezierPath bezierPath];
@@ -867,7 +911,7 @@ CGFloat LineWidthFromContext(CGContextRef context) {
 
 + (void)setTabEdgeStrokeColor {
   static NSColor* strokeColor =
-      [skia::SkColorToCalibratedNSColor(SkColorSetARGB(76, 0, 0, 0)) retain];
+      [skia::SkColorToSRGBNSColor(SkColorSetARGB(76, 0, 0, 0)) retain];
   [strokeColor set];
 }
 
@@ -875,7 +919,7 @@ CGFloat LineWidthFromContext(CGContextRef context) {
   CGContextRef context = static_cast<CGContextRef>(
       [[NSGraphicsContext currentContext] graphicsPort]);
 
-  [TabView setTabEdgeStrokeColor];
+  [self setTabEdgeStrokeColor];
   [[self tabLeftEdgeBezierPathForContext:context] stroke];
 }
 
@@ -897,7 +941,7 @@ CGFloat LineWidthFromContext(CGContextRef context) {
   [translationTransform translateXBy:0 yBy:-1 + lineWidth / 2.];
   [middleEdgePath transformUsingAffineTransform:translationTransform];
 
-  [TabView setTabEdgeStrokeColor];
+  [self setTabEdgeStrokeColor];
   [middleEdgePath stroke];
 }
 
@@ -913,7 +957,7 @@ CGFloat LineWidthFromContext(CGContextRef context) {
   [transform translateXBy:-18 yBy:0];
   [leftEdgePath transformUsingAffineTransform:transform];
 
-  [TabView setTabEdgeStrokeColor];
+  [self setTabEdgeStrokeColor];
   [leftEdgePath stroke];
 }
 
@@ -952,4 +996,16 @@ CGFloat LineWidthFromContext(CGContextRef context) {
   [bezierPath fill];
 }
 
-@end  // @implementation TabView(MaterialDesign)
+@end
+
+@implementation TabHeavyImageMaker
+
+// For "Increase Contrast" mode, use flat black instead of semitransparent black
+// for the tab edge stroke.
++ (void)setTabEdgeStrokeColor {
+  static NSColor* heavyStrokeColor =
+      [skia::SkColorToSRGBNSColor(SK_ColorBLACK) retain];
+  [heavyStrokeColor set];
+}
+
+@end

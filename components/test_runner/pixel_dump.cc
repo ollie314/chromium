@@ -4,23 +4,24 @@
 
 #include "components/test_runner/pixel_dump.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "components/test_runner/layout_test_runtime_flags.h"
 // FIXME: Including platform_canvas.h here is a layering violation.
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/platform/Platform.h"
-#include "third_party/WebKit/public/platform/WebClipboard.h"
 #include "third_party/WebKit/public/platform/WebCompositeAndReadbackAsyncCallback.h"
-#include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebImage.h"
+#include "third_party/WebKit/public/platform/WebMockClipboard.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebPagePopup.h"
 #include "third_party/WebKit/public/web/WebPrintParams.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -85,7 +86,7 @@ void DrawSelectionRect(const PixelsDumpRequest& dump_request,
   canvas->drawIRect(rect, paint);
 }
 
-void CapturePixelsForPrinting(scoped_ptr<PixelsDumpRequest> dump_request) {
+void CapturePixelsForPrinting(std::unique_ptr<PixelsDumpRequest> dump_request) {
   dump_request->web_view->updateAllLifecyclePhases();
 
   blink::WebSize page_size_in_pixels = dump_request->web_view->size();
@@ -98,6 +99,8 @@ void CapturePixelsForPrinting(scoped_ptr<PixelsDumpRequest> dump_request) {
   sk_sp<SkCanvas> canvas(skia::TryCreateBitmapCanvas(
       page_size_in_pixels.width, totalHeight, is_opaque));
   if (!canvas) {
+    LOG(ERROR) << "Failed to create canvas width="
+               << page_size_in_pixels.width << " height=" << totalHeight;
     dump_request->callback.Run(SkBitmap());
     return;
   }
@@ -133,7 +136,7 @@ void CaptureCallback::didCompositeAndReadback(const SkBitmap& bitmap) {
   delete this;
 }
 
-void DidCapturePixelsAsync(scoped_ptr<PixelsDumpRequest> dump_request,
+void DidCapturePixelsAsync(std::unique_ptr<PixelsDumpRequest> dump_request,
                            const SkBitmap& bitmap) {
   SkCanvas canvas(bitmap);
   DrawSelectionRect(*dump_request, &canvas);
@@ -147,11 +150,11 @@ void DumpPixelsAsync(blink::WebView* web_view,
                      const LayoutTestRuntimeFlags& layout_test_runtime_flags,
                      float device_scale_factor_for_test,
                      const base::Callback<void(const SkBitmap&)>& callback) {
-  TRACE_EVENT0("shell", "WebTestProxyBase::CapturePixelsAsync");
+  TRACE_EVENT0("shell", "WebViewTestProxyBase::CapturePixelsAsync");
   DCHECK(!callback.is_null());
   DCHECK(!layout_test_runtime_flags.dump_drag_image());
 
-  scoped_ptr<PixelsDumpRequest> pixels_request(
+  std::unique_ptr<PixelsDumpRequest> pixels_request(
       new PixelsDumpRequest(web_view, layout_test_runtime_flags, callback));
 
   if (layout_test_runtime_flags.is_printing()) {
@@ -183,7 +186,9 @@ void CopyImageAtAndCapturePixels(
   uint64_t sequence_number =
       blink::Platform::current()->clipboard()->sequenceNumber(
           blink::WebClipboard::Buffer());
-  web_view->copyImageAt(blink::WebPoint(x, y));
+  // TODO(lukasza): Support image capture in OOPIFs for
+  // https://crbug.com/477150.
+  web_view->mainFrame()->toWebLocalFrame()->copyImageAt(blink::WebPoint(x, y));
   if (sequence_number ==
       blink::Platform::current()->clipboard()->sequenceNumber(
           blink::WebClipboard::Buffer())) {
@@ -192,9 +197,9 @@ void CopyImageAtAndCapturePixels(
     return;
   }
 
-  blink::WebData data = blink::Platform::current()->clipboard()->readImage(
-      blink::WebClipboard::Buffer());
-  blink::WebImage image = blink::WebImage::fromData(data, blink::WebSize());
+  blink::WebImage image = static_cast<blink::WebMockClipboard*>(
+                              blink::Platform::current()->clipboard())
+                              ->readRawImage(blink::WebClipboard::Buffer());
   const SkBitmap& bitmap = image.getSkBitmap();
   SkAutoLockPixels autoLock(bitmap);
   callback.Run(bitmap);

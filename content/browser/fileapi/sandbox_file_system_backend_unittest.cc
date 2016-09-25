@@ -13,7 +13,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/public/test/test_file_system_options.h"
 #include "storage/browser/fileapi/file_system_backend.h"
 #include "storage/browser/fileapi/file_system_url.h"
@@ -79,7 +79,7 @@ class SandboxFileSystemBackendTest : public testing::Test {
   void SetUpNewDelegate(const storage::FileSystemOptions& options) {
     delegate_.reset(new SandboxFileSystemBackendDelegate(
         NULL /* quota_manager_proxy */,
-        base::ThreadTaskRunnerHandle::Get().get(), data_dir_.path(),
+        base::ThreadTaskRunnerHandle::Get().get(), data_dir_.GetPath(),
         NULL /* special_storage_policy */, options));
   }
 
@@ -122,7 +122,7 @@ class SandboxFileSystemBackendTest : public testing::Test {
   }
 
   base::FilePath file_system_path() const {
-    return data_dir_.path().Append(
+    return data_dir_.GetPath().Append(
         SandboxFileSystemBackendDelegate::kFileSystemDirectory);
   }
 

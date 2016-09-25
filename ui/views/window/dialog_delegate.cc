@@ -16,6 +16,7 @@
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/style/platform_style.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 #include "ui/views/window/dialog_client_view.h"
@@ -29,7 +30,7 @@ namespace views {
 ////////////////////////////////////////////////////////////////////////////////
 // DialogDelegate:
 
-DialogDelegate::DialogDelegate() : supports_new_style_(true) {}
+DialogDelegate::DialogDelegate() : supports_custom_frame_(true) {}
 
 DialogDelegate::~DialogDelegate() {}
 
@@ -37,15 +38,19 @@ DialogDelegate::~DialogDelegate() {}
 Widget* DialogDelegate::CreateDialogWidget(WidgetDelegate* delegate,
                                            gfx::NativeWindow context,
                                            gfx::NativeView parent) {
-  return CreateDialogWidgetWithBounds(delegate, context, parent, gfx::Rect());
+  views::Widget* widget = new views::Widget;
+  views::Widget::InitParams params =
+      GetDialogWidgetInitParams(delegate, context, parent, gfx::Rect());
+  widget->Init(params);
+  return widget;
 }
 
 // static
-Widget* DialogDelegate::CreateDialogWidgetWithBounds(WidgetDelegate* delegate,
-                                                     gfx::NativeWindow context,
-                                                     gfx::NativeView parent,
-                                                     const gfx::Rect& bounds) {
-  views::Widget* widget = new views::Widget;
+Widget::InitParams DialogDelegate::GetDialogWidgetInitParams(
+    WidgetDelegate* delegate,
+    gfx::NativeWindow context,
+    gfx::NativeView parent,
+    const gfx::Rect& bounds) {
   views::Widget::InitParams params;
   params.delegate = delegate;
   params.bounds = bounds;
@@ -54,14 +59,14 @@ Widget* DialogDelegate::CreateDialogWidgetWithBounds(WidgetDelegate* delegate,
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   // The new style doesn't support unparented dialogs on Linux desktop.
   if (dialog)
-    dialog->supports_new_style_ &= parent != NULL;
+    dialog->supports_custom_frame_ &= parent != NULL;
 #elif defined(OS_WIN)
   // The new style doesn't support unparented dialogs on Windows Classic themes.
   if (dialog && !ui::win::IsAeroGlassEnabled())
-    dialog->supports_new_style_ &= parent != NULL;
+    dialog->supports_custom_frame_ &= parent != NULL;
 #endif
 
-  if (!dialog || dialog->UseNewStyleForThisDialog()) {
+  if (!dialog || dialog->ShouldUseCustomFrame()) {
     params.opacity = Widget::InitParams::TRANSLUCENT_WINDOW;
     params.remove_standard_frame = true;
 #if !defined(OS_MACOSX)
@@ -80,8 +85,7 @@ Widget* DialogDelegate::CreateDialogWidgetWithBounds(WidgetDelegate* delegate,
   // method behaviors.
   params.child = parent && (delegate->GetModalType() == ui::MODAL_TYPE_CHILD);
 #endif
-  widget->Init(params);
-  return widget;
+  return params;
 }
 
 View* DialogDelegate::CreateExtraView() {
@@ -116,7 +120,12 @@ bool DialogDelegate::Close() {
 void DialogDelegate::UpdateButton(LabelButton* button, ui::DialogButton type) {
   button->SetText(GetDialogButtonLabel(type));
   button->SetEnabled(IsDialogButtonEnabled(type));
-  button->SetIsDefault(type == GetDefaultDialogButton());
+  bool is_default = type == GetDefaultDialogButton();
+  if (!PlatformStyle::kDialogDefaultButtonCanBeCancel &&
+      type == ui::DIALOG_BUTTON_CANCEL) {
+    is_default = false;
+  }
+  button->SetIsDefault(is_default);
 }
 
 int DialogDelegate::GetDialogButtons() const {
@@ -181,7 +190,7 @@ ClientView* DialogDelegate::CreateClientView(Widget* widget) {
 }
 
 NonClientFrameView* DialogDelegate::CreateNonClientFrameView(Widget* widget) {
-  if (UseNewStyleForThisDialog())
+  if (ShouldUseCustomFrame())
     return CreateDialogFrameView(widget);
   return WidgetDelegate::CreateNonClientFrameView(widget);
 }
@@ -203,8 +212,8 @@ NonClientFrameView* DialogDelegate::CreateDialogFrameView(Widget* widget) {
   return frame;
 }
 
-bool DialogDelegate::UseNewStyleForThisDialog() const {
-  return supports_new_style_;
+bool DialogDelegate::ShouldUseCustomFrame() const {
+  return supports_custom_frame_;
 }
 
 const DialogClientView* DialogDelegate::GetDialogClientView() const {
@@ -246,7 +255,10 @@ View* DialogDelegateView::GetContentsView() {
 }
 
 void DialogDelegateView::GetAccessibleState(ui::AXViewState* state) {
-  state->name = GetWindowTitle();
+  // This may be called by screen readers after the window is closed.
+  // See crbug.com/648280
+  if (!GetWidget()->IsClosed())
+    state->name = GetWindowTitle();
   state->role = ui::AX_ROLE_DIALOG;
 }
 

@@ -35,27 +35,15 @@ class TestGpuChannelManagerDelegate : public GpuChannelManagerDelegate {
  private:
   // GpuChannelManagerDelegate implementation:
   void SetActiveURL(const GURL& url) override;
-  void AddSubscription(int32_t client_id, unsigned int target) override;
   void DidCreateOffscreenContext(const GURL& active_url) override;
   void DidDestroyChannel(int client_id) override;
   void DidDestroyOffscreenContext(const GURL& active_url) override;
   void DidLoseContext(bool offscreen,
                       error::ContextLostReason reason,
                       const GURL& active_url) override;
-  void GpuMemoryUmaStats(const GPUMemoryUmaStats& params) override;
-  void RemoveSubscription(int32_t client_id, unsigned int target) override;
   void StoreShaderToDisk(int32_t client_id,
                          const std::string& key,
                          const std::string& shader) override;
-#if defined(OS_MACOSX)
-  void SendAcceleratedSurfaceBuffersSwapped(
-      int32_t surface_id,
-      CAContextID ca_context_id,
-      const gfx::ScopedRefCountedIOSurfaceMachPort& io_surface,
-      const gfx::Size& size,
-      float scale_factor,
-      std::vector<ui::LatencyInfo> latency_info) override;
-#endif
 #if defined(OS_WIN)
   void SendAcceleratedSurfaceCreatedChildWindow(
       SurfaceHandle parent_window,
@@ -88,7 +76,7 @@ class TestGpuChannel : public GpuChannel {
  public:
   TestGpuChannel(GpuChannelManager* gpu_channel_manager,
                  SyncPointManager* sync_point_manager,
-                 gfx::GLShareGroup* share_group,
+                 gl::GLShareGroup* share_group,
                  gles2::MailboxManager* mailbox_manager,
                  PreemptionFlag* preempting_flag,
                  PreemptionFlag* preempted_flag,
@@ -116,6 +104,9 @@ class GpuChannelTestCommon : public testing::Test {
  public:
   GpuChannelTestCommon();
   ~GpuChannelTestCommon() override;
+
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   GpuChannelManager* channel_manager() { return channel_manager_.get(); }

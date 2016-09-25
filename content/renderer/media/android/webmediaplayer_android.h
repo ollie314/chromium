@@ -35,7 +35,6 @@
 #include "third_party/WebKit/public/platform/WebSetSinkIdCallbacks.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/geometry/rect_f.h"
 
 namespace base {
@@ -134,8 +133,7 @@ class WebMediaPlayerAndroid
   // https://code.google.com/p/skia/issues/detail?id=1189
   void paint(blink::WebCanvas* canvas,
              const blink::WebRect& rect,
-             unsigned char alpha,
-             SkXfermode::Mode mode) override;
+             SkPaint&) override;
 
   bool copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface* gl,
                                          unsigned int texture,
@@ -222,15 +220,6 @@ class WebMediaPlayerAndroid
   // However, the actual GlTexture is not released to keep the video screenshot.
   void SuspendAndReleaseResources() override;
 
-#if defined(VIDEO_HOLE)
-  // Calculate the boundary rectangle of the media player (i.e. location and
-  // size of the video frame).
-  // Returns true if the geometry has been changed since the last call.
-  bool UpdateBoundaryRectangle() override;
-
-  const gfx::RectF GetBoundaryRectangle() override;
-#endif  // defined(VIDEO_HOLE)
-
   void setContentDecryptionModule(
       blink::WebContentDecryptionModule* cdm,
       blink::WebContentDecryptionModuleResult result) override;
@@ -286,6 +275,13 @@ class WebMediaPlayerAndroid
   bool IsKeySystemSupported(const std::string& key_system);
   bool IsLocalResource();
 
+  // Called whenever we create a new StreamTextureProxy and had a VFP::Client,
+  // or when we get a new VFP::Client and had a StreamTextureProxy.
+  // Sets |stream_texture_proxy_|'s OnFrameAvailable() to call |client|'s
+  // DidReceiveFrame().
+  // Passing nullptr to this method will clear the previous callback.
+  void UpdateStreamTextureProxyCallback(cc::VideoFrameProvider::Client* client);
+
   // Called when |cdm_context| is ready.
   void OnCdmContextReady(media::CdmContext* cdm_context);
 
@@ -318,6 +314,9 @@ class WebMediaPlayerAndroid
   // |defer_load_cb_| is null this is called immediately.
   void DoLoad(LoadType load_type, const blink::WebURL& url, CORSMode cors_mode);
 
+  // Returns if this video can be resumed in the background.
+  bool IsBackgroundVideoCandidate() const;
+
   blink::WebFrame* const frame_;
 
   blink::WebMediaPlayerClient* const client_;
@@ -346,6 +345,9 @@ class WebMediaPlayerAndroid
   // The video frame object used for rendering by the compositor.
   scoped_refptr<media::VideoFrame> current_frame_;
   base::Lock current_frame_lock_;
+
+  // A lazily created transparent video frame to be displayed in fullscreen.
+  scoped_refptr<media::VideoFrame> fullscreen_frame_;
 
   base::ThreadChecker main_thread_checker_;
 
@@ -385,13 +387,6 @@ class WebMediaPlayerAndroid
 
   // Player ID assigned by the |player_manager_|.
   int player_id_;
-
-  // User created media session id, if any.
-  //
-  // blink::WebMediaSession::DefaultID represents the non web
-  // exposed default media session. User created session ids are
-  // greater than blink::WebMediaSession::DefaultID.
-  const int media_session_id_;
 
   // Current player states.
   blink::WebMediaPlayer::NetworkState network_state_;
@@ -433,10 +428,6 @@ class WebMediaPlayerAndroid
   // blocked.
   ScopedStreamTextureProxy stream_texture_proxy_;
 
-  // Whether media player needs external surface.
-  // Only used for the VIDEO_HOLE logic.
-  bool needs_external_surface_;
-
   // Whether the player is in fullscreen.
   bool is_fullscreen_;
 
@@ -447,16 +438,6 @@ class WebMediaPlayerAndroid
   cc::VideoFrameProvider::Client* video_frame_provider_client_;
 
   std::unique_ptr<cc_blink::WebLayerImpl> video_weblayer_;
-
-#if defined(VIDEO_HOLE)
-  // A rectangle represents the geometry of video frame, when computed last
-  // time.
-  gfx::RectF last_computed_rect_;
-
-  // Whether to use the video overlay for all embedded video.
-  // True only for testing.
-  bool force_use_overlay_embedded_video_;
-#endif  // defined(VIDEO_HOLE)
 
   MediaPlayerHostMsg_Initialize_Type player_type_;
 
@@ -476,8 +457,6 @@ class WebMediaPlayerAndroid
   // systems, a browser side CDM will be used and we set CDM by calling
   // player_manager_->SetCdm() directly.
   MediaSourceDelegate::CdmReadyCB cdm_ready_cb_;
-
-  SkBitmap bitmap_;
 
   // Whether stored credentials are allowed to be passed to the server.
   bool allow_stored_credentials_;

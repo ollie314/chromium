@@ -13,13 +13,13 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
@@ -43,13 +43,13 @@
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/user_manager.h"
-#include "chrome/browser/ui/webui/signin/get_auth_frame.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
+#include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/about_signin_internals.h"
 #include "components/signin/core/browser/account_tracker_service.h"
@@ -60,6 +60,7 @@
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
@@ -67,7 +68,6 @@
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "grit/components_strings.h"
 #include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -97,11 +97,9 @@ void RedirectToNtpOrAppsPage(content::WebContents* contents,
                    signin_metrics::AccessPoint::ACCESS_POINT_APPS_PAGE_LINK
                ? chrome::kChromeUIAppsURL
                : chrome::kChromeUINewTabURL);
-  content::OpenURLParams params(url,
-                                content::Referrer(),
-                                CURRENT_TAB,
-                                ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
-                                false);
+  content::OpenURLParams params(url, content::Referrer(),
+                                WindowOpenDisposition::CURRENT_TAB,
+                                ui::PAGE_TRANSITION_AUTO_TOPLEVEL, false);
   contents->OpenURL(params);
 }
 
@@ -219,10 +217,8 @@ void ConfirmEmailDialogDelegate::OnClosed() {
 void ConfirmEmailDialogDelegate::OnLinkClicked(
     WindowOpenDisposition disposition) {
   content::OpenURLParams params(
-      GURL(chrome::kChromeSyncMergeTroubleshootingURL),
-      content::Referrer(),
-      NEW_POPUP,
-      ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
+      GURL(chrome::kChromeSyncMergeTroubleshootingURL), content::Referrer(),
+      WindowOpenDisposition::NEW_POPUP, ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
       false);
   // It is guaranteed that |web_contents_| is valid here because when it's
   // deleted, the dialog is immediately closed and no further action can be
@@ -332,7 +328,7 @@ void InlineSigninHelper::OnClientOAuthSuccess(const ClientOAuthResult& result) {
     }
     LogSigninReason(reason);
   } else {
-    ProfileSyncService* sync_service =
+    browser_sync::ProfileSyncService* sync_service =
         ProfileSyncServiceFactory::GetForProfile(profile_);
     SigninErrorController* error_controller =
         SigninErrorControllerFactory::GetForProfile(profile_);
@@ -693,19 +689,34 @@ void InlineLoginHandlerImpl::CompleteLogin(const base::ListValue* args) {
   // taken from web_ui().
   Profile* profile = Profile::FromWebUI(web_ui());
   if (IsSystemProfile(profile)) {
-    // Switch to the profile and finish the login.  Don't pass a handler pointer
-    // since it will be destroyed before the callback runs.
     ProfileManager* manager = g_browser_process->profile_manager();
     base::FilePath path = profiles::GetPathOfProfileWithEmail(manager, email);
     if (!path.empty()) {
-      FinishCompleteLoginParams params(nullptr, partition, current_url, path,
-                                       confirm_untrusted_signin_, email,
-                                       gaia_id, password, session_index,
-                                       auth_code, choose_what_to_sync);
-      ProfileManager::CreateCallback callback = base::Bind(
-          &InlineLoginHandlerImpl::FinishCompleteLogin, params);
-      profiles::SwitchToProfile(path, true, callback,
-                                ProfileMetrics::SWITCH_PROFILE_UNLOCK);
+      signin_metrics::Reason reason =
+          signin::GetSigninReasonForPromoURL(current_url);
+      // If we are only reauthenticating a profile in the user manager (and not
+      // unlocking it), load the profile and finish the login.
+      if (reason == signin_metrics::Reason::REASON_REAUTHENTICATION) {
+        FinishCompleteLoginParams params(
+            this, partition, current_url, base::FilePath(),
+            confirm_untrusted_signin_, email, gaia_id, password, session_index,
+            auth_code, choose_what_to_sync);
+        ProfileManager::CreateCallback callback =
+            base::Bind(&InlineLoginHandlerImpl::FinishCompleteLogin, params);
+        profiles::LoadProfileAsync(path, callback);
+      } else {
+        // Otherwise, switch to the profile and finish the login. Pass the
+        // profile path so it can be marked as unlocked. Don't pass a handler
+        // pointer since it will be destroyed before the callback runs.
+        FinishCompleteLoginParams params(nullptr, partition, current_url, path,
+                                         confirm_untrusted_signin_, email,
+                                         gaia_id, password, session_index,
+                                         auth_code, choose_what_to_sync);
+        ProfileManager::CreateCallback callback =
+            base::Bind(&InlineLoginHandlerImpl::FinishCompleteLogin, params);
+        profiles::SwitchToProfile(path, true, callback,
+                                  ProfileMetrics::SWITCH_PROFILE_UNLOCK);
+      }
     }
   } else {
     FinishCompleteLogin(
@@ -836,7 +847,7 @@ void InlineLoginHandlerImpl::FinishCompleteLogin(
                          params.choose_what_to_sync,
                          params.confirm_untrusted_signin);
 
-  // If opened from user manager to reauthenticate, make sure the user manager
+  // If opened from user manager to unlock a profile, make sure the user manager
   // is closed and that the profile is marked as unlocked.
   if (!params.profile_path.empty()) {
     UserManager::Hide();
@@ -851,10 +862,8 @@ void InlineLoginHandlerImpl::FinishCompleteLogin(
   }
 
   if (params.handler)
-    params.handler->
-        web_ui()->CallJavascriptFunction("inline.login.closeDialog");
-
-  CloseModalSigninIfNeeded(params.handler);
+    params.handler->web_ui()->CallJavascriptFunctionUnsafe(
+        "inline.login.closeDialog");
 }
 
 void InlineLoginHandlerImpl::HandleLoginError(const std::string& error_msg) {

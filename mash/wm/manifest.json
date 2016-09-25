@@ -1,5 +1,0 @@
-{
-  "name": "mojo:desktop_wm",
-  "display_name": "Window Manager",
-  "capabilities": { "*": ["*"] }
-}

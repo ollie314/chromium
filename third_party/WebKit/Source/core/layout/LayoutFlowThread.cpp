@@ -30,7 +30,6 @@
 #include "core/layout/LayoutFlowThread.h"
 
 #include "core/layout/LayoutMultiColumnSet.h"
-#include "core/layout/LayoutView.h"
 
 namespace blink {
 
@@ -100,12 +99,7 @@ void LayoutFlowThread::validateColumnSets()
 bool LayoutFlowThread::mapToVisualRectInAncestorSpace(const LayoutBoxModelObject* ancestor, LayoutRect& rect, VisualRectFlags visualRectFlags) const
 {
     ASSERT(ancestor != this); // A flow thread should never be an invalidation container.
-    // |rect| is a layout rectangle, where the block direction coordinate is flipped for writing
-    // mode. fragmentsBoundingBox(), on the other hand, works on physical rectangles, so we need to
-    // flip the rectangle before and after calling it.
-    flipForWritingMode(rect);
     rect = fragmentsBoundingBox(rect);
-    flipForWritingMode(rect);
     return LayoutBlockFlow::mapToVisualRectInAncestorSpace(ancestor, rect, visualRectFlags);
 }
 
@@ -136,7 +130,7 @@ bool LayoutFlowThread::nodeAtPoint(HitTestResult& result, const HitTestLocation&
 
 LayoutUnit LayoutFlowThread::pageLogicalHeightForOffset(LayoutUnit offset)
 {
-    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(offset);
+    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(offset, AssociateWithLatterPage);
     if (!columnSet)
         return LayoutUnit();
 
@@ -145,7 +139,7 @@ LayoutUnit LayoutFlowThread::pageLogicalHeightForOffset(LayoutUnit offset)
 
 LayoutUnit LayoutFlowThread::pageRemainingLogicalHeightForOffset(LayoutUnit offset, PageBoundaryRule pageBoundaryRule)
 {
-    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(offset);
+    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(offset, pageBoundaryRule);
     if (!columnSet)
         return LayoutUnit();
 
@@ -163,23 +157,10 @@ void LayoutFlowThread::generateColumnSetIntervalTree()
 
 LayoutUnit LayoutFlowThread::nextLogicalTopForUnbreakableContent(LayoutUnit flowThreadOffset, LayoutUnit contentLogicalHeight) const
 {
-    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(flowThreadOffset);
+    LayoutMultiColumnSet* columnSet = columnSetAtBlockOffset(flowThreadOffset, AssociateWithLatterPage);
     if (!columnSet)
         return flowThreadOffset;
     return columnSet->nextLogicalTopForUnbreakableContent(flowThreadOffset, contentLogicalHeight);
-}
-
-void LayoutFlowThread::collectLayerFragments(PaintLayerFragments& layerFragments, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRectInFlowThread)
-{
-    ASSERT(!m_columnSetsInvalidated);
-
-    LayoutRect dirtyRectInMulticolContainer(dirtyRectInFlowThread);
-    dirtyRectInMulticolContainer.moveBy(location());
-
-    for (LayoutMultiColumnSetList::const_iterator iter = m_multiColumnSetList.begin(); iter != m_multiColumnSetList.end(); ++iter) {
-        LayoutMultiColumnSet* columnSet = *iter;
-        columnSet->collectLayerFragments(layerFragments, layerBoundingBox, dirtyRectInMulticolContainer);
-    }
 }
 
 LayoutRect LayoutFlowThread::fragmentsBoundingBox(const LayoutRect& layerBoundingBox) const
@@ -191,6 +172,24 @@ LayoutRect LayoutFlowThread::fragmentsBoundingBox(const LayoutRect& layerBoundin
         result.unite(columnSet->fragmentsBoundingBox(layerBoundingBox));
 
     return result;
+}
+
+void LayoutFlowThread::flowThreadToContainingCoordinateSpace(LayoutUnit& blockPosition, LayoutUnit& inlinePosition) const
+{
+    LayoutPoint position(inlinePosition, blockPosition);
+    // First we have to make |position| physical, because that's what offsetLeft() expects and returns.
+    if (!isHorizontalWritingMode())
+        position = position.transposedPoint();
+    position = flipForWritingMode(position);
+
+    position.move(columnOffset(position));
+
+    // Make |position| logical again, and read out the values.
+    position = flipForWritingMode(position);
+    if (!isHorizontalWritingMode())
+        position = position.transposedPoint();
+    blockPosition = position.y();
+    inlinePosition = position.x();
 }
 
 void LayoutFlowThread::MultiColumnSetSearchAdapter::collectIfNeeded(const MultiColumnSetInterval& interval)

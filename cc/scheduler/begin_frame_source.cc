@@ -9,6 +9,7 @@
 #include "base/auto_reset.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
@@ -33,11 +34,6 @@ const BeginFrameArgs& BeginFrameObserverBase::LastUsedBeginFrameArgs() const {
   return last_begin_frame_args_;
 }
 void BeginFrameObserverBase::OnBeginFrame(const BeginFrameArgs& args) {
-  DEBUG_FRAMES("BeginFrameObserverBase::OnBeginFrame",
-               "last args",
-               last_begin_frame_args_.AsValue(),
-               "new args",
-               args.AsValue());
   DCHECK(args.IsValid());
   DCHECK(args.frame_time >= last_begin_frame_args_.frame_time);
   bool used = OnBeginFrameDerivedImpl(args);
@@ -48,169 +44,101 @@ void BeginFrameObserverBase::OnBeginFrame(const BeginFrameArgs& args) {
   }
 }
 
-void BeginFrameObserverBase::AsValueInto(
-    base::trace_event::TracedValue* dict) const {
-  dict->BeginDictionary("last_begin_frame_args_");
-  last_begin_frame_args_.AsValueInto(dict);
-  dict->EndDictionary();
-  dict->SetInteger("dropped_begin_frame_args_", dropped_begin_frame_args_);
-}
-
-// BeginFrameSourceBase ------------------------------------------------------
-BeginFrameSourceBase::BeginFrameSourceBase()
-    : paused_(false), inside_as_value_into_(false) {}
-
-BeginFrameSourceBase::~BeginFrameSourceBase() {}
-
-void BeginFrameSourceBase::AddObserver(BeginFrameObserver* obs) {
-  DEBUG_FRAMES("BeginFrameSourceBase::AddObserver", "num observers",
-               observers_.size(), "to add observer", obs);
-  DCHECK(obs);
-  DCHECK(observers_.find(obs) == observers_.end())
-      << "AddObserver cannot be called with an observer that was already added";
-  bool observers_was_empty = observers_.empty();
-  observers_.insert(obs);
-  if (observers_was_empty)
-    OnNeedsBeginFramesChanged(true);
-  obs->OnBeginFrameSourcePausedChanged(paused_);
-}
-
-void BeginFrameSourceBase::RemoveObserver(BeginFrameObserver* obs) {
-  DEBUG_FRAMES("BeginFrameSourceBase::RemoveObserver", "num observers",
-               observers_.size(), "removed observer", obs);
-  DCHECK(obs);
-  DCHECK(observers_.find(obs) != observers_.end())
-      << "RemoveObserver cannot be called with an observer that wasn't added";
-  observers_.erase(obs);
-  if (observers_.empty())
-    OnNeedsBeginFramesChanged(false);
-}
-
-void BeginFrameSourceBase::CallOnBeginFrame(const BeginFrameArgs& args) {
-  DEBUG_FRAMES("BeginFrameSourceBase::CallOnBeginFrame", "num observers",
-               observers_.size(), "args", args.AsValue());
-  std::set<BeginFrameObserver*> observers(observers_);
-  for (auto& it : observers)
-    it->OnBeginFrame(args);
-}
-
-void BeginFrameSourceBase::SetBeginFrameSourcePaused(bool paused) {
-  if (paused_ == paused)
-    return;
-  paused_ = paused;
-  std::set<BeginFrameObserver*> observers(observers_);
-  for (auto& it : observers)
-    it->OnBeginFrameSourcePausedChanged(paused_);
-}
-
-// Tracing support
-void BeginFrameSourceBase::AsValueInto(
-    base::trace_event::TracedValue* dict) const {
-  // As the observer might try to trace the source, prevent an infinte loop
-  // from occuring.
-  if (inside_as_value_into_) {
-    dict->SetString("observer", "<loop detected>");
-    return;
-  }
-
-  {
-    base::AutoReset<bool> prevent_loops(
-        const_cast<bool*>(&inside_as_value_into_), true);
-    dict->BeginArray("observers");
-    for (const auto& it : observers_) {
-      dict->BeginDictionary();
-      it->AsValueInto(dict);
-      dict->EndDictionary();
-    }
-    dict->EndArray();
-  }
-}
-
-// BackToBackBeginFrameSource --------------------------------------------
-BackToBackBeginFrameSource::BackToBackBeginFrameSource(
-    base::SingleThreadTaskRunner* task_runner)
-    : BeginFrameSourceBase(), task_runner_(task_runner), weak_factory_(this) {
-  DCHECK(task_runner);
-}
-
-BackToBackBeginFrameSource::~BackToBackBeginFrameSource() {
-}
-
-base::TimeTicks BackToBackBeginFrameSource::Now() {
-  return base::TimeTicks::Now();
-}
-
-// BeginFrameSourceBase support
-void BackToBackBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
-  DCHECK(observers_.empty())
-      << "BackToBackBeginFrameSource only supports a single observer";
-  BeginFrameSourceBase::AddObserver(obs);
-}
-
-void BackToBackBeginFrameSource::OnNeedsBeginFramesChanged(
-    bool needs_begin_frames) {
-  if (needs_begin_frames) {
-    PostBeginFrame();
-  } else {
-    begin_frame_task_.Cancel();
-  }
-}
-
-void BackToBackBeginFrameSource::PostBeginFrame() {
-  DCHECK(needs_begin_frames());
-  begin_frame_task_.Reset(base::Bind(&BackToBackBeginFrameSource::BeginFrame,
-                                     weak_factory_.GetWeakPtr()));
-  task_runner_->PostTask(FROM_HERE, begin_frame_task_.callback());
-}
-
-void BackToBackBeginFrameSource::BeginFrame() {
-  DCHECK(needs_begin_frames());
-  DCHECK(!begin_frame_task_.IsCancelled());
-  begin_frame_task_.Cancel();
-  base::TimeTicks now = Now();
-  BeginFrameArgs args = BeginFrameArgs::Create(
-      BEGINFRAME_FROM_HERE, now, now + BeginFrameArgs::DefaultInterval(),
-      BeginFrameArgs::DefaultInterval(), BeginFrameArgs::NORMAL);
-  CallOnBeginFrame(args);
-}
-
-void BackToBackBeginFrameSource::DidFinishFrame(size_t remaining_frames) {
-  BeginFrameSourceBase::DidFinishFrame(remaining_frames);
-  if (needs_begin_frames() && remaining_frames == 0)
-    PostBeginFrame();
-}
-
-// Tracing support
-void BackToBackBeginFrameSource::AsValueInto(
-    base::trace_event::TracedValue* dict) const {
-  dict->SetString("type", "BackToBackBeginFrameSource");
-  BeginFrameSourceBase::AsValueInto(dict);
+bool StubBeginFrameSource::IsThrottled() const {
+  return true;
 }
 
 // SyntheticBeginFrameSource ---------------------------------------------
-SyntheticBeginFrameSource::SyntheticBeginFrameSource(
-    base::SingleThreadTaskRunner* task_runner,
-    base::TimeDelta initial_vsync_interval)
-    : time_source_(
-          DelayBasedTimeSource::Create(initial_vsync_interval, task_runner)) {
+SyntheticBeginFrameSource::~SyntheticBeginFrameSource() = default;
+
+// BackToBackBeginFrameSource --------------------------------------------
+BackToBackBeginFrameSource::BackToBackBeginFrameSource(
+    std::unique_ptr<DelayBasedTimeSource> time_source)
+    : time_source_(std::move(time_source)), weak_factory_(this) {
   time_source_->SetClient(this);
+  // The time_source_ ticks immediately, so we SetActive(true) for a single
+  // tick when we need it, and keep it as SetActive(false) otherwise.
+  time_source_->SetTimebaseAndInterval(base::TimeTicks(), base::TimeDelta());
 }
 
-SyntheticBeginFrameSource::SyntheticBeginFrameSource(
+BackToBackBeginFrameSource::~BackToBackBeginFrameSource() = default;
+
+void BackToBackBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
+  DCHECK(obs);
+  DCHECK(observers_.find(obs) == observers_.end());
+  observers_.insert(obs);
+  pending_begin_frame_observers_.insert(obs);
+  obs->OnBeginFrameSourcePausedChanged(false);
+  time_source_->SetActive(true);
+}
+
+void BackToBackBeginFrameSource::RemoveObserver(BeginFrameObserver* obs) {
+  DCHECK(obs);
+  DCHECK(observers_.find(obs) != observers_.end());
+  observers_.erase(obs);
+  pending_begin_frame_observers_.erase(obs);
+  if (observers_.empty())
+    time_source_->SetActive(false);
+}
+
+void BackToBackBeginFrameSource::DidFinishFrame(BeginFrameObserver* obs,
+                                                size_t remaining_frames) {
+  if (remaining_frames == 0 && observers_.find(obs) != observers_.end()) {
+    pending_begin_frame_observers_.insert(obs);
+    time_source_->SetActive(true);
+  }
+}
+
+bool BackToBackBeginFrameSource::IsThrottled() const {
+  return false;
+}
+
+void BackToBackBeginFrameSource::OnTimerTick() {
+  base::TimeTicks frame_time = time_source_->LastTickTime();
+  base::TimeDelta default_interval = BeginFrameArgs::DefaultInterval();
+  BeginFrameArgs args = BeginFrameArgs::Create(
+      BEGINFRAME_FROM_HERE, frame_time, frame_time + default_interval,
+      default_interval, BeginFrameArgs::NORMAL);
+
+  // This must happen after getting the LastTickTime() from the time source.
+  time_source_->SetActive(false);
+
+  std::unordered_set<BeginFrameObserver*> pending_observers;
+  pending_observers.swap(pending_begin_frame_observers_);
+  for (BeginFrameObserver* obs : pending_observers)
+    obs->OnBeginFrame(args);
+}
+
+// DelayBasedBeginFrameSource ---------------------------------------------
+DelayBasedBeginFrameSource::DelayBasedBeginFrameSource(
     std::unique_ptr<DelayBasedTimeSource> time_source)
     : time_source_(std::move(time_source)) {
   time_source_->SetClient(this);
 }
 
-SyntheticBeginFrameSource::~SyntheticBeginFrameSource() {}
+DelayBasedBeginFrameSource::~DelayBasedBeginFrameSource() = default;
 
-void SyntheticBeginFrameSource::OnUpdateVSyncParameters(
-    base::TimeTicks new_vsync_timebase,
-    base::TimeDelta new_vsync_interval) {
-  time_source_->SetTimebaseAndInterval(new_vsync_timebase, new_vsync_interval);
+void DelayBasedBeginFrameSource::OnUpdateVSyncParameters(
+    base::TimeTicks timebase,
+    base::TimeDelta interval) {
+  if (!authoritative_interval_.is_zero()) {
+    interval = authoritative_interval_;
+  } else if (interval.is_zero()) {
+    // TODO(brianderson): We should not be receiving 0 intervals.
+    interval = BeginFrameArgs::DefaultInterval();
+  }
+
+  last_timebase_ = timebase;
+  time_source_->SetTimebaseAndInterval(timebase, interval);
 }
 
-BeginFrameArgs SyntheticBeginFrameSource::CreateBeginFrameArgs(
+void DelayBasedBeginFrameSource::SetAuthoritativeVSyncInterval(
+    base::TimeDelta interval) {
+  authoritative_interval_ = interval;
+  OnUpdateVSyncParameters(last_timebase_, interval);
+}
+
+BeginFrameArgs DelayBasedBeginFrameSource::CreateBeginFrameArgs(
     base::TimeTicks frame_time,
     BeginFrameArgs::BeginFrameArgsType type) {
   return BeginFrameArgs::Create(BEGINFRAME_FROM_HERE, frame_time,
@@ -218,9 +146,13 @@ BeginFrameArgs SyntheticBeginFrameSource::CreateBeginFrameArgs(
                                 time_source_->Interval(), type);
 }
 
-// BeginFrameSource support
-void SyntheticBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
-  BeginFrameSourceBase::AddObserver(obs);
+void DelayBasedBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
+  DCHECK(obs);
+  DCHECK(observers_.find(obs) == observers_.end());
+
+  observers_.insert(obs);
+  obs->OnBeginFrameSourcePausedChanged(false);
+  time_source_->SetActive(true);
   BeginFrameArgs args = CreateBeginFrameArgs(
       time_source_->NextTickTime() - time_source_->Interval(),
       BeginFrameArgs::MISSED);
@@ -232,35 +164,90 @@ void SyntheticBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
   }
 }
 
-void SyntheticBeginFrameSource::OnNeedsBeginFramesChanged(
-    bool needs_begin_frames) {
-  time_source_->SetActive(needs_begin_frames);
+void DelayBasedBeginFrameSource::RemoveObserver(BeginFrameObserver* obs) {
+  DCHECK(obs);
+  DCHECK(observers_.find(obs) != observers_.end());
+
+  observers_.erase(obs);
+  if (observers_.empty())
+    time_source_->SetActive(false);
 }
 
-// DelayBasedTimeSourceClient support
-void SyntheticBeginFrameSource::OnTimerTick() {
+bool DelayBasedBeginFrameSource::IsThrottled() const {
+  return true;
+}
+
+void DelayBasedBeginFrameSource::OnTimerTick() {
   BeginFrameArgs args = CreateBeginFrameArgs(time_source_->LastTickTime(),
                                              BeginFrameArgs::NORMAL);
-  std::set<BeginFrameObserver*> observers(observers_);
-  for (auto& it : observers) {
-    BeginFrameArgs last_args = it->LastUsedBeginFrameArgs();
+  std::unordered_set<BeginFrameObserver*> observers(observers_);
+  for (auto* obs : observers) {
+    BeginFrameArgs last_args = obs->LastUsedBeginFrameArgs();
     if (!last_args.IsValid() ||
         (args.frame_time >
-         last_args.frame_time + args.interval / kDoubleTickDivisor)) {
-      it->OnBeginFrame(args);
+         last_args.frame_time + args.interval / kDoubleTickDivisor))
+      obs->OnBeginFrame(args);
+  }
+}
+
+ExternalBeginFrameSource::ExternalBeginFrameSource(
+    ExternalBeginFrameSourceClient* client)
+    : client_(client) {
+  DCHECK(client_);
+}
+
+ExternalBeginFrameSource::~ExternalBeginFrameSource() = default;
+
+void ExternalBeginFrameSource::AddObserver(BeginFrameObserver* obs) {
+  DCHECK(obs);
+  DCHECK(observers_.find(obs) == observers_.end());
+
+  bool observers_was_empty = observers_.empty();
+  observers_.insert(obs);
+  obs->OnBeginFrameSourcePausedChanged(paused_);
+  if (observers_was_empty)
+    client_->OnNeedsBeginFrames(true);
+
+  // Send a MISSED begin frame if necessary.
+  if (missed_begin_frame_args_.IsValid()) {
+    BeginFrameArgs last_args = obs->LastUsedBeginFrameArgs();
+    if (!last_args.IsValid() ||
+        (missed_begin_frame_args_.frame_time > last_args.frame_time)) {
+      obs->OnBeginFrame(missed_begin_frame_args_);
     }
   }
 }
 
-// Tracing support
-void SyntheticBeginFrameSource::AsValueInto(
-    base::trace_event::TracedValue* dict) const {
-  dict->SetString("type", "SyntheticBeginFrameSource");
-  BeginFrameSourceBase::AsValueInto(dict);
+void ExternalBeginFrameSource::RemoveObserver(BeginFrameObserver* obs) {
+  DCHECK(obs);
+  DCHECK(observers_.find(obs) != observers_.end());
 
-  dict->BeginDictionary("time_source");
-  time_source_->AsValueInto(dict);
-  dict->EndDictionary();
+  observers_.erase(obs);
+  if (observers_.empty()) {
+    missed_begin_frame_args_ = BeginFrameArgs();
+    client_->OnNeedsBeginFrames(false);
+  }
+}
+
+bool ExternalBeginFrameSource::IsThrottled() const {
+  return true;
+}
+
+void ExternalBeginFrameSource::OnSetBeginFrameSourcePaused(bool paused) {
+  if (paused_ == paused)
+    return;
+  paused_ = paused;
+  std::unordered_set<BeginFrameObserver*> observers(observers_);
+  for (auto* obs : observers)
+    obs->OnBeginFrameSourcePausedChanged(paused_);
+}
+
+void ExternalBeginFrameSource::OnBeginFrame(const BeginFrameArgs& args) {
+  missed_begin_frame_args_ = args;
+  missed_begin_frame_args_.type = BeginFrameArgs::MISSED;
+  std::unordered_set<BeginFrameObserver*> observers(observers_);
+  for (auto* obs : observers)
+    obs->OnBeginFrame(args);
 }
 
 }  // namespace cc

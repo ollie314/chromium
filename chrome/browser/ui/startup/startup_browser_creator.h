@@ -99,10 +99,6 @@ class StartupBrowserCreator {
     return show_main_browser_window_;
   }
 
-  bool show_desktop_search_redirection_infobar() const {
-    return show_desktop_search_redirection_infobar_;
-  }
-
   // For faking that no profiles have been launched yet.
   static void ClearLaunchedProfilesForTesting();
 
@@ -125,16 +121,11 @@ class StartupBrowserCreator {
                           Profile* last_used_profile,
                           const Profiles& last_opened_profiles);
 
-  // Returns the list of URLs to open from the command line. The returned vector
-  // is empty if the user didn't specify any URLs on the command line.
-  // |show_search_redirection_infobar| is set to true if an infobar should be
-  // shown to inform the user that a desktop search has been redirected to the
-  // default search engine.
+  // Returns the list of URLs to open from the command line.
   static std::vector<GURL> GetURLsFromCommandLine(
       const base::CommandLine& command_line,
       const base::FilePath& cur_dir,
-      Profile* profile,
-      bool* show_desktop_search_redirection_infobar);
+      Profile* profile);
 
   // This function performs command-line handling and is invoked only after
   // start up (for example when we get a start request for another process).
@@ -169,10 +160,6 @@ class StartupBrowserCreator {
   // created. Default is true.
   bool show_main_browser_window_;
 
-  // Whether an infobar should be shown to inform the user that a desktop search
-  // has been redirected to the default search engine.
-  bool show_desktop_search_redirection_infobar_;
-
   // True if we have already read and reset the preference kWasRestarted. (A
   // member variable instead of a static variable inside WasRestarted because
   // of testing.)
@@ -191,5 +178,22 @@ bool HasPendingUncleanExit(Profile* profile);
 // startup.
 base::FilePath GetStartupProfilePath(const base::FilePath& user_data_dir,
                                      const base::CommandLine& command_line);
+
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+// Returns the profile that should be loaded on process startup. This is either
+// the profile returned by GetStartupProfilePath, or the guest profile if the
+// above profile is locked. The guest profile denotes that we should open the
+// user manager. Returns null if the above profile cannot be opened. In case of
+// opening the user manager, returns null if either the guest profile or the
+// system profile cannot be opened.
+Profile* GetStartupProfile(const base::FilePath& user_data_dir,
+                           const base::CommandLine& command_line);
+
+// Returns the profile that should be loaded on process startup when
+// GetStartupProfile() returns null. As with GetStartupProfile(), returning the
+// guest profile means the caller should open the user manager. This may return
+// null if neither any profile nor the user manager can be opened.
+Profile* GetFallbackStartupProfile();
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 
 #endif  // CHROME_BROWSER_UI_STARTUP_STARTUP_BROWSER_CREATOR_H_

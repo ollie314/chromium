@@ -120,6 +120,7 @@ const base::FilePath::CharType kFrameworkName[] =
 
 #if defined(OS_WIN)
 const base::FilePath::CharType kBrowserResourcesDll[] = FPL("chrome.dll");
+const base::FilePath::CharType kChromeElfDllName[] = FPL("chrome_elf.dll");
 const base::FilePath::CharType kStatusTrayWindowClass[] =
     FPL("Chrome_StatusTrayWindow");
 #endif  // defined(OS_WIN)
@@ -148,10 +149,12 @@ const base::FilePath::CharType kLocalStorePoolName[] = FPL("LocalStorePool");
 const base::FilePath::CharType kMediaCacheDirname[] = FPL("Media Cache");
 const base::FilePath::CharType kNetworkPersistentStateFilename[] =
     FPL("Network Persistent State");
-const base::FilePath::CharType kOfflinePageArchviesDirname[] =
+const base::FilePath::CharType kOfflinePageArchivesDirname[] =
     FPL("Offline Pages/archives");
 const base::FilePath::CharType kOfflinePageMetadataDirname[] =
     FPL("Offline Pages/metadata");
+const base::FilePath::CharType kOfflinePageRequestQueueDirname[] =
+    FPL("Offline Pages/request_queue");
 const base::FilePath::CharType kPreferencesFilename[] = FPL("Preferences");
 const base::FilePath::CharType kProtectedPreferencesFilenameDeprecated[] =
     FPL("Protected Preferences");
@@ -197,13 +200,6 @@ const float kMaxShareOfExtensionProcesses = 0.30f;
 #if defined(OS_LINUX)
 const int kLowestRendererOomScore = 300;
 const int kHighestRendererOomScore = 1000;
-#endif
-
-#if defined(OS_WIN)
-const wchar_t kMetroNavigationAndSearchMessage[] =
-    L"CHROME_METRO_NAV_SEARCH_REQUEST";
-const wchar_t kMetroGetCurrentTabInfoMessage[] =
-    L"CHROME_METRO_GET_CURRENT_TAB_INFO";
 #endif
 
 #if defined(OS_CHROMEOS)

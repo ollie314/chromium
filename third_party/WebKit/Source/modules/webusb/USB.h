@@ -9,20 +9,23 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
+#include "device/usb/public/interfaces/chooser_service.mojom-blink.h"
+#include "device/usb/public/interfaces/device_manager.mojom-blink.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/modules/webusb/WebUSBClient.h"
 
 namespace blink {
 
 class LocalFrame;
+class ScopedScriptPromiseResolver;
 class ScriptState;
+class USBDevice;
 class USBDeviceRequestOptions;
-class WebUSBDevice;
 
 class USB final
     : public EventTargetWithInlineData
     , public ContextLifecycleObserver
-    , public WebUSBClient::Observer {
+    , public device::usb::blink::DeviceManagerClient {
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(USB);
     USING_PRE_FINALIZER(USB, dispose);
@@ -32,7 +35,9 @@ public:
         return new USB(frame);
     }
 
-    ~USB() override;
+    virtual ~USB();
+
+    void dispose();
 
     // USB.idl
     ScriptPromise getDevices(ScriptState*);
@@ -47,17 +52,31 @@ public:
     // ContextLifecycleObserver overrides.
     void contextDestroyed() override;
 
-    // WebUSBClient::Observer overrides.
-    void onDeviceConnected(std::unique_ptr<WebUSBDevice>) override;
-    void onDeviceDisconnected(std::unique_ptr<WebUSBDevice>) override;
+    USBDevice* getOrCreateDevice(device::usb::blink::DeviceInfoPtr);
+
+    device::usb::blink::DeviceManager* deviceManager() const { return m_deviceManager.get(); }
+
+    void onGetDevices(ScriptPromiseResolver*, Vector<device::usb::blink::DeviceInfoPtr>);
+    void onGetPermission(ScriptPromiseResolver*, device::usb::blink::DeviceInfoPtr);
+
+    // DeviceManagerClient implementation.
+    void OnDeviceAdded(device::usb::blink::DeviceInfoPtr);
+    void OnDeviceRemoved(device::usb::blink::DeviceInfoPtr);
+
+    void onDeviceManagerConnectionError();
+    void onChooserServiceConnectionError();
 
     DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit USB(LocalFrame& frame);
-    void dispose();
 
-    WebUSBClient* m_client;
+    device::usb::blink::DeviceManagerPtr m_deviceManager;
+    HeapHashSet<Member<ScriptPromiseResolver>> m_deviceManagerRequests;
+    device::usb::blink::ChooserServicePtr m_chooserService;
+    HeapHashSet<Member<ScriptPromiseResolver>> m_chooserServiceRequests;
+    mojo::Binding<device::usb::blink::DeviceManagerClient> m_clientBinding;
+    HeapHashMap<String, WeakMember<USBDevice>> m_deviceCache;
 };
 
 } // namespace blink

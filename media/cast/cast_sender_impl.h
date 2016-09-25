@@ -4,9 +4,10 @@
 #ifndef MEDIA_CAST_CAST_SENDER_IMPL_H_
 #define MEDIA_CAST_CAST_SENDER_IMPL_H_
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "media/cast/cast_environment.h"
 #include "media/cast/cast_sender.h"
 #include "media/cast/sender/audio_sender.h"
@@ -26,14 +27,13 @@ class CastSenderImpl : public CastSender {
   CastSenderImpl(scoped_refptr<CastEnvironment> cast_environment,
                  CastTransport* const transport_sender);
 
-  void InitializeAudio(const AudioSenderConfig& audio_config,
+  void InitializeAudio(const FrameSenderConfig& audio_config,
                        const StatusChangeCallback& status_change_cb) final;
   void InitializeVideo(
-      const VideoSenderConfig& video_config,
+      const FrameSenderConfig& video_config,
       const StatusChangeCallback& status_change_cb,
       const CreateVideoEncodeAcceleratorCallback& create_vea_cb,
-      const CreateVideoEncodeMemoryCallback& create_video_encode_mem_cb)
-      final;
+      const CreateVideoEncodeMemoryCallback& create_video_encode_mem_cb) final;
 
   void SetTargetPlayoutDelay(base::TimeDelta new_target_playout_delay) final;
 
@@ -43,14 +43,14 @@ class CastSenderImpl : public CastSender {
   scoped_refptr<VideoFrameInput> video_frame_input() final;
 
  private:
-  void ReceivedPacket(scoped_ptr<Packet> packet);
+  void ReceivedPacket(std::unique_ptr<Packet> packet);
   void OnAudioStatusChange(const StatusChangeCallback& status_change_cb,
                            OperationalStatus status);
   void OnVideoStatusChange(const StatusChangeCallback& status_change_cb,
                            OperationalStatus status);
 
-  scoped_ptr<AudioSender> audio_sender_;
-  scoped_ptr<VideoSender> video_sender_;
+  std::unique_ptr<AudioSender> audio_sender_;
+  std::unique_ptr<VideoSender> video_sender_;
   scoped_refptr<AudioFrameInput> audio_frame_input_;
   scoped_refptr<VideoFrameInput> video_frame_input_;
   scoped_refptr<CastEnvironment> cast_environment_;

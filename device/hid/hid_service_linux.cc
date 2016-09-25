@@ -21,11 +21,11 @@
 #include "base/scoped_observer.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/device_event_log/device_event_log.h"
-#include "device/hid/device_monitor_linux.h"
+#include "device/core/device_monitor_linux.h"
 #include "device/hid/hid_connection_linux.h"
 #include "device/hid/hid_device_info_linux.h"
 #include "device/udev_linux/scoped_udev.h"
@@ -66,9 +66,7 @@ struct HidServiceLinux::ConnectParams {
   base::File device_file;
 };
 
-class HidServiceLinux::FileThreadHelper
-    : public DeviceMonitorLinux::Observer,
-      public base::MessageLoop::DestructionObserver {
+class HidServiceLinux::FileThreadHelper : public DeviceMonitorLinux::Observer {
  public:
   FileThreadHelper(base::WeakPtr<HidServiceLinux> service,
                    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
@@ -76,15 +74,11 @@ class HidServiceLinux::FileThreadHelper
 
   ~FileThreadHelper() override {
     DCHECK(thread_checker_.CalledOnValidThread());
-    base::MessageLoop::current()->RemoveDestructionObserver(this);
   }
 
   static void Start(std::unique_ptr<FileThreadHelper> self) {
     base::ThreadRestrictions::AssertIOAllowed();
     self->thread_checker_.DetachFromThread();
-    // |self| must be added as a destruction observer first so that it will be
-    // notified before DeviceMonitorLinux.
-    base::MessageLoop::current()->AddDestructionObserver(self.get());
 
     DeviceMonitorLinux* monitor = DeviceMonitorLinux::GetInstance();
     self->observer_.Add(monitor);
@@ -193,8 +187,7 @@ class HidServiceLinux::FileThreadHelper
     }
   }
 
-  // base::MessageLoop::DestructionObserver:
-  void WillDestroyCurrentMessageLoop() override {
+  void WillDestroyMonitorMessageLoop() override {
     DCHECK(thread_checker_.CalledOnValidThread());
     delete this;
   }
@@ -261,12 +254,12 @@ void HidServiceLinux::Connect(const HidDeviceId& device_id,
 
 // static
 void HidServiceLinux::OnPathOpenComplete(std::unique_ptr<ConnectParams> params,
-                                         dbus::FileDescriptor fd) {
+                                         base::ScopedFD fd) {
   scoped_refptr<base::SingleThreadTaskRunner> file_task_runner =
       params->file_task_runner;
-  file_task_runner->PostTask(
-      FROM_HERE, base::Bind(&HidServiceLinux::ValidateFdOnBlockingThread,
-                            base::Passed(&params), base::Passed(&fd)));
+  params->device_file = base::File(fd.release());
+  file_task_runner->PostTask(FROM_HERE, base::Bind(&HidServiceLinux::FinishOpen,
+                                                   base::Passed(&params)));
 }
 
 // static
@@ -277,17 +270,6 @@ void HidServiceLinux::OnPathOpenError(const std::string& device_path,
   HID_LOG(EVENT) << "Permission broker failed to open '" << device_path
                  << "': " << error_name << ": " << error_message;
   callback.Run(nullptr);
-}
-
-// static
-void HidServiceLinux::ValidateFdOnBlockingThread(
-    std::unique_ptr<ConnectParams> params,
-    dbus::FileDescriptor fd) {
-  base::ThreadRestrictions::AssertIOAllowed();
-  fd.CheckValidity();
-  DCHECK(fd.is_valid());
-  params->device_file = base::File(fd.TakeValue());
-  FinishOpen(std::move(params));
 }
 
 #else

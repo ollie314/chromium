@@ -180,7 +180,7 @@ bool SharedStyleFinder::sharingCandidateCanShareHostStyles(Element& candidate) c
     if (static_cast<bool>(elementShadow) != static_cast<bool>(candidateShadow))
         return false;
 
-    return elementShadow->hasSameStyles(candidateShadow);
+    return elementShadow->hasSameStyles(*candidateShadow);
 }
 
 bool SharedStyleFinder::sharingCandidateDistributedToSameInsertionPoint(Element& candidate) const
@@ -197,6 +197,7 @@ bool SharedStyleFinder::sharingCandidateDistributedToSameInsertionPoint(Element&
     return true;
 }
 
+DISABLE_CFI_PERF
 bool SharedStyleFinder::canShareStyleWithElement(Element& candidate) const
 {
     if (element() == candidate)
@@ -253,7 +254,7 @@ bool SharedStyleFinder::canShareStyleWithElement(Element& candidate) const
     if (candidate.isLink() && m_context.elementLinkState() != style->insideLink())
         return false;
 
-    if (candidate.isUnresolvedCustomElement() != element().isUnresolvedCustomElement())
+    if (candidate.isUnresolvedV0CustomElement() != element().isUnresolvedV0CustomElement())
         return false;
 
     if (element().parentOrShadowHostElement() != parent) {

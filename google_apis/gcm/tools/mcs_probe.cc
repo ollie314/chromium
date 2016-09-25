@@ -24,8 +24,8 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/default_clock.h"
 #include "base/values.h"
@@ -41,6 +41,8 @@
 #include "google_apis/gcm/monitoring/fake_gcm_stats_recorder.h"
 #include "net/base/host_mapping_rules.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/multi_log_ct_verifier.h"
 #include "net/dns/host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_auth_preferences.h"
@@ -144,7 +146,7 @@ class MyTestURLRequestContext : public net::TestURLRequestContext {
     context_storage_.set_host_resolver(
         net::HostResolver::CreateDefaultResolver(NULL));
     context_storage_.set_transport_security_state(
-        base::WrapUnique(new net::TransportSecurityState()));
+        base::MakeUnique<net::TransportSecurityState>());
     Init();
   }
 
@@ -177,15 +179,12 @@ class MyTestCertVerifier : public net::CertVerifier {
   MyTestCertVerifier() {}
   ~MyTestCertVerifier() override {}
 
-  int Verify(net::X509Certificate* cert,
-             const std::string& hostname,
-             const std::string& ocsp_response,
-             int flags,
+  int Verify(const RequestParams& params,
              net::CRLSet* crl_set,
              net::CertVerifyResult* verify_result,
              const net::CompletionCallback& callback,
              std::unique_ptr<Request>* out_req,
-             const net::BoundNetLog& net_log) override {
+             const net::NetLogWithSource& net_log) override {
     return net::OK;
   }
 };
@@ -253,6 +252,8 @@ class MCSProbe {
   std::unique_ptr<net::CertVerifier> cert_verifier_;
   std::unique_ptr<net::ChannelIDService> system_channel_id_service_;
   std::unique_ptr<net::TransportSecurityState> transport_security_state_;
+  std::unique_ptr<net::CTVerifier> cert_transparency_verifier_;
+  std::unique_ptr<net::CTPolicyEnforcer> ct_policy_enforcer_;
   MCSProbeAuthPreferences http_auth_preferences_;
   std::unique_ptr<net::HttpAuthHandlerFactory> http_auth_handler_factory_;
   std::unique_ptr<net::HttpServerPropertiesImpl> http_server_properties_;
@@ -402,6 +403,8 @@ void MCSProbe::InitializeNetworkState() {
           base::WorkerPool::GetTaskRunner(true)));
 
   transport_security_state_.reset(new net::TransportSecurityState());
+  cert_transparency_verifier_.reset(new net::MultiLogCTVerifier());
+  ct_policy_enforcer_.reset(new net::CTPolicyEnforcer());
   http_auth_handler_factory_ = net::HttpAuthHandlerRegistryFactory::Create(
       &http_auth_preferences_, host_resolver_.get());
   http_server_properties_.reset(new net::HttpServerPropertiesImpl());
@@ -415,10 +418,11 @@ void MCSProbe::BuildNetworkSession() {
   session_params.cert_verifier = cert_verifier_.get();
   session_params.channel_id_service = system_channel_id_service_.get();
   session_params.transport_security_state = transport_security_state_.get();
+  session_params.cert_transparency_verifier = cert_transparency_verifier_.get();
+  session_params.ct_policy_enforcer = ct_policy_enforcer_.get();
   session_params.ssl_config_service = new net::SSLConfigServiceDefaults();
   session_params.http_auth_handler_factory = http_auth_handler_factory_.get();
-  session_params.http_server_properties =
-      http_server_properties_->GetWeakPtr();
+  session_params.http_server_properties = http_server_properties_.get();
   session_params.host_mapping_rules = host_mapping_rules_.get();
   session_params.ignore_certificate_errors = true;
   session_params.testing_fixed_http_port = 0;
@@ -499,8 +503,7 @@ int MCSProbeMain(int argc, char* argv[]) {
 
   // For check-in and creating registration ids.
   const scoped_refptr<MyTestURLRequestContextGetter> context_getter =
-      new MyTestURLRequestContextGetter(
-          base::MessageLoop::current()->task_runner());
+      new MyTestURLRequestContextGetter(base::ThreadTaskRunnerHandle::Get());
 
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();

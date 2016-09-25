@@ -31,7 +31,7 @@
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/canvas/CanvasImageSource.h"
 #include "core/imagebitmap/ImageBitmapSource.h"
-#include "platform/graphics/GraphicsTypes3D.h"
+#include "third_party/khronos/GLES2/gl2.h"
 
 class SkPaint;
 
@@ -45,12 +45,6 @@ namespace blink {
 class ExceptionState;
 class GraphicsContext;
 class ImageBitmapOptions;
-
-// GL types as defined in OpenGL ES 2.0 header file gl2.h from khronos.org.
-// That header cannot be included directly due to a conflict with NPAPI headers.
-// See crbug.com/328085.
-typedef unsigned GLenum;
-typedef int GC3Dint;
 
 class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement, public CanvasImageSource, public ImageBitmapSource {
     DEFINE_WRAPPERTYPEINFO();
@@ -76,7 +70,7 @@ public:
     void paintCurrentFrame(SkCanvas*, const IntRect&, const SkPaint*) const;
 
     // Used by WebGL to do GPU-GPU textures copy if possible.
-    bool copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface*, Platform3DObject texture, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY);
+    bool copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface*, GLuint texture, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY);
 
     bool shouldDisplayPosterImage() const { return getDisplayMode() == Poster; }
 
@@ -90,23 +84,23 @@ public:
     bool wouldTaintOrigin(SecurityOrigin*) const override;
     FloatSize elementSize(const FloatSize&) const override;
     const KURL& sourceURL() const override { return currentSrc(); }
-
     bool isHTMLVideoElement() const override { return true; }
+    int sourceWidth() override { return videoWidth(); }
+    int sourceHeight() override { return videoHeight(); }
 
     // ImageBitmapSource implementation
     IntSize bitmapSourceSize() const override;
-    ScriptPromise createImageBitmap(ScriptState*, EventTarget&, int sx, int sy, int sw, int sh, const ImageBitmapOptions&, ExceptionState&) override;
+    ScriptPromise createImageBitmap(ScriptState*, EventTarget&, Optional<IntRect> cropRect, const ImageBitmapOptions&, ExceptionState&) override;
 
 private:
     HTMLVideoElement(Document&);
 
     bool layoutObjectIsNeeded(const ComputedStyle&) override;
     LayoutObject* createLayoutObject(const ComputedStyle&) override;
-    void attach(const AttachContext& = AttachContext()) override;
+    void attachLayoutTree(const AttachContext& = AttachContext()) override;
     void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
     bool isPresentationAttribute(const QualifiedName&) const override;
     void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
-    bool hasVideo() const override { return webMediaPlayer() && webMediaPlayer()->hasVideo(); }
     bool isURLAttribute(const Attribute&) const override;
     const AtomicString imageSourceURL() const override;
 

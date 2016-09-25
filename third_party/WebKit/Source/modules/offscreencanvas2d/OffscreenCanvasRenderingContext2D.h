@@ -6,43 +6,50 @@
 #define OffscreenCanvasRenderingContext2D_h
 
 #include "core/html/canvas/CanvasContextCreationAttributes.h"
+#include "core/html/canvas/CanvasRenderingContext.h"
+#include "core/html/canvas/CanvasRenderingContextFactory.h"
 #include "modules/canvas2d/BaseRenderingContext2D.h"
-#include "modules/offscreencanvas/OffscreenCanvasRenderingContext.h"
-#include "modules/offscreencanvas/OffscreenCanvasRenderingContextFactory.h"
+#include <memory>
 
 namespace blink {
 
-class MODULES_EXPORT OffscreenCanvasRenderingContext2D final : public OffscreenCanvasRenderingContext, public BaseRenderingContext2D {
+class MODULES_EXPORT OffscreenCanvasRenderingContext2D final : public CanvasRenderingContext, public BaseRenderingContext2D {
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(OffscreenCanvasRenderingContext2D);
 public:
-    class Factory : public OffscreenCanvasRenderingContextFactory {
+    class Factory : public CanvasRenderingContextFactory {
     public:
         Factory() {}
         ~Factory() override {}
 
-        OffscreenCanvasRenderingContext* create(OffscreenCanvas* canvas, const CanvasContextCreationAttributes& attrs) override
+        CanvasRenderingContext* create(ScriptState* scriptState, OffscreenCanvas* canvas, const CanvasContextCreationAttributes& attrs) override
         {
-            return new OffscreenCanvasRenderingContext2D(canvas, attrs);
+            return new OffscreenCanvasRenderingContext2D(scriptState, canvas, attrs);
         }
 
-        OffscreenCanvasRenderingContext::ContextType getContextType() const override
+        CanvasRenderingContext::ContextType getContextType() const override
         {
-            return OffscreenCanvasRenderingContext::Context2d;
+            return CanvasRenderingContext::Context2d;
         }
-
-        void onError(OffscreenCanvas* canvas, const String& error) override {}
     };
 
-    // OffscreenCanvasRenderingContext implementation
+    void commit(ExceptionState&);
+
+    // CanvasRenderingContext implementation
     ~OffscreenCanvasRenderingContext2D() override;
     ContextType getContextType() const override { return Context2d; }
     bool is2d() const override { return true; }
+    void setOffscreenCanvasGetContextResult(OffscreenRenderingContext&) final;
+    void setIsHidden(bool) final { ASSERT_NOT_REACHED(); }
+    void stop() final { ASSERT_NOT_REACHED(); }
+    void setCanvasGetContextResult(RenderingContext&) final {}
+    void clearRect(double x, double y, double width, double height) override { BaseRenderingContext2D::clearRect(x, y, width, height); }
+    PassRefPtr<Image> getImage(AccelerationHint, SnapshotReason) const final;
 
     // BaseRenderingContext2D implementation
     bool originClean() const final;
     void setOriginTainted() final;
-    bool wouldTaintOrigin(CanvasImageSource*) final;
+    bool wouldTaintOrigin(CanvasImageSource*, ExecutionContext*) final;
 
     int width() const final;
     int height() const final;
@@ -63,22 +70,29 @@ public:
     SkImageFilter* stateGetFilter() final;
     void snapshotStateForFilter() final { }
 
-    void validateStateStack() final;
+    void validateStateStack() const final;
 
-    bool hasAlpha() const override { return m_hasAlpha; }
+    bool hasAlpha() const final { return creationAttributes().alpha(); }
     bool isContextLost() const override;
 
     ImageBitmap* transferToImageBitmap(ExceptionState&) final;
 
 protected:
-    OffscreenCanvasRenderingContext2D(OffscreenCanvas*, const CanvasContextCreationAttributes& attrs);
+    OffscreenCanvasRenderingContext2D(ScriptState*, OffscreenCanvas*, const CanvasContextCreationAttributes& attrs);
     DECLARE_VIRTUAL_TRACE();
 
 private:
-    bool m_hasAlpha;
-    bool m_originClean = true;
-    OwnPtr<ImageBuffer> m_imageBuffer;
+    bool m_needsMatrixClipRestore = false;
+    std::unique_ptr<ImageBuffer> m_imageBuffer;
+
+    bool isPaintable() const final;
+
+    RefPtr<StaticBitmapImage> transferToStaticBitmapImage();
 };
+
+DEFINE_TYPE_CASTS(OffscreenCanvasRenderingContext2D, CanvasRenderingContext, context,
+    context->is2d() && context->getOffscreenCanvas(),
+    context.is2d() && context.getOffscreenCanvas());
 
 } // namespace blink
 

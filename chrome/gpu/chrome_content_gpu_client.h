@@ -5,7 +5,11 @@
 #ifndef CHROME_GPU_CHROME_CONTENT_GPU_CLIENT_H_
 #define CHROME_GPU_CHROME_CONTENT_GPU_CLIENT_H_
 
+#include <memory>
+
 #include "base/macros.h"
+#include "base/profiler/stack_sampling_profiler.h"
+#include "chrome/common/variations/child_process_field_trial_syncer.h"
 #include "content/public/gpu/content_gpu_client.h"
 
 class ChromeContentGpuClient : public content::ContentGpuClient {
@@ -13,10 +17,20 @@ class ChromeContentGpuClient : public content::ContentGpuClient {
   ChromeContentGpuClient();
   ~ChromeContentGpuClient() override;
 
-  // content::ContentGpuClient implementation.
-  void RegisterMojoServices(content::ServiceRegistry* registry) override;
+  // content::ContentGpuClient:
+  void Initialize(base::FieldTrialList::Observer* observer) override;
+  void ExposeInterfacesToBrowser(
+      shell::InterfaceRegistry* registry,
+      const gpu::GpuPreferences& gpu_preferences) override;
+  void ConsumeInterfacesFromBrowser(
+      shell::InterfaceProvider* provider) override;
 
  private:
+  std::unique_ptr<chrome_variations::ChildProcessFieldTrialSyncer>
+      field_trial_syncer_;
+  // Used to profile process startup.
+  base::StackSamplingProfiler stack_sampling_profiler_;
+
   DISALLOW_COPY_AND_ASSIGN(ChromeContentGpuClient);
 };
 

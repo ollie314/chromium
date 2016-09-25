@@ -25,10 +25,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/storage_partition_descriptor.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/policy/core/browser/url_blacklist_manager.h"
 #include "components/prefs/pref_member.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_context.h"
-#include "net/cert/ct_verifier.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
@@ -53,6 +53,11 @@ namespace chrome_browser_net {
 class ResourcePrefetchPredictorObserver;
 }
 
+namespace certificate_transparency {
+class CTPolicyManager;
+class TreeStateTracker;
+}
+
 namespace content_settings {
 class CookieSettings;
 }
@@ -67,15 +72,17 @@ class InfoMap;
 }
 
 namespace net {
-class CertificateReportSender;
 class CertVerifier;
 class ChannelIDService;
+class ClientCertStore;
 class CookieStore;
+class CTVerifier;
 class FtpTransactionFactory;
 class HttpServerProperties;
 class HttpTransactionFactory;
 class ProxyConfigService;
 class ProxyService;
+class ReportSender;
 class SSLConfigService;
 class TransportSecurityPersister;
 class TransportSecurityState;
@@ -87,6 +94,10 @@ class PolicyCertVerifier;
 class PolicyHeaderIOHelper;
 class URLBlacklistManager;
 }  // namespace policy
+
+namespace previews {
+class PreviewsIOData;
+}
 
 // Conceptually speaking, the ProfileIOData represents data that lives on the IO
 // thread that is owned by a Profile, such as, but not limited to, network
@@ -180,7 +191,11 @@ class ProfileIOData {
     return &network_prediction_options_;
   }
 
-  content::ResourceContext::SaltCallback GetMediaDeviceIDSalt() const;
+  bool HasMediaDeviceIDSalt() const {
+    return media_device_id_salt_.get() != nullptr;
+  }
+
+  std::string GetMediaDeviceIDSalt() const;
 
   DevToolsNetworkControllerHandle* network_controller_handle() const {
     return &network_controller_handle_;
@@ -194,8 +209,6 @@ class ProfileIOData {
   std::string username_hash() const {
     return username_hash_;
   }
-
-  bool use_system_key_slot() const { return use_system_key_slot_; }
 #endif
 
   Profile::ProfileType profile_type() const {
@@ -244,6 +257,22 @@ class ProfileIOData {
     return data_reduction_proxy_io_data_.get();
   }
 
+  previews::PreviewsIOData* previews_io_data() const {
+    return previews_io_data_.get();
+  }
+
+  // This function is to be used to check if the |url| is defined in
+  // blacklist or whitelist policy.
+  virtual policy::URLBlacklist::URLBlacklistState GetURLBlacklistState(
+      const GURL& url) const;
+
+  // Returns the predictor service for this Profile. Returns nullptr if there is
+  // no Predictor, as is the case with OffTheRecord profiles.
+  virtual chrome_browser_net::Predictor* GetPredictor();
+
+  // Get platform ClientCertStore. May return nullptr.
+  std::unique_ptr<net::ClientCertStore> CreateClientCertStore();
+
  protected:
   // A URLRequestContext for media that owns its HTTP factory, to ensure
   // it is deleted.
@@ -267,6 +296,10 @@ class ProfileIOData {
     AppRequestContext();
 
     void SetCookieStore(std::unique_ptr<net::CookieStore> cookie_store);
+    void SetChannelIDService(
+        std::unique_ptr<net::ChannelIDService> channel_id_service);
+    void SetHttpNetworkSession(
+        std::unique_ptr<net::HttpNetworkSession> http_network_session);
     void SetHttpTransactionFactory(
         std::unique_ptr<net::HttpTransactionFactory> http_factory);
     void SetJobFactory(std::unique_ptr<net::URLRequestJobFactory> job_factory);
@@ -275,6 +308,8 @@ class ProfileIOData {
     ~AppRequestContext() override;
 
     std::unique_ptr<net::CookieStore> cookie_store_;
+    std::unique_ptr<net::ChannelIDService> channel_id_service_;
+    std::unique_ptr<net::HttpNetworkSession> http_network_session_;
     std::unique_ptr<net::HttpTransactionFactory> http_factory_;
     std::unique_ptr<net::URLRequestJobFactory> job_factory_;
   };
@@ -362,11 +397,14 @@ class ProfileIOData {
       std::unique_ptr<data_reduction_proxy::DataReductionProxyIOData>
           data_reduction_proxy_io_data) const;
 
+  void set_previews_io_data(
+      std::unique_ptr<previews::PreviewsIOData> previews_io_data) const;
+
   net::ProxyService* proxy_service() const {
     return proxy_service_.get();
   }
 
-  base::WeakPtr<net::HttpServerProperties> http_server_properties() const;
+  net::HttpServerProperties* http_server_properties() const;
 
   void set_http_server_properties(
       std::unique_ptr<net::HttpServerProperties> http_server_properties) const;
@@ -409,14 +447,13 @@ class ProfileIOData {
     // ResourceContext implementation:
     net::HostResolver* GetHostResolver() override;
     net::URLRequestContext* GetRequestContext() override;
-    std::unique_ptr<net::ClientCertStore> CreateClientCertStore() override;
     void CreateKeygenHandler(
         uint32_t key_size_in_bits,
         const std::string& challenge_string,
         const GURL& url,
         const base::Callback<void(std::unique_ptr<net::KeygenHandler>)>&
             callback) override;
-    SaltCallback GetMediaDeviceIDSalt() override;
+    std::string GetMediaDeviceIDSalt() override;
 
    private:
     friend class ProfileIOData;
@@ -516,6 +553,7 @@ class ProfileIOData {
   mutable BooleanPrefMember force_google_safesearch_;
   mutable BooleanPrefMember force_youtube_safety_mode_;
   mutable BooleanPrefMember safe_browsing_enabled_;
+  mutable StringPrefMember allowed_domains_for_apps_;
   mutable BooleanPrefMember sync_disabled_;
   mutable BooleanPrefMember signin_allowed_;
   mutable IntegerPrefMember network_prediction_options_;
@@ -539,6 +577,8 @@ class ProfileIOData {
   mutable std::unique_ptr<data_reduction_proxy::DataReductionProxyIOData>
       data_reduction_proxy_io_data_;
 
+  mutable std::unique_ptr<previews::PreviewsIOData> previews_io_data_;
+
   mutable std::unique_ptr<net::ProxyService> proxy_service_;
   mutable std::unique_ptr<net::TransportSecurityState>
       transport_security_state_;
@@ -555,10 +595,12 @@ class ProfileIOData {
   mutable std::unique_ptr<chromeos::CertificateProvider> certificate_provider_;
 #endif
 
+  // Pointed to by the TransportSecurityState.
   mutable std::unique_ptr<net::TransportSecurityPersister>
       transport_security_persister_;
-  mutable std::unique_ptr<net::CertificateReportSender>
-      certificate_report_sender_;
+  mutable std::unique_ptr<net::ReportSender> certificate_report_sender_;
+  mutable std::unique_ptr<certificate_transparency::CTPolicyManager>
+      ct_policy_manager_;
 
   // These are only valid in between LazyInitialize() and their accessor being
   // called.
@@ -593,8 +635,9 @@ class ProfileIOData {
 
   mutable DevToolsNetworkControllerHandle network_controller_handle_;
 
-  // TODO(jhawkins): Remove once crbug.com/102004 is fixed.
-  bool initialized_on_UI_thread_;
+  mutable std::unique_ptr<certificate_transparency::TreeStateTracker>
+      ct_tree_tracker_;
+  mutable base::Closure ct_tree_tracker_unregistration_;
 
   const Profile::ProfileType profile_type_;
 

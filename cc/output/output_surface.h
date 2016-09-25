@@ -12,22 +12,22 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
+#include "base/trace_event/memory_dump_provider.h"
 #include "cc/base/cc_export.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/overlay_candidate_validator.h"
 #include "cc/output/software_output_device.h"
-
-#if defined(ENABLE_VULKAN)
 #include "cc/output/vulkan_context_provider.h"
-#endif
-
-namespace base { class SingleThreadTaskRunner; }
+#include "cc/resources/returned_resource.h"
+#include "gpu/command_buffer/common/texture_in_use_response.h"
+#include "ui/gfx/color_space.h"
 
 namespace ui {
 class LatencyInfo;
 }
 
 namespace gfx {
+class ColorSpace;
 class Rect;
 class Size;
 class Transform;
@@ -36,7 +36,6 @@ class Transform;
 namespace cc {
 
 class CompositorFrame;
-class CompositorFrameAck;
 struct ManagedMemoryPolicy;
 class OutputSurfaceClient;
 
@@ -49,109 +48,68 @@ class OutputSurfaceClient;
 //      surface (on the compositor thread) and go back to step 1.
 class CC_EXPORT OutputSurface : public base::trace_event::MemoryDumpProvider {
  public:
-  OutputSurface(scoped_refptr<ContextProvider> context_provider,
-                scoped_refptr<ContextProvider> worker_context_provider,
-#if defined(ENABLE_VULKAN)
-                scoped_refptr<VulkanContextProvider> vulkan_context_provider,
-#endif
-                std::unique_ptr<SoftwareOutputDevice> software_device);
-  OutputSurface(scoped_refptr<ContextProvider> context_provider,
-                scoped_refptr<ContextProvider> worker_context_provider);
-  explicit OutputSurface(scoped_refptr<ContextProvider> context_provider);
-#if defined(ENABLE_VULKAN)
-  explicit OutputSurface(
-      scoped_refptr<VulkanContextProvider> vulkan_context_provider);
-#endif
-  explicit OutputSurface(std::unique_ptr<SoftwareOutputDevice> software_device);
-
-  OutputSurface(scoped_refptr<ContextProvider> context_provider,
-                std::unique_ptr<SoftwareOutputDevice> software_device);
-
-  ~OutputSurface() override;
-
   struct Capabilities {
-    Capabilities()
-        : delegated_rendering(false),
-          max_frames_pending(1),
-          adjust_deadline_for_parent(true),
-          uses_default_gl_framebuffer(true),
-          flipped_output_surface(false),
-          can_force_reclaim_resources(false),
-          delegated_sync_points_required(true) {}
-    bool delegated_rendering;
-    int max_frames_pending;
-    // This doesn't handle the <webview> case, but once BeginFrame is
-    // supported natively, we shouldn't need adjust_deadline_for_parent.
-    bool adjust_deadline_for_parent;
+    Capabilities() = default;
+
+    int max_frames_pending = 1;
     // Whether this output surface renders to the default OpenGL zero
     // framebuffer or to an offscreen framebuffer.
-    bool uses_default_gl_framebuffer;
+    bool uses_default_gl_framebuffer = true;
     // Whether this OutputSurface is flipped or not.
-    bool flipped_output_surface;
-    // Whether ForceReclaimResources can be called to reclaim all resources
-    // from the OutputSurface.
-    bool can_force_reclaim_resources;
-    // True if sync points for resources are needed when swapping delegated
-    // frames.
-    bool delegated_sync_points_required;
+    bool flipped_output_surface = false;
   };
 
-  const Capabilities& capabilities() const {
-    return capabilities_;
-  }
+  // Constructor for GL-based compositing.
+  explicit OutputSurface(scoped_refptr<ContextProvider> context_provider);
+  // Constructor for software compositing.
+  explicit OutputSurface(std::unique_ptr<SoftwareOutputDevice> software_device);
+  // Constructor for Vulkan-based compositing.
+  explicit OutputSurface(
+      scoped_refptr<VulkanContextProvider> vulkan_context_provider);
 
-  virtual bool HasExternalStencilTest() const;
-  virtual void ApplyExternalStencil();
-
-  // Obtain the 3d context or the software device associated with this output
-  // surface. Either of these may return a null pointer, but not both.
-  // In the event of a lost context, the entire output surface should be
-  // recreated.
-  ContextProvider* context_provider() const { return context_provider_.get(); }
-  ContextProvider* worker_context_provider() const {
-    return worker_context_provider_.get();
-  }
-#if defined(ENABLE_VULKAN)
-  VulkanContextProvider* vulkan_context_provider() const {
-    return vulkan_context_provider_.get();
-  }
-#endif
-  SoftwareOutputDevice* software_device() const {
-    return software_device_.get();
-  }
+  ~OutputSurface() override;
 
   // Called by the compositor on the compositor thread. This is a place where
   // thread-specific data for the output surface can be initialized, since from
   // this point to when DetachFromClient() is called the output surface will
   // only be used on the compositor thread.
+  // The caller should call DetachFromClient() on the same thread before
+  // destroying the OutputSurface, even if this fails. And BindToClient should
+  // not be called twice for a given OutputSurface.
   virtual bool BindToClient(OutputSurfaceClient* client);
 
   // Called by the compositor on the compositor thread. This is a place where
   // thread-specific data for the output surface can be uninitialized.
   virtual void DetachFromClient();
 
+  bool HasClient() { return !!client_; }
+
+  const Capabilities& capabilities() const { return capabilities_; }
+
+  // Obtain the 3d context or the software device associated with this output
+  // surface. Either of these may return a null pointer, but not both.
+  // In the event of a lost context, the entire output surface should be
+  // recreated.
+  ContextProvider* context_provider() const { return context_provider_.get(); }
+  VulkanContextProvider* vulkan_context_provider() const {
+    return vulkan_context_provider_.get();
+  }
+  SoftwareOutputDevice* software_device() const {
+    return software_device_.get();
+  }
+
   virtual void EnsureBackbuffer();
   virtual void DiscardBackbuffer();
 
-  virtual void Reshape(const gfx::Size& size, float scale_factor, bool alpha);
-  gfx::Size SurfaceSize() const { return surface_size_; }
-  float device_scale_factor() const { return device_scale_factor_; }
+  const gfx::ColorSpace& device_color_space() const {
+    return device_color_space_;
+  }
 
-  // If supported, this causes a ReclaimResources for all resources that are
-  // currently in use.
-  virtual void ForceReclaimResources() {}
-
-  virtual void BindFramebuffer();
-
-  // The implementation may destroy or steal the contents of the CompositorFrame
-  // passed in (though it will not take ownership of the CompositorFrame
-  // itself). For successful swaps, the implementation must call
-  // OutputSurfaceClient::DidSwapBuffers() and eventually
-  // DidSwapBuffersComplete().
-  virtual void SwapBuffers(CompositorFrame* frame) = 0;
-  virtual void OnSwapBuffersComplete();
-
-  bool HasClient() { return !!client_; }
+  // Called by subclasses after receiving a response from the gpu process to a
+  // query about whether a given set of textures is still in use by the OS
+  // compositor.
+  void DidReceiveTextureInUseResponses(
+      const gpu::TextureInUseResponses& responses);
 
   // Get the class capable of informing cc of hardware overlay capability.
   virtual OverlayCandidateValidator* GetOverlayCandidateValidator() const;
@@ -162,50 +120,57 @@ class CC_EXPORT OutputSurface : public base::trace_event::MemoryDumpProvider {
   // Get the texture for the main image's overlay.
   virtual unsigned GetOverlayTextureId() const;
 
-  virtual void DidLoseOutputSurface();
-  void SetMemoryPolicy(const ManagedMemoryPolicy& policy);
-
-  // Support for a pull-model where draws are requested by the output surface.
-  //
-  // OutputSurface::Invalidate is called by the compositor to notify that
-  // there's new content.
-  virtual void Invalidate() {}
-
-  // Updates the worker context provider's visibility, freeing GPU resources if
-  // appropriate.
-  virtual void SetWorkerContextShouldAggressivelyFreeResources(bool is_visible);
-
   // If this returns true, then the surface will not attempt to draw.
   virtual bool SurfaceIsSuspendForRecycle() const;
+
+  virtual void Reshape(const gfx::Size& size,
+                       float scale_factor,
+                       const gfx::ColorSpace& color_space,
+                       bool alpha);
+  gfx::Size SurfaceSize() const { return surface_size_; }
+
+  virtual void BindFramebuffer();
+
+  virtual bool HasExternalStencilTest() const;
+  virtual void ApplyExternalStencil();
+
+  // Gives the GL internal format that should be used for calling CopyTexImage2D
+  // when the framebuffer is bound via BindFramebuffer().
+  virtual uint32_t GetFramebufferCopyTextureFormat() = 0;
+
+  // The implementation may destroy or steal the contents of the CompositorFrame
+  // passed in (though it will not take ownership of the CompositorFrame
+  // itself). For successful swaps, the implementation must call
+  // DidSwapBuffersComplete() (via OnSwapBuffersComplete()) eventually.
+  virtual void SwapBuffers(CompositorFrame frame) = 0;
+  virtual void OnSwapBuffersComplete();
 
   // base::trace_event::MemoryDumpProvider implementation.
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                     base::trace_event::ProcessMemoryDump* pmd) override;
 
  protected:
-  OutputSurfaceClient* client_;
-
   void PostSwapBuffersComplete();
+
+  // Used internally for the context provider to inform the client about loss,
+  // and can be overridden to change behaviour instead of informing the client.
+  virtual void DidLoseOutputSurface();
+
+  OutputSurfaceClient* client_ = nullptr;
 
   struct OutputSurface::Capabilities capabilities_;
   scoped_refptr<ContextProvider> context_provider_;
-  scoped_refptr<ContextProvider> worker_context_provider_;
-#if defined(ENABLE_VULKAN)
   scoped_refptr<VulkanContextProvider> vulkan_context_provider_;
-#endif
   std::unique_ptr<SoftwareOutputDevice> software_device_;
   gfx::Size surface_size_;
-  float device_scale_factor_;
-  bool has_alpha_;
+  float device_scale_factor_ = -1;
+  gfx::ColorSpace device_color_space_;
+  bool has_alpha_ = true;
+  gfx::ColorSpace color_space_;
   base::ThreadChecker client_thread_checker_;
 
-  void SetNeedsRedrawRect(const gfx::Rect& damage_rect);
-  void ReclaimResources(const CompositorFrameAck* ack);
-  void SetExternalStencilTest(bool enabled);
-  void DetachFromClientInternal();
-
  private:
-  bool external_stencil_test_enabled_;
+  void DetachFromClientInternal();
 
   base::WeakPtrFactory<OutputSurface> weak_ptr_factory_;
 

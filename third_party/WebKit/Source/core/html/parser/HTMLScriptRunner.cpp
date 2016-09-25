@@ -30,9 +30,11 @@
 #include "bindings/core/v8/V8PerIsolateData.h"
 #include "core/dom/DocumentParserTiming.h"
 #include "core/dom/Element.h"
-#include "core/events/Event.h"
 #include "core/dom/IgnoreDestructiveWriteCountIncrementer.h"
 #include "core/dom/ScriptLoader.h"
+#include "core/dom/TaskRunnerHelper.h"
+#include "core/events/Event.h"
+#include "core/fetch/MemoryCache.h"
 #include "core/fetch/ScriptResource.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/parser/HTMLInputStream.h"
@@ -44,6 +46,7 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebFrameScheduler.h"
 #include <inttypes.h>
+#include <memory>
 
 namespace blink {
 
@@ -51,9 +54,9 @@ namespace {
 
 // TODO(bmcquade): move this to a shared location if we find ourselves wanting
 // to trace similar data elsewhere in the codebase.
-PassOwnPtr<TracedValue> getTraceArgsForScriptElement(Element* element, const TextPosition& textPosition)
+std::unique_ptr<TracedValue> getTraceArgsForScriptElement(Element* element, const TextPosition& textPosition)
 {
-    OwnPtr<TracedValue> value = TracedValue::create();
+    std::unique_ptr<TracedValue> value = TracedValue::create();
     ScriptLoader* scriptLoader = toScriptLoaderIfPossible(element);
     if (scriptLoader && scriptLoader->resource())
         value->setString("url", scriptLoader->resource()->url().getString());
@@ -63,7 +66,7 @@ PassOwnPtr<TracedValue> getTraceArgsForScriptElement(Element* element, const Tex
         value->setInteger("lineNumber", textPosition.m_line.oneBasedInt());
         value->setInteger("columnNumber", textPosition.m_column.oneBasedInt());
     }
-    return value.release();
+    return value;
 }
 
 bool doExecuteScript(Element* scriptElement, const ScriptSourceCode& sourceCode, const TextPosition& textPosition)
@@ -131,11 +134,11 @@ static KURL documentURLForScriptExecution(Document* document)
 
 using namespace HTMLNames;
 
-HTMLScriptRunner::HTMLScriptRunner(Document* document, HTMLScriptRunnerHost* host)
-    : m_document(document)
+HTMLScriptRunner::HTMLScriptRunner(HTMLParserReentryPermit* reentryPermit, Document* document, HTMLScriptRunnerHost* host)
+    : m_reentryPermit(reentryPermit)
+    , m_document(document)
     , m_host(host)
     , m_parserBlockingScript(PendingScript::create(nullptr, nullptr))
-    , m_scriptNestingLevel(0)
     , m_hasScriptsWaitingForResources(false)
 {
     ASSERT(m_host);
@@ -162,6 +165,9 @@ void HTMLScriptRunner::detach()
         pendingScript->releaseElementAndClear();
     }
     m_document = nullptr;
+    // m_reentryPermit is not cleared here, because the script runner
+    // may continue to run pending scripts after the parser has
+    // detached.
 }
 
 bool HTMLScriptRunner::isPendingScriptReady(const PendingScript* script)
@@ -206,7 +212,7 @@ void HTMLScriptRunner::executePendingScriptAndDispatchEvent(PendingScript* pendi
     // Clear the pending script before possible re-entrancy from executeScript()
     Element* element = pendingScript->releaseElementAndClear();
     if (ScriptLoader* scriptLoader = toScriptLoaderIfPossible(element)) {
-        NestingLevelIncrementer nestingLevelIncrementer(m_scriptNestingLevel);
+        HTMLParserReentryPermit::ScriptNestingLevelIncrementer nestingLevelIncrementer = m_reentryPermit->incrementScriptNestingLevel();
         IgnoreDestructiveWriteCountIncrementer ignoreDestructiveWriteCountIncrementer(m_document);
         if (errorOccurred) {
             TRACE_EVENT_WITH_FLOW1("blink", "HTMLScriptRunner ExecuteScriptFailed", element, TRACE_EVENT_FLAG_FLOW_IN,
@@ -244,6 +250,43 @@ void HTMLScriptRunner::stopWatchingResourceForLoad(Resource* resource)
     }
 }
 
+void fetchBlockedDocWriteScript(Element* script, bool isParserInserted, const TextPosition& scriptStartPosition)
+{
+    DCHECK(script);
+
+    ScriptLoader* scriptLoader = ScriptLoader::create(script, isParserInserted, false, false);
+    DCHECK(scriptLoader);
+    scriptLoader->setFetchDocWrittenScriptDeferIdle();
+    scriptLoader->prepareScript(scriptStartPosition);
+}
+
+void HTMLScriptRunner::possiblyFetchBlockedDocWriteScript(Resource* resource)
+{
+    // If the script was blocked as part of document.write intervention,
+    // then send an asynchronous GET request with an interventions header.
+    Element* element = nullptr;
+    TextPosition startingPosition;
+    bool isParserInserted = false;
+
+    if (!resource->errorOccurred() || !m_parserBlockingScript || !(m_parserBlockingScript->resource() == resource))
+        return;
+
+    // Due to dependency violation, not able to check the exact error to be
+    // ERR_CACHE_MISS but other errors are rare with
+    // WebCachePolicy::ReturnCacheDataDontLoad.
+    element = m_parserBlockingScript->element();
+
+    ScriptLoader* scriptLoader = nullptr;
+    if (element && (scriptLoader = toScriptLoaderIfPossible(element)) && scriptLoader->disallowedFetchForDocWrittenScript()) {
+        startingPosition = m_parserBlockingScript->startingPosition();
+        isParserInserted = scriptLoader->isParserInserted();
+        // remove this resource entry from memory cache as the new request
+        // should not join onto this existing entry.
+        memoryCache()->remove(resource);
+        fetchBlockedDocWriteScript(element, isParserInserted, startingPosition);
+    }
+}
+
 void HTMLScriptRunner::notifyFinished(Resource* cachedResource)
 {
     // Handle cancellations of parser-blocking script loads without
@@ -256,6 +299,11 @@ void HTMLScriptRunner::notifyFinished(Resource* cachedResource)
         stopWatchingResourceForLoad(cachedResource);
         return;
     }
+
+    // If the script was blocked as part of document.write intervention,
+    // then send an asynchronous GET request with an interventions header.
+    possiblyFetchBlockedDocWriteScript(cachedResource);
+
     m_host->notifyScriptLoaded(cachedResource);
 }
 
@@ -357,7 +405,7 @@ void HTMLScriptRunner::requestParsingBlockingScript(Element* element)
         if (m_document->frame()) {
             ScriptState* scriptState = ScriptState::forMainWorld(m_document->frame());
             if (scriptState)
-                ScriptStreamer::startStreaming(m_parserBlockingScript.get(), ScriptStreamer::ParsingBlocking, m_document->frame()->settings(), scriptState, m_document->loadingTaskRunner());
+                ScriptStreamer::startStreaming(m_parserBlockingScript.get(), ScriptStreamer::ParsingBlocking, m_document->frame()->settings(), scriptState, TaskRunnerHelper::get(TaskType::Networking, m_document));
         }
 
         m_parserBlockingScript->watchForLoad(this);
@@ -373,7 +421,7 @@ void HTMLScriptRunner::requestDeferredScript(Element* element)
     if (m_document->frame() && !pendingScript->isReady()) {
         ScriptState* scriptState = ScriptState::forMainWorld(m_document->frame());
         if (scriptState)
-            ScriptStreamer::startStreaming(pendingScript, ScriptStreamer::Deferred, m_document->frame()->settings(), scriptState, m_document->loadingTaskRunner());
+            ScriptStreamer::startStreaming(pendingScript, ScriptStreamer::Deferred, m_document->frame()->settings(), scriptState, TaskRunnerHelper::get(TaskType::Networking, m_document));
     }
 
     ASSERT(pendingScript->resource());
@@ -417,7 +465,7 @@ void HTMLScriptRunner::runScript(Element* script, const TextPosition& scriptStar
             Microtask::performCheckpoint(V8PerIsolateData::mainThreadIsolate());
 
         InsertionPointRecord insertionPointRecord(m_host->inputStream());
-        NestingLevelIncrementer nestingLevelIncrementer(m_scriptNestingLevel);
+        HTMLParserReentryPermit::ScriptNestingLevelIncrementer nestingLevelIncrementer = m_reentryPermit->incrementScriptNestingLevel();
 
         scriptLoader->prepareScript(scriptStartPosition);
 
@@ -427,13 +475,13 @@ void HTMLScriptRunner::runScript(Element* script, const TextPosition& scriptStar
         if (scriptLoader->willExecuteWhenDocumentFinishedParsing()) {
             requestDeferredScript(script);
         } else if (scriptLoader->readyToBeParserExecuted()) {
-            if (m_scriptNestingLevel == 1) {
+            if (m_reentryPermit->scriptNestingLevel() == 1u) {
                 m_parserBlockingScript->setElement(script);
                 m_parserBlockingScript->setStartingPosition(scriptStartPosition);
             } else {
-                ASSERT(m_scriptNestingLevel > 1);
+                DCHECK_GT(m_reentryPermit->scriptNestingLevel(), 1u);
                 m_parserBlockingScript->releaseElementAndClear();
-                ScriptSourceCode sourceCode(CompressibleString(script->textContent().impl()), documentURLForScriptExecution(m_document), scriptStartPosition);
+                ScriptSourceCode sourceCode(script->textContent(), documentURLForScriptExecution(m_document), scriptStartPosition);
                 doExecuteScript(script, sourceCode, scriptStartPosition);
             }
         } else {
@@ -448,6 +496,7 @@ DEFINE_TRACE(HTMLScriptRunner)
     visitor->trace(m_host);
     visitor->trace(m_parserBlockingScript);
     visitor->trace(m_scriptsToExecuteAfterParsing);
+    ScriptResourceClient::trace(visitor);
 }
 
 } // namespace blink

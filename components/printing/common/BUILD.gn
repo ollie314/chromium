@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-source_set("common") {
+static_library("common") {
   sources = [
     "print_messages.cc",
     "print_messages.h",
@@ -17,6 +17,7 @@ source_set("common") {
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/gfx/ipc",
+    "//ui/gfx/ipc/geometry",
     "//ui/gfx/ipc/skia",
   ]
 }

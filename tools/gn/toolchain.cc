@@ -29,7 +29,6 @@ const char* Toolchain::kToolCompileXCAssets = "compile_xcassets";
 
 Toolchain::Toolchain(const Settings* settings, const Label& label)
     : Item(settings, label),
-      concurrent_links_(0),
       setup_complete_(false) {
 }
 
@@ -84,6 +83,11 @@ std::string Toolchain::ToolTypeToName(ToolType type) {
       NOTREACHED();
       return std::string();
   }
+}
+
+Tool* Toolchain::GetTool(ToolType type) {
+  DCHECK(type != TYPE_NONE);
+  return tools_[static_cast<size_t>(type)].get();
 }
 
 const Tool* Toolchain::GetTool(ToolType type) const {

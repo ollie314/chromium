@@ -44,22 +44,23 @@
 #include "core/XLinkNames.h"
 #include "core/XMLNSNames.h"
 #include "core/XMLNames.h"
+#include "core/css/MediaQueryEvaluator.h"
 #include "core/css/parser/CSSParserTokenRange.h"
 #include "core/dom/Document.h"
 #include "core/dom/StyleChangeReason.h"
 #include "core/events/EventFactory.h"
 #include "core/fetch/FetchInitiatorTypeNames.h"
-#include "core/fetch/WebCacheMemoryDumpProvider.h"
 #include "core/html/canvas/CanvasRenderingContextFactory.h"
 #include "core/html/parser/HTMLParserThread.h"
 #include "core/workers/WorkerThread.h"
-#include "platform/EventTracer.h"
 #include "platform/FontFamilyNames.h"
 #include "platform/HTTPNames.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityPolicy.h"
 #include "wtf/allocator/Partitions.h"
+#include "wtf/text/AtomicStringTable.h"
 
 namespace blink {
 
@@ -104,7 +105,8 @@ void CoreInitializer::initialize()
 
     StringImpl::reserveStaticStringsCapacityForSize(coreStaticStringsCount + StringImpl::allStaticStrings().size());
     QualifiedName::initAndReserveCapacityForSize(qualifiedNamesCount);
-    AtomicString::reserveTableCapacity(coreStaticStringsCount);
+
+    AtomicStringTable::instance().reserveCapacity(coreStaticStringsCount);
 
     HTMLNames::init();
     SVGNames::init();
@@ -124,12 +126,11 @@ void CoreInitializer::initialize()
     MediaFeatureNames::init();
     MediaTypeNames::init();
 
-    CSSPrimitiveValue::initUnitTable();
+    MediaQueryEvaluator::init();
     CSSParserTokenRange::initStaticEOFToken();
 
     StyleChangeExtraData::init();
 
-    EventTracer::initialize();
     KURL::initialize();
     SchemeRegistry::initialize();
     SecurityPolicy::init();
@@ -138,11 +139,10 @@ void CoreInitializer::initialize()
 
     StringImpl::freezeStaticStrings();
 
-    Platform::current()->registerMemoryDumpProvider(WebCacheMemoryDumpProvider::instance(), "MemoryCache");
-
     // Creates HTMLParserThread::shared and ScriptStreamerThread::shared, but
     // does not start the threads.
-    HTMLParserThread::init();
+    if (!RuntimeEnabledFeatures::parseHTMLOnMainThreadEnabled())
+        HTMLParserThread::init();
     ScriptStreamerThread::init();
 }
 
@@ -155,9 +155,8 @@ void CoreInitializer::shutdown()
     // Make sure we stop the HTMLParserThread before Platform::current() is
     // cleared.
     ASSERT(Platform::current());
-    HTMLParserThread::shutdown();
-
-    Platform::current()->unregisterMemoryDumpProvider(WebCacheMemoryDumpProvider::instance());
+    if (!RuntimeEnabledFeatures::parseHTMLOnMainThreadEnabled())
+        HTMLParserThread::shutdown();
 
     WorkerThread::terminateAndWaitForAllWorkers();
 }

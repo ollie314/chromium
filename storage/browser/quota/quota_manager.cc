@@ -18,7 +18,8 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
@@ -34,18 +35,6 @@
 #include "storage/browser/quota/storage_monitor.h"
 #include "storage/browser/quota/usage_tracker.h"
 #include "storage/common/quota/quota_types.h"
-
-// Platform specific includes for GetVolumeInfo().
-#if defined(OS_WIN)
-#include <windows.h>
-#elif defined(OS_POSIX)
-#if defined(OS_ANDROID)
-#include <sys/vfs.h>
-#define statvfs statfs  // Android uses a statvfs-like statfs struct and call.
-#else
-#include <sys/statvfs.h>
-#endif
-#endif
 
 #define UMA_HISTOGRAM_MBYTES(name, sample)          \
   UMA_HISTOGRAM_CUSTOM_COUNTS(                      \
@@ -339,15 +328,15 @@ void DispatchUsageAndQuotaForWebApps(
   // We assume we can expose the actual disk size for them and cap the quota by
   // the available disk space.
   if (is_unlimited || can_query_disk_size) {
-    callback.Run(
-        status, usage,
-        CalculateQuotaWithDiskSpace(
-            usage_and_quota.available_disk_space,
-            usage, quota));
-    return;
+    quota = CalculateQuotaWithDiskSpace(
+        usage_and_quota.available_disk_space,
+        usage, quota);
   }
 
   callback.Run(status, usage, quota);
+
+  if (type == kStorageTypeTemporary && !is_unlimited)
+    UMA_HISTOGRAM_MBYTES("Quota.QuotaForOrigin", quota);
 }
 
 }  // namespace
@@ -1477,13 +1466,10 @@ void QuotaManager::DeleteOriginDataInternal(const GURL& origin,
 }
 
 void QuotaManager::ReportHistogram() {
+  DCHECK(!is_incognito_);
   GetGlobalUsage(kStorageTypeTemporary,
                  base::Bind(
                      &QuotaManager::DidGetTemporaryGlobalUsageForHistogram,
-                     weak_factory_.GetWeakPtr()));
-  GetGlobalUsage(kStorageTypePersistent,
-                 base::Bind(
-                     &QuotaManager::DidGetPersistentGlobalUsageForHistogram,
                      weak_factory_.GetWeakPtr()));
 }
 
@@ -1502,13 +1488,17 @@ void QuotaManager::DidGetTemporaryGlobalUsageForHistogram(
                   special_storage_policy_.get(),
                   &protected_origins,
                   &unlimited_origins);
-
   UMA_HISTOGRAM_COUNTS("Quota.NumberOfTemporaryStorageOrigins",
                        num_origins);
   UMA_HISTOGRAM_COUNTS("Quota.NumberOfProtectedTemporaryStorageOrigins",
                        protected_origins);
   UMA_HISTOGRAM_COUNTS("Quota.NumberOfUnlimitedTemporaryStorageOrigins",
                        unlimited_origins);
+
+  GetGlobalUsage(kStorageTypePersistent,
+                 base::Bind(
+                     &QuotaManager::DidGetPersistentGlobalUsageForHistogram,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void QuotaManager::DidGetPersistentGlobalUsageForHistogram(
@@ -1526,13 +1516,46 @@ void QuotaManager::DidGetPersistentGlobalUsageForHistogram(
                   special_storage_policy_.get(),
                   &protected_origins,
                   &unlimited_origins);
-
   UMA_HISTOGRAM_COUNTS("Quota.NumberOfPersistentStorageOrigins",
                        num_origins);
   UMA_HISTOGRAM_COUNTS("Quota.NumberOfProtectedPersistentStorageOrigins",
                        protected_origins);
   UMA_HISTOGRAM_COUNTS("Quota.NumberOfUnlimitedPersistentStorageOrigins",
                        unlimited_origins);
+
+  // We DumpOriginInfoTable last to ensure the trackers caches are loaded.
+  DumpOriginInfoTable(
+      base::Bind(&QuotaManager::DidDumpOriginInfoTableForHistogram,
+                 weak_factory_.GetWeakPtr()));
+}
+
+void QuotaManager::DidDumpOriginInfoTableForHistogram(
+    const OriginInfoTableEntries& entries) {
+  using UsageMap = std::map<GURL, int64_t>;
+  UsageMap usage_map;
+  GetUsageTracker(kStorageTypeTemporary)->GetCachedOriginsUsage(&usage_map);
+  base::Time now = base::Time::Now();
+  for (const auto& info : entries) {
+    if (info.type != kStorageTypeTemporary)
+      continue;
+
+    // Ignore stale database entries. If there is no map entry, the origin's
+    // data has been deleted.
+    UsageMap::const_iterator found = usage_map.find(info.origin);
+    if (found == usage_map.end() || found->second == 0)
+      continue;
+
+    base::TimeDelta age = now - std::max(info.last_access_time,
+                                         info.last_modified_time);
+    UMA_HISTOGRAM_COUNTS_1000("Quota.AgeOfOriginInDays", age.InDays());
+
+    int64_t kilobytes = std::max(found->second / INT64_C(1024), INT64_C(1));
+    base::Histogram::FactoryGet(
+        "Quota.AgeOfDataInDays", 1, 1000, 50,
+        base::HistogramBase::kUmaTargetedHistogramFlag)->
+            AddCount(age.InDays(),
+                     base::saturated_cast<int>(kilobytes));
+  }
 }
 
 std::set<GURL> QuotaManager::GetEvictionOriginExceptions(
@@ -1555,8 +1578,8 @@ void QuotaManager::DidGetEvictionOrigin(const GetOriginCallback& callback,
                                         const GURL& origin) {
   // Make sure the returned origin is (still) not in the origin_in_use_ set
   // and has not been accessed since we posted the task.
-  if (ContainsKey(origins_in_use_, origin) ||
-      ContainsKey(access_notified_origins_, origin)) {
+  if (base::ContainsKey(origins_in_use_, origin) ||
+      base::ContainsKey(access_notified_origins_, origin)) {
     callback.Run(GURL());
   } else {
     callback.Run(origin);
@@ -1716,10 +1739,12 @@ void QuotaManager::DidInitialize(int64_t* temporary_quota_override,
   temporary_quota_initialized_ = true;
   DidDatabaseWork(success);
 
-  histogram_timer_.Start(FROM_HERE,
-                         base::TimeDelta::FromMilliseconds(
-                             kReportHistogramInterval),
-                         this, &QuotaManager::ReportHistogram);
+  if (!is_incognito_) {
+    histogram_timer_.Start(FROM_HERE,
+                           base::TimeDelta::FromMilliseconds(
+                               kReportHistogramInterval),
+                           this, &QuotaManager::ReportHistogram);
+  }
 
   db_initialization_callbacks_.Run();
   GetTemporaryGlobalQuota(
@@ -1823,21 +1848,16 @@ bool QuotaManager::GetVolumeInfo(const base::FilePath& path,
                                  uint64_t* total_size) {
   // Inspired by similar code in the base::SysInfo class.
   base::ThreadRestrictions::AssertIOAllowed();
-#if defined(OS_WIN)
-  ULARGE_INTEGER available, total, free;
-  if (!GetDiskFreeSpaceExW(path.value().c_str(), &available, &total, &free))
+
+  int64_t available = base::SysInfo::AmountOfFreeDiskSpace(path);
+  if (available < 0)
     return false;
-  *available_space = static_cast<uint64_t>(available.QuadPart);
-  *total_size = static_cast<uint64_t>(total.QuadPart);
-#elif defined(OS_POSIX)
-  struct statvfs stats;
-  if (HANDLE_EINTR(statvfs(path.value().c_str(), &stats)) != 0)
+  int64_t total = base::SysInfo::AmountOfTotalDiskSpace(path);
+  if (total < 0)
     return false;
-  *available_space = static_cast<uint64_t>(stats.f_bavail) * stats.f_frsize;
-  *total_size = static_cast<uint64_t>(stats.f_blocks) * stats.f_frsize;
-#else
-#error Not implemented
-#endif
+
+  *available_space = static_cast<uint64_t>(available);
+  *total_size = static_cast<uint64_t>(total);
   return true;
 }
 

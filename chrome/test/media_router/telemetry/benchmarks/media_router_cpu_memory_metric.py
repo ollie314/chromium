@@ -12,7 +12,7 @@ from metrics import Metric
 
 
 METRICS = {'privateMemory': {'units': 'MB', 'display_name': 'private_memory'},
-         'cpu': {'units': '%', 'display_name': 'cpu_utilization'}}
+           'cpu': {'units': '%', 'display_name': 'cpu_utilization'}}
 
 
 class MediaRouterCPUMemoryMetric(Metric):
@@ -44,8 +44,19 @@ class MediaRouterCPUMemoryMetric(Metric):
         avg_result = round(sum(process_results)/len(process_results), 4)
         if metric == 'privateMemory':
           avg_result = round(avg_result/(1024 * 1024), 2)
+        logging.info('metric: %s, process: %s, average value: %s' %
+                     (metric, process, str(avg_result)))
         results.AddValue(scalar.ScalarValue(
             results.current_page,
-            '%s.%s' % (METRICS.get(metric).get('display_name'), process),
+            '%s_%s' % (METRICS.get(metric).get('display_name'), process),
             METRICS.get(metric).get('units'),
             avg_result))
+
+    # Calculate MR extension wakeup time
+    if 'mr_extension' in perf_results['cpu']:
+      wakeup_percentage = round(
+          (len(perf_results['cpu']['mr_extension']) * 100 /
+           len(perf_results['cpu']['browser'])), 2)
+      results.AddValue(scalar.ScalarValue(
+              results.current_page, 'mr_extension_wakeup_percentage',
+              '%', wakeup_percentage))

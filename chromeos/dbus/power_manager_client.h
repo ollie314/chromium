@@ -88,6 +88,10 @@ class CHROMEOS_EXPORT PowerManagerClient : public DBusClient {
     virtual void LidEventReceived(bool open,
                                   const base::TimeTicks& timestamp) {}
 
+    // Called when the device's tablet mode switch is on or off.
+    virtual void TabletModeEventReceived(bool on,
+                                         const base::TimeTicks& timestamp) {}
+
     // Called when the idle action will be performed after
     // |time_until_idle_action|.
     virtual void IdleActionImminent(
@@ -194,6 +198,9 @@ class CHROMEOS_EXPORT PowerManagerClient : public DBusClient {
   ~PowerManagerClient() override;
 
  protected:
+  // Needs to call DBusClient::Init().
+  friend class PowerManagerClientTest;
+
   // Create() should be used instead.
   PowerManagerClient();
 

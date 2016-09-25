@@ -8,6 +8,9 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "cc/surfaces/surface_manager.h"
+#include "content/browser/compositor/image_transport_factory.h"
+#include "content/browser/compositor/surface_utils.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
@@ -26,7 +29,13 @@
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_web_contents.h"
 #include "media/base/video_frame.h"
+#include "ui/aura/env.h"
+#include "ui/compositor/compositor.h"
 #include "ui/gfx/geometry/rect.h"
+
+#if defined(OS_ANDROID)
+#include "content/browser/renderer_host/context_provider_factory_impl_android.h"
+#endif
 
 namespace content {
 
@@ -46,7 +55,6 @@ void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
   params->searchable_form_url = GURL();
   params->searchable_form_encoding = std::string();
   params->did_create_new_entry = did_create_new_entry;
-  params->security_info = std::string();
   params->gesture = NavigationGestureUser;
   params->was_within_same_page = false;
   params->method = "GET";
@@ -58,10 +66,38 @@ TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
       is_showing_(false),
       is_occluded_(false),
       did_swap_compositor_frame_(false) {
+#if defined(OS_ANDROID)
+  // Not all tests initialize or need a context provider factory.
+  if (ContextProviderFactoryImpl::GetInstance()) {
+    surface_id_allocator_.reset(
+        new cc::SurfaceIdAllocator(AllocateSurfaceClientId()));
+    GetSurfaceManager()->RegisterSurfaceClientId(
+        surface_id_allocator_->client_id());
+  }
+#else
+  // Not all tests initialize or need an image transport factory.
+  if (ImageTransportFactory::GetInstance()) {
+    surface_id_allocator_.reset(
+        new cc::SurfaceIdAllocator(AllocateSurfaceClientId()));
+    GetSurfaceManager()->RegisterSurfaceClientId(
+        surface_id_allocator_->client_id());
+  }
+#endif
+
   rwh_->SetView(this);
 }
 
 TestRenderWidgetHostView::~TestRenderWidgetHostView() {
+  cc::SurfaceManager* manager = nullptr;
+#if defined(OS_ANDROID)
+  if (ContextProviderFactoryImpl::GetInstance())
+    manager = GetSurfaceManager();
+#else
+  manager = GetSurfaceManager();
+#endif
+  if (manager) {
+    manager->InvalidateSurfaceClientId(surface_id_allocator_->client_id());
+  }
 }
 
 RenderWidgetHost* TestRenderWidgetHostView::GetRenderWidgetHost() const {
@@ -73,15 +109,11 @@ gfx::Vector2dF TestRenderWidgetHostView::GetLastScrollOffset() const {
 }
 
 gfx::NativeView TestRenderWidgetHostView::GetNativeView() const {
-  return NULL;
-}
-
-gfx::NativeViewId TestRenderWidgetHostView::GetNativeViewId() const {
-  return 0;
+  return nullptr;
 }
 
 gfx::NativeViewAccessible TestRenderWidgetHostView::GetNativeViewAccessible() {
-  return NULL;
+  return nullptr;
 }
 
 ui::TextInputClient* TestRenderWidgetHostView::GetTextInputClient() {
@@ -154,6 +186,11 @@ bool TestRenderWidgetHostView::HasAcceleratedSurface(
 
 #if defined(OS_MACOSX)
 
+ui::AcceleratedWidgetMac* TestRenderWidgetHostView::GetAcceleratedWidgetMac()
+    const {
+  return nullptr;
+}
+
 void TestRenderWidgetHostView::SetActive(bool active) {
   // <viettrungluu@gmail.com>: Do I need to do anything here?
 }
@@ -174,19 +211,13 @@ void TestRenderWidgetHostView::StopSpeaking() {
 
 #endif
 
-bool TestRenderWidgetHostView::GetScreenColorProfile(
-    std::vector<char>* color_profile) {
-  DCHECK(color_profile->empty());
-  return false;
-}
-
 gfx::Rect TestRenderWidgetHostView::GetBoundsInRootWindow() {
   return gfx::Rect();
 }
 
 void TestRenderWidgetHostView::OnSwapCompositorFrame(
-    uint32_t output_surface_id,
-    std::unique_ptr<cc::CompositorFrame> frame) {
+    uint32_t compositor_frame_sink_id,
+    cc::CompositorFrame frame) {
   did_swap_compositor_frame_ = true;
 }
 
@@ -195,6 +226,13 @@ bool TestRenderWidgetHostView::LockMouse() {
 }
 
 void TestRenderWidgetHostView::UnlockMouse() {
+}
+
+uint32_t TestRenderWidgetHostView::GetSurfaceClientId() {
+  // See constructor.  If a test needs this, its harness needs to construct an
+  // ImageTransportFactory.
+  DCHECK(surface_id_allocator_);
+  return surface_id_allocator_->client_id();
 }
 
 TestRenderViewHost::TestRenderViewHost(
@@ -209,7 +247,7 @@ TestRenderViewHost::TestRenderViewHost(
                          main_frame_routing_id,
                          swapped_out,
                          false /* has_initialized_audio_host */),
-      delete_counter_(NULL),
+      delete_counter_(nullptr),
       opener_frame_route_id_(MSG_ROUTING_NONE) {
   // TestRenderWidgetHostView installs itself into this->view_ in its
   // constructor, and deletes itself when TestRenderWidgetHostView::Destroy() is
@@ -304,7 +342,7 @@ TestRenderViewHost* RenderViewHostImplTestHarness::test_rvh() {
 TestRenderViewHost* RenderViewHostImplTestHarness::pending_test_rvh() {
   return contents()->GetPendingMainFrame() ?
       contents()->GetPendingMainFrame()->GetRenderViewHost() :
-      NULL;
+      nullptr;
 }
 
 TestRenderViewHost* RenderViewHostImplTestHarness::active_test_rvh() {

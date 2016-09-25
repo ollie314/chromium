@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -18,7 +19,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
@@ -156,8 +156,13 @@ class MockPrefHashStore : public PrefHashStore {
   }
 
   // PrefHashStore implementation.
-  scoped_ptr<PrefHashStoreTransaction> BeginTransaction(
-      scoped_ptr<HashStoreContents> storage) override;
+  std::unique_ptr<PrefHashStoreTransaction> BeginTransaction(
+      HashStoreContents* storage) override;
+  std::string ComputeMac(const std::string& path,
+                         const base::Value* new_value) override;
+  std::unique_ptr<base::DictionaryValue> ComputeSplitMacs(
+      const std::string& path,
+      const base::DictionaryValue* split_values) override;
 
  private:
   // A MockPrefHashStoreTransaction is handed to the caller on
@@ -175,6 +180,7 @@ class MockPrefHashStore : public PrefHashStore {
     }
 
     // PrefHashStoreTransaction implementation.
+    base::StringPiece GetStoreUMASuffix() const override;
     PrefHashStoreTransaction::ValueState CheckValue(
         const std::string& path,
         const base::Value* value) const override;
@@ -246,12 +252,29 @@ void MockPrefHashStore::SetInvalidKeysResult(
   invalid_keys_results_.insert(std::make_pair(path, invalid_keys_result));
 }
 
-scoped_ptr<PrefHashStoreTransaction> MockPrefHashStore::BeginTransaction(
-    scoped_ptr<HashStoreContents> storage) {
+std::unique_ptr<PrefHashStoreTransaction> MockPrefHashStore::BeginTransaction(
+    HashStoreContents* storage) {
   EXPECT_FALSE(transaction_active_);
-  return scoped_ptr<PrefHashStoreTransaction>(
+  return std::unique_ptr<PrefHashStoreTransaction>(
       new MockPrefHashStoreTransaction(this));
 }
+
+std::string MockPrefHashStore::ComputeMac(const std::string& path,
+                                          const base::Value* new_value) {
+  return "atomic mac for: " + path;
+};
+
+std::unique_ptr<base::DictionaryValue> MockPrefHashStore::ComputeSplitMacs(
+    const std::string& path,
+    const base::DictionaryValue* split_values) {
+  std::unique_ptr<base::DictionaryValue> macs_dict(new base::DictionaryValue);
+  for (base::DictionaryValue::Iterator it(*split_values); !it.IsAtEnd();
+       it.Advance()) {
+    macs_dict->SetStringWithoutPathExpansion(
+        it.key(), "split mac for: " + path + "/" + it.key());
+  }
+  return macs_dict;
+};
 
 PrefHashStoreTransaction::ValueState MockPrefHashStore::RecordCheckValue(
     const std::string& path,
@@ -277,6 +300,11 @@ void MockPrefHashStore::RecordStoreHash(
       stored_values_.insert(std::make_pair(path,
                                            std::make_pair(new_value, strategy)))
           .second);
+}
+
+base::StringPiece
+MockPrefHashStore::MockPrefHashStoreTransaction::GetStoreUMASuffix() const {
+  return "unused";
 }
 
 PrefHashStoreTransaction::ValueState
@@ -384,7 +412,7 @@ class PrefHashFilterTest
   // PrefHashFilter) is stored in |mock_pref_hash_store_|.
   void InitializePrefHashFilter(const std::vector<
       PrefHashFilter::TrackedPreferenceMetadata>& configuration) {
-    scoped_ptr<MockPrefHashStore> temp_mock_pref_hash_store(
+    std::unique_ptr<MockPrefHashStore> temp_mock_pref_hash_store(
         new MockPrefHashStore);
     mock_pref_hash_store_ = temp_mock_pref_hash_store.get();
     pref_hash_filter_.reset(new PrefHashFilter(
@@ -414,15 +442,15 @@ class PrefHashFilterTest
   }
 
   MockPrefHashStore* mock_pref_hash_store_;
-  scoped_ptr<base::DictionaryValue> pref_store_contents_;
+  std::unique_ptr<base::DictionaryValue> pref_store_contents_;
   MockValidationDelegate mock_validation_delegate_;
-  scoped_ptr<PrefHashFilter> pref_hash_filter_;
+  std::unique_ptr<PrefHashFilter> pref_hash_filter_;
 
  private:
   // Stores |prefs| back in |pref_store_contents| and ensure
   // |expected_schedule_write| matches the reported |schedule_write|.
   void GetPrefsBack(bool expected_schedule_write,
-                    scoped_ptr<base::DictionaryValue> prefs,
+                    std::unique_ptr<base::DictionaryValue> prefs,
                     bool schedule_write) {
     pref_store_contents_ = std::move(prefs);
     EXPECT_TRUE(pref_store_contents_);

@@ -12,7 +12,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/sample_map.h"
 #include "base/metrics/statistics_recorder.h"
@@ -32,7 +32,7 @@
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_store.h"
 #include "components/policy/core/common/policy_types.h"
-#include "policy/policy_constants.h"
+#include "components/policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -370,7 +370,7 @@ bool CloudPolicyInvalidatorTest::IsInvalidationAcknowledged(
   // The acknowledgement task is run through a WeakHandle that posts back to our
   // own thread.  We need to run any posted tasks before we can check
   // acknowledgement status.
-  loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_FALSE(IsUnsent(invalidation));
   return !invalidation_service_.GetMockAckHandler()->IsUnacked(invalidation);
@@ -411,7 +411,7 @@ bool CloudPolicyInvalidatorTest::CheckPolicyRefreshed(base::TimeDelta delay) {
   base::TimeDelta max_delay = delay + base::TimeDelta::FromMilliseconds(
       CloudPolicyInvalidator::kMaxFetchDelayMin);
 
-  if (task_runner_->GetPendingTasks().empty())
+  if (!task_runner_->HasPendingTask())
     return false;
   base::TimeDelta actual_delay = task_runner_->GetPendingTasks().back().delay;
   EXPECT_GE(actual_delay, delay);

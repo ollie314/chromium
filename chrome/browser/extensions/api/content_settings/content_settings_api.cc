@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -66,7 +67,8 @@ namespace extensions {
 namespace helpers = content_settings_helpers;
 namespace keys = content_settings_api_constants;
 
-bool ContentSettingsContentSettingClearFunction::RunSync() {
+ExtensionFunction::ResponseAction
+ContentSettingsContentSettingClearFunction::Run() {
   ContentSettingsType content_type;
   EXTENSION_FUNCTION_VALIDATE(RemoveContentType(args_.get(), &content_type));
 
@@ -84,23 +86,21 @@ bool ContentSettingsContentSettingClearFunction::RunSync() {
   if (incognito) {
     // We don't check incognito permissions here, as an extension should be
     // always allowed to clear its own settings.
-  } else {
+  } else if (browser_context()->IsOffTheRecord()) {
     // Incognito profiles can't access regular mode ever, they only exist in
     // split mode.
-    if (GetProfile()->IsOffTheRecord()) {
-      error_ = keys::kIncognitoContextError;
-      return false;
-    }
+    return RespondNow(Error(keys::kIncognitoContextError));
   }
 
   scoped_refptr<ContentSettingsStore> store =
-      ContentSettingsService::Get(GetProfile())->content_settings_store();
+      ContentSettingsService::Get(browser_context())->content_settings_store();
   store->ClearContentSettingsForExtension(extension_id(), scope);
 
-  return true;
+  return RespondNow(NoArguments());
 }
 
-bool ContentSettingsContentSettingGetFunction::RunSync() {
+ExtensionFunction::ResponseAction
+ContentSettingsContentSettingGetFunction::Run() {
   ContentSettingsType content_type;
   EXTENSION_FUNCTION_VALIDATE(RemoveContentType(args_.get(), &content_type));
 
@@ -109,18 +109,16 @@ bool ContentSettingsContentSettingGetFunction::RunSync() {
 
   GURL primary_url(params->details.primary_url);
   if (!primary_url.is_valid()) {
-    error_ = ErrorUtils::FormatErrorMessage(keys::kInvalidUrlError,
-        params->details.primary_url);
-    return false;
+    return RespondNow(
+        Error(keys::kInvalidUrlError, params->details.primary_url));
   }
 
   GURL secondary_url(primary_url);
   if (params->details.secondary_url.get()) {
     secondary_url = GURL(*params->details.secondary_url);
     if (!secondary_url.is_valid()) {
-      error_ = ErrorUtils::FormatErrorMessage(keys::kInvalidUrlError,
-        *params->details.secondary_url);
-      return false;
+      return RespondNow(
+          Error(keys::kInvalidUrlError, *params->details.secondary_url));
     }
   }
 
@@ -131,27 +129,26 @@ bool ContentSettingsContentSettingGetFunction::RunSync() {
   bool incognito = false;
   if (params->details.incognito.get())
     incognito = *params->details.incognito;
-  if (incognito && !include_incognito()) {
-    error_ = pref_keys::kIncognitoErrorMessage;
-    return false;
-  }
+  if (incognito && !include_incognito())
+    return RespondNow(Error(pref_keys::kIncognitoErrorMessage));
 
   HostContentSettingsMap* map;
   content_settings::CookieSettings* cookie_settings;
+  Profile* profile = Profile::FromBrowserContext(browser_context());
   if (incognito) {
-    if (!GetProfile()->HasOffTheRecordProfile()) {
+    if (!profile->HasOffTheRecordProfile()) {
       // TODO(bauerb): Allow reading incognito content settings
       // outside of an incognito session.
-      error_ = keys::kIncognitoSessionOnlyError;
-      return false;
+      return RespondNow(Error(keys::kIncognitoSessionOnlyError));
     }
     map = HostContentSettingsMapFactory::GetForProfile(
-        GetProfile()->GetOffTheRecordProfile());
-    cookie_settings = CookieSettingsFactory::GetForProfile(
-                          GetProfile()->GetOffTheRecordProfile()).get();
+        profile->GetOffTheRecordProfile());
+    cookie_settings =
+        CookieSettingsFactory::GetForProfile(profile->GetOffTheRecordProfile())
+            .get();
   } else {
-    map = HostContentSettingsMapFactory::GetForProfile(GetProfile());
-    cookie_settings = CookieSettingsFactory::GetForProfile(GetProfile()).get();
+    map = HostContentSettingsMapFactory::GetForProfile(profile);
+    cookie_settings = CookieSettingsFactory::GetForProfile(profile).get();
   }
 
   ContentSetting setting;
@@ -165,18 +162,17 @@ bool ContentSettingsContentSettingGetFunction::RunSync() {
                                      resource_identifier);
   }
 
-  base::DictionaryValue* result = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   std::string setting_string =
       content_settings::ContentSettingToString(setting);
   DCHECK(!setting_string.empty());
   result->SetString(keys::kContentSettingKey, setting_string);
 
-  SetResult(result);
-
-  return true;
+  return RespondNow(OneArgument(std::move(result)));
 }
 
-bool ContentSettingsContentSettingSetFunction::RunSync() {
+ExtensionFunction::ResponseAction
+ContentSettingsContentSettingSetFunction::Run() {
   ContentSettingsType content_type;
   EXTENSION_FUNCTION_VALIDATE(RemoveContentType(args_.get(), &content_type));
 
@@ -187,10 +183,8 @@ bool ContentSettingsContentSettingSetFunction::RunSync() {
   ContentSettingsPattern primary_pattern =
       helpers::ParseExtensionPattern(params->details.primary_pattern,
                                      &primary_error);
-  if (!primary_pattern.IsValid()) {
-    error_ = primary_error;
-    return false;
-  }
+  if (!primary_pattern.IsValid())
+    return RespondNow(Error(primary_error));
 
   ContentSettingsPattern secondary_pattern = ContentSettingsPattern::Wildcard();
   if (params->details.secondary_pattern.get()) {
@@ -198,10 +192,8 @@ bool ContentSettingsContentSettingSetFunction::RunSync() {
     secondary_pattern =
         helpers::ParseExtensionPattern(*params->details.secondary_pattern,
                                        &secondary_error);
-    if (!secondary_pattern.IsValid()) {
-      error_ = secondary_error;
-      return false;
-    }
+    if (!secondary_pattern.IsValid())
+      return RespondNow(Error(secondary_error));
   }
 
   std::string resource_identifier;
@@ -242,11 +234,9 @@ bool ContentSettingsContentSettingSetFunction::RunSync() {
       NOTREACHED() << "No human-readable type name defined for this type.";
     }
 
-    error_ = base::StringPrintf(
-        kUnsupportedDefaultSettingError,
-        setting_str.c_str(),
-        readable_type_name.c_str());
-    return false;
+    return RespondNow(Error(base::StringPrintf(kUnsupportedDefaultSettingError,
+                                               setting_str.c_str(),
+                                               readable_type_name.c_str())));
   }
 
   ExtensionPrefsScope scope = kExtensionPrefsScopeRegular;
@@ -259,31 +249,27 @@ bool ContentSettingsContentSettingSetFunction::RunSync() {
 
   if (incognito) {
     // Regular profiles can't access incognito unless include_incognito is true.
-    if (!GetProfile()->IsOffTheRecord() && !include_incognito()) {
-      error_ = pref_keys::kIncognitoErrorMessage;
-      return false;
-    }
+    if (!browser_context()->IsOffTheRecord() && !include_incognito())
+      return RespondNow(Error(pref_keys::kIncognitoErrorMessage));
   } else {
     // Incognito profiles can't access regular mode ever, they only exist in
     // split mode.
-    if (GetProfile()->IsOffTheRecord()) {
-      error_ = keys::kIncognitoContextError;
-      return false;
-    }
+    if (browser_context()->IsOffTheRecord())
+      return RespondNow(Error(keys::kIncognitoContextError));
   }
 
   if (scope == kExtensionPrefsScopeIncognitoSessionOnly &&
-      !GetProfile()->HasOffTheRecordProfile()) {
-    error_ = pref_keys::kIncognitoSessionOnlyErrorMessage;
-    return false;
+      !Profile::FromBrowserContext(browser_context())
+           ->HasOffTheRecordProfile()) {
+    return RespondNow(Error(pref_keys::kIncognitoSessionOnlyErrorMessage));
   }
 
   scoped_refptr<ContentSettingsStore> store =
-      ContentSettingsService::Get(GetProfile())->content_settings_store();
+      ContentSettingsService::Get(browser_context())->content_settings_store();
   store->SetExtensionContentSetting(extension_id(), primary_pattern,
                                     secondary_pattern, content_type,
                                     resource_identifier, setting, scope);
-  return true;
+  return RespondNow(NoArguments());
 }
 
 bool ContentSettingsContentSettingGetResourceIdentifiersFunction::RunAsync() {
@@ -306,7 +292,7 @@ void ContentSettingsContentSettingGetResourceIdentifiersFunction::OnGotPlugins(
     const std::vector<content::WebPluginInfo>& plugins) {
   PluginFinder* finder = PluginFinder::GetInstance();
   std::set<std::string> group_identifiers;
-  base::ListValue* list = new base::ListValue();
+  std::unique_ptr<base::ListValue> list(new base::ListValue());
   for (std::vector<content::WebPluginInfo>::const_iterator it = plugins.begin();
        it != plugins.end(); ++it) {
     std::unique_ptr<PluginMetadata> plugin_metadata(
@@ -316,12 +302,12 @@ void ContentSettingsContentSettingGetResourceIdentifiersFunction::OnGotPlugins(
       continue;
 
     group_identifiers.insert(group_identifier);
-    base::DictionaryValue* dict = new base::DictionaryValue();
+    std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
     dict->SetString(keys::kIdKey, group_identifier);
     dict->SetString(keys::kDescriptionKey, plugin_metadata->name());
-    list->Append(dict);
+    list->Append(std::move(dict));
   }
-  SetResult(list);
+  SetResult(std::move(list));
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE, base::Bind(
           &ContentSettingsContentSettingGetResourceIdentifiersFunction::

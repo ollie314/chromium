@@ -34,6 +34,8 @@ namespace blink {
 class AXObjectCacheImpl;
 
 class AXMenuListOption final : public AXMockObject {
+    WTF_MAKE_NONCOPYABLE(AXMenuListOption);
+
 public:
     static AXMenuListOption* create(HTMLOptionElement* element, AXObjectCacheImpl& axObjectCache) { return new AXMenuListOption(element, axObjectCache); }
     ~AXMenuListOption() override;
@@ -57,7 +59,7 @@ private:
     bool isSelected() const override;
     void setSelected(bool) override;
     bool canSetSelectedAttribute() const override;
-    LayoutRect elementRect() const override;
+    void getRelativeBounds(AXObject** outContainer, FloatRect& outBoundsInContainer, SkMatrix44& outContainerTransform) const override;
     String textAlternative(bool recursive, bool inAriaLabelledByTraversal, AXObjectSet& visited, AXNameFrom&, AXRelatedObjectVector*, NameSources*) const override;
     bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 

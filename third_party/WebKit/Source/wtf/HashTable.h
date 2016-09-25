@@ -25,10 +25,17 @@
 #include "wtf/Assertions.h"
 #include "wtf/ConditionalDestructor.h"
 #include "wtf/HashTraits.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/allocator/PartitionAllocator.h"
+#include <memory>
 
 #define DUMP_HASHTABLE_STATS 0
 #define DUMP_HASHTABLE_STATS_PER_TABLE 0
+
+#if DUMP_HASHTABLE_STATS
+#include "wtf/Atomics.h"
+#include "wtf/Threading.h"
+#endif
 
 #if DUMP_HASHTABLE_STATS_PER_TABLE
 #include "wtf/DataLog.h"
@@ -72,7 +79,7 @@ namespace WTF {
 
 #if DUMP_HASHTABLE_STATS
 
-struct HashTableStats {
+struct WTF_EXPORT HashTableStats {
     STATIC_ONLY(HashTableStats);
     // The following variables are all atomically incremented when modified.
     static int numAccesses;
@@ -197,6 +204,15 @@ public:
         return *this != static_cast<const_iterator>(other);
     }
 
+    std::ostream& printTo(std::ostream& stream) const
+    {
+        if (m_position == m_endPosition)
+            return stream << "iterator representing <end>";
+        // TODO(tkent): Change |m_position| to |*m_position| to show the
+        // pointed object. It requires a lot of new stream printer functions.
+        return stream << "iterator pointing to " << m_position;
+    }
+
 private:
     PointerType m_position;
     PointerType m_endPosition;
@@ -205,6 +221,12 @@ private:
     int64_t m_containerModifications;
 #endif
 };
+
+template <typename Key, typename Value, typename Extractor, typename Hash, typename Traits, typename KeyTraits, typename Allocator>
+std::ostream& operator<<(std::ostream& stream, const HashTableConstIterator<Key, Value, Extractor, Hash, Traits, KeyTraits, Allocator>& iterator)
+{
+    return iterator.printTo(stream);
+}
 
 template <typename Key, typename Value, typename Extractor, typename HashFunctions, typename Traits, typename KeyTraits, typename Allocator>
 class HashTableIterator final {
@@ -242,10 +264,17 @@ public:
     bool operator!=(const const_iterator& other) const { return m_iterator != other; }
 
     operator const_iterator() const { return m_iterator; }
+    std::ostream& printTo(std::ostream& stream) const { return m_iterator.printTo(stream); }
 
 private:
     const_iterator m_iterator;
 };
+
+template <typename Key, typename Value, typename Extractor, typename Hash, typename Traits, typename KeyTraits, typename Allocator>
+std::ostream& operator<<(std::ostream& stream, const HashTableIterator<Key, Value, Extractor, Hash, Traits, KeyTraits, Allocator>& iterator)
+{
+    return iterator.printTo(stream);
+}
 
 using std::swap;
 
@@ -353,11 +382,9 @@ public:
     typedef Traits ValueTraits;
     typedef Key KeyType;
     typedef typename KeyTraits::PeekInType KeyPeekInType;
-    typedef typename KeyTraits::PassInType KeyPassInType;
     typedef Value ValueType;
     typedef Extractor ExtractorType;
     typedef KeyTraits KeyTraitsType;
-    typedef typename Traits::PassInType ValuePassInType;
     typedef IdentityHashTranslator<HashFunctions> IdentityTranslatorType;
     typedef HashTableAddResult<HashTable, ValueType> AddResult;
 
@@ -581,7 +608,7 @@ private:
 
 #if DUMP_HASHTABLE_STATS_PER_TABLE
 public:
-    mutable OwnPtr<Stats> m_stats;
+    mutable std::unique_ptr<Stats> m_stats;
 #endif
 
     template <WeakHandlingFlag x, typename T, typename U, typename V, typename W, typename X, typename Y, typename Z> friend struct WeakProcessingHashTableHelper;
@@ -600,7 +627,7 @@ inline HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Alloca
     , m_modifications(0)
 #endif
 #if DUMP_HASHTABLE_STATS_PER_TABLE
-    , m_stats(adoptPtr(new Stats))
+    , m_stats(wrapUnique(new Stats))
 #endif
 {
     static_assert(Allocator::isGarbageCollected || (!IsPointerToGarbageCollectedType<Key>::value && !IsPointerToGarbageCollectedType<Value>::value), "Cannot put raw pointers to garbage-collected classes into an off-heap collection.");
@@ -857,8 +884,23 @@ typename HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allo
 
     ++m_keyCount;
 
-    if (shouldExpand())
+    if (shouldExpand()) {
         entry = expand(entry);
+    } else if (Traits::weakHandlingFlag == WeakHandlingInCollections && shouldShrink()) {
+        // When weak hash tables are processed by the garbage collector,
+        // elements with no other strong references to them will have their
+        // table entries cleared. But no shrinking of the backing store is
+        // allowed at that time, as allocations are prohibited during that
+        // GC phase.
+        //
+        // With that weak processing taking care of removals, explicit
+        // remove()s of elements is rarely done. Which implies that the
+        // weak hash table will never be checked if it can be shrunk.
+        //
+        // To prevent weak hash tables with very low load factors from
+        // developing, we perform it when adding elements instead.
+        entry = rehash(m_tableSize / 2, entry);
+    }
 
     return AddResult(this, entry, true);
 }
@@ -1006,8 +1048,8 @@ Value* HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Alloca
     // polymorphic.
     static_assert(!Traits::emptyValueIsZero || !std::is_polymorphic<KeyType>::value, "empty value cannot be zero for things with a vtable");
     static_assert(Allocator::isGarbageCollected
-        || ((!AllowsOnlyPlacementNew<KeyType>::value || !NeedsTracing<KeyType>::value)
-        && (!AllowsOnlyPlacementNew<ValueType>::value || !NeedsTracing<ValueType>::value))
+        || ((!AllowsOnlyPlacementNew<KeyType>::value || !IsTraceable<KeyType>::value)
+        && (!AllowsOnlyPlacementNew<ValueType>::value || !IsTraceable<ValueType>::value))
         , "Cannot put DISALLOW_NEW_EXCEPT_PLACEMENT_NEW objects that have trace methods into an off-heap HashTable");
 
     if (Traits::emptyValueIsZero) {
@@ -1222,7 +1264,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::H
     , m_modifications(0)
 #endif
 #if DUMP_HASHTABLE_STATS_PER_TABLE
-    , m_stats(adoptPtr(new Stats(*other.m_stats)))
+    , m_stats(wrapUnique(new Stats(*other.m_stats)))
 #endif
 {
     // Copy the hash table the dumb way, by adding each element to the new
@@ -1245,7 +1287,7 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::H
     , m_modifications(0)
 #endif
 #if DUMP_HASHTABLE_STATS_PER_TABLE
-    , m_stats(adoptPtr(new Stats(*other.m_stats)))
+    , m_stats(wrapUnique(new Stats(*other.m_stats)))
 #endif
 {
     swap(other);
@@ -1393,7 +1435,7 @@ void HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocato
         // cases). However, it shouldn't cause any issue.
         Allocator::registerWeakMembers(visitor, this, m_table, WeakProcessingHashTableHelper<Traits::weakHandlingFlag, Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::process);
     }
-    if (!NeedsTracingTrait<Traits>::value)
+    if (!IsTraceableInCollectionTrait<Traits>::value)
         return;
     if (Traits::weakHandlingFlag == WeakHandlingInCollections) {
         // If we have both strong and weak pointers in the collection then
@@ -1440,6 +1482,12 @@ template <typename HashTableType, typename Traits> struct HashTableConstIterator
     typename HashTableType::const_iterator m_impl;
 };
 
+template <typename HashTable, typename Traits>
+std::ostream& operator<<(std::ostream& stream, const HashTableConstIteratorAdapter<HashTable, Traits>& iterator)
+{
+    return stream << iterator.m_impl;
+}
+
 template <typename HashTableType, typename Traits> struct HashTableIteratorAdapter {
     STACK_ALLOCATED();
     typedef typename Traits::IteratorGetType GetType;
@@ -1463,6 +1511,12 @@ template <typename HashTableType, typename Traits> struct HashTableIteratorAdapt
 
     typename HashTableType::iterator m_impl;
 };
+
+template <typename HashTable, typename Traits>
+std::ostream& operator<<(std::ostream& stream, const HashTableIteratorAdapter<HashTable, Traits>& iterator)
+{
+    return stream << iterator.m_impl;
+}
 
 template <typename T, typename U>
 inline bool operator==(const HashTableConstIteratorAdapter<T, U>& a, const HashTableConstIteratorAdapter<T, U>& b)

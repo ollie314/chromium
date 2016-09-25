@@ -27,19 +27,14 @@ VideoFrameProviderClientImpl::VideoFrameProviderClientImpl(
       stopped_(false),
       rendering_(false),
       needs_put_current_frame_(false) {
-  // This only happens during a commit on the compositor thread while the main
-  // thread is blocked. That makes this a thread-safe call to set the video
-  // frame provider client that does not require a lock. The same is true of
-  // the call to Stop().
-  provider_->SetVideoFrameProviderClient(this);
-
-  // This matrix is the default transformation for stream textures, and flips
-  // on the Y axis.
-  stream_texture_matrix_ = gfx::Transform(
-      1.0, 0.0, 0.0, 0.0,
-      0.0, -1.0, 0.0, 1.0,
-      0.0, 0.0, 1.0, 0.0,
-      0.0, 0.0, 0.0, 1.0);
+  // |provider_| may be null if destructed before the layer.
+  if (provider_) {
+    // This only happens during a commit on the compositor thread while the main
+    // thread is blocked. That makes this a thread-safe call to set the video
+    // frame provider client that does not require a lock. The same is true of
+    // the call to Stop().
+    provider_->SetVideoFrameProviderClient(this);
+  }
 }
 
 VideoFrameProviderClientImpl::~VideoFrameProviderClientImpl() {
@@ -103,12 +98,6 @@ void VideoFrameProviderClientImpl::ReleaseLock() {
 bool VideoFrameProviderClientImpl::HasCurrentFrame() {
   base::AutoLock locker(provider_lock_);
   return provider_ && provider_->HasCurrentFrame();
-}
-
-const gfx::Transform& VideoFrameProviderClientImpl::StreamTextureMatrix()
-    const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return stream_texture_matrix_;
 }
 
 void VideoFrameProviderClientImpl::StopUsingProvider() {

@@ -4,30 +4,86 @@
 
 #include "core/origin_trials/OriginTrialContext.h"
 
+#include "bindings/core/v8/ScriptController.h"
+#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/WindowProxy.h"
+#include "bindings/core/v8/WorkerOrWorkletScriptController.h"
+#include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/frame/LocalFrame.h"
+#include "core/workers/WorkerGlobalScope.h"
+#include "platform/Histogram.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/Platform.h"
+#include "public/platform/WebOriginTrialTokenStatus.h"
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/WebTrialTokenValidator.h"
+#include "wtf/text/StringBuilder.h"
+
+#include <v8.h>
 
 namespace blink {
 
 namespace {
 
-String getDisabledMessage(const String& featureName)
+static EnumerationHistogram& tokenValidationResultHistogram()
 {
-    return "The '" + featureName + "' feature is currently enabled in limited trials. Please see https://bit.ly/OriginTrials for information on enabling a trial for your site.";
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(EnumerationHistogram, histogram, new EnumerationHistogram("OriginTrials.ValidationResult", static_cast<int>(WebOriginTrialTokenStatus::Last)));
+    return histogram;
 }
 
-String getInvalidTokenMessage(const String& featureName)
+bool isWhitespace(UChar chr)
 {
-    return "The provided token(s) are not valid for the '" + featureName + "' feature.";
+    return (chr == ' ') || (chr == '\t');
+}
+
+bool skipWhiteSpace(const String& str, unsigned& pos)
+{
+    unsigned len = str.length();
+    while (pos < len && isWhitespace(str[pos]))
+        ++pos;
+    return pos < len;
+}
+
+// Extracts a quoted or unquoted token from an HTTP header. If the token was a
+// quoted string, this also removes the quotes and unescapes any escaped
+// characters. Also skips all whitespace before and after the token.
+String extractTokenOrQuotedString(const String& headerValue, unsigned& pos)
+{
+    unsigned len = headerValue.length();
+    String result;
+    if (!skipWhiteSpace(headerValue, pos))
+        return String();
+
+    if (headerValue[pos] == '\'' || headerValue[pos] == '"') {
+        StringBuilder out;
+        // Quoted string, append characters until matching quote is found,
+        // unescaping as we go.
+        UChar quote = headerValue[pos++];
+        while (pos < len && headerValue[pos] != quote) {
+            if (headerValue[pos] == '\\')
+                pos++;
+            if (pos < len)
+                out.append(headerValue[pos++]);
+        }
+        if (pos < len)
+            pos++;
+        result = out.toString();
+    } else {
+        // Unquoted token. Consume all characters until whitespace or comma.
+        int startPos = pos;
+        while (pos < len && !isWhitespace(headerValue[pos]) && headerValue[pos] != ',')
+            pos++;
+        result = headerValue.substring(startPos, pos - startPos);
+    }
+    skipWhiteSpace(headerValue, pos);
+    return result;
 }
 
 } // namespace
 
-OriginTrialContext::OriginTrialContext(ExecutionContext* host) : m_host(host)
+OriginTrialContext::OriginTrialContext(ExecutionContext* host, WebTrialTokenValidator* validator) : m_host(host), m_trialTokenValidator(validator)
 {
 }
 
@@ -38,83 +94,157 @@ const char* OriginTrialContext::supplementName()
 }
 
 // static
-OriginTrialContext* OriginTrialContext::from(ExecutionContext* host)
+OriginTrialContext* OriginTrialContext::from(ExecutionContext* host, CreateMode create)
 {
     OriginTrialContext* originTrials = static_cast<OriginTrialContext*>(Supplement<ExecutionContext>::from(host, supplementName()));
-    if (!originTrials) {
-        originTrials = new OriginTrialContext(host);
+    if (!originTrials && create == CreateIfNotExists) {
+        originTrials = new OriginTrialContext(host, Platform::current()->trialTokenValidator());
         Supplement<ExecutionContext>::provideTo(*host, supplementName(), originTrials);
     }
     return originTrials;
 }
 
-void OriginTrialContext::addToken(const String& token)
+// static
+std::unique_ptr<Vector<String>> OriginTrialContext::parseHeaderValue(const String& headerValue)
 {
-    m_tokens.append(token);
+    std::unique_ptr<Vector<String>> tokens(new Vector<String>);
+    unsigned pos = 0;
+    unsigned len = headerValue.length();
+    while (pos < len) {
+        String token = extractTokenOrQuotedString(headerValue, pos);
+        if (!token.isEmpty())
+            tokens->append(token);
+        // Make sure tokens are comma-separated.
+        if (pos < len && headerValue[pos++] != ',')
+            return nullptr;
+    }
+    return tokens;
 }
 
-bool OriginTrialContext::isFeatureEnabled(const String& featureName, String* errorMessage, WebTrialTokenValidator* validator)
+// static
+void OriginTrialContext::addTokensFromHeader(ExecutionContext* host, const String& headerValue)
 {
-    if (!RuntimeEnabledFeatures::experimentalFrameworkEnabled()) {
-        // TODO(iclelland): Set an error message here, the first time the
-        // context is accessed in this renderer.
-        return false;
+    if (headerValue.isEmpty())
+        return;
+    std::unique_ptr<Vector<String>> tokens(parseHeaderValue(headerValue));
+    if (!tokens)
+        return;
+    addTokens(host, tokens.get());
+}
+
+// static
+void OriginTrialContext::addTokens(ExecutionContext* host, const Vector<String>* tokens)
+{
+    if (!tokens || tokens->isEmpty())
+        return;
+    from(host)->addTokens(*tokens);
+}
+
+// static
+std::unique_ptr<Vector<String>> OriginTrialContext::getTokens(ExecutionContext* host)
+{
+    OriginTrialContext* context = from(host, DontCreateIfNotExists);
+    if (!context || context->m_tokens.isEmpty())
+        return nullptr;
+    return std::unique_ptr<Vector<String>>(new Vector<String>(context->m_tokens));
+}
+
+
+void OriginTrialContext::addToken(const String& token)
+{
+    if (!token.isEmpty()) {
+        m_tokens.append(token);
+        validateToken(token);
     }
+    initializePendingFeatures();
+}
+
+void OriginTrialContext::addTokens(const Vector<String>& tokens)
+{
+    for (const String& token : tokens) {
+        if (!token.isEmpty()) {
+            m_tokens.append(token);
+            validateToken(token);
+        }
+    }
+    initializePendingFeatures();
+}
+
+void OriginTrialContext::initializePendingFeatures()
+{
+    // TODO(iclelland): Factor this logic out to methods on the various
+    // execution contexts
+    if (m_host->isDocument()) {
+        LocalFrame* frame = toDocument(m_host.get())->frame();
+        if (!frame)
+            return;
+        ScriptState* state = ScriptState::forMainWorld(frame);
+        if (!state)
+            return;
+        if (!frame->script().windowProxy(state->world())->isContextInitialized())
+            return;
+        v8::HandleScope handleScope(state->isolate());
+        installOriginTrials(state);
+    } else if (m_host->isWorkerGlobalScope()) {
+        WorkerOrWorkletScriptController* scriptController = toWorkerGlobalScope(m_host.get())->scriptController();
+        if (!scriptController)
+            return;
+        ScriptState* state = scriptController->getScriptState();
+        if (!state)
+            return;
+        if (!scriptController->isContextInitialized())
+            return;
+        v8::HandleScope handleScope(state->isolate());
+        installOriginTrials(state);
+    }
+}
+
+void OriginTrialContext::setFeatureBindingsInstalled(const String& featureName)
+{
+    m_bindingsInstalled.add(featureName);
+}
+
+bool OriginTrialContext::featureBindingsInstalled(const String& featureName)
+{
+    return m_bindingsInstalled.contains(featureName);
+}
+
+bool OriginTrialContext::isFeatureEnabled(const String& featureName)
+{
+    if (!RuntimeEnabledFeatures::originTrialsEnabled())
+        return false;
+
+    return m_enabledFeatures.contains(featureName);
+}
+
+void OriginTrialContext::validateToken(const String& token)
+{
+    DCHECK(!token.isEmpty());
 
     // Feature trials are only enabled for secure origins
-    bool isSecure = errorMessage
-        ? m_host->isSecureContext(*errorMessage)
-        : m_host->isSecureContext();
-    if (!isSecure) {
-        // The execution context should always set a message here, if a valid
-        // pointer was passed in. If it does not, then we should find out why
-        // not, and decide whether the OriginTrialContext should be using its
-        // own error messages for this case.
-        DCHECK(!errorMessage || !errorMessage->isEmpty());
-        return false;
+    if (!m_host->isSecureContext()) {
+        tokenValidationResultHistogram().count(static_cast<int>(WebOriginTrialTokenStatus::Insecure));
+        return;
     }
 
-    if (!validator) {
-        validator = Platform::current()->trialTokenValidator();
-        if (!validator) {
-            // TODO(iclelland): Set an error message here, the first time the
-            // context is accessed in this renderer.
-            return false;
-        }
+    if (!m_trialTokenValidator) {
+        tokenValidationResultHistogram().count(static_cast<int>(WebOriginTrialTokenStatus::NotSupported));
+        return;
     }
-
 
     WebSecurityOrigin origin(m_host->getSecurityOrigin());
-    for (const String& token : m_tokens) {
-        // Check with the validator service to verify the signature.
-        if (validator->validateToken(token, origin, featureName)) {
-            return true;
-        }
-    }
+    WebString featureName;
+    WebOriginTrialTokenStatus tokenResult = m_trialTokenValidator->validateToken(token, origin, &featureName);
+    if (tokenResult == WebOriginTrialTokenStatus::Success)
+        m_enabledFeatures.add(featureName);
 
-    if (!errorMessage)
-        return false;
-
-    // If an error message has already been generated in this context, for this
-    // feature, do not generate another one. (This avoids cluttering the console
-    // with error messages on every attempt to access the feature.)
-    if (m_errorMessageGeneratedForFeature.contains(featureName)) {
-        *errorMessage = "";
-        return false;
-    }
-
-    if (m_tokens.size()) {
-        *errorMessage = getInvalidTokenMessage(featureName);
-    } else {
-        *errorMessage = getDisabledMessage(featureName);
-    }
-    m_errorMessageGeneratedForFeature.add(featureName);
-    return false;
+    tokenValidationResultHistogram().count(static_cast<int>(tokenResult));
 }
 
 DEFINE_TRACE(OriginTrialContext)
 {
     visitor->trace(m_host);
+    Supplement<ExecutionContext>::trace(visitor);
 }
 
 } // namespace blink

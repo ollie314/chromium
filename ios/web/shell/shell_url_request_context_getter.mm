@@ -19,6 +19,8 @@
 #include "ios/web/shell/shell_network_delegate.h"
 #include "net/base/cache_type.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/multi_log_ct_verifier.h"
 #include "net/dns/host_resolver.h"
 #include "net/extras/sqlite/sqlite_persistent_cookie_store.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -37,6 +39,10 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_storage.h"
 #include "net/url_request/url_request_job_factory_impl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 
@@ -84,8 +90,9 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     storage_->set_cookie_store(std::move(cookie_store));
 
     std::string user_agent = web::GetWebClient()->GetUserAgent(false);
-    storage_->set_http_user_agent_settings(base::WrapUnique(
-        new net::StaticHttpUserAgentSettings("en-us,en", user_agent)));
+    storage_->set_http_user_agent_settings(
+        base::MakeUnique<net::StaticHttpUserAgentSettings>("en-us,en",
+                                                           user_agent));
     storage_->set_proxy_service(
         net::ProxyService::CreateUsingSystemProxyResolver(
             std::move(proxy_config_service_), 0,
@@ -94,13 +101,17 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     storage_->set_cert_verifier(net::CertVerifier::CreateDefault());
 
     storage_->set_transport_security_state(
-        base::WrapUnique(new net::TransportSecurityState()));
+        base::MakeUnique<net::TransportSecurityState>());
+    storage_->set_cert_transparency_verifier(
+        base::WrapUnique(new net::MultiLogCTVerifier));
+    storage_->set_ct_policy_enforcer(
+        base::WrapUnique(new net::CTPolicyEnforcer));
     transport_security_persister_.reset(new net::TransportSecurityPersister(
         url_request_context_->transport_security_state(), base_path_,
         file_task_runner_, false));
-    storage_->set_channel_id_service(base::WrapUnique(
-        new net::ChannelIDService(new net::DefaultChannelIDStore(nullptr),
-                                  base::WorkerPool::GetTaskRunner(true))));
+    storage_->set_channel_id_service(base::MakeUnique<net::ChannelIDService>(
+        new net::DefaultChannelIDStore(nullptr),
+        base::WorkerPool::GetTaskRunner(true)));
     storage_->set_http_server_properties(
         std::unique_ptr<net::HttpServerProperties>(
             new net::HttpServerPropertiesImpl()));
@@ -117,6 +128,10 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         url_request_context_->cert_verifier();
     network_session_params.transport_security_state =
         url_request_context_->transport_security_state();
+    network_session_params.cert_transparency_verifier =
+        url_request_context_->cert_transparency_verifier();
+    network_session_params.ct_policy_enforcer =
+        url_request_context_->ct_policy_enforcer();
     network_session_params.channel_id_service =
         url_request_context_->channel_id_service();
     network_session_params.net_log = url_request_context_->net_log();
@@ -138,10 +153,10 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
                                            cache_path, 0, cache_task_runner_));
 
     storage_->set_http_network_session(
-        base::WrapUnique(new net::HttpNetworkSession(network_session_params)));
-    storage_->set_http_transaction_factory(base::WrapUnique(new net::HttpCache(
+        base::MakeUnique<net::HttpNetworkSession>(network_session_params));
+    storage_->set_http_transaction_factory(base::MakeUnique<net::HttpCache>(
         storage_->http_network_session(), std::move(main_backend),
-        true /* set_up_quic_server_info */)));
+        true /* set_up_quic_server_info */));
 
     std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory(
         new net::URLRequestJobFactoryImpl());

@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
-#include "mojo/message_pump/message_pump_mojo.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/interfaces/bindings/tests/test_sync_methods.mojom.h"
@@ -18,47 +19,80 @@ namespace mojo {
 namespace test {
 namespace {
 
+template <typename... Args>
+struct LambdaBinder {
+  using CallbackType = base::Callback<void(Args...)>;
+
+  template <typename Func>
+  static void RunLambda(Func func, Args... args) {
+    func(std::move(args)...);
+  }
+
+  template <typename Func>
+  static CallbackType BindLambda(Func func) {
+    return base::Bind(&LambdaBinder::RunLambda<Func>, func);
+  }
+};
+
 class TestSyncCommonImpl {
  public:
   TestSyncCommonImpl() {}
 
-  using PingHandler = Callback<void(const Callback<void()>&)>;
-  void set_ping_handler(const PingHandler& handler) { ping_handler_ = handler; }
+  using PingHandler = base::Callback<void(const base::Callback<void()>&)>;
+  using PingBinder = LambdaBinder<const base::Callback<void()>&>;
+  template <typename Func>
+  void set_ping_handler(Func handler) {
+    ping_handler_ = PingBinder::BindLambda(handler);
+  }
 
-  using EchoHandler = Callback<void(int32_t, const Callback<void(int32_t)>&)>;
-  void set_echo_handler(const EchoHandler& handler) { echo_handler_ = handler; }
+  using EchoHandler =
+      base::Callback<void(int32_t, const base::Callback<void(int32_t)>&)>;
+  using EchoBinder =
+      LambdaBinder<int32_t, const base::Callback<void(int32_t)>&>;
+  template <typename Func>
+  void set_echo_handler(Func handler) {
+    echo_handler_ = EchoBinder::BindLambda(handler);
+  }
 
   using AsyncEchoHandler =
-      Callback<void(int32_t, const Callback<void(int32_t)>&)>;
-  void set_async_echo_handler(const AsyncEchoHandler& handler) {
-    async_echo_handler_ = handler;
+      base::Callback<void(int32_t, const base::Callback<void(int32_t)>&)>;
+  using AsyncEchoBinder =
+      LambdaBinder<int32_t, const base::Callback<void(int32_t)>&>;
+  template <typename Func>
+  void set_async_echo_handler(Func handler) {
+    async_echo_handler_ = AsyncEchoBinder::BindLambda(handler);
   }
 
-  using SendInterfaceHandler = Callback<void(TestSyncAssociatedPtrInfo)>;
-  void set_send_interface_handler(const SendInterfaceHandler& handler) {
-    send_interface_handler_ = handler;
+  using SendInterfaceHandler = base::Callback<void(TestSyncAssociatedPtrInfo)>;
+  using SendInterfaceBinder = LambdaBinder<TestSyncAssociatedPtrInfo>;
+  template <typename Func>
+  void set_send_interface_handler(Func handler) {
+    send_interface_handler_ = SendInterfaceBinder::BindLambda(handler);
   }
 
-  using SendRequestHandler = Callback<void(TestSyncAssociatedRequest)>;
-  void set_send_request_handler(const SendRequestHandler& handler) {
-    send_request_handler_ = handler;
+  using SendRequestHandler = base::Callback<void(TestSyncAssociatedRequest)>;
+  using SendRequestBinder = LambdaBinder<TestSyncAssociatedRequest>;
+  template <typename Func>
+  void set_send_request_handler(Func handler) {
+    send_request_handler_ = SendRequestBinder::BindLambda(handler);
   }
 
-  void PingImpl(const Callback<void()>& callback) {
+  void PingImpl(const base::Callback<void()>& callback) {
     if (ping_handler_.is_null()) {
       callback.Run();
       return;
     }
     ping_handler_.Run(callback);
   }
-  void EchoImpl(int32_t value, const Callback<void(int32_t)>& callback) {
+  void EchoImpl(int32_t value, const base::Callback<void(int32_t)>& callback) {
     if (echo_handler_.is_null()) {
       callback.Run(value);
       return;
     }
     echo_handler_.Run(value, callback);
   }
-  void AsyncEchoImpl(int32_t value, const Callback<void(int32_t)>& callback) {
+  void AsyncEchoImpl(int32_t value,
+                     const base::Callback<void(int32_t)>& callback) {
     if (async_echo_handler_.is_null()) {
       callback.Run(value);
       return;
@@ -172,10 +206,7 @@ class TestSyncServiceThread {
  public:
   TestSyncServiceThread()
       : thread_("TestSyncServiceThread"), ping_called_(false) {
-    base::Thread::Options thread_options;
-    thread_options.message_pump_factory =
-        base::Bind(&common::MessagePumpMojo::Create);
-    thread_.StartWithOptions(thread_options);
+    thread_.Start();
   }
 
   void SetUp(InterfaceRequest<Interface> request) {
@@ -205,7 +236,7 @@ class TestSyncServiceThread {
  private:
   base::Thread thread_;
 
-  scoped_ptr<typename ImplTraits<Interface>::Type> impl_;
+  std::unique_ptr<typename ImplTraits<Interface>::Type> impl_;
 
   mutable base::Lock lock_;
   bool ping_called_;
@@ -215,8 +246,8 @@ class TestSyncServiceThread {
 
 class SyncMethodTest : public testing::Test {
  public:
-  SyncMethodTest() : loop_(common::MessagePumpMojo::Create()) {}
-  ~SyncMethodTest() override { loop_.RunUntilIdle(); }
+  SyncMethodTest() {}
+  ~SyncMethodTest() override { base::RunLoop().RunUntilIdle(); }
 
  protected:
   base::MessageLoop loop_;
@@ -271,7 +302,7 @@ class SyncMethodAssociatedTest : public SyncMethodTest {
   }
 
   InterfacePtr<TestSyncMaster> master_ptr_;
-  scoped_ptr<TestSyncMasterImpl> master_impl_;
+  std::unique_ptr<TestSyncMasterImpl> master_impl_;
 
   // An associated interface whose binding lives at the |master_impl_| side.
   TestSyncAssociatedPtrInfo asso_ptr_info_;
@@ -281,6 +312,28 @@ class SyncMethodAssociatedTest : public SyncMethodTest {
   TestSyncAssociatedPtrInfo opposite_asso_ptr_info_;
   TestSyncAssociatedRequest opposite_asso_request_;
 };
+
+void SetFlagAndRunClosure(bool* flag, const base::Closure& closure) {
+  *flag = true;
+  closure.Run();
+}
+
+void ExpectValueAndRunClosure(int32_t expected_value,
+                              const base::Closure& closure,
+                              int32_t value) {
+  EXPECT_EQ(expected_value, value);
+  closure.Run();
+}
+
+template <typename Func>
+void CallAsyncEchoCallback(Func func, int32_t value) {
+  func(value);
+}
+
+template <typename Func>
+TestSync::AsyncEchoCallback BindAsyncEchoCallback(Func func) {
+  return base::Bind(&CallAsyncEchoCallback<Func>, func);
+}
 
 // TestSync and TestSyncMaster exercise Router and MultiplexRouter,
 // respectively.
@@ -292,10 +345,8 @@ TYPED_TEST(SyncMethodCommonTest, CallSyncMethodAsynchronously) {
   typename ImplTraits<TypeParam>::Type impl(GetProxy(&ptr));
 
   base::RunLoop run_loop;
-  ptr->Echo(123, [&run_loop](int32_t result) {
-    EXPECT_EQ(123, result);
-    run_loop.Quit();
-  });
+  ptr->Echo(123, base::Bind(&ExpectValueAndRunClosure, 123,
+                            run_loop.QuitClosure()));
   run_loop.Run();
 }
 
@@ -433,12 +484,14 @@ TYPED_TEST(SyncMethodCommonTest, AsyncResponseQueuedDuringSyncCall) {
 
   bool async_echo_response_dispatched = false;
   base::RunLoop run_loop2;
-  ptr->AsyncEcho(123,
-                 [&async_echo_response_dispatched, &run_loop2](int32_t result) {
-                   async_echo_response_dispatched = true;
-                   EXPECT_EQ(123, result);
-                   run_loop2.Quit();
-                 });
+  ptr->AsyncEcho(
+      123,
+      BindAsyncEchoCallback(
+         [&async_echo_response_dispatched, &run_loop2](int32_t result) {
+           async_echo_response_dispatched = true;
+           EXPECT_EQ(123, result);
+           run_loop2.Quit();
+         }));
   // Run until the AsyncEcho request reaches the service side.
   run_loop1.Run();
 
@@ -483,12 +536,14 @@ TYPED_TEST(SyncMethodCommonTest, AsyncRequestQueuedDuringSyncCall) {
 
   bool async_echo_response_dispatched = false;
   base::RunLoop run_loop;
-  ptr->AsyncEcho(123,
-                 [&async_echo_response_dispatched, &run_loop](int32_t result) {
-                   async_echo_response_dispatched = true;
-                   EXPECT_EQ(123, result);
-                   run_loop.Quit();
-                 });
+  ptr->AsyncEcho(
+      123,
+      BindAsyncEchoCallback(
+         [&async_echo_response_dispatched, &run_loop](int32_t result) {
+           async_echo_response_dispatched = true;
+           EXPECT_EQ(123, result);
+           run_loop.Quit();
+         }));
 
   impl.set_echo_handler([&async_echo_request_dispatched](
       int32_t value, const TestSync::EchoCallback& callback) {
@@ -538,16 +593,18 @@ TYPED_TEST(SyncMethodCommonTest,
   bool connection_error_dispatched = false;
   base::RunLoop run_loop2;
   ptr->AsyncEcho(
-      123, [&async_echo_response_dispatched, &connection_error_dispatched, &ptr,
-            &run_loop2](int32_t result) {
-        async_echo_response_dispatched = true;
-        // At this point, error notification should not be dispatched
-        // yet.
-        EXPECT_FALSE(connection_error_dispatched);
-        EXPECT_FALSE(ptr.encountered_error());
-        EXPECT_EQ(123, result);
-        run_loop2.Quit();
-      });
+      123,
+      BindAsyncEchoCallback(
+          [&async_echo_response_dispatched, &connection_error_dispatched, &ptr,
+              &run_loop2](int32_t result) {
+            async_echo_response_dispatched = true;
+            // At this point, error notification should not be dispatched
+            // yet.
+            EXPECT_FALSE(connection_error_dispatched);
+            EXPECT_FALSE(ptr.encountered_error());
+            EXPECT_EQ(123, result);
+            run_loop2.Quit();
+          }));
   // Run until the AsyncEcho request reaches the service side.
   run_loop1.Run();
 
@@ -563,10 +620,8 @@ TYPED_TEST(SyncMethodCommonTest,
 
   base::RunLoop run_loop3;
   ptr.set_connection_error_handler(
-      [&connection_error_dispatched, &run_loop3]() {
-        connection_error_dispatched = true;
-        run_loop3.Quit();
-      });
+      base::Bind(&SetFlagAndRunClosure, &connection_error_dispatched,
+                 run_loop3.QuitClosure()));
 
   int32_t result_value = -1;
   ASSERT_FALSE(ptr->Echo(456, &result_value));
@@ -618,10 +673,9 @@ TYPED_TEST(SyncMethodCommonTest, InvalidMessageDuringSyncCall) {
 
   bool connection_error_dispatched = false;
   base::RunLoop run_loop;
-  ptr.set_connection_error_handler([&connection_error_dispatched, &run_loop]() {
-    connection_error_dispatched = true;
-    run_loop.Quit();
-  });
+  ptr.set_connection_error_handler(
+      base::Bind(&SetFlagAndRunClosure, &connection_error_dispatched,
+                 run_loop.QuitClosure()));
 
   int32_t result_value = -1;
   ASSERT_FALSE(ptr->Echo(456, &result_value));

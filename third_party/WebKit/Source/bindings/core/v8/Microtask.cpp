@@ -31,7 +31,7 @@
 #include "bindings/core/v8/Microtask.h"
 
 #include "platform/ScriptForbiddenScope.h"
-#include "platform/Task.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -44,19 +44,14 @@ void Microtask::performCheckpoint(v8::Isolate* isolate)
 
 static void microtaskFunctionCallback(void* data)
 {
-    OwnPtr<WebTaskRunner::Task> task = adoptPtr(static_cast<WebTaskRunner::Task*>(data));
-    task->run();
+    std::unique_ptr<WTF::Closure> task = wrapUnique(static_cast<WTF::Closure*>(data));
+    (*task)();
 }
 
-void Microtask::enqueueMicrotask(PassOwnPtr<WebTaskRunner::Task> callback)
+void Microtask::enqueueMicrotask(std::unique_ptr<WTF::Closure> callback)
 {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
-    isolate->EnqueueMicrotask(&microtaskFunctionCallback, callback.leakPtr());
-}
-
-void Microtask::enqueueMicrotask(PassOwnPtr<SameThreadClosure> callback)
-{
-    enqueueMicrotask(adoptPtr(new SameThreadTask(callback)));
+    isolate->EnqueueMicrotask(&microtaskFunctionCallback, static_cast<void*>(callback.release()));
 }
 
 } // namespace blink

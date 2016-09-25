@@ -4,7 +4,7 @@
 
 #include "net/quic/test_tools/quic_packet_creator_peer.h"
 
-#include "net/quic/quic_packet_creator.h"
+#include "net/quic/core/quic_packet_creator.h"
 
 namespace net {
 namespace test {
@@ -40,19 +40,6 @@ void QuicPacketCreatorPeer::SetPacketNumberLength(
 }
 
 // static
-void QuicPacketCreatorPeer::SetNextPacketNumberLength(
-    QuicPacketCreator* creator,
-    QuicPacketNumberLength next_packet_number_length) {
-  creator->next_packet_number_length_ = next_packet_number_length;
-}
-
-// static
-QuicPacketNumberLength QuicPacketCreatorPeer::NextPacketNumberLength(
-    QuicPacketCreator* creator) {
-  return creator->next_packet_number_length_;
-}
-
-// static
 QuicPacketNumberLength QuicPacketCreatorPeer::GetPacketNumberLength(
     QuicPacketCreator* creator) {
   return creator->packet_.packet_number_length;
@@ -70,14 +57,14 @@ void QuicPacketCreatorPeer::FillPacketHeader(QuicPacketCreator* creator,
 }
 
 // static
-size_t QuicPacketCreatorPeer::CreateStreamFrame(QuicPacketCreator* creator,
-                                                QuicStreamId id,
-                                                QuicIOVector iov,
-                                                size_t iov_offset,
-                                                QuicStreamOffset offset,
-                                                bool fin,
-                                                QuicFrame* frame) {
-  return creator->CreateStreamFrame(id, iov, iov_offset, offset, fin, frame);
+void QuicPacketCreatorPeer::CreateStreamFrame(QuicPacketCreator* creator,
+                                              QuicStreamId id,
+                                              QuicIOVector iov,
+                                              size_t iov_offset,
+                                              QuicStreamOffset offset,
+                                              bool fin,
+                                              QuicFrame* frame) {
+  creator->CreateStreamFrame(id, iov, iov_offset, offset, fin, frame);
 }
 
 // static

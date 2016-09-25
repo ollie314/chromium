@@ -43,25 +43,15 @@ DEFINE_TYPE_CASTS(WebHelperPluginImpl, WebHelperPlugin, plugin, true, true);
 
 WebHelperPlugin* WebHelperPlugin::create(const WebString& pluginType, WebLocalFrame* frame)
 {
-    OwnPtr<WebHelperPlugin> plugin = adoptPtr<WebHelperPlugin>(new WebHelperPluginImpl());
+    WebHelperPluginUniquePtr plugin(new WebHelperPluginImpl());
     if (!toWebHelperPluginImpl(plugin.get())->initialize(pluginType, toWebLocalFrameImpl(frame)))
         return 0;
-    return plugin.leakPtr();
+    return plugin.release();
 }
 
 WebHelperPluginImpl::WebHelperPluginImpl()
     : m_destructionTimer(this, &WebHelperPluginImpl::reallyDestroy)
 {
-}
-
-WebHelperPluginImpl::~WebHelperPluginImpl()
-{
-    // TODO(Oilpan): it is potentially problematic to support plugin
-    // disposal during an Oilpan GC. If it happens, we need to know
-    // and evaluate possible ways to handle it.
-    DCHECK(!ThreadState::current()->sweepForbidden());
-    if (m_pluginContainer)
-        m_pluginContainer->dispose();
 }
 
 bool WebHelperPluginImpl::initialize(const String& pluginType, WebLocalFrameImpl* frame)
@@ -90,7 +80,7 @@ bool WebHelperPluginImpl::initialize(const String& pluginType, WebLocalFrameImpl
     return !getPlugin()->isPlaceholder();
 }
 
-void WebHelperPluginImpl::reallyDestroy(Timer<WebHelperPluginImpl>*)
+void WebHelperPluginImpl::reallyDestroy(TimerBase*)
 {
     delete this;
 }

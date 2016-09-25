@@ -28,7 +28,6 @@ logging module.
 Inherit from the LoggingTestCase class for basic testing needs.  For
 more advanced needs (e.g. unit-testing methods that configure logging),
 see the TestLogStream class, and perhaps also the LogTesting class.
-
 """
 
 import logging
@@ -42,7 +41,6 @@ class TestLogStream(object):
     This is meant for passing to the logging.StreamHandler constructor.
     Log messages captured by instances of this object can be tested
     using self.assertMessages() below.
-
     """
 
     def __init__(self, test_case):
@@ -50,7 +48,6 @@ class TestLogStream(object):
 
         Args:
           test_case: A unittest.TestCase instance.
-
         """
         self._test_case = test_case
         self.messages = []
@@ -60,6 +57,7 @@ class TestLogStream(object):
     # constructor should support write() and flush():
     #
     # http://docs.python.org/library/logging.html#module-logging.handlers
+
     def write(self, message):
         self.messages.append(message)
 
@@ -70,7 +68,6 @@ class TestLogStream(object):
         """Assert that the given messages match the logged messages.
 
         messages: A list of log message strings.
-
         """
         self._test_case.assertEqual(messages, self.messages)
 
@@ -95,7 +92,6 @@ class LogTesting(object):
                   # Check the resulting log messages.
                   self._log.assertMessages(["INFO: expected message #1",
                                           "WARNING: expected message #2"])
-
     """
 
     def __init__(self, test_stream, handler):
@@ -107,7 +103,6 @@ class LogTesting(object):
         Args:
           test_stream: A TestLogStream instance.
           handler: The handler added to the logger.
-
         """
         self._test_stream = test_stream
         self._handler = handler
@@ -142,7 +137,6 @@ class LogTesting(object):
           test_case: A unittest.TestCase instance.
           logging_level: An integer logging level that is the minimum level
                          of log messages you would like to test.
-
         """
         stream = TestLogStream(test_case)
         handler = logging.StreamHandler(stream)
@@ -161,15 +155,7 @@ class LogTesting(object):
         return LogTesting(stream, handler)
 
     def tearDown(self):
-        """Assert there are no remaining log messages, and reset logging.
-
-        This method asserts that there are no more messages in the array of
-        log messages, and then restores logging to its original state.
-        This method should normally be called in the tearDown() method of a
-        unittest.TestCase.  See the docstring of this class for more details.
-
-        """
-        self.assertMessages([])
+        """Resets logging."""
         logger = LogTesting._getLogger()
         logger.removeHandler(self._handler)
 
@@ -195,7 +181,6 @@ class LogTesting(object):
 
         Args:
           messages: A list of log message strings.
-
         """
         try:
             self._test_stream.assertMessages(messages)
@@ -229,7 +214,6 @@ class LoggingTestCase(unittest.TestCase):
                   # Check the resulting log messages.
                   self.assertLog(["INFO: expected message #1",
                                   "WARNING: expected message #2"])
-
     """
 
     def setUp(self):
@@ -253,6 +237,5 @@ class LoggingTestCase(unittest.TestCase):
 
         Args:
           messages: A list of log message strings.
-
         """
         self._log.assertMessages(messages)

@@ -27,6 +27,8 @@ struct PasswordForm;
 using DuplicatesMap =
     std::multimap<std::string, std::unique_ptr<autofill::PasswordForm>>;
 
+enum class PasswordEntryType { SAVED, BLACKLISTED };
+
 class PasswordUIView;
 
 class Profile;
@@ -77,24 +79,20 @@ class PasswordManagerPresenter
  private:
   friend class PasswordManagerPresenterTest;
 
-  // Returns true if the user needs to be authenticated before a plaintext
-  // password is revealed or exported.
-  bool IsAuthenticationRequired();
-
   // Sets the password and exception list of the UI view.
   void SetPasswordList();
   void SetPasswordExceptionList();
 
   // Sort entries of |list| based on sort key. The key is the concatenation of
   // origin, entry type (non-Android credential, Android w/ affiliated web realm
-  // or Android w/o affiliated web realm). If |username_and_password_in_key|,
-  // username and password are also included in sort key. If there are several
-  // forms with the same key, all such forms but the first one are
+  // or Android w/o affiliated web realm). If |entry_type == SAVED|,
+  // username, password and federation are also included in sort key. If there
+  // are several forms with the same key, all such forms but the first one are
   // stored in |duplicates| instead of |list|.
   void SortEntriesAndHideDuplicates(
       std::vector<std::unique_ptr<autofill::PasswordForm>>* list,
       DuplicatesMap* duplicates,
-      bool username_and_password_in_key);
+      PasswordEntryType entry_type);
 
   // Returns the password store associated with the currently active profile.
   password_manager::PasswordStore* GetPasswordStore();
@@ -122,7 +120,7 @@ class PasswordManagerPresenter
 
     // Send the password store's reply back to the handler.
     void OnGetPasswordStoreResults(
-        ScopedVector<autofill::PasswordForm> results) override;
+        std::vector<std::unique_ptr<autofill::PasswordForm>> results) override;
   };
 
   // A short class to mediate requests to the password store for exceptions.
@@ -135,7 +133,7 @@ class PasswordManagerPresenter
 
     // Send the password store's reply back to the handler.
     void OnGetPasswordStoreResults(
-        ScopedVector<autofill::PasswordForm> results) override;
+        std::vector<std::unique_ptr<autofill::PasswordForm>> results) override;
   };
 
   // Password store consumer for populating the password list and exceptions.

@@ -7,9 +7,30 @@
 namespace mojo {
 namespace test {
 
+NestedStructWithTraitsImpl::NestedStructWithTraitsImpl() {}
+NestedStructWithTraitsImpl::NestedStructWithTraitsImpl(int32_t in_value)
+    : value(in_value) {}
+
 StructWithTraitsImpl::StructWithTraitsImpl() {}
 
 StructWithTraitsImpl::~StructWithTraitsImpl() {}
+
+StructWithTraitsImpl::StructWithTraitsImpl(const StructWithTraitsImpl& other) =
+    default;
+
+MoveOnlyStructWithTraitsImpl::MoveOnlyStructWithTraitsImpl() {}
+
+MoveOnlyStructWithTraitsImpl::MoveOnlyStructWithTraitsImpl(
+    MoveOnlyStructWithTraitsImpl&& other) = default;
+
+MoveOnlyStructWithTraitsImpl::~MoveOnlyStructWithTraitsImpl() {}
+
+MoveOnlyStructWithTraitsImpl& MoveOnlyStructWithTraitsImpl::operator=(
+    MoveOnlyStructWithTraitsImpl&& other) = default;
+
+UnionWithTraitsInt32::~UnionWithTraitsInt32() {}
+
+UnionWithTraitsStruct::~UnionWithTraitsStruct() {}
 
 }  // namespace test
 }  // namespace mojo

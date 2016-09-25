@@ -11,10 +11,11 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "content/browser/dom_storage/dom_storage_area.h"
 #include "content/browser/dom_storage/dom_storage_database.h"
@@ -146,7 +147,7 @@ TEST_F(DOMStorageAreaTest, BackingDatabaseOpened) {
   const int64_t kSessionStorageNamespaceId = kLocalStorageNamespaceId + 1;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  const base::FilePath kExpectedOriginFilePath = temp_dir.path().Append(
+  const base::FilePath kExpectedOriginFilePath = temp_dir.GetPath().Append(
       DOMStorageArea::DatabaseFileNameFromOrigin(kOrigin));
 
   // No directory, backing should be null.
@@ -179,7 +180,7 @@ TEST_F(DOMStorageAreaTest, BackingDatabaseOpened) {
   // This should set up a DOMStorageArea that is correctly backed to disk.
   {
     scoped_refptr<DOMStorageArea> area(
-        new DOMStorageArea(kOrigin, temp_dir.path(),
+        new DOMStorageArea(kOrigin, temp_dir.GetPath(),
                            new MockDOMStorageTaskRunner(
                                base::ThreadTaskRunnerHandle::Get().get())));
 
@@ -203,7 +204,7 @@ TEST_F(DOMStorageAreaTest, BackingDatabaseOpened) {
     EXPECT_TRUE(area->commit_batch_.get());
     EXPECT_EQ(0, area->commit_batches_in_flight_);
 
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
 
     EXPECT_FALSE(area->commit_batch_.get());
     EXPECT_EQ(0, area->commit_batches_in_flight_);
@@ -226,7 +227,7 @@ TEST_F(DOMStorageAreaTest, CommitTasks) {
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
   scoped_refptr<DOMStorageArea> area(new DOMStorageArea(
-      kOrigin, temp_dir.path(),
+      kOrigin, temp_dir.GetPath(),
       new MockDOMStorageTaskRunner(base::ThreadTaskRunnerHandle::Get().get())));
   // Inject an in-memory db to speed up the test.
   area->backing_.reset(new LocalStorageDatabaseAdapter());
@@ -251,7 +252,7 @@ TEST_F(DOMStorageAreaTest, CommitTasks) {
   EXPECT_TRUE(area->commit_batch_.get());
   EXPECT_FALSE(area->commit_batch_->clear_all_first);
   EXPECT_EQ(2u, area->commit_batch_->changed_values.size());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(area->HasUncommittedChanges());
   EXPECT_FALSE(area->commit_batch_.get());
   EXPECT_EQ(0, area->commit_batches_in_flight_);
@@ -267,7 +268,7 @@ TEST_F(DOMStorageAreaTest, CommitTasks) {
   EXPECT_TRUE(area->commit_batch_.get());
   EXPECT_TRUE(area->commit_batch_->clear_all_first);
   EXPECT_TRUE(area->commit_batch_->changed_values.empty());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(area->commit_batch_.get());
   EXPECT_EQ(0, area->commit_batches_in_flight_);
   // Verify the changes made it to the database.
@@ -289,7 +290,7 @@ TEST_F(DOMStorageAreaTest, CommitTasks) {
       base::Bind(&DOMStorageAreaTest::InjectedCommitSequencingTask1,
                  base::Unretained(this),
                  area));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(area->HasOneRef());
   EXPECT_FALSE(area->HasUncommittedChanges());
   // Verify the changes made it to the database.
@@ -304,7 +305,7 @@ TEST_F(DOMStorageAreaTest, CommitChangesAtShutdown) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   scoped_refptr<DOMStorageArea> area(new DOMStorageArea(
-      kOrigin, temp_dir.path(),
+      kOrigin, temp_dir.GetPath(),
       new MockDOMStorageTaskRunner(base::ThreadTaskRunnerHandle::Get().get())));
 
   // Inject an in-memory db to speed up the test and also to verify
@@ -319,7 +320,7 @@ TEST_F(DOMStorageAreaTest, CommitChangesAtShutdown) {
   area->backing_->ReadAllValues(&values);
   EXPECT_TRUE(values.empty());  // not committed yet
   area->Shutdown();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(area->HasOneRef());
   EXPECT_FALSE(area->backing_.get());
   // The VerifyChangesCommittedDatabase destructor verifies values
@@ -330,7 +331,7 @@ TEST_F(DOMStorageAreaTest, DeleteOrigin) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   scoped_refptr<DOMStorageArea> area(new DOMStorageArea(
-      kOrigin, temp_dir.path(),
+      kOrigin, temp_dir.GetPath(),
       new MockDOMStorageTaskRunner(base::ThreadTaskRunnerHandle::Get().get())));
 
   // This test puts files on disk.
@@ -346,7 +347,7 @@ TEST_F(DOMStorageAreaTest, DeleteOrigin) {
   // Commit something in the database and then delete.
   base::NullableString16 old_value;
   area->SetItem(kKey, kValue, &old_value);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(base::PathExists(db_file_path));
   area->DeleteOrigin();
   EXPECT_EQ(0u, area->Length());
@@ -361,14 +362,14 @@ TEST_F(DOMStorageAreaTest, DeleteOrigin) {
   area->DeleteOrigin();
   EXPECT_TRUE(area->HasUncommittedChanges());
   EXPECT_EQ(0u, area->Length());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(area->HasUncommittedChanges());
   EXPECT_FALSE(base::PathExists(db_file_path));
 
   // Put some uncommitted changes to a an existing database in
   // and then delete.
   area->SetItem(kKey, kValue, &old_value);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(base::PathExists(db_file_path));
   area->SetItem(kKey2, kValue2, &old_value);
   EXPECT_TRUE(area->HasUncommittedChanges());
@@ -376,13 +377,13 @@ TEST_F(DOMStorageAreaTest, DeleteOrigin) {
   area->DeleteOrigin();
   EXPECT_TRUE(area->HasUncommittedChanges());
   EXPECT_EQ(0u, area->Length());
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(area->HasUncommittedChanges());
   // Since the area had uncommitted changes at the time delete
   // was called, the file will linger until the shutdown time.
   EXPECT_TRUE(base::PathExists(db_file_path));
   area->Shutdown();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(base::PathExists(db_file_path));
 }
 
@@ -390,7 +391,7 @@ TEST_F(DOMStorageAreaTest, PurgeMemory) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   scoped_refptr<DOMStorageArea> area(new DOMStorageArea(
-      kOrigin, temp_dir.path(),
+      kOrigin, temp_dir.GetPath(),
       new MockDOMStorageTaskRunner(base::ThreadTaskRunnerHandle::Get().get())));
 
   // Inject an in-memory db to speed up the test.
@@ -425,7 +426,7 @@ TEST_F(DOMStorageAreaTest, PurgeMemory) {
   EXPECT_EQ(original_map, area->map_.get());
 
   // Commit the changes from above,
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(area->HasUncommittedChanges());
   new_backing = static_cast<LocalStorageDatabaseAdapter*>(
       area->backing_.get())->db_.get();

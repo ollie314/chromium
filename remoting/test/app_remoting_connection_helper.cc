@@ -9,7 +9,7 @@
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
 #include "remoting/protocol/host_stub.h"
@@ -161,8 +161,8 @@ void AppRemotingConnectionHelper::SendClientConnectionDetailsToHost() {
 
   // Next send the host a description of the client screen size.
   protocol::ClientResolution client_resolution;
-  client_resolution.set_width(kDefaultWidth);
-  client_resolution.set_height(kDefaultHeight);
+  client_resolution.set_width_deprecated(kDefaultWidth);
+  client_resolution.set_height_deprecated(kDefaultHeight);
   client_resolution.set_x_dpi(kDefaultDPI);
   client_resolution.set_y_dpi(kDefaultDPI);
   client_resolution.set_dips_width(kDefaultWidth);

@@ -11,6 +11,7 @@
 (allow file-read* (regex #"^/Library/Fonts($|/)"))
 (allow mach-lookup (global-name "com.apple.FontObjectsServer"))
 (allow mach-lookup (global-name "com.apple.FontServer"))
+(allow mach-lookup (global-name "com.apple.fonts"))
 
 (allow file-read*
   (regex #"^/System/Library/ColorSync($|/)")  ; https://crbug.com/46648
@@ -33,14 +34,7 @@
 
 (allow file-read-metadata (regex #"^/(private/)?etc$"))
 
-; https://crbug.com/508935
-; TODO(tkent): Remove this section when we drop 'results' attribute support.
-; https://crbug.com/590117
-(if (param-true? elcap-or-later)
-  (allow file-read*
-    (literal "/usr/lib/libcrypto.0.9.8.dylib")
-    (literal "/usr/lib/libcsfde.dylib")
-    (literal "/usr/lib/libcurl.4.dylib")
-    (literal "/usr/lib/libCoreStorage.dylib")
-    (literal "/usr/lib/libsasl2.2.dylib")
-    (literal "/usr/lib/libutil.dylib")))
+; https://crbug.com/605840
+; file-read-metadata /System/Library/LinguisticData/en/US/hyphenation.dat
+; for CFStringIsHyphenationAvailableForLocale and CFStringGetHyphenationLocationBeforeIndex
+(allow file-read* (subpath "/System/Library/LinguisticData"))

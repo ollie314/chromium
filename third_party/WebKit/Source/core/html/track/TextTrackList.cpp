@@ -61,7 +61,7 @@ int TextTrackList::getTrackIndex(TextTrack *textTrack)
     if (textTrack->trackType() == TextTrack::InBand)
         return m_elementTracks.size() + m_addTrackTracks.size() + m_inbandTracks.find(textTrack);
 
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
 
     return -1;
 }
@@ -98,7 +98,7 @@ int TextTrackList::getTrackIndexRelativeToRenderedTracks(TextTrack *textTrack)
         ++trackIndex;
     }
 
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
 
     return -1;
 }
@@ -134,7 +134,7 @@ TextTrack* TextTrackList::getTrackById(const AtomicString& id)
     // to the value of the id argument.
     for (unsigned i = 0; i < length(); ++i) {
         TextTrack* track = anonymousIndexedGetter(i);
-        if (track->id() == id)
+        if (String(track->id()) == id)
             return track;
     }
 
@@ -159,7 +159,7 @@ void TextTrackList::invalidateTrackIndexesAfterTrack(TextTrack* track)
     } else if (track->trackType() == TextTrack::InBand) {
         tracks = &m_inbandTracks;
     } else {
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
 
     size_t index = tracks->find(track);
@@ -167,7 +167,7 @@ void TextTrackList::invalidateTrackIndexesAfterTrack(TextTrack* track)
         return;
 
     for (size_t i = index; i < tracks->size(); ++i)
-        tracks->at(index)->invalidateTrackIndex();
+        tracks->at(i)->invalidateTrackIndex();
 }
 
 void TextTrackList::append(TextTrack* track)
@@ -181,12 +181,12 @@ void TextTrackList::append(TextTrack* track)
     } else if (track->trackType() == TextTrack::InBand) {
         m_inbandTracks.append(track);
     } else {
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
 
     invalidateTrackIndexesAfterTrack(track);
 
-    ASSERT(!track->trackList());
+    DCHECK(!track->trackList());
     track->setTrackList(this);
 
     scheduleAddTrackEvent(track);
@@ -203,7 +203,7 @@ void TextTrackList::remove(TextTrack* track)
     } else if (track->trackType() == TextTrack::InBand) {
         tracks = &m_inbandTracks;
     } else {
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
 
     size_t index = tracks->find(track);
@@ -212,7 +212,7 @@ void TextTrackList::remove(TextTrack* track)
 
     invalidateTrackIndexesAfterTrack(track);
 
-    ASSERT(track->trackList() == this);
+    DCHECK_EQ(track->trackList(), this);
     track->setTrackList(0);
 
     tracks->remove(index);
@@ -239,7 +239,7 @@ bool TextTrackList::contains(TextTrack* track) const
     else if (track->trackType() == TextTrack::InBand)
         tracks = &m_inbandTracks;
     else
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
 
     return tracks->find(track) != kNotFound;
 }
@@ -319,4 +319,14 @@ DEFINE_TRACE(TextTrackList)
     visitor->trace(m_elementTracks);
     visitor->trace(m_inbandTracks);
     EventTargetWithInlineData::trace(visitor);
+}
+
+DEFINE_TRACE_WRAPPERS(TextTrackList)
+{
+    for (auto track : m_addTrackTracks)
+        visitor->traceWrappers(track);
+    for (auto track : m_elementTracks)
+        visitor->traceWrappers(track);
+    for (auto track : m_inbandTracks)
+        visitor->traceWrappers(track);
 }

@@ -9,9 +9,9 @@
 #include <stdint.h>
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 
-#include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_piece.h"
@@ -96,6 +96,10 @@ class NET_EXPORT HttpResponseHeaders
   // merged together by this method; the one provided is simply put at the
   // end of the list.
   void AddHeader(const std::string& header);
+
+  // Adds a cookie header. |cookie_string| should be the header value without
+  // the header name (Set-Cookie).
+  void AddCookie(const std::string& cookie_string);
 
   // Replaces the current status line with the provided one (|new_status| should
   // not have any EOL).
@@ -324,7 +328,7 @@ class NET_EXPORT HttpResponseHeaders
  private:
   friend class base::RefCountedThreadSafe<HttpResponseHeaders>;
 
-  typedef base::hash_set<std::string> HeaderSet;
+  using HeaderSet = std::unordered_set<std::string>;
 
   // The members of this structure point into raw_headers_.
   struct ParsedHeader;

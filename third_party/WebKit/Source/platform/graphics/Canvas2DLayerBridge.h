@@ -26,23 +26,26 @@
 #ifndef Canvas2DLayerBridge_h
 #define Canvas2DLayerBridge_h
 
+#include "cc/layers/texture_layer_client.h"
+#include "cc/resources/texture_mailbox.h"
 #include "platform/PlatformExport.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/ImageBufferSurface.h"
 #include "public/platform/WebExternalTextureLayer.h"
-#include "public/platform/WebExternalTextureLayerClient.h"
-#include "public/platform/WebExternalTextureMailbox.h"
 #include "public/platform/WebThread.h"
 #include "third_party/khronos/GLES2/gl2.h"
-#include "third_party/skia/include/core/SkImage.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkSurface.h"
 #include "wtf/Allocator.h"
 #include "wtf/Deque.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
 #include "wtf/WeakPtr.h"
+#include <memory>
 
+class SkImage;
+struct SkImageInfo;
 class SkPictureRecorder;
 
 namespace gpu {
@@ -56,7 +59,6 @@ namespace blink {
 class Canvas2DLayerBridgeHistogramLogger;
 class Canvas2DLayerBridgeTest;
 class ImageBuffer;
-class WebGraphicsContext3D;
 class WebGraphicsContext3DProvider;
 class SharedContextRateLimiter;
 
@@ -75,7 +77,7 @@ class SharedContextRateLimiter;
 // TODO: Fix background rendering and remove this workaround. crbug.com/600386
 #define CANVAS2D_BACKGROUND_RENDER_SWITCH_TO_CPU 0
 
-class PLATFORM_EXPORT Canvas2DLayerBridge : public WebExternalTextureLayerClient, public WebThread::TaskObserver, public RefCounted<Canvas2DLayerBridge> {
+class PLATFORM_EXPORT Canvas2DLayerBridge : public NON_EXPORTED_BASE(cc::TextureLayerClient), public WebThread::TaskObserver, public RefCounted<Canvas2DLayerBridge> {
     WTF_MAKE_NONCOPYABLE(Canvas2DLayerBridge);
 public:
     enum AccelerationMode {
@@ -84,13 +86,18 @@ public:
         ForceAccelerationForTesting,
     };
 
-    static PassRefPtr<Canvas2DLayerBridge> create(const IntSize&, int msaaSampleCount, OpacityMode, AccelerationMode);
+    Canvas2DLayerBridge(std::unique_ptr<WebGraphicsContext3DProvider>, const IntSize&, int msaaSampleCount, OpacityMode, AccelerationMode, sk_sp<SkColorSpace>);
 
     ~Canvas2DLayerBridge() override;
 
-    // WebExternalTextureLayerClient implementation.
-    bool prepareMailbox(WebExternalTextureMailbox*, WebExternalBitmap*) override;
-    void mailboxReleased(const WebExternalTextureMailbox&, bool lostResource) override;
+    // cc::TextureLayerClient implementation.
+    bool PrepareTextureMailbox(
+        cc::TextureMailbox* outMailbox,
+        std::unique_ptr<cc::SingleReleaseCallback>* outReleaseCallback) override;
+
+    // Callback for mailboxes given to the compositor from PrepareTextureMailbox.
+    void mailboxReleased(const gpu::Mailbox&, const gpu::SyncToken&,
+        bool lostResource);
 
     // ImageBufferSurface implementation
     void finalizeFrame(const FloatRect &dirtyRect);
@@ -112,12 +119,14 @@ public:
     void flushGpu();
     void prepareSurfaceForPaintingIfNeeded();
     bool isHidden() { return m_isHidden; }
+    OpacityMode opacityMode() { return m_opacityMode; }
 
     void beginDestruction();
     void hibernate();
     bool isHibernating() const { return m_hibernationImage.get(); }
+    sk_sp<SkColorSpace> colorSpace() const { return m_colorSpace; }
 
-    PassRefPtr<SkImage> newImageSnapshot(AccelerationHint, SnapshotReason);
+    sk_sp<SkImage> newImageSnapshot(AccelerationHint, SnapshotReason);
 
     // The values of the enum entries must not change because they are used for
     // usage metrics histograms. New values can be added to the end.
@@ -145,7 +154,7 @@ public:
         virtual ~Logger() { }
     };
 
-    void setLoggerForTesting(PassOwnPtr<Logger>);
+    void setLoggerForTesting(std::unique_ptr<Logger>);
 
 private:
 #if USE_IOSURFACE_FOR_2D_CANVAS
@@ -167,8 +176,8 @@ private:
 
     struct MailboxInfo {
         DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-        WebExternalTextureMailbox m_mailbox;
-        RefPtr<SkImage> m_image;
+        gpu::Mailbox m_mailbox;
+        sk_sp<SkImage> m_image;
         RefPtr<Canvas2DLayerBridge> m_parentLayerBridge;
 
 #if USE_IOSURFACE_FOR_2D_CANVAS
@@ -178,11 +187,9 @@ private:
 #endif // USE_IOSURFACE_FOR_2D_CANVAS
 
         MailboxInfo(const MailboxInfo&);
-        MailboxInfo() {}
+        MailboxInfo();
     };
 
-    Canvas2DLayerBridge(PassOwnPtr<WebGraphicsContext3DProvider>, const IntSize&, int msaaSampleCount, OpacityMode, AccelerationMode);
-    WebGraphicsContext3D* context();
     gpu::gles2::GLES2Interface* contextGL();
     void startRecording();
     void skipQueuedDrawCommands();
@@ -206,7 +213,7 @@ private:
     // MailboxInfo, and prepended it to |m_mailboxs|. Returns whether the
     // mailbox was successfully prepared. |mailbox| is an out parameter only
     // populated on success.
-    bool prepareIOSurfaceMailboxFromImage(SkImage*, WebExternalTextureMailbox*);
+    bool prepareIOSurfaceMailboxFromImage(SkImage*, cc::TextureMailbox*);
 
     // Creates an IOSurface-backed texture. Returns an ImageInfo, which is empty
     // on failure. The caller takes ownership of both the texture and the image.
@@ -224,20 +231,20 @@ private:
 
     // Returns whether the mailbox was successfully prepared from the SkImage.
     // The mailbox is an out parameter only populated on success.
-    bool prepareMailboxFromImage(PassRefPtr<SkImage>, WebExternalTextureMailbox*);
+    bool prepareMailboxFromImage(sk_sp<SkImage>, cc::TextureMailbox*);
 
     // Resets Skia's texture bindings. This method should be called after
     // changing texture bindings.
     void resetSkiaTextureBinding();
 
-    OwnPtr<SkPictureRecorder> m_recorder;
-    RefPtr<SkSurface> m_surface;
-    RefPtr<SkImage> m_hibernationImage;
+    std::unique_ptr<SkPictureRecorder> m_recorder;
+    sk_sp<SkSurface> m_surface;
+    sk_sp<SkImage> m_hibernationImage;
     int m_initialSurfaceSaveCount;
-    OwnPtr<WebExternalTextureLayer> m_layer;
-    OwnPtr<WebGraphicsContext3DProvider> m_contextProvider;
-    OwnPtr<SharedContextRateLimiter> m_rateLimiter;
-    OwnPtr<Logger> m_logger;
+    std::unique_ptr<WebExternalTextureLayer> m_layer;
+    std::unique_ptr<WebGraphicsContext3DProvider> m_contextProvider;
+    std::unique_ptr<SharedContextRateLimiter> m_rateLimiter;
+    std::unique_ptr<Logger> m_logger;
     WeakPtrFactory<Canvas2DLayerBridge> m_weakPtrFactory;
     ImageBuffer* m_imageBuffer;
     int m_msaaSampleCount;
@@ -254,6 +261,8 @@ private:
     bool m_hibernationScheduled = false;
 
     friend class Canvas2DLayerBridgeTest;
+    friend class CanvasRenderingContext2DTest;
+    friend class HTMLCanvasPainterTestForSPv2;
 
     uint32_t m_lastImageId;
 
@@ -268,6 +277,7 @@ private:
     AccelerationMode m_accelerationMode;
     OpacityMode m_opacityMode;
     const IntSize m_size;
+    sk_sp<SkColorSpace> m_colorSpace;
     int m_recordingPixelCount;
 
 #if USE_IOSURFACE_FOR_2D_CANVAS

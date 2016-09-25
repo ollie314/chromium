@@ -221,7 +221,7 @@ void DataObject::addFilename(const String& filename, const String& displayName)
 
 void DataObject::addSharedBuffer(const String& name, PassRefPtr<SharedBuffer> buffer)
 {
-    internalAddFileItem(DataObjectItem::createFromSharedBuffer(name, buffer));
+    internalAddFileItem(DataObjectItem::createFromSharedBuffer(name, std::move(buffer)));
 }
 
 DataObject::DataObject()
@@ -305,6 +305,7 @@ WebDragData DataObject::toWebDragData()
 {
     WebDragData data;
     data.initialize();
+    data.setModifierKeyState(m_modifiers);
     WebVector<WebDragData::Item> itemList(length());
 
     for (size_t i = 0; i < length(); ++i) {

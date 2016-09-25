@@ -16,7 +16,7 @@
 #include "base/location.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task_runner_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "crypto/sha2.h"
 #include "net/cert/x509_certificate.h"
@@ -29,7 +29,7 @@ namespace {
 base::ListValue* SPKIHashesToListValue(const HashValueVector& hashes) {
   base::ListValue* pins = new base::ListValue;
   for (size_t i = 0; i != hashes.size(); i++)
-    pins->Append(new base::StringValue(hashes[i].ToString()));
+    pins->AppendString(hashes[i].ToString());
   return pins;
 }
 

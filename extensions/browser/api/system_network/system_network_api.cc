@@ -4,8 +4,6 @@
 
 #include "extensions/browser/api/system_network/system_network_api.h"
 
-#include "net/base/ip_address_number.h"
-
 namespace {
 const char kNetworkListError[] = "Network lookup failed or unsupported";
 }  // namespace
@@ -64,7 +62,7 @@ void SystemNetworkGetNetworkInterfacesFunction::SendResponseOnUIThread(
 
   std::vector<api::system_network::NetworkInterface> create_arg;
   create_arg.reserve(interface_list.size());
-  for (const net::NetworkInterface interface : interface_list) {
+  for (const net::NetworkInterface& interface : interface_list) {
     api::system_network::NetworkInterface info;
     info.name = interface.name;
     info.address = interface.address.ToString();

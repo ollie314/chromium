@@ -17,7 +17,7 @@
 #include "chrome/browser/supervised_user/supervised_users.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_store.h"
-#include "sync/api/syncable_service.h"
+#include "components/sync/api/syncable_service.h"
 
 class PersistentPrefStore;
 class Profile;
@@ -95,7 +95,7 @@ class SupervisedUserSettingsService : public KeyedService,
   void SetActive(bool active);
 
   // Whether supervised user settings are available.
-  bool IsReady();
+  bool IsReady() const;
 
   // Clears all supervised user settings and items.
   void Clear();
@@ -111,6 +111,12 @@ class SupervisedUserSettingsService : public KeyedService,
   // only downloaded), and never passed to the preference system.
   // An example of an uploaded item is an access request to a blocked URL.
   void UploadItem(const std::string& key, std::unique_ptr<base::Value> value);
+
+  // Updates supervised user setting and uploads it to the Sync server.
+  // An example is when an extension updates without permission
+  // increase, the approved version information should be updated accordingly.
+  void UpdateSetting(const std::string& key,
+                     std::unique_ptr<base::Value> value);
 
   // Sets the setting with the given |key| to a copy of the given |value|.
   void SetLocalSetting(const std::string& key,
@@ -159,11 +165,14 @@ class SupervisedUserSettingsService : public KeyedService,
   // subclass whenever the settings change.
   void InformSubscribers();
 
+  void PushItemToSync(const std::string& key,
+                      std::unique_ptr<base::Value> value);
+
   // Used for persisting the settings. Unlike other PrefStores, this one is not
   // directly hooked up to the PrefService.
   scoped_refptr<PersistentPrefStore> store_;
 
-  Profile* profile_;
+  Profile* const profile_;
 
   bool active_;
 

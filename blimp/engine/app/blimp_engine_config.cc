@@ -7,54 +7,62 @@
 #include <memory>
 #include <string>
 
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
-#include "blimp/engine/app/switches.h"
+#include "blimp/common/get_client_auth_token.h"
+#include "cc/base/switches.h"
+#include "content/public/common/content_switches.h"
+#include "ui/gl/gl_switches.h"
+#include "ui/native_theme/native_theme_switches.h"
 
 namespace blimp {
 namespace engine {
 
-namespace {
-// Gets the client token from the file provided by the command line. If a read
-// does not succeed, or the switch is malformed, an empty string is returned.
-std::string GetClientToken(const base::CommandLine& cmd_line) {
-  std::string file_contents;
-  const base::FilePath path = cmd_line.GetSwitchValuePath(kClientTokenPath);
-  if (!base::ReadFileToString(path, &file_contents)) {
-    LOG(ERROR) << "Could not read client token file at "
-               << (path.empty() ? "(not provided)" : path.AsUTF8Unsafe());
-  }
-  return base::CollapseWhitespaceASCII(file_contents, true);
+void SetCommandLineDefaults(base::CommandLine* command_line) {
+  command_line->AppendSwitch(::switches::kEnableOverlayScrollbar);
+  command_line->AppendSwitch(::switches::kEnableViewport);
+  command_line->AppendSwitch(cc::switches::kDisableCachedPictureRaster);
+  command_line->AppendSwitch(::switches::kDisableGpu);
+  command_line->AppendSwitch(
+      "disable-remote-fonts");  // switches::kDisableRemoteFonts is not visible.
+  command_line->AppendSwitch(::switches::kUseRemoteCompositing);
+  command_line->AppendSwitchASCII(
+      ::switches::kUseGL,
+      "osmesa");  // Avoid invoking gpu::CollectDriverVersionNVidia.
+
+  // Disable threaded animation since we don't support them right now.
+  // (crbug/570376).
+  command_line->AppendSwitch(cc::switches::kDisableThreadedAnimation);
 }
-}  // namespace
 
 BlimpEngineConfig::~BlimpEngineConfig() {}
 
 // static
 std::unique_ptr<BlimpEngineConfig> BlimpEngineConfig::Create(
     const base::CommandLine& cmd_line) {
-  const std::string client_token = GetClientToken(cmd_line);
-  if (!client_token.empty()) {
-    return base::WrapUnique(new BlimpEngineConfig(client_token));
+  const std::string client_auth_token = GetClientAuthToken(cmd_line);
+  if (!client_auth_token.empty()) {
+    return base::WrapUnique(new BlimpEngineConfig(client_auth_token));
   }
   return nullptr;
 }
 
 // static
 std::unique_ptr<BlimpEngineConfig> BlimpEngineConfig::CreateForTest(
-    const std::string& client_token) {
-  return base::WrapUnique(new BlimpEngineConfig(client_token));
+    const std::string& client_auth_token) {
+  return base::WrapUnique(new BlimpEngineConfig(client_auth_token));
 }
 
-const std::string& BlimpEngineConfig::client_token() const {
-  return client_token_;
+const std::string& BlimpEngineConfig::client_auth_token() const {
+  return client_auth_token_;
 }
 
-BlimpEngineConfig::BlimpEngineConfig(const std::string& client_token)
-    : client_token_(client_token) {}
+BlimpEngineConfig::BlimpEngineConfig(const std::string& client_auth_token)
+    : client_auth_token_(client_auth_token) {}
 
 }  // namespace engine
 }  // namespace blimp

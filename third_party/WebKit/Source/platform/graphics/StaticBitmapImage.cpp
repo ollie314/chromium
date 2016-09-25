@@ -4,32 +4,47 @@
 
 #include "platform/graphics/StaticBitmapImage.h"
 
+#include "platform/graphics/AcceleratedStaticBitmapImage.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/ImageObserver.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkPaint.h"
-#include "third_party/skia/include/core/SkShader.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
-PassRefPtr<StaticBitmapImage> StaticBitmapImage::create(PassRefPtr<SkImage> image)
+PassRefPtr<StaticBitmapImage> StaticBitmapImage::create(sk_sp<SkImage> image)
 {
     if (!image)
         return nullptr;
-    return adoptRef(new StaticBitmapImage(image));
+    if (image->isTextureBacked())
+        return AcceleratedStaticBitmapImage::createFromSharedContextImage(std::move(image));
+    return adoptRef(new StaticBitmapImage(std::move(image)));
 }
 
-StaticBitmapImage::StaticBitmapImage(PassRefPtr<SkImage> image) : m_image(image)
+StaticBitmapImage::StaticBitmapImage(sk_sp<SkImage> image) : m_image(std::move(image))
 {
     ASSERT(m_image);
 }
 
-StaticBitmapImage::~StaticBitmapImage() { }
+StaticBitmapImage::StaticBitmapImage()
+{
+}
+
+StaticBitmapImage::~StaticBitmapImage()
+{
+}
 
 IntSize StaticBitmapImage::size() const
 {
     return IntSize(m_image->width(), m_image->height());
+}
+
+bool StaticBitmapImage::isTextureBacked()
+{
+    return m_image && m_image->isTextureBacked();
 }
 
 bool StaticBitmapImage::currentFrameKnownToBeOpaque(MetadataMode)
@@ -40,30 +55,20 @@ bool StaticBitmapImage::currentFrameKnownToBeOpaque(MetadataMode)
 void StaticBitmapImage::draw(SkCanvas* canvas, const SkPaint& paint, const FloatRect& dstRect,
     const FloatRect& srcRect, RespectImageOrientationEnum, ImageClampingMode clampMode)
 {
-    // Note: Sizes < 0 should never happen, except that the layout arithmetic
-    // may overflow in degenerate use cases, so we need to check for negatives,
-    // rather than only handle the isEmpty() case. See layout test
-    // fast/canvas/bug544329.html
-    if (dstRect.width() <= 0 || dstRect.height() <= 0 || srcRect.width() <= 0 || srcRect.height() <= 0)
-        return;
-
     FloatRect adjustedSrcRect = srcRect;
-    adjustedSrcRect.intersect(FloatRect(0, 0, m_image->width(), m_image->height()));
+    adjustedSrcRect.intersect(SkRect::Make(m_image->bounds()));
 
-    if (adjustedSrcRect.isEmpty())
+    if (dstRect.isEmpty() || adjustedSrcRect.isEmpty())
         return; // Nothing to draw.
 
-    ASSERT(adjustedSrcRect.width() <= m_image->width() && adjustedSrcRect.height() <= m_image->height());
-
-    SkRect srcSkRect = adjustedSrcRect;
-    canvas->drawImageRect(m_image.get(), srcSkRect, dstRect, &paint,
+    canvas->drawImageRect(m_image.get(), adjustedSrcRect, dstRect, &paint,
         WebCoreClampingModeToSkiaRectConstraint(clampMode));
 
     if (ImageObserver* observer = getImageObserver())
         observer->didDraw(this);
 }
 
-PassRefPtr<SkImage> StaticBitmapImage::imageForCurrentFrame()
+sk_sp<SkImage> StaticBitmapImage::imageForCurrentFrame()
 {
     return m_image;
 }

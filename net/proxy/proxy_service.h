@@ -25,6 +25,7 @@
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_server.h"
+#include "url/gurl.h"
 
 class GURL;
 
@@ -52,6 +53,25 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
                                 public ProxyConfigService::Observer,
                                 NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
+  // Enumerates the policy to use when sanitizing URLs for proxy resolution
+  // (before passing them off to PAC scripts).
+  enum class SanitizeUrlPolicy {
+    // Do a basic level of sanitization for URLs:
+    //   - strip embedded identities (ex: "username:password@")
+    //   - strip the fragment (ex: "#blah")
+    //
+    // This is considered "unsafe" because it does not do any additional
+    // stripping for https:// URLs.
+    UNSAFE,
+
+    // SAFE does the same sanitization as UNSAFE, but additionally strips
+    // everything but the (scheme,host,port) from cryptographic URL schemes
+    // (https:// and wss://).
+    //
+    // In other words, it strips the path and query portion of https:// URLs.
+    SAFE,
+  };
+
   static const size_t kDefaultNumPacThreads = 4;
 
   // This interface defines the set of policies for when to poll the PAC
@@ -132,21 +152,19 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // Profiling information for the request is saved to |net_log| if non-NULL.
   int ResolveProxy(const GURL& url,
                    const std::string& method,
-                   int load_flags,
                    ProxyInfo* results,
                    const CompletionCallback& callback,
                    PacRequest** pac_request,
                    ProxyDelegate* proxy_delegate,
-                   const BoundNetLog& net_log);
+                   const NetLogWithSource& net_log);
 
   // Returns true if the proxy information could be determined without spawning
   // an asynchronous task.  Otherwise, |result| is unmodified.
   bool TryResolveProxySynchronously(const GURL& raw_url,
                                     const std::string& method,
-                                    int load_flags,
                                     ProxyInfo* result,
                                     ProxyDelegate* proxy_delegate,
-                                    const BoundNetLog& net_log);
+                                    const NetLogWithSource& net_log);
 
   // This method is called after a failure to connect or resolve a host name.
   // It gives the proxy service an opportunity to reconsider the proxy to use.
@@ -164,13 +182,12 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // Profiling information for the request is saved to |net_log| if non-NULL.
   int ReconsiderProxyAfterError(const GURL& url,
                                 const std::string& method,
-                                int load_flags,
                                 int net_error,
                                 ProxyInfo* results,
                                 const CompletionCallback& callback,
                                 PacRequest** pac_request,
                                 ProxyDelegate* proxy_delegate,
-                                const BoundNetLog& net_log);
+                                const NetLogWithSource& net_log);
 
   // Explicitly trigger proxy fallback for the given |results| by updating our
   // list of bad proxies to include the first entry of |results|, and,
@@ -186,7 +203,7 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
       const ProxyInfo& results,
       base::TimeDelta retry_delay,
       const std::vector<ProxyServer>& additional_bad_proxies,
-      const BoundNetLog& net_log);
+      const NetLogWithSource& net_log);
 
   // Called to report that the last proxy connection succeeded.  If |proxy_info|
   // has a non empty proxy_retry_info map, the proxies that have been tried (and
@@ -296,6 +313,10 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
     quick_check_enabled_ = value;
   }
 
+  void set_sanitize_url_policy(SanitizeUrlPolicy policy) {
+    sanitize_url_policy_ = policy;
+  }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ProxyServiceTest, UpdateConfigAfterFailedAutodetect);
   FRIEND_TEST_ALL_PREFIXES(ProxyServiceTest, UpdateConfigFromPACToDirect);
@@ -332,7 +353,6 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // Otherwise it fills |result| with the proxy information for |url|.
   // Completing synchronously means we don't need to query ProxyResolver.
   int TryToCompleteSynchronously(const GURL& url,
-                                 int load_flags,
                                  ProxyDelegate* proxy_delegate,
                                  ProxyInfo* result);
 
@@ -341,12 +361,11 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // |TryToCompleteSynchronously|.
   int ResolveProxyHelper(const GURL& url,
                          const std::string& method,
-                         int load_flags,
                          ProxyInfo* results,
                          const CompletionCallback& callback,
                          PacRequest** pac_request,
                          ProxyDelegate* proxy_delegate,
-                         const BoundNetLog& net_log);
+                         const NetLogWithSource& net_log);
 
   // Cancels all of the requests sent to the ProxyResolver. These will be
   // restarted when calling SetReady().
@@ -367,11 +386,10 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // bad entries from the results list.
   int DidFinishResolvingProxy(const GURL& url,
                               const std::string& method,
-                              int load_flags,
                               ProxyDelegate* proxy_delegate,
                               ProxyInfo* result,
                               int result_code,
-                              const BoundNetLog& net_log,
+                              const NetLogWithSource& net_log,
                               base::TimeTicks start_time,
                               bool script_executed);
 
@@ -459,6 +477,9 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
 
   // Whether child ProxyScriptDeciders should use QuickCheck
   bool quick_check_enabled_;
+
+  // The method to use for sanitizing URLs seen by the proxy resolver.
+  SanitizeUrlPolicy sanitize_url_policy_;
 
   DISALLOW_COPY_AND_ASSIGN(ProxyService);
 };

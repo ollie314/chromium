@@ -10,8 +10,9 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner.h"
-#include "device/bluetooth/bluetooth_gatt_characteristic.h"
 #include "device/bluetooth/bluetooth_low_energy_defs_win.h"
+#include "device/bluetooth/bluetooth_remote_gatt_characteristic.h"
+#include "device/bluetooth/bluetooth_remote_gatt_service.h"
 
 namespace device {
 
@@ -21,9 +22,10 @@ class BluetoothRemoteGattServiceWin;
 class BluetoothTaskManagerWin;
 
 // The BluetoothRemoteGattCharacteristicWin class implements
-// BluetoothGattCharacteristic for remote GATT services on Windows 8 and later.
+// BluetoothRemoteGattCharacteristic for remote GATT services on Windows 8 and
+// later.
 class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattCharacteristicWin
-    : public BluetoothGattCharacteristic {
+    : public BluetoothRemoteGattCharacteristic {
  public:
   BluetoothRemoteGattCharacteristicWin(
       BluetoothRemoteGattServiceWin* parent_service,
@@ -31,25 +33,24 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattCharacteristicWin
       scoped_refptr<base::SequencedTaskRunner>& ui_task_runner);
   ~BluetoothRemoteGattCharacteristicWin() override;
 
-  // Override BluetoothGattCharacteristic interfaces.
+  // Override BluetoothRemoteGattCharacteristic interfaces.
   std::string GetIdentifier() const override;
   BluetoothUUID GetUUID() const override;
-  bool IsLocal() const override;
   std::vector<uint8_t>& GetValue() const override;
-  BluetoothGattService* GetService() const override;
+  BluetoothRemoteGattService* GetService() const override;
   Properties GetProperties() const override;
   Permissions GetPermissions() const override;
   bool IsNotifying() const override;
-  std::vector<BluetoothGattDescriptor*> GetDescriptors() const override;
-  BluetoothGattDescriptor* GetDescriptor(
+  std::vector<BluetoothRemoteGattDescriptor*> GetDescriptors() const override;
+  BluetoothRemoteGattDescriptor* GetDescriptor(
       const std::string& identifier) const override;
-  bool AddDescriptor(BluetoothGattDescriptor* descriptor) override;
-  bool UpdateValue(const std::vector<uint8_t>& value) override;
   void StartNotifySession(const NotifySessionCallback& callback,
                           const ErrorCallback& error_callback) override;
+  void StopNotifySession(BluetoothGattNotifySession* session,
+                         const base::Closure& callback) override;
   void ReadRemoteCharacteristic(const ValueCallback& callback,
                                 const ErrorCallback& error_callback) override;
-  void WriteRemoteCharacteristic(const std::vector<uint8_t>& new_value,
+  void WriteRemoteCharacteristic(const std::vector<uint8_t>& value,
                                  const base::Closure& callback,
                                  const ErrorCallback& error_callback) override;
 
@@ -57,6 +58,15 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattCharacteristicWin
   void Update();
   uint16_t GetAttributeHandle() const;
   BluetoothRemoteGattServiceWin* GetWinService() { return parent_service_; }
+
+ protected:
+  void SubscribeToNotifications(BluetoothRemoteGattDescriptor* ccc_descriptor,
+                                const base::Closure& callback,
+                                const ErrorCallback& error_callback) override;
+  void UnsubscribeFromNotifications(
+      BluetoothRemoteGattDescriptor* ccc_descriptor,
+      const base::Closure& callback,
+      const ErrorCallback& error_callback) override;
 
  private:
   void OnGetIncludedDescriptorsCallback(
@@ -80,7 +90,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothRemoteGattCharacteristicWin
       std::unique_ptr<BTH_LE_GATT_CHARACTERISTIC_VALUE> value,
       HRESULT hr);
   void OnWriteRemoteCharacteristicValueCallback(HRESULT hr);
-  BluetoothGattService::GattErrorCode HRESULTToGattErrorCode(HRESULT hr);
+  BluetoothRemoteGattService::GattErrorCode HRESULTToGattErrorCode(HRESULT hr);
   void OnGattCharacteristicValueChanged(
       std::unique_ptr<std::vector<uint8_t>> new_value);
   void GattEventRegistrationCallback(PVOID event_handle, HRESULT hr);

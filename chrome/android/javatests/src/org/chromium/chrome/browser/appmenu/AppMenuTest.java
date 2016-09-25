@@ -15,12 +15,11 @@ import android.widget.ListView;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
-import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 import org.chromium.chrome.test.util.ChromeTabUtils;
@@ -32,6 +31,7 @@ import java.util.concurrent.Callable;
 /**
  * Tests AppMenu popup
  */
+@RetryOnFailure
 public class AppMenuTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final String TEST_URL = UrlUtils.encodeHtmlDataUri("<html>poit.</html>");
 
@@ -106,7 +106,6 @@ public class AppMenuTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     /**
      * Verify opening a new tab from the menu.
      */
-    @CommandLineFlags.Add(ChromeSwitches.DISABLE_DOCUMENT_MODE)
     @SmallTest
     @Feature({"Browser", "Main"})
     public void testMenuNewTab() throws InterruptedException {
@@ -197,9 +196,8 @@ public class AppMenuTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     /*
     @SmallTest
     @Feature({"Browser", "Main"})
-    crbug.com/458193
     */
-    @DisabledTest
+    @DisabledTest(message = "crbug.com/458193")
     public void testChangingOrientationHidesMenu() throws InterruptedException {
         getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         showAppMenuAndAssertMenuShown();

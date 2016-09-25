@@ -7,13 +7,14 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/threading/thread_checker.h"
-#include "sync/api/sync_change_processor.h"
-#include "sync/api/sync_data.h"
+#include "components/sync/api/sync_change_processor.h"
+#include "components/sync/api/sync_data.h"
 
 namespace sync_pb {
 class HistoryDeleteDirectiveSpecifics;
@@ -34,7 +35,7 @@ class DeleteDirectiveHandler {
   // Start/stop processing delete directives when sync is enabled/disabled.
   void Start(HistoryService* history_service,
              const syncer::SyncDataList& initial_sync_data,
-             scoped_ptr<syncer::SyncChangeProcessor> sync_processor);
+             std::unique_ptr<syncer::SyncChangeProcessor> sync_processor);
   void Stop();
 
   // Create delete directives for the deletion of visits identified by
@@ -71,7 +72,7 @@ class DeleteDirectiveHandler {
                         const syncer::SyncDataList& delete_directives);
 
   base::CancelableTaskTracker internal_tracker_;
-  scoped_ptr<syncer::SyncChangeProcessor> sync_processor_;
+  std::unique_ptr<syncer::SyncChangeProcessor> sync_processor_;
   base::ThreadChecker thread_checker_;
   base::WeakPtrFactory<DeleteDirectiveHandler> weak_ptr_factory_;
 

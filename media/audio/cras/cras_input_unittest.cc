@@ -12,8 +12,9 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_message_loop.h"
 #include "base/test/test_timeouts.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "media/audio/audio_device_description.h"
 #include "media/audio/cras/audio_manager_cras.h"
 #include "media/audio/fake_audio_log_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -76,7 +77,7 @@ class CrasInputStreamTest : public testing::Test {
   CrasInputStream* CreateStream(ChannelLayout layout,
                                 int32_t samples_per_packet) {
     return CreateStream(layout, samples_per_packet,
-                        AudioManagerBase::kDefaultDeviceId);
+                        AudioDeviceDescription::kDefaultDeviceId);
   }
 
   CrasInputStream* CreateStream(ChannelLayout layout,
@@ -93,7 +94,7 @@ class CrasInputStreamTest : public testing::Test {
   void CaptureSomeFrames(const AudioParameters &params,
                          unsigned int duration_ms) {
     CrasInputStream* test_stream = new CrasInputStream(
-        params, mock_manager_.get(), AudioManagerBase::kDefaultDeviceId);
+        params, mock_manager_.get(), AudioDeviceDescription::kDefaultDeviceId);
 
     ASSERT_TRUE(test_stream->Open());
 
@@ -101,7 +102,8 @@ class CrasInputStreamTest : public testing::Test {
     // samples can be provided when doing non-integer SRC.  For example
     // converting from 192k to 44.1k is a ratio of 4.35 to 1.
     MockAudioInputCallback mock_callback;
-    base::WaitableEvent event(false, false);
+    base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED);
 
     EXPECT_CALL(mock_callback, OnData(test_stream, _, _, _))
         .WillOnce(InvokeWithoutArgs(&event, &base::WaitableEvent::Signal));
@@ -157,8 +159,9 @@ TEST_F(CrasInputStreamTest, BadBitsPerSample) {
                                  kTestSampleRate,
                                  kTestBitsPerSample - 1,
                                  kTestFramesPerPacket);
-  CrasInputStream* test_stream = new CrasInputStream(
-      bad_bps_params, mock_manager_.get(), AudioManagerBase::kDefaultDeviceId);
+  CrasInputStream* test_stream =
+      new CrasInputStream(bad_bps_params, mock_manager_.get(),
+                          AudioDeviceDescription::kDefaultDeviceId);
   EXPECT_FALSE(test_stream->Open());
   test_stream->Close();
 }
@@ -169,8 +172,9 @@ TEST_F(CrasInputStreamTest, BadSampleRate) {
                                   0,
                                   kTestBitsPerSample,
                                   kTestFramesPerPacket);
-  CrasInputStream* test_stream = new CrasInputStream(
-      bad_rate_params, mock_manager_.get(), AudioManagerBase::kDefaultDeviceId);
+  CrasInputStream* test_stream =
+      new CrasInputStream(bad_rate_params, mock_manager_.get(),
+                          AudioDeviceDescription::kDefaultDeviceId);
   EXPECT_FALSE(test_stream->Open());
   test_stream->Close();
 }
@@ -218,10 +222,9 @@ TEST_F(CrasInputStreamTest, CaptureFrames) {
 }
 
 TEST_F(CrasInputStreamTest, CaptureLoopback) {
-  CrasInputStream* test_stream = CreateStream(
-      CHANNEL_LAYOUT_STEREO,
-      kTestFramesPerPacket,
-      AudioManagerBase::kLoopbackInputDeviceId);
+  CrasInputStream* test_stream =
+      CreateStream(CHANNEL_LAYOUT_STEREO, kTestFramesPerPacket,
+                   AudioDeviceDescription::kLoopbackInputDeviceId);
   EXPECT_TRUE(test_stream->Open());
   test_stream->Close();
 }

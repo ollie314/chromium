@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "media/base/audio_splicer.h"
+
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "media/base/audio_buffer.h"
 #include "media/base/audio_bus.h"
-#include "media/base/audio_splicer.h"
 #include "media/base/audio_timestamp_helper.h"
 #include "media/base/test_helpers.h"
 #include "media/base/timestamp_constants.h"
@@ -55,7 +57,7 @@ class AudioSplicerTest : public ::testing::Test {
 
   bool VerifyData(const scoped_refptr<AudioBuffer>& buffer, float value) {
     int frames = buffer->frame_count();
-    scoped_ptr<AudioBus> bus = AudioBus::Create(kChannels, frames);
+    std::unique_ptr<AudioBus> bus = AudioBus::Create(kChannels, frames);
     buffer->ReadFrames(frames, 0, 0, bus.get());
     for (int ch = 0; ch < buffer->channel_count(); ++ch) {
       for (int i = 0; i < frames; ++i) {
@@ -110,7 +112,7 @@ class AudioSplicerTest : public ::testing::Test {
     const int frames = crossfade_output->frame_count();
     float overlapped_value = GetValue(overlapped_buffer_1);
     const float overlapping_value = GetValue(overlapping_buffer);
-    scoped_ptr<AudioBus> bus = AudioBus::Create(kChannels, frames);
+    std::unique_ptr<AudioBus> bus = AudioBus::Create(kChannels, frames);
     crossfade_output->ReadFrames(frames, 0, 0, bus.get());
     for (int ch = 0; ch < crossfade_output->channel_count(); ++ch) {
       float cf_ratio = 0;
@@ -432,7 +434,7 @@ TEST_F(AudioSplicerTest, PartialOverlapCrossfade) {
   EXPECT_FALSE(splicer_.HasNextBuffer());
 
   // |overlapping_buffer| completes the splice.
-  splicer_.SetSpliceTimestamp(kNoTimestamp());
+  splicer_.SetSpliceTimestamp(kNoTimestamp);
   EXPECT_TRUE(AddInput(overlapping_buffer));
   ASSERT_TRUE(splicer_.HasNextBuffer());
 
@@ -508,7 +510,7 @@ TEST_F(AudioSplicerTest, PartialOverlapCrossfadeEndOfStream) {
 
   // |overlapping_buffer| should not have enough data to complete the splice, so
   // ensure output is not available.
-  splicer_.SetSpliceTimestamp(kNoTimestamp());
+  splicer_.SetSpliceTimestamp(kNoTimestamp);
   EXPECT_TRUE(AddInput(overlapping_buffer));
   EXPECT_FALSE(splicer_.HasNextBuffer());
 
@@ -568,7 +570,7 @@ TEST_F(AudioSplicerTest, PartialOverlapCrossfadeShortPreSplice) {
   EXPECT_FALSE(splicer_.HasNextBuffer());
 
   // |overlapping_buffer| completes the splice.
-  splicer_.SetSpliceTimestamp(kNoTimestamp());
+  splicer_.SetSpliceTimestamp(kNoTimestamp);
   EXPECT_TRUE(AddInput(overlapping_buffer));
 
   const int kExpectedPreSpliceSize = 55;
@@ -634,7 +636,7 @@ TEST_F(AudioSplicerTest, IncorrectlyMarkedSplice) {
 
   // |second_buffer| should complete the supposed splice, so ensure output is
   // now available.
-  splicer_.SetSpliceTimestamp(kNoTimestamp());
+  splicer_.SetSpliceTimestamp(kNoTimestamp);
   EXPECT_TRUE(AddInput(second_buffer));
 
   VerifyNextBuffer(first_buffer);
@@ -675,7 +677,7 @@ TEST_F(AudioSplicerTest, IncorrectlyMarkedSpliceWithGap) {
   // Do not add |gap_buffer|.
 
   // |second_buffer| will complete the supposed splice.
-  splicer_.SetSpliceTimestamp(kNoTimestamp());
+  splicer_.SetSpliceTimestamp(kNoTimestamp);
   EXPECT_TRUE(AddInput(second_buffer));
 
   VerifyNextBuffer(gap_buffer);
@@ -717,7 +719,7 @@ TEST_F(AudioSplicerTest, IncorrectlyMarkedSpliceWithBadGap) {
   // Do not add |gap_buffer|.
 
   // |second_buffer| will complete the supposed splice.
-  splicer_.SetSpliceTimestamp(kNoTimestamp());
+  splicer_.SetSpliceTimestamp(kNoTimestamp);
   EXPECT_FALSE(AddInput(second_buffer));
 }
 
@@ -744,7 +746,7 @@ TEST_F(AudioSplicerTest, IncorrectlyMarkedPastSplice) {
   // |third_buffer| will complete the supposed splice.  The buffer size is set
   // such that unchecked the splicer would try to trim off a negative number of
   // frames.
-  splicer_.SetSpliceTimestamp(kNoTimestamp());
+  splicer_.SetSpliceTimestamp(kNoTimestamp);
   scoped_refptr<AudioBuffer> third_buffer =
       GetNextInputBuffer(0.0f, kBufferSize * 10);
   third_buffer->set_timestamp(base::TimeDelta());

@@ -7,15 +7,25 @@
 #include <utility>
 
 #include "base/lazy_instance.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread_local.h"
-#include "components/mus/public/cpp/window_tree_connection.h"
-#include "components/mus/public/interfaces/window_tree.mojom.h"
-#include "mojo/converters/geometry/geometry_type_converters.h"
 #include "services/shell/public/cpp/connection.h"
 #include "services/shell/public/cpp/connector.h"
-#include "ui/events/devices/device_data_manager.h"
+#include "services/ui/public/cpp/gpu_service.h"
+#include "services/ui/public/cpp/property_type_converters.h"
+#include "services/ui/public/cpp/window.h"
+#include "services/ui/public/cpp/window_property.h"
+#include "services/ui/public/cpp/window_tree_client.h"
+#include "services/ui/public/interfaces/event_matcher.mojom.h"
+#include "services/ui/public/interfaces/window_tree.mojom.h"
+#include "ui/aura/env.h"
+#include "ui/views/mus/clipboard_mus.h"
 #include "ui/views/mus/native_widget_mus.h"
+#include "ui/views/mus/os_exchange_data_provider_mus.h"
+#include "ui/views/mus/pointer_watcher_event_router.h"
 #include "ui/views/mus/screen_mus.h"
+#include "ui/views/mus/surface_context_factory.h"
+#include "ui/views/pointer_watcher.h"
 #include "ui/views/views_delegate.h"
 
 namespace views {
@@ -30,10 +40,31 @@ base::LazyInstance<WindowManagerConnectionPtr>::Leaky lazy_tls_ptr =
 
 }  // namespace
 
+WindowManagerConnection::~WindowManagerConnection() {
+  // ~WindowTreeClient calls back to us (we're its delegate), destroy it while
+  // we are still valid.
+  client_.reset();
+  ui::OSExchangeDataProviderFactory::SetFactory(nullptr);
+  ui::Clipboard::DestroyClipboardForCurrentThread();
+  gpu_service_.reset();
+  lazy_tls_ptr.Pointer()->Set(nullptr);
+
+  if (ViewsDelegate::GetInstance()) {
+    ViewsDelegate::GetInstance()->set_native_widget_factory(
+        ViewsDelegate::NativeWidgetFactory());
+  }
+}
+
 // static
-void WindowManagerConnection::Create(shell::Connector* connector) {
+std::unique_ptr<WindowManagerConnection> WindowManagerConnection::Create(
+    shell::Connector* connector,
+    const shell::Identity& identity,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   DCHECK(!lazy_tls_ptr.Pointer()->Get());
-  lazy_tls_ptr.Pointer()->Set(new WindowManagerConnection(connector));
+  WindowManagerConnection* connection =
+      new WindowManagerConnection(connector, identity, std::move(task_runner));
+  DCHECK(lazy_tls_ptr.Pointer()->Get());
+  return base::WrapUnique(connection);
 }
 
 // static
@@ -48,39 +79,58 @@ bool WindowManagerConnection::Exists() {
   return !!lazy_tls_ptr.Pointer()->Get();
 }
 
-// static
-void WindowManagerConnection::Reset() {
-  delete Get();
-  lazy_tls_ptr.Pointer()->Set(nullptr);
-}
-
-mus::Window* WindowManagerConnection::NewWindow(
+ui::Window* WindowManagerConnection::NewWindow(
     const std::map<std::string, std::vector<uint8_t>>& properties) {
-  return window_tree_connection_->NewTopLevelWindow(&properties);
+  return client_->NewTopLevelWindow(&properties);
 }
 
 NativeWidget* WindowManagerConnection::CreateNativeWidgetMus(
     const std::map<std::string, std::vector<uint8_t>>& props,
     const Widget::InitParams& init_params,
     internal::NativeWidgetDelegate* delegate) {
+  // TYPE_CONTROL widgets require a NativeWidgetAura. So we let this fall
+  // through, so that the default NativeWidgetPrivate::CreateNativeWidget() is
+  // used instead.
+  if (init_params.type == Widget::InitParams::TYPE_CONTROL)
+    return nullptr;
   std::map<std::string, std::vector<uint8_t>> properties = props;
   NativeWidgetMus::ConfigurePropertiesForNewWindow(init_params, &properties);
-  return new NativeWidgetMus(delegate, connector_, NewWindow(properties),
-                             mus::mojom::SurfaceType::DEFAULT);
+  properties[ui::mojom::WindowManager::kAppID_Property] =
+      mojo::ConvertTo<std::vector<uint8_t>>(identity_.name());
+  return new NativeWidgetMus(delegate, NewWindow(properties),
+                             ui::mojom::SurfaceType::DEFAULT);
 }
 
-WindowManagerConnection::WindowManagerConnection(shell::Connector* connector)
-    : connector_(connector), window_tree_connection_(nullptr) {
-  window_tree_connection_.reset(
-      mus::WindowTreeConnection::Create(this, connector_));
+const std::set<ui::Window*>& WindowManagerConnection::GetRoots() const {
+  return client_->GetRoots();
+}
+
+WindowManagerConnection::WindowManagerConnection(
+    shell::Connector* connector,
+    const shell::Identity& identity,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+    : connector_(connector), identity_(identity) {
+  lazy_tls_ptr.Pointer()->Set(this);
+
+  gpu_service_ = ui::GpuService::Create(connector, std::move(task_runner));
+  compositor_context_factory_.reset(
+      new views::SurfaceContextFactory(gpu_service_.get()));
+  aura::Env::GetInstance()->set_context_factory(
+      compositor_context_factory_.get());
+  client_.reset(new ui::WindowTreeClient(this, nullptr, nullptr));
+  client_->ConnectViaWindowTreeFactory(connector_);
+
+  pointer_watcher_event_router_.reset(
+      new PointerWatcherEventRouter(client_.get()));
 
   screen_.reset(new ScreenMus(this));
   screen_->Init(connector);
 
-  // TODO(sad): We should have a DeviceDataManager implementation that talks to
-  // a mojo service to learn about the input-devices on the system.
-  // http://crbug.com/601981
-  ui::DeviceDataManager::CreateInstance();
+  std::unique_ptr<ClipboardMus> clipboard(new ClipboardMus);
+  clipboard->Init(connector);
+  ui::Clipboard::SetClipboardForCurrentThread(std::move(clipboard));
+
+  ui::OSExchangeDataProviderFactory::SetFactory(this);
 
   ViewsDelegate::GetInstance()->set_native_widget_factory(base::Bind(
       &WindowManagerConnection::CreateNativeWidgetMus,
@@ -88,22 +138,37 @@ WindowManagerConnection::WindowManagerConnection(shell::Connector* connector)
       std::map<std::string, std::vector<uint8_t>>()));
 }
 
-WindowManagerConnection::~WindowManagerConnection() {
-  // ~WindowTreeConnection calls back to us (we're the WindowTreeDelegate),
-  // destroy it while we are still valid.
-  window_tree_connection_.reset();
+void WindowManagerConnection::OnEmbed(ui::Window* root) {}
 
-  ui::DeviceDataManager::DeleteInstance();
+void WindowManagerConnection::OnLostConnection(ui::WindowTreeClient* client) {
+  DCHECK_EQ(client, client_.get());
+  client_.reset();
 }
 
-void WindowManagerConnection::OnEmbed(mus::Window* root) {}
+void WindowManagerConnection::OnEmbedRootDestroyed(ui::Window* root) {
+  // Not called for WindowManagerConnection as WindowTreeClient isn't created by
+  // way of an Embed().
+  NOTREACHED();
+}
 
-void WindowManagerConnection::OnConnectionLost(
-    mus::WindowTreeConnection* connection) {}
+void WindowManagerConnection::OnPointerEventObserved(
+    const ui::PointerEvent& event,
+    ui::Window* target) {
+  pointer_watcher_event_router_->OnPointerEventObserved(event, target);
+}
 
 void WindowManagerConnection::OnWindowManagerFrameValuesChanged() {
-  if (window_tree_connection_)
-    NativeWidgetMus::NotifyFrameChanged(window_tree_connection_.get());
+  if (client_)
+    NativeWidgetMus::NotifyFrameChanged(client_.get());
+}
+
+gfx::Point WindowManagerConnection::GetCursorScreenPoint() {
+  return client_->GetCursorScreenPoint();
+}
+
+std::unique_ptr<OSExchangeData::Provider>
+WindowManagerConnection::BuildProvider() {
+  return base::MakeUnique<OSExchangeDataProviderMus>();
 }
 
 }  // namespace views

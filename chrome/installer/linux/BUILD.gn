@@ -5,13 +5,17 @@
 import("//build/config/chrome_build.gni")
 import("//build/config/features.gni")
 import("//build/config/sanitizers/sanitizers.gni")
+import("//build/util/process_version.gni")
 import("//build/util/version.gni")
-import("//chrome/version.gni")
+import("//chrome/process_version_rc_template.gni")  # For branding_file_path.
+
+if (current_cpu == "x86" || current_cpu == "x64") {
+  import("//media/cdm/ppapi/cdm_paths.gni")
+}
 
 assert(is_linux && is_chrome_branded)
 
 # This target builds all "normal" Linux installers.
-# GYP version: chrome/chrome_installer.gypi:linux_packages_all
 #
 # The bot setup is to build stable, unstable, and beta packages for the current
 # build. Then a later step picks up the package corresponding to what the
@@ -48,7 +52,7 @@ group("linux") {
 # This target is provided for compatibility w/ GYP. Users should always
 # depend directly on :linux instead of this target (we set visibility
 # to the empty list to prevent unwanted callers).
-# TODO(GYP): Delete this target after we've migrated away from GYP and
+# TODO(GYP_GONE): Delete this target after we've migrated away from GYP and
 # updated the bots to build :linux instead.
 group("linux_packages_all") {
   visibility = []
@@ -146,6 +150,11 @@ if (!is_chromeos) {
 process_version("save_build_info") {
   # Just output the default version info variables (no template).
   process_only = true
+  sources = [
+    "//build/util/LASTCHANGE",
+    "//chrome/VERSION",
+    branding_file_path,
+  ]
   output = "$root_out_dir/installer/version.txt"
 }
 
@@ -164,7 +173,6 @@ group("installer_deps") {
     "//chrome",
     "//chrome:packed_resources",
     "//sandbox/linux:chrome_sandbox",
-    "//third_party/adobe/flash:flapper_binaries",
   ]
   if (enable_nacl) {
     public_deps += [
@@ -213,21 +221,19 @@ template("linux_package") {
 
     "$root_out_dir/nacl_helper",
     "$root_out_dir/nacl_helper_bootstrap",
-    "$root_out_dir/PepperFlash/libpepflashplayer.so",
-    "$root_out_dir/PepperFlash/manifest.json",
   ]
 
   if (current_cpu == "x86") {
     packaging_files_binaries += [
       "$root_out_dir/nacl_irt_x86_32.nexe",
-      "$root_out_dir/libwidevinecdmadapter.so",
-      "$root_out_dir/libwidevinecdm.so",
+      "$root_out_dir/$widevine_cdm_path/libwidevinecdmadapter.so",
+      "$root_out_dir/$widevine_cdm_path/libwidevinecdm.so",
     ]
   } else if (current_cpu == "x64") {
     packaging_files_binaries += [
       "$root_out_dir/nacl_irt_x86_64.nexe",
-      "$root_out_dir/libwidevinecdmadapter.so",
-      "$root_out_dir/libwidevinecdm.so",
+      "$root_out_dir/$widevine_cdm_path/libwidevinecdmadapter.so",
+      "$root_out_dir/$widevine_cdm_path/libwidevinecdm.so",
     ]
   } else if (current_cpu == "arm") {
     packaging_files_binaries += [ "$root_out_dir/nacl_irt_arm.nexe" ]

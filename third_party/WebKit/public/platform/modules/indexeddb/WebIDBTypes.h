@@ -71,6 +71,15 @@ enum WebIDBPutMode {
     WebIDBPutModeLast = WebIDBPutModeCursorUpdate
 };
 
+enum WebIDBOperationType {
+    WebIDBAdd = 0,
+    WebIDBPut,
+    WebIDBDelete,
+    WebIDBClear,
+    WebIDBOperationTypeCount,
+    WebIDBOperationTypeLast = WebIDBClear
+};
+
 enum WebIDBTransactionMode {
     WebIDBTransactionModeReadOnly = 0,
     WebIDBTransactionModeReadWrite,

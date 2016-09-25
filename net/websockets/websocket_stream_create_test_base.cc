@@ -33,7 +33,7 @@ class DeterministicKeyWebSocketHandshakeStreamCreateHelper
       : WebSocketHandshakeStreamCreateHelper(connect_delegate,
                                              requested_subprotocols) {}
 
-  void OnStreamCreated(WebSocketBasicHandshakeStream* stream) override {
+  void OnBasicStreamCreated(WebSocketBasicHandshakeStream* stream) override {
     stream->SetWebSocketKeyForTesting("dGhlIHNhbXBsZSBub25jZQ==");
   }
 
@@ -98,9 +98,11 @@ WebSocketStreamCreateTestBase::~WebSocketStreamCreateTestBase() {
 }
 
 void WebSocketStreamCreateTestBase::CreateAndConnectStream(
-    const std::string& socket_url,
+    const GURL& socket_url,
     const std::vector<std::string>& sub_protocols,
     const url::Origin& origin,
+    const GURL& first_party_for_cookies,
+    const std::string& additional_headers,
     std::unique_ptr<base::Timer> timer) {
   for (size_t i = 0; i < ssl_data_.size(); ++i) {
     url_request_context_host_.AddSSLSocketDataProvider(std::move(ssl_data_[i]));
@@ -112,10 +114,10 @@ void WebSocketStreamCreateTestBase::CreateAndConnectStream(
   std::unique_ptr<WebSocketHandshakeStreamCreateHelper> create_helper(
       new DeterministicKeyWebSocketHandshakeStreamCreateHelper(delegate,
                                                                sub_protocols));
-  stream_request_ = CreateAndConnectStreamForTesting(
-      GURL(socket_url), std::move(create_helper), origin,
-      url_request_context_host_.GetURLRequestContext(), BoundNetLog(),
-      std::move(connect_delegate),
+  stream_request_ = WebSocketStream::CreateAndConnectStreamForTesting(
+      socket_url, std::move(create_helper), origin, first_party_for_cookies,
+      additional_headers, url_request_context_host_.GetURLRequestContext(),
+      NetLogWithSource(), std::move(connect_delegate),
       timer ? std::move(timer)
             : std::unique_ptr<base::Timer>(new base::Timer(false, false)));
 }

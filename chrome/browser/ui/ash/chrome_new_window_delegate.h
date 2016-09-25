@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "ash/new_window_delegate.h"
+#include "ash/common/new_window_delegate.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 
@@ -21,7 +21,11 @@ class ChromeNewWindowDelegate : public ash::NewWindowDelegate {
   // Overridden from ash::NewWindowDelegate:
   void NewTab() override;
   void NewWindow(bool incognito) override;
+  void OpenFileManager() override;
+  void OpenCrosh() override;
+  void OpenGetHelp() override;
   void RestoreTab() override;
+  void ShowKeyboardOverlay() override;
   void ShowTaskManager() override;
   void OpenFeedbackPage() override;
 

@@ -34,10 +34,12 @@
 #include "bindings/core/v8/ScriptController.h"
 #include "core/events/Event.h"
 #include "core/fetch/ResourceLoaderOptions.h"
+#include "core/frame/Deprecation.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLFormElement.h"
 #include "core/inspector/InspectorInstrumentation.h"
+#include "core/loader/DocumentLoadTiming.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FormSubmission.h"
 #include "core/loader/FrameLoadRequest.h"
@@ -45,6 +47,7 @@
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/FrameLoaderStateMachine.h"
 #include "core/page/Page.h"
+#include "platform/Histogram.h"
 #include "platform/SharedBuffer.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/scheduler/CancellableTaskFactory.h"
@@ -52,10 +55,48 @@
 #include "public/platform/WebCachePolicy.h"
 #include "public/platform/WebScheduler.h"
 #include "wtf/CurrentTime.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
-unsigned NavigationDisablerForBeforeUnload::s_navigationDisableCount = 0;
+namespace {
+
+// Add new scheduled navigation types before ScheduledLastEntry
+enum ScheduledNavigationType {
+    ScheduledReload,
+    ScheduledFormSubmission,
+    ScheduledURLNavigation,
+    ScheduledRedirect,
+    ScheduledLocationChange,
+    ScheduledPageBlock,
+
+    ScheduledLastEntry
+};
+
+// If the current frame has a provisional document loader, a scheduled
+// navigation might abort that load. Log those occurrences until
+// crbug.com/557430 is resolved.
+void maybeLogScheduledNavigationClobber(ScheduledNavigationType type, LocalFrame* frame, const FrameLoadRequest& request, UserGestureIndicator* gestureIndicator)
+{
+    if (!frame->loader().provisionalDocumentLoader())
+        return;
+    // Include enumeration values userGesture variants.
+    DEFINE_STATIC_LOCAL(EnumerationHistogram, scheduledNavigationClobberHistogram, ("Navigation.Scheduled.MaybeCausedAbort", ScheduledNavigationType::ScheduledLastEntry * 2));
+
+    UserGestureToken* gestureToken = gestureIndicator->currentToken();
+    int value = gestureToken->hasGestures() ? type + ScheduledLastEntry : type;
+    scheduledNavigationClobberHistogram.count(value);
+
+    DEFINE_STATIC_LOCAL(CustomCountHistogram, scheduledClobberAbortTimeHistogram, ("Navigation.Scheduled.MaybeCausedAbort.Time", 1, 10000, 50));
+    double navigationStart = frame->loader().provisionalDocumentLoader()->timing().navigationStart();
+    if (navigationStart)
+        scheduledClobberAbortTimeHistogram.count(monotonicallyIncreasingTime() - navigationStart);
+}
+
+} // namespace
+
+unsigned NavigationDisablerForUnload::s_navigationDisableCount = 0;
 
 class ScheduledNavigation : public GarbageCollectedFinalized<ScheduledNavigation> {
     WTF_MAKE_NONCOPYABLE(ScheduledNavigation);
@@ -80,11 +121,11 @@ public:
     Document* originDocument() const { return m_originDocument.get(); }
     bool replacesCurrentItem() const { return m_replacesCurrentItem; }
     bool isLocationChange() const { return m_isLocationChange; }
-    PassOwnPtr<UserGestureIndicator> createUserGestureIndicator()
+    std::unique_ptr<UserGestureIndicator> createUserGestureIndicator()
     {
         if (m_wasUserGesture &&  m_userGestureToken)
-            return adoptPtr(new UserGestureIndicator(m_userGestureToken));
-        return adoptPtr(new UserGestureIndicator(DefinitelyNotProcessingUserGesture));
+            return wrapUnique(new UserGestureIndicator(m_userGestureToken));
+        return wrapUnique(new UserGestureIndicator(DefinitelyNotProcessingUserGesture));
     }
 
     DEFINE_INLINE_VIRTUAL_TRACE()
@@ -117,10 +158,13 @@ protected:
 
     void fire(LocalFrame* frame) override
     {
-        OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
+        std::unique_ptr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
         FrameLoadRequest request(originDocument(), m_url, "_self", m_shouldCheckMainWorldContentSecurityPolicy);
         request.setReplacesCurrentItem(replacesCurrentItem());
         request.setClientRedirect(ClientRedirectPolicy::ClientRedirect);
+
+        ScheduledNavigationType type = isLocationChange() ? ScheduledNavigationType::ScheduledLocationChange : ScheduledNavigationType::ScheduledURLNavigation;
+        maybeLogScheduledNavigationClobber(type, frame, request, gestureIndicator.get());
         frame->loader().load(request);
     }
 
@@ -142,12 +186,13 @@ public:
 
     void fire(LocalFrame* frame) override
     {
-        OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
+        std::unique_ptr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
         FrameLoadRequest request(originDocument(), url(), "_self");
         request.setReplacesCurrentItem(replacesCurrentItem());
         if (equalIgnoringFragmentIdentifier(frame->document()->url(), request.resourceRequest().url()))
             request.resourceRequest().setCachePolicy(WebCachePolicy::ValidatingCacheData);
         request.setClientRedirect(ClientRedirectPolicy::ClientRedirect);
+        maybeLogScheduledNavigationClobber(ScheduledNavigationType::ScheduledRedirect, frame, request, gestureIndicator.get());
         frame->loader().load(request);
     }
 
@@ -180,12 +225,13 @@ public:
 
     void fire(LocalFrame* frame) override
     {
-        OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
+        std::unique_ptr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
         ResourceRequest resourceRequest = frame->loader().resourceRequestForReload(FrameLoadTypeReload, KURL(), ClientRedirectPolicy::ClientRedirect);
         if (resourceRequest.isNull())
             return;
         FrameLoadRequest request = FrameLoadRequest(nullptr, resourceRequest);
         request.setClientRedirect(ClientRedirectPolicy::ClientRedirect);
+        maybeLogScheduledNavigationClobber(ScheduledNavigationType::ScheduledReload, frame, request, gestureIndicator.get());
         frame->loader().load(request, FrameLoadTypeReload);
     }
 
@@ -205,11 +251,12 @@ public:
 
     void fire(LocalFrame* frame) override
     {
-        OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
+        std::unique_ptr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
         SubstituteData substituteData(SharedBuffer::create(), "text/plain", "UTF-8", KURL(), ForceSynchronousLoad);
         FrameLoadRequest request(originDocument(), url(), substituteData);
         request.setReplacesCurrentItem(true);
         request.setClientRedirect(ClientRedirectPolicy::ClientRedirect);
+        maybeLogScheduledNavigationClobber(ScheduledNavigationType::ScheduledPageBlock, frame, request, gestureIndicator.get());
         frame->loader().load(request);
     }
 private:
@@ -229,12 +276,10 @@ public:
 
     void fire(LocalFrame* frame) override
     {
-        OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
-        FrameLoadRequest frameRequest(originDocument());
-        m_submission->populateFrameLoadRequest(frameRequest);
+        std::unique_ptr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
+        FrameLoadRequest frameRequest = m_submission->createFrameLoadRequest(originDocument());
         frameRequest.setReplacesCurrentItem(replacesCurrentItem());
-        frameRequest.setTriggeringEvent(m_submission->event());
-        frameRequest.setForm(m_submission->form());
+        maybeLogScheduledNavigationClobber(ScheduledNavigationType::ScheduledFormSubmission, frame, frameRequest, gestureIndicator.get());
         frame->loader().load(frameRequest);
     }
 
@@ -249,7 +294,7 @@ private:
         : ScheduledNavigation(0, document, replacesCurrentItem, true)
         , m_submission(submission)
     {
-        ASSERT(m_submission->form());
+        DCHECK(m_submission->form());
     }
 
     Member<FormSubmission> m_submission;
@@ -258,15 +303,14 @@ private:
 NavigationScheduler::NavigationScheduler(LocalFrame* frame)
     : m_frame(frame)
     , m_navigateTaskFactory(CancellableTaskFactory::create(this, &NavigationScheduler::navigateTask))
+    , m_frameType(m_frame->isMainFrame() ? WebScheduler::NavigatingFrameType::kMainFrame : WebScheduler::NavigatingFrameType::kChildFrame)
 {
 }
 
 NavigationScheduler::~NavigationScheduler()
 {
-    // TODO(alexclarke): Can remove this if oilpan is on since any pending task should
-    // keep the NavigationScheduler alive.
     if (m_navigateTaskFactory->isPending())
-        Platform::current()->currentThread()->scheduler()->removePendingNavigation();
+        Platform::current()->currentThread()->scheduler()->removePendingNavigation(m_frameType);
 }
 
 bool NavigationScheduler::locationChangePending()
@@ -282,10 +326,12 @@ bool NavigationScheduler::isNavigationScheduledWithin(double interval) const
 // TODO(dcheng): There are really two different load blocking concepts at work
 // here and they have been incorrectly tangled together.
 //
-// 1. NavigationDisablerForBeforeUnload is for blocking navigation scheduling
-//    during a beforeunload event. Scheduled navigations during beforeunload
-//    would make it possible to get trapped in an endless loop of beforeunload
-//    dialogs.
+// 1. NavigationDisablerForUnload is for blocking navigation scheduling during
+//    a beforeunload or unload events. Scheduled navigations during
+//    beforeunload would make it possible to get trapped in an endless loop of
+//    beforeunload dialogs. Scheduled navigations during the unload handler
+//    makes is possible to cancel a navigation that was initiated right before
+//    it commits.
 //
 //    Checking Frame::isNavigationAllowed() doesn't make sense in this context:
 //    NavigationScheduler is always cleared when a new load commits, so it's
@@ -295,15 +341,15 @@ bool NavigationScheduler::isNavigationScheduledWithin(double interval) const
 // 2. FrameNavigationDisabler / LocalFrame::isNavigationAllowed() are intended
 //    to prevent Documents from being reattached during destruction, since it
 //    can cause bugs with security origin confusion. This is primarily intended
-//    to block /synchronous/ navigations during things lke Document::detach().
+//    to block /synchronous/ navigations during things lke Document::detachLayoutTree().
 inline bool NavigationScheduler::shouldScheduleReload() const
 {
-    return m_frame->page() && m_frame->isNavigationAllowed() && NavigationDisablerForBeforeUnload::isNavigationAllowed();
+    return m_frame->page() && m_frame->isNavigationAllowed() && NavigationDisablerForUnload::isNavigationAllowed();
 }
 
 inline bool NavigationScheduler::shouldScheduleNavigation(const String& url) const
 {
-    return m_frame->page() && m_frame->isNavigationAllowed() && (protocolIsJavaScript(url) || NavigationDisablerForBeforeUnload::isNavigationAllowed());
+    return m_frame->page() && m_frame->isNavigationAllowed() && (protocolIsJavaScript(url) || NavigationDisablerForUnload::isNavigationAllowed());
 }
 
 void NavigationScheduler::scheduleRedirect(double delay, const String& url)
@@ -348,6 +394,7 @@ void NavigationScheduler::scheduleLocationChange(Document* originDocument, const
     if (originDocument->getSecurityOrigin()->canAccess(m_frame->document()->getSecurityOrigin())) {
         KURL parsedURL(ParsedURLString, url);
         if (parsedURL.hasFragmentIdentifier() && equalIgnoringFragmentIdentifier(m_frame->document()->url(), parsedURL)) {
+
             FrameLoadRequest request(originDocument, m_frame->document()->completeURL(url), "_self");
             request.setReplacesCurrentItem(replacesCurrentItem);
             if (replacesCurrentItem)
@@ -362,14 +409,14 @@ void NavigationScheduler::scheduleLocationChange(Document* originDocument, const
 
 void NavigationScheduler::schedulePageBlock(Document* originDocument)
 {
-    ASSERT(m_frame->page());
+    DCHECK(m_frame->page());
     const KURL& url = m_frame->document()->url();
     schedule(ScheduledPageBlock::create(originDocument, url));
 }
 
 void NavigationScheduler::scheduleFormSubmission(Document* document, FormSubmission* submission)
 {
-    ASSERT(m_frame->page());
+    DCHECK(m_frame->page());
     schedule(ScheduledFormSubmission::create(document, submission, mustReplaceCurrentItem(m_frame)));
 }
 
@@ -384,7 +431,7 @@ void NavigationScheduler::scheduleReload()
 
 void NavigationScheduler::navigateTask()
 {
-    Platform::current()->currentThread()->scheduler()->removePendingNavigation();
+    Platform::current()->currentThread()->scheduler()->removePendingNavigation(m_frameType);
 
     if (!m_frame->page())
         return;
@@ -400,7 +447,7 @@ void NavigationScheduler::navigateTask()
 
 void NavigationScheduler::schedule(ScheduledNavigation* redirect)
 {
-    ASSERT(m_frame->page());
+    DCHECK(m_frame->page());
 
     // In a back/forward navigation, we sometimes restore history state to iframes, even though the state was generated
     // dynamically and JS will try to put something different in the iframe. In this case, we will load stale things
@@ -422,14 +469,14 @@ void NavigationScheduler::startTimer()
     if (!m_redirect)
         return;
 
-    ASSERT(m_frame->page());
+    DCHECK(m_frame->page());
     if (m_navigateTaskFactory->isPending())
         return;
     if (!m_redirect->shouldStartTimer(m_frame))
         return;
 
     WebScheduler* scheduler = Platform::current()->currentThread()->scheduler();
-    scheduler->addPendingNavigation();
+    scheduler->addPendingNavigation(m_frameType);
     scheduler->loadingTaskRunner()->postDelayedTask(
         BLINK_FROM_HERE, m_navigateTaskFactory->cancelAndCreate(), m_redirect->delay() * 1000.0);
 
@@ -439,7 +486,7 @@ void NavigationScheduler::startTimer()
 void NavigationScheduler::cancel()
 {
     if (m_navigateTaskFactory->isPending()) {
-        Platform::current()->currentThread()->scheduler()->removePendingNavigation();
+        Platform::current()->currentThread()->scheduler()->removePendingNavigation(m_frameType);
         InspectorInstrumentation::frameClearedScheduledNavigation(m_frame);
     }
     m_navigateTaskFactory->cancel();

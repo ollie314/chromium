@@ -26,8 +26,8 @@
 #include "base/single_thread_task_runner.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/cache_util.h"
@@ -65,7 +65,9 @@ class LeakySequencedWorkerPool {
  public:
   LeakySequencedWorkerPool()
       : sequenced_worker_pool_(
-            new SequencedWorkerPool(kMaxWorkerThreads, kThreadNamePrefix)) {}
+            new SequencedWorkerPool(kMaxWorkerThreads,
+                                    kThreadNamePrefix,
+                                    base::TaskPriority::USER_BLOCKING)) {}
 
   void FlushForTesting() { sequenced_worker_pool_->FlushForTesting(); }
 
@@ -245,7 +247,7 @@ SimpleBackendImpl::SimpleBackendImpl(
 }
 
 SimpleBackendImpl::~SimpleBackendImpl() {
-  index_->WriteToDisk();
+  index_->WriteToDisk(SimpleIndex::INDEX_WRITE_REASON_SHUTDOWN);
 }
 
 int SimpleBackendImpl::Init(const CompletionCallback& completion_callback) {
@@ -253,8 +255,8 @@ int SimpleBackendImpl::Init(const CompletionCallback& completion_callback) {
 
   index_.reset(new SimpleIndex(
       base::ThreadTaskRunnerHandle::Get(), this, cache_type_,
-      base::WrapUnique(new SimpleIndexFile(cache_thread_, worker_pool_.get(),
-                                           cache_type_, path_))));
+      base::MakeUnique<SimpleIndexFile>(cache_thread_, worker_pool_.get(),
+                                        cache_type_, path_)));
   index_->ExecuteWhenReady(
       base::Bind(&RecordIndexLoad, cache_type_, base::TimeTicks::Now()));
 
@@ -289,7 +291,7 @@ void SimpleBackendImpl::OnDoomStart(uint64_t entry_hash) {
 
 void SimpleBackendImpl::OnDoomComplete(uint64_t entry_hash) {
   DCHECK_EQ(1u, entries_pending_doom_.count(entry_hash));
-  base::hash_map<uint64_t, std::vector<Closure>>::iterator it =
+  std::unordered_map<uint64_t, std::vector<Closure>>::iterator it =
       entries_pending_doom_.find(entry_hash);
   std::vector<Closure> to_run_closures;
   to_run_closures.swap(it->second);
@@ -378,7 +380,7 @@ int SimpleBackendImpl::OpenEntry(const std::string& key,
 
   // TODO(gavinp): Factor out this (not quite completely) repetitive code
   // block from OpenEntry/CreateEntry/DoomEntry.
-  base::hash_map<uint64_t, std::vector<Closure>>::iterator it =
+  std::unordered_map<uint64_t, std::vector<Closure>>::iterator it =
       entries_pending_doom_.find(entry_hash);
   if (it != entries_pending_doom_.end()) {
     Callback<int(const net::CompletionCallback&)> operation =
@@ -390,14 +392,7 @@ int SimpleBackendImpl::OpenEntry(const std::string& key,
   }
   scoped_refptr<SimpleEntryImpl> simple_entry =
       CreateOrFindActiveEntry(entry_hash, key);
-  CompletionCallback backend_callback =
-      base::Bind(&SimpleBackendImpl::OnEntryOpenedFromKey,
-                 AsWeakPtr(),
-                 key,
-                 entry,
-                 simple_entry,
-                 callback);
-  return simple_entry->OpenEntry(entry, backend_callback);
+  return simple_entry->OpenEntry(entry, callback);
 }
 
 int SimpleBackendImpl::CreateEntry(const std::string& key,
@@ -406,7 +401,7 @@ int SimpleBackendImpl::CreateEntry(const std::string& key,
   DCHECK_LT(0u, key.size());
   const uint64_t entry_hash = simple_util::GetEntryHashKey(key);
 
-  base::hash_map<uint64_t, std::vector<Closure>>::iterator it =
+  std::unordered_map<uint64_t, std::vector<Closure>>::iterator it =
       entries_pending_doom_.find(entry_hash);
   if (it != entries_pending_doom_.end()) {
     Callback<int(const net::CompletionCallback&)> operation =
@@ -425,7 +420,7 @@ int SimpleBackendImpl::DoomEntry(const std::string& key,
                                  const net::CompletionCallback& callback) {
   const uint64_t entry_hash = simple_util::GetEntryHashKey(key);
 
-  base::hash_map<uint64_t, std::vector<Closure>>::iterator it =
+  std::unordered_map<uint64_t, std::vector<Closure>>::iterator it =
       entries_pending_doom_.find(entry_hash);
   if (it != entries_pending_doom_.end()) {
     Callback<int(const net::CompletionCallback&)> operation =
@@ -631,7 +626,7 @@ scoped_refptr<SimpleEntryImpl> SimpleBackendImpl::CreateOrFindActiveEntry(
 int SimpleBackendImpl::OpenEntryFromHash(uint64_t entry_hash,
                                          Entry** entry,
                                          const CompletionCallback& callback) {
-  base::hash_map<uint64_t, std::vector<Closure>>::iterator it =
+  std::unordered_map<uint64_t, std::vector<Closure>>::iterator it =
       entries_pending_doom_.find(entry_hash);
   if (it != entries_pending_doom_.end()) {
     Callback<int(const net::CompletionCallback&)> operation =
@@ -660,7 +655,7 @@ int SimpleBackendImpl::DoomEntryFromHash(uint64_t entry_hash,
   Entry** entry = new Entry*();
   std::unique_ptr<Entry*> scoped_entry(entry);
 
-  base::hash_map<uint64_t, std::vector<Closure>>::iterator pending_it =
+  std::unordered_map<uint64_t, std::vector<Closure>>::iterator pending_it =
       entries_pending_doom_.find(entry_hash);
   if (pending_it != entries_pending_doom_.end()) {
     Callback<int(const net::CompletionCallback&)> operation =
@@ -711,29 +706,6 @@ void SimpleBackendImpl::OnEntryOpenedFromHash(
     simple_entry->Close();
     it->second->OpenEntry(entry, callback);
   }
-}
-
-void SimpleBackendImpl::OnEntryOpenedFromKey(
-    const std::string key,
-    Entry** entry,
-    const scoped_refptr<SimpleEntryImpl>& simple_entry,
-    const CompletionCallback& callback,
-    int error_code) {
-  int final_code = error_code;
-  if (final_code == net::OK) {
-    bool key_matches = key.compare(simple_entry->key()) == 0;
-    if (!key_matches) {
-      // TODO(clamy): Add a unit test to check this code path.
-      DLOG(WARNING) << "Key mismatch on open.";
-      simple_entry->Doom();
-      simple_entry->Close();
-      final_code = net::ERR_FAILED;
-    } else {
-      DCHECK_EQ(simple_entry->entry_hash(), simple_util::GetEntryHashKey(key));
-    }
-    SIMPLE_CACHE_UMA(BOOLEAN, "KeyMatchedOnOpen", cache_type_, key_matches);
-  }
-  callback.Run(final_code);
 }
 
 void SimpleBackendImpl::DoomEntriesComplete(

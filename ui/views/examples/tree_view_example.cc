@@ -47,11 +47,14 @@ void TreeViewExample::CreateExampleView(View* container) {
   tree_view_->SetModel(&model_);
   tree_view_->SetController(this);
   add_ = new LabelButton(this, ASCIIToUTF16("Add"));
-  add_->SetFocusable(true);
+  add_->SetFocusForPlatform();
+  add_->set_request_focus_on_press(true);
   remove_ = new LabelButton(this, ASCIIToUTF16("Remove"));
-  remove_->SetFocusable(true);
+  remove_->SetFocusForPlatform();
+  remove_->set_request_focus_on_press(true);
   change_title_ = new LabelButton(this, ASCIIToUTF16("Change Title"));
-  change_title_->SetFocusable(true);
+  change_title_->SetFocusForPlatform();
+  change_title_->set_request_focus_on_press(true);
 
   GridLayout* layout = new GridLayout(container);
   container->SetLayoutManager(layout);
@@ -127,19 +130,15 @@ bool TreeViewExample::CanEdit(TreeView* tree_view,
 void TreeViewExample::ShowContextMenuForView(View* source,
                                              const gfx::Point& point,
                                              ui::MenuSourceType source_type) {
-  ui::SimpleMenuModel context_menu_model(this);
-  context_menu_model.AddItem(ID_EDIT, ASCIIToUTF16("Edit"));
-  context_menu_model.AddItem(ID_REMOVE, ASCIIToUTF16("Remove"));
-  context_menu_model.AddItem(ID_ADD, ASCIIToUTF16("Add"));
-  context_menu_runner_.reset(new MenuRunner(&context_menu_model, 0));
-  if (context_menu_runner_->RunMenuAt(source->GetWidget(),
-                                      NULL,
-                                      gfx::Rect(point, gfx::Size()),
-                                      MENU_ANCHOR_TOPLEFT,
-                                      source_type) ==
-      MenuRunner::MENU_DELETED) {
-    return;
-  }
+  context_menu_model_.reset(new ui::SimpleMenuModel(this));
+  context_menu_model_->AddItem(ID_EDIT, ASCIIToUTF16("Edit"));
+  context_menu_model_->AddItem(ID_REMOVE, ASCIIToUTF16("Remove"));
+  context_menu_model_->AddItem(ID_ADD, ASCIIToUTF16("Add"));
+  context_menu_runner_.reset(
+      new MenuRunner(context_menu_model_.get(), MenuRunner::ASYNC));
+  context_menu_runner_->RunMenuAt(source->GetWidget(), nullptr,
+                                  gfx::Rect(point, gfx::Size()),
+                                  MENU_ANCHOR_TOPLEFT, source_type);
 }
 
 bool TreeViewExample::IsCommandIdChecked(int command_id) const {
@@ -148,12 +147,6 @@ bool TreeViewExample::IsCommandIdChecked(int command_id) const {
 
 bool TreeViewExample::IsCommandIdEnabled(int command_id) const {
   return const_cast<TreeViewExample*>(this)->IsCommandIdEnabled(command_id);
-}
-
-bool TreeViewExample::GetAcceleratorForCommandId(
-    int command_id,
-    ui::Accelerator* accelerator) {
-  return false;
 }
 
 void TreeViewExample::ExecuteCommand(int command_id, int event_flags) {

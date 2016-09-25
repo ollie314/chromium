@@ -5,11 +5,11 @@
 #ifndef COMPONENTS_CRONET_URL_REQUEST_CONTEXT_CONFIG_H_
 #define COMPONENTS_CRONET_URL_REQUEST_CONTEXT_CONFIG_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 #include "net/base/hash_value.h"
@@ -107,7 +107,13 @@ struct URLRequestContextConfig {
       // Data reduction proxy secure proxy check URL.
       const std::string& data_reduction_secure_proxy_check_url,
       // MockCertVerifier to use for testing purposes.
-      scoped_ptr<net::CertVerifier> mock_cert_verifier);
+      std::unique_ptr<net::CertVerifier> mock_cert_verifier,
+      // Enable network quality estimator.
+      bool enable_network_quality_estimator,
+      // Enable bypassing of public key pinning for local trust anchors
+      bool bypass_public_key_pinning_for_local_trust_anchors,
+      // Certificate verifier cache data.
+      const std::string& cert_verifier_data);
   ~URLRequestContextConfig();
 
   // Configure |context_builder| based on |this|.
@@ -149,7 +155,16 @@ struct URLRequestContextConfig {
   const std::string data_reduction_secure_proxy_check_url;
 
   // Certificate verifier for testing.
-  scoped_ptr<net::CertVerifier> mock_cert_verifier;
+  std::unique_ptr<net::CertVerifier> mock_cert_verifier;
+
+  // Enable network quality estimator.
+  const bool enable_network_quality_estimator;
+
+  // Enable public key pinning bypass for local trust anchors.
+  const bool bypass_public_key_pinning_for_local_trust_anchors;
+
+  // Data to populte CertVerifierCache.
+  const std::string cert_verifier_data;
 
   // App-provided list of servers that support QUIC.
   ScopedVector<QuicHint> quic_hints;

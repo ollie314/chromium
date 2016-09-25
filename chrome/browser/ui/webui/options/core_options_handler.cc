@@ -29,6 +29,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_types.h"
@@ -39,7 +40,6 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -357,12 +357,12 @@ void CoreOptionsHandler::DispatchPrefChangeNotification(
             PreferenceCallbackMap::const_iterator> range =
       pref_callback_map_.equal_range(name);
   base::ListValue result_value;
-  result_value.Append(new base::StringValue(name));
-  result_value.Append(value.release());
+  result_value.AppendString(name);
+  result_value.Append(std::move(value));
   for (PreferenceCallbackMap::const_iterator iter = range.first;
        iter != range.second; ++iter) {
     const std::string& callback_function = iter->second;
-    web_ui()->CallJavascriptFunction(callback_function, result_value);
+    web_ui()->CallJavascriptFunctionUnsafe(callback_function, result_value);
   }
 }
 
@@ -471,8 +471,8 @@ void CoreOptionsHandler::HandleFetchPrefs(const base::ListValue* args) {
 
     result_value.Set(pref_name, FetchPref(pref_name));
   }
-  web_ui()->CallJavascriptFunction(base::UTF16ToASCII(callback_function),
-                                   result_value);
+  web_ui()->CallJavascriptFunctionUnsafe(base::UTF16ToASCII(callback_function),
+                                         result_value);
 }
 
 void CoreOptionsHandler::HandleObservePrefs(const base::ListValue* args) {
@@ -594,7 +594,7 @@ void CoreOptionsHandler::HandleSetPref(const base::ListValue* args,
       }
       temp_value = base::JSONReader::Read(json_string);
       value = temp_value.get();
-      if (!value->IsType(base::Value::TYPE_LIST)) {
+      if (!value || !value->IsType(base::Value::TYPE_LIST)) {
         NOTREACHED();
         return;
       }
@@ -648,14 +648,14 @@ void CoreOptionsHandler::HandleDisableExtension(const base::ListValue* args) {
 void CoreOptionsHandler::UpdateClearPluginLSOData() {
   base::FundamentalValue enabled(
           plugin_status_pref_setter_.IsClearPluginLSODataEnabled());
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "options.OptionsPage.setClearPluginLSODataEnabled", enabled);
 }
 
 void CoreOptionsHandler::UpdatePepperFlashSettingsEnabled() {
   base::FundamentalValue enabled(
           plugin_status_pref_setter_.IsPepperFlashSettingsEnabled());
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "options.OptionsPage.setPepperFlashSettingsEnabled", enabled);
 }
 

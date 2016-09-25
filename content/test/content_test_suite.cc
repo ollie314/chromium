@@ -29,11 +29,8 @@
 #endif
 
 #if defined(OS_ANDROID)
-#include "content/browser/android/in_process_surface_texture_manager.h"
-#endif
-
-#if defined(USE_OZONE)
-#include "ui/ozone/public/client_native_pixmap_factory.h"
+#include "content/browser/media/android/browser_media_player_manager.h"
+#include "gpu/ipc/client/android/in_process_surface_texture_manager.h"
 #endif
 
 namespace content {
@@ -94,21 +91,15 @@ void ContentTestSuite::Initialize() {
     gpu::CollectBasicGraphicsInfo(&gpu_info);
     gpu::ApplyGpuDriverBugWorkarounds(gpu_info,
                                       base::CommandLine::ForCurrentProcess());
-    gfx::GLSurfaceTestSupport::InitializeOneOff();
+    gl::GLSurfaceTestSupport::InitializeOneOff();
   }
   testing::TestEventListeners& listeners =
       testing::UnitTest::GetInstance()->listeners();
   listeners.Append(new TestInitializationListener);
 #if defined(OS_ANDROID)
   gpu::SurfaceTextureManager::SetInstance(
-      InProcessSurfaceTextureManager::GetInstance());
-#endif
-#if defined(USE_OZONE)
-  if (!is_child_process) {
-    client_native_pixmap_factory_ = ui::ClientNativePixmapFactory::Create();
-    ui::ClientNativePixmapFactory::SetInstance(
-        client_native_pixmap_factory_.get());
-  }
+      gpu::InProcessSurfaceTextureManager::GetInstance());
+  content::BrowserMediaPlayerManager::InitSurfaceTexturePeer();
 #endif
 }
 

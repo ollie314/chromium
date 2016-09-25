@@ -7,8 +7,8 @@ package org.chromium.chrome.browser.device;
 import android.content.Context;
 import android.view.accessibility.AccessibilityManager;
 
-import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CommandLine;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.SysUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.chrome.browser.ChromeSwitches;
@@ -19,8 +19,6 @@ import org.chromium.ui.base.DeviceFormFactor;
  * devices.
  */
 public class DeviceClassManager {
-    private static final int DISABLE_AUTO_HIDING_TOOLBAR_THRESHOLD = 800;
-
     private static DeviceClassManager sInstance;
 
     // Set of features that can be enabled/disabled
@@ -30,11 +28,9 @@ public class DeviceClassManager {
     private boolean mEnableAnimations;
     private boolean mEnablePrerendering;
     private boolean mEnableToolbarSwipe;
-    private boolean mEnableToolbarSwipeInDocumentMode;
     private boolean mDisableDomainReliability;
 
     private final boolean mEnableFullscreen;
-    private Boolean mDisableAutoHidingToolbar;
 
     private static DeviceClassManager getInstance() {
         if (sInstance == null) {
@@ -67,7 +63,7 @@ public class DeviceClassManager {
             mDisableDomainReliability = false;
         }
 
-        if (DeviceFormFactor.isTablet(ApplicationStatus.getApplicationContext())) {
+        if (DeviceFormFactor.isTablet(ContextUtils.getApplicationContext())) {
             mEnableAccessibilityLayout = false;
         }
 
@@ -77,8 +73,6 @@ public class DeviceClassManager {
                 .hasSwitch(ChromeSwitches.ENABLE_ACCESSIBILITY_TAB_SWITCHER);
         mEnableFullscreen =
                 !commandLine.hasSwitch(ChromeSwitches.DISABLE_FULLSCREEN);
-        mEnableToolbarSwipeInDocumentMode =
-                commandLine.hasSwitch(ChromeSwitches.ENABLE_TOOLBAR_SWIPE_IN_DOCUMENT_MODE);
 
         // Related features.
         if (mEnableAccessibilityLayout) {
@@ -130,12 +124,10 @@ public class DeviceClassManager {
     }
 
     /**
-     * @param isDocumentMode Whether or not chrome is in document mode.
      * @return Whether or not we can use the toolbar swipe.
      */
-    public static boolean enableToolbarSwipe(boolean isDocumentMode) {
-        return getInstance().mEnableToolbarSwipe
-                && !(isDocumentMode && !getInstance().mEnableToolbarSwipeInDocumentMode);
+    public static boolean enableToolbarSwipe() {
+        return getInstance().mEnableToolbarSwipe;
     }
 
     /**
@@ -153,20 +145,5 @@ public class DeviceClassManager {
                 && manager.isTouchExplorationEnabled();
         TraceEvent.end("DeviceClassManager::isAccessibilityModeEnabled");
         return enabled;
-    }
-
-    /**
-     * @param context A {@link Context} instance.
-     * @return Whether auto-hiding the toolbar is disabled.
-     */
-    public static boolean isAutoHidingToolbarDisabled(Context context) {
-        if (getInstance().mDisableAutoHidingToolbar == null) {
-            getInstance().mDisableAutoHidingToolbar = false;
-            int smallestScreenDp = context.getResources().getConfiguration().smallestScreenWidthDp;
-            if (smallestScreenDp >= DISABLE_AUTO_HIDING_TOOLBAR_THRESHOLD) {
-                getInstance().mDisableAutoHidingToolbar = true;
-            }
-        }
-        return getInstance().mDisableAutoHidingToolbar;
     }
 }

@@ -9,21 +9,28 @@
 #include <string>
 #include <vector>
 
+#include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 
 @class ChromeIdentity;
+@protocol ChromeIdentityBrowserOpener;
+@class ChromeIdentityInteractionManager;
+@protocol ChromeIdentityInteractionManagerDelegate;
 @class NSArray;
 @class NSDate;
+@class NSDictionary;
 @class NSError;
 @class NSString;
+@class NSURL;
+@class UIApplication;
 @class UIImage;
+@class UINavigationController;
 
 namespace ios {
 
-// Callback passed to method |SigninIdentity()|.
-typedef void (^SigninIdentityCallback)(ChromeIdentity* identity,
-                                       NSError* error);
+class ChromeBrowserState;
+class ChromeIdentityService;
 
 // Callback passed to method |GetAccessTokenForScopes()| that returns the
 // information of the obtained access token to the caller.
@@ -83,6 +90,34 @@ class ChromeIdentityService {
   ChromeIdentityService();
   virtual ~ChromeIdentityService();
 
+  // Handles open URL authentication callback. Returns whether the URL was
+  // actually handled. This should be called within
+  // UIApplicationDelegate application:openURL:options:.
+  virtual bool HandleApplicationOpenURL(UIApplication* application,
+                                        NSURL* url,
+                                        NSDictionary* options);
+
+  // Dismisses all the dialogs created by the abstracted flows.
+  virtual void DismissDialogs();
+
+  // Returns a new account details controller to present. A cancel button is
+  // present as leading navigation item.
+  virtual base::scoped_nsobject<UINavigationController> NewAccountDetails(
+      ChromeIdentity* identity,
+      id<ChromeIdentityBrowserOpener> browser_opener);
+
+  // Returns a new Web and App Setting Details controller to present.
+  virtual base::scoped_nsobject<UINavigationController>
+  NewWebAndAppSettingDetails(ChromeIdentity* identity,
+                             id<ChromeIdentityBrowserOpener> browser_opener);
+
+  // Returns a new ChromeIdentityInteractionManager with |delegate| as its
+  // delegate.
+  virtual base::scoped_nsobject<ChromeIdentityInteractionManager>
+  NewChromeIdentityInteractionManager(
+      ios::ChromeBrowserState* browser_state,
+      id<ChromeIdentityInteractionManagerDelegate> delegate) const;
+
   // Returns YES if |identity| is valid and if the service has it in its list of
   // identitites.
   virtual bool IsValidIdentity(ChromeIdentity* identity) const;
@@ -131,10 +166,6 @@ class ChromeIdentityService {
                               const std::string& client_secret,
                               const std::set<std::string>& scopes,
                               const AccessTokenCallback& callback);
-
-  // Allow the user to sign in with an identity already seen on this device.
-  virtual void SigninIdentity(ChromeIdentity* identity,
-                              SigninIdentityCallback callback);
 
   // Fetches the profile avatar, from the cache or the network.
   // For high resolution iPads, returns large images (200 x 200) to avoid

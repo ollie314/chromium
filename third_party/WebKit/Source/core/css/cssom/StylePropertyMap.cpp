@@ -5,48 +5,89 @@
 #include "core/css/cssom/StylePropertyMap.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/css/cssom/SimpleLength.h"
-#include "core/css/cssom/StyleValue.h"
+#include "core/css/CSSValueList.h"
+#include "core/css/cssom/CSSSimpleLength.h"
+#include "core/css/cssom/CSSStyleValue.h"
+#include "core/css/cssom/StyleValueFactory.h"
 
 namespace blink {
 
-StyleValue* StylePropertyMap::get(const String& propertyName, ExceptionState& exceptionState)
+namespace {
+
+class StylePropertyMapIterationSource final : public PairIterable<String, CSSStyleValueOrCSSStyleValueSequence>::IterationSource {
+public:
+    explicit StylePropertyMapIterationSource(HeapVector<StylePropertyMap::StylePropertyMapEntry> values)
+        : m_index(0)
+        , m_values(values)
+    {
+    }
+
+    bool next(ScriptState*, String& key, CSSStyleValueOrCSSStyleValueSequence& value, ExceptionState&) override
+    {
+        if (m_index >= m_values.size())
+            return false;
+
+        const StylePropertyMap::StylePropertyMapEntry& pair = m_values.at(m_index++);
+        key = pair.first;
+        value = pair.second;
+        return true;
+    }
+
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        visitor->trace(m_values);
+        PairIterable<String, CSSStyleValueOrCSSStyleValueSequence>::IterationSource::trace(visitor);
+    }
+
+private:
+    size_t m_index;
+    const HeapVector<StylePropertyMap::StylePropertyMapEntry> m_values;
+};
+
+} // namespace
+
+CSSStyleValue* StylePropertyMap::get(const String& propertyName, ExceptionState& exceptionState)
 {
     CSSPropertyID propertyID = cssPropertyID(propertyName);
-    if (propertyID != CSSPropertyInvalid)
-        return get(propertyID);
+    if (propertyID == CSSPropertyInvalid || propertyID == CSSPropertyVariable) {
+        // TODO(meade): Handle custom properties here.
+        exceptionState.throwTypeError("Invalid propertyName: " + propertyName);
+        return nullptr;
+    }
 
-    // TODO(meade): Handle custom properties here.
-    exceptionState.throwTypeError("Invalid propertyName: " + propertyName);
-    return nullptr;
+    CSSStyleValueVector styleVector = getAllInternal(propertyID);
+    if (styleVector.isEmpty())
+        return nullptr;
+
+    return styleVector[0];
 }
 
-HeapVector<Member<StyleValue>> StylePropertyMap::getAll(const String& propertyName, ExceptionState& exceptionState)
+CSSStyleValueVector StylePropertyMap::getAll(const String& propertyName, ExceptionState& exceptionState)
 {
     CSSPropertyID propertyID = cssPropertyID(propertyName);
-    if (propertyID != CSSPropertyInvalid)
-        return getAll(propertyID);
+    if (propertyID != CSSPropertyInvalid && propertyID != CSSPropertyVariable)
+        return getAllInternal(propertyID);
 
     // TODO(meade): Handle custom properties here.
     exceptionState.throwTypeError("Invalid propertyName: " + propertyName);
-    return HeapVector<Member<StyleValue>>();
+    return CSSStyleValueVector();
 }
 
 bool StylePropertyMap::has(const String& propertyName, ExceptionState& exceptionState)
 {
     CSSPropertyID propertyID = cssPropertyID(propertyName);
-    if (propertyID != CSSPropertyInvalid)
-        return has(propertyID);
+    if (propertyID != CSSPropertyInvalid && propertyID != CSSPropertyVariable)
+        return !getAllInternal(propertyID).isEmpty();
 
     // TODO(meade): Handle custom properties here.
     exceptionState.throwTypeError("Invalid propertyName: " + propertyName);
     return false;
 }
 
-void StylePropertyMap::set(const String& propertyName, StyleValueOrStyleValueSequenceOrString& item, ExceptionState& exceptionState)
+void StylePropertyMap::set(const String& propertyName, CSSStyleValueOrCSSStyleValueSequenceOrString& item, ExceptionState& exceptionState)
 {
     CSSPropertyID propertyID = cssPropertyID(propertyName);
-    if (propertyID != CSSPropertyInvalid) {
+    if (propertyID != CSSPropertyInvalid && propertyID != CSSPropertyVariable) {
         set(propertyID, item, exceptionState);
         return;
     }
@@ -54,10 +95,10 @@ void StylePropertyMap::set(const String& propertyName, StyleValueOrStyleValueSeq
     exceptionState.throwTypeError("Invalid propertyName: " + propertyName);
 }
 
-void StylePropertyMap::append(const String& propertyName, StyleValueOrStyleValueSequenceOrString& item, ExceptionState& exceptionState)
+void StylePropertyMap::append(const String& propertyName, CSSStyleValueOrCSSStyleValueSequenceOrString& item, ExceptionState& exceptionState)
 {
     CSSPropertyID propertyID = cssPropertyID(propertyName);
-    if (propertyID != CSSPropertyInvalid) {
+    if (propertyID != CSSPropertyInvalid && propertyID != CSSPropertyVariable) {
         append(propertyID, item, exceptionState);
         return;
     }
@@ -68,12 +109,17 @@ void StylePropertyMap::append(const String& propertyName, StyleValueOrStyleValue
 void StylePropertyMap::remove(const String& propertyName, ExceptionState& exceptionState)
 {
     CSSPropertyID propertyID = cssPropertyID(propertyName);
-    if (propertyID != CSSPropertyInvalid) {
+    if (propertyID != CSSPropertyInvalid && propertyID != CSSPropertyVariable) {
         remove(propertyID, exceptionState);
         return;
     }
     // TODO(meade): Handle custom properties here.
     exceptionState.throwTypeError("Invalid propertyName: " + propertyName);
+}
+
+StylePropertyMap::IterationSource* StylePropertyMap::startIteration(ScriptState*, ExceptionState&)
+{
+    return new StylePropertyMapIterationSource(getIterationEntries());
 }
 
 } // namespace blink

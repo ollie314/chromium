@@ -32,16 +32,25 @@
 #define CrossThreadCopier_h
 
 #include "platform/PlatformExport.h"
-#include "platform/heap/Handle.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "wtf/Assertions.h"
 #include "wtf/Forward.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/Functional.h" // FunctionThreadAffinity
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/ThreadSafeRefCounted.h"
 #include "wtf/TypeTraits.h"
+#include "wtf/WeakPtr.h"
+#include <memory>
 
 class SkRefCnt;
+
+namespace WTF {
+
+template <typename T>
+class PassedWrapper;
+
+}
 
 namespace blink {
 
@@ -53,6 +62,8 @@ class ResourceRequest;
 class ResourceResponse;
 struct CrossThreadResourceResponseData;
 struct CrossThreadResourceRequestData;
+template<typename T>class CrossThreadPersistent;
+template<typename T>class CrossThreadWeakPersistent;
 
 template <typename T>
 struct CrossThreadCopierPassThrough {
@@ -64,63 +75,36 @@ struct CrossThreadCopierPassThrough {
     }
 };
 
-template <typename T, bool isArithmeticOrEnum, bool isThreadSafeRefCounted, bool isGarbageCollected>
+template <typename T, bool isArithmeticOrEnum>
 struct CrossThreadCopierBase;
 
 // Arithmetic values (integers or floats) and enums can be safely copied.
-template <typename T, bool isThreadSafeRefCounted, bool isGarbageCollected>
-struct CrossThreadCopierBase<T, true, isThreadSafeRefCounted, isGarbageCollected> : public CrossThreadCopierPassThrough<T> {
-    STATIC_ONLY(CrossThreadCopierBase);
-};
-
-// Custom copy method for ThreadSafeRefCounted.
-template <typename T, bool isGarbageCollected>
-struct CrossThreadCopierBase<T, false, true, isGarbageCollected> {
-    STATIC_ONLY(CrossThreadCopierBase);
-    typedef typename WTF::RemoveTemplate<T, RefPtr>::Type TypeWithoutRefPtr;
-    typedef typename WTF::RemoveTemplate<TypeWithoutRefPtr, PassRefPtr>::Type TypeWithoutPassRefPtr;
-    typedef typename std::remove_pointer<TypeWithoutPassRefPtr>::type RefCountedType;
-
-    // Verify that only one of the above did a change.
-    static_assert((std::is_same<RefPtr<RefCountedType>, T>::value
-        || std::is_same<PassRefPtr<RefCountedType>, T>::value
-        || std::is_same<RefCountedType*, T>::value),
-        "only one type modification should be allowed");
-
-    typedef PassRefPtr<RefCountedType> Type;
-    static Type copy(const T& refPtr)
-    {
-        return refPtr;
-    }
-};
-
-// A pointer to GarbageCollected.
 template <typename T>
-struct CrossThreadCopierBase<T, false, false, true> {
+struct CrossThreadCopierBase<T, true> : public CrossThreadCopierPassThrough<T> {
     STATIC_ONLY(CrossThreadCopierBase);
-    typedef typename std::remove_pointer<T>::type TypeWithoutPointer;
-    typedef TypeWithoutPointer* Type;
-    static Type copy(const T& ptr)
-    {
-        return ptr;
-    }
 };
 
 template <typename T>
-struct CrossThreadCopier : public CrossThreadCopierBase<
-    T,
-    std::is_arithmetic<T>::value || std::is_enum<T>::value,
-    WTF::IsSubclassOfTemplate<typename WTF::RemoveTemplate<T, RefPtr>::Type, ThreadSafeRefCounted>::value
-    || WTF::IsSubclassOfTemplate<typename std::remove_pointer<T>::type, ThreadSafeRefCounted>::value
-    || WTF::IsSubclassOfTemplate<typename WTF::RemoveTemplate<T, PassRefPtr>::Type, ThreadSafeRefCounted>::value
-    || std::is_base_of<SkRefCnt, typename WTF::RemoveTemplate<T, RefPtr>::Type>::value
-    || std::is_base_of<SkRefCnt, typename std::remove_pointer<T>::type>::value
-    || std::is_base_of<SkRefCnt, typename WTF::RemoveTemplate<T, PassRefPtr>::Type>::value,
-    WTF::IsSubclassOfTemplate<typename std::remove_pointer<T>::type, GarbageCollected>::value> {
+struct CrossThreadCopier : public CrossThreadCopierBase<T, std::is_arithmetic<T>::value || std::is_enum<T>::value> {
     STATIC_ONLY(CrossThreadCopier);
 };
 
 // CrossThreadCopier specializations follow.
+template <typename T>
+struct CrossThreadCopier<PassRefPtr<T>> : public CrossThreadCopierPassThrough<PassRefPtr<T>> {
+    STATIC_ONLY(CrossThreadCopier);
+    static_assert(WTF::IsSubclassOfTemplate<T, ThreadSafeRefCounted>::value, "PassRefPtr<T> can be passed across threads only if T is ThreadSafeRefCounted.");
+};
+template <typename T>
+struct CrossThreadCopier<RefPtr<T>> : public CrossThreadCopierPassThrough<RefPtr<T>> {
+    STATIC_ONLY(CrossThreadCopier);
+    static_assert(WTF::IsSubclassOfTemplate<T, ThreadSafeRefCounted>::value, "RefPtr<T> can be passed across threads only if T is ThreadSafeRefCounted.");
+};
+template <typename T>
+struct CrossThreadCopier<sk_sp<T>> : public CrossThreadCopierPassThrough<sk_sp<T>> {
+    STATIC_ONLY(CrossThreadCopier);
+    static_assert(std::is_base_of<SkRefCnt, T>::value, "sk_sp<T> can be passed across threads only if T is SkRefCnt.");
+};
 
 // nullptr_t can be passed through without any changes.
 template <>
@@ -140,29 +124,41 @@ struct CrossThreadCopier<IntSize> : public CrossThreadCopierPassThrough<IntSize>
     STATIC_ONLY(CrossThreadCopier);
 };
 
-template <typename T>
-struct CrossThreadCopier<PassOwnPtr<T>> {
+template <typename T, typename Deleter>
+struct CrossThreadCopier<std::unique_ptr<T, Deleter>> {
     STATIC_ONLY(CrossThreadCopier);
-    typedef PassOwnPtr<T> Type;
-    static Type copy(Type ownPtr)
+    using Type = std::unique_ptr<T, Deleter>;
+    static std::unique_ptr<T, Deleter> copy(std::unique_ptr<T, Deleter> pointer)
     {
-        return ownPtr;
-    }
-};
-
-template <typename T>
-struct CrossThreadCopier<WeakMember<T>*> {
-    STATIC_ONLY(CrossThreadCopier);
-    typedef WeakMember<T>* Type;
-    static Type copy(Type ptr)
-    {
-        return ptr;
+        return pointer; // This is in fact a move.
     }
 };
 
 template<typename T>
-struct CrossThreadCopier<CrossThreadWeakPersistentThisPointer<T>> : public CrossThreadCopierPassThrough<CrossThreadWeakPersistentThisPointer<T>> {
+struct CrossThreadCopier<CrossThreadPersistent<T>> : public CrossThreadCopierPassThrough<CrossThreadPersistent<T>> {
     STATIC_ONLY(CrossThreadCopier);
+};
+
+template<typename T>
+struct CrossThreadCopier<CrossThreadWeakPersistent<T>> : public CrossThreadCopierPassThrough<CrossThreadWeakPersistent<T>> {
+    STATIC_ONLY(CrossThreadCopier);
+};
+
+template<typename T>
+struct CrossThreadCopier<WTF::UnretainedWrapper<T, WTF::CrossThreadAffinity>> : public CrossThreadCopierPassThrough<WTF::UnretainedWrapper<T, WTF::CrossThreadAffinity>> {
+    STATIC_ONLY(CrossThreadCopier);
+};
+
+template<typename T>
+struct CrossThreadCopier<WeakPtr<T>> : public CrossThreadCopierPassThrough<WeakPtr<T>> {
+    STATIC_ONLY(CrossThreadCopier);
+};
+
+template <typename T>
+struct CrossThreadCopier<WTF::PassedWrapper<T>> {
+    STATIC_ONLY(CrossThreadCopier);
+    using Type = WTF::PassedWrapper<typename CrossThreadCopier<T>::Type>;
+    static Type copy(WTF::PassedWrapper<T>&& value) { return passed(CrossThreadCopier<T>::copy(value.moveOut())); }
 };
 
 template <>
@@ -189,74 +185,16 @@ struct CrossThreadCopier<ResourceError> {
 template <>
 struct CrossThreadCopier<ResourceRequest> {
     STATIC_ONLY(CrossThreadCopier);
-    typedef PassOwnPtr<CrossThreadResourceRequestData> Type;
+    typedef WTF::PassedWrapper<std::unique_ptr<CrossThreadResourceRequestData>> Type;
     PLATFORM_EXPORT static Type copy(const ResourceRequest&);
 };
 
 template <>
 struct CrossThreadCopier<ResourceResponse> {
     STATIC_ONLY(CrossThreadCopier);
-    typedef PassOwnPtr<CrossThreadResourceResponseData> Type;
+    typedef WTF::PassedWrapper<std::unique_ptr<CrossThreadResourceResponseData>> Type;
     PLATFORM_EXPORT static Type copy(const ResourceResponse&);
 };
-
-template <typename T>
-struct CrossThreadCopier<Member<T>> {
-    STATIC_ONLY(CrossThreadCopier);
-    static_assert(IsGarbageCollectedType<T>::value, "T must be a garbage-collected type.");
-    typedef T* Type;
-    static Type copy(const Member<T>& ptr)
-    {
-        return ptr;
-    }
-};
-
-template <typename T>
-struct CrossThreadCopier<WeakMember<T>> {
-    STATIC_ONLY(CrossThreadCopier);
-    static_assert(IsGarbageCollectedType<T>::value, "T must be a garbage-collected type.");
-    typedef T* Type;
-    static Type copy(const WeakMember<T>& ptr)
-    {
-        return ptr;
-    }
-};
-
-// |T| is |C*| or |const WeakPtr<C>&|.
-template <typename T>
-struct AllowCrossThreadAccessWrapper {
-    STACK_ALLOCATED();
-public:
-    explicit AllowCrossThreadAccessWrapper(T value) : m_value(value) { }
-    T value() const { return m_value; }
-private:
-    // This raw pointer is safe since AllowCrossThreadAccessWrapper is
-    // always stack-allocated. Ideally this should be Member<T> if T is
-    // garbage-collected and T* otherwise, but we don't want to introduce
-    // another template magic just for distinguishing Member<T> from T*.
-    // From the perspective of GC, T* always works correctly.
-    GC_PLUGIN_IGNORE("")
-    T m_value;
-};
-
-template <typename T>
-struct CrossThreadCopier<AllowCrossThreadAccessWrapper<T>> {
-    STATIC_ONLY(CrossThreadCopier);
-    typedef T Type;
-    static Type copy(const AllowCrossThreadAccessWrapper<T>& wrapper) { return wrapper.value(); }
-};
-
-template <typename T>
-AllowCrossThreadAccessWrapper<T*> AllowCrossThreadAccess(T* value)
-{
-    return AllowCrossThreadAccessWrapper<T*>(value);
-}
-
-template <typename T>
-AllowCrossThreadAccessWrapper<const WeakPtr<T>&> AllowCrossThreadAccess(const WeakPtr<T>& value)
-{
-    return AllowCrossThreadAccessWrapper<const WeakPtr<T>&>(value);
-}
 
 } // namespace blink
 

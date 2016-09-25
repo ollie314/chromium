@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_PREDICTORS_RESOURCE_PREFETCHER_MANAGER_H_
 
 #include <map>
+#include <memory>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -21,7 +22,7 @@ namespace predictors {
 struct NavigationID;
 class ResourcePrefetchPredictor;
 
-// Manages prefetches for multple navigations.
+// Manages prefetches for multiple navigations.
 //  - Created and owned by the resource prefetch predictor.
 //  - Needs to be refcounted as it is de-referenced on two different threads.
 //  - Created on the UI thread, but most functions are called in the IO thread.
@@ -46,40 +47,29 @@ class ResourcePrefetcherManager
   // Will create a new ResourcePrefetcher for the main frame url of the input
   // navigation if there isn't one already for the same URL or host (for host
   // based).
-  void MaybeAddPrefetch(
-      const NavigationID& navigation_id,
-      PrefetchKeyType key_type,
-      std::unique_ptr<ResourcePrefetcher::RequestVector> requests);
+  void MaybeAddPrefetch(const NavigationID& navigation_id,
+                        PrefetchKeyType key_type,
+                        const std::vector<GURL>& urls);
 
   // Stops the ResourcePrefetcher for the input navigation, if one was in
   // progress.
   void MaybeRemovePrefetch(const NavigationID& navigation_id);
 
   // ResourcePrefetcher::Delegate methods.
-  void ResourcePrefetcherFinished(
-      ResourcePrefetcher* prefetcher,
-      ResourcePrefetcher::RequestVector* requests) override;
+  void ResourcePrefetcherFinished(ResourcePrefetcher* prefetcher) override;
   net::URLRequestContext* GetURLRequestContext() override;
 
  private:
   friend class base::RefCountedThreadSafe<ResourcePrefetcherManager>;
   friend class MockResourcePrefetcherManager;
 
-  typedef std::map<std::string, ResourcePrefetcher*> PrefetcherMap;
-
   ~ResourcePrefetcherManager() override;
-
-  // UI Thread. |predictor_| needs to be called on the UI thread.
-  void ResourcePrefetcherFinishedOnUI(
-      const NavigationID& navigation_id,
-      PrefetchKeyType key_type,
-      std::unique_ptr<ResourcePrefetcher::RequestVector> requests);
 
   ResourcePrefetchPredictor* predictor_;
   const ResourcePrefetchPredictorConfig config_;
   net::URLRequestContextGetter* const context_getter_;
 
-  PrefetcherMap prefetcher_map_;  // Owns the ResourcePrefetcher pointers.
+  std::map<std::string, std::unique_ptr<ResourcePrefetcher>> prefetcher_map_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourcePrefetcherManager);
 };

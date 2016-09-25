@@ -9,12 +9,14 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "media/base/media_content_type.h"
 
 namespace content {
 
 namespace {
 
 const double kDefaultVolumeMultiplier = 1.0;
+const double kDuckingVolumeMultiplier = 0.2;
 
 }  // anonymous namespace
 
@@ -58,26 +60,47 @@ MediaSession::~MediaSession() {
   DCHECK(audio_focus_state_ == State::INACTIVE);
 }
 
+void MediaSession::SetMetadata(const base::Optional<MediaMetadata>& metadata) {
+  metadata_ = metadata;
+  // TODO(zqzhang): On Android, the metadata is sent though JNI everytime the
+  // media session play/pause state changes. Need to find a way to seprate the
+  // state change and Metadata update. See https://crbug.com/621855.
+  static_cast<WebContentsImpl*>(web_contents())->OnMediaSessionStateChanged();
+}
+
 bool MediaSession::AddPlayer(MediaSessionObserver* observer,
                              int player_id,
-                             Type type) {
-  observer->OnSetVolumeMultiplier(player_id, volume_multiplier_);
+                             media::MediaContentType media_content_type) {
+  observer->OnSetVolumeMultiplier(player_id, GetVolumeMultiplier());
+
+  // Determine the audio focus type required for playing the new player.
+  // TODO(zqzhang): handle duckable and uncontrollable.
+  // See https://crbug.com/639277.
+  AudioFocusManager::AudioFocusType required_audio_focus_type;
+  if (media_content_type == media::MediaContentType::Persistent) {
+    required_audio_focus_type = AudioFocusManager::AudioFocusType::Gain;
+  } else {
+    required_audio_focus_type =
+        AudioFocusManager::AudioFocusType::GainTransientMayDuck;
+  }
 
   // If the audio focus is already granted and is of type Content, there is
   // nothing to do. If it is granted of type Transient the requested type is
   // also transient, there is also nothing to do. Otherwise, the session needs
   // to request audio focus again.
   if (audio_focus_state_ == State::ACTIVE &&
-      (audio_focus_type_ == Type::Content || audio_focus_type_ == type)) {
+      (audio_focus_type_ == AudioFocusManager::AudioFocusType::Gain ||
+       audio_focus_type_ == required_audio_focus_type)) {
     players_.insert(PlayerIdentifier(observer, player_id));
     return true;
   }
 
   State old_audio_focus_state = audio_focus_state_;
-  State audio_focus_state = RequestSystemAudioFocus(type) ? State::ACTIVE
-                                                          : State::INACTIVE;
+  State audio_focus_state = RequestSystemAudioFocus(required_audio_focus_type)
+                                ? State::ACTIVE
+                                : State::INACTIVE;
   SetAudioFocusState(audio_focus_state);
-  audio_focus_type_ = type;
+  audio_focus_type_ = required_audio_focus_type;
 
   if (audio_focus_state_ != State::ACTIVE)
     return false;
@@ -139,12 +162,12 @@ void MediaSession::OnPlayerPaused(MediaSessionObserver* observer,
   OnSuspendInternal(SuspendType::CONTENT, State::SUSPENDED);
 }
 
-void MediaSession::Resume(SuspendType type) {
+void MediaSession::Resume(SuspendType suspend_type) {
   DCHECK(IsReallySuspended());
 
   // When the resume requests comes from another source than system, audio focus
   // must be requested.
-  if (type != SuspendType::SYSTEM) {
+  if (suspend_type != SuspendType::SYSTEM) {
     // Request audio focus again in case we lost it because another app started
     // playing while the playback was paused.
     State audio_focus_state = RequestSystemAudioFocus(audio_focus_type_)
@@ -156,38 +179,55 @@ void MediaSession::Resume(SuspendType type) {
       return;
   }
 
-  OnResumeInternal(type);
+  OnResumeInternal(suspend_type);
 }
 
-void MediaSession::Suspend(SuspendType type) {
+void MediaSession::Suspend(SuspendType suspend_type) {
   DCHECK(!IsSuspended());
 
-  OnSuspendInternal(type, State::SUSPENDED);
+  OnSuspendInternal(suspend_type, State::SUSPENDED);
 }
 
-void MediaSession::Stop(SuspendType type) {
+void MediaSession::Stop(SuspendType suspend_type) {
   DCHECK(audio_focus_state_ != State::INACTIVE);
 
-  DCHECK(type != SuspendType::CONTENT);
+  DCHECK(suspend_type != SuspendType::CONTENT);
 
   // TODO(mlamouri): merge the logic between UI and SYSTEM.
-  if (type == SuspendType::SYSTEM) {
-    OnSuspendInternal(type, State::INACTIVE);
+  if (suspend_type == SuspendType::SYSTEM) {
+    OnSuspendInternal(suspend_type, State::INACTIVE);
     return;
   }
 
   if (audio_focus_state_ != State::SUSPENDED)
-    OnSuspendInternal(type, State::SUSPENDED);
+    OnSuspendInternal(suspend_type, State::SUSPENDED);
 
   DCHECK(audio_focus_state_ == State::SUSPENDED);
   players_.clear();
   AbandonSystemAudioFocusIfNeeded();
 }
 
-void MediaSession::SetVolumeMultiplier(double volume_multiplier) {
-  volume_multiplier_ = volume_multiplier;
+void MediaSession::StartDucking() {
+  if (is_ducking_)
+    return;
+  is_ducking_ = true;
+  UpdateVolumeMultiplier();
+}
+
+void MediaSession::StopDucking() {
+  if (!is_ducking_)
+    return;
+  is_ducking_ = false;
+  UpdateVolumeMultiplier();
+}
+
+void MediaSession::UpdateVolumeMultiplier() {
   for (const auto& it : players_)
-    it.observer->OnSetVolumeMultiplier(it.player_id, volume_multiplier_);
+    it.observer->OnSetVolumeMultiplier(it.player_id, GetVolumeMultiplier());
+}
+
+double MediaSession::GetVolumeMultiplier() const {
+  return is_ducking_ ? kDuckingVolumeMultiplier : kDefaultVolumeMultiplier;
 }
 
 bool MediaSession::IsActive() const {
@@ -204,9 +244,10 @@ bool MediaSession::IsSuspended() const {
 }
 
 bool MediaSession::IsControllable() const {
-  // Only content type media session can be controllable unless it is inactive.
+  // Only media session having focus Gain can be controllable unless it is
+  // inactive.
   return audio_focus_state_ != State::INACTIVE &&
-         audio_focus_type_ == Type::Content;
+         audio_focus_type_ == AudioFocusManager::AudioFocusType::Gain;
 }
 
 std::unique_ptr<base::CallbackList<void(MediaSession::State)>::Subscription>
@@ -224,7 +265,8 @@ bool MediaSession::IsActiveForTest() const {
   return audio_focus_state_ == State::ACTIVE;
 }
 
-MediaSession::Type MediaSession::audio_focus_type_for_test() const {
+AudioFocusManager::AudioFocusType MediaSession::audio_focus_type_for_test()
+    const {
   return audio_focus_type_;
 }
 
@@ -237,15 +279,16 @@ void MediaSession::RemoveAllPlayersForTest() {
   AbandonSystemAudioFocusIfNeeded();
 }
 
-void MediaSession::OnSuspendInternal(SuspendType type, State new_state) {
+void MediaSession::OnSuspendInternal(SuspendType suspend_type,
+                                     State new_state) {
   DCHECK(new_state == State::SUSPENDED || new_state == State::INACTIVE);
   // UI suspend cannot use State::INACTIVE.
-  DCHECK(type == SuspendType::SYSTEM || new_state == State::SUSPENDED);
+  DCHECK(suspend_type == SuspendType::SYSTEM || new_state == State::SUSPENDED);
 
   if (audio_focus_state_ != State::ACTIVE)
     return;
 
-  switch (type) {
+  switch (suspend_type) {
     case SuspendType::UI:
       uma_helper_.RecordSessionSuspended(MediaSessionSuspendedSource::UI);
       break;
@@ -270,9 +313,9 @@ void MediaSession::OnSuspendInternal(SuspendType type, State new_state) {
   }
 
   SetAudioFocusState(new_state);
-  suspend_type_ = type;
+  suspend_type_ = suspend_type;
 
-  if (type != SuspendType::CONTENT) {
+  if (suspend_type != SuspendType::CONTENT) {
     // SuspendType::CONTENT happens when the suspend action came from
     // the page in which case the player is already paused.
     // Otherwise, the players need to be paused.
@@ -283,8 +326,8 @@ void MediaSession::OnSuspendInternal(SuspendType type, State new_state) {
   UpdateWebContents();
 }
 
-void MediaSession::OnResumeInternal(SuspendType type) {
-  if (type == SuspendType::SYSTEM && suspend_type_ != type)
+void MediaSession::OnResumeInternal(SuspendType suspend_type) {
+  if (suspend_type == SuspendType::SYSTEM && suspend_type_ != suspend_type)
     return;
 
   SetAudioFocusState(State::ACTIVE);
@@ -298,16 +341,17 @@ void MediaSession::OnResumeInternal(SuspendType type) {
 MediaSession::MediaSession(WebContents* web_contents)
     : WebContentsObserver(web_contents),
       audio_focus_state_(State::INACTIVE),
-      audio_focus_type_(Type::Transient),
-      volume_multiplier_(kDefaultVolumeMultiplier) {
-}
+      audio_focus_type_(
+          AudioFocusManager::AudioFocusType::GainTransientMayDuck),
+      is_ducking_(false) {}
 
 void MediaSession::Initialize() {
   delegate_ = MediaSessionDelegate::Create(this);
 }
 
-bool MediaSession::RequestSystemAudioFocus(Type type) {
-  bool result = delegate_->RequestAudioFocus(type);
+bool MediaSession::RequestSystemAudioFocus(
+    AudioFocusManager::AudioFocusType audio_focus_type) {
+  bool result = delegate_->RequestAudioFocus(audio_focus_type);
   uma_helper_.RecordRequestAudioFocusResult(result);
   return result;
 }

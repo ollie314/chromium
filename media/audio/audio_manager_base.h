@@ -5,18 +5,17 @@
 #ifndef MEDIA_AUDIO_AUDIO_MANAGER_BASE_H_
 #define MEDIA_AUDIO_AUDIO_MANAGER_BASE_H_
 
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "media/audio/audio_manager.h"
-
 #include "media/audio/audio_output_dispatcher.h"
 
 #if defined(OS_WIN)
@@ -30,36 +29,6 @@ class AudioOutputDispatcher;
 // AudioManagerBase provides AudioManager functions common for all platforms.
 class MEDIA_EXPORT AudioManagerBase : public AudioManager {
  public:
-  // TODO(ajm): Move these strings to AudioManager.
-  // Unique Id of the generic "default" device. Associated with the localized
-  // name returned from GetDefaultDeviceName().
-  static const char kDefaultDeviceId[];
-
-  // Unique Id of the generic default communications device. Associated with
-  // the localized name returned from GetCommunicationsDeviceName().
-  static const char kCommunicationsDeviceId[];
-
-  // Input device ID used to capture the default system playback stream. When
-  // this device ID is passed to MakeAudioInputStream() the returned
-  // AudioInputStream will be capturing audio currently being played on the
-  // default playback device. At the moment this feature is supported only on
-  // some platforms. AudioInputStream::Intialize() will return an error on
-  // platforms that don't support it. GetInputStreamParameters() must be used
-  // to get the parameters of the loopback device before creating a loopback
-  // stream, otherwise stream initialization may fail.
-  static const char kLoopbackInputDeviceId[];
-
-  // Returns true if |device_id| corresponds to the default device.
-  static bool IsDefaultDeviceId(const std::string& device_id);
-
-  // If |device_id| is not empty, |session_id| should be ignored and the output
-  // device should be selected basing on |device_id|.
-  // If |device_id| is empty and |session_id| is nonzero, output device
-  // associated with the opened input device designated by |session_id| should
-  // be used.
-  static bool UseSessionIdToSelectDevice(int session_id,
-                                         const std::string& device_id);
-
   ~AudioManagerBase() override;
 
   // AudioManager:
@@ -69,9 +38,12 @@ class MEDIA_EXPORT AudioManagerBase : public AudioManager {
   void GetAudioOutputDeviceNames(AudioDeviceNames* device_names) override;
   AudioOutputStream* MakeAudioOutputStream(
       const AudioParameters& params,
-      const std::string& device_id) override;
-  AudioInputStream* MakeAudioInputStream(const AudioParameters& params,
-                                         const std::string& device_id) override;
+      const std::string& device_id,
+      const LogCallback& log_callback) override;
+  AudioInputStream* MakeAudioInputStream(
+      const AudioParameters& params,
+      const std::string& device_id,
+      const LogCallback& log_callback) override;
   AudioOutputStream* MakeAudioOutputStreamProxy(
       const AudioParameters& params,
       const std::string& device_id) override;
@@ -87,7 +59,7 @@ class MEDIA_EXPORT AudioManagerBase : public AudioManager {
       const std::string& device_id) override;
   std::string GetAssociatedOutputDeviceID(
       const std::string& input_device_id) override;
-  scoped_ptr<AudioLog> CreateAudioLog(
+  std::unique_ptr<AudioLog> CreateAudioLog(
       AudioLogFactory::AudioComponent component) override;
 
   // AudioManagerBase:
@@ -99,21 +71,30 @@ class MEDIA_EXPORT AudioManagerBase : public AudioManager {
   // Creates the output stream for the |AUDIO_PCM_LINEAR| format. The legacy
   // name is also from |AUDIO_PCM_LINEAR|.
   virtual AudioOutputStream* MakeLinearOutputStream(
-      const AudioParameters& params) = 0;
+      const AudioParameters& params,
+      const LogCallback& log_callback) = 0;
 
   // Creates the output stream for the |AUDIO_PCM_LOW_LATENCY| format.
   virtual AudioOutputStream* MakeLowLatencyOutputStream(
       const AudioParameters& params,
-      const std::string& device_id) = 0;
+      const std::string& device_id,
+      const LogCallback& log_callback) = 0;
 
   // Creates the input stream for the |AUDIO_PCM_LINEAR| format. The legacy
   // name is also from |AUDIO_PCM_LINEAR|.
   virtual AudioInputStream* MakeLinearInputStream(
-      const AudioParameters& params, const std::string& device_id) = 0;
+      const AudioParameters& params,
+      const std::string& device_id,
+      const LogCallback& log_callback) = 0;
 
   // Creates the input stream for the |AUDIO_PCM_LOW_LATENCY| format.
   virtual AudioInputStream* MakeLowLatencyInputStream(
-      const AudioParameters& params, const std::string& device_id) = 0;
+      const AudioParameters& params,
+      const std::string& device_id,
+      const LogCallback& log_callback) = 0;
+
+  std::string GetGroupIDOutput(const std::string& output_device_id) override;
+  std::string GetGroupIDInput(const std::string& input_device_id) override;
 
   // Get number of input or output streams.
   int input_stream_count() const { return num_input_streams_; }

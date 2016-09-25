@@ -24,9 +24,11 @@
 
 #include "core/css/CSSHelper.h"
 #include "core/css/CSSPrimitiveValue.h"
+#include "core/css/CSSToLengthConversionData.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/frame/FrameView.h"
 #include "core/layout/LayoutObject.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/style/ComputedStyle.h"
 #include "core/svg/SVGSVGElement.h"
 #include "platform/LengthFunctions.h"
@@ -159,8 +161,8 @@ SVGLengthContext::SVGLengthContext(const SVGElement* context)
 
 FloatRect SVGLengthContext::resolveRectangle(const SVGElement* context, SVGUnitTypes::SVGUnitType type, const FloatRect& viewport, const SVGLength& x, const SVGLength& y, const SVGLength& width, const SVGLength& height)
 {
-    ASSERT(type != SVGUnitTypes::SVG_UNIT_TYPE_UNKNOWN);
-    if (type != SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE) {
+    DCHECK_NE(SVGUnitTypes::kSvgUnitTypeUnknown, type);
+    if (type != SVGUnitTypes::kSvgUnitTypeUserspaceonuse) {
         const FloatSize& viewportSize = viewport.size();
         return FloatRect(
             convertValueFromPercentageToUserUnits(x, viewportSize) + viewport.x(),
@@ -175,8 +177,8 @@ FloatRect SVGLengthContext::resolveRectangle(const SVGElement* context, SVGUnitT
 
 FloatPoint SVGLengthContext::resolvePoint(const SVGElement* context, SVGUnitTypes::SVGUnitType type, const SVGLength& x, const SVGLength& y)
 {
-    ASSERT(type != SVGUnitTypes::SVG_UNIT_TYPE_UNKNOWN);
-    if (type == SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE) {
+    DCHECK_NE(SVGUnitTypes::kSvgUnitTypeUnknown, type);
+    if (type == SVGUnitTypes::kSvgUnitTypeUserspaceonuse) {
         SVGLengthContext lengthContext(context);
         return FloatPoint(x.value(lengthContext), y.value(lengthContext));
     }
@@ -187,8 +189,8 @@ FloatPoint SVGLengthContext::resolvePoint(const SVGElement* context, SVGUnitType
 
 float SVGLengthContext::resolveLength(const SVGElement* context, SVGUnitTypes::SVGUnitType type, const SVGLength& x)
 {
-    ASSERT(type != SVGUnitTypes::SVG_UNIT_TYPE_UNKNOWN);
-    if (type == SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE) {
+    DCHECK_NE(SVGUnitTypes::kSvgUnitTypeUnknown, type);
+    if (type == SVGUnitTypes::kSvgUnitTypeUserspaceonuse) {
         SVGLengthContext lengthContext(context);
         return x.value(lengthContext);
     }
@@ -210,7 +212,7 @@ float SVGLengthContext::valueForLength(const Length& length, const ComputedStyle
 float SVGLengthContext::valueForLength(const Length& length, float zoom, SVGLengthMode mode) const
 {
     float dimension = 0;
-    if (length.hasPercent()) {
+    if (length.isPercentOrCalc()) {
         FloatSize viewportSize;
         determineViewport(viewportSize);
         // The viewport will be unaffected by zoom.
@@ -240,6 +242,7 @@ float SVGLengthContext::convertValueToUserUnits(float value, SVGLengthMode mode,
     switch (fromUnit) {
     case CSSPrimitiveValue::UnitType::Pixels:
     case CSSPrimitiveValue::UnitType::Number:
+    case CSSPrimitiveValue::UnitType::Integer:
     case CSSPrimitiveValue::UnitType::UserUnits:
         userUnits = value;
         break;
@@ -299,6 +302,7 @@ float SVGLengthContext::convertValueFromUserUnits(float value, SVGLengthMode mod
     switch (toUnit) {
     case CSSPrimitiveValue::UnitType::Pixels:
     case CSSPrimitiveValue::UnitType::Number:
+    case CSSPrimitiveValue::UnitType::Integer:
     case CSSPrimitiveValue::UnitType::UserUnits:
         return value;
     case CSSPrimitiveValue::UnitType::Percentage: {
@@ -415,4 +419,18 @@ bool SVGLengthContext::determineViewport(FloatSize& viewportSize) const
     return true;
 }
 
+float SVGLengthContext::resolveValue(const CSSPrimitiveValue& primitiveValue, SVGLengthMode mode) const
+{
+    const ComputedStyle* style = computedStyleForLengthResolving(m_context);
+    if (!style)
+        return 0;
+
+    const ComputedStyle* rootStyle = rootElementStyle(m_context);
+    if (!rootStyle)
+        return 0;
+
+    CSSToLengthConversionData conversionData = CSSToLengthConversionData(style, rootStyle, m_context->document().layoutViewItem(), 1.0f);
+    Length length = primitiveValue.convertToLength(conversionData);
+    return valueForLength(length, 1.0f, mode);
+}
 } // namespace blink

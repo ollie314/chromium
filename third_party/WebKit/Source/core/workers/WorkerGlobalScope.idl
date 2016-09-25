@@ -27,13 +27,14 @@
 // https://html.spec.whatwg.org/#the-workerglobalscope-common-interface
 
 [
+    ActiveScriptWrappable,
+    DependentLifetime,
     Exposed=Worker,
 ] interface WorkerGlobalScope : EventTarget {
     readonly attribute WorkerGlobalScope self;
     readonly attribute WorkerLocation location;
 
-    void close();
-    // TODO(philipj): onerror should be an OnErrorEventHandler.
+    // TODO(foolip): onerror should be an OnErrorEventHandler.
     attribute EventHandler onerror;
     // attribute EventHandler onlanguagechange;
     // attribute EventHandler onoffline;
@@ -45,16 +46,17 @@
 
     // Console API
     // https://console.spec.whatwg.org/#console-interface
-    [Replaceable] readonly attribute WorkerConsole console;
+    // [Replaceable] readonly attribute Console console;
+    // Console is installed by v8 inspector when context is created
+    // and is left commented here just for documentation.
 
     // CORS and RFC1918
     // https://mikewest.github.io/cors-rfc1918/#feature-detect
     [RuntimeEnabled=CorsRFC1918, ImplementedAs=addressSpaceForBindings] readonly attribute AddressSpace addressSpace;
 
     // Unhandled Promise Rejection Events
-    // https://github.com/domenic/unhandled-rejections-browser-spec
-    [RuntimeEnabled=PromiseRejectionEvent] attribute EventHandler onrejectionhandled;
-    [RuntimeEnabled=PromiseRejectionEvent] attribute EventHandler onunhandledrejection;
+    attribute EventHandler onrejectionhandled;
+    attribute EventHandler onunhandledrejection;
 };
 
 WorkerGlobalScope implements WindowBase64;

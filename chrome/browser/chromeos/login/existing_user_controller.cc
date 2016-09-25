@@ -45,6 +45,7 @@
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -60,12 +61,14 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -77,7 +80,6 @@
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "policy/policy_constants.h"
 #include "ui/accessibility/ax_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/widget/widget.h"
@@ -228,7 +230,7 @@ void ExistingUserController::UpdateLoginDisplay(
 
   cros_settings_->GetBoolean(kAccountsPrefShowUserNamesOnSignIn,
                              &show_users_on_signin);
-  for (const auto& user : users) {
+  for (auto* user : users) {
     // Skip kiosk apps for login screen user list. Kiosk apps as pods (aka new
     // kiosk UI) is currently disabled and it gets the apps directly from
     // KioskAppManager.
@@ -260,10 +262,11 @@ void ExistingUserController::UpdateLoginDisplay(
   cros_settings_->GetBoolean(kAccountsPrefAllowGuest, &show_guest);
   show_users_on_signin |= !filtered_users.empty();
   show_guest &= !filtered_users.empty();
-  bool show_new_user = true;
+  bool allow_new_user = true;
+  cros_settings_->GetBoolean(kAccountsPrefAllowNewUser, &allow_new_user);
   login_display_->set_parent_window(GetNativeWindow());
-  login_display_->Init(
-      filtered_users, show_guest, show_users_on_signin, show_new_user);
+  login_display_->Init(filtered_users, show_guest, show_users_on_signin,
+                       allow_new_user);
   host_->OnPreferencesChanged();
 }
 
@@ -602,16 +605,10 @@ void ExistingUserController::OnAuthFailure(const AuthFailure& failure) {
         ShowError(IDS_LOGIN_ERROR_OFFLINE_FAILED_NETWORK_NOT_CONNECTED, error);
     } else {
       // TODO(nkostylev): Cleanup rest of ClientLogin related code.
-      if (failure.reason() == AuthFailure::NETWORK_AUTH_FAILED &&
-          failure.error().state() ==
-              GoogleServiceAuthError::HOSTED_NOT_ALLOWED) {
-        ShowError(IDS_LOGIN_ERROR_AUTHENTICATING_HOSTED, error);
-      } else {
-        if (!is_known_user)
-          ShowError(IDS_LOGIN_ERROR_AUTHENTICATING_NEW, error);
-        else
-          ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
-      }
+      if (!is_known_user)
+        ShowError(IDS_LOGIN_ERROR_AUTHENTICATING_NEW, error);
+      else
+        ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
     }
     if (auth_flow_offline_)
       UMA_HISTOGRAM_BOOLEAN("Login.OfflineFailure.IsKnownUser", is_known_user);
@@ -742,7 +739,9 @@ void ExistingUserController::OnPasswordChangeDetected() {
 
   // If the password change happens after an online auth, do a TokenHandle check
   // to find out whether the user password is really changed or not.
-  if (auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION) {
+  // TODO(xiyuan): Remove channel restriction. See http://crbug.com/585530
+  if (chrome::GetChannel() <= version_info::Channel::DEV &&
+      auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION) {
     token_handle_util_.reset(new TokenHandleUtil);
     if (token_handle_util_->HasToken(last_login_attempt_account_id_)) {
       token_handle_util_->CheckToken(
@@ -992,9 +991,6 @@ void ExistingUserController::ShowError(int error_id,
     switch (login_performer_->error().state()) {
       case GoogleServiceAuthError::ACCOUNT_DISABLED:
         help_topic_id = HelpAppLauncher::HELP_ACCOUNT_DISABLED;
-        break;
-      case GoogleServiceAuthError::HOSTED_NOT_ALLOWED:
-        help_topic_id = HelpAppLauncher::HELP_HOSTED_ACCOUNT;
         break;
       default:
         help_topic_id = HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT;

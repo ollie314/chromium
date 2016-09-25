@@ -14,13 +14,13 @@
 #include "cc/layers/texture_layer.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/output/copy_output_result.h"
-#include "cc/output/direct_renderer.h"
 #include "cc/resources/texture_mailbox.h"
 #include "cc/test/paths.h"
 #include "cc/test/pixel_comparator.h"
 #include "cc/test/pixel_test_output_surface.h"
 #include "cc/test/pixel_test_software_output_device.h"
 #include "cc/test/pixel_test_utils.h"
+#include "cc/test/test_compositor_frame_sink.h"
 #include "cc/test/test_in_process_context_provider.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "gpu/command_buffer/client/gl_in_process_context.h"
@@ -33,48 +33,61 @@ namespace cc {
 LayerTreePixelTest::LayerTreePixelTest()
     : pixel_comparator_(new ExactPixelComparator(true)),
       test_type_(PIXEL_TEST_GL),
-      pending_texture_mailbox_callbacks_(0) {
-}
+      pending_texture_mailbox_callbacks_(0) {}
 
 LayerTreePixelTest::~LayerTreePixelTest() {}
 
-std::unique_ptr<OutputSurface> LayerTreePixelTest::CreateOutputSurface() {
-  gfx::Size surface_expansion_size(40, 60);
-  std::unique_ptr<PixelTestOutputSurface> output_surface;
-
-  switch (test_type_) {
-    case PIXEL_TEST_SOFTWARE: {
-      std::unique_ptr<PixelTestSoftwareOutputDevice> software_output_device(
-          new PixelTestSoftwareOutputDevice);
-      software_output_device->set_surface_expansion_size(
-          surface_expansion_size);
-      output_surface = base::WrapUnique(new PixelTestOutputSurface(
-          std::move(software_output_device), nullptr));
-      break;
-    }
-    case PIXEL_TEST_GL: {
-      bool flipped_output_surface = false;
-      scoped_refptr<TestInProcessContextProvider> compositor(
-          new TestInProcessContextProvider(nullptr));
-      scoped_refptr<TestInProcessContextProvider> worker(
-          new TestInProcessContextProvider(compositor.get()));
-      output_surface = base::WrapUnique(
-          new PixelTestOutputSurface(std::move(compositor), std::move(worker),
-                                     flipped_output_surface, nullptr));
-      break;
-    }
+std::unique_ptr<TestCompositorFrameSink>
+    LayerTreePixelTest::CreateCompositorFrameSink(
+        scoped_refptr<ContextProvider>,
+        scoped_refptr<ContextProvider>) {
+  scoped_refptr<TestInProcessContextProvider> compositor_context_provider;
+  scoped_refptr<TestInProcessContextProvider> worker_context_provider;
+  if (test_type_ == PIXEL_TEST_GL) {
+    compositor_context_provider = new TestInProcessContextProvider(nullptr);
+    worker_context_provider =
+        new TestInProcessContextProvider(compositor_context_provider.get());
   }
-
-  output_surface->set_surface_expansion_size(surface_expansion_size);
-  return std::move(output_surface);
+  bool synchronous_composite =
+      !HasImplThread() &&
+      !layer_tree_host()->GetSettings().single_thread_proxy_scheduler;
+  // Allow resource reclaiming for partial raster tests to get back
+  // resources from the Display.
+  bool force_disable_reclaim_resources = false;
+  auto delegating_output_surface = base::MakeUnique<TestCompositorFrameSink>(
+      compositor_context_provider, std::move(worker_context_provider),
+      CreateDisplayOutputSurface(compositor_context_provider),
+      shared_bitmap_manager(), gpu_memory_buffer_manager(), RendererSettings(),
+      ImplThreadTaskRunner(), synchronous_composite,
+      force_disable_reclaim_resources);
+  delegating_output_surface->SetEnlargePassTextureAmount(
+      enlarge_texture_amount_);
+  return delegating_output_surface;
 }
 
-void LayerTreePixelTest::WillCommitCompleteOnThread(LayerTreeHostImpl* impl) {
-  if (impl->sync_tree()->source_frame_number() != 0)
-    return;
+std::unique_ptr<OutputSurface> LayerTreePixelTest::CreateDisplayOutputSurface(
+    scoped_refptr<ContextProvider> compositor_context_provider) {
+  // Always test Webview shenanigans.
+  gfx::Size surface_expansion_size(40, 60);
 
-  DirectRenderer* renderer = static_cast<DirectRenderer*>(impl->renderer());
-  renderer->SetEnlargePassTextureAmountForTesting(enlarge_texture_amount_);
+  std::unique_ptr<PixelTestOutputSurface> display_output_surface;
+  if (test_type_ == PIXEL_TEST_GL) {
+    bool flipped_output_surface = false;
+    display_output_surface = base::MakeUnique<PixelTestOutputSurface>(
+        // Pixel tests use a separate context for the Display to more closely
+        // mimic texture transport from the renderer process to the Display
+        // compositor.
+        make_scoped_refptr(new TestInProcessContextProvider(nullptr)),
+        flipped_output_surface);
+  } else {
+    std::unique_ptr<PixelTestSoftwareOutputDevice> software_output_device(
+        new PixelTestSoftwareOutputDevice);
+    software_output_device->set_surface_expansion_size(surface_expansion_size);
+    display_output_surface = base::MakeUnique<PixelTestOutputSurface>(
+        std::move(software_output_device));
+  }
+  display_output_surface->set_surface_expansion_size(surface_expansion_size);
+  return std::move(display_output_surface);
 }
 
 std::unique_ptr<CopyOutputRequest>
@@ -91,8 +104,8 @@ void LayerTreePixelTest::ReadbackResult(
 }
 
 void LayerTreePixelTest::BeginTest() {
-  Layer* target = readback_target_ ? readback_target_
-                                   : layer_tree_host()->root_layer();
+  Layer* target =
+      readback_target_ ? readback_target_ : layer_tree()->root_layer();
   target->RequestCopyOfOutput(CreateCopyOutputRequest());
   PostSetNeedsCommitToMainThread();
 }
@@ -175,7 +188,7 @@ void LayerTreePixelTest::RunPixelTest(
   content_root_ = content_root;
   readback_target_ = NULL;
   ref_file_ = file_name;
-  RunTest(CompositorMode::THREADED, false);
+  RunTest(CompositorMode::THREADED);
 }
 
 void LayerTreePixelTest::RunSingleThreadedPixelTest(
@@ -186,7 +199,7 @@ void LayerTreePixelTest::RunSingleThreadedPixelTest(
   content_root_ = content_root;
   readback_target_ = NULL;
   ref_file_ = file_name;
-  RunTest(CompositorMode::SINGLE_THREADED, false);
+  RunTest(CompositorMode::SINGLE_THREADED);
 }
 
 void LayerTreePixelTest::RunPixelTestWithReadbackTarget(
@@ -198,14 +211,14 @@ void LayerTreePixelTest::RunPixelTestWithReadbackTarget(
   content_root_ = content_root;
   readback_target_ = target;
   ref_file_ = file_name;
-  RunTest(CompositorMode::THREADED, false);
+  RunTest(CompositorMode::THREADED);
 }
 
 void LayerTreePixelTest::SetupTree() {
   scoped_refptr<Layer> root = Layer::Create();
   root->SetBounds(content_root_->bounds());
   root->AddChild(content_root_);
-  layer_tree_host()->SetRootLayer(root);
+  layer_tree()->SetRootLayer(root);
   LayerTreeTest::SetupTree();
 }
 

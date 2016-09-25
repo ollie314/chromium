@@ -20,10 +20,7 @@ class WebContents;
 // class.
 class FirstWebContentsProfiler : public content::WebContentsObserver {
  public:
-  // Creates a profiler for the active web contents. If there are multiple
-  // browsers, the first one is chosen. The resulting FirstWebContentsProfiler
-  // owns itself.
-  static void Start();
+  explicit FirstWebContentsProfiler(content::WebContents* web_contents);
 
  private:
   // Reasons for which profiling is deemed complete. Logged in UMA (do not re-
@@ -44,7 +41,6 @@ class FirstWebContentsProfiler : public content::WebContentsObserver {
     ENUM_MAX
   };
 
-  explicit FirstWebContentsProfiler(content::WebContents* web_contents);
   ~FirstWebContentsProfiler() override = default;
 
   // content::WebContentsObserver:
@@ -76,11 +72,6 @@ class FirstWebContentsProfiler : public content::WebContentsObserver {
 
   // Whether an attempt was made to collect the "MainNavigationFinished" metric.
   bool collected_main_navigation_finished_metric_;
-
-  // Whether core metric collection is complete. Used to keep reporting old
-  // stats post abandon to give us an intra-milestone comparison basis initially
-  // between the old and new stats. TODO(gab): Remove this in M49.
-  bool finished_;
 
   DISALLOW_COPY_AND_ASSIGN(FirstWebContentsProfiler);
 };

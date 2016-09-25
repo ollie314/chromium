@@ -184,6 +184,21 @@ void paintComplexOutline(GraphicsContext& graphicsContext, const Vector<IntRect>
         graphicsContext.endLayer();
 }
 
+
+void fillQuad(GraphicsContext& context, const FloatPoint quad[], const Color& color, bool antialias)
+{
+    SkPath path;
+    path.moveTo(quad[0]);
+    path.lineTo(quad[1]);
+    path.lineTo(quad[2]);
+    path.lineTo(quad[3]);
+    SkPaint paint(context.fillPaint());
+    paint.setAntiAlias(antialias);
+    paint.setColor(color.rgb());
+
+    context.drawPath(path, paint);
+}
+
 } // namespace
 
 void ObjectPainter::paintOutline(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
@@ -191,7 +206,7 @@ void ObjectPainter::paintOutline(const PaintInfo& paintInfo, const LayoutPoint& 
     ASSERT(shouldPaintSelfOutline(paintInfo.phase));
 
     const ComputedStyle& styleToUse = m_layoutObject.styleRef();
-    if (!styleToUse.hasOutline() || styleToUse.visibility() != VISIBLE)
+    if (!styleToUse.hasOutline() || styleToUse.visibility() != EVisibility::Visible)
         return;
 
     // Only paint the focus ring by hand if the theme isn't able to draw the focus ring.
@@ -253,7 +268,7 @@ void ObjectPainter::paintInlineChildrenOutlines(const PaintInfo& paintInfo, cons
 void ObjectPainter::addPDFURLRectIfNeeded(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     ASSERT(paintInfo.isPrinting());
-    if (m_layoutObject.isElementContinuation() || !m_layoutObject.node() || !m_layoutObject.node()->isLink() || m_layoutObject.styleRef().visibility() != VISIBLE)
+    if (m_layoutObject.isElementContinuation() || !m_layoutObject.node() || !m_layoutObject.node()->isLink() || m_layoutObject.styleRef().visibility() != EVisibility::Visible)
         return;
 
     KURL url = toElement(m_layoutObject.node())->hrefURL();
@@ -266,10 +281,10 @@ void ObjectPainter::addPDFURLRectIfNeeded(const PaintInfo& paintInfo, const Layo
     if (rect.isEmpty())
         return;
 
-    if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(paintInfo.context, m_layoutObject, DisplayItem::PrintedContentPDFURLRect))
+    if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(paintInfo.context, m_layoutObject, DisplayItem::kPrintedContentPDFURLRect))
         return;
 
-    LayoutObjectDrawingRecorder recorder(paintInfo.context, m_layoutObject, DisplayItem::PrintedContentPDFURLRect, rect);
+    LayoutObjectDrawingRecorder recorder(paintInfo.context, m_layoutObject, DisplayItem::kPrintedContentPDFURLRect, rect);
     if (url.hasFragmentIdentifier() && equalIgnoringFragmentIdentifier(url, m_layoutObject.document().baseURL())) {
         String fragmentName = url.fragmentIdentifier();
         if (m_layoutObject.document().findAnchor(fragmentName))
@@ -490,7 +505,7 @@ void ObjectPainter::drawSolidBoxSide(GraphicsContext& graphicsContext, int x1, i
     ASSERT(y2 >= y1);
 
     if (!adjacentWidth1 && !adjacentWidth2) {
-        // Tweak antialiasing to match the behavior of fillPolygon();
+        // Tweak antialiasing to match the behavior of fillQuad();
         // this matters for rects in transformed contexts.
         bool wasAntialiased = graphicsContext.shouldAntialias();
         if (antialias != wasAntialiased)
@@ -529,7 +544,7 @@ void ObjectPainter::drawSolidBoxSide(GraphicsContext& graphicsContext, int x1, i
         break;
     }
 
-    graphicsContext.fillPolygon(4, quad, color, antialias);
+    fillQuad(graphicsContext, quad, color, antialias);
 }
 
 void ObjectPainter::paintAllPhasesAtomically(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)

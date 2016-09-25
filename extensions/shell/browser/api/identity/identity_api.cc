@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/guid.h"
+#include "base/memory/ptr_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "extensions/common/manifest_handlers/oauth2_manifest_handler.h"
@@ -61,7 +62,7 @@ void IdentityGetAuthTokenFunction::SetMintTokenFlowForTesting(
 }
 
 ExtensionFunction::ResponseAction IdentityGetAuthTokenFunction::Run() {
-  scoped_ptr<api::identity::GetAuthToken::Params> params(
+  std::unique_ptr<api::identity::GetAuthToken::Params> params(
       api::identity::GetAuthToken::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
@@ -126,7 +127,7 @@ void IdentityGetAuthTokenFunction::OnGetTokenFailure(
 void IdentityGetAuthTokenFunction::OnMintTokenSuccess(
     const std::string& access_token,
     int time_to_live) {
-  Respond(OneArgument(new base::StringValue(access_token)));
+  Respond(OneArgument(base::MakeUnique<base::StringValue>(access_token)));
   Release();  // Balanced in Run().
 }
 
@@ -152,7 +153,7 @@ IdentityRemoveCachedAuthTokenFunction::
 }
 
 ExtensionFunction::ResponseAction IdentityRemoveCachedAuthTokenFunction::Run() {
-  scoped_ptr<api::identity::RemoveCachedAuthToken::Params> params(
+  std::unique_ptr<api::identity::RemoveCachedAuthToken::Params> params(
       api::identity::RemoveCachedAuthToken::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   // This stub identity API does not maintain a token cache, so there is nothing

@@ -7,7 +7,8 @@ package org.chromium.blimp.session;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.blimp.R;
-import org.chromium.blimp.assignment.Result;
+import org.chromium.blimp_public.session.AssignmentRequestResult;
+import org.chromium.ui.base.WindowAndroid;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,19 +48,25 @@ public class BlimpClientSession {
          *               and their explanations.
          */
         void onDisconnected(String reason);
-    }
 
-    private static final String DEFAULT_ASSIGNER_URL =
-            "https://blimp-pa.googleapis.com/v1/assignment";
+        /**
+         * Called to update the debug UI about network statistics for the current web page.
+         * @param received Number of bytes received.
+         * @param sent Number of bytes sent.
+         * @param commit Number of commits completed.
+         */
+        void updateDebugStatsUI(int received, int sent, int commits);
+    }
 
     private final String mAssignerUrl;
     private final List<ConnectionObserver> mObservers;
     private long mNativeBlimpClientSessionAndroidPtr;
 
-    public BlimpClientSession() {
-        mAssignerUrl = DEFAULT_ASSIGNER_URL;
+    public BlimpClientSession(String assignerUrl, WindowAndroid windowAndroid) {
+        mAssignerUrl = assignerUrl;
         mObservers = new ArrayList<ConnectionObserver>();
-        mNativeBlimpClientSessionAndroidPtr = nativeInit(mAssignerUrl);
+        mNativeBlimpClientSessionAndroidPtr =
+                nativeInit(mAssignerUrl, windowAndroid.getNativePointer());
     }
 
     /**
@@ -104,37 +111,37 @@ public class BlimpClientSession {
 
         int resultMessageResourceId = R.string.assignment_failure_unknown;
         switch (result) {
-            case Result.OK:
+            case AssignmentRequestResult.OK:
                 resultMessageResourceId = R.string.assignment_success;
                 break;
-            case Result.BAD_REQUEST:
+            case AssignmentRequestResult.BAD_REQUEST:
                 resultMessageResourceId = R.string.assignment_failure_bad_request;
                 break;
-            case Result.BAD_RESPONSE:
+            case AssignmentRequestResult.BAD_RESPONSE:
                 resultMessageResourceId = R.string.assignment_failure_bad_response;
                 break;
-            case Result.INVALID_PROTOCOL_VERSION:
+            case AssignmentRequestResult.INVALID_PROTOCOL_VERSION:
                 resultMessageResourceId = R.string.assignment_failure_bad_version;
                 break;
-            case Result.EXPIRED_ACCESS_TOKEN:
+            case AssignmentRequestResult.EXPIRED_ACCESS_TOKEN:
                 resultMessageResourceId = R.string.assignment_failure_expired_token;
                 break;
-            case Result.USER_INVALID:
+            case AssignmentRequestResult.USER_INVALID:
                 resultMessageResourceId = R.string.assignment_failure_user_invalid;
                 break;
-            case Result.OUT_OF_VMS:
+            case AssignmentRequestResult.OUT_OF_VMS:
                 resultMessageResourceId = R.string.assignment_failure_out_of_vms;
                 break;
-            case Result.SERVER_ERROR:
+            case AssignmentRequestResult.SERVER_ERROR:
                 resultMessageResourceId = R.string.assignment_failure_server_error;
                 break;
-            case Result.SERVER_INTERRUPTED:
+            case AssignmentRequestResult.SERVER_INTERRUPTED:
                 resultMessageResourceId = R.string.assignment_failure_server_interrupted;
                 break;
-            case Result.NETWORK_FAILURE:
+            case AssignmentRequestResult.NETWORK_FAILURE:
                 resultMessageResourceId = R.string.assignment_failure_network;
                 break;
-            case Result.UNKNOWN:
+            case AssignmentRequestResult.UNKNOWN:
             default:
                 resultMessageResourceId = R.string.assignment_failure_unknown;
                 break;
@@ -165,7 +172,16 @@ public class BlimpClientSession {
         return mNativeBlimpClientSessionAndroidPtr;
     }
 
-    private native long nativeInit(String assignerUrl);
+    /**
+     * Makes a JNI call to pull the debug statistics.
+     */
+    public int[] getDebugStats() {
+        if (mNativeBlimpClientSessionAndroidPtr == 0) return null;
+        return nativeGetDebugInfo(mNativeBlimpClientSessionAndroidPtr);
+    }
+
+    private native long nativeInit(String assignerUrl, long windowAndroidPtr);
     private native void nativeConnect(long nativeBlimpClientSessionAndroid, String token);
     private native void nativeDestroy(long nativeBlimpClientSessionAndroid);
+    private native int[] nativeGetDebugInfo(long nativeBlimpClientSessionAndroid);
 }

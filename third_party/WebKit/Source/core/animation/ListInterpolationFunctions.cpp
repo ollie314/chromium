@@ -7,6 +7,7 @@
 #include "core/animation/UnderlyingValueOwner.h"
 #include "core/css/CSSValueList.h"
 #include "wtf/MathExtras.h"
+#include <memory>
 
 namespace blink {
 
@@ -40,37 +41,37 @@ bool ListInterpolationFunctions::equalValues(const InterpolationValue& a, const 
     return true;
 }
 
-PairwiseInterpolationValue ListInterpolationFunctions::mergeSingleConversions(InterpolationValue&& start, InterpolationValue&& end, MergeSingleItemConversionsCallback mergeSingleItemConversions)
+PairwiseInterpolationValue ListInterpolationFunctions::maybeMergeSingles(InterpolationValue&& start, InterpolationValue&& end, MergeSingleItemConversionsCallback mergeSingleItemConversions)
 {
     size_t startLength = toInterpolableList(*start.interpolableValue).length();
     size_t endLength = toInterpolableList(*end.interpolableValue).length();
 
     if (startLength == 0 && endLength == 0) {
         return PairwiseInterpolationValue(
-            start.interpolableValue.release(),
-            end.interpolableValue.release(),
+            std::move(start.interpolableValue),
+            std::move(end.interpolableValue),
             nullptr);
     }
 
     if (startLength == 0) {
-        OwnPtr<InterpolableValue> startInterpolableValue = end.interpolableValue->cloneAndZero();
+        std::unique_ptr<InterpolableValue> startInterpolableValue = end.interpolableValue->cloneAndZero();
         return PairwiseInterpolationValue(
-            startInterpolableValue.release(),
-            end.interpolableValue.release(),
+            std::move(startInterpolableValue),
+            std::move(end.interpolableValue),
             end.nonInterpolableValue.release());
     }
 
     if (endLength == 0) {
-        OwnPtr<InterpolableValue> endInterpolableValue = start.interpolableValue->cloneAndZero();
+        std::unique_ptr<InterpolableValue> endInterpolableValue = start.interpolableValue->cloneAndZero();
         return PairwiseInterpolationValue(
-            start.interpolableValue.release(),
-            endInterpolableValue.release(),
+            std::move(start.interpolableValue),
+            std::move(endInterpolableValue),
             start.nonInterpolableValue.release());
     }
 
     size_t finalLength = lowestCommonMultiple(startLength, endLength);
-    OwnPtr<InterpolableList> resultStartInterpolableList = InterpolableList::create(finalLength);
-    OwnPtr<InterpolableList> resultEndInterpolableList = InterpolableList::create(finalLength);
+    std::unique_ptr<InterpolableList> resultStartInterpolableList = InterpolableList::create(finalLength);
+    std::unique_ptr<InterpolableList> resultEndInterpolableList = InterpolableList::create(finalLength);
     Vector<RefPtr<NonInterpolableValue>> resultNonInterpolableValues(finalLength);
 
     InterpolableList& startInterpolableList = toInterpolableList(*start.interpolableValue);
@@ -84,14 +85,14 @@ PairwiseInterpolationValue ListInterpolationFunctions::mergeSingleConversions(In
         PairwiseInterpolationValue result = mergeSingleItemConversions(std::move(start), std::move(end));
         if (!result)
             return nullptr;
-        resultStartInterpolableList->set(i, result.startInterpolableValue.release());
-        resultEndInterpolableList->set(i, result.endInterpolableValue.release());
+        resultStartInterpolableList->set(i, std::move(result.startInterpolableValue));
+        resultEndInterpolableList->set(i, std::move(result.endInterpolableValue));
         resultNonInterpolableValues[i] = result.nonInterpolableValue.release();
     }
 
     return PairwiseInterpolationValue(
-        resultStartInterpolableList.release(),
-        resultEndInterpolableList.release(),
+        std::move(resultStartInterpolableList),
+        std::move(resultEndInterpolableList),
         NonInterpolableList::create(std::move(resultNonInterpolableValues)));
 }
 
@@ -100,17 +101,17 @@ static void repeatToLength(InterpolationValue& value, size_t length)
     InterpolableList& interpolableList = toInterpolableList(*value.interpolableValue);
     NonInterpolableList& nonInterpolableList = toNonInterpolableList(*value.nonInterpolableValue);
     size_t currentLength = interpolableList.length();
-    ASSERT(currentLength > 0);
+    DCHECK_GT(currentLength, 0U);
     if (currentLength == length)
         return;
-    ASSERT(currentLength < length);
-    OwnPtr<InterpolableList> newInterpolableList = InterpolableList::create(length);
+    DCHECK_LT(currentLength, length);
+    std::unique_ptr<InterpolableList> newInterpolableList = InterpolableList::create(length);
     Vector<RefPtr<NonInterpolableValue>> newNonInterpolableValues(length);
     for (size_t i = length; i-- > 0;) {
-        newInterpolableList->set(i, i < currentLength ? interpolableList.getMutable(i).release() : interpolableList.get(i % currentLength)->clone());
+        newInterpolableList->set(i, i < currentLength ? std::move(interpolableList.getMutable(i)) : interpolableList.get(i % currentLength)->clone());
         newNonInterpolableValues[i] = nonInterpolableList.get(i % currentLength);
     }
-    value.interpolableValue = newInterpolableList.release();
+    value.interpolableValue = std::move(newInterpolableList);
     value.nonInterpolableValue = NonInterpolableList::create(std::move(newNonInterpolableValues));
 }
 
@@ -127,7 +128,7 @@ void ListInterpolationFunctions::composite(UnderlyingValueOwner& underlyingValue
 {
     size_t underlyingLength = toInterpolableList(*underlyingValueOwner.value().interpolableValue).length();
     if (underlyingLength == 0) {
-        ASSERT(!underlyingValueOwner.value().nonInterpolableValue);
+        DCHECK(!underlyingValueOwner.value().nonInterpolableValue);
         underlyingValueOwner.set(type, value);
         return;
     }
@@ -135,7 +136,7 @@ void ListInterpolationFunctions::composite(UnderlyingValueOwner& underlyingValue
     const InterpolableList& interpolableList = toInterpolableList(*value.interpolableValue);
     size_t valueLength = interpolableList.length();
     if (valueLength == 0) {
-        ASSERT(!value.nonInterpolableValue);
+        DCHECK(!value.nonInterpolableValue);
         underlyingValueOwner.mutableValue().interpolableValue->scale(underlyingFraction);
         return;
     }

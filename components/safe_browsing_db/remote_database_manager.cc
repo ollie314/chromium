@@ -4,6 +4,7 @@
 
 #include "components/safe_browsing_db/remote_database_manager.h"
 
+#include <memory>
 #include <vector>
 
 #include "base/metrics/histogram_macros.h"
@@ -206,12 +207,6 @@ bool RemoteSafeBrowsingDatabaseManager::MatchDownloadWhitelistString(
   return true;
 }
 
-bool RemoteSafeBrowsingDatabaseManager::MatchInclusionWhitelistUrl(
-    const GURL& url) {
-  NOTREACHED();
-  return true;
-}
-
 bool RemoteSafeBrowsingDatabaseManager::MatchModuleWhitelistString(
     const std::string& str) {
   NOTREACHED();
@@ -245,7 +240,7 @@ bool RemoteSafeBrowsingDatabaseManager::CheckBrowseUrl(const GURL& url,
   if (!can_check_url)
     return true;  // Safe, continue right away.
 
-  scoped_ptr<ClientRequest> req(new ClientRequest(client, this, url));
+  std::unique_ptr<ClientRequest> req(new ClientRequest(client, this, url));
   std::vector<SBThreatType> threat_types;  // Not currently used.
 
   DVLOG(1) << "Checking for client " << client << " and URL " << url;
@@ -296,7 +291,7 @@ void RemoteSafeBrowsingDatabaseManager::StopOnIOThread(bool shutdown) {
   // Call back and delete any remaining clients. OnRequestDone() modifies
   // |current_requests_|, so we make a copy first.
   std::vector<ClientRequest*> to_callback(current_requests_);
-  for (auto req : to_callback) {
+  for (auto* req : to_callback) {
     DVLOG(1) << "Stopping: Invoking unfinished req for URL " << req->url();
     req->OnRequestDone(SB_THREAT_TYPE_SAFE, ThreatMetadata());
   }

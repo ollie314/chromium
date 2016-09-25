@@ -24,13 +24,12 @@
 #include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/native_widget_types.h"
 
-struct ViewHostMsg_TextInputState_Params;
-
 namespace content {
 class BrowserPluginGuest;
 class RenderWidgetHost;
 class RenderWidgetHostImpl;
 struct NativeWebKeyboardEvent;
+struct TextInputState;
 
 // See comments in render_widget_host_view.h about this class and its members.
 // This version is for the BrowserPlugin which handles a lot of the
@@ -65,12 +64,12 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void Show() override;
   void Hide() override;
   gfx::NativeView GetNativeView() const override;
-  gfx::NativeViewId GetNativeViewId() const override;
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
   gfx::Rect GetViewBounds() const override;
   gfx::Rect GetBoundsInRootWindow() override;
   gfx::Size GetPhysicalBackingSize() const override;
-  base::string16 GetSelectedText() const override;
+  base::string16 GetSelectedText() override;
+  void SetNeedsBeginFrames(bool needs_begin_frames) override;
 
   // RenderWidgetHostViewBase implementation.
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -78,8 +77,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override;
   void UpdateCursor(const WebCursor& cursor) override;
   void SetIsLoading(bool is_loading) override;
-  void TextInputStateChanged(
-      const ViewHostMsg_TextInputState_Params& params) override;
+  void TextInputStateChanged(const TextInputState& params) override;
   void ImeCancelComposition() override;
 #if defined(OS_MACOSX) || defined(USE_AURA)
   void ImeCompositionRangeChanged(
@@ -95,20 +93,19 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
                         const gfx::Range& range) override;
   void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) override;
-  void OnSwapCompositorFrame(
-      uint32_t output_surface_id,
-      std::unique_ptr<cc::CompositorFrame> frame) override;
+  void OnSwapCompositorFrame(uint32_t compositor_frame_sink_id,
+                             cc::CompositorFrame frame) override;
 #if defined(USE_AURA)
   void ProcessAckedTouchEvent(const TouchEventWithLatencyInfo& touch,
                               InputEventAckState ack_result) override;
 #endif
+  void ProcessMouseEvent(const blink::WebMouseEvent& event,
+                         const ui::LatencyInfo& latency) override;
   void ProcessTouchEvent(const blink::WebTouchEvent& event,
                          const ui::LatencyInfo& latency) override;
 
   bool LockMouse() override;
   void UnlockMouse() override;
-  void GetScreenInfo(blink::WebScreenInfo* results) override;
-  bool GetScreenColorProfile(std::vector<char>* color_profile) override;
 
 #if defined(OS_MACOSX)
   // RenderWidgetHostView implementation.
@@ -120,12 +117,6 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void StopSpeaking() override;
 #endif  // defined(OS_MACOSX)
 
-#if defined(OS_ANDROID) || defined(USE_AURA)
-  // RenderWidgetHostViewBase implementation.
-  void ShowDisambiguationPopup(const gfx::Rect& rect_pixels,
-                               const SkBitmap& zoomed_bitmap) override;
-#endif  // defined(OS_ANDROID) || defined(USE_AURA)
-
   void LockCompositingSurface() override;
   void UnlockCompositingSurface() override;
 
@@ -135,14 +126,23 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   void GestureEventAck(const blink::WebGestureEvent& event,
                        InputEventAckState ack_result) override;
 
+  bool IsRenderWidgetHostViewGuest() override;
+
  protected:
   friend class RenderWidgetHostView;
 
  private:
-  // Destroys this view without calling |Destroy| on |platform_view_|.
-  void DestroyGuestView();
-
   RenderWidgetHostViewBase* GetOwnerRenderWidgetHostView() const;
+
+  // Since we now route GestureEvents directly to the guest renderer, we need
+  // a way to make sure that the BrowserPlugin in the embedder gets focused so
+  // that keyboard input (which still travels via BrowserPlugin) is routed to
+  // the plugin and thus onwards to the guest.
+  // TODO(wjmaclean): When we remove BrowserPlugin, delete this code.
+  // http://crbug.com/533069
+  void MaybeSendSyntheticTapGesture(
+      const blink::WebFloatPoint& position,
+      const blink::WebFloatPoint& screenPosition) const;
 
   void OnHandleInputEvent(RenderWidgetHostImpl* embedder,
                           int browser_plugin_instance_id,
@@ -154,7 +154,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   gfx::Size size_;
   // The platform view for this RenderWidgetHostView.
   // RenderWidgetHostViewGuest mostly only cares about stuff related to
-  // compositing, the rest are directly forwared to this |platform_view_|.
+  // compositing, the rest are directly forwarded to this |platform_view_|.
   base::WeakPtr<RenderWidgetHostViewBase> platform_view_;
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewGuest);
 };

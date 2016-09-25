@@ -45,7 +45,7 @@ class ScrollAnimatorBase;
 class ScrollableArea;
 class ScrollbarTheme;
 
-class PLATFORM_EXPORT Scrollbar : public Widget, public ScrollbarThemeClient {
+class PLATFORM_EXPORT Scrollbar : public Widget, public ScrollbarThemeClient, public DisplayItemClient {
 public:
     static Scrollbar* create(ScrollableArea* scrollableArea, ScrollbarOrientation orientation, ScrollbarControlSize size, HostWindow* hostWindow)
     {
@@ -187,7 +187,7 @@ public:
 protected:
     Scrollbar(ScrollableArea*, ScrollbarOrientation, ScrollbarControlSize, HostWindow* = 0, ScrollbarTheme* = 0);
 
-    void autoscrollTimerFired(Timer<Scrollbar>*);
+    void autoscrollTimerFired(TimerBase*);
     void startTimerIfNeeded(double delay);
     void stopTimerIfNeeded();
     void autoscrollPressedPart(double delay);

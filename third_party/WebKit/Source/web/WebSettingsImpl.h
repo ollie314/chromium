@@ -48,26 +48,25 @@ public:
 
     void setFromStrings(const WebString& name, const WebString& value) override;
 
-    bool mainFrameResizesAreOrientationChanges() const override;
     bool shrinksViewportContentToFit() const override;
     bool viewportEnabled() const override;
-    void setAccelerated2dCanvasEnabled(bool) override;
     void setAccelerated2dCanvasMSAASampleCount(int) override;
     void setAcceleratedCompositingEnabled(bool) override;
     void setPreferCompositingToLCDTextEnabled(bool) override;
     void setAccessibilityEnabled(bool) override;
     void setAccessibilityPasswordValuesEnabled(bool) override;
-    void setAllowDisplayOfInsecureContent(bool) override;
     void setAllowFileAccessFromFileURLs(bool) override;
     void setAllowCustomScrollbarInMainFrame(bool) override;
     void setAllowGeolocationOnInsecureOrigins(bool) override;
     void setAllowRunningOfInsecureContent(bool) override;
     void setAllowScriptsToCloseWindows(bool) override;
     void setAllowUniversalAccessFromFileURLs(bool) override;
+    void setAlwaysShowContextMenuOnTouch(bool) override;
     void setAntialiased2dCanvasEnabled(bool) override;
     void setAntialiasedClips2dCanvasEnabled(bool) override;
     void setAutoplayExperimentMode(const WebString&) override;
     void setAutoZoomFocusedNodeToLegibleScale(bool) override;
+    void setBrowserSideNavigationEnabled(bool) override;
     void setCaretBrowsingEnabled(bool) override;
     void setClobberUserAgentInitialScaleQuirk(bool) override;
     void setCookieEnabled(bool) override;
@@ -97,8 +96,10 @@ public:
     void setExperimentalWebGLEnabled(bool) override;
     void setFantasyFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
     void setFixedFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
+    void setForcePreloadNoneForMediaElements(bool) override;
     void setForceZeroLayoutHeight(bool) override;
     void setFullscreenSupported(bool) override;
+    void setHistoryEntryRequiresUserGesture(bool) override;
     void setHyperlinkAuditingEnabled(bool) override;
     void setIgnoreMainFrameOverflowHiddenQuirk(bool) override;
     void setImageAnimationPolicy(ImageAnimationPolicy) override;
@@ -111,6 +112,7 @@ public:
     void setLoadsImagesAutomatically(bool) override;
     void setLoadWithOverviewMode(bool) override;
     void setShouldReuseGlobalForUnownedMainFrame(bool) override;
+    void setProgressBarCompletion(ProgressBarCompletion) override;
     void setLocalStorageEnabled(bool) override;
     void setMainFrameClipsContent(bool) override;
     void setMainFrameResizesAreOrientationChanges(bool) override;
@@ -122,7 +124,9 @@ public:
     void setMinimumFontSize(int) override;
     void setMinimumLogicalFontSize(int) override;
     void setMockScrollbarsEnabled(bool) override;
+    void setHideScrollbars(bool) override;
     void setOfflineWebApplicationCacheEnabled(bool) override;
+    void setPassiveEventListenerDefault(PassiveEventListenerDefault) override;
     void setPasswordEchoDurationInSeconds(double) override;
     void setPasswordEchoEnabled(bool) override;
     void setPerTilePaintingEnabled(bool) override;
@@ -136,7 +140,6 @@ public:
     void setPreferHiddenVolumeControls(bool) override;
     void setRenderVSyncNotificationEnabled(bool) override;
     void setReportScreenSizeInPhysicalPixelsQuirk(bool) override;
-    void setRootLayerScrolls(bool) override;
     void setRubberBandingOnCompositorThread(bool) override;
     void setSansSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
     void setSelectTrailingWhitespaceEnabled(bool override);
@@ -174,13 +177,12 @@ public:
     void setTextTrackTextSize(const WebString&) override;
     void setThreadedScrollingEnabled(bool) override;
     void setTouchDragDropEnabled(bool) override;
-    void setUnifiedTextCheckerEnabled(bool) override;
-    void setUsesEncodingDetector(bool) override;
     void setUseLegacyBackgroundSizeShorthandBehavior(bool) override;
     void setViewportStyle(WebViewportStyle) override;
     void setUseSolidColorScrollbars(bool) override;
     void setUseWideViewport(bool) override;
     void setV8CacheOptions(V8CacheOptions) override;
+    void setV8CacheStrategiesForCacheStorage(V8CacheStrategiesForCacheStorage) override;
     void setValidationMessageTimerMagnification(int) override;
     void setViewportEnabled(bool) override;
     void setViewportMetaEnabled(bool) override;
@@ -190,7 +192,6 @@ public:
     void setViewportMetaZeroValuesQuirk(bool) override;
     void setWebGLErrorsToConsoleEnabled(bool) override;
     void setWebSecurityEnabled(bool) override;
-    void setWheelGesturesEnabled(bool) override;
     void setWideViewportQuirkEnabled(bool) override;
     void setXSSAuditorEnabled(bool) override;
 
@@ -208,7 +209,6 @@ public:
 
     void setMockGestureTapHighlightsEnabled(bool);
     bool mockGestureTapHighlightsEnabled() const;
-    bool wheelGesturesEnabled() const;
 
 private:
     Settings* m_settings;

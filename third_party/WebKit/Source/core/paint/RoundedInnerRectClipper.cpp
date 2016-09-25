@@ -4,7 +4,7 @@
 
 #include "core/paint/RoundedInnerRectClipper.h"
 
-#include "core/layout/LayoutBox.h"
+#include "core/layout/LayoutObject.h"
 #include "core/paint/PaintInfo.h"
 #include "platform/graphics/paint/ClipDisplayItem.h"
 #include "platform/graphics/paint/PaintController.h"
@@ -15,7 +15,7 @@ RoundedInnerRectClipper::RoundedInnerRectClipper(const LayoutObject& layoutObjec
     : m_layoutObject(layoutObject)
     , m_paintInfo(paintInfo)
     , m_usePaintController(behavior == ApplyToDisplayList)
-    , m_clipType(m_usePaintController ? m_paintInfo.displayItemTypeForClipping() : DisplayItem::ClipBoxPaintPhaseFirst)
+    , m_clipType(m_usePaintController ? m_paintInfo.displayItemTypeForClipping() : DisplayItem::kClipBoxPaintPhaseFirst)
 {
     Vector<FloatRoundedRect> roundedRectClips;
     if (clipRect.isRenderable()) {

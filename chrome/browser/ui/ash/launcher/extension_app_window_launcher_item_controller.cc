@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/ash/launcher/extension_app_window_launcher_item_controller.h"
 
-#include "ash/wm/window_state.h"
+#include "ash/common/wm/window_state.h"
 #include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item.h"
@@ -51,10 +51,10 @@ gfx::Image GetAppListIcon(extensions::AppWindow* app_window) {
 ExtensionAppWindowLauncherItemController::
     ExtensionAppWindowLauncherItemController(
         Type type,
-        const std::string& app_shelf_id,
         const std::string& app_id,
+        const std::string& launch_id,
         ChromeLauncherController* controller)
-    : AppWindowLauncherItemController(type, app_shelf_id, app_id, controller) {}
+    : AppWindowLauncherItemController(type, app_id, launch_id, controller) {}
 
 ExtensionAppWindowLauncherItemController::
     ~ExtensionAppWindowLauncherItemController() {}

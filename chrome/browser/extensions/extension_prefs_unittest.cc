@@ -6,6 +6,7 @@
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -16,6 +17,7 @@
 #include "components/prefs/mock_pref_change_callback.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "components/sync/api/string_ordinal.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -28,7 +30,6 @@
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_info.h"
-#include "sync/api/string_ordinal.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -66,7 +67,7 @@ void ExtensionPrefsTest::TearDown() {
   prefs_.RecreateExtensionPrefs();
   Verify();
   prefs_.pref_service()->CommitPendingWrite();
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Tests the LastPingDay/SetLastPingDay functions.
@@ -171,9 +172,9 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
         permission_info->CreateAPIPermission());
     {
       std::unique_ptr<base::ListValue> value(new base::ListValue());
-      value->Append(new base::StringValue("tcp-connect:*.example.com:80"));
-      value->Append(new base::StringValue("udp-bind::8080"));
-      value->Append(new base::StringValue("udp-send-to::8888"));
+      value->AppendString("tcp-connect:*.example.com:80");
+      value->AppendString("udp-bind::8080");
+      value->AppendString("udp-send-to::8888");
       ASSERT_TRUE(permission->FromValue(value.get(), NULL, NULL));
     }
     api_perm_set1_.insert(permission.release());
@@ -850,7 +851,8 @@ class ExtensionPrefsBlacklistState : public ExtensionPrefsTest {
     ExtensionIdSet empty_ids;
     EXPECT_EQ(empty_ids, prefs()->GetBlacklistedExtensions());
 
-    prefs()->SetExtensionBlacklisted(extension_a_->id(), true);
+    prefs()->SetExtensionBlacklistState(extension_a_->id(),
+                                        BLACKLISTED_MALWARE);
     EXPECT_EQ(BLACKLISTED_MALWARE,
               prefs()->GetExtensionBlacklistState(extension_a_->id()));
 
@@ -861,7 +863,8 @@ class ExtensionPrefsBlacklistState : public ExtensionPrefsTest {
     EXPECT_FALSE(prefs()->IsExtensionBlacklisted(extension_a_->id()));
     EXPECT_EQ(empty_ids, prefs()->GetBlacklistedExtensions());
 
-    prefs()->SetExtensionBlacklisted(extension_a_->id(), true);
+    prefs()->SetExtensionBlacklistState(extension_a_->id(),
+                                        BLACKLISTED_MALWARE);
     EXPECT_TRUE(prefs()->IsExtensionBlacklisted(extension_a_->id()));
     EXPECT_EQ(BLACKLISTED_MALWARE,
               prefs()->GetExtensionBlacklistState(extension_a_->id()));

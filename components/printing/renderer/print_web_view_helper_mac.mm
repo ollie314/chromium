@@ -19,7 +19,7 @@
 namespace printing {
 
 #if defined(ENABLE_BASIC_PRINTING)
-bool PrintWebViewHelper::PrintPagesNative(blink::WebFrame* frame,
+bool PrintWebViewHelper::PrintPagesNative(blink::WebLocalFrame* frame,
                                           int page_count) {
   const PrintMsg_PrintPages_Params& params = *print_pages_params_;
   const PrintMsg_Print_Params& print_params = params.params;
@@ -40,8 +40,8 @@ bool PrintWebViewHelper::PrintPagesNative(blink::WebFrame* frame,
 
 void PrintWebViewHelper::PrintPageInternal(
     const PrintMsg_PrintPage_Params& params,
-    blink::WebFrame* frame) {
-  PdfMetafileSkia metafile;
+    blink::WebLocalFrame* frame) {
+  PdfMetafileSkia metafile(PDF_SKIA_DOCUMENT_TYPE);
   CHECK(metafile.Init());
 
   int page_number = params.page_number;
@@ -80,7 +80,7 @@ bool PrintWebViewHelper::RenderPreviewPage(
                          is_print_ready_metafile_sent_;
 
   if (render_to_draft) {
-    draft_metafile.reset(new PdfMetafileSkia());
+    draft_metafile.reset(new PdfMetafileSkia(PDF_SKIA_DOCUMENT_TYPE));
     CHECK(draft_metafile->Init());
     initial_render_metafile = draft_metafile.get();
   }
@@ -99,7 +99,8 @@ bool PrintWebViewHelper::RenderPreviewPage(
         print_preview_context_.generate_draft_pages()) {
       DCHECK(!draft_metafile.get());
       draft_metafile =
-          print_preview_context_.metafile()->GetMetafileForCurrentPage();
+          print_preview_context_.metafile()->GetMetafileForCurrentPage(
+              PDF_SKIA_DOCUMENT_TYPE);
     }
   }
   return PreviewPageRendered(page_number, draft_metafile.get());
@@ -108,7 +109,7 @@ bool PrintWebViewHelper::RenderPreviewPage(
 
 void PrintWebViewHelper::RenderPage(const PrintMsg_Print_Params& params,
                                     int page_number,
-                                    blink::WebFrame* frame,
+                                    blink::WebLocalFrame* frame,
                                     bool is_preview,
                                     PdfMetafileSkia* metafile,
                                     gfx::Size* page_size,

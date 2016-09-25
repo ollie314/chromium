@@ -7,12 +7,17 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/metrics/histogram_macros.h"
 #include "content/browser/bad_message.h"
-#include "content/browser/fileapi/chrome_blob_storage_context.h"
+#include "content/browser/blob_storage/chrome_blob_storage_context.h"
+#include "content/browser/child_process_security_policy_impl.h"
+#include "content/browser/fileapi/browser_file_system_helper.h"
 #include "content/common/fileapi/webblob_messages.h"
 #include "ipc/ipc_platform_file.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/blob/blob_transport_result.h"
+#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/fileapi/file_system_url.h"
 #include "storage/common/blob_storage/blob_item_bytes_request.h"
 #include "storage/common/blob_storage/blob_item_bytes_response.h"
 #include "storage/common/data_element.h"
@@ -21,14 +26,30 @@
 using storage::BlobStorageContext;
 using storage::BlobStorageRegistry;
 using storage::BlobTransportResult;
+using storage::DataElement;
 using storage::IPCBlobCreationCancelCode;
+using storage::FileSystemURL;
 
 namespace content {
+namespace {
+
+// These are used for UMA stats, don't change.
+enum RefcountOperation {
+  BDH_DECREMENT = 0,
+  BDH_INCREMENT,
+  BDH_TRACING_ENUM_LAST
+};
+
+} // namespace
 
 BlobDispatcherHost::BlobDispatcherHost(
-    ChromeBlobStorageContext* blob_storage_context)
+    int process_id,
+    scoped_refptr<ChromeBlobStorageContext> blob_storage_context,
+    scoped_refptr<storage::FileSystemContext> file_system_context)
     : BrowserMessageFilter(BlobMsgStart),
-      blob_storage_context_(blob_storage_context) {}
+      process_id_(process_id),
+      file_system_context_(std::move(file_system_context)),
+      blob_storage_context_(std::move(blob_storage_context)) {}
 
 BlobDispatcherHost::~BlobDispatcherHost() {
   ClearHostFromBlobStorageContext();
@@ -125,6 +146,33 @@ void BlobDispatcherHost::OnStartBuildingBlob(
     SendIPCResponse(uuid, BlobTransportResult::BAD_IPC);
     return;
   }
+
+  ChildProcessSecurityPolicyImpl* security_policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+  for (const DataElement& item : descriptions) {
+    if (item.type() == storage::DataElement::TYPE_FILE_FILESYSTEM) {
+      FileSystemURL filesystem_url(
+          file_system_context_->CrackURL(item.filesystem_url()));
+      if (!FileSystemURLIsValid(file_system_context_.get(), filesystem_url) ||
+          !security_policy->CanReadFileSystemFile(process_id_,
+                                                  filesystem_url)) {
+        async_builder_.CancelBuildingBlob(
+            uuid, IPCBlobCreationCancelCode::FILE_WRITE_FAILED, context);
+        Send(new BlobStorageMsg_CancelBuildingBlob(
+            uuid, IPCBlobCreationCancelCode::FILE_WRITE_FAILED));
+        return;
+      }
+    }
+    if (item.type() == storage::DataElement::TYPE_FILE &&
+        !security_policy->CanReadFile(process_id_, item.path())) {
+      async_builder_.CancelBuildingBlob(
+          uuid, IPCBlobCreationCancelCode::FILE_WRITE_FAILED, context);
+      Send(new BlobStorageMsg_CancelBuildingBlob(
+          uuid, IPCBlobCreationCancelCode::FILE_WRITE_FAILED));
+      return;
+    }
+  }
+
   // |this| owns async_builder_ so using base::Unretained(this) is safe.
   BlobTransportResult result = async_builder_.StartBuildingBlob(
       uuid, descriptions, context->memory_available(), context,
@@ -208,9 +256,14 @@ void BlobDispatcherHost::OnCancelBuildingBlob(
 void BlobDispatcherHost::OnIncrementBlobRefCount(const std::string& uuid) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   BlobStorageContext* context = this->context();
-  if (uuid.empty() || !context->registry().HasEntry(uuid)) {
+  if (uuid.empty()) {
     bad_message::ReceivedBadMessage(
         this, bad_message::BDH_INVALID_REFCOUNT_OPERATION);
+    return;
+  }
+  if (!context->registry().HasEntry(uuid)) {
+    UMA_HISTOGRAM_ENUMERATION("Storage.Blob.InvalidReference", BDH_INCREMENT,
+                              BDH_TRACING_ENUM_LAST);
     return;
   }
   context->IncrementBlobRefCount(uuid);
@@ -219,9 +272,14 @@ void BlobDispatcherHost::OnIncrementBlobRefCount(const std::string& uuid) {
 
 void BlobDispatcherHost::OnDecrementBlobRefCount(const std::string& uuid) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (uuid.empty() || !IsInUseInHost(uuid)) {
+  if (uuid.empty()) {
     bad_message::ReceivedBadMessage(
         this, bad_message::BDH_INVALID_REFCOUNT_OPERATION);
+    return;
+  }
+  if (!IsInUseInHost(uuid)) {
+    UMA_HISTOGRAM_ENUMERATION("Storage.Blob.InvalidReference", BDH_DECREMENT,
+                              BDH_TRACING_ENUM_LAST);
     return;
   }
   BlobStorageContext* context = this->context();
@@ -247,10 +305,14 @@ void BlobDispatcherHost::OnRegisterPublicBlobURL(const GURL& public_url,
                                                  const std::string& uuid) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   BlobStorageContext* context = this->context();
-  if (uuid.empty() || !IsInUseInHost(uuid) ||
-      context->registry().IsURLMapped(public_url)) {
+  if (uuid.empty()) {
     bad_message::ReceivedBadMessage(this,
                                     bad_message::BDH_INVALID_URL_OPERATION);
+    return;
+  }
+  if (!IsInUseInHost(uuid) || context->registry().IsURLMapped(public_url)) {
+    UMA_HISTOGRAM_ENUMERATION("Storage.Blob.InvalidURLRegister", BDH_INCREMENT,
+                              BDH_TRACING_ENUM_LAST);
     return;
   }
   context->RegisterPublicBlobURL(public_url, uuid);
@@ -259,9 +321,14 @@ void BlobDispatcherHost::OnRegisterPublicBlobURL(const GURL& public_url,
 
 void BlobDispatcherHost::OnRevokePublicBlobURL(const GURL& public_url) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (!IsUrlRegisteredInHost(public_url)) {
+  if (!public_url.is_valid()) {
     bad_message::ReceivedBadMessage(this,
                                     bad_message::BDH_INVALID_URL_OPERATION);
+    return;
+  }
+  if (!IsUrlRegisteredInHost(public_url)) {
+    UMA_HISTOGRAM_ENUMERATION("Storage.Blob.InvalidURLRegister", BDH_DECREMENT,
+                              BDH_TRACING_ENUM_LAST);
     return;
   }
   context()->RevokePublicBlobURL(public_url);

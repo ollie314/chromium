@@ -5,17 +5,22 @@
 #include "platform/testing/HistogramTester.h"
 
 #include "base/test/histogram_tester.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
-HistogramTester::HistogramTester() : m_histogramTester(adoptPtr(new base::HistogramTester)) { }
+HistogramTester::HistogramTester() : m_histogramTester(wrapUnique(new base::HistogramTester)) { }
 
 HistogramTester::~HistogramTester() { }
 
 void HistogramTester::expectUniqueSample(const std::string& name, base::HistogramBase::Sample sample, base::HistogramBase::Count count) const
 {
     m_histogramTester->ExpectUniqueSample(name, sample, count);
+}
+
+void HistogramTester::expectBucketCount(const std::string& name, base::HistogramBase::Sample sample, base::HistogramBase::Count count) const
+{
+    m_histogramTester->ExpectBucketCount(name, sample, count);
 }
 
 void HistogramTester::expectTotalCount(const std::string& name, base::HistogramBase::Count count) const

@@ -31,7 +31,12 @@
 #if defined(OS_WIN)
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "ui/aura/test/test_screen.h"
-#include "ui/gfx/screen.h"
+#include "ui/display/screen.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/users/mock_user_manager.h"
+#include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #endif
 
 namespace ash {
@@ -61,13 +66,19 @@ class SigninErrorNotifierTest : public AshTestBase {
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
     ASSERT_TRUE(profile_manager_->SetUp());
 
+#if defined(OS_CHROMEOS)
+    mock_user_manager_ = new chromeos::MockUserManager();
+    user_manager_enabler_.reset(
+        new chromeos::ScopedUserManagerEnabler(mock_user_manager_));
+#endif
+
     TestingBrowserProcess::GetGlobal();
     AshTestBase::SetUp();
 
     // Set up screen for Windows.
 #if defined(OS_WIN)
     test_screen_.reset(aura::TestScreen::Create(gfx::Size()));
-    gfx::Screen::SetScreenInstance(test_screen_.get());
+    display::Screen::SetScreenInstance(test_screen_.get());
 #endif
 
     error_controller_ = SigninErrorControllerFactory::GetForProfile(
@@ -78,7 +89,7 @@ class SigninErrorNotifierTest : public AshTestBase {
 
   void TearDown() override {
 #if defined(OS_WIN)
-    gfx::Screen::SetScreenInstance(nullptr);
+    display::Screen::SetScreenInstance(nullptr);
     test_screen_.reset();
 #endif
     profile_manager_.reset();
@@ -97,12 +108,16 @@ class SigninErrorNotifierTest : public AshTestBase {
   }
 
 #if defined(OS_WIN)
-  std::unique_ptr<gfx::Screen> test_screen_;
+  std::unique_ptr<display::Screen> test_screen_;
 #endif
   std::unique_ptr<TestingProfileManager> profile_manager_;
   std::unique_ptr<TestingProfile> profile_;
   SigninErrorController* error_controller_;
   NotificationUIManager* notification_ui_manager_;
+#if defined(OS_CHROMEOS)
+  chromeos::MockUserManager* mock_user_manager_;  // Not owned.
+  std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
+#endif
 };
 
 TEST_F(SigninErrorNotifierTest, NoErrorAuthStatusProviders) {
@@ -213,7 +228,7 @@ TEST_F(SigninErrorNotifierTest, AuthStatusEnumerateAllErrors) {
     { GoogleServiceAuthError::SERVICE_UNAVAILABLE, true },
     { GoogleServiceAuthError::TWO_FACTOR, true },
     { GoogleServiceAuthError::REQUEST_CANCELED, true },
-    { GoogleServiceAuthError::HOSTED_NOT_ALLOWED, true },
+    { GoogleServiceAuthError::HOSTED_NOT_ALLOWED_DEPRECATED, false },
     { GoogleServiceAuthError::UNEXPECTED_SERVICE_RESPONSE, true },
     { GoogleServiceAuthError::SERVICE_ERROR, true },
     { GoogleServiceAuthError::WEB_LOGIN_REQUIRED, true },
@@ -222,6 +237,8 @@ TEST_F(SigninErrorNotifierTest, AuthStatusEnumerateAllErrors) {
       "table size should match number of auth error types");
 
   for (size_t i = 0; i < arraysize(table); ++i) {
+    if (GoogleServiceAuthError::IsDeprecated(table[i].error_state))
+      continue;
     FakeAuthStatusProvider provider(error_controller_);
     provider.SetAuthError(kTestAccountId,
                           GoogleServiceAuthError(table[i].error_state));

@@ -17,12 +17,12 @@ class Layer;
 
 namespace views {
 
-class InkDropAnimation;
-class InkDropHover;
+class InkDropRipple;
+class InkDropHighlight;
 
-// Used by the InkDropAnimationController to add and remove the ink drop layers
-// from a host's layer tree. Typically the ink drop layer is added to a View's
-// layer but it can also be added to a View's ancestor layer.
+// Used by the InkDrop to add and remove the ink drop layers from a host's layer
+// tree. Typically the ink drop layer is added to a View's layer but it can also
+// be added to a View's ancestor layer.
 //
 // Note: Some Views do not own a Layer, but you can use
 // View::SetLayer(new ui::Layer(ui::LAYER_NOT_DRAWN)) to force the View to have
@@ -39,10 +39,10 @@ class VIEWS_EXPORT InkDropHost {
   virtual void RemoveInkDropLayer(ui::Layer* ink_drop_layer) = 0;
 
   // Creates and returns the effect used for press.
-  virtual std::unique_ptr<InkDropAnimation> CreateInkDropAnimation() const = 0;
+  virtual std::unique_ptr<InkDropRipple> CreateInkDropRipple() const = 0;
 
-  // Creates and returns the effect used for hover.
-  virtual std::unique_ptr<InkDropHover> CreateInkDropHover() const = 0;
+  // Creates and returns the effect used for hover and focus.
+  virtual std::unique_ptr<InkDropHighlight> CreateInkDropHighlight() const = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InkDropHost);

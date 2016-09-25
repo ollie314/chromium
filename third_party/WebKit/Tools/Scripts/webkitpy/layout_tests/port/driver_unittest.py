@@ -26,25 +26,21 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import optparse
 import unittest
 
 from webkitpy.common.system.systemhost_mock import MockSystemHost
-
 from webkitpy.layout_tests.port.base import Port
-from webkitpy.layout_tests.port.driver import Driver, DriverOutput
-from webkitpy.layout_tests.port.server_process_mock import MockServerProcess
-
+from webkitpy.layout_tests.port.driver import Driver
 # FIXME: remove the dependency on TestWebKitPort
 from webkitpy.layout_tests.port.port_testcase import TestWebKitPort
-
-from webkitpy.tool.mocktool import MockOptions
+from webkitpy.layout_tests.port.server_process_mock import MockServerProcess
 
 
 class DriverTest(unittest.TestCase):
 
     def make_port(self):
-        port = Port(MockSystemHost(), 'test', MockOptions(configuration='Release'))
-        port._config.build_directory = lambda configuration: '/mock-checkout/out/' + configuration
+        port = Port(MockSystemHost(), 'test', optparse.Values({'configuration': 'Release'}))
         return port
 
     def _assert_wrapper(self, wrapper_string, expected_wrapper):
@@ -131,12 +127,11 @@ class DriverTest(unittest.TestCase):
 
     def test_no_timeout(self):
         port = TestWebKitPort()
-        port._config.build_directory = lambda configuration: '/mock-checkout/out/' + configuration
         driver = Driver(port, 0, pixel_tests=True, no_timeout=True)
         cmd_line = driver.cmd_line(True, [])
         self.assertEqual(cmd_line[0], '/mock-checkout/out/Release/content_shell')
         self.assertEqual(cmd_line[-1], '-')
-        self.assertTrue('--no-timeout' in cmd_line)
+        self.assertIn('--no-timeout', cmd_line)
 
     def test_check_for_driver_crash(self):
         port = TestWebKitPort()
@@ -221,9 +216,9 @@ class DriverTest(unittest.TestCase):
 
     def test_creating_a_port_does_not_write_to_the_filesystem(self):
         port = TestWebKitPort()
-        driver = Driver(port, 0, pixel_tests=True)
+        Driver(port, 0, pixel_tests=True)
         self.assertEqual(port._filesystem.written_files, {})
-        self.assertEqual(port._filesystem.last_tmpdir, None)
+        self.assertIsNone(port._filesystem.last_tmpdir)
 
     def test_stop_cleans_up_properly(self):
         port = TestWebKitPort()
@@ -231,7 +226,7 @@ class DriverTest(unittest.TestCase):
         driver = Driver(port, 0, pixel_tests=True)
         driver.start(True, [], None)
         last_tmpdir = port._filesystem.last_tmpdir
-        self.assertNotEquals(last_tmpdir, None)
+        self.assertIsNotNone(last_tmpdir)
         driver.stop()
         self.assertFalse(port._filesystem.isdir(last_tmpdir))
 

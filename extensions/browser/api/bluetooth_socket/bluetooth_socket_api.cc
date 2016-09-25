@@ -62,15 +62,15 @@ SocketInfo CreateSocketInfo(int socket_id, BluetoothApiSocket* socket) {
 void SetSocketProperties(BluetoothApiSocket* socket,
                          SocketProperties* properties) {
   if (properties->name.get()) {
-    socket->set_name(*properties->name.get());
+    socket->set_name(*properties->name);
   }
   if (properties->persistent.get()) {
-    socket->set_persistent(*properties->persistent.get());
+    socket->set_persistent(*properties->persistent);
   }
   if (properties->buffer_size.get()) {
     // buffer size is validated when issuing the actual Recv operation
     // on the socket.
-    socket->set_buffer_size(*properties->buffer_size.get());
+    socket->set_buffer_size(*properties->buffer_size);
   }
 }
 
@@ -195,8 +195,7 @@ void BluetoothSocketCreateFunction::Work() {
 
   BluetoothApiSocket* socket = new BluetoothApiSocket(extension_id());
 
-  bluetooth_socket::SocketProperties* properties =
-      params_.get()->properties.get();
+  bluetooth_socket::SocketProperties* properties = params_->properties.get();
   if (properties) {
     SetSocketProperties(socket, properties);
   }
@@ -204,7 +203,7 @@ void BluetoothSocketCreateFunction::Work() {
   bluetooth_socket::CreateInfo create_info;
   create_info.socket_id = AddSocket(socket);
   results_ = bluetooth_socket::Create::Results::Create(create_info);
-  AsyncWorkCompleted();
+  // AsyncWorkCompleted is called by AsyncWorkStart().
 }
 
 BluetoothSocketUpdateFunction::BluetoothSocketUpdateFunction() {}
@@ -224,7 +223,7 @@ void BluetoothSocketUpdateFunction::Work() {
     return;
   }
 
-  SetSocketProperties(socket, &params_.get()->properties);
+  SetSocketProperties(socket, &params_->properties);
   results_ = bluetooth_socket::Update::Results::Create();
 }
 
@@ -301,7 +300,7 @@ void BluetoothSocketListenFunction::OnGetAdapter(
     return;
   }
 
-  scoped_ptr<std::string> name;
+  std::unique_ptr<std::string> name;
   if (socket->name())
     name.reset(new std::string(*socket->name()));
 
@@ -364,7 +363,7 @@ bool BluetoothSocketListenUsingRfcommFunction::CreateParams() {
 void BluetoothSocketListenUsingRfcommFunction::CreateService(
     scoped_refptr<device::BluetoothAdapter> adapter,
     const device::BluetoothUUID& uuid,
-    scoped_ptr<std::string> name,
+    std::unique_ptr<std::string> name,
     const device::BluetoothAdapter::CreateServiceCallback& callback,
     const device::BluetoothAdapter::CreateServiceErrorCallback&
         error_callback) {
@@ -407,7 +406,7 @@ bool BluetoothSocketListenUsingL2capFunction::CreateParams() {
 void BluetoothSocketListenUsingL2capFunction::CreateService(
     scoped_refptr<device::BluetoothAdapter> adapter,
     const device::BluetoothUUID& uuid,
-    scoped_ptr<std::string> name,
+    std::unique_ptr<std::string> name,
     const device::BluetoothAdapter::CreateServiceCallback& callback,
     const device::BluetoothAdapter::CreateServiceErrorCallback&
         error_callback) {

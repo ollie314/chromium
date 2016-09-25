@@ -12,13 +12,13 @@
 namespace mojo {
 
 template <>
-struct StructTraits<test::TypemappedRect, test::RectChromium> {
+struct StructTraits<test::TypemappedRectDataView, test::RectChromium> {
   static int x(const test::RectChromium& r) { return r.x(); }
   static int y(const test::RectChromium& r) { return r.y(); }
   static int width(const test::RectChromium& r) { return r.width(); }
   static int height(const test::RectChromium& r) { return r.height(); }
 
-  static bool Read(test::TypemappedRect::Reader r, test::RectChromium* out) {
+  static bool Read(test::TypemappedRectDataView r, test::RectChromium* out) {
     if (r.width() < 0 || r.height() < 0)
       return false;
     out->set_x(r.x());

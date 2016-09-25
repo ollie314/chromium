@@ -13,7 +13,7 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/autofill/core/common/password_form.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,7 +30,7 @@ const char kTestFileName[] = "test_only.csv";
 class PasswordImporterTest : public testing::Test {
  public:
   PasswordImporterTest()
-      : callback_called_(false), result_(PasswordImporter::SUCCESS) {
+      : callback_called_(false), result_(PasswordImporter::NUM_IMPORT_RESULTS) {
     CHECK(temp_directory_.CreateUniqueTempDir());
   }
 
@@ -76,7 +76,8 @@ TEST_F(PasswordImporterTest, CSVImport) {
       "Url,Username,Password\n"
       "http://accounts.google.com/a/LoginAuth,test@gmail.com,test1\n";
 
-  base::FilePath input_path = temp_directory_.path().AppendASCII(kTestFileName);
+  base::FilePath input_path =
+      temp_directory_.GetPath().AppendASCII(kTestFileName);
   ASSERT_TRUE(
       base::WriteFile(input_path, kTestCSVInput, strlen(kTestCSVInput)));
   ASSERT_NO_FATAL_FAILURE(StartImportAndWaitForCompletion(input_path));

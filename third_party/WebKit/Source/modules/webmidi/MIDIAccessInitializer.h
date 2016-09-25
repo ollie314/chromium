@@ -12,8 +12,10 @@
 #include "modules/webmidi/MIDIAccessorClient.h"
 #include "modules/webmidi/MIDIOptions.h"
 #include "modules/webmidi/MIDIPort.h"
-#include "wtf/OwnPtr.h"
+#include "third_party/WebKit/public/platform/modules/permissions/permission.mojom-blink.h"
+#include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom-blink.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
@@ -47,7 +49,7 @@ public:
         return resolver->start();
     }
 
-    ~MIDIAccessInitializer() override;
+    ~MIDIAccessInitializer() override = default;
 
     // Eager finalization to allow dispose() operation access
     // other (non eager) heap objects.
@@ -61,23 +63,22 @@ public:
     void didStartSession(bool success, const String& error, const String& message) override;
     void didReceiveMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStamp) override { }
 
-    void resolvePermission(bool allowed);
-    SecurityOrigin* getSecurityOrigin() const;
-
 private:
     MIDIAccessInitializer(ScriptState*, const MIDIOptions&);
 
     ExecutionContext* getExecutionContext() const;
     ScriptPromise start();
-    void dispose();
 
     void contextDestroyed() override;
 
-    OwnPtr<MIDIAccessor> m_accessor;
+    void onPermissionsUpdated(const Vector<mojom::blink::PermissionStatus>&);
+    void onPermissionUpdated(mojom::blink::PermissionStatus);
+
+    std::unique_ptr<MIDIAccessor> m_accessor;
     Vector<PortDescriptor> m_portDescriptors;
     MIDIOptions m_options;
-    bool m_hasBeenDisposed;
-    bool m_permissionResolved;
+
+    mojom::blink::PermissionServicePtr m_permissionService;
 };
 
 } // namespace blink

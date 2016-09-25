@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/base_export.h"
@@ -103,22 +104,22 @@ class BASE_EXPORT ProcessMetrics {
   ~ProcessMetrics();
 
   // Creates a ProcessMetrics for the specified process.
-  // The caller owns the returned object.
 #if !defined(OS_MACOSX) || defined(OS_IOS)
-  static ProcessMetrics* CreateProcessMetrics(ProcessHandle process);
+  static std::unique_ptr<ProcessMetrics> CreateProcessMetrics(
+      ProcessHandle process);
 #else
 
   // The port provider needs to outlive the ProcessMetrics object returned by
   // this function. If NULL is passed as provider, the returned object
   // only returns valid metrics if |process| is the current process.
-  static ProcessMetrics* CreateProcessMetrics(ProcessHandle process,
-                                              PortProvider* port_provider);
+  static std::unique_ptr<ProcessMetrics> CreateProcessMetrics(
+      ProcessHandle process,
+      PortProvider* port_provider);
 #endif  // !defined(OS_MACOSX) || defined(OS_IOS)
 
   // Creates a ProcessMetrics for the current process. This a cross-platform
   // convenience wrapper for CreateProcessMetrics().
-  // The caller owns the returned object.
-  static ProcessMetrics* CreateCurrentProcessMetrics();
+  static std::unique_ptr<ProcessMetrics> CreateCurrentProcessMetrics();
 
   // Returns the current space allocated for the pagefile, in bytes (these pages
   // may or may not be in memory).  On Linux, this returns the total virtual
@@ -272,6 +273,14 @@ struct BASE_EXPORT SystemMemoryInfoKB {
   int total;
   int free;
 
+#if defined(OS_LINUX)
+  // This provides an estimate of available memory as described here:
+  // https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=34e431b0ae398fc54ea69ff85ec700722c9da773
+  // NOTE: this is ONLY valid in kernels 3.14 and up.  Its value will always
+  // be 0 in earlier kernel versions.
+  int available;
+#endif
+
 #if !defined(OS_MACOSX)
   int swap_total;
   int swap_free;
@@ -287,9 +296,9 @@ struct BASE_EXPORT SystemMemoryInfoKB {
   int dirty;
 
   // vmstats data.
-  int pswpin;
-  int pswpout;
-  int pgmajfault;
+  unsigned long pswpin;
+  unsigned long pswpout;
+  unsigned long pgmajfault;
 #endif  // defined(OS_ANDROID) || defined(OS_LINUX)
 
 #if defined(OS_CHROMEOS)
@@ -366,6 +375,9 @@ BASE_EXPORT bool IsValidDiskName(const std::string& candidate);
 // Retrieves data from /proc/diskstats about system-wide disk I/O.
 // Fills in the provided |diskinfo| structure. Returns true on success.
 BASE_EXPORT bool GetSystemDiskInfo(SystemDiskInfo* diskinfo);
+
+// Returns the amount of time spent in user space since boot across all CPUs.
+BASE_EXPORT TimeDelta GetUserCpuTimeSinceBoot();
 #endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)

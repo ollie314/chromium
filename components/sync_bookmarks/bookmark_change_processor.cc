@@ -8,7 +8,8 @@
 
 #include <map>
 #include <stack>
-#include <vector>
+#include <string>
+#include <utility>
 
 #include "base/location.h"
 #include "base/strings/string16.h"
@@ -20,15 +21,15 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/sync_driver/sync_client.h"
+#include "components/sync/core/change_record.h"
+#include "components/sync/core/read_node.h"
+#include "components/sync/core/write_node.h"
+#include "components/sync/core/write_transaction.h"
+#include "components/sync/driver/sync_client.h"
+#include "components/sync/syncable/entry.h"  // TODO(tim): Investigating bug 121587.
+#include "components/sync/syncable/syncable_write_transaction.h"
 #include "components/undo/bookmark_undo_service.h"
 #include "components/undo/bookmark_undo_utils.h"
-#include "sync/internal_api/public/change_record.h"
-#include "sync/internal_api/public/read_node.h"
-#include "sync/internal_api/public/write_node.h"
-#include "sync/internal_api/public/write_transaction.h"
-#include "sync/syncable/entry.h"  // TODO(tim): Investigating bug 121587.
-#include "sync/syncable/syncable_write_transaction.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image_util.h"
 
@@ -37,21 +38,21 @@ using bookmarks::BookmarkNode;
 using syncer::ChangeRecord;
 using syncer::ChangeRecordList;
 
-namespace browser_sync {
+namespace sync_bookmarks {
 
 static const char kMobileBookmarksTag[] = "synced_bookmarks";
 
 BookmarkChangeProcessor::BookmarkChangeProcessor(
     sync_driver::SyncClient* sync_client,
     BookmarkModelAssociator* model_associator,
-    sync_driver::DataTypeErrorHandler* error_handler)
-    : sync_driver::ChangeProcessor(error_handler),
+    std::unique_ptr<syncer::DataTypeErrorHandler> err_handler)
+    : sync_driver::ChangeProcessor(std::move(err_handler)),
       bookmark_model_(NULL),
       sync_client_(sync_client),
       model_associator_(model_associator) {
   DCHECK(model_associator);
   DCHECK(sync_client);
-  DCHECK(error_handler);
+  DCHECK(error_handler());
 }
 
 BookmarkChangeProcessor::~BookmarkChangeProcessor() {
@@ -71,7 +72,7 @@ void BookmarkChangeProcessor::UpdateSyncNodeProperties(
     const BookmarkNode* src,
     BookmarkModel* model,
     syncer::WriteNode* dst,
-    sync_driver::DataTypeErrorHandler* error_handler) {
+    syncer::DataTypeErrorHandler* error_handler) {
   // Set the properties of the item.
   dst->SetIsFolder(src->is_folder());
   dst->SetTitle(base::UTF16ToUTF8(src->GetTitle()));
@@ -135,7 +136,7 @@ void BookmarkChangeProcessor::RemoveSyncNodeHierarchy(
                               syncer::SyncError::DATATYPE_ERROR,
                               "Failed to init sync node from chrome node",
                               syncer::BOOKMARKS);
-      error_handler()->OnSingleDataTypeUnrecoverableError(error);
+      error_handler()->OnUnrecoverableError(error);
       return;
     }
     RemoveSyncNodeHierarchy(&trans, &topmost_sync_node, model_associator_);
@@ -241,9 +242,6 @@ void BookmarkChangeProcessor::CreateOrUpdateSyncNode(const BookmarkNode* node) {
     return;
   }
 
-  const BookmarkNode* parent = node->parent();
-  int index = node->parent()->GetIndexOf(node);
-
   int64_t new_version = syncer::syncable::kInvalidTransactionVersion;
   int64_t sync_id = syncer::kInvalidId;
   {
@@ -254,6 +252,8 @@ void BookmarkChangeProcessor::CreateOrUpdateSyncNode(const BookmarkNode* node) {
       UpdateSyncNode(
           node, bookmark_model_, &trans, model_associator_, error_handler());
     } else {
+      const BookmarkNode* parent = node->parent();
+      int index = parent->GetIndexOf(node);
       sync_id = CreateSyncNode(parent,
                                bookmark_model_,
                                index,
@@ -268,10 +268,8 @@ void BookmarkChangeProcessor::CreateOrUpdateSyncNode(const BookmarkNode* node) {
     // PREV_ID/NEXT_ID and thus get a new version. But we only update version
     // of added node here. After switching to ordinals for positioning,
     // PREV_ID/NEXT_ID will be deprecated and siblings will not be updated.
-    UpdateTransactionVersion(
-        new_version,
-        bookmark_model_,
-        std::vector<const BookmarkNode*>(1, parent->GetChild(index)));
+    UpdateTransactionVersion(new_version, bookmark_model_,
+                             std::vector<const BookmarkNode*>(1, node));
   }
 }
 
@@ -301,7 +299,7 @@ int64_t BookmarkChangeProcessor::CreateSyncNode(
     int index,
     syncer::WriteTransaction* trans,
     BookmarkModelAssociator* associator,
-    sync_driver::DataTypeErrorHandler* error_handler) {
+    syncer::DataTypeErrorHandler* error_handler) {
   const BookmarkNode* child = parent->GetChild(index);
   DCHECK(child);
 
@@ -312,7 +310,7 @@ int64_t BookmarkChangeProcessor::CreateSyncNode(
   if (!PlaceSyncNode(CREATE, parent, index, trans, &sync_child, associator)) {
     syncer::SyncError error(FROM_HERE, syncer::SyncError::DATATYPE_ERROR,
                             "Failed to create sync node.", syncer::BOOKMARKS);
-    error_handler->OnSingleDataTypeUnrecoverableError(error);
+    error_handler->OnUnrecoverableError(error);
     return syncer::kInvalidId;
   }
 
@@ -368,7 +366,7 @@ int64_t BookmarkChangeProcessor::UpdateSyncNode(
     BookmarkModel* model,
     syncer::WriteTransaction* trans,
     BookmarkModelAssociator* associator,
-    sync_driver::DataTypeErrorHandler* error_handler) {
+    syncer::DataTypeErrorHandler* error_handler) {
   // Lookup the sync node that's associated with |node|.
   syncer::WriteNode sync_node(trans);
   if (!associator->InitSyncNodeFromChromeId(node->id(), &sync_node)) {
@@ -376,7 +374,7 @@ int64_t BookmarkChangeProcessor::UpdateSyncNode(
                             syncer::SyncError::DATATYPE_ERROR,
                             "Failed to init sync node from chrome node",
                             syncer::BOOKMARKS);
-    error_handler->OnSingleDataTypeUnrecoverableError(error);
+    error_handler->OnUnrecoverableError(error);
     return syncer::kInvalidId;
   }
   UpdateSyncNodeProperties(node, model, &sync_node, error_handler);
@@ -418,7 +416,7 @@ void BookmarkChangeProcessor::BookmarkNodeMoved(BookmarkModel* model,
                               syncer::SyncError::DATATYPE_ERROR,
                               "Failed to init sync node from chrome node",
                               syncer::BOOKMARKS);
-      error_handler()->OnSingleDataTypeUnrecoverableError(error);
+      error_handler()->OnUnrecoverableError(error);
       return;
     }
 
@@ -428,7 +426,7 @@ void BookmarkChangeProcessor::BookmarkNodeMoved(BookmarkModel* model,
                               syncer::SyncError::DATATYPE_ERROR,
                               "Failed to place sync node",
                               syncer::BOOKMARKS);
-      error_handler()->OnSingleDataTypeUnrecoverableError(error);
+      error_handler()->OnUnrecoverableError(error);
       return;
     }
   }
@@ -457,7 +455,14 @@ void BookmarkChangeProcessor::BookmarkNodeFaviconChanged(
     return;
   }
 
-  BookmarkNodeChanged(model, node);
+  // Ignore updates to favicon if model associator doesn't know about this
+  // bookmark node.
+  if (model_associator_->GetSyncIdFromChromeId(node->id()) ==
+      syncer::kInvalidId) {
+    return;
+  }
+
+  CreateOrUpdateSyncNode(node);
 }
 
 void BookmarkChangeProcessor::BookmarkNodeChildrenReordered(
@@ -483,7 +488,7 @@ void BookmarkChangeProcessor::BookmarkNodeChildrenReordered(
                                 syncer::SyncError::DATATYPE_ERROR,
                                 "Failed to init sync node from chrome node",
                                 syncer::BOOKMARKS);
-        error_handler()->OnSingleDataTypeUnrecoverableError(error);
+        error_handler()->OnUnrecoverableError(error);
         return;
       }
       DCHECK_EQ(sync_child.GetParentId(),
@@ -495,7 +500,7 @@ void BookmarkChangeProcessor::BookmarkNodeChildrenReordered(
                                 syncer::SyncError::DATATYPE_ERROR,
                                 "Failed to place sync node",
                                 syncer::BOOKMARKS);
-        error_handler()->OnSingleDataTypeUnrecoverableError(error);
+        error_handler()->OnUnrecoverableError(error);
         return;
       }
     }
@@ -620,7 +625,7 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
                                   syncer::SyncError::DATATYPE_ERROR,
                                   "Failed to create foster parent",
                                   syncer::BOOKMARKS);
-          error_handler()->OnSingleDataTypeUnrecoverableError(error);
+          error_handler()->OnUnrecoverableError(error);
           return;
         }
       }
@@ -681,7 +686,7 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
                               syncer::SyncError::DATATYPE_ERROR,
                               "Failed to load sync node",
                               syncer::BOOKMARKS);
-      error_handler()->OnSingleDataTypeUnrecoverableError(error);
+      error_handler()->OnUnrecoverableError(error);
       return;
     }
 
@@ -866,12 +871,12 @@ bool BookmarkChangeProcessor::SetBookmarkFavicon(
 }
 
 // static
-scoped_ptr<BookmarkNode::MetaInfoMap>
+std::unique_ptr<BookmarkNode::MetaInfoMap>
 BookmarkChangeProcessor::GetBookmarkMetaInfo(
     const syncer::BaseNode* sync_node) {
   const sync_pb::BookmarkSpecifics& specifics =
       sync_node->GetBookmarkSpecifics();
-  scoped_ptr<BookmarkNode::MetaInfoMap> meta_info_map(
+  std::unique_ptr<BookmarkNode::MetaInfoMap> meta_info_map(
       new BookmarkNode::MetaInfoMap);
   for (int i = 0; i < specifics.meta_info_size(); ++i) {
     (*meta_info_map)[specifics.meta_info(i).key()] =
@@ -972,4 +977,4 @@ bool BookmarkChangeProcessor::CanSyncNode(const BookmarkNode* node) {
   return bookmark_model_->client()->CanSyncNode(node);
 }
 
-}  // namespace browser_sync
+}  // namespace sync_bookmarks

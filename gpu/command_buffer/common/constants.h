@@ -13,7 +13,6 @@ namespace gpu {
 typedef int32_t CommandBufferOffset;
 const CommandBufferOffset kInvalidCommandBufferOffset = -1;
 
-// This enum must stay in sync with NPDeviceContext3DError.
 namespace error {
   enum Error {
     kNoError,
@@ -24,12 +23,14 @@ namespace error {
     kLostContext,
     kGenericError,
     kDeferCommandUntilLater,
-    kErrorLast = kDeferCommandUntilLater,
+    kDeferLaterCommands,
+    kErrorLast = kDeferLaterCommands,
   };
 
   // Return true if the given error code is an actual error.
   inline bool IsError(Error error) {
-    return error != kNoError && error != kDeferCommandUntilLater;
+    return error != kNoError && error != kDeferCommandUntilLater &&
+           error != kDeferLaterCommands;
   }
 
   // Provides finer grained information about why the context was lost.
@@ -56,7 +57,7 @@ namespace error {
     // client-side.
     kInvalidGpuMessage,
 
-    kContextLostReasonLast = kGpuChannelLost
+    kContextLostReasonLast = kInvalidGpuMessage
   };
 }
 

@@ -54,6 +54,17 @@ enum ImageAnimationPolicy {
 
 enum class ViewportStyle { DEFAULT, MOBILE, TELEVISION, LAST = TELEVISION };
 
+// Controls when the progress bar reports itself as complete. See
+// third_party/WebKit/Source/core/loader/ProgressTracker.cpp for most of its
+// effects.
+enum class ProgressBarCompletion {
+  LOAD_EVENT,
+  RESOURCES_BEFORE_DCL,
+  DOM_CONTENT_LOADED,
+  RESOURCES_BEFORE_DCL_AND_SAME_ORIGIN_IFRAMES,
+  LAST = RESOURCES_BEFORE_DCL_AND_SAME_ORIGIN_IFRAMES
+};
+
 // The ISO 15924 script code for undetermined script aka Common. It's the
 // default used on WebKit's side to get/set a font setting when no script is
 // specified.
@@ -87,7 +98,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool plugins_enabled;
   bool dom_paste_enabled;
   bool shrinks_standalone_images_to_fit;
-  bool uses_universal_detector;
   bool text_areas_are_resizable;
   bool allow_scripts_to_close_windows;
   bool remote_fonts_enabled;
@@ -106,6 +116,7 @@ struct CONTENT_EXPORT WebPreferences {
   bool application_cache_enabled;
   bool tabs_to_links;
   bool caret_browsing_enabled;
+  bool history_entry_requires_user_gesture;
   bool hyperlink_auditing_enabled;
   bool allow_universal_access_from_file_urls;
   bool allow_file_access_from_file_urls;
@@ -117,7 +128,7 @@ struct CONTENT_EXPORT WebPreferences {
   bool privileged_webgl_extensions_enabled;
   bool webgl_errors_to_console_enabled;
   bool mock_scrollbars_enabled;
-  bool unified_textchecker_enabled;
+  bool hide_scrollbars;
   bool accelerated_2d_canvas_enabled;
   int minimum_accelerated_2d_canvas_size;
   bool disable_2d_canvas_copy_on_write;
@@ -127,7 +138,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool accelerated_filters_enabled;
   bool deferred_filters_enabled;
   bool container_culling_enabled;
-  bool allow_displaying_insecure_content;
   bool allow_running_insecure_content;
   // If true, taints all <canvas> elements, regardless of origin.
   bool disable_reading_from_canvas;
@@ -161,14 +171,16 @@ struct CONTENT_EXPORT WebPreferences {
   int available_hover_types;
   ui::HoverType primary_hover_type;
   bool sync_xhr_in_documents_enabled;
-  bool image_color_profiles_enabled;
+  bool color_correct_rendering_enabled = false;
   bool should_respect_image_orientation;
   int number_of_cpu_cores;
   EditingBehavior editing_behavior;
   bool supports_multiple_windows;
   bool viewport_enabled;
   bool viewport_meta_enabled;
+  bool shrinks_viewport_contents_to_fit;
   ViewportStyle viewport_style;
+  bool always_show_context_menu_on_touch;
   bool main_frame_resizes_are_orientation_changes;
   bool initialize_at_minimum_page_scale;
   bool smart_insert_delete_enabled;
@@ -224,8 +236,13 @@ struct CONTENT_EXPORT WebPreferences {
   // Used by Android_WebView only to support legacy apps that inject script into
   // a top-level initial empty document and expect it to persist on navigation.
   bool resue_global_for_unowned_main_frame;
-  std::string autoplay_experiment_mode;
+  bool autoplay_muted_videos_enabled;
+  ProgressBarCompletion progress_bar_completion;
 #endif
+
+  // String that describes how media element autoplay behavior should be
+  // affected by experiment.
+  std::string autoplay_experiment_mode;
 
   // Default (used if the page or UA doesn't override these) values for page
   // scale limits. These are set directly on the WebView so there's no analogue

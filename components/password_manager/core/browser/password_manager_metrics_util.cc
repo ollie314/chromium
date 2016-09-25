@@ -88,9 +88,31 @@ void LogAutoSigninPromoUserAction(AutoSigninPromoUserAction action) {
                             AUTO_SIGNIN_PROMO_ACTION_COUNT);
 }
 
-void LogAccountChooserUserAction(AccountChooserUserAction action) {
+void LogAccountChooserUserActionOneAccount(AccountChooserUserAction action) {
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.AccountChooserDialogOneAccount",
+                            action, ACCOUNT_CHOOSER_ACTION_COUNT);
+  // TODO(vasilii): deprecate the histogram when the new ones hit the Stable.
   UMA_HISTOGRAM_ENUMERATION("PasswordManager.AccountChooserDialog", action,
                             ACCOUNT_CHOOSER_ACTION_COUNT);
+}
+
+void LogAccountChooserUserActionManyAccounts(AccountChooserUserAction action) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "PasswordManager.AccountChooserDialogMultipleAccounts", action,
+      ACCOUNT_CHOOSER_ACTION_COUNT);
+  // TODO(vasilii): deprecate the histogram when the new ones hit the Stable.
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.AccountChooserDialog", action,
+                            ACCOUNT_CHOOSER_ACTION_COUNT);
+}
+
+void LogAutoSigninPromoUserAction(SyncSignInUserAction action) {
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.SignInPromo", action,
+                            CHROME_SIGNIN_ACTION_COUNT);
+}
+
+void LogAccountChooserUsability(AccountChooserUsabilityMetric usability) {
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.AccountChooserDialogUsability",
+                            usability, ACCOUNT_CHOOSER_USABILITY_COUNT);
 }
 
 }  // namespace metrics_util

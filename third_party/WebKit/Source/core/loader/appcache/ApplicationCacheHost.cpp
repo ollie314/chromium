@@ -34,8 +34,8 @@
 #include "core/events/ApplicationCacheErrorEvent.h"
 #include "core/events/ProgressEvent.h"
 #include "core/frame/Deprecation.h"
+#include "core/frame/HostsUsingFeatures.h"
 #include "core/frame/LocalFrame.h"
-#include "core/frame/OriginsUsingFeatures.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "core/inspector/InspectorApplicationCacheAgent.h"
@@ -67,13 +67,13 @@ ApplicationCacheHost::ApplicationCacheHost(DocumentLoader* documentLoader)
     , m_documentLoader(documentLoader)
     , m_defersEvents(true)
 {
-    ASSERT(m_documentLoader);
+    DCHECK(m_documentLoader);
 }
 
 ApplicationCacheHost::~ApplicationCacheHost()
 {
     // Verify that detachFromDocumentLoader() has been performed already.
-    ASSERT(!m_host);
+    DCHECK(!m_host);
 }
 
 void ApplicationCacheHost::willStartLoadingMainResource(ResourceRequest& request)
@@ -85,7 +85,7 @@ void ApplicationCacheHost::willStartLoadingMainResource(ResourceRequest& request
     if (!isApplicationCacheEnabled())
         return;
 
-    ASSERT(m_documentLoader->frame());
+    DCHECK(m_documentLoader->frame());
     LocalFrame& frame = *m_documentLoader->frame();
     m_host = frame.loader().client()->createApplicationCacheHost(this);
     if (!m_host)
@@ -128,7 +128,7 @@ void ApplicationCacheHost::selectCacheWithManifest(const KURL& manifestURL)
     } else {
         Deprecation::countDeprecation(document, UseCounter::ApplicationCacheManifestSelectInsecureOrigin);
         Deprecation::countDeprecationCrossOriginIframe(*document, UseCounter::ApplicationCacheManifestSelectInsecureOrigin);
-        OriginsUsingFeatures::countAnyWorld(*document, OriginsUsingFeatures::Feature::ApplicationCacheManifestSelectInsecureOrigin);
+        HostsUsingFeatures::countAnyWorld(*document, HostsUsingFeatures::Feature::ApplicationCacheManifestSelectInsecureHost);
     }
     if (m_host && !m_host->selectCacheWithManifest(manifestURL)) {
         // It's a foreign entry, restart the current navigation from the top
@@ -176,7 +176,7 @@ void ApplicationCacheHost::willStartLoadingResource(ResourceRequest& request)
 
 void ApplicationCacheHost::setApplicationCache(ApplicationCache* domApplicationCache)
 {
-    ASSERT(!m_domApplicationCache || !domApplicationCache);
+    DCHECK(!m_domApplicationCache || !domApplicationCache);
     m_domApplicationCache = domApplicationCache;
 }
 
@@ -184,13 +184,13 @@ void ApplicationCacheHost::detachFromDocumentLoader()
 {
     // Detach from the owning DocumentLoader and let go of WebApplicationCacheHost.
     setApplicationCache(nullptr);
-    m_host.clear();
+    m_host.reset();
     m_documentLoader = nullptr;
 }
 
 void ApplicationCacheHost::notifyApplicationCache(EventID id, int progressTotal, int progressDone, WebApplicationCacheHost::ErrorReason errorReason, const String& errorURL, int errorStatus, const String& errorMessage)
 {
-    if (id != PROGRESS_EVENT)
+    if (id != kProgressEvent)
         InspectorInstrumentation::updateApplicationCacheStatus(m_documentLoader->frame());
 
     if (m_defersEvents) {
@@ -244,9 +244,9 @@ void ApplicationCacheHost::dispatchDOMEvent(EventID id, int progressTotal, int p
     if (eventType.isEmpty() || !m_domApplicationCache->getExecutionContext())
         return;
     Event* event = nullptr;
-    if (id == PROGRESS_EVENT)
+    if (id == kProgressEvent)
         event = ProgressEvent::create(eventType, true, progressDone, progressTotal);
-    else if (id == ERROR_EVENT)
+    else if (id == kErrorEvent)
         event = ApplicationCacheErrorEvent::create(errorReason, errorURL, errorStatus, errorMessage);
     else
         event = Event::create(eventType);
@@ -255,7 +255,7 @@ void ApplicationCacheHost::dispatchDOMEvent(EventID id, int progressTotal, int p
 
 ApplicationCacheHost::Status ApplicationCacheHost::getStatus() const
 {
-    return m_host ? static_cast<Status>(m_host->getStatus()) : UNCACHED;
+    return m_host ? static_cast<Status>(m_host->getStatus()) : kUncached;
 }
 
 bool ApplicationCacheHost::update()
@@ -279,7 +279,7 @@ void ApplicationCacheHost::abort()
 
 bool ApplicationCacheHost::isApplicationCacheEnabled()
 {
-    ASSERT(m_documentLoader->frame());
+    DCHECK(m_documentLoader->frame());
     return m_documentLoader->frame()->settings() && m_documentLoader->frame()->settings()->offlineWebApplicationCacheEnabled();
 }
 
@@ -295,12 +295,12 @@ void ApplicationCacheHost::notifyEventListener(WebApplicationCacheHost::EventID 
 
 void ApplicationCacheHost::notifyProgressEventListener(const WebURL&, int progressTotal, int progressDone)
 {
-    notifyApplicationCache(PROGRESS_EVENT, progressTotal, progressDone, WebApplicationCacheHost::UnknownError, String(), 0, String());
+    notifyApplicationCache(kProgressEvent, progressTotal, progressDone, WebApplicationCacheHost::UnknownError, String(), 0, String());
 }
 
 void ApplicationCacheHost::notifyErrorEventListener(WebApplicationCacheHost::ErrorReason reason, const WebURL& url, int status, const WebString& message)
 {
-    notifyApplicationCache(ERROR_EVENT, 0, 0, reason, url.string(), status, message);
+    notifyApplicationCache(kErrorEvent, 0, 0, reason, url.string(), status, message);
 }
 
 DEFINE_TRACE(ApplicationCacheHost)

@@ -12,7 +12,6 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_background_view.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
-#include "grit/theme_resources.h"
 #import "ui/base/cocoa/focus_tracker.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/theme_provider.h"
@@ -24,7 +23,8 @@
 // subview of the root view. It cannot be a subview of the contentView, as that
 // would cause it to become layer backed, which would cause it to draw on top
 // of non-layer backed content like the window controls.
-- (void)insertTabStripBackgroundViewIntoWindow:(NSWindow*)window;
+- (void)insertTabStripBackgroundViewIntoWindow:(NSWindow*)window
+                                      titleBar:(BOOL)hasTitleBar;
 @end
 
 @interface TabWindowOverlayWindow : NSWindow
@@ -44,11 +44,20 @@
   return [[self parentWindow] themeImagePositionForAlignment:alignment];
 }
 
+- (BOOL)hasDarkTheme {
+  return [[self parentWindow] hasDarkTheme];
+}
+
+- (BOOL)inIncognitoModeWithSystemTheme {
+  return [[self parentWindow] inIncognitoModeWithSystemTheme];
+}
+
 @end
 
 @implementation TabWindowController
 
-- (id)initTabWindowControllerWithTabStrip:(BOOL)hasTabStrip {
+- (id)initTabWindowControllerWithTabStrip:(BOOL)hasTabStrip
+                                 titleBar:(BOOL)hasTitleBar {
   const CGFloat kDefaultWidth = 750;
   const CGFloat kDefaultHeight = 600;
 
@@ -88,7 +97,7 @@
                                  kBrowserFrameViewPaintHeight)]);
     [tabStripBackgroundView_
         setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
-    [self insertTabStripBackgroundViewIntoWindow:window];
+    [self insertTabStripBackgroundViewIntoWindow:window titleBar:hasTitleBar];
 
     tabStripView_.reset([[TabStripView alloc]
         initWithFrame:NSMakeRect(
@@ -180,12 +189,15 @@
     // Return the original window's tab strip view and content view to their
     // places. The TabStripView always needs to be in front of the window's
     // content view and therefore it should always be added after the content
-    // view is set.
+    // view is set. It needs to be positioned below the avatar button to ensure
+    // that its overlay will not overlap it.
     [[window contentView] addSubview:originalContentView_
                           positioned:NSWindowBelow
                           relativeTo:nil];
     originalContentView_.frame = [[window contentView] bounds];
-    [[window contentView] addSubview:[self tabStripView]];
+    [[window contentView] addSubview:[self tabStripView]
+                          positioned:NSWindowBelow
+                          relativeTo:[self avatarView]];
     [[self tabStripView] setInATabDraggingOverlayWindow:NO];
     [[window contentView] updateTrackingAreas];
 
@@ -310,6 +322,10 @@
   return 0;
 }
 
+- (NSView*)avatarView {
+  return nil;
+}
+
 - (NSString*)activeTabTitle {
   // subclass must implement
   NOTIMPLEMENTED();
@@ -335,20 +351,26 @@
   closeDeferred_ = YES;
 }
 
-- (void)insertTabStripBackgroundViewIntoWindow:(NSWindow*)window {
+- (void)insertTabStripBackgroundViewIntoWindow:(NSWindow*)window
+                                      titleBar:(BOOL)hasTitleBar {
   DCHECK(tabStripBackgroundView_);
   NSView* rootView = [[window contentView] superview];
 
   // In Material Design on 10.10 and higher, the top portion of the window is
   // blurred using an NSVisualEffectView.
   Class nsVisualEffectViewClass = NSClassFromString(@"NSVisualEffectView");
-  if (!ui::MaterialDesignController::IsModeMaterial() ||
-      !nsVisualEffectViewClass) {
+  if (!nsVisualEffectViewClass) {
     [rootView addSubview:tabStripBackgroundView_
               positioned:NSWindowBelow
               relativeTo:nil];
     return;
   }
+
+  [window setTitlebarAppearsTransparent:YES];
+
+  // If the window has a normal titlebar, then do not add NSVisualEffectView.
+  if (hasTitleBar)
+    return;
 
   base::scoped_nsobject<NSVisualEffectView> visualEffectView(
       [[nsVisualEffectViewClass alloc]
@@ -371,8 +393,6 @@
   [visualEffectView setMaterial:NSVisualEffectMaterialLight];
   [visualEffectView setBlendingMode:NSVisualEffectBlendingModeBehindWindow];
   [visualEffectView setState:NSVisualEffectStateFollowsWindowActiveState];
-
-  [window setTitlebarAppearsTransparent:YES];
 
   [rootView addSubview:visualEffectView
             positioned:NSWindowBelow

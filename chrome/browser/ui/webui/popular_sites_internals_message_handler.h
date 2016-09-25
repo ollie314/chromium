@@ -16,7 +16,9 @@ namespace base {
 class ListValue;
 }  // namespace base
 
+namespace ntp_tiles {
 class PopularSites;
+}  // namespace ntp_tiles
 
 // The implementation for the chrome://popular-sites-internals page.
 class PopularSitesInternalsMessageHandler
@@ -30,16 +32,17 @@ class PopularSitesInternalsMessageHandler
   void RegisterMessages() override;
 
   void HandleRegisterForEvents(const base::ListValue* args);
-  void HandleDownload(const base::ListValue* args);
+  void HandleUpdate(const base::ListValue* args);
   void HandleViewJson(const base::ListValue* args);
 
+  void SendOverrides();
   void SendDownloadResult(bool success);
   void SendSites();
   void SendJson(const std::string& json);
 
   void OnPopularSitesAvailable(bool explicit_request, bool success);
 
-  std::unique_ptr<PopularSites> popular_sites_;
+  std::unique_ptr<ntp_tiles::PopularSites> popular_sites_;
 
   base::WeakPtrFactory<PopularSitesInternalsMessageHandler> weak_ptr_factory_;
 

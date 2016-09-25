@@ -6,23 +6,25 @@
 
 #include "base/logging.h"
 #include "build/build_config.h"
-#include "content/public/browser/browser_thread.h"
-#include "content/public/browser/render_process_host.h"
 #include "third_party/icu/source/common/unicode/unistr.h"
 #include "third_party/icu/source/i18n/unicode/timezone.h"
 
 namespace content {
 
 TimeZoneMonitor::TimeZoneMonitor() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
 }
 
 TimeZoneMonitor::~TimeZoneMonitor() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(thread_checker_.CalledOnValidThread());
 }
 
-void TimeZoneMonitor::NotifyRenderers() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+void TimeZoneMonitor::Bind(device::mojom::TimeZoneMonitorRequest request) {
+  bindings_.AddBinding(this, std::move(request));
+}
+
+void TimeZoneMonitor::NotifyClients() {
+  DCHECK(thread_checker_.CalledOnValidThread());
 #if defined(OS_CHROMEOS)
   // On CrOS, ICU's default tz is already set to a new zone. No
   // need to redetect it with detectHostTimeZone().
@@ -45,12 +47,16 @@ void TimeZoneMonitor::NotifyRenderers() {
   std::string zone_id_str;
   new_zone->getID(zone_id).toUTF8String(zone_id_str);
   VLOG(1) << "timezone reset to " << zone_id_str;
-  for (RenderProcessHost::iterator iterator =
-           RenderProcessHost::AllHostsIterator();
-       !iterator.IsAtEnd();
-       iterator.Advance()) {
-    iterator.GetCurrentValue()->NotifyTimezoneChange(zone_id_str);
-  }
+
+  clients_.ForAllPtrs(
+      [&zone_id_str](device::mojom::TimeZoneMonitorClient* client) {
+        client->OnTimeZoneChange(zone_id_str);
+      });
+}
+
+void TimeZoneMonitor::AddClient(
+    device::mojom::TimeZoneMonitorClientPtr client) {
+  clients_.AddPtr(std::move(client));
 }
 
 }  // namespace content

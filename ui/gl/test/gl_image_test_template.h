@@ -22,8 +22,9 @@
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_helper.h"
 #include "ui/gl/gl_image.h"
-#include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
+#include "ui/gl/gl_version_info.h"
+#include "ui/gl/init/gl_factory.h"
 #include "ui/gl/test/gl_image_test_support.h"
 #include "ui/gl/test/gl_test_helper.h"
 
@@ -34,48 +35,87 @@
 namespace gl {
 namespace {
 
+GLuint LoadVertexShader() {
+  bool is_desktop_core_profile =
+      GLContext::GetCurrent()->GetVersionInfo()->is_desktop_core_profile;
+  std::string vertex_shader = base::StringPrintf(
+      "%s"  // version
+      "%s vec2 a_position;\n"
+      "%s vec2 v_texCoord;\n"
+      "void main() {\n"
+      "  gl_Position = vec4(a_position.x, a_position.y, 0.0, 1.0);\n"
+      "  v_texCoord = (a_position + vec2(1.0, 1.0)) * 0.5;\n"
+      "}",
+      is_desktop_core_profile ? "#version 150\n" : "",
+      is_desktop_core_profile ? "in" : "attribute",
+      is_desktop_core_profile ? "out" : "varying");
+  return GLHelper::LoadShader(GL_VERTEX_SHADER, vertex_shader.c_str());
+}
+
 // Compiles a fragment shader for sampling out of a texture of |size| bound to
 // |target| and checks for compilation errors.
 GLuint LoadFragmentShader(unsigned target, const gfx::Size& size) {
-  // clang-format off
-  const char kFragmentShader[] = STRINGIZE(
-    uniform SamplerType a_texture;
-    varying vec2 v_texCoord;
-    void main() {
-      gl_FragColor = TextureLookup(a_texture, v_texCoord * TextureScale);
-    }
-  );
-  const char kShaderFloatPrecision[] = STRINGIZE(
-    precision mediump float;
-  );
-  // clang-format on
+  bool is_desktop_core_profile =
+      GLContext::GetCurrent()->GetVersionInfo()->is_desktop_core_profile;
+  bool is_gles = GLContext::GetCurrent()->GetVersionInfo()->is_es;
 
-  bool is_gles = gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2;
+  std::string fragment_shader_main = base::StringPrintf(
+      "uniform SamplerType a_texture;\n"
+      "%s vec2 v_texCoord;\n"
+      "%s"  // output variable declaration
+      "void main() {\n"
+      "  %s = TextureLookup(a_texture, v_texCoord * TextureScale);\n"
+      "}",
+      is_desktop_core_profile ? "in" : "varying",
+      is_desktop_core_profile ? "out vec4 my_FragData;\n" : "",
+      is_desktop_core_profile ? "my_FragData" : "gl_FragData[0]");
+
   switch (target) {
     case GL_TEXTURE_2D:
-      return gfx::GLHelper::LoadShader(
+      return GLHelper::LoadShader(
           GL_FRAGMENT_SHADER,
-          base::StringPrintf("%s\n"
+          base::StringPrintf("%s"  // version
+                             "%s"  // precision
                              "#define SamplerType sampler2D\n"
-                             "#define TextureLookup texture2D\n"
+                             "#define TextureLookup %s\n"
                              "#define TextureScale vec2(1.0, 1.0)\n"
-                             "%s",
-                             is_gles ? kShaderFloatPrecision : "",
-                             kFragmentShader)
+                             "%s",  // main function
+                             is_desktop_core_profile ? "#version 150\n" : "",
+                             is_gles ? "precision mediump float;\n" : "",
+                             is_desktop_core_profile ? "texture" : "texture2D",
+                             fragment_shader_main.c_str())
               .c_str());
     case GL_TEXTURE_RECTANGLE_ARB:
-      return gfx::GLHelper::LoadShader(
+      DCHECK(!is_gles);
+      return GLHelper::LoadShader(
           GL_FRAGMENT_SHADER,
-          base::StringPrintf("%s\n"
-                             "#extension GL_ARB_texture_rectangle : require\n"
-                             "#define SamplerType sampler2DRect\n"
-                             "#define TextureLookup texture2DRect\n"
-                             "#define TextureScale vec2(%f, %f)\n"
-                             "%s",
-                             is_gles ? kShaderFloatPrecision : "",
-                             static_cast<double>(size.width()),
-                             static_cast<double>(size.height()),
-                             kFragmentShader)
+          base::StringPrintf(
+              "%s"  // version
+              "%s"  // extension
+              "#define SamplerType sampler2DRect\n"
+              "#define TextureLookup %s\n"
+              "#define TextureScale vec2(%f, %f)\n"
+              "%s",  // main function
+              is_desktop_core_profile ? "#version 150\n" : "",
+              is_desktop_core_profile
+                  ? ""
+                  : "#extension GL_ARB_texture_rectangle : require\n",
+              is_desktop_core_profile ? "texture" : "texture2DRect",
+              static_cast<double>(size.width()),
+              static_cast<double>(size.height()), fragment_shader_main.c_str())
+              .c_str());
+    case GL_TEXTURE_EXTERNAL_OES:
+      DCHECK(is_gles);
+      return GLHelper::LoadShader(
+          GL_FRAGMENT_SHADER,
+          base::StringPrintf("#extension GL_OES_EGL_image_external : require\n"
+                             "%s"  // precision
+                             "#define SamplerType samplerExternalOES\n"
+                             "#define TextureLookup texture2D\n"
+                             "#define TextureScale vec2(1.0, 1.0)\n"
+                             "%s",  // main function
+                             is_gles ? "precision mediump float;\n" : "",
+                             fragment_shader_main.c_str())
               .c_str());
     default:
       NOTREACHED();
@@ -86,21 +126,15 @@ GLuint LoadFragmentShader(unsigned target, const gfx::Size& size) {
 // Draws texture bound to |target| of texture unit 0 to the currently bound
 // frame buffer.
 void DrawTextureQuad(GLenum target, const gfx::Size& size) {
-  // clang-format off
-  const char kVertexShader[] = STRINGIZE(
-    attribute vec2 a_position;
-    varying vec2 v_texCoord;
-    void main() {
-      gl_Position = vec4(a_position.x, a_position.y, 0.0, 1.0);
-      v_texCoord = (a_position + vec2(1.0, 1.0)) * 0.5;
-    }
-  );
-  // clang-format on
+  GLuint vao = 0;
+  if (GLHelper::ShouldTestsUseVAOs()) {
+    glGenVertexArraysOES(1, &vao);
+    glBindVertexArrayOES(vao);
+  }
 
-  GLuint vertex_shader =
-      gfx::GLHelper::LoadShader(GL_VERTEX_SHADER, kVertexShader);
+  GLuint vertex_shader = LoadVertexShader();
   GLuint fragment_shader = LoadFragmentShader(target, size);
-  GLuint program = gfx::GLHelper::SetupProgram(vertex_shader, fragment_shader);
+  GLuint program = GLHelper::SetupProgram(vertex_shader, fragment_shader);
   EXPECT_NE(program, 0u);
   glUseProgram(program);
 
@@ -108,8 +142,12 @@ void DrawTextureQuad(GLenum target, const gfx::Size& size) {
   ASSERT_NE(sampler_location, -1);
   glUniform1i(sampler_location, 0);
 
-  GLuint vertex_buffer = gfx::GLHelper::SetupQuadVertexBuffer();
-  gfx::GLHelper::DrawQuad(vertex_buffer);
+  GLuint vertex_buffer = GLHelper::SetupQuadVertexBuffer();
+  GLHelper::DrawQuad(vertex_buffer);
+
+  if (vao != 0) {
+    glDeleteVertexArraysOES(1, &vao);
+  }
 
   glDeleteShader(vertex_shader);
   glDeleteShader(fragment_shader);
@@ -125,9 +163,9 @@ class GLImageTest : public testing::Test {
   // Overridden from testing::Test:
   void SetUp() override {
     GLImageTestSupport::InitializeGL();
-    surface_ = gfx::GLSurface::CreateOffscreenGLSurface(gfx::Size());
-    context_ = gfx::GLContext::CreateGLContext(nullptr, surface_.get(),
-                                               gfx::PreferIntegratedGpu);
+    surface_ = gl::init::CreateOffscreenGLSurface(gfx::Size());
+    context_ =
+        gl::init::CreateGLContext(nullptr, surface_.get(), PreferIntegratedGpu);
     context_->MakeCurrent(surface_.get());
   }
   void TearDown() override {
@@ -138,8 +176,8 @@ class GLImageTest : public testing::Test {
   }
 
  protected:
-  scoped_refptr<gfx::GLSurface> surface_;
-  scoped_refptr<gfx::GLContext> context_;
+  scoped_refptr<GLSurface> surface_;
+  scoped_refptr<GLContext> context_;
   GLImageTestDelegate delegate_;
 };
 
@@ -148,17 +186,17 @@ TYPED_TEST_CASE_P(GLImageTest);
 TYPED_TEST_P(GLImageTest, CreateAndDestroy) {
   const gfx::Size small_image_size(4, 4);
   const gfx::Size large_image_size(512, 512);
-  const uint8_t image_color[] = {0, 0xff, 0, 0xff};
+  const uint8_t* image_color = this->delegate_.GetImageColor();
 
   // Create a small solid color green image of preferred format. This must
   // succeed in order for a GLImage to be conformant.
-  scoped_refptr<gl::GLImage> small_image =
+  scoped_refptr<GLImage> small_image =
       this->delegate_.CreateSolidColorImage(small_image_size, image_color);
   ASSERT_TRUE(small_image);
 
   // Create a large solid color green image of preferred format. This must
   // succeed in order for a GLImage to be conformant.
-  scoped_refptr<gl::GLImage> large_image =
+  scoped_refptr<GLImage> large_image =
       this->delegate_.CreateSolidColorImage(large_image_size, image_color);
   ASSERT_TRUE(large_image);
 
@@ -187,7 +225,12 @@ TYPED_TEST_P(GLImageZeroInitializeTest, ZeroInitialize) {
 #if defined(OS_MACOSX)
   // This functionality is disabled on Mavericks because it breaks PDF
   // rendering. https://crbug.com/594343.
-  if (base::mac::IsOSMavericks())
+  if (base::mac::IsOS10_9())
+    return;
+
+  // This functionality is disabled on Yosemite because it is suspected of
+  // causing performance regressions on old hardware. https://crbug.com/606850.
+  if (base::mac::IsOS10_10())
     return;
 #endif
 
@@ -200,7 +243,7 @@ TYPED_TEST_P(GLImageZeroInitializeTest, ZeroInitialize) {
   glViewport(0, 0, image_size.width(), image_size.height());
 
   // Create an uninitialized image of preferred format.
-  scoped_refptr<gl::GLImage> image = this->delegate_.CreateImage(image_size);
+  scoped_refptr<GLImage> image = this->delegate_.CreateImage(image_size);
 
   // Create a texture that |image| will be bound to.
   GLenum target = this->delegate_.GetTextureTarget();
@@ -237,7 +280,7 @@ TYPED_TEST_CASE_P(GLImageBindTest);
 
 TYPED_TEST_P(GLImageBindTest, BindTexImage) {
   const gfx::Size image_size(256, 256);
-  const uint8_t image_color[] = {0x10, 0x20, 0, 0xff};
+  const uint8_t* image_color = this->delegate_.GetImageColor();
 
   GLuint framebuffer =
       GLTestHelper::SetupFramebuffer(image_size.width(), image_size.height());
@@ -247,7 +290,7 @@ TYPED_TEST_P(GLImageBindTest, BindTexImage) {
 
   // Create a solid color green image of preferred format. This must succeed
   // in order for a GLImage to be conformant.
-  scoped_refptr<gl::GLImage> image =
+  scoped_refptr<GLImage> image =
       this->delegate_.CreateSolidColorImage(image_size, image_color);
   ASSERT_TRUE(image);
 
@@ -284,11 +327,15 @@ TYPED_TEST_CASE_P(GLImageCopyTest);
 
 TYPED_TEST_P(GLImageCopyTest, CopyTexImage) {
   const gfx::Size image_size(256, 256);
-  // These values are picked so that RGB -> YUV on the CPU converted
-  // back to RGB on the GPU produces the original RGB values without
-  // any error.
-  const uint8_t image_color[] = {0x10, 0x20, 0, 0xff};
+  const uint8_t* image_color = this->delegate_.GetImageColor();
   const uint8_t texture_color[] = {0, 0, 0xff, 0xff};
+
+  GLuint vao = 0;
+  if (GLContext::GetCurrent()->GetVersionInfo()->IsAtLeastGL(3, 3)) {
+    // To avoid glGetVertexAttribiv(0, ...) failing.
+    glGenVertexArraysOES(1, &vao);
+    glBindVertexArrayOES(vao);
+  }
 
   GLuint framebuffer =
       GLTestHelper::SetupFramebuffer(image_size.width(), image_size.height());
@@ -298,7 +345,7 @@ TYPED_TEST_P(GLImageCopyTest, CopyTexImage) {
 
   // Create a solid color green image of preferred format. This must succeed
   // in order for a GLImage to be conformant.
-  scoped_refptr<gl::GLImage> image =
+  scoped_refptr<GLImage> image =
       this->delegate_.CreateSolidColorImage(image_size, image_color);
   ASSERT_TRUE(image);
 
@@ -331,6 +378,9 @@ TYPED_TEST_P(GLImageCopyTest, CopyTexImage) {
   glDeleteTextures(1, &texture);
   glDeleteFramebuffersEXT(1, &framebuffer);
   image->Destroy(true /* have_context */);
+  if (vao) {
+    glDeleteVertexArraysOES(1, &vao);
+  }
 }
 
 // The GLImageCopyTest test case verifies that the GLImage implementation

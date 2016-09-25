@@ -4,10 +4,12 @@
 
 #include "net/quic/test_tools/simple_quic_framer.h"
 
+#include <memory>
+
 #include "base/macros.h"
 #include "base/stl_util.h"
-#include "net/quic/crypto/quic_decrypter.h"
-#include "net/quic/crypto/quic_encrypter.h"
+#include "net/quic/core/crypto/quic_decrypter.h"
+#include "net/quic/core/crypto/quic_encrypter.h"
 
 using base::StringPiece;
 using std::string;
@@ -21,8 +23,8 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
   SimpleFramerVisitor() : error_(QUIC_NO_ERROR) {}
 
   ~SimpleFramerVisitor() override {
-    STLDeleteElements(&stream_frames_);
-    STLDeleteElements(&stream_data_);
+    base::STLDeleteElements(&stream_frames_);
+    base::STLDeleteElements(&stream_data_);
   }
 
   void OnError(QuicFramer* framer) override { error_ = framer->error(); }
@@ -55,7 +57,7 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
   bool OnStreamFrame(const QuicStreamFrame& frame) override {
     // Save a copy of the data so it is valid after the packet is processed.
     string* string_data = new string();
-    StringPiece(frame.frame_buffer, frame.frame_length)
+    StringPiece(frame.data_buffer, frame.data_length)
         .AppendToString(string_data);
     stream_data_.push_back(string_data);
     // TODO(ianswett): A pointer isn't necessary with emplace_back.
@@ -71,6 +73,11 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
 
   bool OnStopWaitingFrame(const QuicStopWaitingFrame& frame) override {
     stop_waiting_frames_.push_back(frame);
+    return true;
+  }
+
+  bool OnPaddingFrame(const QuicPaddingFrame& frame) override {
+    padding_frames_.push_back(frame);
     return true;
   }
 
@@ -141,6 +148,7 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
   std::unique_ptr<QuicPublicResetPacket> public_reset_packet_;
   vector<QuicAckFrame> ack_frames_;
   vector<QuicStopWaitingFrame> stop_waiting_frames_;
+  vector<QuicPaddingFrame> padding_frames_;
   vector<QuicPingFrame> ping_frames_;
   vector<QuicStreamFrame*> stream_frames_;
   vector<QuicRstStreamFrame> rst_stream_frames_;
@@ -155,12 +163,16 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
 };
 
 SimpleQuicFramer::SimpleQuicFramer()
-    : framer_(QuicSupportedVersions(),
+    : framer_(AllSupportedVersions(),
               QuicTime::Zero(),
               Perspective::IS_SERVER) {}
 
 SimpleQuicFramer::SimpleQuicFramer(const QuicVersionVector& supported_versions)
     : framer_(supported_versions, QuicTime::Zero(), Perspective::IS_SERVER) {}
+
+SimpleQuicFramer::SimpleQuicFramer(const QuicVersionVector& supported_versions,
+                                   Perspective perspective)
+    : framer_(supported_versions, QuicTime::Zero(), perspective) {}
 
 SimpleQuicFramer::~SimpleQuicFramer() {}
 

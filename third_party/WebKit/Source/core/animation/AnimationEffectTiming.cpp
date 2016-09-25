@@ -5,19 +5,19 @@
 #include "core/animation/AnimationEffectTiming.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/UnionTypesCore.h"
-#include "core/animation/AnimationEffect.h"
+#include "bindings/core/v8/UnrestrictedDoubleOrString.h"
+#include "core/animation/AnimationEffectReadOnly.h"
 #include "core/animation/KeyframeEffect.h"
 #include "platform/animation/TimingFunction.h"
 
 namespace blink {
 
-AnimationEffectTiming* AnimationEffectTiming::create(AnimationEffect* parent)
+AnimationEffectTiming* AnimationEffectTiming::create(AnimationEffectReadOnly* parent)
 {
     return new AnimationEffectTiming(parent);
 }
 
-AnimationEffectTiming::AnimationEffectTiming(AnimationEffect* parent)
+AnimationEffectTiming::AnimationEffectTiming(AnimationEffectReadOnly* parent)
     : m_parent(parent)
 {
 }
@@ -91,27 +91,25 @@ void AnimationEffectTiming::setFill(String fill)
     m_parent->updateSpecifiedTiming(timing);
 }
 
-void AnimationEffectTiming::setIterationStart(double iterationStart)
+void AnimationEffectTiming::setIterationStart(double iterationStart, ExceptionState& exceptionState)
 {
     Timing timing = m_parent->specifiedTiming();
-    TimingInput::setIterationStart(timing, iterationStart);
-    m_parent->updateSpecifiedTiming(timing);
+    if (TimingInput::setIterationStart(timing, iterationStart, exceptionState))
+        m_parent->updateSpecifiedTiming(timing);
 }
 
-void AnimationEffectTiming::setIterations(double iterations)
+void AnimationEffectTiming::setIterations(double iterations, ExceptionState& exceptionState)
 {
     Timing timing = m_parent->specifiedTiming();
-    TimingInput::setIterationCount(timing, iterations);
-    m_parent->updateSpecifiedTiming(timing);
+    if (TimingInput::setIterationCount(timing, iterations, exceptionState))
+        m_parent->updateSpecifiedTiming(timing);
 }
 
-void AnimationEffectTiming::setDuration(const UnrestrictedDoubleOrString& durationOrAuto)
+void AnimationEffectTiming::setDuration(const UnrestrictedDoubleOrString& duration, ExceptionState& exceptionState)
 {
-    // Any strings other than "auto" are coerced to "auto".
-    double duration = durationOrAuto.isString() ? std::numeric_limits<double>::quiet_NaN() : durationOrAuto.getAsUnrestrictedDouble();
     Timing timing = m_parent->specifiedTiming();
-    TimingInput::setIterationDuration(timing, duration);
-    m_parent->updateSpecifiedTiming(timing);
+    if (TimingInput::setIterationDuration(timing, duration, exceptionState))
+        m_parent->updateSpecifiedTiming(timing);
 }
 
 void AnimationEffectTiming::setPlaybackRate(double playbackRate)

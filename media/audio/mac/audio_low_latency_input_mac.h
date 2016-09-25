@@ -38,21 +38,23 @@
 
 #include <AudioUnit/AudioUnit.h>
 #include <CoreAudio/CoreAudio.h>
+
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/atomicops.h"
 #include "base/cancelable_callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "media/audio/agc_audio_stream.h"
 #include "media/audio/audio_io.h"
-#include "media/audio/audio_parameters.h"
+#include "media/audio/audio_manager.h"
 #include "media/base/audio_block_fifo.h"
+#include "media/base/audio_parameters.h"
 
 namespace media {
 
@@ -67,7 +69,8 @@ class MEDIA_EXPORT AUAudioInputStream
   // the audio manager who is creating this object.
   AUAudioInputStream(AudioManagerMac* manager,
                      const AudioParameters& input_params,
-                     AudioDeviceID audio_device_id);
+                     AudioDeviceID audio_device_id,
+                     const AudioManager::LogCallback& log_callback);
   // The dtor is typically called by the AudioManager only and it is usually
   // triggered by calling AudioInputStream::Close().
   ~AUAudioInputStream() override;
@@ -229,7 +232,7 @@ class MEDIA_EXPORT AUAudioInputStream
 
   // Temporary storage for recorded data. The InputProc() renders into this
   // array as soon as a frame of the desired buffer size has been recorded.
-  scoped_ptr<uint8_t[]> audio_data_buffer_;
+  std::unique_ptr<uint8_t[]> audio_data_buffer_;
 
   // Fixed capture hardware latency in frames.
   double hardware_latency_frames_;
@@ -257,7 +260,7 @@ class MEDIA_EXPORT AUAudioInputStream
   // Timer which triggers CheckInputStartupSuccess() to verify that input
   // callbacks have started as intended after a successful call to Start().
   // This timer lives on the main browser thread.
-  scoped_ptr<base::OneShotTimer> input_callback_timer_;
+  std::unique_ptr<base::OneShotTimer> input_callback_timer_;
 
   // Set to true if the Start() call was delayed.
   // See AudioManagerMac::ShouldDeferStreamStart() for details.
@@ -301,7 +304,7 @@ class MEDIA_EXPORT AUAudioInputStream
 
   // Timer that provides periodic callbacks used to monitor if the input stream
   // is alive or not.
-  scoped_ptr<base::RepeatingTimer> check_alive_timer_;
+  std::unique_ptr<base::RepeatingTimer> check_alive_timer_;
 
   // Time tick set once in each input data callback. The time is measured on
   // the real-time priority I/O thread but this member is modified and read
@@ -322,6 +325,9 @@ class MEDIA_EXPORT AUAudioInputStream
   // Counts the total number of times RestartAudio() has been called. It is
   // set to zero once in the constructor and then never reset again.
   size_t total_number_of_restart_attempts_;
+
+  // Callback to send statistics info.
+  AudioManager::LogCallback log_callback_;
 
   // Used to ensure DevicePropertyChangedOnMainThread() is not called when
   // this object is destroyed.

@@ -27,8 +27,6 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import base64
-import copy
-import sys
 import time
 
 from webkitpy.layout_tests.port.base import Port, VirtualTestSuite
@@ -87,7 +85,7 @@ class TestList(object):
         self.tests[name] = test
 
     def add_reftest(self, name, reference_name, same_image, crash=False):
-        self.add(name, actual_checksum='xxx', actual_image='XXX', is_reftest=True, crash=crash)
+        self.add(name, actual_text='reftest', actual_checksum='xxx', actual_image='XXX', is_reftest=True, crash=crash)
         if same_image:
             self.add(reference_name, actual_checksum='xxx', actual_image='XXX', is_reftest=True)
         else:
@@ -367,19 +365,6 @@ class TestPort(Port):
     port_name = 'test'
     default_port_name = 'test-mac-mac10.10'
 
-    # TODO(wkorman): The below constant is legacy code and is only referenced by a unit test. Find the modern way to do
-    # the same thing that test is doing and delete this.
-    #
-    # A list of platform names sufficient to cover all the baselines.
-    # The list should be sorted so that a later platform  will reuse
-    # an earlier platform's baselines if they are the same (e.g.,
-    # 'mac10.10' should precede 'mac10.9').
-    ALL_BASELINE_VARIANTS = (
-        'test-linux-trusty', 'test-linux-precise', 'test-linux-x86',
-        'test-mac-mac10.11', 'test-mac-mac10.10',
-        'test-win-win10', 'test-win-win7'
-    )
-
     FALLBACK_PATHS = {
         'win7': ['test-win-win7', 'test-win-win10'],
         'win10': ['test-win-win10'],
@@ -432,6 +417,24 @@ class TestPort(Port):
 
         if self._operating_system == 'linux' and self._version != 'linux32':
             self._architecture = 'x86_64'
+
+        self.all_systems = (('mac10.10', 'x86'),
+                            ('mac10.11', 'x86'),
+                            ('win7', 'x86'),
+                            ('win10', 'x86'),
+                            ('linux32', 'x86'),
+                            ('precise', 'x86_64'),
+                            ('trusty', 'x86_64'))
+
+        self.all_build_types = ('debug', 'release')
+
+        # To avoid surprises when introducing new macros, these are
+        # intentionally fixed in time.
+        self.configuration_specifier_macros_dict = {
+            'mac': ['mac10.10', 'mac10.11'],
+            'win': ['win7', 'win10'],
+            'linux': ['linux32', 'precise', 'trusty']
+        }
 
     def buildbot_archives_baselines(self):
         return self._name != 'test-win-win7'
@@ -525,41 +528,21 @@ class TestPort(Port):
     def path_to_generic_test_expectations_file(self):
         return self._generic_expectations_path
 
-    def _port_specific_expectations_files(self):
-        return [self._filesystem.join(self._webkit_baseline_path(d), 'TestExpectations') for d in ['test', 'test-win-win7']]
-
     def all_test_configurations(self):
         """Returns a sequence of the TestConfigurations the port supports."""
         # By default, we assume we want to test every graphics type in
         # every configuration on every system.
         test_configurations = []
-        for version, architecture in self._all_systems():
-            for build_type in self._all_build_types():
+        for version, architecture in self.all_systems:
+            for build_type in self.all_build_types:
                 test_configurations.append(TestConfiguration(
                     version=version,
                     architecture=architecture,
                     build_type=build_type))
         return test_configurations
 
-    def _all_systems(self):
-        return (('mac10.10', 'x86'),
-                ('mac10.11', 'x86'),
-                ('win7', 'x86'),
-                ('win10', 'x86'),
-                ('linux32', 'x86'),
-                ('precise', 'x86_64'),
-                ('trusty', 'x86_64'))
-
-    def _all_build_types(self):
-        return ('debug', 'release')
-
     def configuration_specifier_macros(self):
-        """To avoid surprises when introducing new macros, these are intentionally fixed in time."""
-        return {
-            'mac': ['mac10.10', 'mac10.11'],
-            'win': ['win7', 'win10'],
-            'linux': ['linux32', 'precise', 'trusty']
-        }
+        return self.configuration_specifier_macros_dict
 
     def virtual_test_suites(self):
         return [
@@ -581,7 +564,8 @@ class TestDriver(Driver):
 
     def cmd_line(self, pixel_tests, per_test_args):
         pixel_tests_flag = '-p' if pixel_tests else ''
-        return [self._port._path_to_driver()] + [pixel_tests_flag] + self._port.get_option('additional_driver_flag', []) + per_test_args
+        return [self._port._path_to_driver()] + [pixel_tests_flag] + \
+            self._port.get_option('additional_driver_flag', []) + per_test_args
 
     def run_test(self, driver_input, stop_when_done):
         if not self.started:

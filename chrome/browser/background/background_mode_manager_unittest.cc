@@ -12,10 +12,10 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/background/background_trigger.h"
 #include "chrome/browser/browser_shutdown.h"
@@ -259,13 +259,15 @@ class BackgroundModeManagerWithExtensionsTest : public testing::Test {
     Mock::VerifyAndClearExpectations(manager_.get());
 
     // We're getting ready to shutdown the message loop. Clear everything out!
-    base::MessageLoop::current()->RunUntilIdle();
-
-    test_keep_alive_.reset();
+    base::RunLoop().RunUntilIdle();
 
     // TestBackgroundModeManager has dependencies on the infrastructure.
     // It should get cleared first.
     manager_.reset();
+
+    // Now that the background manager is destroyed, the test KeepAlive can be
+    // cleared without having |manager_| attempt to perform optimizations.
+    test_keep_alive_.reset();
 
     // The Profile Manager references the Browser Process.
     // The Browser Process references the Notification UI Manager.

@@ -4,6 +4,7 @@
 
 body {
   -webkit-user-select: none;
+  background-color: black;
   font-size: 84%;
   margin: 0;
 }
@@ -39,6 +40,12 @@ button:focus {
   width: 17px;
 }
 
+html[dir='rtl'] .bubble .pointer {
+  margin: 0 -5px 0 0;
+  left: auto;
+  right: 24px;
+}
+
 .bubble .pointer:not(.bottom) {
   top: -11px;
 }
@@ -60,17 +67,17 @@ button:focus {
   width: 21px;
 }
 
+html[dir='rtl'] .bubble .close-x {
+  right: auto;
+  left: 3px;
+}
+
 .bubble .close-x:hover {
   opacity: 0.7;
 }
 
-paper-ripple,
-paper-button::shadow paper-ripple {
+paper-ripple {
   color: black;
-}
-
-files-toggle-ripple::shadow .ripple.activated {
-  opacity: 0.4;
 }
 
 .gallery,
@@ -346,6 +353,7 @@ files-toggle-ripple::shadow .ripple.activated {
 
 #rename-input > input {
   color: white;
+  text-overflow: ellipsis;
 }
 
 /* Bubble */
@@ -356,6 +364,11 @@ files-toggle-ripple::shadow .ripple.activated {
   left: 20px;
   position: absolute;
   width: 220px;
+}
+
+html[dir='rtl'] .gallery .toolbar .bubble {
+  left: auto;
+  right: 20px;
 }
 
 .gallery:not([editing]) .toolbar .bubble {
@@ -538,21 +551,7 @@ files-toggle-ripple::shadow .ripple.activated {
   -webkit-margin-start: 16px;
 }
 
-.edit-mode-toolbar .overwrite-original::shadow #checkboxContainer {
-  transform: scale(0.78, 0.78); /* Make box size to 14px. */
-}
-
-.edit-mode-toolbar .overwrite-original::shadow #ink {
-  left: -10px;
-  top: -10px;
-}
-
-.edit-mode-toolbar .overwrite-original::shadow #checkboxLabel {
-  padding-left: 6px;
-}
-
-.edit-mode-toolbar .overwrite-original[disabled]::shadow #checkbox,
-.edit-mode-toolbar .overwrite-original[disabled]::shadow #checkboxLabel {
+.edit-mode-toolbar .overwrite-original[disabled] {
   opacity: 0.2;
 }
 
@@ -747,6 +746,12 @@ button[disabled] {
       url(../images/200/crop.png) 2x);
 }
 
+.edit-main button.resize .icon {
+  background-image:  -webkit-image-set(
+      url(../images/100/resize.png) 1x,
+      url(../images/200/resize.png) 2x);
+}
+
 .edit-main button.exposure .icon {
   background-image: -webkit-image-set(
       url(../images/100/brightness.png) 1x,
@@ -787,6 +792,10 @@ button[disabled] {
   pointer-events: none;
   position: absolute;
   width: 100%;
+}
+
+.gallery[editor-mode="resize"] .edit-modal {
+  height: 56px;
 }
 
 .edit-modal-wrapper[hidden] {
@@ -910,10 +919,6 @@ paper-slider {
   width: 172px;
 }
 
-paper-slider::shadow paper-progress::shadow #progressContainer {
-  background-color: rgba(255, 255, 255, 0.2);
-}
-
 .edit-modal .range.brightness > .icon {
   background-image: -webkit-image-set(
       url(../images/100/brightness.png) 1x,
@@ -1007,6 +1012,44 @@ paper-slider::shadow paper-progress::shadow #progressContainer {
 
 .gallery .crop-frame .corner.bottom {
   bottom: -6px;
+}
+
+/* Input UI */
+.edit-modal .input {
+  align-items: flex-end;
+  display: flex;
+  width: 90px;
+}
+
+.edit-modal .input > .unit_label {
+  color: rgba(255, 255, 255, 0.54);
+  margin-bottom: 10px;
+}
+
+.edit-modal .lockicon {
+  background-repeat: no-repeat;
+  background-size: contain;
+  height: 16px;
+  margin: 16px;
+  margin-top: auto;
+  width: 16px;
+}
+
+.edit-modal .lockicon:focus {
+  outline: none;
+}
+
+.edit-modal .lockicon[locked] {
+  background-image: -webkit-image-set(
+      url(../images/100/ratio_locked.png) 1x,
+      url(../images/200/ratio_locked.png) 2x);
+}
+
+.edit-modal .lockicon:not([locked]) {
+  opacity: 0.54;
+  background-image: -webkit-image-set(
+      url(../images/100/ratio_unlocked.png) 1x,
+      url(../images/200/ratio_unlocked.png) 2x);
 }
 
 /* Prompt/notification panel */
@@ -1282,6 +1325,7 @@ files-toast {
 .thumbnail-view {
   display: block;
   height: 100%;
+  outline: none;
   overflow-y: scroll;
 }
 

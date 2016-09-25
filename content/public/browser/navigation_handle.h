@@ -15,7 +15,12 @@
 
 class GURL;
 
+namespace net {
+class HttpResponseHeaders;
+}  // namespace net
+
 namespace content {
+class NavigationData;
 class NavigationThrottle;
 class RenderFrameHost;
 class WebContents;
@@ -37,6 +42,10 @@ class CONTENT_EXPORT NavigationHandle {
 
   // The URL the frame is navigating to. This may change during the navigation
   // when encountering a server redirect.
+  // This URL may not be the same as the virtual URL returned from
+  // WebContents::GetVisibleURL and WebContents::GetLastCommittedURL. For
+  // example, viewing a page's source navigates to the URL of the page, but the
+  // virtual URL is prefixed with "view-source:".
   virtual const GURL& GetURL() = 0;
 
   // Whether the navigation is taking place in the main frame or in a subframe.
@@ -46,6 +55,14 @@ class CONTENT_EXPORT NavigationHandle {
   // Whether the navigation is taking place in a frame that is a direct child
   // of the main frame. This remains constant over the navigation lifetime.
   virtual bool IsParentMainFrame() = 0;
+
+  // Whether the navigation was initated by the renderer process. Examples of
+  // renderer-initiated navigations include:
+  //  * <a> link click
+  //  * changing window.location.href
+  //  * redirect via the <meta http-equiv="refresh"> tag
+  //  * using window.history.pushState
+  virtual bool IsRendererInitiated() = 0;
 
   // Whether the navigation is synchronous or not. Examples of synchronous
   // navigations are:
@@ -80,8 +97,13 @@ class CONTENT_EXPORT NavigationHandle {
   // This corresponds to NavigationThrottle::WillSendRequest. They should not
   // be queried before that.
 
-  // Whether the navigation is a POST or a GET. This may change during the
-  // navigation when encountering a server redirect.
+  // Whether the navigation is done using HTTP POST method. This may change
+  // during the navigation (e.g. after encountering a server redirect).
+  //
+  // Note: page and frame navigations can only be done using HTTP POST or HTTP
+  // GET methods (and using other, scheme-specific protocols for non-http(s) URI
+  // schemes like data: or file:).  Therefore //content public API exposes only
+  // |bool IsPost()| as opposed to |const std::string& GetMethod()| method.
   virtual bool IsPost() = 0;
 
   // Returns a sanitized version of the referrer for this request.
@@ -107,7 +129,12 @@ class CONTENT_EXPORT NavigationHandle {
   virtual net::Error GetNetErrorCode() = 0;
 
   // Returns the RenderFrameHost this navigation is taking place in. This can
-  // only be accessed after the navigation is ready to commit.
+  // only be accessed after a response has been delivered for processing.
+  //
+  // If PlzNavigate is active, the RenderFrameHost returned will be the final
+  // host for the navigation. If PlzNavigate is inactive, the navigation may
+  // transfer to a new host up until the point that DidFinishNavigation is
+  // called.
   virtual RenderFrameHost* GetRenderFrameHost() = 0;
 
   // Whether the navigation happened in the same page. This is only known
@@ -125,7 +152,15 @@ class CONTENT_EXPORT NavigationHandle {
   virtual bool HasCommitted() = 0;
 
   // Whether the navigation resulted in an error page.
+  // Note that if an error page reloads, this will return true even though
+  // GetNetErrorCode will be net::OK.
   virtual bool IsErrorPage() = 0;
+
+  // Returns the response headers for the request or nullptr if there are none.
+  // This should only be accessed after a redirect was encountered or after the
+  // navigation is ready to commit. The headers returned should not be modified,
+  // as modifications will not be reflected in the network stack.
+  virtual const net::HttpResponseHeaders* GetResponseHeaders() = 0;
 
   // Resumes a navigation that was previously deferred by a NavigationThrottle.
   virtual void Resume() = 0;
@@ -142,7 +177,9 @@ class CONTENT_EXPORT NavigationHandle {
 
   static std::unique_ptr<NavigationHandle> CreateNavigationHandleForTesting(
       const GURL& url,
-      RenderFrameHost* render_frame_host);
+      RenderFrameHost* render_frame_host,
+      bool committed = false,
+      net::Error error = net::OK);
 
   // Registers a NavigationThrottle for tests. The throttle can
   // modify the request, pause the request or cancel the request. This will
@@ -168,6 +205,20 @@ class CONTENT_EXPORT NavigationHandle {
                                     bool new_method_is_post,
                                     const GURL& new_referrer_url,
                                     bool new_is_external_protocol) = 0;
+
+  // Simulates the reception of the network response.
+  virtual NavigationThrottle::ThrottleCheckResult
+  CallWillProcessResponseForTesting(
+      RenderFrameHost* render_frame_host,
+      const std::string& raw_response_headers) = 0;
+
+  // Simulates the navigation being committed.
+  virtual void CallDidCommitNavigationForTesting(const GURL& url) = 0;
+
+  // The NavigationData that the embedder returned from
+  // ResourceDispatcherHostDelegate::GetNavigationData during commit. This will
+  // be a clone of the NavigationData.
+  virtual NavigationData* GetNavigationData() = 0;
 };
 
 }  // namespace content

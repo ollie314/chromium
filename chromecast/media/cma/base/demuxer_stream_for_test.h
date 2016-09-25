@@ -9,7 +9,7 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chromecast/media/cma/base/demuxer_stream_adapter.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/demuxer_stream.h"
@@ -47,6 +47,9 @@ class DemuxerStreamForTest : public ::media::DemuxerStream {
   Type type() const override;
   bool SupportsConfigChanges() override;
   ::media::VideoRotation video_rotation() override;
+  bool enabled() const override;
+  void set_enabled(bool enabled, base::TimeDelta time) override;
+  void SetStreamStatusChangeCB(const StreamStatusChangeCB& cb) override;
 
   bool has_pending_read() const { return has_pending_read_; }
 

@@ -66,6 +66,20 @@ public:
         V8CacheOptionsCode,
     };
 
+    enum class V8CacheStrategiesForCacheStorage {
+        Default,
+        None,
+        Normal,
+        Aggressive,
+    };
+
+    enum class ProgressBarCompletion {
+        LoadEvent,
+        ResourcesBeforeDCL,
+        DOMContentLoaded,
+        ResourcesBeforeDCLAndSameOriginIFrames
+    };
+
     // Selection strategy defines how the selection granularity changes when the
     // selection extent is moved.
     enum class SelectionStrategyType {
@@ -88,15 +102,21 @@ public:
         Subtitles
     };
 
+    // Defines the default for 'passive' field used in the AddEventListenerOptions interface
+    // when javascript calls addEventListener.
+    enum class PassiveEventListenerDefault {
+        False, // Default of false.
+        True, // Default of true.
+        ForceAllTrue // Force all values to be true even when specified.
+    };
+
     // Sets value of a setting by its string identifier from Settings.in and
     // string representation of value. An enum's string representation is the
     // string representation of the integer value of the enum.
     virtual void setFromStrings(const WebString& name, const WebString& value) = 0;
 
-    virtual bool mainFrameResizesAreOrientationChanges() const = 0;
     virtual bool shrinksViewportContentToFit() const = 0;
     virtual bool viewportEnabled() const = 0;
-    virtual void setAccelerated2dCanvasEnabled(bool) = 0;
     virtual void setAccelerated2dCanvasMSAASampleCount(int) = 0;
     virtual void setAcceleratedCompositingEnabled(bool) = 0;
     virtual void setPreferCompositingToLCDTextEnabled(bool) = 0;
@@ -108,7 +128,6 @@ public:
     // method.
     virtual void setAccessibilityEnabled(bool) = 0;
     virtual void setAccessibilityPasswordValuesEnabled(bool) = 0;
-    virtual void setAllowDisplayOfInsecureContent(bool) = 0;
     virtual void setAllowFileAccessFromFileURLs(bool) = 0;
     virtual void setAllowCustomScrollbarInMainFrame(bool) = 0;
     virtual void setAllowGeolocationOnInsecureOrigins(bool) = 0;
@@ -119,10 +138,12 @@ public:
     virtual void setAllowRunningOfInsecureContent(bool) = 0;
     virtual void setAllowScriptsToCloseWindows(bool) = 0;
     virtual void setAllowUniversalAccessFromFileURLs(bool) = 0;
+    virtual void setAlwaysShowContextMenuOnTouch(bool) = 0;
     virtual void setAntialiased2dCanvasEnabled(bool) = 0;
     virtual void setAntialiasedClips2dCanvasEnabled(bool) = 0;
     virtual void setAutoplayExperimentMode(const WebString&) = 0;
     virtual void setAutoZoomFocusedNodeToLegibleScale(bool) = 0;
+    virtual void setBrowserSideNavigationEnabled(bool) = 0;
     virtual void setCaretBrowsingEnabled(bool) = 0;
     virtual void setClobberUserAgentInitialScaleQuirk(bool) = 0;
     virtual void setCookieEnabled(bool) = 0;
@@ -150,8 +171,10 @@ public:
     virtual void setExperimentalWebGLEnabled(bool) = 0;
     virtual void setFantasyFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
     virtual void setFixedFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
+    virtual void setForcePreloadNoneForMediaElements(bool) = 0;
     virtual void setForceZeroLayoutHeight(bool) = 0;
     virtual void setFullscreenSupported(bool) = 0;
+    virtual void setHistoryEntryRequiresUserGesture(bool) = 0;
     virtual void setHyperlinkAuditingEnabled(bool) = 0;
     virtual void setIgnoreMainFrameOverflowHiddenQuirk(bool) = 0;
     virtual void setImageAnimationPolicy(ImageAnimationPolicy) = 0;
@@ -165,6 +188,7 @@ public:
     virtual void setLoadsImagesAutomatically(bool) = 0;
     virtual void setLoadWithOverviewMode(bool) = 0;
     virtual void setShouldReuseGlobalForUnownedMainFrame(bool) = 0;
+    virtual void setProgressBarCompletion(ProgressBarCompletion) = 0;
     virtual void setLocalStorageEnabled(bool) = 0;
     virtual void setMainFrameClipsContent(bool) = 0;
     virtual void setMainFrameResizesAreOrientationChanges(bool) = 0;
@@ -176,7 +200,9 @@ public:
     virtual void setMinimumFontSize(int) = 0;
     virtual void setMinimumLogicalFontSize(int) = 0;
     virtual void setMockScrollbarsEnabled(bool) = 0;
+    virtual void setHideScrollbars(bool) = 0;
     virtual void setOfflineWebApplicationCacheEnabled(bool) = 0;
+    virtual void setPassiveEventListenerDefault(PassiveEventListenerDefault) = 0;
     virtual void setPasswordEchoDurationInSeconds(double) = 0;
     virtual void setPasswordEchoEnabled(bool) = 0;
     virtual void setPerTilePaintingEnabled(bool) = 0;
@@ -190,7 +216,6 @@ public:
     virtual void setPreferHiddenVolumeControls(bool) = 0;
     virtual void setRenderVSyncNotificationEnabled(bool) = 0;
     virtual void setReportScreenSizeInPhysicalPixelsQuirk(bool) = 0;
-    virtual void setRootLayerScrolls(bool) = 0;
     virtual void setRubberBandingOnCompositorThread(bool) = 0;
     virtual void setSansSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
     virtual void setSelectTrailingWhitespaceEnabled(bool) = 0;
@@ -235,13 +260,12 @@ public:
     virtual void setTextTrackTextSize(const WebString&) = 0;
     virtual void setThreadedScrollingEnabled(bool) = 0;
     virtual void setTouchDragDropEnabled(bool) = 0;
-    virtual void setUnifiedTextCheckerEnabled(bool) = 0;
     virtual void setUseLegacyBackgroundSizeShorthandBehavior(bool) = 0;
     virtual void setViewportStyle(WebViewportStyle) = 0;
     virtual void setUseSolidColorScrollbars(bool) = 0;
     virtual void setUseWideViewport(bool) = 0;
-    virtual void setUsesEncodingDetector(bool) = 0;
     virtual void setV8CacheOptions(V8CacheOptions) = 0;
+    virtual void setV8CacheStrategiesForCacheStorage(V8CacheStrategiesForCacheStorage) = 0;
     virtual void setValidationMessageTimerMagnification(int) = 0;
     virtual void setViewportEnabled(bool) = 0;
     virtual void setViewportMetaEnabled(bool) = 0;
@@ -251,7 +275,6 @@ public:
     virtual void setViewportMetaZeroValuesQuirk(bool) = 0;
     virtual void setWebGLErrorsToConsoleEnabled(bool) = 0;
     virtual void setWebSecurityEnabled(bool) = 0;
-    virtual void setWheelGesturesEnabled(bool) = 0;
     virtual void setWideViewportQuirkEnabled(bool) = 0;
     virtual void setXSSAuditorEnabled(bool) = 0;
 

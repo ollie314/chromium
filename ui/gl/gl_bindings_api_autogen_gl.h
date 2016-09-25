@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -42,6 +42,9 @@ void glBindRenderbufferEXTFn(GLenum target, GLuint renderbuffer) override;
 void glBindSamplerFn(GLuint unit, GLuint sampler) override;
 void glBindTextureFn(GLenum target, GLuint texture) override;
 void glBindTransformFeedbackFn(GLenum target, GLuint id) override;
+void glBindUniformLocationCHROMIUMFn(GLuint program,
+                                     GLint location,
+                                     const char* name) override;
 void glBindVertexArrayOESFn(GLuint array) override;
 void glBlendBarrierKHRFn(void) override;
 void glBlendColorFn(GLclampf red,
@@ -123,6 +126,7 @@ void glColorMaskFn(GLboolean red,
                    GLboolean blue,
                    GLboolean alpha) override;
 void glCompileShaderFn(GLuint shader) override;
+void glCompressedCopyTextureCHROMIUMFn(GLuint sourceId, GLuint destId) override;
 void glCompressedTexImage2DFn(GLenum target,
                               GLint level,
                               GLenum internalformat,
@@ -165,6 +169,17 @@ void glCopyBufferSubDataFn(GLenum readTarget,
                            GLintptr readOffset,
                            GLintptr writeOffset,
                            GLsizeiptr size) override;
+void glCopySubTextureCHROMIUMFn(GLuint sourceId,
+                                GLuint destId,
+                                GLint xoffset,
+                                GLint yoffset,
+                                GLint x,
+                                GLint y,
+                                GLsizei width,
+                                GLsizei height,
+                                GLboolean unpackFlipY,
+                                GLboolean unpackPremultiplyAlpha,
+                                GLboolean unpackUnmultiplyAlpha) override;
 void glCopyTexImage2DFn(GLenum target,
                         GLint level,
                         GLenum internalformat,
@@ -190,6 +205,13 @@ void glCopyTexSubImage3DFn(GLenum target,
                            GLint y,
                            GLsizei width,
                            GLsizei height) override;
+void glCopyTextureCHROMIUMFn(GLuint sourceId,
+                             GLuint destId,
+                             GLint internalFormat,
+                             GLenum destType,
+                             GLboolean unpackFlipY,
+                             GLboolean unpackPremultiplyAlpha,
+                             GLboolean unpackUnmultiplyAlpha) override;
 void glCoverageModulationNVFn(GLenum components) override;
 void glCoverFillPathInstancedNVFn(GLsizei numPaths,
                                   GLenum pathNameType,

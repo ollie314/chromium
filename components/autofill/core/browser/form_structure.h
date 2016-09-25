@@ -88,13 +88,20 @@ class FormStructure {
   static std::vector<FormDataPredictions> GetFieldTypePredictions(
       const std::vector<FormStructure*>& form_structures);
 
-  // The unique signature for this form, composed of the target url domain,
-  // the form name, and the form field names in a 64-bit hash.
-  std::string FormSignature() const;
+  // Returns whether sending autofill field metadata to the server is enabled.
+  static bool IsAutofillFieldMetadataEnabled();
+
+  // Return the form signature as string.
+  std::string FormSignatureAsStr() const;
 
   // Runs a quick heuristic to rule out forms that are obviously not
   // auto-fillable, like google/yahoo/msn search, etc.
   bool IsAutofillable() const;
+
+  // Returns whether |this| form represents a complete Credit Card form, which
+  // consists in having at least a credit card number field and an expiration
+  // field.
+  bool IsCompleteCreditCardForm() const;
 
   // Resets |autofill_count_| and counts the number of auto-fillable fields.
   // This is used when we receive server data for form fields.  At that time,
@@ -131,6 +138,11 @@ class FormStructure {
                          rappor::RapporService* rappor_service,
                          bool did_show_suggestions,
                          bool observed_submission) const;
+
+  // Log the quality of the heuristics and server predictions for this form
+  // structure, if autocomplete attributes are present on the fields (they are
+  // used as golden truths).
+  void LogQualityMetricsBasedOnAutocomplete() const;
 
   // Classifies each field in |fields_| based upon its |autocomplete| attribute,
   // if the attribute is available.  The association is stored into the field's
@@ -208,6 +220,8 @@ class FormStructure {
 
   bool all_fields_are_passwords() const { return all_fields_are_passwords_; }
 
+  FormSignature form_signature() const { return form_signature_; }
+
   // Returns a FormData containing the data this form structure knows about.
   FormData ToFormData() const;
 
@@ -226,11 +240,6 @@ class FormStructure {
 
   // Encodes information about this form and its fields into |upload|.
   void EncodeFormForUpload(autofill::AutofillUploadContents* upload) const;
-
-  // 64-bit hash of the string - used in FormSignature and unit-tests.
-  static uint64_t Hash64Bit(const std::string& str);
-
-  uint64_t FormSignature64Bit() const;
 
   // Returns true if the form has no fields, or too many.
   bool IsMalformed() const;
@@ -277,11 +286,6 @@ class FormStructure {
   // included in queries to the Autofill server.
   size_t active_field_count_;
 
-  // The names of the form input elements, that are part of the form signature.
-  // The string starts with "&" and the names are also separated by the "&"
-  // character. E.g.: "&form_input1_name&form_input2_name&...&form_inputN_name"
-  std::string form_signature_field_names_;
-
   // Whether the server expects us to always upload, never upload, or default
   // to the stored upload rates.
   UploadRequired upload_required_;
@@ -310,6 +314,10 @@ class FormStructure {
 
   // True if all form fields are password fields.
   bool all_fields_are_passwords_;
+
+  // The unique signature for this form, composed of the target url domain,
+  // the form name, and the form field names in a 64-bit hash.
+  FormSignature form_signature_;
 
   DISALLOW_COPY_AND_ASSIGN(FormStructure);
 };

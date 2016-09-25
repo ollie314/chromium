@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/power_monitor/power_monitor.h"
+#include "base/run_loop.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/power_monitor_test_base.h"
 #include "base/test/simple_test_tick_clock.h"
@@ -54,18 +55,6 @@ void MediaTestSuite::Initialize() {
 
 }  // namespace
 
-int main(int argc, char** argv) {
-  {
-    base::AtExitManager at_exit_manager;
-    CHECK(VideoToolboxGlue::Get())
-        << "VideoToolbox is not available. Requires OS X 10.8 or iOS 8.0.";
-  }
-  MediaTestSuite test_suite(argc, argv);
-  return base::LaunchUnitTests(
-      argc, argv,
-      base::Bind(&MediaTestSuite::Run, base::Unretained(&test_suite)));
-}
-
 namespace media {
 namespace cast {
 
@@ -87,8 +76,8 @@ class MetadataRecorder : public base::RefCountedThreadSafe<MetadataRecorder> {
 
   int count_frames_delivered() const { return count_frames_delivered_; }
 
-  void PushExpectation(uint32_t expected_frame_id,
-                       uint32_t expected_last_referenced_frame_id,
+  void PushExpectation(FrameId expected_frame_id,
+                       FrameId expected_last_referenced_frame_id,
                        RtpTimeTicks expected_rtp_timestamp,
                        const base::TimeTicks& expected_reference_time) {
     expectations_.push(Expectation{expected_frame_id,
@@ -97,7 +86,8 @@ class MetadataRecorder : public base::RefCountedThreadSafe<MetadataRecorder> {
                                    expected_reference_time});
   }
 
-  void CompareFrameWithExpected(scoped_ptr<SenderEncodedFrame> encoded_frame) {
+  void CompareFrameWithExpected(
+      std::unique_ptr<SenderEncodedFrame> encoded_frame) {
     ASSERT_LT(0u, expectations_.size());
     auto e = expectations_.front();
     expectations_.pop();
@@ -123,8 +113,8 @@ class MetadataRecorder : public base::RefCountedThreadSafe<MetadataRecorder> {
   int count_frames_delivered_;
 
   struct Expectation {
-    uint32_t expected_frame_id;
-    uint32_t expected_last_referenced_frame_id;
+    FrameId expected_frame_id;
+    FrameId expected_last_referenced_frame_id;
     RtpTimeTicks expected_rtp_timestamp;
     base::TimeTicks expected_reference_time;
   };
@@ -144,7 +134,7 @@ class EndToEndFrameChecker
         base::Bind(&SaveDecoderInitResult, &decoder_init_result),
         base::Bind(&EndToEndFrameChecker::CompareFrameWithExpected,
                    base::Unretained(this)));
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     EXPECT_TRUE(decoder_init_result);
   }
 
@@ -152,7 +142,7 @@ class EndToEndFrameChecker
     expectations_.push(frame);
   }
 
-  void EncodeDone(scoped_ptr<SenderEncodedFrame> encoded_frame) {
+  void EncodeDone(std::unique_ptr<SenderEncodedFrame> encoded_frame) {
     auto buffer = DecoderBuffer::CopyFrom(encoded_frame->bytes(),
                                           encoded_frame->data.size());
     decoder_.Decode(buffer, base::Bind(&EndToEndFrameChecker::DecodeDone,
@@ -187,10 +177,10 @@ void CreateFrameAndMemsetPlane(VideoFrameFactory* const video_frame_factory) {
       video_frame_factory->MaybeCreateFrame(
           gfx::Size(kVideoWidth, kVideoHeight), base::TimeDelta());
   ASSERT_TRUE(video_frame.get());
-  auto cv_pixel_buffer = video_frame->cv_pixel_buffer();
+  auto* cv_pixel_buffer = video_frame->cv_pixel_buffer();
   ASSERT_TRUE(cv_pixel_buffer);
   CVPixelBufferLockBaseAddress(cv_pixel_buffer, 0);
-  auto ptr = CVPixelBufferGetBaseAddressOfPlane(cv_pixel_buffer, 0);
+  auto* ptr = CVPixelBufferGetBaseAddressOfPlane(cv_pixel_buffer, 0);
   ASSERT_TRUE(ptr);
   memset(ptr, 0xfe, CVPixelBufferGetBytesPerRowOfPlane(cv_pixel_buffer, 0) *
                         CVPixelBufferGetHeightOfPlane(cv_pixel_buffer, 0));
@@ -198,18 +188,17 @@ void CreateFrameAndMemsetPlane(VideoFrameFactory* const video_frame_factory) {
 }
 
 void NoopFrameEncodedCallback(
-    scoped_ptr<media::cast::SenderEncodedFrame> /*encoded_frame*/) {
-}
+    std::unique_ptr<media::cast::SenderEncodedFrame> /*encoded_frame*/) {}
 
 class TestPowerSource : public base::PowerMonitorSource {
  public:
   void GenerateSuspendEvent() {
     ProcessPowerEvent(SUSPEND_EVENT);
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
   void GenerateResumeEvent() {
     ProcessPowerEvent(RESUME_EVENT);
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
  private:
@@ -221,26 +210,28 @@ class H264VideoToolboxEncoderTest : public ::testing::Test {
   H264VideoToolboxEncoderTest() = default;
 
   void SetUp() final {
+    CHECK(VideoToolboxGlue::Get())
+        << "VideoToolbox is not available. Requires OS X 10.8 or iOS 8.0.";
     clock_ = new base::SimpleTestTickClock();
     clock_->Advance(base::TimeTicks::Now() - base::TimeTicks());
 
     power_source_ = new TestPowerSource();
-    power_monitor_.reset(
-        new base::PowerMonitor(scoped_ptr<TestPowerSource>(power_source_)));
+    power_monitor_.reset(new base::PowerMonitor(
+        std::unique_ptr<TestPowerSource>(power_source_)));
 
     cast_environment_ = new CastEnvironment(
-        scoped_ptr<base::TickClock>(clock_), message_loop_.task_runner(),
+        std::unique_ptr<base::TickClock>(clock_), message_loop_.task_runner(),
         message_loop_.task_runner(), message_loop_.task_runner());
     encoder_.reset(new H264VideoToolboxEncoder(
         cast_environment_, video_sender_config_,
         base::Bind(&SaveOperationalStatus, &operational_status_)));
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     EXPECT_EQ(STATUS_INITIALIZED, operational_status_);
   }
 
   void TearDown() final {
     encoder_.reset();
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     power_monitor_.reset();
   }
 
@@ -263,15 +254,15 @@ class H264VideoToolboxEncoderTest : public ::testing::Test {
   static void TearDownTestCase() { frame_ = nullptr; }
 
   static scoped_refptr<media::VideoFrame> frame_;
-  static VideoSenderConfig video_sender_config_;
+  static FrameSenderConfig video_sender_config_;
 
   base::SimpleTestTickClock* clock_;  // Owned by CastEnvironment.
   base::MessageLoop message_loop_;
   scoped_refptr<CastEnvironment> cast_environment_;
-  scoped_ptr<VideoEncoder> encoder_;
+  std::unique_ptr<VideoEncoder> encoder_;
   OperationalStatus operational_status_;
   TestPowerSource* power_source_;  // Owned by the power monitor.
-  scoped_ptr<base::PowerMonitor> power_monitor_;
+  std::unique_ptr<base::PowerMonitor> power_monitor_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(H264VideoToolboxEncoderTest);
@@ -279,20 +270,23 @@ class H264VideoToolboxEncoderTest : public ::testing::Test {
 
 // static
 scoped_refptr<media::VideoFrame> H264VideoToolboxEncoderTest::frame_;
-VideoSenderConfig H264VideoToolboxEncoderTest::video_sender_config_;
+FrameSenderConfig H264VideoToolboxEncoderTest::video_sender_config_;
 
-TEST_F(H264VideoToolboxEncoderTest, CheckFrameMetadataSequence) {
+// Failed on mac_chromium_rel_ng trybot. http://crbug.com/627260
+TEST_F(H264VideoToolboxEncoderTest, DISABLED_CheckFrameMetadataSequence) {
   scoped_refptr<MetadataRecorder> metadata_recorder(new MetadataRecorder());
   VideoEncoder::FrameEncodedCallback cb = base::Bind(
       &MetadataRecorder::CompareFrameWithExpected, metadata_recorder.get());
 
   metadata_recorder->PushExpectation(
-      0, 0, RtpTimeTicks::FromTimeDelta(frame_->timestamp(), kVideoFrequency),
+      FrameId::first(), FrameId::first(),
+      RtpTimeTicks::FromTimeDelta(frame_->timestamp(), kVideoFrequency),
       clock_->NowTicks());
   EXPECT_TRUE(encoder_->EncodeVideoFrame(frame_, clock_->NowTicks(), cb));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
-  for (uint32_t frame_id = 1; frame_id < 10; ++frame_id) {
+  for (FrameId frame_id = FrameId::first() + 1;
+       frame_id < FrameId::first() + 10; ++frame_id) {
     AdvanceClockAndVideoFrameTimestamp();
     metadata_recorder->PushExpectation(
         frame_id, frame_id - 1,
@@ -302,13 +296,14 @@ TEST_F(H264VideoToolboxEncoderTest, CheckFrameMetadataSequence) {
   }
 
   encoder_.reset();
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(10, metadata_recorder->count_frames_delivered());
 }
 
 #if defined(USE_PROPRIETARY_CODECS)
-TEST_F(H264VideoToolboxEncoderTest, CheckFramesAreDecodable) {
+// Failed on mac_chromium_rel_ng trybot. http://crbug.com/627260
+TEST_F(H264VideoToolboxEncoderTest, DISABLED_CheckFramesAreDecodable) {
   VideoDecoderConfig config(kCodecH264, H264PROFILE_MAIN, frame_->format(),
                             COLOR_SPACE_UNSPECIFIED, frame_->coded_size(),
                             frame_->visible_rect(), frame_->natural_size(),
@@ -317,14 +312,15 @@ TEST_F(H264VideoToolboxEncoderTest, CheckFramesAreDecodable) {
 
   VideoEncoder::FrameEncodedCallback cb =
       base::Bind(&EndToEndFrameChecker::EncodeDone, checker.get());
-  for (uint32_t frame_id = 0; frame_id < 6; ++frame_id) {
+  for (FrameId frame_id = FrameId::first(); frame_id < FrameId::first() + 6;
+       ++frame_id) {
     checker->PushExpectation(frame_);
     EXPECT_TRUE(encoder_->EncodeVideoFrame(frame_, clock_->NowTicks(), cb));
     AdvanceClockAndVideoFrameTimestamp();
   }
 
   encoder_.reset();
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(5, checker->count_frames_checked());
 }
@@ -339,7 +335,7 @@ TEST_F(H264VideoToolboxEncoderTest, CheckVideoFrameFactory) {
   // request a frame again.
   ASSERT_FALSE(video_frame_factory->MaybeCreateFrame(
       gfx::Size(kVideoWidth, kVideoHeight), base::TimeDelta()));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   CreateFrameAndMemsetPlane(video_frame_factory.get());
 }
 
@@ -375,7 +371,7 @@ TEST_F(H264VideoToolboxEncoderTest, CheckPowerMonitoringVideoFrameFactory) {
   // request a frame again.
   ASSERT_FALSE(video_frame_factory->MaybeCreateFrame(
       gfx::Size(kVideoWidth, kVideoHeight), base::TimeDelta()));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   CreateFrameAndMemsetPlane(video_frame_factory.get());
 
   // After a power suspension, the factory should not produce frames.
@@ -383,7 +379,7 @@ TEST_F(H264VideoToolboxEncoderTest, CheckPowerMonitoringVideoFrameFactory) {
 
   ASSERT_FALSE(video_frame_factory->MaybeCreateFrame(
       gfx::Size(kVideoWidth, kVideoHeight), base::TimeDelta()));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ASSERT_FALSE(video_frame_factory->MaybeCreateFrame(
       gfx::Size(kVideoWidth, kVideoHeight), base::TimeDelta()));
 
@@ -404,7 +400,7 @@ TEST_F(H264VideoToolboxEncoderTest,
 
   ASSERT_FALSE(video_frame_factory->MaybeCreateFrame(
       gfx::Size(kVideoWidth, kVideoHeight), base::TimeDelta()));
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ASSERT_FALSE(video_frame_factory->MaybeCreateFrame(
       gfx::Size(kVideoWidth, kVideoHeight), base::TimeDelta()));
 

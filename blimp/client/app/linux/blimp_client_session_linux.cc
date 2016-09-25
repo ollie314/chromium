@@ -18,14 +18,14 @@ namespace client {
 namespace {
 
 const int kDummyTabId = 0;
-const std::string kDefaultAssignerUrl =
+const char kDefaultAssignerUrl[] =
     "https://blimp-pa.googleapis.com/v1/assignment";
 
 class FakeNavigationFeatureDelegate
     : public NavigationFeature::NavigationFeatureDelegate {
  public:
   FakeNavigationFeatureDelegate();
-  ~FakeNavigationFeatureDelegate();
+  ~FakeNavigationFeatureDelegate() override;
 
   // NavigationFeatureDelegate implementation.
   void OnUrlChanged(int tab_id, const GURL& url) override;
@@ -66,18 +66,50 @@ void FakeNavigationFeatureDelegate::OnPageLoadStatusUpdate(int tab_id,
       " in tab " << tab_id;
 }
 
+class FakeImeFeatureDelegate : public ImeFeature::Delegate {
+ public:
+  FakeImeFeatureDelegate();
+  ~FakeImeFeatureDelegate() override;
+
+  // ImeFeature::Delegate implementation.
+  void OnShowImeRequested(ui::TextInputType input_type,
+                          const std::string& text,
+                          const ImeFeature::ShowImeCallback& callback) override;
+  void OnHideImeRequested() override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FakeImeFeatureDelegate);
+};
+
+FakeImeFeatureDelegate::FakeImeFeatureDelegate() {}
+
+FakeImeFeatureDelegate::~FakeImeFeatureDelegate() {}
+
+void FakeImeFeatureDelegate::OnShowImeRequested(
+    ui::TextInputType input_type,
+    const std::string& text,
+    const ImeFeature::ShowImeCallback& callback) {
+  DVLOG(1) << "Show IME requested (input_type=" << input_type << ")";
+}
+
+void FakeImeFeatureDelegate::OnHideImeRequested() {
+  DVLOG(1) << "Hide IME requested";
+}
+
 }  // namespace
 
 BlimpClientSessionLinux::BlimpClientSessionLinux()
     : BlimpClientSession(GURL(kDefaultAssignerUrl)),
       event_source_(ui::PlatformEventSource::CreateDefault()),
-      navigation_feature_delegate_(new FakeNavigationFeatureDelegate) {
+      navigation_feature_delegate_(new FakeNavigationFeatureDelegate),
+      ime_feature_delegate_(new FakeImeFeatureDelegate) {
   blimp_display_manager_.reset(new BlimpDisplayManager(gfx::Size(800, 600),
                                                        this,
                                                        GetRenderWidgetFeature(),
                                                        GetTabControlFeature()));
   GetNavigationFeature()->SetDelegate(kDummyTabId,
                                       navigation_feature_delegate_.get());
+  GetImeFeature()->set_delegate(ime_feature_delegate_.get());
 }
 
 BlimpClientSessionLinux::~BlimpClientSessionLinux() {}

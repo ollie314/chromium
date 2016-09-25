@@ -30,7 +30,7 @@
 #include "chromeos/login/auth/user_context.h"
 #include "components/app_modal/javascript_app_modal_dialog.h"
 #include "components/app_modal/native_app_modal_dialog.h"
-#include "components/browser_sync/common/browser_sync_switches.h"
+#include "components/browser_sync/browser_sync_switches.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/browser/account_tracker_service.h"
@@ -518,8 +518,9 @@ const char kRandomPagePath[] = "/non_google_page";
 // merge session tests.
 class FakeGoogle {
  public:
-  FakeGoogle() : start_event_(true, false) {
-  }
+  FakeGoogle()
+      : start_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                     base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 
   ~FakeGoogle() {}
 
@@ -583,9 +584,10 @@ class FakeGoogle {
 class DelayedFakeGaia : public FakeGaia {
  public:
   DelayedFakeGaia()
-     : blocking_event_(true, false),
-       start_event_(true, false) {
-  }
+      : blocking_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                        base::WaitableEvent::InitialState::NOT_SIGNALED),
+        start_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                     base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 
   void UnblockMergeSession() {
     blocking_event_.Signal();
@@ -720,9 +722,8 @@ IN_PROC_BROWSER_TEST_F(MergeSessionTest, PageThrottle) {
   Browser* browser =
       FindOrCreateVisibleBrowser(profile());
   ui_test_utils::NavigateToURLWithDisposition(
-      browser,
-      fake_google_page_url_,
-      CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
+      browser, fake_google_page_url_, WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
 
   // Wait until we get send merge session request.
   WaitForMergeSessionToStart();

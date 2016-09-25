@@ -10,6 +10,11 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "ui/ozone/platform/drm/gpu/drm_thread.h"
+#include "ui/ozone/public/interfaces/device_cursor.mojom.h"
+
+namespace shell {
+class Connection;
+}
 
 namespace ui {
 
@@ -34,13 +39,17 @@ class DrmThreadProxy {
                                         gfx::BufferFormat format,
                                         gfx::BufferUsage usage);
 
-  scoped_refptr<GbmBuffer> CreateBufferFromFD(const gfx::Size& size,
-                                              gfx::BufferFormat format,
-                                              base::ScopedFD fd,
-                                              int stride);
+  scoped_refptr<GbmBuffer> CreateBufferFromFds(
+      gfx::AcceleratedWidget widget,
+      const gfx::Size& size,
+      gfx::BufferFormat format,
+      std::vector<base::ScopedFD>&& fds,
+      const std::vector<gfx::NativePixmapPlane>& planes);
 
   void GetScanoutFormats(gfx::AcceleratedWidget widget,
                          std::vector<gfx::BufferFormat>* scanout_formats);
+
+  void AddBinding(ozone::mojom::DeviceCursorRequest request);
 
  private:
   DrmThread drm_thread_;

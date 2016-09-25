@@ -29,18 +29,20 @@
 
 #include "platform/fonts/SimpleFontData.h"
 
-#include "SkPaint.h"
 #include "SkPath.h"
 #include "SkTypeface.h"
 #include "SkTypes.h"
 #include "platform/fonts/FontDescription.h"
 #include "platform/fonts/GlyphPage.h"
 #include "platform/fonts/VDMXParser.h"
+#include "platform/fonts/skia/SkiaTextMetrics.h"
 #include "platform/geometry/FloatRect.h"
 #include "wtf/MathExtras.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/allocator/Partitions.h"
 #include "wtf/text/CharacterNames.h"
 #include "wtf/text/Unicode.h"
+#include <memory>
 #include <unicode/unorm.h>
 #include <unicode/utf16.h>
 
@@ -78,8 +80,6 @@ SimpleFontData::SimpleFontData(PassRefPtr<CustomFontData> customData, float font
     , m_hasVerticalGlyphs(false)
     , m_customFontData(customData)
 {
-    if (m_customFontData)
-        m_customFontData->initializeFontData(this, fontSize);
 }
 
 void SimpleFontData::platformInit()
@@ -91,12 +91,12 @@ void SimpleFontData::platformInit()
         return;
     }
 
-    SkPaint paint;
     SkPaint::FontMetrics metrics;
 
-    m_platformData.setupPaint(&paint);
-    paint.getFontMetrics(&metrics);
-    SkTypeface* face = paint.getTypeface();
+    m_platformData.setupPaint(&m_paint);
+    m_paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+    m_paint.getFontMetrics(&metrics);
+    SkTypeface* face = m_paint.getTypeface();
     ASSERT(face);
 
     int vdmxAscent = 0, vdmxDescent = 0;
@@ -104,14 +104,13 @@ void SimpleFontData::platformInit()
 
 #if OS(LINUX) || OS(ANDROID)
     // Manually digging up VDMX metrics is only applicable when bytecode hinting using FreeType.
-    // With GDI, the metrics will already have taken this into account (as needed).
     // With DirectWrite or CoreText, no bytecode hinting is ever done.
     // This code should be pushed into FreeType (hinted font metrics).
     static const uint32_t vdmxTag = SkSetFourByteTag('V', 'D', 'M', 'X');
     int pixelSize = m_platformData.size() + 0.5;
-    if (!paint.isAutohinted()
-        &&    (paint.getHinting() == SkPaint::kFull_Hinting
-            || paint.getHinting() == SkPaint::kNormal_Hinting))
+    if (!m_paint.isAutohinted()
+        &&    (m_paint.getHinting() == SkPaint::kFull_Hinting
+            || m_paint.getHinting() == SkPaint::kNormal_Hinting))
     {
         size_t vdmxSize = face->getTableSize(vdmxTag);
         if (vdmxSize && vdmxSize < maxVDMXTableSize) {
@@ -346,9 +345,9 @@ bool SimpleFontData::isTextOrientationFallbackOf(const SimpleFontData* fontData)
         || fontData->m_derivedFontData->verticalRightOrientation == this;
 }
 
-PassOwnPtr<SimpleFontData::DerivedFontData> SimpleFontData::DerivedFontData::create(bool forCustomFont)
+std::unique_ptr<SimpleFontData::DerivedFontData> SimpleFontData::DerivedFontData::create(bool forCustomFont)
 {
-    return adoptPtr(new DerivedFontData(forCustomFont));
+    return wrapUnique(new DerivedFontData(forCustomFont));
 }
 
 SimpleFontData::DerivedFontData::~DerivedFontData()
@@ -368,28 +367,8 @@ SimpleFontData::DerivedFontData::~DerivedFontData()
 
 PassRefPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
 {
-    return platformCreateScaledFontData(fontDescription, scaleFactor);
-}
-
-PassRefPtr<SimpleFontData> SimpleFontData::platformCreateScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
-{
     const float scaledSize = lroundf(fontDescription.computedSize() * scaleFactor);
     return SimpleFontData::create(FontPlatformData(m_platformData, scaledSize), isCustomFont() ? CustomFontData::create() : nullptr);
-}
-
-static inline void getSkiaBoundsForGlyph(SkPaint& paint, Glyph glyph, SkRect& bounds)
-{
-    paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
-
-    SkPath path;
-    paint.getTextPath(&glyph, sizeof(glyph), 0, 0, &path);
-    bounds = path.getBounds();
-
-    if (!paint.isSubpixelText()) {
-        SkIRect ir;
-        bounds.round(&ir);
-        bounds.set(ir);
-    }
 }
 
 FloatRect SimpleFontData::platformBoundsForGlyph(Glyph glyph) const
@@ -397,13 +376,10 @@ FloatRect SimpleFontData::platformBoundsForGlyph(Glyph glyph) const
     if (!m_platformData.size())
         return FloatRect();
 
-    SkASSERT(sizeof(glyph) == 2); // compile-time assert
-
-    SkPaint paint;
-    m_platformData.setupPaint(&paint);
+    static_assert(sizeof(glyph) == 2, "Glyph id should not be truncated.");
 
     SkRect bounds;
-    getSkiaBoundsForGlyph(paint, glyph, bounds);
+    SkiaTextMetrics(&m_paint).getSkiaBoundsForGlyph(glyph, &bounds);
     return FloatRect(bounds);
 }
 
@@ -412,18 +388,11 @@ float SimpleFontData::platformWidthForGlyph(Glyph glyph) const
     if (!m_platformData.size())
         return 0;
 
-    SkASSERT(sizeof(glyph) == 2); // compile-time assert
+    static_assert(sizeof(glyph) == 2, "Glyph id should not be truncated.");
 
-    SkPaint paint;
-
-    m_platformData.setupPaint(&paint);
-
-    paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
-    SkScalar width = paint.measureText(&glyph, 2);
-    if (!paint.isSubpixelText())
-        width = SkScalarRoundToInt(width);
-    return SkScalarToFloat(width);
+    return SkiaTextMetrics(&m_paint).getSkiaWidthForGlyph(glyph);
 }
+
 
 bool SimpleFontData::fillGlyphPage(GlyphPage* pageToFill, unsigned offset, unsigned length, UChar* buffer, unsigned bufferLength) const
 {

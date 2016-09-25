@@ -30,18 +30,10 @@ class PersistentSparseHistogramDataManager;
 // structures. Changes here likely need to be duplicated there.
 class BASE_EXPORT PersistentSampleMap : public HistogramSamples {
  public:
-  // Constructs a persistent sample map using any of a variety of persistent
-  // data sources. Really, the first two are just convenience methods for
-  // getting at the PersistentSampleMapRecords object for the specified |id|.
-  // The source objects must live longer than this object.
+  // Constructs a persistent sample map using a PersistentHistogramAllocator
+  // as the data source for persistent records.
   PersistentSampleMap(uint64_t id,
                       PersistentHistogramAllocator* allocator,
-                      Metadata* meta);
-  PersistentSampleMap(uint64_t id,
-                      PersistentSparseHistogramDataManager* manager,
-                      Metadata* meta);
-  PersistentSampleMap(uint64_t id,
-                      PersistentSampleMapRecords* records,
                       Metadata* meta);
 
   ~PersistentSampleMap() override;
@@ -81,25 +73,34 @@ class BASE_EXPORT PersistentSampleMap : public HistogramSamples {
       HistogramBase::Sample value);
 
  private:
-  enum : HistogramBase::Sample { kAllSamples = -1 };
+  // Gets the object that manages persistent records. This returns the
+  // |records_| member after first initializing it if necessary.
+  PersistentSampleMapRecords* GetRecords();
 
   // Imports samples from persistent memory by iterating over all sample
   // records found therein, adding them to the sample_counts_ map. If a
   // count for the sample |until_value| is found, stop the import and return
   // a pointer to that counter. If that value is not found, null will be
   // returned after all currently available samples have been loaded. Pass
-  // kAllSamples to force the importing of all available samples.
-  HistogramBase::Count* ImportSamples(HistogramBase::Sample until_value);
+  // true for |import_everything| to force the importing of all available
+  // samples even if a match is found.
+  HistogramBase::Count* ImportSamples(HistogramBase::Sample until_value,
+                                      bool import_everything);
 
   // All created/loaded sample values and their associated counts. The storage
   // for the actual Count numbers is owned by the |records_| object and its
   // underlying allocator.
   std::map<HistogramBase::Sample, HistogramBase::Count*> sample_counts_;
 
-  // The object that manages records inside persistent memory. This is owned
-  // externally (typically by a PersistentHistogramAllocator) and is expected
-  // to live beyond the life of this object.
-  PersistentSampleMapRecords* records_;
+  // The allocator that manages histograms inside persistent memory. This is
+  // owned externally and is expected to live beyond the life of this object.
+  PersistentHistogramAllocator* allocator_;
+
+  // The object that manages sample records inside persistent memory. This is
+  // owned by the |allocator_| object (above) and so, like it, is expected to
+  // live beyond the life of this object. This value is lazily-initialized on
+  // first use via the GetRecords() accessor method.
+  PersistentSampleMapRecords* records_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(PersistentSampleMap);
 };

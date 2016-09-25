@@ -10,7 +10,9 @@
 #include <string>
 #include <vector>
 
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/time/time.h"
 #include "net/base/net_export.h"
@@ -76,16 +78,11 @@ class NET_EXPORT HttpUtil {
   static bool IsSafeHeader(const std::string& name);
 
   // Returns true if |name| is a valid HTTP header name.
-  static bool IsValidHeaderName(const std::string& name);
+  static bool IsValidHeaderName(const base::StringPiece& name);
 
   // Returns false if |value| contains NUL or CRLF. This method does not perform
   // a fully RFC-2616-compliant header value validation.
-  static bool IsValidHeaderValue(const std::string& value);
-
-  // Returns true if |value| is a valid HTTP header value according to
-  // RFC 7230 and doesn't contain CR or LF.
-  // i.e. returns true if |value| matches |*field-content| in RFC 7230.
-  static bool IsValidHeaderValueRFC7230(const base::StringPiece& value);
+  static bool IsValidHeaderValue(const base::StringPiece& value);
 
   // Strips all header lines from |headers| whose name matches
   // |headers_to_remove|. |headers_to_remove| is a list of null-terminated
@@ -112,15 +109,21 @@ class NET_EXPORT HttpUtil {
   // Trim HTTP_LWS chars from the beginning and end of the string.
   static void TrimLWS(std::string::const_iterator* begin,
                       std::string::const_iterator* end);
+  static base::StringPiece TrimLWS(const base::StringPiece& string);
 
   // Whether the character is the start of a quotation mark.
   static bool IsQuote(char c);
 
-  // Whether the string is a valid |token| as defined in RFC 2616 Sec 2.2.
-  static bool IsToken(std::string::const_iterator begin,
-                      std::string::const_iterator end);
-  static bool IsToken(const std::string& str) {
-    return IsToken(str.begin(), str.end());
+  // Whether the character is a valid |tchar| as defined in RFC 7230 Sec 3.2.6.
+  static bool IsTokenChar(char c);
+  // Whether the string is a valid |token| as defined in RFC 7230 Sec 3.2.6.
+  static bool IsToken(const base::StringPiece& str);
+
+  // Whether the string is a valid |parmname| as defined in RFC 5987 Sec 3.2.1.
+  static bool IsParmName(std::string::const_iterator begin,
+                         std::string::const_iterator end);
+  static bool IsParmName(const std::string& str) {
+    return IsParmName(str.begin(), str.end());
   }
 
   // RFC 2616 Sec 2.2:
@@ -133,6 +136,20 @@ class NET_EXPORT HttpUtil {
 
   // Same as above.
   static std::string Unquote(const std::string& str);
+
+  // Similar to Unquote(), but additionally validates that the string being
+  // unescaped actually is a valid quoted string. Returns false for an empty
+  // string, a string without quotes, a string with mismatched quotes, and
+  // a string with unescaped embeded quotes.
+  // In accordance with RFC 2616 this method only allows double quotes to
+  // enclose the string.
+  static bool StrictUnquote(std::string::const_iterator begin,
+                            std::string::const_iterator end,
+                            std::string* out) WARN_UNUSED_RESULT;
+
+  // Same as above.
+  static bool StrictUnquote(const std::string& str,
+                            std::string* out) WARN_UNUSED_RESULT;
 
   // The reverse of Unquote() -- escapes and surrounds with "
   static std::string Quote(const std::string& str);
@@ -303,6 +320,12 @@ class NET_EXPORT HttpUtil {
     ValuesIterator(const ValuesIterator& other);
     ~ValuesIterator();
 
+    // Set the characters to regard as quotes.  By default, this includes both
+    // single and double quotes.
+    void set_quote_chars(const char* quotes) {
+      values_.set_quote_chars(quotes);
+    }
+
     // Advances the iterator to the next value, if any.  Returns true if there
     // is a next value.  Use value* methods to access the resultant value.
     bool GetNext();
@@ -332,18 +355,26 @@ class NET_EXPORT HttpUtil {
   // calls to GetNext() or after the NameValuePairsIterator is destroyed.
   class NET_EXPORT NameValuePairsIterator {
    public:
-    // Whether or not values are optional. VALUES_OPTIONAL allows
-    // e.g. name1=value1;name2;name3=value3, whereas VALUES_NOT_OPTIONAL
+    // Whether or not values are optional. Values::NOT_REQUIRED allows
+    // e.g. name1=value1;name2;name3=value3, whereas Vaues::REQUIRED
     // will treat it as a parse error because name2 does not have a
     // corresponding equals sign.
-    enum OptionalValues { VALUES_OPTIONAL, VALUES_NOT_OPTIONAL };
+    enum class Values { NOT_REQUIRED, REQUIRED };
+
+    // Whether or not unmatched quotes should be considered a failure. By
+    // default this class is pretty lenient and does a best effort to parse
+    // values with mismatched quotes. When set to STRICT_QUOTES a value with
+    // mismatched or otherwise invalid quotes is considered a parse error.
+    enum class Quotes { STRICT_QUOTES, NOT_STRICT };
 
     NameValuePairsIterator(std::string::const_iterator begin,
                            std::string::const_iterator end,
                            char delimiter,
-                           OptionalValues optional_values);
+                           Values optional_values,
+                           Quotes strict_quotes);
 
-    // Treats values as not optional by default (VALUES_NOT_OPTIONAL).
+    // Treats values as not optional by default (Values::REQUIRED) and
+    // treats quotes as not strict.
     NameValuePairsIterator(std::string::const_iterator begin,
                            std::string::const_iterator end,
                            char delimiter);
@@ -384,6 +415,8 @@ class NET_EXPORT HttpUtil {
                                                        value_end_); }
 
    private:
+    bool IsQuote(char c) const;
+
     HttpUtil::ValuesIterator props_;
     bool valid_;
 
@@ -403,6 +436,11 @@ class NET_EXPORT HttpUtil {
     // True if values are required for each name/value pair; false if a
     // name is permitted to appear without a corresponding value.
     bool values_optional_;
+
+    // True if quotes values are required to be properly quoted; false if
+    // mismatched quotes and other problems with quoted values should be more
+    // or less gracefully treated as valid.
+    bool strict_quotes_;
   };
 };
 

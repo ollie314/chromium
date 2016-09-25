@@ -29,6 +29,9 @@ class ViewsTestBase : public PlatformTest {
   ViewsTestBase();
   ~ViewsTestBase() override;
 
+  // Whether the test is running under mus.
+  static bool IsMus();
+
   // testing::Test:
   void SetUp() override;
   void TearDown() override;
@@ -39,11 +42,7 @@ class ViewsTestBase : public PlatformTest {
   // cross-platform tests.
   Widget::InitParams CreateParams(Widget::InitParams::Type type);
 
-  // Use for tests that you should not create a NativeWidgetMus. Ideally we
-  // would use an ifdef, but for the time being we're not compiling differently,
-  // so that a define is not possible.
-  void DisableNativeWidgetMus();
-  bool IsMus() const;
+  bool HasCompositingManager() const;
 
  protected:
   TestViewsDelegate* views_delegate() const {
@@ -67,6 +66,7 @@ class ViewsTestBase : public PlatformTest {
   std::unique_ptr<ScopedViewsTestHelper> test_helper_;
   bool setup_called_;
   bool teardown_called_;
+  bool has_compositing_manager_;
 
 #if defined(OS_WIN)
   ui::ScopedOleInitializer ole_initializer_;

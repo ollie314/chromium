@@ -10,21 +10,23 @@
 #include <set>
 #include <utility>
 
-#include "ash/multi_profile_uma.h"
+#include "ash/common/multi_profile_uma.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/format_macros.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
 #include "base/task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -61,6 +63,7 @@
 #include "chromeos/login/user_names.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "chromeos/timezone/timezone_resolver.h"
+#include "components/policy/policy_constants.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
@@ -68,11 +71,12 @@
 #include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/remove_user_delegate.h"
+#include "components/user_manager/user.h"
 #include "components/user_manager/user_image/user_image.h"
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
-#include "policy/policy_constants.h"
+#include "extensions/common/features/feature_session_type.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/chromeos/resources/grit/ui_chromeos_resources.h"
@@ -127,6 +131,35 @@ void ResolveLocale(const std::string& raw_locale,
   ignore_result(l10n_util::CheckAndResolveLocale(raw_locale, resolved_locale));
 }
 
+bool GetUserLockAttributes(const user_manager::User* user,
+                           bool* can_lock,
+                           std::string* multi_profile_behavior) {
+  Profile* const profile = ProfileHelper::Get()->GetProfileByUser(user);
+  if (!profile)
+    return false;
+  PrefService* const prefs = profile->GetPrefs();
+  if (can_lock)
+    *can_lock = user->can_lock() && prefs->GetBoolean(prefs::kAllowScreenLock);
+  if (multi_profile_behavior) {
+    *multi_profile_behavior =
+        prefs->GetString(prefs::kMultiProfileUserBehavior);
+  }
+  return true;
+}
+
+extensions::FeatureSessionType GetFeatureSessionTypeForUser(
+    const user_manager::User* user) {
+  switch (user->GetType()) {
+    case user_manager::USER_TYPE_REGULAR:
+      return extensions::FeatureSessionType::REGULAR;
+    case user_manager::USER_TYPE_KIOSK_APP:
+      return extensions::FeatureSessionType::KIOSK;
+    default:
+      // The rest of user types is not used by extensions features.
+      return extensions::FeatureSessionType::UNKNOWN;
+  }
+}
+
 }  // namespace
 
 // static
@@ -171,8 +204,8 @@ ChromeUserManagerImpl::ChromeUserManagerImpl()
                  content::NotificationService::AllSources());
 
   // Since we're in ctor postpone any actions till this is fully created.
-  if (base::MessageLoop::current()) {
-    base::MessageLoop::current()->PostTask(
+  if (base::ThreadTaskRunnerHandle::IsSet()) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&ChromeUserManagerImpl::RetrieveTrustedDevicePolicies,
                    weak_factory_.GetWeakPtr()));
@@ -305,29 +338,31 @@ user_manager::UserList ChromeUserManagerImpl::GetUnlockUsers() const {
   if (logged_in_users.empty())
     return user_manager::UserList();
 
+  bool can_primary_lock = false;
+  std::string primary_behavior;
+  if (!GetUserLockAttributes(GetPrimaryUser(), &can_primary_lock,
+                             &primary_behavior)) {
+    // Locking is not allowed until the primary user profile is created.
+    return user_manager::UserList();
+  }
+
   user_manager::UserList unlock_users;
-  Profile* profile =
-      ProfileHelper::Get()->GetProfileByUserUnsafe(GetPrimaryUser());
-  std::string primary_behavior =
-      profile->GetPrefs()->GetString(prefs::kMultiProfileUserBehavior);
 
   // Specific case: only one logged in user or
   // primary user has primary-only multi-profile policy.
   if (logged_in_users.size() == 1 ||
       primary_behavior == MultiProfileUserController::kBehaviorPrimaryOnly) {
-    if (GetPrimaryUser()->can_lock())
+    if (can_primary_lock)
       unlock_users.push_back(primary_user_);
   } else {
     // Fill list of potential unlock users based on multi-profile policy state.
-    for (user_manager::UserList::const_iterator it = logged_in_users.begin();
-         it != logged_in_users.end();
-         ++it) {
-      user_manager::User* user = (*it);
-      Profile* profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
-      const std::string behavior =
-          profile->GetPrefs()->GetString(prefs::kMultiProfileUserBehavior);
+    for (user_manager::User* user : logged_in_users) {
+      bool can_lock = false;
+      std::string behavior;
+      if (!GetUserLockAttributes(user, &can_lock, &behavior))
+        continue;
       if (behavior == MultiProfileUserController::kBehaviorUnrestricted &&
-          user->can_lock()) {
+          can_lock) {
         unlock_users.push_back(user);
       } else if (behavior == MultiProfileUserController::kBehaviorPrimaryOnly) {
         NOTREACHED()
@@ -455,11 +490,10 @@ void ChromeUserManagerImpl::Observe(
         // ProfileManager::GetProfile before the profile gets registered
         // in ProfileManager. It happens in case of sync profile load when
         // NOTIFICATION_PROFILE_CREATED is called synchronously.
-        base::MessageLoop::current()->PostTask(
+        base::ThreadTaskRunnerHandle::Get()->PostTask(
             FROM_HERE,
             base::Bind(&ChromeUserManagerImpl::SwitchActiveUser,
-                       weak_factory_.GetWeakPtr(),
-                       GetPendingUserSwitchID()));
+                       weak_factory_.GetWeakPtr(), GetPendingUserSwitchID()));
         SetPendingUserSwitchId(EmptyAccountId());
       }
       break;
@@ -524,8 +558,14 @@ void ChromeUserManagerImpl::OnDeviceLocalAccountsChanged() {
 }
 
 bool ChromeUserManagerImpl::CanCurrentUserLock() const {
-  return ChromeUserManager::CanCurrentUserLock() &&
-         GetCurrentUserFlow()->CanLockScreen();
+  if (!ChromeUserManager::CanCurrentUserLock() ||
+      !GetCurrentUserFlow()->CanLockScreen()) {
+    return false;
+  }
+  bool can_lock = false;
+  if (!GetUserLockAttributes(active_user_, &can_lock, nullptr))
+    return false;
+  return can_lock;
 }
 
 bool ChromeUserManagerImpl::IsUserNonCryptohomeDataEphemeral(
@@ -692,9 +732,9 @@ void ChromeUserManagerImpl::GuestUserLoggedIn() {
   // mount point. Legacy (--login-profile) value will be used for now.
   // http://crosbug.com/230859
   active_user_->SetStubImage(
-      base::WrapUnique(new user_manager::UserImage(
+      base::MakeUnique<user_manager::UserImage>(
           *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-              IDR_PROFILE_PICTURE_LOADING))),
+              IDR_PROFILE_PICTURE_LOADING)),
       user_manager::User::USER_IMAGE_INVALID, false);
 
   // Initializes wallpaper after active_user_ is set.
@@ -756,8 +796,8 @@ void ChromeUserManagerImpl::SupervisedUserLoggedIn(
 
   // Add the user to the front of the user list.
   ListPrefUpdate prefs_users_update(GetLocalState(), kRegularUsers);
-  prefs_users_update->Insert(0,
-                             new base::StringValue(account_id.GetUserEmail()));
+  prefs_users_update->Insert(
+      0, base::MakeUnique<base::StringValue>(account_id.GetUserEmail()));
   users_.insert(users_.begin(), active_user_);
 
   // Now that user is in the list, save display name.
@@ -795,9 +835,9 @@ void ChromeUserManagerImpl::KioskAppLoggedIn(user_manager::User* user) {
 
   active_user_ = user;
   active_user_->SetStubImage(
-      base::WrapUnique(new user_manager::UserImage(
+      base::MakeUnique<user_manager::UserImage>(
           *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-              IDR_PROFILE_PICTURE_LOADING))),
+              IDR_PROFILE_PICTURE_LOADING)),
       user_manager::User::USER_IMAGE_INVALID, false);
 
   const AccountId& kiosk_app_account_id = user->GetAccountId();
@@ -840,9 +880,9 @@ void ChromeUserManagerImpl::DemoAccountLoggedIn() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   active_user_ = user_manager::User::CreateKioskAppUser(login::DemoAccountId());
   active_user_->SetStubImage(
-      base::WrapUnique(new user_manager::UserImage(
+      base::MakeUnique<user_manager::UserImage>(
           *ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-              IDR_PROFILE_PICTURE_LOADING))),
+              IDR_PROFILE_PICTURE_LOADING)),
       user_manager::User::USER_IMAGE_INVALID, false);
   WallpaperManager::Get()->SetUserWallpaperNow(login::DemoAccountId());
 
@@ -951,7 +991,7 @@ bool ChromeUserManagerImpl::UpdateAndCleanUpDeviceLocalAccounts(
 
   // Get the current list of device local accounts.
   std::vector<std::string> old_accounts;
-  for (const auto& user : users_) {
+  for (auto* user : users_) {
     if (user->IsDeviceLocalAccount())
       old_accounts.push_back(user->email());
   }
@@ -1197,7 +1237,7 @@ bool ChromeUserManagerImpl::ShouldReportUser(const std::string& user_id) const {
 void ChromeUserManagerImpl::AddReportingUser(const AccountId& account_id) {
   ListPrefUpdate users_update(GetLocalState(), kReportingUsers);
   users_update->AppendIfNotPresent(
-      new base::StringValue(account_id.GetUserEmail()));
+      base::MakeUnique<base::StringValue>(account_id.GetUserEmail()));
 }
 
 void ChromeUserManagerImpl::RemoveReportingUser(const AccountId& account_id) {
@@ -1212,6 +1252,11 @@ void ChromeUserManagerImpl::UpdateLoginState(
     bool is_current_user_owner) const {
   chrome_user_manager_util::UpdateLoginState(active_user, primary_user,
                                              is_current_user_owner);
+  // If a user is logged in, update session type as seen by extensions system.
+  if (active_user) {
+    extensions::SetCurrentFeatureSessionType(
+        GetFeatureSessionTypeForUser(active_user));
+  }
 }
 
 bool ChromeUserManagerImpl::GetPlatformKnownUserId(

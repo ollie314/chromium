@@ -9,7 +9,7 @@ from core import perf_benchmark
 
 from telemetry import benchmark
 from telemetry import page as page_module
-from telemetry.page import page_test
+from telemetry.page import legacy_page_test
 from telemetry.page import shared_page_state
 from telemetry import story
 from telemetry.value import list_of_scalar_values
@@ -71,7 +71,7 @@ def CreateStorySetFromPath(path, skipped_file,
   return ps
 
 
-class _BlinkPerfMeasurement(page_test.PageTest):
+class _BlinkPerfMeasurement(legacy_page_test.LegacyPageTest):
   """Tuns a blink performance test and reports the results."""
 
   def __init__(self):
@@ -81,6 +81,7 @@ class _BlinkPerfMeasurement(page_test.PageTest):
       self._blink_perf_js = f.read()
 
   def WillNavigateToPage(self, page, tab):
+    del tab  # unused
     page.script_to_evaluate_on_commit = self._blink_perf_js
 
   def CustomizeBrowserOptions(self, options):
@@ -198,7 +199,6 @@ class BlinkPerfCanvas(perf_benchmark.PerfBenchmark):
     return story_set
 
 
-@benchmark.Disabled('win', 'mac', 'linux')  # http://crbug.com/601666
 class BlinkPerfDOM(perf_benchmark.PerfBenchmark):
   tag = 'dom'
   test = _BlinkPerfMeasurement
@@ -317,7 +317,9 @@ class BlinkPerfXMLHttpRequest(perf_benchmark.PerfBenchmark):
 
 
 # Disabled on Windows and ChromeOS due to https://crbug.com/521887
-@benchmark.Disabled('win', 'chromeos')
+#@benchmark.Disabled('win', 'chromeos')
+# Disabling on remaining platforms due to heavy flake https://crbug.com/646938
+@benchmark.Disabled('all')
 class BlinkPerfPywebsocket(perf_benchmark.PerfBenchmark):
   """The blink_perf.pywebsocket tests measure turn-around-time of 10MB
   send/receive for XHR, Fetch API and WebSocket. We might ignore < 10%

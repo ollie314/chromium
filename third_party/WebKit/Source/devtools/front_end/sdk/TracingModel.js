@@ -160,16 +160,16 @@ WebInspector.TracingModel.prototype = {
         this._backingStorage.appendString(this._firstWritePending ? "[]" : "]");
         this._backingStorage.finishWriting();
         this._firstWritePending = false;
-        for (var process of Object.values(this._processById)) {
-            for (var thread of Object.values(process._threads))
+        for (var process of this._processById.values()) {
+            for (var thread of process._threads.values())
                 thread.tracingComplete();
         }
     },
 
     reset: function()
     {
-        /** @type {!Object.<(number|string), !WebInspector.TracingModel.Process>} */
-        this._processById = {};
+        /** @type {!Map<(number|string), !WebInspector.TracingModel.Process>} */
+        this._processById = new Map();
         this._processByName = new Map();
         this._minimumRecordTime = 0;
         this._maximumRecordTime = 0;
@@ -193,10 +193,10 @@ WebInspector.TracingModel.prototype = {
       */
     _addEvent: function(payload)
     {
-        var process = this._processById[payload.pid];
+        var process = this._processById.get(payload.pid);
         if (!process) {
             process = new WebInspector.TracingModel.Process(this, payload.pid);
-            this._processById[payload.pid] = process;
+            this._processById.set(payload.pid, process);
         }
 
         var eventsDelimiter = ",\n";
@@ -272,7 +272,7 @@ WebInspector.TracingModel.prototype = {
      */
     sortedProcesses: function()
     {
-        return WebInspector.TracingModel.NamedObject._sort(Object.values(this._processById));
+        return WebInspector.TracingModel.NamedObject._sort(this._processById.valuesArray());
     },
 
     /**
@@ -297,7 +297,7 @@ WebInspector.TracingModel.prototype = {
 
     _processPendingAsyncEvents: function()
     {
-        this._asyncEvents.sort(WebInspector.TracingModel.Event.compareStartTime);
+        this._asyncEvents.stableSort(WebInspector.TracingModel.Event.compareStartTime);
         for (var i = 0; i < this._asyncEvents.length; ++i) {
             var event = this._asyncEvents[i];
             if (WebInspector.TracingModel.isNestableAsyncPhase(event.phase))
@@ -447,7 +447,7 @@ WebInspector.TracingModel.Event = function(categories, name, phase, startTime, t
     this.warning = null;
     /** @type {?WebInspector.TracingModel.Event} */
     this.initiator = null;
-    /** @type {?Array.<!RuntimeAgent.CallFrame>} */
+    /** @type {?Array<!RuntimeAgent.CallFrame>} */
     this.stackTrace = null;
     /** @type {?Element} */
     this.previewElement = null;
@@ -543,7 +543,7 @@ WebInspector.TracingModel.Event.prototype = {
  * @param {!WebInspector.TracingModel.Event} b
  * @return {number}
  */
-WebInspector.TracingModel.Event.compareStartTime = function (a, b)
+WebInspector.TracingModel.Event.compareStartTime = function(a, b)
 {
     return a.startTime - b.startTime;
 }
@@ -553,9 +553,9 @@ WebInspector.TracingModel.Event.compareStartTime = function (a, b)
  * @param {!WebInspector.TracingModel.Event} b
  * @return {number}
  */
-WebInspector.TracingModel.Event.compareStartAndEndTime = function (a, b)
+WebInspector.TracingModel.Event.compareStartAndEndTime = function(a, b)
 {
-    return a.startTime - b.startTime || (b.endTime != undefined && a.endTime !== undefined && b.endTime - a.endTime) || 0;
+    return a.startTime - b.startTime || (b.endTime !== undefined && a.endTime !== undefined && b.endTime - a.endTime) || 0;
 }
 
 /**
@@ -563,7 +563,7 @@ WebInspector.TracingModel.Event.compareStartAndEndTime = function (a, b)
  * @param {!WebInspector.TracingModel.Event} b
  * @return {number}
  */
-WebInspector.TracingModel.Event.orderedCompareStartTime = function (a, b)
+WebInspector.TracingModel.Event.orderedCompareStartTime = function(a, b)
 {
     // Array.mergeOrdered coalesces objects if comparator returns 0.
     // To change this behavior this comparator return -1 in the case events
@@ -677,7 +677,7 @@ WebInspector.TracingModel.AsyncEvent.prototype = {
      */
     _addStep: function(event)
     {
-        this.steps.push(event)
+        this.steps.push(event);
         if (event.phase === WebInspector.TracingModel.Phase.AsyncEnd || event.phase === WebInspector.TracingModel.Phase.NestableAsyncEnd) {
             this.setEndTime(event.startTime);
             // FIXME: ideally, we shouldn't do this, but this makes the logic of converting
@@ -750,8 +750,8 @@ WebInspector.TracingModel.Process = function(model, id)
     WebInspector.TracingModel.NamedObject.call(this);
     this._setName("Process " + id);
     this._id = id;
-    /** @type {!Object.<number, !WebInspector.TracingModel.Thread>} */
-    this._threads = {};
+    /** @type {!Map<number, !WebInspector.TracingModel.Thread>} */
+    this._threads = new Map();
     this._threadByName = new Map();
     this._model = model;
 }
@@ -771,10 +771,10 @@ WebInspector.TracingModel.Process.prototype = {
      */
     threadById: function(id)
     {
-        var thread = this._threads[id];
+        var thread = this._threads.get(id);
         if (!thread) {
             thread = new WebInspector.TracingModel.Thread(this, id);
-            this._threads[id] = thread;
+            this._threads.set(id, thread);
         }
         return thread;
     },
@@ -811,7 +811,7 @@ WebInspector.TracingModel.Process.prototype = {
      */
     sortedThreads: function()
     {
-        return WebInspector.TracingModel.NamedObject._sort(Object.values(this._threads));
+        return WebInspector.TracingModel.NamedObject._sort(this._threads.valuesArray());
     },
 
     __proto__: WebInspector.TracingModel.NamedObject.prototype
@@ -861,6 +861,8 @@ WebInspector.TracingModel.Thread.prototype = {
                 break;
             }
         }
+        while (stack.length)
+            stack.pop().setEndTime(this._model.maximumRecordTime());
         this._events.remove(null, false);
     },
 

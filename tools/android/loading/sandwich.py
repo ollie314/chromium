@@ -7,16 +7,17 @@
 
 When running Chrome is sandwiched between preprocessed disk caches and
 WepPageReplay serving all connections.
-
-TODO(pasko): implement cache preparation and WPR.
 """
 
 import argparse
 import csv
+import json
 import logging
 import os
-import shutil
+import re
 import sys
+from urlparse import urlparse
+import yaml
 
 _SRC_DIR = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '..', '..', '..'))
@@ -28,220 +29,248 @@ sys.path.append(os.path.join(_SRC_DIR, 'build', 'android'))
 from pylib import constants
 import devil_chromium
 
-import chrome_cache
-import common_util
-import emulation
+import csv_util
+import device_setup
 import options
-import sandwich_metrics
-import sandwich_misc
-from sandwich_runner import SandwichRunner
-from trace_test.webserver_test import WebServer
+import sandwich_prefetch
+import sandwich_swr
+import sandwich_utils
+import task_manager
 
 
 # Use options layer to access constants.
 OPTIONS = options.OPTIONS
 
+_SPEED_INDEX_MEASUREMENT = 'speed-index'
+_MEMORY_MEASUREMENT = 'memory'
+_TTFMP_MEASUREMENT = 'ttfmp'
+_CORPUS_DIR = 'sandwich_corpuses'
+_SANDWICH_SETUP_FILENAME = 'sandwich_setup.yaml'
+
+_MAIN_TRANSFORMER_LIST_NAME = 'no-network-emulation'
+
+
+def ReadUrlsFromCorpus(corpus_path):
+  """Retrieves the list of URLs associated with the corpus name."""
+  try:
+    # Attempt to read by regular file name.
+    json_file_name = corpus_path
+    with open(json_file_name) as f:
+      json_data = json.load(f)
+  except IOError:
+    # Extra sugar: attempt to load from _CORPUS_DIR.
+    json_file_name = os.path.join(
+        os.path.dirname(__file__), _CORPUS_DIR, corpus_path)
+    with open(json_file_name) as f:
+      json_data = json.load(f)
+
+  key = 'urls'
+  if json_data and key in json_data:
+    url_list = json_data[key]
+    if isinstance(url_list, list) and len(url_list) > 0:
+      return [str(u) for u in url_list]
+  raise Exception(
+      'File {} does not define a list named "urls"'.format(json_file_name))
+
+
+def _GenerateUrlDirectoryMap(urls):
+  domain_times_encountered_per_domain = {}
+  url_directories = {}
+  for url in urls:
+    domain = '.'.join(urlparse(url).netloc.split('.')[-2:])
+    domain_times_encountered = domain_times_encountered_per_domain.get(
+        domain, 0)
+    output_subdirectory = '{}.{}'.format(domain, domain_times_encountered)
+    domain_times_encountered_per_domain[domain] = domain_times_encountered + 1
+    url_directories[output_subdirectory] = url
+  return url_directories
+
 
 def _ArgumentParser():
   """Build a command line argument's parser."""
-  # Command parser when dealing with jobs.
-  common_job_parser = argparse.ArgumentParser(add_help=False)
-  common_job_parser.add_argument('--job', required=True,
-                                 help='JSON file with job description.')
+  # Command line parser when dealing with _SetupBenchmarkMain.
+  sandwich_setup_parser = argparse.ArgumentParser(add_help=False)
+  sandwich_setup_parser.add_argument('--android', default=None, type=str,
+      dest='android_device_serial', help='Android device\'s serial to use.')
+  sandwich_setup_parser.add_argument('-c', '--corpus', required=True,
+      help='Path to a JSON file with a corpus such as in %s/.' % _CORPUS_DIR)
+  sandwich_setup_parser.add_argument('-m', '--measure', default=[], nargs='+',
+      choices=[_SPEED_INDEX_MEASUREMENT,
+               _MEMORY_MEASUREMENT,
+               _TTFMP_MEASUREMENT],
+      dest='optional_measures', help='Enable optional measurements.')
+  sandwich_setup_parser.add_argument('-o', '--output', type=str, required=True,
+      help='Path of the output directory to setup.')
+  sandwich_setup_parser.add_argument('-r', '--url-repeat', default=1, type=int,
+      help='How many times to repeat the urls.')
 
   # Plumbing parser to configure OPTIONS.
   plumbing_parser = OPTIONS.GetParentParser('plumbing options')
 
   # Main parser
-  parser = argparse.ArgumentParser(parents=[plumbing_parser])
+  parser = argparse.ArgumentParser(parents=[plumbing_parser],
+      fromfile_prefix_chars=task_manager.FROMFILE_PREFIX_CHARS)
   subparsers = parser.add_subparsers(dest='subcommand', help='subcommand line')
 
-  # Record WPR subcommand.
-  record_wpr = subparsers.add_parser('record-wpr', parents=[common_job_parser],
-                                     help='Record WPR from sandwich job.')
-  record_wpr.add_argument('--wpr-archive', required=True, type=str,
-                          dest='wpr_archive_path',
-                          help='Web page replay archive to generate.')
+  # Setup NoState-Prefetch benchmarks subcommand.
+  subparsers.add_parser('setup-prefetch', parents=[sandwich_setup_parser],
+      help='Setup all NoState-Prefetch benchmarks.')
 
-  # Patch WPR subcommand.
-  patch_wpr = subparsers.add_parser('patch-wpr',
-                                     help='Patch WPR response headers.')
-  patch_wpr.add_argument('--wpr-archive', required=True, type=str,
-                         dest='wpr_archive_path',
-                         help='Web page replay archive to patch.')
+  # Setup Stale-While-Revalidate benchmarks subcommand.
+  swr_setup_parser = subparsers.add_parser('setup-swr',
+      parents=[sandwich_setup_parser],
+      help='Setup all Stale-While-Revalidate benchmarks.')
+  swr_setup_parser.add_argument('-d', '--domains-csv',
+      type=argparse.FileType('r'), required=True,
+      help='Path of the CSV containing the pattern of domains in a '
+           '`domain-patterns` column and a `usage` column in percent in how '
+           'likely they are in a page load.')
 
-  # Create cache subcommand.
-  create_cache_parser = subparsers.add_parser('create-cache',
-      parents=[common_job_parser],
-      help='Create cache from sandwich job.')
-  create_cache_parser.add_argument('--cache-archive', required=True, type=str,
-                                   dest='cache_archive_path',
-                                   help='Cache archive destination path.')
-  create_cache_parser.add_argument('--wpr-archive', default=None, type=str,
-                                   dest='wpr_archive_path',
-                                   help='Web page replay archive to create ' +
-                                       'the cache from.')
+  # Run benchmarks subcommand (used in _RunBenchmarkMain).
+  subparsers.add_parser('run', parents=[task_manager.CommandLineParser()],
+      help='Run benchmarks steps using the task manager infrastructure.')
 
-  # Run subcommand.
-  run_parser = subparsers.add_parser('run', parents=[common_job_parser],
-                                     help='Run sandwich benchmark.')
-  run_parser.add_argument('--output', required=True, type=str,
-                          dest='trace_output_directory',
-                          help='Path of output directory to create.')
-  run_parser.add_argument('--cache-archive', type=str,
-                          dest='cache_archive_path',
-                          help='Cache archive destination path.')
-  run_parser.add_argument('--cache-op',
-                          choices=['clear', 'push', 'reload'],
-                          dest='cache_operation',
-                          default='clear',
-                          help='Configures cache operation to do before '
-                              +'launching Chrome. (Default is clear). The push'
-                              +' cache operation requires --cache-archive to '
-                              +'set.')
-  run_parser.add_argument('--disable-wpr-script-injection',
-                          action='store_true',
-                          help='Disable WPR default script injection such as ' +
-                              'overriding javascript\'s Math.random() and ' +
-                              'Date() with deterministic implementations.')
-  run_parser.add_argument('--network-condition', default=None,
-      choices=sorted(emulation.NETWORK_CONDITIONS.keys()),
-      help='Set a network profile.')
-  run_parser.add_argument('--network-emulator', default='browser',
-      choices=['browser', 'wpr'],
-      help='Set which component is emulating the network condition.' +
-          ' (Default to browser). Wpr network emulator requires --wpr-archive' +
-          ' to be set.')
-  run_parser.add_argument('--job-repeat', default=1, type=int,
-                          help='How many times to run the job.')
-  run_parser.add_argument('--record-video', action='store_true',
-                          help='Configures either to record or not a video of '
-                              +'chrome loading the web pages.')
-  run_parser.add_argument('--wpr-archive', default=None, type=str,
-                          dest='wpr_archive_path',
-                          help='Web page replay archive to load job\'s urls ' +
-                              'from.')
-
-  # Pull metrics subcommand.
-  create_cache_parser = subparsers.add_parser('extract-metrics',
-      help='Extracts metrics from a loading trace and saves as CSV.')
-  create_cache_parser.add_argument('--trace-directory', required=True,
-                                   dest='trace_output_directory', type=str,
-                                   help='Path of loading traces directory.')
-  create_cache_parser.add_argument('--out-metrics', default=None, type=str,
-                                   dest='metrics_csv_path',
-                                   help='Path where to save the metrics\'s '+
-                                      'CSV.')
-
-  # Filter cache subcommand.
-  filter_cache_parser = subparsers.add_parser('filter-cache',
-      help='Cache filtering that keeps only resources discoverable by the HTML'+
-          ' document parser.')
-  filter_cache_parser.add_argument('--cache-archive', type=str, required=True,
-                                   dest='cache_archive_path',
-                                   help='Path of the cache archive to filter.')
-  filter_cache_parser.add_argument('--subresource-discoverer', required=True,
-      help='Strategy for populating the cache with a subset of resources, '
-           'according to the way they can be discovered',
-      choices=sandwich_misc.SUBRESOURCE_DISCOVERERS)
-  filter_cache_parser.add_argument('--output', type=str, required=True,
-                                   dest='output_cache_archive_path',
-                                   help='Path of filtered cache archive.')
-  filter_cache_parser.add_argument('loading_trace_paths', type=str, nargs='+',
-      metavar='LOADING_TRACE',
-      help='A list of loading traces generated by a sandwich run for a given' +
-          ' url. This is used to have a resource dependency graph to white-' +
-          'list the ones discoverable by the HTML pre-scanner for that given ' +
-          'url.')
-
-  # Record test trace subcommand.
-  record_trace_parser = subparsers.add_parser('record-test-trace',
-      help='Record a test trace using the trace_test.webserver_test.')
-  record_trace_parser.add_argument('--source-dir', type=str, required=True,
-                                   help='Base path where the files are opened'
-                                        'by the web server.')
-  record_trace_parser.add_argument('--page', type=str, required=True,
-                                   help='Source page in source-dir to navigate '
-                                        'to.')
-  record_trace_parser.add_argument('-o', '--output', type=str, required=True,
-                                   help='Output path of the generated trace.')
+  # Collect subcommand.
+  collect_csv_parser = subparsers.add_parser('collect-csv',
+      help='Collects all CSVs from Sandwich output directory into a single '
+           'CSV.')
+  collect_csv_parser.add_argument('output_dir', type=str,
+                                  help='Path to the run output directory.')
+  collect_csv_parser.add_argument('output_csv', type=argparse.FileType('w'),
+                                  help='Path to the output CSV.')
 
   return parser
 
 
-def _RecordWprMain(args):
-  sandwich_runner = SandwichRunner()
-  sandwich_runner.LoadJob(args.job)
-  sandwich_runner.PullConfigFromArgs(args)
-  sandwich_runner.wpr_record = True
-  sandwich_runner.PrintConfig()
-  if not os.path.isdir(os.path.dirname(args.wpr_archive_path)):
-    os.makedirs(os.path.dirname(args.wpr_archive_path))
-  sandwich_runner.Run()
-  return 0
+def _SetupNoStatePrefetchBenchmark(args):
+  del args # unused.
+  return {
+    'network_conditions': ['Regular4G', 'Regular3G', 'Regular2G'],
+    'subresource_discoverers': [
+        e for e in sandwich_prefetch.SUBRESOURCE_DISCOVERERS
+            if e != sandwich_prefetch.Discoverer.FullCache]
+  }
 
 
-def _CreateCacheMain(args):
-  sandwich_runner = SandwichRunner()
-  sandwich_runner.LoadJob(args.job)
-  sandwich_runner.PullConfigFromArgs(args)
-  sandwich_runner.cache_operation = 'save'
-  sandwich_runner.PrintConfig()
-  if not os.path.isdir(os.path.dirname(args.cache_archive_path)):
-    os.makedirs(os.path.dirname(args.cache_archive_path))
-  sandwich_runner.Run()
-  return 0
+def _GenerateNoStatePrefetchBenchmarkTasks(
+    common_builder, main_transformer, benchmark_setup):
+  builder = sandwich_prefetch.PrefetchBenchmarkBuilder(common_builder)
+  builder.PopulateLoadBenchmark(sandwich_prefetch.Discoverer.EmptyCache,
+                                _MAIN_TRANSFORMER_LIST_NAME,
+                                transformer_list=[main_transformer])
+  builder.PopulateLoadBenchmark(sandwich_prefetch.Discoverer.FullCache,
+                                _MAIN_TRANSFORMER_LIST_NAME,
+                                transformer_list=[main_transformer])
+  for network_condition in benchmark_setup['network_conditions']:
+    transformer_list_name = network_condition.lower()
+    network_transformer = \
+        sandwich_utils.NetworkSimulationTransformer(network_condition)
+    transformer_list = [main_transformer, network_transformer]
+    for subresource_discoverer in benchmark_setup['subresource_discoverers']:
+      builder.PopulateLoadBenchmark(
+          subresource_discoverer, transformer_list_name, transformer_list)
 
 
-def _RunJobMain(args):
-  sandwich_runner = SandwichRunner()
-  sandwich_runner.LoadJob(args.job)
-  sandwich_runner.PullConfigFromArgs(args)
-  sandwich_runner.PrintConfig()
-  sandwich_runner.Run()
-  return 0
+def _SetupStaleWhileRevalidateBenchmark(args):
+  domain_regexes = []
+  for row in csv.DictReader(args.domains_csv):
+    domain_patterns = json.loads('[{}]'.format(row['domain-patterns']))
+    for domain_pattern in domain_patterns:
+      domain_pattern_escaped = r'(\.|^){}$'.format(re.escape(domain_pattern))
+      domain_regexes.append({
+          'usage': float(row['usage']),
+          'domain_regex': domain_pattern_escaped.replace(r'\?', r'\w*')})
+  return {
+    'domain_regexes': domain_regexes,
+    'network_conditions': ['Regular3G', 'Regular2G'],
+    'usage_thresholds': [1, 3, 5, 10]
+  }
 
 
-def _ExtractMetricsMain(args):
-  trace_metrics_list = sandwich_metrics.PullMetricsFromOutputDirectory(
-      args.trace_output_directory)
-  trace_metrics_list.sort(key=lambda e: e['id'])
-  with open(args.metrics_csv_path, 'w') as csv_file:
-    writer = csv.DictWriter(csv_file,
-                            fieldnames=sandwich_metrics.CSV_FIELD_NAMES)
-    writer.writeheader()
-    for trace_metrics in trace_metrics_list:
-      writer.writerow(trace_metrics)
-  return 0
+def _GenerateStaleWhileRevalidateBenchmarkTasks(
+    common_builder, main_transformer, benchmark_setup):
+  # Compile domain regexes.
+  domain_regexes = []
+  for e in benchmark_setup['domain_regexes']:
+     domain_regexes.append({
+        'usage': e['usage'],
+        'domain_regex': re.compile(e['domain_regex'])})
+
+  # Build tasks.
+  builder = sandwich_swr.StaleWhileRevalidateBenchmarkBuilder(common_builder)
+  for network_condition in benchmark_setup['network_conditions']:
+    transformer_list_name = network_condition.lower()
+    network_transformer = \
+        sandwich_utils.NetworkSimulationTransformer(network_condition)
+    transformer_list = [main_transformer, network_transformer]
+    builder.PopulateBenchmark(
+        'no-swr', [], transformer_list_name, transformer_list)
+    for usage_threshold in benchmark_setup['usage_thresholds']:
+      benchmark_name = 'threshold{}'.format(usage_threshold)
+      selected_domain_regexes = [e['domain_regex'] for e in domain_regexes
+          if e['usage'] > usage_threshold]
+      builder.PopulateBenchmark(
+          benchmark_name, selected_domain_regexes,
+          transformer_list_name, transformer_list)
 
 
-def _FilterCacheMain(args):
-  whitelisted_urls = set()
-  for loading_trace_path in args.loading_trace_paths:
-    whitelisted_urls.update(sandwich_misc.ExtractDiscoverableUrls(
-        loading_trace_path, args.subresource_discoverer))
-  if not os.path.isdir(os.path.dirname(args.output_cache_archive_path)):
-    os.makedirs(os.path.dirname(args.output_cache_archive_path))
-  chrome_cache.ApplyUrlWhitelistToCacheArchive(args.cache_archive_path,
-                                               whitelisted_urls,
-                                               args.output_cache_archive_path)
-  return 0
+_TASK_GENERATORS = {
+  'prefetch': _GenerateNoStatePrefetchBenchmarkTasks,
+  'swr': _GenerateStaleWhileRevalidateBenchmarkTasks
+}
 
 
-def _RecordWebServerTestTrace(args):
-  with common_util.TemporaryDirectory() as out_path:
-    sandwich_runner = SandwichRunner()
-    # Reuse the WPR's forwarding to access the webpage from Android.
-    sandwich_runner.wpr_record = True
-    sandwich_runner.wpr_archive_path = os.path.join(out_path, 'wpr')
-    sandwich_runner.trace_output_directory = os.path.join(out_path, 'run')
-    with WebServer.Context(
-        source_dir=args.source_dir, communication_dir=out_path) as server:
-      address = server.Address()
-      sandwich_runner.urls = ['http://%s/%s' % (address, args.page)]
-      sandwich_runner.Run()
-    shutil.copy(os.path.join(out_path, 'run', '0', 'trace.json'), args.output)
-  return 0
+def _SetupBenchmarkMain(args, benchmark_type, benchmark_specific_handler):
+  assert benchmark_type in _TASK_GENERATORS
+  urls = ReadUrlsFromCorpus(args.corpus)
+  setup = {
+    'benchmark_type': benchmark_type,
+    'benchmark_setup': benchmark_specific_handler(args),
+    'sandwich_runner': {
+      'record_video': _SPEED_INDEX_MEASUREMENT in args.optional_measures,
+      'record_memory_dumps': _MEMORY_MEASUREMENT in args.optional_measures,
+      'record_first_meaningful_paint': (
+          _TTFMP_MEASUREMENT in args.optional_measures),
+      'repeat': args.url_repeat,
+      'android_device_serial': args.android_device_serial
+    },
+    'urls': _GenerateUrlDirectoryMap(urls)
+  }
+  if not os.path.isdir(args.output):
+    os.makedirs(args.output)
+  setup_path = os.path.join(args.output, _SANDWICH_SETUP_FILENAME)
+  with open(setup_path, 'w') as file_output:
+    yaml.dump(setup, file_output, default_flow_style=False)
+
+
+def _RunBenchmarkMain(args):
+  setup_path = os.path.join(args.output, _SANDWICH_SETUP_FILENAME)
+  with open(setup_path) as file_input:
+    setup = yaml.load(file_input)
+  android_device = None
+  if setup['sandwich_runner']['android_device_serial']:
+    android_device = device_setup.GetDeviceFromSerial(
+        setup['sandwich_runner']['android_device_serial'])
+  task_generator = _TASK_GENERATORS[setup['benchmark_type']]
+
+  def MainTransformer(runner):
+    runner.record_video = setup['sandwich_runner']['record_video']
+    runner.record_memory_dumps = setup['sandwich_runner']['record_memory_dumps']
+    runner.record_first_meaningful_paint = (
+        setup['sandwich_runner']['record_first_meaningful_paint'])
+    runner.repeat = setup['sandwich_runner']['repeat']
+
+  default_final_tasks = []
+  for output_subdirectory, url in setup['urls'].iteritems():
+    common_builder = sandwich_utils.SandwichCommonBuilder(
+        android_device=android_device,
+        url=url,
+        output_directory=args.output,
+        output_subdirectory=output_subdirectory)
+    common_builder.PopulateWprRecordingTask()
+    task_generator(common_builder, MainTransformer, setup['benchmark_setup'])
+    default_final_tasks.extend(common_builder.default_final_tasks)
+  return task_manager.ExecuteWithCommandLine(args, default_final_tasks)
 
 
 def main(command_line_args):
@@ -251,21 +280,19 @@ def main(command_line_args):
   args = _ArgumentParser().parse_args(command_line_args)
   OPTIONS.SetParsedArgs(args)
 
-  if args.subcommand == 'record-wpr':
-    return _RecordWprMain(args)
-  if args.subcommand == 'patch-wpr':
-    sandwich_misc.PatchWpr(args.wpr_archive_path)
-    return 0
-  if args.subcommand == 'create-cache':
-    return _CreateCacheMain(args)
+  if args.subcommand == 'setup-prefetch':
+    return _SetupBenchmarkMain(
+        args, 'prefetch', _SetupNoStatePrefetchBenchmark)
+  if args.subcommand == 'setup-swr':
+    return _SetupBenchmarkMain(
+        args, 'swr', _SetupStaleWhileRevalidateBenchmark)
   if args.subcommand == 'run':
-    return _RunJobMain(args)
-  if args.subcommand == 'extract-metrics':
-    return _ExtractMetricsMain(args)
-  if args.subcommand == 'filter-cache':
-    return _FilterCacheMain(args)
-  if args.subcommand == 'record-test-trace':
-    return _RecordWebServerTestTrace(args)
+    return _RunBenchmarkMain(args)
+  if args.subcommand == 'collect-csv':
+    with args.output_csv as output_file:
+      if not csv_util.CollectCSVsFromDirectory(args.output_dir, output_file):
+        return 1
+    return 0
   assert False
 
 

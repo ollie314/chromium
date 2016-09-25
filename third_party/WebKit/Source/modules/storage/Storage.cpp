@@ -26,7 +26,6 @@
 #include "modules/storage/Storage.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/text/WTFString.h"
 
@@ -43,11 +42,6 @@ Storage::Storage(LocalFrame* frame, StorageArea* storageArea)
 {
     ASSERT(m_frame);
     ASSERT(m_storageArea);
-}
-
-String Storage::anonymousIndexedGetter(unsigned index, ExceptionState& exceptionState)
-{
-    return anonymousNamedGetter(AtomicString::number(index), exceptionState);
 }
 
 String Storage::anonymousNamedGetter(const AtomicString& name, ExceptionState& exceptionState)
@@ -67,11 +61,6 @@ bool Storage::anonymousNamedSetter(const AtomicString& name, const AtomicString&
     return true;
 }
 
-bool Storage::anonymousIndexedSetter(unsigned index, const AtomicString& value, ExceptionState& exceptionState)
-{
-    return anonymousNamedSetter(AtomicString::number(index), value, exceptionState);
-}
-
 DeleteResult Storage::anonymousNamedDeleter(const AtomicString& name, ExceptionState& exceptionState)
 {
     bool found = contains(name, exceptionState);
@@ -83,12 +72,6 @@ DeleteResult Storage::anonymousNamedDeleter(const AtomicString& name, ExceptionS
     if (exceptionState.hadException())
         return DeleteReject;
     return DeleteSuccess;
-}
-
-DeleteResult Storage::anonymousIndexedDeleter(unsigned index, ExceptionState& exceptionState)
-{
-    DeleteResult result = anonymousNamedDeleter(AtomicString::number(index), exceptionState);
-    return result == DeleteUnknownProperty ? DeleteSuccess : result;
 }
 
 void Storage::namedPropertyEnumerator(Vector<String>& names, ExceptionState& exceptionState)

@@ -59,6 +59,8 @@ public:
 
     DECLARE_VIRTUAL_TRACE();
 
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
+
 private:
     Attr(Element&, const QualifiedName&);
     Attr(Document&, const QualifiedName&, const AtomicString& value);
@@ -66,7 +68,7 @@ private:
     bool isElementNode() const = delete; // This will catch anyone doing an unnecessary check.
 
     String nodeName() const override { return name(); }
-    NodeType getNodeType() const override { return ATTRIBUTE_NODE; }
+    NodeType getNodeType() const override { return kAttributeNode; }
 
     String nodeValue() const override { return value(); }
     void setNodeValue(const String&) override;

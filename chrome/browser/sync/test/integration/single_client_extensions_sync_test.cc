@@ -7,8 +7,8 @@
 #include "chrome/browser/sync/test/integration/extensions_helper.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
-#include "sync/test/fake_server/tombstone_entity.h"
+#include "components/browser_sync/profile_sync_service.h"
+#include "components/sync/test/fake_server/tombstone_entity.h"
 
 using extensions_helper::AllProfilesHaveSameExtensionsAsVerifier;
 using extensions_helper::DisableExtension;
@@ -57,7 +57,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientExtensionsSyncTest, InstallSomeExtensions) {
     InstallExtension(verifier(), i);
   }
 
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService(0)));
 
   ASSERT_TRUE(AllProfilesHaveSameExtensionsAsVerifier());
 }
@@ -82,9 +82,10 @@ IN_PROC_BROWSER_TEST_F(SingleClientExtensionsSyncTest, UninstallWinsConflicts) {
   std::vector<sync_pb::SyncEntity> server_extensions =
       GetFakeServer()->GetSyncEntitiesByModelType(syncer::EXTENSIONS);
   ASSERT_EQ(1ul, server_extensions.size());
-  std::string entity_id = server_extensions[0].id_string();
   std::unique_ptr<fake_server::FakeServerEntity> tombstone(
-      fake_server::TombstoneEntity::Create(entity_id));
+      fake_server::TombstoneEntity::Create(
+          server_extensions[0].id_string(),
+          server_extensions[0].client_defined_unique_tag()));
   GetFakeServer()->InjectEntity(std::move(tombstone));
 
   // Modify the extension in the local profile to cause a conflict.

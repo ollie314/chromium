@@ -7,7 +7,6 @@
 #include "public/platform/WebFrameScheduler.h"
 #include "public/platform/WebTraceLocation.h"
 #include "wtf/Assertions.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
@@ -18,7 +17,7 @@ class IdleTaskRunner : public WebThread::IdleTask {
     WTF_MAKE_NONCOPYABLE(IdleTaskRunner);
 
 public:
-    explicit IdleTaskRunner(PassOwnPtr<WebScheduler::IdleTask> task)
+    explicit IdleTaskRunner(std::unique_ptr<WebScheduler::IdleTask> task)
         : m_task(std::move(task))
     {
     }
@@ -34,24 +33,19 @@ public:
     }
 
 private:
-    OwnPtr<WebScheduler::IdleTask> m_task;
+    std::unique_ptr<WebScheduler::IdleTask> m_task;
 };
 
 } // namespace
 
-void WebScheduler::postIdleTask(const WebTraceLocation& location, PassOwnPtr<IdleTask> idleTask)
+void WebScheduler::postIdleTask(const WebTraceLocation& location, std::unique_ptr<IdleTask> idleTask)
 {
     postIdleTask(location, new IdleTaskRunner(std::move(idleTask)));
 }
 
-void WebScheduler::postNonNestableIdleTask(const WebTraceLocation& location, PassOwnPtr<IdleTask> idleTask)
+void WebScheduler::postNonNestableIdleTask(const WebTraceLocation& location, std::unique_ptr<IdleTask> idleTask)
 {
     postNonNestableIdleTask(location, new IdleTaskRunner(std::move(idleTask)));
-}
-
-void WebScheduler::postIdleTaskAfterWakeup(const WebTraceLocation& location, PassOwnPtr<IdleTask> idleTask)
-{
-    postIdleTaskAfterWakeup(location, new IdleTaskRunner(std::move(idleTask)));
 }
 
 } // namespace blink

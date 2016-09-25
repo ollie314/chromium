@@ -19,6 +19,7 @@
 #include "content/browser/media/media_web_contents_observer.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
+#include "content/browser/ssl/ssl_policy.h"
 #include "content/browser/webui/content_web_ui_controller_factory.h"
 #include "content/browser/webui/web_ui_controller_factory_registry.h"
 #include "content/common/frame_messages.h"
@@ -49,8 +50,8 @@
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
-#include "net/base/test_data_directory.h"
 #include "net/test/cert_test_util.h"
+#include "net/test/test_data_directory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "url/url_constants.h"
@@ -405,29 +406,46 @@ TEST_F(WebContentsImplTest, UseTitleFromPendingEntryIfSet) {
   EXPECT_EQ(title, contents()->GetTitle());
 }
 
-// Test view source mode for a webui page.
-TEST_F(WebContentsImplTest, NTPViewSource) {
+// Browser initiated navigations to view-source URLs of WebUI pages should work.
+TEST_F(WebContentsImplTest, DirectNavigationToViewSourceWebUI) {
   NavigationControllerImpl& cont =
       static_cast<NavigationControllerImpl&>(controller());
-  const char kUrl[] = "view-source:chrome://blah";
-  const GURL kGURL(kUrl);
+  const GURL kGURL("view-source:chrome://blah");
+  // NavigationControllerImpl rewrites view-source URLs, simulating that here.
+  const GURL kRewrittenURL("chrome://blah");
 
   process()->sink().ClearMessages();
 
-  cont.LoadURL(
-      kGURL, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
+  // Use LoadURLWithParams instead of LoadURL, because the former properly
+  // rewrites view-source:chrome://blah URLs to chrome://blah.
+  NavigationController::LoadURLParams load_params(kGURL);
+  load_params.transition_type = ui::PAGE_TRANSITION_TYPED;
+  load_params.extra_headers = "content-type: text/plain";
+  load_params.load_type = NavigationController::LOAD_TYPE_DEFAULT;
+  load_params.is_renderer_initiated = false;
+  controller().LoadURLWithParams(load_params);
+
   int entry_id = cont.GetPendingEntry()->GetUniqueID();
   // Did we get the expected message?
   EXPECT_TRUE(process()->sink().GetFirstMessageMatching(
       FrameMsg_EnableViewSourceMode::ID));
 
   FrameHostMsg_DidCommitProvisionalLoad_Params params;
-  InitNavigateParams(&params, 0, entry_id, true, kGURL,
+  InitNavigateParams(&params, 0, entry_id, true, kRewrittenURL,
                      ui::PAGE_TRANSITION_TYPED);
   contents()->GetMainFrame()->PrepareForCommit();
+  contents()->GetMainFrame()->OnMessageReceived(
+      FrameHostMsg_DidStartProvisionalLoad(1, kRewrittenURL,
+                                           base::TimeTicks::Now()));
   contents()->GetMainFrame()->SendNavigateWithParams(&params);
-  // Also check title and url.
-  EXPECT_EQ(base::ASCIIToUTF16(kUrl), contents()->GetTitle());
+
+  // This is the virtual URL.
+  EXPECT_EQ(base::ASCIIToUTF16("view-source:chrome://blah"),
+            contents()->GetTitle());
+
+  // The actual URL navigated to.
+  EXPECT_EQ(kRewrittenURL,
+            contents()->GetController().GetLastCommittedEntry()->GetURL());
 }
 
 // Test to ensure UpdateMaxPageID is working properly.
@@ -856,10 +874,7 @@ TEST_F(WebContentsImplTest, NavigateFromRestoredSitelessUrl) {
           std::string(), browser_context());
   new_entry->SetPageID(0);
   entries.push_back(std::move(new_entry));
-  controller().Restore(
-      0,
-      NavigationController::RESTORE_LAST_SESSION_EXITED_CLEANLY,
-      &entries);
+  controller().Restore(0, RestoreType::LAST_SESSION_EXITED_CLEANLY, &entries);
   ASSERT_EQ(0u, entries.size());
   ASSERT_EQ(1, controller().GetEntryCount());
 
@@ -906,10 +921,7 @@ TEST_F(WebContentsImplTest, NavigateFromRestoredRegularUrl) {
           std::string(), browser_context());
   new_entry->SetPageID(0);
   entries.push_back(std::move(new_entry));
-  controller().Restore(
-      0,
-      NavigationController::RESTORE_LAST_SESSION_EXITED_CLEANLY,
-      &entries);
+  controller().Restore(0, RestoreType::LAST_SESSION_EXITED_CLEANLY, &entries);
   ASSERT_EQ(0u, entries.size());
 
   ASSERT_EQ(1, controller().GetEntryCount());
@@ -1530,11 +1542,11 @@ TEST_F(WebContentsImplTest, NavigationExitsFullscreen) {
   EXPECT_EQ(orig_rfh, contents()->GetMainFrame());
 
   // Toggle fullscreen mode on (as if initiated via IPC from renderer).
-  EXPECT_FALSE(contents()->IsFullscreenForCurrentTab(test_rvh()->GetWidget()));
+  EXPECT_FALSE(contents()->IsFullscreenForCurrentTab());
   EXPECT_FALSE(fake_delegate.IsFullscreenForTabOrPending(contents()));
   orig_rfh->OnMessageReceived(
       FrameHostMsg_ToggleFullscreen(orig_rfh->GetRoutingID(), true));
-  EXPECT_TRUE(contents()->IsFullscreenForCurrentTab(test_rvh()->GetWidget()));
+  EXPECT_TRUE(contents()->IsFullscreenForCurrentTab());
   EXPECT_TRUE(fake_delegate.IsFullscreenForTabOrPending(contents()));
 
   // Navigate to a new site.
@@ -1548,7 +1560,7 @@ TEST_F(WebContentsImplTest, NavigationExitsFullscreen) {
                               ui::PAGE_TRANSITION_TYPED);
 
   // Confirm fullscreen has exited.
-  EXPECT_FALSE(contents()->IsFullscreenForCurrentTab(test_rvh()->GetWidget()));
+  EXPECT_FALSE(contents()->IsFullscreenForCurrentTab());
   EXPECT_FALSE(fake_delegate.IsFullscreenForTabOrPending(contents()));
 
   contents()->SetDelegate(nullptr);
@@ -1583,14 +1595,14 @@ TEST_F(WebContentsImplTest, HistoryNavigationExitsFullscreen) {
   EXPECT_EQ(orig_rfh, contents()->GetMainFrame());
 
   // Sanity-check: Confirm we're not starting out in fullscreen mode.
-  EXPECT_FALSE(contents()->IsFullscreenForCurrentTab(test_rvh()->GetWidget()));
+  EXPECT_FALSE(contents()->IsFullscreenForCurrentTab());
   EXPECT_FALSE(fake_delegate.IsFullscreenForTabOrPending(contents()));
 
   for (int i = 0; i < 2; ++i) {
     // Toggle fullscreen mode on (as if initiated via IPC from renderer).
     orig_rfh->OnMessageReceived(
         FrameHostMsg_ToggleFullscreen(orig_rfh->GetRoutingID(), true));
-    EXPECT_TRUE(contents()->IsFullscreenForCurrentTab(test_rvh()->GetWidget()));
+    EXPECT_TRUE(contents()->IsFullscreenForCurrentTab());
     EXPECT_TRUE(fake_delegate.IsFullscreenForTabOrPending(contents()));
 
     // Navigate backward (or forward).
@@ -1607,8 +1619,7 @@ TEST_F(WebContentsImplTest, HistoryNavigationExitsFullscreen) {
     orig_rfh->SimulateNavigationStop();
 
     // Confirm fullscreen has exited.
-    EXPECT_FALSE(
-        contents()->IsFullscreenForCurrentTab(test_rvh()->GetWidget()));
+    EXPECT_FALSE(contents()->IsFullscreenForCurrentTab());
     EXPECT_FALSE(fake_delegate.IsFullscreenForTabOrPending(contents()));
   }
 
@@ -1647,18 +1658,18 @@ TEST_F(WebContentsImplTest, CrashExitsFullscreen) {
                               url, ui::PAGE_TRANSITION_TYPED);
 
   // Toggle fullscreen mode on (as if initiated via IPC from renderer).
-  EXPECT_FALSE(contents()->IsFullscreenForCurrentTab(test_rvh()->GetWidget()));
+  EXPECT_FALSE(contents()->IsFullscreenForCurrentTab());
   EXPECT_FALSE(fake_delegate.IsFullscreenForTabOrPending(contents()));
   contents()->GetMainFrame()->OnMessageReceived(FrameHostMsg_ToggleFullscreen(
       contents()->GetMainFrame()->GetRoutingID(), true));
-  EXPECT_TRUE(contents()->IsFullscreenForCurrentTab(test_rvh()->GetWidget()));
+  EXPECT_TRUE(contents()->IsFullscreenForCurrentTab());
   EXPECT_TRUE(fake_delegate.IsFullscreenForTabOrPending(contents()));
 
   // Crash the renderer.
   main_test_rfh()->GetProcess()->SimulateCrash();
 
   // Confirm fullscreen has exited.
-  EXPECT_FALSE(contents()->IsFullscreenForCurrentTab(test_rvh()->GetWidget()));
+  EXPECT_FALSE(contents()->IsFullscreenForCurrentTab());
   EXPECT_FALSE(fake_delegate.IsFullscreenForTabOrPending(contents()));
 
   contents()->SetDelegate(nullptr);
@@ -2637,9 +2648,10 @@ TEST_F(WebContentsImplTest, PendingContents) {
   std::unique_ptr<TestWebContents> other_contents(
       static_cast<TestWebContents*>(CreateTestWebContents()));
   contents()->AddPendingContents(other_contents.get());
+  int process_id = other_contents->GetRenderViewHost()->GetProcess()->GetID();
   int route_id = other_contents->GetRenderViewHost()->GetRoutingID();
   other_contents.reset();
-  EXPECT_EQ(nullptr, contents()->GetCreatedWindow(route_id));
+  EXPECT_EQ(nullptr, contents()->GetCreatedWindow(process_id, route_id));
 }
 
 TEST_F(WebContentsImplTest, CapturerOverridesPreferredSize) {
@@ -2805,43 +2817,34 @@ TEST_F(WebContentsImplTest, HandleWheelEvent) {
   EXPECT_FALSE(contents()->HandleWheelEvent(event));
   EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
 
-  modifiers = WebInputEvent::ShiftKey | WebInputEvent::AltKey |
-      WebInputEvent::ControlKey;
-  event =
-      SyntheticWebMouseWheelEventBuilder::Build(0, 0, 0, 1, modifiers, false);
-  EXPECT_FALSE(contents()->HandleWheelEvent(event));
-  EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
-
-  // But whenever the ctrl modifier is applied with canScroll=false, they can
-  // increase/decrease zoom. Except on MacOS where we never want to adjust zoom
+  // But whenever the ctrl modifier is applied zoom can be increased or
+  // decreased. Except on MacOS where we never want to adjust zoom
   // with mousewheel.
   modifiers = WebInputEvent::ControlKey;
   event =
       SyntheticWebMouseWheelEventBuilder::Build(0, 0, 0, 1, modifiers, false);
-  event.canScroll = false;
   bool handled = contents()->HandleWheelEvent(event);
-#if defined(OS_MACOSX)
-  EXPECT_FALSE(handled);
-  EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
-#else
+#if defined(USE_AURA)
   EXPECT_TRUE(handled);
   EXPECT_EQ(1, delegate->GetAndResetContentsZoomChangedCallCount());
   EXPECT_TRUE(delegate->last_zoom_in());
+#else
+  EXPECT_FALSE(handled);
+  EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
 #endif
 
   modifiers = WebInputEvent::ControlKey | WebInputEvent::ShiftKey |
       WebInputEvent::AltKey;
   event =
       SyntheticWebMouseWheelEventBuilder::Build(0, 0, 2, -5, modifiers, false);
-  event.canScroll = false;
   handled = contents()->HandleWheelEvent(event);
-#if defined(OS_MACOSX)
-  EXPECT_FALSE(handled);
-  EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
-#else
+#if defined(USE_AURA)
   EXPECT_TRUE(handled);
   EXPECT_EQ(1, delegate->GetAndResetContentsZoomChangedCallCount());
   EXPECT_FALSE(delegate->last_zoom_in());
+#else
+  EXPECT_FALSE(handled);
+  EXPECT_EQ(0, delegate->GetAndResetContentsZoomChangedCallCount());
 #endif
 
   // Unless there is no vertical movement.
@@ -3243,7 +3246,8 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
   // should be created.  If audio stream monitoring is available, an audio power
   // save blocker should be created too.
   rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnMediaPlaying(
-      0, kPlayerAudioVideoId, true, true, false, base::TimeDelta()));
+      0, kPlayerAudioVideoId, true, true, false,
+      media::MediaContentType::Persistent));
   EXPECT_TRUE(has_video_power_save_blocker());
   EXPECT_EQ(has_audio_power_save_blocker(),
             !AudioStreamMonitor::monitoring_available());
@@ -3256,7 +3260,8 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
   // the power save blockers.  The notification should take into account the
   // visibility state of the WebContents.
   rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnMediaPlaying(
-      0, kPlayerVideoOnlyId, true, false, false, base::TimeDelta()));
+      0, kPlayerVideoOnlyId, true, false, false,
+      media::MediaContentType::Persistent));
   EXPECT_FALSE(has_video_power_save_blocker());
   EXPECT_EQ(has_audio_power_save_blocker(),
             !AudioStreamMonitor::monitoring_available());
@@ -3268,7 +3273,8 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
   // Start another player that only has audio.  There should be no change in
   // the power save blockers.
   rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnMediaPlaying(
-      0, kPlayerAudioOnlyId, false, true, false, base::TimeDelta()));
+      0, kPlayerAudioOnlyId, false, true, false,
+      media::MediaContentType::Persistent));
   EXPECT_TRUE(has_video_power_save_blocker());
   EXPECT_EQ(has_audio_power_save_blocker(),
             !AudioStreamMonitor::monitoring_available());
@@ -3276,7 +3282,8 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
   // Start a remote player. There should be no change in the power save
   // blockers.
   rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnMediaPlaying(
-      0, kPlayerRemoteId, true, true, true, base::TimeDelta()));
+      0, kPlayerRemoteId, true, true, true,
+      media::MediaContentType::Persistent));
   EXPECT_TRUE(has_video_power_save_blocker());
   EXPECT_EQ(has_audio_power_save_blocker(),
             !AudioStreamMonitor::monitoring_available());
@@ -3311,7 +3318,8 @@ TEST_F(WebContentsImplTest, MediaPowerSaveBlocking) {
   // should be created.  If audio stream monitoring is available, an audio power
   // save blocker should be created too.
   rfh->OnMessageReceived(MediaPlayerDelegateHostMsg_OnMediaPlaying(
-      0, kPlayerAudioVideoId, true, true, false, base::TimeDelta()));
+      0, kPlayerAudioVideoId, true, true, false,
+      media::MediaContentType::Persistent));
   EXPECT_TRUE(has_video_power_save_blocker());
   EXPECT_EQ(has_audio_power_save_blocker(),
             !AudioStreamMonitor::monitoring_available());
@@ -3361,23 +3369,10 @@ TEST_F(WebContentsImplTest, ThemeColorChangeDependingOnFirstVisiblePaint) {
   EXPECT_EQ(SK_ColorGREEN, observer.last_theme_color());
 }
 
-// Test that if a renderer reports that it has loaded a resource from
-// memory cache with bad security info (i.e. can't be deserialized), the
-// renderer gets killed.
-TEST_F(WebContentsImplTest, LoadResourceFromMemoryCacheWithBadSecurityInfo) {
-  MockRenderProcessHost* rph = contents()->GetMainFrame()->GetProcess();
-  EXPECT_EQ(0, rph->bad_msg_count());
-
-  contents()->OnDidLoadResourceFromMemoryCache(
-      GURL("http://example.test"), "not valid security info", "GET",
-      "mime type", RESOURCE_TYPE_MAIN_FRAME);
-  EXPECT_EQ(1, rph->bad_msg_count());
-}
-
 // Test that if a resource is loaded with empty security info, the SSLManager
 // does not mistakenly think it has seen a good certificate and thus forget any
 // user exceptions for that host. See https://crbug.com/516808.
-TEST_F(WebContentsImplTest, LoadResourceFromMemoryCacheWithEmptySecurityInfo) {
+TEST_F(WebContentsImplTest, LoadResourceWithEmptySecurityInfo) {
   WebContentsImplTestBrowserClient browser_client;
   SetBrowserClientForTesting(&browser_client);
 
@@ -3389,8 +3384,8 @@ TEST_F(WebContentsImplTest, LoadResourceFromMemoryCacheWithEmptySecurityInfo) {
   backend->AllowCertForHost(*cert, test_url.host(), 1);
   EXPECT_TRUE(backend->HasAllowException(test_url.host()));
 
-  contents()->OnDidLoadResourceFromMemoryCache(test_url, "", "GET", "mime type",
-                                               RESOURCE_TYPE_MAIN_FRAME);
+  contents()->controller_.ssl_manager()->policy()->OnRequestStarted(
+      test_url, 0, 0);
 
   EXPECT_TRUE(backend->HasAllowException(test_url.host()));
 

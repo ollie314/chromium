@@ -9,6 +9,8 @@
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebCanvasCaptureHandler.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include <memory>
 
 namespace blink {
 
@@ -16,17 +18,17 @@ class TimedCanvasDrawListener final : public GarbageCollectedFinalized<TimedCanv
     USING_GARBAGE_COLLECTED_MIXIN(TimedCanvasDrawListener);
 public:
     ~TimedCanvasDrawListener();
-    static TimedCanvasDrawListener* create(const PassOwnPtr<WebCanvasCaptureHandler>&, double frameRate);
-    void sendNewFrame(const WTF::PassRefPtr<SkImage>&) override;
+    static TimedCanvasDrawListener* create(std::unique_ptr<WebCanvasCaptureHandler>, double frameRate);
+    void sendNewFrame(sk_sp<SkImage>) override;
 
     DEFINE_INLINE_TRACE() {}
 private:
-    TimedCanvasDrawListener(const PassOwnPtr<WebCanvasCaptureHandler>&, double frameRate);
+    TimedCanvasDrawListener(std::unique_ptr<WebCanvasCaptureHandler>, double frameRate);
     // Implementation of TimerFiredFunction.
-    void requestFrameTimerFired(Timer<TimedCanvasDrawListener>*);
+    void requestFrameTimerFired(TimerBase*);
 
     double m_frameInterval;
-    UnthrottledTimer<TimedCanvasDrawListener> m_requestFrameTimer;
+    UnthrottledThreadTimer<TimedCanvasDrawListener> m_requestFrameTimer;
 };
 
 } // namespace blink

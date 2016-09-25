@@ -18,6 +18,7 @@
 #include "modules/fetch/FetchBlobDataConsumerHandle.h"
 #include "modules/fetch/FetchFormDataConsumerHandle.h"
 #include "modules/fetch/Headers.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/blob/BlobData.h"
 #include "platform/network/EncodedFormData.h"
 #include "platform/weborigin/ReferrerPolicy.h"
@@ -44,6 +45,9 @@ RequestInit::RequestInit(ExecutionContext* context, const Dictionary& options, E
     bool isReferrerStringSet = DictionaryHelper::get(options, "referrer", referrerString);
     areAnyMembersSet |= isReferrerStringSet;
     areAnyMembersSet |= DictionaryHelper::get(options, "integrity", integrity);
+    AtomicString referrerPolicyString;
+    bool isReferrerPolicySet = DictionaryHelper::get(options, "referrerPolicy", referrerPolicyString);
+    areAnyMembersSet |= isReferrerPolicySet;
 
     v8::Local<v8::Value> v8Body;
     bool isBodySet = DictionaryHelper::get(options, "body", v8Body);
@@ -63,6 +67,26 @@ RequestInit::RequestInit(ExecutionContext* context, const Dictionary& options, E
         referrer = Referrer("about:client", ReferrerPolicyDefault);
         if (isReferrerStringSet)
             referrer.referrer = referrerString;
+        if (isReferrerPolicySet) {
+            if (referrerPolicyString == "") {
+                referrer.referrerPolicy = ReferrerPolicyDefault;
+            } else if (referrerPolicyString == "no-referrer") {
+                referrer.referrerPolicy = ReferrerPolicyNever;
+            } else if (referrerPolicyString == "no-referrer-when-downgrade") {
+                referrer.referrerPolicy = ReferrerPolicyNoReferrerWhenDowngrade;
+            } else if (referrerPolicyString == "origin") {
+                referrer.referrerPolicy = ReferrerPolicyOrigin;
+            } else if (referrerPolicyString == "origin-when-cross-origin") {
+                referrer.referrerPolicy = ReferrerPolicyOriginWhenCrossOrigin;
+            } else if (referrerPolicyString == "unsafe-url") {
+                referrer.referrerPolicy = ReferrerPolicyAlways;
+            } else if (referrerPolicyString == "no-referrer-when-downgrade-origin-when-cross-origin" && RuntimeEnabledFeatures::reducedReferrerGranularityEnabled()) {
+                referrer.referrerPolicy = ReferrerPolicyNoReferrerWhenDowngradeOriginWhenCrossOrigin;
+            } else {
+                exceptionState.throwTypeError("Invalid referrer policy");
+                return;
+            }
+        }
     }
 
     v8::Isolate* isolate = toIsolate(context);
@@ -74,7 +98,7 @@ RequestInit::RequestInit(ExecutionContext* context, const Dictionary& options, E
             // hop between the browser and renderer processes to deal with service workers is equally
             // painful. There should be no developer-visible difference in behavior with this option,
             // except that the `Content-Type` header will be set early. That seems reasonable.
-            PasswordCredential* credential = V8PasswordCredential::toImpl(v8::Local<v8::Object>::Cast(v8Credential));
+            PasswordCredential* credential = V8PasswordCredential::toImpl(v8Credential.As<v8::Object>());
             attachedCredential = credential->encodeFormData(contentType);
             credentials = "password";
         } else if (v8Credential->IsString()) {
@@ -86,21 +110,21 @@ RequestInit::RequestInit(ExecutionContext* context, const Dictionary& options, E
         return;
 
     if (v8Body->IsArrayBuffer()) {
-        body = FetchFormDataConsumerHandle::create(V8ArrayBuffer::toImpl(v8::Local<v8::Object>::Cast(v8Body)));
+        body = FetchFormDataConsumerHandle::create(V8ArrayBuffer::toImpl(v8Body.As<v8::Object>()));
     } else if (v8Body->IsArrayBufferView()) {
-        body = FetchFormDataConsumerHandle::create(V8ArrayBufferView::toImpl(v8::Local<v8::Object>::Cast(v8Body)));
+        body = FetchFormDataConsumerHandle::create(V8ArrayBufferView::toImpl(v8Body.As<v8::Object>()));
     } else if (V8Blob::hasInstance(v8Body, isolate)) {
-        RefPtr<BlobDataHandle> blobDataHandle = V8Blob::toImpl(v8::Local<v8::Object>::Cast(v8Body))->blobDataHandle();
+        RefPtr<BlobDataHandle> blobDataHandle = V8Blob::toImpl(v8Body.As<v8::Object>())->blobDataHandle();
         contentType = blobDataHandle->type();
         body = FetchBlobDataConsumerHandle::create(context, blobDataHandle.release());
     } else if (V8FormData::hasInstance(v8Body, isolate)) {
-        RefPtr<EncodedFormData> formData = V8FormData::toImpl(v8::Local<v8::Object>::Cast(v8Body))->encodeMultiPartFormData();
+        RefPtr<EncodedFormData> formData = V8FormData::toImpl(v8Body.As<v8::Object>())->encodeMultiPartFormData();
         // Here we handle formData->boundary() as a C-style string. See
         // FormDataEncoder::generateUniqueBoundaryString.
         contentType = AtomicString("multipart/form-data; boundary=") + formData->boundary().data();
         body = FetchFormDataConsumerHandle::create(context, formData.release());
     } else if (V8URLSearchParams::hasInstance(v8Body, isolate)) {
-        RefPtr<EncodedFormData> formData = V8URLSearchParams::toImpl(v8::Local<v8::Object>::Cast(v8Body))->encodeFormData();
+        RefPtr<EncodedFormData> formData = V8URLSearchParams::toImpl(v8Body.As<v8::Object>())->toEncodedFormData();
         contentType = AtomicString("application/x-www-form-urlencoded;charset=UTF-8");
         body = FetchFormDataConsumerHandle::create(context, formData.release());
     } else if (v8Body->IsString()) {

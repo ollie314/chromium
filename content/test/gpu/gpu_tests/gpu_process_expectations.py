@@ -12,3 +12,17 @@ class GpuProcessExpectations(GpuTestExpectations):
     self.Fail('GpuProcess.canvas2d', ['linux'], bug=254724)
 
     self.Fail('GpuProcess.video', ['linux'], bug=257109)
+
+    # Nexus 5X
+    # Skip this test because expecting it to fail will still run it.
+    self.Skip('GpuProcess.skip_gpu_process',
+              ['android', ('qualcomm', 'Adreno (TM) 418')], bug=610951)
+
+    # Nexus 9
+    # Skip this test because expecting it to fail will still run it.
+    self.Skip('GpuProcess.skip_gpu_process',
+              ['android', 'nvidia'], bug=610023)
+
+    # There are currently no blacklist entries disabling all GPU
+    # functionality on Mac OS.
+    self.Fail('GpuProcess.no_gpu_process', ['mac'], bug=579255)

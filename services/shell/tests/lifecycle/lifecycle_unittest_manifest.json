@@ -4,9 +4,19 @@
   "display_name": "Lifecycle Unittest",
   "capabilities": {
     "required": {
-      "*": { "interfaces": [ "*" ] },
-      "mojo:shell": { "classes": [ "instance_name", "client_process" ], 
-                      "interfaces": [ "*" ] }
+      "*": {
+        "interfaces": [ "shell::test::mojom::LifecycleControl" ]
+      },
+      "mojo:lifecycle_unittest_parent": {
+        "interfaces": [ "shell::test::mojom::Parent" ]
+      },
+      "mojo:shell": {
+        "classes": [
+          "shell:instance_name",
+          "shell:client_process"
+        ],
+        "interfaces": [ "shell::mojom::ServiceManager" ]
+      }
     }
   }
 }

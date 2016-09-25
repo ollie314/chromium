@@ -12,6 +12,9 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
+#include "net/base/load_timing_info.h"
 #include "net/http/bidirectional_stream_impl.h"
 #include "net/http/http_stream_factory.h"
 #include "net/log/net_log.h"
@@ -31,8 +34,9 @@ struct BidirectionalStreamRequestInfo;
 struct SSLConfig;
 
 // A class to do HTTP/2 bidirectional streaming. Note that at most one each of
-// ReadData or SendData should be in flight until the operation completes.
-// The BidirectionalStream must be torn down before the HttpNetworkSession.
+// ReadData or SendData/SendvData should be in flight until the operation
+// completes. The BidirectionalStream must be torn down before the
+// HttpNetworkSession.
 class NET_EXPORT BidirectionalStream
     : public NON_EXPORTED_BASE(BidirectionalStreamImpl::Delegate),
       public NON_EXPORTED_BASE(HttpStreamRequest::Delegate) {
@@ -43,13 +47,15 @@ class NET_EXPORT BidirectionalStream
    public:
     Delegate();
 
-    // Called when headers have been sent. This is called at most once for
-    // the lifetime of a stream.
+    // Called when the stream is ready for writing and reading. This is called
+    // at most once for the lifetime of a stream.
     // The delegate may call BidirectionalStream::ReadData to start reading,
     // or call BidirectionalStream::SendData to send data.
     // The delegate should not call BidirectionalStream::Cancel
     // during this callback.
-    virtual void OnHeadersSent() = 0;
+    // |request_headers_sent| if true, request headers have been sent. If false,
+    // SendRequestHeaders() needs to be explicitly called.
+    virtual void OnStreamReady(bool request_headers_sent) = 0;
 
     // Called when headers are received. This is called at most once for the
     // lifetime of a stream.
@@ -78,8 +84,8 @@ class NET_EXPORT BidirectionalStream
     // EOF has not been received, or to send data if there is no pending send.
     virtual void OnTrailersReceived(const SpdyHeaderBlock& trailers) = 0;
 
-    // Called when the stream is closed or an error occurred.
-    // No other delegate functions will be called after this.
+    // Called when an error occurred. Do not call into the stream after this
+    // point. No other delegate functions will be called after this.
     virtual void OnFailed(int error) = 0;
 
    protected:
@@ -93,9 +99,14 @@ class NET_EXPORT BidirectionalStream
   // the request, and must be non-NULL. |session| is the http network session
   // with which this request will be made. |delegate| must be non-NULL.
   // |session| and |delegate| must outlive |this|.
+  // |send_request_headers_automatically| if true, request headers will be sent
+  // automatically when stream is negotiated. If false, request headers will be
+  // sent only when SendRequestHeaders() is invoked or with
+  // next SendData/SendvData.
   BidirectionalStream(
       std::unique_ptr<BidirectionalStreamRequestInfo> request_info,
       HttpNetworkSession* session,
+      bool send_request_headers_automatically,
       Delegate* delegate);
 
   // Constructor that accepts a Timer, which can be used in tests to control
@@ -103,6 +114,7 @@ class NET_EXPORT BidirectionalStream
   BidirectionalStream(
       std::unique_ptr<BidirectionalStreamRequestInfo> request_info,
       HttpNetworkSession* session,
+      bool send_request_headers_automatically,
       Delegate* delegate,
       std::unique_ptr<base::Timer> timer);
 
@@ -110,6 +122,18 @@ class NET_EXPORT BidirectionalStream
   // |this| should not be destroyed during Delegate::OnHeadersSent or
   // Delegate::OnDataSent.
   ~BidirectionalStream() override;
+
+  // Sends request headers to server.
+  // When |send_request_headers_automatically_| is
+  // false and OnStreamReady() is invoked with request_headers_sent = false,
+  // headers will be combined with next SendData/SendvData unless this
+  // method is called first, in which case headers will be sent separately
+  // without delay.
+  // (This method cannot be called when |send_request_headers_automatically_| is
+  // true nor when OnStreamReady() is invoked with request_headers_sent = true,
+  // since headers have been sent by the stream when stream is negotiated
+  // successfully.)
+  void SendRequestHeaders();
 
   // Reads at most |buf_len| bytes into |buf|. Returns the number of bytes read,
   // or ERR_IO_PENDING if the read is to be completed asynchronously, or an
@@ -123,12 +147,14 @@ class NET_EXPORT BidirectionalStream
   // invoked, and should not be called again until Delegate::OnDataSent is
   // invoked. If |end_stream| is true, the DATA frame will have an END_STREAM
   // flag.
-  void SendData(IOBuffer* data, int length, bool end_stream);
+  void SendData(const scoped_refptr<IOBuffer>& data,
+                int length,
+                bool end_stream);
 
-  // If |stream_request_| is non-NULL, cancel it. If |stream_impl_| is
-  // established, cancel it. No delegate method will be called after Cancel().
-  // Any pending operations may or may not succeed.
-  void Cancel();
+  // Same as SendData except this takes in a vector of IOBuffers.
+  void SendvData(const std::vector<scoped_refptr<IOBuffer>>& buffers,
+                 const std::vector<int>& lengths,
+                 bool end_stream);
 
   // Returns the protocol used by this stream. If stream has not been
   // established, return kProtoUnknown.
@@ -146,12 +172,12 @@ class NET_EXPORT BidirectionalStream
   // not associated with any stream, and are not included in this value.
   int64_t GetTotalSentBytes() const;
 
-  // TODO(xunjieli): Implement a method to do flow control and a method to ping
-  // remote end point.
+  // Gets LoadTimingInfo of this stream.
+  void GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const;
 
  private:
   // BidirectionalStreamImpl::Delegate implementation:
-  void OnHeadersSent() override;
+  void OnStreamReady(bool request_headers_sent) override;
   void OnHeadersReceived(const SpdyHeaderBlock& response_headers) override;
   void OnDataRead(int bytes_read) override;
   void OnDataSent() override;
@@ -170,9 +196,7 @@ class NET_EXPORT BidirectionalStream
       const SSLConfig& used_ssl_config,
       const ProxyInfo& used_proxy_info,
       WebSocketHandshakeStreamBase* stream) override;
-  void OnStreamFailed(int status,
-                      const SSLConfig& used_ssl_config,
-                      SSLFailureState ssl_failure_state) override;
+  void OnStreamFailed(int status, const SSLConfig& used_ssl_config) override;
   void OnCertificateError(int status,
                           const SSLConfig& used_ssl_config,
                           const SSLInfo& ssl_info) override;
@@ -188,11 +212,21 @@ class NET_EXPORT BidirectionalStream
                                   HttpStream* stream) override;
   void OnQuicBroken() override;
 
+  // Helper method to notify delegate if there is an error.
+  void NotifyFailed(int error);
+
+  void UpdateHistograms();
+
   // BidirectionalStreamRequestInfo used when requesting the stream.
   std::unique_ptr<BidirectionalStreamRequestInfo> request_info_;
-  const BoundNetLog net_log_;
+  const NetLogWithSource net_log_;
 
   HttpNetworkSession* session_;
+
+  bool send_request_headers_automatically_;
+  // Whether request headers have been sent, as indicated in OnStreamReady()
+  // callback.
+  bool request_headers_sent_;
 
   Delegate* const delegate_;
 
@@ -208,10 +242,19 @@ class NET_EXPORT BidirectionalStream
 
   // Buffer used for reading.
   scoped_refptr<IOBuffer> read_buffer_;
-  // Buffer used for writing.
-  scoped_refptr<IOBuffer> write_buffer_;
-  // Length of |write_buffer_|.
-  size_t write_buffer_len_;
+  // List of buffers used for writing.
+  std::vector<scoped_refptr<IOBuffer>> write_buffer_list_;
+  // List of buffer length.
+  std::vector<int> write_buffer_len_list_;
+
+  // TODO(xunjieli): Remove this once LoadTimingInfo has response end.
+  base::TimeTicks read_end_time_;
+
+  // Load timing info of this stream. |connect_timing| is obtained when headers
+  // are received. Other fields are populated at different stages of the request
+  LoadTimingInfo load_timing_info_;
+
+  base::WeakPtrFactory<BidirectionalStream> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BidirectionalStream);
 };

@@ -26,8 +26,8 @@
 #include "public/platform/WebMediaStreamTrackSourcesRequest.h"
 
 #include "platform/mediastream/MediaStreamTrackSourcesRequest.h"
+#include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/WebSourceInfo.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -47,7 +47,7 @@ void WebMediaStreamTrackSourcesRequest::reset()
     m_private.reset();
 }
 
-WebString WebMediaStreamTrackSourcesRequest::origin() const
+WebSecurityOrigin WebMediaStreamTrackSourcesRequest::origin() const
 {
     ASSERT(m_private.get());
     return m_private->origin();

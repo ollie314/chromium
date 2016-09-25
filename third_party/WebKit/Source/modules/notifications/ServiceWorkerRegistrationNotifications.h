@@ -14,9 +14,8 @@
 #include "platform/heap/Visitor.h"
 #include "public/platform/modules/notifications/WebNotificationManager.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -30,11 +29,10 @@ class SecurityOrigin;
 class ServiceWorkerRegistration;
 struct WebNotificationData;
 
-class ServiceWorkerRegistrationNotifications final : public GarbageCollectedFinalized<ServiceWorkerRegistrationNotifications>, public Supplement<ServiceWorkerRegistration>, public ContextLifecycleObserver {
+class ServiceWorkerRegistrationNotifications final : public GarbageCollected<ServiceWorkerRegistrationNotifications>, public Supplement<ServiceWorkerRegistration>, public ContextLifecycleObserver {
     USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistrationNotifications);
     WTF_MAKE_NONCOPYABLE(ServiceWorkerRegistrationNotifications);
 public:
-    ~ServiceWorkerRegistrationNotifications();
     static ScriptPromise showNotification(ScriptState*, ServiceWorkerRegistration&, const String& title, const NotificationOptions&, ExceptionState&);
     static ScriptPromise getNotifications(ScriptState*, ServiceWorkerRegistration&, const GetNotificationOptions&);
 
@@ -49,8 +47,8 @@ private:
     static const char* supplementName();
     static ServiceWorkerRegistrationNotifications& from(ExecutionContext*, ServiceWorkerRegistration&);
 
-    void prepareShow(const WebNotificationData&, PassOwnPtr<WebNotificationShowCallbacks>);
-    void didLoadResources(PassRefPtr<SecurityOrigin>, const WebNotificationData&, PassOwnPtr<WebNotificationShowCallbacks>, NotificationResourcesLoader*);
+    void prepareShow(const WebNotificationData&, std::unique_ptr<WebNotificationShowCallbacks>);
+    void didLoadResources(PassRefPtr<SecurityOrigin>, const WebNotificationData&, std::unique_ptr<WebNotificationShowCallbacks>, NotificationResourcesLoader*);
 
     Member<ServiceWorkerRegistration> m_registration;
     HeapHashSet<Member<NotificationResourcesLoader>> m_loaders;

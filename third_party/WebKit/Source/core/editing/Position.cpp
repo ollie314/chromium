@@ -35,9 +35,19 @@
 namespace blink {
 
 #if DCHECK_IS_ON()
-static bool canBeAnchorNode(Node* node)
+template <typename Strategy>
+static bool canBeAnchorNode(Node*);
+
+template <>
+bool canBeAnchorNode<EditingStrategy>(Node* node)
 {
     return !node || !node->isPseudoElement();
+}
+
+template <>
+bool canBeAnchorNode<EditingInFlatTreeStrategy>(Node* node)
+{
+    return canBeAnchorNode<EditingStrategy>(node) && node->canParticipateInFlatTree();
 }
 #endif
 
@@ -89,7 +99,7 @@ PositionTemplate<Strategy>::PositionTemplate(Node* anchorNode, PositionAnchorTyp
         return;
     }
 #if DCHECK_IS_ON()
-    DCHECK(canBeAnchorNode(m_anchorNode.get()));
+    DCHECK(canBeAnchorNode<Strategy>(m_anchorNode.get())) << m_anchorNode;
 #endif
     DCHECK_NE(m_anchorType, PositionAnchorType::OffsetInAnchor);
 }
@@ -105,7 +115,7 @@ PositionTemplate<Strategy>::PositionTemplate(Node* anchorNode, int offset)
     else
         DCHECK_EQ(offset, 0);
 #if DCHECK_IS_ON()
-    DCHECK(canBeAnchorNode(m_anchorNode.get()));
+    DCHECK(canBeAnchorNode<Strategy>(m_anchorNode.get())) << m_anchorNode;
 #endif
 }
 
@@ -134,7 +144,7 @@ Node* PositionTemplate<Strategy>::computeContainerNode() const
     case PositionAnchorType::AfterAnchor:
         return Strategy::parent(*m_anchorNode);
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return 0;
 }
 
@@ -156,7 +166,7 @@ int PositionTemplate<Strategy>::computeOffsetInContainerNode() const
     case PositionAnchorType::AfterAnchor:
         return Strategy::index(*m_anchorNode) + 1;
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return 0;
 }
 
@@ -174,7 +184,7 @@ PositionTemplate<Strategy> PositionTemplate<Strategy>::parentAnchoredEquivalent(
             return inParentBeforeNode(*m_anchorNode);
         return PositionTemplate<Strategy>(m_anchorNode.get(), 0);
     }
-    if (!m_anchorNode->offsetInCharacters()
+    if (!m_anchorNode->isCharacterDataNode()
         && (isAfterAnchorOrAfterChildren() || static_cast<unsigned>(m_offset) == m_anchorNode->countChildren())
         && (Strategy::editingIgnoresContent(m_anchorNode.get()) || isDisplayInsideTable(m_anchorNode.get()))
         && computeContainerNode()) {
@@ -218,7 +228,7 @@ Node* PositionTemplate<Strategy>::computeNodeBeforePosition() const
     case PositionAnchorType::AfterAnchor:
         return m_anchorNode.get();
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return 0;
 }
 
@@ -240,7 +250,7 @@ Node* PositionTemplate<Strategy>::computeNodeAfterPosition() const
     case PositionAnchorType::AfterAnchor:
         return Strategy::nextSibling(*m_anchorNode);
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return 0;
 }
 
@@ -252,7 +262,7 @@ Node* PositionTemplate<Strategy>::nodeAsRangeFirstNode() const
         return nullptr;
     if (!isOffsetInAnchor())
         return toOffsetInAnchor().nodeAsRangeFirstNode();
-    if (m_anchorNode->offsetInCharacters())
+    if (m_anchorNode->isCharacterDataNode())
         return m_anchorNode.get();
     if (Node* child = Strategy::childAt(*m_anchorNode, m_offset))
         return child;
@@ -279,7 +289,7 @@ Node* PositionTemplate<Strategy>::nodeAsRangePastLastNode() const
         return nullptr;
     if (!isOffsetInAnchor())
         return toOffsetInAnchor().nodeAsRangePastLastNode();
-    if (m_anchorNode->offsetInCharacters())
+    if (m_anchorNode->isCharacterDataNode())
         return Strategy::nextSkippingChildren(*m_anchorNode);
     if (Node* child = Strategy::childAt(*m_anchorNode, m_offset))
         return child;
@@ -355,7 +365,7 @@ bool PositionTemplate<Strategy>::atFirstEditingPositionForNode() const
         // of DOM tree version.
         return !EditingStrategy::lastOffsetForEditing(anchorNode());
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return false;
 }
 
@@ -390,30 +400,96 @@ bool PositionTemplate<Strategy>::atEndOfTree() const
     return !Strategy::parent(*anchorNode()) && m_offset >= EditingStrategy::lastOffsetForEditing(anchorNode());
 }
 
+// static
 template <typename Strategy>
-void PositionTemplate<Strategy>::debugPosition(const char* msg) const
+PositionTemplate<Strategy> PositionTemplate<Strategy>::inParentBeforeNode(const Node& node)
 {
-    static const char* const anchorTypes[] = {
-        "OffsetInAnchor",
-        "BeforeAnchor",
-        "AfterAnchor",
-        "BeforeChildren",
-        "AfterChildren",
-        "Invalid",
-    };
+    // FIXME: This should DCHECK(node.parentNode())
+    // At least one caller currently hits this ASSERT though, which indicates
+    // that the caller is trying to make a position relative to a disconnected node (which is likely an error)
+    // Specifically, editing/deleting/delete-ligature-001.html crashes with DCHECK(node->parentNode())
+    return PositionTemplate<Strategy>(Strategy::parent(node), Strategy::index(node));
+}
 
-    if (isNull()) {
-        fprintf(stderr, "Position [%s]: null\n", msg);
-        return;
-    }
+// static
+template <typename Strategy>
+PositionTemplate<Strategy> PositionTemplate<Strategy>::inParentAfterNode(const Node& node)
+{
+    DCHECK(node.parentNode()) << node;
+    return PositionTemplate<Strategy>(Strategy::parent(node), Strategy::index(node) + 1);
+}
 
-    const char* anchorType = anchorTypes[std::min(static_cast<size_t>(m_anchorType), WTF_ARRAY_LENGTH(anchorTypes) - 1)];
-    if (m_anchorNode->isTextNode()) {
-        fprintf(stderr, "Position [%s]: %s [%p] %s, (%s) at %d\n", msg, anchorNode()->nodeName().utf8().data(), anchorNode(), anchorType, m_anchorNode->nodeValue().utf8().data(), m_offset);
-        return;
-    }
+// static
+template <typename Strategy>
+PositionTemplate<Strategy> PositionTemplate<Strategy>::beforeNode(Node* anchorNode)
+{
+    DCHECK(anchorNode);
+    return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::BeforeAnchor);
+}
 
-    fprintf(stderr, "Position [%s]: %s [%p] %s at %d\n", msg, anchorNode()->nodeName().utf8().data(), anchorNode(), anchorType, m_offset);
+// static
+template <typename Strategy>
+PositionTemplate<Strategy> PositionTemplate<Strategy>::afterNode(Node* anchorNode)
+{
+    DCHECK(anchorNode);
+    return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::AfterAnchor);
+}
+
+// static
+template <typename Strategy>
+int PositionTemplate<Strategy>::lastOffsetInNode(Node* node)
+{
+    return node->isCharacterDataNode() ? node->maxCharacterOffset() : static_cast<int>(Strategy::countChildren(*node));
+}
+
+// static
+template <typename Strategy>
+PositionTemplate<Strategy> PositionTemplate<Strategy>::firstPositionInNode(Node* anchorNode)
+{
+    if (anchorNode->isTextNode())
+        return PositionTemplate<Strategy>(anchorNode, 0);
+    return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::BeforeChildren);
+}
+
+// static
+template <typename Strategy>
+PositionTemplate<Strategy> PositionTemplate<Strategy>::lastPositionInNode(Node* anchorNode)
+{
+    if (anchorNode->isTextNode())
+        return PositionTemplate<Strategy>(anchorNode, lastOffsetInNode(anchorNode));
+    return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::AfterChildren);
+}
+
+// static
+template <typename Strategy>
+int PositionTemplate<Strategy>::minOffsetForNode(Node* anchorNode, int offset)
+{
+    if (anchorNode->isCharacterDataNode())
+        return std::min(offset, anchorNode->maxCharacterOffset());
+
+    int newOffset = 0;
+    for (Node* node = Strategy::firstChild(*anchorNode); node && newOffset < offset; node = Strategy::nextSibling(*node))
+        newOffset++;
+
+    return newOffset;
+}
+
+// static
+template <typename Strategy>
+PositionTemplate<Strategy> PositionTemplate<Strategy>::firstPositionInOrBeforeNode(Node* node)
+{
+    if (!node)
+        return PositionTemplate<Strategy>();
+    return Strategy::editingIgnoresContent(node) ? beforeNode(node) : firstPositionInNode(node);
+}
+
+// static
+template <typename Strategy>
+PositionTemplate<Strategy> PositionTemplate<Strategy>::lastPositionInOrAfterNode(Node* node)
+{
+    if (!node)
+        return PositionTemplate<Strategy>();
+    return Strategy::editingIgnoresContent(node) ? afterNode(node) : lastPositionInNode(node);
 }
 
 PositionInFlatTree toPositionInFlatTree(const Position& pos)
@@ -421,22 +497,22 @@ PositionInFlatTree toPositionInFlatTree(const Position& pos)
     if (pos.isNull())
         return PositionInFlatTree();
 
+    Node* const anchor = pos.anchorNode();
     if (pos.isOffsetInAnchor()) {
-        Node* anchor = pos.anchorNode();
-        if (anchor->offsetInCharacters())
+        if (anchor->isCharacterDataNode())
             return PositionInFlatTree(anchor, pos.computeOffsetInContainerNode());
         DCHECK(!anchor->isSlotOrActiveInsertionPoint());
         int offset = pos.computeOffsetInContainerNode();
         Node* child = NodeTraversal::childAt(*anchor, offset);
         if (!child) {
             if (anchor->isShadowRoot())
-                return PositionInFlatTree(anchor->shadowHost(), PositionAnchorType::AfterChildren);
+                return PositionInFlatTree(anchor->ownerShadowHost(), PositionAnchorType::AfterChildren);
             return PositionInFlatTree(anchor, PositionAnchorType::AfterChildren);
         }
         child->updateDistribution();
         if (child->isSlotOrActiveInsertionPoint()) {
             if (anchor->isShadowRoot())
-                return PositionInFlatTree(anchor->shadowHost(), offset);
+                return PositionInFlatTree(anchor->ownerShadowHost(), offset);
             return PositionInFlatTree(anchor, offset);
         }
         if (Node* parent = FlatTreeTraversal::parent(*child))
@@ -445,11 +521,15 @@ PositionInFlatTree toPositionInFlatTree(const Position& pos)
         // children of shadow host.
         // e.g. "foo",0 in <progress>foo</progress>
         if (anchor->isShadowRoot())
-            return PositionInFlatTree(anchor->shadowHost(), PositionAnchorType::AfterChildren);
+            return PositionInFlatTree(anchor->ownerShadowHost(), PositionAnchorType::AfterChildren);
         return PositionInFlatTree(anchor, PositionAnchorType::AfterChildren);
     }
 
-    return PositionInFlatTree(pos.anchorNode(), pos.anchorType());
+    if (anchor->isShadowRoot())
+        return PositionInFlatTree(anchor->ownerShadowHost(), pos.anchorType());
+    // TODO(yosin): Once we have a test case for SLOT or active insertion point,
+    // this function should handle it.
+    return PositionInFlatTree(anchor, pos.anchorType());
 }
 
 Position toPositionInDOMTree(const Position& position)
@@ -469,14 +549,14 @@ Position toPositionInDOMTree(const PositionInFlatTree& position)
         // FIXME: When anchorNode is <img>, assertion fails in the constructor.
         return Position(anchorNode, PositionAnchorType::AfterChildren);
     case PositionAnchorType::AfterAnchor:
-        return positionAfterNode(anchorNode);
+        return Position::afterNode(anchorNode);
     case PositionAnchorType::BeforeChildren:
         return Position(anchorNode, PositionAnchorType::BeforeChildren);
     case PositionAnchorType::BeforeAnchor:
-        return positionBeforeNode(anchorNode);
+        return Position::beforeNode(anchorNode);
     case PositionAnchorType::OffsetInAnchor: {
         int offset = position.offsetInContainerNode();
-        if (anchorNode->offsetInCharacters())
+        if (anchorNode->isCharacterDataNode())
             return Position(anchorNode, offset);
         Node* child = FlatTreeTraversal::childAt(*anchorNode, offset);
         if (child)
@@ -489,62 +569,45 @@ Position toPositionInDOMTree(const PositionInFlatTree& position)
         return Position(anchorNode, PositionAnchorType::AfterChildren);
     }
     default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return Position();
     }
 }
 
-#ifndef NDEBUG
-
 template <typename Strategy>
-void PositionTemplate<Strategy>::formatForDebugger(char* buffer, unsigned length) const
-{
-    StringBuilder result;
-
-    if (isNull()) {
-        result.appendLiteral("<null>");
-    } else {
-        char s[1024];
-        result.appendLiteral("offset ");
-        result.appendNumber(m_offset);
-        result.appendLiteral(" of ");
-        anchorNode()->formatForDebugger(s, sizeof(s));
-        result.append(s);
-    }
-
-    strncpy(buffer, result.toString().utf8().data(), length - 1);
-}
-
-template <typename Strategy>
-void PositionTemplate<Strategy>::showAnchorTypeAndOffset() const
+String PositionTemplate<Strategy>::toAnchorTypeAndOffsetString() const
 {
     switch (anchorType()) {
-    case PositionAnchorType::OffsetInAnchor:
-        fputs("offset", stderr);
-        break;
-    case PositionAnchorType::BeforeChildren:
-        fputs("beforeChildren", stderr);
-        break;
-    case PositionAnchorType::AfterChildren:
-        fputs("afterChildren", stderr);
-        break;
-    case PositionAnchorType::BeforeAnchor:
-        fputs("before", stderr);
-        break;
-    case PositionAnchorType::AfterAnchor:
-        fputs("after", stderr);
-        break;
+    case PositionAnchorType::OffsetInAnchor: {
+        StringBuilder builder;
+        builder.append("offsetInAnchor[");
+        builder.append(m_offset);
+        builder.append("]");
+        return builder.toString();
     }
-    fprintf(stderr, ", offset:%d\n", m_offset);
+    case PositionAnchorType::BeforeChildren:
+        return "beforeChildren";
+    case PositionAnchorType::AfterChildren:
+        return "afterChildren";
+    case PositionAnchorType::BeforeAnchor:
+        return "beforeAnchor";
+    case PositionAnchorType::AfterAnchor:
+        return "afterAnchor";
+    }
+    NOTREACHED();
+    return emptyString();
 }
+
+#ifndef NDEBUG
 
 template <typename Strategy>
 void PositionTemplate<Strategy>::showTreeForThis() const
 {
     if (!anchorNode())
         return;
-    anchorNode()->showTreeForThis();
-    showAnchorTypeAndOffset();
+    LOG(INFO) << "\n"
+        << anchorNode()->toTreeStringForThis().utf8().data()
+        << toAnchorTypeAndOffsetString().utf8().data();
 }
 
 template <typename Strategy>
@@ -552,8 +615,9 @@ void PositionTemplate<Strategy>::showTreeForThisInFlatTree() const
 {
     if (!anchorNode())
         return;
-    anchorNode()->showTreeForThisInFlatTree();
-    showAnchorTypeAndOffset();
+    LOG(INFO) << "\n"
+        << anchorNode()->toFlatTreeStringForThis().utf8().data()
+        << toAnchorTypeAndOffsetString().utf8().data();
 }
 
 #endif
@@ -563,10 +627,7 @@ static std::ostream& printPosition(std::ostream& ostream, const PositionType& po
 {
     if (position.isNull())
         return ostream << "null";
-    ostream << position.anchorNode() << "@";
-    if (position.isOffsetInAnchor())
-        return ostream << position.offsetInContainerNode();
-    return ostream << position.anchorType();
+    return ostream << position.anchorNode() << "@" << position.toAnchorTypeAndOffsetString().utf8().data();
 }
 
 std::ostream& operator<<(std::ostream& ostream, PositionAnchorType anchorType)
@@ -614,7 +675,7 @@ void showTree(const blink::Position* pos)
     if (pos)
         pos->showTreeForThis();
     else
-        fprintf(stderr, "Cannot showTree for (nil)\n");
+        LOG(INFO) << "Cannot showTree for <null>";
 }
 
 #endif

@@ -33,6 +33,7 @@ enum class CredentialType {
   CREDENTIAL_TYPE_LAST = CREDENTIAL_TYPE_FEDERATED
 };
 
+std::string CredentialTypeToString(CredentialType value);
 std::ostream& operator<<(std::ostream& os, CredentialType value);
 
 struct CredentialInfo {
@@ -69,6 +70,11 @@ struct CredentialInfo {
 // CREDENTIAL_TYPE_EMPTY.
 std::unique_ptr<autofill::PasswordForm> CreatePasswordFormFromCredentialInfo(
     const CredentialInfo& info,
+    const GURL& origin);
+
+// Create a new autofill::PasswordForm object based on |origin|. The result
+// plays the role of an observed form on that page.
+std::unique_ptr<autofill::PasswordForm> CreateObservedPasswordFormFromOrigin(
     const GURL& origin);
 
 }  // namespace password_manager

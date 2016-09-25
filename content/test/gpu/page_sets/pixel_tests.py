@@ -12,13 +12,17 @@ from gpu_tests import gpu_test_base
 class PixelTestsPage(gpu_test_base.PageBase):
 
   def __init__(self, url, name, test_rect, revision, story_set,
-               shared_page_state_class, expectations, expected_colors=None):
+               shared_page_state_class, expectations, expected_colors=None,
+               tolerance=2):
     super(PixelTestsPage, self).__init__(
       url=url, page_set=story_set, name=name,
       shared_page_state_class=shared_page_state_class,
       expectations=expectations)
     self.test_rect = test_rect
     self.revision = revision
+
+    # The tolerance when comparing against the reference image.
+    self.tolerance = tolerance
     if expected_colors:
       self.expected_colors = expected_colors
 
@@ -45,6 +49,30 @@ class IOSurface2DCanvasSharedPageState(gpu_test_base.GpuSharedPageState):
        '--disable-display-list-2d-canvas'])
 
 
+class WebGLNonChromiumImageSharedPageState(gpu_test_base.GpuSharedPageState):
+  def __init__(self, test, finder_options, story_set):
+    super(WebGLNonChromiumImageSharedPageState, self).__init__(
+      test, finder_options, story_set)
+    finder_options.browser_options.AppendExtraBrowserArgs(
+      ['--disable-webgl-image-chromium'])
+
+
+class DisableMacOverlaysSharedPageState(gpu_test_base.GpuSharedPageState):
+  def __init__(self, test, finder_options, story_set):
+    super(DisableMacOverlaysSharedPageState, self).__init__(
+      test, finder_options, story_set)
+    finder_options.browser_options.AppendExtraBrowserArgs(
+      ['--disable-mac-overlays'])
+
+
+class EnableExperimentalCanvasFeaturesSharedPageState(
+        gpu_test_base.GpuSharedPageState):
+  def __init__(self, test, finder_options, story_set):
+    super(EnableExperimentalCanvasFeaturesSharedPageState, self).__init__(
+      test, finder_options, story_set)
+    finder_options.browser_options.AppendExtraBrowserArgs(
+      ['--enable-experimental-canvas-features'])
+
 class PixelTestsStorySet(story_set_module.StorySet):
 
   """ Some basic test cases for GPU. """
@@ -61,8 +89,8 @@ class PixelTestsStorySet(story_set_module.StorySet):
       # OS.
       self._AddAllPages(expectations, base_name, True)
 
-    # On OS X, test the IOSurface 2D Canvas compositing path.
     if sys.platform.startswith('darwin'):
+      # On OS X, test the IOSurface 2D Canvas compositing path.
       self.AddStory(PixelTestsPage(
         url='file://../../data/gpu/pixel_canvas2d_accelerated.html',
         name=base_name + '.IOSurface2DCanvas',
@@ -80,6 +108,64 @@ class PixelTestsStorySet(story_set_module.StorySet):
         shared_page_state_class=IOSurface2DCanvasSharedPageState,
         expectations=expectations))
 
+      # On OS X, test WebGL non-Chromium Image compositing path.
+      self.AddStory(PixelTestsPage(
+        url='file://../../data/gpu/pixel_webgl_aa_alpha.html',
+        name=base_name + '.WebGLGreenTriangle.NonChromiumImage.AA.Alpha',
+        test_rect=[0, 0, 300, 300],
+        revision=1,
+        story_set=self,
+        shared_page_state_class=WebGLNonChromiumImageSharedPageState,
+        expectations=expectations))
+
+      self.AddStory(PixelTestsPage(
+        url='file://../../data/gpu/pixel_webgl_noaa_alpha.html',
+        name=base_name + '.WebGLGreenTriangle.NonChromiumImage.NoAA.Alpha',
+        test_rect=[0, 0, 300, 300],
+        revision=1,
+        story_set=self,
+        shared_page_state_class=WebGLNonChromiumImageSharedPageState,
+        expectations=expectations))
+
+      self.AddStory(PixelTestsPage(
+        url='file://../../data/gpu/pixel_webgl_aa_noalpha.html',
+        name=base_name + '.WebGLGreenTriangle.NonChromiumImage.AA.NoAlpha',
+        test_rect=[0, 0, 300, 300],
+        revision=1,
+        story_set=self,
+        shared_page_state_class=WebGLNonChromiumImageSharedPageState,
+        expectations=expectations))
+
+      self.AddStory(PixelTestsPage(
+        url='file://../../data/gpu/pixel_webgl_noaa_noalpha.html',
+        name=base_name + '.WebGLGreenTriangle.NonChromiumImage.NoAA.NoAlpha',
+        test_rect=[0, 0, 300, 300],
+        revision=1,
+        story_set=self,
+        shared_page_state_class=WebGLNonChromiumImageSharedPageState,
+        expectations=expectations))
+
+      # On macOS, test CSS filter effects with and without the CA compositor.
+      self.AddStory(PixelTestsPage(
+        url='file://../../data/gpu/filter_effects.html',
+        name=base_name + '.CSSFilterEffects',
+        test_rect=[0, 0, 300, 300],
+        revision=2,
+        story_set=self,
+        shared_page_state_class=gpu_test_base.GpuSharedPageState,
+        expectations=expectations,
+        tolerance=10))
+
+      self.AddStory(PixelTestsPage(
+        url='file://../../data/gpu/filter_effects.html',
+        name=base_name + '.CSSFilterEffects.NoOverlays',
+        test_rect=[0, 0, 300, 300],
+        revision=2,
+        story_set=self,
+        shared_page_state_class=DisableMacOverlaysSharedPageState,
+        expectations=expectations,
+        tolerance=10))
+
   def _AddAllPages(self, expectations, base_name, use_es3):
     if use_es3:
       es3_suffix = 'ES3'
@@ -87,6 +173,42 @@ class PixelTestsStorySet(story_set_module.StorySet):
     else:
       es3_suffix = ''
       shared_page_state_class = gpu_test_base.GpuSharedPageState
+
+    self.AddStory(PixelTestsPage(
+      url='file://../../data/gpu/pixel_offscreenCanvas_webgl_commit_main.html',
+      name=base_name + '.OffscreenCanvasWebGLGreenBox' + es3_suffix,
+      test_rect=[0, 0, 300, 300],
+      revision=1,
+      story_set=self,
+      shared_page_state_class=EnableExperimentalCanvasFeaturesSharedPageState,
+      expectations=expectations))
+
+    self.AddStory(PixelTestsPage(
+      url='file://../../data/gpu/pixel_offscreenCanvas_webgl_commit_worker.html',
+      name=base_name + '.OffscreenCanvasWebGLRedBoxWorker' + es3_suffix,
+      test_rect=[0, 0, 300, 300],
+      revision=2,
+      story_set=self,
+      shared_page_state_class=EnableExperimentalCanvasFeaturesSharedPageState,
+      expectations=expectations))
+
+    self.AddStory(PixelTestsPage(
+      url='file://../../data/gpu/pixel_acceleratedOffscreen2d_commit_main.html',
+      name=base_name + '.OffscreenCanvasAccelerated2D' + es3_suffix,
+      test_rect=[0, 0, 350, 350],
+      revision=1,
+      story_set=self,
+      shared_page_state_class=EnableExperimentalCanvasFeaturesSharedPageState,
+      expectations=expectations))
+
+    self.AddStory(PixelTestsPage(
+      url='file://../../data/gpu/pixel_acceleratedOffscreen2d_commit_worker.html',
+      name=base_name + '.OffscreenCanvasAccelerated2DWorker' + es3_suffix,
+      test_rect=[0, 0, 350, 350],
+      revision=1,
+      story_set=self,
+      shared_page_state_class=EnableExperimentalCanvasFeaturesSharedPageState,
+      expectations=expectations))
 
     self.AddStory(PixelTestsPage(
       url='file://../../data/gpu/pixel_canvas2d.html',
@@ -107,10 +229,37 @@ class PixelTestsStorySet(story_set_module.StorySet):
       expectations=expectations))
 
     self.AddStory(PixelTestsPage(
-      url='file://../../data/gpu/pixel_webgl.html',
-      name=base_name + '.WebGLGreenTriangle' + es3_suffix,
+      url='file://../../data/gpu/pixel_webgl_aa_alpha.html',
+      name=base_name + '.WebGLGreenTriangle.AA.Alpha' + es3_suffix,
       test_rect=[0, 0, 300, 300],
-      revision=12,
+      revision=1,
+      story_set=self,
+      shared_page_state_class=shared_page_state_class,
+      expectations=expectations))
+
+    self.AddStory(PixelTestsPage(
+      url='file://../../data/gpu/pixel_webgl_noaa_alpha.html',
+      name=base_name + '.WebGLGreenTriangle.NoAA.Alpha' + es3_suffix,
+      test_rect=[0, 0, 300, 300],
+      revision=1,
+      story_set=self,
+      shared_page_state_class=shared_page_state_class,
+      expectations=expectations))
+
+    self.AddStory(PixelTestsPage(
+      url='file://../../data/gpu/pixel_webgl_aa_noalpha.html',
+      name=base_name + '.WebGLGreenTriangle.AA.NoAlpha' + es3_suffix,
+      test_rect=[0, 0, 300, 300],
+      revision=1,
+      story_set=self,
+      shared_page_state_class=shared_page_state_class,
+      expectations=expectations))
+
+    self.AddStory(PixelTestsPage(
+      url='file://../../data/gpu/pixel_webgl_noaa_noalpha.html',
+      name=base_name + '.WebGLGreenTriangle.NoAA.NoAlpha' + es3_suffix,
+      test_rect=[0, 0, 300, 300],
+      revision=1,
       story_set=self,
       shared_page_state_class=shared_page_state_class,
       expectations=expectations))
@@ -127,9 +276,18 @@ class PixelTestsStorySet(story_set_module.StorySet):
 
     self.AddStory(PixelTestsPage(
       url='file://../../data/gpu/pixel_canvas2d_webgl.html',
-      name=base_name + '.2DCanvasWebGL',
+      name=base_name + '.2DCanvasWebGL' + es3_suffix,
       test_rect=[0, 0, 300, 300],
       revision=2,
+      story_set=self,
+      shared_page_state_class=shared_page_state_class,
+      expectations=expectations))
+
+    self.AddStory(PixelTestsPage(
+      url='file://../../data/gpu/pixel_background.html',
+      name=base_name + '.SolidColorBackground' + es3_suffix,
+      test_rect=[500, 500, 100, 100],
+      revision=1,
       story_set=self,
       shared_page_state_class=shared_page_state_class,
       expectations=expectations))

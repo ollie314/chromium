@@ -353,14 +353,15 @@ WebInspector.Workspace = function()
     this._hasResourceContentTrackingExtensions = false;
 }
 
+/** @enum {symbol} */
 WebInspector.Workspace.Events = {
-    UISourceCodeAdded: "UISourceCodeAdded",
-    UISourceCodeRemoved: "UISourceCodeRemoved",
-    WorkingCopyChanged: "WorkingCopyChanged",
-    WorkingCopyCommitted: "WorkingCopyCommitted",
-    WorkingCopyCommittedByUser: "WorkingCopyCommittedByUser",
-    ProjectAdded: "ProjectAdded",
-    ProjectRemoved: "ProjectRemoved"
+    UISourceCodeAdded: Symbol("UISourceCodeAdded"),
+    UISourceCodeRemoved: Symbol("UISourceCodeRemoved"),
+    WorkingCopyChanged: Symbol("WorkingCopyChanged"),
+    WorkingCopyCommitted: Symbol("WorkingCopyCommitted"),
+    WorkingCopyCommittedByUser: Symbol("WorkingCopyCommittedByUser"),
+    ProjectAdded: Symbol("ProjectAdded"),
+    ProjectRemoved: Symbol("ProjectRemoved")
 }
 
 WebInspector.Workspace.prototype = {
@@ -430,6 +431,7 @@ WebInspector.Workspace.prototype = {
      */
     addProject: function(project)
     {
+        console.assert(!this._projects.has(project.id()), `A project with id ${project.id()} already exists!`);
         this._projects.set(project.id(), project);
         this.dispatchEventToListeners(WebInspector.Workspace.Events.ProjectAdded, project);
     },
@@ -457,7 +459,7 @@ WebInspector.Workspace.prototype = {
      */
     projects: function()
     {
-        return Array.from(this._projects.values());
+        return this._projects.valuesArray();
     },
 
     /**

@@ -5,8 +5,7 @@
 #ifndef DEVICE_BLUETOOTH_DBUS_FAKE_BLUETOOTH_DEVICE_CLIENT_H_
 #define DEVICE_BLUETOOTH_DBUS_FAKE_BLUETOOTH_DEVICE_CLIENT_H_
 
-#include <stdint.h>
-
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <vector>
@@ -16,6 +15,7 @@
 #include "base/observer_list.h"
 #include "dbus/object_path.h"
 #include "dbus/property.h"
+#include "device/bluetooth/bluetooth_common.h"
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/dbus/bluetooth_agent_service_provider.h"
 #include "device/bluetooth/dbus/bluetooth_device_client.h"
@@ -101,6 +101,9 @@ class DEVICE_BLUETOOTH_EXPORT FakeBluetoothDeviceClient
   void GetConnInfo(const dbus::ObjectPath& object_path,
                    const ConnInfoCallback& callback,
                    const ErrorCallback& error_callback) override;
+  void GetServiceRecords(const dbus::ObjectPath& object_path,
+                         const ServiceRecordsCallback& callback,
+                         const ErrorCallback& error_callback) override;
 
   void SetSimulationIntervalMs(int interval_ms);
 
@@ -151,12 +154,13 @@ class DEVICE_BLUETOOTH_EXPORT FakeBluetoothDeviceClient
   // Remove all test devices from this client.
   void RemoveAllDevices();
 
-  // Create a test Bluetooth LE device with the given properties.
+  // Create a test Bluetooth device with the given properties.
   void CreateTestDevice(const dbus::ObjectPath& adapter_path,
                         const std::string name,
                         const std::string alias,
                         const std::string device_address,
-                        const std::vector<std::string>& service_uuids);
+                        const std::vector<std::string>& service_uuids,
+                        device::BluetoothTransport type);
 
   void set_delay_start_discovery(bool value) { delay_start_discovery_ = value; }
 
@@ -176,6 +180,7 @@ class DEVICE_BLUETOOTH_EXPORT FakeBluetoothDeviceClient
   // we can emulate.
   static const char kPairedDevicePath[];
   static const char kPairedDeviceName[];
+  static const char kPairedDeviceAlias[];
   static const char kPairedDeviceAddress[];
   static const uint32_t kPairedDeviceClass;
 
@@ -241,6 +246,7 @@ class DEVICE_BLUETOOTH_EXPORT FakeBluetoothDeviceClient
 
   static const char kPairedUnconnectableDevicePath[];
   static const char kPairedUnconnectableDeviceName[];
+  static const char kPairedUnconnectableDeviceAlias[];
   static const char kPairedUnconnectableDeviceAddress[];
   static const uint32_t kPairedUnconnectableDeviceClass;
 
@@ -271,6 +277,9 @@ class DEVICE_BLUETOOTH_EXPORT FakeBluetoothDeviceClient
   void AddInputDeviceIfNeeded(const dbus::ObjectPath& object_path,
                               Properties* properties);
 
+  // If fake device with |object_path| exists, sets its inquiry RSSI property
+  // to false and notifies that the property changed.
+  void InvalidateDeviceRSSI(const dbus::ObjectPath& object_path);
   // Updates the inquiry RSSI property of fake device with object path
   // |object_path| to |rssi|, if the fake device exists.
   void UpdateDeviceRSSI(const dbus::ObjectPath& object_path, int16_t rssi);

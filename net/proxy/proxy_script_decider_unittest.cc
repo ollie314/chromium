@@ -8,17 +8,17 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/log/net_log.h"
+#include "net/log/net_log_event_type.h"
 #include "net/log/test_net_log.h"
 #include "net/log/test_net_log_entry.h"
 #include "net/log/test_net_log_util.h"
@@ -28,8 +28,13 @@
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_script_decider.h"
 #include "net/proxy/proxy_script_fetcher.h"
+#include "net/test/gtest_util.h"
 #include "net/url_request/url_request_context.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using net::test::IsError;
+using net::test::IsOk;
 
 namespace net {
 namespace {
@@ -205,14 +210,14 @@ TEST(ProxyScriptDeciderTest, CustomPacSucceeds) {
   log.GetEntries(&entries);
 
   EXPECT_EQ(4u, entries.size());
+  EXPECT_TRUE(
+      LogContainsBeginEvent(entries, 0, NetLogEventType::PROXY_SCRIPT_DECIDER));
   EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 0, NetLog::TYPE_PROXY_SCRIPT_DECIDER));
-  EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 1, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+      entries, 1, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
   EXPECT_TRUE(LogContainsEndEvent(
-      entries, 2, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
-  EXPECT_TRUE(LogContainsEndEvent(
-      entries, 3, NetLog::TYPE_PROXY_SCRIPT_DECIDER));
+      entries, 2, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+  EXPECT_TRUE(
+      LogContainsEndEvent(entries, 3, NetLogEventType::PROXY_SCRIPT_DECIDER));
 
   EXPECT_TRUE(decider.effective_config().has_pac_url());
   EXPECT_EQ(config.pac_url(), decider.effective_config().pac_url());
@@ -235,21 +240,21 @@ TEST(ProxyScriptDeciderTest, CustomPacFails1) {
   EXPECT_EQ(kFailedDownloading,
             decider.Start(config, base::TimeDelta(), true,
                           callback.callback()));
-  EXPECT_EQ(nullptr, decider.script_data());
+  EXPECT_FALSE(decider.script_data());
 
   // Check the NetLog was filled correctly.
   TestNetLogEntry::List entries;
   log.GetEntries(&entries);
 
   EXPECT_EQ(4u, entries.size());
+  EXPECT_TRUE(
+      LogContainsBeginEvent(entries, 0, NetLogEventType::PROXY_SCRIPT_DECIDER));
   EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 0, NetLog::TYPE_PROXY_SCRIPT_DECIDER));
-  EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 1, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+      entries, 1, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
   EXPECT_TRUE(LogContainsEndEvent(
-      entries, 2, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
-  EXPECT_TRUE(LogContainsEndEvent(
-      entries, 3, NetLog::TYPE_PROXY_SCRIPT_DECIDER));
+      entries, 2, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+  EXPECT_TRUE(
+      LogContainsEndEvent(entries, 3, NetLogEventType::PROXY_SCRIPT_DECIDER));
 
   EXPECT_FALSE(decider.effective_config().has_pac_url());
 }
@@ -270,7 +275,7 @@ TEST(ProxyScriptDeciderTest, CustomPacFails2) {
   EXPECT_EQ(kFailedParsing,
             decider.Start(config, base::TimeDelta(), true,
                           callback.callback()));
-  EXPECT_EQ(nullptr, decider.script_data());
+  EXPECT_FALSE(decider.script_data());
 }
 
 // Fail downloading the custom PAC script, because the fetcher was NULL.
@@ -286,7 +291,7 @@ TEST(ProxyScriptDeciderTest, HasNullProxyScriptFetcher) {
   EXPECT_EQ(ERR_UNEXPECTED,
             decider.Start(config, base::TimeDelta(), true,
                           callback.callback()));
-  EXPECT_EQ(nullptr, decider.script_data());
+  EXPECT_FALSE(decider.script_data());
 }
 
 // Succeeds in choosing autodetect (WPAD DNS).
@@ -347,7 +352,7 @@ TEST_F(ProxyScriptDeciderQuickCheckTest, SyncSuccess) {
   resolver_.set_synchronous_mode(true);
   resolver_.rules()->AddRule("wpad", "1.2.3.4");
 
-  EXPECT_EQ(OK, StartDecider());
+  EXPECT_THAT(StartDecider(), IsOk());
   EXPECT_EQ(rule_.text(), decider_->script_data()->utf16());
 
   EXPECT_TRUE(decider_->effective_config().has_pac_url());
@@ -360,7 +365,7 @@ TEST_F(ProxyScriptDeciderQuickCheckTest, AsyncSuccess) {
   resolver_.set_ondemand_mode(true);
   resolver_.rules()->AddRule("wpad", "1.2.3.4");
 
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
+  EXPECT_THAT(StartDecider(), IsError(ERR_IO_PENDING));
   ASSERT_TRUE(resolver_.has_pending_requests());
   resolver_.ResolveAllPending();
   callback_.WaitForResult();
@@ -375,7 +380,7 @@ TEST_F(ProxyScriptDeciderQuickCheckTest, AsyncSuccess) {
 TEST_F(ProxyScriptDeciderQuickCheckTest, AsyncFail) {
   resolver_.set_ondemand_mode(true);
   resolver_.rules()->AddSimulatedFailure("wpad");
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
+  EXPECT_THAT(StartDecider(), IsError(ERR_IO_PENDING));
   ASSERT_TRUE(resolver_.has_pending_requests());
   resolver_.ResolveAllPending();
   callback_.WaitForResult();
@@ -386,7 +391,7 @@ TEST_F(ProxyScriptDeciderQuickCheckTest, AsyncFail) {
 // URL or causes ProxyScriptDecider not to cancel its pending resolution.
 TEST_F(ProxyScriptDeciderQuickCheckTest, AsyncTimeout) {
   resolver_.set_ondemand_mode(true);
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
+  EXPECT_THAT(StartDecider(), IsError(ERR_IO_PENDING));
   ASSERT_TRUE(resolver_.has_pending_requests());
   callback_.WaitForResult();
   EXPECT_FALSE(resolver_.has_pending_requests());
@@ -401,7 +406,7 @@ TEST_F(ProxyScriptDeciderQuickCheckTest, QuickCheckInhibitsDhcp) {
   GURL url("http://foobar/baz");
   dhcp_fetcher.SetPacURL(url);
   decider_.reset(new ProxyScriptDecider(&fetcher_, &dhcp_fetcher, NULL));
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
+  EXPECT_THAT(StartDecider(), IsError(ERR_IO_PENDING));
   dhcp_fetcher.CompleteRequests(OK, pac_contents);
   EXPECT_TRUE(decider_->effective_config().has_pac_url());
   EXPECT_EQ(decider_->effective_config().pac_url(), url);
@@ -417,7 +422,7 @@ TEST_F(ProxyScriptDeciderQuickCheckTest, QuickCheckDisabled) {
   resolver_.rules()->AddSimulatedFailure("wpad");
   MockProxyScriptFetcher fetcher;
   decider_.reset(new ProxyScriptDecider(&fetcher, &dhcp_fetcher_, NULL));
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
+  EXPECT_THAT(StartDecider(), IsError(ERR_IO_PENDING));
   EXPECT_TRUE(fetcher.has_pending_request());
   fetcher.NotifyFetchCompletion(OK, kPac);
 }
@@ -428,7 +433,7 @@ TEST_F(ProxyScriptDeciderQuickCheckTest, ExplicitPacUrl) {
   Rules::Rule rule = rules_.AddSuccessRule(kCustomUrl);
   resolver_.rules()->AddSimulatedFailure("wpad");
   resolver_.rules()->AddRule("custom", "1.2.3.4");
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
+  EXPECT_THAT(StartDecider(), IsError(ERR_IO_PENDING));
   callback_.WaitForResult();
   EXPECT_TRUE(decider_->effective_config().has_pac_url());
   EXPECT_EQ(rule.url, decider_->effective_config().pac_url());
@@ -440,7 +445,7 @@ TEST_F(ProxyScriptDeciderQuickCheckTest, ExplicitPacUrl) {
 TEST_F(ProxyScriptDeciderQuickCheckTest, CancelPartway) {
   resolver_.set_synchronous_mode(false);
   resolver_.set_ondemand_mode(true);
-  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
+  EXPECT_THAT(StartDecider(), IsError(ERR_IO_PENDING));
   decider_.reset(NULL);
 }
 
@@ -502,34 +507,34 @@ TEST(ProxyScriptDeciderTest, AutodetectFailCustomSuccess2) {
   log.GetEntries(&entries);
 
   EXPECT_EQ(10u, entries.size());
-  EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 0, NetLog::TYPE_PROXY_SCRIPT_DECIDER));
+  EXPECT_TRUE(
+      LogContainsBeginEvent(entries, 0, NetLogEventType::PROXY_SCRIPT_DECIDER));
   // This is the DHCP phase, which fails fetching rather than parsing, so
   // there is no pair of SET_PAC_SCRIPT events.
   EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 1, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+      entries, 1, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
   EXPECT_TRUE(LogContainsEndEvent(
-      entries, 2, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+      entries, 2, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
   EXPECT_TRUE(LogContainsEvent(
       entries, 3,
-      NetLog::TYPE_PROXY_SCRIPT_DECIDER_FALLING_BACK_TO_NEXT_PAC_SOURCE,
-      NetLog::PHASE_NONE));
+      NetLogEventType::PROXY_SCRIPT_DECIDER_FALLING_BACK_TO_NEXT_PAC_SOURCE,
+      NetLogEventPhase::NONE));
   // This is the DNS phase, which attempts a fetch but fails.
   EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 4, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+      entries, 4, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
   EXPECT_TRUE(LogContainsEndEvent(
-      entries, 5, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+      entries, 5, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
   EXPECT_TRUE(LogContainsEvent(
       entries, 6,
-      NetLog::TYPE_PROXY_SCRIPT_DECIDER_FALLING_BACK_TO_NEXT_PAC_SOURCE,
-      NetLog::PHASE_NONE));
+      NetLogEventType::PROXY_SCRIPT_DECIDER_FALLING_BACK_TO_NEXT_PAC_SOURCE,
+      NetLogEventPhase::NONE));
   // Finally, the custom PAC URL phase.
   EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 7, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+      entries, 7, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
   EXPECT_TRUE(LogContainsEndEvent(
-      entries, 8, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
-  EXPECT_TRUE(LogContainsEndEvent(
-      entries, 9, NetLog::TYPE_PROXY_SCRIPT_DECIDER));
+      entries, 8, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+  EXPECT_TRUE(
+      LogContainsEndEvent(entries, 9, NetLogEventType::PROXY_SCRIPT_DECIDER));
 }
 
 // Fails at WPAD (downloading), and fails at custom PAC (downloading).
@@ -550,7 +555,7 @@ TEST(ProxyScriptDeciderTest, AutodetectFailCustomFails1) {
   EXPECT_EQ(kFailedDownloading,
             decider.Start(config, base::TimeDelta(), true,
                           callback.callback()));
-  EXPECT_EQ(nullptr, decider.script_data());
+  EXPECT_FALSE(decider.script_data());
 }
 
 // Fails at WPAD (downloading), and fails at custom PAC (parsing).
@@ -571,7 +576,7 @@ TEST(ProxyScriptDeciderTest, AutodetectFailCustomFails2) {
   EXPECT_EQ(kFailedParsing,
             decider.Start(config, base::TimeDelta(), true,
                           callback.callback()));
-  EXPECT_EQ(nullptr, decider.script_data());
+  EXPECT_FALSE(decider.script_data());
 }
 
 // This is a copy-paste of CustomPacFails1, with the exception that we give it
@@ -595,25 +600,25 @@ TEST(ProxyScriptDeciderTest, CustomPacFails1_WithPositiveDelay) {
                       true, callback.callback()));
 
   EXPECT_EQ(kFailedDownloading, callback.WaitForResult());
-  EXPECT_EQ(nullptr, decider.script_data());
+  EXPECT_FALSE(decider.script_data());
 
   // Check the NetLog was filled correctly.
   TestNetLogEntry::List entries;
   log.GetEntries(&entries);
 
   EXPECT_EQ(6u, entries.size());
+  EXPECT_TRUE(
+      LogContainsBeginEvent(entries, 0, NetLogEventType::PROXY_SCRIPT_DECIDER));
   EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 0, NetLog::TYPE_PROXY_SCRIPT_DECIDER));
+      entries, 1, NetLogEventType::PROXY_SCRIPT_DECIDER_WAIT));
+  EXPECT_TRUE(LogContainsEndEvent(entries, 2,
+                                  NetLogEventType::PROXY_SCRIPT_DECIDER_WAIT));
   EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 1, NetLog::TYPE_PROXY_SCRIPT_DECIDER_WAIT));
+      entries, 3, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
   EXPECT_TRUE(LogContainsEndEvent(
-      entries, 2, NetLog::TYPE_PROXY_SCRIPT_DECIDER_WAIT));
-  EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 3, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
-  EXPECT_TRUE(LogContainsEndEvent(
-      entries, 4, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
-  EXPECT_TRUE(LogContainsEndEvent(
-      entries, 5, NetLog::TYPE_PROXY_SCRIPT_DECIDER));
+      entries, 4, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+  EXPECT_TRUE(
+      LogContainsEndEvent(entries, 5, NetLogEventType::PROXY_SCRIPT_DECIDER));
 }
 
 // This is a copy-paste of CustomPacFails1, with the exception that we give it
@@ -635,21 +640,21 @@ TEST(ProxyScriptDeciderTest, CustomPacFails1_WithNegativeDelay) {
   EXPECT_EQ(kFailedDownloading,
             decider.Start(config, base::TimeDelta::FromSeconds(-5),
                           true, callback.callback()));
-  EXPECT_EQ(nullptr, decider.script_data());
+  EXPECT_FALSE(decider.script_data());
 
   // Check the NetLog was filled correctly.
   TestNetLogEntry::List entries;
   log.GetEntries(&entries);
 
   EXPECT_EQ(4u, entries.size());
+  EXPECT_TRUE(
+      LogContainsBeginEvent(entries, 0, NetLogEventType::PROXY_SCRIPT_DECIDER));
   EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 0, NetLog::TYPE_PROXY_SCRIPT_DECIDER));
-  EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 1, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+      entries, 1, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
   EXPECT_TRUE(LogContainsEndEvent(
-      entries, 2, NetLog::TYPE_PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
-  EXPECT_TRUE(LogContainsEndEvent(
-      entries, 3, NetLog::TYPE_PROXY_SCRIPT_DECIDER));
+      entries, 2, NetLogEventType::PROXY_SCRIPT_DECIDER_FETCH_PAC_SCRIPT));
+  EXPECT_TRUE(
+      LogContainsEndEvent(entries, 3, NetLogEventType::PROXY_SCRIPT_DECIDER));
 }
 
 class SynchronousSuccessDhcpFetcher : public DhcpProxyScriptFetcher {
@@ -725,7 +730,7 @@ TEST(ProxyScriptDeciderTest, AutodetectDhcpFailParse) {
   // it failed downloading, not that it failed parsing.
   EXPECT_EQ(kFailedDownloading,
       decider.Start(config, base::TimeDelta(), true, callback.callback()));
-  EXPECT_EQ(nullptr, decider.script_data());
+  EXPECT_FALSE(decider.script_data());
 
   EXPECT_FALSE(decider.effective_config().has_pac_url());
 }
@@ -787,7 +792,7 @@ TEST(ProxyScriptDeciderTest, DhcpCancelledByDestructor) {
   // back. Before the fix linked to above, this would try to invoke on
   // the callback object provided by ProxyScriptDecider after it was
   // no longer valid.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 }  // namespace

@@ -205,12 +205,14 @@ class ContentSettingBubbleWebContentsObserverBridge
         webContents:(content::WebContents*)webContents
        parentWindow:(NSWindow*)parentWindow
          anchoredAt:(NSPoint)anchoredAt;
+- (NSString*)getNibPathForModel:(ContentSettingBubbleModel*)model;
 - (NSButton*)hyperlinkButtonWithFrame:(NSRect)frame
                                 title:(NSString*)title
                                  icon:(NSImage*)icon
                        referenceFrame:(NSRect)referenceFrame;
 - (void)initializeBlockedPluginsList;
 - (void)initializeTitle;
+- (void)initializeMessage;
 - (void)initializeRadioGroup;
 - (void)initializeItemList;
 - (void)initializeGeoLists;
@@ -268,6 +270,20 @@ const ContentTypeToNibPath kNibPaths[] = {
   observerBridge_.reset(
     new ContentSettingBubbleWebContentsObserverBridge(webContents, self));
 
+  NSString* nibPath = [self getNibPathForModel:model.get()];
+
+  DCHECK_NE(0u, [nibPath length]);
+
+  if ((self = [super initWithWindowNibPath:nibPath
+                              parentWindow:parentWindow
+                                anchoredAt:anchoredAt])) {
+    contentSettingBubbleModel_.reset(model.release());
+    [self showWindow:nil];
+  }
+  return self;
+}
+
+- (NSString*)getNibPathForModel:(ContentSettingBubbleModel*)model {
   NSString* nibPath = @"";
 
   ContentSettingSimpleBubbleModel* simple_bubble = model->AsSimpleBubbleModel();
@@ -285,19 +301,13 @@ const ContentTypeToNibPath kNibPaths[] = {
   if (model->AsMediaStreamBubbleModel())
     nibPath = @"ContentBlockedMedia";
 
-  DCHECK_NE(0u, [nibPath length]);
-
-  if ((self = [super initWithWindowNibPath:nibPath
-                              parentWindow:parentWindow
-                                anchoredAt:anchoredAt])) {
-    contentSettingBubbleModel_.reset(model.release());
-    [self showWindow:nil];
-  }
-  return self;
+  if (model->AsSubresourceFilterBubbleModel())
+    nibPath = @"ContentSubresourceFilter";
+  return nibPath;
 }
 
 - (void)dealloc {
-  STLDeleteValues(&mediaMenus_);
+  base::STLDeleteValues(&mediaMenus_);
   [super dealloc];
 }
 
@@ -305,7 +315,7 @@ const ContentTypeToNibPath kNibPaths[] = {
   if (!titleLabel_)
     return;
 
-  NSString* label = base::SysUTF8ToNSString(
+  NSString* label = base::SysUTF16ToNSString(
       contentSettingBubbleModel_->bubble_content().title);
   [titleLabel_ setStringValue:label];
 
@@ -320,11 +330,31 @@ const ContentTypeToNibPath kNibPaths[] = {
   [titleLabel_ setFrame:titleFrame];
 }
 
+- (void)initializeMessage {
+  if (!messageLabel_)
+    return;
+
+  NSString* label = base::SysUTF16ToNSString(
+      contentSettingBubbleModel_->bubble_content().message);
+  [messageLabel_ setStringValue:label];
+
+  CGFloat deltaY = [GTMUILocalizerAndLayoutTweaker
+      sizeToFitFixedWidthTextField:messageLabel_];
+  NSRect windowFrame = [[self window] frame];
+  windowFrame.size.height += deltaY;
+  [[self window] setFrame:windowFrame display:NO];
+  NSRect messageFrame = [messageLabel_ frame];
+  messageFrame.origin.y -= deltaY;
+  [messageLabel_ setFrame:messageFrame];
+}
+
 - (void)initializeRadioGroup {
   // NOTE! Tags in the xib files must match the order of the radio buttons
   // passed in the radio_group and be 1-based, not 0-based.
+  const ContentSettingBubbleModel::BubbleContent& bubble_content =
+      contentSettingBubbleModel_->bubble_content();
   const ContentSettingBubbleModel::RadioGroup& radio_group =
-      contentSettingBubbleModel_->bubble_content().radio_group;
+      bubble_content.radio_group;
 
   // Xcode 5.1 Interface Builder doesn't allow a font property to be set for
   // NSMatrix. The implementation of GTMUILocalizerAndLayoutTweaker assumes that
@@ -338,6 +368,7 @@ const ContentTypeToNibPath kNibPaths[] = {
     DCHECK([font isEqual:[cell font]]);
   }
   [allowBlockRadioGroup_ setFont:font];
+  [allowBlockRadioGroup_ setEnabled:bubble_content.radio_group_enabled];
 
   // Select appropriate radio button.
   [allowBlockRadioGroup_ selectCellWithTag: radio_group.default_item + 1];
@@ -730,7 +761,7 @@ const ContentTypeToNibPath kNibPaths[] = {
 - (void)initManageDoneButtons {
   const ContentSettingBubbleModel::BubbleContent& content =
       contentSettingBubbleModel_->bubble_content();
-  [manageButton_ setTitle:base::SysUTF8ToNSString(content.manage_link)];
+  [manageButton_ setTitle:base::SysUTF8ToNSString(content.manage_text)];
   [GTMUILocalizerAndLayoutTweaker sizeToFitView:[manageButton_ superview]];
 
   CGFloat actualWidth = NSWidth([[[self window] contentView] frame]);
@@ -757,6 +788,7 @@ const ContentTypeToNibPath kNibPaths[] = {
   [self initManageDoneButtons];
 
   [self initializeTitle];
+  [self initializeMessage];
 
   // Note that the per-content-type methods and |initializeRadioGroup| below
   // must be kept in the correct order, as they make interdependent adjustments

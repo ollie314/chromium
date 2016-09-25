@@ -26,6 +26,7 @@
 #include "core/CoreExport.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "platform/geometry/LayoutRect.h"
+#include <memory>
 
 namespace blink {
 
@@ -40,10 +41,15 @@ public:
 
     bool isDefault() const { return m_shape == Default; }
 
-    bool pointInArea(LayoutPoint, const LayoutSize& containerSize);
-
-    LayoutRect computeRect(const LayoutObject*) const;
-    Path computePath(const LayoutObject*) const;
+    // |containerObject| in the following functions is an object (normally a LayoutImage)
+    // which references the containing image map of this area. There might be multiple
+    // objects referencing the same map. For these functions, the effective geometry of
+    // this map will be calculated based on the specified container object, e.g. the
+    // rectangle of the default shape will be the border box rect of the container object,
+    // and effective zoom factor of the container object will be applied on non-default shape.
+    bool pointInArea(const LayoutPoint&, const LayoutObject* containerObject) const;
+    LayoutRect computeAbsoluteRect(const LayoutObject* containerObject) const;
+    Path getPath(const LayoutObject* containerObject) const;
 
     // The parent map's image.
     HTMLImageElement* imageElement() const;
@@ -60,12 +66,10 @@ private:
     void setFocus(bool) override;
 
     enum Shape { Default, Poly, Rect, Circle };
-    Path getRegion(const LayoutSize&) const;
-    void invalidateCachedRegion();
+    void invalidateCachedPath();
 
-    OwnPtr<Path> m_region;
+    mutable std::unique_ptr<Path> m_path;
     Vector<double> m_coords;
-    LayoutSize m_lastSize;
     Shape m_shape;
 };
 

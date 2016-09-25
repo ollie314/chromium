@@ -8,7 +8,9 @@
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
@@ -61,8 +63,8 @@ class ShortcutsBackendTest : public testing::Test,
   base::MessageLoop message_loop_;
   base::Thread db_thread_;
   base::ScopedTempDir profile_dir_;
-  scoped_ptr<TemplateURLService> template_url_service_;
-  scoped_ptr<history::HistoryService> history_service_;
+  std::unique_ptr<TemplateURLService> template_url_service_;
+  std::unique_ptr<history::HistoryService> history_service_;
 
   scoped_refptr<ShortcutsBackend> backend_;
 
@@ -102,23 +104,23 @@ void ShortcutsBackendTest::SetSearchProvider() {
   data.SetShortName(base::UTF8ToUTF16("foo"));
   data.SetKeyword(base::UTF8ToUTF16("foo"));
 
-  TemplateURL* template_url = new TemplateURL(data);
-  // Takes ownership of |template_url|.
-  template_url_service_->Add(template_url);
+  TemplateURL* template_url =
+      template_url_service_->Add(base::MakeUnique<TemplateURL>(data));
   template_url_service_->SetUserSelectedDefaultSearchProvider(template_url);
 }
 
 void ShortcutsBackendTest::SetUp() {
   template_url_service_.reset(new TemplateURLService(nullptr, 0));
   if (profile_dir_.CreateUniqueTempDir())
-    history_service_ = history::CreateHistoryService(profile_dir_.path(), true);
+    history_service_ =
+        history::CreateHistoryService(profile_dir_.GetPath(), true);
   ASSERT_TRUE(history_service_);
 
   db_thread_.Start();
   base::FilePath shortcuts_database_path =
-      profile_dir_.path().Append(kShortcutsDatabaseName);
+      profile_dir_.GetPath().Append(kShortcutsDatabaseName);
   backend_ = new ShortcutsBackend(
-      template_url_service_.get(), make_scoped_ptr(new SearchTermsData()),
+      template_url_service_.get(), base::MakeUnique<SearchTermsData>(),
       history_service_.get(), db_thread_.task_runner(), shortcuts_database_path,
       false);
   ASSERT_TRUE(backend_.get());
@@ -144,7 +146,7 @@ void ShortcutsBackendTest::InitBackend() {
   ASSERT_FALSE(load_notified_);
   ASSERT_FALSE(backend_->initialized());
   backend_->Init();
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_TRUE(load_notified_);
   EXPECT_TRUE(backend_->initialized());
 }

@@ -14,6 +14,7 @@
 #include "tools/gn/config_values_extractors.h"
 #include "tools/gn/deps_iterator.h"
 #include "tools/gn/filesystem_utils.h"
+#include "tools/gn/functions.h"
 #include "tools/gn/scheduler.h"
 #include "tools/gn/source_file_type.h"
 #include "tools/gn/substitution_writer.h"
@@ -53,19 +54,6 @@ Err MakeTestOnlyError(const Target* from, const Target* to) {
       "can depend on other test-only targets.\n"
       "\n"
       "Either mark it test-only or don't do this dependency.");
-}
-
-Err MakeStaticLibDepsError(const Target* from, const Target* to) {
-  return Err(from->defined_from(),
-             "Complete static libraries can't depend on static libraries.",
-             from->label().GetUserVisibleName(false) +
-                 "\n"
-                 "which is a complete static library can't depend on\n" +
-                 to->label().GetUserVisibleName(false) +
-                 "\n"
-                 "which is a static library.\n"
-                 "\n"
-                 "Use source sets for intermediate targets instead.");
 }
 
 // Set check_private_deps to true for the first invocation since a target
@@ -141,7 +129,7 @@ bool EnsureFileIsGeneratedByDependency(const Target* target,
         return true;  // Found a path.
     }
     if (target->output_type() == Target::CREATE_BUNDLE) {
-      for (const auto& dep : target->bundle_data().bundle_deps()) {
+      for (auto* dep : target->bundle_data().bundle_deps()) {
         if (EnsureFileIsGeneratedByDependency(dep, file, false,
                                               consider_object_files,
                                               check_data_deps, seen_targets))
@@ -228,29 +216,29 @@ Target::~Target() {
 const char* Target::GetStringForOutputType(OutputType type) {
   switch (type) {
     case UNKNOWN:
-      return "Unknown";
+      return "unknown";
     case GROUP:
-      return "Group";
+      return functions::kGroup;
     case EXECUTABLE:
-      return "Executable";
+      return functions::kExecutable;
     case LOADABLE_MODULE:
-      return "Loadable module";
+      return functions::kLoadableModule;
     case SHARED_LIBRARY:
-      return "Shared library";
+      return functions::kSharedLibrary;
     case STATIC_LIBRARY:
-      return "Static library";
+      return functions::kStaticLibrary;
     case SOURCE_SET:
-      return "Source set";
+      return functions::kSourceSet;
     case COPY_FILES:
-      return "Copy";
+      return functions::kCopy;
     case ACTION:
-      return "Action";
+      return functions::kAction;
     case ACTION_FOREACH:
-      return "ActionForEach";
+      return functions::kActionForEach;
     case BUNDLE_DATA:
-      return "Bundle data";
+      return functions::kBundleData;
     case CREATE_BUNDLE:
-      return "Create bundle";
+      return functions::kCreateBundle;
     default:
       return "";
   }
@@ -317,12 +305,13 @@ bool Target::OnResolved(Err* err) {
       return false;
     if (!CheckTestonly(err))
       return false;
-    if (!CheckNoNestedStaticLibs(err))
-      return false;
     if (!CheckAssertNoDeps(err))
       return false;
     CheckSourcesGenerated();
   }
+
+  if (!write_runtime_deps_output_.value().empty())
+    g_scheduler->AddWriteRuntimeDepsTarget(this);
 
   return true;
 }
@@ -436,14 +425,11 @@ bool Target::GetOutputFilesForSource(const SourceFile& source,
   return !outputs->empty();
 }
 
-void Target::PullDependentTargetConfigsFrom(const Target* dep) {
-  MergeAllDependentConfigsFrom(dep, &configs_, &all_dependent_configs_);
-  MergePublicConfigsFrom(dep, &configs_);
-}
-
 void Target::PullDependentTargetConfigs() {
   for (const auto& pair : GetDeps(DEPS_LINKED))
-    PullDependentTargetConfigsFrom(pair.ptr);
+    MergeAllDependentConfigsFrom(pair.ptr, &configs_, &all_dependent_configs_);
+  for (const auto& pair : GetDeps(DEPS_LINKED))
+    MergePublicConfigsFrom(pair.ptr, &configs_);
 }
 
 void Target::PullDependentTargetLibsFrom(const Target* dep, bool is_public) {
@@ -479,8 +465,24 @@ void Target::PullDependentTargetLibsFrom(const Target* dep, bool is_public) {
     // The current target isn't linked, so propogate linked deps and
     // libraries up the dependency tree.
     inherited_libraries_.AppendInherited(dep->inherited_libraries(), is_public);
+  } else if (dep->complete_static_lib()) {
+    // Inherit only final targets through _complete_ static libraries.
+    //
+    // Inherited final libraries aren't linked into complete static libraries.
+    // They are forwarded here so that targets that depend on complete
+    // static libraries can link them in. Conversely, since complete static
+    // libraries link in non-final targets they shouldn't be inherited.
+    for (const auto& inherited :
+         dep->inherited_libraries().GetOrderedAndPublicFlag()) {
+      if (inherited.first->IsFinal()) {
+        inherited_libraries_.Append(inherited.first,
+                                    is_public && inherited.second);
+      }
+    }
+  }
 
-    // Inherited library settings.
+  // Library settings are always inherited across static library boundaries.
+  if (!dep->IsFinal() || dep->output_type() == STATIC_LIBRARY) {
     all_lib_dirs_.append(dep->all_lib_dirs());
     all_libs_.append(dep->all_libs());
   }
@@ -511,12 +513,16 @@ void Target::PullRecursiveBundleData() {
     if (pair.ptr->output_type() == CREATE_BUNDLE)
       continue;
 
+    // Don't propagate across toolchain.
+    if (pair.ptr->toolchain() != toolchain())
+      continue;
+
     // Direct dependency on a bundle_data target.
     if (pair.ptr->output_type() == BUNDLE_DATA)
       bundle_data_.AddBundleData(pair.ptr);
 
     // Recursive bundle_data informations from all dependencies.
-    for (const auto& target : pair.ptr->bundle_data().bundle_deps())
+    for (auto* target : pair.ptr->bundle_data().bundle_deps())
       bundle_data_.AddBundleData(target);
   }
 
@@ -537,7 +543,8 @@ void Target::FillOutputFiles() {
       // These don't get linked to and use stamps which should be the first
       // entry in the outputs. These stamps are named
       // "<target_out_dir>/<targetname>.stamp".
-      dependency_output_file_ = GetTargetOutputDirAsOutputFile(this);
+      dependency_output_file_ =
+          GetBuildDirForTargetAsOutputFile(this, BuildDirType::OBJ);
       dependency_output_file_.value().append(GetComputedOutputName());
       dependency_output_file_.value().append(".stamp");
       break;
@@ -551,6 +558,14 @@ void Target::FillOutputFiles() {
       dependency_output_file_ =
           SubstitutionWriter::ApplyPatternToLinkerAsOutputFile(
               this, tool, tool->outputs().list()[0]);
+
+      if (tool->runtime_outputs().list().empty()) {
+        // Default to the first output for the runtime output.
+        runtime_outputs_.push_back(dependency_output_file_);
+      } else {
+        SubstitutionWriter::ApplyListToLinkerAsOutputFile(
+            this, tool, tool->runtime_outputs(), &runtime_outputs_);
+      }
       break;
     case STATIC_LIBRARY:
       // Static libraries both have dependencies and linking going off of the
@@ -582,12 +597,12 @@ void Target::FillOutputFiles() {
                   this, tool, tool->depend_output());
         }
       }
-      if (tool->runtime_link_output().empty()) {
-        runtime_link_output_file_ = link_output_file_;
+      if (tool->runtime_outputs().list().empty()) {
+        // Default to the link output for the runtime output.
+        runtime_outputs_.push_back(link_output_file_);
       } else {
-          runtime_link_output_file_ =
-              SubstitutionWriter::ApplyPatternToLinkerAsOutputFile(
-                  this, tool, tool->runtime_link_output());
+        SubstitutionWriter::ApplyListToLinkerAsOutputFile(
+            this, tool, tool->runtime_outputs(), &runtime_outputs_);
       }
       break;
     case UNKNOWN:
@@ -696,30 +711,6 @@ bool Target::CheckTestonly(Err* err) const {
     }
   }
 
-  return true;
-}
-
-bool Target::CheckNoNestedStaticLibs(Err* err) const {
-  // If the current target is not a complete static library, it can depend on
-  // static library targets with no problem.
-  if (!(output_type() == Target::STATIC_LIBRARY && complete_static_lib()))
-    return true;
-
-  // Verify no deps are static libraries.
-  for (const auto& pair : GetDeps(DEPS_ALL)) {
-    if (pair.ptr->output_type() == Target::STATIC_LIBRARY) {
-      *err = MakeStaticLibDepsError(this, pair.ptr);
-      return false;
-    }
-  }
-
-  // Verify no inherited libraries are static libraries.
-  for (const auto& lib : inherited_libraries().GetOrdered()) {
-    if (lib->output_type() == Target::STATIC_LIBRARY) {
-      *err = MakeStaticLibDepsError(this, lib);
-      return false;
-    }
-  }
   return true;
 }
 

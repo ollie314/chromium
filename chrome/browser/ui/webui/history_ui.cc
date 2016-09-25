@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/history_ui.h"
 
+#include <string>
+
 #include "base/command_line.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/string16.h"
@@ -17,16 +19,19 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
+#include "components/browsing_data/core/history_notice_utils.h"
+#include "components/browsing_data/core/pref_names.h"
+#include "components/grit/components_scaled_resources.h"
 #include "components/prefs/pref_service.h"
 #include "components/search/search.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/strings/grit/components_strings.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
-#include "grit/browser_resources.h"
-#include "grit/components_scaled_resources.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -69,12 +74,16 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIHistoryFrameHost);
   source->AddBoolean("isUserSignedIn", is_authenticated);
+#if !defined(OS_ANDROID)
   source->AddLocalizedString("collapseSessionMenuItemText",
       IDS_HISTORY_OTHER_SESSIONS_COLLAPSE_SESSION);
   source->AddLocalizedString("expandSessionMenuItemText",
       IDS_HISTORY_OTHER_SESSIONS_EXPAND_SESSION);
   source->AddLocalizedString("restoreSessionMenuItemText",
       IDS_HISTORY_OTHER_SESSIONS_OPEN_ALL);
+  source->AddLocalizedString("deleteSessionMenuItemText",
+      IDS_HISTORY_OTHER_SESSIONS_HIDE_FOR_NOW);
+#endif
   source->AddLocalizedString("xMore", IDS_HISTORY_OTHER_DEVICES_X_MORE);
   source->AddLocalizedString("loading", IDS_HISTORY_LOADING);
   source->AddLocalizedString("title", IDS_HISTORY_TITLE);
@@ -98,12 +107,13 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
                              IDS_HISTORY_OPEN_CLEAR_BROWSING_DATA_DIALOG);
 
   auto availability = IncognitoModePrefs::GetAvailability(profile->GetPrefs());
-  base::string16 delete_warning = availability == IncognitoModePrefs::ENABLED ?
-      l10n_util::GetStringFUTF16(IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING,
-                                 base::UTF8ToUTF16(kIncognitoModeShortcut)) :
-      l10n_util::GetStringUTF16(
-          IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING_NO_INCOGNITO);
-  source->AddString("deleteWarning", delete_warning);
+  base::string16 delete_string = availability == IncognitoModePrefs::ENABLED
+             ? l10n_util::GetStringFUTF16(
+                   IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING,
+                   base::UTF8ToUTF16(kIncognitoModeShortcut))
+             : l10n_util::GetStringUTF16(
+                   IDS_HISTORY_DELETE_PRIOR_VISITS_WARNING_NO_INCOGNITO);
+  source->AddString("deleteWarning", delete_string);
 
   source->AddLocalizedString("removeBookmark", IDS_HISTORY_REMOVE_BOOKMARK);
   source->AddLocalizedString("actionMenuDescription",
@@ -155,6 +165,7 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   source->AddResourcePath(kOtherDevicesJsFile, IDR_OTHER_DEVICES_JS);
   source->SetDefaultResource(IDR_HISTORY_HTML);
   source->DisableDenyXFrameOptions();
+  source->DisableI18nAndUseGzipForAllPaths();
 
   return source;
 }
@@ -172,6 +183,20 @@ HistoryUI::HistoryUI(content::WebUI* web_ui) : WebUIController(web_ui) {
     web_ui->AddMessageHandler(new HistoryLoginHandler());
   }
 #endif
+
+  // TODO(crbug.com/595332): Since the API to query other forms of browsing
+  // history is not ready yet, make it possible to test the history UI as if
+  // it were. If the user opens chrome://history/?reset_ofbh, we will assume
+  // that other forms of browsing history exist (for all accounts), and we will
+  // also reset the one-time notice shown in the Clear Browsing Data dialog.
+  // This code should be removed as soon as the API is ready.
+  GURL url = web_ui->GetWebContents()->GetVisibleURL();
+  if (url.has_query() && url.query() == "reset_ofbh") {
+    Profile::FromWebUI(web_ui)->GetPrefs()->SetInteger(
+        browsing_data::prefs::kClearBrowsingDataHistoryNoticeShownTimes, 0);
+    browsing_data::testing::
+        g_override_other_forms_of_browsing_history_query = true;
+  }
 
   // Set up the chrome://history-frame/ source.
   Profile* profile = Profile::FromWebUI(web_ui);

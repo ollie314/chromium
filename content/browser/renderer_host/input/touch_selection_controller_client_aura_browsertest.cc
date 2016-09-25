@@ -17,9 +17,9 @@
 #include "content/shell/browser/shell.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/display/display_switches.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
-#include "ui/gfx/switches.h"
 #include "ui/touch_selection/touch_selection_controller_test_api.h"
 
 namespace content {
@@ -135,8 +135,8 @@ class TouchSelectionControllerClientAuraTest : public ContentBrowserTest {
 
   bool GetPointInsideText(gfx::PointF* point) {
     std::string str;
-    if (ExecuteScriptAndExtractString(shell()->web_contents()->GetMainFrame(),
-                                      "get_point_inside_text()", &str)) {
+    if (ExecuteScriptAndExtractString(shell(), "get_point_inside_text()",
+                                      &str)) {
       return JSONToPoint(str, point);
     }
     return false;
@@ -144,17 +144,14 @@ class TouchSelectionControllerClientAuraTest : public ContentBrowserTest {
 
   bool GetPointInsideTextfield(gfx::PointF* point) {
     std::string str;
-    if (ExecuteScriptAndExtractString(shell()->web_contents()->GetMainFrame(),
-                                      "get_point_inside_textfield()", &str)) {
+    if (ExecuteScriptAndExtractString(shell(), "get_point_inside_textfield()",
+                                      &str)) {
       return JSONToPoint(str, point);
     }
     return false;
   }
 
-  bool EmptyTextfield() {
-    return ExecuteScript(shell()->web_contents()->GetMainFrame(),
-                         "empty_textfield()");
-  }
+  bool ClearTextfield() { return ExecuteScript(shell(), "clear_textfield()"); }
 
   RenderWidgetHostViewAura* GetRenderWidgetHostViewAura() {
     return static_cast<RenderWidgetHostViewAura*>(
@@ -212,9 +209,10 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest, BasicSelection) {
 
   gfx::PointF point;
   ASSERT_TRUE(GetPointInsideText(&point));
-  ui::GestureEvent long_press(
-      point.x(), point.y(), 0, ui::EventTimeForNow(),
-      ui::GestureEventDetails(ui::ET_GESTURE_LONG_PRESS));
+  ui::GestureEventDetails long_press_details(ui::ET_GESTURE_LONG_PRESS);
+  long_press_details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent long_press(point.x(), point.y(), 0, ui::EventTimeForNow(),
+                              long_press_details);
   rwhva->OnGestureEvent(&long_press);
 
   selection_controller_client()->Wait();
@@ -284,7 +282,7 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest,
   RenderWidgetHostViewAura* rwhva = GetRenderWidgetHostViewAura();
 
   // Clear textfield contents.
-  ASSERT_TRUE(EmptyTextfield());
+  ASSERT_TRUE(ClearTextfield());
 
   EXPECT_EQ(ui::TouchSelectionController::INACTIVE,
             rwhva->selection_controller()->active_status());
@@ -297,6 +295,7 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest,
   gfx::PointF point;
   ASSERT_TRUE(GetPointInsideTextfield(&point));
   ui::GestureEventDetails tap_details(ui::ET_GESTURE_TAP);
+  tap_details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
   tap_details.set_tap_count(1);
   ui::GestureEvent tap(point.x(), point.y(), 0, ui::EventTimeForNow(),
                        tap_details);
@@ -308,6 +307,43 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest,
   EXPECT_EQ(ui::TouchSelectionController::INACTIVE,
             rwhva->selection_controller()->active_status());
   EXPECT_FALSE(ui::TouchSelectionMenuRunner::GetInstance()->IsRunning());
+}
+
+// Tests that long-pressing on an empty textfield brings up the insertion handle
+// and the quick menu.
+IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest,
+                       EmptyTextfieldInsertionOnLongPress) {
+  // Set the test page up.
+  ASSERT_NO_FATAL_FAILURE(StartTestWithPage("/touch_selection.html"));
+  InitSelectionController();
+
+  RenderWidgetHostViewAura* rwhva = GetRenderWidgetHostViewAura();
+
+  // Clear textfield contents.
+  ASSERT_TRUE(ClearTextfield());
+
+  EXPECT_EQ(ui::TouchSelectionController::INACTIVE,
+            rwhva->selection_controller()->active_status());
+  EXPECT_FALSE(ui::TouchSelectionMenuRunner::GetInstance()->IsRunning());
+
+  // Long-press inside the textfield and wait for the insertion handle.
+  selection_controller_client()->InitWaitForSelectionEvent(
+      ui::INSERTION_HANDLE_SHOWN);
+
+  gfx::PointF point;
+  ASSERT_TRUE(GetPointInsideTextfield(&point));
+  ui::GestureEventDetails long_press_details(ui::ET_GESTURE_LONG_PRESS);
+  long_press_details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent long_press(point.x(), point.y(), 0, ui::EventTimeForNow(),
+                              long_press_details);
+  rwhva->OnGestureEvent(&long_press);
+
+  selection_controller_client()->Wait();
+
+  // Check that insertion is active and the quick menu is showing.
+  EXPECT_EQ(ui::TouchSelectionController::INSERTION_ACTIVE,
+            rwhva->selection_controller()->active_status());
+  EXPECT_TRUE(ui::TouchSelectionMenuRunner::GetInstance()->IsRunning());
 }
 
 // Tests that the quick menu is hidden whenever a touch point is active.
@@ -328,9 +364,10 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest,
 
   gfx::PointF point;
   ASSERT_TRUE(GetPointInsideText(&point));
-  ui::GestureEvent long_press(
-      point.x(), point.y(), 0, ui::EventTimeForNow(),
-      ui::GestureEventDetails(ui::ET_GESTURE_LONG_PRESS));
+  ui::GestureEventDetails long_press_details(ui::ET_GESTURE_LONG_PRESS);
+  long_press_details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent long_press(point.x(), point.y(), 0, ui::EventTimeForNow(),
+                              long_press_details);
   rwhva->OnGestureEvent(&long_press);
 
   selection_controller_client()->Wait();
@@ -387,9 +424,10 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest, HiddenOnScroll) {
 
   gfx::PointF point;
   ASSERT_TRUE(GetPointInsideText(&point));
-  ui::GestureEvent long_press(
-      point.x(), point.y(), 0, ui::EventTimeForNow(),
-      ui::GestureEventDetails(ui::ET_GESTURE_LONG_PRESS));
+  ui::GestureEventDetails long_press_details(ui::ET_GESTURE_LONG_PRESS);
+  long_press_details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent long_press(point.x(), point.y(), 0, ui::EventTimeForNow(),
+                              long_press_details);
   rwhva->OnGestureEvent(&long_press);
 
   selection_controller_client()->Wait();
@@ -411,9 +449,11 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest, HiddenOnScroll) {
 
   // Start scrolling: touch handles should get hidden, while touch selection is
   // still active.
-  ui::GestureEvent scroll_begin(
-      10, 10, 0, ui::EventTimeForNow(),
-      ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_BEGIN));
+  ui::GestureEventDetails scroll_begin_details(ui::ET_GESTURE_SCROLL_BEGIN);
+  scroll_begin_details.set_device_type(
+      ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent scroll_begin(10, 10, 0, ui::EventTimeForNow(),
+                                scroll_begin_details);
   rwhva->OnGestureEvent(&scroll_begin);
   EXPECT_EQ(ui::TouchSelectionController::SELECTION_ACTIVE,
             rwhva->selection_controller()->active_status());
@@ -421,9 +461,10 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest, HiddenOnScroll) {
   EXPECT_FALSE(ui::TouchSelectionMenuRunner::GetInstance()->IsRunning());
 
   // End scrolling: touch handles should re-appear.
-  ui::GestureEvent scroll_end(
-      10, 10, 0, ui::EventTimeForNow(),
-      ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_END));
+  ui::GestureEventDetails scroll_end_details(ui::ET_GESTURE_SCROLL_END);
+  scroll_end_details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent scroll_end(10, 10, 0, ui::EventTimeForNow(),
+                              scroll_end_details);
   rwhva->OnGestureEvent(&scroll_end);
   EXPECT_EQ(ui::TouchSelectionController::SELECTION_ACTIVE,
             rwhva->selection_controller()->active_status());
@@ -458,9 +499,10 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest,
 
   gfx::PointF point;
   ASSERT_TRUE(GetPointInsideText(&point));
-  ui::GestureEvent long_press(
-      point.x(), point.y(), 0, ui::EventTimeForNow(),
-      ui::GestureEventDetails(ui::ET_GESTURE_LONG_PRESS));
+  ui::GestureEventDetails long_press_details(ui::ET_GESTURE_LONG_PRESS);
+  long_press_details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent long_press(point.x(), point.y(), 0, ui::EventTimeForNow(),
+                              long_press_details);
   rwhva->OnGestureEvent(&long_press);
 
   selection_controller_client()->Wait();
@@ -474,19 +516,25 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraTest,
   selection_controller_client()->InitWaitForSelectionEvent(
       ui::SELECTION_HANDLES_CLEARED);
 
-  ui::GestureEvent scroll_begin(
-      10, 10, 0, ui::EventTimeForNow(),
-      ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_BEGIN));
+  ui::GestureEventDetails scroll_begin_details(ui::ET_GESTURE_SCROLL_BEGIN);
+  scroll_begin_details.set_device_type(
+      ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent scroll_begin(10, 10, 0, ui::EventTimeForNow(),
+                                scroll_begin_details);
   rwhva->OnGestureEvent(&scroll_begin);
 
-  ui::GestureEvent scroll_update(
-      210, 10, 0, ui::EventTimeForNow(),
-      ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_UPDATE, 200, 0));
+  ui::GestureEventDetails scroll_update_details(ui::ET_GESTURE_SCROLL_UPDATE,
+                                                200, 0);
+  scroll_update_details.set_device_type(
+      ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent scroll_update(210, 10, 0, ui::EventTimeForNow(),
+                                 scroll_update_details);
   rwhva->OnGestureEvent(&scroll_update);
 
-  ui::GestureEvent scroll_end(
-      210, 10, 0, ui::EventTimeForNow(),
-      ui::GestureEventDetails(ui::ET_GESTURE_SCROLL_END));
+  ui::GestureEventDetails scroll_end_details(ui::ET_GESTURE_SCROLL_END);
+  scroll_end_details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent scroll_end(210, 10, 0, ui::EventTimeForNow(),
+                              scroll_end_details);
   rwhva->OnGestureEvent(&scroll_end);
 
   selection_controller_client()->Wait();
@@ -532,9 +580,10 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraScaleFactorTest,
       ui::SELECTION_HANDLES_SHOWN);
   gfx::PointF point;
   ASSERT_TRUE(GetPointInsideText(&point));
-  ui::GestureEvent long_press(
-      point.x(), point.y(), 0, ui::EventTimeForNow(),
-      ui::GestureEventDetails(ui::ET_GESTURE_LONG_PRESS));
+  ui::GestureEventDetails long_press_details(ui::ET_GESTURE_LONG_PRESS);
+  long_press_details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
+  ui::GestureEvent long_press(point.x(), point.y(), 0, ui::EventTimeForNow(),
+                              long_press_details);
   rwhva->OnGestureEvent(&long_press);
   selection_controller_client()->Wait();
 
@@ -615,6 +664,7 @@ IN_PROC_BROWSER_TEST_F(TouchSelectionControllerClientAuraScaleFactorTest,
   gfx::PointF point;
   ASSERT_TRUE(GetPointInsideTextfield(&point));
   ui::GestureEventDetails tap_details(ui::ET_GESTURE_TAP);
+  tap_details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
   tap_details.set_tap_count(1);
   ui::GestureEvent tap(point.x(), point.y(), 0, ui::EventTimeForNow(),
                        tap_details);

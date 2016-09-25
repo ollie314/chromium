@@ -8,6 +8,7 @@
 #include "core/CSSValueKeywords.h"
 #include "core/animation/CSSInterpolationType.h"
 #include "platform/graphics/Color.h"
+#include <memory>
 
 namespace blink {
 
@@ -22,15 +23,15 @@ public:
     InterpolationValue maybeConvertUnderlyingValue(const InterpolationEnvironment&) const final;
     void apply(const InterpolableValue&, const NonInterpolableValue*, InterpolationEnvironment&) const final;
 
-    static PassOwnPtr<InterpolableValue> createInterpolableColor(const Color&);
-    static PassOwnPtr<InterpolableValue> createInterpolableColor(CSSValueID);
-    static PassOwnPtr<InterpolableValue> createInterpolableColor(const StyleColor&);
-    static PassOwnPtr<InterpolableValue> maybeCreateInterpolableColor(const CSSValue&);
+    static std::unique_ptr<InterpolableValue> createInterpolableColor(const Color&);
+    static std::unique_ptr<InterpolableValue> createInterpolableColor(CSSValueID);
+    static std::unique_ptr<InterpolableValue> createInterpolableColor(const StyleColor&);
+    static std::unique_ptr<InterpolableValue> maybeCreateInterpolableColor(const CSSValue&);
     static Color resolveInterpolableColor(const InterpolableValue& interpolableColor, const StyleResolverState&, bool isVisited = false, bool isTextDecoration = false);
 
 private:
     InterpolationValue maybeConvertNeutral(const InterpolationValue& underlying, ConversionCheckers&) const final;
-    InterpolationValue maybeConvertInitial(const StyleResolverState&) const final;
+    InterpolationValue maybeConvertInitial(const StyleResolverState&, ConversionCheckers&) const final;
     InterpolationValue maybeConvertInherit(const StyleResolverState&, ConversionCheckers&) const final;
     InterpolationValue maybeConvertValue(const CSSValue&, const StyleResolverState&, ConversionCheckers&) const final;
     InterpolationValue convertStyleColorPair(const StyleColor&, const StyleColor&) const;

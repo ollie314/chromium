@@ -68,16 +68,14 @@ std::string HexStringToID(const std::string& hexstr) {
 
 }  // namespace
 
-std::string BuildProtocolRequest(const std::string& browser_version,
+std::string BuildProtocolRequest(const std::string& prod_id,
+                                 const std::string& browser_version,
                                  const std::string& channel,
                                  const std::string& lang,
                                  const std::string& os_long_name,
                                  const std::string& download_preference,
                                  const std::string& request_body,
                                  const std::string& additional_attributes) {
-  const std::string prod_id(
-      UpdateQueryParams::GetProdIdString(UpdateQueryParams::CHROME));
-
   std::string request(
       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
       "<request protocol=\"3.0\" ");
@@ -91,8 +89,8 @@ std::string BuildProtocolRequest(const std::string& browser_version,
       "version=\"%s-%s\" prodversion=\"%s\" "
       "requestid=\"{%s}\" lang=\"%s\" updaterchannel=\"%s\" prodchannel=\"%s\" "
       "os=\"%s\" arch=\"%s\" nacl_arch=\"%s\"",
-      prod_id.c_str(),
-      browser_version.c_str(),            // "version"
+      prod_id.c_str(),                    // "version" is prefixed by prod_id.
+      browser_version.c_str(),
       browser_version.c_str(),            // "prodversion"
       base::GenerateGUID().c_str(),       // "requestid"
       lang.c_str(),                       // "lang",
@@ -129,12 +127,12 @@ std::string BuildProtocolRequest(const std::string& browser_version,
   return request;
 }
 
-scoped_ptr<net::URLFetcher> SendProtocolRequest(
+std::unique_ptr<net::URLFetcher> SendProtocolRequest(
     const GURL& url,
     const std::string& protocol_request,
     net::URLFetcherDelegate* url_fetcher_delegate,
     net::URLRequestContextGetter* url_request_context_getter) {
-  scoped_ptr<net::URLFetcher> url_fetcher = net::URLFetcher::Create(
+  std::unique_ptr<net::URLFetcher> url_fetcher = net::URLFetcher::Create(
       0, url, net::URLFetcher::POST, url_fetcher_delegate);
   if (!url_fetcher.get())
     return url_fetcher;
@@ -221,7 +219,7 @@ bool VerifyFileHash256(const base::FilePath& filepath,
     return false;
 
   uint8_t actual_hash[crypto::kSHA256Length] = {0};
-  scoped_ptr<crypto::SecureHash> hasher(
+  std::unique_ptr<crypto::SecureHash> hasher(
       crypto::SecureHash::Create(crypto::SecureHash::SHA256));
   hasher->Update(mmfile.data(), mmfile.length());
   hasher->Finish(actual_hash, sizeof(actual_hash));
@@ -239,23 +237,42 @@ bool IsValidBrand(const std::string& brand) {
          }) == brand.end();
 }
 
-bool IsValidAp(const std::string& ap) {
-  const size_t kMaxApSize = 256;
-  if (ap.size() > kMaxApSize)
+// Helper function.
+// Returns true if |part| matches the expression
+// ^[<special_chars>a-zA-Z0-9]{min_length,max_length}$
+bool IsValidInstallerAttributePart(const std::string& part,
+                                   const std::string& special_chars,
+                                   size_t min_length,
+                                   size_t max_length) {
+  if (part.size() < min_length || part.size() > max_length)
     return false;
 
-  return std::find_if_not(ap.begin(), ap.end(), [](char ch) {
+  return std::find_if_not(part.begin(), part.end(), [&special_chars](char ch) {
            if (base::IsAsciiAlpha(ch) || base::IsAsciiDigit(ch))
              return true;
 
-           const char kSpecialChars[] = "+-_=";
-           for (auto c : kSpecialChars) {
+           for (auto c : special_chars) {
              if (c == ch)
                return true;
            }
 
            return false;
-         }) == ap.end();
+         }) == part.end();
+}
+
+// Returns true if the |name| parameter matches ^[-_a-zA-Z0-9]{1,256}$ .
+bool IsValidInstallerAttributeName(const std::string& name) {
+  return IsValidInstallerAttributePart(name, "-_", 1, 256);
+}
+
+// Returns true if the |value| parameter matches ^[-.,;+_=a-zA-Z0-9]{0,256}$ .
+bool IsValidInstallerAttributeValue(const std::string& value) {
+  return IsValidInstallerAttributePart(value, "-.,;+_=", 0, 256);
+}
+
+bool IsValidInstallerAttribute(const InstallerAttribute& attr) {
+  return IsValidInstallerAttributeName(attr.first) &&
+         IsValidInstallerAttributeValue(attr.second);
 }
 
 void RemoveUnsecureUrls(std::vector<GURL>* urls) {

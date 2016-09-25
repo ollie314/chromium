@@ -34,8 +34,11 @@
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutImage.h"
+#include "core/layout/api/LineLayoutBlockFlow.h"
 #include "platform/LengthFunctions.h"
 #include "public/platform/Platform.h"
+#include "wtf/AutoReset.h"
+#include <memory>
 
 namespace blink {
 
@@ -119,7 +122,7 @@ static bool isValidRasterShapeRect(const LayoutRect& rect)
     return (rect.width().toFloat() * rect.height().toFloat() * 4.0) < maxImageSizeBytes;
 }
 
-PassOwnPtr<Shape> ShapeOutsideInfo::createShapeForImage(StyleImage* styleImage, float shapeImageThreshold, WritingMode writingMode, float margin) const
+std::unique_ptr<Shape> ShapeOutsideInfo::createShapeForImage(StyleImage* styleImage, float shapeImageThreshold, WritingMode writingMode, float margin) const
 {
     const LayoutSize& imageSize = styleImage->imageSize(m_layoutBox, m_layoutBox.style()->effectiveZoom(), m_referenceBoxLogicalSize);
 
@@ -144,7 +147,7 @@ const Shape& ShapeOutsideInfo::computedShape() const
     if (Shape* shape = m_shape.get())
         return *shape;
 
-    TemporaryChange<bool> isInComputingShape(m_isComputingShape, true);
+    AutoReset<bool> isInComputingShape(&m_isComputingShape, true);
 
     const ComputedStyle& style = *m_layoutBox.style();
     ASSERT(m_layoutBox.containingBlock());

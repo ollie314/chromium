@@ -84,6 +84,8 @@ public:
 
     static void installAttribute(v8::Isolate*, const DOMWrapperWorld&, v8::Local<v8::ObjectTemplate> instanceTemplate, v8::Local<v8::ObjectTemplate> prototypeTemplate, const AttributeConfiguration&);
 
+    static void installAttribute(v8::Isolate*, const DOMWrapperWorld&, v8::Local<v8::Object> instance, v8::Local<v8::Object> prototype, const AttributeConfiguration&);
+
     // AccessorConfiguration translates into calls to SetAccessorProperty()
     // on prototype ObjectTemplate.
     struct AccessorConfiguration {
@@ -140,6 +142,8 @@ public:
     static void installConstants(v8::Isolate*, v8::Local<v8::FunctionTemplate> interfaceTemplate, v8::Local<v8::ObjectTemplate> prototypeTemplate, const ConstantConfiguration*, size_t constantCount);
 
     static void installConstant(v8::Isolate*, v8::Local<v8::FunctionTemplate> interfaceTemplate, v8::Local<v8::ObjectTemplate> prototypeTemplate, const ConstantConfiguration&);
+
+    static void installConstant(v8::Isolate*, v8::Local<v8::Function> interface, v8::Local<v8::Object> prototype, const ConstantConfiguration&);
 
     static void installConstantWithGetter(v8::Isolate*, v8::Local<v8::FunctionTemplate> interfaceTemplate, v8::Local<v8::ObjectTemplate> prototypeTemplate, const char* name, v8::AccessorNameGetterCallback);
 

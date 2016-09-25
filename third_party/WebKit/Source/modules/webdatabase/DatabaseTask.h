@@ -33,13 +33,13 @@
 #include "modules/webdatabase/DatabaseBasicTypes.h"
 #include "modules/webdatabase/DatabaseError.h"
 #include "modules/webdatabase/SQLTransactionBackend.h"
-#include "platform/TaskSynchronizer.h"
+#include "platform/WaitableEvent.h"
 #include "platform/heap/Handle.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/Threading.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
@@ -51,21 +51,18 @@ public:
     void run();
 
     Database* database() const { return m_database.get(); }
-#if ENABLE(ASSERT)
-    bool hasSynchronizer() const { return m_synchronizer; }
-#endif
 
 protected:
-    DatabaseTask(Database*, TaskSynchronizer*);
+    DatabaseTask(Database*, WaitableEvent* completeEvent);
 
 private:
     virtual void doPerformTask() = 0;
     virtual void taskCancelled() { }
 
     CrossThreadPersistent<Database> m_database;
-    TaskSynchronizer* m_synchronizer;
+    WaitableEvent* m_completeEvent;
 
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
     virtual const char* debugTaskName() const = 0;
     bool m_complete;
 #endif
@@ -73,16 +70,16 @@ private:
 
 class Database::DatabaseOpenTask final : public DatabaseTask {
 public:
-    static PassOwnPtr<DatabaseOpenTask> create(Database* db, bool setVersionInNewDatabase, TaskSynchronizer* synchronizer, DatabaseError& error, String& errorMessage, bool& success)
+    static std::unique_ptr<DatabaseOpenTask> create(Database* db, bool setVersionInNewDatabase, WaitableEvent* completeEvent, DatabaseError& error, String& errorMessage, bool& success)
     {
-        return adoptPtr(new DatabaseOpenTask(db, setVersionInNewDatabase, synchronizer, error, errorMessage, success));
+        return wrapUnique(new DatabaseOpenTask(db, setVersionInNewDatabase, completeEvent, error, errorMessage, success));
     }
 
 private:
-    DatabaseOpenTask(Database*, bool setVersionInNewDatabase, TaskSynchronizer*, DatabaseError&, String& errorMessage, bool& success);
+    DatabaseOpenTask(Database*, bool setVersionInNewDatabase, WaitableEvent*, DatabaseError&, String& errorMessage, bool& success);
 
     void doPerformTask() override;
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
     const char* debugTaskName() const override;
 #endif
 
@@ -94,16 +91,16 @@ private:
 
 class Database::DatabaseCloseTask final : public DatabaseTask {
 public:
-    static PassOwnPtr<DatabaseCloseTask> create(Database* db, TaskSynchronizer* synchronizer)
+    static std::unique_ptr<DatabaseCloseTask> create(Database* db, WaitableEvent* synchronizer)
     {
-        return adoptPtr(new DatabaseCloseTask(db, synchronizer));
+        return wrapUnique(new DatabaseCloseTask(db, synchronizer));
     }
 
 private:
-    DatabaseCloseTask(Database*, TaskSynchronizer*);
+    DatabaseCloseTask(Database*, WaitableEvent*);
 
     void doPerformTask() override;
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
     const char* debugTaskName() const override;
 #endif
 };
@@ -113,9 +110,9 @@ public:
     ~DatabaseTransactionTask() override;
 
     // Transaction task is never synchronous, so no 'synchronizer' parameter.
-    static PassOwnPtr<DatabaseTransactionTask> create(SQLTransactionBackend* transaction)
+    static std::unique_ptr<DatabaseTransactionTask> create(SQLTransactionBackend* transaction)
     {
-        return adoptPtr(new DatabaseTransactionTask(transaction));
+        return wrapUnique(new DatabaseTransactionTask(transaction));
     }
 
     SQLTransactionBackend* transaction() const { return m_transaction.get(); }
@@ -125,7 +122,7 @@ private:
 
     void doPerformTask() override;
     void taskCancelled() override;
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
     const char* debugTaskName() const override;
 #endif
 
@@ -134,16 +131,16 @@ private:
 
 class Database::DatabaseTableNamesTask final : public DatabaseTask {
 public:
-    static PassOwnPtr<DatabaseTableNamesTask> create(Database* db, TaskSynchronizer* synchronizer, Vector<String>& names)
+    static std::unique_ptr<DatabaseTableNamesTask> create(Database* db, WaitableEvent* synchronizer, Vector<String>& names)
     {
-        return adoptPtr(new DatabaseTableNamesTask(db, synchronizer, names));
+        return wrapUnique(new DatabaseTableNamesTask(db, synchronizer, names));
     }
 
 private:
-    DatabaseTableNamesTask(Database*, TaskSynchronizer*, Vector<String>& names);
+    DatabaseTableNamesTask(Database*, WaitableEvent*, Vector<String>& names);
 
     void doPerformTask() override;
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
     const char* debugTaskName() const override;
 #endif
 

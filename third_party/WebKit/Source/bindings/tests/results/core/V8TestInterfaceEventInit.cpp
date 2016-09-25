@@ -31,36 +31,34 @@ void V8TestInterfaceEventInit::toImpl(v8::Isolate* isolate, v8::Local<v8::Value>
         exceptionState.rethrowV8Exception(block.Exception());
         return;
     }
-    {
-        v8::Local<v8::Value> stringMemberValue;
-        if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "stringMember")).ToLocal(&stringMemberValue)) {
-            exceptionState.rethrowV8Exception(block.Exception());
-            return;
-        }
-        if (stringMemberValue.IsEmpty() || stringMemberValue->IsUndefined()) {
-            // Do nothing.
-        } else {
-            V8StringResource<> stringMember = stringMemberValue;
-            if (!stringMember.prepare(exceptionState))
-                return;
-            impl.setStringMember(stringMember);
-        }
+    v8::Local<v8::Value> stringMemberValue;
+    if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "stringMember")).ToLocal(&stringMemberValue)) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return;
     }
-
+    if (stringMemberValue.IsEmpty() || stringMemberValue->IsUndefined()) {
+        // Do nothing.
+    } else {
+        V8StringResource<> stringMember = stringMemberValue;
+        if (!stringMember.prepare(exceptionState))
+            return;
+        impl.setStringMember(stringMember);
+    }
 }
 
-v8::Local<v8::Value> toV8(const TestInterfaceEventInit& impl, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
+v8::Local<v8::Value> TestInterfaceEventInit::toV8Impl(v8::Local<v8::Object> creationContext, v8::Isolate* isolate) const
 {
     v8::Local<v8::Object> v8Object = v8::Object::New(isolate);
-    if (!toV8EventInit(impl, v8Object, creationContext, isolate))
-        return v8::Local<v8::Value>();
-    if (!toV8TestInterfaceEventInit(impl, v8Object, creationContext, isolate))
-        return v8::Local<v8::Value>();
+    if (!toV8TestInterfaceEventInit(*this, v8Object, creationContext, isolate))
+        return v8::Undefined(isolate);
     return v8Object;
 }
 
 bool toV8TestInterfaceEventInit(const TestInterfaceEventInit& impl, v8::Local<v8::Object> dictionary, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
 {
+    if (!toV8EventInit(impl, dictionary, creationContext, isolate))
+        return false;
+
     if (impl.hasStringMember()) {
         if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "stringMember"), v8String(isolate, impl.stringMember()))))
             return false;

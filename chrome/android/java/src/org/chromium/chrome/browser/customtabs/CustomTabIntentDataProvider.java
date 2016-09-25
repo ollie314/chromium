@@ -16,8 +16,8 @@ import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.IBinder;
 import android.support.customtabs.CustomTabsIntent;
+import android.support.customtabs.CustomTabsSessionToken;
 import android.text.TextUtils;
 import android.util.Pair;
 import android.view.View;
@@ -56,11 +56,9 @@ public class CustomTabIntentDataProvider {
     public static final String EXTRA_IS_OPENED_BY_CHROME =
             "org.chromium.chrome.browser.customtabs.IS_OPENED_BY_CHROME";
 
-    /**
-     * Herb: Extra used by the main Chrome browser to enable the bookmark icon in the menu.
-     */
-    public static final String EXTRA_SHOW_STAR_ICON =
-            "org.chromium.chrome.browser.customtabs.SHOW_STAR_ICON";
+    /** Indicates that the Custom Tab should style itself as a media viewer. */
+    public static final String EXTRA_IS_MEDIA_VIEWER =
+            "org.chromium.chrome.browser.customtabs.IS_MEDIA_VIEWER";
 
     private static final int MAX_CUSTOM_MENU_ITEMS = 5;
     private static final String ANIMATION_BUNDLE_PREFIX =
@@ -70,9 +68,12 @@ public class CustomTabIntentDataProvider {
             ANIMATION_BUNDLE_PREFIX + "animEnterRes";
     private static final String BUNDLE_EXIT_ANIMATION_RESOURCE =
             ANIMATION_BUNDLE_PREFIX + "animExitRes";
-    private final IBinder mSession;
+
+    private final CustomTabsSessionToken mSession;
     private final Intent mKeepAliveServiceIntent;
     private final int mTitleVisibilityState;
+    private final boolean mIsMediaViewer;
+
     private int mToolbarColor;
     private int mBottomBarColor;
     private boolean mEnableUrlBarHiding;
@@ -92,15 +93,12 @@ public class CustomTabIntentDataProvider {
     /** Herb: Whether this CustomTabActivity was explicitly started by another Chrome Activity. */
     private boolean mIsOpenedByChrome;
 
-    /** Herb: Whether or not the bookmark button should be shown. */
-    private boolean mShowBookmarkItem;
-
     /**
      * Constructs a {@link CustomTabIntentDataProvider}.
      */
     public CustomTabIntentDataProvider(Intent intent, Context context) {
         if (intent == null) assert false;
-        mSession = IntentUtils.safeGetBinderExtra(intent, CustomTabsIntent.EXTRA_SESSION);
+        mSession = CustomTabsSessionToken.getSessionTokenFromIntent(intent);
         parseHerbExtras(intent, context);
 
         retrieveCustomButtons(intent, context);
@@ -149,6 +147,8 @@ public class CustomTabIntentDataProvider {
                 CustomTabsIntent.EXTRA_REMOTEVIEWS_VIEW_IDS);
         mRemoteViewsPendingIntent = IntentUtils.safeGetParcelableExtra(intent,
                 CustomTabsIntent.EXTRA_REMOTEVIEWS_PENDINGINTENT);
+        mIsMediaViewer = IntentHandler.isIntentChromeOrFirstParty(intent, context)
+                && IntentUtils.safeGetBooleanExtra(intent, EXTRA_IS_MEDIA_VIEWER, false);
     }
 
     /**
@@ -202,7 +202,7 @@ public class CustomTabIntentDataProvider {
     /**
      * @return The session specified in the intent, or null.
      */
-    public IBinder getSession() {
+    public CustomTabsSessionToken getSession() {
         return mSession;
     }
 
@@ -250,13 +250,6 @@ public class CustomTabIntentDataProvider {
      */
     public boolean shouldShowShareMenuItem() {
         return mShowShareItem;
-    }
-
-    /**
-     * @return Whether the bookmark item should be shown in the menu.
-     */
-    public boolean shouldShowBookmarkMenuItem() {
-        return mShowBookmarkItem;
     }
 
     /**
@@ -432,6 +425,13 @@ public class CustomTabIntentDataProvider {
     }
 
     /**
+     * @return See {@link #EXTRA_IS_MEDIA_VIEWER}.
+     */
+    boolean isMediaViewer() {
+        return mIsMediaViewer;
+    }
+
+    /**
      * Parses out extras specifically added for Herb.
      *
      * @param intent Intent fired to open the CustomTabActivity.
@@ -447,7 +447,5 @@ public class CustomTabIntentDataProvider {
 
         mIsOpenedByChrome = IntentUtils.safeGetBooleanExtra(
                 intent, EXTRA_IS_OPENED_BY_CHROME, false);
-        mShowBookmarkItem = IntentUtils.safeGetBooleanExtra(
-                intent, EXTRA_SHOW_STAR_ICON, false);
     }
 }

@@ -55,6 +55,7 @@ Capabilities::Capabilities()
       num_program_binary_formats(0),
       uniform_buffer_offset_alignment(1),
       post_sub_buffer(false),
+      swap_buffers_with_damage(false),
       commit_overlay_planes(false),
       egl_image_external(false),
       texture_format_astc(false),
@@ -84,7 +85,11 @@ Capabilities::Capabilities()
       surfaceless(false),
       flips_vertically(false),
       msaa_is_slow(false),
+      disable_one_component_textures(false),
+      disable_multisampling_color_mask_usage(false),
+      disable_webgl_rgb_multisampling_usage(false),
       chromium_image_rgb_emulation(false),
+      emulate_rgb_buffer_with_rgba(false),
       major_version(2),
       minor_version(0) {}
 

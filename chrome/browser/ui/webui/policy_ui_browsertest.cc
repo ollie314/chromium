@@ -4,12 +4,15 @@
 
 #include <stddef.h>
 
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -26,11 +29,11 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/core/common/schema.h"
+#include "components/policy/policy_constants.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/common/extension_builder.h"
-#include "grit/components_strings.h"
-#include "policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -211,46 +214,31 @@ IN_PROC_BROWSER_TEST_F(PolicyUITest, SendPolicyValues) {
   std::map<std::string, std::string> expected_values;
 
   // Set the values of four existing policies.
-  base::ListValue* restore_on_startup_urls = new base::ListValue;
-  restore_on_startup_urls->Append(new base::StringValue("aaa"));
-  restore_on_startup_urls->Append(new base::StringValue("bbb"));
-  restore_on_startup_urls->Append(new base::StringValue("ccc"));
-  values.Set(policy::key::kRestoreOnStartupURLs,
-             policy::POLICY_LEVEL_MANDATORY,
-             policy::POLICY_SCOPE_USER,
-             policy::POLICY_SOURCE_CLOUD,
-             restore_on_startup_urls,
-             NULL);
+  std::unique_ptr<base::ListValue> restore_on_startup_urls(new base::ListValue);
+  restore_on_startup_urls->AppendString("aaa");
+  restore_on_startup_urls->AppendString("bbb");
+  restore_on_startup_urls->AppendString("ccc");
+  values.Set(policy::key::kRestoreOnStartupURLs, policy::POLICY_LEVEL_MANDATORY,
+             policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+             std::move(restore_on_startup_urls), nullptr);
   expected_values[policy::key::kRestoreOnStartupURLs] = "aaa,bbb,ccc";
-  values.Set(policy::key::kHomepageLocation,
-             policy::POLICY_LEVEL_MANDATORY,
-             policy::POLICY_SCOPE_MACHINE,
-             policy::POLICY_SOURCE_CLOUD,
-             new base::StringValue("http://google.com"),
-             NULL);
+  values.Set(policy::key::kHomepageLocation, policy::POLICY_LEVEL_MANDATORY,
+             policy::POLICY_SCOPE_MACHINE, policy::POLICY_SOURCE_CLOUD,
+             base::MakeUnique<base::StringValue>("http://google.com"), nullptr);
   expected_values[policy::key::kHomepageLocation] = "http://google.com";
-  values.Set(policy::key::kRestoreOnStartup,
-             policy::POLICY_LEVEL_RECOMMENDED,
-             policy::POLICY_SCOPE_USER,
-             policy::POLICY_SOURCE_CLOUD,
-             new base::FundamentalValue(4),
-             NULL);
+  values.Set(policy::key::kRestoreOnStartup, policy::POLICY_LEVEL_RECOMMENDED,
+             policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+             base::MakeUnique<base::FundamentalValue>(4), nullptr);
   expected_values[policy::key::kRestoreOnStartup] = "4";
-  values.Set(policy::key::kShowHomeButton,
-             policy::POLICY_LEVEL_RECOMMENDED,
-             policy::POLICY_SCOPE_MACHINE,
-             policy::POLICY_SOURCE_CLOUD,
-             new base::FundamentalValue(true),
-             NULL);
+  values.Set(policy::key::kShowHomeButton, policy::POLICY_LEVEL_RECOMMENDED,
+             policy::POLICY_SCOPE_MACHINE, policy::POLICY_SOURCE_CLOUD,
+             base::MakeUnique<base::FundamentalValue>(true), nullptr);
   expected_values[policy::key::kShowHomeButton] = "true";
   // Set the value of a policy that does not exist.
   const std::string kUnknownPolicy = "NoSuchThing";
-  values.Set(kUnknownPolicy,
-             policy::POLICY_LEVEL_MANDATORY,
-             policy::POLICY_SCOPE_USER,
-             policy::POLICY_SOURCE_PLATFORM,
-             new base::FundamentalValue(true),
-             NULL);
+  values.Set(kUnknownPolicy, policy::POLICY_LEVEL_MANDATORY,
+             policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_PLATFORM,
+             base::MakeUnique<base::FundamentalValue>(true), nullptr);
   expected_values[kUnknownPolicy] = "true";
   UpdateProviderPolicy(values);
 
@@ -301,7 +289,7 @@ IN_PROC_BROWSER_TEST_F(PolicyUITest, ExtensionLoadAndSendPolicy) {
                           "\": { \"type\": \"string\"}}}";
 
   const std::string schema_file = "schema.json";
-  base::FilePath schema_path = temp_dir_.path().AppendASCII(schema_file);
+  base::FilePath schema_path = temp_dir_.GetPath().AppendASCII(schema_file);
   base::WriteFile(schema_path, json_data.data(), json_data.size());
 
   // Build extension that contains the policy schema.
@@ -315,7 +303,7 @@ IN_PROC_BROWSER_TEST_F(PolicyUITest, ExtensionLoadAndSendPolicy) {
       .Set("storage", storage.Build());
 
   extensions::ExtensionBuilder builder;
-  builder.SetPath(temp_dir_.path());
+  builder.SetPath(temp_dir_.GetPath());
   builder.SetManifest(manifest.Build());
 
   // Install extension.

@@ -9,6 +9,7 @@
 #include "core/layout/LayoutText.h"
 #include "core/layout/LayoutView.h"
 #include <inttypes.h>
+#include <memory>
 
 namespace blink {
 
@@ -38,13 +39,7 @@ void dumpToTracedValue(const LayoutObject& object, bool traceGeometry, TracedVal
     if (traceGeometry) {
         tracedValue->setDouble("absX", object.absoluteBoundingBoxRect().x());
         tracedValue->setDouble("absY", object.absoluteBoundingBoxRect().y());
-        LayoutRect rect;
-        if (object.isText())
-            rect = LayoutRect(toLayoutText(object).linesBoundingBox());
-        else if (object.isLayoutInline())
-            rect = LayoutRect(toLayoutInline(object).linesBoundingBox());
-        else if (object.isBox())
-            rect = toLayoutBox(&object)->frameRect();
+        LayoutRect rect = object.debugRect();
         tracedValue->setDouble("relX", rect.x());
         tracedValue->setDouble("relY", rect.y());
         tracedValue->setDouble("width", rect.width());
@@ -99,11 +94,11 @@ void dumpToTracedValue(const LayoutObject& object, bool traceGeometry, TracedVal
 
 } // namespace
 
-PassOwnPtr<TracedValue> TracedLayoutObject::create(const LayoutView& view, bool traceGeometry)
+std::unique_ptr<TracedValue> TracedLayoutObject::create(const LayoutView& view, bool traceGeometry)
 {
-    OwnPtr<TracedValue> tracedValue = TracedValue::create();
+    std::unique_ptr<TracedValue> tracedValue = TracedValue::create();
     dumpToTracedValue(view, traceGeometry, tracedValue.get());
-    return tracedValue.release();
+    return tracedValue;
 }
 
 } // namespace blink

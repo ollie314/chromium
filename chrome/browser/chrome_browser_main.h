@@ -32,6 +32,7 @@ class StartupBrowserCreator;
 class StartupTimeBomb;
 class ShutdownWatcherHelper;
 class ThreeDAPIObserver;
+class WebUsbDetector;
 
 namespace chrome_browser {
 // For use by ShowMissingLocaleMessageBox.
@@ -46,11 +47,6 @@ extern const char kMissingLocaleDataMessage[];
 
 namespace metrics {
 class TrackingSynchronizer;
-}
-
-namespace webusb {
-class WebUsbBrowserClient;
-class WebUsbDetector;
 }
 
 class ChromeBrowserMainParts : public content::BrowserMainParts {
@@ -74,6 +70,8 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   void PreMainMessageLoopStart() override;
   void PostMainMessageLoopStart() override;
   int PreCreateThreads() override;
+  void MojoShellConnectionStarted(
+      content::MojoShellConnection* connection) override;
   void PreMainMessageLoopRun() override;
   bool MainMessageLoopRun(int* result_code) override;
   void PostMainMessageLoopRun() override;
@@ -104,12 +102,12 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   const PrefService* local_state() const { return local_state_; }
 
  private:
-  // Methods for |SetupMetricsAndFieldTrials()| --------------------------------
+  // Sets up the field trials and related initialization. Call only after
+  // about:flags have been converted to switches.
+  void SetupFieldTrials();
 
-  // Constructs metrics service and does related initialization, including
-  // creation of field trials. Call only after labs have been converted to
-  // switches.
-  void SetupMetricsAndFieldTrials();
+  // Constructs the metrics service and initializes metrics recording.
+  void SetupMetrics();
 
   // Starts recording of metrics. This can only be called after we have a file
   // thread.
@@ -117,6 +115,10 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   // Record time from process startup to present time in an UMA histogram.
   void RecordBrowserStartupTime();
+
+  // Reads origin trial policy data from local state and configures command line
+  // for child processes.
+  void SetupOriginTrialsCommandLine();
 
   // Methods for Main Message Loop -------------------------------------------
 
@@ -137,8 +139,8 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // it is destroyed last.
   std::unique_ptr<ShutdownWatcherHelper> shutdown_watcher_;
 
-  // Statistical testing infrastructure for the entire browser. NULL until
-  // SetupMetricsAndFieldTrials is called.
+  // Statistical testing infrastructure for the entire browser. nullptr until
+  // |SetupFieldTrials()| is called.
   std::unique_ptr<base::FieldTrialList> field_trial_list_;
 
   ChromeBrowserFieldTrials browser_field_trials_;
@@ -147,8 +149,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // A monitor for attributing power consumption to origins.
   std::unique_ptr<ProcessPowerCollector> process_power_collector_;
 
-  std::unique_ptr<webusb::WebUsbBrowserClient> webusb_browser_client_;
-  std::unique_ptr<webusb::WebUsbDetector> webusb_detector_;
+  std::unique_ptr<WebUsbDetector> web_usb_detector_;
 #endif
 
   // Vector of additional ChromeBrowserMainExtraParts.
@@ -166,6 +167,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   std::unique_ptr<BrowserProcessImpl> browser_process_;
   scoped_refptr<metrics::TrackingSynchronizer> tracking_synchronizer_;
+
 #if !defined(OS_ANDROID)
   // Browser creation happens on the Java side in Android.
   std::unique_ptr<StartupBrowserCreator> browser_creator_;
@@ -176,22 +178,25 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   // Android's first run is done in Java instead of native.
   std::unique_ptr<first_run::MasterPrefs> master_prefs_;
+
+  ProcessSingleton::NotifyResult notify_result_ =
+      ProcessSingleton::PROCESS_NONE;
+
+  // Members needed across shutdown methods.
+  bool restart_last_session_ = false;
 #endif
+
   Profile* profile_;
   bool run_message_loop_;
-  ProcessSingleton::NotifyResult notify_result_;
   std::unique_ptr<ThreeDAPIObserver> three_d_observer_;
 
-  // Initialized in SetupMetricsAndFieldTrials.
+  // Initialized in |SetupFieldTrials()|.
   scoped_refptr<FieldTrialSynchronizer> field_trial_synchronizer_;
 
   // Members initialized in PreMainMessageLoopRun, needed in
   // PreMainMessageLoopRunThreadsCreated.
   PrefService* local_state_;
   base::FilePath user_data_dir_;
-
-  // Members needed across shutdown methods.
-  bool restart_last_session_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainParts);
 };

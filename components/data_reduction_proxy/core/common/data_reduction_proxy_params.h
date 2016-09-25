@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_PARAMS_H_
-#define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_PARAMS_H_
+#ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_COMMON_DATA_REDUCTION_PROXY_PARAMS_H_
+#define COMPONENTS_DATA_REDUCTION_PROXY_CORE_COMMON_DATA_REDUCTION_PROXY_PARAMS_H_
 
 #include <string>
 #include <vector>
 
 #include "base/macros.h"
+#include "base/strings/string_piece.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_config_values.h"
 #include "net/proxy/proxy_server.h"
 #include "url/gurl.h"
@@ -41,7 +42,7 @@ bool IsIncludedInPromoFieldTrial();
 bool IsIncludedInHoldbackFieldTrial();
 
 // Returns the name of the trusted SPDY/HTTP2 proxy field trial.
-std::string GetTrustedSpdyProxyFieldTrialName();
+const char* GetTrustedSpdyProxyFieldTrialName();
 
 // Returns true if this client is part of the enabled group of the trusted
 // SPDY/HTTP2 proxy field trial.
@@ -49,14 +50,14 @@ bool IsIncludedInTrustedSpdyProxyFieldTrial();
 
 // Returns true if this client is part of the field trial that should display
 // a promotion for the data reduction proxy on Android One devices.
-bool IsIncludedInAndroidOnePromoFieldTrial(const char* build_fingerprint);
+bool IsIncludedInAndroidOnePromoFieldTrial(base::StringPiece build_fingerprint);
 
 // Returns the name of the Lo-Fi field trial.
-std::string GetLoFiFieldTrialName();
+const char* GetLoFiFieldTrialName();
 
 // Returns the name of the Lo-Fi field trial that configures LoFi flags when it
 // is force enabled through flags.
-std::string GetLoFiFlagFieldTrialName();
+const char* GetLoFiFlagFieldTrialName();
 
 // Returns true if this client is part of the "Enabled" or "Enabled_Preview"
 // group of the Lo-Fi field trial, both of which mean Lo-Fi should be enabled.
@@ -69,6 +70,10 @@ bool IsIncludedInLoFiControlFieldTrial();
 // Returns true if this client is part of the "Preview" group of the Lo-Fi field
 // trial.
 bool IsIncludedInLoFiPreviewFieldTrial();
+
+// Returns true if this client is part of the field trial that should enable
+// server experiments for the data reduction proxy.
+bool IsIncludedInServerExperimentsFieldTrial();
 
 // Returns true if this client is part of the tamper detection experiment.
 bool IsIncludedInTamperDetectionExperiment();
@@ -99,6 +104,10 @@ bool IsLoFiDisabledViaFlags();
 // whenever Lo-Fi mode is on.
 bool AreLoFiPreviewsEnabledViaFlags();
 
+// Returns true if this client has the command line switch to enable forced
+// pageload metrics pingbacks on every page load.
+bool IsForcePingbackEnabledViaFlags();
+
 // Returns true if this client has the command line switch to show
 // interstitials for data reduction proxy bypasses.
 bool WarnIfNoDataReductionProxy();
@@ -107,10 +116,14 @@ bool WarnIfNoDataReductionProxy();
 // proxy server as quic://proxy.googlezip.net.
 bool IsIncludedInQuicFieldTrial();
 
-std::string GetQuicFieldTrialName();
+const char* GetQuicFieldTrialName();
 
 // Returns true if the Data Reduction Proxy config client should be used.
 bool IsConfigClientEnabled();
+
+// If the Data Reduction Proxy is used for a page load, the URL for the
+// Data Reduction Proxy Pageload Metrics service.
+GURL GetPingbackURL();
 
 // If the Data Reduction Proxy config client is being used, the URL for the
 // Data Reduction Proxy config service.
@@ -139,19 +152,19 @@ bool GetOverrideProxiesForHttpFromCommandLine(
     std::vector<net::ProxyServer>* override_proxies_for_http);
 
 // Returns the name of the server side experiment field trial.
-std::string GetServerExperimentsFieldTrialName();
+const char* GetServerExperimentsFieldTrialName();
 
 }  // namespace params
 
 // Contains information about a given proxy server. |proxies_for_http| contains
-// the configured data reduction proxy servers. |is_fallback| notes whether the
-// given proxy is a fallback.
+// the configured data reduction proxy servers. |proxy_index| notes the index
+// of the data reduction proxy used in the list of all data reduction proxies.
 struct DataReductionProxyTypeInfo {
   DataReductionProxyTypeInfo();
   DataReductionProxyTypeInfo(const DataReductionProxyTypeInfo& other);
   ~DataReductionProxyTypeInfo();
   std::vector<net::ProxyServer> proxy_servers;
-  bool is_fallback;
+  size_t proxy_index;
 };
 
 // Provides initialization parameters. Proxy origins, and the secure proxy
@@ -184,9 +197,6 @@ class DataReductionProxyParams : public DataReductionProxyConfigValues {
 
   ~DataReductionProxyParams() override;
 
-  // If true, uses QUIC instead of SPDY to connect to proxies that use TLS.
-  void EnableQuic(bool enable);
-
   const std::vector<net::ProxyServer>& proxies_for_http() const override;
 
   const GURL& secure_proxy_check_url() const override;
@@ -198,8 +208,6 @@ class DataReductionProxyParams : public DataReductionProxyConfigValues {
   bool promo_allowed() const override;
 
   bool holdback() const override;
-
-  bool quic_enabled() const { return quic_enabled_; }
 
  protected:
   // Test constructor that optionally won't call Init();
@@ -235,8 +243,6 @@ class DataReductionProxyParams : public DataReductionProxyConfigValues {
   bool fallback_allowed_;
   bool promo_allowed_;
   bool holdback_;
-  bool quic_enabled_;
-  std::string override_quic_origin_;
 
   bool configured_on_command_line_;
 
@@ -247,4 +253,5 @@ class DataReductionProxyParams : public DataReductionProxyConfigValues {
 };
 
 }  // namespace data_reduction_proxy
-#endif  // COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_PARAMS_H_
+
+#endif  // COMPONENTS_DATA_REDUCTION_PROXY_CORE_COMMON_DATA_REDUCTION_PROXY_PARAMS_H_

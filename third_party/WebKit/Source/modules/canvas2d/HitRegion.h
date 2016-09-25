@@ -10,8 +10,6 @@
 #include "platform/graphics/Path.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 
@@ -45,11 +43,10 @@ private:
     WindRule m_fillRule;
 };
 
-class HitRegionManager final : public GarbageCollectedFinalized<HitRegionManager> {
+class HitRegionManager final : public GarbageCollected<HitRegionManager> {
     WTF_MAKE_NONCOPYABLE(HitRegionManager);
 public:
     static HitRegionManager* create() { return new HitRegionManager; }
-    ~HitRegionManager() { }
 
     void addHitRegion(HitRegion*);
 

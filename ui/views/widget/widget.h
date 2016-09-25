@@ -5,9 +5,10 @@
 #ifndef UI_VIEWS_WIDGET_WIDGET_H_
 #define UI_VIEWS_WIDGET_WIDGET_H_
 
+#include <map>
 #include <memory>
 #include <set>
-#include <stack>
+#include <string>
 #include <vector>
 
 #include "base/macros.h"
@@ -47,10 +48,6 @@ class Point;
 class Rect;
 }
 
-namespace mus {
-class Window;
-}
-
 namespace ui {
 class Accelerator;
 class Compositor;
@@ -60,7 +57,8 @@ class Layer;
 class NativeTheme;
 class OSExchangeData;
 class ThemeProvider;
-}
+class Window;
+}  // namespace ui
 
 namespace views {
 
@@ -243,12 +241,15 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     ui::WindowShowState show_state;
     gfx::NativeView parent;
     // Used only by mus and is necessitated by mus not being a NativeView.
-    mus::Window* parent_mus = nullptr;
+    ui::Window* parent_mus = nullptr;
     // Specifies the initial bounds of the Widget. Default is empty, which means
     // the NativeWidget may specify a default size. If the parent is specified,
     // |bounds| is in the parent's coordinate system. If the parent is not
     // specified, it's in screen's global coordinate system.
     gfx::Rect bounds;
+    // The initial workspace of the Widget.  Default is "", which means the
+    // current workspace.
+    std::string workspace;
     // When set, this value is used as the Widget's NativeWidget implementation.
     // The Widget will not construct a default one. Default is NULL.
     NativeWidget* native_widget;
@@ -285,6 +286,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     // Used if widget is not activatable to do determine if mouse events should
     // be sent to the widget.
     bool wants_mouse_events_when_inactive = false;
+
+    // A map of properties applied to windows when running in mus.
+    std::map<std::string, std::vector<uint8_t>> mus_properties;
   };
 
   Widget();
@@ -424,6 +428,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Retrieves the restored bounds for the window.
   gfx::Rect GetRestoredBounds() const;
 
+  // Retrieves the current workspace for the window.
+  std::string GetWorkspace() const;
+
   // Sizes and/or places the widget to the specified bounds, size or position.
   void SetBounds(const gfx::Rect& bounds);
   void SetSize(const gfx::Size& size);
@@ -468,8 +475,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   void StackBelow(gfx::NativeView native_view);
 
   // Sets a shape on the widget. Passing a NULL |shape| reverts the widget to
-  // be rectangular. Takes ownership of |shape|.
-  void SetShape(SkRegion* shape);
+  // be rectangular.
+  void SetShape(std::unique_ptr<SkRegion> shape);
 
   // Hides the widget then closes it after a return to the message loop.
   virtual void Close();
@@ -513,6 +520,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Sets the widget to be visible on all work spaces.
   void SetVisibleOnAllWorkspaces(bool always_visible);
 
+  // Is this widget currently visible on all workspaces?
+  // A call to SetVisibleOnAllWorkspaces(true) won't necessarily mean
+  // IsVisbleOnAllWorkspaces() == true (for example, when the platform doesn't
+  // support workspaces).
+  bool IsVisibleOnAllWorkspaces() const;
+
   // Maximizes/minimizes/restores the window.
   void Maximize();
   void Minimize();
@@ -529,7 +542,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Sets the opacity of the widget. This may allow widgets behind the widget
   // in the Z-order to become visible, depending on the capabilities of the
   // underlying windowing system.
-  void SetOpacity(unsigned char opacity);
+  void SetOpacity(float opacity);
 
   // Flashes the frame of the window to draw attention to it. Currently only
   // implemented on Windows for non-Aura.
@@ -787,6 +800,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   gfx::Size GetMaximumSize() const override;
   void OnNativeWidgetMove() override;
   void OnNativeWidgetSizeChanged(const gfx::Size& new_size) override;
+  void OnNativeWidgetWorkspaceChanged() override;
   void OnNativeWidgetWindowShowStateChanged() override;
   void OnNativeWidgetBeginUserBoundsChange() override;
   void OnNativeWidgetEndUserBoundsChange() override;

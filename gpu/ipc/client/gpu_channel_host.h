@@ -22,17 +22,12 @@
 #include "gpu/config/gpu_info.h"
 #include "gpu/gpu_export.h"
 #include "gpu/ipc/common/gpu_stream_constants.h"
-#include "gpu/ipc/common/surface_handle.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/message_filter.h"
 #include "ipc/message_router.h"
 #include "ui/events/latency_info.h"
-#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/gpu_memory_buffer.h"
-#include "ui/gl/gpu_preference.h"
-
-class GURL;
 
 namespace base {
 class WaitableEvent;
@@ -47,8 +42,20 @@ class GpuMemoryBufferManager;
 }
 
 namespace gpu {
-class CommandBufferProxyImpl;
+
 class GpuChannelHost;
+using GpuChannelEstablishedCallback =
+    base::Callback<void(scoped_refptr<GpuChannelHost>)>;
+
+class GPU_EXPORT GpuChannelEstablishFactory {
+ public:
+  virtual ~GpuChannelEstablishFactory() {}
+
+  virtual void EstablishGpuChannel(
+      const GpuChannelEstablishedCallback& callback) = 0;
+  virtual scoped_refptr<GpuChannelHost> EstablishGpuChannelSync() = 0;
+  virtual GpuMemoryBufferManager* GetGpuMemoryBufferManager() = 0;
+};
 
 class GPU_EXPORT GpuChannelHostFactory {
  public:
@@ -78,10 +85,6 @@ class GPU_EXPORT GpuChannelHost
       base::WaitableEvent* shutdown_event,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager);
 
-  static const int32_t kDefaultStreamId = gpu::GPU_STREAM_DEFAULT;
-  static const gpu::GpuStreamPriority kDefaultStreamPriority =
-      gpu::GpuStreamPriority::NORMAL;
-
   bool IsLost() const {
     DCHECK(channel_filter_.get());
     return channel_filter_->IsLost();
@@ -98,29 +101,17 @@ class GPU_EXPORT GpuChannelHost
   // Set an ordering barrier.  AsyncFlushes any pending barriers on other
   // routes. Combines multiple OrderingBarriers into a single AsyncFlush.
   // Returns the flush ID for the stream or 0 if put offset was not changed.
+  // Outputs *highest_verified_flush_id.
   uint32_t OrderingBarrier(int32_t route_id,
                            int32_t stream_id,
                            int32_t put_offset,
                            uint32_t flush_count,
                            const std::vector<ui::LatencyInfo>& latency_info,
                            bool put_offset_changed,
-                           bool do_flush);
+                           bool do_flush,
+                           uint32_t* highest_verified_flush_id);
 
   void FlushPendingStream(int32_t stream_id);
-
-  // Create and connect to a command buffer in the GPU process.
-  std::unique_ptr<CommandBufferProxyImpl> CreateCommandBuffer(
-      gpu::SurfaceHandle surface_handle,
-      const gfx::Size& size,
-      CommandBufferProxyImpl* share_group,
-      int32_t stream_id,
-      gpu::GpuStreamPriority stream_priority,
-      const std::vector<int32_t>& attribs,
-      const GURL& active_url,
-      gfx::GpuPreference gpu_preference);
-
-  // Destroy a command buffer created by this channel.
-  void DestroyCommandBuffer(CommandBufferProxyImpl* command_buffer);
 
   // Destroy this channel. Must be called on the main thread, before
   // destruction.

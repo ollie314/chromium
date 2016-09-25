@@ -7,39 +7,51 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
-#include "chrome/browser/plugins/plugin_prefs.h"
+#include "chrome/browser/plugins/plugin_utils.h"
+#include "chrome/browser/plugins/plugins_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/content_settings/content/common/content_settings_messages.h"
-#include "components/infobars/core/confirm_infobar_delegate.h"
-#include "components/infobars/core/infobar.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_context.h"
-#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/base/window_open_disposition.h"
+#include "content/public/common/content_constants.h"
+#include "url/gurl.h"
 
-using base::UserMetricsAction;
 using content::BrowserThread;
 using content::PluginService;
 
 namespace {
+
+class ProfileContentSettingObserver : public content_settings::Observer {
+ public:
+  explicit ProfileContentSettingObserver(Profile* profile)
+      : profile_(profile) {}
+  ~ProfileContentSettingObserver() override {}
+  void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
+                               const ContentSettingsPattern& secondary_pattern,
+                               ContentSettingsType content_type,
+                               std::string resource_identifier) override {
+    DCHECK(base::FeatureList::IsEnabled(features::kPreferHtmlOverPlugins));
+    if (content_type == CONTENT_SETTINGS_TYPE_PLUGINS)
+      PluginService::GetInstance()->PurgePluginListCache(profile_, false);
+  }
+
+ private:
+  Profile* profile_;
+};
 
 void AuthorizeRenderer(content::RenderFrameHost* render_frame_host) {
   ChromePluginServiceFilter::GetInstance()->AuthorizePlugin(
@@ -48,17 +60,66 @@ void AuthorizeRenderer(content::RenderFrameHost* render_frame_host) {
 
 }  // namespace
 
+// ChromePluginServiceFilter inner struct definitions.
+
+struct ChromePluginServiceFilter::ContextInfo {
+  ContextInfo(
+      const scoped_refptr<PluginPrefs>& plugin_prefs,
+      const scoped_refptr<HostContentSettingsMap>& host_content_settings_map,
+      Profile* profile);
+  ~ContextInfo();
+
+  scoped_refptr<PluginPrefs> plugin_prefs;
+  scoped_refptr<HostContentSettingsMap> host_content_settings_map;
+  ProfileContentSettingObserver observer;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ContextInfo);
+};
+
+ChromePluginServiceFilter::ContextInfo::ContextInfo(
+    const scoped_refptr<PluginPrefs>& plugin_prefs,
+    const scoped_refptr<HostContentSettingsMap>& host_content_settings_map,
+    Profile* profile)
+    : plugin_prefs(plugin_prefs),
+      host_content_settings_map(host_content_settings_map),
+      observer(ProfileContentSettingObserver(profile)) {
+  if (base::FeatureList::IsEnabled(features::kPreferHtmlOverPlugins))
+    host_content_settings_map->AddObserver(&observer);
+}
+
+ChromePluginServiceFilter::ContextInfo::~ContextInfo() {
+  if (base::FeatureList::IsEnabled(features::kPreferHtmlOverPlugins))
+    host_content_settings_map->RemoveObserver(&observer);
+}
+
+ChromePluginServiceFilter::OverriddenPlugin::OverriddenPlugin()
+    : render_frame_id(MSG_ROUTING_NONE) {}
+
+ChromePluginServiceFilter::OverriddenPlugin::~OverriddenPlugin() {}
+
+ChromePluginServiceFilter::ProcessDetails::ProcessDetails() {}
+
+ChromePluginServiceFilter::ProcessDetails::ProcessDetails(
+    const ProcessDetails& other) = default;
+
+ChromePluginServiceFilter::ProcessDetails::~ProcessDetails() {}
+
+// ChromePluginServiceFilter definitions.
+
 // static
 ChromePluginServiceFilter* ChromePluginServiceFilter::GetInstance() {
   return base::Singleton<ChromePluginServiceFilter>::get();
 }
 
-void ChromePluginServiceFilter::RegisterResourceContext(
-    PluginPrefs* plugin_prefs,
-    const void* context) {
+void ChromePluginServiceFilter::RegisterResourceContext(Profile* profile,
+                                                        const void* context) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::AutoLock lock(lock_);
-  resource_context_map_[context] = plugin_prefs;
+  resource_context_map_[context] = base::MakeUnique<ContextInfo>(
+      PluginPrefs::GetForProfile(profile),
+      HostContentSettingsMapFactory::GetForProfile(profile),
+      profile);
 }
 
 void ChromePluginServiceFilter::UnregisterResourceContext(
@@ -79,6 +140,26 @@ void ChromePluginServiceFilter::OverridePluginForFrame(
   overridden_plugin.url = url;
   overridden_plugin.plugin = plugin;
   details->overridden_plugins.push_back(overridden_plugin);
+}
+
+void ChromePluginServiceFilter::AuthorizePlugin(
+    int render_process_id,
+    const base::FilePath& plugin_path) {
+  base::AutoLock auto_lock(lock_);
+  ProcessDetails* details = GetOrRegisterProcess(render_process_id);
+  details->authorized_plugins.insert(plugin_path);
+}
+
+void ChromePluginServiceFilter::AuthorizeAllPlugins(
+    content::WebContents* web_contents,
+    bool load_blocked,
+    const std::string& identifier) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  web_contents->ForEachFrame(base::Bind(&AuthorizeRenderer));
+  if (load_blocked) {
+    web_contents->SendToAllFrames(new ChromeViewMsg_LoadBlockedPlugins(
+        MSG_ROUTING_NONE, identifier));
+  }
 }
 
 bool ChromePluginServiceFilter::IsPluginAvailable(
@@ -105,14 +186,47 @@ bool ChromePluginServiceFilter::IsPluginAvailable(
   }
 
   // Check whether the plugin is disabled.
-  ResourceContextMap::iterator prefs_it =
-      resource_context_map_.find(context);
-  if (prefs_it == resource_context_map_.end())
+  auto context_info_it = resource_context_map_.find(context);
+  // The context might not be found because RenderFrameMessageFilter might
+  // outlive the Profile (the context is unregistered during the Profile
+  // destructor).
+  if (context_info_it == resource_context_map_.end())
     return false;
 
-  PluginPrefs* plugin_prefs = prefs_it->second.get();
-  if (!plugin_prefs->IsPluginEnabled(*plugin))
+  const ContextInfo* context_info = context_info_it->second.get();
+  if (!context_info->plugin_prefs.get()->IsPluginEnabled(*plugin))
     return false;
+
+  // If PreferHtmlOverPlugins is enabled and the plugin is Flash, we do
+  // additional checks.
+  if (plugin->name == base::ASCIIToUTF16(content::kFlashPluginName) &&
+      base::FeatureList::IsEnabled(features::kPreferHtmlOverPlugins)) {
+    DCHECK(!policy_url.is_empty());
+
+    // Check the content setting first, and always respect the ALLOW or BLOCK
+    // state. When IsPluginAvailable() is called to check whether a plugin
+    // should be advertised, |url| has the same value of |policy_url| (i.e. the
+    //  main frame origin). The intended behavior is that Flash is advertised
+    // only if a Flash embed hosted on the same origin as the main frame origin
+    // is allowed to run.
+    HostContentSettingsMap* settings_map =
+        context_info_it->second->host_content_settings_map.get();
+    ContentSetting flash_setting = PluginUtils::GetFlashPluginContentSetting(
+        settings_map, policy_url, url);
+    flash_setting = PluginsFieldTrial::EffectiveContentSetting(
+        CONTENT_SETTINGS_TYPE_PLUGINS, flash_setting);
+    if (flash_setting == CONTENT_SETTING_ALLOW)
+      return true;
+    else if (flash_setting == CONTENT_SETTING_BLOCK)
+      return false;
+
+    // The content setting is neither ALLOW or BLOCK. Check whether the site
+    // meets the engagement cutoff for making Flash available without a prompt.
+    if (SiteEngagementService::GetScoreFromSettings(settings_map, url) <
+        PluginsFieldTrial::GetSiteEngagementThresholdForFlash()) {
+      return false;
+    }
+  }
 
   return true;
 }
@@ -133,26 +247,6 @@ bool ChromePluginServiceFilter::CanLoadPlugin(int render_process_id,
           ContainsKey(details->authorized_plugins, base::FilePath()));
 }
 
-void ChromePluginServiceFilter::AuthorizePlugin(
-    int render_process_id,
-    const base::FilePath& plugin_path) {
-  base::AutoLock auto_lock(lock_);
-  ProcessDetails* details = GetOrRegisterProcess(render_process_id);
-  details->authorized_plugins.insert(plugin_path);
-}
-
-void ChromePluginServiceFilter::AuthorizeAllPlugins(
-    content::WebContents* web_contents,
-    bool load_blocked,
-    const std::string& identifier) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  web_contents->ForEachFrame(base::Bind(&AuthorizeRenderer));
-  if (load_blocked) {
-    web_contents->SendToAllFrames(new ChromeViewMsg_LoadBlockedPlugins(
-        MSG_ROUTING_NONE, identifier));
-  }
-}
-
 ChromePluginServiceFilter::ChromePluginServiceFilter() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
@@ -161,8 +255,7 @@ ChromePluginServiceFilter::ChromePluginServiceFilter() {
                  content::NotificationService::AllSources());
 }
 
-ChromePluginServiceFilter::~ChromePluginServiceFilter() {
-}
+ChromePluginServiceFilter::~ChromePluginServiceFilter() {}
 
 void ChromePluginServiceFilter::Observe(
     int type,
@@ -208,20 +301,3 @@ ChromePluginServiceFilter::GetProcess(
     return NULL;
   return &it->second;
 }
-
-ChromePluginServiceFilter::OverriddenPlugin::OverriddenPlugin()
-    : render_frame_id(MSG_ROUTING_NONE) {
-}
-
-ChromePluginServiceFilter::OverriddenPlugin::~OverriddenPlugin() {
-}
-
-ChromePluginServiceFilter::ProcessDetails::ProcessDetails() {
-}
-
-ChromePluginServiceFilter::ProcessDetails::ProcessDetails(
-    const ProcessDetails& other) = default;
-
-ChromePluginServiceFilter::ProcessDetails::~ProcessDetails() {
-}
-

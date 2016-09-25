@@ -4,7 +4,7 @@
 
 #include "chrome/utility/media_galleries/ipc_data_source.h"
 
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/common/extensions/chrome_utility_extensions_messages.h"
 #include "content/public/utility/utility_thread.h"
 
@@ -22,6 +22,10 @@ IPCDataSource::~IPCDataSource() {
 }
 
 void IPCDataSource::Stop() {
+  DCHECK(data_source_thread_checker_.CalledOnValidThread());
+}
+
+void IPCDataSource::Abort() {
   DCHECK(data_source_thread_checker_.CalledOnValidThread());
 }
 

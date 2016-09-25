@@ -11,11 +11,10 @@
 
 #include <cmath>
 
-#include "content/browser/renderer_host/input/web_input_event_util.h"
 #include "content/common/input/synthetic_web_input_event_builders.h"
-#include "content/common/input/web_input_event_traits.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/blink/blink_event_util.h"
+#include "ui/events/blink/web_input_event_traits.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/gesture_detection/gesture_event_data.h"
 #include "ui/events/gesture_detection/motion_event_generic.h"
@@ -42,7 +41,7 @@ TEST(WebInputEventUtilTest, MotionEventConversion) {
   pointer.pressure = 30;
   pointer.touch_minor = 35;
   pointer.orientation = static_cast<float>(-M_PI / 2);
-  pointer.tilt = static_cast<float>(-M_PI / 3);
+  pointer.tilt = static_cast<float>(M_PI / 3);
   for (MotionEvent::ToolType tool_type : tool_types) {
     pointer.tool_type = tool_type;
     MotionEventGeneric event(
@@ -67,7 +66,7 @@ TEST(WebInputEventUtilTest, MotionEventConversion) {
     expected_pointer.rotationAngle = 0.f;
     expected_pointer.force = pointer.pressure;
     if (tool_type == MotionEvent::TOOL_TYPE_STYLUS) {
-      expected_pointer.tiltX = -60;
+      expected_pointer.tiltX = 60;
       expected_pointer.tiltY = 0;
     } else {
       expected_pointer.tiltX = 0;
@@ -78,8 +77,8 @@ TEST(WebInputEventUtilTest, MotionEventConversion) {
 
     WebTouchEvent actual_event =
         ui::CreateWebTouchEventFromMotionEvent(event, false);
-    EXPECT_EQ(WebInputEventTraits::ToString(expected_event),
-              WebInputEventTraits::ToString(actual_event));
+    EXPECT_EQ(ui::WebInputEventTraits::ToString(expected_event),
+              ui::WebInputEventTraits::ToString(actual_event));
   }
 }
 
@@ -96,6 +95,7 @@ TEST(WebInputEventUtilTest, ScrollUpdateConversion) {
   ui::GestureEventDetails details(ui::ET_GESTURE_SCROLL_UPDATE,
                                   delta.x(),
                                   delta.y());
+  details.set_device_type(ui::GestureDeviceType::DEVICE_TOUCHSCREEN);
   details.mark_previous_scroll_update_in_sequence_prevented();
   ui::GestureEventData event(details,
                              motion_event_id,
@@ -107,7 +107,8 @@ TEST(WebInputEventUtilTest, ScrollUpdateConversion) {
                              raw_pos.y(),
                              touch_points,
                              rect,
-                             flags);
+                             flags,
+                             0U);
 
   blink::WebGestureEvent web_event =
       ui::CreateWebGestureEventFromGestureEventData(event);

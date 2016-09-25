@@ -21,7 +21,6 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/default_search_manager.h"
-#include "components/search_engines/desktop_search_utils.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url_service.h"
 
@@ -50,7 +49,7 @@ std::unique_ptr<KeyedService> TemplateURLServiceFactory::BuildInstanceFor(
       rlz::RLZTracker::ChromeOmnibox(), rlz_lib::SET_TO_GOOGLE);
 #endif
   Profile* profile = static_cast<Profile*>(context);
-  return base::WrapUnique(new TemplateURLService(
+  return base::MakeUnique<TemplateURLService>(
       profile->GetPrefs(),
       std::unique_ptr<SearchTermsData>(new UIThreadSearchTermsData(profile)),
       WebDataServiceFactory::GetKeywordWebDataForProfile(
@@ -60,7 +59,7 @@ std::unique_ptr<KeyedService> TemplateURLServiceFactory::BuildInstanceFor(
               HistoryServiceFactory::GetForProfile(
                   profile, ServiceAccessType::EXPLICIT_ACCESS))),
       GoogleURLTrackerFactory::GetForProfile(profile),
-      g_browser_process->rappor_service(), dsp_change_callback));
+      g_browser_process->rappor_service(), dsp_change_callback);
 }
 
 TemplateURLServiceFactory::TemplateURLServiceFactory()
@@ -83,7 +82,6 @@ void TemplateURLServiceFactory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   DefaultSearchManager::RegisterProfilePrefs(registry);
   TemplateURLService::RegisterProfilePrefs(registry);
-  RegisterDesktopSearchRedirectionPref(registry);
 }
 
 content::BrowserContext* TemplateURLServiceFactory::GetBrowserContextToUse(

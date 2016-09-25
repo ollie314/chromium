@@ -12,9 +12,13 @@ get_instance_metadata() {
       -H "Metadata-Flavor: Google"
 }
 
-# Talk to the metadata server to get the project id
+# Talk to the metadata server to get the project id and the instance id
 PROJECTID=$(curl -s \
     "http://metadata.google.internal/computeMetadata/v1/project/project-id" \
+    -H "Metadata-Flavor: Google")
+
+INSTANCE_NAME=$(curl -s \
+    "http://metadata.google.internal/computeMetadata/v1/instance/hostname" \
     -H "Metadata-Flavor: Google")
 
 # Install dependencies from apt
@@ -56,24 +60,45 @@ mkdir /opt/app/clovis/binaries
 gsutil cp gs://$DEPLOYMENT_PATH/binaries/* /opt/app/clovis/binaries/
 unzip /opt/app/clovis/binaries/linux.zip -d /opt/app/clovis/binaries/
 
+# Ad and tracking filtering rules.
+# Made by the EasyList authors (https://easylist.github.io/).
+DATA_DIR=/opt/app/clovis/data
+mkdir $DATA_DIR && cd $DATA_DIR
+curl https://easylist.github.io/easylist/easylist.txt > easylist.txt
+curl https://easylist.github.io/easylist/easyprivacy.txt > easyprivacy.txt
+
 # Install the Chrome sandbox
 cp /opt/app/clovis/binaries/chrome_sandbox /usr/local/sbin/chrome-devel-sandbox
 chown root:root /usr/local/sbin/chrome-devel-sandbox
 chmod 4755 /usr/local/sbin/chrome-devel-sandbox
 
-# Make sure the pythonapp user owns the application code
+# Make sure the pythonapp user owns the application code.
 chown -R pythonapp:pythonapp /opt/app
 
 # Create the configuration file for this deployment.
 DEPLOYMENT_CONFIG_PATH=/opt/app/clovis/deployment_config.json
-TASKQUEUE_TAG=`get_instance_metadata taskqueue_tag`
+TASKQUEUE_TAG=`get_instance_metadata taskqueue-tag`
+TASK_DIR=`get_instance_metadata task-dir`
+TASK_STORAGE_PATH=$CLOUD_STORAGE_PATH/$TASK_DIR
+if [ "$(get_instance_metadata self-destruct)" == "false" ]; then
+  SELF_DESTRUCT="False"
+else
+  SELF_DESTRUCT="True"
+fi
+WORKER_LOG_PATH=/opt/app/clovis/worker.log
+
 cat >$DEPLOYMENT_CONFIG_PATH << EOF
 {
+  "instance_name" : "$INSTANCE_NAME",
   "project_name" : "$PROJECTID",
-  "cloud_storage_path" : "$CLOUD_STORAGE_PATH",
-  "chrome_path" : "/opt/app/clovis/binaries/chrome",
+  "task_storage_path" : "$TASK_STORAGE_PATH",
+  "binaries_path" : "/opt/app/clovis/binaries",
   "src_path" : "/opt/app/clovis/src",
-  "taskqueue_tag" : "$TASKQUEUE_TAG"
+  "taskqueue_tag" : "$TASKQUEUE_TAG",
+  "worker_log_path" : "$WORKER_LOG_PATH",
+  "self_destruct" : "$SELF_DESTRUCT",
+  "ad_rules_filename": "$DATA_DIR/easylist.txt",
+  "tracking_rules_filename": "$DATA_DIR/easyprivacy.txt"
 }
 EOF
 
@@ -89,9 +114,9 @@ fi
 cat >/etc/supervisor/conf.d/python-app.conf << EOF
 [program:pythonapp]
 directory=/opt/app/clovis/src/tools/android/loading/cloud/backend
-command=python worker.py --config $DEPLOYMENT_CONFIG_PATH
+command=python -u worker.py --config $DEPLOYMENT_CONFIG_PATH
 autostart=true
-autorestart=true
+autorestart=unexpected
 user=pythonapp
 # Environment variables ensure that the application runs inside of the
 # configured virtualenv.
@@ -99,8 +124,8 @@ environment=VIRTUAL_ENV="/opt/app/clovis/env", \
     PATH="/opt/app/clovis/env/bin:/usr/bin", \
     HOME="/home/pythonapp",USER="pythonapp", \
     CHROME_DEVEL_SANDBOX="/usr/local/sbin/chrome-devel-sandbox"
-stdout_logfile=syslog
-stderr_logfile=syslog
+stdout_logfile=$WORKER_LOG_PATH
+stderr_logfile=$WORKER_LOG_PATH
 EOF
 
 supervisorctl reread

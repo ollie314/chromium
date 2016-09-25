@@ -25,12 +25,16 @@ class CONTENT_EXPORT BackgroundTracingConfigImpl
   void IntoDict(base::DictionaryValue* dict) const override;
 
   enum CategoryPreset {
+    CATEGORY_PRESET_UNSET,
     BENCHMARK,
     BENCHMARK_DEEP,
     BENCHMARK_GPU,
     BENCHMARK_IPC,
     BENCHMARK_STARTUP,
     BENCHMARK_BLINK_GC,
+    BENCHMARK_MEMORY_HEAVY,
+    BENCHMARK_MEMORY_LIGHT,
+    BENCHMARK_EXECUTION_METRIC,
     BLINK_STYLE
   };
 

@@ -53,8 +53,6 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
 
   void Close();
 
-  void Prerender();
-
   void ModelChanged();
 
   SearchBoxView* search_box_view() const { return search_box_view_; }
@@ -67,9 +65,6 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
   ContentsView* contents_view() const { return contents_view_; }
   AppListModel* model() { return model_; }
   AppListViewDelegate* view_delegate() { return delegate_; }
-
-  // Returns true if the app list should be centered and in landscape mode.
-  bool ShouldCenterWindow() const;
 
   // Called when the search box's visibility is changed.
   void NotifySearchBoxVisibilityChanged();
@@ -97,14 +92,11 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
   // Invoked when |icon_loading_wait_timer_| fires.
   void OnIconLoadingWaitTimer();
 
-  // Invoked from an IconLoader when icon loading is finished.
-  void OnItemIconLoaded(IconLoader* loader);
+  // Invoked from an IconLoader when icon loading is finished or item is closed.
+  void OnIconLoaderFinished(IconLoader* loader);
 
   // Overridden from AppsGridViewDelegate:
   void ActivateApp(AppListItem* item, int event_flags) override;
-  void GetShortcutPathForApp(
-      const std::string& app_id,
-      const base::Callback<void(const base::FilePath&)>& callback) override;
   void CancelDragInActiveFolder() override;
 
   // Overridden from SearchBoxViewDelegate:

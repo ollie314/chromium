@@ -9,24 +9,21 @@
 #include "components/contextual_search/browser/contextual_search_js_api_handler.h"
 #include "components/contextual_search/common/contextual_search_js_api_service.mojom.h"
 #include "mojo/public/cpp/bindings/string.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace contextual_search {
 
 // This is the receiving end of Contextual Search JavaScript API calls.
-class ContextualSearchJsApiServiceImpl : public ContextualSearchJsApiService {
+class ContextualSearchJsApiServiceImpl
+    : public mojom::ContextualSearchJsApiService {
  public:
-  ContextualSearchJsApiServiceImpl(
-      ContextualSearchJsApiHandler* contextual_search_js_api_handler,
-      mojo::InterfaceRequest<ContextualSearchJsApiService> request);
+  explicit ContextualSearchJsApiServiceImpl(
+      ContextualSearchJsApiHandler* contextual_search_js_api_handler);
   ~ContextualSearchJsApiServiceImpl() override;
 
   // Mojo ContextualSearchApiService implementation.
   void HandleSetCaption(const mojo::String& message, bool does_answer) override;
 
  private:
-  mojo::StrongBinding<ContextualSearchJsApiService> binding_;
-
   // The UI handler for calls through the JavaScript API.
   ContextualSearchJsApiHandler* contextual_search_js_api_handler_;
 
@@ -36,7 +33,7 @@ class ContextualSearchJsApiServiceImpl : public ContextualSearchJsApiService {
 // static
 void CreateContextualSearchJsApiService(
     ContextualSearchJsApiHandler* contextual_search_js_api_handler,
-    mojo::InterfaceRequest<ContextualSearchJsApiService> request);
+    mojo::InterfaceRequest<mojom::ContextualSearchJsApiService> request);
 
 }  // namespace contextual_search
 

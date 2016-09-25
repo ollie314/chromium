@@ -31,7 +31,7 @@ class TimeZoneMonitorWin : public TimeZoneMonitor {
       return;
     }
 
-    NotifyRenderers();
+    NotifyClients();
   }
 
   std::unique_ptr<gfx::SingletonHwndObserver> singleton_hwnd_observer_;
@@ -40,7 +40,8 @@ class TimeZoneMonitorWin : public TimeZoneMonitor {
 };
 
 // static
-std::unique_ptr<TimeZoneMonitor> TimeZoneMonitor::Create() {
+std::unique_ptr<TimeZoneMonitor> TimeZoneMonitor::Create(
+    scoped_refptr<base::SequencedTaskRunner> file_task_runner) {
   return std::unique_ptr<TimeZoneMonitor>(new TimeZoneMonitorWin());
 }
 

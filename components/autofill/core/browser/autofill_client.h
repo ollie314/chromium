@@ -10,7 +10,6 @@
 
 #include "base/callback_forward.h"
 #include "base/i18n/rtl.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
@@ -59,14 +58,6 @@ struct Suggestion;
 // for the tab the AutofillManager is attached to).
 class AutofillClient {
  public:
-  // Copy of blink::WebFormElement::AutocompleteResult.
-  enum RequestAutocompleteResult {
-    AutocompleteResultSuccess,
-    AutocompleteResultErrorDisabled,
-    AutocompleteResultErrorCancel,
-    AutocompleteResultErrorInvalid,
-  };
-
   enum PaymentsRpcResult {
     // Empty result. Used for initializing variables and should generally
     // not be returned nor passed as arguments unless explicitly allowed by
@@ -95,13 +86,7 @@ class AutofillClient {
     UNMASK_FOR_AUTOFILL,
   };
 
-  typedef base::Callback<void(RequestAutocompleteResult,
-                              const base::string16&,
-                              const FormStructure*)> ResultCallback;
-
-  typedef base::Callback<void(const base::string16& /* card number */,
-                              int /* exp month */,
-                              int /* exp year */)> CreditCardScanCallback;
+  typedef base::Callback<void(const CreditCard&)> CreditCardScanCallback;
 
   virtual ~AutofillClient() {}
 
@@ -122,9 +107,6 @@ class AutofillClient {
 
   // Gets the RapporService associated with the client (for metrics).
   virtual rappor::RapporService* GetRapporService() = 0;
-
-  // Hides the associated request autocomplete dialog (if it exists).
-  virtual void HideRequestAutocompleteDialog() = 0;
 
   // Causes the Autofill settings UI to be shown.
   virtual void ShowAutofillSettings() = 0;
@@ -148,6 +130,11 @@ class AutofillClient {
       std::unique_ptr<base::DictionaryValue> legal_message,
       const base::Closure& callback) = 0;
 
+  // Will show an infobar to get user consent for Credit Card assistive filling.
+  // Will run |callback| on success.
+  virtual void ConfirmCreditCardFillAssist(const CreditCard& card,
+                                           const base::Closure& callback) = 0;
+
   // Gathers risk data and provides it to |callback|.
   virtual void LoadRiskData(
       const base::Callback<void(const std::string&)>& callback) = 0;
@@ -160,12 +147,6 @@ class AutofillClient {
   // when a credit card is scanned successfully. Should be called only if
   // HasCreditCardScanFeature() returns true.
   virtual void ScanCreditCard(const CreditCardScanCallback& callback) = 0;
-
-  // Causes the dialog for request autocomplete feature to be shown.
-  virtual void ShowRequestAutocompleteDialog(
-      const FormData& form,
-      content::RenderFrameHost* render_frame_host,
-      const ResultCallback& callback) = 0;
 
   // Shows an Autofill popup with the given |values|, |labels|, |icons|, and
   // |identifiers| for the element at |element_bounds|. |delegate| will be
@@ -203,6 +184,13 @@ class AutofillClient {
 
   // If the context is secure.
   virtual bool IsContextSecure(const GURL& form_origin) = 0;
+
+  // Whether it is appropriate to show a signin promo for this user.
+  virtual bool ShouldShowSigninPromo() = 0;
+
+  // Starts the signin flow. Should not be called if ShouldShowSigninPromo()
+  // returns false.
+  virtual void StartSigninFlow() = 0;
 };
 
 }  // namespace autofill

@@ -13,7 +13,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -48,7 +48,7 @@ IntranetRedirectDetector::IntranetRedirectDetector()
 
 IntranetRedirectDetector::~IntranetRedirectDetector() {
   net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
-  STLDeleteElements(&fetchers_);
+  base::STLDeleteElements(&fetchers_);
 }
 
 // static
@@ -68,7 +68,7 @@ void IntranetRedirectDetector::FinishSleep() {
   in_sleep_ = false;
 
   // If another fetch operation is still running, cancel it.
-  STLDeleteElements(&fetchers_);
+  base::STLDeleteElements(&fetchers_);
   resulting_origins_.clear();
 
   const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
@@ -91,7 +91,8 @@ void IntranetRedirectDetector::FinishSleep() {
     // We don't want these fetches to affect existing state in the profile.
     fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE |
                           net::LOAD_DO_NOT_SAVE_COOKIES |
-                          net::LOAD_DO_NOT_SEND_COOKIES);
+                          net::LOAD_DO_NOT_SEND_COOKIES |
+                          net::LOAD_DO_NOT_SEND_AUTH_DATA);
     fetcher->SetRequestContext(g_browser_process->system_request_context());
     fetcher->Start();
     fetchers_.insert(fetcher);

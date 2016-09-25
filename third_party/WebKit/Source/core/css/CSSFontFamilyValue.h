@@ -6,15 +6,13 @@
 #define CSSFontFamilyValue_h
 
 #include "core/css/CSSValue.h"
+#include "wtf/text/WTFString.h"
 
 namespace blink {
 
 class CSSFontFamilyValue : public CSSValue {
 public:
-    static CSSFontFamilyValue* create(const String& str)
-    {
-        return new CSSFontFamilyValue(str);
-    }
+    static CSSFontFamilyValue* create(const String& familyName);
 
     String value() const { return m_string; }
 
@@ -28,6 +26,8 @@ public:
     DECLARE_TRACE_AFTER_DISPATCH();
 
 private:
+    friend class CSSValuePool;
+
     CSSFontFamilyValue(const String&);
 
     // TODO(sashab): Change this to an AtomicString.

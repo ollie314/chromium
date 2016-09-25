@@ -21,6 +21,7 @@ class FilePath;
 class Builder;
 class BuildSettings;
 class Err;
+class SourceFile;
 class Target;
 
 class VisualStudioWriter {
@@ -31,15 +32,17 @@ class VisualStudioWriter {
   };
 
   // Writes Visual Studio project and solution files. |sln_name| is the optional
-  // solution file name ("all" is used if not specified). |dir_filters| is
-  // optional semicolon-separated list of label patterns used to limit the set
-  // of generated projects. Only matching targets will be included to the
-  // solution. On failure will populate |err| and will return false.
+  // solution file name ("all" is used if not specified). |filters| is optional
+  // semicolon-separated list of label patterns used to limit the set of
+  // generated projects. Only matching targets and their dependencies (unless
+  // |no_deps| is true) will be included to the solution. On failure will
+  // populate |err| and will return false.
   static bool RunAndWriteFiles(const BuildSettings* build_settings,
-                               Builder* builder,
+                               const Builder& builder,
                                Version version,
                                const std::string& sln_name,
-                               const std::string& dir_filters,
+                               const std::string& filters,
+                               bool no_deps,
                                Err* err);
 
  private:
@@ -78,8 +81,19 @@ class VisualStudioWriter {
     std::string config_platform;
   };
 
+  struct SourceFileCompileTypePair {
+    SourceFileCompileTypePair(const SourceFile* file, const char* compile_type);
+    ~SourceFileCompileTypePair();
+
+    // Source file.
+    const SourceFile* file;
+    // Compile type string.
+    const char* compile_type;
+  };
+
   using SolutionProjects = std::vector<std::unique_ptr<SolutionProject>>;
   using SolutionFolders = std::vector<std::unique_ptr<SolutionEntry>>;
+  using SourceFileCompileTypePairs = std::vector<SourceFileCompileTypePair>;
 
   VisualStudioWriter(const BuildSettings* build_settings,
                      const char* config_platform,
@@ -90,8 +104,11 @@ class VisualStudioWriter {
   bool WriteProjectFileContents(std::ostream& out,
                                 const SolutionProject& solution_project,
                                 const Target* target,
+                                SourceFileCompileTypePairs* source_types,
                                 Err* err);
-  void WriteFiltersFileContents(std::ostream& out, const Target* target);
+  void WriteFiltersFileContents(std::ostream& out,
+                                const Target* target,
+                                const SourceFileCompileTypePairs& source_types);
   bool WriteSolutionFile(const std::string& sln_name, Err* err);
   void WriteSolutionFileContents(std::ostream& out,
                                  const base::FilePath& solution_dir_path);

@@ -9,15 +9,15 @@
 #include <memory>
 #include <vector>
 
-#include "ash/shell.h"
-#include "ash/system/system_notifier.h"
-#include "ash/system/tray/system_tray_notifier.h"
+#include "ash/common/system/system_notifier.h"
+#include "ash/common/system/tray/system_tray_notifier.h"
+#include "ash/common/wm_shell.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -26,7 +26,6 @@
 #include "chrome/browser/chromeos/mobile/mobile_activator.h"
 #include "chrome/browser/chromeos/net/network_portal_web_dialog.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chrome/browser/chromeos/policy/consumer_management_service.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -301,10 +300,9 @@ void NetworkPortalNotificationController::OnPortalDetectionCompleted(
     return;
   last_network_path_ = network->path();
 
-  if (ash::Shell::HasInstance()) {
-    ash::Shell::GetInstance()
-        ->system_tray_notifier()
-        ->NotifyOnCaptivePortalDetected(network->path());
+  if (ash::WmShell::HasInstance()) {
+    ash::WmShell::Get()->system_tray_notifier()->NotifyOnCaptivePortalDetected(
+        network->path());
   }
 
   message_center::MessageCenter::Get()->AddNotification(

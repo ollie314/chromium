@@ -34,6 +34,7 @@
 
 namespace cc {
 class Layer;
+class TextureLayerClient;
 }
 
 namespace blink {
@@ -41,8 +42,6 @@ namespace blink {
 class WebContentLayer;
 class WebContentLayerClient;
 class WebExternalTextureLayer;
-class WebExternalTextureLayerClient;
-class WebGraphicsContext3D;
 class WebImageLayer;
 class WebLayer;
 class WebScrollbarLayer;
@@ -59,7 +58,7 @@ public:
 
     virtual WebContentLayer* createContentLayer(WebContentLayerClient*) { return nullptr; }
 
-    virtual WebExternalTextureLayer* createExternalTextureLayer(WebExternalTextureLayerClient*) { return nullptr; }
+    virtual WebExternalTextureLayer* createExternalTextureLayer(cc::TextureLayerClient*) { return nullptr; }
 
     virtual WebImageLayer* createImageLayer() { return nullptr; }
 

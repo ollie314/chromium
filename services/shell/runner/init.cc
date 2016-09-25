@@ -50,8 +50,17 @@ void WaitForDebuggerIfNecessary() {
                 .BaseName()
                 .RemoveExtension()
                 .MaybeAsASCII();
+    } else {
+      base::FilePath exe_path =
+          command_line->GetProgram().BaseName().RemoveExtension();
+      for (const auto& app_name : apps_to_debug) {
+        if (base::FilePath().AppendASCII(app_name) == exe_path) {
+          app = app_name;
+          break;
+        }
+      }
     }
-    if (apps_to_debug.empty() || ContainsValue(apps_to_debug, app)) {
+    if (apps_to_debug.empty() || base::ContainsValue(apps_to_debug, app)) {
 #if defined(OS_WIN)
       base::string16 appw = base::UTF8ToUTF16(app);
       base::string16 message = base::UTF8ToUTF16(
@@ -67,17 +76,19 @@ void WaitForDebuggerIfNecessary() {
 
 void CallLibraryEarlyInitialization(base::NativeLibrary app_library) {
   // Do whatever warming that the mojo application wants.
+
+#if ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE
   typedef void (*LibraryEarlyInitFunction)(const uint8_t*);
   LibraryEarlyInitFunction init_function =
       reinterpret_cast<LibraryEarlyInitFunction>(
           base::GetFunctionPointerFromNativeLibrary(app_library,
                                                     "InitializeBase"));
-  if (init_function) {
-    // Get the ICU data that we prewarmed in the runner and then pass it to
-    // the copy of icu in the mojo binary that we're running.
-    const uint8_t* icu_data = base::i18n::GetRawIcuMemory();
-    init_function(icu_data);
-  }
+  CHECK(init_function);
+  // Get the ICU data that we prewarmed in the runner and then pass it to
+  // the copy of icu in the mojo binary that we're running.
+  const uint8_t* icu_data = base::i18n::GetRawIcuMemory();
+  init_function(icu_data);
+#endif  // ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE
 
   // TODO(erg): All chromium binaries load base. We might want to make a
   // general system for other people.

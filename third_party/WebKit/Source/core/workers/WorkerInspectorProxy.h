@@ -6,6 +6,7 @@
 #define WorkerInspectorProxy_h
 
 #include "core/CoreExport.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "core/workers/WorkerThread.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
@@ -14,7 +15,6 @@ namespace blink {
 
 class Document;
 class KURL;
-class WebTraceLocation;
 class WorkerGlobalScopeProxy;
 
 // A proxy for talking to the worker inspector on the worker thread.
@@ -30,14 +30,13 @@ public:
     public:
         virtual ~PageInspector() { }
         virtual void dispatchMessageFromWorker(WorkerInspectorProxy*, const String&) = 0;
-        virtual void workerConsoleAgentEnabled(WorkerInspectorProxy*) = 0;
     };
 
     WorkerThreadStartMode workerStartMode(Document*);
     void workerThreadCreated(Document*, WorkerThread*, const KURL&);
     void workerThreadTerminated();
     void dispatchMessageFromWorker(const String&);
-    void workerConsoleAgentEnabled();
+    void addConsoleMessageFromWorker(MessageLevel, const String& message, std::unique_ptr<SourceLocation>);
 
     void connectToInspector(PageInspector*);
     void disconnectFromInspector(PageInspector*);

@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "remoting/proto/control.pb.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capture_options.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
@@ -40,7 +40,8 @@ class DesktopCapturerProxy::Core : public webrtc::DesktopCapturer::Callback {
 
  private:
   // webrtc::DesktopCapturer::Callback implementation.
-  void OnCaptureCompleted(webrtc::DesktopFrame* frame) override;
+  void OnCaptureResult(webrtc::DesktopCapturer::Result result,
+                       std::unique_ptr<webrtc::DesktopFrame> frame) override;
 
   base::ThreadChecker thread_checker_;
 
@@ -84,8 +85,7 @@ void DesktopCapturerProxy::Core::SetSharedMemoryFactory(
     std::unique_ptr<webrtc::SharedMemoryFactory> shared_memory_factory) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (capturer_) {
-    capturer_->SetSharedMemoryFactory(
-        rtc_make_scoped_ptr(shared_memory_factory.release()));
+    capturer_->SetSharedMemoryFactory(std::move(shared_memory_factory));
   }
 }
 
@@ -94,17 +94,18 @@ void DesktopCapturerProxy::Core::Capture(const webrtc::DesktopRegion& rect) {
   if (capturer_) {
     capturer_->Capture(rect);
   } else {
-    OnCaptureCompleted(nullptr);
+    OnCaptureResult(webrtc::DesktopCapturer::Result::ERROR_PERMANENT, nullptr);
   }
 }
 
-void DesktopCapturerProxy::Core::OnCaptureCompleted(
-    webrtc::DesktopFrame* frame) {
+void DesktopCapturerProxy::Core::OnCaptureResult(
+    webrtc::DesktopCapturer::Result result,
+    std::unique_ptr<webrtc::DesktopFrame> frame) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   caller_task_runner_->PostTask(
       FROM_HERE, base::Bind(&DesktopCapturerProxy::OnFrameCaptured, proxy_,
-                            base::Passed(base::WrapUnique(frame))));
+                            result, base::Passed(&frame)));
 }
 
 DesktopCapturerProxy::DesktopCapturerProxy(
@@ -131,7 +132,7 @@ void DesktopCapturerProxy::Start(Callback* callback) {
 }
 
 void DesktopCapturerProxy::SetSharedMemoryFactory(
-    rtc::scoped_ptr<webrtc::SharedMemoryFactory> shared_memory_factory) {
+    std::unique_ptr<webrtc::SharedMemoryFactory> shared_memory_factory) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   capture_task_runner_->PostTask(
@@ -153,10 +154,11 @@ void DesktopCapturerProxy::Capture(const webrtc::DesktopRegion& rect) {
 }
 
 void DesktopCapturerProxy::OnFrameCaptured(
+    webrtc::DesktopCapturer::Result result,
     std::unique_ptr<webrtc::DesktopFrame> frame) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  callback_->OnCaptureCompleted(frame.release());
+  callback_->OnCaptureResult(result, std::move(frame));
 }
 
 }  // namespace remoting

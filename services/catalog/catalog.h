@@ -6,24 +6,30 @@
 #define SERVICES_CATALOG_CATALOG_H_
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "components/filesystem/public/interfaces/directory.mojom.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "services/catalog/public/interfaces/catalog.mojom.h"
 #include "services/catalog/types.h"
-#include "services/shell/public/cpp/shell_client.h"
-#include "services/shell/public/interfaces/shell_client.mojom.h"
-#include "services/shell/public/interfaces/shell_resolver.mojom.h"
+#include "services/shell/public/cpp/service.h"
+#include "services/shell/public/interfaces/resolver.mojom.h"
+#include "services/shell/public/interfaces/service.mojom.h"
 
 namespace base {
-class TaskRunner;
+class SequencedWorkerPool;
+class SingleThreadTaskRunner;
+}
+
+namespace filesystem {
+class LockTable;
 }
 
 namespace shell {
-class ShellConnection;
+class ServiceContext;
 }
 
 namespace catalog {
@@ -33,47 +39,62 @@ class ManifestProvider;
 class Reader;
 class Store;
 
-// Creates and owns an instance of the catalog. Exposes a ShellClientPtr that
+// Creates and owns an instance of the catalog. Exposes a ServicePtr that
 // can be passed to the Shell, potentially in a different process.
-class Catalog : public shell::ShellClient,
+class Catalog : public shell::Service,
                 public shell::InterfaceFactory<mojom::Catalog>,
-                public shell::InterfaceFactory<shell::mojom::ShellResolver> {
+                public shell::InterfaceFactory<filesystem::mojom::Directory>,
+                public shell::InterfaceFactory<shell::mojom::Resolver> {
  public:
   // |manifest_provider| may be null.
-  Catalog(base::TaskRunner* file_task_runner,
-          scoped_ptr<Store> store,
+  Catalog(base::SequencedWorkerPool* worker_pool,
+          std::unique_ptr<Store> store,
+          ManifestProvider* manifest_provider);
+  Catalog(base::SingleThreadTaskRunner* task_runner,
+          std::unique_ptr<Store> store,
           ManifestProvider* manifest_provider);
   ~Catalog() override;
 
-  shell::mojom::ShellClientPtr TakeShellClient();
+  shell::mojom::ServicePtr TakeService();
 
  private:
-  // shell::ShellClient:
-  bool AcceptConnection(shell::Connection* connection) override;
+  explicit Catalog(std::unique_ptr<Store> store);
 
-  // shell::InterfaceFactory<shell::mojom::ShellResolver>:
-  void Create(shell::Connection* connection,
-              shell::mojom::ShellResolverRequest request) override;
+  // Starts a scane for system packages.
+  void ScanSystemPackageDir();
+
+  // shell::Service:
+  bool OnConnect(const shell::Identity& remote_identity,
+                 shell::InterfaceRegistry* registry) override;
+
+  // shell::InterfaceFactory<shell::mojom::Resolver>:
+  void Create(const shell::Identity& remote_identity,
+              shell::mojom::ResolverRequest request) override;
 
   // shell::InterfaceFactory<mojom::Catalog>:
-  void Create(shell::Connection* connection,
+  void Create(const shell::Identity& remote_identity,
               mojom::CatalogRequest request) override;
+
+  // shell::InterfaceFactory<filesystem::mojom::Directory>:
+  void Create(const shell::Identity& remote_identity,
+              filesystem::mojom::DirectoryRequest request) override;
 
   Instance* GetInstanceForUserId(const std::string& user_id);
 
   void SystemPackageDirScanned();
 
-  base::TaskRunner* const file_task_runner_;
-  scoped_ptr<Store> store_;
+  std::unique_ptr<Store> store_;
 
-  shell::mojom::ShellClientPtr shell_client_;
-  scoped_ptr<shell::ShellConnection> shell_connection_;
+  shell::mojom::ServicePtr service_;
+  std::unique_ptr<shell::ServiceContext> shell_connection_;
 
-  std::map<std::string, scoped_ptr<Instance>> instances_;
+  std::map<std::string, std::unique_ptr<Instance>> instances_;
 
-  scoped_ptr<Reader> system_reader_;
+  std::unique_ptr<Reader> system_reader_;
   EntryCache system_cache_;
   bool loaded_ = false;
+
+  scoped_refptr<filesystem::LockTable> lock_table_;
 
   base::WeakPtrFactory<Catalog> weak_factory_;
 

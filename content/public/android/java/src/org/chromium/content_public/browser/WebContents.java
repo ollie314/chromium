@@ -109,11 +109,6 @@ public interface WebContents extends Parcelable {
     void unselect();
 
     /**
-     * Inserts css into main frame's document.
-     */
-    void insertCSS(String css);
-
-    /**
      * To be called when the ContentView is hidden.
      */
     void onHide();
@@ -285,23 +280,22 @@ public interface WebContents extends Parcelable {
     boolean hasAccessedInitialDocument();
 
     /**
-     * This returns the theme color as set by the theme-color meta tag after getting rid of the
-     * alpha.
-     * @param defaultColor The default color to be returned if the cached color is not valid.
+     * This returns the theme color as set by the theme-color meta tag.
+     * <p>
+     * The color returned may retain non-fully opaque alpha components.  A value of
+     * {@link android.graphics.Color#TRANSPARENT} means there was no theme color specified.
+     *
      * @return The theme color for the content as set by the theme-color meta tag.
      */
-    int getThemeColor(int defaultColor);
+    int getThemeColor();
 
     /**
      * Requests a snapshop of accessibility tree. The result is provided asynchronously
      * using the callback
      * @param callback The callback to be called when the snapshot is ready. The callback
      *                 cannot be null.
-     * @param offsetY The Physical on-screen Y offset amount below the top controls.
-     * @param scrollX Horizontal scroll offset in physical pixels
      */
-    void requestAccessibilitySnapshot(AccessibilitySnapshotCallback callback, float offsetY,
-            float scrollX);
+    void requestAccessibilitySnapshot(AccessibilitySnapshotCallback callback);
 
     /**
      * Resumes the current media session.
@@ -350,16 +344,30 @@ public interface WebContents extends Parcelable {
      */
     void onContextMenuClosed();
 
-    /**
-     * @return The character encoding for the current visible page.
-     */
-    @VisibleForTesting
-    String getEncoding();
-
     public void getContentBitmapAsync(Bitmap.Config config, float scale, Rect srcRect,
             ContentBitmapCallback callback);
     /**
      * Reloads all the Lo-Fi images in this WebContents.
      */
     public void reloadLoFiImages();
+
+    /**
+     * Sends a request to download the given image {@link url}.
+     * This method delegates the call to the downloadImage() method of native WebContents.
+     * @param url The URL of the image to download.
+     * @param isFavicon Whether the image is a favicon. If true, the cookies are not sent and not
+     *                 accepted during download.
+     * @param maxBitmapSize The maximum bitmap size. Bitmaps with pixel sizes larger than {@link
+     *                 max_bitmap_size} are filtered out from the bitmap results. If there are no
+     *                 bitmap results <= {@link max_bitmap_size}, the smallest bitmap is resized to
+     *                 {@link max_bitmap_size} and is the only result. A {@link max_bitmap_size} of
+     *                 0 means unlimited.
+     * @param bypassCache If true, {@link url} is requested from the server even if it is present in
+     *                 the browser cache.
+     * @param callback The callback which will be called when the bitmaps are received from the
+     *                 renderer.
+     * @return The unique id of the download request
+     */
+    public int downloadImage(String url, boolean isFavicon, int maxBitmapSize,
+            boolean bypassCache, ImageDownloadCallback callback);
 }

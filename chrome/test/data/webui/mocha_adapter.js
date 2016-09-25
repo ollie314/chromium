@@ -35,10 +35,14 @@ function BrowserTestReporter(runner) {
     var message = 'Mocha test failed: ' + test.fullTitle() + '\n';
 
     // Remove unhelpful mocha lines from stack trace.
-    var stack = err.stack.split('\n');
-    for (var i = 0; i < stack.length; i++) {
-      if (stack[i].indexOf('mocha.js:') == -1)
-        message += stack[i] + '\n';
+    if (err.stack) {
+      var stack = err.stack.split('\n');
+      for (var i = 0; i < stack.length; i++) {
+        if (stack[i].indexOf('mocha.js:') == -1)
+          message += stack[i] + '\n';
+      }
+    } else {
+      message += err.toString();
     }
 
     console.error(message);
@@ -47,7 +51,10 @@ function BrowserTestReporter(runner) {
   // Report the results to the test API.
   runner.on('end', function() {
     if (failures == 0) {
-      testDone();
+      if (passes > 0)
+        testDone();
+      else
+        testDone([false, 'Failure: Mocha ran, but no mocha tests were run!']);
       return;
     }
     testDone([

@@ -17,7 +17,6 @@
 #include "cc/debug/debug_colors.h"
 #include "cc/debug/frame_rate_counter.h"
 #include "cc/output/begin_frame_args.h"
-#include "cc/output/renderer.h"
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/resources/memory_history.h"
 #include "cc/trees/layer_tree_host_impl.h"
@@ -96,9 +95,9 @@ void HeadsUpDisplayLayerImpl::AcquireResource(
 
   std::unique_ptr<ScopedResource> resource =
       ScopedResource::Create(resource_provider);
-  resource->Allocate(internal_content_bounds_,
-                     ResourceProvider::TEXTURE_HINT_IMMUTABLE,
-                     resource_provider->best_texture_format());
+  resource->Allocate(
+      internal_content_bounds_, ResourceProvider::TEXTURE_HINT_IMMUTABLE,
+      resource_provider->best_texture_format(), gfx::ColorSpace());
   resources_.push_back(std::move(resource));
 }
 
@@ -120,6 +119,9 @@ bool HeadsUpDisplayLayerImpl::WillDraw(DrawMode draw_mode,
   internal_contents_scale_ = GetIdealContentsScale();
   internal_content_bounds_ =
       gfx::ScaleToCeiledSize(bounds(), internal_contents_scale_);
+  internal_content_bounds_.SetToMin(
+      gfx::Size(resource_provider->max_texture_size(),
+                resource_provider->max_texture_size()));
 
   ReleaseUnmatchedSizeResources(resource_provider);
   AcquireResource(resource_provider);
@@ -147,18 +149,10 @@ void HeadsUpDisplayLayerImpl::AppendQuads(
   bool nearest_neighbor = false;
   TextureDrawQuad* quad =
       render_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
-  quad->SetNew(shared_quad_state,
-               quad_rect,
-               opaque_rect,
-               visible_quad_rect,
-               resources_.back()->id(),
-               premultiplied_alpha,
-               uv_top_left,
-               uv_bottom_right,
-               SK_ColorTRANSPARENT,
-               vertex_opacity,
-               flipped,
-               nearest_neighbor);
+  quad->SetNew(shared_quad_state, quad_rect, opaque_rect, visible_quad_rect,
+               resources_.back()->id(), premultiplied_alpha, uv_top_left,
+               uv_bottom_right, SK_ColorTRANSPARENT, vertex_opacity, flipped,
+               nearest_neighbor, false);
   ValidateQuadResources(quad);
 }
 
@@ -217,13 +211,12 @@ gfx::Rect HeadsUpDisplayLayerImpl::GetEnclosingRectInTargetSpace() const {
   return GetScaledEnclosingRectInTargetSpace(internal_contents_scale_);
 }
 
-void HeadsUpDisplayLayerImpl::SetHUDTypeface(
-    const skia::RefPtr<SkTypeface>& typeface) {
+void HeadsUpDisplayLayerImpl::SetHUDTypeface(sk_sp<SkTypeface> typeface) {
   if (typeface_ == typeface)
     return;
 
   DCHECK(typeface_.get() == nullptr);
-  typeface_ = typeface;
+  typeface_ = std::move(typeface);
   NoteLayerPropertyChanged();
 }
 
@@ -291,7 +284,7 @@ int HeadsUpDisplayLayerImpl::MeasureText(SkPaint* paint,
   const bool anti_alias = paint->isAntiAlias();
   paint->setAntiAlias(true);
   paint->setTextSize(size);
-  paint->setTypeface(typeface_.get());
+  paint->setTypeface(typeface_);
   SkScalar text_width = paint->measureText(text.c_str(), text.length());
 
   paint->setAntiAlias(anti_alias);
@@ -310,7 +303,7 @@ void HeadsUpDisplayLayerImpl::DrawText(SkCanvas* canvas,
 
   paint->setTextSize(size);
   paint->setTextAlign(align);
-  paint->setTypeface(typeface_.get());
+  paint->setTypeface(typeface_);
   canvas->drawText(text.c_str(), text.length(), x, y, *paint);
 
   paint->setAntiAlias(anti_alias);
@@ -685,7 +678,7 @@ void HeadsUpDisplayLayerImpl::DrawDebugRect(
 
     SkPaint label_paint = CreatePaint();
     label_paint.setTextSize(kFontHeight);
-    label_paint.setTypeface(typeface_.get());
+    label_paint.setTypeface(typeface_);
     label_paint.setColor(stroke_color);
 
     const SkScalar label_text_width =

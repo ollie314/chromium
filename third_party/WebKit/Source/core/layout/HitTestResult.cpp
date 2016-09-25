@@ -26,12 +26,9 @@
 #include "core/dom/PseudoElement.h"
 #include "core/dom/shadow/FlatTreeTraversal.h"
 #include "core/dom/shadow/ShadowRoot.h"
+#include "core/editing/EditingUtilities.h"
 #include "core/editing/FrameSelection.h"
-#include "core/editing/VisibleUnits.h"
-#include "core/editing/markers/DocumentMarkerController.h"
-#include "core/fetch/ImageResource.h"
 #include "core/frame/LocalFrame.h"
-#include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLAreaElement.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLInputElement.h"
@@ -40,8 +37,6 @@
 #include "core/html/HTMLTextAreaElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/layout/LayoutImage.h"
-#include "core/layout/LayoutTextFragment.h"
-#include "core/page/FrameTree.h"
 #include "core/svg/SVGElement.h"
 #include "platform/geometry/Region.h"
 #include "platform/scroll/Scrollbar.h"
@@ -177,7 +172,7 @@ void HitTestResult::setToShadowHostIfInUserAgentShadowRoot()
     if (Node* node = innerNode()) {
         if (ShadowRoot* containingShadowRoot = node->containingShadowRoot()) {
             if (containingShadowRoot->type() == ShadowRootType::UserAgent)
-                setInnerNode(node->shadowHost());
+                setInnerNode(node->ownerShadowHost());
         }
     }
 }
@@ -190,8 +185,8 @@ HTMLAreaElement* HitTestResult::imageAreaForImage() const
         imageElement = toHTMLImageElement(m_innerNode);
     } else if (m_innerNode->isInShadowTree()) {
         if (m_innerNode->containingShadowRoot()->type() == ShadowRootType::UserAgent) {
-            if (isHTMLImageElement(m_innerNode->shadowHost()))
-                imageElement = toHTMLImageElement(m_innerNode->shadowHost());
+            if (isHTMLImageElement(m_innerNode->ownerShadowHost()))
+                imageElement = toHTMLImageElement(m_innerNode->ownerShadowHost());
         }
     }
 
@@ -202,13 +197,7 @@ HTMLAreaElement* HitTestResult::imageAreaForImage() const
     if (!map)
         return nullptr;
 
-    LayoutBox* box = toLayoutBox(imageElement->layoutObject());
-    LayoutRect contentBox = box->contentBoxRect();
-    float scaleFactor = 1 / box->style()->effectiveZoom();
-    LayoutPoint location = localPoint();
-    location.scale(scaleFactor, scaleFactor);
-
-    return map->areaForPoint(location, contentBox.size());
+    return map->areaForPoint(localPoint(), imageElement->layoutObject());
 }
 
 void HitTestResult::setInnerNode(Node* n)
@@ -248,23 +237,6 @@ bool HitTestResult::isSelected() const
     if (LocalFrame* frame = m_innerNode->document().frame())
         return frame->selection().contains(m_hitTestLocation.point());
     return false;
-}
-
-String HitTestResult::spellingToolTip(TextDirection& dir) const
-{
-    dir = LTR;
-    // Return the tool tip string associated with this point, if any. Only markers associated with bad grammar
-    // currently supply strings, but maybe someday markers associated with misspelled words will also.
-    if (!m_innerNode)
-        return String();
-
-    DocumentMarker* marker = m_innerNode->document().markers().markerContainingPoint(m_hitTestLocation.point(), DocumentMarker::Grammar);
-    if (!marker)
-        return String();
-
-    if (LayoutObject* layoutObject = m_innerNode->layoutObject())
-        dir = layoutObject->style()->direction();
-    return marker->description();
 }
 
 String HitTestResult::title(TextDirection& dir) const
@@ -385,19 +357,6 @@ bool HitTestResult::isLiveLink() const
     return m_innerURLElement && m_innerURLElement->isLiveLink();
 }
 
-// TODO(yosin) We should move |HitTestResult::isMisspelled()| to
-// "SelectionController.cpp" as static function.
-bool HitTestResult::isMisspelled() const
-{
-    if (!innerNode() || !innerNode()->layoutObject())
-        return false;
-    VisiblePosition pos = createVisiblePosition(innerNode()->layoutObject()->positionForPoint(localPoint()));
-    if (pos.isNull())
-        return false;
-    return m_innerNode->document().markers().markersInRange(
-        EphemeralRange(pos.deepEquivalent().parentAnchoredEquivalent()), DocumentMarker::MisspellingMarkers()).size() > 0;
-}
-
 bool HitTestResult::isOverLink() const
 {
     return m_innerURLElement && m_innerURLElement->isLink();
@@ -427,7 +386,7 @@ bool HitTestResult::isContentEditable() const
         return !inputElement.isDisabledOrReadOnly() && inputElement.isTextField();
     }
 
-    return m_innerNode->hasEditableStyle();
+    return hasEditableStyle(*m_innerNode);
 }
 
 ListBasedHitTestBehavior HitTestResult::addNodeToListBasedTestResult(Node* node, const HitTestLocation& location, const LayoutRect& rect)

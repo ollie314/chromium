@@ -27,7 +27,8 @@
 
 #include "core/CoreExport.h"
 #include "core/fetch/Resource.h"
-#include "public/platform/WebMemoryDumpProvider.h"
+#include "platform/MemoryCacheDumpProvider.h"
+#include "platform/MemoryCoordinator.h"
 #include "public/platform/WebThread.h"
 #include "wtf/Allocator.h"
 #include "wtf/HashMap.h"
@@ -55,9 +56,6 @@ class ExecutionContext;
 // -------|-----+++++++++++++++|
 // -------|-----+++++++++++++++|+++++
 
-// Enable this macro to periodically log information about the memory cache.
-#undef MEMORY_CACHE_STATS
-
 enum UpdateReason {
     UpdateForAccess,
     UpdateForPropertyChange
@@ -66,7 +64,7 @@ enum UpdateReason {
 // MemoryCacheEntry class is used only in MemoryCache class, but we don't make
 // MemoryCacheEntry class an inner class of MemoryCache because of dependency
 // from MemoryCacheLRUList.
-class MemoryCacheEntry final : public GarbageCollectedFinalized<MemoryCacheEntry> {
+class MemoryCacheEntry final : public GarbageCollected<MemoryCacheEntry> {
 public:
     static MemoryCacheEntry* create(Resource* resource)
     {
@@ -74,8 +72,8 @@ public:
     }
     DECLARE_TRACE();
     void dispose();
+    Resource* resource();
 
-    Member<Resource> m_resource;
     bool m_inLiveDecodedResourcesList;
     unsigned m_accessCount;
     double m_lastDecodedAccessTime; // Used as a thrash guard
@@ -87,16 +85,20 @@ public:
 
 private:
     explicit MemoryCacheEntry(Resource* resource)
-        : m_resource(resource)
-        , m_inLiveDecodedResourcesList(false)
+        : m_inLiveDecodedResourcesList(false)
         , m_accessCount(0)
         , m_lastDecodedAccessTime(0.0)
         , m_previousInLiveResourcesList(nullptr)
         , m_nextInLiveResourcesList(nullptr)
         , m_previousInAllResourcesList(nullptr)
         , m_nextInAllResourcesList(nullptr)
+        , m_resource(resource)
     {
     }
+
+    void clearResourceWeak(Visitor*);
+
+    WeakMember<Resource> m_resource;
 };
 
 WILL_NOT_BE_EAGERLY_TRACED_CLASS(MemoryCacheEntry);
@@ -120,7 +122,8 @@ WTF_ALLOW_MOVE_INIT_AND_COMPARE_WITH_MEM_FUNCTIONS(blink::MemoryCacheLRUList);
 
 namespace blink {
 
-class CORE_EXPORT MemoryCache final : public GarbageCollectedFinalized<MemoryCache>, public WebThread::TaskObserver {
+class CORE_EXPORT MemoryCache final : public GarbageCollectedFinalized<MemoryCache>, public WebThread::TaskObserver, public MemoryCacheDumpClient, public MemoryCoordinatorClient {
+    USING_GARBAGE_COLLECTED_MIXIN(MemoryCache);
     WTF_MAKE_NONCOPYABLE(MemoryCache);
 public:
     static MemoryCache* create();
@@ -134,9 +137,8 @@ public:
         size_t liveSize;
         size_t decodedSize;
         size_t encodedSize;
+        size_t overheadSize;
         size_t encodedSizeDuplicatedInDataURLs;
-        size_t purgeableSize;
-        size_t purgedSize;
 
         TypeStatistic()
             : count(0)
@@ -144,9 +146,8 @@ public:
             , liveSize(0)
             , decodedSize(0)
             , encodedSize(0)
+            , overheadSize(0)
             , encodedSizeDuplicatedInDataURLs(0)
-            , purgeableSize(0)
-            , purgedSize(0)
         {
         }
 
@@ -196,11 +197,6 @@ public:
     void makeLive(Resource*);
     void makeDead(Resource*);
 
-    // This should be called when a Resource object is created.
-    void registerLiveResource(Resource&);
-    // This should be called when a Resource object becomes unnecesarry.
-    void unregisterLiveResource(Resource&);
-
     void removeURLFromCache(const KURL&);
 
     Statistics getStatistics();
@@ -220,7 +216,9 @@ public:
     void updateFramePaintTimestamp();
 
     // Take memory usage snapshot for tracing.
-    void onMemoryDump(WebMemoryDumpLevelOfDetail, WebProcessMemoryDump*);
+    bool onMemoryDump(WebMemoryDumpLevelOfDetail, WebProcessMemoryDump*) override;
+
+    void onMemoryPressure(WebMemoryPressureLevel) override;
 
     bool isInSameLRUListForTest(const Resource*, const Resource*);
 private:
@@ -234,11 +232,6 @@ private:
     MemoryCache();
 
     MemoryCacheLRUList* lruListFor(unsigned accessCount, size_t);
-
-#ifdef MEMORY_CACHE_STATS
-    void dumpStats(Timer<MemoryCache>*);
-    void dumpLRULists(bool includeLive) const;
-#endif
 
     // Calls to put the cached resource into and out of LRU lists.
     void insertInLRUList(MemoryCacheEntry*, MemoryCacheLRUList*);
@@ -298,9 +291,6 @@ private:
     ResourceMapIndex m_resourceMaps;
 
     friend class MemoryCacheTest;
-#ifdef MEMORY_CACHE_STATS
-    Timer<MemoryCache> m_statsTimer;
-#endif
 };
 
 // Returns the global cache.

@@ -25,9 +25,9 @@ class AnimationHostTest : public AnimationTimelinesTest {
 
 TEST_F(AnimationHostTest, SyncTimelinesAddRemove) {
   std::unique_ptr<AnimationHost> host(
-      AnimationHost::Create(ThreadInstance::MAIN));
+      AnimationHost::CreateForTesting(ThreadInstance::MAIN));
   std::unique_ptr<AnimationHost> host_impl(
-      AnimationHost::Create(ThreadInstance::IMPL));
+      AnimationHost::CreateForTesting(ThreadInstance::IMPL));
 
   const int timeline_id = AnimationIdProvider::NextTimelineId();
   scoped_refptr<AnimationTimeline> timeline(
@@ -58,9 +58,9 @@ TEST_F(AnimationHostTest, SyncTimelinesAddRemove) {
 
 TEST_F(AnimationHostTest, ImplOnlyTimeline) {
   std::unique_ptr<AnimationHost> host(
-      AnimationHost::Create(ThreadInstance::MAIN));
+      AnimationHost::CreateForTesting(ThreadInstance::MAIN));
   std::unique_ptr<AnimationHost> host_impl(
-      AnimationHost::Create(ThreadInstance::IMPL));
+      AnimationHost::CreateForTesting(ThreadInstance::IMPL));
 
   const int timeline_id1 = AnimationIdProvider::NextTimelineId();
   const int timeline_id2 = AnimationIdProvider::NextTimelineId();
@@ -81,13 +81,13 @@ TEST_F(AnimationHostTest, ImplOnlyTimeline) {
 }
 
 TEST_F(AnimationHostTest, ImplOnlyScrollAnimationUpdateTargetIfDetached) {
-  client_.RegisterLayer(layer_id_, LayerTreeType::ACTIVE);
-  client_impl_.RegisterLayer(layer_id_, LayerTreeType::PENDING);
+  client_.RegisterElement(element_id_, ElementListType::ACTIVE);
+  client_impl_.RegisterElement(element_id_, ElementListType::PENDING);
 
   gfx::ScrollOffset target_offset(0., 2.);
   gfx::ScrollOffset current_offset(0., 1.);
-  host_impl_->ImplOnlyScrollAnimationCreate(layer_id_, target_offset,
-                                            current_offset);
+  host_impl_->ImplOnlyScrollAnimationCreate(element_id_, target_offset,
+                                            current_offset, base::TimeDelta());
 
   gfx::Vector2dF scroll_delta(0, 0.5);
   gfx::ScrollOffset max_scroll_offset(0., 3.);
@@ -96,14 +96,14 @@ TEST_F(AnimationHostTest, ImplOnlyScrollAnimationUpdateTargetIfDetached) {
 
   time += base::TimeDelta::FromSecondsD(0.1);
   EXPECT_TRUE(host_impl_->ImplOnlyScrollAnimationUpdateTarget(
-      layer_id_, scroll_delta, max_scroll_offset, time));
+      element_id_, scroll_delta, max_scroll_offset, time, base::TimeDelta()));
 
   // Detach all players from layers and timelines.
   host_impl_->ClearTimelines();
 
   time += base::TimeDelta::FromSecondsD(0.1);
   EXPECT_FALSE(host_impl_->ImplOnlyScrollAnimationUpdateTarget(
-      layer_id_, scroll_delta, max_scroll_offset, time));
+      element_id_, scroll_delta, max_scroll_offset, time, base::TimeDelta()));
 }
 
 }  // namespace

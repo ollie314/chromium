@@ -7,6 +7,7 @@
 #include "base/barrier_closure.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
@@ -24,6 +25,7 @@
 #include "chromeos/chromeos_constants.h"
 #include "chromeos/chromeos_switches.h"
 #include "components/guest_view/browser/guest_view_manager.h"
+#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -137,13 +139,12 @@ std::string ProfileHelper::GetUserIdHashFromProfile(const Profile* profile) {
 
   // Check that profile directory starts with the correct prefix.
   std::string prefix(chrome::kProfileDirPrefix);
-  if (profile_dir.find(prefix) != 0) {
+  if (!base::StartsWith(profile_dir, prefix, base::CompareCase::SENSITIVE)) {
     // This happens when creating a TestingProfile in browser tests.
     return std::string();
   }
 
-  return profile_dir.substr(prefix.length(),
-                            profile_dir.length() - prefix.length());
+  return profile_dir.substr(prefix.length());
 }
 
 // static
@@ -261,9 +262,9 @@ void ProfileHelper::ClearSigninProfile(const base::Closure& on_clear_callback) {
     browsing_data_remover_ =
         BrowsingDataRemoverFactory::GetForBrowserContext(GetSigninProfile());
     browsing_data_remover_->AddObserver(this);
-    browsing_data_remover_->Remove(BrowsingDataRemover::Unbounded(),
-                                   BrowsingDataRemover::REMOVE_SITE_DATA,
-                                   BrowsingDataHelper::ALL);
+    browsing_data_remover_->RemoveAndReply(
+        BrowsingDataRemover::Unbounded(), BrowsingDataRemover::REMOVE_SITE_DATA,
+        BrowsingDataHelper::ALL, this);
   } else {
     on_clear_profile_stage_finished_.Run();
   }
@@ -339,7 +340,7 @@ const user_manager::User* ProfileHelper::GetUserByProfile(
              user_list_for_testing_.begin();
          it != user_list_for_testing_.end();
          ++it) {
-      if ((*it)->email() == user_name)
+      if ((*it)->GetAccountId().GetUserEmail() == user_name)
         return *it;
     }
 
@@ -453,6 +454,16 @@ void ProfileHelper::SetUserToProfileMappingForTesting(
     const user_manager::User* user,
     Profile* profile) {
   user_to_profile_for_testing_[user] = profile;
+}
+
+void ProfileHelper::RemoveUserFromListForTesting(const AccountId& account_id) {
+  auto it =
+      std::find_if(user_list_for_testing_.begin(), user_list_for_testing_.end(),
+                   [&account_id](const user_manager::User* user) {
+                     return user->GetAccountId() == account_id;
+                   });
+  if (it != user_list_for_testing_.end())
+    user_list_for_testing_.erase(it);
 }
 
 // static

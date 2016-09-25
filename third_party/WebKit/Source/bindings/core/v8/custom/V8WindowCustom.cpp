@@ -45,8 +45,8 @@
 #include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8Node.h"
 #include "core/dom/DOMArrayBuffer.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/dom/MessagePort.h"
+#include "core/frame/Deprecation.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/ImageBitmap.h"
 #include "core/frame/LocalDOMWindow.h"
@@ -56,14 +56,12 @@
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLCollection.h"
 #include "core/html/HTMLDocument.h"
-#include "core/inspector/InspectorInstrumentation.h"
+#include "core/inspector/MainThreadDebugger.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "platform/LayoutTestSupport.h"
-#include "platform/v8_inspector/public/V8Debugger.h"
 #include "wtf/Assertions.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
@@ -71,8 +69,7 @@ void V8Window::eventAttributeGetterCustom(const v8::PropertyCallbackInfo<v8::Val
 {
     LocalDOMWindow* impl = toLocalDOMWindow(V8Window::toImpl(info.Holder()));
     ExceptionState exceptionState(ExceptionState::GetterContext, "event", "Window", info.Holder(), info.GetIsolate());
-    if (!BindingSecurity::shouldAllowAccessTo(info.GetIsolate(), callingDOMWindow(info.GetIsolate()), impl, exceptionState)) {
-        exceptionState.throwIfNeeded();
+    if (!BindingSecurity::shouldAllowAccessTo(currentDOMWindow(info.GetIsolate()), impl, exceptionState)) {
         return;
     }
 
@@ -93,8 +90,7 @@ void V8Window::eventAttributeSetterCustom(v8::Local<v8::Value> value, const v8::
 {
     LocalDOMWindow* impl = toLocalDOMWindow(V8Window::toImpl(info.Holder()));
     ExceptionState exceptionState(ExceptionState::SetterContext, "event", "Window", info.Holder(), info.GetIsolate());
-    if (!BindingSecurity::shouldAllowAccessTo(info.GetIsolate(), callingDOMWindow(info.GetIsolate()), impl, exceptionState)) {
-        exceptionState.throwIfNeeded();
+    if (!BindingSecurity::shouldAllowAccessTo(currentDOMWindow(info.GetIsolate()), impl, exceptionState)) {
         return;
     }
 
@@ -112,7 +108,7 @@ void V8Window::frameElementAttributeGetterCustom(const v8::PropertyCallbackInfo<
 {
     LocalDOMWindow* impl = toLocalDOMWindow(V8Window::toImpl(info.Holder()));
 
-    if (!BindingSecurity::shouldAllowAccessTo(info.GetIsolate(), callingDOMWindow(info.GetIsolate()), impl->frameElement(), DoNotReportSecurityError)) {
+    if (!BindingSecurity::shouldAllowAccessTo(currentDOMWindow(info.GetIsolate()), impl->frameElement(), BindingSecurity::ErrorReportOption::DoNotReport)) {
         v8SetReturnValueNull(info);
         return;
     }
@@ -130,8 +126,7 @@ void V8Window::openerAttributeSetterCustom(v8::Local<v8::Value> value, const v8:
     v8::Isolate* isolate = info.GetIsolate();
     DOMWindow* impl = V8Window::toImpl(info.Holder());
     ExceptionState exceptionState(ExceptionState::SetterContext, "opener", "Window", info.Holder(), isolate);
-    if (!BindingSecurity::shouldAllowAccessTo(info.GetIsolate(), callingDOMWindow(info.GetIsolate()), impl, exceptionState)) {
-        exceptionState.throwIfNeeded();
+    if (!BindingSecurity::shouldAllowAccessTo(currentDOMWindow(info.GetIsolate()), impl, exceptionState)) {
         return;
     }
 
@@ -145,37 +140,32 @@ void V8Window::openerAttributeSetterCustom(v8::Local<v8::Value> value, const v8:
         toLocalFrame(impl->frame())->loader().setOpener(0);
     }
 
-    // Delete the accessor from this object.
+    // Delete the accessor from the inner object.
     info.Holder()->Delete(isolate->GetCurrentContext(), v8AtomicString(isolate, "opener"));
 
-    // Put property on the front (this) object.
-    if (info.This()->IsObject()) {
-        v8::Maybe<bool> unused = v8::Local<v8::Object>::Cast(info.This())->Set(isolate->GetCurrentContext(), v8AtomicString(isolate, "opener"), value);
+    // Put property on the inner object.
+    if (info.Holder()->IsObject()) {
+        v8::Maybe<bool> unused = v8::Local<v8::Object>::Cast(info.Holder())->Set(isolate->GetCurrentContext(), v8AtomicString(isolate, "opener"), value);
         ALLOW_UNUSED_LOCAL(unused);
     }
 }
-
-static bool isLegacyTargetOriginDesignation(v8::Local<v8::Value> value)
-{
-    if (value->IsString() || value->IsStringObject())
-        return true;
-    return false;
-}
-
 
 void V8Window::postMessageMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "postMessage", "Window", info.Holder(), info.GetIsolate());
     if (UNLIKELY(info.Length() < 2)) {
-        setMinimumArityTypeError(exceptionState, 2, info.Length());
-        exceptionState.throwIfNeeded();
+        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(2, info.Length()));
         return;
     }
 
     // None of these need to be RefPtr because info and context are guaranteed
     // to hold on to them.
     DOMWindow* window = V8Window::toImpl(info.Holder());
-    LocalDOMWindow* source = callingDOMWindow(info.GetIsolate());
+    // TODO(yukishiino): The HTML spec specifies that we should use the
+    // Incumbent Realm instead of the Current Realm, but currently we don't have
+    // a way to retrieve the Incumbent Realm.  See also:
+    // https://html.spec.whatwg.org/multipage/comms.html#dom-window-postmessage
+    LocalDOMWindow* source = currentDOMWindow(info.GetIsolate());
 
     ASSERT(window);
     UseCounter::countIfNotPrivateScript(info.GetIsolate(), window->frame(), UseCounter::WindowPostMessage);
@@ -183,46 +173,39 @@ void V8Window::postMessageMethodCustom(const v8::FunctionCallbackInfo<v8::Value>
     // If called directly by WebCore we don't have a calling context.
     if (!source) {
         exceptionState.throwTypeError("No active calling context exists.");
-        exceptionState.throwIfNeeded();
         return;
     }
 
     // This function has variable arguments and can be:
-    // Per current spec:
     //   postMessage(message, targetOrigin)
     //   postMessage(message, targetOrigin, {sequence of transferrables})
-    // Legacy non-standard implementations in webkit allowed:
-    //   postMessage(message, {sequence of transferrables}, targetOrigin);
+    // TODO(foolip): Type checking of the arguments should happen in order, so
+    // that e.g. postMessage({}, { toString: () => { throw Error(); } }, 0)
+    // throws the Error from toString, not the TypeError for argument 3.
     Transferables transferables;
-    int targetOriginArgIndex = 1;
+    const int targetOriginArgIndex = 1;
     if (info.Length() > 2) {
-        int transferablesArgIndex = 2;
-        if (isLegacyTargetOriginDesignation(info[2])) {
-            UseCounter::countIfNotPrivateScript(info.GetIsolate(), window->frame(), UseCounter::WindowPostMessageWithLegacyTargetOriginArgument);
-            targetOriginArgIndex = 2;
-            transferablesArgIndex = 1;
-        }
+        const int transferablesArgIndex = 2;
         if (!SerializedScriptValue::extractTransferables(info.GetIsolate(), info[transferablesArgIndex], transferablesArgIndex, transferables, exceptionState)) {
-            exceptionState.throwIfNeeded();
             return;
         }
     }
+    // TODO(foolip): targetOrigin should be a USVString in IDL and treated as
+    // such here, without TreatNullAndUndefinedAsNullString.
     TOSTRING_VOID(V8StringResource<TreatNullAndUndefinedAsNullString>, targetOrigin, info[targetOriginArgIndex]);
 
-    RefPtr<SerializedScriptValue> message = SerializedScriptValueFactory::instance().create(info.GetIsolate(), info[0], &transferables, exceptionState);
-    if (exceptionState.throwIfNeeded())
+    RefPtr<SerializedScriptValue> message = SerializedScriptValue::serialize(info.GetIsolate(), info[0], &transferables, nullptr, exceptionState);
+    if (exceptionState.hadException())
         return;
 
     window->postMessage(message.release(), transferables.messagePorts, targetOrigin, source, exceptionState);
-    exceptionState.throwIfNeeded();
 }
 
 void V8Window::openMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     DOMWindow* impl = V8Window::toImpl(info.Holder());
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "open", "Window", info.Holder(), info.GetIsolate());
-    if (!BindingSecurity::shouldAllowAccessTo(info.GetIsolate(), callingDOMWindow(info.GetIsolate()), impl, exceptionState)) {
-        exceptionState.throwIfNeeded();
+    if (!BindingSecurity::shouldAllowAccessTo(currentDOMWindow(info.GetIsolate()), impl, exceptionState)) {
         return;
     }
 
@@ -238,51 +221,15 @@ void V8Window::openMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 
     // |impl| has to be a LocalDOMWindow, since RemoteDOMWindows wouldn't have
     // passed the BindingSecurity check above.
-    DOMWindow* openedWindow = toLocalDOMWindow(impl)->open(urlString, frameName, windowFeaturesString, callingDOMWindow(info.GetIsolate()), enteredDOMWindow(info.GetIsolate()));
+    DOMWindow* openedWindow = toLocalDOMWindow(impl)->open(urlString, frameName, windowFeaturesString, currentDOMWindow(info.GetIsolate()), enteredDOMWindow(info.GetIsolate()));
     if (!openedWindow)
         return;
 
     v8SetReturnValueFast(info, openedWindow, impl);
 }
 
-static bool namedPropertyFromDebuggerScopeExtension(v8::Local<v8::Name> name, const AtomicString& nameString, const v8::PropertyCallbackInfo<v8::Value>& info)
+void V8Window::namedPropertyGetterCustom(const AtomicString& name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (!InspectorInstrumentation::hasFrontends())
-        return false;
-
-    bool isGetter = V8Debugger::isCommandLineAPIGetter(nameString);
-    bool isMethod = !isGetter && (V8Debugger::isCommandLineAPIMethod(nameString) || V8Debugger::isRemoteObjectAPIMethod(nameString));
-    if (!isGetter && !isMethod)
-        return false;
-
-    v8::Isolate* isolate = info.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    v8::Local<v8::Object> global = context->Global();
-    v8::Local<v8::Value> scopeExtensionValue;
-
-    if (v8Call(global->Get(context, V8Debugger::scopeExtensionSymbol(isolate)), scopeExtensionValue)) {
-        v8::Local<v8::Value> value;
-        if (scopeExtensionValue->IsObject() && v8Call(scopeExtensionValue->ToObject(isolate)->Get(context, name), value)) {
-            if (isMethod) {
-                v8SetReturnValue(info, value);
-                return true;
-            }
-            if (isGetter && value->IsFunction()) {
-                v8::Local<v8::Function> getterFunction = v8::Local<v8::Function>::Cast(value);
-                v8::MicrotasksScope microtasks(isolate, v8::MicrotasksScope::kDoNotRunMicrotasks);
-                if (getterFunction->Call(context, scopeExtensionValue, 0, nullptr).ToLocal(&value)) {
-                    v8SetReturnValue(info, value);
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
-}
-
-void V8Window::namedPropertyGetterCustom(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
-{
-    auto nameString = name.As<v8::String>();
     DOMWindow* window = V8Window::toImpl(info.Holder());
     if (!window)
         return;
@@ -292,12 +239,10 @@ void V8Window::namedPropertyGetterCustom(v8::Local<v8::Name> name, const v8::Pro
     if (!frame)
         return;
 
-    AtomicString propName = toCoreAtomicString(nameString);
-
     // Note that the spec doesn't allow any cross-origin named access to the window object. However,
     // UAs have traditionally allowed named access to named child browsing contexts, even across
     // origins. So first, search child frames for a frame with a matching name.
-    Frame* child = frame->tree().scopedChild(propName);
+    Frame* child = frame->tree().scopedChild(name);
     if (child) {
         v8SetReturnValueFast(info, child->domWindow(), window);
         return;
@@ -307,30 +252,27 @@ void V8Window::namedPropertyGetterCustom(v8::Local<v8::Name> name, const v8::Pro
     if (!frame->isLocalFrame())
         return;
 
-    if (namedPropertyFromDebuggerScopeExtension(name, propName, info))
-        return;
-
     // Search named items in the document.
     Document* doc = toLocalFrame(frame)->document();
     if (!doc || !doc->isHTMLDocument())
         return;
 
     // This is an AllCanRead interceptor.  Check that the caller has access to the named results.
-    if (!BindingSecurity::shouldAllowAccessTo(info.GetIsolate(), callingDOMWindow(info.GetIsolate()), window, DoNotReportSecurityError))
+    if (!BindingSecurity::shouldAllowAccessTo(currentDOMWindow(info.GetIsolate()), window, BindingSecurity::ErrorReportOption::DoNotReport))
         return;
 
-    bool hasNamedItem = toHTMLDocument(doc)->hasNamedItem(propName);
-    bool hasIdItem = doc->hasElementWithId(propName);
+    bool hasNamedItem = toHTMLDocument(doc)->hasNamedItem(name);
+    bool hasIdItem = doc->hasElementWithId(name);
 
     if (!hasNamedItem && !hasIdItem)
         return;
 
-    if (!hasNamedItem && hasIdItem && !doc->containsMultipleElementsWithId(propName)) {
-        v8SetReturnValueFast(info, doc->getElementById(propName), window);
+    if (!hasNamedItem && hasIdItem && !doc->containsMultipleElementsWithId(name)) {
+        v8SetReturnValueFast(info, doc->getElementById(name), window);
         return;
     }
 
-    HTMLCollection* items = doc->windowNamedItems(propName);
+    HTMLCollection* items = doc->windowNamedItems(name);
     if (!items->isEmpty()) {
         // TODO(esprehn): Firefox doesn't return an HTMLCollection here if there's
         // multiple with the same name, but Chrome and Safari does. What's the

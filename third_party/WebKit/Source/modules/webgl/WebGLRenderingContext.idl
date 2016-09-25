@@ -28,5 +28,7 @@
 [
     DoNotCheckConstants,
     SetWrapperReferenceFrom=canvas,
+    Exposed(Worker ExperimentalCanvasFeatures, Window StableBlinkFeatures),
+    Custom=VisitDOMWrapper,
 ] interface WebGLRenderingContext { };
 WebGLRenderingContext implements WebGLRenderingContextBase;

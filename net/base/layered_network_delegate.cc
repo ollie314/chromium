@@ -30,46 +30,46 @@ void LayeredNetworkDelegate::OnBeforeURLRequestInternal(
     GURL* new_url) {
 }
 
-int LayeredNetworkDelegate::OnBeforeSendHeaders(
+int LayeredNetworkDelegate::OnBeforeStartTransaction(
     URLRequest* request,
     const CompletionCallback& callback,
     HttpRequestHeaders* headers) {
-  OnBeforeSendHeadersInternal(request, callback, headers);
-  return nested_network_delegate_->NotifyBeforeSendHeaders(request, callback,
-                                                           headers);
+  OnBeforeStartTransactionInternal(request, callback, headers);
+  return nested_network_delegate_->NotifyBeforeStartTransaction(
+      request, callback, headers);
+}
+
+void LayeredNetworkDelegate::OnBeforeStartTransactionInternal(
+    URLRequest* request,
+    const CompletionCallback& callback,
+    HttpRequestHeaders* headers) {}
+
+void LayeredNetworkDelegate::OnBeforeSendHeaders(
+    URLRequest* request,
+    const ProxyInfo& proxy_info,
+    const ProxyRetryInfoMap& proxy_retry_info,
+    HttpRequestHeaders* headers) {
+  OnBeforeSendHeadersInternal(request, proxy_info, proxy_retry_info, headers);
+  nested_network_delegate_->NotifyBeforeSendHeaders(request, proxy_info,
+                                                    proxy_retry_info, headers);
 }
 
 void LayeredNetworkDelegate::OnBeforeSendHeadersInternal(
     URLRequest* request,
-    const CompletionCallback& callback,
-    HttpRequestHeaders* headers) {
-}
-
-void LayeredNetworkDelegate::OnBeforeSendProxyHeaders(
-    URLRequest* request,
     const ProxyInfo& proxy_info,
-    HttpRequestHeaders* headers) {
-  OnBeforeSendProxyHeadersInternal(request, proxy_info, headers);
-  nested_network_delegate_->NotifyBeforeSendProxyHeaders(request, proxy_info,
-                                                         headers);
-}
+    const ProxyRetryInfoMap& proxy_retry_info,
+    HttpRequestHeaders* headers) {}
 
-void LayeredNetworkDelegate::OnBeforeSendProxyHeadersInternal(
-    URLRequest* request,
-    const ProxyInfo& proxy_info,
-    HttpRequestHeaders* headers) {
-}
-
-void LayeredNetworkDelegate::OnSendHeaders(URLRequest* request,
-                                           const HttpRequestHeaders& headers) {
-  OnSendHeadersInternal(request, headers);
-  nested_network_delegate_->NotifySendHeaders(request, headers);
-}
-
-void LayeredNetworkDelegate::OnSendHeadersInternal(
+void LayeredNetworkDelegate::OnStartTransaction(
     URLRequest* request,
     const HttpRequestHeaders& headers) {
+  OnStartTransactionInternal(request, headers);
+  nested_network_delegate_->NotifyStartTransaction(request, headers);
 }
+
+void LayeredNetworkDelegate::OnStartTransactionInternal(
+    URLRequest* request,
+    const HttpRequestHeaders& headers) {}
 
 int LayeredNetworkDelegate::OnHeadersReceived(
     URLRequest* request,
@@ -104,9 +104,10 @@ void LayeredNetworkDelegate::OnBeforeRedirectInternal(
     const GURL& new_location) {
 }
 
-void LayeredNetworkDelegate::OnResponseStarted(URLRequest* request) {
+void LayeredNetworkDelegate::OnResponseStarted(URLRequest* request,
+                                               int net_error) {
   OnResponseStartedInternal(request);
-  nested_network_delegate_->NotifyResponseStarted(request);
+  nested_network_delegate_->NotifyResponseStarted(request, net_error);
 }
 
 void LayeredNetworkDelegate::OnResponseStartedInternal(URLRequest* request) {
@@ -131,14 +132,15 @@ void LayeredNetworkDelegate::OnNetworkBytesSent(URLRequest* request,
 void LayeredNetworkDelegate::OnNetworkBytesSentInternal(URLRequest* request,
                                                         int64_t bytes_sent) {}
 
-void LayeredNetworkDelegate::OnCompleted(URLRequest* request, bool started) {
+void LayeredNetworkDelegate::OnCompleted(URLRequest* request,
+                                         bool started,
+                                         int net_error) {
   OnCompletedInternal(request, started);
-  nested_network_delegate_->NotifyCompleted(request, started);
+  nested_network_delegate_->NotifyCompleted(request, started, net_error);
 }
 
 void LayeredNetworkDelegate::OnCompletedInternal(URLRequest* request,
-                                                 bool started) {
-}
+                                                 bool started) {}
 
 void LayeredNetworkDelegate::OnURLRequestDestroyed(URLRequest* request) {
   OnURLRequestDestroyedInternal(request);

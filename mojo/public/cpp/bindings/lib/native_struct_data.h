@@ -7,21 +7,19 @@
 
 #include <vector>
 
+#include "mojo/public/cpp/bindings/bindings_export.h"
 #include "mojo/public/cpp/bindings/lib/array_internal.h"
 #include "mojo/public/cpp/system/handle.h"
 
 namespace mojo {
 namespace internal {
 
-class BoundsChecker;
 class Buffer;
+class ValidationContext;
 
-class NativeStruct_Data {
+class MOJO_CPP_BINDINGS_EXPORT NativeStruct_Data {
  public:
-  static bool Validate(const void* data, BoundsChecker* bounds_checker);
-
-  void EncodePointersAndHandles(std::vector<Handle>* handles) {}
-  void DecodePointersAndHandles(std::vector<Handle>* handles) {}
+  static bool Validate(const void* data, ValidationContext* validation_context);
 
   // Unlike normal structs, the memory layout is exactly the same as an array
   // of uint8_t.

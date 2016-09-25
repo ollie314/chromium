@@ -11,7 +11,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/io_buffer.h"
 #include "net/base/url_util.h"
 #include "net/http/http_request_headers.h"
@@ -183,9 +183,9 @@ void URLRequestMockDataJob::AddUrlHandlerForHostname(
   // Add |hostname| to URLRequestFilter for HTTP and HTTPS.
   URLRequestFilter* filter = URLRequestFilter::GetInstance();
   filter->AddHostnameInterceptor("http", hostname,
-                                 base::WrapUnique(new MockJobInterceptor()));
+                                 base::MakeUnique<MockJobInterceptor>());
   filter->AddHostnameInterceptor("https", hostname,
-                                 base::WrapUnique(new MockJobInterceptor()));
+                                 base::MakeUnique<MockJobInterceptor>());
 }
 
 // static

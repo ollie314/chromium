@@ -11,7 +11,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "blimp/engine/app/blimp_network_delegate.h"
-#include "blimp/engine/common/blimp_content_client.h"
+#include "blimp/engine/common/blimp_user_agent.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_service.h"
@@ -69,7 +69,7 @@ net::URLRequestContext* BlimpURLRequestContextGetter::GetURLRequestContext() {
 
     std::vector<std::unique_ptr<net::URLRequestInterceptor>>
         request_interceptors;
-    for (auto i : request_interceptors_) {
+    for (auto* i : request_interceptors_) {
       request_interceptors.push_back(base::WrapUnique(i));
     }
     request_interceptors_.weak_clear();
@@ -91,7 +91,7 @@ net::URLRequestContext* BlimpURLRequestContextGetter::GetURLRequestContext() {
 
 scoped_refptr<base::SingleThreadTaskRunner>
 BlimpURLRequestContextGetter::GetNetworkTaskRunner() const {
-  return content::BrowserThread::GetMessageLoopProxyForThread(
+  return content::BrowserThread::GetTaskRunnerForThread(
       content::BrowserThread::IO);
 }
 

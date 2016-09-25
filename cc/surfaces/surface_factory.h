@@ -30,8 +30,6 @@ class Surface;
 class SurfaceFactoryClient;
 class SurfaceManager;
 
-enum class SurfaceDrawStatus { DRAW_SKIPPED, DRAWN };
-
 // A SurfaceFactory is used to create surfaces that may share resources and
 // receive returned resources for frames submitted to those surfaces. Resources
 // submitted to frames created by a particular factory will be returned to that
@@ -40,26 +38,31 @@ enum class SurfaceDrawStatus { DRAW_SKIPPED, DRAWN };
 class CC_SURFACES_EXPORT SurfaceFactory
     : public base::SupportsWeakPtr<SurfaceFactory> {
  public:
-  using DrawCallback = base::Callback<void(SurfaceDrawStatus)>;
+  using DrawCallback = base::Callback<void()>;
 
   SurfaceFactory(SurfaceManager* manager, SurfaceFactoryClient* client);
   ~SurfaceFactory();
 
-  void Create(SurfaceId surface_id);
-  void Destroy(SurfaceId surface_id);
+  void Create(const SurfaceId& surface_id);
+  void Destroy(const SurfaceId& surface_id);
   void DestroyAll();
+
+  // Set that the current frame on new_id is to be treated as the successor to
+  // the current frame on old_id for the purposes of calculating damage.
+  void SetPreviousFrameSurface(const SurfaceId& new_id,
+                               const SurfaceId& old_id);
 
   // A frame can only be submitted to a surface created by this factory,
   // although the frame may reference surfaces created by other factories.
   // The callback is called the first time this frame is used to draw, or if
   // the frame is discarded.
-  void SubmitCompositorFrame(SurfaceId surface_id,
-                             std::unique_ptr<CompositorFrame> frame,
+  void SubmitCompositorFrame(const SurfaceId& surface_id,
+                             CompositorFrame frame,
                              const DrawCallback& callback);
-  void RequestCopyOfSurface(SurfaceId surface_id,
+  void RequestCopyOfSurface(const SurfaceId& surface_id,
                             std::unique_ptr<CopyOutputRequest> copy_request);
 
-  void WillDrawSurface(SurfaceId id, const gfx::Rect& damage_rect);
+  void WillDrawSurface(const SurfaceId& id, const gfx::Rect& damage_rect);
 
   SurfaceFactoryClient* client() { return client_; }
 
@@ -74,6 +77,10 @@ class CC_SURFACES_EXPORT SurfaceFactory
   // example if the Display shares a context with the creator.
   bool needs_sync_points() const { return needs_sync_points_; }
   void set_needs_sync_points(bool needs) { needs_sync_points_ = needs; }
+
+  // SurfaceFactory's owner can call this when it finds out that SurfaceManager
+  // is no longer alive during destruction.
+  void DidDestroySurfaceManager() { manager_ = nullptr; }
 
  private:
   SurfaceManager* manager_;

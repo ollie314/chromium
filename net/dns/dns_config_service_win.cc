@@ -13,20 +13,22 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/free_deleter.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
-#include "base/win/windows_version.h"
 #include "net/base/ip_address.h"
 #include "net/base/network_change_notifier.h"
 #include "net/dns/dns_hosts.h"
@@ -531,12 +533,7 @@ ConfigParseWinResult ConvertSettingsToDnsConfig(
   config->ndots = 1;
 
   if (!settings.append_to_multi_label_name.set) {
-    // The default setting is true for XP, false for Vista+.
-    if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
-      config->append_to_multi_label_name = false;
-    } else {
-      config->append_to_multi_label_name = true;
-    }
+    config->append_to_multi_label_name = false;
   } else {
     config->append_to_multi_label_name =
         (settings.append_to_multi_label_name.value != 0);
@@ -663,9 +660,8 @@ class DnsConfigServiceWin::ConfigReader : public SerialWorker {
     } else {
       LOG(WARNING) << "Failed to read DnsConfig.";
       // Try again in a while in case DnsConfigWatcher missed the signal.
-      base::MessageLoop::current()->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&ConfigReader::WorkNow, this),
+      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+          FROM_HERE, base::Bind(&ConfigReader::WorkNow, this),
           base::TimeDelta::FromSeconds(kRetryIntervalSeconds));
     }
   }

@@ -7,76 +7,27 @@
 chrome.send('queryHistory', ['', 0, 0, 0, RESULTS_PER_PAGE]);
 chrome.send('getForeignSessions');
 
+/** @type {Promise} */
+var upgradePromise = null;
+/** @type {boolean} */
+var resultsRendered = false;
+
 /**
- * @param {HTMLElement} element
- * @return {!Promise} Resolves once a Polymer element has been fully upgraded.
+ * @return {!Promise} Resolves once the history-app has been fully upgraded.
  */
-function waitForUpgrade(element) {
-  return new Promise(function(resolve, reject) {
-    if (window.Polymer && Polymer.isInstance && Polymer.isInstance(element))
-      resolve();
-    else
-      $('bundle').addEventListener('load', resolve);
-  });
+function waitForAppUpgrade() {
+  if (!upgradePromise) {
+    upgradePromise = new Promise(function(resolve, reject) {
+      if (window.Polymer && Polymer.isInstance &&
+          Polymer.isInstance($('history-app'))) {
+        resolve();
+      } else {
+        $('bundle').addEventListener('load', resolve);
+      }
+    });
+  }
+  return upgradePromise;
 }
-
-/**
- * Listens for history-item being selected or deselected (through checkbox)
- * and changes the view of the top toolbar.
- * @param {{detail: {countAddition: number}}} e
- */
-window.addEventListener('history-checkbox-select', function(e) {
-  var toolbar = /** @type {HistoryToolbarElement} */($('toolbar'));
-  toolbar.count += e.detail.countAddition;
-});
-
-/**
- * Listens for call to cancel selection and loops through all items to set
- * checkbox to be unselected.
- */
-window.addEventListener('unselect-all', function() {
-  var historyList = /** @type {HistoryListElement} */($('history-list'));
-  var toolbar = /** @type {HistoryToolbarElement} */($('toolbar'));
-  historyList.unselectAllItems(toolbar.count);
-  toolbar.count = 0;
-});
-
-/**
- * Listens for call to delete all selected items and loops through all items to
- * to determine which ones are selected and deletes these.
- */
-window.addEventListener('delete-selected', function() {
-  if (!loadTimeData.getBoolean('allowDeletingHistory'))
-    return;
-
-  // TODO(hsampson): add a popup to check whether the user definitely wants to
-  // delete the selected items.
-
-  var historyList = /** @type {HistoryListElement} */($('history-list'));
-  var toolbar = /** @type {HistoryToolbarElement} */($('toolbar'));
-  var toBeRemoved = historyList.getSelectedItems(toolbar.count);
-  chrome.send('removeVisits', toBeRemoved);
-});
-
-/**
- * When the search is changed refresh the results from the backend. Ensures that
- * the search bar is updated with the new search term.
- * @param {{detail: {search: string}}} e
- */
-window.addEventListener('search-changed', function(e) {
-  $('toolbar').setSearchTerm(e.detail.search);
-  /** @type {HistoryListElement} */($('history-list')).setLoading();
-  chrome.send('queryHistory', [e.detail.search, 0, 0, 0, RESULTS_PER_PAGE]);
-});
-
-/**
- * Switches between displaying history data and synced tabs data for the page.
- */
-window.addEventListener('switch-display', function(e) {
-  $('history-synced-device-manager').hidden =
-      e.detail.display != 'synced-tabs-button';
-  $('history-list').hidden = e.detail.display != 'history-button';
-});
 
 // Chrome Callbacks-------------------------------------------------------------
 
@@ -86,16 +37,15 @@ window.addEventListener('switch-display', function(e) {
  * @param {!Array<HistoryEntry>} results A list of results.
  */
 function historyResult(info, results) {
-  var listElem = $('history-list');
-  waitForUpgrade(listElem).then(function() {
-    var list = /** @type {HistoryListElement} */(listElem);
-    list.addNewResults(results, info.term);
-    if (info.finished)
-      list.disableResultLoading();
-    // TODO(tsergeant): Showing everything as soon as the list is ready is not
-    // ideal, as the sidebar can still pop in after. Fix this to show everything
-    // at once.
+  waitForAppUpgrade().then(function() {
+    var app = /** @type {HistoryAppElement} */($('history-app'));
+    app.historyResult(info, results);
     document.body.classList.remove('loading');
+
+    if (!resultsRendered) {
+      resultsRendered = true;
+      app.onFirstRender();
+    }
   });
 }
 
@@ -108,8 +58,11 @@ function historyResult(info, results) {
  */
 function showNotification(
     hasSyncedResults, includeOtherFormsOfBrowsingHistory) {
-  // TODO(msramek): Implement the joint notification about web history and other
-  // forms of browsing history for the MD history page.
+  waitForAppUpgrade().then(function() {
+    var app = /** @type {HistoryAppElement} */ ($('history-app'));
+    app.showSidebarFooter = includeOtherFormsOfBrowsingHistory;
+    app.hasSyncedResults = hasSyncedResults;
+  });
 }
 
 /**
@@ -122,37 +75,31 @@ function showNotification(
  * @param {boolean} isTabSyncEnabled Is tab sync enabled for this profile?
  */
 function setForeignSessions(sessionList, isTabSyncEnabled) {
-  // TODO(calamity): Add a 'no synced devices' message when sessions are empty.
-  $('history-side-bar').hidden = !isTabSyncEnabled;
-  var syncedDeviceElem = $('history-synced-device-manager');
-  waitForUpgrade(syncedDeviceElem).then(function() {
-    var syncedDeviceManager =
-        /** @type {HistorySyncedDeviceManagerElement} */(syncedDeviceElem);
-    if (isTabSyncEnabled) {
-      syncedDeviceManager.setSyncedHistory(sessionList);
-      /** @type {HistoryToolbarElement} */($('toolbar')).hasSidebar = true;
-    }
+  waitForAppUpgrade().then(function() {
+    /** @type {HistoryAppElement} */($('history-app'))
+        .setForeignSessions(sessionList, isTabSyncEnabled);
   });
-}
-
-/**
- * Called by the history backend when deletion was succesful.
- */
-function deleteComplete() {
-  var historyList = /** @type {HistoryListElement} */($('history-list'));
-  var toolbar = /** @type {HistoryToolbarElement} */($('toolbar'));
-  historyList.removeDeletedHistory(toolbar.count);
-  toolbar.count = 0;
-}
-
-/**
- * Called by the history backend when the deletion failed.
- */
-function deleteFailed() {
 }
 
 /**
  * Called when the history is deleted by someone else.
  */
 function historyDeleted() {
+  waitForAppUpgrade().then(function() {
+    /** @type {HistoryAppElement} */($('history-app'))
+        .historyDeleted();
+  });
+}
+
+/**
+ * Called by the history backend after user's sign in state changes.
+ * @param {boolean} isUserSignedIn Whether user is signed in or not now.
+ */
+function updateSignInState(isUserSignedIn) {
+  waitForAppUpgrade().then(function() {
+    if ($('history-app')) {
+      /** @type {HistoryAppElement} */($('history-app'))
+          .updateSignInState(isUserSignedIn);
+    }
+  });
 }

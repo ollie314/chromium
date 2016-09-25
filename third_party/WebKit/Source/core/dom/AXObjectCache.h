@@ -28,6 +28,7 @@
 
 #include "core/CoreExport.h"
 #include "core/dom/Document.h"
+#include <memory>
 
 typedef unsigned AXID;
 
@@ -62,6 +63,7 @@ public:
         AXChildrenChanged,
         AXClicked,
         AXDocumentSelectionChanged,
+        AXExpandedChanged,
         AXFocusedUIElementChanged,
         AXHide,
         AXHover,
@@ -122,7 +124,7 @@ public:
     virtual void handleLayoutComplete(Document*) = 0;
     virtual void handleClicked(Node*) = 0;
 
-    virtual void setCanvasObjectBounds(Element*, const LayoutRect&) = 0;
+    virtual void setCanvasObjectBounds(HTMLCanvasElement*, Element*, const LayoutRect&) = 0;
 
     virtual void inlineTextBoxesUpdated(LineLayoutItem) = 0;
 
@@ -153,7 +155,7 @@ class CORE_EXPORT ScopedAXObjectCache {
     USING_FAST_MALLOC(ScopedAXObjectCache);
     WTF_MAKE_NONCOPYABLE(ScopedAXObjectCache);
 public:
-    static PassOwnPtr<ScopedAXObjectCache> create(Document&);
+    static std::unique_ptr<ScopedAXObjectCache> create(Document&);
     ~ScopedAXObjectCache();
 
     AXObjectCache* get();

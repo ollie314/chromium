@@ -12,7 +12,6 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/debug/stack_trace.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
@@ -120,7 +119,6 @@ class URLFetcherCore : public base::RefCountedThreadSafe<URLFetcherCore>,
   const GURL& GetURL() const;
   const URLRequestStatus& GetStatus() const;
   int GetResponseCode() const;
-  const ResponseCookies& GetCookies() const;
   int64_t GetReceivedResponseContentLength() const;
   int64_t GetTotalReceivedBytes() const;
   // Reports that the received content was malformed (i.e. failed parsing
@@ -138,7 +136,7 @@ class URLFetcherCore : public base::RefCountedThreadSafe<URLFetcherCore>,
   void OnReceivedRedirect(URLRequest* request,
                           const RedirectInfo& redirect_info,
                           bool* defer_redirect) override;
-  void OnResponseStarted(URLRequest* request) override;
+  void OnResponseStarted(URLRequest* request, int net_error) override;
   void OnReadCompleted(URLRequest* request, int bytes_read) override;
   void OnCertificateRequested(URLRequest* request,
                               SSLCertRequestInfo* cert_request_info) override;
@@ -251,7 +249,6 @@ class URLFetcherCore : public base::RefCountedThreadSafe<URLFetcherCore>,
   // The user data to add to each newly-created URLRequest.
   const void* url_request_data_key_;
   URLFetcher::CreateDataCallback url_request_create_data_callback_;
-  ResponseCookies cookies_;          // Response cookies
   HttpRequestHeaders extra_request_headers_;
   scoped_refptr<HttpResponseHeaders> response_headers_;
   bool was_fetched_via_proxy_;
@@ -346,9 +343,6 @@ class URLFetcherCore : public base::RefCountedThreadSafe<URLFetcherCore>,
   int64_t current_response_bytes_;
   // Total expected bytes to receive (-1 if it cannot be determined).
   int64_t total_response_bytes_;
-
-  // TODO(willchan): Get rid of this after debugging crbug.com/90971.
-  base::debug::StackTrace stack_trace_;
 
   static base::LazyInstance<Registry> g_registry;
 

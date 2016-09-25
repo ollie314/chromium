@@ -13,6 +13,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <memory>
+
+#include "base/memory/ptr_util.h"
+
 #if defined(OS_OPENBSD)
 #include <sys/uio.h>
 #endif
@@ -31,7 +35,6 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/global_descriptors.h"
@@ -338,6 +341,8 @@ bool ChannelPosix::CreatePipe(
 }
 
 bool ChannelPosix::Connect() {
+  WillConnect();
+
   if (!server_listen_pipe_.is_valid() && !pipe_.is_valid()) {
     DLOG(WARNING) << "Channel creation failed: " << pipe_name_;
     return false;
@@ -359,7 +364,7 @@ bool ChannelPosix::Connect() {
         this);
 #endif
   } else {
-    did_connect = AcceptConnection();
+    did_connect = OnConnect();
   }
   return did_connect;
 }
@@ -627,7 +632,7 @@ void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
         << "IPC channels in nacl_helper_nonsfi should not be SERVER mode.";
 #else
     int new_pipe = 0;
-    if (!ServerAcceptConnection(server_listen_pipe_.get(), &new_pipe) ||
+    if (!ServerOnConnect(server_listen_pipe_.get(), &new_pipe) ||
         new_pipe < 0) {
       Close();
       listener()->OnChannelListenError();
@@ -645,22 +650,20 @@ void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
     }
     pipe_.reset(new_pipe);
 
-    if ((mode_ & MODE_OPEN_ACCESS_FLAG) == 0) {
-      // Verify that the IPC channel peer is running as the same user.
-      uid_t client_euid;
-      if (!GetPeerEuid(&client_euid)) {
-        DLOG(ERROR) << "Unable to query client euid";
-        ResetToAcceptingConnectionState();
-        return;
-      }
-      if (client_euid != geteuid()) {
-        DLOG(WARNING) << "Client euid is not authorised";
-        ResetToAcceptingConnectionState();
-        return;
-      }
+    // Verify that the IPC channel peer is running as the same user.
+    uid_t client_euid;
+    if (!GetPeerEuid(&client_euid)) {
+      DLOG(ERROR) << "Unable to query client euid";
+      ResetToAcceptingConnectionState();
+      return;
+    }
+    if (client_euid != geteuid()) {
+      DLOG(WARNING) << "Client euid is not authorised";
+      ResetToAcceptingConnectionState();
+      return;
     }
 
-    if (!AcceptConnection()) {
+    if (!OnConnect()) {
       NOTREACHED() << "AcceptConnection should not fail on server";
     }
     waiting_connect_ = false;
@@ -763,7 +766,7 @@ bool ChannelPosix::FlushPrelimQueue() {
   return !processing_error;
 }
 
-bool ChannelPosix::AcceptConnection() {
+bool ChannelPosix::OnConnect() {
   base::MessageLoopForIO::current()->WatchFileDescriptor(
       pipe_.get(),
       true,
@@ -820,9 +823,8 @@ int ChannelPosix::GetHelloMessageProcId() const {
 
 void ChannelPosix::QueueHelloMessage() {
   // Create the Hello message
-  scoped_ptr<Message> msg(new Message(MSG_ROUTING_NONE,
-                                      HELLO_MESSAGE_TYPE,
-                                      IPC::Message::PRIORITY_NORMAL));
+  std::unique_ptr<Message> msg(new Message(MSG_ROUTING_NONE, HELLO_MESSAGE_TYPE,
+                                           IPC::Message::PRIORITY_NORMAL));
   if (!msg->WriteInt(GetHelloMessageProcId())) {
     NOTREACHED() << "Unable to pickle hello message proc id";
   }
@@ -976,9 +978,9 @@ void ChannelPosix::QueueCloseFDMessage(int fd, int hops) {
     case 1:
     case 2: {
       // Create the message
-      scoped_ptr<Message> msg(new Message(MSG_ROUTING_NONE,
-                                          CLOSE_FD_MESSAGE_TYPE,
-                                          IPC::Message::PRIORITY_NORMAL));
+      std::unique_ptr<Message> msg(new Message(MSG_ROUTING_NONE,
+                                               CLOSE_FD_MESSAGE_TYPE,
+                                               IPC::Message::PRIORITY_NORMAL));
       if (!msg->WriteInt(hops - 1) || !msg->WriteInt(fd)) {
         NOTREACHED() << "Unable to pickle close fd.";
       }
@@ -1013,6 +1015,12 @@ void ChannelPosix::HandleInternalMessage(const Message& msg) {
 
       if (!FlushPrelimQueue())
         ClosePipeOnError();
+
+      if (IsAttachmentBrokerEndpoint() &&
+          AttachmentBroker::GetGlobal() &&
+          AttachmentBroker::GetGlobal()->IsPrivilegedBroker()) {
+        AttachmentBroker::GetGlobal()->ReceivedPeerPid(pid);
+      }
       break;
 
 #if defined(OS_MACOSX)
@@ -1101,10 +1109,11 @@ void ChannelPosix::ResetSafely(base::ScopedFD* fd) {
 // Channel's methods
 
 // static
-scoped_ptr<Channel> Channel::Create(const IPC::ChannelHandle& channel_handle,
-                                    Mode mode,
-                                    Listener* listener) {
-  return make_scoped_ptr(new ChannelPosix(channel_handle, mode, listener));
+std::unique_ptr<Channel> Channel::Create(
+    const IPC::ChannelHandle& channel_handle,
+    Mode mode,
+    Listener* listener) {
+  return base::WrapUnique(new ChannelPosix(channel_handle, mode, listener));
 }
 
 // static

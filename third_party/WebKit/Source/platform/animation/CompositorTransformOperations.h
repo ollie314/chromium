@@ -7,18 +7,15 @@
 
 #include "cc/animation/transform_operations.h"
 #include "platform/PlatformExport.h"
-#include "wtf/Noncopyable.h"
 
 class SkMatrix44;
 
 namespace blink {
 
 class PLATFORM_EXPORT CompositorTransformOperations {
-    WTF_MAKE_NONCOPYABLE(CompositorTransformOperations);
 public:
-    CompositorTransformOperations();
-
-    const cc::TransformOperations& asTransformOperations() const;
+    const cc::TransformOperations& asCcTransformOperations() const;
+    cc::TransformOperations releaseCcTransformOperations();
 
     // Returns true if these operations can be blended. It will only return
     // false if we must resort to matrix interpolation, and matrix interpolation

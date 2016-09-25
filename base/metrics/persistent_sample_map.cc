@@ -96,22 +96,11 @@ PersistentSampleMap::PersistentSampleMap(
     uint64_t id,
     PersistentHistogramAllocator* allocator,
     Metadata* meta)
-    : PersistentSampleMap(id, allocator->UseSampleMapRecords(id, this), meta) {}
-
-PersistentSampleMap::PersistentSampleMap(
-    uint64_t id,
-    PersistentSparseHistogramDataManager* manager,
-    Metadata* meta)
-    : PersistentSampleMap(id, manager->UseSampleMapRecords(id, this), meta) {}
-
-PersistentSampleMap::PersistentSampleMap(
-    uint64_t id,
-    PersistentSampleMapRecords* records,
-    Metadata* meta)
-    : HistogramSamples(id, meta), records_(records) {}
+    : HistogramSamples(id, meta), allocator_(allocator) {}
 
 PersistentSampleMap::~PersistentSampleMap() {
-  records_->Release(this);
+  if (records_)
+    records_->Release(this);
 }
 
 void PersistentSampleMap::Accumulate(Sample value, Count count) {
@@ -131,7 +120,7 @@ Count PersistentSampleMap::GetCount(Sample value) const {
 Count PersistentSampleMap::TotalCount() const {
   // Have to override "const" in order to make sure all samples have been
   // loaded before trying to iterate over the map.
-  const_cast<PersistentSampleMap*>(this)->ImportSamples(kAllSamples);
+  const_cast<PersistentSampleMap*>(this)->ImportSamples(-1, true);
 
   Count count = 0;
   for (const auto& entry : sample_counts_) {
@@ -143,7 +132,7 @@ Count PersistentSampleMap::TotalCount() const {
 std::unique_ptr<SampleCountIterator> PersistentSampleMap::Iterator() const {
   // Have to override "const" in order to make sure all samples have been
   // loaded before trying to iterate over the map.
-  const_cast<PersistentSampleMap*>(this)->ImportSamples(kAllSamples);
+  const_cast<PersistentSampleMap*>(this)->ImportSamples(-1, true);
   return WrapUnique(new PersistentSampleMapIterator(sample_counts_));
 }
 
@@ -204,15 +193,13 @@ bool PersistentSampleMap::AddSubtractImpl(SampleCountIterator* iter,
 }
 
 Count* PersistentSampleMap::GetSampleCountStorage(Sample value) {
-  DCHECK_LE(0, value);
-
   // If |value| is already in the map, just return that.
   auto it = sample_counts_.find(value);
   if (it != sample_counts_.end())
     return it->second;
 
   // Import any new samples from persistent memory looking for the value.
-  return ImportSamples(value);
+  return ImportSamples(value, false);
 }
 
 Count* PersistentSampleMap::GetOrCreateSampleCountStorage(Sample value) {
@@ -221,7 +208,9 @@ Count* PersistentSampleMap::GetOrCreateSampleCountStorage(Sample value) {
   if (count_pointer)
     return count_pointer;
 
-  // Create a new record in persistent memory for the value.
+  // Create a new record in persistent memory for the value. |records_| will
+  // have been initialized by the GetSampleCountStorage() call above.
+  DCHECK(records_);
   PersistentMemoryAllocator::Reference ref = records_->CreateNew(value);
   if (!ref) {
     // If a new record could not be created then the underlying allocator is
@@ -242,16 +231,30 @@ Count* PersistentSampleMap::GetOrCreateSampleCountStorage(Sample value) {
   // Thread-safety within a process where multiple threads use the same
   // histogram object is delegated to the controlling histogram object which,
   // for sparse histograms, is a lock object.
-  count_pointer = ImportSamples(value);
+  count_pointer = ImportSamples(value, false);
   DCHECK(count_pointer);
   return count_pointer;
 }
 
-Count* PersistentSampleMap::ImportSamples(Sample until_value) {
+PersistentSampleMapRecords* PersistentSampleMap::GetRecords() {
+  // The |records_| pointer is lazily fetched from the |allocator_| only on
+  // first use. Sometimes duplicate histograms are created by race conditions
+  // and if both were to grab the records object, there would be a conflict.
+  // Use of a histogram, and thus a call to this method, won't occur until
+  // after the histogram has been de-dup'd.
+  if (!records_)
+    records_ = allocator_->UseSampleMapRecords(id(), this);
+  return records_;
+}
+
+Count* PersistentSampleMap::ImportSamples(Sample until_value,
+                                          bool import_everything) {
+  Count* found_count = nullptr;
   PersistentMemoryAllocator::Reference ref;
-  while ((ref = records_->GetNext()) != 0) {
+  PersistentSampleMapRecords* records = GetRecords();
+  while ((ref = records->GetNext()) != 0) {
     SampleRecord* record =
-        records_->GetAsObject<SampleRecord>(ref, kTypeIdSampleRecord);
+        records->GetAsObject<SampleRecord>(ref, kTypeIdSampleRecord);
     if (!record)
       continue;
 
@@ -259,9 +262,8 @@ Count* PersistentSampleMap::ImportSamples(Sample until_value) {
 
     // Check if the record's value is already known.
     if (!ContainsKey(sample_counts_, record->value)) {
-      // No: Add it to map of known values if the value is valid.
-      if (record->value >= 0)
-        sample_counts_[record->value] = &record->count;
+      // No: Add it to map of known values.
+      sample_counts_[record->value] = &record->count;
     } else {
       // Yes: Ignore it; it's a duplicate caused by a race condition -- see
       // code & comment in GetOrCreateSampleCountStorage() for details.
@@ -269,12 +271,19 @@ Count* PersistentSampleMap::ImportSamples(Sample until_value) {
       DCHECK_EQ(0, record->count);
     }
 
-    // Stop if it's the value being searched for.
-    if (record->value == until_value)
-      return &record->count;
+    // Check if it's the value being searched for and, if so, keep a pointer
+    // to return later. Stop here unless everything is being imported.
+    // Because race conditions can cause multiple records for a single value,
+    // be sure to return the first one found.
+    if (record->value == until_value) {
+      if (!found_count)
+        found_count = &record->count;
+      if (!import_everything)
+        break;
+    }
   }
 
-  return nullptr;
+  return found_count;
 }
 
 }  // namespace base

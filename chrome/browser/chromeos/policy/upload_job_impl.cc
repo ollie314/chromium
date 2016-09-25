@@ -8,7 +8,8 @@
 #include <set>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/chromeos/logging.h"
+#include "base/location.h"
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "google_apis/gaia/gaia_constants.h"
@@ -28,11 +29,14 @@ const char kAuthorizationHeaderFormat[] = "Authorization: Bearer %s";
 // Value the "Content-Type" field will be set to in the POST request.
 const char kUploadContentType[] = "multipart/form-data";
 
-// Number of upload retries.
-const int kMaxRetries = 1;
+// Number of upload attempts.
+const int kMaxAttempts = 4;
 
 // Max size of MIME boundary according to RFC 1341, section 7.2.1.
 const size_t kMaxMimeBoundarySize = 70;
+
+// Delay after each unsuccessful upload attempt.
+long g_retry_delay_ms = 25000;
 
 }  // namespace
 
@@ -127,7 +131,8 @@ UploadJobImpl::UploadJobImpl(
     OAuth2TokenService* token_service,
     scoped_refptr<net::URLRequestContextGetter> url_context_getter,
     Delegate* delegate,
-    std::unique_ptr<MimeBoundaryGenerator> boundary_generator)
+    std::unique_ptr<MimeBoundaryGenerator> boundary_generator,
+    scoped_refptr<base::SequencedTaskRunner> task_runner)
     : OAuth2TokenService::Consumer("cros_upload_job"),
       upload_url_(upload_url),
       account_id_(account_id),
@@ -136,7 +141,9 @@ UploadJobImpl::UploadJobImpl(
       delegate_(delegate),
       boundary_generator_(std::move(boundary_generator)),
       state_(IDLE),
-      retry_(0) {
+      retry_(0),
+      task_runner_(task_runner),
+      weak_factory_(this) {
   DCHECK(token_service_);
   DCHECK(url_context_getter_);
   DCHECK(delegate_);
@@ -154,6 +161,7 @@ void UploadJobImpl::AddDataSegment(
     const std::string& filename,
     const std::map<std::string, std::string>& header_entries,
     std::unique_ptr<std::string> data) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   // Cannot add data to busy or failed instance.
   DCHECK_EQ(IDLE, state_);
   if (state_ != IDLE)
@@ -165,14 +173,27 @@ void UploadJobImpl::AddDataSegment(
 }
 
 void UploadJobImpl::Start() {
+  DCHECK(thread_checker_.CalledOnValidThread());
   // Cannot start an upload on a busy or failed instance.
   DCHECK_EQ(IDLE, state_);
   if (state_ != IDLE)
     return;
+  DCHECK_EQ(0, retry_);
+
+  CHROMEOS_SYSLOG(WARNING) << "Upload job started";
   RequestAccessToken();
 }
 
+// static
+void UploadJobImpl::SetRetryDelayForTesting(long retry_delay_ms) {
+  CHECK_GE(retry_delay_ms, 0);
+  g_retry_delay_ms = retry_delay_ms;
+}
+
 void UploadJobImpl::RequestAccessToken() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(!access_token_request_);
+
   state_ = ACQUIRING_TOKEN;
 
   OAuth2TokenService::ScopeSet scope_set;
@@ -191,7 +212,7 @@ bool UploadJobImpl::SetUpMultipart() {
   std::set<std::string> used_names;
 
   // Check uniqueness of header field names.
-  for (const auto& data_segment : data_segments_) {
+  for (auto* data_segment : data_segments_) {
     if (!used_names.insert(data_segment->GetName()).second)
       return false;
   }
@@ -203,7 +224,7 @@ bool UploadJobImpl::SetUpMultipart() {
   // allocation more efficient. It is not an error if this turns out to be too
   // small as std::string will take care of the realloc.
   size_t size = 0;
-  for (const auto& data_segment : data_segments_) {
+  for (auto* data_segment : data_segments_) {
     for (const auto& entry : data_segment->GetHeaderEntries())
       size += entry.first.size() + entry.second.size();
     size += kMaxMimeBoundarySize + data_segment->GetName().size() +
@@ -216,7 +237,7 @@ bool UploadJobImpl::SetUpMultipart() {
   post_data_.reset(new std::string);
   post_data_->reserve(size);
 
-  for (const auto& data_segment : data_segments_) {
+  for (auto* data_segment : data_segments_) {
     post_data_->append("--" + *mime_boundary_.get() + "\r\n");
     post_data_->append("Content-Disposition: form-data; name=\"" +
                        data_segment->GetName() + "\"");
@@ -236,7 +257,7 @@ bool UploadJobImpl::SetUpMultipart() {
 
   // Issues a warning if our buffer size estimate was too small.
   if (post_data_->size() > size) {
-    LOG(WARNING)
+    CHROMEOS_SYSLOG(WARNING)
         << "Reallocation needed in POST data buffer. Expected maximum size "
         << size << " bytes, actual size " << post_data_->size() << " bytes.";
   }
@@ -264,13 +285,15 @@ void UploadJobImpl::CreateAndStartURLFetcher(const std::string& access_token) {
   upload_fetcher_->Start();
 }
 
-void UploadJobImpl::StartUpload(const std::string& access_token) {
+void UploadJobImpl::StartUpload() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
   if (!SetUpMultipart()) {
-    LOG(ERROR) << "Multipart message assembly failed.";
+    CHROMEOS_SYSLOG(ERROR) << "Multipart message assembly failed.";
     state_ = ERROR;
     return;
   }
-  CreateAndStartURLFetcher(access_token);
+  CreateAndStartURLFetcher(access_token_);
   state_ = UPLOADING;
 }
 
@@ -284,7 +307,7 @@ void UploadJobImpl::OnGetTokenSuccess(
 
   // Also cache the token locally, so that we can revoke it later if necessary.
   access_token_ = access_token;
-  StartUpload(access_token);
+  StartUpload();
 }
 
 void UploadJobImpl::OnGetTokenFailure(
@@ -293,58 +316,72 @@ void UploadJobImpl::OnGetTokenFailure(
   DCHECK_EQ(ACQUIRING_TOKEN, state_);
   DCHECK_EQ(access_token_request_.get(), request);
   access_token_request_.reset();
-  LOG(ERROR) << "Token request failed: " << error.ToString();
-  state_ = ERROR;
-  delegate_->OnFailure(AUTHENTICATION_ERROR);
+  CHROMEOS_SYSLOG(ERROR) << "Token request failed: " << error.ToString();
+  HandleError(AUTHENTICATION_ERROR);
+}
+
+void UploadJobImpl::HandleError(ErrorCode error_code) {
+  retry_++;
+  upload_fetcher_.reset();
+
+  CHROMEOS_SYSLOG(ERROR) << "Upload failed, error code: " << error_code;
+
+  if (retry_ >= kMaxAttempts) {
+    // Maximum number of attempts reached, failure.
+    CHROMEOS_SYSLOG(ERROR) << "Maximum number of attempts reached.";
+    access_token_.clear();
+    post_data_.reset();
+    state_ = ERROR;
+    delegate_->OnFailure(error_code);
+  } else {
+    if (error_code == AUTHENTICATION_ERROR) {
+      CHROMEOS_SYSLOG(ERROR) << "Retrying upload with a new token.";
+      // Request new token and retry.
+      OAuth2TokenService::ScopeSet scope_set;
+      scope_set.insert(GaiaConstants::kDeviceManagementServiceOAuth);
+      token_service_->InvalidateAccessToken(account_id_, scope_set,
+                                            access_token_);
+      access_token_.clear();
+      task_runner_->PostDelayedTask(
+          FROM_HERE, base::Bind(&UploadJobImpl::RequestAccessToken,
+                                weak_factory_.GetWeakPtr()),
+          base::TimeDelta::FromMilliseconds(g_retry_delay_ms));
+    } else {
+      // Retry without a new token.
+      state_ = ACQUIRING_TOKEN;
+      CHROMEOS_SYSLOG(WARNING) << "Retrying upload with the same token.";
+      task_runner_->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&UploadJobImpl::StartUpload, weak_factory_.GetWeakPtr()),
+          base::TimeDelta::FromMilliseconds(g_retry_delay_ms));
+    }
+  }
 }
 
 void UploadJobImpl::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK_EQ(upload_fetcher_.get(), source);
+  DCHECK_EQ(UPLOADING, state_);
   const net::URLRequestStatus& status = source->GetStatus();
   if (!status.is_success()) {
-    LOG(ERROR) << "URLRequestStatus error " << status.error();
-    upload_fetcher_.reset();
-    state_ = ERROR;
-    post_data_.reset();
-    delegate_->OnFailure(NETWORK_ERROR);
-    return;
-  }
-
-  const int response_code = source->GetResponseCode();
-  const bool success = response_code == net::HTTP_OK;
-  if (!success)
-    LOG(ERROR) << "POST request failed with HTTP status code " << response_code;
-
-  if (response_code == net::HTTP_UNAUTHORIZED) {
-    if (retry_ >= kMaxRetries) {
-      upload_fetcher_.reset();
-      LOG(ERROR) << "Unauthorized request.";
-      state_ = ERROR;
-      post_data_.reset();
-      delegate_->OnFailure(AUTHENTICATION_ERROR);
-      return;
-    }
-    retry_++;
-    upload_fetcher_.reset();
-    OAuth2TokenService::ScopeSet scope_set;
-    scope_set.insert(GaiaConstants::kDeviceManagementServiceOAuth);
-    token_service_->InvalidateAccessToken(account_id_, scope_set,
-                                          access_token_);
-    access_token_.clear();
-    RequestAccessToken();
-    return;
-  }
-
-  upload_fetcher_.reset();
-  access_token_.clear();
-  upload_fetcher_.reset();
-  post_data_.reset();
-  if (success) {
-    state_ = SUCCESS;
-    delegate_->OnSuccess();
+    CHROMEOS_SYSLOG(ERROR) << "URLRequestStatus error " << status.error();
+    HandleError(NETWORK_ERROR);
   } else {
-    state_ = ERROR;
-    delegate_->OnFailure(SERVER_ERROR);
+    const int response_code = source->GetResponseCode();
+    if (response_code == net::HTTP_OK) {
+      // Successful upload
+      upload_fetcher_.reset();
+      access_token_.clear();
+      post_data_.reset();
+      state_ = SUCCESS;
+      delegate_->OnSuccess();
+    } else if (response_code == net::HTTP_UNAUTHORIZED) {
+      CHROMEOS_SYSLOG(ERROR) << "Unauthorized request.";
+      HandleError(AUTHENTICATION_ERROR);
+    } else {
+      CHROMEOS_SYSLOG(ERROR) << "POST request failed with HTTP status code "
+                             << response_code << ".";
+      HandleError(SERVER_ERROR);
+    }
   }
 }
 

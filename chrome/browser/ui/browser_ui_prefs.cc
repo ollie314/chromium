@@ -19,6 +19,18 @@
 #include "base/win/windows_version.h"
 #endif
 
+namespace {
+
+uint32_t GetHomeButtonAndHomePageIsNewTabPageFlags() {
+#if defined(OS_IOS) || defined(OS_ANDROID)
+  return PrefRegistry::NO_REGISTRATION_FLAGS;
+#else
+  return user_prefs::PrefRegistrySyncable::SYNCABLE_PREF;
+#endif
+}
+
+}  // namespace
+
 namespace chrome {
 
 void RegisterBrowserPrefs(PrefRegistrySimple* registry) {
@@ -32,46 +44,10 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
       prefs::kHomePageIsNewTabPage,
       true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kShowHomeButton,
-      false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kDeleteBrowsingHistory,
-      true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kDeleteDownloadHistory,
-      true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kDeleteCache,
-      true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kDeleteCookies,
-      true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kDeletePasswords,
-      false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kDeleteFormData,
-      false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kDeleteHostedAppsData,
-      false,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterIntegerPref(
-      prefs::kDeleteTimePeriod,
-      0,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterIntegerPref(
-      prefs::kClearBrowsingDataHistoryNoticeShownTimes, 0);
-  registry->RegisterInt64Pref(prefs::kLastClearBrowsingDataTime, 0);
+      GetHomeButtonAndHomePageIsNewTabPageFlags());
+  registry->RegisterBooleanPref(prefs::kShowHomeButton, false,
+                                GetHomeButtonAndHomePageIsNewTabPageFlags());
+
   registry->RegisterIntegerPref(prefs::kModuleConflictBubbleShown, 0);
   registry->RegisterInt64Pref(prefs::kDefaultBrowserLastDeclined, 0);
   bool reset_check_default = false;
@@ -110,6 +86,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kWebRTCNonProxiedUdpEnabled, true);
   registry->RegisterStringPref(prefs::kWebRTCIPHandlingPolicy,
                                content::kWebRTCIPHandlingDefault);
+  registry->RegisterStringPref(prefs::kWebRTCUDPPortRange, std::string());
 #endif
 
   // Dictionaries to keep track of default tasks in the file browser.

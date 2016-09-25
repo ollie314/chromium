@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -15,6 +15,8 @@ static void GL_BINDING_CALL Mock_glBeginQuery(GLenum target, GLuint id);
 static void GL_BINDING_CALL Mock_glBeginQueryARB(GLenum target, GLuint id);
 static void GL_BINDING_CALL Mock_glBeginQueryEXT(GLenum target, GLuint id);
 static void GL_BINDING_CALL Mock_glBeginTransformFeedback(GLenum primitiveMode);
+static void GL_BINDING_CALL
+Mock_glBeginTransformFeedbackEXT(GLenum primitiveMode);
 static void GL_BINDING_CALL Mock_glBindAttribLocation(GLuint program,
                                                       GLuint index,
                                                       const char* name);
@@ -22,11 +24,19 @@ static void GL_BINDING_CALL Mock_glBindBuffer(GLenum target, GLuint buffer);
 static void GL_BINDING_CALL Mock_glBindBufferBase(GLenum target,
                                                   GLuint index,
                                                   GLuint buffer);
+static void GL_BINDING_CALL Mock_glBindBufferBaseEXT(GLenum target,
+                                                     GLuint index,
+                                                     GLuint buffer);
 static void GL_BINDING_CALL Mock_glBindBufferRange(GLenum target,
                                                    GLuint index,
                                                    GLuint buffer,
                                                    GLintptr offset,
                                                    GLsizeiptr size);
+static void GL_BINDING_CALL Mock_glBindBufferRangeEXT(GLenum target,
+                                                      GLuint index,
+                                                      GLuint buffer,
+                                                      GLintptr offset,
+                                                      GLsizeiptr size);
 static void GL_BINDING_CALL Mock_glBindFragDataLocation(GLuint program,
                                                         GLuint colorNumber,
                                                         const char* name);
@@ -69,6 +79,10 @@ static void GL_BINDING_CALL Mock_glBindSampler(GLuint unit, GLuint sampler);
 static void GL_BINDING_CALL Mock_glBindTexture(GLenum target, GLuint texture);
 static void GL_BINDING_CALL Mock_glBindTransformFeedback(GLenum target,
                                                          GLuint id);
+static void GL_BINDING_CALL
+Mock_glBindUniformLocationCHROMIUM(GLuint program,
+                                   GLint location,
+                                   const char* name);
 static void GL_BINDING_CALL Mock_glBindVertexArray(GLuint array);
 static void GL_BINDING_CALL Mock_glBindVertexArrayAPPLE(GLuint array);
 static void GL_BINDING_CALL Mock_glBindVertexArrayOES(GLuint array);
@@ -155,6 +169,8 @@ static void GL_BINDING_CALL Mock_glColorMask(GLboolean red,
                                              GLboolean blue,
                                              GLboolean alpha);
 static void GL_BINDING_CALL Mock_glCompileShader(GLuint shader);
+static void GL_BINDING_CALL
+Mock_glCompressedCopyTextureCHROMIUM(GLuint sourceId, GLuint destId);
 static void GL_BINDING_CALL Mock_glCompressedTexImage2D(GLenum target,
                                                         GLint level,
                                                         GLenum internalformat,
@@ -197,6 +213,18 @@ static void GL_BINDING_CALL Mock_glCopyBufferSubData(GLenum readTarget,
                                                      GLintptr readOffset,
                                                      GLintptr writeOffset,
                                                      GLsizeiptr size);
+static void GL_BINDING_CALL
+Mock_glCopySubTextureCHROMIUM(GLuint sourceId,
+                              GLuint destId,
+                              GLint xoffset,
+                              GLint yoffset,
+                              GLint x,
+                              GLint y,
+                              GLsizei width,
+                              GLsizei height,
+                              GLboolean unpackFlipY,
+                              GLboolean unpackPremultiplyAlpha,
+                              GLboolean unpackUnmultiplyAlpha);
 static void GL_BINDING_CALL Mock_glCopyTexImage2D(GLenum target,
                                                   GLint level,
                                                   GLenum internalformat,
@@ -222,6 +250,14 @@ static void GL_BINDING_CALL Mock_glCopyTexSubImage3D(GLenum target,
                                                      GLint y,
                                                      GLsizei width,
                                                      GLsizei height);
+static void GL_BINDING_CALL
+Mock_glCopyTextureCHROMIUM(GLuint sourceId,
+                           GLuint destId,
+                           GLint internalFormat,
+                           GLenum destType,
+                           GLboolean unpackFlipY,
+                           GLboolean unpackPremultiplyAlpha,
+                           GLboolean unpackUnmultiplyAlpha);
 static void GL_BINDING_CALL
 Mock_glCoverFillPathInstancedNV(GLsizei numPaths,
                                 GLenum pathNameType,
@@ -349,6 +385,7 @@ static void GL_BINDING_CALL Mock_glEndQuery(GLenum target);
 static void GL_BINDING_CALL Mock_glEndQueryARB(GLenum target);
 static void GL_BINDING_CALL Mock_glEndQueryEXT(GLenum target);
 static void GL_BINDING_CALL Mock_glEndTransformFeedback(void);
+static void GL_BINDING_CALL Mock_glEndTransformFeedbackEXT(void);
 static GLsync GL_BINDING_CALL Mock_glFenceSync(GLenum condition,
                                                GLbitfield flags);
 static void GL_BINDING_CALL Mock_glFinish(void);
@@ -640,6 +677,14 @@ static void GL_BINDING_CALL Mock_glGetTransformFeedbackVarying(GLuint program,
                                                                GLsizei* size,
                                                                GLenum* type,
                                                                char* name);
+static void GL_BINDING_CALL
+Mock_glGetTransformFeedbackVaryingEXT(GLuint program,
+                                      GLuint index,
+                                      GLsizei bufSize,
+                                      GLsizei* length,
+                                      GLsizei* size,
+                                      GLenum* type,
+                                      char* name);
 static void GL_BINDING_CALL
 Mock_glGetTranslatedShaderSourceANGLE(GLuint shader,
                                       GLsizei bufsize,
@@ -982,6 +1027,11 @@ Mock_glTransformFeedbackVaryings(GLuint program,
                                  GLsizei count,
                                  const char* const* varyings,
                                  GLenum bufferMode);
+static void GL_BINDING_CALL
+Mock_glTransformFeedbackVaryingsEXT(GLuint program,
+                                    GLsizei count,
+                                    const char* const* varyings,
+                                    GLenum bufferMode);
 static void GL_BINDING_CALL Mock_glUniform1f(GLint location, GLfloat x);
 static void GL_BINDING_CALL Mock_glUniform1fv(GLint location,
                                               GLsizei count,

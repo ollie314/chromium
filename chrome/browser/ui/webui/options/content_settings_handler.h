@@ -25,7 +25,12 @@
 #include "content/public/browser/notification_registrar.h"
 
 class HostContentSettingsMap;
+class Profile;
 class ProtocolHandlerRegistry;
+
+namespace site_settings {
+struct ChooserTypeNameEntry;
+}
 
 namespace options {
 
@@ -34,8 +39,6 @@ class ContentSettingsHandler : public OptionsPageUIHandler,
                                public content::NotificationObserver,
                                public PepperFlashSettingsManager::Client {
  public:
-  struct ChooserTypeNameEntry;
-
   ContentSettingsHandler();
   ~ContentSettingsHandler() override;
 
@@ -62,9 +65,6 @@ class ContentSettingsHandler : public OptionsPageUIHandler,
       bool success,
       PP_Flash_BrowserOperations_Permission default_permission,
       const ppapi::FlashSiteSettings& sites) override;
-
-  // Gets a string identifier for the group name, for use in HTML.
-  static std::string ContentSettingsTypeToGroupName(ContentSettingsType type);
 
  private:
   // Used to determine whether we should show links to Flash camera and
@@ -163,11 +163,11 @@ class ContentSettingsHandler : public OptionsPageUIHandler,
   // Clobbers and rebuilds the exception table for a particular chooser-based
   // permission.
   void UpdateChooserExceptionsViewFromModel(
-      const ChooserTypeNameEntry& chooser_type);
+      const site_settings::ChooserTypeNameEntry& chooser_type);
 
   // As above, but only OTR tables.
   void UpdateOTRChooserExceptionsViewFromModel(
-      const ChooserTypeNameEntry& chooser_type);
+      const site_settings::ChooserTypeNameEntry& chooser_type);
 
   // Modifies the zoom level exceptions list to display correct chrome
   // signin page entry. When the legacy (non-WebView-based) signin page
@@ -209,8 +209,9 @@ class ContentSettingsHandler : public OptionsPageUIHandler,
 
   // Removes one exception for a chooser-based permission. |args| contains the
   // parameters passed to RemoveException().
-  void RemoveChooserException(const ChooserTypeNameEntry* chooser_type,
-                              const base::ListValue* args);
+  void RemoveChooserException(
+      const site_settings::ChooserTypeNameEntry* chooser_type,
+      const base::ListValue* args);
 
   // Callbacks used by the page ------------------------------------------------
 
@@ -238,22 +239,17 @@ class ContentSettingsHandler : public OptionsPageUIHandler,
   void ApplyWhitelist(ContentSettingsType content_type,
                       ContentSetting default_setting);
 
-  // Gets the HostContentSettingsMap for the normal profile.
-  HostContentSettingsMap* GetContentSettingsMap();
+  // Gets the normal profile.
+  Profile* GetProfile();
 
-  // Gets the HostContentSettingsMap for the incognito profile, or NULL if there
-  // is no active incognito session.
-  HostContentSettingsMap* GetOTRContentSettingsMap();
+  // Gets the incognito profile, or nullptr if there is no active incognito
+  // session.
+  Profile* GetOTRProfile();
 
   // Gets the ProtocolHandlerRegistry for the normal profile.
   ProtocolHandlerRegistry* GetProtocolHandlerRegistry();
 
   void RefreshFlashMediaSettings();
-
-  // Fills in |exceptions| with Values for the given |type| from |map|.
-  void GetChooserExceptionsFromProfile(bool incognito,
-                                       const ChooserTypeNameEntry& type,
-                                       base::ListValue* exceptions);
 
   void OnPepperFlashPrefChanged();
 

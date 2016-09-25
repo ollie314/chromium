@@ -110,13 +110,10 @@
 #include "chrome/browser/apps/app_launch_for_metro_restart_win.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/shell_integration_win.h"
-#include "components/search_engines/desktop_search_redirection_infobar_delegate.h"
-#include "components/search_engines/template_url.h"
-#include "components/search_engines/template_url_service.h"
 #endif
 
 #if defined(ENABLE_RLZ)
-#include "components/rlz/rlz_tracker.h"
+#include "components/rlz/rlz_tracker.h"  // nogncheck
 #endif
 
 using content::ChildProcessSecurityPolicy;
@@ -326,9 +323,9 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
     // specially here, otherwise it will be handled below.
     if (extension) {
       RecordCmdLineAppHistogram(extensions::Manifest::TYPE_PLATFORM_APP);
-      AppLaunchParams params(profile, extension,
-                             extensions::LAUNCH_CONTAINER_NONE, NEW_WINDOW,
-                             extensions::SOURCE_COMMAND_LINE);
+      AppLaunchParams params(
+          profile, extension, extensions::LAUNCH_CONTAINER_NONE,
+          WindowOpenDisposition::NEW_WINDOW, extensions::SOURCE_COMMAND_LINE);
       params.command_line = command_line_;
       params.current_directory = cur_dir_;
       ::OpenApplicationWithReenablePrompt(params);
@@ -429,7 +426,8 @@ bool StartupBrowserCreatorImpl::OpenApplicationTab(Profile* profile) {
 
   WebContents* app_tab = ::OpenApplication(
       AppLaunchParams(profile, extension, extensions::LAUNCH_CONTAINER_TAB,
-                      NEW_FOREGROUND_TAB, extensions::SOURCE_COMMAND_LINE));
+                      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                      extensions::SOURCE_COMMAND_LINE));
   return (app_tab != NULL);
 }
 
@@ -457,7 +455,8 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(Profile* profile) {
 
     RecordCmdLineAppHistogram(extension->GetType());
 
-    AppLaunchParams params(profile, extension, launch_container, NEW_WINDOW,
+    AppLaunchParams params(profile, extension, launch_container,
+                           WindowOpenDisposition::NEW_WINDOW,
                            extensions::SOURCE_COMMAND_LINE);
     params.command_line = command_line_;
     params.current_directory = cur_dir_;
@@ -589,7 +588,9 @@ bool StartupBrowserCreatorImpl::ProcessStartupURLs(
         StartupBrowserCreator::WasRestarted()));
   }
 
-  if (pref.type == SessionStartupPref::LAST) {
+  // Only activate the session restore logic if it is not the first run. It
+  // makes really no sense to "restore" missing session.
+  if (pref.type == SessionStartupPref::LAST && !is_first_run_) {
     if (profile_->GetLastSessionExitType() == Profile::EXIT_CRASHED &&
         !command_line_.HasSwitch(switches::kRestoreLastSession)) {
       // The last session crashed. It's possible automatically loading the
@@ -756,7 +757,8 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
 
     chrome::NavigateParams params(browser, tabs[i].url,
                                   ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
-    params.disposition = first_tab ? NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB;
+    params.disposition = first_tab ? WindowOpenDisposition::NEW_FOREGROUND_TAB
+                                   : WindowOpenDisposition::NEW_BACKGROUND_TAB;
     params.tabstrip_add_types = add_types;
 
 #if defined(ENABLE_RLZ)
@@ -822,21 +824,6 @@ void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
       }
     }
 #endif
-
-#if defined(OS_WIN)
-    if (browser_creator_ &&
-        browser_creator_->show_desktop_search_redirection_infobar()) {
-      DesktopSearchRedirectionInfobarDelegate::Show(
-          InfoBarService::FromWebContents(
-              browser->tab_strip_model()->GetActiveWebContents()),
-          TemplateURLServiceFactory::GetForProfile(profile_)
-              ->GetDefaultSearchProvider()
-              ->AdjustedShortNameForLocaleDirection(),
-          base::Bind(&chrome::ShowSettingsSubPage, base::Unretained(browser),
-                     chrome::kSearchEnginesSubPage),
-          profile_->GetPrefs());
-    }
-#endif  // defined(OS_WIN)
   }
 }
 

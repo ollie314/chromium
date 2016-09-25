@@ -9,14 +9,16 @@
 
 #include <list>
 #include <memory>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -43,13 +45,14 @@ struct SimpleIndexLoadResult;
 class NET_EXPORT_PRIVATE EntryMetadata {
  public:
   EntryMetadata();
-  EntryMetadata(base::Time last_used_time, uint64_t entry_size);
+  EntryMetadata(base::Time last_used_time,
+                base::StrictNumeric<uint32_t> entry_size);
 
   base::Time GetLastUsedTime() const;
   void SetLastUsedTime(const base::Time& last_used_time);
 
-  uint64_t GetEntrySize() const;
-  void SetEntrySize(uint64_t entry_size);
+  uint32_t GetEntrySize() const;
+  void SetEntrySize(base::StrictNumeric<uint32_t> entry_size);
 
   // Serialize the data into the provided pickle.
   void Serialize(base::Pickle* pickle) const;
@@ -70,7 +73,7 @@ class NET_EXPORT_PRIVATE EntryMetadata {
   // are originally calculated as >32-bit types, the actual necessary size for
   // each shouldn't exceed 32 bits, so we use 32-bit types here.
   uint32_t last_used_time_seconds_since_epoch_;
-  int32_t entry_size_;  // Storage size in bytes.
+  uint32_t entry_size_;  // Storage size in bytes.
 };
 static_assert(sizeof(EntryMetadata) == 8, "incorrect metadata size");
 
@@ -84,6 +87,14 @@ class NET_EXPORT_PRIVATE SimpleIndex
     INITIALIZE_METHOD_LOADED = 1,
     INITIALIZE_METHOD_NEWCACHE = 2,
     INITIALIZE_METHOD_MAX = 3,
+  };
+  // Used in histograms. Please only add entries at the end.
+  enum IndexWriteToDiskReason {
+    INDEX_WRITE_REASON_SHUTDOWN = 0,
+    INDEX_WRITE_REASON_STARTUP_MERGE = 1,
+    INDEX_WRITE_REASON_IDLE = 2,
+    INDEX_WRITE_REASON_ANDROID_STOPPED = 3,
+    INDEX_WRITE_REASON_MAX = 4,
   };
 
   typedef std::vector<uint64_t> HashList;
@@ -110,14 +121,15 @@ class NET_EXPORT_PRIVATE SimpleIndex
   // iff the entry exist in the index.
   bool UseIfExists(uint64_t entry_hash);
 
-  void WriteToDisk();
+  void WriteToDisk(IndexWriteToDiskReason reason);
 
   // Update the size (in bytes) of an entry, in the metadata stored in the
   // index. This should be the total disk-file size including all streams of the
   // entry.
-  bool UpdateEntrySize(uint64_t entry_hash, int64_t entry_size);
+  bool UpdateEntrySize(uint64_t entry_hash,
+                       base::StrictNumeric<uint32_t> entry_size);
 
-  typedef base::hash_map<uint64_t, EntryMetadata> EntrySet;
+  using EntrySet = std::unordered_map<uint64_t, EntryMetadata>;
 
   static void InsertInEntrySet(uint64_t entry_hash,
                                const EntryMetadata& entry_metadata,
@@ -160,7 +172,8 @@ class NET_EXPORT_PRIVATE SimpleIndex
 
   void PostponeWritingToDisk();
 
-  void UpdateEntryIteratorSize(EntrySet::iterator* it, int64_t entry_size);
+  void UpdateEntryIteratorSize(EntrySet::iterator* it,
+                               base::StrictNumeric<uint32_t> entry_size);
 
   // Must run on IO Thread.
   void MergeInitializingSet(std::unique_ptr<SimpleIndexLoadResult> load_result);
@@ -187,7 +200,7 @@ class NET_EXPORT_PRIVATE SimpleIndex
 
   // This stores all the entry_hash of entries that are removed during
   // initialization.
-  base::hash_set<uint64_t> removed_entries_;
+  std::unordered_set<uint64_t> removed_entries_;
   bool initialized_;
   IndexInitMethod init_method_;
 

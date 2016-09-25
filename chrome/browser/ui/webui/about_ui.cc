@@ -23,6 +23,7 @@
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/statistics_recorder.h"
+#include "base/process/process_metrics.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -43,9 +44,11 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
+#include "components/grit/components_resources.h"
 #include "components/strings/grit/components_locale_settings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -55,14 +58,13 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/process_type.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "grit/browser_resources.h"
-#include "grit/components_resources.h"
 #include "net/base/escape.h"
 #include "net/base/filename_util.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
+#include "third_party/brotli/dec/decode.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
@@ -79,7 +81,7 @@
 #endif
 
 #if defined(OS_WIN)
-#include "chrome/browser/enumerate_modules_model_win.h"
+#include "chrome/browser/win/enumerate_modules_model.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -744,8 +746,7 @@ std::string AboutUIHTMLSource::GetSource() const {
 
 void AboutUIHTMLSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   std::string response;
   // Add your data source here, in alphabetical order.
@@ -760,8 +761,25 @@ void AboutUIHTMLSource::StartDataRequest(
       idr = IDR_KEYBOARD_UTILS_JS;
 #endif
 
-    response = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        idr).as_string();
+    base::StringPiece raw_response =
+        ResourceBundle::GetSharedInstance().GetRawDataResource(idr);
+    if (idr == IDR_ABOUT_UI_CREDITS_HTML) {
+      size_t decoded_size;
+      const uint8_t* encoded_response_buffer =
+          reinterpret_cast<const uint8_t*>(raw_response.data());
+      CHECK(BrotliDecompressedSize(raw_response.size(), encoded_response_buffer,
+                                   &decoded_size));
+
+      // Resizing the response and using it as the buffer Brotli decompresses
+      // into.
+      response.resize(decoded_size);
+      CHECK(BrotliDecompressBuffer(raw_response.size(), encoded_response_buffer,
+                                   &decoded_size,
+                                   reinterpret_cast<uint8_t*>(&response[0])) ==
+            BROTLI_RESULT_SUCCESS);
+    } else {
+      response = raw_response.as_string();
+    }
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
   } else if (source_name_ == chrome::kChromeUIDiscardsHost) {
     response = AboutDiscards(path);

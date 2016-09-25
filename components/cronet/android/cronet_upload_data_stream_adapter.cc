@@ -12,9 +12,11 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/cronet/android/cronet_url_request_adapter.h"
 #include "jni/CronetUploadDataStream_jni.h"
+
+using base::android::JavaParamRef;
 
 namespace cronet {
 
@@ -50,7 +52,7 @@ void CronetUploadDataStreamAdapter::Read(net::IOBuffer* buffer, int buf_len) {
   JNIEnv* env = base::android::AttachCurrentThread();
   base::android::ScopedJavaLocalRef<jobject> java_buffer(
       env, env->NewDirectByteBuffer(buffer->data(), buf_len));
-  Java_CronetUploadDataStream_readData(env, jupload_data_stream_.obj(),
+  Java_CronetUploadDataStream_readData(env, jupload_data_stream_,
                                        java_buffer.obj());
 }
 
@@ -59,7 +61,7 @@ void CronetUploadDataStreamAdapter::Rewind() {
   DCHECK(network_task_runner_->BelongsToCurrentThread());
 
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_CronetUploadDataStream_rewind(env, jupload_data_stream_.obj());
+  Java_CronetUploadDataStream_rewind(env, jupload_data_stream_);
 }
 
 void CronetUploadDataStreamAdapter::OnUploadDataStreamDestroyed() {
@@ -69,8 +71,8 @@ void CronetUploadDataStreamAdapter::OnUploadDataStreamDestroyed() {
          network_task_runner_->BelongsToCurrentThread());
 
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_CronetUploadDataStream_onUploadDataStreamDestroyed(
-      env, jupload_data_stream_.obj());
+  Java_CronetUploadDataStream_onUploadDataStreamDestroyed(env,
+                                                          jupload_data_stream_);
   // |this| is invalid here since the Java call above effectively destroys it.
 }
 
@@ -79,7 +81,6 @@ void CronetUploadDataStreamAdapter::OnReadSucceeded(
     const JavaParamRef<jobject>& jcaller,
     int bytes_read,
     bool final_chunk) {
-  DCHECK(!network_task_runner_->BelongsToCurrentThread());
   DCHECK(bytes_read > 0 || (final_chunk && bytes_read == 0));
 
   buffer_ = nullptr;
@@ -91,7 +92,6 @@ void CronetUploadDataStreamAdapter::OnReadSucceeded(
 void CronetUploadDataStreamAdapter::OnRewindSucceeded(
     JNIEnv* env,
     const JavaParamRef<jobject>& jcaller) {
-  DCHECK(!network_task_runner_->BelongsToCurrentThread());
 
   network_task_runner_->PostTask(
       FROM_HERE,
@@ -120,7 +120,7 @@ static jlong AttachUploadDataToRequest(
   CronetUploadDataStreamAdapter* adapter =
       new CronetUploadDataStreamAdapter(env, jupload_data_stream);
 
-  scoped_ptr<CronetUploadDataStream> upload_data_stream(
+  std::unique_ptr<CronetUploadDataStream> upload_data_stream(
       new CronetUploadDataStream(adapter, jlength));
 
   request_adapter->SetUpload(std::move(upload_data_stream));

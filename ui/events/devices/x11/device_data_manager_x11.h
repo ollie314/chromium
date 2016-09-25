@@ -24,13 +24,12 @@
 #include "base/event_types.h"
 #include "base/macros.h"
 #include "ui/events/devices/device_data_manager.h"
-#include "ui/events/devices/events_devices_export.h"
+#include "ui/events/devices/x11/events_devices_x11_export.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/x/x11_atom_cache.h"
-
-typedef union _XEvent XEvent;
+#include "ui/gfx/x/x11_types.h"
 
 namespace ui {
 
@@ -49,7 +48,8 @@ enum ScrollType {
 
 // A class that extracts and tracks the input events data. It currently handles
 // mouse, touchpad and touchscreen devices.
-class EVENTS_DEVICES_EXPORT DeviceDataManagerX11 : public DeviceDataManager {
+class EVENTS_DEVICES_X11_EXPORT DeviceDataManagerX11
+    : public DeviceDataManager {
  public:
   // Enumerate additional data that one might be interested on an input event,
   // which are usually wrapped in X valuators. If you modify any of this,
@@ -107,6 +107,10 @@ class EVENTS_DEVICES_EXPORT DeviceDataManagerX11 : public DeviceDataManager {
 
     DT_LAST_ENTRY  // This must come last.
   };
+
+  // A Device ID number that can be passed to InvalidateScrollClasses that
+  // invalidates all devices.
+  static const int kAllDevices = -1;
 
   // Data struct to store extracted data from an input event.
   typedef std::map<int, double> EventData;
@@ -199,8 +203,9 @@ class EVENTS_DEVICES_EXPORT DeviceDataManagerX11 : public DeviceDataManager {
                              double* y_offset);
 
   // Invalidate stored scroll class counters, since they can change when
-  // pointing at other windows.
-  void InvalidateScrollClasses();
+  // pointing at other windows. If kAllDevices is specified, all devices are
+  // invalidated.
+  void InvalidateScrollClasses(int device_id);
 
   // Extract data from a fling event. User must first verify the event type
   // with IsFlingEvent. Pointers shouldn't be NULL.
@@ -276,7 +281,7 @@ class EVENTS_DEVICES_EXPORT DeviceDataManagerX11 : public DeviceDataManager {
  protected:
   // DeviceHotplugEventObserver:
   void OnKeyboardDevicesUpdated(
-      const std::vector<KeyboardDevice>& devices) override;
+      const std::vector<InputDevice>& devices) override;
 
  private:
   // Information about scroll valuators
@@ -358,6 +363,9 @@ class EVENTS_DEVICES_EXPORT DeviceDataManagerX11 : public DeviceDataManager {
   // by valuator_lookup_[device_id][data_type].
   std::vector<int> valuator_lookup_[kMaxDeviceNum];
 
+  // Indicates if the user has disabled high precision scrolling support.
+  bool high_precision_scrolling_disabled_;
+
   // Index table to find the horizontal and vertical scroll valuator
   // numbers, scroll increments and scroll position.
   ScrollInfo scroll_data_[kMaxDeviceNum];
@@ -382,7 +390,7 @@ class EVENTS_DEVICES_EXPORT DeviceDataManagerX11 : public DeviceDataManager {
 
   // Map that stores meta-data for blocked keyboards. This is needed to restore
   // devices when they are re-enabled.
-  std::map<int, ui::KeyboardDevice> blocked_keyboards_;
+  std::map<int, ui::InputDevice> blocked_keyboard_devices_;
 
   // X11 atoms cache.
   X11AtomCache atom_cache_;

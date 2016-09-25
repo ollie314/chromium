@@ -6,9 +6,13 @@
  * @fileoverview 'create-profile' is a page that contains controls for creating
  * a (optionally supervised) profile, including choosing a name, and an avatar.
  */
+
+/** @typedef {{url: string, label:string}} */
+var AvatarIcon;
+
 (function() {
 /**
- * It means the sentinel menu item is selected.
+ * Sentinel signed-in user's index value.
  * @const {number}
  */
 var NO_USER_SELECTED = -1;
@@ -32,10 +36,10 @@ Polymer({
     },
 
     /**
-     * The list of available profile icon URLs.
-     * @private {!Array<string>}
+     * The list of available profile icon Urls and labels.
+     * @private {!Array<!AvatarIcon>}
      */
-    availableIconUrls_: {
+    availableIcons_: {
       type: Array,
       value: function() { return []; }
     },
@@ -50,10 +54,28 @@ Polymer({
     },
 
     /**
+     * True if the existing supervised users are being loaded.
+     * @private {boolean}
+     */
+    loadingSupervisedUsers_: {
+      type: Boolean,
+      value: false
+    },
+
+    /**
      * True if a profile is being created or imported.
      * @private {boolean}
      */
     createInProgress_: {
+      type: Boolean,
+      value: false
+    },
+
+    /**
+     * True if the error/warning message is displaying.
+     * @private {boolean}
+     */
+    isMessageVisble_: {
       type: Boolean,
       value: false
     },
@@ -98,6 +120,11 @@ Polymer({
     browserProxy_: Object
   },
 
+  listeners: {
+    'tap': 'onTap_',
+    'importUserPopup.import': 'onImportUserPopupImport_'
+  },
+
   /** @override */
   created: function() {
     this.browserProxy_ = signin.ProfileBrowserProxyImpl.getInstance();
@@ -120,24 +147,50 @@ Polymer({
 
     this.browserProxy_.getAvailableIcons();
     this.browserProxy_.getSignedInUsers();
+  },
 
-    // Alias on 'this' to use in html.
-    this.NO_USER_SELECTED = NO_USER_SELECTED;
+  /** @override */
+  attached: function() {
+    this.$.nameInput.focus();
+  },
+
+  /**
+   * Handles tap events from:
+   * - links within dynamic warning/error messages pushed from the browser.
+   * - the 'noSignedInUserMessage' i18n string.
+   * @param {!Event} event
+   * @private
+   */
+  onTap_: function(event) {
+    var element = Polymer.dom(event).rootTarget;
+
+    if (element.id == 'supervised-user-import-existing') {
+      this.onImportUserTap_(event);
+      event.preventDefault();
+    } else if (element.id == 'sign-in-to-chrome') {
+      this.browserProxy_.openUrlInLastActiveProfileBrowser(element.href);
+      event.preventDefault();
+    } else if (element.id == 'reauth') {
+      var elementData = /** @type {{userEmail: string}} */ (element.dataset);
+      this.browserProxy_.authenticateCustodian(elementData.userEmail);
+      this.hideMessage_();
+      event.preventDefault();
+    }
   },
 
   /**
    * Handler for when the profile icons are pushed from the browser.
-   * @param {!Array<string>} iconUrls
+   * @param {!Array<!AvatarIcon>} icons
    * @private
    */
-  handleProfileIcons_: function(iconUrls) {
-    this.availableIconUrls_ = iconUrls;
-    this.profileIconUrl_ = iconUrls[0];
+  handleProfileIcons_: function(icons) {
+    this.availableIcons_ = icons;
+    this.profileIconUrl_ = icons[0].url;
   },
 
   /**
    * Handler for when the profile defaults are pushed from the browser.
-   * @param {ProfileInfo} profileInfo Default Info for the new profile.
+   * @param {!ProfileInfo} profileInfo Default Info for the new profile.
    * @private
    */
   handleProfileDefaults_: function(profileInfo) {
@@ -172,27 +225,60 @@ Polymer({
   },
 
   /**
+   * Handler for the 'Import Supervised User' link tap event.
+   * @param {!Event} event
+   * @private
+   */
+  onImportUserTap_: function(event) {
+    if (this.signedInUserIndex_ == NO_USER_SELECTED) {
+      // A custodian must be selected.
+      this.handleMessage_(this.i18n('custodianAccountNotSelectedError'));
+    } else {
+      var signedInUser = this.signedInUser_(this.signedInUserIndex_);
+      this.hideMessage_();
+      this.loadingSupervisedUsers_ = true;
+      this.browserProxy_.getExistingSupervisedUsers(signedInUser.profilePath)
+          .then(this.showImportSupervisedUserPopup_.bind(this),
+                this.handleMessage_.bind(this));
+    }
+  },
+
+  /**
    * Handler for the 'Save' button tap event.
    * @param {!Event} event
    * @private
    */
   onSaveTap_: function(event) {
-    this.createInProgress_ = true;
-
     if (!this.isSupervised_) {
       // The new profile is not supervised. Go ahead and create it.
       this.createProfile_();
     } else if (this.signedInUserIndex_ == NO_USER_SELECTED) {
       // If the new profile is supervised, a custodian must be selected.
       this.handleMessage_(this.i18n('custodianAccountNotSelectedError'));
-      this.createInProgress_ = false;
     } else {
       var signedInUser = this.signedInUser_(this.signedInUserIndex_);
-      this.browserProxy_.getExistingSupervisedUsers(
-          signedInUser.profilePath).then(
-            this.createProfileIfValidSupervisedUser_.bind(this),
-            /** @param {*} error */
-            function(error) { this.handleMessage_(error); }.bind(this));
+      this.hideMessage_();
+      this.loadingSupervisedUsers_ = true;
+      this.browserProxy_.getExistingSupervisedUsers(signedInUser.profilePath)
+          .then(this.createProfileIfValidSupervisedUser_.bind(this),
+                this.handleMessage_.bind(this));
+    }
+  },
+
+  /**
+   * Displays the import supervised user popup or an error message if there are
+   * no existing supervised users.
+   * @param {!Array<!SupervisedUser>} supervisedUsers The list of existing
+   *     supervised users.
+   * @private
+   */
+  showImportSupervisedUserPopup_: function(supervisedUsers) {
+    this.loadingSupervisedUsers_ = false;
+    if (supervisedUsers.length > 0) {
+      this.$.importUserPopup.show(this.signedInUser_(this.signedInUserIndex_),
+                                  supervisedUsers);
+    } else {
+      this.handleMessage_(this.i18n('noSupervisedUserImportText'));
     }
   },
 
@@ -200,7 +286,7 @@ Polymer({
    * Checks if the entered name matches name of an existing supervised user.
    * If yes, the user is prompted to import the existing supervised user.
    * If no, the new supervised profile gets created.
-   * @param {Array<SupervisedUser>} supervisedUsers The list of existing
+   * @param {!Array<!SupervisedUser>} supervisedUsers The list of existing
    *     supervised users.
    * @private
    */
@@ -224,17 +310,36 @@ Polymer({
         }
       }
 
+      var opts = {
+        'substitutions':
+          [HTMLEscape(elide(this.profileName_, /* maxLength */ 50))],
+        'attrs': {
+          'id': function(node, value) {
+            return node.tagName == 'A';
+          },
+          'is': function(node, value) {
+            return node.tagName == 'A' && value == 'action-link';
+          },
+          'role': function(node, value) {
+            return node.tagName == 'A' && value == 'link';
+          },
+          'tabindex': function(node, value) {
+            return node.tagName == 'A';
+          }
+        }
+      };
+
       this.handleMessage_(allOnCurrentDevice ?
           this.i18n('managedProfilesExistingLocalSupervisedUser') :
-          this.i18n('manageProfilesExistingSupervisedUser',
-               HTMLEscape(elide(this.profileName_, /* maxLength */ 50))));
-
-      this.createInProgress_ = false;
+          this.i18nAdvanced('manageProfilesExistingSupervisedUser', opts));
       return;
     }
     // No existing supervised user's name matches the entered profile name.
     // Continue with creating the new supervised profile.
     this.createProfile_();
+    // Set this to false after createInProgress_ has been set to true in
+    // order for the 'Save' button to remain disabled.
+    this.loadingSupervisedUsers_ = false;
   },
 
   /**
@@ -247,10 +352,28 @@ Polymer({
       custodianProfilePath =
           this.signedInUser_(this.signedInUserIndex_).profilePath;
     }
-
+    this.hideMessage_();
+    this.createInProgress_ = true;
     this.browserProxy_.createProfile(
-        this.profileName_, this.profileIconUrl_, this.isSupervised_,
+        this.profileName_, this.profileIconUrl_, this.isSupervised_, '',
         custodianProfilePath);
+  },
+
+  /**
+   * Handler for the 'import' event fired by #importUserPopup once a supervised
+   * user is selected to be imported and the popup closes.
+   * @param {!{detail: {supervisedUser: !SupervisedUser,
+   *                    signedInUser: !SignedInUser}}} event
+   * @private
+   */
+  onImportUserPopupImport_: function(event) {
+    var supervisedUser = event.detail.supervisedUser;
+    var signedInUser = event.detail.signedInUser;
+    this.hideMessage_();
+    this.createInProgress_ = true;
+    this.browserProxy_.createProfile(
+        supervisedUser.name, supervisedUser.iconURL, true, supervisedUser.id,
+        signedInUser.profilePath);
   },
 
   /**
@@ -262,27 +385,12 @@ Polymer({
     if (this.createInProgress_) {
       this.createInProgress_ = false;
       this.browserProxy_.cancelCreateProfile();
+    } else if (this.loadingSupervisedUsers_) {
+      this.loadingSupervisedUsers_ = false;
+      this.browserProxy_.cancelLoadingSupervisedUsers();
     } else {
       this.fire('change-page', {page: 'user-pods-page'});
     }
-  },
-
-  /**
-   * Handler for when the user clicks a new profile icon.
-   * @param {!Event} event
-   * @private
-   */
-  onIconTap_: function(event) {
-    var element = Polymer.dom(event).rootTarget;
-
-    if (element.nodeName == 'IMG')
-      this.profileIconUrl_ = element.src;
-    else if (element.dataset && element.dataset.iconUrl)
-      this.profileIconUrl_ = element.dataset.iconUrl;
-
-    // Button toggle state is controlled by the selected icon URL. Prevent
-    // tap events from changing the toggle state.
-    event.preventDefault();
   },
 
   /**
@@ -292,23 +400,51 @@ Polymer({
    */
   handleSuccess_: function(profileInfo) {
     this.createInProgress_ = false;
-    this.fire('change-page', {page: 'user-pods-page'});
+    if (profileInfo.showConfirmation) {
+      this.fire('change-page', {page: 'supervised-create-confirm-page',
+                                data: profileInfo});
+    } else {
+      this.fire('change-page', {page: 'user-pods-page'});
+    }
   },
 
   /**
-   * Handles profile create/import warning/error message pushed by the browser.
-   * @param {string} message An HTML warning/error message.
+   * Hides the warning/error message.
+   * @private
+   */
+  hideMessage_: function() {
+    this.isMessageVisble_ = false;
+  },
+
+  /**
+   * Handles warning/error messages when a profile is being created/imported
+   * or the existing supervised users are being loaded.
+   * @param {*} message An HTML warning/error message.
    * @private
    */
   handleMessage_: function(message) {
     this.createInProgress_ = false;
-    this.message_ = message;
+    this.loadingSupervisedUsers_ = false;
+    this.message_ = '' + message;
+    this.isMessageVisble_ = true;
+  },
 
-    // TODO(mahmadi): attach handler to '#supervised-user-import-existing'
-    // in order to import supervised user with the given name.
+  /**
+   * Returns a translated message that contains link elements with the 'id'
+   * attribute.
+   * @param {string} id The ID of the string to translate.
+   * @private
+   */
+  i18nAllowIDAttr_: function(id) {
+    var opts = {
+      'attrs': {
+        'id' : function(node, value) {
+          return node.tagName == 'A';
+        }
+      }
+    };
 
-    // TODO(mahmadi): attach handler to '#reauth' in order to re-authenticate
-    // custodian.
+    return this.i18nAdvanced(id, opts);
   },
 
   /**
@@ -323,18 +459,49 @@ Polymer({
   },
 
   /**
+   * Computed binding determining whether the paper-spinner is active.
+   * @param {boolean} createInProgress Is create in progress?
+   * @param {boolean} loadingSupervisedUsers Are supervised users being loaded?
+   * @return {boolean}
+   * @private
+   */
+  isSpinnerActive_: function(createInProgress, loadingSupervisedUsers) {
+    return createInProgress || loadingSupervisedUsers;
+  },
+
+  /**
    * Computed binding determining whether 'Save' button is disabled.
    * @param {boolean} createInProgress Is create in progress?
+   * @param {boolean} loadingSupervisedUsers Are supervised users being loaded?
    * @param {string} profileName Profile Name.
    * @return {boolean}
    * @private
    */
-  isSaveDisabled_: function(createInProgress, profileName) {
+  isSaveDisabled_: function(createInProgress,
+                            loadingSupervisedUsers,
+                            profileName) {
     // TODO(mahmadi): Figure out a way to add 'paper-input-extracted' as a
     // dependency and cast to PaperInputElement instead.
     /** @type {{validate: function():boolean}} */
     var nameInput = this.$.nameInput;
-    return createInProgress || !profileName || !nameInput.validate();
+    return createInProgress || loadingSupervisedUsers || !profileName ||
+           !nameInput.validate();
+  },
+
+  /**
+   * Returns True if the import existing supervised user link should be hidden.
+   * @param {boolean} createInProgress True if create/import is in progress.
+   * @param {boolean} loadingSupervisedUsers True if supervised users are being
+   *     loaded.
+   * @param {number} signedInUserIndex Index of the selected signed-in user.
+   * @return {boolean}
+   * @private
+   */
+  isImportUserLinkHidden_: function(createInProgress,
+                                    loadingSupervisedUsers,
+                                    signedInUserIndex) {
+    return createInProgress || loadingSupervisedUsers ||
+        !this.signedInUser_(signedInUserIndex);
   },
 
   /**

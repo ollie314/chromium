@@ -43,10 +43,7 @@ class APP_LIST_EXPORT SearchController {
                           int event_flags);
 
   // Adds a new mixer group. See Mixer::AddGroup.
-  size_t AddGroup(size_t max_results, double boost, double multiplier);
-
-  // Adds a new mixer group. See Mixer::AddOmniboxGroup.
-  size_t AddOmniboxGroup(size_t max_results, double boost, double multiplier);
+  size_t AddGroup(size_t max_results, double multiplier);
 
   // Takes ownership of |provider| and associates it with given mixer group.
   void AddProvider(size_t group_id, std::unique_ptr<SearchProvider> provider);
@@ -59,12 +56,15 @@ class APP_LIST_EXPORT SearchController {
 
   SearchBoxModel* search_box_;
 
-  bool dispatching_query_;
+  bool dispatching_query_ = false;
+
+  // If true, the search results are shown on the launcher start page.
+  bool query_for_recommendation_ = false;
   Providers providers_;
   std::unique_ptr<Mixer> mixer_;
   History* history_;  // KeyedService, not owned.
 
-  bool is_voice_query_;
+  bool is_voice_query_ = false;
 
   base::OneShotTimer stop_timer_;
 

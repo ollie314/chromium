@@ -46,6 +46,7 @@ enum WebAXEvent {
     WebAXEventChildrenChanged,
     WebAXEventClicked,
     WebAXEventDocumentSelectionChanged,
+    WebAXEventExpandedChanged,
     WebAXEventFocus,
     WebAXEventHide,
     WebAXEventHover,
@@ -82,6 +83,7 @@ enum WebAXRole {
     WebAXRoleAnnotation,
     WebAXRoleApplication,
     WebAXRoleArticle,
+    WebAXRoleAudio,
     WebAXRoleBanner,
     WebAXRoleBlockquote,
     WebAXRoleBusyIndicator,
@@ -126,6 +128,7 @@ enum WebAXRole {
     WebAXRoleInputTime,
     WebAXRoleLabel,
     WebAXRoleLegend,
+    WebAXRoleLineBreak,
     WebAXRoleLink,
     WebAXRoleListBoxOption,
     WebAXRoleListBox,
@@ -192,8 +195,8 @@ enum WebAXRole {
     WebAXRoleTreeItem,
     WebAXRoleTree,
     WebAXRoleUserInterfaceTooltip,
+    WebAXRoleVideo,
     WebAXRoleWebArea,
-    WebAXRoleLineBreak,
     WebAXRoleWindow,
 };
 
@@ -256,6 +259,17 @@ enum WebAXOrientation {
     WebAXOrientationHorizontal,
 };
 
+enum WebAXAriaCurrentState {
+    WebAXAriaCurrentStateUndefined = 0,
+    WebAXAriaCurrentStateFalse,
+    WebAXAriaCurrentStateTrue,
+    WebAXAriaCurrentStatePage,
+    WebAXAriaCurrentStateStep,
+    WebAXAriaCurrentStateLocation,
+    WebAXAriaCurrentStateDate,
+    WebAXAriaCurrentStateTime
+};
+
 // Only used by HTML form controls and any other element that has
 // an aria-invalid attribute specified.
 enum WebAXInvalidState {
@@ -265,6 +279,12 @@ enum WebAXInvalidState {
     WebAXInvalidStateSpelling,
     WebAXInvalidStateGrammar,
     WebAXInvalidStateOther
+};
+
+enum WebAXMarkerType {
+    WebAXMarkerTypeSpelling = 1 << 0,
+    WebAXMarkerTypeGrammar = 1 << 1,
+    WebAXMarkerTypeTextMatch = 1 << 2
 };
 
 // Used for exposing text attributes.
@@ -299,6 +319,12 @@ enum WebAXDescriptionFrom {
     WebAXDescriptionFromContents,
     WebAXDescriptionFromPlaceholder,
     WebAXDescriptionFromRelatedElement,
+};
+
+// Text affinity for the start or end of a selection.
+enum WebAXTextAffinity {
+    WebAXTextAffinityUpstream,
+    WebAXTextAffinityDownstream
 };
 
 } // namespace blink

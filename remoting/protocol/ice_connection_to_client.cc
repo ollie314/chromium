@@ -10,9 +10,11 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "net/base/io_buffer.h"
+#include "remoting/codec/audio_encoder.h"
+#include "remoting/codec/audio_encoder_opus.h"
 #include "remoting/codec/video_encoder.h"
-#include "remoting/codec/video_encoder_verbatim.h"
-#include "remoting/codec/video_encoder_vpx.h"
+#include "remoting/protocol/audio_pump.h"
+#include "remoting/protocol/audio_source.h"
 #include "remoting/protocol/audio_writer.h"
 #include "remoting/protocol/clipboard_stub.h"
 #include "remoting/protocol/host_control_dispatcher.h"
@@ -28,16 +30,12 @@ namespace protocol {
 
 namespace {
 
-std::unique_ptr<VideoEncoder> CreateVideoEncoder(
+std::unique_ptr<AudioEncoder> CreateAudioEncoder(
     const protocol::SessionConfig& config) {
-  const protocol::ChannelConfig& video_config = config.video_config();
+  const protocol::ChannelConfig& audio_config = config.audio_config();
 
-  if (video_config.codec == protocol::ChannelConfig::CODEC_VP8) {
-    return VideoEncoderVpx::CreateForVP8();
-  } else if (video_config.codec == protocol::ChannelConfig::CODEC_VP9) {
-    return VideoEncoderVpx::CreateForVP9();
-  } else if (video_config.codec == protocol::ChannelConfig::CODEC_VERBATIM) {
-    return base::WrapUnique(new VideoEncoderVerbatim());
+  if (audio_config.codec == protocol::ChannelConfig::CODEC_OPUS) {
+    return base::WrapUnique(new AudioEncoderOpus());
   }
 
   NOTREACHED();
@@ -49,10 +47,12 @@ std::unique_ptr<VideoEncoder> CreateVideoEncoder(
 IceConnectionToClient::IceConnectionToClient(
     std::unique_ptr<protocol::Session> session,
     scoped_refptr<TransportContext> transport_context,
-    scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner)
+    scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner)
     : event_handler_(nullptr),
       session_(std::move(session)),
       video_encode_task_runner_(video_encode_task_runner),
+      audio_task_runner_(audio_task_runner),
       transport_(transport_context, this),
       control_dispatcher_(new HostControlDispatcher()),
       event_dispatcher_(new HostEventDispatcher()),
@@ -82,17 +82,12 @@ void IceConnectionToClient::Disconnect(ErrorCode error) {
   session_->Close(error);
 }
 
-void IceConnectionToClient::OnInputEventReceived(int64_t timestamp) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  event_handler_->OnInputEventReceived(this, timestamp);
-}
-
 std::unique_ptr<VideoStream> IceConnectionToClient::StartVideoStream(
     std::unique_ptr<webrtc::DesktopCapturer> desktop_capturer) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   std::unique_ptr<VideoEncoder> video_encoder =
-      CreateVideoEncoder(session_->config());
+      VideoEncoder::Create(session_->config());
 
   std::unique_ptr<VideoFramePump> pump(
       new VideoFramePump(video_encode_task_runner_, std::move(desktop_capturer),
@@ -101,9 +96,20 @@ std::unique_ptr<VideoStream> IceConnectionToClient::StartVideoStream(
   return std::move(pump);
 }
 
-AudioStub* IceConnectionToClient::audio_stub() {
+std::unique_ptr<AudioStream> IceConnectionToClient::StartAudioStream(
+    std::unique_ptr<AudioSource> audio_source) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return audio_writer_.get();
+
+  // Audio channel is disabled.
+  if (!audio_writer_)
+    return nullptr;
+
+  std::unique_ptr<AudioEncoder> audio_encoder =
+      CreateAudioEncoder(session_->config());
+
+  return base::WrapUnique(
+      new AudioPump(audio_task_runner_, std::move(audio_source),
+                    std::move(audio_encoder), audio_writer_.get()));
 }
 
 // Return pointer to ClientStub.
@@ -192,6 +198,17 @@ void IceConnectionToClient::OnChannelInitialized(
   NotifyIfChannelsReady();
 }
 
+void IceConnectionToClient::OnChannelClosed(
+    ChannelDispatcherBase* channel_dispatcher) {
+  // ICE transport doesn't close channels dynamically.
+  NOTREACHED();
+}
+
+void IceConnectionToClient::OnInputEventReceived(int64_t timestamp) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  event_handler_->OnInputEventReceived(this, timestamp);
+}
+
 void IceConnectionToClient::NotifyIfChannelsReady() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -206,7 +223,7 @@ void IceConnectionToClient::NotifyIfChannelsReady() {
     return;
   }
   event_handler_->OnConnectionChannelsConnected(this);
-  event_handler_->CreateVideoStreams(this);
+  event_handler_->CreateMediaStreams(this);
 }
 
 void IceConnectionToClient::CloseChannels() {

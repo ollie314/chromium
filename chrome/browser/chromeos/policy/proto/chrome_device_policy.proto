@@ -99,6 +99,8 @@ message DeviceReportingProto {
   optional bool report_users = 6 [default = true];
   optional bool report_hardware_status = 7 [default = true];
   optional bool report_session_status = 8 [default = true];
+  optional bool report_os_update_status = 10 [default = false];
+  optional bool report_running_kiosk_app = 11 [default = false];
 
   // Frequency to report device status, default to 3 hours.
   optional int64 device_status_frequency = 9 [default = 10800000];
@@ -704,6 +706,18 @@ message DeviceQuirksDownloadEnabledProto {
   optional bool quirks_download_enabled = 1;
 }
 
+// A list of security origins for SAML login pages that are allowed to
+// access the webcam.  No login pages will be allowed to access the
+// webcam if the list is empty.
+message LoginVideoCaptureAllowedUrlsProto {
+  repeated string urls = 1;
+}
+
+// A list of app-ids to install from the webstore on the login page.
+message LoginAppsProto {
+  repeated string login_apps = 1;
+}
+
 message ChromeDeviceSettingsProto {
   optional DevicePolicyRefreshRateProto device_policy_refresh_rate = 1;
   optional UserWhitelistProto user_whitelist = 2;
@@ -754,4 +768,7 @@ message ChromeDeviceSettingsProto {
   optional UsbDetachableWhitelistProto usb_detachable_whitelist = 42;
   optional AllowBluetoothProto allow_bluetooth = 43;
   optional DeviceQuirksDownloadEnabledProto quirks_download_enabled = 44;
+  optional LoginVideoCaptureAllowedUrlsProto login_video_capture_allowed_urls =
+      45;
+  optional LoginAppsProto login_apps = 46;
 }

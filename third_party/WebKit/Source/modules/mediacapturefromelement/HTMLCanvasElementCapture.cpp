@@ -12,6 +12,8 @@
 #include "public/platform/WebCanvasCaptureHandler.h"
 #include "public/platform/WebMediaStream.h"
 #include "public/platform/WebMediaStreamTrack.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace {
 const double kDefaultFrameRate = 60.0;
@@ -43,11 +45,11 @@ MediaStream* HTMLCanvasElementCapture::captureStream(HTMLCanvasElement& element,
 
     WebMediaStreamTrack track;
     const WebSize size(element.width(), element.height());
-    OwnPtr<WebCanvasCaptureHandler> handler;
+    std::unique_ptr<WebCanvasCaptureHandler> handler;
     if (givenFrameRate)
-        handler = adoptPtr(Platform::current()->createCanvasCaptureHandler(size, frameRate, &track));
+        handler = wrapUnique(Platform::current()->createCanvasCaptureHandler(size, frameRate, &track));
     else
-        handler = adoptPtr(Platform::current()->createCanvasCaptureHandler(size, kDefaultFrameRate, &track));
+        handler = wrapUnique(Platform::current()->createCanvasCaptureHandler(size, kDefaultFrameRate, &track));
 
     if (!handler) {
         exceptionState.throwDOMException(NotSupportedError, "No CanvasCapture handler can be created.");
@@ -56,9 +58,9 @@ MediaStream* HTMLCanvasElementCapture::captureStream(HTMLCanvasElement& element,
 
     CanvasCaptureMediaStreamTrack* canvasTrack;
     if (givenFrameRate)
-        canvasTrack = CanvasCaptureMediaStreamTrack::create(track, &element, handler.release(), frameRate);
+        canvasTrack = CanvasCaptureMediaStreamTrack::create(track, &element, std::move(handler), frameRate);
     else
-        canvasTrack = CanvasCaptureMediaStreamTrack::create(track, &element, handler.release());
+        canvasTrack = CanvasCaptureMediaStreamTrack::create(track, &element, std::move(handler));
     // We want to capture a frame in the beginning.
     canvasTrack->requestFrame();
 

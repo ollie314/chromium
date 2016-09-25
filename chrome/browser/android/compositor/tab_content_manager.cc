@@ -20,19 +20,19 @@
 #include "chrome/browser/android/compositor/layer/thumbnail_layer.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/android/thumbnail/thumbnail.h"
-#include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/readback_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "jni/TabContentManager_jni.h"
 #include "ui/android/resources/ui_resource_provider.h"
 #include "ui/gfx/android/java_bitmap.h"
-#include "ui/gfx/display.h"
 #include "ui/gfx/geometry/dip_util.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/screen.h"
 #include "url/gurl.h"
+
+using base::android::JavaParamRef;
 
 namespace {
 
@@ -46,78 +46,33 @@ namespace android {
 
 class TabContentManager::TabReadbackRequest {
  public:
-  TabReadbackRequest(jobject content_view_core,
-                     gfx::Rect src_rect,
+  TabReadbackRequest(content::WebContents* web_contents,
                      float thumbnail_scale,
                      const TabReadbackCallback& end_callback)
-      : src_rect_(src_rect),
-        thumbnail_scale_(thumbnail_scale),
+      : thumbnail_scale_(thumbnail_scale),
         end_callback_(end_callback),
         drop_after_readback_(false),
         weak_factory_(this) {
-    JNIEnv* env = base::android::AttachCurrentThread();
-    j_content_view_core_.Reset(env, content_view_core);
-  }
-
-  virtual ~TabReadbackRequest() {}
-
-  void Run() {
-    JNIEnv* env = base::android::AttachCurrentThread();
+    DCHECK(web_contents);
     content::ReadbackRequestCallback result_callback =
         base::Bind(&TabReadbackRequest::OnFinishGetTabThumbnailBitmap,
                    weak_factory_.GetWeakPtr());
 
-    if (j_content_view_core_.is_null()) {
-      result_callback.Run(SkBitmap(), content::READBACK_FAILED);
-      return;
-    }
-
-    content::ContentViewCore* view =
-        content::ContentViewCore::GetNativeContentViewCore(
-            env, j_content_view_core_.obj());
-
-    if (!view) {
-      result_callback.Run(SkBitmap(), content::READBACK_FAILED);
-      return;
-    }
-
-    DCHECK(view->GetWebContents());
-    view->GetWebContents()
-        ->GetRenderViewHost()
-        ->GetWidget()
-        ->LockBackingStore();
+    content::RenderWidgetHost* rwh =
+        web_contents->GetRenderViewHost()->GetWidget();
+    DCHECK(rwh);
 
     SkColorType color_type = kN32_SkColorType;
-
-    const gfx::Display& display = gfx::Screen::GetScreen()->GetPrimaryDisplay();
-    float device_scale_factor = display.device_scale_factor();
-    DCHECK_GT(device_scale_factor, 0);
+    gfx::Rect src_rect = rwh->GetView()->GetViewBounds();
     gfx::Size dst_size(
-        gfx::ScaleToCeiledSize(src_rect_.size(),
-                               thumbnail_scale_ / device_scale_factor));
-    gfx::Rect src_rect = gfx::ConvertRectToDIP(device_scale_factor, src_rect_);
-    view->GetWebContents()
-        ->GetRenderViewHost()
-        ->GetWidget()
-        ->CopyFromBackingStore(src_rect, dst_size, result_callback, color_type);
+        gfx::ScaleToCeiledSize(src_rect.size(), thumbnail_scale_));
+    rwh->CopyFromBackingStore(src_rect, dst_size, result_callback, color_type);
   }
+
+  virtual ~TabReadbackRequest() {}
 
   void OnFinishGetTabThumbnailBitmap(const SkBitmap& bitmap,
                                      content::ReadbackResponse response) {
-    DCHECK(!j_content_view_core_.is_null());
-    JNIEnv* env = base::android::AttachCurrentThread();
-    content::ContentViewCore* view =
-        content::ContentViewCore::GetNativeContentViewCore(
-            env, j_content_view_core_.obj());
-
-    if (view) {
-      DCHECK(view->GetWebContents());
-      view->GetWebContents()
-          ->GetRenderViewHost()
-          ->GetWidget()
-          ->UnlockBackingStore();
-    }
-
     if (response != content::READBACK_SUCCESS || drop_after_readback_) {
       end_callback_.Run(0.f, SkBitmap());
       return;
@@ -131,8 +86,6 @@ class TabContentManager::TabReadbackRequest {
   void SetToDropAfterReadback() { drop_after_readback_ = true; }
 
  private:
-  base::android::ScopedJavaGlobalRef<jobject> j_content_view_core_;
-  gfx::Rect src_rect_;
   const float thumbnail_scale_;
   TabReadbackCallback end_callback_;
   bool drop_after_readback_;
@@ -159,10 +112,11 @@ TabContentManager::TabContentManager(JNIEnv* env,
                                      jint write_queue_max_size,
                                      jboolean use_approximation_thumbnail)
     : weak_java_tab_content_manager_(env, obj), weak_factory_(this) {
-  thumbnail_cache_ = base::WrapUnique(new ThumbnailCache(
-      (size_t)default_cache_size, (size_t)approximation_cache_size,
-      (size_t)compression_queue_max_size, (size_t)write_queue_max_size,
-      use_approximation_thumbnail));
+  thumbnail_cache_ = base::MakeUnique<ThumbnailCache>(
+      static_cast<size_t>(default_cache_size),
+      static_cast<size_t>(approximation_cache_size),
+      static_cast<size_t>(compression_queue_max_size),
+      static_cast<size_t>(write_queue_max_size), use_approximation_thumbnail);
   thumbnail_cache_->AddThumbnailCacheObserver(this);
 }
 
@@ -246,8 +200,7 @@ void TabContentManager::OnFinishDecompressThumbnail(int tab_id,
     java_bitmap = gfx::ConvertToJavaBitmap(&bitmap);
 
   Java_TabContentManager_notifyDecompressBitmapFinished(
-      env, weak_java_tab_content_manager_.get(env).obj(), tab_id,
-      java_bitmap.obj());
+      env, weak_java_tab_content_manager_.get(env), tab_id, java_bitmap);
 }
 
 jboolean TabContentManager::HasFullCachedThumbnail(
@@ -260,23 +213,19 @@ jboolean TabContentManager::HasFullCachedThumbnail(
 void TabContentManager::CacheTab(JNIEnv* env,
                                  const JavaParamRef<jobject>& obj,
                                  const JavaParamRef<jobject>& tab,
-                                 const JavaParamRef<jobject>& content_view_core,
                                  jfloat thumbnail_scale) {
   TabAndroid* tab_android = TabAndroid::GetNativeTab(env, tab);
   DCHECK(tab_android);
   int tab_id = tab_android->GetAndroidId();
   GURL url = tab_android->GetURL();
 
-  content::ContentViewCore* view =
-      content::ContentViewCore::GetNativeContentViewCore(env,
-                                                         content_view_core);
+  content::WebContents* web_contents = tab_android->web_contents();
+  DCHECK(web_contents);
 
   if (thumbnail_cache_->CheckAndUpdateThumbnailMetaData(tab_id, url)) {
-    if (!view ||
-        !view->GetWebContents()->GetRenderViewHost() ||
-        !view->GetWebContents()->GetRenderViewHost()->GetWidget() ||
-        !view->GetWebContents()
-             ->GetRenderViewHost()
+    if (!web_contents->GetRenderViewHost() ||
+        !web_contents->GetRenderViewHost()->GetWidget() ||
+        !web_contents->GetRenderViewHost()
              ->GetWidget()
              ->CanCopyFromBackingStore() ||
         pending_tab_readbacks_.find(tab_id) != pending_tab_readbacks_.end() ||
@@ -285,16 +234,12 @@ void TabContentManager::CacheTab(JNIEnv* env,
       return;
     }
 
-    gfx::Rect src_rect = gfx::Rect(GetLiveLayer(tab_id)->bounds());
     TabReadbackCallback readback_done_callback =
         base::Bind(&TabContentManager::PutThumbnailIntoCache,
                    weak_factory_.GetWeakPtr(), tab_id);
-    std::unique_ptr<TabReadbackRequest> readback_request =
-        base::WrapUnique(new TabReadbackRequest(
-            content_view_core, src_rect, thumbnail_scale,
-            readback_done_callback));
-    pending_tab_readbacks_.set(tab_id, std::move(readback_request));
-    pending_tab_readbacks_.get(tab_id)->Run();
+    pending_tab_readbacks_.set(
+        tab_id, base::MakeUnique<TabReadbackRequest>(
+                    web_contents, thumbnail_scale, readback_done_callback));
   }
 }
 
@@ -366,7 +311,7 @@ void TabContentManager::OnUIResourcesWereEvicted() {
 void TabContentManager::OnFinishedThumbnailRead(int tab_id) {
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_TabContentManager_notifyListenersOfThumbnailChange(
-      env, weak_java_tab_content_manager_.get(env).obj(), tab_id);
+      env, weak_java_tab_content_manager_.get(env), tab_id);
 }
 
 void TabContentManager::PutThumbnailIntoCache(int tab_id,

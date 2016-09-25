@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "media/base/decoder_buffer.h"
 #include "media/filters/webvtt_util.h"
 
@@ -44,6 +44,19 @@ bool FakeTextTrackStream::SupportsConfigChanges() { return false; }
 
 VideoRotation FakeTextTrackStream::video_rotation() {
   return VIDEO_ROTATION_0;
+}
+
+bool FakeTextTrackStream::enabled() const {
+  return true;
+}
+
+void FakeTextTrackStream::set_enabled(bool enabled, base::TimeDelta timestamp) {
+  NOTIMPLEMENTED();
+}
+
+void FakeTextTrackStream::SetStreamStatusChangeCB(
+    const StreamStatusChangeCB& cb) {
+  NOTIMPLEMENTED();
 }
 
 void FakeTextTrackStream::SatisfyPendingRead(

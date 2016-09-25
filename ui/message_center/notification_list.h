@@ -45,25 +45,36 @@ struct MESSAGE_CENTER_EXPORT CompareTimestampSerial {
   bool operator()(Notification* n1, Notification* n2);
 };
 
+// An adapter to allow use of the comparers above with std::unique_ptr.
+template <typename PlainCompare>
+struct UniquePtrCompare {
+  template <typename T>
+  bool operator()(const std::unique_ptr<T>& n1, const std::unique_ptr<T>& n2) {
+    return PlainCompare()(n1.get(), n2.get());
+  }
+};
+
 // A helper class to manage the list of notifications.
 class MESSAGE_CENTER_EXPORT NotificationList {
  public:
   // Auto-sorted set. Matches the order in which Notifications are shown in
   // Notification Center.
-  typedef std::set<Notification*, ComparePriorityTimestampSerial> Notifications;
+  using Notifications = std::set<Notification*, ComparePriorityTimestampSerial>;
+  using OwnedNotifications =
+      std::set<std::unique_ptr<Notification>,
+               UniquePtrCompare<ComparePriorityTimestampSerial>>;
 
   // Auto-sorted set used to return the Notifications to be shown as popup
   // toasts.
-  typedef std::set<Notification*, CompareTimestampSerial> PopupNotifications;
+  using PopupNotifications = std::set<Notification*, CompareTimestampSerial>;
 
-  explicit NotificationList();
+  explicit NotificationList(MessageCenter* message_center);
   virtual ~NotificationList();
 
-  // Affects whether or not a message has been "read". Collects the set of
-  // ids whose state have changed and set to |udpated_ids|. NULL if updated
-  // ids don't matter.
-  void SetMessageCenterVisible(bool visible,
-                               std::set<std::string>* updated_ids);
+  // Makes a message "read". Collects the set of ids whose state have changed
+  // and set to |udpated_ids|. NULL if updated ids don't matter.
+  void SetNotificationsShown(const NotificationBlockers& blockers,
+                             std::set<std::string>* updated_ids);
 
   void AddNotification(std::unique_ptr<Notification> notification);
 
@@ -137,22 +148,20 @@ class MESSAGE_CENTER_EXPORT NotificationList {
   size_t NotificationCount(const NotificationBlockers& blockers) const;
   size_t UnreadCount(const NotificationBlockers& blockers) const;
 
-  bool is_message_center_visible() const { return message_center_visible_; }
-
  private:
   friend class NotificationListTest;
   FRIEND_TEST_ALL_PREFIXES(NotificationListTest,
                            TestPushingShownNotification);
 
   // Iterates through the list and returns the first notification matching |id|.
-  Notifications::iterator GetNotification(const std::string& id);
+  OwnedNotifications::iterator GetNotification(const std::string& id);
 
-  void EraseNotification(Notifications::iterator iter);
+  void EraseNotification(OwnedNotifications::iterator iter);
 
   void PushNotification(std::unique_ptr<Notification> notification);
 
-  Notifications notifications_;
-  bool message_center_visible_;
+  MessageCenter* message_center_;  // owner
+  OwnedNotifications notifications_;
   bool quiet_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationList);

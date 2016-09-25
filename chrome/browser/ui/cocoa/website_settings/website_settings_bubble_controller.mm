@@ -11,7 +11,6 @@
 #include "base/i18n/rtl.h"
 #include "base/mac/bind_objc_block.h"
 #include "base/memory/ptr_util.h"
-#include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #import "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
@@ -26,21 +25,21 @@
 #import "chrome/browser/ui/cocoa/website_settings/permission_selector_button.h"
 #import "chrome/browser/ui/tab_dialogs.h"
 #include "chrome/browser/ui/website_settings/permission_menu_model.h"
-#include "chrome/browser/ui/website_settings/website_settings_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/cert_store.h"
+#include "components/strings/grit/components_chromium_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/components_chromium_strings.h"
-#include "grit/components_google_chrome_strings.h"
-#include "grit/components_strings.h"
+#include "content/public/common/url_constants.h"
+#include "extensions/common/constants.h"
+#include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
 #import "ui/base/cocoa/controls/hyperlink_button_cell.h"
@@ -59,56 +58,61 @@ using ChosenObjectDeleteCallback =
 
 namespace {
 
+/**************** General ****************/
+
 // The default width of the window, in view coordinates. It may be larger to
 // fit the content.
-const CGFloat kDefaultWindowWidth = 310;
+const CGFloat kDefaultWindowWidth = 320;
 
-// Padding between the window frame and content.
-const CGFloat kFramePadding = 20;
+// Padding around each section
+const CGFloat kSectionVerticalPadding = 20;
+const CGFloat kSectionHorizontalPadding = 16;
 
-// Padding between the window frame and content.
-const CGFloat kVerticalSectionMargin = 16;
+// Links are buttons with invisible padding, so we need to move them back to
+// align with other text.
+const CGFloat kLinkButtonXAdjustment = 1;
 
-// Padding between the window frame and content for the internal page bubble.
-const CGFloat kInternalPageFramePadding = 10;
+/**************** Security Section ****************/
 
-// Spacing between the identity field and the security summary.
-const CGFloat kSpacingBeforeSecuritySummary = 2;
+// Spacing between security summary, security details, and cert decisions text.
+const CGFloat kSecurityParagraphSpacing = 12;
 
-// Spacing between the security summary and the reset decisions button.
-const CGFloat kSpacingBeforeResetDecisionsButton = 8;
-
-// Spacing between parts of the site settings section.
-const CGFloat kSiteSettingsSectionSpacing = 2;
-
-// Spacing between the image and text for internal pages.
-const CGFloat kInternalPageImageSpacing = 10;
+/**************** Site Settings Section ****************/
 
 // Square size of the permission images.
-const CGFloat kPermissionImageSize = 19;
+const CGFloat kPermissionImageSize = 16;
+
+// Spacing between a permission image and the text.
+const CGFloat kPermissionImageSpacing = 6;
 
 // Square size of the permission delete button image.
 const CGFloat kPermissionDeleteImageSize = 16;
 
-// Vertical adjustment for the permission images. They have an extra pixel of
-// padding on the bottom edge.
-const CGFloat kPermissionImageYAdjust = 1;
+// The spacing between individual permissions.
+const CGFloat kPermissionsVerticalSpacing = 16;
 
-// Spacing between a permission image and the text.
-const CGFloat kPermissionImageSpacing = 3;
+// Amount to lower each permission icon to align the icon baseline with the
+// label text.
+const CGFloat kPermissionIconYAdjustment = 1;
 
-// The spacing between individual items in the Permissions tab.
-const CGFloat kPermissionsTabSpacing = 12;
+// Amount to lower each permission popup button to make its text align with the
+// permission label.
+const CGFloat kPermissionPopupButtonYAdjustment = 3;
 
-// Extra spacing after a headline on the Permissions tab.
-const CGFloat kPermissionsHeadlineSpacing = 2;
+/**************** Internal Page Bubble ****************/
 
-// The amount of horizontal space between a permission label and the popup.
-const CGFloat kPermissionPopUpXSpacing = 3;
+// Padding between the window frame and content for the internal page bubble.
+const CGFloat kInternalPageFramePadding = 10;
 
-// The amount of padding to *remove* when placing
-// |IDS_WEBSITE_SETTINGS_{FIRST,THIRD}_PARTY_SITE_DATA| next to each other.
-const CGFloat kTextLabelXPadding = 5;
+// Spacing between the image and text for internal pages.
+const CGFloat kInternalPageImageSpacing = 10;
+
+/********************************/
+
+// NOTE: This assumes that there will never be more than one website settings
+// popup shown, and that the one that is shown is associated with the current
+// window. This matches the behaviour in views: see WebsiteSettingsPopupView.
+bool g_is_popup_showing = false;
 
 // Takes in the parent window, which should be a BrowserWindow, and gets the
 // proper anchor point for the bubble. The returned point is in screen
@@ -179,16 +183,23 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   return kDefaultWindowWidth;
 }
 
+bool IsInternalURL(const GURL& url) {
+  return url.SchemeIs(content::kChromeUIScheme) ||
+         url.SchemeIs(extensions::kExtensionScheme) ||
+         url.SchemeIs(content::kViewSourceScheme);
+}
+
 - (id)initWithParentWindow:(NSWindow*)parentWindow
     websiteSettingsUIBridge:(WebsiteSettingsUIBridge*)bridge
                 webContents:(content::WebContents*)webContents
-             isInternalPage:(BOOL)isInternalPage
+                        url:(const GURL&)url
          isDevToolsDisabled:(BOOL)isDevToolsDisabled {
   DCHECK(parentWindow);
 
   webContents_ = webContents;
   permissionsPresent_ = NO;
   isDevToolsDisabled_ = isDevToolsDisabled;
+  url_ = url;
 
   // Use an arbitrary height; it will be changed in performLayout.
   NSRect contentRect = NSMakeRect(0, 0, [self defaultWindowWidth], 1);
@@ -213,10 +224,11 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
     [[[self window] contentView] setSubviews:
         [NSArray arrayWithObject:contentView_.get()]];
 
-    if (isInternalPage)
-      [self initializeContentsForInternalPage];
-    else
+    if (IsInternalURL(url_)) {
+      [self initializeContentsForInternalPage:url_];
+    } else {
       [self initializeContents];
+    }
 
     bridge_.reset(bridge);
     bridge_->set_bubble_controller(self);
@@ -236,14 +248,26 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 }
 
 // Create the subviews for the bubble for internal Chrome pages.
-- (void)initializeContentsForInternalPage {
+- (void)initializeContentsForInternalPage:(const GURL&)url {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
-  NSPoint controlOrigin = NSMakePoint(
-      kInternalPageFramePadding,
-      kInternalPageFramePadding + info_bubble::kBubbleArrowHeight);
-  NSImage* productLogoImage =
-      rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_16).ToNSImage();
+  int text = IDS_PAGE_INFO_INTERNAL_PAGE;
+  int icon = IDR_PRODUCT_LOGO_16;
+  if (url.SchemeIs(extensions::kExtensionScheme)) {
+    text = IDS_PAGE_INFO_EXTENSION_PAGE;
+    icon = IDR_PLUGINS_FAVICON;
+  } else if (url.SchemeIs(content::kViewSourceScheme)) {
+    text = IDS_PAGE_INFO_VIEW_SOURCE_PAGE;
+    // view-source scheme uses the same icon as chrome:// pages.
+    icon = IDR_PRODUCT_LOGO_16;
+  } else if (!url.SchemeIs(content::kChromeUIScheme)) {
+    NOTREACHED();
+  }
+
+  NSPoint controlOrigin =
+      NSMakePoint(kInternalPageFramePadding,
+                  kInternalPageFramePadding + info_bubble::kBubbleArrowHeight);
+  NSImage* productLogoImage = rb.GetNativeImageNamed(icon).ToNSImage();
   NSImageView* imageView = [self addImageWithSize:[productLogoImage size]
                                            toView:contentView_
                                           atPoint:controlOrigin];
@@ -251,8 +275,7 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 
   NSRect imageFrame = [imageView frame];
   controlOrigin.x += NSWidth(imageFrame) + kInternalPageImageSpacing;
-  base::string16 text = l10n_util::GetStringUTF16(IDS_PAGE_INFO_INTERNAL_PAGE);
-  NSTextField* textField = [self addText:text
+  NSTextField* textField = [self addText:l10n_util::GetStringUTF16(text)
                                 withSize:[NSFont smallSystemFontSize]
                                     bold:NO
                                   toView:contentView_
@@ -293,23 +316,24 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 
   // Create a controlOrigin to place the text fields. The y value doesn't
   // matter, because the correct value is calculated in -performLayout.
-  NSPoint controlOrigin = NSMakePoint(kFramePadding, 0);
-
-  // Create a text field (empty for now) to show the site identity.
-  identityField_ = [self addText:base::string16()
-                        withSize:[NSFont systemFontSize]
-                            bold:YES
-                          toView:securitySectionView
-                         atPoint:controlOrigin];
+  NSPoint controlOrigin = NSMakePoint(kSectionHorizontalPadding, 0);
 
   // Create a text field for the security summary (private/not private/etc.).
   securitySummaryField_ = [self addText:base::string16()
+                               withSize:[NSFont systemFontSize]
+                                   bold:NO
+                                 toView:securitySectionView
+                                atPoint:controlOrigin];
+
+  securityDetailsField_ = [self addText:base::string16()
                                withSize:[NSFont smallSystemFontSize]
                                    bold:NO
                                  toView:securitySectionView
                                 atPoint:controlOrigin];
 
-  resetDecisionsButton_ = nil;  // This will be created only if necessary.
+  // These will be created only if necessary.
+  resetDecisionsField_ = nil;
+  resetDecisionsButton_ = nil;
 
   NSString* securityDetailsButtonText =
       l10n_util::GetNSString(IDS_WEBSITE_SETTINGS_DETAILS_LINK);
@@ -345,8 +369,10 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   // performLayout.
   NSString* siteSettingsButtonText =
       l10n_util::GetNSString(IDS_PAGE_INFO_SITE_SETTINGS_LINK);
-  siteSettingsButton_ = [self addLinkButtonWithText:siteSettingsButtonText
-                                             toView:siteSettingsSectionView];
+  siteSettingsButton_ = [self addButtonWithText:siteSettingsButtonText
+                                         toView:siteSettingsSectionView];
+  [GTMUILocalizerAndLayoutTweaker sizeToFitView:siteSettingsButton_];
+
   [siteSettingsButton_ setTarget:self];
   [siteSettingsButton_ setAction:@selector(showSiteSettingsData:)];
 
@@ -370,7 +396,8 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
       WebsiteSettings::WEBSITE_SETTINGS_SITE_SETTINGS_OPENED);
   webContents_->OpenURL(content::OpenURLParams(
       GURL(chrome::kChromeUIContentSettingsURL), content::Referrer(),
-      NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK, false));
+      WindowOpenDisposition::NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK,
+      false));
 }
 
 // Handler for the site settings button below the list of permissions.
@@ -392,11 +419,11 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 
 // Handler for the link button to show certificate information.
 - (void)showCertificateInfo:(id)sender {
-  DCHECK(certificateId_);
+  DCHECK(certificate_.get());
   DCHECK(presenter_);
   presenter_->RecordWebsiteSettingsAction(
       WebsiteSettings::WEBSITE_SETTINGS_CERTIFICATE_DIALOG_OPENED);
-  ShowCertificateViewerByID(webContents_, [self parentWindow], certificateId_);
+  ShowCertificateViewer(webContents_, [self parentWindow], certificate_.get());
 }
 
 // Handler for the link button to revoke user certificate decisions.
@@ -404,6 +431,18 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   DCHECK(resetDecisionsButton_);
   presenter_->OnRevokeSSLErrorBypassButtonPressed();
   [self close];
+}
+
+- (CGFloat)layoutViewAtRTLStart:(NSView*)view withYPosition:(CGFloat)yPos {
+  CGFloat xPos;
+  if (base::i18n::IsRTL()) {
+    xPos =
+        kDefaultWindowWidth - kSectionHorizontalPadding - NSWidth([view frame]);
+  } else {
+    xPos = kSectionHorizontalPadding;
+  }
+  [view setFrameOrigin:NSMakePoint(xPos, yPos)];
+  return yPos + NSHeight([view frame]);
 }
 
 // Set the Y position of |view| to the given position, and return the position
@@ -436,20 +475,17 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   [self setWidthOfView:securitySectionView_ to:contentWidth];
   [self setWidthOfView:siteSettingsSectionView_ to:contentWidth];
 
-  CGFloat yPos = info_bubble::kBubbleArrowHeight;
+  CGFloat yPos = 0;
 
   [self layoutSecuritySection];
-  yPos = [self setYPositionOfView:securitySectionView_ to:yPos + kFramePadding];
+  yPos = [self setYPositionOfView:securitySectionView_ to:yPos];
 
-  yPos = [self setYPositionOfView:separatorAfterSecuritySection_
-                               to:yPos + kVerticalSectionMargin];
+  yPos = [self setYPositionOfView:separatorAfterSecuritySection_ to:yPos];
 
   [self layoutSiteSettingsSection];
-  yPos = [self setYPositionOfView:siteSettingsSectionView_
-                               to:yPos + kVerticalSectionMargin];
+  yPos = [self setYPositionOfView:siteSettingsSectionView_ to:yPos];
 
-  [contentView_ setFrame:NSMakeRect(0, 0, NSWidth([contentView_ frame]),
-                                    yPos + kFramePadding)];
+  [contentView_ setFrame:NSMakeRect(0, 0, NSWidth([contentView_ frame]), yPos)];
 
   [self sizeAndPositionWindow];
 }
@@ -458,52 +494,59 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   // Start the layout with the first element. Margins are handled by the caller.
   CGFloat yPos = 0;
 
-  [self sizeTextFieldHeightToFit:identityField_];
-  yPos = [self setYPositionOfView:identityField_ to:yPos];
-
   [self sizeTextFieldHeightToFit:securitySummaryField_];
   yPos = [self setYPositionOfView:securitySummaryField_
-                               to:yPos + kSpacingBeforeSecuritySummary];
+                               to:yPos + kSectionVerticalPadding];
 
-  if (isDevToolsDisabled_ && certificateId_ == 0) {
+  [self sizeTextFieldHeightToFit:securityDetailsField_];
+  yPos = [self setYPositionOfView:securityDetailsField_
+                               to:yPos + kSecurityParagraphSpacing];
+
+  if (isDevToolsDisabled_ && !certificate_) {
     // -removeFromSuperview is idempotent.
     [securityDetailsButton_ removeFromSuperview];
   } else {
     // -addSubview is idempotent.
     [securitySectionView_ addSubview:securityDetailsButton_];
-    yPos = [self setYPositionOfView:securityDetailsButton_ to:yPos];
+    [securityDetailsButton_
+        setFrameOrigin:NSMakePoint(
+                           kSectionHorizontalPadding - kLinkButtonXAdjustment,
+                           yPos)];
+    yPos = NSMaxY([securityDetailsButton_ frame]);
   }
 
   if (resetDecisionsButton_) {
-    yPos = [self setYPositionOfView:resetDecisionsButton_
-                                 to:yPos + kSpacingBeforeResetDecisionsButton];
+    DCHECK(resetDecisionsField_);
+    yPos = [self setYPositionOfView:resetDecisionsField_
+                                 to:yPos + kSecurityParagraphSpacing];
+    [resetDecisionsButton_
+        setFrameOrigin:NSMakePoint(NSMinX([resetDecisionsButton_ frame]) -
+                                       kLinkButtonXAdjustment,
+                                   yPos)];
+    yPos = NSMaxY([resetDecisionsButton_ frame]);
   }
 
   // Resize the height based on contents.
-  [self setHeightOfView:securitySectionView_ to:yPos];
+  [self setHeightOfView:securitySectionView_ to:yPos + kSectionVerticalPadding];
 }
 
 - (void)layoutSiteSettingsSection {
   // Start the layout with the first element. Margins are handled by the caller.
   CGFloat yPos = 0;
 
-  yPos = [self setYPositionOfView:cookiesView_ to:yPos];
+  yPos =
+      [self setYPositionOfView:cookiesView_ to:yPos + kSectionVerticalPadding];
 
   if (permissionsPresent_) {
     // Put the permission info just below the link button.
-    yPos = [self setYPositionOfView:permissionsView_
-                                 to:yPos + kSiteSettingsSectionSpacing];
+    yPos = [self setYPositionOfView:permissionsView_ to:yPos];
   }
 
-  // Put the link button for site settings just below the permissions.
-  // TODO(lgarron): set the position of this based on RTL/LTR.
-  // http://code.google.com/p/chromium/issues/detail?id=525304
-  yPos += kSiteSettingsSectionSpacing;
-  [siteSettingsButton_ setFrameOrigin:NSMakePoint(kFramePadding, yPos)];
-  yPos = NSMaxY([siteSettingsButton_ frame]);
+  yPos = [self layoutViewAtRTLStart:siteSettingsButton_ withYPosition:yPos];
 
   // Resize the height based on contents.
-  [self setHeightOfView:siteSettingsSectionView_ to:yPos];
+  [self setHeightOfView:siteSettingsSectionView_
+                     to:yPos + kSectionVerticalPadding];
 }
 
 // Adjust the size of the window to match the size of the content, and position
@@ -554,7 +597,7 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
                 atPoint:(NSPoint)point {
   // Size the text to take up the full available width, with some padding.
   // The height is arbitrary as it will be adjusted later.
-  CGFloat width = NSWidth([view frame]) - point.x - kFramePadding;
+  CGFloat width = NSWidth([view frame]) - point.x - kSectionHorizontalPadding;
   NSRect frame = NSMakeRect(point.x, point.y, width, 100);
   base::scoped_nsobject<NSTextField> textField(
       [[NSTextField alloc] initWithFrame:frame]);
@@ -594,7 +637,7 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 // Add a link button with the given text to |view|.
 - (NSButton*)addLinkButtonWithText:(NSString*)text toView:(NSView*)view {
   // Frame size is arbitrary; it will be adjusted by the layout tweaker.
-  NSRect frame = NSMakeRect(kFramePadding, 0, 100, 10);
+  NSRect frame = NSMakeRect(kSectionHorizontalPadding, 0, 100, 10);
   base::scoped_nsobject<NSButton> button(
       [[NSButton alloc] initWithFrame:frame]);
   base::scoped_nsobject<HyperlinkButtonCell> cell(
@@ -614,7 +657,7 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 - (NSButton*)addButtonWithText:(NSString*)text toView:(NSView*)view {
   NSRect containerFrame = [view frame];
   // Frame size is arbitrary; it will be adjusted by the layout tweaker.
-  NSRect frame = NSMakeRect(kFramePadding, 0, 100, 10);
+  NSRect frame = NSMakeRect(kSectionHorizontalPadding, 0, 100, 10);
   base::scoped_nsobject<NSButton> button(
       [[NSButton alloc] initWithFrame:frame]);
 
@@ -622,7 +665,8 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   // of the connection section minus the padding on both sides minus the
   // connection image size and spacing.
   // TODO(lgarron): handle this sizing in -performLayout.
-  CGFloat maxTitleWidth = containerFrame.size.width - kFramePadding * 2;
+  CGFloat maxTitleWidth =
+      containerFrame.size.width - kSectionHorizontalPadding * 2;
 
   base::scoped_nsobject<NSButtonCell> cell(
       [[NSButtonCell alloc] initTextCell:text]);
@@ -644,18 +688,33 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 
 // Set the content of the identity and identity status fields.
 - (void)setIdentityInfo:(const WebsiteSettingsUI::IdentityInfo&)identityInfo {
-  [identityField_
-      setStringValue:base::SysUTF8ToNSString(identityInfo.site_identity)];
-  [securitySummaryField_ setStringValue:base::SysUTF16ToNSString(
-                                            identityInfo.GetSecuritySummary())];
+  std::unique_ptr<WebsiteSettingsUI::SecurityDescription> security_description =
+      identityInfo.GetSecurityDescription();
+  [securitySummaryField_
+      setStringValue:base::SysUTF16ToNSString(security_description->summary)];
 
-  certificateId_ = identityInfo.cert_id;
+  [securityDetailsField_
+      setStringValue:SysUTF16ToNSString(security_description->details)];
 
-  if (certificateId_ &&  identityInfo.show_ssl_decision_revoke_button) {
-    NSString* text = l10n_util::GetNSString(
-        IDS_PAGEINFO_RESET_INVALID_CERTIFICATE_DECISIONS_BUTTON);
+  certificate_ = identityInfo.certificate;
+
+  if (certificate_ &&  identityInfo.show_ssl_decision_revoke_button) {
+    resetDecisionsField_ =
+        [self addText:base::string16()
+             withSize:[NSFont smallSystemFontSize]
+                 bold:NO
+               toView:securitySectionView_
+              atPoint:NSMakePoint(kSectionHorizontalPadding, 0)];
+    [resetDecisionsField_
+        setStringValue:l10n_util::GetNSString(
+                           IDS_PAGEINFO_INVALID_CERTIFICATE_DESCRIPTION)];
+    [self sizeTextFieldHeightToFit:resetDecisionsField_];
+
     resetDecisionsButton_ =
-        [self addButtonWithText:text toView:securitySectionView_];
+        [self addLinkButtonWithText:
+                  l10n_util::GetNSString(
+                      IDS_PAGEINFO_RESET_INVALID_CERTIFICATE_DECISIONS_BUTTON)
+                             toView:securitySectionView_];
     [resetDecisionsButton_ setTarget:self];
     [resetDecisionsButton_ setAction:@selector(resetCertificateDecisions:)];
   }
@@ -679,6 +738,7 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
       [[PermissionSelectorButton alloc] initWithPermissionInfo:permissionInfo
                                                         forURL:url
                                                   withCallback:callback]);
+
   // Determine the largest possible size for this button.
   CGFloat maxTitleWidth = [button
       maxTitleWidthForContentSettingsType:permissionInfo.type
@@ -687,8 +747,9 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   // Ensure the containing view is large enough to contain the button with its
   // widest possible title.
   NSRect containerFrame = [view frame];
-  containerFrame.size.width = std::max(
-      NSWidth(containerFrame), point.x + maxTitleWidth + kFramePadding);
+  containerFrame.size.width =
+      std::max(NSWidth(containerFrame),
+               point.x + maxTitleWidth + kSectionHorizontalPadding);
   [view setFrame:containerFrame];
   [view addSubview:button.get()];
   return button.get();
@@ -712,8 +773,8 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   // Ensure the containing view is large enough to contain the button.
   NSRect containerFrame = [view frame];
   containerFrame.size.width =
-      std::max(NSWidth(containerFrame),
-               point.x + kPermissionDeleteImageSize + kFramePadding);
+      std::max(NSWidth(containerFrame), point.x + kPermissionDeleteImageSize +
+                                            kSectionHorizontalPadding);
   [view setFrame:containerFrame];
   [view addSubview:button.get()];
   return button.get();
@@ -740,10 +801,8 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
                   toView:(NSView*)view
                  atPoint:(NSPoint)point {
   base::string16 labelText =
-      WebsiteSettingsUI::PermissionTypeToUIString(permissionInfo.type) +
-      base::ASCIIToUTF16(":");
-  bool isRTL =
-      base::i18n::RIGHT_TO_LEFT == base::i18n::GetStringDirection(labelText);
+      WebsiteSettingsUI::PermissionTypeToUIString(permissionInfo.type);
+  bool isRTL = base::i18n::IsRTL();
   base::scoped_nsobject<NSImage> image(
       [WebsiteSettingsUI::GetPermissionIcon(permissionInfo).ToNSImage()
           retain]);
@@ -757,13 +816,13 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 
   if (isRTL) {
     point.x = NSWidth([view frame]) - kPermissionImageSize -
-              kPermissionImageSpacing - kFramePadding;
+              kSectionHorizontalPadding;
     imageView = [self addImageWithSize:[image size] toView:view atPoint:point];
     [imageView setImage:image];
     point.x -= kPermissionImageSpacing;
 
     label = [self addText:labelText
-                 withSize:[NSFont smallSystemFontSize]
+                 withSize:[NSFont systemFontSize]
                      bold:NO
                    toView:view
                   atPoint:point];
@@ -771,7 +830,8 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
     point.x -= NSWidth([label frame]);
     [label setFrameOrigin:point];
 
-    position = NSMakePoint(point.x, point.y);
+    position =
+        NSMakePoint(point.x, point.y + kPermissionPopupButtonYAdjustment);
     button = [self addPopUpButtonForPermission:permissionInfo
                                         toView:view
                                        atPoint:position];
@@ -783,13 +843,15 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
     point.x += kPermissionImageSize + kPermissionImageSpacing;
 
     label = [self addText:labelText
-                 withSize:[NSFont smallSystemFontSize]
+                 withSize:[NSFont systemFontSize]
                      bold:NO
                    toView:view
                   atPoint:point];
     [label sizeToFit];
 
-    position = NSMakePoint(NSMaxX([label frame]), point.y);
+    position = NSMakePoint(NSMaxX([label frame]),
+                           point.y + kPermissionPopupButtonYAdjustment);
+
     button = [self addPopUpButtonForPermission:permissionInfo
                                         toView:view
                                        atPoint:position];
@@ -803,9 +865,10 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   // invisible bezel.
   NSRect titleRect = [[button cell] titleRectForBounds:[button bounds]];
   if (isRTL) {
-    position.x += kPermissionPopUpXSpacing;
+    position.x = kSectionHorizontalPadding;
   } else {
-    position.x -= titleRect.origin.x - kPermissionPopUpXSpacing;
+    position.x = kDefaultWindowWidth - kSectionHorizontalPadding -
+                 [button frame].size.width;
   }
   position.y -= titleRect.origin.y;
   [button setFrameOrigin:position];
@@ -832,8 +895,7 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   base::string16 labelText = l10n_util::GetStringFUTF16(
       objectInfo->ui_info.label_string_id,
       WebsiteSettingsUI::ChosenObjectToUIString(*objectInfo));
-  bool isRTL =
-      base::i18n::RIGHT_TO_LEFT == base::i18n::GetStringDirection(labelText);
+  bool isRTL = base::i18n::IsRTL();
   base::scoped_nsobject<NSImage> image(
       [WebsiteSettingsUI::GetChosenObjectIcon(*objectInfo, false)
               .ToNSImage() retain]);
@@ -847,13 +909,13 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 
   if (isRTL) {
     point.x = NSWidth([view frame]) - kPermissionImageSize -
-              kPermissionImageSpacing - kFramePadding;
+              kPermissionImageSpacing - kSectionHorizontalPadding;
     imageView = [self addImageWithSize:[image size] toView:view atPoint:point];
     [imageView setImage:image];
     point.x -= kPermissionImageSpacing;
 
     label = [self addText:labelText
-                 withSize:[NSFont smallSystemFontSize]
+                 withSize:[NSFont systemFontSize]
                      bold:NO
                    toView:view
                   atPoint:point];
@@ -873,7 +935,7 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
     point.x += kPermissionImageSize + kPermissionImageSpacing;
 
     label = [self addText:labelText
-                 withSize:[NSFont smallSystemFontSize]
+                 withSize:[NSFont systemFontSize]
                      bold:NO
                    toView:view
                   atPoint:point];
@@ -892,11 +954,6 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   // Also adjust the horizontal position to remove excess space due to the
   // invisible bezel.
   NSRect titleRect = [[button cell] titleRectForBounds:[button bounds]];
-  if (isRTL) {
-    position.x += kPermissionPopUpXSpacing;
-  } else {
-    position.x -= titleRect.origin.x - kPermissionPopUpXSpacing;
-  }
   position.y -= titleRect.origin.y;
   [button setFrameOrigin:position];
 
@@ -911,15 +968,9 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 // the cap height of the first line of text.
 - (void)alignPermissionIcon:(NSImageView*)imageView
               withTextField:(NSTextField*)textField {
-  NSFont* font = [textField font];
-
-  // Calculate the offset from the top of the text field.
-  CGFloat capHeight = [font capHeight];
-  CGFloat offset = (kPermissionImageSize - capHeight) / 2 -
-      ([font ascender] - capHeight) - kPermissionImageYAdjust;
 
   NSRect frame = [imageView frame];
-  frame.origin.y -= offset;
+  frame.origin.y += kPermissionIconYAdjustment;
   [imageView setFrame:frame];
 }
 
@@ -931,50 +982,27 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
   // |cookieInfoList| should only ever have 2 items: first- and third-party
   // cookies.
   DCHECK_EQ(cookieInfoList.size(), 2u);
-  base::string16 firstPartyLabelText;
-  base::string16 thirdPartyLabelText;
+
+  int totalAllowed = 0;
   for (const auto& i : cookieInfoList) {
-    if (i.is_first_party) {
-      firstPartyLabelText =
-          l10n_util::GetStringFUTF16(IDS_WEBSITE_SETTINGS_FIRST_PARTY_SITE_DATA,
-                                     base::IntToString16(i.allowed));
-    } else {
-      thirdPartyLabelText =
-          l10n_util::GetStringFUTF16(IDS_WEBSITE_SETTINGS_THIRD_PARTY_SITE_DATA,
-                                     base::IntToString16(i.allowed));
-    }
+    totalAllowed += i.allowed;
   }
+  base::string16 label_text = l10n_util::GetPluralStringFUTF16(
+      IDS_WEBSITE_SETTINGS_NUM_COOKIES, totalAllowed);
 
   base::string16 sectionTitle =
       l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TITLE_SITE_DATA);
-  bool isRTL = base::i18n::RIGHT_TO_LEFT ==
-               base::i18n::GetStringDirection(firstPartyLabelText);
+  bool isRTL = base::i18n::IsRTL();
 
   [cookiesView_ setSubviews:[NSArray array]];
-  NSPoint controlOrigin = NSMakePoint(kFramePadding, 0);
-
-  NSTextField* label;
+  NSPoint controlOrigin = NSMakePoint(kSectionHorizontalPadding, 0);
 
   CGFloat viewWidth = NSWidth([cookiesView_ frame]);
-
-  NSTextField* header = [self addText:sectionTitle
-                             withSize:[NSFont smallSystemFontSize]
-                                 bold:YES
-                               toView:cookiesView_
-                              atPoint:controlOrigin];
-  [header sizeToFit];
-
-  if (isRTL) {
-    controlOrigin.x = viewWidth - kFramePadding - NSWidth([header frame]);
-    [header setFrameOrigin:controlOrigin];
-  }
-  controlOrigin.y += NSHeight([header frame]) + kPermissionsHeadlineSpacing;
-  controlOrigin.y += kPermissionsTabSpacing;
 
   // Reset X for the cookie image.
   if (isRTL) {
     controlOrigin.x = viewWidth - kPermissionImageSize -
-                      kPermissionImageSpacing - kFramePadding;
+                      kPermissionImageSpacing - kSectionHorizontalPadding;
   }
 
   WebsiteSettingsUI::PermissionInfo info;
@@ -988,51 +1016,53 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
                                           atPoint:controlOrigin];
   [imageView setImage:image];
 
-  base::string16 comma = base::ASCIIToUTF16(", ");
-  NSString* cookieButtonText = base::SysUTF16ToNSString(firstPartyLabelText);
+  NSButton* cookiesButton =
+      [self addLinkButtonWithText:base::SysUTF16ToNSString(label_text)
+                           toView:cookiesView_];
+  [cookiesButton setTarget:self];
+  [cookiesButton setAction:@selector(showCookiesAndSiteData:)];
 
   if (isRTL) {
-    NSButton* cookiesButton =
-        [self addLinkButtonWithText:cookieButtonText toView:cookiesView_];
-    [cookiesButton setTarget:self];
-    [cookiesButton setAction:@selector(showCookiesAndSiteData:)];
-    controlOrigin.x -= NSWidth([cookiesButton frame]);
-    [cookiesButton setFrameOrigin:controlOrigin];
+    controlOrigin.x -= kPermissionImageSpacing;
+    NSTextField* cookiesLabel =
+        [self addText:l10n_util::GetStringUTF16(IDS_PAGE_INFO_COOKIES)
+             withSize:[NSFont systemFontSize]
+                 bold:NO
+               toView:cookiesView_
+              atPoint:controlOrigin];
+    [cookiesLabel sizeToFit];
 
-    label = [self addText:comma + thirdPartyLabelText
-                 withSize:[NSFont smallSystemFontSize]
-                     bold:NO
-                   toView:cookiesView_
-                  atPoint:controlOrigin];
-    [label sizeToFit];
-    controlOrigin.x -= NSWidth([label frame]) - kTextLabelXPadding;
-    [label setFrameOrigin:controlOrigin];
+    NSPoint cookiesLabelOrigin = [cookiesLabel frame].origin;
+    cookiesLabelOrigin.x -= NSWidth([cookiesLabel frame]);
+    [cookiesLabel setFrameOrigin:cookiesLabelOrigin];
+
+    // Align the icon with the text.
+    [self alignPermissionIcon:imageView withTextField:cookiesLabel];
+
+    controlOrigin.y += NSHeight([cookiesLabel frame]);
+    controlOrigin.x -= NSWidth([cookiesButton frame]) - kLinkButtonXAdjustment;
+    [cookiesButton setFrameOrigin:controlOrigin];
   } else {
     controlOrigin.x += kPermissionImageSize + kPermissionImageSpacing;
+    NSTextField* cookiesLabel =
+        [self addText:l10n_util::GetStringUTF16(IDS_PAGE_INFO_COOKIES)
+             withSize:[NSFont systemFontSize]
+                 bold:NO
+               toView:cookiesView_
+              atPoint:controlOrigin];
+    [cookiesLabel sizeToFit];
 
-    NSButton* cookiesButton =
-        [self addLinkButtonWithText:cookieButtonText toView:cookiesView_];
-    [cookiesButton setTarget:self];
-    [cookiesButton setAction:@selector(showCookiesAndSiteData:)];
+    controlOrigin.y += NSHeight([cookiesLabel frame]);
+    controlOrigin.x -= kLinkButtonXAdjustment;
     [cookiesButton setFrameOrigin:controlOrigin];
 
-    controlOrigin.x += NSWidth([cookiesButton frame]) - kTextLabelXPadding;
-
-    label = [self addText:comma + thirdPartyLabelText
-                 withSize:[NSFont smallSystemFontSize]
-                     bold:NO
-                   toView:cookiesView_
-                  atPoint:controlOrigin];
-    [label sizeToFit];
+    // Align the icon with the text.
+    [self alignPermissionIcon:imageView withTextField:cookiesLabel];
   }
 
-  // Align the icon with the text.
-  [self alignPermissionIcon:imageView withTextField:label];
-
-  controlOrigin.y += NSHeight([label frame]) + kPermissionsTabSpacing;
-
-  [cookiesView_ setFrameSize:
-      NSMakeSize(NSWidth([cookiesView_ frame]), controlOrigin.y)];
+  controlOrigin.y += NSHeight([cookiesButton frame]);
+  [cookiesView_
+      setFrameSize:NSMakeSize(NSWidth([cookiesView_ frame]), controlOrigin.y)];
 
   [self performLayout];
 }
@@ -1040,45 +1070,31 @@ NSPoint AnchorPointForWindow(NSWindow* parent) {
 - (void)setPermissionInfo:(const PermissionInfoList&)permissionInfoList
          andChosenObjects:(const ChosenObjectInfoList&)chosenObjectInfoList {
   [permissionsView_ setSubviews:[NSArray array]];
-  NSPoint controlOrigin = NSMakePoint(kFramePadding, 0);
+  NSPoint controlOrigin = NSMakePoint(kSectionHorizontalPadding, 0);
 
   permissionsPresent_ = YES;
 
   if (permissionInfoList.size() > 0 || chosenObjectInfoList.size() > 0) {
     base::string16 sectionTitle = l10n_util::GetStringUTF16(
         IDS_WEBSITE_SETTINGS_TITLE_SITE_PERMISSIONS);
-    bool isRTL = base::i18n::RIGHT_TO_LEFT ==
-                 base::i18n::GetStringDirection(sectionTitle);
-    NSTextField* header = [self addText:sectionTitle
-                               withSize:[NSFont smallSystemFontSize]
-                                   bold:YES
-                                 toView:permissionsView_
-                                atPoint:controlOrigin];
-    [header sizeToFit];
-    if (isRTL) {
-      controlOrigin.x = NSWidth([permissionsView_ frame]) - kFramePadding -
-                        NSWidth([header frame]);
-      [header setFrameOrigin:controlOrigin];
-    }
-    controlOrigin.y += NSHeight([header frame]) + kPermissionsHeadlineSpacing;
 
     for (const auto& permission : permissionInfoList) {
-      controlOrigin.y += kPermissionsTabSpacing;
+      controlOrigin.y += kPermissionsVerticalSpacing;
       NSPoint rowBottomRight = [self addPermission:permission
                                             toView:permissionsView_
                                            atPoint:controlOrigin];
       controlOrigin.y = rowBottomRight.y;
     }
 
-    for (auto object : chosenObjectInfoList) {
-      controlOrigin.y += kPermissionsTabSpacing;
+    for (auto* object : chosenObjectInfoList) {
+      controlOrigin.y += kPermissionsVerticalSpacing;
       NSPoint rowBottomRight = [self addChosenObject:base::WrapUnique(object)
                                               toView:permissionsView_
                                              atPoint:controlOrigin];
       controlOrigin.y = rowBottomRight.y;
     }
 
-    controlOrigin.y += kFramePadding;
+    controlOrigin.y += kPermissionsVerticalSpacing;
   }
 
   [permissionsView_ setFrameSize:
@@ -1092,9 +1108,14 @@ WebsiteSettingsUIBridge::WebsiteSettingsUIBridge(
     content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       web_contents_(web_contents),
-      bubble_controller_(nil) {}
+      bubble_controller_(nil) {
+  DCHECK(!g_is_popup_showing);
+  g_is_popup_showing = true;
+}
 
 WebsiteSettingsUIBridge::~WebsiteSettingsUIBridge() {
+  DCHECK(g_is_popup_showing);
+  g_is_popup_showing = false;
 }
 
 void WebsiteSettingsUIBridge::set_bubble_controller(
@@ -1106,16 +1127,20 @@ void WebsiteSettingsUIBridge::Show(
     gfx::NativeWindow parent,
     Profile* profile,
     content::WebContents* web_contents,
-    const GURL& url,
+    const GURL& virtual_url,
     const security_state::SecurityStateModel::SecurityInfo& security_info) {
-  if (chrome::ToolkitViewsDialogsEnabled()) {
+  if (chrome::ToolkitViewsWebUIDialogsEnabled()) {
     chrome::ShowWebsiteSettingsBubbleViewsAtPoint(
         gfx::ScreenPointFromNSPoint(AnchorPointForWindow(parent)), profile,
-        web_contents, url, security_info);
+        web_contents, virtual_url, security_info);
     return;
   }
 
-  bool is_internal_page = InternalChromePage(url);
+  // Don't show the popup if it's already being shown. Since this method is
+  // called each time the location icon is clicked, each click toggles the popup
+  // in and out.
+  if (g_is_popup_showing)
+    return;
 
   // Create the bridge. This will be owned by the bubble controller.
   WebsiteSettingsUIBridge* bridge = new WebsiteSettingsUIBridge(web_contents);
@@ -1123,22 +1148,23 @@ void WebsiteSettingsUIBridge::Show(
   bool is_devtools_disabled =
       profile->GetPrefs()->GetBoolean(prefs::kDevToolsDisabled);
 
-  // Create the bubble controller. It will dealloc itself when it closes.
+  // Create the bubble controller. It will dealloc itself when it closes,
+  // resetting |g_is_popup_showing|.
   WebsiteSettingsBubbleController* bubble_controller =
       [[WebsiteSettingsBubbleController alloc]
              initWithParentWindow:parent
           websiteSettingsUIBridge:bridge
                       webContents:web_contents
-                   isInternalPage:is_internal_page
+                              url:virtual_url
                isDevToolsDisabled:is_devtools_disabled];
 
-  if (!is_internal_page) {
+  if (!IsInternalURL(virtual_url)) {
     // Initialize the presenter, which holds the model and controls the UI.
     // This is also owned by the bubble controller.
     WebsiteSettings* presenter = new WebsiteSettings(
         bridge, profile,
         TabSpecificContentSettings::FromWebContents(web_contents), web_contents,
-        url, security_info, content::CertStore::GetInstance());
+        virtual_url, security_info);
     [bubble_controller setPresenter:presenter];
   }
 

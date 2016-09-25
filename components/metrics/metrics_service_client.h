@@ -6,12 +6,14 @@
 #define COMPONENTS_METRICS_METRICS_SERVICE_CLIENT_H_
 
 #include <stdint.h>
+
+#include <memory>
 #include <string>
 
 #include "base/callback_forward.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
+#include "components/metrics/metrics_reporting_default_state.h"
 #include "components/metrics/proto/system_profile.pb.h"
 
 namespace base {
@@ -27,19 +29,6 @@ class MetricsService;
 // environment.
 class MetricsServiceClient {
  public:
-  // Default value of the enable metrics recording. This relates to the state of
-  // the enable checkbox shown on first-run. This enum is used to store values
-  // in a pref, and shouldn't be renumbered.
-  enum EnableMetricsDefault {
-    // We only record the value during first-run. The default of existing
-    // installs is considered unknown.
-    DEFAULT_UNKNOWN,
-    // The first-run checkbox was unchecked by default.
-    OPT_IN,
-    // The first-run checkbox was checked by default.
-    OPT_OUT,
-  };
-
   virtual ~MetricsServiceClient() {}
 
   // Returns the MetricsService instance that this client is associated with.
@@ -51,10 +40,6 @@ class MetricsServiceClient {
   // Registers the client id with other services (e.g. crash reporting), called
   // when metrics recording gets enabled.
   virtual void SetMetricsClientId(const std::string& client_id) = 0;
-
-  // Notifies the client that recording is disabled, so that other services
-  // (such as crash reporting) can clear any association with metrics.
-  virtual void OnRecordingDisabled() = 0;
 
   // Whether there's an "off the record" (aka "Incognito") session active.
   virtual bool IsOffTheRecordSessionActive() = 0;
@@ -93,7 +78,7 @@ class MetricsServiceClient {
 
   // Creates a MetricsLogUploader with the specified parameters (see comments on
   // MetricsLogUploader for details).
-  virtual scoped_ptr<MetricsLogUploader> CreateUploader(
+  virtual std::unique_ptr<MetricsLogUploader> CreateUploader(
       const base::Callback<void(int)>& on_upload_complete) = 0;
 
   // Returns the standard interval between upload attempts.
@@ -114,9 +99,9 @@ class MetricsServiceClient {
   // Returns whether metrics reporting is managed by policy.
   virtual bool IsReportingPolicyManaged();
 
-  // Gets information about the default value for the enable metrics reporting
-  // checkbox shown during first-run.
-  virtual EnableMetricsDefault GetDefaultOptIn();
+  // Gets information about the default value for the metrics reporting checkbox
+  // shown during first-run.
+  virtual EnableMetricsDefault GetMetricsReportingDefaultState();
 
   // Returns whether cellular logic is enabled for metrics reporting.
   virtual bool IsUMACellularUploadLogicEnabled();

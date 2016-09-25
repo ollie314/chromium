@@ -2,6 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+cr.exportPath('extensions');
+
+// Declare this here to make closure compiler happy, and us sad.
+/** @enum {number} */
+extensions.ShowingType = {
+  EXTENSIONS: 0,
+  APPS: 1,
+};
+
 cr.define('extensions', function() {
   /** @interface */
   var SidebarDelegate = function() {};
@@ -16,55 +25,38 @@ cr.define('extensions', function() {
     /** Opens the dialog to load unpacked extensions. */
     loadUnpacked: assertNotReached,
 
-    /** Opens the dialog to pack an extension. */
-    packExtension: assertNotReached,
-
     /** Updates all extensions. */
     updateAllExtensions: assertNotReached,
   };
 
   /** @interface */
-  var SidebarScrollDelegate = function() {};
+  var SidebarListDelegate = function() {};
 
-  SidebarScrollDelegate.prototype = {
-    /** Scrolls to the extensions section. */
-    scrollToExtensions: assertNotReached,
+  SidebarListDelegate.prototype = {
+    /**
+     * Shows the given type of item.
+     * @param {extensions.ShowingType} type
+     */
+    showType: assertNotReached,
 
-    /** Scrolls to the apps section. */
-    scrollToApps: assertNotReached,
+    /** Shows the keyboard shortcuts page. */
+    showKeyboardShortcuts: assertNotReached,
 
-    /** Scrolls to the websites section. */
-    scrollToWebsites: assertNotReached,
+    /** Shows the pack extension dialog. */
+    showPackDialog: assertNotReached,
   };
 
   var Sidebar = Polymer({
     is: 'extensions-sidebar',
+
+    behaviors: [I18nBehavior],
 
     properties: {
       inDevMode: {
         type: Boolean,
         value: false,
       },
-
-      hideExtensionsButton: {
-        type: Boolean,
-        value: false,
-      },
-
-      hideAppsButton: {
-        type: Boolean,
-        value: false,
-      },
-
-      hideWebsitesButton: {
-        type: Boolean,
-        value: false,
-      },
     },
-
-    behaviors: [
-      I18nBehavior,
-    ],
 
     /** @param {extensions.SidebarDelegate} delegate */
     setDelegate: function(delegate) {
@@ -72,25 +64,20 @@ cr.define('extensions', function() {
       this.delegate_ = delegate;
     },
 
-    /** @param {extensions.SidebarScrollDelegate} scrollDelegate */
-    setScrollDelegate: function(scrollDelegate) {
-      /** @private {extensions.SidebarScrollDelegate} */
-      this.scrollDelegate_ = scrollDelegate;
+    /** @param {extensions.SidebarListDelegate} listDelegate */
+    setListDelegate: function(listDelegate) {
+      /** @private {extensions.SidebarListDelegate} */
+      this.listDelegate_ = listDelegate;
     },
 
     /** @private */
     onExtensionsTap_: function() {
-      this.scrollDelegate_.scrollToExtensions();
+      this.listDelegate_.showType(extensions.ShowingType.EXTENSIONS);
     },
 
     /** @private */
     onAppsTap_: function() {
-      this.scrollDelegate_.scrollToApps();
-    },
-
-    /** @private */
-    onWebsitesTap_: function() {
-      this.scrollDelegate_.scrollToWebsites();
+      this.listDelegate_.showType(extensions.ShowingType.APPS);
     },
 
     /** @private */
@@ -106,19 +93,24 @@ cr.define('extensions', function() {
 
     /** @private */
     onPackTap_: function() {
-      this.delegate_.packExtension();
+      this.listDelegate_.showPackDialog();
     },
 
     /** @private */
     onUpdateNowTap_: function() {
       this.delegate_.updateAllExtensions();
     },
+
+    /** @private */
+    onKeyboardShortcutsTap_: function() {
+      this.listDelegate_.showKeyboardShortcuts();
+    },
   });
 
   return {
     Sidebar: Sidebar,
     SidebarDelegate: SidebarDelegate,
-    SidebarScrollDelegate: SidebarScrollDelegate,
+    SidebarListDelegate: SidebarListDelegate,
   };
 });
 

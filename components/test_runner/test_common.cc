@@ -9,9 +9,8 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/rand_util.h"
-#include "third_party/WebKit/public/platform/Platform.h"
-#include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebNavigationPolicy.h"
+#include "url/gurl.h"
 
 namespace test_runner {
 
@@ -25,26 +24,6 @@ const char file_test_prefix[] = "(file test):";
 const char data_url_pattern[] = "data:";
 const std::string::size_type data_url_pattern_size =
     sizeof(data_url_pattern) - 1;
-
-// This mock is used to initialize blink.
-class MockBlinkPlatform : NON_EXPORTED_BASE(public blink::Platform) {
- public:
-  MockBlinkPlatform() {
-    blink::Platform::initialize(this);
-  }
-  ~MockBlinkPlatform() override {}
-
-  void registerMemoryDumpProvider(blink::WebMemoryDumpProvider*,
-                                  const char* name) override {}
-  void unregisterMemoryDumpProvider(blink::WebMemoryDumpProvider*) override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockBlinkPlatform);
-};
-
-base::LazyInstance<MockBlinkPlatform>::Leaky g_mock_blink_platform =
-    LAZY_INSTANCE_INITIALIZER;
-
 const char* kIllegalString = "illegal value";
 const char* kPolicyIgnore = "Ignore";
 const char* kPolicyDownload = "download";
@@ -99,8 +78,11 @@ const char* WebNavigationPolicyToString(
   }
 }
 
-void EnsureBlinkInitialized() {
-  g_mock_blink_platform.Get();
+blink::WebString V8StringToWebString(v8::Local<v8::String> v8_str) {
+  int length = v8_str->Utf8Length() + 1;
+  std::unique_ptr<char[]> chars(new char[length]);
+  v8_str->WriteUtf8(chars.get(), length);
+  return blink::WebString::fromUTF8(chars.get());
 }
 
 }  // namespace test_runner

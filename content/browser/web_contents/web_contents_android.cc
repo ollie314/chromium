@@ -46,7 +46,9 @@ using base::android::ConvertJavaStringToUTF16;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertUTF16ToJavaString;
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 using base::android::ScopedJavaGlobalRef;
+using base::android::ScopedJavaLocalRef;
 using base::android::ToJavaIntArray;
 
 namespace content {
@@ -64,23 +66,13 @@ void JavaScriptResultCallback(const ScopedJavaGlobalRef<jobject>& callback,
   std::string json;
   base::JSONWriter::Write(*result, &json);
   ScopedJavaLocalRef<jstring> j_json = ConvertUTF8ToJavaString(env, json);
-  Java_WebContentsImpl_onEvaluateJavaScriptResult(
-      env, j_json.obj(), callback.obj());
+  Java_WebContentsImpl_onEvaluateJavaScriptResult(env, j_json, callback);
 }
 
 struct AccessibilitySnapshotParams {
-  AccessibilitySnapshotParams(float scale,
-                              float vertical_offset,
-                              float horizontal_scroll)
-      : scale_factor(scale),
-        y_offset(vertical_offset),
-        x_scroll(horizontal_scroll),
-        has_tree_data(false),
-        should_select_leaf_nodes(false) {}
+  AccessibilitySnapshotParams()
+      : has_tree_data(false), should_select_leaf_nodes(false) {}
 
-  float scale_factor;
-  float y_offset;
-  float x_scroll;
   bool has_tree_data;
   // The current text selection within this tree, if any, expressed as the
   // node ID and character offset of the anchor (selection start) and focus
@@ -96,12 +88,12 @@ struct AccessibilitySnapshotParams {
 ScopedJavaLocalRef<jobject> WalkAXTreeDepthFirst(
     JNIEnv* env,
     BrowserAccessibilityAndroid* node,
+    const gfx::Rect& parent_rect,
     AccessibilitySnapshotParams* params) {
   ScopedJavaLocalRef<jstring> j_text =
       ConvertUTF16ToJavaString(env, node->GetText());
   ScopedJavaLocalRef<jstring> j_class =
       ConvertUTF8ToJavaString(env, node->GetClassName());
-  const gfx::Rect& location = node->GetLocalBoundsRect();
   // The style attributes exists and valid if size attribute exists. Otherwise,
   // they are not. Use a negative size information to indicate the existence
   // of style information.
@@ -116,15 +108,18 @@ ScopedJavaLocalRef<jobject> WalkAXTreeDepthFirst(
     size =  node->GetFloatAttribute(ui::AX_ATTR_FONT_SIZE);
     text_style = node->GetIntAttribute(ui::AX_ATTR_TEXT_STYLE);
   }
-  float scale_factor = params->scale_factor;
+
+  const gfx::Rect& absolute_rect = node->GetPageBoundsRect();
+  gfx::Rect parent_relative_rect = absolute_rect;
+  bool is_root = node->GetParent() == nullptr;
+  if (!is_root) {
+    parent_relative_rect.Offset(-parent_rect.OffsetFromOrigin());
+  }
   ScopedJavaLocalRef<jobject> j_node =
       Java_WebContentsImpl_createAccessibilitySnapshotNode(
-          env, scale_factor * location.x() - params->x_scroll,
-          scale_factor * location.y() + params->y_offset,
-          scale_factor * node->GetScrollX(), scale_factor * node->GetScrollY(),
-          scale_factor * location.width(), scale_factor * location.height(),
-          j_text.obj(), color, bgcolor, scale_factor * size, text_style,
-          j_class.obj());
+          env, parent_relative_rect.x(), parent_relative_rect.y(),
+          absolute_rect.width(), absolute_rect.height(), is_root, j_text, color,
+          bgcolor, size, text_style, j_class);
 
   if (params->has_tree_data && node->PlatformIsLeaf()) {
     int start_selection = 0;
@@ -142,7 +137,7 @@ ScopedJavaLocalRef<jobject> WalkAXTreeDepthFirst(
     }
     if (end_selection > 0)
       Java_WebContentsImpl_setAccessibilitySnapshotSelection(
-          env, j_node.obj(), start_selection, end_selection);
+          env, j_node, start_selection, end_selection);
   }
 
   for (uint32_t i = 0; i < node->PlatformChildCount(); i++) {
@@ -150,18 +145,17 @@ ScopedJavaLocalRef<jobject> WalkAXTreeDepthFirst(
         static_cast<BrowserAccessibilityAndroid*>(
             node->PlatformGetChild(i));
     Java_WebContentsImpl_addAccessibilityNodeAsChild(
-        env, j_node.obj(), WalkAXTreeDepthFirst(env, child, params).obj());
+        env, j_node, WalkAXTreeDepthFirst(env, child, absolute_rect, params));
   }
   return j_node;
 }
 
 // Walks over the AXTreeUpdate and creates a light weight snapshot.
 void AXTreeSnapshotCallback(const ScopedJavaGlobalRef<jobject>& callback,
-                            AccessibilitySnapshotParams* params,
                             const ui::AXTreeUpdate& result) {
   JNIEnv* env = base::android::AttachCurrentThread();
   if (result.nodes.empty()) {
-    Java_WebContentsImpl_onAccessibilitySnapshot(env, nullptr, callback.obj());
+    Java_WebContentsImpl_onAccessibilitySnapshot(env, nullptr, callback);
     return;
   }
   std::unique_ptr<BrowserAccessibilityManagerAndroid> manager(
@@ -170,25 +164,27 @@ void AXTreeSnapshotCallback(const ScopedJavaGlobalRef<jobject>& callback,
   manager->set_prune_tree_for_screen_reader(false);
   BrowserAccessibilityAndroid* root =
       static_cast<BrowserAccessibilityAndroid*>(manager->GetRoot());
+  AccessibilitySnapshotParams params;
   if (result.has_tree_data) {
-    params->has_tree_data = true;
-    params->sel_anchor_object_id = result.tree_data.sel_anchor_object_id;
-    params->sel_anchor_offset = result.tree_data.sel_anchor_offset;
-    params->sel_focus_object_id = result.tree_data.sel_focus_object_id;
-    params->sel_focus_offset = result.tree_data.sel_focus_offset;
+    params.has_tree_data = true;
+    params.sel_anchor_object_id = result.tree_data.sel_anchor_object_id;
+    params.sel_anchor_offset = result.tree_data.sel_anchor_offset;
+    params.sel_focus_object_id = result.tree_data.sel_focus_object_id;
+    params.sel_focus_offset = result.tree_data.sel_focus_offset;
   }
-  ScopedJavaLocalRef<jobject> j_root = WalkAXTreeDepthFirst(env, root, params);
-  Java_WebContentsImpl_onAccessibilitySnapshot(
-      env, j_root.obj(), callback.obj());
+  gfx::Rect parent_rect;
+  ScopedJavaLocalRef<jobject> j_root =
+      WalkAXTreeDepthFirst(env, root, parent_rect, &params);
+  Java_WebContentsImpl_onAccessibilitySnapshot(env, j_root, callback);
 }
 
 }  // namespace
 
 // static
 WebContents* WebContents::FromJavaWebContents(
-    jobject jweb_contents_android) {
+    const JavaRef<jobject>& jweb_contents_android) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (!jweb_contents_android)
+  if (jweb_contents_android.is_null())
     return NULL;
 
   WebContentsAndroid* web_contents_android =
@@ -248,10 +244,9 @@ WebContentsAndroid::WebContentsAndroid(WebContentsImpl* web_contents)
   g_allocated_web_contents_androids.Get().insert(this);
   JNIEnv* env = AttachCurrentThread();
   obj_.Reset(env,
-             Java_WebContentsImpl_create(
-                 env,
-                 reinterpret_cast<intptr_t>(this),
-                 navigation_controller_.GetJavaObject().obj()).obj());
+             Java_WebContentsImpl_create(env, reinterpret_cast<intptr_t>(this),
+                                         navigation_controller_.GetJavaObject())
+                 .obj());
   RendererPreferences* prefs = web_contents_->GetMutableRendererPrefs();
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   prefs->network_contry_iso =
@@ -264,7 +259,7 @@ WebContentsAndroid::~WebContentsAndroid() {
   DCHECK(g_allocated_web_contents_androids.Get().find(this) !=
       g_allocated_web_contents_androids.Get().end());
   g_allocated_web_contents_androids.Get().erase(this);
-  Java_WebContentsImpl_clearNativePtr(AttachCurrentThread(), obj_.obj());
+  Java_WebContentsImpl_clearNativePtr(AttachCurrentThread(), obj_);
 }
 
 base::android::ScopedJavaLocalRef<jobject>
@@ -327,12 +322,6 @@ void WebContentsAndroid::SelectAll(JNIEnv* env,
 void WebContentsAndroid::Unselect(JNIEnv* env,
                                   const JavaParamRef<jobject>& obj) {
   web_contents_->Unselect();
-}
-
-void WebContentsAndroid::InsertCSS(JNIEnv* env,
-                                   const JavaParamRef<jobject>& jobj,
-                                   const JavaParamRef<jstring>& jcss) {
-  web_contents_->InsertCSS(base::android::ConvertJavaStringToUTF8(env, jcss));
 }
 
 RenderWidgetHostViewAndroid*
@@ -579,7 +568,7 @@ void WebContentsAndroid::SendMessageToFrame(
   base::string16 source_origin;
   base::string16 j_target_origin(ConvertJavaStringToUTF16(env, target_origin));
   base::string16 j_message(ConvertJavaStringToUTF16(env, message));
-  std::vector<content::TransferredMessagePort> ports;
+  std::vector<int> ports;
   content::MessagePortProvider::PostMessageToFrame(
       web_contents_, source_origin, j_target_origin, j_message, ports);
 }
@@ -599,21 +588,14 @@ jint WebContentsAndroid::GetThemeColor(JNIEnv* env,
 void WebContentsAndroid::RequestAccessibilitySnapshot(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
-    const JavaParamRef<jobject>& callback,
-    jfloat y_offset,
-    jfloat x_scroll) {
+    const JavaParamRef<jobject>& callback) {
   // Secure the Java callback in a scoped object and give ownership of it to the
   // base::Callback.
   ScopedJavaGlobalRef<jobject> j_callback;
   j_callback.Reset(env, callback);
-  gfx::DeviceDisplayInfo device_info;
-  ContentViewCoreImpl* contentViewCore =
-      ContentViewCoreImpl::FromWebContents(web_contents_);
 
-  AccessibilitySnapshotParams* params = new AccessibilitySnapshotParams(
-      contentViewCore->GetScaleFactor(), y_offset, x_scroll);
   WebContentsImpl::AXTreeSnapshotCallback snapshot_callback =
-      base::Bind(&AXTreeSnapshotCallback, j_callback, base::Owned(params));
+      base::Bind(&AXTreeSnapshotCallback, j_callback);
   static_cast<WebContentsImpl*>(web_contents_)->RequestAXTreeSnapshot(
       snapshot_callback);
 }
@@ -682,6 +664,25 @@ void WebContentsAndroid::ReloadLoFiImages(JNIEnv* env,
   static_cast<WebContentsImpl*>(web_contents_)->ReloadLoFiImages();
 }
 
+int WebContentsAndroid::DownloadImage(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj,
+    const base::android::JavaParamRef<jstring>& jurl,
+    jboolean is_fav_icon,
+    jint max_bitmap_size,
+    jboolean bypass_cache,
+    const base::android::JavaParamRef<jobject>& jcallback) {
+  GURL url(base::android::ConvertJavaStringToUTF8(env, jurl));
+  return web_contents_->DownloadImage(
+      url, is_fav_icon, max_bitmap_size, bypass_cache,
+      base::Bind(&WebContentsAndroid::OnFinishDownloadImage,
+                 weak_factory_.GetWeakPtr(),
+                 base::Owned(new ScopedJavaGlobalRef<jobject>(
+                     env, obj)),
+                 base::Owned(new ScopedJavaGlobalRef<jobject>(
+                     env, jcallback))));
+}
+
 void WebContentsAndroid::OnFinishGetContentBitmap(
     ScopedJavaGlobalRef<jobject>* obj,
     ScopedJavaGlobalRef<jobject>* callback,
@@ -691,11 +692,38 @@ void WebContentsAndroid::OnFinishGetContentBitmap(
   ScopedJavaLocalRef<jobject> java_bitmap;
   if (response == READBACK_SUCCESS)
     java_bitmap = gfx::ConvertToJavaBitmap(&bitmap);
-  Java_WebContentsImpl_onGetContentBitmapFinished(env,
-                                                  obj->obj(),
-                                                  callback->obj(),
-                                                  java_bitmap.obj(),
-                                                  response);
+  Java_WebContentsImpl_onGetContentBitmapFinished(env, *obj, *callback,
+                                                  java_bitmap, response);
 }
 
+void WebContentsAndroid::OnFinishDownloadImage(
+    base::android::ScopedJavaGlobalRef<jobject>* obj,
+    base::android::ScopedJavaGlobalRef<jobject>* callback,
+    int id,
+    int http_status_code,
+    const GURL& url,
+    const std::vector<SkBitmap>& bitmaps,
+    const std::vector<gfx::Size>& sizes) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> jbitmaps =
+      Java_WebContentsImpl_createBitmapList(env);
+  ScopedJavaLocalRef<jobject> jsizes =
+      Java_WebContentsImpl_createSizeList(env);
+  ScopedJavaLocalRef<jstring> jurl =
+      base::android::ConvertUTF8ToJavaString(env, url.spec());
+
+  for (const SkBitmap& bitmap : bitmaps) {
+    // WARNING: convering to java bitmaps results in duplicate memory
+    // allocations, which increases the chance of OOMs if DownloadImage() is
+    // misused.
+    ScopedJavaLocalRef<jobject> jbitmap = gfx::ConvertToJavaBitmap(&bitmap);
+    Java_WebContentsImpl_addToBitmapList(env, jbitmaps, jbitmap);
+  }
+  for (const gfx::Size& size : sizes) {
+    Java_WebContentsImpl_createSizeAndAddToList(env, jsizes, size.width(),
+                                                size.height());
+  }
+  Java_WebContentsImpl_onDownloadImageFinished(
+      env, *obj, *callback, id, http_status_code, jurl, jbitmaps, jsizes);
+}
 }  // namespace content

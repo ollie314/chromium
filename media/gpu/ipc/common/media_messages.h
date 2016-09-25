@@ -5,11 +5,13 @@
 // Multiply-included message file, hence no include guard here, but see below
 // for a much smaller-than-usual include guard section.
 
+#include <stdint.h>
+
+#include "base/unguessable_token.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/ipc/common/gpu_param_traits_macros.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/param_traits_macros.h"
-#include "media/base/bitstream_buffer.h"
 #include "media/gpu/ipc/common/media_param_traits.h"
 #include "media/video/jpeg_decode_accelerator.h"
 #include "media/video/video_decode_accelerator.h"
@@ -17,24 +19,6 @@
 #include "ui/gfx/ipc/gfx_param_traits.h"
 
 #define IPC_MESSAGE_START MediaMsgStart
-
-#ifndef MEDIA_GPU_IPC_COMMON_MEDIA_MESSAGES_H_
-#define MEDIA_GPU_IPC_COMMON_MEDIA_MESSAGES_H_
-
-namespace IPC {
-template <>
-struct ParamTraits<media::BitstreamBuffer> {
-  using param_type = media::BitstreamBuffer;
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-}  // namespace IPC
-
-#endif  // MEDIA_GPU_IPC_COMMON_MEDIA_MESSAGES_H_
 
 IPC_STRUCT_BEGIN(AcceleratedJpegDecoderMsg_Decode_Params)
   IPC_STRUCT_MEMBER(media::BitstreamBuffer, input_buffer)
@@ -60,6 +44,15 @@ IPC_STRUCT_BEGIN(AcceleratedVideoEncoderMsg_Encode_Params2)
   IPC_STRUCT_MEMBER(gfx::Size, size)
   IPC_STRUCT_MEMBER(bool, force_keyframe)
 IPC_STRUCT_END()
+
+//------------------------------------------------------------------------------
+// Utility Messages
+
+// Sent from Renderer to GPU process to request a token identifying the channel.
+// These tokens can be used to prove ownership of the channel. The intended use
+// case is to share the command buffer with MojoMediaApplication.
+IPC_SYNC_MESSAGE_CONTROL0_1(GpuCommandBufferMsg_GetChannelToken,
+                            base::UnguessableToken /* channel_token */)
 
 //------------------------------------------------------------------------------
 // Accelerated Video Decoder Messages
@@ -114,11 +107,12 @@ IPC_MESSAGE_ROUTED1(AcceleratedVideoDecoderHostMsg_BitstreamBufferProcessed,
                     int32_t) /* Processed buffer ID */
 
 // Allocate video frames for output of the hardware video decoder.
-IPC_MESSAGE_ROUTED4(AcceleratedVideoDecoderHostMsg_ProvidePictureBuffers,
-                    int32_t,   /* Number of video frames to generate */
-                    uint32_t,  /* Number of textures per frame */
-                    gfx::Size, /* Requested size of buffer */
-                    uint32_t)  /* Texture target */
+IPC_MESSAGE_ROUTED5(AcceleratedVideoDecoderHostMsg_ProvidePictureBuffers,
+                    int32_t, /* Number of video frames to generate */
+                    media::VideoPixelFormat, /* Picture buffer format */
+                    uint32_t,                /* Number of textures per frame */
+                    gfx::Size,               /* Requested size of buffer */
+                    uint32_t)                /* Texture target */
 
 // Decoder reports that a picture is ready and buffer does not need to be passed
 // back to the decoder.
@@ -195,10 +189,11 @@ IPC_MESSAGE_ROUTED1(AcceleratedVideoEncoderHostMsg_NotifyInputDone,
                     int32_t /* frame_id */)
 
 // Notify the renderer that an output buffer has been filled with encoded data.
-IPC_MESSAGE_ROUTED3(AcceleratedVideoEncoderHostMsg_BitstreamBufferReady,
+IPC_MESSAGE_ROUTED4(AcceleratedVideoEncoderHostMsg_BitstreamBufferReady,
                     int32_t /* bitstream_buffer_id */,
                     uint32_t /* payload_size */,
-                    bool /* key_frame */)
+                    bool /* key_frame */,
+                    base::TimeDelta /* timestamp */)
 
 // Report error condition.
 IPC_MESSAGE_ROUTED1(AcceleratedVideoEncoderHostMsg_NotifyError,

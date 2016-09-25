@@ -20,9 +20,7 @@
 #include "core/svg/SVGFEMorphologyElement.h"
 
 #include "core/SVGNames.h"
-#include "core/svg/SVGParserUtilities.h"
 #include "core/svg/graphics/filters/SVGFilterBuilder.h"
-#include "platform/graphics/filters/FilterEffect.h"
 
 namespace blink {
 
@@ -68,9 +66,7 @@ bool SVGFEMorphologyElement::setFilterEffectAttribute(FilterEffect* effect, cons
         bool isRadiusYChanged = morphology->setRadiusY(radiusY()->currentValue()->value());
         return isRadiusXChanged || isRadiusYChanged;
     }
-
-    ASSERT_NOT_REACHED();
-    return false;
+    return SVGFilterPrimitiveStandardAttributes::setFilterEffectAttribute(effect, attrName);
 }
 
 void SVGFEMorphologyElement::svgAttributeChanged(const QualifiedName& attrName)

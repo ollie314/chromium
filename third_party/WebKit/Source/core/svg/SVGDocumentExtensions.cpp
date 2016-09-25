@@ -26,7 +26,7 @@
 #include "core/layout/svg/SVGResourcesCache.h"
 #include "core/svg/SVGSVGElement.h"
 #include "core/svg/animation/SMILTimeContainer.h"
-#include "wtf/TemporaryChange.h"
+#include "wtf/AutoReset.h"
 #include "wtf/text/AtomicString.h"
 
 namespace blink {
@@ -86,20 +86,20 @@ LayoutSVGResourceContainer* SVGDocumentExtensions::resourceById(const AtomicStri
     return m_resources.get(id);
 }
 
-void SVGDocumentExtensions::serviceOnAnimationFrame(Document& document, double monotonicAnimationStartTime)
+void SVGDocumentExtensions::serviceOnAnimationFrame(Document& document)
 {
     if (!document.svgExtensions())
         return;
-    document.accessSVGExtensions().serviceAnimations(monotonicAnimationStartTime);
+    document.accessSVGExtensions().serviceAnimations();
 }
 
-void SVGDocumentExtensions::serviceAnimations(double monotonicAnimationStartTime)
+void SVGDocumentExtensions::serviceAnimations()
 {
     if (RuntimeEnabledFeatures::smilEnabled()) {
         HeapVector<Member<SVGSVGElement>> timeContainers;
         copyToVector(m_timeContainers, timeContainers);
         for (const auto& container : timeContainers)
-            container->timeContainer()->serviceAnimations(monotonicAnimationStartTime);
+            container->timeContainer()->serviceAnimations();
     }
 
     SVGElementSet webAnimationsPendingSVGElements;
@@ -123,7 +123,7 @@ void SVGDocumentExtensions::startAnimations()
     for (const auto& container : timeContainers) {
         SMILTimeContainer* timeContainer = container->timeContainer();
         if (!timeContainer->isStarted())
-            timeContainer->begin();
+            timeContainer->start();
     }
 }
 
@@ -150,13 +150,14 @@ void SVGDocumentExtensions::dispatchSVGLoadEventToOutermostSVGElements()
 
 void SVGDocumentExtensions::reportError(const String& message)
 {
-    m_document->addConsoleMessage(ConsoleMessage::create(RenderingMessageSource, ErrorMessageLevel,  "Error: " + message));
+    ConsoleMessage* consoleMessage = ConsoleMessage::create(RenderingMessageSource, ErrorMessageLevel,  "Error: " + message);
+    m_document->addConsoleMessage(consoleMessage);
 }
 
 void SVGDocumentExtensions::addPendingResource(const AtomicString& id, Element* element)
 {
     ASSERT(element);
-    ASSERT(element->inShadowIncludingDocument());
+    ASSERT(element->isConnected());
 
     if (id.isEmpty())
         return;
@@ -318,7 +319,7 @@ void SVGDocumentExtensions::invalidateSVGRootsWithRelativeLengthDescendents(Subt
 {
     ASSERT(!m_inRelativeLengthSVGRootsInvalidation);
 #if ENABLE(ASSERT)
-    TemporaryChange<bool> inRelativeLengthSVGRootsChange(m_inRelativeLengthSVGRootsInvalidation, true);
+    AutoReset<bool> inRelativeLengthSVGRootsChange(&m_inRelativeLengthSVGRootsInvalidation, true);
 #endif
 
     for (SVGSVGElement* element : m_relativeLengthSVGRoots)

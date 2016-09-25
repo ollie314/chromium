@@ -30,9 +30,9 @@
 #include "chrome/browser/ui/libgtk2ui/select_file_dialog_impl.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 #include "ui/strings/grit/ui_strings.h"
-#include "ui/views/widget/desktop_aura/x11_desktop_handler.h"
 
 namespace {
 
@@ -116,9 +116,6 @@ void SelectFileDialogImplGTK::SelectFileImpl(
     gfx::NativeWindow owning_window,
     void* params) {
   type_ = type;
-  // |owning_window| can be null when user right-clicks on a downloadable item
-  // and chooses 'Open Link in New Tab' when 'Ask where to save each file
-  // before downloading.' preference is turned on. (http://crbug.com/29213)
   if (owning_window) {
     owning_window->AddObserver(this);
     parents_.insert(owning_window);
@@ -172,8 +169,8 @@ void SelectFileDialogImplGTK::SelectFileImpl(
 
   // We need to call gtk_window_present after making the widgets visible to make
   // sure window gets correctly raised and gets focus.
-  int time = views::X11DesktopHandler::get()->wm_user_time_ms();
-  gtk_window_present_with_time(GTK_WINDOW(dialog), time);
+  gtk_window_present_with_time(
+      GTK_WINDOW(dialog), ui::X11EventSource::GetInstance()->GetTimestamp());
 }
 
 void SelectFileDialogImplGTK::AddFilters(GtkFileChooser* chooser) {
@@ -279,7 +276,7 @@ GtkWidget* SelectFileDialogImplGTK::CreateFileOpenHelper(
                                   GTK_FILE_CHOOSER_ACTION_OPEN,
                                   "_Cancel", GTK_RESPONSE_CANCEL,
                                   "_Open", GTK_RESPONSE_ACCEPT,
-                                  NULL);
+                                  nullptr);
   SetGtkTransientForAura(dialog, parent);
   AddFilters(GTK_FILE_CHOOSER(dialog));
 
@@ -321,7 +318,7 @@ GtkWidget* SelectFileDialogImplGTK::CreateSelectFolderDialog(
                                   "_Cancel", GTK_RESPONSE_CANCEL,
                                   accept_button_label.c_str(),
                                   GTK_RESPONSE_ACCEPT,
-                                  NULL);
+                                  nullptr);
   SetGtkTransientForAura(dialog, parent);
 
   if (!default_path.empty()) {
@@ -375,7 +372,7 @@ GtkWidget* SelectFileDialogImplGTK::CreateSaveAsDialog(const std::string& title,
                                   GTK_FILE_CHOOSER_ACTION_SAVE,
                                   "_Cancel", GTK_RESPONSE_CANCEL,
                                   "_Save", GTK_RESPONSE_ACCEPT,
-                                  NULL);
+                                  nullptr);
   SetGtkTransientForAura(dialog, parent);
 
   AddFilters(GTK_FILE_CHOOSER(dialog));
@@ -412,26 +409,6 @@ void* SelectFileDialogImplGTK::PopParamsForDialog(GtkWidget* dialog) {
   void* params = iter->second;
   params_map_.erase(iter);
   return params;
-}
-
-void SelectFileDialogImplGTK::FileDialogDestroyed(GtkWidget* dialog) {
-  dialogs_.erase(dialog);
-
-  // Parent may be NULL in a few cases: 1) on shutdown when
-  // AllBrowsersClosed() trigger this handler after all the browser
-  // windows got destroyed, or 2) when the parent tab has been opened by
-  // 'Open Link in New Tab' context menu on a downloadable item and
-  // the tab has no content (see the comment in SelectFile as well).
-  aura::Window* parent = GetAuraTransientParent(dialog);
-  if (!parent)
-    return;
-  std::set<aura::Window*>::iterator iter = parents_.find(parent);
-  if (iter != parents_.end()) {
-    (*iter)->RemoveObserver(this);
-    parents_.erase(iter);
-  } else {
-    NOTREACHED();
-  }
 }
 
 bool SelectFileDialogImplGTK::IsCancelResponse(gint response_id) {
@@ -513,7 +490,20 @@ void SelectFileDialogImplGTK::OnSelectMultiFileDialogResponse(GtkWidget* dialog,
 }
 
 void SelectFileDialogImplGTK::OnFileChooserDestroy(GtkWidget* dialog) {
-  FileDialogDestroyed(dialog);
+  dialogs_.erase(dialog);
+
+  // |parent| can be NULL when closing the host window
+  // while opening the file-picker.
+  aura::Window* parent = GetAuraTransientParent(dialog);
+  if (!parent)
+    return;
+  std::set<aura::Window*>::iterator iter = parents_.find(parent);
+  if (iter != parents_.end()) {
+    (*iter)->RemoveObserver(this);
+    parents_.erase(iter);
+  } else {
+    NOTREACHED();
+  }
 }
 
 void SelectFileDialogImplGTK::OnUpdatePreview(GtkWidget* chooser) {

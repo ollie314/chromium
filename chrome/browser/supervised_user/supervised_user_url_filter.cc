@@ -22,7 +22,6 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/supervised_user/experimental/supervised_user_async_url_checker.h"
 #include "chrome/browser/supervised_user/experimental/supervised_user_blacklist.h"
-#include "chrome/grit/generated_resources.h"
 #include "components/policy/core/browser/url_blacklist_manager.h"
 #include "components/url_formatter/url_fixer.h"
 #include "components/url_matcher/url_matcher.h"
@@ -465,7 +464,7 @@ bool SupervisedUserURLFilter::HasAsyncURLChecker() const {
 
 void SupervisedUserURLFilter::Clear() {
   default_behavior_ = ALLOW;
-  SetContents(base::WrapUnique(new Contents()));
+  SetContents(base::MakeUnique<Contents>());
   url_map_.clear();
   host_map_.clear();
   blacklist_ = nullptr;

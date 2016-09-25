@@ -15,6 +15,9 @@
 #include "ui/gfx/geometry/point.h"
 #include "ui/platform_window/platform_window_delegate.h"
 
+using base::android::JavaParamRef;
+using base::android::ScopedJavaLocalRef;
+
 namespace ui {
 
 namespace {
@@ -66,7 +69,7 @@ PlatformWindowAndroid::~PlatformWindowAndroid() {
   ScopedJavaLocalRef<jobject> scoped_obj =
       java_platform_window_android_.get(env);
   if (!scoped_obj.is_null()) {
-    Java_PlatformWindowAndroid_detach(env, scoped_obj.obj());
+    Java_PlatformWindowAndroid_detach(env, scoped_obj);
   }
 }
 
@@ -122,9 +125,10 @@ bool PlatformWindowAndroid::TouchEvent(JNIEnv* env,
   ui::EventType event_type = MotionEventActionToEventType(masked_action);
   if (event_type == ui::ET_UNKNOWN)
     return false;
-  ui::TouchEvent touch(event_type, gfx::Point(), ui::EF_NONE, pointer_id,
-                       base::TimeDelta::FromMilliseconds(time_ms), touch_major,
-                       touch_minor, orientation, pressure);
+  ui::TouchEvent touch(
+      event_type, gfx::Point(), ui::EF_NONE, pointer_id,
+      base::TimeTicks() + base::TimeDelta::FromMilliseconds(time_ms),
+      touch_major, touch_minor, orientation, pressure);
   touch.set_location_f(gfx::PointF(x, y));
   touch.set_root_location_f(gfx::PointF(x, y));
   delegate_->DispatchEvent(&touch);

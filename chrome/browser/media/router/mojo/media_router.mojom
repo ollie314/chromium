@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-module media_router.interfaces;
+module media_router.mojom;
+
+import "mojo/common/common_custom_types.mojom";
 
 // Represents an output sink to which media can be routed.
 struct MediaSink {
@@ -46,9 +48,8 @@ struct MediaRoute {
   string? custom_controller_path;
   // Set to true if this route should be displayed for |media_sink_id| in UI.
   bool for_display;
-  // Set to true if this route was created by an off the record (incognito)
-  // profile.
-  bool off_the_record;
+  // Set to true if this route was created by an incognito profile.
+  bool incognito;
 };
 
 // Notifications or an actionable events to be shown to the user.
@@ -97,8 +98,8 @@ struct Issue {
 
   array<ActionType>? secondary_actions;
 
-  // A help page to be opened if users select learn_more.
-  string? help_url;
+  // The ID of the help page to be opened if users select learn_more.
+  int32 help_page_id;
 };
 
 struct RouteMessage {
@@ -114,12 +115,28 @@ struct RouteMessage {
   array<uint8>? data;
 };
 
-// Maps to a ResultCode value in route_request_result.h
-// The enum defined here is a subset of those defined in route_request_result.h.
+struct SinkSearchCriteria {
+  // Input to the search method which each Media Route Provider may interpret
+  // differently.
+  string input;
+  // The user's current hosted domain.
+  string domain;
+};
+
+// Keep in sync with:
+// - RouteRequestResult::ResultCode in route_request_result.h
+// - MediaRouteProviderResult enum in tools/metrics/histograms.xml.
+// - mr.RouteRequestResultCode in route_request_error.js
 enum RouteRequestResultCode {
   UNKNOWN_ERROR,
   OK,
-  TIMED_OUT
+  TIMED_OUT,
+  ROUTE_NOT_FOUND,
+  SINK_NOT_FOUND,
+  INVALID_ORIGIN,
+  INCOGNITO_MISMATCH,
+  NO_SUPPORTED_PROVIDER
+// New values must be added here.
 };
 
 // Modeled after the MediaRouter interface defined in
@@ -135,11 +152,10 @@ interface MediaRouteProvider {
   // same-tab scopes. Use -1 as |tab_id| in cases where the request is not
   // made on behalf of a tab.
   //
-  // If |timeout_millis| is positive, it will be used in place of the default
-  // timeout defined by Media Route Provider Manager.
+  // If |timeout| is positive, it will be used in place of the default timeout
+  // defined by Media Route Provider Manager.
   //
-  // If |off_the_record| is true, the request was made by an off the record
-  // (incognito) profile.
+  // If |incognito| is true, the request was made by an incognito profile.
   //
   // If the operation was successful, |route| will be defined and
   //     |error_text| will be null.
@@ -152,8 +168,8 @@ interface MediaRouteProvider {
               string original_presentation_id,
               string origin,
               int32 tab_id,
-              int64 timeout_millis,
-              bool off_the_record) =>
+              mojo.common.mojom.TimeDelta timeout,
+              bool incognito) =>
                   (MediaRoute? route,
                    string? error_text,
                    RouteRequestResultCode result_code);
@@ -164,11 +180,11 @@ interface MediaRouteProvider {
   // |origin| and |tab_id| are used for validating same-origin/tab scopes;
   // see CreateRoute for additional documentation.
   //
-  // If |timeout_millis| is positive, it will be used in place of the default
-  // timeout defined by Media Route Provider Manager.
+  // If |timeout| is positive, it will be used in place of the default timeout
+  // defined by Media Route Provider Manager.
   //
-  // If the route request was created by an off the record (incognito) profile,
-  // |off_the_record| must be true.
+  // If the route request was created by an incognito profile,
+  // |incognito| must be true.
   //
   // If the operation was successful, |route| will be defined and
   //     |error_text| will be null.
@@ -180,15 +196,15 @@ interface MediaRouteProvider {
             string presentation_id,
             string origin,
             int32 tab_id,
-            int64 timeout_millis,
-            bool off_the_record) =>
+            mojo.common.mojom.TimeDelta timeout,
+            bool incognito) =>
                 (MediaRoute? route,
                  string? error_text,
                  RouteRequestResultCode result_code);
 
   // Creates a new route for |media_source| that connects to the established
   // route given by |route_id|.
-  // 
+  //
   // The presentation ID of the new route will be |presentation_id|, but it may
   // be overridden by a provider implementation.  The presentation ID will be
   // used by the presentation API to refer to the created route.
@@ -196,12 +212,12 @@ interface MediaRouteProvider {
   // |origin| and |tab_id| are used for validating same-origin/tab scopes; see
   // CreateRoute for additional documentation.
   //
-  // If |timeout_millis| is positive, it will be used in place of the default
-  // timeout defined by Media Route Provider Manager; see CreateRoute for additional
+  // If |timeout| is positive, it will be used in place of the default timeout
+  // defined by Media Route Provider Manager; see CreateRoute for additional
   // documentation.
   //
-  // If the route request was created by an off the record (incognito) profile,
-  // |off_the_record| must be true.
+  // If the route request was created by an incognito profile,
+  // |incognito| must be true.
   //
   // If the operation was successful, |route| will be defined and
   // |error_text| will be null. If the operation failed, |route| will be null
@@ -214,14 +230,18 @@ interface MediaRouteProvider {
                         string presentation_id,
                         string origin,
                         int32 tab_id,
-                        int64 timeout_millis,
-                        bool off_the_record) =>
+                        mojo.common.mojom.TimeDelta timeout,
+                        bool incognito) =>
                             (MediaRoute? route,
                              string? error_text,
                              RouteRequestResultCode result_code);
 
-  // Terminates the route specified by |route_id|.
-  TerminateRoute(string route_id);
+  // Terminates the route specified by |route_id|.  If the route was terminated
+  // successfully, |result_code| is set to OK and |error_text| is null.
+  // Otherwise, |result_code| is an error code and |error_text| describes the
+  // error.
+  TerminateRoute(string route_id) =>
+      (string? error_text, RouteRequestResultCode result_code);
 
   // Sends |message| via the media route |media_route_id|.
   // If the operation was successful, |sent| is true; otherwise it is false.
@@ -263,18 +283,15 @@ interface MediaRouteProvider {
   // that being with StartObservingMediaRoutes()).
   StopObservingMediaRoutes(string media_source);
 
-  // Called when the MediaRouter is ready to get the next batch of messages
-  // associated with |route_id|.
-  // |messages| returned will contain the batch of messages.
-  // |messages| will be empty if |StopListeningForRouteMessages| was invoked.
-  // |error| indicates if a permanent error occurred. If true, then subsequent
-  // calls will also return with |error| being true.
-  ListenForRouteMessages(string route_id) =>
-      (array<RouteMessage> messages, bool error);
+  // Starts listening for messages from the media sink for the route given by
+  // |route_id|.
+  // |MediaRouter::OnRouteMessagesReceived| will be invoked when a batch of
+  // messages arrives, or when there is an error.
+  // |StopListeningForRouteMessages| will stop the Media Router from receiving
+  // further messages for |route_id|.
+  StartListeningForRouteMessages(string route_id);
 
   // Called when there are no more listeners for messages for |route_id|.
-  // Calling this will resolve the pending |ListenForRouteMessages| callback
-  // with an empty list.
   StopListeningForRouteMessages(string route_id);
 
   // Indicates that a PresentationConnection that was connected to route
@@ -289,6 +306,17 @@ interface MediaRouteProvider {
 
   // Updates media sinks capable of displaying |media_source|.
   UpdateMediaSinks(string media_source);
+
+  // Indicates that the Media Router is interested in finding a sink that
+  // matches |search_criteria| and is compatible with the source urn
+  // |media_source|. |search_criteria| should contain an exact copy of the user
+  // input. The user's current domain is also used to search.  The domain is the
+  // hosted domain of the user's signed-in identity, or empty if the user has no
+  // domain or is not signed in.
+  SearchSinks(string sink_id,
+              string media_source,
+              SinkSearchCriteria search_criteria) =>
+                  (string sink_id);
 };
 
 // Interface for a service which observes state changes across media
@@ -354,5 +382,13 @@ interface MediaRouter {
   OnPresentationConnectionClosed(
       string route_id, PresentationConnectionCloseReason reason,
       string message);
-};
 
+  // Called when the a batch of messages arrives from the media sink for the
+  // route given by |route_id|.
+  // |StartListeningForRouteMessages| must be called first in order to receive
+  // messages.
+  // |route_id|: ID of route of the messages.
+  // |messages|: A non-empty list of messages received.
+  OnRouteMessagesReceived(string route_id,
+                          array<RouteMessage> messages);
+};

@@ -24,7 +24,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/mock_entropy_provider.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/history/chrome_history_client.h"
@@ -71,8 +71,8 @@ std::unique_ptr<KeyedService> BuildHistoryService(
 
   std::unique_ptr<history::HistoryService> history_service(
       new history::HistoryService(
-          base::WrapUnique(new ChromeHistoryClient(
-              BookmarkModelFactory::GetForProfile(profile))),
+          base::MakeUnique<ChromeHistoryClient>(
+              BookmarkModelFactory::GetForBrowserContext(profile)),
           std::unique_ptr<history::VisitDelegate>()));
   if (history_service->Init(
           history::HistoryDatabaseParamsForPath(profile->GetPath()))) {
@@ -273,7 +273,8 @@ class LastDownloadFinderTest : public testing::Test {
     return history::DownloadRow(
         base::FilePath(file_path), base::FilePath(file_path),
         std::vector<GURL>(1, GURL("http://www.google.com")),  // url_chain
-        GURL("http://referrer.example.com/"),        // referrer
+        GURL("http://referrer.example.com/"),                 // referrer
+        GURL("http://site-url.example.com/"),        // site instance URL
         GURL("http://tab-url.example.com/"),         // tab URL
         GURL("http://tab-referrer.example.com/"),    // tab referrer URL
         std::string(),                               // HTTP method
@@ -292,9 +293,9 @@ class LastDownloadFinderTest : public testing::Test {
         std::string(),                                 // hash
         download_id_++,                                // id
         base::GenerateGUID(),                          // GUID
-        false,           // download_opened
-        std::string(),   // ext_id
-        std::string());  // ext_name
+        false,                                         // download_opened
+        std::string(),                                 // ext_id
+        std::string());                                // ext_name
   }
 
   content::TestBrowserThreadBundle browser_thread_bundle_;
@@ -388,7 +389,8 @@ TEST_F(LastDownloadFinderTest, NonBinaryOnly) {
 // enabled.
 TEST_F(LastDownloadFinderTest, SimpleEndToEndFieldTrial) {
   // Set up a field trial
-  base::FieldTrialList field_trial_list(new base::MockEntropyProvider());
+  base::FieldTrialList field_trial_list(
+      base::MakeUnique<base::MockEntropyProvider>());
   base::FieldTrialList::CreateFieldTrial("SafeBrowsingIncidentReportingService",
                                          "Enabled");
   // Create a profile with a history service that is opted-in to Safe Browsing

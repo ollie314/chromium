@@ -9,17 +9,14 @@
 #include <utility>
 #include <vector>
 
+#include "ash/aura/wm_window_aura.h"
+#include "ash/common/shelf/wm_shelf.h"
+#include "ash/common/wm/window_animation_types.h"
+#include "ash/common/wm/workspace_controller.h"
 #include "ash/screen_util.h"
-#include "ash/shelf/shelf.h"
-#include "ash/shelf/shelf_layout_manager.h"
-#include "ash/shelf/shelf_widget.h"
-#include "ash/wm/common/window_animation_types.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/workspace_controller.h"
-#include "base/command_line.h"
-#include "base/compiler_specific.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
 #include "ui/aura/client/aura_constants.h"
@@ -33,15 +30,15 @@
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/layer_tree_owner.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
-#include "ui/gfx/geometry/vector3d_f.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/interpolated_transform.h"
-#include "ui/gfx/screen.h"
-#include "ui/views/view.h"
-#include "ui/views/widget/widget.h"
+#include "ui/gfx/transform.h"
 #include "ui/wm/core/window_util.h"
 
 namespace ash {
 namespace {
+
 const int kLayerAnimationsForMinimizeDurationMS = 200;
 
 // Durations for the cross-fade animation, in milliseconds.
@@ -57,10 +54,6 @@ const float kWindowAnimation_ShowBrightnessGrayscale = 0.f;
 
 const float kWindowAnimation_HideOpacity = 0.f;
 const float kWindowAnimation_ShowOpacity = 1.f;
-
-// Scales for AshWindow above/below current workspace.
-const float kLayerScaleAboveSize = 1.1f;
-const float kLayerScaleBelowSize = .9f;
 
 int64_t Round64(float f) {
   return static_cast<int64_t>(f + 0.5f);
@@ -84,8 +77,7 @@ base::TimeDelta GetCrossFadeDuration(aura::Window* window,
   if (delta_area == 0)
     return base::TimeDelta::FromMilliseconds(kCrossFadeDurationMS);
 
-  float factor =
-      static_cast<float>(delta_area) / static_cast<float>(max_area);
+  float factor = static_cast<float>(delta_area) / static_cast<float>(max_area);
   const float kRange = kCrossFadeDurationMaxMs - kCrossFadeDurationMinMs;
   return base::TimeDelta::FromMilliseconds(
       Round64(kCrossFadeDurationMinMs + (factor * kRange)));
@@ -117,15 +109,15 @@ void AddLayerAnimationsForMinimize(aura::Window* window, bool show) {
   scale->SetChild(translation.release());
   scale->SetReversed(show);
 
-  base::TimeDelta duration = window->layer()->GetAnimator()->
-      GetTransitionDuration();
+  base::TimeDelta duration =
+      window->layer()->GetAnimator()->GetTransitionDuration();
 
   std::unique_ptr<ui::LayerAnimationElement> transition(
       ui::LayerAnimationElement::CreateInterpolatedTransformElement(
           scale.release(), duration));
 
-  transition->set_tween_type(
-      show ? gfx::Tween::EASE_IN : gfx::Tween::EASE_IN_OUT);
+  transition->set_tween_type(show ? gfx::Tween::EASE_IN
+                                  : gfx::Tween::EASE_IN_OUT);
 
   window->layer()->GetAnimator()->ScheduleAnimation(
       new ui::LayerAnimationSequence(transition.release()));
@@ -141,22 +133,21 @@ void AddLayerAnimationsForMinimize(aura::Window* window, bool show) {
   float opacity = show ? 1.0f : 0.0f;
   window->layer()->GetAnimator()->ScheduleAnimation(
       new ui::LayerAnimationSequence(
-          ui::LayerAnimationElement::CreateOpacityElement(
-              opacity, duration / 4)));
+          ui::LayerAnimationElement::CreateOpacityElement(opacity,
+                                                          duration / 4)));
 
   // Reset the transform to identity when the minimize animation is completed.
   window->layer()->GetAnimator()->ScheduleAnimation(
       new ui::LayerAnimationSequence(
           ui::LayerAnimationElement::CreateTransformElement(
-              gfx::Transform(),
-              base::TimeDelta())));
+              gfx::Transform(), base::TimeDelta())));
 }
 
 void AnimateShowWindow_Minimize(aura::Window* window) {
   window->layer()->SetOpacity(kWindowAnimation_HideOpacity);
   ui::ScopedLayerAnimationSettings settings(window->layer()->GetAnimator());
-  base::TimeDelta duration = base::TimeDelta::FromMilliseconds(
-      kLayerAnimationsForMinimizeDurationMS);
+  base::TimeDelta duration =
+      base::TimeDelta::FromMilliseconds(kLayerAnimationsForMinimizeDurationMS);
   settings.SetTransitionDuration(duration);
   AddLayerAnimationsForMinimize(window, true);
 
@@ -169,8 +160,8 @@ void AnimateShowWindow_Minimize(aura::Window* window) {
 void AnimateHideWindow_Minimize(aura::Window* window) {
   // Property sets within this scope will be implicitly animated.
   ::wm::ScopedHidingAnimationSettings hiding_settings(window);
-  base::TimeDelta duration = base::TimeDelta::FromMilliseconds(
-      kLayerAnimationsForMinimizeDurationMS);
+  base::TimeDelta duration =
+      base::TimeDelta::FromMilliseconds(kLayerAnimationsForMinimizeDurationMS);
   hiding_settings.layer_animation_settings()->SetTransitionDuration(duration);
   window->layer()->SetVisible(false);
 
@@ -200,14 +191,12 @@ void AnimateShowHideWindowCommon_BrightnessGrayscale(aura::Window* window,
 
   if (show) {
     ui::ScopedLayerAnimationSettings settings(window->layer()->GetAnimator());
-    window->layer()->GetAnimator()->
-        ScheduleTogether(
-            CreateBrightnessGrayscaleAnimationSequence(end_value, duration));
+    window->layer()->GetAnimator()->ScheduleTogether(
+        CreateBrightnessGrayscaleAnimationSequence(end_value, duration));
   } else {
     ::wm::ScopedHidingAnimationSettings hiding_settings(window);
-    window->layer()->GetAnimator()->
-        ScheduleTogether(
-            CreateBrightnessGrayscaleAnimationSequence(end_value, duration));
+    window->layer()->GetAnimator()->ScheduleTogether(
+        CreateBrightnessGrayscaleAnimationSequence(end_value, duration));
     window->layer()->SetOpacity(kWindowAnimation_HideOpacity);
     window->layer()->SetVisible(false);
   }
@@ -222,8 +211,8 @@ void AnimateHideWindow_BrightnessGrayscale(aura::Window* window) {
 }
 
 bool AnimateShowWindow(aura::Window* window) {
-  if (!::wm::HasWindowVisibilityAnimationTransition(
-          window, ::wm::ANIMATE_SHOW)) {
+  if (!::wm::HasWindowVisibilityAnimationTransition(window,
+                                                    ::wm::ANIMATE_SHOW)) {
     return false;
   }
 
@@ -241,8 +230,8 @@ bool AnimateShowWindow(aura::Window* window) {
 }
 
 bool AnimateHideWindow(aura::Window* window) {
-  if (!::wm::HasWindowVisibilityAnimationTransition(
-          window, ::wm::ANIMATE_HIDE)) {
+  if (!::wm::HasWindowVisibilityAnimationTransition(window,
+                                                    ::wm::ANIMATE_HIDE)) {
     return false;
   }
 
@@ -329,8 +318,8 @@ base::TimeDelta CrossFadeAnimation(
   const bool old_on_top = (old_bounds.width() > new_bounds.width());
 
   // Shorten the animation if there's not much visual movement.
-  const base::TimeDelta duration = GetCrossFadeDuration(window,
-      old_transformed_bounds, new_bounds);
+  const base::TimeDelta duration =
+      GetCrossFadeDuration(window, old_transformed_bounds, new_bounds);
 
   // Scale up the old layer while translating to new position.
   {
@@ -346,9 +335,9 @@ base::TimeDelta CrossFadeAnimation(
     settings.SetTweenType(tween_type);
     gfx::Transform out_transform;
     float scale_x = static_cast<float>(new_bounds.width()) /
-        static_cast<float>(old_bounds.width());
+                    static_cast<float>(old_bounds.width());
     float scale_y = static_cast<float>(new_bounds.height()) /
-        static_cast<float>(old_bounds.height());
+                    static_cast<float>(old_bounds.height());
     out_transform.Translate(new_bounds.x() - old_bounds.x(),
                             new_bounds.y() - old_bounds.y());
     out_transform.Scale(scale_x, scale_y);
@@ -365,10 +354,10 @@ base::TimeDelta CrossFadeAnimation(
   // Set the new layer's current transform, such that the user sees a scaled
   // version of the window with the original bounds at the original position.
   gfx::Transform in_transform;
-  const float scale_x = old_transformed_bounds.width() /
-      static_cast<float>(new_bounds.width());
-  const float scale_y = old_transformed_bounds.height() /
-      static_cast<float>(new_bounds.height());
+  const float scale_x =
+      old_transformed_bounds.width() / static_cast<float>(new_bounds.width());
+  const float scale_y =
+      old_transformed_bounds.height() / static_cast<float>(new_bounds.height());
   in_transform.Translate(old_transformed_bounds.x() - new_bounds.x(),
                          old_transformed_bounds.y() - new_bounds.y());
   in_transform.Scale(scale_x, scale_y);
@@ -406,7 +395,7 @@ bool AnimateOnChildWindowVisibilityChanged(aura::Window* window, bool visible) {
     return AnimateShowWindow(window);
   // Don't start hiding the window again if it's already being hidden.
   return window->layer()->GetTargetOpacity() != 0.0f &&
-      AnimateHideWindow(window);
+         AnimateHideWindow(window);
 }
 
 std::vector<ui::LayerAnimationSequence*>
@@ -437,25 +426,10 @@ CreateBrightnessGrayscaleAnimationSequence(float target_value,
   return animations;
 }
 
-// Returns scale related to the specified AshWindowScaleType.
-void SetTransformForScaleAnimation(ui::Layer* layer,
-                                   LayerScaleAnimationDirection type) {
-  const float scale =
-      type == LAYER_SCALE_ANIMATION_ABOVE ? kLayerScaleAboveSize :
-          kLayerScaleBelowSize;
-  gfx::Transform transform;
-  transform.Translate(-layer->bounds().width() * (scale - 1.0f) / 2,
-                      -layer->bounds().height() * (scale - 1.0f) / 2);
-  transform.Scale(scale, scale);
-  layer->SetTransform(transform);
-}
-
 gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
-  Shelf* shelf = Shelf::ForWindow(window);
-  // Shelf is created lazily and can be NULL.
-  if (!shelf)
-    return gfx::Rect();
-  gfx::Rect item_rect = shelf->GetScreenBoundsOfItemIconForWindow(window);
+  WmWindow* wm_window = WmWindowAura::Get(window);
+  WmShelf* shelf = WmShelf::ForWindow(wm_window);
+  gfx::Rect item_rect = shelf->GetScreenBoundsOfItemIconForWindow(wm_window);
 
   // The launcher item is visible and has an icon.
   if (!item_rect.IsEmpty())
@@ -467,8 +441,8 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
   // are still reported correctly and the window can be animated to the launcher
   // item's light bar.
   if (item_rect.width() != 0 || item_rect.height() != 0) {
-    if (shelf->shelf_layout_manager()->visibility_state() == SHELF_AUTO_HIDE) {
-      gfx::Rect shelf_bounds = shelf->shelf_widget()->GetWindowBoundsInScreen();
+    if (shelf->GetVisibilityState() == SHELF_AUTO_HIDE) {
+      gfx::Rect shelf_bounds = shelf->GetWindow()->GetBoundsInScreen();
       if (shelf->alignment() == SHELF_ALIGNMENT_LEFT)
         item_rect.set_x(shelf_bounds.right());
       else if (shelf->alignment() == SHELF_ALIGNMENT_RIGHT)
@@ -483,12 +457,19 @@ gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
   // to the location of the application launcher (which is fixed as first item
   // of the shelf).
   gfx::Rect work_area =
-      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window).work_area();
+      display::Screen::GetScreen()->GetDisplayNearestWindow(window).work_area();
   int ltr_adjusted_x = base::i18n::IsRTL() ? work_area.right() : work_area.x();
-  return shelf->SelectValueForShelfAlignment(
-      gfx::Rect(ltr_adjusted_x, work_area.bottom(), 0, 0),
-      gfx::Rect(work_area.x(), work_area.y(), 0, 0),
-      gfx::Rect(work_area.right(), work_area.y(), 0, 0));
+  switch (shelf->alignment()) {
+    case SHELF_ALIGNMENT_BOTTOM:
+    case SHELF_ALIGNMENT_BOTTOM_LOCKED:
+      return gfx::Rect(ltr_adjusted_x, work_area.bottom(), 0, 0);
+    case SHELF_ALIGNMENT_LEFT:
+      return gfx::Rect(work_area.x(), work_area.y(), 0, 0);
+    case SHELF_ALIGNMENT_RIGHT:
+      return gfx::Rect(work_area.right(), work_area.y(), 0, 0);
+  }
+  NOTREACHED();
+  return gfx::Rect();
 }
 
 }  // namespace ash

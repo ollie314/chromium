@@ -38,35 +38,40 @@ namespace blink {
 
 void SVGPreserveAspectRatioTearOff::setAlign(unsigned short align, ExceptionState& exceptionState)
 {
-    if (align == SVG_PRESERVEASPECTRATIO_UNKNOWN || align > SVG_PRESERVEASPECTRATIO_XMAXYMAX) {
+    if (isImmutable()) {
+        throwReadOnly(exceptionState);
+        return;
+    }
+    if (align == kSvgPreserveaspectratioUnknown || align > kSvgPreserveaspectratioXmaxymax) {
         exceptionState.throwDOMException(NotSupportedError, "The alignment provided is invalid.");
         return;
     }
-    if (isImmutable()) {
-        exceptionState.throwDOMException(NoModificationAllowedError, "The attribute is read-only.");
-        return;
-    }
-
     target()->setAlign(static_cast<SVGPreserveAspectRatio::SVGPreserveAspectRatioType>(align));
+    commitChange();
 }
 
 void SVGPreserveAspectRatioTearOff::setMeetOrSlice(unsigned short meetOrSlice, ExceptionState& exceptionState)
 {
-    if (meetOrSlice == SVG_MEETORSLICE_UNKNOWN || meetOrSlice > SVG_MEETORSLICE_SLICE) {
+    if (isImmutable()) {
+        throwReadOnly(exceptionState);
+        return;
+    }
+    if (meetOrSlice == kSvgMeetorsliceUnknown || meetOrSlice > kSvgMeetorsliceSlice) {
         exceptionState.throwDOMException(NotSupportedError, "The meetOrSlice provided is invalid.");
         return;
     }
-    if (isImmutable()) {
-        exceptionState.throwDOMException(NoModificationAllowedError, "The attribute is read-only.");
-        return;
-    }
-
     target()->setMeetOrSlice(static_cast<SVGPreserveAspectRatio::SVGMeetOrSliceType>(meetOrSlice));
+    commitChange();
 }
 
 SVGPreserveAspectRatioTearOff::SVGPreserveAspectRatioTearOff(SVGPreserveAspectRatio* target, SVGElement* contextElement, PropertyIsAnimValType propertyIsAnimVal, const QualifiedName& attributeName)
     : SVGPropertyTearOff<SVGPreserveAspectRatio>(target, contextElement, propertyIsAnimVal, attributeName)
 {
+}
+
+DEFINE_TRACE_WRAPPERS(SVGPreserveAspectRatioTearOff)
+{
+    visitor->traceWrappers(contextElement());
 }
 
 } // namespace blink

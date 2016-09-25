@@ -7,13 +7,13 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "media/base/cdm_key_information.h"
 #include "media/cdm/aes_decryptor.h"
@@ -94,8 +94,7 @@ class ClearKeyCdm : public ClearKeyCdmInterface {
   // ContentDecryptionModule callbacks.
   void OnSessionMessage(const std::string& session_id,
                         MediaKeys::MessageType message_type,
-                        const std::vector<uint8_t>& message,
-                        const GURL& legacy_destination_url);
+                        const std::vector<uint8_t>& message);
   void OnSessionKeysChange(const std::string& session_id,
                            bool has_additional_usable_key,
                            CdmKeysInfo keys_info);
@@ -140,10 +139,14 @@ class ClearKeyCdm : public ClearKeyCdmInterface {
                                       cdm::AudioFrames* audio_frames);
 #endif  // CLEAR_KEY_CDM_USE_FAKE_AUDIO_DECODER
 
+  void OnUnitTestComplete(bool success);
+
   void StartFileIOTest();
 
   // Callback for CDM File IO test.
   void OnFileIOTestComplete(bool success);
+
+  void StartOutputProtectionTest();
 
   // Keep track of the last session created.
   void SetSessionId(const std::string& session_id);
@@ -202,12 +205,14 @@ class ClearKeyCdm : public ClearKeyCdmInterface {
 #endif  // CLEAR_KEY_CDM_USE_FAKE_AUDIO_DECODER
 
 #if defined(CLEAR_KEY_CDM_USE_FFMPEG_DECODER)
-  scoped_ptr<FFmpegCdmAudioDecoder> audio_decoder_;
+  std::unique_ptr<FFmpegCdmAudioDecoder> audio_decoder_;
 #endif  // CLEAR_KEY_CDM_USE_FFMPEG_DECODER
 
-  scoped_ptr<CdmVideoDecoder> video_decoder_;
+  std::unique_ptr<CdmVideoDecoder> video_decoder_;
 
-  scoped_ptr<FileIOTestRunner> file_io_test_runner_;
+  std::unique_ptr<FileIOTestRunner> file_io_test_runner_;
+
+  bool is_running_output_protection_test_;
 
   DISALLOW_COPY_AND_ASSIGN(ClearKeyCdm);
 };

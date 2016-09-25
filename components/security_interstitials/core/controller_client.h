@@ -5,10 +5,10 @@
 #ifndef COMPONENTS_SECURITY_INTERSTITIALS_CORE_CONTROLLER_CLIENT_H_
 #define COMPONENTS_SECURITY_INTERSTITIALS_CORE_CONTROLLER_CLIENT_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 
 class GURL;
 class PrefService;
@@ -46,8 +46,9 @@ enum SecurityInterstitialCommands {
   CMD_DO_REPORT = 8,
   CMD_DONT_REPORT = 9,
   CMD_OPEN_REPORTING_PRIVACY = 10,
+  CMD_OPEN_WHITEPAPER = 11,
   // Report a phishing error
-  CMD_REPORT_PHISHING_ERROR = 11,
+  CMD_REPORT_PHISHING_ERROR = 12,
 };
 
 // Provides methods for handling commands from the user, which requires some
@@ -61,6 +62,7 @@ class ControllerClient {
   // Handle the user's reporting preferences.
   void SetReportingPreference(bool report);
   void OpenExtendedReportingPrivacyPolicy();
+  void OpenExtendedReportingWhitepaper();
 
   // If available, open the operating system's date/time settings.
   virtual bool CanLaunchDateAndTimeSettings() = 0;
@@ -76,7 +78,7 @@ class ControllerClient {
   virtual void Reload() = 0;
 
   MetricsHelper* metrics_helper() const;
-  void set_metrics_helper(scoped_ptr<MetricsHelper> metrics_helper);
+  void set_metrics_helper(std::unique_ptr<MetricsHelper> metrics_helper);
 
   virtual void OpenUrlInCurrentTab(const GURL& url) = 0;
 
@@ -86,7 +88,7 @@ class ControllerClient {
   virtual const std::string GetExtendedReportingPrefName() = 0;
 
  private:
-  scoped_ptr<MetricsHelper> metrics_helper_;
+  std::unique_ptr<MetricsHelper> metrics_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(ControllerClient);
 };

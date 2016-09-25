@@ -7,9 +7,9 @@
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/tab_contents/origins_seen_service.h"
 #include "chrome/browser/tab_contents/origins_seen_service_factory.h"
 #include "components/navigation_metrics/navigation_metrics.h"
+#include "components/navigation_metrics/origins_seen_service.h"
 #include "components/rappor/rappor_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -42,7 +42,7 @@ void NavigationMetricsRecorder::DidNavigateMainFrame(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   content::BrowserContext* context = web_contents()->GetBrowserContext();
-  OriginsSeenService* service =
+  navigation_metrics::OriginsSeenService* service =
       OriginsSeenServiceFactory::GetForBrowserContext(context);
   const url::Origin origin(details.entry->GetVirtualURL());
   bool have_already_seen_origin = service->Insert(origin);
@@ -54,7 +54,8 @@ void NavigationMetricsRecorder::DidNavigateMainFrame(
   // Record the domain and registry of the URL that resulted in a navigation to
   // a |data:| URL, either by redirects or user clicking a link.
   if (details.entry->GetVirtualURL().SchemeIs(url::kDataScheme) &&
-      params.transition != ui::PAGE_TRANSITION_TYPED &&
+      !ui::PageTransitionCoreTypeIs(params.transition,
+                                    ui::PAGE_TRANSITION_TYPED) &&
       !details.previous_url.is_empty()) {
     rappor::SampleDomainAndRegistryFromGURL(g_browser_process->rappor_service(),
                                             "Navigation.Scheme.Data",

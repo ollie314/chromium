@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
@@ -13,11 +15,13 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_paths.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/strings/grit/extensions_strings.h"
 #include "extensions/test/test_extensions_client.h"
 #include "extensions/utility/unpacker.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/zlib/google/zip.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using base::ASCIIToUTF16;
 
@@ -29,7 +33,7 @@ namespace keys = manifest_keys;
 class UnpackerTest : public testing::Test {
  public:
   ~UnpackerTest() override {
-    VLOG(1) << "Deleting temp dir: " << temp_dir_.path().LossyDisplayName();
+    VLOG(1) << "Deleting temp dir: " << temp_dir_.GetPath().LossyDisplayName();
     VLOG(1) << temp_dir_.Delete();
   }
 
@@ -43,18 +47,19 @@ class UnpackerTest : public testing::Test {
     // a temp folder to play in.
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
-    base::FilePath unzipped_dir = temp_dir_.path().AppendASCII("unzipped");
+    base::FilePath unzipped_dir = temp_dir_.GetPath().AppendASCII("unzipped");
     ASSERT_TRUE(zip::Unzip(crx_path, unzipped_dir))
         << "Failed to unzip " << crx_path.value() << " to "
         << unzipped_dir.value();
 
-    unpacker_.reset(new Unpacker(temp_dir_.path(), unzipped_dir, std::string(),
-                                 Manifest::INTERNAL, Extension::NO_FLAGS));
+    unpacker_.reset(new Unpacker(temp_dir_.GetPath(), unzipped_dir,
+                                 std::string(), Manifest::INTERNAL,
+                                 Extension::NO_FLAGS));
   }
 
  protected:
   base::ScopedTempDir temp_dir_;
-  scoped_ptr<Unpacker> unpacker_;
+  std::unique_ptr<Unpacker> unpacker_;
 };
 
 TEST_F(UnpackerTest, EmptyDefaultLocale) {
@@ -98,9 +103,12 @@ TEST_F(UnpackerTest, MissingDefaultData) {
 
 TEST_F(UnpackerTest, MissingDefaultLocaleHasLocalesFolder) {
   SetupUnpacker("missing_default_has_locales.crx");
+  const base::string16 kExpectedError =
+      l10n_util::GetStringUTF16(
+          IDS_EXTENSION_LOCALES_NO_DEFAULT_LOCALE_SPECIFIED);
+
   EXPECT_FALSE(unpacker_->Run());
-  EXPECT_EQ(ASCIIToUTF16(errors::kLocalesNoDefaultLocaleSpecified),
-            unpacker_->error_message());
+  EXPECT_EQ(kExpectedError, unpacker_->error_message());
 }
 
 TEST_F(UnpackerTest, MissingMessagesFile) {
@@ -186,6 +194,40 @@ TEST_F(UnpackerTest, ImageDecodingError) {
                                base::CompareCase::INSENSITIVE_ASCII))
       << "Expected prefix: \"" << kExpected << "\", actual error: \""
       << unpacker_->error_message() << "\"";
+}
+
+base::FilePath CreateEmptyTestFile(const base::FilePath& test_dir,
+                                   const base::FilePath& file_path) {
+  base::FilePath test_file(test_dir.Append(file_path));
+  base::FilePath temp_file;
+  EXPECT_TRUE(base::CreateTemporaryFileInDir(test_dir, &temp_file));
+  EXPECT_TRUE(base::Move(temp_file, test_file));
+  return test_file;
+}
+
+TEST_F(UnpackerTest, BlockedFileTypes) {
+  const struct {
+    const base::FilePath::CharType* input;
+    bool expected;
+  } cases[] = {
+      {FILE_PATH_LITERAL("foo"), true},
+      {FILE_PATH_LITERAL("foo.nexe"), true},
+      {FILE_PATH_LITERAL("foo.dll"), true},
+      {FILE_PATH_LITERAL("foo.jpg.exe"), false},
+      {FILE_PATH_LITERAL("foo.exe"), false},
+      {FILE_PATH_LITERAL("foo.EXE"), false},
+  };
+
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  for (size_t i = 0; i < arraysize(cases); ++i) {
+    base::FilePath input(cases[i].input);
+    base::FilePath test_file(CreateEmptyTestFile(temp_dir.path(), input));
+    bool observed = Unpacker::ShouldExtractFile(test_file);
+    EXPECT_EQ(cases[i].expected, observed) << "i: " << i
+                                           << ", input: " << test_file.value();
+  }
 }
 
 }  // namespace extensions

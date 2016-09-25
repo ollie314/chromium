@@ -30,7 +30,6 @@
 
 #include "platform/text/LocaleWin.h"
 
-#include <limits>
 #include "platform/DateComponents.h"
 #include "platform/Language.h"
 #include "platform/LayoutTestSupport.h"
@@ -38,11 +37,12 @@
 #include "wtf/CurrentTime.h"
 #include "wtf/DateMath.h"
 #include "wtf/HashMap.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/text/StringBuffer.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/StringHash.h"
+#include <limits>
+#include <memory>
 
 namespace blink {
 
@@ -59,7 +59,15 @@ static LCID LCIDFromLocaleInternal(LCID userDefaultLCID, const String& userDefau
     String localeLanguageCode = extractLanguageCode(locale);
     if (equalIgnoringCase(localeLanguageCode, userDefaultLanguageCode))
         return userDefaultLCID;
-    return ::LocaleNameToLCID(locale.charactersWithNullTermination().data(), 0);
+    if (locale.length() >= LOCALE_NAME_MAX_LENGTH)
+        return 0;
+    UChar buffer[LOCALE_NAME_MAX_LENGTH];
+    if (locale.is8Bit())
+        StringImpl::copyChars(buffer, locale.characters8(), locale.length());
+    else
+        StringImpl::copyChars(buffer, locale.characters16(), locale.length());
+    buffer[locale.length()] = '\0';
+    return ::LocaleNameToLCID(buffer, 0);
 }
 
 static LCID LCIDFromLocale(const String& locale, bool defaultsForLocale)
@@ -76,7 +84,7 @@ static LCID LCIDFromLocale(const String& locale, bool defaultsForLocale)
     return lcid;
 }
 
-PassOwnPtr<Locale> Locale::create(const String& locale)
+std::unique_ptr<Locale> Locale::create(const String& locale)
 {
     // Whether the default settings for the locale should be used, ignoring user overrides.
     bool defaultsForLocale = LayoutTestSupport::isRunningLayoutTest();
@@ -95,9 +103,9 @@ inline LocaleWin::LocaleWin(LCID lcid, bool defaultsForLocale)
     m_firstDayOfWeek = (value + 1) % 7;
 }
 
-PassOwnPtr<LocaleWin> LocaleWin::create(LCID lcid, bool defaultsForLocale)
+std::unique_ptr<LocaleWin> LocaleWin::create(LCID lcid, bool defaultsForLocale)
 {
-    return adoptPtr(new LocaleWin(lcid, defaultsForLocale));
+    return wrapUnique(new LocaleWin(lcid, defaultsForLocale));
 }
 
 LocaleWin::~LocaleWin()
@@ -169,7 +177,7 @@ static void commitLiteralToken(StringBuilder& literalBuffer, StringBuilder& conv
 {
     if (literalBuffer.length() <= 0)
         return;
-    DateTimeFormat::quoteAndAppendLiteral(literalBuffer.toString(), converted);
+    DateTimeFormat::quoteAndappend(literalBuffer.toString(), converted);
     literalBuffer.clear();
 }
 
@@ -233,9 +241,9 @@ static String convertWindowsDateTimeFormat(const String& format)
                 if (count <= 2)
                     converted.append(format, symbolStart, count);
                 else if (count == 3)
-                    converted.appendLiteral("EEE");
+                    converted.append("EEE");
                 else
-                    converted.appendLiteral("EEEE");
+                    converted.append("EEEE");
             } else if (ch == 'g') {
                 if (count == 1) {
                     converted.append('G');
@@ -381,7 +389,7 @@ String LocaleWin::shortTimeFormat()
         format = getLocaleInfoString(LOCALE_STIMEFORMAT);
         StringBuilder builder;
         builder.append(getLocaleInfoString(LOCALE_STIME));
-        builder.appendLiteral("ss");
+        builder.append("ss");
         size_t pos = format.reverseFind(builder.toString());
         if (pos != kNotFound)
             format.remove(pos, builder.length());

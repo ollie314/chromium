@@ -16,7 +16,7 @@ public:
     friend class MarkingVisitorImpl<InlinedGlobalMarkingVisitor>;
     using Impl = MarkingVisitorImpl<InlinedGlobalMarkingVisitor>;
 
-    InlinedGlobalMarkingVisitor() { }
+    explicit InlinedGlobalMarkingVisitor(ThreadState* state) : VisitorHelper(state) { }
 
     // Hack to unify interface to visitor->trace().
     // Without this hack, we need to use visitor.trace() for
@@ -47,7 +47,7 @@ public:
 protected:
     // Methods to be called from MarkingVisitorImpl.
 
-    inline bool shouldMarkObject(const void*)
+    inline bool shouldMarkObject(const void*) const
     {
         // As this is global marking visitor, we need to mark all objects.
         return true;

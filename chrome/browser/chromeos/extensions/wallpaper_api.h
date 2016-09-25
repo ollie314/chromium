@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_CHROMEOS_EXTENSIONS_WALLPAPER_API_H_
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_WALLPAPER_API_H_
 
+#include <memory>
+
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/extensions/wallpaper_function_base.h"
 #include "chrome/common/extensions/api/wallpaper.h"
@@ -62,10 +64,6 @@ class WallpaperSetWallpaperFunction : public WallpaperFunctionBase {
 
   // Id used to identify user wallpaper files on hard drive.
   wallpaper::WallpaperFilesId wallpaper_files_id_;
-
-  // Sequence token associated with wallpaper operations. Shared with
-  // WallpaperManager.
-  base::SequencedWorkerPool::SequenceToken sequence_token_;
 };
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_WALLPAPER_API_H_

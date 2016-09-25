@@ -47,7 +47,6 @@ class UsbServiceImpl :
 
  private:
   // device::UsbService implementation
-  scoped_refptr<UsbDevice> GetDevice(const std::string& guid) override;
   void GetDevices(const GetDevicesCallback& callback) override;
 
 #if defined(OS_WIN)
@@ -80,9 +79,12 @@ class UsbServiceImpl :
   void OnPlatformDeviceAdded(PlatformUsbDevice platform_device);
   void OnPlatformDeviceRemoved(PlatformUsbDevice platform_device);
 
+  // Add |platform_device| to the |ignored_devices_| and
+  // run |refresh_complete|.
+  void EnumerationFailed(PlatformUsbDevice platform_device,
+                         const base::Closure& refresh_complete);
+
   scoped_refptr<UsbContext> context_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
 
   // When available the device list will be updated when new devices are
   // connected instead of only when a full enumeration is requested.
@@ -96,14 +98,14 @@ class UsbServiceImpl :
   std::queue<std::string> pending_path_enumerations_;
   std::vector<GetDevicesCallback> pending_enumeration_callbacks_;
 
-  // The map from unique IDs to UsbDevices.
-  typedef std::map<std::string, scoped_refptr<UsbDeviceImpl>> DeviceMap;
-  DeviceMap devices_;
-
   // The map from PlatformUsbDevices to UsbDevices.
   typedef std::map<PlatformUsbDevice, scoped_refptr<UsbDeviceImpl>>
       PlatformDeviceMap;
   PlatformDeviceMap platform_devices_;
+
+  // The set of devices that only need to be enumerated once and then can be
+  // ignored (for example, hub devices, devices that failed enumeration, etc.).
+  std::set<PlatformUsbDevice> ignored_devices_;
 
   // Tracks PlatformUsbDevices that might be removed while they are being
   // enumerated.

@@ -42,6 +42,7 @@ class LayoutRect;
 class Node;
 
 class MODULES_EXPORT AXNodeObject : public AXObject {
+    WTF_MAKE_NONCOPYABLE(AXNodeObject);
 protected:
     AXNodeObject(Node*, AXObjectCacheImpl&);
 
@@ -64,7 +65,7 @@ protected:
     virtual AccessibilityRole nativeAccessibilityRoleIgnoringAria() const;
     String accessibilityDescriptionForElements(HeapVector<Member<Element>> &elements) const;
     void alterSliderValue(bool increase);
-    AXObject* activeDescendant() const override;
+    AXObject* activeDescendant() override;
     String ariaAccessibilityDescription() const;
     String ariaAutoComplete() const;
     AccessibilityRole determineAriaRoleAttribute() const;
@@ -74,7 +75,6 @@ protected:
     bool isTextControl() const override;
     // This returns true if it's focusable but it's not content editable and it's not a control or ARIA control.
     bool isGenericFocusableElement() const;
-    HTMLLabelElement* labelForElement(const Element*) const;
     AXObject* menuButtonForMenu() const;
     Element* menuItemElementForMenu() const;
     Element* mouseButtonListener() const;
@@ -97,7 +97,7 @@ protected:
     bool isAnchor() const final;
     bool isControl() const override;
     bool isControllingVideoElement() const;
-    bool isEditable() const override { return isTextControl(); }
+    bool isEditable() const override { return isNativeTextControl(); }
     bool isEmbeddedObject() const final;
     bool isFieldset() const final;
     bool isHeading() const final;
@@ -138,11 +138,13 @@ protected:
     bool canvasHasFallbackContent() const final;
     int headingLevel() const final;
     unsigned hierarchicalLevel() const final;
+    void markers(Vector<DocumentMarker::MarkerType>&, Vector<AXRange>&) const override;
     AccessibilityOrientation orientation() const override;
     String text() const override;
 
     // Properties of interactive elements.
     AccessibilityButtonState checkboxOrRadioValue() const final;
+    AriaCurrentState ariaCurrentState() const final;
     InvalidState getInvalidState() const final;
     // Only used when invalidState() returns InvalidStateOther.
     String ariaInvalidValue() const final;
@@ -164,8 +166,8 @@ protected:
     String placeholder(AXNameFrom, AXDescriptionFrom) const override;
     bool nameFromLabelElement() const override;
 
-    // Location and click point in frame-relative coordinates.
-    LayoutRect elementRect() const override;
+    // Location
+    void getRelativeBounds(AXObject** outContainer, FloatRect& outBoundsInContainer, SkMatrix44& outContainerTransform) const override;
 
     // High-level accessibility tree access.
     AXObject* computeParent() const override;

@@ -24,6 +24,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "platform/image-decoders/ImageFrame.h"
+
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/image-decoders/ImageDecoder.h"
 
 namespace blink {
@@ -93,13 +96,22 @@ bool ImageFrame::copyBitmapData(const ImageFrame& other)
     return other.m_bitmap.copyTo(&m_bitmap, other.m_bitmap.colorType());
 }
 
-bool ImageFrame::setSize(int newWidth, int newHeight)
+bool ImageFrame::setSizeAndColorProfile(int newWidth, int newHeight, const ICCProfile& newIccProfile)
 {
-    // setSize() should only be called once, it leaks memory otherwise.
+    // setSizeAndColorProfile() should only be called once, it leaks memory otherwise.
     ASSERT(!width() && !height());
 
+    sk_sp<SkColorSpace> colorSpace;
+    if (RuntimeEnabledFeatures::colorCorrectRenderingEnabled()) {
+        if (newIccProfile.isEmpty())
+            colorSpace = SkColorSpace::NewNamed(SkColorSpace::kSRGB_Named);
+        else
+            colorSpace = SkColorSpace::NewICC(newIccProfile.data(), newIccProfile.size());
+        DCHECK(colorSpace);
+    }
+
     m_bitmap.setInfo(SkImageInfo::MakeN32(newWidth, newHeight,
-        m_premultiplyAlpha ? kPremul_SkAlphaType : kUnpremul_SkAlphaType));
+        m_premultiplyAlpha ? kPremul_SkAlphaType : kUnpremul_SkAlphaType, colorSpace));
     if (!m_bitmap.tryAllocPixels(m_allocator, 0))
         return false;
 

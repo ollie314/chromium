@@ -17,6 +17,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
+#include "base/threading/thread_checker.h"
 #include "extensions/common/permissions/permission_message.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
@@ -27,7 +28,6 @@ class Profile;
 
 namespace base {
 class DictionaryValue;
-class MessageLoop;
 }  // namespace base
 
 namespace content {
@@ -260,6 +260,10 @@ class ExtensionInstallPrompt {
   // The implementations of this function are platform-specific.
   static ShowDialogCallback GetDefaultShowDialogCallback();
 
+  // Callback to show the Views extension install dialog. Don't use this; it is
+  // a temporary hack for MacViews.
+  static ShowDialogCallback GetViewsShowDialogCallback();
+
   // Returns the appropriate prompt type for the given |extension|.
   // TODO(devlin): This method is yucky - callers probably only care about one
   // prompt type. We just need to comb through and figure out what it is.
@@ -350,7 +354,7 @@ class ExtensionInstallPrompt {
 
   Profile* profile_;
 
-  base::MessageLoop* ui_loop_;
+  base::ThreadChecker ui_thread_checker_;
 
   // The extensions installation icon.
   SkBitmap icon_;

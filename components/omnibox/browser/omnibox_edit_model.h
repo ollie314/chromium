@@ -7,22 +7,24 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
+#include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_controller_delegate.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/omnibox_controller.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "components/omnibox/common/omnibox_focus_state.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
 
-class AutocompleteController;
 class AutocompleteResult;
 class OmniboxClient;
 class OmniboxEditController;
@@ -36,11 +38,13 @@ class Rect;
 
 // Reasons why the Omnibox could change into keyword mode.
 // These numeric values are used in UMA logs; do not change them.
-enum EnteredKeywordModeMethod {
-  ENTERED_KEYWORD_MODE_VIA_TAB = 0,
-  ENTERED_KEYWORD_MODE_VIA_SPACE_AT_END = 1,
-  ENTERED_KEYWORD_MODE_VIA_SPACE_IN_MIDDLE = 2,
-  ENTERED_KEYWORD_MODE_NUM_ITEMS
+enum class KeywordModeEntryMethod {
+  TAB = 0,
+  SPACE_AT_END = 1,
+  SPACE_IN_MIDDLE = 2,
+  KEYBOARD_SHORTCUT = 3,
+  QUESTION_MARK = 4,
+  NUM_ITEMS,
 };
 
 class OmniboxEditModel {
@@ -59,7 +63,7 @@ class OmniboxEditModel {
           const base::string16& gray_text,
           const base::string16& keyword,
           bool is_keyword_hint,
-          bool url_replacement_enabled,
+          KeywordModeEntryMethod keyword_mode_entry_method,
           OmniboxFocusState focus_state,
           FocusSource focus_source,
           const AutocompleteInput& autocomplete_input);
@@ -71,7 +75,7 @@ class OmniboxEditModel {
     const base::string16 gray_text;
     const base::string16 keyword;
     const bool is_keyword_hint;
-    bool url_replacement_enabled;
+    KeywordModeEntryMethod keyword_mode_entry_method;
     OmniboxFocusState focus_state;
     FocusSource focus_source;
     const AutocompleteInput autocomplete_input;
@@ -79,7 +83,7 @@ class OmniboxEditModel {
 
   OmniboxEditModel(OmniboxView* view,
                    OmniboxEditController* controller,
-                   scoped_ptr<OmniboxClient> client);
+                   std::unique_ptr<OmniboxClient> client);
   virtual ~OmniboxEditModel();
 
   // TODO(beaudoin): Remove this accessor when the AutocompleteController has
@@ -236,10 +240,14 @@ class OmniboxEditModel {
   }
 
   // Accepts the current keyword hint as a keyword. It always returns true for
-  // caller convenience. |entered_method| indicates how the use entered
-  // keyword mode. This parameter is only used for metrics/logging; it's not
-  // used to change user-visible behavior.
-  bool AcceptKeyword(EnteredKeywordModeMethod entered_method);
+  // caller convenience. |entered_method| indicates how the user entered
+  // keyword mode.
+  bool AcceptKeyword(KeywordModeEntryMethod entry_method);
+
+  // Sets the current keyword to that of the user's default search provider and
+  // updates the view so the user sees the keyword chip in the omnibox.
+  void EnterKeywordModeForDefaultSearchProvider(
+      KeywordModeEntryMethod entry_method);
 
   // Accepts the current temporary text as the user text.
   void AcceptTemporaryTextAsUserText();
@@ -323,19 +331,13 @@ class OmniboxEditModel {
   // Called by the OmniboxView after something changes, with details about what
   // state changes occured.  Updates internal state, updates the popup if
   // necessary, and returns true if any significant changes occurred.  Note that
-  // |text_differs| may be set even if |old_text| == |new_text|, e.g. if we've
-  // just committed an IME composition.
+  // |text_change.text_differs| may be set even if |text_change.old_text| ==
+  // |text_change.new_text|, e.g. if we've just committed an IME composition.
   //
   // If |allow_keyword_ui_change| is false then the change should not affect
   // keyword ui state, even if the text matches a keyword exactly. This value
   // may be false when the user is composing a text with an IME.
-  bool OnAfterPossibleChange(const base::string16& old_text,
-                             const base::string16& new_text,
-                             size_t selection_start,
-                             size_t selection_end,
-                             bool selection_differs,
-                             bool text_differs,
-                             bool just_deleted_text,
+  bool OnAfterPossibleChange(const OmniboxView::StateChanges& state_changes,
                              bool allow_keyword_ui_change);
 
   // Called when the current match has changed in the OmniboxController.
@@ -368,15 +370,19 @@ class OmniboxEditModel {
     DOWN_WITH_CHANGE,     // The control key is depressed, and the edit's
                           // contents/selection have changed since it was
                           // depressed.  If the user now hits enter, we assume
-                          // he simply hasn't released the key, rather than that
-                          // he intended to hit "ctrl-enter".
+                          // they simply haven't released the key, rather than
+                          // that they intended to hit "ctrl-enter".
   };
 
   // Returns true if a query to an autocomplete provider is currently
   // in progress.  This logic should in the future live in
   // AutocompleteController but resides here for now.  This method is used by
   // AutomationProvider::AutocompleteEditIsQueryInProgress.
-  bool query_in_progress() const;
+  bool query_in_progress() const { return !autocomplete_controller()->done(); }
+
+  // Returns true if the popup exists and is open.  (This is a convenience
+  // wrapper for the benefit of test code, which may not have a popup model.)
+  bool PopupIsOpen() const;
 
   // Called whenever user_text_ should change.
   void InternalSetUserText(const base::string16& text);
@@ -387,8 +393,8 @@ class OmniboxEditModel {
   // Conversion between user text and display text. User text is the text the
   // user has input. Display text is the text being shown in the edit. The
   // two are different if a keyword is selected.
-  base::string16 DisplayTextFromUserText(const base::string16& text) const;
-  base::string16 UserTextFromDisplayText(const base::string16& text) const;
+  base::string16 MaybeStripKeyword(const base::string16& text) const;
+  base::string16 MaybePrependKeyword(const base::string16& text) const;
 
   // If there's a selected match, copies it into |match|. Else, returns the
   // default match for the current text, as well as the alternate nav URL, if
@@ -439,9 +445,9 @@ class OmniboxEditModel {
 
   // NOTE: |client_| must outlive |omnibox_controller_|, as the latter has a
   // reference to the former.
-  scoped_ptr<OmniboxClient> client_;
+  std::unique_ptr<OmniboxClient> client_;
 
-  scoped_ptr<OmniboxController> omnibox_controller_;
+  std::unique_ptr<OmniboxController> omnibox_controller_;
 
   OmniboxView* view_;
 
@@ -545,6 +551,11 @@ class OmniboxEditModel {
   // user hasn't actually selected a keyword yet.  When this is true, we can use
   // keyword_ to show a "Press <tab> to search" sort of hint.
   bool is_keyword_hint_;
+
+  // Indicates how the user entered keyword mode if the user is actually in
+  // keyword mode.  Otherwise, the value of this variable is undefined.  This
+  // is used to restore the user's search terms upon a call to ClearKeyword().
+  KeywordModeEntryMethod keyword_mode_entry_method_;
 
   // This is needed to properly update the SearchModel state when the user
   // presses escape.

@@ -1,11 +1,11 @@
 {
     "extensions": [
         {
-            "type": "@WebInspector.PanelFactory",
+            "type": "@WebInspector.Panel",
             "name": "timeline",
             "title": "Timeline",
             "order": 50,
-            "className": "WebInspector.TimelinePanelFactory"
+            "className": "WebInspector.TimelinePanel"
         },
         {
             "type": "setting",
@@ -21,9 +21,14 @@
             "className": "WebInspector.LoadTimelineHandler"
         },
         {
-            "type": "@WebInspector.UISourceCodeFrame.LineDecorator",
-            "className": "WebInspector.TimelineUIUtils.PerformanceLineDecorator",
-            "decoratorType": "performance"
+            "type": "context-menu-item",
+            "location": "timelineMenu/open",
+            "actionId": "timeline.load-from-file"
+        },
+        {
+            "type": "context-menu-item",
+            "location": "timelineMenu/open",
+            "actionId": "timeline.save-to-file"
         },
         {
             "type": "@WebInspector.ActionDelegate",
@@ -48,9 +53,11 @@
         },
         {
             "type": "@WebInspector.ActionDelegate",
+            "category": "Timeline",
             "actionId": "timeline.save-to-file",
             "contextTypes": ["WebInspector.TimelinePanel"],
             "className": "WebInspector.TimelinePanel.ActionDelegate",
+            "title": "Save Timeline data\u2026",
             "bindings": [
                 {
                     "platform": "windows,linux",
@@ -64,10 +71,12 @@
         },
         {
             "type": "@WebInspector.ActionDelegate",
+            "category": "Timeline",
             "actionId": "timeline.load-from-file",
             "contextTypes": ["WebInspector.TimelinePanel"],
             "order": "10",
             "className": "WebInspector.TimelinePanel.ActionDelegate",
+            "title": "Load Timeline data\u2026",
             "bindings": [
                 {
                     "platform": "windows,linux",
@@ -105,33 +114,21 @@
     "dependencies": [
         "components",
         "components_lazy",
-        "source_frame",
-        "sources",
+        "layer_viewer",
+        "timeline_model",
         "ui_lazy"
     ],
     "scripts": [
-        "LayerTreeModel.js",
         "CountersGraph.js",
-        "LayerDetailsView.js",
-        "LayerTreeOutline.js",
-        "LayerViewHost.js",
-        "Layers3DView.js",
         "MemoryCountersGraph.js",
         "TimelineController.js",
-        "TimelineModel.js",
-        "TimelineIRModel.js",
-        "TimelineJSProfile.js",
         "TimelineLoader.js",
-        "TimelineFrameModel.js",
         "TimelineEventOverview.js",
         "TimelineFlameChart.js",
         "TimelineTreeView.js",
         "TimelineUIUtils.js",
         "TimelineLayersView.js",
         "TimelinePaintProfilerView.js",
-        "TimelineProfileTree.js",
-        "TransformController.js",
-        "PaintProfilerView.js",
         "TimelinePanel.js"
     ],
     "resources": [

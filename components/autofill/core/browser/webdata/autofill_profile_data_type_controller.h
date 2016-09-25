@@ -10,7 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/scoped_observer.h"
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
-#include "components/sync_driver/non_ui_data_type_controller.h"
+#include "components/sync/driver/non_ui_data_type_controller.h"
 
 namespace autofill {
 class AutofillWebDataService;
@@ -24,23 +24,21 @@ class AutofillProfileDataTypeController
     : public sync_driver::NonUIDataTypeController,
       public autofill::PersonalDataManagerObserver {
  public:
+  // |dump_stack| is called when an unrecoverable error occurs.
   AutofillProfileDataTypeController(
-      const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
       const scoped_refptr<base::SingleThreadTaskRunner>& db_thread,
-      const base::Closure& error_callback,
+      const base::Closure& dump_stack,
       sync_driver::SyncClient* sync_client,
       const scoped_refptr<autofill::AutofillWebDataService>& web_data_service);
+  ~AutofillProfileDataTypeController() override;
 
   // NonUIDataTypeController:
-  syncer::ModelType type() const override;
   syncer::ModelSafeGroup model_safe_group() const override;
 
   // PersonalDataManagerObserver:
   void OnPersonalDataChanged() override;
 
  protected:
-  ~AutofillProfileDataTypeController() override;
-
   // NonUIDataTypeController:
   bool PostTaskOnBackendThread(const tracked_objects::Location& from_here,
                                const base::Closure& task) override;
@@ -50,9 +48,6 @@ class AutofillProfileDataTypeController
  private:
   // Callback to notify that WebDatabase has loaded.
   void WebDatabaseLoaded();
-
-  // A reference to the UI thread's task runner.
-  const scoped_refptr<base::SingleThreadTaskRunner> ui_thread_;
 
   // A reference to the DB thread's task runner.
   const scoped_refptr<base::SingleThreadTaskRunner> db_thread_;

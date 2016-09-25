@@ -6,6 +6,7 @@
 #define PaintChunker_h
 
 #include "platform/PlatformExport.h"
+#include "platform/graphics/paint/DisplayItem.h"
 #include "platform/graphics/paint/PaintChunk.h"
 #include "platform/graphics/paint/PaintChunkProperties.h"
 #include "wtf/Allocator.h"
@@ -21,24 +22,29 @@ class PLATFORM_EXPORT PaintChunker final {
     DISALLOW_NEW();
     WTF_MAKE_NONCOPYABLE(PaintChunker);
 public:
-    enum ItemBehavior {
-        // Can be combined with adjacent items when building chunks.
-        DefaultBehavior = 0,
-
-        // Item requires its own paint chunk.
-        RequiresSeparateChunk,
-    };
-
     PaintChunker();
     ~PaintChunker();
 
     bool isInInitialState() const { return m_chunks.isEmpty() && m_currentProperties == PaintChunkProperties(); }
 
     const PaintChunkProperties& currentPaintChunkProperties() const { return m_currentProperties; }
-    void updateCurrentPaintChunkProperties(const PaintChunkProperties&);
+    void updateCurrentPaintChunkProperties(const PaintChunk::Id*, const PaintChunkProperties&);
 
-    void incrementDisplayItemIndex(ItemBehavior);
-    void decrementDisplayItemIndex();
+    // Returns true if a new chunk is created.
+    bool incrementDisplayItemIndex(const DisplayItem&);
+    // Returns true if the last chunk is removed.
+    bool decrementDisplayItemIndex();
+
+    PaintChunk& paintChunkAt(size_t i) { return m_chunks[i]; }
+    size_t lastChunkIndex() const { return m_chunks.isEmpty() ? kNotFound : m_chunks.size() - 1; }
+    PaintChunk& lastChunk() { return m_chunks.last(); }
+
+    PaintChunk& findChunkByDisplayItemIndex(size_t index)
+    {
+        auto chunk = findChunkInVectorByDisplayItemIndex(m_chunks, index);
+        DCHECK(chunk != m_chunks.end());
+        return *chunk;
+    }
 
     void clear();
 
@@ -47,8 +53,17 @@ public:
     Vector<PaintChunk> releasePaintChunks();
 
 private:
+    enum ItemBehavior {
+        // Can be combined with adjacent items when building chunks.
+        DefaultBehavior = 0,
+
+        // Item requires its own paint chunk.
+        RequiresSeparateChunk,
+    };
+
     Vector<PaintChunk> m_chunks;
     Vector<ItemBehavior> m_chunkBehavior;
+    Optional<PaintChunk::Id> m_currentChunkId;
     PaintChunkProperties m_currentProperties;
 };
 

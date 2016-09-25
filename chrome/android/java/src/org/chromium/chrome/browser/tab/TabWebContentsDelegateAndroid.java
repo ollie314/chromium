@@ -36,11 +36,12 @@ import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.tabmodel.TabWindowManager;
 import org.chromium.components.web_contents_delegate_android.WebContentsDelegateAndroid;
 import org.chromium.content_public.browser.InvalidateTypes;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.ui.WindowOpenDisposition;
+import org.chromium.content_public.common.ResourceRequestBody;
+import org.chromium.ui.mojom.WindowOpenDisposition;
 
 /**
  * A basic {@link TabWebContentsDelegateAndroid} that forwards some calls to the registered
@@ -73,6 +74,7 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
     private int mDisplayMode = WebDisplayMode.Browser;
 
     protected Handler mHandler;
+
     private final Runnable mCloseContentsRunnable = new Runnable() {
         @Override
         public void run() {
@@ -82,11 +84,7 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
             // If the parent Tab belongs to another Activity, fire the Intent to bring it back.
             if (isSelected && mTab.getParentIntent() != null
                     && mTab.getActivity().getIntent() != mTab.getParentIntent()) {
-                boolean mayLaunch = FeatureUtilities.isDocumentMode(mTab.getApplicationContext())
-                        ? isParentInAndroidOverview() : true;
-                if (mayLaunch) {
-                    mTab.getActivity().startActivity(mTab.getParentIntent());
-                }
+                mTab.getActivity().startActivity(mTab.getParentIntent());
             }
         }
 
@@ -185,13 +183,13 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
     }
 
     @Override
-    public void onLoadStarted(boolean toDifferentDocument) {
-        mTab.onLoadStarted(toDifferentDocument);
-    }
-
-    @Override
-    public void onLoadStopped() {
-        mTab.onLoadStopped();
+    public void loadingStateChanged(boolean toDifferentDocument) {
+        boolean isLoading = mTab.getWebContents() != null && mTab.getWebContents().isLoading();
+        if (isLoading) {
+            mTab.onLoadStarted(toDifferentDocument);
+        } else {
+            mTab.onLoadStopped();
+        }
     }
 
     @Override
@@ -225,9 +223,10 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
     @Override
     public void navigationStateChanged(int flags) {
         if ((flags & InvalidateTypes.TAB) != 0) {
+            int mediaType = MediaCaptureNotificationService.getMediaType(
+                    isCapturingAudio(), isCapturingVideo(), isCapturingScreen());
             MediaCaptureNotificationService.updateMediaNotificationForTab(
-                    mTab.getApplicationContext(), mTab.getId(), isCapturingAudio(),
-                    isCapturingVideo(), mTab.getUrl());
+                    mTab.getApplicationContext(), mTab.getId(), mediaType, mTab.getUrl());
         }
         if ((flags & InvalidateTypes.TITLE) != 0) {
             // Update cached title then notify observers.
@@ -290,8 +289,8 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
     }
 
     @Override
-    public void openNewTab(String url, String extraHeaders, byte[] postData, int disposition,
-            boolean isRendererInitiated) {
+    public void openNewTab(String url, String extraHeaders, ResourceRequestBody postData,
+            int disposition, boolean isRendererInitiated) {
         mTab.openNewTab(url, extraHeaders, postData, disposition, true, isRendererInitiated);
     }
 
@@ -340,11 +339,6 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
         }
 
         return success;
-    }
-
-    @CalledByNative
-    private boolean requestAppBanner() {
-        return mTab.requestAppBanner();
     }
 
     @Override
@@ -479,8 +473,26 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
         return !mTab.isClosing() && nativeIsCapturingVideo(mTab.getWebContents());
     }
 
+    /**
+     * @return Whether screen is being captured.
+     */
+    private boolean isCapturingScreen() {
+        return !mTab.isClosing() && nativeIsCapturingScreen(mTab.getWebContents());
+    }
+
+    /**
+     * When STOP button in the media capture notification is clicked, pass the event to native
+     * to stop the media capture.
+     */
+    public static void notifyStopped(int tabId) {
+        final Tab tab = TabWindowManager.getInstance().getTabById(tabId);
+        if (tab != null) nativeNotifyStopped(tab.getWebContents());
+    }
+
     private static native void nativeOnRendererUnresponsive(WebContents webContents);
     private static native void nativeOnRendererResponsive(WebContents webContents);
     private static native boolean nativeIsCapturingAudio(WebContents webContents);
     private static native boolean nativeIsCapturingVideo(WebContents webContents);
+    private static native boolean nativeIsCapturingScreen(WebContents webContents);
+    private static native void nativeNotifyStopped(WebContents webContents);
 }

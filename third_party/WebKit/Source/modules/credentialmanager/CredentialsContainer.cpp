@@ -27,6 +27,8 @@
 #include "public/platform/WebCredentialManagerError.h"
 #include "public/platform/WebFederatedCredential.h"
 #include "public/platform/WebPasswordCredential.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -80,13 +82,14 @@ public:
         Frame* frame = toDocument(m_resolver->getScriptState()->getExecutionContext())->frame();
         SECURITY_CHECK(!frame || frame == frame->tree().top());
 
-        OwnPtr<WebCredential> credential = adoptPtr(webCredential.release());
+        std::unique_ptr<WebCredential> credential = wrapUnique(webCredential.release());
         if (!credential || !frame) {
             m_resolver->resolve();
             return;
         }
 
         ASSERT(credential->isPasswordCredential() || credential->isFederatedCredential());
+        UseCounter::count(m_resolver->getScriptState()->getExecutionContext(), UseCounter::CredentialManagerGetReturnedCredential);
         if (credential->isPasswordCredential())
             m_resolver->resolve(PasswordCredential::create(static_cast<WebPasswordCredential*>(credential.get())));
         else
@@ -170,7 +173,8 @@ ScriptPromise CredentialsContainer::store(ScriptState* scriptState, Credential* 
     if (!checkBoilerplate(resolver))
         return promise;
 
-    CredentialManagerClient::from(scriptState->getExecutionContext())->dispatchStore(WebCredential::create(credential->getPlatformCredential()), new NotificationCallbacks(resolver));
+    auto webCredential = WebCredential::create(credential->getPlatformCredential());
+    CredentialManagerClient::from(scriptState->getExecutionContext())->dispatchStore(*webCredential, new NotificationCallbacks(resolver));
     return promise;
 }
 

@@ -9,6 +9,7 @@
 #include "base/at_exit.h"
 #include "base/atomicops.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
@@ -16,16 +17,23 @@
 #include "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/worker_pool.h"
-#include "components/cronet/version.h"
+#include "components/cronet/ios/version.h"
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_filter.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_change_notifier.h"
-#include "net/cert/cert_verify_result.h"
+#include "net/cert/cert_verifier.h"
+#include "net/cert/ct_known_logs.h"
+#include "net/cert/ct_log_verifier.h"
+#include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/ct_verifier.h"
+#include "net/cert/multi_log_ct_verifier.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/mapped_host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -44,6 +52,7 @@
 #include "net/url_request/static_http_user_agent_settings.h"
 #include "net/url_request/url_request_context_storage.h"
 #include "net/url_request/url_request_job_factory_impl.h"
+#include "url/scheme_host_port.h"
 #include "url/url_util.h"
 
 namespace {
@@ -52,32 +61,6 @@ base::AtExitManager* g_at_exit_ = nullptr;
 net::NetworkChangeNotifier* g_network_change_notifier = nullptr;
 // MessageLoop on the main thread.
 base::MessageLoop* g_main_message_loop = nullptr;
-
-#if USE_FAKE_CERT_VERIFIER
-// TODO(mef): Remove this after GRPC testing is done.
-class FakeCertVerifier : public net::CertVerifier {
- public:
-  FakeCertVerifier() {}
-
-  ~FakeCertVerifier() override {}
-
-  // CertVerifier implementation
-  int Verify(net::X509Certificate* cert,
-             const std::string& hostname,
-             const std::string& ocsp_response,
-             int flags,
-             net::CRLSet* crl_set,
-             net::CertVerifyResult* verify_result,
-             const net::CompletionCallback& callback,
-             scoped_ptr<Request>* out_req,
-             const net::BoundNetLog& net_log) override {
-    // It's all good!
-    verify_result->verified_cert = cert;
-    verify_result->cert_status = MapNetErrorToCertStatus(net::OK);
-    return net::OK;
-  }
-};
-#endif  // USE_FAKE_CERT_VERIFIER
 
 }  // namespace
 
@@ -96,7 +79,7 @@ void CronetEnvironment::PostToNetworkThread(
 void CronetEnvironment::PostToFileUserBlockingThread(
     const tracked_objects::Location& from_here,
     const base::Closure& task) {
-  file_user_blocking_thread_->message_loop()->PostTask(from_here, task);
+  file_user_blocking_thread_->task_runner()->PostTask(from_here, task);
 }
 
 net::URLRequestContext* CronetEnvironment::GetURLRequestContext() const {
@@ -168,7 +151,9 @@ void CronetEnvironment::StartNetLogOnNetworkThread(
 }
 
 void CronetEnvironment::StopNetLog() {
-  base::WaitableEvent log_stopped_event(true, false);
+  base::WaitableEvent log_stopped_event(
+      base::WaitableEvent::ResetPolicy::MANUAL,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
   PostToNetworkThread(FROM_HERE,
                       base::Bind(&CronetEnvironment::StopNetLogOnNetworkThread,
                                  base::Unretained(this), &log_stopped_event));
@@ -208,11 +193,6 @@ CronetEnvironment::CronetEnvironment(const std::string& user_agent_product_name)
       net_log_(new net::NetLog) {}
 
 void CronetEnvironment::Start() {
-#if USE_FAKE_CERT_VERIFIER
-  // TODO(mef): Remove this and FakeCertVerifier after GRPC testing.
-  set_cert_verifier(scoped_ptr<net::CertVerifier>(new FakeCertVerifier()));
-#endif  // USE_FAKE_CERT_VERIFIER
-
   // Threads setup.
   network_cache_thread_.reset(new base::Thread("Chrome Network Cache Thread"));
   network_cache_thread_->StartWithOptions(
@@ -242,7 +222,7 @@ void CronetEnvironment::Start() {
   proxy_config_service_ = net::ProxyService::CreateSystemProxyConfigService(
       network_io_thread_->task_runner(), nullptr);
 
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
   net::SetURLRequestContextForNSSHttpIO(main_context_.get());
 #endif
   base::subtle::MemoryBarrier();
@@ -253,13 +233,15 @@ void CronetEnvironment::Start() {
 
 CronetEnvironment::~CronetEnvironment() {
 // net::HTTPProtocolHandlerDelegate::SetInstance(nullptr);
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
   net::SetURLRequestContextForNSSHttpIO(nullptr);
 #endif
 }
 
 void CronetEnvironment::InitializeOnNetworkThread() {
   DCHECK(network_io_thread_->task_runner()->BelongsToCurrentThread());
+  base::FeatureList::InitializeInstance(std::string(), std::string());
+  // TODO(mef): Use net:UrlRequestContextBuilder instead of manual build.
   main_context_.reset(new net::URLRequestContext);
   main_context_->set_net_log(net_log_.get());
   std::string user_agent(user_agent_product_name_ +
@@ -271,14 +253,13 @@ void CronetEnvironment::InitializeOnNetworkThread() {
   main_context_->set_transport_security_state(
       new net::TransportSecurityState());
   http_server_properties_.reset(new net::HttpServerPropertiesImpl());
-  main_context_->set_http_server_properties(
-      http_server_properties_->GetWeakPtr());
+  main_context_->set_http_server_properties(http_server_properties_.get());
 
   // TODO(rdsmith): Note that the ".release()" calls below are leaking
   // the objects in question; this should be fixed by having an object
   // corresponding to URLRequestContextStorage that actually owns those
   // objects.  See http://crbug.com/523858.
-  scoped_ptr<net::MappedHostResolver> mapped_host_resolver(
+  std::unique_ptr<net::MappedHostResolver> mapped_host_resolver(
       new net::MappedHostResolver(
           net::HostResolver::CreateDefaultResolver(nullptr)));
 
@@ -288,6 +269,12 @@ void CronetEnvironment::InitializeOnNetworkThread() {
   if (!cert_verifier_)
     cert_verifier_ = net::CertVerifier::CreateDefault();
   main_context_->set_cert_verifier(cert_verifier_.get());
+
+  std::unique_ptr<net::MultiLogCTVerifier> ct_verifier =
+      base::MakeUnique<net::MultiLogCTVerifier>();
+  ct_verifier->AddLogs(net::ct::CreateLogVerifiersForKnownLogs());
+  main_context_->set_cert_transparency_verifier(ct_verifier.release());
+  main_context_->set_ct_policy_enforcer(new net::CTPolicyEnforcer());
 
   main_context_->set_http_auth_handler_factory(
       net::HttpAuthHandlerRegistryFactory::CreateDefault(
@@ -303,7 +290,7 @@ void CronetEnvironment::InitializeOnNetworkThread() {
   if (!PathService::Get(base::DIR_CACHE, &cache_path))
     return;
   cache_path = cache_path.Append(FILE_PATH_LITERAL("cronet"));
-  scoped_ptr<net::HttpCache::DefaultBackend> main_backend(
+  std::unique_ptr<net::HttpCache::DefaultBackend> main_backend(
       new net::HttpCache::DefaultBackend(net::DISK_CACHE,
                                          net::CACHE_BACKEND_SIMPLE, cache_path,
                                          0,  // Default cache size.
@@ -313,6 +300,9 @@ void CronetEnvironment::InitializeOnNetworkThread() {
 
   params.host_resolver = main_context_->host_resolver();
   params.cert_verifier = main_context_->cert_verifier();
+  params.cert_transparency_verifier =
+      main_context_->cert_transparency_verifier();
+  params.ct_policy_enforcer = main_context_->ct_policy_enforcer();
   params.channel_id_service = main_context_->channel_id_service();
   params.transport_security_state = main_context_->transport_security_state();
   params.proxy_service = main_context_->proxy_service();
@@ -321,15 +311,15 @@ void CronetEnvironment::InitializeOnNetworkThread() {
   params.http_server_properties = main_context_->http_server_properties();
   params.net_log = main_context_->net_log();
   params.enable_http2 = http2_enabled();
-  params.parse_alternative_services = false;
   params.enable_quic = quic_enabled();
 
   for (const auto& quic_hint : quic_hints_) {
     net::AlternativeService alternative_service(net::AlternateProtocol::QUIC,
                                                 "", quic_hint.port());
-
+    url::SchemeHostPort quic_hint_server("https", quic_hint.host(),
+                                         quic_hint.port());
     main_context_->http_server_properties()->SetAlternativeService(
-        quic_hint, alternative_service, base::Time::Max());
+        quic_hint_server, alternative_service, base::Time::Max());
     params.quic_host_whitelist.insert(quic_hint.host());
   }
 

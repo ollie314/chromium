@@ -5,11 +5,12 @@
 #ifndef COMPONENTS_ARC_IME_ARC_IME_SERVICE_H_
 #define COMPONENTS_ARC_IME_ARC_IME_SERVICE_H_
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "components/arc/arc_service.h"
 #include "components/arc/ime/arc_ime_bridge.h"
-#include "ui/aura/client/focus_change_observer.h"
+#include "components/exo/wm_helper.h"
 #include "ui/aura/env_observer.h"
 #include "ui/aura/window_observer.h"
 #include "ui/aura/window_tracker.h"
@@ -17,6 +18,8 @@
 #include "ui/base/ime/text_input_flags.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/keyboard/keyboard_controller.h"
+#include "ui/keyboard/keyboard_controller_observer.h"
 
 namespace aura {
 class Window;
@@ -35,15 +38,15 @@ class ArcBridgeService;
 class ArcImeService : public ArcService,
                       public ArcImeBridge::Delegate,
                       public aura::EnvObserver,
-                      public aura::WindowObserver,
-                      public aura::client::FocusChangeObserver,
+                      public exo::WMHelper::FocusObserver,
+                      public keyboard::KeyboardControllerObserver,
                       public ui::TextInputClient {
  public:
   explicit ArcImeService(ArcBridgeService* bridge_service);
   ~ArcImeService() override;
 
   // Injects the custom IPC bridge object for testing purpose only.
-  void SetImeBridgeForTesting(scoped_ptr<ArcImeBridge> test_ime_bridge);
+  void SetImeBridgeForTesting(std::unique_ptr<ArcImeBridge> test_ime_bridge);
 
   // Injects the custom IME for testing purpose only.
   void SetInputMethodForTesting(ui::InputMethod* test_input_method);
@@ -51,10 +54,7 @@ class ArcImeService : public ArcService,
   // Overridden from aura::EnvObserver:
   void OnWindowInitialized(aura::Window* new_window) override;
 
-  // Overridden from aura::WindowObserver:
-  void OnWindowAddedToRootWindow(aura::Window* window) override;
-
-  // Overridden from aura::client::FocusChangeObserver:
+  // Overridden from exo::WMHelper::FocusObserver:
   void OnWindowFocused(aura::Window* gained_focus,
                        aura::Window* lost_focus) override;
 
@@ -62,6 +62,11 @@ class ArcImeService : public ArcService,
   void OnTextInputTypeChanged(ui::TextInputType type) override;
   void OnCursorRectChanged(const gfx::Rect& rect) override;
   void OnCancelComposition() override;
+  void ShowImeIfNeeded() override;
+
+  // Overridden from keyboard::KeyboardControllerObserver.
+  void OnKeyboardBoundsChanging(const gfx::Rect& rect) override;
+  void OnKeyboardClosed() override;
 
   // Overridden from ui::TextInputClient:
   void SetCompositionText(const ui::CompositionText& composition) override;
@@ -76,6 +81,7 @@ class ArcImeService : public ArcService,
   // TODO(kinaba): Support each of these methods to the extent possible in
   // Android input method API.
   ui::TextInputMode GetTextInputMode() const override;
+  base::i18n::TextDirection GetTextDirection() const override;
   int GetTextInputFlags() const override;
   bool CanComposeInline() const override;
   bool GetCompositionCharacterBounds(uint32_t index,
@@ -91,24 +97,26 @@ class ArcImeService : public ArcService,
   void OnInputMethodChanged() override {}
   bool ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) override;
-  void ExtendSelectionAndDelete(size_t before, size_t after) override {}
+  void ExtendSelectionAndDelete(size_t before, size_t after) override;
   void EnsureCaretInRect(const gfx::Rect& rect) override {}
-  bool IsEditCommandEnabled(int command_id) override;
-  void SetEditCommandForNextKeyEvent(int command_id) override {}
+  bool IsTextEditCommandEnabled(ui::TextEditCommand command) const override;
+  void SetTextEditCommandForNextKeyEvent(ui::TextEditCommand command) override {
+  }
 
  private:
   ui::InputMethod* GetInputMethod();
 
-  scoped_ptr<ArcImeBridge> ime_bridge_;
+  std::unique_ptr<ArcImeBridge> ime_bridge_;
   ui::TextInputType ime_type_;
   gfx::Rect cursor_rect_;
   bool has_composition_text_;
 
-  aura::WindowTracker observing_root_windows_;
-  aura::WindowTracker arc_windows_;
   aura::WindowTracker focused_arc_window_;
 
+  keyboard::KeyboardController* keyboard_controller_;
+
   ui::InputMethod* test_input_method_;
+  bool is_focus_observer_installed_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcImeService);
 };

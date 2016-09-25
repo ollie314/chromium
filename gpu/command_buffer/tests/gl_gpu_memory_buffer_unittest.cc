@@ -88,6 +88,12 @@ void SetRow(gfx::BufferFormat format,
       for (int i = 0; i < width; ++i)
         buffer[i] = pixel[0];
       return;
+    case gfx::BufferFormat::BGR_565:
+      for (int i = 0; i < width * 2; i += 2) {
+        *reinterpret_cast<uint16_t*>(&buffer[i]) =
+            ((pixel[2] >> 3) << 11) | ((pixel[1] >> 2) << 5) | (pixel[0] >> 3);
+      }
+      return;
     case gfx::BufferFormat::RGBA_4444:
       for (int i = 0; i < width * 2; i += 2) {
         buffer[i + 0] = (pixel[1] << 4) | (pixel[0] & 0xf);
@@ -118,7 +124,7 @@ void SetRow(gfx::BufferFormat format,
     case gfx::BufferFormat::ETC1:
     case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::UYVY_422:
-    case gfx::BufferFormat::YUV_420:
+    case gfx::BufferFormat::YVU_420:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
       NOTREACHED();
       return;
@@ -131,6 +137,8 @@ GLenum InternalFormat(gfx::BufferFormat format) {
   switch (format) {
     case gfx::BufferFormat::R_8:
       return GL_RED;
+    case gfx::BufferFormat::BGR_565:
+      return GL_RGB;
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBA_8888:
       return GL_RGBA;
@@ -144,7 +152,7 @@ GLenum InternalFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::ETC1:
     case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::UYVY_422:
-    case gfx::BufferFormat::YUV_420:
+    case gfx::BufferFormat::YVU_420:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
       NOTREACHED();
       return 0;
@@ -241,6 +249,7 @@ TEST_P(GpuMemoryBufferTest, Lifecycle) {
 INSTANTIATE_TEST_CASE_P(GpuMemoryBufferTests,
                         GpuMemoryBufferTest,
                         ::testing::Values(gfx::BufferFormat::R_8,
+                                          gfx::BufferFormat::BGR_565,
                                           gfx::BufferFormat::RGBA_4444,
                                           gfx::BufferFormat::RGBA_8888,
                                           gfx::BufferFormat::BGRA_8888));

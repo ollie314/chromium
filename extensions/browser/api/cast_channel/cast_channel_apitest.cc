@@ -5,6 +5,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/memory/ptr_util.h"
 #include "base/timer/mock_timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -94,12 +95,12 @@ class CastChannelAPITest : public ExtensionApiTest {
   void SetUpMockCastSocket() {
     extensions::CastChannelAPI* api = GetApi();
     timeout_timer_ = new base::MockTimer(true, false);
-    api->SetPingTimeoutTimerForTest(make_scoped_ptr(timeout_timer_));
+    api->SetPingTimeoutTimerForTest(base::WrapUnique(timeout_timer_));
 
     net::IPEndPoint ip_endpoint(net::IPAddress(192, 168, 1, 1), 8009);
     mock_cast_socket_ = new MockCastSocket;
     // Transfers ownership of the socket.
-    api->SetSocketForTest(make_scoped_ptr<CastSocket>(mock_cast_socket_));
+    api->SetSocketForTest(base::WrapUnique<CastSocket>(mock_cast_socket_));
     ON_CALL(*mock_cast_socket_, set_id(_))
         .WillByDefault(SaveArg<0>(&channel_id_));
     ON_CALL(*mock_cast_socket_, id())
@@ -168,9 +169,8 @@ class CastChannelAPITest : public ExtensionApiTest {
  protected:
   void CallOnMessage(const std::string& message) {
     content::BrowserThread::PostTask(
-        content::BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&CastChannelAPITest::DoCallOnMessage, this,
+        content::BrowserThread::IO, FROM_HERE,
+        base::Bind(&CastChannelAPITest::DoCallOnMessage, base::Unretained(this),
                    GetApi(), mock_cast_socket_, message));
   }
 
@@ -476,23 +476,16 @@ IN_PROC_BROWSER_TEST_F(CastChannelAPITest, TestSetAuthorityKeysInvalid) {
   // been removed. The API is deprecated and will trivially return
   // success. So this is just testing that it succeeds for all inputs
   // (even invalid ones).
-  std::string errorResult = "";
+  cast_channel_set_authority_keys_function =
+      CreateSetAuthorityKeysFunction(empty_extension);
+  EXPECT_TRUE(utils::RunFunction(cast_channel_set_authority_keys_function.get(),
+                                 "[\"\", \"signature\"]", browser(),
+                                 utils::NONE));
 
   cast_channel_set_authority_keys_function =
       CreateSetAuthorityKeysFunction(empty_extension);
-  std::string error = utils::RunFunctionAndReturnError(
-      cast_channel_set_authority_keys_function.get(),
-      "[\"\", \"signature\"]",
-      browser());
-  EXPECT_EQ(error, errorResult);
-
-  cast_channel_set_authority_keys_function =
-      CreateSetAuthorityKeysFunction(empty_extension);
-  error = utils::RunFunctionAndReturnError(
-      cast_channel_set_authority_keys_function.get(),
-      "[\"keys\", \"\"]",
-      browser());
-  EXPECT_EQ(error, errorResult);
+  EXPECT_TRUE(utils::RunFunction(cast_channel_set_authority_keys_function.get(),
+                                 "[\"keys\", \"\"]", browser(), utils::NONE));
 
   std::string keys =
       "CrMCCiBSnZzWf+XraY5w3SbX2PEmWfHm5SNIv2pc9xbhP0EOcxKOAjCCAQoCggEBALwigL"
@@ -511,27 +504,21 @@ IN_PROC_BROWSER_TEST_F(CastChannelAPITest, TestSetAuthorityKeysInvalid) {
 
   cast_channel_set_authority_keys_function =
       CreateSetAuthorityKeysFunction(empty_extension);
-  error = utils::RunFunctionAndReturnError(
-      cast_channel_set_authority_keys_function.get(),
-      "[\"" + keys + "\", \"signature\"]",
-      browser());
-  EXPECT_EQ(error, errorResult);
+  EXPECT_TRUE(utils::RunFunction(cast_channel_set_authority_keys_function.get(),
+                                 "[\"" + keys + "\", \"signature\"]", browser(),
+                                 utils::NONE));
 
   cast_channel_set_authority_keys_function =
       CreateSetAuthorityKeysFunction(empty_extension);
-  error = utils::RunFunctionAndReturnError(
-      cast_channel_set_authority_keys_function.get(),
-      "[\"keys\", \"" + signature + "\"]",
-      browser());
-  EXPECT_EQ(error, errorResult);
+  EXPECT_TRUE(utils::RunFunction(cast_channel_set_authority_keys_function.get(),
+                                 "[\"keys\", \"" + signature + "\"]", browser(),
+                                 utils::NONE));
 
   cast_channel_set_authority_keys_function =
       CreateSetAuthorityKeysFunction(empty_extension);
-  error = utils::RunFunctionAndReturnError(
-      cast_channel_set_authority_keys_function.get(),
-      "[\"" + keys + "\", \"" + signature + "\"]",
-      browser());
-  EXPECT_EQ(error, errorResult);
+  EXPECT_TRUE(utils::RunFunction(cast_channel_set_authority_keys_function.get(),
+                                 "[\"" + keys + "\", \"" + signature + "\"]",
+                                 browser(), utils::NONE));
 }
 
 IN_PROC_BROWSER_TEST_F(CastChannelAPITest, TestSetAuthorityKeysValid) {
@@ -563,9 +550,8 @@ IN_PROC_BROWSER_TEST_F(CastChannelAPITest, TestSetAuthorityKeysValid) {
       "bzPtNRRlTqfv7Rxm5YXkZMLmJJMZiTs5+o8FMRMTQZT4hRR3DQ+A/jofViyTGA==";
 
   std::string args = "[\"" + keys + "\", \"" + signature + "\"]";
-  std::string error = utils::RunFunctionAndReturnError(
-      cast_channel_set_authority_keys_function.get(), args, browser());
-  EXPECT_EQ(error, std::string());
+  EXPECT_TRUE(utils::RunFunction(cast_channel_set_authority_keys_function.get(),
+                                 args, browser(), utils::NONE));
 }
 
 // TODO(vadimgo): Win Dbg has a workaround that makes RunExtensionSubtest

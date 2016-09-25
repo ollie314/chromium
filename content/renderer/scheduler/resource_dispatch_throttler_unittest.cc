@@ -10,8 +10,9 @@
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 #include "content/common/resource_messages.h"
-#include "content/test/fake_renderer_scheduler.h"
+#include "content/common/resource_request.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/scheduler/test/fake_renderer_scheduler.h"
 
 namespace content {
 namespace {
@@ -46,7 +47,8 @@ int GetRequestId(const IPC::Message& msg) {
   return request_id;
 }
 
-class RendererSchedulerForTest : public FakeRendererScheduler {
+class RendererSchedulerForTest
+    : public blink::scheduler::FakeRendererScheduler {
  public:
   RendererSchedulerForTest() : high_priority_work_anticipated_(false) {}
   ~RendererSchedulerForTest() override {}
@@ -68,8 +70,9 @@ class RendererSchedulerForTest : public FakeRendererScheduler {
 
 class ResourceDispatchThrottlerForTest : public ResourceDispatchThrottler {
  public:
-  ResourceDispatchThrottlerForTest(IPC::Sender* sender,
-                                   scheduler::RendererScheduler* scheduler)
+  ResourceDispatchThrottlerForTest(
+      IPC::Sender* sender,
+      blink::scheduler::RendererScheduler* scheduler)
       : ResourceDispatchThrottler(
             sender,
             scheduler,
@@ -126,7 +129,7 @@ class ResourceDispatchThrottlerTest : public testing::Test, public IPC::Sender {
   bool FlushScheduled() { return throttler_->flush_scheduled(); }
 
   bool RequestResource() {
-    ResourceHostMsg_Request request;
+    ResourceRequest request;
     request.download_to_file = true;
     return throttler_->Send(new ResourceHostMsg_RequestResource(
         kRoutingId, ++last_request_id_, request));
@@ -135,7 +138,7 @@ class ResourceDispatchThrottlerTest : public testing::Test, public IPC::Sender {
   bool RequestResourceSync() {
     SyncLoadResult result;
     return throttler_->Send(new ResourceHostMsg_SyncLoad(
-        kRoutingId, ++last_request_id_, ResourceHostMsg_Request(), &result));
+        kRoutingId, ++last_request_id_, ResourceRequest(), &result));
   }
 
   void RequestResourcesUntilThrottled() {

@@ -13,17 +13,19 @@ class Node;
 class IntersectionObservation;
 class IntersectionObserver;
 
-class NodeIntersectionObserverData : public GarbageCollectedFinalized<NodeIntersectionObserverData> {
+class NodeIntersectionObserverData : public GarbageCollected<NodeIntersectionObserverData> {
 public:
-    DECLARE_TRACE();
     NodeIntersectionObserverData();
-    ~NodeIntersectionObserverData();
 
     IntersectionObservation* getObservationFor(IntersectionObserver&);
     void addObservation(IntersectionObservation&);
     void removeObservation(IntersectionObserver&);
     void activateValidIntersectionObservers(Node&);
     void deactivateAllIntersectionObservers(Node&);
+
+    DECLARE_TRACE();
+
+    DECLARE_TRACE_WRAPPERS();
 
 private:
     // IntersectionObservers for which the Node owning this data is root.

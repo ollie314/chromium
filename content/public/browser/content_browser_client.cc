@@ -5,8 +5,10 @@
 #include "content/public/browser/content_browser_client.h"
 
 #include "base/files/file_path.h"
+#include "base/guid.h"
 #include "build/build_config.h"
 #include "content/public/browser/client_certificate_delegate.h"
+#include "content/public/browser/vpn_service_proxy.h"
 #include "content/public/common/sandbox_type.h"
 #include "media/base/cdm_factory.h"
 #include "storage/browser/quota/quota_manager.h"
@@ -48,7 +50,7 @@ bool ContentBrowserClient::ShouldUseProcessPerSite(
 
 bool ContentBrowserClient::DoesSiteRequireDedicatedProcess(
     BrowserContext* browser_context,
-    const GURL& effective_url) {
+    const GURL& effective_site_url) {
   return false;
 }
 
@@ -68,12 +70,6 @@ bool ContentBrowserClient::IsHandledURL(const GURL& url) {
 bool ContentBrowserClient::CanCommitURL(RenderProcessHost* process_host,
                                         const GURL& site_url) {
   return true;
-}
-
-bool ContentBrowserClient::IsIllegalOrigin(ResourceContext* resource_context,
-                                           int child_process_id,
-                                           const GURL& origin) {
-  return false;
 }
 
 bool ContentBrowserClient::ShouldAllowOpenURL(SiteInstance* site_instance,
@@ -100,6 +96,11 @@ bool ContentBrowserClient::ShouldSwapBrowsingInstancesForNavigation(
     const GURL& current_url,
     const GURL& new_url) {
   return false;
+}
+
+media::ScopedAudioManagerPtr ContentBrowserClient::CreateAudioManager(
+    media::AudioLogFactory* audio_log_factory) {
+  return nullptr;
 }
 
 std::unique_ptr<media::CdmFactory> ContentBrowserClient::CreateCdmFactory() {
@@ -278,6 +279,7 @@ bool ContentBrowserClient::CanCreateWindow(
     WindowContainerType container_type,
     const GURL& target_url,
     const Referrer& referrer,
+    const std::string& frame_name,
     WindowOpenDisposition disposition,
     const blink::WebWindowFeatures& features,
     bool user_gesture,
@@ -300,14 +302,6 @@ net::NetLog* ContentBrowserClient::GetNetLog() {
   return nullptr;
 }
 
-AccessTokenStore* ContentBrowserClient::CreateAccessTokenStore() {
-  return nullptr;
-}
-
-bool ContentBrowserClient::IsFastShutdownPossible() {
-  return true;
-}
-
 base::FilePath ContentBrowserClient::GetDefaultDownloadDirectory() {
   return base::FilePath();
 }
@@ -325,6 +319,11 @@ BrowserPpapiHost*
   return nullptr;
 }
 
+gpu::GpuChannelEstablishFactory*
+ContentBrowserClient::GetGpuChannelEstablishFactory() {
+  return nullptr;
+}
+
 bool ContentBrowserClient::AllowPepperSocketAPI(
     BrowserContext* browser_context,
     const GURL& url,
@@ -333,12 +332,19 @@ bool ContentBrowserClient::AllowPepperSocketAPI(
   return false;
 }
 
-ui::SelectFilePolicy* ContentBrowserClient::CreateSelectFilePolicy(
-    WebContents* web_contents) {
+bool ContentBrowserClient::IsPepperVpnProviderAPIAllowed(
+    BrowserContext* browser_context,
+    const GURL& url) {
+  return false;
+}
+
+std::unique_ptr<VpnServiceProxy> ContentBrowserClient::GetVpnServiceProxy(
+    BrowserContext* browser_context) {
   return nullptr;
 }
 
-LocationProvider* ContentBrowserClient::OverrideSystemLocationProvider() {
+ui::SelectFilePolicy* ContentBrowserClient::CreateSelectFilePolicy(
+    WebContents* web_contents) {
   return nullptr;
 }
 
@@ -360,6 +366,11 @@ bool ContentBrowserClient::IsPluginAllowedToUseDevChannelAPIs(
     BrowserContext* browser_context,
     const GURL& url) {
   return false;
+}
+
+std::string ContentBrowserClient::GetShellUserIdForBrowserContext(
+    BrowserContext* browser_context) {
+  return base::GenerateGUID();
 }
 
 PresentationServiceDelegate*
@@ -406,19 +417,11 @@ bool ContentBrowserClient::IsWin32kLockdownEnabledForMimeType(
   // is enabled by default in Chrome. See crbug.com/523278.
   return false;
 }
-
-bool ContentBrowserClient::ShouldUseWindowsPrefetchArgument() const {
-  return true;
-}
 #endif  // defined(OS_WIN)
 
-#if defined(VIDEO_HOLE)
-ExternalVideoSurfaceContainer*
-ContentBrowserClient::OverrideCreateExternalVideoSurfaceContainer(
-    WebContents* web_contents) {
-  NOTREACHED() << "Hole-punching is not supported. See crbug.com/469348.";
+std::unique_ptr<base::Value> ContentBrowserClient::GetServiceManifestOverlay(
+    const std::string& name) {
   return nullptr;
 }
-#endif
 
 }  // namespace content

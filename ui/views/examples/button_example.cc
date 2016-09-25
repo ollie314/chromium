@@ -44,7 +44,8 @@ void ButtonExample::CreateExampleView(View* container) {
   container->SetLayoutManager(layout);
 
   label_button_ = new LabelButton(this, ASCIIToUTF16(kLabelButton));
-  label_button_->SetFocusable(true);
+  label_button_->SetFocusForPlatform();
+  label_button_->set_request_focus_on_press(true);
   container->AddChildView(label_button_);
 
   styled_button_ = new LabelButton(this, ASCIIToUTF16("Styled Button"));
@@ -58,20 +59,21 @@ void ButtonExample::CreateExampleView(View* container) {
 
   container->AddChildView(new BlueButton(this, ASCIIToUTF16("Blue Button")));
 
-  container->AddChildView(MdTextButton::CreateMdButton(
-      nullptr, base::ASCIIToUTF16("Material design")));
-  MdTextButton* md_button = MdTextButton::CreateMdButton(
-      nullptr, base::ASCIIToUTF16("Strong call to action"));
-  md_button->SetCallToAction(MdTextButton::STRONG_CALL_TO_ACTION);
+  container->AddChildView(
+      MdTextButton::Create(nullptr, base::ASCIIToUTF16("Material design")));
+  MdTextButton* md_button =
+      MdTextButton::Create(nullptr, base::ASCIIToUTF16("Default"));
+  md_button->SetIsDefault(true);
   container->AddChildView(md_button);
-  md_button = MdTextButton::CreateMdButton(
-      nullptr, base::ASCIIToUTF16("Weak call to action"));
-  md_button->SetCallToAction(MdTextButton::WEAK_CALL_TO_ACTION);
+  md_button =
+      MdTextButton::Create(nullptr, base::ASCIIToUTF16("Call to action"));
+  md_button->SetCallToAction(true);
   container->AddChildView(md_button);
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   image_button_ = new ImageButton(this);
-  image_button_->SetFocusable(true);
+  image_button_->SetFocusForPlatform();
+  image_button_->set_request_focus_on_press(true);
   image_button_->SetImage(ImageButton::STATE_NORMAL,
                           rb.GetImageNamed(IDR_CLOSE).ToImageSkia());
   image_button_->SetImage(ImageButton::STATE_HOVERED,
@@ -103,7 +105,10 @@ void ButtonExample::LabelButtonPressed(LabelButton* label_button,
     }
   } else if (event.IsShiftDown()) {
     if (event.IsAltDown()) {
-      label_button->SetFocusable(!label_button->IsFocusable());
+      // Toggle focusability.
+      label_button_->IsAccessibilityFocusable()
+          ? label_button_->SetFocusBehavior(View::FocusBehavior::NEVER)
+          : label_button_->SetFocusForPlatform();
     } else {
       label_button->SetStyle(static_cast<Button::ButtonStyle>(
           (label_button->style() + 1) % Button::STYLE_COUNT));

@@ -33,12 +33,12 @@ TEST(ConditionalWorkItemListTest, ExecutionSuccess) {
     // Expect all three items to be done in order then undone.
     InSequence s;
 
-    EXPECT_CALL(*item1, Do()).WillOnce(Return(true));
-    EXPECT_CALL(*item2, Do()).WillOnce(Return(true));
-    EXPECT_CALL(*item3, Do()).WillOnce(Return(true));
-    EXPECT_CALL(*item3, Rollback());
-    EXPECT_CALL(*item2, Rollback());
-    EXPECT_CALL(*item1, Rollback());
+    EXPECT_CALL(*item1, DoImpl()).WillOnce(Return(true));
+    EXPECT_CALL(*item2, DoImpl()).WillOnce(Return(true));
+    EXPECT_CALL(*item3, DoImpl()).WillOnce(Return(true));
+    EXPECT_CALL(*item3, RollbackImpl());
+    EXPECT_CALL(*item2, RollbackImpl());
+    EXPECT_CALL(*item1, RollbackImpl());
   }
 
   // Add the items to the list.
@@ -68,10 +68,10 @@ TEST(ConditionalWorkItemListTest, ExecutionFailAndRollback) {
     // Expect the two first work items to be done in order then undone.
     InSequence s;
 
-    EXPECT_CALL(*item1, Do()).WillOnce(Return(true));
-    EXPECT_CALL(*item2, Do()).WillOnce(Return(false));
-    EXPECT_CALL(*item2, Rollback());
-    EXPECT_CALL(*item1, Rollback());
+    EXPECT_CALL(*item1, DoImpl()).WillOnce(Return(true));
+    EXPECT_CALL(*item2, DoImpl()).WillOnce(Return(false));
+    EXPECT_CALL(*item2, RollbackImpl());
+    EXPECT_CALL(*item1, RollbackImpl());
   }
 
   // Add the items to the list.
@@ -122,8 +122,8 @@ TEST(ConditionalWorkItemListTest, ConditionRunIfFileExists) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  EXPECT_TRUE(ConditionRunIfFileExists(temp_dir.path()).ShouldRun());
+  EXPECT_TRUE(ConditionRunIfFileExists(temp_dir.GetPath()).ShouldRun());
   EXPECT_FALSE(ConditionRunIfFileExists(
-                   temp_dir.path().Append(FILE_PATH_LITERAL("DoesNotExist")))
+                   temp_dir.GetPath().Append(FILE_PATH_LITERAL("DoesNotExist")))
                    .ShouldRun());
 }

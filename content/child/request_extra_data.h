@@ -19,8 +19,10 @@
 
 namespace content {
 
+struct ResourceRequest;
+
 // Can be used by callers to store extra data on every ResourceRequest
-// which will be incorporated into the ResourceHostMsg_Request message
+// which will be incorporated into the ResourceHostMsg_RequestResource message
 // sent by ResourceDispatcher.
 class CONTENT_EXPORT RequestExtraData
     : public NON_EXPORTED_BASE(blink::WebURLRequest::ExtraData) {
@@ -98,12 +100,6 @@ class CONTENT_EXPORT RequestExtraData
   void set_originated_from_service_worker(bool originated_from_service_worker) {
     originated_from_service_worker_ = originated_from_service_worker;
   }
-  LoFiState lofi_state() const {
-    return lofi_state_;
-  }
-  void set_lofi_state(LoFiState lofi_state) {
-    lofi_state_ = lofi_state;
-  }
   // |custom_user_agent| is used to communicate an overriding custom user agent
   // to |RenderViewImpl::willSendRequest()|; set to a null string to indicate no
   // override and an empty string to indicate that there should be no user
@@ -132,6 +128,28 @@ class CONTENT_EXPORT RequestExtraData
     stream_override_ = std::move(stream_override);
   }
 
+  bool initiated_in_secure_context() const {
+    return initiated_in_secure_context_;
+  }
+  void set_initiated_in_secure_context(bool secure) {
+    initiated_in_secure_context_ = secure;
+  }
+
+  // The request is a prefetch and should use LOAD_PREFETCH network flags.
+  bool is_prefetch() const { return is_prefetch_; }
+  void set_is_prefetch(bool prefetch) { is_prefetch_ = prefetch; }
+
+  // The request is downloaded to the network cache, but not rendered or
+  // executed. The renderer will see this as an aborted request.
+  bool download_to_network_cache_only() const {
+    return download_to_network_cache_only_;
+  }
+  void set_download_to_network_cache_only(bool download_to_cache) {
+    download_to_network_cache_only_ = download_to_cache;
+  }
+
+  void CopyToResourceRequest(ResourceRequest* request) const;
+
  private:
   blink::WebPageVisibilityState visibility_state_;
   int render_frame_id_;
@@ -149,7 +167,9 @@ class CONTENT_EXPORT RequestExtraData
   blink::WebString custom_user_agent_;
   blink::WebString requested_with_;
   std::unique_ptr<StreamOverrideParameters> stream_override_;
-  LoFiState lofi_state_;
+  bool initiated_in_secure_context_;
+  bool is_prefetch_;
+  bool download_to_network_cache_only_;
 
   DISALLOW_COPY_AND_ASSIGN(RequestExtraData);
 };

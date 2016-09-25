@@ -27,11 +27,11 @@ class StashClientTest : public ApiTestBase {
   }
 
   void PrepareEnvironment(ApiTestEnvironment* env) {
-    env->service_provider()->AddService(base::Bind(
+    env->interface_provider()->AddInterface(base::Bind(
         &StashBackend::BindToRequest, base::Unretained(stash_backend_.get())));
   }
 
-  scoped_ptr<StashBackend> stash_backend_;
+  std::unique_ptr<StashBackend> stash_backend_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StashClientTest);
@@ -46,7 +46,8 @@ class StashClientTest : public ApiTestBase {
 // Test that stashing and restoring work correctly.
 TEST_F(StashClientTest, MAYBE_StashAndRestore) {
   ASSERT_NO_FATAL_FAILURE(RunTest("stash_client_unittest.js", "testStash"));
-  scoped_ptr<ModuleSystemTestEnvironment> restore_test_env(CreateEnvironment());
+  std::unique_ptr<ModuleSystemTestEnvironment> restore_test_env(
+      CreateEnvironment());
   ApiTestEnvironment restore_environment(restore_test_env.get());
   PrepareEnvironment(&restore_environment);
   restore_environment.RunTest("stash_client_unittest.js", "testRetrieve");

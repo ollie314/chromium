@@ -40,6 +40,7 @@
 namespace blink {
 
 class LocalFrame;
+class MediaDevices;
 
 class UserMediaClient {
     USING_FAST_MALLOC(UserMediaClient);
@@ -49,12 +50,11 @@ public:
     virtual void requestMediaDevices(MediaDevicesRequest*) = 0;
     virtual void cancelMediaDevicesRequest(MediaDevicesRequest*) = 0;
     virtual void requestSources(MediaStreamTrackSourcesRequest*) = 0;
-
-protected:
+    virtual void setMediaDeviceChangeObserver(MediaDevices*) = 0;
     virtual ~UserMediaClient() { }
 };
 
-MODULES_EXPORT void provideUserMediaTo(LocalFrame&, UserMediaClient*);
+MODULES_EXPORT void provideUserMediaTo(LocalFrame&, std::unique_ptr<UserMediaClient>);
 
 } // namespace blink
 

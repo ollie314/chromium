@@ -8,6 +8,9 @@ bindings_modules_v8_custom_files =
                     "V8CustomSQLStatementErrorCallback.cpp",
                     "V8DeviceMotionEventCustom.cpp",
                     "V8ExtendableMessageEventCustom.cpp",
+                    "V8IDBObserverCustom.cpp",
                     "V8ServiceWorkerMessageEventCustom.cpp",
+                    "V8WebGLRenderingContextCustom.cpp",
+                    "V8WebGL2RenderingContextCustom.cpp",
                   ],
                   "abspath")

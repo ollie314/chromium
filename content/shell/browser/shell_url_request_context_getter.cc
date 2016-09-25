@@ -25,6 +25,8 @@
 #include "content/shell/common/shell_switches.h"
 #include "net/base/cache_type.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/multi_log_ct_verifier.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/mapped_host_resolver.h"
@@ -111,6 +113,11 @@ ShellURLRequestContextGetter::GetProxyService() {
       std::move(proxy_config_service_), 0, url_request_context_->net_log());
 }
 
+bool ShellURLRequestContextGetter::ShouldEnableReferrerPolicyHeader() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableExperimentalWebPlatformFeatures);
+}
+
 net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -122,14 +129,19 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     url_request_context_->set_net_log(net_log_);
     network_delegate_ = CreateNetworkDelegate();
     url_request_context_->set_network_delegate(network_delegate_.get());
+    // TODO(estark): Remove this once the Referrer-Policy header is no
+    // longer an experimental feature. https://crbug.com/619228
+    url_request_context_->set_enable_referrer_policy_header(
+        ShouldEnableReferrerPolicyHeader());
     storage_.reset(
         new net::URLRequestContextStorage(url_request_context_.get()));
     storage_->set_cookie_store(CreateCookieStore(CookieStoreConfig()));
     storage_->set_channel_id_service(base::WrapUnique(
         new net::ChannelIDService(new net::DefaultChannelIDStore(NULL),
                                   base::WorkerPool::GetTaskRunner(true))));
-    storage_->set_http_user_agent_settings(base::WrapUnique(
-        new net::StaticHttpUserAgentSettings("en-us,en", GetShellUserAgent())));
+    storage_->set_http_user_agent_settings(
+        base::MakeUnique<net::StaticHttpUserAgentSettings>(
+            "en-us,en", GetShellUserAgent()));
 
     std::unique_ptr<net::HostResolver> host_resolver(
         net::HostResolver::CreateDefaultResolver(
@@ -138,12 +150,16 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     storage_->set_cert_verifier(net::CertVerifier::CreateDefault());
     storage_->set_transport_security_state(
         base::WrapUnique(new net::TransportSecurityState));
+    storage_->set_cert_transparency_verifier(
+        base::WrapUnique(new net::MultiLogCTVerifier));
+    storage_->set_ct_policy_enforcer(
+        base::WrapUnique(new net::CTPolicyEnforcer));
     storage_->set_proxy_service(GetProxyService());
     storage_->set_ssl_config_service(new net::SSLConfigServiceDefaults);
     storage_->set_http_auth_handler_factory(
         net::HttpAuthHandlerFactory::CreateDefault(host_resolver.get()));
     storage_->set_http_server_properties(
-        base::WrapUnique(new net::HttpServerPropertiesImpl()));
+        base::MakeUnique<net::HttpServerPropertiesImpl>());
 
     base::FilePath cache_path = base_path_.Append(FILE_PATH_LITERAL("Cache"));
     std::unique_ptr<net::HttpCache::DefaultBackend> main_backend(
@@ -157,13 +173,17 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
             net::CACHE_BACKEND_DEFAULT,
 #endif
             cache_path, 0,
-            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)));
+            BrowserThread::GetTaskRunnerForThread(BrowserThread::CACHE)));
 
     net::HttpNetworkSession::Params network_session_params;
     network_session_params.cert_verifier =
         url_request_context_->cert_verifier();
     network_session_params.transport_security_state =
         url_request_context_->transport_security_state();
+    network_session_params.cert_transparency_verifier =
+        url_request_context_->cert_transparency_verifier();
+    network_session_params.ct_policy_enforcer =
+        url_request_context_->ct_policy_enforcer();
     network_session_params.channel_id_service =
         url_request_context_->channel_id_service();
     network_session_params.proxy_service =
@@ -204,10 +224,10 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         url_request_context_->host_resolver();
 
     storage_->set_http_network_session(
-        base::WrapUnique(new net::HttpNetworkSession(network_session_params)));
-    storage_->set_http_transaction_factory(base::WrapUnique(new net::HttpCache(
+        base::MakeUnique<net::HttpNetworkSession>(network_session_params));
+    storage_->set_http_transaction_factory(base::MakeUnique<net::HttpCache>(
         storage_->http_network_session(), std::move(main_backend),
-        true /* set_up_quic_server_info */)));
+        true /* set_up_quic_server_info */));
 
     std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory(
         new net::URLRequestJobFactoryImpl());
@@ -220,9 +240,9 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
 #if !defined(DISABLE_FILE_SUPPORT)
     set_protocol = job_factory->SetProtocolHandler(
         url::kFileScheme,
-        base::WrapUnique(new net::FileProtocolHandler(
+        base::MakeUnique<net::FileProtocolHandler>(
             BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-                base::SequencedWorkerPool::SKIP_ON_SHUTDOWN))));
+                base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
     DCHECK(set_protocol);
 #endif
 
@@ -246,7 +266,7 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
 
 scoped_refptr<base::SingleThreadTaskRunner>
     ShellURLRequestContextGetter::GetNetworkTaskRunner() const {
-  return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
+  return BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
 }
 
 net::HostResolver* ShellURLRequestContextGetter::host_resolver() {

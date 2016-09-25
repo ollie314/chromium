@@ -393,6 +393,19 @@ TEST_F(FeatureListTest, GetFeatureOverrides_UseDefault) {
   EXPECT_EQ("D", SortFeatureListString(disable_features));
 }
 
+TEST_F(FeatureListTest, GetFieldTrial) {
+  ClearFeatureListInstance();
+  FieldTrialList field_trial_list(nullptr);
+  FieldTrial* trial = FieldTrialList::CreateFieldTrial("Trial", "Group");
+  std::unique_ptr<FeatureList> feature_list(new FeatureList);
+  feature_list->RegisterFieldTrialOverride(
+      kFeatureOnByDefaultName, FeatureList::OVERRIDE_USE_DEFAULT, trial);
+  RegisterFeatureListInstance(std::move(feature_list));
+
+  EXPECT_EQ(trial, FeatureList::GetFieldTrial(kFeatureOnByDefault));
+  EXPECT_EQ(nullptr, FeatureList::GetFieldTrial(kFeatureOffByDefault));
+}
+
 TEST_F(FeatureListTest, InitializeFromCommandLine_WithFieldTrials) {
   ClearFeatureListInstance();
   FieldTrialList field_trial_list(nullptr);
@@ -441,6 +454,17 @@ TEST_F(FeatureListTest, InitializeInstance) {
   // Do not initialize from commandline if we have already.
   FeatureList::InitializeInstance(kFeatureOffByDefaultName, "");
   EXPECT_FALSE(FeatureList::IsEnabled(kFeatureOnByDefault));
+  EXPECT_FALSE(FeatureList::IsEnabled(kFeatureOffByDefault));
+}
+
+TEST_F(FeatureListTest, UninitializedInstance_IsEnabledReturnsFalse) {
+  ClearFeatureListInstance();
+  // This test case simulates the calling pattern found in code which does not
+  // explicitly initialize the features list.
+  // All IsEnabled() calls should return the default value in this scenario.
+  EXPECT_EQ(nullptr, FeatureList::GetInstance());
+  EXPECT_TRUE(FeatureList::IsEnabled(kFeatureOnByDefault));
+  EXPECT_EQ(nullptr, FeatureList::GetInstance());
   EXPECT_FALSE(FeatureList::IsEnabled(kFeatureOffByDefault));
 }
 

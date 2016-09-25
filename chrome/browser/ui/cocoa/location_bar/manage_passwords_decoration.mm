@@ -10,7 +10,6 @@
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/cocoa/passwords/passwords_bubble_cocoa.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/color_palette.h"
@@ -90,20 +89,13 @@ void ManagePasswordsDecoration::UpdateUIState() {
   SetVisible(true);
   if (!ui::MaterialDesignController::IsModeMaterial()) {
     SetImage(OmniboxViewMac::ImageForResource(icon_->icon_id()));
-  } else {
-    int resource_id = icon_->icon_id();
-    bool locationBarIsDark =
-        [[location_bar_->GetAutocompleteTextField() window]
-            inIncognitoModeWithSystemTheme];
-    SkColor vectorIconColor = gfx::kGoogleBlue700;
-    if (resource_id != IDR_SAVE_PASSWORD_ACTIVE) {
-      vectorIconColor = locationBarIsDark ? SK_ColorWHITE
-                                          : gfx::kChromeIconGrey;
-    }
-    NSImage* theImage = NSImageFromImageSkia(gfx::CreateVectorIcon(
-        gfx::VectorIconId::AUTOLOGIN, 16, vectorIconColor));
-    SetImage(theImage);
+    return;
   }
+  // |location_bar_| can be NULL in tests.
+  bool location_bar_is_dark = location_bar_ &&
+      [[location_bar_->GetAutocompleteTextField() window]
+           inIncognitoModeWithSystemTheme];
+  SetImage(GetMaterialIcon(location_bar_is_dark));
 }
 
 void ManagePasswordsDecoration::UpdateVisibleUI() {
@@ -114,4 +106,10 @@ void ManagePasswordsDecoration::UpdateVisibleUI() {
 void ManagePasswordsDecoration::HideBubble() {
   if (icon()->active() && ManagePasswordsBubbleCocoa::instance())
     ManagePasswordsBubbleCocoa::instance()->Close();
+}
+
+gfx::VectorIconId ManagePasswordsDecoration::GetMaterialVectorIconId() const {
+  // Note: update unit tests if this vector id ever changes (it's hard-coded
+  // there).
+  return gfx::VectorIconId::AUTOLOGIN;
 }

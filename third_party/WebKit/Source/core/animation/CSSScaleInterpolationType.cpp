@@ -7,6 +7,8 @@
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSValueList.h"
 #include "core/css/resolver/StyleResolverState.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -37,12 +39,12 @@ struct Scale {
         array[2] = z;
     }
 
-    PassOwnPtr<InterpolableValue> createInterpolableValue() const
+    std::unique_ptr<InterpolableValue> createInterpolableValue() const
     {
-        OwnPtr<InterpolableList> result = InterpolableList::create(3);
+        std::unique_ptr<InterpolableList> result = InterpolableList::create(3);
         for (size_t i = 0; i < 3; i++)
             result->set(i, InterpolableNumber::create(array[i]));
-        return result.release();
+        return std::move(result);
     }
 
     bool operator==(const Scale& other) const
@@ -59,9 +61,9 @@ struct Scale {
 
 class ParentScaleChecker : public InterpolationType::ConversionChecker {
 public:
-    static PassOwnPtr<ParentScaleChecker> create(const Scale& scale)
+    static std::unique_ptr<ParentScaleChecker> create(const Scale& scale)
     {
-        return adoptPtr(new ParentScaleChecker(scale));
+        return wrapUnique(new ParentScaleChecker(scale));
     }
 
 private:
@@ -122,7 +124,7 @@ InterpolationValue CSSScaleInterpolationType::maybeConvertNeutral(const Interpol
     return InterpolationValue(Scale(1, 1, 1).createInterpolableValue());
 }
 
-InterpolationValue CSSScaleInterpolationType::maybeConvertInitial(const StyleResolverState&) const
+InterpolationValue CSSScaleInterpolationType::maybeConvertInitial(const StyleResolverState&, ConversionCheckers&) const
 {
     return InterpolationValue(Scale(1, 1, 1).createInterpolableValue());
 }
@@ -145,7 +147,7 @@ InterpolationValue CSSScaleInterpolationType::maybeConvertValue(const CSSValue& 
         return nullptr;
 
     for (size_t i = 0; i < list.length(); i++) {
-        const CSSValue& item = *list.item(i);
+        const CSSValue& item = list.item(i);
         if (!item.isPrimitiveValue() || !toCSSPrimitiveValue(item).isNumber())
             return nullptr;
         scale.array[i] = toCSSPrimitiveValue(item).getDoubleValue();
@@ -166,11 +168,11 @@ InterpolationValue CSSScaleInterpolationType::maybeConvertSingle(const PropertyS
     return result;
 }
 
-PairwiseInterpolationValue CSSScaleInterpolationType::mergeSingleConversions(InterpolationValue&& start, InterpolationValue&& end) const
+PairwiseInterpolationValue CSSScaleInterpolationType::maybeMergeSingles(InterpolationValue&& start, InterpolationValue&& end) const
 {
     return PairwiseInterpolationValue(
-        start.interpolableValue.release(),
-        end.interpolableValue.release(),
+        std::move(start.interpolableValue),
+        std::move(end.interpolableValue),
         CSSScaleNonInterpolableValue::merge(
             toCSSScaleNonInterpolableValue(*start.nonInterpolableValue),
             toCSSScaleNonInterpolableValue(*end.nonInterpolableValue)));
@@ -184,7 +186,7 @@ InterpolationValue CSSScaleInterpolationType::maybeConvertUnderlyingValue(const 
 void CSSScaleInterpolationType::composite(UnderlyingValueOwner& underlyingValueOwner, double underlyingFraction, const InterpolationValue& value, double interpolationFraction) const
 {
     const CSSScaleNonInterpolableValue& metadata = toCSSScaleNonInterpolableValue(*value.nonInterpolableValue);
-    ASSERT(metadata.isStartAdditive() || metadata.isEndAdditive());
+    DCHECK(metadata.isStartAdditive() || metadata.isEndAdditive());
 
     InterpolableList& underlyingList = toInterpolableList(*underlyingValueOwner.mutableValue().interpolableValue);
     for (size_t i = 0; i < 3; i++) {

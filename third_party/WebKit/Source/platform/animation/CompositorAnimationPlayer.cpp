@@ -8,7 +8,6 @@
 #include "cc/animation/animation_timeline.h"
 #include "platform/animation/CompositorAnimation.h"
 #include "platform/animation/CompositorAnimationDelegate.h"
-#include "public/platform/WebLayer.h"
 
 namespace blink {
 
@@ -27,7 +26,7 @@ CompositorAnimationPlayer::~CompositorAnimationPlayer()
         m_animationPlayer->animation_timeline()->DetachPlayer(m_animationPlayer);
 }
 
-cc::AnimationPlayer* CompositorAnimationPlayer::animationPlayer() const
+cc::AnimationPlayer* CompositorAnimationPlayer::ccAnimationPlayer() const
 {
     return m_animationPlayer.get();
 }
@@ -35,28 +34,27 @@ cc::AnimationPlayer* CompositorAnimationPlayer::animationPlayer() const
 void CompositorAnimationPlayer::setAnimationDelegate(CompositorAnimationDelegate* delegate)
 {
     m_delegate = delegate;
-    m_animationPlayer->set_layer_animation_delegate(delegate ? this : nullptr);
+    m_animationPlayer->set_animation_delegate(delegate ? this : nullptr);
 }
 
-void CompositorAnimationPlayer::attachLayer(WebLayer* webLayer)
+void CompositorAnimationPlayer::attachElement(const CompositorElementId& id)
 {
-    m_animationPlayer->AttachLayer(webLayer->id());
+    m_animationPlayer->AttachElement(id);
 }
 
-void CompositorAnimationPlayer::detachLayer()
+void CompositorAnimationPlayer::detachElement()
 {
-    m_animationPlayer->DetachLayer();
+    m_animationPlayer->DetachElement();
 }
 
-bool CompositorAnimationPlayer::isLayerAttached() const
+bool CompositorAnimationPlayer::isElementAttached() const
 {
-    return m_animationPlayer->layer_id() != 0;
+    return !!m_animationPlayer->element_id();
 }
 
-void CompositorAnimationPlayer::addAnimation(CompositorAnimation* animation)
+void CompositorAnimationPlayer::addAnimation(std::unique_ptr<CompositorAnimation> animation)
 {
-    m_animationPlayer->AddAnimation(animation->passAnimation());
-    delete animation;
+    m_animationPlayer->AddAnimation(animation->releaseCcAnimation());
 }
 
 void CompositorAnimationPlayer::removeAnimation(int animationId)

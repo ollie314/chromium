@@ -21,20 +21,24 @@
 @class CAContext;
 @class CALayer;
 
+namespace ui {
+class CALayerTreeCoordinator;
+struct CARendererLayerParams;
+}
+
+namespace gl {
+class GLFence;
+}
+
 namespace gpu {
 
-class CALayerTree;
-class CALayerPartialDamageTree;
-
-class ImageTransportSurfaceOverlayMac : public gfx::GLSurface,
+class ImageTransportSurfaceOverlayMac : public gl::GLSurface,
                                         public ui::GpuSwitchingObserver {
  public:
-  ImageTransportSurfaceOverlayMac(GpuChannelManager* manager,
-                                  GpuCommandBufferStub* stub,
-                                  SurfaceHandle handle);
+  explicit ImageTransportSurfaceOverlayMac(GpuCommandBufferStub* stub);
 
   // GLSurface implementation
-  bool Initialize(gfx::GLSurface::Format format) override;
+  bool Initialize(gl::GLSurface::Format format) override;
   void Destroy() override;
   bool Resize(const gfx::Size& size,
               float scale_factor,
@@ -45,23 +49,15 @@ class ImageTransportSurfaceOverlayMac : public gfx::GLSurface,
   bool SupportsPostSubBuffer() override;
   gfx::Size GetSize() override;
   void* GetHandle() override;
-  bool OnMakeCurrent(gfx::GLContext* context) override;
+  bool OnMakeCurrent(gl::GLContext* context) override;
   bool ScheduleOverlayPlane(int z_order,
                             gfx::OverlayTransform transform,
                             gl::GLImage* image,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect) override;
-  bool ScheduleCALayer(gl::GLImage* contents_image,
-                       const gfx::RectF& contents_rect,
-                       float opacity,
-                       unsigned background_color,
-                       unsigned edge_aa_mask,
-                       const gfx::RectF& rect,
-                       bool is_clipped,
-                       const gfx::RectF& clip_rect,
-                       const gfx::Transform& transform,
-                       int sorting_context_id,
-                       unsigned filter) override;
+  bool ScheduleCALayer(const ui::CARendererLayerParams& params) override;
+  void ScheduleCALayerInUseQuery(
+      std::vector<CALayerInUseQuery> queries) override;
   bool IsSurfaceless() const override;
 
   // ui::GpuSwitchingObserver implementation.
@@ -71,47 +67,38 @@ class ImageTransportSurfaceOverlayMac : public gfx::GLSurface,
   ~ImageTransportSurfaceOverlayMac() override;
 
   void SetLatencyInfo(const std::vector<ui::LatencyInfo>& latency_info);
-  void BufferPresented(int32_t surface_id,
-                       const base::TimeTicks& vsync_timebase,
-                       const base::TimeDelta& vsync_interval);
   void SendAcceleratedSurfaceBuffersSwapped(
-      int32_t surface_id,
       CAContextID ca_context_id,
+      bool fullscreen_low_power_ca_context_valid,
+      CAContextID fullscreen_low_power_ca_context_id,
       const gfx::ScopedRefCountedIOSurfaceMachPort& io_surface,
       const gfx::Size& size,
       float scale_factor,
       std::vector<ui::LatencyInfo> latency_info);
   gfx::SwapResult SwapBuffersInternal(const gfx::Rect& pixel_damage_rect);
 
-  GpuChannelManager* manager_;
   base::WeakPtr<GpuCommandBufferStub> stub_;
-  SurfaceHandle handle_;
   std::vector<ui::LatencyInfo> latency_info_;
 
   bool use_remote_layer_api_;
   base::scoped_nsobject<CAContext> ca_context_;
-  base::scoped_nsobject<CALayer> ca_root_layer_;
+  base::scoped_nsobject<CAContext> fullscreen_low_power_ca_context_;
+  std::unique_ptr<ui::CALayerTreeCoordinator> ca_layer_tree_coordinator_;
 
   gfx::Size pixel_size_;
   float scale_factor_;
 
+  std::vector<CALayerInUseQuery> ca_layer_in_use_queries_;
+
+  // A GLFence marking the end of the previous frame. Must only be accessed
+  // while in a ScopedSetGLToRealGLApi, and while the associated
+  // |previous_frame_context_| is bound.
+  std::unique_ptr<gl::GLFence> previous_frame_fence_;
+  base::ScopedTypeRef<CGLContextObj> fence_context_obj_;
+
   // The renderer ID that all contexts made current to this surface should be
   // targeting.
   GLint gl_renderer_id_;
-
-  // Planes that have been scheduled, but have not had a subsequent SwapBuffers
-  // call made yet.
-  std::unique_ptr<CALayerPartialDamageTree> pending_partial_damage_tree_;
-  std::unique_ptr<CALayerTree> pending_ca_layer_tree_;
-
-  // The planes that are currently being displayed on the screen.
-  std::unique_ptr<CALayerPartialDamageTree> current_partial_damage_tree_;
-  std::unique_ptr<CALayerTree> current_ca_layer_tree_;
-
-  // The vsync information provided by the browser.
-  bool vsync_parameters_valid_;
-  base::TimeTicks vsync_timebase_;
-  base::TimeDelta vsync_interval_;
 };
 
 }  // namespace gpu

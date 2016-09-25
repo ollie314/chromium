@@ -14,8 +14,8 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
@@ -105,8 +105,8 @@ void BroadcastEvent(Profile* profile,
                     const std::string& event_name,
                     std::unique_ptr<base::ListValue> event_args) {
   extensions::EventRouter::Get(profile)->BroadcastEvent(
-      base::WrapUnique(new extensions::Event(histogram_value, event_name,
-                                             std::move(event_args))));
+      base::MakeUnique<extensions::Event>(histogram_value, event_name,
+                                          std::move(event_args)));
 }
 
 // Sends an event named |event_name| with arguments |event_args| to an extension
@@ -118,8 +118,8 @@ void DispatchEventToExtension(
     const std::string& event_name,
     std::unique_ptr<base::ListValue> event_args) {
   extensions::EventRouter::Get(profile)->DispatchEventToExtension(
-      extension_id, base::WrapUnique(new extensions::Event(
-                        histogram_value, event_name, std::move(event_args))));
+      extension_id, base::MakeUnique<extensions::Event>(
+                        histogram_value, event_name, std::move(event_args)));
 }
 
 file_manager_private::MountCompletedStatus
@@ -342,7 +342,7 @@ class JobEventRouterImpl : public JobEventRouter {
 
     std::set<std::string> extension_ids;
 
-    for (const auto listener : listeners) {
+    for (const auto& listener : listeners) {
       extension_ids.insert(listener->extension_id());
     }
 
@@ -397,7 +397,7 @@ void EventRouter::Shutdown() {
   DLOG_IF(WARNING, !file_watchers_.empty())
       << "Not all file watchers are "
       << "removed. This can happen when Files.app is open during shutdown.";
-  STLDeleteValues(&file_watchers_);
+  base::STLDeleteValues(&file_watchers_);
   if (!profile_) {
     NOTREACHED();
     return;

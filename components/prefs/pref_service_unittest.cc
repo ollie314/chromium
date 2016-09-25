@@ -243,13 +243,13 @@ class WriteFlagChecker : public TestingPrefStore {
   }
 
   void SetValue(const std::string& key,
-                scoped_ptr<base::Value> value,
+                std::unique_ptr<base::Value> value,
                 uint32_t flags) override {
     SetLastWriteFlags(flags);
   }
 
   void SetValueSilently(const std::string& key,
-                        scoped_ptr<base::Value> value,
+                        std::unique_ptr<base::Value> value,
                         uint32_t flags) override {
     SetLastWriteFlags(flags);
   }
@@ -286,7 +286,7 @@ TEST(PrefServiceTest, WriteablePrefStoreFlags) {
   scoped_refptr<PrefRegistrySimple> registry(new PrefRegistrySimple);
   PrefServiceFactory factory;
   factory.set_user_prefs(flag_checker);
-  scoped_ptr<PrefService> prefs(factory.Create(registry.get()));
+  std::unique_ptr<PrefService> prefs(factory.Create(registry.get()));
 
   // The first 8 bits of write flags are reserved for subclasses. Create a
   // custom flag in this range
@@ -414,7 +414,7 @@ TEST_F(PrefServiceSetValueTest, SetListValue) {
   Mock::VerifyAndClearExpectations(&observer_);
 
   base::ListValue new_value;
-  new_value.Append(new base::StringValue(kValue));
+  new_value.AppendString(kValue);
   observer_.Expect(kName, &new_value);
   prefs_.Set(kName, new_value);
   Mock::VerifyAndClearExpectations(&observer_);

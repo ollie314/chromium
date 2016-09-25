@@ -14,10 +14,8 @@
 #include "base/trace_event/trace_event_synthetic_delay.h"
 #include "build/build_config.h"
 #include "cc/trees/swap_promise_monitor.h"
-#include "components/scheduler/renderer/renderer_scheduler.h"
 #include "content/common/input/input_event_ack.h"
 #include "content/common/input/input_event_ack_state.h"
-#include "content/common/input/web_input_event_traits.h"
 #include "content/public/common/content_switches.h"
 #include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/ime_event_guard.h"
@@ -26,6 +24,8 @@
 #include "content/renderer/render_widget.h"
 #include "third_party/WebKit/public/platform/WebFloatPoint.h"
 #include "third_party/WebKit/public/platform/WebFloatSize.h"
+#include "third_party/WebKit/public/platform/scheduler/renderer/renderer_scheduler.h"
+#include "ui/events/blink/web_input_event_traits.h"
 #include "ui/events/latency_info.h"
 #include "ui/gfx/geometry/point_conversions.h"
 
@@ -43,6 +43,7 @@ using blink::WebMouseEvent;
 using blink::WebMouseWheelEvent;
 using blink::WebTouchEvent;
 using blink::WebTouchPoint;
+using ui::DidOverscrollParams;
 
 namespace content {
 
@@ -117,14 +118,8 @@ void LogInputEventLatencyUma(const WebInputEvent& event, base::TimeTicks now) {
 #undef CASE_TYPE
 }
 
-void LogPassiveLatency(int64_t latency) {
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Event.PassiveListeners.Latency", latency, 1,
-                              10000000, 100);
-}
-
 void LogPassiveEventListenersUma(WebInputEventResult result,
-                                 bool non_blocking,
-                                 bool cancelable,
+                                 WebInputEvent::DispatchType dispatch_type,
                                  double event_timestamp,
                                  const ui::LatencyInfo& latency_info) {
   enum {
@@ -133,28 +128,50 @@ void LogPassiveEventListenersUma(WebInputEventResult result,
     PASSIVE_LISTENER_UMA_ENUM_SUPPRESSED,
     PASSIVE_LISTENER_UMA_ENUM_CANCELABLE,
     PASSIVE_LISTENER_UMA_ENUM_CANCELABLE_AND_CANCELED,
+    PASSIVE_LISTENER_UMA_ENUM_FORCED_NON_BLOCKING_DUE_TO_FLING,
     PASSIVE_LISTENER_UMA_ENUM_COUNT
   };
 
   int enum_value;
-  if (non_blocking)
-    enum_value = PASSIVE_LISTENER_UMA_ENUM_PASSIVE;
-  else if (!cancelable)
-    enum_value = PASSIVE_LISTENER_UMA_ENUM_UNCANCELABLE;
-  else if (result == WebInputEventResult::HandledApplication)
-    enum_value = PASSIVE_LISTENER_UMA_ENUM_CANCELABLE_AND_CANCELED;
-  else if (result == WebInputEventResult::HandledSuppressed)
-    enum_value = PASSIVE_LISTENER_UMA_ENUM_SUPPRESSED;
-  else
-    enum_value = PASSIVE_LISTENER_UMA_ENUM_CANCELABLE;
+  switch (dispatch_type) {
+    case WebInputEvent::ListenersForcedNonBlockingDueToFling:
+      enum_value = PASSIVE_LISTENER_UMA_ENUM_FORCED_NON_BLOCKING_DUE_TO_FLING;
+      break;
+    case WebInputEvent::ListenersNonBlockingPassive:
+      enum_value = PASSIVE_LISTENER_UMA_ENUM_PASSIVE;
+      break;
+    case WebInputEvent::EventNonBlocking:
+      enum_value = PASSIVE_LISTENER_UMA_ENUM_UNCANCELABLE;
+      break;
+    case WebInputEvent::Blocking:
+      if (result == WebInputEventResult::HandledApplication)
+        enum_value = PASSIVE_LISTENER_UMA_ENUM_CANCELABLE_AND_CANCELED;
+      else if (result == WebInputEventResult::HandledSuppressed)
+        enum_value = PASSIVE_LISTENER_UMA_ENUM_SUPPRESSED;
+      else
+        enum_value = PASSIVE_LISTENER_UMA_ENUM_CANCELABLE;
+      break;
+    default:
+      NOTREACHED();
+      return;
+  }
 
   UMA_HISTOGRAM_ENUMERATION("Event.PassiveListeners", enum_value,
                             PASSIVE_LISTENER_UMA_ENUM_COUNT);
 
-  if (enum_value == PASSIVE_LISTENER_UMA_ENUM_CANCELABLE &&
-      base::TimeTicks::IsHighResolution()) {
-    base::TimeTicks now = base::TimeTicks::Now();
-    LogPassiveLatency(GetEventLatencyMicros(event_timestamp, now));
+  if (base::TimeTicks::IsHighResolution()) {
+    if (enum_value == PASSIVE_LISTENER_UMA_ENUM_CANCELABLE) {
+      base::TimeTicks now = base::TimeTicks::Now();
+      UMA_HISTOGRAM_CUSTOM_COUNTS("Event.PassiveListeners.Latency",
+                                  GetEventLatencyMicros(event_timestamp, now),
+                                  1, 10000000, 100);
+    } else if (enum_value ==
+               PASSIVE_LISTENER_UMA_ENUM_FORCED_NON_BLOCKING_DUE_TO_FLING) {
+      base::TimeTicks now = base::TimeTicks::Now();
+      UMA_HISTOGRAM_CUSTOM_COUNTS(
+          "Event.PassiveListeners.ForcedNonBlockingLatencyDueToFling",
+          GetEventLatencyMicros(event_timestamp, now), 1, 10000000, 100);
+    }
   }
 }
 
@@ -228,9 +245,9 @@ void RenderWidgetInputHandler::HandleInputEvent(
   if (base::TimeTicks::IsHighResolution())
     start_time = base::TimeTicks::Now();
 
-  TRACE_EVENT1("renderer,benchmark",
+  TRACE_EVENT1("renderer,benchmark,rail",
                "RenderWidgetInputHandler::OnHandleInputEvent", "event",
-               WebInputEventTraits::GetName(input_event.type));
+               WebInputEvent::GetName(input_event.type));
   TRACE_EVENT_SYNTHETIC_DELAY_BEGIN("blink.HandleInputEvent");
   TRACE_EVENT_WITH_FLOW1("input,benchmark", "LatencyInfo.Flow",
                          TRACE_ID_DONT_MANGLE(latency_info.trace_id()),
@@ -244,7 +261,9 @@ void RenderWidgetInputHandler::HandleInputEvent(
 
   std::unique_ptr<cc::SwapPromiseMonitor> latency_info_swap_promise_monitor;
   ui::LatencyInfo swap_latency_info(latency_info);
-
+  swap_latency_info.AddLatencyNumber(
+      ui::LatencyComponentType::INPUT_EVENT_LATENCY_RENDERER_MAIN_COMPONENT, 0,
+      0);
   if (widget_->compositor()) {
     latency_info_swap_promise_monitor =
         widget_->compositor()->CreateLatencyInfoSwapPromiseMonitor(
@@ -302,27 +321,38 @@ void RenderWidgetInputHandler::HandleInputEvent(
                                       : WebInputEventResult::NotHandled;
   if (input_event.type != WebInputEvent::Char || !suppress_next_char_events_) {
     suppress_next_char_events_ = false;
-    if (processed == WebInputEventResult::NotHandled && widget_->webwidget())
-      processed = widget_->webwidget()->handleInputEvent(input_event);
+    if (processed == WebInputEventResult::NotHandled && widget_->GetWebWidget())
+      processed = widget_->GetWebWidget()->handleInputEvent(input_event);
   }
 
-  bool non_blocking =
-      dispatch_type ==
-          InputEventDispatchType::DISPATCH_TYPE_NON_BLOCKING_NOTIFY_MAIN ||
-      dispatch_type == InputEventDispatchType::DISPATCH_TYPE_NON_BLOCKING;
   // TODO(dtapuska): Use the input_event.timeStampSeconds as the start
   // ideally this should be when the event was sent by the compositor to the
   // renderer. crbug.com/565348
   if (input_event.type == WebInputEvent::TouchStart ||
       input_event.type == WebInputEvent::TouchMove ||
       input_event.type == WebInputEvent::TouchEnd) {
-    LogPassiveEventListenersUma(
-        processed, non_blocking,
-        static_cast<const WebTouchEvent&>(input_event).cancelable,
-        input_event.timeStampSeconds, latency_info);
-  } else if (input_event.type == WebInputEvent::MouseWheel) {
-    LogPassiveEventListenersUma(processed, non_blocking, !non_blocking,
+    const WebTouchEvent& touch = static_cast<const WebTouchEvent&>(input_event);
+
+    LogPassiveEventListenersUma(processed, touch.dispatchType,
                                 input_event.timeStampSeconds, latency_info);
+
+    // TODO(lanwei): Remove this metric for event latency outside fling in M56,
+    // once we've gathered enough data to decide if we want to ship the passive
+    // event listener for fling, see https://crbug.com/638661.
+    if (touch.dispatchType == WebInputEvent::Blocking &&
+        touch.touchStartOrFirstTouchMove &&
+        base::TimeTicks::IsHighResolution()) {
+      base::TimeTicks now = base::TimeTicks::Now();
+      UMA_HISTOGRAM_CUSTOM_COUNTS(
+          "Event.Touch.TouchLatencyOutsideFling",
+          GetEventLatencyMicros(input_event.timeStampSeconds, now), 1,
+          100000000, 50);
+    }
+  } else if (input_event.type == WebInputEvent::MouseWheel) {
+    LogPassiveEventListenersUma(
+        processed,
+        static_cast<const WebMouseWheelEvent&>(input_event).dispatchType,
+        input_event.timeStampSeconds, latency_info);
   }
 
   // If this RawKeyDown event corresponds to a browser keyboard shortcut and
@@ -355,21 +385,11 @@ void RenderWidgetInputHandler::HandleInputEvent(
     }
   }
 
-  // Send mouse wheel events and their disposition to the compositor thread, so
-  // that they can be used to produce the elastic overscroll effect on Mac.
-  if (input_event.type == WebInputEvent::MouseWheel) {
-    const WebMouseWheelEvent& wheel_event =
-        static_cast<const WebMouseWheelEvent&>(input_event);
-    if (wheel_event.canScroll) {
-      delegate_->ObserveWheelEventAndResult(
-          wheel_event,
-          event_overscroll ? event_overscroll->latest_overscroll_delta
-                           : gfx::Vector2dF(),
-          processed != WebInputEventResult::NotHandled);
-    }
-  } else if (input_event.type == WebInputEvent::GestureScrollBegin ||
-             input_event.type == WebInputEvent::GestureScrollEnd ||
-             input_event.type == WebInputEvent::GestureScrollUpdate) {
+  // Send gesture scroll events and their dispositions to the compositor thread,
+  // so that they can be used to produce the elastic overscroll effect on Mac.
+  if (input_event.type == WebInputEvent::GestureScrollBegin ||
+      input_event.type == WebInputEvent::GestureScrollEnd ||
+      input_event.type == WebInputEvent::GestureScrollUpdate) {
     const WebGestureEvent& gesture_event =
         static_cast<const WebGestureEvent&>(input_event);
     if (gesture_event.sourceDevice == blink::WebGestureDeviceTouchpad) {
@@ -398,15 +418,14 @@ void RenderWidgetInputHandler::HandleInputEvent(
 
   TRACE_EVENT_SYNTHETIC_DELAY_END("blink.HandleInputEvent");
 
-  // Note that we can't use handling_event_type_ here since it will be overriden
-  // by reentrant calls for events after the paused one.
+  // Note that we can't use handling_event_type_ here since it will be
+  // overridden by reentrant calls for events after the paused one.
   bool can_send_ack = !(ignore_ack_for_mouse_move_from_debugger_ &&
                         input_event.type == WebInputEvent::MouseMove);
-  if (dispatch_type == DISPATCH_TYPE_BLOCKING_NOTIFY_MAIN ||
-      dispatch_type == DISPATCH_TYPE_NON_BLOCKING_NOTIFY_MAIN) {
+  if (dispatch_type == DISPATCH_TYPE_BLOCKING_NOTIFY_MAIN) {
     // |non_blocking| means it was ack'd already by the InputHandlerProxy
     // so let the delegate know the event has been handled.
-    delegate_->NotifyInputEventHandled(input_event.type);
+    delegate_->NotifyInputEventHandled(input_event.type, ack_result);
   }
 
   if ((dispatch_type == DISPATCH_TYPE_BLOCKING ||
@@ -415,7 +434,7 @@ void RenderWidgetInputHandler::HandleInputEvent(
     std::unique_ptr<InputEventAck> response(new InputEventAck(
         input_event.type, ack_result, swap_latency_info,
         std::move(event_overscroll),
-        WebInputEventTraits::GetUniqueTouchEventId(input_event)));
+        ui::WebInputEventTraits::GetUniqueTouchEventId(input_event)));
     if (rate_limiting_wanted && frame_pending && !widget_->is_hidden()) {
       // We want to rate limit the input events in this case, so we'll wait for
       // painting to finish before ACKing this message.
@@ -495,10 +514,8 @@ void RenderWidgetInputHandler::DidOverscrollFromBlink(
       accumulatedOverscroll.width, accumulatedOverscroll.height);
   params->latest_overscroll_delta =
       gfx::Vector2dF(overscrollDelta.width, overscrollDelta.height);
-  // TODO(sataya.m): don't negate velocity once http://crbug.com/499743 is
-  // fixed.
   params->current_fling_velocity =
-      gfx::Vector2dF(-velocity.width, -velocity.height);
+      gfx::Vector2dF(velocity.width, velocity.height);
   params->causal_event_viewport_point = gfx::PointF(position.x, position.y);
 
   // If we're currently handling an event, stash the overscroll data such that

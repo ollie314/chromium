@@ -3,8 +3,6 @@
 # found in the LICENSE file.
 
 import("//build/config/mac/mac_sdk.gni")
-import("//build/symlink.gni")
-import("//third_party/class-dump/class-dump.gni")
 
 if (current_toolchain == host_toolchain) {
   config("config") {
@@ -12,10 +10,9 @@ if (current_toolchain == host_toolchain) {
 
     include_dirs = [ "$root_gen_dir/iossim" ]
 
-    # TODO(crbug.com/595295): Building class-dump tools requires OS X SDK
-    # version 10.9 or higher. Remove this override once the global version
-    # of the SDK is raised.
-    common_flags = [ "-mmacosx-version-min=10.9" ]
+    # -objectForKeyedSubscript requires 10.8 or newer. Remove this override once
+    # the global version of the SDK is raised.
+    common_flags = [ "-mmacosx-version-min=10.8" ]
     ldflags = common_flags
     cflags_objcc = common_flags
   }
@@ -25,41 +22,18 @@ if (current_toolchain == host_toolchain) {
       "iossim.mm",
     ]
     libs = [ "Foundation.framework" ]
-    deps = [
-      ":generate_dvt_core_simulator",
-      ":generate_dvt_foundation_header",
-      ":generate_dvt_iphone_sim_header",
-    ]
     configs += [ ":config" ]
-
-    # TODO(crbug.com/595295): Building class-dump tools requires OS X SDK
-    # version 10.9 or higher. To prevent mixing code using different value
-    # of minimum SDK supported, forbids dependencies on any Chromium target.
-    assert_no_deps = [ "//base/*" ]
-  }
-
-  class_dump("generate_dvt_core_simulator") {
-    framework_name = "CoreSimulator"
-    framework_path = "$mac_sdk_path/../../../../../Library/PrivateFrameworks"
-    class_dump_filter = "Sim"
-  }
-
-  class_dump("generate_dvt_foundation_header") {
-    framework_name = "DVTFoundation"
-    framework_path = "$mac_sdk_path/../../../../../../SharedFrameworks"
-    class_dump_filter = "DVTStackBacktrace|DVTInvalidation|DVTMixIn"
-  }
-
-  class_dump("generate_dvt_iphone_sim_header") {
-    topological_sort = true
-    framework_name = "DVTiPhoneSimulatorRemoteClient"
-    framework_path = "$mac_sdk_path/../../../../../../SharedFrameworks"
-    class_dump_filter = "iPhoneSimulator"
   }
 } else if (current_toolchain == default_toolchain) {
-  binary_symlink("iossim") {
-    # This creates an 'iossim' target in root_build_dir for compatibility
-    # with GYP and the test scripts.
-    binary_label = ":iossim($host_toolchain)"
+  copy("iossim") {
+    deps = [
+      ":iossim($host_toolchain)",
+    ]
+    outputs = [
+      "$root_out_dir/iossim",
+    ]
+    sources = [
+      get_label_info(":iossim($host_toolchain)", "root_out_dir") + "/iossim",
+    ]
   }
 }

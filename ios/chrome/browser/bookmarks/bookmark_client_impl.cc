@@ -5,6 +5,7 @@
 #include "ios/chrome/browser/bookmarks/bookmark_client_impl.h"
 
 #include "base/logging.h"
+#include "base/metrics/user_metrics.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/bookmarks/browser/bookmark_storage.h"
@@ -15,7 +16,6 @@
 #include "components/keyed_service/core/service_access_type.h"
 #include "ios/chrome/browser/favicon/favicon_service_factory.h"
 #include "ios/chrome/browser/history/history_service_factory.h"
-#include "ios/web/public/user_metrics.h"
 
 BookmarkClientImpl::BookmarkClientImpl(ios::ChromeBrowserState* browser_state)
     : browser_state_(browser_state) {}
@@ -50,7 +50,7 @@ void BookmarkClientImpl::GetTypedCountForNodes(
           browser_state_, ServiceAccessType::EXPLICIT_ACCESS);
   history::URLDatabase* url_db =
       history_service ? history_service->InMemoryDatabase() : nullptr;
-  for (const auto& node : nodes) {
+  for (const auto* node : nodes) {
     // If |url_db| is the InMemoryDatabase, it might not cache all URLRows, but
     // it guarantees to contain those with |typed_count| > 0. Thus, if fetching
     // the URLRow fails, it is safe to assume that its |typed_count| is 0.
@@ -70,7 +70,7 @@ bool BookmarkClientImpl::IsPermanentNodeVisible(
 }
 
 void BookmarkClientImpl::RecordAction(const base::UserMetricsAction& action) {
-  web::RecordAction(action);
+  base::RecordAction(action);
 }
 
 bookmarks::LoadExtraCallback BookmarkClientImpl::GetLoadExtraNodesCallback() {

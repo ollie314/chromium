@@ -35,6 +35,7 @@
 #include "WebExceptionCode.h"
 #include "WebFrame.h"
 #include "WebNode.h"
+#include "public/platform/WebColor.h"
 #include "public/platform/WebReferrerPolicy.h"
 #include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/WebVector.h"
@@ -107,8 +108,6 @@ public:
     BLINK_EXPORT WebURL completeURL(const WebString&) const;
     BLINK_EXPORT WebElement getElementById(const WebString&) const;
     BLINK_EXPORT WebElement focusedElement() const;
-    BLINK_EXPORT void cancelFullScreen();
-    BLINK_EXPORT WebElement fullScreenElement() const;
     BLINK_EXPORT WebReferrerPolicy referrerPolicy() const;
     BLINK_EXPORT WebString outgoingReferrer();
 

@@ -29,6 +29,7 @@
 
 #include "platform/weborigin/KnownPorts.h"
 #include "url/url_util.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/text/CString.h"
 #include "wtf/text/StringHash.h"
@@ -274,7 +275,7 @@ KURL::KURL(const KURL& other)
     , m_string(other.m_string)
 {
     if (other.m_innerURL.get())
-        m_innerURL = adoptPtr(new KURL(other.m_innerURL->copy()));
+        m_innerURL = wrapUnique(new KURL(other.m_innerURL->copy()));
 }
 
 KURL::~KURL()
@@ -288,9 +289,9 @@ KURL& KURL::operator=(const KURL& other)
     m_parsed = other.m_parsed;
     m_string = other.m_string;
     if (other.m_innerURL)
-        m_innerURL = adoptPtr(new KURL(other.m_innerURL->copy()));
+        m_innerURL = wrapUnique(new KURL(other.m_innerURL->copy()));
     else
-        m_innerURL.clear();
+        m_innerURL.reset();
     return *this;
 }
 
@@ -302,7 +303,7 @@ KURL KURL::copy() const
     result.m_parsed = m_parsed;
     result.m_string = m_string.isolatedCopy();
     if (m_innerURL)
-        result.m_innerURL = adoptPtr(new KURL(m_innerURL->copy()));
+        result.m_innerURL = wrapUnique(new KURL(m_innerURL->copy()));
     return result;
 }
 
@@ -338,8 +339,6 @@ bool KURL::hasPath() const
     return m_parsed.path.len >= 0;
 }
 
-// We handle "parameters" separated by a semicolon, while KURL.cpp does not,
-// which can lead to different results in some cases.
 String KURL::lastPathComponent() const
 {
     if (!m_isValid)
@@ -654,27 +653,8 @@ String decodeURLEscapeSequences(const String& string)
     return decodeURLEscapeSequences(string, UTF8Encoding());
 }
 
-// In KURL.cpp's implementation, this is called by every component getter.
-// It will unescape every character, including '\0'. This is scary, and may
-// cause security holes. We never call this function for components, and
-// just return the ASCII versions instead.
-//
-// This function is also used to decode javascript: URLs and as a general
-// purpose unescaping function.
-//
-// FIXME These should be merged to the KURL.cpp implementation.
 String decodeURLEscapeSequences(const String& string, const WTF::TextEncoding& encoding)
 {
-    // FIXME We can probably use KURL.cpp's version of this function
-    // without modification. However, I'm concerned about
-    // https://bugs.webkit.org/show_bug.cgi?id=20559 so am keeping this old
-    // custom code for now. Using their version will also fix the bug that
-    // we ignore the encoding.
-    //
-    // FIXME b/1350291: This does not get called very often. We just convert
-    // first to 8-bit UTF-8, then unescape, then back to 16-bit. This kind of
-    // sucks, and we don't use the encoding properly, which will make some
-    // obscure anchor navigations fail.
     StringUTF8Adaptor stringUTF8(string);
     url::RawCanonOutputT<base::char16> unescaped;
     url::DecodeURLEscapeSequences(stringUTF8.data(), stringUTF8.length(), &unescaped);
@@ -687,7 +667,7 @@ String encodeWithURLEscapeSequences(const String& notEncodedString)
 
     url::RawCanonOutputT<char> buffer;
     int inputLength = utf8.length();
-    if (buffer.length() < inputLength * 3)
+    if (buffer.capacity() < inputLength * 3)
         buffer.Resize(inputLength * 3);
 
     url::EncodeURIComponent(utf8.data(), inputLength, &buffer);
@@ -814,13 +794,13 @@ void KURL::init(const KURL& base, const CHAR* relative, int relativeLength, cons
 void KURL::initInnerURL()
 {
     if (!m_isValid) {
-        m_innerURL.clear();
+        m_innerURL.reset();
         return;
     }
     if (url::Parsed* innerParsed = m_parsed.inner_parsed())
-        m_innerURL = adoptPtr(new KURL(ParsedURLString, m_string.substring(innerParsed->scheme.begin, innerParsed->Length() - innerParsed->scheme.begin)));
+        m_innerURL = wrapUnique(new KURL(ParsedURLString, m_string.substring(innerParsed->scheme.begin, innerParsed->Length() - innerParsed->scheme.begin)));
     else
-        m_innerURL.clear();
+        m_innerURL.reset();
 }
 
 template<typename CHAR>
@@ -847,6 +827,10 @@ bool checkIfProtocolIsInHTTPFamily(const url::Component& scheme, const CHAR* spe
         return internalProtocolIs(scheme, spec, "http");
     if (scheme.len == 5)
         return internalProtocolIs(scheme, spec, "https");
+    if (scheme.len == 7)
+        return internalProtocolIs(scheme, spec, "http-so");
+    if (scheme.len == 8)
+        return internalProtocolIs(scheme, spec, "https-so");
     return false;
 }
 

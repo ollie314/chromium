@@ -29,7 +29,6 @@ const char kContentCapabilities[] = "content_capabilities";
 const char kContentScripts[] = "content_scripts";
 const char kContentSecurityPolicy[] = "content_security_policy";
 const char kConvertedFromUserScript[] = "converted_from_user_script";
-const char kCopresence[] = "copresence";
 const char kCss[] = "css";
 const char kCtrlKey[] = "ctrlKey";
 const char kCurrentLocale[] = "current_locale";
@@ -49,7 +48,9 @@ const char kFileFilters[] = "file_filters";
 const char kFileBrowserHandlers[] = "file_browser_handlers";
 const char kFileHandlers[] = "file_handlers";
 const char kFileHandlerExtensions[] = "extensions";
+const char kFileHandlerIncludeDirectories[] = "include_directories";
 const char kFileHandlerTypes[] = "types";
+const char kFileHandlerVerb[] = "verb";
 const char kGlobal[] = "global";
 const char kHideBookmarkButton[] = "hide_bookmark_button";
 const char kHomepageURL[] = "homepage_url";
@@ -293,6 +294,7 @@ const char kChromeVersionTooLow[] =
 const char kDisabledByPolicy[] =
     "This extension has been disabled by your administrator.";
 const char kExpectString[] = "Expect string value.";
+const char kFileNotFound[] = "File not found: *.";
 const char kInvalidAboutPage[] = "Invalid value for 'about_page'.";
 const char kInvalidAboutPageExpectRelativePath[] =
     "Invalid value for 'about_page'. Value must be a relative path.";
@@ -341,9 +343,6 @@ const char kInvalidContentScriptsList[] =
     "Invalid value for 'content_scripts'.";
 const char kInvalidContentSecurityPolicy[] =
     "Invalid value for 'content_security_policy'.";
-const char kInvalidCopresenceConfig[] = "Invalid value for 'copresence'.";
-const char kInvalidCopresenceApiKey[] =
-    "copresence.api_key must not be empty.";
 const char kInvalidCSPInsecureValue[] =
     "Ignored insecure CSP value \"*\" in directive '*'.";
 const char kInvalidCSPMissingSecureSrc[] =
@@ -406,6 +405,8 @@ const char kInvalidFileHandlerType[] =
     "Invalid value for 'file_handlers[*].types'.";
 const char kInvalidFileHandlerTypeElement[] =
     "Invalid value for 'file_handlers[*].types[*]'.";
+const char kInvalidFileHandlerVerb[] =
+    "Invalid value for 'file_handlers[*].verb'.";
 const char kInvalidGlob[] =
     "Invalid value for 'content_scripts[*].*[*]'.";
 const char kInvalidGlobList[] =
@@ -696,8 +697,6 @@ const char kLocalesInvalidLocale[] =
     "Invalid locale file '*': *";
 const char kLocalesMessagesFileMissing[] =
     "Messages file is missing for locale.";
-const char kLocalesNoDefaultLocaleSpecified[] =
-    "Localization used, but default_locale wasn't specified in the manifest.";
 const char kLocalesNoDefaultMessages[] =
     "Default locale is defined but default data couldn't be loaded.";
 const char kLocalesNoValidLocaleNamesListed[] =

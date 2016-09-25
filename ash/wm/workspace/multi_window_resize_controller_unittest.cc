@@ -2,22 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/wm/workspace/multi_window_resize_controller.h"
+#include "ash/common/wm/workspace/multi_window_resize_controller.h"
 
-#include "ash/ash_constants.h"
-#include "ash/frame/custom_frame_view_ash.h"
+#include "ash/aura/wm_window_aura.h"
+#include "ash/common/ash_constants.h"
+#include "ash/common/frame/custom_frame_view_ash.h"
+#include "ash/common/wm/workspace/workspace_event_handler_test_helper.h"
+#include "ash/common/wm/workspace_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/shell_test_api.h"
 #include "ash/wm/window_util.h"
-#include "ash/wm/workspace/workspace_event_handler_test_helper.h"
-#include "ash/wm/workspace_controller.h"
 #include "ash/wm/workspace_controller_test_helper.h"
+#include "base/stl_util.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
 #include "ui/events/test/event_generator.h"
-#include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -33,9 +34,7 @@ class TestWidgetDelegate : public views::WidgetDelegateView {
   ~TestWidgetDelegate() override {}
 
   // views::WidgetDelegateView:
-  bool CanResize() const override {
-    return true;
-  }
+  bool CanResize() const override { return true; }
 
   views::NonClientFrameView* CreateNonClientFrameView(
       views::Widget* widget) override {
@@ -59,8 +58,8 @@ class MultiWindowResizeControllerTest : public test::AshTestBase {
         test::ShellTestApi(Shell::GetInstance()).workspace_controller();
     WorkspaceEventHandler* event_handler =
         WorkspaceControllerTestHelper(wc).GetEventHandler();
-    resize_controller_ = WorkspaceEventHandlerTestHelper(event_handler).
-        resize_controller();
+    resize_controller_ =
+        WorkspaceEventHandlerTestHelper(event_handler).resize_controller();
   }
 
  protected:
@@ -75,34 +74,23 @@ class MultiWindowResizeControllerTest : public test::AshTestBase {
     return window;
   }
 
-  void ShowNow() {
-    resize_controller_->ShowNow();
-  }
+  void ShowNow() { resize_controller_->ShowNow(); }
 
-  bool IsShowing() {
-    return resize_controller_->IsShowing();
-  }
+  bool IsShowing() { return resize_controller_->IsShowing(); }
 
-  bool HasPendingShow() {
-    return resize_controller_->show_timer_.IsRunning();
-  }
+  bool HasPendingShow() { return resize_controller_->show_timer_.IsRunning(); }
 
-  void Hide() {
-    resize_controller_->Hide();
-  }
+  void Hide() { resize_controller_->Hide(); }
 
   bool HasTarget(aura::Window* window) {
     if (!resize_controller_->windows_.is_valid())
       return false;
-    if ((resize_controller_->windows_.window1 == window ||
-         resize_controller_->windows_.window2 == window))
+    WmWindow* wm_window = WmWindowAura::Get(window);
+    if ((resize_controller_->windows_.window1 == wm_window ||
+         resize_controller_->windows_.window2 == wm_window))
       return true;
-    for (size_t i = 0;
-         i < resize_controller_->windows_.other_windows.size(); ++i) {
-      if (resize_controller_->windows_.other_windows[i] == window)
-        return true;
-    }
-    return false;
+    return base::ContainsValue(resize_controller_->windows_.other_windows,
+                               wm_window);
   }
 
   bool IsOverWindows(const gfx::Point& loc) {

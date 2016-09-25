@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.contextmenu;
 
 import android.content.Context;
 import android.net.MailTo;
+import android.support.annotation.IntDef;
 import android.text.TextUtils;
 import android.view.ContextMenu;
 import android.view.MenuInflater;
@@ -21,6 +22,8 @@ import org.chromium.chrome.browser.preferences.datareduction.DataReductionProxyU
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.util.UrlUtilities;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Arrays;
@@ -29,10 +32,23 @@ import java.util.Arrays;
  * A {@link ContextMenuPopulator} used for showing the default Chrome context menu.
  */
 public class ChromeContextMenuPopulator implements ContextMenuPopulator {
+
+    private static final String TAG = "CCMenuPopulator";
+
+    /**
+     * Defines the context menu modes
+     */
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef({
+        NORMAL_MODE, /* Default mode */
+        CUSTOM_TAB_MODE, /* Custom tab mode */
+        FULLSCREEN_TAB_MODE /* Full screen mode */
+    })
+    public @interface ContextMenuMode {}
+
     public static final int NORMAL_MODE = 0;
     public static final int CUSTOM_TAB_MODE = 1;
     public static final int FULLSCREEN_TAB_MODE = 2;
-    private static final String TAG = "CCMenuPopulator";
 
     // Items that are included in all context menus.
     private static final int[] BASE_WHITELIST = {
@@ -158,15 +174,11 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
      * Builds a {@link ChromeContextMenuPopulator}.
      * @param delegate The {@link ContextMenuItemDelegate} that will be notified with actions
      *                 to perform when menu items are selected.
+     * @param mode Defines the context menu mode
      */
-    public ChromeContextMenuPopulator(ContextMenuItemDelegate delegate, int mode) {
+    public ChromeContextMenuPopulator(ContextMenuItemDelegate delegate, @ContextMenuMode int mode) {
         mDelegate = delegate;
         mMode = mode;
-    }
-
-    @Override
-    public boolean shouldShowContextMenu(ContextMenuParams params) {
-        return params != null && (params.isAnchor() || params.isImage() || params.isVideo());
     }
 
     @Override
@@ -197,6 +209,12 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
             menu.findItem(R.id.contextmenu_copy_link_text).setVisible(false);
         }
 
+        if (params.isAnchor() && !UrlUtilities.isAcceptedScheme(params.getLinkUrl())) {
+            menu.findItem(R.id.contextmenu_open_in_other_window).setVisible(false);
+            menu.findItem(R.id.contextmenu_open_in_new_tab).setVisible(false);
+            menu.findItem(R.id.contextmenu_open_in_incognito_tab).setVisible(false);
+        }
+
         if (MailTo.isMailTo(params.getLinkUrl())) {
             menu.findItem(R.id.contextmenu_copy_link_address).setVisible(false);
         } else {
@@ -223,16 +241,16 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
             // properties can also prevent an image underlying a link from being clickable.
             // When Lo-Fi is active, provide the user with a "Load images" option on links
             // to get the images in these cases.
-            DataReductionProxyUma.dataReductionProxyLoFiUIAction(
-                    DataReductionProxyUma.ACTION_LOAD_IMAGES_CONTEXT_MENU_SHOWN);
+            DataReductionProxyUma.previewsLoFiContextMenuAction(
+                    DataReductionProxyUma.ACTION_LOFI_LOAD_IMAGES_CONTEXT_MENU_SHOWN);
         }
 
         if (params.isVideo()) {
             menu.findItem(R.id.contextmenu_save_video).setVisible(
-                    UrlUtilities.isDownloadableScheme(params.getSrcUrl()));
+                    params.canSaveMedia() && UrlUtilities.isDownloadableScheme(params.getSrcUrl()));
         } else if (params.isImage() && params.imageWasFetchedLoFi()) {
-            DataReductionProxyUma.dataReductionProxyLoFiUIAction(
-                    DataReductionProxyUma.ACTION_LOAD_IMAGE_CONTEXT_MENU_SHOWN);
+            DataReductionProxyUma.previewsLoFiContextMenuAction(
+                    DataReductionProxyUma.ACTION_LOFI_LOAD_IMAGE_CONTEXT_MENU_SHOWN);
             // All image context menu items other than "Load image," "Open original image in
             // new tab," and "Copy image URL" should be disabled on Lo-Fi images.
             menu.findItem(R.id.contextmenu_save_image).setVisible(false);
@@ -307,16 +325,16 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
             mDelegate.onOpenImageInNewTab(params.getSrcUrl(), params.getReferrer());
         } else if (itemId == R.id.contextmenu_load_images) {
             ContextMenuUma.record(params, ContextMenuUma.ACTION_LOAD_IMAGES);
-            DataReductionProxyUma.dataReductionProxyLoFiUIAction(
-                    DataReductionProxyUma.ACTION_LOAD_IMAGES_CONTEXT_MENU_CLICKED);
+            DataReductionProxyUma.previewsLoFiContextMenuAction(
+                    DataReductionProxyUma.ACTION_LOFI_LOAD_IMAGES_CONTEXT_MENU_CLICKED);
             mDelegate.onReloadLoFiImages();
         } else if (itemId == R.id.contextmenu_load_original_image) {
             ContextMenuUma.record(params, ContextMenuUma.ACTION_LOAD_ORIGINAL_IMAGE);
-            DataReductionProxyUma.dataReductionProxyLoFiUIAction(
-                    DataReductionProxyUma.ACTION_LOAD_IMAGE_CONTEXT_MENU_CLICKED);
+            DataReductionProxyUma.previewsLoFiContextMenuAction(
+                    DataReductionProxyUma.ACTION_LOFI_LOAD_IMAGE_CONTEXT_MENU_CLICKED);
             if (!DataReductionProxySettings.getInstance().wasLoFiLoadImageRequestedBefore()) {
-                DataReductionProxyUma.dataReductionProxyLoFiUIAction(
-                        DataReductionProxyUma.ACTION_LOAD_IMAGE_CONTEXT_MENU_CLICKED_ON_PAGE);
+                DataReductionProxyUma.previewsLoFiContextMenuAction(
+                        DataReductionProxyUma.ACTION_LOFI_LOAD_IMAGE_CONTEXT_MENU_CLICKED_ON_PAGE);
                 DataReductionProxySettings.getInstance().setLoFiLoadImageRequested();
             }
             mDelegate.onLoadOriginalImage();
@@ -351,8 +369,8 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
                 helper.startContextMenuDownload(true, false);
             }
         } else if (itemId == R.id.contextmenu_save_offline) {
-            // TODO(petewil): Add code here to save the page offline.
-            Log.d(TAG, "Save an offline copy of the linked page");
+            // This is a temporary hookup point to save a page later.
+            mDelegate.onSavePageLater(params.getLinkUrl());
         } else if (itemId == R.id.contextmenu_search_by_image) {
             ContextMenuUma.record(params, ContextMenuUma.ACTION_SEARCH_BY_IMAGE);
             helper.searchForImage();

@@ -45,12 +45,14 @@
 #include "public/platform/modules/indexeddb/WebIDBTypes.h"
 #include "wtf/Atomics.h"
 #include <limits>
+#include <memory>
 
 using blink::WebIDBDatabase;
 
 namespace blink {
 
 const char IDBDatabase::indexDeletedErrorMessage[] = "The index or its object store has been deleted.";
+const char IDBDatabase::indexNameTakenErrorMessage[] = "An index with the specified name already exists.";
 const char IDBDatabase::isKeyCursorErrorMessage[] = "The cursor is a key cursor.";
 const char IDBDatabase::noKeyOrKeyRangeErrorMessage[] = "No key or key range specified.";
 const char IDBDatabase::noSuchIndexErrorMessage[] = "The specified index was not found.";
@@ -59,6 +61,7 @@ const char IDBDatabase::noValueErrorMessage[] = "The cursor is being iterated or
 const char IDBDatabase::notValidKeyErrorMessage[] = "The parameter is not a valid key.";
 const char IDBDatabase::notVersionChangeTransactionErrorMessage[] = "The database is not running a version change transaction.";
 const char IDBDatabase::objectStoreDeletedErrorMessage[] = "The object store has been deleted.";
+const char IDBDatabase::objectStoreNameTakenErrorMessage[] = "An object store with the specified name already exists.";
 const char IDBDatabase::requestNotFinishedErrorMessage[] = "The request has not finished.";
 const char IDBDatabase::sourceDeletedErrorMessage[] = "The cursor's source or effective object store has been deleted.";
 const char IDBDatabase::transactionInactiveErrorMessage[] = "The transaction is not active.";
@@ -66,17 +69,17 @@ const char IDBDatabase::transactionFinishedErrorMessage[] = "The transaction has
 const char IDBDatabase::transactionReadOnlyErrorMessage[] = "The transaction is read-only.";
 const char IDBDatabase::databaseClosedErrorMessage[] = "The database connection is closed.";
 
-IDBDatabase* IDBDatabase::create(ExecutionContext* context, PassOwnPtr<WebIDBDatabase> database, IDBDatabaseCallbacks* callbacks)
+IDBDatabase* IDBDatabase::create(ExecutionContext* context, std::unique_ptr<WebIDBDatabase> database, IDBDatabaseCallbacks* callbacks)
 {
-    IDBDatabase* idbDatabase = new IDBDatabase(context, database, callbacks);
+    IDBDatabase* idbDatabase = new IDBDatabase(context, std::move(database), callbacks);
     idbDatabase->suspendIfNeeded();
     return idbDatabase;
 }
 
-IDBDatabase::IDBDatabase(ExecutionContext* context, PassOwnPtr<WebIDBDatabase> backend, IDBDatabaseCallbacks* callbacks)
+IDBDatabase::IDBDatabase(ExecutionContext* context, std::unique_ptr<WebIDBDatabase> backend, IDBDatabaseCallbacks* callbacks)
     : ActiveScriptWrappable(this)
     , ActiveDOMObject(context)
-    , m_backend(backend)
+    , m_backend(std::move(backend))
     , m_databaseCallbacks(callbacks)
 {
     m_databaseCallbacks->connect(this);
@@ -120,27 +123,38 @@ void IDBDatabase::indexDeleted(int64_t objectStoreId, int64_t indexId)
     it->value.indexes.remove(indexId);
 }
 
+void IDBDatabase::indexRenamed(int64_t objectStoreId, int64_t indexId, const String& newName)
+{
+    IDBDatabaseMetadata::ObjectStoreMap::iterator storeIterator = m_metadata.objectStores.find(objectStoreId);
+    SECURITY_DCHECK(storeIterator != m_metadata.objectStores.end());
+
+    IDBObjectStoreMetadata& storeMetadata = storeIterator->value;
+    IDBObjectStoreMetadata::IndexMap::iterator indexIterator = storeMetadata.indexes.find(indexId);
+    DCHECK_NE(indexIterator, storeMetadata.indexes.end());
+    indexIterator->value.name = newName;
+}
+
 void IDBDatabase::transactionCreated(IDBTransaction* transaction)
 {
-    ASSERT(transaction);
-    ASSERT(!m_transactions.contains(transaction->id()));
+    DCHECK(transaction);
+    DCHECK(!m_transactions.contains(transaction->id()));
     m_transactions.add(transaction->id(), transaction);
 
     if (transaction->isVersionChange()) {
-        ASSERT(!m_versionChangeTransaction);
+        DCHECK(!m_versionChangeTransaction);
         m_versionChangeTransaction = transaction;
     }
 }
 
 void IDBDatabase::transactionFinished(const IDBTransaction* transaction)
 {
-    ASSERT(transaction);
-    ASSERT(m_transactions.contains(transaction->id()));
-    ASSERT(m_transactions.get(transaction->id()) == transaction);
+    DCHECK(transaction);
+    DCHECK(m_transactions.contains(transaction->id()));
+    DCHECK_EQ(m_transactions.get(transaction->id()), transaction);
     m_transactions.remove(transaction->id());
 
     if (transaction->isVersionChange()) {
-        ASSERT(m_versionChangeTransaction == transaction);
+        DCHECK_EQ(m_versionChangeTransaction, transaction);
         m_versionChangeTransaction = nullptr;
     }
 
@@ -150,13 +164,13 @@ void IDBDatabase::transactionFinished(const IDBTransaction* transaction)
 
 void IDBDatabase::onAbort(int64_t transactionId, DOMException* error)
 {
-    ASSERT(m_transactions.contains(transactionId));
+    DCHECK(m_transactions.contains(transactionId));
     m_transactions.get(transactionId)->onAbort(error);
 }
 
 void IDBDatabase::onComplete(int64_t transactionId)
 {
-    ASSERT(m_transactions.contains(transactionId));
+    DCHECK(m_transactions.contains(transactionId));
     m_transactions.get(transactionId)->onComplete();
 }
 
@@ -167,6 +181,13 @@ DOMStringList* IDBDatabase::objectStoreNames() const
         objectStoreNames->append(it.value.name);
     objectStoreNames->sort();
     return objectStoreNames;
+}
+
+const String& IDBDatabase::getObjectStoreName(int64_t objectStoreId) const
+{
+    const auto& it = m_metadata.objectStores.find(objectStoreId);
+    DCHECK(it != m_metadata.objectStores.end());
+    return it->value.name;
 }
 
 IDBObjectStore* IDBDatabase::createObjectStore(const String& name, const IDBKeyPath& keyPath, bool autoIncrement, ExceptionState& exceptionState)
@@ -187,13 +208,13 @@ IDBObjectStore* IDBDatabase::createObjectStore(const String& name, const IDBKeyP
         return nullptr;
     }
 
-    if (containsObjectStore(name)) {
-        exceptionState.throwDOMException(ConstraintError, "An object store with the specified name already exists.");
+    if (!keyPath.isNull() && !keyPath.isValid()) {
+        exceptionState.throwDOMException(SyntaxError, "The keyPath option is not a valid key path.");
         return nullptr;
     }
 
-    if (!keyPath.isNull() && !keyPath.isValid()) {
-        exceptionState.throwDOMException(SyntaxError, "The keyPath option is not a valid key path.");
+    if (containsObjectStore(name)) {
+        exceptionState.throwDOMException(ConstraintError, IDBDatabase::objectStoreNameTakenErrorMessage);
         return nullptr;
     }
 
@@ -268,22 +289,8 @@ IDBTransaction* IDBDatabase::transaction(ScriptState* scriptState, const StringO
         for (const String& name : list)
             scope.add(name);
     } else {
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
-
-    if (scope.isEmpty()) {
-        exceptionState.throwDOMException(InvalidAccessError, "The storeNames parameter was empty.");
-        return nullptr;
-    }
-
-    WebIDBTransactionMode mode = IDBTransaction::stringToMode(modeString);
-    if (mode != WebIDBTransactionModeReadOnly && mode != WebIDBTransactionModeReadWrite) {
-        exceptionState.throwTypeError("The mode provided ('" + modeString + "') is not one of 'readonly' or 'readwrite'.");
-        return nullptr;
-    }
-
-    if (exceptionState.hadException())
-        return nullptr;
 
     if (m_versionChangeTransaction) {
         exceptionState.throwDOMException(InvalidStateError, "A version change transaction is running.");
@@ -292,6 +299,16 @@ IDBTransaction* IDBDatabase::transaction(ScriptState* scriptState, const StringO
 
     if (m_closePending) {
         exceptionState.throwDOMException(InvalidStateError, "The database connection is closing.");
+        return nullptr;
+    }
+
+    if (!m_backend) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::databaseClosedErrorMessage);
+        return nullptr;
+    }
+
+    if (scope.isEmpty()) {
+        exceptionState.throwDOMException(InvalidAccessError, "The storeNames parameter was empty.");
         return nullptr;
     }
 
@@ -305,15 +322,16 @@ IDBTransaction* IDBDatabase::transaction(ScriptState* scriptState, const StringO
         objectStoreIds.append(objectStoreId);
     }
 
-    if (!m_backend) {
-        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::databaseClosedErrorMessage);
+    WebIDBTransactionMode mode = IDBTransaction::stringToMode(modeString);
+    if (mode != WebIDBTransactionModeReadOnly && mode != WebIDBTransactionModeReadWrite) {
+        exceptionState.throwTypeError("The mode provided ('" + modeString + "') is not one of 'readonly' or 'readwrite'.");
         return nullptr;
     }
 
     int64_t transactionId = nextTransactionId();
-    m_backend->createTransaction(transactionId, WebIDBDatabaseCallbacksImpl::create(m_databaseCallbacks).leakPtr(), objectStoreIds, mode);
+    m_backend->createTransaction(transactionId, objectStoreIds, mode);
 
-    return IDBTransaction::create(scriptState, transactionId, scope, mode, this);
+    return IDBTransaction::createNonVersionChange(scriptState, transactionId, scope, mode, this);
 }
 
 void IDBDatabase::forceClose()
@@ -338,12 +356,12 @@ void IDBDatabase::close()
 
 void IDBDatabase::closeConnection()
 {
-    ASSERT(m_closePending);
-    ASSERT(m_transactions.isEmpty());
+    DCHECK(m_closePending);
+    DCHECK(m_transactions.isEmpty());
 
     if (m_backend) {
         m_backend->close();
-        m_backend.clear();
+        m_backend.reset();
     }
 
     if (m_contextStopped || !getExecutionContext())
@@ -380,8 +398,8 @@ void IDBDatabase::onVersionChange(int64_t oldVersion, int64_t newVersion)
 
 void IDBDatabase::enqueueEvent(Event* event)
 {
-    ASSERT(!m_contextStopped);
-    ASSERT(getExecutionContext());
+    DCHECK(!m_contextStopped);
+    DCHECK(getExecutionContext());
     EventQueue* eventQueue = getExecutionContext()->getEventQueue();
     event->setTarget(this);
     eventQueue->enqueueEvent(event);
@@ -393,7 +411,7 @@ DispatchEventResult IDBDatabase::dispatchEventInternal(Event* event)
     IDB_TRACE("IDBDatabase::dispatchEvent");
     if (m_contextStopped || !getExecutionContext())
         return DispatchEventResult::CanceledBeforeDispatch;
-    ASSERT(event->type() == EventTypeNames::versionchange || event->type() == EventTypeNames::close);
+    DCHECK(event->type() == EventTypeNames::versionchange || event->type() == EventTypeNames::close);
     for (size_t i = 0; i < m_enqueuedEvents.size(); ++i) {
         if (m_enqueuedEvents[i].get() == event)
             m_enqueuedEvents.remove(i);
@@ -409,11 +427,21 @@ int64_t IDBDatabase::findObjectStoreId(const String& name) const
 {
     for (const auto& it : m_metadata.objectStores) {
         if (it.value.name == name) {
-            ASSERT(it.key != IDBObjectStoreMetadata::InvalidId);
+            DCHECK_NE(it.key, IDBObjectStoreMetadata::InvalidId);
             return it.key;
         }
     }
     return IDBObjectStoreMetadata::InvalidId;
+}
+
+void IDBDatabase::objectStoreRenamed(int64_t objectStoreId, const String& newName)
+{
+    DCHECK(m_versionChangeTransaction) << "Object store renamed on database without a versionchange transaction";
+    DCHECK(m_versionChangeTransaction->isActive()) << "Object store renamed when versionchange transaction is not active";
+    DCHECK(m_backend) << "Object store renamed after database connection closed";
+    DCHECK(m_metadata.objectStores.contains(objectStoreId));
+    IDBDatabaseMetadata::ObjectStoreMap::iterator it = m_metadata.objectStores.find(objectStoreId);
+    it->value.name = newName;
 }
 
 bool IDBDatabase::hasPendingActivity() const
@@ -432,7 +460,7 @@ void IDBDatabase::stop()
     // round trip to the back-end to abort.
     if (m_backend) {
         m_backend->close();
-        m_backend.clear();
+        m_backend.reset();
     }
 }
 

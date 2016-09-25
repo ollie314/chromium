@@ -6,8 +6,8 @@
 
 #include <stddef.h>
 
-#include "ash/new_window_delegate.h"
-#include "ash/shell.h"
+#include "ash/common/new_window_delegate.h"
+#include "ash/common/wm_shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -18,8 +18,7 @@
 #include "content/public/browser/web_ui.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/events/devices/device_data_manager.h"
-#include "ui/events/devices/keyboard_device.h"
+#include "ui/events/devices/input_device_manager.h"
 
 namespace {
 const struct ModifierKeysSelectItem {
@@ -48,11 +47,13 @@ const char* kDataValuesNames[] = {
   "remapAltKeyToValue",
   "remapCapsLockKeyToValue",
   "remapDiamondKeyToValue",
+  "remapEscapeKeyToValue",
+  "remapBackspaceKeyToValue",
 };
 
 bool HasExternalKeyboard() {
-  for (const ui::KeyboardDevice& keyboard :
-       ui::DeviceDataManager::GetInstance()->keyboard_devices()) {
+  for (const ui::InputDevice& keyboard :
+       ui::InputDeviceManager::GetInstance()->GetKeyboardDevices()) {
     if (keyboard.type == ui::InputDeviceType::INPUT_DEVICE_EXTERNAL)
       return true;
   }
@@ -65,11 +66,11 @@ namespace chromeos {
 namespace options {
 
 KeyboardHandler::KeyboardHandler() {
-  ui::DeviceDataManager::GetInstance()->AddObserver(this);
+  ui::InputDeviceManager::GetInstance()->AddObserver(this);
 }
 
 KeyboardHandler::~KeyboardHandler() {
-  ui::DeviceDataManager::GetInstance()->RemoveObserver(this);
+  ui::InputDeviceManager::GetInstance()->RemoveObserver(this);
 }
 
 void KeyboardHandler::GetLocalizedValues(
@@ -93,6 +94,12 @@ void KeyboardHandler::GetLocalizedValues(
   localized_strings->SetString("remapDiamondKeyToContent",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_LANGUAGES_KEY_DIAMOND_KEY_LABEL));
+  localized_strings->SetString("remapBackspaceKeyToContent",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_LANGUAGES_KEY_BACKSPACE_KEY_LABEL));
+  localized_strings->SetString("remapEscapeKeyToContent",
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_LANGUAGES_KEY_ESCAPE_KEY_LABEL));
   localized_strings->SetString("sendFunctionKeys",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_LANGUAGES_SEND_FUNCTION_KEYS));
@@ -133,14 +140,6 @@ void KeyboardHandler::GetLocalizedValues(
       const input_method::ModifierKey value =
           kModifierKeysSelectItems[j].value;
       const int message_id = kModifierKeysSelectItems[j].message_id;
-      // Only the seach/caps-lock key can be remapped to the
-      // caps-lock/backspace key.
-      if (kDataValuesNames[i] != std::string("remapSearchKeyToValue") &&
-          kDataValuesNames[i] != std::string("remapCapsLockKeyToValue") &&
-          (value == input_method::kCapsLockKey ||
-           value == input_method::kBackspaceKey)) {
-        continue;
-      }
       base::ListValue* option = new base::ListValue();
       option->Append(new base::FundamentalValue(value));
       option->Append(new base::StringValue(l10n_util::GetStringUTF16(
@@ -156,7 +155,7 @@ void KeyboardHandler::InitializePage() {
       chromeos::switches::kHasChromeOSDiamondKey);
   const base::FundamentalValue show_diamond_key_options(has_diamond_key);
 
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "options.KeyboardOverlay.showDiamondKeyOptions",
       show_diamond_key_options);
 
@@ -176,14 +175,13 @@ void KeyboardHandler::OnKeyboardDeviceConfigurationChanged() {
 }
 
 void KeyboardHandler::HandleShowKeyboardShortcuts(const base::ListValue* args) {
-  ash::Shell::GetInstance()->new_window_delegate()->ShowKeyboardOverlay();
+  ash::WmShell::Get()->new_window_delegate()->ShowKeyboardOverlay();
 }
 
 void KeyboardHandler::UpdateCapsLockOptions() const {
   const base::FundamentalValue show_caps_lock_options(HasExternalKeyboard());
-  web_ui()->CallJavascriptFunction(
-      "options.KeyboardOverlay.showCapsLockOptions",
-      show_caps_lock_options);
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "options.KeyboardOverlay.showCapsLockOptions", show_caps_lock_options);
 }
 
 }  // namespace options

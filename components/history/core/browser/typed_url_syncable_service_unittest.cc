@@ -7,28 +7,29 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_backend_client.h"
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/in_memory_history_backend.h"
 #include "components/history/core/test/test_history_database.h"
-#include "sync/api/fake_sync_change_processor.h"
-#include "sync/api/sync_change_processor_wrapper_for_test.h"
-#include "sync/api/sync_error.h"
-#include "sync/api/sync_error_factory_mock.h"
-#include "sync/internal_api/public/attachments/attachment_service_proxy_for_test.h"
-#include "sync/protocol/sync.pb.h"
-#include "sync/protocol/typed_url_specifics.pb.h"
+#include "components/sync/api/fake_sync_change_processor.h"
+#include "components/sync/api/sync_change_processor_wrapper_for_test.h"
+#include "components/sync/api/sync_error.h"
+#include "components/sync/api/sync_error_factory_mock.h"
+#include "components/sync/core/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/protocol/sync.pb.h"
+#include "components/sync/protocol/typed_url_specifics.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using history::HistoryBackend;
@@ -77,7 +78,7 @@ void AddNewestVisit(ui::PageTransition transition,
   base::Time time = base::Time::FromInternalValue(visit_time);
   visits->insert(visits->begin(), VisitRow(url->id(), time, 0, transition, 0));
 
-  if (transition == ui::PAGE_TRANSITION_TYPED) {
+  if (ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_TYPED)) {
     url->set_typed_count(url->typed_count() + 1);
   }
 
@@ -92,7 +93,7 @@ void AddOldestVisit(ui::PageTransition transition,
   base::Time time = base::Time::FromInternalValue(visit_time);
   visits->push_back(VisitRow(url->id(), time, 0, transition, 0));
 
-  if (transition == ui::PAGE_TRANSITION_TYPED) {
+  if (ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_TYPED)) {
     url->set_typed_count(url->typed_count() + 1);
   }
 
@@ -148,11 +149,12 @@ class TestHistoryBackend;
 
 class TestHistoryBackendDelegate : public HistoryBackend::Delegate {
  public:
-  explicit TestHistoryBackendDelegate(TestHistoryBackend* test) : test_(test) {}
+  TestHistoryBackendDelegate() {}
 
-  void NotifyProfileError(sql::InitStatus init_status) override {}
+  void NotifyProfileError(sql::InitStatus init_status,
+                          const std::string& diagnostics) override {}
   void SetInMemoryBackend(
-      scoped_ptr<InMemoryHistoryBackend> backend) override{};
+      std::unique_ptr<InMemoryHistoryBackend> backend) override{};
   void NotifyFaviconsChanged(const std::set<GURL>& page_urls,
                              const GURL& icon_url) override{};
   void NotifyURLVisited(ui::PageTransition transition,
@@ -171,16 +173,13 @@ class TestHistoryBackendDelegate : public HistoryBackend::Delegate {
   void DBLoaded() override{};
 
  private:
-  // Not owned by us.
-  TestHistoryBackend* test_;
-
   DISALLOW_COPY_AND_ASSIGN(TestHistoryBackendDelegate);
 };
 
 class TestHistoryBackend : public HistoryBackend {
  public:
   TestHistoryBackend()
-      : HistoryBackend(new TestHistoryBackendDelegate(this),
+      : HistoryBackend(new TestHistoryBackendDelegate(),
                        nullptr,
                        base::ThreadTaskRunnerHandle::Get()) {}
 
@@ -220,8 +219,8 @@ class TypedUrlSyncableServiceTest : public testing::Test {
   void SetUp() override {
     fake_history_backend_ = new TestHistoryBackend();
     ASSERT_TRUE(test_dir_.CreateUniqueTempDir());
-    fake_history_backend_->Init(false,
-        TestHistoryDatabaseParamsForPath(test_dir_.path()));
+    fake_history_backend_->Init(
+        false, TestHistoryDatabaseParamsForPath(test_dir_.GetPath()));
     typed_url_sync_service_ =
         fake_history_backend_->GetTypedUrlSyncableService();
     fake_change_processor_.reset(new syncer::FakeSyncChangeProcessor);
@@ -295,7 +294,7 @@ class TypedUrlSyncableServiceTest : public testing::Test {
   base::ScopedTempDir test_dir_;
   scoped_refptr<TestHistoryBackend> fake_history_backend_;
   TypedUrlSyncableService* typed_url_sync_service_;
-  scoped_ptr<syncer::FakeSyncChangeProcessor> fake_change_processor_;
+  std::unique_ptr<syncer::FakeSyncChangeProcessor> fake_change_processor_;
 };
 
 void TypedUrlSyncableServiceTest::StartSyncing(
@@ -306,10 +305,10 @@ void TypedUrlSyncableServiceTest::StartSyncing(
   syncer::SyncMergeResult result =
       typed_url_sync_service_->MergeDataAndStartSyncing(
           syncer::TYPED_URLS, initial_data,
-          scoped_ptr<syncer::SyncChangeProcessor>(
+          std::unique_ptr<syncer::SyncChangeProcessor>(
               new syncer::SyncChangeProcessorWrapperForTest(
                   fake_change_processor_.get())),
-          scoped_ptr<syncer::SyncErrorFactory>(
+          std::unique_ptr<syncer::SyncErrorFactory>(
               new syncer::SyncErrorFactoryMock()));
   typed_url_sync_service_->history_backend_observer_.RemoveAll();
   EXPECT_FALSE(result.error().IsSet()) << result.error().message();
@@ -802,7 +801,8 @@ TEST_F(TypedUrlSyncableServiceTest, MaxVisitLocalTypedUrl) {
   int num_other_visits_synced = 0;
   int r = url_specifics.visits_size() - 1;
   for (int i = 0; i < url_specifics.visits_size(); ++i, --r) {
-    if (url_specifics.visit_transitions(i) == ui::PAGE_TRANSITION_TYPED) {
+    if (url_specifics.visit_transitions(i) ==
+        static_cast<int32_t>(ui::PAGE_TRANSITION_TYPED)) {
       ++num_typed_visits_synced;
     } else {
       ++num_other_visits_synced;
@@ -957,7 +957,8 @@ TEST_F(TypedUrlSyncableServiceTest, MergeUrlEmptyLocal) {
   fake_history_backend_->GetVisitsForURL(url_id, &all_visits);
   ASSERT_EQ(1U, all_visits.size());
   EXPECT_EQ(server_time, all_visits[0].visit_time);
-  EXPECT_EQ(visits[0].transition, all_visits[0].transition);
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      all_visits[0].transition, visits[0].transition));
 }
 
 // Add a url to the local and sync data before sync begins, with the sync data
@@ -999,7 +1000,8 @@ TEST_F(TypedUrlSyncableServiceTest, MergeUrlOldLocal) {
   fake_history_backend_->GetVisitsForURL(url_id, &all_visits);
   ASSERT_EQ(2U, all_visits.size());
   EXPECT_EQ(server_time, all_visits.back().visit_time);
-  EXPECT_EQ(server_visits[0].transition, all_visits.back().transition);
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      all_visits.back().transition, server_visits[0].transition));
   URLRow url_row;
   EXPECT_TRUE(fake_history_backend_->GetURL(GURL(kURL), &url_row));
   EXPECT_EQ(kTitle2, base::UTF16ToUTF8(url_row.title()));
@@ -1074,6 +1076,50 @@ TEST_F(TypedUrlSyncableServiceTest, MergeUrlOldSync) {
             url_specifics.visit_transitions(0));
 }
 
+// Check that there is no crash during start sync, if history backend and sync
+// have same url, but sync has username/password in it.
+// Also check sync will not accept url with username and password.
+TEST_F(TypedUrlSyncableServiceTest, MergeUrlsWithUsernameAndPassword) {
+  const char kURLWithUsernameAndPassword[] =
+      "http://username:password@pie.com/";
+
+  // Add a url to backend.
+  VisitVector visits;
+  URLRow local_row = MakeTypedUrlRow(kURL, kTitle2, 1, 3, false, &visits);
+  fake_history_backend_->SetVisitsForUrl(local_row, visits);
+
+  // Create sync data for the same url but contain username and password.
+  VisitVector server_visits;
+  URLRow server_row = MakeTypedUrlRow(kURLWithUsernameAndPassword, kTitle, 1, 3,
+                                      false, &server_visits);
+  syncer::SyncDataList initial_sync_data;
+  sync_pb::EntitySpecifics entity_specifics;
+  sync_pb::TypedUrlSpecifics* typed_url = entity_specifics.mutable_typed_url();
+  WriteToTypedUrlSpecifics(server_row, server_visits, typed_url);
+  syncer::SyncData data =
+      syncer::SyncData::CreateLocalData(kURL, kTitle, entity_specifics);
+
+  // Make sure there is no crash when merge two urls.
+  initial_sync_data.push_back(data);
+  StartSyncing(initial_sync_data);
+
+  // Check that the username and password url did not get merged.
+  std::set<GURL> sync_state;
+  GetSyncedUrls(&sync_state);
+  EXPECT_EQ(1U, sync_state.size());
+  EXPECT_EQ(1U, sync_state.count(GURL(kURL)));
+
+  // Notify typed url sync service of the update.
+  typed_url_sync_service_->OnURLVisited(
+      fake_history_backend_.get(), ui::PAGE_TRANSITION_TYPED, server_row,
+      RedirectList(), base::Time::FromInternalValue(7));
+
+  // Check username/password url is not synced.
+  GetSyncedUrls(&sync_state);
+  EXPECT_EQ(1U, sync_state.size());
+  EXPECT_EQ(1U, sync_state.count(GURL(kURL)));
+}
+
 // Create a remote typed URL and visit, then send to syncable service after sync
 // has started. Check that local DB is received the new URL and visit.
 TEST_F(TypedUrlSyncableServiceTest, AddUrlAndVisits) {
@@ -1088,7 +1134,8 @@ TEST_F(TypedUrlSyncableServiceTest, AddUrlAndVisits) {
   fake_history_backend_->GetVisitsForURL(url_id, &all_visits);
   EXPECT_EQ(1U, all_visits.size());
   EXPECT_EQ(visit_time, all_visits[0].visit_time);
-  EXPECT_EQ(visits[0].transition, all_visits[0].transition);
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      all_visits[0].transition, visits[0].transition));
   URLRow url_row;
   EXPECT_TRUE(fake_history_backend_->GetURL(GURL(kURL), &url_row));
   EXPECT_EQ(kTitle, base::UTF16ToUTF8(url_row.title()));
@@ -1118,7 +1165,8 @@ TEST_F(TypedUrlSyncableServiceTest, UpdateUrlAndVisits) {
   GetSyncedUrls(&sync_state);
   EXPECT_EQ(1U, all_visits.size());
   EXPECT_EQ(visit_time, all_visits[0].visit_time);
-  EXPECT_EQ(visits[0].transition, all_visits[0].transition);
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      all_visits[0].transition, visits[0].transition));
   EXPECT_EQ(1U, sync_state.size());
   EXPECT_TRUE(fake_history_backend_->GetURL(GURL(kURL), &url_row));
   EXPECT_EQ(kTitle, base::UTF16ToUTF8(url_row.title()));
@@ -1136,7 +1184,8 @@ TEST_F(TypedUrlSyncableServiceTest, UpdateUrlAndVisits) {
 
   EXPECT_EQ(2U, all_visits.size());
   EXPECT_EQ(new_visit_time, all_visits.back().visit_time);
-  EXPECT_EQ(new_visits[0].transition, all_visits.back().transition);
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      all_visits.back().transition, new_visits[0].transition));
   EXPECT_TRUE(fake_history_backend_->GetURL(GURL(kURL), &url_row));
   EXPECT_EQ(kTitle2, base::UTF16ToUTF8(url_row.title()));
 }
@@ -1162,7 +1211,8 @@ TEST_F(TypedUrlSyncableServiceTest, DeleteUrlAndVisits) {
   fake_history_backend_->GetVisitsForURL(url_id, &all_visits);
   EXPECT_EQ(1U, all_visits.size());
   EXPECT_EQ(visit_time, all_visits[0].visit_time);
-  EXPECT_EQ(visit_vectors[0][0].transition, all_visits[0].transition);
+  EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+      all_visits[0].transition, visit_vectors[0][0].transition));
   URLRow url_row;
   EXPECT_TRUE(fake_history_backend_->GetURL(GURL(kURL), &url_row));
   EXPECT_EQ(kTitle, base::UTF16ToUTF8(url_row.title()));
@@ -1281,7 +1331,8 @@ TEST_F(TypedUrlSyncableServiceTest, DiffVisitsAdd) {
   ASSERT_TRUE(new_visits.size() == arraysize(visits_added));
   for (size_t i = 0; i < arraysize(visits_added); ++i) {
     EXPECT_EQ(new_visits[i].first.ToInternalValue(), visits_added[i]);
-    EXPECT_EQ(new_visits[i].second, ui::PAGE_TRANSITION_TYPED);
+    EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+        new_visits[i].second, ui::PAGE_TRANSITION_TYPED));
   }
 }
 
@@ -1301,10 +1352,10 @@ TEST_F(TypedUrlSyncableServiceTest, WriteTypedUrlSpecifics) {
   EXPECT_EQ(typed_url.visit_transitions_size(), typed_url.visits_size());
   EXPECT_EQ(1, typed_url.visits(0));
   EXPECT_EQ(3, typed_url.visits(1));
-  EXPECT_EQ(ui::PAGE_TRANSITION_TYPED,
-            ui::PageTransitionFromInt(typed_url.visit_transitions(0)));
-  EXPECT_EQ(ui::PAGE_TRANSITION_LINK,
-            ui::PageTransitionFromInt(typed_url.visit_transitions(1)));
+  EXPECT_EQ(static_cast<int32_t>(ui::PAGE_TRANSITION_TYPED),
+            typed_url.visit_transitions(0));
+  EXPECT_EQ(static_cast<int32_t>(ui::PAGE_TRANSITION_LINK),
+            typed_url.visit_transitions(1));
 }
 
 // Create 101 visits, check WriteToTypedUrlSpecifics will only keep 100 visits.
@@ -1326,10 +1377,10 @@ TEST_F(TypedUrlSyncableServiceTest, TooManyVisits) {
   // Visit with timestamp of 1001 should be omitted since we should have
   // skipped that visit to stay under the cap.
   EXPECT_EQ(1002, typed_url.visits(1));
-  EXPECT_EQ(ui::PAGE_TRANSITION_TYPED,
-            ui::PageTransitionFromInt(typed_url.visit_transitions(0)));
-  EXPECT_EQ(ui::PAGE_TRANSITION_LINK,
-            ui::PageTransitionFromInt(typed_url.visit_transitions(1)));
+  EXPECT_EQ(static_cast<int32_t>(ui::PAGE_TRANSITION_TYPED),
+            typed_url.visit_transitions(0));
+  EXPECT_EQ(static_cast<int32_t>(ui::PAGE_TRANSITION_LINK),
+            typed_url.visit_transitions(1));
 }
 
 // Create 306 visits, check WriteToTypedUrlSpecifics will only keep 100 typed
@@ -1354,8 +1405,8 @@ TEST_F(TypedUrlSyncableServiceTest, TooManyTypedVisits) {
 
   // Ensure there are no non-typed visits since that's all that should fit.
   for (int i = 0; i < typed_url.visits_size(); ++i) {
-    EXPECT_EQ(ui::PAGE_TRANSITION_TYPED,
-              ui::PageTransitionFromInt(typed_url.visit_transitions(i)));
+    EXPECT_EQ(static_cast<int32_t>(ui::PAGE_TRANSITION_TYPED),
+              typed_url.visit_transitions(i));
   }
 }
 
@@ -1372,8 +1423,8 @@ TEST_F(TypedUrlSyncableServiceTest, NoTypedVisits) {
   EXPECT_EQ(typed_url.visit_transitions_size(), typed_url.visits_size());
 
   EXPECT_EQ(1000, typed_url.visits(0));
-  EXPECT_EQ(ui::PAGE_TRANSITION_RELOAD,
-            ui::PageTransitionFromInt(typed_url.visit_transitions(0)));
+  EXPECT_EQ(static_cast<int32_t>(ui::PAGE_TRANSITION_RELOAD),
+            typed_url.visit_transitions(0));
 }
 
 TEST_F(TypedUrlSyncableServiceTest, MergeUrls) {

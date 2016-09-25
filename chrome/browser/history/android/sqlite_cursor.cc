@@ -15,6 +15,7 @@
 #include "sql/statement.h"
 
 using base::android::ConvertUTF8ToJavaString;
+using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 using content::BrowserThread;
 
@@ -162,13 +163,13 @@ SQLiteCursor::SQLiteCursor(const std::vector<std::string>& column_names,
                            history::AndroidStatement* statement,
                            AndroidHistoryProviderService* service)
     : position_(-1),
-      event_(false, false),
+      event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+             base::WaitableEvent::InitialState::NOT_SIGNALED),
       statement_(statement),
       column_names_(column_names),
       service_(service),
       count_(-1),
-      test_observer_(NULL) {
-}
+      test_observer_(NULL) {}
 
 SQLiteCursor::~SQLiteCursor() {
 }

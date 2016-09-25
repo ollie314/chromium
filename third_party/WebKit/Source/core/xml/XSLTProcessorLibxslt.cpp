@@ -22,6 +22,7 @@
 
 #include "core/xml/XSLTProcessor.h"
 
+#include "bindings/core/v8/SourceLocation.h"
 #include "core/dom/Document.h"
 #include "core/dom/TransformSource.h"
 #include "core/editing/serializers/Serialization.h"
@@ -80,7 +81,7 @@ void XSLTProcessor::parseErrorFunc(void* userData, xmlError* error)
         break;
     }
 
-    console->addMessage(ConsoleMessage::create(XMLMessageSource, level, error->message, error->file, error->line));
+    console->addMessage(ConsoleMessage::create(XMLMessageSource, level, error->message, SourceLocation::create(error->file, error->line, 0, nullptr)));
 }
 
 // FIXME: There seems to be no way to control the ctxt pointer for loading here, thus we have globals.
@@ -116,7 +117,7 @@ static xmlDocPtr docLoaderFunc(
 
         // We don't specify an encoding here. Neither Gecko nor WinIE respects
         // the encoding specified in the HTTP headers.
-        SharedBuffer* data = resource->resourceBuffer();
+        RefPtr<const SharedBuffer> data = resource->resourceBuffer();
         xmlDocPtr doc = data ? xmlReadMemory(data->data(), data->size(), (const char*)uri, 0, options) : nullptr;
 
         xmlSetStructuredErrorFunc(0, 0);
@@ -154,7 +155,7 @@ static int writeToStringBuilder(void* context, const char* buffer, int len)
     const char* stringCurrent = buffer;
     WTF::Unicode::ConversionResult result = WTF::Unicode::convertUTF8ToUTF16(&stringCurrent, buffer + len, &bufferUChar, bufferUCharEnd);
     if (result != WTF::Unicode::conversionOK && result != WTF::Unicode::sourceExhausted) {
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return -1;
     }
 

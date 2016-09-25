@@ -6,10 +6,12 @@
 
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "jni/SurfaceTextureListener_jni.h"
 
-namespace gfx {
+using base::android::JavaParamRef;
+
+namespace gl {
 
 SurfaceTextureListener::SurfaceTextureListener(const base::Closure& callback,
                                                bool use_any_thread)
@@ -41,4 +43,4 @@ bool SurfaceTextureListener::RegisterSurfaceTextureListener(JNIEnv* env) {
   return RegisterNativesImpl(env);
 }
 
-}  // namespace gfx
+}  // namespace gl

@@ -16,10 +16,10 @@
 #include "modules/serviceworkers/ServiceWorkerWindowClientCallback.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerClientQueryOptions.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerClientsInfo.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
@@ -68,7 +68,7 @@ public:
 
     void onSuccess(std::unique_ptr<WebServiceWorkerClientInfo> webClient) override
     {
-        OwnPtr<WebServiceWorkerClientInfo> client = adoptPtr(webClient.release());
+        std::unique_ptr<WebServiceWorkerClientInfo> client = wrapUnique(webClient.release());
         if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
             return;
         if (!client) {
@@ -76,7 +76,7 @@ public:
             m_resolver->resolve();
             return;
         }
-        m_resolver->resolve(ServiceWorkerClient::take(m_resolver, client.release()));
+        m_resolver->resolve(ServiceWorkerClient::take(m_resolver, std::move(client)));
     }
 
     void onError(const WebServiceWorkerError& error) override

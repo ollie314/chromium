@@ -14,10 +14,6 @@
 #include "net/proxy/proxy_resolver_factory.h"
 #include "url/gurl.h"
 
-namespace base {
-class MessageLoop;
-}
-
 namespace net {
 
 // Asynchronous mock proxy resolver. All requests complete asynchronously,
@@ -46,7 +42,6 @@ class MockAsyncProxyResolver : public ProxyResolver {
     const GURL url_;
     ProxyInfo* results_;
     CompletionCallback callback_;
-    base::MessageLoop* origin_loop_;
   };
 
   typedef std::vector<scoped_refptr<Request> > RequestsList;
@@ -59,7 +54,7 @@ class MockAsyncProxyResolver : public ProxyResolver {
                      ProxyInfo* results,
                      const CompletionCallback& callback,
                      RequestHandle* request_handle,
-                     const BoundNetLog& /*net_log*/) override;
+                     const NetLogWithSource& /*net_log*/) override;
   void CancelRequest(RequestHandle request_handle) override;
   LoadState GetLoadState(RequestHandle request_handle) const override;
   const RequestsList& pending_requests() const {
@@ -152,7 +147,7 @@ class ForwardingProxyResolver : public ProxyResolver {
                      ProxyInfo* results,
                      const CompletionCallback& callback,
                      RequestHandle* request,
-                     const BoundNetLog& net_log) override;
+                     const NetLogWithSource& net_log) override;
   void CancelRequest(RequestHandle request) override;
   LoadState GetLoadState(RequestHandle request) const override;
 

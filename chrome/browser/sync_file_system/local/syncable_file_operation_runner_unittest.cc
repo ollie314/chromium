@@ -16,7 +16,7 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/sync_file_system/local/canned_syncable_file_system.h"
 #include "chrome/browser/sync_file_system/local/local_file_change_tracker.h"
 #include "chrome/browser/sync_file_system/local/local_file_sync_context.h"
@@ -72,11 +72,10 @@ class SyncableFileOperationRunnerTest : public testing::Test {
     ASSERT_TRUE(dir_.CreateUniqueTempDir());
 
     file_system_.SetUp(CannedSyncableFileSystem::QUOTA_ENABLED);
-    sync_context_ = new LocalFileSyncContext(
-        dir_.path(),
-        in_memory_env_.get(),
-        base::ThreadTaskRunnerHandle::Get().get(),
-        base::ThreadTaskRunnerHandle::Get().get());
+    sync_context_ =
+        new LocalFileSyncContext(dir_.GetPath(), in_memory_env_.get(),
+                                 base::ThreadTaskRunnerHandle::Get().get(),
+                                 base::ThreadTaskRunnerHandle::Get().get());
     ASSERT_EQ(
         SYNC_STATUS_OK,
         file_system_.MaybeInitializeFileSystemContext(sync_context_.get()));
@@ -142,7 +141,7 @@ class SyncableFileOperationRunnerTest : public testing::Test {
   }
 
   bool CreateTempFile(base::FilePath* path) {
-    return base::CreateTemporaryFileInDir(dir_.path(), path);
+    return base::CreateTemporaryFileInDir(dir_.GetPath(), path);
   }
 
   content::TestBrowserThreadBundle thread_bundle_;
@@ -327,7 +326,7 @@ TEST_F(SyncableFileOperationRunnerTest, Write) {
   ResetCallbackStatus();
 
   while (!write_complete_)
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(File::FILE_OK, write_status_);
   EXPECT_EQ(kData.size(), write_bytes_);
@@ -345,7 +344,7 @@ TEST_F(SyncableFileOperationRunnerTest, QueueAndCancel) {
   file_system_.operation_runner()->Truncate(
       URL(kFile), 1,
       ExpectStatus(FROM_HERE, File::FILE_ERROR_ABORT));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(0, callback_count_);
 
   ResetCallbackStatus();
@@ -353,7 +352,7 @@ TEST_F(SyncableFileOperationRunnerTest, QueueAndCancel) {
   // This shouldn't crash nor leak memory.
   sync_context_->ShutdownOnUIThread();
   sync_context_ = nullptr;
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(2, callback_count_);
 }
 
@@ -375,7 +374,7 @@ TEST_F(SyncableFileOperationRunnerTest, CopyInForeignFile) {
   file_system_.operation_runner()->CopyInForeignFile(
       temp_path, URL(kFile),
       ExpectStatus(FROM_HERE, File::FILE_OK));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(0, callback_count_);
 
   // End syncing (to enable write).
@@ -383,7 +382,7 @@ TEST_F(SyncableFileOperationRunnerTest, CopyInForeignFile) {
   ASSERT_TRUE(sync_status()->IsWritable(URL(kFile)));
 
   ResetCallbackStatus();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, callback_count_);
 
   // Now the file must have been created and have the same content as temp_path.
@@ -391,7 +390,7 @@ TEST_F(SyncableFileOperationRunnerTest, CopyInForeignFile) {
   file_system_.DoVerifyFile(
       URL(kFile), kTestData,
       ExpectStatus(FROM_HERE, File::FILE_OK));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, callback_count_);
 }
 
@@ -400,7 +399,7 @@ TEST_F(SyncableFileOperationRunnerTest, Cancel) {
   file_system_.operation_runner()->CreateFile(
       URL(kFile), false /* exclusive */,
       ExpectStatus(FROM_HERE, File::FILE_OK));
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, callback_count_);
 
   // Run Truncate and immediately cancel. This shouldn't crash.

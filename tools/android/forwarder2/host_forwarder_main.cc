@@ -161,7 +161,7 @@ class HostControllersManager {
     if (adb_port < 0) {
       SendMessage(
           "ERROR: could not get adb port for device. You might need to add "
-          "'adb' to your PATH or provide the device serial id.",
+          "'adb' to your PATH or provide the device serial id.\n",
           client_socket.get());
       return;
     }
@@ -172,7 +172,7 @@ class HostControllersManager {
       const bool controller_did_exist = DeleteRefCountedValueInMap(
           controller_key, controllers_.get());
       if (!controller_did_exist) {
-        SendMessage("ERROR: could not unmap port.", client_socket.get());
+        SendMessage("ERROR: could not unmap port.\n", client_socket.get());
         LogExistingControllers(client_socket);
       } else {
         SendMessage("OK", client_socket.get());
@@ -182,7 +182,7 @@ class HostControllersManager {
       return;
     }
     if (host_port < 0) {
-      SendMessage("ERROR: missing host port", client_socket.get());
+      SendMessage("ERROR: missing host port\n", client_socket.get());
       return;
     }
     const bool use_dynamic_port_allocation = device_port == 0;
@@ -199,12 +199,12 @@ class HostControllersManager {
     }
     // Create a new host controller.
     std::unique_ptr<HostController> host_controller(HostController::Create(
-        device_port, host_port, adb_port, GetExitNotifierFD(),
+        device_serial, device_port, host_port, adb_port, GetExitNotifierFD(),
         base::Bind(&HostControllersManager::DeleteHostController,
                    weak_ptr_factory_.GetWeakPtr())));
     if (!host_controller.get()) {
       has_failed_ = true;
-      SendMessage("ERROR: Connection to device failed.", client_socket.get());
+      SendMessage("ERROR: Connection to device failed.\n", client_socket.get());
       LogExistingControllers(client_socket);
       return;
     }
@@ -222,9 +222,9 @@ class HostControllersManager {
   }
 
   void LogExistingControllers(const std::unique_ptr<Socket>& client_socket) {
-    SendMessage("ERROR: Existing controllers:", client_socket.get());
+    SendMessage("ERROR: Existing controllers:\n", client_socket.get());
     for (const auto& controller : *controllers_) {
-      SendMessage(base::StringPrintf("ERROR:   %s", controller.first.c_str()),
+      SendMessage(base::StringPrintf("ERROR: %s\n", controller.first.c_str()),
           client_socket.get());
     }
   }
@@ -240,7 +240,7 @@ class HostControllersManager {
     const std::string prefix = base::StringPrintf("%d:", port);
     for (HostControllerMap::const_iterator others = controllers_->begin();
          others != controllers_->end(); ++others) {
-      if (others->first.find(prefix) == 0U)
+      if (base::StartsWith(others->first, prefix, base::CompareCase::SENSITIVE))
         return;
     }
     // No other port is being forwarded to this device:
@@ -318,7 +318,7 @@ class HostControllersManager {
 
 class ServerDelegate : public Daemon::ServerDelegate {
  public:
-  ServerDelegate(const std::string& adb_path)
+  explicit ServerDelegate(const std::string& adb_path)
       : adb_path_(adb_path), has_failed_(false) {}
 
   bool has_failed() const {
@@ -350,7 +350,7 @@ class ServerDelegate : public Daemon::ServerDelegate {
     CHECK(pickle_it.ReadString(&device_serial));
     int device_port;
     if (!pickle_it.ReadInt(&device_port)) {
-      client_socket->WriteString("ERROR: missing device port");
+      client_socket->WriteString("ERROR: missing device port\n");
       return;
     }
     int host_port;
@@ -370,7 +370,7 @@ class ServerDelegate : public Daemon::ServerDelegate {
 
 class ClientDelegate : public Daemon::ClientDelegate {
  public:
-  ClientDelegate(const base::Pickle& command_pickle)
+  explicit ClientDelegate(const base::Pickle& command_pickle)
       : command_pickle_(command_pickle), has_failed_(false) {}
 
   bool has_failed() const { return has_failed_; }

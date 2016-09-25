@@ -20,11 +20,11 @@
 #include "chrome/browser/ui/cocoa/download/download_item_controller.h"
 #include "chrome/browser/ui/cocoa/download/download_shelf_mac.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_view_cocoa.h"
-#import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
 #import "ui/base/cocoa/hover_button.h"
+#import "ui/base/cocoa/nsview_additions.h"
 
 using content::DownloadItem;
 
@@ -83,7 +83,7 @@ const NSSize kHoverCloseButtonDefaultSize = { 18, 18 };
 - (void)installTrackingArea;
 - (void)removeTrackingArea;
 - (void)willEnterFullscreen;
-- (void)willLeaveFullscreen;
+- (void)didExitFullscreen;
 - (void)updateCloseButton;
 @end
 
@@ -130,15 +130,13 @@ const NSSize kHoverCloseButtonDefaultSize = { 18, 18 };
                         name:NSViewFrameDidChangeNotification
                       object:[self view]];
 
-  // These notifications are declared in fullscreen_controller, and are posted
-  // without objects.
   [defaultCenter addObserver:self
                     selector:@selector(willEnterFullscreen)
-                        name:kWillEnterFullscreenNotification
+                        name:NSWindowWillEnterFullScreenNotification
                       object:nil];
   [defaultCenter addObserver:self
-                    selector:@selector(willLeaveFullscreen)
-                        name:kWillLeaveFullscreenNotification
+                    selector:@selector(didExitFullscreen)
+                        name:NSWindowDidExitFullScreenNotification
                       object:nil];
   [self installTrackingArea];
 }
@@ -481,9 +479,11 @@ const NSSize kHoverCloseButtonDefaultSize = { 18, 18 };
   [self updateCloseButton];
 }
 
-- (void)willLeaveFullscreen {
+- (void)didExitFullscreen {
   isFullscreen_ = NO;
   [self updateCloseButton];
+  for (DownloadItemController* controller in downloadItemControllers_.get())
+    [[controller view] cr_recursivelySetNeedsDisplay:YES];
 }
 
 - (void)updateCloseButton {

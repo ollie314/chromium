@@ -130,6 +130,9 @@ class CONTENT_EXPORT BrowserAccessibility {
   BrowserAccessibility* GetPreviousSibling() const;
   BrowserAccessibility* GetNextSibling() const;
 
+  bool IsPreviousSiblingOnSameLine() const;
+  bool IsNextSiblingOnSameLine() const;
+
   // Returns nullptr if there are no children.
   BrowserAccessibility* PlatformDeepestFirstChild() const;
   // Returns nullptr if there are no children.
@@ -140,38 +143,47 @@ class CONTENT_EXPORT BrowserAccessibility {
   // Returns nullptr if there are no children.
   BrowserAccessibility* InternalDeepestLastChild() const;
 
+  // Returns the bounds of this object in coordinates relative to this frame.
+  gfx::Rect GetFrameBoundsRect() const;
+
   // Returns the bounds of this object in coordinates relative to the
-  // top-left corner of the overall web area.
-  gfx::Rect GetLocalBoundsRect() const;
+  // page (specifically, the top-left corner of the topmost web contents).
+  gfx::Rect GetPageBoundsRect() const;
 
   // Returns the bounds of this object in screen coordinates.
-  gfx::Rect GetGlobalBoundsRect() const;
+  gfx::Rect GetScreenBoundsRect() const;
 
   // Returns the bounds of the given range in coordinates relative to the
   // top-left corner of the overall web area. Only valid when the
   // role is WebAXRoleStaticText.
-  gfx::Rect GetLocalBoundsForRange(int start, int len) const;
+  gfx::Rect GetPageBoundsForRange(int start, int len) const;
 
-  // Same as GetLocalBoundsForRange, in screen coordinates. Only valid when
+  // Same as GetPageBoundsForRange, in screen coordinates. Only valid when
   // the role is WebAXRoleStaticText.
-  gfx::Rect GetGlobalBoundsForRange(int start, int len) const;
+  gfx::Rect GetScreenBoundsForRange(int start, int len) const;
 
   // This is to handle the cases such as ARIA textbox, where the value should
   // be calculated from the object's inner text.
   virtual base::string16 GetValue() const;
 
-  // Searches in the given text and from the given offset until the start of
-  // the next or previous word is found and returns its position.
+  // Starting at the given character offset, locates the start of the next or
+  // previous line and returns its character offset.
+  int GetLineStartBoundary(int start,
+                           ui::TextBoundaryDirection direction,
+                           ui::AXTextAffinity affinity) const;
+
+  // Starting at the given character offset, locates the start of the next or
+  // previous word and returns its character offset.
   // In case there is no word boundary before or after the given offset, it
-  // returns one past the last character, i.e. the text's length.
+  // returns one past the last character.
   // If the given offset is already at the start of a word, returns the start
-  // of the next word if the search is forwards and the given offset if it is
+  // of the next word if the search is forwards, and the given offset if it is
   // backwards.
   // If the start offset is equal to -1 and the search is in the forwards
   // direction, returns the start boundary of the first word.
   // Start offsets that are not in the range -1 to text length are invalid.
-  int GetWordStartBoundary(
-      int start, ui::TextBoundaryDirection direction) const;
+  int GetWordStartBoundary(int start,
+                           ui::TextBoundaryDirection direction) const;
 
   // Returns the deepest descendant that contains the specified point
   // (in global screen coordinates).
@@ -216,7 +228,7 @@ class CONTENT_EXPORT BrowserAccessibility {
 
   int32_t GetId() const;
   const ui::AXNodeData& GetData() const;
-  gfx::Rect GetLocation() const;
+  gfx::RectF GetLocation() const;
   int32_t GetRole() const;
   int32_t GetState() const;
 
@@ -323,7 +335,7 @@ class CONTENT_EXPORT BrowserAccessibility {
   virtual bool IsClickable() const;
   bool IsControl() const;
   bool IsMenuRelated() const;
-  bool IsRangeControl() const;
+  bool IsNativeTextControl() const;
   bool IsSimpleTextControl() const;
   // Indicates if this object is at the root of a rich edit text control.
   bool IsRichTextControl() const;
@@ -331,6 +343,9 @@ class CONTENT_EXPORT BrowserAccessibility {
   // If an object is focusable but has no accessible name, use this
   // to compute a name from its descendants.
   std::string ComputeAccessibleNameFromDescendants();
+
+  // Gets the text offsets where new lines start.
+  std::vector<int> GetLineStartOffsets() const;
 
  protected:
   BrowserAccessibility();
@@ -355,12 +370,13 @@ class CONTENT_EXPORT BrowserAccessibility {
   // children, since most accessibility APIs don't like elements with no
   // bounds, but "virtual" elements in the accessibility tree that don't
   // correspond to a layed-out element sometimes don't have bounds.
-  void FixEmptyBounds(gfx::Rect* bounds) const;
+  void FixEmptyBounds(gfx::RectF* bounds) const;
 
   // Convert the bounding rectangle of an element (which is relative to
-  // its nearest scrollable ancestor) to local bounds (which are relative
-  // to the top of the web accessibility tree).
-  gfx::Rect ElementBoundsToLocalBounds(gfx::Rect bounds) const;
+  // its nearest scrollable ancestor) to absolute bounds, either in
+  // page coordinates (when |frameOnly| is false), or in frame coordinates
+  // (when |frameOnly| is true).
+  gfx::Rect RelativeToAbsoluteBounds(gfx::RectF bounds, bool frame_only) const;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibility);
 };

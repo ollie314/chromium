@@ -16,6 +16,12 @@ cr.define('settings', function() {
      * @return {!Promise} A promise resolved when data clearing has completed.
      */
     clearBrowsingData: function() {},
+
+    /**
+     * Kick off counter updates and return initial state.
+     * @return {!Promise<void>} Signal when the setup is complete.
+     */
+    initialize: function() {},
   };
 
   /**
@@ -30,9 +36,15 @@ cr.define('settings', function() {
     clearBrowsingData: function() {
       return cr.sendWithPromise('clearBrowsingData');
     },
+
+    /** @override */
+    initialize: function() {
+      return cr.sendWithPromise('initializeClearBrowsingData');
+    },
   };
 
   return {
+    ClearBrowsingDataBrowserProxy: ClearBrowsingDataBrowserProxy,
     ClearBrowsingDataBrowserProxyImpl: ClearBrowsingDataBrowserProxyImpl,
   };
 });

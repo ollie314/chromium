@@ -7,8 +7,8 @@
 // capturing so this implementation uses a Chromium thread for fetching frames
 // from V4L2.
 
-#ifndef MEDIA_VIDEO_CAPTURE_LINUX_VIDEO_CAPTURE_DEVICE_LINUX_H_
-#define MEDIA_VIDEO_CAPTURE_LINUX_VIDEO_CAPTURE_DEVICE_LINUX_H_
+#ifndef MEDIA_CAPTURE_VIDEO_LINUX_VIDEO_CAPTURE_DEVICE_LINUX_H_
+#define MEDIA_CAPTURE_VIDEO_LINUX_VIDEO_CAPTURE_DEVICE_LINUX_H_
 
 #include <stdint.h>
 
@@ -31,13 +31,15 @@ class VideoCaptureDeviceLinux : public VideoCaptureDevice {
   static VideoPixelFormat V4l2FourCcToChromiumPixelFormat(uint32_t v4l2_fourcc);
   static std::list<uint32_t> GetListOfUsableFourCCs(bool favour_mjpeg);
 
-  explicit VideoCaptureDeviceLinux(const Name& device_name);
+  explicit VideoCaptureDeviceLinux(
+      const VideoCaptureDeviceDescriptor& device_descriptor);
   ~VideoCaptureDeviceLinux() override;
 
   // VideoCaptureDevice implementation.
   void AllocateAndStart(const VideoCaptureParams& params,
-                        scoped_ptr<Client> client) override;
+                        std::unique_ptr<Client> client) override;
   void StopAndDeAllocate() override;
+  void TakePhoto(TakePhotoCallback callback) override;
 
  protected:
   void SetRotation(int rotation);
@@ -52,11 +54,11 @@ class VideoCaptureDeviceLinux : public VideoCaptureDevice {
 
   base::Thread v4l2_thread_;  // Thread used for reading data from the device.
 
-  const Name device_name_;
+  const VideoCaptureDeviceDescriptor device_descriptor_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(VideoCaptureDeviceLinux);
 };
 
 }  // namespace media
 
-#endif  // MEDIA_VIDEO_CAPTURE_LINUX_VIDEO_CAPTURE_DEVICE_LINUX_H_
+#endif  // MEDIA_CAPTURE_VIDEO_LINUX_VIDEO_CAPTURE_DEVICE_LINUX_H_

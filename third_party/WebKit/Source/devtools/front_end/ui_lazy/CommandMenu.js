@@ -15,14 +15,17 @@ WebInspector.CommandMenu.prototype = {
     _loadCommands: function()
     {
         // Populate panels.
-        var panelExtensions = self.runtime.extensions(WebInspector.PanelFactory);
+        var panelExtensions = self.runtime.extensions(WebInspector.Panel);
         for (var extension of panelExtensions)
             this._commands.push(WebInspector.CommandMenu.createRevealPanelCommand(extension));
 
         // Populate drawers.
-        var drawerExtensions = self.runtime.extensions("drawer-view");
-        for (var extension of drawerExtensions)
+        var drawerExtensions = self.runtime.extensions("view");
+        for (var extension of drawerExtensions) {
+            if (extension.descriptor()["location"] !== "drawer-view")
+                continue;
             this._commands.push(WebInspector.CommandMenu.createRevealDrawerCommand(extension));
+        }
 
         // Populate whitelisted settings.
         var settingExtensions = self.runtime.extensions("setting");
@@ -55,6 +58,8 @@ WebInspector.CommandMenuDelegate = function()
     this._appendAvailableCommands();
 }
 
+WebInspector.CommandMenuDelegate.MaterialPaletteColors = ["#F44336", "#E91E63", "#9C27B0", "#673AB7", "#3F51B5", "#03A9F4", "#00BCD4", "#009688", "#4CAF50", "#8BC34A", "#CDDC39", "#FFC107", "#FF9800", "#FF5722", "#795548", "#9E9E9E", "#607D8B"];
+
 WebInspector.CommandMenuDelegate.prototype = {
     _appendAvailableCommands: function()
     {
@@ -81,7 +86,8 @@ WebInspector.CommandMenuDelegate.prototype = {
          */
         function commandComparator(left, right)
         {
-            return left.title().compareTo(right.title());
+            var cats = left.category().compareTo(right.category());
+            return cats ? cats : left.title().compareTo(right.title());
         }
     },
 
@@ -122,9 +128,9 @@ WebInspector.CommandMenuDelegate.prototype = {
         }
 
         // Score panel/drawer reveals above regular actions.
-        if (command.title().startsWith("Panel"))
+        if (command.category().startsWith("Panel"))
             score += 2;
-        else if (command.title().startsWith("Drawer"))
+        else if (command.category().startsWith("Drawer"))
             score += 1;
 
         return score;
@@ -140,7 +146,12 @@ WebInspector.CommandMenuDelegate.prototype = {
     renderItem: function(itemIndex, query, titleElement, subtitleElement)
     {
         var command = this._commands[itemIndex];
-        titleElement.textContent = command.title();
+        titleElement.removeChildren();
+        var tagElement = titleElement.createChild("span", "tag");
+        var index = String.hashCode(command.category()) % WebInspector.CommandMenuDelegate.MaterialPaletteColors.length;
+        tagElement.style.backgroundColor = WebInspector.CommandMenuDelegate.MaterialPaletteColors[index];
+        tagElement.textContent = command.category();
+        titleElement.createTextChild(command.title());
         this.highlightRanges(titleElement, query);
         subtitleElement.textContent = command.shortcut();
     },
@@ -164,27 +175,46 @@ WebInspector.CommandMenuDelegate.prototype = {
         return false;
     },
 
+    /**
+     * @override
+     * @return {boolean}
+     */
+    renderMonospace: function()
+    {
+        return false;
+    },
+
     __proto__: WebInspector.FilteredListWidget.Delegate.prototype
 }
 
 /**
  * @constructor
+ * @param {string} category
  * @param {string} title
  * @param {string} key
  * @param {string} shortcut
  * @param {function()} executeHandler
  * @param {function()=} availableHandler
  */
-WebInspector.CommandMenu.Command = function(title, key, shortcut, executeHandler, availableHandler)
+WebInspector.CommandMenu.Command = function(category, title, key, shortcut, executeHandler, availableHandler)
 {
+    this._category = category;
     this._title = title;
-    this._key = title + "\0" + key;
+    this._key = category + "\0" + title + "\0" + key;
     this._shortcut = shortcut;
     this._executeHandler = executeHandler;
     this._availableHandler = availableHandler;
 }
 
 WebInspector.CommandMenu.Command.prototype = {
+    /**
+     * @return {string}
+     */
+    category: function()
+    {
+        return this._category;
+    },
+
     /**
      * @return {string}
      */
@@ -235,9 +265,8 @@ WebInspector.CommandMenu.Command.prototype = {
 WebInspector.CommandMenu.createCommand = function(category, keys, title, shortcut, executeHandler, availableHandler)
 {
     // Separate keys by null character, to prevent fuzzy matching from matching across them.
-    var key = keys ? keys.split(",").join("\0") : "";
-    title = category ? WebInspector.UIString("%s: %s", category, title) : title;
-    return new WebInspector.CommandMenu.Command(title, key, shortcut, executeHandler, availableHandler);
+    var key = keys.replace(/,/g, "\0");
+    return new WebInspector.CommandMenu.Command(category, title, key, shortcut, executeHandler, availableHandler);
 }
 
 /**
@@ -281,7 +310,7 @@ WebInspector.CommandMenu.createRevealPanelCommand = function(extension)
 {
     var panelName = extension.descriptor()["name"];
     var tags = extension.descriptor()["tags"] || "";
-    return WebInspector.CommandMenu.createCommand(WebInspector.UIString("Panel"), tags, WebInspector.UIString("Show %s", extension.title(WebInspector.platform())), "", executeHandler, availableHandler);
+    return WebInspector.CommandMenu.createCommand(WebInspector.UIString("Panel"), tags, WebInspector.UIString("Show %s", extension.title()), "", executeHandler, availableHandler);
 
     /**
      * @return {boolean}
@@ -303,10 +332,10 @@ WebInspector.CommandMenu.createRevealPanelCommand = function(extension)
  */
 WebInspector.CommandMenu.createRevealDrawerCommand = function(extension)
 {
-    var drawerId = extension.descriptor()["name"];
-    var executeHandler = WebInspector.inspectorView.showViewInDrawer.bind(WebInspector.inspectorView, drawerId);
+    var drawerId = extension.descriptor()["id"];
+    var executeHandler = WebInspector.viewManager.showView.bind(WebInspector.viewManager, drawerId);
     var tags = extension.descriptor()["tags"] || "";
-    return WebInspector.CommandMenu.createCommand(WebInspector.UIString("Drawer"), tags, WebInspector.UIString("Show %s", extension.title(WebInspector.platform())), "", executeHandler);
+    return WebInspector.CommandMenu.createCommand(WebInspector.UIString("Drawer"), tags, WebInspector.UIString("Show %s", extension.title()), "", executeHandler);
 }
 
 /** @type {!WebInspector.CommandMenu} */
@@ -329,7 +358,7 @@ WebInspector.CommandMenu.ShowActionDelegate.prototype = {
      */
     handleAction: function(context, actionId)
     {
-        new WebInspector.FilteredListWidget(new WebInspector.CommandMenuDelegate(), false).showAsDialog();
+        new WebInspector.FilteredListWidget(new WebInspector.CommandMenuDelegate()).showAsDialog();
         InspectorFrontendHost.bringToFront();
         return true;
     }

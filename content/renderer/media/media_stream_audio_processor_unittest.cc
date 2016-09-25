@@ -15,12 +15,13 @@
 #include "base/path_service.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "content/common/media/media_stream_options.h"
 #include "content/public/common/media_stream_request.h"
 #include "content/renderer/media/media_stream_audio_processor.h"
 #include "content/renderer/media/media_stream_audio_processor_options.h"
 #include "content/renderer/media/mock_constraint_factory.h"
-#include "media/audio/audio_parameters.h"
 #include "media/base/audio_bus.h"
+#include "media/base/audio_parameters.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
@@ -207,6 +208,7 @@ class MediaStreamAudioProcessorTest : public ::testing::Test {
 #define MAYBE_WithAudioProcessing WithAudioProcessing
 #endif
 TEST_F(MediaStreamAudioProcessorTest, MAYBE_WithAudioProcessing) {
+  base::MessageLoop message_loop;
   MockConstraintFactory constraint_factory;
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
@@ -222,9 +224,10 @@ TEST_F(MediaStreamAudioProcessorTest, MAYBE_WithAudioProcessing) {
                              kAudioProcessingSampleRate,
                              kAudioProcessingNumberOfChannel,
                              kAudioProcessingSampleRate / 100);
-  // Set |audio_processor| to NULL to make sure |webrtc_audio_device| outlives
-  // |audio_processor|.
-  audio_processor = NULL;
+
+  // Stop |audio_processor| so that it removes itself from
+  // |webrtc_audio_device| and clears its pointer to it.
+  audio_processor->Stop();
 }
 
 TEST_F(MediaStreamAudioProcessorTest, VerifyTabCaptureWithoutAudioProcessing) {
@@ -258,9 +261,9 @@ TEST_F(MediaStreamAudioProcessorTest, VerifyTabCaptureWithoutAudioProcessing) {
       input_device_params_, webrtc_audio_device.get());
   EXPECT_FALSE(audio_processor->has_audio_processing());
 
-  // Set |audio_processor| to NULL to make sure |webrtc_audio_device| outlives
-  // |audio_processor|.
-  audio_processor = NULL;
+  // Stop |audio_processor| so that it removes itself from
+  // |webrtc_audio_device| and clears its pointer to it.
+  audio_processor->Stop();
 }
 
 TEST_F(MediaStreamAudioProcessorTest, TurnOffDefaultConstraints) {
@@ -280,9 +283,10 @@ TEST_F(MediaStreamAudioProcessorTest, TurnOffDefaultConstraints) {
                              params_.sample_rate(),
                              params_.channels(),
                              params_.sample_rate() / 100);
-  // Set |audio_processor| to NULL to make sure |webrtc_audio_device| outlives
-  // |audio_processor|.
-  audio_processor = NULL;
+
+  // Stop |audio_processor| so that it removes itself from
+  // |webrtc_audio_device| and clears its pointer to it.
+  audio_processor->Stop();
 }
 
 TEST_F(MediaStreamAudioProcessorTest, VerifyConstraints) {
@@ -439,6 +443,7 @@ TEST_F(MediaStreamAudioProcessorTest, SelectsConstraintsArrayGeometryIfExists) {
 #define MAYBE_TestAllSampleRates TestAllSampleRates
 #endif
 TEST_F(MediaStreamAudioProcessorTest, MAYBE_TestAllSampleRates) {
+  base::MessageLoop message_loop;
   MockConstraintFactory constraint_factory;
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
@@ -466,9 +471,9 @@ TEST_F(MediaStreamAudioProcessorTest, MAYBE_TestAllSampleRates) {
                                kAudioProcessingSampleRate / 100);
   }
 
-  // Set |audio_processor| to NULL to make sure |webrtc_audio_device|
-  // outlives |audio_processor|.
-  audio_processor = NULL;
+  // Stop |audio_processor| so that it removes itself from
+  // |webrtc_audio_device| and clears its pointer to it.
+  audio_processor->Stop();
 }
 
 // Test that if we have an AEC dump message filter created, we are getting it
@@ -478,7 +483,7 @@ TEST_F(MediaStreamAudioProcessorTest, GetAecDumpMessageFilter) {
   base::MessageLoopForUI message_loop;
   scoped_refptr<AecDumpMessageFilter> aec_dump_message_filter_(
       new AecDumpMessageFilter(message_loop.task_runner(),
-                               message_loop.task_runner(), nullptr));
+                               message_loop.task_runner()));
 
   MockConstraintFactory constraint_factory;
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
@@ -490,7 +495,9 @@ TEST_F(MediaStreamAudioProcessorTest, GetAecDumpMessageFilter) {
 
   EXPECT_TRUE(audio_processor->aec_dump_message_filter_.get());
 
-  audio_processor = NULL;
+  // Stop |audio_processor| so that it removes itself from
+  // |webrtc_audio_device| and clears its pointer to it.
+  audio_processor->Stop();
 }
 
 TEST_F(MediaStreamAudioProcessorTest, TestStereoAudio) {
@@ -548,9 +555,9 @@ TEST_F(MediaStreamAudioProcessorTest, TestStereoAudio) {
     EXPECT_EQ(pushed_capture_delay, capture_delay);
   }
 
-  // Set |audio_processor| to NULL to make sure |webrtc_audio_device| outlives
-  // |audio_processor|.
-  audio_processor = NULL;
+  // Stop |audio_processor| so that it removes itself from
+  // |webrtc_audio_device| and clears its pointer to it.
+  audio_processor->Stop();
 }
 
 // Disabled on android clang builds due to crbug.com/470499
@@ -559,8 +566,8 @@ TEST_F(MediaStreamAudioProcessorTest, TestStereoAudio) {
 #else
 #define MAYBE_TestWithKeyboardMicChannel TestWithKeyboardMicChannel
 #endif
-
 TEST_F(MediaStreamAudioProcessorTest, MAYBE_TestWithKeyboardMicChannel) {
+  base::MessageLoop message_loop;
   MockConstraintFactory constraint_factory;
   constraint_factory.basic().googExperimentalNoiseSuppression.setExact(true);
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
@@ -580,9 +587,10 @@ TEST_F(MediaStreamAudioProcessorTest, MAYBE_TestWithKeyboardMicChannel) {
                              kAudioProcessingSampleRate,
                              kAudioProcessingNumberOfChannel,
                              kAudioProcessingSampleRate / 100);
-  // Set |audio_processor| to NULL to make sure |webrtc_audio_device| outlives
-  // |audio_processor|.
-  audio_processor = NULL;
+
+  // Stop |audio_processor| so that it removes itself from
+  // |webrtc_audio_device| and clears its pointer to it.
+  audio_processor->Stop();
 }
 
 }  // namespace content

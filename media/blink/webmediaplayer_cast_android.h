@@ -4,8 +4,8 @@
 
 // Delete this file when WMPI_CAST is no longer needed.
 
-#ifndef MEDIA_BLINK_WEBMEDIAPLAYER_CAST_H_
-#define MEDIA_BLINK_WEBMEDIAPLAYER_CAST_H_
+#ifndef MEDIA_BLINK_WEBMEDIAPLAYER_CAST_ANDROID_H_
+#define MEDIA_BLINK_WEBMEDIAPLAYER_CAST_ANDROID_H_
 
 #include "base/memory/weak_ptr.h"
 #include "media/blink/media_blink_export.h"
@@ -16,6 +16,7 @@
 namespace blink {
 class WebLocalFrame;
 class WebMediaPlayerClient;
+class WebURL;
 }
 
 namespace media {
@@ -90,15 +91,6 @@ class WebMediaPlayerCast : public RendererMediaPlayerInterface {
   // However, the actual GlTexture is not released to keep the video screenshot.
   void SuspendAndReleaseResources() override;
 
-#if defined(VIDEO_HOLE)
-  // Calculate the boundary rectangle of the media player (i.e. location and
-  // size of the video frame).
-  // Returns true if the geometry has been changed since the last call.
-  bool UpdateBoundaryRectangle() override;
-
-  const gfx::RectF GetBoundaryRectangle() override;
-#endif
-
   void OnWaitingForDecryptionKey() override;
 
   bool paused() const override;
@@ -106,6 +98,7 @@ class WebMediaPlayerCast : public RendererMediaPlayerInterface {
 
   void SetDeviceScaleFactor(float scale_factor);
   scoped_refptr<VideoFrame> GetCastingBanner();
+  void setPoster(const blink::WebURL& poster);
 
  private:
   WebMediaPlayerImpl* webmediaplayer_;
@@ -150,4 +143,4 @@ MEDIA_BLINK_EXPORT scoped_refptr<VideoFrame> MakeTextFrameForCast(
 
 }  // namespace media
 
-#endif  // MEDIA_BLINK_WEBMEDIAPLAYER_CAST_H_
+#endif  // MEDIA_BLINK_WEBMEDIAPLAYER_CAST_ANDROID_H_

@@ -31,7 +31,7 @@ class BlobStorageContext;
 namespace content {
 
 class ResourceContext;
-class ResourceRequestBody;
+class ResourceRequestBodyImpl;
 class ServiceWorkerContextCore;
 class ServiceWorkerContextWrapper;
 class ServiceWorkerProviderHost;
@@ -46,6 +46,12 @@ class CONTENT_EXPORT ForeignFetchRequestHandler
     : public base::SupportsUserData::Data,
       public ServiceWorkerURLRequestJob::Delegate {
  public:
+  // Returns true if Foreign Fetch is enabled. Foreign Fetch is considered to be
+  // enabled if an OriginTrialPolicy exists, and that policy doesn't disable the
+  // feature. When the policy does disable the feature, that can be overridden
+  // with the experimental web platform features command line flag.
+  static bool IsForeignFetchEnabled();
+
   // Attaches a newly created handler if the given |request| needs to
   // be handled by a foreign fetch handling ServiceWorker.
   static void InitializeHandler(
@@ -54,14 +60,15 @@ class CONTENT_EXPORT ForeignFetchRequestHandler
       storage::BlobStorageContext* blob_storage_context,
       int process_id,
       int provider_id,
-      bool skip_service_worker,
+      SkipServiceWorker skip_service_worker,
       FetchRequestMode request_mode,
       FetchCredentialsMode credentials_mode,
       FetchRedirectMode redirect_mode,
       ResourceType resource_type,
       RequestContextType request_context_type,
       RequestContextFrameType frame_type,
-      scoped_refptr<ResourceRequestBody> body);
+      scoped_refptr<ResourceRequestBodyImpl> body,
+      bool initiated_in_secure_context);
 
   // Returns the handler attached to |request|. This may return null
   // if no handler is attached.
@@ -88,27 +95,17 @@ class CONTENT_EXPORT ForeignFetchRequestHandler
       ResourceType resource_type,
       RequestContextType request_context_type,
       RequestContextFrameType frame_type,
-      scoped_refptr<ResourceRequestBody> body);
+      scoped_refptr<ResourceRequestBodyImpl> body);
 
   // Called when a ServiceWorkerRegistration has (or hasn't) been found for the
   // request being handled.
   void DidFindRegistration(
       const base::WeakPtr<ServiceWorkerURLRequestJob>& job,
       ServiceWorkerStatusCode status,
-      const scoped_refptr<ServiceWorkerRegistration>& registration);
+      scoped_refptr<ServiceWorkerRegistration> registration);
 
   // ServiceWorkerURLRequestJob::Delegate implementation:
-  void OnPrepareToRestart(base::TimeTicks service_worker_start_time,
-                          base::TimeTicks service_worker_ready_time) override;
-  void OnStartCompleted(
-      bool was_fetched_via_service_worker,
-      bool was_fallback_required,
-      const GURL& original_url_via_service_worker,
-      blink::WebServiceWorkerResponseType response_type_via_service_worker,
-      base::TimeTicks worker_start_time,
-      base::TimeTicks service_worker_ready_time,
-      bool response_is_in_cache_storage,
-      const std::string& response_cache_storage_cache_name) override;
+  void OnPrepareToRestart() override;
   ServiceWorkerVersion* GetServiceWorkerVersion(
       ServiceWorkerMetrics::URLRequestJobResult* result) override;
 
@@ -124,7 +121,8 @@ class CONTENT_EXPORT ForeignFetchRequestHandler
   FetchRedirectMode redirect_mode_;
   RequestContextType request_context_type_;
   RequestContextFrameType frame_type_;
-  scoped_refptr<ResourceRequestBody> body_;
+  scoped_refptr<ResourceRequestBodyImpl> body_;
+  ResourceContext* resource_context_;
 
   base::WeakPtr<ServiceWorkerURLRequestJob> job_;
   scoped_refptr<ServiceWorkerVersion> target_worker_;

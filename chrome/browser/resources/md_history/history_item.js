@@ -2,150 +2,330 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-Polymer({
-  is: 'history-item',
+/**
+ * @param {!Element} root
+ * @param {?Element} boundary
+ * @param {cr.ui.FocusRow.Delegate} delegate
+ * @constructor
+ * @extends {cr.ui.FocusRow}
+ */
+function HistoryFocusRow(root, boundary, delegate) {
+  cr.ui.FocusRow.call(this, root, boundary, delegate);
+  this.addItems();
+}
 
-  properties: {
-    // Underlying HistoryEntry data for this item. Contains read-only fields
-    // from the history backend, as well as fields computed by history-list.
-    item: {
-      type: Object,
-      observer: 'showIcon_'
-    },
+HistoryFocusRow.prototype = {
+  __proto__: cr.ui.FocusRow.prototype,
 
-    // True if the website is a bookmarked page.
-    starred: {
-      type: Boolean,
-      value: false,
-      reflectToAttribute: true
-    },
+  /** @override */
+  getCustomEquivalent: function(sampleElement) {
+    var equivalent;
 
-    // Search term used to obtain this history-item.
-    searchTerm: {
-      type: String,
-      value: '',
-    },
+    if (this.getTypeForElement(sampleElement) == 'star')
+      equivalent = this.getFirstFocusable('title');
 
-    selected: {
-      type: Boolean,
-      value: false,
-      notify: true
-    },
-
-    isCardStart: {
-      type: Boolean,
-      value: false,
-      reflectToAttribute: true
-    },
-
-    isCardEnd: {
-      type: Boolean,
-      value: false,
-      reflectToAttribute: true
-    },
-
-    hasTimeGap: {
-      type: Boolean,
-      value: false,
-    },
-
-    numberOfItems: {
-      type: Number,
-      value: 0
-    }
+    return equivalent ||
+        cr.ui.FocusRow.prototype.getCustomEquivalent.call(
+            this, sampleElement);
   },
 
-  observers: [
-    'setSearchedTextToBold_(item.title, searchTerm)'
-  ],
+  addItems: function() {
+    this.destroy();
 
+    assert(this.addItem('checkbox', '#checkbox'));
+    assert(this.addItem('title', '#title'));
+    assert(this.addItem('menu-button', '#menu-button'));
+
+    this.addItem('star', '#bookmark-star');
+  },
+};
+
+cr.define('md_history', function() {
   /**
-   * When a history-item is selected the toolbar is notified and increases
-   * or decreases its count of selected items accordingly.
-   * @private
+   * @param {{lastFocused: Object}} historyItemElement
+   * @constructor
+   * @implements {cr.ui.FocusRow.Delegate}
    */
-  onCheckboxSelected_: function() {
-    this.fire('history-checkbox-select', {
-      countAddition: this.$.checkbox.checked ? 1 : -1
-    });
-  },
-
-  /**
-   * Fires a custom event when the menu button is clicked. Sends the details of
-   * the history item and where the menu should appear.
-   */
-  onMenuButtonTap_: function(e) {
-    this.fire('toggle-menu', {
-      target: Polymer.dom(e).localTarget,
-      itemIdentifier: {
-        url: this.item.url,
-        timestamps: this.item.time,
-        domain: this.item.domain
-      },
-    });
-
-    // Stops the 'tap' event from closing the menu when it opens.
-    e.stopPropagation();
-  },
-
-  /**
-   * Set the favicon image, based on the URL of the history item.
-   * @private
-   */
-  showIcon_: function() {
-    this.$.icon.style.backgroundImage =
-        getFaviconImageSet(this.item.url);
-  },
-
-  /**
-   * Updates the page title. If the result was from a search, highlights any
-   * occurrences of the search term in bold.
-   * @private
-   */
-  setSearchedTextToBold_: function() {
-    var i = 0;
-    var titleElem = this.$.title;
-    var titleText = this.item.title;
-
-    if (this.searchTerm == '' || this.searchTerm == null) {
-      titleElem.textContent = titleText;
-      return;
-    }
-
-    var re = new RegExp(quoteString(this.searchTerm), 'gim');
-    var match;
-    titleElem.textContent = '';
-    while (match = re.exec(titleText)) {
-      if (match.index > i)
-        titleElem.appendChild(document.createTextNode(
-            titleText.slice(i, match.index)));
-      i = re.lastIndex;
-      // Mark the highlighted text in bold.
-      var b = document.createElement('b');
-      b.textContent = titleText.substring(match.index, i);
-      titleElem.appendChild(b);
-    }
-    if (i < titleText.length)
-      titleElem.appendChild(
-          document.createTextNode(titleText.slice(i)));
-  },
-
-  selectionNotAllowed_: function() {
-    return !loadTimeData.getBoolean('allowDeletingHistory');
-  },
-
-  /**
-   * Generates the title for this history card.
-   * @param {number} numberOfItems The number of items in the card.
-   * @param {string} search The search term associated with these results.
-   * @private
-   */
-  cardTitle_: function(numberOfItems, historyDate, search) {
-    if (!search)
-      return this.item.dateRelativeDay;
-
-    var resultId = numberOfItems == 1 ? 'searchResult' : 'searchResults';
-    return loadTimeData.getStringF('foundSearchResults', numberOfItems,
-        loadTimeData.getString(resultId), search);
+  function FocusRowDelegate(historyItemElement) {
+    this.historyItemElement = historyItemElement;
   }
+
+  FocusRowDelegate.prototype = {
+    /**
+     * @override
+     * @param {!cr.ui.FocusRow} row
+     * @param {!Event} e
+     */
+    onFocus: function(row, e) {
+      this.historyItemElement.lastFocused = e.path[0];
+    },
+
+    /**
+     * @override
+     * @param {!cr.ui.FocusRow} row The row that detected a keydown.
+     * @param {!Event} e
+     * @return {boolean} Whether the event was handled.
+     */
+    onKeydown: function(row, e) {
+      // Prevent iron-list from changing the focus on enter.
+      if (e.key == 'Enter')
+        e.stopPropagation();
+
+      return false;
+    },
+  };
+
+  var HistoryItem = Polymer({
+    is: 'history-item',
+
+    properties: {
+      // Underlying HistoryEntry data for this item. Contains read-only fields
+      // from the history backend, as well as fields computed by history-list.
+      item: {type: Object, observer: 'showIcon_'},
+
+      // Search term used to obtain this history-item.
+      searchTerm: {type: String},
+
+      selected: {type: Boolean, reflectToAttribute: true},
+
+      isCardStart: {type: Boolean, reflectToAttribute: true},
+
+      isCardEnd: {type: Boolean, reflectToAttribute: true},
+
+      // True if the item is being displayed embedded in another element and
+      // should not manage its own borders or size.
+      embedded: {type: Boolean, reflectToAttribute: true},
+
+      hasTimeGap: {type: Boolean},
+
+      numberOfItems: {type: Number},
+
+      // The path of this history item inside its parent.
+      path: String,
+
+      index: Number,
+
+      /** @type {Element} */
+      lastFocused: {
+        type: Object,
+        notify: true,
+      },
+
+      ironListTabIndex: {
+        type: Number,
+        observer: 'ironListTabIndexChanged_',
+      },
+    },
+
+    /** @private {?HistoryFocusRow} */
+    row_: null,
+
+    /** @override */
+    attached: function() {
+      Polymer.RenderStatus.afterNextRender(this, function() {
+        this.row_ = new HistoryFocusRow(
+            this.$['sizing-container'], null, new FocusRowDelegate(this));
+        this.row_.makeActive(this.ironListTabIndex == 0);
+        this.listen(this, 'focus', 'onFocus_');
+        this.listen(this, 'dom-change', 'onDomChange_');
+      });
+    },
+
+    /** @override */
+    detached: function() {
+      this.unlisten(this, 'focus', 'onFocus_');
+      this.unlisten(this, 'dom-change', 'onDomChange_');
+      if (this.row_)
+        this.row_.destroy();
+    },
+
+    /**
+     * @private
+     */
+    onFocus_: function() {
+      if (this.lastFocused)
+        this.row_.getEquivalentElement(this.lastFocused).focus();
+      else
+        this.row_.getFirstFocusable().focus();
+
+      this.tabIndex = -1;
+    },
+
+    /**
+     * @private
+     */
+    ironListTabIndexChanged_: function() {
+      if (this.row_)
+        this.row_.makeActive(this.ironListTabIndex == 0);
+    },
+
+    /**
+     * @private
+     */
+    onDomChange_: function() {
+      if (this.row_)
+        this.row_.addItems();
+    },
+
+    /**
+     * When a history-item is selected the toolbar is notified and increases
+     * or decreases its count of selected items accordingly.
+     * @param {MouseEvent} e
+     * @private
+     */
+    onCheckboxSelected_: function(e) {
+      // TODO(calamity): Fire this event whenever |selected| changes.
+      this.fire('history-checkbox-select', {
+        element: this,
+        shiftKey: e.shiftKey,
+      });
+      e.preventDefault();
+    },
+
+    /**
+     * @param {MouseEvent} e
+     * @private
+     */
+    onCheckboxMousedown_: function(e) {
+      // Prevent shift clicking a checkbox from selecting text.
+      if (e.shiftKey)
+        e.preventDefault();
+    },
+
+    /**
+     * @private
+     * @return {string}
+     */
+    getEntrySummary_: function() {
+      var item = this.item;
+      return loadTimeData.getStringF(
+          'entrySummary', item.dateTimeOfDay,
+          item.starred ? loadTimeData.getString('bookmarked') : '', item.title,
+          item.domain);
+    },
+
+    /**
+     * @param {boolean} selected
+     * @return {string}
+     * @private
+     */
+    getAriaChecked_: function(selected) {
+      return selected ? 'true' : 'false';
+    },
+
+    /**
+     * Remove bookmark of current item when bookmark-star is clicked.
+     * @private
+     */
+    onRemoveBookmarkTap_: function() {
+      if (!this.item.starred)
+        return;
+
+      if (this.$$('#bookmark-star') == this.root.activeElement)
+        this.$['menu-button'].focus();
+
+      var browserService = md_history.BrowserService.getInstance();
+      browserService.removeBookmark(this.item.url);
+      browserService.recordAction('BookmarkStarClicked');
+
+      this.fire('remove-bookmark-stars', this.item.url);
+    },
+
+    /**
+     * Fires a custom event when the menu button is clicked. Sends the details
+     * of the history item and where the menu should appear.
+     */
+    onMenuButtonTap_: function(e) {
+      this.fire('toggle-menu', {
+        target: Polymer.dom(e).localTarget,
+        index: this.index,
+        item: this.item,
+        path: this.path,
+      });
+
+      // Stops the 'tap' event from closing the menu when it opens.
+      e.stopPropagation();
+    },
+
+    /**
+     * Record metrics when a result is clicked. This is deliberately tied to
+     * on-click rather than on-tap, as on-click triggers from middle clicks.
+     */
+    onLinkClick_: function() {
+      var browserService = md_history.BrowserService.getInstance();
+      browserService.recordAction('EntryLinkClick');
+
+      if (this.searchTerm)
+        browserService.recordAction('SearchResultClick');
+
+      if (this.index == undefined)
+        return;
+
+      browserService.recordHistogram(
+          'HistoryPage.ClickPosition', this.index, UMA_MAX_BUCKET_VALUE);
+
+      if (this.index <= UMA_MAX_SUBSET_BUCKET_VALUE) {
+        browserService.recordHistogram(
+            'HistoryPage.ClickPositionSubset', this.index,
+            UMA_MAX_SUBSET_BUCKET_VALUE);
+      }
+    },
+
+    onLinkRightClick_: function() {
+      md_history.BrowserService.getInstance().recordAction(
+          'EntryLinkRightClick');
+    },
+
+    /**
+     * Set the favicon image, based on the URL of the history item.
+     * @private
+     */
+    showIcon_: function() {
+      this.$.icon.style.backgroundImage = cr.icon.getFavicon(this.item.url);
+    },
+
+    selectionNotAllowed_: function() {
+      return !loadTimeData.getBoolean('allowDeletingHistory');
+    },
+
+    /**
+     * Generates the title for this history card.
+     * @param {number} numberOfItems The number of items in the card.
+     * @param {string} search The search term associated with these results.
+     * @private
+     */
+    cardTitle_: function(numberOfItems, historyDate, search) {
+      if (!search)
+        return this.item.dateRelativeDay;
+
+      var resultId = numberOfItems == 1 ? 'searchResult' : 'searchResults';
+      return loadTimeData.getStringF('foundSearchResults', numberOfItems,
+          loadTimeData.getString(resultId), search);
+    },
+  });
+
+  /**
+   * Check whether the time difference between the given history item and the
+   * next one is large enough for a spacer to be required.
+   * @param {Array<HistoryEntry>} visits
+   * @param {number} currentIndex
+   * @param {string} searchedTerm
+   * @return {boolean} Whether or not time gap separator is required.
+   * @private
+   */
+  HistoryItem.needsTimeGap = function(visits, currentIndex, searchedTerm) {
+    if (currentIndex >= visits.length - 1 || visits.length == 0)
+      return false;
+
+    var currentItem = visits[currentIndex];
+    var nextItem = visits[currentIndex + 1];
+
+    if (searchedTerm)
+      return currentItem.dateShort != nextItem.dateShort;
+
+    return currentItem.time - nextItem.time > BROWSING_GAP_TIME &&
+        currentItem.dateRelativeDay == nextItem.dateRelativeDay;
+  };
+
+  return { HistoryItem: HistoryItem };
 });

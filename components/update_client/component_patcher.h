@@ -16,7 +16,7 @@
 //                prodversionmin="2.0.143.0"
 //                codebasediff="http://example.com/diff_1.2.3.4.crx"
 //                hashdiff="123" sizediff="101"
-//                fp="1.123" />
+//                fp="1.123"/>
 // The component updater will attempt a differential update if it is available
 // and allowed to, and fall back to a full update if it fails.
 //
@@ -27,10 +27,11 @@
 #ifndef COMPONENTS_UPDATE_CLIENT_COMPONENT_PATCHER_H_
 #define COMPONENTS_UPDATE_CLIENT_COMPONENT_PATCHER_H_
 
+#include <memory>
+
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "components/update_client/component_unpacker.h"
 
@@ -89,8 +90,8 @@ class ComponentPatcher : public base::RefCountedThreadSafe<ComponentPatcher> {
   scoped_refptr<CrxInstaller> installer_;
   scoped_refptr<OutOfProcessPatcher> out_of_process_patcher_;
   ComponentUnpacker::Callback callback_;
-  scoped_ptr<base::ListValue> commands_;
-  base::ValueVector::const_iterator next_command_;
+  std::unique_ptr<base::ListValue> commands_;
+  base::ListValue::const_iterator next_command_;
   scoped_refptr<DeltaUpdateOp> current_operation_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 

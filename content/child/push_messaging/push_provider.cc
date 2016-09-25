@@ -14,6 +14,8 @@
 #include "content/child/service_worker/web_service_worker_registration_impl.h"
 #include "content/child/thread_safe_sender.h"
 #include "content/common/push_messaging_messages.h"
+#include "content/public/common/child_process_host.h"
+#include "content/public/common/push_subscription_options.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/modules/push_messaging/WebPushSubscription.h"
 #include "third_party/WebKit/public/platform/modules/push_messaging/WebPushSubscriptionOptions.h"
@@ -83,8 +85,9 @@ void PushProvider::subscribe(
   // Just treat the server key as a string of bytes and pass it to the push
   // service.
   content_options.sender_info = options.applicationServerKey.latin1();
-  thread_safe_sender_->Send(new PushMessagingHostMsg_SubscribeFromWorker(
-      request_id, service_worker_registration_id, content_options));
+  thread_safe_sender_->Send(new PushMessagingHostMsg_Subscribe(
+      ChildProcessHost::kInvalidUniqueID, request_id,
+      service_worker_registration_id, content_options));
 }
 
 void PushProvider::unsubscribe(
@@ -156,6 +159,7 @@ bool PushProvider::OnMessageReceived(const IPC::Message& message) {
 void PushProvider::OnSubscribeFromWorkerSuccess(
     int request_id,
     const GURL& endpoint,
+    const PushSubscriptionOptions& options,
     const std::vector<uint8_t>& p256dh,
     const std::vector<uint8_t>& auth) {
   blink::WebPushSubscriptionCallbacks* callbacks =
@@ -163,8 +167,9 @@ void PushProvider::OnSubscribeFromWorkerSuccess(
   if (!callbacks)
     return;
 
-  callbacks->onSuccess(
-      base::WrapUnique(new blink::WebPushSubscription(endpoint, p256dh, auth)));
+  callbacks->onSuccess(base::MakeUnique<blink::WebPushSubscription>(
+      endpoint, options.user_visible_only,
+      blink::WebString::fromLatin1(options.sender_info), p256dh, auth));
 
   subscription_callbacks_.Remove(request_id);
 }
@@ -178,7 +183,7 @@ void PushProvider::OnSubscribeFromWorkerError(int request_id,
 
   blink::WebPushError::ErrorType error_type =
       status == PUSH_REGISTRATION_STATUS_PERMISSION_DENIED
-          ? blink::WebPushError::ErrorTypePermissionDenied
+          ? blink::WebPushError::ErrorTypeNotAllowed
           : blink::WebPushError::ErrorTypeAbort;
 
   callbacks->onError(blink::WebPushError(
@@ -216,6 +221,7 @@ void PushProvider::OnUnsubscribeError(int request_id,
 void PushProvider::OnGetSubscriptionSuccess(
     int request_id,
     const GURL& endpoint,
+    const PushSubscriptionOptions& options,
     const std::vector<uint8_t>& p256dh,
     const std::vector<uint8_t>& auth) {
   blink::WebPushSubscriptionCallbacks* callbacks =
@@ -223,8 +229,9 @@ void PushProvider::OnGetSubscriptionSuccess(
   if (!callbacks)
     return;
 
-  callbacks->onSuccess(
-      base::WrapUnique(new blink::WebPushSubscription(endpoint, p256dh, auth)));
+  callbacks->onSuccess(base::MakeUnique<blink::WebPushSubscription>(
+      endpoint, options.user_visible_only,
+      blink::WebString::fromLatin1(options.sender_info), p256dh, auth));
 
   subscription_callbacks_.Remove(request_id);
 }

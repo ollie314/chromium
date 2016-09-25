@@ -5,51 +5,98 @@
 #include "core/CoreExport.h"
 #include "core/dom/DOMTypedArray.h"
 #include "core/fileapi/BlobCallback.h"
+#include "core/workers/ParentFrameTaskRunners.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/heap/Handle.h"
-#include "wtf/OwnPtr.h"
+#include "public/platform/WebTraceLocation.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
-class PNGImageEncoderState;
+class Document;
 class JPEGImageEncoderState;
+class PNGImageEncoderState;
 
 class CORE_EXPORT CanvasAsyncBlobCreator : public GarbageCollectedFinalized<CanvasAsyncBlobCreator> {
 public:
-    static CanvasAsyncBlobCreator* create(DOMUint8ClampedArray* unpremultipliedRGBAImageData, const String& mimeType, const IntSize&, BlobCallback*);
-    void scheduleAsyncBlobCreation(bool canUseIdlePeriodScheduling, double quality = 0.0);
+    static CanvasAsyncBlobCreator* create(DOMUint8ClampedArray* unpremultipliedRGBAImageData, const String& mimeType, const IntSize&, BlobCallback*, double, Document&);
+    void scheduleAsyncBlobCreation(bool canUseIdlePeriodScheduling, const double& quality = 0.0);
     virtual ~CanvasAsyncBlobCreator();
+    enum MimeType {
+        MimeTypePng,
+        MimeTypeJpeg,
+        MimeTypeWebp,
+        NumberOfMimeTypeSupported
+    };
+    // This enum is used to back an UMA histogram, and should therefore be treated as append-only.
+    enum IdleTaskStatus {
+        IdleTaskNotStarted,
+        IdleTaskStarted,
+        IdleTaskCompleted,
+        IdleTaskFailed,
+        IdleTaskSwitchedToMainThreadTask,
+        IdleTaskNotSupported, // Idle tasks are not implemented for some image types
+        IdleTaskCount, // Should not be seen in production
+    };
+    // Methods are virtual for mocking in unit tests
+    virtual void signalTaskSwitchInStartTimeoutEventForTesting() { }
+    virtual void signalTaskSwitchInCompleteTimeoutEventForTesting() { }
 
-    DEFINE_INLINE_VIRTUAL_TRACE()
-    {
-        visitor->trace(m_data);
-    }
+    DECLARE_VIRTUAL_TRACE();
+
+protected:
+    CanvasAsyncBlobCreator(DOMUint8ClampedArray* data, MimeType, const IntSize&, BlobCallback*, double, Document&);
+    // Methods are virtual for unit testing
+    virtual void scheduleInitiatePngEncoding();
+    virtual void scheduleInitiateJpegEncoding(const double&);
+    virtual void idleEncodeRowsPng(double deadlineSeconds);
+    virtual void idleEncodeRowsJpeg(double deadlineSeconds);
+    virtual void postDelayedTaskToMainThread(const WebTraceLocation&, std::unique_ptr<WTF::Closure>, double delayMs);
+    virtual void signalAlternativeCodePathFinishedForTesting() { }
+    virtual void createBlobAndInvokeCallback();
+    virtual void createNullAndInvokeCallback();
+
+    void initiatePngEncoding(double deadlineSeconds);
+    void initiateJpegEncoding(const double& quality, double deadlineSeconds);
+    IdleTaskStatus m_idleTaskStatus;
 
 private:
-    CanvasAsyncBlobCreator(DOMUint8ClampedArray* data, const String& mimeType, const IntSize&, BlobCallback*);
+    friend class CanvasAsyncBlobCreatorTest;
 
-    OwnPtr<PNGImageEncoderState> m_pngEncoderState;
-    OwnPtr<JPEGImageEncoderState> m_jpegEncoderState;
+    void dispose();
+
+    std::unique_ptr<PNGImageEncoderState> m_pngEncoderState;
+    std::unique_ptr<JPEGImageEncoderState> m_jpegEncoderState;
     Member<DOMUint8ClampedArray> m_data;
-    OwnPtr<Vector<unsigned char>> m_encodedImage;
+    std::unique_ptr<Vector<unsigned char>> m_encodedImage;
     int m_numRowsCompleted;
+    Member<Document> m_document;
 
     const IntSize m_size;
     size_t m_pixelRowStride;
-    const String m_mimeType;
-    CrossThreadPersistent<BlobCallback> m_callback;
+    const MimeType m_mimeType;
+    Member<BlobCallback> m_callback;
+    double m_startTime;
+    double m_scheduleInitiateStartTime;
+    double m_elapsedTime;
+    Member<ParentFrameTaskRunners> m_parentFrameTaskRunner;
 
-    void initiatePngEncoding(double deadlineSeconds);
-    void scheduleIdleEncodeRowsPng();
-    void idleEncodeRowsPng(double deadlineSeconds);
+    // PNG
+    bool initializePngStruct();
+    void encodeRowsPngOnMainThread(); // Similar to idleEncodeRowsPng without deadline
 
-    void initiateJpegEncoding(const double& quality);
+    // JPEG
+    bool initializeJpegStruct(double quality);
+    void encodeRowsJpegOnMainThread(); // Similar to idleEncodeRowsJpeg without deadline
 
-    void createBlobAndCall();
-
+    // WEBP
     void encodeImageOnEncoderThread(double quality);
+
+    void idleTaskStartTimeoutEvent(double quality);
+    void idleTaskCompleteTimeoutEvent();
+    void recordIdleTaskStatusHistogram();
 };
 
 } // namespace blink

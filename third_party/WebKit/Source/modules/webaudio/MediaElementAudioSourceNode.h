@@ -28,14 +28,15 @@
 #include "modules/webaudio/AudioSourceNode.h"
 #include "platform/audio/AudioSourceProviderClient.h"
 #include "platform/audio/MultiChannelResampler.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/ThreadingPrimitives.h"
+#include <memory>
 
 namespace blink {
 
-class AbstractAudioContext;
+class BaseAudioContext;
 class HTMLMediaElement;
+class MediaElementAudioSourceOptions;
 
 class MediaElementAudioSourceHandler final : public AudioHandler {
 public:
@@ -78,7 +79,7 @@ private:
     unsigned m_sourceNumberOfChannels;
     double m_sourceSampleRate;
 
-    OwnPtr<MultiChannelResampler> m_multiChannelResampler;
+    std::unique_ptr<MultiChannelResampler> m_multiChannelResampler;
 
     // |m_passesCurrentSrcCORSAccessCheck| holds the value of
     // context()->getSecurityOrigin() && context()->getSecurityOrigin()->canRequest(mediaElement()->currentSrc()),
@@ -100,7 +101,9 @@ class MediaElementAudioSourceNode final : public AudioSourceNode, public AudioSo
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(MediaElementAudioSourceNode);
 public:
-    static MediaElementAudioSourceNode* create(AbstractAudioContext&, HTMLMediaElement&);
+    static MediaElementAudioSourceNode* create(BaseAudioContext&, HTMLMediaElement&, ExceptionState&);
+    static MediaElementAudioSourceNode* create(BaseAudioContext*, const MediaElementAudioSourceOptions&, ExceptionState&);
+
     DECLARE_VIRTUAL_TRACE();
     MediaElementAudioSourceHandler& mediaElementAudioSourceHandler() const;
 
@@ -113,7 +116,7 @@ public:
     void unlock() override;
 
 private:
-    MediaElementAudioSourceNode(AbstractAudioContext&, HTMLMediaElement&);
+    MediaElementAudioSourceNode(BaseAudioContext&, HTMLMediaElement&);
 };
 
 } // namespace blink

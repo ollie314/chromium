@@ -21,17 +21,20 @@ class CC_EXPORT SurfaceLayer : public Layer {
   // This callback is run when a SurfaceSequence needs to be satisfied, but
   // the parent compositor is unable to. It can be called on either the main
   // or impl threads.
-  using SatisfyCallback = base::Callback<void(SurfaceSequence)>;
+  using SatisfyCallback = base::Callback<void(const SurfaceSequence&)>;
 
   // This callback is run to require that a specific SurfaceSequence is
   // received before a SurfaceId is destroyed.
-  using RequireCallback = base::Callback<void(SurfaceId, SurfaceSequence)>;
+  using RequireCallback =
+      base::Callback<void(const SurfaceId&, const SurfaceSequence&)>;
 
   static scoped_refptr<SurfaceLayer> Create(
       const SatisfyCallback& satisfy_callback,
       const RequireCallback& require_callback);
 
-  void SetSurfaceId(SurfaceId surface_id, float scale, const gfx::Size& size);
+  void SetSurfaceId(const SurfaceId& surface_id,
+                    float scale,
+                    const gfx::Size& size);
 
   // Layer overrides.
   std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;

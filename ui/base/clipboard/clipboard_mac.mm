@@ -39,11 +39,9 @@ NSString* const kPepperCustomDataPboardType =
     @"org.chromium.pepper-custom-data";
 
 NSPasteboard* GetPasteboard() {
-  // The pasteboard should not be nil in a UI session, but this handy DCHECK
-  // can help track down problems if someone tries using clipboard code outside
-  // of a UI session.
+  // The pasteboard can always be nil, since there is a finite amount of storage
+  // that must be shared between all pasteboards.
   NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
-  DCHECK(pasteboard);
   return pasteboard;
 }
 
@@ -227,11 +225,12 @@ void ClipboardMac::ReadAvailableTypes(ClipboardType type,
     types->push_back(base::UTF8ToUTF16(kMimeTypeHTML));
   if (IsFormatAvailable(Clipboard::GetRtfFormatType(), type))
     types->push_back(base::UTF8ToUTF16(kMimeTypeRTF));
-  if ([NSImage canInitWithPasteboard:GetPasteboard()])
+
+  NSPasteboard* pb = GetPasteboard();
+  if (pb && [NSImage canInitWithPasteboard:pb])
     types->push_back(base::UTF8ToUTF16(kMimeTypePNG));
   *contains_filenames = false;
 
-  NSPasteboard* pb = GetPasteboard();
   if ([[pb types] containsObject:kWebCustomDataPboardType]) {
     NSData* data = [pb dataForType:kWebCustomDataPboardType];
     if ([data length])
@@ -299,7 +298,7 @@ void ClipboardMac::ReadRTF(ClipboardType type, std::string* result) const {
   return ReadData(GetRtfFormatType(), result);
 }
 
-SkBitmap ClipboardMac::ReadImage(ClipboardType type) const {
+SkBitmap ClipboardMac::ReadImage(ClipboardType type, NSPasteboard* pb) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
 
@@ -307,7 +306,6 @@ SkBitmap ClipboardMac::ReadImage(ClipboardType type) const {
   // may throw, and that exception will leak. Prevent a crash in that case;
   // a blank image is better.
   base::scoped_nsobject<NSImage> image;
-  NSPasteboard* pb = GetPasteboard();
   @try {
     if ([[pb types] containsObject:NSFilenamesPboardType]) {
       // -[NSImage initWithPasteboard:] gets confused with copies of a single
@@ -320,17 +318,27 @@ SkBitmap ClipboardMac::ReadImage(ClipboardType type) const {
             initWithContentsOfURL:[NSURL fileURLWithPath:[paths lastObject]]]);
       }
     } else {
-      image.reset([[NSImage alloc] initWithPasteboard:pb]);
+      if (pb)
+        image.reset([[NSImage alloc] initWithPasteboard:pb]);
     }
   } @catch (id exception) {
   }
 
-  SkBitmap bitmap;
   if (image.get()) {
-    bitmap = skia::NSImageToSkBitmapWithColorSpace(
-        image.get(), /*is_opaque=*/ false, base::mac::GetSystemColorSpace());
+    if ([[image representations] count] == 1u) {
+      NSImageRep* rep = [[image representations] objectAtIndex:0];
+      return skia::NSImageRepToSkBitmapWithColorSpace(
+          rep, NSMakeSize([rep pixelsWide], [rep pixelsHigh]),
+          /*is_opaque=*/false, base::mac::GetSystemColorSpace());
+    }
+    return skia::NSImageToSkBitmapWithColorSpace(
+        image.get(), /*is_opaque=*/false, base::mac::GetSystemColorSpace());
   }
-  return bitmap;
+  return SkBitmap();
+}
+
+SkBitmap ClipboardMac::ReadImage(ClipboardType type) const {
+  return ReadImage(type, GetPasteboard());
 }
 
 void ClipboardMac::ReadCustomData(ClipboardType clipboard_type,

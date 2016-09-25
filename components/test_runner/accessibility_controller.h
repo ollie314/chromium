@@ -14,29 +14,26 @@
 #include "v8/include/v8.h"
 
 namespace blink {
-class WebFrame;
+class WebLocalFrame;
 class WebString;
 class WebView;
 }
 
 namespace test_runner {
 
-class WebTestDelegate;
+class WebViewTestProxyBase;
 
-class AccessibilityController :
-      public base::SupportsWeakPtr<AccessibilityController> {
+class AccessibilityController {
  public:
-  AccessibilityController();
+  explicit AccessibilityController(
+      WebViewTestProxyBase* web_view_test_proxy_base);
   ~AccessibilityController();
 
   void Reset();
-  void Install(blink::WebFrame* frame);
+  void Install(blink::WebLocalFrame* frame);
   bool ShouldLogAccessibilityEvents();
   void NotificationReceived(const blink::WebAXObject& target,
                             const std::string& notification_name);
-
-  void SetDelegate(WebTestDelegate* delegate);
-  void SetWebView(blink::WebView* web_view);
 
  private:
   friend class AccessibilityControllerBindings;
@@ -59,8 +56,8 @@ class AccessibilityController :
 
   v8::Persistent<v8::Function> notification_callback_;
 
-  WebTestDelegate* delegate_;
-  blink::WebView* web_view_;
+  blink::WebView* web_view();
+  WebViewTestProxyBase* web_view_test_proxy_base_;
 
   base::WeakPtrFactory<AccessibilityController> weak_factory_;
 

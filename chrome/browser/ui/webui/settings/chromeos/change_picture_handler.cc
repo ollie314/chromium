@@ -4,16 +4,16 @@
 
 #include "chrome/browser/ui/webui/settings/chromeos/change_picture_handler.h"
 
-#include "ash/audio/sounds.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/camera_presence_notifier.h"
 #include "chrome/browser/chromeos/login/users/avatar/user_image_manager.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
@@ -25,6 +25,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/audio/chromeos_sounds.h"
 #include "components/user_manager/user.h"
@@ -34,7 +35,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/url_constants.h"
-#include "grit/browser_resources.h"
+#include "media/audio/sounds/sounds_manager.h"
 #include "net/base/data_url.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -80,13 +81,6 @@ ChangePictureHandler::ChangePictureHandler()
     : previous_image_url_(url::kAboutBlankURL),
       previous_image_index_(user_manager::User::USER_IMAGE_INVALID),
       camera_observer_(this) {
-  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_IMAGE_UPDATED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_IMAGE_UPDATE_FAILED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
-                 content::NotificationService::AllSources());
-
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   media::SoundsManager* manager = media::SoundsManager::Get();
   manager->Initialize(SOUND_OBJECT_DELETE,
@@ -119,6 +113,19 @@ void ChangePictureHandler::RegisterMessages() {
                                 base::Unretained(this)));
 }
 
+void ChangePictureHandler::OnJavascriptAllowed() {
+  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_IMAGE_UPDATED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_IMAGE_UPDATE_FAILED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
+                 content::NotificationService::AllSources());
+}
+
+void ChangePictureHandler::OnJavascriptDisallowed() {
+  registrar_.RemoveAll();
+}
+
 void ChangePictureHandler::SendDefaultImages() {
   base::ListValue image_urls;
   for (int i = default_user_image::kFirstDefaultImageIndex;
@@ -136,9 +143,9 @@ void ChangePictureHandler::SendDefaultImages() {
                           default_user_image::GetDefaultImageDescription(i));
     image_urls.Append(image_data.release());
   }
-  web_ui()->CallJavascriptFunction("cr.webUIListenerCallback",
-                                   base::StringValue("default-images-changed"),
-                                   image_urls);
+  CallJavascriptFunction("cr.webUIListenerCallback",
+                         base::StringValue("default-images-changed"),
+                         image_urls);
 }
 
 void ChangePictureHandler::HandleChooseFile(const base::ListValue* args) {
@@ -164,12 +171,14 @@ void ChangePictureHandler::HandleChooseFile(const base::ListValue* args) {
 
 void ChangePictureHandler::HandleDiscardPhoto(const base::ListValue* args) {
   DCHECK(args->empty());
-  ash::PlaySystemSoundIfSpokenFeedback(SOUND_OBJECT_DELETE);
+  AccessibilityManager::Get()->PlayEarcon(
+      SOUND_OBJECT_DELETE, PlaySoundOption::SPOKEN_FEEDBACK_ENABLED);
 }
 
 void ChangePictureHandler::HandlePhotoTaken(const base::ListValue* args) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  ash::PlaySystemSoundIfSpokenFeedback(SOUND_CAMERA_SNAP);
+  AccessibilityManager::Get()->PlayEarcon(
+      SOUND_CAMERA_SNAP, PlaySoundOption::SPOKEN_FEEDBACK_ENABLED);
 
   std::string image_url;
   if (!args || args->GetSize() != 1 || !args->GetString(0, &image_url))
@@ -190,6 +199,8 @@ void ChangePictureHandler::HandlePhotoTaken(const base::ListValue* args) {
 
 void ChangePictureHandler::HandlePageInitialized(const base::ListValue* args) {
   DCHECK(args && args->empty());
+
+  AllowJavascript();
 
   CameraPresenceNotifier* camera = CameraPresenceNotifier::GetInstance();
   if (!camera_observer_.IsObserving(camera))
@@ -225,9 +236,9 @@ void ChangePictureHandler::SendSelectedImage() {
         // User has image from the current set of default images.
         base::StringValue image_url(
             default_user_image::GetDefaultImageUrl(previous_image_index_));
-        web_ui()->CallJavascriptFunction(
-            "cr.webUIListenerCallback",
-            base::StringValue("selected-image-changed"), image_url);
+        CallJavascriptFunction("cr.webUIListenerCallback",
+                               base::StringValue("selected-image-changed"),
+                               image_url);
       } else {
         // User has an old default image, so present it in the same manner as a
         // previous image from file.
@@ -242,9 +253,9 @@ void ChangePictureHandler::SendProfileImage(const gfx::ImageSkia& image,
                                             bool should_select) {
   base::StringValue data_url(webui::GetBitmapDataUrl(*image.bitmap()));
   base::FundamentalValue select(should_select);
-  web_ui()->CallJavascriptFunction("cr.webUIListenerCallback",
-                                   base::StringValue("profile-image-changed"),
-                                   data_url, select);
+  CallJavascriptFunction("cr.webUIListenerCallback",
+                         base::StringValue("profile-image-changed"), data_url,
+                         select);
 }
 
 void ChangePictureHandler::UpdateProfileImage() {
@@ -262,8 +273,8 @@ void ChangePictureHandler::UpdateProfileImage() {
 void ChangePictureHandler::SendOldImage(const std::string& image_url) {
   previous_image_url_ = image_url;
   base::StringValue url(image_url);
-  web_ui()->CallJavascriptFunction("cr.webUIListenerCallback",
-                                   base::StringValue("old-image-changed"), url);
+  CallJavascriptFunction("cr.webUIListenerCallback",
+                         base::StringValue("old-image-changed"), url);
 }
 
 void ChangePictureHandler::HandleSelectImage(const base::ListValue* args) {
@@ -357,9 +368,9 @@ void ChangePictureHandler::SetImageFromCamera(const gfx::ImageSkia& photo) {
 }
 
 void ChangePictureHandler::SetCameraPresent(bool present) {
-  web_ui()->CallJavascriptFunction("cr.webUIListenerCallback",
-                                   base::StringValue("camera-presence-changed"),
-                                   base::FundamentalValue(present));
+  CallJavascriptFunction("cr.webUIListenerCallback",
+                         base::StringValue("camera-presence-changed"),
+                         base::FundamentalValue(present));
 }
 
 void ChangePictureHandler::OnCameraPresenceCheckDone(bool is_camera_present) {

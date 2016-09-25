@@ -26,8 +26,8 @@
 #include "base/test/test_switches.h"
 #include "base/test/test_timeouts.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_checker.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -121,7 +121,7 @@ class DefaultUnitTestPlatformDelegate : public UnitTestPlatformDelegate {
 
     CHECK(temp_dir_.IsValid() || temp_dir_.CreateUniqueTempDir());
     FilePath temp_file;
-    CHECK(CreateTemporaryFileInDir(temp_dir_.path(), &temp_file));
+    CHECK(CreateTemporaryFileInDir(temp_dir_.GetPath(), &temp_file));
     std::string long_flags(
         std::string("--") + kGTestFilterFlag + "=" +
         JoinString(test_names, ":"));

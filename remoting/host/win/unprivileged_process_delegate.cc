@@ -22,7 +22,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/win/scoped_handle.h"
-#include "base/win/windows_version.h"
 #include "ipc/attachment_broker.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -65,8 +64,10 @@ const char kWindowStationSdFormat[] = "O:SYG:SYD:(A;CIOIIO;GA;;;SY)"
 
 // Security descriptor of the worker process. It gives access SYSTEM full access
 // to the process. It gives READ_CONTROL, SYNCHRONIZE, PROCESS_QUERY_INFORMATION
-// and PROCESS_TERMINATE rights to the built-in administrators group.
-const char kWorkerProcessSd[] = "O:SYG:SYD:(A;;GA;;;SY)(A;;0x120401;;;BA)";
+// and PROCESS_TERMINATE rights to the built-in administrators group.  It also
+// gives PROCESS_QUERY_LIMITED_INFORMATION to the authenticated users group.
+const char kWorkerProcessSd[] =
+    "O:SYG:SYD:(A;;GA;;;SY)(A;;0x120401;;;BA)(A;;0x1000;;;AU)";
 
 // Security descriptor of the worker process threads. It gives access SYSTEM
 // full access to the threads. It gives READ_CONTROL, SYNCHRONIZE,
@@ -90,34 +91,23 @@ bool CreateRestrictedToken(ScopedHandle* token_out) {
   if (restricted_token.Init(token.Get()) != ERROR_SUCCESS)
     return false;
 
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
-    // "SeChangeNotifyPrivilege" is needed to access the machine certificate
-    // (including its private key) in the "Local Machine" cert store. This is
-    // needed for HTTPS client third-party authentication . But the presence of
-    // "SeChangeNotifyPrivilege" also allows it to open and manipulate objects
-    // owned by the same user. This risk is only mitigated by setting the
-    // process integrity level to Low, which is why it is unsafe to enable
-    // "SeChangeNotifyPrivilege" on Windows XP where we don't have process
-    // integrity to protect us.
-    std::vector<base::string16> exceptions;
-    exceptions.push_back(base::string16(L"SeChangeNotifyPrivilege"));
+  // "SeChangeNotifyPrivilege" is needed to access the machine certificate
+  // (including its private key) in the "Local Machine" cert store. This is
+  // needed for HTTPS client third-party authentication . But the presence of
+  // "SeChangeNotifyPrivilege" also allows it to open and manipulate objects
+  // owned by the same user. This risk is only mitigated by setting the
+  // process integrity level to Low.
+  std::vector<base::string16> exceptions;
+  exceptions.push_back(base::string16(L"SeChangeNotifyPrivilege"));
 
-    // Remove privileges in the token.
-    if (restricted_token.DeleteAllPrivileges(&exceptions) != ERROR_SUCCESS)
-      return false;
+  // Remove privileges in the token.
+  if (restricted_token.DeleteAllPrivileges(&exceptions) != ERROR_SUCCESS)
+    return false;
 
-    // Set low integrity level if supported by the OS.
-    if (restricted_token.SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW)
-        != ERROR_SUCCESS) {
-      return false;
-    }
-  } else {
-    // Remove all privileges in the token.
-    // Since "SeChangeNotifyPrivilege" is among the privileges being removed,
-    // the network process won't be able to acquire certificates from the local
-    // machine store. This means third-party authentication won't work.
-    if (restricted_token.DeleteAllPrivileges(nullptr) != ERROR_SUCCESS)
-      return false;
+  // Set low integrity level.
+  if (restricted_token.SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW) !=
+      ERROR_SUCCESS) {
+    return false;
   }
 
   // Return the resulting token.
@@ -143,17 +133,12 @@ bool CreateWindowStationAndDesktop(ScopedSid logon_sid,
 
   // Format the security descriptors in SDDL form.
   std::string desktop_sddl =
-      base::StringPrintf(kDesktopSdFormat, logon_sid_string.c_str());
+      base::StringPrintf(kDesktopSdFormat, logon_sid_string.c_str()) +
+      kLowIntegrityMandatoryLabel;
   std::string window_station_sddl =
       base::StringPrintf(kWindowStationSdFormat, logon_sid_string.c_str(),
-                         logon_sid_string.c_str());
-
-  // The worker runs at low integrity level. Make sure it will be able to attach
-  // to the window station and desktop.
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
-    desktop_sddl += kLowIntegrityMandatoryLabel;
-    window_station_sddl += kLowIntegrityMandatoryLabel;
-  }
+                         logon_sid_string.c_str()) +
+      kLowIntegrityMandatoryLabel;
 
   // Create the desktop and window station security descriptors.
   ScopedSd desktop_sd = ConvertSddlToSd(desktop_sddl);
@@ -175,9 +160,7 @@ bool CreateWindowStationAndDesktop(ScopedSid logon_sid,
 
   // Make sure that a new window station will be created instead of opening
   // an existing one.
-  DWORD window_station_flags = 0;
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA)
-    window_station_flags = CWF_CREATE_ONLY;
+  DWORD window_station_flags = CWF_CREATE_ONLY;
 
   // Request full access because this handle will be inherited by the worker
   // process which needs full access in order to attach to the window station.
@@ -296,7 +279,7 @@ void UnprivilegedProcessDelegate::LaunchProcess(
 
   ScopedHandle worker_process;
   {
-    // Take a lock why any inheritable handles are open to make sure that only
+    // Take a lock when any inheritable handles are open to make sure that only
     // one process inherits them.
     base::AutoLock lock(g_inherit_handles_lock.Get());
 
@@ -337,8 +320,6 @@ void UnprivilegedProcessDelegate::LaunchProcess(
   }
 
   channel_ = std::move(server);
-  IPC::AttachmentBroker::GetGlobal()->RegisterCommunicationChannel(
-      channel_.get(), io_task_runner_);
 
   ReportProcessLaunched(std::move(worker_process));
 }

@@ -57,16 +57,17 @@ void CSSImageSetValue::fillImageSet()
     size_t length = this->length();
     size_t i = 0;
     while (i < length) {
-        CSSImageValue* imageValue = toCSSImageValue(item(i));
-        String imageURL = imageValue->url();
+        const CSSImageValue& imageValue = toCSSImageValue(item(i));
+        String imageURL = imageValue.url();
 
         ++i;
         ASSERT_WITH_SECURITY_IMPLICATION(i < length);
-        CSSValue* scaleFactorValue = item(i);
-        float scaleFactor = toCSSPrimitiveValue(scaleFactorValue)->getFloatValue();
+        const CSSValue& scaleFactorValue = item(i);
+        float scaleFactor = toCSSPrimitiveValue(scaleFactorValue).getFloatValue();
 
         ImageWithScale image;
         image.imageURL = imageURL;
+        image.referrer = SecurityPolicy::generateReferrer(imageValue.referrer().referrerPolicy, KURL(ParsedURLString, imageURL), imageValue.referrer().referrer);
         image.scaleFactor = scaleFactor;
         m_imagesInSet.append(image);
         ++i;
@@ -99,10 +100,8 @@ StyleImage* CSSImageSetValue::cachedImage(float deviceScaleFactor) const
     return m_cachedImage.get();
 }
 
-StyleImage* CSSImageSetValue::cacheImage(Document* document, float deviceScaleFactor, CrossOriginAttributeValue crossOrigin)
+StyleImage* CSSImageSetValue::cacheImage(const Document& document, float deviceScaleFactor, CrossOriginAttributeValue crossOrigin)
 {
-    ASSERT(document);
-
     if (!m_imagesInSet.size())
         fillImageSet();
 
@@ -111,12 +110,13 @@ StyleImage* CSSImageSetValue::cacheImage(Document* document, float deviceScaleFa
         // All forms of scale should be included: Page::pageScaleFactor(), LocalFrame::pageZoomFactor(),
         // and any CSS transforms. https://bugs.webkit.org/show_bug.cgi?id=81698
         ImageWithScale image = bestImageForScaleFactor(deviceScaleFactor);
-        FetchRequest request(ResourceRequest(document->completeURL(image.imageURL)), FetchInitiatorTypeNames::css);
+        FetchRequest request(ResourceRequest(document.completeURL(image.imageURL)), FetchInitiatorTypeNames::css);
+        request.mutableResourceRequest().setHTTPReferrer(image.referrer);
 
         if (crossOrigin != CrossOriginAttributeNotSet)
-            request.setCrossOriginAccessControl(document->getSecurityOrigin(), crossOrigin);
+            request.setCrossOriginAccessControl(document.getSecurityOrigin(), crossOrigin);
 
-        if (ImageResource* cachedImage = ImageResource::fetch(request, document->fetcher()))
+        if (ImageResource* cachedImage = ImageResource::fetch(request, document.fetcher()))
             m_cachedImage = StyleFetchedImageSet::create(cachedImage, image.scaleFactor, this, request.url());
         else
             m_cachedImage = StyleInvalidImage::create(image.imageURL);
@@ -135,16 +135,16 @@ String CSSImageSetValue::customCSSText() const
     size_t i = 0;
     while (i < length) {
         if (i > 0)
-            result.appendLiteral(", ");
+            result.append(", ");
 
-        const CSSValue* imageValue = item(i);
-        result.append(imageValue->cssText());
+        const CSSValue& imageValue = item(i);
+        result.append(imageValue.cssText());
         result.append(' ');
 
         ++i;
         ASSERT_WITH_SECURITY_IMPLICATION(i < length);
-        const CSSValue* scaleFactorValue = item(i);
-        result.append(scaleFactorValue->cssText());
+        const CSSValue& scaleFactorValue = item(i);
+        result.append(scaleFactorValue.cssText());
         // FIXME: Eventually the scale factor should contain it's own unit http://wkb.ug/100120.
         // For now 'x' is hard-coded in the parser, so we hard-code it here too.
         result.append('x');
@@ -175,7 +175,7 @@ CSSImageSetValue* CSSImageSetValue::valueWithURLsMadeAbsolute()
 {
     CSSImageSetValue* value = CSSImageSetValue::create();
     for (auto& item : *this)
-        item->isImageValue() ? value->append(toCSSImageValue(*item).valueWithURLMadeAbsolute()) : value->append(item);
+        item->isImageValue() ? value->append(*toCSSImageValue(*item).valueWithURLMadeAbsolute()) : value->append(*item);
     return value;
 }
 

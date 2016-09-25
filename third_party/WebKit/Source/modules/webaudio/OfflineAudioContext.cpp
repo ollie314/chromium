@@ -30,10 +30,12 @@
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
+#include "modules/webaudio/AudioListener.h"
 #include "modules/webaudio/DeferredTaskHandler.h"
 #include "modules/webaudio/OfflineAudioCompletionEvent.h"
 #include "modules/webaudio/OfflineAudioDestinationNode.h"
 
+#include "platform/Histogram.h"
 #include "platform/audio/AudioUtilities.h"
 
 namespace blink {
@@ -55,7 +57,7 @@ OfflineAudioContext* OfflineAudioContext::create(ExecutionContext* context, unsi
         return nullptr;
     }
 
-    if (numberOfChannels > AbstractAudioContext::maxNumberOfChannels()) {
+    if (numberOfChannels > BaseAudioContext::maxNumberOfChannels()) {
         exceptionState.throwDOMException(
             IndexSizeError,
             ExceptionMessages::indexOutsideRange<unsigned>(
@@ -63,7 +65,7 @@ OfflineAudioContext* OfflineAudioContext::create(ExecutionContext* context, unsi
                 numberOfChannels,
                 0,
                 ExceptionMessages::InclusiveBound,
-                AbstractAudioContext::maxNumberOfChannels(),
+                BaseAudioContext::maxNumberOfChannels(),
                 ExceptionMessages::InclusiveBound));
         return nullptr;
     }
@@ -89,12 +91,33 @@ OfflineAudioContext* OfflineAudioContext::create(ExecutionContext* context, unsi
             + ")");
     }
 
+#if DEBUG_AUDIONODE_REFERENCES
+    fprintf(stderr, "[%16p]: OfflineAudioContext::OfflineAudioContext()\n", audioContext);
+#endif
+    DEFINE_STATIC_LOCAL(SparseHistogram, offlineContextChannelCountHistogram,
+        ("WebAudio.OfflineAudioContext.ChannelCount"));
+    // Arbitrarly limit the maximum length to 1 million frames (about 20 sec
+    // at 48kHz).  The number of buckets is fairly arbitrary.
+    DEFINE_STATIC_LOCAL(CustomCountHistogram, offlineContextLengthHistogram,
+        ("WebAudio.OfflineAudioContext.Length", 1, 1000000, 50));
+    // The limits are the min and max AudioBuffer sample rates currently
+    // supported.  We use explicit values here instead of
+    // AudioUtilities::minAudioBufferSampleRate() and
+    // AudioUtilities::maxAudioBufferSampleRate().  The number of buckets is
+    // fairly arbitrary.
+    DEFINE_STATIC_LOCAL(CustomCountHistogram, offlineContextSampleRateHistogram,
+        ("WebAudio.OfflineAudioContext.SampleRate", 3000, 192000, 50));
+
+    offlineContextChannelCountHistogram.sample(numberOfChannels);
+    offlineContextLengthHistogram.count(numberOfFrames);
+    offlineContextSampleRateHistogram.count(sampleRate);
+
     audioContext->suspendIfNeeded();
     return audioContext;
 }
 
 OfflineAudioContext::OfflineAudioContext(Document* document, unsigned numberOfChannels, size_t numberOfFrames, float sampleRate, ExceptionState& exceptionState)
-    : AbstractAudioContext(document, numberOfChannels, numberOfFrames, sampleRate)
+    : BaseAudioContext(document, numberOfChannels, numberOfFrames, sampleRate)
     , m_isRenderingStarted(false)
     , m_totalRenderFrames(numberOfFrames)
 {
@@ -104,6 +127,7 @@ OfflineAudioContext::OfflineAudioContext(Document* document, unsigned numberOfCh
     // Throw an exception if the render target is not ready.
     if (m_renderTarget) {
         m_destinationNode = OfflineAudioDestinationNode::create(this, m_renderTarget.get());
+        initialize();
     } else {
         exceptionState.throwRangeError(ExceptionMessages::failedToConstruct(
             "OfflineAudioContext",
@@ -112,12 +136,13 @@ OfflineAudioContext::OfflineAudioContext(Document* document, unsigned numberOfCh
             String::number(numberOfFrames) + ", " +
             String::number(sampleRate) + ")"));
     }
-
-    initialize();
 }
 
 OfflineAudioContext::~OfflineAudioContext()
 {
+#if DEBUG_AUDIONODE_REFERENCES
+    fprintf(stderr, "[%16p]: OfflineAudioContext::~OfflineAudioContext()\n", this);
+#endif
 }
 
 DEFINE_TRACE(OfflineAudioContext)
@@ -125,12 +150,12 @@ DEFINE_TRACE(OfflineAudioContext)
     visitor->trace(m_renderTarget);
     visitor->trace(m_completeResolver);
     visitor->trace(m_scheduledSuspends);
-    AbstractAudioContext::trace(visitor);
+    BaseAudioContext::trace(visitor);
 }
 
 ScriptPromise OfflineAudioContext::startOfflineRendering(ScriptState* scriptState)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
 
     // Calling close() on an OfflineAudioContext is not supported/allowed,
     // but it might well have been stopped by its execution context.
@@ -162,7 +187,7 @@ ScriptPromise OfflineAudioContext::startOfflineRendering(ScriptState* scriptStat
                 "cannot call startRendering more than once"));
     }
 
-    ASSERT(!m_isRenderingStarted);
+    DCHECK(!m_isRenderingStarted);
 
     m_completeResolver = ScriptPromiseResolver::create(scriptState);
 
@@ -174,19 +199,10 @@ ScriptPromise OfflineAudioContext::startOfflineRendering(ScriptState* scriptStat
     return m_completeResolver->promise();
 }
 
-ScriptPromise OfflineAudioContext::closeContext(ScriptState* scriptState)
-{
-    return ScriptPromise::rejectWithDOMException(
-        scriptState,
-        DOMException::create(
-            InvalidAccessError,
-            "cannot close an OfflineAudioContext."));
-}
-
 ScriptPromise OfflineAudioContext::suspendContext(ScriptState* scriptState)
 {
     // This CANNOT be called on OfflineAudioContext; this is only to implement
-    // the pure virtual interface from AbstractAudioContext.
+    // the pure virtual interface from BaseAudioContext.
     RELEASE_NOTREACHED();
 
     return ScriptPromise();
@@ -194,7 +210,7 @@ ScriptPromise OfflineAudioContext::suspendContext(ScriptState* scriptState)
 
 ScriptPromise OfflineAudioContext::suspendContext(ScriptState* scriptState, double when)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
@@ -261,7 +277,7 @@ ScriptPromise OfflineAudioContext::suspendContext(ScriptState* scriptState, doub
 
 ScriptPromise OfflineAudioContext::resumeContext(ScriptState* scriptState)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
@@ -287,7 +303,7 @@ ScriptPromise OfflineAudioContext::resumeContext(ScriptState* scriptState)
         return promise;
     }
 
-    ASSERT(contextState() == AudioContextState::Suspended);
+    DCHECK_EQ(contextState(), AudioContextState::Suspended);
 
     // If the context is suspended, resume rendering by setting the state to
     // "Running". and calling startRendering(). Note that resuming is possible
@@ -303,7 +319,7 @@ ScriptPromise OfflineAudioContext::resumeContext(ScriptState* scriptState)
 
 void OfflineAudioContext::fireCompletionEvent()
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
 
     // We set the state to closed here so that the oncomplete event handler sees
     // that the context has been closed.
@@ -311,7 +327,7 @@ void OfflineAudioContext::fireCompletionEvent()
 
     AudioBuffer* renderedBuffer = renderTarget();
 
-    ASSERT(renderedBuffer);
+    DCHECK(renderedBuffer);
     if (!renderedBuffer)
         return;
 
@@ -330,12 +346,15 @@ void OfflineAudioContext::fireCompletionEvent()
 
 bool OfflineAudioContext::handlePreOfflineRenderTasks()
 {
-    ASSERT(isAudioThread());
+    DCHECK(isAudioThread());
 
     // OfflineGraphAutoLocker here locks the audio graph for this scope. Note
     // that this locker does not use tryLock() inside because the timing of
     // suspension MUST NOT be delayed.
     OfflineGraphAutoLocker locker(this);
+
+    // Update the dirty state of the listener.
+    listener()->updateState();
 
     deferredTaskHandler().handleDeferredTasks();
     handleStoppableSourceNodes();
@@ -345,7 +364,7 @@ bool OfflineAudioContext::handlePreOfflineRenderTasks()
 
 void OfflineAudioContext::handlePostOfflineRenderTasks()
 {
-    ASSERT(isAudioThread());
+    DCHECK(isAudioThread());
 
     // OfflineGraphAutoLocker here locks the audio graph for the same reason
     // above in |handlePreOfflineRenderTasks|.
@@ -365,7 +384,7 @@ OfflineAudioDestinationHandler& OfflineAudioContext::destinationHandler()
 
 void OfflineAudioContext::resolveSuspendOnMainThread(size_t frame)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
 
     // Suspend the context first. This will fire onstatechange event.
     setContextState(Suspended);
@@ -373,19 +392,42 @@ void OfflineAudioContext::resolveSuspendOnMainThread(size_t frame)
     // Wait until the suspend map is available for the removal.
     AutoLocker locker(this);
 
-    // |frame| must exist in the map. However, it can be removed already in a
-    // very rare case. See: crbug.com/568796
-    RELEASE_ASSERT(m_scheduledSuspends.contains(frame));
+    // If the context is going away, m_scheduledSuspends could have had all its entries removed.
+    // Check for that here.
+    if (m_scheduledSuspends.size()) {
+        // |frame| must exist in the map.
+        DCHECK(m_scheduledSuspends.contains(frame));
 
-    SuspendMap::iterator it = m_scheduledSuspends.find(frame);
-    it->value->resolve();
+        SuspendMap::iterator it = m_scheduledSuspends.find(frame);
+        it->value->resolve();
 
-    m_scheduledSuspends.remove(it);
+        m_scheduledSuspends.remove(it);
+    }
+}
+
+void OfflineAudioContext::rejectPendingResolvers()
+{
+    DCHECK(isMainThread());
+
+    // Wait until the suspend map is available for removal.
+    AutoLocker locker(this);
+
+    // Offline context is going away so reject any promises that are still pending.
+
+    for (auto& pendingSuspendResolver : m_scheduledSuspends) {
+        pendingSuspendResolver.value->reject(DOMException::create(
+            InvalidStateError, "Audio context is going away"));
+    }
+
+    m_scheduledSuspends.clear();
+    DCHECK_EQ(m_resumeResolvers.size(), 0u);
+
+    rejectPendingDecodeAudioDataResolvers();
 }
 
 bool OfflineAudioContext::shouldSuspend()
 {
-    ASSERT(isAudioThread());
+    DCHECK(isAudioThread());
 
     // Note that the GraphLock is required before this check. Since this needs
     // to run on the audio thread, OfflineGraphAutoLocker must be used.

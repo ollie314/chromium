@@ -36,6 +36,7 @@
     boolean isPreloaded(DOMString url);
     boolean isPreloadedBy(DOMString url, Document document);
     boolean isLoadingFromMemoryCache(DOMString url);
+    unsigned long getResourcePriority (DOMString url, Document document);
 
     boolean isSharingStyle(Element element1, Element element2);
 
@@ -108,6 +109,7 @@
     [RaisesException] Range markerRangeForNode(Node node, DOMString markerType, unsigned long index);
     [RaisesException] DOMString markerDescriptionForNode(Node node, DOMString markerType, unsigned long index);
     void addTextMatchMarker(Range range, boolean isActive);
+    [RaisesException] void addCompositionMarker(Range range, DOMString underlineColorValue, boolean thick, DOMString backgroundColorValue);
     void setMarkersActive(Node node, unsigned long startOffset, unsigned long endOffset, boolean active);
     void setMarkedTextMatchesAreHighlighted(Document document, boolean highlight);
 
@@ -161,7 +163,10 @@
 
     boolean hasSpellingMarker(Document document, long from, long length);
     boolean hasGrammarMarker(Document document, long from, long length);
-    void setContinuousSpellCheckingEnabled(boolean enabled);
+    void setSpellCheckingEnabled(boolean enabled);
+
+    bool canHyphenate(DOMString locale);
+    void setMockHyphenation(DOMString locale);
 
     boolean isOverwriteModeEnabled(Document document);
     void toggleOverwriteModeEnabled(Document document);
@@ -196,7 +201,6 @@
     unsigned long numberOfLiveNodes();
     unsigned long numberOfLiveDocuments();
     DOMString dumpRefCountedInstanceCounts();
-    sequence<DOMString> consoleMessageArgumentCounts(Document document);
     unsigned long[] setMemoryCacheCapacities(unsigned long minDeadBytes, unsigned long maxDeadBytes, unsigned long totalBytes);
 
     DOMString counterValue(Element element);
@@ -207,6 +211,7 @@
     [RaisesException] DOMString pageProperty(DOMString propertyName, long pageNumber);
     [RaisesException] DOMString pageSizeAndMarginsInPixels(long pageIndex, long width, long height, long marginTop, long marginRight, long marginBottom, long marginLeft);
 
+    [RaisesException] float pageScaleFactor();
     [RaisesException] void setPageScaleFactor(float scaleFactor);
     [RaisesException] void setPageScaleFactorLimits(float minScaleFactor, float maxScaleFactor);
 
@@ -233,7 +238,6 @@
 
     // These functions both reset the tracked repaint rects. They are intended to be used in the following order:
     //  startTrackingRepaints(), repaintRectsAsText(), stopTrackingRepaints().
-    // TODO(wangxianzhu): Remove these functions when we no longer use repaint rects.
     [RaisesException] void startTrackingRepaints(Document document);
     [RaisesException] void stopTrackingRepaints(Document document);
 
@@ -243,16 +247,6 @@
     [RaisesException] void updateLayoutIgnorePendingStylesheetsAndRunPostLayoutTasks(optional Node? node = null);
 
     [RaisesException] void forceFullRepaint(Document document);
-
-    // These functions both reset the tracked paint invalidation objects. They are intended to be used in the following order:
-    //  startTrackingPaintInvalidationObjects(), trackedPaintInvalidationObjects(), stopTrackingPaintInvalidationObjects().
-    void startTrackingPaintInvalidationObjects();
-    void stopTrackingPaintInvalidationObjects();
-
-    // Returns a list of debug strings for objects that were invalidated between
-    // startTrackingPaintInvalidationObjects() and stopTrackingPaintInvalidationObjects().
-    // If an object is invalidated multiple times, it will appear in the list multiple times.
-    DOMString[] trackedPaintInvalidationObjects();
 
     // Returns a list of draggable/non-draggable regions in the document.
     [RaisesException] ClientRectList draggableRegions(Document document);
@@ -307,10 +301,9 @@
 
     boolean ignoreLayoutWithPendingStylesheets(Document document);
 
-    // These functions are for testing NetInfo. You must call setNetworkStateNotifierTestOnly(true)
-    // before calling setNetworkConnectionInfo.
-    void setNetworkStateNotifierTestOnly(boolean testOnly);
-    [RaisesException] void setNetworkConnectionInfo(DOMString type, double downlinkMaxMbps);
+    // These functions are for testing NetInfo. You must call clearNetworkConnectionInfoOverride() at the end.
+    [RaisesException] void setNetworkConnectionInfoOverride(boolean onLine, DOMString type, double downlinkMaxMbps);
+    void clearNetworkConnectionInfoOverride();
 
     // This function is for testing HitRegions on Canvas2D.
     unsigned long countHitRegions(CanvasRenderingContext2D context);
@@ -320,6 +313,7 @@
 
     DictionaryTest dictionaryTest();
     UnionTypesTest unionTypesTest();
+    CallbackFunctionTest callbackFunctionTest();
     [RaisesException] void setScrollChain(ScrollState scrollState, Element[] elements);
     void forceBlinkGCWithoutV8GC();
 
@@ -339,8 +333,8 @@
 
     iterable<long>;
 
-    [Unscopeable] readonly attribute DOMString unscopeableAttribute;
-    [Unscopeable] DOMString unscopeableMethod();
+    [Unscopable] readonly attribute DOMString unscopableAttribute;
+    [Unscopable] DOMString unscopableMethod();
 
     ClientRectList focusRingRects(Element element);
     ClientRectList outlineRects(Element element);
@@ -350,7 +344,6 @@
     // support overlay scrollbars.
     bool setScrollbarVisibilityInScrollableArea(Node node, boolean visible);
 
-    void forceRestrictIFramePermissions();
     [RaisesException] double monotonicTimeToZeroBasedDocumentTime(double platformTime);
 
     void setMediaElementNetworkState(HTMLMediaElement element, long state);
@@ -361,4 +354,10 @@
     DOMString getScrollAnimationState(Node node);
 
     DOMString getProgrammaticScrollAnimationState(Node node);
+
+    ClientRect visualRect(Node node);
+
+    OriginTrialsTest originTrialsTest();
+
+    void crash();
 };

@@ -136,7 +136,7 @@ TEST_F(L10nUtilTest, GetAppLocale) {
   const std::string original_locale = base::i18n::GetConfiguredLocale();
 
   if (kPlatformHasDefaultLocale && kUseLocaleFromEnvironment) {
-    env.reset(base::Environment::Create());
+    env = base::Environment::Create();
 
     // Test the support of LANGUAGE environment variable.
     base::i18n::SetICUDefaultLocale("en-US");
@@ -399,7 +399,7 @@ TEST_F(L10nUtilTest, SortStringsUsingFunction) {
   ASSERT_TRUE(UTF8ToUTF16("b") == strings[1]->string());
   ASSERT_TRUE(UTF8ToUTF16("C") == strings[2]->string());
   ASSERT_TRUE(UTF8ToUTF16("d") == strings[3]->string());
-  STLDeleteElements(&strings);
+  base::STLDeleteElements(&strings);
 }
 
 /**

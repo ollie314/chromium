@@ -42,7 +42,6 @@ struct WebLocalizedString {
         AXCalendarShowPreviousMonth,
         AXCalendarWeekDescription,
         AXCheckedCheckBoxActionVerb,
-        AXDateTimeFieldEmptyValueText,
         AXDayOfMonthFieldText,
         AXDefaultActionVerb,
         AXHeadingText, // Deprecated.
@@ -69,6 +68,7 @@ struct WebLocalizedString {
         AXMediaHideClosedCaptionsButtonHelp,
         AXMediaMuteButton,
         AXMediaMuteButtonHelp,
+        AxMediaOverflowButton,
         AXMediaPauseButton,
         AXMediaPauseButtonHelp,
         AXMediaPlayButton,
@@ -119,6 +119,16 @@ struct WebLocalizedString {
         OtherMonthLabel,
         OtherTimeLabel,
         OtherWeekLabel,
+        OverflowMenuCaptions,
+        OverflowMenuCast,
+        OverflowMenuEnterFullscreen,
+        OverflowMenuExitFullscreen,
+        OverflowMenuStopCast,
+        OverflowMenuMute,
+        OverflowMenuUnmute,
+        OverflowMenuPlay,
+        OverflowMenuPause,
+        OverflowMenuDownload,
         // PlaceholderForDayOfMonthField is for day placeholder text, e.g.
         // "dd", for date field used in multiple fields "date", "datetime", and
         // "datetime-local" input UI instead of "--".
@@ -138,6 +148,8 @@ struct WebLocalizedString {
         SearchMenuRecentSearchesText, // Deprecated.
         SelectMenuListText,
         SubmitButtonDefaultLabel,
+        TextTracksNoLabel,
+        TextTracksOff,
         ThisMonthButtonLabel,
         ThisWeekButtonLabel,
         ValidationBadInputForNumber,

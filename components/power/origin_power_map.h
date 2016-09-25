@@ -6,10 +6,10 @@
 #define COMPONENTS_POWER_ORIGIN_POWER_MAP_H_
 
 #include <map>
+#include <memory>
 
 #include "base/callback_list.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "url/gurl.h"
 
@@ -38,15 +38,16 @@ class OriginPowerMap : public KeyedService {
   PercentOriginMap GetPercentOriginMap();
 
   // Adds a callback for the completion of a round of updates to |origin_map_|.
-  scoped_ptr<Subscription> AddPowerConsumptionUpdatedCallback(
+  std::unique_ptr<Subscription> AddPowerConsumptionUpdatedCallback(
       const base::Closure& callback);
 
   // Notifies observers to let them know that the origin power map has finished
   // updating for all origins this cycle.
   void OnAllOriginsUpdated();
 
-  // Clears all URLs out of the map.
-  void ClearOriginMap();
+  // Clears URLs out of the map. If |url_filter| is not null, only clears those
+  // URLs that are matched by it.
+  void ClearOriginMap(const base::Callback<bool(const GURL&)> url_filter);
 
  private:
   // OriginMap maps a URL to the amount of power consumed by the URL using the

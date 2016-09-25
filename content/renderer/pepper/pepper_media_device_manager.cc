@@ -7,7 +7,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/renderer/media/media_stream_dispatcher.h"
 #include "content/renderer/render_frame_impl.h"
 #include "ppapi/shared_impl/ppb_device_ref_shared.h"
@@ -57,17 +57,13 @@ int PepperMediaDeviceManager::EnumerateDevices(
 
 #if defined(ENABLE_WEBRTC)
   GetMediaStreamDispatcher()->EnumerateDevices(
-      request_id,
-      AsWeakPtr(),
+      request_id, AsWeakPtr(),
       PepperMediaDeviceManager::FromPepperDeviceType(type),
-      document_url.GetOrigin());
+      url::Origin(document_url.GetOrigin()));
 #else
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&PepperMediaDeviceManager::OnDevicesEnumerated,
-                 AsWeakPtr(),
-                 request_id,
-                 StreamDeviceInfoArray()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&PepperMediaDeviceManager::OnDevicesEnumerated,
+                            AsWeakPtr(), request_id, StreamDeviceInfoArray()));
 #endif
 
   return request_id;
@@ -106,17 +102,13 @@ int PepperMediaDeviceManager::OpenDevice(PP_DeviceType_Dev type,
 
 #if defined(ENABLE_WEBRTC)
   GetMediaStreamDispatcher()->OpenDevice(
-      request_id,
-      AsWeakPtr(),
-      device_id,
+      request_id, AsWeakPtr(), device_id,
       PepperMediaDeviceManager::FromPepperDeviceType(type),
-      document_url.GetOrigin());
+      url::Origin(document_url.GetOrigin()));
 #else
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&PepperMediaDeviceManager::OnDeviceOpenFailed,
-                 AsWeakPtr(),
-                 request_id));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&PepperMediaDeviceManager::OnDeviceOpenFailed,
+                            AsWeakPtr(), request_id));
 #endif
 
   return request_id;
@@ -200,6 +192,8 @@ void PepperMediaDeviceManager::OnDeviceOpenFailed(int request_id) {
   NotifyDeviceOpened(request_id, false, std::string());
 }
 
+void PepperMediaDeviceManager::OnDevicesChanged() {}
+
 // static
 MediaStreamType PepperMediaDeviceManager::FromPepperDeviceType(
     PP_DeviceType_Dev type) {
@@ -254,6 +248,10 @@ MediaStreamDispatcher* PepperMediaDeviceManager::GetMediaStreamDispatcher()
       static_cast<RenderFrameImpl*>(render_frame())->GetMediaStreamDispatcher();
   DCHECK(dispatcher);
   return dispatcher;
+}
+
+void PepperMediaDeviceManager::OnDestruct() {
+  delete this;
 }
 
 }  // namespace content

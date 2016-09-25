@@ -141,6 +141,10 @@ class BASE_EXPORT FeatureList {
   // struct, which is checked in builds with DCHECKs enabled.
   static bool IsEnabled(const Feature& feature);
 
+  // Returns the field trial associated with the given |feature|. Must only be
+  // called after the singleton instance has been registered via SetInstance().
+  static FieldTrial* GetFieldTrial(const Feature& feature);
+
   // Splits a comma-separated string containing feature names into a vector.
   static std::vector<std::string> SplitFeatureListString(
       const std::string& input);
@@ -161,8 +165,16 @@ class BASE_EXPORT FeatureList {
   // process. This should only be called once and |instance| must not be null.
   static void SetInstance(std::unique_ptr<FeatureList> instance);
 
-  // Clears the previously-registered singleton instance for tests.
-  static void ClearInstanceForTesting();
+  // Clears the previously-registered singleton instance for tests and returns
+  // the old instance.
+  // Note: Most tests should never call this directly. Instead consider using
+  // base::test::ScopedFeatureList.
+  static std::unique_ptr<FeatureList> ClearInstanceForTesting();
+
+  // Sets a given (initialized) |instance| to be the singleton feature list,
+  // for testing. Existing instance must be null. This is primarily intended
+  // to support base::test::ScopedFeatureList helper class.
+  static void RestoreInstanceForTesting(std::unique_ptr<FeatureList> instance);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(FeatureListTest, CheckFeatureIdentity);
@@ -199,6 +211,12 @@ class BASE_EXPORT FeatureList {
   // public FeatureList::IsEnabled() static function on the global singleton.
   // Requires the FeatureList to have already been fully initialized.
   bool IsFeatureEnabled(const Feature& feature);
+
+  // Returns the field trial associated with the given |feature|. This is
+  // invoked by the public FeatureList::GetFieldTrial() static function on the
+  // global singleton. Requires the FeatureList to have already been fully
+  // initialized.
+  base::FieldTrial* GetAssociatedFieldTrial(const Feature& feature);
 
   // For each feature name in comma-separated list of strings |feature_list|,
   // registers an override with the specified |overridden_state|. Also, will
@@ -237,10 +255,10 @@ class BASE_EXPORT FeatureList {
 
   // Whether this object has been fully initialized. This gets set to true as a
   // result of FinalizeInitialization().
-  bool initialized_;
+  bool initialized_ = false;
 
   // Whether this object has been initialized from command line.
-  bool initialized_from_command_line_;
+  bool initialized_from_command_line_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(FeatureList);
 };

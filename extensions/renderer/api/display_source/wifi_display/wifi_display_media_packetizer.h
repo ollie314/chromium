@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/move.h"
+#include "base/macros.h"
 #include "extensions/renderer/api/display_source/wifi_display/wifi_display_transport_stream_packetizer.h"
 
 namespace extensions {
@@ -21,7 +21,7 @@ class WiFiDisplayMediaDatagramPacket : public std::vector<uint8_t> {
   WiFiDisplayMediaDatagramPacket(WiFiDisplayMediaDatagramPacket&&);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN_WITH_MOVE_FOR_BIND(WiFiDisplayMediaDatagramPacket);
+  DISALLOW_COPY_AND_ASSIGN(WiFiDisplayMediaDatagramPacket);
 };
 
 // The WiFi Display media packetizer packetizes unit buffers to media datagram
@@ -38,7 +38,7 @@ class WiFiDisplayMediaPacketizer : public WiFiDisplayTransportStreamPacketizer {
 
   WiFiDisplayMediaPacketizer(
       const base::TimeDelta& delay_for_unit_time_stamps,
-      std::vector<WiFiDisplayElementaryStreamInfo> stream_infos,
+      const std::vector<WiFiDisplayElementaryStreamInfo>& stream_infos,
       const PacketizedCallback& on_packetized);
   ~WiFiDisplayMediaPacketizer() override;
 

@@ -26,7 +26,7 @@
 #ifndef File_h
 #define File_h
 
-#include "bindings/core/v8/UnionTypesCore.h"
+#include "bindings/core/v8/ArrayBufferOrArrayBufferViewOrBlobOrUSVString.h"
 #include "core/CoreExport.h"
 #include "core/fileapi/Blob.h"
 #include "platform/heap/Handle.h"
@@ -56,7 +56,7 @@ public:
     enum UserVisibility { IsUserVisible, IsNotUserVisible };
 
     // Constructor in File.idl
-    static File* create(const HeapVector<BlobOrStringOrArrayBufferViewOrArrayBuffer>&, const String& fileName, const FilePropertyBag&, ExceptionState&);
+    static File* create(ExecutionContext*, const HeapVector<ArrayBufferOrArrayBufferViewOrBlobOrUSVString>&, const String& fileName, const FilePropertyBag&, ExceptionState&);
 
     static File* create(const String& path, ContentTypeLookupPolicy policy = WellKnownContentTypes)
     {
@@ -65,17 +65,17 @@ public:
 
     static File* create(const String& name, double modificationTime, PassRefPtr<BlobDataHandle> blobDataHandle)
     {
-        return new File(name, modificationTime, blobDataHandle);
+        return new File(name, modificationTime, std::move(blobDataHandle));
     }
 
     // For deserialization.
-    static File* createFromSerialization(const String& path, const String& name, const String& relativePath, UserVisibility userVisibility, bool hasSnaphotData, uint64_t size, double lastModified, PassRefPtr<BlobDataHandle> blobDataHandle)
+    static File* createFromSerialization(const String& path, const String& name, const String& relativePath, UserVisibility userVisibility, bool hasSnapshotData, uint64_t size, double lastModified, PassRefPtr<BlobDataHandle> blobDataHandle)
     {
-        return new File(path, name, relativePath, userVisibility, hasSnaphotData, size, lastModified, blobDataHandle);
+        return new File(path, name, relativePath, userVisibility, hasSnapshotData, size, lastModified, std::move(blobDataHandle));
     }
     static File* createFromIndexedSerialization(const String& path, const String& name, uint64_t size, double lastModified, PassRefPtr<BlobDataHandle> blobDataHandle)
     {
-        return new File(path, name, String(), IsNotUserVisible, true, size, lastModified, blobDataHandle);
+        return new File(path, name, String(), IsNotUserVisible, true, size, lastModified, std::move(blobDataHandle));
     }
 
     static File* createWithRelativePath(const String& path, const String& relativePath);
@@ -149,7 +149,7 @@ public:
 private:
     File(const String& path, ContentTypeLookupPolicy, UserVisibility);
     File(const String& path, const String& name, ContentTypeLookupPolicy, UserVisibility);
-    File(const String& path, const String& name, const String& relativePath, UserVisibility, bool hasSnaphotData, uint64_t size, double lastModified, PassRefPtr<BlobDataHandle>);
+    File(const String& path, const String& name, const String& relativePath, UserVisibility, bool hasSnapshotData, uint64_t size, double lastModified, PassRefPtr<BlobDataHandle>);
     File(const String& name, double modificationTime, PassRefPtr<BlobDataHandle>);
     File(const String& name, const FileMetadata&, UserVisibility);
     File(const KURL& fileSystemURL, const FileMetadata&, UserVisibility);

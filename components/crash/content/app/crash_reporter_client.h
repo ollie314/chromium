@@ -12,9 +12,11 @@
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 
+#if !defined(OS_WIN)
 namespace base {
 class FilePath;
 }
+#endif
 
 #if defined(OS_MACOSX)
 // We don't want to directly include
@@ -66,11 +68,11 @@ class CrashReporterClient {
 
   // Returns true if an alternative location to store the minidump files was
   // specified. Returns true if |crash_dir| was set.
-  virtual bool GetAlternativeCrashDumpLocation(base::FilePath* crash_dir);
+  virtual bool GetAlternativeCrashDumpLocation(base::string16* crash_dir);
 
   // Returns a textual description of the product type and version to include
   // in the crash report.
-  virtual void GetProductNameAndVersion(const base::FilePath& exe_path,
+  virtual void GetProductNameAndVersion(const base::string16& exe_path,
                                         base::string16* product_name,
                                         base::string16* version,
                                         base::string16* special_build,
@@ -92,7 +94,7 @@ class CrashReporterClient {
   virtual bool GetDeferredUploadsSupported(bool is_per_user_install);
 
   // Returns true if the running binary is a per-user installation.
-  virtual bool GetIsPerUserInstall(const base::FilePath& exe_path);
+  virtual bool GetIsPerUserInstall(const base::string16& exe_path);
 
   // Returns true if larger crash dumps should be dumped.
   virtual bool GetShouldDumpLargerDumps(bool is_per_user_install);
@@ -100,15 +102,6 @@ class CrashReporterClient {
   // Returns the result code to return when breakpad failed to respawn a
   // crashed process.
   virtual int GetResultCodeRespawnFailed();
-
-  // Invoked when initializing the crash reporter in the browser process.
-  virtual void InitBrowserCrashDumpsRegKey();
-
-  // Invoked before attempting to write a minidump.
-  virtual void RecordCrashDumpAttempt(bool is_real_crash);
-
-  // Invoked with the results of a minidump attempt.
-  virtual void RecordCrashDumpAttemptResult(bool is_real_crash, bool succeeded);
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS)
@@ -128,8 +121,24 @@ class CrashReporterClient {
 #endif
 
   // The location where minidump files should be written. Returns true if
-  // |crash_dir| was set.
+  // |crash_dir| was set. Windows has to use base::string16 because this code
+  // needs to work in chrome_elf, where only kernel32.dll is allowed, and
+  // base::FilePath and its dependencies pull in other DLLs.
+#if defined(OS_WIN)
+  virtual bool GetCrashDumpLocation(base::string16* crash_dir);
+#else
   virtual bool GetCrashDumpLocation(base::FilePath* crash_dir);
+#endif
+
+  // The location where metrics files should be written. Returns true if
+  // |metrics_dir| was set. Windows has to use base::string16 because this code
+  // needs to work in chrome_elf, where only kernel32.dll is allowed, and
+  // base::FilePath and its dependencies pull in other DLLs.
+#if defined(OS_WIN)
+  virtual bool GetCrashMetricsLocation(base::string16* metrics_dir);
+#else
+  virtual bool GetCrashMetricsLocation(base::FilePath* metrics_dir);
+#endif
 
   // Register all of the potential crash keys that can be sent to the crash
   // reporting server. Returns the size of the union of all keys.
@@ -141,6 +150,11 @@ class CrashReporterClient {
   // Returns true if the user has given consent to collect stats.
   virtual bool GetCollectStatsConsent();
 
+  // Returns true if the client is currently in the chosen sample that will
+  // report stats and crashes. Crashes should only be reported if this function
+  // returns true and GetCollectStatsConsent returns true.
+  virtual bool GetCollectStatsInSample();
+
 #if defined(OS_WIN) || defined(OS_MACOSX)
   // Returns true if crash reporting is enforced via management policies. In
   // that case, |breakpad_enabled| is set to the value enforced by policies.
@@ -150,6 +164,10 @@ class CrashReporterClient {
 #if defined(OS_ANDROID)
   // Returns the descriptor key of the android minidump global descriptor.
   virtual int GetAndroidMinidumpDescriptor();
+
+  // Returns the file descriptor of the pipe used to inform apps of
+  // webview renderer crashes.
+  virtual int GetAndroidCrashSignalFD();
 
   // Returns true if breakpad microdumps should be enabled. This orthogonal to
   // the standard minidump uploader (which depends on the user consent).

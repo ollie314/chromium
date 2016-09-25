@@ -13,7 +13,7 @@
 
 #include "base/win/scoped_comptr.h"
 // chromoting_lib.h contains MIDL-generated declarations.
-#include "remoting/host/chromoting_lib.h"
+#include "remoting/host/win/chromoting_lib.h"
 #include "remoting/host/win/rdp_client.h"
 
 namespace remoting {
@@ -41,10 +41,12 @@ class __declspec(uuid(RDP_DESKTOP_SESSION_CLSID)) RdpDesktopSession
   ~RdpDesktopSession() override;
 
   // IRdpDesktopSession implementation.
-  STDMETHOD(Connect)(long width,
-                     long height,
-                     BSTR terminal_id,
-                     IRdpDesktopSessionEventHandler* event_handler) override;
+  STDMETHOD(Connect)
+  (long width,
+   long height,
+   BSTR terminal_id,
+   DWORD port_number,
+   IRdpDesktopSessionEventHandler* event_handler) override;
   STDMETHOD(Disconnect)() override;
   STDMETHOD(ChangeResolution)(long width, long height) override;
   STDMETHOD(InjectSas)() override;

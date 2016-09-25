@@ -2,20 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if !defined(OS_CHROMEOS)
-
 #include "chrome/browser/ui/webui/settings_utils.h"
 
 #include <stddef.h>
 
 #include "base/bind.h"
 #include "base/environment.h"
-#include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/nix/xdg_util.h"
 #include "base/process/launch.h"
-#include "base/strings/string_split.h"
-#include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "content/public/browser/browser_thread.h"
@@ -27,25 +22,24 @@ using content::BrowserThread;
 using content::OpenURLParams;
 using content::Referrer;
 
-namespace settings_utils {
+namespace {
 
 // Command used to configure GNOME 2 proxy settings.
-const char* kGNOME2ProxyConfigCommand[] = {"gnome-network-properties", NULL};
+const char* const kGNOME2ProxyConfigCommand[] = {"gnome-network-properties",
+                                                 nullptr};
 // In GNOME 3, we might need to run gnome-control-center instead. We try this
 // only after gnome-network-properties is not found, because older GNOME also
 // has this but it doesn't do the same thing. See below where we use it.
-const char* kGNOME3ProxyConfigCommand[] = {"gnome-control-center", "network",
-                                           NULL};
+const char* const kGNOME3ProxyConfigCommand[] = {"gnome-control-center",
+                                                 "network", nullptr};
 // KDE3, 4, and 5 are only slightly different, but incompatible. Go figure.
-const char* kKDE3ProxyConfigCommand[] = {"kcmshell", "proxy", NULL};
-const char* kKDE4ProxyConfigCommand[] = {"kcmshell4", "proxy", NULL};
-const char* kKDE5ProxyConfigCommand[] = {"kcmshell5", "proxy", NULL};
+const char* const kKDE3ProxyConfigCommand[] = {"kcmshell", "proxy", nullptr};
+const char* const kKDE4ProxyConfigCommand[] = {"kcmshell4", "proxy", nullptr};
+const char* const kKDE5ProxyConfigCommand[] = {"kcmshell5", "proxy", nullptr};
 
 // The URL for Linux proxy configuration help when not running under a
 // supported desktop environment.
 const char kLinuxProxyConfigUrl[] = "about:linux-proxy-config";
-
-namespace {
 
 // Show the proxy config URL in the given tab.
 void ShowLinuxProxyConfigUrl(int render_process_id, int render_view_id) {
@@ -54,9 +48,9 @@ void ShowLinuxProxyConfigUrl(int render_process_id, int render_view_id) {
   const char* name = base::nix::GetDesktopEnvironmentName(env.get());
   if (name)
     LOG(ERROR) << "Could not find " << name << " network settings in $PATH";
-  OpenURLParams params(
-      GURL(kLinuxProxyConfigUrl), Referrer(), NEW_FOREGROUND_TAB,
-      ui::PAGE_TRANSITION_LINK, false);
+  OpenURLParams params(GURL(kLinuxProxyConfigUrl), Referrer(),
+                       WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                       ui::PAGE_TRANSITION_LINK, false);
 
   content::WebContents* web_contents =
       tab_util::GetWebContentsByID(render_process_id, render_view_id);
@@ -65,34 +59,15 @@ void ShowLinuxProxyConfigUrl(int render_process_id, int render_view_id) {
 }
 
 // Start the given proxy configuration utility.
-bool StartProxyConfigUtil(const char* command[]) {
+bool StartProxyConfigUtil(const char* const command[]) {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   // base::LaunchProcess() returns true ("success") if the fork()
   // succeeds, but not necessarily the exec(). We'd like to be able to
   // use StartProxyConfigUtil() to search possible options and stop on
   // success, so we search $PATH first to predict whether the exec is
   // expected to succeed.
-  // TODO(mdm): this is a useful check, and is very similar to some
-  // code in proxy_config_service_linux.cc. It should probably be in
-  // base:: somewhere.
   std::unique_ptr<base::Environment> env(base::Environment::Create());
-  std::string path;
-  if (!env->GetVar("PATH", &path)) {
-    LOG(ERROR) << "No $PATH variable. Assuming no " << command[0] << ".";
-    return false;
-  }
-
-  bool found = false;
-  for (const base::StringPiece& cur_path :
-       base::SplitStringPiece(path, ":", base::KEEP_WHITESPACE,
-                              base::SPLIT_WANT_NONEMPTY)) {
-    base::FilePath file(cur_path);
-    if (base::PathExists(file.Append(command[0]))) {
-      found = true;
-      break;
-    }
-  }
-  if (!found)
+  if (!base::ExecutableExistsInPath(env.get(), command[0]))
     return false;
 
   std::vector<std::string> argv;
@@ -154,7 +129,9 @@ void DetectAndStartProxyConfigUtil(int render_process_id,
       base::Bind(&ShowLinuxProxyConfigUrl, render_process_id, render_view_id));
 }
 
-}  // anonymous namespace
+}  // namespace
+
+namespace settings_utils {
 
 void ShowNetworkProxySettings(content::WebContents* web_contents) {
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
@@ -164,5 +141,3 @@ void ShowNetworkProxySettings(content::WebContents* web_contents) {
 }
 
 }  // namespace settings_utils
-
-#endif  // !defined(OS_CHROMEOS)

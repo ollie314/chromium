@@ -12,8 +12,8 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/synchronization/lock.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "remoting/codec/video_decoder.h"
 #include "remoting/codec/video_decoder_verbatim.h"
 #include "remoting/codec/video_decoder_vpx.h"
@@ -294,6 +294,12 @@ TestVideoRenderer::~TestVideoRenderer() {
   video_decode_thread_->Stop();
 }
 
+bool TestVideoRenderer::Initialize(
+    const ClientContext& client_context,
+    protocol::FrameStatsConsumer* stats_consumer) {
+  return true;
+}
+
 void TestVideoRenderer::OnSessionConfig(const protocol::SessionConfig& config) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -312,6 +318,9 @@ protocol::VideoStub* TestVideoRenderer::GetVideoStub() {
 protocol::FrameConsumer* TestVideoRenderer::GetFrameConsumer() {
   DCHECK(thread_checker_.CalledOnValidThread());
   NOTREACHED();
+  return nullptr;
+}
+protocol::FrameStatsConsumer* TestVideoRenderer::GetFrameStatsConsumer() {
   return nullptr;
 }
 

@@ -10,7 +10,8 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/output/managed_memory_policy.h"
 #include "cc/output/output_surface_client.h"
@@ -49,7 +50,7 @@ class SkiaGpuTraceMemoryDump : public SkTraceMemoryDump {
                         const char* value_name,
                         const char* units,
                         uint64_t value) override {
-    auto dump = GetOrCreateAllocatorDump(dump_name);
+    auto* dump = GetOrCreateAllocatorDump(dump_name);
     dump->AddScalar(value_name, units, value);
   }
 
@@ -69,12 +70,12 @@ class SkiaGpuTraceMemoryDump : public SkTraceMemoryDump {
     base::trace_event::MemoryAllocatorDumpGuid guid;
 
     if (strcmp(backing_type, kGLTextureBackingType) == 0) {
-      guid = gfx::GetGLTextureClientGUIDForTracing(share_group_tracing_guid_,
-                                                   gl_id);
+      guid = gl::GetGLTextureClientGUIDForTracing(share_group_tracing_guid_,
+                                                  gl_id);
     } else if (strcmp(backing_type, kGLBufferBackingType) == 0) {
-      guid = gfx::GetGLBufferGUIDForTracing(tracing_process_id, gl_id);
+      guid = gl::GetGLBufferGUIDForTracing(tracing_process_id, gl_id);
     } else if (strcmp(backing_type, kGLRenderbufferBackingType) == 0) {
-      guid = gfx::GetGLRenderbufferGUIDForTracing(tracing_process_id, gl_id);
+      guid = gl::GetGLRenderbufferGUIDForTracing(tracing_process_id, gl_id);
     }
 
     if (!guid.empty()) {
@@ -104,7 +105,7 @@ class SkiaGpuTraceMemoryDump : public SkTraceMemoryDump {
   // Helper to create allocator dumps.
   base::trace_event::MemoryAllocatorDump* GetOrCreateAllocatorDump(
       const char* dump_name) {
-    auto dump = pmd_->GetAllocatorDump(dump_name);
+    auto* dump = pmd_->GetAllocatorDump(dump_name);
     if (!dump)
       dump = pmd_->CreateAllocatorDump(dump_name);
     return dump;
@@ -118,94 +119,25 @@ class SkiaGpuTraceMemoryDump : public SkTraceMemoryDump {
 
 }  // namespace
 
-OutputSurface::OutputSurface(
-    scoped_refptr<ContextProvider> context_provider,
-    scoped_refptr<ContextProvider> worker_context_provider,
-#if defined(ENABLE_VULKAN)
-    scoped_refptr<VulkanContextProvider> vulkan_context_provider,
-#endif
-    std::unique_ptr<SoftwareOutputDevice> software_device)
-    : client_(NULL),
-      context_provider_(std::move(context_provider)),
-      worker_context_provider_(std::move(worker_context_provider)),
-#if defined(ENABLE_VULKAN)
-      vulkan_context_provider_(vulkan_context_provider),
-#endif
-      software_device_(std::move(software_device)),
-      device_scale_factor_(-1),
-      has_alpha_(true),
-      external_stencil_test_enabled_(false),
-      weak_ptr_factory_(this) {
+OutputSurface::OutputSurface(scoped_refptr<ContextProvider> context_provider)
+    : context_provider_(std::move(context_provider)), weak_ptr_factory_(this) {
+  DCHECK(context_provider_);
   client_thread_checker_.DetachFromThread();
 }
 
-OutputSurface::OutputSurface(scoped_refptr<ContextProvider> context_provider)
-    : OutputSurface(std::move(context_provider),
-                    nullptr,
-#if defined(ENABLE_VULKAN)
-                    nullptr,
-#endif
-                    nullptr) {
-}
-
 OutputSurface::OutputSurface(
-    scoped_refptr<ContextProvider> context_provider,
-    scoped_refptr<ContextProvider> worker_context_provider)
-    : OutputSurface(std::move(context_provider),
-                    std::move(worker_context_provider),
-#if defined(ENABLE_VULKAN)
-                    nullptr,
-#endif
-                    nullptr) {
+    std::unique_ptr<SoftwareOutputDevice> software_device)
+    : software_device_(std::move(software_device)), weak_ptr_factory_(this) {
+  DCHECK(software_device_);
+  client_thread_checker_.DetachFromThread();
 }
 
-#if defined(ENABLE_VULKAN)
 OutputSurface::OutputSurface(
     scoped_refptr<VulkanContextProvider> vulkan_context_provider)
-    : OutputSurface(nullptr,
-                    nullptr,
-                    std::move(vulkan_context_provider),
-                    nullptr) {}
-#endif
-
-OutputSurface::OutputSurface(
-    std::unique_ptr<SoftwareOutputDevice> software_device)
-    : OutputSurface(nullptr,
-                    nullptr,
-#if defined(ENABLE_VULKAN)
-                    nullptr,
-#endif
-                    std::move(software_device)) {
-}
-
-OutputSurface::OutputSurface(
-    scoped_refptr<ContextProvider> context_provider,
-    std::unique_ptr<SoftwareOutputDevice> software_device)
-    : OutputSurface(std::move(context_provider),
-                    nullptr,
-#if defined(ENABLE_VULKAN)
-                    nullptr,
-#endif
-                    std::move(software_device)) {
-}
-
-// Forwarded to OutputSurfaceClient
-void OutputSurface::SetNeedsRedrawRect(const gfx::Rect& damage_rect) {
-  TRACE_EVENT0("cc", "OutputSurface::SetNeedsRedrawRect");
-  client_->SetNeedsRedrawRect(damage_rect);
-}
-
-void OutputSurface::ReclaimResources(const CompositorFrameAck* ack) {
-  client_->ReclaimResources(ack);
-}
-
-void OutputSurface::DidLoseOutputSurface() {
-  TRACE_EVENT0("cc", "OutputSurface::DidLoseOutputSurface");
-  client_->DidLoseOutputSurface();
-}
-
-void OutputSurface::SetExternalStencilTest(bool enabled) {
-  external_stencil_test_enabled_ = enabled;
+    : vulkan_context_provider_(vulkan_context_provider),
+      weak_ptr_factory_(this) {
+  DCHECK(vulkan_context_provider_);
+  client_thread_checker_.DetachFromThread();
 }
 
 OutputSurface::~OutputSurface() {
@@ -214,7 +146,7 @@ OutputSurface::~OutputSurface() {
 }
 
 bool OutputSurface::HasExternalStencilTest() const {
-  return external_stencil_test_enabled_;
+  return false;
 }
 
 void OutputSurface::ApplyExternalStencil() {}
@@ -234,13 +166,10 @@ bool OutputSurface::BindToClient(OutputSurfaceClient* client) {
     }
   }
 
-  if (!success)
-    client_ = NULL;
-
   // In certain cases, ThreadTaskRunnerHandle isn't set (Android Webview).
   // Don't register a dump provider in these cases.
   // TODO(ericrk): Get this working in Android Webview. crbug.com/517156
-  if (client_ && base::ThreadTaskRunnerHandle::IsSet()) {
+  if (base::ThreadTaskRunnerHandle::IsSet()) {
     // Now that we are on the context thread, register a dump provider with this
     // thread's task runner. This will overwrite any previous dump provider
     // registered.
@@ -248,6 +177,8 @@ bool OutputSurface::BindToClient(OutputSurfaceClient* client) {
         this, "OutputSurface", base::ThreadTaskRunnerHandle::Get());
   }
 
+  if (!success)
+    DetachFromClient();
   return success;
 }
 
@@ -269,7 +200,9 @@ void OutputSurface::DiscardBackbuffer() {
 
 void OutputSurface::Reshape(const gfx::Size& size,
                             float scale_factor,
+                            const gfx::ColorSpace& color_space,
                             bool has_alpha) {
+  device_color_space_ = color_space;
   if (size == surface_size_ && scale_factor == device_scale_factor_ &&
       has_alpha == has_alpha_)
     return;
@@ -302,14 +235,9 @@ void OutputSurface::OnSwapBuffersComplete() {
   client_->DidSwapBuffersComplete();
 }
 
-void OutputSurface::SetMemoryPolicy(const ManagedMemoryPolicy& policy) {
-  TRACE_EVENT1("cc", "OutputSurface::SetMemoryPolicy",
-               "bytes_limit_when_visible", policy.bytes_limit_when_visible);
-  // Just ignore the memory manager when it says to set the limit to zero
-  // bytes. This will happen when the memory manager thinks that the renderer
-  // is not visible (which the renderer knows better).
-  if (policy.bytes_limit_when_visible)
-    client_->SetMemoryPolicy(policy);
+void OutputSurface::DidReceiveTextureInUseResponses(
+    const gpu::TextureInUseResponses& responses) {
+  client_->DidReceiveTextureInUseResponses(responses);
 }
 
 OverlayCandidateValidator* OutputSurface::GetOverlayCandidateValidator() const {
@@ -322,25 +250,6 @@ bool OutputSurface::IsDisplayedAsOverlayPlane() const {
 
 unsigned OutputSurface::GetOverlayTextureId() const {
   return 0;
-}
-
-void OutputSurface::SetWorkerContextShouldAggressivelyFreeResources(
-    bool aggressively_free_resources) {
-  TRACE_EVENT1("cc",
-               "OutputSurface::SetWorkerContextShouldAggressivelyFreeResources",
-               "aggressively_free_resources", aggressively_free_resources);
-  if (auto* context_provider = worker_context_provider()) {
-    ContextProvider::ScopedContextLock scoped_context(context_provider);
-
-    if (aggressively_free_resources) {
-      context_provider->DeleteCachedResources();
-    }
-
-    if (auto* context_support = context_provider->ContextSupport()) {
-      context_support->SetAggressivelyFreeResources(
-          aggressively_free_resources);
-    }
-  }
 }
 
 bool OutputSurface::SurfaceIsSuspendForRecycle() const {
@@ -357,16 +266,6 @@ bool OutputSurface::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
       gr_context->dumpMemoryStatistics(&trace_memory_dump);
     }
   }
-  if (auto* context_provider = worker_context_provider()) {
-    ContextProvider::ScopedContextLock scoped_context(context_provider);
-
-    if (auto* gr_context = context_provider->GrContext()) {
-      SkiaGpuTraceMemoryDump trace_memory_dump(
-          pmd, context_provider->ContextSupport()->ShareGroupTracingGUID());
-      gr_context->dumpMemoryStatistics(&trace_memory_dump);
-    }
-  }
-
   return true;
 }
 
@@ -386,6 +285,11 @@ void OutputSurface::DetachFromClientInternal() {
   context_provider_ = nullptr;
   client_ = nullptr;
   weak_ptr_factory_.InvalidateWeakPtrs();
+}
+
+void OutputSurface::DidLoseOutputSurface() {
+  TRACE_EVENT0("cc", "OutputSurface::DidLoseOutputSurface");
+  client_->DidLoseOutputSurface();
 }
 
 }  // namespace cc

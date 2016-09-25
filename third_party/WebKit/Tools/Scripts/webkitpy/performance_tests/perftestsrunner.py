@@ -37,7 +37,6 @@ import datetime
 
 from webkitpy.common import find_files
 from webkitpy.common.checkout.scm.detection import SCMDetector
-from webkitpy.common.config.urls import view_source_url
 from webkitpy.common.host import Host
 from webkitpy.common.net.file_uploader import FileUploader
 from webkitpy.performance_tests.perftest import PerfTestFactory
@@ -81,6 +80,8 @@ class PerfTestsRunner(object):
                                  help='Set the configuration to Debug'),
             optparse.make_option('--release', action='store_const', const='Release', dest="configuration",
                                  help='Set the configuration to Release'),
+            optparse.make_option('-t', '--target', dest='configuration',
+                                 help='Specify the target build subdirectory under src/out/'),
             optparse.make_option("--platform",
                                  help="Specify port/platform being tested (e.g. mac)"),
             optparse.make_option("--chromium",
@@ -92,9 +93,9 @@ class PerfTestsRunner(object):
             optparse.make_option("--build-number",
                                  help=("The build number of the builder running this script.")),
             optparse.make_option("--build", dest="build", action="store_true", default=True,
-                                 help="Check to ensure the DumpRenderTree build is up-to-date (default)."),
+                                 help="Check to ensure the DumpRenderTree build is up to date (default)."),
             optparse.make_option("--no-build", dest="build", action="store_false",
-                                 help="Don't check to see if the DumpRenderTree build is up-to-date."),
+                                 help="Don't check to see if the DumpRenderTree build is up to date."),
             optparse.make_option("--build-directory",
                                  help="Path to the directory under which build files are kept (should not include configuration)"),
             optparse.make_option("--time-out-ms", default=600 * 1000,
@@ -150,14 +151,15 @@ class PerfTestsRunner(object):
                 if filesystem.exists(filesystem.join(self._base_path, relpath)):
                     paths.append(filesystem.normpath(relpath))
                 else:
-                    _log.warn('Path was not found:' + arg)
+                    _log.warning('Path was not found:' + arg)
 
         skipped_directories = set(['.svn', 'resources'])
         test_files = find_files.find(filesystem, self._base_path, paths, skipped_directories, _is_test_file)
         tests = []
         for path in test_files:
             relative_path = filesystem.relpath(path, self._base_path).replace('\\', '/')
-            if self._options.use_skipped_list and self._port.skips_perf_test(relative_path) and filesystem.normpath(relative_path) not in paths:
+            if self._options.use_skipped_list and self._port.skips_perf_test(
+                    relative_path) and filesystem.normpath(relative_path) not in paths:
                 continue
             test = PerfTestFactory.create_perf_test(self._port, relative_path, path,
                                                     test_runner_count=self._options.test_runner_count)
@@ -190,16 +192,12 @@ class PerfTestsRunner(object):
 
         run_count = 0
         repeat = self._options.repeat
-        while (run_count < repeat):
+        while run_count < repeat:
             run_count += 1
 
             tests = self._collect_tests()
             runs = ' (Run %d of %d)' % (run_count, repeat) if repeat > 1 else ''
-            _log.info("Running %d tests%s" % (len(tests), runs))
-
-            for test in tests:
-                if not test.prepare(self._options.time_out_ms):
-                    return self.EXIT_CODE_BAD_PREPARATION
+            _log.info("Running %d tests%s", len(tests), runs)
 
             try:
                 if needs_http:
@@ -291,7 +289,8 @@ class PerfTestsRunner(object):
                 path = test.test_name_without_file_extension().split('/')
                 for i in range(0, len(path)):
                     is_last_token = i + 1 == len(path)
-                    url = view_source_url('PerformanceTests/' + (test.test_name() if is_last_token else '/'.join(path[0:i + 1])))
+                    url = self.view_source_url(
+                        'PerformanceTests/' + (test.test_name() if is_last_token else '/'.join(path[0:i + 1])))
                     tests.setdefault(path[i], {'url': url})
                     current_test = tests[path[i]]
                     if is_last_token:
@@ -305,12 +304,16 @@ class PerfTestsRunner(object):
         return contents
 
     @staticmethod
+    def view_source_url(path_from_blink):
+        return 'https://chromium.googlesource.com/chromium/src/+/master/third_party/WebKit/%s' % path_from_blink
+
+    @staticmethod
     def _datetime_in_ES5_compatible_iso_format(datetime):
         return datetime.strftime('%Y-%m-%dT%H:%M:%S.%f')
 
     def _merge_slave_config_json(self, slave_config_json_path, contents):
         if not self._host.filesystem.isfile(slave_config_json_path):
-            _log.error("Missing slave configuration JSON file: %s" % slave_config_json_path)
+            _log.error("Missing slave configuration JSON file: %s", slave_config_json_path)
             return None
 
         try:
@@ -319,8 +322,8 @@ class PerfTestsRunner(object):
             for key in slave_config:
                 contents['builder' + key.capitalize()] = slave_config[key]
             return contents
-        except Exception, error:
-            _log.error("Failed to merge slave configuration JSON file %s: %s" % (slave_config_json_path, error))
+        except Exception as error:
+            _log.error("Failed to merge slave configuration JSON file %s: %s", slave_config_json_path, error)
         return None
 
     def _merge_outputs_if_needed(self, output_json_path, output):
@@ -329,8 +332,8 @@ class PerfTestsRunner(object):
         try:
             existing_outputs = json.loads(self._host.filesystem.read_text_file(output_json_path))
             return existing_outputs + [output]
-        except Exception, error:
-            _log.error("Failed to merge output JSON file %s: %s" % (output_json_path, error))
+        except Exception as error:
+            _log.error("Failed to merge output JSON file %s: %s", output_json_path, error)
         return None
 
     def _upload_json(self, test_results_server, json_path, host_path="/api/report", file_uploader=FileUploader):
@@ -338,8 +341,8 @@ class PerfTestsRunner(object):
         uploader = file_uploader(url, 120)
         try:
             response = uploader.upload_single_text_file(self._host.filesystem, 'application/json', json_path)
-        except Exception, error:
-            _log.error("Failed to upload JSON file to %s in 120s: %s" % (url, error))
+        except Exception as error:
+            _log.error("Failed to upload JSON file to %s in 120s: %s", url, error)
             return False
 
         response_body = [line.strip('\n') for line in response]
@@ -347,25 +350,24 @@ class PerfTestsRunner(object):
             try:
                 parsed_response = json.loads('\n'.join(response_body))
             except:
-                _log.error("Uploaded JSON to %s but got a bad response:" % url)
+                _log.error("Uploaded JSON to %s but got a bad response:", url)
                 for line in response_body:
                     _log.error(line)
                 return False
             if parsed_response.get('status') != 'OK':
-                _log.error("Uploaded JSON to %s but got an error:" % url)
+                _log.error("Uploaded JSON to %s but got an error:", url)
                 _log.error(json.dumps(parsed_response, indent=4))
                 return False
 
-        _log.info("JSON file uploaded to %s." % url)
+        _log.info("JSON file uploaded to %s.", url)
         return True
 
     def _run_tests_set(self, tests):
-        result_count = len(tests)
         failures = 0
         self._results = []
 
         for i, test in enumerate(tests):
-            _log.info('Running %s (%d of %d)' % (test.test_name(), i + 1, len(tests)))
+            _log.info('Running %s (%d of %d)', test.test_name(), i + 1, len(tests))
             start_time = time.time()
             metrics = test.run(self._options.time_out_ms)
             if metrics:
@@ -374,7 +376,7 @@ class PerfTestsRunner(object):
                 failures += 1
                 _log.error('FAILED')
 
-            _log.info('Finished: %f s' % (time.time() - start_time))
+            _log.info('Finished: %f s', time.time() - start_time)
             _log.info('')
 
         return failures

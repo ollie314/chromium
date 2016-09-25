@@ -31,7 +31,6 @@
 #include "core/inspector/InspectorInputAgent.h"
 
 #include "core/frame/FrameView.h"
-#include "core/frame/LocalFrame.h"
 #include "core/input/EventHandler.h"
 #include "core/inspector/InspectedFrames.h"
 #include "core/page/ChromeClient.h"
@@ -43,7 +42,6 @@
 #include "platform/geometry/IntPoint.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/IntSize.h"
-#include "platform/inspector_protocol/Values.h"
 #include "wtf/CurrentTime.h"
 
 namespace {
@@ -125,8 +123,7 @@ void ConvertInspectorPoint(blink::LocalFrame* frame, const blink::IntPoint& poin
 namespace blink {
 
 InspectorInputAgent::InspectorInputAgent(InspectedFrames* inspectedFrames)
-    : InspectorBaseAgent<InspectorInputAgent, protocol::Frontend::Input>("Input")
-    , m_inspectedFrames(inspectedFrames)
+    : m_inspectedFrames(inspectedFrames)
 {
 }
 
@@ -134,7 +131,7 @@ InspectorInputAgent::~InspectorInputAgent()
 {
 }
 
-void InspectorInputAgent::dispatchTouchEvent(ErrorString* error, const String& type, PassOwnPtr<protocol::Array<protocol::Input::TouchPoint>> touchPoints, const protocol::Maybe<int>& modifiers, const protocol::Maybe<double>& timestamp)
+void InspectorInputAgent::dispatchTouchEvent(ErrorString* error, const String& type, std::unique_ptr<protocol::Array<protocol::Input::TouchPoint>> touchPoints, const protocol::Maybe<int>& modifiers, const protocol::Maybe<double>& timestamp)
 {
     PlatformEvent::EventType convertedType;
     if (type == "touchStart") {

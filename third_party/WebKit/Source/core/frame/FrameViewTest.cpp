@@ -15,9 +15,10 @@
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/paint/PaintArtifact.h"
 #include "platform/heap/Handle.h"
+#include "platform/testing/RuntimeEnabledFeaturesTestHelpers.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/OwnPtr.h"
+#include <memory>
 
 using testing::_;
 using testing::AnyNumber;
@@ -30,7 +31,6 @@ public:
     MockChromeClient() : m_hasScheduledAnimation(false) { }
 
     // ChromeClient
-    MOCK_METHOD1(didPaint, void(const PaintArtifact&));
     MOCK_METHOD2(attachRootGraphicsLayer, void(GraphicsLayer*, LocalFrame* localRoot));
     MOCK_METHOD2(setToolTip, void(const String&, TextDirection));
 
@@ -38,13 +38,20 @@ public:
     bool m_hasScheduledAnimation;
 };
 
-class FrameViewTestBase : public testing::Test {
+typedef bool TestParamRootLayerScrolling;
+class FrameViewTest
+    : public testing::WithParamInterface<TestParamRootLayerScrolling>
+    , private ScopedRootLayerScrollingForTest
+    , public testing::Test {
 protected:
-    FrameViewTestBase()
-        : m_chromeClient(new MockChromeClient)
-    { }
+    FrameViewTest()
+        : ScopedRootLayerScrollingForTest(GetParam())
+        , m_chromeClient(new MockChromeClient)
+    {
+        EXPECT_CALL(chromeClient(), attachRootGraphicsLayer(_, _)).Times(AnyNumber());
+    }
 
-    ~FrameViewTestBase()
+    ~FrameViewTest()
     {
         testing::Mock::VerifyAndClearExpectations(&chromeClient());
     }
@@ -63,63 +70,12 @@ protected:
 
 private:
     Persistent<MockChromeClient> m_chromeClient;
-    OwnPtr<DummyPageHolder> m_pageHolder;
+    std::unique_ptr<DummyPageHolder> m_pageHolder;
 };
 
-class FrameViewTest : public FrameViewTestBase {
-protected:
-    FrameViewTest()
-    {
-        EXPECT_CALL(chromeClient(), attachRootGraphicsLayer(_, _)).Times(AnyNumber());
-    }
-};
+INSTANTIATE_TEST_CASE_P(All, FrameViewTest, ::testing::Bool());
 
-class FrameViewSlimmingPaintV2Test : public FrameViewTestBase {
-protected:
-    FrameViewSlimmingPaintV2Test()
-    {
-        // We shouldn't attach a root graphics layer. In this mode, that's not
-        // our responsibility.
-        EXPECT_CALL(chromeClient(), attachRootGraphicsLayer(_, _)).Times(0);
-    }
-
-    void SetUp() override
-    {
-        RuntimeEnabledFeatures::setSlimmingPaintV2Enabled(true);
-        FrameViewTestBase::SetUp();
-        document().view()->setParentVisible(true);
-        document().view()->setSelfVisible(true);
-    }
-
-    void TearDown() override
-    {
-        m_featuresBackup.restore();
-    }
-
-private:
-    RuntimeEnabledFeatures::Backup m_featuresBackup;
-};
-
-// These tests ensure that FrameView informs the ChromeClient of changes to the
-// paint artifact so that they can be shown to the user (e.g. via the
-// compositor).
-TEST_F(FrameViewSlimmingPaintV2Test, PaintOnce)
-{
-    EXPECT_CALL(chromeClient(), didPaint(_));
-    document().body()->setInnerHTML("Hello world", ASSERT_NO_EXCEPTION);
-    document().view()->updateAllLifecyclePhases();
-}
-
-TEST_F(FrameViewSlimmingPaintV2Test, PaintAndRepaint)
-{
-    EXPECT_CALL(chromeClient(), didPaint(_)).Times(2);
-    document().body()->setInnerHTML("Hello", ASSERT_NO_EXCEPTION);
-    document().view()->updateAllLifecyclePhases();
-    document().body()->setInnerHTML("Hello world", ASSERT_NO_EXCEPTION);
-    document().view()->updateAllLifecyclePhases();
-}
-
-TEST_F(FrameViewTest, SetPaintInvalidationDuringUpdateAllLifecyclePhases)
+TEST_P(FrameViewTest, SetPaintInvalidationDuringUpdateAllLifecyclePhases)
 {
     document().body()->setInnerHTML("<div id='a' style='color: blue'>A</div>", ASSERT_NO_EXCEPTION);
     document().view()->updateAllLifecyclePhases();
@@ -129,7 +85,7 @@ TEST_F(FrameViewTest, SetPaintInvalidationDuringUpdateAllLifecyclePhases)
     EXPECT_FALSE(chromeClient().m_hasScheduledAnimation);
 }
 
-TEST_F(FrameViewTest, SetPaintInvalidationOutOfUpdateAllLifecyclePhases)
+TEST_P(FrameViewTest, SetPaintInvalidationOutOfUpdateAllLifecyclePhases)
 {
     document().body()->setInnerHTML("<div id='a' style='color: blue'>A</div>", ASSERT_NO_EXCEPTION);
     document().view()->updateAllLifecyclePhases();
@@ -146,13 +102,13 @@ TEST_F(FrameViewTest, SetPaintInvalidationOutOfUpdateAllLifecyclePhases)
 
 // If we don't hide the tooltip on scroll, it can negatively impact scrolling
 // performance. See crbug.com/586852 for details.
-TEST_F(FrameViewTest, HideTooltipWhenScrollPositionChanges)
+TEST_P(FrameViewTest, HideTooltipWhenScrollPositionChanges)
 {
     document().body()->setInnerHTML("<div style='width:1000px;height:1000px'></div>", ASSERT_NO_EXCEPTION);
     document().view()->updateAllLifecyclePhases();
 
     EXPECT_CALL(chromeClient(), setToolTip(String(), _));
-    document().view()->setScrollPosition(DoublePoint(1, 1), UserScroll);
+    document().view()->layoutViewportScrollableArea()->setScrollPosition(DoublePoint(1, 1), UserScroll);
 }
 
 } // namespace

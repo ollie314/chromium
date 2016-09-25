@@ -35,12 +35,8 @@ static const String& errorReasonToString(WebApplicationCacheHost::ErrorReason re
     case WebApplicationCacheHost::UnknownError:
         return errorUnknown;
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return emptyString();
-}
-
-ApplicationCacheErrorEvent::ApplicationCacheErrorEvent()
-{
 }
 
 ApplicationCacheErrorEvent::ApplicationCacheErrorEvent(WebApplicationCacheHost::ErrorReason reason, const String& url, int status, const String& message)

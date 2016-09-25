@@ -31,7 +31,7 @@ class SkBitmap;
 namespace base {
 class File;
 class Lock;
-class RefCountedStaticMemory;
+class RefCountedMemory;
 }
 
 namespace ui {
@@ -54,13 +54,11 @@ class UI_BASE_EXPORT ResourceBundle {
   // client code providing their own constant with the desired font size delta.
   enum FontStyle {
     SmallFont,
-    SmallBoldFont,
     BaseFont,
     BoldFont,
     MediumFont,
     MediumBoldFont,
     LargeFont,
-    LargeBoldFont,
   };
 
   enum LoadResources {
@@ -96,9 +94,9 @@ class UI_BASE_EXPORT ResourceBundle {
     // default resource.
     virtual gfx::Image GetNativeImageNamed(int resource_id) = 0;
 
-    // Return a static memory resource or NULL to attempt retrieval of the
+    // Return a ref counted memory resource or NULL to attempt retrieval of the
     // default resource.
-    virtual base::RefCountedStaticMemory* LoadDataResourceBytes(
+    virtual base::RefCountedMemory* LoadDataResourceBytes(
         int resource_id,
         ScaleFactor scale_factor) = 0;
 
@@ -177,15 +175,6 @@ class UI_BASE_EXPORT ResourceBundle {
   void AddOptionalDataPackFromPath(const base::FilePath& path,
                                    ScaleFactor scale_factor);
 
-  // The same as AddDataPackFromPath() and AddOptionalDataPackFromPath(),
-  // except the data pack is flagged as containing only material design assets.
-  // TODO(tdanderson): These methods are temporary and should be removed after
-  //                   the transition to material design in the browser UI.
-  void AddMaterialDesignDataPackFromPath(const base::FilePath& path,
-                                         ScaleFactor scale_factor);
-  void AddOptionalMaterialDesignDataPackFromPath(const base::FilePath& path,
-                                                 ScaleFactor scale_factor);
-
   // Changes the locale for an already-initialized ResourceBundle, returning the
   // name of the newly-loaded locale.  Future calls to get strings will return
   // the strings for this new locale.  This has no effect on existing or future
@@ -216,19 +205,19 @@ class UI_BASE_EXPORT ResourceBundle {
   gfx::Image& GetNativeImageNamed(int resource_id);
 
   // Loads the raw bytes of a scale independent data resource.
-  base::RefCountedStaticMemory* LoadDataResourceBytes(int resource_id) const;
+  base::RefCountedMemory* LoadDataResourceBytes(int resource_id) const;
 
   // Loads the raw bytes of a data resource nearest the scale factor
   // |scale_factor| into |bytes|, without doing any processing or
   // interpretation of the resource. Use ResourceHandle::SCALE_FACTOR_NONE
   // for scale independent image resources (such as wallpaper).
   // Returns NULL if we fail to read the resource.
-  base::RefCountedStaticMemory* LoadDataResourceBytesForScale(
+  base::RefCountedMemory* LoadDataResourceBytesForScale(
       int resource_id,
       ScaleFactor scale_factor) const;
 
   // Return the contents of a scale independent resource in a
-  // StringPiece given the resource id
+  // StringPiece given the resource id.
   base::StringPiece GetRawDataResource(int resource_id) const;
 
   // Return the contents of a resource in a StringPiece given the resource id
@@ -242,16 +231,22 @@ class UI_BASE_EXPORT ResourceBundle {
   // string if the message_id is not found.
   base::string16 GetLocalizedString(int message_id);
 
+  // Get a localized resource (for example, localized image logo) given a
+  // resource id.
+  base::RefCountedMemory* LoadLocalizedResourceBytes(int resource_id);
+
   // Returns a font list derived from the platform-specific "Base" font list.
   // The result is always cached and exists for the lifetime of the process.
   const gfx::FontList& GetFontListWithDelta(
       int size_delta,
-      gfx::Font::FontStyle style = gfx::Font::NORMAL);
+      gfx::Font::FontStyle style = gfx::Font::NORMAL,
+      gfx::Font::Weight weight = gfx::Font::Weight::NORMAL);
 
   // Returns the primary font from the FontList given by GetFontListWithDelta().
   const gfx::Font& GetFontWithDelta(
       int size_delta,
-      gfx::Font::FontStyle style = gfx::Font::NORMAL);
+      gfx::Font::FontStyle style = gfx::Font::NORMAL,
+      gfx::Font::Weight weight = gfx::Font::Weight::NORMAL);
 
   // Deprecated. Returns fonts using hard-coded size deltas implied by |style|.
   const gfx::FontList& GetFontList(FontStyle style);
@@ -285,13 +280,6 @@ class UI_BASE_EXPORT ResourceBundle {
   // Returns SCALE_FACTOR_100P if no resource is loaded.
   ScaleFactor GetMaxScaleFactor() const;
 
-#if defined(OS_MACOSX)
-  // Loads Material Design data packs and makes them the first items in
-  // |data_packs_|.
-  void LoadMaterialDesignResources();
-#endif
-
- protected:
   // Returns true if |scale_factor| is supported by this platform.
   static bool IsScaleFactorSupported(ScaleFactor scale_factor);
 
@@ -299,12 +287,6 @@ class UI_BASE_EXPORT ResourceBundle {
   FRIEND_TEST_ALL_PREFIXES(ResourceBundleTest, DelegateGetPathForLocalePack);
   FRIEND_TEST_ALL_PREFIXES(ResourceBundleTest, DelegateGetImageNamed);
   FRIEND_TEST_ALL_PREFIXES(ResourceBundleTest, DelegateGetNativeImageNamed);
-  FRIEND_TEST_ALL_PREFIXES(ResourceBundleImageTest,
-                           CountMaterialDesignDataPacksInResourceBundle);
-  FRIEND_TEST_ALL_PREFIXES(ResourceBundleMacImageTest,
-                           CheckImageFromMaterialDesign);
-  FRIEND_TEST_ALL_PREFIXES(ChromeBrowserMainMacBrowserTest,
-                           MDResourceAccess);
 
   friend class ResourceBundleMacImageTest;
   friend class ResourceBundleImageTest;
@@ -313,6 +295,8 @@ class UI_BASE_EXPORT ResourceBundle {
 
   class ResourceBundleImageSource;
   friend class ResourceBundleImageSource;
+
+  struct FontKey;
 
   typedef base::hash_map<int, base::string16> IdToStringMap;
 
@@ -329,19 +313,14 @@ class UI_BASE_EXPORT ResourceBundle {
   // Load the main resources.
   void LoadCommonResources();
 
-  // Loads the resource paks chrome_{100,200}_percent.pak. Also loads the
-  // resource paks chrome_material_{100,200}_percent.pak contaning top
-  // chrome material design assets if the runtime flag is enabled.
+  // Loads the resource paks chrome_{100,200}_percent.pak.
   void LoadChromeResources();
 
   // Implementation for the public methods which add a DataPack from a path. If
-  // |optional| is false, an error is logged on failure to load. Sets the
-  // member |has_only_material_design_assets_| on the created DataPack to the
-  // value of |has_only_material_assets|.
+  // |optional| is false, an error is logged on failure to load.
   void AddDataPackFromPathInternal(const base::FilePath& path,
                                    ScaleFactor scale_factor,
-                                   bool optional,
-                                   bool has_only_material_assets);
+                                   bool optional);
 
   // Inserts |data_pack| to |data_pack_| and updates |max_scale_factor_|
   // accordingly.
@@ -433,11 +412,13 @@ class UI_BASE_EXPORT ResourceBundle {
   // platform base font size, plus style, to the FontList. Cached to avoid
   // repeated GDI creation/destruction and font derivation.
   // Must be accessed only while holding |images_and_fonts_lock_|.
-  std::map<std::pair<int, gfx::Font::FontStyle>, gfx::FontList> font_cache_;
+  std::map<FontKey, gfx::FontList> font_cache_;
 
   base::FilePath overridden_pak_path_;
 
   IdToStringMap overridden_locale_strings_;
+
+  bool is_test_resources_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceBundle);
 };

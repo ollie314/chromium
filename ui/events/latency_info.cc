@@ -14,6 +14,7 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 
 namespace {
 
@@ -34,9 +35,11 @@ const char* GetComponentName(ui::LatencyComponentType type) {
     CASE_TYPE(INPUT_EVENT_LATENCY_ACK_RWH_COMPONENT);
     CASE_TYPE(WINDOW_SNAPSHOT_FRAME_NUMBER_COMPONENT);
     CASE_TYPE(TAB_SHOW_COMPONENT);
+    CASE_TYPE(INPUT_EVENT_LATENCY_RENDERER_MAIN_COMPONENT);
     CASE_TYPE(INPUT_EVENT_LATENCY_RENDERER_SWAP_COMPONENT);
     CASE_TYPE(INPUT_EVENT_BROWSER_RECEIVED_RENDERER_SWAP_COMPONENT);
     CASE_TYPE(INPUT_EVENT_GPU_SWAP_BUFFER_COMPONENT);
+    CASE_TYPE(INPUT_EVENT_LATENCY_GENERATE_SCROLL_UPDATE_FROM_MOUSE_WHEEL);
     CASE_TYPE(INPUT_EVENT_LATENCY_TERMINATED_MOUSE_COMPONENT);
     CASE_TYPE(INPUT_EVENT_LATENCY_TERMINATED_MOUSE_WHEEL_COMPONENT);
     CASE_TYPE(INPUT_EVENT_LATENCY_TERMINATED_KEYBOARD_COMPONENT);
@@ -117,7 +120,7 @@ LatencyInfoTracedValue::LatencyInfoTracedValue(base::Value* value)
     : value_(value) {
 }
 
-const char kTraceCategoriesForAsyncEvents[] = "benchmark,latencyInfo";
+const char kTraceCategoriesForAsyncEvents[] = "benchmark,latencyInfo,rail";
 
 struct LatencyInfoEnabledInitializer {
   LatencyInfoEnabledInitializer() :
@@ -135,17 +138,14 @@ static base::LazyInstance<LatencyInfoEnabledInitializer>::Leaky
 
 namespace ui {
 
-LatencyInfo::InputCoordinate::InputCoordinate() : x(0), y(0) {
-}
+LatencyInfo::LatencyInfo() : LatencyInfo(SourceEventType::UNKNOWN) {}
 
-LatencyInfo::InputCoordinate::InputCoordinate(float x, float y) : x(x), y(y) {
-}
-
-LatencyInfo::LatencyInfo()
+LatencyInfo::LatencyInfo(SourceEventType type)
     : input_coordinates_size_(0),
       trace_id_(-1),
       coalesced_(false),
-      terminated_(false) {}
+      terminated_(false),
+      source_event_type_(type) {}
 
 LatencyInfo::LatencyInfo(const LatencyInfo& other) = default;
 
@@ -154,7 +154,8 @@ LatencyInfo::~LatencyInfo() {}
 LatencyInfo::LatencyInfo(int64_t trace_id, bool terminated)
     : input_coordinates_size_(0),
       trace_id_(trace_id),
-      terminated_(terminated) {}
+      terminated_(terminated),
+      source_event_type_(SourceEventType::UNKNOWN) {}
 
 bool LatencyInfo::Verify(const std::vector<LatencyInfo>& latency_info,
                          const char* referring_msg) {
@@ -242,16 +243,16 @@ void LatencyInfo::AddLatencyNumberWithTimestampImpl(
       // originally created, e.g. the timestamp of its ORIGINAL/UI_COMPONENT,
       // not when we actually issue the ASYNC_BEGIN trace event.
       LatencyComponent begin_component;
-      int64_t ts = 0;
+      base::TimeTicks ts;
       if (FindLatency(INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT,
                       0,
                       &begin_component) ||
           FindLatency(INPUT_EVENT_LATENCY_UI_COMPONENT,
                       0,
                       &begin_component)) {
-        ts = begin_component.event_time.ToInternalValue();
+        ts = begin_component.event_time;
       } else {
-        ts = base::TimeTicks::Now().ToInternalValue();
+        ts = base::TimeTicks::Now();
       }
 
       if (trace_name_str) {
@@ -341,9 +342,9 @@ LatencyInfo::CoordinatesAsTraceableData() {
   for (size_t i = 0; i < input_coordinates_size_; i++) {
     std::unique_ptr<base::DictionaryValue> coordinate_pair(
         new base::DictionaryValue());
-    coordinate_pair->SetDouble("x", input_coordinates_[i].x);
-    coordinate_pair->SetDouble("y", input_coordinates_[i].y);
-    coordinates->Append(coordinate_pair.release());
+    coordinate_pair->SetDouble("x", input_coordinates_[i].x());
+    coordinate_pair->SetDouble("y", input_coordinates_[i].y());
+    coordinates->Append(std::move(coordinate_pair));
   }
   return LatencyInfoTracedValue::FromValue(std::move(coordinates));
 }
@@ -363,17 +364,14 @@ bool LatencyInfo::FindLatency(LatencyComponentType type,
 void LatencyInfo::RemoveLatency(LatencyComponentType type) {
   LatencyMap::iterator it = latency_components_.begin();
   while (it != latency_components_.end()) {
-    if (it->first.first == type) {
-      LatencyMap::iterator tmp = it;
-      ++it;
-      latency_components_.erase(tmp);
-    } else {
+    if (it->first.first == type)
+      it = latency_components_.erase(it);
+    else
       it++;
-    }
   }
 }
 
-bool LatencyInfo::AddInputCoordinate(const InputCoordinate& input_coordinate) {
+bool LatencyInfo::AddInputCoordinate(const gfx::PointF& input_coordinate) {
   if (input_coordinates_size_ >= kMaxInputCoordinates)
     return false;
   input_coordinates_[input_coordinates_size_++] = input_coordinate;

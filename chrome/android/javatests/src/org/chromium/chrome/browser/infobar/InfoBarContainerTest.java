@@ -14,6 +14,7 @@ import android.widget.TextView;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
@@ -32,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Tests for the InfoBarContainer.
  */
+@RetryOnFailure
 public class InfoBarContainerTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final String MESSAGE_TEXT = "Ding dong. Woof. Translate french? Bears!";
 
@@ -46,12 +48,13 @@ public class InfoBarContainerTest extends ChromeActivityTestCaseBase<ChromeActiv
         }
 
         @Override
-        public void onInfoBarButtonClicked(boolean isPrimary) {
+        public boolean onInfoBarButtonClicked(boolean isPrimary) {
             if (isPrimary) {
                 primaryButtonCallback.notifyCalled();
             } else {
                 secondaryButtonCallback.notifyCalled();
             }
+            return false;
         }
     }
 

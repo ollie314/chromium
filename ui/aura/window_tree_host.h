@@ -18,6 +18,7 @@
 #include "ui/gfx/native_widget_types.h"
 
 namespace gfx {
+class ICCProfile;
 class Insets;
 class Point;
 class Rect;
@@ -194,6 +195,7 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
 
   void OnHostMoved(const gfx::Point& new_location);
   void OnHostResized(const gfx::Size& new_size);
+  void OnHostWorkspaceChanged();
   void OnHostCloseRequested();
   void OnHostActivated();
   void OnHostLostWindowCapture();
@@ -213,6 +215,8 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   // Hides the WindowTreeHost.
   virtual void HideImpl() = 0;
 
+  virtual gfx::ICCProfile GetICCProfileForCurrentDisplay();
+
   // Overridden from ui::EventSource:
   ui::EventProcessor* GetEventProcessor() override;
 
@@ -224,10 +228,10 @@ class AURA_EXPORT WindowTreeHost : public ui::internal::InputMethodDelegate,
   void MoveCursorToInternal(const gfx::Point& root_location,
                             const gfx::Point& host_location);
 
-  // We don't use a scoped_ptr for |window_| since we need this ptr to be valid
-  // during its deletion. (Window's dtor notifies observers that may attempt to
-  // reach back up to access this object which will be valid until the end of
-  // the dtor).
+  // We don't use a std::unique_ptr for |window_| since we need this ptr to be
+  // valid during its deletion. (Window's dtor notifies observers that may
+  // attempt to reach back up to access this object which will be valid until
+  // the end of the dtor).
   Window* window_;  // Owning.
 
   base::ObserverList<WindowTreeHostObserver> observers_;

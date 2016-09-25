@@ -17,7 +17,7 @@
 #include "base/containers/stack_container.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -160,14 +160,6 @@ class ResizeFilter {
 
   ImageOperations::ResizeMethod method_;
 
-  // Size of the filter support on one side only in the destination space.
-  // See GetFilterSupport.
-  float x_filter_support_;
-  float y_filter_support_;
-
-  // Subset of scaled destination bitmap to compute.
-  SkIRect out_bounds_;
-
   ConvolutionFilter1D x_filter_;
   ConvolutionFilter1D y_filter_;
 
@@ -175,11 +167,12 @@ class ResizeFilter {
 };
 
 ResizeFilter::ResizeFilter(ImageOperations::ResizeMethod method,
-                           int src_full_width, int src_full_height,
-                           int dest_width, int dest_height,
+                           int src_full_width,
+                           int src_full_height,
+                           int dest_width,
+                           int dest_height,
                            const SkIRect& dest_subset)
-    : method_(method),
-      out_bounds_(dest_subset) {
+    : method_(method) {
   // method_ will only ever refer to an "algorithm method".
   SkASSERT((ImageOperations::RESIZE_FIRST_ALGORITHM_METHOD <= method) &&
            (method <= ImageOperations::RESIZE_LAST_ALGORITHM_METHOD));

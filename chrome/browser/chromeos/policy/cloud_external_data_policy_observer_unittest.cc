@@ -15,7 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/policy/cloud_external_data_manager_base_test_util.h"
@@ -43,6 +43,8 @@
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_service_impl.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/policy/policy_constants.h"
+#include "components/policy/proto/cloud_policy.pb.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -50,8 +52,6 @@
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
-#include "policy/policy_constants.h"
-#include "policy/proto/cloud_policy.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -352,14 +352,11 @@ void CloudExternalDataPolicyObserverTest::SetRegularUserAvatarPolicy(
     const std::string& value) {
   PolicyMap policy_map;
   if (!value.empty()) {
-    policy_map.Set(
-        key::kUserAvatarImage,
-        POLICY_LEVEL_MANDATORY,
-        POLICY_SCOPE_USER,
-        POLICY_SOURCE_CLOUD,
-        new base::StringValue(value),
-        external_data_manager_.CreateExternalDataFetcher(
-            key::kUserAvatarImage).release());
+    policy_map.Set(key::kUserAvatarImage, POLICY_LEVEL_MANDATORY,
+                   POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
+                   base::MakeUnique<base::StringValue>(value),
+                   external_data_manager_.CreateExternalDataFetcher(
+                       key::kUserAvatarImage));
   }
   user_policy_provider_.UpdateChromePolicy(policy_map);
 }

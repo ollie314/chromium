@@ -7,7 +7,9 @@ package org.chromium.chrome.browser.media.remote;
 import android.graphics.Rect;
 import android.test.suitebuilder.annotation.LargeTest;
 
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.tab.Tab;
 
 import java.util.concurrent.TimeoutException;
@@ -24,6 +26,8 @@ public class CastVideoControlsTest extends CastTestBase {
      */
     @Feature({"VideoFling"})
     @LargeTest
+    @DisableIf.Build(hardware_is = "flo", message = "https://crbug.com/623526")
+    @RetryOnFailure
     public void testPauseButton() throws InterruptedException, TimeoutException {
         Rect videoRect = castDefaultVideoFromPage(DEFAULT_VIDEO_PAGE);
 

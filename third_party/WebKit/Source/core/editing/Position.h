@@ -137,11 +137,11 @@ public:
     Node* anchorNode() const { return m_anchorNode.get(); }
 
     Document* document() const { return m_anchorNode ? &m_anchorNode->document() : 0; }
-    bool inShadowIncludingDocument() const { return m_anchorNode && m_anchorNode->inShadowIncludingDocument(); }
+    bool isConnected() const { return m_anchorNode && m_anchorNode->isConnected(); }
 
     bool isNull() const { return !m_anchorNode; }
     bool isNotNull() const { return m_anchorNode; }
-    bool isOrphan() const { return m_anchorNode && !m_anchorNode->inShadowIncludingDocument(); }
+    bool isOrphan() const { return m_anchorNode && !m_anchorNode->isConnected(); }
 
     // Note: Comparison of positions require both parameters are non-null. You
     // should check null-position before comparing them.
@@ -170,15 +170,11 @@ public:
     static PositionTemplate<Strategy> firstPositionInNode(Node* anchorNode);
     static PositionTemplate<Strategy> lastPositionInNode(Node* anchorNode);
     static int minOffsetForNode(Node* anchorNode, int offset);
-    static bool offsetIsBeforeLastNodeOffset(int offset, Node* anchorNode);
     static PositionTemplate<Strategy> firstPositionInOrBeforeNode(Node* anchorNode);
     static PositionTemplate<Strategy> lastPositionInOrAfterNode(Node* anchorNode);
 
-    void debugPosition(const char* msg = "") const;
-
+    String toAnchorTypeAndOffsetString() const;
 #ifndef NDEBUG
-    void formatForDebugger(char* buffer, unsigned length) const;
-    void showAnchorTypeAndOffset() const;
     void showTreeForThis() const;
     void showTreeForThisInFlatTree() const;
 #endif
@@ -231,152 +227,6 @@ template <typename Strategy>
 bool operator!=(const PositionTemplate<Strategy>& a, const PositionTemplate<Strategy>& b)
 {
     return !(a == b);
-}
-
-// We define position creation functions to make callsites more readable.
-// These are inline to prevent ref-churn when returning a Position object.
-// If we ever add a PassPosition we can make these non-inline.
-
-template <typename Strategy>
-PositionTemplate<Strategy> PositionTemplate<Strategy>::inParentBeforeNode(const Node& node)
-{
-    // FIXME: This should DCHECK(node.parentNode())
-    // At least one caller currently hits this ASSERT though, which indicates
-    // that the caller is trying to make a position relative to a disconnected node (which is likely an error)
-    // Specifically, editing/deleting/delete-ligature-001.html crashes with DCHECK(node->parentNode())
-    return PositionTemplate<Strategy>(Strategy::parent(node), Strategy::index(node));
-}
-
-inline Position positionInParentBeforeNode(const Node& node)
-{
-    return Position::inParentBeforeNode(node);
-}
-
-template <typename Strategy>
-PositionTemplate<Strategy> PositionTemplate<Strategy>::inParentAfterNode(const Node& node)
-{
-    DCHECK(node.parentNode()) << node;
-    return PositionTemplate<Strategy>(Strategy::parent(node), Strategy::index(node) + 1);
-}
-
-inline Position positionInParentAfterNode(const Node& node)
-{
-    return Position::inParentAfterNode(node);
-}
-
-// positionBeforeNode and positionAfterNode return neighbor-anchored positions, construction is O(1)
-template <typename Strategy>
-PositionTemplate<Strategy> PositionTemplate<Strategy>::beforeNode(Node* anchorNode)
-{
-    DCHECK(anchorNode);
-    return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::BeforeAnchor);
-}
-
-inline Position positionBeforeNode(Node* anchorNode)
-{
-    return Position::beforeNode(anchorNode);
-}
-
-template <typename Strategy>
-PositionTemplate<Strategy> PositionTemplate<Strategy>::afterNode(Node* anchorNode)
-{
-    DCHECK(anchorNode);
-    return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::AfterAnchor);
-}
-
-inline Position positionAfterNode(Node* anchorNode)
-{
-    return Position::afterNode(anchorNode);
-}
-
-template <typename Strategy>
-int PositionTemplate<Strategy>::lastOffsetInNode(Node* node)
-{
-    return node->offsetInCharacters() ? node->maxCharacterOffset() : static_cast<int>(Strategy::countChildren(*node));
-}
-
-inline int lastOffsetInNode(Node* node)
-{
-    return Position::lastOffsetInNode(node);
-}
-
-// firstPositionInNode and lastPositionInNode return parent-anchored positions, lastPositionInNode construction is O(n) due to countChildren()
-template <typename Strategy>
-PositionTemplate<Strategy> PositionTemplate<Strategy>::firstPositionInNode(Node* anchorNode)
-{
-    if (anchorNode->isTextNode())
-        return PositionTemplate<Strategy>(anchorNode, 0);
-    return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::BeforeChildren);
-}
-
-inline Position firstPositionInNode(Node* anchorNode)
-{
-    return Position::firstPositionInNode(anchorNode);
-}
-
-template <typename Strategy>
-PositionTemplate<Strategy> PositionTemplate<Strategy>::lastPositionInNode(Node* anchorNode)
-{
-    if (anchorNode->isTextNode())
-        return PositionTemplate<Strategy>(anchorNode, lastOffsetInNode(anchorNode));
-    return PositionTemplate<Strategy>(anchorNode, PositionAnchorType::AfterChildren);
-}
-
-inline Position lastPositionInNode(Node* anchorNode)
-{
-    return Position::lastPositionInNode(anchorNode);
-}
-
-template <typename Strategy>
-int PositionTemplate<Strategy>::minOffsetForNode(Node* anchorNode, int offset)
-{
-    if (anchorNode->offsetInCharacters())
-        return std::min(offset, anchorNode->maxCharacterOffset());
-
-    int newOffset = 0;
-    for (Node* node = Strategy::firstChild(*anchorNode); node && newOffset < offset; node = Strategy::nextSibling(*node))
-        newOffset++;
-
-    return newOffset;
-}
-
-inline int minOffsetForNode(Node* anchorNode, int offset)
-{
-    return Position::minOffsetForNode(anchorNode, offset);
-}
-
-template <typename Strategy>
-bool PositionTemplate<Strategy>::offsetIsBeforeLastNodeOffset(int offset, Node* anchorNode)
-{
-    if (anchorNode->offsetInCharacters())
-        return offset < anchorNode->maxCharacterOffset();
-
-    int currentOffset = 0;
-    for (Node* node = Strategy::firstChild(*anchorNode); node && currentOffset < offset; node = Strategy::nextSibling(*node))
-        currentOffset++;
-
-    return offset < currentOffset;
-}
-
-inline bool offsetIsBeforeLastNodeOffset(int offset, Node* anchorNode)
-{
-    return Position::offsetIsBeforeLastNodeOffset(offset, anchorNode);
-}
-
-template <typename Strategy>
-PositionTemplate<Strategy> PositionTemplate<Strategy>::firstPositionInOrBeforeNode(Node* node)
-{
-    if (!node)
-        return PositionTemplate<Strategy>();
-    return Strategy::editingIgnoresContent(node) ? beforeNode(node) : firstPositionInNode(node);
-}
-
-template <typename Strategy>
-PositionTemplate<Strategy> PositionTemplate<Strategy>::lastPositionInOrAfterNode(Node* node)
-{
-    if (!node)
-        return PositionTemplate<Strategy>();
-    return Strategy::editingIgnoresContent(node) ? afterNode(node) : lastPositionInNode(node);
 }
 
 CORE_EXPORT PositionInFlatTree toPositionInFlatTree(const Position&);

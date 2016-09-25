@@ -44,7 +44,6 @@
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLFrameOwnerElement.h"
-#include "core/html/HTMLLabelElement.h"
 #include "core/html/HTMLMapElement.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/api/LayoutViewItem.h"
@@ -163,7 +162,7 @@ Node* TreeScope::ancestorInThisScope(Node* node) const
         if (!node->isInShadowTree())
             return nullptr;
 
-        node = node->shadowHost();
+        node = node->ownerShadowHost();
     }
 
     return nullptr;
@@ -197,9 +196,24 @@ HTMLMapElement* TreeScope::getImageMap(const String& url) const
         return nullptr;
     size_t hashPos = url.find('#');
     String name = hashPos == kNotFound ? url : url.substring(hashPos + 1);
-    if (rootNode().document().isHTMLDocument())
-        return toHTMLMapElement(m_imageMapsByName->getElementByLowercasedMapName(AtomicString(name.lower()), this));
-    return toHTMLMapElement(m_imageMapsByName->getElementByMapName(AtomicString(name), this));
+    HTMLMapElement* map = toHTMLMapElement(rootNode().document().isHTMLDocument()
+        ? m_imageMapsByName->getElementByLowercasedMapName(AtomicString(name.lower()), this)
+        : m_imageMapsByName->getElementByMapName(AtomicString(name), this));
+    if (!map || !rootNode().document().isHTMLDocument())
+        return map;
+    const AtomicString& nameValue = map->fastGetAttribute(nameAttr);
+    if (nameValue.isNull())
+        return map;
+    String strippedName = nameValue;
+    if (strippedName.startsWith('#'))
+        strippedName = strippedName.substring(1);
+    if (strippedName == name)
+        UseCounter::count(rootNode().document(), UseCounter::MapNameMatchingStrict);
+    else if (equalIgnoringASCIICase(strippedName, name))
+        UseCounter::count(rootNode().document(), UseCounter::MapNameMatchingASCIICaseless);
+    else
+        UseCounter::count(rootNode().document(), UseCounter::MapNameMatchingUnicodeLower);
+    return map;
 }
 
 static bool pointWithScrollAndZoomIfPossible(const Document& document, IntPoint& point)
@@ -227,6 +241,9 @@ HitTestResult hitTestInDocument(const Document* document, int x, int y, const Hi
 {
     IntPoint hitPoint(x, y);
     if (!pointWithScrollAndZoomIfPossible(*document, hitPoint))
+        return HitTestResult();
+
+    if (!document->isActive())
         return HitTestResult();
 
     HitTestResult result(request, hitPoint);
@@ -303,36 +320,6 @@ HeapVector<Member<Element>> TreeScope::elementsFromPoint(int x, int y) const
     return elementsFromHitTestResult(result);
 }
 
-void TreeScope::addLabel(const AtomicString& forAttributeValue, HTMLLabelElement* element)
-{
-    DCHECK(m_labelsByForAttribute);
-    m_labelsByForAttribute->add(forAttributeValue, element);
-}
-
-void TreeScope::removeLabel(const AtomicString& forAttributeValue, HTMLLabelElement* element)
-{
-    DCHECK(m_labelsByForAttribute);
-    m_labelsByForAttribute->remove(forAttributeValue, element);
-}
-
-HTMLLabelElement* TreeScope::labelElementForId(const AtomicString& forAttributeValue)
-{
-    if (forAttributeValue.isEmpty())
-        return nullptr;
-
-    if (!m_labelsByForAttribute) {
-        // Populate the map on first access.
-        m_labelsByForAttribute = DocumentOrderedMap::create();
-        for (HTMLLabelElement& label : Traversal<HTMLLabelElement>::startsAfter(rootNode())) {
-            const AtomicString& forValue = label.fastGetAttribute(forAttr);
-            if (!forValue.isEmpty())
-                addLabel(forValue, &label);
-        }
-    }
-
-    return toHTMLLabelElement(m_labelsByForAttribute->getElementByLabelForAttribute(forAttributeValue, this));
-}
-
 DOMSelection* TreeScope::getSelection() const
 {
     if (!rootNode().document().frame())
@@ -370,6 +357,9 @@ Element* TreeScope::findAnchor(const String& name)
 
 void TreeScope::adoptIfNeeded(Node& node)
 {
+    // Script is forbidden to protect against event handlers firing in the middle of rescoping
+    // in |didMoveToNewDocument| callbacks. See https://crbug.com/605766 and https://crbug.com/606651.
+    ScriptForbiddenScope forbidScript;
     DCHECK(this);
     DCHECK(!node.isDocumentNode());
     TreeScopeAdopter adopter(node, *this);
@@ -379,7 +369,7 @@ void TreeScope::adoptIfNeeded(Node& node)
 
 Element* TreeScope::retarget(const Element& target) const
 {
-    for (const Element* ancestor = &target; ancestor; ancestor = ancestor->shadowHost()) {
+    for (const Element* ancestor = &target; ancestor; ancestor = ancestor->ownerShadowHost()) {
         if (this == ancestor->treeScope())
             return const_cast<Element*>(ancestor);
     }
@@ -416,10 +406,26 @@ Element* TreeScope::adjustedFocusedElement() const
     return nullptr;
 }
 
+Element* TreeScope::adjustedElement(const Element& target) const
+{
+    const Element* adjustedTarget = &target;
+    for (const Element* ancestor = &target; ancestor; ancestor = ancestor->ownerShadowHost()) {
+        // This adjustment is done only for V1 shadows, and is skipped for V0 or UA shadows,
+        // because .pointerLockElement and .(webkit)fullscreenElement is not available for
+        // non-V1 shadow roots.
+        // TODO(kochi): Once V0 code is removed, use the same logic as .activeElement for V1.
+        if (ancestor->shadowRootIfV1())
+            adjustedTarget = ancestor;
+        if (this == ancestor->treeScope())
+            return const_cast<Element*>(adjustedTarget);
+    }
+    return nullptr;
+}
+
 unsigned short TreeScope::comparePosition(const TreeScope& otherScope) const
 {
     if (otherScope == this)
-        return Node::DOCUMENT_POSITION_EQUIVALENT;
+        return Node::kDocumentPositionEquivalent;
 
     HeapVector<Member<const TreeScope>, 16> chain1;
     HeapVector<Member<const TreeScope>, 16> chain2;
@@ -432,7 +438,7 @@ unsigned short TreeScope::comparePosition(const TreeScope& otherScope) const
     unsigned index1 = chain1.size();
     unsigned index2 = chain2.size();
     if (chain1[index1 - 1] != chain2[index2 - 1])
-        return Node::DOCUMENT_POSITION_DISCONNECTED | Node::DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC;
+        return Node::kDocumentPositionDisconnected | Node::kDocumentPositionImplementationSpecific;
 
     for (unsigned i = std::min(index1, index2); i; --i) {
         const TreeScope* child1 = chain1[--index1];
@@ -445,18 +451,18 @@ unsigned short TreeScope::comparePosition(const TreeScope& otherScope) const
 
             for (const ShadowRoot* child = toShadowRoot(child2->rootNode()).olderShadowRoot(); child; child = child->olderShadowRoot()) {
                 if (child == child1)
-                    return Node::DOCUMENT_POSITION_FOLLOWING;
+                    return Node::kDocumentPositionFollowing;
             }
 
-            return Node::DOCUMENT_POSITION_PRECEDING;
+            return Node::kDocumentPositionPreceding;
         }
     }
 
     // There was no difference between the two parent chains, i.e., one was a subset of the other. The shorter
     // chain is the ancestor.
     return index1 < index2 ?
-        Node::DOCUMENT_POSITION_FOLLOWING | Node::DOCUMENT_POSITION_CONTAINED_BY :
-        Node::DOCUMENT_POSITION_PRECEDING | Node::DOCUMENT_POSITION_CONTAINS;
+        Node::kDocumentPositionFollowing | Node::kDocumentPositionContainedBy :
+        Node::kDocumentPositionPreceding | Node::kDocumentPositionContains;
 }
 
 const TreeScope* TreeScope::commonAncestorTreeScope(const TreeScope& other) const
@@ -531,7 +537,6 @@ DEFINE_TRACE(TreeScope)
     visitor->trace(m_selection);
     visitor->trace(m_elementsById);
     visitor->trace(m_imageMapsByName);
-    visitor->trace(m_labelsByForAttribute);
     visitor->trace(m_scopedStyleResolver);
     visitor->trace(m_radioButtonGroupScope);
 }

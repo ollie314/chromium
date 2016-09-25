@@ -6,7 +6,7 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/search_engines/chrome_template_url_service_client.h"
 #include "chrome/test/base/testing_profile.h"
@@ -47,10 +47,10 @@ TemplateURLServiceTestUtil::TemplateURLServiceTestUtil()
       search_terms_data_(NULL) {
   // Make unique temp directory.
   EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
-  profile_.reset(new TestingProfile(temp_dir_.path()));
+  profile_.reset(new TestingProfile(temp_dir_.GetPath()));
 
   scoped_refptr<WebDatabaseService> web_database_service =
-      new WebDatabaseService(temp_dir_.path().AppendASCII("webdata"),
+      new WebDatabaseService(temp_dir_.GetPath().AppendASCII("webdata"),
                              base::ThreadTaskRunnerHandle::Get(),
                              base::ThreadTaskRunnerHandle::Get());
   web_database_service->AddTable(

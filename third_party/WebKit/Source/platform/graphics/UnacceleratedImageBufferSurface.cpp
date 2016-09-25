@@ -30,6 +30,7 @@
 
 #include "platform/graphics/UnacceleratedImageBufferSurface.h"
 
+#include "platform/graphics/skia/SkiaUtils.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "wtf/PassRefPtr.h"
 
@@ -37,11 +38,11 @@ class SkCanvas;
 
 namespace blink {
 
-UnacceleratedImageBufferSurface::UnacceleratedImageBufferSurface(const IntSize& size, OpacityMode opacityMode, ImageInitializationMode initializationMode)
-    : ImageBufferSurface(size, opacityMode)
+UnacceleratedImageBufferSurface::UnacceleratedImageBufferSurface(const IntSize& size, OpacityMode opacityMode, ImageInitializationMode initializationMode, sk_sp<SkColorSpace> colorSpace)
+    : ImageBufferSurface(size, opacityMode, colorSpace)
 {
     SkAlphaType alphaType = (Opaque == opacityMode) ? kOpaque_SkAlphaType : kPremul_SkAlphaType;
-    SkImageInfo info = SkImageInfo::MakeN32(size.width(), size.height(), alphaType);
+    SkImageInfo info = SkImageInfo::MakeN32(size.width(), size.height(), alphaType, colorSpace);
     SkSurfaceProps disableLCDProps(0, kUnknown_SkPixelGeometry);
     m_surface = SkSurface::MakeRaster(info, Opaque == opacityMode ? 0 : &disableLCDProps);
 
@@ -63,9 +64,9 @@ bool UnacceleratedImageBufferSurface::isValid() const
     return m_surface;
 }
 
-PassRefPtr<SkImage> UnacceleratedImageBufferSurface::newImageSnapshot(AccelerationHint, SnapshotReason)
+sk_sp<SkImage> UnacceleratedImageBufferSurface::newImageSnapshot(AccelerationHint, SnapshotReason)
 {
-    return adoptRef(m_surface->newImageSnapshot());
+    return m_surface->makeImageSnapshot();
 }
 
 } // namespace blink

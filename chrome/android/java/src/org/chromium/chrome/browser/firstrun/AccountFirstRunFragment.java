@@ -11,8 +11,11 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.signin.AccountSigninView;
+import org.chromium.chrome.browser.signin.SigninAccessPoint;
+import org.chromium.chrome.browser.signin.SigninManager;
 
 /**
  * A {@link Fragment} meant to handle sync setup for the first run experience.
@@ -53,7 +56,7 @@ public class AccountFirstRunFragment extends FirstRunPage implements AccountSign
             public void onAccountSelected(String accountName, boolean settingsClicked) {
                 getPageDelegate().acceptSignIn(accountName);
                 if (settingsClicked) {
-                    getPageDelegate().askToOpenSyncSettings();
+                    getPageDelegate().askToOpenSignInSettings();
                 }
                 advanceToNextPage();
             }
@@ -76,12 +79,10 @@ public class AccountFirstRunFragment extends FirstRunPage implements AccountSign
         if (!TextUtils.isEmpty(forcedAccountName)) {
             mView.switchToForcedAccountMode(forcedAccountName);
         }
-    }
 
-    @Override
-    public void onStart() {
-        super.onStart();
-        getPageDelegate().onSigninDialogShown();
+        RecordUserAction.record("MobileFre.SignInShown");
+        RecordUserAction.record("Signin_Signin_FromStartPage");
+        SigninManager.logSigninStartAccessPoint(SigninAccessPoint.START_PAGE);
     }
 
     // FirstRunPage:

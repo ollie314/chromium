@@ -7,10 +7,13 @@
 #include <algorithm>
 
 #include "build/build_config.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/blue_button.h"
+#include "ui/views/controls/button/custom_button.h"
 #include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
@@ -36,14 +39,19 @@ bool ShouldShow(View* view) {
 }
 
 // Do the layout for a button.
-void LayoutButton(LabelButton* button, gfx::Rect* row_bounds) {
+void LayoutButton(LabelButton* button,
+                  gfx::Rect* row_bounds,
+                  int button_height) {
   if (!button)
     return;
 
   const gfx::Size size = button->GetPreferredSize();
   row_bounds->set_width(row_bounds->width() - size.width());
-  button->SetBounds(row_bounds->right(), row_bounds->y(),
-                    size.width(), row_bounds->height());
+  DCHECK_LE(button_height, row_bounds->height());
+  button->SetBounds(
+      row_bounds->right(),
+      row_bounds->y() + (row_bounds->height() - button_height) / 2,
+      size.width(), button_height);
   row_bounds->set_width(row_bounds->width() - kRelatedButtonHSpacing);
 }
 
@@ -58,9 +66,9 @@ DialogClientView::DialogClientView(Widget* owner, View* contents_view)
                          kButtonHEdgeMarginNew,
                          kButtonVEdgeMarginNew,
                          kButtonHEdgeMarginNew),
-      ok_button_(NULL),
-      cancel_button_(NULL),
-      extra_view_(NULL),
+      ok_button_(nullptr),
+      cancel_button_(nullptr),
+      extra_view_(nullptr),
       delegate_allowed_close_(false) {
   // Doing this now ensures this accelerator will have lower priority than
   // one set by the contents view.
@@ -98,7 +106,7 @@ void DialogClientView::UpdateDialogButtons() {
     GetDialogDelegate()->UpdateButton(ok_button_, ui::DIALOG_BUTTON_OK);
   } else if (ok_button_) {
     delete ok_button_;
-    ok_button_ = NULL;
+    ok_button_ = nullptr;
   }
 
   if (buttons & ui::DIALOG_BUTTON_CANCEL) {
@@ -110,7 +118,7 @@ void DialogClientView::UpdateDialogButtons() {
     GetDialogDelegate()->UpdateButton(cancel_button_, ui::DIALOG_BUTTON_CANCEL);
   } else if (cancel_button_) {
     delete cancel_button_;
-    cancel_button_ = NULL;
+    cancel_button_ = nullptr;
   }
 
   SetupFocusChain();
@@ -178,12 +186,17 @@ void DialogClientView::Layout() {
     const int height = GetButtonsAndExtraViewRowHeight();
     gfx::Rect row_bounds(bounds.x(), bounds.bottom() - height,
                          bounds.width(), height);
+    // If the |extra_view_| is a also button, then the |button_height| is the
+    // maximum height of the three buttons, otherwise it is the maximum height
+    // of the ok and cancel buttons.
+    const int button_height =
+        CustomButton::AsCustomButton(extra_view_) ? height : GetButtonHeight();
     if (kIsOkButtonOnLeftSide) {
-      LayoutButton(cancel_button_, &row_bounds);
-      LayoutButton(ok_button_, &row_bounds);
+      LayoutButton(cancel_button_, &row_bounds, button_height);
+      LayoutButton(ok_button_, &row_bounds, button_height);
     } else {
-      LayoutButton(ok_button_, &row_bounds);
-      LayoutButton(cancel_button_, &row_bounds);
+      LayoutButton(ok_button_, &row_bounds, button_height);
+      LayoutButton(cancel_button_, &row_bounds, button_height);
     }
     if (extra_view_) {
       int custom_padding = 0;
@@ -213,10 +226,6 @@ void DialogClientView::Layout() {
 bool DialogClientView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   DCHECK_EQ(accelerator.key_code(), ui::VKEY_ESCAPE);
 
-  // If there's a cancel button, it handles escape.
-  if (cancel_button_)
-    return cancel_button_->AcceleratorPressed(accelerator);
-
   GetWidget()->Close();
   return true;
 }
@@ -242,7 +251,7 @@ void DialogClientView::OnNativeThemeChanged(const ui::NativeTheme* theme) {
   // dialog style simply inherits the bubble's frame view color.
   const DialogDelegate* dialog = GetDialogDelegate();
 
-  if (dialog && !dialog->UseNewStyleForThisDialog()) {
+  if (dialog && !dialog->ShouldUseCustomFrame()) {
     set_background(views::Background::CreateSolidBackground(GetNativeTheme()->
         GetSystemColor(ui::NativeTheme::kColorId_DialogBackground)));
   }
@@ -268,10 +277,10 @@ void DialogClientView::ButtonPressed(Button* sender, const ui::Event& event) {
 // DialogClientView, protected:
 
 DialogClientView::DialogClientView(View* contents_view)
-    : ClientView(NULL, contents_view),
-      ok_button_(NULL),
-      cancel_button_(NULL),
-      extra_view_(NULL),
+    : ClientView(nullptr, contents_view),
+      ok_button_(nullptr),
+      cancel_button_(nullptr),
+      extra_view_(nullptr),
       delegate_allowed_close_(false) {}
 
 DialogDelegate* DialogClientView::GetDialogDelegate() const {
@@ -304,16 +313,15 @@ void DialogClientView::ChildVisibilityChanged(View* child) {
 
 LabelButton* DialogClientView::CreateDialogButton(ui::DialogButton type) {
   const base::string16 title = GetDialogDelegate()->GetDialogButtonLabel(type);
-  LabelButton* button = NULL;
-  if (GetDialogDelegate()->UseNewStyleForThisDialog() &&
-      GetDialogDelegate()->GetDefaultDialogButton() == type &&
-      GetDialogDelegate()->ShouldDefaultButtonBeBlue()) {
-    button = new BlueButton(this, title);
+  LabelButton* button = nullptr;
+  // The default button is always blue in Harmony.
+  if (GetDialogDelegate()->GetDefaultDialogButton() == type &&
+      (ui::MaterialDesignController::IsSecondaryUiMaterial() ||
+       GetDialogDelegate()->ShouldDefaultButtonBeBlue())) {
+    button = MdTextButton::CreateSecondaryUiBlueButton(this, title);
   } else {
-    button = new LabelButton(this, title);
-    button->SetStyle(Button::STYLE_BUTTON);
+    button = MdTextButton::CreateSecondaryUiButton(this, title);
   }
-  button->SetFocusable(true);
 
   const int kDialogMinButtonWidth = 75;
   button->SetMinSize(gfx::Size(kDialogMinButtonWidth, 0));
@@ -321,13 +329,18 @@ LabelButton* DialogClientView::CreateDialogButton(ui::DialogButton type) {
   return button;
 }
 
-int DialogClientView::GetButtonsAndExtraViewRowHeight() const {
-  int extra_view_height = ShouldShow(extra_view_) ?
-      extra_view_->GetPreferredSize().height() : 0;
-  int buttons_height = std::max(
+int DialogClientView::GetButtonHeight() const {
+  return std::max(
       ok_button_ ? ok_button_->GetPreferredSize().height() : 0,
       cancel_button_ ? cancel_button_->GetPreferredSize().height() : 0);
-  return std::max(extra_view_height, buttons_height);
+}
+
+int DialogClientView::GetExtraViewHeight() const {
+  return ShouldShow(extra_view_) ? extra_view_->GetPreferredSize().height() : 0;
+}
+
+int DialogClientView::GetButtonsAndExtraViewRowHeight() const {
+  return std::max(GetExtraViewHeight(), GetButtonHeight());
 }
 
 gfx::Insets DialogClientView::GetButtonRowInsets() const {

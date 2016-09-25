@@ -60,10 +60,10 @@
 #include "core/style/StyleFetchedImage.h"
 #include "core/style/StyleImage.h"
 #include "platform/SerializedResource.h"
+#include "platform/TraceEvent.h"
 #include "platform/graphics/Image.h"
 #include "platform/heap/Handle.h"
 #include "wtf/HashSet.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/text/CString.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/TextEncoding.h"
@@ -146,14 +146,14 @@ void SerializerMarkupAccumulator::appendElement(StringBuilder& result, Element& 
 
     // TODO(tiger): Refactor MarkupAccumulator so it is easier to append an element like this, without special cases for XHTML
     if (isHTMLHeadElement(element)) {
-        result.appendLiteral("<meta http-equiv=\"Content-Type\" content=\"");
+        result.append("<meta http-equiv=\"Content-Type\" content=\"");
         appendAttributeValue(result, m_document->suggestedMIMEType());
-        result.appendLiteral("; charset=");
+        result.append("; charset=");
         appendAttributeValue(result, m_document->characterSet());
         if (m_document->isXHTMLDocument())
-            result.appendLiteral("\" />");
+            result.append("\" />");
         else
-            result.appendLiteral("\">");
+            result.append("\">");
     }
 
     // FIXME: For object (plugins) tags and video tag we could replace them by an image of their current contents.
@@ -227,9 +227,9 @@ void SerializerMarkupAccumulator::appendRewrittenAttribute(
     // TODO(tiger): Refactor MarkupAccumulator so it is easier to append an attribute like this.
     out.append(' ');
     out.append(attributeName);
-    out.appendLiteral("=\"");
+    out.append("=\"");
     appendAttributeValue(out, attributeValue);
-    out.appendLiteral("\"");
+    out.append("\"");
 }
 
 // TODO(tiger): Right now there is no support for rewriting URLs inside CSS
@@ -249,6 +249,7 @@ FrameSerializer::FrameSerializer(
 
 void FrameSerializer::serializeFrame(const LocalFrame& frame)
 {
+    TRACE_EVENT0("page-serialization", "FrameSerializer::serializeFrame");
     ASSERT(frame.document());
     Document& document = *frame.document();
     KURL url = document.url();
@@ -260,12 +261,14 @@ void FrameSerializer::serializeFrame(const LocalFrame& frame)
         return;
     }
 
+    TRACE_EVENT_BEGIN0("page-serialization", "FrameSerializer::serializeFrame HTML");
     HeapVector<Member<Node>> serializedNodes;
     SerializerMarkupAccumulator accumulator(m_delegate, document, serializedNodes);
     String text = serializeNodes<EditingStrategy>(accumulator, document, IncludeNode);
 
     CString frameHTML = document.encoding().encode(text, WTF::EntitiesForUnencodables);
     m_resources->append(SerializedResource(url, document.suggestedMIMEType(), SharedBuffer::create(frameHTML.data(), frameHTML.length())));
+    TRACE_EVENT_END0("page-serialization", "FrameSerializer::serializeFrame HTML");
 
     for (Node* node: serializedNodes) {
         ASSERT(node);
@@ -307,10 +310,12 @@ void FrameSerializer::serializeFrame(const LocalFrame& frame)
 
 void FrameSerializer::serializeCSSStyleSheet(CSSStyleSheet& styleSheet, const KURL& url)
 {
+    TRACE_EVENT2("page-serialization", "FrameSerializer::serializeCSSStyleSheet",
+        "type", "CSS", "url", url.elidedString().utf8().data());
     StringBuilder cssText;
-    cssText.appendLiteral("@charset \"");
+    cssText.append("@charset \"");
     cssText.append(styleSheet.contents()->charset().lower());
-    cssText.appendLiteral("\";\n\n");
+    cssText.append("\";\n\n");
 
     for (unsigned i = 0; i < styleSheet.length(); ++i) {
         CSSRule* rule = styleSheet.item(i);
@@ -318,7 +323,7 @@ void FrameSerializer::serializeCSSStyleSheet(CSSStyleSheet& styleSheet, const KU
         if (!itemText.isEmpty()) {
             cssText.append(itemText);
             if (i < styleSheet.length() - 1)
-                cssText.appendLiteral("\n\n");
+                cssText.append("\n\n");
         }
 
         // Some rules have resources associated with them that we need to retrieve.
@@ -329,7 +334,7 @@ void FrameSerializer::serializeCSSStyleSheet(CSSStyleSheet& styleSheet, const KU
         WTF::TextEncoding textEncoding(styleSheet.contents()->charset());
         ASSERT(textEncoding.isValid());
         String textString = cssText.toString();
-        CString text = textEncoding.encode(textString, WTF::EntitiesForUnencodables);
+        CString text = textEncoding.encode(textString, WTF::CSSEncodedEntitiesForUnencodables);
         m_resources->append(SerializedResource(url, String("text/css"), SharedBuffer::create(text.data(), text.length())));
         m_resourceURLs.add(url);
     }
@@ -341,11 +346,11 @@ void FrameSerializer::serializeCSSRule(CSSRule* rule)
     Document& document = *rule->parentStyleSheet()->ownerDocument();
 
     switch (rule->type()) {
-    case CSSRule::STYLE_RULE:
+    case CSSRule::kStyleRule:
         retrieveResourcesForProperties(&toCSSStyleRule(rule)->styleRule()->properties(), document);
         break;
 
-    case CSSRule::IMPORT_RULE: {
+    case CSSRule::kImportRule: {
         CSSImportRule* importRule = toCSSImportRule(rule);
         KURL sheetBaseURL = rule->parentStyleSheet()->baseURL();
         ASSERT(sheetBaseURL.isValid());
@@ -358,46 +363,47 @@ void FrameSerializer::serializeCSSRule(CSSRule* rule)
     }
 
     // Rules inheriting CSSGroupingRule
-    case CSSRule::MEDIA_RULE:
-    case CSSRule::SUPPORTS_RULE: {
+    case CSSRule::kMediaRule:
+    case CSSRule::kSupportsRule: {
         CSSRuleList* ruleList = rule->cssRules();
         for (unsigned i = 0; i < ruleList->length(); ++i)
             serializeCSSRule(ruleList->item(i));
         break;
     }
 
-    case CSSRule::FONT_FACE_RULE:
+    case CSSRule::kFontFaceRule:
         retrieveResourcesForProperties(&toCSSFontFaceRule(rule)->styleRule()->properties(), document);
         break;
 
     // Rules in which no external resources can be referenced
-    case CSSRule::CHARSET_RULE:
-    case CSSRule::PAGE_RULE:
-    case CSSRule::KEYFRAMES_RULE:
-    case CSSRule::KEYFRAME_RULE:
-    case CSSRule::VIEWPORT_RULE:
+    case CSSRule::kCharsetRule:
+    case CSSRule::kPageRule:
+    case CSSRule::kKeyframesRule:
+    case CSSRule::kKeyframeRule:
+    case CSSRule::kNamespaceRule:
+    case CSSRule::kViewportRule:
         break;
-
-    default:
-        ASSERT_NOT_REACHED();
     }
 }
 
 bool FrameSerializer::shouldAddURL(const KURL& url)
 {
     return url.isValid() && !m_resourceURLs.contains(url) && !url.protocolIsData()
-        && !m_delegate.shouldSkipResource(url);
+        && !m_delegate.shouldSkipResourceWithURL(url);
 }
 
-void FrameSerializer::addToResources(Resource* resource, PassRefPtr<SharedBuffer> data, const KURL& url)
+void FrameSerializer::addToResources(const Resource& resource, PassRefPtr<const SharedBuffer> data, const KURL& url)
 {
+    if (m_delegate.shouldSkipResource(resource))
+        return;
+
     if (!data) {
         DLOG(ERROR) << "No data for resource " << url.getString();
         return;
     }
 
-    String mimeType = resource->response().mimeType();
-    m_resources->append(SerializedResource(url, mimeType, data));
+    String mimeType = resource.response().mimeType();
+    m_resources->append(SerializedResource(url, mimeType, std::move(data)));
     m_resourceURLs.add(url);
 }
 
@@ -406,8 +412,10 @@ void FrameSerializer::addImageToResources(ImageResource* image, const KURL& url)
     if (!image || !image->hasImage() || image->errorOccurred() || !shouldAddURL(url))
         return;
 
-    RefPtr<SharedBuffer> data = image->getImage()->data();
-    addToResources(image, data, url);
+    TRACE_EVENT2("page-serialization", "FrameSerializer::addImageToResources",
+        "type", "image", "url", url.elidedString().utf8().data());
+    RefPtr<const SharedBuffer> data = image->getImage()->data();
+    addToResources(*image, data, url);
 }
 
 void FrameSerializer::addFontToResources(FontResource* font)
@@ -415,9 +423,9 @@ void FrameSerializer::addFontToResources(FontResource* font)
     if (!font || !font->isLoaded() || !font->resourceBuffer() || !shouldAddURL(font->url()))
         return;
 
-    RefPtr<SharedBuffer> data(font->resourceBuffer());
+    RefPtr<const SharedBuffer> data(font->resourceBuffer());
 
-    addToResources(font, data, font->url());
+    addToResources(*font, data, font->url());
 }
 
 void FrameSerializer::retrieveResourcesForProperties(const StylePropertySet* styleDeclaration, Document& document)
@@ -430,33 +438,33 @@ void FrameSerializer::retrieveResourcesForProperties(const StylePropertySet* sty
     // image properties there might be.
     unsigned propertyCount = styleDeclaration->propertyCount();
     for (unsigned i = 0; i < propertyCount; ++i) {
-        CSSValue* cssValue = styleDeclaration->propertyAt(i).value();
+        const CSSValue& cssValue = styleDeclaration->propertyAt(i).value();
         retrieveResourcesForCSSValue(cssValue, document);
     }
 }
 
-void FrameSerializer::retrieveResourcesForCSSValue(CSSValue* cssValue, Document& document)
+void FrameSerializer::retrieveResourcesForCSSValue(const CSSValue& cssValue, Document& document)
 {
-    if (cssValue->isImageValue()) {
-        CSSImageValue* imageValue = toCSSImageValue(cssValue);
-        if (imageValue->isCachePending())
+    if (cssValue.isImageValue()) {
+        const CSSImageValue& imageValue = toCSSImageValue(cssValue);
+        if (imageValue.isCachePending())
             return;
-        StyleImage* styleImage = imageValue->cachedImage();
+        StyleImage* styleImage = imageValue.cachedImage();
         if (!styleImage || !styleImage->isImageResource())
             return;
 
         addImageToResources(styleImage->cachedImage(), styleImage->cachedImage()->url());
-    } else if (cssValue->isFontFaceSrcValue()) {
-        CSSFontFaceSrcValue* fontFaceSrcValue = toCSSFontFaceSrcValue(cssValue);
-        if (fontFaceSrcValue->isLocal()) {
+    } else if (cssValue.isFontFaceSrcValue()) {
+        const CSSFontFaceSrcValue& fontFaceSrcValue = toCSSFontFaceSrcValue(cssValue);
+        if (fontFaceSrcValue.isLocal()) {
             return;
         }
 
-        addFontToResources(fontFaceSrcValue->fetch(&document));
-    } else if (cssValue->isValueList()) {
-        CSSValueList* cssValueList = toCSSValueList(cssValue);
-        for (unsigned i = 0; i < cssValueList->length(); i++)
-            retrieveResourcesForCSSValue(cssValueList->item(i), document);
+        addFontToResources(fontFaceSrcValue.fetch(&document));
+    } else if (cssValue.isValueList()) {
+        const CSSValueList& cssValueList = toCSSValueList(cssValue);
+        for (unsigned i = 0; i < cssValueList.length(); i++)
+            retrieveResourcesForCSSValue(cssValueList.item(i), document);
     }
 }
 

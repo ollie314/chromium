@@ -130,6 +130,7 @@ fontStyle
 fontVariant
 fontVariantCaps
 fontVariantLigatures
+fontVariantNumeric
 fontWeight
 getPropertyPriority
 getPropertyValue
@@ -152,6 +153,7 @@ gridTemplateAreas
 gridTemplateColumns
 gridTemplateRows
 height
+hyphens
 imageOrientation
 imageRendering
 isolation
@@ -188,11 +190,14 @@ minWidth
 minZoom
 mixBlendMode
 motion
-motionOffset
-motionPath
-motionRotation
 objectFit
 objectPosition
+offset
+offsetAnchor
+offsetDistance
+offsetPath
+offsetPosition
+offsetRotation
 opacity
 order
 orientation
@@ -203,6 +208,7 @@ outlineOffset
 outlineStyle
 outlineWidth
 overflow
+overflowAnchor
 overflowWrap
 overflowX
 overflowY
@@ -271,6 +277,7 @@ textOrientation
 textOverflow
 textRendering
 textShadow
+textSizeAdjust
 textTransform
 textUnderlinePosition
 top
@@ -286,6 +293,7 @@ transitionTimingFunction
 translate
 unicodeBidi
 unicodeRange
+userSelect
 userZoom
 vectorEffect
 verticalAlign
@@ -323,11 +331,9 @@ webkitBoxOrdinalGroup
 webkitBoxOrient
 webkitBoxPack
 webkitBoxReflect
-webkitClipPath
 webkitColumnBreakAfter
 webkitColumnBreakBefore
 webkitColumnBreakInside
-webkitFilter
 webkitFontSizeDelta
 webkitFontSmoothing
 webkitHighlight
@@ -395,7 +401,6 @@ webkitTransformOriginY
 webkitTransformOriginZ
 webkitUserDrag
 webkitUserModify
-webkitUserSelect
 webkitWritingMode
 whiteSpace
 widows

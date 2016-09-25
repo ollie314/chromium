@@ -25,7 +25,7 @@
 #include "core/dom/StaticNodeList.h"
 #include "core/events/EventDispatchMediator.h"
 #include "core/events/EventTarget.h"
-#include "core/frame/OriginsUsingFeatures.h"
+#include "core/frame/HostsUsingFeatures.h"
 #include "core/frame/UseCounter.h"
 #include "core/svg/SVGElement.h"
 #include "core/timing/DOMWindowPerformance.h"
@@ -34,9 +34,12 @@
 
 namespace blink {
 
-static bool defaultScopedFromEventType(const AtomicString& eventType)
+static bool isEventTypeScopedInV0(const AtomicString& eventType)
 {
-    return (eventType == EventTypeNames::abort
+    // WebKit never allowed selectstart event to cross the the shadow DOM boundary.
+    // Changing this breaks existing sites.
+    // See https://bugs.webkit.org/show_bug.cgi?id=52195 for details.
+    return eventType == EventTypeNames::abort
         || eventType == EventTypeNames::change
         || eventType == EventTypeNames::error
         || eventType == EventTypeNames::load
@@ -45,66 +48,58 @@ static bool defaultScopedFromEventType(const AtomicString& eventType)
         || eventType == EventTypeNames::scroll
         || eventType == EventTypeNames::select
         || eventType == EventTypeNames::selectstart
-        || eventType == EventTypeNames::slotchange);
+        || eventType == EventTypeNames::slotchange;
 }
 
 Event::Event()
-    : Event("", false, false, false)
+    : Event("", false, false)
 {
-}
-
-Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg)
-    : Event(eventType, canBubbleArg, cancelableArg, defaultScopedFromEventType(eventType), false, monotonicallyIncreasingTime())
-{
-}
-
-Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, EventTarget* relatedTarget)
-    : Event(eventType, canBubbleArg, cancelableArg, defaultScopedFromEventType(eventType), relatedTarget ? true : false, monotonicallyIncreasingTime())
-{
+    m_wasInitialized = false;
 }
 
 Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, double platformTimeStamp)
-    : Event(eventType, canBubbleArg, cancelableArg, defaultScopedFromEventType(eventType), false, platformTimeStamp)
+    : Event(eventType, canBubbleArg, cancelableArg, ComposedMode::Scoped, platformTimeStamp)
 {
 }
 
-Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, EventTarget* relatedTarget, double platformTimeStamp)
-    : Event(eventType, canBubbleArg, cancelableArg, defaultScopedFromEventType(eventType), relatedTarget ? true : false, platformTimeStamp)
+Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, ComposedMode composedMode)
+    : Event(eventType, canBubbleArg, cancelableArg, composedMode, monotonicallyIncreasingTime())
 {
 }
 
-Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, bool scoped)
-    : Event(eventType, canBubbleArg, cancelableArg, scoped, false, monotonicallyIncreasingTime())
-{
-}
-
-Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, bool scoped, bool relatedTargetScoped, double platformTimeStamp)
+Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableArg, ComposedMode composedMode, double platformTimeStamp)
     : m_type(eventType)
     , m_canBubble(canBubbleArg)
     , m_cancelable(cancelableArg)
-    , m_scoped(scoped)
-    , m_relatedTargetScoped(relatedTargetScoped)
+    , m_composed(composedMode == ComposedMode::Composed)
+    , m_isEventTypeScopedInV0(isEventTypeScopedInV0(eventType))
     , m_propagationStopped(false)
     , m_immediatePropagationStopped(false)
     , m_defaultPrevented(false)
     , m_defaultHandled(false)
     , m_cancelBubble(false)
+    , m_wasInitialized(true)
     , m_isTrusted(false)
-    , m_handlingPassive(false)
+    , m_preventDefaultCalledOnUncancelableEvent(false)
+    , m_handlingPassive(PassiveMode::NotPassive)
     , m_eventPhase(0)
     , m_currentTarget(nullptr)
-    , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
     , m_platformTimeStamp(platformTimeStamp)
 {
 }
 
 Event::Event(const AtomicString& eventType, const EventInit& initializer)
-    : Event(eventType, initializer.bubbles(), initializer.cancelable(), initializer.scoped(), initializer.relatedTargetScoped(), monotonicallyIncreasingTime())
+    : Event(eventType, initializer.bubbles(), initializer.cancelable(), initializer.composed() ? ComposedMode::Composed : ComposedMode::Scoped, monotonicallyIncreasingTime())
 {
 }
 
 Event::~Event()
 {
+}
+
+bool Event::isScopedInV0() const
+{
+    return isTrusted() && m_isEventTypeScopedInV0;
 }
 
 void Event::initEvent(const AtomicString& eventTypeArg, bool canBubbleArg, bool cancelableArg)
@@ -114,19 +109,19 @@ void Event::initEvent(const AtomicString& eventTypeArg, bool canBubbleArg, bool 
 
 void Event::initEvent(const AtomicString& eventTypeArg, bool canBubbleArg, bool cancelableArg, EventTarget* relatedTarget)
 {
-    if (dispatched())
+    if (isBeingDispatched())
         return;
 
+    m_wasInitialized = true;
     m_propagationStopped = false;
     m_immediatePropagationStopped = false;
     m_defaultPrevented = false;
     m_isTrusted = false;
+    m_preventDefaultCalledOnUncancelableEvent = false;
 
     m_type = eventTypeArg;
     m_canBubble = canBubbleArg;
     m_cancelable = cancelableArg;
-
-    m_relatedTargetScoped = relatedTarget ? true : false;
 }
 
 bool Event::legacyReturnValue(ExecutionContext* executionContext) const
@@ -230,15 +225,33 @@ bool Event::isBeforeUnloadEvent() const
 
 void Event::preventDefault()
 {
-    if (m_handlingPassive) {
+    if (m_handlingPassive != PassiveMode::NotPassive) {
+        m_preventDefaultCalledDuringPassive = true;
+
         const LocalDOMWindow* window = m_eventPath ? m_eventPath->windowEventContext().window() : 0;
-        if (window)
-            window->printErrorMessage("Unable to preventDefault inside passive event listener invocation.");
+        if (window) {
+            const char* devToolsMsg = nullptr;
+            switch (m_handlingPassive) {
+            case PassiveMode::NotPassive:
+                NOTREACHED();
+                break;
+            case PassiveMode::Passive:
+                devToolsMsg = "Unable to preventDefault inside passive event listener invocation.";
+                break;
+            case PassiveMode::PassiveForcedDocumentLevel:
+                devToolsMsg = "Unable to preventDefault inside passive event listener due to target being treated as passive. See https://www.chromestatus.com/features/5093566007214080";
+                break;
+            }
+            if (devToolsMsg)
+                window->printErrorMessage(devToolsMsg);
+        }
         return;
     }
 
     if (m_cancelable)
         m_defaultPrevented = true;
+    else
+        m_preventDefaultCalledOnUncancelableEvent = true;
 }
 
 void Event::setTarget(EventTarget* target)
@@ -278,23 +291,29 @@ HeapVector<Member<EventTarget>> Event::path(ScriptState* scriptState) const
     return pathInternal(scriptState, NonEmptyAfterDispatch);
 }
 
-HeapVector<Member<EventTarget>> Event::deepPath(ScriptState* scriptState) const
+HeapVector<Member<EventTarget>> Event::composedPath(ScriptState* scriptState) const
 {
     return pathInternal(scriptState, EmptyAfterDispatch);
+}
+
+void Event::setHandlingPassive(PassiveMode mode)
+{
+    m_handlingPassive = mode;
+    m_preventDefaultCalledDuringPassive = false;
 }
 
 HeapVector<Member<EventTarget>> Event::pathInternal(ScriptState* scriptState, EventPathMode mode) const
 {
     if (m_target)
-        OriginsUsingFeatures::countOriginOrIsolatedWorldHumanReadableName(scriptState, *m_target, OriginsUsingFeatures::Feature::EventPath);
+        HostsUsingFeatures::countHostOrIsolatedWorldHumanReadableName(scriptState, *m_target, HostsUsingFeatures::Feature::EventPath);
 
     if (!m_currentTarget) {
-        ASSERT(m_eventPhase == Event::NONE);
+        DCHECK_EQ(Event::kNone, m_eventPhase);
         if (!m_eventPath) {
             // Before dispatching the event
             return HeapVector<Member<EventTarget>>();
         }
-        ASSERT(!m_eventPath->isEmpty());
+        DCHECK(!m_eventPath->isEmpty());
         // After dispatching the event
         if (mode == EmptyAfterDispatch)
             return HeapVector<Member<EventTarget>>();
@@ -302,19 +321,19 @@ HeapVector<Member<EventTarget>> Event::pathInternal(ScriptState* scriptState, Ev
     }
 
     if (Node* node = m_currentTarget->toNode()) {
-        ASSERT(m_eventPath);
+        DCHECK(m_eventPath);
         size_t eventPathSize = m_eventPath->size();
         for (size_t i = 0; i < eventPathSize; ++i) {
             if (node == (*m_eventPath)[i].node()) {
                 return (*m_eventPath)[i].treeScopeEventContext().ensureEventPath(*m_eventPath);
             }
         }
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
 
     // Returns [window] for events that are directly dispatched to the window object;
     // e.g., window.load, pageshow, etc.
-    if (LocalDOMWindow* window = m_currentTarget->toDOMWindow())
+    if (LocalDOMWindow* window = m_currentTarget->toLocalDOMWindow())
         return HeapVector<Member<EventTarget>>(1, window);
 
     return HeapVector<Member<EventTarget>>();
@@ -325,34 +344,24 @@ EventDispatchMediator* Event::createMediator()
     return EventDispatchMediator::create(this);
 }
 
-EventTarget* Event::currentTarget() const
-{
-    if (!m_currentTarget)
-        return nullptr;
-    Node* node = m_currentTarget->toNode();
-    if (node && node->isSVGElement()) {
-        if (SVGElement* svgElement = toSVGElement(node)->correspondingElement())
-            return svgElement;
-    }
-    return m_currentTarget.get();
-}
-
 double Event::timeStamp(ScriptState* scriptState) const
 {
     double timeStamp = 0;
-    // TODO(majidvp): Get rid of m_createTime once the flag is enabled by default;
-    if (UNLIKELY(RuntimeEnabledFeatures::hiResEventTimeStampEnabled())) {
-        // Only expose monotonic time after changing its origin to its target
-        // document's time origin.
-        if (scriptState && scriptState->domWindow()) {
-            Performance* performance = DOMWindowPerformance::performance(*scriptState->domWindow());
-            timeStamp = performance->monotonicTimeToDOMHighResTimeStamp(m_platformTimeStamp);
-        }
-    } else {
-        timeStamp = m_createTime;
+    if (scriptState && scriptState->domWindow()) {
+        Performance* performance = DOMWindowPerformance::performance(*scriptState->domWindow());
+        timeStamp = performance->monotonicTimeToDOMHighResTimeStamp(m_platformTimeStamp);
     }
 
     return timeStamp;
+}
+
+void Event::setCancelBubble(ExecutionContext* context, bool cancel)
+{
+    if (!m_cancelBubble && cancel)
+        UseCounter::count(context, UseCounter::EventCancelBubbleWasChangedToTrue);
+    else if (m_cancelBubble && !cancel)
+        UseCounter::count(context, UseCounter::EventCancelBubbleWasChangedToFalse);
+    m_cancelBubble = cancel;
 }
 
 DEFINE_TRACE(Event)

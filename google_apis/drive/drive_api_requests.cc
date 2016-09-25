@@ -5,7 +5,6 @@
 #include "google_apis/drive/drive_api_requests.h"
 
 #include <stddef.h>
-#include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -16,6 +15,8 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task_runner_util.h"
 #include "base/values.h"
@@ -91,7 +92,8 @@ void AttachProperties(const Properties& properties,
 
   base::ListValue* const properties_value = new base::ListValue;
   for (const auto& property : properties) {
-    base::DictionaryValue* const property_value = new base::DictionaryValue;
+    std::unique_ptr<base::DictionaryValue> property_value(
+        new base::DictionaryValue);
     std::string visibility_as_string;
     switch (property.visibility()) {
       case Property::VISIBILITY_PRIVATE:
@@ -104,7 +106,7 @@ void AttachProperties(const Properties& properties,
     property_value->SetString("visibility", visibility_as_string);
     property_value->SetString("key", property.key());
     property_value->SetString("value", property.value());
-    properties_value->Append(property_value);
+    properties_value->Append(std::move(property_value));
   }
   request_body->Set("properties", properties_value);
 }
@@ -125,8 +127,7 @@ std::string CreateMultipartUploadMetadataJson(
   // Fill parent link.
   if (!parent_resource_id.empty()) {
     std::unique_ptr<base::ListValue> parents(new base::ListValue);
-    parents->Append(
-        google_apis::util::CreateParentValue(parent_resource_id).release());
+    parents->Append(google_apis::util::CreateParentValue(parent_resource_id));
     root.Set("parents", parents.release());
   }
 
@@ -145,37 +146,6 @@ std::string CreateMultipartUploadMetadataJson(
   base::JSONWriter::Write(root, &json_string);
   return json_string;
 }
-
-// Splits |string| into lines by |kHttpBr|.
-// Each line does not include |kHttpBr|.
-void SplitIntoLines(const std::string& string,
-                    std::vector<base::StringPiece>* output) {
-  const size_t br_size = std::string(kHttpBr).size();
-  std::string::const_iterator it = string.begin();
-  std::vector<base::StringPiece> lines;
-  while (true) {
-    const std::string::const_iterator next_pos =
-        std::search(it, string.end(), kHttpBr, kHttpBr + br_size);
-    lines.push_back(base::StringPiece(it, next_pos));
-    if (next_pos == string.end())
-      break;
-    it = next_pos + br_size;
-  }
-  output->swap(lines);
-}
-
-// Remove transport padding (spaces and tabs at the end of line) from |piece|.
-base::StringPiece TrimTransportPadding(const base::StringPiece& piece) {
-  size_t trim_size = 0;
-  while (trim_size < piece.size() &&
-         (piece[piece.size() - 1 - trim_size] == ' ' ||
-          piece[piece.size() - 1 - trim_size] == '\t')) {
-    ++trim_size;
-  }
-  return piece.substr(0, piece.size() - trim_size);
-}
-
-void EmptyClosure(std::unique_ptr<BatchableDelegate>) {}
 
 }  // namespace
 
@@ -221,10 +191,9 @@ bool ParseMultipartResponse(const std::string& content_type,
   if (content_type_piece.empty())
     return false;
   if (content_type_piece[0] == '"') {
-    if (content_type_piece.size() <= 2 ||
-        content_type_piece[content_type_piece.size() - 1] != '"') {
+    if (content_type_piece.size() <= 2 || content_type_piece.back() != '"')
       return false;
-    }
+
     content_type_piece =
         content_type_piece.substr(1, content_type_piece.size() - 2);
   }
@@ -234,8 +203,8 @@ bool ParseMultipartResponse(const std::string& content_type,
   const std::string header = "--" + boundary;
   const std::string terminator = "--" + boundary + "--";
 
-  std::vector<base::StringPiece> lines;
-  SplitIntoLines(response, &lines);
+  std::vector<base::StringPiece> lines = base::SplitStringPieceUsingSubstr(
+      response, kHttpBr, base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
 
   enum {
     STATE_START,
@@ -277,7 +246,8 @@ bool ParseMultipartResponse(const std::string& content_type,
       body.clear();
       continue;
     }
-    const base::StringPiece chopped_line = TrimTransportPadding(line);
+    const base::StringPiece chopped_line =
+        base::TrimString(line, " \t", base::TRIM_TRAILING);
     const bool is_new_part = chopped_line == header;
     const bool was_last_part = chopped_line == terminator;
     if (is_new_part || was_last_part) {
@@ -418,9 +388,9 @@ bool FilesInsertRequest::GetContentData(std::string* upload_content_type,
   if (!parents_.empty()) {
     base::ListValue* parents_value = new base::ListValue;
     for (size_t i = 0; i < parents_.size(); ++i) {
-      base::DictionaryValue* parent = new base::DictionaryValue;
+      std::unique_ptr<base::DictionaryValue> parent(new base::DictionaryValue);
       parent->SetString("id", parents_[i]);
-      parents_value->Append(parent);
+      parents_value->Append(std::move(parent));
     }
     root.Set("parents", parents_value);
   }
@@ -496,9 +466,9 @@ bool FilesPatchRequest::GetContentData(std::string* upload_content_type,
   if (!parents_.empty()) {
     base::ListValue* parents_value = new base::ListValue;
     for (size_t i = 0; i < parents_.size(); ++i) {
-      base::DictionaryValue* parent = new base::DictionaryValue;
+      std::unique_ptr<base::DictionaryValue> parent(new base::DictionaryValue);
       parent->SetString("id", parents_[i]);
-      parents_value->Append(parent);
+      parents_value->Append(std::move(parent));
     }
     root.Set("parents", parents_value);
   }
@@ -550,9 +520,9 @@ bool FilesCopyRequest::GetContentData(std::string* upload_content_type,
   if (!parents_.empty()) {
     base::ListValue* parents_value = new base::ListValue;
     for (size_t i = 0; i < parents_.size(); ++i) {
-      base::DictionaryValue* parent = new base::DictionaryValue;
+      std::unique_ptr<base::DictionaryValue> parent(new base::DictionaryValue);
       parent->SetString("id", parents_[i]);
-      parents_value->Append(parent);
+      parents_value->Append(std::move(parent));
     }
     root.Set("parents", parents_value);
   }
@@ -833,7 +803,7 @@ bool InitiateUploadNewFileRequest::GetContentData(
 
   // Fill parent link.
   std::unique_ptr<base::ListValue> parents(new base::ListValue);
-  parents->Append(util::CreateParentValue(parent_resource_id_).release());
+  parents->Append(util::CreateParentValue(parent_resource_id_));
   root.Set("parents", parents.release());
 
   if (!modified_date_.is_null())
@@ -893,7 +863,7 @@ bool InitiateUploadExistingFileRequest::GetContentData(
   base::DictionaryValue root;
   if (!parent_resource_id_.empty()) {
     std::unique_ptr<base::ListValue> parents(new base::ListValue);
-    parents->Append(util::CreateParentValue(parent_resource_id_).release());
+    parents->Append(util::CreateParentValue(parent_resource_id_));
     root.Set("parents", parents.release());
   }
 
@@ -1171,11 +1141,10 @@ bool PermissionsInsertRequest::GetContentData(std::string* upload_content_type,
 
 SingleBatchableDelegateRequest::SingleBatchableDelegateRequest(
     RequestSender* sender,
-    BatchableDelegate* delegate)
+    std::unique_ptr<BatchableDelegate> delegate)
     : UrlFetchRequestBase(sender),
-      delegate_(delegate),
-      weak_ptr_factory_(this) {
-}
+      delegate_(std::move(delegate)),
+      weak_ptr_factory_(this) {}
 
 SingleBatchableDelegateRequest::~SingleBatchableDelegateRequest() {
 }
@@ -1313,7 +1282,7 @@ ScopedVector<BatchUploadChildEntry>::iterator BatchUploadRequest::GetChildEntry(
 void BatchUploadRequest::MayCompletePrepare() {
   if (!committed_ || prepare_callback_.is_null())
     return;
-  for (const auto& child : child_requests_) {
+  for (auto* child : child_requests_) {
     if (!child->prepared)
       return;
   }
@@ -1321,7 +1290,7 @@ void BatchUploadRequest::MayCompletePrepare() {
   // Build multipart body here.
   int64_t total_size = 0;
   std::vector<ContentTypeAndData> parts;
-  for (auto& child : child_requests_) {
+  for (auto* child : child_requests_) {
     std::string type;
     std::string data;
     const bool result = child->request->GetContentData(&type, &data);
@@ -1349,10 +1318,7 @@ void BatchUploadRequest::MayCompletePrepare() {
     child->data_size = data.size();
     total_size += data.size();
 
-    parts.push_back(ContentTypeAndData());
-    parts.back().type = kHttpContentType;
-    parts.back().data = header;
-    parts.back().data.append(data);
+    parts.push_back(ContentTypeAndData({kHttpContentType, header + data}));
   }
 
   UMA_HISTOGRAM_COUNTS_100(kUMADriveTotalFileCountInBatchUpload, parts.size());
@@ -1397,11 +1363,18 @@ std::vector<std::string> BatchUploadRequest::GetExtraRequestHeaders() const {
 
 void BatchUploadRequest::ProcessURLFetchResults(const net::URLFetcher* source) {
   // Return the detailed raw HTTP code if the error code is abstracted
-  // DRIVE_OTHER_ERROR.
-  UMA_HISTOGRAM_SPARSE_SLOWLY(kUMADriveBatchUploadResponseCode,
-                              GetErrorCode() != DRIVE_OTHER_ERROR
-                                  ? GetErrorCode()
-                                  : source->GetResponseCode());
+  // DRIVE_OTHER_ERROR. If HTTP connection is failed and the status code is -1,
+  // return network status error.
+  int histogram_error = 0;
+  if (GetErrorCode() != DRIVE_OTHER_ERROR) {
+    histogram_error = GetErrorCode();
+  } else if (source->GetResponseCode() != -1) {
+    histogram_error = source->GetResponseCode();
+  } else {
+    histogram_error = source->GetStatus().error();
+  }
+  UMA_HISTOGRAM_SPARSE_SLOWLY(
+      kUMADriveBatchUploadResponseCode, histogram_error);
 
   if (!IsSuccessfulDriveApiErrorCode(GetErrorCode())) {
     RunCallbackOnPrematureFailure(GetErrorCode());
@@ -1423,12 +1396,12 @@ void BatchUploadRequest::ProcessURLFetchResults(const net::URLFetcher* source) {
   }
 
   for (size_t i = 0; i < parts.size(); ++i) {
-    BatchableDelegate* const delegate = child_requests_[i]->request.get();
-    // Pass onwership of |delegate| so that child_requests_.clear() won't
+    BatchableDelegate* delegate = child_requests_[i]->request.get();
+    // Pass ownership of |delegate| so that child_requests_.clear() won't
     // kill the delegate. It has to be deleted after the notification.
-    delegate->NotifyResult(
-        parts[i].code, parts[i].body,
-        base::Bind(&EmptyClosure, base::Passed(&child_requests_[i]->request)));
+    delegate->NotifyResult(parts[i].code, parts[i].body,
+                           base::Bind(&base::DeletePointer<BatchableDelegate>,
+                                      child_requests_[i]->request.release()));
   }
   child_requests_.clear();
 
@@ -1436,16 +1409,15 @@ void BatchUploadRequest::ProcessURLFetchResults(const net::URLFetcher* source) {
 }
 
 void BatchUploadRequest::RunCallbackOnPrematureFailure(DriveApiErrorCode code) {
-  for (auto child : child_requests_) {
+  for (auto* child : child_requests_)
     child->request->NotifyError(code);
-  }
   child_requests_.clear();
 }
 
 void BatchUploadRequest::OnURLFetchUploadProgress(const net::URLFetcher* source,
                                                   int64_t current,
                                                   int64_t total) {
-  for (auto child : child_requests_) {
+  for (auto* child : child_requests_) {
     if (child->data_offset <= current &&
         current <= child->data_offset + child->data_size) {
       child->request->NotifyUploadProgress(source, current - child->data_offset,

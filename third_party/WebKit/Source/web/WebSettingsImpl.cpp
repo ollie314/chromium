@@ -73,6 +73,11 @@ void WebSettingsImpl::setFixedFontFamily(const WebString& font, UScriptCode scri
         m_settings->notifyGenericFontFamilyChange();
 }
 
+void WebSettingsImpl::setForcePreloadNoneForMediaElements(bool enabled)
+{
+    m_settings->setForcePreloadNoneForMediaElements(enabled);
+}
+
 void WebSettingsImpl::setForceZeroLayoutHeight(bool enabled)
 {
     m_settings->setForceZeroLayoutHeight(enabled);
@@ -153,6 +158,11 @@ void WebSettingsImpl::setAutoZoomFocusedNodeToLegibleScale(bool autoZoomFocusedN
     m_autoZoomFocusedNodeToLegibleScale = autoZoomFocusedNodeToLegibleScale;
 }
 
+void WebSettingsImpl::setBrowserSideNavigationEnabled(bool enabled)
+{
+    m_settings->setBrowserSideNavigationEnabled(enabled);
+}
+
 void WebSettingsImpl::setTextAutosizingEnabled(bool enabled)
 {
     m_devToolsEmulator->setTextAutosizingEnabled(enabled);
@@ -203,11 +213,6 @@ void WebSettingsImpl::setWebSecurityEnabled(bool enabled)
     m_settings->setWebSecurityEnabled(enabled);
 }
 
-void WebSettingsImpl::setWheelGesturesEnabled(bool enabled)
-{
-    m_settings->setWheelGesturesEnabled(enabled);
-}
-
 void WebSettingsImpl::setJavaScriptCanOpenWindowsAutomatically(bool canOpenWindows)
 {
     m_settings->setJavaScriptCanOpenWindowsAutomatically(canOpenWindows);
@@ -248,11 +253,6 @@ void WebSettingsImpl::setReportScreenSizeInPhysicalPixelsQuirk(bool reportScreen
     m_settings->setReportScreenSizeInPhysicalPixelsQuirk(reportScreenSizeInPhysicalPixelsQuirk);
 }
 
-void WebSettingsImpl::setRootLayerScrolls(bool rootLayerScrolls)
-{
-    m_settings->setRootLayerScrolls(rootLayerScrolls);
-}
-
 void WebSettingsImpl::setRubberBandingOnCompositorThread(bool rubberBandingOnCompositorThread)
 {
 }
@@ -290,6 +290,11 @@ void WebSettingsImpl::setLoadWithOverviewMode(bool enabled)
 void WebSettingsImpl::setShouldReuseGlobalForUnownedMainFrame(bool enabled)
 {
     m_settings->setShouldReuseGlobalForUnownedMainFrame(enabled);
+}
+
+void WebSettingsImpl::setProgressBarCompletion(ProgressBarCompletion progressBarCompletion)
+{
+    m_settings->setProgressBarCompletion(static_cast<blink::ProgressBarCompletion>(progressBarCompletion));
 }
 
 void WebSettingsImpl::setPluginsEnabled(bool enabled)
@@ -335,11 +340,6 @@ void WebSettingsImpl::setShrinksViewportContentToFit(bool shrinkViewportContent)
 void WebSettingsImpl::setSpatialNavigationEnabled(bool enabled)
 {
     m_settings->setSpatialNavigationEnabled(enabled);
-}
-
-void WebSettingsImpl::setUsesEncodingDetector(bool usesDetector)
-{
-    m_settings->setUsesEncodingDetector(usesDetector);
 }
 
 void WebSettingsImpl::setTextAreasAreResizable(bool areResizable)
@@ -502,6 +502,11 @@ void WebSettingsImpl::setWebGLErrorsToConsoleEnabled(bool enabled)
     m_settings->setWebGLErrorsToConsoleEnabled(enabled);
 }
 
+void WebSettingsImpl::setAlwaysShowContextMenuOnTouch(bool enabled)
+{
+    m_settings->setAlwaysShowContextMenuOnTouch(enabled);
+}
+
 void WebSettingsImpl::setShowContextMenuOnMouseUp(bool enabled)
 {
     m_settings->setShowContextMenuOnMouseUp(enabled);
@@ -532,14 +537,14 @@ void WebSettingsImpl::setMockScrollbarsEnabled(bool enabled)
     m_settings->setMockScrollbarsEnabled(enabled);
 }
 
+void WebSettingsImpl::setHideScrollbars(bool enabled)
+{
+    m_settings->setHideScrollbars(enabled);
+}
+
 void WebSettingsImpl::setMockGestureTapHighlightsEnabled(bool enabled)
 {
     m_settings->setMockGestureTapHighlightsEnabled(enabled);
-}
-
-void WebSettingsImpl::setAccelerated2dCanvasEnabled(bool enabled)
-{
-    m_settings->setAccelerated2dCanvasEnabled(enabled);
 }
 
 void WebSettingsImpl::setAccelerated2dCanvasMSAASampleCount(int count)
@@ -567,6 +572,11 @@ void WebSettingsImpl::setMinimumAccelerated2dCanvasSize(int numPixels)
     m_settings->setMinimumAccelerated2dCanvasSize(numPixels);
 }
 
+void WebSettingsImpl::setHistoryEntryRequiresUserGesture(bool enabled)
+{
+    m_settings->setHistoryEntryRequiresUserGesture(enabled);
+}
+
 void WebSettingsImpl::setHyperlinkAuditingEnabled(bool enabled)
 {
     m_settings->setHyperlinkAuditingEnabled(enabled);
@@ -577,11 +587,6 @@ void WebSettingsImpl::setAutoplayExperimentMode(const WebString& mode)
     m_settings->setAutoplayExperimentMode(mode);
 }
 
-void WebSettingsImpl::setUnifiedTextCheckerEnabled(bool enabled)
-{
-    m_settings->setUnifiedTextCheckerEnabled(enabled);
-}
-
 void WebSettingsImpl::setCaretBrowsingEnabled(bool enabled)
 {
     m_settings->setCaretBrowsingEnabled(enabled);
@@ -590,11 +595,6 @@ void WebSettingsImpl::setCaretBrowsingEnabled(bool enabled)
 void WebSettingsImpl::setValidationMessageTimerMagnification(int newValue)
 {
     m_settings->setValidationMessageTimerMagnification(newValue);
-}
-
-void WebSettingsImpl::setAllowDisplayOfInsecureContent(bool enabled)
-{
-    m_settings->setAllowDisplayOfInsecureContent(enabled);
 }
 
 void WebSettingsImpl::setAllowRunningOfInsecureContent(bool enabled)
@@ -625,6 +625,11 @@ void WebSettingsImpl::setStrictPowerfulFeatureRestrictions(bool enabled)
 void WebSettingsImpl::setStrictlyBlockBlockableMixedContent(bool enabled)
 {
     m_settings->setStrictlyBlockBlockableMixedContent(enabled);
+}
+
+void WebSettingsImpl::setPassiveEventListenerDefault(PassiveEventListenerDefault defaultValue)
+{
+    m_settings->setPassiveListenerDefault(static_cast<PassiveListenerDefault>(defaultValue));
 }
 
 void WebSettingsImpl::setPasswordEchoEnabled(bool flag)
@@ -690,16 +695,6 @@ bool WebSettingsImpl::doubleTapToZoomEnabled() const
 bool WebSettingsImpl::mockGestureTapHighlightsEnabled() const
 {
     return m_settings->mockGestureTapHighlightsEnabled();
-}
-
-bool WebSettingsImpl::wheelGesturesEnabled() const
-{
-    return m_settings->wheelGesturesEnabled();
-}
-
-bool WebSettingsImpl::mainFrameResizesAreOrientationChanges() const
-{
-    return m_devToolsEmulator->mainFrameResizesAreOrientationChanges();
 }
 
 bool WebSettingsImpl::shrinksViewportContentToFit() const
@@ -796,6 +791,11 @@ void WebSettingsImpl::setMainFrameResizesAreOrientationChanges(bool enabled)
 void WebSettingsImpl::setV8CacheOptions(V8CacheOptions options)
 {
     m_settings->setV8CacheOptions(static_cast<blink::V8CacheOptions>(options));
+}
+
+void WebSettingsImpl::setV8CacheStrategiesForCacheStorage(V8CacheStrategiesForCacheStorage strategies)
+{
+    m_settings->setV8CacheStrategiesForCacheStorage(static_cast<blink::V8CacheStrategiesForCacheStorage>(strategies));
 }
 
 void WebSettingsImpl::setViewportStyle(WebViewportStyle style)

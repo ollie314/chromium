@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 
+#include "remoting/protocol/errors.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
 #include "third_party/webrtc/p2p/base/candidate.h"
 
@@ -16,6 +17,37 @@ namespace remoting {
 namespace protocol {
 
 class ContentDescription;
+
+// Represents an address of a Chromoting endpoint and its routing channel.
+// TODO(kelvinp): Move the struct to remoting/signaling. Potentially we could
+// update SignalStrategy interface to use this instead of jid for addressing.
+struct SignalingAddress {
+  enum class Channel { LCS, XMPP };
+
+  SignalingAddress();
+  SignalingAddress(const std::string& jid);
+  SignalingAddress(const std::string& jid,
+                   const std::string& endpoint_id,
+                   Channel channel);
+
+  // Represents the |to| or |from| field in an IQ stanza.
+  std::string jid;
+
+  // Represents the identifier of an endpoint. In  LCS, this is the LCS address
+  // encoded in a JID like format.  In XMPP, it is empty.
+  std::string endpoint_id;
+
+  Channel channel;
+
+  inline const std::string& id() const {
+    return (channel == Channel::LCS) ? endpoint_id : jid;
+  }
+
+  inline bool empty() const { return jid.empty(); }
+
+  bool operator==(const SignalingAddress& other);
+  bool operator!=(const SignalingAddress& other);
+};
 
 struct JingleMessage {
   enum ActionType {
@@ -40,7 +72,7 @@ struct JingleMessage {
 
 
   JingleMessage();
-  JingleMessage(const std::string& to_value,
+  JingleMessage(const SignalingAddress& to,
                 ActionType action_value,
                 const std::string& sid_value);
   ~JingleMessage();
@@ -55,8 +87,8 @@ struct JingleMessage {
 
   std::unique_ptr<buzz::XmlElement> ToXml() const;
 
-  std::string from;
-  std::string to;
+  SignalingAddress from;
+  SignalingAddress to;
   ActionType action = UNKNOWN_ACTION;
   std::string sid;
 
@@ -73,6 +105,11 @@ struct JingleMessage {
   // message. Useful mainly for session-terminate messages, but Jingle
   // spec allows it in any message.
   Reason reason = UNKNOWN_REASON;
+
+  // Value from the <google:remoting:error-code> tag if it is present in the
+  // message. Useful mainly for session-terminate messages. If it's UNKNOWN,
+  // or reason is UNKNOWN_REASON, this field will be ignored in the xml output.
+  ErrorCode error_code = UNKNOWN_ERROR;
 };
 
 struct JingleMessageReply {

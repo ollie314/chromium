@@ -41,6 +41,7 @@
 #include "core/events/Event.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/FormData.h"
 #include "core/html/forms/FormController.h"
 #include "core/html/parser/HTMLParserIdioms.h"
@@ -192,8 +193,10 @@ void HTMLTextAreaElement::parseAttribute(const QualifiedName& name, const Atomic
     } else if (name == accesskeyAttr) {
         // ignore for the moment
     } else if (name == maxlengthAttr) {
+        UseCounter::count(document(), UseCounter::TextAreaMaxLength);
         setNeedsValidityCheck();
     } else if (name == minlengthAttr) {
+        UseCounter::count(document(), UseCounter::TextAreaMinLength);
         setNeedsValidityCheck();
     } else {
         HTMLTextFormControlElement::parseAttribute(name, oldValue, value);
@@ -210,7 +213,7 @@ void HTMLTextAreaElement::appendToFormData(FormData& formData)
     if (name().isEmpty())
         return;
 
-    document().updateLayout();
+    document().updateStyleAndLayout();
 
     const String& text = (m_wrap == HardWrap) ? valueWithHardLineBreaks() : value();
     formData.append(name(), text);
@@ -251,8 +254,13 @@ void HTMLTextAreaElement::updateFocusAppearance(SelectionBehaviorOnFocus selecti
     case SelectionBehaviorOnFocus::None:
         return;
     }
-    if (document().frame())
+    if (document().frame()) {
+        // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+        // needs to be audited.  See http://crbug.com/590369 for more details.
+        document().updateStyleAndLayoutIgnorePendingStylesheets();
+
         document().frame()->selection().revealSelection();
+    }
 }
 
 void HTMLTextAreaElement::defaultEventHandler(Event* event)
@@ -273,7 +281,7 @@ void HTMLTextAreaElement::handleFocusEvent(Element*, WebFocusType)
 
 void HTMLTextAreaElement::subtreeHasChanged()
 {
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     // The innerEditor should have either Text nodes or a placeholder break
     // element. If we see other nodes, it's a bug in editing code and we should
     // fix it.
@@ -281,8 +289,8 @@ void HTMLTextAreaElement::subtreeHasChanged()
     for (Node& node : NodeTraversal::descendantsOf(*innerEditor)) {
         if (node.isTextNode())
             continue;
-        ASSERT(isHTMLBRElement(node));
-        ASSERT(&node == innerEditor->lastChild());
+        DCHECK(isHTMLBRElement(node));
+        DCHECK_EQ(&node, innerEditor->lastChild());
     }
 #endif
     addPlaceholderBreakElementIfNecessary();
@@ -298,14 +306,14 @@ void HTMLTextAreaElement::subtreeHasChanged()
     // When typing in a textarea, childrenChanged is not called, so we need to force the directionality check.
     calculateAndAdjustDirectionality();
 
-    ASSERT(document().isActive());
+    DCHECK(document().isActive());
     document().frameHost()->chromeClient().didChangeValueInTextField(*this);
 }
 
 void HTMLTextAreaElement::handleBeforeTextInsertedEvent(BeforeTextInsertedEvent* event) const
 {
-    ASSERT(event);
-    ASSERT(layoutObject());
+    DCHECK(event);
+    DCHECK(layoutObject());
     int signedMaxLength = maxLength();
     if (signedMaxLength < 0)
         return;
@@ -323,9 +331,13 @@ void HTMLTextAreaElement::handleBeforeTextInsertedEvent(BeforeTextInsertedEvent*
     // that case, and nothing in the text field will be removed.
     unsigned selectionLength = 0;
     if (focused()) {
+        // TODO(xiaochengh): The use of updateStyleAndLayoutIgnorePendingStylesheets
+        // needs to be audited.  See http://crbug.com/590369 for more details.
+        document().updateStyleAndLayoutIgnorePendingStylesheets();
+
         selectionLength = computeLengthForSubmission(document().frame()->selection().selectedText());
     }
-    ASSERT(currentLength >= selectionLength);
+    DCHECK_GE(currentLength, selectionLength);
     unsigned baseLength = currentLength - selectionLength;
     unsigned appendableLength = unsignedMaxLength > baseLength ? unsignedMaxLength - baseLength : 0;
     event->setText(sanitizeUserInputValue(event->text(), appendableLength));
@@ -372,7 +384,7 @@ void HTMLTextAreaElement::setValue(const String& value, TextFieldEventBehavior e
     setValueCommon(value, eventBehavior);
     m_isDirty = true;
     if (document().focusedElement() == this)
-        document().frameHost()->chromeClient().didUpdateTextOfFocusedElementByNonUserInput();
+        document().frameHost()->chromeClient().didUpdateTextOfFocusedElementByNonUserInput(*document().frame());
 }
 
 void HTMLTextAreaElement::setNonDirtyValue(const String& value)
@@ -399,7 +411,7 @@ void HTMLTextAreaElement::setValueCommon(const String& newValue, TextFieldEventB
             if (isFinishedParsingChildren()) {
                 // Set the caret to the end of the text value except for initialize.
                 unsigned endOfString = m_value.length();
-                setSelectionRange(endOfString, endOfString, SelectionHasNoDirection, NotDispatchSelectEvent, ChangeSelectionIfFocused);
+                setSelectionRange(endOfString, endOfString);
             }
         }
         return;
@@ -416,7 +428,7 @@ void HTMLTextAreaElement::setValueCommon(const String& newValue, TextFieldEventB
     if (isFinishedParsingChildren()) {
         // Set the caret to the end of the text value except for initialize.
         unsigned endOfString = m_value.length();
-        setSelectionRange(endOfString, endOfString, SelectionHasNoDirection, NotDispatchSelectEvent, ChangeSelectionIfFocused);
+        setSelectionRange(endOfString, endOfString);
     }
 
     notifyFormStateChanged();

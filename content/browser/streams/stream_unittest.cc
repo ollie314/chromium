@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/test/test_simple_task_runner.h"
 #include "content/browser/streams/stream.h"
 #include "content/browser/streams/stream_read_observer.h"
@@ -42,8 +43,7 @@ class StreamTest : public testing::Test {
 
 class TestStreamReader : public StreamReadObserver {
  public:
-  TestStreamReader() : buffer_(new net::GrowableIOBuffer()), completed_(false) {
-  }
+  TestStreamReader() : buffer_(new net::GrowableIOBuffer()) {}
   ~TestStreamReader() override {}
 
   void Read(Stream* stream) {
@@ -67,6 +67,7 @@ class TestStreamReader : public StreamReadObserver {
           EXPECT_FALSE(completed_);
           return;
         case Stream::STREAM_ABORTED:
+          aborted_ = true;
           EXPECT_FALSE(completed_);
           return;
       }
@@ -81,13 +82,13 @@ class TestStreamReader : public StreamReadObserver {
 
   scoped_refptr<net::GrowableIOBuffer> buffer() { return buffer_; }
 
-  bool completed() const {
-    return completed_;
-  }
+  bool completed() const { return completed_; }
+  bool aborted() const { return aborted_; }
 
  private:
   scoped_refptr<net::GrowableIOBuffer> buffer_;
-  bool completed_;
+  bool completed_ = false;
+  bool aborted_ = false;
 };
 
 class TestStreamWriter : public StreamWriteObserver {
@@ -195,12 +196,26 @@ TEST_F(StreamTest, Stream) {
   scoped_refptr<net::IOBuffer> buffer(NewIOBuffer(kBufferSize));
   writer.Write(stream.get(), buffer, kBufferSize);
   stream->Finalize();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(reader.completed());
 
   ASSERT_EQ(reader.buffer()->capacity(), kBufferSize);
   for (int i = 0; i < kBufferSize; i++)
     EXPECT_EQ(buffer->data()[i], reader.buffer()->data()[i]);
+}
+
+TEST_F(StreamTest, Abort) {
+  TestStreamReader reader;
+  TestStreamWriter writer;
+
+  GURL url("blob://stream");
+  scoped_refptr<Stream> stream(new Stream(registry_.get(), &writer, url));
+  EXPECT_TRUE(stream->SetReadObserver(&reader));
+
+  stream->Abort();
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(reader.completed());
+  EXPECT_TRUE(reader.aborted());
 }
 
 // Test that even if a reader receives an empty buffer, once TransferData()
@@ -222,7 +237,7 @@ TEST_F(StreamTest, ClosedReaderDoesNotReturnStreamEmpty) {
   scoped_refptr<net::IOBuffer> buffer(NewIOBuffer(kBufferSize));
   stream->AddData(buffer, kBufferSize);
   stream->Finalize();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(reader.completed());
   EXPECT_EQ(0, reader.buffer()->capacity());
 }
@@ -308,7 +323,7 @@ TEST_F(StreamTest, MemoryExceedMemoryUsageLimit) {
   scoped_refptr<net::IOBuffer> buffer(NewIOBuffer(kBufferSize));
   writer1.Write(stream1.get(), buffer, kBufferSize);
   // Make transfer happen.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   writer2.Write(stream2.get(), buffer, kBufferSize);
 
@@ -337,7 +352,7 @@ TEST_F(StreamTest, UnderMemoryUsageLimit) {
   writer.Write(stream.get(), buffer, kBufferSize);
 
   // Run loop to make |reader| consume the data.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   writer.Write(stream.get(), buffer, kBufferSize);
 
@@ -360,13 +375,13 @@ TEST_F(StreamTest, Flush) {
   writer.Write(stream.get(), buffer, kBufferSize);
 
   // Run loop to make |reader| consume the data.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(0, reader.buffer()->capacity());
 
   stream->Flush();
 
   // Run loop to make |reader| consume the data.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(kBufferSize, reader.buffer()->capacity());
 
   EXPECT_EQ(stream.get(), registry_->GetStream(url).get());

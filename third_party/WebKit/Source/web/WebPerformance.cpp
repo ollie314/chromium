@@ -52,13 +52,13 @@ void WebPerformance::assign(const WebPerformance& other)
 WebNavigationType WebPerformance::navigationType() const
 {
     switch (m_private->navigation()->type()) {
-    case PerformanceNavigation::TYPE_NAVIGATE:
+    case PerformanceNavigation::kTypeNavigate:
         return WebNavigationTypeOther;
-    case PerformanceNavigation::TYPE_RELOAD:
+    case PerformanceNavigation::kTypeReload:
         return WebNavigationTypeReload;
-    case PerformanceNavigation::TYPE_BACK_FORWARD:
+    case PerformanceNavigation::kTypeBackForward:
         return WebNavigationTypeBackForward;
-    case PerformanceNavigation::TYPE_RESERVED:
+    case PerformanceNavigation::kTypeReserved:
         return WebNavigationTypeOther;
     }
     NOTREACHED();
@@ -190,6 +190,11 @@ double WebPerformance::firstContentfulPaint() const
     return millisecondsToSeconds(m_private->timing()->firstContentfulPaint());
 }
 
+double WebPerformance::firstMeaningfulPaint() const
+{
+    return millisecondsToSeconds(m_private->timing()->firstMeaningfulPaint());
+}
+
 double WebPerformance::parseStart() const
 {
     return millisecondsToSeconds(m_private->timing()->parseStart());
@@ -208,6 +213,16 @@ double WebPerformance::parseBlockedOnScriptLoadDuration() const
 double WebPerformance::parseBlockedOnScriptLoadFromDocumentWriteDuration() const
 {
     return millisecondsToSeconds(m_private->timing()->parseBlockedOnScriptLoadFromDocumentWriteDuration());
+}
+
+double WebPerformance::parseBlockedOnScriptExecutionDuration() const
+{
+    return millisecondsToSeconds(m_private->timing()->parseBlockedOnScriptExecutionDuration());
+}
+
+double WebPerformance::parseBlockedOnScriptExecutionFromDocumentWriteDuration() const
+{
+    return millisecondsToSeconds(m_private->timing()->parseBlockedOnScriptExecutionFromDocumentWriteDuration());
 }
 
 WebPerformance::WebPerformance(Performance* performance)

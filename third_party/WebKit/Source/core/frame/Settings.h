@@ -28,12 +28,15 @@
 #define Settings_h
 
 #include "bindings/core/v8/V8CacheOptions.h"
+#include "bindings/core/v8/V8CacheStrategiesForCacheStorage.h"
 #include "core/CoreExport.h"
 #include "core/SettingsMacros.h"
 #include "core/editing/EditingBehaviorTypes.h"
 #include "core/editing/SelectionStrategy.h"
+#include "core/events/AddEventListenerOptionsDefaults.h"
 #include "core/frame/SettingsDelegate.h"
 #include "core/html/track/TextTrackKindUserPreference.h"
+#include "core/loader/FrameLoaderTypes.h"
 #include "platform/Timer.h"
 #include "platform/fonts/GenericFontFamilySettings.h"
 #include "platform/geometry/IntSize.h"
@@ -42,6 +45,7 @@
 #include "public/platform/PointerProperties.h"
 #include "public/platform/WebDisplayMode.h"
 #include "public/platform/WebViewportStyle.h"
+#include <memory>
 
 namespace blink {
 
@@ -49,7 +53,7 @@ class CORE_EXPORT Settings {
     WTF_MAKE_NONCOPYABLE(Settings);
     USING_FAST_MALLOC(Settings);
 public:
-    static PassOwnPtr<Settings> create();
+    static std::unique_ptr<Settings> create();
 
     GenericFontFamilySettings& genericFontFamilySettings() { return m_genericFontFamilySettings; }
     void notifyGenericFontFamilyChange() { invalidate(SettingsDelegate::FontFamilyChange); }

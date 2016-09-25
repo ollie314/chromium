@@ -33,6 +33,9 @@
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/Text.h"
 #include "core/dom/shadow/FlatTreeTraversal.h"
+#include "core/editing/EditingUtilities.h"
+#include "core/editing/markers/DocumentMarkerController.h"
+#include "core/frame/FrameView.h"
 #include "core/html/HTMLDListElement.h"
 #include "core/html/HTMLFieldSetElement.h"
 #include "core/html/HTMLFrameElementBase.h"
@@ -50,6 +53,7 @@
 #include "core/html/HTMLTableRowElement.h"
 #include "core/html/HTMLTableSectionElement.h"
 #include "core/html/HTMLTextAreaElement.h"
+#include "core/html/LabelsNodeList.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/shadow/MediaControlElements.h"
 #include "core/layout/LayoutBlockFlow.h"
@@ -143,7 +147,7 @@ void AXNodeObject::alterSliderValue(bool increase)
     axObjectCache().postNotification(getNode(), AXObjectCacheImpl::AXValueChanged);
 }
 
-AXObject* AXNodeObject::activeDescendant() const
+AXObject* AXNodeObject::activeDescendant()
 {
     if (!getNode() || !getNode()->isElementNode())
         return nullptr;
@@ -433,6 +437,11 @@ AccessibilityRole AXNodeObject::nativeAccessibilityRoleIgnoringAria() const
     if (isHTMLDListElement(*getNode()))
         return DescriptionListRole;
 
+    if (isHTMLAudioElement(*getNode()))
+        return AudioRole;
+    if (isHTMLVideoElement(*getNode()))
+        return VideoRole;
+
     if (getNode()->hasTagName(ddTag))
         return DescriptionListDetailRole;
 
@@ -490,12 +499,22 @@ AccessibilityRole AXNodeObject::nativeAccessibilityRoleIgnoringAria() const
     }
 
     // There should only be one banner/contentInfo per page. If header/footer are being used within an article or section
-    // then it should not be exposed as whole page's banner/contentInfo
-    if (getNode()->hasTagName(headerTag) && !isDescendantOfElementType(articleTag) && !isDescendantOfElementType(sectionTag))
+    // then it should not be exposed as whole page's banner/contentInfo but as a group role.
+    if (getNode()->hasTagName(headerTag)) {
+        if (isDescendantOfElementType(articleTag) || isDescendantOfElementType(sectionTag)
+            || (getNode()->parentElement() && getNode()->parentElement()->hasTagName(mainTag))) {
+            return GroupRole;
+        }
         return BannerRole;
+    }
 
-    if (getNode()->hasTagName(footerTag) && !isDescendantOfElementType(articleTag) && !isDescendantOfElementType(sectionTag))
+    if (getNode()->hasTagName(footerTag)) {
+        if (isDescendantOfElementType(articleTag) || isDescendantOfElementType(sectionTag)
+            || (getNode()->parentElement() && getNode()->parentElement()->hasTagName(mainTag))) {
+            return GroupRole;
+        }
         return FooterRole;
+    }
 
     if (getNode()->hasTagName(blockquoteTag))
         return BlockquoteRole;
@@ -518,6 +537,10 @@ AccessibilityRole AXNodeObject::nativeAccessibilityRoleIgnoringAria() const
     if (isHTMLHRElement(*getNode()))
         return SplitterRole;
 
+    if (isFieldset()) {
+        return GroupRole;
+    }
+
     return UnknownRole;
 }
 
@@ -537,7 +560,7 @@ AccessibilityRole AXNodeObject::determineAccessibilityRole()
     if (getNode()->isElementNode()) {
         Element* element = toElement(getNode());
         if (element->isInCanvasSubtree()) {
-            getDocument()->updateLayoutTreeForNode(element);
+            getDocument()->updateStyleAndLayoutTreeForNode(element);
             if (element->isFocusable())
                 return GroupRole;
         }
@@ -575,8 +598,15 @@ void AXNodeObject::accessibilityChildrenFromAttribute(QualifiedName attr, AXObje
 
     AXObjectCacheImpl& cache = axObjectCache();
     for (const auto& element : elements) {
-        if (AXObject* child = cache.getOrCreate(element))
+        if (AXObject* child = cache.getOrCreate(element)) {
+            // Only aria-labelledby and aria-describedby can target hidden elements.
+            if (child->accessibilityIsIgnored()
+                && attr != aria_labelledbyAttr && attr != aria_labeledbyAttr
+                && attr != aria_describedbyAttr) {
+                continue;
+            }
             children.append(child);
+        }
     }
 }
 
@@ -641,24 +671,6 @@ bool AXNodeObject::isGenericFocusableElement() const
         return false;
 
     return true;
-}
-
-HTMLLabelElement* AXNodeObject::labelForElement(const Element* element) const
-{
-    if (!element->isHTMLElement() || !toHTMLElement(element)->isLabelable())
-        return 0;
-
-    const AtomicString& id = element->getIdAttribute();
-    if (!id.isEmpty()) {
-        if (HTMLLabelElement* labelFor = element->treeScope().labelElementForId(id))
-            return labelFor;
-    }
-
-    HTMLLabelElement* labelWrappedElement = Traversal<HTMLLabelElement>::firstAncestor(*element);
-    if (labelWrappedElement && labelWrappedElement->control() == toLabelableElement(element))
-        return labelWrappedElement;
-
-    return 0;
 }
 
 AXObject* AXNodeObject::menuButtonForMenu() const
@@ -1066,7 +1078,7 @@ bool AXNodeObject::isReadOnly() const
             return input.isReadOnly();
     }
 
-    return !node->hasEditableStyle();
+    return !hasEditableStyle(*node);
 }
 
 bool AXNodeObject::isRequired() const
@@ -1148,10 +1160,14 @@ int AXNodeObject::headingLevel() const
     if (!node)
         return 0;
 
-    if (roleValue() == HeadingRole && hasAttribute(aria_levelAttr)) {
-        int level = getAttribute(aria_levelAttr).toInt();
-        if (level >= 1 && level <= 9)
-            return level;
+    if (roleValue() == HeadingRole) {
+        String levelStr = getAttribute(aria_levelAttr);
+        if (!levelStr.isEmpty()) {
+            int level = levelStr.toInt();
+            if (level >= 1 && level <= 9)
+                return level;
+            return 1;
+        }
     }
 
     if (!node->isHTMLElement())
@@ -1184,10 +1200,15 @@ unsigned AXNodeObject::hierarchicalLevel() const
     Node* node = this->getNode();
     if (!node || !node->isElementNode())
         return 0;
+
     Element* element = toElement(node);
-    String ariaLevel = element->getAttribute(aria_levelAttr);
-    if (!ariaLevel.isEmpty())
-        return ariaLevel.toInt();
+    String levelStr = element->getAttribute(aria_levelAttr);
+    if (!levelStr.isEmpty()) {
+        int level = levelStr.toInt();
+        if (level > 0)
+            return level;
+        return 1;
+    }
 
     // Only tree item will calculate its level through the DOM currently.
     if (roleValue() != TreeItemRole)
@@ -1219,6 +1240,32 @@ String AXNodeObject::ariaAutoComplete() const
         return ariaAutoComplete;
 
     return String();
+}
+
+void AXNodeObject::markers(
+    Vector<DocumentMarker::MarkerType>& markerTypes,
+    Vector<AXRange>& markerRanges) const
+{
+    if (!getNode() || !getDocument() || !getDocument()->view())
+        return;
+
+    DocumentMarkerController& markerController = getDocument()->markers();
+    DocumentMarkerVector markers = markerController.markersFor(getNode());
+    for (size_t i = 0; i < markers.size(); ++i) {
+        DocumentMarker* marker = markers[i];
+        switch (marker->type()) {
+        case DocumentMarker::Spelling:
+        case DocumentMarker::Grammar:
+        case DocumentMarker::TextMatch:
+            markerTypes.append(marker->type());
+            markerRanges.append(AXRange(marker->startOffset(), marker->endOffset()));
+            break;
+        case DocumentMarker::InvisibleSpellcheck:
+        case DocumentMarker::Composition:
+            // No need for accessibility to know about these marker types.
+            break;
+        }
+    }
 }
 
 AccessibilityOrientation AXNodeObject::orientation() const
@@ -1309,6 +1356,33 @@ RGBA32 AXNodeObject::colorValue() const
     return color.rgb();
 }
 
+AriaCurrentState AXNodeObject::ariaCurrentState() const
+{
+    if (!hasAttribute(aria_currentAttr))
+        return AXObject::ariaCurrentState();
+
+    const AtomicString& attributeValue = getAttribute(aria_currentAttr);
+    if (attributeValue.isEmpty() || equalIgnoringCase(attributeValue, "false"))
+        return AriaCurrentStateFalse;
+    if (equalIgnoringCase(attributeValue, "true"))
+        return AriaCurrentStateTrue;
+    if (equalIgnoringCase(attributeValue, "page"))
+        return AriaCurrentStatePage;
+    if (equalIgnoringCase(attributeValue, "step"))
+        return AriaCurrentStateStep;
+    if (equalIgnoringCase(attributeValue, "location"))
+        return AriaCurrentStateLocation;
+    if (equalIgnoringCase(attributeValue, "date"))
+        return AriaCurrentStateDate;
+    if (equalIgnoringCase(attributeValue, "time"))
+        return AriaCurrentStateTime;
+    // An unknown value should return true.
+    if (!attributeValue.isEmpty())
+        return AriaCurrentStateTrue;
+
+    return AXObject::ariaCurrentState();
+}
+
 InvalidState AXNodeObject::getInvalidState() const
 {
     if (hasAttribute(aria_invalidAttr)) {
@@ -1336,14 +1410,20 @@ InvalidState AXNodeObject::getInvalidState() const
         return isInvalid ? InvalidStateTrue : InvalidStateFalse;
     }
 
-    return InvalidStateUndefined;
+    return AXObject::getInvalidState();
 }
 
 int AXNodeObject::posInSet() const
 {
     if (supportsSetSizeAndPosInSet()) {
-        if (hasAttribute(aria_posinsetAttr))
-            return getAttribute(aria_posinsetAttr).toInt();
+        String posInSetStr = getAttribute(aria_posinsetAttr);
+        if (!posInSetStr.isEmpty()) {
+            int posInSet = posInSetStr.toInt();
+            if (posInSet > 0)
+                return posInSet;
+            return 1;
+        }
+
         return AXObject::indexInParent() + 1;
     }
 
@@ -1353,8 +1433,13 @@ int AXNodeObject::posInSet() const
 int AXNodeObject::setSize() const
 {
     if (supportsSetSizeAndPosInSet()) {
-        if (hasAttribute(aria_setsizeAttr))
-            return getAttribute(aria_setsizeAttr).toInt();
+        String setSizeStr = getAttribute(aria_setsizeAttr);
+        if (!setSizeStr.isEmpty()) {
+            int setSize = setSizeStr.toInt();
+            if (setSize > 0)
+                return setSize;
+            return 1;
+        }
 
         if (parentObject()) {
             const auto& siblings = parentObject()->children();
@@ -1614,7 +1699,7 @@ String AXNodeObject::textAlternative(bool recursive, bool inAriaLabelledByTraver
 
     nameFrom = AXNameFromUninitialized;
 
-    if (foundTextAlternative) {
+    if (nameSources && foundTextAlternative) {
         for (size_t i = 0; i < nameSources->size(); ++i) {
             if (!(*nameSources)[i].text.isNull() && !(*nameSources)[i].superseded) {
                 NameSource& nameSource = (*nameSources)[i];
@@ -1649,8 +1734,12 @@ String AXNodeObject::textFromDescendants(AXObjectSet& visited, bool recursive) c
         children.append(ownedChild);
 
     for (AXObject* child : children) {
-        // Skip hidden children
-        if (child->isInertOrAriaHidden())
+        // Don't recurse into children that are explicitly marked as aria-hidden.
+        // Note that we don't call isInertOrAriaHidden because that would return true
+        // if any ancestor is hidden, but we need to be able to compute the accessible
+        // name of object inside hidden subtrees (for example, if aria-labelledby points
+        // to an object that's hidden).
+        if (equalIgnoringCase(child->getAttribute(aria_hiddenAttr), "true"))
             continue;
 
         // If we're going between two layoutObjects that are in separate LayoutBoxes, add
@@ -1704,57 +1793,71 @@ bool AXNodeObject::nameFromLabelElement() const
     HTMLElement* htmlElement = nullptr;
     if (getNode()->isHTMLElement())
         htmlElement = toHTMLElement(getNode());
-    if (htmlElement && htmlElement->isLabelable()) {
-        HTMLLabelElement* label = labelForElement(htmlElement);
-        if (label)
+    if (htmlElement && isLabelableElement(htmlElement)) {
+        if (toLabelableElement(htmlElement)->labels() && toLabelableElement(htmlElement)->labels()->length() > 0)
             return true;
     }
 
     return false;
 }
 
-LayoutRect AXNodeObject::elementRect() const
+void AXNodeObject::getRelativeBounds(AXObject** outContainer, FloatRect& outBoundsInContainer, SkMatrix44& outContainerTransform) const
 {
-    // First check if it has a custom rect, for example if this element is tied to a canvas path.
-    if (!m_explicitElementRect.isEmpty())
-        return m_explicitElementRect;
+    if (layoutObjectForRelativeBounds()) {
+        AXObject::getRelativeBounds(outContainer, outBoundsInContainer, outContainerTransform);
+        return;
+    }
 
-    // FIXME: If there are a lot of elements in the canvas, it will be inefficient.
-    // We can avoid the inefficient calculations by using AXComputedObjectAttributeCache.
+    *outContainer = nullptr;
+    outBoundsInContainer = FloatRect();
+    outContainerTransform.setIdentity();
+
+    // First check if it has explicit bounds, for example if this element is tied to a
+    // canvas path. When explicit coordinates are provided, the ID of the explicit container
+    // element that the coordinates are relative to must be provided too.
+    if (!m_explicitElementRect.isEmpty()) {
+        *outContainer = axObjectCache().objectFromAXID(m_explicitContainerID);
+        if (*outContainer) {
+            outBoundsInContainer = FloatRect(m_explicitElementRect);
+            return;
+        }
+    }
+
+    // If it's in a canvas but doesn't have an explicit rect, get the bounding rect of its children.
     if (getNode()->parentElement()->isInCanvasSubtree()) {
-        LayoutRect rect;
-
+        Vector<FloatRect> rects;
         for (Node& child : NodeTraversal::childrenOf(*getNode())) {
             if (child.isHTMLElement()) {
                 if (AXObject* obj = axObjectCache().get(&child)) {
-                    if (rect.isEmpty())
-                        rect = obj->elementRect();
-                    else
-                        rect.unite(obj->elementRect());
+                    AXObject* container;
+                    FloatRect bounds;
+                    obj->getRelativeBounds(&container, bounds, outContainerTransform);
+                    if (container) {
+                        *outContainer = container;
+                        rects.append(bounds);
+                    }
                 }
             }
         }
 
-        if (!rect.isEmpty())
-            return rect;
+        if (*outContainer) {
+            outBoundsInContainer = unionRect(rects);
+            return;
+        }
     }
 
     // If this object doesn't have an explicit element rect or computable from its children,
     // for now, let's return the position of the ancestor that does have a position,
-    // and make it the width of that parent, and about the height of a line of text, so that it's clear the object is a child of the parent.
-
-    LayoutRect boundingBox;
-
+    // and make it the width of that parent, and about the height of a line of text, so that
+    // it's clear the object is a child of the parent.
     for (AXObject* positionProvider = parentObject(); positionProvider; positionProvider = positionProvider->parentObject()) {
         if (positionProvider->isAXLayoutObject()) {
-            LayoutRect parentRect = positionProvider->elementRect();
-            boundingBox.setSize(LayoutSize(parentRect.width(), LayoutUnit(std::min(10.0f, parentRect.height().toFloat()))));
-            boundingBox.setLocation(parentRect.location());
+            positionProvider->getRelativeBounds(outContainer, outBoundsInContainer, outContainerTransform);
+            if (*outContainer)
+                outBoundsInContainer.setSize(FloatSize(outBoundsInContainer.width(), std::min(10.0f, outBoundsInContainer.height())));
             break;
         }
     }
-
-    return boundingBox;
 }
 
 static Node* getParentNodeForComputeParent(Node* node)
@@ -1837,7 +1940,7 @@ void AXNodeObject::addChildren()
 
     for (Node& child : NodeTraversal::childrenOf(*m_node)) {
         AXObject* childObj = axObjectCache().getOrCreate(&child);
-        if (!axObjectCache().isAriaOwned(childObj))
+        if (childObj && !axObjectCache().isAriaOwned(childObj))
             addChild(childObj);
     }
 
@@ -1944,16 +2047,16 @@ Element* AXNodeObject::actionElement() const
     case MenuItemRole:
     case MenuItemCheckBoxRole:
     case MenuItemRadioRole:
-    case ListItemRole:
         return toElement(node);
     default:
         break;
     }
 
-    Element* elt = anchorElement();
-    if (!elt)
-        elt = mouseButtonListener();
-    return elt;
+    Element* anchor = anchorElement();
+    Element* clickElement = mouseButtonListener();
+    if (!anchor || (clickElement && clickElement->isDescendantOf(anchor)))
+        return clickElement;
+    return anchor;
 }
 
 Element* AXNodeObject::anchorElement() const
@@ -2146,7 +2249,8 @@ void AXNodeObject::computeAriaOwnsChildren(HeapVector<Member<AXObject>>& ownedCh
         return;
 
     Vector<String> idVector;
-    tokenVectorFromAttribute(idVector, aria_ownsAttr);
+    if (canHaveChildren() && !isNativeTextControl() && !hasContentEditableAttributeSet())
+        tokenVectorFromAttribute(idVector, aria_ownsAttr);
 
     axObjectCache().updateAriaOwns(this, idVector, ownedChildren);
 }
@@ -2173,39 +2277,41 @@ String AXNodeObject::nativeTextAlternative(AXObjectSet& visited, AXNameFrom& nam
     HTMLElement* htmlElement = nullptr;
     if (getNode()->isHTMLElement())
         htmlElement = toHTMLElement(getNode());
+
     if (htmlElement && htmlElement->isLabelable()) {
-        // label
         nameFrom = AXNameFromRelatedElement;
         if (nameSources) {
             nameSources->append(NameSource(*foundTextAlternative));
             nameSources->last().type = nameFrom;
             nameSources->last().nativeSource = AXTextFromNativeHTMLLabel;
         }
-        HTMLLabelElement* label = labelForElement(htmlElement);
-        if (label) {
-            AXObject* labelAXObject = axObjectCache().getOrCreate(label);
-            // Avoid an infinite loop for label wrapped
-            if (labelAXObject && !visited.contains(labelAXObject)) {
-                textAlternative = recursiveTextAlternative(*labelAXObject, false, visited);
 
-                if (relatedObjects) {
-                    localRelatedObjects.append(new NameSourceRelatedObject(labelAXObject, textAlternative));
-                    *relatedObjects = localRelatedObjects;
-                    localRelatedObjects.clear();
+        LabelsNodeList* labels = toLabelableElement(htmlElement)->labels();
+        if (labels && labels->length() > 0) {
+            HeapVector<Member<Element>> labelElements;
+            for (unsigned labelIndex = 0; labelIndex < labels->length(); ++labelIndex) {
+                Element* label = labels->item(labelIndex);
+                if (nameSources) {
+                    if (label->getAttribute(forAttr) == htmlElement->getIdAttribute())
+                        nameSources->last().nativeSource = AXTextFromNativeHTMLLabelFor;
+                    else
+                        nameSources->last().nativeSource = AXTextFromNativeHTMLLabelWrapped;
                 }
+                labelElements.append(label);
+            }
 
+            textAlternative = textFromElements(false, visited, labelElements, relatedObjects);
+            if (!textAlternative.isNull()) {
+                *foundTextAlternative = true;
                 if (nameSources) {
                     NameSource& source = nameSources->last();
                     source.relatedObjects = *relatedObjects;
                     source.text = textAlternative;
-                    if (label->getAttribute(forAttr) == htmlElement->getIdAttribute())
-                        source.nativeSource = AXTextFromNativeHTMLLabelFor;
-                    else
-                        source.nativeSource = AXTextFromNativeHTMLLabelWrapped;
-                    *foundTextAlternative = true;
                 } else {
                     return textAlternative;
                 }
+            } else if (nameSources) {
+                nameSources->last().invalid = true;
             }
         }
     }

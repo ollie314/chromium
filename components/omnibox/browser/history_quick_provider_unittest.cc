@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -15,8 +16,8 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/sequenced_worker_pool_owner.h"
@@ -56,52 +57,53 @@ struct TestURLInfo {
   int typed_count;
   int days_from_now;
 } quick_test_db[] = {
-  {"http://www.google.com/", "Google", 3, 3, 0},
-  {"http://slashdot.org/favorite_page.html", "Favorite page", 200, 100, 0},
-  {"http://kerneltrap.org/not_very_popular.html", "Less popular", 4, 0, 0},
-  {"http://freshmeat.net/unpopular.html", "Unpopular", 1, 1, 0},
-  {"http://news.google.com/?ned=us&topic=n", "Google News - U.S.", 2, 2, 0},
-  {"http://news.google.com/", "Google News", 1, 1, 0},
-  {"http://foo.com/", "Dir", 200, 100, 0},
-  {"http://foo.com/dir/", "Dir", 2, 1, 10},
-  {"http://foo.com/dir/another/", "Dir", 10, 5, 0},
-  {"http://foo.com/dir/another/again/", "Dir", 5, 1, 0},
-  {"http://foo.com/dir/another/again/myfile.html", "File", 3, 1, 0},
-  {"http://visitedest.com/y/a", "VA", 10, 1, 20},
-  {"http://visitedest.com/y/b", "VB", 9, 1, 20},
-  {"http://visitedest.com/x/c", "VC", 8, 1, 20},
-  {"http://visitedest.com/x/d", "VD", 7, 1, 20},
-  {"http://visitedest.com/y/e", "VE", 6, 1, 20},
-  {"http://typeredest.com/y/a", "TA", 5, 5, 0},
-  {"http://typeredest.com/y/b", "TB", 5, 4, 0},
-  {"http://typeredest.com/x/c", "TC", 5, 3, 0},
-  {"http://typeredest.com/x/d", "TD", 5, 2, 0},
-  {"http://typeredest.com/y/e", "TE", 5, 1, 0},
-  {"http://daysagoest.com/y/a", "DA", 1, 1, 0},
-  {"http://daysagoest.com/y/b", "DB", 1, 1, 1},
-  {"http://daysagoest.com/x/c", "DC", 1, 1, 2},
-  {"http://daysagoest.com/x/d", "DD", 1, 1, 3},
-  {"http://daysagoest.com/y/e", "DE", 1, 1, 4},
-  {"http://abcdefghixyzjklmnopqrstuvw.com/a", "", 3, 1, 0},
-  {"http://spaces.com/path%20with%20spaces/foo.html", "Spaces", 2, 2, 0},
-  {"http://abcdefghijklxyzmnopqrstuvw.com/a", "", 3, 1, 0},
-  {"http://abcdefxyzghijklmnopqrstuvw.com/a", "", 3, 1, 0},
-  {"http://abcxyzdefghijklmnopqrstuvw.com/a", "", 3, 1, 0},
-  {"http://xyzabcdefghijklmnopqrstuvw.com/a", "", 3, 1, 0},
-  {"http://cda.com/Dogs%20Cats%20Gorillas%20Sea%20Slugs%20and%20Mice",
-   "Dogs & Cats & Mice & Other Animals", 1, 1, 0},
-  {"https://monkeytrap.org/", "", 3, 1, 0},
-  {"http://popularsitewithpathonly.com/moo",
-   "popularsitewithpathonly.com/moo", 50, 50, 0},
-  {"http://popularsitewithroot.com/", "popularsitewithroot.com", 50, 50, 0},
-  {"http://testsearch.com/?q=thequery", "Test Search Engine", 10, 10, 0},
-  {"http://testsearch.com/", "Test Search Engine", 9, 9, 0},
-  {"http://anotherengine.com/?q=thequery", "Another Search Engine", 8, 8, 0},
-  // The encoded stuff between /wiki/ and the # is 第二次世界大戦
-  {"http://ja.wikipedia.org/wiki/%E7%AC%AC%E4%BA%8C%E6%AC%A1%E4%B8%96%E7%95"
-   "%8C%E5%A4%A7%E6%88%A6#.E3.83.B4.E3.82.A7.E3.83.AB.E3.82.B5.E3.82.A4.E3."
-   "83.A6.E4.BD.93.E5.88.B6", "Title Unimportant", 2, 2, 0}
-};
+    {"http://www.google.com/", "Google", 3, 3, 0},
+    {"http://slashdot.org/favorite_page.html", "Favorite page", 200, 100, 0},
+    {"http://kerneltrap.org/not_very_popular.html", "Less popular", 4, 0, 0},
+    {"http://freshmeat.net/unpopular.html", "Unpopular", 1, 1, 0},
+    {"http://news.google.com/?ned=us&topic=n", "Google News - U.S.", 2, 2, 0},
+    {"http://news.google.com/", "Google News", 1, 1, 0},
+    {"http://foo.com/", "Dir", 200, 100, 0},
+    {"http://foo.com/dir/", "Dir", 2, 1, 10},
+    {"http://foo.com/dir/another/", "Dir", 10, 5, 0},
+    {"http://foo.com/dir/another/again/", "Dir", 5, 1, 0},
+    {"http://foo.com/dir/another/again/myfile.html", "File", 3, 1, 0},
+    {"http://visitedest.com/y/a", "VA", 10, 1, 20},
+    {"http://visitedest.com/y/b", "VB", 9, 1, 20},
+    {"http://visitedest.com/x/c", "VC", 8, 1, 20},
+    {"http://visitedest.com/x/d", "VD", 7, 1, 20},
+    {"http://visitedest.com/y/e", "VE", 6, 1, 20},
+    {"http://typeredest.com/y/a", "TA", 5, 5, 0},
+    {"http://typeredest.com/y/b", "TB", 5, 4, 0},
+    {"http://typeredest.com/x/c", "TC", 5, 3, 0},
+    {"http://typeredest.com/x/d", "TD", 5, 2, 0},
+    {"http://typeredest.com/y/e", "TE", 5, 1, 0},
+    {"http://daysagoest.com/y/a", "DA", 1, 1, 0},
+    {"http://daysagoest.com/y/b", "DB", 1, 1, 1},
+    {"http://daysagoest.com/x/c", "DC", 1, 1, 2},
+    {"http://daysagoest.com/x/d", "DD", 1, 1, 3},
+    {"http://daysagoest.com/y/e", "DE", 1, 1, 4},
+    {"http://abcdefghixyzjklmnopqrstuvw.com/a", "", 3, 1, 0},
+    {"http://spaces.com/path%20with%20spaces/foo.html", "Spaces", 2, 2, 0},
+    {"http://abcdefghijklxyzmnopqrstuvw.com/a", "", 3, 1, 0},
+    {"http://abcdefxyzghijklmnopqrstuvw.com/a", "", 3, 1, 0},
+    {"http://abcxyzdefghijklmnopqrstuvw.com/a", "", 3, 1, 0},
+    {"http://xyzabcdefghijklmnopqrstuvw.com/a", "", 3, 1, 0},
+    {"http://cda.com/Dogs%20Cats%20Gorillas%20Sea%20Slugs%20and%20Mice",
+     "Dogs & Cats & Mice & Other Animals", 1, 1, 0},
+    {"https://monkeytrap.org/", "", 3, 1, 0},
+    {"http://popularsitewithpathonly.com/moo",
+     "popularsitewithpathonly.com/moo", 50, 50, 0},
+    {"http://popularsitewithroot.com/", "popularsitewithroot.com", 50, 50, 0},
+    {"http://testsearch.com/?q=thequery", "Test Search Engine", 10, 10, 0},
+    {"http://testsearch.com/", "Test Search Engine", 9, 9, 0},
+    {"http://anotherengine.com/?q=thequery", "Another Search Engine", 8, 8, 0},
+    // The encoded stuff between /wiki/ and the # is 第二次世界大戦
+    {"http://ja.wikipedia.org/wiki/%E7%AC%AC%E4%BA%8C%E6%AC%A1%E4%B8%96%E7%95"
+     "%8C%E5%A4%A7%E6%88%A6#.E3.83.B4.E3.82.A7.E3.83.AB.E3.82.B5.E3.82.A4.E3."
+     "83.A6.E4.BD.93.E5.88.B6",
+     "Title Unimportant", 2, 2, 0},
+    {"https://twitter.com/fungoodtimes", "relatable!", 1, 1, 0}};
 
 // Waits for OnURLsDeletedNotification and when run quits the supplied run loop.
 class WaitForURLsDeletedObserver : public history::HistoryServiceObserver {
@@ -181,13 +183,13 @@ class FakeAutocompleteProviderClient : public MockAutocompleteProviderClient {
   FakeAutocompleteProviderClient() : pool_owner_(3, "Background Pool") {
     bookmark_model_ = bookmarks::TestBookmarkClient::CreateModel();
     if (history_dir_.CreateUniqueTempDir()) {
-      history_service_ = history::CreateHistoryService(
-          history_dir_.path(), true);
+      history_service_ =
+          history::CreateHistoryService(history_dir_.GetPath(), true);
     }
 
     in_memory_url_index_.reset(new InMemoryURLIndex(
         bookmark_model_.get(), history_service_.get(), nullptr,
-        pool_owner_.pool().get(), history_dir_.path(), SchemeSet()));
+        pool_owner_.pool().get(), history_dir_.GetPath(), SchemeSet()));
     in_memory_url_index_->Init();
   }
 
@@ -211,18 +213,18 @@ class FakeAutocompleteProviderClient : public MockAutocompleteProviderClient {
     return in_memory_url_index_.get();
   }
 
-  void set_in_memory_url_index(scoped_ptr<InMemoryURLIndex> index) {
+  void set_in_memory_url_index(std::unique_ptr<InMemoryURLIndex> index) {
     in_memory_url_index_ = std::move(index);
   }
 
  private:
   base::SequencedWorkerPoolOwner pool_owner_;
   base::ScopedTempDir history_dir_;
-  scoped_ptr<bookmarks::BookmarkModel> bookmark_model_;
+  std::unique_ptr<bookmarks::BookmarkModel> bookmark_model_;
   TestSchemeClassifier scheme_classifier_;
   SearchTermsData search_terms_data_;
-  scoped_ptr<InMemoryURLIndex> in_memory_url_index_;
-  scoped_ptr<history::HistoryService> history_service_;
+  std::unique_ptr<InMemoryURLIndex> in_memory_url_index_;
+  std::unique_ptr<history::HistoryService> history_service_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeAutocompleteProviderClient);
 };
@@ -287,7 +289,7 @@ class HistoryQuickProviderTest : public testing::Test {
   bool GetURLProxy(const GURL& url);
 
   base::MessageLoop message_loop_;
-  scoped_ptr<FakeAutocompleteProviderClient> client_;
+  std::unique_ptr<FakeAutocompleteProviderClient> client_;
 
   ACMatches ac_matches_;  // The resulting matches after running RunTest.
 
@@ -323,7 +325,7 @@ void HistoryQuickProviderTest::TearDown() {
   // History index rebuild task is created from main thread during SetUp,
   // performed on DB thread and must be deleted on main thread.
   // Run main loop to process delete task, to prevent leaks.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 void HistoryQuickProviderTest::GetTestData(size_t* data_count,
@@ -412,7 +414,7 @@ void HistoryQuickProviderTest::RunTestWithCursor(
     base::string16 expected_fill_into_edit,
     base::string16 expected_autocompletion) {
   SCOPED_TRACE(text);  // Minimal hint to query being run.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   AutocompleteInput input(text, cursor_position, std::string(), GURL(),
                           metrics::OmniboxEventProto::INVALID_SPEC,
                           prevent_inline_autocomplete, false, true, true, false,
@@ -468,11 +470,11 @@ bool HistoryQuickProviderTest::GetURLProxy(const GURL& url) {
   base::CancelableTaskTracker task_tracker;
   bool result = false;
   client_->GetHistoryService()->ScheduleDBTask(
-      scoped_ptr<history::HistoryDBTask>(new GetURLTask(url, &result)),
+      std::unique_ptr<history::HistoryDBTask>(new GetURLTask(url, &result)),
       &task_tracker);
   // Run the message loop until GetURLTask::DoneRunOnMainThread stops it.  If
   // the test hangs, DoneRunOnMainThread isn't being invoked correctly.
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   return result;
 }
 
@@ -492,6 +494,16 @@ TEST_F(HistoryQuickProviderTest, SingleMatchWithCursor) {
   RunTestWithCursor(ASCIIToUTF16("slashfavorite_page.html"), 5, false,
                     expected_urls, false,
                     ASCIIToUTF16("slashdot.org/favorite_page.html"),
+                    base::string16());
+}
+
+TEST_F(HistoryQuickProviderTest, MatchWithAndWithoutCursorWordBreak) {
+  std::vector<std::string> expected_urls;
+  expected_urls.push_back("https://twitter.com/fungoodtimes");
+  // With cursor after "good", we should retrieve the desired result but it
+  // should not be allowed to be the default match.
+  RunTestWithCursor(ASCIIToUTF16("fungoodtimes"), 7, false, expected_urls,
+                    false, ASCIIToUTF16("https://twitter.com/fungoodtimes"),
                     base::string16());
 }
 

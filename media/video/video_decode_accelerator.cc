@@ -9,13 +9,13 @@
 
 namespace media {
 
+VideoDecodeAccelerator::Config::Config() = default;
+VideoDecodeAccelerator::Config::Config(const Config& config) = default;
+
 VideoDecodeAccelerator::Config::Config(VideoCodecProfile video_codec_profile)
     : profile(video_codec_profile) {}
 
-VideoDecodeAccelerator::Config::Config(
-    const VideoDecoderConfig& video_decoder_config)
-    : profile(video_decoder_config.profile()),
-      is_encrypted(video_decoder_config.is_encrypted()) {}
+VideoDecodeAccelerator::Config::~Config() = default;
 
 std::string VideoDecodeAccelerator::Config::AsHumanReadableString() const {
   std::ostringstream s;
@@ -31,10 +31,6 @@ void VideoDecodeAccelerator::Client::NotifyInitializationComplete(
 
 VideoDecodeAccelerator::~VideoDecodeAccelerator() {}
 
-void VideoDecodeAccelerator::SetCdm(int cdm_id) {
-  NOTREACHED() << "By default CDM is not supported.";
-}
-
 bool VideoDecodeAccelerator::TryToSetupDecodeOnSeparateThread(
     const base::WeakPtr<Client>& decode_client,
     const scoped_refptr<base::SingleThreadTaskRunner>& decode_task_runner) {
@@ -45,16 +41,12 @@ bool VideoDecodeAccelerator::TryToSetupDecodeOnSeparateThread(
 
 void VideoDecodeAccelerator::ImportBufferForPicture(
     int32_t picture_buffer_id,
-    const std::vector<gfx::GpuMemoryBufferHandle>& gpu_memory_buffer_handles) {
+    const gfx::GpuMemoryBufferHandle& gpu_memory_buffer_handle) {
   NOTREACHED() << "Buffer import not supported.";
 }
 
 GLenum VideoDecodeAccelerator::GetSurfaceInternalFormat() const {
   return GL_RGBA;
-}
-
-VideoPixelFormat VideoDecodeAccelerator::GetOutputFormat() const {
-  return PIXEL_FORMAT_UNKNOWN;
 }
 
 VideoDecodeAccelerator::SupportedProfile::SupportedProfile()

@@ -141,19 +141,7 @@ FileTasks.create = function(volumeManager, metadataModel, directoryModel, ui,
   });
 
   var defaultTaskPromise = tasksPromise.then(function(tasks) {
-    for (var i = 0; i < tasks.length; i++) {
-      if (tasks[i].isDefault) {
-        return tasks[i];
-      }
-    }
-    // If we haven't picked a default task yet, then just pick the first one
-    // which is not generic file handler.
-    for (var i = 0; i < tasks.length; i++) {
-      if (!tasks[i].isGenericFileHandler) {
-        return tasks[i];
-      }
-    }
-    return null;
+    return FileTasks.getDefaultTask(tasks);
   });
 
   return Promise.all([tasksPromise, defaultTaskPromise]).then(
@@ -247,9 +235,8 @@ FileTasks.prototype.openSuggestAppsDialog = function(
  *
  * @const
  * @type {Array<string>}
- * @private
  */
-FileTasks.UMA_INDEX_KNOWN_EXTENSIONS_ = Object.freeze([
+FileTasks.UMA_INDEX_KNOWN_EXTENSIONS = Object.freeze([
   'other', '.3ga', '.3gp', '.aac', '.alac', '.asf', '.avi', '.bmp', '.csv',
   '.doc', '.docx', '.flac', '.gif', '.jpeg', '.jpg', '.log', '.m3u', '.m3u8',
   '.m4a', '.m4v', '.mid', '.mkv', '.mov', '.mp3', '.mp4', '.mpg', '.odf',
@@ -289,11 +276,11 @@ FileTasks.recordViewingFileTypeUMA_ = function(entries) {
   for (var i = 0; i < entries.length; i++) {
     var entry = entries[i];
     var extension = FileType.getExtension(entry).toLowerCase();
-    if (FileTasks.UMA_INDEX_KNOWN_EXTENSIONS_.indexOf(extension) < 0) {
+    if (FileTasks.UMA_INDEX_KNOWN_EXTENSIONS.indexOf(extension) < 0) {
       extension = 'other';
     }
     metrics.recordEnum(
-        'ViewingFileType', extension, FileTasks.UMA_INDEX_KNOWN_EXTENSIONS_);
+        'ViewingFileType', extension, FileTasks.UMA_INDEX_KNOWN_EXTENSIONS);
   }
 };
 
@@ -380,6 +367,29 @@ FileTasks.annotateTasks_ = function(tasks, entries) {
     if (!task.iconType && taskParts[1] === 'web-intent') {
       task.iconType = 'generic';
     }
+
+    // Add verb to title.
+    if (task.verb) {
+      var verb_button_label = 'OPEN_WITH_VERB_BUTTON_LABEL';  // Default.
+      switch (task.verb) {
+        case chrome.fileManagerPrivate.Verb.ADD_TO:
+          verb_button_label = 'ADD_TO_VERB_BUTTON_LABEL';
+          break;
+        case chrome.fileManagerPrivate.Verb.PACK_WITH:
+          verb_button_label = 'PACK_WITH_VERB_BUTTON_LABEL';
+          break;
+        case chrome.fileManagerPrivate.Verb.SHARE_WITH:
+          verb_button_label = 'SHARE_WITH_VERB_BUTTON_LABEL';
+          break;
+        case chrome.fileManagerPrivate.Verb.OPEN_WITH:
+          // Nothing to do as same as initialization button label.
+          break;
+        default:
+          console.error('Invalid task verb: ' + task.verb + '.');
+      }
+      task.title = loadTimeData.getStringF(verb_button_label, task.title);
+    }
+
     result.push(task);
   }
 
@@ -485,10 +495,8 @@ FileTasks.prototype.executeDefaultInternal_ = function(opt_callback) {
         break;
       case 'message_sent':
         util.isTeleported(window).then(function(teleported) {
-          if (teleported) {
-            util.showOpenInOtherDesktopAlert(
-                this.ui_.alertDialog, this.entries_);
-          }
+          if (teleported)
+            this.ui_.showOpenInOtherDesktopAlert(this.entries_);
         }.bind(this));
         callback(true, this.entries_);
         break;
@@ -535,10 +543,8 @@ FileTasks.prototype.executeInternal_ = function(taskId) {
             if (result !== 'message_sent')
               return;
             util.isTeleported(window).then(function(teleported) {
-              if (teleported) {
-                util.showOpenInOtherDesktopAlert(
-                    this.ui_.alertDialog, this.entries_);
-              }
+              if (teleported)
+                this.ui_.showOpenInOtherDesktopAlert(this.entries_);
             }.bind(this));
       }.bind(this));
     }
@@ -720,7 +726,7 @@ FileTasks.prototype.display = function(combobutton) {
   } else {
     combobutton.defaultItem = {
       type: FileTasks.TaskMenuButtonItemType.ShowMenu,
-      label: str('OPEN_WITH_BUTTON_LABEL')
+      label: str('MORE_ACTIONS_BUTTON_LABEL')
     };
   }
 
@@ -845,4 +851,32 @@ FileTasks.prototype.showTaskPicker = function(taskDialog, title, message,
       function(item) {
         onSuccess(item.task);
       });
+};
+
+/**
+ * Gets the default task from tasks. In case there is no such task (i.e. all
+ * tasks are generic file handlers), then return opt_taskToUseIfNoDefault or
+ * null.
+ *
+ * @param {!Array<!Object>} tasks The list of tasks from where to choose the
+ *     default task.
+ * @param {!Object=} opt_taskToUseIfNoDefault The task to return in case there
+ *     is no default task available in tasks.
+ * @return {Object} opt_taskToUseIfNoDefault or null in case
+ *     opt_taskToUseIfNoDefault is undefined.
+ */
+FileTasks.getDefaultTask = function(tasks, opt_taskToUseIfNoDefault) {
+  for (var i = 0; i < tasks.length; i++) {
+    if (tasks[i].isDefault) {
+      return tasks[i];
+    }
+  }
+  // If we haven't picked a default task yet, then just pick the first one
+  // which is not generic file handler.
+  for (var i = 0; i < tasks.length; i++) {
+    if (!tasks[i].isGenericFileHandler) {
+      return tasks[i];
+    }
+  }
+  return opt_taskToUseIfNoDefault || null;
 };

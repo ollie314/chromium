@@ -4,11 +4,15 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/environment.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
+#include "media/audio/audio_device_description.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager_base.h"
 #include "media/audio/audio_unittest_util.h"
@@ -27,7 +31,7 @@ namespace media {
 
 ACTION_P4(CheckCountAndPostQuitTask, count, limit, loop, closure) {
   if (++*count >= limit) {
-    loop->PostTask(FROM_HERE, closure);
+    loop->task_runner()->PostTask(FROM_HERE, closure);
   }
 }
 
@@ -82,7 +86,7 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
               uint32_t hardware_delay_bytes,
               double volume) override {
     const int num_samples = src->frames() * src->channels();
-    scoped_ptr<int16_t> interleaved(new int16_t[num_samples]);
+    std::unique_ptr<int16_t> interleaved(new int16_t[num_samples]);
     const int bytes_per_sample = sizeof(*interleaved);
     src->ToInterleaved(src->frames(), bytes_per_sample, interleaved.get());
 
@@ -130,8 +134,9 @@ class MacAudioInputTest : public testing::Test {
     int samples_per_packet = fs / 100;
     AudioInputStream* ais = audio_manager_->MakeAudioInputStream(
         AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY,
-        CHANNEL_LAYOUT_STEREO, fs, 16, samples_per_packet),
-        AudioManagerBase::kDefaultDeviceId);
+                        CHANNEL_LAYOUT_STEREO, fs, 16, samples_per_packet),
+        AudioDeviceDescription::kDefaultDeviceId,
+        base::Bind(&MacAudioInputTest::OnLogMessage, base::Unretained(this)));
     EXPECT_TRUE(ais);
     return ais;
   }
@@ -142,15 +147,19 @@ class MacAudioInputTest : public testing::Test {
     int fs = static_cast<int>(AUAudioInputStream::HardwareSampleRate());
     int samples_per_packet = fs / 100;
     AudioInputStream* ais = audio_manager_->MakeAudioInputStream(
-        AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY,
-        channel_layout, fs, 16, samples_per_packet),
-        AudioManagerBase::kDefaultDeviceId);
+        AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY, channel_layout,
+                        fs, 16, samples_per_packet),
+        AudioDeviceDescription::kDefaultDeviceId,
+        base::Bind(&MacAudioInputTest::OnLogMessage, base::Unretained(this)));
     EXPECT_TRUE(ais);
     return ais;
   }
 
+  void OnLogMessage(const std::string& message) { log_message_ = message; }
+
   base::MessageLoop message_loop_;
   ScopedAudioManagerPtr audio_manager_;
+  std::string log_message_;
 };
 
 // Test Create(), Close().
@@ -213,6 +222,8 @@ TEST_F(MacAudioInputTest, AUAudioInputStreamVerifyMonoRecording) {
   run_loop.Run();
   ais->Stop();
   ais->Close();
+
+  EXPECT_FALSE(log_message_.empty());
 }
 
 // Verify that recording starts and stops correctly in mono using mocked sink.
@@ -246,6 +257,8 @@ TEST_F(MacAudioInputTest, AUAudioInputStreamVerifyStereoRecording) {
   run_loop.Run();
   ais->Stop();
   ais->Close();
+
+  EXPECT_FALSE(log_message_.empty());
 }
 
 // This test is intended for manual tests and should only be enabled

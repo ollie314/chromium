@@ -6,6 +6,7 @@
 
 #include "base/strings/sys_string_conversions.h"
 #include "components/version_info/version_info.h"
+#include "ios/chrome/browser/metrics/previous_session_info_private.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
 
@@ -13,7 +14,8 @@ namespace {
 
 // Key in the UserDefaults for a boolean value keeping track of memory warnings.
 NSString* const kDidSeeMemoryWarningShortlyBeforeTerminating =
-    @"DidSeeMemoryWarning";
+    previous_session_info_constants::
+        kDidSeeMemoryWarningShortlyBeforeTerminating;
 
 // Key in the NSUserDefaults for a string value that stores the version of the
 // last session.

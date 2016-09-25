@@ -190,7 +190,7 @@ PolicyProvider::~PolicyProvider() {
   DCHECK(!prefs_);
 }
 
-scoped_ptr<RuleIterator> PolicyProvider::GetRuleIterator(
+std::unique_ptr<RuleIterator> PolicyProvider::GetRuleIterator(
     ContentSettingsType content_type,
     const ResourceIdentifier& resource_identifier,
     bool incognito) const {
@@ -213,22 +213,26 @@ void PolicyProvider::GetContentSettingsFromPreferences(
 
     const base::ListValue* pattern_str_list = nullptr;
     if (!pref->GetValue()->GetAsList(&pattern_str_list)) {
-      NOTREACHED();
+      NOTREACHED() << "Could not read patterns from " << pref_name;
       return;
     }
 
     for (size_t j = 0; j < pattern_str_list->GetSize(); ++j) {
       std::string original_pattern_str;
       if (!pattern_str_list->GetString(j, &original_pattern_str)) {
-        NOTREACHED();
+        NOTREACHED() << "Could not read content settings pattern #" << j
+                     << " from " << pref_name;
         continue;
       }
+
+      VLOG(2) << "Reading content settings pattern " << original_pattern_str
+              << " from " << pref_name;
 
       PatternPair pattern_pair = ParsePatternString(original_pattern_str);
       // Ignore invalid patterns.
       if (!pattern_pair.first.IsValid()) {
-        VLOG(1) << "Ignoring invalid content settings pattern: " <<
-                   original_pattern_str;
+        VLOG(1) << "Ignoring invalid content settings pattern "
+                << original_pattern_str;
         continue;
       }
 
@@ -239,6 +243,9 @@ void PolicyProvider::GetContentSettingsFromPreferences(
       ContentSettingsPattern secondary_pattern =
           !pattern_pair.second.IsValid() ? ContentSettingsPattern::Wildcard()
                                          : pattern_pair.second;
+      VLOG_IF(2, !pattern_pair.second.IsValid())
+          << "Replacing invalid secondary pattern '"
+          << pattern_pair.second.ToString() << "' with wildcard";
       value_map->SetValue(pattern_pair.first, secondary_pattern, content_type,
                           ResourceIdentifier(),
                           new base::FundamentalValue(
@@ -290,7 +297,7 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
       continue;
     }
 
-    scoped_ptr<base::Value> value = base::JSONReader::Read(
+    std::unique_ptr<base::Value> value = base::JSONReader::Read(
         pattern_filter_json, base::JSON_ALLOW_TRAILING_COMMAS);
     if (!value || !value->IsType(base::Value::TYPE_DICTIONARY)) {
       VLOG(1) << "Ignoring invalid certificate auto select setting. Reason:"
@@ -298,7 +305,7 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
       continue;
     }
 
-    scoped_ptr<base::DictionaryValue> pattern_filter_pair(
+    std::unique_ptr<base::DictionaryValue> pattern_filter_pair(
         static_cast<base::DictionaryValue*>(value.release()));
     std::string pattern_str;
     bool pattern_read = pattern_filter_pair->GetStringWithoutPathExpansion(

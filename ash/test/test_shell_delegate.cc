@@ -8,30 +8,31 @@
 
 #include "ash/app_list/app_list_presenter_delegate.h"
 #include "ash/app_list/app_list_presenter_delegate_factory.h"
-#include "ash/app_list/app_list_view_delegate_factory.h"
-#include "ash/default_accessibility_delegate.h"
-#include "ash/gpu_support_stub.h"
-#include "ash/media_delegate.h"
-#include "ash/new_window_delegate.h"
-#include "ash/session/session_state_delegate.h"
-#include "ash/shell.h"
-#include "ash/shell_window_ids.h"
+#include "ash/common/default_accessibility_delegate.h"
+#include "ash/common/gpu_support_stub.h"
+#include "ash/common/media_delegate.h"
+#include "ash/common/new_window_delegate.h"
+#include "ash/common/palette_delegate.h"
+#include "ash/common/session/session_state_delegate.h"
+#include "ash/common/shell_window_ids.h"
+#include "ash/common/wm/window_state.h"
+#include "ash/common/wm_shell.h"
 #include "ash/test/test_keyboard_ui.h"
 #include "ash/test/test_session_state_delegate.h"
 #include "ash/test/test_shelf_delegate.h"
 #include "ash/test/test_system_tray_delegate.h"
-#include "ash/test/test_user_wallpaper_delegate.h"
-#include "ash/wm/window_state.h"
+#include "ash/test/test_wallpaper_delegate.h"
 #include "ash/wm/window_util.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "ui/app_list/presenter/app_list_presenter_impl.h"
+#include "ui/app_list/presenter/app_list_view_delegate_factory.h"
 #include "ui/app_list/test/app_list_test_view_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/image/image.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/system/tray/system_tray_notifier.h"
+#include "ash/common/system/tray/system_tray_notifier.h"
 #endif
 
 namespace ash {
@@ -79,7 +80,8 @@ class MediaDelegateImpl : public MediaDelegate {
   DISALLOW_COPY_AND_ASSIGN(MediaDelegateImpl);
 };
 
-class AppListViewDelegateFactoryImpl : public ash::AppListViewDelegateFactory {
+class AppListViewDelegateFactoryImpl
+    : public app_list::AppListViewDelegateFactory {
  public:
   AppListViewDelegateFactoryImpl() {}
   ~AppListViewDelegateFactoryImpl() override {}
@@ -108,8 +110,7 @@ TestShellDelegate::TestShellDelegate()
       app_list_presenter_delegate_factory_(new AppListPresenterDelegateFactory(
           base::WrapUnique(new AppListViewDelegateFactoryImpl))) {}
 
-TestShellDelegate::~TestShellDelegate() {
-}
+TestShellDelegate::~TestShellDelegate() {}
 
 bool TestShellDelegate::IsFirstRunAfterBoot() const {
   return false;
@@ -127,7 +128,7 @@ bool TestShellDelegate::IsRunningInForcedAppMode() const {
   return false;
 }
 
-bool TestShellDelegate::CanShowWindowForUser(aura::Window* window) const {
+bool TestShellDelegate::CanShowWindowForUser(WmWindow* window) const {
   return true;
 }
 
@@ -135,11 +136,9 @@ bool TestShellDelegate::IsForceMaximizeOnFirstRun() const {
   return force_maximize_on_first_run_;
 }
 
-void TestShellDelegate::PreInit() {
-}
+void TestShellDelegate::PreInit() {}
 
-void TestShellDelegate::PreShutdown() {
-}
+void TestShellDelegate::PreShutdown() {}
 
 void TestShellDelegate::Exit() {
   num_exit_requests_++;
@@ -149,23 +148,7 @@ keyboard::KeyboardUI* TestShellDelegate::CreateKeyboardUI() {
   return new TestKeyboardUI;
 }
 
-void TestShellDelegate::VirtualKeyboardActivated(bool activated) {
-  FOR_EACH_OBSERVER(ash::VirtualKeyboardStateObserver,
-                    keyboard_state_observer_list_,
-                    OnVirtualKeyboardStateChanged(activated));
-}
-
-void TestShellDelegate::AddVirtualKeyboardStateObserver(
-    VirtualKeyboardStateObserver* observer) {
-  keyboard_state_observer_list_.AddObserver(observer);
-}
-
-void TestShellDelegate::RemoveVirtualKeyboardStateObserver(
-    VirtualKeyboardStateObserver* observer) {
-  keyboard_state_observer_list_.RemoveObserver(observer);
-}
-
-void TestShellDelegate::OpenUrl(const GURL& url) {}
+void TestShellDelegate::OpenUrlFromArc(const GURL& url) {}
 
 app_list::AppListPresenter* TestShellDelegate::GetAppListPresenter() {
   if (!app_list_presenter_) {
@@ -183,8 +166,9 @@ SystemTrayDelegate* TestShellDelegate::CreateSystemTrayDelegate() {
   return new TestSystemTrayDelegate;
 }
 
-UserWallpaperDelegate* TestShellDelegate::CreateUserWallpaperDelegate() {
-  return new TestUserWallpaperDelegate();
+std::unique_ptr<WallpaperDelegate>
+TestShellDelegate::CreateWallpaperDelegate() {
+  return base::MakeUnique<TestWallpaperDelegate>();
 }
 
 TestSessionStateDelegate* TestShellDelegate::CreateSessionStateDelegate() {
@@ -203,9 +187,12 @@ MediaDelegate* TestShellDelegate::CreateMediaDelegate() {
   return new MediaDelegateImpl;
 }
 
-ui::MenuModel* TestShellDelegate::CreateContextMenu(
-    ash::Shelf* shelf,
-    const ash::ShelfItem* item) {
+std::unique_ptr<PaletteDelegate> TestShellDelegate::CreatePaletteDelegate() {
+  return nullptr;
+}
+
+ui::MenuModel* TestShellDelegate::CreateContextMenu(WmShelf* wm_shelf,
+                                                    const ShelfItem* item) {
   return nullptr;
 }
 
@@ -224,10 +211,9 @@ gfx::Image TestShellDelegate::GetDeprecatedAcceleratorImage() const {
 
 void TestShellDelegate::SetMediaCaptureState(MediaCaptureState state) {
 #if defined(OS_CHROMEOS)
-  Shell* shell = Shell::GetInstance();
-  static_cast<MediaDelegateImpl*>(shell->media_delegate())
+  static_cast<MediaDelegateImpl*>(WmShell::Get()->media_delegate())
       ->set_media_capture_state(state);
-  shell->system_tray_notifier()->NotifyMediaCaptureChanged();
+  WmShell::Get()->system_tray_notifier()->NotifyMediaCaptureChanged();
 #endif
 }
 

@@ -4,53 +4,24 @@
 
 #include "modules/compositorworker/CompositorWorkerThread.h"
 
-#include "bindings/core/v8/V8GCController.h"
-#include "bindings/core/v8/V8Initializer.h"
 #include "core/workers/InProcessWorkerObjectProxy.h"
-#include "core/workers/WorkerBackingThread.h"
 #include "core/workers/WorkerThreadStartupData.h"
 #include "modules/compositorworker/CompositorWorkerGlobalScope.h"
-#include "platform/ThreadSafeFunctional.h"
 #include "platform/TraceEvent.h"
-#include "public/platform/Platform.h"
+#include "wtf/Assertions.h"
+#include <memory>
 
 namespace blink {
 
-namespace {
-
-class BackingThreadHolder {
-public:
-    static BackingThreadHolder& instance()
-    {
-        DEFINE_THREAD_SAFE_STATIC_LOCAL(BackingThreadHolder, holder, new BackingThreadHolder);
-        return holder;
-    }
-
-    WorkerBackingThread* thread() { return m_thread.get(); }
-    void clear() { m_thread = nullptr; }
-    void resetForTest()
-    {
-        ASSERT(!m_thread || (m_thread->workerScriptCount() == 0));
-        m_thread = WorkerBackingThread::createForTest(Platform::current()->compositorThread());
-    }
-
-private:
-    BackingThreadHolder() : m_thread(WorkerBackingThread::create(Platform::current()->compositorThread())) {}
-
-    OwnPtr<WorkerBackingThread> m_thread;
-};
-
-} // namespace
-
-PassOwnPtr<CompositorWorkerThread> CompositorWorkerThread::create(PassRefPtr<WorkerLoaderProxy> workerLoaderProxy, InProcessWorkerObjectProxy& workerObjectProxy, double timeOrigin)
+std::unique_ptr<CompositorWorkerThread> CompositorWorkerThread::create(PassRefPtr<WorkerLoaderProxy> workerLoaderProxy, InProcessWorkerObjectProxy& workerObjectProxy, double timeOrigin)
 {
     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("compositor-worker"), "CompositorWorkerThread::create");
     ASSERT(isMainThread());
-    return adoptPtr(new CompositorWorkerThread(workerLoaderProxy, workerObjectProxy, timeOrigin));
+    return wrapUnique(new CompositorWorkerThread(std::move(workerLoaderProxy), workerObjectProxy, timeOrigin));
 }
 
 CompositorWorkerThread::CompositorWorkerThread(PassRefPtr<WorkerLoaderProxy> workerLoaderProxy, InProcessWorkerObjectProxy& workerObjectProxy, double timeOrigin)
-    : WorkerThread(workerLoaderProxy, workerObjectProxy)
+    : AbstractAnimationWorkletThread(std::move(workerLoaderProxy), workerObjectProxy)
     , m_workerObjectProxy(workerObjectProxy)
     , m_timeOrigin(timeOrigin)
 {
@@ -60,25 +31,10 @@ CompositorWorkerThread::~CompositorWorkerThread()
 {
 }
 
-WorkerBackingThread& CompositorWorkerThread::workerBackingThread()
-{
-    return *BackingThreadHolder::instance().thread();
-}
-
-WorkerGlobalScope*CompositorWorkerThread::createWorkerGlobalScope(PassOwnPtr<WorkerThreadStartupData> startupData)
+WorkerOrWorkletGlobalScope* CompositorWorkerThread::createWorkerGlobalScope(std::unique_ptr<WorkerThreadStartupData> startupData)
 {
     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("compositor-worker"), "CompositorWorkerThread::createWorkerGlobalScope");
-    return CompositorWorkerGlobalScope::create(this, startupData, m_timeOrigin);
-}
-
-void CompositorWorkerThread::clearSharedBackingThread()
-{
-    BackingThreadHolder::instance().clear();
-}
-
-void CompositorWorkerThread::resetSharedBackingThreadForTest()
-{
-    BackingThreadHolder::instance().resetForTest();
+    return CompositorWorkerGlobalScope::create(this, std::move(startupData), m_timeOrigin);
 }
 
 } // namespace blink

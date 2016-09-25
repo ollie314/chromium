@@ -8,10 +8,13 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chromecast/media/cma/base/balanced_media_task_runner_factory.h"
 #include "chromecast/media/cma/base/decoder_buffer_base.h"
@@ -85,10 +88,9 @@ void DemuxerStreamAdapterTest::Start() {
   // TODO(damienv): currently, test assertions which fail do not trigger the
   // exit of the unit test, the message loop is still running. Find a different
   // way to exit the unit test.
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&DemuxerStreamAdapterTest::OnTestTimeout,
-                 base::Unretained(this)),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&DemuxerStreamAdapterTest::OnTestTimeout,
+                            base::Unretained(this)),
       base::TimeDelta::FromSeconds(5));
 
   coded_frame_provider_->Read(base::Bind(&DemuxerStreamAdapterTest::OnNewFrame,
@@ -130,11 +132,10 @@ void DemuxerStreamAdapterTest::OnNewFrame(
     base::Closure flush_cb = base::Bind(
         &DemuxerStreamAdapterTest::OnFlushCompleted, base::Unretained(this));
     if (use_post_task_for_flush_) {
-      base::MessageLoop::current()->PostTask(
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
           base::Bind(&CodedFrameProvider::Flush,
-                     base::Unretained(coded_frame_provider_.get()),
-                     flush_cb));
+                     base::Unretained(coded_frame_provider_.get()), flush_cb));
     } else {
       coded_frame_provider_->Flush(flush_cb);
     }
@@ -162,10 +163,10 @@ TEST_F(DemuxerStreamAdapterTest, NoDelay) {
 
   std::unique_ptr<base::MessageLoop> message_loop(new base::MessageLoop());
   Initialize(demuxer_stream_.get());
-  message_loop->PostTask(
+  message_loop->task_runner()->PostTask(
       FROM_HERE,
       base::Bind(&DemuxerStreamAdapterTest::Start, base::Unretained(this)));
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(DemuxerStreamAdapterTest, AllDelayed) {
@@ -182,10 +183,10 @@ TEST_F(DemuxerStreamAdapterTest, AllDelayed) {
 
   std::unique_ptr<base::MessageLoop> message_loop(new base::MessageLoop());
   Initialize(demuxer_stream_.get());
-  message_loop->PostTask(
+  message_loop->task_runner()->PostTask(
       FROM_HERE,
       base::Bind(&DemuxerStreamAdapterTest::Start, base::Unretained(this)));
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 TEST_F(DemuxerStreamAdapterTest, AllDelayedEarlyFlush) {
@@ -203,10 +204,10 @@ TEST_F(DemuxerStreamAdapterTest, AllDelayedEarlyFlush) {
 
   std::unique_ptr<base::MessageLoop> message_loop(new base::MessageLoop());
   Initialize(demuxer_stream_.get());
-  message_loop->PostTask(
+  message_loop->task_runner()->PostTask(
       FROM_HERE,
       base::Bind(&DemuxerStreamAdapterTest::Start, base::Unretained(this)));
-  message_loop->Run();
+  base::RunLoop().Run();
 }
 
 }  // namespace media

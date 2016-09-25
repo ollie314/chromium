@@ -6,9 +6,9 @@
 
 #include <stddef.h>
 
-#include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/output/compositor_frame_metadata.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
@@ -97,15 +97,15 @@ bool SetMouseEventButton(blink::WebMouseEvent* event,
     return true;
 
   if (*button == dispatch_mouse_event::kButtonNone) {
-    event->button = blink::WebMouseEvent::ButtonNone;
+    event->button = blink::WebMouseEvent::Button::NoButton;
   } else if (*button == dispatch_mouse_event::kButtonLeft) {
-    event->button = blink::WebMouseEvent::ButtonLeft;
+    event->button = blink::WebMouseEvent::Button::Left;
     event->modifiers |= blink::WebInputEvent::LeftButtonDown;
   } else if (*button == dispatch_mouse_event::kButtonMiddle) {
-    event->button = blink::WebMouseEvent::ButtonMiddle;
+    event->button = blink::WebMouseEvent::Button::Middle;
     event->modifiers |= blink::WebInputEvent::MiddleButtonDown;
   } else if (*button == dispatch_mouse_event::kButtonRight) {
-    event->button = blink::WebMouseEvent::ButtonRight;
+    event->button = blink::WebMouseEvent::Button::Right;
     event->modifiers |= blink::WebInputEvent::RightButtonDown;
   } else {
     return false;
@@ -166,6 +166,7 @@ Response InputHandler::DispatchKeyEvent(
     const bool* is_keypad,
     const bool* is_system_key) {
   NativeWebKeyboardEvent event;
+  event.skip_in_browser = true;
 
   if (type == dispatch_key_event::kTypeKeyDown) {
     event.type = blink::WebInputEvent::KeyDown;
@@ -197,17 +198,6 @@ Response InputHandler::DispatchKeyEvent(
     event.modifiers |= blink::WebInputEvent::IsKeyPad;
   if (is_system_key)
     event.isSystemKey = *is_system_key;
-
-  if (key_identifier) {
-    if (key_identifier->size() >
-        blink::WebKeyboardEvent::keyIdentifierLengthCap) {
-      return Response::InvalidParams("Invalid 'keyIdentifier' parameter");
-    }
-    for (size_t i = 0; i < key_identifier->size(); ++i)
-      event.keyIdentifier[i] = (*key_identifier)[i];
-  } else if (event.type != blink::WebInputEvent::Char) {
-    event.setKeyIdentifierFromWindowsKeyCode();
-  }
 
   if (code) {
     event.domCode = static_cast<int>(
@@ -431,7 +421,7 @@ void InputHandler::OnScrollFinished(
   }
 
   if (repeat_count > 0) {
-    base::MessageLoop::current()->task_runner()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&InputHandler::SynthesizeRepeatingScroll,
                    weak_factory_.GetWeakPtr(), gesture_params, repeat_count - 1,

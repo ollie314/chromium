@@ -26,10 +26,9 @@
 #include "core/layout/LayoutGeometryMap.h"
 
 #include "core/frame/LocalFrame.h"
-#include "core/layout/LayoutView.h"
 #include "core/paint/PaintLayer.h"
 #include "platform/geometry/TransformState.h"
-#include "wtf/TemporaryChange.h"
+#include "wtf/AutoReset.h"
 
 #define LAYOUT_GEOMETRY_MAP_LOGGING 0
 
@@ -82,7 +81,7 @@ void LayoutGeometryMap::mapToAncestor(TransformState& transformState, const Layo
         // If this box has a transform, it acts as a fixed position container
         // for fixed descendants, which prevents the propagation of 'fixed'
         // unless the layer itself is also fixed position.
-        if (i && currentStep.m_flags & HasTransform && !(currentStep.m_flags & IsFixedPosition))
+        if (i && currentStep.m_flags & ContainsFixedPosition && !(currentStep.m_flags & IsFixedPosition))
             inFixed = false;
         else if (currentStep.m_flags & IsFixedPosition)
             inFixed = true;
@@ -121,8 +120,8 @@ void LayoutGeometryMap::dumpSteps() const
             m_mapping[i].m_layoutObject->debugName().ascii().data(),
             m_mapping[i].m_offset.width().toInt(),
             m_mapping[i].m_offset.height().toInt());
-        if (m_mapping[i].m_flags & HasTransform)
-            fprintf(stderr, " hasTransform");
+        if (m_mapping[i].m_flags & ContainsFixedPosition)
+            fprintf(stderr, " containsFixedPosition");
         fprintf(stderr, "\n");
     }
 }
@@ -161,7 +160,7 @@ FloatQuad LayoutGeometryMap::mapToAncestor(const FloatRect& rect, const LayoutBo
 void LayoutGeometryMap::pushMappingsToAncestor(const LayoutObject* layoutObject, const LayoutBoxModelObject* ancestorLayoutObject)
 {
     // We need to push mappings in reverse order here, so do insertions rather than appends.
-    TemporaryChange<size_t> positionChange(m_insertionPosition, m_mapping.size());
+    AutoReset<size_t> positionChange(&m_insertionPosition, m_mapping.size());
     do {
         layoutObject = layoutObject->pushMappingToContainer(ancestorLayoutObject, *this);
     } while (layoutObject && layoutObject != ancestorLayoutObject);
@@ -176,7 +175,7 @@ static bool canMapBetweenLayoutObjects(const LayoutObject* layoutObject, const L
         if (style.position() == FixedPosition || style.isFlippedBlocksWritingMode())
             return false;
 
-        if (current->hasTransformRelatedProperty() || current->isLayoutFlowThread() || current->isSVGRoot())
+        if (current->style()->canContainFixedPositionObjects() || current->isLayoutFlowThread() || current->isSVGRoot())
             return false;
 
         if (current == ancestor)
@@ -209,7 +208,7 @@ void LayoutGeometryMap::pushMappingsToAncestor(const PaintLayer* layer, const Pa
             pushMappingsToAncestor(ancestorLayer->layoutObject(), 0);
         }
 
-        TemporaryChange<size_t> positionChange(m_insertionPosition, m_mapping.size());
+        AutoReset<size_t> positionChange(&m_insertionPosition, m_mapping.size());
         bool accumulatingTransform = layer->layoutObject()->style()->preserves3D() || ancestorLayer->layoutObject()->style()->preserves3D();
         push(layoutObject, toLayoutSize(layerOffset), accumulatingTransform ? AccumulatingTransform : 0);
         return;
@@ -258,9 +257,17 @@ void LayoutGeometryMap::popMappingsToAncestor(const LayoutBoxModelObject* ancest
 {
     ASSERT(m_mapping.size());
 
+    bool mightBeSaturated = false;
     while (m_mapping.size() && m_mapping.last().m_layoutObject != ancestorLayoutObject) {
+        mightBeSaturated = mightBeSaturated || m_accumulatedOffset.width().mightBeSaturated();
+        mightBeSaturated = mightBeSaturated || m_accumulatedOffset.height().mightBeSaturated();
         stepRemoved(m_mapping.last());
         m_mapping.removeLast();
+    }
+    if (UNLIKELY(mightBeSaturated)) {
+        m_accumulatedOffset = LayoutSize();
+        for (const auto& step : m_mapping)
+            m_accumulatedOffset += step.m_offset;
     }
 }
 

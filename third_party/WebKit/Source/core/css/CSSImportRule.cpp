@@ -54,9 +54,9 @@ MediaList* CSSImportRule::media() const
 String CSSImportRule::cssText() const
 {
     StringBuilder result;
-    result.appendLiteral("@import url(\"");
+    result.append("@import url(\"");
     result.append(m_importRule->href());
-    result.appendLiteral("\")");
+    result.append("\")");
 
     if (m_importRule->mediaQueries()) {
         String mediaText = m_importRule->mediaQueries()->mediaText();
@@ -72,6 +72,8 @@ String CSSImportRule::cssText() const
 
 CSSStyleSheet* CSSImportRule::styleSheet() const
 {
+    // TODO(yukishiino): CSSImportRule.styleSheet attribute is not nullable,
+    // thus this function must not return nullptr.
     if (!m_importRule->styleSheet())
         return nullptr;
 

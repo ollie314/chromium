@@ -361,6 +361,15 @@ unsigned long long PerformanceTiming::firstContentfulPaint() const
     return monotonicTimeToIntegerMilliseconds(timing->firstContentfulPaint());
 }
 
+unsigned long long PerformanceTiming::firstMeaningfulPaint() const
+{
+    const PaintTiming* timing = paintTiming();
+    if (!timing)
+        return 0;
+
+    return monotonicTimeToIntegerMilliseconds(timing->firstMeaningfulPaint());
+}
+
 unsigned long long PerformanceTiming::parseStart() const
 {
     const DocumentParserTiming* timing = documentParserTiming();
@@ -395,6 +404,24 @@ unsigned long long PerformanceTiming::parseBlockedOnScriptLoadFromDocumentWriteD
         return 0;
 
     return toIntegerMilliseconds(timing->parserBlockedOnScriptLoadFromDocumentWriteDuration());
+}
+
+unsigned long long PerformanceTiming::parseBlockedOnScriptExecutionDuration() const
+{
+    const DocumentParserTiming* timing = documentParserTiming();
+    if (!timing)
+        return 0;
+
+    return toIntegerMilliseconds(timing->parserBlockedOnScriptExecutionDuration());
+}
+
+unsigned long long PerformanceTiming::parseBlockedOnScriptExecutionFromDocumentWriteDuration() const
+{
+    const DocumentParserTiming* timing = documentParserTiming();
+    if (!timing)
+        return 0;
+
+    return toIntegerMilliseconds(timing->parserBlockedOnScriptExecutionFromDocumentWriteDuration());
 }
 
 DocumentLoader* PerformanceTiming::documentLoader() const

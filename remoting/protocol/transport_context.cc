@@ -10,7 +10,7 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "remoting/base/url_request.h"
 #include "remoting/protocol/http_ice_config_request.h"
 #include "remoting/protocol/jingle_info_request.h"
@@ -31,7 +31,7 @@ namespace protocol {
 scoped_refptr<TransportContext> TransportContext::ForTests(TransportRole role) {
   jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
   return new protocol::TransportContext(
-      nullptr, base::WrapUnique(new protocol::ChromiumPortAllocatorFactory()),
+      nullptr, base::MakeUnique<protocol::ChromiumPortAllocatorFactory>(),
       nullptr, protocol::NetworkSettings(
                    protocol::NetworkSettings::NAT_TRAVERSAL_OUTGOING),
       role);

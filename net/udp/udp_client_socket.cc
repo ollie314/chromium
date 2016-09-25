@@ -109,14 +109,18 @@ int UDPClientSocket::SetSendBufferSize(int32_t size) {
   return socket_.SetSendBufferSize(size);
 }
 
-const BoundNetLog& UDPClientSocket::NetLog() const {
+int UDPClientSocket::SetDoNotFragment() {
+  return socket_.SetDoNotFragment();
+}
+
+const NetLogWithSource& UDPClientSocket::NetLog() const {
   return socket_.NetLog();
 }
 
-#if defined(OS_WIN)
 void UDPClientSocket::UseNonBlockingIO() {
+#if defined(OS_WIN)
   socket_.UseNonBlockingIO();
-}
 #endif
+}
 
 }  // namespace net

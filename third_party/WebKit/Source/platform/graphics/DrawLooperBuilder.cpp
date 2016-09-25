@@ -39,7 +39,9 @@
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "third_party/skia/include/effects/SkBlurMaskFilter.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -47,14 +49,14 @@ DrawLooperBuilder::DrawLooperBuilder() { }
 
 DrawLooperBuilder::~DrawLooperBuilder() { }
 
-PassOwnPtr<DrawLooperBuilder> DrawLooperBuilder::create()
+std::unique_ptr<DrawLooperBuilder> DrawLooperBuilder::create()
 {
-    return adoptPtr(new DrawLooperBuilder);
+    return wrapUnique(new DrawLooperBuilder);
 }
 
-PassRefPtr<SkDrawLooper> DrawLooperBuilder::detachDrawLooper()
+sk_sp<SkDrawLooper> DrawLooperBuilder::detachDrawLooper()
 {
-    return fromSkSp(m_skDrawLooperBuilder.detach());
+    return m_skDrawLooperBuilder.detach();
 }
 
 void DrawLooperBuilder::addUnmodifiedContent()

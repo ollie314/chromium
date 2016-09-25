@@ -1,3 +1,5 @@
+{% filter format_blink_cpp_source_code %}
+
 {% include 'copyright_block.txt' %}
 #ifndef {{v8_class}}_h
 #define {{v8_class}}_h
@@ -10,6 +12,9 @@ namespace blink {
 
 {% if has_event_constructor %}
 class Dictionary;
+{% endif %}
+{% if attributes|origin_trial_enabled_attributes %}
+class ScriptState;
 {% endif %}
 {% if named_constructor %}
 class {{v8_class}}Constructor {
@@ -39,10 +44,10 @@ public:
     };
 
     {% endif %}
-    {{exported}}static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
     {% if is_array_buffer_or_view %}
     {{exported}}static {{cpp_class}}* toImpl(v8::Local<v8::Object> object);
     {% else %}
+    {{exported}}static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
     static v8::Local<v8::Object> findInstanceInPrototypeChain(v8::Local<v8::Value>, v8::Isolate*);
     {{exported}}static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*, const DOMWrapperWorld&);
     {% if has_named_properties_object %}
@@ -64,11 +69,15 @@ public:
     {
         visitor->trace(scriptWrappable->toImpl<{{cpp_class}}>());
     }
+    static void traceWrappers(WrapperVisitor* visitor, ScriptWrappable* scriptWrappable)
+    {
+        visitor->traceWrappers(scriptWrappable->toImpl<{{cpp_class}}>());
+    }
     {% if has_visit_dom_wrapper %}
     static void visitDOMWrapper(v8::Isolate*, ScriptWrappable*, const v8::Persistent<v8::Object>&);
     {% endif %}
-    {% if active_scriptwrappable %}
-    static ActiveScriptWrappable* toActiveScriptWrappable(v8::Local<v8::Object>);
+    {% if has_visit_dom_wrapper_custom %}
+    static void visitDOMWrapperCustom(v8::Isolate*, ScriptWrappable*, const v8::Persistent<v8::Object>&);
     {% endif %}
     {% for method in methods %}
     {% if method.is_custom %}
@@ -114,17 +123,17 @@ public:
     static void indexedPropertyDeleterCustom(uint32_t, const v8::PropertyCallbackInfo<v8::Boolean>&);
     {% endif %}
     {% if named_property_getter and named_property_getter.is_custom %}
-    static void namedPropertyGetterCustom(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>&);
+    static void namedPropertyGetterCustom(const AtomicString&, const v8::PropertyCallbackInfo<v8::Value>&);
     {% endif %}
     {% if named_property_setter and named_property_setter.is_custom %}
-    static void namedPropertySetterCustom(v8::Local<v8::Name>, v8::Local<v8::Value>, const v8::PropertyCallbackInfo<v8::Value>&);
+    static void namedPropertySetterCustom(const AtomicString&, v8::Local<v8::Value>, const v8::PropertyCallbackInfo<v8::Value>&);
     {% endif %}
     {% if named_property_getter and
           named_property_getter.is_custom_property_query %}
-    static void namedPropertyQueryCustom(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Integer>&);
+    static void namedPropertyQueryCustom(const AtomicString&, const v8::PropertyCallbackInfo<v8::Integer>&);
     {% endif %}
     {% if named_property_deleter and named_property_deleter.is_custom %}
-    static void namedPropertyDeleterCustom(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Boolean>&);
+    static void namedPropertyDeleterCustom(const AtomicString&, const v8::PropertyCallbackInfo<v8::Boolean>&);
     {% endif %}
     {% if named_property_getter and
           named_property_getter.is_custom_property_enumerator %}
@@ -148,11 +157,9 @@ public:
        * a C++ pointer to the DOM object (if the object is not in oilpan) #}
     static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + {{custom_internal_field_counter}};
     {# End custom internal fields #}
-    static void installConditionallyEnabledProperties(v8::Local<v8::Object>, v8::Isolate*){% if has_conditional_attributes %};
-    {% else %} { }
-    {% endif %}
-    static void preparePrototypeAndInterfaceObject(v8::Local<v8::Context>, const DOMWrapperWorld&, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate){% if unscopeables or has_conditional_attributes_on_prototype or conditionally_enabled_methods %};
-    {% else %} { }
+    {% if unscopables or has_conditional_attributes_on_prototype or
+          methods | conditionally_exposed(is_partial) %}
+    {{exported}}static void preparePrototypeAndInterfaceObject(v8::Local<v8::Context>, const DOMWrapperWorld&, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate);
     {% endif %}
     {% if has_partial_interface %}
     {{exported}}static void updateWrapperTypeInfo(InstallTemplateFunction, PreparePrototypeAndInterfaceObjectFunction);
@@ -161,6 +168,12 @@ public:
     {{exported}}static void register{{method.name | blink_capitalize}}MethodForPartialInterface(void (*)(const v8::FunctionCallbackInfo<v8::Value>&));
     {% endfor %}
     {% endif %}
+    {% for origin_trial_feature in origin_trial_features %}{{newline}}
+    static void install{{origin_trial_feature.name}}(ScriptState*, v8::Local<v8::Object> instance);
+    {% if not origin_trial_feature.needs_instance %}
+    static void install{{origin_trial_feature.name}}(ScriptState*);
+    {% endif %}
+    {% endfor %}
     {% if has_partial_interface %}
 
 private:
@@ -180,3 +193,5 @@ struct V8TypeOf<{{cpp_class}}> {
 } // namespace blink
 
 #endif // {{v8_class}}_h
+
+{% endfilter %}{# format_blink_cpp_source_code #}

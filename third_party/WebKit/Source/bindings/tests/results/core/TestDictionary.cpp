@@ -6,6 +6,8 @@
 
 #include "TestDictionary.h"
 
+#include "bindings/core/v8/DoubleOrString.h"
+#include "bindings/core/v8/TestInterface2OrUint8Array.h"
 
 namespace blink {
 
@@ -43,6 +45,7 @@ DEFINE_TRACE(TestDictionary)
     visitor->trace(m_testInterfaceOrNullMember);
     visitor->trace(m_testInterfaceSequenceMember);
     visitor->trace(m_uint8ArrayMember);
+    IDLDictionaryBase::trace(visitor);
 }
 
 } // namespace blink

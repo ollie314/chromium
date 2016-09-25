@@ -7,21 +7,21 @@
 #include <map>
 #include <memory>
 
+#include "ash/public/interfaces/container.mojom.h"
 #include "base/guid.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/mus/public/cpp/property_type_converters.h"
-#include "components/mus/public/interfaces/user_access_manager.mojom.h"
 #include "mash/init/public/interfaces/init.mojom.h"
 #include "mash/login/public/interfaces/login.mojom.h"
-#include "mash/wm/public/interfaces/container.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "services/shell/public/cpp/connector.h"
-#include "services/shell/public/cpp/shell_client.h"
-#include "services/tracing/public/cpp/tracing_impl.h"
+#include "services/shell/public/cpp/service.h"
+#include "services/tracing/public/cpp/provider.h"
+#include "services/ui/public/cpp/property_type_converters.h"
+#include "services/ui/public/interfaces/user_access_manager.mojom.h"
 #include "ui/views/background.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/mus/aura_init.h"
 #include "ui/views/mus/native_widget_mus.h"
 #include "ui/views/mus/window_manager_connection.h"
@@ -36,11 +36,11 @@ class Login;
 class UI : public views::WidgetDelegateView,
            public views::ButtonListener {
  public:
-  static void Show(shell::Connector* connector, Login* login) {
+  static void Show(shell::Connector* connector,
+                   const shell::Identity& identity,
+                   Login* login) {
     UI* ui = new UI(login, connector);
-    ui->StartWindowManager();
-
-    views::WindowManagerConnection::Create(connector);
+    ui->StartWindowManager(identity);
 
     views::Widget* widget = new views::Widget;
     views::Widget::InitParams params(
@@ -48,13 +48,13 @@ class UI : public views::WidgetDelegateView,
     params.delegate = ui;
 
     std::map<std::string, std::vector<uint8_t>> properties;
-    properties[mash::wm::mojom::kWindowContainer_Property] =
+    properties[ash::mojom::kWindowContainer_Property] =
         mojo::ConvertTo<std::vector<uint8_t>>(
-            static_cast<int32_t>(mash::wm::mojom::Container::LOGIN_WINDOWS));
-    mus::Window* window =
+            static_cast<int32_t>(ash::mojom::Container::LOGIN_WINDOWS));
+    ui::Window* window =
         views::WindowManagerConnection::Get()->NewWindow(properties);
     params.native_widget = new views::NativeWidgetMus(
-        widget, connector, window, mus::mojom::SurfaceType::DEFAULT);
+        widget, window, ui::mojom::SurfaceType::DEFAULT);
     widget->Init(params);
     widget->Show();
   }
@@ -66,18 +66,16 @@ class UI : public views::WidgetDelegateView,
         user_id_1_("00000000-0000-4000-8000-000000000000"),
         user_id_2_("00000000-0000-4000-8000-000000000001"),
         login_button_1_(
-            new views::LabelButton(this, base::ASCIIToUTF16("Timothy"))),
+            views::MdTextButton::Create(this, base::ASCIIToUTF16("Timothy"))),
         login_button_2_(
-            new views::LabelButton(this, base::ASCIIToUTF16("Jimothy"))) {
+            views::MdTextButton::Create(this, base::ASCIIToUTF16("Jimothy"))) {
     set_background(views::Background::CreateSolidBackground(SK_ColorRED));
-    login_button_1_->SetStyle(views::Button::STYLE_BUTTON);
-    login_button_2_->SetStyle(views::Button::STYLE_BUTTON);
     AddChildView(login_button_1_);
     AddChildView(login_button_2_);
   }
   ~UI() override {
     // Prevent the window manager from restarting during graceful shutdown.
-    window_manager_connection_->SetConnectionLostClosure(base::Closure());
+    mash_wm_connection_->SetConnectionLostClosure(base::Closure());
     base::MessageLoop::current()->QuitWhenIdle();
   }
 
@@ -104,32 +102,35 @@ class UI : public views::WidgetDelegateView,
     button_box.set_y((button_box.height() - ps1.height()) / 2);
 
     login_button_1_->SetBounds(button_box.x(), button_box.y(), ps1.width(),
-                                ps1.height());
+                               ps1.height());
     login_button_2_->SetBounds(login_button_1_->bounds().right() + 10,
-                                button_box.y(), ps2.width(), ps2.height());
+                               button_box.y(), ps2.width(), ps2.height());
   }
 
   // Overridden from views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
-  void StartWindowManager() {
-    window_manager_connection_ = connector_->Connect("mojo:desktop_wm");
-    window_manager_connection_->SetConnectionLostClosure(
-        base::Bind(&UI::StartWindowManager, base::Unretained(this)));
+  void StartWindowManager(const shell::Identity& identity) {
+    mash_wm_connection_ = connector_->Connect("mojo:ash");
+    mash_wm_connection_->SetConnectionLostClosure(
+        base::Bind(&UI::StartWindowManager, base::Unretained(this), identity));
+    window_manager_connection_ =
+        views::WindowManagerConnection::Create(connector_, identity);
   }
 
   Login* login_;
   shell::Connector* connector_;
   const std::string user_id_1_;
   const std::string user_id_2_;
-  views::LabelButton* login_button_1_;
-  views::LabelButton* login_button_2_;
-  std::unique_ptr<shell::Connection> window_manager_connection_;
+  views::MdTextButton* login_button_1_;
+  views::MdTextButton* login_button_2_;
+  std::unique_ptr<shell::Connection> mash_wm_connection_;
+  std::unique_ptr<views::WindowManagerConnection> window_manager_connection_;
 
   DISALLOW_COPY_AND_ASSIGN(UI);
 };
 
-class Login : public shell::ShellClient,
+class Login : public shell::Service,
               public shell::InterfaceFactory<mojom::Login>,
               public mojom::Login {
  public:
@@ -139,50 +140,49 @@ class Login : public shell::ShellClient,
   void LoginAs(const std::string& user_id) {
     user_access_manager_->SetActiveUser(user_id);
     mash::init::mojom::InitPtr init;
-    connector_->ConnectToInterface("mojo:mash_init", &init);
+    connector()->ConnectToInterface("mojo:mash_init", &init);
     init->StartService("mojo:mash_session", user_id);
   }
 
  private:
-  // shell::ShellClient:
-  void Initialize(shell::Connector* connector,
-                  const shell::Identity& identity,
-                  uint32_t id) override {
-    connector_ = connector;
-    tracing_.Initialize(connector, identity.name());
+  // shell::Service:
+  void OnStart(const shell::Identity& identity) override {
+    identity_ = identity;
+    tracing_.Initialize(connector(), identity.name());
 
-    aura_init_.reset(new views::AuraInit(connector, "views_mus_resources.pak"));
+    aura_init_.reset(
+        new views::AuraInit(connector(), "views_mus_resources.pak"));
 
-    connector_->ConnectToInterface("mojo:mus", &user_access_manager_);
+    connector()->ConnectToInterface("mojo:ui", &user_access_manager_);
     user_access_manager_->SetActiveUser(identity.user_id());
   }
-  bool AcceptConnection(shell::Connection* connection) override {
-    connection->AddInterface<mojom::Login>(this);
+  bool OnConnect(const shell::Identity& remote_identity,
+                 shell::InterfaceRegistry* registry) override {
+    registry->AddInterface<mojom::Login>(this);
     return true;
   }
 
   // shell::InterfaceFactory<mojom::Login>:
-  void Create(shell::Connection* connection,
+  void Create(const shell::Identity& remote_identity,
               mojom::LoginRequest request) override {
     bindings_.AddBinding(this, std::move(request));
   }
 
   // mojom::Login:
   void ShowLoginUI() override {
-    UI::Show(connector_, this);
+    UI::Show(connector(), identity_, this);
   }
   void SwitchUser() override {
-    UI::Show(connector_, this);
+    UI::Show(connector(), identity_, this);
   }
 
   void StartWindowManager();
 
-  shell::Connector* connector_;
-  mojo::TracingImpl tracing_;
+  shell::Identity identity_;
+  tracing::Provider tracing_;
   std::unique_ptr<views::AuraInit> aura_init_;
   mojo::BindingSet<mojom::Login> bindings_;
-  mus::mojom::UserAccessManagerPtr user_access_manager_;
-  std::unique_ptr<shell::Connection> window_manager_connection_;
+  ui::mojom::UserAccessManagerPtr user_access_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(Login);
 };
@@ -201,7 +201,7 @@ void UI::ButtonPressed(views::Button* sender, const ui::Event& event) {
 
 }  // namespace
 
-shell::ShellClient* CreateLogin() {
+shell::Service* CreateLogin() {
   return new Login;
 }
 

@@ -44,6 +44,8 @@ component("test_runner") {
     "mock_spell_check.h",
     "mock_web_audio_device.cc",
     "mock_web_audio_device.h",
+    "mock_web_document_subresource_filter.cc",
+    "mock_web_document_subresource_filter.h",
     "mock_web_media_stream_center.cc",
     "mock_web_media_stream_center.h",
     "mock_web_midi_accessor.cc",
@@ -75,6 +77,8 @@ component("test_runner") {
     "test_runner.cc",
     "test_runner.h",
     "test_runner_export.h",
+    "test_runner_for_specific_view.cc",
+    "test_runner_for_specific_view.h",
     "text_input_controller.cc",
     "text_input_controller.h",
     "tracked_dictionary.cc",
@@ -85,16 +89,18 @@ component("test_runner") {
     "web_frame_test_client.h",
     "web_frame_test_proxy.cc",
     "web_frame_test_proxy.h",
-    "web_task.cc",
-    "web_task.h",
     "web_test_delegate.h",
     "web_test_interfaces.cc",
     "web_test_interfaces.h",
-    "web_test_proxy.cc",
-    "web_test_proxy.h",
     "web_test_runner.h",
     "web_view_test_client.cc",
     "web_view_test_client.h",
+    "web_view_test_proxy.cc",
+    "web_view_test_proxy.h",
+    "web_widget_test_client.cc",
+    "web_widget_test_client.h",
+    "web_widget_test_proxy.cc",
+    "web_widget_test_proxy.h",
   ]
 
   # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -108,17 +114,24 @@ component("test_runner") {
     "//cc/blink",
     "//gin",
     "//gpu",
+    "//gpu/command_buffer/client:gles2_interface",
     "//net",
     "//skia",
     "//third_party/WebKit/public:blink",
+    "//ui/display",
     "//ui/events:dom_keycode_converter",
     "//ui/events:events_base",
+    "//ui/events/blink",
     "//ui/gfx",
     "//ui/gfx:test_support",
     "//ui/gfx/geometry",
     "//url",
     "//v8",
   ]
+
+  if (is_mac) {
+    libs = [ "AppKit.framework" ]
+  }
 }
 
 # Font copies.
@@ -158,20 +171,24 @@ if (is_android) {
     ]
   }
 }
+if (is_mac) {
+  bundle_data("test_runner_bundle_data") {
+    sources = [
+      "resources/fonts/AHEM____.TTF",
+      "resources/fonts/ChromiumAATTest.ttf",
+    ]
+
+    outputs = [
+      "{{bundle_resources_dir}}/{{source_file_part}}",
+    ]
+  }
+}
 
 group("resources") {
   deps = []
 
   if (is_mac) {
-    # TODO(GYP) Mac bundle resources.
-    #'all_dependent_settings': {
-    #  'mac_bundle_resources': [
-    #    'resources/fonts/AHEM____.TTF',
-    #    'resources/fonts/ChromiumAATTest.ttf',
-    #    '<(SHARED_INTERMEDIATE_DIR)/webkit/missingImage.png',
-    #    '<(SHARED_INTERMEDIATE_DIR)/webkit/textAreaResizeCorner.png',
-    #  ],
-    #},
+    deps += [ ":test_runner_bundle_data" ]
   } else {
     deps += [ ":copy_ahem" ]
   }
@@ -184,20 +201,15 @@ group("resources") {
   }
 }
 
-if (is_mac || is_win) {
-  # GYP version: components/test_runner/test_runner.gyp:layout_test_helper
+if (is_win) {
   executable("layout_test_helper") {
     sources = [
-      "helper/layout_test_helper_mac.mm",
       "helper/layout_test_helper_win.cc",
     ]
 
-    if (is_mac) {
-      libs = [ "AppKit.framework" ]
-    }
-
     deps = [
       "//build/config/sanitizers:deps",
+      "//build/win:default_exe_manifest",
     ]
   }
 }

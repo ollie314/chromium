@@ -71,6 +71,9 @@ public:
     // true if an new entry was added.
     AddResult add(const ValueType&);
 
+    // Generalized add(), adding the value N times.
+    AddResult add(const ValueType&, unsigned);
+
     // Reduces the count of the value, and removes it if count goes down to
     // zero, returns true if the value is removed.
     bool remove(const ValueType& value) { return remove(find(value)); }
@@ -83,6 +86,8 @@ public:
     // Clears the whole set.
     void clear() { m_impl.clear(); }
 
+    Vector<Value> asVector() const;
+
     template <typename VisitorDispatcher>
     void trace(VisitorDispatcher visitor) { m_impl.trace(visitor); }
 
@@ -91,11 +96,18 @@ private:
 };
 
 template <typename T, typename U, typename V, typename W>
+inline typename HashCountedSet<T, U, V, W>::AddResult HashCountedSet<T, U, V, W>::add(const ValueType& value, unsigned count)
+{
+    DCHECK_GT(count, 0u);
+    AddResult result = m_impl.add(value, 0);
+    result.storedValue->value += count;
+    return result;
+}
+
+template <typename T, typename U, typename V, typename W>
 inline typename HashCountedSet<T, U, V, W>::AddResult HashCountedSet<T, U, V, W>::add(const ValueType& value)
 {
-    AddResult result = m_impl.add(value, 0);
-    ++result.storedValue->value;
-    return result;
+    return add(value, 1u);
 }
 
 template <typename T, typename U, typename V, typename W>
@@ -125,38 +137,27 @@ inline void HashCountedSet<T, U, V, W>::removeAll(iterator it)
     m_impl.remove(it);
 }
 
-template <typename T, typename U, typename V, typename W, typename VectorType>
-inline void copyToVector(const HashCountedSet<T, U, V, W>& collection, VectorType& vector)
+template <typename Value, typename HashFunctions, typename Traits, typename Allocator, typename VectorType>
+inline void copyToVector(const HashCountedSet<Value, HashFunctions, Traits, Allocator>& collection, VectorType& vector)
 {
-    typedef typename HashCountedSet<T, U, V, W>::const_iterator iterator;
-
     {
         // Disallow GC across resize allocation, see crbug.com/568173
         typename VectorType::GCForbiddenScope scope;
         vector.resize(collection.size());
     }
 
-    iterator it = collection.begin();
-    iterator end = collection.end();
-    for (unsigned i = 0; it != end; ++it, ++i)
-        vector[i] = *it;
-}
-
-template <typename Value, typename HashFunctions, typename Traits, typename Allocator, size_t inlineCapacity, typename VectorAllocator>
-inline void copyToVector(const HashCountedSet<Value, HashFunctions, Traits, Allocator>& collection, Vector<Value, inlineCapacity, VectorAllocator>& vector)
-{
-    typedef typename HashCountedSet<Value, HashFunctions, Traits, Allocator>::const_iterator iterator;
-
-    {
-        // Disallow GC across resize allocation, see crbug.com/568173
-        typename Vector<Value, inlineCapacity, VectorAllocator>::GCForbiddenScope scope;
-        vector.resize(collection.size());
-    }
-
-    iterator it = collection.begin();
-    iterator end = collection.end();
+    auto it = collection.begin();
+    auto end = collection.end();
     for (unsigned i = 0; it != end; ++it, ++i)
         vector[i] = (*it).key;
+}
+
+template <typename T, typename U, typename V, typename W>
+inline Vector<T> HashCountedSet<T, U, V, W>::asVector() const
+{
+    Vector<T> vector;
+    copyToVector(*this, vector);
+    return vector;
 }
 
 } // namespace WTF

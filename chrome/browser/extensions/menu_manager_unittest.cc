@@ -11,6 +11,7 @@
 #include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -59,7 +60,7 @@ class MenuManagerTest : public testing::Test {
 
   void TearDown() override {
     prefs_.pref_service()->CommitPendingWrite();
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   // Returns a test item.
@@ -225,16 +226,12 @@ TEST_F(MenuManagerTest, PopulateFromValue) {
   ASSERT_TRUE(contexts.ToValue()->GetAsInteger(&contexts_value));
 
   base::ListValue* document_url_patterns(new base::ListValue());
-  document_url_patterns->Append(
-      new base::StringValue("http://www.google.com/*"));
-  document_url_patterns->Append(
-      new base::StringValue("http://www.reddit.com/*"));
+  document_url_patterns->AppendString("http://www.google.com/*");
+  document_url_patterns->AppendString("http://www.reddit.com/*");
 
   base::ListValue* target_url_patterns(new base::ListValue());
-  target_url_patterns->Append(
-      new base::StringValue("http://www.yahoo.com/*"));
-  target_url_patterns->Append(
-      new base::StringValue("http://www.facebook.com/*"));
+  target_url_patterns->AppendString("http://www.yahoo.com/*");
+  target_url_patterns->AppendString("http://www.facebook.com/*");
 
   base::DictionaryValue value;
   value.SetBoolean("incognito", incognito);
@@ -488,7 +485,7 @@ class MockEventRouter : public EventRouter {
 // MockEventRouter factory function
 std::unique_ptr<KeyedService> MockEventRouterFactoryFunction(
     content::BrowserContext* context) {
-  return base::WrapUnique(new MockEventRouter(static_cast<Profile*>(context)));
+  return base::MakeUnique<MockEventRouter>(static_cast<Profile*>(context));
 }
 
 }  // namespace

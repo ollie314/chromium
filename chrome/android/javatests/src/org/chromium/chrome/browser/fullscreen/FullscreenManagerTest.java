@@ -4,7 +4,8 @@
 
 package org.chromium.chrome.browser.fullscreen;
 
-import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE;
+// (http://crbug/642336)
+// import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE;
 
 import android.graphics.Rect;
 import android.graphics.Region;
@@ -18,11 +19,12 @@ import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.Restriction;
+//  (http://crbug/642336) import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager.FullscreenListener;
 import org.chromium.chrome.browser.omnibox.UrlBar;
 import org.chromium.chrome.browser.tab.Tab;
@@ -48,6 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Test suite for verifying the behavior of various fullscreen actions.
  */
+@RetryOnFailure
 public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
 
     private static final String LONG_HTML_WITH_AUTO_FOCUS_INPUT_TEST_PAGE =
@@ -136,7 +139,6 @@ public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
     @Feature({"Fullscreen"})
     public void testExitPersistentFullscreenAllowsManualFullscreen() throws InterruptedException {
         startMainActivityWithURL(LONG_FULLSCREEN_API_HTML_TEST_PAGE);
-        if (DeviceClassManager.isAutoHidingToolbarDisabled(getActivity())) return;
 
         ChromeFullscreenManager fullscreenManager = getActivity().getFullscreenManager();
         fullscreenManager.setAnimationDurationsForTest(1, 1);
@@ -166,7 +168,6 @@ public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
     @Feature({"Fullscreen"})
     public void testManualHidingShowingTopControls() throws InterruptedException {
         startMainActivityWithURL(LONG_HTML_TEST_PAGE);
-        if (DeviceClassManager.isAutoHidingToolbarDisabled(getActivity())) return;
 
         final ChromeFullscreenManager fullscreenManager = getActivity().getFullscreenManager();
         disableBrowserOverrides();
@@ -184,7 +185,6 @@ public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
     @Feature({"Fullscreen"})
     public void testHidingTopControlsRemovesSurfaceFlingerOverlay() throws InterruptedException {
         startMainActivityWithURL(LONG_HTML_TEST_PAGE);
-        if (DeviceClassManager.isAutoHidingToolbarDisabled(getActivity())) return;
 
         final ChromeFullscreenManager fullscreenManager = getActivity().getFullscreenManager();
         disableBrowserOverrides();
@@ -260,7 +260,6 @@ public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
     @Feature({"Fullscreen"})
     public void testControlsShownOnUnresponsiveRenderer() throws InterruptedException {
         startMainActivityWithURL(LONG_HTML_TEST_PAGE);
-        if (DeviceClassManager.isAutoHidingToolbarDisabled(getActivity())) return;
 
         ChromeFullscreenManager fullscreenManager = getActivity().getFullscreenManager();
         fullscreenManager.setAnimationDurationsForTest(1, 1);
@@ -289,12 +288,14 @@ public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
         waitForNoBrowserTopControlsOffset();
     }
 
+    /*
     @LargeTest
     @Feature({"Fullscreen"})
     @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    */
+    @DisabledTest(message = "crbug.com/642336")
     public void testPrerenderedPageSupportsManualHiding() throws InterruptedException {
         startMainActivityOnBlankPage();
-        if (DeviceClassManager.isAutoHidingToolbarDisabled(getActivity())) return;
         disableBrowserOverrides();
 
         EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartFileServer(
@@ -329,7 +330,6 @@ public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
     public void testTopControlsShownWhenInputIsFocused()
             throws InterruptedException, TimeoutException {
         startMainActivityWithURL(LONG_HTML_WITH_AUTO_FOCUS_INPUT_TEST_PAGE);
-        if (DeviceClassManager.isAutoHidingToolbarDisabled(getActivity())) return;
 
         ChromeFullscreenManager fullscreenManager = getActivity().getFullscreenManager();
         assertEquals(fullscreenManager.getControlOffset(), 0f);
@@ -428,7 +428,7 @@ public class FullscreenManagerTest extends ChromeTabbedActivityTestBase {
 
         fullscreenManager.addListener(new FullscreenListener() {
             @Override
-            public void onVisibleContentOffsetChanged(float offset) {
+            public void onVisibleContentOffsetChanged(float offset, boolean needsAnimate) {
                 if (offset != initialVisibleContentOffset) {
                     contentMovedCallback.notifyCalled();
                     fullscreenManager.removeListener(this);

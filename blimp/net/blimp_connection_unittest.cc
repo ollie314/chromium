@@ -7,13 +7,16 @@
 #include <stddef.h>
 
 #include <string>
+#include <utility>
 
 #include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "blimp/common/create_blimp_message.h"
 #include "blimp/common/proto/blimp_message.pb.h"
 #include "blimp/net/common.h"
 #include "blimp/net/connection_error_observer.h"
+#include "blimp/net/message_port.h"
 #include "blimp/net/test_common.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
@@ -33,11 +36,14 @@ namespace {
 class BlimpConnectionTest : public testing::Test {
  public:
   BlimpConnectionTest() {
-    std::unique_ptr<testing::StrictMock<MockPacketWriter>> writer(
-        new testing::StrictMock<MockPacketWriter>);
-    writer_ = writer.get();
-    connection_.reset(new BlimpConnection(
-        base::WrapUnique(new MockPacketReader), std::move(writer)));
+    std::unique_ptr<MockPacketReader> mock_reader(new MockPacketReader);
+    std::unique_ptr<MockPacketWriter> mock_writer(new MockPacketWriter);
+    mock_reader_ = mock_reader.get();
+    mock_writer_ = mock_writer.get();
+    connection_ =
+        base::MakeUnique<BlimpConnection>(base::MakeUnique<MessagePort>(
+            std::move(mock_reader), std::move(mock_writer)));
+
     connection_->AddConnectionErrorObserver(&error_observer1_);
     connection_->AddConnectionErrorObserver(&error_observer2_);
     connection_->AddConnectionErrorObserver(&error_observer3_);
@@ -46,21 +52,22 @@ class BlimpConnectionTest : public testing::Test {
 
   ~BlimpConnectionTest() override {}
 
+  void DropConnection() { connection_.reset(); }
+
  protected:
   std::unique_ptr<BlimpMessage> CreateInputMessage() {
-    std::unique_ptr<BlimpMessage> msg(new BlimpMessage);
-    msg->set_type(BlimpMessage::INPUT);
-    return msg;
+    InputMessage* input;
+    return CreateBlimpMessage(&input);
   }
 
   std::unique_ptr<BlimpMessage> CreateControlMessage() {
-    std::unique_ptr<BlimpMessage> msg(new BlimpMessage);
-    msg->set_type(BlimpMessage::TAB_CONTROL);
-    return msg;
+    TabControlMessage* control;
+    return CreateBlimpMessage(&control);
   }
 
   base::MessageLoop message_loop_;
-  testing::StrictMock<MockPacketWriter>* writer_;
+  MockPacketReader* mock_reader_;
+  MockPacketWriter* mock_writer_;
   testing::StrictMock<MockConnectionErrorObserver> error_observer1_;
   testing::StrictMock<MockConnectionErrorObserver> error_observer2_;
 
@@ -77,14 +84,17 @@ TEST_F(BlimpConnectionTest, AsyncTwoPacketsWrite) {
   net::CompletionCallback write_packet_cb;
 
   InSequence s;
-  EXPECT_CALL(*writer_,
+  EXPECT_CALL(*mock_writer_,
               WritePacket(BufferEqualsProto(*CreateInputMessage()), _))
       .WillOnce(SaveArg<1>(&write_packet_cb))
       .RetiresOnSaturation();
-  EXPECT_CALL(*writer_,
+  EXPECT_CALL(*mock_writer_,
               WritePacket(BufferEqualsProto(*CreateControlMessage()), _))
       .WillOnce(SaveArg<1>(&write_packet_cb))
       .RetiresOnSaturation();
+  EXPECT_CALL(error_observer1_, OnConnectionError(_)).Times(0);
+  EXPECT_CALL(error_observer2_, OnConnectionError(_)).Times(0);
+  EXPECT_CALL(error_observer3_, OnConnectionError(_)).Times(0);
 
   BlimpMessageProcessor* sender = connection_->GetOutgoingMessageProcessor();
   net::TestCompletionCallback complete_cb_1;
@@ -110,16 +120,17 @@ TEST_F(BlimpConnectionTest, AsyncTwoPacketsWriteWithError) {
   net::CompletionCallback write_packet_cb;
 
   InSequence s;
-  EXPECT_CALL(*writer_,
+  EXPECT_CALL(*mock_writer_,
               WritePacket(BufferEqualsProto(*CreateInputMessage()), _))
       .WillOnce(SaveArg<1>(&write_packet_cb))
       .RetiresOnSaturation();
-  EXPECT_CALL(*writer_,
+  EXPECT_CALL(*mock_writer_,
               WritePacket(BufferEqualsProto(*CreateControlMessage()), _))
       .WillOnce(SaveArg<1>(&write_packet_cb))
       .RetiresOnSaturation();
   EXPECT_CALL(error_observer1_, OnConnectionError(net::ERR_FAILED));
   EXPECT_CALL(error_observer2_, OnConnectionError(net::ERR_FAILED));
+  EXPECT_CALL(error_observer3_, OnConnectionError(_)).Times(0);
 
   BlimpMessageProcessor* sender = connection_->GetOutgoingMessageProcessor();
   net::TestCompletionCallback complete_cb_1;
@@ -133,6 +144,86 @@ TEST_F(BlimpConnectionTest, AsyncTwoPacketsWriteWithError) {
                          complete_cb_2.callback());
   base::ResetAndReturn(&write_packet_cb).Run(net::ERR_FAILED);
   EXPECT_EQ(net::ERR_FAILED, complete_cb_2.WaitForResult());
+}
+
+TEST_F(BlimpConnectionTest, DeleteHappyObserversAreOK) {
+  net::CompletionCallback write_packet_cb;
+
+  InSequence s;
+  EXPECT_CALL(*mock_writer_,
+              WritePacket(BufferEqualsProto(*CreateInputMessage()), _))
+      .WillOnce(SaveArg<1>(&write_packet_cb))
+      .RetiresOnSaturation();
+  EXPECT_CALL(error_observer1_, OnConnectionError(net::ERR_FAILED))
+      .WillOnce(testing::InvokeWithoutArgs(
+          this, &BlimpConnectionTest::DropConnection));
+
+  BlimpMessageProcessor* sender = connection_->GetOutgoingMessageProcessor();
+  net::TestCompletionCallback complete_cb_1;
+  sender->ProcessMessage(CreateInputMessage(), complete_cb_1.callback());
+  base::ResetAndReturn(&write_packet_cb).Run(net::ERR_FAILED);
+  EXPECT_EQ(net::ERR_FAILED, complete_cb_1.WaitForResult());
+}
+
+// Verifies that a ReadPacket error causes ErrorObservers to be notified.
+TEST_F(BlimpConnectionTest, ReadPacketErrorInvokesErrorObservers) {
+  scoped_refptr<net::GrowableIOBuffer> read_packet_buffer;
+  net::CompletionCallback read_packet_cb;
+
+  EXPECT_CALL(*mock_reader_, ReadPacket(_, _))
+      .WillOnce(
+          DoAll(SaveArg<0>(&read_packet_buffer), SaveArg<1>(&read_packet_cb)))
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(error_observer1_, OnConnectionError(net::ERR_FAILED));
+  EXPECT_CALL(error_observer2_, OnConnectionError(net::ERR_FAILED));
+  EXPECT_CALL(error_observer3_, OnConnectionError(_)).Times(0);
+
+  EXPECT_CALL(receiver_, MockableProcessMessage(_, _)).Times(0);
+
+  // Trigger the first ReadPacket() call by setting the MessageProcessor.
+  connection_->SetIncomingMessageProcessor(&receiver_);
+  EXPECT_TRUE(read_packet_buffer);
+  EXPECT_FALSE(read_packet_cb.is_null());
+
+  // Signal an error back from the ReadPacket operation.
+  base::ResetAndReturn(&read_packet_cb).Run(net::ERR_FAILED);
+}
+
+// Verifies that EndConnection messages received from the peer are
+// routed through to registered ConnectionErrorObservers as errors.
+TEST_F(BlimpConnectionTest, EndConnectionInvokesErrorObservers) {
+  scoped_refptr<net::GrowableIOBuffer> read_packet_buffer;
+  net::CompletionCallback read_packet_cb;
+
+  EXPECT_CALL(*mock_reader_, ReadPacket(_, _))
+      .WillOnce(
+          DoAll(SaveArg<0>(&read_packet_buffer), SaveArg<1>(&read_packet_cb)))
+      .WillOnce(Return())
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(error_observer1_,
+              OnConnectionError(EndConnectionMessage::PROTOCOL_MISMATCH));
+  EXPECT_CALL(error_observer2_,
+              OnConnectionError(EndConnectionMessage::PROTOCOL_MISMATCH));
+  EXPECT_CALL(error_observer3_, OnConnectionError(_)).Times(0);
+
+  EXPECT_CALL(receiver_, MockableProcessMessage(_, _)).Times(0);
+
+  // Trigger the first ReadPacket() call by setting the MessageProcessor.
+  connection_->SetIncomingMessageProcessor(&receiver_);
+  EXPECT_TRUE(read_packet_buffer);
+  EXPECT_FALSE(read_packet_cb.is_null());
+
+  // Create an EndConnection message to return from ReadPacket.
+  std::unique_ptr<BlimpMessage> message =
+      CreateEndConnectionMessage(EndConnectionMessage::PROTOCOL_MISMATCH);
+
+  // Put the EndConnection message in the buffer and invoke the read callback.
+  read_packet_buffer->SetCapacity(message->ByteSize());
+  ASSERT_TRUE(message->SerializeToArray(read_packet_buffer->data(),
+                                        message->GetCachedSize()));
+  base::ResetAndReturn(&read_packet_cb).Run(message->ByteSize());
 }
 
 }  // namespace

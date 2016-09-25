@@ -4,20 +4,21 @@
 
 #include "chrome/browser/ui/webui/settings/chromeos/device_keyboard_handler.h"
 
+#include "ash/common/new_window_delegate.h"
+#include "ash/common/wm_shell.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chromeos/chromeos_switches.h"
 #include "content/public/browser/web_ui.h"
-#include "ui/events/devices/device_data_manager.h"
-#include "ui/events/devices/keyboard_device.h"
+#include "ui/events/devices/input_device_manager.h"
 
 namespace {
 
 bool HasExternalKeyboard() {
-  for (const ui::KeyboardDevice& keyboard :
-       ui::DeviceDataManager::GetInstance()->keyboard_devices()) {
+  for (const ui::InputDevice& keyboard :
+       ui::InputDeviceManager::GetInstance()->GetKeyboardDevices()) {
     if (keyboard.type == ui::InputDeviceType::INPUT_DEVICE_EXTERNAL)
       return true;
   }
@@ -31,12 +32,9 @@ namespace chromeos {
 namespace settings {
 
 KeyboardHandler::KeyboardHandler(content::WebUI* webui)
-    : profile_(Profile::FromWebUI(webui)) {
-  ui::DeviceDataManager::GetInstance()->AddObserver(this);
-}
+    : profile_(Profile::FromWebUI(webui)), observer_(this) {}
 
 KeyboardHandler::~KeyboardHandler() {
-  ui::DeviceDataManager::GetInstance()->RemoveObserver(this);
 }
 
 void KeyboardHandler::RegisterMessages() {
@@ -44,6 +42,18 @@ void KeyboardHandler::RegisterMessages() {
       "initializeKeyboardSettings",
       base::Bind(&KeyboardHandler::HandleInitialize,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "showKeyboardShortcutsOverlay",
+      base::Bind(&KeyboardHandler::HandleShowKeyboardShortcutsOverlay,
+                 base::Unretained(this)));
+}
+
+void KeyboardHandler::OnJavascriptAllowed() {
+  observer_.Add(ui::InputDeviceManager::GetInstance());
+}
+
+void KeyboardHandler::OnJavascriptDisallowed() {
+  observer_.RemoveAll();
 }
 
 void KeyboardHandler::OnKeyboardDeviceConfigurationChanged() {
@@ -51,18 +61,23 @@ void KeyboardHandler::OnKeyboardDeviceConfigurationChanged() {
 }
 
 void KeyboardHandler::HandleInitialize(const base::ListValue* args) {
+  AllowJavascript();
   UpdateShowKeys();
 }
 
-void KeyboardHandler::UpdateShowKeys() const {
+void KeyboardHandler::HandleShowKeyboardShortcutsOverlay(
+    const base::ListValue* args) const {
+  ash::WmShell::Get()->new_window_delegate()->ShowKeyboardOverlay();
+}
+
+void KeyboardHandler::UpdateShowKeys() {
   const base::FundamentalValue has_caps_lock(HasExternalKeyboard());
   const base::FundamentalValue has_diamond_key(
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kHasChromeOSDiamondKey));
-  web_ui()->CallJavascriptFunction("cr.webUIListenerCallback",
-                                   base::StringValue("show-keys-changed"),
-                                   has_caps_lock,
-                                   has_diamond_key);
+  CallJavascriptFunction("cr.webUIListenerCallback",
+                         base::StringValue("show-keys-changed"), has_caps_lock,
+                         has_diamond_key);
 }
 
 }  // namespace settings

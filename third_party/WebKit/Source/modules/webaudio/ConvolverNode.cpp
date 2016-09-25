@@ -22,13 +22,16 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "modules/webaudio/ConvolverNode.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
 #include "modules/webaudio/AudioBuffer.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/AudioNodeOutput.h"
+#include "modules/webaudio/ConvolverNode.h"
+#include "modules/webaudio/ConvolverOptions.h"
 #include "platform/audio/Reverb.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 // Note about empirical tuning:
 // The maximum FFT size affects reverb performance and accuracy.
@@ -49,8 +52,8 @@ ConvolverHandler::ConvolverHandler(AudioNode& node, float sampleRate)
 
     // Node-specific default mixing rules.
     m_channelCount = 2;
-    m_channelCountMode = ClampedMax;
-    m_channelInterpretation = AudioBus::Speakers;
+    setInternalChannelCountMode(ClampedMax);
+    setInternalChannelInterpretation(AudioBus::Speakers);
 
     initialize();
 }
@@ -68,7 +71,7 @@ ConvolverHandler::~ConvolverHandler()
 void ConvolverHandler::process(size_t framesToProcess)
 {
     AudioBus* outputBus = output(0).bus();
-    ASSERT(outputBus);
+    DCHECK(outputBus);
 
     // Synchronize with possible dynamic changes to the impulse response.
     MutexTryLocker tryLocker(m_processLock);
@@ -90,7 +93,7 @@ void ConvolverHandler::process(size_t framesToProcess)
 
 void ConvolverHandler::setBuffer(AudioBuffer* buffer, ExceptionState& exceptionState)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
 
     if (!buffer)
         return;
@@ -127,19 +130,19 @@ void ConvolverHandler::setBuffer(AudioBuffer* buffer, ExceptionState& exceptionS
     bufferBus->setSampleRate(buffer->sampleRate());
 
     // Create the reverb with the given impulse response.
-    OwnPtr<Reverb> reverb = adoptPtr(new Reverb(bufferBus.get(), ProcessingSizeInFrames, MaxFFTSize, 2, context() && context()->hasRealtimeConstraint(), m_normalize));
+    std::unique_ptr<Reverb> reverb = wrapUnique(new Reverb(bufferBus.get(), ProcessingSizeInFrames, MaxFFTSize, 2, context() && context()->hasRealtimeConstraint(), m_normalize));
 
     {
         // Synchronize with process().
         MutexLocker locker(m_processLock);
-        m_reverb = reverb.release();
+        m_reverb = std::move(reverb);
         m_buffer = buffer;
     }
 }
 
 AudioBuffer* ConvolverHandler::buffer()
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
     return m_buffer.get();
 }
 
@@ -165,15 +168,39 @@ double ConvolverHandler::latencyTime() const
 
 // ----------------------------------------------------------------
 
-ConvolverNode::ConvolverNode(AbstractAudioContext& context, float sampleRate)
+ConvolverNode::ConvolverNode(BaseAudioContext& context)
     : AudioNode(context)
 {
-    setHandler(ConvolverHandler::create(*this, sampleRate));
+    setHandler(ConvolverHandler::create(*this, context.sampleRate()));
 }
 
-ConvolverNode* ConvolverNode::create(AbstractAudioContext& context, float sampleRate)
+ConvolverNode* ConvolverNode::create(BaseAudioContext& context, ExceptionState& exceptionState)
 {
-    return new ConvolverNode(context, sampleRate);
+    DCHECK(isMainThread());
+
+    if (context.isContextClosed()) {
+        context.throwExceptionForClosedState(exceptionState);
+        return nullptr;
+    }
+
+    return new ConvolverNode(context);
+}
+
+ConvolverNode* ConvolverNode::create(BaseAudioContext* context, const ConvolverOptions& options, ExceptionState& exceptionState)
+{
+    ConvolverNode* node = create(*context, exceptionState);
+
+    if (!node)
+        return nullptr;
+
+    node->handleChannelOptions(options, exceptionState);
+
+    // It is important to set normalize first because setting the buffer will
+    // examing the normalize attribute to see if normalization needs to be done.
+    node->setNormalize(!options.disableNormalization());
+    if (options.hasBuffer())
+        node->setBuffer(options.buffer(), exceptionState);
+    return node;
 }
 
 ConvolverHandler& ConvolverNode::convolverHandler() const

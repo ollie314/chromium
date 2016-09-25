@@ -21,7 +21,7 @@ public:
         case CSSPropertyTextShadow:
             return style.textShadow();
         default:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
             return nullptr;
         }
     }
@@ -29,13 +29,13 @@ public:
     {
         switch (property) {
         case CSSPropertyBoxShadow:
-            style.setBoxShadow(shadowList);
+            style.setBoxShadow(std::move(shadowList));
             return;
         case CSSPropertyTextShadow:
-            style.setTextShadow(shadowList);
+            style.setTextShadow(std::move(shadowList));
             return;
         default:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
         }
     }
 };

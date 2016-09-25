@@ -37,9 +37,9 @@ namespace blink {
 FontCache::FontCache()
     : m_purgePreventCount(0)
 {
-    if (s_fontManager) {
-        adopted(s_fontManager);
-        m_fontManager = s_fontManager;
+    if (s_staticFontManager) {
+        adopted(s_staticFontManager);
+        m_fontManager = sk_ref_sp(s_staticFontManager);
     } else {
         m_fontManager = nullptr;
     }
@@ -105,7 +105,7 @@ PassRefPtr<SimpleFontData> FontCache::fallbackFontForCharacter(
     }
 
     FontCache::PlatformFallbackFont fallbackFont;
-    FontCache::getFontForCharacter(c, fontDescription.locale().ascii().data(), &fallbackFont);
+    FontCache::getFontForCharacter(c, fontDescription.localeOrDefault().ascii().data(), &fallbackFont);
     if (fallbackFont.name.isEmpty())
         return nullptr;
 
@@ -134,10 +134,11 @@ PassRefPtr<SimpleFontData> FontCache::fallbackFontForCharacter(
     FontPlatformData* substitutePlatformData = getFontPlatformData(description, creationParams);
     if (!substitutePlatformData)
         return nullptr;
-    FontPlatformData platformData = FontPlatformData(*substitutePlatformData);
-    platformData.setSyntheticBold(shouldSetSyntheticBold);
-    platformData.setSyntheticItalic(shouldSetSyntheticItalic);
-    return fontDataFromFontPlatformData(&platformData, DoNotRetain);
+
+    std::unique_ptr<FontPlatformData> platformData(new FontPlatformData(*substitutePlatformData));
+    platformData->setSyntheticBold(shouldSetSyntheticBold);
+    platformData->setSyntheticItalic(shouldSetSyntheticItalic);
+    return fontDataFromFontPlatformData(platformData.get(), DoNotRetain);
 }
 
 #endif // !OS(ANDROID)

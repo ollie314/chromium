@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
@@ -210,11 +210,8 @@ class EPKChallengeKeyTestBase : public BrowserWithTestWindowTest {
   std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
                                         std::unique_ptr<base::ListValue> args,
                                         Browser* browser) {
-    scoped_refptr<ExtensionFunction> function_owner(function);
-    // Without a callback the function will not generate a result.
-    function->set_has_callback(true);
     utils::RunFunction(function, std::move(args), browser, utils::NONE);
-    EXPECT_FALSE(function->GetResultList()) << "Did not expect a result";
+    EXPECT_EQ(ExtensionFunction::FAILED, *function->response_type());
     return function->GetError();
   }
 

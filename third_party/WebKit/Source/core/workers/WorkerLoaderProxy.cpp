@@ -15,32 +15,30 @@ WorkerLoaderProxy::WorkerLoaderProxy(WorkerLoaderProxyProvider* loaderProxyProvi
 
 WorkerLoaderProxy::~WorkerLoaderProxy()
 {
-    ASSERT(!m_loaderProxyProvider);
+    DCHECK(!m_loaderProxyProvider);
 }
 
 void WorkerLoaderProxy::detachProvider(WorkerLoaderProxyProvider* proxyProvider)
 {
     MutexLocker locker(m_lock);
-    ASSERT_UNUSED(proxyProvider, proxyProvider == m_loaderProxyProvider);
+    DCHECK(proxyProvider == m_loaderProxyProvider);
     m_loaderProxyProvider = nullptr;
 }
 
-void WorkerLoaderProxy::postTaskToLoader(PassOwnPtr<ExecutionContextTask> task)
+void WorkerLoaderProxy::postTaskToLoader(const WebTraceLocation& location, std::unique_ptr<ExecutionContextTask> task)
 {
     MutexLocker locker(m_lock);
     if (!m_loaderProxyProvider)
         return;
-
-    m_loaderProxyProvider->postTaskToLoader(task);
+    m_loaderProxyProvider->postTaskToLoader(location, std::move(task));
 }
 
-bool WorkerLoaderProxy::postTaskToWorkerGlobalScope(PassOwnPtr<ExecutionContextTask> task)
+void WorkerLoaderProxy::postTaskToWorkerGlobalScope(const WebTraceLocation& location, std::unique_ptr<ExecutionContextTask> task)
 {
     MutexLocker locker(m_lock);
     if (!m_loaderProxyProvider)
-        return false;
-
-    return m_loaderProxyProvider->postTaskToWorkerGlobalScope(task);
+        return;
+    m_loaderProxyProvider->postTaskToWorkerGlobalScope(location, std::move(task));
 }
 
 } // namespace blink

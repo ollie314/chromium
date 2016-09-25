@@ -105,14 +105,14 @@ PasswordCredential* PasswordCredential::create(HTMLFormElement* form, ExceptionS
 }
 
 PasswordCredential::PasswordCredential(WebPasswordCredential* webPasswordCredential)
-    : Credential(webPasswordCredential->getPlatformCredential())
+    : SiteBoundCredential(webPasswordCredential->getPlatformCredential())
     , m_idName("username")
     , m_passwordName("password")
 {
 }
 
 PasswordCredential::PasswordCredential(const String& id, const String& password, const String& name, const KURL& icon)
-    : Credential(PlatformPasswordCredential::create(id, password, name, icon))
+    : SiteBoundCredential(PlatformPasswordCredential::create(id, password, name, icon))
     , m_idName("username")
     , m_passwordName("password")
 {
@@ -134,7 +134,7 @@ PassRefPtr<EncodedFormData> PasswordCredential::encodeFormData(String& contentTy
 
         contentType = AtomicString("application/x-www-form-urlencoded;charset=UTF-8");
 
-        return params->encodeFormData();
+        return params->toEncodedFormData();
     }
 
     // Otherwise, we'll build a multipart response.
@@ -167,7 +167,7 @@ const String& PasswordCredential::password() const
 
 DEFINE_TRACE(PasswordCredential)
 {
-    Credential::trace(visitor);
+    SiteBoundCredential::trace(visitor);
     visitor->trace(m_additionalData);
 }
 

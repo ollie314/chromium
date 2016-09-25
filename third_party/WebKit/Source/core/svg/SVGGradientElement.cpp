@@ -45,7 +45,7 @@ SVGGradientElement::SVGGradientElement(const QualifiedName& tagName, Document& d
     , SVGURIReference(this)
     , m_gradientTransform(SVGAnimatedTransformList::create(this, SVGNames::gradientTransformAttr, SVGTransformList::create()))
     , m_spreadMethod(SVGAnimatedEnumeration<SVGSpreadMethodType>::create(this, SVGNames::spreadMethodAttr, SVGSpreadMethodPad))
-    , m_gradientUnits(SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>::create(this, SVGNames::gradientUnitsAttr, SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX))
+    , m_gradientUnits(SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>::create(this, SVGNames::gradientUnitsAttr, SVGUnitTypes::kSvgUnitTypeObjectboundingbox))
 {
     addToPropertyMap(m_gradientTransform);
     addToPropertyMap(m_spreadMethod);
@@ -96,15 +96,14 @@ Vector<Gradient::ColorStop> SVGGradientElement::buildStops()
     Vector<Gradient::ColorStop> stops;
 
     float previousOffset = 0.0f;
-    for (SVGStopElement* stop = Traversal<SVGStopElement>::firstChild(*this); stop; stop = Traversal<SVGStopElement>::nextSibling(*stop)) {
-        // Figure out right monotonic offset
-        float offset = stop->offset()->currentValue()->value();
+    for (const SVGStopElement& stop : Traversal<SVGStopElement>::childrenOf(*this)) {
+        // Figure out right monotonic offset.
+        float offset = stop.offset()->currentValue()->value();
         offset = std::min(std::max(previousOffset, offset), 1.0f);
         previousOffset = offset;
 
-        stops.append(Gradient::ColorStop(offset, stop->stopColorIncludingOpacity()));
+        stops.append(Gradient::ColorStop(offset, stop.stopColorIncludingOpacity()));
     }
-
     return stops;
 }
 

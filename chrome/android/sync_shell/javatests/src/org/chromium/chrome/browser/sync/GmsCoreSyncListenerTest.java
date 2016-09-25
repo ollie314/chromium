@@ -9,6 +9,7 @@ import android.test.suitebuilder.annotation.MediumTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
@@ -18,6 +19,7 @@ import java.util.concurrent.Callable;
 /**
  * Test suite for the GmsCoreSyncListener.
  */
+@RetryOnFailure  // crbug.com/637448
 public class GmsCoreSyncListenerTest extends SyncTestBase {
     private static final String PASSPHRASE = "passphrase";
 
@@ -62,7 +64,7 @@ public class GmsCoreSyncListenerTest extends SyncTestBase {
     @MediumTest
     @Feature({"Sync"})
     public void testGetsKey() throws Throwable {
-        Account account = setUpTestAccountAndSignInToSync();
+        Account account = setUpTestAccountAndSignIn();
         assertEquals(0, mListener.callCount());
         encryptWithPassphrase(PASSPHRASE);
         waitForCallCount(1);
@@ -76,12 +78,12 @@ public class GmsCoreSyncListenerTest extends SyncTestBase {
     @MediumTest
     @Feature({"Sync"})
     public void testClearData() throws Throwable {
-        setUpTestAccountAndSignInToSync();
+        setUpTestAccountAndSignIn();
         assertEquals(0, mListener.callCount());
         encryptWithPassphrase(PASSPHRASE);
         waitForCallCount(1);
         clearServerData();
-        startSyncAndWait();
+        setUpTestAccountAndSignIn();
         encryptWithPassphrase(PASSPHRASE);
         waitForCallCount(2);
     }

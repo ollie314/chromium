@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -23,7 +24,6 @@
 #include "build/build_config.h"
 #include "components/error_page/common/error_page_params.h"
 #include "components/error_page/common/net_error_info.h"
-#include "components/test_runner/test_common.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -56,8 +56,8 @@ struct NavigationCorrection {
   bool is_porn;
   bool is_soft_porn;
 
-  base::Value* ToValue() const {
-    base::DictionaryValue* dict = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> ToValue() const {
+    std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
     dict->SetString("correctionType", correction_type);
     dict->SetString("urlCorrection", url_correction);
     dict->SetString("clickType", click_type);
@@ -170,7 +170,6 @@ class NetErrorHelperCoreTest : public testing::Test,
         error_url_(GURL(content::kUnreachableWebDataURL)),
         tracking_request_count_(0) {
     SetUpCore(false, false, true);
-    test_runner::EnsureBlinkInitialized();
   }
 
   ~NetErrorHelperCoreTest() override {
@@ -190,7 +189,7 @@ class NetErrorHelperCoreTest : public testing::Test,
                                        auto_reload_enabled,
                                        auto_reload_visible_only,
                                        visible));
-    core_->set_timer_for_testing(scoped_ptr<base::Timer>(timer_));
+    core_->set_timer_for_testing(std::unique_ptr<base::Timer>(timer_));
   }
 
   NetErrorHelperCore* core() { return core_.get(); }
@@ -356,7 +355,7 @@ class NetErrorHelperCoreTest : public testing::Test,
                                   bool is_failed_post,
                                   bool can_show_network_diagnostics_dialog,
                                   bool has_offline_pages,
-                                  scoped_ptr<ErrorPageParams> params,
+                                  std::unique_ptr<ErrorPageParams> params,
                                   bool* reload_button_shown,
                                   bool* show_saved_copy_button_shown,
                                   bool* show_cached_copy_button_shown,
@@ -407,8 +406,8 @@ class NetErrorHelperCoreTest : public testing::Test,
     // Check the body of the request.
 
     base::JSONReader reader;
-    scoped_ptr<base::Value> parsed_body(reader.Read(
-        navigation_correction_request_body));
+    std::unique_ptr<base::Value> parsed_body(
+        reader.Read(navigation_correction_request_body));
     ASSERT_TRUE(parsed_body);
     base::DictionaryValue* dict = NULL;
     ASSERT_TRUE(parsed_body->GetAsDictionary(&dict));
@@ -451,7 +450,8 @@ class NetErrorHelperCoreTest : public testing::Test,
     // Check the body of the request.
 
     base::JSONReader reader;
-    scoped_ptr<base::Value> parsed_body(reader.Read(tracking_request_body));
+    std::unique_ptr<base::Value> parsed_body(
+        reader.Read(tracking_request_body));
     ASSERT_TRUE(parsed_body);
     base::DictionaryValue* dict = NULL;
     ASSERT_TRUE(parsed_body->GetAsDictionary(&dict));
@@ -465,7 +465,7 @@ class NetErrorHelperCoreTest : public testing::Test,
 
   base::MockTimer* timer_;
 
-  scoped_ptr<NetErrorHelperCore> core_;
+  std::unique_ptr<NetErrorHelperCore> core_;
 
   GURL url_being_fetched_;
   std::string request_body_;
@@ -485,7 +485,7 @@ class NetErrorHelperCoreTest : public testing::Test,
   // UpdateErrorPage.  Mutable because GenerateLocalizedErrorPage is const.
   mutable bool last_can_show_network_diagnostics_dialog_;
   mutable bool last_has_offline_pages_;
-  mutable scoped_ptr<ErrorPageParams> last_error_page_params_;
+  mutable std::unique_ptr<ErrorPageParams> last_error_page_params_;
 
   int reload_count_;
   int reload_bypassing_cache_count_;

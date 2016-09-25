@@ -72,7 +72,8 @@ void BluetoothControllerPairingController::DeviceFound(
     device::BluetoothDevice* device) {
   DCHECK_EQ(current_stage_, STAGE_DEVICES_DISCOVERY);
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (base::StartsWith(device->GetName(), base::ASCIIToUTF16(kDeviceNamePrefix),
+  if (base::StartsWith(device->GetNameForDisplay(),
+                       base::ASCIIToUTF16(kDeviceNamePrefix),
                        base::CompareCase::INSENSITIVE_ASCII)) {
     discovered_devices_.insert(device->GetAddress());
     FOR_EACH_OBSERVER(ControllerPairingController::Observer, observers_,
@@ -132,12 +133,12 @@ void BluetoothControllerPairingController::OnGetAdapter(
 }
 
 void BluetoothControllerPairingController::OnStartDiscoverySession(
-    scoped_ptr<device::BluetoothDiscoverySession> discovery_session) {
+    std::unique_ptr<device::BluetoothDiscoverySession> discovery_session) {
   DCHECK(thread_checker_.CalledOnValidThread());
   discovery_session_ = std::move(discovery_session);
   ChangeStage(STAGE_DEVICES_DISCOVERY);
 
-  for (const auto& device : adapter_->GetDevices())
+  for (auto* device : adapter_->GetDevices())
     DeviceFound(device);
 }
 

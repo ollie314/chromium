@@ -94,8 +94,9 @@ public:
     SMILTime simpleDuration() const;
 
     void seekToIntervalCorrespondingToTime(SMILTime elapsed);
-    bool progress(SMILTime elapsed, SVGSMILElement* resultsElement, bool seekToTime);
+    bool progress(SMILTime elapsed, bool seekToTime);
     SMILTime nextProgressTime() const;
+    void updateAnimatedValue(SVGSMILElement* resultElement) { updateAnimation(m_lastPercent, m_lastRepeat, resultElement); }
 
     void reset();
 
@@ -111,6 +112,10 @@ public:
     virtual void resetAnimatedType() = 0;
     virtual void clearAnimatedType() = 0;
     virtual void applyResultsToTarget() = 0;
+
+    bool animatedTypeIsLocked() const { return m_animatedPropertyLocked; }
+    void lockAnimatedType() { DCHECK(!m_animatedPropertyLocked); m_animatedPropertyLocked = true; }
+    void unlockAnimatedType() { DCHECK(m_animatedPropertyLocked); m_animatedPropertyLocked = false; }
 
     void connectSyncBaseConditions();
     void connectEventBaseConditions();
@@ -276,6 +281,8 @@ private:
     mutable SMILTime m_cachedRepeatCount;
     mutable SMILTime m_cachedMin;
     mutable SMILTime m_cachedMax;
+
+    bool m_animatedPropertyLocked;
 
     friend class ConditionEventListener;
 };

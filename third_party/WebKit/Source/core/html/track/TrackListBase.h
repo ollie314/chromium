@@ -36,7 +36,7 @@ public:
     T* getTrackById(const String& id) const
     {
         for (unsigned i = 0; i < m_tracks.size(); ++i) {
-            if (m_tracks[i]->id() == id)
+            if (String(m_tracks[i]->id()) == id)
                 return m_tracks[i].get();
         }
 
@@ -59,21 +59,21 @@ public:
     {
         track->setMediaElement(m_mediaElement);
         m_tracks.append(track);
-        scheduleTrackEvent(EventTypeNames::addtrack, track);
+        scheduleEvent(TrackEvent::create(EventTypeNames::addtrack, track));
     }
 
     void remove(WebMediaPlayer::TrackId trackId)
     {
         for (unsigned i = 0; i < m_tracks.size(); ++i) {
-            if (m_tracks[i]->trackId() != trackId)
+            if (m_tracks[i]->id() != trackId)
                 continue;
 
             m_tracks[i]->setMediaElement(0);
-            scheduleTrackEvent(EventTypeNames::removetrack, m_tracks[i]);
+            scheduleEvent(TrackEvent::create(EventTypeNames::removetrack, m_tracks[i].get()));
             m_tracks.remove(i);
             return;
         }
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
 
     void removeAll()
@@ -86,9 +86,7 @@ public:
 
     void scheduleChangeEvent()
     {
-        Event* event = Event::create(EventTypeNames::change);
-        event->setTarget(this);
-        m_mediaElement->scheduleEvent(event);
+        scheduleEvent(Event::create(EventTypeNames::change));
     }
 
     Node* owner() const { return m_mediaElement; }
@@ -100,10 +98,16 @@ public:
         EventTargetWithInlineData::trace(visitor);
     }
 
-private:
-    void scheduleTrackEvent(const AtomicString& eventName, T* track)
+    DECLARE_VIRTUAL_TRACE_WRAPPERS()
     {
-        Event* event = TrackEvent::create(eventName, track);
+        for (auto track : m_tracks) {
+            visitor->traceWrappers(track);
+        }
+    }
+
+private:
+    void scheduleEvent(Event* event)
+    {
         event->setTarget(this);
         m_mediaElement->scheduleEvent(event);
     }

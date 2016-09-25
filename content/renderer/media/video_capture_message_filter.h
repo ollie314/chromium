@@ -48,14 +48,13 @@ class CONTENT_EXPORT VideoCaptureMessageFilter : public IPC::MessageFilter {
 
     // Called when a buffer referencing a captured VideoFrame is received from
     // Browser process.
-    virtual void OnBufferReceived(
-        int buffer_id,
-        base::TimeTicks timestamp,
-        const base::DictionaryValue& metadata,
-        media::VideoPixelFormat pixel_format,
-        media::VideoFrame::StorageType storage_type,
-        const gfx::Size& coded_size,
-        const gfx::Rect& visible_rect) = 0;
+    virtual void OnBufferReceived(int buffer_id,
+                                  base::TimeDelta timestamp,
+                                  const base::DictionaryValue& metadata,
+                                  media::VideoPixelFormat pixel_format,
+                                  media::VideoFrame::StorageType storage_type,
+                                  const gfx::Size& coded_size,
+                                  const gfx::Rect& visible_rect) = 0;
 
     // Called when state of a video capture device has changed in the browser
     // process.
@@ -90,7 +89,7 @@ class CONTENT_EXPORT VideoCaptureMessageFilter : public IPC::MessageFilter {
 
   // IPC::MessageFilter override. Called on IO thread.
   bool OnMessageReceived(const IPC::Message& message) override;
-  void OnFilterAdded(IPC::Sender* sender) override;
+  void OnFilterAdded(IPC::Channel* channel) override;
   void OnFilterRemoved() override;
   void OnChannelClosing() override;
 

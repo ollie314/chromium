@@ -31,12 +31,14 @@ source_set("ipc_client_sources") {
     sources += [
       "gpu_memory_buffer_impl_io_surface.cc",
       "gpu_memory_buffer_impl_io_surface.h",
+      "gpu_process_hosted_ca_layer_tree_params.cc",
+      "gpu_process_hosted_ca_layer_tree_params.h",
     ]
   }
   if (is_android) {
     sources += [
-      "gpu_memory_buffer_impl_surface_texture.cc",
-      "gpu_memory_buffer_impl_surface_texture.h",
+      "android/in_process_surface_texture_manager.cc",
+      "android/in_process_surface_texture_manager.h",
     ]
     libs = [ "android" ]
   }
@@ -57,8 +59,10 @@ source_set("ipc_client_sources") {
     "//gpu/config:config_sources",
     "//gpu/ipc/common:ipc_common_sources",
     "//ipc",
+    "//ui/base/",
     "//ui/events/ipc",
     "//ui/gfx/ipc",
+    "//ui/gfx/ipc/geometry",
     "//ui/gl",
     "//url/ipc:url_ipc",
   ]

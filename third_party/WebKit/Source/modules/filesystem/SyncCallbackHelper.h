@@ -39,42 +39,26 @@
 #include "modules/filesystem/EntriesCallback.h"
 #include "modules/filesystem/EntryCallback.h"
 #include "modules/filesystem/EntrySync.h"
-#include "modules/filesystem/ErrorCallback.h"
 #include "modules/filesystem/FileEntry.h"
 #include "modules/filesystem/FileSystemCallback.h"
+#include "modules/filesystem/FileSystemCallbacks.h"
 #include "modules/filesystem/MetadataCallback.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
-
-template <typename ResultType, typename CallbackArg>
-struct HelperResultType {
-    DISALLOW_NEW();
-public:
-    typedef ResultType* ReturnType;
-    typedef Member<ResultType> StorageType;
-
-    static ReturnType createFromCallbackArg(CallbackArg argument)
-    {
-        return ResultType::create(argument);
-    }
-};
 
 // A helper template for FileSystemSync implementation.
 template <typename SuccessCallback, typename CallbackArg, typename ResultType>
 class SyncCallbackHelper final : public GarbageCollected<SyncCallbackHelper<SuccessCallback, CallbackArg, ResultType>> {
 public:
     typedef SyncCallbackHelper<SuccessCallback, CallbackArg, ResultType> HelperType;
-    typedef HelperResultType<ResultType, CallbackArg> ResultTypeTrait;
-    typedef typename ResultTypeTrait::StorageType ResultStorageType;
-    typedef typename ResultTypeTrait::ReturnType ResultReturnType;
 
     static HelperType* create()
     {
         return new SyncCallbackHelper();
     }
 
-    ResultReturnType getResult(ExceptionState& exceptionState)
+    ResultType* getResult(ExceptionState& exceptionState)
     {
         if (m_errorCode)
             FileError::throwDOMException(exceptionState, m_errorCode);
@@ -83,7 +67,7 @@ public:
     }
 
     SuccessCallback* getSuccessCallback() { return SuccessCallbackImpl::create(this); }
-    ErrorCallback* getErrorCallback() { return ErrorCallbackImpl::create(this); }
+    ErrorCallbackBase* getErrorCallback() { return ErrorCallbackImpl::create(this); }
 
     DEFINE_INLINE_TRACE()
     {
@@ -92,7 +76,7 @@ public:
 
 private:
     SyncCallbackHelper()
-        : m_errorCode(FileError::OK)
+        : m_errorCode(FileError::kOK)
         , m_completed(false)
     {
     }
@@ -106,7 +90,7 @@ private:
 
         virtual void handleEvent()
         {
-            m_helper->setError(FileError::OK);
+            m_helper->setError(FileError::kOK);
         }
 
         virtual void handleEvent(CallbackArg arg)
@@ -128,23 +112,22 @@ private:
         Member<HelperType> m_helper;
     };
 
-    class ErrorCallbackImpl final : public ErrorCallback {
+    class ErrorCallbackImpl final : public ErrorCallbackBase {
     public:
         static ErrorCallbackImpl* create(HelperType* helper)
         {
             return new ErrorCallbackImpl(helper);
         }
 
-        void handleEvent(FileError* error) override
+        void invoke(FileError::ErrorCode error) override
         {
-            ASSERT(error);
-            m_helper->setError(error->code());
+            m_helper->setError(error);
         }
 
         DEFINE_INLINE_TRACE()
         {
             visitor->trace(m_helper);
-            ErrorCallback::trace(visitor);
+            ErrorCallbackBase::trace(visitor);
         }
 
     private:
@@ -155,19 +138,19 @@ private:
         Member<HelperType> m_helper;
     };
 
-    void setError(FileError::ErrorCode code)
+    void setError(FileError::ErrorCode error)
     {
-        m_errorCode = code;
+        m_errorCode = error;
         m_completed = true;
     }
 
     void setResult(CallbackArg result)
     {
-        m_result = ResultTypeTrait::createFromCallbackArg(result);
+        m_result = ResultType::create(result);
         m_completed = true;
     }
 
-    ResultStorageType m_result;
+    Member<ResultType> m_result;
     FileError::ErrorCode m_errorCode;
     bool m_completed;
 };

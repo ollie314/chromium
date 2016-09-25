@@ -10,10 +10,12 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/string_piece.h"
 #include "base/time/clock.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
@@ -26,6 +28,7 @@
 #include "components/data_reduction_proxy/core/browser/data_store.h"
 #include "net/base/backoff_entry.h"
 #include "net/log/test_net_log.h"
+#include "net/proxy/proxy_server.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -54,7 +57,6 @@ class DataReductionProxySettings;
 class DataReductionProxyCompressionStats;
 class MockDataReductionProxyConfig;
 class TestDataReductionProxyConfig;
-class TestDataReductionProxyConfigurator;
 class TestDataReductionProxyEventStorageDelegate;
 class TestDataReductionProxyParams;
 
@@ -101,6 +103,7 @@ class TestDataReductionProxyConfigServiceClient
       DataReductionProxyMutableConfigValues* config_values,
       DataReductionProxyConfig* config,
       DataReductionProxyEventCreator* event_creator,
+      DataReductionProxyIOData* io_data,
       net::NetLog* net_log,
       ConfigStorer config_storer);
 
@@ -190,7 +193,6 @@ class TestDataReductionProxyIOData : public DataReductionProxyIOData {
       std::unique_ptr<DataReductionProxyEventCreator> event_creator,
       std::unique_ptr<DataReductionProxyRequestOptions> request_options,
       std::unique_ptr<DataReductionProxyConfigurator> configurator,
-      std::unique_ptr<DataReductionProxyConfigServiceClient> config_client,
       net::NetLog* net_log,
       bool enabled);
   ~TestDataReductionProxyIOData() override;
@@ -202,6 +204,10 @@ class TestDataReductionProxyIOData : public DataReductionProxyIOData {
     return configurator_.get();
   }
 
+  void set_config_client(
+      std::unique_ptr<DataReductionProxyConfigServiceClient> config_client) {
+    config_client_ = std::move(config_client);
+  }
   DataReductionProxyConfigServiceClient* config_client() const {
     return config_client_.get();
   }
@@ -215,9 +221,19 @@ class TestDataReductionProxyIOData : public DataReductionProxyIOData {
     return weak_factory_.GetWeakPtr();
   }
 
+  // Records the reporting fraction that was set by parsing a config.
+  void SetPingbackReportingFraction(float pingback_reporting_fraction) override;
+
+  float pingback_reporting_fraction() const {
+    return pingback_reporting_fraction_;
+  }
+
  private:
   // Allowed SetDataReductionProxyService to be re-entrant.
   bool service_set_;
+
+  // Reporting fraction last set via SetPingbackReportingFraction.
+  float pingback_reporting_fraction_;
 };
 
 // Test version of |DataStore|. Uses an in memory hash map to store data.
@@ -229,11 +245,11 @@ class TestDataStore : public data_reduction_proxy::DataStore {
 
   void InitializeOnDBThread() override {}
 
-  DataStore::Status Get(const std::string& key, std::string* value) override;
+  DataStore::Status Get(base::StringPiece key, std::string* value) override;
 
   DataStore::Status Put(const std::map<std::string, std::string>& map) override;
 
-  DataStore::Status Delete(const std::string& key) override;
+  DataStore::Status Delete(base::StringPiece key) override;
 
   std::map<std::string, std::string>* map() { return &map_; }
 
@@ -278,10 +294,6 @@ class DataReductionProxyTestContext {
     // |TestDataReductionProxyConfig|.
     Builder& WithMockConfig();
 
-    // Specifies the use of |TestDataReductionProxyConfigurator| instead of
-    // |DataReductionProxyConfigurator|.
-    Builder& WithTestConfigurator();
-
     // Specifies the use of |MockDataReductionProxyService| instead of
     // |DataReductionProxyService|.
     Builder& WithMockDataReductionProxyService();
@@ -311,7 +323,6 @@ class DataReductionProxyTestContext {
     net::MockClientSocketFactory* mock_socket_factory_;
 
     bool use_mock_config_;
-    bool use_test_configurator_;
     bool use_mock_service_;
     bool use_mock_request_options_;
     bool use_config_client_;
@@ -361,10 +372,6 @@ class DataReductionProxyTestContext {
   // |settings_| has been initialized, and |this| was built with a
   // |net::MockClientSocketFactory| specified.
   void EnableDataReductionProxyWithSecureProxyCheckSuccess();
-
-  // Returns the underlying |TestDataReductionProxyConfigurator|. This can only
-  // be called if built with WithTestConfigurator.
-  TestDataReductionProxyConfigurator* test_configurator() const;
 
   // Returns the underlying |MockDataReductionProxyConfig|. This can only be
   // called if built with WithMockConfig.
@@ -432,25 +439,26 @@ class DataReductionProxyTestContext {
     return params_;
   }
 
+  // Returns the proxies that are currently configured for "http://" requests,
+  // excluding any that are invalid or direct.
+  std::vector<net::ProxyServer> GetConfiguredProxiesForHttp() const;
+
  private:
   enum TestContextOptions {
     // Permits mocking of the underlying |DataReductionProxyConfig|.
     USE_MOCK_CONFIG = 0x1,
-    // Uses a |TestDataReductionProxyConfigurator| to record proxy configuration
-    // changes.
-    USE_TEST_CONFIGURATOR = 0x2,
     // Construct, but do not initialize the |DataReductionProxySettings| object.
     // Primarily used for testing of the |DataReductionProxySettings| object
     // itself.
-    SKIP_SETTINGS_INITIALIZATION = 0x4,
+    SKIP_SETTINGS_INITIALIZATION = 0x2,
     // Permits mocking of the underlying |DataReductionProxyService|.
-    USE_MOCK_SERVICE = 0x8,
+    USE_MOCK_SERVICE = 0x4,
     // Permits mocking of the underlying |DataReductionProxyRequestOptions|.
-    USE_MOCK_REQUEST_OPTIONS = 0x10,
+    USE_MOCK_REQUEST_OPTIONS = 0x8,
     // Specifies the use of the |DataReductionProxyConfigServiceClient|.
-    USE_CONFIG_CLIENT = 0x20,
+    USE_CONFIG_CLIENT = 0x10,
     // Specifies the use of the |TESTDataReductionProxyConfigServiceClient|.
-    USE_TEST_CONFIG_CLIENT = 0x40,
+    USE_TEST_CONFIG_CLIENT = 0x20,
   };
 
   // Used to storage a serialized Data Reduction Proxy config.

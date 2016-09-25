@@ -7,6 +7,7 @@
 #include "core/animation/InterpolationEnvironment.h"
 #include "core/animation/StringKeyframe.h"
 #include "core/css/resolver/StyleResolverState.h"
+#include <memory>
 
 namespace blink {
 
@@ -24,9 +25,9 @@ void InvalidatableInterpolation::interpolate(int, double fraction)
     // We defer the interpolation to ensureValidInterpolation() if m_cachedPairConversion is null.
 }
 
-PassOwnPtr<PairwisePrimitiveInterpolation> InvalidatableInterpolation::maybeConvertPairwise(const InterpolationEnvironment& environment, const UnderlyingValueOwner& underlyingValueOwner) const
+std::unique_ptr<PairwisePrimitiveInterpolation> InvalidatableInterpolation::maybeConvertPairwise(const InterpolationEnvironment& environment, const UnderlyingValueOwner& underlyingValueOwner) const
 {
-    ASSERT(m_currentFraction != 0 && m_currentFraction != 1);
+    DCHECK(m_currentFraction != 0 && m_currentFraction != 1);
     for (const auto& interpolationType : m_interpolationTypes) {
         if ((m_startKeyframe->isNeutral() || m_endKeyframe->isNeutral()) && (!underlyingValueOwner || underlyingValueOwner.type() != *interpolationType))
             continue;
@@ -35,15 +36,15 @@ PassOwnPtr<PairwisePrimitiveInterpolation> InvalidatableInterpolation::maybeConv
         addConversionCheckers(*interpolationType, conversionCheckers);
         if (result) {
             return PairwisePrimitiveInterpolation::create(*interpolationType,
-                result.startInterpolableValue.release(),
-                result.endInterpolableValue.release(),
+                std::move(result.startInterpolableValue),
+                std::move(result.endInterpolableValue),
                 result.nonInterpolableValue.release());
         }
     }
     return nullptr;
 }
 
-PassOwnPtr<TypedInterpolationValue> InvalidatableInterpolation::convertSingleKeyframe(const PropertySpecificKeyframe& keyframe, const InterpolationEnvironment& environment, const UnderlyingValueOwner& underlyingValueOwner) const
+std::unique_ptr<TypedInterpolationValue> InvalidatableInterpolation::convertSingleKeyframe(const PropertySpecificKeyframe& keyframe, const InterpolationEnvironment& environment, const UnderlyingValueOwner& underlyingValueOwner) const
 {
     if (keyframe.isNeutral() && !underlyingValueOwner)
         return nullptr;
@@ -54,9 +55,9 @@ PassOwnPtr<TypedInterpolationValue> InvalidatableInterpolation::convertSingleKey
         InterpolationValue result = interpolationType->maybeConvertSingle(keyframe, environment, underlyingValueOwner.value(), conversionCheckers);
         addConversionCheckers(*interpolationType, conversionCheckers);
         if (result)
-            return TypedInterpolationValue::create(*interpolationType, result.interpolableValue.release(), result.nonInterpolableValue.release());
+            return TypedInterpolationValue::create(*interpolationType, std::move(result.interpolableValue), result.nonInterpolableValue.release());
     }
-    ASSERT(keyframe.isNeutral());
+    DCHECK(keyframe.isNeutral());
     return nullptr;
 }
 
@@ -64,16 +65,16 @@ void InvalidatableInterpolation::addConversionCheckers(const InterpolationType& 
 {
     for (size_t i = 0; i < conversionCheckers.size(); i++) {
         conversionCheckers[i]->setType(type);
-        m_conversionCheckers.append(conversionCheckers[i].release());
+        m_conversionCheckers.append(std::move(conversionCheckers[i]));
     }
 }
 
-PassOwnPtr<TypedInterpolationValue> InvalidatableInterpolation::maybeConvertUnderlyingValue(const InterpolationEnvironment& environment) const
+std::unique_ptr<TypedInterpolationValue> InvalidatableInterpolation::maybeConvertUnderlyingValue(const InterpolationEnvironment& environment) const
 {
     for (const auto& interpolationType : m_interpolationTypes) {
         InterpolationValue result = interpolationType->maybeConvertUnderlyingValue(environment);
         if (result)
-            return TypedInterpolationValue::create(*interpolationType, result.interpolableValue.release(), result.nonInterpolableValue.release());
+            return TypedInterpolationValue::create(*interpolationType, std::move(result.interpolableValue), result.nonInterpolableValue.release());
     }
     return nullptr;
 }
@@ -91,9 +92,9 @@ bool InvalidatableInterpolation::isNeutralKeyframeActive() const
 void InvalidatableInterpolation::clearCache() const
 {
     m_isCached = false;
-    m_cachedPairConversion.clear();
+    m_cachedPairConversion.reset();
     m_conversionCheckers.clear();
-    m_cachedValue.clear();
+    m_cachedValue.reset();
 }
 
 bool InvalidatableInterpolation::isCacheValid(const InterpolationEnvironment& environment, const UnderlyingValueOwner& underlyingValueOwner) const
@@ -116,7 +117,7 @@ bool InvalidatableInterpolation::isCacheValid(const InterpolationEnvironment& en
 
 const TypedInterpolationValue* InvalidatableInterpolation::ensureValidInterpolation(const InterpolationEnvironment& environment, const UnderlyingValueOwner& underlyingValueOwner) const
 {
-    ASSERT(!std::isnan(m_currentFraction));
+    DCHECK(!std::isnan(m_currentFraction));
     if (isCacheValid(environment, underlyingValueOwner))
         return m_cachedValue.get();
     clearCache();
@@ -125,10 +126,10 @@ const TypedInterpolationValue* InvalidatableInterpolation::ensureValidInterpolat
     } else if (m_currentFraction == 1) {
         m_cachedValue = convertSingleKeyframe(*m_endKeyframe, environment, underlyingValueOwner);
     } else {
-        OwnPtr<PairwisePrimitiveInterpolation> pairwiseConversion = maybeConvertPairwise(environment, underlyingValueOwner);
+        std::unique_ptr<PairwisePrimitiveInterpolation> pairwiseConversion = maybeConvertPairwise(environment, underlyingValueOwner);
         if (pairwiseConversion) {
             m_cachedValue = pairwiseConversion->initialValue();
-            m_cachedPairConversion = pairwiseConversion.release();
+            m_cachedPairConversion = std::move(pairwiseConversion);
         } else {
             m_cachedPairConversion = FlipPrimitiveInterpolation::create(
                 convertSingleKeyframe(*m_startKeyframe, environment, underlyingValueOwner),
@@ -165,7 +166,7 @@ double InvalidatableInterpolation::underlyingFraction() const
 
 void InvalidatableInterpolation::applyStack(const ActiveInterpolations& interpolations, InterpolationEnvironment& environment)
 {
-    ASSERT(!interpolations.isEmpty());
+    DCHECK(!interpolations.isEmpty());
     size_t startingIndex = 0;
 
     // Compute the underlying value to composite onto.
@@ -191,7 +192,7 @@ void InvalidatableInterpolation::applyStack(const ActiveInterpolations& interpol
     bool shouldApply = false;
     for (size_t i = startingIndex; i < interpolations.size(); i++) {
         const InvalidatableInterpolation& currentInterpolation = toInvalidatableInterpolation(*interpolations.at(i));
-        ASSERT(currentInterpolation.dependsOnUnderlyingValue());
+        DCHECK(currentInterpolation.dependsOnUnderlyingValue());
         const TypedInterpolationValue* currentValue = currentInterpolation.ensureValidInterpolation(environment, underlyingValueOwner);
         if (!currentValue)
             continue;

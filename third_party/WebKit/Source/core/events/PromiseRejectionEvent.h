@@ -18,11 +18,8 @@ namespace blink {
 
 class CORE_EXPORT PromiseRejectionEvent final : public Event {
     DEFINE_WRAPPERTYPEINFO();
+    USING_PRE_FINALIZER(PromiseRejectionEvent, dispose);
 public:
-    static PromiseRejectionEvent* create()
-    {
-        return new PromiseRejectionEvent;
-    }
     static PromiseRejectionEvent* create(ScriptState* state, const AtomicString& type, const PromiseRejectionEventInit& initializer)
     {
         return new PromiseRejectionEvent(state, type, initializer);
@@ -41,13 +38,12 @@ public:
 
     DECLARE_VIRTUAL_TRACE();
 
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
+
 private:
-    PromiseRejectionEvent();
     PromiseRejectionEvent(ScriptState*, const AtomicString&, const PromiseRejectionEventInit&);
     ~PromiseRejectionEvent() override;
-
-    static void didCollectPromise(const v8::WeakCallbackInfo<PromiseRejectionEvent>&);
-    static void didCollectReason(const v8::WeakCallbackInfo<PromiseRejectionEvent>&);
+    void dispose();
 
     RefPtr<ScriptState> m_scriptState;
     ScopedPersistent<v8::Value> m_promise;

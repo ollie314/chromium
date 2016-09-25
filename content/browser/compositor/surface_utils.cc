@@ -4,13 +4,14 @@
 
 #include "content/browser/compositor/surface_utils.h"
 
+#include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 #include "cc/output/copy_output_result.h"
 #include "cc/resources/single_release_callback.h"
 #include "cc/surfaces/surface_id_allocator.h"
-#include "content/browser/compositor/gl_helper.h"
+#include "components/display_compositor/gl_helper.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
@@ -19,10 +20,10 @@
 #include "ui/gfx/geometry/rect.h"
 
 #if defined(OS_ANDROID)
-#include "content/browser/renderer_host/compositor_impl_android.h"
+#include "content/browser/renderer_host/context_provider_factory_impl_android.h"
 #else
 #include "content/browser/compositor/image_transport_factory.h"
-#include "ui/compositor/compositor.h"
+#include "ui/compositor/compositor.h"  // nogncheck
 #endif
 
 namespace {
@@ -38,7 +39,7 @@ void CopyFromCompositingSurfaceFinished(
 
   gpu::SyncToken sync_token;
   if (result) {
-    content::GLHelper* gl_helper =
+    display_compositor::GLHelper* gl_helper =
         content::ImageTransportFactory::GetInstance()->GetGLHelper();
     if (gl_helper)
       gl_helper->GenerateSyncToken(&sync_token);
@@ -76,14 +77,14 @@ void PrepareTextureCopyOutputResult(
   if (!bitmap->tryAllocPixels(SkImageInfo::Make(
           dst_size_in_pixel.width(), dst_size_in_pixel.height(), color_type,
           kOpaque_SkAlphaType))) {
-    scoped_callback_runner.Reset(base::Bind(
+    scoped_callback_runner.ReplaceClosure(base::Bind(
         callback, SkBitmap(), content::READBACK_BITMAP_ALLOCATION_FAILURE));
     return;
   }
 
   content::ImageTransportFactory* factory =
       content::ImageTransportFactory::GetInstance();
-  content::GLHelper* gl_helper = factory->GetGLHelper();
+  display_compositor::GLHelper* gl_helper = factory->GetGLHelper();
   if (!gl_helper)
     return;
 
@@ -104,7 +105,7 @@ void PrepareTextureCopyOutputResult(
       base::Bind(&CopyFromCompositingSurfaceFinished, callback,
                  base::Passed(&release_callback), base::Passed(&bitmap),
                  base::Passed(&bitmap_pixels_lock)),
-      content::GLHelper::SCALER_QUALITY_GOOD);
+      display_compositor::GLHelper::SCALER_QUALITY_GOOD);
 #endif
 }
 
@@ -158,20 +159,22 @@ void PrepareBitmapCopyOutputResult(
 
 namespace content {
 
-std::unique_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator() {
+uint32_t AllocateSurfaceClientId() {
 #if defined(OS_ANDROID)
-  return CompositorImpl::CreateSurfaceIdAllocator();
+  return ContextProviderFactoryImpl::GetInstance()->AllocateSurfaceClientId();
 #else
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-  return factory->GetContextFactory()->CreateSurfaceIdAllocator();
+  return factory->GetContextFactory()->AllocateSurfaceClientId();
 #endif
 }
 
 cc::SurfaceManager* GetSurfaceManager() {
 #if defined(OS_ANDROID)
-  return CompositorImpl::GetSurfaceManager();
+  return ContextProviderFactoryImpl::GetInstance()->GetSurfaceManager();
 #else
   ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
+  if (factory == NULL)
+    return nullptr;
   return factory->GetSurfaceManager();
 #endif
 }

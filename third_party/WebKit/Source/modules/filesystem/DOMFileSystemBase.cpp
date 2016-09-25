@@ -41,16 +41,15 @@
 #include "modules/filesystem/Entry.h"
 #include "modules/filesystem/EntryBase.h"
 #include "modules/filesystem/EntryCallback.h"
-#include "modules/filesystem/ErrorCallback.h"
 #include "modules/filesystem/FileSystemCallbacks.h"
 #include "modules/filesystem/MetadataCallback.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebFileSystem.h"
 #include "public/platform/WebFileSystemCallbacks.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/TextEncoding.h"
+#include <memory>
 
 namespace blink {
 
@@ -95,22 +94,6 @@ bool DOMFileSystemBase::isValidType(FileSystemType type)
     return type == FileSystemTypeTemporary || type == FileSystemTypePersistent || type == FileSystemTypeIsolated || type == FileSystemTypeExternal;
 }
 
-bool DOMFileSystemBase::crackFileSystemURL(const KURL& url, FileSystemType& type, String& filePath)
-{
-    if (!url.protocolIs("filesystem"))
-        return false;
-
-    if (!url.innerURL())
-        return false;
-
-    String typeString = url.innerURL()->path().substring(1);
-    if (!pathPrefixToFileSystemType(typeString, type))
-        return false;
-
-    filePath = decodeURLEscapeSequences(url.path());
-    return true;
-}
-
 KURL DOMFileSystemBase::createFileSystemRootURL(const String& origin, FileSystemType type)
 {
     String typeString;
@@ -145,7 +128,7 @@ KURL DOMFileSystemBase::createFileSystemURL(const String& fullPath) const
     if (type() == FileSystemTypeExternal) {
         // For external filesystem originString could be different from what we have in m_filesystemRootURL.
         StringBuilder result;
-        result.appendLiteral("filesystem:");
+        result.append("filesystem:");
         result.append(getSecurityOrigin()->toString());
         result.append('/');
         result.append(externalPathPrefix);
@@ -215,16 +198,16 @@ File* DOMFileSystemBase::createFile(const FileMetadata& metadata, const KURL& fi
     }
 }
 
-void DOMFileSystemBase::getMetadata(const EntryBase* entry, MetadataCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::getMetadata(const EntryBase* entry, MetadataCallback* successCallback, ErrorCallbackBase* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
-        reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
+        reportError(errorCallback, FileError::kAbortErr);
         return;
     }
 
-    OwnPtr<AsyncFileSystemCallbacks> callbacks(MetadataCallbacks::create(successCallback, errorCallback, m_context, this));
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks(MetadataCallbacks::create(successCallback, errorCallback, m_context, this));
     callbacks->setShouldBlockUntilCompletion(synchronousType == Synchronous);
-    fileSystem()->readMetadata(createFileSystemURL(entry), callbacks.release());
+    fileSystem()->readMetadata(createFileSystemURL(entry), std::move(callbacks));
 }
 
 static bool verifyAndGetDestinationPathForCopyOrMove(const EntryBase* source, EntryBase* parent, const String& newName, String& destinationPath)
@@ -256,88 +239,88 @@ static bool verifyAndGetDestinationPathForCopyOrMove(const EntryBase* source, En
     return true;
 }
 
-void DOMFileSystemBase::move(const EntryBase* source, EntryBase* parent, const String& newName, EntryCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::move(const EntryBase* source, EntryBase* parent, const String& newName, EntryCallback* successCallback, ErrorCallbackBase* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
-        reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
+        reportError(errorCallback, FileError::kAbortErr);
         return;
     }
 
     String destinationPath;
     if (!verifyAndGetDestinationPathForCopyOrMove(source, parent, newName, destinationPath)) {
-        reportError(errorCallback, FileError::create(FileError::INVALID_MODIFICATION_ERR));
+        reportError(errorCallback, FileError::kInvalidModificationErr);
         return;
     }
 
-    OwnPtr<AsyncFileSystemCallbacks> callbacks(EntryCallbacks::create(successCallback, errorCallback, m_context, parent->filesystem(), destinationPath, source->isDirectory()));
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks(EntryCallbacks::create(successCallback, errorCallback, m_context, parent->filesystem(), destinationPath, source->isDirectory()));
     callbacks->setShouldBlockUntilCompletion(synchronousType == Synchronous);
 
-    fileSystem()->move(createFileSystemURL(source), parent->filesystem()->createFileSystemURL(destinationPath), callbacks.release());
+    fileSystem()->move(createFileSystemURL(source), parent->filesystem()->createFileSystemURL(destinationPath), std::move(callbacks));
 }
 
-void DOMFileSystemBase::copy(const EntryBase* source, EntryBase* parent, const String& newName, EntryCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::copy(const EntryBase* source, EntryBase* parent, const String& newName, EntryCallback* successCallback, ErrorCallbackBase* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
-        reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
+        reportError(errorCallback, FileError::kAbortErr);
         return;
     }
 
     String destinationPath;
     if (!verifyAndGetDestinationPathForCopyOrMove(source, parent, newName, destinationPath)) {
-        reportError(errorCallback, FileError::create(FileError::INVALID_MODIFICATION_ERR));
+        reportError(errorCallback, FileError::kInvalidModificationErr);
         return;
     }
 
-    OwnPtr<AsyncFileSystemCallbacks> callbacks(EntryCallbacks::create(successCallback, errorCallback, m_context, parent->filesystem(), destinationPath, source->isDirectory()));
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks(EntryCallbacks::create(successCallback, errorCallback, m_context, parent->filesystem(), destinationPath, source->isDirectory()));
     callbacks->setShouldBlockUntilCompletion(synchronousType == Synchronous);
 
-    fileSystem()->copy(createFileSystemURL(source), parent->filesystem()->createFileSystemURL(destinationPath), callbacks.release());
+    fileSystem()->copy(createFileSystemURL(source), parent->filesystem()->createFileSystemURL(destinationPath), std::move(callbacks));
 }
 
-void DOMFileSystemBase::remove(const EntryBase* entry, VoidCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::remove(const EntryBase* entry, VoidCallback* successCallback, ErrorCallbackBase* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
-        reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
+        reportError(errorCallback, FileError::kAbortErr);
         return;
     }
 
     ASSERT(entry);
     // We don't allow calling remove() on the root directory.
     if (entry->fullPath() == String(DOMFilePath::root)) {
-        reportError(errorCallback, FileError::create(FileError::INVALID_MODIFICATION_ERR));
+        reportError(errorCallback, FileError::kInvalidModificationErr);
         return;
     }
 
-    OwnPtr<AsyncFileSystemCallbacks> callbacks(VoidCallbacks::create(successCallback, errorCallback, m_context, this));
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks(VoidCallbacks::create(successCallback, errorCallback, m_context, this));
     callbacks->setShouldBlockUntilCompletion(synchronousType == Synchronous);
 
-    fileSystem()->remove(createFileSystemURL(entry), callbacks.release());
+    fileSystem()->remove(createFileSystemURL(entry), std::move(callbacks));
 }
 
-void DOMFileSystemBase::removeRecursively(const EntryBase* entry, VoidCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::removeRecursively(const EntryBase* entry, VoidCallback* successCallback, ErrorCallbackBase* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
-        reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
+        reportError(errorCallback, FileError::kAbortErr);
         return;
     }
 
     ASSERT(entry && entry->isDirectory());
     // We don't allow calling remove() on the root directory.
     if (entry->fullPath() == String(DOMFilePath::root)) {
-        reportError(errorCallback, FileError::create(FileError::INVALID_MODIFICATION_ERR));
+        reportError(errorCallback, FileError::kInvalidModificationErr);
         return;
     }
 
-    OwnPtr<AsyncFileSystemCallbacks> callbacks(VoidCallbacks::create(successCallback, errorCallback, m_context, this));
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks(VoidCallbacks::create(successCallback, errorCallback, m_context, this));
     callbacks->setShouldBlockUntilCompletion(synchronousType == Synchronous);
 
-    fileSystem()->removeRecursively(createFileSystemURL(entry), callbacks.release());
+    fileSystem()->removeRecursively(createFileSystemURL(entry), std::move(callbacks));
 }
 
-void DOMFileSystemBase::getParent(const EntryBase* entry, EntryCallback* successCallback, ErrorCallback* errorCallback)
+void DOMFileSystemBase::getParent(const EntryBase* entry, EntryCallback* successCallback, ErrorCallbackBase* errorCallback)
 {
     if (!fileSystem()) {
-        reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
+        reportError(errorCallback, FileError::kAbortErr);
         return;
     }
 
@@ -347,63 +330,63 @@ void DOMFileSystemBase::getParent(const EntryBase* entry, EntryCallback* success
     fileSystem()->directoryExists(createFileSystemURL(path), EntryCallbacks::create(successCallback, errorCallback, m_context, this, path, true));
 }
 
-void DOMFileSystemBase::getFile(const EntryBase* entry, const String& path, const FileSystemFlags& flags, EntryCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::getFile(const EntryBase* entry, const String& path, const FileSystemFlags& flags, EntryCallback* successCallback, ErrorCallbackBase* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
-        reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
+        reportError(errorCallback, FileError::kAbortErr);
         return;
     }
 
     String absolutePath;
     if (!pathToAbsolutePath(m_type, entry, path, absolutePath)) {
-        reportError(errorCallback, FileError::create(FileError::INVALID_MODIFICATION_ERR));
+        reportError(errorCallback, FileError::kInvalidModificationErr);
         return;
     }
 
-    OwnPtr<AsyncFileSystemCallbacks> callbacks(EntryCallbacks::create(successCallback, errorCallback, m_context, this, absolutePath, false));
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks(EntryCallbacks::create(successCallback, errorCallback, m_context, this, absolutePath, false));
     callbacks->setShouldBlockUntilCompletion(synchronousType == Synchronous);
 
     if (flags.createFlag())
-        fileSystem()->createFile(createFileSystemURL(absolutePath), flags.exclusive(), callbacks.release());
+        fileSystem()->createFile(createFileSystemURL(absolutePath), flags.exclusive(), std::move(callbacks));
     else
-        fileSystem()->fileExists(createFileSystemURL(absolutePath), callbacks.release());
+        fileSystem()->fileExists(createFileSystemURL(absolutePath), std::move(callbacks));
 }
 
-void DOMFileSystemBase::getDirectory(const EntryBase* entry, const String& path, const FileSystemFlags& flags, EntryCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
+void DOMFileSystemBase::getDirectory(const EntryBase* entry, const String& path, const FileSystemFlags& flags, EntryCallback* successCallback, ErrorCallbackBase* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
-        reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
+        reportError(errorCallback, FileError::kAbortErr);
         return;
     }
 
     String absolutePath;
     if (!pathToAbsolutePath(m_type, entry, path, absolutePath)) {
-        reportError(errorCallback, FileError::create(FileError::INVALID_MODIFICATION_ERR));
+        reportError(errorCallback, FileError::kInvalidModificationErr);
         return;
     }
 
-    OwnPtr<AsyncFileSystemCallbacks> callbacks(EntryCallbacks::create(successCallback, errorCallback, m_context, this, absolutePath, true));
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks(EntryCallbacks::create(successCallback, errorCallback, m_context, this, absolutePath, true));
     callbacks->setShouldBlockUntilCompletion(synchronousType == Synchronous);
 
     if (flags.createFlag())
-        fileSystem()->createDirectory(createFileSystemURL(absolutePath), flags.exclusive(), callbacks.release());
+        fileSystem()->createDirectory(createFileSystemURL(absolutePath), flags.exclusive(), std::move(callbacks));
     else
-        fileSystem()->directoryExists(createFileSystemURL(absolutePath), callbacks.release());
+        fileSystem()->directoryExists(createFileSystemURL(absolutePath), std::move(callbacks));
 }
 
-int DOMFileSystemBase::readDirectory(DirectoryReaderBase* reader, const String& path, EntriesCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
+int DOMFileSystemBase::readDirectory(DirectoryReaderBase* reader, const String& path, EntriesCallback* successCallback, ErrorCallbackBase* errorCallback, SynchronousType synchronousType)
 {
     if (!fileSystem()) {
-        reportError(errorCallback, FileError::create(FileError::ABORT_ERR));
+        reportError(errorCallback, FileError::kAbortErr);
         return 0;
     }
 
     ASSERT(DOMFilePath::isAbsolute(path));
 
-    OwnPtr<AsyncFileSystemCallbacks> callbacks(EntriesCallbacks::create(successCallback, errorCallback, m_context, reader, path));
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks(EntriesCallbacks::create(successCallback, errorCallback, m_context, reader, path));
     callbacks->setShouldBlockUntilCompletion(synchronousType == Synchronous);
 
-    return fileSystem()->readDirectory(createFileSystemURL(path), callbacks.release());
+    return fileSystem()->readDirectory(createFileSystemURL(path), std::move(callbacks));
 }
 
 bool DOMFileSystemBase::waitForAdditionalResult(int callbacksId)

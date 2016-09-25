@@ -4,172 +4,79 @@
 
 #include "blimp/client/session/blimp_client_session.h"
 
+#include <utility>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/location.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/numerics/safe_conversions.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/sequenced_task_runner.h"
+#include "base/task_runner_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
-#include "blimp/client/app/blimp_client_switches.h"
-#include "blimp/client/feature/ime_feature.h"
-#include "blimp/client/feature/navigation_feature.h"
-#include "blimp/client/feature/render_widget_feature.h"
-#include "blimp/client/feature/settings_feature.h"
-#include "blimp/client/feature/tab_control_feature.h"
-#include "blimp/net/blimp_connection.h"
-#include "blimp/net/blimp_message_processor.h"
+#include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "blimp/client/core/blimp_client_switches.h"
+#include "blimp/client/core/contents/ime_feature.h"
+#include "blimp/client/core/contents/navigation_feature.h"
+#include "blimp/client/core/contents/tab_control_feature.h"
+#include "blimp/client/core/geolocation/geolocation_feature.h"
+#include "blimp/client/core/render_widget/render_widget_feature.h"
+#include "blimp/client/core/session/client_network_components.h"
+#include "blimp/client/core/session/cross_thread_network_event_observer.h"
+#include "blimp/client/core/settings/settings_feature.h"
+#include "blimp/common/blob_cache/in_memory_blob_cache.h"
 #include "blimp/net/blimp_message_thread_pipe.h"
-#include "blimp/net/browser_connection_handler.h"
-#include "blimp/net/client_connection_manager.h"
-#include "blimp/net/common.h"
-#include "blimp/net/connection_handler.h"
-#include "blimp/net/null_blimp_message_processor.h"
-#include "blimp/net/ssl_client_transport.h"
-#include "blimp/net/tcp_client_transport.h"
+#include "blimp/net/blimp_stats.h"
+#include "blimp/net/blob_channel/blob_channel_receiver.h"
+#include "blimp/net/blob_channel/helium_blob_receiver_delegate.h"
 #include "blimp/net/thread_pipe_manager.h"
-#include "net/base/address_list.h"
-#include "net/base/ip_address.h"
-#include "net/base/ip_endpoint.h"
+#include "device/geolocation/geolocation_delegate.h"
+#include "device/geolocation/location_arbitrator.h"
 #include "url/gurl.h"
 
 namespace blimp {
 namespace client {
 namespace {
 
-// Posts network events to an observer across the IO/UI thread boundary.
-class CrossThreadNetworkEventObserver : public NetworkEventObserver {
- public:
-  CrossThreadNetworkEventObserver(
-      const base::WeakPtr<NetworkEventObserver>& target,
-      const scoped_refptr<base::TaskRunner>& task_runner)
-      : target_(target), task_runner_(task_runner) {}
-
-  ~CrossThreadNetworkEventObserver() override {}
-
-  void OnConnected() override {
-    task_runner_->PostTask(
-        FROM_HERE, base::Bind(&NetworkEventObserver::OnConnected, target_));
-  }
-
-  void OnDisconnected(int result) override {
-    task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&NetworkEventObserver::OnDisconnected, target_, result));
-  }
-
- private:
-  base::WeakPtr<NetworkEventObserver> target_;
-  scoped_refptr<base::TaskRunner> task_runner_;
-};
+void DropConnectionOnIOThread(ClientNetworkComponents* net_components) {
+  net_components->GetBrowserConnectionHandler()->DropCurrentConnection();
+}
 
 }  // namespace
 
-// This class's functions and destruction are all invoked on the IO thread by
-// the BlimpClientSession.
-class ClientNetworkComponents : public ConnectionHandler,
-                                public ConnectionErrorObserver {
- public:
-  // Can be created on any thread.
-  explicit ClientNetworkComponents(
-      std::unique_ptr<NetworkEventObserver> observer);
-  ~ClientNetworkComponents() override;
-
-  // Sets up network components.
-  void Initialize();
-
-  // Starts the connection to the engine using the given |assignment|.
-  // It is required to first call Initialize.
-  void ConnectWithAssignment(const Assignment& assignment);
-
-  BrowserConnectionHandler* GetBrowserConnectionHandler();
-
- private:
-  // ConnectionHandler implementation.
-  void HandleConnection(std::unique_ptr<BlimpConnection> connection) override;
-
-  // ConnectionErrorObserver implementation.
-  void OnConnectionError(int error) override;
-
-  std::unique_ptr<BrowserConnectionHandler> connection_handler_;
-  std::unique_ptr<ClientConnectionManager> connection_manager_;
-  std::unique_ptr<NetworkEventObserver> network_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ClientNetworkComponents);
-};
-
-ClientNetworkComponents::ClientNetworkComponents(
-    std::unique_ptr<NetworkEventObserver> network_observer)
-    : connection_handler_(new BrowserConnectionHandler),
-      network_observer_(std::move(network_observer)) {}
-
-ClientNetworkComponents::~ClientNetworkComponents() {}
-
-void ClientNetworkComponents::Initialize() {
-  DCHECK(!connection_manager_);
-  connection_manager_ = base::WrapUnique(new ClientConnectionManager(this));
-}
-
-void ClientNetworkComponents::ConnectWithAssignment(
-    const Assignment& assignment) {
-  DCHECK(connection_manager_);
-  connection_manager_->set_client_token(assignment.client_token);
-
-  switch (assignment.transport_protocol) {
-    case Assignment::SSL:
-      DCHECK(assignment.cert);
-      connection_manager_->AddTransport(base::WrapUnique(new SSLClientTransport(
-          assignment.engine_endpoint, std::move(assignment.cert), nullptr)));
-      break;
-    case Assignment::TCP:
-      connection_manager_->AddTransport(base::WrapUnique(
-          new TCPClientTransport(assignment.engine_endpoint, nullptr)));
-      break;
-    case Assignment::UNKNOWN:
-      DLOG(FATAL) << "Uknown transport type.";
-      break;
-  }
-
-  connection_manager_->Connect();
-}
-
-BrowserConnectionHandler*
-ClientNetworkComponents::GetBrowserConnectionHandler() {
-  return connection_handler_.get();
-}
-
-void ClientNetworkComponents::HandleConnection(
-    std::unique_ptr<BlimpConnection> connection) {
-  connection->AddConnectionErrorObserver(this);
-  network_observer_->OnConnected();
-  connection_handler_->HandleConnection(std::move(connection));
-}
-
-void ClientNetworkComponents::OnConnectionError(int result) {
-  network_observer_->OnDisconnected(result);
-}
-
 BlimpClientSession::BlimpClientSession(const GURL& assigner_endpoint)
     : io_thread_("BlimpIOThread"),
+      geolocation_feature_(base::MakeUnique<GeolocationFeature>(
+          base::MakeUnique<device::LocationArbitrator>(
+              base::MakeUnique<device::GeolocationDelegate>()))),
       tab_control_feature_(new TabControlFeature),
       navigation_feature_(new NavigationFeature),
       ime_feature_(new ImeFeature),
       render_widget_feature_(new RenderWidgetFeature),
       settings_feature_(new SettingsFeature),
       weak_factory_(this) {
-  net_components_.reset(new ClientNetworkComponents(
-      base::WrapUnique(new CrossThreadNetworkEventObserver(
-          weak_factory_.GetWeakPtr(),
-          base::SequencedTaskRunnerHandle::Get()))));
   base::Thread::Options options;
   options.message_loop_type = base::MessageLoop::TYPE_IO;
   io_thread_.StartWithOptions(options);
+  net_components_.reset(new ClientNetworkComponents(
+      base::MakeUnique<CrossThreadNetworkEventObserver>(
+          weak_factory_.GetWeakPtr(), base::SequencedTaskRunnerHandle::Get())));
 
   assignment_source_.reset(new AssignmentSource(
       assigner_endpoint, io_thread_.task_runner(), io_thread_.task_runner()));
 
+  std::unique_ptr<HeliumBlobReceiverDelegate> blob_delegate(
+      new HeliumBlobReceiverDelegate);
+  blob_delegate_ = blob_delegate.get();
+  blob_receiver_ = BlobChannelReceiver::Create(
+      base::WrapUnique(new InMemoryBlobCache), std::move(blob_delegate));
+
   RegisterFeatures();
+
+  blob_image_processor_.set_blob_receiver(blob_receiver_.get());
+  blob_image_processor_.set_error_delegate(this);
 
   // Initialize must only be posted after the RegisterFeature calls have
   // completed.
@@ -183,19 +90,22 @@ BlimpClientSession::~BlimpClientSession() {
 }
 
 void BlimpClientSession::Connect(const std::string& client_auth_token) {
+  VLOG(1) << "Trying to get assignment.";
   assignment_source_->GetAssignment(
       client_auth_token, base::Bind(&BlimpClientSession::ConnectWithAssignment,
                                     weak_factory_.GetWeakPtr()));
 }
 
-void BlimpClientSession::ConnectWithAssignment(AssignmentSource::Result result,
+void BlimpClientSession::ConnectWithAssignment(AssignmentRequestResult result,
                                                const Assignment& assignment) {
   OnAssignmentConnectionAttempted(result, assignment);
 
-  if (result != AssignmentSource::Result::RESULT_OK) {
-    VLOG(1) << "Assignment request failed: " << result;
+  if (result != ASSIGNMENT_REQUEST_RESULT_OK) {
+    LOG(ERROR) << "Assignment failed, reason: " << result;
     return;
   }
+
+  VLOG(1) << "Assignment succeeded";
 
   io_thread_.task_runner()->PostTask(
       FROM_HERE,
@@ -204,48 +114,61 @@ void BlimpClientSession::ConnectWithAssignment(AssignmentSource::Result result,
 }
 
 void BlimpClientSession::OnAssignmentConnectionAttempted(
-    AssignmentSource::Result result,
+    AssignmentRequestResult result,
     const Assignment& assignment) {}
 
 void BlimpClientSession::RegisterFeatures() {
-  thread_pipe_manager_ = base::WrapUnique(new ThreadPipeManager(
-      io_thread_.task_runner(), base::SequencedTaskRunnerHandle::Get(),
-      net_components_->GetBrowserConnectionHandler()));
+  thread_pipe_manager_ = base::MakeUnique<ThreadPipeManager>(
+      io_thread_.task_runner(), net_components_->GetBrowserConnectionHandler());
 
   // Register features' message senders and receivers.
+  geolocation_feature_->set_outgoing_message_processor(
+      thread_pipe_manager_->RegisterFeature(BlimpMessage::kGeolocation,
+                                            geolocation_feature_.get()));
   tab_control_feature_->set_outgoing_message_processor(
-      thread_pipe_manager_->RegisterFeature(BlimpMessage::TAB_CONTROL,
+      thread_pipe_manager_->RegisterFeature(BlimpMessage::kTabControl,
                                             tab_control_feature_.get()));
   navigation_feature_->set_outgoing_message_processor(
-      thread_pipe_manager_->RegisterFeature(BlimpMessage::NAVIGATION,
+      thread_pipe_manager_->RegisterFeature(BlimpMessage::kNavigation,
                                             navigation_feature_.get()));
   render_widget_feature_->set_outgoing_input_message_processor(
-      thread_pipe_manager_->RegisterFeature(BlimpMessage::INPUT,
+      thread_pipe_manager_->RegisterFeature(BlimpMessage::kInput,
                                             render_widget_feature_.get()));
   render_widget_feature_->set_outgoing_compositor_message_processor(
-      thread_pipe_manager_->RegisterFeature(BlimpMessage::COMPOSITOR,
+      thread_pipe_manager_->RegisterFeature(BlimpMessage::kCompositor,
                                             render_widget_feature_.get()));
   settings_feature_->set_outgoing_message_processor(
-      thread_pipe_manager_->RegisterFeature(BlimpMessage::SETTINGS,
+      thread_pipe_manager_->RegisterFeature(BlimpMessage::kSettings,
                                             settings_feature_.get()));
+  thread_pipe_manager_->RegisterFeature(BlimpMessage::kBlobChannel,
+                                        blob_delegate_);
+
+  // Client will not send send any RenderWidget messages, so don't save the
+  // outgoing BlimpMessageProcessor in the RenderWidgetFeature.
+  thread_pipe_manager_->RegisterFeature(BlimpMessage::kRenderWidget,
+                                        render_widget_feature_.get());
+
+  ime_feature_->set_outgoing_message_processor(
+      thread_pipe_manager_->RegisterFeature(BlimpMessage::kIme,
+                                            ime_feature_.get()));
 
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDownloadWholeDocument))
     settings_feature_->SetRecordWholeDocument(true);
+}
 
-  // Client will not send send any RenderWidget messages, so don't save the
-  // outgoing BlimpMessageProcessor in the RenderWidgetFeature.
-  thread_pipe_manager_->RegisterFeature(BlimpMessage::RENDER_WIDGET,
-                                        render_widget_feature_.get());
-
-  ime_feature_->set_outgoing_message_processor(
-      thread_pipe_manager_->RegisterFeature(BlimpMessage::IME,
-                                            ime_feature_.get()));
+void BlimpClientSession::DropConnection() {
+  io_thread_.task_runner()->PostTask(
+      FROM_HERE, base::Bind(&DropConnectionOnIOThread, net_components_.get()));
 }
 
 void BlimpClientSession::OnConnected() {}
 
 void BlimpClientSession::OnDisconnected(int result) {}
+
+void BlimpClientSession::OnImageDecodeError() {
+  DropConnection();
+}
 
 TabControlFeature* BlimpClientSession::GetTabControlFeature() const {
   return tab_control_feature_.get();

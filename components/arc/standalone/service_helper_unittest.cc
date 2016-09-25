@@ -7,11 +7,13 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
 #include "base/threading/platform_thread.h"
@@ -28,7 +30,7 @@ class ServiceHelperTest : public ::testing::Test {
   void Quit() {
     CHECK(base_loop_);
     CHECK(run_loop_);
-    base_loop_->PostTask(FROM_HERE, run_loop_->QuitClosure());
+    base_loop_->task_runner()->PostTask(FROM_HERE, run_loop_->QuitClosure());
   }
 
   void Init() {
@@ -44,9 +46,9 @@ class ServiceHelperTest : public ::testing::Test {
   }
 
  protected:
-  scoped_ptr<base::MessageLoopForIO> base_loop_;
-  scoped_ptr<base::RunLoop> run_loop_;
-  scoped_ptr<ServiceHelper> helper_;
+  std::unique_ptr<base::MessageLoopForIO> base_loop_;
+  std::unique_ptr<base::RunLoop> run_loop_;
+  std::unique_ptr<ServiceHelper> helper_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ServiceHelperTest);

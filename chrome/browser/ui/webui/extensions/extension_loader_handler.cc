@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/extensions/extension_loader_handler.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -169,12 +171,12 @@ void ExtensionLoaderHandler::OnLoadFailure(
 
 void ExtensionLoaderHandler::DidStartNavigationToPendingEntry(
     const GURL& url,
-    content::NavigationController::ReloadType reload_type) {
+    content::ReloadType reload_type) {
   // In the event of a page reload, we ensure that the frontend is not notified
   // until the UI finishes loading, so we set |ui_ready_| to false. This is
   // balanced in HandleDisplayFailures, which is called when the frontend is
   // ready to receive failure notifications.
-  if (reload_type != content::NavigationController::NO_RELOAD)
+  if (reload_type != content::ReloadType::NONE)
     ui_ready_ = false;
 }
 
@@ -198,7 +200,7 @@ void ExtensionLoaderHandler::AddFailure(
                new base::StringValue(prettified_path.LossyDisplayName()));
   failure->Set("error", new base::StringValue(base::UTF8ToUTF16(error)));
   failure->Set("manifest", manifest_value.release());
-  failures_.Append(failure.release());
+  failures_.Append(std::move(failure));
 
   // Only notify the frontend if the frontend UI is ready.
   if (ui_ready_)
@@ -206,9 +208,8 @@ void ExtensionLoaderHandler::AddFailure(
 }
 
 void ExtensionLoaderHandler::NotifyFrontendOfFailure() {
-  web_ui()->CallJavascriptFunction(
-      "extensions.ExtensionLoader.notifyLoadFailed",
-      failures_);
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "extensions.ExtensionLoader.notifyLoadFailed", failures_);
   failures_.Clear();
 }
 

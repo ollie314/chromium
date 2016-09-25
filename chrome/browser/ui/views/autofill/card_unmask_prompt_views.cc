@@ -7,19 +7,18 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
-#include "chrome/browser/ui/autofill/autofill_dialog_types.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/ui/autofill/create_card_unmask_prompt_view.h"
 #include "chrome/browser/ui/views/autofill/decorated_textfield.h"
 #include "chrome/browser/ui/views/autofill/tooltip_icon.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/autofill/core/browser/ui/card_unmask_prompt_controller.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -42,17 +41,19 @@
 
 namespace autofill {
 
+namespace {
+
 // The number of pixels of blank space on the outer horizontal edges of the
 // dialog.
 const int kEdgePadding = 19;
 
 SkColor kGreyTextColor = SkColorSetRGB(0x64, 0x64, 0x64);
 
-CardUnmaskPromptView* CreateCardUnmaskPromptView(
-    CardUnmaskPromptController* controller,
-    content::WebContents* web_contents) {
-  return new CardUnmaskPromptViews(controller, web_contents);
-}
+SkColor const kWarningColor = gfx::kGoogleRed700;
+SkColor const kLightShadingColor = SkColorSetARGB(7, 0, 0, 0);
+SkColor const kSubtleBorderColor = SkColorSetARGB(10, 0, 0, 0);
+
+}  // namespace
 
 CardUnmaskPromptViews::CardUnmaskPromptViews(
     CardUnmaskPromptController* controller,
@@ -452,8 +453,8 @@ void CardUnmaskPromptViews::InitIfNecessary() {
 
   error_icon_ = new views::ImageView();
   error_icon_->SetVisible(false);
-  error_icon_->SetImage(gfx::CreateVectorIcon(gfx::VectorIconId::WARNING, 16,
-                                              gfx::kGoogleRed700));
+  error_icon_->SetImage(
+      gfx::CreateVectorIcon(gfx::VectorIconId::WARNING, 16, kWarningColor));
   temporary_error->AddChildView(error_icon_);
 
   // Reserve vertical space for the error label, assuming it's one line.
@@ -506,7 +507,7 @@ CardUnmaskPromptViews::FadeOutView::~FadeOutView() {
 void CardUnmaskPromptViews::FadeOutView::PaintChildren(
     const ui::PaintContext& context) {
   const bool kLcdTextRequiresOpaqueLayer = true;
-  ui::CompositingRecorder recorder(context, size(), alpha_,
+  ui::CompositingRecorder recorder(context, alpha_,
                                    kLcdTextRequiresOpaqueLayer);
   views::View::PaintChildren(context);
 }

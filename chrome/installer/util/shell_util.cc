@@ -31,6 +31,7 @@
 #include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -56,6 +57,7 @@
 #include "chrome/installer/util/scoped_user_protocol_entry.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item.h"
+#include "components/base32/base32.h"
 
 using base::win::RegKey;
 
@@ -135,17 +137,15 @@ UserSpecificRegistrySuffix::UserSpecificRegistrySuffix() {
   base::MD5Digest md5_digest;
   std::string user_sid_ascii(base::UTF16ToASCII(user_sid));
   base::MD5Sum(user_sid_ascii.c_str(), user_sid_ascii.length(), &md5_digest);
-  const base::string16 base32_md5(
-      ShellUtil::ByteArrayToBase32(md5_digest.a, arraysize(md5_digest.a)));
-  // The value returned by the base32 algorithm above must never change and
-  // must always be 26 characters long (i.e. if someone ever moves this to
-  // base and implements the full base32 algorithm (i.e. with appended '='
-  // signs in the output), they must provide a flag to allow this method to
-  // still request the output with no appended '=' signs).
+  std::string base32_md5 = base32::Base32Encode(
+      base::StringPiece(reinterpret_cast<char*>(md5_digest.a),
+                        arraysize(md5_digest.a)),
+      base32::Base32EncodePolicy::OMIT_PADDING);
+  // The value returned by the base32 algorithm above must never change.
   DCHECK_EQ(base32_md5.length(), 26U);
   suffix_.reserve(base32_md5.length() + 1);
   suffix_.assign(1, L'.');
-  suffix_.append(base32_md5);
+  suffix_.append(base::ASCIIToUTF16(base32_md5));
 }
 
 bool UserSpecificRegistrySuffix::GetSuffix(base::string16* suffix) {
@@ -349,8 +349,7 @@ void GetChromeProgIdEntries(BrowserDistribution* dist,
                             const base::FilePath& chrome_exe,
                             const base::string16& suffix,
                             ScopedVector<RegistryEntry>* entries) {
-  int chrome_icon_index =
-      dist->GetIconIndex(BrowserDistribution::SHORTCUT_CHROME);
+  int chrome_icon_index = dist->GetIconIndex();
 
   ApplicationInfo app_info;
   app_info.prog_id = GetBrowserProgId(suffix);
@@ -411,8 +410,8 @@ void GetShellIntegrationEntries(BrowserDistribution* dist,
                                 const base::FilePath& chrome_exe,
                                 const base::string16& suffix,
                                 ScopedVector<RegistryEntry>* entries) {
-  const base::string16 icon_path(ShellUtil::FormatIconLocation(
-      chrome_exe, dist->GetIconIndex(BrowserDistribution::SHORTCUT_CHROME)));
+  const base::string16 icon_path(
+      ShellUtil::FormatIconLocation(chrome_exe, dist->GetIconIndex()));
   const base::string16 quoted_exe_path(L"\"" + chrome_exe.value() + L"\"");
 
   // Register for the Start Menu "Internet" link (pre-Win7).
@@ -599,8 +598,8 @@ void GetXPStyleDefaultBrowserUserEntries(BrowserDistribution* dist,
 
   // Protocols associations.
   base::string16 chrome_open = ShellUtil::GetChromeShellOpenCmd(chrome_exe);
-  base::string16 chrome_icon = ShellUtil::FormatIconLocation(
-      chrome_exe, dist->GetIconIndex(BrowserDistribution::SHORTCUT_CHROME));
+  base::string16 chrome_icon =
+      ShellUtil::FormatIconLocation(chrome_exe, dist->GetIconIndex());
   for (int i = 0; ShellUtil::kBrowserProtocolAssociations[i] != NULL; i++) {
     GetXPStyleUserProtocolEntries(ShellUtil::kBrowserProtocolAssociations[i],
                                   chrome_icon, chrome_open, entries);
@@ -707,26 +706,45 @@ bool ElevateAndRegisterChrome(BrowserDistribution* dist,
   return false;
 }
 
+// Returns the target used as a activate parameter when opening the settings
+// pointing to the page that is the most relevant to a user trying to change the
+// default handler for |protocol|.
+base::string16 GetTargetForDefaultAppsSettings(const wchar_t* protocol) {
+  static const wchar_t kSystemSettingsDefaultAppsFormat[] =
+      L"SystemSettings_DefaultApps_%ls";
+
+  if (base::EqualsCaseInsensitiveASCII(protocol, L"http"))
+    return base::StringPrintf(kSystemSettingsDefaultAppsFormat, L"Browser");
+  if (base::EqualsCaseInsensitiveASCII(protocol, L"mailto"))
+    return base::StringPrintf(kSystemSettingsDefaultAppsFormat, L"Email");
+  return L"SettingsPageAppsDefaultsProtocolView";
+}
+
 // Launches the Windows 'settings' modern app with the 'default apps' view
 // focused. This only works for Windows 8 and Windows 10. The appModelId
-// looks arbitrary but it is the same in Win8 and Win10 previews. There
-// is no easy way to retrieve the appModelId from the registry.
-bool LaunchDefaultAppsSettingsModernDialog() {
+// looks arbitrary but it is the same in Win8 and Win10. There is no easy way to
+// retrieve the appModelId from the registry.
+bool LaunchDefaultAppsSettingsModernDialog(const wchar_t* protocol) {
+  DCHECK(protocol);
+  static const wchar_t kControlPanelAppModelId[] =
+      L"windows.immersivecontrolpanel_cw5n1h2txyewy"
+      L"!microsoft.windows.immersivecontrolpanel";
+
   base::win::ScopedComPtr<IApplicationActivationManager> activator;
   HRESULT hr = activator.CreateInstance(CLSID_ApplicationActivationManager);
   if (SUCCEEDED(hr)) {
     DWORD pid = 0;
     CoAllowSetForegroundWindow(activator.get(), nullptr);
-    hr = activator->ActivateApplication(
-        L"windows.immersivecontrolpanel_cw5n1h2txyewy"
-        L"!microsoft.windows.immersivecontrolpanel",
-        L"page=SettingsPageAppsDefaults", AO_NONE, &pid);
+    hr = activator->ActivateApplication(kControlPanelAppModelId,
+                                        L"page=SettingsPageAppsDefaults",
+                                        AO_NONE, &pid);
     if (SUCCEEDED(hr)) {
       hr = activator->ActivateApplication(
-          L"windows.immersivecontrolpanel_cw5n1h2txyewy"
-          L"!microsoft.windows.immersivecontrolpanel",
-          L"page=SettingsPageAppsDefaults"
-          L"&target=SystemSettings_DefaultApps_Browser", AO_NONE, &pid);
+          kControlPanelAppModelId,
+          base::StringPrintf(L"page=SettingsPageAppsDefaults&target=%ls",
+                             GetTargetForDefaultAppsSettings(protocol).c_str())
+              .c_str(),
+          AO_NONE, &pid);
     }
     if (SUCCEEDED(hr))
       return true;
@@ -899,9 +917,7 @@ bool RegisterChromeAsDefaultProtocolClientXPStyle(
   const base::string16 chrome_open(
       ShellUtil::GetChromeShellOpenCmd(chrome_exe));
   const base::string16 chrome_icon(
-      ShellUtil::FormatIconLocation(
-          chrome_exe,
-          dist->GetIconIndex(BrowserDistribution::SHORTCUT_CHROME)));
+      ShellUtil::FormatIconLocation(chrome_exe, dist->GetIconIndex()));
   GetXPStyleUserProtocolEntries(protocol, chrome_icon, chrome_open, &entries);
   // Change the default protocol handler for current user.
   if (!ShellUtil::AddRegistryEntries(HKEY_CURRENT_USER, entries)) {
@@ -913,19 +929,15 @@ bool RegisterChromeAsDefaultProtocolClientXPStyle(
 }
 
 // Returns |properties.shortcut_name| if the property is set, otherwise it
-// returns dist->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME). In any
-// case, it makes sure the return value is suffixed with ".lnk".
+// returns dist->GetShortcutName(). In any case, it makes sure the return value
+// is suffixed with ".lnk".
 base::string16 ExtractShortcutNameFromProperties(
     BrowserDistribution* dist,
     const ShellUtil::ShortcutProperties& properties) {
   DCHECK(dist);
-  base::string16 shortcut_name;
-  if (properties.has_shortcut_name()) {
-    shortcut_name = properties.shortcut_name;
-  } else {
-    shortcut_name =
-        dist->GetShortcutName(BrowserDistribution::SHORTCUT_CHROME);
-  }
+  base::string16 shortcut_name = properties.has_shortcut_name()
+                                     ? properties.shortcut_name
+                                     : dist->GetShortcutName();
 
   if (!base::EndsWith(shortcut_name, installer::kLnkExt,
                       base::CompareCase::INSENSITIVE_ASCII))
@@ -1818,6 +1830,16 @@ bool ShellUtil::CanMakeChromeDefaultUnattended() {
   return base::win::GetVersion() < base::win::VERSION_WIN8;
 }
 
+// static
+ShellUtil::InteractiveSetDefaultMode ShellUtil::GetInteractiveSetDefaultMode() {
+  DCHECK(!CanMakeChromeDefaultUnattended());
+
+  if (base::win::GetVersion() >= base::win::VERSION_WIN10)
+    return InteractiveSetDefaultMode::SYSTEM_SETTINGS;
+
+  return InteractiveSetDefaultMode::INTENT_PICKER;
+}
+
 bool ShellUtil::MakeChromeDefault(BrowserDistribution* dist,
                                   int shell_change,
                                   const base::FilePath& chrome_exe,
@@ -1891,7 +1913,7 @@ bool ShellUtil::MakeChromeDefault(BrowserDistribution* dist,
 bool ShellUtil::ShowMakeChromeDefaultSystemUI(
     BrowserDistribution* dist,
     const base::FilePath& chrome_exe) {
-  DCHECK_GE(base::win::GetVersion(), base::win::VERSION_WIN8);
+  DCHECK(!CanMakeChromeDefaultUnattended());
   if (dist->GetDefaultBrowserControlPolicy() !=
       BrowserDistribution::DEFAULT_BROWSER_FULL_CONTROL) {
     return false;
@@ -1903,22 +1925,25 @@ bool ShellUtil::ShowMakeChromeDefaultSystemUI(
   bool succeeded = true;
   bool is_default = (GetChromeDefaultState() == IS_DEFAULT);
   if (!is_default) {
-    if (base::win::GetVersion() < base::win::VERSION_WIN10) {
-      // On Windows 8, you can't set yourself as the default handler
-      // programatically. In other words IApplicationAssociationRegistration
-      // has been rendered useless. What you can do is to launch
-      // "Set Program Associations" section of the "Default Programs"
-      // control panel, which is a mess, or pop the concise "How you want to
-      // open webpages?" dialog.  We choose the latter.
-      ScopedUserProtocolEntry user_protocol_entry;
-      succeeded = LaunchSelectDefaultProtocolHandlerDialog(L"http");
-    } else {
-      // On Windows 10, you can't even launch the associations dialog.
-      // So we launch the settings dialog. Quoting from MSDN: "The Open With
-      // dialog box can no longer be used to change the default program used to
-      // open a file extension. You can only use SHOpenWithDialog to open
-      // a single file."
-      succeeded = LaunchDefaultAppsSettingsModernDialog();
+    switch (GetInteractiveSetDefaultMode()) {
+      case INTENT_PICKER: {
+        // On Windows 8, you can't set yourself as the default handler
+        // programatically. In other words IApplicationAssociationRegistration
+        // has been rendered useless. What you can do is to launch
+        // "Set Program Associations" section of the "Default Programs"
+        // control panel, which is a mess, or pop the concise "How you want to
+        // open webpages?" dialog.  We choose the latter.
+        ScopedUserProtocolEntry user_protocol_entry(L"http");
+        succeeded = LaunchSelectDefaultProtocolHandlerDialog(L"http");
+      } break;
+      case SYSTEM_SETTINGS:
+        // On Windows 10, you can't even launch the associations dialog.
+        // So we launch the settings dialog. Quoting from MSDN: "The Open With
+        // dialog box can no longer be used to change the default program used
+        // to open a file extension. You can only use SHOpenWithDialog to open
+        // a single file."
+        succeeded = LaunchDefaultAppsSettingsModernDialog(L"http");
+        break;
     }
     is_default = (succeeded && GetChromeDefaultState() == IS_DEFAULT);
   }
@@ -1980,7 +2005,7 @@ bool ShellUtil::ShowMakeChromeDefaultProtocolClientSystemUI(
     BrowserDistribution* dist,
     const base::FilePath& chrome_exe,
     const base::string16& protocol) {
-  DCHECK_GE(base::win::GetVersion(), base::win::VERSION_WIN8);
+  DCHECK(!CanMakeChromeDefaultUnattended());
   if (dist->GetDefaultBrowserControlPolicy() !=
       BrowserDistribution::DEFAULT_BROWSER_FULL_CONTROL) {
     return false;
@@ -1994,13 +2019,24 @@ bool ShellUtil::ShowMakeChromeDefaultProtocolClientSystemUI(
   bool is_default = (
       GetChromeDefaultProtocolClientState(protocol) == IS_DEFAULT);
   if (!is_default) {
-    // On Windows 8, you can't set yourself as the default handler
-    // programatically. In other words IApplicationAssociationRegistration
-    // has been rendered useless. What you can do is to launch
-    // "Set Program Associations" section of the "Default Programs"
-    // control panel, which is a mess, or pop the concise "How you want to open
-    // links of this type (protocol)?" dialog.  We choose the latter.
-    succeeded = LaunchSelectDefaultProtocolHandlerDialog(protocol.c_str());
+    switch (GetInteractiveSetDefaultMode()) {
+      case INTENT_PICKER: {
+        // On Windows 8, you can't set yourself as the default handler
+        // programatically. In other words IApplicationAssociationRegistration
+        // has been rendered useless. What you can do is to launch
+        // "Set Program Associations" section of the "Default Programs"
+        // control panel, which is a mess, or pop the concise "How you want to
+        // open
+        // links of this type (protocol)?" dialog.  We choose the latter.
+        ScopedUserProtocolEntry user_protocol_entry(protocol.c_str());
+        succeeded = LaunchSelectDefaultProtocolHandlerDialog(protocol.c_str());
+      } break;
+      case SYSTEM_SETTINGS:
+        // On Windows 10, you can't even launch the associations dialog.
+        // So we launch the settings dialog.
+        succeeded = LaunchDefaultAppsSettingsModernDialog(protocol.c_str());
+        break;
+    }
     is_default = (succeeded &&
                   GetChromeDefaultProtocolClientState(protocol) == IS_DEFAULT);
   }
@@ -2230,54 +2266,6 @@ bool ShellUtil::GetOldUserSpecificRegistrySuffix(base::string16* suffix) {
   suffix->assign(1, L'.');
   suffix->append(user_name, size - 1);
   return true;
-}
-
-base::string16 ShellUtil::ByteArrayToBase32(const uint8_t* bytes, size_t size) {
-  static const char kEncoding[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-
-  // Eliminate special cases first.
-  if (size == 0) {
-    return base::string16();
-  } else if (size == 1) {
-    base::string16 ret;
-    ret.push_back(kEncoding[(bytes[0] & 0xf8) >> 3]);
-    ret.push_back(kEncoding[(bytes[0] & 0x07) << 2]);
-    return ret;
-  } else if (size >= std::numeric_limits<size_t>::max() / 8) {
-    // If |size| is too big, the calculation of |encoded_length| below will
-    // overflow.
-    NOTREACHED();
-    return base::string16();
-  }
-
-  // Overestimate the number of bits in the string by 4 so that dividing by 5
-  // is the equivalent of rounding up the actual number of bits divided by 5.
-  const size_t encoded_length = (size * 8 + 4) / 5;
-
-  base::string16 ret;
-  ret.reserve(encoded_length);
-
-  // A bit stream which will be read from the left and appended to from the
-  // right as it's emptied.
-  uint16_t bit_stream = (bytes[0] << 8) + bytes[1];
-  size_t next_byte_index = 2;
-  int free_bits = 0;
-  while (free_bits < 16) {
-    // Extract the 5 leftmost bits in the stream
-    ret.push_back(kEncoding[(bit_stream & 0xf800) >> 11]);
-    bit_stream <<= 5;
-    free_bits += 5;
-
-    // If there is enough room in the bit stream, inject another byte (if there
-    // are any left...).
-    if (free_bits >= 8 && next_byte_index < size) {
-      free_bits -= 8;
-      bit_stream += bytes[next_byte_index++] << free_bits;
-    }
-  }
-
-  DCHECK_EQ(ret.length(), encoded_length);
-  return ret;
 }
 
 // static

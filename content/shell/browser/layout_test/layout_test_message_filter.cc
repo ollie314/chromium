@@ -56,6 +56,7 @@ void LayoutTestMessageFilter::OverrideThreadForMessage(
     case LayoutTestHostMsg_SetPermission::ID:
     case LayoutTestHostMsg_ResetPermissions::ID:
     case LayoutTestHostMsg_LayoutTestRuntimeFlagsChanged::ID:
+    case LayoutTestHostMsg_TestFinishedInSecondaryRenderer::ID:
       *thread = BrowserThread::UI;
       break;
   }
@@ -74,12 +75,15 @@ bool LayoutTestMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnSimulateWebNotificationClick)
     IPC_MESSAGE_HANDLER(LayoutTestHostMsg_SimulateWebNotificationClose,
                         OnSimulateWebNotificationClose)
-    IPC_MESSAGE_HANDLER(LayoutTestHostMsg_AcceptAllCookies, OnAcceptAllCookies)
+    IPC_MESSAGE_HANDLER(LayoutTestHostMsg_BlockThirdPartyCookies,
+                        OnBlockThirdPartyCookies)
     IPC_MESSAGE_HANDLER(LayoutTestHostMsg_DeleteAllCookies, OnDeleteAllCookies)
     IPC_MESSAGE_HANDLER(LayoutTestHostMsg_SetPermission, OnSetPermission)
     IPC_MESSAGE_HANDLER(LayoutTestHostMsg_ResetPermissions, OnResetPermissions)
     IPC_MESSAGE_HANDLER(LayoutTestHostMsg_LayoutTestRuntimeFlagsChanged,
                         OnLayoutTestRuntimeFlagsChanged)
+    IPC_MESSAGE_HANDLER(LayoutTestHostMsg_TestFinishedInSecondaryRenderer,
+                        OnTestFinishedInSecondaryRenderer)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -136,8 +140,8 @@ void LayoutTestMessageFilter::OnSimulateWebNotificationClose(
     manager->SimulateClose(title, by_user);
 }
 
-void LayoutTestMessageFilter::OnAcceptAllCookies(bool accept) {
-  ShellNetworkDelegate::SetAcceptAllCookies(accept);
+void LayoutTestMessageFilter::OnBlockThirdPartyCookies(bool block) {
+  ShellNetworkDelegate::SetBlockThirdPartyCookies(block);
 }
 
 void LayoutTestMessageFilter::OnDeleteAllCookies() {
@@ -191,6 +195,10 @@ void LayoutTestMessageFilter::OnLayoutTestRuntimeFlagsChanged(
     const base::DictionaryValue& changed_layout_test_runtime_flags) {
   BlinkTestController::Get()->OnLayoutTestRuntimeFlagsChanged(
       render_process_id_, changed_layout_test_runtime_flags);
+}
+
+void LayoutTestMessageFilter::OnTestFinishedInSecondaryRenderer() {
+  BlinkTestController::Get()->OnTestFinishedInSecondaryRenderer();
 }
 
 }  // namespace content

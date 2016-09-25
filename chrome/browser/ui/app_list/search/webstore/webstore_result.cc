@@ -22,11 +22,10 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
-#include "grit/theme_resources.h"
 #include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -48,7 +47,7 @@ WebstoreResult::WebstoreResult(Profile* profile,
       install_tracker_(NULL),
       extension_registry_(NULL),
       weak_factory_(this) {
-  set_id(extensions::Extension::GetBaseURLFromExtensionId(app_id_).spec());
+  set_id(GetResultIdFromExtensionId(app_id));
 
   SetDefaultDetails();
 
@@ -70,6 +69,12 @@ WebstoreResult::WebstoreResult(Profile* profile,
 WebstoreResult::~WebstoreResult() {
   StopObservingInstall();
   StopObservingRegistry();
+}
+
+// static
+std::string WebstoreResult::GetResultIdFromExtensionId(
+    const std::string& extension_id) {
+  return extension_urls::GetWebstoreItemDetailURLPrefix() + extension_id;
 }
 
 void WebstoreResult::Open(int event_flags) {

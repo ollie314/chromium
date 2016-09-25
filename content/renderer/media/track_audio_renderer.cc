@@ -6,14 +6,14 @@
 
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/synchronization/lock.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "content/renderer/media/audio_device_factory.h"
 #include "content/renderer/media/media_stream_audio_track.h"
-#include "content/renderer/media/webrtc_audio_renderer.h"
 #include "media/base/audio_bus.h"
+#include "media/base/audio_latency.h"
 #include "media/base/audio_shifter.h"
 
 namespace content {
@@ -311,13 +311,18 @@ void TrackAudioRenderer::MaybeStartSink() {
   media::AudioParameters sink_params(
       hardware_params.format(), source_params_.channel_layout(),
       source_params_.sample_rate(), source_params_.bits_per_sample(),
-      WebRtcAudioRenderer::GetOptimalBufferSize(
+      media::AudioLatency::GetRtcBufferSize(
           source_params_.sample_rate(), hardware_params.frames_per_buffer()));
   DVLOG(1) << ("TrackAudioRenderer::MaybeStartSink() -- Starting sink.  "
                "source_params_={")
            << source_params_.AsHumanReadableString() << "}, hardware_params_={"
            << hardware_params.AsHumanReadableString() << "}, sink parameters={"
            << sink_params.AsHumanReadableString() << '}';
+
+  // Specify the latency info to be passed to the browser side.
+  sink_params.set_latency_tag(AudioDeviceFactory::GetSourceLatencyType(
+      AudioDeviceFactory::kSourceNonRtcAudioTrack));
+
   sink_->Initialize(sink_params, this);
   sink_->Start();
   sink_->SetVolume(volume_);

@@ -50,7 +50,7 @@ import sys
 from idl_compiler import idl_filename_to_interface_name
 from idl_definitions import Visitor
 from idl_reader import IdlReader
-from utilities import get_file_contents, read_file_to_list, idl_filename_to_interface_name, idl_filename_to_component, write_pickle_file, get_interface_extended_attributes_from_idl, is_callback_interface_from_idl, merge_dict_recursively
+from utilities import get_file_contents, read_file_to_list, idl_filename_to_interface_name, idl_filename_to_component, write_pickle_file, get_interface_extended_attributes_from_idl, is_callback_interface_from_idl, merge_dict_recursively, shorten_union_name
 
 module_path = os.path.dirname(__file__)
 source_path = os.path.normpath(os.path.join(module_path, os.pardir, os.pardir))
@@ -173,6 +173,7 @@ class InterfaceInfoCollector(object):
         self.enumerations = set()
         self.union_types = set()
         self.typedefs = {}
+        self.callback_functions = {}
 
     def add_paths_to_partials_dict(self, partial_interface_name, full_path,
                                    include_paths):
@@ -216,6 +217,14 @@ class InterfaceInfoCollector(object):
         this_union_types = collect_union_types_from_definitions(definitions)
         self.union_types.update(this_union_types)
         self.typedefs.update(definitions.typedefs)
+        for callback_function_name, callback_function in definitions.callback_functions.iteritems():
+            if 'ExperimentalCallbackFunction' in callback_function.extended_attributes:
+                # Set 'component_dir' to specify a directory that callback function files belong to
+                self.callback_functions[callback_function_name] = {
+                    'callback_function': callback_function,
+                    'component_dir': idl_filename_to_component(idl_filename),
+                    'full_path': os.path.realpath(idl_filename),
+                }
         # Check enum duplication.
         for enum_name in definitions.enumerations.keys():
             for defined_enum in self.enumerations:
@@ -266,9 +275,10 @@ class InterfaceInfoCollector(object):
             partial_include_paths = []
             if this_include_path:
                 partial_include_paths.append(this_include_path)
-            if this_union_types:
+            for union_type in this_union_types:
+                name = shorten_union_name(union_type)
                 partial_include_paths.append(
-                    'bindings/%s/v8/UnionTypes%s.h' % (component, component.capitalize()))
+                    'bindings/%s/v8/%s.h' % (component, name))
             self.add_paths_to_partials_dict(definition.name, full_path, partial_include_paths)
             # Collects C++ header paths which should be included from generated
             # .cpp files.  The resulting structure is as follows.
@@ -295,7 +305,7 @@ class InterfaceInfoCollector(object):
         interface_info.update({
             'extended_attributes': extended_attributes,
             'full_path': full_path,
-            'has_union_types': bool(this_union_types),
+            'union_types': this_union_types,
             'implemented_as': implemented_as,
             'implemented_by_interfaces': left_interfaces,
             'implements_interfaces': right_interfaces,
@@ -320,6 +330,7 @@ class InterfaceInfoCollector(object):
     def get_component_info_as_dict(self):
         """Returns component wide information as a dict."""
         return {
+            'callback_functions': self.callback_functions,
             'enumerations': dict((enum.name, enum.values)
                                  for enum in self.enumerations),
             'typedefs': self.typedefs,

@@ -45,7 +45,6 @@
 #include "ui/gfx/geometry/rect.h"
 
 struct BrowserPluginHostMsg_Attach_Params;
-struct ViewHostMsg_TextInputState_Params;
 
 #if defined(OS_MACOSX)
 struct FrameHostMsg_ShowPopup_Params;
@@ -53,7 +52,7 @@ struct FrameHostMsg_ShowPopup_Params;
 
 namespace cc {
 class CompositorFrame;
-struct SurfaceId;
+class SurfaceId;
 struct SurfaceSequence;
 }  // namespace cc
 
@@ -70,6 +69,7 @@ class RenderWidgetHostView;
 class RenderWidgetHostViewBase;
 class SiteInstance;
 struct DropData;
+struct TextInputState;
 
 // A browser plugin guest provides functionality for WebContents to operate in
 // the guest role and implements guest-specific overrides for ViewHostMsg_*
@@ -253,6 +253,11 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
 
   void ResendEventToEmbedder(const blink::WebInputEvent& event);
 
+  // TODO(ekaramad): Remove this once https://crbug.com/642826 is resolved.
+  bool can_use_cross_process_frames() const {
+    return can_use_cross_process_frames_;
+  }
+
  protected:
 
   // BrowserPluginGuest is a WebContentsObserver of |web_contents| and
@@ -332,18 +337,17 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   void OnUnlockMouseAck(int instance_id);
   void OnUpdateGeometry(int instance_id, const gfx::Rect& view_rect);
 
-  void OnTextInputStateChanged(
-      const ViewHostMsg_TextInputState_Params& params);
+  void OnTextInputStateChanged(const TextInputState& params);
   void OnImeSetComposition(
       int instance_id,
       const std::string& text,
       const std::vector<blink::WebCompositionUnderline>& underlines,
       int selection_start,
       int selection_end);
-  void OnImeConfirmComposition(
-      int instance_id,
-      const std::string& text,
-      bool keep_selection);
+  void OnImeCommitText(int instance_id,
+                       const std::string& text,
+                       int relative_cursor_pos);
+  void OnImeFinishComposingText(bool keep_selection);
   void OnExtendSelectionAndDelete(int instance_id, int before, int after);
   void OnImeCancelComposition();
 #if defined(OS_MACOSX) || defined(USE_AURA)
@@ -426,8 +430,7 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
 
   // Text input type states.
   // Using scoped_ptr to avoid including the header file: view_messages.h.
-  std::unique_ptr<const ViewHostMsg_TextInputState_Params>
-      last_text_input_state_;
+  std::unique_ptr<const TextInputState> last_text_input_state_;
 
   // The is the routing ID for a swapped out RenderView for the guest
   // WebContents in the embedder's process.
@@ -439,14 +442,19 @@ class CONTENT_EXPORT BrowserPluginGuest : public GuestHost,
   // Whether or not our embedder has seen a DragSourceEndedAt() call.
   bool seen_embedder_drag_source_ended_at_;
 
-  // Indicates the URL dragged into the guest if any.
-  GURL dragged_url_;
+  // Ignore the URL dragged into guest that is coming from guest.
+  bool ignore_dragged_url_;
 
   // This is a queue of messages that are destined to be sent to the embedder
   // once the guest is attached to a particular embedder.
   std::deque<linked_ptr<IPC::Message> > pending_messages_;
 
   BrowserPluginGuestDelegate* const delegate_;
+
+  // Whether or not this BrowserPluginGuest can use cross process frames. This
+  // means when we have --use-cross-process-frames-for-guests on, the
+  // WebContents associated with this BrowserPluginGuest has OOPIF structure.
+  bool can_use_cross_process_frames_;
 
   // Weak pointer used to ask GeolocationPermissionContext about geolocation
   // permission.

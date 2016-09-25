@@ -4,8 +4,12 @@
 
 #include "core/layout/LayoutObject.h"
 
+#include "core/frame/FrameView.h"
 #include "core/layout/LayoutTestHelper.h"
 #include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutAPIShim.h"
+#include "core/layout/api/LayoutViewItem.h"
+#include "platform/json/JSONValues.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
@@ -15,7 +19,7 @@ public:
     LayoutObjectTest()
         : RenderingTest(SingleChildFrameLoaderClient::create()) {}
 protected:
-    LayoutView& layoutView() const { return *document().layoutView(); }
+    LayoutView& layoutView() const { return *toLayoutView(LayoutAPIShim::layoutObjectFrom(document().layoutViewItem())); }
 };
 
 TEST_F(LayoutObjectTest, LayoutDecoratedNameCalledWithPositionedObject)
@@ -107,6 +111,20 @@ TEST_F(LayoutObjectTest, ContainingBlockAbsoluteLayoutObjectShouldNotBeNonStatic
     EXPECT_EQ(nullptr, layoutObject->nextSibling());
 
     EXPECT_EQ(layoutObject->containingBlock(), bodyLayoutObject);
+}
+
+TEST_F(LayoutObjectTest, PaintingLayerOfOverflowClipLayerUnderColumnSpanAll)
+{
+    setBodyInnerHTML(
+        "<div id='columns' style='columns: 3'>"
+        "  <div style='column-span: all'>"
+        "    <div id='overflow-clip-layer' style='height: 100px; overflow: hidden'></div>"
+        "  </div>"
+        "</div>");
+
+    LayoutObject* overflowClipObject = getLayoutObjectByElementId("overflow-clip-layer");
+    LayoutBlock* columns = toLayoutBlock(getLayoutObjectByElementId("columns"));
+    EXPECT_EQ(columns->layer(), overflowClipObject->paintingLayer());
 }
 
 } // namespace blink

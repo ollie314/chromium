@@ -27,8 +27,8 @@ namespace chromecast {
 namespace media {
 class AudioDecoderSoftwareWrapper;
 class AudioPipelineImpl;
-class BrowserCdmCast;
 class BufferingController;
+class CastCdmContext;
 class CodedFrameProvider;
 class VideoPipelineImpl;
 struct AvPipelineClient;
@@ -64,7 +64,7 @@ class MediaPipelineImpl {
   bool HasAudio() const;
   bool HasVideo() const;
 
-  void SetCdm(BrowserCdmCast* cdm);
+  void SetCdm(CastCdmContext* cdm);
 
  private:
   enum BackendState {
@@ -74,6 +74,9 @@ class MediaPipelineImpl {
     BACKEND_STATE_PAUSED
   };
   struct FlushTask;
+  void CheckForPlaybackStall(base::TimeDelta media_time,
+                             base::TimeTicks current_stc);
+
   void OnFlushDone(bool is_audio_stream);
 
   // Invoked to notify about a change of buffering state.
@@ -88,7 +91,7 @@ class MediaPipelineImpl {
   base::ThreadChecker thread_checker_;
   MediaPipelineClient client_;
   std::unique_ptr<BufferingController> buffering_controller_;
-  BrowserCdmCast* cdm_;
+  CastCdmContext* cdm_context_;
 
   // Interface with the underlying hardware media pipeline.
   BackendState backend_state_;
@@ -96,10 +99,12 @@ class MediaPipelineImpl {
   // Cached here because CMA pipeline backend does not support rate == 0,
   // which is emulated by pausing the backend.
   float playback_rate_;
+
+  // Since av pipeline still need to access device components in their
+  // destructor, it's important to delete them first.
   std::unique_ptr<MediaPipelineBackend> media_pipeline_backend_;
   std::unique_ptr<AudioDecoderSoftwareWrapper> audio_decoder_;
   MediaPipelineBackend::VideoDecoder* video_decoder_;
-
   std::unique_ptr<AudioPipelineImpl> audio_pipeline_;
   std::unique_ptr<VideoPipelineImpl> video_pipeline_;
   std::unique_ptr<FlushTask> pending_flush_task_;
@@ -115,6 +120,11 @@ class MediaPipelineImpl {
   base::TimeDelta elapsed_time_delta_;
   int audio_bytes_for_bitrate_estimation_;
   int video_bytes_for_bitrate_estimation_;
+
+  // Playback stalled handling.
+  bool playback_stalled_;
+  base::TimeTicks playback_stalled_time_;
+  bool playback_stalled_notification_sent_;
 
   base::WeakPtr<MediaPipelineImpl> weak_this_;
   base::WeakPtrFactory<MediaPipelineImpl> weak_factory_;

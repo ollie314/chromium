@@ -59,7 +59,7 @@
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutImage.h"
 #include "core/layout/LayoutTheme.h"
-#include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
 #include "core/page/ChromeClient.h"
@@ -83,9 +83,8 @@
 #include "public/platform/WebScreenInfo.h"
 #include "wtf/Assertions.h"
 #include "wtf/CurrentTime.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 #if OS(WIN)
 #include <windows.h>
@@ -120,7 +119,7 @@ static bool dragTypeIsValid(DragSourceAction action)
 static PlatformMouseEvent createMouseEvent(DragData* dragData)
 {
     return PlatformMouseEvent(dragData->clientPosition(), dragData->globalPosition(),
-        LeftButton, PlatformEvent::MouseMoved, 0,
+        WebPointerProperties::Button::Left, PlatformEvent::MouseMoved, 0,
         static_cast<PlatformEvent::Modifiers>(dragData->modifiers()),
         PlatformMouseEvent::RealOrIndistinguishable, monotonicallyIncreasingTime());
 }
@@ -138,10 +137,6 @@ DragController::DragController(Page* page)
     , m_documentIsHandlingDrag(false)
     , m_dragDestinationAction(DragDestinationActionNone)
     , m_didInitiateDrag(false)
-{
-}
-
-DragController::~DragController()
 {
 }
 
@@ -316,7 +311,7 @@ DragSession DragController::dragEnteredOrUpdated(DragData* dragData)
 static HTMLInputElement* asFileInput(Node* node)
 {
     ASSERT(node);
-    for (; node; node = node->shadowHost()) {
+    for (; node; node = node->ownerShadowHost()) {
         if (isHTMLInputElement(*node) && toHTMLInputElement(node)->type() == InputTypeNames::file)
             return toHTMLInputElement(node);
     }
@@ -328,13 +323,13 @@ static Element* elementUnderMouse(Document* documentUnderMouse, const IntPoint& 
 {
     HitTestRequest request(HitTestRequest::ReadOnly | HitTestRequest::Active);
     HitTestResult result(request, point);
-    documentUnderMouse->layoutView()->hitTest(result);
+    documentUnderMouse->layoutViewItem().hitTest(result);
 
     Node* n = result.innerNode();
     while (n && !n->isElementNode())
         n = n->parentOrShadowHostNode();
     if (n && n->isInShadowTree())
-        n = n->shadowHost();
+        n = n->ownerShadowHost();
 
     return toElement(n);
 }
@@ -393,9 +388,7 @@ bool DragController::tryDocumentDrag(DragData* dragData, DragDestinationAction a
         dragSession.mouseIsOverFileInput = m_fileInputElementUnderMouse;
         dragSession.numberOfItemsToBeAccepted = 0;
 
-        Vector<String> paths;
-        dragData->asFilePaths(paths);
-        const unsigned numberOfFiles = paths.size();
+        const unsigned numberOfFiles = dragData->numberOfFiles();
         if (m_fileInputElementUnderMouse) {
             if (m_fileInputElementUnderMouse->isDisabledFormControl())
                 dragSession.numberOfItemsToBeAccepted = 0;
@@ -431,7 +424,7 @@ DragOperation DragController::operationForLoad(DragData* dragData)
     ASSERT(dragData);
     Document* doc = m_page->deprecatedLocalMainFrame()->documentAtPoint(dragData->clientPosition());
 
-    if (doc && (m_didInitiateDrag || doc->isPluginDocument() || doc->hasEditableStyle()))
+    if (doc && (m_didInitiateDrag || doc->isPluginDocument() || hasEditableStyle(*doc)))
         return DragOperationNone;
     return dragOperation(dragData);
 }
@@ -495,6 +488,13 @@ bool DragController::concludeEditDrag(DragData* dragData)
 
     VisibleSelection dragCaret(m_page->dragCaretController().caretPosition());
     m_page->dragCaretController().clear();
+    // |innerFrame| can be removed by event handler called by
+    // |dispatchTextInputEventFor()|.
+    if (!innerFrame->selection().isAvailable()) {
+        // "editing/pasteboard/drop-text-events-sideeffect-crash.html" reaches
+        // here.
+        return false;
+    }
     Range* range = createRange(dragCaret.toNormalizedEphemeralRange());
     Element* rootEditableElement = innerFrame->selection().rootEditableElement();
 
@@ -564,9 +564,9 @@ bool DragController::canProcessDrag(DragData* dragData)
 
     if (isHTMLPlugInElement(*result.innerNode())) {
         HTMLPlugInElement* plugin = toHTMLPlugInElement(result.innerNode());
-        if (!plugin->canProcessDrag() && !result.innerNode()->hasEditableStyle())
+        if (!plugin->canProcessDrag() && !hasEditableStyle(*result.innerNode()))
             return false;
-    } else if (!result.innerNode()->hasEditableStyle()) {
+    } else if (!hasEditableStyle(*result.innerNode())) {
         return false;
     }
 
@@ -584,7 +584,7 @@ static DragOperation defaultOperationForDrag(DragOperation srcOpMask)
         return DragOperationCopy;
     if (srcOpMask == DragOperationNone)
         return DragOperationNone;
-    if (srcOpMask & DragOperationMove || srcOpMask & DragOperationGeneric)
+    if (srcOpMask & DragOperationMove)
         return DragOperationMove;
     if (srcOpMask & DragOperationCopy)
         return DragOperationCopy;
@@ -718,7 +718,8 @@ static Image* getImage(Element* element)
 
 static void prepareDataTransferForImageDrag(LocalFrame* source, DataTransfer* dataTransfer, Element* node, const KURL& linkURL, const KURL& imageURL, const String& label)
 {
-    if (node->isContentRichlyEditable()) {
+    node->document().updateStyleAndLayoutTree();
+    if (hasRichlyEditableStyle(*node)) {
         Range* range = source->document()->createRange();
         range->selectNode(node, ASSERT_NO_EXCEPTION);
         source->selection().setSelection(VisibleSelection(EphemeralRange(range)));
@@ -800,9 +801,9 @@ static const IntSize maxDragImageSize(float deviceScaleFactor)
     return maxSizeInPixels;
 }
 
-static PassOwnPtr<DragImage> dragImageForImage(Element* element, Image* image, float deviceScaleFactor, const IntPoint& dragOrigin, const IntPoint& imageElementLocation, const IntSize& imageElementSizeInPixels, IntPoint& dragLocation)
+static std::unique_ptr<DragImage> dragImageForImage(Element* element, Image* image, float deviceScaleFactor, const IntPoint& dragOrigin, const IntPoint& imageElementLocation, const IntSize& imageElementSizeInPixels, IntPoint& dragLocation)
 {
-    OwnPtr<DragImage> dragImage;
+    std::unique_ptr<DragImage> dragImage;
     IntPoint origin;
 
     InterpolationQuality interpolationQuality = element->ensureComputedStyle()->imageRendering() == ImageRenderingPixelated ? InterpolationNone : InterpolationHigh;
@@ -835,20 +836,20 @@ static PassOwnPtr<DragImage> dragImageForImage(Element* element, Image* image, f
     }
 
     dragLocation = dragOrigin + origin;
-    return dragImage.release();
+    return dragImage;
 }
 
-static PassOwnPtr<DragImage> dragImageForLink(const KURL& linkURL, const String& linkText, float deviceScaleFactor, const IntPoint& mouseDraggedPoint, IntPoint& dragLoc)
+static std::unique_ptr<DragImage> dragImageForLink(const KURL& linkURL, const String& linkText, float deviceScaleFactor, const IntPoint& mouseDraggedPoint, IntPoint& dragLoc)
 {
     FontDescription fontDescription;
     LayoutTheme::theme().systemFont(blink::CSSValueNone, fontDescription);
-    OwnPtr<DragImage> dragImage = DragImage::create(linkURL, linkText, fontDescription, deviceScaleFactor);
+    std::unique_ptr<DragImage> dragImage = DragImage::create(linkURL, linkText, fontDescription, deviceScaleFactor);
 
     IntSize size = dragImage ? dragImage->size() : IntSize();
     IntPoint dragImageOffset(-size.width() / 2, -LinkDragBorderInset);
     dragLoc = IntPoint(mouseDraggedPoint.x() + dragImageOffset.x(), mouseDraggedPoint.y() + dragImageOffset.y());
 
-    return dragImage.release();
+    return dragImage;
 }
 
 bool DragController::startDrag(LocalFrame* src, const DragState& state, const PlatformMouseEvent& dragEvent, const IntPoint& dragOrigin)
@@ -876,7 +877,7 @@ bool DragController::startDrag(LocalFrame* src, const DragState& state, const Pl
     DataTransfer* dataTransfer = state.m_dragDataTransfer.get();
     // We allow DHTML/JS to set the drag image, even if its a link, image or text we're dragging.
     // This is in the spirit of the IE API, which allows overriding of pasteboard data and DragOp.
-    OwnPtr<DragImage> dragImage = dataTransfer->createDragImage(dragOffset, src);
+    std::unique_ptr<DragImage> dragImage = dataTransfer->createDragImage(dragOffset, src);
     if (dragImage) {
         dragLocation = dragLocationForDHTMLDrag(mouseDraggedPoint, dragOrigin, dragOffset, !linkURL.isEmpty());
     }
@@ -903,7 +904,7 @@ bool DragController::startDrag(LocalFrame* src, const DragState& state, const Pl
             IntSize imageSizeInPixels = imageRect.size();
             // TODO(oshima): Remove this scaling and simply pass imageRect to dragImageForImage
             // once all platforms are migrated to use zoom for dsf.
-            imageSizeInPixels.scale(src->host()->deviceScaleFactor());
+            imageSizeInPixels.scale(src->host()->deviceScaleFactorDeprecated());
 
             float screenDeviceScaleFactor = src->page()->chromeClient().screenInfo().deviceScaleFactor;
             // Pass the selected image size in DIP becasue dragImageForImage clips the image in DIP.

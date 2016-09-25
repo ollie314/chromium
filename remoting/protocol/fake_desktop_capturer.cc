@@ -141,8 +141,8 @@ void FakeDesktopCapturer::Start(Callback* callback) {
 }
 
 void FakeDesktopCapturer::SetSharedMemoryFactory(
-    rtc::scoped_ptr<webrtc::SharedMemoryFactory> shared_memory_factory) {
-  shared_memory_factory_.reset(shared_memory_factory.release());
+    std::unique_ptr<webrtc::SharedMemoryFactory> shared_memory_factory) {
+  shared_memory_factory_ = std::move(shared_memory_factory);
 }
 
 void FakeDesktopCapturer::Capture(const webrtc::DesktopRegion& region) {
@@ -153,7 +153,10 @@ void FakeDesktopCapturer::Capture(const webrtc::DesktopRegion& region) {
     frame->set_capture_time_ms(
         (base::Time::Now() - capture_start_time).InMillisecondsRoundedUp());
   }
-  callback_->OnCaptureCompleted(frame.release());
+  callback_->OnCaptureResult(
+      frame ? webrtc::DesktopCapturer::Result::SUCCESS
+            : webrtc::DesktopCapturer::Result::ERROR_TEMPORARY,
+      std::move(frame));
 }
 
 }  // namespace protocol

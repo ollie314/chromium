@@ -75,14 +75,6 @@ WebInspector.CountersGraph = function(delegate, model, filters)
 }
 
 WebInspector.CountersGraph.prototype = {
-    /**
-     * @return {?WebInspector.Target}
-     */
-    target: function()
-    {
-        return this._model.target();
-    },
-
     _createCurrentValuesBar: function()
     {
         this._currentValuesBar = this._graphsContainer.element.createChild("div");
@@ -199,35 +191,7 @@ WebInspector.CountersGraph.prototype = {
             }
         }
         if (bestTime !== undefined)
-            this._revealRecordAt(bestTime);
-    },
-
-    /**
-     * @param {number} time
-     */
-    _revealRecordAt: function(time)
-    {
-        var recordToReveal;
-        /**
-         * @param {!WebInspector.TimelineModel.Record} record
-         * @return {boolean}
-         * @this {WebInspector.CountersGraph}
-         */
-        function findRecordToReveal(record)
-        {
-            if (!WebInspector.TimelineModel.isVisible(this._filters, record.traceEvent()))
-                return false;
-            if (record.startTime() <= time && time <= record.endTime()) {
-                recordToReveal = record;
-                return true;
-            }
-            // If there is no record containing the time than use the latest one before that time.
-            if (!recordToReveal || record.endTime() < time && recordToReveal.endTime() < record.endTime())
-                recordToReveal = record;
-            return false;
-        }
-        this._model.forAllRecords(null, findRecordToReveal.bind(this));
-        this._delegate.select(recordToReveal ? WebInspector.TimelineSelection.fromTraceEvent(recordToReveal.traceEvent()) : null);
+            this._delegate.selectEntryAtTime(bestTime);
     },
 
     /**
@@ -283,11 +247,11 @@ WebInspector.CountersGraph.prototype = {
 
     /**
      * @override
-     * @param {?WebInspector.TimelineModel.Record} record
+     * @param {?WebInspector.TracingModel.Event} event
      * @param {string=} regex
-     * @param {boolean=} selectRecord
+     * @param {boolean=} select
      */
-    highlightSearchResult: function(record, regex, selectRecord)
+    highlightSearchResult: function(event, regex, select)
     {
     },
 
@@ -401,7 +365,7 @@ WebInspector.CountersGraph.Counter.prototype = {
 
         this.x = new Array(this.values.length);
         for (var i = this._minimumIndex + 1; i <= this._maximumIndex; i++)
-             this.x[i] = xFactor * (this.times[i] - this._minTime);
+            this.x[i] = xFactor * (this.times[i] - this._minTime);
     }
 }
 
@@ -423,6 +387,7 @@ WebInspector.CountersGraph.CounterUI = function(memoryCountersPane, title, curre
 
     this._setting = WebInspector.settings.createSetting("timelineCountersGraph-" + title, true);
     this._filter = new WebInspector.ToolbarCheckbox(title, title, this._setting);
+    this._filter.inputElement.classList.add("-theme-preserve");
     var color = WebInspector.Color.parse(graphColor).setAlpha(0.5).asString(WebInspector.Color.Format.RGBA);
     if (color) {
         this._filter.element.backgroundColor = color;
@@ -542,14 +507,14 @@ WebInspector.CountersGraph.CounterUI.prototype = {
         var currentY = Math.round(originY + height - (value - minValue) * yFactor);
         ctx.moveTo(0, currentY);
         for (var i = counter._minimumIndex; i <= counter._maximumIndex; i++) {
-             var x = Math.round(counter.x[i]);
-             ctx.lineTo(x, currentY);
-             var currentValue = values[i];
-             if (typeof currentValue !== "undefined")
+            var x = Math.round(counter.x[i]);
+            ctx.lineTo(x, currentY);
+            var currentValue = values[i];
+            if (typeof currentValue !== "undefined")
                 value = currentValue;
-             currentY = Math.round(originY + height - (value - minValue) * yFactor);
-             ctx.lineTo(x, currentY);
-             yValues[i] = currentY;
+            currentY = Math.round(originY + height - (value - minValue) * yFactor);
+            ctx.lineTo(x, currentY);
+            yValues[i] = currentY;
         }
         yValues.length = i;
         ctx.lineTo(width, currentY);
@@ -629,7 +594,7 @@ WebInspector.CounterGraphCalculator.prototype = {
      * @param {number=} precision
      * @return {string}
      */
-    formatTime: function(value, precision)
+    formatValue: function(value, precision)
     {
         return Number.preciseMillisToString(value - this.zeroTime(), precision);
     },

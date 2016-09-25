@@ -25,6 +25,7 @@
 
 
 using base::android::ConvertUTF8ToJavaString;
+using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 using data_reduction_proxy::DataReductionProxySettings;
 
@@ -82,18 +83,6 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyManaged(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   return Settings()->IsDataReductionProxyManaged();
-}
-
-void DataReductionProxySettingsAndroid::IncrementLoFiSnackbarShown(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  Settings()->IncrementLoFiSnackbarShown();
-}
-
-void DataReductionProxySettingsAndroid::IncrementLoFiUserRequestsForImages(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  Settings()->IncrementLoFiUserRequestsForImages();
 }
 
 void DataReductionProxySettingsAndroid::SetDataReductionProxyEnabled(

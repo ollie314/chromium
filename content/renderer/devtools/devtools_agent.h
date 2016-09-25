@@ -10,8 +10,8 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
-#include "content/public/common/console_message_level.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "third_party/WebKit/public/web/WebDevToolsAgentClient.h"
 
@@ -19,10 +19,14 @@ namespace blink {
 class WebDevToolsAgent;
 }
 
+class GURL;
+
 namespace content {
 
 class DevToolsCPUThrottler;
 class RenderFrameImpl;
+struct Manifest;
+struct ManifestDebugInfo;
 
 // DevToolsAgent belongs to the inspectable RenderFrameImpl and communicates
 // with WebDevToolsAgent. There is a corresponding DevToolsAgentHost
@@ -43,13 +47,12 @@ class CONTENT_EXPORT DevToolsAgent
                                          int call_id,
                                          const std::string& message,
                                          const std::string& post_state);
+  static blink::WebDevToolsAgentClient::WebKitClientMessageLoop*
+      createMessageLoopWrapper();
 
   blink::WebDevToolsAgent* GetWebAgent();
 
   bool IsAttached();
-
-  void AddMessageToConsole(ConsoleMessageLevel level,
-                           const std::string& message);
 
  private:
   friend class DevToolsAgentTest;
@@ -57,6 +60,7 @@ class CONTENT_EXPORT DevToolsAgent
   // RenderFrameObserver implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
   void WidgetWillClose() override;
+  void OnDestruct() override;
 
   // WebDevToolsAgentClient implementation.
   void sendProtocolMessage(int session_id,
@@ -80,11 +84,20 @@ class CONTENT_EXPORT DevToolsAgent
                   int session_id,
                   const std::string& agent_state);
   void OnDetach();
-  void OnDispatchOnInspectorBackend(int session_id, const std::string& message);
-  void OnInspectElement(int x, int y);
+  void OnDispatchOnInspectorBackend(int session_id,
+                                    int call_id,
+                                    const std::string& method,
+                                    const std::string& message);
+  void OnInspectElement(int session_id, int x, int y);
   void OnRequestNewWindowACK(bool success);
   void ContinueProgram();
   void OnSetupDevToolsClient(const std::string& compatibility_script);
+
+  void GotManifest(int session_id,
+                   int command_id,
+                   const GURL& manifest_url,
+                   const Manifest& manifest,
+                   const ManifestDebugInfo& debug_info);
 
   bool is_attached_;
   bool is_devtools_client_;
@@ -94,6 +107,7 @@ class CONTENT_EXPORT DevToolsAgent
   base::Callback<void(int, int, const std::string&, const std::string&)>
       send_protocol_message_callback_for_test_;
   std::unique_ptr<DevToolsCPUThrottler> cpu_throttler_;
+  base::WeakPtrFactory<DevToolsAgent> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsAgent);
 };

@@ -5,6 +5,7 @@
 #include "modules/geolocation/GeolocationWatchers.h"
 
 #include "modules/geolocation/GeoNotifier.h"
+#include "wtf/Assertions.h"
 
 namespace blink {
 
@@ -16,7 +17,7 @@ DEFINE_TRACE(GeolocationWatchers)
 
 bool GeolocationWatchers::add(int id, GeoNotifier* notifier)
 {
-    ASSERT(id > 0);
+    DCHECK_GT(id, 0);
     if (!m_idToNotifierMap.add(id, notifier).isNewEntry)
         return false;
     m_notifierToIdMap.set(notifier, id);
@@ -25,16 +26,16 @@ bool GeolocationWatchers::add(int id, GeoNotifier* notifier)
 
 GeoNotifier* GeolocationWatchers::find(int id)
 {
-    ASSERT(id > 0);
+    DCHECK_GT(id, 0);
     IdToNotifierMap::iterator iter = m_idToNotifierMap.find(id);
     if (iter == m_idToNotifierMap.end())
         return 0;
-    return iter->value.get();
+    return iter->value;
 }
 
 void GeolocationWatchers::remove(int id)
 {
-    ASSERT(id > 0);
+    DCHECK_GT(id, 0);
     IdToNotifierMap::iterator iter = m_idToNotifierMap.find(id);
     if (iter == m_idToNotifierMap.end())
         return;

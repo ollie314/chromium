@@ -35,6 +35,9 @@ class FakeDemuxerStream : public DemuxerStream {
   Type type() const override;
   bool SupportsConfigChanges() override;
   VideoRotation video_rotation() override;
+  bool enabled() const override;
+  void set_enabled(bool enabled, base::TimeDelta timestamp) override;
+  void SetStreamStatusChangeCB(const StreamStatusChangeCB& cb) override;
 
   void Initialize();
 
@@ -62,6 +65,9 @@ class FakeDemuxerStream : public DemuxerStream {
   // Reset() this demuxer stream and set the reading position to the start of
   // the stream.
   void SeekToStart();
+
+  // Sets further read requests to return EOS buffers.
+  void SeekToEndOfStream();
 
   // Sets the splice timestamp for all furture buffers returned via Read().
   void set_splice_timestamp(base::TimeDelta splice_timestamp) {

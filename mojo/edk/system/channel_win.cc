@@ -9,15 +9,17 @@
 
 #include <algorithm>
 #include <deque>
+#include <limits>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/task_runner.h"
+#include "base/win/win_util.h"
 #include "mojo/edk/embedder/platform_handle_vector.h"
 
 namespace mojo {
@@ -78,13 +80,9 @@ class ChannelWin : public Channel,
         self_(this),
         handle_(std::move(handle)),
         io_task_runner_(io_task_runner) {
-    sentinel_ = ~reinterpret_cast<uintptr_t>(this);
     CHECK(handle_.is_valid());
-    memset(&read_context_, 0, sizeof(read_context_));
-    read_context_.handler = this;
 
-    memset(&write_context_, 0, sizeof(write_context_));
-    write_context_.handler = this;
+    wait_for_connect_ = handle_.get().needs_connection;
   }
 
   void Start() override {
@@ -119,34 +117,64 @@ class ChannelWin : public Channel,
     }
   }
 
-  ScopedPlatformHandleVectorPtr GetReadPlatformHandles(
+  void LeakHandle() override {
+    DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
+    leak_handle_ = true;
+  }
+
+  bool GetReadPlatformHandles(
       size_t num_handles,
       const void* extra_header,
-      size_t extra_header_size) override {
-    size_t handles_size = sizeof(PlatformHandle) * num_handles;
+      size_t extra_header_size,
+      ScopedPlatformHandleVectorPtr* handles) override {
+    if (num_handles > std::numeric_limits<uint16_t>::max())
+      return false;
+    using HandleEntry = Channel::Message::HandleEntry;
+    size_t handles_size = sizeof(HandleEntry) * num_handles;
     if (handles_size > extra_header_size)
-      return nullptr;
-
-    ScopedPlatformHandleVectorPtr handles(
-        new PlatformHandleVector(num_handles));
-    memcpy(handles->data(), extra_header, handles_size);
-    return handles;
+      return false;
+    DCHECK(extra_header);
+    handles->reset(new PlatformHandleVector(num_handles));
+    const HandleEntry* extra_header_handles =
+        reinterpret_cast<const HandleEntry*>(extra_header);
+    for (size_t i = 0; i < num_handles; i++) {
+      (*handles)->at(i).handle =
+          base::win::Uint32ToHandle(extra_header_handles[i].handle);
+    }
+    return true;
   }
 
  private:
   // May run on any thread.
-  ~ChannelWin() override {
-    // This is intentionally not 0. If another object is constructed on top of
-    // this memory, it is likely to initialise values to 0. Using a non-zero
-    // value lets us detect the difference between just destroying, and
-    // re-allocating the memory.
-    sentinel_ = UINTPTR_MAX;
-  }
+  ~ChannelWin() override {}
 
   void StartOnIOThread() {
     base::MessageLoop::current()->AddDestructionObserver(this);
     base::MessageLoopForIO::current()->RegisterIOHandler(
         handle_.get().handle, this);
+
+    if (wait_for_connect_) {
+      BOOL ok = ConnectNamedPipe(handle_.get().handle,
+                                 &connect_context_.overlapped);
+      if (ok) {
+        PLOG(ERROR) << "Unexpected success while waiting for pipe connection";
+        OnError();
+        return;
+      }
+
+      const DWORD err = GetLastError();
+      switch (err) {
+        case ERROR_PIPE_CONNECTED:
+          wait_for_connect_ = false;
+          break;
+        case ERROR_IO_PENDING:
+          AddRef();
+          return;
+        case ERROR_NO_DATA:
+          OnError();
+          return;
+      }
+    }
 
     // Now that we have registered our IOHandler, we can start writing.
     {
@@ -169,6 +197,8 @@ class ChannelWin : public Channel,
     // |handle_| should be valid at this point.
     CHECK(handle_.is_valid());
     CancelIo(handle_.get().handle);
+    if (leak_handle_)
+      ignore_result(handle_.release());
     handle_.reset();
 
     // May destroy the |this| if it was the last reference.
@@ -177,7 +207,6 @@ class ChannelWin : public Channel,
 
   // base::MessageLoop::DestructionObserver:
   void WillDestroyCurrentMessageLoop() override {
-    CheckValid();
     DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
     if (self_)
       ShutDownOnIOThread();
@@ -187,9 +216,18 @@ class ChannelWin : public Channel,
   void OnIOCompleted(base::MessageLoopForIO::IOContext* context,
                      DWORD bytes_transfered,
                      DWORD error) override {
-    CheckValid();
     if (error != ERROR_SUCCESS) {
       OnError();
+    } else if (context == &connect_context_) {
+      DCHECK(wait_for_connect_);
+      wait_for_connect_ = false;
+      ReadMore(0);
+
+      base::AutoLock lock(write_lock_);
+      if (delay_writes_) {
+        delay_writes_ = false;
+        WriteNextNoLock();
+      }
     } else if (context == &read_context_) {
       OnReadDone(static_cast<size_t>(bytes_transfered));
     } else {
@@ -282,16 +320,13 @@ class ChannelWin : public Channel,
     return WriteNoLock(outgoing_messages_.front());
   }
 
-  void CheckValid() const {
-    CHECK_EQ(reinterpret_cast<uintptr_t>(this), ~sentinel_);
-  }
-
   // Keeps the Channel alive at least until explicit shutdown on the IO thread.
   scoped_refptr<Channel> self_;
 
   ScopedPlatformHandle handle_;
   scoped_refptr<base::TaskRunner> io_task_runner_;
 
+  base::MessageLoopForIO::IOContext connect_context_;
   base::MessageLoopForIO::IOContext read_context_;
   base::MessageLoopForIO::IOContext write_context_;
 
@@ -303,11 +338,9 @@ class ChannelWin : public Channel,
   bool reject_writes_ = false;
   std::deque<MessageView> outgoing_messages_;
 
-  // A value that is unlikely to be valid if this object is destroyed and the
-  // memory overwritten by something else. When this is valid, its value will be
-  // ~|this|.
-  // TODO(amistry): Remove before M50 branch point.
-  uintptr_t sentinel_;
+  bool wait_for_connect_;
+
+  bool leak_handle_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ChannelWin);
 };

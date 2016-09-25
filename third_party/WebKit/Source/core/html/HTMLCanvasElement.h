@@ -29,24 +29,28 @@
 #define HTMLCanvasElement_h
 
 #include "bindings/core/v8/ScriptValue.h"
-#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/CoreExport.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/DOMTypedArray.h"
 #include "core/dom/Document.h"
-#include "core/dom/DocumentVisibilityObserver.h"
 #include "core/fileapi/BlobCallback.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/canvas/CanvasDrawListener.h"
 #include "core/html/canvas/CanvasImageSource.h"
 #include "core/imagebitmap/ImageBitmapSource.h"
+#include "core/page/PageVisibilityObserver.h"
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/IntSize.h"
+#include "platform/graphics/CanvasSurfaceLayerBridge.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/graphics/GraphicsTypes3D.h"
 #include "platform/graphics/ImageBufferClient.h"
 #include "platform/heap/Handle.h"
+#include <memory>
 
 #define CanvasDefaultInterpolationQuality InterpolationLow
+
+class SkColorSpace;
 
 namespace blink {
 
@@ -55,6 +59,7 @@ class CanvasContextCreationAttributes;
 class CanvasRenderingContext;
 class CanvasRenderingContextFactory;
 class GraphicsContext;
+class HitTestCanvasResult;
 class HTMLCanvasElement;
 class Image;
 class ImageBitmapOptions;
@@ -62,14 +67,18 @@ class ImageBuffer;
 class ImageBufferSurface;
 class ImageData;
 class IntSize;
+class WebGraphicsContext3DProvider;
 
 class CanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrImageBitmapRenderingContext;
 typedef CanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrImageBitmapRenderingContext RenderingContext;
 
-class CORE_EXPORT HTMLCanvasElement final : public HTMLElement, public DocumentVisibilityObserver, public CanvasImageSource, public ImageBufferClient, public ImageBitmapSource {
+class CORE_EXPORT HTMLCanvasElement final : public HTMLElement, public ContextLifecycleObserver, public PageVisibilityObserver, public CanvasImageSource, public ImageBufferClient, public ImageBitmapSource {
     DEFINE_WRAPPERTYPEINFO();
     USING_GARBAGE_COLLECTED_MIXIN(HTMLCanvasElement);
+    USING_PRE_FINALIZER(HTMLCanvasElement, dispose);
 public:
+    using Node::getExecutionContext;
+
     DECLARE_NODE_FACTORY(HTMLCanvasElement);
     ~HTMLCanvasElement() override;
 
@@ -79,19 +88,10 @@ public:
 
     const IntSize& size() const { return m_size; }
 
-    void setWidth(int);
-    void setHeight(int);
+    void setWidth(int, ExceptionState&);
+    void setHeight(int, ExceptionState&);
 
-    void setSize(const IntSize& newSize)
-    {
-        if (newSize == size())
-            return;
-        m_ignoreReset = true;
-        setWidth(newSize.width());
-        setHeight(newSize.height());
-        m_ignoreReset = false;
-        reset();
-    }
+    void setSize(const IntSize& newSize);
 
     // Called by Document::getCSSCanvasContext as well as above getContext().
     CanvasRenderingContext* getCanvasRenderingContext(const String&, const CanvasContextCreationAttributes&);
@@ -142,8 +142,6 @@ public:
     bool hasImageBuffer() const { return m_imageBuffer.get(); }
     void discardImageBuffer();
 
-    bool shouldAccelerate(const IntSize&) const;
-
     bool shouldBeDirectComposited() const;
 
     void prepareSurfaceForPaintingIfNeeded() const;
@@ -152,9 +150,11 @@ public:
 
     InsertionNotificationRequest insertedInto(ContainerNode*) override;
 
-    // DocumentVisibilityObserver implementation
-    void didChangeVisibilityState(PageVisibilityState) override;
-    void willDetachDocument() override;
+    // ContextLifecycleObserver (and PageVisibilityObserver!!!) implementation
+    void contextDestroyed() override;
+
+    // PageVisibilityObserver implementation
+    void pageVisibilityChanged() override;
 
     // CanvasImageSource implementation
     PassRefPtr<Image> getSourceImageForCanvas(SourceImageStatus*, AccelerationHint, SnapshotReason, const FloatSize&) const override;
@@ -162,10 +162,13 @@ public:
     FloatSize elementSize(const FloatSize&) const override;
     bool isCanvasElement() const override { return true; }
     bool isOpaque() const override;
+    int sourceWidth() override { return m_size.width(); }
+    int sourceHeight() override { return m_size.height(); }
 
     // ImageBufferClient implementation
     void notifySurfaceInvalid() override;
     bool isDirty() override { return !m_dirtyRect.isEmpty(); }
+    void didDisableAcceleration() override;
     void didFinalizeFrame() override;
     void restoreCanvasMatrixClipStack(SkCanvas*) const override;
 
@@ -173,13 +176,15 @@ public:
 
     // ImageBitmapSource implementation
     IntSize bitmapSourceSize() const override;
-    ScriptPromise createImageBitmap(ScriptState*, EventTarget&, int sx, int sy, int sw, int sh, const ImageBitmapOptions&, ExceptionState&) override;
+    ScriptPromise createImageBitmap(ScriptState*, EventTarget&, Optional<IntRect> cropRect, const ImageBitmapOptions&, ExceptionState&) override;
 
     DECLARE_VIRTUAL_TRACE();
 
-    void createImageBufferUsingSurfaceForTesting(PassOwnPtr<ImageBufferSurface>);
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
-    static void registerRenderingContextFactory(PassOwnPtr<CanvasRenderingContextFactory>);
+    void createImageBufferUsingSurfaceForTesting(std::unique_ptr<ImageBufferSurface>);
+
+    static void registerRenderingContextFactory(std::unique_ptr<CanvasRenderingContextFactory>);
     void updateExternallyAllocatedMemory() const;
 
     void styleDidChange(const ComputedStyle* oldStyle, const ComputedStyle& newStyle);
@@ -188,18 +193,27 @@ public:
 
     // For Canvas HitRegions
     bool isSupportedInteractiveCanvasFallback(const Element&);
-    std::pair<Element*, String> getControlAndIdIfHitRegionExists(const LayoutPoint&);
+    HitTestCanvasResult* getControlAndIdIfHitRegionExists(const LayoutPoint&);
     String getIdFromControl(const Element*);
+
+    // For OffscreenCanvas that controls this html canvas element
+    CanvasSurfaceLayerBridge* surfaceLayerBridge() const { return m_surfaceLayerBridge.get(); }
+    bool createSurfaceLayer();
+
+    void detachContext() { m_context = nullptr; }
 
 protected:
     void didMoveToNewDocument(Document& oldDocument) override;
 
 private:
     explicit HTMLCanvasElement(Document&);
+    void dispose();
 
-    using ContextFactoryVector = Vector<OwnPtr<CanvasRenderingContextFactory>>;
+    using ContextFactoryVector = Vector<std::unique_ptr<CanvasRenderingContextFactory>>;
     static ContextFactoryVector& renderingContextFactories();
     static CanvasRenderingContextFactory* getRenderingContextFactory(int);
+
+    bool shouldAccelerate(const IntSize&) const;
 
     void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
     LayoutObject* createLayoutObject(const ComputedStyle&) override;
@@ -207,9 +221,11 @@ private:
 
     void reset();
 
-    PassOwnPtr<ImageBufferSurface> createImageBufferSurface(const IntSize& deviceSize, int* msaaSampleCount);
+    std::unique_ptr<ImageBufferSurface> createWebGLImageBufferSurface(const IntSize& deviceSize, OpacityMode, sk_sp<SkColorSpace>);
+    std::unique_ptr<ImageBufferSurface> createAcceleratedImageBufferSurface(const IntSize& deviceSize, OpacityMode, sk_sp<SkColorSpace>, int* msaaSampleCount);
+    std::unique_ptr<ImageBufferSurface> createUnacceleratedImageBufferSurface(const IntSize& deviceSize, OpacityMode, sk_sp<SkColorSpace>);
     void createImageBuffer();
-    void createImageBufferInternal(PassOwnPtr<ImageBufferSurface> externalSurface);
+    void createImageBufferInternal(std::unique_ptr<ImageBufferSurface> externalSurface);
     bool shouldUseDisplayList(const IntSize& deviceSize);
 
     void setSurfaceSize(const IntSize&);
@@ -237,9 +253,15 @@ private:
     // after the first attempt failed.
     mutable bool m_didFailToCreateImageBuffer;
     bool m_imageBufferIsClear;
-    OwnPtr<ImageBuffer> m_imageBuffer;
+    std::unique_ptr<ImageBuffer> m_imageBuffer;
 
     mutable RefPtr<Image> m_copiedImage; // FIXME: This is temporary for platforms that have to copy the image buffer to render (and for CSSCanvasValue).
+
+    // Used for OffscreenCanvas that controls this HTML canvas element
+    std::unique_ptr<CanvasSurfaceLayerBridge> m_surfaceLayerBridge;
+
+    int m_numFramesSinceLastRenderingModeSwitch;
+    bool m_pendingRenderingModeSwitch;
 };
 
 } // namespace blink

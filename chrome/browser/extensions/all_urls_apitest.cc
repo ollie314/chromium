@@ -9,7 +9,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/crx_file/id_util.h"
 #include "extensions/browser/extension_registry.h"
@@ -70,16 +69,9 @@ class AllUrlsApiTest : public ExtensionApiTest {
 };
 
 IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, WhitelistedExtension) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
-
   WhitelistExtensions();
 
-  auto bystander = LoadExtension(
+  auto* bystander = LoadExtension(
       test_data_dir_.AppendASCII("all_urls").AppendASCII("bystander"));
   ASSERT_TRUE(bystander);
 
@@ -96,7 +88,7 @@ IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, WhitelistedExtension) {
     embedded_test_server()->GetURL(kAllUrlsTarget).spec(),
     bystander->GetResourceURL("page.html").spec()
   };
-  for (auto test_url : test_urls)
+  for (const auto& test_url : test_urls)
     NavigateAndWait(test_url);
 }
 

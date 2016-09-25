@@ -13,9 +13,10 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/policy/proto/install_attributes.pb.h"
 #include "chromeos/cryptohome/cryptohome_util.h"
@@ -78,11 +79,15 @@ EnterpriseInstallAttributes::EnterpriseInstallAttributes(
 EnterpriseInstallAttributes::~EnterpriseInstallAttributes() {}
 
 void EnterpriseInstallAttributes::Init(const base::FilePath& cache_file) {
-  DCHECK_EQ(false, device_locked_);
+  DCHECK(!device_locked_);
 
-  // The actual check happens asynchronously, thus it is ok to trigger it before
-  // Init() has completed.
-  TriggerConsistencyCheck(kDbusRetryCount * kDbusRetryIntervalInSeconds);
+  // Mark the consistency check as running to ensure that LockDevice() is
+  // blocked, but wait for the cryptohome service to be available before
+  // actually calling TriggerConsistencyCheck().
+  consistency_check_running_ = true;
+  cryptohome_client_->WaitForServiceToBeAvailable(base::Bind(
+      &EnterpriseInstallAttributes::OnCryptohomeServiceInitiallyAvailable,
+      weak_ptr_factory_.GetWeakPtr()));
 
   if (!base::PathExists(cache_file))
     return;
@@ -98,7 +103,7 @@ void EnterpriseInstallAttributes::Init(const base::FilePath& cache_file) {
 
   cryptohome::SerializedInstallAttributes install_attrs_proto;
   if (!install_attrs_proto.ParseFromArray(buf, len)) {
-    LOG(ERROR) << "Failed to parse install attributes cache";
+    LOG(ERROR) << "Failed to parse install attributes cache.";
     return;
   }
 
@@ -336,13 +341,6 @@ bool EnterpriseInstallAttributes::IsConsumerKioskDeviceWithAutoLaunch() {
          registration_mode_ == DEVICE_MODE_CONSUMER_KIOSK_AUTOLAUNCH;
 }
 
-std::string EnterpriseInstallAttributes::GetRegistrationUser() {
-  if (!device_locked_)
-    return std::string();
-
-  return registration_user_;
-}
-
 std::string EnterpriseInstallAttributes::GetDomain() const {
   if (!IsEnterpriseDevice())
     return std::string();
@@ -362,7 +360,6 @@ DeviceMode EnterpriseInstallAttributes::GetMode() {
 }
 
 void EnterpriseInstallAttributes::TriggerConsistencyCheck(int dbus_retries) {
-  consistency_check_running_ = true;
   cryptohome_client_->TpmIsOwned(
       base::Bind(&EnterpriseInstallAttributes::OnTpmOwnerCheckCompleted,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -375,11 +372,10 @@ void EnterpriseInstallAttributes::OnTpmOwnerCheckCompleted(
     bool result) {
   if (call_status != chromeos::DBUS_METHOD_CALL_SUCCESS &&
       dbus_retries_remaining) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&EnterpriseInstallAttributes::TriggerConsistencyCheck,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   dbus_retries_remaining - 1),
+                   weak_ptr_factory_.GetWeakPtr(), dbus_retries_remaining - 1),
         base::TimeDelta::FromSeconds(kDbusRetryIntervalInSeconds));
     return;
   }
@@ -424,6 +420,16 @@ const char EnterpriseInstallAttributes::kAttrEnterpriseUser[] =
     "enterprise.user";
 const char EnterpriseInstallAttributes::kAttrConsumerKioskEnabled[] =
     "consumer.app_kiosk_enabled";
+
+void EnterpriseInstallAttributes::OnCryptohomeServiceInitiallyAvailable(
+    bool service_is_ready) {
+  if (!service_is_ready)
+    LOG(ERROR) << "Failed waiting for cryptohome D-Bus service availability.";
+
+  // Start the consistency check even if we failed to wait for availability;
+  // hopefully the service will become available eventually.
+  TriggerConsistencyCheck(kDbusRetryCount);
+}
 
 std::string EnterpriseInstallAttributes::GetDeviceModeString(DeviceMode mode) {
   switch (mode) {
@@ -495,6 +501,13 @@ void EnterpriseInstallAttributes::DecodeInstallAttributes(
     // |registration_user_| is empty on consumer devices.
     registration_mode_ = DEVICE_MODE_CONSUMER;
   }
+}
+
+std::string EnterpriseInstallAttributes::GetRegistrationUser() const {
+  if (!device_locked_)
+    return std::string();
+
+  return registration_user_;
 }
 
 }  // namespace policy

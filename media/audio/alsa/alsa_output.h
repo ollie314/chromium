@@ -24,20 +24,19 @@
 #include <alsa/asoundlib.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/non_thread_safe.h"
 #include "base/time/time.h"
 #include "media/audio/audio_io.h"
-#include "media/audio/audio_parameters.h"
-
-namespace base {
-class MessageLoop;
-}
+#include "media/base/audio_parameters.h"
 
 namespace media {
 
@@ -46,7 +45,8 @@ class AudioManagerBase;
 class ChannelMixer;
 class SeekableBuffer;
 
-class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
+class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream,
+                                         public base::NonThreadSafe {
  public:
   // String for the generic "default" ALSA device that has the highest
   // compatibility and chance of working.
@@ -66,7 +66,7 @@ class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
   // |device_name|.  The AlsaPcmOutputStream uses |wrapper| to communicate with
   // the alsa libraries, allowing for dependency injection during testing.  All
   // requesting of data, and writing to the alsa device will be done on
-  // |message_loop|.
+  // the current thread.
   //
   // If unsure of what to use for |device_name|, use |kAutoSelectDevice|.
   AlsaPcmOutputStream(const std::string& device_name,
@@ -144,10 +144,6 @@ class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
   InternalState TransitionTo(InternalState to);
   InternalState state();
 
-  // Returns true when we're on the audio thread or if the audio thread's
-  // message loop is NULL (which will happen during shutdown).
-  bool IsOnAudioThread() const;
-
   // API for Proxying calls to the AudioSourceCallback provided during
   // Start().
   //
@@ -191,16 +187,13 @@ class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
   // Audio manager that created us.  Used to report that we've been closed.
   AudioManagerBase* manager_;
 
-  // Message loop to use for polling. The object is owned by the AudioManager.
-  // We hold a reference to the audio thread message loop since
-  // AudioManagerBase::ShutDown() can invalidate the message loop pointer
-  // before the stream gets deleted.
-  base::MessageLoop* message_loop_;
+  // Task runner to use for polling.
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   // Handle to the actual PCM playback device.
   snd_pcm_t* playback_handle_;
 
-  scoped_ptr<media::SeekableBuffer> buffer_;
+  std::unique_ptr<media::SeekableBuffer> buffer_;
   uint32_t frames_per_packet_;
 
   InternalState state_;
@@ -209,11 +202,11 @@ class MEDIA_EXPORT AlsaPcmOutputStream : public AudioOutputStream {
   AudioSourceCallback* source_callback_;
 
   // Container for retrieving data from AudioSourceCallback::OnMoreData().
-  scoped_ptr<AudioBus> audio_bus_;
+  std::unique_ptr<AudioBus> audio_bus_;
 
   // Channel mixer and temporary bus for the final mixed channel data.
-  scoped_ptr<ChannelMixer> channel_mixer_;
-  scoped_ptr<AudioBus> mixed_audio_bus_;
+  std::unique_ptr<ChannelMixer> channel_mixer_;
+  std::unique_ptr<AudioBus> mixed_audio_bus_;
 
   // Allows us to run tasks on the AlsaPcmOutputStream instance which are
   // bound by its lifetime.

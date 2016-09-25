@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "components/exo/surface_observer.h"
+#include "components/exo/wm_helper.h"
 #include "ui/aura/client/focus_change_observer.h"
 #include "ui/events/event_handler.h"
 
@@ -25,7 +26,7 @@ class Surface;
 // This class implements a client keyboard that represents one or more keyboard
 // devices.
 class Keyboard : public ui::EventHandler,
-                 public aura::client::FocusChangeObserver,
+                 public WMHelper::FocusObserver,
                  public SurfaceObserver {
  public:
   explicit Keyboard(KeyboardDelegate* delegate);
@@ -34,7 +35,7 @@ class Keyboard : public ui::EventHandler,
   // Overridden from ui::EventHandler:
   void OnKeyEvent(ui::KeyEvent* event) override;
 
-  // Overridden aura::client::FocusChangeObserver:
+  // Overridden WMHelper::FocusObserver:
   void OnWindowFocused(aura::Window* gained_focus,
                        aura::Window* lost_focus) override;
 
@@ -46,16 +47,16 @@ class Keyboard : public ui::EventHandler,
   Surface* GetEffectiveFocus(aura::Window* window) const;
 
   // The delegate instance that all events are dispatched to.
-  KeyboardDelegate* delegate_;
+  KeyboardDelegate* const delegate_;
 
   // The current focus surface for the keyboard.
-  Surface* focus_;
+  Surface* focus_ = nullptr;
 
   // Vector of currently pressed keys.
   std::vector<ui::DomCode> pressed_keys_;
 
   // Current set of modifier flags.
-  int modifier_flags_;
+  int modifier_flags_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(Keyboard);
 };

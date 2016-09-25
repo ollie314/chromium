@@ -9,23 +9,23 @@ import android.content.Context;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.os.Build;
+import android.view.Display;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.WindowManager;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
-import org.chromium.chrome.browser.compositor.layouts.Layout.SizingFlags;
 import org.chromium.chrome.browser.compositor.layouts.LayoutProvider;
 import org.chromium.chrome.browser.compositor.layouts.LayoutRenderHost;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
@@ -33,9 +33,7 @@ import org.chromium.chrome.browser.compositor.layouts.content.ContentOffsetProvi
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.compositor.resources.StaticResourcePreloads;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneLayer;
-import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.externalnav.IntentWithGesturesHandler;
-import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.tabmodel.TabModelImpl;
 import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.DrawingInfo;
@@ -51,6 +49,7 @@ import org.chromium.ui.resources.ResourceManager;
 public class CompositorView
         extends SurfaceView implements ContentOffsetProvider, SurfaceHolder.Callback {
     private static final String TAG = "CompositorView";
+    private static final long NANOSECONDS_PER_MILLISECOND = 1000000;
 
     // Cache objects that should not be created every frame
     private final Rect mCacheViewport = new Rect();
@@ -64,6 +63,9 @@ public class CompositorView
     private int mPreviousWindowTop = -1;
 
     private int mLastLayerCount;
+
+    // A conservative estimate of when a frame is guaranteed to be presented after being submitted.
+    private long mFramePresentationDelay;
 
     // Resource Management
     private ResourceManager mResourceManager;
@@ -181,7 +183,6 @@ public class CompositorView
         mTabContentManager = tabContentManager;
 
         mNativeCompositorView = nativeInit(lowMemDevice,
-                ApiCompatibilityUtils.getColor(getResources(), R.color.tab_switcher_background),
                 windowAndroid.getNativePointer(), layerTitleCache, tabContentManager);
 
         assert !getHolder().getSurface().isValid()
@@ -191,6 +192,18 @@ public class CompositorView
         // Cover the black surface before it has valid content.
         setBackgroundColor(Color.WHITE);
         setVisibility(View.VISIBLE);
+
+        mFramePresentationDelay = 0;
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
+            Display display =
+                    ((WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE))
+                    .getDefaultDisplay();
+            long presentationDeadline = display.getPresentationDeadlineNanos()
+                    / NANOSECONDS_PER_MILLISECOND;
+            long vsyncPeriod = mWindowAndroid.getVsyncPeriodInMillis();
+            mFramePresentationDelay = Math.min(3 * vsyncPeriod,
+                    ((presentationDeadline + vsyncPeriod - 1) / vsyncPeriod) * vsyncPeriod);
+        }
 
         // Grab the Resource Manager
         mResourceManager = nativeGetResourceManager(mNativeCompositorView);
@@ -294,67 +307,15 @@ public class CompositorView
     private void onSwapBuffersCompleted(int pendingSwapBuffersCount) {
         // Clear the color used to cover the uninitialized surface.
         if (getBackground() != null) {
-            post(new Runnable() {
+            postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     setBackgroundResource(0);
                 }
-            });
+            }, mFramePresentationDelay);
         }
 
         mRenderHost.onSwapBuffersCompleted(pendingSwapBuffersCount);
-    }
-
-    private void updateToolbarLayer(LayoutProvider provider, boolean forRotation,
-            final DrawingInfo progressBarDrawingInfo) {
-        if (forRotation || !DeviceClassManager.enableFullscreen()) return;
-
-        ChromeFullscreenManager fullscreenManager = provider.getFullscreenManager();
-        if (fullscreenManager == null) return;
-
-        float offset = fullscreenManager.getControlOffset();
-        boolean forceHideTopControlsAndroidView =
-                provider.getActiveLayout().forceHideTopControlsAndroidView();
-        boolean useTexture = fullscreenManager.drawControlsAsTexture() || offset == 0
-                || forceHideTopControlsAndroidView;
-
-        float dpToPx = getContext().getResources().getDisplayMetrics().density;
-        float layoutOffsetDp = provider.getActiveLayout().getTopControlsOffset(offset / dpToPx);
-        boolean validLayoutOffset = !Float.isNaN(layoutOffsetDp);
-
-        if (validLayoutOffset) {
-            offset = layoutOffsetDp * dpToPx;
-            useTexture = true;
-        }
-
-        fullscreenManager.setHideTopControlsAndroidView(forceHideTopControlsAndroidView
-                || (validLayoutOffset && layoutOffsetDp != 0.f));
-
-        int flags = provider.getActiveLayout().getSizingFlags();
-        if ((flags & SizingFlags.REQUIRE_FULLSCREEN_SIZE) != 0
-                && (flags & SizingFlags.ALLOW_TOOLBAR_HIDE) == 0
-                && (flags & SizingFlags.ALLOW_TOOLBAR_ANIMATE) == 0) {
-            useTexture = false;
-        }
-
-        nativeUpdateToolbarLayer(mNativeCompositorView, R.id.control_container,
-                mRenderHost.getTopControlsBackgroundColor(), R.drawable.textbox,
-                mRenderHost.getTopControlsUrlBarAlpha(), offset,
-                provider.getActiveLayout().getToolbarBrightness(),
-                useTexture, forceHideTopControlsAndroidView);
-
-        if (progressBarDrawingInfo == null) return;
-        nativeUpdateProgressBar(mNativeCompositorView,
-                progressBarDrawingInfo.progressBarRect.left,
-                progressBarDrawingInfo.progressBarRect.top,
-                progressBarDrawingInfo.progressBarRect.width(),
-                progressBarDrawingInfo.progressBarRect.height(),
-                progressBarDrawingInfo.progressBarColor,
-                progressBarDrawingInfo.progressBarBackgroundRect.left,
-                progressBarDrawingInfo.progressBarBackgroundRect.top,
-                progressBarDrawingInfo.progressBarBackgroundRect.width(),
-                progressBarDrawingInfo.progressBarBackgroundRect.height(),
-                progressBarDrawingInfo.progressBarBackgroundColor);
     }
 
     /**
@@ -394,9 +355,6 @@ public class CompositorView
                 mCacheViewport.width(), mCacheViewport.height(), mCacheVisibleViewport.left,
                 mCacheVisibleViewport.top, 1.0f);
 
-        // TODO(changwan): move to treeprovider.
-        updateToolbarLayer(provider, forRotation, progressBarDrawingInfo);
-
         SceneLayer sceneLayer =
                 provider.getUpdatedActiveSceneLayer(mCacheViewport, mCacheVisibleViewport,
                         mLayerTitleCache, mTabContentManager, mResourceManager,
@@ -428,7 +386,7 @@ public class CompositorView
     }
 
     // Implemented in native
-    private native long nativeInit(boolean lowMemDevice, int emptyColor, long nativeWindowAndroid,
+    private native long nativeInit(boolean lowMemDevice, long nativeWindowAndroid,
             LayerTitleCache layerTitleCache, TabContentManager tabContentManager);
     private native void nativeDestroy(long nativeCompositorView);
     private native ResourceManager nativeGetResourceManager(long nativeCompositorView);
@@ -441,21 +399,6 @@ public class CompositorView
     private native void nativeSetLayoutViewport(long nativeCompositorView, float x, float y,
             float width, float height, float visibleXOffset, float visibleYOffset,
             float dpToPixel);
-    private native void nativeUpdateToolbarLayer(long nativeCompositorView, int resourceId,
-            int toolbarBackgroundColor, int urlBarResourceId, float urlBarAlpha, float topOffset,
-            float brightness, boolean visible, boolean showShadow);
-    private native void nativeUpdateProgressBar(
-            long nativeCompositorView,
-            int progressBarX,
-            int progressBarY,
-            int progressBarWidth,
-            int progressBarHeight,
-            int progressBarColor,
-            int progressBarBackgroundX,
-            int progressBarBackgroundY,
-            int progressBarBackgroundWidth,
-            int progressBarBackgroundHeight,
-            int progressBarBackgroundColor);
     private native void nativeSetOverlayVideoMode(long nativeCompositorView, boolean enabled);
     private native void nativeSetSceneLayer(long nativeCompositorView, SceneLayer sceneLayer);
 }

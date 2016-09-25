@@ -4,11 +4,15 @@
 
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 
+#include "ash/common/focus_cycler.h"
+#include "ash/common/system/status_area_widget_delegate.h"
+#include "ash/common/system/tray/system_tray.h"
+#include "ash/common/wm_shell.h"
 #include "ash/shell.h"
-#include "ash/system/tray/system_tray.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/i18n/rtl.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
@@ -19,18 +23,22 @@
 #include "chrome/browser/chromeos/login/ui/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_display.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
-#include "chrome/browser/media/media_capture_devices_dispatcher.h"
-#include "chrome/browser/media/media_stream_devices_controller.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
+#include "chrome/browser/media/webrtc/media_stream_devices_controller.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
+#include "chromeos/settings/cros_settings_names.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -46,6 +54,8 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/controls/webview/webview.h"
+#include "ui/views/focus/focus_manager.h"
+#include "ui/views/focus/focus_search.h"
 #include "ui/views/widget/widget.h"
 
 using content::NativeWebKeyboardEvent;
@@ -63,8 +73,6 @@ const char kAccelNameEnrollment[] = "enrollment";
 const char kAccelNameKioskEnable[] = "kiosk_enable";
 const char kAccelNameVersion[] = "version";
 const char kAccelNameReset[] = "reset";
-const char kAccelFocusPrev[] = "focus_prev";
-const char kAccelFocusNext[] = "focus_next";
 const char kAccelNameDeviceRequisition[] = "device_requisition";
 const char kAccelNameDeviceRequisitionRemora[] = "device_requisition_remora";
 const char kAccelNameDeviceRequisitionShark[] = "device_requisition_shark";
@@ -91,6 +99,15 @@ class ScopedArrowKeyTraversal {
   DISALLOW_COPY_AND_ASSIGN(ScopedArrowKeyTraversal);
 };
 
+// A helper method returns status area widget delegate if exists,
+// otherwise nullptr.
+ash::StatusAreaWidgetDelegate* GetStatusAreaWidgetDelegate() {
+  ash::SystemTray* tray = ash::Shell::GetInstance()->GetPrimarySystemTray();
+  return tray ? static_cast<ash::StatusAreaWidgetDelegate*>(
+                    tray->GetWidget()->GetContentsView())
+              : nullptr;
+}
+
 }  // namespace
 
 namespace chromeos {
@@ -98,6 +115,59 @@ namespace chromeos {
 // static
 const char WebUILoginView::kViewClassName[] =
     "browser/chromeos/login/WebUILoginView";
+
+// WebUILoginView::CycleFocusTraversable ---------------------------------------
+class WebUILoginView::CycleFocusTraversable : public views::FocusTraversable {
+ public:
+  explicit CycleFocusTraversable(WebUILoginView* webui_login_view)
+      : cycle_focus_search_(webui_login_view, true, false) {}
+  ~CycleFocusTraversable() override {}
+
+  // views::FocusTraversable
+  views::FocusSearch* GetFocusSearch() override { return &cycle_focus_search_; }
+
+  views::FocusTraversable* GetFocusTraversableParent() override {
+    return nullptr;
+  }
+
+  views::View* GetFocusTraversableParentView() override { return nullptr; }
+
+ private:
+  views::FocusSearch cycle_focus_search_;
+
+  DISALLOW_COPY_AND_ASSIGN(CycleFocusTraversable);
+};
+
+// WebUILoginView::StatusAreaFocusTraversable ----------------------------------
+class WebUILoginView::StatusAreaFocusTraversable
+    : public views::FocusTraversable {
+ public:
+  StatusAreaFocusTraversable(
+      ash::StatusAreaWidgetDelegate* status_area_widget_delegate,
+      WebUILoginView* webui_login_view)
+      : webui_login_view_(webui_login_view),
+        status_area_focus_search_(status_area_widget_delegate, false, false) {}
+  ~StatusAreaFocusTraversable() override {}
+
+  // views::FocusTraversable
+  views::FocusSearch* GetFocusSearch() override {
+    return &status_area_focus_search_;
+  }
+
+  views::FocusTraversable* GetFocusTraversableParent() override {
+    return webui_login_view_->cycle_focus_traversable_.get();
+  }
+
+  views::View* GetFocusTraversableParentView() override {
+    return webui_login_view_->status_area_widget_host_;
+  }
+
+ private:
+  WebUILoginView* const webui_login_view_;
+  views::FocusSearch status_area_focus_search_;
+
+  DISALLOW_COPY_AND_ASSIGN(StatusAreaFocusTraversable);
+};
 
 // WebUILoginView public: ------------------------------------------------------
 
@@ -134,11 +204,6 @@ WebUILoginView::WebUILoginView()
       ui::VKEY_B, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
       kAccelNameToggleEasyBootstrap;
 
-  accel_map_[ui::Accelerator(ui::VKEY_LEFT, ui::EF_NONE)] =
-      kAccelFocusPrev;
-  accel_map_[ui::Accelerator(ui::VKEY_RIGHT, ui::EF_NONE)] =
-      kAccelFocusNext;
-
   accel_map_[ui::Accelerator(
       ui::VKEY_D, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
       kAccelNameDeviceRequisition;
@@ -167,9 +232,17 @@ WebUILoginView::~WebUILoginView() {
                     observer_list_,
                     OnHostDestroying());
 
-  if (ash::Shell::GetInstance()->HasPrimaryStatusArea()) {
-    ash::Shell::GetInstance()->GetPrimarySystemTray()->
-        SetNextFocusableView(NULL);
+  if (!chrome::IsRunningInMash() &&
+      ash::Shell::GetInstance()->HasPrimaryStatusArea()) {
+    views::Widget* tray_widget =
+        ash::Shell::GetInstance()->GetPrimarySystemTray()->GetWidget();
+    ash::StatusAreaWidgetDelegate* status_area_widget_delegate =
+        static_cast<ash::StatusAreaWidgetDelegate*>(
+            tray_widget->GetContentsView());
+    status_area_widget_delegate->set_custom_focus_traversable(nullptr);
+    status_area_widget_delegate->set_default_last_focusable_child(false);
+  } else {
+    NOTIMPLEMENTED();
   }
 }
 
@@ -203,6 +276,9 @@ void WebUILoginView::Init() {
   content::RendererPreferences* prefs = web_contents->GetMutableRendererPrefs();
   renderer_preferences_util::UpdateFromSystemSettings(
       prefs, signin_profile, web_contents);
+
+  status_area_widget_host_ = new views::View;
+  AddChildView(status_area_widget_host_);
 }
 
 const char* WebUILoginView::GetClassName() const {
@@ -256,8 +332,8 @@ bool WebUILoginView::AcceleratorPressed(
   content::WebUI* web_ui = GetWebUI();
   if (web_ui) {
     base::StringValue accel_name(entry->second);
-    web_ui->CallJavascriptFunction("cr.ui.Oobe.handleAccelerator",
-                                   accel_name);
+    web_ui->CallJavascriptFunctionUnsafe("cr.ui.Oobe.handleAccelerator",
+                                         accel_name);
   }
 
   return true;
@@ -278,6 +354,19 @@ void WebUILoginView::LoadURL(const GURL & url) {
       ->GetWidget()
       ->GetView()
       ->SetBackgroundColor(SK_ColorTRANSPARENT);
+
+  // There is no Shell instance while running in mash.
+  if (chrome::IsRunningInMash())
+    return;
+
+  ash::StatusAreaWidgetDelegate* status_area_widget_delegate =
+      GetStatusAreaWidgetDelegate();
+  DCHECK(status_area_widget_delegate);
+  cycle_focus_traversable_.reset(new CycleFocusTraversable(this));
+  status_area_focus_traversable_.reset(
+      new StatusAreaFocusTraversable(status_area_widget_delegate, this));
+  status_area_widget_delegate->set_custom_focus_traversable(
+      status_area_focus_traversable_.get());
 }
 
 content::WebUI* WebUILoginView::GetWebUI() {
@@ -307,20 +396,27 @@ void WebUILoginView::OnPostponedShow() {
 }
 
 void WebUILoginView::SetStatusAreaVisible(bool visible) {
-  if (ash::Shell::GetInstance()->HasPrimaryStatusArea()) {
+  if (!chrome::IsRunningInMash() &&
+      ash::Shell::GetInstance()->HasPrimaryStatusArea()) {
     ash::SystemTray* tray = ash::Shell::GetInstance()->GetPrimarySystemTray();
     tray->SetVisible(visible);
+    tray->GetWidget()->SetOpacity(visible ? 1.0 : 0.0);
     if (visible) {
-      // Tray may have been initialized being hidden.
       tray->GetWidget()->Show();
     } else {
       tray->GetWidget()->Hide();
     }
+  } else {
+    NOTIMPLEMENTED();
   }
 }
 
 void WebUILoginView::SetUIEnabled(bool enabled) {
   forward_keyboard_event_ = enabled;
+  if (chrome::IsRunningInMash()) {
+    NOTIMPLEMENTED();
+    return;
+  }
   ash::SystemTray* tray = ash::Shell::GetInstance()->GetPrimarySystemTray();
 
   // We disable the UI to prevent user from interracting with UI elements,
@@ -406,7 +502,7 @@ void WebUILoginView::HandleKeyboardEvent(content::WebContents* source,
   if (event.type == blink::WebInputEvent::KeyDown) {
     content::WebUI* web_ui = GetWebUI();
     if (web_ui)
-      web_ui->CallJavascriptFunction("cr.ui.Oobe.clearErrors");
+      web_ui->CallJavascriptFunctionUnsafe("cr.ui.Oobe.clearErrors");
   }
 }
 
@@ -420,11 +516,18 @@ bool WebUILoginView::TakeFocus(content::WebContents* source, bool reverse) {
   if (!forward_keyboard_event_)
     return false;
 
-  ash::SystemTray* tray = ash::Shell::GetInstance()->GetPrimarySystemTray();
-  if (tray && tray->GetWidget()->IsVisible()) {
-    tray->SetNextFocusableView(this);
-    ash::Shell::GetInstance()->RotateFocus(reverse ? ash::Shell::BACKWARD :
-                                                    ash::Shell::FORWARD);
+  // Focus is accepted, but the Ash system tray is not available in Mash, so
+  // exit early.
+  if (chrome::IsRunningInMash())
+    return true;
+
+  ash::StatusAreaWidgetDelegate* status_area_widget_delegate =
+      GetStatusAreaWidgetDelegate();
+  if (status_area_widget_delegate &&
+      status_area_widget_delegate->GetWidget()->IsVisible()) {
+    status_area_widget_delegate->set_default_last_focusable_child(reverse);
+    ash::WmShell::Get()->focus_cycler()->RotateFocus(
+        reverse ? ash::FocusCycler::BACKWARD : ash::FocusCycler::FORWARD);
   }
 
   return true;
@@ -435,8 +538,45 @@ void WebUILoginView::RequestMediaAccessPermission(
     const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback) {
   MediaStreamDevicesController controller(web_contents, request, callback);
-  if (controller.IsAskingForVideo() || controller.IsAskingForAudio())
-    NOTREACHED() << "Media stream not allowed for WebUI";
+  if (!controller.IsAskingForAudio() && !controller.IsAskingForVideo())
+    return;
+
+  if (controller.IsAskingForAudio()) {
+    controller.PermissionDenied();
+    return;
+  }
+
+  const CrosSettings* const settings = CrosSettings::Get();
+  if (!settings) {
+    controller.PermissionDenied();
+    return;
+  }
+
+  const base::Value* const raw_list_value =
+      settings->GetPref(kLoginVideoCaptureAllowedUrls);
+  if (!raw_list_value) {
+    controller.PermissionDenied();
+    return;
+  }
+
+  const base::ListValue* list_value;
+  CHECK(raw_list_value->GetAsList(&list_value));
+  for (const auto& base_value : *list_value) {
+    std::string value;
+    if (base_value->GetAsString(&value)) {
+      ContentSettingsPattern pattern =
+          ContentSettingsPattern::FromString(value);
+      if (pattern == ContentSettingsPattern::Wildcard()) {
+        LOG(WARNING) << "Ignoring wildcard URL pattern: " << value;
+        continue;
+      }
+      if (pattern.IsValid() && pattern.Matches(request.security_origin)) {
+        controller.PermissionGranted();
+        return;
+      }
+    }
+  }
+  controller.PermissionDenied();
 }
 
 bool WebUILoginView::CheckMediaAccessPermission(
@@ -454,36 +594,6 @@ bool WebUILoginView::PreHandleGestureEvent(
   return event.type == blink::WebGestureEvent::GesturePinchBegin ||
       event.type == blink::WebGestureEvent::GesturePinchUpdate ||
       event.type == blink::WebGestureEvent::GesturePinchEnd;
-}
-
-void WebUILoginView::LoadProgressChanged(content::WebContents* source,
-                                         double progress) {
-  // TODO(jdufault): Remove once crbug.com/452599 is resolved.
-  VLOG(1) << "WebUILoginView loading progress updated to " << progress;
-}
-
-void WebUILoginView::SwappedOut(content::WebContents* source) {
-  VLOG(1) << "WebUILoginView got swapped out";
-}
-
-void WebUILoginView::BeforeUnloadFired(content::WebContents* tab,
-                                       bool proceed,
-                                       bool* proceed_to_fire_unload) {
-  VLOG(1) << "WebUILoginView is unloading";
-  *proceed_to_fire_unload = true;
-}
-
-void WebUILoginView::RendererUnresponsive(content::WebContents* source) {
-  VLOG(1) << "WebUILoginView renderer became unresponsive";
-}
-
-void WebUILoginView::RendererResponsive(content::WebContents* source) {
-  VLOG(1) << "WebUILoginView renderer became responsive";
-}
-
-void WebUILoginView::DidNavigateMainFramePostCommit(
-    content::WebContents* source) {
-  VLOG(1) << "WebUILoginView navigated";
 }
 
 void WebUILoginView::OnLoginPromptVisible() {

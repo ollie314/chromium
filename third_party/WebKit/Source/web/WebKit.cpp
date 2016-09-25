@@ -36,18 +36,20 @@
 #include "bindings/core/v8/V8Initializer.h"
 #include "core/animation/AnimationClock.h"
 #include "core/page/Page.h"
+#include "core/workers/WorkerBackingThread.h"
 #include "gin/public/v8_platform.h"
 #include "modules/ModulesInitializer.h"
 #include "platform/LayoutTestSupport.h"
-#include "platform/Logging.h"
 #include "platform/heap/Heap.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
 #include "wtf/Assertions.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/WTF.h"
 #include "wtf/allocator/Partitions.h"
 #include "wtf/text/AtomicString.h"
 #include "wtf/text/TextEncoding.h"
+#include <memory>
 #include <v8.h>
 
 namespace blink {
@@ -73,7 +75,7 @@ static WebThread::TaskObserver* s_endOfTaskRunner = nullptr;
 
 static ModulesInitializer& modulesInitializer()
 {
-    DEFINE_STATIC_LOCAL(OwnPtr<ModulesInitializer>, initializer, (adoptPtr(new ModulesInitializer)));
+    DEFINE_STATIC_LOCAL(std::unique_ptr<ModulesInitializer>, initializer, (wrapUnique(new ModulesInitializer)));
     return *initializer;
 }
 
@@ -81,9 +83,9 @@ void initialize(Platform* platform)
 {
     Platform::initialize(platform);
 
-    modulesInitializer().initialize();
-
     V8Initializer::initializeMainThread();
+
+    modulesInitializer().initialize();
 
     // currentThread is null if we are running on a thread without a message loop.
     if (WebThread* currentThread = platform->currentThread()) {
@@ -98,17 +100,14 @@ void shutdown()
     ThreadState::current()->cleanupMainThread();
 
     // currentThread() is null if we are running on a thread without a message loop.
-    if (Platform::current()->currentThread()) {
-        // We don't need to (cannot) remove s_endOfTaskRunner from the current
-        // message loop, because the message loop is already destructed before
-        // the shutdown() is called.
-        delete s_endOfTaskRunner;
+    if (WebThread* currentThread = Platform::current()->currentThread()) {
+        currentThread->removeTaskObserver(s_endOfTaskRunner);
         s_endOfTaskRunner = nullptr;
     }
 
-    V8Initializer::shutdownMainThread();
-
     modulesInitializer().shutdown();
+
+    V8Initializer::shutdownMainThread();
 
     Platform::shutdown();
 }
@@ -156,15 +155,6 @@ bool alwaysUseComplexTextForTest()
     return LayoutTestSupport::alwaysUseComplexTextForTest();
 }
 
-void enableLogChannel(const char* name)
-{
-#if !LOG_DISABLED
-    WTFLogChannel* channel = getChannelFromName(name);
-    if (channel)
-        channel->state = WTFLogChannelOn;
-#endif // !LOG_DISABLED
-}
-
 void resetPluginCache(bool reloadPages)
 {
     DCHECK(!reloadPages);
@@ -174,6 +164,18 @@ void resetPluginCache(bool reloadPages)
 void decommitFreeableMemory()
 {
     WTF::Partitions::decommitFreeableMemory();
+}
+
+void MemoryPressureNotificationToWorkerThreadIsolates(
+    v8::MemoryPressureLevel level)
+{
+    WorkerBackingThread::
+        MemoryPressureNotificationToWorkerThreadIsolates(level);
+}
+
+void setRAILModeOnWorkerThreadIsolates(v8::RAILMode railMode)
+{
+    WorkerBackingThread::setRAILModeOnWorkerThreadIsolates(railMode);
 }
 
 } // namespace blink

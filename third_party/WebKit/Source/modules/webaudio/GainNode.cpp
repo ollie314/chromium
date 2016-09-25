@@ -25,6 +25,7 @@
 #include "modules/webaudio/GainNode.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/AudioNodeOutput.h"
+#include "modules/webaudio/GainOptions.h"
 #include "platform/audio/AudioBus.h"
 
 namespace blink {
@@ -53,7 +54,7 @@ void GainHandler::process(size_t framesToProcess)
     // Then we can avoid all of the following:
 
     AudioBus* outputBus = output(0).bus();
-    ASSERT(outputBus);
+    DCHECK(outputBus);
 
     if (!isInitialized() || !input(0).isConnected()) {
         outputBus->zero();
@@ -62,11 +63,16 @@ void GainHandler::process(size_t framesToProcess)
 
         if (m_gain->hasSampleAccurateValues()) {
             // Apply sample-accurate gain scaling for precise envelopes, grain windows, etc.
-            ASSERT(framesToProcess <= m_sampleAccurateGainValues.size());
+            DCHECK_LE(framesToProcess, m_sampleAccurateGainValues.size());
             if (framesToProcess <= m_sampleAccurateGainValues.size()) {
                 float* gainValues = m_sampleAccurateGainValues.data();
                 m_gain->calculateSampleAccurateValues(gainValues, framesToProcess);
                 outputBus->copyWithSampleAccurateGainValuesFrom(*inputBus, gainValues, framesToProcess);
+                // Update m_lastGain so if the timeline ever ends, we get
+                // consistent data for the smoothing below.  (Without this,
+                // m_lastGain was the last value before the timeline started
+                // procesing.
+                m_lastGain = gainValues[framesToProcess - 1];
             }
         } else {
             // Apply the gain with de-zippering into the output bus.
@@ -88,11 +94,11 @@ void GainHandler::process(size_t framesToProcess)
 // uninitialize and then re-initialize with the new channel count.
 void GainHandler::checkNumberOfChannelsForInput(AudioNodeInput* input)
 {
-    ASSERT(context()->isAudioThread());
+    DCHECK(context()->isAudioThread());
     ASSERT(context()->isGraphOwner());
 
-    ASSERT(input);
-    ASSERT(input == &this->input(0));
+    DCHECK(input);
+    DCHECK_EQ(input, &this->input(0));
     if (input != &this->input(0))
         return;
 
@@ -114,16 +120,38 @@ void GainHandler::checkNumberOfChannelsForInput(AudioNodeInput* input)
 
 // ----------------------------------------------------------------
 
-GainNode::GainNode(AbstractAudioContext& context, float sampleRate)
+GainNode::GainNode(BaseAudioContext& context)
     : AudioNode(context)
-    , m_gain(AudioParam::create(context, 1.0))
+    , m_gain(AudioParam::create(context, ParamTypeGainGain, 1.0))
 {
-    setHandler(GainHandler::create(*this, sampleRate, m_gain->handler()));
+    setHandler(GainHandler::create(*this, context.sampleRate(), m_gain->handler()));
 }
 
-GainNode* GainNode::create(AbstractAudioContext& context, float sampleRate)
+GainNode* GainNode::create(BaseAudioContext& context, ExceptionState& exceptionState)
 {
-    return new GainNode(context, sampleRate);
+    DCHECK(isMainThread());
+
+    if (context.isContextClosed()) {
+        context.throwExceptionForClosedState(exceptionState);
+        return nullptr;
+    }
+
+    return new GainNode(context);
+}
+
+GainNode* GainNode::create(BaseAudioContext* context, const GainOptions& options, ExceptionState& exceptionState)
+{
+    GainNode* node = create(*context, exceptionState);
+
+    if (!node)
+        return nullptr;
+
+    node->handleChannelOptions(options, exceptionState);
+
+    if (options.hasGain())
+        node->gain()->setValue(options.gain());
+
+    return node;
 }
 
 AudioParam* GainNode::gain() const

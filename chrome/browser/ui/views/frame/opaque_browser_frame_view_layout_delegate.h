@@ -31,15 +31,12 @@ class OpaqueBrowserFrameViewLayoutDelegate {
   // depend on the current state of the window (e.g., whether it is maximized).
   virtual bool ShouldShowCaptionButtons() const = 0;
 
-  // Controls the visualization of the avatar
-  virtual bool ShouldShowAvatar() const = 0;
-
   // Returns true if in guest mode or a non off the record session.
   virtual bool IsRegularOrGuestSession() const = 0;
 
   // We don't have a ThemeProvider in the layout manager, so plumb in the icon
   // source here.
-  virtual gfx::ImageSkia GetOTRAvatarIcon() const = 0;
+  virtual gfx::ImageSkia GetIncognitoAvatarIcon() const = 0;
 
   // Controls window state.
   virtual bool IsMaximized() const = 0;
@@ -53,11 +50,6 @@ class OpaqueBrowserFrameViewLayoutDelegate {
   // Returns the tabstrips preferred size so the frame layout can work around
   // it.
   virtual gfx::Size GetTabstripPreferredSize() const = 0;
-
-  // Returns the width of the portion of the toolbar's leading-edge rounded
-  // corner that is within the client area.  This is only necessary pre-Material
-  // Design.
-  virtual int GetToolbarLeadingCornerClientWidth() const = 0;
 
  protected:
   virtual ~OpaqueBrowserFrameViewLayoutDelegate() {}

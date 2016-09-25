@@ -18,11 +18,11 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/request_priority.h"
-#include "net/base/test_data_directory.h"
 #include "net/cert/x509_certificate.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/test/cert_test_util.h"
+#include "net/test/test_data_directory.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -43,10 +43,11 @@ using content::BrowserThread;
 class SSLClientCertificateSelectorTest : public InProcessBrowserTest {
  public:
   SSLClientCertificateSelectorTest()
-      : io_loop_finished_event_(false, false),
+      : io_loop_finished_event_(
+            base::WaitableEvent::ResetPolicy::AUTOMATIC,
+            base::WaitableEvent::InitialState::NOT_SIGNALED),
         url_request_(NULL),
-        selector_(NULL) {
-  }
+        selector_(NULL) {}
 
   void SetUpInProcessBrowserTestFixture() override {
     base::FilePath certs_dir = net::GetTestCertsDirectory();
@@ -80,7 +81,8 @@ class SSLClientCertificateSelectorTest : public InProcessBrowserTest {
 
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&SSLClientCertificateSelectorTest::SetUpOnIOThread, this));
+        base::Bind(&SSLClientCertificateSelectorTest::SetUpOnIOThread,
+                   base::Unretained(this)));
 
     io_loop_finished_event_.Wait();
 
@@ -110,7 +112,8 @@ class SSLClientCertificateSelectorTest : public InProcessBrowserTest {
   void TearDownOnMainThread() override {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        base::Bind(&SSLClientCertificateSelectorTest::CleanUpOnIOThread, this));
+        base::Bind(&SSLClientCertificateSelectorTest::CleanUpOnIOThread,
+                   base::Unretained(this)));
 
     io_loop_finished_event_.Wait();
 
@@ -291,15 +294,7 @@ class SSLClientCertificateSelectorMultiProfileTest
   SSLClientCertificateSelector* selector_1_;
 };
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
-// TODO(erg): linux_aura bringup: http://crbug.com/163931
-#define MAYBE_SelectNone DISABLED_SelectNone
-#else
-#define MAYBE_SelectNone SelectNone
-#endif
-
-
-IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorTest, MAYBE_SelectNone) {
+IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorTest, SelectNone) {
   EXPECT_CALL(*auth_requestor_.get(), CancelCertificateSelection());
 
   // Let the mock get checked on destruction.

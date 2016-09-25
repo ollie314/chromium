@@ -24,11 +24,12 @@
 #ifndef HTMLFrameElementBase_h
 #define HTMLFrameElementBase_h
 
+#include "core/CoreExport.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 
 namespace blink {
 
-class HTMLFrameElementBase : public HTMLFrameOwnerElement {
+class CORE_EXPORT HTMLFrameElementBase : public HTMLFrameOwnerElement {
 public:
     bool canContainRangeEndPoint() const final { return false; }
 
@@ -45,7 +46,7 @@ protected:
     void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
     InsertionNotificationRequest insertedInto(ContainerNode*) override;
     void didNotifySubtreeInsertionsToDocument() final;
-    void attach(const AttachContext& = AttachContext()) override;
+    void attachLayoutTree(const AttachContext& = AttachContext()) override;
 
     // FIXME: Remove this method once we have input routing in the browser
     // process. See http://crbug.com/339659.
@@ -54,6 +55,8 @@ protected:
     void setScrollingMode(ScrollbarMode);
     void setMarginWidth(int);
     void setMarginHeight(int);
+
+    void frameOwnerPropertiesChanged();
 
 private:
     bool supportsFocus() const final;
@@ -68,8 +71,6 @@ private:
     void setLocation(const String&);
     void setNameAndOpenURL();
     void openURL(bool replaceCurrentItem = true);
-
-    void frameOwnerPropertiesChanged();
 
     ScrollbarMode m_scrollingMode;
     int m_marginWidth;

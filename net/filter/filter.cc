@@ -31,6 +31,7 @@
 #include "net/filter/brotli_filter.h"
 #include "net/filter/gzip_filter.h"
 #include "net/filter/sdch_filter.h"
+#include "net/log/net_log_event_type.h"
 #include "net/url_request/url_request_context.h"
 #include "url/gurl.h"
 
@@ -58,7 +59,7 @@ void LogSdchProblem(const FilterContext& filter_context,
                     SdchProblemCode problem) {
   SdchManager::SdchErrorRecovery(problem);
   filter_context.GetNetLog().AddEvent(
-      NetLog::TYPE_SDCH_DECODING_ERROR,
+      NetLogEventType::SDCH_DECODING_ERROR,
       base::Bind(&NetLogSdchResourceProblemCallback, problem));
 }
 
@@ -92,39 +93,41 @@ FilterContext::~FilterContext() {
 Filter::~Filter() {}
 
 // static
-Filter* Filter::Factory(const std::vector<FilterType>& filter_types,
-                        const FilterContext& filter_context) {
+std::unique_ptr<Filter> Filter::Factory(
+    const std::vector<FilterType>& filter_types,
+    const FilterContext& filter_context) {
   if (filter_types.empty())
-    return NULL;
+    return nullptr;
 
-  Filter* filter_list = NULL;  // Linked list of filters.
+  std::unique_ptr<Filter> filter_list = nullptr;  // Linked list of filters.
   for (size_t i = 0; i < filter_types.size(); i++) {
     filter_list = PrependNewFilter(filter_types[i], filter_context,
-                                   kFilterBufSize, filter_list);
+                                   kFilterBufSize, std::move(filter_list));
     if (!filter_list)
-      return NULL;
+      return nullptr;
   }
   return filter_list;
 }
 
 // static
-Filter* Filter::GZipFactory() {
+std::unique_ptr<Filter> Filter::GZipFactory() {
   return InitGZipFilter(FILTER_TYPE_GZIP, kFilterBufSize);
 }
 
 // static
-Filter* Filter::FactoryForTests(const std::vector<FilterType>& filter_types,
-                                const FilterContext& filter_context,
-                                int buffer_size) {
+std::unique_ptr<Filter> Filter::FactoryForTests(
+    const std::vector<FilterType>& filter_types,
+    const FilterContext& filter_context,
+    int buffer_size) {
   if (filter_types.empty())
-    return NULL;
+    return nullptr;
 
-  Filter* filter_list = NULL;  // Linked list of filters.
+  std::unique_ptr<Filter> filter_list;  // Linked list of filters.
   for (size_t i = 0; i < filter_types.size(); i++) {
-    filter_list = PrependNewFilter(filter_types[i], filter_context,
-                                   buffer_size, filter_list);
+    filter_list = PrependNewFilter(filter_types[i], filter_context, buffer_size,
+                                   std::move(filter_list));
     if (!filter_list)
-      return NULL;
+      return nullptr;
   }
   return filter_list;
 }
@@ -138,19 +141,26 @@ Filter::FilterStatus Filter::ReadData(char* dest_buffer, int* dest_len) {
 
   // This filter needs more data, but it's not clear that the rest of
   // the chain does; delegate the actual status return to the next filter.
-  if (last_status_ == FILTER_NEED_MORE_DATA && !stream_data_len())
-    return next_filter_->ReadData(dest_buffer, dest_len);
+  if (last_status_ == FILTER_NEED_MORE_DATA && !stream_data_len()) {
+    last_status_ = next_filter_->ReadData(dest_buffer, dest_len);
+    return last_status_;
+  }
 
   do {
     if (next_filter_->last_status() == FILTER_NEED_MORE_DATA) {
       PushDataIntoNextFilter();
-      if (FILTER_ERROR == last_status_)
+      if (FILTER_ERROR == last_status_) {
+        *dest_len = 0;
         return FILTER_ERROR;
+      }
     }
     *dest_len = dest_buffer_capacity;  // Reset the input/output parameter.
+
     next_filter_->ReadData(dest_buffer, dest_len);
-    if (FILTER_NEED_MORE_DATA == last_status_)
-        return next_filter_->last_status();
+    if (FILTER_NEED_MORE_DATA == last_status_) {
+      last_status_ = next_filter_->last_status();
+      return last_status_;
+    }
 
     // In the case where this filter has data internally, and is indicating such
     // with a last_status_ of FILTER_OK, but at the same time the next filter in
@@ -165,8 +175,12 @@ Filter::FilterStatus Filter::ReadData(char* dest_buffer, int* dest_len) {
            FILTER_NEED_MORE_DATA == next_filter_->last_status() &&
            0 == *dest_len);
 
-  if (next_filter_->last_status() == FILTER_ERROR)
+  if (next_filter_->last_status() == FILTER_ERROR) {
+    last_status_ = FILTER_ERROR;
+    *dest_len = 0;
     return FILTER_ERROR;
+  }
+  last_status_ = FILTER_OK;
   return FILTER_OK;
 }
 
@@ -329,9 +343,9 @@ std::string Filter::OrderedFilterList() const {
 }
 
 Filter::Filter(FilterType type_id)
-    : stream_buffer_(NULL),
+    : stream_buffer_(nullptr),
       stream_buffer_size_(0),
-      next_stream_data_(NULL),
+      next_stream_data_(nullptr),
       stream_data_len_(0),
       last_status_(FILTER_NEED_MORE_DATA),
       type_id_(type_id) {}
@@ -349,7 +363,7 @@ Filter::FilterStatus Filter::CopyOut(char* dest_buffer, int* dest_len) {
   *dest_len += out_len;
   stream_data_len_ -= out_len;
   if (0 == stream_data_len_) {
-    next_stream_data_ = NULL;
+    next_stream_data_ = nullptr;
     return Filter::FILTER_NEED_MORE_DATA;
   } else {
     next_stream_data_ += out_len;
@@ -358,52 +372,55 @@ Filter::FilterStatus Filter::CopyOut(char* dest_buffer, int* dest_len) {
 }
 
 // static
-Filter* Filter::InitBrotliFilter(FilterType type_id, int buffer_size) {
+std::unique_ptr<Filter> Filter::InitBrotliFilter(FilterType type_id,
+                                                 int buffer_size) {
   std::unique_ptr<Filter> brotli_filter(CreateBrotliFilter(type_id));
   if (!brotli_filter.get())
     return nullptr;
 
   brotli_filter->InitBuffer(buffer_size);
-  return brotli_filter.release();
+  return brotli_filter;
 }
 
 // static
-Filter* Filter::InitGZipFilter(FilterType type_id, int buffer_size) {
+std::unique_ptr<Filter> Filter::InitGZipFilter(FilterType type_id,
+                                               int buffer_size) {
   std::unique_ptr<GZipFilter> gz_filter(new GZipFilter(type_id));
   gz_filter->InitBuffer(buffer_size);
-  return gz_filter->InitDecoding(type_id) ? gz_filter.release() : NULL;
+  return gz_filter->InitDecoding(type_id) ? std::move(gz_filter) : nullptr;
 }
 
 // static
-Filter* Filter::InitSdchFilter(FilterType type_id,
-                               const FilterContext& filter_context,
-                               int buffer_size) {
+std::unique_ptr<Filter> Filter::InitSdchFilter(
+    FilterType type_id,
+    const FilterContext& filter_context,
+    int buffer_size) {
   std::unique_ptr<SdchFilter> sdch_filter(
       new SdchFilter(type_id, filter_context));
   sdch_filter->InitBuffer(buffer_size);
-  return sdch_filter->InitDecoding(type_id) ? sdch_filter.release() : NULL;
+  return sdch_filter->InitDecoding(type_id) ? std::move(sdch_filter) : nullptr;
 }
 
 // static
-Filter* Filter::PrependNewFilter(FilterType type_id,
-                                 const FilterContext& filter_context,
-                                 int buffer_size,
-                                 Filter* filter_list) {
+std::unique_ptr<Filter> Filter::PrependNewFilter(
+    FilterType type_id,
+    const FilterContext& filter_context,
+    int buffer_size,
+    std::unique_ptr<Filter> filter_list) {
   std::unique_ptr<Filter> first_filter;  // Soon to be start of chain.
   switch (type_id) {
     case FILTER_TYPE_BROTLI:
-      first_filter.reset(InitBrotliFilter(type_id, buffer_size));
+      first_filter = InitBrotliFilter(type_id, buffer_size);
       break;
     case FILTER_TYPE_GZIP_HELPING_SDCH:
     case FILTER_TYPE_DEFLATE:
     case FILTER_TYPE_GZIP:
-      first_filter.reset(InitGZipFilter(type_id, buffer_size));
+      first_filter = InitGZipFilter(type_id, buffer_size);
       break;
     case FILTER_TYPE_SDCH:
     case FILTER_TYPE_SDCH_POSSIBLE:
       if (filter_context.GetURLRequestContext()->sdch_manager()) {
-        first_filter.reset(
-            InitSdchFilter(type_id, filter_context, buffer_size));
+        first_filter = InitSdchFilter(type_id, filter_context, buffer_size);
       }
       break;
     default:
@@ -411,10 +428,10 @@ Filter* Filter::PrependNewFilter(FilterType type_id,
   }
 
   if (!first_filter.get())
-    return NULL;
+    return nullptr;
 
-  first_filter->next_filter_.reset(filter_list);
-  return first_filter.release();
+  first_filter->next_filter_ = std::move(filter_list);
+  return first_filter;
 }
 
 void Filter::InitBuffer(int buffer_size) {

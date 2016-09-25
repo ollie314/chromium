@@ -34,6 +34,13 @@ gfx::NativeWindow AppListControllerDelegateImpl::GetAppListWindow() {
   return service_->GetAppListWindow();
 }
 
+bool AppListControllerDelegateImpl::IsAppOpen(
+    const std::string& extension_id) const {
+  // Not expected to call in non-ash environment.
+  NOTREACHED();
+  return false;
+}
+
 bool AppListControllerDelegateImpl::IsAppPinned(
     const std::string& extension_id) {
   return false;
@@ -108,7 +115,8 @@ void AppListControllerDelegateImpl::LaunchApp(
   AppListServiceImpl::RecordAppListAppLaunch();
 
   AppLaunchParams params = CreateAppLaunchParamsUserContainer(
-      profile, extension, NEW_FOREGROUND_TAB, extensions::SOURCE_APP_LAUNCHER);
+      profile, extension, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      extensions::SOURCE_APP_LAUNCHER);
 
   if (source != LAUNCH_FROM_UNKNOWN &&
       extension->id() == extensions::kWebStoreAppId) {

@@ -15,8 +15,6 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
-import org.chromium.content.browser.DownloadController;
-import org.chromium.content.browser.DownloadInfo;
 import org.chromium.content.browser.test.util.ApplicationUtils;
 import org.chromium.content.browser.test.util.CallbackHelper;
 
@@ -101,10 +99,6 @@ public abstract class DownloadTestBase extends ChromeActivityTestCaseBase<Chrome
         assertTrue(hasDownload(lastDownload, null));
     }
 
-    public EnqueueHttpGetDownloadCallbackHelper getHttpGetDownloadCallbackHelper() {
-        return mEnqueueHttpGetDownloadCallbackHelper;
-    }
-
     /**
      * Delete all download entries in DownloadManager and delete the corresponding files.
      */
@@ -158,21 +152,6 @@ public abstract class DownloadTestBase extends ChromeActivityTestCaseBase<Chrome
         }
     }
 
-    protected static class EnqueueHttpGetDownloadCallbackHelper extends CallbackHelper {
-        private DownloadInfo mDownloadInfo;
-
-        public void notifyCalled(DownloadInfo downloadInfo, boolean notifyCompleted) {
-            mDownloadInfo = downloadInfo;
-            super.notifyCalled();
-        }
-
-        public DownloadInfo getDownloadInfo() {
-            return mDownloadInfo;
-        }
-    }
-
-    private final EnqueueHttpGetDownloadCallbackHelper mEnqueueHttpGetDownloadCallbackHelper =
-            new EnqueueHttpGetDownloadCallbackHelper();
     private String mLastDownloadFilePath;
     private final CallbackHelper mHttpDownloadFinished = new CallbackHelper();
     private DownloadManagerService mSavedDownloadManagerService;
@@ -222,15 +201,6 @@ public abstract class DownloadTestBase extends ChromeActivityTestCaseBase<Chrome
             mLastDownloadFilePath = downloadInfo.getFilePath();
             mHttpDownloadFinished.notifyCalled();
         }
-
-        @Override
-        public void enqueueDownloadManagerRequest(
-                final DownloadItem item, boolean notifyCompleted) {
-            // Intentionally do not call super, since DownloadManager does not work in test
-            // environment.
-            mEnqueueHttpGetDownloadCallbackHelper.notifyCalled(
-                    item.getDownloadInfo(), notifyCompleted);
-        }
     }
 
     @Override
@@ -268,5 +238,15 @@ public abstract class DownloadTestBase extends ChromeActivityTestCaseBase<Chrome
             }
         });
         super.tearDown();
+    }
+
+    protected void deleteFilesInDownloadDirectory(String...filenames) {
+        for (String filename : filenames) {
+            final File fileToDelete = new File(DOWNLOAD_DIRECTORY, filename);
+            if (fileToDelete.exists()) {
+                assertTrue("Could not delete file that would block this test",
+                        fileToDelete.delete());
+            }
+        }
     }
 }

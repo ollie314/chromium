@@ -20,7 +20,7 @@ public:
 
     ~WebGLVertexArrayObjectBase() override;
 
-    Platform3DObject object() const { return m_object; }
+    GLuint object() const { return m_object; }
 
     bool isDefaultObject() const { return m_type == VaoTypeDefault; }
 
@@ -32,7 +32,12 @@ public:
 
     WebGLBuffer* getArrayBufferForAttrib(size_t);
     void setArrayBufferForAttrib(GLuint, WebGLBuffer*);
+    void setAttribEnabled(GLuint, bool);
+    bool getAttribEnabled(GLuint) const;
+    bool isAllEnabledAttribBufferBound() const { return m_isAllEnabledAttribBufferBound; }
     void unbindBuffer(WebGLBuffer*);
+
+    virtual void visitChildDOMWrappers(v8::Isolate*, const v8::Persistent<v8::Object>&);
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -44,13 +49,17 @@ private:
     bool hasObject() const override { return m_object != 0; }
     void deleteObjectImpl(gpu::gles2::GLES2Interface*) override;
 
-    Platform3DObject m_object;
+    void updateAttribBufferBoundStatus();
+
+    GLuint m_object;
 
     VaoType m_type;
     bool m_hasEverBeenBound;
     bool m_destructionInProgress;
     Member<WebGLBuffer> m_boundElementArrayBuffer;
     HeapVector<Member<WebGLBuffer>> m_arrayBufferList;
+    Vector<bool> m_attribEnabled;
+    bool m_isAllEnabledAttribBufferBound;
 };
 
 } // namespace blink

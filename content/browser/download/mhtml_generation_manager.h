@@ -1,7 +1,6 @@
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
 #ifndef CONTENT_BROWSER_DOWNLOAD_MHTML_GENERATION_MANAGER_H_
 #define CONTENT_BROWSER_DOWNLOAD_MHTML_GENERATION_MANAGER_H_
 
@@ -15,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/process/process.h"
+#include "content/public/common/mhtml_generation_params.h"
 #include "ipc/ipc_platform_file.h"
 
 namespace base {
@@ -28,6 +28,10 @@ class WebContents;
 
 // The class and all of its members live on the UI thread.  Only static methods
 // are executed on other threads.
+//
+// MHTMLGenerationManager is a singleton.  Each call to SaveMHTML method creates
+// a new instance of MHTMLGenerationManager::Job that tracks generation of a
+// single MHTML file.
 class MHTMLGenerationManager {
  public:
   static MHTMLGenerationManager* GetInstance();
@@ -37,10 +41,10 @@ class MHTMLGenerationManager {
   // generated file.  On failure |file_size| is -1.
   typedef base::Callback<void(int64_t file_size)> GenerateMHTMLCallback;
 
-  // Instructs the render view to generate a MHTML representation of the current
-  // page for |web_contents|.
+  // Instructs the RenderFrames in |web_contents| to generate a MHTML
+  // representation of the current page.
   void SaveMHTML(WebContents* web_contents,
-                 const base::FilePath& file_path,
+                 const MHTMLGenerationParams& params,
                  const GenerateMHTMLCallback& callback);
 
   // Handler for FrameHostMsg_SerializeAsMHTMLResponse (a notification from the
@@ -73,7 +77,9 @@ class MHTMLGenerationManager {
   void OnFileClosed(int job_id, JobStatus job_status, int64_t file_size);
 
   // Creates and registers a new job.
-  int NewJob(WebContents* web_contents, const GenerateMHTMLCallback& callback);
+  Job* NewJob(WebContents* web_contents,
+              const MHTMLGenerationParams& params,
+              const GenerateMHTMLCallback& callback);
 
   // Finds job by id.  Returns nullptr if no job with a given id was found.
   Job* FindJob(int job_id);

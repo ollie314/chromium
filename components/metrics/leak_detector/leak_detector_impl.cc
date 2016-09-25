@@ -10,6 +10,7 @@
 #include <algorithm>  // For std::move
 #include <iterator>  // For std::advance
 #include <new>
+#include <utility>
 
 #include "base/hash.h"
 #include "base/process/process_handle.h"
@@ -184,6 +185,8 @@ void LeakDetectorImpl::TestForLeaks(InternalVector<LeakReport>* reports) {
 
   RecordCurrentAllocationDataInHistory();
 
+  UpdateLeakCooldowns();
+
   // Get suspected leaks by size.
   for (const ValueType& size_value : size_leak_analyzer_.suspected_leaks()) {
     uint32_t size = size_value.size();
@@ -215,6 +218,9 @@ void LeakDetectorImpl::TestForLeaks(InternalVector<LeakReport>* reports) {
     for (const ValueType& call_stack_value : leak_analyzer.suspected_leaks()) {
       const CallStack* call_stack = call_stack_value.call_stack();
 
+      if (!ReadyToGenerateReport(size, call_stack))
+        continue;
+
       // Return reports by storing in |*reports|.
       reports->resize(reports->size() + 1);
       LeakReport* report = &reports->back();
@@ -225,6 +231,7 @@ void LeakDetectorImpl::TestForLeaks(InternalVector<LeakReport>* reports) {
       }
 
       StoreHistoricalDataInReport(size, call_stack, report);
+      ResetLeakCooldown(size, call_stack);
     }
   }
 }
@@ -243,7 +250,7 @@ uintptr_t LeakDetectorImpl::GetOffset(const void* ptr) const {
   uintptr_t ptr_value = reinterpret_cast<uintptr_t>(ptr);
   if (ptr_value >= mapping_addr_ && ptr_value < mapping_addr_ + mapping_size_)
     return ptr_value - mapping_addr_;
-  return ptr_value;
+  return UINTPTR_MAX;
 }
 
 void LeakDetectorImpl::RecordCurrentAllocationDataInHistory() {
@@ -309,6 +316,31 @@ void LeakDetectorImpl::StoreHistoricalDataInReport(size_t size,
       dest_iter->count_for_call_stack = find_call_site_iter->count;
     ++src_iter;
     ++dest_iter;
+  }
+}
+
+bool LeakDetectorImpl::ReadyToGenerateReport(
+    size_t size,
+    const CallStack* call_stack) const {
+  return cooldowns_per_leak_.find(std::make_pair(size, call_stack)) ==
+         cooldowns_per_leak_.end();
+}
+
+void LeakDetectorImpl::ResetLeakCooldown(size_t size,
+                                         const CallStack* call_stack) {
+  cooldowns_per_leak_[std::make_pair(size, call_stack)] =
+      kNumSizeEntriesInHistory;
+}
+
+void LeakDetectorImpl::UpdateLeakCooldowns() {
+  for (auto iter = cooldowns_per_leak_.begin();
+       iter != cooldowns_per_leak_.end();
+       /* No iterating here */) {
+    if (--iter->second > 0) {
+      ++iter;
+    } else {
+      cooldowns_per_leak_.erase(iter++);
+    }
   }
 }
 

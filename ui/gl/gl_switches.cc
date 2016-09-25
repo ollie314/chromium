@@ -5,7 +5,7 @@
 #include "base/macros.h"
 #include "ui/gl/gl_switches.h"
 
-namespace gfx {
+namespace gl {
 
 const char kGLImplementationDesktopName[]     = "desktop";
 const char kGLImplementationOSMesaName[]      = "osmesa";
@@ -21,17 +21,21 @@ const char kANGLEImplementationD3D11Name[]    = "d3d11";
 const char kANGLEImplementationOpenGLName[]   = "gl";
 const char kANGLEImplementationOpenGLESName[] = "gles";
 
-}  // namespace gfx
+}  // namespace gl
 
 namespace switches {
 
 // Disables use of D3D11.
 const char kDisableD3D11[]                  = "disable-d3d11";
 
+// Disables use of ES3 backend (use ES2 backend instead).
+const char kDisableES3GLContext[]           = "disable-es3-gl-context";
+
 // Stop the GPU from synchronizing on the vsync before presenting.
 // We can select from the options below:
-//  beginframe : Next frame can start without any delay on cc::scheduler.
-//  gpu : Disable gpu vsync.
+//  beginframe: Next frame can start without any delay on cc::scheduler in
+//              renderer compositors.
+//  gpu: Disable display and browser vsync.
 //  default: Set both flags.
 const char kDisableGpuVsync[]               = "disable-gpu-vsync";
 
@@ -82,6 +86,10 @@ const char kUseGpuInTests[] = "use-gpu-in-tests";
 // Enable OpenGL ES 3 APIs without proper service side validation.
 const char kEnableUnsafeES3APIs[] = "enable-unsafe-es3-apis";
 
+// Enable use of the SGI_video_sync extension, which can have
+// driver/sandbox/window manager compatibility issues.
+const char kEnableSgiVideoSync[] = "enable-sgi-video-sync";
+
 // Disables GL drawing operations which produce pixel output. With this
 // the GL output will not be correct but tests will run faster.
 const char kDisableGLDrawingForTests[] = "disable-gl-drawing-for-tests";
@@ -93,6 +101,9 @@ const char kOverrideUseGLWithOSMesaForTests[] =
 // Disables specified comma separated GL Extensions if found.
 const char kDisableGLExtensions[] = "disable-gl-extensions";
 
+// Use EGL_KHR_swap_buffers_with_damage to implement PostSubBuffers
+const char kEnableSwapBuffersWithDamage[] = "enable-swap-buffers-with-damage";
+
 // This is the list of switches passed from this file that are passed from the
 // GpuProcessHost to the GPU Process. Add your switch to this list if you need
 // to read it in the GPU process, else don't add it.
@@ -102,14 +113,15 @@ const char* kGLSwitchesCopiedFromGpuProcessHost[] = {
     kEnableGPUServiceLogging,
     kEnableGPUServiceTracing,
     kEnableUnsafeES3APIs,
+    kEnableSgiVideoSync,
     kGpuNoContextLost,
     kDisableGLDrawingForTests,
     kOverrideUseGLWithOSMesaForTests,
     kUseANGLE,
     kDisableDirectComposition,
+    kEnableSwapBuffersWithDamage,
 };
 const int kGLSwitchesCopiedFromGpuProcessHostNumSwitches =
     arraysize(kGLSwitchesCopiedFromGpuProcessHost);
 
 }  // namespace switches
-

@@ -19,18 +19,17 @@ namespace content {
 namespace {
 
 #if defined(OS_WIN)
-// The scrollbar metrics default to 17 dips which is the default value on
-// Windows in most cases.
-int32_t g_vertical_scroll_bar_width = 17;
+// The width of a vertical scroll bar in dips.
+int32_t g_vertical_scroll_bar_width;
 
 // The height of a horizontal scroll bar in dips.
-int32_t g_horizontal_scroll_bar_height = 17;
+int32_t g_horizontal_scroll_bar_height;
 
 // The height of the arrow bitmap on a vertical scroll bar in dips.
-int32_t g_vertical_arrow_bitmap_height = 17;
+int32_t g_vertical_arrow_bitmap_height;
 
 // The width of the arrow bitmap on a horizontal scroll bar in dips.
-int32_t g_horizontal_arrow_bitmap_width = 17;
+int32_t g_horizontal_arrow_bitmap_width;
 #endif
 
 }  // namespace

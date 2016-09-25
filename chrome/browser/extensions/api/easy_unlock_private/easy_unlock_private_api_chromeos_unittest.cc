@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_api_unittest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
@@ -101,7 +101,8 @@ class TestableGetPermitAccessFunction
 
 // Converts a string to a base::BinaryValue value whose buffer contains the
 // string data without the trailing '\0'.
-base::BinaryValue* StringToBinaryValue(const std::string& value) {
+std::unique_ptr<base::BinaryValue> StringToBinaryValue(
+    const std::string& value) {
   return base::BinaryValue::CreateWithCopiedBuffer(value.data(),
                                                    value.length());
 }
@@ -134,8 +135,7 @@ class EasyUnlockPrivateApiTest : public extensions::ExtensionApiUnittest {
     chromeos::DBusThreadManager::Initialize();
     bluez::BluezDBusManager::Initialize(
         chromeos::DBusThreadManager::Get()->GetSystemBus(),
-        chromeos::DBusThreadManager::Get()->IsUsingStub(
-            chromeos::DBusClientBundle::BLUETOOTH));
+        chromeos::DBusThreadManager::Get()->IsUsingFakes());
     client_ = chromeos::DBusThreadManager::Get()->GetEasyUnlockClient();
 
     extensions::ExtensionApiUnittest::SetUp();
@@ -516,8 +516,8 @@ std::unique_ptr<KeyedService> FakeEventRouterFactoryFunction(
     content::BrowserContext* profile) {
   std::unique_ptr<extensions::TestExtensionPrefs> extension_prefs(
       new extensions::TestExtensionPrefs(base::ThreadTaskRunnerHandle::Get()));
-  return base::WrapUnique(new FakeEventRouter(static_cast<Profile*>(profile),
-                                              std::move(extension_prefs)));
+  return base::MakeUnique<FakeEventRouter>(static_cast<Profile*>(profile),
+                                           std::move(extension_prefs));
 }
 
 TEST_F(EasyUnlockPrivateApiTest, AutoPairing) {

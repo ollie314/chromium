@@ -5,12 +5,13 @@
 #ifndef COMPONENTS_OMNIBOX_BROWSER_SUGGESTION_ANSWER_H_
 #define COMPONENTS_OMNIBOX_BROWSER_SUGGESTION_ANSWER_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -74,12 +75,16 @@ class SuggestionAnswer {
 
     const base::string16& text() const { return text_; }
     int type() const { return type_; }
+    bool has_num_lines() const { return has_num_lines_; }
+    int num_lines() const { return num_lines_; }
 
     bool Equals(const TextField& field) const;
 
    private:
     base::string16 text_;
     int type_;
+    bool has_num_lines_;
+    int num_lines_;
 
     FRIEND_TEST_ALL_PREFIXES(SuggestionAnswerTest, DifferentValuesAreUnequal);
 
@@ -100,6 +105,7 @@ class SuggestionAnswer {
                                ImageLine* image_line);
 
     const TextFields& text_fields() const { return text_fields_; }
+    int num_text_lines() const { return num_text_lines_; }
     const TextField* additional_text() const { return additional_text_.get(); }
     const TextField* status_text() const { return status_text_.get(); }
     const GURL& image_url() const { return image_url_; }
@@ -115,28 +121,30 @@ class SuggestionAnswer {
     ImageLine& operator=(const ImageLine&);
 
     TextFields text_fields_;
-    scoped_ptr<TextField> additional_text_;
-    scoped_ptr<TextField> status_text_;
+    int num_text_lines_;
+    std::unique_ptr<TextField> additional_text_;
+    std::unique_ptr<TextField> status_text_;
     GURL image_url_;
 
     FRIEND_TEST_ALL_PREFIXES(SuggestionAnswerTest, DifferentValuesAreUnequal);
   };
 
   SuggestionAnswer();
-  SuggestionAnswer(const SuggestionAnswer& answer);
+  SuggestionAnswer(const SuggestionAnswer& answer) = default;
   ~SuggestionAnswer();
 
   // Parses |answer_json| and returns a SuggestionAnswer containing the
   // contents.  If the supplied data is not well formed or is missing required
   // elements, returns nullptr instead.
-  static scoped_ptr<SuggestionAnswer> ParseAnswer(
-        const base::DictionaryValue* answer_json);
+  static std::unique_ptr<SuggestionAnswer> ParseAnswer(
+      const base::DictionaryValue* answer_json);
 
   // TODO(jdonnelly): Once something like std::optional<T> is available in base/
   // (see discussion at http://goo.gl/zN2GNy) remove this in favor of having
   // SuggestResult and AutocompleteMatch use optional<SuggestionAnswer>.
-  static scoped_ptr<SuggestionAnswer> copy(const SuggestionAnswer* source) {
-    return make_scoped_ptr(source ? new SuggestionAnswer(*source) : nullptr);
+  static std::unique_ptr<SuggestionAnswer> copy(
+      const SuggestionAnswer* source) {
+    return base::WrapUnique(source ? new SuggestionAnswer(*source) : nullptr);
   }
 
   const ImageLine& first_line() const { return first_line_; }

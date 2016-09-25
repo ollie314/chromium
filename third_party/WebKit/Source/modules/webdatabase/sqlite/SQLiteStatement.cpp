@@ -25,12 +25,14 @@
 
 #include "modules/webdatabase/sqlite/SQLiteStatement.h"
 
+#include "modules/webdatabase/sqlite/SQLLog.h"
 #include "modules/webdatabase/sqlite/SQLValue.h"
-#include "platform/Logging.h"
 #include "platform/heap/SafePoint.h"
 #include "third_party/sqlite/sqlite3.h"
 #include "wtf/Assertions.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/text/CString.h"
+#include <memory>
 
 // SQLite 3.6.16 makes sqlite3_prepare_v2 automatically retry preparing the statement
 // once if the database scheme has changed. We rely on this behavior.
@@ -100,15 +102,15 @@ int SQLiteStatement::prepare()
 
     // Need to pass non-stack |const char*| and |sqlite3_stmt*| to avoid race
     // with Oilpan stack scanning.
-    OwnPtr<const char*> tail = adoptPtr(new const char*);
-    OwnPtr<sqlite3_stmt*> statement = adoptPtr(new sqlite3_stmt*);
+    std::unique_ptr<const char*> tail = wrapUnique(new const char*);
+    std::unique_ptr<sqlite3_stmt*> statement = wrapUnique(new sqlite3_stmt*);
     *tail = nullptr;
     *statement = nullptr;
     int error;
     {
         SafePointScope scope(BlinkGC::HeapPointersOnStack);
 
-        WTF_LOG(SQLDatabase, "SQL - prepare - %s", query.data());
+        SQL_DVLOG(1) << "SQL - prepare - " << query.data();
 
         // Pass the length of the string including the null character to sqlite3_prepare_v2;
         // this lets SQLite avoid an extra string copy.
@@ -119,7 +121,7 @@ int SQLiteStatement::prepare()
     m_statement = *statement;
 
     if (error != SQLITE_OK)
-        WTF_LOG(SQLDatabase, "sqlite3_prepare16 failed (%i)\n%s\n%s", error, query.data(), sqlite3_errmsg(m_database.sqlite3Handle()));
+        SQL_DVLOG(1) << "sqlite3_prepare16 failed (" << error << ")\n" << query.data() << "\n" << sqlite3_errmsg(m_database.sqlite3Handle());
     else if (*tail && **tail)
         error = SQLITE_ERROR;
 
@@ -141,11 +143,11 @@ int SQLiteStatement::step()
     // in order to compute properly the lastChanges() return value.
     m_database.updateLastChangesCount();
 
-    WTF_LOG(SQLDatabase, "SQL - step - %s", m_query.ascii().data());
+    SQL_DVLOG(1) << "SQL - step - " << m_query;
     int error = sqlite3_step(m_statement);
     if (error != SQLITE_DONE && error != SQLITE_ROW) {
-        WTF_LOG(SQLDatabase, "sqlite3_step failed (%i)\nQuery - %s\nError - %s",
-            error, m_query.ascii().data(), sqlite3_errmsg(m_database.sqlite3Handle()));
+        SQL_DVLOG(1) << "sqlite3_step failed (" << error << " )\nQuery - "
+            << m_query << "\nError - " << sqlite3_errmsg(m_database.sqlite3Handle());
     }
 
     return restrictError(error);
@@ -158,7 +160,7 @@ int SQLiteStatement::finalize()
 #endif
     if (!m_statement)
         return SQLITE_OK;
-    WTF_LOG(SQLDatabase, "SQL - finalize - %s", m_query.ascii().data());
+    SQL_DVLOG(1) << "SQL - finalize - " << m_query;
     int result = sqlite3_finalize(m_statement);
     m_statement = 0;
     return restrictError(result);
@@ -183,9 +185,9 @@ int SQLiteStatement::bindText(int index, const String& text)
     ASSERT(index > 0);
     ASSERT(static_cast<unsigned>(index) <= bindParameterCount());
 
-    // SQLite treats uses zero pointers to represent null strings, which means we need to make sure to map null WTFStrings to zero pointers.
-    ASSERT(!String().charactersWithNullTermination().data());
-    return restrictError(sqlite3_bind_text16(m_statement, index, text.charactersWithNullTermination().data(), sizeof(UChar) * text.length(), SQLITE_TRANSIENT));
+    String text16(text);
+    text16.ensure16Bit();
+    return restrictError(sqlite3_bind_text16(m_statement, index, text16.characters16(), sizeof(UChar) * text16.length(), SQLITE_TRANSIENT));
 }
 
 int SQLiteStatement::bindDouble(int index, double number)

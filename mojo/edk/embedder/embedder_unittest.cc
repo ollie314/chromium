@@ -17,13 +17,13 @@
 #include "base/macros.h"
 #include "base/memory/shared_memory.h"
 #include "base/message_loop/message_loop.h"
+#include "base/process/process_handle.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/embedder/test_embedder.h"
 #include "mojo/edk/system/test_utils.h"
 #include "mojo/edk/test/mojo_test_base.h"
-#include "mojo/message_pump/message_pump_mojo.h"
 #include "mojo/public/c/system/core.h"
 #include "mojo/public/cpp/system/handle.h"
 #include "mojo/public/cpp/system/message_pipe.h"
@@ -182,6 +182,58 @@ TEST_F(EmbedderTest, ChannelsHandlePassing) {
   ASSERT_EQ(MOJO_RESULT_OK, MojoClose(h1));
 }
 
+TEST_F(EmbedderTest, PipeSetup) {
+  std::string child_token = GenerateRandomToken();
+  std::string pipe_token = GenerateRandomToken();
+
+  ScopedMessagePipeHandle parent_mp =
+      CreateParentMessagePipe(pipe_token, child_token);
+  ScopedMessagePipeHandle child_mp =
+      CreateChildMessagePipe(pipe_token);
+
+  const std::string kHello = "hello";
+  WriteMessage(parent_mp.get().value(), kHello);
+
+  EXPECT_EQ(kHello, ReadMessage(child_mp.get().value()));
+}
+
+TEST_F(EmbedderTest, PipeSetup_LaunchDeath) {
+  PlatformChannelPair pair;
+
+  std::string child_token = GenerateRandomToken();
+  std::string pipe_token = GenerateRandomToken();
+
+  ScopedMessagePipeHandle parent_mp =
+      CreateParentMessagePipe(pipe_token, child_token);
+  ChildProcessLaunched(base::GetCurrentProcessHandle(), pair.PassServerHandle(),
+                       child_token);
+
+  // Close the remote end, simulating child death before the child connects to
+  // the reserved port.
+  ignore_result(pair.PassClientHandle());
+
+  EXPECT_EQ(MOJO_RESULT_OK, MojoWait(parent_mp.get().value(),
+                                     MOJO_HANDLE_SIGNAL_PEER_CLOSED,
+                                     MOJO_DEADLINE_INDEFINITE,
+                                     nullptr));
+}
+
+TEST_F(EmbedderTest, PipeSetup_LaunchFailure) {
+  PlatformChannelPair pair;
+
+  std::string child_token = GenerateRandomToken();
+  std::string pipe_token = GenerateRandomToken();
+
+  ScopedMessagePipeHandle parent_mp =
+      CreateParentMessagePipe(pipe_token, child_token);
+
+  ChildProcessLaunchFailed(child_token);
+  EXPECT_EQ(MOJO_RESULT_OK, MojoWait(parent_mp.get().value(),
+                                     MOJO_HANDLE_SIGNAL_PEER_CLOSED,
+                                     MOJO_DEADLINE_INDEFINITE,
+                                     nullptr));
+}
+
 // The sequence of messages sent is:
 //       server_mp   client_mp   mp0         mp1         mp2         mp3
 //   1.  "hello"
@@ -199,13 +251,7 @@ TEST_F(EmbedderTest, ChannelsHandlePassing) {
 
 #if !defined(OS_IOS)
 
-#if defined(OS_ANDROID)
-// Android multi-process tests are not executing the new process. This is flaky.
-#define MAYBE_MultiprocessChannels DISABLED_MultiprocessChannels
-#else
-#define MAYBE_MultiprocessChannels MultiprocessChannels
-#endif  // defined(OS_ANDROID)
-TEST_F(EmbedderTest, MAYBE_MultiprocessChannels) {
+TEST_F(EmbedderTest, MultiprocessChannels) {
   RUN_CHILD_ON_PIPE(MultiprocessChannelsClient, server_mp)
     // 1. Write a message to |server_mp| (attaching nothing).
     WriteMessage(server_mp, "hello");
@@ -291,13 +337,7 @@ DEFINE_TEST_CLIENT_TEST_WITH_PIPE(MultiprocessChannelsClient, EmbedderTest,
   ASSERT_EQ(MOJO_RESULT_OK, MojoClose(mp1));
 }
 
-#if defined(OS_ANDROID)
-// Android multi-process tests are not executing the new process. This is flaky.
-#define MAYBE_MultiprocessBaseSharedMemory DISABLED_MultiprocessBaseSharedMemory
-#else
-#define MAYBE_MultiprocessBaseSharedMemory MultiprocessBaseSharedMemory
-#endif  // defined(OS_ANDROID)
-TEST_F(EmbedderTest, MAYBE_MultiprocessBaseSharedMemory) {
+TEST_F(EmbedderTest, MultiprocessBaseSharedMemory) {
   RUN_CHILD_ON_PIPE(MultiprocessSharedMemoryClient, server_mp)
     // 1. Create a base::SharedMemory object and create a mojo shared buffer
     // from it.

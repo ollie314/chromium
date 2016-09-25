@@ -18,6 +18,7 @@
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "device/bluetooth/bluetooth_advertisement.h"
 #include "device/bluetooth/bluetooth_audio_sink.h"
@@ -29,9 +30,10 @@ namespace device {
 class BluetoothAdvertisement;
 class BluetoothDiscoveryFilter;
 class BluetoothDiscoverySession;
-class BluetoothGattCharacteristic;
-class BluetoothGattDescriptor;
-class BluetoothGattService;
+class BluetoothLocalGattService;
+class BluetoothRemoteGattCharacteristic;
+class BluetoothRemoteGattDescriptor;
+class BluetoothRemoteGattService;
 class BluetoothSocket;
 class BluetoothUUID;
 struct BluetoothAdapterDeleter;
@@ -81,9 +83,27 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
     virtual void DeviceAdded(BluetoothAdapter* adapter,
                              BluetoothDevice* device) {}
 
-    // Called when properties of the device |device| known to the adapter
-    // |adapter| change. |device| should not be cached. Instead, copy its
-    // Bluetooth address.
+    // Called when the result of one of the following methods of the device
+    // |device| changes:
+    //  * GetAddress()
+    //  * GetAppearance()
+    //  * GetBluetoothClass()
+    //  * GetInquiryRSSI()
+    //  * GetInquiryTxPower()
+    //  * GetUUIDs()
+    //  * IsConnectable()
+    //  * IsConnected()
+    //  * IsConnecting()
+    //  * IsGattConnected()
+    //  * IsPaired()
+    //  * IsTrustable()
+    //
+    // On Android and MacOS this method is called for each advertisement packet
+    // received. On Chrome OS and Linux, we can't guarantee that this method
+    // will be called for each Adv. Packet received but, because the RSSI is
+    // always changing, it's very likely this method will be called for each
+    // Adv. Packet.
+    // |device| should not be cached. Instead, copy its Bluetooth address.
     virtual void DeviceChanged(BluetoothAdapter* adapter,
                                BluetoothDevice* device) {}
 
@@ -112,17 +132,17 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
 
     // Called when a new GATT service |service| is added to the device |device|,
     // as the service is received from the device. Don't cache |service|. Store
-    // its identifier instead (i.e. BluetoothGattService::GetIdentifier).
+    // its identifier instead (i.e. BluetoothRemoteGattService::GetIdentifier).
     virtual void GattServiceAdded(BluetoothAdapter* adapter,
                                   BluetoothDevice* device,
-                                  BluetoothGattService* service) {}
+                                  BluetoothRemoteGattService* service) {}
 
     // Called when the GATT service |service| is removed from the device
     // |device|. This can happen if the attribute database of the remote device
     // changes or when |device| gets removed.
     virtual void GattServiceRemoved(BluetoothAdapter* adapter,
                                     BluetoothDevice* device,
-                                    BluetoothGattService* service) {}
+                                    BluetoothRemoteGattService* service) {}
 
     // Called when all the GATT Services in |device| have been discovered
     // and GattServiceAdded has been called for each service.
@@ -135,7 +155,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
     // preceded by calls to GattCharacteristicAdded and GattDescriptorAdded.
     virtual void GattDiscoveryCompleteForService(
         BluetoothAdapter* adapter,
-        BluetoothGattService* service) {}
+        BluetoothRemoteGattService* service) {}
 
     // Called when properties of the remote GATT service |service| have changed.
     // This will get called for properties such as UUID, as well as for changes
@@ -143,7 +163,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
     // should read all GATT characteristic and descriptors objects and do any
     // necessary set up required for a changed service.
     virtual void GattServiceChanged(BluetoothAdapter* adapter,
-                                    BluetoothGattService* service) {}
+                                    BluetoothRemoteGattService* service) {}
 
     // Called when the remote GATT characteristic |characteristic| has been
     // discovered. Use this to issue any initial read/write requests to the
@@ -157,39 +177,41 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
     // one.
     virtual void GattCharacteristicAdded(
         BluetoothAdapter* adapter,
-        BluetoothGattCharacteristic* characteristic) {}
+        BluetoothRemoteGattCharacteristic* characteristic) {}
 
     // Called when a GATT characteristic |characteristic| has been removed from
     // the system.
     virtual void GattCharacteristicRemoved(
         BluetoothAdapter* adapter,
-        BluetoothGattCharacteristic* characteristic) {}
+        BluetoothRemoteGattCharacteristic* characteristic) {}
 
     // Called when the remote GATT characteristic descriptor |descriptor| has
     // been discovered. Don't cache the arguments as the pointers may become
     // invalid. Instead, use the specially assigned identifier to obtain a
     // descriptor and cache that identifier as necessary.
-    virtual void GattDescriptorAdded(BluetoothAdapter* adapter,
-                                     BluetoothGattDescriptor* descriptor) {}
+    virtual void GattDescriptorAdded(
+        BluetoothAdapter* adapter,
+        BluetoothRemoteGattDescriptor* descriptor) {}
 
     // Called when a GATT characteristic descriptor |descriptor| has been
     // removed from the system.
-    virtual void GattDescriptorRemoved(BluetoothAdapter* adapter,
-                                       BluetoothGattDescriptor* descriptor) {}
+    virtual void GattDescriptorRemoved(
+        BluetoothAdapter* adapter,
+        BluetoothRemoteGattDescriptor* descriptor) {}
 
     // Called when the value of a characteristic has changed. This might be a
     // result of a read/write request to, or a notification/indication from, a
     // remote GATT characteristic.
     virtual void GattCharacteristicValueChanged(
         BluetoothAdapter* adapter,
-        BluetoothGattCharacteristic* characteristic,
+        BluetoothRemoteGattCharacteristic* characteristic,
         const std::vector<uint8_t>& value) {}
 
     // Called when the value of a characteristic descriptor has been updated.
-    virtual void GattDescriptorValueChanged(BluetoothAdapter* adapter,
-                                            BluetoothGattDescriptor* descriptor,
-                                            const std::vector<uint8_t>& value) {
-    }
+    virtual void GattDescriptorValueChanged(
+        BluetoothAdapter* adapter,
+        BluetoothRemoteGattDescriptor* descriptor,
+        const std::vector<uint8_t>& value) {}
   };
 
   // Used to configure a listening servie.
@@ -204,27 +226,27 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
 
   // The ErrorCallback is used for methods that can fail in which case it is
   // called, in the success case the callback is simply not called.
-  typedef base::Closure ErrorCallback;
+  using ErrorCallback = base::Closure;
 
   // The InitCallback is used to trigger a callback after asynchronous
   // initialization, if initialization is asynchronous on the platform.
-  typedef base::Callback<void()> InitCallback;
+  using InitCallback = base::Callback<void()>;
 
-  typedef base::Callback<void(std::unique_ptr<BluetoothDiscoverySession>)>
-      DiscoverySessionCallback;
-  typedef std::vector<BluetoothDevice*> DeviceList;
-  typedef std::vector<const BluetoothDevice*> ConstDeviceList;
-  typedef std::vector<BluetoothUUID> UUIDList;
-  typedef base::Callback<void(scoped_refptr<BluetoothSocket>)>
-      CreateServiceCallback;
-  typedef base::Callback<void(const std::string& message)>
-      CreateServiceErrorCallback;
-  typedef base::Callback<void(scoped_refptr<BluetoothAudioSink>)>
-      AcquiredCallback;
-  typedef base::Callback<void(scoped_refptr<BluetoothAdvertisement>)>
-      CreateAdvertisementCallback;
-  typedef base::Callback<void(BluetoothAdvertisement::ErrorCode)>
-      CreateAdvertisementErrorCallback;
+  using DiscoverySessionCallback =
+      base::Callback<void(std::unique_ptr<BluetoothDiscoverySession>)>;
+  using DeviceList = std::vector<BluetoothDevice*>;
+  using ConstDeviceList = std::vector<const BluetoothDevice*>;
+  using UUIDList = std::vector<BluetoothUUID>;
+  using CreateServiceCallback =
+      base::Callback<void(scoped_refptr<BluetoothSocket>)>;
+  using CreateServiceErrorCallback =
+      base::Callback<void(const std::string& message)>;
+  using AcquiredCallback =
+      base::Callback<void(scoped_refptr<BluetoothAudioSink>)>;
+  using CreateAdvertisementCallback =
+      base::Callback<void(scoped_refptr<BluetoothAdvertisement>)>;
+  using AdvertisementErrorCallback =
+      base::Callback<void(BluetoothAdvertisement::ErrorCode)>;
 
   // Returns a weak pointer to a new adapter.  For platforms with asynchronous
   // initialization, the returned adapter will run the |init_callback| once
@@ -251,6 +273,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   // methods to determine which adapter is issuing the event.
   virtual void AddObserver(BluetoothAdapter::Observer* observer);
   virtual void RemoveObserver(BluetoothAdapter::Observer* observer);
+  virtual bool HasObserver(BluetoothAdapter::Observer* observer);
 
   // The address of this adapter. The address format is "XX:XX:XX:XX:XX:XX",
   // where each XX is a hexadecimal number.
@@ -410,36 +433,59 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       const BluetoothAudioSink::ErrorCallback& error_callback) = 0;
 
   // Creates and registers an advertisement for broadcast over the LE channel.
-  // The created advertisement will be returned via the success callback.
+  // The created advertisement will be returned via the success callback. An
+  // advertisement can unregister itself at any time by calling its unregister
+  // function.
   virtual void RegisterAdvertisement(
       std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
       const CreateAdvertisementCallback& callback,
-      const CreateAdvertisementErrorCallback& error_callback) = 0;
+      const AdvertisementErrorCallback& error_callback) = 0;
+
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+  // Sets the interval between two consecutive advertisements. Valid ranges
+  // for the interval are from 20ms to 10.24 seconds, with min <= max.
+  virtual void SetAdvertisingInterval(
+      const base::TimeDelta& min,
+      const base::TimeDelta& max,
+      const base::Closure& callback,
+      const AdvertisementErrorCallback& error_callback) = 0;
+#endif
+
+  // Returns the local GATT services associated with this adapter with the
+  // given identifier. Returns NULL if the service doesn't exist.
+  virtual BluetoothLocalGattService* GetGattService(
+      const std::string& identifier) const = 0;
 
   // The following methods are used to send various events to observers.
-  void NotifyAdapterStateChanged(bool powered);
+  void NotifyAdapterPoweredChanged(bool powered);
+  void NotifyDeviceChanged(BluetoothDevice* device);
+
 #if defined(OS_CHROMEOS) || defined(OS_LINUX)
   // This function is implemented for ChromeOS only, and the support on
   // Android, MaxOS and Windows should be added on demand in the future.
   void NotifyDevicePairedChanged(BluetoothDevice* device,
                                  bool new_paired_status);
 #endif
-  void NotifyGattServiceAdded(BluetoothGattService* service);
-  void NotifyGattServiceRemoved(BluetoothGattService* service);
-  void NotifyGattServiceChanged(BluetoothGattService* service);
+  void NotifyGattServiceAdded(BluetoothRemoteGattService* service);
+  void NotifyGattServiceRemoved(BluetoothRemoteGattService* service);
+  void NotifyGattServiceChanged(BluetoothRemoteGattService* service);
   void NotifyGattServicesDiscovered(BluetoothDevice* device);
-  void NotifyGattDiscoveryComplete(BluetoothGattService* service);
+  void NotifyGattDiscoveryComplete(BluetoothRemoteGattService* service);
   void NotifyGattCharacteristicAdded(
-      BluetoothGattCharacteristic* characteristic);
+      BluetoothRemoteGattCharacteristic* characteristic);
   void NotifyGattCharacteristicRemoved(
-      BluetoothGattCharacteristic* characteristic);
-  void NotifyGattDescriptorAdded(BluetoothGattDescriptor* descriptor);
-  void NotifyGattDescriptorRemoved(BluetoothGattDescriptor* descriptor);
+      BluetoothRemoteGattCharacteristic* characteristic);
+  void NotifyGattDescriptorAdded(BluetoothRemoteGattDescriptor* descriptor);
+  void NotifyGattDescriptorRemoved(BluetoothRemoteGattDescriptor* descriptor);
   void NotifyGattCharacteristicValueChanged(
-      BluetoothGattCharacteristic* characteristic,
+      BluetoothRemoteGattCharacteristic* characteristic,
       const std::vector<uint8_t>& value);
-  void NotifyGattDescriptorValueChanged(BluetoothGattDescriptor* descriptor,
-                                        const std::vector<uint8_t>& value);
+  void NotifyGattDescriptorValueChanged(
+      BluetoothRemoteGattDescriptor* descriptor,
+      const std::vector<uint8_t>& value);
+
+  // The timeout in seconds used by RemoveTimedOutDevices.
+  static const base::TimeDelta timeoutSec;
 
  protected:
   friend class base::RefCounted<BluetoothAdapter>;
@@ -535,6 +581,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       BluetoothDiscoverySession* discovery_session);
 
   void DeleteDeviceForTesting(const std::string& address);
+
+  // Removes from |devices_| any previously paired, connected or seen
+  // devices which are no longer present. Notifies observers. Note:
+  // this is only used by platforms where there is no notification of
+  // lost devices.
+  void RemoveTimedOutDevices();
 
   // Observers of BluetoothAdapter, notified from implementation subclasses.
   base::ObserverList<device::BluetoothAdapter::Observer> observers_;

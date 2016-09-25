@@ -10,7 +10,7 @@
 #include "base/location.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/extensions/extension_message_bubble_controller.h"
 #include "chrome/browser/extensions/extension_util.h"
@@ -20,7 +20,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/extension_action_view_controller.h"
 #include "chrome/browser/ui/extensions/extension_message_bubble_bridge.h"
-#include "chrome/browser/ui/extensions/extension_message_bubble_factory.h"
+#include "chrome/browser/ui/extensions/settings_api_bubble_helpers.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
@@ -28,13 +28,13 @@
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_observer.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/runtime_data.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/feature_switch.h"
-#include "grit/theme_resources.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
@@ -136,9 +136,12 @@ ToolbarActionsBar::ToolbarActionsBar(ToolbarActionsBarDelegate* delegate,
       popped_out_action_(nullptr),
       is_popped_out_sticky_(false),
       is_showing_bubble_(false),
+      tab_strip_observer_(this),
       weak_ptr_factory_(this) {
   if (model_)  // |model_| can be null in unittests.
     model_observer_.Add(model_);
+
+  tab_strip_observer_.Add(browser_->tab_strip_model());
 }
 
 ToolbarActionsBar::~ToolbarActionsBar() {
@@ -195,9 +198,7 @@ gfx::Size ToolbarActionsBar::GetPreferredSize() const {
 }
 
 int ToolbarActionsBar::GetMinimumWidth() const {
-  if (!platform_settings_.chevron_enabled || toolbar_actions_.empty())
-    return platform_settings_.item_spacing;
-  return 2 * platform_settings_.item_spacing + delegate_->GetChevronWidth();
+  return platform_settings_.item_spacing;
 }
 
 int ToolbarActionsBar::GetMaximumWidth() const {
@@ -207,18 +208,7 @@ int ToolbarActionsBar::GetMaximumWidth() const {
 int ToolbarActionsBar::IconCountToWidth(int icons) const {
   if (icons < 0)
     icons = toolbar_actions_.size();
-  const bool display_chevron =
-      platform_settings_.chevron_enabled &&
-      static_cast<size_t>(icons) < toolbar_actions_.size();
-  if (icons == 0 && !display_chevron)
-    return platform_settings_.item_spacing;
-
-  const int icons_size = (icons == 0) ? 0 :
-      (icons * IconWidth(true)) - platform_settings_.item_spacing;
-  const int chevron_size = display_chevron ? delegate_->GetChevronWidth() : 0;
-  const int side_padding = platform_settings_.item_spacing * 2;
-
-  return icons_size + chevron_size + side_padding;
+  return icons * IconWidth(true) + platform_settings_.item_spacing;
 }
 
 size_t ToolbarActionsBar::WidthToIconCount(int pixels) const {
@@ -226,16 +216,10 @@ size_t ToolbarActionsBar::WidthToIconCount(int pixels) const {
   if (pixels >= IconCountToWidth(-1))
     return toolbar_actions_.size();
 
-  // We reserve space for the padding on either side of the toolbar and,
-  // if enabled, for the chevron.
-  int available_space = pixels - (platform_settings_.item_spacing * 2);
-  if (platform_settings_.chevron_enabled)
-    available_space -= delegate_->GetChevronWidth();
-
   // Now we add an extra between-item padding value so the space can be divided
   // evenly by (size of icon with padding).
   return static_cast<size_t>(std::max(
-      0, available_space + platform_settings_.item_spacing) / IconWidth(true));
+      0, pixels - platform_settings_.item_spacing) / IconWidth(true));
 }
 
 size_t ToolbarActionsBar::GetIconCount() const {
@@ -402,14 +386,9 @@ void ToolbarActionsBar::CreateActions() {
     should_check_extension_bubble_ = false;
     // CreateActions() can be called as part of the browser window set up, which
     // we need to let finish before showing the actions.
-    std::unique_ptr<extensions::ExtensionMessageBubbleController> controller =
-        ExtensionMessageBubbleFactory(browser_).GetController();
-    if (controller) {
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(&ToolbarActionsBar::MaybeShowExtensionBubble,
-                                weak_ptr_factory_.GetWeakPtr(),
-                                base::Passed(std::move(controller))));
-    }
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&ToolbarActionsBar::MaybeShowExtensionBubble,
+                              weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -610,11 +589,21 @@ void ToolbarActionsBar::ShowToolbarActionBubble(
   }
 }
 
-void ToolbarActionsBar::MaybeShowExtensionBubble(
-    std::unique_ptr<extensions::ExtensionMessageBubbleController> controller) {
-  if (!controller->ShouldShow())
+void ToolbarActionsBar::ShowToolbarActionBubbleAsync(
+    std::unique_ptr<ToolbarActionsBarBubbleDelegate> bubble) {
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&ToolbarActionsBar::ShowToolbarActionBubble,
+                            weak_ptr_factory_.GetWeakPtr(),
+                            base::Passed(std::move(bubble))));
+}
+
+void ToolbarActionsBar::MaybeShowExtensionBubble() {
+  std::unique_ptr<extensions::ExtensionMessageBubbleController> controller =
+      model_->GetExtensionMessageBubbleController(browser_);
+  if (!controller)
     return;
 
+  DCHECK(controller->ShouldShow());
   controller->HighlightExtensionsIfNecessary();  // Safe to call multiple times.
 
   // Not showing the bubble right away (during startup) has a few benefits:
@@ -681,6 +670,8 @@ void ToolbarActionsBar::OnToolbarActionRemoved(const std::string& action_id) {
   std::unique_ptr<ToolbarActionViewController> removed_action(*iter);
   toolbar_actions_.weak_erase(iter);
   delegate_->RemoveViewForAction(removed_action.get());
+  if (popped_out_action_ == removed_action.get())
+    UndoPopOut();
   removed_action.reset();
 
   // If the extension is being upgraded we don't want the bar to shrink
@@ -699,7 +690,6 @@ void ToolbarActionsBar::OnToolbarActionRemoved(const std::string& action_id) {
       // removed an entry directly from the overflow list).
       delegate_->Redraw(false);
     } else {
-      delegate_->SetChevronVisibility(false);
       // Either we went from overflow to no-overflow, or we shrunk the no-
       // overflow container by 1.  Either way the size changed, so animate.
       ResizeDelegate(gfx::Tween::EASE_OUT, false);
@@ -733,7 +723,7 @@ void ToolbarActionsBar::ResizeDelegate(gfx::Tween::Type tween_type,
   int desired_width = GetPreferredSize().width();
   if (desired_width !=
       delegate_->GetWidth(ToolbarActionsBarDelegate::GET_WIDTH_CURRENT)) {
-    delegate_->ResizeAndAnimate(tween_type, desired_width, suppress_chevron);
+    delegate_->ResizeAndAnimate(tween_type, desired_width);
   } else if (delegate_->IsAnimating()) {
     // It's possible that we're right where we're supposed to be in terms of
     // width, but that we're also currently resizing. If this is the case, end
@@ -801,6 +791,14 @@ void ToolbarActionsBar::OnToolbarModelInitialized() {
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "ToolbarActionsBar::OnToolbarModelInitialized"));
   ResizeDelegate(gfx::Tween::EASE_OUT, false);
+}
+
+void ToolbarActionsBar::TabInsertedAt(TabStripModel* tab_strip_model,
+                                      content::WebContents* contents,
+                                      int index,
+                                      bool foreground) {
+  if (foreground)
+    extensions::MaybeShowExtensionControlledNewTabPage(browser_, contents);
 }
 
 void ToolbarActionsBar::ReorderActions() {

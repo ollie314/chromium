@@ -88,7 +88,7 @@ void PointerEventFactoryTest::createAndCheckPointerTransitionEvent(
     const AtomicString& type)
 {
     PointerEvent* clonePointerEvent = m_pointerEventFactory.
-        createPointerTransitionEvent(pointerEvent, type, nullptr);
+        createPointerBoundaryEvent(pointerEvent, type, nullptr);
     EXPECT_EQ(clonePointerEvent->pointerType(), pointerEvent->pointerType());
     EXPECT_EQ(clonePointerEvent->pointerId(), pointerEvent->pointerId());
     EXPECT_EQ(clonePointerEvent->isPrimary(), pointerEvent->isPrimary());
@@ -101,7 +101,7 @@ PointerEvent* PointerEventFactoryTest::createAndCheckTouchEvent(
     PlatformTouchPoint::TouchState state)
 {
     PointerEvent* pointerEvent = m_pointerEventFactory.create(
-        EventTypeNames::pointerdown, PointerEventFactoryTest::PlatformTouchPointBuilder(pointerType, rawId, state), PlatformEvent::NoModifiers, 0, 0, 0, 0);
+        EventTypeNames::pointerdown, PointerEventFactoryTest::PlatformTouchPointBuilder(pointerType, rawId, state), PlatformEvent::NoModifiers, FloatSize(), FloatPoint(), nullptr);
     EXPECT_EQ(uniqueId, pointerEvent->pointerId());
     EXPECT_EQ(isPrimary, pointerEvent->isPrimary());
     return pointerEvent;
@@ -113,7 +113,7 @@ PointerEvent* PointerEventFactoryTest::createAndCheckMouseEvent(
     PlatformEvent::Modifiers modifiers)
 {
     PointerEvent* pointerEvent = m_pointerEventFactory.create(
-        EventTypeNames::mouseenter, PlatformMouseEventBuilder(pointerType, rawId, modifiers), nullptr, nullptr);
+        EventTypeNames::mousedown, PlatformMouseEventBuilder(pointerType, rawId, modifiers), nullptr);
     EXPECT_EQ(uniqueId, pointerEvent->pointerId());
     EXPECT_EQ(isPrimary, pointerEvent->isPrimary());
     return pointerEvent;

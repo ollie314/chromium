@@ -16,7 +16,6 @@
 #include "chrome/browser/ui/app_list/search/app_search_provider.h"
 #include "chrome/browser/ui/app_list/search/history_factory.h"
 #include "chrome/browser/ui/app_list/search/omnibox_provider.h"
-#include "chrome/browser/ui/app_list/search/people/people_provider.h"
 #include "chrome/browser/ui/app_list/search/suggestions/suggestions_search_provider.h"
 #include "chrome/browser/ui/app_list/search/webstore/webstore_provider.h"
 #include "chrome/common/chrome_switches.h"
@@ -34,11 +33,9 @@ namespace app_list {
 namespace {
 
 // Maximum number of results to show in each mixer group.
-const size_t kMaxAppsGroupResults = 4;
-// Ignored unless AppListMixer field trial is "Blended".
+const size_t kMaxAppsGroupResults = 8;
 const size_t kMaxOmniboxResults = 4;
 const size_t kMaxWebstoreResults = 2;
-const size_t kMaxPeopleResults = 2;
 const size_t kMaxSuggestionsResults = 6;
 
 #if defined(OS_CHROMEOS)
@@ -68,26 +65,19 @@ std::unique_ptr<SearchController> CreateSearchController(
       new SearchController(model->search_box(), model->results(),
                            HistoryFactory::GetForBrowserContext(profile)));
 
-  // Add mixer groups. There are four main groups: apps, people, webstore and
-  // omnibox. The behaviour depends on the AppListMixer field trial:
-  // - If default: The apps, people and webstore groups each have a fixed
-  //   maximum number of results. The omnibox group fills the remaining slots
-  //   (with a minimum of one result).
-  // - If "Blended": Each group has a "soft" maximum number of results. However,
-  //   if a query turns up very few results, the mixer may take more than this
-  //   maximum from a particular group.
-  size_t apps_group_id = controller->AddGroup(kMaxAppsGroupResults, 3.0, 1.0);
-  size_t omnibox_group_id =
-      controller->AddOmniboxGroup(kMaxOmniboxResults, 2.0, 1.0);
-  size_t webstore_group_id =
-      controller->AddGroup(kMaxWebstoreResults, 1.0, 0.4);
-  size_t people_group_id = controller->AddGroup(kMaxPeopleResults, 0.0, 0.85);
+  // Add mixer groups. There are three main groups: apps, webstore and
+  // omnibox. Each group has a "soft" maximum number of results. However, if
+  // a query turns up very few results, the mixer may take more than this
+  // maximum from a particular group.
+  size_t apps_group_id = controller->AddGroup(kMaxAppsGroupResults, 1.0);
+  size_t omnibox_group_id = controller->AddGroup(kMaxOmniboxResults, 1.0);
+  size_t webstore_group_id = controller->AddGroup(kMaxWebstoreResults, 0.4);
 
   // Add search providers.
   controller->AddProvider(
       apps_group_id,
       std::unique_ptr<SearchProvider>(new AppSearchProvider(
-          profile, list_controller, base::WrapUnique(new base::DefaultClock()),
+          profile, list_controller, base::MakeUnique<base::DefaultClock>(),
           model->top_level_item_list())));
   controller->AddProvider(omnibox_group_id,
                           std::unique_ptr<SearchProvider>(
@@ -95,12 +85,9 @@ std::unique_ptr<SearchController> CreateSearchController(
   controller->AddProvider(webstore_group_id,
                           std::unique_ptr<SearchProvider>(
                               new WebstoreProvider(profile, list_controller)));
-  controller->AddProvider(people_group_id,
-                          std::unique_ptr<SearchProvider>(
-                              new PeopleProvider(profile, list_controller)));
   if (IsSuggestionsSearchProviderEnabled()) {
     size_t suggestions_group_id =
-        controller->AddGroup(kMaxSuggestionsResults, 3.0, 1.0);
+        controller->AddGroup(kMaxSuggestionsResults, 1.0);
     controller->AddProvider(
         suggestions_group_id,
         std::unique_ptr<SearchProvider>(
@@ -113,7 +100,7 @@ std::unique_ptr<SearchController> CreateSearchController(
   if (app_list::switches::IsDriveSearchInChromeLauncherEnabled() &&
       !profile->IsGuestSession()) {
     size_t search_api_group_id =
-        controller->AddGroup(kMaxLauncherSearchResults, 0.0, 1.0);
+        controller->AddGroup(kMaxLauncherSearchResults, 1.0);
     controller->AddProvider(
         search_api_group_id,
         std::unique_ptr<SearchProvider>(new LauncherSearchProvider(profile)));

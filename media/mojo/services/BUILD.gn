@@ -3,14 +3,9 @@
 # found in the LICENSE file.
 
 import("//media/media_options.gni")
+import("//services/shell/public/cpp/service.gni")
+import("//services/shell/public/service_manifest.gni")
 import("//testing/test.gni")
-import("//mojo/public/mojo_application.gni")
-import("//mojo/public/mojo_application_manifest.gni")
-
-# Target naming conventions:
-# - proxy: C++ implementations supported by mojo services.
-# - service: Mojo interface implementations.
-# - test: Tests for a particular app, e.g. media.
 
 config("mojo_media_config") {
   if (!enable_mojo_media) {
@@ -46,57 +41,15 @@ config("mojo_media_config") {
   }
 }
 
-# Implementations of media C++ interfaces using corresponding mojo services.
-source_set("proxy") {
-  sources = [
-    "mojo_audio_decoder.cc",
-    "mojo_audio_decoder.h",
-    "mojo_cdm.cc",
-    "mojo_cdm.h",
-    "mojo_cdm_factory.cc",
-    "mojo_cdm_factory.h",
-    "mojo_decoder_factory.cc",
-    "mojo_decoder_factory.h",
-    "mojo_decryptor.cc",
-    "mojo_decryptor.h",
-    "mojo_demuxer_stream_impl.cc",
-    "mojo_demuxer_stream_impl.h",
-    "mojo_renderer_factory.cc",
-    "mojo_renderer_factory.h",
-    "mojo_renderer_impl.cc",
-    "mojo_renderer_impl.h",
-    "mojo_type_trait.h",
-    "mojo_video_decoder.cc",
-    "mojo_video_decoder.h",
-  ]
-
-  public_configs = [ ":mojo_media_config" ]
-
-  deps = [
-    "//base",
-    "//media",
-    "//media/mojo/common",
-    "//media/mojo/interfaces",
-    "//mojo/common",
-    "//mojo/public/c/system:for_component",
-    "//services/shell/public/cpp:sources",
-    "//services/shell/public/interfaces",
-  ]
-}
-
-source_set("cdm_service") {
-  deps = [
-    "//base",
-    "//media",
-    "//media/mojo/common",
-    "//media/mojo/interfaces",
-    "//mojo/common",
-    "//mojo/public/c/system:for_component",
-    "//services/shell/public/interfaces",
-    "//url",
-  ]
+component("services") {
+  output_name = "media_mojo_services"
 
   sources = [
+    "demuxer_stream_provider_shim.cc",
+    "demuxer_stream_provider_shim.h",
+    "media_mojo_export.h",
+    "mojo_audio_decoder_service.cc",
+    "mojo_audio_decoder_service.h",
     "mojo_cdm_allocator.cc",
     "mojo_cdm_allocator.h",
     "mojo_cdm_promise.cc",
@@ -107,111 +60,52 @@ source_set("cdm_service") {
     "mojo_cdm_service_context.h",
     "mojo_decryptor_service.cc",
     "mojo_decryptor_service.h",
-    "mojo_type_trait.h",
-  ]
-
-  if (is_android) {
-    sources += [
-      "mojo_provision_fetcher.cc",
-      "mojo_provision_fetcher.h",
-    ]
-  }
-
-  # TODO(xhwang): Needed because targets can depend on cdm_service directly,
-  # which is a bit hacky since we need to access CdmService directly
-  # from C++ code (AVDA). In the future we'll make those decoders part of
-  # MojoMediaApplication, then we won't need this.
-  public_configs = [ ":mojo_media_config" ]
-
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
-}
-
-source_set("audio_decoder_service") {
-  sources = [
-    "mojo_audio_decoder_service.cc",
-    "mojo_audio_decoder_service.h",
-  ]
-
-  deps = [
-    ":cdm_service",
-    "//base",
-    "//media",
-    "//media:shared_memory_support",
-    "//media/mojo/common",
-    "//media/mojo/interfaces",
-    "//mojo/common",
-  ]
-}
-
-source_set("renderer_service") {
-  sources = [
-    "demuxer_stream_provider_shim.cc",
-    "demuxer_stream_provider_shim.h",
     "mojo_demuxer_stream_adapter.cc",
     "mojo_demuxer_stream_adapter.h",
-    "mojo_renderer_service.cc",
-    "mojo_renderer_service.h",
-  ]
-
-  deps = [
-    ":cdm_service",
-    "//base",
-    "//media",
-    "//media:shared_memory_support",
-    "//media/mojo/common",
-    "//media/mojo/interfaces",
-    "//mojo/common",
-  ]
-}
-
-source_set("application") {
-  sources = [
     "mojo_media_application.cc",
     "mojo_media_application.h",
+    "mojo_media_application_factory.cc",
+    "mojo_media_application_factory.h",
     "mojo_media_client.cc",
     "mojo_media_client.h",
+    "mojo_renderer_service.cc",
+    "mojo_renderer_service.h",
+    "mojo_video_decoder_service.cc",
+    "mojo_video_decoder_service.h",
     "service_factory_impl.cc",
     "service_factory_impl.h",
   ]
 
+  defines = [ "MEDIA_MOJO_IMPLEMENTATION" ]
+
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
   public_configs = [ ":mojo_media_config" ]
 
-  deps = [
-    ":audio_decoder_service",
-    ":cdm_service",
-    ":renderer_service",
+  public_deps = [
     "//base",
     "//media",
     "//media/mojo/interfaces",
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/cpp/system",
     "//services/shell/public/cpp",
+    "//url",
   ]
-}
-
-source_set("application_factory") {
-  sources = [
-    "mojo_media_application_factory.cc",
-    "mojo_media_application_factory.h",
-  ]
-
-  public_configs = [ ":mojo_media_config" ]
 
   deps = [
-    ":application",
-    "//base",
-    "//media",
-    "//services/shell/public/cpp:sources",
+    "//media:cdm_api",
+    "//media:shared_memory_support",
+    "//media/mojo/common",
+    "//mojo/common",
+    "//services/shell/public/interfaces",
   ]
 
-  if (enable_test_mojo_media_client) {
-    defines = [ "ENABLE_TEST_MOJO_MEDIA_CLIENT" ]
-    sources += [
-      "test_mojo_media_client.cc",
-      "test_mojo_media_client.h",
-    ]
-  } else if (is_android) {
+  if (is_android) {
     sources += [
       "android_mojo_media_client.cc",
       "android_mojo_media_client.h",
+      "mojo_provision_fetcher.cc",
+      "mojo_provision_fetcher.h",
     ]
   } else {
     sources += [
@@ -221,89 +115,77 @@ source_set("application_factory") {
   }
 }
 
-mojo_native_application("media") {
+service("media") {
   testonly = true
 
   sources = [
     "main.cc",
-    "test_mojo_media_client.cc",
-    "test_mojo_media_client.h",
+  ]
+
+  public_deps = [
+    ":services",
+    "//base",
+    "//media",
   ]
 
   deps = [
-    ":application",
-    "//base",
-    "//media",
-    "//mojo/logging",
-    "//mojo/public/c/system:for_shared_library",
-    "//services/shell/public/cpp:sources",
+    "//mojo/public/c/system",
+    "//services/shell/public/cpp",
   ]
 }
 
-mojo_application_manifest("media_manifest") {
-  application_name = "media"
-  source = "media_manifest.json"
-}
-
-# Note, the following tests must be loaded via mojo_runner as an app, e.g.
-#
-#   mojo/tools/apptest_runner.py
-#     --apptest-filter mojo:media_apptests out/Debug
-#
-#   mojo/tools/apptest_runner.py
-#     --apptest-filter mojo:media_pipeline_integration_apptests out/Debug
-#
-mojo_native_application("media_apptests") {
+test("media_mojo_shell_unittests") {
   testonly = true
 
   sources = [
-    "media_apptest.cc",
+    "media_mojo_unittest.cc",
   ]
 
   deps = [
-    ":proxy",
     "//media",
     "//media/base:test_support",
+    "//media/mojo/clients",
     "//media/mojo/common",
     "//media/mojo/interfaces",
-    "//services/shell/public/cpp:test_support",
+    "//services/shell/public/cpp:service_test_support",
+    "//services/shell/public/cpp/test:run_all_shelltests",
     "//testing/gmock",
     "//testing/gtest",
   ]
 
   data_deps = [
-    ":apptest_manifest",
-    ":media",
+    "//media/mojo/services:test_manifest",
+    "//media/mojo/services:media",
   ]
 }
 
-mojo_application_manifest("apptest_manifest") {
-  application_name = "media_apptests"
-  source = "apptest_manifest.json"
+service_manifest("media_manifest") {
+  name = "media"
+  source = "media_manifest.json"
 }
 
-mojo_native_application("media_pipeline_integration_apptests") {
+service_manifest("test_manifest") {
+  name = "media_mojo_shell_unittests"
+  type = "exe"
+  source = "test_manifest.json"
+}
+
+test("media_pipeline_integration_unittests") {
   testonly = true
 
   deps = [
     "//media/test:mojo_pipeline_integration_tests",
+    "//services/shell/public/cpp/test:run_all_shelltests",
   ]
 
   data_deps = [
     ":media",
-    ":pipeline_apptest_manifest",
+    ":pipeline_test_manifest",
   ]
 }
 
-mojo_application_manifest("pipeline_apptest_manifest") {
-  application_name = "media_pipeline_integration_apptests"
-  source = "pipeline_apptest_manifest.json"
-}
-
-group("tests") {
-  testonly = true
-  deps = [
-    ":media_apptests",
-    ":media_pipeline_integration_apptests",
-  ]
+service_manifest("pipeline_test_manifest") {
+  name = "media_pipeline_integration_unittests"
+  type = "exe"
+  source = "pipeline_test_manifest.json"
 }

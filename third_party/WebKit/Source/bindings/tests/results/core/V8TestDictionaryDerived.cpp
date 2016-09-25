@@ -7,7 +7,6 @@
 #include "V8TestDictionaryDerived.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/UnionTypesCore.h"
 #include "bindings/core/v8/V8TestDictionary.h"
 
 namespace blink {
@@ -33,85 +32,77 @@ void V8TestDictionaryDerivedImplementedAs::toImpl(v8::Isolate* isolate, v8::Loca
         exceptionState.rethrowV8Exception(block.Exception());
         return;
     }
-    {
-        v8::Local<v8::Value> derivedStringMemberValue;
-        if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMember")).ToLocal(&derivedStringMemberValue)) {
-            exceptionState.rethrowV8Exception(block.Exception());
+    v8::Local<v8::Value> derivedStringMemberValue;
+    if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMember")).ToLocal(&derivedStringMemberValue)) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return;
+    }
+    if (derivedStringMemberValue.IsEmpty() || derivedStringMemberValue->IsUndefined()) {
+        // Do nothing.
+    } else {
+        V8StringResource<> derivedStringMember = derivedStringMemberValue;
+        if (!derivedStringMember.prepare(exceptionState))
             return;
-        }
-        if (derivedStringMemberValue.IsEmpty() || derivedStringMemberValue->IsUndefined()) {
-            // Do nothing.
-        } else {
-            V8StringResource<> derivedStringMember = derivedStringMemberValue;
-            if (!derivedStringMember.prepare(exceptionState))
-                return;
-            impl.setDerivedStringMember(derivedStringMember);
-        }
+        impl.setDerivedStringMember(derivedStringMember);
     }
 
-    {
-        v8::Local<v8::Value> derivedStringMemberWithDefaultValue;
-        if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMemberWithDefault")).ToLocal(&derivedStringMemberWithDefaultValue)) {
-            exceptionState.rethrowV8Exception(block.Exception());
+    v8::Local<v8::Value> derivedStringMemberWithDefaultValue;
+    if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMemberWithDefault")).ToLocal(&derivedStringMemberWithDefaultValue)) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return;
+    }
+    if (derivedStringMemberWithDefaultValue.IsEmpty() || derivedStringMemberWithDefaultValue->IsUndefined()) {
+        // Do nothing.
+    } else {
+        V8StringResource<> derivedStringMemberWithDefault = derivedStringMemberWithDefaultValue;
+        if (!derivedStringMemberWithDefault.prepare(exceptionState))
             return;
-        }
-        if (derivedStringMemberWithDefaultValue.IsEmpty() || derivedStringMemberWithDefaultValue->IsUndefined()) {
-            // Do nothing.
-        } else {
-            V8StringResource<> derivedStringMemberWithDefault = derivedStringMemberWithDefaultValue;
-            if (!derivedStringMemberWithDefault.prepare(exceptionState))
-                return;
-            impl.setDerivedStringMemberWithDefault(derivedStringMemberWithDefault);
-        }
+        impl.setDerivedStringMemberWithDefault(derivedStringMemberWithDefault);
     }
 
-    {
-        v8::Local<v8::Value> requiredLongMemberValue;
-        if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "requiredLongMember")).ToLocal(&requiredLongMemberValue)) {
-            exceptionState.rethrowV8Exception(block.Exception());
+    v8::Local<v8::Value> requiredLongMemberValue;
+    if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "requiredLongMember")).ToLocal(&requiredLongMemberValue)) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return;
+    }
+    if (requiredLongMemberValue.IsEmpty() || requiredLongMemberValue->IsUndefined()) {
+        exceptionState.throwTypeError("required member requiredLongMember is undefined.");
+        return;
+    } else {
+        int requiredLongMember = toInt32(isolate, requiredLongMemberValue, NormalConversion, exceptionState);
+        if (exceptionState.hadException())
             return;
-        }
-        if (requiredLongMemberValue.IsEmpty() || requiredLongMemberValue->IsUndefined()) {
-            exceptionState.throwTypeError("required member requiredLongMember is undefined.");
-            return;
-        } else {
-            int requiredLongMember = toInt32(isolate, requiredLongMemberValue, NormalConversion, exceptionState);
-            if (exceptionState.hadException())
-                return;
-            impl.setRequiredLongMember(requiredLongMember);
-        }
+        impl.setRequiredLongMember(requiredLongMember);
     }
 
-    {
-        v8::Local<v8::Value> stringOrDoubleSequenceMemberValue;
-        if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "stringOrDoubleSequenceMember")).ToLocal(&stringOrDoubleSequenceMemberValue)) {
-            exceptionState.rethrowV8Exception(block.Exception());
-            return;
-        }
-        if (stringOrDoubleSequenceMemberValue.IsEmpty() || stringOrDoubleSequenceMemberValue->IsUndefined()) {
-            // Do nothing.
-        } else {
-            HeapVector<StringOrDouble> stringOrDoubleSequenceMember = toImplArray<HeapVector<StringOrDouble>>(stringOrDoubleSequenceMemberValue, 0, isolate, exceptionState);
-            if (exceptionState.hadException())
-                return;
-            impl.setStringOrDoubleSequenceMember(stringOrDoubleSequenceMember);
-        }
+    v8::Local<v8::Value> stringOrDoubleSequenceMemberValue;
+    if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "stringOrDoubleSequenceMember")).ToLocal(&stringOrDoubleSequenceMemberValue)) {
+        exceptionState.rethrowV8Exception(block.Exception());
+        return;
     }
-
+    if (stringOrDoubleSequenceMemberValue.IsEmpty() || stringOrDoubleSequenceMemberValue->IsUndefined()) {
+        // Do nothing.
+    } else {
+        HeapVector<StringOrDouble> stringOrDoubleSequenceMember = toImplArray<HeapVector<StringOrDouble>>(stringOrDoubleSequenceMemberValue, 0, isolate, exceptionState);
+        if (exceptionState.hadException())
+            return;
+        impl.setStringOrDoubleSequenceMember(stringOrDoubleSequenceMember);
+    }
 }
 
-v8::Local<v8::Value> toV8(const TestDictionaryDerivedImplementedAs& impl, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
+v8::Local<v8::Value> TestDictionaryDerivedImplementedAs::toV8Impl(v8::Local<v8::Object> creationContext, v8::Isolate* isolate) const
 {
     v8::Local<v8::Object> v8Object = v8::Object::New(isolate);
-    if (!toV8TestDictionary(impl, v8Object, creationContext, isolate))
-        return v8::Local<v8::Value>();
-    if (!toV8TestDictionaryDerivedImplementedAs(impl, v8Object, creationContext, isolate))
-        return v8::Local<v8::Value>();
+    if (!toV8TestDictionaryDerivedImplementedAs(*this, v8Object, creationContext, isolate))
+        return v8::Undefined(isolate);
     return v8Object;
 }
 
 bool toV8TestDictionaryDerivedImplementedAs(const TestDictionaryDerivedImplementedAs& impl, v8::Local<v8::Object> dictionary, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
 {
+    if (!toV8TestDictionary(impl, dictionary, creationContext, isolate))
+        return false;
+
     if (impl.hasDerivedStringMember()) {
         if (!v8CallBoolean(dictionary->CreateDataProperty(isolate->GetCurrentContext(), v8String(isolate, "derivedStringMember"), v8String(isolate, impl.derivedStringMember()))))
             return false;

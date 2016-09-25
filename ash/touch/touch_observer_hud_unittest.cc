@@ -4,7 +4,7 @@
 
 #include "ash/touch/touch_observer_hud.h"
 
-#include "ash/ash_switches.h"
+#include "ash/common/ash_switches.h"
 #include "ash/display/display_manager.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
@@ -13,6 +13,7 @@
 #include "ash/test/display_manager_test_api.h"
 #include "ash/touch/touch_hud_debug.h"
 #include "ash/touch/touch_hud_projection.h"
+#include "ash/touch_hud/touch_hud_renderer.h"
 #include "base/command_line.h"
 #include "base/format_macros.h"
 #include "base/strings/stringprintf.h"
@@ -44,11 +45,11 @@ class TouchHudTestBase : public test::AshTestBase {
         CreateDisplayInfo(mirrored_display_id_, gfx::Rect(0, 0, 100, 100));
   }
 
-  gfx::Display GetPrimaryDisplay() {
-    return gfx::Screen::GetScreen()->GetPrimaryDisplay();
+  display::Display GetPrimaryDisplay() {
+    return display::Screen::GetScreen()->GetPrimaryDisplay();
   }
 
-  const gfx::Display& GetSecondaryDisplay() {
+  const display::Display& GetSecondaryDisplay() {
     return ScreenUtil::GetSecondaryDisplay();
   }
 
@@ -127,11 +128,11 @@ class TouchHudTestBase : public test::AshTestBase {
     return Shell::GetInstance()->window_tree_host_manager();
   }
 
-  const gfx::Display& GetInternalDisplay() {
+  const display::Display& GetInternalDisplay() {
     return GetDisplayManager()->GetDisplayForId(internal_display_id_);
   }
 
-  const gfx::Display& GetExternalDisplay() {
+  const display::Display& GetExternalDisplay() {
     return GetDisplayManager()->GetDisplayForId(external_display_id_);
   }
 
@@ -146,12 +147,12 @@ class TouchHudTestBase : public test::AshTestBase {
   }
 
   aura::Window* GetPrimaryRootWindow() {
-    const gfx::Display& display = GetPrimaryDisplay();
+    const display::Display& display = GetPrimaryDisplay();
     return GetWindowTreeHostManager()->GetRootWindowForDisplayId(display.id());
   }
 
   aura::Window* GetSecondaryRootWindow() {
-    const gfx::Display& display = GetSecondaryDisplay();
+    const display::Display& display = GetSecondaryDisplay();
     return GetWindowTreeHostManager()->GetRootWindowForDisplayId(display.id());
   }
 
@@ -175,8 +176,10 @@ class TouchHudTestBase : public test::AshTestBase {
     return GetRootWindowController(root);
   }
 
-  DisplayInfo CreateDisplayInfo(int64_t id, const gfx::Rect& bounds) {
-    DisplayInfo info(id, base::StringPrintf("x-%" PRId64, id), false);
+  display::ManagedDisplayInfo CreateDisplayInfo(int64_t id,
+                                                const gfx::Rect& bounds) {
+    display::ManagedDisplayInfo info(id, base::StringPrintf("x-%" PRId64, id),
+                                     false);
     info.SetBounds(bounds);
     return info;
   }
@@ -192,11 +195,11 @@ class TouchHudTestBase : public test::AshTestBase {
   int64_t internal_display_id_;
   int64_t external_display_id_;
   int64_t mirrored_display_id_;
-  DisplayInfo internal_display_info_;
-  DisplayInfo external_display_info_;
-  DisplayInfo mirrored_display_info_;
+  display::ManagedDisplayInfo internal_display_info_;
+  display::ManagedDisplayInfo external_display_info_;
+  display::ManagedDisplayInfo mirrored_display_info_;
 
-  std::vector<DisplayInfo> display_info_list_;
+  std::vector<display::ManagedDisplayInfo> display_info_list_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchHudTestBase);
 };
@@ -221,11 +224,13 @@ class TouchHudDebugTest : public TouchHudTestBase {
     EXPECT_EQ(GetInternalRootWindow(),
               GetRootWindowForTouchHud(GetInternalTouchHudDebug()));
     EXPECT_EQ(GetInternalRootWindow(),
-              GetWidgetForTouchHud(GetInternalTouchHudDebug())->
-                  GetNativeView()->GetRootWindow());
+              GetWidgetForTouchHud(GetInternalTouchHudDebug())
+                  ->GetNativeView()
+                  ->GetRootWindow());
     EXPECT_EQ(GetInternalDisplay().size(),
-              GetWidgetForTouchHud(GetInternalTouchHudDebug())->
-                  GetWindowBoundsInScreen().size());
+              GetWidgetForTouchHud(GetInternalTouchHudDebug())
+                  ->GetWindowBoundsInScreen()
+                  .size());
   }
 
   void CheckExternalDisplay() {
@@ -234,11 +239,13 @@ class TouchHudDebugTest : public TouchHudTestBase {
     EXPECT_EQ(GetExternalRootWindow(),
               GetRootWindowForTouchHud(GetExternalTouchHudDebug()));
     EXPECT_EQ(GetExternalRootWindow(),
-              GetWidgetForTouchHud(GetExternalTouchHudDebug())->
-                  GetNativeView()->GetRootWindow());
+              GetWidgetForTouchHud(GetExternalTouchHudDebug())
+                  ->GetNativeView()
+                  ->GetRootWindow());
     EXPECT_EQ(GetExternalDisplay().size(),
-              GetWidgetForTouchHud(GetExternalTouchHudDebug())->
-                  GetWindowBoundsInScreen().size());
+              GetWidgetForTouchHud(GetExternalTouchHudDebug())
+                  ->GetWindowBoundsInScreen()
+                  .size());
   }
 
  private:
@@ -279,7 +286,7 @@ class TouchHudProjectionTest : public TouchHudTestBase {
   }
 
   int GetInternalTouchPointsCount() {
-    return GetInternalTouchHudProjection()->points_.size();
+    return GetInternalTouchHudProjection()->touch_hud_renderer_->points_.size();
   }
 
   void SendTouchEventToInternalHud(ui::EventType type,
@@ -293,7 +300,7 @@ class TouchHudProjectionTest : public TouchHudTestBase {
   }
 
  private:
-  base::TimeDelta event_time;
+  base::TimeTicks event_time;
 
   DISALLOW_COPY_AND_ASSIGN(TouchHudProjectionTest);
 };

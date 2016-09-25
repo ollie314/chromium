@@ -12,6 +12,7 @@
 #define GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_VALIDATION_AUTOGEN_H_
 
 ValueValidator<GLenum> attachment;
+ValueValidator<GLenum> attachment_query;
 class BackbufferAttachmentValidator {
  public:
   bool IsValid(const GLenum value) const;
@@ -112,8 +113,8 @@ class FaceTypeValidator {
 };
 FaceTypeValidator face_type;
 
-ValueValidator<GLenum> frame_buffer_parameter;
-ValueValidator<GLenum> frame_buffer_target;
+ValueValidator<GLenum> framebuffer_parameter;
+ValueValidator<GLenum> framebuffer_target;
 ValueValidator<GLenum> g_l_state;
 class GetMaxIndexTypeValidator {
  public:
@@ -253,12 +254,7 @@ class QueryTargetValidator {
 };
 QueryTargetValidator query_target;
 
-class ReadBufferValidator {
- public:
-  bool IsValid(const GLenum value) const;
-};
-ReadBufferValidator read_buffer;
-
+ValueValidator<GLenum> read_buffer;
 ValueValidator<GLenum> read_pixel_format;
 ValueValidator<GLenum> read_pixel_type;
 ValueValidator<GLenum> render_buffer_format;
@@ -308,7 +304,6 @@ class StringTypeValidator {
 };
 StringTypeValidator string_type;
 
-ValueValidator<GLenum> subscription_target;
 ValueValidator<GLbitfield> sync_flush_flags;
 class SyncParameterValidator {
  public:
@@ -389,7 +384,6 @@ class UniformParameterValidator {
 };
 UniformParameterValidator uniform_parameter;
 
-ValueValidator<GLenum> value_buffer_target;
 class VertexAttribITypeValidator {
  public:
   bool IsValid(const GLenum value) const;

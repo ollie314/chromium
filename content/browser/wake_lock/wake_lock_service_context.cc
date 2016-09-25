@@ -8,12 +8,12 @@
 
 #include "base/bind.h"
 #include "build/build_config.h"
-#include "content/browser/power_save_blocker_impl.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/power_save_blocker.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/common/service_registry.h"
+#include "content/public/browser/web_contents.h"
+#include "device/power_save_blocker/power_save_blocker.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace content {
 
@@ -26,14 +26,22 @@ void WakeLockServiceContext::CreateService(
     int render_process_id,
     int render_frame_id,
     mojo::InterfaceRequest<blink::mojom::WakeLockService> request) {
-  new WakeLockServiceImpl(weak_factory_.GetWeakPtr(), render_process_id,
-                          render_frame_id, std::move(request));
+  mojo::MakeStrongBinding(
+      base::MakeUnique<WakeLockServiceImpl>(weak_factory_.GetWeakPtr(),
+                                            render_process_id, render_frame_id),
+      std::move(request));
 }
 
 void WakeLockServiceContext::RenderFrameDeleted(
     RenderFrameHost* render_frame_host) {
   CancelWakeLock(render_frame_host->GetProcess()->GetID(),
                  render_frame_host->GetRoutingID());
+}
+
+void WakeLockServiceContext::WebContentsDestroyed() {
+#if defined(OS_ANDROID)
+  view_weak_factory_.reset();
+#endif
 }
 
 void WakeLockServiceContext::RequestWakeLock(int render_process_id,
@@ -61,16 +69,21 @@ bool WakeLockServiceContext::HasWakeLockForTests() const {
 
 void WakeLockServiceContext::CreateWakeLock() {
   DCHECK(!wake_lock_);
-  wake_lock_ = PowerSaveBlocker::Create(
-      PowerSaveBlocker::kPowerSaveBlockPreventDisplaySleep,
-      PowerSaveBlocker::kReasonOther, "Wake Lock API");
+  wake_lock_.reset(new device::PowerSaveBlocker(
+      device::PowerSaveBlocker::kPowerSaveBlockPreventDisplaySleep,
+      device::PowerSaveBlocker::kReasonOther, "Wake Lock API",
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE)));
 
 #if defined(OS_ANDROID)
   // On Android, additionaly associate the blocker with this WebContents.
   DCHECK(web_contents());
 
-  static_cast<PowerSaveBlockerImpl*>(wake_lock_.get())
-      ->InitDisplaySleepBlocker(web_contents());
+  if (web_contents()->GetNativeView()) {
+    view_weak_factory_.reset(new base::WeakPtrFactory<ui::ViewAndroid>(
+        web_contents()->GetNativeView()));
+    wake_lock_.get()->InitDisplaySleepBlocker(view_weak_factory_->GetWeakPtr());
+  }
 #endif
 }
 

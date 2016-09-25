@@ -26,7 +26,8 @@
 #ifndef MockImageDecoder_h
 
 #include "platform/image-decoders/ImageDecoder.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -65,7 +66,7 @@ private:
 
 class MockImageDecoder : public ImageDecoder {
 public:
-    static PassOwnPtr<MockImageDecoder> create(MockImageDecoderClient* client) { return adoptPtr(new MockImageDecoder(client)); }
+    static std::unique_ptr<MockImageDecoder> create(MockImageDecoderClient* client) { return wrapUnique(new MockImageDecoder(client)); }
 
     MockImageDecoder(MockImageDecoderClient* client)
         : ImageDecoder(AlphaPremultiplied, GammaAndColorProfileApplied, noDecodedImageByteLimit)
@@ -128,7 +129,7 @@ private:
 
     void initializeNewFrame(size_t index) override
     {
-        m_frameBufferCache[index].setSize(size().width(), size().height());
+        m_frameBufferCache[index].setSizeAndColorProfile(size().width(), size().height(), colorProfile());
         m_frameBufferCache[index].setHasAlpha(false);
     }
 
@@ -137,21 +138,21 @@ private:
 
 class MockImageDecoderFactory : public ImageDecoderFactory {
 public:
-    static PassOwnPtr<MockImageDecoderFactory> create(MockImageDecoderClient* client, const SkISize& decodedSize)
+    static std::unique_ptr<MockImageDecoderFactory> create(MockImageDecoderClient* client, const SkISize& decodedSize)
     {
-        return adoptPtr(new MockImageDecoderFactory(client, IntSize(decodedSize.width(), decodedSize.height())));
+        return wrapUnique(new MockImageDecoderFactory(client, IntSize(decodedSize.width(), decodedSize.height())));
     }
 
-    static PassOwnPtr<MockImageDecoderFactory> create(MockImageDecoderClient* client, const IntSize& decodedSize)
+    static std::unique_ptr<MockImageDecoderFactory> create(MockImageDecoderClient* client, const IntSize& decodedSize)
     {
-        return adoptPtr(new MockImageDecoderFactory(client, decodedSize));
+        return wrapUnique(new MockImageDecoderFactory(client, decodedSize));
     }
 
-    PassOwnPtr<ImageDecoder> create() override
+    std::unique_ptr<ImageDecoder> create() override
     {
-        OwnPtr<MockImageDecoder> decoder = MockImageDecoder::create(m_client);
+        std::unique_ptr<MockImageDecoder> decoder = MockImageDecoder::create(m_client);
         decoder->setSize(m_decodedSize.width(), m_decodedSize.height());
-        return decoder.release();
+        return std::move(decoder);
     }
 
 private:

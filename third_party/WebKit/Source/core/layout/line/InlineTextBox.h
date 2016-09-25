@@ -23,6 +23,7 @@
 #ifndef InlineTextBox_h
 #define InlineTextBox_h
 
+#include "core/CoreExport.h"
 #include "core/layout/api/LineLayoutText.h"
 #include "core/layout/api/SelectionState.h"
 #include "core/layout/line/InlineBox.h"
@@ -34,10 +35,19 @@ namespace blink {
 class DocumentMarker;
 class GraphicsContext;
 
+// The two truncation values below are used as tokens representing truncation
+// state for the text box, are intended to be relative to |m_start|, and are set
+// directly into |m_truncation|. In the case where there is some truncation of
+// the text but it is not full, |m_truncation| is set to the character offset
+// from |m_start| representing the characters that are not truncated.
+//
+// Thus the maximum possible length of the text displayed before an ellipsis in
+// a single InlineTextBox is |USHRT_MAX - 2| to allow for the no-truncation and
+// full-truncation states.
 const unsigned short cNoTruncation = USHRT_MAX;
 const unsigned short cFullTruncation = USHRT_MAX - 1;
 
-class InlineTextBox : public InlineBox {
+class CORE_EXPORT InlineTextBox : public InlineBox {
 public:
     InlineTextBox(LineLayoutItem item, int start, unsigned short length)
         : InlineBox(item)
@@ -88,8 +98,8 @@ public:
     LayoutUnit logicalBottomVisualOverflow() const { return logicalOverflowRect().maxY(); }
 
     // charactersWithHyphen, if provided, must not be destroyed before the TextRun.
-    TextRun constructTextRun(const ComputedStyle&, const Font&, StringBuilder* charactersWithHyphen = nullptr) const;
-    TextRun constructTextRun(const ComputedStyle&, const Font&, StringView, int maximumLength, StringBuilder* charactersWithHyphen = nullptr) const;
+    TextRun constructTextRun(const ComputedStyle&, StringBuilder* charactersWithHyphen = nullptr) const;
+    TextRun constructTextRun(const ComputedStyle&, StringView, int maximumLength, StringBuilder* charactersWithHyphen = nullptr) const;
 
 #ifndef NDEBUG
     void showBox(int = 0) const override;
@@ -99,8 +109,9 @@ public:
 
     String text() const;
 
+    void transformText();
 public:
-    TextRun constructTextRunForInspector(const ComputedStyle&, const Font&) const;
+    TextRun constructTextRunForInspector(const ComputedStyle&) const;
     LayoutRect calculateBoundaries() const override { return LayoutRect(x(), y(), width(), height()); }
 
     virtual LayoutRect localSelectionRect(int startPos, int endPos) const;

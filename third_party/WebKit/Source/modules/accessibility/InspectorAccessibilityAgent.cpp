@@ -8,13 +8,14 @@
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/DOMNodeIds.h"
 #include "core/dom/Element.h"
+#include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectorDOMAgent.h"
 #include "core/inspector/InspectorStyleSheet.h"
 #include "core/page/Page.h"
 #include "modules/accessibility/AXObject.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "modules/accessibility/InspectorTypeBuilderHelper.h"
-#include "platform/inspector_protocol/Values.h"
+#include <memory>
 
 namespace blink {
 
@@ -246,18 +247,18 @@ void fillWidgetStates(AXObject* axObject, protocol::Array<AXProperty>* propertie
     }
 }
 
-PassOwnPtr<AXProperty> createRelatedNodeListProperty(const String& key, AXRelatedObjectVector& nodes)
+std::unique_ptr<AXProperty> createRelatedNodeListProperty(const String& key, AXRelatedObjectVector& nodes)
 {
-    OwnPtr<AXValue> nodeListValue = createRelatedNodeListValue(nodes, AXValueTypeEnum::NodeList);
-    return createProperty(key, nodeListValue.release());
+    std::unique_ptr<AXValue> nodeListValue = createRelatedNodeListValue(nodes, AXValueTypeEnum::NodeList);
+    return createProperty(key, std::move(nodeListValue));
 }
 
-PassOwnPtr<AXProperty> createRelatedNodeListProperty(const String& key, AXObject::AXObjectVector& nodes, const QualifiedName& attr, AXObject* axObject)
+std::unique_ptr<AXProperty> createRelatedNodeListProperty(const String& key, AXObject::AXObjectVector& nodes, const QualifiedName& attr, AXObject* axObject)
 {
-    OwnPtr<AXValue> nodeListValue = createRelatedNodeListValue(nodes);
+    std::unique_ptr<AXValue> nodeListValue = createRelatedNodeListValue(nodes);
     const AtomicString& attrValue = axObject->getAttribute(attr);
     nodeListValue->setValue(protocol::StringValue::create(attrValue));
-    return createProperty(key, nodeListValue.release());
+    return createProperty(key, std::move(nodeListValue));
 }
 
 void fillRelationships(AXObject* axObject, protocol::Array<AXProperty>* properties)
@@ -288,53 +289,60 @@ void fillRelationships(AXObject* axObject, protocol::Array<AXProperty>* properti
     results.clear();
 }
 
-PassOwnPtr<AXValue> createRoleNameValue(AccessibilityRole role)
+std::unique_ptr<AXValue> createRoleNameValue(AccessibilityRole role)
 {
     AtomicString roleName = AXObject::roleName(role);
-    OwnPtr<AXValue> roleNameValue;
+    std::unique_ptr<AXValue> roleNameValue;
     if (!roleName.isNull()) {
         roleNameValue = createValue(roleName, AXValueTypeEnum::Role);
     } else {
         roleNameValue = createValue(AXObject::internalRoleName(role), AXValueTypeEnum::InternalRole);
     }
-    return roleNameValue.release();
+    return roleNameValue;
 }
 
-PassOwnPtr<AXNode> buildObjectForIgnoredNode(Node* node, AXObject* axObject, AXObjectCacheImpl* cacheImpl)
+std::unique_ptr<AXNode> buildObjectForIgnoredNode(Node* node, const AXObject* axObject)
 {
     AXObject::IgnoredReasons ignoredReasons;
 
     AXID axID = 0;
-    OwnPtr<AXNode> ignoredNodeObject = AXNode::create().setNodeId(String::number(axID)).setIgnored(true).build();
+    std::unique_ptr<AXNode> ignoredNodeObject = AXNode::create().setNodeId(String::number(axID)).setIgnored(true).build();
     if (axObject) {
         axObject->computeAccessibilityIsIgnored(&ignoredReasons);
         axID = axObject->axObjectID();
         AccessibilityRole role = axObject->roleValue();
         ignoredNodeObject->setRole(createRoleNameValue(role));
-    } else if (!node->layoutObject()) {
+    } else if (node && !node->layoutObject()) {
         ignoredReasons.append(IgnoredReason(AXNotRendered));
     }
 
-    OwnPtr<protocol::Array<AXProperty>> ignoredReasonProperties = protocol::Array<AXProperty>::create();
+    std::unique_ptr<protocol::Array<AXProperty>> ignoredReasonProperties = protocol::Array<AXProperty>::create();
     for (size_t i = 0; i < ignoredReasons.size(); i++)
         ignoredReasonProperties->addItem(createProperty(ignoredReasons[i]));
-    ignoredNodeObject->setIgnoredReasons(ignoredReasonProperties.release());
+    ignoredNodeObject->setIgnoredReasons(std::move(ignoredReasonProperties));
 
-    return ignoredNodeObject.release();
+    return ignoredNodeObject;
 }
 
-PassOwnPtr<AXNode> buildObjectForNode(Node* node, AXObject* axObject, AXObjectCacheImpl* cacheImpl, PassOwnPtr<protocol::Array<AXProperty>> properties)
+std::unique_ptr<AXNode> buildProtocolAXObject(AXObject* axObject)
 {
     AccessibilityRole role = axObject->roleValue();
-    OwnPtr<AXNode> nodeObject = AXNode::create().setNodeId(String::number(axObject->axObjectID())).setIgnored(false).build();
+    std::unique_ptr<AXNode> nodeObject = AXNode::create().setNodeId(String::number(axObject->axObjectID())).setIgnored(false).build();
     nodeObject->setRole(createRoleNameValue(role));
+
+    std::unique_ptr<protocol::Array<AXProperty>> properties = protocol::Array<AXProperty>::create();
+    fillLiveRegionProperties(axObject, properties.get());
+    fillGlobalStates(axObject, properties.get());
+    fillWidgetProperties(axObject, properties.get());
+    fillWidgetStates(axObject, properties.get());
+    fillRelationships(axObject, properties.get());
 
     AXObject::NameSources nameSources;
     String computedName = axObject->name(&nameSources);
     if (!nameSources.isEmpty()) {
-        OwnPtr<AXValue> name = createValue(computedName, AXValueTypeEnum::ComputedString);
+        std::unique_ptr<AXValue> name = createValue(computedName, AXValueTypeEnum::ComputedString);
         if (!nameSources.isEmpty()) {
-            OwnPtr<protocol::Array<AXValueSource>> nameSourceProperties = protocol::Array<AXValueSource>::create();
+            std::unique_ptr<protocol::Array<AXValueSource>> nameSourceProperties = protocol::Array<AXValueSource>::create();
             for (size_t i = 0; i < nameSources.size(); ++i) {
                 NameSource& nameSource = nameSources[i];
                 nameSourceProperties->addItem(createValueSource(nameSource));
@@ -344,65 +352,67 @@ PassOwnPtr<AXNode> buildObjectForNode(Node* node, AXObject* axObject, AXObjectCa
                     properties->addItem(createRelatedNodeListProperty(AXRelationshipAttributesEnum::Labelledby, nameSource.relatedObjects));
                 }
             }
-            name->setSources(nameSourceProperties.release());
+            name->setSources(std::move(nameSourceProperties));
         }
-        nodeObject->setProperties(properties);
-        nodeObject->setName(name.release());
+        nodeObject->setProperties(std::move(properties));
+        nodeObject->setName(std::move(name));
     } else {
-        nodeObject->setProperties(properties);
+        nodeObject->setProperties(std::move(properties));
     }
 
     fillCoreProperties(axObject, nodeObject.get());
-    return nodeObject.release();
+    return nodeObject;
 }
 
 } // namespace
 
-InspectorAccessibilityAgent::InspectorAccessibilityAgent(Page* page)
-    : InspectorBaseAgent<InspectorAccessibilityAgent, protocol::Frontend::Accessibility>("Accessibility")
-    , m_page(page)
+InspectorAccessibilityAgent::InspectorAccessibilityAgent(Page* page, InspectorDOMAgent* domAgent)
+    : m_page(page)
+    , m_domAgent(domAgent)
 {
 }
 
-void InspectorAccessibilityAgent::getAXNode(ErrorString* errorString, int nodeId, Maybe<AXNode>* accessibilityNode)
+void InspectorAccessibilityAgent::getAXNodeChain(ErrorString* errorString, int domNodeId, bool fetchAncestors, std::unique_ptr<protocol::Array<protocol::Accessibility::AXNode>>* nodes)
 {
-    Frame* mainFrame = m_page->mainFrame();
-    if (!mainFrame->isLocalFrame()) {
-        *errorString = "Can't inspect out of process frames yet";
-        return;
-    }
-
-    InspectorDOMAgent* domAgent = toLocalFrame(mainFrame)->instrumentingAgents()->inspectorDOMAgent();
-    if (!domAgent) {
+    if (!m_domAgent->enabled()) {
         *errorString = "DOM agent must be enabled";
         return;
     }
-    Node* node = domAgent->assertNode(errorString, nodeId);
+    Node* node = m_domAgent->assertNode(errorString, domNodeId);
     if (!node)
         return;
 
     Document& document = node->document();
-    OwnPtr<ScopedAXObjectCache> cache = ScopedAXObjectCache::create(document);
-    AXObjectCacheImpl* cacheImpl = toAXObjectCacheImpl(cache->get());
-    AXObject* axObject = cacheImpl->getOrCreate(node);
-    if (!axObject || axObject->accessibilityIsIgnored()) {
-        *accessibilityNode = buildObjectForIgnoredNode(node, axObject, cacheImpl);
+    document.updateStyleAndLayoutIgnorePendingStylesheets();
+    DocumentLifecycle::DisallowTransitionScope disallowTransition(document.lifecycle());
+    LocalFrame* localFrame = document.frame();
+    if (!localFrame) {
+        *errorString = "Frame is detached.";
         return;
     }
+    std::unique_ptr<ScopedAXObjectCache> scopedCache = ScopedAXObjectCache::create(document);
+    AXObjectCacheImpl* cache = toAXObjectCacheImpl(scopedCache->get());
+    AXObject* axObject = cache->getOrCreate(node);
+    *nodes = protocol::Array<protocol::Accessibility::AXNode>::create();
+    if (!axObject || axObject->accessibilityIsIgnored()) {
+        (*nodes)->addItem(buildObjectForIgnoredNode(node, axObject));
+    } else {
+        (*nodes)->addItem(buildProtocolAXObject(axObject));
+    }
 
-    OwnPtr<protocol::Array<AXProperty>> properties = protocol::Array<AXProperty>::create();
-    fillLiveRegionProperties(axObject, properties.get());
-    fillGlobalStates(axObject, properties.get());
-    fillWidgetProperties(axObject, properties.get());
-    fillWidgetStates(axObject, properties.get());
-    fillRelationships(axObject, properties.get());
-
-    *accessibilityNode = buildObjectForNode(node, axObject, cacheImpl, properties.release());
+    if (fetchAncestors && axObject) {
+        AXObject* parent = axObject->parentObjectUnignored();
+        while (parent) {
+            (*nodes)->addItem(buildProtocolAXObject(parent));
+            parent = parent->parentObjectUnignored();
+        }
+    }
 }
 
 DEFINE_TRACE(InspectorAccessibilityAgent)
 {
     visitor->trace(m_page);
+    visitor->trace(m_domAgent);
     InspectorBaseAgent::trace(visitor);
 }
 

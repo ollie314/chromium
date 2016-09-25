@@ -24,7 +24,7 @@
 
 namespace net {
 
-class BoundNetLog;
+class NetLogWithSource;
 class URLRequest;
 class URLRequestThrottlerEntryInterface;
 
@@ -38,7 +38,7 @@ class NET_EXPORT SdchDictionaryFetcher : public URLRequest::Delegate,
  public:
   typedef base::Callback<void(const std::string& dictionary_text,
                               const GURL& dictionary_url,
-                              const BoundNetLog& net_log,
+                              const NetLogWithSource& net_log,
                               bool was_from_cache)>
       OnDictionaryFetchedCallback;
 
@@ -65,7 +65,7 @@ class NET_EXPORT SdchDictionaryFetcher : public URLRequest::Delegate,
   void OnReceivedRedirect(URLRequest* request,
                           const RedirectInfo& redirect_info,
                           bool* defer_redirect) override;
-  void OnResponseStarted(URLRequest* request) override;
+  void OnResponseStarted(URLRequest* request, int net_error) override;
   void OnReadCompleted(URLRequest* request, int bytes_read) override;
 
  private:
@@ -112,8 +112,10 @@ class NET_EXPORT SdchDictionaryFetcher : public URLRequest::Delegate,
   scoped_refptr<IOBuffer> buffer_;
   OnDictionaryFetchedCallback current_callback_;
 
-  // The currently accumulating dictionary.
-  std::string dictionary_;
+  // The currently accumulating dictionary. Stored as a unique_ptr so all memory
+  // it consumes can be easily freed, as it gets quite big, and
+  // std::string::clear() may not free memory.
+  std::unique_ptr<std::string> dictionary_;
 
   // Store the URLRequestContext associated with the owning SdchManager for
   // use while fetching.

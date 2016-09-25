@@ -20,11 +20,11 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList(
       details_callback_(details_callback) {}
 
 ConfigurationPolicyHandlerList::~ConfigurationPolicyHandlerList() {
-  STLDeleteElements(&handlers_);
+  base::STLDeleteElements(&handlers_);
 }
 
 void ConfigurationPolicyHandlerList::AddHandler(
-    scoped_ptr<ConfigurationPolicyHandler> handler) {
+    std::unique_ptr<ConfigurationPolicyHandler> handler) {
   handlers_.push_back(handler.release());
 }
 

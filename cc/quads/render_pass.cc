@@ -10,6 +10,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "base/values.h"
 #include "cc/base/math_util.h"
@@ -17,7 +18,6 @@
 #include "cc/output/copy_output_request.h"
 #include "cc/quads/debug_border_draw_quad.h"
 #include "cc/quads/draw_quad.h"
-#include "cc/quads/io_surface_draw_quad.h"
 #include "cc/quads/largest_draw_quad.h"
 #include "cc/quads/picture_draw_quad.h"
 #include "cc/quads/render_pass_draw_quad.h"
@@ -35,6 +35,10 @@ const size_t kDefaultNumQuadsToReserve = 128;
 }
 
 namespace cc {
+
+QuadList::QuadList()
+    : ListContainer<DrawQuad>(LargestDrawQuadSize(),
+                              kDefaultNumSharedQuadStatesToReserve) {}
 
 QuadList::QuadList(size_t default_size_to_reserve)
     : ListContainer<DrawQuad>(LargestDrawQuadSize(), default_size_to_reserve) {
@@ -95,51 +99,50 @@ std::unique_ptr<RenderPass> RenderPass::Copy(RenderPassId new_id) const {
   return copy_pass;
 }
 
+std::unique_ptr<RenderPass> RenderPass::DeepCopy() const {
+  // Since we can't copy these, it's wrong to use DeepCopy in a situation where
+  // you may have copy_requests present.
+  DCHECK_EQ(copy_requests.size(), 0u);
+
+  std::unique_ptr<RenderPass> copy_pass(
+      Create(shared_quad_state_list.size(), quad_list.size()));
+  copy_pass->SetAll(id, output_rect, damage_rect, transform_to_root_target,
+                    has_transparent_background);
+  for (auto* shared_quad_state : shared_quad_state_list) {
+    SharedQuadState* copy_shared_quad_state =
+        copy_pass->CreateAndAppendSharedQuadState();
+    *copy_shared_quad_state = *shared_quad_state;
+  }
+  SharedQuadStateList::ConstIterator sqs_iter = shared_quad_state_list.begin();
+  SharedQuadStateList::Iterator copy_sqs_iter =
+      copy_pass->shared_quad_state_list.begin();
+  for (auto* quad : quad_list) {
+    while (quad->shared_quad_state != *sqs_iter) {
+      ++sqs_iter;
+      ++copy_sqs_iter;
+      DCHECK(sqs_iter != shared_quad_state_list.end());
+    }
+    DCHECK(quad->shared_quad_state == *sqs_iter);
+
+    SharedQuadState* copy_shared_quad_state = *copy_sqs_iter;
+
+    if (quad->material == DrawQuad::RENDER_PASS) {
+      const RenderPassDrawQuad* pass_quad =
+          RenderPassDrawQuad::MaterialCast(quad);
+      copy_pass->CopyFromAndAppendRenderPassDrawQuad(
+          pass_quad, copy_shared_quad_state, pass_quad->render_pass_id);
+    } else {
+      copy_pass->CopyFromAndAppendDrawQuad(quad, copy_shared_quad_state);
+    }
+  }
+  return copy_pass;
+}
+
 // static
 void RenderPass::CopyAll(const std::vector<std::unique_ptr<RenderPass>>& in,
                          std::vector<std::unique_ptr<RenderPass>>* out) {
-  for (const auto& source : in) {
-    // Since we can't copy these, it's wrong to use CopyAll in a situation where
-    // you may have copy_requests present.
-    DCHECK_EQ(source->copy_requests.size(), 0u);
-
-    std::unique_ptr<RenderPass> copy_pass(Create(
-        source->shared_quad_state_list.size(), source->quad_list.size()));
-    copy_pass->SetAll(source->id,
-                      source->output_rect,
-                      source->damage_rect,
-                      source->transform_to_root_target,
-                      source->has_transparent_background);
-    for (const auto& shared_quad_state : source->shared_quad_state_list) {
-      SharedQuadState* copy_shared_quad_state =
-          copy_pass->CreateAndAppendSharedQuadState();
-      copy_shared_quad_state->CopyFrom(shared_quad_state);
-    }
-    SharedQuadStateList::Iterator sqs_iter =
-        source->shared_quad_state_list.begin();
-    SharedQuadStateList::Iterator copy_sqs_iter =
-        copy_pass->shared_quad_state_list.begin();
-    for (const auto& quad : source->quad_list) {
-      while (quad->shared_quad_state != *sqs_iter) {
-        ++sqs_iter;
-        ++copy_sqs_iter;
-        DCHECK(sqs_iter != source->shared_quad_state_list.end());
-      }
-      DCHECK(quad->shared_quad_state == *sqs_iter);
-
-      SharedQuadState* copy_shared_quad_state = *copy_sqs_iter;
-
-      if (quad->material == DrawQuad::RENDER_PASS) {
-        const RenderPassDrawQuad* pass_quad =
-            RenderPassDrawQuad::MaterialCast(quad);
-        copy_pass->CopyFromAndAppendRenderPassDrawQuad(
-            pass_quad, copy_shared_quad_state, pass_quad->render_pass_id);
-      } else {
-        copy_pass->CopyFromAndAppendDrawQuad(quad, copy_shared_quad_state);
-      }
-    }
-    out->push_back(std::move(copy_pass));
-  }
+  for (const auto& source : in)
+    out->push_back(source->DeepCopy());
 }
 
 void RenderPass::SetNew(RenderPassId id,
@@ -186,7 +189,7 @@ void RenderPass::AsValueInto(base::trace_event::TracedValue* value) const {
                     base::saturated_cast<int>(copy_requests.size()));
 
   value->BeginArray("shared_quad_state_list");
-  for (const auto& shared_quad_state : shared_quad_state_list) {
+  for (auto* shared_quad_state : shared_quad_state_list) {
     value->BeginDictionary();
     shared_quad_state->AsValueInto(value);
     value->EndDictionary();
@@ -194,7 +197,7 @@ void RenderPass::AsValueInto(base::trace_event::TracedValue* value) const {
   value->EndArray();
 
   value->BeginArray("quad_list");
-  for (const auto& quad : quad_list) {
+  for (auto* quad : quad_list) {
     value->BeginDictionary();
     quad->AsValueInto(value);
     value->EndDictionary();
@@ -229,9 +232,6 @@ DrawQuad* RenderPass::CopyFromAndAppendDrawQuad(
   switch (quad->material) {
     case DrawQuad::DEBUG_BORDER:
       CopyFromAndAppendTypedDrawQuad<DebugBorderDrawQuad>(quad);
-      break;
-    case DrawQuad::IO_SURFACE_CONTENT:
-      CopyFromAndAppendTypedDrawQuad<IOSurfaceDrawQuad>(quad);
       break;
     case DrawQuad::PICTURE_CONTENT:
       CopyFromAndAppendTypedDrawQuad<PictureDrawQuad>(quad);

@@ -30,7 +30,8 @@
 #include "core/fetch/ResourceClient.h"
 #include "platform/Timer.h"
 #include "platform/fonts/FontOrientation.h"
-#include "wtf/OwnPtr.h"
+#include "platform/heap/Handle.h"
+#include <memory>
 
 namespace blink {
 
@@ -49,6 +50,8 @@ public:
 
     void didAddClient(ResourceClient*) override;
 
+    void setRevalidatingRequest(const ResourceRequest&) override;
+
     void allClientsAndObserversRemoved() override;
     void startLoadLimitTimersIfNeeded();
 
@@ -58,9 +61,6 @@ public:
 
     bool ensureCustomFontData();
     FontPlatformData platformDataFromCustomData(float size, bool bold, bool italic, FontOrientation = FontOrientation::Horizontal);
-
-protected:
-    bool isSafeToUnlock() const override;
 
 private:
     class FontResourceFactory : public ResourceFactory {
@@ -76,12 +76,12 @@ private:
     FontResource(const ResourceRequest&, const ResourceLoaderOptions&);
 
     void checkNotify() override;
-    void fontLoadShortLimitCallback(Timer<FontResource>*);
-    void fontLoadLongLimitCallback(Timer<FontResource>*);
+    void fontLoadShortLimitCallback(TimerBase*);
+    void fontLoadLongLimitCallback(TimerBase*);
 
     enum LoadLimitState { UnderLimit, ShortLimitExceeded, LongLimitExceeded };
 
-    OwnPtr<FontCustomPlatformData> m_fontData;
+    std::unique_ptr<FontCustomPlatformData> m_fontData;
     String m_otsParsingMessage;
     LoadLimitState m_loadLimitState;
     bool m_corsFailed;

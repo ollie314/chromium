@@ -19,7 +19,6 @@
 #include "base/process/process_metrics.h"
 #include "base/system_monitor/system_monitor.h"
 #include "base/threading/thread_restrictions.h"
-#include "crypto/nss_util.h"
 #include "ios/web/net/cookie_notification_bridge.h"
 #include "ios/web/public/app/web_main_parts.h"
 #include "ios/web/public/web_client.h"
@@ -52,14 +51,6 @@ void WebMainLoop::Init() {
 void WebMainLoop::EarlyInitialization() {
   if (parts_) {
     parts_->PreEarlyInitialization();
-  }
-
-#if defined(USE_NSS_VERIFIER)
-  // We want to be sure to init NSPR on the main thread.
-  crypto::EnsureNSPRInit();
-#endif
-
-  if (parts_) {
     parts_->PostEarlyInitialization();
   }
 }
@@ -263,11 +254,7 @@ void WebMainLoop::ShutdownThreadsAndCleanUp() {
 }
 
 void WebMainLoop::InitializeMainThread() {
-  const char* kThreadName = "CrWebMain";
-  base::PlatformThread::SetName(kThreadName);
-  if (main_message_loop_) {
-    main_message_loop_->set_thread_name(kThreadName);
-  }
+  base::PlatformThread::SetName("CrWebMain");
 
   // Register the main thread by instantiating it, but don't call any methods.
   main_thread_.reset(

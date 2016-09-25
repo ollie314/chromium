@@ -27,19 +27,13 @@
 
 #include "core/CoreExport.h"
 #include "core/layout/LayoutTable.h"
+#include "core/layout/LayoutTableBoxComponent.h"
 #include "wtf/Vector.h"
 
 namespace blink {
 
 // This variable is used to balance the memory consumption vs the paint invalidation time on big tables.
 const float gMaxAllowedOverflowingCellRatioForFastPaintPath = 0.1f;
-
-enum CollapsedBorderSide {
-    CBSBefore,
-    CBSAfter,
-    CBSStart,
-    CBSEnd
-};
 
 // Helper class for paintObject.
 class CellSpan {
@@ -102,17 +96,14 @@ class LayoutTableRow;
 // LayoutTableSection is responsible for laying out LayoutTableRows and
 // LayoutTableCells (see layoutRows()). However it is not their containing
 // block, the enclosing LayoutTable (this object's parent()) is. This is why
-// this class inherits from LayoutBox and not LayoutBlock.
-class CORE_EXPORT LayoutTableSection final : public LayoutBox {
+// this class inherits from LayoutTableBoxComponent and not LayoutBlock.
+class CORE_EXPORT LayoutTableSection final : public LayoutTableBoxComponent {
 public:
-    LayoutTableSection(Element*);
+    explicit LayoutTableSection(Element*);
     ~LayoutTableSection() override;
 
     LayoutTableRow* firstRow() const;
     LayoutTableRow* lastRow() const;
-
-    const LayoutObjectChildList* children() const { return &m_children; }
-    LayoutObjectChildList* children() { return &m_children; }
 
     void addChild(LayoutObject* child, LayoutObject* beforeChild = nullptr) override;
 
@@ -124,6 +115,8 @@ public:
     void layoutRows();
     void computeOverflowFromCells();
     bool recalcChildOverflowAfterStyleChange();
+
+    void markAllCellsWidthsDirtyAndOrNeedsLayout(LayoutTable::WhatToMarkAllCells);
 
     LayoutTable* table() const { return toLayoutTable(parent()); }
 
@@ -141,10 +134,8 @@ public:
         Vector<LayoutTableCell*, 1> cells;
         bool inColSpan; // true for columns after the first in a colspan
 
-        CellStruct()
-            : inColSpan(false)
-        {
-        }
+        CellStruct();
+        ~CellStruct();
 
         // This is the cell in the grid "slot" that is on top of the others
         // (aka the last cell in DOM order for this slot).
@@ -237,6 +228,7 @@ public:
     }
     const LayoutTableCell* primaryCellAt(unsigned row, unsigned effectiveColumn) const { return const_cast<LayoutTableSection*>(this)->primaryCellAt(row, effectiveColumn); }
 
+    // Returns null for cells with a rowspan that exceed the last row. Possibly others.
     LayoutTableRow* rowLayoutObjectAt(unsigned row) { return m_grid[row].rowLayoutObject; }
     const LayoutTableRow* rowLayoutObjectAt(unsigned row) const { return m_grid[row].rowLayoutObject; }
 
@@ -254,7 +246,11 @@ public:
     int outerBorderStart() const { return m_outerBorderStart; }
     int outerBorderEnd() const { return m_outerBorderEnd; }
 
-    unsigned numRows() const { return m_grid.size(); }
+    unsigned numRows() const
+    {
+        DCHECK(!needsCellRecalc());
+        return m_grid.size();
+    }
     unsigned numEffectiveColumns() const;
 
     // recalcCells() is used when we are not sure about the section's structure
@@ -279,12 +275,6 @@ public:
     int rowBaseline(unsigned row) { return m_grid[row].baseline; }
 
     void rowLogicalHeightChanged(LayoutTableRow*);
-
-    void removeCachedCollapsedBorders(const LayoutTableCell*);
-    // Returns true if any collapsed borders of the cell changed.
-    bool setCachedCollapsedBorder(const LayoutTableCell*, CollapsedBorderSide, const CollapsedBorderValue&);
-    // Returns null if the border is not cached (there is no such collapsed border or the border is invisible).
-    const CollapsedBorderValue* cachedCollapsedBorder(const LayoutTableCell*, CollapsedBorderSide) const;
 
     // distributeExtraLogicalHeightToRows methods return the *consumed* extra logical height.
     // FIXME: We may want to introduce a structure holding the in-flux layout information.
@@ -314,21 +304,25 @@ public:
     bool foregroundIsKnownToBeOpaqueInRect(const LayoutRect&, unsigned) const override { return false; }
     bool backgroundIsKnownToBeOpaqueInRect(const LayoutRect&) const override { return false; }
 
+    int paginationStrutForRow(LayoutTableRow*, LayoutUnit logicalOffset) const;
+
+    void setOffsetForRepeatingHeader(LayoutUnit offset) { m_offsetForRepeatingHeader = offset; }
+    LayoutUnit offsetForRepeatingHeader() const { return m_offsetForRepeatingHeader; }
+
+    bool mapToVisualRectInAncestorSpace(const LayoutBoxModelObject* ancestor, LayoutRect&, VisualRectFlags = DefaultVisualRectFlags) const override;
+
+    bool isRepeatingHeaderGroup() const;
+
 protected:
     void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
     bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override;
 
 private:
-    LayoutObjectChildList* virtualChildren() override { return children(); }
-    const LayoutObjectChildList* virtualChildren() const override { return children(); }
-
     bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectTableSection || LayoutBox::isOfType(type); }
 
     void willBeRemovedFromTree() override;
 
     void layout() override;
-
-    void imageChanged(WrappedImagePtr, const IntRect* = nullptr) override;
 
     int borderSpacingForRow(unsigned row) const { return m_grid[row].rowLayoutObject ? table()->vBorderSpacing() : 0; }
 
@@ -365,16 +359,14 @@ private:
 
     void setLogicalPositionForCell(LayoutTableCell*, unsigned effectiveColumn) const;
 
-    LayoutObjectChildList m_children;
-
     // The representation of the rows and their cells (CellStruct).
     Vector<RowStruct> m_grid;
 
     // The logical offset of each row from the top of the section.
     //
     // Note that this Vector has one more entry than the number of rows so that
-    // we can keep track of the final size of the section
-    // (m_rowPos[m_grid.size() + 1]).
+    // we can keep track of the final size of the section. That is,
+    // m_rowPos[m_grid.size()] is a valid entry.
     //
     // To know a row's height at |rowIndex|, use the formula:
     // m_rowPos[rowIndex + 1] - m_rowPos[rowIndex]
@@ -413,11 +405,7 @@ private:
     // invalidated cells.
     bool m_hasMultipleCellLevels;
 
-    // This map holds the collapsed border values for cells with collapsed borders.
-    // It is held at LayoutTableSection level to spare memory consumption by table cells.
-    // Invisible borders are never stored in this map.
-    using CellsCollapsedBordersMap = HashMap<std::pair<const LayoutTableCell*, int>, CollapsedBorderValue>;
-    CellsCollapsedBordersMap m_cellsCollapsedBorders;
+    LayoutUnit m_offsetForRepeatingHeader;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutTableSection, isTableSection());

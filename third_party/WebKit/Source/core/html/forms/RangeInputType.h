@@ -32,18 +32,24 @@
 #define RangeInputType_h
 
 #include "core/html/forms/InputType.h"
+#include "core/html/forms/InputTypeView.h"
 
 namespace blink {
 
 class ExceptionState;
 class SliderThumbElement;
 
-class RangeInputType final : public InputType {
+class RangeInputType final : public InputType, public InputTypeView {
+    USING_GARBAGE_COLLECTED_MIXIN(RangeInputType);
+
 public:
     static InputType* create(HTMLInputElement&);
+    DECLARE_VIRTUAL_TRACE();
+    using InputType::element;
 
 private:
     RangeInputType(HTMLInputElement&);
+    InputTypeView* createView() override;
     void countUsage() override;
     const AtomicString& formControlType() const override;
     double valueAsDouble() const override;
@@ -53,8 +59,6 @@ private:
     StepRange createStepRange(AnyStepHandling) const override;
     bool isSteppable() const override;
     void handleMouseDownEvent(MouseEvent*) override;
-    void handleTouchEvent(TouchEvent*) override;
-    bool hasTouchEventHandler() const override;
     void handleKeydownEvent(KeyboardEvent*) override;
     LayoutObject* createLayoutObject(const ComputedStyle&) const override;
     void createShadowSubtree() override;
@@ -62,6 +66,7 @@ private:
     String serialize(const Decimal&) const override;
     void accessKeyAction(bool sendMouseEvents) override;
     void sanitizeValueInResponseToMinOrMaxAttributeChange() override;
+    void stepAttributeChanged() override;
     void warnIfValueIsInvalid(const String&) const override;
     void setValue(const String&, bool valueChanged, TextFieldEventBehavior) override;
     String fallbackValue() const override;

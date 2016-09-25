@@ -15,18 +15,16 @@
 #ifndef CHROME_BROWSER_NET_REFERRER_H_
 #define CHROME_BROWSER_NET_REFERRER_H_
 
-#include <map>
-
 #include <stdint.h>
+
+#include <map>
+#include <memory>
 
 #include "base/macros.h"
 #include "base/time/time.h"
+#include "base/values.h"
 #include "net/base/host_port_pair.h"
 #include "url/gurl.h"
-
-namespace base {
-class Value;
-}
 
 namespace chrome_browser_net {
 
@@ -61,10 +59,6 @@ class ReferrerValue {
 
   int64_t preresolution_count() const { return preresolution_count_; }
   void preresolution_increment() { ++preresolution_count_; }
-
-  // Reduce the subresource_use_rate_ by the supplied factor, and return true
-  // if the result is still greater than the given threshold.
-  bool Trim(double reduce_rate, double threshold);
 
  private:
   const base::Time birth_time_;
@@ -111,13 +105,8 @@ class Referrer : public SubresourceMap {
   // discarded to make room for this insertion.
   void SuggestHost(const GURL& url);
 
-  // Trim the Referrer, by first diminishing (scaling down) the subresource
-  // use expectation for each ReferredValue.
-  // Returns true if expected use rate is greater than the threshold.
-  bool Trim(double reduce_rate, double threshold);
-
   // Provide methods for persisting, and restoring contents into a Value class.
-  base::Value* Serialize() const;
+  std::unique_ptr<base::ListValue> Serialize() const;
   void Deserialize(const base::Value& referrers);
 
  private:

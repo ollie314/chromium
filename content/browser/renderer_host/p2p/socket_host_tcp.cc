@@ -67,20 +67,23 @@ P2PSocketHostTcpBase::~P2PSocketHostTcpBase() {
   }
 }
 
-bool P2PSocketHostTcpBase::InitAccepted(const net::IPEndPoint& remote_address,
-                                        net::StreamSocket* socket) {
+bool P2PSocketHostTcpBase::InitAccepted(
+    const net::IPEndPoint& remote_address,
+    std::unique_ptr<net::StreamSocket> socket) {
   DCHECK(socket);
   DCHECK_EQ(state_, STATE_UNINITIALIZED);
 
   remote_address_.ip_address = remote_address;
   // TODO(ronghuawu): Add FakeSSLServerSocket.
-  socket_.reset(socket);
+  socket_ = std::move(socket);
   state_ = STATE_OPEN;
   DoRead();
   return state_ != STATE_ERROR;
 }
 
 bool P2PSocketHostTcpBase::Init(const net::IPEndPoint& local_address,
+                                uint16_t min_port,
+                                uint16_t max_port,
                                 const P2PHostAndIPEndPoint& remote_address) {
   DCHECK_EQ(state_, STATE_UNINITIALIZED);
 
@@ -108,10 +111,8 @@ bool P2PSocketHostTcpBase::Init(const net::IPEndPoint& local_address,
   // The default SSLConfig is good enough for us for now.
   const net::SSLConfig ssl_config;
   socket_.reset(new jingle_glue::ProxyResolvingClientSocket(
-                    NULL,     // Default socket pool provided by the net::Proxy.
-                    url_context_,
-                    ssl_config,
-                    dest_host_port_pair));
+      nullptr,  // Default socket pool provided by the net::Proxy.
+      url_context_, ssl_config, dest_host_port_pair));
 
   int status = socket_->Connect(
       base::Bind(&P2PSocketHostTcpBase::OnConnected,
@@ -183,11 +184,15 @@ void P2PSocketHostTcpBase::StartTls() {
       new net::ClientSocketHandle());
   socket_handle->SetSocket(std::move(socket_));
 
-  net::SSLClientSocketContext context;
-  context.cert_verifier = url_context_->GetURLRequestContext()->cert_verifier();
-  context.transport_security_state =
-      url_context_->GetURLRequestContext()->transport_security_state();
-  DCHECK(context.transport_security_state);
+  const net::URLRequestContext* url_request_context =
+      url_context_->GetURLRequestContext();
+  net::SSLClientSocketContext context(
+      url_request_context->cert_verifier(),
+      nullptr, /* TODO(rkn): ChannelIDService is not thread safe. */
+      url_request_context->transport_security_state(),
+      url_request_context->cert_transparency_verifier(),
+      url_request_context->ct_policy_enforcer(),
+      std::string() /* TODO(rsleevi): Ensure a proper unique shard. */);
 
   // Default ssl config.
   const net::SSLConfig ssl_config;
@@ -196,7 +201,7 @@ void P2PSocketHostTcpBase::StartTls() {
   // Calling net::HostPortPair::FromIPEndPoint will crash if the IP address is
   // empty.
   if (!remote_address_.ip_address.address().empty()) {
-      net::HostPortPair::FromIPEndPoint(remote_address_.ip_address);
+    net::HostPortPair::FromIPEndPoint(remote_address_.ip_address);
   } else {
     dest_host_port_pair.set_port(remote_address_.ip_address.port());
   }
@@ -420,7 +425,7 @@ void P2PSocketHostTcpBase::HandleWriteResult(int result) {
       message_sender_->Send(
           new P2PMsg_OnSendComplete(id_, P2PSendPacketMetrics()));
       if (write_queue_.empty()) {
-        write_buffer_ = NULL;
+        write_buffer_ = nullptr;
       } else {
         write_buffer_ = write_queue_.front();
         write_queue_.pop();
@@ -431,16 +436,20 @@ void P2PSocketHostTcpBase::HandleWriteResult(int result) {
   } else if (result == net::ERR_IO_PENDING) {
     write_pending_ = true;
   } else {
+    ReportSocketError(result, "WebRTC.ICE.TcpSocketWriteErrorCode");
+
     LOG(ERROR) << "Error when sending data in TCP socket: " << result;
     OnError();
   }
 }
 
-P2PSocketHost* P2PSocketHostTcpBase::AcceptIncomingTcpConnection(
-    const net::IPEndPoint& remote_address, int id) {
+std::unique_ptr<P2PSocketHost>
+P2PSocketHostTcpBase::AcceptIncomingTcpConnection(
+    const net::IPEndPoint& remote_address,
+    int id) {
   NOTREACHED();
   OnError();
-  return NULL;
+  return nullptr;
 }
 
 void P2PSocketHostTcpBase::DidCompleteRead(int result) {

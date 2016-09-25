@@ -23,9 +23,10 @@ Supported sanitizer configurations are:
 
 | GN Argument | Description |
 |--------------|----|
-| is_asan=true | enables [Address Sanitizer] to catch problems like buffer overruns. |
-| is_msan=true | enables [Memory Sanitizer] to catch problems like uninitialed reads. |
-| is_ubsan_security=true | enables [Undefined Behavior Sanitizer] to catch undefined behavior like integer overflow. |
+| `is_asan=true` | enables [Address Sanitizer] to catch problems like buffer overruns. |
+| `is_msan=true` | enables [Memory Sanitizer] to catch problems like uninitialed reads. |
+| `is_ubsan_security=true` | enables [Undefined Behavior Sanitizer] to catch<sup>\[[1](#Notes)\]</sup> undefined behavior like integer overflow. |
+| | it is possible to run libfuzzer without any sanitizers; *probably not what you want*.|
 
 
 ## Write Fuzzer Function
@@ -33,7 +34,10 @@ Supported sanitizer configurations are:
 Create a new .cc file and define a `LLVMFuzzerTestOneInput` function:
 
 ```cpp
-extern "C" int LLVMFuzzerTestOneInput(const unsigned char *data, size_t size) {
+#include <stddef.h>
+#include <stdint.h>
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // put your fuzzing code here and use data+size as input.
   return 0;
 }
@@ -88,6 +92,37 @@ efficient fuzzer should be able to finds lots of them rather quickly.
 The `... pulse ...` line will appear periodically to show the current status.
 
 
+### Default value for maximum testcase length
+
+By default, when run manually, libFuzzer uses `-max_len=64` or takes the length
+of the biggest testcase in corpus if corpus is not empty. ClusterFuzz takes
+random value in range from `1` to `10000` for each fuzzing session and passes
+that value to libFuzzers. If corpus contains testcases of size greater than
+`max_len`, libFuzzer will use only first `max_len` bytes of such testcases.
+
+
+You can specify custom `max_len` value to be used by ClusterFuzz. For more
+information check out [Maximum Testcase Length] section of the [Efficient Fuzzer
+Guide].
+
+## Disable noisy error message logging
+
+If the code that you are a fuzzing generates error messages when encountering
+incorrect or invalid data then you need to silence those errors in the fuzzer.
+
+If the target uses the Chromium logging APIs, the best way to do that is to
+override the environment used for logging in your fuzzer:
+
+```cpp
+struct Environment {
+  Environment() {
+    logging::SetMinLogLevel(logging::LOG_FATAL);
+  }
+};
+
+Environment* env = new Environment();
+```
+
 ## Submitting Fuzzer to ClusterFuzz
 
 ClusterFuzz builds and executes all `fuzzer_test` targets in the source tree.
@@ -101,10 +136,25 @@ a day or two.
 performance and for optimization hints.
 
 
+## Notes
+[1] By default UBSan doesn't crash once undefined behavior has been detected.
+To make it crash the following additional option should be provided:
+
+```bash
+UBSAN_OPTIONS=halt_on_error=1 ./fuzzer <corpus_directory_or_single_testcase_path>
+```
+
+Other useful options (used by ClusterFuzz) are:
+```bash
+UBSAN_OPTIONS=symbolize=1:halt_on_error=1:print_stacktrace=1 ./fuzzer <corpus_directory_or_single_testcase_path>
+```
+
+
 [Address Sanitizer]: http://clang.llvm.org/docs/AddressSanitizer.html
 [Memory Sanitizer]: http://clang.llvm.org/docs/MemorySanitizer.html
 [Undefined Behavior Sanitizer]: http://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html
-[url_parse_fuzzer.cc]: https://code.google.com/p/chromium/codesearch#chromium/src/testing/libfuzzer/fuzzers/url_parse_fuzzer.cc
 [ClusterFuzz status]: clusterfuzz.md#Status-Links
-[Efficient Fuzzer Guide]: efficient_fuzzer.md
 [crbug/598448]: https://bugs.chromium.org/p/chromium/issues/detail?id=598448
+[Efficient Fuzzer Guide]: efficient_fuzzer.md
+[Maximum Testcase Length]: efficient_fuzzer.md#Maximum-Testcase-Length
+[url_parse_fuzzer.cc]: https://code.google.com/p/chromium/codesearch#chromium/src/testing/libfuzzer/fuzzers/url_parse_fuzzer.cc

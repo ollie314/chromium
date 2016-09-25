@@ -26,14 +26,14 @@ const int kHeight = 32;
 const int kFrameRate = 10;
 const int kQp = 20;
 
-VideoSenderConfig GetVideoConfigForTest() {
-  VideoSenderConfig config = GetDefaultVideoSenderConfig();
+FrameSenderConfig GetVideoConfigForTest() {
+  FrameSenderConfig config = GetDefaultVideoSenderConfig();
   config.codec = CODEC_VIDEO_VP8;
   config.use_external_encoder = false;
   config.max_frame_rate = kFrameRate;
-  config.min_qp = kQp;
-  config.max_qp = kQp;
-  config.max_cpu_saver_qp = kQp;
+  config.video_codec_params.min_qp = kQp;
+  config.video_codec_params.max_qp = kQp;
+  config.video_codec_params.max_cpu_saver_qp = kQp;
   return config;
 }
 }  // unnamed namespace
@@ -58,9 +58,9 @@ class Vp8QuantizerParserTest : public ::testing::Test {
   // Update the vp8 encoder with the new quantizer.
   void UpdateQuantizer(int qp) {
     DCHECK((qp > 3) && (qp < 64));
-    video_config_.min_qp = qp;
-    video_config_.max_qp = qp;
-    video_config_.max_cpu_saver_qp = qp;
+    video_config_.video_codec_params.min_qp = qp;
+    video_config_.video_codec_params.max_qp = qp;
+    video_config_.video_codec_params.max_cpu_saver_qp = qp;
     RecreateVp8Encoder();
   }
 
@@ -79,8 +79,8 @@ class Vp8QuantizerParserTest : public ::testing::Test {
   }
 
   base::TimeDelta next_frame_timestamp_;
-  VideoSenderConfig video_config_;
-  scoped_ptr<Vp8Encoder> vp8_encoder_;
+  FrameSenderConfig video_config_;
+  std::unique_ptr<Vp8Encoder> vp8_encoder_;
 
   DISALLOW_COPY_AND_ASSIGN(Vp8QuantizerParserTest);
 };
@@ -88,7 +88,7 @@ class Vp8QuantizerParserTest : public ::testing::Test {
 // Encode 3 frames to test the cases with insufficient data input.
 TEST_F(Vp8QuantizerParserTest, InsufficientData) {
   for (int i = 0; i < 3; ++i) {
-    scoped_ptr<SenderEncodedFrame> encoded_frame(new SenderEncodedFrame());
+    std::unique_ptr<SenderEncodedFrame> encoded_frame(new SenderEncodedFrame());
     const uint8_t* encoded_data =
         reinterpret_cast<const uint8_t*>(encoded_frame->data.data());
     // Null input.
@@ -138,7 +138,8 @@ TEST_F(Vp8QuantizerParserTest, VariedQuantizer) {
   for (int qp = 4; qp <= 63; qp += 10) {
     UpdateQuantizer(qp);
     for (int i = 0; i < 3; ++i) {
-      scoped_ptr<SenderEncodedFrame> encoded_frame(new SenderEncodedFrame());
+      std::unique_ptr<SenderEncodedFrame> encoded_frame(
+          new SenderEncodedFrame());
       EncodeOneFrame(encoded_frame.get());
       decoded_quantizer = ParseVp8HeaderQuantizer(
           reinterpret_cast<const uint8_t*>(encoded_frame->data.data()),

@@ -222,8 +222,10 @@ class GPU_EXPORT BufferManager : public base::trace_event::MemoryDumpProvider {
   BufferManager(MemoryTracker* memory_tracker, FeatureInfo* feature_info);
   ~BufferManager() override;
 
+  void MarkContextLost();
+
   // Must call before destruction.
-  void Destroy(bool have_context);
+  void Destroy();
 
   // Creates a Buffer for the given buffer.
   void CreateBuffer(GLuint client_id, GLuint service_id);
@@ -262,6 +264,10 @@ class GPU_EXPORT BufferManager : public base::trace_event::MemoryDumpProvider {
   // Sets the target of a buffer. Returns false if the target can not be set.
   bool SetTarget(Buffer* buffer, GLenum target);
 
+  void set_max_buffer_size(GLsizeiptr max_buffer_size) {
+    max_buffer_size_ = max_buffer_size;
+  }
+
   void set_allow_buffers_on_multiple_targets(bool allow) {
     allow_buffers_on_multiple_targets_ = allow;
   }
@@ -293,6 +299,7 @@ class GPU_EXPORT BufferManager : public base::trace_event::MemoryDumpProvider {
   friend class Buffer;
   friend class TestHelper;  // Needs access to DoBufferData.
   friend class BufferManagerTestBase;  // Needs access to DoBufferSubData.
+  friend class IndexedBufferBindingHostTest;  // Needs access to SetInfo.
 
   void StartTracking(Buffer* buffer);
   void StopTracking(Buffer* buffer);
@@ -336,6 +343,9 @@ class GPU_EXPORT BufferManager : public base::trace_event::MemoryDumpProvider {
   typedef base::hash_map<GLuint, scoped_refptr<Buffer> > BufferMap;
   BufferMap buffers_;
 
+  // The maximum size of buffers.
+  GLsizeiptr max_buffer_size_;
+
   // Whether or not buffers can be bound to multiple targets.
   bool allow_buffers_on_multiple_targets_;
 
@@ -348,7 +358,7 @@ class GPU_EXPORT BufferManager : public base::trace_event::MemoryDumpProvider {
 
   GLuint primitive_restart_fixed_index_;
 
-  bool have_context_;
+  bool lost_context_;
   bool use_client_side_arrays_for_stream_buffers_;
 
   DISALLOW_COPY_AND_ASSIGN(BufferManager);

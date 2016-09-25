@@ -51,19 +51,14 @@ class VIEWS_EXPORT Slider : public View, public gfx::AnimationDelegate {
   // Internal class name.
   static const char kViewClassName[];
 
-  enum Orientation {
-    HORIZONTAL,
-    VERTICAL
-  };
-
-  Slider(SliderListener* listener, Orientation orientation);
+  // Based on the bool |is_material_design|, either a md version or a non-md
+  // version of the slider will be created.
+  static Slider* CreateSlider(bool is_material_design,
+                              SliderListener* listener);
   ~Slider() override;
 
   float value() const { return value_; }
   void SetValue(float value);
-
-  // Set the delta used for changing the value via keyboard.
-  void SetKeyboardIncrement(float increment);
 
   void SetAccessibleName(const base::string16& name);
 
@@ -74,7 +69,18 @@ class VIEWS_EXPORT Slider : public View, public gfx::AnimationDelegate {
   void set_focus_border_color(SkColor color) { focus_border_color_ = color; }
 
   // Update UI based on control on/off state.
-  void UpdateState(bool control_on);
+  virtual void UpdateState(bool control_on) = 0;
+
+ protected:
+  explicit Slider(SliderListener* listener);
+
+  // Returns the current position of the thumb on the slider.
+  float GetAnimatingValue() const;
+
+  virtual int GetThumbWidth() = 0;
+
+  // views::View:
+  void OnPaint(gfx::Canvas* canvas) override;
 
  private:
   friend class test::SliderTestApi;
@@ -84,7 +90,7 @@ class VIEWS_EXPORT Slider : public View, public gfx::AnimationDelegate {
   // Should be called on the Mouse Down event. Used to calculate relative
   // position of the mouse cursor (or the touch point) on the button to
   // accurately move the button using the MoveButtonTo() method.
-  void PrepareForMove(const gfx::Point& point);
+  void PrepareForMove(const int new_x);
 
   // Moves the button to the specified point and updates the value accordingly.
   void MoveButtonTo(const gfx::Point& point);
@@ -97,10 +103,9 @@ class VIEWS_EXPORT Slider : public View, public gfx::AnimationDelegate {
   // Notify the listener_, if not NULL, that dragging ended.
   void OnSliderDragEnded();
 
-  // views::View overrides:
+  // views::View:
   const char* GetClassName() const override;
   gfx::Size GetPreferredSize() const override;
-  void OnPaint(gfx::Canvas* canvas) override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
@@ -109,10 +114,10 @@ class VIEWS_EXPORT Slider : public View, public gfx::AnimationDelegate {
   void OnFocus() override;
   void OnBlur() override;
 
-  // ui::EventHandler overrides:
+  // ui::EventHandler:
   void OnGestureEvent(ui::GestureEvent* event) override;
 
-  // gfx::AnimationDelegate overrides:
+  // gfx::AnimationDelegate:
   void AnimationProgressed(const gfx::Animation* animation) override;
 
   void set_listener(SliderListener* listener) {
@@ -120,7 +125,6 @@ class VIEWS_EXPORT Slider : public View, public gfx::AnimationDelegate {
   }
 
   SliderListener* listener_;
-  Orientation orientation_;
 
   std::unique_ptr<gfx::SlideAnimation> move_animation_;
 
@@ -134,13 +138,7 @@ class VIEWS_EXPORT Slider : public View, public gfx::AnimationDelegate {
 
   // Relative position of the mouse cursor (or the touch point) on the slider's
   // button.
-  gfx::Point initial_button_offset_;
-
-  const int* bar_active_images_;
-  const int* bar_disabled_images_;
-  const gfx::ImageSkia* thumb_;
-  const gfx::ImageSkia* images_[4];
-  int bar_height_;
+  int initial_button_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(Slider);
 };

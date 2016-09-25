@@ -12,12 +12,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
-#include "services/shell/public/cpp/shell_client.h"
-#include "services/shell/public/interfaces/shell_client.mojom.h"
+#include "base/strings/string_piece.h"
+#include "content/public/common/mojo_application_info.h"
+#include "services/shell/public/cpp/service.h"
+#include "services/shell/public/interfaces/service.mojom.h"
 
 namespace content {
 
-// Hosts an in-process application instance that supports multiple ShellClient
+// Hosts an in-process application instance that supports multiple Service
 // connections. The first incoming connection will invoke a provided factory
 // function to instantiate the application, and the application will
 // automatically be torn down when its last connection is lost. The application
@@ -25,22 +27,17 @@ namespace content {
 // EmbeddedApplicationRunner instance.
 class EmbeddedApplicationRunner {
  public:
-  using FactoryCallback = base::Callback<std::unique_ptr<shell::ShellClient>()>;
-
-  // Constructs a runner which hosts the application on |task_runner|'s thread.
-  // If an existing instance of the app is not running when an incoming
-  // connection is made, |callback| will be run on |task_runner|'s thread to
-  // create a new instance which will live on that thread.
-  EmbeddedApplicationRunner(
-      const FactoryCallback& callback,
-      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
-
+  // Constructs a runner which hosts a Mojo application. If an existing instance
+  // of the app is not running when an incoming connection is made, details from
+  // |info| will be used to construct a new instance.
+  EmbeddedApplicationRunner(const base::StringPiece& name,
+                            const MojoApplicationInfo& info);
   ~EmbeddedApplicationRunner();
 
-  // Binds an incoming ShellClientRequest for this application. If the
+  // Binds an incoming ServiceRequest for this application. If the
   // application isn't already running, it's started. Otherwise the request is
   // bound to the running instance.
-  void BindShellClientRequest(shell::mojom::ShellClientRequest request);
+  void BindServiceRequest(shell::mojom::ServiceRequest request);
 
   // Sets a callback to run after the application loses its last connection and
   // is torn down.
@@ -50,11 +47,6 @@ class EmbeddedApplicationRunner {
   class Instance;
 
   void OnQuit();
-
-  // The TaskRunner on which the factory callback will be run. The
-  // shell::ShellClient it returns will live and die on this TaskRunner's
-  // thread.
-  const scoped_refptr<base::SingleThreadTaskRunner> application_task_runner_;
 
   // A reference to the application instance which may operate on the
   // |application_task_runner_|'s thread.

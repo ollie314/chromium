@@ -11,10 +11,12 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/run_loop.h"
 #include "build/build_config.h"
-#include "content/browser/gamepad/gamepad_test_helpers.h"
+#include "content/browser/gamepad/gamepad_service_test_helpers.h"
 #include "content/browser/renderer_host/pepper/browser_ppapi_host_test.h"
 #include "content/common/gamepad_hardware_buffer.h"
+#include "device/gamepad/gamepad_test_helpers.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/host/host_message_context.h"
 #include "ppapi/proxy/gamepad_resource.h"
@@ -151,11 +153,11 @@ TEST_F(PepperGamepadHostTest, MAYBE_WaitForReply) {
             gamepad_host.OnResourceMessageReceived(
                 PpapiHostMsg_Gamepad_RequestMemory(), &context));
 
-  MockGamepadDataFetcher* fetcher = service_->data_fetcher();
+  device::MockGamepadDataFetcher* fetcher = service_->data_fetcher();
   fetcher->WaitForDataReadAndCallbacksIssued();
 
   // It should not have sent the callback message.
-  service_->message_loop().RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(0u, sink().message_count());
 
   // Set a button down and wait for it to be read twice.
@@ -166,7 +168,7 @@ TEST_F(PepperGamepadHostTest, MAYBE_WaitForReply) {
   fetcher->WaitForDataReadAndCallbacksIssued();
 
   // It should have sent a callback.
-  service_->message_loop().RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   ppapi::proxy::ResourceMessageReplyParams reply_params;
   IPC::Message reply_msg;
   ASSERT_TRUE(sink().GetFirstResourceReplyMatching(

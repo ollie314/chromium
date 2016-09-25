@@ -8,8 +8,10 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
@@ -167,7 +169,12 @@ ModuleSystem::ModuleSystem(ScriptContext* context, const SourceMap* source_map)
   SetPrivate(global, kModuleSystem, v8::External::New(isolate, this));
 
   gin::ModuleRegistry::From(context->v8_context())->AddObserver(this);
-  if (context_->GetRenderFrame()) {
+  // TODO(devlin): We really shouldn't be injecting mojo into every blessed
+  // extension context - it's wasteful. But it's better than injecting into
+  // every frame (previous behavior) so start with this while we investigate
+  // further. See crbug.com/636655.
+  if (context_->GetRenderFrame() &&
+      context_->context_type() == Feature::BLESSED_EXTENSION_CONTEXT) {
     context_->GetRenderFrame()->EnsureMojoBuiltinsAreAvailable(
         context->isolate(), context->v8_context());
   }
@@ -337,7 +344,7 @@ v8::Local<v8::Value> ModuleSystem::CallModuleMethod(
 
 void ModuleSystem::RegisterNativeHandler(
     const std::string& name,
-    scoped_ptr<NativeHandler> native_handler) {
+    std::unique_ptr<NativeHandler> native_handler) {
   ClobberExistingNativeHandler(name);
   native_handler_map_[name] = std::move(native_handler);
 }
@@ -379,6 +386,7 @@ void ModuleSystem::LazyFieldGetterInner(
     v8::Local<v8::String> property,
     const v8::PropertyCallbackInfo<v8::Value>& info,
     RequireFunction require_function) {
+  base::ElapsedTimer timer;
   CHECK(!info.Data().IsEmpty());
   CHECK(info.Data()->IsObject());
   v8::Isolate* isolate = info.GetIsolate();
@@ -460,6 +468,8 @@ void ModuleSystem::LazyFieldGetterInner(
     NOTREACHED();
   }
   info.GetReturnValue().Set(new_field);
+
+  UMA_HISTOGRAM_TIMES("Extensions.ApiBindingGenerationTime", timer.Elapsed());
 }
 
 void ModuleSystem::SetLazyField(v8::Local<v8::Object> object,
@@ -566,7 +576,7 @@ void ModuleSystem::RequireAsync(
   v8::Local<v8::Promise::Resolver> resolver(
       v8::Promise::Resolver::New(v8_context).ToLocalChecked());
   args.GetReturnValue().Set(resolver->GetPromise());
-  scoped_ptr<v8::Global<v8::Promise::Resolver>> global_resolver(
+  std::unique_ptr<v8::Global<v8::Promise::Resolver>> global_resolver(
       new v8::Global<v8::Promise::Resolver>(GetIsolate(), resolver));
   gin::ModuleRegistry* module_registry =
       gin::ModuleRegistry::From(v8_context);
@@ -618,6 +628,10 @@ void ModuleSystem::Private(const v8::FunctionCallbackInfo<v8::Value>& args) {
           ToV8StringUnsafe(GetIsolate(), "Failed to create privates"));
       return;
     }
+    v8::Maybe<bool> maybe =
+        privates.As<v8::Object>()->SetPrototype(context()->v8_context(),
+                                                v8::Null(args.GetIsolate()));
+    CHECK(maybe.IsJust() && maybe.FromJust());
     SetPrivate(obj, "privates", privates);
   }
   args.GetReturnValue().Set(privates);
@@ -658,6 +672,7 @@ v8::Local<v8::Value> ModuleSystem::LoadModule(const std::string& module_name) {
   v8::Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(
       GetIsolate(),
       &SetExportsProperty);
+  tmpl->RemovePrototype();
   v8::Local<v8::String> v8_key;
   if (!v8_helpers::ToV8String(GetIsolate(), "$set", &v8_key)) {
     NOTREACHED();
@@ -735,7 +750,7 @@ void ModuleSystem::OnDidAddPendingModule(
 }
 
 void ModuleSystem::OnModuleLoaded(
-    scoped_ptr<v8::Global<v8::Promise::Resolver>> resolver,
+    std::unique_ptr<v8::Global<v8::Promise::Resolver>> resolver,
     v8::Local<v8::Value> value) {
   if (!is_valid())
     return;

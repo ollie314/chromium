@@ -4,12 +4,56 @@
   "process-group": "browser",
   "display_name": "Content Browser",
   "capabilities": {
+    // Remove this once http://crbug.com/632818 is fixed.
+    "provided": {
+      "all_interfaces": [ "*" ],
+      "web": [
+        "blink::mojom::BackgroundSyncService",
+        "blink::mojom::BroadcastChannelProvider",
+        "blink::mojom::BudgetService",
+        "blink::mojom::MimeRegistry",
+        "blink::mojom::NotificationService",
+        "blink::mojom::OffscreenCanvasCompositorFrameSinkProvider",
+        "blink::mojom::OffscreenCanvasSurface",
+        "blink::mojom::PermissionService",
+        "blink::mojom::WebSocket",
+        "content::mojom::LayoutTestBluetoothFakeAdapterSetter",
+        "content::mojom::MemoryCoordinatorHandle",
+        "content::mojom::StoragePartitionService",
+        "content::mojom::URLLoaderFactory",
+        "device::BatteryMonitor",
+        "device::mojom::LightSensor",
+        "device::mojom::MotionSensor",
+        "device::mojom::OrientationSensor",
+        "device::mojom::TimeZoneMonitor",
+        "media::mojom::ImageCapture",
+        "memory_coordinator::mojom::MemoryCoordinatorHandle"
+      ]
+    },
     "required": {
-      "*": { "interfaces": [ "*" ] },
+      "*": { "classes": [ "app" ] },
+
+      // We allow the browser to connect to any interfaces exposed by its child
+      // processes.
+      "exe:content_gpu": { "classes": [ "all_interfaces" ] },
+      "exe:content_plugin": { "classes": [ "all_interfaces" ] },
+      "exe:content_renderer": { "classes": [ "browser" ] },
+      "exe:content_utility": { "classes": [ "all_interfaces" ] },
+
       "mojo:shell": {
-        "classes": [ "client_process", "instance_name", "user_id" ],
-        "interfaces": [ "*" ]
-      }
+        "classes": [
+          "shell:client_process",
+          "shell:instance_name",
+          "shell:user_id"
+        ]
+      },
+      "mojo:file": {
+        "interfaces": [
+          "leveldb::mojom::LevelDBService",
+          "user_service::UserService"
+        ]
+      },
+      "mojo:media": { "classes": [ "all_interfaces" ] }
     }
   }
 }

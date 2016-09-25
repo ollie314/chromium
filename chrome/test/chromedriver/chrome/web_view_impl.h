@@ -32,6 +32,8 @@ class HeapSnapshotTaker;
 struct KeyEvent;
 struct MouseEvent;
 class NavigationTracker;
+class NonBlockingNavigationTracker;
+class PageLoadStrategy;
 class Status;
 
 class WebViewImpl : public WebView {
@@ -42,7 +44,8 @@ class WebViewImpl : public WebView {
   WebViewImpl(const std::string& id,
               const BrowserInfo* browser_info,
               std::unique_ptr<DevToolsClient> client,
-              const DeviceMetrics* device_metrics);
+              const DeviceMetrics* device_metrics,
+              std::string page_load_strategy);
   ~WebViewImpl() override;
 
   // Overridden from WebView:
@@ -52,8 +55,8 @@ class WebViewImpl : public WebView {
   Status HandleReceivedEvents() override;
   Status GetUrl(std::string* url) override;
   Status Load(const std::string& url, const Timeout* timeout) override;
-  Status Reload() override;
-  Status TraverseHistory(int delta) override;
+  Status Reload(const Timeout* timeout) override;
+  Status TraverseHistory(int delta, const Timeout* timeout) override;
   Status EvaluateScript(const std::string& frame,
                         const std::string& expression,
                         std::unique_ptr<base::Value>* result) override;
@@ -108,6 +111,10 @@ class WebViewImpl : public WebView {
                                  int xoffset,
                                  int yoffset) override;
   Status SynthesizePinchGesture(int x, int y, double scale_factor) override;
+  Status GetScreenOrientation(std::string* orientation) override;
+  Status SetScreenOrientation(std::string orientation) override;
+  Status DeleteScreenOrientation() override;
+
 
  private:
   Status TraverseHistoryWithJavaScript(int delta);
@@ -129,7 +136,7 @@ class WebViewImpl : public WebView {
   std::unique_ptr<DomTracker> dom_tracker_;
   std::unique_ptr<FrameTracker> frame_tracker_;
   std::unique_ptr<JavaScriptDialogManager> dialog_manager_;
-  std::unique_ptr<NavigationTracker> navigation_tracker_;
+  std::unique_ptr<PageLoadStrategy> navigation_tracker_;
   std::unique_ptr<MobileEmulationOverrideManager>
       mobile_emulation_override_manager_;
   std::unique_ptr<GeolocationOverrideManager> geolocation_override_manager_;

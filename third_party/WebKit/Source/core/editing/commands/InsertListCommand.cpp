@@ -175,7 +175,7 @@ void InsertListCommand::doApply(EditingState* editingState)
                 // infinite loop and because there is no more work to be done.
                 // FIXME(<rdar://problem/5983974>): The endingSelection() may be incorrect here.  Compute
                 // the new location of endOfSelection and use it as the end of the new selection.
-                if (!startOfLastParagraph.deepEquivalent().inShadowIncludingDocument())
+                if (!startOfLastParagraph.deepEquivalent().isConnected())
                     return;
                 setEndingSelection(startOfCurrentParagraph);
 
@@ -187,6 +187,11 @@ void InsertListCommand::doApply(EditingState* editingState)
                 if (!singleParagraphResult)
                     break;
                 if (endOfSelection.isNull() || endOfSelection.isOrphan() || startOfLastParagraph.isNull() || startOfLastParagraph.isOrphan()) {
+
+                    // TODO(dglazkov): The use of updateStyleAndLayoutIgnorePendingStylesheets needs to be audited.
+                    // see http://crbug.com/590369 for more details.
+                    document().updateStyleAndLayoutIgnorePendingStylesheets();
+
                     endOfSelection = visiblePositionForIndex(indexForEndOfSelection, scopeForEndOfSelection);
                     // If endOfSelection is null, then some contents have been deleted from the document.
                     // This should never happen and if it did, exit early immediately because we've lost the loop invariant.
@@ -201,6 +206,9 @@ void InsertListCommand::doApply(EditingState* editingState)
             setEndingSelection(endOfSelection);
         }
         doApplyForSingleParagraph(forceListCreation, listTag, *currentSelection, editingState);
+
+        document().updateStyleAndLayoutIgnorePendingStylesheets();
+
         if (editingState->isAborted())
             return;
         // Fetch the end of the selection, for the reason mentioned above.
@@ -222,6 +230,11 @@ void InsertListCommand::doApply(EditingState* editingState)
     doApplyForSingleParagraph(false, listTag, *firstRangeOf(endingSelection()), editingState);
 }
 
+InputEvent::InputType InsertListCommand::inputType() const
+{
+    return m_type == OrderedList ? InputEvent::InputType::InsertOrderedList : InputEvent::InputType::InsertUnorderedList;
+}
+
 bool InsertListCommand::doApplyForSingleParagraph(bool forceCreateList, const HTMLQualifiedName& listTag, Range& currentSelection, EditingState* editingState)
 {
     // FIXME: This will produce unexpected results for a selection that starts just before a
@@ -231,17 +244,17 @@ bool InsertListCommand::doApplyForSingleParagraph(bool forceCreateList, const HT
     Node* listChildNode = enclosingListChild(selectionNode);
     bool switchListType = false;
     if (listChildNode) {
-        if (!listChildNode->parentNode()->hasEditableStyle())
+        if (!hasEditableStyle(*listChildNode->parentNode()))
             return false;
         // Remove the list child.
         HTMLElement* listElement = enclosingList(listChildNode);
         if (listElement) {
-            if (!listElement->hasEditableStyle()) {
+            if (!hasEditableStyle(*listElement)) {
                 // Since, |listElement| is uneditable, we can't move |listChild|
                 // out from |listElement|.
                 return false;
             }
-            if (!listElement->parentNode()->hasEditableStyle()) {
+            if (!hasEditableStyle(*listElement->parentNode())) {
                 // Since parent of |listElement| is uneditable, we can not remove
                 // |listElement| for switching list type neither unlistify.
                 return false;
@@ -255,8 +268,8 @@ bool InsertListCommand::doApplyForSingleParagraph(bool forceCreateList, const HT
             if (editingState->isAborted())
                 return false;
         }
-        DCHECK(listElement->hasEditableStyle());
-        DCHECK(listElement->parentNode()->hasEditableStyle());
+        DCHECK(hasEditableStyle(*listElement));
+        DCHECK(hasEditableStyle(*listElement->parentNode()));
         if (!listElement->hasTagName(listTag)) {
             // |listChildNode| will be removed from the list and a list of type
             // |m_type| will be created.
@@ -270,25 +283,25 @@ bool InsertListCommand::doApplyForSingleParagraph(bool forceCreateList, const HT
 
         // If the entire list is selected, then convert the whole list.
         if (switchListType && isNodeVisiblyContainedWithin(*listElement, currentSelection)) {
-            bool rangeStartIsInList = visiblePositionBeforeNode(*listElement).deepEquivalent() == createVisiblePosition(currentSelection.startPosition()).deepEquivalent();
-            bool rangeEndIsInList = visiblePositionAfterNode(*listElement).deepEquivalent() == createVisiblePosition(currentSelection.endPosition()).deepEquivalent();
+            bool rangeStartIsInList = visiblePositionBeforeNode(*listElement).deepEquivalent() == createVisiblePositionDeprecated(currentSelection.startPosition()).deepEquivalent();
+            bool rangeEndIsInList = visiblePositionAfterNode(*listElement).deepEquivalent() == createVisiblePositionDeprecated(currentSelection.endPosition()).deepEquivalent();
 
             HTMLElement* newList = createHTMLElement(document(), listTag);
             insertNodeBefore(newList, listElement, editingState);
             if (editingState->isAborted())
                 return false;
 
-            Node* firstChildInList = enclosingListChild(createVisiblePosition(firstPositionInNode(listElement)).deepEquivalent().anchorNode(), listElement);
+            Node* firstChildInList = enclosingListChild(VisiblePosition::firstPositionInNode(listElement).deepEquivalent().anchorNode(), listElement);
             Element* outerBlock = firstChildInList && isBlockFlowElement(*firstChildInList) ? toElement(firstChildInList) : listElement;
 
-            moveParagraphWithClones(createVisiblePosition(firstPositionInNode(listElement)), createVisiblePosition(lastPositionInNode(listElement)), newList, outerBlock, editingState);
+            moveParagraphWithClones(VisiblePosition::firstPositionInNode(listElement), VisiblePosition::lastPositionInNode(listElement), newList, outerBlock, editingState);
             if (editingState->isAborted())
                 return false;
 
             // Manually remove listNode because moveParagraphWithClones sometimes leaves it behind in the document.
             // See the bug 33668 and editing/execCommand/insert-list-orphaned-item-with-nested-lists.html.
             // FIXME: This might be a bug in moveParagraphWithClones or deleteSelection.
-            if (listElement && listElement->inShadowIncludingDocument()) {
+            if (listElement && listElement->isConnected()) {
                 removeNode(listElement, editingState);
                 if (editingState->isAborted())
                     return false;
@@ -303,9 +316,9 @@ bool InsertListCommand::doApplyForSingleParagraph(bool forceCreateList, const HT
             if (rangeStartIsInList && newList)
                 currentSelection.setStart(newList, 0, IGNORE_EXCEPTION);
             if (rangeEndIsInList && newList)
-                currentSelection.setEnd(newList, lastOffsetInNode(newList), IGNORE_EXCEPTION);
+                currentSelection.setEnd(newList, Position::lastOffsetInNode(newList), IGNORE_EXCEPTION);
 
-            setEndingSelection(createVisiblePosition(firstPositionInNode(newList)));
+            setEndingSelection(VisiblePosition::firstPositionInNode(newList));
 
             return true;
         }
@@ -325,15 +338,15 @@ void InsertListCommand::unlistifyParagraph(const VisiblePosition& originalStart,
 {
     // Since, unlistify paragraph inserts nodes into parent and removes node
     // from parent, if parent of |listElement| should be editable.
-    DCHECK(listElement->parentNode()->hasEditableStyle());
+    DCHECK(hasEditableStyle(*listElement->parentNode()));
     Node* nextListChild;
     Node* previousListChild;
     VisiblePosition start;
     VisiblePosition end;
     DCHECK(listChildNode);
     if (isHTMLLIElement(*listChildNode)) {
-        start = createVisiblePosition(firstPositionInNode(listChildNode));
-        end = createVisiblePosition(lastPositionInNode(listChildNode));
+        start = VisiblePosition::firstPositionInNode(listChildNode);
+        end = VisiblePosition::lastPositionInNode(listChildNode);
         nextListChild = listChildNode->nextSibling();
         previousListChild = listChildNode->previousSibling();
     } else {
@@ -382,8 +395,8 @@ void InsertListCommand::unlistifyParagraph(const VisiblePosition& originalStart,
     if (editingState->isAborted())
         return;
 
-    VisiblePosition insertionPoint = createVisiblePosition(positionBeforeNode(placeholder));
-    moveParagraphs(start, end, insertionPoint, editingState, /* preserveSelection */ true, /* preserveStyle */ true, listChildNode);
+    VisiblePosition insertionPoint = VisiblePosition::beforeNode(placeholder);
+    moveParagraphs(start, end, insertionPoint, editingState, PreserveSelection, PreserveStyle, listChildNode);
 }
 
 static HTMLElement* adjacentEnclosingList(const VisiblePosition& pos, const VisiblePosition& adjacentPos, const HTMLQualifiedName& listTag)
@@ -458,7 +471,7 @@ void InsertListCommand::listifyParagraph(const VisiblePosition& originalStart, c
     // Also avoid the containing list item.
     Node* const listChild = enclosingListChild(insertionPos.anchorNode());
     if (isHTMLLIElement(listChild))
-        insertionPos = positionInParentBeforeNode(*listChild);
+        insertionPos = Position::inParentBeforeNode(*listChild);
 
     HTMLElement* listElement = createHTMLElement(document(), listTag);
     insertNodeAt(listElement, insertionPos, editingState);
@@ -476,7 +489,7 @@ void InsertListCommand::listifyParagraph(const VisiblePosition& originalStart, c
     if (insertionPos == startPos)
         moveParagraphOverPositionIntoEmptyListItem(originalStart, listItemElement, editingState);
     else
-        moveParagraphOverPositionIntoEmptyListItem(createVisiblePosition(startPos), listItemElement, editingState);
+        moveParagraphOverPositionIntoEmptyListItem(createVisiblePositionDeprecated(startPos), listItemElement, editingState);
     if (editingState->isAborted())
         return;
 
@@ -492,10 +505,10 @@ void InsertListCommand::moveParagraphOverPositionIntoEmptyListItem(const Visible
         return;
     // Inserting list element and list item list may change start of pargraph
     // to move. We calculate start of paragraph again.
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     const VisiblePosition& start = startOfParagraph(pos, CanSkipOverEditingBoundary);
     const VisiblePosition& end = endOfParagraph(pos, CanSkipOverEditingBoundary);
-    moveParagraph(start, end, createVisiblePosition(positionBeforeNode(placeholder)), editingState, true);
+    moveParagraph(start, end, VisiblePosition::beforeNode(placeholder), editingState, PreserveSelection);
 }
 
 DEFINE_TRACE(InsertListCommand)

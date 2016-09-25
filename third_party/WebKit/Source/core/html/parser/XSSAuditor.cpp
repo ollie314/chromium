@@ -45,6 +45,8 @@
 #include "platform/network/EncodedFormData.h"
 #include "platform/text/DecodeEscapeSequences.h"
 #include "wtf/ASCIICType.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace {
 
@@ -73,8 +75,10 @@ static bool isNonCanonicalCharacter(UChar c)
     // We also remove the questionmark character, since some severs replace invalid high-bytes with a questionmark. We
     // are already stripping the high-bytes so we also strip the questionmark to match.
     //
+    // We also move the percent character, since some servers strip it when there's a malformed sequence.
+    //
     // For instance: new String("http://localhost:8000?x") => new String("http:localhost:8x").
-    return (c == '\\' || c == '0' || c == '\0' || c == '/' || c == '?' || c >= 127);
+    return (c == '\\' || c == '0' || c == '\0' || c == '/' || c == '?' || c == '%' || c >= 127);
 }
 
 static bool isRequiredForInjection(UChar c)
@@ -115,13 +119,11 @@ static bool startsMultiLineCommentAt(const String& string, size_t start)
 
 static bool startsOpeningScriptTagAt(const String& string, size_t start)
 {
-    return start + 6 < string.length() && string[start] == '<'
-        && WTF::toASCIILowerUnchecked(string[start + 1]) == 's'
-        && WTF::toASCIILowerUnchecked(string[start + 2]) == 'c'
-        && WTF::toASCIILowerUnchecked(string[start + 3]) == 'r'
-        && WTF::toASCIILowerUnchecked(string[start + 4]) == 'i'
-        && WTF::toASCIILowerUnchecked(string[start + 5]) == 'p'
-        && WTF::toASCIILowerUnchecked(string[start + 6]) == 't';
+    if (start + 6 >= string.length())
+        return false;
+    // TODO(esprehn): StringView should probably have startsWith.
+    StringView script("<script");
+    return equalIgnoringASCIICase(StringView(string, start, script.length()), script);
 }
 
 // If other files need this, we should move this to core/html/parser/HTMLParserIdioms.h
@@ -197,14 +199,17 @@ static void truncateForSrcLikeAttribute(String& decodedSnippet)
     // the first comma, and the the first /*, //, or <!-- may introduce a comment. Also,
     // DATA URLs may use the same string literal tricks as with script content itself.
     // In either case, content following this may come from the page and may be ignored
-    // when the script is executed.
+    // when the script is executed. Also, any of these characters may now be represented
+    // by the (enlarged) set of html5 entities.
     // For simplicity, we don't differentiate based on URL scheme, and stop at the first
-    // # or ?, the third slash, or the first slash, <, ', or " once a comma is seen.
+    // & (since it might be part of an entity for any of the subsequent punctuation), the
+    // first # or ?, the third slash, or the first slash, <, ', or " once a comma is seen.
     int slashCount = 0;
     bool commaSeen = false;
     for (size_t currentLength = 0; currentLength < decodedSnippet.length(); ++currentLength) {
         UChar currentChar = decodedSnippet[currentLength];
-        if (currentChar == '?'
+        if (currentChar == '&'
+            || currentChar == '?'
             || currentChar == '#'
             || ((currentChar == '/' || currentChar == '\\') && (commaSeen || ++slashCount > 2))
             || (currentChar == '<' && commaSeen)
@@ -388,14 +393,14 @@ void XSSAuditor::setEncoding(const WTF::TextEncoding& encoding)
         if (m_decodedHTTPBody.find(isRequiredForInjection) == kNotFound)
             m_decodedHTTPBody = String();
             if (m_decodedHTTPBody.length() >= miniumLengthForSuffixTree)
-                m_decodedHTTPBodySuffixTree = adoptPtr(new SuffixTree<ASCIICodebook>(m_decodedHTTPBody, suffixTreeDepth));
+                m_decodedHTTPBodySuffixTree = wrapUnique(new SuffixTree<ASCIICodebook>(m_decodedHTTPBody, suffixTreeDepth));
     }
 
     if (m_decodedURL.isEmpty() && m_decodedHTTPBody.isEmpty())
         m_isEnabled = false;
 }
 
-PassOwnPtr<XSSInfo> XSSAuditor::filterToken(const FilterTokenRequest& request)
+std::unique_ptr<XSSInfo> XSSAuditor::filterToken(const FilterTokenRequest& request)
 {
     ASSERT(m_state != Uninitialized);
     if (!m_isEnabled || m_xssProtection == AllowReflectedXSS)
@@ -413,8 +418,8 @@ PassOwnPtr<XSSInfo> XSSAuditor::filterToken(const FilterTokenRequest& request)
 
     if (didBlockScript) {
         bool didBlockEntirePage = (m_xssProtection == BlockReflectedXSS);
-        OwnPtr<XSSInfo> xssInfo = XSSInfo::create(m_documentURL, didBlockEntirePage, m_didSendValidXSSProtectionHeader, m_didSendValidCSPHeader);
-        return xssInfo.release();
+        std::unique_ptr<XSSInfo> xssInfo = XSSInfo::create(m_documentURL, didBlockEntirePage, m_didSendValidXSSProtectionHeader, m_didSendValidCSPHeader);
+        return xssInfo;
     }
     return nullptr;
 }
@@ -568,7 +573,7 @@ bool XSSAuditor::filterBaseToken(const FilterTokenRequest& request)
     ASSERT(request.token.type() == HTMLToken::StartTag);
     ASSERT(hasName(request.token, baseTag));
 
-    return eraseAttributeIfInjected(request, hrefAttr);
+    return eraseAttributeIfInjected(request, hrefAttr, String(), SrcLikeAttributeTruncation);
 }
 
 bool XSSAuditor::filterFormToken(const FilterTokenRequest& request)

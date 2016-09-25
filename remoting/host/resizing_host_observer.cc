@@ -118,13 +118,15 @@ class CandidateResolution {
 }  // namespace
 
 ResizingHostObserver::ResizingHostObserver(
-    std::unique_ptr<DesktopResizer> desktop_resizer)
+    std::unique_ptr<DesktopResizer> desktop_resizer,
+    bool restore)
     : desktop_resizer_(std::move(desktop_resizer)),
-      now_function_(base::Bind(base::Time::Now)),
+      restore_(restore),
+      now_function_(base::Bind(base::TimeTicks::Now)),
       weak_factory_(this) {}
 
 ResizingHostObserver::~ResizingHostObserver() {
-  if (!original_resolution_.IsEmpty())
+  if (restore_ && !original_resolution_.IsEmpty())
     desktop_resizer_->RestoreResolution(original_resolution_);
 }
 
@@ -132,22 +134,20 @@ void ResizingHostObserver::SetScreenResolution(
     const ScreenResolution& resolution) {
   // Get the current time. This function is called exactly once for each call
   // to SetScreenResolution to simplify the implementation of unit-tests.
-  base::Time now = now_function_.Run();
+  base::TimeTicks now = now_function_.Run();
 
   if (resolution.IsEmpty())
     return;
 
   // Resizing the desktop too often is probably not a good idea, so apply a
   // simple rate-limiting scheme.
-  base::TimeDelta minimum_resize_interval =
+  base::TimeTicks next_allowed_resize =
+      previous_resize_time_ +
       base::TimeDelta::FromMilliseconds(kMinimumResizeIntervalMs);
-  base::Time next_allowed_resize =
-      previous_resize_time_ + minimum_resize_interval;
 
   if (now < next_allowed_resize) {
     deferred_resize_timer_.Start(
-        FROM_HERE,
-        next_allowed_resize - now,
+        FROM_HERE, next_allowed_resize - now,
         base::Bind(&ResizingHostObserver::SetScreenResolution,
                    weak_factory_.GetWeakPtr(), resolution));
     return;
@@ -181,7 +181,7 @@ void ResizingHostObserver::SetScreenResolution(
 }
 
 void ResizingHostObserver::SetNowFunctionForTesting(
-    const base::Callback<base::Time(void)>& now_function) {
+    const base::Callback<base::TimeTicks(void)>& now_function) {
   now_function_ = now_function;
 }
 

@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "components/autofill/core/browser/autofill_credit_card_filling_infobar_delegate_mobile.h"
 #include "components/autofill/core/browser/autofill_save_card_infobar_delegate_mobile.h"
 #include "components/autofill/core/browser/autofill_save_card_infobar_mobile.h"
 #include "components/autofill/core/browser/ui/card_unmask_prompt_view.h"
@@ -19,8 +20,10 @@
 #include "components/password_manager/core/browser/password_generation_manager.h"
 #include "components/prefs/pref_service.h"
 #include "google_apis/gaia/identity_provider.h"
+#include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/autofill/personal_data_manager_factory.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#include "ios/chrome/browser/infobars/infobar_utils.h"
 #include "ios/chrome/browser/web_data_service_factory.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 
@@ -45,7 +48,7 @@ AutofillClientIOS::~AutofillClientIOS() {
 }
 
 PersonalDataManager* AutofillClientIOS::GetPersonalDataManager() {
-  return PersonalDataManagerFactory::GetForBrowserState(
+  return autofill::PersonalDataManagerFactory::GetForBrowserState(
       browser_state_->GetOriginalChromeBrowserState());
 }
 
@@ -63,11 +66,8 @@ IdentityProvider* AutofillClientIOS::GetIdentityProvider() {
   return identity_provider_.get();
 }
 
-// TODO(dconnelly): [Merge] Does this need a real implementation?
-// http://crbug.com/468326
 rappor::RapporService* AutofillClientIOS::GetRapporService() {
-  NOTIMPLEMENTED();
-  return nullptr;
+  return GetApplicationContext()->GetRapporService();
 }
 
 void AutofillClientIOS::ShowAutofillSettings() {
@@ -97,9 +97,9 @@ void AutofillClientIOS::ConfirmSaveCreditCardLocally(
   // InfoBarService is a WebContentsUserData, it must also be alive at this
   // time.
   infobar_manager_->AddInfoBar(CreateSaveCardInfoBarMobile(
-      base::WrapUnique(new AutofillSaveCardInfoBarDelegateMobile(
+      base::MakeUnique<AutofillSaveCardInfoBarDelegateMobile>(
           false, card, std::unique_ptr<base::DictionaryValue>(nullptr),
-          callback))));
+          callback)));
 }
 
 void AutofillClientIOS::ConfirmSaveCreditCardToCloud(
@@ -107,8 +107,21 @@ void AutofillClientIOS::ConfirmSaveCreditCardToCloud(
     std::unique_ptr<base::DictionaryValue> legal_message,
     const base::Closure& callback) {
   infobar_manager_->AddInfoBar(CreateSaveCardInfoBarMobile(
-      base::WrapUnique(new AutofillSaveCardInfoBarDelegateMobile(
-          true, card, std::move(legal_message), callback))));
+      base::MakeUnique<AutofillSaveCardInfoBarDelegateMobile>(
+          true, card, std::move(legal_message), callback)));
+}
+
+void AutofillClientIOS::ConfirmCreditCardFillAssist(
+    const CreditCard& card,
+    const base::Closure& callback) {
+  auto infobar_delegate =
+      base::MakeUnique<AutofillCreditCardFillingInfoBarDelegateMobile>(
+          card, callback);
+  auto* raw_delegate = infobar_delegate.get();
+  if (infobar_manager_->AddInfoBar(
+          ::CreateConfirmInfoBar(std::move(infobar_delegate)))) {
+    raw_delegate->set_was_shown();
+  }
 }
 
 void AutofillClientIOS::LoadRiskData(
@@ -121,13 +134,6 @@ bool AutofillClientIOS::HasCreditCardScanFeature() {
 }
 
 void AutofillClientIOS::ScanCreditCard(const CreditCardScanCallback& callback) {
-  NOTREACHED();
-}
-
-void AutofillClientIOS::ShowRequestAutocompleteDialog(
-    const FormData& form,
-    content::RenderFrameHost* render_frame_host,
-    const ResultCallback& callback) {
   NOTREACHED();
 }
 
@@ -146,10 +152,6 @@ void AutofillClientIOS::HideAutofillPopup() {
 bool AutofillClientIOS::IsAutocompleteEnabled() {
   // For browser, Autocomplete is always enabled as part of Autofill.
   return GetPrefs()->GetBoolean(prefs::kAutofillEnabled);
-}
-
-void AutofillClientIOS::HideRequestAutocompleteDialog() {
-  NOTREACHED();
 }
 
 void AutofillClientIOS::UpdateAutofillPopupDataListValues(
@@ -185,6 +187,14 @@ bool AutofillClientIOS::IsContextSecure(const GURL& form_origin) {
 void AutofillClientIOS::OnFirstUserGestureObserved() {
   // TODO(gcasto): [Merge 306796] http://crbug.com/439425 Verify if this method
   // needs a real implementation or not.
+  NOTIMPLEMENTED();
+}
+
+bool AutofillClientIOS::ShouldShowSigninPromo() {
+  return false;
+}
+
+void AutofillClientIOS::StartSigninFlow() {
   NOTIMPLEMENTED();
 }
 

@@ -9,6 +9,8 @@
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/style/StyleImage.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -46,8 +48,8 @@ private:
         , m_end(end)
         , m_isSingle(m_start == m_end)
     {
-        ASSERT(m_start);
-        ASSERT(m_end);
+        DCHECK(m_start);
+        DCHECK(m_end);
     }
 
     Persistent<CSSValue> m_start;
@@ -62,8 +64,8 @@ PassRefPtr<CSSImageNonInterpolableValue> CSSImageNonInterpolableValue::merge(Pas
 {
     const CSSImageNonInterpolableValue& startImagePair = toCSSImageNonInterpolableValue(*start);
     const CSSImageNonInterpolableValue& endImagePair = toCSSImageNonInterpolableValue(*end);
-    ASSERT(startImagePair.m_isSingle);
-    ASSERT(endImagePair.m_isSingle);
+    DCHECK(startImagePair.m_isSingle);
+    DCHECK(endImagePair.m_isSingle);
     return create(startImagePair.m_start, endImagePair.m_end);
 }
 
@@ -113,9 +115,9 @@ class UnderlyingImageChecker : public InterpolationType::ConversionChecker {
 public:
     ~UnderlyingImageChecker() final {}
 
-    static PassOwnPtr<UnderlyingImageChecker> create(const InterpolationValue& underlying)
+    static std::unique_ptr<UnderlyingImageChecker> create(const InterpolationValue& underlying)
     {
-        return adoptPtr(new UnderlyingImageChecker(underlying));
+        return wrapUnique(new UnderlyingImageChecker(underlying));
     }
 
 private:
@@ -142,7 +144,7 @@ InterpolationValue CSSImageInterpolationType::maybeConvertNeutral(const Interpol
     return InterpolationValue(underlying.clone());
 }
 
-InterpolationValue CSSImageInterpolationType::maybeConvertInitial(const StyleResolverState&) const
+InterpolationValue CSSImageInterpolationType::maybeConvertInitial(const StyleResolverState&, ConversionCheckers& conversionCheckers) const
 {
     return maybeConvertStyleImage(ImagePropertyFunctions::getInitialStyleImage(cssProperty()), true);
 }
@@ -151,9 +153,9 @@ class ParentImageChecker : public InterpolationType::ConversionChecker {
 public:
     ~ParentImageChecker() final {}
 
-    static PassOwnPtr<ParentImageChecker> create(CSSPropertyID property, StyleImage* inheritedImage)
+    static std::unique_ptr<ParentImageChecker> create(CSSPropertyID property, StyleImage* inheritedImage)
     {
-        return adoptPtr(new ParentImageChecker(property, inheritedImage));
+        return wrapUnique(new ParentImageChecker(property, inheritedImage));
     }
 
 private:

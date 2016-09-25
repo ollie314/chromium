@@ -33,7 +33,9 @@ ChromeMetricsHelper::ChromeMetricsHelper(
           g_browser_process->rappor_service()
               ? g_browser_process->rappor_service()->AsWeakPtr()
               : base::WeakPtr<rappor::RapporService>()),
+#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION) || defined(ENABLE_EXTENSIONS)
       web_contents_(web_contents),
+#endif
       request_url_(request_url),
       sampling_event_name_(sampling_event_name) {
   DCHECK(!sampling_event_name_.empty());
@@ -108,6 +110,7 @@ void ChromeMetricsHelper::RecordExtraUserInteractionMetrics(
     case SET_EXTENDED_REPORTING_DISABLED:
     case EXTENDED_REPORTING_IS_ENABLED:
     case REPORT_PHISHING_ERROR:
+    case SHOW_WHITEPAPER:
     case MAX_INTERACTION:
       break;
   }

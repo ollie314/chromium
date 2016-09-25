@@ -28,6 +28,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/* eslint-disable indent */
 
 /**
  * @fileoverview This file contains small testing framework along with the
@@ -607,7 +608,7 @@ TestSuite.prototype.testPauseInSharedWorkerInitialization1 = function()
 
     function callback()
     {
-        var target = WebInspector.targetManager.targetsWithJSContext()[0];
+        var target = WebInspector.targetManager.targets(WebInspector.Target.Capability.JS)[0];
         target._connection.deprecatedRunAfterPendingDispatches(this.releaseControl.bind(this));
     }
 };
@@ -619,7 +620,7 @@ TestSuite.prototype.testPauseInSharedWorkerInitialization2 = function()
 
     function callback()
     {
-        var target = WebInspector.targetManager.targetsWithJSContext()[0];
+        var target = WebInspector.targetManager.targets(WebInspector.Target.Capability.JS)[0];
         var debuggerModel = WebInspector.DebuggerModel.fromTarget(target);
         if (debuggerModel.isPaused()) {
             this.releaseControl();
@@ -714,6 +715,73 @@ TestSuite.prototype.testDeviceMetricsOverrides = function()
 
     test.takeControl();
     step1();
+};
+
+TestSuite.prototype.testDispatchKeyEventDoesNotCrash = function()
+{
+    WebInspector.targetManager.mainTarget().inputAgent().invoke_dispatchKeyEvent({
+        type: "rawKeyDown",
+        windowsVirtualKeyCode: 0x23,
+        key: "End"
+    });
+    WebInspector.targetManager.mainTarget().inputAgent().invoke_dispatchKeyEvent({
+        type: "keyUp",
+        windowsVirtualKeyCode: 0x23,
+        key: "End"
+    });
+};
+
+TestSuite.prototype.testEmulateNetworkConditions = function()
+{
+    var test = this;
+
+    function testPreset(preset, messages, next)
+    {
+        function onConsoleMessage(event)
+        {
+            var index = messages.indexOf(event.data.messageText);
+            if (index === -1) {
+                test.fail("Unexpected message: " + event.data.messageText);
+                return;
+            }
+
+            messages.splice(index, 1);
+            if (!messages.length) {
+                WebInspector.multitargetConsoleModel.removeEventListener(WebInspector.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
+                next();
+            }
+        }
+
+        WebInspector.multitargetConsoleModel.addEventListener(WebInspector.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
+        WebInspector.multitargetNetworkManager.setNetworkConditions(preset);
+    }
+
+    test.takeControl();
+    step1();
+
+    function step1()
+    {
+        testPreset(
+            WebInspector.NetworkConditionsSelector._presets[0],
+            ["offline event: online = false", "connection change event: type = none; downlinkMax = 0"],
+            step2);
+    }
+
+    function step2()
+    {
+        testPreset(
+            WebInspector.NetworkConditionsSelector._presets[2],
+            ["online event: online = true", "connection change event: type = cellular; downlinkMax = 0.244140625"],
+            step3);
+    }
+
+    function step3()
+    {
+        testPreset(
+            WebInspector.NetworkConditionsSelector._presets[8],
+            ["connection change event: type = wifi; downlinkMax = 30"],
+            test.releaseControl.bind(test));
+    }
 };
 
 TestSuite.prototype.testScreenshotRecording = function()
@@ -845,6 +913,34 @@ TestSuite.prototype.testSettings = function()
     }
 }
 
+TestSuite.prototype.testWindowInitializedOnNavigateBack = function()
+{
+    var messages = WebInspector.multitargetConsoleModel.messages();
+    this.assertEquals(1, messages.length);
+    var text = messages[0].messageText;
+    if (text.indexOf("Uncaught") !== -1)
+        this.fail(text);
+};
+
+TestSuite.prototype.testConsoleContextNames = function()
+{
+    var test = this;
+    test.takeControl();
+    this.showPanel("console").then(() => this._waitForExecutionContexts(2, onExecutionContexts.bind(this)));
+
+    function onExecutionContexts()
+    {
+        var consoleView = WebInspector.ConsoleView.instance();
+        var options = consoleView._consoleContextSelector._selectElement.options;
+        var values = [];
+        for (var i = 0; i < options.length; ++i)
+            values.push(options[i].value.trim());
+        test.assertEquals("top", values[0]);
+        test.assertEquals("Simple content script", values[1]);
+        test.releaseControl();
+    }
+}
+
 TestSuite.prototype.waitForTestResultsInConsole = function()
 {
     var messages = WebInspector.multitargetConsoleModel.messages();
@@ -950,11 +1046,15 @@ TestSuite.prototype.checkInputEventsPresent = function()
     var expectedEvents = new Set(arguments);
     var model = WebInspector.panels.timeline._model;
     var asyncEvents = model.mainThreadAsyncEvents();
-    var input = asyncEvents.get(WebInspector.TimelineUIUtils.asyncEventGroups().input) || [];
+    var input = asyncEvents.get(WebInspector.TimelineModel.AsyncEventGroup.input) || [];
     var prefix = "InputLatency::";
     for (var e of input) {
         if (!e.name.startsWith(prefix))
             continue;
+        if (e.steps.length < 2)
+            continue;
+        if (e.name.startsWith(prefix + "Mouse") && typeof e.steps[0].timeWaitingForMainThread !== "number")
+            throw `Missing timeWaitingForMainThread on ${e.name}`;
         expectedEvents.delete(e.name.substr(prefix.length));
     }
     if (expectedEvents.size)
@@ -1010,7 +1110,7 @@ TestSuite.prototype.evaluateInConsole_ = function(code, callback)
         WebInspector.context.removeFlavorChangeListener(WebInspector.ExecutionContext, showConsoleAndEvaluate, this);
         var consoleView = WebInspector.ConsoleView.instance();
         consoleView._prompt.setText(code);
-        consoleView._promptElement.dispatchEvent(TestSuite.createKeyEvent("Enter"));
+        consoleView._prompt.element.dispatchEvent(TestSuite.createKeyEvent("Enter"));
 
         this.addSniffer(WebInspector.ConsoleView.prototype, "_consoleMessageAddedForTest",
             function(viewMessage) {
@@ -1095,14 +1195,26 @@ TestSuite.prototype._waitForTargets = function(n, callback)
     }
 }
 
+TestSuite.prototype._waitForExecutionContexts = function(n, callback)
+{
+    var runtimeModel = WebInspector.targetManager.mainTarget().runtimeModel;
+    checkForExecutionContexts.call(this);
+
+    function checkForExecutionContexts()
+    {
+        if (runtimeModel.executionContexts().length >= n)
+            callback.call(null);
+        else
+            this.addSniffer(WebInspector.RuntimeModel.prototype, "_executionContextCreated", checkForExecutionContexts.bind(this));
+    }
+}
+
 /**
  * Key event with given key identifier.
  */
-TestSuite.createKeyEvent = function(keyIdentifier)
+TestSuite.createKeyEvent = function(key)
 {
-    var evt = document.createEvent("KeyboardEvent");
-    evt.initKeyboardEvent("keydown", true /* can bubble */, true /* can cancel */, null /* view */, keyIdentifier, "");
-    return evt;
+    return new KeyboardEvent("keydown", {bubbles: true, cancelable:true, key: key});
 };
 
 window.uiTests = new TestSuite(window.domAutomationController);

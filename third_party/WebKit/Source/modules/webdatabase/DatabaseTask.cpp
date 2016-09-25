@@ -31,14 +31,14 @@
 #include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseContext.h"
 #include "modules/webdatabase/DatabaseThread.h"
-#include "platform/Logging.h"
+#include "modules/webdatabase/StorageLog.h"
 
 namespace blink {
 
-DatabaseTask::DatabaseTask(Database* database, TaskSynchronizer* synchronizer)
+DatabaseTask::DatabaseTask(Database* database, WaitableEvent* completeEvent)
     : m_database(database)
-    , m_synchronizer(synchronizer)
-#if !LOG_DISABLED
+    , m_completeEvent(completeEvent)
+#if DCHECK_IS_ON()
     , m_complete(false)
 #endif
 {
@@ -46,35 +46,35 @@ DatabaseTask::DatabaseTask(Database* database, TaskSynchronizer* synchronizer)
 
 DatabaseTask::~DatabaseTask()
 {
-#if !LOG_DISABLED
-    ASSERT(m_complete || !m_synchronizer);
+#if DCHECK_IS_ON()
+    DCHECK(m_complete || !m_completeEvent);
 #endif
 }
 
 void DatabaseTask::run()
 {
     // Database tasks are meant to be used only once, so make sure this one hasn't been performed before.
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
     ASSERT(!m_complete);
 #endif
 
-    if (!m_synchronizer && !m_database->getDatabaseContext()->databaseThread()->isDatabaseOpen(m_database.get())) {
+    if (!m_completeEvent && !m_database->getDatabaseContext()->databaseThread()->isDatabaseOpen(m_database.get())) {
         taskCancelled();
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
         m_complete = true;
 #endif
         return;
     }
-
-    WTF_LOG(StorageAPI, "Performing %s %p\n", debugTaskName(), this);
-
+#if DCHECK_IS_ON()
+    STORAGE_DVLOG(1) << "Performing " << debugTaskName() << " " << this;
+#endif
     m_database->resetAuthorizer();
     doPerformTask();
 
-    if (m_synchronizer)
-        m_synchronizer->taskCompleted();
+    if (m_completeEvent)
+        m_completeEvent->signal();
 
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
     m_complete = true;
 #endif
 }
@@ -82,14 +82,14 @@ void DatabaseTask::run()
 // *** DatabaseOpenTask ***
 // Opens the database file and verifies the version matches the expected version.
 
-Database::DatabaseOpenTask::DatabaseOpenTask(Database* database, bool setVersionInNewDatabase, TaskSynchronizer* synchronizer, DatabaseError& error, String& errorMessage, bool& success)
-    : DatabaseTask(database, synchronizer)
+Database::DatabaseOpenTask::DatabaseOpenTask(Database* database, bool setVersionInNewDatabase, WaitableEvent* completeEvent, DatabaseError& error, String& errorMessage, bool& success)
+    : DatabaseTask(database, completeEvent)
     , m_setVersionInNewDatabase(setVersionInNewDatabase)
     , m_error(error)
     , m_errorMessage(errorMessage)
     , m_success(success)
 {
-    ASSERT(synchronizer); // A task with output parameters is supposed to be synchronous.
+    DCHECK(completeEvent); // A task with output parameters is supposed to be synchronous.
 }
 
 void Database::DatabaseOpenTask::doPerformTask()
@@ -100,7 +100,7 @@ void Database::DatabaseOpenTask::doPerformTask()
         m_errorMessage = errorMessage.isolatedCopy();
 }
 
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
 const char* Database::DatabaseOpenTask::debugTaskName() const
 {
     return "DatabaseOpenTask";
@@ -110,8 +110,8 @@ const char* Database::DatabaseOpenTask::debugTaskName() const
 // *** DatabaseCloseTask ***
 // Closes the database.
 
-Database::DatabaseCloseTask::DatabaseCloseTask(Database* database, TaskSynchronizer* synchronizer)
-    : DatabaseTask(database, synchronizer)
+Database::DatabaseCloseTask::DatabaseCloseTask(Database* database, WaitableEvent* completeEvent)
+    : DatabaseTask(database, completeEvent)
 {
 }
 
@@ -120,7 +120,7 @@ void Database::DatabaseCloseTask::doPerformTask()
     database()->close();
 }
 
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
 const char* Database::DatabaseCloseTask::debugTaskName() const
 {
     return "DatabaseCloseTask";
@@ -158,7 +158,7 @@ void Database::DatabaseTransactionTask::taskCancelled()
     m_transaction->notifyDatabaseThreadIsShuttingDown();
 }
 
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
 const char* Database::DatabaseTransactionTask::debugTaskName() const
 {
     return "DatabaseTransactionTask";
@@ -168,11 +168,11 @@ const char* Database::DatabaseTransactionTask::debugTaskName() const
 // *** DatabaseTableNamesTask ***
 // Retrieves a list of all tables in the database - for WebInspector support.
 
-Database::DatabaseTableNamesTask::DatabaseTableNamesTask(Database* database, TaskSynchronizer* synchronizer, Vector<String>& names)
-    : DatabaseTask(database, synchronizer)
+Database::DatabaseTableNamesTask::DatabaseTableNamesTask(Database* database, WaitableEvent* completeEvent, Vector<String>& names)
+    : DatabaseTask(database, completeEvent)
     , m_tableNames(names)
 {
-    ASSERT(synchronizer); // A task with output parameters is supposed to be synchronous.
+    DCHECK(completeEvent); // A task with output parameters is supposed to be synchronous.
 }
 
 void Database::DatabaseTableNamesTask::doPerformTask()
@@ -180,7 +180,7 @@ void Database::DatabaseTableNamesTask::doPerformTask()
     m_tableNames = database()->performGetTableNames();
 }
 
-#if !LOG_DISABLED
+#if DCHECK_IS_ON()
 const char* Database::DatabaseTableNamesTask::debugTaskName() const
 {
     return "DatabaseTableNamesTask";

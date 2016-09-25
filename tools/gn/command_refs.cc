@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "tools/gn/commands.h"
 #include "tools/gn/deps_iterator.h"
 #include "tools/gn/filesystem_utils.h"
@@ -17,6 +18,7 @@
 #include "tools/gn/item.h"
 #include "tools/gn/setup.h"
 #include "tools/gn/standard_out.h"
+#include "tools/gn/switches.h"
 #include "tools/gn/target.h"
 
 namespace commands {
@@ -31,7 +33,7 @@ typedef std::multimap<const Target*, const Target*> DepMap;
 
 // Populates the reverse dependency map for the targets in the Setup.
 void FillDepMap(Setup* setup, DepMap* dep_map) {
-  for (const auto& target : setup->builder()->GetAllResolvedTargets()) {
+  for (auto* target : setup->builder().GetAllResolvedTargets()) {
     for (const auto& dep_pair : target->GetDeps(Target::DEPS_ALL))
       dep_map->insert(std::make_pair(dep_pair.ptr, target));
   }
@@ -142,7 +144,13 @@ bool TargetContainsFile(const Target* target, const SourceFile& file) {
   for (const auto& cur_file : target->data()) {
     if (cur_file == file.value())
       return true;
+    if (cur_file.back() == '/' &&
+        base::StartsWith(file.value(), cur_file, base::CompareCase::SENSITIVE))
+      return true;
   }
+
+  if (target->action_values().script().value() == file.value())
+    return true;
 
   std::vector<SourceFile> outputs;
   target->action_values().GetOutputsAsSourceFiles(target, &outputs);
@@ -159,7 +167,7 @@ void GetTargetsContainingFile(Setup* setup,
                               bool all_toolchains,
                               UniqueVector<const Target*>* matches) {
   Label default_toolchain = setup->loader()->default_toolchain_label();
-  for (const auto& target : all_targets) {
+  for (auto* target : all_targets) {
     if (!all_toolchains) {
       // Only check targets in the default toolchain.
       if (target->label().GetToolchainLabel() != default_toolchain)
@@ -188,7 +196,7 @@ void GetTargetsReferencingConfig(Setup* setup,
                                  bool all_toolchains,
                                  UniqueVector<const Target*>* matches) {
   Label default_toolchain = setup->loader()->default_toolchain_label();
-  for (const auto& target : all_targets) {
+  for (auto* target : all_targets) {
     if (!all_toolchains) {
       // Only check targets in the default toolchain.
       if (target->label().GetToolchainLabel() != default_toolchain)
@@ -315,16 +323,7 @@ const char kRefs_Help[] =
     "\n"
     "      When used with --tree, turns off eliding to show a complete tree.\n"
     "\n"
-    "  --all-toolchains\n"
-    "      Normally only inputs in the default toolchain will be included.\n"
-    "      This switch will turn on matching all toolchains.\n"
-    "\n"
-    "      For example, a file is in a target might be compiled twice:\n"
-    "      once in the default toolchain and once in a secondary one. Without\n"
-    "      this flag, only the default toolchain one will be matched and\n"
-    "      printed (potentially with its recursive dependencies, depending on\n"
-    "      the other options). With this flag, both will be printed\n"
-    "      (potentially with both of their recursive dependencies).\n"
+    ALL_TOOLCHAINS_SWITCH_HELP
     "\n"
     TARGET_PRINTING_MODE_COMMAND_LINE_HELP
     "\n"
@@ -397,7 +396,7 @@ int RunRefs(const std::vector<std::string>& args) {
   const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
   bool tree = cmdline->HasSwitch("tree");
   bool all = cmdline->HasSwitch("all");
-  bool all_toolchains = cmdline->HasSwitch("all-toolchains");
+  bool all_toolchains = cmdline->HasSwitch(switches::kAllToolchains);
 
   Setup* setup = new Setup;
   setup->build_settings().set_check_for_bad_items(false);
@@ -444,13 +443,13 @@ int RunRefs(const std::vector<std::string>& args) {
   // the output, while for normal targets you don't want to see the inputs,
   // only what refers to them.
   std::vector<const Target*> all_targets =
-      setup->builder()->GetAllResolvedTargets();
+      setup->builder().GetAllResolvedTargets();
   UniqueVector<const Target*> explicit_target_matches;
   for (const auto& file : file_matches) {
     GetTargetsContainingFile(setup, all_targets, file, all_toolchains,
                              &explicit_target_matches);
   }
-  for (const auto& config : config_matches) {
+  for (auto* config : config_matches) {
     GetTargetsReferencingConfig(setup, all_targets, config, all_toolchains,
                                 &explicit_target_matches);
   }

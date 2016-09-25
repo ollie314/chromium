@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -27,6 +27,7 @@
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #include "chrome/browser/shell_integration_win.h"
+#include "chrome/installer/util/shell_util.h"
 #endif
 
 #if !defined(OS_WIN)
@@ -244,13 +245,15 @@ void DefaultBrowserWorker::SetAsDefaultImpl(
     case SET_DEFAULT_INTERACTIVE:
 #if defined(OS_WIN)
       if (interactive_permitted_) {
-        // The Windows 8 API for choosing the default browser was deprecated on
-        // Windows 10.
-        if (base::win::GetVersion() >= base::win::VERSION_WIN10) {
-          win::SetAsDefaultBrowserUsingSystemSettings(on_finished_callback);
-          return;
-        } else {
-          win::SetAsDefaultBrowserUsingIntentPicker();
+        switch (ShellUtil::GetInteractiveSetDefaultMode()) {
+          case ShellUtil::INTENT_PICKER:
+            win::SetAsDefaultBrowserUsingIntentPicker();
+            break;
+          case ShellUtil::SYSTEM_SETTINGS:
+            win::SetAsDefaultBrowserUsingSystemSettings(on_finished_callback);
+            // Early return because the function above takes care of calling
+            // |on_finished_callback|.
+            return;
         }
       }
 #endif  // defined(OS_WIN)
@@ -292,9 +295,19 @@ void DefaultProtocolClientWorker::SetAsDefaultImpl(
       break;
     case SET_DEFAULT_INTERACTIVE:
 #if defined(OS_WIN)
-      // TODO(pmonette): Implement a working flow for Windows 10.
-      if (interactive_permitted_)
-        win::SetAsDefaultProtocolClientUsingIntentPicker(protocol_);
+      if (interactive_permitted_) {
+        switch (ShellUtil::GetInteractiveSetDefaultMode()) {
+          case ShellUtil::INTENT_PICKER:
+            win::SetAsDefaultProtocolClientUsingIntentPicker(protocol_);
+            break;
+          case ShellUtil::SYSTEM_SETTINGS:
+            win::SetAsDefaultProtocolClientUsingSystemSettings(
+                protocol_, on_finished_callback);
+            // Early return because the function above takes care of calling
+            // |on_finished_callback|.
+            return;
+        }
+      }
 #endif  // defined(OS_WIN)
       break;
   }

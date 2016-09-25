@@ -13,45 +13,38 @@
 #include <vector>
 
 #include "ash/ash_export.h"
-#include "ash/display/display_info.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
+#include "ui/display/display.h"
+#include "ui/display/display_observer.h"
 #include "ui/display/manager/display_layout.h"
-#include "ui/gfx/display.h"
+#include "ui/display/manager/managed_display_info.h"
 
 #if defined(OS_CHROMEOS)
 #include "ui/display/chromeos/display_configurator.h"
 #endif
 
-namespace aura {
-class Window;
-}
-
-namespace chromeos {
-class DisplayNotificationsTest;
-}
-
-namespace gfx {
-class Display;
-class Insets;
-class Rect;
+namespace display {
+class DisplayLayoutStore;
+class DisplayObserver;
 class Screen;
 }
 
-namespace ash {
-class AcceleratorControllerTest;
-class DisplayLayoutStore;
-class MouseWarpController;
-class ScreenAsh;
+namespace gfx {
+class Insets;
+class Rect;
+}
 
-typedef std::vector<DisplayInfo> DisplayInfoList;
+namespace ash {
+using DisplayInfoList = std::vector<display::ManagedDisplayInfo>;
 
 namespace test {
 class AshTestBase;
 class DisplayManagerTestApi;
-class SystemGestureEventFilterTest;
 }
 
 // DisplayManager maintains the current display configurations,
@@ -62,7 +55,7 @@ class ASH_EXPORT DisplayManager
 #if defined(OS_CHROMEOS)
     : public ui::DisplayConfigurator::SoftwareMirroringController
 #endif
-      {
+{
  public:
   class ASH_EXPORT Delegate {
    public:
@@ -80,6 +73,11 @@ class ASH_EXPORT DisplayManager
     // deactivate the active window and set the focus window to NULL.
     virtual void PreDisplayConfigurationChange(bool clear_focus) = 0;
     virtual void PostDisplayConfigurationChange() = 0;
+
+#if defined(OS_CHROMEOS)
+    // Get the ui::DisplayConfigurator.
+    virtual ui::DisplayConfigurator* display_configurator() = 0;
+#endif
   };
 
   // How the second display will be used.
@@ -96,16 +94,14 @@ class ASH_EXPORT DisplayManager
   // The display ID for a virtual display assigned to a unified desktop.
   static int64_t kUnifiedDisplayId;
 
-  DisplayManager();
+  explicit DisplayManager(std::unique_ptr<display::Screen> screen);
 #if defined(OS_CHROMEOS)
   ~DisplayManager() override;
 #else
   virtual ~DisplayManager();
 #endif
 
-  DisplayLayoutStore* layout_store() {
-    return layout_store_.get();
-  }
+  display::DisplayLayoutStore* layout_store() { return layout_store_.get(); }
 
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
@@ -142,12 +138,12 @@ class ASH_EXPORT DisplayManager
       std::unique_ptr<display::DisplayLayout> layout);
 
   // Returns display for given |id|;
-  const gfx::Display& GetDisplayForId(int64_t id) const;
+  const display::Display& GetDisplayForId(int64_t id) const;
 
   // Finds the display that contains |point| in screeen coordinates.
   // Returns invalid display if there is no display that can satisfy
   // the condition.
-  const gfx::Display& FindDisplayContainingPoint(
+  const display::Display& FindDisplayContainingPoint(
       const gfx::Point& point_in_screen) const;
 
   // Sets the work area's |insets| to the display given by |display_id|.
@@ -161,19 +157,25 @@ class ASH_EXPORT DisplayManager
   // Sets the display's rotation for the given |source|. The new |rotation| will
   // also become active.
   void SetDisplayRotation(int64_t display_id,
-                          gfx::Display::Rotation rotation,
-                          gfx::Display::RotationSource source);
+                          display::Display::Rotation rotation,
+                          display::Display::RotationSource source);
+
+  // Sets the UI scale for the |display_id|. Returns false if the
+  // display_id is not an internal display.
+  bool SetDisplayUIScale(int64_t display_id, float scale);
 
   // Sets the external display's configuration, including resolution change,
   // ui-scale change, and device scale factor change. Returns true if it changes
   // the display resolution so that the caller needs to show a notification in
   // case the new resolution actually doesn't work.
-  bool SetDisplayMode(int64_t display_id, const DisplayMode& display_mode);
+  bool SetDisplayMode(
+      int64_t display_id,
+      const scoped_refptr<display::ManagedDisplayMode>& display_mode);
 
   // Register per display properties. |overscan_insets| is NULL if
   // the display has no custom overscan insets.
   void RegisterDisplayProperty(int64_t display_id,
-                               gfx::Display::Rotation rotation,
+                               display::Display::Rotation rotation,
                                float ui_scale,
                                const gfx::Insets* overscan_insets,
                                const gfx::Size& resolution_in_pixels,
@@ -182,7 +184,7 @@ class ASH_EXPORT DisplayManager
 
   // Register stored rotation properties for the internal display.
   void RegisterDisplayRotationProperties(bool rotation_lock,
-                                         gfx::Display::Rotation rotation);
+                                         display::Display::Rotation rotation);
 
   // Returns the stored rotation lock preference if it has been loaded,
   // otherwise false.
@@ -191,18 +193,19 @@ class ASH_EXPORT DisplayManager
   }
 
   // Returns the stored rotation preference for the internal display if it has
-  // been loaded, otherwise |gfx::Display::Rotate_0|.
-  gfx::Display::Rotation registered_internal_display_rotation() const {
+  // been loaded, otherwise |display::Display::Rotate_0|.
+  display::Display::Rotation registered_internal_display_rotation() const {
     return registered_internal_display_rotation_;
   }
 
   // Returns the display mode of |display_id| which is currently used.
-  DisplayMode GetActiveModeForDisplayId(int64_t display_id) const;
+  scoped_refptr<display::ManagedDisplayMode> GetActiveModeForDisplayId(
+      int64_t display_id) const;
 
   // Returns the display's selected mode. This returns false and doesn't
   // set |mode_out| if the display mode is in default.
-  bool GetSelectedModeForDisplayId(int64_t display_id,
-                                   DisplayMode* mode_out) const;
+  scoped_refptr<display::ManagedDisplayMode> GetSelectedModeForDisplayId(
+      int64_t display_id) const;
 
   // Tells if the virtual resolution feature is enabled.
   bool IsDisplayUIScalingEnabled() const;
@@ -220,25 +223,35 @@ class ASH_EXPORT DisplayManager
   // configurations is passed as a vector of Display object, which
   // contains each display's new infomration.
   void OnNativeDisplaysChanged(
-      const std::vector<DisplayInfo>& display_info_list);
+      const std::vector<display::ManagedDisplayInfo>& display_info_list);
 
   // Updates the internal display data and notifies observers about the changes.
-  void UpdateDisplaysWith(const std::vector<DisplayInfo>& display_info_list);
+  void UpdateDisplaysWith(
+      const std::vector<display::ManagedDisplayInfo>& display_info_list);
 
   // Updates current displays using current |display_info_|.
   void UpdateDisplays();
 
   // Returns the display at |index|. The display at 0 is
   // no longer considered "primary".
-  const gfx::Display& GetDisplayAt(size_t index) const;
+  const display::Display& GetDisplayAt(size_t index) const;
 
-  const gfx::Display& GetPrimaryDisplayCandidate() const;
+  const display::Display& GetPrimaryDisplayCandidate() const;
 
   // Returns the logical number of displays. This returns 1
   // when displays are mirrored.
   size_t GetNumDisplays() const;
 
-  const display::DisplayList& active_display_list() const {
+  // Returns only the currently active displays. This list does not include the
+  // displays that will be removed if |UpdateDisplaysWith| is currently
+  // executing.
+  // See https://crbug.com/632755
+  const display::Displays& active_only_display_list() const {
+    return is_updating_display_list_ ? active_only_display_list_
+                                     : active_display_list();
+  }
+
+  const display::Displays& active_display_list() const {
     return active_display_list_;
   }
 
@@ -253,7 +266,7 @@ class ASH_EXPORT DisplayManager
   // Returns the mirroring status.
   bool IsInMirrorMode() const;
   int64_t mirroring_display_id() const { return mirroring_display_id_; }
-  const display::DisplayList& software_mirroring_display_list() const {
+  const display::Displays& software_mirroring_display_list() const {
     return software_mirroring_display_list_;
   }
 
@@ -266,10 +279,10 @@ class ASH_EXPORT DisplayManager
 
   // Returns the display used for software mirrroring. Returns invalid
   // display if not found.
-  const gfx::Display GetMirroringDisplayById(int64_t id) const;
+  const display::Display GetMirroringDisplayById(int64_t id) const;
 
   // Retuns the display info associated with |display_id|.
-  const DisplayInfo& GetDisplayInfo(int64_t display_id) const;
+  const display::ManagedDisplayInfo& GetDisplayInfo(int64_t display_id) const;
 
   // Returns the human-readable name for the display |id|.
   std::string GetDisplayNameForId(int64_t id);
@@ -288,7 +301,7 @@ class ASH_EXPORT DisplayManager
   void AddRemoveDisplay();
   void ToggleDisplayScaleFactor();
 
-  // SoftwareMirroringController override:
+// SoftwareMirroringController override:
 #if defined(OS_CHROMEOS)
   void SetSoftwareMirroring(bool enabled) override;
   bool SoftwareMirroringEnabled() const override;
@@ -315,35 +328,36 @@ class ASH_EXPORT DisplayManager
   // is enabled.
   void CreateMirrorWindowAsyncIfAny();
 
-  // Creates a MouseWarpController for the current display
-  // configuration. |drag_source| is the window where dragging
-  // started, or nullptr otherwise.
-  std::unique_ptr<MouseWarpController> CreateMouseWarpController(
-      aura::Window* drag_source) const;
-
-  // Create a screen instance to be used during shutdown.
-  void CreateScreenForShutdown() const;
-
   // A unit test may change the internal display id (which never happens on
   // a real device). This will update the mode list for internal display
   // for this test scenario.
-  void UpdateInternalDisplayModeListForTest();
+  void UpdateInternalManagedDisplayModeListForTest();
 
-private:
+  // Zoom the internal display.
+  bool ZoomInternalDisplay(bool up);
+
+  // Reset the internal display zoom.
+  void ResetInternalDisplayZoom();
+
+  // Notifies observers of display configuration changes.
+  void NotifyMetricsChanged(const display::Display& display, uint32_t metrics);
+  void NotifyDisplayAdded(const display::Display& display);
+  void NotifyDisplayRemoved(const display::Display& display);
+
+  // Delegated from the Screen implementation.
+  void AddObserver(display::DisplayObserver* observer);
+  void RemoveObserver(display::DisplayObserver* observer);
+
+ private:
   FRIEND_TEST_ALL_PREFIXES(ExtendedDesktopTest, ConvertPoint);
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, TestNativeDisplaysChanged);
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest,
                            NativeDisplaysChangedAfterPrimaryChange);
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, AutomaticOverscanInsets);
   FRIEND_TEST_ALL_PREFIXES(DisplayManagerTest, Rotate);
-  friend class AcceleratorControllerTest;
   friend class DisplayManagerTest;
-  friend class chromeos::DisplayNotificationsTest;
   friend class test::AshTestBase;
   friend class test::DisplayManagerTestApi;
-  friend class test::SystemGestureEventFilterTest;
-
-  typedef std::vector<DisplayInfo> DisplayInfoList;
 
   bool software_mirroring_enabled() const {
     return multi_display_mode_ == MIRRORING;
@@ -357,29 +371,35 @@ private:
   // used to mirror the content is removed from the |display_info_list|.
   void CreateSoftwareMirroringDisplayInfo(DisplayInfoList* display_info_list);
 
-  gfx::Display* FindDisplayForId(int64_t id);
+  display::Display* FindDisplayForId(int64_t id);
 
   // Add the mirror display's display info if the software based
   // mirroring is in use.
   void AddMirrorDisplayInfoIfAny(DisplayInfoList* display_info_list);
 
-  // Inserts and update the DisplayInfo according to the overscan
-  // state. Note that The DisplayInfo stored in the |internal_display_info_|
+  // Inserts and update the display::ManagedDisplayInfo according to the
+  // overscan
+  // state. Note that The display::ManagedDisplayInfo stored in the
+  // |internal_display_info_|
   // can be different from |new_info| (due to overscan state), so
-  // you must use |GetDisplayInfo| to get the correct DisplayInfo for
+  // you must use |GetDisplayInfo| to get the correct
+  // display::ManagedDisplayInfo for
   // a display.
-  void InsertAndUpdateDisplayInfo(const DisplayInfo& new_info);
+  void InsertAndUpdateDisplayInfo(const display::ManagedDisplayInfo& new_info);
 
   // Called when the display info is updated through InsertAndUpdateDisplayInfo.
-  void OnDisplayInfoUpdated(const DisplayInfo& display_info);
+  void OnDisplayInfoUpdated(const display::ManagedDisplayInfo& display_info);
 
-  // Creates a display object from the DisplayInfo for |display_id|.
-  gfx::Display CreateDisplayFromDisplayInfoById(int64_t display_id);
+  // Creates a display object from the display::ManagedDisplayInfo for
+  // |display_id|.
+  display::Display CreateDisplayFromDisplayInfoById(int64_t display_id);
 
-  // Creates a display object from the DisplayInfo for |display_id| for
+  // Creates a display object from the display::ManagedDisplayInfo for
+  // |display_id|
+  // for
   // mirroring. The size of the display will be scaled using |scale|
   // with the offset using |origin|.
-  gfx::Display CreateMirroringDisplayFromDisplayInfoById(
+  display::Display CreateMirroringDisplayFromDisplayInfoById(
       int64_t display_id,
       const gfx::Point& origin,
       float scale);
@@ -390,7 +410,7 @@ private:
   // the layout registered for the display pair. For more than 2 displays,
   // the bounds are updated using horizontal layout.
   void UpdateNonPrimaryDisplayBoundsForLayout(
-      display::DisplayList* display_list,
+      display::Displays* display_list,
       std::vector<size_t>* updated_indices);
 
   void CreateMirrorWindowIfAny();
@@ -400,29 +420,38 @@ private:
   // Applies the |layout| and updates the bounds of displays in |display_list|.
   // |updated_ids| contains the ids for displays whose bounds have changed.
   void ApplyDisplayLayout(const display::DisplayLayout& layout,
-                          display::DisplayList* display_list,
+                          display::Displays* display_list,
                           std::vector<int64_t>* updated_ids);
 
   Delegate* delegate_;  // not owned.
 
-  std::unique_ptr<ScreenAsh> screen_;
+  std::unique_ptr<display::Screen> screen_;
 
-  std::unique_ptr<DisplayLayoutStore> layout_store_;
+  std::unique_ptr<display::DisplayLayoutStore> layout_store_;
 
   int64_t first_display_id_;
 
   // List of current active displays.
-  display::DisplayList active_display_list_;
+  display::Displays active_display_list_;
+  // This list does not include the displays that will be removed if
+  // |UpdateDisplaysWith| is under execution.
+  // See https://crbug.com/632755
+  display::Displays active_only_display_list_;
+
+  // True if active_display_list is being modified and has displays that are not
+  // presently active.
+  // See https://crbug.com/632755
+  bool is_updating_display_list_;
 
   int num_connected_displays_;
 
   bool force_bounds_changed_;
 
   // The mapping from the display ID to its internal data.
-  std::map<int64_t, DisplayInfo> display_info_;
+  std::map<int64_t, display::ManagedDisplayInfo> display_info_;
 
   // Selected display modes for displays. Key is the displays' ID.
-  std::map<int64_t, DisplayMode> display_modes_;
+  std::map<int64_t, scoped_refptr<display::ManagedDisplayMode>> display_modes_;
 
   // When set to true, the host window's resize event updates
   // the display's size. This is set to true when running on
@@ -435,15 +464,17 @@ private:
   MultiDisplayMode current_default_multi_display_mode_;
 
   int64_t mirroring_display_id_;
-  display::DisplayList software_mirroring_display_list_;
+  display::Displays software_mirroring_display_list_;
 
   // User preference for rotation lock of the internal display.
   bool registered_internal_display_rotation_lock_;
 
   // User preference for the rotation of the internal display.
-  gfx::Display::Rotation registered_internal_display_rotation_;
+  display::Display::Rotation registered_internal_display_rotation_;
 
   bool unified_desktop_enabled_;
+
+  base::ObserverList<display::DisplayObserver> observers_;
 
   base::WeakPtrFactory<DisplayManager> weak_ptr_factory_;
 

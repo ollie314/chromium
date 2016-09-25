@@ -26,7 +26,6 @@ class TestMetricsServiceClient : public MetricsServiceClient {
   // MetricsServiceClient:
   metrics::MetricsService* GetMetricsService() override;
   void SetMetricsClientId(const std::string& client_id) override;
-  void OnRecordingDisabled() override;
   bool IsOffTheRecordSessionActive() override;
   int32_t GetProduct() override;
   std::string GetApplicationLocale() override;
@@ -37,11 +36,11 @@ class TestMetricsServiceClient : public MetricsServiceClient {
   void InitializeSystemProfileMetrics(
       const base::Closure& done_callback) override;
   void CollectFinalMetricsForLog(const base::Closure& done_callback) override;
-  scoped_ptr<MetricsLogUploader> CreateUploader(
+  std::unique_ptr<MetricsLogUploader> CreateUploader(
       const base::Callback<void(int)>& on_upload_complete) override;
   base::TimeDelta GetStandardUploadInterval() override;
   bool IsReportingPolicyManaged() override;
-  MetricsServiceClient::EnableMetricsDefault GetDefaultOptIn() override;
+  EnableMetricsDefault GetMetricsReportingDefaultState() override;
 
   const std::string& get_client_id() const { return client_id_; }
   void set_version_string(const std::string& str) { version_string_ = str; }
@@ -49,8 +48,7 @@ class TestMetricsServiceClient : public MetricsServiceClient {
   void set_reporting_is_managed(bool managed) {
     reporting_is_managed_ = managed;
   }
-  void set_enable_default(
-      MetricsServiceClient::EnableMetricsDefault enable_default) {
+  void set_enable_default(EnableMetricsDefault enable_default) {
     enable_default_ = enable_default;
   }
 
@@ -59,7 +57,7 @@ class TestMetricsServiceClient : public MetricsServiceClient {
   std::string version_string_;
   int32_t product_;
   bool reporting_is_managed_;
-  MetricsServiceClient::EnableMetricsDefault enable_default_;
+  EnableMetricsDefault enable_default_;
 
   DISALLOW_COPY_AND_ASSIGN(TestMetricsServiceClient);
 };

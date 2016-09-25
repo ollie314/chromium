@@ -8,6 +8,7 @@ import android.content.Context;
 import android.media.AudioManager;
 
 import org.chromium.base.Log;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
@@ -26,16 +27,13 @@ import org.chromium.base.annotations.JNINamespace;
 public class MediaSessionDelegate implements AudioManager.OnAudioFocusChangeListener {
     private static final String TAG = "MediaSession";
 
-    // These need to match the values in native apps.
-    public static final double DUCKING_VOLUME_MULTIPLIER = 0.2f;
-    public static final double DEFAULT_VOLUME_MULTIPLIER = 1.0f;
-
     private Context mContext;
     private int mFocusType;
     private boolean mIsDucking = false;
 
-    // Native pointer to C++ content::MediaSessionAndroid.
-    private final long mNativeMediaSessionDelegateAndroid;
+    // Native pointer to C++ content::MediaSessionDelegateAndroid.
+    // It will be set to 0 when the native MediaSessionDelegateAndroid object is destroyed.
+    private long mNativeMediaSessionDelegateAndroid;
 
     private MediaSessionDelegate(final Context context, long nativeMediaSessionDelegateAndroid) {
         mContext = context;
@@ -50,11 +48,14 @@ public class MediaSessionDelegate implements AudioManager.OnAudioFocusChangeList
 
     @CalledByNative
     private void tearDown() {
+        assert ThreadUtils.runningOnUiThread();
         abandonAudioFocus();
+        mNativeMediaSessionDelegateAndroid = 0;
     }
 
     @CalledByNative
     private boolean requestAudioFocus(boolean transientFocus) {
+        assert ThreadUtils.runningOnUiThread();
         mFocusType = transientFocus ? AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
                 : AudioManager.AUDIOFOCUS_GAIN;
         return requestAudioFocusInternal();
@@ -62,6 +63,7 @@ public class MediaSessionDelegate implements AudioManager.OnAudioFocusChangeList
 
     @CalledByNative
     private void abandonAudioFocus() {
+        assert ThreadUtils.runningOnUiThread();
         AudioManager am = (AudioManager) mContext.getSystemService(Context.AUDIO_SERVICE);
         am.abandonAudioFocus(this);
     }
@@ -75,11 +77,13 @@ public class MediaSessionDelegate implements AudioManager.OnAudioFocusChangeList
 
     @Override
     public void onAudioFocusChange(int focusChange) {
+        assert ThreadUtils.runningOnUiThread();
+        if (mNativeMediaSessionDelegateAndroid == 0) return;
+
         switch (focusChange) {
             case AudioManager.AUDIOFOCUS_GAIN:
                 if (mIsDucking) {
-                    nativeOnSetVolumeMultiplier(mNativeMediaSessionDelegateAndroid,
-                                                DEFAULT_VOLUME_MULTIPLIER);
+                    nativeOnStopDucking(mNativeMediaSessionDelegateAndroid);
                     mIsDucking = false;
                 } else {
                     nativeOnResume(mNativeMediaSessionDelegateAndroid);
@@ -91,8 +95,7 @@ public class MediaSessionDelegate implements AudioManager.OnAudioFocusChangeList
             case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
                 mIsDucking = true;
                 nativeRecordSessionDuck(mNativeMediaSessionDelegateAndroid);
-                nativeOnSetVolumeMultiplier(mNativeMediaSessionDelegateAndroid,
-                                            DUCKING_VOLUME_MULTIPLIER);
+                nativeOnStartDucking(mNativeMediaSessionDelegateAndroid);
                 break;
             case AudioManager.AUDIOFOCUS_LOSS:
                 abandonAudioFocus();
@@ -106,7 +109,7 @@ public class MediaSessionDelegate implements AudioManager.OnAudioFocusChangeList
 
     private native void nativeOnSuspend(long nativeMediaSessionDelegateAndroid, boolean temporary);
     private native void nativeOnResume(long nativeMediaSessionDelegateAndroid);
-    private native void nativeOnSetVolumeMultiplier(long nativeMediaSessionDelegateAndroid,
-                                                    double volumeMultiplier);
+    private native void nativeOnStartDucking(long nativeMediaSessionDelegateAndroid);
+    private native void nativeOnStopDucking(long nativeMediaSessionDelegateAndroid);
     private native void nativeRecordSessionDuck(long nativeMediaSessionDelegateAndroid);
 }

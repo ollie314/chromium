@@ -76,9 +76,21 @@ DocumentLifecycle::AllowThrottlingScope::~AllowThrottlingScope()
     s_allowThrottlingCount--;
 }
 
+DocumentLifecycle::DisallowThrottlingScope::DisallowThrottlingScope(DocumentLifecycle& lifecycle)
+{
+    m_savedCount = s_allowThrottlingCount;
+    s_allowThrottlingCount = 0;
+}
+
+DocumentLifecycle::DisallowThrottlingScope::~DisallowThrottlingScope()
+{
+    s_allowThrottlingCount = m_savedCount;
+}
+
 DocumentLifecycle::DocumentLifecycle()
     : m_state(Uninitialized)
     , m_detachCount(0)
+    , m_disallowTransitionCount(0)
 {
 }
 
@@ -90,6 +102,9 @@ DocumentLifecycle::~DocumentLifecycle()
 
 bool DocumentLifecycle::canAdvanceTo(LifecycleState nextState) const
 {
+    if (stateTransitionDisallowed())
+        return false;
+
     // We can stop from anywhere.
     if (nextState == Stopping)
         return true;
@@ -99,8 +114,6 @@ bool DocumentLifecycle::canAdvanceTo(LifecycleState nextState) const
         return nextState == Inactive;
     case Inactive:
         if (nextState == StyleClean)
-            return true;
-        if (nextState == Disposed)
             return true;
         break;
     case VisualUpdatePending:
@@ -130,7 +143,9 @@ bool DocumentLifecycle::canAdvanceTo(LifecycleState nextState) const
             return true;
         if (nextState == LayoutClean)
             return true;
-        if (nextState == InCompositingUpdate)
+        if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled() && nextState == InCompositingUpdate)
+            return true;
+        if (RuntimeEnabledFeatures::slimmingPaintV2Enabled() && nextState == InPrePaint)
             return true;
         break;
     case InLayoutSubtreeChange:
@@ -149,7 +164,9 @@ bool DocumentLifecycle::canAdvanceTo(LifecycleState nextState) const
             return true;
         if (nextState == LayoutClean)
             return true;
-        if (nextState == InCompositingUpdate)
+        if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled() && nextState == InCompositingUpdate)
+            return true;
+        if (RuntimeEnabledFeatures::slimmingPaintV2Enabled() && nextState == InPrePaint)
             return true;
         break;
     case InPreLayout:
@@ -185,43 +202,57 @@ bool DocumentLifecycle::canAdvanceTo(LifecycleState nextState) const
             return true;
         if (nextState == StyleClean)
             return true;
-        if (nextState == InCompositingUpdate)
+        if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled() && nextState == InCompositingUpdate)
+            return true;
+        if (RuntimeEnabledFeatures::slimmingPaintV2Enabled() && nextState == InPrePaint)
             return true;
         break;
     case InCompositingUpdate:
+        DCHECK(!RuntimeEnabledFeatures::slimmingPaintV2Enabled());
         return nextState == CompositingClean;
     case CompositingClean:
+        DCHECK(!RuntimeEnabledFeatures::slimmingPaintV2Enabled());
         if (nextState == InStyleRecalc)
             return true;
         if (nextState == InPreLayout)
             return true;
         if (nextState == InCompositingUpdate)
             return true;
-        if (nextState == InPaintInvalidation)
-            return true;
-        break;
-    case InPaintInvalidation:
-        return nextState == PaintInvalidationClean;
-    case PaintInvalidationClean:
-        if (nextState == InStyleRecalc)
-            return true;
-        if (nextState == InPreLayout)
-            return true;
-        if (nextState == InCompositingUpdate)
-            return true;
-        if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
-            if (nextState == InUpdatePaintProperties)
+        if (RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled()) {
+            if (nextState == InPrePaint)
                 return true;
-        } else if (nextState == InPaint) {
+        } else if (nextState == InPaintInvalidation) {
             return true;
         }
         break;
-    case InUpdatePaintProperties:
-        if (nextState == UpdatePaintPropertiesClean && RuntimeEnabledFeatures::slimmingPaintV2Enabled())
+    case InPaintInvalidation:
+        DCHECK(!RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled());
+        return nextState == PaintInvalidationClean;
+    case PaintInvalidationClean:
+        DCHECK(!RuntimeEnabledFeatures::slimmingPaintInvalidationEnabled());
+        if (nextState == InStyleRecalc)
+            return true;
+        if (nextState == InPreLayout)
+            return true;
+        if (nextState == InCompositingUpdate)
+            return true;
+        if (nextState == InPrePaint)
             return true;
         break;
-    case UpdatePaintPropertiesClean:
-        if (nextState == InPaint && RuntimeEnabledFeatures::slimmingPaintV2Enabled())
+    case InPrePaint:
+        if (nextState == PrePaintClean)
+            return true;
+        break;
+    case PrePaintClean:
+        if (nextState == InPaint)
+            return true;
+        if (nextState == InStyleRecalc)
+            return true;
+        if (nextState == InPreLayout)
+            return true;
+        if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled() && nextState == InCompositingUpdate)
+            return true;
+        if (RuntimeEnabledFeatures::slimmingPaintV2Enabled() && nextState == InPrePaint)
             return true;
         break;
     case InPaint:
@@ -233,23 +264,24 @@ bool DocumentLifecycle::canAdvanceTo(LifecycleState nextState) const
             return true;
         if (nextState == InPreLayout)
             return true;
-        if (nextState == InCompositingUpdate)
+        if (!RuntimeEnabledFeatures::slimmingPaintV2Enabled() && nextState == InCompositingUpdate)
+            return true;
+        if (RuntimeEnabledFeatures::slimmingPaintV2Enabled() && nextState == InPrePaint)
             return true;
         break;
     case Stopping:
         return nextState == Stopped;
     case Stopped:
-        return nextState == Disposed;
-    case Disposed:
-        // FIXME: We can dispose a document multiple times. This seems wrong.
-        // See https://code.google.com/p/chromium/issues/detail?id=301668.
-        return nextState == Disposed;
+        return false;
     }
     return false;
 }
 
 bool DocumentLifecycle::canRewindTo(LifecycleState nextState) const
 {
+    if (stateTransitionDisallowed())
+        return false;
+
     // This transition is bogus, but we've whitelisted it anyway.
     if (s_deprecatedTransitionStack && m_state == s_deprecatedTransitionStack->from() && nextState == s_deprecatedTransitionStack->to())
         return true;
@@ -259,6 +291,7 @@ bool DocumentLifecycle::canRewindTo(LifecycleState nextState) const
         || m_state == LayoutClean
         || m_state == CompositingClean
         || m_state == PaintInvalidationClean
+        || m_state == PrePaintClean
         || m_state == PaintClean;
 }
 
@@ -314,13 +347,12 @@ const char* DocumentLifecycle::stateAsDebugString(const LifecycleState state)
         DEBUG_STRING_CASE(CompositingClean);
         DEBUG_STRING_CASE(InPaintInvalidation);
         DEBUG_STRING_CASE(PaintInvalidationClean);
-        DEBUG_STRING_CASE(InUpdatePaintProperties);
-        DEBUG_STRING_CASE(UpdatePaintPropertiesClean);
+        DEBUG_STRING_CASE(InPrePaint);
+        DEBUG_STRING_CASE(PrePaintClean);
         DEBUG_STRING_CASE(InPaint);
         DEBUG_STRING_CASE(PaintClean);
         DEBUG_STRING_CASE(Stopping);
         DEBUG_STRING_CASE(Stopped);
-        DEBUG_STRING_CASE(Disposed);
     }
 
     ASSERT_NOT_REACHED();

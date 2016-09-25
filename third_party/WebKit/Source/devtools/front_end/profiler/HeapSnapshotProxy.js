@@ -42,7 +42,7 @@ WebInspector.HeapSnapshotWorkerProxy = function(eventHandler)
     this._callbacks = new Map();
     /** @type {!Set<number>} */
     this._previousCallbacks = new Set();
-    this._worker = new WorkerRuntime.Worker("heap_snapshot_worker");
+    this._worker = new WebInspector.Worker("heap_snapshot_worker");
     this._worker.onmessage = this._messageReceived.bind(this);
 }
 
@@ -297,8 +297,7 @@ WebInspector.HeapSnapshotLoaderProxy.prototype = {
         {
             if (callback)
                 callback();
-            var showHiddenData = WebInspector.moduleSetting("showAdvancedHeapSnapshotProperties").get();
-            this.callFactoryMethod(updateStaticData.bind(this), "buildSnapshot", WebInspector.HeapSnapshotProxy, showHiddenData);
+            this.callFactoryMethod(updateStaticData.bind(this), "buildSnapshot", WebInspector.HeapSnapshotProxy);
         }
 
         /**

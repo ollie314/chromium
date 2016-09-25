@@ -10,7 +10,6 @@
 #include "ui/views/layout/layout_manager.h"
 #include "ui/views/window/frame_buttons.h"
 
-class AvatarMenuButton;
 class NewAvatarButton;
 class OpaqueBrowserFrameViewLayoutDelegate;
 
@@ -73,10 +72,10 @@ class OpaqueBrowserFrameViewLayout : public views::LayoutManager {
   // borders, including both the window frame and any client edge.
   int NonClientBorderThickness() const;
 
-  // Returns the height of the entire nonclient top border, including the window
-  // frame, any title area, and any connected client edge.  If |restored| is
-  // true, acts as if the window is restored regardless of the real mode.
-  int NonClientTopBorderHeight(bool restored) const;
+  // Returns the height of the entire nonclient top border, from the edge of the
+  // window to the top of the tabs. If |restored| is true, this is calculated as
+  // if the window was restored, regardless of its current state.
+  int NonClientTopHeight(bool restored) const;
 
   int GetTabStripInsetsTop(bool restored) const;
 
@@ -195,7 +194,7 @@ class OpaqueBrowserFrameViewLayout : public views::LayoutManager {
   views::View* window_icon_;
   views::Label* window_title_;
 
-  AvatarMenuButton* avatar_button_;
+  views::View* incognito_icon_;
   views::View* new_avatar_button_;
 
   std::vector<views::FrameButton> leading_buttons_;

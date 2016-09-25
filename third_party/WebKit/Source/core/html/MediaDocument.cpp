@@ -34,6 +34,7 @@
 #include "core/events/EventListener.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLContentElement.h"
@@ -123,13 +124,11 @@ private:
 
 void MediaDocumentParser::createDocumentStructure()
 {
-    ASSERT(document());
+    DCHECK(document());
     HTMLHtmlElement* rootElement = HTMLHtmlElement::create(*document());
-    rootElement->insertedByParser();
     document()->appendChild(rootElement);
+    rootElement->insertedByParser();
 
-    document()->frame()->loader().dispatchDocumentElementAvailable();
-    document()->frame()->loader().runScriptsAtDocumentElementAvailable();
     if (isDetached())
         return; // runScriptsAtDocumentElementAvailable can detach the frame.
 
@@ -182,23 +181,22 @@ void MediaDocumentParser::createDocumentStructure()
             "margin-top: 32px;"
             "padding: 0 16px 0 16px;"
             "height: 36px;"
-            "background: #4285F4;"
+            "background: #000000;"
+            "-webkit-tap-highlight-color: rgba(255, 255, 255, 0.12);"
             "font-family: Roboto;"
             "font-size: 14px;"
             "border-radius: 5px;"
             "color: white;"
-            "font-weight: bold;"
+            "font-weight: 500;"
             "text-decoration: none;"
-            "min-width: 300px;"
             "line-height: 36px;");
         EventListener* listener = MediaDownloadEventListener::create();
         anchor->addEventListener(EventTypeNames::click, listener, false);
         HTMLDivElement* buttonContainer = HTMLDivElement::create(*document());
         buttonContainer->setAttribute(styleAttr,
-            "position: absolute;"
             "text-align: center;"
-            "left: 0;"
-            "right: 0;");
+            "height: 0;"
+            "flex: none");
         buttonContainer->appendChild(anchor);
         div->appendChild(buttonContainer);
         recordDownloadMetric(MediaDocumentDownloadButtonShown);
@@ -234,6 +232,9 @@ MediaDocument::MediaDocument(const DocumentInit& initializer)
 {
     setCompatibilityMode(QuirksMode);
     lockCompatibilityMode();
+    UseCounter::count(*this, UseCounter::MediaDocument);
+    if (!isInMainFrame())
+        UseCounter::count(*this, UseCounter::MediaDocumentInFrame);
 }
 
 DocumentParser* MediaDocument::createParser()
@@ -253,7 +254,7 @@ void MediaDocument::defaultEventHandler(Event* event)
             return;
 
         KeyboardEvent* keyboardEvent = toKeyboardEvent(event);
-        if (keyboardEvent->keyIdentifier() == "U+0020" || keyboardEvent->keyCode() == VKEY_MEDIA_PLAY_PAUSE) {
+        if (keyboardEvent->key() == " " || keyboardEvent->keyCode() == VKEY_MEDIA_PLAY_PAUSE) {
             // space or media key (play/pause)
             video->togglePlayState();
             event->setDefaultHandled();

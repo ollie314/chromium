@@ -16,8 +16,8 @@
 #include "base/threading/thread_checker.h"
 #include "content/common/content_export.h"
 #include "content/public/renderer/media_stream_audio_sink.h"
-#include "media/audio/audio_parameters.h"
 #include "media/base/audio_converter.h"
+#include "media/base/audio_parameters.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
 
 namespace media {
@@ -62,7 +62,7 @@ class CONTENT_EXPORT SpeechRecognitionAudioSink
 
   // media::AudioConverter::Inputcallback implementation.
   double ProvideInput(media::AudioBus* audio_bus,
-                      base::TimeDelta buffer_delay) override;
+                      uint32_t frames_delayed) override;
 
   // Returns the pointer to the audio input buffer mapped in the shared memory.
   media::AudioInputBuffer* GetAudioInputBuffer() const;

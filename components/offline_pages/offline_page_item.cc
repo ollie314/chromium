@@ -4,14 +4,9 @@
 
 #include "components/offline_pages/offline_page_item.h"
 
-#include "components/offline_pages/proto/offline_pages.pb.h"
 #include "net/base/filename_util.h"
 
 namespace offline_pages {
-
-namespace {
-const int kCurrentVersion = 1;
-}
 
 ClientId::ClientId() : name_space(""), id("") {}
 
@@ -22,12 +17,15 @@ bool ClientId::operator==(const ClientId& client_id) const {
   return name_space == client_id.name_space && id == client_id.id;
 }
 
-OfflinePageItem::OfflinePageItem()
-    : version(kCurrentVersion),
-      file_size(0),
-      access_count(0),
-      flags(NO_FLAG) {
+bool ClientId::operator<(const ClientId& client_id) const {
+  if (name_space == client_id.name_space)
+    return (id < client_id.id);
+
+  return name_space < client_id.name_space;
 }
+
+OfflinePageItem::OfflinePageItem()
+    : file_size(0), access_count(0), flags(NO_FLAG) {}
 
 OfflinePageItem::OfflinePageItem(const GURL& url,
                                  int64_t offline_id,
@@ -37,7 +35,6 @@ OfflinePageItem::OfflinePageItem(const GURL& url,
     : url(url),
       offline_id(offline_id),
       client_id(client_id),
-      version(kCurrentVersion),
       file_path(file_path),
       file_size(file_size),
       access_count(0),
@@ -52,7 +49,6 @@ OfflinePageItem::OfflinePageItem(const GURL& url,
     : url(url),
       offline_id(offline_id),
       client_id(client_id),
-      version(kCurrentVersion),
       file_path(file_path),
       file_size(file_size),
       creation_time(creation_time),
@@ -65,20 +61,25 @@ OfflinePageItem::OfflinePageItem(const OfflinePageItem& other) = default;
 OfflinePageItem::~OfflinePageItem() {
 }
 
+bool OfflinePageItem::operator==(const OfflinePageItem& other) const {
+  return url == other.url &&
+         offline_id == other.offline_id &&
+         client_id == other.client_id &&
+         file_path == other.file_path &&
+         creation_time == other.creation_time &&
+         last_access_time == other.last_access_time &&
+         expiration_time == other.expiration_time &&
+         access_count == other.access_count &&
+         title == other.title &&
+         flags == other.flags;
+}
+
 GURL OfflinePageItem::GetOfflineURL() const {
   return net::FilePathToFileURL(file_path);
 }
 
-bool OfflinePageItem::IsMarkedForDeletion() const {
-  return (static_cast<int>(flags) & MARKED_FOR_DELETION) != 0;
-}
-
-void OfflinePageItem::MarkForDeletion() {
-  flags = static_cast<Flags>(static_cast<int>(flags) | MARKED_FOR_DELETION);
-}
-
-void OfflinePageItem::ClearMarkForDeletion() {
-  flags = static_cast<Flags>(static_cast<int>(flags) & ~MARKED_FOR_DELETION);
+bool OfflinePageItem::IsExpired() const {
+  return creation_time < expiration_time;
 }
 
 }  // namespace offline_pages

@@ -7,19 +7,26 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
+#include "base/i18n/icu_util.h"
 #include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/process/launch.h"
+#include "base/run_loop.h"
 #include "base/sys_info.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/test/base/chrome_test_launcher.h"
 #include "chrome/test/base/chrome_test_suite.h"
 #include "chrome/test/base/mojo_test_connector.h"
 #include "content/public/common/mojo_shell_connection.h"
 #include "content/public/test/test_launcher.h"
+#include "mash/package/mash_packaged_service.h"
 #include "services/shell/public/cpp/connector.h"
-#include "services/shell/public/cpp/shell_client.h"
-#include "services/shell/public/cpp/shell_connection.h"
+#include "services/shell/public/cpp/service.h"
+#include "services/shell/public/cpp/service_context.h"
+#include "services/shell/public/cpp/service_runner.h"
 #include "services/shell/runner/common/switches.h"
 #include "services/shell/runner/host/child_process.h"
+#include "services/shell/runner/host/child_process_base.h"
 #include "services/shell/runner/init.h"
 
 namespace {
@@ -79,11 +86,11 @@ class MashTestLauncherDelegate : public ChromeTestLauncherDelegate {
       base::CommandLine* command_line,
       base::TestLauncher::LaunchOptions* test_launch_options) override {
     if (!mojo_test_connector_) {
-      mojo_test_connector_.reset(new MojoTestConnector);
-      shell_client_.reset(new shell::ShellClient);
-      shell_connection_.reset(new shell::ShellConnection(
-          shell_client_.get(), mojo_test_connector_->Init()));
-      ConnectToDefaultApps(shell_connection_->connector());
+      mojo_test_connector_ = base::MakeUnique<MojoTestConnector>();
+      service_ = base::MakeUnique<mash::MashPackagedService>();
+      service_->set_context(base::MakeUnique<shell::ServiceContext>(
+          service_.get(), mojo_test_connector_->Init()));
+      ConnectToDefaultApps(service_->connector());
     }
     return mojo_test_connector_->PrepareForTest(command_line,
                                                 test_launch_options);
@@ -91,25 +98,38 @@ class MashTestLauncherDelegate : public ChromeTestLauncherDelegate {
   void OnDoneRunningTests() override {
     // We have to shutdown this state here, while an AtExitManager is still
     // valid.
-    shell_connection_.reset();
-    shell_client_.reset();
+    service_.reset();
     mojo_test_connector_.reset();
   }
 
   std::unique_ptr<MashTestSuite> test_suite_;
   std::unique_ptr<MojoTestConnector> mojo_test_connector_;
-  std::unique_ptr<shell::ShellClient> shell_client_;
-  std::unique_ptr<shell::ShellConnection> shell_connection_;
+  std::unique_ptr<mash::MashPackagedService> service_;
 
   DISALLOW_COPY_AND_ASSIGN(MashTestLauncherDelegate);
 };
 
-void CreateMojoShellConnection(MashTestLauncherDelegate* delegate) {
-  const bool is_external_shell = true;
-  content::MojoShellConnection::Create(
-      delegate->GetMojoTestConnectorForSingleProcess()->Init(),
-      is_external_shell);
-  ConnectToDefaultApps(content::MojoShellConnection::Get()->GetConnector());
+std::unique_ptr<content::MojoShellConnection> CreateMojoShellConnection(
+    MashTestLauncherDelegate* delegate) {
+  std::unique_ptr<content::MojoShellConnection> connection(
+      content::MojoShellConnection::Create(
+          delegate->GetMojoTestConnectorForSingleProcess()->Init(),
+          base::ThreadTaskRunnerHandle::Get()));
+  connection->Start();
+  ConnectToDefaultApps(connection->GetConnector());
+  return connection;
+}
+
+void StartChildApp(shell::mojom::ServiceRequest service_request) {
+  base::MessageLoop message_loop(base::MessageLoop::TYPE_DEFAULT);
+  base::RunLoop run_loop;
+  mash::MashPackagedService service;
+  std::unique_ptr<shell::ServiceContext> context =
+      base::MakeUnique<shell::ServiceContext>(&service,
+                                              std::move(service_request));
+  context->SetConnectionLostClosure(run_loop.QuitClosure());
+  service.set_context(std::move(context));
+  run_loop.Run();
 }
 
 }  // namespace
@@ -121,19 +141,25 @@ bool RunMashBrowserTests(int argc, char** argv, int* exit_code) {
   if (!command_line.HasSwitch("run-in-mash"))
     return false;
 
+  if (command_line.HasSwitch(MojoTestConnector::kMashApp)) {
+#if defined(OS_LINUX)
+    base::AtExitManager exit_manager;
+#endif
+    base::i18n::InitializeICU();
+    shell::ChildProcessMainWithCallback(base::Bind(&StartChildApp));
+    *exit_code = 0;
+    return true;
+  }
+
   if (command_line.HasSwitch(switches::kChildProcess) &&
       !command_line.HasSwitch(MojoTestConnector::kTestSwitch)) {
     base::AtExitManager at_exit;
     shell::InitializeLogging();
-    // TODO(sky): nuke once resolve why test isn't shutting down: 594600.
-    LOG(ERROR) << "starting app " << command_line.GetCommandLineString();
     shell::WaitForDebuggerIfNecessary();
 #if !defined(OFFICIAL_BUILD) && defined(OS_WIN)
     base::RouteStdioToConsole(false);
 #endif
     *exit_code = shell::ChildProcessMain();
-    // TODO(sky): nuke once resolve why test isn't shutting down: 594600.
-    LOG(ERROR) << "child exit_code=" << *exit_code;
     return true;
   }
 
@@ -150,7 +176,5 @@ bool RunMashBrowserTests(int argc, char** argv, int* exit_code) {
     content::MojoShellConnection::SetFactoryForTest(&shell_connection_factory);
   }
   *exit_code = LaunchChromeTests(default_jobs, &delegate, argc, argv);
-  // TODO(sky): nuke once resolve why test isn't shutting down: 594600.
-  LOG(ERROR) << "RunMashBrowserTests exit_code=" << *exit_code;
   return true;
 }

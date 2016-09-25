@@ -5,6 +5,9 @@
 #import "ios/web/public/test/test_web_client.h"
 
 #include "base/logging.h"
+#include "ios/web/test/test_url_constants.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "url/gurl.h"
 
 namespace web {
 
@@ -12,6 +15,23 @@ TestWebClient::TestWebClient()
     : last_cert_error_code_(0), last_cert_error_overridable_(true) {}
 
 TestWebClient::~TestWebClient() {}
+
+void TestWebClient::AddAdditionalSchemes(
+    std::vector<url::SchemeWithType>* additional_standard_schemes) const {
+  url::SchemeWithType scheme = {kTestWebUIScheme, url::SCHEME_WITHOUT_PORT};
+  additional_standard_schemes->push_back(scheme);
+}
+
+bool TestWebClient::IsAppSpecificURL(const GURL& url) const {
+  return url.SchemeIs(kTestWebUIScheme);
+}
+
+base::RefCountedMemory* TestWebClient::GetDataResourceBytes(
+    int resource_id) const {
+  if (!ResourceBundle::HasSharedInstance())
+    return nullptr;
+  return ResourceBundle::GetSharedInstance().LoadDataResourceBytes(resource_id);
+}
 
 NSString* TestWebClient::GetEarlyPageScript() const {
   return early_page_script_ ? early_page_script_.get() : @"";

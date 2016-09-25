@@ -5,9 +5,11 @@
 #ifndef EXTENSIONS_SHELL_TEST_SHELL_TEST_H_
 #define EXTENSIONS_SHELL_TEST_SHELL_TEST_H_
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_base.h"
+#include "extensions/common/features/feature_channel.h"
 
 namespace base {
 class FilePath;
@@ -37,6 +39,7 @@ class AppShellTest : public content::BrowserTestBase {
  protected:
   content::BrowserContext* browser_context_;
   ShellExtensionSystem* extension_system_;
+  ScopedCurrentChannel current_channel_;
 };
 
 }  // namespace extensions

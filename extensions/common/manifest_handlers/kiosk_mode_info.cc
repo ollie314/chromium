@@ -4,7 +4,8 @@
 
 #include "extensions/common/manifest_handlers/kiosk_mode_info.h"
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -113,8 +114,8 @@ bool KioskModeHandler::Parse(Extension* extension, base::string16* error) {
       return false;
     }
 
-    for (const base::Value* value : *list) {
-      scoped_ptr<KioskSecondaryAppsType> app =
+    for (const auto& value : *list) {
+      std::unique_ptr<KioskSecondaryAppsType> app =
           KioskSecondaryAppsType::FromValue(*value, error);
       if (!app) {
         *error = base::ASCIIToUTF16(

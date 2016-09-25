@@ -13,22 +13,22 @@ WebInspector.RemoteObjectPreviewFormatter.prototype = {
     /**
      * @param {!Element} parentElement
      * @param {!RuntimeAgent.ObjectPreview} preview
-     * @return {boolean} true iff preview captured all information.
      */
     appendObjectPreview: function(parentElement, preview)
     {
         var description = preview.description;
         if (preview.type !== "object" || preview.subtype === "null") {
             parentElement.appendChild(this.renderPropertyPreview(preview.type, preview.subtype, description));
-            return true;
+            return;
         }
-        if (description && preview.subtype !== "array") {
+        if (description && preview.subtype !== "array" && preview.subtype !== "typedarray") {
             var text = preview.subtype ? description : this._abbreviateFullQualifiedClassName(description);
             parentElement.createTextChildren(text, " ");
         }
         if (preview.entries)
-            return this._appendEntriesPreview(parentElement, preview);
-        return this._appendPropertiesPreview(parentElement, preview);
+            this._appendEntriesPreview(parentElement, preview);
+        else
+            this._appendPropertiesPreview(parentElement, preview);
     },
 
     /**
@@ -46,11 +46,10 @@ WebInspector.RemoteObjectPreviewFormatter.prototype = {
     /**
      * @param {!Element} parentElement
      * @param {!RuntimeAgent.ObjectPreview} preview
-     * @return {boolean} true iff preview captured all information.
      */
     _appendPropertiesPreview: function(parentElement, preview)
     {
-        var isArray = preview.subtype === "array";
+        var isArray = preview.subtype === "array" || preview.subtype === "typedarray";
         var arrayLength = WebInspector.RemoteObject.arrayLength(preview);
         var properties = preview.properties;
         if (isArray)
@@ -88,7 +87,7 @@ WebInspector.RemoteObjectPreviewFormatter.prototype = {
 
             var property = properties[i];
             var name = property.name;
-            if (!isArray || name != i || i >= arrayLength) {
+            if (!isArray || name !== String(i) || i >= arrayLength) {
                 if (/^\s|\s$|^$|\n/.test(name))
                     parentElement.createChild("span", "name").createTextChildren("\"", name.replace(/\n/g, "\u21B5"), "\"");
                 else
@@ -101,18 +100,15 @@ WebInspector.RemoteObjectPreviewFormatter.prototype = {
         if (preview.overflow)
             parentElement.createChild("span").textContent = "\u2026";
         parentElement.createTextChild(isArray ? "]" : "}");
-        return preview.lossless;
     },
 
 
     /**
      * @param {!Element} parentElement
      * @param {!RuntimeAgent.ObjectPreview} preview
-     * @return {boolean} true iff preview captured all information.
      */
     _appendEntriesPreview: function(parentElement, preview)
     {
-        var lossless = preview.lossless && !preview.properties.length;
         parentElement.createTextChild("{");
         for (var i = 0; i < preview.entries.length; ++i) {
             if (i > 0)
@@ -128,7 +124,6 @@ WebInspector.RemoteObjectPreviewFormatter.prototype = {
         if (preview.overflow)
             parentElement.createChild("span").textContent = "\u2026";
         parentElement.createTextChild("}");
-        return lossless;
     },
 
 

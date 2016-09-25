@@ -55,7 +55,6 @@ class KeyboardEvent;
 class MouseEvent;
 class LayoutObject;
 class ComputedStyle;
-class TouchEvent;
 
 class ClickHandlingState final : public EventDispatchHandlingState {
 public:
@@ -69,10 +68,9 @@ public:
 // An InputTypeView object represents the UI-specific part of an
 // HTMLInputElement. Do not expose instances of InputTypeView and classes
 // derived from it to classes other than HTMLInputElement.
-class CORE_EXPORT InputTypeView : public GarbageCollectedFinalized<InputTypeView> {
+class CORE_EXPORT InputTypeView : public GarbageCollectedMixin {
     WTF_MAKE_NONCOPYABLE(InputTypeView);
 public:
-    static InputTypeView* create(HTMLInputElement&);
     virtual ~InputTypeView();
     DECLARE_VIRTUAL_TRACE();
 
@@ -88,7 +86,6 @@ public:
     virtual void handleKeypressEvent(KeyboardEvent*);
     virtual void handleKeyupEvent(KeyboardEvent*);
     virtual void handleBeforeTextInsertedEvent(BeforeTextInsertedEvent*);
-    virtual void handleTouchEvent(TouchEvent*);
     virtual void forwardEvent(Event*);
     virtual bool shouldSubmitImplicitly(Event*);
     virtual HTMLFormElement* formForSubmission() const;
@@ -98,7 +95,6 @@ public:
     virtual void handleBlurEvent();
     virtual void handleDOMActivateEvent(Event*);
     virtual void accessKeyAction(bool sendMouseEvents);
-    virtual bool hasTouchEventHandler() const;
     virtual void blur();
     void dispatchSimulatedClickIfActive(KeyboardEvent*) const;
 

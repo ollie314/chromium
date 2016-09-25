@@ -20,7 +20,9 @@ class MockInputApi(object):
     self.json = json
     self.re = re
     self.os_path = os.path
+    self.platform = sys.platform
     self.python_executable = sys.executable
+    self.platform = sys.platform
     self.subprocess = subprocess
     self.files = []
     self.is_committing = False
@@ -121,6 +123,10 @@ class MockFile(object):
     """os.path.basename is called on MockFile so we need a get method."""
     return self._local_path[i]
 
+  def __len__(self):
+    """os.path.basename is called on MockFile so we need a len method."""
+    return len(self._local_path)
+
 
 class MockAffectedFile(MockFile):
   def AbsoluteLocalPath(self):
@@ -138,4 +144,8 @@ class MockChange(object):
     self._changed_files = changed_files
 
   def LocalPaths(self):
+    return self._changed_files
+
+  def AffectedFiles(self, include_dirs=False, include_deletes=True,
+                    file_filter=None):
     return self._changed_files

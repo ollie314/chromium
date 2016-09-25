@@ -12,7 +12,8 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -43,16 +44,28 @@ void ImportCookies(const net::CookieList& cookies,
     // To re-create the original cookie, a domain should only be passed in to
     // SetCookieWithDetailsAsync if cookie.Domain() has a leading period, to
     // re-create the original cookie.
-    std::string domain;
-    if (!cookie.Domain().empty() && cookie.Domain()[0] == '.')
-      domain = cookie.Domain();
+    std::string effective_domain = cookie.Domain();
+    std::string host;
+    if (effective_domain.length() > 1 && effective_domain[0] == '.') {
+      host = effective_domain.substr(1);
+    } else {
+      host = effective_domain;
+      effective_domain = "";
+    }
+
+    // Assume HTTPS - since the cookies are being restored from another store,
+    // they have already gone through the strict secure check.
+    GURL url(std::string(url::kHttpsScheme) + url::kStandardSchemeSeparator +
+             host + "/");
 
     cookie_store->SetCookieWithDetailsAsync(
-        cookie.Source(), cookie.Name(), cookie.Value(), domain, cookie.Path(),
+        url, cookie.Name(), cookie.Value(), effective_domain, cookie.Path(),
         cookie.CreationDate(), cookie.ExpiryDate(), cookie.LastAccessDate(),
         cookie.IsSecure(), cookie.IsHttpOnly(), cookie.SameSite(),
         // enforce_strict_secure should have been applied on the original
-        // cookie, prior to import.
+        // cookie, prior to import. This allows URL to be treated as an HTTPS
+        // URL, whether the cookie was set by an HTTP or HTTPS domain (Something
+        // that can't be determined by just looking at the CanonicalCookie).
         false, cookie.Priority(), net::CookieStore::SetCookiesCallback());
   }
 }
@@ -323,7 +336,7 @@ void ProfileAuthDataTransferer::Finish() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!completion_callback_.is_null())
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, completion_callback_);
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
 }
 
 }  // namespace

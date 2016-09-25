@@ -18,18 +18,22 @@
 
 namespace content {
 class VideoCaptureBufferPool;
-class VideoCaptureController;
-class VideoCaptureGpuJpegDecoder;
+class VideoFrameReceiver;
+class VideoCaptureJpegDecoder;
 
-// Receives events from the VideoCaptureDevice and posts them to a |controller_|
-// on the IO thread. An instance of this class may safely outlive its target
-// VideoCaptureController. This is a shallow class meant to convert incoming
-// frames and holds no significant state.
+using VideoCaptureJpegDecoderFactoryCB =
+    base::Callback<std::unique_ptr<VideoCaptureJpegDecoder>()>;
+
+// Implementation of media::VideoCaptureDevice::Client that uses a buffer pool
+// to provide buffers and converts incoming data to the I420 format for
+// consumption by a given VideoFrameReceiver.
 //
 // Methods of this class may be called from any thread, and in practice will
 // often be called on some auxiliary thread depending on the platform and the
 // device type; including, for example, the DirectShow thread on Windows, the
 // v4l2_thread on Linux, and the UI thread for tab capture.
+// The owner is responsible for making sure that the instance outlives these
+// calls.
 //
 // It has an internal ref counted TextureWrapHelper class used to wrap incoming
 // GpuMemoryBuffers into Texture backed VideoFrames. This class creates and
@@ -40,8 +44,9 @@ class CONTENT_EXPORT VideoCaptureDeviceClient
       public base::SupportsWeakPtr<VideoCaptureDeviceClient> {
  public:
   VideoCaptureDeviceClient(
-      const base::WeakPtr<VideoCaptureController>& controller,
-      const scoped_refptr<VideoCaptureBufferPool>& buffer_pool);
+      std::unique_ptr<VideoFrameReceiver> receiver,
+      const scoped_refptr<VideoCaptureBufferPool>& buffer_pool,
+      const VideoCaptureJpegDecoderFactoryCB& jpeg_decoder_factory);
   ~VideoCaptureDeviceClient() override;
 
   // VideoCaptureDevice::Client implementation.
@@ -49,18 +54,19 @@ class CONTENT_EXPORT VideoCaptureDeviceClient
                               int length,
                               const media::VideoCaptureFormat& frame_format,
                               int rotation,
-                              const base::TimeTicks& timestamp) override;
+                              base::TimeTicks reference_time,
+                              base::TimeDelta timestamp) override;
   std::unique_ptr<Buffer> ReserveOutputBuffer(
       const gfx::Size& dimensions,
       media::VideoPixelFormat format,
       media::VideoPixelStorage storage) override;
   void OnIncomingCapturedBuffer(std::unique_ptr<Buffer> buffer,
                                 const media::VideoCaptureFormat& frame_format,
-                                const base::TimeTicks& timestamp) override;
+                                base::TimeTicks reference_time,
+                                base::TimeDelta timestamp) override;
   void OnIncomingCapturedVideoFrame(
       std::unique_ptr<Buffer> buffer,
-      const scoped_refptr<media::VideoFrame>& frame,
-      const base::TimeTicks& timestamp) override;
+      const scoped_refptr<media::VideoFrame>& frame) override;
   std::unique_ptr<Buffer> ResurrectLastOutputBuffer(
       const gfx::Size& dimensions,
       media::VideoPixelFormat format,
@@ -90,17 +96,25 @@ class CONTENT_EXPORT VideoCaptureDeviceClient
       uint8_t** u_plane_data,
       uint8_t** v_plane_data);
 
-  // The controller to which we post events.
-  const base::WeakPtr<VideoCaptureController> controller_;
+  // The receiver to which we post events.
+  const std::unique_ptr<VideoFrameReceiver> receiver_;
 
-  // Hardware JPEG decoder.
-  std::unique_ptr<VideoCaptureGpuJpegDecoder> external_jpeg_decoder_;
+  const VideoCaptureJpegDecoderFactoryCB jpeg_decoder_factory_callback_;
+  std::unique_ptr<VideoCaptureJpegDecoder> external_jpeg_decoder_;
 
   // Whether |external_jpeg_decoder_| has been initialized.
   bool external_jpeg_decoder_initialized_;
 
   // The pool of shared-memory buffers used for capturing.
   const scoped_refptr<VideoCaptureBufferPool> buffer_pool_;
+
+#if DCHECK_IS_ON()
+  // Counter used to track the number of times consecutive capture buffers are
+  // dropped.
+  int dropped_frame_counter_ = 0;
+
+  static const int kMaxDroppedFrames = 150;
+#endif  // DCHECK_IS_ON()
 
   // Indication to the Client to copy-transform the incoming data into
   // GpuMemoryBuffers.

@@ -20,9 +20,11 @@
 #include "ppapi/shared_impl/resource.h"
 
 namespace gpu {
+namespace gles2 {
+struct ContextCreationAttribHelper;
+}
 struct Capabilities;
 class CommandBufferProxyImpl;
-class GpuChannelHost;
 }
 
 namespace content {
@@ -30,12 +32,13 @@ namespace content {
 class PPB_Graphics3D_Impl : public ppapi::PPB_Graphics3D_Shared,
                             public gpu::GpuControlClient {
  public:
-  static PP_Resource CreateRaw(PP_Instance instance,
-                               PP_Resource share_context,
-                               const int32_t* attrib_list,
-                               gpu::Capabilities* capabilities,
-                               base::SharedMemoryHandle* shared_state_handle,
-                               gpu::CommandBufferId* command_buffer_id);
+  static PP_Resource CreateRaw(
+      PP_Instance instance,
+      PP_Resource share_context,
+      const gpu::gles2::ContextCreationAttribHelper& attrib_helper,
+      gpu::Capabilities* capabilities,
+      base::SharedMemoryHandle* shared_state_handle,
+      gpu::CommandBufferId* command_buffer_id);
 
   // PPB_Graphics3D_API trusted implementation.
   PP_Bool SetGetBuffer(int32_t transfer_buffer_id) override;
@@ -48,6 +51,10 @@ class PPB_Graphics3D_Impl : public ppapi::PPB_Graphics3D_Shared,
   gpu::CommandBuffer::State WaitForGetOffsetInRange(int32_t start,
                                                     int32_t end) override;
   void EnsureWorkVisible() override;
+  void TakeFrontBuffer() override;
+  void ReturnFrontBuffer(const gpu::Mailbox& mailbox,
+                         const gpu::SyncToken& sync_token,
+                         bool is_lost);
 
   // Binds/unbinds the graphics of this context with the associated instance.
   // Returns true if binding/unbinding is successful.
@@ -60,39 +67,44 @@ class PPB_Graphics3D_Impl : public ppapi::PPB_Graphics3D_Shared,
   // These messages are used to send Flush callbacks to the plugin.
   void ViewInitiatedPaint();
 
-  void GetBackingMailbox(gpu::Mailbox* mailbox, gpu::SyncToken* sync_token) {
-    *mailbox = mailbox_;
-    *sync_token = sync_token_;
-  }
-
   gpu::CommandBufferProxyImpl* GetCommandBufferProxy();
-
-  gpu::GpuChannelHost* channel() { return channel_.get(); }
 
  protected:
   ~PPB_Graphics3D_Impl() override;
   // ppapi::PPB_Graphics3D_Shared overrides.
   gpu::CommandBuffer* GetCommandBuffer() override;
   gpu::GpuControl* GetGpuControl() override;
-  int32_t DoSwapBuffers(const gpu::SyncToken& sync_token) override;
+  int32_t DoSwapBuffers(const gpu::SyncToken& sync_token,
+                        const gfx::Size& size) override;
 
  private:
   explicit PPB_Graphics3D_Impl(PP_Instance instance);
 
   bool InitRaw(PPB_Graphics3D_API* share_context,
-               const int32_t* attrib_list,
+               const gpu::gles2::ContextCreationAttribHelper& requested_attribs,
                gpu::Capabilities* capabilities,
                base::SharedMemoryHandle* shared_state_handle,
                gpu::CommandBufferId* command_buffer_id);
 
   // GpuControlClient implementation.
   void OnGpuControlLostContext() final;
+  void OnGpuControlLostContextMaybeReentrant() final;
   void OnGpuControlErrorMessage(const char* msg, int id) final;
 
   // Other notifications from the GPU process.
   void OnSwapBuffers();
   // Notifications sent to plugin.
   void SendContextLost();
+
+  // Reuses a mailbox if one is available, otherwise makes a new one.
+  gpu::Mailbox GenerateMailbox();
+
+  // A front buffer that was recently taken from the command buffer. This should
+  // be immediately consumed by DoSwapBuffers().
+  gpu::Mailbox taken_front_buffer_;
+
+  // Mailboxes that are no longer in use.
+  std::vector<gpu::Mailbox> mailboxes_to_reuse_;
 
   // True if context is bound to instance.
   bool bound_to_instance_;
@@ -103,10 +115,8 @@ class PPB_Graphics3D_Impl : public ppapi::PPB_Graphics3D_Shared,
   bool lost_context_ = false;
 #endif
 
-  gpu::Mailbox mailbox_;
-  gpu::SyncToken sync_token_;
   bool has_alpha_;
-  scoped_refptr<gpu::GpuChannelHost> channel_;
+  bool use_image_chromium_;
   std::unique_ptr<gpu::CommandBufferProxyImpl> command_buffer_;
 
   base::WeakPtrFactory<PPB_Graphics3D_Impl> weak_ptr_factory_;

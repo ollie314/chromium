@@ -33,15 +33,9 @@ void CompositingReasonFinder::updateTriggers()
     }
 }
 
-bool CompositingReasonFinder::hasOverflowScrollTrigger() const
-{
-    return m_compositingTriggers & OverflowScrollTrigger;
-}
-
 bool CompositingReasonFinder::isMainFrame() const
 {
-    // FIXME: LocalFrame::isMainFrame() is probably better.
-    return !m_layoutView.document().ownerElement();
+    return m_layoutView.document().isInMainFrame();
 }
 
 CompositingReasons CompositingReasonFinder::directReasons(const PaintLayer* layer) const
@@ -93,7 +87,7 @@ CompositingReasons CompositingReasonFinder::potentialCompositingReasonsFromStyle
     if (style.hasInlineTransform())
         reasons |= CompositingReasonInlineTransform;
 
-    if (style.transformStyle3D() == TransformStyle3DPreserve3D)
+    if (style.usedTransformStyle3D() == TransformStyle3DPreserve3D)
         reasons |= CompositingReasonPreserve3DWith3DDescendants;
 
     if (style.hasPerspective())
@@ -143,24 +137,20 @@ CompositingReasons CompositingReasonFinder::nonStyleDeterminedDirectReasons(cons
     CompositingReasons directReasons = CompositingReasonNone;
     LayoutObject* layoutObject = layer->layoutObject();
 
-    if (hasOverflowScrollTrigger()) {
-        if (layer->clipParent())
-            directReasons |= CompositingReasonOutOfFlowClipping;
-
-        if (layer->needsCompositedScrolling())
-            directReasons |= CompositingReasonOverflowScrollingTouch;
-    }
+    if (layer->needsCompositedScrolling())
+        directReasons |= CompositingReasonOverflowScrollingTouch;
 
     // Composite |layer| if it is inside of an ancestor scrolling layer, but that
-    // scrolling layer is not not on the stacking context ancestor chain of |layer|.
+    // scrolling layer is not on the stacking context ancestor chain of |layer|.
     // See the definition of the scrollParent property in Layer for more detail.
     if (const PaintLayer* scrollingAncestor = layer->ancestorScrollingLayer()) {
         if (scrollingAncestor->needsCompositedScrolling() && layer->scrollParent())
             directReasons |= CompositingReasonOverflowScrollingParent;
     }
 
-    if (requiresCompositingForPositionFixed(layer))
-        directReasons |= CompositingReasonPositionFixed;
+    // TODO(flackr): Rename functions and variables to include sticky position (i.e. ScrollDependentPosition rather than PositionFixed).
+    if (requiresCompositingForScrollDependentPosition(layer))
+        directReasons |= CompositingReasonScrollDependentPosition;
 
     directReasons |= layoutObject->additionalCompositingReasons();
 
@@ -176,13 +166,15 @@ bool CompositingReasonFinder::requiresCompositingForAnimation(const ComputedStyl
     return style.shouldCompositeForCurrentAnimations();
 }
 
-bool CompositingReasonFinder::requiresCompositingForPositionFixed(const PaintLayer* layer) const
+bool CompositingReasonFinder::requiresCompositingForScrollDependentPosition(const PaintLayer* layer) const
 {
     if (!(m_compositingTriggers & ViewportConstrainedPositionedTrigger))
         return false;
     // Don't promote fixed position elements that are descendants of a non-view container, e.g. transformed elements.
     // They will stay fixed wrt the container rather than the enclosing frame.
-    return layer->scrollsWithViewport() && m_layoutView.frameView()->isScrollable();
+    if (layer->scrollsWithViewport())
+        return m_layoutView.frameView()->isScrollable();
+    return layer->layoutObject()->style()->position() == StickyPosition && layer->ancestorOverflowLayer()->scrollsOverflow();
 }
 
 } // namespace blink

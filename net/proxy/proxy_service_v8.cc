@@ -9,8 +9,8 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_checker.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/proxy/network_delegate_error_observer.h"
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_resolver_factory.h"
@@ -34,10 +34,10 @@ std::unique_ptr<ProxyService> CreateProxyServiceUsingV8ProxyResolver(
 
   std::unique_ptr<ProxyService> proxy_service(new ProxyService(
       std::move(proxy_config_service),
-      base::WrapUnique(new ProxyResolverFactoryV8TracingWrapper(
+      base::MakeUnique<ProxyResolverFactoryV8TracingWrapper>(
           host_resolver, net_log,
           base::Bind(&NetworkDelegateErrorObserver::Create, network_delegate,
-                     base::ThreadTaskRunnerHandle::Get()))),
+                     base::ThreadTaskRunnerHandle::Get())),
       net_log));
 
   // Configure fetchers to use for PAC script downloads and auto-detect.

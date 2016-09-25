@@ -31,9 +31,18 @@ final class ChromeUsbDevice {
         Log.v(TAG, "ChromeUsbDevice created.");
     }
 
+    public UsbDevice getDevice() {
+        return mDevice;
+    }
+
     @CalledByNative
     private static ChromeUsbDevice create(UsbDevice device) {
         return new ChromeUsbDevice(device);
+    }
+
+    @CalledByNative
+    private int getDeviceId() {
+        return mDevice.getDeviceId();
     }
 
     @CalledByNative
@@ -74,16 +83,19 @@ final class ChromeUsbDevice {
         return Integer.parseInt(parts[0]) << 8 | Integer.parseInt(parts[1]);
     }
 
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     @CalledByNative
     private String getManufacturerName() {
         return mDevice.getManufacturerName();
     }
 
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     @CalledByNative
     private String getProductName() {
         return mDevice.getProductName();
     }
 
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     @CalledByNative
     private String getSerialNumber() {
         return mDevice.getSerialNumber();

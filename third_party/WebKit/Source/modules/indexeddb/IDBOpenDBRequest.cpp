@@ -33,6 +33,7 @@
 #include "modules/indexeddb/IDBDatabaseCallbacks.h"
 #include "modules/indexeddb/IDBTracing.h"
 #include "modules/indexeddb/IDBVersionChangeEvent.h"
+#include <memory>
 
 using blink::WebIDBDatabase;
 
@@ -51,7 +52,7 @@ IDBOpenDBRequest::IDBOpenDBRequest(ScriptState* scriptState, IDBDatabaseCallback
     , m_transactionId(transactionId)
     , m_version(version)
 {
-    ASSERT(!resultAsAny());
+    DCHECK(!resultAsAny());
 }
 
 IDBOpenDBRequest::~IDBOpenDBRequest()
@@ -78,11 +79,11 @@ void IDBOpenDBRequest::onBlocked(int64_t oldVersion)
     enqueueEvent(IDBVersionChangeEvent::create(EventTypeNames::blocked, oldVersion, newVersionNullable));
 }
 
-void IDBOpenDBRequest::onUpgradeNeeded(int64_t oldVersion, PassOwnPtr<WebIDBDatabase> backend, const IDBDatabaseMetadata& metadata, WebIDBDataLoss dataLoss, String dataLossMessage)
+void IDBOpenDBRequest::onUpgradeNeeded(int64_t oldVersion, std::unique_ptr<WebIDBDatabase> backend, const IDBDatabaseMetadata& metadata, WebIDBDataLoss dataLoss, String dataLossMessage)
 {
     IDB_TRACE("IDBOpenDBRequest::onUpgradeNeeded()");
     if (m_contextStopped || !getExecutionContext()) {
-        OwnPtr<WebIDBDatabase> db = backend;
+        std::unique_ptr<WebIDBDatabase> db = std::move(backend);
         db->abort(m_transactionId);
         db->close();
         return;
@@ -90,9 +91,9 @@ void IDBOpenDBRequest::onUpgradeNeeded(int64_t oldVersion, PassOwnPtr<WebIDBData
     if (!shouldEnqueueEvent())
         return;
 
-    ASSERT(m_databaseCallbacks);
+    DCHECK(m_databaseCallbacks);
 
-    IDBDatabase* idbDatabase = IDBDatabase::create(getExecutionContext(), backend, m_databaseCallbacks.release());
+    IDBDatabase* idbDatabase = IDBDatabase::create(getExecutionContext(), std::move(backend), m_databaseCallbacks.release());
     idbDatabase->setMetadata(metadata);
 
     if (oldVersion == IDBDatabaseMetadata::NoVersion) {
@@ -102,7 +103,7 @@ void IDBOpenDBRequest::onUpgradeNeeded(int64_t oldVersion, PassOwnPtr<WebIDBData
     IDBDatabaseMetadata oldMetadata(metadata);
     oldMetadata.version = oldVersion;
 
-    m_transaction = IDBTransaction::create(getScriptState(), m_transactionId, idbDatabase, this, oldMetadata);
+    m_transaction = IDBTransaction::createVersionChange(getScriptState(), m_transactionId, idbDatabase, this, oldMetadata);
     setResult(IDBAny::create(idbDatabase));
 
     if (m_version == IDBDatabaseMetadata::NoVersion)
@@ -110,11 +111,11 @@ void IDBOpenDBRequest::onUpgradeNeeded(int64_t oldVersion, PassOwnPtr<WebIDBData
     enqueueEvent(IDBVersionChangeEvent::create(EventTypeNames::upgradeneeded, oldVersion, m_version, dataLoss, dataLossMessage));
 }
 
-void IDBOpenDBRequest::onSuccess(PassOwnPtr<WebIDBDatabase> backend, const IDBDatabaseMetadata& metadata)
+void IDBOpenDBRequest::onSuccess(std::unique_ptr<WebIDBDatabase> backend, const IDBDatabaseMetadata& metadata)
 {
     IDB_TRACE("IDBOpenDBRequest::onSuccess()");
     if (m_contextStopped || !getExecutionContext()) {
-        OwnPtr<WebIDBDatabase> db = backend;
+        std::unique_ptr<WebIDBDatabase> db = std::move(backend);
         if (db)
             db->close();
         return;
@@ -125,14 +126,14 @@ void IDBOpenDBRequest::onSuccess(PassOwnPtr<WebIDBDatabase> backend, const IDBDa
     IDBDatabase* idbDatabase = nullptr;
     if (resultAsAny()) {
         // Previous onUpgradeNeeded call delivered the backend.
-        ASSERT(!backend.get());
+        DCHECK(!backend.get());
         idbDatabase = resultAsAny()->idbDatabase();
-        ASSERT(idbDatabase);
-        ASSERT(!m_databaseCallbacks);
+        DCHECK(idbDatabase);
+        DCHECK(!m_databaseCallbacks);
     } else {
-        ASSERT(backend.get());
-        ASSERT(m_databaseCallbacks);
-        idbDatabase = IDBDatabase::create(getExecutionContext(), backend, m_databaseCallbacks.release());
+        DCHECK(backend.get());
+        DCHECK(m_databaseCallbacks);
+        idbDatabase = IDBDatabase::create(getExecutionContext(), std::move(backend), m_databaseCallbacks.release());
         setResult(IDBAny::create(idbDatabase));
     }
     idbDatabase->setMetadata(metadata);
@@ -156,7 +157,7 @@ bool IDBOpenDBRequest::shouldEnqueueEvent() const
 {
     if (m_contextStopped || !getExecutionContext())
         return false;
-    ASSERT(m_readyState == PENDING || m_readyState == DONE);
+    DCHECK(m_readyState == PENDING || m_readyState == DONE);
     if (m_requestAborted)
         return false;
     return true;

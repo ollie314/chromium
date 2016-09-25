@@ -16,10 +16,11 @@ WebInspector.FilmStripView = function()
     this.setMode(WebInspector.FilmStripView.Modes.TimeBased);
 }
 
+/** @enum {symbol} */
 WebInspector.FilmStripView.Events = {
-    FrameSelected: "FrameSelected",
-    FrameEnter: "FrameEnter",
-    FrameExit: "FrameExit",
+    FrameSelected: Symbol("FrameSelected"),
+    FrameEnter: Symbol("FrameEnter"),
+    FrameExit: Symbol("FrameExit"),
 }
 
 WebInspector.FilmStripView.Modes = {
@@ -264,15 +265,15 @@ WebInspector.FilmStripView.Dialog.prototype = {
      */
     _keyDown: function(event)
     {
-        switch (event.keyIdentifier) {
-        case "Left":
+        switch (event.key) {
+        case "ArrowLeft":
             if (WebInspector.isMac() && event.metaKey)
                 this._onFirstFrame();
             else
                 this._onPrevFrame();
             break;
 
-        case "Right":
+        case "ArrowRight":
             if (WebInspector.isMac() && event.metaKey)
                 this._onLastFrame();
             else

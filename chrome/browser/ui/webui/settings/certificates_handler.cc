@@ -32,10 +32,9 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/crypto_module_password_dialog_nss.h"
 #include "chrome/browser/ui/webui/certificate_viewer_webui.h"
-#include "chrome/grit/settings_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/components_strings.h"
 #include "net/base/crypto_module.h"
 #include "net/base/net_errors.h"
 #include "net/cert/x509_certificate.h"
@@ -88,13 +87,16 @@ struct DictionaryIdComparator {
   explicit DictionaryIdComparator(icu::Collator* collator)
       : collator_(collator) {}
 
-  bool operator()(const base::Value* a, const base::Value* b) const {
+  bool operator()(const std::unique_ptr<base::Value>& a,
+                  const std::unique_ptr<base::Value>& b) const {
     DCHECK(a->GetType() == base::Value::TYPE_DICTIONARY);
     DCHECK(b->GetType() == base::Value::TYPE_DICTIONARY);
-    const base::DictionaryValue* a_dict =
-        reinterpret_cast<const base::DictionaryValue*>(a);
-    const base::DictionaryValue* b_dict =
-        reinterpret_cast<const base::DictionaryValue*>(b);
+    const base::DictionaryValue* a_dict;
+    bool a_is_dictionary = a->GetAsDictionary(&a_dict);
+    DCHECK(a_is_dictionary);
+    const base::DictionaryValue* b_dict;
+    bool b_is_dictionary = b->GetAsDictionary(&b_dict);
+    DCHECK(b_is_dictionary);
     base::string16 a_str;
     base::string16 b_str;
     a_dict->GetString(kNameField, &a_str);
@@ -297,7 +299,7 @@ base::CancelableTaskTracker::TaskId FileAccessProvider::StartRead(
 
   // Post task to file thread to read file.
   return tracker->PostTaskAndReply(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE).get(),
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE).get(),
       FROM_HERE,
       base::Bind(&FileAccessProvider::DoRead, this, path, saved_errno, data),
       base::Bind(callback, base::Owned(saved_errno), base::Owned(data)));
@@ -314,7 +316,7 @@ base::CancelableTaskTracker::TaskId FileAccessProvider::StartWrite(
 
   // Post task to file thread to write file.
   return tracker->PostTaskAndReply(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE).get(),
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE).get(),
       FROM_HERE, base::Bind(&FileAccessProvider::DoWrite, this, path, data,
                             saved_errno, bytes_written),
       base::Bind(callback, base::Owned(saved_errno),
@@ -486,6 +488,8 @@ void CertificatesHandler::AssignWebUICallbackId(const base::ListValue* args) {
 }
 
 void CertificatesHandler::HandleGetCATrust(const base::ListValue* args) {
+  AllowJavascript();
+
   CHECK_EQ(2U, args->GetSize());
   AssignWebUICallbackId(args);
   std::string node_id;
@@ -985,14 +989,16 @@ void CertificatesHandler::CertificateManagerModelReady() {
       certificate_manager_model_->is_user_db_available());
   base::FundamentalValue tpm_available_value(
       certificate_manager_model_->is_tpm_available());
-  web_ui()->CallJavascriptFunction(
-      "cr.webUIListenerCallback", base::StringValue("certificates-model-ready"),
-      user_db_available_value, tpm_available_value);
+  CallJavascriptFunction("cr.webUIListenerCallback",
+                         base::StringValue("certificates-model-ready"),
+                         user_db_available_value, tpm_available_value);
   certificate_manager_model_->Refresh();
 }
 
 void CertificatesHandler::HandleRefreshCertificates(
     const base::ListValue* args) {
+  AllowJavascript();
+
   if (certificate_manager_model_) {
     // Already have a model, the webui must be re-loading.  Just re-run the
     // webui initialization.
@@ -1031,11 +1037,11 @@ void CertificatesHandler::PopulateTree(
 
   {
     std::unique_ptr<base::ListValue> nodes =
-        base::WrapUnique(new base::ListValue());
+        base::MakeUnique<base::ListValue>();
     for (CertificateManagerModel::OrgGroupingMap::iterator i = map.begin();
          i != map.end(); ++i) {
       // Populate first level (org name).
-      base::DictionaryValue* dict = new base::DictionaryValue;
+      std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
       dict->SetString(kKeyField, OrgNameToId(i->first));
       dict->SetString(kNameField, i->first);
 
@@ -1043,7 +1049,8 @@ void CertificatesHandler::PopulateTree(
       base::ListValue* subnodes = new base::ListValue;
       for (net::CertificateList::const_iterator org_cert_it = i->second.begin();
            org_cert_it != i->second.end(); ++org_cert_it) {
-        base::DictionaryValue* cert_dict = new base::DictionaryValue;
+        std::unique_ptr<base::DictionaryValue> cert_dict(
+            new base::DictionaryValue);
         net::X509Certificate* cert = org_cert_it->get();
         cert_dict->SetString(kKeyField, cert_id_map_->CertToId(cert));
         cert_dict->SetString(
@@ -1067,18 +1074,18 @@ void CertificatesHandler::PopulateTree(
             kExtractableField,
             !certificate_manager_model_->IsHardwareBacked(cert));
         // TODO(mattm): Other columns.
-        subnodes->Append(cert_dict);
+        subnodes->Append(std::move(cert_dict));
       }
       std::sort(subnodes->begin(), subnodes->end(), comparator);
 
       dict->Set(kSubnodesField, subnodes);
-      nodes->Append(dict);
+      nodes->Append(std::move(dict));
     }
     std::sort(nodes->begin(), nodes->end(), comparator);
 
-    web_ui()->CallJavascriptFunction("cr.webUIListenerCallback",
-                                     base::StringValue("certificates-changed"),
-                                     base::StringValue(tab_name), *nodes);
+    CallJavascriptFunction("cr.webUIListenerCallback",
+                           base::StringValue("certificates-changed"),
+                           base::StringValue(tab_name), *nodes);
   }
 }
 
@@ -1117,14 +1124,14 @@ void CertificatesHandler::RejectCallbackWithImportError(
         IDS_SETTINGS_CERTIFICATE_MANAGER_IMPORT_SOME_NOT_IMPORTED);
 
   std::unique_ptr<base::ListValue> cert_error_list =
-      base::WrapUnique(new base::ListValue());
+      base::MakeUnique<base::ListValue>();
   for (size_t i = 0; i < not_imported.size(); ++i) {
     const net::NSSCertDatabase::ImportCertFailure& failure = not_imported[i];
-    base::DictionaryValue* dict = new base::DictionaryValue;
+    std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
     dict->SetString(kNameField,
                     failure.certificate->subject().GetDisplayName());
     dict->SetString(kErrorField, NetErrorToString(failure.net_error));
-    cert_error_list->Append(dict);
+    cert_error_list->Append(std::move(dict));
   }
 
   std::unique_ptr<base::DictionaryValue> error_info(new base::DictionaryValue);

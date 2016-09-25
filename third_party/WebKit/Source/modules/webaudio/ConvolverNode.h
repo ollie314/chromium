@@ -28,13 +28,14 @@
 #include "base/gtest_prod_util.h"
 #include "modules/ModulesExport.h"
 #include "modules/webaudio/AudioNode.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/ThreadingPrimitives.h"
+#include <memory>
 
 namespace blink {
 
 class AudioBuffer;
+class ConvolverOptions;
 class ExceptionState;
 class Reverb;
 
@@ -58,7 +59,7 @@ private:
     double tailTime() const override;
     double latencyTime() const override;
 
-    OwnPtr<Reverb> m_reverb;
+    std::unique_ptr<Reverb> m_reverb;
     // This Persistent doesn't make a reference cycle including the owner
     // ConvolverNode.
     Persistent<AudioBuffer> m_buffer;
@@ -75,7 +76,8 @@ private:
 class MODULES_EXPORT ConvolverNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static ConvolverNode* create(AbstractAudioContext&, float sampleRate);
+    static ConvolverNode* create(BaseAudioContext&, ExceptionState&);
+    static ConvolverNode* create(BaseAudioContext*, const ConvolverOptions&, ExceptionState&);
 
     AudioBuffer* buffer() const;
     void setBuffer(AudioBuffer*, ExceptionState&);
@@ -83,7 +85,7 @@ public:
     void setNormalize(bool);
 
 private:
-    ConvolverNode(AbstractAudioContext&, float sampleRate);
+    ConvolverNode(BaseAudioContext&);
     ConvolverHandler& convolverHandler() const;
 
     FRIEND_TEST_ALL_PREFIXES(ConvolverNodeTest, ReverbLifetime);

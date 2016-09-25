@@ -24,22 +24,15 @@ namespace {
 
 class ManagePasswordsViewControllerTest : public ManagePasswordsControllerTest {
  public:
-  ManagePasswordsViewControllerTest() : controller_(nil) {}
-
-  void SetUp() override {
-    ManagePasswordsControllerTest::SetUp();
-    delegate_.reset([[ContentViewDelegateMock alloc] init]);
+  void SetUpManageState(
+      const VectorConstFormPtr& forms = VectorConstFormPtr()) {
+    ManagePasswordsControllerTest::SetUpManageState(forms);
+    controller_.reset(
+        [[ManagePasswordsViewController alloc] initWithDelegate:delegate()]);
+    [controller_ view];
   }
 
-  ContentViewDelegateMock* delegate() { return delegate_.get(); }
-
   ManagePasswordsViewController* controller() {
-    if (!controller_) {
-      [delegate() setModel:GetModelAndCreateIfNull()];
-      controller_.reset(
-          [[ManagePasswordsViewController alloc] initWithDelegate:delegate()]);
-      [controller_ view];
-    }
     return controller_.get();
   }
 
@@ -49,8 +42,6 @@ class ManagePasswordsViewControllerTest : public ManagePasswordsControllerTest {
 
  private:
   base::scoped_nsobject<ManagePasswordsViewController> controller_;
-  base::scoped_nsobject<ContentViewDelegateMock> delegate_;
-  DISALLOW_COPY_AND_ASSIGN(ManagePasswordsViewControllerTest);
 };
 
 TEST_F(ManagePasswordsViewControllerTest, ShouldDismissWhenDoneClicked) {
@@ -78,26 +69,20 @@ TEST_F(ManagePasswordsViewControllerTest,
 TEST_F(ManagePasswordsViewControllerTest,
        ShouldShowAllPasswordItemsWhenPasswordsExistForSite) {
   // Add a few password entries.
-  autofill::PasswordForm form1;
-  form1.username_value = base::ASCIIToUTF16("username1");
-  form1.password_value = base::ASCIIToUTF16("password1");
+  std::unique_ptr<autofill::PasswordForm> form1(new autofill::PasswordForm);
+  form1->username_value = base::ASCIIToUTF16("username1");
+  form1->password_value = base::ASCIIToUTF16("password1");
 
-  autofill::PasswordForm form2;
-  form2.username_value = base::ASCIIToUTF16("username2");
-  form2.password_value = base::ASCIIToUTF16("password2");
+  std::unique_ptr<autofill::PasswordForm> form2(new autofill::PasswordForm);
+  form2->username_value = base::ASCIIToUTF16("username2");
+  form2->password_value = base::ASCIIToUTF16("password2");
 
-  // Add the entries to the model.
-  std::vector<const autofill::PasswordForm*> forms;
-  forms.push_back(&form1);
-  forms.push_back(&form2);
-  EXPECT_CALL(*ui_controller(), GetCurrentForms()).WillOnce(ReturnRef(forms));
-  GURL origin;
-  EXPECT_CALL(*ui_controller(), GetOrigin()).WillOnce(ReturnRef(origin));
-  EXPECT_CALL(*ui_controller(), GetState())
-      .WillOnce(Return(password_manager::ui::MANAGE_STATE));
+  VectorConstFormPtr forms;
+  forms.push_back(std::move(form1));
+  forms.push_back(std::move(form2));
+  SetUpManageState(forms);
 
   // Check the view state.
-  EXPECT_FALSE(GetModelAndCreateIfNull()->local_credentials().empty());
   ASSERT_TRUE([controller() passwordsListController]);
   EXPECT_FALSE([controller() noPasswordsView]);
   NSArray* items = [[controller() passwordsListController] itemViews];
@@ -124,7 +109,6 @@ TEST_F(ManagePasswordsViewControllerTest, CloseBubbleAndHandleClick) {
   SetUpManageState();
   EXPECT_CALL(*ui_controller(), NavigateToPasswordManagerSettingsPage())
       .Times(0);
-  [controller() bubbleWillDisappear];
   [delegate() setModel:nil];
   [controller().doneButton performClick:nil];
   [controller().manageButton performClick:nil];

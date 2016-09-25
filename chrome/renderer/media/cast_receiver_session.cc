@@ -8,7 +8,7 @@
 
 #include "base/location.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/renderer/media/cast_receiver_audio_valve.h"
 #include "content/public/renderer/render_thread.h"
 #include "media/base/audio_capturer_source.h"
@@ -59,8 +59,7 @@ class CastReceiverSession::VideoCapturerSource
 
 CastReceiverSession::CastReceiverSession()
     : delegate_(new CastReceiverSessionDelegate()),
-      io_task_runner_(
-          content::RenderThread::Get()->GetIOMessageLoopProxy()) {}
+      io_task_runner_(content::RenderThread::Get()->GetIOTaskRunner()) {}
 
 CastReceiverSession::~CastReceiverSession() {
   // We should always be able to delete the object on the IO thread.

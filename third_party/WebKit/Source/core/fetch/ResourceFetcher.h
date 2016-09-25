@@ -41,6 +41,7 @@
 #include "wtf/HashSet.h"
 #include "wtf/ListHashSet.h"
 #include "wtf/text/StringHash.h"
+#include <memory>
 
 namespace blink {
 
@@ -55,7 +56,6 @@ class ScriptResource;
 class XSLStyleSheetResource;
 class KURL;
 class ResourceTimingInfo;
-class ResourceLoaderSet;
 
 // The ResourceFetcher provides a per-context interface to the MemoryCache
 // and enforces a bunch of security checks and rules for resource revalidation.
@@ -80,21 +80,28 @@ public:
     using DocumentResourceMap = HeapHashMap<String, WeakMember<Resource>>;
     const DocumentResourceMap& allResources() const { return m_documentResources; }
 
+    // Actually starts loading a Resource if it wasn't started during requestResource().
+    bool startLoad(Resource*);
+
     void setAutoLoadImages(bool);
     void setImagesEnabled(bool);
 
     FetchContext& context() const { return m_context ? *m_context.get() : FetchContext::nullInstance(); }
-    void clearContext() { m_context.clear(); }
+    void clearContext();
 
     int requestCount() const;
+    bool hasPendingRequest() const;
 
     enum ClearPreloadsPolicy { ClearAllPreloads, ClearSpeculativeMarkupPreloads };
 
-    bool isPreloaded(const KURL&) const;
+    void enableIsPreloadedForTest();
+    bool isPreloadedForTest(const KURL&) const;
+
     int countPreloads() const { return m_preloads ? m_preloads->size() : 0; }
     void clearPreloads(ClearPreloadsPolicy = ClearAllPreloads);
     void preloadStarted(Resource*);
-    void printPreloadStats();
+    void logPreloadStats();
+    void warnUnusedPreloads();
 
     MHTMLArchive* archive() const { return m_archive.get(); }
     ArchiveResource* createArchive(Resource*);
@@ -103,43 +110,32 @@ public:
     void stopFetching();
     bool isFetching() const;
 
-    void didLoadResource(Resource*);
-    bool willFollowRedirect(Resource*, ResourceRequest&, const ResourceResponse&);
-    void didFinishLoading(Resource*, double finishTime, int64_t encodedDataLength);
-    void didFailLoading(const Resource*, const ResourceError&);
-    void didReceiveResponse(const Resource*, const ResourceResponse&);
+    bool willFollowRedirect(Resource*, ResourceRequest&, const ResourceResponse&, int64_t encodedDataLength);
+    enum DidFinishLoadingReason {
+        DidFinishLoading,
+        DidFinishFirstPartInMultipart
+    };
+    void didFinishLoading(Resource*, double finishTime, int64_t encodedDataLength, DidFinishLoadingReason);
+    void didFailLoading(Resource*, const ResourceError&);
+    void didReceiveResponse(Resource*, const ResourceResponse&, WebDataConsumerHandle*);
     void didReceiveData(const Resource*, const char* data, int dataLength, int encodedDataLength);
     void didDownloadData(const Resource*, int dataLength, int encodedDataLength);
-    void willStartLoadingResource(Resource*, ResourceLoader*, ResourceRequest&);
     bool defersLoading() const;
-
-    void moveResourceLoaderToNonBlocking(ResourceLoader*);
-    void removeResourceLoader(ResourceLoader*);
-
-    enum AccessControlLoggingDecision {
-        ShouldLogAccessControlErrors,
-        ShouldNotLogAccessControlErrors
-    };
-    bool canAccessResource(Resource*, SecurityOrigin*, const KURL&, AccessControlLoggingDecision) const;
     bool isControlledByServiceWorker() const;
 
     void acceptDataFromThreadedReceiver(unsigned long identifier, const char* data, int dataLength, int encodedDataLength);
-
-    ResourceLoadPriority loadPriority(Resource::Type, const FetchRequest&, ResourcePriority::VisibilityStatus = ResourcePriority::NotVisible);
 
     enum ResourceLoadStartType {
         ResourceLoadingFromNetwork,
         ResourceLoadingFromCache
     };
-    void requestLoadStarted(Resource*, const FetchRequest&, ResourceLoadStartType, bool isStaticData = false);
+    void requestLoadStarted(unsigned long identifier, Resource*, const FetchRequest&, ResourceLoadStartType, bool isStaticData = false);
     static const ResourceLoaderOptions& defaultResourceOptions();
 
     String getCacheIdentifier() const;
 
     static void determineRequestContext(ResourceRequest&, Resource::Type, bool isMainFrame);
     void determineRequestContext(ResourceRequest&, Resource::Type);
-
-    WebTaskRunner* loadingTaskRunner();
 
     void updateAllImageResourcePriorities();
 
@@ -153,9 +149,10 @@ private:
 
     explicit ResourceFetcher(FetchContext*);
 
-    void initializeRevalidation(const FetchRequest&, Resource*);
+    void initializeRevalidation(ResourceRequest&, Resource*);
     Resource* createResourceForLoading(FetchRequest&, const String& charset, const ResourceFactory&);
     void storeResourceTimingInitiatorInformation(Resource*);
+    ResourceLoadPriority computeLoadPriority(Resource::Type, const FetchRequest&, ResourcePriority::VisibilityStatus);
 
     Resource* resourceForStaticData(const FetchRequest&, const ResourceFactory&, const SubstituteData&);
 
@@ -164,13 +161,17 @@ private:
     RevalidationPolicy determineRevalidationPolicy(Resource::Type, const FetchRequest&, Resource* existingResource, bool isStaticData) const;
 
     void moveCachedNonBlockingResourceToBlocking(Resource*, const FetchRequest&);
+    void moveResourceLoaderToNonBlocking(ResourceLoader*);
+    void removeResourceLoader(ResourceLoader*);
 
     void initializeResourceRequest(ResourceRequest&, Resource::Type, FetchRequest::DeferOption);
+    void willSendRequest(unsigned long identifier, ResourceRequest&, const ResourceResponse&, const ResourceLoaderOptions&);
+    bool canAccessResponse(Resource*, const ResourceResponse&) const;
 
     bool resourceNeedsLoad(Resource*, const FetchRequest&, RevalidationPolicy);
     bool shouldDeferImageLoad(const KURL&) const;
 
-    void resourceTimingReportTimerFired(Timer<ResourceFetcher>*);
+    void resourceTimingReportTimerFired(TimerBase*);
 
     void reloadImagesIfNotDeferred();
 
@@ -186,13 +187,13 @@ private:
 
     Timer<ResourceFetcher> m_resourceTimingReportTimer;
 
-    using ResourceTimingInfoMap = HeapHashMap<Member<Resource>, OwnPtr<ResourceTimingInfo>>;
+    using ResourceTimingInfoMap = HeapHashMap<Member<Resource>, std::unique_ptr<ResourceTimingInfo>>;
     ResourceTimingInfoMap m_resourceTimingInfoMap;
 
-    Vector<OwnPtr<ResourceTimingInfo>> m_scheduledResourceTimingReports;
+    Vector<std::unique_ptr<ResourceTimingInfo>> m_scheduledResourceTimingReports;
 
-    Member<ResourceLoaderSet> m_loaders;
-    Member<ResourceLoaderSet> m_nonBlockingLoaders;
+    HeapHashSet<Member<ResourceLoader>> m_loaders;
+    HeapHashSet<Member<ResourceLoader>> m_nonBlockingLoaders;
 
     // Used in hit rate histograms.
     class DeadResourceStatsRecorder {
@@ -210,10 +211,13 @@ private:
     };
     DeadResourceStatsRecorder m_deadStatsRecorder;
 
+    std::unique_ptr<HashSet<String>> m_preloadedURLsForTest;
+
     // 28 bits left
     bool m_autoLoadImages : 1;
     bool m_imagesEnabled : 1;
     bool m_allowStaleResources : 1;
+    bool m_imageFetched : 1;
 };
 
 class ResourceCacheValidationSuppressor {

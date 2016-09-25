@@ -7,6 +7,7 @@
 #include "V8TestInterfaceDocument.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/GeneratedCodeHelper.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
 #include "bindings/core/v8/V8Location.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
@@ -27,7 +28,7 @@ namespace blink {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestInterfaceDocument::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceDocument::domTemplate, V8TestInterfaceDocument::trace, 0, 0, V8TestInterfaceDocument::preparePrototypeAndInterfaceObject, V8TestInterfaceDocument::installConditionallyEnabledProperties, "TestInterfaceDocument", &V8Document::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::NodeClassId, WrapperTypeInfo::InheritFromEventTarget, WrapperTypeInfo::Dependent };
+const WrapperTypeInfo V8TestInterfaceDocument::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceDocument::domTemplate, V8TestInterfaceDocument::trace, V8TestInterfaceDocument::traceWrappers, 0, nullptr, "TestInterfaceDocument", &V8Document::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::NodeClassId, WrapperTypeInfo::NotInheritFromActiveScriptWrappable, WrapperTypeInfo::InheritFromEventTarget, WrapperTypeInfo::Dependent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -36,6 +37,19 @@ const WrapperTypeInfo V8TestInterfaceDocument::wrapperTypeInfo = { gin::kEmbedde
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
 // bindings/core/v8/ScriptWrappable.h.
 const WrapperTypeInfo& TestInterfaceDocument::s_wrapperTypeInfo = V8TestInterfaceDocument::wrapperTypeInfo;
+
+// not [ActiveScriptWrappable]
+static_assert(
+    !std::is_base_of<ActiveScriptWrappable, TestInterfaceDocument>::value,
+    "TestInterfaceDocument inherits from ActiveScriptWrappable, but is not specifying "
+    "[ActiveScriptWrappable] extended attribute in the IDL file.  "
+    "Be consistent.");
+static_assert(
+    std::is_same<decltype(&TestInterfaceDocument::hasPendingActivity),
+                 decltype(&ScriptWrappable::hasPendingActivity)>::value,
+    "TestInterfaceDocument is overriding hasPendingActivity(), but is not specifying "
+    "[ActiveScriptWrappable] extended attribute in the IDL file.  "
+    "Be consistent.");
 
 namespace TestInterfaceDocumentV8Internal {
 
@@ -46,7 +60,7 @@ static void locationAttributeGetter(const v8::FunctionCallbackInfo<v8::Value>& i
     v8SetReturnValueFast(info, WTF::getPtr(impl->location()), impl);
 }
 
-static void locationAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void locationAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestInterfaceDocumentV8Internal::locationAttributeGetter(info);
 }
@@ -64,7 +78,7 @@ static void locationAttributeSetter(v8::Local<v8::Value> v8Value, const v8::Func
     impl->setHref(currentDOMWindow(info.GetIsolate()), enteredDOMWindow(info.GetIsolate()), cppValue);
 }
 
-static void locationAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void locationAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
     TestInterfaceDocumentV8Internal::locationAttributeSetter(v8Value, info);
@@ -107,7 +121,7 @@ v8::Local<v8::Object> V8TestInterfaceDocument::findInstanceInPrototypeChain(v8::
 
 TestInterfaceDocument* V8TestInterfaceDocument::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
-    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
+    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : nullptr;
 }
 
 } // namespace blink

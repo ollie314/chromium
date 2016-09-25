@@ -7,8 +7,8 @@
 #include "cc/animation/animation_curve.h"
 #include "cc/animation/keyframed_animation_curve.h"
 #include "cc/animation/timing_function.h"
-
-using blink::CompositorFloatKeyframe;
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -17,60 +17,46 @@ CompositorFloatAnimationCurve::CompositorFloatAnimationCurve()
 {
 }
 
+CompositorFloatAnimationCurve::CompositorFloatAnimationCurve(std::unique_ptr<cc::KeyframedFloatAnimationCurve> curve)
+    : m_curve(std::move(curve))
+{
+}
+
 CompositorFloatAnimationCurve::~CompositorFloatAnimationCurve()
 {
 }
 
-CompositorAnimationCurve::AnimationCurveType CompositorFloatAnimationCurve::type() const
+std::unique_ptr<CompositorFloatAnimationCurve> CompositorFloatAnimationCurve::createForTesting(std::unique_ptr<cc::KeyframedFloatAnimationCurve> curve)
 {
-    return CompositorAnimationCurve::AnimationCurveTypeFloat;
+    return wrapUnique(new CompositorFloatAnimationCurve(std::move(curve)));
 }
 
-void CompositorFloatAnimationCurve::add(const CompositorFloatKeyframe& keyframe)
+CompositorFloatAnimationCurve::Keyframes CompositorFloatAnimationCurve::keyframesForTesting() const
 {
-    add(keyframe, TimingFunctionTypeEase);
+    Keyframes keyframes;
+    for (const auto& ccKeyframe : m_curve->keyframes_for_testing())
+        keyframes.append(wrapUnique(new CompositorFloatKeyframe(ccKeyframe->Clone())));
+    return keyframes;
 }
 
-void CompositorFloatAnimationCurve::add(const CompositorFloatKeyframe& keyframe,
-    TimingFunctionType type)
+PassRefPtr<TimingFunction> CompositorFloatAnimationCurve::getTimingFunctionForTesting() const
 {
-    m_curve->AddKeyframe(
-        cc::FloatKeyframe::Create(base::TimeDelta::FromSecondsD(keyframe.time),
-            keyframe.value, createTimingFunction(type)));
+    return createCompositorTimingFunctionFromCC(m_curve->timing_function_for_testing());
 }
 
-void CompositorFloatAnimationCurve::add(const CompositorFloatKeyframe& keyframe, double x1, double y1, double x2, double y2)
+void CompositorFloatAnimationCurve::addKeyframe(const CompositorFloatKeyframe& keyframe)
 {
-    m_curve->AddKeyframe(cc::FloatKeyframe::Create(
-        base::TimeDelta::FromSecondsD(keyframe.time), keyframe.value,
-        cc::CubicBezierTimingFunction::Create(x1, y1, x2, y2)));
+    m_curve->AddKeyframe(keyframe.cloneToCC());
 }
 
-void CompositorFloatAnimationCurve::add(const CompositorFloatKeyframe& keyframe, int steps, float stepsStartOffset)
+void CompositorFloatAnimationCurve::setTimingFunction(const TimingFunction& timingFunction)
 {
-    m_curve->AddKeyframe(cc::FloatKeyframe::Create(
-        base::TimeDelta::FromSecondsD(keyframe.time), keyframe.value,
-        cc::StepsTimingFunction::Create(steps, stepsStartOffset)));
+    m_curve->SetTimingFunction(timingFunction.cloneToCC());
 }
 
-void CompositorFloatAnimationCurve::setLinearTimingFunction()
+void CompositorFloatAnimationCurve::setScaledDuration(double scaledDuration)
 {
-    m_curve->SetTimingFunction(nullptr);
-}
-
-void CompositorFloatAnimationCurve::setCubicBezierTimingFunction(TimingFunctionType type)
-{
-    m_curve->SetTimingFunction(createTimingFunction(type));
-}
-
-void CompositorFloatAnimationCurve::setCubicBezierTimingFunction(double x1, double y1, double x2, double y2)
-{
-    m_curve->SetTimingFunction(cc::CubicBezierTimingFunction::Create(x1, y1, x2, y2));
-}
-
-void CompositorFloatAnimationCurve::setStepsTimingFunction(int numberOfSteps, float stepsStartOffset)
-{
-    m_curve->SetTimingFunction(cc::StepsTimingFunction::Create(numberOfSteps, stepsStartOffset));
+    m_curve->set_scaled_duration(scaledDuration);
 }
 
 float CompositorFloatAnimationCurve::getValue(double time) const

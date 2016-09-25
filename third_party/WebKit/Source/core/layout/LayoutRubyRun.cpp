@@ -170,7 +170,7 @@ void LayoutRubyRun::removeChild(LayoutObject* child)
 
     if (!beingDestroyed() && !documentBeingDestroyed()) {
         // Check if our base (if any) is now empty. If so, destroy it.
-        LayoutBlock* base = rubyBase();
+        LayoutBlockFlow* base = rubyBase();
         if (base && !base->firstChild()) {
             LayoutBlockFlow::removeChild(base);
             base->deleteLineBoxTree();
@@ -278,12 +278,12 @@ void LayoutRubyRun::getOverhang(bool firstLine, LayoutObject* startLayoutObject,
     if (!rubyBase->firstRootBox())
         return;
 
-    int logicalWidth = this->logicalWidth();
+    int logicalWidth = this->logicalWidth().toInt();
     int logicalLeftOverhang = std::numeric_limits<int>::max();
     int logicalRightOverhang = std::numeric_limits<int>::max();
     for (RootInlineBox* rootInlineBox = rubyBase->firstRootBox(); rootInlineBox; rootInlineBox = rootInlineBox->nextRootBox()) {
-        logicalLeftOverhang = std::min<int>(logicalLeftOverhang, rootInlineBox->logicalLeft());
-        logicalRightOverhang = std::min<int>(logicalRightOverhang, logicalWidth - rootInlineBox->logicalRight());
+        logicalLeftOverhang = std::min<int>(logicalLeftOverhang, rootInlineBox->logicalLeft().toInt());
+        logicalRightOverhang = std::min<int>(logicalRightOverhang, (logicalWidth - rootInlineBox->logicalRight()).toInt());
     }
 
     startOverhang = style()->isLeftToRightDirection() ? logicalLeftOverhang : logicalRightOverhang;

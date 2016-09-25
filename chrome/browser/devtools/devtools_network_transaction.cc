@@ -12,13 +12,12 @@
 #include "chrome/browser/devtools/devtools_network_upload_data_stream.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
-#include "net/base/upload_progress.h"
 #include "net/http/http_network_transaction.h"
 #include "net/http/http_request_info.h"
 #include "net/socket/connection_attempts.h"
 
-// Keep in sync with kDevToolsEmulateNetworkConditionsClientId defined in
-// InspectorResourceAgent.cpp.
+// Keep in sync with X_DevTools_Emulate_Network_Conditions_Client_Id defined in
+// HTTPNames.in.
 const char
     DevToolsNetworkTransaction::kDevToolsEmulateNetworkConditionsClientId[] =
         "X-DevTools-Emulate-Network-Conditions-Client-Id";
@@ -106,10 +105,9 @@ bool DevToolsNetworkTransaction::CheckFailed() {
   return false;
 }
 
-int DevToolsNetworkTransaction::Start(
-    const net::HttpRequestInfo* request,
-    const net::CompletionCallback& callback,
-    const net::BoundNetLog& net_log) {
+int DevToolsNetworkTransaction::Start(const net::HttpRequestInfo* request,
+                                      const net::CompletionCallback& callback,
+                                      const net::NetLogWithSource& net_log) {
   DCHECK(request);
   request_ = request;
 
@@ -250,10 +248,6 @@ net::LoadState DevToolsNetworkTransaction::GetLoadState() const {
   return network_transaction_->GetLoadState();
 }
 
-net::UploadProgress DevToolsNetworkTransaction::GetUploadProgress() const {
-  return network_transaction_->GetUploadProgress();
-}
-
 void DevToolsNetworkTransaction::SetQuicServerInfo(
     net::QuicServerInfo* quic_server_info) {
   network_transaction_->SetQuicServerInfo(quic_server_info);
@@ -288,9 +282,9 @@ void DevToolsNetworkTransaction::SetBeforeNetworkStartCallback(
   network_transaction_->SetBeforeNetworkStartCallback(callback);
 }
 
-void DevToolsNetworkTransaction::SetBeforeProxyHeadersSentCallback(
-    const BeforeProxyHeadersSentCallback& callback) {
-  network_transaction_->SetBeforeProxyHeadersSentCallback(callback);
+void DevToolsNetworkTransaction::SetBeforeHeadersSentCallback(
+    const BeforeHeadersSentCallback& callback) {
+  network_transaction_->SetBeforeHeadersSentCallback(callback);
 }
 
 int DevToolsNetworkTransaction::ResumeNetworkStart() {

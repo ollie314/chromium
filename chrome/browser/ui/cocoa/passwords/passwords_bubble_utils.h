@@ -15,15 +15,16 @@
 
 @class HyperlinkTextView;
 
-const CGFloat kDesiredBubbleWidth = 370;
-const CGFloat kFramePadding = 16;
-const CGFloat kDesiredRowWidth = kDesiredBubbleWidth - 2 * kFramePadding;
-const CGFloat kItemLabelSpacing = 10;
-const CGFloat kRelatedControlHorizontalPadding = 2;
-const CGFloat kRelatedControlVerticalSpacing = 8;
-const CGFloat kTitleTextInset = 2;
-const CGFloat kUnrelatedControlVerticalPadding = 15;
-const CGFloat kVerticalAvatarMargin = 8;
+constexpr CGFloat kDesiredBubbleWidth = 370;
+constexpr CGFloat kFramePadding = 16;
+constexpr CGFloat kDesiredRowWidth = kDesiredBubbleWidth - 2 * kFramePadding;
+constexpr CGFloat kItemLabelSpacing = 10;
+constexpr CGFloat kMinUsernameSize = 50;
+constexpr CGFloat kRelatedControlHorizontalPadding = 2;
+constexpr CGFloat kRelatedControlVerticalSpacing = 8;
+constexpr CGFloat kTitleTextInset = 2;
+constexpr CGFloat kUnrelatedControlVerticalPadding = 15;
+constexpr CGFloat kVerticalAvatarMargin = 8;
 
 // Returns a font for password bubbles.
 NSFont* LabelFont();
@@ -36,7 +37,8 @@ NSSize LabelSize(int resourceID);
 void InitLabel(NSTextField* textField, const base::string16& text);
 
 // Returns widths of 2 columns, that are proportional to |columnsWidth| and
-// their total width is equal to |maxWidth|.
+// their total width is equal to |maxWidth|. The first column won't be shrunk to
+// less than |kMinUsernameSize|.
 std::pair<CGFloat, CGFloat> GetResizedColumns(
     CGFloat maxWidth,
     std::pair<CGFloat, CGFloat> columnsWidth);
@@ -46,6 +48,10 @@ NSSecureTextField* PasswordLabel(const base::string16& text);
 
 // Returns a button of the standard style for the bubble.
 NSButton* DialogButton(NSString* title);
+
+// Returns a NSRegularControlSize button. It's used for improving the contrast
+// due to Accessabilty standards.
+NSButton* BiggerDialogButton(NSString* title);
 
 // Returns a title label with |text| for a bubble. Nonempty |range| may specify
 // a link range.

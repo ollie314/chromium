@@ -32,6 +32,7 @@ class ConnectivityCheckerImpl
       public net::URLRequest::Delegate,
       public net::NetworkChangeNotifier::NetworkChangeObserver {
  public:
+  // Connectivity checking and initialization will run on task_runner.
   explicit ConnectivityCheckerImpl(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
 
@@ -65,17 +66,30 @@ class ConnectivityCheckerImpl
   // Sets connectivity and alerts observers if it has changed
   void SetConnected(bool connected);
 
+  enum class ErrorType {
+    BAD_HTTP_STATUS = 1,
+    SSL_CERTIFICATE_ERROR = 2,
+    REQUEST_TIMEOUT = 3,
+  };
+
   // Called when URL request failed.
-  void OnUrlRequestError();
+  void OnUrlRequestError(ErrorType type);
 
   // Called when URL request timed out.
   void OnUrlRequestTimeout();
+
+  void CheckInternal();
 
   std::unique_ptr<GURL> connectivity_check_url_;
   std::unique_ptr<net::URLRequestContext> url_request_context_;
   std::unique_ptr<net::URLRequest> url_request_;
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
+  // connected_lock_ protects access to connected_ which is shared across
+  // threads.
+  mutable base::Lock connected_lock_;
   bool connected_;
+
   net::NetworkChangeNotifier::ConnectionType connection_type_;
   // Number of connectivity check errors.
   unsigned int check_errors_;

@@ -12,19 +12,20 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/channel_info.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
-#include "components/sync_driver/about_sync_util.h"
-#include "components/sync_driver/sync_service.h"
+#include "components/sync/base/weak_handle.h"
+#include "components/sync/driver/about_sync_util.h"
+#include "components/sync/driver/sync_service.h"
+#include "components/sync/engine/cycle/commit_counters.h"
+#include "components/sync/engine/cycle/status_counters.h"
+#include "components/sync/engine/cycle/update_counters.h"
+#include "components/sync/engine/events/protocol_event.h"
+#include "components/sync/js/js_event_details.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui.h"
-#include "sync/internal_api/public/events/protocol_event.h"
-#include "sync/internal_api/public/sessions/commit_counters.h"
-#include "sync/internal_api/public/sessions/status_counters.h"
-#include "sync/internal_api/public/sessions/update_counters.h"
-#include "sync/internal_api/public/util/weak_handle.h"
-#include "sync/js/js_event_details.h"
 
+using browser_sync::ProfileSyncService;
 using syncer::JsEventDetails;
 using syncer::ModelTypeSet;
 using syncer::WeakHandle;
@@ -43,7 +44,7 @@ class UtilAboutSyncDataExtractor : public AboutSyncDataExtractor {
 
 SyncInternalsMessageHandler::SyncInternalsMessageHandler()
     : SyncInternalsMessageHandler(
-          base::WrapUnique(new UtilAboutSyncDataExtractor())) {}
+          base::MakeUnique<UtilAboutSyncDataExtractor>()) {}
 
 SyncInternalsMessageHandler::SyncInternalsMessageHandler(
     std::unique_ptr<AboutSyncDataExtractor> about_sync_data_extractor)
@@ -141,10 +142,10 @@ void SyncInternalsMessageHandler::HandleRequestListOfTypes(
   ModelTypeSet protocol_types = syncer::ProtocolTypes();
   for (ModelTypeSet::Iterator it = protocol_types.First();
        it.Good(); it.Inc()) {
-    type_list->Append(new base::StringValue(ModelTypeToString(it.Get())));
+    type_list->AppendString(ModelTypeToString(it.Get()));
   }
   event_details.Set(sync_driver::sync_ui_util::kTypes, type_list.release());
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       sync_driver::sync_ui_util::kDispatchEvent,
       base::StringValue(sync_driver::sync_ui_util::kOnReceivedListOfTypes),
       event_details);
@@ -169,7 +170,7 @@ void SyncInternalsMessageHandler::OnReceivedAllNodes(
     int request_id,
     std::unique_ptr<base::ListValue> nodes) {
   base::FundamentalValue id(request_id);
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       sync_driver::sync_ui_util::kGetAllNodesCallback, id, *nodes);
 }
 
@@ -181,7 +182,7 @@ void SyncInternalsMessageHandler::OnProtocolEvent(
     const syncer::ProtocolEvent& event) {
   std::unique_ptr<base::DictionaryValue> value(
       syncer::ProtocolEvent::ToValue(event));
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       sync_driver::sync_ui_util::kDispatchEvent,
       base::StringValue(sync_driver::sync_ui_util::kOnProtocolEvent), *value);
 }
@@ -216,7 +217,7 @@ void SyncInternalsMessageHandler::EmitCounterUpdate(
                      ModelTypeToString(type));
   details->SetString(sync_driver::sync_ui_util::kCounterType, counter_type);
   details->Set(sync_driver::sync_ui_util::kCounters, value.release());
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       sync_driver::sync_ui_util::kDispatchEvent,
       base::StringValue(sync_driver::sync_ui_util::kOnCountersUpdated),
       *details);
@@ -227,8 +228,9 @@ void SyncInternalsMessageHandler::HandleJsEvent(
     const JsEventDetails& details) {
   DVLOG(1) << "Handling event: " << name
            << " with details " << details.ToString();
-  web_ui()->CallJavascriptFunction(sync_driver::sync_ui_util::kDispatchEvent,
-                                   base::StringValue(name), details.Get());
+  web_ui()->CallJavascriptFunctionUnsafe(
+      sync_driver::sync_ui_util::kDispatchEvent, base::StringValue(name),
+      details.Get());
 }
 
 void SyncInternalsMessageHandler::SendAboutInfo() {
@@ -237,7 +239,7 @@ void SyncInternalsMessageHandler::SendAboutInfo() {
   std::unique_ptr<base::DictionaryValue> value =
       about_sync_data_extractor_->ConstructAboutInformation(sync_service,
                                                             signin);
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       sync_driver::sync_ui_util::kDispatchEvent,
       base::StringValue(sync_driver::sync_ui_util::kOnAboutInfoUpdated),
       *value);

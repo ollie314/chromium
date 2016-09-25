@@ -26,9 +26,15 @@
 #ifndef ComputedStyleConstants_h
 #define ComputedStyleConstants_h
 
+#include "core/ComputedStyleBaseConstants.h"
 #include <cstddef>
 
 namespace blink {
+
+// TODO(sashab): Change these enums to enum classes with an unsigned underlying
+// type. Enum classes provide better type safety, and forcing an unsigned
+// underlying type prevents msvc from interpreting enums as negative numbers.
+// See: crbug.com/628043
 
 // Sides used when drawing borders and outlines. The values should run clockwise from top.
 enum BoxSide {
@@ -42,6 +48,7 @@ enum StyleRecalcChange {
     NoChange,
     NoInherit,
     UpdatePseudoElements,
+    IndependentInherit,
     Inherit,
     Force,
     Reattach,
@@ -117,8 +124,8 @@ enum EPosition {
     FixedPosition = 6
 };
 
-enum EFloat {
-    NoFloat, LeftFloat, RightFloat
+enum class EFloat : unsigned {
+    None, Left, Right
 };
 
 enum EMarginCollapse { MarginCollapseCollapse, MarginCollapseSeparate, MarginCollapseDiscard };
@@ -132,6 +139,10 @@ enum EBoxDecorationBreak { BoxDecorationBreakSlice, BoxDecorationBreakClone };
 enum EBoxSizing { BoxSizingContentBox, BoxSizingBorderBox };
 
 // Random visual rendering model attributes. Not inherited.
+
+enum EOverflowAnchor {
+    AnchorVisible, AnchorNone, AnchorAuto
+};
 
 enum EOverflow {
     OverflowVisible, OverflowHidden, OverflowScroll, OverflowAuto, OverflowOverlay, OverflowPagedX, OverflowPagedY
@@ -170,6 +181,17 @@ enum EFillBox {
     BorderFillBox, PaddingFillBox, ContentFillBox, TextFillBox
 };
 
+inline EFillBox enclosingFillBox(EFillBox boxA, EFillBox boxB)
+{
+    if (boxA == BorderFillBox || boxB == BorderFillBox)
+        return BorderFillBox;
+    if (boxA == PaddingFillBox || boxB == PaddingFillBox)
+        return PaddingFillBox;
+    if (boxA == ContentFillBox || boxB == ContentFillBox)
+        return ContentFillBox;
+    return TextFillBox;
+}
+
 enum EFillRepeat {
     RepeatFill, NoRepeatFill, RoundFill, SpaceFill
 };
@@ -189,7 +211,7 @@ enum EMaskSourceType { MaskAlpha, MaskLuminance };
 
 // Deprecated Flexible Box Properties
 
-enum EBoxPack { Start, Center, End, Justify };
+enum EBoxPack { BoxPackStart, BoxPackCenter, BoxPackEnd, BoxPackJustify };
 enum EBoxAlignment { BSTRETCH, BSTART, BCENTER, BEND, BBASELINE };
 enum EBoxOrient { HORIZONTAL, VERTICAL };
 enum EBoxLines { SINGLE, MULTIPLE };
@@ -382,8 +404,6 @@ enum ECaptionSide {
 
 enum EListStylePosition { ListStylePositionOutside, ListStylePositionInside };
 
-enum EVisibility { VISIBLE, HIDDEN, COLLAPSE };
-
 enum ECursor {
     // The following must match the order in CSSValueKeywords.in.
     CURSOR_AUTO,
@@ -454,7 +474,7 @@ enum ETransformStyle3D {
     TransformStyle3DFlat, TransformStyle3DPreserve3D
 };
 
-enum MotionRotationType { MotionRotationAuto, MotionRotationFixed };
+enum OffsetRotationType { OffsetRotationAuto, OffsetRotationFixed };
 
 enum EBackfaceVisibility {
     BackfaceVisibilityVisible, BackfaceVisibilityHidden
@@ -478,15 +498,7 @@ enum TextOverflow { TextOverflowClip = 0, TextOverflowEllipsis };
 
 enum EImageRendering { ImageRenderingAuto, ImageRenderingOptimizeSpeed, ImageRenderingOptimizeQuality, ImageRenderingOptimizeContrast, ImageRenderingPixelated };
 
-enum ImageResolutionSource { ImageResolutionSpecified = 0, ImageResolutionFromImage };
-
-enum ImageResolutionSnap { ImageResolutionNoSnap = 0, ImageResolutionSnapPixels };
-
 enum Order { LogicalOrder = 0, VisualOrder };
-
-enum WrapFlow { WrapFlowAuto, WrapFlowBoth, WrapFlowStart, WrapFlowEnd, WrapFlowMaximum, WrapFlowClear };
-
-enum WrapThrough { WrapThroughWrap, WrapThroughNone };
 
 enum RubyPosition { RubyPositionBefore, RubyPositionAfter };
 
@@ -532,19 +544,22 @@ inline TouchAction& operator&= (TouchAction& a, TouchAction b) { return a = a & 
 
 enum EIsolation { IsolationAuto, IsolationIsolate };
 
-static const size_t ContainmentBits = 3;
+static const size_t ContainmentBits = 4;
 enum Containment {
     ContainsNone = 0x0,
     ContainsLayout = 0x1,
     ContainsStyle = 0x2,
     ContainsPaint = 0x4,
-    ContainsStrict = ContainsLayout | ContainsStyle | ContainsPaint,
+    ContainsSize = 0x8,
+    ContainsStrict = ContainsLayout | ContainsStyle | ContainsPaint | ContainsSize,
+    ContainsContent = ContainsLayout | ContainsStyle | ContainsPaint,
 };
 inline Containment operator| (Containment a, Containment b) { return Containment(int(a) | int(b)); }
 inline Containment& operator|= (Containment& a, Containment b) { return a = a | b; }
 
 enum ItemPosition {
-    ItemPositionAuto,
+    ItemPositionAuto, // It will mean 'normal' after running the StyleAdjuster to avoid resolving the initial values.
+    ItemPositionNormal,
     ItemPositionStretch,
     ItemPositionBaseline,
     ItemPositionLastBaseline,
@@ -592,7 +607,7 @@ enum ContentDistributionType {
 };
 
 // Reasonable maximum to prevent insane font sizes from causing crashes on some platforms (such as Windows).
-static const float maximumAllowedFontSize = 1000000.0f;
+static const float maximumAllowedFontSize = 10000.0f;
 
 enum TextIndentLine { TextIndentFirstLine, TextIndentEachLine };
 enum TextIndentType { TextIndentNormal, TextIndentHanging };

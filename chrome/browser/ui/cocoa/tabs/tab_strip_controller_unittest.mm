@@ -6,8 +6,8 @@
 
 #include "base/bind_helpers.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "chrome/browser/media/media_capture_devices_dispatcher.h"
-#include "chrome/browser/media/media_stream_capture_indicator.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
+#include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
@@ -61,6 +61,8 @@ using content::WebContents;
         withContents:(WebContents*)contents {
 }
 - (void)onTabDetachedWithContents:(WebContents*)contents {
+}
+- (void)onTabInsertedInForeground:(BOOL)inForeground {
 }
 @end
 
@@ -250,23 +252,31 @@ TEST_F(TabStripControllerTest, CorrectMouseHoverBehavior) {
 
   // Set up mouse event on overlap of tab1 + tab2.
   const CGFloat min_y = NSMinY([tab_strip_.get() frame]) + 1;
+  const CGFloat tab_overlap = [TabStripController tabOverlap];
 
   // Hover over overlap between tab 1 and 2.
-  NSEvent* event =
-      cocoa_test_event_utils::MouseEventAtPoint(NSMakePoint(280, min_y),
-                                                NSMouseMoved, 0);
+  NSRect tab1_frame = [tab1 frame];
+  NSPoint tab_overlap_point =
+      NSMakePoint(NSMaxX(tab1_frame) - tab_overlap / 2, min_y);
+
+  NSEvent* event = cocoa_test_event_utils::MouseEventAtPoint(tab_overlap_point,
+                                                             NSMouseMoved,
+                                                             0);
   [controller_.get() mouseMoved:event];
   EXPECT_EQ(tab2, [controller_ hoveredTab]);
 
   // Hover over tab 1.
-  event = cocoa_test_event_utils::MouseEventAtPoint(NSMakePoint(260, min_y),
-                                                    NSMouseMoved, 0);
+  NSPoint hover_point = NSMakePoint(NSMidX(tab1_frame), min_y);
+  event =
+      cocoa_test_event_utils::MouseEventAtPoint(hover_point, NSMouseMoved, 0);
   [controller_.get() mouseMoved:event];
   EXPECT_EQ(tab1, [controller_ hoveredTab]);
 
   // Hover over tab 2.
-  event = cocoa_test_event_utils::MouseEventAtPoint(NSMakePoint(290, min_y),
-                                                    NSMouseMoved, 0);
+  NSRect tab2_frame = [tab2 frame];
+  hover_point = NSMakePoint(NSMidX(tab2_frame), min_y);
+  event =
+      cocoa_test_event_utils::MouseEventAtPoint(hover_point, NSMouseMoved, 0);
   [controller_.get() mouseMoved:event];
   EXPECT_EQ(tab2, [controller_ hoveredTab]);
 }

@@ -12,13 +12,13 @@
 #include "build/build_config.h"
 #include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/screen.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/menu/menu_config.h"
@@ -46,7 +46,7 @@
 #endif
 
 #if defined(USE_AURA)
-#include "ui/views/controls/menu/menu_key_event_handler.h"
+#include "ui/views/controls/menu/menu_pre_target_handler.h"
 #endif
 
 using base::Time;
@@ -397,7 +397,7 @@ MenuItemView* MenuController::Run(Widget* parent,
   possible_drag_ = false;
   drag_in_progress_ = false;
   did_initiate_drag_ = false;
-  closing_event_time_ = base::TimeDelta();
+  closing_event_time_ = base::TimeTicks();
   menu_start_time_ = base::TimeTicks::Now();
   menu_start_mouse_press_loc_ = gfx::Point();
 
@@ -420,7 +420,8 @@ MenuItemView* MenuController::Run(Widget* parent,
     }
   }
 
-  bool nested_menu = showing_;
+  // If we are already showing, this new menu is being nested. Such as context
+  // menus on top of normal menus.
   if (showing_) {
     // Only support nesting of blocking_run menus, nesting of
     // blocking/non-blocking shouldn't be needed.
@@ -437,10 +438,16 @@ MenuItemView* MenuController::Run(Widget* parent,
   } else {
     showing_ = true;
 
+    if (owner_)
+      owner_->RemoveObserver(this);
+    owner_ = parent;
+    if (owner_)
+      owner_->AddObserver(this);
+
 #if defined(USE_AURA)
-    // Only create a MenuKeyEventHandler for non-nested menus. Nested menus will
-    // use the existing one.
-    key_event_handler_.reset(new MenuKeyEventHandler);
+    // Only create a MenuPreTargetHandler for non-nested menus. Nested menus
+    // will use the existing one.
+    menu_pre_target_handler_.reset(new MenuPreTargetHandler(this, owner_));
 #endif
   }
 
@@ -448,12 +455,6 @@ MenuItemView* MenuController::Run(Widget* parent,
   pending_state_ = State();
   state_ = State();
   UpdateInitialLocation(bounds, position, context_menu);
-
-  if (owner_)
-    owner_->RemoveObserver(this);
-  owner_ = parent;
-  if (owner_)
-    owner_->AddObserver(this);
 
   // Set the selection, which opens the initial menu.
   SetSelection(root, SELECTION_OPEN_SUBMENU | SELECTION_UPDATE_IMMEDIATELY);
@@ -483,7 +484,7 @@ MenuItemView* MenuController::Run(Widget* parent,
   // appears totally broken.
   message_loop_depth_++;
   DCHECK_LE(message_loop_depth_, 2);
-  RunMessageLoop(nested_menu);
+  RunMessageLoop();
   message_loop_depth_--;
 
   if (ViewsDelegate::GetInstance())
@@ -1023,30 +1024,57 @@ void MenuController::OnDragComplete(bool should_close) {
 }
 
 ui::PostDispatchAction MenuController::OnWillDispatchKeyEvent(
-    base::char16 character,
-    ui::KeyboardCode key_code) {
-  if (exit_type() == MenuController::EXIT_ALL ||
-      exit_type() == MenuController::EXIT_DESTROYED) {
+    ui::KeyEvent* event) {
+  if (exit_type() == EXIT_ALL || exit_type() == EXIT_DESTROYED) {
+    // If the event has arrived after the menu's exit type had changed but
+    // before its message loop terminated, the event will continue its normal
+    // propagation for the following reason:
+    // If the user accepts a menu item in a nested menu, the menu item action is
+    // run after the base::RunLoop for the innermost menu has quit but before
+    // the base::RunLoop for the outermost menu has quit. If the menu item
+    // action starts a base::RunLoop, the outermost menu's base::RunLoop will
+    // not quit till the action's base::RunLoop ends. IDC_BOOKMARK_BAR_OPEN_ALL
+    // sometimes opens a modal dialog. The modal dialog starts a base::RunLoop
+    // and keeps the base::RunLoop running for the duration of its lifetime.
     TerminateNestedMessageLoopIfNecessary();
     return ui::POST_DISPATCH_PERFORM_DEFAULT;
   }
 
-  if (character)
-    SelectByChar(character);
-  else
-    OnKeyDown(key_code);
+  event->StopPropagation();
 
-  // MenuController may have been deleted, so check for an active instance
-  // before accessing member variables.
-  if (GetActiveInstance())
-    TerminateNestedMessageLoopIfNecessary();
+  if (event->type() == ui::ET_KEY_PRESSED) {
+    OnKeyDown(event->key_code());
+    // Menu controller might have been deleted.
+    if (!GetActiveInstance())
+      return ui::POST_DISPATCH_NONE;
 
+    // Do not check mnemonics if the Alt or Ctrl modifiers are pressed. For
+    // example Ctrl+<T> is an accelerator, but <T> only is a mnemonic.
+    const int kKeyFlagsMask = ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN;
+    const int flags = event->flags();
+    if (exit_type() == EXIT_NONE && (flags & kKeyFlagsMask) == 0) {
+      base::char16 c = event->GetCharacter();
+      SelectByChar(c);
+      // Menu controller might have been deleted.
+      if (!GetActiveInstance())
+        return ui::POST_DISPATCH_NONE;
+    }
+  }
+
+  if (!TerminateNestedMessageLoopIfNecessary()) {
+    ui::Accelerator accelerator(*event);
+    ViewsDelegate::ProcessMenuAcceleratorResult result =
+        ViewsDelegate::GetInstance()->ProcessAcceleratorWhileMenuShowing(
+            accelerator);
+    if (result == ViewsDelegate::ProcessMenuAcceleratorResult::CLOSE_MENU)
+      CancelAll();
+  }
   return ui::POST_DISPATCH_NONE;
 }
 
 void MenuController::UpdateSubmenuSelection(SubmenuView* submenu) {
   if (submenu->IsShowing()) {
-    gfx::Point point = gfx::Screen::GetScreen()->GetCursorScreenPoint();
+    gfx::Point point = display::Screen::GetScreen()->GetCursorScreenPoint();
     const SubmenuView* root_submenu =
         submenu->GetMenuItem()->GetRootMenuItem()->GetSubmenu();
     View::ConvertPointFromScreen(
@@ -1059,7 +1087,6 @@ void MenuController::OnWidgetDestroying(Widget* widget) {
   DCHECK_EQ(owner_, widget);
   owner_->RemoveObserver(this);
   owner_ = NULL;
-  message_loop_->ClearOwner();
 }
 
 bool MenuController::IsCancelAllTimerRunningForTest() {
@@ -1208,7 +1235,7 @@ void MenuController::StartDrag(SubmenuView* source,
       ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
   // MenuController may have been deleted if |async_run_| so check for an active
   // instance before accessing member variables.
-  if (GetActiveInstance())
+  if (GetActiveInstance() == this)
     did_initiate_drag_ = false;
 }
 
@@ -1340,8 +1367,6 @@ MenuController::MenuController(bool blocking,
       hot_button_(nullptr),
       delegate_(delegate),
       message_loop_depth_(0),
-      closing_event_time_(base::TimeDelta()),
-      menu_start_time_(base::TimeTicks()),
       async_run_(false),
       is_combobox_(false),
       item_selected_by_touch_(false),
@@ -1362,8 +1387,8 @@ MenuController::~MenuController() {
   StopCancelAllTimer();
 }
 
-void MenuController::RunMessageLoop(bool nested_menu) {
-  message_loop_->Run(this, owner_, nested_menu);
+void MenuController::RunMessageLoop() {
+  message_loop_->Run();
 }
 
 bool MenuController::SendAcceleratorToHotTrackedView() {
@@ -1373,8 +1398,11 @@ bool MenuController::SendAcceleratorToHotTrackedView() {
 
   ui::Accelerator accelerator(ui::VKEY_RETURN, ui::EF_NONE);
   hot_view->AcceleratorPressed(accelerator);
-  CustomButton* button = static_cast<CustomButton*>(hot_view);
-  SetHotTrackedButton(button);
+  // An accelerator may have canceled the menu after activation.
+  if (GetActiveInstance()) {
+    CustomButton* button = static_cast<CustomButton*>(hot_view);
+    SetHotTrackedButton(button);
+  }
   return true;
 }
 
@@ -1401,14 +1429,14 @@ void MenuController::UpdateInitialLocation(const gfx::Rect& bounds,
 
   // Calculate the bounds of the monitor we'll show menus on. Do this once to
   // avoid repeated system queries for the info.
-  pending_state_.monitor_bounds = gfx::Screen::GetScreen()
+  pending_state_.monitor_bounds = display::Screen::GetScreen()
                                       ->GetDisplayNearestPoint(bounds.origin())
                                       .work_area();
 
   if (!pending_state_.monitor_bounds.Contains(bounds)) {
     // Use the monitor area if the work area doesn't contain the bounds. This
     // handles showing a menu from the launcher.
-    gfx::Rect monitor_area = gfx::Screen::GetScreen()
+    gfx::Rect monitor_area = display::Screen::GetScreen()
                                  ->GetDisplayNearestPoint(bounds.origin())
                                  .bounds();
     if (monitor_area.Contains(bounds))
@@ -1443,11 +1471,12 @@ bool MenuController::ShowSiblingMenu(SubmenuView* source,
     return false;
   }
 
-  gfx::NativeWindow window_under_mouse =
-      gfx::Screen::GetScreen()->GetWindowUnderCursor();
   // TODO(oshima): Replace with views only API.
-  if (!owner_ || window_under_mouse != owner_->GetNativeWindow())
+  if (!owner_ ||
+      !display::Screen::GetScreen()->IsWindowUnderCursor(
+          owner_->GetNativeWindow())) {
     return false;
+  }
 
   // The user moved the mouse outside the menu and over the owning window. See
   // if there is a sibling menu we should show.
@@ -2330,7 +2359,7 @@ void MenuController::RepostEventAndCancel(SubmenuView* source,
   gfx::NativeView native_view = source->GetWidget()->GetNativeView();
   gfx::NativeWindow window = nullptr;
   if (native_view) {
-    gfx::Screen* screen = gfx::Screen::GetScreen();
+    display::Screen* screen = display::Screen::GetScreen();
     window = screen->GetWindowAtScreenPoint(screen_loc);
   }
 #endif
@@ -2584,7 +2613,7 @@ MenuItemView* MenuController::ExitMenuRun() {
     }
   } else {
 #if defined(USE_AURA)
-    key_event_handler_.reset();
+    menu_pre_target_handler_.reset();
 #endif
 
     showing_ = false;
@@ -2668,15 +2697,19 @@ void MenuController::SetInitialHotTrackedView(
 void MenuController::SetHotTrackedButton(CustomButton* hot_button) {
   if (hot_button == hot_button_) {
     // Hot-tracked state may change outside of the MenuController. Correct it.
-    if (hot_button && !hot_button->IsHotTracked())
+    if (hot_button && !hot_button->IsHotTracked()) {
       hot_button->SetHotTracked(true);
+      hot_button->NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
+    }
     return;
   }
   if (hot_button_)
     hot_button_->SetHotTracked(false);
   hot_button_ = hot_button;
-  if (hot_button)
+  if (hot_button) {
     hot_button->SetHotTracked(true);
+    hot_button->NotifyAccessibilityEvent(ui::AX_EVENT_SELECTION, true);
+  }
 }
 
 }  // namespace views

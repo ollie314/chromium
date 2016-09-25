@@ -6,7 +6,7 @@
 
 #include <stddef.h>
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service.h"
@@ -33,16 +33,18 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/common/profile_management_switches.h"
-#include "components/sync_driver/sync_prefs.h"
+#include "components/sync/driver/sync_prefs.h"
 #include "content/public/browser/user_metrics.h"
 #include "net/base/url_util.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using browser_sync::ProfileSyncService;
 
 namespace {
 
@@ -84,7 +86,7 @@ OneClickSigninSyncStarter::OneClickSigninSyncStarter(
     const GURL& continue_url,
     Callback sync_setup_completed_callback)
     : content::WebContentsObserver(web_contents),
-      profile_(NULL),
+      profile_(nullptr),
       start_mode_(start_mode),
       confirmation_required_(confirmation_required),
       current_url_(current_url),
@@ -108,7 +110,7 @@ OneClickSigninSyncStarter::OneClickSigninSyncStarter(
 
 void OneClickSigninSyncStarter::OnBrowserRemoved(Browser* browser) {
   if (browser == browser_)
-    browser_ = NULL;
+    browser_ = nullptr;
 }
 
 OneClickSigninSyncStarter::~OneClickSigninSyncStarter() {
@@ -133,7 +135,7 @@ void OneClickSigninSyncStarter::Initialize(Profile* profile, Browser* browser) {
   // syncing until the user has finished any configuration.
   ProfileSyncService* profile_sync_service = GetProfileSyncService();
   if (profile_sync_service)
-    profile_sync_service->SetSetupInProgress(true);
+    sync_blocker_ = profile_sync_service->GetSetupInProgressHandle();
 
   // Make sure the syncing is requested, otherwise the SigninManager
   // will not be able to complete successfully.
@@ -174,7 +176,7 @@ void OneClickSigninSyncStarter::SigninDialogDelegate::OnCancelSignin() {
   SetUserChoiceHistogram(SIGNIN_CHOICE_CANCEL);
   content::RecordAction(
       base::UserMetricsAction("Signin_EnterpriseAccountPrompt_Cancel"));
-  if (sync_starter_ != NULL)
+  if (sync_starter_)
     sync_starter_->CancelSigninAndDelete();
 }
 
@@ -183,7 +185,7 @@ void OneClickSigninSyncStarter::SigninDialogDelegate::OnContinueSignin() {
   content::RecordAction(
       base::UserMetricsAction("Signin_EnterpriseAccountPrompt_ImportData"));
 
-  if (sync_starter_ != NULL)
+  if (sync_starter_)
     sync_starter_->LoadPolicyWithCachedCredentials();
 }
 
@@ -192,7 +194,7 @@ void OneClickSigninSyncStarter::SigninDialogDelegate::OnSigninWithNewProfile() {
   content::RecordAction(
       base::UserMetricsAction("Signin_EnterpriseAccountPrompt_DontImportData"));
 
-  if (sync_starter_ != NULL)
+  if (sync_starter_)
     sync_starter_->CreateNewSignedInProfile();
 }
 
@@ -306,7 +308,7 @@ void OneClickSigninSyncStarter::CompleteInitForNewProfile(
       // and switch over to tracking that profile.
       new_signin_manager->CopyCredentialsFrom(*old_signin_manager);
       FinishProfileSyncServiceSetup();
-      Initialize(new_profile, NULL);
+      Initialize(new_profile, nullptr);
       DCHECK_EQ(profile_, new_profile);
 
       // We've transferred our credentials to the new profile - notify that
@@ -358,7 +360,6 @@ void OneClickSigninSyncStarter::ConfirmAndSignin() {
         base::UTF8ToUTF16(signin->GetUsernameForAuthInProgress()),
         base::Bind(&OneClickSigninSyncStarter::UntrustedSigninConfirmed,
                    weak_pointer_factory_.GetWeakPtr()));
-    LoginUIServiceFactory::GetForProfile(profile_)->UntrustedLoginUIShown();
   } else {
     // No confirmation required - just sign in the user.
     signin->CompletePendingSignin();
@@ -608,17 +609,14 @@ void OneClickSigninSyncStarter::ShowSettingsPage(bool configure_sync) {
 }
 
 ProfileSyncService* OneClickSigninSyncStarter::GetProfileSyncService() {
-  ProfileSyncService* service = NULL;
+  ProfileSyncService* service = nullptr;
   if (profile_->IsSyncAllowed())
     service = ProfileSyncServiceFactory::GetForProfile(profile_);
   return service;
 }
 
 void OneClickSigninSyncStarter::FinishProfileSyncServiceSetup() {
-  ProfileSyncService* service =
-      ProfileSyncServiceFactory::GetForProfile(profile_);
-  if (service)
-    service->SetSetupInProgress(false);
+  sync_blocker_.reset();
 }
 
 void OneClickSigninSyncStarter::ShowSettingsPageInWebContents(
@@ -631,11 +629,9 @@ void OneClickSigninSyncStarter::ShowSettingsPageInWebContents(
   }
 
   GURL url = chrome::GetSettingsUrl(sub_page);
-  content::OpenURLParams params(url,
-                                content::Referrer(),
-                                CURRENT_TAB,
-                                ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
-                                false);
+  content::OpenURLParams params(url, content::Referrer(),
+                                WindowOpenDisposition::CURRENT_TAB,
+                                ui::PAGE_TRANSITION_AUTO_TOPLEVEL, false);
   contents->OpenURL(params);
 
   // Activate the tab.

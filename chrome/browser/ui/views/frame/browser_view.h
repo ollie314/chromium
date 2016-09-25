@@ -13,6 +13,7 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/devtools/devtools_window.h"
@@ -53,6 +54,7 @@ class DownloadShelfView;
 class ExclusiveAccessBubbleViews;
 class InfoBarContainerView;
 class LocationBarView;
+class NewBackShortcutBubble;
 class StatusBubbleViews;
 class TabStrip;
 class ToolbarView;
@@ -148,8 +150,8 @@ class BrowserView : public BrowserWindow,
   // window.
   gfx::Rect GetFindBarBoundingBox() const;
 
-  // Returns the preferred height of the TabStrip. Used to position the OTR
-  // avatar icon.
+  // Returns the preferred height of the TabStrip. Used to position the
+  // incognito avatar icon.
   int GetTabStripHeight() const;
 
   // Takes some view's origin (relative to this BrowserView) and offsets it such
@@ -190,18 +192,19 @@ class BrowserView : public BrowserWindow,
 
   // Returns true if the profile associated with this Browser window is
   // incognito.
-  bool IsOffTheRecord() const;
+  bool IsIncognito() const;
 
   // Returns true if the profile associated with this Browser window is
   // a guest session.
   bool IsGuestSession() const;
 
   // Returns true if the profile associated with this Browser window is
-  // not off the record or a guest session.
+  // not incognito or a guest session.
   bool IsRegularOrGuestSession() const;
 
-  // Returns true if the non-client view should render an avatar icon.
-  bool ShouldShowAvatar() const;
+  // Returns whether or not a client edge (the border around the web content)
+  // should be laid out and drawn.
+  bool HasClientEdge() const;
 
   // Provides the containing frame with the accelerator for the specified
   // command id. This can be used to provide menu item shortcut hints etc.
@@ -279,8 +282,7 @@ class BrowserView : public BrowserWindow,
   void Minimize() override;
   void Restore() override;
   void EnterFullscreen(const GURL& url,
-                       ExclusiveAccessBubbleType bubble_type,
-                       bool with_toolbar) override;
+                       ExclusiveAccessBubbleType bubble_type) override;
   void ExitFullscreen() override;
   void UpdateExclusiveAccessExitBubbleContent(
       const GURL& url,
@@ -289,6 +291,8 @@ class BrowserView : public BrowserWindow,
   bool ShouldHideUIForFullscreen() const override;
   bool IsFullscreen() const override;
   bool IsFullscreenBubbleVisible() const override;
+  void MaybeShowNewBackShortcutBubble(bool forward) override;
+  void HideNewBackShortcutBubble() override;
   LocationBar* GetLocationBar() const override;
   void SetFocusToLocationBar(bool select_all) override;
   void UpdateReloadStopState(bool is_loading, bool force) override;
@@ -307,8 +311,6 @@ class BrowserView : public BrowserWindow,
   bool IsTabStripEditable() const override;
   bool IsToolbarVisible() const override;
   gfx::Rect GetRootWindowResizerRect() const override;
-  void ConfirmAddSearchProvider(TemplateURL* template_url,
-                                Profile* profile) override;
   void ShowUpdateChromeDialog() override;
   void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) override;
   void ShowBookmarkAppBubble(
@@ -340,7 +342,7 @@ class BrowserView : public BrowserWindow,
   void ShowWebsiteSettings(
       Profile* profile,
       content::WebContents* web_contents,
-      const GURL& url,
+      const GURL& virtual_url,
       const security_state::SecurityStateModel::SecurityInfo& security_info)
       override;
   void ShowAppMenu() override;
@@ -366,6 +368,8 @@ class BrowserView : public BrowserWindow,
       const extensions::Extension* extension,
       const base::Callback<void(ImeWarningBubblePermissionStatus status)>&
           callback) override;
+  std::string GetWorkspace() const override;
+  bool IsVisibleOnAllWorkspaces() const override;
 
   BookmarkBarView* GetBookmarkBarView() const;
   LocationBarView* GetLocationBarView() const;
@@ -373,7 +377,8 @@ class BrowserView : public BrowserWindow,
   ToolbarView* GetToolbarView() const;
 
   // Overridden from TabStripModelObserver:
-  void TabInsertedAt(content::WebContents* contents,
+  void TabInsertedAt(TabStripModel* tab_strip_model,
+                     content::WebContents* contents,
                      int index,
                      bool foreground) override;
   void TabDetachedAt(content::WebContents* contents, int index) override;
@@ -384,7 +389,7 @@ class BrowserView : public BrowserWindow,
 
   // Overridden from ui::AcceleratorProvider:
   bool GetAcceleratorForCommandId(int command_id,
-                                  ui::Accelerator* accelerator) override;
+                                  ui::Accelerator* accelerator) const override;
 
   // Overridden from views::WidgetDelegate:
   bool CanResize() const override;
@@ -414,6 +419,7 @@ class BrowserView : public BrowserWindow,
   void GetAccessiblePanes(std::vector<View*>* panes) override;
 
   // Overridden from views::WidgetObserver:
+  void OnWidgetDestroying(views::Widget* widget) override;
   void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
 
   // Overridden from views::ClientView:
@@ -652,7 +658,7 @@ class BrowserView : public BrowserWindow,
   // The Status information bubble that appears at the bottom of the window.
   std::unique_ptr<StatusBubbleViews> status_bubble_;
 
-  // A mapping between accelerators and commands.
+  // A mapping between accelerators and command IDs.
   std::map<ui::Accelerator, int> accelerator_table_;
 
   // True if we have already been initialized.
@@ -668,6 +674,9 @@ class BrowserView : public BrowserWindow,
   bool in_process_fullscreen_;
 
   std::unique_ptr<ExclusiveAccessBubbleViews> exclusive_access_bubble_;
+
+  std::unique_ptr<NewBackShortcutBubble> new_back_shortcut_bubble_;
+  base::TimeTicks last_back_shortcut_press_time_;
 
 #if defined(OS_WIN)
   // Helper class to listen for completion of first page load.

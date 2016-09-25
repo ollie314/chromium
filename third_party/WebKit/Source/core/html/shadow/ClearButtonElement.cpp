@@ -29,7 +29,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/html/shadow/ShadowElementNames.h"
 #include "core/input/EventHandler.h"
-#include "core/layout/LayoutView.h"
+#include "core/layout/LayoutObject.h"
 
 namespace blink {
 
@@ -49,9 +49,9 @@ ClearButtonElement* ClearButtonElement::create(Document& document, ClearButtonOw
     return element;
 }
 
-void ClearButtonElement::detach(const AttachContext& context)
+void ClearButtonElement::detachLayoutTree(const AttachContext& context)
 {
-    HTMLDivElement::detach(context);
+    HTMLDivElement::detachLayoutTree(context);
 }
 
 void ClearButtonElement::defaultEventHandler(Event* event)

@@ -4,6 +4,7 @@
 
 #include "content/browser/devtools/service_worker_devtools_manager.h"
 
+#include "content/browser/devtools/devtools_agent_host_impl.h"
 #include "content/browser/devtools/service_worker_devtools_agent_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -78,14 +79,15 @@ void ServiceWorkerDevToolsManager::AddAllAgentHostsForBrowserContext(
 bool ServiceWorkerDevToolsManager::WorkerCreated(
     int worker_process_id,
     int worker_route_id,
-    const ServiceWorkerIdentifier& service_worker_id) {
+    const ServiceWorkerIdentifier& service_worker_id,
+    bool is_installed_version) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const WorkerId id(worker_process_id, worker_route_id);
   AgentHostMap::iterator it = FindExistingWorkerAgentHost(service_worker_id);
   if (it == workers_.end()) {
     scoped_refptr<ServiceWorkerDevToolsAgentHost> host =
-        new ServiceWorkerDevToolsAgentHost(
-            id, service_worker_id);
+        new ServiceWorkerDevToolsAgentHost(id, service_worker_id,
+                                           is_installed_version);
     workers_[id] = host.get();
     FOR_EACH_OBSERVER(Observer, observer_list_, WorkerCreated(host.get()));
     if (debug_service_worker_on_start_)
@@ -116,17 +118,33 @@ void ServiceWorkerDevToolsManager::WorkerReadyForInspection(
                     WorkerReadyForInspection(host.get()));
 
   // Then bring up UI for the ones not picked by other clients.
-  if (host->IsPausedForDebugOnStart() && !host->IsAttached()) {
-    host->Inspect(RenderProcessHost::FromID(worker_process_id)->
-        GetBrowserContext());
-  }
+  if (host->IsPausedForDebugOnStart() && !host->IsAttached())
+    static_cast<DevToolsAgentHostImpl*>(host.get())->Inspect();
 }
 
-void ServiceWorkerDevToolsManager::WorkerStopIgnored(int worker_process_id,
-                                                      int worker_route_id) {
+void ServiceWorkerDevToolsManager::WorkerVersionInstalled(int worker_process_id,
+                                                          int worker_route_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  // TODO(pfeldman): Show a console message to tell the user that UA didn't
-  // terminate the worker because devtools is attached.
+  const WorkerId id(worker_process_id, worker_route_id);
+  AgentHostMap::iterator it = workers_.find(id);
+  if (it == workers_.end())
+    return;
+  scoped_refptr<ServiceWorkerDevToolsAgentHost> host = it->second;
+  host->WorkerVersionInstalled();
+  FOR_EACH_OBSERVER(Observer, observer_list_,
+                    WorkerVersionInstalled(host.get()));
+}
+
+void ServiceWorkerDevToolsManager::WorkerVersionDoomed(int worker_process_id,
+                                                       int worker_route_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  const WorkerId id(worker_process_id, worker_route_id);
+  AgentHostMap::iterator it = workers_.find(id);
+  if (it == workers_.end())
+    return;
+  scoped_refptr<ServiceWorkerDevToolsAgentHost> host = it->second;
+  host->WorkerVersionDoomed();
+  FOR_EACH_OBSERVER(Observer, observer_list_, WorkerVersionDoomed(host.get()));
 }
 
 void ServiceWorkerDevToolsManager::WorkerDestroyed(int worker_process_id,

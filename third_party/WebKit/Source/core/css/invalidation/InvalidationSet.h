@@ -36,10 +36,10 @@
 #include "wtf/Assertions.h"
 #include "wtf/Forward.h"
 #include "wtf/HashSet.h"
-#include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/AtomicStringHash.h"
 #include "wtf/text/StringHash.h"
+#include <memory>
 
 namespace blink {
 
@@ -77,7 +77,8 @@ enum InvalidationType {
 // .t .v, .t ~ .z {}
 //   For class t we will have a SiblingInvalidationSet containing class z, with the SiblingInvalidationSet also holding descendants containing class v.
 //
-class CORE_EXPORT InvalidationSet : public RefCounted<InvalidationSet> {
+// We avoid virtual functions to minimize space consumption.
+class CORE_EXPORT InvalidationSet {
     WTF_MAKE_NONCOPYABLE(InvalidationSet);
     USING_FAST_MALLOC_WITH_TYPE_NAME(blink::InvalidationSet);
 public:
@@ -114,28 +115,38 @@ public:
 
     bool isEmpty() const { return !m_classes && !m_ids && !m_tagNames && !m_attributes && !m_customPseudoInvalid && !m_insertionPointCrossing && !m_invalidatesSlotted; }
 
+    bool isAlive() const { return m_isAlive; }
+
     void toTracedValue(TracedValue*) const;
 
 #ifndef NDEBUG
     void show() const;
 #endif
 
-    const HashSet<AtomicString>& classSetForTesting() const { ASSERT(m_classes); return *m_classes; }
-    const HashSet<AtomicString>& idSetForTesting() const { ASSERT(m_ids); return *m_ids; }
-    const HashSet<AtomicString>& tagNameSetForTesting() const { ASSERT(m_tagNames); return *m_tagNames; }
-    const HashSet<AtomicString>& attributeSetForTesting() const { ASSERT(m_attributes); return *m_attributes; }
+    const HashSet<AtomicString>& classSetForTesting() const { DCHECK(m_classes); return *m_classes; }
+    const HashSet<AtomicString>& idSetForTesting() const { DCHECK(m_ids); return *m_ids; }
+    const HashSet<AtomicString>& tagNameSetForTesting() const { DCHECK(m_tagNames); return *m_tagNames; }
+    const HashSet<AtomicString>& attributeSetForTesting() const { DCHECK(m_attributes); return *m_attributes; }
 
+    void ref() { ++m_refCount; }
     void deref()
     {
-        if (!derefBase())
-            return;
-        destroy();
+        DCHECK_GT(m_refCount, 0);
+        --m_refCount;
+        if (!m_refCount)
+            destroy();
     }
 
     void combine(const InvalidationSet& other);
 
 protected:
-    InvalidationSet(InvalidationType);
+    explicit InvalidationSet(InvalidationType);
+
+    ~InvalidationSet()
+    {
+        RELEASE_ASSERT(m_isAlive);
+        m_isAlive = false;
+    }
 
 private:
     void destroy();
@@ -145,11 +156,18 @@ private:
     HashSet<AtomicString>& ensureTagNameSet();
     HashSet<AtomicString>& ensureAttributeSet();
 
+    // Implement reference counting manually so we can call a derived
+    // class destructor when the reference count decreases to 0.
+    // If we use RefCounted instead, at least one of our compilers
+    // requires the ability for RefCounted<InvalidationSet>::deref()
+    // to call ~InvalidationSet(), but this is not a virtual call.
+    int m_refCount;
+
     // FIXME: optimize this if it becomes a memory issue.
-    OwnPtr<HashSet<AtomicString>> m_classes;
-    OwnPtr<HashSet<AtomicString>> m_ids;
-    OwnPtr<HashSet<AtomicString>> m_tagNames;
-    OwnPtr<HashSet<AtomicString>> m_attributes;
+    std::unique_ptr<HashSet<AtomicString>> m_classes;
+    std::unique_ptr<HashSet<AtomicString>> m_ids;
+    std::unique_ptr<HashSet<AtomicString>> m_tagNames;
+    std::unique_ptr<HashSet<AtomicString>> m_attributes;
 
     unsigned m_type : 1;
 
@@ -170,6 +188,9 @@ private:
 
     // If true, distributed nodes of <slot> elements need to be invalidated.
     unsigned m_invalidatesSlotted : 1;
+
+    // If true, the instance is alive and can be used.
+    unsigned m_isAlive : 1;
 };
 
 class CORE_EXPORT DescendantInvalidationSet final : public InvalidationSet {
@@ -188,13 +209,13 @@ class CORE_EXPORT SiblingInvalidationSet final : public InvalidationSet {
 public:
     static PassRefPtr<SiblingInvalidationSet> create(PassRefPtr<DescendantInvalidationSet> descendants)
     {
-        return adoptRef(new SiblingInvalidationSet(descendants));
+        return adoptRef(new SiblingInvalidationSet(std::move(descendants)));
     }
 
     unsigned maxDirectAdjacentSelectors() const { return m_maxDirectAdjacentSelectors; }
     void updateMaxDirectAdjacentSelectors(unsigned value) { m_maxDirectAdjacentSelectors = std::max(value, m_maxDirectAdjacentSelectors); }
 
-    const DescendantInvalidationSet* siblingDescendants() const { return m_siblingDescendantInvalidationSet.get(); }
+    DescendantInvalidationSet* siblingDescendants() const { return m_siblingDescendantInvalidationSet.get(); }
     DescendantInvalidationSet& ensureSiblingDescendants();
 
     DescendantInvalidationSet* descendants() const { return m_descendantInvalidationSet.get(); }

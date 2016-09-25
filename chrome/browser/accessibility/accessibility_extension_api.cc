@@ -10,7 +10,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "chrome/browser/accessibility/accessibility_extension_api.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -31,6 +30,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/ui/accessibility_focus_ring_controller.h"
+using chromeos::AccessibilityFocusRingController;
 #endif
 
 namespace accessibility_private = extensions::api::accessibility_private;
@@ -47,8 +47,9 @@ const char kHeight[] = "height";
 const char kErrorNotSupported[] = "This API is not supported on this platform.";
 }  // namespace
 
-bool AccessibilityPrivateSetNativeAccessibilityEnabledFunction::RunSync() {
-  bool enabled;
+ExtensionFunction::ResponseAction
+AccessibilityPrivateSetNativeAccessibilityEnabledFunction::Run() {
+  bool enabled = false;
   EXTENSION_FUNCTION_VALIDATE(args_->GetBoolean(0, &enabled));
   if (enabled) {
     content::BrowserAccessibilityState::GetInstance()->
@@ -57,10 +58,11 @@ bool AccessibilityPrivateSetNativeAccessibilityEnabledFunction::RunSync() {
     content::BrowserAccessibilityState::GetInstance()->
         DisableAccessibility();
   }
-  return true;
+  return RespondNow(NoArguments());
 }
 
-bool AccessibilityPrivateSetFocusRingFunction::RunSync() {
+ExtensionFunction::ResponseAction
+AccessibilityPrivateSetFocusRingFunction::Run() {
 #if defined(OS_CHROMEOS)
   base::ListValue* rect_values = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetList(0, &rect_values));
@@ -77,13 +79,22 @@ bool AccessibilityPrivateSetFocusRingFunction::RunSync() {
     rects.push_back(gfx::Rect(left, top, width, height));
   }
 
-  chromeos::AccessibilityFocusRingController::GetInstance()->SetFocusRing(
-      rects);
-  return true;
+  // Move the visible focus ring to cover all of these rects.
+  AccessibilityFocusRingController::GetInstance()->SetFocusRing(
+      rects, AccessibilityFocusRingController::PERSIST_FOCUS_RING);
+
+  // Also update the touch exploration controller so that synthesized
+  // touch events are anchored within the focused object.
+  if (!rects.empty()) {
+    chromeos::AccessibilityManager* manager =
+        chromeos::AccessibilityManager::Get();
+    manager->SetTouchAccessibilityAnchorPoint(rects[0].CenterPoint());
+  }
+
+  return RespondNow(NoArguments());
 #endif  // defined(OS_CHROMEOS)
 
-  error_ = kErrorNotSupported;
-  return false;
+  return RespondNow(Error(kErrorNotSupported));
 }
 
 ExtensionFunction::ResponseAction

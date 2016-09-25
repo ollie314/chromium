@@ -7,8 +7,18 @@
 #ifndef V8TestObject_h
 #define V8TestObject_h
 
+#include "bindings/core/v8/ArrayBufferOrArrayBufferViewOrDictionary.h"
+#include "bindings/core/v8/BooleanOrStringOrUnrestrictedDouble.h"
+#include "bindings/core/v8/DoubleOrString.h"
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/StringOrArrayBufferOrArrayBufferView.h"
+#include "bindings/core/v8/StringOrDouble.h"
+#include "bindings/core/v8/StringOrStringSequence.h"
+#include "bindings/core/v8/TestEnumOrDouble.h"
+#include "bindings/core/v8/TestInterfaceGarbageCollectedOrString.h"
+#include "bindings/core/v8/TestInterfaceOrLong.h"
 #include "bindings/core/v8/ToV8.h"
+#include "bindings/core/v8/UnrestrictedDoubleOrString.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
@@ -18,6 +28,7 @@
 
 namespace blink {
 
+class ScriptState;
 class V8TestObject {
     STATIC_ONLY(V8TestObject);
 public:
@@ -58,6 +69,10 @@ public:
     {
         visitor->trace(scriptWrappable->toImpl<TestObject>());
     }
+    static void traceWrappers(WrapperVisitor* visitor, ScriptWrappable* scriptWrappable)
+    {
+        visitor->traceWrappers(scriptWrappable->toImpl<TestObject>());
+    }
     static void customVoidMethodMethodCustom(const v8::FunctionCallbackInfo<v8::Value>&);
     static void customCallPrologueVoidMethodMethodPrologueCustom(const v8::FunctionCallbackInfo<v8::Value>&, TestObject*);
     static void customCallEpilogueVoidMethodMethodEpilogueCustom(const v8::FunctionCallbackInfo<v8::Value>&, TestObject*);
@@ -71,8 +86,19 @@ public:
     static void customGetterImplementedAsLongAttributeAttributeGetterCustom(const v8::FunctionCallbackInfo<v8::Value>&);
     static void customSetterImplementedAsLongAttributeAttributeSetterCustom(v8::Local<v8::Value>, const v8::FunctionCallbackInfo<v8::Value>&);
     static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + 0;
-    static void installConditionallyEnabledProperties(v8::Local<v8::Object>, v8::Isolate*) { }
-    static void preparePrototypeAndInterfaceObject(v8::Local<v8::Context>, const DOMWrapperWorld&, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate);
+    CORE_EXPORT static void preparePrototypeAndInterfaceObject(v8::Local<v8::Context>, const DOMWrapperWorld&, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate);
+
+    static void installFeatureName(ScriptState*, v8::Local<v8::Object> instance);
+    static void installFeatureName(ScriptState*);
+
+    static void installFeatureName1(ScriptState*, v8::Local<v8::Object> instance);
+    static void installFeatureName1(ScriptState*);
+
+    static void installFeatureName2(ScriptState*, v8::Local<v8::Object> instance);
+    static void installFeatureName2(ScriptState*);
+
+    static void installFeatureName3(ScriptState*, v8::Local<v8::Object> instance);
+    static void installFeatureName3(ScriptState*);
 };
 
 template <>

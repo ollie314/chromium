@@ -1,9 +1,9 @@
 if (window.testRunner) {
-    testRunner.setAlwaysAcceptCookies(true);
+    testRunner.setBlockThirdPartyCookies(false);
 }
 
-var ORIGINAL_HOST  = "127.0.0.1";
-var TEST_ROOT = "example.test";
+var ORIGINAL_HOST  = "example.test";
+var TEST_ROOT = "not-example.test";
 var TEST_HOST = "cookies." + TEST_ROOT;
 var TEST_SUB  = "subdomain." + TEST_HOST;
 

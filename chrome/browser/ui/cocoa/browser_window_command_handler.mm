@@ -8,14 +8,12 @@
 #import "base/mac/foundation_util.h"
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/app_controller_mac.h"
-#include "chrome/browser/fullscreen.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
-#include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/user_metrics.h"
@@ -58,25 +56,6 @@ void UpdateToggleStateWithTag(NSInteger tag, id item, NSWindow* window) {
     SetToggleState(prefs->GetBoolean(prefs::kShowFullscreenToolbar), item);
     return;
   }
-
-  // Update the checked/unchecked state of items in the encoding menu.
-  // On Windows, this logic is part of |EncodingMenuModel| in
-  // browser/ui/views/toolbar_view.h.
-  EncodingMenuController encoding_controller;
-  if (!encoding_controller.DoesCommandBelongToEncodingMenu(tag))
-    return;
-
-  Profile* profile = browser->profile();
-  DCHECK(profile);
-  content::WebContents* current_tab =
-      browser->tab_strip_model()->GetActiveWebContents();
-  if (!current_tab)
-    return;
-
-  const std::string encoding = current_tab->GetEncoding();
-
-  SetToggleState(encoding_controller.IsItemChecked(profile, encoding, tag),
-                 item);
 }
 
 NSString* GetTitleForViewsFullscreenMenuItem(Browser* browser) {
@@ -90,7 +69,6 @@ NSString* GetTitleForViewsFullscreenMenuItem(Browser* browser) {
 NSString* GetTitleForFullscreenMenuItem(Browser* browser) {
   NSWindow* ns_window = browser->window()->GetNativeWindow();
   if (BrowserWindowController* controller = [ns_window windowController]) {
-    DCHECK(chrome::mac::SupportsSystemFullscreen());
     return l10n_util::GetNSString([controller isInAppKitFullscreen]
                                       ? IDS_EXIT_FULLSCREEN_MAC
                                       : IDS_ENTER_FULLSCREEN_MAC);
@@ -194,12 +172,7 @@ Browser* FindBrowserForSender(id sender, NSWindow* window) {
       break;
     }
     default:
-      // Special handling for the contents of the Text Encoding submenu. On
-      // Mac OS, instead of enabling/disabling the top-level menu item, we
-      // enable/disable the submenu's contents (per Apple's HIG).
-      EncodingMenuController encoding_controller;
-      if (encoding_controller.DoesCommandBelongToEncodingMenu(tag))
-        enable &= chrome::IsCommandEnabled(browser, IDC_ENCODING_MENU);
+      break;
   }
 
   // If the item is toggleable, find its toggle state and

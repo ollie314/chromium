@@ -18,16 +18,15 @@
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/loader/redirect_to_file_resource_handler.h"
 #include "content/browser/loader/resource_loader_delegate.h"
-#include "content/common/ssl_status_serialization.h"
-#include "content/public/browser/cert_store.h"
 #include "content/public/browser/client_certificate_delegate.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/resource_response.h"
+#include "content/public/common/resource_type.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -40,14 +39,16 @@
 #include "net/base/mock_file_stream.h"
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
-#include "net/base/test_data_directory.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/cert/x509_certificate.h"
+#include "net/nqe/effective_connection_type.h"
+#include "net/nqe/network_quality_estimator.h"
 #include "net/ssl/client_cert_store.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_private_key.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/test_data_directory.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_interceptor.h"
@@ -281,7 +282,9 @@ class ResourceHandlerStub : public ResourceHandler {
         received_eof_(false),
         received_response_completed_(false),
         received_request_redirected_(false),
-        total_bytes_downloaded_(0) {}
+        total_bytes_downloaded_(0),
+        observed_effective_connection_type_(
+            net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {}
 
   // If true, defers the resource load in OnWillStart.
   void set_defer_request_on_will_start(bool defer_request_on_will_start) {
@@ -314,6 +317,10 @@ class ResourceHandlerStub : public ResourceHandler {
   const net::URLRequestStatus& status() const { return status_; }
   int total_bytes_downloaded() const { return total_bytes_downloaded_; }
 
+  net::EffectiveConnectionType observed_effective_connection_type() const {
+    return observed_effective_connection_type_;
+  }
+
   void Resume() {
     controller()->Resume();
   }
@@ -329,6 +336,8 @@ class ResourceHandlerStub : public ResourceHandler {
   bool OnResponseStarted(ResourceResponse* response, bool* defer) override {
     EXPECT_FALSE(response_.get());
     response_ = response;
+    observed_effective_connection_type_ =
+        response->head.effective_connection_type;
     return true;
   }
 
@@ -339,10 +348,6 @@ class ResourceHandlerStub : public ResourceHandler {
       *defer = true;
       deferred_run_loop_.Quit();
     }
-    return true;
-  }
-
-  bool OnBeforeNetworkStart(const GURL& url, bool* defer) override {
     return true;
   }
 
@@ -381,7 +386,6 @@ class ResourceHandlerStub : public ResourceHandler {
   }
 
   void OnResponseCompleted(const net::URLRequestStatus& status,
-                           const std::string& security_info,
                            bool* defer) override {
     EXPECT_FALSE(received_response_completed_);
     if (status.is_success() && expect_reads_)
@@ -429,6 +433,7 @@ class ResourceHandlerStub : public ResourceHandler {
   base::RunLoop deferred_run_loop_;
   base::RunLoop response_completed_run_loop_;
   std::unique_ptr<base::RunLoop> wait_for_progress_run_loop_;
+  net::EffectiveConnectionType observed_effective_connection_type_;
 };
 
 // Test browser client that captures calls to SelectClientCertificates and
@@ -477,23 +482,6 @@ class SelectCertificateBrowserClient : public TestContentBrowserClient {
   DISALLOW_COPY_AND_ASSIGN(SelectCertificateBrowserClient);
 };
 
-class ResourceContextStub : public MockResourceContext {
- public:
-  explicit ResourceContextStub(net::URLRequestContext* test_request_context)
-      : MockResourceContext(test_request_context) {}
-
-  std::unique_ptr<net::ClientCertStore> CreateClientCertStore() override {
-    return std::move(dummy_cert_store_);
-  }
-
-  void SetClientCertStore(std::unique_ptr<net::ClientCertStore> store) {
-    dummy_cert_store_ = std::move(store);
-  }
-
- private:
-  std::unique_ptr<net::ClientCertStore> dummy_cert_store_;
-};
-
 // Wraps a ChunkedUploadDataStream to behave as non-chunked to enable upload
 // progress reporting.
 class NonChunkedUploadDataStream : public net::UploadDataStream {
@@ -506,10 +494,11 @@ class NonChunkedUploadDataStream : public net::UploadDataStream {
   }
 
  private:
-  int InitInternal() override {
+  int InitInternal(const net::NetLogWithSource& net_log) override {
     SetSize(size_);
     stream_.Init(base::Bind(&NonChunkedUploadDataStream::OnInitCompleted,
-                            base::Unretained(this)));
+                            base::Unretained(this)),
+                 net_log);
     return net::OK;
   }
 
@@ -539,18 +528,48 @@ void CreateTemporaryError(
 
 }  // namespace
 
+class TestNetworkQualityEstimator : public net::NetworkQualityEstimator {
+ public:
+  TestNetworkQualityEstimator()
+      : net::NetworkQualityEstimator(nullptr,
+                                     std::map<std::string, std::string>()),
+        type_(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {}
+  ~TestNetworkQualityEstimator() override {}
+
+  net::EffectiveConnectionType GetEffectiveConnectionType() const override {
+    return type_;
+  }
+
+  void set_effective_connection_type(net::EffectiveConnectionType type) {
+    type_ = type;
+  }
+
+ private:
+  net::EffectiveConnectionType type_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestNetworkQualityEstimator);
+};
+
 class ResourceLoaderTest : public testing::Test,
                            public ResourceLoaderDelegate {
  protected:
   ResourceLoaderTest()
-    : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-      resource_context_(&test_url_request_context_),
-      raw_ptr_resource_handler_(NULL),
-      raw_ptr_to_request_(NULL) {
+      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
+        test_url_request_context_(true),
+        resource_context_(&test_url_request_context_),
+        raw_ptr_resource_handler_(NULL),
+        raw_ptr_to_request_(NULL) {
     test_url_request_context_.set_job_factory(&job_factory_);
+    test_url_request_context_.set_network_quality_estimator(
+        &network_quality_estimator_);
+    test_url_request_context_.Init();
   }
 
   GURL test_url() const { return net::URLRequestTestJob::test_url_1(); }
+
+  TestNetworkQualityEstimator* network_quality_estimator() {
+    return &network_quality_estimator_;
+  }
 
   std::string test_data() const {
     return net::URLRequestTestJob::test_data_1();
@@ -568,14 +587,21 @@ class ResourceLoaderTest : public testing::Test,
   }
 
   // Replaces loader_ with a new one for |request|.
-  void SetUpResourceLoader(std::unique_ptr<net::URLRequest> request) {
+  void SetUpResourceLoader(std::unique_ptr<net::URLRequest> request,
+                           ResourceType resource_type,
+                           bool belongs_to_main_frame) {
     raw_ptr_to_request_ = request.get();
+
+    // A request marked as a main frame request must also belong to a main
+    // frame.
+    ASSERT_TRUE((resource_type != RESOURCE_TYPE_MAIN_FRAME) ||
+                belongs_to_main_frame);
 
     RenderFrameHost* rfh = web_contents_->GetMainFrame();
     ResourceRequestInfo::AllocateForTesting(
-        request.get(), RESOURCE_TYPE_MAIN_FRAME, &resource_context_,
+        request.get(), resource_type, &resource_context_,
         rfh->GetProcess()->GetID(), rfh->GetRenderViewHost()->GetRoutingID(),
-        rfh->GetRoutingID(), true /* is_main_frame */,
+        rfh->GetRoutingID(), belongs_to_main_frame,
         false /* parent_is_main_frame */, true /* allow_download */,
         false /* is_async */, false /* is_using_lofi_ */);
     std::unique_ptr<ResourceHandlerStub> resource_handler(
@@ -584,7 +610,7 @@ class ResourceLoaderTest : public testing::Test,
     loader_.reset(new ResourceLoader(
         std::move(request),
         WrapResourceHandler(std::move(resource_handler), raw_ptr_to_request_),
-        CertStore::GetInstance(), this));
+        this));
   }
 
   void SetUp() override {
@@ -599,7 +625,7 @@ class ResourceLoaderTest : public testing::Test,
     std::unique_ptr<net::URLRequest> request(
         resource_context_.GetRequestContext()->CreateRequest(
             test_url(), net::DEFAULT_PRIORITY, nullptr /* delegate */));
-    SetUpResourceLoader(std::move(request));
+    SetUpResourceLoader(std::move(request), RESOURCE_TYPE_MAIN_FRAME, true);
   }
 
   void TearDown() override {
@@ -608,6 +634,10 @@ class ResourceLoaderTest : public testing::Test,
     // tasks complete.
     web_contents_.reset();
     base::RunLoop().RunUntilIdle();
+  }
+
+  void SetClientCertStore(std::unique_ptr<net::ClientCertStore> store) {
+    dummy_cert_store_ = std::move(store);
   }
 
   // ResourceLoaderDelegate:
@@ -622,18 +652,25 @@ class ResourceLoaderTest : public testing::Test,
   }
   void DidStartRequest(ResourceLoader* loader) override {}
   void DidReceiveRedirect(ResourceLoader* loader,
-                          const GURL& new_url) override {}
+                          const GURL& new_url,
+                          ResourceResponse* response) override {}
   void DidReceiveResponse(ResourceLoader* loader) override {}
   void DidFinishLoading(ResourceLoader* loader) override {}
+  std::unique_ptr<net::ClientCertStore> CreateClientCertStore(
+      ResourceLoader* loader) override {
+    return std::move(dummy_cert_store_);
+  }
 
   TestBrowserThreadBundle thread_bundle_;
   RenderViewHostTestEnabler rvh_test_enabler_;
 
   net::URLRequestJobFactoryImpl job_factory_;
+  TestNetworkQualityEstimator network_quality_estimator_;
   net::TestURLRequestContext test_url_request_context_;
-  ResourceContextStub resource_context_;
+  MockResourceContext resource_context_;
   std::unique_ptr<TestBrowserContext> browser_context_;
   std::unique_ptr<TestWebContents> web_contents_;
+  std::unique_ptr<net::ClientCertStore> dummy_cert_store_;
 
   // The ResourceLoader owns the URLRequest and the ResourceHandler.
   ResourceHandlerStub* raw_ptr_resource_handler_;
@@ -690,11 +727,10 @@ TEST_F(ClientCertResourceLoaderTest, WithStoreLookup) {
   // Set up the test client cert store.
   int store_request_count;
   std::vector<std::string> store_requested_authorities;
-  net::CertificateList dummy_certs(1, scoped_refptr<net::X509Certificate>(
-      new net::X509Certificate("test", "test", base::Time(), base::Time())));
+  net::CertificateList dummy_certs(1, GetTestCert());
   std::unique_ptr<ClientCertStoreStub> test_store(new ClientCertStoreStub(
       dummy_certs, &store_request_count, &store_requested_authorities));
-  resource_context_.SetClientCertStore(std::move(test_store));
+  SetClientCertStore(std::move(test_store));
 
   // Plug in test content browser client.
   SelectCertificateBrowserClient test_client;
@@ -804,7 +840,7 @@ TEST_F(ClientCertResourceLoaderTest, StoreAsyncCancel) {
   LoaderDestroyingCertStore* test_store =
       new LoaderDestroyingCertStore(&loader_,
                                     loader_destroyed_run_loop.QuitClosure());
-  resource_context_.SetClientCertStore(base::WrapUnique(test_store));
+  SetClientCertStore(base::WrapUnique(test_store));
 
   loader_->StartRequest();
   loader_destroyed_run_loop.Run();
@@ -897,10 +933,8 @@ class ResourceLoaderRedirectToFileTest : public ResourceLoaderTest {
                                          base::ThreadTaskRunnerHandle::Get()));
     file_stream_ = file_stream.get();
     deletable_file_ = ShareableFileReference::GetOrCreate(
-        temp_path_,
-        ShareableFileReference::DELETE_ON_FINAL_RELEASE,
-        BrowserThread::GetMessageLoopProxyForThread(
-            BrowserThread::FILE).get());
+        temp_path_, ShareableFileReference::DELETE_ON_FINAL_RELEASE,
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE).get());
 
     // Inject them into the handler.
     std::unique_ptr<RedirectToFileResourceHandler> handler(
@@ -1074,82 +1108,61 @@ TEST_F(ResourceLoaderRedirectToFileTest, DownstreamDeferStart) {
   EXPECT_EQ(test_data(), contents);
 }
 
-// Test that an HTTPS resource has the expected security info attached
-// to it.
-TEST_F(HTTPSSecurityInfoResourceLoaderTest, SecurityInfoOnHTTPSResource) {
-  // Start the request and wait for it to finish.
-  std::unique_ptr<net::URLRequest> request(
-      resource_context_.GetRequestContext()->CreateRequest(
-          test_https_url(), net::DEFAULT_PRIORITY, nullptr /* delegate */));
-  SetUpResourceLoader(std::move(request));
+class EffectiveConnectionTypeResourceLoaderTest : public ResourceLoaderTest {
+ public:
+  void VerifyEffectiveConnectionType(
+      ResourceType resource_type,
+      bool belongs_to_main_frame,
+      net::EffectiveConnectionType set_type,
+      net::EffectiveConnectionType expected_type) {
+    network_quality_estimator()->set_effective_connection_type(set_type);
 
-  // Send the request and wait until it completes.
-  loader_->StartRequest();
-  raw_ptr_resource_handler_->WaitForResponseComplete();
-  ASSERT_EQ(net::URLRequestStatus::SUCCESS,
-            raw_ptr_to_request_->status().status());
+    // Start the request and wait for it to finish.
+    std::unique_ptr<net::URLRequest> request(
+        resource_context_.GetRequestContext()->CreateRequest(
+            test_url(), net::DEFAULT_PRIORITY, nullptr /* delegate */));
+    SetUpResourceLoader(std::move(request), resource_type,
+                        belongs_to_main_frame);
 
-  ResourceResponse* response = raw_ptr_resource_handler_->response();
-  ASSERT_TRUE(response);
+    // Send the request and wait until it completes.
+    loader_->StartRequest();
+    raw_ptr_resource_handler_->WaitForResponseComplete();
+    ASSERT_EQ(net::URLRequestStatus::SUCCESS,
+              raw_ptr_to_request_->status().status());
 
-  // Deserialize the security info from the response and check that it
-  // is as expected.
-  SSLStatus deserialized;
-  ASSERT_TRUE(
-      DeserializeSecurityInfo(response->head.security_info, &deserialized));
+    EXPECT_EQ(expected_type,
+              raw_ptr_resource_handler_->observed_effective_connection_type());
+  }
+};
 
-  // Expect a BROKEN security style because the cert status has errors.
-  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATION_BROKEN,
-            deserialized.security_style);
-  scoped_refptr<net::X509Certificate> cert;
-  ASSERT_TRUE(
-      CertStore::GetInstance()->RetrieveCert(deserialized.cert_id, &cert));
-  EXPECT_TRUE(cert->Equals(GetTestCert().get()));
-
-  EXPECT_EQ(kTestCertError, deserialized.cert_status);
-  EXPECT_EQ(kTestConnectionStatus, deserialized.connection_status);
-  EXPECT_EQ(kTestSecurityBits, deserialized.security_bits);
+// Tests that the effective connection type is set on main frame requests.
+TEST_F(EffectiveConnectionTypeResourceLoaderTest, Slow2G) {
+  VerifyEffectiveConnectionType(RESOURCE_TYPE_MAIN_FRAME, true,
+                                net::EFFECTIVE_CONNECTION_TYPE_SLOW_2G,
+                                net::EFFECTIVE_CONNECTION_TYPE_SLOW_2G);
 }
 
-// Test that an HTTPS redirect response has the expected security info
-// attached to it.
-TEST_F(HTTPSSecurityInfoResourceLoaderTest,
-       SecurityInfoOnHTTPSRedirectResource) {
-  // Start the request and wait for it to finish.
-  std::unique_ptr<net::URLRequest> request(
-      resource_context_.GetRequestContext()->CreateRequest(
-          test_https_redirect_url(), net::DEFAULT_PRIORITY,
-          nullptr /* delegate */));
-  SetUpResourceLoader(std::move(request));
+// Tests that the effective connection type is set on main frame requests.
+TEST_F(EffectiveConnectionTypeResourceLoaderTest, 3G) {
+  VerifyEffectiveConnectionType(RESOURCE_TYPE_MAIN_FRAME, true,
+                                net::EFFECTIVE_CONNECTION_TYPE_3G,
+                                net::EFFECTIVE_CONNECTION_TYPE_3G);
+}
 
-  // Send the request and wait until it completes.
-  loader_->StartRequest();
-  raw_ptr_resource_handler_->WaitForResponseComplete();
-  ASSERT_EQ(net::URLRequestStatus::SUCCESS,
-            raw_ptr_to_request_->status().status());
-  ASSERT_TRUE(raw_ptr_resource_handler_->received_request_redirected());
+// Tests that the effective connection type is not set on requests that belong
+// to main frame.
+TEST_F(EffectiveConnectionTypeResourceLoaderTest, BelongsToMainFrame) {
+  VerifyEffectiveConnectionType(RESOURCE_TYPE_OBJECT, true,
+                                net::EFFECTIVE_CONNECTION_TYPE_3G,
+                                net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN);
+}
 
-  ResourceResponse* redirect_response =
-      raw_ptr_resource_handler_->redirect_response();
-  ASSERT_TRUE(redirect_response);
-
-  // Deserialize the security info from the redirect response and check
-  // that it is as expected.
-  SSLStatus deserialized;
-  ASSERT_TRUE(DeserializeSecurityInfo(redirect_response->head.security_info,
-                                      &deserialized));
-
-  // Expect a BROKEN security style because the cert status has errors.
-  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATION_BROKEN,
-            deserialized.security_style);
-  scoped_refptr<net::X509Certificate> cert;
-  ASSERT_TRUE(
-      CertStore::GetInstance()->RetrieveCert(deserialized.cert_id, &cert));
-  EXPECT_TRUE(cert->Equals(GetTestCert().get()));
-
-  EXPECT_EQ(kTestCertError, deserialized.cert_status);
-  EXPECT_EQ(kTestConnectionStatus, deserialized.connection_status);
-  EXPECT_EQ(kTestSecurityBits, deserialized.security_bits);
+// Tests that the effective connection type is not set on non-main frame
+// requests.
+TEST_F(EffectiveConnectionTypeResourceLoaderTest, DoesNotBelongToMainFrame) {
+  VerifyEffectiveConnectionType(RESOURCE_TYPE_OBJECT, false,
+                                net::EFFECTIVE_CONNECTION_TYPE_3G,
+                                net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN);
 }
 
 }  // namespace content

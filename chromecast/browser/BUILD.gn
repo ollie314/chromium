@@ -30,6 +30,8 @@ source_set("browser") {
     "cast_download_manager_delegate.h",
     "cast_http_user_agent_settings.cc",
     "cast_http_user_agent_settings.h",
+    "cast_media_blocker.cc",
+    "cast_media_blocker.h",
     "cast_net_log.cc",
     "cast_net_log.h",
     "cast_network_delegate.cc",
@@ -40,8 +42,8 @@ source_set("browser") {
     "cast_quota_permission_context.h",
     "cast_resource_dispatcher_host_delegate.cc",
     "cast_resource_dispatcher_host_delegate.h",
-    "devtools/cast_dev_tools_delegate.cc",
-    "devtools/cast_dev_tools_delegate.h",
+    "devtools/cast_devtools_delegate.cc",
+    "devtools/cast_devtools_delegate.h",
     "devtools/remote_debugging_server.cc",
     "devtools/remote_debugging_server.h",
     "geolocation/cast_access_token_store.cc",
@@ -84,12 +86,12 @@ source_set("browser") {
     "//chromecast/base:cast_sys_info",
     "//chromecast/base:cast_version",
     "//chromecast/common",
+    "//chromecast/common/media",
     "//chromecast/media",
     "//chromecast/net",
     "//chromecast/service",
     "//components/crash/content/app",
     "//components/crash/content/browser",
-    "//components/devtools_http_handler:devtools_http_handler",
     "//components/metrics",
     "//components/metrics:gpu",
     "//components/metrics:net",
@@ -104,12 +106,14 @@ source_set("browser") {
     "//content/public/browser",
     "//content/public/common",
     "//content/public/utility",
+    "//device/geolocation",
     "//gpu",
     "//ipc",
     "//media",
     "//net",
     "//ui/base",
     "//ui/compositor",
+    "//ui/display",
     "//ui/gl",
   ]
 
@@ -128,10 +132,7 @@ source_set("browser") {
       "//ui/aura",
     ]
   } else if (is_android) {
-    deps += [
-      ":jni_headers",
-      "//components/external_video_surface",
-    ]
+    deps += [ ":jni_headers" ]
   }
 
   if (use_ozone) {
@@ -145,13 +146,18 @@ source_set("test_support") {
   sources = [
     "test/chromecast_browser_test.cc",
     "test/chromecast_browser_test.h",
+    "test/chromecast_browser_test_helper.h",
     "test/chromecast_browser_test_runner.cc",
   ]
+
+  if (chromecast_branding == "public") {
+    sources += [ "test/chromecast_browser_test_helper_default.cc" ]
+  }
 
   public_deps = [
     ":browser",
     "//chromecast:cast_shell_common",
-    "//content/test:browsertest_base",
+    "//content/test:test_support",
   ]
 
   deps = [
@@ -160,7 +166,6 @@ source_set("test_support") {
     "//chromecast/base",
     "//content/public/browser",
     "//content/public/common",
-    "//content/test:test_support",
     "//testing/gtest",
   ]
 }
@@ -172,6 +177,7 @@ config("browser_test_config") {
 test("cast_shell_browser_test") {
   sources = [
     "test/chromecast_shell_browser_test.cc",
+    "test/chromecast_shell_media_blocking_browser_test.cc",
   ]
 
   configs += [ ":browser_test_config" ]
@@ -180,7 +186,6 @@ test("cast_shell_browser_test") {
     ":test_support",
     "//base",
     "//chromecast:chromecast_features",
-    "//content/test:browsertest_base",
     "//content/test:test_support",
     "//media/base:test_support",
     "//testing/gtest",
@@ -190,6 +195,7 @@ test("cast_shell_browser_test") {
   # TODO(slan): Find a better way to do this.
   if (chromecast_branding != "public") {
     deps += [ "//chromecast/internal:cast_shell_internal" ]
+    deps += [ "//chromecast/internal/shell:cast_shell_browser_test_helper_internal" ]
   }
 
   if (chromecast_branding == "public") {

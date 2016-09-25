@@ -51,14 +51,14 @@ Pattern::RepeatMode CanvasPattern::parseRepetitionType(const String& type,
 }
 
 CanvasPattern::CanvasPattern(PassRefPtr<Image> image, Pattern::RepeatMode repeat, bool originClean)
-    : m_pattern(Pattern::createImagePattern(image, repeat))
+    : m_pattern(Pattern::createImagePattern(std::move(image), repeat))
     , m_originClean(originClean)
 {
 }
 
 void CanvasPattern::setTransform(SVGMatrixTearOff* transform)
 {
-    getPattern()->setPatternSpaceTransform(transform ? transform->value() : AffineTransform(1, 0, 0, 1, 0, 0));
+    m_patternTransform = transform ? transform->value() : AffineTransform(1, 0, 0, 1, 0, 0);
 }
 
 } // namespace blink

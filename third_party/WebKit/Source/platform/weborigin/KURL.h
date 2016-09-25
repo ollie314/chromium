@@ -32,8 +32,8 @@
 #include "wtf/Allocator.h"
 #include "wtf/Forward.h"
 #include "wtf/HashTableDeletedValueType.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace WTF {
 class TextEncoding;
@@ -124,6 +124,7 @@ public:
     String user() const;
     String pass() const;
     String path() const;
+    // This method handles "parameters" separated by a semicolon.
     String lastPathComponent() const;
     String query() const;
     String fragmentIdentifier() const;
@@ -177,6 +178,7 @@ public:
     unsigned pathAfterLastSlash() const;
 
     operator const String&() const { return getString(); }
+    operator StringView() const { return StringView(getString()); }
 
     const url::Parsed& parsed() const { return m_parsed; }
 
@@ -202,7 +204,7 @@ private:
     bool m_protocolIsInHTTPFamily;
     url::Parsed m_parsed;
     String m_string;
-    OwnPtr<KURL> m_innerURL;
+    std::unique_ptr<KURL> m_innerURL;
 };
 
 PLATFORM_EXPORT bool operator==(const KURL&, const KURL&);
@@ -228,8 +230,13 @@ PLATFORM_EXPORT bool protocolIsJavaScript(const String& url);
 PLATFORM_EXPORT bool isValidProtocol(const String&);
 
 // Unescapes the given string using URL escaping rules, given an optional
-// encoding (defaulting to UTF-8 otherwise). DANGER: If the URL has "%00"
-// in it, the resulting string will have embedded null characters!
+// encoding (defaulting to UTF-8 otherwise).
+//
+// DANGER: If the URL has "%00" in it, the resulting string will have embedded
+// null characters!
+//
+// This function is also used to decode javascript: URLs and as a general
+// purpose unescaping function.
 PLATFORM_EXPORT String decodeURLEscapeSequences(const String&);
 PLATFORM_EXPORT String decodeURLEscapeSequences(const String&, const WTF::TextEncoding&);
 

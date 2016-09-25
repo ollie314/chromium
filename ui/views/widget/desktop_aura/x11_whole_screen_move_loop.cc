@@ -13,12 +13,14 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/base/x/x11_window_event_manager.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
@@ -89,7 +91,7 @@ uint32_t X11WholeScreenMoveLoop::DispatchEvent(const ui::PlatformEvent& event) {
         // Post a task to dispatch mouse movement event when control returns to
         // the message loop. This allows smoother dragging since the events are
         // dispatched without waiting for the drag widget updates.
-        base::MessageLoopForUI::current()->PostTask(
+        base::MessageLoopForUI::current()->task_runner()->PostTask(
             FROM_HERE,
             base::Bind(&X11WholeScreenMoveLoop::DispatchMouseMovement,
                        weak_factory_.GetWeakPtr()));
@@ -136,7 +138,7 @@ bool X11WholeScreenMoveLoop::RunMoveLoop(aura::Window* source,
   // restored when the move loop finishes.
   initial_cursor_ = source->GetHost()->last_cursor();
 
-  grab_input_window_ = CreateDragInputWindow(gfx::GetXDisplay());
+  CreateDragInputWindow(gfx::GetXDisplay());
 
   // Only grab mouse capture of |grab_input_window_| if |source| does not have
   // capture.
@@ -227,6 +229,7 @@ void X11WholeScreenMoveLoop::EndMoveLoop() {
   // Restore the previous dispatcher.
   nested_dispatcher_.reset();
   delegate_->OnMoveLoopEnded();
+  grab_input_window_events_.reset();
   XDestroyWindow(display, grab_input_window_);
   grab_input_window_ = None;
 
@@ -259,21 +262,22 @@ void X11WholeScreenMoveLoop::GrabEscKey() {
   }
 }
 
-Window X11WholeScreenMoveLoop::CreateDragInputWindow(XDisplay* display) {
+void X11WholeScreenMoveLoop::CreateDragInputWindow(XDisplay* display) {
   unsigned long attribute_mask = CWEventMask | CWOverrideRedirect;
   XSetWindowAttributes swa;
   memset(&swa, 0, sizeof(swa));
-  swa.event_mask = ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
-                   KeyPressMask | KeyReleaseMask | StructureNotifyMask;
   swa.override_redirect = True;
-  Window window = XCreateWindow(display,
-                                DefaultRootWindow(display),
-                                -100, -100, 10, 10,
-                                0, CopyFromParent, InputOnly, CopyFromParent,
-                                attribute_mask, &swa);
-  XMapRaised(display, window);
-  ui::X11EventSource::GetInstance()->BlockUntilWindowMapped(window);
-  return window;
+  grab_input_window_ = XCreateWindow(display, DefaultRootWindow(display), -100,
+                                     -100, 10, 10, 0, CopyFromParent, InputOnly,
+                                     CopyFromParent, attribute_mask, &swa);
+  uint32_t event_mask = ButtonPressMask | ButtonReleaseMask |
+                        PointerMotionMask | KeyPressMask | KeyReleaseMask |
+                        StructureNotifyMask;
+  grab_input_window_events_.reset(
+      new ui::XScopedEventSelector(grab_input_window_, event_mask));
+
+  XMapRaised(display, grab_input_window_);
+  ui::X11EventSource::GetInstance()->BlockUntilWindowMapped(grab_input_window_);
 }
 
 }  // namespace views

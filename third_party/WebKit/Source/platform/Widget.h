@@ -59,8 +59,8 @@ public:
     IntSize size() const { return frameRect().size(); }
     IntPoint location() const { return frameRect().location(); }
 
-    virtual void setFrameRect(const IntRect& frame) { m_frame = frame; }
-    const IntRect& frameRect() const { return m_frame; }
+    virtual void setFrameRect(const IntRect& frameRect) { m_frameRect = frameRect; }
+    const IntRect& frameRect() const { return m_frameRect; }
     IntRect boundsRect() const { return IntRect(0, 0, width(),  height()); }
 
     void resize(int w, int h) { setFrameRect(IntRect(x(), y(), w, h)); }
@@ -92,10 +92,6 @@ public:
 
     virtual void handleEvent(Event*) { }
 
-    // It is important for cross-platform code to realize that Mac has flipped coordinates. Therefore any code
-    // that tries to convert the location of a rect using the point-based convertFromRootFrame will end
-    // up with an inaccurate rect. Always make sure to use the rect-based convertFromRootFrame method
-    // when converting window rects.
     IntRect convertToRootFrame(const IntRect&) const;
     IntRect convertFromRootFrame(const IntRect&) const;
 
@@ -124,7 +120,7 @@ public:
 
 private:
     Member<Widget> m_parent;
-    IntRect m_frame;
+    IntRect m_frameRect;
     bool m_selfVisible;
     bool m_parentVisible;
 };

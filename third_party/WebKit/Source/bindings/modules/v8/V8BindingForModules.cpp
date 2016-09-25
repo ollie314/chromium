@@ -34,24 +34,29 @@
 #include "bindings/core/v8/V8DOMStringList.h"
 #include "bindings/core/v8/V8File.h"
 #include "bindings/core/v8/V8Uint8Array.h"
-#include "bindings/core/v8/WorkerOrWorkletScriptController.h"
 #include "bindings/modules/v8/ToV8ForModules.h"
+#include "bindings/modules/v8/V8DedicatedWorkerGlobalScopePartial.h"
 #include "bindings/modules/v8/V8IDBCursor.h"
 #include "bindings/modules/v8/V8IDBCursorWithValue.h"
 #include "bindings/modules/v8/V8IDBDatabase.h"
 #include "bindings/modules/v8/V8IDBIndex.h"
 #include "bindings/modules/v8/V8IDBKeyRange.h"
 #include "bindings/modules/v8/V8IDBObjectStore.h"
-#include "bindings/modules/v8/V8WorkletGlobalScope.h"
+#include "bindings/modules/v8/V8InstallEvent.h"
+#include "bindings/modules/v8/V8NavigatorPartial.h"
+#include "bindings/modules/v8/V8ServiceWorkerGlobalScope.h"
+#include "bindings/modules/v8/V8SharedWorkerGlobalScopePartial.h"
+#include "bindings/modules/v8/V8WindowPartial.h"
+#include "bindings/modules/v8/V8WorkerNavigatorPartial.h"
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/DOMArrayBufferView.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/origin_trials/OriginTrialContext.h"
 #include "modules/indexeddb/IDBKey.h"
 #include "modules/indexeddb/IDBKeyPath.h"
 #include "modules/indexeddb/IDBKeyRange.h"
 #include "modules/indexeddb/IDBTracing.h"
 #include "modules/indexeddb/IDBValue.h"
-#include "modules/worklet/WorkletGlobalScope.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/SharedBuffer.h"
 #include "wtf/MathExtras.h"
@@ -209,9 +214,12 @@ static IDBKey* createIDBKeyFromValue(v8::Isolate* isolate, v8::Local<v8::Value> 
         IDBKey::KeyArray subkeys;
         uint32_t length = array->Length();
         v8::TryCatch block(isolate);
+        v8::Local<v8::Context> context = isolate->GetCurrentContext();
         for (uint32_t i = 0; i < length; ++i) {
+            if (!v8CallBoolean(array->HasOwnProperty(context, i)))
+                return nullptr;
             v8::Local<v8::Value> item;
-            if (!v8Call(array->Get(isolate->GetCurrentContext(), i), item, block)) {
+            if (!v8Call(array->Get(context, i), item, block)) {
                 exceptionState.rethrowV8Exception(block.Exception());
                 return nullptr;
             }
@@ -271,20 +279,62 @@ static IDBKey* createIDBKeyFromValueAndKeyPath(v8::Isolate* isolate, v8::Local<v
     v8::Local<v8::Context> context = isolate->GetCurrentContext();
     v8::TryCatch block(isolate);
     for (size_t i = 0; i < keyPathElements.size(); ++i) {
-        if (v8Value->IsString() && keyPathElements[i] == "length") {
+        const String& element = keyPathElements[i];
+
+        // Special cases from https://w3c.github.io/IndexedDB/#key-path-construct
+        // These access special or non-own properties directly, to avoid side
+        // effects.
+
+        if (v8Value->IsString() && element == "length") {
             int32_t length = v8Value.As<v8::String>()->Length();
             v8Value = v8::Number::New(isolate, length);
-        } else if (!v8Value->IsObject()) {
+            continue;
+        }
+
+        if (v8Value->IsArray() && element == "length") {
+            int32_t length = v8Value.As<v8::Array>()->Length();
+            v8Value = v8::Number::New(isolate, length);
+            continue;
+        }
+
+        if (!v8Value->IsObject())
             return nullptr;
-        } else {
-            v8::Local<v8::Object> object = v8Value.As<v8::Object>();
-            v8::Local<v8::String> key = v8String(isolate, keyPathElements[i]);
-            if (!v8CallBoolean(object->Has(context, key)))
-                return nullptr;
-            if (!v8Call(object->Get(context, key), v8Value, block)) {
-                exceptionState.rethrowV8Exception(block.Exception());
-                return nullptr;
+        v8::Local<v8::Object> object = v8Value.As<v8::Object>();
+
+        if (V8Blob::hasInstance(object, isolate)) {
+            if (element == "size") {
+                v8Value = v8::Number::New(isolate, V8Blob::toImpl(object)->size());
+                continue;
             }
+            if (element == "type") {
+                v8Value = v8String(isolate, V8Blob::toImpl(object)->type());
+                continue;
+            }
+            // Fall through.
+        }
+
+        if (V8File::hasInstance(object, isolate)) {
+            if (element == "name") {
+                v8Value = v8String(isolate, V8File::toImpl(object)->name());
+                continue;
+            }
+            if (element == "lastModified") {
+                v8Value = v8::Number::New(isolate, V8File::toImpl(object)->lastModified());
+                continue;
+            }
+            if (element == "lastModifiedDate") {
+                v8Value = v8::Date::New(isolate, V8File::toImpl(object)->lastModifiedDate());
+                continue;
+            }
+            // Fall through.
+        }
+
+        v8::Local<v8::String> key = v8String(isolate, element);
+        if (!v8CallBoolean(object->HasOwnProperty(context, key)))
+            return nullptr;
+        if (!v8Call(object->Get(context, key), v8Value, block)) {
+            exceptionState.rethrowV8Exception(block.Exception());
+            return nullptr;
         }
     }
     return createIDBKeyFromValue(isolate, v8Value, exceptionState, allowExperimentalTypes);
@@ -319,7 +369,7 @@ static v8::Local<v8::Value> deserializeIDBValueData(v8::Isolate* isolate, const 
         return v8::Null(isolate);
 
     const SharedBuffer* valueData = value->data();
-    RefPtr<SerializedScriptValue> serializedValue = SerializedScriptValueFactory::instance().createFromWireBytes(valueData->data(), valueData->size());
+    RefPtr<SerializedScriptValue> serializedValue = SerializedScriptValue::create(valueData->data(), valueData->size());
     return serializedValue->deserialize(isolate, nullptr, value->blobInfo());
 }
 
@@ -520,16 +570,78 @@ void assertPrimaryKeyValidOrInjectable(ScriptState* scriptState, const IDBValue*
 }
 #endif
 
-ExecutionContext* toExecutionContextForModules(v8::Local<v8::Context> context)
-{
-    if (context.IsEmpty())
-        return nullptr;
-    v8::Local<v8::Object> global = context->Global();
-    v8::Local<v8::Object> workletWrapper = V8WorkletGlobalScope::findInstanceInPrototypeChain(global, context->GetIsolate());
-    if (!workletWrapper.IsEmpty())
-        return V8WorkletGlobalScope::toImpl(workletWrapper);
-    // FIXME: Is this line of code reachable?
-    return nullptr;
+namespace {
+InstallOriginTrialsFunction s_originalInstallOriginTrialsFunction = nullptr;
 }
 
+void installOriginTrialsForModules(ScriptState* scriptState)
+{
+    // TODO(iclelland): Generate all of this logic at compile-time, based on the
+    // configuration of origin trial enabled attibutes and interfaces in IDL
+    // files. (crbug.com/615060)
+    (*s_originalInstallOriginTrialsFunction)(scriptState);
+
+    v8::Local<v8::Context> context = scriptState->context();
+    ExecutionContext* executionContext = toExecutionContext(context);
+    OriginTrialContext* originTrialContext = OriginTrialContext::from(executionContext, OriginTrialContext::DontCreateIfNotExists);
+    if (!originTrialContext)
+        return;
+
+    ScriptState::Scope scope(scriptState);
+    v8::Local<v8::Object> global = context->Global();
+
+    if (!originTrialContext->featureBindingsInstalled("DurableStorage") && (RuntimeEnabledFeatures::durableStorageEnabled() || originTrialContext->isFeatureEnabled("DurableStorage"))) {
+        if (executionContext->isDocument()) {
+            V8WindowPartial::installDurableStorage(scriptState, global);
+            V8NavigatorPartial::installDurableStorage(scriptState);
+        } else if (executionContext->isSharedWorkerGlobalScope()) {
+            V8SharedWorkerGlobalScopePartial::installDurableStorage(scriptState, global);
+            V8WorkerNavigatorPartial::installDurableStorage(scriptState);
+        } else if (executionContext->isDedicatedWorkerGlobalScope()) {
+            V8DedicatedWorkerGlobalScopePartial::installDurableStorage(scriptState, global);
+            V8WorkerNavigatorPartial::installDurableStorage(scriptState);
+        } else if (executionContext->isServiceWorkerGlobalScope()) {
+            V8ServiceWorkerGlobalScope::installDurableStorage(scriptState, global);
+            V8WorkerNavigatorPartial::installDurableStorage(scriptState);
+        }
+    }
+
+    if (!originTrialContext->featureBindingsInstalled("WebBluetooth") && (RuntimeEnabledFeatures::webBluetoothEnabled() || originTrialContext->isFeatureEnabled("WebBluetooth"))) {
+        if (executionContext->isDocument()) {
+            // For global interfaces e.g. BluetoothUUID.
+            V8WindowPartial::installWebBluetooth(scriptState, global);
+            // For navigator interfaces e.g. navigator.bluetooth.
+            V8NavigatorPartial::installWebBluetooth(scriptState);
+        }
+    }
+
+    if (!originTrialContext->featureBindingsInstalled("WebShare") && (RuntimeEnabledFeatures::webShareEnabled() || originTrialContext->isFeatureEnabled("WebShare"))) {
+        if (executionContext->isDocument()) {
+            // For navigator interfaces e.g. navigator.share.
+            V8NavigatorPartial::installWebShare(scriptState);
+        }
+    }
+
+    if (!originTrialContext->featureBindingsInstalled("WebUSB") && (RuntimeEnabledFeatures::webUSBEnabled() || originTrialContext->isFeatureEnabled("WebUSB"))) {
+        if (executionContext->isDocument()) {
+            // For global interfaces e.g. USBInterface.
+            V8WindowPartial::installWebUSB(scriptState, global);
+            // For navigator interfaces e.g. navigator.usb.
+            V8NavigatorPartial::installWebUSB(scriptState);
+        }
+    }
+
+
+    if (!originTrialContext->featureBindingsInstalled("ForeignFetch") && (RuntimeEnabledFeatures::foreignFetchEnabled() || originTrialContext->isFeatureEnabled("ForeignFetch"))) {
+        if (executionContext->isServiceWorkerGlobalScope()) {
+            V8ServiceWorkerGlobalScope::installForeignFetch(scriptState, global);
+            V8InstallEvent::installForeignFetch(scriptState);
+        }
+    }
+}
+
+void registerInstallOriginTrialsForModules()
+{
+    s_originalInstallOriginTrialsFunction = setInstallOriginTrialsFunction(&installOriginTrialsForModules);
+}
 } // namespace blink

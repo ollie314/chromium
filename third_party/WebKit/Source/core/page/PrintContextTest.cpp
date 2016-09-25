@@ -19,6 +19,7 @@
 #include "platform/text/TextStream.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include <memory>
 
 namespace blink {
 
@@ -98,7 +99,7 @@ protected:
         context.setPrinting(true);
         document().view()->paintContents(context, GlobalPaintPrinting, pageRect);
         {
-            DrawingRecorder recorder(context, *document().layoutView(), DisplayItem::PrintedContentDestinationLocations, pageRect);
+            DrawingRecorder recorder(context, *document().layoutView(), DisplayItem::kPrintedContentDestinationLocations, pageRect);
             printContext().outputLinkedDestinations(context, pageRect);
         }
         pictureBuilder.endRecording()->playback(&canvas);
@@ -128,7 +129,7 @@ protected:
     }
 
 private:
-    OwnPtr<DummyPageHolder> m_pageHolder;
+    std::unique_ptr<DummyPageHolder> m_pageHolder;
     Persistent<MockPrintContext> m_printContext;
 };
 

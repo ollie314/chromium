@@ -41,12 +41,12 @@
 #include "core/html/shadow/ShadowElementNames.h"
 #include "core/html/shadow/SpinButtonElement.h"
 #include "core/html/shadow/TextControlInnerElements.h"
+#include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutThemeMobile.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/style/ComputedStyle.h"
 #include "platform/FileMetadata.h"
-#include "platform/FloatConversion.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/Theme.h"
 #include "platform/fonts/FontSelector.h"
@@ -180,7 +180,11 @@ void LayoutTheme::adjustStyle(ComputedStyle& style, Element* e)
                 if (style.setFontDescription(controlFont))
                     style.font().update(nullptr);
             }
+            break;
         }
+        case ProgressBarPart:
+            adjustProgressBarBounds(style);
+            break;
         default:
             break;
         }
@@ -210,6 +214,12 @@ void LayoutTheme::adjustStyle(ComputedStyle& style, Element* e)
         return adjustMenuListStyle(style, e);
     case MenulistButtonPart:
         return adjustMenuListButtonStyle(style, e);
+    case SliderHorizontalPart:
+    case SliderVerticalPart:
+    case MediaFullscreenVolumeSliderPart:
+    case MediaSliderPart:
+    case MediaVolumeSliderPart:
+        return adjustSliderContainerStyle(style, e);
     case SliderThumbHorizontalPart:
     case SliderThumbVerticalPart:
         return adjustSliderThumbStyle(style);
@@ -217,10 +227,6 @@ void LayoutTheme::adjustStyle(ComputedStyle& style, Element* e)
         return adjustSearchFieldStyle(style);
     case SearchFieldCancelButtonPart:
         return adjustSearchFieldCancelButtonStyle(style);
-    case SearchFieldDecorationPart:
-        return adjustSearchFieldDecorationStyle(style);
-    case SearchFieldResultsDecorationPart:
-        return adjustSearchFieldResultsDecorationStyle(style);
     default:
         break;
     }
@@ -230,7 +236,7 @@ String LayoutTheme::extraDefaultStyleSheet()
 {
     StringBuilder runtimeCSS;
     if (RuntimeEnabledFeatures::contextMenuEnabled())
-        runtimeCSS.appendLiteral("menu[type=\"popup\" i] { display: none; }");
+        runtimeCSS.append("menu[type=\"popup\" i] { display: none; }");
     return runtimeCSS.toString();
 }
 
@@ -380,7 +386,7 @@ int LayoutTheme::baselinePosition(const LayoutObject* o) const
 
     if (m_platformTheme)
         return box->size().height() + box->marginTop() + m_platformTheme->baselinePositionAdjustment(o->style()->appearance()) * o->style()->effectiveZoom();
-    return box->size().height() + box->marginTop();
+    return (box->size().height() + box->marginTop()).toInt();
 }
 
 bool LayoutTheme::isControlContainer(ControlPart appearance) const
@@ -397,7 +403,6 @@ bool LayoutTheme::isControlStyled(const ComputedStyle& style) const
     case SquareButtonPart:
     case ButtonPart:
     case ProgressBarPart:
-    case MeterPart:
         return style.hasAuthorBackground() || style.hasAuthorBorder();
 
     case MenulistPart:
@@ -632,6 +637,19 @@ void LayoutTheme::adjustMenuListButtonStyle(ComputedStyle&, Element*) const
 {
 }
 
+void LayoutTheme::adjustSliderContainerStyle(ComputedStyle& style, Element* e) const
+{
+    if (e && (e->shadowPseudoId() == "-webkit-media-slider-container" || e->shadowPseudoId() == "-webkit-slider-container")) {
+        if (style.appearance() == SliderVerticalPart) {
+            style.setTouchAction(TouchActionPanX);
+            style.setAppearance(NoControlPart);
+        } else {
+            style.setTouchAction(TouchActionPanY);
+            style.setAppearance(NoControlPart);
+        }
+    }
+}
+
 void LayoutTheme::adjustSliderThumbStyle(ComputedStyle& style) const
 {
     adjustSliderThumbSize(style);
@@ -649,17 +667,19 @@ void LayoutTheme::adjustSearchFieldCancelButtonStyle(ComputedStyle&) const
 {
 }
 
-void LayoutTheme::adjustSearchFieldDecorationStyle(ComputedStyle&) const
-{
-}
-
-void LayoutTheme::adjustSearchFieldResultsDecorationStyle(ComputedStyle&) const
-{
-}
-
 void LayoutTheme::platformColorsDidChange()
 {
     Page::platformColorsChanged();
+}
+
+void LayoutTheme::setCaretBlinkInterval(double interval)
+{
+    m_caretBlinkInterval = interval;
+}
+
+double LayoutTheme::caretBlinkInterval() const
+{
+    return m_caretBlinkInterval;
 }
 
 static FontDescription& getCachedFontDescription(CSSValueID systemFontID)
@@ -835,8 +855,7 @@ String LayoutTheme::fileListNameForWidth(Locale& locale, const FileList* fileLis
     } else if (fileList->length() == 1) {
         string = fileList->item(0)->name();
     } else {
-        // FIXME: Localization of fileList->length().
-        return StringTruncator::rightTruncate(locale.queryString(WebLocalizedString::MultipleFileUploadText, String::number(fileList->length())), width, font);
+        return StringTruncator::rightTruncate(locale.queryString(WebLocalizedString::MultipleFileUploadText, locale.convertToLocalizedNumber(String::number(fileList->length()))), width, font);
     }
 
     return StringTruncator::centerTruncate(string, width, font);
@@ -847,16 +866,15 @@ bool LayoutTheme::shouldOpenPickerWithF4Key() const
     return false;
 }
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 bool LayoutTheme::supportsCalendarPicker(const AtomicString& type) const
 {
+    DCHECK(RuntimeEnabledFeatures::inputMultipleFieldsUIEnabled());
     return type == InputTypeNames::date
         || type == InputTypeNames::datetime
         || type == InputTypeNames::datetime_local
         || type == InputTypeNames::month
         || type == InputTypeNames::week;
 }
-#endif
 
 bool LayoutTheme::shouldUseFallbackTheme(const ComputedStyle&) const
 {

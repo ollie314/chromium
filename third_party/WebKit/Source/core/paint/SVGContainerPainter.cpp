@@ -11,7 +11,6 @@
 #include "core/paint/ObjectPainter.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/SVGPaintContext.h"
-#include "core/paint/TransformRecorder.h"
 #include "core/svg/SVGSVGElement.h"
 #include "wtf/Optional.h"
 
@@ -36,7 +35,7 @@ void SVGContainerPainter::paint(const PaintInfo& paintInfo)
 
     PaintInfo paintInfoBeforeFiltering(paintInfo);
     paintInfoBeforeFiltering.updateCullRect(m_layoutSVGContainer.localToSVGParentTransform());
-    TransformRecorder transformRecorder(paintInfoBeforeFiltering.context, m_layoutSVGContainer, m_layoutSVGContainer.localToSVGParentTransform());
+    SVGTransformContext transformContext(paintInfoBeforeFiltering.context, m_layoutSVGContainer, m_layoutSVGContainer.localToSVGParentTransform());
     {
         Optional<FloatClipRecorder> clipRecorder;
         if (m_layoutSVGContainer.isSVGViewportContainer() && SVGLayoutSupport::isOverflowHidden(&m_layoutSVGContainer)) {
@@ -58,7 +57,7 @@ void SVGContainerPainter::paint(const PaintInfo& paintInfo)
     if (paintInfoBeforeFiltering.phase != PaintPhaseForeground)
         return;
 
-    if (m_layoutSVGContainer.style()->outlineWidth() && m_layoutSVGContainer.style()->visibility() == VISIBLE) {
+    if (m_layoutSVGContainer.style()->outlineWidth() && m_layoutSVGContainer.style()->visibility() == EVisibility::Visible) {
         PaintInfo outlinePaintInfo(paintInfoBeforeFiltering);
         outlinePaintInfo.phase = PaintPhaseSelfOutlineOnly;
         ObjectPainter(m_layoutSVGContainer).paintOutline(outlinePaintInfo, LayoutPoint(boundingBox.location()));

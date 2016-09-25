@@ -43,7 +43,7 @@ const char kErrorSerialConnectionNotFound[] = "Serial connection not found.";
 const char kErrorGetControlSignalsFailed[] = "Failed to get control signals.";
 
 template <class T>
-void SetDefaultScopedPtrValue(scoped_ptr<T>& ptr, const T& value) {
+void SetDefaultScopedPtrValue(std::unique_ptr<T>& ptr, const T& value) {
   if (!ptr.get())
     ptr.reset(new T(value));
 }
@@ -86,7 +86,7 @@ bool SerialGetDevicesFunction::Prepare() {
 void SerialGetDevicesFunction::Work() {
   DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
-  scoped_ptr<device::SerialDeviceEnumerator> enumerator =
+  std::unique_ptr<device::SerialDeviceEnumerator> enumerator =
       device::SerialDeviceEnumerator::Create();
   mojo::Array<device::serial::DeviceInfoPtr> devices = enumerator->GetDevices();
   results_ = serial::GetDevices::Results::Create(
@@ -131,7 +131,7 @@ bool SerialConnectFunction::Prepare() {
 void SerialConnectFunction::AsyncWorkStart() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   connection_ = CreateSerialConnection(params_->path, extension_->id());
-  connection_->Open(*params_->options.get(),
+  connection_->Open(*params_->options,
                     base::Bind(&SerialConnectFunction::OnConnected, this));
 }
 

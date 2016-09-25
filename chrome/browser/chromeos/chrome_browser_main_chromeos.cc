@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "ash/ash_switches.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/callback.h"
@@ -66,8 +65,8 @@
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/power/freezer_cgroup_process_manager.h"
 #include "chrome/browser/chromeos/power/idle_action_warning_observer.h"
+#include "chrome/browser/chromeos/power/login_lock_state_notifier.h"
 #include "chrome/browser/chromeos/power/peripheral_battery_observer.h"
-#include "chrome/browser/chromeos/power/power_button_observer.h"
 #include "chrome/browser/chromeos/power/power_data_collector.h"
 #include "chrome/browser/chromeos/power/power_prefs.h"
 #include "chrome/browser/chromeos/power/renderer_freezer.h"
@@ -77,12 +76,14 @@
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/status/data_promo_notification.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
+#include "chrome/browser/chromeos/ui/low_disk_notification.h"
 #include "chrome/browser/chromeos/upgrade_detector_chromeos.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/network_connect_delegate_chromeos.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
@@ -117,7 +118,7 @@
 #include "chromeos/network/portal_detector/network_portal_detector_stub.h"
 #include "chromeos/system/statistics_provider.h"
 #include "chromeos/tpm/tpm_token_loader.h"
-#include "components/browser_sync/common/browser_sync_switches.h"
+#include "components/browser_sync/browser_sync_switches.h"
 #include "components/device_event_log/device_event_log.h"
 #include "components/metrics/metrics_service.h"
 #include "components/ownership/owner_key_util.h"
@@ -138,6 +139,7 @@
 #include "net/socket/ssl_server_socket.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "printing/backend/print_backend.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/touch/touch_device.h"
@@ -152,10 +154,6 @@
 #include "chrome/browser/chromeos/device_uma.h"
 #include "chrome/browser/chromeos/events/system_key_event_listener.h"
 #include "chrome/browser/chromeos/events/xinput_hierarchy_changed_event_listener.h"
-#endif
-
-#if defined(MOJO_SHELL_CLIENT)
-#include "chrome/browser/chromeos/chrome_interface_factory.h"
 #endif
 
 namespace chromeos {
@@ -189,14 +187,6 @@ void InitializeNetworkPortalDetector() {
   }
 }
 
-bool IsRunningAsMusClient() {
-#if defined(MOJO_SHELL_CLIENT)
-  return content::MojoShellConnection::Get() &&
-         content::MojoShellConnection::Get()->UsingExternalShell();
-#endif
-  return false;
-}
-
 }  // namespace
 
 namespace internal {
@@ -207,28 +197,36 @@ namespace internal {
 class DBusServices {
  public:
   explicit DBusServices(const content::MainFunctionParams& parameters) {
+    // Under mash, some D-Bus clients are owned by other processes.
+    DBusThreadManager::ProcessMask process_mask =
+        chrome::IsRunningInMash() ? DBusThreadManager::PROCESS_BROWSER
+                                  : DBusThreadManager::PROCESS_ALL;
+
     // Initialize DBusThreadManager for the browser. This must be done after
     // the main message loop is started, as it uses the message loop.
-    DBusThreadManager::Initialize();
+    DBusThreadManager::Initialize(process_mask);
 
     bluez::BluezDBusManager::Initialize(
         DBusThreadManager::Get()->GetSystemBus(),
-        chromeos::DBusThreadManager::Get()->IsUsingStub(
-            chromeos::DBusClientBundle::BLUETOOTH));
+        chromeos::DBusThreadManager::Get()->IsUsingFakes());
 
     PowerPolicyController::Initialize(
         DBusThreadManager::Get()->GetPowerManagerClient());
 
-    ScopedVector<CrosDBusService::ServiceProviderInterface> service_providers;
-    service_providers.push_back(ProxyResolutionServiceProvider::Create(
-        base::WrapUnique(new ChromeProxyResolverDelegate())));
-    service_providers.push_back(new DisplayPowerServiceProvider(
-        base::WrapUnique(new ChromeDisplayPowerServiceProviderDelegate)));
-    service_providers.push_back(new LivenessServiceProvider);
-    service_providers.push_back(new ScreenLockServiceProvider);
-    service_providers.push_back(new ConsoleServiceProvider(
-        base::WrapUnique(new ChromeConsoleServiceProviderDelegate)));
-    service_providers.push_back(new KioskInfoService);
+    CrosDBusService::ServiceProviderList service_providers;
+    service_providers.push_back(
+        base::WrapUnique(ProxyResolutionServiceProvider::Create(
+            base::MakeUnique<ChromeProxyResolverDelegate>())));
+    if (!chrome::IsRunningInMash()) {
+      // TODO(crbug.com/629707): revisit this with mustash dbus work.
+      service_providers.push_back(base::MakeUnique<DisplayPowerServiceProvider>(
+          base::MakeUnique<ChromeDisplayPowerServiceProviderDelegate>()));
+    }
+    service_providers.push_back(base::MakeUnique<LivenessServiceProvider>());
+    service_providers.push_back(base::MakeUnique<ScreenLockServiceProvider>());
+    service_providers.push_back(base::MakeUnique<ConsoleServiceProvider>(
+        base::MakeUnique<ChromeConsoleServiceProviderDelegate>()));
+    service_providers.push_back(base::MakeUnique<KioskInfoService>());
     CrosDBusService::Initialize(std::move(service_providers));
 
     // Initialize PowerDataCollector after DBusThreadManager is initialized.
@@ -387,16 +385,9 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
 // Threads are initialized between MainMessageLoopStart and MainMessageLoopRun.
 // about_flags settings are applied in ChromeBrowserMainParts::PreCreateThreads.
 void ChromeBrowserMainPartsChromeos::PreMainMessageLoopRun() {
-#if defined(MOJO_SHELL_CLIENT)
-  if (IsRunningAsMusClient()) {
-    interface_factory_.reset(new ChromeInterfaceFactory);
-    content::MojoShellConnection::Get()->AddListener(interface_factory_.get());
-  }
-#endif
-
   // Set the crypto thread after the IO thread has been created/started.
   TPMTokenLoader::Get()->SetCryptoTaskRunner(
-      content::BrowserThread::GetMessageLoopProxyForThread(
+      content::BrowserThread::GetTaskRunnerForThread(
           content::BrowserThread::IO));
 
   CrasAudioHandler::Initialize(
@@ -413,7 +404,7 @@ void ChromeBrowserMainPartsChromeos::PreMainMessageLoopRun() {
   // will ensure that loading is aborted on early exit.
   bool load_oem_statistics = !StartupUtils::IsOobeCompleted();
   system::StatisticsProvider::GetInstance()->StartLoadingMachineStatistics(
-      content::BrowserThread::GetMessageLoopProxyForThread(
+      content::BrowserThread::GetTaskRunnerForThread(
           content::BrowserThread::FILE),
       load_oem_statistics);
 
@@ -485,14 +476,15 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
 
   media::SoundsManager::Create();
 
-  if (!IsRunningAsMusClient()) {
+  AccessibilityManager::Initialize();
+
+  if (!chrome::IsRunningInMash()) {
     // Initialize magnification manager before ash tray is created. And this
     // must be placed after UserManager::SessionStarted();
     // TODO(sad): These components expects the ash::Shell instance to be
     // created. However, when running as a mus-client, an ash::Shell instance is
     // not created. These accessibility services should instead be exposed as
     // separate services. crbug.com/557401
-    AccessibilityManager::Initialize();
     MagnificationManager::Initialize();
   }
 
@@ -520,6 +512,10 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
       ShouldAutoLaunchKioskApp(parsed_command_line())) {
     WizardController::SetZeroDelays();
   }
+
+  // Enable/disable native CUPS integration
+  printing::PrintBackend::SetNativeCupsEnabled(
+      parsed_command_line().HasSwitch(::switches::kEnableNativeCups));
 
   power_prefs_.reset(new PowerPrefs(PowerPolicyController::Get()));
 
@@ -688,6 +684,9 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   // available.
   idle_action_warning_observer_.reset(new IdleActionWarningObserver());
 
+  // Start watching for low disk space events to notify the user.
+  low_disk_notification_.reset(new LowDiskNotification());
+
   ChromeBrowserMainPartsLinux::PostProfileInit();
 }
 
@@ -710,13 +709,15 @@ void ChromeBrowserMainPartsChromeos::PreBrowserStart() {
     SystemKeyEventListener::Initialize();
   }
 
-  // Listen for XI_HierarchyChanged events. Note: if this is moved to
-  // PreMainMessageLoopRun() then desktopui_PageCyclerTests fail for unknown
-  // reasons, see http://crosbug.com/24833.
-  XInputHierarchyChangedEventListener::GetInstance();
+  if (!chrome::IsRunningInMash()) {
+    // Listen for XI_HierarchyChanged events. Note: if this is moved to
+    // PreMainMessageLoopRun() then desktopui_PageCyclerTests fail for unknown
+    // reasons, see http://crosbug.com/24833.
+    XInputHierarchyChangedEventListener::GetInstance();
 
-  // Start the CrOS input device UMA watcher
-  DeviceUMA::GetInstance();
+    // Start the CrOS input device UMA watcher
+    DeviceUMA::GetInstance();
+  }
 #endif
 
   // -- This used to be in ChromeBrowserMainParts::PreMainMessageLoopRun()
@@ -732,17 +733,18 @@ void ChromeBrowserMainPartsChromeos::PreBrowserStart() {
 }
 
 void ChromeBrowserMainPartsChromeos::PostBrowserStart() {
-  system::InputDeviceSettings::Get()->InitTouchDevicesStatusFromLocalPrefs();
+  if (!chrome::IsRunningInMash()) {
+    system::InputDeviceSettings::Get()->InitTouchDevicesStatusFromLocalPrefs();
 
-  if (!IsRunningAsMusClient()) {
     // These are dependent on the ash::Shell singleton already having been
     // initialized. Consequently, these cannot be used when running as a mus
     // client.
-    // TODO(oshima): Remove ash dependency in PowerButtonObserver.
+    // TODO(oshima): Remove ash dependency in LoginLockStateNotifier.
     // crbug.com/408832.
-    power_button_observer_.reset(new PowerButtonObserver);
+    login_lock_state_notifier_.reset(new LoginLockStateNotifier);
     data_promo_notification_.reset(new DataPromoNotification());
 
+    // TODO(mash): Support EventRewriterController; see crbug.com/647781
     keyboard_event_rewriters_.reset(new EventRewriterController());
     keyboard_event_rewriters_->AddEventRewriter(
         std::unique_ptr<ui::EventRewriter>(new KeyboardDrivenEventRewriter()));
@@ -796,12 +798,15 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   wake_on_wifi_manager_.reset();
   ScreenLocker::ShutDownClass();
   keyboard_event_rewriters_.reset();
+  low_disk_notification_.reset();
 #if defined(USE_X11)
-  // The XInput2 event listener needs to be shut down earlier than when
-  // Singletons are finally destroyed in AtExitManager.
-  XInputHierarchyChangedEventListener::GetInstance()->Stop();
+  if (!chrome::IsRunningInMash()) {
+    // The XInput2 event listener needs to be shut down earlier than when
+    // Singletons are finally destroyed in AtExitManager.
+    XInputHierarchyChangedEventListener::GetInstance()->Stop();
 
-  DeviceUMA::GetInstance()->Stop();
+    DeviceUMA::GetInstance()->Stop();
+  }
 
   // SystemKeyEventListener::Shutdown() is always safe to call,
   // even if Initialize() wasn't called.
@@ -809,10 +814,10 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
 #endif
 
   // Detach D-Bus clients before DBusThreadManager is shut down.
-  power_button_observer_.reset();
+  login_lock_state_notifier_.reset();
   idle_action_warning_observer_.reset();
 
-  if (!IsRunningAsMusClient())
+  if (!chrome::IsRunningInMash())
     MagnificationManager::Shutdown();
 
   media::SoundsManager::Shutdown();
@@ -850,7 +855,7 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // Ash needs to be closed before UserManager is destroyed.
   ChromeBrowserMainPartsLinux::PostMainMessageLoopRun();
 
-  if (!IsRunningAsMusClient())
+  if (!chrome::IsRunningInMash())
     AccessibilityManager::Shutdown();
 
   input_method::Shutdown();

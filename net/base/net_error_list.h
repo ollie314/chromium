@@ -107,6 +107,11 @@ NET_ERROR(UPLOAD_STREAM_REWIND_NOT_SUPPORTED, -25)
 // been shut down.
 NET_ERROR(CONTEXT_SHUT_DOWN, -26)
 
+// The request failed because the response was delivered along with requirements
+// which are not met ('X-Frame-Options' and 'Content-Security-Policy' ancestor
+// checks, for instance).
+NET_ERROR(BLOCKED_BY_RESPONSE, -27)
+
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
 
@@ -185,7 +190,7 @@ NET_ERROR(SOCKS_CONNECTION_FAILED, -120)
 NET_ERROR(SOCKS_CONNECTION_HOST_UNREACHABLE, -121)
 
 // The request to negotiate an alternate protocol failed.
-NET_ERROR(NPN_NEGOTIATION_FAILED, -122)
+NET_ERROR(ALPN_NEGOTIATION_FAILED, -122)
 
 // The peer sent an SSL no_renegotiation alert message.
 NET_ERROR(SSL_NO_RENEGOTIATION, -123)
@@ -351,8 +356,10 @@ NET_ERROR(ICANN_NAME_COLLISION, -166)
 // not a certificate error code as no X509Certificate object is available. This
 // error is fatal.
 NET_ERROR(SSL_SERVER_CERT_BAD_FORMAT, -167)
+
 // Certificate Transparency: Received a signed tree head that failed to parse.
 NET_ERROR(CT_STH_PARSING_FAILED, -168)
+
 // Certificate Transparency: Received a signed tree head whose JSON parsing was
 // OK but was missing some of the fields.
 NET_ERROR(CT_STH_INCOMPLETE, -169)
@@ -365,6 +372,12 @@ NET_ERROR(UNABLE_TO_REUSE_CONNECTION_FOR_PROXY_AUTH, -170)
 
 // Certificate Transparency: Failed to parse the received consistency proof.
 NET_ERROR(CT_CONSISTENCY_PROOF_PARSING_FAILED, -171)
+
+// The SSL server required an unsupported cipher suite that has since been
+// removed. This error will temporarily be signaled on a fallback for one or two
+// releases immediately following a cipher suite's removal, after which the
+// fallback will be removed.
+NET_ERROR(SSL_OBSOLETE_CIPHER, -172)
 
 // Certificate error codes
 //
@@ -469,13 +482,17 @@ NET_ERROR(CERT_NAME_CONSTRAINT_VIOLATION, -212)
 // The certificate's validity period is too long.
 NET_ERROR(CERT_VALIDITY_TOO_LONG, -213)
 
+// Certificate Transparency was required for this connection, but the server
+// did not provide CT information that complied with the policy.
+NET_ERROR(CERTIFICATE_TRANSPARENCY_REQUIRED, -214)
+
 // Add new certificate error codes here.
 //
 // Update the value of CERT_END whenever you add a new certificate error
 // code.
 
 // The value immediately past the last certificate error code.
-NET_ERROR(CERT_END, -214)
+NET_ERROR(CERT_END, -215)
 
 // The URL is invalid.
 NET_ERROR(INVALID_URL, -300)
@@ -657,14 +674,14 @@ NET_ERROR(PROXY_HTTP_1_1_REQUIRED, -366)
 // The PAC script terminated fatally and must be reloaded.
 NET_ERROR(PAC_SCRIPT_TERMINATED, -367)
 
-// The certificate offered by the alternative server is not valid for the
-// origin, a violation of HTTP Alternative Services specification Section 2.1,
-// https://tools.ietf.org/id/draft-ietf-httpbis-alt-svc-06.html#host_auth.
-NET_ERROR(ALTERNATIVE_CERT_NOT_VALID_FOR_ORIGIN, -368)
-
+// Obsolete. Kept here to avoid reuse.
 // Request is throttled because of a Backoff header.
 // See: crbug.com/486891.
-NET_ERROR(TEMPORARY_BACKOFF, -369)
+// NET_ERROR(TEMPORARY_BACKOFF, -369)
+
+// The server was expected to return an HTTP/1.x response, but did not. Rather
+// than treat it as HTTP/0.9, this error is returned.
+NET_ERROR(INVALID_HTTP_RESPONSE, -370)
 
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)

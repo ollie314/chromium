@@ -16,10 +16,58 @@ DOMMatrix* DOMMatrix::create(DOMMatrixReadOnly* other)
     return new DOMMatrix(other->matrix(), other->is2D());
 }
 
+DOMMatrix* DOMMatrix::create(const SkMatrix44& matrix)
+{
+    TransformationMatrix transformationMatrix(matrix);
+    return new DOMMatrix(transformationMatrix, transformationMatrix.isAffine());
+}
+
+DOMMatrix* DOMMatrix::fromFloat32Array(DOMFloat32Array* float32Array, ExceptionState& exceptionState)
+{
+    if (float32Array->length() != 6 && float32Array->length() != 16) {
+        exceptionState.throwTypeError("The sequence must contain 6 elements for a 2D matrix or 16 elements for a 3D matrix.");
+        return nullptr;
+    }
+    return new DOMMatrix(float32Array->data(), float32Array->length());
+}
+
+DOMMatrix* DOMMatrix::fromFloat64Array(DOMFloat64Array* float64Array, ExceptionState& exceptionState)
+{
+    if (float64Array->length() != 6 && float64Array->length() != 16) {
+        exceptionState.throwTypeError("The sequence must contain 6 elements for a 2D matrix or 16 elements for a 3D matrix.");
+        return nullptr;
+    }
+    return new DOMMatrix(float64Array->data(), float64Array->length());
+}
+
+template <typename T>
+DOMMatrix::DOMMatrix(T sequence, int size) : DOMMatrixReadOnly(sequence, size)
+{
+}
+
 DOMMatrix::DOMMatrix(const TransformationMatrix& matrix, bool is2D)
 {
     m_matrix = TransformationMatrix::create(matrix);
     m_is2D = is2D;
+}
+
+DOMMatrix* DOMMatrix::fromMatrix(DOMMatrixInit& other, ExceptionState& exceptionState)
+{
+    validateAndFixup(other, exceptionState);
+    if (exceptionState.hadException())
+        return nullptr;
+
+    if (other.is2D()) {
+        return new DOMMatrix({
+            other.m11(), other.m12(), other.m21(),
+            other.m22(), other.m41(), other.m42()}, other.is2D());
+    }
+
+    return new DOMMatrix({
+        other.m11(), other.m12(), other.m13(), other.m14(),
+        other.m21(), other.m22(), other.m23(), other.m24(),
+        other.m31(), other.m32(), other.m33(), other.m34(),
+        other.m41(), other.m42(), other.m43(), other.m44()}, other.is2D());
 }
 
 void DOMMatrix::setIs2D(bool value)
@@ -28,23 +76,25 @@ void DOMMatrix::setIs2D(bool value)
         m_is2D = value;
 }
 
-DOMMatrix* DOMMatrix::multiplySelf(DOMMatrix* other)
+DOMMatrix* DOMMatrix::multiplySelf(DOMMatrixInit& other, ExceptionState& exceptionState)
 {
-    if (!other->is2D())
+    DOMMatrix* otherMatrix = DOMMatrix::fromMatrix(other, exceptionState);
+    if (!otherMatrix->is2D())
         m_is2D = false;
 
-    *m_matrix *= other->matrix();
+    *m_matrix *= otherMatrix->matrix();
 
     return this;
 }
 
-DOMMatrix* DOMMatrix::preMultiplySelf(DOMMatrix* other)
+DOMMatrix* DOMMatrix::preMultiplySelf(DOMMatrixInit& other, ExceptionState& exceptionState)
 {
-    if (!other->is2D())
+    DOMMatrix* otherMatrix = DOMMatrix::fromMatrix(other, exceptionState);
+    if (!otherMatrix->is2D())
         m_is2D = false;
 
     TransformationMatrix& matrix = *m_matrix;
-    *m_matrix = other->matrix() * matrix;
+    *m_matrix = otherMatrix->matrix() * matrix;
 
     return this;
 }
@@ -97,6 +147,44 @@ DOMMatrix* DOMMatrix::scaleNonUniformSelf(double sx, double sy, double sz,
     if (hasTranslation)
         translateSelf(-ox, -oy, -oz);
 
+    return this;
+}
+
+DOMMatrix* DOMMatrix::skewXSelf(double sx)
+{
+    m_matrix->skewX(sx);
+    return this;
+}
+
+DOMMatrix* DOMMatrix::skewYSelf(double sy)
+{
+    m_matrix->skewY(sy);
+    return this;
+}
+
+DOMMatrix* DOMMatrix::invertSelf()
+{
+    if (m_matrix->isInvertible()) {
+        m_matrix = TransformationMatrix::create(m_matrix->inverse());
+    } else {
+        setM11(NAN);
+        setM12(NAN);
+        setM13(NAN);
+        setM14(NAN);
+        setM21(NAN);
+        setM22(NAN);
+        setM23(NAN);
+        setM24(NAN);
+        setM31(NAN);
+        setM32(NAN);
+        setM33(NAN);
+        setM34(NAN);
+        setM41(NAN);
+        setM42(NAN);
+        setM43(NAN);
+        setM44(NAN);
+        setIs2D(false);
+    }
     return this;
 }
 

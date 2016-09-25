@@ -9,15 +9,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <memory>
+#include <utility>
+
 #if defined(OS_POSIX)
 #include <unistd.h>
 #endif
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/nacl/common/nacl_messages.h"
 #include "components/nacl/common/nacl_renderer_messages.h"
@@ -25,17 +30,22 @@
 #include "components/nacl/loader/nacl_ipc_adapter.h"
 #include "components/nacl/loader/nacl_validation_db.h"
 #include "components/nacl/loader/nacl_validation_query.h"
+#include "content/public/common/mojo_channel_switches.h"
 #include "ipc/attachment_broker_unprivileged.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_switches.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
+#include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/scoped_ipc_support.h"
 #include "native_client/src/public/chrome_main.h"
 #include "native_client/src/public/nacl_app.h"
 #include "native_client/src/public/nacl_desc.h"
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
+#include "base/posix/global_descriptors.h"
+#include "content/public/common/content_descriptors.h"
 #endif
 
 #if defined(OS_LINUX)
@@ -46,6 +56,7 @@
 #include <io.h>
 
 #include "content/public/common/sandbox_init.h"
+#include "mojo/edk/embedder/platform_channel_pair.h"
 #endif
 
 namespace {
@@ -97,7 +108,7 @@ void DebugStubPortSelectedHandler(uint16_t port) {
 
 // Creates the PPAPI IPC channel between the NaCl IRT and the host
 // (browser/renderer) process, and starts to listen it on the thread where
-// the given message_loop_proxy runs.
+// the given task runner runs.
 // Also, creates and sets the corresponding NaClDesc to the given nap with
 // the FD #.
 void SetUpIPCAdapter(
@@ -154,7 +165,8 @@ class BrowserValidationDBProxy : public NaClValidationDB {
 };
 
 NaClListener::NaClListener()
-    : shutdown_event_(true, false),
+    : shutdown_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                      base::WaitableEvent::InitialState::NOT_SIGNALED),
       io_thread_("NaCl_IOThread"),
 #if defined(OS_LINUX)
       prereserved_sandbox_size_(0),
@@ -162,13 +174,26 @@ NaClListener::NaClListener()
 #if defined(OS_POSIX)
       number_of_cores_(-1),  // unknown/error
 #endif
-      main_loop_(NULL),
       is_started_(false) {
   IPC::AttachmentBrokerUnprivileged::CreateBrokerIfNeeded();
   io_thread_.StartWithOptions(
       base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
   DCHECK(g_listener == NULL);
   g_listener = this;
+
+  mojo_ipc_support_ =
+      base::MakeUnique<mojo::edk::ScopedIPCSupport>(io_thread_.task_runner());
+#if defined(OS_WIN)
+  mojo::edk::ScopedPlatformHandle platform_channel(
+      mojo::edk::PlatformChannelPair::PassClientHandleFromParentProcess(
+          *base::CommandLine::ForCurrentProcess()));
+#else
+  mojo::edk::ScopedPlatformHandle platform_channel(
+      mojo::edk::PlatformHandle(
+          base::GlobalDescriptors::GetInstance()->Get(kMojoIPCChannel)));
+#endif
+  DCHECK(platform_channel.is_valid());
+  mojo::edk::SetParentPipeHandle(std::move(platform_channel));
 }
 
 NaClListener::~NaClListener() {
@@ -178,8 +203,8 @@ NaClListener::~NaClListener() {
 }
 
 bool NaClListener::Send(IPC::Message* msg) {
-  DCHECK(main_loop_ != NULL);
-  if (base::MessageLoop::current() == main_loop_) {
+  DCHECK(!!main_task_runner_);
+  if (main_task_runner_->BelongsToCurrentThread()) {
     // This thread owns the channel.
     return channel_->Send(msg);
   } else {
@@ -217,19 +242,23 @@ class FileTokenMessageFilter : public IPC::MessageFilter {
 };
 
 void NaClListener::Listen() {
-  std::string channel_name =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kProcessChannelID);
+  mojo::ScopedMessagePipeHandle handle(
+      mojo::edk::CreateChildMessagePipe(
+          base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+              switches::kMojoChannelToken)));
+  DCHECK(handle.is_valid());
+  IPC::ChannelHandle channel_handle(handle.release());
+
   channel_ = IPC::SyncChannel::Create(this, io_thread_.task_runner().get(),
                                       &shutdown_event_);
   filter_ = channel_->CreateSyncMessageFilter();
   channel_->AddFilter(new FileTokenMessageFilter());
-  channel_->Init(channel_name, IPC::Channel::MODE_CLIENT, true);
   IPC::AttachmentBroker* global = IPC::AttachmentBroker::GetGlobal();
   if (global && !global->IsPrivilegedBroker())
     global->RegisterBrokerCommunicationChannel(channel_.get());
-  main_loop_ = base::MessageLoop::current();
-  main_loop_->Run();
+  channel_->Init(channel_handle, IPC::Channel::MODE_CLIENT, true);
+  main_task_runner_ = base::ThreadTaskRunnerHandle::Get();
+  base::RunLoop().Run();
 }
 
 bool NaClListener::OnMessageReceived(const IPC::Message& msg) {

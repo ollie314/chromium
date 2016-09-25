@@ -5,22 +5,18 @@
 #ifndef CC_SURFACES_DISPLAY_CLIENT_H_
 #define CC_SURFACES_DISPLAY_CLIENT_H_
 
-#include <memory>
-
-#include "base/time/time.h"
+#include "cc/quads/render_pass.h"
 
 namespace cc {
-
-class BeginFrameSource;
 struct ManagedMemoryPolicy;
 
 class DisplayClient {
  public:
-  virtual void OutputSurfaceLost() = 0;
-  virtual void SetMemoryPolicy(const ManagedMemoryPolicy& policy) = 0;
-
- protected:
   virtual ~DisplayClient() {}
+  virtual void DisplayOutputSurfaceLost() = 0;
+  virtual void DisplayWillDrawAndSwap(bool will_draw_and_swap,
+                                      const RenderPassList& render_passes) = 0;
+  virtual void DisplayDidDrawAndSwap() = 0;
 };
 
 }  // namespace cc

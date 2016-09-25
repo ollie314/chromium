@@ -21,7 +21,7 @@
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/payments/payments_request.h"
-#include "components/autofill/core/common/autofill_switches.h"
+#include "components/autofill/core/browser/payments/payments_service_url.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "google_apis/gaia/identity_provider.h"
 #include "net/base/escape.h"
@@ -34,9 +34,6 @@ namespace autofill {
 namespace payments {
 
 namespace {
-
-const char kPaymentsRequestHost[] = "https://wallet.google.com";
-const char kPaymentsRequestHostSandbox[] = "https://sandbox.google.com";
 
 const char kUnmaskCardRequestPath[] =
     "payments/apis-secure/creditcardservice/getrealpan?s7e_suffix=chromewallet";
@@ -58,24 +55,6 @@ const char kTokenServiceConsumerId[] = "wallet_client";
 const char kPaymentsOAuth2Scope[] =
     "https://www.googleapis.com/auth/wallet.chrome";
 
-// This is mostly copied from wallet_service_url.cc, which is currently in
-// content/, hence inaccessible from here.
-bool IsPaymentsProductionEnabled() {
-  // If the command line flag exists, it takes precedence.
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
-  std::string sandbox_enabled(
-      command_line->GetSwitchValueASCII(switches::kWalletServiceUseSandbox));
-  if (!sandbox_enabled.empty())
-    return sandbox_enabled != "1";
-
-#if defined(ENABLE_PROD_WALLET_SERVICE)
-  return true;
-#else
-  return false;
-#endif
-}
-
 GURL GetRequestUrl(const std::string& path) {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch("sync-url")) {
     if (IsPaymentsProductionEnabled()) {
@@ -91,9 +70,7 @@ GURL GetRequestUrl(const std::string& path) {
                   "about:flags.";
   }
 
-  GURL base(IsPaymentsProductionEnabled() ? kPaymentsRequestHost
-                                          : kPaymentsRequestHostSandbox);
-  return base.Resolve(path);
+  return GetBaseSecureUrl().Resolve(path);
 }
 
 std::unique_ptr<base::DictionaryValue> BuildRiskDictionary(
@@ -176,8 +153,9 @@ class UnmaskCardRequest : public PaymentsRequest {
  public:
   UnmaskCardRequest(const PaymentsClient::UnmaskRequestDetails& request_details)
       : request_details_(request_details) {
-    DCHECK_EQ(CreditCard::MASKED_SERVER_CARD,
-              request_details.card.record_type());
+    DCHECK(
+        CreditCard::MASKED_SERVER_CARD == request_details.card.record_type() ||
+        CreditCard::FULL_SERVER_CARD == request_details.card.record_type());
   }
   ~UnmaskCardRequest() override {}
 
@@ -193,7 +171,7 @@ class UnmaskCardRequest : public PaymentsRequest {
     request_dict.SetString("credit_card_id", request_details_.card.server_id());
     request_dict.Set("risk_data_encoded",
                      BuildRiskDictionary(request_details_.risk_data));
-    request_dict.Set("context", base::WrapUnique(new base::DictionaryValue()));
+    request_dict.Set("context", base::MakeUnique<base::DictionaryValue>());
 
     int value = 0;
     if (base::StringToInt(request_details_.user_response.exp_month, &value))
@@ -379,17 +357,16 @@ void PaymentsClient::Prepare() {
 
 void PaymentsClient::UnmaskCard(
     const PaymentsClient::UnmaskRequestDetails& request_details) {
-  IssueRequest(base::WrapUnique(new UnmaskCardRequest(request_details)), true);
+  IssueRequest(base::MakeUnique<UnmaskCardRequest>(request_details), true);
 }
 
 void PaymentsClient::GetUploadDetails(const std::string& app_locale) {
-  IssueRequest(base::WrapUnique(new GetUploadDetailsRequest(app_locale)),
-               false);
+  IssueRequest(base::MakeUnique<GetUploadDetailsRequest>(app_locale), false);
 }
 
 void PaymentsClient::UploadCard(
     const PaymentsClient::UploadRequestDetails& request_details) {
-  IssueRequest(base::WrapUnique(new UploadCardRequest(request_details)), true);
+  IssueRequest(base::MakeUnique<UploadCardRequest>(request_details), true);
 }
 
 void PaymentsClient::IssueRequest(std::unique_ptr<PaymentsRequest> request,

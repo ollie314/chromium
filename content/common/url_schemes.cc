@@ -34,7 +34,11 @@ void RegisterContentSchemes(bool lock_schemes) {
   url::AddStandardScheme(kChromeDevToolsScheme, url::SCHEME_WITHOUT_PORT);
   url::AddStandardScheme(kChromeUIScheme, url::SCHEME_WITHOUT_PORT);
   url::AddStandardScheme(kGuestScheme, url::SCHEME_WITHOUT_PORT);
-  url::AddStandardScheme(kMetadataScheme, url::SCHEME_WITHOUT_AUTHORITY);
+
+  url::AddStandardScheme(kHttpSuboriginScheme, url::SCHEME_WITH_PORT);
+  url::AddReferrerScheme(kHttpSuboriginScheme, url::SCHEME_WITH_PORT);
+  url::AddStandardScheme(kHttpsSuboriginScheme, url::SCHEME_WITH_PORT);
+  url::AddReferrerScheme(kHttpsSuboriginScheme, url::SCHEME_WITH_PORT);
 
   for (const url::SchemeWithType& scheme : additional_standard_schemes)
     url::AddStandardScheme(scheme.scheme, scheme.type);

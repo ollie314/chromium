@@ -78,24 +78,24 @@ const AtomicString& TextTrack::metadataKeyword()
 
 const AtomicString& TextTrack::disabledKeyword()
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, open, ("disabled"));
-    return open;
+    DEFINE_STATIC_LOCAL(const AtomicString, disabled, ("disabled"));
+    return disabled;
 }
 
 const AtomicString& TextTrack::hiddenKeyword()
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, closed, ("hidden"));
-    return closed;
+    DEFINE_STATIC_LOCAL(const AtomicString, hidden, ("hidden"));
+    return hidden;
 }
 
 const AtomicString& TextTrack::showingKeyword()
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, ended, ("showing"));
-    return ended;
+    DEFINE_STATIC_LOCAL(const AtomicString, showing, ("showing"));
+    return showing;
 }
 
 TextTrack::TextTrack(const AtomicString& kind, const AtomicString& label, const AtomicString& language, const AtomicString& id, TextTrackType type)
-    : TrackBase(WebMediaPlayer::TextTrack, label, language, id)
+    : TrackBase(WebMediaPlayer::TextTrack, kind, label, language, id)
     , m_cues(nullptr)
     , m_regions(nullptr)
     , m_trackList(nullptr)
@@ -106,7 +106,6 @@ TextTrack::TextTrack(const AtomicString& kind, const AtomicString& label, const 
     , m_renderedTrackIndex(invalidTrackIndex)
     , m_hasBeenConfigured(false)
 {
-    setKind(kind);
 }
 
 TextTrack::~TextTrack()
@@ -138,22 +137,14 @@ void TextTrack::setTrackList(TextTrackList* trackList)
     invalidateTrackIndex();
 }
 
-void TextTrack::setKind(const AtomicString& newKind)
+bool TextTrack::isVisualKind() const
 {
-    AtomicString oldKind = kind();
-    TrackBase::setKind(newKind);
-
-    // If kind changes from visual to non-visual and mode is 'showing', then force mode to 'hidden'.
-    // FIXME: This is not per spec. crbug.com/460923
-    if (oldKind != kind() && mode() == showingKeyword()) {
-        if (kind() != captionsKeyword() && kind() != subtitlesKeyword())
-            setMode(hiddenKeyword());
-    }
+    return kind() == subtitlesKeyword() || kind() == captionsKeyword();
 }
 
 void TextTrack::setMode(const AtomicString& mode)
 {
-    ASSERT(mode == disabledKeyword() || mode == hiddenKeyword() || mode == showingKeyword());
+    DCHECK(mode == disabledKeyword() || mode == hiddenKeyword() || mode == showingKeyword());
 
     // On setting, if the new value isn't equal to what the attribute would currently
     // return, the new value must be processed as follows ...
@@ -239,7 +230,7 @@ TextTrackCueList* TextTrack::activeCues()
 
 void TextTrack::addCue(TextTrackCue* cue)
 {
-    ASSERT(cue);
+    DCHECK(cue);
 
     // TODO(93143): Add spec-compliant behavior for negative time values.
     if (std::isnan(cue->startTime()) || std::isnan(cue->endTime()) || cue->startTime() < 0 || cue->endTime() < 0)
@@ -266,7 +257,7 @@ void TextTrack::addCue(TextTrackCue* cue)
 
 void TextTrack::removeCue(TextTrackCue* cue, ExceptionState& exceptionState)
 {
-    ASSERT(cue);
+    DCHECK(cue);
 
     // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-texttrack-removecue
 
@@ -282,14 +273,14 @@ void TextTrack::removeCue(TextTrackCue* cue, ExceptionState& exceptionState)
     // cue->track() == this implies that cue is in this track's list of cues,
     // so this track should have a list of cues and the cue being removed
     // should be in it.
-    ASSERT(m_cues);
+    DCHECK(m_cues);
 
     // 2. Remove cue from the method's TextTrack object's text track's text track list of cues.
     bool wasRemoved = m_cues->remove(cue);
-    ASSERT_UNUSED(wasRemoved, wasRemoved);
+    DCHECK(wasRemoved);
 
     // If the cue is active, a timeline needs to be available.
-    ASSERT(!cue->isActive() || cueTimeline());
+    DCHECK(!cue->isActive() || cueTimeline());
 
     cue->setTrack(0);
 
@@ -379,16 +370,16 @@ void TextTrack::cueDidChange(TextTrackCue* cue)
 {
     // This method is called through cue->track(), which should imply that this
     // track has a list of cues.
-    ASSERT(m_cues && cue->track() == this);
+    DCHECK(m_cues && cue->track() == this);
 
-    // Make sure the TextTrackCueList order is up-to-date.
+    // Make sure the TextTrackCueList order is up to date.
     // FIXME: Only need to do this if the change was to any of the timestamps.
     m_cues->updateCueIndex(cue);
 
     // Since a call to cueDidChange is always preceded by a call to
     // cueWillChange, the cue should no longer be active when we reach this
     // point (since it was removed from the timeline in cueWillChange).
-    ASSERT(!cue->isActive());
+    DCHECK(!cue->isActive());
 
     if (m_mode == disabledKeyword())
         return;
@@ -400,7 +391,7 @@ void TextTrack::cueDidChange(TextTrackCue* cue)
 
 int TextTrack::trackIndex()
 {
-    ASSERT(m_trackList);
+    DCHECK(m_trackList);
 
     if (m_trackIndex == invalidTrackIndex)
         m_trackIndex = m_trackList->getTrackIndex(this);
@@ -414,15 +405,15 @@ void TextTrack::invalidateTrackIndex()
     m_renderedTrackIndex = invalidTrackIndex;
 }
 
-bool TextTrack::isRendered()
+bool TextTrack::isRendered() const
 {
-    if (kind() != captionsKeyword() && kind() != subtitlesKeyword())
-        return false;
+    return m_mode == showingKeyword() && isVisualKind();
+}
 
-    if (m_mode != showingKeyword())
-        return false;
-
-    return true;
+bool TextTrack::canBeRendered() const
+{
+    // A track can be displayed when it's of kind captions or subtitles and hasn't failed to load.
+    return getReadinessState() != FailedToLoad && isVisualKind();
 }
 
 TextTrackCueList* TextTrack::ensureTextTrackCueList()
@@ -435,7 +426,7 @@ TextTrackCueList* TextTrack::ensureTextTrackCueList()
 
 int TextTrack::trackIndexRelativeToRenderedTracks()
 {
-    ASSERT(m_trackList);
+    DCHECK(m_trackList);
 
     if (m_renderedTrackIndex == invalidTrackIndex)
         m_renderedTrackIndex = m_trackList->getTrackIndexRelativeToRenderedTracks(this);
@@ -479,4 +470,8 @@ DEFINE_TRACE(TextTrack)
     EventTargetWithInlineData::trace(visitor);
 }
 
+DEFINE_TRACE_WRAPPERS(TextTrack)
+{
+    visitor->traceWrappers(m_cues);
+}
 } // namespace blink

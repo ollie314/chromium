@@ -128,6 +128,8 @@ public:
 
     class PLATFORM_EXPORT ImageExtractor final {
         STACK_ALLOCATED();
+        WTF_MAKE_NONCOPYABLE(ImageExtractor);
+
     public:
         ImageExtractor(Image*, ImageHtmlDomSource, bool premultiplyAlpha, bool ignoreGammaAndColorProfile);
 
@@ -191,7 +193,7 @@ public:
     // packing the pixel data according to the given format and type,
     // and obeying the flipY and premultiplyAlpha flags. Returns true
     // upon success.
-    static bool extractImageData(const uint8_t*, const IntSize&, GLenum format, GLenum type, bool flipY, bool premultiplyAlpha, Vector<uint8_t>& data);
+    static bool extractImageData(const uint8_t*, DataFormat sourceDataFormat, const IntSize&, GLenum format, GLenum type, bool flipY, bool premultiplyAlpha, Vector<uint8_t>& data);
 
     // Helper function which extracts the user-supplied texture
     // data, applying the flipY and premultiplyAlpha parameters.
@@ -203,6 +205,7 @@ public:
     // End GraphicsContext3DImagePacking.cpp functions
 
 private:
+    friend class WebGLImageConversionTest;
     // Helper for packImageData/extractImageData/extractTextureData which implement packing of pixel
     // data into the specified OpenGL destination format and type.
     // A sourceUnpackAlignment of zero indicates that the source
@@ -210,6 +213,8 @@ private:
     // Destination data will have no gaps between rows.
     // Implemented in GraphicsContext3DImagePacking.cpp
     static bool packPixels(const uint8_t* sourceData, DataFormat sourceDataFormat, unsigned width, unsigned height, unsigned sourceUnpackAlignment, unsigned destinationFormat, unsigned destinationType, AlphaOp, void* destinationData, bool flipY);
+    static void unpackPixels(const uint16_t* sourceData, DataFormat sourceDataFormat, unsigned pixelsPerRow, uint8_t* destinationData);
+    static void packPixels(const uint8_t* sourceData, DataFormat sourceDataFormat, unsigned pixelsPerRow, uint8_t* destinationData);
 };
 
 } // namespace blink

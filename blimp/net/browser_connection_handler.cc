@@ -4,6 +4,8 @@
 
 #include "blimp/net/browser_connection_handler.h"
 
+#include <utility>
+
 #include "base/logging.h"
 #include "base/macros.h"
 #include "blimp/net/blimp_connection.h"
@@ -19,7 +21,7 @@ namespace {
 
 // Maximum footprint of the output buffer.
 // TODO(kmarshall): Use a value that's computed from the platform.
-const int kMaxBufferSizeBytes = 1 << 24;
+const int kMaxBufferSizeBytes = 32 * 1024 * 1024;
 
 }  // namespace
 
@@ -35,10 +37,10 @@ BrowserConnectionHandler::~BrowserConnectionHandler() {}
 
 std::unique_ptr<BlimpMessageProcessor>
 BrowserConnectionHandler::RegisterFeature(
-    BlimpMessage::Type type,
+    BlimpMessage::FeatureCase feature_case,
     BlimpMessageProcessor* incoming_processor) {
-  demultiplexer_->AddProcessor(type, incoming_processor);
-  return multiplexer_->CreateSenderForType(type);
+  demultiplexer_->AddProcessor(feature_case, incoming_processor);
+  return multiplexer_->CreateSender(feature_case);
 }
 
 void BrowserConnectionHandler::HandleConnection(
@@ -63,7 +65,10 @@ void BrowserConnectionHandler::OnConnectionError(int error) {
 }
 
 void BrowserConnectionHandler::DropCurrentConnection() {
-  DCHECK(connection_);
+  if (!connection_) {
+    return;
+  }
+
   output_buffer_->SetOutputProcessor(nullptr);
   connection_.reset();
 }

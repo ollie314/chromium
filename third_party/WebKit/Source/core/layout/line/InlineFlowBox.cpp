@@ -23,7 +23,6 @@
 #include "core/dom/Document.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/api/LineLayoutAPIShim.h"
-#include "core/layout/api/LineLayoutBlockFlow.h"
 #include "core/layout/api/LineLayoutBox.h"
 #include "core/layout/api/LineLayoutInline.h"
 #include "core/layout/api/LineLayoutListMarker.h"
@@ -37,6 +36,7 @@
 #include "core/paint/InlineFlowBoxPainter.h"
 #include "core/style/ShadowList.h"
 #include "platform/fonts/Font.h"
+#include "wtf/PtrUtil.h"
 #include <algorithm>
 #include <math.h>
 
@@ -125,6 +125,8 @@ void InlineFlowBox::addToLine(InlineBox* child)
             }
             if (childStyle.hasTextCombine() || childStyle.getTextEmphasisMark() != TextEmphasisMarkNone)
                 shouldClearDescendantsHaveSameLineHeightAndBaseline = true;
+            if (child->isInlineTextBox() && isFirstLineStyle() && childStyle.textTransform() != child->getLineLayoutItem().styleRef(false).textTransform())
+                toInlineTextBox(child)->transformText();
         } else {
             if (child->getLineLayoutItem().isBR()) {
                 // FIXME: This is dumb. We only turn off because current layout test results expect the <br> to be 0-height on the baseline.
@@ -460,13 +462,15 @@ FontBaseline InlineFlowBox::dominantBaseline() const
 
 void InlineFlowBox::adjustMaxAscentAndDescent(int& maxAscent, int& maxDescent, int maxPositionTop, int maxPositionBottom)
 {
+    int originalMaxAscent = maxAscent;
+    int originalMaxDescent = maxDescent;
     for (InlineBox* curr = firstChild(); curr; curr = curr->nextOnLine()) {
         // The computed lineheight needs to be extended for the
         // positioned elements
         if (curr->getLineLayoutItem().isOutOfFlowPositioned())
             continue; // Positioned placeholders don't affect calculations.
         if (curr->verticalAlign() == VerticalAlignTop || curr->verticalAlign() == VerticalAlignBottom) {
-            int lineHeight = curr->lineHeight();
+            int lineHeight = curr->lineHeight().round();
             if (curr->verticalAlign() == VerticalAlignTop) {
                 if (maxAscent + maxDescent < lineHeight)
                     maxDescent = lineHeight - maxAscent;
@@ -477,6 +481,8 @@ void InlineFlowBox::adjustMaxAscentAndDescent(int& maxAscent, int& maxDescent, i
 
             if (maxAscent + maxDescent >= std::max(maxPositionTop, maxPositionBottom))
                 break;
+            maxAscent = originalMaxAscent;
+            maxDescent = originalMaxDescent;
         }
 
         if (curr->isInlineFlowBox())
@@ -868,7 +874,8 @@ inline void InlineFlowBox::addTextBoxVisualOverflow(InlineTextBox* textBox, Glyp
 
     logicalVisualOverflow = LayoutRect(logicalLeftVisualOverflow, logicalTopVisualOverflow, logicalRightVisualOverflow - logicalLeftVisualOverflow, logicalBottomVisualOverflow - logicalTopVisualOverflow);
 
-    textBox->setLogicalOverflowRect(logicalVisualOverflow);
+    if (logicalVisualOverflow != textBox->logicalFrameRect())
+        textBox->setLogicalOverflowRect(logicalVisualOverflow);
 }
 
 inline void InlineFlowBox::addReplacedChildOverflow(const InlineBox* inlineBox, LayoutRect& logicalLayoutOverflow, LayoutRect& logicalVisualOverflow)
@@ -901,7 +908,7 @@ void InlineFlowBox::computeOverflow(LayoutUnit lineTop, LayoutUnit lineBottom, G
     }
 
     if (m_overflow)
-        m_overflow.clear();
+        m_overflow.reset();
 
     // Visual overflow just includes overflow for stuff we need to issues paint invalidations for ourselves. Self-painting layers are ignored.
     // Layout overflow is used to determine scrolling extent, so it still includes child layers and also factors in
@@ -948,7 +955,7 @@ void InlineFlowBox::setLayoutOverflow(const LayoutRect& rect, const LayoutRect& 
         return;
 
     if (!m_overflow)
-        m_overflow = adoptPtr(new OverflowModel(frameBox, frameBox));
+        m_overflow = wrapUnique(new SimpleOverflowModel(frameBox, frameBox));
 
     m_overflow->setLayoutOverflow(rect);
 }
@@ -960,7 +967,7 @@ void InlineFlowBox::setVisualOverflow(const LayoutRect& rect, const LayoutRect& 
         return;
 
     if (!m_overflow)
-        m_overflow = adoptPtr(new OverflowModel(frameBox, frameBox));
+        m_overflow = wrapUnique(new SimpleOverflowModel(frameBox, frameBox));
 
     m_overflow->setVisualOverflow(rect);
 }
@@ -1111,12 +1118,12 @@ LayoutUnit InlineFlowBox::placeEllipsisBox(bool ltr, LayoutUnit blockLeftEdge, L
     InlineBox* box = ltr ? firstChild() : lastChild();
 
     // NOTE: these will cross after foundBox = true.
-    int visibleLeftEdge = blockLeftEdge;
-    int visibleRightEdge = blockRightEdge;
+    int visibleLeftEdge = blockLeftEdge.toInt();
+    int visibleRightEdge = blockRightEdge.toInt();
 
     while (box) {
         int currResult = box->placeEllipsisBox(ltr, LayoutUnit(visibleLeftEdge), LayoutUnit(visibleRightEdge),
-            ellipsisWidth, truncatedWidth, foundBox);
+            ellipsisWidth, truncatedWidth, foundBox).toInt();
         if (currResult != -1 && result == -1)
             result = LayoutUnit(currResult);
 
@@ -1173,10 +1180,10 @@ LayoutUnit InlineFlowBox::computeOverAnnotationAdjustment(LayoutUnit allowedPosi
             TextEmphasisPosition emphasisMarkPosition;
             if (style.getTextEmphasisMark() != TextEmphasisMarkNone && toInlineTextBox(curr)->getEmphasisMarkPosition(style, emphasisMarkPosition) && emphasisMarkPosition == TextEmphasisPositionOver) {
                 if (!style.isFlippedLinesWritingMode()) {
-                    int topOfEmphasisMark = curr->logicalTop() - style.font().emphasisMarkHeight(style.textEmphasisMarkString());
+                    int topOfEmphasisMark = (curr->logicalTop() - style.font().emphasisMarkHeight(style.textEmphasisMarkString())).toInt();
                     result = std::max(result, allowedPosition - topOfEmphasisMark);
                 } else {
-                    int bottomOfEmphasisMark = curr->logicalBottom() + style.font().emphasisMarkHeight(style.textEmphasisMarkString());
+                    int bottomOfEmphasisMark = (curr->logicalBottom() + style.font().emphasisMarkHeight(style.textEmphasisMarkString())).toInt();
                     result = std::max(result, bottomOfEmphasisMark - allowedPosition);
                 }
             }
@@ -1232,7 +1239,7 @@ LayoutUnit InlineFlowBox::computeUnderAnnotationAdjustment(LayoutUnit allowedPos
     return result;
 }
 
-void InlineFlowBox::collectLeafBoxesInLogicalOrder(Vector<InlineBox*>& leafBoxesInLogicalOrder, CustomInlineBoxRangeReverse customReverseImplementation, void* userData) const
+void InlineFlowBox::collectLeafBoxesInLogicalOrder(Vector<InlineBox*>& leafBoxesInLogicalOrder, CustomInlineBoxRangeReverse customReverseImplementation) const
 {
     InlineBox* leaf = firstLeafChild();
 
@@ -1275,12 +1282,10 @@ void InlineFlowBox::collectLeafBoxesInLogicalOrder(Vector<InlineBox*>& leafBoxes
                 ++it;
             }
             Vector<InlineBox*>::iterator last = it;
-            if (customReverseImplementation) {
-                ASSERT(userData);
-                (*customReverseImplementation)(userData, first, last);
-            } else {
+            if (customReverseImplementation)
+                (*customReverseImplementation)(first, last);
+            else
                 std::reverse(first, last);
-            }
         }
         ++minLevel;
     }

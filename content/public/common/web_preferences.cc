@@ -33,6 +33,16 @@ STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_PARSE, WebSettings::V8CacheOptionsParse);
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_CODE, WebSettings::V8CacheOptionsCode);
 STATIC_ASSERT_ENUM(V8_CACHE_OPTIONS_LAST, WebSettings::V8CacheOptionsCode);
 
+STATIC_ASSERT_ENUM(ProgressBarCompletion::LOAD_EVENT,
+                   WebSettings::ProgressBarCompletion::LoadEvent);
+STATIC_ASSERT_ENUM(ProgressBarCompletion::RESOURCES_BEFORE_DCL,
+                   WebSettings::ProgressBarCompletion::ResourcesBeforeDCL);
+STATIC_ASSERT_ENUM(ProgressBarCompletion::DOM_CONTENT_LOADED,
+                   WebSettings::ProgressBarCompletion::DOMContentLoaded);
+STATIC_ASSERT_ENUM(
+    ProgressBarCompletion::RESOURCES_BEFORE_DCL_AND_SAME_ORIGIN_IFRAMES,
+    WebSettings::ProgressBarCompletion::ResourcesBeforeDCLAndSameOriginIFrames);
+
 STATIC_ASSERT_ENUM(IMAGE_ANIMATION_POLICY_ALLOWED,
                    WebSettings::ImageAnimationPolicyAllowed);
 STATIC_ASSERT_ENUM(IMAGE_ANIMATION_POLICY_ANIMATION_ONCE,
@@ -72,7 +82,6 @@ WebPreferences::WebPreferences()
       plugins_enabled(true),
       dom_paste_enabled(false),  // enables execCommand("paste")
       shrinks_standalone_images_to_fit(true),
-      uses_universal_detector(false),  // Disabled: page cycler regression
       text_areas_are_resizable(true),
       allow_scripts_to_close_windows(false),
       remote_fonts_enabled(true),
@@ -86,6 +95,7 @@ WebPreferences::WebPreferences()
       application_cache_enabled(false),
       tabs_to_links(true),
       caret_browsing_enabled(false),
+      history_entry_requires_user_gesture(false),
       hyperlink_auditing_enabled(true),
       allow_universal_access_from_file_urls(false),
       allow_file_access_from_file_urls(false),
@@ -97,7 +107,7 @@ WebPreferences::WebPreferences()
       privileged_webgl_extensions_enabled(false),
       webgl_errors_to_console_enabled(true),
       mock_scrollbars_enabled(false),
-      unified_textchecker_enabled(false),
+      hide_scrollbars(false),
       accelerated_2d_canvas_enabled(false),
       minimum_accelerated_2d_canvas_size(257 * 256),
       disable_2d_canvas_copy_on_write(false),
@@ -107,7 +117,6 @@ WebPreferences::WebPreferences()
       accelerated_filters_enabled(false),
       deferred_filters_enabled(false),
       container_culling_enabled(false),
-      allow_displaying_insecure_content(true),
       allow_running_insecure_content(false),
       disable_reading_from_canvas(false),
       strict_mixed_content_checking(false),
@@ -129,7 +138,6 @@ WebPreferences::WebPreferences()
       available_hover_types(0),
       primary_hover_type(ui::HOVER_TYPE_NONE),
       sync_xhr_in_documents_enabled(true),
-      image_color_profiles_enabled(false),
       should_respect_image_orientation(false),
       number_of_cpu_cores(1),
 #if defined(OS_MACOSX)
@@ -147,10 +155,14 @@ WebPreferences::WebPreferences()
       viewport_enabled(false),
 #if defined(OS_ANDROID)
       viewport_meta_enabled(true),
+      shrinks_viewport_contents_to_fit(true),
       viewport_style(ViewportStyle::MOBILE),
+      always_show_context_menu_on_touch(false),
 #else
       viewport_meta_enabled(false),
+      shrinks_viewport_contents_to_fit(false),
       viewport_style(ViewportStyle::DEFAULT),
+      always_show_context_menu_on_touch(true),
 #endif
       main_frame_resizes_are_orientation_changes(false),
       initialize_at_minimum_page_scale(true),
@@ -192,6 +204,8 @@ WebPreferences::WebPreferences()
       ignore_main_frame_overflow_hidden_quirk(false),
       report_screen_size_in_physical_pixels_quirk(false),
       resue_global_for_unowned_main_frame(false),
+      autoplay_muted_videos_enabled(false),
+      progress_bar_completion(ProgressBarCompletion::LOAD_EVENT),
 #endif
 #if defined(OS_ANDROID)
       default_minimum_page_scale_factor(0.25f),

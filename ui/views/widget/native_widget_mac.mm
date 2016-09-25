@@ -8,9 +8,11 @@
 
 #include <utility>
 
+#import "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #import "ui/base/cocoa/constrained_window/constrained_window_animation.h"
 #import "ui/base/cocoa/window_size_constants.h"
 #include "ui/gfx/font_list.h"
@@ -20,8 +22,11 @@
 #include "ui/native_theme/native_theme_mac.h"
 #import "ui/views/cocoa/bridged_content_view.h"
 #import "ui/views/cocoa/bridged_native_widget.h"
+#include "ui/views/cocoa/cocoa_mouse_capture.h"
+#import "ui/views/cocoa/drag_drop_client_mac.h"
 #import "ui/views/cocoa/native_widget_mac_nswindow.h"
 #import "ui/views/cocoa/views_nswindow_delegate.h"
+#include "ui/views/widget/drop_helper.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/window/native_frame_view.h"
 
@@ -201,11 +206,9 @@ void NativeWidgetMac::ReorderNativeViews() {
 }
 
 void NativeWidgetMac::ViewRemoved(View* view) {
-  // TODO(tapted): Something for drag and drop might be needed here in future.
-  // See http://crbug.com/464581. A NOTIMPLEMENTED() here makes a lot of spam,
-  // so only emit it when a drag and drop could be likely.
-  if (IsMouseButtonDown())
-    NOTIMPLEMENTED();
+  DragDropClientMac* client = bridge_ ? bridge_->drag_drop_client() : nullptr;
+  if (client)
+    client->drop_helper()->ResetTargetViewIfEquals(view);
 }
 
 void NativeWidgetMac::SetNativeWindowProperty(const char* name, void* value) {
@@ -306,6 +309,10 @@ gfx::Rect NativeWidgetMac::GetRestoredBounds() const {
   return bridge_ ? bridge_->GetRestoredBounds() : gfx::Rect();
 }
 
+std::string NativeWidgetMac::GetWorkspace() const {
+  return std::string();
+}
+
 void NativeWidgetMac::SetBounds(const gfx::Rect& bounds) {
   if (bridge_)
     bridge_->SetBounds(bounds);
@@ -329,7 +336,7 @@ void NativeWidgetMac::StackBelow(gfx::NativeView native_view) {
   NOTIMPLEMENTED();
 }
 
-void NativeWidgetMac::SetShape(SkRegion* shape) {
+void NativeWidgetMac::SetShape(std::unique_ptr<SkRegion> shape) {
   NOTIMPLEMENTED();
 }
 
@@ -362,7 +369,13 @@ void NativeWidgetMac::Close() {
   // like -performClose:, first remove the window from AppKit's display
   // list to avoid crashes like http://crbug.com/156101.
   [window orderOut:nil];
-  [window performSelector:@selector(close) withObject:nil afterDelay:0];
+
+  // Many tests assume that base::RunLoop().RunUntilIdle() is always sufficient
+  // to execute a close. However, in rare cases, -performSelector:..afterDelay:0
+  // does not do this. So post a regular task.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, base::BindBlock(^{
+    [window close];
+  }));
 }
 
 void NativeWidgetMac::CloseNow() {
@@ -450,6 +463,10 @@ void NativeWidgetMac::SetVisibleOnAllWorkspaces(bool always_visible) {
   gfx::SetNSWindowVisibleOnAllWorkspaces(GetNativeWindow(), always_visible);
 }
 
+bool NativeWidgetMac::IsVisibleOnAllWorkspaces() const {
+  return false;
+}
+
 void NativeWidgetMac::Maximize() {
   NOTIMPLEMENTED();  // See IsMaximized().
 }
@@ -490,8 +507,8 @@ bool NativeWidgetMac::IsFullscreen() const {
   return bridge_ && bridge_->target_fullscreen_state();
 }
 
-void NativeWidgetMac::SetOpacity(unsigned char opacity) {
-  [GetNativeWindow() setAlphaValue:opacity / 255.0];
+void NativeWidgetMac::SetOpacity(float opacity) {
+  [GetNativeWindow() setAlphaValue:opacity];
 }
 
 void NativeWidgetMac::FlashFrame(bool flash_frame) {
@@ -503,7 +520,7 @@ void NativeWidgetMac::RunShellDrag(View* view,
                                    const gfx::Point& location,
                                    int operation,
                                    ui::DragDropTypes::DragEventSource source) {
-  NOTIMPLEMENTED();
+  bridge_->drag_drop_client()->StartDragAndDrop(view, data, operation, source);
 }
 
 void NativeWidgetMac::SchedulePaintInRect(const gfx::Rect& rect) {
@@ -547,12 +564,15 @@ Widget::MoveLoopResult NativeWidgetMac::RunMoveLoop(
     const gfx::Vector2d& drag_offset,
     Widget::MoveLoopSource source,
     Widget::MoveLoopEscapeBehavior escape_behavior) {
-  NOTIMPLEMENTED();
-  return Widget::MOVE_LOOP_CANCELED;
+  if (!bridge_)
+    return Widget::MOVE_LOOP_CANCELED;
+
+  return bridge_->RunMoveLoop(drag_offset);
 }
 
 void NativeWidgetMac::EndMoveLoop() {
-  NOTIMPLEMENTED();
+  if (bridge_)
+    bridge_->EndMoveLoop();
 }
 
 void NativeWidgetMac::SetVisibilityChangedAnimationsEnabled(bool value) {
@@ -713,6 +733,12 @@ bool NativeWidgetPrivate::IsMouseButtonDown() {
 gfx::FontList NativeWidgetPrivate::GetWindowTitleFontList() {
   NOTIMPLEMENTED();
   return gfx::FontList();
+}
+
+// static
+gfx::NativeView NativeWidgetPrivate::GetGlobalCapture(
+    gfx::NativeView native_view) {
+  return [CocoaMouseCapture::GetGlobalCaptureWindow() contentView];
 }
 
 }  // namespace internal

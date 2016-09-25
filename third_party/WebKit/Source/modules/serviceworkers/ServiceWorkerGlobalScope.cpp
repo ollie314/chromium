@@ -31,10 +31,10 @@
 #include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
 
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
-#include "bindings/core/v8/ScriptCallStack.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
+#include "bindings/core/v8/SourceLocation.h"
 #include "bindings/core/v8/V8ThrowException.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/events/Event.h"
@@ -42,7 +42,9 @@
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/WorkerInspectorController.h"
+#include "core/inspector/WorkerThreadDebugger.h"
 #include "core/loader/ThreadableLoader.h"
+#include "core/origin_trials/OriginTrialContext.h"
 #include "core/workers/WorkerClients.h"
 #include "core/workers/WorkerThreadStartupData.h"
 #include "modules/EventTargetModules.h"
@@ -61,24 +63,29 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebURL.h"
 #include "wtf/CurrentTime.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
-ServiceWorkerGlobalScope* ServiceWorkerGlobalScope::create(ServiceWorkerThread* thread, PassOwnPtr<WorkerThreadStartupData> startupData)
+ServiceWorkerGlobalScope* ServiceWorkerGlobalScope::create(ServiceWorkerThread* thread, std::unique_ptr<WorkerThreadStartupData> startupData)
 {
     // Note: startupData is finalized on return. After the relevant parts has been
     // passed along to the created 'context'.
-    ServiceWorkerGlobalScope* context = new ServiceWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, monotonicallyIncreasingTime(), startupData->m_starterOriginPrivilegeData.release(), startupData->m_workerClients.release());
+    ServiceWorkerGlobalScope* context = new ServiceWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, monotonicallyIncreasingTime(), std::move(startupData->m_starterOriginPrivilegeData), startupData->m_workerClients.release());
 
     context->setV8CacheOptions(startupData->m_v8CacheOptions);
     context->applyContentSecurityPolicyFromVector(*startupData->m_contentSecurityPolicyHeaders);
+    if (!startupData->m_referrerPolicy.isNull())
+        context->parseAndSetReferrerPolicy(startupData->m_referrerPolicy);
     context->setAddressSpace(startupData->m_addressSpace);
+    OriginTrialContext::addTokens(context, startupData->m_originTrialTokens.get());
 
     return context;
 }
 
-ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(const KURL& url, const String& userAgent, ServiceWorkerThread* thread, double timeOrigin, PassOwnPtr<SecurityOrigin::PrivilegeData> starterOriginPrivilegeData, WorkerClients* workerClients)
-    : WorkerGlobalScope(url, userAgent, thread, timeOrigin, starterOriginPrivilegeData, workerClients)
+ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(const KURL& url, const String& userAgent, ServiceWorkerThread* thread, double timeOrigin, std::unique_ptr<SecurityOrigin::PrivilegeData> starterOriginPrivilegeData, WorkerClients* workerClients)
+    : WorkerGlobalScope(url, userAgent, thread, timeOrigin, std::move(starterOriginPrivilegeData), workerClients)
     , m_didEvaluateScript(false)
     , m_hadErrorInTopLevelEventHandler(false)
     , m_eventNestingLevel(0)
@@ -90,6 +97,13 @@ ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(const KURL& url, const String
 
 ServiceWorkerGlobalScope::~ServiceWorkerGlobalScope()
 {
+}
+
+void ServiceWorkerGlobalScope::countScript(size_t scriptSize, size_t cachedMetadataSize)
+{
+    ++m_scriptCount;
+    m_scriptTotalSize += scriptSize;
+    m_scriptCachedMetadataTotalSize += cachedMetadataSize;
 }
 
 void ServiceWorkerGlobalScope::didEvaluateWorkerScript()
@@ -122,11 +136,6 @@ ServiceWorkerRegistration* ServiceWorkerGlobalScope::registration()
     return m_registration;
 }
 
-void ServiceWorkerGlobalScope::close(ExceptionState& exceptionState)
-{
-    exceptionState.throwDOMException(InvalidAccessError, "Not supported.");
-}
-
 ScriptPromise ServiceWorkerGlobalScope::skipWaiting(ScriptState* scriptState)
 {
     ExecutionContext* executionContext = scriptState->getExecutionContext();
@@ -145,19 +154,14 @@ void ServiceWorkerGlobalScope::setRegistration(std::unique_ptr<WebServiceWorkerR
 {
     if (!getExecutionContext())
         return;
-    m_registration = ServiceWorkerRegistration::getOrCreate(getExecutionContext(), adoptPtr(handle.release()));
+    m_registration = ServiceWorkerRegistration::getOrCreate(getExecutionContext(), wrapUnique(handle.release()));
 }
 
-bool ServiceWorkerGlobalScope::addEventListenerInternal(const AtomicString& eventType, EventListener* listener, const EventListenerOptions& options)
+bool ServiceWorkerGlobalScope::addEventListenerInternal(const AtomicString& eventType, EventListener* listener, const AddEventListenerOptionsResolved& options)
 {
     if (m_didEvaluateScript) {
-        if (eventType == EventTypeNames::install) {
-            ConsoleMessage* consoleMessage = ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "Event handler of 'install' event must be added on the initial evaluation of worker script.");
-            addMessageToWorkerConsole(consoleMessage);
-        } else if (eventType == EventTypeNames::activate) {
-            ConsoleMessage* consoleMessage = ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "Event handler of 'activate' event must be added on the initial evaluation of worker script.");
-            addMessageToWorkerConsole(consoleMessage);
-        }
+        String message = String::format("Event handler of '%s' event must be added on the initial evaluation of worker script.", eventType.utf8().data());
+        addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, message));
     }
     return WorkerGlobalScope::addEventListenerInternal(eventType, listener, options);
 }
@@ -184,8 +188,12 @@ void ServiceWorkerGlobalScope::dispatchExtendableEvent(Event* event, WaitUntilOb
 
     observer->willDispatchEvent();
     dispatchEvent(event);
-    if (thread()->terminated())
+
+    // Check if the worker thread is forcibly terminated during the event
+    // because of timeout etc.
+    if (thread()->isForciblyTerminated())
         m_hadErrorInTopLevelEventHandler = true;
+
     observer->didDispatchEvent(m_hadErrorInTopLevelEventHandler);
 }
 
@@ -211,20 +219,11 @@ CachedMetadataHandler* ServiceWorkerGlobalScope::createWorkerScriptCachedMetadat
     return ServiceWorkerScriptCachedMetadataHandler::create(this, scriptURL, metaData);
 }
 
-void ServiceWorkerGlobalScope::logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtr<ScriptCallStack> callStack)
+void ServiceWorkerGlobalScope::exceptionThrown(ErrorEvent* event)
 {
-    WorkerGlobalScope::logExceptionToConsole(errorMessage, scriptId, sourceURL, lineNumber, columnNumber, callStack);
-    ConsoleMessage* consoleMessage = ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, errorMessage, sourceURL, lineNumber, columnNumber);
-    consoleMessage->setScriptId(scriptId);
-    consoleMessage->setCallStack(callStack);
-    addMessageToWorkerConsole(consoleMessage);
-}
-
-void ServiceWorkerGlobalScope::scriptLoaded(size_t scriptSize, size_t cachedMetadataSize)
-{
-    ++m_scriptCount;
-    m_scriptTotalSize += scriptSize;
-    m_scriptCachedMetadataTotalSize += cachedMetadataSize;
+    WorkerGlobalScope::exceptionThrown(event);
+    if (WorkerThreadDebugger* debugger = WorkerThreadDebugger::from(thread()->isolate()))
+        debugger->exceptionThrown(event);
 }
 
 } // namespace blink

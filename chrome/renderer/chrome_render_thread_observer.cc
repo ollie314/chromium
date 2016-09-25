@@ -12,7 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
@@ -25,8 +24,8 @@
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
@@ -38,9 +37,8 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/content_settings_observer.h"
 #include "chrome/renderer/security_filter_peer.h"
-#include "components/variations/variations_util.h"
+#include "components/visitedlink/renderer/visitedlink_slave.h"
 #include "content/public/child/resource_dispatcher_delegate.h"
-#include "content/public/common/service_registry.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_view_visitor.h"
@@ -48,10 +46,10 @@
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_module.h"
+#include "services/shell/public/cpp/interface_registry.h"
 #include "third_party/WebKit/public/web/WebCache.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
-#include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
@@ -60,7 +58,6 @@
 #endif
 
 using blink::WebCache;
-using blink::WebRuntimeFeatures;
 using blink::WebSecurityPolicy;
 using blink::WebString;
 using content::RenderThread;
@@ -131,13 +128,9 @@ static const int kWaitForWorkersStatsTimeoutMS = 20;
 
 class ResourceUsageReporterImpl : public mojom::ResourceUsageReporter {
  public:
-  ResourceUsageReporterImpl(
-      base::WeakPtr<ChromeRenderThreadObserver> observer,
-      mojo::InterfaceRequest<mojom::ResourceUsageReporter> req)
-      : workers_to_go_(0),
-        binding_(this, std::move(req)),
-        observer_(observer),
-        weak_factory_(this) {}
+  explicit ResourceUsageReporterImpl(
+      base::WeakPtr<ChromeRenderThreadObserver> observer)
+      : workers_to_go_(0), observer_(observer), weak_factory_(this) {}
   ~ResourceUsageReporterImpl() override {}
 
  private:
@@ -169,13 +162,12 @@ class ResourceUsageReporterImpl : public mojom::ResourceUsageReporter {
   void SendResults() {
     if (!callback_.is_null())
       callback_.Run(std::move(usage_data_));
-    callback_.reset();
+    callback_.Reset();
     weak_factory_.InvalidateWeakPtrs();
     workers_to_go_ = 0;
   }
 
-  void GetUsageData(const mojo::Callback<void(mojom::ResourceUsageDataPtr)>&
-                        callback) override {
+  void GetUsageData(const GetUsageDataCallback& callback) override {
     DCHECK(callback_.is_null());
     weak_factory_.InvalidateWeakPtrs();
     usage_data_ = mojom::ResourceUsageData::New();
@@ -219,9 +211,8 @@ class ResourceUsageReporterImpl : public mojom::ResourceUsageReporter {
   }
 
   mojom::ResourceUsageDataPtr usage_data_;
-  mojo::Callback<void(mojom::ResourceUsageDataPtr)> callback_;
+  GetUsageDataCallback callback_;
   int workers_to_go_;
-  mojo::StrongBinding<mojom::ResourceUsageReporter> binding_;
   base::WeakPtr<ChromeRenderThreadObserver> observer_;
 
   base::WeakPtrFactory<ResourceUsageReporterImpl> weak_factory_;
@@ -232,7 +223,8 @@ class ResourceUsageReporterImpl : public mojom::ResourceUsageReporter {
 void CreateResourceUsageReporter(
     base::WeakPtr<ChromeRenderThreadObserver> observer,
     mojo::InterfaceRequest<mojom::ResourceUsageReporter> request) {
-  new ResourceUsageReporterImpl(observer, std::move(request));
+  mojo::MakeStrongBinding(base::MakeUnique<ResourceUsageReporterImpl>(observer),
+                          std::move(request));
 }
 
 }  // namespace
@@ -240,19 +232,17 @@ void CreateResourceUsageReporter(
 bool ChromeRenderThreadObserver::is_incognito_process_ = false;
 
 ChromeRenderThreadObserver::ChromeRenderThreadObserver()
-    : weak_factory_(this) {
+    : field_trial_syncer_(this),
+      visited_link_slave_(new visitedlink::VisitedLinkSlave),
+      weak_factory_(this) {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
-
-#if defined(ENABLE_AUTOFILL_DIALOG)
-  WebRuntimeFeatures::enableRequestAutocomplete(true);
-#endif
 
   RenderThread* thread = RenderThread::Get();
   resource_delegate_.reset(new RendererResourceDelegate());
   thread->SetResourceDispatcherDelegate(resource_delegate_.get());
 
-  thread->GetServiceRegistry()->AddService(
+  thread->GetInterfaceRegistry()->AddInterface(
       base::Bind(CreateResourceUsageReporter, weak_factory_.GetWeakPtr()));
 
   // Configure modules that need access to resources.
@@ -260,7 +250,7 @@ ChromeRenderThreadObserver::ChromeRenderThreadObserver()
   media::SetLocalizedStringProvider(
       chrome_common_media::LocalizedStringProvider);
 
-  InitFieldTrialObserving(command_line);
+  field_trial_syncer_.InitFieldTrialObserving(command_line);
 
   // chrome-native: is a scheme used for placeholder navigations that allow
   // UIs to be drawn with platform native widgets instead of HTML.  These pages
@@ -274,37 +264,12 @@ ChromeRenderThreadObserver::ChromeRenderThreadObserver()
   WebSecurityPolicy::registerURLSchemeAsNoAccess(native_scheme);
   WebSecurityPolicy::registerURLSchemeAsNotAllowingJavascriptURLs(
       native_scheme);
+
+  thread->GetInterfaceRegistry()->AddInterface(
+      visited_link_slave_->GetBindCallback());
 }
 
 ChromeRenderThreadObserver::~ChromeRenderThreadObserver() {}
-
-void ChromeRenderThreadObserver::InitFieldTrialObserving(
-    const base::CommandLine& command_line) {
-  // Set up initial set of crash dump data for field trials in this renderer.
-  variations::SetVariationListCrashKeys();
-
-  // Listen for field trial activations to report them to the browser.
-  base::FieldTrialList::AddObserver(this);
-
-  // Some field trials may have been activated before this point. Notify the
-  // browser of these activations now. To detect these, take the set difference
-  // of currently active trials with the initially active trials.
-  base::FieldTrial::ActiveGroups initially_active_trials;
-  base::FieldTrialList::GetActiveFieldTrialGroupsFromString(
-      command_line.GetSwitchValueASCII(switches::kForceFieldTrials),
-      &initially_active_trials);
-  std::set<std::string> initially_active_trials_set;
-  for (const auto& entry : initially_active_trials) {
-    initially_active_trials_set.insert(std::move(entry.trial_name));
-  }
-
-  base::FieldTrial::ActiveGroups current_active_trials;
-  base::FieldTrialList::GetActiveFieldTrialGroups(&current_active_trials);
-  for (const auto& trial : current_active_trials) {
-    if (!ContainsKey(initially_active_trials_set, trial.trial_name))
-      OnFieldTrialGroupFinalized(trial.trial_name, trial.group_name);
-  }
-}
 
 bool ChromeRenderThreadObserver::OnControlMessageReceived(
     const IPC::Message& message) {
@@ -320,6 +285,17 @@ bool ChromeRenderThreadObserver::OnControlMessageReceived(
   return handled;
 }
 
+void ChromeRenderThreadObserver::OnRenderProcessShutdown() {
+  visited_link_slave_.reset();
+}
+
+void ChromeRenderThreadObserver::OnFieldTrialGroupFinalized(
+    const std::string& trial_name,
+    const std::string& group_name) {
+  content::RenderThread::Get()->Send(
+      new ChromeViewHostMsg_FieldTrialActivated(trial_name));
+}
+
 void ChromeRenderThreadObserver::OnSetIsIncognitoProcess(
     bool is_incognito_process) {
   is_incognito_process_ = is_incognito_process;
@@ -331,49 +307,12 @@ void ChromeRenderThreadObserver::OnSetContentSettingRules(
 }
 
 void ChromeRenderThreadObserver::OnSetFieldTrialGroup(
-    const std::string& field_trial_name,
-    const std::string& group_name,
-    base::ProcessId sender_pid) {
-  // Check that the sender's PID doesn't change between messages. We expect
-  // these IPCs to always be delivered from the same browser process, whose pid
-  // should not change.
-  // TODO(asvitkine): Remove this after http://crbug.com/359406 is fixed.
-  static base::ProcessId sender_pid_cached = sender_pid;
-  CHECK_EQ(sender_pid_cached, sender_pid) << sender_pid_cached << "/"
-                                          << sender_pid;
-  base::FieldTrial* trial =
-      base::FieldTrialList::CreateFieldTrial(field_trial_name, group_name);
-  // TODO(asvitkine): Remove this after http://crbug.com/359406 is fixed.
-  if (!trial) {
-    // Log the --force-fieldtrials= switch value for debugging purposes. Take
-    // its substring starting with the trial name, since otherwise the end of
-    // it can get truncated in the dump.
-    std::string switch_substr = base::CommandLine::ForCurrentProcess()->
-        GetSwitchValueASCII(switches::kForceFieldTrials);
-    size_t index = switch_substr.find(field_trial_name);
-    if (index != std::string::npos) {
-      // If possible, log the string one char before the trial name, as there
-      // may be a leading * to indicate it should be activated.
-      switch_substr = switch_substr.substr(index > 0 ? index - 1 : index);
-    }
-    CHECK(trial) << field_trial_name << ":" << group_name << "=>"
-                 << base::FieldTrialList::FindFullName(field_trial_name)
-                 << " ] " << switch_substr;
-  }
-  // Ensure the trial is marked as "used" by calling group() on it if it is
-  // marked as activated.
-  trial->group();
-  variations::SetVariationListCrashKeys();
+    const std::string& trial_name,
+    const std::string& group_name) {
+  field_trial_syncer_.OnSetFieldTrialGroup(trial_name, group_name);
 }
 
 const RendererContentSettingRules*
 ChromeRenderThreadObserver::content_setting_rules() const {
   return &content_setting_rules_;
-}
-
-void ChromeRenderThreadObserver::OnFieldTrialGroupFinalized(
-    const std::string& trial_name,
-    const std::string& group_name) {
-  content::RenderThread::Get()->Send(
-      new ChromeViewHostMsg_FieldTrialActivated(trial_name));
 }

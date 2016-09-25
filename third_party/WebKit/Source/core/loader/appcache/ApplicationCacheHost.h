@@ -35,8 +35,8 @@
 #include "platform/weborigin/KURL.h"
 #include "public/platform/WebApplicationCacheHostClient.h"
 #include "wtf/Allocator.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
     class ApplicationCache;
@@ -57,23 +57,23 @@ namespace blink {
 
         // The Status numeric values are specified in the HTML5 spec.
         enum Status {
-            UNCACHED = 0,
-            IDLE = 1,
-            CHECKING = 2,
-            DOWNLOADING = 3,
-            UPDATEREADY = 4,
-            OBSOLETE = 5
+            kUncached = 0,
+            kIdle = 1,
+            kChecking = 2,
+            kDownloading = 3,
+            kUpdateready = 4,
+            kObsolete = 5
         };
 
         enum EventID {
-            CHECKING_EVENT = 0,
-            ERROR_EVENT,
-            NOUPDATE_EVENT,
-            DOWNLOADING_EVENT,
-            PROGRESS_EVENT,
-            UPDATEREADY_EVENT,
-            CACHED_EVENT,
-            OBSOLETE_EVENT  // Must remain the last value, this is used to size arrays.
+            kCheckingEvent = 0,
+            kErrorEvent,
+            kNoupdateEvent,
+            kDownloadingEvent,
+            kProgressEvent,
+            kUpdatereadyEvent,
+            kCachedEvent,
+            kObsoleteEvent // Must remain the last value, this is used to size arrays.
         };
 
         struct CacheInfo {
@@ -175,7 +175,7 @@ namespace blink {
 
         void dispatchDOMEvent(EventID, int progressTotal, int progressDone, WebApplicationCacheHost::ErrorReason, const String& errorURL, int errorStatus, const String& errorMessage);
 
-        OwnPtr<WebApplicationCacheHost> m_host;
+        std::unique_ptr<WebApplicationCacheHost> m_host;
     };
 
 }  // namespace blink

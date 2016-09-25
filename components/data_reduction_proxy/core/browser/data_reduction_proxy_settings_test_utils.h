@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 
+#include "base/message_loop/message_loop.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/prefs/testing_pref_service.h"
 #include "net/log/test_net_log.h"
@@ -71,7 +72,6 @@ class DataReductionProxySettingsTestBase : public testing::Test {
   void InitWithStatisticsPrefs();
   void InitDataReductionProxy(bool enabled_at_startup);
   void CheckDataReductionProxySyntheticTrial(bool enabled);
-  void CheckDataReductionProxyLoFiSyntheticTrial(bool enabled);
   bool SyntheticFieldTrialRegistrationCallback(const std::string& trial_name,
                                                const std::string& group_name) {
     synthetic_field_trials_[trial_name] = group_name;

@@ -6,10 +6,10 @@ package org.chromium.chrome.browser.net.spdyproxy;
 
 import android.content.Context;
 import android.net.Uri;
-import android.preference.PreferenceManager;
 import android.text.TextUtils;
 import android.webkit.URLUtil;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
@@ -80,7 +80,7 @@ public class DataReductionProxySettings {
     public static boolean isEnabledBeforeNativeLoad(Context context) {
         // TODO(lizeb): Add a listener for the native preference change to keep
         // both in sync and avoid the false-positives and false-negatives.
-        return PreferenceManager.getDefaultSharedPreferences(context).getBoolean(
+        return ContextUtils.getAppSharedPreferences().getBoolean(
             DATA_REDUCTION_ENABLED_PREF, false);
     }
 
@@ -99,7 +99,7 @@ public class DataReductionProxySettings {
     public static void reconcileDataReductionProxyEnabledState(Context context) {
         ThreadUtils.assertOnUiThread();
         boolean enabled = getInstance().isDataReductionProxyEnabled();
-        PreferenceManager.getDefaultSharedPreferences(context).edit()
+        ContextUtils.getAppSharedPreferences().edit()
                 .putBoolean(DATA_REDUCTION_ENABLED_PREF, enabled).apply();
     }
 
@@ -140,7 +140,7 @@ public class DataReductionProxySettings {
      * data reduction statistics if this is the first time the SPDY proxy has been enabled.
      */
     public void setDataReductionProxyEnabled(Context context, boolean enabled) {
-        PreferenceManager.getDefaultSharedPreferences(context).edit()
+        ContextUtils.getAppSharedPreferences().edit()
                 .putBoolean(DATA_REDUCTION_ENABLED_PREF, enabled).apply();
         nativeSetDataReductionProxyEnabled(mNativeDataReductionProxySettings, enabled);
     }
@@ -180,22 +180,6 @@ public class DataReductionProxySettings {
      */
     public void setLoFiLoadImageRequested() {
         nativeSetLoFiLoadImageRequested(mNativeDataReductionProxySettings);
-    }
-
-    /**
-     * Counts the number of times the Lo-Fi snackbar has been shown.
-     *  */
-    public void incrementLoFiSnackbarShown() {
-        nativeIncrementLoFiSnackbarShown(mNativeDataReductionProxySettings);
-    }
-
-    /**
-     * Counts the number of requests to reload the page with images from the Lo-Fi snackbar. If the
-     * user requests the page with images a certain number of times, then Lo-Fi is disabled for the
-     * session.
-     *  */
-    public void incrementLoFiUserRequestsForImages() {
-        nativeIncrementLoFiUserRequestsForImages(mNativeDataReductionProxySettings);
     }
 
     /** Returns true if the SPDY proxy is managed by an administrator's policy. */
@@ -316,10 +300,6 @@ public class DataReductionProxySettings {
     private native boolean nativeWasLoFiLoadImageRequestedBefore(
             long nativeDataReductionProxySettingsAndroid);
     private native void nativeSetLoFiLoadImageRequested(
-            long nativeDataReductionProxySettingsAndroid);
-    private native void nativeIncrementLoFiSnackbarShown(
-            long nativeDataReductionProxySettingsAndroid);
-    private native void nativeIncrementLoFiUserRequestsForImages(
             long nativeDataReductionProxySettingsAndroid);
     private native boolean nativeIsDataReductionProxyManaged(
             long nativeDataReductionProxySettingsAndroid);

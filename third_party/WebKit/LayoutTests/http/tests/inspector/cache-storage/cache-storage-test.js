@@ -20,13 +20,12 @@ InspectorTest.dumpCacheTree = function()
                 return resolve();
             }
 
-            WebInspector.panels.resources.cacheStorageListTreeElement._refreshCaches();
             queryView(0);
 
             function queryView(i)
             {
                 var cacheTreeElement = cachesTreeElement.childAt(i);
-                InspectorTest.addResult("    cache: " + cacheTreeElement.titleText);
+                InspectorTest.addResult("    cache: " + cacheTreeElement.title);
                 var view = cacheTreeElement._view;
                 InspectorTest.addSniffer(WebInspector.ServiceWorkerCacheView.prototype, "_updateDataCallback", addDataResult, false);
                 if (!view)
@@ -89,7 +88,7 @@ InspectorTest.deleteCacheFromInspector = function(cacheName, optionalEntry)
                 }
                 for (var i = 0; i < cachesTreeElement.childCount(); i++) {
                     var cacheTreeElement = cachesTreeElement.childAt(i);
-                    var title = cacheTreeElement.titleText;
+                    var title = cacheTreeElement.title;
                     var elementCacheName = title.substring(0, title.lastIndexOf(" - "));
                     if (elementCacheName != cacheName)
                         continue;
@@ -136,44 +135,43 @@ InspectorTest.waitForCacheRefresh = function(callback)
 
 InspectorTest.createCache = function(cacheName)
 {
-    return InspectorTest.invokePageFunctionPromise("createCache", [cacheName]);
+    return InspectorTest.callFunctionInPageAsync("createCache", [ cacheName ]);
 }
 
 InspectorTest.addCacheEntry = function(cacheName, requestUrl, responseText)
 {
-    return InspectorTest.invokePageFunctionPromise("addCacheEntry", [cacheName, requestUrl, responseText]);
+    return InspectorTest.callFunctionInPageAsync("addCacheEntry", [ cacheName, requestUrl, responseText ]);
 }
 
 InspectorTest.deleteCache = function(cacheName)
 {
-    return InspectorTest.invokePageFunctionPromise("deleteCache", [cacheName]);
+    return InspectorTest.callFunctionInPageAsync("deleteCache", [ cacheName ]);
 }
 
 InspectorTest.deleteCacheEntry = function(cacheName, requestUrl)
 {
-    return InspectorTest.invokePageFunctionPromise("deleteCacheEntry", [cacheName, requestUrl]);
+    return InspectorTest.callFunctionInPageAsync("deleteCacheEntry", [ cacheName, requestUrl ]);
 }
 
 InspectorTest.clearAllCaches = function()
 {
-    return InspectorTest.invokePageFunctionPromise("clearAllCaches", []);
+    return InspectorTest.callFunctionInPageAsync("clearAllCaches");
 }
 }
 
-function onCacheStorageError(reject, e)
+function onCacheStorageError(e)
 {
     console.error("CacheStorage error: " + e);
-    reject();
 }
 
-function createCache(resolve, reject, cacheName)
+function createCache(cacheName)
 {
-    caches.open(cacheName).then(resolve).catch(onCacheStorageError.bind(this, reject));
+    return caches.open(cacheName).catch(onCacheStorageError);
 }
 
-function addCacheEntry(resolve, reject, cacheName, requestUrl, responseText)
+function addCacheEntry(cacheName, requestUrl, responseText)
 {
-    caches.open(cacheName)
+    return caches.open(cacheName)
         .then(function(cache) {
             var request = new Request(requestUrl);
             var myBlob = new Blob();
@@ -181,40 +179,28 @@ function addCacheEntry(resolve, reject, cacheName, requestUrl, responseText)
             var response = new Response(myBlob, init);
             return cache.put(request, response);
         })
-        .then(resolve)
-        .catch(onCacheStorageError.bind(this, reject));
+        .catch(onCacheStorageError);
 }
 
-function deleteCache(resolve, reject, cacheName)
+function deleteCache(cacheName)
 {
-    caches.delete(cacheName)
+    return caches.delete(cacheName)
         .then(function(success) {
-            if (success)
-                resolve();
-            else
-                onCacheStorageError(reject, "Could not find cache " + cacheName);
-        }).catch(onCacheStorageError.bind(this, reject));
+            if (!success)
+                onCacheStorageError("Could not find cache " + cacheName);
+        }).catch(onCacheStorageError);
 }
 
-function deleteCacheEntry(resolve, reject, cacheName, requestUrl)
+function deleteCacheEntry(cacheName, requestUrl)
 {
-    caches.open(cacheName)
-        .then(function(cache) {
-            var request = new Request(requestUrl);
-            return cache.delete(request);
-        })
-        .then(resolve)
-        .catch(onCacheStorageError.bind(this, reject));
+    return caches.open(cacheName)
+        .then((cache) => cache.delete(new Request(requestUrl)))
+        .catch(onCacheStorageError);
 }
 
-function clearAllCaches(resolve, reject)
+function clearAllCaches()
 {
-    caches.keys()
-        .then(function(keys) {
-            return Promise.all(keys.map(function(key) {
-                return caches.delete(key);
-            }));
-        })
-        .then(resolve)
-        .catch(onCacheStorageError.bind(this, reject));
+    return caches.keys()
+        .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+        .catch(onCacheStorageError.bind(this, undefined));
 }

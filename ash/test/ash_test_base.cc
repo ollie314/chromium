@@ -7,17 +7,20 @@
 #include <string>
 #include <vector>
 
-#include "ash/ash_switches.h"
+#include "ash/common/wm/window_positioner.h"
+#include "ash/common/wm_root_window_controller.h"
+#include "ash/common/wm_shell.h"
+#include "ash/common/wm_window.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/ime/input_method_event_handler.h"
 #include "ash/shell.h"
 #include "ash/shell/toplevel_window.h"
+#include "ash/test/ash_test_environment.h"
 #include "ash/test/ash_test_helper.h"
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/test_session_state_delegate.h"
 #include "ash/test/test_shell_delegate.h"
 #include "ash/test/test_system_tray_delegate.h"
-#include "ash/wm/window_positioner.h"
 #include "base/command_line.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/screen_position_client.h"
@@ -28,15 +31,12 @@
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/input_method_initializer.h"
+#include "ui/display/display.h"
+#include "ui/display/display_switches.h"
+#include "ui/display/screen.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
-#include "ui/gfx/display.h"
 #include "ui/gfx/geometry/point.h"
-#include "ui/gfx/screen.h"
 #include "ui/wm/core/coordinate_conversion.h"
-
-#if defined(OS_CHROMEOS)
-#include "ash/system/chromeos/tray_display.h"
-#endif
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -60,8 +60,8 @@ class AshEventGeneratorDelegate
   // aura::test::EventGeneratorDelegateAura overrides:
   aura::WindowTreeHost* GetHostAt(
       const gfx::Point& point_in_screen) const override {
-    gfx::Screen* screen = gfx::Screen::GetScreen();
-    gfx::Display display = screen->GetDisplayNearestPoint(point_in_screen);
+    display::Screen* screen = display::Screen::GetScreen();
+    display::Display display = screen->GetDisplayNearestPoint(point_in_screen);
     return Shell::GetInstance()
         ->window_tree_host_manager()
         ->GetRootWindowForDisplayId(display.id())
@@ -90,7 +90,8 @@ class AshEventGeneratorDelegate
 AshTestBase::AshTestBase()
     : setup_called_(false),
       teardown_called_(false),
-      start_session_(true) {
+      start_session_(true),
+      material_mode_(MaterialDesignController::Mode::UNINITIALIZED) {
 #if defined(USE_X11)
   // This is needed for tests which use this base class but are run in browser
   // test binaries so don't get the default initialization in the unit test
@@ -98,10 +99,11 @@ AshTestBase::AshTestBase()
   gfx::InitializeThreadedX11();
 #endif
 
-  thread_bundle_.reset(new content::TestBrowserThreadBundle);
+  ash_test_environment_ = AshTestEnvironment::Create();
+
   // Must initialize |ash_test_helper_| here because some tests rely on
   // AshTestBase methods before they call AshTestBase::SetUp().
-  ash_test_helper_.reset(new AshTestHelper(base::MessageLoopForUI::current()));
+  ash_test_helper_.reset(new AshTestHelper(ash_test_environment_.get()));
 }
 
 AshTestBase::~AshTestBase() {
@@ -122,21 +124,22 @@ void AshTestBase::SetUp() {
   // Use the origin (1,1) so that it doesn't over
   // lap with the native mouse cursor.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (!command_line->HasSwitch(switches::kAshHostWindowBounds)) {
-    command_line->AppendSwitchASCII(
-        switches::kAshHostWindowBounds, "1+1-800x600");
+  if (!command_line->HasSwitch(::switches::kHostWindowBounds)) {
+    command_line->AppendSwitchASCII(::switches::kHostWindowBounds,
+                                    "1+1-800x600");
   }
 #if defined(OS_WIN)
   ui::test::SetUsePopupAsRootWindowForTest(true);
 #endif
-  ash_test_helper_->SetUp(start_session_);
+
+  ash_test_helper_->SetUp(start_session_, material_mode_);
 
   Shell::GetPrimaryRootWindow()->Show();
   Shell::GetPrimaryRootWindow()->GetHost()->Show();
   // Move the mouse cursor to far away so that native events doesn't
   // interfere test expectations.
   Shell::GetPrimaryRootWindow()->MoveCursorTo(gfx::Point(-1000, -1000));
-  ash::Shell::GetInstance()->cursor_manager()->EnableMouseEvents();
+  Shell::GetInstance()->cursor_manager()->EnableMouseEvents();
 
   // Changing GestureConfiguration shouldn't make tests fail. These values
   // prevent unexpected events from being generated during tests. Such as
@@ -146,11 +149,6 @@ void AshTestBase::SetUp() {
   gesture_config->set_max_touch_down_duration_for_click_in_ms(800);
   gesture_config->set_long_press_time_in_ms(1000);
   gesture_config->set_max_touch_move_in_pixels_for_click(5);
-
-#if defined(OS_WIN)
-  if (!command_line->HasSwitch(ash::switches::kForceAshToDesktop))
-    ash::WindowPositioner::SetMaximizeFirstWindow(true);
-#endif
 }
 
 void AshTestBase::TearDown() {
@@ -167,7 +165,20 @@ void AshTestBase::TearDown() {
   event_generator_.reset();
   // Some tests set an internal display id,
   // reset it here, so other tests will continue in a clean environment.
-  gfx::Display::SetInternalDisplayId(gfx::Display::kInvalidDisplayID);
+  display::Display::SetInternalDisplayId(display::Display::kInvalidDisplayID);
+}
+
+// static
+WmShelf* AshTestBase::GetPrimaryShelf() {
+  return WmShell::Get()
+      ->GetPrimaryRootWindow()
+      ->GetRootWindowController()
+      ->GetShelf();
+}
+
+// static
+SystemTray* AshTestBase::GetPrimarySystemTray() {
+  return Shell::GetInstance()->GetPrimarySystemTray();
 }
 
 ui::test::EventGenerator& AshTestBase::GetEventGenerator() {
@@ -178,21 +189,25 @@ ui::test::EventGenerator& AshTestBase::GetEventGenerator() {
   return *event_generator_.get();
 }
 
-gfx::Display::Rotation AshTestBase::GetActiveDisplayRotation(int64_t id) {
+// static
+display::Display::Rotation AshTestBase::GetActiveDisplayRotation(int64_t id) {
   return Shell::GetInstance()
       ->display_manager()
       ->GetDisplayInfo(id)
       .GetActiveRotation();
 }
 
-gfx::Display::Rotation AshTestBase::GetCurrentInternalDisplayRotation() {
-  return GetActiveDisplayRotation(gfx::Display::InternalDisplayId());
+// static
+display::Display::Rotation AshTestBase::GetCurrentInternalDisplayRotation() {
+  return GetActiveDisplayRotation(display::Display::InternalDisplayId());
 }
 
+// static
 bool AshTestBase::SupportsMultipleDisplays() {
   return AshTestHelper::SupportsMultipleDisplays();
 }
 
+// static
 bool AshTestBase::SupportsHostWindowResize() {
   return AshTestHelper::SupportsHostWindowResize();
 }
@@ -203,6 +218,26 @@ void AshTestBase::UpdateDisplay(const std::string& display_specs) {
 
 aura::Window* AshTestBase::CurrentContext() {
   return ash_test_helper_->CurrentContext();
+}
+
+// static
+std::unique_ptr<views::Widget> AshTestBase::CreateTestWidget(
+    views::WidgetDelegate* delegate,
+    int container_id,
+    const gfx::Rect& bounds) {
+  std::unique_ptr<views::Widget> widget(new views::Widget);
+  views::Widget::InitParams params;
+  params.delegate = delegate;
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.bounds = bounds;
+  WmShell::Get()
+      ->GetPrimaryRootWindow()
+      ->GetRootWindowController()
+      ->ConfigureWidgetInitParamsForContainer(widget.get(), container_id,
+                                              &params);
+  widget->Init(params);
+  widget->Show();
+  return widget;
 }
 
 aura::Window* AshTestBase::CreateTestWindowInShellWithId(int id) {
@@ -243,8 +278,9 @@ aura::Window* AshTestBase::CreateTestWindowInShellWithDelegateAndType(
   if (bounds.IsEmpty()) {
     ParentWindowInPrimaryRootWindow(window);
   } else {
-    gfx::Display display = gfx::Screen::GetScreen()->GetDisplayMatching(bounds);
-    aura::Window* root = ash::Shell::GetInstance()
+    display::Display display =
+        display::Screen::GetScreen()->GetDisplayMatching(bounds);
+    aura::Window* root = Shell::GetInstance()
                              ->window_tree_host_manager()
                              ->GetRootWindowForDisplayId(display.id());
     gfx::Point origin = bounds.origin();
@@ -258,8 +294,8 @@ aura::Window* AshTestBase::CreateTestWindowInShellWithDelegateAndType(
 }
 
 void AshTestBase::ParentWindowInPrimaryRootWindow(aura::Window* window) {
-  aura::client::ParentWindowWithContext(
-      window, Shell::GetPrimaryRootWindow(), gfx::Rect());
+  aura::client::ParentWindowWithContext(window, Shell::GetPrimaryRootWindow(),
+                                        gfx::Rect());
 }
 
 void AshTestBase::RunAllPendingInMessageLoop() {
@@ -272,7 +308,7 @@ TestScreenshotDelegate* AshTestBase::GetScreenshotDelegate() {
 
 TestSystemTrayDelegate* AshTestBase::GetSystemTrayDelegate() {
   return static_cast<TestSystemTrayDelegate*>(
-      Shell::GetInstance()->system_tray_delegate());
+      WmShell::Get()->system_tray_delegate());
 }
 
 void AshTestBase::SetSessionStarted(bool session_started) {
@@ -310,7 +346,7 @@ void AshTestBase::BlockUserSession(UserSessionBlockReason block_reason) {
     case BLOCKED_BY_LOCK_SCREEN:
       SetSessionStarted(true);
       SetUserAddingScreenRunning(false);
-      Shell::GetInstance()->session_state_delegate()->LockScreen();
+      WmShell::Get()->GetSessionStateDelegate()->LockScreen();
       Shell::GetInstance()->OnLockStateChanged(true);
       break;
     case BLOCKED_BY_LOGIN_SCREEN:
@@ -328,7 +364,7 @@ void AshTestBase::BlockUserSession(UserSessionBlockReason block_reason) {
 }
 
 void AshTestBase::UnblockUserSession() {
-  Shell::GetInstance()->session_state_delegate()->UnlockScreen();
+  WmShell::Get()->GetSessionStateDelegate()->UnlockScreen();
   SetSessionStarted(true);
   SetUserAddingScreenRunning(false);
 }

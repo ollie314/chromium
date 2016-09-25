@@ -31,7 +31,6 @@
 #ifndef SVGMatrixTearOff_h
 #define SVGMatrixTearOff_h
 
-#include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
@@ -39,12 +38,13 @@
 
 namespace blink {
 
+class ExceptionState;
 class SVGTransformTearOff;
 
 // SVGMatrixTearOff wraps a AffineTransform for Javascript.
 // Its instance can either hold a static value, or this can be teared off from |SVGTransform.matrix|.
 // This does not derive from SVGPropertyTearOff, as its instances are never tied to an animated property nor an XML attribute.
-class CORE_EXPORT SVGMatrixTearOff final : public GarbageCollectedFinalized<SVGMatrixTearOff>, public ScriptWrappable {
+class CORE_EXPORT SVGMatrixTearOff final : public GarbageCollected<SVGMatrixTearOff>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static SVGMatrixTearOff* create(const AffineTransform& value)
@@ -56,8 +56,6 @@ public:
     {
         return new SVGMatrixTearOff(target);
     }
-
-    ~SVGMatrixTearOff();
 
     double a() { return value().a(); }
     double b() { return value().b(); }
@@ -90,6 +88,8 @@ public:
     const AffineTransform& value() const;
 
     DECLARE_VIRTUAL_TRACE();
+
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
 private:
     explicit SVGMatrixTearOff(const AffineTransform&);

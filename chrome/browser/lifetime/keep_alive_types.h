@@ -27,6 +27,13 @@ enum class KeepAliveOrigin {
   // c/b/chromeos
   LOGIN_DISPLAY_HOST_IMPL,
 
+  // c/b/notifications
+  NOTIFICATION,
+  PENDING_NOTIFICATION_CLICK_EVENT,
+
+  // c/b/push_messaging
+  IN_FLIGHT_PUSH_MESSAGE,
+
   // c/b/ui
   APP_LIST_SERVICE_VIEWS,
   APP_LIST_SHOWER,
@@ -43,10 +50,8 @@ enum class KeepAliveOrigin {
 // restarts
 enum class KeepAliveRestartOption { DISABLED, ENABLED };
 
-#if !defined(NDEBUG) || defined(DCHECK_ALWAYS_ON)
 std::ostream& operator<<(std::ostream& out, const KeepAliveOrigin& origin);
 std::ostream& operator<<(std::ostream& out,
                          const KeepAliveRestartOption& restart);
-#endif
 
 #endif  // CHROME_BROWSER_LIFETIME_KEEP_ALIVE_TYPES_H_

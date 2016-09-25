@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/system/buffer.h"
@@ -87,10 +88,9 @@ TEST(MojoSharedBufferVideoFrameTest, CreateFrameAndPassSharedMemory) {
   gfx::Rect visible_rect(size);
   size_t requested_size = VideoFrame::AllocationSize(format, size);
   ASSERT_LT(y_offset, requested_size);
-  mojo::ScopedSharedBufferHandle handle;
-  MojoResult result =
-      mojo::CreateSharedBuffer(nullptr, requested_size, &handle);
-  ASSERT_EQ(result, MOJO_RESULT_OK);
+  mojo::ScopedSharedBufferHandle handle =
+      mojo::SharedBufferHandle::Create(requested_size);
+  ASSERT_TRUE(handle.is_valid());
 
   // Allocate frame.
   scoped_refptr<MojoSharedBufferVideoFrame> frame =
@@ -147,10 +147,9 @@ TEST(MojoSharedBufferVideoFrameTest, TestDestructionCallback) {
   gfx::Size size(kWidth, kHeight);
   gfx::Rect visible_rect(size);
   size_t requested_size = VideoFrame::AllocationSize(format, size);
-  mojo::ScopedSharedBufferHandle handle;
-  MojoResult result =
-      mojo::CreateSharedBuffer(nullptr, requested_size, &handle);
-  ASSERT_EQ(result, MOJO_RESULT_OK);
+  mojo::ScopedSharedBufferHandle handle =
+      mojo::SharedBufferHandle::Create(requested_size);
+  ASSERT_TRUE(handle.is_valid());
 
   // Keep track of the original handle. MojoSharedBufferVideoFrame::Create()
   // will get ownership of the memory.

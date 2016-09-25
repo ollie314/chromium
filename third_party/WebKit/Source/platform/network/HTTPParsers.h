@@ -96,15 +96,27 @@ struct CacheControlHeader {
 PLATFORM_EXPORT ContentDispositionType getContentDispositionType(const String&);
 PLATFORM_EXPORT bool isValidHTTPHeaderValue(const String&);
 PLATFORM_EXPORT bool isValidHTTPFieldContentRFC7230(const String&);
+// Checks whether the given string conforms to the |token| ABNF production
+// defined in the RFC 7230 or not.
+//
+// The ABNF is for validating octets, but this method takes a String instance
+// for convenience which consists of Unicode code points. When this method sees
+// non-ASCII characters, it just returns false.
 PLATFORM_EXPORT bool isValidHTTPToken(const String&);
-PLATFORM_EXPORT bool parseHTTPRefresh(const String& refresh, bool fromHttpEquivMeta, double& delay, String& url);
+// |matcher| specifies a function to check a whitespace character. if |nullptr|
+// is specified, ' ' and '\t' are treated as whitespace characters.
+PLATFORM_EXPORT bool parseHTTPRefresh(const String& refresh, WTF::CharacterMatchFunctionPtr matcher, double& delay, String& url);
 PLATFORM_EXPORT double parseDate(const String&);
 
 // Given a Media Type (like "foo/bar; baz=gazonk" - usually from the
 // 'Content-Type' HTTP header), extract and return the "type/subtype" portion
 // ("foo/bar").
-// Note: This function does not in any way check that the "type/subtype" pair
-// is well-formed.
+//
+// Note:
+// - This function does not in any way check that the "type/subtype" pair
+//   is well-formed.
+// - OWSes at the head and the tail of the region before the first semicolon
+//   are trimmed.
 PLATFORM_EXPORT AtomicString extractMIMETypeFromMediaType(const AtomicString&);
 PLATFORM_EXPORT String extractCharsetFromMediaType(const String&);
 PLATFORM_EXPORT void findCharsetInMediaType(const String& mediaType, unsigned& charsetPos, unsigned& charsetLen, unsigned start = 0);

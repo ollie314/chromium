@@ -8,22 +8,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <list>
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "crypto/crypto_export.h"
 
-#if defined(USE_OPENSSL)
 // Forward declaration for openssl/*.h
 typedef struct evp_pkey_st EVP_PKEY;
-#else
-// Forward declaration.
-typedef struct PK11SlotInfoStr PK11SlotInfo;
-typedef struct SECKEYPrivateKeyStr SECKEYPrivateKey;
-typedef struct SECKEYPublicKeyStr SECKEYPublicKey;
-#endif
 
 namespace crypto {
 
@@ -35,34 +28,23 @@ class CRYPTO_EXPORT RSAPrivateKey {
   ~RSAPrivateKey();
 
   // Create a new random instance. Can return NULL if initialization fails.
-  static RSAPrivateKey* Create(uint16_t num_bits);
+  static std::unique_ptr<RSAPrivateKey> Create(uint16_t num_bits);
 
   // Create a new instance by importing an existing private key. The format is
   // an ASN.1-encoded PrivateKeyInfo block from PKCS #8. This can return NULL if
   // initialization fails.
-  static RSAPrivateKey* CreateFromPrivateKeyInfo(
+  static std::unique_ptr<RSAPrivateKey> CreateFromPrivateKeyInfo(
       const std::vector<uint8_t>& input);
 
-#if defined(USE_OPENSSL)
   // Create a new instance from an existing EVP_PKEY, taking a
   // reference to it. |key| must be an RSA key. Returns NULL on
   // failure.
-  static RSAPrivateKey* CreateFromKey(EVP_PKEY* key);
-#else
-  // Create a new instance by referencing an existing private key
-  // structure.  Does not import the key.
-  static RSAPrivateKey* CreateFromKey(SECKEYPrivateKey* key);
-#endif
+  static std::unique_ptr<RSAPrivateKey> CreateFromKey(EVP_PKEY* key);
 
-#if defined(USE_OPENSSL)
   EVP_PKEY* key() { return key_; }
-#else
-  SECKEYPrivateKey* key() { return key_; }
-  SECKEYPublicKey* public_key() { return public_key_; }
-#endif
 
   // Creates a copy of the object.
-  RSAPrivateKey* Copy() const;
+  std::unique_ptr<RSAPrivateKey> Copy() const;
 
   // Exports the private key to a PKCS #8 PrivateKeyInfo block.
   bool ExportPrivateKey(std::vector<uint8_t>* output) const;
@@ -74,12 +56,7 @@ class CRYPTO_EXPORT RSAPrivateKey {
   // Constructor is private. Use one of the Create*() methods above instead.
   RSAPrivateKey();
 
-#if defined(USE_OPENSSL)
   EVP_PKEY* key_;
-#else
-  SECKEYPrivateKey* key_;
-  SECKEYPublicKey* public_key_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(RSAPrivateKey);
 };

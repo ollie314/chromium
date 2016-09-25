@@ -4,12 +4,13 @@
 
 #include "android_webview/native/aw_gl_functor.h"
 
-#include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/public/browser/draw_gl.h"
 #include "content/public/browser/browser_thread.h"
 #include "jni/AwGLFunctor_jni.h"
 
 using base::android::AttachCurrentThread;
+using base::android::JavaParamRef;
+using base::android::ScopedJavaLocalRef;
 using content::BrowserThread;
 
 extern "C" {
@@ -26,28 +27,31 @@ static void DrawGLFunction(long view_context,
 
 namespace android_webview {
 
+namespace {
+int g_instance_count = 0;
+}
+
 AwGLFunctor::AwGLFunctor(const JavaObjectWeakGlobalRef& java_ref)
     : java_ref_(java_ref),
       render_thread_manager_(
           this,
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)),
-      browser_view_renderer_(nullptr) {}
-
-AwGLFunctor::~AwGLFunctor() {}
-
-void AwGLFunctor::OnParentDrawConstraintsUpdated() {
+          BrowserThread::GetTaskRunnerForThread(BrowserThread::UI)) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (browser_view_renderer_)
-    browser_view_renderer_->OnParentDrawConstraintsUpdated();
+  ++g_instance_count;
 }
 
-bool AwGLFunctor::RequestDrawGL(bool wait_for_completion) {
+AwGLFunctor::~AwGLFunctor() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  --g_instance_count;
+}
+
+bool AwGLFunctor::RequestInvokeGL(bool wait_for_completion) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return false;
-  return Java_AwGLFunctor_requestDrawGL(env, obj.obj(), wait_for_completion);
+  return Java_AwGLFunctor_requestInvokeGL(env, obj, wait_for_completion);
 }
 
 void AwGLFunctor::DetachFunctorFromView() {
@@ -55,17 +59,12 @@ void AwGLFunctor::DetachFunctorFromView() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (!obj.is_null())
-    Java_AwGLFunctor_detachFunctorFromView(env, obj.obj());
-}
-
-void AwGLFunctor::SetBrowserViewRenderer(
-    BrowserViewRenderer* browser_view_renderer) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  browser_view_renderer_ = browser_view_renderer;
+    Java_AwGLFunctor_detachFunctorFromView(env, obj);
 }
 
 void AwGLFunctor::Destroy(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   java_ref_.reset();
   delete this;
 }
@@ -73,13 +72,20 @@ void AwGLFunctor::Destroy(JNIEnv* env,
 void AwGLFunctor::DeleteHardwareRenderer(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& obj) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   render_thread_manager_.DeleteHardwareRendererOnUI();
 }
 
 jlong AwGLFunctor::GetAwDrawGLViewContext(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& obj) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return reinterpret_cast<intptr_t>(&render_thread_manager_);
+}
+
+static jint GetNativeInstanceCount(JNIEnv* env, const JavaParamRef<jclass>&) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  return g_instance_count;
 }
 
 static jlong GetAwDrawGLFunction(JNIEnv* env, const JavaParamRef<jclass>&) {
@@ -89,6 +95,7 @@ static jlong GetAwDrawGLFunction(JNIEnv* env, const JavaParamRef<jclass>&) {
 static jlong Create(JNIEnv* env,
                     const JavaParamRef<jclass>&,
                     const base::android::JavaParamRef<jobject>& obj) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return reinterpret_cast<intptr_t>(
       new AwGLFunctor(JavaObjectWeakGlobalRef(env, obj)));
 }

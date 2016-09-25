@@ -44,6 +44,17 @@ class HtmlChecker(object):
     return regex_check.RegexCheck(self.input_api.re, line_number, line, regex,
         'Use the button element instead of <input type="button">')
 
+  def DoNotUseSingleQuotesCheck(self, line_number, line):
+    regex = self.input_api.re.compile("""
+        <\S+                           # The tag name.
+        (?:\s+\S+\$?="[^"]*"|\s+\S+)*  # Correctly quoted or non-value props.
+        \s+(\S+\$?='[^']*')            # Find incorrectly quoted (foo='bar').
+        [^>]*>                         # To the end of the tag.
+        """,
+        self.input_api.re.MULTILINE | self.input_api.re.VERBOSE)
+    return regex_check.RegexCheck(self.input_api.re, line_number, line, regex,
+        'Use double quotes rather than single quotes in HTML properties')
+
   def I18nContentJavaScriptCaseCheck(self, line_number, line):
     regex = self.input_api.re.compile("""
         (?:^|\s)                      # start of line or whitespace
@@ -56,8 +67,9 @@ class HtmlChecker(object):
 
   def LabelCheck(self, line_number, line):
     regex = self.input_api.re.compile("""
-        (?:^|\s) # start of line or whitespace
-        (for=)   # for=
+        (?:^|\s)     # start of line or whitespace
+        <label[^>]+? # <label tag
+        (for=)       # for=
         """,
         self.input_api.re.VERBOSE)
     return regex_check.RegexCheck(self.input_api.re, line_number, line, regex,

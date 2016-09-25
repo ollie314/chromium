@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -145,9 +146,9 @@ ShellExtensionsBrowserClient::GetProcessManagerDelegate() const {
   return NULL;
 }
 
-scoped_ptr<ExtensionHostDelegate>
+std::unique_ptr<ExtensionHostDelegate>
 ShellExtensionsBrowserClient::CreateExtensionHostDelegate() {
-  return scoped_ptr<ExtensionHostDelegate>(new ShellExtensionHostDelegate);
+  return base::WrapUnique(new ShellExtensionHostDelegate);
 }
 
 bool ShellExtensionsBrowserClient::DidVersionUpdate(BrowserContext* context) {
@@ -164,12 +165,6 @@ bool ShellExtensionsBrowserClient::IsRunningInForcedAppMode() {
 
 bool ShellExtensionsBrowserClient::IsLoggedInAsPublicAccount() {
   return false;
-}
-
-ApiActivityMonitor* ShellExtensionsBrowserClient::GetApiActivityMonitor(
-    BrowserContext* context) {
-  // app_shell doesn't monitor API function calls or events.
-  return NULL;
 }
 
 ExtensionSystemProvider*
@@ -192,10 +187,10 @@ void ShellExtensionsBrowserClient::RegisterMojoServices(
   RegisterServicesForFrame(render_frame_host, extension);
 }
 
-scoped_ptr<RuntimeAPIDelegate>
+std::unique_ptr<RuntimeAPIDelegate>
 ShellExtensionsBrowserClient::CreateRuntimeAPIDelegate(
     content::BrowserContext* context) const {
-  return scoped_ptr<RuntimeAPIDelegate>(new ShellRuntimeAPIDelegate());
+  return base::MakeUnique<ShellRuntimeAPIDelegate>();
 }
 
 const ComponentExtensionResourceManager*
@@ -206,7 +201,7 @@ ShellExtensionsBrowserClient::GetComponentExtensionResourceManager() {
 void ShellExtensionsBrowserClient::BroadcastEventToRenderers(
     events::HistogramValue histogram_value,
     const std::string& event_name,
-    scoped_ptr<base::ListValue> args) {
+    std::unique_ptr<base::ListValue> args) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
@@ -216,7 +211,7 @@ void ShellExtensionsBrowserClient::BroadcastEventToRenderers(
     return;
   }
 
-  scoped_ptr<Event> event(
+  std::unique_ptr<Event> event(
       new Event(histogram_value, event_name, std::move(args)));
   EventRouter::Get(browser_context_)->BroadcastEvent(std::move(event));
 }

@@ -277,11 +277,13 @@ WebInspector.JavaScriptFormatter.prototype = {
                 return "";
             if (node.parent && node.parent.type === "FunctionExpression" && node.parent.parent && node.parent.parent.type === "Property")
                 return "";
+            if (node.parent && node.parent.type === "FunctionExpression" && node.parent.parent && node.parent.parent.type === "VariableDeclarator")
+                return "";
             if (node.parent && node.parent.type === "FunctionExpression" && node.parent.parent && node.parent.parent.type === "CallExpression")
                 return "";
             if (node.parent && node.parent.type === "DoWhileStatement")
                 return "";
-            if (node.parent && node.parent.type === "TryStatement" && node.parent.block == node)
+            if (node.parent && node.parent.type === "TryStatement" && node.parent.block === node)
                 return "s";
             if (node.parent && node.parent.type === "CatchClause" && node.parent.parent.finalizer)
                 return "s";
@@ -297,7 +299,7 @@ WebInspector.JavaScriptFormatter.prototype = {
                 if (node.consequent.type !== "BlockStatement")
                     return "<";
             }
-        } else if (node.type === "BreakStatement" || node.type === "ThrowStatement" || node.type === "ReturnStatement" || node.type === "ExpressionStatement") {
+        } else if (node.type === "BreakStatement" || node.type === "ContinueStatement" || node.type === "ThrowStatement" || node.type === "ReturnStatement" || node.type === "ExpressionStatement") {
             return "n";
         }
         return "";

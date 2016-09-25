@@ -14,6 +14,7 @@
 #include "v8/include/v8.h"
 
 struct ExtensionMsg_AccessibilityEventParams;
+struct ExtensionMsg_AccessibilityLocationChangeParams;
 
 namespace extensions {
 
@@ -132,6 +133,10 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   void GetChildIDAtIndex(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // Args: int ax_tree_id, int node_id
+  // Returns: JS object with a map from html attribute key to value.
+  void GetHtmlAttributes(const v8::FunctionCallbackInfo<v8::Value>& args);
+
+  // Args: int ax_tree_id, int node_id
   // Returns: JS object with a string key for each state flag that's set.
   void GetState(const v8::FunctionCallbackInfo<v8::Value>& args);
 
@@ -142,6 +147,8 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   // Handle accessibility events from the browser process.
   void OnAccessibilityEvent(const ExtensionMsg_AccessibilityEventParams& params,
                             bool is_active_profile);
+  void OnAccessibilityLocationChange(
+      const ExtensionMsg_AccessibilityLocationChangeParams& params);
 
   void UpdateOverallTreeChangeObserverFilter();
 
@@ -152,7 +159,10 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   void OnTreeDataChanged(ui::AXTree* tree) override;
   void OnNodeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
   void OnSubtreeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
+  void OnNodeWillBeReparented(ui::AXTree* tree, ui::AXNode* node) override;
+  void OnSubtreeWillBeReparented(ui::AXTree* tree, ui::AXNode* node) override;
   void OnNodeCreated(ui::AXTree* tree, ui::AXNode* node) override;
+  void OnNodeReparented(ui::AXTree* tree, ui::AXNode* node) override;
   void OnNodeChanged(ui::AXTree* tree, ui::AXNode* node) override;
   void OnAtomicUpdateFinished(ui::AXTree* tree,
                               bool root_changed,
@@ -168,8 +178,8 @@ class AutomationInternalCustomBindings : public ObjectBackedNativeHandler,
   scoped_refptr<AutomationMessageFilter> message_filter_;
   bool is_active_profile_;
   std::vector<TreeChangeObserver> tree_change_observers_;
-  api::automation::TreeChangeObserverFilter
-      tree_change_observer_overall_filter_;
+  // A bit-map of api::automation::TreeChangeObserverFilter.
+  int tree_change_observer_overall_filter_;
   std::vector<int> deleted_node_ids_;
   std::vector<int> text_changed_node_ids_;
 

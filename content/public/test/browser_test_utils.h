@@ -27,6 +27,9 @@
 #include "ipc/message_filter.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/accessibility/ax_tree_update.h"
+#include "ui/events/keycodes/dom/dom_code.h"
+#include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "url/gurl.h"
 
@@ -58,6 +61,7 @@ namespace content {
 
 class BrowserContext;
 class MessageLoopRunner;
+class NavigationHandle;
 class RenderViewHost;
 class RenderWidgetHost;
 class WebContents;
@@ -130,6 +134,10 @@ void SimulateGestureScrollSequence(WebContents* web_contents,
                                    const gfx::Point& point,
                                    const gfx::Vector2dF& delta);
 
+void SimulateGestureFlingSequence(WebContents* web_contents,
+                                  const gfx::Point& point,
+                                  const gfx::Vector2dF& velocity);
+
 // Taps the screen at |point|.
 void SimulateTapAt(WebContents* web_contents, const gfx::Point& point);
 
@@ -144,53 +152,44 @@ void SimulateTapWithModifiersAt(WebContents* web_contents,
                                 const gfx::Point& point);
 
 // Sends a key press asynchronously.
-// The native code of the key event will be set to InvalidNativeKeycode().
+// |key| specifies the UIEvents (aka: DOM4Events) value of the key.
+// |code| specifies the UIEvents (aka: DOM4Events) value of the physical key.
 // |key_code| alone is good enough for scenarios that only need the char
 // value represented by a key event and not the physical key on the keyboard
 // or the keyboard layout.
-// For scenarios such as chromoting that need the native code,
-// SimulateKeyPressWithCode should be used.
 void SimulateKeyPress(WebContents* web_contents,
+                      ui::DomKey key,
+                      ui::DomCode code,
                       ui::KeyboardCode key_code,
                       bool control,
                       bool shift,
                       bool alt,
                       bool command);
 
-// Sends a key press asynchronously.
-// |code| specifies the UIEvents (aka: DOM4Events) value of the key:
-// https://dvcs.w3.org/hg/d4e/raw-file/tip/source_respec.htm
-// The native code of the key event will be set based on |code|.
-// See ui/base/keycodes/vi usb_keycode_map.h for mappings between |code|
-// and the native code.
-// Examples of the various codes:
-//   key_code: VKEY_A
-//   code: "KeyA"
-//   native key code: 0x001e (for Windows).
-//   native key code: 0x0026 (for Linux).
-void SimulateKeyPressWithCode(WebContents* web_contents,
-                              ui::KeyboardCode key_code,
-                              const std::string& code,
-                              bool control,
-                              bool shift,
-                              bool alt,
-                              bool command);
+// Method to check what devices we have on the system.
+bool IsWebcamAvailableOnSystem(WebContents* web_contents);
 
 // Allow ExecuteScript* methods to target either a WebContents or a
 // RenderFrameHost.  Targetting a WebContents means executing the script in the
-// RenderFrameHost returned by WebContents::GetMainFrame(), which is the
-// main frame.  Pass a specific RenderFrameHost to target it.
+// RenderFrameHost returned by WebContents::GetMainFrame(), which is the main
+// frame.  Pass a specific RenderFrameHost to target it. Embedders may declare
+// additional ConvertToRenderFrameHost functions for convenience.
 class ToRenderFrameHost {
  public:
-  ToRenderFrameHost(WebContents* web_contents);
-  ToRenderFrameHost(RenderViewHost* render_view_host);
-  ToRenderFrameHost(RenderFrameHost* render_frame_host);
+  template <typename T>
+  ToRenderFrameHost(T* frame_convertible_value)
+      : render_frame_host_(ConvertToRenderFrameHost(frame_convertible_value)) {}
 
+  // Extract the underlying frame.
   RenderFrameHost* render_frame_host() const { return render_frame_host_; }
 
  private:
   RenderFrameHost* render_frame_host_;
 };
+
+RenderFrameHost* ConvertToRenderFrameHost(RenderViewHost* render_view_host);
+RenderFrameHost* ConvertToRenderFrameHost(RenderFrameHost* render_view_host);
+RenderFrameHost* ConvertToRenderFrameHost(WebContents* web_contents);
 
 // Executes the passed |script| in the specified frame. The |script| should not
 // invoke domAutomationController.send(); otherwise, your test will hang or be
@@ -203,6 +202,9 @@ bool ExecuteScript(const ToRenderFrameHost& adapter,
 // sets |result| to the value passed to "window.domAutomationController.send" by
 // the executed script. They return true on success, false if the script
 // execution failed or did not evaluate to the expected type.
+bool ExecuteScriptAndExtractDouble(const ToRenderFrameHost& adapter,
+                                   const std::string& script,
+                                   double* result) WARN_UNUSED_RESULT;
 bool ExecuteScriptAndExtractInt(const ToRenderFrameHost& adapter,
                                 const std::string& script,
                                 int* result) WARN_UNUSED_RESULT;
@@ -261,6 +263,12 @@ void FetchHistogramsFromChildProcesses();
 // "/cross-site/hostname/rest/of/path" to redirect the request to
 // "<scheme>://hostname:<port>/rest/of/path", where <scheme> and <port>
 // are the values for the instance of EmbeddedTestServer.
+//
+// By default, redirection will be done using HTTP 302 response, but in some
+// cases (e.g. to preserve HTTP method and POST body across redirects as
+// prescribed by https://tools.ietf.org/html/rfc7231#section-6.4.7) a test might
+// want to use HTTP 307 response instead.  This can be accomplished by replacing
+// "/cross-site/" URL substring above with "/cross-site-307/".
 void SetupCrossSiteRedirector(net::EmbeddedTestServer* embedded_test_server);
 
 // Waits for an interstitial page to attach to given web contents.
@@ -290,6 +298,48 @@ void WaitForAccessibilityFocusChange();
 
 // Retrieve information about the node that's focused in the accessibility tree.
 ui::AXNodeData GetFocusedAccessibilityNodeInfo(WebContents* web_contents);
+
+// This is intended to be a robust way to assert that the accessibility
+// tree eventually gets into the correct state, without worrying about
+// the exact ordering of events received while getting there.
+//
+// Searches the accessibility tree to see if any node's accessible name
+// is equal to the given name. If not, sets up a notification waiter
+// that listens for any accessibility event in any frame, and checks again
+// after each event. Keeps looping until the text is found (or the
+// test times out).
+void WaitForAccessibilityTreeToContainNodeWithName(WebContents* web_contents,
+                                                   const std::string& name);
+
+// Get a snapshot of a web page's accessibility tree.
+ui::AXTreeUpdate GetAccessibilityTreeSnapshot(WebContents* web_contents);
+
+// Find out if the BrowserPlugin for a guest WebContents is focused. Returns
+// false if the WebContents isn't a guest with a BrowserPlugin.
+bool IsWebContentsBrowserPluginFocused(content::WebContents* web_contents);
+
+#if defined(USE_AURA)
+// The following two methods allow a test to send a touch tap sequence, and
+// a corresponding gesture tap sequence, by sending it to the top-level
+// WebContents for the page.
+
+// Send a TouchStart/End sequence routed via the main frame's
+// RenderWidgetHostViewAura.
+void SendRoutedTouchTapSequence(content::WebContents* web_contents,
+                                gfx::Point point);
+
+// Send a GestureTapDown/GestureTap sequence routed via the main frame's
+// RenderWidgetHostViewAura.
+void SendRoutedGestureTapSequence(content::WebContents* web_contents,
+                                  gfx::Point point);
+//
+// Waits until the cc::Surface associated with a guest/cross-process-iframe
+// has been drawn for the first time. Once this method returns it should be
+// safe to assume that events sent to the top-level RenderWidgetHostView can
+// be expected to properly hit-test to this surface, if appropriate.
+void WaitForGuestSurfaceReady(content::WebContents* web_contents);
+
+#endif
 
 // Watches title changes on a WebContents, blocking until an expected title is
 // set.
@@ -505,6 +555,96 @@ class InputMsgWatcher : public BrowserMessageFilter {
   base::Closure quit_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMsgWatcher);
+};
+
+// Sets up a ui::TestClipboard for use in browser tests. On Windows,
+// clipboard is handled on the IO thread, BrowserTestClipboardScope
+// hops messages onto the right thread.
+class BrowserTestClipboardScope {
+ public:
+  // Sets up a ui::TestClipboard.
+  BrowserTestClipboardScope();
+
+  // Tears down the clipboard.
+  ~BrowserTestClipboardScope();
+
+  // Puts text/rtf |rtf| on the clipboard.
+  void SetRtf(const std::string& rtf);
+
+  // Puts plain text |text| on the clipboard.
+  void SetText(const std::string& text);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BrowserTestClipboardScope);
+};
+
+// This observer is used to wait for its owner Frame to become focused.
+class FrameFocusedObserver {
+  // Private impl struct which hides non public types including FrameTreeNode.
+  class FrameTreeNodeObserverImpl;
+
+ public:
+  explicit FrameFocusedObserver(RenderFrameHost* owner_host);
+  ~FrameFocusedObserver();
+
+  void Wait();
+
+ private:
+  // FrameTreeNode::Observer
+  std::unique_ptr<FrameTreeNodeObserverImpl> impl_;
+
+  DISALLOW_COPY_AND_ASSIGN(FrameFocusedObserver);
+};
+
+// This class can be used to pause and resume navigations, based on a URL
+// match. Note that it only keeps track of one navigation at a time.
+// Navigations are paused automatically before hitting the network, and are
+// resumed automatically if a Wait method is called for a future event.
+// Note: This class is one time use only! After it successfully tracks a
+// navigation it will ignore all subsequent navigations. Explicitly create
+// mutliple instances of this class if you want to pause multiple navigations.
+class TestNavigationManager : public WebContentsObserver {
+ public:
+  // Monitors any frame in WebContents.
+  TestNavigationManager(WebContents* web_contents, const GURL& url);
+
+  ~TestNavigationManager() override;
+
+  // Waits until the navigation request is ready to be sent to the network
+  // stack. Returns false if the request was aborted before starting.
+  WARN_UNUSED_RESULT bool WaitForWillStartRequest();
+
+  // Waits until the navigation has been finished. Will automatically resume
+  // navigations paused before this point.
+  void WaitForNavigationFinished();
+
+ protected:
+  // Derived classes can override if they want to filter out navigations. This
+  // is called from DidStartNavigation.
+  virtual bool ShouldMonitorNavigation(NavigationHandle* handle);
+
+ private:
+  // WebContentsObserver:
+  void DidStartNavigation(NavigationHandle* handle) override;
+  void DidFinishNavigation(NavigationHandle* handle) override;
+
+  // Called when the NavigationThrottle pauses the navigation in
+  // WillStartRequest.
+  void OnWillStartRequest();
+
+  // Resumes the navigation.
+  void ResumeNavigation();
+
+  const GURL url_;
+  bool navigation_paused_;
+  NavigationHandle* handle_;
+  bool handled_navigation_;
+  scoped_refptr<MessageLoopRunner> will_start_loop_runner_;
+  scoped_refptr<MessageLoopRunner> did_finish_loop_runner_;
+
+  base::WeakPtrFactory<TestNavigationManager> weak_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestNavigationManager);
 };
 
 }  // namespace content

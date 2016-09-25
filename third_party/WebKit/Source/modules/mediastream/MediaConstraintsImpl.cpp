@@ -33,13 +33,12 @@
 #include "bindings/core/v8/ArrayValue.h"
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/UseCounter.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "modules/mediastream/MediaTrackConstraints.h"
-#include "platform/Logging.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "wtf/Assertions.h"
 #include "wtf/HashMap.h"
 #include "wtf/Vector.h"
 #include "wtf/text/StringHash.h"
@@ -50,12 +49,12 @@ namespace blink {
 namespace MediaConstraintsImpl {
 
 // Old type/value form of constraint. Used in parsing old-style constraints.
-struct WebMediaConstraint {
-    WebMediaConstraint()
+struct NameValueStringConstraint {
+    NameValueStringConstraint()
     {
     }
 
-    WebMediaConstraint(WebString name, WebString value)
+    NameValueStringConstraint(WebString name, WebString value)
         : m_name(name)
         , m_value(value)
     {
@@ -156,21 +155,19 @@ const char kPowerLineFrequency[] = "googPowerLineFrequency";
 const char kTestConstraint1[] = "valid_and_supported_1";
 const char kTestConstraint2[] = "valid_and_supported_2";
 
-static bool parseMandatoryConstraintsDictionary(const Dictionary& mandatoryConstraintsDictionary, WebVector<WebMediaConstraint>& mandatory)
+static bool parseMandatoryConstraintsDictionary(const Dictionary& mandatoryConstraintsDictionary, Vector<NameValueStringConstraint>& mandatory)
 {
-    Vector<WebMediaConstraint> mandatoryConstraintsVector;
     HashMap<String, String> mandatoryConstraintsHashMap;
     bool ok = mandatoryConstraintsDictionary.getOwnPropertiesAsStringHashMap(mandatoryConstraintsHashMap);
     if (!ok)
         return false;
 
     for (const auto& iter : mandatoryConstraintsHashMap)
-        mandatoryConstraintsVector.append(WebMediaConstraint(iter.key, iter.value));
-    mandatory.assign(mandatoryConstraintsVector);
+        mandatory.append(NameValueStringConstraint(iter.key, iter.value));
     return true;
 }
 
-static bool parseOptionalConstraintsVectorElement(const Dictionary& constraint, Vector<WebMediaConstraint>& optionalConstraintsVector)
+static bool parseOptionalConstraintsVectorElement(const Dictionary& constraint, Vector<NameValueStringConstraint>& optionalConstraintsVector)
 {
     Vector<String> localNames;
     bool ok = constraint.getPropertyNames(localNames);
@@ -183,12 +180,12 @@ static bool parseOptionalConstraintsVectorElement(const Dictionary& constraint, 
     ok = DictionaryHelper::get(constraint, key, value);
     if (!ok)
         return false;
-    optionalConstraintsVector.append(WebMediaConstraint(key, value));
+    optionalConstraintsVector.append(NameValueStringConstraint(key, value));
     return true;
 }
 
 // Old style parser. Deprecated.
-static bool parse(const Dictionary& constraintsDictionary, WebVector<WebMediaConstraint>& optional, WebVector<WebMediaConstraint>& mandatory)
+static bool parse(const Dictionary& constraintsDictionary, Vector<NameValueStringConstraint>& optional, Vector<NameValueStringConstraint>& mandatory)
 {
     if (constraintsDictionary.isUndefinedOrNull())
         return true;
@@ -216,7 +213,6 @@ static bool parse(const Dictionary& constraintsDictionary, WebVector<WebMediaCon
             return false;
     }
 
-    Vector<WebMediaConstraint> optionalConstraintsVector;
     if (names.contains(optionalName)) {
         ArrayValue optionalConstraints;
         bool ok = DictionaryHelper::get(constraintsDictionary, optionalName, optionalConstraints);
@@ -233,37 +229,34 @@ static bool parse(const Dictionary& constraintsDictionary, WebVector<WebMediaCon
             ok = optionalConstraints.get(i, constraint);
             if (!ok || constraint.isUndefinedOrNull())
                 return false;
-            ok = parseOptionalConstraintsVectorElement(constraint, optionalConstraintsVector);
+            ok = parseOptionalConstraintsVectorElement(constraint, optional);
             if (!ok)
                 return false;
         }
-        optional.assign(optionalConstraintsVector);
     }
 
     return true;
 }
 
-static bool parse(const MediaTrackConstraints& constraintsIn, WebVector<WebMediaConstraint>& optional, WebVector<WebMediaConstraint>& mandatory)
+static bool parse(const MediaTrackConstraints& constraintsIn, Vector<NameValueStringConstraint>& optional, Vector<NameValueStringConstraint>& mandatory)
 {
-    Vector<WebMediaConstraint> mandatoryConstraintsVector;
+    Vector<NameValueStringConstraint> mandatoryConstraintsVector;
     if (constraintsIn.hasMandatory()) {
         bool ok = parseMandatoryConstraintsDictionary(constraintsIn.mandatory(), mandatory);
         if (!ok)
             return false;
     }
 
-    Vector<WebMediaConstraint> optionalConstraintsVector;
     if (constraintsIn.hasOptional()) {
         const Vector<Dictionary>& optionalConstraints = constraintsIn.optional();
 
         for (const auto& constraint : optionalConstraints) {
             if (constraint.isUndefinedOrNull())
                 return false;
-            bool ok = parseOptionalConstraintsVectorElement(constraint, optionalConstraintsVector);
+            bool ok = parseOptionalConstraintsVectorElement(constraint, optional);
             if (!ok)
                 return false;
         }
-        optional.assign(optionalConstraintsVector);
     }
     return true;
 }
@@ -275,9 +268,9 @@ static bool toBoolean(const WebString& asWebString)
     // https://crbug.com/576582
 }
 
-static void parseOldStyleNames(ExecutionContext* context, const WebVector<WebMediaConstraint>& oldNames, bool reportUnknownNames, WebMediaTrackConstraintSet& result, MediaErrorState& errorState)
+static void parseOldStyleNames(ExecutionContext* context, const Vector<NameValueStringConstraint>& oldNames, bool reportUnknownNames, WebMediaTrackConstraintSet& result, MediaErrorState& errorState)
 {
-    for (const WebMediaConstraint& constraint : oldNames) {
+    for (const NameValueStringConstraint& constraint : oldNames) {
         if (constraint.m_name.equals(kMinAspectRatio)) {
             result.aspectRatio.setMin(atof(constraint.m_value.utf8().c_str()));
         } else if (constraint.m_name.equals(kMaxAspectRatio)) {
@@ -424,7 +417,7 @@ static void parseOldStyleNames(ExecutionContext* context, const WebVector<WebMed
     }
 }
 
-static WebMediaConstraints createFromNamedConstraints(ExecutionContext* context, WebVector<WebMediaConstraint>& mandatory, const WebVector<WebMediaConstraint>& optional, MediaErrorState& errorState)
+static WebMediaConstraints createFromNamedConstraints(ExecutionContext* context, Vector<NameValueStringConstraint>& mandatory, const Vector<NameValueStringConstraint>& optional, MediaErrorState& errorState)
 {
     WebMediaTrackConstraintSet basic;
     WebMediaTrackConstraintSet advanced;
@@ -437,7 +430,7 @@ static WebMediaConstraints createFromNamedConstraints(ExecutionContext* context,
     Vector<WebMediaTrackConstraintSet> advancedVector;
     for (const auto& optionalConstraint : optional) {
         WebMediaTrackConstraintSet advancedElement;
-        WebVector<WebMediaConstraint> elementAsList(&optionalConstraint, 1);
+        Vector<NameValueStringConstraint> elementAsList(1, optionalConstraint);
         parseOldStyleNames(context, elementAsList, false, advancedElement, ignoredErrorState);
         if (!advancedElement.isEmpty())
             advancedVector.append(advancedElement);
@@ -449,8 +442,8 @@ static WebMediaConstraints createFromNamedConstraints(ExecutionContext* context,
 // Deprecated.
 WebMediaConstraints create(ExecutionContext* context, const Dictionary& constraintsDictionary, MediaErrorState& errorState)
 {
-    WebVector<WebMediaConstraint> optional;
-    WebVector<WebMediaConstraint> mandatory;
+    Vector<NameValueStringConstraint> optional;
+    Vector<NameValueStringConstraint> mandatory;
     if (!parse(constraintsDictionary, optional, mandatory)) {
         errorState.throwTypeError("Malformed constraints object.");
         return WebMediaConstraints();
@@ -459,8 +452,13 @@ WebMediaConstraints create(ExecutionContext* context, const Dictionary& constrai
     return createFromNamedConstraints(context, mandatory, optional, errorState);
 }
 
-void copyLongConstraint(const ConstrainLongRange& blinkForm, LongConstraint& webForm)
+void copyLongConstraint(const LongOrConstrainLongRange& blinkUnionForm, LongConstraint& webForm)
 {
+    if (blinkUnionForm.isLong()) {
+        webForm.setIdeal(blinkUnionForm.getAsLong());
+        return;
+    }
+    const auto& blinkForm = blinkUnionForm.getAsConstrainLongRange();
     if (blinkForm.hasMin()) {
         webForm.setMin(blinkForm.min());
     }
@@ -475,8 +473,13 @@ void copyLongConstraint(const ConstrainLongRange& blinkForm, LongConstraint& web
     }
 }
 
-void copyDoubleConstraint(const ConstrainDoubleRange& blinkForm, DoubleConstraint& webForm)
+void copyDoubleConstraint(const DoubleOrConstrainDoubleRange& blinkUnionForm, DoubleConstraint& webForm)
 {
+    if (blinkUnionForm.isDouble()) {
+        webForm.setIdeal(blinkUnionForm.getAsDouble());
+        return;
+    }
+    const auto& blinkForm = blinkUnionForm.getAsConstrainDoubleRange();
     if (blinkForm.hasMin()) {
         webForm.setMin(blinkForm.min());
     }
@@ -491,18 +494,40 @@ void copyDoubleConstraint(const ConstrainDoubleRange& blinkForm, DoubleConstrain
     }
 }
 
-void copyStringConstraint(const ConstrainDOMStringParameters& blinkForm, StringConstraint& webForm)
+void copyStringConstraint(const StringOrStringSequenceOrConstrainDOMStringParameters& blinkUnionForm, StringConstraint& webForm)
 {
+    if (blinkUnionForm.isString()) {
+        webForm.setIdeal(Vector<String>(1, blinkUnionForm.getAsString()));
+        return;
+    }
+    if (blinkUnionForm.isStringSequence()) {
+        webForm.setIdeal(blinkUnionForm.getAsStringSequence());
+        return;
+    }
+    const auto& blinkForm = blinkUnionForm.getAsConstrainDOMStringParameters();
     if (blinkForm.hasIdeal()) {
-        webForm.setIdeal(WebVector<WebString>(blinkForm.ideal()));
+        if (blinkForm.ideal().isStringSequence()) {
+            webForm.setIdeal(blinkForm.ideal().getAsStringSequence());
+        } else if (blinkForm.ideal().isString()) {
+            webForm.setIdeal(Vector<String>(1, blinkForm.ideal().getAsString()));
+        }
     }
     if (blinkForm.hasExact()) {
-        webForm.setExact(WebVector<WebString>(blinkForm.exact()));
+        if (blinkForm.exact().isStringSequence()) {
+            webForm.setExact(blinkForm.exact().getAsStringSequence());
+        } else if (blinkForm.exact().isString()) {
+            webForm.setExact(Vector<String>(1, blinkForm.exact().getAsString()));
+        }
     }
 }
 
-void copyBooleanConstraint(const ConstrainBooleanParameters& blinkForm, BooleanConstraint& webForm)
+void copyBooleanConstraint(const BooleanOrConstrainBooleanParameters& blinkUnionForm, BooleanConstraint& webForm)
 {
+    if (blinkUnionForm.isBoolean()) {
+        webForm.setIdeal(blinkUnionForm.getAsBoolean());
+        return;
+    }
+    const auto& blinkForm = blinkUnionForm.getAsConstrainBooleanParameters();
     if (blinkForm.hasIdeal()) {
         webForm.setIdeal(blinkForm.ideal());
     }
@@ -511,7 +536,7 @@ void copyBooleanConstraint(const ConstrainBooleanParameters& blinkForm, BooleanC
     }
 }
 
-void copyConstraints(const MediaTrackConstraintSet& constraintsIn, WebMediaTrackConstraintSet& constraintBuffer)
+void copyConstraintSet(const MediaTrackConstraintSet& constraintsIn, WebMediaTrackConstraintSet& constraintBuffer)
 {
     if (constraintsIn.hasWidth()) {
         copyLongConstraint(constraintsIn.width(), constraintBuffer.width);
@@ -554,28 +579,34 @@ void copyConstraints(const MediaTrackConstraintSet& constraintsIn, WebMediaTrack
     }
 }
 
-WebMediaConstraints create(ExecutionContext* context, const MediaTrackConstraints& constraintsIn, MediaErrorState& errorState)
+WebMediaConstraints convertConstraintsToWeb(const MediaTrackConstraints& constraintsIn)
 {
     WebMediaConstraints constraints;
     WebMediaTrackConstraintSet constraintBuffer;
     Vector<WebMediaTrackConstraintSet> advancedBuffer;
-    copyConstraints(constraintsIn, constraintBuffer);
+    copyConstraintSet(constraintsIn, constraintBuffer);
     if (constraintsIn.hasAdvanced()) {
         for (const auto& element : constraintsIn.advanced()) {
             WebMediaTrackConstraintSet advancedElement;
-            copyConstraints(element, advancedElement);
+            copyConstraintSet(element, advancedElement);
             advancedBuffer.append(advancedElement);
         }
     }
-    // TODO(hta): Add initialization of advanced constraints once present.
-    // https://crbug.com/253412
+    constraints.initialize(constraintBuffer, advancedBuffer);
+    return constraints;
+}
+
+WebMediaConstraints create(ExecutionContext* context, const MediaTrackConstraints& constraintsIn, MediaErrorState& errorState)
+{
+    WebMediaConstraints standardForm = convertConstraintsToWeb(constraintsIn);
     if (constraintsIn.hasOptional() || constraintsIn.hasMandatory()) {
-        if (!constraintBuffer.isEmpty() || constraintsIn.hasAdvanced()) {
+        if (!standardForm.isEmpty()) {
+            UseCounter::count(context, UseCounter::MediaStreamConstraintsOldAndNew);
             errorState.throwTypeError("Malformed constraint: Cannot use both optional/mandatory and specific or advanced constraints.");
             return WebMediaConstraints();
         }
-        WebVector<WebMediaConstraint> optional;
-        WebVector<WebMediaConstraint> mandatory;
+        Vector<NameValueStringConstraint> optional;
+        Vector<NameValueStringConstraint> mandatory;
         if (!parse(constraintsIn, optional, mandatory)) {
             errorState.throwTypeError("Malformed constraints object.");
             return WebMediaConstraints();
@@ -584,8 +615,7 @@ WebMediaConstraints create(ExecutionContext* context, const MediaTrackConstraint
         return createFromNamedConstraints(context, mandatory, optional, errorState);
     }
     UseCounter::count(context, UseCounter::MediaStreamConstraintsConformant);
-    constraints.initialize(constraintBuffer, advancedBuffer);
-    return constraints;
+    return standardForm;
 }
 
 WebMediaConstraints create()
@@ -593,6 +623,151 @@ WebMediaConstraints create()
     WebMediaConstraints constraints;
     constraints.initialize();
     return constraints;
+}
+
+LongOrConstrainLongRange convertLong(const LongConstraint& input)
+{
+    LongOrConstrainLongRange outputUnion;
+    if (input.hasExact() || input.hasMin() || input.hasMax()) {
+        ConstrainLongRange output;
+        if (input.hasExact())
+            output.setExact(input.exact());
+        if (input.hasMin())
+            output.setMin(input.min());
+        if (input.hasMax())
+            output.setMax(input.max());
+        if (input.hasIdeal())
+            output.setIdeal(input.ideal());
+        outputUnion.setConstrainLongRange(output);
+    } else {
+        if (input.hasIdeal()) {
+            outputUnion.setLong(input.ideal());
+        }
+    }
+    return outputUnion;
+}
+
+DoubleOrConstrainDoubleRange convertDouble(const DoubleConstraint& input)
+{
+    DoubleOrConstrainDoubleRange outputUnion;
+    if (input.hasExact() || input.hasMin() || input.hasMax()) {
+        ConstrainDoubleRange output;
+        if (input.hasExact())
+            output.setExact(input.exact());
+        if (input.hasIdeal())
+            output.setIdeal(input.ideal());
+        if (input.hasMin())
+            output.setMin(input.min());
+        if (input.hasMax())
+            output.setMax(input.max());
+        outputUnion.setConstrainDoubleRange(output);
+    } else {
+        if (input.hasIdeal()) {
+            outputUnion.setDouble(input.ideal());
+        }
+    }
+    return outputUnion;
+}
+
+StringOrStringSequence convertStringSequence(const WebVector<WebString>& input)
+{
+    StringOrStringSequence theStrings;
+    if (input.size() > 1) {
+        Vector<String> buffer;
+        for (const auto& scanner : input)
+            buffer.append(scanner);
+        theStrings.setStringSequence(buffer);
+    } else if (input.size() > 0) {
+        theStrings.setString(input[0]);
+    }
+    return theStrings;
+}
+
+StringOrStringSequenceOrConstrainDOMStringParameters convertString(const StringConstraint& input)
+{
+    StringOrStringSequenceOrConstrainDOMStringParameters outputUnion;
+    if (input.hasExact()) {
+        ConstrainDOMStringParameters output;
+        output.setExact(convertStringSequence(input.exact()));
+        if (input.hasIdeal()) {
+            output.setIdeal(convertStringSequence(input.ideal()));
+        }
+        outputUnion.setConstrainDOMStringParameters(output);
+    } else if (input.hasIdeal()) {
+        if (input.ideal().size() > 1) {
+            Vector<String> buffer;
+            for (const auto& scanner : input.ideal())
+                buffer.append(scanner);
+            outputUnion.setStringSequence(buffer);
+        } else if (input.ideal().size() == 1) {
+            outputUnion.setString(input.ideal()[0]);
+        }
+    }
+    return outputUnion;
+}
+
+BooleanOrConstrainBooleanParameters convertBoolean(const BooleanConstraint& input)
+{
+    BooleanOrConstrainBooleanParameters outputUnion;
+    if (input.hasExact()) {
+        ConstrainBooleanParameters output;
+        if (input.hasExact())
+            output.setExact(input.exact());
+        if (input.hasIdeal())
+            output.setIdeal(input.ideal());
+        outputUnion.setConstrainBooleanParameters(output);
+    } else if (input.hasIdeal()) {
+        outputUnion.setBoolean(input.ideal());
+    }
+    return outputUnion;
+}
+
+void convertConstraintSet(const WebMediaTrackConstraintSet& input, MediaTrackConstraintSet& output)
+{
+    if (!input.width.isEmpty())
+        output.setWidth(convertLong(input.width));
+    if (!input.height.isEmpty())
+        output.setHeight(convertLong(input.height));
+    if (!input.aspectRatio.isEmpty())
+        output.setAspectRatio(convertDouble(input.aspectRatio));
+    if (!input.frameRate.isEmpty())
+        output.setFrameRate(convertDouble(input.frameRate));
+    if (!input.facingMode.isEmpty())
+        output.setFacingMode(convertString(input.facingMode));
+    if (!input.volume.isEmpty())
+        output.setVolume(convertDouble(input.volume));
+    if (!input.sampleRate.isEmpty())
+        output.setSampleRate(convertLong(input.sampleRate));
+    if (!input.sampleSize.isEmpty())
+        output.setSampleSize(convertLong(input.sampleSize));
+    if (!input.echoCancellation.isEmpty())
+        output.setEchoCancellation(convertBoolean(input.echoCancellation));
+    if (!input.latency.isEmpty())
+        output.setLatency(convertDouble(input.latency));
+    if (!input.channelCount.isEmpty())
+        output.setChannelCount(convertLong(input.channelCount));
+    if (!input.deviceId.isEmpty())
+        output.setDeviceId(convertString(input.deviceId));
+    if (!input.groupId.isEmpty())
+        output.setGroupId(convertString(input.groupId));
+    // TODO(hta): Decide the future of the nonstandard constraints.
+    // If they go forward, they need to be added here.
+    // https://crbug.com/605673
+}
+
+void convertConstraints(const WebMediaConstraints& input, MediaTrackConstraints& output)
+{
+    if (input.isNull())
+        return;
+    convertConstraintSet(input.basic(), output);
+    HeapVector<MediaTrackConstraintSet> advancedVector;
+    for (const auto& it : input.advanced()) {
+        MediaTrackConstraintSet element;
+        convertConstraintSet(it, element);
+        advancedVector.append(element);
+    }
+    if (!advancedVector.isEmpty())
+        output.setAdvanced(advancedVector);
 }
 
 } // namespace MediaConstraintsImpl

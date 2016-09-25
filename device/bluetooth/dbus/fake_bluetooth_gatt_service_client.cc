@@ -7,25 +7,24 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
+#include "device/bluetooth/dbus/fake_bluetooth_device_client.h"
 #include "device/bluetooth/dbus/fake_bluetooth_gatt_characteristic_client.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace bluez {
 
-namespace {
-
-const int kExposeCharacteristicsDelayIntervalMs = 100;
-
-}  // namespace
-
 // static
 const char FakeBluetoothGattServiceClient::kHeartRateServicePathComponent[] =
     "service0000";
+const char FakeBluetoothGattServiceClient::kBatteryServicePathComponent[] =
+    "service0001";
 const char FakeBluetoothGattServiceClient::kHeartRateServiceUUID[] =
     "0000180d-0000-1000-8000-00805f9b34fb";
+const char FakeBluetoothGattServiceClient::kBatteryServiceUUID[] =
+    "0000180f-0000-1000-8000-00805f9b34fb";
 
 FakeBluetoothGattServiceClient::Properties::Properties(
     const PropertyChangedCallback& callback)
@@ -75,6 +74,10 @@ std::vector<dbus::ObjectPath> FakeBluetoothGattServiceClient::GetServices() {
     DCHECK(!heart_rate_service_path_.empty());
     paths.push_back(dbus::ObjectPath(heart_rate_service_path_));
   }
+  if (battery_service_properties_.get()) {
+    DCHECK(!battery_service_path_.empty());
+    paths.push_back(dbus::ObjectPath(battery_service_path_));
+  }
   return paths;
 }
 
@@ -83,6 +86,8 @@ FakeBluetoothGattServiceClient::GetProperties(
     const dbus::ObjectPath& object_path) {
   if (object_path.value() == heart_rate_service_path_)
     return heart_rate_service_properties_.get();
+  if (object_path.value() == battery_service_path_)
+    return battery_service_properties_.get();
   return NULL;
 }
 
@@ -103,14 +108,13 @@ void FakeBluetoothGattServiceClient::ExposeHeartRateService(
   heart_rate_service_properties_->device.ReplaceValue(device_path);
   heart_rate_service_properties_->primary.ReplaceValue(true);
 
-  NotifyServiceAdded(dbus::ObjectPath(heart_rate_service_path_));
+  NotifyServiceAdded(GetHeartRateServicePath());
 
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(
           &FakeBluetoothGattServiceClient::ExposeHeartRateCharacteristics,
-          weak_ptr_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kExposeCharacteristicsDelayIntervalMs));
+          weak_ptr_factory_.GetWeakPtr()));
 }
 
 void FakeBluetoothGattServiceClient::HideHeartRateService() {
@@ -134,13 +138,42 @@ void FakeBluetoothGattServiceClient::HideHeartRateService() {
   heart_rate_service_path_.clear();
 }
 
+void FakeBluetoothGattServiceClient::ExposeBatteryService(
+    const dbus::ObjectPath& device_path) {
+  if (IsBatteryServiceVisible()) {
+    DCHECK(!battery_service_path_.empty());
+    VLOG(1) << "Fake Battery Service already exposed.";
+    return;
+  }
+
+  VLOG(2) << "Exposing fake Battery Service.";
+  battery_service_path_ =
+      device_path.value() + "/" + kBatteryServicePathComponent;
+  battery_service_properties_.reset(new Properties(base::Bind(
+      &FakeBluetoothGattServiceClient::OnPropertyChanged,
+      base::Unretained(this), dbus::ObjectPath(battery_service_path_))));
+  battery_service_properties_->uuid.ReplaceValue(kBatteryServiceUUID);
+  battery_service_properties_->device.ReplaceValue(device_path);
+  battery_service_properties_->primary.ReplaceValue(true);
+
+  NotifyServiceAdded(GetBatteryServicePath());
+}
+
 bool FakeBluetoothGattServiceClient::IsHeartRateVisible() const {
   return !!heart_rate_service_properties_.get();
+}
+
+bool FakeBluetoothGattServiceClient::IsBatteryServiceVisible() const {
+  return !!battery_service_properties_.get();
 }
 
 dbus::ObjectPath FakeBluetoothGattServiceClient::GetHeartRateServicePath()
     const {
   return dbus::ObjectPath(heart_rate_service_path_);
+}
+
+dbus::ObjectPath FakeBluetoothGattServiceClient::GetBatteryServicePath() const {
+  return dbus::ObjectPath(battery_service_path_);
 }
 
 void FakeBluetoothGattServiceClient::OnPropertyChanged(
@@ -177,13 +210,6 @@ void FakeBluetoothGattServiceClient::ExposeHeartRateCharacteristics() {
               ->GetBluetoothGattCharacteristicClient());
   char_client->ExposeHeartRateCharacteristics(
       dbus::ObjectPath(heart_rate_service_path_));
-
-  std::vector<dbus::ObjectPath> char_paths;
-  char_paths.push_back(char_client->GetHeartRateMeasurementPath());
-  char_paths.push_back(char_client->GetBodySensorLocationPath());
-  char_paths.push_back(char_client->GetHeartRateControlPointPath());
-
-  heart_rate_service_properties_->characteristics.ReplaceValue(char_paths);
 }
 
 }  // namespace bluez

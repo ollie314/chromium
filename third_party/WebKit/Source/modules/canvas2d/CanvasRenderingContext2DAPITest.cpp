@@ -4,10 +4,10 @@
 
 #include "modules/canvas2d/CanvasRenderingContext2D.h"
 
+#include "core/dom/Document.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLCanvasElement.h"
-#include "core/html/HTMLDocument.h"
 #include "core/html/ImageData.h"
 #include "core/loader/EmptyClients.h"
 #include "core/testing/DummyPageHolder.h"
@@ -20,6 +20,7 @@
 #include "platform/graphics/UnacceleratedImageBufferSurface.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include <memory>
 
 using ::testing::Mock;
 
@@ -31,15 +32,15 @@ protected:
     void SetUp() override;
 
     DummyPageHolder& page() const { return *m_dummyPageHolder; }
-    HTMLDocument& document() const { return *m_document; }
+    Document& document() const { return *m_document; }
     HTMLCanvasElement& canvasElement() const { return *m_canvasElement; }
     CanvasRenderingContext2D* context2d() const;
 
     void createContext(OpacityMode);
 
 private:
-    OwnPtr<DummyPageHolder> m_dummyPageHolder;
-    Persistent<HTMLDocument> m_document;
+    std::unique_ptr<DummyPageHolder> m_dummyPageHolder;
+    Persistent<Document> m_document;
     Persistent<HTMLCanvasElement> m_canvasElement;
 
 };
@@ -70,7 +71,7 @@ void CanvasRenderingContext2DAPITest::SetUp()
     Page::PageClients pageClients;
     fillWithEmptyClients(pageClients);
     m_dummyPageHolder = DummyPageHolder::create(IntSize(800, 600), &pageClients);
-    m_document = toHTMLDocument(&m_dummyPageHolder->document());
+    m_document = &m_dummyPageHolder->document();
     m_document->documentElement()->setInnerHTML("<body><canvas id='c'></canvas></body>", ASSERT_NO_EXCEPTION);
     m_document->view()->updateAllLifecyclePhases();
     m_canvasElement = toHTMLCanvasElement(m_document->getElementById("c"));
@@ -259,7 +260,7 @@ TEST_F(CanvasRenderingContext2DAPITest, GetImageDataTooBig)
     EXPECT_EQ(V8RangeError, exceptionState.code());
 }
 
-void resetCanvasForAccessibilityRectTest(HTMLDocument& document)
+void resetCanvasForAccessibilityRectTest(Document& document)
 {
     document.documentElement()->setInnerHTML(
         "<canvas id='canvas' style='position:absolute; top:0px; left:0px; padding:10px; margin:5px;'>"
@@ -295,10 +296,11 @@ TEST_F(CanvasRenderingContext2DAPITest, AccessibilityRectTestForAddHitRegion)
     AXObjectCacheImpl* axObjectCache = toAXObjectCacheImpl(document().existingAXObjectCache());
     AXObject* axObject = axObjectCache->getOrCreate(buttonElement);
 
-    EXPECT_EQ(25, axObject->elementRect().x().toInt());
-    EXPECT_EQ(25, axObject->elementRect().y().toInt());
-    EXPECT_EQ(40, axObject->elementRect().width().toInt());
-    EXPECT_EQ(40, axObject->elementRect().height().toInt());
+    LayoutRect axBounds = axObject->getBoundsInFrameCoordinates();
+    EXPECT_EQ(25, axBounds.x().toInt());
+    EXPECT_EQ(25, axBounds.y().toInt());
+    EXPECT_EQ(40, axBounds.width().toInt());
+    EXPECT_EQ(40, axBounds.height().toInt());
 }
 
 TEST_F(CanvasRenderingContext2DAPITest, AccessibilityRectTestForDrawFocusIfNeeded)
@@ -309,7 +311,7 @@ TEST_F(CanvasRenderingContext2DAPITest, AccessibilityRectTestForDrawFocusIfNeede
     HTMLCanvasElement* canvas = toHTMLCanvasElement(document().getElementById("canvas"));
     CanvasRenderingContext2D* context = static_cast<CanvasRenderingContext2D*>(canvas->renderingContext());
 
-    document().updateLayoutTreeForNode(canvas);
+    document().updateStyleAndLayoutTreeForNode(canvas);
 
     context->beginPath();
     context->rect(10, 10, 40, 40);
@@ -318,10 +320,11 @@ TEST_F(CanvasRenderingContext2DAPITest, AccessibilityRectTestForDrawFocusIfNeede
     AXObjectCacheImpl* axObjectCache = toAXObjectCacheImpl(document().existingAXObjectCache());
     AXObject* axObject = axObjectCache->getOrCreate(buttonElement);
 
-    EXPECT_EQ(25, axObject->elementRect().x().toInt());
-    EXPECT_EQ(25, axObject->elementRect().y().toInt());
-    EXPECT_EQ(40, axObject->elementRect().width().toInt());
-    EXPECT_EQ(40, axObject->elementRect().height().toInt());
+    LayoutRect axBounds = axObject->getBoundsInFrameCoordinates();
+    EXPECT_EQ(25, axBounds.x().toInt());
+    EXPECT_EQ(25, axBounds.y().toInt());
+    EXPECT_EQ(40, axBounds.width().toInt());
+    EXPECT_EQ(40, axBounds.height().toInt());
 }
 
 } // namespace blink

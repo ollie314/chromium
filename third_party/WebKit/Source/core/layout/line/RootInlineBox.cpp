@@ -21,6 +21,7 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/StyleEngine.h"
+#include "core/editing/EditingUtilities.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/VerticalPositionCache.h"
 #include "core/layout/api/LineLayoutBlockFlow.h"
@@ -50,12 +51,6 @@ RootInlineBox::RootInlineBox(LineLayoutItem block)
     : InlineFlowBox(block)
     , m_lineBreakPos(0)
     , m_lineBreakObj(nullptr)
-    , m_lineTop(0)
-    , m_lineBottom(0)
-    , m_lineTopWithLeading(0)
-    , m_lineBottomWithLeading(0)
-    , m_selectionBottom(0)
-    , m_paginationStrut(0)
 {
     setIsHorizontal(block.isHorizontalWritingMode());
 }
@@ -115,7 +110,7 @@ LayoutUnit RootInlineBox::placeEllipsis(const AtomicString& ellipsisStr,  bool l
 {
     // Create an ellipsis box.
     EllipsisBox* ellipsisBox = new EllipsisBox(getLineLayoutItem(), ellipsisStr, this,
-        ellipsisWidth, logicalHeight().toFloat(), x(), y(), !prevRootBox(), isHorizontal());
+        ellipsisWidth, logicalHeight().toFloat(), x().toInt(), y().toInt(), !prevRootBox(), isHorizontal());
 
     if (!gEllipsisBoxMap)
         gEllipsisBoxMap = new EllipsisBoxMap();
@@ -236,7 +231,7 @@ LayoutUnit RootInlineBox::alignBoxesInBlockDirection(LayoutUnit heightOfBlock, G
     computeLogicalBoxHeights(this, maxPositionTop, maxPositionBottom, maxAscent, maxDescent, setMaxAscent, setMaxDescent, noQuirksMode, textBoxDataMap, baselineType(), verticalPositionCache);
 
     if (maxAscent + maxDescent < std::max(maxPositionTop, maxPositionBottom))
-        adjustMaxAscentAndDescent(maxAscent, maxDescent, maxPositionTop, maxPositionBottom);
+        adjustMaxAscentAndDescent(maxAscent, maxDescent, maxPositionTop.toInt(), maxPositionBottom.toInt());
 
     if (getLineLayoutItem().styleRef().snapHeightUnit())
         snapHeight(maxAscent, maxDescent, getLineLayoutItem().styleRef());
@@ -413,7 +408,7 @@ LineLayoutBlockFlow RootInlineBox::block() const
 
 static bool isEditableLeaf(InlineBox* leaf)
 {
-    return leaf && leaf->getLineLayoutItem().node() && leaf->getLineLayoutItem().node()->hasEditableStyle();
+    return leaf && leaf->getLineLayoutItem().node() && hasEditableStyle(*leaf->getLineLayoutItem().node());
 }
 
 InlineBox* RootInlineBox::closestLeafChildForPoint(const LayoutPoint& pointInContents, bool onlyEditableLeaves)
@@ -590,7 +585,7 @@ void RootInlineBox::ascentAndDescentForBox(InlineBox* box, GlyphOverflowAndFallb
     // If leading is included for the box, then we compute that box.
     if (includeLeading && !setUsedFontWithLeading) {
         int ascentWithLeading = box->baselinePosition(baselineType());
-        int descentWithLeading = box->lineHeight() - ascentWithLeading;
+        int descentWithLeading = (box->lineHeight() - ascentWithLeading).toInt();
         setAscentAndDescent(ascent, descent, ascentWithLeading, descentWithLeading, ascentDescentSet);
 
         // Examine the font box for inline flows and text boxes to see if any part of it is above the baseline.
@@ -661,7 +656,7 @@ LayoutUnit RootInlineBox::verticalPositionForBox(InlineBox* box, VerticalPositio
         } else if (verticalAlign == VerticalAlignLength) {
             LayoutUnit lineHeight;
             // Per http://www.w3.org/TR/CSS21/visudet.html#propdef-vertical-align: 'Percentages: refer to the 'line-height' of the element itself'.
-            if (boxModel.style()->getVerticalAlignLength().hasPercent())
+            if (boxModel.style()->getVerticalAlignLength().isPercentOrCalc())
                 lineHeight = LayoutUnit(boxModel.style()->computedLineHeight());
             else
                 lineHeight = boxModel.lineHeight(firstLine, lineDirection);
@@ -671,7 +666,7 @@ LayoutUnit RootInlineBox::verticalPositionForBox(InlineBox* box, VerticalPositio
 
     // Store the cached value.
     if (isLayoutInline && !firstLine)
-        verticalPositionCache.set(boxModel, baselineType(), verticalPosition);
+        verticalPositionCache.set(boxModel, baselineType(), verticalPosition.toInt());
 
     return verticalPosition;
 }

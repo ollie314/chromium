@@ -10,8 +10,7 @@ ShortcutInfo::ShortcutInfo(const GURL& shortcut_url)
       orientation(blink::WebScreenOrientationLockDefault),
       source(SOURCE_ADD_TO_HOMESCREEN),
       theme_color(content::Manifest::kInvalidOrMissingColor),
-      background_color(content::Manifest::kInvalidOrMissingColor),
-      is_icon_generated(false) {
+      background_color(content::Manifest::kInvalidOrMissingColor) {
 }
 
 ShortcutInfo::ShortcutInfo(const ShortcutInfo& other) = default;
@@ -36,14 +35,15 @@ void ShortcutInfo::UpdateFromManifest(const content::Manifest& manifest) {
   if (manifest.start_url.is_valid())
     url = manifest.start_url;
 
+  if (manifest.scope.is_valid())
+    scope = manifest.scope;
+
   // Set the display based on the manifest value, if any.
   if (manifest.display != blink::WebDisplayModeUndefined)
     display = manifest.display;
 
-  // 'fullscreen' and 'minimal-ui' are not yet supported, fallback to the right
-  // mode in those cases.
-  if (manifest.display == blink::WebDisplayModeFullscreen)
-    display = blink::WebDisplayModeStandalone;
+  // 'minimal-ui' is not yet supported, so fallback in this case.
+  // See crbug.com/604390.
   if (manifest.display == blink::WebDisplayModeMinimalUi)
     display = blink::WebDisplayModeBrowser;
 

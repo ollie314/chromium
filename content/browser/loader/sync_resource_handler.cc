@@ -5,7 +5,7 @@
 #include "content/browser/loader/sync_resource_handler.h"
 
 #include "base/logging.h"
-#include "content/browser/devtools/devtools_netlog_observer.h"
+#include "content/browser/loader/netlog_observer.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/loader/resource_message_filter.h"
 #include "content/browser/loader/resource_request_info_impl.h"
@@ -51,7 +51,7 @@ bool SyncResourceHandler::OnRequestRedirected(
         response);
   }
 
-  DevToolsNetLogObserver::PopulateResponseInfo(request(), response);
+  NetLogObserver::PopulateResponseInfo(request(), response);
   // TODO(darin): It would be much better if this could live in WebCore, but
   // doing so requires API changes at all levels.  Similar code exists in
   // WebCore/platform/network/cf/ResourceHandleCFNet.cpp :-(
@@ -73,11 +73,11 @@ bool SyncResourceHandler::OnResponseStarted(
     return false;
 
   if (rdh_->delegate()) {
-    rdh_->delegate()->OnResponseStarted(
-        request(), info->GetContext(), response, info->filter());
+    rdh_->delegate()->OnResponseStarted(request(), info->GetContext(),
+                                        response);
   }
 
-  DevToolsNetLogObserver::PopulateResponseInfo(request(), response);
+  NetLogObserver::PopulateResponseInfo(request(), response);
 
   // We don't care about copying the status here.
   result_.headers = response->head.headers;
@@ -92,10 +92,6 @@ bool SyncResourceHandler::OnResponseStarted(
 }
 
 bool SyncResourceHandler::OnWillStart(const GURL& url, bool* defer) {
-  return true;
-}
-
-bool SyncResourceHandler::OnBeforeNetworkStart(const GURL& url, bool* defer) {
   return true;
 }
 
@@ -117,7 +113,6 @@ bool SyncResourceHandler::OnReadCompleted(int bytes_read, bool* defer) {
 
 void SyncResourceHandler::OnResponseCompleted(
     const net::URLRequestStatus& status,
-    const std::string& security_info,
     bool* defer) {
   ResourceMessageFilter* filter = GetFilter();
   if (!filter)
@@ -127,6 +122,7 @@ void SyncResourceHandler::OnResponseCompleted(
 
   int total_transfer_size = request()->GetTotalReceivedBytes();
   result_.encoded_data_length = total_transfer_size_ + total_transfer_size;
+  result_.encoded_body_length = request()->GetRawBodyBytes();
 
   ResourceHostMsg_SyncLoad::WriteReplyParams(result_message_, result_);
   filter->Send(result_message_);

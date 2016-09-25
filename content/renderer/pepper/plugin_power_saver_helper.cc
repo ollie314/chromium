@@ -7,9 +7,11 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/location.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/common/frame_messages.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/render_frame.h"
@@ -23,7 +25,7 @@ namespace content {
 namespace {
 
 const char kPeripheralHeuristicHistogram[] =
-    "Plugin.PowerSaver.PeripheralHeuristic";
+    "Plugin.PowerSaver.PeripheralHeuristicInitialDecision";
 
 }  // namespace
 
@@ -66,6 +68,10 @@ bool PluginPowerSaverHelper::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
+void PluginPowerSaverHelper::OnDestruct() {
+  delete this;
+}
+
 void PluginPowerSaverHelper::OnUpdatePluginContentOriginWhitelist(
     const std::set<url::Origin>& origin_whitelist) {
   origin_whitelist_ = origin_whitelist;
@@ -76,8 +82,8 @@ void PluginPowerSaverHelper::OnUpdatePluginContentOriginWhitelist(
     if (origin_whitelist.count(it->content_origin)) {
       // Because the unthrottle callback may register another peripheral plugin
       // and invalidate our iterator, we cannot run it synchronously.
-      base::MessageLoop::current()->PostTask(FROM_HERE,
-                                             it->unthrottle_callback);
+      base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                    it->unthrottle_callback);
       it = peripheral_plugins_.erase(it);
     } else {
       ++it;
@@ -96,7 +102,8 @@ RenderFrame::PeripheralContentStatus
 PluginPowerSaverHelper::GetPeripheralContentStatus(
     const url::Origin& main_frame_origin,
     const url::Origin& content_origin,
-    const gfx::Size& unobscured_size) const {
+    const gfx::Size& unobscured_size,
+    RenderFrame::RecordPeripheralDecision record_decision) const {
   if (base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kOverridePluginPowerSaverForTesting) == "always") {
     return RenderFrame::CONTENT_STATUS_PERIPHERAL;
@@ -104,15 +111,14 @@ PluginPowerSaverHelper::GetPeripheralContentStatus(
 
   auto status = PeripheralContentHeuristic::GetPeripheralStatus(
       origin_whitelist_, main_frame_origin, content_origin, unobscured_size);
-  if (status == RenderFrame::CONTENT_STATUS_ESSENTIAL_UNKNOWN_SIZE) {
-    // Early exit here to avoid recording a UMA. Every plugin will call this
-    // method once before the size is known (to faciliate early-exit for
-    // same-origin and whitelisted-origin content).
-    return status;
+
+  // Never record ESSENTIAL_UNKNOWN_SIZE. Wait for retest after size is known.
+  if (record_decision == RenderFrame::RECORD_DECISION &&
+      status != RenderFrame::CONTENT_STATUS_ESSENTIAL_UNKNOWN_SIZE) {
+    UMA_HISTOGRAM_ENUMERATION(kPeripheralHeuristicHistogram, status,
+                              RenderFrame::CONTENT_STATUS_NUM_ITEMS);
   }
 
-  UMA_HISTOGRAM_ENUMERATION(kPeripheralHeuristicHistogram, status,
-                            RenderFrame::CONTENT_STATUS_NUM_ITEMS);
   return status;
 }
 

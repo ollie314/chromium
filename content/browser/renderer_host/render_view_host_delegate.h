@@ -136,20 +136,9 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // refocus on the modal dialog, flash title etc).
   virtual void OnIgnoredUIEvent() {}
 
-  // Notification that the RenderViewHost's load state changed.
-  virtual void LoadStateChanged(const GURL& url,
-                                const net::LoadStateWithParam& load_state,
-                                uint64_t upload_position,
-                                uint64_t upload_size) {}
-
   // The page wants the hosting window to activate itself (it called the
   // JavaScript window.focus() method).
   virtual void Activate() {}
-
-  // Called when a file selection is to be done.
-  virtual void RunFileChooser(
-      RenderViewHost* render_view_host,
-      const FileChooserParams& params) {}
 
   // The contents' preferred size changed.
   virtual void UpdatePreferredSize(const gfx::Size& pref_size) {}
@@ -198,18 +187,20 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   //
   // Note: this is not called "ShowWindow" because that will clash with
   // the Windows function which is actually a #define.
-  virtual void ShowCreatedWindow(int route_id,
+  virtual void ShowCreatedWindow(int process_id,
+                                 int route_id,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_rect,
                                  bool user_gesture) {}
 
   // Show the newly created widget with the specified bounds.
   // The widget is identified by the route_id passed to CreateNewWidget.
-  virtual void ShowCreatedWidget(int route_id,
+  virtual void ShowCreatedWidget(int process_id,
+                                 int route_id,
                                  const gfx::Rect& initial_rect) {}
 
   // Show the newly created full screen widget. Similar to above.
-  virtual void ShowCreatedFullscreenWidget(int route_id) {}
+  virtual void ShowCreatedFullscreenWidget(int process_id, int route_id) {}
 
   // Returns the SessionStorageNamespace the render view should use. Might
   // create the SessionStorageNamespace on the fly.
@@ -219,6 +210,11 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // Returns a copy of the map of all session storage namespaces related
   // to this view.
   virtual SessionStorageNamespaceMap GetSessionStorageNamespaceMap();
+
+  // Returns the zoom level for the pending navigation for the page. If there
+  // is no pending navigation, this returns the zoom level for the current
+  // page.
+  virtual double GetPendingPageZoomLevel();
 
   // Returns true if the RenderViewHost will never be visible.
   virtual bool IsNeverVisible();

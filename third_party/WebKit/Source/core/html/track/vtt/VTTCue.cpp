@@ -29,9 +29,9 @@
 
 #include "core/html/track/vtt/VTTCue.h"
 
+#include "bindings/core/v8/DoubleOrAutoKeyword.h"
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
-#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
 #include "core/dom/DocumentFragment.h"
@@ -47,7 +47,6 @@
 #include "core/html/track/vtt/VTTRegionList.h"
 #include "core/html/track/vtt/VTTScanner.h"
 #include "core/layout/LayoutVTTCue.h"
-#include "platform/FloatConversion.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/text/BidiResolver.h"
 #include "platform/text/TextRunIterator.h"
@@ -123,7 +122,7 @@ static const String& verticalGrowingRightKeyword()
 
 static bool isInvalidPercentage(double value)
 {
-    ASSERT(std::isfinite(value));
+    DCHECK(std::isfinite(value));
     return value < 0 || value > 100;
 }
 
@@ -192,7 +191,7 @@ void VTTCueBox::applyCSSProperties(const VTTDisplayParameters& displayParameters
     // text alignment:
     setInlineStyleProperty(CSSPropertyTextAlign, displayParameters.textAlign);
 
-    // TODO(philipj): The position adjustment for non-snap-to-lines cues has
+    // TODO(foolip): The position adjustment for non-snap-to-lines cues has
     // been removed from the spec:
     // https://www.w3.org/Bugs/Public/show_bug.cgi?id=19178
     if (std::isnan(displayParameters.snapToLinesPosition)) {
@@ -272,7 +271,7 @@ const String& VTTCue::vertical() const
     case VerticalGrowingRight:
         return verticalGrowingRightKeyword();
     default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return emptyString();
     }
 }
@@ -287,7 +286,7 @@ void VTTCue::setVertical(const String& value)
     else if (value == verticalGrowingRightKeyword())
         direction = VerticalGrowingRight;
     else
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
 
     if (direction == m_writingDirection)
         return;
@@ -332,8 +331,8 @@ void VTTCue::setLine(const DoubleOrAutoKeyword& position)
             return;
         floatPosition = std::numeric_limits<float>::quiet_NaN();
     } else {
-        ASSERT(position.isDouble());
-        floatPosition = narrowPrecisionToFloat(position.getAsDouble());
+        DCHECK(position.isDouble());
+        floatPosition = clampTo<float>(position.getAsDouble());
         if (m_linePosition == floatPosition)
             return;
     }
@@ -369,10 +368,10 @@ void VTTCue::setPosition(const DoubleOrAutoKeyword& position, ExceptionState& ex
             return;
         floatPosition = std::numeric_limits<float>::quiet_NaN();
     } else {
-        ASSERT(position.isDouble());
+        DCHECK(position.isDouble());
         if (isInvalidPercentage(position.getAsDouble(), exceptionState))
             return;
-        floatPosition = narrowPrecisionToFloat(position.getAsDouble());
+        floatPosition = clampTo<float>(position.getAsDouble());
         if (m_textPosition == floatPosition)
             return;
     }
@@ -391,7 +390,7 @@ void VTTCue::setSize(double size, ExceptionState& exceptionState)
         return;
 
     // Otherwise, set the WebVTT cue size to the new value.
-    float floatSize = narrowPrecisionToFloat(size);
+    float floatSize = clampTo<float>(size);
     if (m_cueSize == floatSize)
         return;
 
@@ -414,7 +413,7 @@ const String& VTTCue::align() const
     case Right:
         return rightKeyword();
     default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return emptyString();
     }
 }
@@ -433,7 +432,7 @@ void VTTCue::setAlign(const String& value)
     else if (value == rightKeyword())
         alignment = Right;
     else
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
 
     if (alignment == m_cueAlignment)
         return;
@@ -565,7 +564,7 @@ static TextDirection determineDirectionality(const String& value, bool& hasStron
 
 static CSSValueID determineTextDirection(DocumentFragment* vttRoot)
 {
-    ASSERT(vttRoot);
+    DCHECK(vttRoot);
 
     // Apply the Unicode Bidirectional Algorithm's Paragraph Level steps to the
     // concatenation of the values of each WebVTT Text Object in nodes, in a
@@ -574,7 +573,7 @@ static CSSValueID determineTextDirection(DocumentFragment* vttRoot)
     TextDirection textDirection = LTR;
     Node* node = NodeTraversal::next(*vttRoot);
     while (node) {
-        ASSERT(node->isDescendantOf(vttRoot));
+        DCHECK(node->isDescendantOf(vttRoot));
 
         if (node->isTextNode()) {
             bool hasStrongDirectionality;
@@ -615,7 +614,7 @@ float VTTCue::calculateComputedTextPosition() const
     case Middle:
         return 50;
     default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return 0;
     }
 }
@@ -676,7 +675,7 @@ VTTDisplayParameters VTTCue::calculateDisplayParameters() const
         maximumSize = computedTextPosition <= 50 ? computedTextPosition : (100 - computedTextPosition);
         maximumSize = maximumSize * 2;
     } else {
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
 
     // 5. If the cue size is less than maximum size, then let size
@@ -703,7 +702,7 @@ VTTDisplayParameters VTTCue::calculateDisplayParameters() const
             displayParameters.position.setX(computedTextPosition - displayParameters.size / 2);
             break;
         default:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
         }
     } else {
         // Cases for m_writingDirection being VerticalGrowing{Left|Right}
@@ -718,7 +717,7 @@ VTTDisplayParameters VTTCue::calculateDisplayParameters() const
             displayParameters.position.setY(computedTextPosition - displayParameters.size / 2);
             break;
         default:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
         }
     }
 
@@ -748,9 +747,9 @@ VTTDisplayParameters VTTCue::calculateDisplayParameters() const
         ? computedLinePosition
         : std::numeric_limits<float>::quiet_NaN();
 
-    ASSERT(std::isfinite(displayParameters.size));
-    ASSERT(displayParameters.direction != CSSValueNone);
-    ASSERT(displayParameters.writingMode != CSSValueNone);
+    DCHECK(std::isfinite(displayParameters.size));
+    DCHECK_NE(displayParameters.direction, CSSValueNone);
+    DCHECK_NE(displayParameters.writingMode, CSSValueNone);
     return displayParameters;
 }
 
@@ -758,7 +757,7 @@ void VTTCue::updatePastAndFutureNodes(double movieTime)
 {
     DEFINE_STATIC_LOCAL(const String, timestampTag, ("timestamp"));
 
-    ASSERT(isActive());
+    DCHECK(isActive());
 
     // An active cue may still not have a display tree, e.g. if its track is
     // hidden or if the track belongs to an audio element.
@@ -781,7 +780,7 @@ void VTTCue::updatePastAndFutureNodes(double movieTime)
         if (child.nodeName() == timestampTag) {
             double currentTimestamp;
             bool check = VTTParser::collectTimeStamp(child.nodeValue(), currentTimestamp);
-            ASSERT_UNUSED(check, check);
+            DCHECK(check);
 
             if (currentTimestamp > movieTime)
                 isPastNode = false;
@@ -798,14 +797,14 @@ void VTTCue::updatePastAndFutureNodes(double movieTime)
 
 VTTCueBox* VTTCue::getDisplayTree()
 {
-    ASSERT(track() && track()->isRendered() && isActive());
+    DCHECK(track() && track()->isRendered() && isActive());
 
     if (!m_displayTree) {
         m_displayTree = VTTCueBox::create(document());
         m_displayTree->appendChild(m_cueBackgroundBox);
     }
 
-    ASSERT(m_displayTree->firstChild() == m_cueBackgroundBox);
+    DCHECK_EQ(m_displayTree->firstChild(), m_cueBackgroundBox);
 
     if (!m_displayTreeShouldChange) {
         // Apply updated user style overrides for text tracks when display tree doesn't change.
@@ -820,7 +819,7 @@ VTTCueBox* VTTCue::getDisplayTree()
     m_cueBackgroundBox->removeChildren();
     m_vttNodeTree->cloneChildNodes(m_cueBackgroundBox.get());
 
-    // TODO(philipj): The region identifier may be non-empty without there being
+    // TODO(foolip): The region identifier may be non-empty without there being
     // a corresponding region, in which case this VTTCueBox will be added
     // directly to the text track container in updateDisplay().
     if (regionId().isEmpty()) {
@@ -853,7 +852,7 @@ void VTTCue::removeDisplayTree(RemovalNotification removalNotification)
 
 void VTTCue::updateDisplay(HTMLDivElement& container)
 {
-    ASSERT(track() && track()->isRendered() && isActive());
+    DCHECK(track() && track()->isRendered() && isActive());
 
     UseCounter::count(document(), UseCounter::VTTCueRender);
 
@@ -1129,13 +1128,13 @@ void VTTCue::applyUserOverrideCSSProperties()
 
 ExecutionContext* VTTCue::getExecutionContext() const
 {
-    ASSERT(m_cueBackgroundBox);
+    DCHECK(m_cueBackgroundBox);
     return m_cueBackgroundBox->getExecutionContext();
 }
 
 Document& VTTCue::document() const
 {
-    ASSERT(m_cueBackgroundBox);
+    DCHECK(m_cueBackgroundBox);
     return m_cueBackgroundBox->document();
 }
 

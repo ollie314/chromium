@@ -11,8 +11,8 @@
 
 #include "base/android/jni_android.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "chrome/browser/ui/passwords/manage_passwords_state.h"
+#include "content/public/browser/web_contents_observer.h"
 
 namespace content {
 class WebContents;
@@ -24,16 +24,16 @@ struct CredentialInfo;
 
 // Native counterpart for the android dialog which allows users to select
 // credentials which will be passed to the web site in order to log in the user.
-class AccountChooserDialogAndroid {
+class AccountChooserDialogAndroid : public content::WebContentsObserver {
  public:
   AccountChooserDialogAndroid(
       content::WebContents* web_contents,
-      ScopedVector<autofill::PasswordForm> local_credentials,
-      ScopedVector<autofill::PasswordForm> federated_credentials,
+      std::vector<std::unique_ptr<autofill::PasswordForm>> local_credentials,
+      std::vector<std::unique_ptr<autofill::PasswordForm>> federation_providers,
       const GURL& origin,
       const ManagePasswordsState::CredentialsCallback& callback);
 
-  ~AccountChooserDialogAndroid();
+  ~AccountChooserDialogAndroid() override;
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
 
   void ShowDialog();
@@ -46,24 +46,34 @@ class AccountChooserDialogAndroid {
   void OnCredentialClicked(JNIEnv* env,
                            const base::android::JavaParamRef<jobject>& obj,
                            jint credential_item,
-                           jint credential_type);
+                           jint credential_type,
+                           jboolean sign_button_clicked);
 
   // Opens new tab with page which explains the Smart Lock branding.
   void OnLinkClicked(JNIEnv* env,
                      const base::android::JavaParamRef<jobject>& obj);
 
+  // content::WebContentsObserver overrides:
+  void WebContentsDestroyed() override;
+  void WasHidden() override;
+
  private:
-  const std::vector<const autofill::PasswordForm*>& local_credentials_forms()
-      const;
+  void OnDialogCancel();
 
-  const std::vector<const autofill::PasswordForm*>&
-  federated_credentials_forms() const;
+  const std::vector<std::unique_ptr<autofill::PasswordForm>>&
+  local_credentials_forms() const;
 
-  void ChooseCredential(size_t index, password_manager::CredentialType type);
+  const std::vector<std::unique_ptr<autofill::PasswordForm>>&
+  federation_providers_forms() const;
+
+  void ChooseCredential(size_t index,
+                        password_manager::CredentialType type,
+                        bool sign_button_clicked);
 
   content::WebContents* web_contents_;
   ManagePasswordsState passwords_data_;
   GURL origin_;
+  base::android::ScopedJavaGlobalRef<jobject> dialog_jobject_;
 
   DISALLOW_COPY_AND_ASSIGN(AccountChooserDialogAndroid);
 };

@@ -16,6 +16,7 @@
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
+#include "components/spellcheck/browser/pref_names.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -90,7 +91,8 @@ class SpellcheckServiceUnitTest : public testing::TestWithParam<TestCase> {
   ~SpellcheckServiceUnitTest() override {}
 
   void SetUp() override {
-    prefs()->registry()->RegisterListPref(prefs::kSpellCheckDictionaries);
+    prefs()->registry()->RegisterListPref(
+        spellcheck::prefs::kSpellCheckDictionaries);
     prefs()->registry()->RegisterStringPref(prefs::kAcceptLanguages,
                                             std::string());
   }
@@ -112,8 +114,10 @@ INSTANTIATE_TEST_CASE_P(
     TestCases,
     SpellcheckServiceUnitTest,
     testing::Values(
+        TestCase("en,aa", "aa", "", ""),
         TestCase("en,en-JP,fr,aa", "fr", "fr", "fr"),
         TestCase("en,en-JP,fr,zz,en-US", "fr", "fr,en-US", "fr"),
+        TestCase("en,en-US,en-GB", "en-GB", "en-US,en-GB", "en-GB"),
         TestCase("en,en-US,en-AU", "en-AU", "en-US,en-AU", "en-AU"),
         TestCase("en,en-US,en-AU", "en-US", "en-US,en-AU", "en-US"),
         TestCase("en,en-US", "en-US", "en-US", "en-US"),
@@ -126,7 +130,8 @@ TEST_P(SpellcheckServiceUnitTest, GetDictionaries) {
   prefs()->SetString(prefs::kAcceptLanguages, GetParam().accept_languages);
   base::ListValue spellcheck_dictionaries;
   spellcheck_dictionaries.AppendStrings(GetParam().spellcheck_dictionaries);
-  prefs()->Set(prefs::kSpellCheckDictionaries, spellcheck_dictionaries);
+  prefs()->Set(spellcheck::prefs::kSpellCheckDictionaries,
+               spellcheck_dictionaries);
 
   std::vector<SpellcheckService::Dictionary> dictionaries;
   SpellcheckService::GetDictionaries(context(), &dictionaries);

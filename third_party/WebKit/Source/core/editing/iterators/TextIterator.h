@@ -149,6 +149,10 @@ private:
 
     bool excludesAutofilledValue() const { return m_behavior & TextIteratorExcludeAutofilledValue; }
 
+    bool doesNotBreakAtReplacedElement() const { return m_behavior & TextIteratorDoesNotBreakAtReplacedElement; }
+
+    bool forInnerText() const { return m_behavior & TextIteratorForInnerText; }
+
     bool isBetweenSurrogatePair(int position) const;
 
     // Append code units with offset range [position, position + copyLength)
@@ -168,6 +172,9 @@ private:
     int m_startOffset;
     Member<Node> m_endContainer;
     int m_endOffset;
+    // |m_endNode| stores |Strategy::childAt(*m_endContainer, m_endOffset - 1)|,
+    // if it exists, or |nullptr| otherwise.
+    Member<Node> m_endNode;
     Member<Node> m_pastEndNode;
 
     // Used when there is still some pending text from the current node; when these

@@ -62,11 +62,13 @@ private:
     void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
     const AtomicString& formControlType() const override;
     bool isDisabledFormControl() const override;
+    bool matchesEnabledPseudoClass() const override;
     bool isEnumeratable() const override { return true; }
     bool supportLabels() const override { return true; }
     bool supportsFocus() const override;
     void childrenChanged(const ChildrenChange&) override;
     void resetImpl() override;
+    short tabIndex() const override;
 
     void valueWasSet() final;
 

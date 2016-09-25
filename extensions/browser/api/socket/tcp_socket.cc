@@ -4,9 +4,11 @@
 
 #include "extensions/browser/api/socket/tcp_socket.h"
 
+#include "base/callback_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "extensions/browser/api/api_resource.h"
 #include "net/base/address_list.h"
 #include "net/base/ip_endpoint.h"
@@ -45,7 +47,7 @@ ApiResourceManager<ResumableTCPServerSocket>::GetFactoryInstance() {
 TCPSocket::TCPSocket(const std::string& owner_extension_id)
     : Socket(owner_extension_id), socket_mode_(UNKNOWN) {}
 
-TCPSocket::TCPSocket(scoped_ptr<net::TCPClientSocket> tcp_client_socket,
+TCPSocket::TCPSocket(std::unique_ptr<net::TCPClientSocket> tcp_client_socket,
                      const std::string& owner_extension_id,
                      bool is_connected)
     : Socket(owner_extension_id),
@@ -54,7 +56,7 @@ TCPSocket::TCPSocket(scoped_ptr<net::TCPClientSocket> tcp_client_socket,
   this->is_connected_ = is_connected;
 }
 
-TCPSocket::TCPSocket(scoped_ptr<net::TCPServerSocket> tcp_server_socket,
+TCPSocket::TCPSocket(std::unique_ptr<net::TCPServerSocket> tcp_server_socket,
                      const std::string& owner_extension_id)
     : Socket(owner_extension_id),
       server_socket_(std::move(tcp_server_socket)),
@@ -62,7 +64,7 @@ TCPSocket::TCPSocket(scoped_ptr<net::TCPServerSocket> tcp_server_socket,
 
 // static
 TCPSocket* TCPSocket::CreateSocketForTesting(
-    scoped_ptr<net::TCPClientSocket> tcp_client_socket,
+    std::unique_ptr<net::TCPClientSocket> tcp_client_socket,
     const std::string& owner_extension_id,
     bool is_connected) {
   return new TCPSocket(std::move(tcp_client_socket), owner_extension_id,
@@ -71,7 +73,7 @@ TCPSocket* TCPSocket::CreateSocketForTesting(
 
 // static
 TCPSocket* TCPSocket::CreateServerSocketForTesting(
-    scoped_ptr<net::TCPServerSocket> tcp_server_socket,
+    std::unique_ptr<net::TCPServerSocket> tcp_server_socket,
     const std::string& owner_extension_id) {
   return new TCPSocket(std::move(tcp_server_socket), owner_extension_id);
 }
@@ -114,7 +116,11 @@ void TCPSocket::Disconnect() {
     socket_->Disconnect();
   server_socket_.reset(NULL);
   connect_callback_.Reset();
-  read_callback_.Reset();
+  // TODO(devlin): Should we do this for all callbacks?
+  if (!read_callback_.is_null()) {
+    base::ResetAndReturn(&read_callback_)
+        .Run(net::ERR_CONNECTION_CLOSED, nullptr);
+  }
   accept_callback_.Reset();
   accept_socket_.reset(NULL);
 }
@@ -299,7 +305,7 @@ void TCPSocket::OnAccept(int result) {
   DCHECK(!accept_callback_.is_null());
   if (result == net::OK && accept_socket_.get()) {
     accept_callback_.Run(result,
-                         make_scoped_ptr(static_cast<net::TCPClientSocket*>(
+                         base::WrapUnique(static_cast<net::TCPClientSocket*>(
                              accept_socket_.release())));
   } else {
     accept_callback_.Run(result, NULL);
@@ -344,13 +350,21 @@ ResumableTCPSocket::ResumableTCPSocket(const std::string& owner_extension_id)
       paused_(false) {}
 
 ResumableTCPSocket::ResumableTCPSocket(
-    scoped_ptr<net::TCPClientSocket> tcp_client_socket,
+    std::unique_ptr<net::TCPClientSocket> tcp_client_socket,
     const std::string& owner_extension_id,
     bool is_connected)
     : TCPSocket(std::move(tcp_client_socket), owner_extension_id, is_connected),
       persistent_(false),
       buffer_size_(0),
       paused_(false) {}
+
+ResumableTCPSocket::~ResumableTCPSocket() {
+  // Despite ~TCPSocket doing basically the same, we need to disconnect
+  // before ResumableTCPSocket is destroyed, because we have some extra
+  // state that relies on the socket being ResumableTCPSocket, like
+  // read_callback_.
+  Disconnect();
+}
 
 bool ResumableTCPSocket::IsPersistent() const { return persistent(); }
 

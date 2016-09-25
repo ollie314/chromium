@@ -7,7 +7,9 @@ package org.chromium.chrome.browser.metrics;
 import android.util.Pair;
 
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.ArrayList;
@@ -29,7 +31,7 @@ public class LaunchMetrics {
     private abstract static class CachedHistogram {
         private static final List<CachedHistogram> sEvents = new ArrayList<CachedHistogram>();
 
-        protected String mHistogramName;
+        protected final String mHistogramName;
 
         /**
          * @param histogramName Name of the histogram to record.
@@ -43,23 +45,34 @@ public class LaunchMetrics {
         protected abstract void commitAndClear();
     }
 
-    /** Caches whether an event happened. */
-    public static class BooleanEvent extends CachedHistogram {
-        private boolean mIsHit;
+    /**
+     * Caches an action that will be recorded after native side is loaded.
+     */
+    public static class ActionEvent extends CachedHistogram {
+        private int mCount;
 
-        public BooleanEvent(String histogramName) {
-            super(histogramName);
+        public ActionEvent(String actionName) {
+            super(actionName);
         }
 
-        /** Records that the histogram condition occurred. */
-        public void recordHit() {
-            mIsHit = true;
+        public void record() {
+            if (LibraryLoader.isInitialized()) {
+                recordWithNative();
+            } else {
+                mCount++;
+            }
+        }
+
+        private void recordWithNative() {
+            RecordUserAction.record(mHistogramName);
         }
 
         @Override
         protected void commitAndClear() {
-            RecordHistogram.recordBooleanHistogram(mHistogramName, mIsHit);
-            mIsHit = false;
+            while (mCount > 0) {
+                recordWithNative();
+                mCount--;
+            }
         }
     }
 
@@ -72,13 +85,83 @@ public class LaunchMetrics {
         }
 
         public void record(int sample) {
-            mSamples.add(sample);
+            if (LibraryLoader.isInitialized()) {
+                recordWithNative(sample);
+            } else {
+                mSamples.add(sample);
+            }
+        }
+
+        private void recordWithNative(int sample) {
+            RecordHistogram.recordSparseSlowlyHistogram(mHistogramName, sample);
         }
 
         @Override
         protected void commitAndClear() {
             for (Integer sample : mSamples) {
-                RecordHistogram.recordSparseSlowlyHistogram(mHistogramName, sample);
+                recordWithNative(sample);
+            }
+            mSamples.clear();
+        }
+    }
+
+    /** Caches a set of enumerated histogram samples. */
+    public static class EnumeratedHistogramSample extends CachedHistogram {
+        private final List<Integer> mSamples = new ArrayList<Integer>();
+        private final int mMaxValue;
+
+        public EnumeratedHistogramSample(String histogramName, int maxValue) {
+            super(histogramName);
+            mMaxValue = maxValue;
+        }
+
+        public void record(int sample) {
+            if (LibraryLoader.isInitialized()) {
+                recordWithNative(sample);
+            } else {
+                mSamples.add(sample);
+            }
+        }
+
+        private void recordWithNative(int sample) {
+            RecordHistogram.recordEnumeratedHistogram(mHistogramName, sample, mMaxValue);
+        }
+
+        @Override
+        protected void commitAndClear() {
+            for (Integer sample : mSamples) {
+                recordWithNative(sample);
+            }
+            mSamples.clear();
+        }
+    }
+
+    /** Caches a set of times histogram samples. */
+    public static class TimesHistogramSample extends CachedHistogram {
+        private final List<Long> mSamples = new ArrayList<Long>();
+        private final TimeUnit mTimeUnit;
+
+        public TimesHistogramSample(String histogramName, TimeUnit timeUnit) {
+            super(histogramName);
+            mTimeUnit = timeUnit;
+        }
+
+        public void record(long sample) {
+            if (LibraryLoader.isInitialized()) {
+                recordWithNative(sample);
+            } else {
+                mSamples.add(sample);
+            }
+        }
+
+        private void recordWithNative(long sample) {
+            RecordHistogram.recordTimesHistogram(mHistogramName, sample, mTimeUnit);
+        }
+
+        @Override
+        protected void commitAndClear() {
+            for (Long sample : mSamples) {
+                recordWithNative(sample);
             }
             mSamples.clear();
         }
@@ -138,16 +221,27 @@ public class LaunchMetrics {
         }
         sTabUrls.clear();
 
-        for (Long time : sWebappHistogramTimes) {
-            RecordHistogram.recordTimesHistogram("Android.StrictMode.WebappAuthenticatorMac", time,
-                    TimeUnit.MILLISECONDS);
-        }
-        sWebappHistogramTimes.clear();
-
         // Record generic cached events.
         for (CachedHistogram event : CachedHistogram.sEvents) event.commitAndClear();
     }
 
+    /**
+     * Records metrics about the state of the homepage on launch.
+     * @param showHomeButton Whether the home button is shown.
+     * @param homepageIsNtp Whether the homepage is set to the NTP.
+     * @param homepageUrl The value of the homepage URL.
+     */
+    public static void recordHomePageLaunchMetrics(
+            boolean showHomeButton, boolean homepageIsNtp, String homepageUrl) {
+        if (homepageUrl == null) {
+            homepageUrl = "";
+            assert !showHomeButton : "Homepage should be disabled for a null URL";
+        }
+        nativeRecordHomePageLaunchMetrics(showHomeButton, homepageIsNtp, homepageUrl);
+    }
+
     private static native void nativeRecordLaunch(
             boolean standalone, String url, int source, WebContents webContents);
+    private static native void nativeRecordHomePageLaunchMetrics(
+            boolean showHomeButton, boolean homepageIsNtp, String homepageUrl);
 }

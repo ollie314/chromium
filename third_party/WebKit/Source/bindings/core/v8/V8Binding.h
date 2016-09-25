@@ -48,8 +48,8 @@
 #include "bindings/core/v8/V8ValueCache.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
-#include "platform/text/CompressibleString.h"
 #include "wtf/text/AtomicString.h"
+#include "wtf/text/StringView.h"
 #include <v8.h>
 
 namespace blink {
@@ -69,6 +69,8 @@ class WorkerGlobalScope;
 class WorkerOrWorkletGlobalScope;
 class XPathNSResolver;
 
+using InstallOriginTrialsFunction = void (*)(ScriptState*);
+
 template <typename T>
 struct V8TypeOf {
     STATIC_ONLY(V8TypeOf);
@@ -77,12 +79,6 @@ struct V8TypeOf {
     // V8TypeOf for each wrapper class.
     typedef void Type;
 };
-
-// Helpers for throwing JavaScript TypeErrors for arity mismatches.
-CORE_EXPORT void setArityTypeError(ExceptionState&, const char* valid, unsigned provided);
-CORE_EXPORT v8::Local<v8::Value> createMinimumArityTypeErrorForMethod(v8::Isolate*, const char* method, const char* type, unsigned expected, unsigned provided);
-v8::Local<v8::Value> createMinimumArityTypeErrorForConstructor(v8::Isolate*, const char* type, unsigned expected, unsigned provided);
-CORE_EXPORT void setMinimumArityTypeError(ExceptionState&, unsigned expected, unsigned provided);
 
 template<typename CallbackInfo, typename S>
 inline void v8SetReturnValue(const CallbackInfo& info, const v8::Persistent<S>& handle)
@@ -395,33 +391,38 @@ inline String toCoreStringWithUndefinedOrNullCheck(v8::Local<v8::Value> value)
 }
 
 // Convert a string to a V8 string.
-// Return a V8 external string that shares the underlying buffer with the given
-// WebCore string. The reference counting mechanism is used to keep the
-// underlying buffer alive while the string is still live in the V8 engine.
-inline v8::Local<v8::String> v8String(v8::Isolate* isolate, const String& string)
+
+inline v8::Local<v8::String> v8String(v8::Isolate* isolate, const StringView& string)
 {
+    DCHECK(isolate);
     if (string.isNull())
         return v8::String::Empty(isolate);
+    if (StringImpl* impl = string.sharedImpl())
+        return V8PerIsolateData::from(isolate)->getStringCache()->v8ExternalString(isolate, impl);
+    if (string.is8Bit())
+        return v8::String::NewFromOneByte(isolate, reinterpret_cast<const uint8_t*>(string.characters8()), v8::NewStringType::kNormal, static_cast<int>(string.length())).ToLocalChecked();
+    return v8::String::NewFromTwoByte(isolate, reinterpret_cast<const uint16_t*>(string.characters16()), v8::NewStringType::kNormal, static_cast<int>(string.length())).ToLocalChecked();
+}
+
+inline v8::Local<v8::Value> v8StringOrNull(v8::Isolate* isolate, const AtomicString& string)
+{
+    if (string.isNull())
+        return v8::Null(isolate);
     return V8PerIsolateData::from(isolate)->getStringCache()->v8ExternalString(isolate, string.impl());
 }
 
-inline v8::Local<v8::String> v8String(v8::Isolate* isolate, const CompressibleString& string)
+inline v8::Local<v8::String> v8AtomicString(v8::Isolate* isolate, const StringView& string)
 {
-    if (string.isNull())
-        return v8::String::Empty(isolate);
-    return V8PerIsolateData::from(isolate)->getStringCache()->v8ExternalString(isolate, string);
+    DCHECK(isolate);
+    if (string.is8Bit())
+        return v8::String::NewFromOneByte(isolate, reinterpret_cast<const uint8_t*>(string.characters8()), v8::NewStringType::kInternalized, static_cast<int>(string.length())).ToLocalChecked();
+    return v8::String::NewFromTwoByte(isolate, reinterpret_cast<const uint16_t*>(string.characters16()), v8::NewStringType::kInternalized, static_cast<int>(string.length())).ToLocalChecked();
 }
 
-inline v8::Local<v8::String> v8AtomicString(v8::Isolate* isolate, const char* str, int length = -1)
+inline v8::Local<v8::String> v8StringFromUtf8(v8::Isolate* isolate, const char* bytes, int length)
 {
-    ASSERT(isolate);
-    v8::Local<v8::String> value;
-    if (LIKELY(v8::String::NewFromUtf8(isolate, str, v8::NewStringType::kInternalized, length).ToLocal(&value)))
-        return value;
-    // Immediately crashes when NewFromUtf8() fails because it only fails the
-    // given str is too long.
-    RELEASE_NOTREACHED();
-    return v8::String::Empty(isolate);
+    DCHECK(isolate);
+    return v8::String::NewFromUtf8(isolate, bytes, v8::NewStringType::kNormal, length).ToLocalChecked();
 }
 
 inline v8::Local<v8::Value> v8Undefined()
@@ -558,13 +559,15 @@ inline v8::Local<v8::Boolean> v8Boolean(bool value, v8::Isolate* isolate)
     return value ? v8::True(isolate) : v8::False(isolate);
 }
 
-inline double toCoreDate(v8::Isolate* isolate, v8::Local<v8::Value> object)
+inline double toCoreDate(v8::Isolate* isolate, v8::Local<v8::Value> object, ExceptionState& exceptionState)
 {
-    if (object->IsDate())
-        return object.As<v8::Date>()->ValueOf();
-    if (object->IsNumber())
-        return object.As<v8::Number>()->Value();
-    return std::numeric_limits<double>::quiet_NaN();
+    if (object->IsNull())
+        return std::numeric_limits<double>::quiet_NaN();
+    if (!object->IsDate()) {
+        exceptionState.throwTypeError("The provided value is not a Date.");
+        return 0;
+    }
+    return object.As<v8::Date>()->ValueOf();
 }
 
 inline v8::MaybeLocal<v8::Value> v8DateOrNaN(v8::Isolate* isolate, double value)
@@ -719,6 +722,9 @@ VectorType toImplArguments(const v8::FunctionCallbackInfo<v8::Value>& info, int 
     return result;
 }
 
+// Gets an iterator from an Object.
+CORE_EXPORT v8::MaybeLocal<v8::Object> getEsIterator(v8::Isolate*, v8::Local<v8::Object>, ExceptionState&);
+
 // Validates that the passed object is a sequence type per WebIDL spec
 // http://www.w3.org/TR/2012/CR-WebIDL-20120419/#es-sequence
 inline bool toV8Sequence(v8::Local<v8::Value> value, uint32_t& length, v8::Isolate* isolate, ExceptionState& exceptionState)
@@ -768,6 +774,17 @@ struct NativeValueTraits<String> {
         V8StringResource<> stringValue(value);
         if (!stringValue.prepare(exceptionState))
             return String();
+        return stringValue;
+    }
+};
+
+template<>
+struct NativeValueTraits<AtomicString> {
+    static inline AtomicString nativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState)
+    {
+        V8StringResource<> stringValue(value);
+        if (!stringValue.prepare(exceptionState))
+            return AtomicString();
         return stringValue;
     }
 };
@@ -835,7 +852,6 @@ DOMWindow* toDOMWindow(v8::Isolate*, v8::Local<v8::Value>);
 DOMWindow* toDOMWindow(v8::Local<v8::Context>);
 LocalDOMWindow* enteredDOMWindow(v8::Isolate*);
 CORE_EXPORT LocalDOMWindow* currentDOMWindow(v8::Isolate*);
-CORE_EXPORT LocalDOMWindow* callingDOMWindow(v8::Isolate*);
 CORE_EXPORT ExecutionContext* toExecutionContext(v8::Local<v8::Context>);
 CORE_EXPORT void registerToExecutionContextForModules(ExecutionContext* (*toExecutionContextForModules)(v8::Local<v8::Context>));
 CORE_EXPORT ExecutionContext* currentExecutionContext(v8::Isolate*);
@@ -861,6 +877,73 @@ CORE_EXPORT EventTarget* toEventTarget(v8::Isolate*, v8::Local<v8::Value>);
 // to allocate it using alloca() in the callers stack frame.
 CORE_EXPORT void toFlexibleArrayBufferView(v8::Isolate*, v8::Local<v8::Value>, FlexibleArrayBufferView&, void* storage = nullptr);
 
+// Converts a V8 value to an array (an IDL sequence) as per the WebIDL
+// specification: http://heycam.github.io/webidl/#es-sequence
+template <typename VectorType>
+VectorType toImplSequence(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState)
+{
+    using ValueType = typename VectorType::ValueType;
+
+    if (!value->IsObject() || value->IsRegExp()) {
+        exceptionState.throwTypeError("The provided value cannot be converted to a sequence.");
+        return VectorType();
+    }
+
+    v8::Local<v8::Object> iterator;
+    if (!getEsIterator(isolate, value.As<v8::Object>(), exceptionState).ToLocal(&iterator))
+        return VectorType();
+
+    v8::Local<v8::String> nextKey = v8String(isolate, "next");
+    v8::Local<v8::String> valueKey = v8String(isolate, "value");
+    v8::Local<v8::String> doneKey = v8String(isolate, "done");
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    VectorType result;
+    while (true) {
+        v8::Local<v8::Value> next;
+        if (!iterator->Get(context, nextKey).ToLocal(&next))
+            return VectorType();
+        // TODO(bashi): Support callable objects.
+        if (!next->IsObject() || !next.As<v8::Object>()->IsFunction()) {
+            exceptionState.throwTypeError("Iterator.next should be callable.");
+            return VectorType();
+        }
+        v8::Local<v8::Value> nextResult;
+        if (!V8ScriptRunner::callFunction(next.As<v8::Function>(), toExecutionContext(context), iterator, 0, nullptr, isolate).ToLocal(&nextResult))
+            return VectorType();
+        if (!nextResult->IsObject()) {
+            exceptionState.throwTypeError("Iterator.next() did not return an object.");
+            return VectorType();
+        }
+        v8::Local<v8::Object> resultObject = nextResult.As<v8::Object>();
+        v8::Local<v8::Value> element;
+        v8::Local<v8::Value> done;
+        if (!resultObject->Get(context, valueKey).ToLocal(&element)
+            || !resultObject->Get(context, doneKey).ToLocal(&done))
+            return VectorType();
+        v8::Local<v8::Boolean> doneBoolean;
+        if (!done->ToBoolean(context).ToLocal(&doneBoolean))
+            return VectorType();
+        if (doneBoolean->Value())
+            break;
+        result.append(NativeValueTraits<ValueType>::nativeValue(isolate, element, exceptionState));
+    }
+    return result;
+}
+
+// Installs all of the origin-trial-enabled V8 bindings for the given context
+// and world, based on the trial tokens which have been added to the
+// ExecutionContext. This should be called after the V8 context has been
+// installed, but may be called multiple times, as trial tokens are
+// encountered. It indirectly calls the function set by
+// |setInstallOriginTrialsFunction|.
+CORE_EXPORT void installOriginTrials(ScriptState*);
+
+// Sets the function to be called by |installOriginTrials|. The function is
+// initially set to the private |installOriginTrialsForCore| function, but
+// can be overridden by this function. A pointer to the previously set function
+// is returned, so that functions can be chained.
+CORE_EXPORT InstallOriginTrialsFunction setInstallOriginTrialsFunction(InstallOriginTrialsFunction);
+
 // If the current context causes out of memory, JavaScript setting
 // is disabled and it returns true.
 bool handleOutOfMemory();
@@ -872,21 +955,16 @@ inline bool isUndefinedOrNull(v8::Local<v8::Value> value)
 }
 v8::Local<v8::Function> getBoundFunction(v8::Local<v8::Function>);
 
-// Attaches |environment| to |function| and returns it.
-inline v8::Local<v8::Function> createClosure(v8::FunctionCallback function, v8::Local<v8::Value> environment, v8::Isolate* isolate)
-{
-    return v8::Function::New(isolate, function, environment);
-}
-
 // FIXME: This will be soon embedded in the generated code.
 template<typename Collection> static void indexedPropertyEnumerator(const v8::PropertyCallbackInfo<v8::Array>& info)
 {
     Collection* collection = toScriptWrappable(info.Holder())->toImpl<Collection>();
     int length = collection->length();
     v8::Local<v8::Array> properties = v8::Array::New(info.GetIsolate(), length);
+    v8::Local<v8::Context> context = info.GetIsolate()->GetCurrentContext();
     for (int i = 0; i < length; ++i) {
         v8::Local<v8::Integer> integer = v8::Integer::New(info.GetIsolate(), i);
-        if (!v8CallBoolean(properties->Set(info.GetIsolate()->GetCurrentContext(), integer, integer)))
+        if (!v8CallBoolean(properties->CreateDataProperty(context, i, integer)))
             return;
     }
     v8SetReturnValue(info, properties);
@@ -930,10 +1008,13 @@ private:
     v8::Isolate* m_isolate;
 };
 
-// Callback functions used by generated code.
-CORE_EXPORT void v8ConstructorAttributeGetter(v8::Local<v8::Name> propertyName, const v8::PropertyCallbackInfo<v8::Value>&);
 
 typedef void (*InstallTemplateFunction)(v8::Isolate*, const DOMWrapperWorld&, v8::Local<v8::FunctionTemplate> interfaceTemplate);
+
+// Freeze a V8 object. The type of the first parameter and the return value is
+// intentionally v8::Value so that this function can wrap toV8().
+// If the argument isn't an object, this will crash.
+CORE_EXPORT v8::Local<v8::Value> freezeV8Object(v8::Local<v8::Value>, v8::Isolate*);
 
 } // namespace blink
 

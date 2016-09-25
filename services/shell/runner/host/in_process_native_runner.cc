@@ -10,10 +10,11 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/process/process.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "services/shell/runner/host/native_application_support.h"
 #include "services/shell/runner/host/out_of_process_native_runner.h"
@@ -34,7 +35,7 @@ InProcessNativeRunner::~InProcessNativeRunner() {
   }
 }
 
-mojom::ShellClientPtr InProcessNativeRunner::Start(
+mojom::ServicePtr InProcessNativeRunner::Start(
     const base::FilePath& app_path,
     const Identity& target,
     bool start_sandboxed,
@@ -43,7 +44,7 @@ mojom::ShellClientPtr InProcessNativeRunner::Start(
   app_path_ = app_path;
 
   DCHECK(!request_.is_pending());
-  mojom::ShellClientPtr client;
+  mojom::ServicePtr client;
   request_ = GetProxy(&client);
 
   DCHECK(app_completed_callback_runner_.is_null());
@@ -58,7 +59,7 @@ mojom::ShellClientPtr InProcessNativeRunner::Start(
 #endif
   thread_.reset(new base::DelegateSimpleThread(this, thread_name));
   thread_->Start();
-  pid_available_callback.Run(base::kNullProcessId);
+  pid_available_callback.Run(base::Process::Current().Pid());
 
   return client;
 }
@@ -84,9 +85,9 @@ void InProcessNativeRunner::Run() {
 std::unique_ptr<NativeRunner> InProcessNativeRunnerFactory::Create(
     const base::FilePath& app_path) {
   // Non-Mojo apps are always run in a new process.
-  if (!app_path.MatchesExtension(FILE_PATH_LITERAL(".mojo"))) {
-    return base::WrapUnique(
-        new OutOfProcessNativeRunner(launch_process_runner_, nullptr));
+  if (!app_path.MatchesExtension(FILE_PATH_LITERAL(".library"))) {
+    return base::MakeUnique<OutOfProcessNativeRunner>(launch_process_runner_,
+                                                      nullptr);
   }
   return base::WrapUnique(new InProcessNativeRunner);
 }

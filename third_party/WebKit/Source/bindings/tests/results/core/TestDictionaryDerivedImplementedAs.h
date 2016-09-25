@@ -8,7 +8,7 @@
 #define TestDictionaryDerivedImplementedAs_h
 
 #include "bindings/core/v8/Nullable.h"
-#include "bindings/core/v8/UnionTypesCore.h"
+#include "bindings/core/v8/StringOrDouble.h"
 #include "bindings/tests/idls/core/TestDictionary.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
@@ -39,6 +39,7 @@ public:
     const HeapVector<StringOrDouble>& stringOrDoubleSequenceMember() const { return m_stringOrDoubleSequenceMember.get(); }
     void setStringOrDoubleSequenceMember(const HeapVector<StringOrDouble>& value) { m_stringOrDoubleSequenceMember = value; }
 
+    v8::Local<v8::Value> toV8Impl(v8::Local<v8::Object>, v8::Isolate*) const override;
     DECLARE_VIRTUAL_TRACE();
 
 private:

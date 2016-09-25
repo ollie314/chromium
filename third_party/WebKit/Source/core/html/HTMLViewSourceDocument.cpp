@@ -25,6 +25,7 @@
 #include "core/html/HTMLViewSourceDocument.h"
 
 #include "core/dom/Text.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLBRElement.h"
 #include "core/html/HTMLBaseElement.h"
@@ -58,6 +59,7 @@ HTMLViewSourceDocument::HTMLViewSourceDocument(const DocumentInit& initializer, 
     // FIXME: Why do view-source pages need to load in quirks mode?
     setCompatibilityMode(QuirksMode);
     lockCompatibilityMode();
+    UseCounter::count(*this, UseCounter::ViewSourceDocument);
 }
 
 DocumentParser* HTMLViewSourceDocument::createParser()
@@ -95,7 +97,7 @@ void HTMLViewSourceDocument::addSource(const String& source, HTMLToken& token, S
 
     switch (token.type()) {
     case HTMLToken::Uninitialized:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         break;
     case HTMLToken::DOCTYPE:
         processDoctypeToken(source, token);
@@ -143,7 +145,7 @@ void HTMLViewSourceDocument::processTagToken(const String& source, HTMLToken& to
         if (iter == token.attributes().end()) {
             // We want to show the remaining characters in the token.
             index = addRange(source, index, source.length(), emptyAtom);
-            ASSERT(index == source.length());
+            DCHECK_EQ(index, source.length());
             break;
         }
 
@@ -256,7 +258,7 @@ void HTMLViewSourceDocument::addText(const String& text, const AtomicString& cla
 
 int HTMLViewSourceDocument::addRange(const String& source, int start, int end, const AtomicString& className, bool isLink, bool isAnchor, const AtomicString& link)
 {
-    ASSERT(start <= end);
+    DCHECK_LE(start, end);
     if (start == end)
         return start;
 

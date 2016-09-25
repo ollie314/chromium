@@ -4,7 +4,7 @@
 
 #include "ui/aura/window_tree_host.h"
 
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
@@ -18,13 +18,15 @@
 #include "ui/base/view_prop.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
-#include "ui/gfx/display.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/point_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
-#include "ui/gfx/screen.h"
+#include "ui/gfx/icc_profile.h"
 
 namespace aura {
 
@@ -32,8 +34,8 @@ const char kWindowTreeHostForAcceleratedWidget[] =
     "__AURA_WINDOW_TREE_HOST_ACCELERATED_WIDGET__";
 
 float GetDeviceScaleFactorFromDisplay(Window* window) {
-  gfx::Display display =
-      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window);
+  display::Display display =
+      display::Screen::GetScreen()->GetDisplayNearestWindow(window);
   DCHECK(display.is_valid());
   return display.device_scale_factor();
 }
@@ -67,6 +69,8 @@ void WindowTreeHost::InitCompositor() {
   compositor_->SetScaleAndSize(GetDeviceScaleFactorFromDisplay(window()),
                                GetBounds().size());
   compositor_->SetRootLayer(window()->layer());
+  compositor_->SetDisplayColorSpace(
+      GetICCProfileForCurrentDisplay().GetColorSpace());
 }
 
 void WindowTreeHost::AddObserver(WindowTreeHostObserver* observer) {
@@ -114,10 +118,11 @@ void WindowTreeHost::UpdateRootWindowSize(const gfx::Size& host_size) {
   gfx::Rect bounds(output_surface_padding_.left(),
                    output_surface_padding_.top(), host_size.width(),
                    host_size.height());
-  gfx::RectF new_bounds(ui::ConvertRectToDIP(window()->layer(), bounds));
+  float scale_factor = ui::GetDeviceScaleFactor(window()->layer());
+  gfx::RectF new_bounds =
+      gfx::ScaleRect(gfx::RectF(bounds), 1.0f / scale_factor);
   window()->layer()->transform().TransformRect(&new_bounds);
-  window()->SetBounds(gfx::Rect(gfx::ToFlooredPoint(new_bounds.origin()),
-                                gfx::ToFlooredSize(new_bounds.size())));
+  window()->SetBounds(gfx::ToEnclosingRect(new_bounds));
 }
 
 void WindowTreeHost::ConvertPointToNativeScreen(gfx::Point* point) const {
@@ -285,6 +290,11 @@ void WindowTreeHost::OnHostResized(const gfx::Size& new_size) {
   FOR_EACH_OBSERVER(WindowTreeHostObserver, observers_, OnHostResized(this));
 }
 
+void WindowTreeHost::OnHostWorkspaceChanged() {
+  FOR_EACH_OBSERVER(WindowTreeHostObserver, observers_,
+                    OnHostWorkspaceChanged(this));
+}
+
 void WindowTreeHost::OnHostCloseRequested() {
   FOR_EACH_OBSERVER(WindowTreeHostObserver, observers_,
                     OnHostCloseRequested(this));
@@ -300,6 +310,12 @@ void WindowTreeHost::OnHostLostWindowCapture() {
     capture_window->ReleaseCapture();
 }
 
+gfx::ICCProfile WindowTreeHost::GetICCProfileForCurrentDisplay() {
+  // TODO(hubbe): Get the color space from the *current* monitor and
+  // update it when window is moved or color space configuration changes.
+  return gfx::ICCProfile::FromBestMonitor();
+}
+
 ui::EventProcessor* WindowTreeHost::GetEventProcessor() {
   return event_processor();
 }
@@ -313,8 +329,8 @@ void WindowTreeHost::MoveCursorToInternal(const gfx::Point& root_location,
   MoveCursorToNative(host_location);
   client::CursorClient* cursor_client = client::GetCursorClient(window());
   if (cursor_client) {
-    const gfx::Display& display =
-        gfx::Screen::GetScreen()->GetDisplayNearestWindow(window());
+    const display::Display& display =
+        display::Screen::GetScreen()->GetDisplayNearestWindow(window());
     cursor_client->SetDisplay(display);
   }
   dispatcher()->OnCursorMovedToRootLocation(root_location);

@@ -5,16 +5,24 @@
 #include "media/mojo/services/service_factory_impl.h"
 
 #include "base/logging.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "media/base/media_log.h"
 #include "media/mojo/services/mojo_media_client.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/shell/public/interfaces/interface_provider.mojom.h"
 
 #if defined(ENABLE_MOJO_AUDIO_DECODER)
 #include "media/mojo/services/mojo_audio_decoder_service.h"
 #endif  // defined(ENABLE_MOJO_AUDIO_DECODER)
 
+#if defined(ENABLE_MOJO_VIDEO_DECODER)
+#include "media/mojo/services/mojo_video_decoder_service.h"
+#endif  // defined(ENABLE_MOJO_VIDEO_DECODER)
+
 #if defined(ENABLE_MOJO_RENDERER)
+#include "media/base/audio_renderer_sink.h"
 #include "media/base/renderer_factory.h"
+#include "media/base/video_renderer_sink.h"
 #include "media/mojo/services/mojo_renderer_service.h"
 #endif  // defined(ENABLE_MOJO_RENDERER)
 
@@ -26,30 +34,32 @@
 namespace media {
 
 ServiceFactoryImpl::ServiceFactoryImpl(
-    mojo::InterfaceRequest<interfaces::ServiceFactory> request,
-    shell::mojom::InterfaceProvider* interfaces,
+    shell::mojom::InterfaceProviderPtr interfaces,
     scoped_refptr<MediaLog> media_log,
-    std::unique_ptr<shell::MessageLoopRef> parent_app_refcount,
+    std::unique_ptr<shell::ServiceContextRef> connection_ref,
     MojoMediaClient* mojo_media_client)
-    : binding_(this, std::move(request)),
-      interfaces_(interfaces),
+    :
+#if defined(ENABLE_MOJO_CDM)
+      interfaces_(std::move(interfaces)),
+#endif
       media_log_(media_log),
-      parent_app_refcount_(std::move(parent_app_refcount)),
+      connection_ref_(std::move(connection_ref)),
       mojo_media_client_(mojo_media_client) {
   DVLOG(1) << __FUNCTION__;
+  DCHECK(mojo_media_client_);
 }
 
 ServiceFactoryImpl::~ServiceFactoryImpl() {
   DVLOG(1) << __FUNCTION__;
 }
 
-// interfaces::ServiceFactory implementation.
+// mojom::ServiceFactory implementation.
 
 void ServiceFactoryImpl::CreateAudioDecoder(
-    mojo::InterfaceRequest<interfaces::AudioDecoder> request) {
+    mojo::InterfaceRequest<mojom::AudioDecoder> request) {
 #if defined(ENABLE_MOJO_AUDIO_DECODER)
   scoped_refptr<base::SingleThreadTaskRunner> task_runner(
-      base::MessageLoop::current()->task_runner());
+      base::ThreadTaskRunnerHandle::Get());
 
   std::unique_ptr<AudioDecoder> audio_decoder =
       mojo_media_client_->CreateAudioDecoder(task_runner);
@@ -58,50 +68,61 @@ void ServiceFactoryImpl::CreateAudioDecoder(
     return;
   }
 
-  new MojoAudioDecoderService(cdm_service_context_.GetWeakPtr(),
-                              std::move(audio_decoder), std::move(request));
+  mojo::MakeStrongBinding(
+      base::MakeUnique<MojoAudioDecoderService>(
+          cdm_service_context_.GetWeakPtr(), std::move(audio_decoder)),
+      std::move(request));
 #endif  // defined(ENABLE_MOJO_AUDIO_DECODER)
 }
 
-void ServiceFactoryImpl::CreateRenderer(
-    mojo::InterfaceRequest<interfaces::Renderer> request) {
-#if defined(ENABLE_MOJO_RENDERER)
-  // The created object is owned by the pipe.
-  // The audio and video sinks are owned by the client.
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner(
-      base::MessageLoop::current()->task_runner());
-  AudioRendererSink* audio_renderer_sink =
-      mojo_media_client_->CreateAudioRendererSink();
-  VideoRendererSink* video_renderer_sink =
-      mojo_media_client_->CreateVideoRendererSink(task_runner);
+void ServiceFactoryImpl::CreateVideoDecoder(
+    mojom::VideoDecoderRequest request) {
+#if defined(ENABLE_MOJO_VIDEO_DECODER)
+  mojo::MakeStrongBinding(
+      base::MakeUnique<MojoVideoDecoderService>(mojo_media_client_),
+      std::move(request));
+#endif  // defined(ENABLE_MOJO_VIDEO_DECODER)
+}
 
+void ServiceFactoryImpl::CreateRenderer(
+    const mojo::String& audio_device_id,
+    mojo::InterfaceRequest<mojom::Renderer> request) {
+#if defined(ENABLE_MOJO_RENDERER)
   RendererFactory* renderer_factory = GetRendererFactory();
   if (!renderer_factory)
     return;
 
-  std::unique_ptr<Renderer> renderer = renderer_factory->CreateRenderer(
-      task_runner, task_runner, audio_renderer_sink, video_renderer_sink,
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner(
+      base::ThreadTaskRunnerHandle::Get());
+  auto audio_sink =
+      mojo_media_client_->CreateAudioRendererSink(audio_device_id);
+  auto video_sink = mojo_media_client_->CreateVideoRendererSink(task_runner);
+  auto renderer = renderer_factory->CreateRenderer(
+      task_runner, task_runner, audio_sink.get(), video_sink.get(),
       RequestSurfaceCB());
   if (!renderer) {
     LOG(ERROR) << "Renderer creation failed.";
     return;
   }
 
-  new MojoRendererService(cdm_service_context_.GetWeakPtr(),
-                          std::move(renderer), std::move(request));
+  mojo::MakeStrongBinding(
+      base::MakeUnique<MojoRendererService>(
+          cdm_service_context_.GetWeakPtr(), std::move(audio_sink),
+          std::move(video_sink), std::move(renderer)),
+      std::move(request));
 #endif  // defined(ENABLE_MOJO_RENDERER)
 }
 
 void ServiceFactoryImpl::CreateCdm(
-    mojo::InterfaceRequest<interfaces::ContentDecryptionModule> request) {
+    mojo::InterfaceRequest<mojom::ContentDecryptionModule> request) {
 #if defined(ENABLE_MOJO_CDM)
   CdmFactory* cdm_factory = GetCdmFactory();
   if (!cdm_factory)
     return;
 
-  // The created object is owned by the pipe.
-  new MojoCdmService(cdm_service_context_.GetWeakPtr(), cdm_factory,
-                     std::move(request));
+  mojo::MakeStrongBinding(base::MakeUnique<MojoCdmService>(
+                              cdm_service_context_.GetWeakPtr(), cdm_factory),
+                          std::move(request));
 #endif  // defined(ENABLE_MOJO_CDM)
 }
 
@@ -118,7 +139,7 @@ RendererFactory* ServiceFactoryImpl::GetRendererFactory() {
 #if defined(ENABLE_MOJO_CDM)
 CdmFactory* ServiceFactoryImpl::GetCdmFactory() {
   if (!cdm_factory_) {
-    cdm_factory_ = mojo_media_client_->CreateCdmFactory(interfaces_);
+    cdm_factory_ = mojo_media_client_->CreateCdmFactory(interfaces_.get());
     LOG_IF(ERROR, !cdm_factory_) << "CdmFactory not available.";
   }
   return cdm_factory_.get();

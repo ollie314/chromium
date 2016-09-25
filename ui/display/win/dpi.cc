@@ -7,29 +7,16 @@
 #include <windows.h>
 
 #include "base/win/scoped_hdc.h"
-#include "ui/gfx/display.h"
+#include "ui/display/display.h"
+
+namespace display {
+namespace win {
 
 namespace {
 
 const float kDefaultDPI = 96.f;
 
 float g_device_scale_factor = 0.f;
-
-float GetUnforcedDeviceScaleFactor() {
-  return g_device_scale_factor ?
-      g_device_scale_factor :
-      static_cast<float>(display::win::GetDPI().width()) / kDefaultDPI;
-}
-
-}  // namespace
-
-namespace display {
-namespace win {
-
-void SetDefaultDeviceScaleFactor(float scale) {
-  DCHECK_NE(0.f, scale);
-  g_device_scale_factor = scale;
-}
 
 gfx::Size GetDPI() {
   static int dpi_x = 0;
@@ -48,18 +35,31 @@ gfx::Size GetDPI() {
   return gfx::Size(dpi_x, dpi_y);
 }
 
-float GetDPIScale() {
-  if (gfx::Display::HasForceDeviceScaleFactor())
-    return gfx::Display::GetForcedDeviceScaleFactor();
-  float dpi_scale = GetUnforcedDeviceScaleFactor();
-  return (dpi_scale <= 1.25f) ? 1.f : dpi_scale;
+float GetUnforcedDeviceScaleFactor() {
+  return g_device_scale_factor
+      ? g_device_scale_factor
+      : GetScalingFactorFromDPI(GetDPI().width());
 }
 
-int GetSystemMetricsInDIP(int metric) {
-  // The system metrics always reflect the system DPI, not whatever scale we've
-  // forced or decided to use.
-  return static_cast<int>(
-      std::round(GetSystemMetrics(metric) / GetUnforcedDeviceScaleFactor()));
+}  // namespace
+
+void SetDefaultDeviceScaleFactor(float scale) {
+  DCHECK_NE(0.f, scale);
+  g_device_scale_factor = scale;
+}
+
+float GetDPIScale() {
+  if (display::Display::HasForceDeviceScaleFactor())
+    return display::Display::GetForcedDeviceScaleFactor();
+  return GetUnforcedDeviceScaleFactor();
+}
+
+int GetDPIFromScalingFactor(float device_scaling_factor) {
+  return kDefaultDPI * device_scaling_factor;
+}
+
+float GetScalingFactorFromDPI(int dpi) {
+  return static_cast<float>(dpi) / kDefaultDPI;
 }
 
 }  // namespace win

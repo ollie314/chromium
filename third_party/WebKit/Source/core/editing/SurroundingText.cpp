@@ -63,11 +63,12 @@ void SurroundingText::initialize(const Position& startPosition, const Position& 
     // The position will have no document if it is null (as in no position).
     if (!document || !document->documentElement())
         return;
+    DCHECK(!document->needsLayoutTreeUpdate());
 
     // The forward range starts at the selection end and ends at the document's
     // end. It will then be updated to only contain the text in the text in the
     // right range around the selection.
-    CharacterIterator forwardIterator(endPosition, lastPositionInNode(document->documentElement()).parentAnchoredEquivalent(), TextIteratorStopsOnFormControls);
+    CharacterIterator forwardIterator(endPosition, Position::lastPositionInNode(document->documentElement()).parentAnchoredEquivalent(), TextIteratorStopsOnFormControls);
     // FIXME: why do we stop going trough the text if we were not able to select something on the right?
     if (!forwardIterator.atEnd())
         forwardIterator.advance(maxLength - halfMaxLength);
@@ -79,7 +80,7 @@ void SurroundingText::initialize(const Position& startPosition, const Position& 
     // Same as with the forward range but with the backward range. The range
     // starts at the document's start and ends at the selection start and will
     // be updated.
-    BackwardsCharacterIterator backwardsIterator(firstPositionInNode(document->documentElement()).parentAnchoredEquivalent(), startPosition, TextIteratorStopsOnFormControls);
+    BackwardsCharacterIterator backwardsIterator(Position::firstPositionInNode(document->documentElement()).parentAnchoredEquivalent(), startPosition, TextIteratorStopsOnFormControls);
     if (!backwardsIterator.atEnd())
         backwardsIterator.advance(halfMaxLength);
 
@@ -87,27 +88,6 @@ void SurroundingText::initialize(const Position& startPosition, const Position& 
     m_endOffsetInContent = Range::create(*document, backwardsIterator.endPosition(), endPosition)->text().length();
     m_contentRange = Range::create(*document, backwardsIterator.endPosition(), forwardRange.startPosition());
     DCHECK(m_contentRange);
-}
-
-Range* SurroundingText::rangeFromContentOffsets(unsigned startOffsetInContent, unsigned endOffsetInContent)
-{
-    if (startOffsetInContent >= endOffsetInContent || endOffsetInContent > content().length())
-        return nullptr;
-
-    CharacterIterator iterator(m_contentRange->startPosition(), m_contentRange->endPosition());
-
-    DCHECK(!iterator.atEnd());
-    iterator.advance(startOffsetInContent);
-
-    Position start = iterator.startPosition();
-
-    DCHECK(!iterator.atEnd());
-    iterator.advance(endOffsetInContent - startOffsetInContent);
-
-    Position end = iterator.startPosition();
-
-    DCHECK(start.document());
-    return Range::create(*start.document(), start, end);
 }
 
 String SurroundingText::content() const

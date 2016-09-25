@@ -16,7 +16,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/task_runner_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/url_request/url_request.h"
 #include "storage/browser/fileapi/copy_or_move_file_validator.h"
 #include "storage/browser/fileapi/external_mount_points.h"
@@ -183,8 +183,8 @@ FileSystemContext::FileSystemContext(
   // Chrome OS the additional backend chromeos::FileSystemBackend handles these
   // types.
   isolated_backend_.reset(new IsolatedFileSystemBackend(
-      !ContainsKey(backend_map_, kFileSystemTypeNativeLocal),
-      !ContainsKey(backend_map_, kFileSystemTypeNativeForPlatformApp)));
+      !base::ContainsKey(backend_map_, kFileSystemTypeNativeLocal),
+      !base::ContainsKey(backend_map_, kFileSystemTypeNativeForPlatformApp)));
   RegisterBackend(isolated_backend_.get());
 
   if (quota_manager_proxy) {

@@ -13,6 +13,7 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/chrome_extension_function_details.h"
@@ -142,14 +143,14 @@ class ConsentProviderDelegate : public ConsentProvider::DelegateInterface {
 
 }  // namespace file_system_api
 
-class FileSystemGetDisplayPathFunction : public ChromeSyncExtensionFunction {
+class FileSystemGetDisplayPathFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileSystem.getDisplayPath",
                              FILESYSTEM_GETDISPLAYPATH)
 
  protected:
   ~FileSystemGetDisplayPathFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
 class FileSystemEntryFunction : public ChromeAsyncExtensionFunction {
@@ -170,12 +171,13 @@ class FileSystemEntryFunction : public ChromeAsyncExtensionFunction {
   void RegisterFileSystemsAndSendResponse(
       const std::vector<base::FilePath>& path);
 
-  // Creates a response dictionary and sets it as the response to be sent.
-  void CreateResponse();
+  // Creates a result dictionary.
+  std::unique_ptr<base::DictionaryValue> CreateResult();
 
-  // Adds an entry to the response dictionary.
-  void AddEntryToResponse(const base::FilePath& path,
-                          const std::string& id_override);
+  // Adds an entry to the result dictionary.
+  void AddEntryToResult(const base::FilePath& path,
+                        const std::string& id_override,
+                        base::DictionaryValue* result);
 
   // called on the UI thread if there is a problem checking a writable file.
   void HandleWritableFileError(const base::FilePath& error_path);
@@ -185,9 +187,6 @@ class FileSystemEntryFunction : public ChromeAsyncExtensionFunction {
 
   // Whether a directory has been requested.
   bool is_directory_;
-
-  // The dictionary to send as the response.
-  base::DictionaryValue* response_;
 };
 
 class FileSystemGetWritableEntryFunction : public FileSystemEntryFunction {
@@ -207,14 +206,14 @@ class FileSystemGetWritableEntryFunction : public FileSystemEntryFunction {
   base::FilePath path_;
 };
 
-class FileSystemIsWritableEntryFunction : public ChromeSyncExtensionFunction {
+class FileSystemIsWritableEntryFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileSystem.isWritableEntry",
                              FILESYSTEM_ISWRITABLEENTRY)
 
  protected:
   ~FileSystemIsWritableEntryFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
 class FileSystemChooseEntryFunction : public FileSystemEntryFunction {
@@ -300,13 +299,13 @@ class FileSystemRetainEntryFunction : public ChromeAsyncExtensionFunction {
                        std::unique_ptr<base::File::Info> file_info);
 };
 
-class FileSystemIsRestorableFunction : public ChromeSyncExtensionFunction {
+class FileSystemIsRestorableFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileSystem.isRestorable", FILESYSTEM_ISRESTORABLE)
 
  protected:
   ~FileSystemIsRestorableFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
 class FileSystemRestoreEntryFunction : public FileSystemEntryFunction {
@@ -318,35 +317,34 @@ class FileSystemRestoreEntryFunction : public FileSystemEntryFunction {
   bool RunAsync() override;
 };
 
-class FileSystemObserveDirectoryFunction : public ChromeSyncExtensionFunction {
+class FileSystemObserveDirectoryFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileSystem.observeDirectory",
                              FILESYSTEM_OBSERVEDIRECTORY)
 
  protected:
   ~FileSystemObserveDirectoryFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
-class FileSystemUnobserveEntryFunction : public ChromeSyncExtensionFunction {
+class FileSystemUnobserveEntryFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileSystem.unobserveEntry",
                              FILESYSTEM_UNOBSERVEENTRY)
 
  protected:
   ~FileSystemUnobserveEntryFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
-class FileSystemGetObservedEntriesFunction
-    : public ChromeSyncExtensionFunction {
+class FileSystemGetObservedEntriesFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileSystem.getObservedEntries",
                              FILESYSTEM_GETOBSERVEDENTRIES);
 
  protected:
   ~FileSystemGetObservedEntriesFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
 #if !defined(OS_CHROMEOS)

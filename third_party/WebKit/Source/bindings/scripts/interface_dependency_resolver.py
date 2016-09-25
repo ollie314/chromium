@@ -45,7 +45,9 @@ from utilities import idl_filename_to_component, is_valid_component_dependency, 
 # which changes the semantics and yields different code than the same extended
 # attribute on the main interface.
 DEPENDENCY_EXTENDED_ATTRIBUTES = frozenset([
+    'OriginTrialEnabled',
     'RuntimeEnabled',
+    'SecureContext',
 ])
 
 
@@ -253,17 +255,24 @@ def transfer_extended_attributes(dependency_interface, dependency_interface_base
     interface post-merging).
 
     The data storing consists of:
-    * applying certain extended attributes from the dependency interface
-      to its members
+    * moving certain extended attributes from the dependency interface
+      to its members (deleting the extended attribute from the interface)
     * storing the C++ class of the implementation in an internal
       extended attribute of each member, [PartialInterfaceImplementedAs]
 
     No return: modifies dependency_interface in place.
     """
-    merged_extended_attributes = dict(
-        (key, value)
-        for key, value in dependency_interface.extended_attributes.iteritems()
-        if key in DEPENDENCY_EXTENDED_ATTRIBUTES)
+    merged_extended_attributes = {}
+    for key in DEPENDENCY_EXTENDED_ATTRIBUTES:
+        if key not in dependency_interface.extended_attributes:
+            continue
+
+        merged_extended_attributes[key] = dependency_interface.extended_attributes[key]
+        # Remove the merged attributes from the original dependency interface.
+        # This ensures that if other dependency interfaces are merged onto this
+        # one, its extended_attributes do not leak through
+        # (https://crbug.com/603782).
+        del dependency_interface.extended_attributes[key]
 
     # A partial interface's members are implemented as static member functions
     # in a separate C++ class. This class name is stored in
@@ -291,7 +300,7 @@ def transfer_extended_attributes(dependency_interface, dependency_interface_base
     if (dependency_interface.is_partial or
         'LegacyTreatAsPartialInterface' in dependency_interface.extended_attributes):
         merged_extended_attributes['PartialInterfaceImplementedAs'] = (
-            dependency_interface.extended_attributes.get(
+            dependency_interface.extended_attributes.pop(
                 'ImplementedAs', dependency_interface_basename))
 
     def update_attributes(attributes, extras):

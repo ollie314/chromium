@@ -5,9 +5,11 @@
 package org.chromium.chrome.browser.datausage;
 
 import android.content.Context;
+import android.text.TextUtils;
 
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.PackageUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
@@ -37,6 +39,10 @@ public class ExternalDataUseObserver {
             mInstalled = false;
             ApplicationStatus.registerApplicationStateListener(this);
             checkAndNotifyPackageInstallState();
+            if (!mInstalled) {
+                // Notify the state when the control app is not installed on startup.
+                nativeOnControlAppInstallStateChange(mNativeExternalDataUseObserverBridge, false);
+            }
         }
 
         @Override
@@ -56,16 +62,17 @@ public class ExternalDataUseObserver {
             if (mNativeExternalDataUseObserverBridge == 0) {
                 return;
             }
-            if (mControlAppPackageName != null && !mControlAppPackageName.isEmpty()) {
-                boolean isControlAppInstalled =
-                        PackageUtils.getPackageVersion(
-                                ApplicationStatus.getApplicationContext(), mControlAppPackageName)
-                        != -1;
-                if (isControlAppInstalled != mInstalled) {
-                    mInstalled = isControlAppInstalled;
-                    nativeOnControlAppInstallStateChange(
-                            mNativeExternalDataUseObserverBridge, mInstalled);
-                }
+            if (TextUtils.isEmpty(mControlAppPackageName)) {
+                return;
+            }
+            boolean isControlAppInstalled =
+                    PackageUtils.getPackageVersion(
+                            ContextUtils.getApplicationContext(), mControlAppPackageName)
+                    != -1;
+            if (isControlAppInstalled != mInstalled) {
+                mInstalled = isControlAppInstalled;
+                nativeOnControlAppInstallStateChange(
+                        mNativeExternalDataUseObserverBridge, mInstalled);
             }
         }
     }
@@ -95,11 +102,30 @@ public class ExternalDataUseObserver {
     }
 
     /**
-     * Sets the package name of the control app.
-     * @param controlAppPackageName package name of the control app.
+     * @return the default control app package name.
+     */
+    protected String getDefaultControlAppPackageName() {
+        return "";
+    }
+
+    /**
+     * @return the google variation id.
+     * TODO(rajendrant): This function is unused, and should be removed.
+     */
+    protected int getGoogleVariationID() {
+        return 0;
+    }
+
+    /**
+     * Initializes the control app manager with package name of the control app.
+     * @param controlAppPackageName package name of the control app. If this is empty the default
+     * control app package name from {@link getDefaultControlAppPackageName} will be used.
      */
     @CalledByNative
-    protected void setControlAppPackageName(String controlAppPackageName) {
+    protected void initControlAppManager(String controlAppPackageName) {
+        if (TextUtils.isEmpty(controlAppPackageName)) {
+            controlAppPackageName = getDefaultControlAppPackageName();
+        }
         mControlAppManager = new ControlAppManager(controlAppPackageName);
     }
 
@@ -144,8 +170,7 @@ public class ExternalDataUseObserver {
     /**
      * Asynchronously reports data use to the external observer.
      * @param label the label provided by {@link #ExternalDataUseObserver} for the matching rule.
-     * “ChromeTab” in case traffic was performed in a Chromium tab, and “ChromePlate” in case it was
-     * performed within a ChromePlate.
+     * @param tag “ChromeCustomTab” for Chrome custom tab, or "ChromeTab" for a default tab.
      * @param networkType type of the network on which the traffic was exchanged. This integer value
      * must map to NetworkChangeNotifier.ConnectionType.
      * @param mccMnc MCCMNC of the network on which the traffic was exchanged.
@@ -162,7 +187,7 @@ public class ExternalDataUseObserver {
      * report to be lost.
      */
     @CalledByNative
-    protected void reportDataUse(String label, int networkType, String mccMnc,
+    protected void reportDataUse(String label, String tag, int networkType, String mccMnc,
             long startTimeInMillis, long endTimeInMillis, long bytesDownloaded,
             long bytesUploaded) {}
 

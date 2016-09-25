@@ -15,6 +15,11 @@
 @property(nonatomic, readonly) web::WebState* webState;
 // Progress received in |webState:didChangeProgress| call.
 @property(nonatomic, readonly) double changedProgress;
+// ContextMenuParams reveived in |webState:handleContextMenu:| call.
+// nullptr if that delegate method was not called.
+@property(nonatomic, readonly) web::ContextMenuParams* contextMenuParams;
+// Whether |javaScriptDialogPresenterForWebState:| has been called or not.
+@property(nonatomic, readonly) BOOL javaScriptDialogPresenterRequested;
 @end
 
 #endif  // IOS_WEB_WEB_STATE_WEB_STATE_DELEGATE_STUB_H_

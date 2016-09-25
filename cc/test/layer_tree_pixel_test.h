@@ -40,8 +40,12 @@ class LayerTreePixelTest : public LayerTreeTest {
   LayerTreePixelTest();
   ~LayerTreePixelTest() override;
 
-  std::unique_ptr<OutputSurface> CreateOutputSurface() override;
-  void WillCommitCompleteOnThread(LayerTreeHostImpl* impl) override;
+  // LayerTreeTest overrides.
+  std::unique_ptr<TestCompositorFrameSink> CreateCompositorFrameSink(
+      scoped_refptr<ContextProvider> compositor_context_provider,
+      scoped_refptr<ContextProvider> worker_context_provider) override;
+  std::unique_ptr<OutputSurface> CreateDisplayOutputSurface(
+      scoped_refptr<ContextProvider> compositor_context_provider) override;
 
   virtual std::unique_ptr<CopyOutputRequest> CreateCopyOutputRequest();
 
@@ -81,7 +85,10 @@ class LayerTreePixelTest : public LayerTreeTest {
 
   void Finish();
 
-  void set_enlarge_texture_amount(const gfx::Vector2d& enlarge_texture_amount) {
+  // Allow tests to enlarge the backing texture for a non-root render pass, to
+  // simulate reusing a larger texture from a previous frame for a new
+  // render pass. This should be called before the output surface is bound.
+  void set_enlarge_texture_amount(const gfx::Size& enlarge_texture_amount) {
     enlarge_texture_amount_ = enlarge_texture_amount;
   }
 
@@ -90,7 +97,7 @@ class LayerTreePixelTest : public LayerTreeTest {
   static const SkColor kCSSBrown = 0xffa52a2a;
   static const SkColor kCSSGreen = 0xff008000;
 
-  gfx::DisableNullDrawGLBindings enable_pixel_output_;
+  gl::DisableNullDrawGLBindings enable_pixel_output_;
   std::unique_ptr<PixelComparator> pixel_comparator_;
   PixelTestType test_type_;
   scoped_refptr<Layer> content_root_;
@@ -99,7 +106,7 @@ class LayerTreePixelTest : public LayerTreeTest {
   std::unique_ptr<SkBitmap> result_bitmap_;
   std::vector<scoped_refptr<TextureLayer>> texture_layers_;
   int pending_texture_mailbox_callbacks_;
-  gfx::Vector2d enlarge_texture_amount_;
+  gfx::Size enlarge_texture_amount_;
 };
 
 }  // namespace cc

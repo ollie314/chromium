@@ -7,7 +7,7 @@
 #include "base/android/build_info.h"
 #include "base/android/context_utils.h"
 #include "base/command_line.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "jni/MidiManagerAndroid_jni.h"
 #include "media/midi/midi_device_android.h"
@@ -15,6 +15,8 @@
 #include "media/midi/midi_output_port_android.h"
 #include "media/midi/midi_switches.h"
 #include "media/midi/usb_midi_device_factory_android.h"
+
+using base::android::JavaParamRef;
 
 namespace media {
 namespace midi {
@@ -24,8 +26,8 @@ MidiManager* MidiManager::Create() {
   if (sdk_version <= base::android::SDK_VERSION_LOLLIPOP_MR1 ||
       !base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kUseAndroidMidiApi)) {
-    return new MidiManagerUsb(
-        scoped_ptr<UsbMidiDevice::Factory>(new UsbMidiDeviceFactoryAndroid));
+    return new MidiManagerUsb(std::unique_ptr<UsbMidiDevice::Factory>(
+        new UsbMidiDeviceFactoryAndroid));
   }
 
   return new MidiManagerAndroid();
@@ -33,7 +35,10 @@ MidiManager* MidiManager::Create() {
 
 MidiManagerAndroid::MidiManagerAndroid() {}
 
-MidiManagerAndroid::~MidiManagerAndroid() {}
+MidiManagerAndroid::~MidiManagerAndroid() {
+  base::AutoLock auto_lock(scheduler_lock_);
+  CHECK(!scheduler_);
+}
 
 void MidiManagerAndroid::StartInitialization() {
   JNIEnv* env = base::android::AttachCurrentThread();
@@ -41,8 +46,19 @@ void MidiManagerAndroid::StartInitialization() {
   uintptr_t pointer = reinterpret_cast<uintptr_t>(this);
   raw_manager_.Reset(Java_MidiManagerAndroid_create(
       env, base::android::GetApplicationContext(), pointer));
-  scheduler_.reset(new MidiScheduler(this));
-  Java_MidiManagerAndroid_initialize(env, raw_manager_.obj());
+
+  {
+    base::AutoLock auto_lock(scheduler_lock_);
+    scheduler_.reset(new MidiScheduler(this));
+  }
+
+  Java_MidiManagerAndroid_initialize(env, raw_manager_);
+}
+
+void MidiManagerAndroid::Finalize() {
+  // Destruct MidiScheduler on Chrome_IOThread.
+  base::AutoLock auto_lock(scheduler_lock_);
+  scheduler_.reset();
 }
 
 void MidiManagerAndroid::DispatchSendMidiData(MidiManagerClient* client,
@@ -92,7 +108,7 @@ void MidiManagerAndroid::OnInitialized(
 
   for (jsize i = 0; i < length; ++i) {
     jobject raw_device = env->GetObjectArrayElement(devices, i);
-    AddDevice(make_scoped_ptr(new MidiDeviceAndroid(env, raw_device, this)));
+    AddDevice(base::MakeUnique<MidiDeviceAndroid>(env, raw_device, this));
   }
   CompleteInitialization(Result::OK);
 }
@@ -100,20 +116,20 @@ void MidiManagerAndroid::OnInitialized(
 void MidiManagerAndroid::OnAttached(JNIEnv* env,
                                     const JavaParamRef<jobject>& caller,
                                     const JavaParamRef<jobject>& raw_device) {
-  AddDevice(make_scoped_ptr(new MidiDeviceAndroid(env, raw_device, this)));
+  AddDevice(base::MakeUnique<MidiDeviceAndroid>(env, raw_device, this));
 }
 
 void MidiManagerAndroid::OnDetached(JNIEnv* env,
                                     const JavaParamRef<jobject>& caller,
                                     const JavaParamRef<jobject>& raw_device) {
-  for (const auto& device : devices_) {
+  for (auto* device : devices_) {
     if (device->HasRawDevice(env, raw_device)) {
-      for (const auto& port : device->input_ports()) {
+      for (auto* port : device->input_ports()) {
         DCHECK(input_port_to_index_.end() != input_port_to_index_.find(port));
         size_t index = input_port_to_index_[port];
         SetInputPortState(index, MIDI_PORT_DISCONNECTED);
       }
-      for (const auto& port : device->output_ports()) {
+      for (auto* port : device->output_ports()) {
         DCHECK(output_port_to_index_.end() != output_port_to_index_.find(port));
         size_t index = output_port_to_index_[port];
         SetOutputPortState(index, MIDI_PORT_DISCONNECTED);
@@ -122,8 +138,8 @@ void MidiManagerAndroid::OnDetached(JNIEnv* env,
   }
 }
 
-void MidiManagerAndroid::AddDevice(scoped_ptr<MidiDeviceAndroid> device) {
-  for (auto& port : device->input_ports()) {
+void MidiManagerAndroid::AddDevice(std::unique_ptr<MidiDeviceAndroid> device) {
+  for (auto* port : device->input_ports()) {
     // We implicitly open input ports here, because there are no signal
     // from the renderer when to open.
     // TODO(yhirano): Implement open operation in Blink.
@@ -142,7 +158,7 @@ void MidiManagerAndroid::AddDevice(scoped_ptr<MidiDeviceAndroid> device) {
                               device->GetProductName(),
                               device->GetDeviceVersion(), state));
   }
-  for (const auto& port : device->output_ports()) {
+  for (auto* port : device->output_ports()) {
     const size_t index = all_output_ports_.size();
     all_output_ports_.push_back(port);
 

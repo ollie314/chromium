@@ -11,13 +11,16 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
@@ -28,7 +31,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "grit/browser_resources.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 
@@ -56,6 +58,7 @@ struct ModifierToLabel {
   {chromeos::input_method::kVoidKey, "disabled"},
   {chromeos::input_method::kCapsLockKey, "caps lock"},
   {chromeos::input_method::kEscapeKey, "esc"},
+  {chromeos::input_method::kBackspaceKey, "backspace"},
 };
 
 struct I18nContentToMessage {
@@ -209,8 +212,6 @@ struct I18nContentToMessage {
   { "keyboardOverlayOpenAddressInNewTab",
     IDS_KEYBOARD_OVERLAY_OPEN_ADDRESS_IN_NEW_TAB },
   { "keyboardOverlayOpenFileManager", IDS_KEYBOARD_OVERLAY_OPEN_FILE_MANAGER },
-  { "keyboardOverlayOpenGoogleCloudPrint",
-    IDS_KEYBOARD_OVERLAY_OPEN_GOOGLE_CLOUD_PRINT },
   { "keyboardOverlayPageDown", IDS_KEYBOARD_OVERLAY_PAGE_DOWN },
   { "keyboardOverlayPageUp", IDS_KEYBOARD_OVERLAY_PAGE_UP },
   { "keyboardOverlayPaste", IDS_KEYBOARD_OVERLAY_PASTE },
@@ -247,6 +248,7 @@ struct I18nContentToMessage {
   { "keyboardOverlayShowStatusMenu", IDS_KEYBOARD_OVERLAY_SHOW_STATUS_MENU },
   { "keyboardOverlayShowWrenchMenu", IDS_KEYBOARD_OVERLAY_SHOW_WRENCH_MENU },
   { "keyboardOverlaySignOut", IDS_KEYBOARD_OVERLAY_SIGN_OUT },
+  { "keyboardOverlaySuspend", IDS_KEYBOARD_OVERLAY_SUSPEND },
   { "keyboardOverlaySwapPrimaryMonitor",
     IDS_KEYBOARD_OVERLAY_SWAP_PRIMARY_MONITOR },
   { "keyboardOverlayTakeScreenshot", IDS_KEYBOARD_OVERLAY_TAKE_SCREENSHOT },
@@ -307,6 +309,9 @@ content::WebUIDataSource* CreateKeyboardOverlayUIHTMLSource(Profile* profile) {
   ash::DisplayManager* display_manager = shell->display_manager();
   source->AddBoolean("keyboardOverlayIsDisplayUIScalingEnabled",
                      display_manager->IsDisplayUIScalingEnabled());
+  source->AddBoolean(
+      "backspaceGoesBackFeatureEnabled",
+      base::FeatureList::IsEnabled(features::kBackspaceGoesBackFeature));
   source->SetJsonPath("strings.js");
   source->AddResourcePath("keyboard_overlay.js", IDR_KEYBOARD_OVERLAY_JS);
   source->SetDefaultResource(IDR_KEYBOARD_OVERLAY_HTML);
@@ -373,7 +378,7 @@ void KeyboardOverlayHandler::GetInputMethodId(const base::ListValue* args) {
   const chromeos::input_method::InputMethodDescriptor& descriptor =
       manager->GetActiveIMEState()->GetCurrentInputMethod();
   base::StringValue param(descriptor.id());
-  web_ui()->CallJavascriptFunction("initKeyboardOverlayId", param);
+  web_ui()->CallJavascriptFunctionUnsafe("initKeyboardOverlayId", param);
 }
 
 void KeyboardOverlayHandler::GetLabelMap(const base::ListValue* args) {
@@ -396,17 +401,15 @@ void KeyboardOverlayHandler::GetLabelMap(const base::ListValue* args) {
     dict.SetString(ModifierKeyToLabel(i->first), ModifierKeyToLabel(i->second));
   }
 
-  web_ui()->CallJavascriptFunction("initIdentifierMap", dict);
+  web_ui()->CallJavascriptFunctionUnsafe("initIdentifierMap", dict);
 }
 
 void KeyboardOverlayHandler::OpenLearnMorePage(const base::ListValue* args) {
   web_ui()->GetWebContents()->GetDelegate()->OpenURLFromTab(
       web_ui()->GetWebContents(),
-      content::OpenURLParams(GURL(kLearnMoreURL),
-                             content::Referrer(),
-                             NEW_FOREGROUND_TAB,
-                             ui::PAGE_TRANSITION_LINK,
-                             false));
+      content::OpenURLParams(GURL(kLearnMoreURL), content::Referrer(),
+                             WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                             ui::PAGE_TRANSITION_LINK, false));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

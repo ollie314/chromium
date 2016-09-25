@@ -28,12 +28,13 @@ class LeveldbScopedDatabaseUnitTest : public testing::Test {
  protected:
   void SetUp() override {
     ASSERT_TRUE(database_dir_.CreateUniqueTempDir());
-    db_ = new LeveldbScopedDatabase(kTestUMAClientName, database_dir_.path());
+    db_ =
+        new LeveldbScopedDatabase(kTestUMAClientName, database_dir_.GetPath());
   }
 
   void TearDown() override {
     db_ = nullptr;
-    base::DeleteFile(database_dir_.path(), true);
+    base::DeleteFile(database_dir_.GetPath(), true);
   }
 
   ValueStore::Status ReadAllValues(
@@ -41,7 +42,7 @@ class LeveldbScopedDatabaseUnitTest : public testing::Test {
     values->clear();
     leveldb::ReadOptions read_options;
     read_options.verify_checksums = true;
-    scoped_ptr<leveldb::Iterator> iterator;
+    std::unique_ptr<leveldb::Iterator> iterator;
     ValueStore::Status status = db_->CreateIterator(read_options, &iterator);
     if (!status.ok())
       return status;
@@ -159,7 +160,7 @@ TEST_F(LeveldbScopedDatabaseUnitTest, TestEmptyValue) {
   values.SetString("s1_key1", "");
   EXPECT_TRUE(db_->Write("scope1", values).ok());
 
-  scoped_ptr<base::Value> value;
+  std::unique_ptr<base::Value> value;
   ASSERT_TRUE(db_->Read("scope1", "s1_key1", &value).ok());
   std::string str;
   EXPECT_TRUE(value->GetAsString(&str));
@@ -171,7 +172,7 @@ TEST_F(LeveldbScopedDatabaseUnitTest, TestValueContainingDelimiter) {
   values.SetString("s1_key1", "with:delimiter");
   EXPECT_TRUE(db_->Write("scope1", values).ok());
 
-  scoped_ptr<base::Value> value;
+  std::unique_ptr<base::Value> value;
   ASSERT_TRUE(db_->Read("scope1", "s1_key1", &value).ok());
   std::string str;
   EXPECT_TRUE(value->GetAsString(&str));

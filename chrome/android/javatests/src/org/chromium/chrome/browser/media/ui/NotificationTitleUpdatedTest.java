@@ -13,11 +13,10 @@ import android.widget.TextView;
 
 import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 import org.chromium.chrome.test.util.ChromeRestriction;
@@ -32,6 +31,7 @@ import org.chromium.content_public.common.MediaMetadata;
  * Test of media notifications to see whether the text updates when the tab title changes or the
  * MediaMetadata gets updated.
  */
+@RetryOnFailure
 public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final int NOTIFICATION_ID = R.id.media_playback_notification;
 
@@ -48,33 +48,33 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
         simulateUpdateTitle(mTab, "title1");
     }
 
-    private void testSessionStatePlayingInternal() throws InterruptedException {
+    private void doTestSessionStatePlaying() throws InterruptedException {
         simulateMediaSessionStateChanged(mTab, true, false);
         assertTitleMatches("title1");
         simulateUpdateTitle(mTab, "title2");
         assertTitleMatches("title2");
     }
 
-    private void testSessionStatePausedInternal() throws InterruptedException {
+    private void doTestSessionStatePaused() throws InterruptedException {
         simulateMediaSessionStateChanged(mTab, true, true);
         assertTitleMatches("title1");
         simulateUpdateTitle(mTab, "title2");
         assertTitleMatches("title2");
     }
 
-    private void testSessionStateUncontrollableInternal() throws InterruptedException {
+    private void doTestSessionStateUncontrollable() throws InterruptedException {
         simulateMediaSessionStateChanged(mTab, true, false);
         assertTitleMatches("title1");
         simulateMediaSessionStateChanged(mTab, false, false);
         simulateUpdateTitle(mTab, "title2");
     }
 
-    private void testMediaMetadataSetsTitleInternal() throws InterruptedException {
+    private void doTestMediaMetadataSetsTitle() throws InterruptedException {
         simulateMediaSessionStateChanged(mTab, true, false, new MediaMetadata("title2", "", ""));
         assertTitleMatches("title2");
     }
 
-    private void testMediaMetadataOverridesTitleInternal() throws InterruptedException {
+    private void doTestMediaMetadataOverridesTitle() throws InterruptedException {
         simulateMediaSessionStateChanged(mTab, true, false, new MediaMetadata("title2", "", ""));
         assertTitleMatches("title2");
 
@@ -91,7 +91,7 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
      *   4. change the title of newTab and then mTab to different names,
      *      the notification should have the title of newTab.
      */
-    private void testMultipleTabsInternal() throws Throwable {
+    private void doTestMultipleTabs() throws Throwable {
         simulateMediaSessionStateChanged(mTab, true, false);
         assertTitleMatches("title1");
         simulateMediaSessionStateChanged(mTab, false, false);
@@ -106,79 +106,36 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
     }
 
     @SmallTest
-    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
     public void testSessionStatePlaying_MediaStyleNotification() throws InterruptedException {
-        testSessionStatePlayingInternal();
+        doTestSessionStatePlaying();
     }
 
     @SmallTest
-    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
     public void testSessionStatePaused_MediaStyleNotification() throws InterruptedException {
-        testSessionStatePausedInternal();
+        doTestSessionStatePaused();
     }
 
     @SmallTest
-    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
     public void testSessionStateUncontrollable_MediaStyleNotification()
             throws InterruptedException {
-        testSessionStateUncontrollableInternal();
+        doTestSessionStateUncontrollable();
     }
 
     @SmallTest
-    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
     public void testMediaMetadataSetsTitle_MediaStyleNotification() throws InterruptedException {
-        testMediaMetadataSetsTitleInternal();
+        doTestMediaMetadataSetsTitle();
     }
 
     @SmallTest
-    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
     public void testMediaMetadataOverridesTitle_MediaStyleNotification()
             throws InterruptedException {
-        testMediaMetadataOverridesTitleInternal();
+        doTestMediaMetadataOverridesTitle();
     }
 
     @SmallTest
     @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
-    @CommandLineFlags.Add("enable-features=MediaStyleNotification")
     public void testMultipleTabs_MediaStyleNotification() throws Throwable {
-        testMultipleTabsInternal();
-    }
-
-    @SmallTest
-    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
-    public void testSessionStatePlaying_CustomNotification() throws InterruptedException {
-        testSessionStatePlayingInternal();
-    }
-
-    @SmallTest
-    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
-    public void testSessionStatePaused_CustomNotification() throws InterruptedException {
-        testSessionStatePausedInternal();
-    }
-
-    @SmallTest
-    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
-    public void testSessionStateUncontrollable_CustomNotification() throws InterruptedException {
-        testSessionStateUncontrollableInternal();
-    }
-
-    @SmallTest
-    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
-    public void testMediaMetadataSetsTitle_CustomNotification() throws InterruptedException {
-        testMediaMetadataSetsTitleInternal();
-    }
-
-    @SmallTest
-    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
-    public void testMediaMetadataOverridesTitle_CustomNotification() throws InterruptedException {
-        testMediaMetadataOverridesTitleInternal();
-    }
-
-    @SmallTest
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
-    @CommandLineFlags.Add("disable-features=MediaStyleNotification")
-    public void testMultipleTabs_CustomNotification() throws Throwable {
-        testMultipleTabsInternal();
+        doTestMultipleTabs();
     }
 
     @Override
@@ -241,19 +198,14 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
                     View contentView = notification.contentView.apply(
                             getActivity().getApplicationContext(), null);
                     String observedText = null;
-                    if (ChromeFeatureList.isEnabled(ChromeFeatureList.MEDIA_STYLE_NOTIFICATION)) {
-                        TextView view = (TextView) contentView.findViewById(android.R.id.title);
-                        if (view == null) {
-                            // Case where NotificationCompat does not use the native Notification.
-                            // The TextView id will be in Chrome's namespace.
-                            view = (TextView) contentView.findViewById(R.id.title);
-                        }
-                        observedText = view.getText().toString();
-                    } else {
-                        observedText = ((TextView) contentView.findViewById(R.id.title))
-                                               .getText()
-                                               .toString();
+                    TextView view = (TextView) contentView.findViewById(android.R.id.title);
+                    if (view == null) {
+                        // Case where NotificationCompat does not use the native Notification.
+                        // The TextView id will be in Chrome's namespace.
+                        view = (TextView) contentView.findViewById(R.id.title);
                     }
+                    observedText = view.getText().toString();
+
                     assertEquals(title, observedText);
                 }
             });

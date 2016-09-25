@@ -46,11 +46,13 @@ class StyleRuleFontFace;
 
 class CORE_EXPORT TreeScopeStyleSheetCollection : public StyleSheetCollection {
 public:
-    void addStyleSheetCandidateNode(Node*);
-    void removeStyleSheetCandidateNode(Node* node) { m_styleSheetCandidateNodes.remove(node); }
+    void addStyleSheetCandidateNode(Node&);
+    void removeStyleSheetCandidateNode(Node& node) { m_styleSheetCandidateNodes.remove(&node); }
     bool hasStyleSheetCandidateNodes() const { return !m_styleSheetCandidateNodes.isEmpty(); }
 
     void clearMediaQueryRuleSetStyleSheets();
+
+    virtual bool isShadowTreeStyleSheetCollection() const { return false; }
 
     DECLARE_VIRTUAL_TRACE();
 
@@ -78,7 +80,7 @@ protected:
             , requiresFullStyleRecalc(true) { }
     };
 
-    void analyzeStyleSheetChange(StyleResolverUpdateMode, const StyleSheetCollection&, StyleSheetChange&);
+    void analyzeStyleSheetChange(StyleResolverUpdateMode, const HeapVector<Member<CSSStyleSheet>>&, StyleSheetChange&);
 
 private:
     static StyleResolverUpdateType compareStyleSheets(const HeapVector<Member<CSSStyleSheet>>& oldStyleSheets, const HeapVector<Member<CSSStyleSheet>>& newStylesheets, HeapVector<Member<StyleSheetContents>>& addedSheets);

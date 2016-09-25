@@ -57,10 +57,10 @@
 #include "net/http/http_request_info.h"
 #include "net/http/transport_security_state.h"
 #include "net/log/net_log.h"
-#include "net/quic/crypto/proof_verifier_chromium.h"
-#include "net/quic/quic_protocol.h"
-#include "net/quic/quic_server_id.h"
-#include "net/quic/quic_utils.h"
+#include "net/quic/chromium/crypto/proof_verifier_chromium.h"
+#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_server_id.h"
+#include "net/quic/core/quic_utils.h"
 #include "net/spdy/spdy_header_block.h"
 #include "net/spdy/spdy_http_utils.h"
 #include "net/tools/quic/quic_simple_client.h"
@@ -69,6 +69,7 @@
 
 using base::StringPiece;
 using net::CertVerifier;
+using net::CTPolicyEnforcer;
 using net::CTVerifier;
 using net::MultiLogCTVerifier;
 using net::ProofVerifierChromium;
@@ -107,49 +108,18 @@ int32_t FLAGS_initial_mtu = 0;
 
 class FakeCertVerifier : public net::CertVerifier {
  public:
-  int Verify(net::X509Certificate* cert,
-             const std::string& hostname,
-             const std::string& ocsp_response,
-             int flags,
+  int Verify(const RequestParams& params,
              net::CRLSet* crl_set,
              net::CertVerifyResult* verify_result,
              const net::CompletionCallback& callback,
-             std::unique_ptr<net::CertVerifier::Request>* out_req,
-             const net::BoundNetLog& net_log) override {
+             std::unique_ptr<Request>* out_req,
+             const net::NetLogWithSource& net_log) override {
     return net::OK;
   }
 
   // Returns true if this CertVerifier supports stapled OCSP responses.
   bool SupportsOCSPStapling() override { return false; }
 };
-
-static bool DecodeHexString(const base::StringPiece& hex, std::string* bytes) {
-  bytes->clear();
-  if (hex.empty())
-    return true;
-  std::vector<uint8_t> v;
-  if (!base::HexStringToBytes(hex.as_string(), &v))
-    return false;
-  if (!v.empty())
-    bytes->assign(reinterpret_cast<const char*>(&v[0]), v.size());
-  return true;
-};
-
-// Converts binary data into an ASCII string. Each character in the resulting
-// string is preceeded by a space, and replaced with a '.' if not printable.
-string BinaryToAscii(const string& binary) {
-  string out = "";
-  for (const unsigned char c : binary) {
-    // Leading space.
-    out += " ";
-    if (isprint(c)) {
-      out += c;
-    } else {
-      out += '.';
-    }
-  }
-  return out;
-}
 
 int main(int argc, char* argv[]) {
   base::CommandLine::Init(argc, argv);
@@ -270,7 +240,7 @@ int main(int argc, char* argv[]) {
   // Build the client, and try to connect.
   net::QuicServerId server_id(url.host(), url.EffectiveIntPort(),
                               net::PRIVACY_MODE_DISABLED);
-  net::QuicVersionVector versions = net::QuicSupportedVersions();
+  net::QuicVersionVector versions = net::AllSupportedVersions();
   if (FLAGS_quic_version != -1) {
     versions.clear();
     versions.push_back(static_cast<net::QuicVersion>(FLAGS_quic_version));
@@ -283,11 +253,13 @@ int main(int argc, char* argv[]) {
   std::unique_ptr<TransportSecurityState> transport_security_state(
       new TransportSecurityState);
   std::unique_ptr<CTVerifier> ct_verifier(new MultiLogCTVerifier());
-  ProofVerifierChromium* proof_verifier = new ProofVerifierChromium(
-      cert_verifier.get(), nullptr, transport_security_state.get(),
-      ct_verifier.get());
+  std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer(new CTPolicyEnforcer());
+  std::unique_ptr<ProofVerifierChromium> proof_verifier(
+      new ProofVerifierChromium(cert_verifier.get(), ct_policy_enforcer.get(),
+                                transport_security_state.get(),
+                                ct_verifier.get()));
   net::QuicSimpleClient client(net::IPEndPoint(ip_addr, port), server_id,
-                               versions, proof_verifier);
+                               versions, std::move(proof_verifier));
   client.set_initial_max_packet_length(
       FLAGS_initial_mtu != 0 ? FLAGS_initial_mtu : net::kDefaultMaxPacketSize);
   if (!client.Initialize()) {
@@ -312,7 +284,7 @@ int main(int argc, char* argv[]) {
   string body = FLAGS_body;
   if (!FLAGS_body_hex.empty()) {
     DCHECK(FLAGS_body.empty()) << "Only set one of --body and --body_hex.";
-    DecodeHexString(FLAGS_body_hex, &body);
+    body = net::QuicUtils::HexDecode(FLAGS_body_hex);
   }
 
   // Construct a GET or POST request for supplied URL.
@@ -345,8 +317,7 @@ int main(int argc, char* argv[]) {
   // Send the request.
   net::SpdyHeaderBlock header_block;
   net::CreateSpdyHeadersFromHttpRequest(request, request.extra_headers,
-                                        net::HTTP2, /*direct=*/true,
-                                        &header_block);
+                                        /*direct=*/true, &header_block);
   client.SendRequestAndWaitForResponse(request, body, /*fin=*/true);
 
   // Print request and response details.
@@ -355,10 +326,9 @@ int main(int argc, char* argv[]) {
     cout << "headers:" << header_block.DebugString();
     if (!FLAGS_body_hex.empty()) {
       // Print the user provided hex, rather than binary body.
-      cout << "body hex:   " << FLAGS_body_hex << endl;
-      string bytes;
-      DecodeHexString(FLAGS_body_hex, &bytes);
-      cout << "body ascii: " << BinaryToAscii(bytes) << endl;
+      cout << "body:\n"
+           << net::QuicUtils::HexDump(net::QuicUtils::HexDecode(FLAGS_body_hex))
+           << endl;
     } else {
       cout << "body: " << body << endl;
     }
@@ -368,10 +338,7 @@ int main(int argc, char* argv[]) {
     string response_body = client.latest_response_body();
     if (!FLAGS_body_hex.empty()) {
       // Assume response is binary data.
-      string bytes;
-      DecodeHexString(response_body, &bytes);
-      cout << "body hex:   " << bytes << endl;
-      cout << "body ascii: " << BinaryToAscii(response_body) << endl;
+      cout << "body:\n" << net::QuicUtils::HexDump(response_body) << endl;
     } else {
       cout << "body: " << response_body << endl;
     }

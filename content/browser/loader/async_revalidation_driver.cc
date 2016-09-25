@@ -13,7 +13,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_status.h"
@@ -81,22 +81,6 @@ void AsyncRevalidationDriver::OnAuthRequired(
   // This error code doesn't have exactly the right semantics, but it should
   // be sufficient to narrow down the problem in net logs.
   CancelRequestInternal(net::ERR_ACCESS_DENIED, RESULT_AUTH_FAILED);
-}
-
-void AsyncRevalidationDriver::OnBeforeNetworkStart(net::URLRequest* request,
-                                                   bool* defer) {
-  DCHECK_EQ(request_.get(), request);
-
-  // Verify that the ResourceScheduler does not defer here.
-  throttle_->WillStartUsingNetwork(defer);
-  DCHECK(!*defer);
-
-  // Start the response timer. This use of base::Unretained() is guaranteed safe
-  // by the semantics of base::OneShotTimer.
-  timer_.Start(FROM_HERE,
-               base::TimeDelta::FromSeconds(kResponseTimeoutInSeconds),
-               base::Bind(&AsyncRevalidationDriver::OnTimeout,
-                          base::Unretained(this), RESULT_RESPONSE_TIMEOUT));
 }
 
 void AsyncRevalidationDriver::OnResponseStarted(net::URLRequest* request) {
@@ -188,6 +172,12 @@ void AsyncRevalidationDriver::StartRequestInternal() {
   DCHECK(request_);
   DCHECK(!request_->is_pending());
 
+  // Start the response timer. This use of base::Unretained() is guaranteed safe
+  // by the semantics of base::OneShotTimer.
+  timer_.Start(FROM_HERE,
+               base::TimeDelta::FromSeconds(kResponseTimeoutInSeconds),
+               base::Bind(&AsyncRevalidationDriver::OnTimeout,
+                          base::Unretained(this), RESULT_RESPONSE_TIMEOUT));
   request_->Start();
 }
 

@@ -50,7 +50,7 @@ class CONTENT_EXPORT DownloadItemImpl
   // outlives the DownloadItemImpl.
 
   // Constructing from persistent store:
-  // |bound_net_log| is constructed externally for our use.
+  // |net_log| is constructed externally for our use.
   DownloadItemImpl(DownloadItemImplDelegate* delegate,
                    const std::string& guid,
                    uint32_t id,
@@ -58,6 +58,7 @@ class CONTENT_EXPORT DownloadItemImpl
                    const base::FilePath& target_path,
                    const std::vector<GURL>& url_chain,
                    const GURL& referrer_url,
+                   const GURL& site_url,
                    const GURL& tab_url,
                    const GURL& tab_referrer_url,
                    const std::string& mime_type,
@@ -73,19 +74,17 @@ class CONTENT_EXPORT DownloadItemImpl
                    DownloadDangerType danger_type,
                    DownloadInterruptReason interrupt_reason,
                    bool opened,
-                   const net::BoundNetLog& bound_net_log);
+                   const net::NetLogWithSource& net_log);
 
   // Constructing for a regular download.
-  // |bound_net_log| is constructed externally for our use.
-  // TODO(asanka): Get rid of the DownloadCreateInfo parameter since active
-  // downloads end up at Start() immediately after creation.
+  // |net_log| is constructed externally for our use.
   DownloadItemImpl(DownloadItemImplDelegate* delegate,
                    uint32_t id,
                    const DownloadCreateInfo& info,
-                   const net::BoundNetLog& bound_net_log);
+                   const net::NetLogWithSource& net_log);
 
   // Constructing for the "Save Page As..." feature:
-  // |bound_net_log| is constructed externally for our use.
+  // |net_log| is constructed externally for our use.
   DownloadItemImpl(
       DownloadItemImplDelegate* delegate,
       uint32_t id,
@@ -93,7 +92,7 @@ class CONTENT_EXPORT DownloadItemImpl
       const GURL& url,
       const std::string& mime_type,
       std::unique_ptr<DownloadRequestHandleInterface> request_handle,
-      const net::BoundNetLog& bound_net_log);
+      const net::NetLogWithSource& net_log);
 
   ~DownloadItemImpl() override;
 
@@ -121,6 +120,7 @@ class CONTENT_EXPORT DownloadItemImpl
   const std::vector<GURL>& GetUrlChain() const override;
   const GURL& GetOriginalUrl() const override;
   const GURL& GetReferrerUrl() const override;
+  const GURL& GetSiteUrl() const override;
   const GURL& GetTabUrl() const override;
   const GURL& GetTabReferrerUrl() const override;
   std::string GetSuggestedFilename() const override;
@@ -161,7 +161,6 @@ class CONTENT_EXPORT DownloadItemImpl
   WebContents* GetWebContents() const override;
   void OnContentCheckCompleted(DownloadDangerType danger_type) override;
   void SetOpenWhenComplete(bool open) override;
-  void SetIsTemporary(bool temporary) override;
   void SetOpened(bool opened) override;
   void SetDisplayName(const base::FilePath& name) override;
   std::string DebugString(bool verbose) const override;
@@ -202,8 +201,8 @@ class CONTENT_EXPORT DownloadItemImpl
   virtual base::WeakPtr<DownloadDestinationObserver>
       DestinationObserverAsWeakPtr();
 
-  // Get the download's BoundNetLog.
-  virtual const net::BoundNetLog& GetBoundNetLog() const;
+  // Get the download's NetLogWithSource.
+  virtual const net::NetLogWithSource& GetNetLogWithSource() const;
 
   // DownloadItemImpl routines only needed by SavePackage ----------------------
 
@@ -476,7 +475,8 @@ class CONTENT_EXPORT DownloadItemImpl
 
   void AutoResumeIfValid();
 
-  void ResumeInterruptedDownload();
+  enum class ResumptionRequestSource { AUTOMATIC, USER };
+  void ResumeInterruptedDownload(ResumptionRequestSource source);
 
   // Update origin information based on the response to a download resumption
   // request. Should only be called if the resumption request was successful.
@@ -525,6 +525,9 @@ class CONTENT_EXPORT DownloadItemImpl
 
   // The URL of the page that initiated the download.
   GURL referrer_url_;
+
+  // Site URL for the site instance that initiated this download.
+  GURL site_url_;
 
   // The URL of the tab that initiated the download.
   GURL tab_url_;
@@ -671,7 +674,7 @@ class CONTENT_EXPORT DownloadItemImpl
   std::string etag_;
 
   // Net log to use for this download.
-  const net::BoundNetLog bound_net_log_;
+  const net::NetLogWithSource net_log_;
 
   base::WeakPtrFactory<DownloadItemImpl> weak_ptr_factory_;
 

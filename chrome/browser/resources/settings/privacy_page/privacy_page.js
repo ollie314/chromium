@@ -6,20 +6,15 @@
  * @fileoverview
  * 'settings-privacy-page' is the settings page containing privacy and
  * security settings.
- *
- * Example:
- *
- *    <iron-animated-pages>
- *      <settings-privacy-page prefs="{{prefs}}">
- *      </settings-privacy-page>
- *      ... other pages ...
- *    </iron-animated-pages>
  */
 Polymer({
   is: 'settings-privacy-page',
 
   behaviors: [
-    I18nBehavior,
+    settings.RouteObserverBehavior,
+<if expr="_google_chrome and not chromeos">
+    WebUIListenerBehavior,
+</if>
   ],
 
   properties: {
@@ -32,36 +27,78 @@ Polymer({
     },
 
     /**
-     * The current active route.
+     * Dictionary defining page visibility.
+     * @type {!PrivacyPageVisibility}
      */
-    currentRoute: {
-      type: Object,
-      notify: true,
-    },
+    pageVisibility: Object,
+
+<if expr="_google_chrome and not chromeos">
+    /** @type {MetricsReporting} */
+    metricsReporting_: Object,
+</if>
+
+    /** @private */
+    showClearBrowsingDataDialog_: Boolean,
   },
 
   ready: function() {
     this.ContentSettingsTypes = settings.ContentSettingsTypes;
+
+<if expr="_google_chrome and not chromeos">
+    var boundSetMetricsReporting = this.setMetricsReporting_.bind(this);
+    this.addWebUIListener('metrics-reporting-change', boundSetMetricsReporting);
+
+    var browserProxy = settings.PrivacyPageBrowserProxyImpl.getInstance();
+    browserProxy.getMetricsReporting().then(boundSetMetricsReporting);
+</if>
+  },
+
+  /** @protected */
+  currentRouteChanged: function() {
+    this.showClearBrowsingDataDialog_ =
+        settings.getCurrentRoute() == settings.Route.CLEAR_BROWSER_DATA;
   },
 
   /** @private */
   onManageCertificatesTap_: function() {
 <if expr="use_nss_certs">
-    this.$.pages.setSubpageChain(['manage-certificates']);
+    settings.navigateTo(settings.Route.CERTIFICATES);
 </if>
 <if expr="is_win or is_macosx">
     settings.PrivacyPageBrowserProxyImpl.getInstance().
-      showManageSSLCertificates();
+        showManageSSLCertificates();
 </if>
   },
 
   /** @private */
   onSiteSettingsTap_: function() {
-    this.$.pages.setSubpageChain(['site-settings']);
+    settings.navigateTo(settings.Route.SITE_SETTINGS);
   },
 
   /** @private */
   onClearBrowsingDataTap_: function() {
-    this.$.pages.querySelector('settings-clear-browsing-data-dialog').open();
+    settings.navigateTo(settings.Route.CLEAR_BROWSER_DATA);
   },
+
+  /** @private */
+  onDialogClosed_: function() {
+    settings.navigateToPreviousRoute();
+  },
+
+<if expr="_google_chrome and not chromeos">
+  /** @private */
+  onMetricsReportingCheckboxTap_: function() {
+    var browserProxy = settings.PrivacyPageBrowserProxyImpl.getInstance();
+    var enabled = this.$.metricsReportingCheckbox.checked;
+    browserProxy.setMetricsReportingEnabled(enabled);
+  },
+
+  /**
+   * @param {!MetricsReporting} metricsReporting
+   * @private
+   */
+  setMetricsReporting_: function(metricsReporting) {
+    this.metricsReporting_ = metricsReporting;
+  },
+</if>
 });

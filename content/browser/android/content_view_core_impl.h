@@ -12,6 +12,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_weak_ref.h"
+#include "base/android/scoped_java_ref.h"
 #include "base/compiler_specific.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
@@ -26,6 +27,7 @@
 #include "ui/android/view_android.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/selection_bound.h"
 #include "url/gurl.h"
 
 namespace cc {
@@ -48,33 +50,23 @@ class ContentViewCoreImpl : public ContentViewCore,
                             public WebContentsObserver {
  public:
   static ContentViewCoreImpl* FromWebContents(WebContents* web_contents);
-  ContentViewCoreImpl(JNIEnv* env,
-                      jobject obj,
-                      WebContents* web_contents,
-                      jobject view_android,
-                      ui::WindowAndroid* window_android,
-                      jobject java_bridge_retained_object_set);
+  ContentViewCoreImpl(
+      JNIEnv* env,
+      const base::android::JavaRef<jobject>& obj,
+      WebContents* web_contents,
+      const base::android::JavaRef<jobject>& view_android_delegate,
+      ui::WindowAndroid* window_android,
+      const base::android::JavaRef<jobject>& java_bridge_retained_object_set);
 
   // ContentViewCore implementation.
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject() override;
   WebContents* GetWebContents() const override;
   ui::WindowAndroid* GetWindowAndroid() const override;
-  const scoped_refptr<cc::Layer>& GetLayer() const override;
   bool ShowPastePopup(int x, int y) override;
-  float GetDpiScale() const override;
   void PauseOrResumeGeolocation(bool should_pause) override;
-  void RequestTextSurroundingSelection(
-      int max_length,
-      const base::Callback<void(const base::string16& content,
-                                int start_offset,
-                                int end_offset)>& callback) override;
 
   void AddObserver(ContentViewCoreImplObserver* observer);
   void RemoveObserver(ContentViewCoreImplObserver* observer);
-
-  // ViewAndroid implementation
-  base::android::ScopedJavaLocalRef<jobject> GetViewAndroidDelegate()
-      const override;
 
   // --------------------------------------------------------------------------
   // Methods called from Java via JNI
@@ -208,12 +200,6 @@ class ContentViewCoreImpl : public ContentViewCore,
                jfloat x,
                jfloat y,
                jfloat delta);
-  void SelectBetweenCoordinates(JNIEnv* env,
-                                const base::android::JavaParamRef<jobject>& obj,
-                                jfloat x1,
-                                jfloat y1,
-                                jfloat x2,
-                                jfloat y2);
   void DismissTextHandles(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj);
   void SetTextHandlesTemporarilyHidden(
@@ -282,6 +268,19 @@ class ContentViewCoreImpl : public ContentViewCore,
                            const base::android::JavaParamRef<jobject>& jobj,
                            jboolean opaque);
 
+  bool IsTouchDragDropEnabled(JNIEnv* env,
+                              const base::android::JavaParamRef<jobject>& jobj);
+
+  void OnDragEvent(JNIEnv* env,
+                   const base::android::JavaParamRef<jobject>& jobj,
+                   jint action,
+                   jint x,
+                   jint y,
+                   jint screen_x,
+                   jint screen_y,
+                   const base::android::JavaParamRef<jobjectArray>& j_mimeTypes,
+                   const base::android::JavaParamRef<jstring>& j_content);
+
   jint GetCurrentRenderProcessId(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
@@ -289,6 +288,8 @@ class ContentViewCoreImpl : public ContentViewCore,
   // --------------------------------------------------------------------------
   // Public methods that call to Java via JNI
   // --------------------------------------------------------------------------
+
+  void HidePopupsAndPreserveSelection();
 
   void OnSmartClipDataExtracted(const base::string16& text,
                                 const base::string16& html,
@@ -313,10 +314,12 @@ class ContentViewCoreImpl : public ContentViewCore,
                        const gfx::Vector2dF& page_scale_factor_limits,
                        const gfx::SizeF& content_size,
                        const gfx::SizeF& viewport_size,
-                       const gfx::Vector2dF& controls_offset,
-                       const gfx::Vector2dF& content_offset,
+                       const float top_controls_height,
+                       const float top_controls_shown_ratio,
+                       const float bottom_controls_height,
+                       const float bottom_controls_shown_ratio,
                        bool is_mobile_optimized_hint,
-                       const cc::ViewportSelectionBound& selection_start);
+                       const gfx::SelectionBound& selection_start);
 
   void ForceUpdateImeAdapter(long native_ime_adapter);
   void UpdateImeAdapter(long native_ime_adapter,
@@ -328,7 +331,8 @@ class ContentViewCoreImpl : public ContentViewCore,
                         int composition_start,
                         int composition_end,
                         bool show_ime_if_needed,
-                        bool is_non_ime_change);
+                        bool is_non_ime_change,
+                        bool in_batch_edit_mode);
   void SetTitle(const base::string16& title);
   void OnBackgroundColorChanged(SkColor color);
 
@@ -380,9 +384,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   gfx::Size GetViewportSizeDip() const;
   bool DoTopControlsShrinkBlinkSize() const;
   float GetTopControlsHeightDip() const;
-
-  void AttachLayer(scoped_refptr<cc::Layer> layer);
-  void RemoveLayer(scoped_refptr<cc::Layer> layer);
+  float GetBottomControlsHeightDip() const;
 
   void MoveRangeSelectionExtent(const gfx::PointF& extent);
 
@@ -391,8 +393,8 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   void OnShowUnhandledTapUIIfNeeded(int x_dip, int y_dip);
 
-  // returns page density (dpi) X page scale
-  float GetScaleFactor() const;
+  ui::ViewAndroid* GetViewAndroid();
+
  private:
   class ContentViewUserData;
 
@@ -426,6 +428,7 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   gfx::Size GetViewportSizePix() const;
   int GetTopControlsHeightPix() const;
+  int GetBottomControlsHeightPix() const;
 
   void SendGestureEvent(const blink::WebGestureEvent& event);
 
@@ -440,24 +443,20 @@ class ContentViewCoreImpl : public ContentViewCore,
   // A weak reference to the Java ContentViewCore object.
   JavaObjectWeakGlobalRef java_ref_;
 
+  // Select popup view
+  ui::ViewAndroid::ScopedAnchorView select_popup_;
+
+  ui::ViewAndroid view_;
+
   // Reference to the current WebContents used to determine how and what to
   // display in the ContentViewCore.
   WebContentsImpl* web_contents_;
 
-  // A compositor layer containing any layer that should be shown.
-  scoped_refptr<cc::Layer> root_layer_;
-
   // Page scale factor.
   float page_scale_;
 
-  // Java delegate to acquire and release anchor views from the NativeView
-  base::android::ScopedJavaGlobalRef<jobject> view_android_delegate_;
-
   // Device scale factor.
   const float dpi_scale_;
-
-  // The owning window that has a hold of main application activity.
-  ui::WindowAndroid* window_android_;
 
   // Observer to notify of lifecyle changes.
   base::ObserverList<ContentViewCoreImplObserver> observer_list_;

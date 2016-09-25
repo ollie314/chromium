@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "base/memory/scoped_ptr.h"
 #include "components/sessions/core/serialized_navigation_entry.h"
 #include "components/sessions/core/session_id.h"
 #include "ui/base/page_transition_types.h"
@@ -20,7 +19,7 @@ namespace sync_sessions {
 class SyncSessionsClient;
 }
 
-namespace browser_sync {
+namespace sync_sessions {
 
 // A SyncedTabDelegate is used to insulate the sync code from depending
 // directly on WebContents, NavigationController, and the extensions TabHelper.
@@ -55,8 +54,7 @@ class SyncedTabDelegate {
   // Session sync related methods.
   virtual int GetSyncId() const = 0;
   virtual void SetSyncId(int sync_id) = 0;
-  virtual bool ShouldSync(
-      sync_sessions::SyncSessionsClient* sessions_client) = 0;
+  virtual bool ShouldSync(SyncSessionsClient* sessions_client) = 0;
 
   // Whether this tab is a placeholder tab. On some platforms, tabs can be
   // restored without bringing all their state into memory, and are just
@@ -68,6 +66,6 @@ class SyncedTabDelegate {
   SyncedTabDelegate();
 };
 
-}  // namespace browser_sync
+}  // namespace sync_sessions
 
 #endif  // COMPONENTS_SYNC_SESSIONS_SYNCED_TAB_DELEGATE_H__

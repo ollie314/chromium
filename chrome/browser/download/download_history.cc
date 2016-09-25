@@ -31,7 +31,7 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "components/history/content/browser/download_constants_utils.h"
 #include "components/history/core/browser/download_database.h"
@@ -128,7 +128,8 @@ history::DownloadRow GetDownloadRow(
 
   return history::DownloadRow(
       item->GetFullPath(), item->GetTargetFilePath(), item->GetUrlChain(),
-      item->GetReferrerUrl(), item->GetTabUrl(), item->GetTabReferrerUrl(),
+      item->GetReferrerUrl(), item->GetSiteUrl(), item->GetTabUrl(),
+      item->GetTabReferrerUrl(),
       std::string(),  // HTTP method (not available yet)
       item->GetMimeType(), item->GetOriginalMimeType(), item->GetStartTime(),
       item->GetEndTime(), item->GetETag(), item->GetLastModifiedTime(),
@@ -143,8 +144,8 @@ history::DownloadRow GetDownloadRow(
 
 bool ShouldUpdateHistory(const history::DownloadRow* previous,
                          const history::DownloadRow& current) {
-  // Ignore url_chain, referrer, http_method, mime_type, original_mime_type,
-  // start_time, id, guid, which don't change.
+  // Ignore url_chain, referrer, site_url, http_method, mime_type,
+  // original_mime_type, start_time, id, and guid. These fields don't change.
   return ((previous == NULL) ||
           (previous->current_path != current.current_path) ||
           (previous->target_path != current.target_path) ||
@@ -263,9 +264,9 @@ void DownloadHistory::QueryCallback(std::unique_ptr<InfoVector> infos) {
     loading_id_ = history::ToContentDownloadId(it->id);
     content::DownloadItem* item = notifier_.GetManager()->CreateDownloadItem(
         it->guid, loading_id_, it->current_path, it->target_path, it->url_chain,
-        it->referrer_url, it->tab_url, it->tab_referrer_url, it->mime_type,
-        it->original_mime_type, it->start_time, it->end_time, it->etag,
-        it->last_modified, it->received_bytes, it->total_bytes,
+        it->referrer_url, it->site_url, it->tab_url, it->tab_referrer_url,
+        it->mime_type, it->original_mime_type, it->start_time, it->end_time,
+        it->etag, it->last_modified, it->received_bytes, it->total_bytes,
         std::string(),  // TODO(asanka): Need to persist and restore hash of
                         // partial file for an interrupted download. No need to
                         // store hash for a completed file.
@@ -342,12 +343,13 @@ void DownloadHistory::ItemAdded(uint32_t download_id, bool success) {
   }
 
   DownloadHistoryData* data = DownloadHistoryData::Get(item);
+  bool was_persisted = IsPersisted(item);
 
   // The sql INSERT statement failed. Avoid an infinite loop: don't
   // automatically retry. Retry adding the next time the item is updated by
   // resetting the state to NOT_PERSISTED.
   if (!success) {
-    DVLOG(20) << __FUNCTION__ << " INSERT failed id=" << download_id;
+    DVLOG(20) << __func__ << " INSERT failed id=" << download_id;
     data->SetState(DownloadHistoryData::NOT_PERSISTED);
     return;
   }
@@ -355,15 +357,18 @@ void DownloadHistory::ItemAdded(uint32_t download_id, bool success) {
 
   UMA_HISTOGRAM_CUSTOM_COUNTS("Download.HistorySize2",
                               history_size_,
-                              0/*min*/,
+                              1/*min*/,
                               (1 << 23)/*max*/,
                               (1 << 7)/*num_buckets*/);
   ++history_size_;
 
+  // Notify the observer about the change in the persistence state.
+  if (was_persisted != IsPersisted(item)) {
+    FOR_EACH_OBSERVER(Observer, observers_, OnDownloadStored(
+        item, *data->info()));
+  }
+
   // In case the item changed or became temporary while it was being added.
-  // Don't just update all of the item's observers because we're the only
-  // observer that can also see data->state(), which is the only thing that
-  // ItemAdded() changed.
   OnDownloadUpdated(notifier_.GetManager(), item);
 }
 

@@ -36,6 +36,7 @@
 #include "core/dom/Comment.h"
 #include "core/dom/Document.h"
 #include "core/dom/DocumentFragment.h"
+#include "core/dom/DocumentParserTiming.h"
 #include "core/dom/DocumentType.h"
 #include "core/dom/ProcessingInstruction.h"
 #include "core/dom/ScriptLoader.h"
@@ -45,7 +46,6 @@
 #include "core/fetch/RawResource.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/fetch/ScriptResource.h"
-#include "core/frame/ConsoleTypes.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLHtmlElement.h"
@@ -67,8 +67,9 @@
 #include "platform/network/ResourceRequest.h"
 #include "platform/network/ResourceResponse.h"
 #include "platform/weborigin/SecurityOrigin.h"
+#include "wtf/AutoReset.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/StringExtras.h"
-#include "wtf/TemporaryChange.h"
 #include "wtf/Threading.h"
 #include "wtf/Vector.h"
 #include "wtf/text/UTF8.h"
@@ -76,6 +77,7 @@
 #include <libxml/parser.h>
 #include <libxml/parserInternals.h>
 #include <libxslt/xslt.h>
+#include <memory>
 
 namespace blink {
 
@@ -309,8 +311,8 @@ private:
 
 void XMLDocumentParser::pushCurrentNode(ContainerNode* n)
 {
-    ASSERT(n);
-    ASSERT(m_currentNode);
+    DCHECK(n);
+    DCHECK(m_currentNode);
     m_currentNodeStack.append(m_currentNode);
     m_currentNode = n;
     if (m_currentNodeStack.size() > maxXMLTreeDepth)
@@ -321,7 +323,7 @@ void XMLDocumentParser::popCurrentNode()
 {
     if (!m_currentNode)
         return;
-    ASSERT(m_currentNodeStack.size());
+    DCHECK(m_currentNodeStack.size());
     m_currentNode = m_currentNodeStack.last();
     m_currentNodeStack.removeLast();
 }
@@ -338,7 +340,7 @@ void XMLDocumentParser::clearCurrentNodeStack()
 
 void XMLDocumentParser::insert(const SegmentedString&)
 {
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
 }
 
 void XMLDocumentParser::append(const String& inputSource)
@@ -372,7 +374,7 @@ void XMLDocumentParser::createLeafTextNodeIfNeeded()
     if (m_leafTextNode)
         return;
 
-    ASSERT(m_bufferedText.size() == 0);
+    DCHECK_EQ(m_bufferedText.size(), 0u);
     m_leafTextNode = Text::create(m_currentNode->document(), "");
     m_currentNode->parserAppendChild(m_leafTextNode.get());
 }
@@ -398,6 +400,7 @@ void XMLDocumentParser::detach()
     if (m_pendingScript) {
         m_pendingScript->removeClient(this);
         m_pendingScript = nullptr;
+        m_parserBlockingPendingScriptLoadStartTime = 0.0;
     }
     clearCurrentNodeStack();
     ScriptableDocumentParser::detach();
@@ -408,7 +411,7 @@ void XMLDocumentParser::end()
     TRACE_EVENT0("blink", "XMLDocumentParser::end");
     // XMLDocumentParserLibxml2 will do bad things to the document if doEnd() is called.
     // I don't believe XMLDocumentParserQt needs doEnd called in the fragment case.
-    ASSERT(!m_parsingFragment);
+    DCHECK(!m_parsingFragment);
 
     doEnd();
 
@@ -435,7 +438,7 @@ void XMLDocumentParser::end()
 
 void XMLDocumentParser::finish()
 {
-    // FIXME: We should ASSERT(!m_parserStopped) here, since it does not
+    // FIXME: We should DCHECK(!m_parserStopped) here, since it does not
     // makes sense to call any methods on DocumentParser once it's been stopped.
     // However, FrameLoader::stop calls DocumentParser::finish unconditionally.
 
@@ -456,11 +459,13 @@ void XMLDocumentParser::insertErrorMessageBlock()
 
 void XMLDocumentParser::notifyFinished(Resource* unusedResource)
 {
-    ASSERT_UNUSED(unusedResource, unusedResource == m_pendingScript);
+    DCHECK_EQ(unusedResource, m_pendingScript);
 
     ScriptSourceCode sourceCode(m_pendingScript.get());
     bool errorOccurred = m_pendingScript->errorOccurred();
     bool wasCanceled = m_pendingScript->wasCanceled();
+    double scriptParserBlockingTime = m_parserBlockingPendingScriptLoadStartTime;
+    m_parserBlockingPendingScriptLoadStartTime = 0.0;
 
     m_pendingScript->removeClient(this);
     m_pendingScript = nullptr;
@@ -469,11 +474,15 @@ void XMLDocumentParser::notifyFinished(Resource* unusedResource)
     m_scriptElement = nullptr;
 
     ScriptLoader* scriptLoader = toScriptLoaderIfPossible(e);
-    ASSERT(scriptLoader);
+    DCHECK(scriptLoader);
 
     if (errorOccurred) {
         scriptLoader->dispatchErrorEvent();
     } else if (!wasCanceled) {
+        if (scriptParserBlockingTime > 0.0) {
+            DocumentParserTiming::from(*document()).recordParserBlockedOnScriptLoadDuration(monotonicallyIncreasingTime() - scriptParserBlockingTime, scriptLoader->wasCreatedDuringDocumentWrite());
+        }
+
         if (!scriptLoader->executeScript(sourceCode))
             scriptLoader->dispatchErrorEvent();
         else
@@ -630,8 +639,8 @@ static bool shouldAllowExternalLoad(const KURL& url)
 
 static void* openFunc(const char* uri)
 {
-    ASSERT(XMLDocumentParserScope::currentDocument);
-    ASSERT(currentThread() == libxmlLoaderThread);
+    DCHECK(XMLDocumentParserScope::currentDocument);
+    DCHECK_EQ(currentThread(), libxmlLoaderThread);
 
     KURL url(KURL(), uri);
 
@@ -639,7 +648,7 @@ static void* openFunc(const char* uri)
         return &globalDescriptor;
 
     KURL finalURL;
-    RefPtr<SharedBuffer> data;
+    RefPtr<const SharedBuffer> data;
 
     {
         Document* document = XMLDocumentParserScope::currentDocument;
@@ -776,6 +785,7 @@ XMLDocumentParser::XMLDocumentParser(Document& document, FrameView* frameView)
     , m_finishCalled(false)
     , m_xmlErrors(&document)
     , m_scriptStartPosition(TextPosition::belowRangePosition())
+    , m_parserBlockingPendingScriptLoadStartTime(0.0)
     , m_parsingFragment(false)
 {
     // This is XML being used as a document resource.
@@ -827,7 +837,7 @@ XMLDocumentParser::XMLDocumentParser(DocumentFragment* fragment, Element* parent
     }
 
     // If the parent element is not in document tree, there may be no xmlns attribute; just default to the parent's namespace.
-    if (m_defaultNamespaceURI.isNull() && !parentElement->inShadowIncludingDocument())
+    if (m_defaultNamespaceURI.isNull() && !parentElement->isConnected())
         m_defaultNamespaceURI = parentElement->namespaceURI();
 }
 
@@ -840,7 +850,7 @@ XMLParserContext::~XMLParserContext()
 
 XMLDocumentParser::~XMLDocumentParser()
 {
-    ASSERT(!m_pendingScript);
+    DCHECK(!m_pendingScript);
 }
 
 DEFINE_TRACE(XMLDocumentParser)
@@ -852,12 +862,13 @@ DEFINE_TRACE(XMLDocumentParser)
     visitor->trace(m_pendingScript);
     visitor->trace(m_scriptElement);
     ScriptableDocumentParser::trace(visitor);
+    ScriptResourceClient::trace(visitor);
 }
 
 void XMLDocumentParser::doWrite(const String& parseString)
 {
     TRACE_EVENT0("blink", "XMLDocumentParser::doWrite");
-    ASSERT(!isDetached());
+    DCHECK(!isDetached());
     if (!m_context)
         initializeParserContext();
 
@@ -868,7 +879,7 @@ void XMLDocumentParser::doWrite(const String& parseString)
     // string.
     if (parseString.length()) {
         XMLDocumentParserScope scope(document());
-        TemporaryChange<bool> encodingScope(m_isCurrentlyParsing8BitChunk, parseString.is8Bit());
+        AutoReset<bool> encodingScope(&m_isCurrentlyParsing8BitChunk, parseString.is8Bit());
         parseChunk(context->context(), parseString);
 
         // JavaScript (which may be run under the parseChunk callstack) may
@@ -959,7 +970,7 @@ void XMLDocumentParser::startElementNs(const AtomicString& localName, const Atom
 
     if (m_parserPaused) {
         m_scriptStartPosition = textPosition();
-        m_pendingCallbacks.append(adoptPtr(new PendingStartElementNSCallback(localName, prefix, uri, nbNamespaces, libxmlNamespaces,
+        m_pendingCallbacks.append(wrapUnique(new PendingStartElementNSCallback(localName, prefix, uri, nbNamespaces, libxmlNamespaces,
             nbAttributes, nbDefaulted, libxmlAttributes)));
         return;
     }
@@ -979,7 +990,7 @@ void XMLDocumentParser::startElementNs(const AtomicString& localName, const Atom
     m_sawFirstElement = true;
 
     QualifiedName qName(prefix, localName, adjustedURI);
-    Element* newElement = m_currentNode->document().createElement(qName, true);
+    Element* newElement = m_currentNode->document().createElement(qName, CreatedByParser);
     if (!newElement) {
         stopParsing();
         return;
@@ -1021,10 +1032,11 @@ void XMLDocumentParser::startElementNs(const AtomicString& localName, const Atom
     else
         pushCurrentNode(newElement);
 
-    if (isHTMLHtmlElement(*newElement))
+    // Note: |insertedByParser| will perform dispatching if this is an
+    // HTMLHtmlElement.
+    if (isHTMLHtmlElement(*newElement) && isFirstElement) {
         toHTMLHtmlElement(*newElement).insertedByParser();
-
-    if (!m_parsingFragment && isFirstElement && document()->frame()) {
+    } else if (!m_parsingFragment && isFirstElement && document()->frame()) {
         document()->frame()->loader().dispatchDocumentElementAvailable();
         document()->frame()->loader().runScriptsAtDocumentElementAvailable();
         // runScriptsAtDocumentElementAvailable might have invalidated the document.
@@ -1037,7 +1049,7 @@ void XMLDocumentParser::endElementNs()
         return;
 
     if (m_parserPaused) {
-        m_pendingCallbacks.append(adoptPtr(new PendingEndElementNSCallback(m_scriptStartPosition)));
+        m_pendingCallbacks.append(wrapUnique(new PendingEndElementNSCallback(m_scriptStartPosition)));
         return;
     }
 
@@ -1063,7 +1075,7 @@ void XMLDocumentParser::endElementNs()
 
     // The element's parent may have already been removed from document.
     // Parsing continues in this case, but scripts aren't executed.
-    if (!element->inShadowIncludingDocument()) {
+    if (!element->isConnected()) {
         popCurrentNode();
         return;
     }
@@ -1075,7 +1087,7 @@ void XMLDocumentParser::endElementNs()
     }
 
     // Don't load external scripts for standalone documents (for now).
-    ASSERT(!m_pendingScript);
+    DCHECK(!m_pendingScript);
     m_requestingScript = true;
 
     if (scriptLoader->prepareScript(m_scriptStartPosition, ScriptLoader::AllowLegacyTypeInTypeAttribute)) {
@@ -1090,6 +1102,8 @@ void XMLDocumentParser::endElementNs()
             }
         } else if (scriptLoader->willBeParserExecuted()) {
             m_pendingScript = scriptLoader->resource();
+            DCHECK_EQ(m_parserBlockingPendingScriptLoadStartTime, 0.0);
+            m_parserBlockingPendingScriptLoadStartTime = monotonicallyIncreasingTime();
             m_scriptElement = element;
             m_pendingScript->addClient(this);
             // m_pendingScript will be 0 if script was already loaded and
@@ -1119,7 +1133,7 @@ void XMLDocumentParser::characters(const xmlChar* chars, int length)
         return;
 
     if (m_parserPaused) {
-        m_pendingCallbacks.append(adoptPtr(new PendingCharactersCallback(chars, length)));
+        m_pendingCallbacks.append(wrapUnique(new PendingCharactersCallback(chars, length)));
         return;
     }
 
@@ -1136,7 +1150,7 @@ void XMLDocumentParser::error(XMLErrors::ErrorType type, const char* message, va
     vsnprintf(formattedMessage, sizeof(formattedMessage) - 1, message, args);
 
     if (m_parserPaused) {
-        m_pendingCallbacks.append(adoptPtr(new PendingErrorCallback(type, reinterpret_cast<const xmlChar*>(formattedMessage), lineNumber(), columnNumber())));
+        m_pendingCallbacks.append(wrapUnique(new PendingErrorCallback(type, reinterpret_cast<const xmlChar*>(formattedMessage), lineNumber(), columnNumber())));
         return;
     }
 
@@ -1149,7 +1163,7 @@ void XMLDocumentParser::processingInstruction(const String& target, const String
         return;
 
     if (m_parserPaused) {
-        m_pendingCallbacks.append(adoptPtr(new PendingProcessingInstructionCallback(target, data)));
+        m_pendingCallbacks.append(wrapUnique(new PendingProcessingInstructionCallback(target, data)));
         return;
     }
 
@@ -1188,7 +1202,7 @@ void XMLDocumentParser::cdataBlock(const String& text)
         return;
 
     if (m_parserPaused) {
-        m_pendingCallbacks.append(adoptPtr(new PendingCDATABlockCallback(text)));
+        m_pendingCallbacks.append(wrapUnique(new PendingCDATABlockCallback(text)));
         return;
     }
 
@@ -1204,7 +1218,7 @@ void XMLDocumentParser::comment(const String& text)
         return;
 
     if (m_parserPaused) {
-        m_pendingCallbacks.append(adoptPtr(new PendingCommentCallback(text)));
+        m_pendingCallbacks.append(wrapUnique(new PendingCommentCallback(text)));
         return;
     }
 
@@ -1249,7 +1263,7 @@ void XMLDocumentParser::internalSubset(const String& name, const String& externa
         return;
 
     if (m_parserPaused) {
-        m_pendingCallbacks.append(adoptPtr(new PendingInternalSubsetCallback(name, externalID, systemID)));
+        m_pendingCallbacks.append(wrapUnique(new PendingInternalSubsetCallback(name, externalID, systemID)));
         return;
     }
 
@@ -1337,7 +1351,7 @@ static size_t convertUTF16EntityToUTF8(const UChar* utf16Entity, size_t numberOf
         return 0;
 
     // Even though we must pass the length, libxml expects the entity string to be null terminated.
-    ASSERT(target > originalTarget + 1);
+    DCHECK_GT(target, originalTarget + 1);
     *target = '\0';
     return target - originalTarget;
 }
@@ -1349,7 +1363,7 @@ static xmlEntityPtr getXHTMLEntity(const xmlChar* name)
     if (!numberOfCodeUnits)
         return 0;
 
-    ASSERT(numberOfCodeUnits <= 4);
+    DCHECK_LE(numberOfCodeUnits, 4u);
     size_t entityLengthInUTF8 = convertUTF16EntityToUTF8(utf16DecodedEntity, numberOfCodeUnits,
         reinterpret_cast<char*>(sharedXHTMLEntityResult), WTF_ARRAY_LENGTH(sharedXHTMLEntityResult));
     if (!entityLengthInUTF8)
@@ -1461,7 +1475,7 @@ void XMLDocumentParser::initializeParserContext(const CString& chunk)
     if (m_parsingFragment) {
         m_context = XMLParserContext::createMemoryParser(&sax, this, chunk);
     } else {
-        ASSERT(!chunk.data());
+        DCHECK(!chunk.data());
         m_context = XMLParserContext::createStringParser(&sax, this);
     }
 }
@@ -1487,7 +1501,7 @@ void XMLDocumentParser::doEnd()
         V8Document::PrivateScript::transformDocumentToTreeViewMethod(document()->frame(), document(), noStyleMessage);
     } else if (m_sawXSLTransform) {
         xmlDocPtr doc = xmlDocPtrForString(document(), m_originalSourceForTransform.toString(), document()->url().getString());
-        document()->setTransformSource(adoptPtr(new TransformSource(doc)));
+        document()->setTransformSource(wrapUnique(new TransformSource(doc)));
         DocumentParser::stopParsing();
     }
 }
@@ -1531,14 +1545,14 @@ void XMLDocumentParser::stopParsing()
 
 void XMLDocumentParser::resumeParsing()
 {
-    ASSERT(!isDetached());
-    ASSERT(m_parserPaused);
+    DCHECK(!isDetached());
+    DCHECK(m_parserPaused);
 
     m_parserPaused = false;
 
     // First, execute any pending callbacks
     while (!m_pendingCallbacks.isEmpty()) {
-        OwnPtr<PendingCallback> callback = m_pendingCallbacks.takeFirst();
+        std::unique_ptr<PendingCallback> callback = m_pendingCallbacks.takeFirst();
         callback->call(this);
 
         // A callback paused the parser
@@ -1562,8 +1576,8 @@ void XMLDocumentParser::resumeParsing()
 
 bool XMLDocumentParser::appendFragmentSource(const String& chunk)
 {
-    ASSERT(!m_context);
-    ASSERT(m_parsingFragment);
+    DCHECK(!m_context);
+    DCHECK(m_parsingFragment);
 
     CString chunkAsUtf8 = chunk.utf8();
 
@@ -1585,9 +1599,9 @@ bool XMLDocumentParser::appendFragmentSource(const String& chunk)
     long bytesProcessed = xmlByteConsumed(context());
     if (bytesProcessed == -1 || static_cast<unsigned long>(bytesProcessed) != chunkAsUtf8.length()) {
         // FIXME: I don't believe we can hit this case without also having seen
-        // an error or a null byte. If we hit this ASSERT, we've found a test
+        // an error or a null byte. If we hit this DCHECK, we've found a test
         // case which demonstrates the need for this code.
-        ASSERT(m_sawError || (bytesProcessed >= 0 && !chunkAsUtf8.data()[bytesProcessed]));
+        DCHECK(m_sawError || (bytesProcessed >= 0 && !chunkAsUtf8.data()[bytesProcessed]));
         return false;
     }
 

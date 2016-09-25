@@ -19,6 +19,7 @@ class ExtensionFunction;
 class GURL;
 class Profile;
 class TabStripModel;
+class UIThreadExtensionFunction;
 
 namespace base {
 class DictionaryValue;
@@ -35,7 +36,6 @@ class Rect;
 }
 
 namespace extensions {
-
 class Extension;
 class WindowController;
 
@@ -58,18 +58,18 @@ class ExtensionTabUtil {
   // Opens a new tab given an extension function |function| and creation
   // parameters |params|. Returns a Tab object if successful, or NULL and
   // optionally sets |error| if an error occurs.
-  static base::DictionaryValue* OpenTab(
-      ChromeUIThreadExtensionFunction* function,
-      const OpenTabParams& params,
-      std::string* error);
+  static base::DictionaryValue* OpenTab(UIThreadExtensionFunction* function,
+                                        const OpenTabParams& params,
+                                        std::string* error);
 
   static int GetWindowId(const Browser* browser);
   static int GetWindowIdOfTabStripModel(const TabStripModel* tab_strip_model);
   static int GetTabId(const content::WebContents* web_contents);
   static std::string GetTabStatusText(bool is_loading);
   static int GetWindowIdOfTab(const content::WebContents* web_contents);
-  static base::ListValue* CreateTabList(const Browser* browser,
-                                        const Extension* extension);
+  static std::unique_ptr<base::ListValue> CreateTabList(
+      const Browser* browser,
+      const Extension* extension);
 
   // DEPRECATED: Please consider using ChromeExtensionFunctionDetails instead
   // of the deprecated ChromeUIThreadExtensionFunction and use the overload

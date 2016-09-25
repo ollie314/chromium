@@ -6,10 +6,13 @@
 
 #include <utility>
 
+#include "base/location.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
@@ -99,7 +102,7 @@ class DistillerPageWebContentsTest : public ContentBrowserTest {
         embedded_test_server()->GetURL(url),
         dom_distiller::proto::DomDistillerOptions(),
         base::Bind(&DistillerPageWebContentsTest::OnPageDistillationFinished,
-                   this, quit_closure));
+                   base::Unretained(this), quit_closure));
   }
 
   void OnPageDistillationFinished(
@@ -312,7 +315,7 @@ IN_PROC_BROWSER_TEST_F(DistillerPageWebContentsTest,
 }
 
 IN_PROC_BROWSER_TEST_F(DistillerPageWebContentsTest,
-                       UsingCurrentWebContentsNotFinishedLoadingYet) {
+                       DISABLED_UsingCurrentWebContentsNotFinishedLoadingYet) {
   std::string url(kSimpleArticlePath);
   bool expect_new_web_contents = false;
   bool setup_main_frame_observer = true;
@@ -324,7 +327,7 @@ IN_PROC_BROWSER_TEST_F(DistillerPageWebContentsTest,
 }
 
 IN_PROC_BROWSER_TEST_F(DistillerPageWebContentsTest,
-                       UsingCurrentWebContentsReadyForDistillation) {
+                       DISABLED_UsingCurrentWebContentsReadyForDistillation) {
   std::string url(kSimpleArticlePath);
   bool expect_new_web_contents = false;
   bool setup_main_frame_observer = true;
@@ -409,7 +412,7 @@ IN_PROC_BROWSER_TEST_F(DistillerPageWebContentsTest,
   delete distiller_page_;
 
   // Make sure the test ends when it does not crash.
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(), base::TimeDelta::FromSeconds(2));
 
   run_loop.Run();

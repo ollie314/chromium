@@ -61,8 +61,9 @@ LayoutTestPushMessagingService::LayoutTestPushMessagingService() {
 LayoutTestPushMessagingService::~LayoutTestPushMessagingService() {
 }
 
-GURL LayoutTestPushMessagingService::GetPushEndpoint() {
-  return GURL("https://example.com/LayoutTestEndpoint");
+GURL LayoutTestPushMessagingService::GetEndpoint(bool standard_protocol) const {
+  return GURL(standard_protocol ? "https://example.com/StandardizedEndpoint/"
+                                : "https://example.com/LayoutTestEndpoint/");
 }
 
 void LayoutTestPushMessagingService::SubscribeFromDocument(
@@ -100,6 +101,7 @@ void LayoutTestPushMessagingService::SubscribeFromWorker(
 void LayoutTestPushMessagingService::GetEncryptionInfo(
     const GURL& origin,
     int64_t service_worker_registration_id,
+    const std::string& sender_id,
     const EncryptionInfoCallback& callback) {
   std::vector<uint8_t> p256dh(
         kTestP256Key, kTestP256Key + arraysize(kTestP256Key));

@@ -26,6 +26,7 @@
 
 #include "core/fetch/ResourceClient.h"
 #include "core/style/StyleImage.h"
+#include "platform/weborigin/KURL.h"
 
 namespace blink {
 
@@ -34,8 +35,9 @@ class ImageResource;
 
 class StyleFetchedImage final : public StyleImage, private ResourceClient {
     USING_PRE_FINALIZER(StyleFetchedImage, dispose);
+    USING_GARBAGE_COLLECTED_MIXIN(StyleFetchedImage);
 public:
-    static StyleFetchedImage* create(ImageResource* image, Document* document, const KURL& url)
+    static StyleFetchedImage* create(ImageResource* image, const Document& document, const KURL& url)
     {
         return new StyleFetchedImage(image, document, url);
     }
@@ -63,12 +65,12 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
 private:
-    StyleFetchedImage(ImageResource*, Document*, const KURL&);
+    StyleFetchedImage(ImageResource*, const Document&, const KURL&);
 
     void dispose();
 
     Member<ImageResource> m_image;
-    Member<Document> m_document;
+    Member<const Document> m_document;
     const KURL m_url;
 };
 

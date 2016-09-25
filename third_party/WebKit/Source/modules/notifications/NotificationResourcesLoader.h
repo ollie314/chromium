@@ -13,8 +13,6 @@
 #include "platform/heap/ThreadState.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "wtf/Functional.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/Vector.h"
 #include <memory>
 
@@ -34,7 +32,7 @@ public:
     // the same function to handle the callbacks.
     using CompletionCallback = Function<void(NotificationResourcesLoader*)>;
 
-    explicit NotificationResourcesLoader(PassOwnPtr<CompletionCallback>);
+    explicit NotificationResourcesLoader(std::unique_ptr<CompletionCallback>);
     ~NotificationResourcesLoader();
 
     // Starts fetching the resources specified in the given WebNotificationData.
@@ -55,7 +53,8 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
 private:
-    void loadImage(ExecutionContext*, const KURL&, PassOwnPtr<NotificationImageLoader::ImageCallback>);
+    void loadImage(ExecutionContext*, const KURL&, std::unique_ptr<NotificationImageLoader::ImageCallback>);
+    void didLoadImage(const SkBitmap& image);
     void didLoadIcon(const SkBitmap& image);
     void didLoadBadge(const SkBitmap& image);
     void didLoadActionIcon(size_t actionIndex, const SkBitmap& image);
@@ -65,9 +64,10 @@ private:
     void didFinishRequest();
 
     bool m_started;
-    OwnPtr<CompletionCallback> m_completionCallback;
+    std::unique_ptr<CompletionCallback> m_completionCallback;
     int m_pendingRequestCount;
     HeapVector<Member<NotificationImageLoader>> m_imageLoaders;
+    SkBitmap m_image;
     SkBitmap m_icon;
     SkBitmap m_badge;
     Vector<SkBitmap> m_actionIcons;

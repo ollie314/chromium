@@ -1,14 +1,15 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="ja">
-<translation id="1008557486741366299">後で</translation>
 <translation id="1047726139967079566">ブックマークに追加...</translation>
 <translation id="1172898394251786223">次の項目</translation>
 <translation id="2320166752086256636">キーボードを非表示</translation>
 <translation id="2467815441875554965">コンテキスト検索</translation>
+<translation id="2572712655377361602">端末ポリシーにより写真へのアクセスがブロックされました</translation>
 <translation id="2704606927547763573">コピーしました</translation>
 <translation id="2747003861858887689">前の項目</translation>
 <translation id="2780046210906776326">メールアカウントなし</translation>
+<translation id="3172213052701798825">Google Smart Lock for Passwords</translation>
 <translation id="3244271242291266297">MM</translation>
 <translation id="3252394070589632019"><ph name="VALUE" />、<ph name="ADDITIONAL_INFO" />、<ph name="INDEX" /> / <ph name="NUM_SUGGESTIONS" /></translation>
 <translation id="3335947283844343239">閉じたタブを開く</translation>
@@ -19,7 +20,9 @@
 <translation id="4399225372525667111">ChromeではこのサイトのURLが正しいことを確認できません。</translation>
 <translation id="4728558894243024398">プラットフォーム</translation>
 <translation id="473775607612524610">アップデート</translation>
+<translation id="4875622588773761625"><ph name="PASSWORD_MANAGER_BRAND" /> でこのサイトのパスワードを更新しますか？</translation>
 <translation id="5317780077021120954">保存</translation>
+<translation id="6039694632319341016"><ph name="PASSWORD_MANAGER_BRAND" /> に保存されているこのサイトの <ph name="USERNAME" /> のパスワードを更新しますか？</translation>
 <translation id="605721222689873409">YY</translation>
 <translation id="6149061208933997199">パスワードを使用</translation>
 <translation id="6196207969502475924">音声検索</translation>

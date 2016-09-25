@@ -4,7 +4,7 @@
 
 #include "modules/imagebitmap/ImageBitmapRenderingContext.h"
 
-#include "bindings/modules/v8/UnionTypesModules.h"
+#include "bindings/modules/v8/RenderingContext.h"
 #include "core/frame/ImageBitmap.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/StaticBitmapImage.h"
@@ -13,9 +13,8 @@
 
 namespace blink {
 
-ImageBitmapRenderingContext::ImageBitmapRenderingContext(HTMLCanvasElement* canvas, CanvasContextCreationAttributes attrs, Document& document)
-    : CanvasRenderingContext(canvas)
-    , m_hasAlpha(attrs.alpha())
+ImageBitmapRenderingContext::ImageBitmapRenderingContext(HTMLCanvasElement* canvas, const CanvasContextCreationAttributes& attrs, Document& document)
+    : CanvasRenderingContext(canvas, nullptr, attrs)
 { }
 
 ImageBitmapRenderingContext::~ImageBitmapRenderingContext() { }
@@ -25,13 +24,18 @@ void ImageBitmapRenderingContext::setCanvasGetContextResult(RenderingContext& re
     result.setImageBitmapRenderingContext(this);
 }
 
-void ImageBitmapRenderingContext::transferImageBitmap(ImageBitmap* imageBitmap)
+void ImageBitmapRenderingContext::transferFromImageBitmap(ImageBitmap* imageBitmap)
 {
+    if (!imageBitmap) {
+        m_image.release();
+        return;
+    }
+
     m_image = imageBitmap->bitmapImage();
     if (!m_image)
         return;
 
-    RefPtr<SkImage> skImage = m_image->imageForCurrentFrame();
+    sk_sp<SkImage> skImage = m_image->imageForCurrentFrame();
     if (skImage->isTextureBacked()) {
         // TODO(junov): crbug.com/585607 Eliminate this readback and use an ExternalTextureLayer
         sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(skImage->width(), skImage->height());
@@ -40,8 +44,8 @@ void ImageBitmapRenderingContext::transferImageBitmap(ImageBitmap* imageBitmap)
             m_image.clear();
             return;
         }
-        surface->getCanvas()->drawImage(skImage.get(), 0, 0);
-        m_image = StaticBitmapImage::create(adoptRef(surface->newImageSnapshot()));
+        surface->getCanvas()->drawImage(skImage, 0, 0);
+        m_image = StaticBitmapImage::create(surface->makeImageSnapshot());
     }
     canvas()->didDraw(FloatRect(FloatPoint(), FloatSize(m_image->width(), m_image->height())));
 }
@@ -53,7 +57,7 @@ bool ImageBitmapRenderingContext::paint(GraphicsContext& gc, const IntRect& r)
 
     // With impl-side painting, it is unsafe to use a gpu-backed SkImage
     ASSERT(!m_image->imageForCurrentFrame()->isTextureBacked());
-    gc.drawImage(m_image.get(), r, m_hasAlpha ? SkXfermode::kSrcOver_Mode : SkXfermode::kSrc_Mode);
+    gc.drawImage(m_image.get(), r, nullptr, creationAttributes().alpha() ? SkXfermode::kSrcOver_Mode : SkXfermode::kSrc_Mode);
 
     return true;
 }

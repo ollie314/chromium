@@ -57,6 +57,8 @@ public:
     virtual bool isVideoElement() const { return false; }
     virtual bool isCanvasElement() const { return false; }
     virtual bool isSVGSource() const { return false; }
+    virtual bool isImageBitmap() const { return false; }
+    virtual bool isOffscreenCanvas() const { return false; }
 
     // Adjusts the source and destination rectangles for cases where the actual
     // source image is a subregion of the image returned by getSourceImageForCanvas.
@@ -66,6 +68,9 @@ public:
     virtual FloatSize defaultDestinationSize(const FloatSize& defaultObjectSize) const { return elementSize(defaultObjectSize); }
     virtual const KURL& sourceURL() const { return blankURL(); }
     virtual bool isOpaque() const { return false; }
+
+    virtual int sourceWidth() = 0;
+    virtual int sourceHeight() = 0;
 
 protected:
     virtual ~CanvasImageSource() { }

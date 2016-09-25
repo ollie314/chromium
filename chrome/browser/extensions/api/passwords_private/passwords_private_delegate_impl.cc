@@ -49,11 +49,21 @@ void PasswordsPrivateDelegateImpl::SendSavedPasswordsList() {
     router->OnSavedPasswordsListChanged(current_entries_);
 }
 
+const std::vector<api::passwords_private::PasswordUiEntry>*
+PasswordsPrivateDelegateImpl::GetSavedPasswordsList() const {
+  return &current_entries_;
+}
+
 void PasswordsPrivateDelegateImpl::SendPasswordExceptionsList() {
   PasswordsPrivateEventRouter* router =
       PasswordsPrivateEventRouterFactory::GetForProfile(profile_);
   if (router)
     router->OnPasswordExceptionsListChanged(current_exceptions_);
+}
+
+const std::vector<api::passwords_private::ExceptionPair>*
+PasswordsPrivateDelegateImpl::GetPasswordExceptionsList() const {
+  return &current_exceptions_;
 }
 
 void PasswordsPrivateDelegateImpl::RemoveSavedPassword(
@@ -198,8 +208,10 @@ void PasswordsPrivateDelegateImpl::SetPasswordExceptionList(
   // Now, create a list of exceptions to send to observers.
   current_exceptions_.clear();
   for (const auto& form : password_exception_list) {
-    current_exceptions_.push_back(
-        password_manager::GetHumanReadableOrigin(*form));
+    api::passwords_private::ExceptionPair pair;
+    pair.exception_url = password_manager::GetHumanReadableOrigin(*form);
+    pair.link_url = form->origin.spec();
+    current_exceptions_.push_back(std::move(pair));
   }
 
   SendPasswordExceptionsList();

@@ -9,7 +9,9 @@
 #include "modules/ModulesExport.h"
 #include "modules/canvas2d/BaseRenderingContext2D.h"
 #include "platform/graphics/ImageBuffer.h"
-#include "third_party/skia/include/core/SkCanvas.h"
+#include <memory>
+
+class SkCanvas;
 
 namespace blink {
 
@@ -21,9 +23,9 @@ class MODULES_EXPORT PaintRenderingContext2D : public BaseRenderingContext2D, pu
     USING_GARBAGE_COLLECTED_MIXIN(PaintRenderingContext2D);
     WTF_MAKE_NONCOPYABLE(PaintRenderingContext2D);
 public:
-    static PaintRenderingContext2D* create(PassOwnPtr<ImageBuffer> imageBuffer)
+    static PaintRenderingContext2D* create(std::unique_ptr<ImageBuffer> imageBuffer, bool hasAlpha, float zoom)
     {
-        return new PaintRenderingContext2D(imageBuffer);
+        return new PaintRenderingContext2D(std::move(imageBuffer), hasAlpha, zoom);
     }
 
     // BaseRenderingContext2D
@@ -32,7 +34,7 @@ public:
     // is always clean, and unable to taint it.
     bool originClean() const final { return true; }
     void setOriginTainted() final { }
-    bool wouldTaintOrigin(CanvasImageSource*) final { return false; }
+    bool wouldTaintOrigin(CanvasImageSource*, ExecutionContext*) final { return false; }
 
     int width() const final;
     int height() const final;
@@ -58,17 +60,18 @@ public:
     SkImageFilter* stateGetFilter() final { return nullptr; }
     void snapshotStateForFilter() final { }
 
-    void validateStateStack() final;
+    void validateStateStack() const final;
 
-    bool hasAlpha() const final { return true; }
+    bool hasAlpha() const final { return m_hasAlpha; }
 
     // PaintRenderingContext2D cannot lose it's context.
     bool isContextLost() const final { return false; }
 
 private:
-    explicit PaintRenderingContext2D(PassOwnPtr<ImageBuffer>);
+    PaintRenderingContext2D(std::unique_ptr<ImageBuffer>, bool hasAlpha, float zoom);
 
-    OwnPtr<ImageBuffer> m_imageBuffer;
+    std::unique_ptr<ImageBuffer> m_imageBuffer;
+    bool m_hasAlpha;
 };
 
 } // namespace blink

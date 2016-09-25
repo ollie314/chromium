@@ -1,14 +1,15 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="sw">
-<translation id="1008557486741366299">Sio Sasa</translation>
 <translation id="1047726139967079566">Alamisha Ukurasa Huu...</translation>
 <translation id="1172898394251786223">Sehemu inayofuata</translation>
 <translation id="2320166752086256636">Ficha kibodi</translation>
 <translation id="2467815441875554965">Kutafuta katika Muktadha</translation>
+<translation id="2572712655377361602">Sera ya kifaa imezuia idhini ya kufikia picha zako</translation>
 <translation id="2704606927547763573">Imenakiliwa</translation>
 <translation id="2747003861858887689">Sehemu iliyotangulia</translation>
 <translation id="2780046210906776326">Hakuna Akaunti za Barua pepe</translation>
+<translation id="3172213052701798825">Google Smart Lock ya Manenosiri</translation>
 <translation id="3244271242291266297">MW</translation>
 <translation id="3252394070589632019"><ph name="VALUE" />, <ph name="ADDITIONAL_INFO" />, <ph name="INDEX" /> kati ya <ph name="NUM_SUGGESTIONS" /></translation>
 <translation id="3335947283844343239">Fungua Tena Kichupo Kilichofugwa</translation>
@@ -19,7 +20,9 @@
 <translation id="4399225372525667111">Chrome haiwezi kuthibitisha kuwa URL ya tovuti hii ni sahihi.</translation>
 <translation id="4728558894243024398">Mfumo wa uendeshaji</translation>
 <translation id="473775607612524610">Sasisha</translation>
+<translation id="4875622588773761625">Je, unataka <ph name="PASSWORD_MANAGER_BRAND" /> isasishe nenosiri lako kwa wavuti huu?</translation>
 <translation id="5317780077021120954">Hifadhi</translation>
+<translation id="6039694632319341016">Je, ungependa <ph name="PASSWORD_MANAGER_BRAND" /> isasishe nenosiri lako la <ph name="USERNAME" /> kwa tovuti hii?</translation>
 <translation id="605721222689873409">MK</translation>
 <translation id="6149061208933997199">Tumia Nenosiri</translation>
 <translation id="6196207969502475924">Utafutaji wa Sauti</translation>

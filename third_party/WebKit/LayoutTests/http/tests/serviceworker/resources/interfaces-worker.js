@@ -1,6 +1,5 @@
 importScripts('interfaces.js');
 importScripts('worker-testharness.js');
-importScripts('/resources/testharness-helpers.js');
 
 var EVENT_HANDLER = 'object';
 
@@ -9,7 +8,6 @@ test(function() {
                      self,
                      {
                        clients: 'object',
-                       close: 'function',
                        registration: 'object',
                        skipWaiting: 'function',
 
@@ -74,6 +72,15 @@ test(function() {
     assert_equals(
         new ExtendableEvent('ExtendableEvent').type,
         'ExtendableEvent', 'Type of ExtendableEvent should be ExtendableEvent');
+    assert_throws(new TypeError, function() {
+        new FetchEvent('FetchEvent');
+    }, 'FetchEvent constructor with one argument throws');
+    assert_throws(new TypeError, function() {
+        new FetchEvent('FetchEvent', {});
+    }, 'FetchEvent constructor with empty init dict throws');
+    assert_throws(new TypeError, function() {
+        new FetchEvent('FetchEvent', {request: null});
+    }, 'FetchEvent constructor with null request member throws');
     var req = new Request('https://www.example.com/', {method: 'POST'});
     assert_equals(
         new FetchEvent('FetchEvent', {request: req}).type,

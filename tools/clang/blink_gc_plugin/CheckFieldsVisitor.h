@@ -25,15 +25,16 @@ class CheckFieldsVisitor : public RecursiveEdgeVisitor {
     kRefPtrToGCManaged,
     kReferencePtrToGCManaged,
     kOwnPtrToGCManaged,
+    kUniquePtrToGCManaged,
     kMemberToGCUnmanaged,
     kMemberInUnmanaged,
     kPtrFromHeapToStack,
     kGCDerivedPartObject
   };
 
-  typedef std::vector<std::pair<FieldPoint*, Error> > Errors;
+  using Errors = std::vector<std::pair<FieldPoint*, Error>>;
 
-  explicit CheckFieldsVisitor(const BlinkGCPluginOptions& options);
+  CheckFieldsVisitor();
 
   Errors& invalid_fields();
 
@@ -46,7 +47,6 @@ class CheckFieldsVisitor : public RecursiveEdgeVisitor {
  private:
   Error InvalidSmartPtr(Edge* ptr);
 
-  const BlinkGCPluginOptions& options_;
   FieldPoint* current_;
   bool stack_allocated_host_;
   bool managed_host_;

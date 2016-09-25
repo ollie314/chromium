@@ -15,7 +15,7 @@
 namespace content {
 
 // Test instance of WebUI that tracks the data passed to
-// CallJavascriptFunction().
+// CallJavascriptFunctionUnsafe().
 class TestWebUI : public WebUI {
  public:
   TestWebUI();
@@ -44,44 +44,49 @@ class TestWebUI : public WebUI {
   void ProcessWebUIMessage(const GURL& source_url,
                            const std::string& message,
                            const base::ListValue& args) override {}
-  void CallJavascriptFunction(const std::string& function_name) override;
-  void CallJavascriptFunction(const std::string& function_name,
-                              const base::Value& arg1) override;
-  void CallJavascriptFunction(const std::string& function_name,
-                              const base::Value& arg1,
-                              const base::Value& arg2) override;
-  void CallJavascriptFunction(const std::string& function_name,
-                              const base::Value& arg1,
-                              const base::Value& arg2,
-                              const base::Value& arg3) override;
-  void CallJavascriptFunction(const std::string& function_name,
-                              const base::Value& arg1,
-                              const base::Value& arg2,
-                              const base::Value& arg3,
-                              const base::Value& arg4) override;
-  void CallJavascriptFunction(
+  bool CanCallJavascript() override;
+  void CallJavascriptFunctionUnsafe(const std::string& function_name) override;
+  void CallJavascriptFunctionUnsafe(const std::string& function_name,
+                                    const base::Value& arg1) override;
+  void CallJavascriptFunctionUnsafe(const std::string& function_name,
+                                    const base::Value& arg1,
+                                    const base::Value& arg2) override;
+  void CallJavascriptFunctionUnsafe(const std::string& function_name,
+                                    const base::Value& arg1,
+                                    const base::Value& arg2,
+                                    const base::Value& arg3) override;
+  void CallJavascriptFunctionUnsafe(const std::string& function_name,
+                                    const base::Value& arg1,
+                                    const base::Value& arg2,
+                                    const base::Value& arg3,
+                                    const base::Value& arg4) override;
+  void CallJavascriptFunctionUnsafe(
       const std::string& function_name,
       const std::vector<const base::Value*>& args) override;
+  ScopedVector<WebUIMessageHandler>* GetHandlersForTesting() override;
 
   class CallData {
    public:
     explicit CallData(const std::string& function_name);
     ~CallData();
 
-    void TakeAsArg1(base::Value* arg);
-    void TakeAsArg2(base::Value* arg);
-    void TakeAsArg3(base::Value* arg);
+    void TakeAsArg1(std::unique_ptr<base::Value> arg);
+    void TakeAsArg2(std::unique_ptr<base::Value> arg);
+    void TakeAsArg3(std::unique_ptr<base::Value> arg);
+    void TakeAsArg4(std::unique_ptr<base::Value> arg);
 
     const std::string& function_name() const { return function_name_; }
     const base::Value* arg1() const { return arg1_.get(); }
     const base::Value* arg2() const { return arg2_.get(); }
     const base::Value* arg3() const { return arg3_.get(); }
+    const base::Value* arg4() const { return arg4_.get(); }
 
    private:
     std::string function_name_;
     std::unique_ptr<base::Value> arg1_;
     std::unique_ptr<base::Value> arg2_;
     std::unique_ptr<base::Value> arg3_;
+    std::unique_ptr<base::Value> arg4_;
   };
 
   const ScopedVector<CallData>& call_data() const { return call_data_; }

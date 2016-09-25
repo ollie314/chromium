@@ -28,36 +28,24 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "platform/Histogram.h"
+#include "platform/MemoryCacheDumpProvider.h"
 #include "platform/PartitionAllocMemoryDumpProvider.h"
 #include "platform/fonts/FontCacheMemoryDumpProvider.h"
-#include "platform/graphics/CompositorFactory.h"
+#include "platform/heap/BlinkGCMemoryDumpProvider.h"
 #include "platform/heap/GCTaskRunner.h"
-#include "platform/web_memory_dump_provider_adapter.h"
+#include "public/platform/InterfaceProvider.h"
 #include "public/platform/Platform.h"
-#include "public/platform/ServiceRegistry.h"
 #include "public/platform/WebPrerenderingSupport.h"
 #include "wtf/HashMap.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
 static Platform* s_platform = nullptr;
-using ProviderToAdapterMap = HashMap<WebMemoryDumpProvider*, OwnPtr<WebMemoryDumpProviderAdapter>>;
 
 static GCTaskRunner* s_gcTaskRunner = nullptr;
-
-namespace {
-
-ProviderToAdapterMap& memoryDumpProviders()
-{
-    DEFINE_STATIC_LOCAL(ProviderToAdapterMap, providerToAdapterMap, ());
-    return providerToAdapterMap;
-}
-
-} // namespace
 
 Platform::Platform()
     : m_mainThread(0)
@@ -78,7 +66,7 @@ static void maxObservedSizeFunction(size_t sizeInMB)
 
 static void callOnMainThreadFunction(WTF::MainThreadFunction function, void* context)
 {
-    Platform::current()->mainThread()->getWebTaskRunner()->postTask(BLINK_FROM_HERE, threadSafeBind(function, AllowCrossThreadAccess(context)));
+    Platform::current()->mainThread()->getWebTaskRunner()->postTask(BLINK_FROM_HERE, crossThreadBind(function, crossThreadUnretained(context)));
 }
 
 void Platform::initialize(Platform* platform)
@@ -91,7 +79,9 @@ void Platform::initialize(Platform* platform)
     WTF::Partitions::initialize(maxObservedSizeFunction);
     WTF::initialize(callOnMainThreadFunction);
 
-    ThreadHeap::init();
+    ProcessHeap::init();
+    if (base::ThreadTaskRunnerHandle::IsSet())
+        base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(BlinkGCMemoryDumpProvider::instance(), "BlinkGC", base::ThreadTaskRunnerHandle::Get());
 
     ThreadState::attachMainThread();
 
@@ -99,21 +89,21 @@ void Platform::initialize(Platform* platform)
     if (s_platform->m_mainThread) {
         ASSERT(!s_gcTaskRunner);
         s_gcTaskRunner = new GCTaskRunner(s_platform->m_mainThread);
-        s_platform->registerMemoryDumpProvider(PartitionAllocMemoryDumpProvider::instance(), "PartitionAlloc");
-        s_platform->registerMemoryDumpProvider(FontCacheMemoryDumpProvider::instance(), "FontCaches");
+        base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(PartitionAllocMemoryDumpProvider::instance(), "PartitionAlloc", base::ThreadTaskRunnerHandle::Get());
+        base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(FontCacheMemoryDumpProvider::instance(), "FontCaches", base::ThreadTaskRunnerHandle::Get());
+        base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(MemoryCacheDumpProvider::instance(), "MemoryCache", base::ThreadTaskRunnerHandle::Get());
     }
-
-    CompositorFactory::initializeDefault();
 }
 
 void Platform::shutdown()
 {
     ASSERT(isMainThread());
-    CompositorFactory::shutdown();
-
     if (s_platform->m_mainThread) {
-        s_platform->unregisterMemoryDumpProvider(FontCacheMemoryDumpProvider::instance());
-        s_platform->unregisterMemoryDumpProvider(PartitionAllocMemoryDumpProvider::instance());
+        base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(FontCacheMemoryDumpProvider::instance());
+        base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(PartitionAllocMemoryDumpProvider::instance());
+        base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(BlinkGCMemoryDumpProvider::instance());
+        base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(MemoryCacheDumpProvider::instance());
+
         ASSERT(s_gcTaskRunner);
         delete s_gcTaskRunner;
         s_gcTaskRunner = nullptr;
@@ -123,7 +113,7 @@ void Platform::shutdown()
     // so that the main thread won't get involved in a GC during the shutdown.
     ThreadState::detachMainThread();
 
-    ThreadHeap::shutdown();
+    ProcessHeap::shutdown();
 
     WTF::shutdown();
     WTF::Partitions::shutdown();
@@ -149,38 +139,9 @@ WebThread* Platform::mainThread() const
     return m_mainThread;
 }
 
-void Platform::registerMemoryDumpProvider(WebMemoryDumpProvider* provider, const char* name)
+InterfaceProvider* Platform::interfaceProvider()
 {
-    // MemoryDumpProvider needs a message loop.
-    if (!Platform::current()->currentThread())
-        return;
-
-    WebMemoryDumpProviderAdapter* adapter = new WebMemoryDumpProviderAdapter(provider);
-    ProviderToAdapterMap::AddResult result = memoryDumpProviders().add(provider, adoptPtr(adapter));
-    if (!result.isNewEntry)
-        return;
-    adapter->set_is_registered(true);
-    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(adapter, name, base::ThreadTaskRunnerHandle::Get());
-}
-
-void Platform::unregisterMemoryDumpProvider(WebMemoryDumpProvider* provider)
-{
-    // MemoryDumpProvider needs a message loop.
-    if (!Platform::current()->currentThread())
-        return;
-
-    ProviderToAdapterMap::iterator it = memoryDumpProviders().find(provider);
-    if (it == memoryDumpProviders().end())
-        return;
-    WebMemoryDumpProviderAdapter* adapter = it->value.get();
-    base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(adapter);
-    adapter->set_is_registered(false);
-    memoryDumpProviders().remove(it);
-}
-
-ServiceRegistry* Platform::serviceRegistry()
-{
-    return ServiceRegistry::getEmptyServiceRegistry();
+    return InterfaceProvider::getEmptyInterfaceProvider();
 }
 
 } // namespace blink

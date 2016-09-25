@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "media/base/media_log.h"
 #include "media/base/media_track.h"
 #include "media/base/media_tracks.h"
 #include "media/base/test_data_util.h"
@@ -88,24 +89,28 @@ void StreamParserTestBase::OnInitDone(
 bool StreamParserTestBase::OnNewConfig(
     std::unique_ptr<MediaTracks> tracks,
     const StreamParser::TextTrackConfigMap& text_config) {
-  DVLOG(1) << __FUNCTION__ << " media tracks count=" << tracks->tracks().size();
+  DVLOG(1) << __FUNCTION__ << ": got " << tracks->tracks().size() << " tracks";
   EXPECT_EQ(tracks->tracks().size(), 1u);
-  EXPECT_TRUE(tracks->getFirstAudioConfig().IsValidConfig());
-  EXPECT_FALSE(tracks->getFirstVideoConfig().IsValidConfig());
-  last_audio_config_ = tracks->getFirstAudioConfig();
+  const auto& track = tracks->tracks()[0];
+  EXPECT_EQ(track->type(), MediaTrack::Audio);
+  audio_track_id_ = track->bytestream_track_id();
+  last_audio_config_ = tracks->getAudioConfig(track->bytestream_track_id());
+  EXPECT_TRUE(last_audio_config_.IsValidConfig());
   return true;
 }
 
 bool StreamParserTestBase::OnNewBuffers(
-    const StreamParser::BufferQueue& audio_buffers,
-    const StreamParser::BufferQueue& video_buffers,
-    const StreamParser::TextBufferQueueMap& text_map) {
+    const StreamParser::BufferQueueMap& buffer_queue_map) {
+  EXPECT_EQ(1u, buffer_queue_map.size());
+  const auto& itr_audio = buffer_queue_map.find(audio_track_id_);
+  EXPECT_NE(buffer_queue_map.end(), itr_audio);
+  const StreamParser::BufferQueue& audio_buffers = itr_audio->second;
   EXPECT_FALSE(audio_buffers.empty());
-  EXPECT_TRUE(video_buffers.empty());
 
-  // TODO(wolenetz/acolwell): Add text track support to more MSE parsers. See
-  // http://crbug.com/336926.
-  EXPECT_TRUE(text_map.empty());
+  // Ensure that track ids are properly assigned on all emitted buffers.
+  for (const auto& buf : audio_buffers) {
+    EXPECT_EQ(audio_track_id_, buf->track_id());
+  }
 
   const std::string buffers_str = BufferQueueToString(audio_buffers);
   DVLOG(1) << __FUNCTION__ << " : " << buffers_str;

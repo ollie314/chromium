@@ -7,7 +7,9 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/animation/css/CSSTimingData.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
@@ -26,10 +28,10 @@ public:
             : propertyType(TransitionKnownProperty)
             , unresolvedProperty(id)
         {
-            ASSERT(id != CSSPropertyInvalid);
+            DCHECK_NE(id, CSSPropertyInvalid);
         }
 
-        TransitionProperty(const String& string)
+        TransitionProperty(const AtomicString& string)
             : propertyType(TransitionUnknownProperty)
             , unresolvedProperty(CSSPropertyInvalid)
             , propertyString(string)
@@ -40,24 +42,24 @@ public:
             : propertyType(type)
             , unresolvedProperty(CSSPropertyInvalid)
         {
-            ASSERT(type == TransitionNone);
+            DCHECK_EQ(type, TransitionNone);
         }
 
         bool operator==(const TransitionProperty& other) const { return propertyType == other.propertyType && unresolvedProperty == other.unresolvedProperty && propertyString == other.propertyString; }
 
         TransitionPropertyType propertyType;
         CSSPropertyID unresolvedProperty;
-        String propertyString;
+        AtomicString propertyString;
     };
 
-    static PassOwnPtr<CSSTransitionData> create()
+    static std::unique_ptr<CSSTransitionData> create()
     {
-        return adoptPtr(new CSSTransitionData);
+        return wrapUnique(new CSSTransitionData);
     }
 
-    static PassOwnPtr<CSSTransitionData> create(const CSSTransitionData& transitionData)
+    static std::unique_ptr<CSSTransitionData> create(const CSSTransitionData& transitionData)
     {
-        return adoptPtr(new CSSTransitionData(transitionData));
+        return wrapUnique(new CSSTransitionData(transitionData));
     }
 
     bool transitionsMatchForStyleRecalc(const CSSTransitionData& other) const;

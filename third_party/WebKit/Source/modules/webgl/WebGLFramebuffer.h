@@ -94,6 +94,8 @@ public:
 
     GLenum getReadBuffer() const { return m_readBuffer; }
 
+    virtual void visitChildDOMWrappers(v8::Isolate*, const v8::Persistent<v8::Object>&);
+
     DECLARE_VIRTUAL_TRACE();
 
 protected:

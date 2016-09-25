@@ -13,9 +13,9 @@
 #include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "content/common/resource_request_body.h"
+#include "content/common/resource_request_body_impl.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -38,7 +38,8 @@ namespace content {
 TEST(UploadDataStreamBuilderTest, CreateUploadDataStream) {
   base::MessageLoop message_loop;
   {
-    scoped_refptr<ResourceRequestBody> request_body = new ResourceRequestBody;
+    scoped_refptr<ResourceRequestBodyImpl> request_body =
+        new ResourceRequestBodyImpl;
 
     const std::string kBlob = "blobuuid";
     const std::string kBlobData = "blobdata";
@@ -115,13 +116,14 @@ TEST(UploadDataStreamBuilderTest,
     std::unique_ptr<BlobDataHandle> handle =
         blob_storage_context.AddFinishedBlob(blob_data_builder.get());
 
-    scoped_refptr<ResourceRequestBody> request_body(new ResourceRequestBody());
+    scoped_refptr<ResourceRequestBodyImpl> request_body(
+        new ResourceRequestBodyImpl());
     std::unique_ptr<net::UploadDataStream> upload(
         UploadDataStreamBuilder::Build(
             request_body.get(), &blob_storage_context, NULL,
             base::ThreadTaskRunnerHandle::Get().get()));
 
-    request_body = new ResourceRequestBody();
+    request_body = new ResourceRequestBodyImpl();
     request_body->AppendBlob(blob_id);
     request_body->AppendBlob(blob_id);
     request_body->AppendBlob(blob_id);
@@ -134,7 +136,8 @@ TEST(UploadDataStreamBuilderTest,
     ASSERT_EQ(3U, readers.size());
 
     net::TestCompletionCallback init_callback;
-    ASSERT_EQ(net::ERR_IO_PENDING, upload->Init(init_callback.callback()));
+    ASSERT_EQ(net::ERR_IO_PENDING,
+              upload->Init(init_callback.callback(), net::NetLogWithSource()));
     EXPECT_EQ(net::OK, init_callback.WaitForResult());
 
     EXPECT_EQ(kZeroLength, upload->size());
@@ -159,7 +162,8 @@ TEST(UploadDataStreamBuilderTest,
 TEST(UploadDataStreamBuilderTest, ResetUploadStreamWithBlob) {
   base::MessageLoopForIO message_loop;
   {
-    scoped_refptr<ResourceRequestBody> request_body = new ResourceRequestBody;
+    scoped_refptr<ResourceRequestBodyImpl> request_body =
+        new ResourceRequestBodyImpl;
 
     const std::string kBlob = "blobuuid";
     const std::string kBlobData = "blobdata";
@@ -180,7 +184,8 @@ TEST(UploadDataStreamBuilderTest, ResetUploadStreamWithBlob) {
             base::ThreadTaskRunnerHandle::Get().get()));
 
     net::TestCompletionCallback init_callback;
-    ASSERT_EQ(net::OK, upload->Init(init_callback.callback()));
+    ASSERT_EQ(net::OK,
+              upload->Init(init_callback.callback(), net::NetLogWithSource()));
 
     // Read part of the data.
     const int kBufferLength = 4;
@@ -194,7 +199,8 @@ TEST(UploadDataStreamBuilderTest, ResetUploadStreamWithBlob) {
               std::memcmp(kBlobData.c_str(), buffer->data(), buffer->size()));
 
     // Reset.
-    ASSERT_EQ(net::OK, upload->Init(init_callback.callback()));
+    ASSERT_EQ(net::OK,
+              upload->Init(init_callback.callback(), net::NetLogWithSource()));
 
     // Read all the data.
     buffer = new net::IOBufferWithSize(kBlobDataLength);

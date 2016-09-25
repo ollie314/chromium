@@ -33,7 +33,7 @@ struct DownloadCreateInfo;
 class CONTENT_EXPORT DownloadFileImpl : public DownloadFile {
  public:
   // Takes ownership of the object pointed to by |request_handle|.
-  // |bound_net_log| will be used for logging the download file's events.
+  // |net_log| will be used for logging the download file's events.
   // May be constructed on any thread.  All methods besides the constructor
   // (including destruction) must occur on the FILE thread.
   //
@@ -43,7 +43,7 @@ class CONTENT_EXPORT DownloadFileImpl : public DownloadFile {
   DownloadFileImpl(std::unique_ptr<DownloadSaveInfo> save_info,
                    const base::FilePath& default_downloads_directory,
                    std::unique_ptr<ByteStreamReader> byte_stream,
-                   const net::BoundNetLog& bound_net_log,
+                   const net::NetLogWithSource& net_log,
                    base::WeakPtr<DownloadDestinationObserver> observer);
 
   ~DownloadFileImpl() override;
@@ -113,6 +113,8 @@ class CONTENT_EXPORT DownloadFileImpl : public DownloadFile {
   // handled.
   void StreamActive();
 
+  net::NetLogWithSource net_log_;
+
   // The base file instance.
   BaseFile file_;
 
@@ -138,8 +140,6 @@ class CONTENT_EXPORT DownloadFileImpl : public DownloadFile {
   base::TimeDelta disk_writes_time_;
   base::TimeTicks download_start_;
   RateEstimator rate_estimator_;
-
-  net::BoundNetLog bound_net_log_;
 
   base::WeakPtr<DownloadDestinationObserver> observer_;
 

@@ -11,6 +11,7 @@
 
 namespace content {
 class ResourceContext;
+class VpnServiceProxy;
 }
 
 namespace extensions {
@@ -33,9 +34,6 @@ class ChromeContentBrowserClientExtensionsPart
                                  const GURL& effective_site_url);
   static bool CanCommitURL(content::RenderProcessHost* process_host,
                            const GURL& url);
-  static bool IsIllegalOrigin(content::ResourceContext* resource_context,
-                              int child_process_id,
-                              const GURL& origin);
   static bool IsSuitableHost(Profile* profile,
                              content::RenderProcessHost* process_host,
                              const GURL& site_url);
@@ -65,6 +63,11 @@ class ChromeContentBrowserClientExtensionsPart
   // Helper function to call InfoMap::SetSigninProcess().
   static void SetSigninProcess(content::SiteInstance* site_instance);
 
+  // Creates a new VpnServiceProxy. The caller owns the returned value. It's
+  // valid to return nullptr.
+  static std::unique_ptr<content::VpnServiceProxy> GetVpnServiceProxy(
+      content::BrowserContext* browser_context);
+
  private:
   // ChromeContentBrowserClientParts:
   void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
@@ -85,6 +88,7 @@ class ChromeContentBrowserClientExtensionsPart
       base::CommandLine* command_line,
       content::RenderProcessHost* process,
       Profile* profile) override;
+  void ResourceDispatcherHostCreated() override;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeContentBrowserClientExtensionsPart);
 };

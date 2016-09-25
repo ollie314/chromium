@@ -26,8 +26,8 @@
 
 #include "core/frame/LocalDOMWindow.h"
 
-#include "bindings/core/v8/ScriptCallStack.h"
 #include "bindings/core/v8/ScriptController.h"
+#include "bindings/core/v8/SourceLocation.h"
 #include "core/css/CSSComputedStyleDeclaration.h"
 #include "core/css/CSSRuleList.h"
 #include "core/css/DOMWindowCSS.h"
@@ -39,7 +39,7 @@
 #include "core/dom/ExecutionContextTask.h"
 #include "core/dom/FrameRequestCallback.h"
 #include "core/dom/SandboxFlags.h"
-#include "core/dom/custom/CustomElementsRegistry.h"
+#include "core/dom/custom/CustomElementRegistry.h"
 #include "core/editing/Editor.h"
 #include "core/events/DOMWindowEventQueue.h"
 #include "core/events/HashChangeEvent.h"
@@ -47,20 +47,23 @@
 #include "core/events/PageTransitionEvent.h"
 #include "core/events/PopStateEvent.h"
 #include "core/events/ScopedEventQueue.h"
+#include "core/fetch/ResourceFetcher.h"
 #include "core/frame/BarProp.h"
-#include "core/frame/Console.h"
+#include "core/frame/DOMVisualViewport.h"
 #include "core/frame/EventHandlerRegistry.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/History.h"
+#include "core/frame/LocalFrame.h"
 #include "core/frame/Navigator.h"
 #include "core/frame/Screen.h"
 #include "core/frame/ScrollToOptions.h"
 #include "core/frame/Settings.h"
 #include "core/frame/SuspendableTimer.h"
+#include "core/frame/VisualViewport.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/input/EventHandler.h"
-#include "core/inspector/ConsoleMessageStorage.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoaderClient.h"
@@ -77,55 +80,31 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebFrameScheduler.h"
 #include "public/platform/WebScreenInfo.h"
+#include <memory>
 
 namespace blink {
 
-LocalDOMWindow::WindowFrameObserver::WindowFrameObserver(LocalDOMWindow* window, LocalFrame& frame)
-    : LocalFrameLifecycleObserver(&frame)
-    , m_window(window)
-{
-}
-
-LocalDOMWindow::WindowFrameObserver* LocalDOMWindow::WindowFrameObserver::create(LocalDOMWindow* window, LocalFrame& frame)
-{
-    return new WindowFrameObserver(window, frame);
-}
-
-DEFINE_TRACE(LocalDOMWindow::WindowFrameObserver)
-{
-    visitor->trace(m_window);
-    LocalFrameLifecycleObserver::trace(visitor);
-}
-
-void LocalDOMWindow::WindowFrameObserver::willDetachFrameHost()
-{
-    m_window->willDetachFrameHost();
-}
-
-void LocalDOMWindow::WindowFrameObserver::contextDestroyed()
-{
-    m_window->frameDestroyed();
-    LocalFrameLifecycleObserver::contextDestroyed();
-}
+// Timeout for link preloads to be used after window.onload
+static const int unusedPreloadTimeoutInSeconds = 3;
 
 class PostMessageTimer final : public GarbageCollectedFinalized<PostMessageTimer>, public SuspendableTimer {
     USING_GARBAGE_COLLECTED_MIXIN(PostMessageTimer);
 public:
-    PostMessageTimer(LocalDOMWindow& window, MessageEvent* event, SecurityOrigin* targetOrigin, PassRefPtr<ScriptCallStack> stackTrace, UserGestureToken* userGestureToken)
+    PostMessageTimer(LocalDOMWindow& window, MessageEvent* event, PassRefPtr<SecurityOrigin> targetOrigin, std::unique_ptr<SourceLocation> location, UserGestureToken* userGestureToken)
         : SuspendableTimer(window.document())
         , m_event(event)
         , m_window(&window)
         , m_targetOrigin(targetOrigin)
-        , m_stackTrace(stackTrace)
+        , m_location(std::move(location))
         , m_userGestureToken(userGestureToken)
         , m_disposalAllowed(true)
     {
         InspectorInstrumentation::asyncTaskScheduled(window.document(), "postMessage", this);
     }
 
-    MessageEvent* event() const { return m_event.get(); }
+    MessageEvent* event() const { return m_event; }
     SecurityOrigin* targetOrigin() const { return m_targetOrigin.get(); }
-    ScriptCallStack* stackTrace() const { return m_stackTrace.get(); }
+    std::unique_ptr<SourceLocation> takeLocation() { return std::move(m_location); }
     UserGestureToken* userGestureToken() const { return m_userGestureToken.get(); }
     void stop() override
     {
@@ -154,21 +133,19 @@ private:
         m_disposalAllowed = false;
         m_window->postMessageTimerFired(this);
         dispose();
+        // Oilpan optimization: unregister as an observer right away.
+        clearContext();
     }
 
     void dispose()
     {
-        // Oilpan optimization: unregister as an observer right away.
-        clearContext();
-        // Will destroy this object, now or after the next GC depending
-        // on whether Oilpan is disabled or not.
         m_window->removePostMessageTimer(this);
     }
 
     Member<MessageEvent> m_event;
     Member<LocalDOMWindow> m_window;
     RefPtr<SecurityOrigin> m_targetOrigin;
-    RefPtr<ScriptCallStack> m_stackTrace;
+    std::unique_ptr<SourceLocation> m_location;
     RefPtr<UserGestureToken> m_userGestureToken;
     bool m_disposalAllowed;
 };
@@ -285,11 +262,10 @@ bool LocalDOMWindow::allowPopUp()
 }
 
 LocalDOMWindow::LocalDOMWindow(LocalFrame& frame)
-    : m_frameObserver(WindowFrameObserver::create(this, frame))
+    : m_frame(&frame)
+    , m_visualViewport(DOMVisualViewport::create(this))
+    , m_unusedPreloadsTimer(this, &LocalDOMWindow::warnUnusedPreloads)
     , m_shouldPrintWhenFinishedLoading(false)
-#if ENABLE(ASSERT)
-    , m_hasBeenReset(false)
-#endif
 {
     ThreadState::current()->registerPreFinalizer(this);
 }
@@ -304,6 +280,7 @@ void LocalDOMWindow::clearDocument()
     // FIXME: This should be part of ActiveDOMObject shutdown
     clearEventQueue();
 
+    m_unusedPreloadsTimer.stop();
     m_document->clearDOMWindow();
     m_document = nullptr;
 }
@@ -347,7 +324,7 @@ Document* LocalDOMWindow::installNewDocument(const String& mimeType, const Docum
 
     m_document = createDocument(mimeType, init, forceXHTML);
     m_eventQueue = DOMWindowEventQueue::create(m_document.get());
-    m_document->attach();
+    m_document->initialize();
 
     if (!frame())
         return m_document;
@@ -395,7 +372,7 @@ void LocalDOMWindow::dispatchWindowLoadEvent()
     // workaround to avoid Editing code crashes.  We should always dispatch
     // 'load' event asynchronously.  crbug.com/569511.
     if (ScopedEventQueue::instance()->shouldQueueEvents() && m_document) {
-        m_document->postTask(BLINK_FROM_HERE, createSameThreadTask(&LocalDOMWindow::dispatchLoadEvent, this));
+        m_document->postTask(BLINK_FROM_HERE, createSameThreadTask(&LocalDOMWindow::dispatchLoadEvent, wrapPersistent(this)));
         return;
     }
     dispatchLoadEvent();
@@ -425,7 +402,7 @@ void LocalDOMWindow::enqueueHashchangeEvent(const String& oldURL, const String& 
 void LocalDOMWindow::enqueuePopstateEvent(PassRefPtr<SerializedScriptValue> stateObject)
 {
     // FIXME: https://bugs.webkit.org/show_bug.cgi?id=36202 Popstate event needs to fire asynchronously
-    dispatchEvent(PopStateEvent::create(stateObject, history()));
+    dispatchEvent(PopStateEvent::create(std::move(stateObject), history()));
 }
 
 void LocalDOMWindow::statePopped(PassRefPtr<SerializedScriptValue> stateObject)
@@ -436,7 +413,7 @@ void LocalDOMWindow::statePopped(PassRefPtr<SerializedScriptValue> stateObject)
     // Per step 11 of section 6.5.9 (history traversal) of the HTML5 spec, we
     // defer firing of popstate until we're in the complete state.
     if (document()->isLoadCompleted())
-        enqueuePopstateEvent(stateObject);
+        enqueuePopstateEvent(std::move(stateObject));
     else
         m_pendingStateObject = stateObject;
 }
@@ -467,12 +444,12 @@ ExecutionContext* LocalDOMWindow::getExecutionContext() const
     return m_document.get();
 }
 
-const LocalDOMWindow* LocalDOMWindow::toDOMWindow() const
+const LocalDOMWindow* LocalDOMWindow::toLocalDOMWindow() const
 {
     return this;
 }
 
-LocalDOMWindow* LocalDOMWindow::toDOMWindow()
+LocalDOMWindow* LocalDOMWindow::toLocalDOMWindow()
 {
     return this;
 }
@@ -482,31 +459,15 @@ MediaQueryList* LocalDOMWindow::matchMedia(const String& media)
     return document() ? document()->mediaQueryMatcher().matchMedia(media) : nullptr;
 }
 
-void LocalDOMWindow::willDetachFrameHost()
-{
-    frame()->host()->eventHandlerRegistry().didRemoveAllEventHandlers(*this);
-    frame()->host()->consoleMessageStorage().frameWindowDiscarded(this);
-    LocalDOMWindow::notifyContextDestroyed();
-}
-
 void LocalDOMWindow::frameDestroyed()
 {
-    willDestroyDocumentInFrame();
+    for (const auto& domWindowProperty : m_properties)
+        domWindowProperty->frameDestroyed();
+
     resetLocation();
     m_properties.clear();
     removeAllEventListeners();
-}
-
-void LocalDOMWindow::willDestroyDocumentInFrame()
-{
-    for (const auto& domWindowProperty : m_properties)
-        domWindowProperty->willDestroyGlobalObjectInFrame();
-}
-
-void LocalDOMWindow::willDetachDocumentFromFrame()
-{
-    for (const auto& domWindowProperty : m_properties)
-        domWindowProperty->willDetachGlobalObjectFromFrame();
+    m_frame = nullptr;
 }
 
 void LocalDOMWindow::registerProperty(DOMWindowProperty* property)
@@ -519,9 +480,14 @@ void LocalDOMWindow::unregisterProperty(DOMWindowProperty* property)
     m_properties.remove(property);
 }
 
+void LocalDOMWindow::registerEventListenerObserver(EventListenerObserver* eventListenerObserver)
+{
+    m_eventListenerObservers.add(eventListenerObserver);
+}
+
 void LocalDOMWindow::reset()
 {
-    m_frameObserver->contextDestroyed();
+    frameDestroyed();
 
     m_screen = nullptr;
     m_history = nullptr;
@@ -531,16 +497,10 @@ void LocalDOMWindow::reset()
     m_scrollbars = nullptr;
     m_statusbar = nullptr;
     m_toolbar = nullptr;
-    m_console = nullptr;
     m_navigator = nullptr;
     m_media = nullptr;
     m_customElements = nullptr;
     m_applicationCache = nullptr;
-#if ENABLE(ASSERT)
-    m_hasBeenReset = true;
-#endif
-
-    LocalDOMWindow::notifyContextDestroyed();
 }
 
 void LocalDOMWindow::sendOrientationChangeEvent()
@@ -634,13 +594,6 @@ BarProp* LocalDOMWindow::toolbar() const
     return m_toolbar.get();
 }
 
-Console* LocalDOMWindow::console() const
-{
-    if (!m_console)
-        m_console = Console::create(frame());
-    return m_console.get();
-}
-
 FrameConsole* LocalDOMWindow::frameConsole() const
 {
     if (!isCurrentlyDisplayedInFrame())
@@ -664,14 +617,12 @@ Navigator* LocalDOMWindow::navigator() const
     return m_navigator.get();
 }
 
-void LocalDOMWindow::schedulePostMessage(MessageEvent* event, SecurityOrigin* target, PassRefPtr<ScriptCallStack> stackTrace)
+void LocalDOMWindow::schedulePostMessage(MessageEvent* event, PassRefPtr<SecurityOrigin> target, Document* source)
 {
     // Allowing unbounded amounts of messages to build up for a suspended context
     // is problematic; consider imposing a limit or other restriction if this
     // surfaces often as a problem (see crbug.com/587012).
-
-    // Schedule the message.
-    PostMessageTimer* timer = new PostMessageTimer(*this, event, target, stackTrace, UserGestureIndicator::currentToken());
+    PostMessageTimer* timer = new PostMessageTimer(*this, event, std::move(target), SourceLocation::capture(source), UserGestureIndicator::currentToken());
     timer->startOneShot(0, BLINK_FROM_HERE);
     timer->suspendIfNeeded();
     m_postMessageTimers.add(timer);
@@ -687,7 +638,8 @@ void LocalDOMWindow::postMessageTimerFired(PostMessageTimer* timer)
     UserGestureIndicator gestureIndicator(timer->userGestureToken());
 
     event->entangleMessagePorts(document());
-    dispatchMessageEventWithOriginCheck(timer->targetOrigin(), event, timer->stackTrace());
+
+    dispatchMessageEventWithOriginCheck(timer->targetOrigin(), event, timer->takeLocation());
 }
 
 void LocalDOMWindow::removePostMessageTimer(PostMessageTimer* timer)
@@ -695,7 +647,7 @@ void LocalDOMWindow::removePostMessageTimer(PostMessageTimer* timer)
     m_postMessageTimers.remove(timer);
 }
 
-void LocalDOMWindow::dispatchMessageEventWithOriginCheck(SecurityOrigin* intendedTargetOrigin, Event* event, PassRefPtr<ScriptCallStack> stackTrace)
+void LocalDOMWindow::dispatchMessageEventWithOriginCheck(SecurityOrigin* intendedTargetOrigin, Event* event, std::unique_ptr<SourceLocation> location)
 {
     if (intendedTargetOrigin) {
         // Check target origin now since the target document may have changed since the timer was scheduled.
@@ -706,8 +658,7 @@ void LocalDOMWindow::dispatchMessageEventWithOriginCheck(SecurityOrigin* intende
 
         if (!validTarget) {
             String message = ExceptionMessages::failedToExecute("postMessage", "DOMWindow", "The target origin provided ('" + intendedTargetOrigin->toString() + "') does not match the recipient window's origin ('" + document()->getSecurityOrigin()->toString() + "').");
-            ConsoleMessage* consoleMessage = ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, message);
-            consoleMessage->setCallStack(stackTrace);
+            ConsoleMessage* consoleMessage = ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, message, std::move(location));
             frameConsole()->addMessage(consoleMessage);
             return;
         }
@@ -721,7 +672,7 @@ DOMSelection* LocalDOMWindow::getSelection()
     if (!isCurrentlyDisplayedInFrame())
         return nullptr;
 
-    return frame()->document()->getSelection();
+    return document()->getSelection();
 }
 
 Element* LocalDOMWindow::frameElement() const
@@ -736,7 +687,7 @@ void LocalDOMWindow::blur()
 {
 }
 
-void LocalDOMWindow::print()
+void LocalDOMWindow::print(ScriptState* scriptState)
 {
     if (!frame())
         return;
@@ -745,18 +696,23 @@ void LocalDOMWindow::print()
     if (!host)
         return;
 
-    if (frame()->document()->isSandboxed(SandboxModals)) {
-        UseCounter::count(frame()->document(), UseCounter::DialogInSandboxedContext);
-        if (RuntimeEnabledFeatures::sandboxBlocksModalsEnabled()) {
-            frameConsole()->addMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Ignored call to 'print()'. The document is sandboxed, and the 'allow-modals' keyword is not set."));
-            return;
-        }
+    if (document()->isSandboxed(SandboxModals)) {
+        UseCounter::count(document(), UseCounter::DialogInSandboxedContext);
+        frameConsole()->addMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Ignored call to 'print()'. The document is sandboxed, and the 'allow-modals' keyword is not set."));
+        return;
+    }
+
+    if (scriptState && v8::MicrotasksScope::IsRunningMicrotasks(scriptState->isolate())) {
+        UseCounter::count(document(), UseCounter::During_Microtask_Print);
     }
 
     if (frame()->isLoading()) {
         m_shouldPrintWhenFinishedLoading = true;
         return;
     }
+
+    UseCounter::countCrossOriginIframe(*document(), UseCounter::CrossOriginWindowPrint);
+
     m_shouldPrintWhenFinishedLoading = false;
     host->chromeClient().print(frame());
 }
@@ -768,64 +724,74 @@ void LocalDOMWindow::stop()
     frame()->loader().stopAllLoaders();
 }
 
-void LocalDOMWindow::alert(const String& message)
+void LocalDOMWindow::alert(ScriptState* scriptState, const String& message)
 {
     if (!frame())
         return;
 
-    if (frame()->document()->isSandboxed(SandboxModals)) {
-        UseCounter::count(frame()->document(), UseCounter::DialogInSandboxedContext);
-        if (RuntimeEnabledFeatures::sandboxBlocksModalsEnabled()) {
-            frameConsole()->addMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Ignored call to 'alert()'. The document is sandboxed, and the 'allow-modals' keyword is not set."));
-            return;
-        }
+    if (document()->isSandboxed(SandboxModals)) {
+        UseCounter::count(document(), UseCounter::DialogInSandboxedContext);
+        frameConsole()->addMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Ignored call to 'alert()'. The document is sandboxed, and the 'allow-modals' keyword is not set."));
+        return;
     }
 
-    frame()->document()->updateLayoutTree();
+    if (v8::MicrotasksScope::IsRunningMicrotasks(scriptState->isolate())) {
+        UseCounter::count(document(), UseCounter::During_Microtask_Alert);
+    }
+
+    document()->updateStyleAndLayoutTree();
 
     FrameHost* host = frame()->host();
     if (!host)
         return;
+
+    UseCounter::countCrossOriginIframe(*document(), UseCounter::CrossOriginWindowAlert);
 
     host->chromeClient().openJavaScriptAlert(frame(), message);
 }
 
-bool LocalDOMWindow::confirm(const String& message)
+bool LocalDOMWindow::confirm(ScriptState* scriptState, const String& message)
 {
     if (!frame())
         return false;
 
-    if (frame()->document()->isSandboxed(SandboxModals)) {
-        UseCounter::count(frame()->document(), UseCounter::DialogInSandboxedContext);
-        if (RuntimeEnabledFeatures::sandboxBlocksModalsEnabled()) {
-            frameConsole()->addMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Ignored call to 'confirm()'. The document is sandboxed, and the 'allow-modals' keyword is not set."));
-            return false;
-        }
+    if (document()->isSandboxed(SandboxModals)) {
+        UseCounter::count(document(), UseCounter::DialogInSandboxedContext);
+        frameConsole()->addMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Ignored call to 'confirm()'. The document is sandboxed, and the 'allow-modals' keyword is not set."));
+        return false;
     }
 
-    frame()->document()->updateLayoutTree();
+    if (v8::MicrotasksScope::IsRunningMicrotasks(scriptState->isolate())) {
+        UseCounter::count(document(), UseCounter::During_Microtask_Confirm);
+    }
+
+    document()->updateStyleAndLayoutTree();
 
     FrameHost* host = frame()->host();
     if (!host)
         return false;
 
+    UseCounter::countCrossOriginIframe(*document(), UseCounter::CrossOriginWindowConfirm);
+
     return host->chromeClient().openJavaScriptConfirm(frame(), message);
 }
 
-String LocalDOMWindow::prompt(const String& message, const String& defaultValue)
+String LocalDOMWindow::prompt(ScriptState* scriptState, const String& message, const String& defaultValue)
 {
     if (!frame())
         return String();
 
-    if (frame()->document()->isSandboxed(SandboxModals)) {
-        UseCounter::count(frame()->document(), UseCounter::DialogInSandboxedContext);
-        if (RuntimeEnabledFeatures::sandboxBlocksModalsEnabled()) {
-            frameConsole()->addMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Ignored call to 'prompt()'. The document is sandboxed, and the 'allow-modals' keyword is not set."));
-            return String();
-        }
+    if (document()->isSandboxed(SandboxModals)) {
+        UseCounter::count(document(), UseCounter::DialogInSandboxedContext);
+        frameConsole()->addMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Ignored call to 'prompt()'. The document is sandboxed, and the 'allow-modals' keyword is not set."));
+        return String();
     }
 
-    frame()->document()->updateLayoutTree();
+    if (v8::MicrotasksScope::IsRunningMicrotasks(scriptState->isolate())) {
+        UseCounter::count(document(), UseCounter::During_Microtask_Prompt);
+    }
+
+    document()->updateStyleAndLayoutTree();
 
     FrameHost* host = frame()->host();
     if (!host)
@@ -835,6 +801,8 @@ String LocalDOMWindow::prompt(const String& message, const String& defaultValue)
     if (host->chromeClient().openJavaScriptPrompt(frame(), message, defaultValue, returnValue))
         return returnValue;
 
+    UseCounter::countCrossOriginIframe(*document(), UseCounter::CrossOriginWindowPrompt);
+
     return String();
 }
 
@@ -842,6 +810,10 @@ bool LocalDOMWindow::find(const String& string, bool caseSensitive, bool backwar
 {
     if (!isCurrentlyDisplayedInFrame())
         return false;
+
+    // Up-to-date, clean tree is required for finding text in page, since it relies
+    // on TextIterator to look over the text.
+    document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
     // FIXME (13016): Support searchInFrames and showDialog
     FindOptions options = (backwards ? Backwards : 0) | (caseSensitive ? 0 : CaseInsensitive) | (wrap ? WrapAround : 0) | (wholeWord ? WholeWord | AtWordStarts : 0);
@@ -862,9 +834,10 @@ int LocalDOMWindow::outerHeight() const
     if (!host)
         return 0;
 
+    ChromeClient& chromeClient = host->chromeClient();
     if (host->settings().reportScreenSizeInPhysicalPixelsQuirk())
-        return lroundf(host->chromeClient().windowRect().height() * host->deviceScaleFactor());
-    return host->chromeClient().windowRect().height();
+        return lroundf(chromeClient.rootWindowRect().height() * chromeClient.screenInfo().deviceScaleFactor);
+    return chromeClient.rootWindowRect().height();
 }
 
 int LocalDOMWindow::outerWidth() const
@@ -876,18 +849,23 @@ int LocalDOMWindow::outerWidth() const
     if (!host)
         return 0;
 
+    ChromeClient& chromeClient = host->chromeClient();
     if (host->settings().reportScreenSizeInPhysicalPixelsQuirk())
-        return lroundf(host->chromeClient().windowRect().width() * host->deviceScaleFactor());
-    return host->chromeClient().windowRect().width();
+        return lroundf(chromeClient.rootWindowRect().width() * chromeClient.screenInfo().deviceScaleFactor);
+
+    return chromeClient.rootWindowRect().width();
 }
 
-static FloatSize getViewportSize(LocalFrame* frame)
+FloatSize LocalDOMWindow::getViewportSize(IncludeScrollbarsInRect scrollbarInclusion) const
 {
-    FrameView* view = frame->view();
+    if (!frame())
+        return FloatSize();
+
+    FrameView* view = frame()->view();
     if (!view)
         return FloatSize();
 
-    FrameHost* host = frame->host();
+    FrameHost* host = frame()->host();
     if (!host)
         return FloatSize();
 
@@ -895,18 +873,18 @@ static FloatSize getViewportSize(LocalFrame* frame)
     // initial page scale depends on the content width and is set after a
     // layout, perform one now so queries during page load will use the up to
     // date viewport.
-    if (host->settings().viewportEnabled() && frame->isMainFrame())
-        frame->document()->updateLayoutIgnorePendingStylesheets();
+    if (host->settings().viewportEnabled() && frame()->isMainFrame())
+        document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
     // FIXME: This is potentially too much work. We really only need to know the dimensions of the parent frame's layoutObject.
-    if (Frame* parent = frame->tree().parent()) {
+    if (Frame* parent = frame()->tree().parent()) {
         if (parent && parent->isLocalFrame())
-            toLocalFrame(parent)->document()->updateLayoutIgnorePendingStylesheets();
+            toLocalFrame(parent)->document()->updateStyleAndLayoutIgnorePendingStylesheets();
     }
 
-    return frame->isMainFrame() && !host->settings().inertVisualViewport()
+    return frame()->isMainFrame() && !host->settings().inertVisualViewport()
         ? FloatSize(host->visualViewport().visibleRect().size())
-        : FloatSize(view->visibleContentRect(IncludeScrollbars).size());
+        : FloatSize(view->visibleContentRect(scrollbarInclusion).size());
 }
 
 int LocalDOMWindow::innerHeight() const
@@ -914,7 +892,7 @@ int LocalDOMWindow::innerHeight() const
     if (!frame())
         return 0;
 
-    FloatSize viewportSize = getViewportSize(frame());
+    FloatSize viewportSize = getViewportSize(IncludeScrollbars);
     return adjustForAbsoluteZoom(expandedIntSize(viewportSize).height(), frame()->pageZoomFactor());
 }
 
@@ -923,7 +901,7 @@ int LocalDOMWindow::innerWidth() const
     if (!frame())
         return 0;
 
-    FloatSize viewportSize = getViewportSize(frame());
+    FloatSize viewportSize = getViewportSize(IncludeScrollbars);
     return adjustForAbsoluteZoom(expandedIntSize(viewportSize).width(), frame()->pageZoomFactor());
 }
 
@@ -936,9 +914,10 @@ int LocalDOMWindow::screenX() const
     if (!host)
         return 0;
 
+    ChromeClient& chromeClient = host->chromeClient();
     if (host->settings().reportScreenSizeInPhysicalPixelsQuirk())
-        return lroundf(host->chromeClient().windowRect().x() * host->deviceScaleFactor());
-    return host->chromeClient().windowRect().x();
+        return lroundf(chromeClient.rootWindowRect().x() * chromeClient.screenInfo().deviceScaleFactor);
+    return chromeClient.rootWindowRect().x();
 }
 
 int LocalDOMWindow::screenY() const
@@ -950,49 +929,54 @@ int LocalDOMWindow::screenY() const
     if (!host)
         return 0;
 
+    ChromeClient& chromeClient = host->chromeClient();
     if (host->settings().reportScreenSizeInPhysicalPixelsQuirk())
-        return lroundf(host->chromeClient().windowRect().y() * host->deviceScaleFactor());
-    return host->chromeClient().windowRect().y();
+        return lroundf(chromeClient.rootWindowRect().y() * chromeClient.screenInfo().deviceScaleFactor);
+    return chromeClient.rootWindowRect().y();
 }
 
 double LocalDOMWindow::scrollX() const
 {
-    if (!frame())
+    if (!frame() || !frame()->host())
         return 0;
+
+    if (!frame()->host()->settings().inertVisualViewport())
+        return m_visualViewport->pageX();
 
     FrameView* view = frame()->view();
     if (!view)
         return 0;
 
-    FrameHost* host = frame()->host();
-    if (!host)
-        return 0;
+    document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
-    frame()->document()->updateLayoutIgnorePendingStylesheets();
-
-    ScrollableArea* viewport = host->settings().inertVisualViewport() ? view->layoutViewportScrollableArea() : view->getScrollableArea();
-    double viewportX = viewport->scrollPositionDouble().x();
+    double viewportX = view->layoutViewportScrollableArea()->scrollPositionDouble().x();
     return adjustScrollForAbsoluteZoom(viewportX, frame()->pageZoomFactor());
 }
 
 double LocalDOMWindow::scrollY() const
 {
-    if (!frame())
+    if (!frame() || !frame()->host())
         return 0;
+
+    if (!frame()->host()->settings().inertVisualViewport())
+        return m_visualViewport->pageY();
 
     FrameView* view = frame()->view();
     if (!view)
         return 0;
 
-    FrameHost* host = frame()->host();
-    if (!host)
-        return 0;
+    document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
-    frame()->document()->updateLayoutIgnorePendingStylesheets();
-
-    ScrollableArea* viewport = host->settings().inertVisualViewport() ? view->layoutViewportScrollableArea() : view->getScrollableArea();
-    double viewportY = viewport->scrollPositionDouble().y();
+    double viewportY = view->layoutViewportScrollableArea()->scrollPositionDouble().y();
     return adjustScrollForAbsoluteZoom(viewportY, frame()->pageZoomFactor());
+}
+
+DOMVisualViewport* LocalDOMWindow::visualViewport()
+{
+    if (!frame())
+        return nullptr;
+
+    return m_visualViewport;
 }
 
 const AtomicString& LocalDOMWindow::name() const
@@ -1006,6 +990,9 @@ const AtomicString& LocalDOMWindow::name() const
 void LocalDOMWindow::setName(const AtomicString& name)
 {
     if (!isCurrentlyDisplayedInFrame())
+        return;
+
+    if (name == frame()->tree().name())
         return;
 
     frame()->tree().setName(name);
@@ -1024,7 +1011,6 @@ void LocalDOMWindow::setStatus(const String& string)
     if (!host)
         return;
 
-    ASSERT(frame()->document()); // Client calls shouldn't be made when the frame is in inconsistent state.
     host->chromeClient().setStatusbarText(m_status);
 }
 
@@ -1039,7 +1025,6 @@ void LocalDOMWindow::setDefaultStatus(const String& string)
     if (!host)
         return;
 
-    ASSERT(frame()->document()); // Client calls shouldn't be made when the frame is in inconsistent state.
     host->chromeClient().setStatusbarText(m_defaultStatus);
 }
 
@@ -1076,8 +1061,8 @@ CSSRuleList* LocalDOMWindow::getMatchedCSSRules(Element* element, const String& 
 
     unsigned rulesToInclude = StyleResolver::AuthorCSSRules;
     PseudoId pseudoId = CSSSelector::pseudoId(pseudoType);
-    element->document().updateLayoutTree();
-    return frame()->document()->ensureStyleResolver().pseudoCSSRulesForElement(element, pseudoId, rulesToInclude);
+    element->document().updateStyleAndLayoutTree();
+    return document()->ensureStyleResolver().pseudoCSSRulesForElement(element, pseudoId, rulesToInclude);
 }
 
 double LocalDOMWindow::devicePixelRatio() const
@@ -1093,7 +1078,7 @@ void LocalDOMWindow::scrollBy(double x, double y, ScrollBehavior scrollBehavior)
     if (!isCurrentlyDisplayedInFrame())
         return;
 
-    document()->updateLayoutIgnorePendingStylesheets();
+    document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
     FrameView* view = frame()->view();
     if (!view)
@@ -1146,7 +1131,7 @@ void LocalDOMWindow::scrollTo(double x, double y) const
     // It is only necessary to have an up-to-date layout if the position may be clamped,
     // which is never the case for (0, 0).
     if (x || y)
-        document()->updateLayoutIgnorePendingStylesheets();
+        document()->updateStyleAndLayoutIgnorePendingStylesheets();
 
     DoublePoint layoutPos(x * frame()->pageZoomFactor(), y * frame()->pageZoomFactor());
     ScrollableArea* viewport = host->settings().inertVisualViewport() ? view->layoutViewportScrollableArea() : view->getScrollableArea();
@@ -1172,7 +1157,7 @@ void LocalDOMWindow::scrollTo(const ScrollToOptions& scrollToOptions) const
         || !scrollToOptions.hasTop()
         || scrollToOptions.left()
         || scrollToOptions.top()) {
-        document()->updateLayoutIgnorePendingStylesheets();
+        document()->updateStyleAndLayoutIgnorePendingStylesheets();
     }
 
     double scaledX = 0.0;
@@ -1205,10 +1190,10 @@ void LocalDOMWindow::moveBy(int x, int y) const
     if (!host)
         return;
 
-    IntRect windowRect = host->chromeClient().windowRect();
-    windowRect.move(x, y);
+    IntRect windowRect = host->chromeClient().rootWindowRect();
+    windowRect.saturatedMove(x, y);
     // Security check (the spec talks about UniversalBrowserWrite to disable this check...)
-    host->chromeClient().setWindowRectWithAdjustment(windowRect);
+    host->chromeClient().setWindowRectWithAdjustment(windowRect, *frame());
 }
 
 void LocalDOMWindow::moveTo(int x, int y) const
@@ -1220,10 +1205,10 @@ void LocalDOMWindow::moveTo(int x, int y) const
     if (!host)
         return;
 
-    IntRect windowRect = host->chromeClient().windowRect();
+    IntRect windowRect = host->chromeClient().rootWindowRect();
     windowRect.setLocation(IntPoint(x, y));
     // Security check (the spec talks about UniversalBrowserWrite to disable this check...)
-    host->chromeClient().setWindowRectWithAdjustment(windowRect);
+    host->chromeClient().setWindowRectWithAdjustment(windowRect, *frame());
 }
 
 void LocalDOMWindow::resizeBy(int x, int y) const
@@ -1235,10 +1220,10 @@ void LocalDOMWindow::resizeBy(int x, int y) const
     if (!host)
         return;
 
-    IntRect fr = host->chromeClient().windowRect();
+    IntRect fr = host->chromeClient().rootWindowRect();
     IntSize dest = fr.size() + IntSize(x, y);
     IntRect update(fr.location(), dest);
-    host->chromeClient().setWindowRectWithAdjustment(update);
+    host->chromeClient().setWindowRectWithAdjustment(update, *frame());
 }
 
 void LocalDOMWindow::resizeTo(int width, int height) const
@@ -1250,10 +1235,10 @@ void LocalDOMWindow::resizeTo(int width, int height) const
     if (!host)
         return;
 
-    IntRect fr = host->chromeClient().windowRect();
+    IntRect fr = host->chromeClient().rootWindowRect();
     IntSize dest = IntSize(width, height);
     IntRect update(fr.location(), dest);
-    host->chromeClient().setWindowRectWithAdjustment(update);
+    host->chromeClient().setWindowRectWithAdjustment(update, *frame());
 }
 
 int LocalDOMWindow::requestAnimationFrame(FrameRequestCallback* callback)
@@ -1291,26 +1276,37 @@ void LocalDOMWindow::cancelIdleCallback(int id)
         document->cancelIdleCallback(id);
 }
 
-CustomElementsRegistry* LocalDOMWindow::customElements() const
+CustomElementRegistry* LocalDOMWindow::customElements(ScriptState* scriptState) const
 {
-    if (!m_customElements)
-        m_customElements = CustomElementsRegistry::create();
-    return m_customElements.get();
+    if (!scriptState->world().isMainWorld())
+        return nullptr;
+    return customElements();
 }
 
-bool LocalDOMWindow::addEventListenerInternal(const AtomicString& eventType, EventListener* listener, const EventListenerOptions& options)
+CustomElementRegistry* LocalDOMWindow::customElements() const
 {
-    if (!EventTarget::addEventListenerInternal(eventType, listener, options))
-        return false;
+    if (!m_customElements && m_document)
+        m_customElements = CustomElementRegistry::create(this);
+    return m_customElements;
+}
 
+CustomElementRegistry* LocalDOMWindow::maybeCustomElements() const
+{
+    return m_customElements;
+}
+
+void LocalDOMWindow::addedEventListener(const AtomicString& eventType, RegisteredEventListener& registeredListener)
+{
+    DOMWindow::addedEventListener(eventType, registeredListener);
     if (frame() && frame()->host())
-        frame()->host()->eventHandlerRegistry().didAddEventHandler(*this, eventType, options);
+        frame()->host()->eventHandlerRegistry().didAddEventHandler(*this, eventType, registeredListener.options());
 
-    if (Document* document = this->document()) {
+    if (Document* document = this->document())
         document->addListenerTypeIfNeeded(eventType);
-    }
 
-    notifyAddEventListener(this, eventType);
+    for (auto& it : m_eventListenerObservers) {
+        it->didAddEventListener(this, eventType);
+    }
 
     if (eventType == EventTypeNames::unload) {
         UseCounter::count(document(), UseCounter::DocumentUnloadRegistered);
@@ -1327,40 +1323,49 @@ bool LocalDOMWindow::addEventListenerInternal(const AtomicString& eventType, Eve
             UseCounter::count(document(), UseCounter::SubFrameBeforeUnloadRegistered);
         }
     }
-
-    return true;
 }
 
-bool LocalDOMWindow::removeEventListenerInternal(const AtomicString& eventType, EventListener* listener, const EventListenerOptions& options)
+void LocalDOMWindow::removedEventListener(const AtomicString& eventType, const RegisteredEventListener& registeredListener)
 {
-    if (!EventTarget::removeEventListenerInternal(eventType, listener, options))
-        return false;
-
+    DOMWindow::removedEventListener(eventType, registeredListener);
     if (frame() && frame()->host())
-        frame()->host()->eventHandlerRegistry().didRemoveEventHandler(*this, eventType, options);
+        frame()->host()->eventHandlerRegistry().didRemoveEventHandler(*this, eventType, registeredListener.options());
 
-    notifyRemoveEventListener(this, eventType);
+    for (auto& it : m_eventListenerObservers) {
+        it->didRemoveEventListener(this, eventType);
+    }
 
     if (eventType == EventTypeNames::unload) {
         removeUnloadEventListener(this);
     } else if (eventType == EventTypeNames::beforeunload && allowsBeforeUnloadListeners(this)) {
         removeBeforeUnloadEventListener(this);
     }
+}
 
-    return true;
+void LocalDOMWindow::warnUnusedPreloads(TimerBase* base)
+{
+    if (frame() && frame()->loader().documentLoader()) {
+        ResourceFetcher* fetcher = frame()->loader().documentLoader()->fetcher();
+        DCHECK(fetcher);
+        if (fetcher->countPreloads())
+            fetcher->warnUnusedPreloads();
+    }
 }
 
 void LocalDOMWindow::dispatchLoadEvent()
 {
     Event* loadEvent(Event::create(EventTypeNames::load));
     if (frame() && frame()->loader().documentLoader() && !frame()->loader().documentLoader()->timing().loadEventStart()) {
-        // The DocumentLoader (and thus its DocumentLoadTiming) might get destroyed while dispatching
-        // the event, so protect it to prevent writing the end time into freed memory.
         DocumentLoader* documentLoader = frame()->loader().documentLoader();
         DocumentLoadTiming& timing = documentLoader->timing();
         timing.markLoadEventStart();
         dispatchEvent(loadEvent, document());
         timing.markLoadEventEnd();
+        DCHECK(documentLoader->fetcher());
+        // If fetcher->countPreloads() is not empty here, it's full of link preloads,
+        // as speculatove preloads were cleared at DCL.
+        if (frame() && documentLoader == frame()->loader().documentLoader() && documentLoader->fetcher()->countPreloads())
+            m_unusedPreloadsTimer.startOneShot(unusedPreloadTimeoutInSeconds, BLINK_FROM_HERE);
     } else {
         dispatchEvent(loadEvent, document());
     }
@@ -1383,7 +1388,7 @@ DispatchEventResult LocalDOMWindow::dispatchEvent(Event* event, EventTarget* tar
     event->setTrusted(true);
     event->setTarget(target ? target : this);
     event->setCurrentTarget(this);
-    event->setEventPhase(Event::AT_TARGET);
+    event->setEventPhase(Event::kAtTarget);
 
     TRACE_EVENT1("devtools.timeline", "EventDispatch", "data", InspectorEventDispatchEvent::data(*event));
     return fireEventListeners(event);
@@ -1393,7 +1398,10 @@ void LocalDOMWindow::removeAllEventListeners()
 {
     EventTarget::removeAllEventListeners();
 
-    notifyRemoveAllEventListeners(this);
+    for (auto& it : m_eventListenerObservers) {
+        it->didRemoveAllEventListeners(this);
+    }
+
     if (frame() && frame()->host())
         frame()->host()->eventHandlerRegistry().didRemoveAllEventHandlers(*this);
 
@@ -1405,7 +1413,7 @@ void LocalDOMWindow::finishedLoading()
 {
     if (m_shouldPrintWhenFinishedLoading) {
         m_shouldPrintWhenFinishedLoading = false;
-        print();
+        print(nullptr);
     }
 }
 
@@ -1480,7 +1488,7 @@ DOMWindow* LocalDOMWindow::open(const String& urlString, const AtomicString& fra
 
 DEFINE_TRACE(LocalDOMWindow)
 {
-    visitor->trace(m_frameObserver);
+    visitor->trace(m_frame);
     visitor->trace(m_document);
     visitor->trace(m_properties);
     visitor->trace(m_screen);
@@ -1491,16 +1499,16 @@ DEFINE_TRACE(LocalDOMWindow)
     visitor->trace(m_scrollbars);
     visitor->trace(m_statusbar);
     visitor->trace(m_toolbar);
-    visitor->trace(m_console);
     visitor->trace(m_navigator);
     visitor->trace(m_media);
     visitor->trace(m_customElements);
     visitor->trace(m_applicationCache);
     visitor->trace(m_eventQueue);
     visitor->trace(m_postMessageTimers);
+    visitor->trace(m_visualViewport);
+    visitor->trace(m_eventListenerObservers);
     DOMWindow::trace(visitor);
     Supplementable<LocalDOMWindow>::trace(visitor);
-    DOMWindowLifecycleNotifier::trace(visitor);
 }
 
 LocalFrame* LocalDOMWindow::frame() const
@@ -1508,9 +1516,8 @@ LocalFrame* LocalDOMWindow::frame() const
     // If the LocalDOMWindow still has a frame reference, that frame must point
     // back to this LocalDOMWindow: otherwise, it's easy to get into a situation
     // where script execution leaks between different LocalDOMWindows.
-    if (m_frameObserver->frame())
-        ASSERT_WITH_SECURITY_IMPLICATION(m_frameObserver->frame()->domWindow() == this);
-    return m_frameObserver->frame();
+    SECURITY_DCHECK(!m_frame || m_frame->domWindow() == this);
+    return m_frame;
 }
 
 } // namespace blink

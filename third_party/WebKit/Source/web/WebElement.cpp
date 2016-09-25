@@ -30,11 +30,11 @@
 
 #include "public/web/WebElement.h"
 
-#include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/HTMLNames.h"
 #include "core/dom/Element.h"
-#include "core/dom/Fullscreen.h"
-#include "core/dom/custom/CustomElementProcessingStack.h"
+#include "core/dom/custom/V0CustomElementProcessingStack.h"
+#include "core/editing/EditingUtilities.h"
 #include "core/html/HTMLTextFormControlElement.h"
 #include "platform/graphics/Image.h"
 #include "public/platform/WebRect.h"
@@ -56,11 +56,14 @@ bool WebElement::isTextFormControlElement() const
     return constUnwrap<Element>()->isTextFormControl();
 }
 
+// TODO(dglazkov): Remove. Consumers of this code should use Node:hasEditableStyle.
+// http://crbug.com/612560
 bool WebElement::isEditable() const
 {
     const Element* element = constUnwrap<Element>();
 
-    if (element->isContentEditable())
+    element->document().updateStyleAndLayoutTree();
+    if (hasEditableStyle(*element))
         return true;
 
     if (element->isTextFormControl()) {
@@ -69,7 +72,7 @@ bool WebElement::isEditable() const
             return true;
     }
 
-    return equalIgnoringCase(element->getAttribute(roleAttr), "textbox");
+    return equalIgnoringASCIICase(element->getAttribute(roleAttr), "textbox");
 }
 
 WebString WebElement::tagName() const
@@ -98,14 +101,12 @@ WebString WebElement::getAttribute(const WebString& attrName) const
     return constUnwrap<Element>()->getAttribute(attrName);
 }
 
-bool WebElement::setAttribute(const WebString& attrName, const WebString& attrValue)
+void WebElement::setAttribute(const WebString& attrName, const WebString& attrValue)
 {
     // TODO: Custom element callbacks need to be called on WebKit API methods that
     // mutate the DOM in any way.
-    CustomElementProcessingStack::CallbackDeliveryScope deliverCustomElementCallbacks;
-    TrackExceptionState exceptionState;
-    unwrap<Element>()->setAttribute(attrName, attrValue, exceptionState);
-    return !exceptionState.hadException();
+    V0CustomElementProcessingStack::CallbackDeliveryScope deliverCustomElementCallbacks;
+    unwrap<Element>()->setAttribute(attrName, attrValue, IGNORE_EXCEPTION);
 }
 
 unsigned WebElement::attributeCount() const
@@ -132,12 +133,6 @@ WebString WebElement::attributeValue(unsigned index) const
 WebString WebElement::textContent() const
 {
     return constUnwrap<Element>()->textContent();
-}
-
-void WebElement::requestFullScreen()
-{
-    Element* element = unwrap<Element>();
-    Fullscreen::from(element->document()).requestFullscreen(*element, Fullscreen::PrefixedRequest);
 }
 
 bool WebElement::hasNonEmptyLayoutSize() const

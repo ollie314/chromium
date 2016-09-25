@@ -43,7 +43,7 @@ static SkPath::FillType fillRuleFromStyle(const PaintInfo& paintInfo, const SVGC
 void SVGShapePainter::paint(const PaintInfo& paintInfo)
 {
     if (paintInfo.phase != PaintPhaseForeground
-        || m_layoutSVGShape.style()->visibility() == HIDDEN
+        || m_layoutSVGShape.style()->visibility() != EVisibility::Visible
         || m_layoutSVGShape.isShapeEmpty())
         return;
 
@@ -53,14 +53,14 @@ void SVGShapePainter::paint(const PaintInfo& paintInfo)
 
     PaintInfo paintInfoBeforeFiltering(paintInfo);
     // Shapes cannot have children so do not call updateCullRect.
-    TransformRecorder transformRecorder(paintInfoBeforeFiltering.context, m_layoutSVGShape, m_layoutSVGShape.localSVGTransform());
+    SVGTransformContext transformContext(paintInfoBeforeFiltering.context, m_layoutSVGShape, m_layoutSVGShape.localSVGTransform());
     {
         SVGPaintContext paintContext(m_layoutSVGShape, paintInfoBeforeFiltering);
         if (paintContext.applyClipMaskAndFilterIfNecessary() && !LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(paintContext.paintInfo().context, m_layoutSVGShape, paintContext.paintInfo().phase)) {
             LayoutObjectDrawingRecorder recorder(paintContext.paintInfo().context, m_layoutSVGShape, paintContext.paintInfo().phase, boundingBox);
             const SVGComputedStyle& svgStyle = m_layoutSVGShape.style()->svgStyle();
 
-            bool shouldAntiAlias = svgStyle.shapeRendering() != SR_CRISPEDGES;
+            bool shouldAntiAlias = svgStyle.shapeRendering() != SR_CRISPEDGES && svgStyle.shapeRendering() != SR_OPTIMIZESPEED;
 
             for (int i = 0; i < 3; i++) {
                 switch (svgStyle.paintOrderType(i)) {
@@ -191,10 +191,9 @@ void SVGShapePainter::paintMarkers(const PaintInfo& paintInfo, const FloatRect& 
         return;
 
     float strokeWidth = m_layoutSVGShape.strokeWidth();
-    unsigned size = markerPositions->size();
 
-    for (unsigned i = 0; i < size; ++i) {
-        if (LayoutSVGResourceMarker* marker = SVGMarkerData::markerForType((*markerPositions)[i].type, markerStart, markerMid, markerEnd)) {
+    for (const MarkerPosition& markerPosition : *markerPositions) {
+        if (const LayoutSVGResourceMarker* marker = SVGMarkerData::markerForType(markerPosition.type, markerStart, markerMid, markerEnd)) {
             SkPictureBuilder pictureBuilder(boundingBox, nullptr, &paintInfo.context);
             PaintInfo markerPaintInfo(pictureBuilder.context(), paintInfo);
 
@@ -203,18 +202,16 @@ void SVGShapePainter::paintMarkers(const PaintInfo& paintInfo, const FloatRect& 
             // be culled if it is outside the paint info cull rect.
             markerPaintInfo.m_cullRect.m_rect = LayoutRect::infiniteIntRect();
 
-            paintMarker(markerPaintInfo, *marker, (*markerPositions)[i], strokeWidth);
+            paintMarker(markerPaintInfo, *marker, markerPosition, strokeWidth);
             pictureBuilder.endRecording()->playback(paintInfo.context.canvas());
         }
     }
 }
 
-void SVGShapePainter::paintMarker(const PaintInfo& paintInfo, LayoutSVGResourceMarker& marker, const MarkerPosition& position, float strokeWidth)
+void SVGShapePainter::paintMarker(
+    const PaintInfo& paintInfo, const LayoutSVGResourceMarker& marker, const MarkerPosition& position, float strokeWidth)
 {
-    // An empty viewBox disables rendering.
-    SVGMarkerElement* markerElement = toSVGMarkerElement(marker.element());
-    ASSERT(markerElement);
-    if (markerElement->hasAttribute(SVGNames::viewBoxAttr) && markerElement->viewBox()->currentValue()->isValid() && markerElement->viewBox()->currentValue()->value().isEmpty())
+    if (!marker.shouldPaint())
         return;
 
     TransformRecorder transformRecorder(paintInfo.context, marker, marker.markerTransformation(position.origin, position.angle, strokeWidth));

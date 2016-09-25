@@ -10,6 +10,8 @@
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/Text.h"
 #include "core/frame/FrameHost.h"
+#include "core/frame/LocalFrame.h"
+#include "core/frame/VisualViewport.h"
 #include "core/html/HTMLHeadElement.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLMetaElement.h"
@@ -62,7 +64,7 @@ bool isVisible(const Element& element)
         return false;
     return (
         style->display() != NONE
-        && style->visibility() != HIDDEN
+        && style->visibility() != EVisibility::Hidden
         && style->opacity() != 0
     );
 }
@@ -235,7 +237,7 @@ WebDistillabilityFeatures DocumentStatisticsCollector::collectStatistics(Documen
     double startTime = monotonicallyIncreasingTime();
 
     // This should be cheap since collectStatistics is only called right after layout.
-    document.updateLayoutTree();
+    document.updateStyleAndLayoutTree();
 
     // Traverse the DOM tree and collect statistics.
     collectFeatures(*body, features);

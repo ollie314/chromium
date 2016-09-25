@@ -52,16 +52,12 @@ class TestProxyDelegate : public ProxyDelegate {
   // ProxyDelegate implementation:
   void OnResolveProxy(const GURL& url,
                       const std::string& method,
-                      int load_flags,
                       const ProxyService& proxy_service,
                       ProxyInfo* result) override;
   void OnTunnelConnectCompleted(const HostPortPair& endpoint,
                                 const HostPortPair& proxy_server,
                                 int net_error) override;
   void OnFallback(const ProxyServer& bad_proxy, int net_error) override;
-  void OnBeforeSendHeaders(URLRequest* request,
-                           const ProxyInfo& proxy_info,
-                           HttpRequestHeaders* headers) override;
   void OnBeforeTunnelRequest(const HostPortPair& proxy_server,
                              HttpRequestHeaders* extra_headers) override;
   void OnTunnelHeadersReceived(
@@ -69,6 +65,24 @@ class TestProxyDelegate : public ProxyDelegate {
       const HostPortPair& proxy_server,
       const HttpResponseHeaders& response_headers) override;
   bool IsTrustedSpdyProxy(const net::ProxyServer& proxy_server) override;
+  void GetAlternativeProxy(
+      const GURL& url,
+      const ProxyServer& resolved_proxy_server,
+      ProxyServer* alternative_proxy_server) const override;
+  void OnAlternativeProxyBroken(
+      const ProxyServer& alternative_proxy_server) override;
+
+  void set_alternative_proxy_server(
+      const ProxyServer& alternative_proxy_server) {
+    alternative_proxy_server_ = alternative_proxy_server;
+  }
+  const ProxyServer& alternative_proxy_server() const {
+    return alternative_proxy_server_;
+  }
+
+  int get_alternative_proxy_invocations() const {
+    return get_alternative_proxy_invocations_;
+  }
 
  private:
   bool on_before_tunnel_request_called_;
@@ -80,6 +94,10 @@ class TestProxyDelegate : public ProxyDelegate {
   HostPortPair on_tunnel_headers_received_origin_;
   HostPortPair on_tunnel_headers_received_proxy_server_;
   std::string on_tunnel_headers_received_status_line_;
+  ProxyServer alternative_proxy_server_;
+
+  // Number of times GetAlternativeProxy() method has been called.
+  mutable int get_alternative_proxy_invocations_;
 };
 
 }  // namespace net

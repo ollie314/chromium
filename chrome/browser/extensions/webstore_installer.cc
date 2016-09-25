@@ -15,7 +15,7 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
@@ -52,6 +52,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -244,7 +245,6 @@ WebstoreInstaller::Approval::Approval()
       use_app_installed_bubble(false),
       skip_post_install_ui(false),
       skip_install_dialog(false),
-      enable_launcher(false),
       manifest_check_level(MANIFEST_CHECK_LEVEL_STRICT) {
 }
 
@@ -372,28 +372,22 @@ void WebstoreInstaller::Start() {
 void WebstoreInstaller::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
-  switch (type) {
-    case extensions::NOTIFICATION_EXTENSION_INSTALL_ERROR: {
-      CrxInstaller* crx_installer = content::Source<CrxInstaller>(source).ptr();
-      CHECK(crx_installer);
-      if (crx_installer != crx_installer_.get())
-        return;
+  DCHECK_EQ(extensions::NOTIFICATION_EXTENSION_INSTALL_ERROR, type);
 
-      // TODO(rdevlin.cronin): Continue removing std::string errors and
-      // replacing with base::string16. See crbug.com/71980.
-      const extensions::CrxInstallError* error =
-          content::Details<const extensions::CrxInstallError>(details).ptr();
-      const std::string utf8_error = base::UTF16ToUTF8(error->message());
-      crx_installer_ = NULL;
-      // ReportFailure releases a reference to this object so it must be the
-      // last operation in this method.
-      ReportFailure(utf8_error, FAILURE_REASON_OTHER);
-      break;
-    }
+  CrxInstaller* crx_installer = content::Source<CrxInstaller>(source).ptr();
+  CHECK(crx_installer);
+  if (crx_installer != crx_installer_.get())
+    return;
 
-    default:
-      NOTREACHED();
-  }
+  // TODO(rdevlin.cronin): Continue removing std::string errors and
+  // replacing with base::string16. See crbug.com/71980.
+  const extensions::CrxInstallError* error =
+      content::Details<const extensions::CrxInstallError>(details).ptr();
+  const std::string utf8_error = base::UTF16ToUTF8(error->message());
+  crx_installer_ = nullptr;
+  // ReportFailure releases a reference to this object so it must be the
+  // last operation in this method.
+  ReportFailure(utf8_error, FAILURE_REASON_OTHER);
 }
 
 void WebstoreInstaller::OnExtensionInstalled(
@@ -420,7 +414,7 @@ void WebstoreInstaller::OnExtensionInstalled(
     CHECK_EQ(extension->id(), id_);
     ReportSuccess();
   } else {
-    const Version version_required(info.minimum_version);
+    const base::Version version_required(info.minimum_version);
     if (version_required.IsValid() &&
         extension->version()->CompareTo(version_required) < 0) {
       // It should not happen, CrxInstaller will make sure the version is
@@ -494,11 +488,10 @@ void WebstoreInstaller::OnDownloadStarted(
         Approval::CreateForSharedModule(profile_);
     const SharedModuleInfo::ImportInfo& info = pending_modules_.front();
     approval->extension_id = info.extension_id;
-    const Version version_required(info.minimum_version);
+    const base::Version version_required(info.minimum_version);
 
     if (version_required.IsValid()) {
-      approval->minimum_version.reset(
-          new Version(version_required));
+      approval->minimum_version.reset(new base::Version(version_required));
     }
     download_item_->SetUserData(kApprovalKey, approval.release());
   } else {
@@ -665,11 +658,15 @@ void WebstoreInstaller::StartDownload(const std::string& extension_id,
   int render_process_host_id = contents->GetRenderProcessHost()->GetID();
   int render_view_host_routing_id =
       contents->GetRenderViewHost()->GetRoutingID();
-  content::ResourceContext* resource_context =
-      controller.GetBrowserContext()->GetResourceContext();
+
+  content::RenderFrameHost* render_frame_host = contents->GetMainFrame();
+  content::StoragePartition* storage_partition =
+      BrowserContext::GetStoragePartition(profile_,
+                                          render_frame_host->GetSiteInstance());
   std::unique_ptr<DownloadUrlParameters> params(new DownloadUrlParameters(
       download_url_, render_process_host_id, render_view_host_routing_id,
-      contents->GetMainFrame()->GetRoutingID(), resource_context));
+      render_frame_host->GetRoutingID(),
+      storage_partition->GetURLRequestContext()));
   params->set_file_path(file);
   if (controller.GetVisibleEntry())
     params->set_referrer(content::Referrer::SanitizeForRequest(

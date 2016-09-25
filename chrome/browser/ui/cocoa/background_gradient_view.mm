@@ -7,18 +7,15 @@
 #import "chrome/browser/themes/theme_properties.h"
 #import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #import "ui/base/cocoa/nsgraphics_context_additions.h"
 #import "ui/base/cocoa/nsview_additions.h"
-
-@interface BackgroundGradientView (Private)
-- (void)commonInit;
-- (NSColor*)backgroundImageColor;
-@end
+#include "ui/base/material_design/material_design_controller.h"
 
 @implementation BackgroundGradientView
 
 @synthesize showsDivider = showsDivider_;
+@synthesize dividerEdge = dividerEdge_;
 
 - (id)initWithFrame:(NSRect)frameRect {
   if ((self = [super initWithFrame:frameRect])) {
@@ -36,12 +33,20 @@
 
 - (void)commonInit {
   showsDivider_ = YES;
+  dividerEdge_ = NSMinYEdge;
 }
 
 - (void)setShowsDivider:(BOOL)show {
   if (showsDivider_ == show)
     return;
   showsDivider_ = show;
+  [self setNeedsDisplay:YES];
+}
+
+- (void)setDividerEdge:(NSRectEdge)dividerEdge {
+  if (dividerEdge_ == dividerEdge)
+    return;
+  dividerEdge_ = dividerEdge;
   [self setNeedsDisplay:YES];
 }
 
@@ -67,10 +72,10 @@
   NSRectFillUsingOperation(dirtyRect, NSCompositeSourceOver);
 
   if (showsDivider_) {
-    // Draw bottom stroke
+    // Draw stroke
     NSRect borderRect, contentRect;
     NSDivideRect([self bounds], &borderRect, &contentRect, [self cr_lineWidth],
-                 NSMinYEdge);
+                 dividerEdge_);
     if (NSIntersectsRect(borderRect, dirtyRect)) {
       [[self strokeColor] set];
       NSRectFillUsingOperation(NSIntersectionRect(borderRect, dirtyRect),
@@ -94,9 +99,13 @@
   const ui::ThemeProvider* themeProvider = [window themeProvider];
   if (!themeProvider)
     return [NSColor blackColor];
+  if (!ui::MaterialDesignController::IsModeMaterial()) {
+    return themeProvider->GetNSColor(
+        isActive ? ThemeProperties::COLOR_TOOLBAR_STROKE :
+                   ThemeProperties::COLOR_TOOLBAR_STROKE_INACTIVE);
+  }
   return themeProvider->GetNSColor(
-      isActive ? ThemeProperties::COLOR_TOOLBAR_STROKE :
-                 ThemeProperties::COLOR_TOOLBAR_STROKE_INACTIVE);
+             ThemeProperties::COLOR_DETACHED_BOOKMARK_BAR_SEPARATOR);
 }
 
 - (NSColor*)backgroundImageColor {

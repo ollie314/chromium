@@ -23,9 +23,11 @@ class FrameTreeNode;
 class NavigationControllerImpl;
 class NavigationHandleImpl;
 class NavigationURLLoader;
+class NavigationData;
 class NavigatorDelegate;
 class ResourceRequestBody;
 class SiteInstanceImpl;
+class StreamHandle;
 struct NavigationRequestInfo;
 
 // PlzNavigate
@@ -78,6 +80,7 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
       FrameMsg_Navigate_Type::Value navigation_type,
       LoFiState lofi_state,
       bool is_same_document_history_load,
+      bool is_history_navigation_in_new_child,
       const base::TimeTicks& navigation_start,
       NavigationControllerImpl* controller);
 
@@ -90,7 +93,6 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
       FrameTreeNode* frame_tree_node,
       const CommonNavigationParams& common_params,
       const BeginNavigationParams& begin_params,
-      scoped_refptr<ResourceRequestBody> body,
       int current_history_list_offset,
       int current_history_list_length);
 
@@ -121,9 +123,7 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
     return dest_site_instance_.get();
   }
 
-  NavigationEntryImpl::RestoreType restore_type() const {
-    return restore_type_;
-  };
+  RestoreType restore_type() const { return restore_type_; };
 
   bool is_view_source() const { return is_view_source_; };
 
@@ -164,7 +164,6 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
                     const CommonNavigationParams& common_params,
                     const BeginNavigationParams& begin_params,
                     const RequestNavigationParams& request_params,
-                    scoped_refptr<ResourceRequestBody> body,
                     bool browser_initiated,
                     const FrameNavigationEntry* frame_navigation_entry,
                     const NavigationEntryImpl* navitation_entry);
@@ -173,8 +172,11 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   void OnRequestRedirected(
       const net::RedirectInfo& redirect_info,
       const scoped_refptr<ResourceResponse>& response) override;
-  void OnResponseStarted(const scoped_refptr<ResourceResponse>& response,
-                         std::unique_ptr<StreamHandle> body) override;
+  void OnResponseStarted(
+      const scoped_refptr<ResourceResponse>& response,
+      std::unique_ptr<StreamHandle> body,
+      const SSLStatus& ssl_status,
+      std::unique_ptr<NavigationData> navigation_data) override;
   void OnRequestFailed(bool has_stale_copy_in_cache, int net_error) override;
   void OnRequestStarted(base::TimeTicks timestamp) override;
 
@@ -188,9 +190,6 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   // Have a RenderFrameHost commit the navigation. The NavigationRequest will
   // be destroyed after this call.
   void CommitNavigation();
-
-  // Called when the navigation is about to be sent to the IO thread.
-  void InitializeServiceWorkerHandleIfNeeded();
 
   FrameTreeNode* frame_tree_node_;
 
@@ -211,10 +210,6 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   NavigationState state_;
 
 
-  // The parameters to send to the IO thread. |loader_| takes ownership of
-  // |info_| after calling BeginNavigation.
-  std::unique_ptr<NavigationRequestInfo> info_;
-
   std::unique_ptr<NavigationURLLoader> loader_;
 
   // These next items are used in browser-initiated navigations to store
@@ -222,7 +217,7 @@ class CONTENT_EXPORT NavigationRequest : public NavigationURLLoaderDelegate {
   // creation time.
   scoped_refptr<SiteInstanceImpl> source_site_instance_;
   scoped_refptr<SiteInstanceImpl> dest_site_instance_;
-  NavigationEntryImpl::RestoreType restore_type_;
+  RestoreType restore_type_;
   bool is_view_source_;
   int bindings_;
 

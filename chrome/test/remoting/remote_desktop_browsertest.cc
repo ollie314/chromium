@@ -30,6 +30,7 @@
 #include "extensions/common/extension_set.h"
 #include "extensions/common/switches.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 
 namespace remoting {
 
@@ -76,9 +77,9 @@ void RemoteDesktopBrowserTest::VerifyInternetAccess() {
 void RemoteDesktopBrowserTest::OpenClientBrowserPage() {
   // Open the client browser page in a new tab
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      GURL(http_server() + "/client.html"),
-      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
+      browser(), GURL(http_server() + "/client.html"),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
   // Save this web content for later reference
   client_web_content_ = browser()->tab_strip_model()->GetActiveWebContents();
@@ -194,7 +195,7 @@ content::WebContents* RemoteDesktopBrowserTest::LaunchChromotingApp(
       defer_start);
 
   if (is_platform_app()) {
-    window_open_disposition = NEW_WINDOW;
+    window_open_disposition = WindowOpenDisposition::NEW_WINDOW;
   }
 
   OpenApplication(AppLaunchParams(browser()->profile(), extension_,
@@ -236,7 +237,7 @@ content::WebContents* RemoteDesktopBrowserTest::LaunchChromotingApp(
 
 content::WebContents* RemoteDesktopBrowserTest::LaunchChromotingApp(
     bool defer_start) {
-  return LaunchChromotingApp(defer_start, CURRENT_TAB);
+  return LaunchChromotingApp(defer_start, WindowOpenDisposition::CURRENT_TAB);
 }
 
 void RemoteDesktopBrowserTest::StartChromotingApp() {
@@ -405,34 +406,34 @@ void RemoteDesktopBrowserTest::DisconnectMe2Me() {
 
 void RemoteDesktopBrowserTest::SimulateKeyPressWithCode(
     ui::KeyboardCode keyCode,
-    const std::string& code) {
-  SimulateKeyPressWithCode(keyCode, code, false, false, false, false);
+    const std::string& codeStr) {
+  ui::DomCode code = ui::KeycodeConverter::CodeStringToDomCode(codeStr);
+  SimulateKeyPressWithCode(ui::DomKey(), code, keyCode, false, false, false,
+                           false);
 }
 
 void RemoteDesktopBrowserTest::SimulateKeyPressWithCode(
+    ui::DomKey key,
+    ui::DomCode code,
     ui::KeyboardCode keyCode,
-    const std::string& code,
     bool control,
     bool shift,
     bool alt,
     bool command) {
-  content::SimulateKeyPressWithCode(
-      active_web_contents(),
-      keyCode,
-      code,
-      control,
-      shift,
-      alt,
-      command);
+  content::SimulateKeyPress(active_web_contents(), key, code, keyCode, control,
+                            shift, alt, command);
 }
 
 void RemoteDesktopBrowserTest::SimulateCharInput(char c) {
-  const char* code;
+  const char* codeStr;
   ui::KeyboardCode keyboard_code;
   bool shift;
-  GetKeyValuesFromChar(c, &code, &keyboard_code, &shift);
-  ASSERT_TRUE(code != NULL);
-  SimulateKeyPressWithCode(keyboard_code, code, false, shift, false, false);
+  GetKeyValuesFromChar(c, &codeStr, &keyboard_code, &shift);
+  ui::DomKey key = ui::DomKey::FromCharacter(c);
+  ASSERT_TRUE(codeStr != NULL);
+  ui::DomCode code = ui::KeycodeConverter::CodeStringToDomCode(codeStr);
+  SimulateKeyPressWithCode(key, code, keyboard_code, false, shift, false,
+                           false);
 }
 
 void RemoteDesktopBrowserTest::SimulateStringInput(const std::string& input) {
@@ -441,7 +442,7 @@ void RemoteDesktopBrowserTest::SimulateStringInput(const std::string& input) {
 }
 
 void RemoteDesktopBrowserTest::SimulateMouseLeftClickAt(int x, int y) {
-  SimulateMouseClickAt(0, blink::WebMouseEvent::ButtonLeft, x, y);
+  SimulateMouseClickAt(0, blink::WebMouseEvent::Button::Left, x, y);
 }
 
 void RemoteDesktopBrowserTest::SimulateMouseClickAt(
@@ -559,7 +560,8 @@ void RemoteDesktopBrowserTest::ConnectToLocalHost(bool remember_pin) {
   ConditionalTimeoutWaiter waiter(
         base::TimeDelta::FromSeconds(5),
         base::TimeDelta::FromMilliseconds(500),
-        base::Bind(&RemoteDesktopBrowserTest::IsLocalHostReady, this));
+        base::Bind(&RemoteDesktopBrowserTest::IsLocalHostReady,
+                   base::Unretained(this)));
   EXPECT_TRUE(waiter.Wait());
 
   // Verify that the local host is online.
@@ -587,7 +589,8 @@ void RemoteDesktopBrowserTest::ConnectToRemoteHost(
   ConditionalTimeoutWaiter waiter(
         base::TimeDelta::FromSeconds(5),
         base::TimeDelta::FromMilliseconds(500),
-        base::Bind(&RemoteDesktopBrowserTest::IsHostListReady, this));
+        base::Bind(&RemoteDesktopBrowserTest::IsHostListReady,
+                   base::Unretained(this)));
   EXPECT_TRUE(waiter.Wait());
 
   std::string host_id = ExecuteScriptAndExtractString(
@@ -795,7 +798,8 @@ void RemoteDesktopBrowserTest::EnterPin(const std::string& pin,
   ConditionalTimeoutWaiter waiter(
       base::TimeDelta::FromSeconds(30),
       base::TimeDelta::FromSeconds(1),
-      base::Bind(&RemoteDesktopBrowserTest::IsPinFormVisible, this));
+      base::Bind(&RemoteDesktopBrowserTest::IsPinFormVisible,
+                 base::Unretained(this)));
   EXPECT_TRUE(waiter.Wait());
 
   ExecuteScript(
@@ -821,7 +825,8 @@ void RemoteDesktopBrowserTest::WaitForConnection() {
   ConditionalTimeoutWaiter waiter(
       base::TimeDelta::FromSeconds(30),
       base::TimeDelta::FromSeconds(1),
-      base::Bind(&RemoteDesktopBrowserTest::IsSessionConnected, this));
+      base::Bind(&RemoteDesktopBrowserTest::IsSessionConnected,
+                 base::Unretained(this)));
   EXPECT_TRUE(waiter.Wait());
 
   // The client is not yet ready to take input when the session state becomes
@@ -932,7 +937,8 @@ void RemoteDesktopBrowserTest::DisableRemoteConnection() {
   ConditionalTimeoutWaiter hostReadyWaiter(
         base::TimeDelta::FromSeconds(5),
         base::TimeDelta::FromMilliseconds(500),
-        base::Bind(&RemoteDesktopBrowserTest::IsLocalHostReady, this));
+        base::Bind(&RemoteDesktopBrowserTest::IsLocalHostReady,
+                   base::Unretained(this)));
   EXPECT_TRUE(hostReadyWaiter.Wait());
 
   ClickOnControl("stop-daemon");
@@ -941,7 +947,8 @@ void RemoteDesktopBrowserTest::DisableRemoteConnection() {
           base::TimeDelta::FromSeconds(30),
           base::TimeDelta::FromMilliseconds(500),
           base::Bind(&RemoteDesktopBrowserTest::IsAppModeEqualTo,
-                     this, "remoting.AppMode.HOST_SETUP_DONE"));
+                     base::Unretained(this),
+                     "remoting.AppMode.HOST_SETUP_DONE"));
   EXPECT_TRUE(setupDoneWaiter.Wait());
 
   ClickOnControl("host-config-done-dismiss");
@@ -950,7 +957,8 @@ void RemoteDesktopBrowserTest::DisableRemoteConnection() {
           base::TimeDelta::FromSeconds(5),
           base::TimeDelta::FromMilliseconds(500),
           base::Bind(&RemoteDesktopBrowserTest::IsAppModeEqualTo,
-                     this, "remoting.AppMode.HOME"));
+                     base::Unretained(this),
+                     "remoting.AppMode.HOME"));
   EXPECT_TRUE(homeWaiter.Wait());
 }
 

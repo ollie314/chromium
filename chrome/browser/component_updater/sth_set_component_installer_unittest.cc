@@ -44,9 +44,8 @@ class STHSetComponentInstallerTest : public PlatformTest {
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
-    std::unique_ptr<StoringSTHObserver> observer(new StoringSTHObserver());
-    observer_ = observer.get();
-    traits_.reset(new STHSetComponentInstallerTraits(std::move(observer)));
+    observer_.reset(new StoringSTHObserver());
+    traits_.reset(new STHSetComponentInstallerTraits(observer_.get()));
   }
 
   void WriteSTHToFile(const std::string& sth_json,
@@ -56,7 +55,7 @@ class STHSetComponentInstallerTest : public PlatformTest {
   }
 
   base::FilePath GetSTHsDir() {
-    return temp_dir_.path()
+    return temp_dir_.GetPath()
         .Append(FILE_PATH_LITERAL("_platform_specific"))
         .Append(FILE_PATH_LITERAL("all"))
         .Append(FILE_PATH_LITERAL("sths"));
@@ -64,13 +63,13 @@ class STHSetComponentInstallerTest : public PlatformTest {
 
   void CreateSTHsDir(const base::DictionaryValue& manifest,
                      const base::FilePath& sths_dir) {
-    ASSERT_FALSE(traits_->VerifyInstallation(manifest, temp_dir_.path()));
+    ASSERT_FALSE(traits_->VerifyInstallation(manifest, temp_dir_.GetPath()));
     ASSERT_TRUE(base::CreateDirectory(sths_dir));
   }
 
   void LoadSTHs(const base::DictionaryValue& manifest,
                 const base::FilePath& sths_dir) {
-    ASSERT_TRUE(traits_->VerifyInstallation(manifest, temp_dir_.path()));
+    ASSERT_TRUE(traits_->VerifyInstallation(manifest, temp_dir_.GetPath()));
 
     const base::Version v("1.0");
     traits_->LoadSTHsFromDisk(sths_dir, v);
@@ -82,8 +81,10 @@ class STHSetComponentInstallerTest : public PlatformTest {
   content::TestBrowserThreadBundle thread_bundle_;
 
   base::ScopedTempDir temp_dir_;
+  std::unique_ptr<StoringSTHObserver> observer_;
+  // |traits_| should be destroyed before the |observer_| as it holds a pointer
+  // to it.
   std::unique_ptr<STHSetComponentInstallerTraits> traits_;
-  StoringSTHObserver* observer_;
   safe_json::TestingJsonParser::ScopedFactoryOverride factory_override_;
 
  private:

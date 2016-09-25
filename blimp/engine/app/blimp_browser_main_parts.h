@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "blimp/engine/mojo/blob_channel_service.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/common/main_function_params.h"
 
@@ -20,6 +21,9 @@ struct MainFunctionParams;
 }
 
 namespace blimp {
+
+class BlobChannelSender;
+
 namespace engine {
 
 class BlimpBrowserContext;
@@ -39,6 +43,9 @@ class BlimpBrowserMainParts : public content::BrowserMainParts {
 
   BlimpBrowserContext* GetBrowserContext();
   SettingsManager* GetSettingsManager();
+  BlobChannelSender* GetBlobChannelSender();
+  BlobChannelService* GetBlobChannelService();
+  BlimpEngineSession* GetBlimpEngineSession();
 
  private:
   std::unique_ptr<BlimpEngineConfig> engine_config_;

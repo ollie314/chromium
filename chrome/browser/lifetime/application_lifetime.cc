@@ -6,6 +6,10 @@
 
 #include <memory>
 
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
+
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
@@ -40,12 +44,15 @@
 #include "base/sys_info.h"
 #include "chrome/browser/chromeos/boot_times_recorder.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/power_policy_controller.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/dbus/update_engine_client.h"
 #endif
 
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
+#include "chrome/common/chrome_constants.h"
 #endif
 
 namespace chrome {
@@ -150,6 +157,7 @@ void CloseAllBrowsers() {
 
 void AttemptUserExit() {
 #if defined(OS_CHROMEOS)
+  VLOG(1) << "AttemptUserExit";
   browser_shutdown::StartShutdownTracing();
   chromeos::BootTimesRecorder::Get()->AddLogoutTimeMarker("LogoutStarted",
                                                           false);
@@ -187,6 +195,23 @@ void AttemptUserExit() {
 // The Android implementation is in application_lifetime_android.cc
 #if !defined(OS_ANDROID)
 void AttemptRestart() {
+#if defined(OS_WIN)
+  // On Windows, Breakpad will upload crash reports if the breakpad pipe name
+  // environment variable is defined. So we undefine this environment variable
+  // before restarting, as the restarted processes will inherit their
+  // environment variables from ours, thus suppressing crash uploads.
+  if (!ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled()) {
+    HMODULE exe_module = GetModuleHandle(chrome::kBrowserProcessExecutableName);
+    if (exe_module) {
+      typedef void (__cdecl *ClearBreakpadPipeEnvVar)();
+      ClearBreakpadPipeEnvVar clear = reinterpret_cast<ClearBreakpadPipeEnvVar>(
+          GetProcAddress(exe_module, "ClearBreakpadPipeEnvironmentVariable"));
+      if (clear)
+        clear();
+    }
+  }
+#endif  // defined(OS_WIN)
+
   // TODO(beng): Can this use ProfileManager::GetLoadedProfiles instead?
   for (auto* browser : *BrowserList::GetInstance())
     content::BrowserContext::SaveSessionState(browser->profile());
@@ -209,7 +234,15 @@ void AttemptRestart() {
   AttemptExit();
 #endif
 }
+#endif  // !defined(OS_ANDROID)
+
+void AttemptRelaunch() {
+#if defined(OS_CHROMEOS)
+  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart();
+  // If running the Chrome OS build, but we're not on the device, fall through.
 #endif
+  chrome::AttemptRestart();
+}
 
 void AttemptExit() {
 #if defined(OS_CHROMEOS)
@@ -232,6 +265,7 @@ void AttemptExit() {
 #if defined(OS_CHROMEOS)
 // A function called when SIGTERM is received.
 void ExitCleanly() {
+  VLOG(1) << "ExitCleanly";
   // We always mark exit cleanly.
   MarkAsCleanShutdown();
 
@@ -272,6 +306,13 @@ void SessionEnding() {
   shutdown_watcher.Arm(base::TimeDelta::FromSeconds(90));
 
   browser_shutdown::OnShutdownStarting(browser_shutdown::END_SESSION);
+
+  // In a clean shutdown, browser_shutdown::OnShutdownStarting sets
+  // g_shutdown_type, and browser_shutdown::ShutdownPreThreadsStop calls
+  // RecordShutdownInfoPrefs to update the pref with the value. However, here
+  // the process is going to exit without calling ShutdownPreThreadsStop.
+  // Instead, here we call RecordShutdownInfoPrefs to record the shutdown info.
+  browser_shutdown::RecordShutdownInfoPrefs();
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
@@ -324,6 +365,9 @@ void NotifyAndTerminate(bool fast_path) {
     NotifyAppTerminating();
 
 #if defined(OS_CHROMEOS)
+  if (chromeos::PowerPolicyController::IsInitialized())
+    chromeos::PowerPolicyController::Get()->NotifyChromeIsExiting();
+
   if (base::SysInfo::IsRunningOnChromeOS()) {
     // If we're on a ChromeOS device, reboot if an update has been applied,
     // or else signal the session manager to log out.

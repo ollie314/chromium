@@ -108,7 +108,7 @@ TEST_F(MacUtilTest, DISABLED_TestExcludeFileFromBackups) {
   // The file must already exist in order to set its exclusion property.
   ScopedTempDir temp_dir_;
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  FilePath dummy_file_path = temp_dir_.path().Append("DummyFile");
+  FilePath dummy_file_path = temp_dir_.GetPath().Append("DummyFile");
   const char dummy_data[] = "All your base are belong to us!";
   // Dump something real into the file.
   ASSERT_EQ(static_cast<int>(arraysize(dummy_data)),
@@ -145,88 +145,64 @@ TEST_F(MacUtilTest, IsOSEllipsis) {
   base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
 
   if (major == 10) {
-    if (minor == 7) {
-      EXPECT_TRUE(IsOSLion());
-      EXPECT_TRUE(IsOSLionOrEarlier());
-      EXPECT_TRUE(IsOSLionOrLater());
-      EXPECT_FALSE(IsOSMountainLion());
-      EXPECT_TRUE(IsOSMountainLionOrEarlier());
-      EXPECT_FALSE(IsOSMountainLionOrLater());
-      EXPECT_FALSE(IsOSMavericks());
-      EXPECT_TRUE(IsOSMavericksOrEarlier());
-      EXPECT_FALSE(IsOSMavericksOrLater());
-      EXPECT_FALSE(IsOSYosemite());
-      EXPECT_TRUE(IsOSYosemiteOrEarlier());
-      EXPECT_FALSE(IsOSYosemiteOrLater());
-      EXPECT_FALSE(IsOSElCapitan());
-      EXPECT_FALSE(IsOSElCapitanOrLater());
-      EXPECT_FALSE(IsOSLaterThanElCapitan_DontCallThis());
-    } else if (minor == 8) {
-      EXPECT_FALSE(IsOSLion());
-      EXPECT_FALSE(IsOSLionOrEarlier());
-      EXPECT_TRUE(IsOSLionOrLater());
-      EXPECT_TRUE(IsOSMountainLion());
-      EXPECT_TRUE(IsOSMountainLionOrEarlier());
-      EXPECT_TRUE(IsOSMountainLionOrLater());
-      EXPECT_FALSE(IsOSMavericks());
-      EXPECT_TRUE(IsOSMavericksOrEarlier());
-      EXPECT_FALSE(IsOSMavericksOrLater());
-      EXPECT_FALSE(IsOSYosemite());
-      EXPECT_TRUE(IsOSYosemiteOrEarlier());
-      EXPECT_FALSE(IsOSYosemiteOrLater());
-      EXPECT_FALSE(IsOSElCapitan());
-      EXPECT_FALSE(IsOSElCapitanOrLater());
-      EXPECT_FALSE(IsOSLaterThanElCapitan_DontCallThis());
-    } else if (minor == 9) {
-      EXPECT_FALSE(IsOSLion());
-      EXPECT_FALSE(IsOSLionOrEarlier());
-      EXPECT_TRUE(IsOSLionOrLater());
-      EXPECT_FALSE(IsOSMountainLion());
-      EXPECT_FALSE(IsOSMountainLionOrEarlier());
-      EXPECT_TRUE(IsOSMountainLionOrLater());
-      EXPECT_TRUE(IsOSMavericks());
-      EXPECT_TRUE(IsOSMavericksOrEarlier());
-      EXPECT_TRUE(IsOSMavericksOrLater());
-      EXPECT_FALSE(IsOSYosemite());
-      EXPECT_TRUE(IsOSYosemiteOrEarlier());
-      EXPECT_FALSE(IsOSYosemiteOrLater());
-      EXPECT_FALSE(IsOSElCapitan());
-      EXPECT_FALSE(IsOSElCapitanOrLater());
-      EXPECT_FALSE(IsOSLaterThanElCapitan_DontCallThis());
+    if (minor == 9) {
+      EXPECT_TRUE(IsOS10_9());
+      EXPECT_TRUE(IsAtMostOS10_9());
+      EXPECT_TRUE(IsAtLeastOS10_9());
+      EXPECT_FALSE(IsOS10_10());
+      EXPECT_TRUE(IsAtMostOS10_10());
+      EXPECT_FALSE(IsAtLeastOS10_10());
+      EXPECT_FALSE(IsOS10_11());
+      EXPECT_TRUE(IsAtMostOS10_11());
+      EXPECT_FALSE(IsAtLeastOS10_11());
+      EXPECT_FALSE(IsOS10_12());
+      EXPECT_FALSE(IsAtLeastOS10_12());
+      EXPECT_TRUE(IsAtMostOS10_12());
+      EXPECT_FALSE(IsOSLaterThan10_12_DontCallThis());
     } else if (minor == 10) {
-      EXPECT_FALSE(IsOSLion());
-      EXPECT_FALSE(IsOSLionOrEarlier());
-      EXPECT_TRUE(IsOSLionOrLater());
-      EXPECT_FALSE(IsOSMountainLion());
-      EXPECT_FALSE(IsOSMountainLionOrEarlier());
-      EXPECT_TRUE(IsOSMountainLionOrLater());
-      EXPECT_FALSE(IsOSMavericks());
-      EXPECT_FALSE(IsOSMavericksOrEarlier());
-      EXPECT_TRUE(IsOSMavericksOrLater());
-      EXPECT_TRUE(IsOSYosemite());
-      EXPECT_TRUE(IsOSYosemiteOrEarlier());
-      EXPECT_TRUE(IsOSYosemiteOrLater());
-      EXPECT_FALSE(IsOSElCapitan());
-      EXPECT_FALSE(IsOSElCapitanOrLater());
-      EXPECT_FALSE(IsOSLaterThanElCapitan_DontCallThis());
+      EXPECT_FALSE(IsOS10_9());
+      EXPECT_FALSE(IsAtMostOS10_9());
+      EXPECT_TRUE(IsAtLeastOS10_9());
+      EXPECT_TRUE(IsOS10_10());
+      EXPECT_TRUE(IsAtMostOS10_10());
+      EXPECT_TRUE(IsAtLeastOS10_10());
+      EXPECT_FALSE(IsOS10_11());
+      EXPECT_TRUE(IsAtMostOS10_11());
+      EXPECT_FALSE(IsAtLeastOS10_11());
+      EXPECT_FALSE(IsOS10_12());
+      EXPECT_FALSE(IsAtLeastOS10_12());
+      EXPECT_TRUE(IsAtMostOS10_12());
+      EXPECT_FALSE(IsOSLaterThan10_12_DontCallThis());
     } else if (minor == 11) {
-      EXPECT_FALSE(IsOSLion());
-      EXPECT_FALSE(IsOSLionOrEarlier());
-      EXPECT_TRUE(IsOSLionOrLater());
-      EXPECT_FALSE(IsOSMountainLion());
-      EXPECT_FALSE(IsOSMountainLionOrEarlier());
-      EXPECT_TRUE(IsOSMountainLionOrLater());
-      EXPECT_FALSE(IsOSMavericks());
-      EXPECT_FALSE(IsOSMavericksOrEarlier());
-      EXPECT_TRUE(IsOSMavericksOrLater());
-      EXPECT_FALSE(IsOSYosemite());
-      EXPECT_FALSE(IsOSYosemiteOrEarlier());
-      EXPECT_TRUE(IsOSYosemiteOrLater());
-      EXPECT_TRUE(IsOSElCapitan());
-      EXPECT_TRUE(IsOSElCapitanOrLater());
-      EXPECT_FALSE(IsOSLaterThanElCapitan_DontCallThis());
+      EXPECT_FALSE(IsOS10_9());
+      EXPECT_FALSE(IsAtMostOS10_9());
+      EXPECT_TRUE(IsAtLeastOS10_9());
+      EXPECT_FALSE(IsOS10_10());
+      EXPECT_FALSE(IsAtMostOS10_10());
+      EXPECT_TRUE(IsAtLeastOS10_10());
+      EXPECT_TRUE(IsOS10_11());
+      EXPECT_TRUE(IsAtMostOS10_11());
+      EXPECT_TRUE(IsAtLeastOS10_11());
+      EXPECT_FALSE(IsOS10_12());
+      EXPECT_FALSE(IsAtLeastOS10_12());
+      EXPECT_TRUE(IsAtMostOS10_12());
+      EXPECT_FALSE(IsOSLaterThan10_12_DontCallThis());
+    } else if (minor == 12) {
+      EXPECT_FALSE(IsOS10_9());
+      EXPECT_FALSE(IsAtMostOS10_9());
+      EXPECT_TRUE(IsAtLeastOS10_9());
+      EXPECT_FALSE(IsOS10_10());
+      EXPECT_FALSE(IsAtMostOS10_10());
+      EXPECT_TRUE(IsAtLeastOS10_10());
+      EXPECT_FALSE(IsOS10_11());
+      EXPECT_FALSE(IsAtMostOS10_11());
+      EXPECT_TRUE(IsAtLeastOS10_11());
+      EXPECT_TRUE(IsOS10_12());
+      EXPECT_TRUE(IsAtMostOS10_12());
+      EXPECT_TRUE(IsAtLeastOS10_12());
+      EXPECT_FALSE(IsOSLaterThan10_12_DontCallThis());
     } else {
-      // Not six, seven, eight, nine, ten, or eleven. Ah, ah, ah.
+      // Not nine, ten, eleven, or twelve. Ah, ah, ah.
       EXPECT_TRUE(false);
     }
   } else {
@@ -259,7 +235,7 @@ TEST_F(MacUtilTest, ParseModelIdentifier) {
 TEST_F(MacUtilTest, TestRemoveQuarantineAttribute) {
   ScopedTempDir temp_dir_;
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  FilePath dummy_folder_path = temp_dir_.path().Append("DummyFolder");
+  FilePath dummy_folder_path = temp_dir_.GetPath().Append("DummyFolder");
   ASSERT_TRUE(base::CreateDirectory(dummy_folder_path));
   const char* quarantine_str = "0000;4b392bb2;Chromium;|org.chromium.Chromium";
   const char* file_path_str = dummy_folder_path.value().c_str();
@@ -276,7 +252,7 @@ TEST_F(MacUtilTest, TestRemoveQuarantineAttribute) {
 TEST_F(MacUtilTest, TestRemoveQuarantineAttributeTwice) {
   ScopedTempDir temp_dir_;
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  FilePath dummy_folder_path = temp_dir_.path().Append("DummyFolder");
+  FilePath dummy_folder_path = temp_dir_.GetPath().Append("DummyFolder");
   const char* file_path_str = dummy_folder_path.value().c_str();
   ASSERT_TRUE(base::CreateDirectory(dummy_folder_path));
   EXPECT_EQ(-1, getxattr(file_path_str, "com.apple.quarantine", NULL, 0, 0, 0));
@@ -291,7 +267,7 @@ TEST_F(MacUtilTest, TestRemoveQuarantineAttributeTwice) {
 TEST_F(MacUtilTest, TestRemoveQuarantineAttributeNonExistentPath) {
   ScopedTempDir temp_dir_;
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  FilePath non_existent_path = temp_dir_.path().Append("DummyPath");
+  FilePath non_existent_path = temp_dir_.GetPath().Append("DummyPath");
   ASSERT_FALSE(PathExists(non_existent_path));
   EXPECT_FALSE(RemoveQuarantineAttribute(non_existent_path));
 }

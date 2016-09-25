@@ -28,6 +28,8 @@
 #include "core/css/CSSStyleSheet.h"
 #include "core/dom/DOMTokenList.h"
 #include "core/dom/IconURL.h"
+#include "core/dom/IncrementLoadEventDelayCount.h"
+#include "core/dom/StyleEngine.h"
 #include "core/fetch/ResourceOwner.h"
 #include "core/fetch/StyleSheetResource.h"
 #include "core/fetch/StyleSheetResourceClient.h"
@@ -37,6 +39,7 @@
 #include "core/html/RelList.h"
 #include "core/loader/LinkLoader.h"
 #include "core/loader/LinkLoaderClient.h"
+#include <memory>
 
 namespace blink {
 
@@ -44,14 +47,11 @@ class HTMLLinkElement;
 class KURL;
 class LinkImport;
 
-template<typename T> class EventSender;
-using LinkEventSender = EventSender<HTMLLinkElement>;
-
 //
-// LinkStyle handles dynaically change-able link resources, which is
+// LinkStyle handles dynamically change-able link resources, which is
 // typically @rel="stylesheet".
 //
-// It could be @rel="shortcut icon" or soething else though. Each of
+// It could be @rel="shortcut icon" or something else though. Each of
 // types might better be handled by a separate class, but dynamically
 // changing @rel makes it harder to move such a design so we are
 // sticking current way so far.
@@ -75,7 +75,7 @@ public:
     bool sheetLoaded();
 
     void setDisabledState(bool);
-    void setSheetTitle(const String&);
+    void setSheetTitle(const String&, StyleEngine::ActiveSheetsUpdate = StyleEngine::DontUpdateActiveSheets);
 
     bool styleSheetIsLoading() const;
     bool hasSheet() const { return m_sheet; }
@@ -110,7 +110,7 @@ private:
     void setCrossOriginStylesheetStatus(CSSStyleSheet*);
     void setFetchFollowingCORS()
     {
-        ASSERT(!m_fetchFollowingCORS);
+        DCHECK(!m_fetchFollowingCORS);
         m_fetchFollowingCORS = true;
     }
     void clearFetchFollowingCORS()
@@ -121,6 +121,7 @@ private:
     Member<CSSStyleSheet> m_sheet;
     DisabledState m_disabledState;
     PendingSheetType m_pendingSheetType;
+    StyleEngineContext m_styleEngineContext;
     bool m_loading;
     bool m_firedLoad;
     bool m_loadedSheet;
@@ -164,10 +165,8 @@ public:
 
     DOMTokenList* sizes() const;
 
-    void dispatchPendingEvent(LinkEventSender*);
+    void dispatchPendingEvent(std::unique_ptr<IncrementLoadEventDelayCount>);
     void scheduleEvent();
-    void dispatchEventImmediately();
-    static void dispatchPendingLoadEvents();
 
     // From LinkLoaderClient
     bool shouldLoadLink() override;
@@ -178,11 +177,9 @@ public:
     bool shouldProcessStyle() { return linkResourceToProcess() && linkStyle(); }
     bool isCreatedByParser() const { return m_createdByParser; }
 
-    // Parse the icon size attribute into |iconSizes|, make this method public
-    // visible for testing purpose.
-    static void parseSizesAttribute(const AtomicString& value, Vector<IntSize>& iconSizes);
-
     DECLARE_VIRTUAL_TRACE();
+
+    DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
 private:
     HTMLLinkElement(Document&, bool createdByParser);
@@ -230,7 +227,6 @@ private:
     String m_scope;
 
     bool m_createdByParser;
-    bool m_isInShadowTree;
 };
 
 } // namespace blink

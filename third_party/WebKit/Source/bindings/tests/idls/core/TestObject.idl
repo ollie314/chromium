@@ -32,7 +32,9 @@ enum TestEnum {"", "EnumValue1", "EnumValue2", "EnumValue3"};
 
 callback VoidCallbackFunction = void ();
 callback AnyCallbackFunctionOptionalAnyArg = any (optional any optionalAnyArg);
-
+[ExperimentalCallbackFunction] callback VoidExperimentalCallbackFunction = void ();
+[ExperimentalCallbackFunction] callback LongExperimentalCallbackFunction = long (long num1, long num2);
+[ExperimentalCallbackFunction] callback VoidCallbackFunctionInterfaceArg = void (HTMLDivElement divElement);
 // No extended attributes on the interface; those go in TestInterface.idl
 interface TestObject {
     // Constants
@@ -259,13 +261,13 @@ interface TestObject {
     [Reflect=reflectUrlAttribute, URL] attribute DOMString urlStringAttribute;
     [Unforgeable] attribute long unforgeableLongAttribute;
     [Measure] attribute long measuredLongAttribute;
-    [SameObject] attribute TestInterface sameObjectAttribute;
-    [Unscopeable] attribute long unscopeableLongAttribute;
-    [Unscopeable, OriginTrialEnabled=FeatureName] attribute long unscopeableOriginTrialEnabledLongAttribute;
-    [Unscopeable, RuntimeEnabled=FeatureName] attribute long unscopeableRuntimeEnabledLongAttribute;
-    [Unscopeable] void unscopeableVoidMethod();
-    [Unscopeable, RuntimeEnabled=FeatureName] void unscopeableRuntimeEnabledVoidMethod();
-
+    [SameObject] readonly attribute TestInterface sameObjectAttribute;
+    [SameObject, SaveSameObject] readonly attribute TestInterface saveSameObjectAttribute;
+    [Unscopable] attribute long unscopableLongAttribute;
+    [Unscopable, OriginTrialEnabled=FeatureName] attribute long unscopableOriginTrialEnabledLongAttribute;
+    [Unscopable, RuntimeEnabled=FeatureName] attribute long unscopableRuntimeEnabledLongAttribute;
+    [Unscopable] void unscopableVoidMethod();
+    [Unscopable, RuntimeEnabled=FeatureName] void unscopableRuntimeEnabledVoidMethod();
 
     // Methods
     //
@@ -322,6 +324,8 @@ interface TestObject {
     void voidMethodOptionalVoidCallbackFunctionArg(optional VoidCallbackFunction voidCallbackFunctionArg);
     void voidMethodNullableVoidCallbackFunctionArg(VoidCallbackFunction? voidCallbackFunctionArg);
     void voidMethodAnyCallbackFunctionOptionalAnyArg(AnyCallbackFunctionOptionalAnyArg anyCallbackFunctionOptionalAnyArgArg);
+    void voidMethodVoidExperimentalCallbackFunctionArg(VoidExperimentalCallbackFunction voidExperimentalCallbackFunctionArg);
+    void voidMethodLongExperimentalCallbackFunctionArg(LongExperimentalCallbackFunction longExperimentalCallbackFunctionArg);
     // Custom type conversions
     any anyMethod();
     void voidMethodEventTargetArg(EventTarget eventTargetArg);
@@ -474,6 +478,8 @@ interface TestObject {
     void overloadedMethodK(DOMString stringArg);
     void overloadedMethodL(long longArg, any... restArgs);
     void overloadedMethodL(DOMString stringArg, any... restArgs);
+    void overloadedMethodN(TestInterface testInterfaceArg);
+    void overloadedMethodN(TestCallbackInterface testCallbackInterfaceArg);
 
     Promise promiseOverloadMethod();
     Promise promiseOverloadMethod(Window arg1, double arg2);
@@ -547,12 +553,14 @@ interface TestObject {
     [NotEnumerable] void notEnumerableVoidMethod();
     [OriginTrialEnabled=FeatureName] void originTrialEnabledVoidMethod();
     [PerWorldBindings, OriginTrialEnabled=FeatureName] void perWorldBindingsOriginTrialEnabledVoidMethod();
-    [OriginTrialEnabled=FeatureName] void originTrialEnabledOverloadedVoidMethod(DOMString stringArg);
-    [OriginTrialEnabled=FeatureName] void originTrialEnabledOverloadedVoidMethod(long longArg);
-    [OriginTrialEnabled=FeatureName1] void partiallyOriginTrialEnabledOverloadedVoidMethod(DOMString stringArg);
-    [OriginTrialEnabled=FeatureName2] void partiallyOriginTrialEnabledOverloadedVoidMethod(TestInterface testInterfaceArg);
-    void partiallyOriginTrialEnabledOverloadedVoidMethod(long longArg, DOMString stringArg);
-    [OriginTrialEnabled=FeatureName3] void partiallyOriginTrialEnabledOverloadedVoidMethod(long longArg, DOMString stringArg, TestInterface testInterfaceArg);
+    // TODO(iclelland): Re-enable origin trials on overloaded methods
+    // (crbug.com/621641)
+    // [OriginTrialEnabled=FeatureName] void originTrialEnabledOverloadedVoidMethod(DOMString stringArg);
+    // [OriginTrialEnabled=FeatureName] void originTrialEnabledOverloadedVoidMethod(long longArg);
+    // [OriginTrialEnabled=FeatureName1] void partiallyOriginTrialEnabledOverloadedVoidMethod(DOMString stringArg);
+    // [OriginTrialEnabled=FeatureName2] void partiallyOriginTrialEnabledOverloadedVoidMethod(TestInterface testInterfaceArg);
+    // void partiallyOriginTrialEnabledOverloadedVoidMethod(long longArg, DOMString stringArg);
+    // [OriginTrialEnabled=FeatureName3] void partiallyOriginTrialEnabledOverloadedVoidMethod(long longArg, DOMString stringArg, TestInterface testInterfaceArg);
     [PerWorldBindings] void perWorldBindingsVoidMethod();
     [PerWorldBindings] void perWorldBindingsVoidMethodTestInterfaceEmptyArg(TestInterfaceEmpty testInterfaceEmptyArg);
     [PostMessage, RaisesException] void postMessage(SerializedScriptValue message, optional sequence<Transferable> transfer);

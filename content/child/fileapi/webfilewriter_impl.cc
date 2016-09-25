@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/child/child_thread_impl.h"
 #include "content/child/fileapi/file_system_dispatcher.h"
 #include "content/public/child/worker_thread.h"
@@ -36,8 +36,11 @@ class WebFileWriterImpl::WriterBridge
         task_runner_(running_on_worker_ ? base::ThreadTaskRunnerHandle::Get()
                                         : nullptr),
         written_bytes_(0) {
-    if (type == WebFileWriterImpl::TYPE_SYNC)
-      waitable_event_.reset(new base::WaitableEvent(false, false));
+    if (type == WebFileWriterImpl::TYPE_SYNC) {
+      waitable_event_.reset(new base::WaitableEvent(
+          base::WaitableEvent::ResetPolicy::AUTOMATIC,
+          base::WaitableEvent::InitialState::NOT_SIGNALED));
+    }
   }
 
   void Truncate(const GURL& path,

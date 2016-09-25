@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -64,7 +64,7 @@ void UserCloudPolicyInvalidator::Observe(
     const content::NotificationDetails& details) {
   // Initialize now that profile creation is complete and the invalidation
   // service can safely be initialized.
-  DCHECK(type == chrome::NOTIFICATION_PROFILE_ADDED);
+  DCHECK_EQ(chrome::NOTIFICATION_PROFILE_ADDED, type);
   invalidation::ProfileInvalidationProvider* invalidation_provider =
       invalidation::ProfileInvalidationProviderFactory::GetForProfile(profile_);
   if (invalidation_provider)

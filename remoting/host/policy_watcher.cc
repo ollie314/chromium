@@ -23,7 +23,7 @@
 #include "components/policy/core/common/policy_service_impl.h"
 #include "components/policy/core/common/schema.h"
 #include "components/policy/core/common/schema_registry.h"
-#include "policy/policy_constants.h"
+#include "components/policy/policy_constants.h"
 #include "remoting/host/dns_blackhole_checker.h"
 #include "remoting/host/third_party_auth_config.h"
 #include "remoting/protocol/port_range.h"
@@ -52,7 +52,7 @@ namespace {
 std::unique_ptr<base::DictionaryValue> CopyValuesAndAddDefaults(
     const base::DictionaryValue& from,
     const base::DictionaryValue& default_values) {
-  std::unique_ptr<base::DictionaryValue> to(default_values.DeepCopy());
+  std::unique_ptr<base::DictionaryValue> to(default_values.CreateDeepCopy());
   for (base::DictionaryValue::Iterator i(default_values); !i.IsAtEnd();
        i.Advance()) {
     const base::Value* value = nullptr;
@@ -63,7 +63,7 @@ std::unique_ptr<base::DictionaryValue> CopyValuesAndAddDefaults(
     }
 
     CHECK(value->IsType(i.value().GetType()));
-    to->Set(i.key(), value->DeepCopy());
+    to->Set(i.key(), value->CreateDeepCopy());
   }
 
   return to;
@@ -90,16 +90,16 @@ std::unique_ptr<base::DictionaryValue> CopyChromotingPoliciesIntoDictionary(
   const char kPolicyNameSubstring[] = "RemoteAccessHost";
   std::unique_ptr<base::DictionaryValue> policy_dict(
       new base::DictionaryValue());
-  for (auto it = current.begin(); it != current.end(); ++it) {
-    const std::string& key = it->first;
-    const base::Value* value = it->second.value;
+  for (const auto& entry : current) {
+    const std::string& key = entry.first;
+    const base::Value* value = entry.second.value.get();
 
     // Copying only Chromoting-specific policies helps avoid false alarms
     // raised by NormalizePolicies below (such alarms shutdown the host).
     // TODO(lukasza): Removing this somewhat brittle filtering will be possible
     //                after having separate, Chromoting-specific schema.
     if (key.find(kPolicyNameSubstring) != std::string::npos) {
-      policy_dict->Set(key, value->DeepCopy());
+      policy_dict->Set(key, value->CreateDeepCopy());
     }
   }
 
@@ -195,6 +195,8 @@ PolicyWatcher::PolicyWatcher(
   default_values_->SetBoolean(key::kRemoteAccessHostAllowRelayedConnection,
                               true);
   default_values_->SetString(key::kRemoteAccessHostUdpPortRange, "");
+  default_values_->SetBoolean(
+      key::kRemoteAccessHostAllowUiAccessForRemoteAssistance, false);
 }
 
 PolicyWatcher::~PolicyWatcher() {
@@ -243,7 +245,7 @@ void CopyDictionaryValue(const base::DictionaryValue& from,
                          std::string key) {
   const base::Value* value;
   if (from.Get(key, &value)) {
-    to.Set(key, value->DeepCopy());
+    to.Set(key, value->CreateDeepCopy());
   }
 }
 }  // namespace
@@ -259,7 +261,7 @@ PolicyWatcher::StoreNewAndReturnChangedPolicies(
     base::Value* old_policy;
     if (!(old_policies_->Get(iter.key(), &old_policy) &&
           old_policy->Equals(&iter.value()))) {
-      changed_policies->Set(iter.key(), iter.value().DeepCopy());
+      changed_policies->Set(iter.key(), iter.value().CreateDeepCopy());
     }
     iter.Advance();
   }
@@ -374,6 +376,12 @@ std::unique_ptr<PolicyWatcher> PolicyWatcher::Create(
       policy::POLICY_SCOPE_MACHINE));
 #elif defined(OS_ANDROID)
   NOTIMPLEMENTED();
+  policy::PolicyServiceImpl::Providers providers;
+  std::unique_ptr<policy::PolicyService> owned_policy_service(
+      new policy::PolicyServiceImpl(providers));
+  return base::WrapUnique(new PolicyWatcher(
+      owned_policy_service.get(), std::move(owned_policy_service), nullptr,
+      CreateSchemaRegistry()));
 #else
 #error OS that is not yet supported by PolicyWatcher code.
 #endif

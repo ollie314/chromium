@@ -4,7 +4,6 @@
 
 #include "platform/fonts/SymbolsIterator.h"
 
-#include "platform/Logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include <string>
 
@@ -97,7 +96,7 @@ TEST_F(SymbolsIteratorTest, LatinColorEmojiTextEmoji)
 
 TEST_F(SymbolsIteratorTest, IgnoreVSInMath)
 {
-    CHECK_RUNS({ { "⊆⊇⊈\xEF\xB8\x8E⊙⊚⊚", FontFallbackPriority::Math } });
+    CHECK_RUNS({ { "⊆⊇⊈\xEF\xB8\x8E⊙⊚⊚", FontFallbackPriority::Text } });
 }
 
 TEST_F(SymbolsIteratorTest, IgnoreVS15InText)
@@ -110,17 +109,29 @@ TEST_F(SymbolsIteratorTest, IgnoreVS16InText)
     CHECK_RUNS({ { "abcdef\xEF\xB8\x8Fghji", FontFallbackPriority::Text } });
 }
 
+TEST_F(SymbolsIteratorTest, AllHexValuesText)
+{
+    // Helps with detecting incorrect emoji pattern definitions which are
+    // missing a \U000... prefix for example.
+    CHECK_RUNS({ { "abcdef0123456789ABCDEF", FontFallbackPriority::Text } });
+}
+
 TEST_F(SymbolsIteratorTest, NumbersAndHashNormalAndEmoji)
 {
-    CHECK_RUNS({ { "0123456789#", FontFallbackPriority::Text },
-        { "0⃣1⃣2⃣3⃣4⃣5⃣6⃣7⃣8⃣9⃣#⃣", FontFallbackPriority::EmojiEmoji },
-        { "0123456789#", FontFallbackPriority::Text } });
+    CHECK_RUNS({ { "0123456789#*", FontFallbackPriority::Text },
+        { "0⃣1⃣2⃣3⃣4⃣5⃣6⃣7⃣8⃣9⃣*⃣", FontFallbackPriority::EmojiEmoji },
+        { "0123456789#*", FontFallbackPriority::Text } });
 }
 
 
 TEST_F(SymbolsIteratorTest, SingleFlag)
 {
     CHECK_RUNS({ { "🇺", FontFallbackPriority::Text } });
+}
+
+TEST_F(SymbolsIteratorTest, CombiningCircle)
+{
+    CHECK_RUNS({ { "◌́◌̀◌̈◌̂◌̄◌̊", FontFallbackPriority::Text } });
 }
 
 // TODO: Perhaps check for invalid country indicator combinations?
@@ -157,6 +168,28 @@ TEST_F(SymbolsIteratorTest, AllEmojiZWSSequences)
         FontFallbackPriority::EmojiEmoji } });
 }
 
+TEST_F(SymbolsIteratorTest, ModifierPlusGender)
+{
+    CHECK_RUNS({ { "⛹🏻‍♂", FontFallbackPriority::EmojiEmoji } });
+}
+
+TEST_F(SymbolsIteratorTest, TextMemberZwjSequence)
+{
+    CHECK_RUNS({ { "👨‍⚕", FontFallbackPriority::EmojiEmoji } });
+}
+
+TEST_F(SymbolsIteratorTest, FacepalmCartwheelShrugModifierFemale)
+{
+    CHECK_RUNS({ { "🤦‍♀🤸‍♀🤷‍♀🤷🏾‍♀", FontFallbackPriority::EmojiEmoji } });
+}
+
+TEST_F(SymbolsIteratorTest, AesculapiusMaleFemalEmoji)
+{
+    // Emoji Data 4 has upgraded those three characters to Emoji.
+    CHECK_RUNS({ { "a", FontFallbackPriority::Text },
+        { "⚕♀♂", FontFallbackPriority::EmojiText } });
+}
+
 TEST_F(SymbolsIteratorTest, EyeSpeechBubble)
 {
     CHECK_RUNS({ { "👁‍🗨", FontFallbackPriority::EmojiEmoji } });
@@ -183,10 +216,7 @@ TEST_F(SymbolsIteratorTest, ExtraZWJPrefix)
 
 TEST_F(SymbolsIteratorTest, Arrows)
 {
-    CHECK_RUNS({ { "x", FontFallbackPriority::Text },
-        { "→←", FontFallbackPriority::Math },
-        { "x", FontFallbackPriority::Text },
-        { "←↑↓→", FontFallbackPriority::Math } });
+    CHECK_RUNS({ { "x→←x←↑↓→", FontFallbackPriority::Text } });
 }
 
 } // namespace blink

@@ -25,7 +25,6 @@ class Rect;
 
 namespace blink {
 class WebMouseEvent;
-struct WebScreenInfo;
 }
 
 namespace content {
@@ -34,6 +33,7 @@ class RenderProcessHost;
 class RenderWidgetHostImpl;
 class RenderWidgetHostIterator;
 class RenderWidgetHostView;
+struct ScreenInfo;
 
 // A RenderWidgetHost manages the browser side of a browser<->renderer
 // HWND connection.  The HWND lives in the browser process, and
@@ -218,6 +218,11 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   // warning too soon.
   virtual void RestartHangMonitorTimeout() = 0;
 
+  // Stops and disables hang monitor. This avoids flakiness in tests that need
+  // to observe things like beforeunload dialogs, which could fail if the
+  // timeout skips the dialog.
+  virtual void DisableHangMonitorForTesting() = 0;
+
   virtual void SetIgnoreInputEvents(bool ignore_input_events) = 0;
 
   // Called to notify the RenderWidget that it has been resized.
@@ -239,10 +244,20 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Sender {
   virtual void AddMouseEventCallback(const MouseEventCallback& callback) = 0;
   virtual void RemoveMouseEventCallback(const MouseEventCallback& callback) = 0;
 
+  // Observer for WebInputEvents (but not input event acks).
+  class InputEventObserver {
+   public:
+    virtual ~InputEventObserver() {}
+
+    virtual void OnInputEvent(const blink::WebInputEvent&) = 0;
+  };
+
+  // Add/remove an input event observer.
+  virtual void AddInputEventObserver(InputEventObserver* observer) = 0;
+  virtual void RemoveInputEventObserver(InputEventObserver* observer) = 0;
+
   // Get the screen info corresponding to this render widget.
-  virtual void GetWebScreenInfo(blink::WebScreenInfo* result) = 0;
-  // Get the color profile corresponding to this render widget.
-  virtual bool GetScreenColorProfile(std::vector<char>* color_profile) = 0;
+  virtual void GetScreenInfo(ScreenInfo* result) = 0;
 
   // Sends a compositor proto to the render widget.
   virtual void HandleCompositorProto(const std::vector<uint8_t>& proto) = 0;

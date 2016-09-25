@@ -6,6 +6,7 @@
 
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
+#include "wtf/Assertions.h"
 
 namespace blink {
 
@@ -16,16 +17,16 @@ DOMException* PushError::take(ScriptPromiseResolver*, const WebPushError& webErr
         return DOMException::create(AbortError, webError.message);
     case WebPushError::ErrorTypeNetwork:
         return DOMException::create(NetworkError, webError.message);
+    case WebPushError::ErrorTypeNotAllowed:
+        return DOMException::create(NotAllowedError, webError.message);
     case WebPushError::ErrorTypeNotFound:
         return DOMException::create(NotFoundError, webError.message);
     case WebPushError::ErrorTypeNotSupported:
         return DOMException::create(NotSupportedError, webError.message);
-    case WebPushError::ErrorTypePermissionDenied:
-        return DOMException::create(PermissionDeniedError, webError.message);
     case WebPushError::ErrorTypeUnknown:
         return DOMException::create(UnknownError, webError.message);
     }
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return DOMException::create(UnknownError);
 }
 

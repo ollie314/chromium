@@ -4,6 +4,7 @@
 
 #include "core/html/HTMLTextFormControlElement.h"
 
+#include "core/dom/Document.h"
 #include "core/dom/Text.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/Position.h"
@@ -12,7 +13,6 @@
 #include "core/editing/spellcheck/SpellChecker.h"
 #include "core/frame/FrameView.h"
 #include "core/html/HTMLBRElement.h"
-#include "core/html/HTMLDocument.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLTextAreaElement.h"
 #include "core/layout/LayoutTreeAsText.h"
@@ -21,7 +21,8 @@
 #include "core/testing/DummyPageHolder.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/OwnPtr.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -30,7 +31,7 @@ protected:
     void SetUp() override;
 
     DummyPageHolder& page() const { return *m_dummyPageHolder; }
-    HTMLDocument& document() const { return *m_document; }
+    Document& document() const { return *m_document; }
     HTMLTextFormControlElement& textControl() const { return *m_textControl; }
     HTMLInputElement& input() const { return *m_input; }
 
@@ -38,10 +39,10 @@ protected:
     void forceLayoutFlag();
 
 private:
-    OwnPtr<SpellCheckerClient> m_spellCheckerClient;
-    OwnPtr<DummyPageHolder> m_dummyPageHolder;
+    std::unique_ptr<SpellCheckerClient> m_spellCheckerClient;
+    std::unique_ptr<DummyPageHolder> m_dummyPageHolder;
 
-    Persistent<HTMLDocument> m_document;
+    Persistent<Document> m_document;
     Persistent<HTMLTextFormControlElement> m_textControl;
     Persistent<HTMLInputElement> m_input;
 };
@@ -50,7 +51,7 @@ class DummySpellCheckerClient : public EmptySpellCheckerClient {
 public:
     virtual ~DummySpellCheckerClient() { }
 
-    bool isContinuousSpellCheckingEnabled() override { return true; }
+    bool isSpellCheckingEnabled() override { return true; }
 
     TextCheckerClient& textChecker() override { return m_emptyTextCheckerClient; }
 
@@ -62,11 +63,11 @@ void HTMLTextFormControlElementTest::SetUp()
 {
     Page::PageClients pageClients;
     fillWithEmptyClients(pageClients);
-    m_spellCheckerClient = adoptPtr(new DummySpellCheckerClient);
+    m_spellCheckerClient = wrapUnique(new DummySpellCheckerClient);
     pageClients.spellCheckerClient = m_spellCheckerClient.get();
     m_dummyPageHolder = DummyPageHolder::create(IntSize(800, 600), &pageClients);
 
-    m_document = toHTMLDocument(&m_dummyPageHolder->document());
+    m_document = &m_dummyPageHolder->document();
     m_document->documentElement()->setInnerHTML("<body><textarea id=textarea></textarea><input id=input /></body>", ASSERT_NO_EXCEPTION);
     m_document->view()->updateAllLifecyclePhases();
     m_textControl = toHTMLTextFormControlElement(m_document->getElementById("textarea"));
@@ -81,6 +82,7 @@ void HTMLTextFormControlElementTest::forceLayoutFlag()
     frameRect.setWidth(frameRect.width() + 1);
     frameRect.setHeight(frameRect.height() + 1);
     page().frameView().setFrameRect(frameRect);
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 }
 
 TEST_F(HTMLTextFormControlElementTest, SetSelectionRange)
@@ -143,8 +145,9 @@ static VisiblePosition endOfWord(const VisiblePosition& position)
     return endOfWord(position, RightWordIfOnBoundary);
 }
 
-void testBoundary(HTMLDocument& document, HTMLTextFormControlElement& textControl)
+void testBoundary(Document& document, HTMLTextFormControlElement& textControl)
 {
+    document.updateStyleAndLayout();
     for (unsigned i = 0; i < textControl.innerEditorValue().length(); i++) {
         textControl.setSelectionRange(i, i);
         Position position = document.frame()->selection().start();
@@ -212,6 +215,14 @@ TEST_F(HTMLTextFormControlElementTest, SpellCheckDoesNotCauseUpdateLayout)
     int startCount = layoutCount();
     spellChecker->respondToChangedSelection(oldSelection, FrameSelection::CloseTyping | FrameSelection::ClearTypingStyle);
     EXPECT_EQ(startCount, layoutCount());
+}
+
+TEST_F(HTMLTextFormControlElementTest, IndexForPosition)
+{
+    HTMLInputElement* input = toHTMLInputElement(document().getElementById("input"));
+    input->setValue("Hello");
+    HTMLElement* innerEditor = input->innerEditorElement();
+    EXPECT_EQ(5, HTMLTextFormControlElement::indexForPosition(innerEditor, Position(innerEditor, PositionAnchorType::AfterAnchor)));
 }
 
 } // namespace blink

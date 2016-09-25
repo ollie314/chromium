@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -78,7 +79,8 @@ class BackFwdMenuModelTest : public ChromeRenderViewHostTestHarness {
 
   void LoadURLAndUpdateState(const char* url, const char* title) {
     NavigateAndCommit(GURL(url));
-    controller().GetLastCommittedEntry()->SetTitle(base::UTF8ToUTF16(title));
+    web_contents()->UpdateTitleForEntry(
+        controller().GetLastCommittedEntry(), base::UTF8ToUTF16(title));
   }
 
   // Navigate back or forward the given amount and commits the entry (which
@@ -536,7 +538,7 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
 
   // Make the favicon service run GetFavIconForURL,
   // FaviconDelegate.OnIconChanged will be called.
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   // Verify that the callback executed.
   EXPECT_TRUE(favicon_delegate.was_called());

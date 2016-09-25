@@ -5,6 +5,10 @@
 #ifndef CHROME_BROWSER_UI_BROWSER_DIALOGS_H_
 #define CHROME_BROWSER_UI_BROWSER_DIALOGS_H_
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "base/callback.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
@@ -12,11 +16,19 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/arc/arc_navigation_throttle.h"
+#endif  // OS_CHROMEOS
+
 class Browser;
 class ContentSettingBubbleModel;
 class GURL;
 class LoginHandler;
 class Profile;
+
+namespace base {
+struct Feature;
+}
 
 namespace bookmarks {
 class BookmarkBubbleObserver;
@@ -33,6 +45,7 @@ class Extension;
 }
 
 namespace gfx {
+class Image;
 class Point;
 }
 
@@ -41,14 +54,28 @@ class AuthChallengeInfo;
 class URLRequest;
 }
 
+namespace task_manager {
+class TaskManagerTableModel;
+}
+
 namespace ui {
 class WebDialogDelegate;
 }
 
 namespace chrome {
 
+#if defined(OS_MACOSX)
+// Makes ToolkitViewsDialogsEnabled() available to chrome://flags.
+extern const base::Feature kMacViewsNativeDialogs;
+
+// Makes ToolkitViewsWebUIDialogsEnabled() available to chrome://flags.
+extern const base::Feature kMacViewsWebUIDialogs;
+#endif  // OS_MACOSX
+
 // Shows or hides the Task Manager. |browser| can be NULL when called from Ash.
-void ShowTaskManager(Browser* browser);
+// Returns a pointer to the underlying TableModel, which can be ignored, or used
+// for testing.
+task_manager::TaskManagerTableModel* ShowTaskManager(Browser* browser);
 void HideTaskManager();
 
 #if !defined(OS_MACOSX)
@@ -82,12 +109,11 @@ content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,
 #if defined(OS_MACOSX)
 
 // For Mac, returns true if Chrome should show an equivalent toolkit-views based
-// dialog using one of the functions below, rather than showing a Cocoa dialog.
+// dialog instead of a native-looking Cocoa dialog.
 bool ToolkitViewsDialogsEnabled();
 
 // For Mac, returns true if Chrome should show an equivalent toolkit-views based
-// dialog instead of a WebUI-styled Cocoa dialog. ToolkitViewsDialogsEnabled()
-// implies ToolkitViewsWebUIDialogsEnabled().
+// dialog instead of a WebUI-styled Cocoa dialog.
 bool ToolkitViewsWebUIDialogsEnabled();
 
 // Shows a Views website settings bubble at the given anchor point.
@@ -95,7 +121,7 @@ void ShowWebsiteSettingsBubbleViewsAtPoint(
     const gfx::Point& anchor_point,
     Profile* profile,
     content::WebContents* web_contents,
-    const GURL& url,
+    const GURL& virtual_url,
     const security_state::SecurityStateModel::SecurityInfo& security_info);
 
 // Show a Views bookmark bubble at the given point. This occurs when the
@@ -109,7 +135,7 @@ void ShowBookmarkBubbleViewsAtPoint(const gfx::Point& anchor_point,
                                     bool newly_bookmarked);
 
 // Bridging methods that show/hide the toolkit-views based Task Manager on Mac.
-void ShowTaskManagerViews(Browser* browser);
+task_manager::TaskManagerTableModel* ShowTaskManagerViews(Browser* browser);
 void HideTaskManagerViews();
 
 #endif  // OS_MACOSX
@@ -145,5 +171,18 @@ class ContentSettingBubbleViewsBridge {
 #endif  // TOOLKIT_VIEWS
 
 }  // namespace chrome
+
+#if defined(OS_CHROMEOS)
+
+// Return a pointer to the IntentPickerBubbleView::ShowBubble method.
+using BubbleShowPtr = void (*)(
+    content::WebContents*,
+    const std::vector<std::pair<std::basic_string<char>, gfx::Image>>&,
+    const base::Callback<void(size_t,
+                              arc::ArcNavigationThrottle::CloseReason)>&);
+
+BubbleShowPtr ShowIntentPickerBubble();
+
+#endif  // OS_CHROMEOS
 
 #endif  // CHROME_BROWSER_UI_BROWSER_DIALOGS_H_

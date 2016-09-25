@@ -520,7 +520,7 @@ WebInspector.DevicesView.DeviceView.prototype = {
          */
         function newTabKeyDown(event)
         {
-            if (event.keyIdentifier === "Enter") {
+            if (event.key === "Enter") {
                 event.consume(true);
                 openNewTab();
             }
@@ -634,7 +634,7 @@ WebInspector.DevicesView.DeviceView.prototype = {
             section.url.textContent = "";
             section.url.appendChild(WebInspector.linkifyURLAsNode(page.url, undefined, undefined, true));
         }
-        section.inspect.disabled = page.adbAttachedForeign;
+        section.inspect.disabled = page.attached;
 
         section.page = page;
     },

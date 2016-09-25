@@ -10,10 +10,10 @@
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/signin_view_controller_delegate.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
+#include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -22,11 +22,19 @@
 
 const int kProfileImageSize = 128;
 
-SyncConfirmationHandler::SyncConfirmationHandler() {}
+SyncConfirmationHandler::SyncConfirmationHandler()
+    : did_user_explicitly_interact(false) {}
 
 SyncConfirmationHandler::~SyncConfirmationHandler() {
   Profile* profile = Profile::FromWebUI(web_ui());
   AccountTrackerServiceFactory::GetForProfile(profile)->RemoveObserver(this);
+
+  // Abort signin and prevent sync from starting if none of the actions on the
+  // sync confirmation dialog are taken by the user.
+  if (!did_user_explicitly_interact) {
+    HandleUndo(nullptr);
+    content::RecordAction(base::UserMetricsAction("Signin_Abort_Signin"));
+  }
 }
 
 void SyncConfirmationHandler::RegisterMessages() {
@@ -44,22 +52,27 @@ void SyncConfirmationHandler::RegisterMessages() {
 }
 
 void SyncConfirmationHandler::HandleConfirm(const base::ListValue* args) {
+  did_user_explicitly_interact = true;
   CloseModalSigninWindow(LoginUIService::SYNC_WITH_DEFAULT_SETTINGS);
 }
 
 void SyncConfirmationHandler::HandleGoToSettings(const base::ListValue* args) {
+  did_user_explicitly_interact = true;
   CloseModalSigninWindow(LoginUIService::CONFIGURE_SYNC_FIRST);
 }
 
 void SyncConfirmationHandler::HandleUndo(const base::ListValue* args) {
+  did_user_explicitly_interact = true;
   content::RecordAction(base::UserMetricsAction("Signin_Undo_Signin"));
-  Browser* browser = GetDesktopBrowser();
-  LoginUIServiceFactory::GetForProfile(browser->profile())->
-      SyncConfirmationUIClosed(LoginUIService::ABORT_SIGNIN);
-  SigninManagerFactory::GetForProfile(Profile::FromWebUI(web_ui()))->SignOut(
-      signin_metrics::ABORT_SIGNIN,
-      signin_metrics::SignoutDelete::IGNORE_METRIC);
-  browser->CloseModalSigninWindow();
+  Browser* browser = signin::GetDesktopBrowser(web_ui());
+  if (browser) {
+    LoginUIServiceFactory::GetForProfile(browser->profile())->
+        SyncConfirmationUIClosed(LoginUIService::ABORT_SIGNIN);
+    SigninManagerFactory::GetForProfile(Profile::FromWebUI(web_ui()))->SignOut(
+        signin_metrics::ABORT_SIGNIN,
+        signin_metrics::SignoutDelete::IGNORE_METRIC);
+    browser->CloseModalSigninWindow();
+  }
 }
 
 void SyncConfirmationHandler::SetUserImageURL(const std::string& picture_url) {
@@ -68,8 +81,8 @@ void SyncConfirmationHandler::SetUserImageURL(const std::string& picture_url) {
                                              kProfileImageSize,
                                              &url)) {
     base::StringValue picture_url_value(url.spec());
-    web_ui()->CallJavascriptFunction(
-        "sync.confirmation.setUserImageURL", picture_url_value);
+    web_ui()->CallJavascriptFunctionUnsafe("sync.confirmation.setUserImageURL",
+                                           picture_url_value);
   }
 }
 
@@ -81,26 +94,22 @@ void SyncConfirmationHandler::OnAccountUpdated(const AccountInfo& info) {
   SetUserImageURL(info.picture_url);
 }
 
-Browser* SyncConfirmationHandler::GetDesktopBrowser() {
-  Browser* browser = chrome::FindBrowserWithWebContents(
-      web_ui()->GetWebContents());
-  if (!browser)
-    browser = chrome::FindLastActiveWithProfile(Profile::FromWebUI(web_ui()));
-  DCHECK(browser);
-  return browser;
-}
-
 void SyncConfirmationHandler::CloseModalSigninWindow(
     LoginUIService::SyncConfirmationUIClosedResult result) {
-  Browser* browser = GetDesktopBrowser();
-  LoginUIServiceFactory::GetForProfile(browser->profile())->
-      SyncConfirmationUIClosed(result);
-  browser->CloseModalSigninWindow();
+  Browser* browser = signin::GetDesktopBrowser(web_ui());
+  if (browser) {
+    LoginUIServiceFactory::GetForProfile(browser->profile())->
+        SyncConfirmationUIClosed(result);
+    browser->CloseModalSigninWindow();
+  }
 }
 
 void SyncConfirmationHandler::HandleInitializedWithSize(
     const base::ListValue* args) {
-  Browser* browser = GetDesktopBrowser();
+  Browser* browser = signin::GetDesktopBrowser(web_ui());
+  if (!browser)
+    return;
+
   Profile* profile = browser->profile();
   std::vector<AccountInfo> accounts =
       AccountTrackerServiceFactory::GetForProfile(profile)->GetAccounts();
@@ -115,10 +124,12 @@ void SyncConfirmationHandler::HandleInitializedWithSize(
   else
     SetUserImageURL(primary_account_info.picture_url);
 
-  double height;
-  bool success = args->GetDouble(0, &height);
-  DCHECK(success);
+  signin::SetInitializedModalHeight(web_ui(), args);
 
-  browser->signin_view_controller()->delegate()->ResizeNativeView(
-      static_cast<int>(height));
+  // After the dialog is shown, some platforms might have an element focused.
+  // To be consistent, clear the focused element on all platforms.
+  // TODO(anthonyvd): Figure out why this is needed on Mac and not other
+  // platforms and if there's a way to start unfocused while avoiding this
+  // workaround.
+  web_ui()->CallJavascriptFunctionUnsafe("sync.confirmation.clearFocus");
 }

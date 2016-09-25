@@ -15,21 +15,21 @@
 #include "chrome/browser/ui/webui/test_files_request_filter.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/content_switches.h"
-#include "grit/browser_resources.h"
-#include "grit/generated_resources.h"
 
 namespace {
 
 content::WebUIDataSource* CreateWebUIDataSource() {
   content::WebUIDataSource* source =
         content::WebUIDataSource::Create(chrome::kChromeUIChromeSigninHost);
-  source->OverrideContentSecurityPolicyFrameSrc("frame-src chrome-extension:;");
-  source->OverrideContentSecurityPolicyObjectSrc("object-src *;");
+  source->OverrideContentSecurityPolicyChildSrc("child-src chrome-extension:;");
+  source->OverrideContentSecurityPolicyObjectSrc("object-src chrome:;");
   source->SetJsonPath("strings.js");
 
   source->SetDefaultResource(IDR_NEW_INLINE_LOGIN_HTML);

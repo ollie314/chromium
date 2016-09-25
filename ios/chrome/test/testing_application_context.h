@@ -46,10 +46,10 @@ class TestingApplicationContext : public ApplicationContext {
   network_time::NetworkTimeTracker* GetNetworkTimeTracker() override;
   IOSChromeIOThread* GetIOSChromeIOThread() override;
   gcm::GCMDriver* GetGCMDriver() override;
-  web_resource::PromoResourceService* GetPromoResourceService() override;
   component_updater::ComponentUpdateService* GetComponentUpdateService()
       override;
   CRLSetFetcher* GetCRLSetFetcher() override;
+  PhysicalWebDataSource* GetPhysicalWebDataSource() override;
 
  private:
   base::ThreadChecker thread_checker_;

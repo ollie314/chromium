@@ -612,10 +612,11 @@ bool CheckEV(PCCERT_CHAIN_CONTEXT chain_context,
 
   // Look up the EV policy OID of the root CA.
   PCCERT_CONTEXT root_cert = element[num_elements - 1]->pCertContext;
-  SHA1HashValue fingerprint =
-      X509Certificate::CalculateFingerprint(root_cert);
+  SHA1HashValue weak_fingerprint;
+  base::SHA1HashBytes(root_cert->pbCertEncoded, root_cert->cbCertEncoded,
+                      weak_fingerprint.data);
   EVRootCAMetadata* metadata = EVRootCAMetadata::GetInstance();
-  return metadata->HasEVPolicyOID(fingerprint, policy_oid);
+  return metadata->HasEVPolicyOID(weak_fingerprint, policy_oid);
 }
 
 // Custom revocation provider function that compares incoming certificates with
@@ -948,8 +949,8 @@ int CertVerifyProcWin::VerifyInternal(
   // By default, use the default HCERTCHAINENGINE (aka HCCE_CURRENT_USER). When
   // running tests, use a dynamic HCERTCHAINENGINE. All of the status and cache
   // of verified certificates and chains is tied to the HCERTCHAINENGINE. As
-  // each invocation may have changed the set of known roots, invalid the cache
-  // between runs.
+  // each invocation may have changed the set of known roots, invalidate the
+  // cache between runs.
   //
   // This is not the most efficient means of doing so; it's possible to mark the
   // Root store used by TestRootCerts as changed, via CertControlStore with the

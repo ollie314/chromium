@@ -40,27 +40,34 @@ class CC_SURFACES_EXPORT Surface {
  public:
   using DrawCallback = SurfaceFactory::DrawCallback;
 
-  Surface(SurfaceId id, SurfaceFactory* factory);
+  Surface(const SurfaceId& id, SurfaceFactory* factory);
   ~Surface();
 
-  SurfaceId surface_id() const { return surface_id_; }
+  const SurfaceId& surface_id() const { return surface_id_; }
+  const SurfaceId& previous_frame_surface_id() const {
+    return previous_frame_surface_id_;
+  }
 
-  void QueueFrame(std::unique_ptr<CompositorFrame> frame,
-                  const DrawCallback& draw_callback);
+  void SetPreviousFrameSurface(Surface* surface);
+
+  void QueueFrame(CompositorFrame frame, const DrawCallback& draw_callback);
   void RequestCopyOfOutput(std::unique_ptr<CopyOutputRequest> copy_request);
   // Adds each CopyOutputRequest in the current frame to copy_requests. The
   // caller takes ownership of them.
   void TakeCopyOutputRequests(
       std::multimap<RenderPassId, std::unique_ptr<CopyOutputRequest>>*
           copy_requests);
+
   // Returns the most recent frame that is eligible to be rendered.
-  const CompositorFrame* GetEligibleFrame();
+  // If the CompositorFrame's DelegateFrameData is null then there is
+  // no eligible frame.
+  const CompositorFrame& GetEligibleFrame();
 
   // Returns a number that increments by 1 every time a new frame is enqueued.
   int frame_index() const { return frame_index_; }
 
   void TakeLatencyInfo(std::vector<ui::LatencyInfo>* latency_info);
-  void RunDrawCallbacks(SurfaceDrawStatus drawn);
+  void RunDrawCallbacks();
 
   base::WeakPtr<SurfaceFactory> factory() { return factory_; }
 
@@ -85,12 +92,14 @@ class CC_SURFACES_EXPORT Surface {
   void set_destroyed(bool destroyed) { destroyed_ = destroyed; }
 
  private:
+  void UnrefFrameResources(DelegatedFrameData* frame_data);
   void ClearCopyRequests();
 
   SurfaceId surface_id_;
+  SurfaceId previous_frame_surface_id_;
   base::WeakPtr<SurfaceFactory> factory_;
   // TODO(jamesr): Support multiple frames in flight.
-  std::unique_ptr<CompositorFrame> current_frame_;
+  CompositorFrame current_frame_;
   int frame_index_;
   bool destroyed_;
   std::vector<SurfaceSequence> destruction_dependencies_;

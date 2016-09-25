@@ -5,14 +5,14 @@
 #ifndef MOJO_PUBLIC_CPP_BINDINGS_LIB_SERIALIZATION_FORWARD_H_
 #define MOJO_PUBLIC_CPP_BINDINGS_LIB_SERIALIZATION_FORWARD_H_
 
-#include <stddef.h>
-
-#include "mojo/public/cpp/bindings/array.h"
+#include "base/optional.h"
 #include "mojo/public/cpp/bindings/array_traits.h"
-#include "mojo/public/cpp/bindings/lib/string_serialization.h"
-#include "mojo/public/cpp/bindings/lib/wtf_string_serialization.h"
-#include "mojo/public/cpp/bindings/map.h"
-#include "mojo/public/cpp/bindings/native_struct.h"
+#include "mojo/public/cpp/bindings/enum_traits.h"
+#include "mojo/public/cpp/bindings/lib/template_util.h"
+#include "mojo/public/cpp/bindings/map_traits.h"
+#include "mojo/public/cpp/bindings/string_traits.h"
+#include "mojo/public/cpp/bindings/struct_traits.h"
+#include "mojo/public/cpp/bindings/union_traits.h"
 
 // This file is included by serialization implementation files to avoid circular
 // includes.
@@ -20,126 +20,104 @@
 // wtf_serialization.h if necessary).
 
 namespace mojo {
-
-template <typename T>
-class WTFArray;
-
 namespace internal {
 
-template <typename T>
-class Array_Data;
-
-class ArrayValidateParams;
-
-class Buffer;
-
-template <typename K, typename V>
-class Map_Data;
-
-class NativeStruct_Data;
-
-struct SerializationContext;
+template <typename MojomType, typename MaybeConstUserType>
+struct Serializer;
 
 template <typename T>
-struct ShouldUseNativeSerializer;
+struct IsOptionalWrapper {
+  static const bool value = IsSpecializationOf<
+      base::Optional,
+      typename std::remove_const<
+          typename std::remove_reference<T>::type>::type>::value;
+};
 
-// -----------------------------------------------------------------------------
-// Forward declaration for native types.
+// PrepareToSerialize() must be matched by a Serialize() for the same input
+// later. Moreover, within the same SerializationContext if PrepareToSerialize()
+// is called for |input_1|, ..., |input_n|, Serialize() must be called for
+// those objects in the exact same order.
+template <typename MojomType,
+          typename InputUserType,
+          typename... Args,
+          typename std::enable_if<
+              !IsOptionalWrapper<InputUserType>::value>::type* = nullptr>
+size_t PrepareToSerialize(InputUserType&& input, Args&&... args) {
+  return Serializer<MojomType,
+                    typename std::remove_reference<InputUserType>::type>::
+      PrepareToSerialize(std::forward<InputUserType>(input),
+                         std::forward<Args>(args)...);
+}
 
-template <typename T>
-size_t GetSerializedSizeNative_(const T& value, SerializationContext* context);
+template <typename MojomType,
+          typename InputUserType,
+          typename... Args,
+          typename std::enable_if<
+              !IsOptionalWrapper<InputUserType>::value>::type* = nullptr>
+void Serialize(InputUserType&& input, Args&&... args) {
+  Serializer<MojomType, typename std::remove_reference<InputUserType>::type>::
+      Serialize(std::forward<InputUserType>(input),
+                std::forward<Args>(args)...);
+}
 
-template <typename T>
-void SerializeNative_(const T& value,
-                      Buffer* buffer,
-                      Array_Data<uint8_t>** out,
-                      SerializationContext* context);
+template <typename MojomType,
+          typename DataType,
+          typename InputUserType,
+          typename... Args,
+          typename std::enable_if<
+              !IsOptionalWrapper<InputUserType>::value>::type* = nullptr>
+bool Deserialize(DataType&& input, InputUserType* output, Args&&... args) {
+  return Serializer<MojomType, InputUserType>::Deserialize(
+      std::forward<DataType>(input), output, std::forward<Args>(args)...);
+}
 
-template <typename T>
-bool DeserializeNative_(Array_Data<uint8_t>* data,
-                        T* out,
-                        SerializationContext* context);
+// Specialization that unwraps base::Optional<>.
+template <typename MojomType,
+          typename InputUserType,
+          typename... Args,
+          typename std::enable_if<
+              IsOptionalWrapper<InputUserType>::value>::type* = nullptr>
+size_t PrepareToSerialize(InputUserType&& input, Args&&... args) {
+  if (!input)
+    return 0;
+  return PrepareToSerialize<MojomType>(*input, std::forward<Args>(args)...);
+}
+
+template <typename MojomType,
+          typename InputUserType,
+          typename DataType,
+          typename... Args,
+          typename std::enable_if<
+              IsOptionalWrapper<InputUserType>::value>::type* = nullptr>
+void Serialize(InputUserType&& input,
+               Buffer* buffer,
+               DataType** output,
+               Args&&... args) {
+  if (!input) {
+    *output = nullptr;
+    return;
+  }
+  Serialize<MojomType>(*input, buffer, output, std::forward<Args>(args)...);
+}
+
+template <typename MojomType,
+          typename DataType,
+          typename InputUserType,
+          typename... Args,
+          typename std::enable_if<
+              IsOptionalWrapper<InputUserType>::value>::type* = nullptr>
+bool Deserialize(DataType&& input, InputUserType* output, Args&&... args) {
+  if (!input) {
+    *output = base::nullopt;
+    return true;
+  }
+  if (!*output)
+    output->emplace();
+  return Deserialize<MojomType>(std::forward<DataType>(input), &output->value(),
+                                std::forward<Args>(args)...);
+}
 
 }  // namespace internal
-
-size_t GetSerializedSize_(const NativeStructPtr& input,
-                          internal::SerializationContext* context);
-
-void Serialize_(NativeStructPtr input,
-                internal::Buffer* buffer,
-                internal::NativeStruct_Data** output,
-                internal::SerializationContext* context);
-
-bool Deserialize_(internal::NativeStruct_Data* input,
-                  NativeStructPtr* output,
-                  internal::SerializationContext* context);
-
-// -----------------------------------------------------------------------------
-// Forward declaration for Array.
-
-template <typename E>
-inline size_t GetSerializedSize_(const Array<E>& input,
-                                 internal::SerializationContext* context);
-
-template <typename E>
-inline void SerializeArray_(
-    Array<E> input,
-    internal::Buffer* buf,
-    typename Array<E>::Data_** output,
-    const internal::ArrayValidateParams* validate_params,
-    internal::SerializationContext* context);
-
-template <typename E>
-inline bool Deserialize_(typename Array<E>::Data_* input,
-                         Array<E>* output,
-                         internal::SerializationContext* context);
-
-// -----------------------------------------------------------------------------
-// Forward declaration for WTFArray.
-
-template <typename E>
-inline size_t GetSerializedSize_(const WTFArray<E>& input,
-                                 internal::SerializationContext* context);
-
-template <typename E>
-inline void SerializeArray_(
-    WTFArray<E> input,
-    internal::Buffer* buf,
-    typename WTFArray<E>::Data_** output,
-    const internal::ArrayValidateParams* validate_params,
-    internal::SerializationContext* context);
-
-template <typename E>
-inline bool Deserialize_(typename WTFArray<E>::Data_* input,
-                         WTFArray<E>* output,
-                         internal::SerializationContext* context);
-
-// -----------------------------------------------------------------------------
-// Forward declaration for Map.
-
-template <typename MapKey, typename MapValue>
-inline size_t GetSerializedSize_(const Map<MapKey, MapValue>& input,
-                                 internal::SerializationContext* context);
-
-template <typename MapKey,
-          typename MapValue,
-          typename DataKey,
-          typename DataValue>
-inline void SerializeMap_(
-    Map<MapKey, MapValue> input,
-    internal::Buffer* buf,
-    internal::Map_Data<DataKey, DataValue>** output,
-    const internal::ArrayValidateParams* value_validate_params,
-    internal::SerializationContext* context);
-
-template <typename MapKey,
-          typename MapValue,
-          typename DataKey,
-          typename DataValue>
-inline bool Deserialize_(internal::Map_Data<DataKey, DataValue>* input,
-                         Map<MapKey, MapValue>* output,
-                         internal::SerializationContext* context);
-
 }  // namespace mojo
 
 #endif  // MOJO_PUBLIC_CPP_BINDINGS_LIB_SERIALIZATION_FORWARD_H_

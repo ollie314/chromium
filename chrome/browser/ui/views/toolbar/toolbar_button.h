@@ -15,12 +15,15 @@
 
 class Profile;
 
+namespace test {
+class ToolbarButtonTestApi;
+}
+
 namespace ui {
 class MenuModel;
 }
 
 namespace views {
-class InkDropDelegate;
 class MenuModelAdapter;
 class MenuRunner;
 }
@@ -71,6 +74,8 @@ class ToolbarButton : public views::LabelButton,
   virtual void ShowDropDownMenu(ui::MenuSourceType source_type);
 
  private:
+  friend test::ToolbarButtonTestApi;
+
   // Callback for MenuModelAdapter.
   void OnMenuClosed();
 
@@ -94,9 +99,6 @@ class ToolbarButton : public views::LabelButton,
 
   // Menu runner to display drop down menu.
   std::unique_ptr<views::MenuRunner> menu_runner_;
-
-  // Controls the visual feedback for the button state.
-  std::unique_ptr<views::InkDropDelegate> ink_drop_delegate_;
 
   // A factory for tasks that show the dropdown context menu for the button.
   base::WeakPtrFactory<ToolbarButton> show_menu_factory_;

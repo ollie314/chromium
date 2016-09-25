@@ -35,16 +35,21 @@
 #include "platform/weborigin/SecurityOrigin.h"
 #include "wtf/HashMap.h"
 #include "wtf/HashSet.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/Threading.h"
 #include "wtf/text/StringHash.h"
+#include <memory>
 
 namespace blink {
 
 using OriginAccessWhiteList = Vector<OriginAccessEntry>;
-using OriginAccessMap = HashMap<String, OwnPtr<OriginAccessWhiteList>>;
+using OriginAccessMap = HashMap<String, std::unique_ptr<OriginAccessWhiteList>>;
 using OriginSet = HashSet<String>;
+
+enum ReferrerPolicyLegacyKeywordsSupport {
+    SupportReferrerPolicyLegacyKeywords,
+    DoNotSupportReferrerPolicyLegacyKeywords,
+};
 
 static OriginAccessMap& originAccessMap()
 {
@@ -56,6 +61,34 @@ static OriginSet& trustworthyOriginSet()
 {
     DEFINE_STATIC_LOCAL(OriginSet, trustworthyOriginSet, ());
     return trustworthyOriginSet;
+}
+
+static bool referrerPolicyFromStringImpl(const String& policy, ReferrerPolicyLegacyKeywordsSupport legacyKeywordsSupport, ReferrerPolicy* result)
+{
+    DCHECK(!policy.isNull());
+    bool supportLegacyKeywords = (legacyKeywordsSupport == SupportReferrerPolicyLegacyKeywords);
+
+    if (equalIgnoringASCIICase(policy, "no-referrer") || (supportLegacyKeywords && equalIgnoringASCIICase(policy, "never"))) {
+        *result = ReferrerPolicyNever;
+        return true;
+    }
+    if (equalIgnoringASCIICase(policy, "unsafe-url") || (supportLegacyKeywords && equalIgnoringASCIICase(policy, "always"))) {
+        *result = ReferrerPolicyAlways;
+        return true;
+    }
+    if (equalIgnoringASCIICase(policy, "origin")) {
+        *result = ReferrerPolicyOrigin;
+        return true;
+    }
+    if (equalIgnoringASCIICase(policy, "origin-when-cross-origin") || (supportLegacyKeywords && equalIgnoringASCIICase(policy, "origin-when-crossorigin"))) {
+        *result = ReferrerPolicyOriginWhenCrossOrigin;
+        return true;
+    }
+    if (equalIgnoringASCIICase(policy, "no-referrer-when-downgrade") || (supportLegacyKeywords && equalIgnoringASCIICase(policy, "default"))) {
+        *result = ReferrerPolicyNoReferrerWhenDowngrade;
+        return true;
+    }
+    return false;
 }
 
 void SecurityPolicy::init()
@@ -186,7 +219,7 @@ void SecurityPolicy::addOriginAccessWhitelistEntry(const SecurityOrigin& sourceO
     String sourceString = sourceOrigin.toString();
     OriginAccessMap::AddResult result = originAccessMap().add(sourceString, nullptr);
     if (result.isNewEntry)
-        result.storedValue->value = adoptPtr(new OriginAccessWhiteList);
+        result.storedValue->value = wrapUnique(new OriginAccessWhiteList);
 
     OriginAccessWhiteList* list = result.storedValue->value.get();
     list->append(OriginAccessEntry(destinationProtocol, destinationDomain, allowDestinationSubdomains ? OriginAccessEntry::AllowSubdomains : OriginAccessEntry::DisallowSubdomains));
@@ -225,29 +258,12 @@ void SecurityPolicy::resetOriginAccessWhitelists()
 
 bool SecurityPolicy::referrerPolicyFromString(const String& policy, ReferrerPolicy* result)
 {
-    ASSERT(!policy.isNull());
+    return referrerPolicyFromStringImpl(policy, DoNotSupportReferrerPolicyLegacyKeywords, result);
+}
 
-    if (equalIgnoringCase(policy, "no-referrer") || equalIgnoringCase(policy, "never")) {
-        *result = ReferrerPolicyNever;
-        return true;
-    }
-    if (equalIgnoringCase(policy, "unsafe-url") || equalIgnoringCase(policy, "always")) {
-        *result = ReferrerPolicyAlways;
-        return true;
-    }
-    if (equalIgnoringCase(policy, "origin")) {
-        *result = ReferrerPolicyOrigin;
-        return true;
-    }
-    if (equalIgnoringCase(policy, "origin-when-cross-origin") || equalIgnoringCase(policy, "origin-when-crossorigin")) {
-        *result = ReferrerPolicyOriginWhenCrossOrigin;
-        return true;
-    }
-    if (equalIgnoringCase(policy, "no-referrer-when-downgrade") || equalIgnoringCase(policy, "default")) {
-        *result = ReferrerPolicyNoReferrerWhenDowngrade;
-        return true;
-    }
-    return false;
+bool SecurityPolicy::referrerPolicyFromStringWithLegacyKeywords(const String& policy, ReferrerPolicy* result)
+{
+    return referrerPolicyFromStringImpl(policy, SupportReferrerPolicyLegacyKeywords, result);
 }
 
 } // namespace blink

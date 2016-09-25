@@ -24,16 +24,17 @@
 #include "chrome/browser/ui/webui/signin/login_ui_test_utils.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/invalidation/impl/p2p_invalidation_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
-#include "components/sync_driver/about_sync_util.h"
+#include "components/sync/base/progress_marker_map.h"
+#include "components/sync/driver/about_sync_util.h"
+#include "components/sync/engine/sync_string_conversions.h"
 #include "google_apis/gaia/gaia_constants.h"
-#include "sync/internal_api/public/base/progress_marker_map.h"
-#include "sync/internal_api/public/util/sync_string_conversions.h"
 
-using syncer::sessions::SyncSessionSnapshot;
+using browser_sync::ProfileSyncService;
+using syncer::SyncCycleSnapshot;
 
 namespace {
 
@@ -155,7 +156,7 @@ bool ProfileSyncServiceHarness::SetupSync(
 
   // Tell the sync service that setup is in progress so we don't start syncing
   // until we've finished configuration.
-  service()->SetSetupInProgress(true);
+  sync_blocker_ = service()->GetSetupInProgressHandle();
 
   DCHECK(!username_.empty());
   if (signin_type_ == SigninType::UI_SIGNIN) {
@@ -186,11 +187,19 @@ bool ProfileSyncServiceHarness::SetupSync(
 
   // Choose the datatypes to be synced. If all datatypes are to be synced,
   // set sync_everything to true; otherwise, set it to false.
-  bool sync_everything = synced_datatypes.Equals(syncer::UserSelectableTypes());
+  bool sync_everything = (synced_datatypes == syncer::UserSelectableTypes());
   service()->OnUserChoseDatatypes(sync_everything, synced_datatypes);
 
   // Notify ProfileSyncService that we are done with configuration.
   FinishSyncSetup();
+
+  if ((signin_type_ == SigninType::UI_SIGNIN) &&
+      !login_ui_test_utils::DismissSyncConfirmationDialog(
+          chrome::FindBrowserWithProfile(profile_),
+          base::TimeDelta::FromSeconds(30))) {
+    LOG(ERROR) << "Failed to dismiss sync confirmation dialog.";
+    return false;
+  }
 
   // Set an implicit passphrase for encryption if an explicit one hasn't already
   // been set. If an explicit passphrase has been set, immediately return false,
@@ -305,16 +314,16 @@ bool ProfileSyncServiceHarness::IsSyncDisabled() const {
 }
 
 void ProfileSyncServiceHarness::FinishSyncSetup() {
-  service()->SetSetupInProgress(false);
+  sync_blocker_.reset();
   service()->SetFirstSetupComplete();
 }
 
-SyncSessionSnapshot ProfileSyncServiceHarness::GetLastSessionSnapshot() const {
+SyncCycleSnapshot ProfileSyncServiceHarness::GetLastCycleSnapshot() const {
   DCHECK(service() != NULL) << "Sync service has not yet been set up.";
   if (service()->IsSyncActive()) {
-    return service()->GetLastSessionSnapshot();
+    return service()->GetLastCycleSnapshot();
   }
-  return SyncSessionSnapshot();
+  return SyncCycleSnapshot();
 }
 
 bool ProfileSyncServiceHarness::EnableSyncForDatatype(
@@ -430,7 +439,7 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
   std::stringstream os;
   os << profile_debug_name_ << ": " << message << ": ";
   if (service()) {
-    const SyncSessionSnapshot& snap = GetLastSessionSnapshot();
+    const SyncCycleSnapshot& snap = GetLastCycleSnapshot();
     ProfileSyncService::Status status;
     service()->QueryDetailedSyncStatus(&status);
     // Capture select info from the sync session snapshot and syncer status.

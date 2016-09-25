@@ -2,36 +2,27 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# GYP version: mojo/mojo_base.gyp:mojo_application_base
-source_set("cpp") {
-  public_deps = [
-    ":init_commandline",
-    ":sources",
-  ]
-}
-
-# Like the target above, but without special commandline initialization that
-# apps use.
-source_set("cpp_for_chromium") {
+group("cpp") {
   public_deps = [
     ":sources",
   ]
 }
 
-source_set("sources") {
+# TODO(rockot): Rename this to "cpp".
+static_library("sources") {
   sources = [
-    "application_runner.h",
     "capabilities.h",
     "connect.h",
     "connection.h",
     "connector.h",
     "identity.h",
-    "initialize_base_and_icu.cc",
     "interface_binder.h",
     "interface_factory.h",
     "interface_factory_impl.h",
+    "interface_provider.h",
     "interface_registry.h",
-    "lib/application_runner.cc",
+    "lib/callback_binder.cc",
+    "lib/callback_binder.h",
     "lib/capabilities.cc",
     "lib/connection_impl.cc",
     "lib/connection_impl.h",
@@ -39,23 +30,22 @@ source_set("sources") {
     "lib/connector_impl.h",
     "lib/identity.cc",
     "lib/interface_factory_binder.h",
+    "lib/interface_provider.cc",
     "lib/interface_registry.cc",
-    "lib/message_loop_ref.cc",
     "lib/names.cc",
-    "lib/shell_client.cc",
-    "lib/shell_connection.cc",
-    "message_loop_ref.h",
+    "lib/service.cc",
+    "lib/service_context.cc",
+    "lib/service_context_ref.cc",
+    "lib/service_runner.cc",
     "names.h",
-    "shell_client.h",
-    "shell_connection.h",
-  ]
-
-  deps = [
-    "//base",
-    "//base:i18n",
+    "service.h",
+    "service_context.h",
+    "service_context_ref.h",
+    "service_runner.h",
   ]
 
   public_deps = [
+    "//base",
     "//mojo/public/cpp/bindings",
     "//mojo/public/cpp/system",
     "//services/shell/public/interfaces",
@@ -63,58 +53,43 @@ source_set("sources") {
   ]
 }
 
-source_set("init_commandline") {
-  sources = [
-    "lib/init_commandline.cc",
-  ]
-}
+if (!is_ios) {
+  # This cannot be a static library because it needs to export the symbols from
+  # initialize_base_and_icu.cc.
+  source_set("application_support") {
+    sources = [
+      "lib/init_commandline.cc",
+      "lib/initialize_base_and_icu.cc",
+    ]
 
-source_set("test_support") {
-  testonly = true
-  sources = [
-    "application_test_base.h",
-    "lib/application_test_base.cc",
-    "lib/application_test_main.cc",
-  ]
+    deps = [
+      "//base",
+      "//base:i18n",
+      "//mojo/public/c/system",
+    ]
+  }
 
-  public_deps = [
-    ":cpp",
-    "//testing/gtest",
-  ]
+  static_library("service_test_support") {
+    testonly = true
+    sources = [
+      "lib/service_test.cc",
+      "service_test.h",
+    ]
 
-  deps = [
-    "//base",
-    "//base/test:test_support",
-    "//mojo/logging",
-    "//mojo/public/cpp/bindings",
-    "//mojo/public/cpp/system",
-    "//services/shell/public/interfaces:interfaces_cpp_sources",
-  ]
+    public_deps = [
+      ":cpp",
+      "//testing/gtest",
+    ]
 
-  data_deps = []
-}
+    deps = [
+      "//base",
+      "//base/test:test_support",
+      "//mojo/public/cpp/bindings",
+      "//mojo/public/cpp/system",
+      "//services/shell/background:lib",
+      "//services/shell/public/interfaces:interfaces_cpp_sources",
+    ]
 
-source_set("shell_test_support") {
-  testonly = true
-  sources = [
-    "lib/shell_test.cc",
-    "shell_test.h",
-  ]
-
-  public_deps = [
-    ":cpp",
-    "//testing/gtest",
-  ]
-
-  deps = [
-    "//base",
-    "//base/test:test_support",
-    "//mojo/logging",
-    "//mojo/public/cpp/bindings",
-    "//mojo/public/cpp/system",
-    "//services/shell/background:lib",
-    "//services/shell/public/interfaces:interfaces_cpp_sources",
-  ]
-
-  data_deps = []
+    data_deps = []
+  }
 }

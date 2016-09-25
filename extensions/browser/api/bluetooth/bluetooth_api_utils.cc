@@ -94,7 +94,8 @@ namespace bluetooth {
 void BluetoothDeviceToApiDevice(const device::BluetoothDevice& device,
                                 Device* out) {
   out->address = device.GetAddress();
-  out->name.reset(new std::string(base::UTF16ToUTF8(device.GetName())));
+  out->name.reset(
+      new std::string(base::UTF16ToUTF8(device.GetNameForDisplay())));
   out->device_class.reset(new int(device.GetBluetoothClass()));
 
   // Only include the Device ID members when one exists for the device, and
@@ -115,19 +116,19 @@ void BluetoothDeviceToApiDevice(const device::BluetoothDevice& device,
   out->connectable.reset(new bool(device.IsConnectable()));
 
   std::vector<std::string>* string_uuids = new std::vector<std::string>();
-  const device::BluetoothDevice::UUIDList& uuids = device.GetUUIDs();
-  for (device::BluetoothDevice::UUIDList::const_iterator iter = uuids.begin();
-       iter != uuids.end(); ++iter)
-    string_uuids->push_back(iter->canonical_value());
+  const device::BluetoothDevice::UUIDSet& uuids = device.GetUUIDs();
+  for (const auto& uuid : uuids) {
+    string_uuids->push_back(uuid.canonical_value());
+  }
   out->uuids.reset(string_uuids);
 
-  if (device.GetInquiryRSSI() != device::BluetoothDevice::kUnknownPower)
-    out->inquiry_rssi.reset(new int(device.GetInquiryRSSI()));
+  if (device.GetInquiryRSSI())
+    out->inquiry_rssi.reset(new int(device.GetInquiryRSSI().value()));
   else
     out->inquiry_rssi.reset();
 
-  if (device.GetInquiryTxPower() != device::BluetoothDevice::kUnknownPower)
-    out->inquiry_tx_power.reset(new int(device.GetInquiryTxPower()));
+  if (device.GetInquiryTxPower())
+    out->inquiry_tx_power.reset(new int(device.GetInquiryTxPower().value()));
   else
     out->inquiry_tx_power.reset();
 }

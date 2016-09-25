@@ -18,10 +18,10 @@
 #include <time.h>
 
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "client/settings.h"
@@ -190,11 +190,12 @@ void CrashReportUploadThread::ProcessPendingReport(
   Settings* const settings = database_->GetSettings();
 
   bool uploads_enabled;
-  if (!settings->GetUploadsEnabled(&uploads_enabled) ||
-      !uploads_enabled ||
-      url_.empty()) {
-    // If the upload-enabled state can’t be determined, uploads are disabled, or
-    // there’s no URL to upload to, don’t attempt to upload the new report.
+  if (url_.empty() ||
+      (!report.upload_explicitly_requested &&
+       (!settings->GetUploadsEnabled(&uploads_enabled) || !uploads_enabled))) {
+    // Don’t attempt an upload if there’s no URL to upload to. Allow upload if
+    // it has been explicitly requested by the user, otherwise, respect the
+    // upload-enabled state stored in the database’s settings.
     database_->SkipReportUpload(report.uuid);
     return;
   }
@@ -250,6 +251,10 @@ void CrashReportUploadThread::ProcessPendingReport(
       // In these cases, SkipReportUpload() might not work either, but it’s best
       // to at least try to get the report out of the way.
       database_->SkipReportUpload(report.uuid);
+      return;
+
+    case CrashReportDatabase::kCannotRequestUpload:
+      NOTREACHED();
       return;
   }
 
@@ -316,7 +321,7 @@ CrashReportUploadThread::UploadResult CrashReportUploadThread::UploadReport(
       report->file_path,
       "application/octet-stream");
 
-  scoped_ptr<HTTPTransport> http_transport(HTTPTransport::Create());
+  std::unique_ptr<HTTPTransport> http_transport(HTTPTransport::Create());
   http_transport->SetURL(url_);
   HTTPHeaders::value_type content_type =
       http_multipart_builder.GetContentType();

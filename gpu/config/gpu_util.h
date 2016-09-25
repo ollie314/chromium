@@ -34,6 +34,15 @@ GPU_EXPORT void ApplyGpuDriverBugWorkarounds(
 GPU_EXPORT void StringToFeatureSet(
     const std::string& str, std::set<int>* feature_set);
 
+// With provided command line, fill gpu_info->secondary_gpus with parsed
+// secondary vendor and device ids.
+GPU_EXPORT void ParseSecondaryGpuDevicesFromCommandLine(
+    const base::CommandLine& command_line,
+    GPUInfo* gpu_info);
+
+GPU_EXPORT void InitializeDualGpusIfSupported(
+    const std::set<int>& driver_bug_workarounds);
+
 }  // namespace gpu
 
 #endif  // GPU_CONFIG_GPU_UTIL_H_

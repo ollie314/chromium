@@ -48,7 +48,6 @@
 #include "core/editing/Editor.h"
 #include "core/editing/VisibleSelection.h"
 #include "core/editing/VisibleUnits.h"
-#include "core/editing/iterators/TextIterator.h"
 #include "core/editing/serializers/MarkupAccumulator.h"
 #include "core/editing/serializers/StyledMarkupSerializer.h"
 #include "core/frame/LocalFrame.h"
@@ -161,22 +160,12 @@ bool propertyMissingOrEqualToNone(StylePropertySet* style, CSSPropertyID propert
 {
     if (!style)
         return false;
-    CSSValue* value = style->getPropertyCSSValue(propertyID);
+    const CSSValue* value = style->getPropertyCSSValue(propertyID);
     if (!value)
         return true;
     if (!value->isPrimitiveValue())
         return false;
     return toCSSPrimitiveValue(value)->getValueID() == CSSValueNone;
-}
-
-static bool isPresentationalHTMLElement(const Node* node)
-{
-    if (!node->isHTMLElement())
-        return false;
-
-    const HTMLElement& element = toHTMLElement(*node);
-    return element.hasTagName(uTag) || element.hasTagName(sTag) || element.hasTagName(strikeTag)
-        || element.hasTagName(iTag) || element.hasTagName(emTag) || element.hasTagName(bTag) || element.hasTagName(strongTag);
 }
 
 template<typename Strategy>
@@ -210,7 +199,7 @@ static HTMLElement* highestAncestorToWrapMarkup(const PositionTemplate<Strategy>
 
     Node* checkAncestor = specialCommonAncestor ? specialCommonAncestor : commonAncestor;
     if (checkAncestor->layoutObject()) {
-        HTMLElement* newSpecialCommonAncestor = toHTMLElement(highestEnclosingNodeOfType(firstPositionInNode(checkAncestor), &isPresentationalHTMLElement, CanCrossEditingBoundary, constrainingAncestor));
+        HTMLElement* newSpecialCommonAncestor = toHTMLElement(highestEnclosingNodeOfType(Position::firstPositionInNode(checkAncestor), &isPresentationalHTMLElement, CanCrossEditingBoundary, constrainingAncestor));
         if (newSpecialCommonAncestor)
             specialCommonAncestor = newSpecialCommonAncestor;
     }
@@ -224,7 +213,7 @@ static HTMLElement* highestAncestorToWrapMarkup(const PositionTemplate<Strategy>
     if (!specialCommonAncestor && isTabHTMLSpanElement(commonAncestor))
         specialCommonAncestor = toHTMLSpanElement(commonAncestor);
 
-    if (HTMLAnchorElement* enclosingAnchor = toHTMLAnchorElement(enclosingElementWithTag(firstPositionInNode(specialCommonAncestor ? specialCommonAncestor : commonAncestor), aTag)))
+    if (HTMLAnchorElement* enclosingAnchor = toHTMLAnchorElement(enclosingElementWithTag(Position::firstPositionInNode(specialCommonAncestor ? specialCommonAncestor : commonAncestor), aTag)))
         specialCommonAncestor = enclosingAnchor;
 
     return specialCommonAncestor;
@@ -255,7 +244,7 @@ String CreateMarkupAlgorithm<Strategy>::createMarkup(const PositionTemplate<Stra
         return emptyString();
 
     Document* document = startPosition.document();
-    document->updateLayoutIgnorePendingStylesheets();
+    document->updateStyleAndLayoutIgnorePendingStylesheets();
 
     HTMLElement* specialCommonAncestor = highestAncestorToWrapMarkup<Strategy>(startPosition, endPosition, shouldAnnotate, constrainingAncestor);
     StyledMarkupSerializer<Strategy> serializer(shouldResolveURLs, shouldAnnotate, startPosition, endPosition, specialCommonAncestor, convertBlocksToInlines);
@@ -290,8 +279,10 @@ static const char fragmentMarkerTag[] = "webkit-fragment-marker";
 
 static bool findNodesSurroundingContext(DocumentFragment* fragment, Comment*& nodeBeforeContext, Comment*& nodeAfterContext)
 {
-    for (Node& node : NodeTraversal::startsAt(fragment->firstChild())) {
-        if (node.getNodeType() == Node::COMMENT_NODE && toComment(node).data() == fragmentMarkerTag) {
+    if (!fragment->firstChild())
+        return false;
+    for (Node& node : NodeTraversal::startsAt(*fragment->firstChild())) {
+        if (node.getNodeType() == Node::kCommentNode && toComment(node).data() == fragmentMarkerTag) {
             if (!nodeBeforeContext) {
                 nodeBeforeContext = &toComment(node);
             } else {
@@ -352,8 +343,8 @@ DocumentFragment* createFragmentFromMarkupWithContext(Document& document, const 
     taggedDocument->appendChild(root);
 
     Range* range = Range::create(*taggedDocument,
-        positionAfterNode(nodeBeforeContext).parentAnchoredEquivalent(),
-        positionBeforeNode(nodeAfterContext).parentAnchoredEquivalent());
+        Position::afterNode(nodeBeforeContext).parentAnchoredEquivalent(),
+        Position::beforeNode(nodeAfterContext).parentAnchoredEquivalent());
 
     Node* commonAncestor = range->commonAncestorContainer();
     HTMLElement* specialCommonAncestor = ancestorToRetainStructureAndAppearanceWithNoLayoutObject(commonAncestor);

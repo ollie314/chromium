@@ -5,14 +5,24 @@
 #ifndef UI_EVENTS_TEST_COCOA_TEST_EVENT_UTILS_H_
 #define UI_EVENTS_TEST_COCOA_TEST_EVENT_UTILS_H_
 
-#include <utility>
-
+#import <Cocoa/Cocoa.h>
 #import <objc/objc-class.h>
+
+#include <utility>
 
 #include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 namespace cocoa_test_event_utils {
+
+// Converts |window_point| in |window| coordinates (origin at bottom left of
+// window frame) to a point in global display coordinates for a CGEvent (origin
+// at top left of primary screen).
+CGPoint ScreenPointFromWindow(NSPoint window_point, NSWindow* window);
+
+// Converts |event| to an NSEvent with a timestamp from ui::EventTimeForNow(),
+// and attaches |window| to it.
+NSEvent* AttachWindowToCGEvent(CGEventRef event, NSWindow* window);
 
 // Create synthetic mouse events for testing. Currently these are very
 // basic, flesh out as needed.  Points are all in window coordinates;
@@ -39,6 +49,16 @@ std::pair<NSEvent*, NSEvent*> MouseClickInView(NSView* view,
 // |view|'s midpoint.
 std::pair<NSEvent*, NSEvent*> RightMouseClickInView(NSView* view,
                                                     NSUInteger clickCount);
+
+// Creates a test scroll event. Currently only events for a "real" mouse wheel
+// are supported (-hasPreciseScrollingDeltas is NO).  If |window| is nil,
+// |location| is assumed to be AppKit screen coordinates (origin in bottom left
+// of primary screen).
+// TODO(tapted): Add event phase arguments to support trackpad scrolls also.
+NSEvent* TestScrollEvent(NSPoint location,
+                         NSWindow* window,
+                         CGFloat delta_x,
+                         CGFloat delta_y);
 
 // Returns a key event with the given character.
 NSEvent* KeyEventWithCharacter(unichar c);

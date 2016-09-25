@@ -8,19 +8,21 @@
 #include "core/animation/Timing.h"
 #include "core/animation/css/CSSTimingData.h"
 #include "core/style/ComputedStyleConstants.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
 class CSSAnimationData final : public CSSTimingData {
 public:
-    static PassOwnPtr<CSSAnimationData> create()
+    static std::unique_ptr<CSSAnimationData> create()
     {
-        return adoptPtr(new CSSAnimationData);
+        return wrapUnique(new CSSAnimationData);
     }
 
-    static PassOwnPtr<CSSAnimationData> create(const CSSAnimationData& animationData)
+    static std::unique_ptr<CSSAnimationData> create(const CSSAnimationData& animationData)
     {
-        return adoptPtr(new CSSAnimationData(animationData));
+        return wrapUnique(new CSSAnimationData(animationData));
     }
 
     bool animationsMatchForStyleRecalc(const CSSAnimationData& other) const;
@@ -40,8 +42,8 @@ public:
     Vector<EAnimPlayState>& playStateList() { return m_playStateList; }
 
     static const AtomicString& initialName();
-    static Timing::PlaybackDirection initialDirection() { return Timing::PlaybackDirectionNormal; }
-    static Timing::FillMode initialFillMode() { return Timing::FillModeNone; }
+    static Timing::PlaybackDirection initialDirection() { return Timing::PlaybackDirection::NORMAL; }
+    static Timing::FillMode initialFillMode() { return Timing::FillMode::NONE; }
     static double initialIterationCount() { return 1.0; }
     static EAnimPlayState initialPlayState() { return AnimPlayStatePlaying; }
 

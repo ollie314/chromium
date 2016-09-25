@@ -38,9 +38,8 @@
 #include "modules/ModulesExport.h"
 #include "public/platform/modules/serviceworker/WebServiceWorker.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProxy.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -48,22 +47,24 @@ class ScriptPromiseResolver;
 
 class MODULES_EXPORT ServiceWorker final : public AbstractWorker, public ActiveScriptWrappable, public WebServiceWorkerProxy {
     DEFINE_WRAPPERTYPEINFO();
+    USING_GARBAGE_COLLECTED_MIXIN(ServiceWorker);
 public:
-    static ServiceWorker* from(ExecutionContext*, PassOwnPtr<WebServiceWorker::Handle>);
+    static ServiceWorker* from(ExecutionContext*, std::unique_ptr<WebServiceWorker::Handle>);
 
     ~ServiceWorker() override;
+    DECLARE_VIRTUAL_TRACE();
 
     // Eager finalization needed to promptly release owned WebServiceWorker.
     EAGERLY_FINALIZE();
-
-    // Override 'operator new' to enforce allocation of eagerly finalized object.
-    DECLARE_EAGER_FINALIZATION_OPERATOR_NEW();
 
     void postMessage(ExecutionContext*, PassRefPtr<SerializedScriptValue> message, const MessagePortArray&, ExceptionState&);
 
     String scriptURL() const;
     String state() const;
     DEFINE_ATTRIBUTE_EVENT_LISTENER(statechange);
+
+    // ScriptWrappable overrides.
+    bool hasPendingActivity() const final;
 
     // WebServiceWorkerProxy overrides.
     void dispatchStateChangeEvent() override;
@@ -73,17 +74,14 @@ public:
 
     void internalsTerminate();
 private:
-    static ServiceWorker* getOrCreate(ExecutionContext*, PassOwnPtr<WebServiceWorker::Handle>);
-    ServiceWorker(ExecutionContext*, PassOwnPtr<WebServiceWorker::Handle>);
-
-    // ActiveScriptWrappable overrides.
-    bool hasPendingActivity() const final;
+    static ServiceWorker* getOrCreate(ExecutionContext*, std::unique_ptr<WebServiceWorker::Handle>);
+    ServiceWorker(ExecutionContext*, std::unique_ptr<WebServiceWorker::Handle>);
 
     // ActiveDOMObject overrides.
     void stop() override;
 
     // A handle to the service worker representation in the embedder.
-    OwnPtr<WebServiceWorker::Handle> m_handle;
+    std::unique_ptr<WebServiceWorker::Handle> m_handle;
     bool m_wasStopped;
 };
 

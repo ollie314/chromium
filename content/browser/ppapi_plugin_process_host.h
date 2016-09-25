@@ -36,6 +36,8 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
   class Client {
    public:
     // Gets the information about the renderer that's requesting the channel.
+    // If |renderer_handle| is base::kNullProcessHandle, this channel is used by
+    // the browser itself.
     virtual void GetPpapiChannelInfo(base::ProcessHandle* renderer_handle,
                                      int* renderer_id) = 0;
 
@@ -49,8 +51,8 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
         base::ProcessId plugin_pid,
         int plugin_child_id) = 0;
 
-    // Returns true if the current connection is off-the-record.
-    virtual bool OffTheRecord() = 0;
+    // Returns true if the current connection is incognito.
+    virtual bool Incognito() = 0;
 
    protected:
     virtual ~Client() {}

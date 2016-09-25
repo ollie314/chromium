@@ -13,6 +13,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
@@ -207,7 +208,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, RealMenu) {
   // Open a context menu.
   blink::WebMouseEvent mouse_event;
   mouse_event.type = blink::WebInputEvent::MouseDown;
-  mouse_event.button = blink::WebMouseEvent::ButtonRight;
+  mouse_event.button = blink::WebMouseEvent::Button::Right;
   mouse_event.x = 15;
   mouse_event.y = 15;
   content::WebContents* tab =
@@ -348,7 +349,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, SuggestedFileName) {
   // Open a context menu.
   blink::WebMouseEvent mouse_event;
   mouse_event.type = blink::WebInputEvent::MouseDown;
-  mouse_event.button = blink::WebMouseEvent::ButtonRight;
+  mouse_event.button = blink::WebMouseEvent::Button::Right;
   mouse_event.x = 15;
   mouse_event.y = 15;
   content::WebContents* tab =
@@ -363,31 +364,6 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, SuggestedFileName) {
   // Compare filename.
   base::string16 suggested_filename = menu_observer.params().suggested_filename;
   ASSERT_EQ(kSuggestedFilename, base::UTF16ToUTF8(suggested_filename).c_str());
-}
-
-// Ensure that View Page Info won't crash if there is no visible entry.
-// See http://crbug.com/370863.
-IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, ViewPageInfoWithNoEntry) {
-  // Create a new tab with no committed entry.
-  ui_test_utils::WindowedTabAddedNotificationObserver tab_observer(
-      content::NotificationService::AllSources());
-  ASSERT_TRUE(content::ExecuteScript(
-      browser()->tab_strip_model()->GetActiveWebContents(), "window.open();"));
-  tab_observer.Wait();
-  content::WebContents* tab = tab_observer.GetTab();
-  EXPECT_FALSE(tab->GetController().GetLastCommittedEntry());
-  EXPECT_FALSE(tab->GetController().GetVisibleEntry());
-
-  // Create a context menu.
-  content::ContextMenuParams context_menu_params;
-  TestRenderViewContextMenu menu(tab->GetMainFrame(), context_menu_params);
-  menu.Init();
-
-  // The item shouldn't be enabled in the menu.
-  EXPECT_FALSE(menu.IsCommandIdEnabled(IDC_CONTENT_CONTEXT_VIEWPAGEINFO));
-
-  // Ensure that viewing page info doesn't crash even if you can get to it.
-  menu.ExecuteCommand(IDC_CONTENT_CONTEXT_VIEWPAGEINFO, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, DataSaverOpenOrigImageInNewTab) {
@@ -444,7 +420,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, OpenLinkInProfileEntryPresent) {
   }
 
   // Create one additional profile, but do not yet open windows in it.
-  CreateSecondaryProfile(1);
+  Profile* profile = CreateSecondaryProfile(1);
 
   {
     std::unique_ptr<TestRenderViewContextMenu> menu(
@@ -454,8 +430,24 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest, OpenLinkInProfileEntryPresent) {
     ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKNEWTAB));
     ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW));
     ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_COPYLINKLOCATION));
-    // With two profiles (the current and another profile), no submenu is
-    // created. Instead, a single item is added to the main context menu.
+    // With the second profile not open, no entry is created.
+    ASSERT_FALSE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKINPROFILE));
+    ASSERT_FALSE(menu->IsItemPresent(IDC_OPEN_LINK_IN_PROFILE_FIRST));
+  }
+
+  profiles::FindOrCreateNewWindowForProfile(
+      profile, chrome::startup::IS_NOT_PROCESS_STARTUP,
+      chrome::startup::IS_NOT_FIRST_RUN, false);
+
+  {
+    std::unique_ptr<TestRenderViewContextMenu> menu(
+        CreateContextMenuMediaTypeNone(GURL("http://www.google.com/"),
+                                       GURL("http://www.google.com/")));
+
+    ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKNEWTAB));
+    ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW));
+    ASSERT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_COPYLINKLOCATION));
+    // With the second profile open, an inline menu entry is created.
     ASSERT_FALSE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKINPROFILE));
     ASSERT_TRUE(menu->IsItemPresent(IDC_OPEN_LINK_IN_PROFILE_FIRST));
   }
@@ -662,7 +654,7 @@ class SearchByImageBrowserTest : public InProcessBrowserTest {
         IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE));
     content::WebContents* tab =
         browser()->tab_strip_model()->GetActiveWebContents();
-    content::SimulateMouseClickAt(tab, 0, blink::WebMouseEvent::ButtonRight,
+    content::SimulateMouseClickAt(tab, 0, blink::WebMouseEvent::Button::Right,
                                   gfx::Point(15, 15));
   }
 
@@ -691,9 +683,8 @@ class SearchByImageBrowserTest : public InProcessBrowserTest {
     data.image_url = GetImageSearchURL().spec();
     data.image_url_post_params = kImageSearchPostParams;
 
-    // The model takes ownership of |template_url|.
-    TemplateURL* template_url = new TemplateURL(data);
-    ASSERT_TRUE(model->Add(template_url));
+    TemplateURL* template_url = model->Add(base::MakeUnique<TemplateURL>(data));
+    ASSERT_TRUE(template_url);
     model->SetUserSelectedDefaultSearchProvider(template_url);
   }
 
@@ -829,7 +820,7 @@ class LoadImageBrowserTest : public InProcessBrowserTest {
         IDC_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE));
     content::WebContents* tab =
         browser()->tab_strip_model()->GetActiveWebContents();
-    content::SimulateMouseClickAt(tab, 0, blink::WebMouseEvent::ButtonRight,
+    content::SimulateMouseClickAt(tab, 0, blink::WebMouseEvent::Button::Right,
                                   gfx::Point(15, 15));
   }
 

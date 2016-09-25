@@ -25,15 +25,6 @@ class MEDIA_EXPORT FrameProcessor {
  public:
   typedef base::Callback<void(base::TimeDelta)> UpdateDurationCB;
 
-  // TODO(wolenetz/acolwell): Ensure that all TrackIds are coherent and unique
-  // for each track buffer. For now, special track identifiers are used for each
-  // of audio and video here, and text TrackIds are assumed to be non-negative.
-  // See http://crbug.com/341581.
-  enum {
-    kAudioTrackId = -2,
-    kVideoTrackId = -3
-  };
-
   FrameProcessor(const UpdateDurationCB& update_duration_cb,
                  const scoped_refptr<MediaLog>& media_log);
   ~FrameProcessor();
@@ -44,16 +35,14 @@ class MEDIA_EXPORT FrameProcessor {
   bool sequence_mode() { return sequence_mode_; }
   void SetSequenceMode(bool sequence_mode);
 
-  // Processes buffers in |audio_buffers|, |video_buffers|, and |text_map|.
+  // Processes buffers in |buffer_queue_map|.
   // Returns true on success or false on failure which indicates decode error.
   // |append_window_start| and |append_window_end| correspond to the MSE spec's
   // similarly named source buffer attributes that are used in coded frame
   // processing.
   // Uses |*timestamp_offset| according to the coded frame processing algorithm,
   // including updating it as required in 'sequence' mode frame processing.
-  bool ProcessFrames(const StreamParser::BufferQueue& audio_buffers,
-                     const StreamParser::BufferQueue& video_buffers,
-                     const StreamParser::TextBufferQueueMap& text_map,
+  bool ProcessFrames(const StreamParser::BufferQueueMap& buffer_queue_map,
                      base::TimeDelta append_window_start,
                      base::TimeDelta append_window_end,
                      base::TimeDelta* timestamp_offset);
@@ -152,14 +141,20 @@ class MEDIA_EXPORT FrameProcessor {
   // set to false ("segments").
   bool sequence_mode_ = false;
 
-  // Flag to track whether or not the next processed frame is a continuation of
-  // a coded frame group. This flag resets to false upon detection of
-  // discontinuity, and becomes true once a processed coded frame for the
-  // current coded frame group is sent to its track buffer.
-  bool in_coded_frame_group_ = false;
+  // Tracks whether or not the next processed frame is a continuation of a coded
+  // frame group (see https://w3c.github.io/media-source/#coded-frame-group).
+  // Resets to kNoDecodeTimestamp() upon detection of 'segments' mode
+  // discontinuity, parser reset during 'segments' mode, or switching from
+  // 'sequence' to 'segments' mode.
+  // Once a processed coded frame is emitted for the current coded frame group,
+  // tracks the decode timestamp of the last frame emitted.
+  // Explicit setting of timestampOffset will trigger subsequent notification of
+  // a new coded frame start to the tracks' streams, even in 'sequence' mode, if
+  // the resulting frame has a DTS less than this.
+  DecodeTimestamp coded_frame_group_last_dts_ = kNoDecodeTimestamp();
 
   // Tracks the MSE coded frame processing variable of same name.
-  // Initially kNoTimestamp(), meaning "unset".
+  // Initially kNoTimestamp, meaning "unset".
   base::TimeDelta group_start_timestamp_;
 
   // Tracks the MSE coded frame processing variable of same name. It stores the

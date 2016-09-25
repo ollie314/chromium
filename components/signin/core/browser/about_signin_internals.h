@@ -6,11 +6,11 @@
 #define COMPONENTS_SIGNIN_CORE_BROWSER_ABOUT_SIGNIN_INTERNALS_H_
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/values.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -94,11 +94,12 @@ class AboutSigninInternals
   //     [ List of {"name": "foo-name", "token" : "foo-token",
   //                 "status": "foo_stat", "time" : "foo_time"} elems]
   //  }
-  scoped_ptr<base::DictionaryValue> GetSigninStatus();
+  std::unique_ptr<base::DictionaryValue> GetSigninStatus();
 
   // GaiaCookieManagerService::Observer implementations.
   void OnGaiaAccountsInCookieUpdated(
       const std::vector<gaia::ListedAccount>& gaia_accounts,
+      const std::vector<gaia::ListedAccount>& signed_out_accounts,
       const GoogleServiceAuthError& error) override;
 
  private:
@@ -107,7 +108,7 @@ class AboutSigninInternals
     TokenInfo(const std::string& consumer_id,
               const OAuth2TokenService::ScopeSet& scopes);
     ~TokenInfo();
-    base::DictionaryValue* ToValue() const;
+    std::unique_ptr<base::DictionaryValue> ToValue() const;
 
     static bool LessThan(const TokenInfo* a, const TokenInfo* b);
 
@@ -157,7 +158,7 @@ class AboutSigninInternals
     //                           "status" : request status} elems]
     //       }],
     //  }
-    scoped_ptr<base::DictionaryValue> ToValue(
+    std::unique_ptr<base::DictionaryValue> ToValue(
         AccountTrackerService* account_tracker,
         SigninManagerBase* signin_manager,
         SigninErrorController* signin_error_controller,

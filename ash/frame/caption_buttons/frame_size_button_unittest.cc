@@ -2,22 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/frame/caption_buttons/frame_size_button.h"
+#include "ash/common/frame/caption_buttons/frame_size_button.h"
 
-#include "ash/ash_layout_constants.h"
-#include "ash/frame/caption_buttons/frame_caption_button.h"
-#include "ash/frame/caption_buttons/frame_caption_button_container_view.h"
+#include "ash/common/ash_layout_constants.h"
+#include "ash/common/frame/caption_buttons/frame_caption_button.h"
+#include "ash/common/frame/caption_buttons/frame_caption_button_container_view.h"
+#include "ash/common/wm/window_state.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/wm/window_state.h"
 #include "ash/wm/window_state_aura.h"
 #include "base/i18n/rtl.h"
 #include "grit/ash_resources.h"
 #include "ui/aura/window.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/test/event_generator.h"
-#include "ui/gfx/display.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/vector_icons_public.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -50,7 +50,8 @@ class TestWidgetDelegate : public views::WidgetDelegateView {
     // Right align the caption button container.
     gfx::Size preferred_size = caption_button_container_->GetPreferredSize();
     caption_button_container_->SetBounds(width() - preferred_size.width(), 0,
-        preferred_size.width(), preferred_size.height());
+                                         preferred_size.width(),
+                                         preferred_size.height());
   }
 
   void ViewHierarchyChanged(
@@ -99,8 +100,8 @@ class FrameSizeButtonTest : public AshTestBase {
   // Returns true if all three buttons are in the normal state.
   bool AllButtonsInNormalState() const {
     return minimize_button_->state() == views::Button::STATE_NORMAL &&
-        size_button_->state() == views::Button::STATE_NORMAL &&
-        close_button_->state() == views::Button::STATE_NORMAL;
+           size_button_->state() == views::Button::STATE_NORMAL &&
+           close_button_->state() == views::Button::STATE_NORMAL;
   }
 
   // Creates a widget with |delegate|. The returned widget takes ownership of
@@ -122,16 +123,16 @@ class FrameSizeButtonTest : public AshTestBase {
     AshTestBase::SetUp();
 
     TestWidgetDelegate* delegate = new TestWidgetDelegate();
-    window_state_ = ash::wm::GetWindowState(
-        CreateWidget(delegate)->GetNativeWindow());
+    window_state_ =
+        ash::wm::GetWindowState(CreateWidget(delegate)->GetNativeWindow());
 
     FrameCaptionButtonContainerView::TestApi test(
         delegate->caption_button_container());
 
     minimize_button_ = test.minimize_button();
     size_button_ = test.size_button();
-    static_cast<FrameSizeButton*>(
-        size_button_)->set_delay_to_set_buttons_to_snap_mode(0);
+    static_cast<FrameSizeButton*>(size_button_)
+        ->set_delay_to_set_buttons_to_snap_mode(0);
     close_button_ = test.close_button();
   }
 
@@ -221,20 +222,16 @@ TEST_F(FrameSizeButtonTest, ButtonDrag) {
 
   // 2) Test with scroll gestures.
   // Snap right.
-  generator.GestureScrollSequence(
-      CenterPointInScreen(size_button()),
-      CenterPointInScreen(close_button()),
-      base::TimeDelta::FromMilliseconds(100),
-      3);
+  generator.GestureScrollSequence(CenterPointInScreen(size_button()),
+                                  CenterPointInScreen(close_button()),
+                                  base::TimeDelta::FromMilliseconds(100), 3);
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(wm::WINDOW_STATE_TYPE_RIGHT_SNAPPED));
 
   // Snap left.
-  generator.GestureScrollSequence(
-      CenterPointInScreen(size_button()),
-      CenterPointInScreen(minimize_button()),
-      base::TimeDelta::FromMilliseconds(100),
-      3);
+  generator.GestureScrollSequence(CenterPointInScreen(size_button()),
+                                  CenterPointInScreen(minimize_button()),
+                                  base::TimeDelta::FromMilliseconds(100), 3);
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(wm::WINDOW_STATE_TYPE_LEFT_SNAPPED));
 
@@ -337,7 +334,7 @@ TEST_F(FrameSizeButtonTest, ResetButtonsAfterClick) {
   EXPECT_EQ(CAPTION_BUTTON_ICON_RIGHT_SNAPPED, close_button()->icon());
 
   const gfx::Rect& kWorkAreaBoundsInScreen =
-      gfx::Screen::GetScreen()->GetPrimaryDisplay().work_area();
+      display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
   generator.MoveMouseTo(kWorkAreaBoundsInScreen.bottom_left());
 
   // None of the buttons should be pressed because we are really far away from
@@ -388,7 +385,7 @@ TEST_F(FrameSizeButtonTest, SizeButtonPressedWhenSnapButtonHovered) {
   // the close button (snap right button) should hover the close button and
   // keep the size button pressed.
   const gfx::Rect& kWorkAreaBoundsInScreen =
-      gfx::Screen::GetScreen()->GetPrimaryDisplay().work_area();
+      display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
   generator.MoveMouseTo(kWorkAreaBoundsInScreen.bottom_left());
   EXPECT_TRUE(AllButtonsInNormalState());
   generator.MoveMouseTo(CenterPointInScreen(close_button()));

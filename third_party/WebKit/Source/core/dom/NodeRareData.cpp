@@ -30,10 +30,10 @@
 
 #include "core/dom/NodeRareData.h"
 
+#include "bindings/core/v8/ScriptWrappableVisitor.h"
 #include "core/dom/Element.h"
 #include "core/dom/ElementRareData.h"
 #include "core/frame/FrameHost.h"
-#include "core/layout/LayoutObject.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -58,16 +58,30 @@ DEFINE_TRACE_AFTER_DISPATCH(NodeRareData)
 
 DEFINE_TRACE(NodeRareData)
 {
-    if (m_isElementRareData)
+    if (isElementRareData())
         static_cast<ElementRareData*>(this)->traceAfterDispatch(visitor);
     else
         traceAfterDispatch(visitor);
 }
 
+DEFINE_TRACE_WRAPPERS(NodeRareData)
+{
+    if (isElementRareData())
+        static_cast<const ElementRareData*>(this)->traceWrappersAfterDispatch(visitor);
+    else
+        traceWrappersAfterDispatch(visitor);
+}
+
+DEFINE_TRACE_WRAPPERS_AFTER_DISPATCH(NodeRareData)
+{
+    visitor->traceWrappers(m_nodeLists);
+    visitor->traceWrappers(m_mutationObserverData);
+}
+
 void NodeRareData::finalizeGarbageCollectedObject()
 {
     RELEASE_ASSERT(!layoutObject());
-    if (m_isElementRareData)
+    if (isElementRareData())
         static_cast<ElementRareData*>(this)->~ElementRareData();
     else
         this->~NodeRareData();

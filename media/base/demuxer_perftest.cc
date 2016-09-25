@@ -4,11 +4,14 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <memory>
 
 #include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -47,7 +50,8 @@ class DemuxerHostImpl : public media::DemuxerHost {
 static void QuitLoopWithStatus(base::MessageLoop* message_loop,
                                media::PipelineStatus status) {
   CHECK_EQ(status, media::PIPELINE_OK);
-  message_loop->PostTask(FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+  message_loop->task_runner()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
 static void OnEncryptedMediaInitData(EmeInitDataType init_data_type,
@@ -55,7 +59,7 @@ static void OnEncryptedMediaInitData(EmeInitDataType init_data_type,
   VLOG(0) << "File is encrypted.";
 }
 
-static void OnMediaTracksUpdated(scoped_ptr<MediaTracks> tracks) {
+static void OnMediaTracksUpdated(std::unique_ptr<MediaTracks> tracks) {
   VLOG(0) << "Got media tracks info, tracks = " << tracks->tracks().size();
 }
 
@@ -101,7 +105,7 @@ StreamReader::StreamReader(media::Demuxer* demuxer,
   if (stream) {
     streams_.push_back(stream);
     end_of_stream_.push_back(false);
-    last_read_timestamp_.push_back(media::kNoTimestamp());
+    last_read_timestamp_.push_back(media::kNoTimestamp);
     counts_.push_back(0);
   }
 
@@ -109,7 +113,7 @@ StreamReader::StreamReader(media::Demuxer* demuxer,
   if (stream) {
     streams_.push_back(stream);
     end_of_stream_.push_back(false);
-    last_read_timestamp_.push_back(media::kNoTimestamp());
+    last_read_timestamp_.push_back(media::kNoTimestamp);
     counts_.push_back(0);
 
     if (enable_bitstream_converter)
@@ -127,9 +131,9 @@ void StreamReader::Read() {
   streams_[index]->Read(base::Bind(
       &StreamReader::OnReadDone, base::Unretained(this),
       base::MessageLoop::current(), &end_of_stream, &timestamp));
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
-  CHECK(end_of_stream || timestamp != media::kNoTimestamp());
+  CHECK(end_of_stream || timestamp != media::kNoTimestamp);
   end_of_stream_[index] = end_of_stream;
   last_read_timestamp_[index] = timestamp;
   counts_[index]++;
@@ -152,8 +156,9 @@ void StreamReader::OnReadDone(
   CHECK_EQ(status, media::DemuxerStream::kOk);
   CHECK(buffer.get());
   *end_of_stream = buffer->end_of_stream();
-  *timestamp = *end_of_stream ? media::kNoTimestamp() : buffer->timestamp();
-  message_loop->PostTask(FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+  *timestamp = *end_of_stream ? media::kNoTimestamp : buffer->timestamp();
+  message_loop->task_runner()->PostTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
 int StreamReader::GetNextStreamIndexToRead() {
@@ -164,7 +169,7 @@ int StreamReader::GetNextStreamIndexToRead() {
       continue;
 
     // Use a stream if it hasn't been read from yet.
-    if (last_read_timestamp_[i] == media::kNoTimestamp())
+    if (last_read_timestamp_[i] == media::kNoTimestamp)
       return i;
 
     if (index < 0 ||
@@ -197,7 +202,7 @@ static void RunDemuxerBenchmark(const std::string& filename) {
     demuxer.Initialize(&demuxer_host,
                        base::Bind(&QuitLoopWithStatus, &message_loop),
                        false);
-    message_loop.Run();
+    base::RunLoop().Run();
     StreamReader stream_reader(&demuxer, false);
 
     // Benchmark.
@@ -209,7 +214,7 @@ static void RunDemuxerBenchmark(const std::string& filename) {
     total_time += (end - start).InSecondsF();
     demuxer.Stop();
     QuitLoopWithStatus(&message_loop, PIPELINE_OK);
-    message_loop.Run();
+    base::RunLoop().Run();
   }
 
   perf_test::PrintResult("demuxer_bench",

@@ -9,9 +9,9 @@
 #include "cc/quads/draw_quad.h"
 #include "cc/resources/ui_resource_bitmap.h"
 #include "cc/resources/ui_resource_client.h"
+#include "cc/test/fake_compositor_frame_sink.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
-#include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_ui_resource_layer_tree_host_impl.h"
 #include "cc/test/layer_test_common.h"
 #include "cc/test/test_shared_bitmap_manager.h"
@@ -35,7 +35,7 @@ std::unique_ptr<UIResourceLayerImpl> GenerateUIResourceLayer(
       UIResourceLayerImpl::Create(host_impl->active_tree(), 1);
   layer->draw_properties().visible_layer_rect = visible_layer_rect;
   layer->SetBounds(layer_size);
-  layer->SetForceRenderSurface(true);
+  layer->test_properties()->force_render_surface = true;
 
   UIResourceBitmap bitmap(bitmap_size, opaque);
 
@@ -61,11 +61,12 @@ TEST(UIResourceLayerImplTest, VerifyDrawQuads) {
   FakeImplTaskRunnerProvider task_runner_provider;
   TestSharedBitmapManager shared_bitmap_manager;
   TestTaskGraphRunner task_graph_runner;
-  std::unique_ptr<OutputSurface> output_surface = FakeOutputSurface::Create3d();
+  std::unique_ptr<CompositorFrameSink> compositor_frame_sink =
+      FakeCompositorFrameSink::Create3d();
   FakeUIResourceLayerTreeHostImpl host_impl(
       &task_runner_provider, &shared_bitmap_manager, &task_graph_runner);
   host_impl.SetVisible(true);
-  host_impl.InitializeRenderer(output_surface.get());
+  host_impl.InitializeRenderer(compositor_frame_sink.get());
 
   // Make sure we're appending quads when there are valid values.
   gfx::Size bitmap_size(100, 100);
@@ -106,11 +107,12 @@ TEST(UIResourceLayerImplTest, VerifySetOpaqueOnSkBitmap) {
   FakeImplTaskRunnerProvider task_runner_provider;
   TestSharedBitmapManager shared_bitmap_manager;
   TestTaskGraphRunner task_graph_runner;
-  std::unique_ptr<OutputSurface> output_surface = FakeOutputSurface::Create3d();
+  std::unique_ptr<CompositorFrameSink> compositor_frame_sink =
+      FakeCompositorFrameSink::Create3d();
   FakeUIResourceLayerTreeHostImpl host_impl(
       &task_runner_provider, &shared_bitmap_manager, &task_graph_runner);
   host_impl.SetVisible(true);
-  host_impl.InitializeRenderer(output_surface.get());
+  host_impl.InitializeRenderer(compositor_frame_sink.get());
 
   gfx::Size bitmap_size(100, 100);
   gfx::Size layer_size(100, 100);
@@ -135,11 +137,12 @@ TEST(UIResourceLayerImplTest, VerifySetOpaqueOnLayer) {
   FakeImplTaskRunnerProvider task_runner_provider;
   TestSharedBitmapManager shared_bitmap_manager;
   TestTaskGraphRunner task_graph_runner;
-  std::unique_ptr<OutputSurface> output_surface = FakeOutputSurface::Create3d();
+  std::unique_ptr<CompositorFrameSink> compositor_frame_sink =
+      FakeCompositorFrameSink::Create3d();
   FakeUIResourceLayerTreeHostImpl host_impl(
       &task_runner_provider, &shared_bitmap_manager, &task_graph_runner);
   host_impl.SetVisible(true);
-  host_impl.InitializeRenderer(output_surface.get());
+  host_impl.InitializeRenderer(compositor_frame_sink.get());
 
   gfx::Size bitmap_size(100, 100);
   gfx::Size layer_size(100, 100);

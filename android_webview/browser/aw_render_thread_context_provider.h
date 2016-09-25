@@ -16,7 +16,7 @@
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 
-namespace gfx {
+namespace gl {
 class GLSurface;
 }
 
@@ -29,25 +29,28 @@ namespace android_webview {
 class AwRenderThreadContextProvider : public cc::ContextProvider {
  public:
   static scoped_refptr<AwRenderThreadContextProvider> Create(
-      scoped_refptr<gfx::GLSurface> surface,
+      scoped_refptr<gl::GLSurface> surface,
       scoped_refptr<gpu::InProcessCommandBuffer::Service> service);
+
+  // Gives the GL internal format that should be used for calling CopyTexImage2D
+  // on the default framebuffer.
+  uint32_t GetCopyTextureInternalFormat();
 
  private:
   AwRenderThreadContextProvider(
-      scoped_refptr<gfx::GLSurface> surface,
+      scoped_refptr<gl::GLSurface> surface,
       scoped_refptr<gpu::InProcessCommandBuffer::Service> service);
   ~AwRenderThreadContextProvider() override;
 
   // cc::ContextProvider:
   bool BindToCurrentThread() override;
-  Capabilities ContextCapabilities() override;
+  gpu::Capabilities ContextCapabilities() override;
   gpu::gles2::GLES2Interface* ContextGL() override;
   gpu::ContextSupport* ContextSupport() override;
   class GrContext* GrContext() override;
+  cc::ContextCacheController* CacheController() override;
   void InvalidateGrContext(uint32_t state) override;
-  void SetupLock() override;
   base::Lock* GetLock() override;
-  void DeleteCachedResources() override;
   void SetLostContextCallback(
       const LostContextCallback& lost_context_callback) override;
 
@@ -57,8 +60,7 @@ class AwRenderThreadContextProvider : public cc::ContextProvider {
 
   std::unique_ptr<gpu::GLInProcessContext> context_;
   sk_sp<class GrContext> gr_context_;
-
-  cc::ContextProvider::Capabilities capabilities_;
+  std::unique_ptr<cc::ContextCacheController> cache_controller_;
 
   LostContextCallback lost_context_callback_;
 

@@ -30,9 +30,8 @@ class ContentLoFiDecider : public LoFiDecider {
   bool IsUsingLoFiMode(const net::URLRequest& request) const override;
   bool MaybeAddLoFiDirectiveToHeaders(
       const net::URLRequest& request,
-      net::HttpRequestHeaders* headers,
-      const net::ProxyServer& proxy_server,
-      DataReductionProxyConfig* config) const override;
+      net::HttpRequestHeaders* headers) const override;
+  bool ShouldRecordLoFiUMA(const net::URLRequest& request) const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ContentLoFiDecider);

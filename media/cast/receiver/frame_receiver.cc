@@ -13,7 +13,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/numerics/safe_conversions.h"
 #include "media/cast/cast_config.h"
-#include "media/cast/cast_defines.h"
 #include "media/cast/cast_environment.h"
 #include "media/cast/constants.h"
 #include "media/cast/net/rtcp/rtcp_utility.h"
@@ -41,21 +40,24 @@ FrameReceiver::FrameReceiver(
     CastTransport* const transport)
     : cast_environment_(cast_environment),
       transport_(transport),
-      packet_parser_(config.sender_ssrc, config.rtp_payload_type),
+      packet_parser_(
+          config.sender_ssrc,
+          config.rtp_payload_type <= RtpPayloadType::AUDIO_LAST ? 127 : 96),
       stats_(cast_environment->Clock()),
       event_media_type_(event_media_type),
       event_subscriber_(kReceiverRtcpEventHistorySize, event_media_type),
       rtp_timebase_(config.rtp_timebase),
       target_playout_delay_(
           base::TimeDelta::FromMilliseconds(config.rtp_max_delay_ms)),
-      expected_frame_duration_(base::TimeDelta::FromSeconds(1) /
-                               config.target_frame_rate),
+      expected_frame_duration_(
+          base::TimeDelta::FromSecondsD(1.0 / config.target_frame_rate)),
       reports_are_scheduled_(false),
       framer_(cast_environment->Clock(),
               this,
               config.sender_ssrc,
               true,
-              config.rtp_max_delay_ms * config.target_frame_rate / 1000),
+              static_cast<int>(
+                  config.rtp_max_delay_ms * config.target_frame_rate / 1000)),
       rtcp_(cast_environment_->Clock(),
             config.receiver_ssrc,
             config.sender_ssrc),
@@ -81,7 +83,7 @@ void FrameReceiver::RequestEncodedFrame(
   EmitAvailableEncodedFrames();
 }
 
-bool FrameReceiver::ProcessPacket(scoped_ptr<Packet> packet) {
+bool FrameReceiver::ProcessPacket(std::unique_ptr<Packet> packet) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
 
   if (IsRtcpPacket(&packet->front(), packet->size())) {
@@ -118,10 +120,10 @@ void FrameReceiver::ProcessParsedPacket(const RtpCastHeader& rtp_header,
 
   const base::TimeTicks now = cast_environment_->Clock()->NowTicks();
 
-  frame_id_to_rtp_timestamp_[rtp_header.frame_id & 0xff] =
+  frame_id_to_rtp_timestamp_[rtp_header.frame_id.lower_8_bits()] =
       rtp_header.rtp_timestamp;
 
-  scoped_ptr<PacketEvent> receive_event(new PacketEvent());
+  std::unique_ptr<PacketEvent> receive_event(new PacketEvent());
   receive_event->timestamp = now;
   receive_event->type = PACKET_RECEIVED;
   receive_event->media_type = event_media_type_;
@@ -182,9 +184,9 @@ void FrameReceiver::CastFeedback(const RtcpCastMessage& cast_message) {
 
   base::TimeTicks now = cast_environment_->Clock()->NowTicks();
   RtpTimeTicks rtp_timestamp =
-      frame_id_to_rtp_timestamp_[cast_message.ack_frame_id & 0xff];
+      frame_id_to_rtp_timestamp_[cast_message.ack_frame_id.lower_8_bits()];
 
-  scoped_ptr<FrameEvent> ack_sent_event(new FrameEvent());
+  std::unique_ptr<FrameEvent> ack_sent_event(new FrameEvent());
   ack_sent_event->timestamp = now;
   ack_sent_event->type = FRAME_ACK_SENT;
   ack_sent_event->media_type = event_media_type_;
@@ -206,8 +208,7 @@ void FrameReceiver::EmitAvailableEncodedFrames() {
     // Attempt to peek at the next completed frame from the |framer_|.
     // TODO(miu): We should only be peeking at the metadata, and not copying the
     // payload yet!  Or, at least, peek using a StringPiece instead of a copy.
-    scoped_ptr<EncodedFrame> encoded_frame(
-        new EncodedFrame());
+    std::unique_ptr<EncodedFrame> encoded_frame(new EncodedFrame());
     bool is_consecutively_next_frame = false;
     bool have_multiple_complete_frames = false;
     if (!framer_.GetEncodedFrame(encoded_frame.get(),
@@ -293,8 +294,9 @@ void FrameReceiver::EmitAvailableEncodedFramesAfterWaiting() {
   EmitAvailableEncodedFrames();
 }
 
-void FrameReceiver::EmitOneFrame(const ReceiveEncodedFrameCallback& callback,
-                                 scoped_ptr<EncodedFrame> encoded_frame) const {
+void FrameReceiver::EmitOneFrame(
+    const ReceiveEncodedFrameCallback& callback,
+    std::unique_ptr<EncodedFrame> encoded_frame) const {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
   if (!callback.is_null())
     callback.Run(std::move(encoded_frame));

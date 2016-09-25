@@ -35,6 +35,7 @@
 #include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseAuthorizer.h"
 #include "modules/webdatabase/DatabaseContext.h"
+#include "modules/webdatabase/DatabaseThread.h"
 #include "modules/webdatabase/SQLError.h"
 #include "modules/webdatabase/SQLStatementCallback.h"
 #include "modules/webdatabase/SQLStatementErrorCallback.h"
@@ -42,7 +43,7 @@
 #include "modules/webdatabase/SQLTransactionCallback.h"
 #include "modules/webdatabase/SQLTransactionClient.h" // FIXME: Should be used in the backend only.
 #include "modules/webdatabase/SQLTransactionErrorCallback.h"
-#include "platform/Logging.h"
+#include "modules/webdatabase/StorageLog.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/Vector.h"
 
@@ -64,6 +65,7 @@ SQLTransaction::SQLTransaction(Database* db, SQLTransactionCallback* callback,
     , m_executeSqlAllowed(false)
     , m_readOnly(readOnly)
 {
+    DCHECK(isMainThread());
     ASSERT(m_database);
     InspectorInstrumentation::asyncTaskScheduled(db->getExecutionContext(), "SQLTransaction", this, true);
 }
@@ -131,7 +133,9 @@ SQLTransaction::StateFunction SQLTransaction::stateFunctionFor(SQLTransactionSta
 // modify is m_requestedState which is meant for this purpose.
 void SQLTransaction::requestTransitToState(SQLTransactionState nextState)
 {
-    WTF_LOG(StorageAPI, "Scheduling %s for transaction %p\n", nameForSQLTransactionState(nextState), this);
+#if DCHECK_IS_ON()
+    STORAGE_DVLOG(1) << "Scheduling " << nameForSQLTransactionState(nextState) << " for transaction " << this;
+#endif
     m_requestedState = nextState;
     m_database->scheduleTransactionCallback(this);
 }
@@ -162,8 +166,8 @@ SQLTransactionState SQLTransaction::deliverTransactionCallback()
     // Spec 4.3.2 5: If the transaction callback was null or raised an exception, jump to the error callback
     SQLTransactionState nextState = SQLTransactionState::RunStatements;
     if (shouldDeliverErrorCallback) {
-        m_database->reportStartTransactionResult(5, SQLError::UNKNOWN_ERR, 0);
-        m_transactionError = SQLErrorData::create(SQLError::UNKNOWN_ERR, "the SQLTransactionCallback was null or threw an exception");
+        m_database->reportStartTransactionResult(5, SQLError::kUnknownErr, 0);
+        m_transactionError = SQLErrorData::create(SQLError::kUnknownErr, "the SQLTransactionCallback was null or threw an exception");
         nextState = SQLTransactionState::DeliverTransactionErrorCallback;
     }
     m_database->reportStartTransactionResult(0, -1, 0); // OK
@@ -200,6 +204,7 @@ SQLTransactionState SQLTransaction::deliverTransactionErrorCallback()
 
 SQLTransactionState SQLTransaction::deliverStatementCallback()
 {
+    DCHECK(isMainThread());
     // Spec 4.3.2.6.6 and 4.3.2.6.3: If the statement callback went wrong, jump to the transaction error callback
     // Otherwise, continue to loop through the statement queue
     m_executeSqlAllowed = true;
@@ -212,8 +217,8 @@ SQLTransactionState SQLTransaction::deliverStatementCallback()
     m_executeSqlAllowed = false;
 
     if (result) {
-        m_database->reportCommitTransactionResult(2, SQLError::UNKNOWN_ERR, 0);
-        m_transactionError = SQLErrorData::create(SQLError::UNKNOWN_ERR, "the statement callback raised an exception or statement error callback did not return false");
+        m_database->reportCommitTransactionResult(2, SQLError::kUnknownErr, 0);
+        m_transactionError = SQLErrorData::create(SQLError::kUnknownErr, "the statement callback raised an exception or statement error callback did not return false");
         return nextStateForTransactionError();
     }
     return SQLTransactionState::RunStatements;
@@ -221,6 +226,7 @@ SQLTransactionState SQLTransaction::deliverStatementCallback()
 
 SQLTransactionState SQLTransaction::deliverQuotaIncreaseCallback()
 {
+    DCHECK(isMainThread());
     ASSERT(m_backend->currentStatement());
 
     bool shouldRetryCurrentStatement = m_database->transactionClient()->didExceedQuota(database());
@@ -231,6 +237,7 @@ SQLTransactionState SQLTransaction::deliverQuotaIncreaseCallback()
 
 SQLTransactionState SQLTransaction::deliverSuccessCallback()
 {
+    DCHECK(isMainThread());
     InspectorInstrumentation::AsyncTask asyncTask(m_database->getExecutionContext(), this);
     InspectorInstrumentation::asyncTaskCanceled(m_database->getExecutionContext(), this);
 
@@ -263,12 +270,14 @@ SQLTransactionState SQLTransaction::sendToBackendState()
 
 void SQLTransaction::performPendingCallback()
 {
+    DCHECK(isMainThread());
     computeNextStateAndCleanupIfNeeded();
     runStateMachine();
 }
 
 void SQLTransaction::executeSQL(const String& sqlStatement, const Vector<SQLValue>& arguments, SQLStatementCallback* callback, SQLStatementErrorCallback* callbackError, ExceptionState& exceptionState)
 {
+    DCHECK(isMainThread());
     if (!m_executeSqlAllowed) {
         exceptionState.throwDOMException(InvalidStateError, "SQL execution is disallowed.");
         return;
@@ -314,8 +323,9 @@ bool SQLTransaction::computeNextStateAndCleanupIfNeeded()
             || m_nextState == SQLTransactionState::DeliverStatementCallback
             || m_nextState == SQLTransactionState::DeliverQuotaIncreaseCallback
             || m_nextState == SQLTransactionState::DeliverSuccessCallback);
-
-        WTF_LOG(StorageAPI, "Callback %s\n", nameForSQLTransactionState(m_nextState));
+#if DCHECK_IS_ON()
+        STORAGE_DVLOG(1) << "Callback " << nameForSQLTransactionState(m_nextState);
+#endif
         return false;
     }
 

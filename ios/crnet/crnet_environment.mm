@@ -11,22 +11,23 @@
 #include "base/at_exit.h"
 #include "base/atomicops.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
-#include "base/i18n/icu_util.h"
 #include "base/json/json_writer.h"
 #include "base/mac/bind_objc_block.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_block.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/worker_pool.h"
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_filter.h"
-#include "crypto/nss_util.h"
 #include "ios/crnet/sdch_owner_pref_storage.h"
 #include "ios/net/cookies/cookie_store_ios.h"
 #include "ios/net/crn_http_protocol_handler.h"
@@ -38,7 +39,11 @@
 #include "net/base/network_change_notifier.h"
 #include "net/base/sdch_manager.h"
 #include "net/cert/cert_verifier.h"
-#include "net/cert_net/nss_ocsp.h"
+#include "net/cert/ct_known_logs.h"
+#include "net/cert/ct_log_verifier.h"
+#include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/ct_verifier.h"
+#include "net/cert/multi_log_ct_verifier.h"
 #include "net/cookies/cookie_store.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
@@ -59,7 +64,12 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_context_storage.h"
 #include "net/url_request/url_request_job_factory_impl.h"
+#include "url/url_features.h"
 #include "url/url_util.h"
+
+#if !BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
+#include "base/i18n/icu_util.h"  // nogncheck
+#endif
 
 namespace {
 
@@ -135,13 +145,13 @@ class CrNetHttpProtocolHandlerDelegate
 void CrNetEnvironment::PostToNetworkThread(
     const tracked_objects::Location& from_here,
     const base::Closure& task) {
-  network_io_thread_->message_loop()->PostTask(from_here, task);
+  network_io_thread_->task_runner()->PostTask(from_here, task);
 }
 
 void CrNetEnvironment::PostToFileUserBlockingThread(
     const tracked_objects::Location& from_here,
     const base::Closure& task) {
-  file_user_blocking_thread_->message_loop()->PostTask(from_here, task);
+  file_user_blocking_thread_->task_runner()->PostTask(from_here, task);
 }
 
 // static
@@ -150,17 +160,15 @@ void CrNetEnvironment::Initialize() {
   if (!g_at_exit_)
     g_at_exit_ = new base::AtExitManager;
 
+  // Change the framework bundle to the bundle that contain CrNet framework.
+  // By default the framework bundle is set equal to the main (app) bundle.
+  NSBundle* frameworkBundle = [NSBundle bundleForClass:CrNet.class];
+  base::mac::SetOverrideFrameworkBundle(frameworkBundle);
+#if !BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
   CHECK(base::i18n::InitializeICU());
+#endif
   url::Initialize();
   base::CommandLine::Init(0, nullptr);
-
-#if defined(USE_NSS_VERIFIER)
-  // This needs to happen on the main thread. NSPR's initialization sets up its
-  // memory allocator; if this is not done before other threads are created,
-  // this initialization can race to cause accidental free/allocation
-  // mismatches.
-  crypto::EnsureNSPRInit();
-#endif
 
   // Without doing this, StatisticsRecorder::FactoryGet() leaks one histogram
   // per call after the first for a given name.
@@ -183,8 +191,7 @@ void CrNetEnvironment::StartNetLog(base::FilePath::StringType file_name,
 
 void CrNetEnvironment::StartNetLogInternal(
     base::FilePath::StringType file_name, bool log_bytes) {
-  DCHECK(base::MessageLoop::current() ==
-         file_user_blocking_thread_->message_loop());
+  DCHECK(file_user_blocking_thread_->task_runner()->BelongsToCurrentThread());
   DCHECK(file_name.length());
   DCHECK(net_log_);
 
@@ -217,8 +224,7 @@ void CrNetEnvironment::StopNetLog() {
 }
 
 void CrNetEnvironment::StopNetLogInternal() {
-  DCHECK(base::MessageLoop::current() ==
-         file_user_blocking_thread_->message_loop());
+  DCHECK(file_user_blocking_thread_->task_runner()->BelongsToCurrentThread());
   if (net_log_observer_) {
     net_log_observer_->StopObserving(nullptr);
     net_log_observer_.reset();
@@ -248,8 +254,7 @@ net::HttpNetworkSession* CrNetEnvironment::GetHttpNetworkSession(
 }
 
 void CrNetEnvironment::CloseAllSpdySessionsInternal() {
-  DCHECK(base::MessageLoop::current() ==
-         network_io_thread_->message_loop());
+  DCHECK(network_io_thread_->task_runner()->BelongsToCurrentThread());
 
   net::HttpNetworkSession* http_network_session =
       GetHttpNetworkSession(GetMainContextGetter()->GetURLRequestContext());
@@ -262,12 +267,14 @@ void CrNetEnvironment::CloseAllSpdySessionsInternal() {
   }
 }
 
-CrNetEnvironment::CrNetEnvironment(const std::string& user_agent_product_name)
+CrNetEnvironment::CrNetEnvironment(const std::string& user_agent,
+                                   bool user_agent_partial)
     : spdy_enabled_(false),
       quic_enabled_(false),
       sdch_enabled_(false),
       main_context_(new net::URLRequestContext),
-      user_agent_product_name_(user_agent_product_name),
+      user_agent_(user_agent),
+      user_agent_partial_(user_agent_partial),
       net_log_(new net::NetLog) {}
 
 void CrNetEnvironment::Install() {
@@ -292,9 +299,6 @@ void CrNetEnvironment::Install() {
   proxy_config_service_ = net::ProxyService::CreateSystemProxyConfigService(
       network_io_thread_->task_runner(), nullptr);
 
-#if defined(USE_NSS_VERIFIER)
-  net::SetURLRequestContextForNSSHttpIO(main_context_.get());
-#endif
   main_context_getter_ = new CrNetURLRequestContextGetter(
       main_context_.get(), network_io_thread_->task_runner());
   base::subtle::MemoryBarrier();
@@ -312,9 +316,6 @@ void CrNetEnvironment::InstallIntoSessionConfiguration(
 
 CrNetEnvironment::~CrNetEnvironment() {
   net::HTTPProtocolHandlerDelegate::SetInstance(nullptr);
-#if defined(USE_NSS_VERIFIER)
-  net::SetURLRequestContextForNSSHttpIO(nullptr);
-#endif
 }
 
 net::URLRequestContextGetter* CrNetEnvironment::GetMainContextGetter() {
@@ -339,7 +340,7 @@ void CrNetEnvironment::SetHTTPProtocolHandlerRegistered(bool registered) {
 }
 
 void CrNetEnvironment::ConfigureSdchOnNetworkThread() {
-  DCHECK(base::MessageLoop::current() == network_io_thread_->message_loop());
+  DCHECK(network_io_thread_->task_runner()->BelongsToCurrentThread());
   net::URLRequestContext* context =
       main_context_getter_->GetURLRequestContext();
 
@@ -364,13 +365,15 @@ void CrNetEnvironment::ConfigureSdchOnNetworkThread() {
 }
 
 void CrNetEnvironment::InitializeOnNetworkThread() {
-  DCHECK(base::MessageLoop::current() == network_io_thread_->message_loop());
+  DCHECK(network_io_thread_->task_runner()->BelongsToCurrentThread());
+  base::FeatureList::InitializeInstance(std::string(), std::string());
 
   ConfigureSdchOnNetworkThread();
 
+  // Use the framework bundle to search for resources.
+  NSBundle* frameworkBundle = base::mac::FrameworkBundle();
   NSString* bundlePath =
-      [[NSBundle mainBundle] pathForResource:@"crnet_resources"
-                                      ofType:@"bundle"];
+      [frameworkBundle pathForResource:@"crnet_resources" ofType:@"bundle"];
   NSBundle* bundle = [NSBundle bundleWithPath:bundlePath];
   NSString* acceptableLanguages = NSLocalizedStringWithDefaultValue(
       @"IDS_ACCEPT_LANGUAGES",
@@ -380,30 +383,37 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
       @"These values are copied from Chrome's .xtb files, so the same "
        "values are used in the |Accept-Language| header. Key name matches "
        "Chrome's.");
-  DCHECK(acceptableLanguages);
+  if (acceptableLanguages == Nil)
+    acceptableLanguages = @"en-US,en";
   std::string acceptable_languages =
       [acceptableLanguages cStringUsingEncoding:NSUTF8StringEncoding];
-  std::string user_agent =
-      web::BuildUserAgentFromProduct(user_agent_product_name_);
+  if (user_agent_partial_) {
+    user_agent_ = web::BuildUserAgentFromProduct(user_agent_);
+    user_agent_partial_ = false;
+  }
   // Set the user agent through NSUserDefaults. This sets it for both
   // UIWebViews and WKWebViews, and javascript calls to navigator.userAgent
   // return this value.
   [[NSUserDefaults standardUserDefaults] registerDefaults:@{
-    @"UserAgent" : [NSString stringWithUTF8String:user_agent.c_str()]
+    @"UserAgent" : [NSString stringWithUTF8String:user_agent_.c_str()]
   }];
   main_context_->set_http_user_agent_settings(
-      new net::StaticHttpUserAgentSettings(acceptable_languages, user_agent));
+      new net::StaticHttpUserAgentSettings(acceptable_languages, user_agent_));
 
   main_context_->set_ssl_config_service(new net::SSLConfigServiceDefaults);
   main_context_->set_transport_security_state(
       new net::TransportSecurityState());
-  http_server_properties_.reset(new net::HttpServerPropertiesImpl());
-  main_context_->set_http_server_properties(
-      http_server_properties_->GetWeakPtr());
-  // TODO(rdsmith): Note that the ".release()" calls below are leaking
+  std::unique_ptr<net::MultiLogCTVerifier> ct_verifier =
+      base::MakeUnique<net::MultiLogCTVerifier>();
+  ct_verifier->AddLogs(net::ct::CreateLogVerifiersForKnownLogs());
+  // TODO(mef): Note that the ".release()" calls below are leaking
   // the objects in question; this should be fixed by having an object
   // corresponding to URLRequestContextStorage that actually owns those
   // objects.  See http://crbug.com/523858.
+  main_context_->set_cert_transparency_verifier(ct_verifier.release());
+  main_context_->set_ct_policy_enforcer(new net::CTPolicyEnforcer());
+  http_server_properties_.reset(new net::HttpServerPropertiesImpl());
+  main_context_->set_http_server_properties(http_server_properties_.get());
   main_context_->set_host_resolver(
       net::HostResolver::CreateDefaultResolver(nullptr).release());
   main_context_->set_cert_verifier(
@@ -433,6 +443,9 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
   net::HttpNetworkSession::Params params;
   params.host_resolver = main_context_->host_resolver();
   params.cert_verifier = main_context_->cert_verifier();
+  params.cert_transparency_verifier =
+      main_context_->cert_transparency_verifier();
+  params.ct_policy_enforcer = main_context_->ct_policy_enforcer();
   params.channel_id_service = main_context_->channel_id_service();
   params.transport_security_state = main_context_->transport_security_state();
   params.proxy_service = main_context_->proxy_service();
@@ -440,9 +453,7 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
   params.http_auth_handler_factory = main_context_->http_auth_handler_factory();
   params.http_server_properties = main_context_->http_server_properties();
   params.net_log = main_context_->net_log();
-  params.enable_spdy31 = spdy_enabled();
   params.enable_http2 = spdy_enabled();
-  params.parse_alternative_services = false;
   params.enable_quic = quic_enabled();
 
   if (!params.channel_id_service) {
@@ -473,9 +484,11 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
       new net::URLRequestJobFactoryImpl;
   job_factory->SetProtocolHandler(
       "data", base::WrapUnique(new net::DataProtocolHandler));
+#if !defined(DISABLE_FILE_SUPPORT)
   job_factory->SetProtocolHandler(
-      "file", base::WrapUnique(
-                  new net::FileProtocolHandler(file_thread_->task_runner())));
+      "file",
+      base::MakeUnique<net::FileProtocolHandler>(file_thread_->task_runner()));
+#endif   // !defined(DISABLE_FILE_SUPPORT)
   main_context_->set_job_factory(job_factory);
 
   main_context_->set_net_log(net_log_.get());
@@ -493,7 +506,7 @@ std::string CrNetEnvironment::user_agent() {
 
 void CrNetEnvironment::ClearCache(ClearCacheCallback callback) {
   PostToNetworkThread(
-      FROM_HERE,
-      base::Bind(&net::ClearHttpCache, main_context_getter_,
-                 network_io_thread_->task_runner(), base::BindBlock(callback)));
+      FROM_HERE, base::Bind(&net::ClearHttpCache, main_context_getter_,
+                            network_io_thread_->task_runner(), base::Time(),
+                            base::Time::Max(), base::BindBlock(callback)));
 }

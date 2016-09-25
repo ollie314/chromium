@@ -6,8 +6,11 @@
 
 #include <stddef.h>
 
+#include "base/location.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -30,14 +33,14 @@ class PrivetV3ContextGetterTest : public testing::Test,
 
   void SetUp() override {
     context_getter_ = new extensions::PrivetV3ContextGetter(
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
   }
 
   void OnURLFetchComplete(const net::URLFetcher* source) override {
     done_ = true;
     status_ = source->GetStatus();
 
-    base::MessageLoop::current()->PostTask(FROM_HERE, quit_);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, quit_);
   }
 
   void CreateServer(EmbeddedTestServer::Type type) {

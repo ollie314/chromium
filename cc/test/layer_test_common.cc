@@ -17,7 +17,8 @@
 #include "cc/quads/draw_quad.h"
 #include "cc/quads/render_pass.h"
 #include "cc/test/animation_test_common.h"
-#include "cc/test/fake_output_surface.h"
+#include "cc/test/fake_compositor_frame_sink.h"
+#include "cc/test/layer_tree_settings_for_testing.h"
 #include "cc/test/mock_occlusion_tracker.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -74,14 +75,14 @@ void LayerTestCommon::VerifyQuadsAreOccluded(const QuadList& quads,
                                              const gfx::Rect& occluded,
                                              size_t* partially_occluded_count) {
   // No quad should exist if it's fully occluded.
-  for (const auto& quad : quads) {
+  for (auto* quad : quads) {
     gfx::Rect target_visible_rect = MathUtil::MapEnclosingClippedRect(
         quad->shared_quad_state->quad_to_target_transform, quad->visible_rect);
     EXPECT_FALSE(occluded.Contains(target_visible_rect));
   }
 
   // Quads that are fully occluded on one axis only should be shrunken.
-  for (const auto& quad : quads) {
+  for (auto* quad : quads) {
     gfx::Rect target_rect = MathUtil::MapEnclosingClippedRect(
         quad->shared_quad_state->quad_to_target_transform, quad->rect);
     if (!quad->shared_quad_state->quad_to_target_transform
@@ -96,8 +97,6 @@ void LayerTestCommon::VerifyQuadsAreOccluded(const QuadList& quads,
       // ends up on integer boundaries for ease of testing.
       ASSERT_EQ(target_rectf, gfx::RectF(target_rect));
     }
-    gfx::Rect target_visible_rect = MathUtil::MapEnclosingClippedRect(
-        quad->shared_quad_state->quad_to_target_transform, quad->visible_rect);
 
     bool fully_occluded_horizontal = target_rect.x() >= occluded.x() &&
                                      target_rect.right() <= occluded.right();
@@ -117,44 +116,43 @@ void LayerTestCommon::VerifyQuadsAreOccluded(const QuadList& quads,
 }
 
 LayerTestCommon::LayerImplTest::LayerImplTest()
-    : LayerImplTest(LayerTreeSettings()) {}
+    : LayerImplTest(LayerTreeSettingsForTesting()) {}
 
 LayerTestCommon::LayerImplTest::LayerImplTest(const LayerTreeSettings& settings)
-    : client_(FakeLayerTreeHostClient::DIRECT_3D),
-      output_surface_(FakeOutputSurface::Create3d()),
+    : compositor_frame_sink_(FakeCompositorFrameSink::Create3d()),
       host_(FakeLayerTreeHost::Create(&client_, &task_graph_runner_, settings)),
       render_pass_(RenderPass::Create()),
       layer_impl_id_(2) {
   std::unique_ptr<LayerImpl> root =
       LayerImpl::Create(host_->host_impl()->active_tree(), 1);
-  host_->host_impl()->active_tree()->SetRootLayer(std::move(root));
-  root_layer()->SetHasRenderSurface(true);
+  host_->host_impl()->active_tree()->SetRootLayerForTesting(std::move(root));
+  root_layer_for_testing()->SetHasRenderSurface(true);
   host_->host_impl()->SetVisible(true);
-  host_->host_impl()->InitializeRenderer(output_surface_.get());
+  EXPECT_TRUE(
+      host_->host_impl()->InitializeRenderer(compositor_frame_sink_.get()));
 
   const int timeline_id = AnimationIdProvider::NextTimelineId();
   timeline_ = AnimationTimeline::Create(timeline_id);
-  host_->animation_host()->AddAnimationTimeline(timeline_);
+  host_->GetLayerTree()->animation_host()->AddAnimationTimeline(timeline_);
   // Create impl-side instance.
-  host_->animation_host()->PushPropertiesTo(
+  host_->GetLayerTree()->animation_host()->PushPropertiesTo(
       host_->host_impl()->animation_host());
   timeline_impl_ =
       host_->host_impl()->animation_host()->GetTimelineById(timeline_id);
 }
 
 LayerTestCommon::LayerImplTest::~LayerImplTest() {
-  host_->animation_host()->RemoveAnimationTimeline(timeline_);
+  host_->GetLayerTree()->animation_host()->RemoveAnimationTimeline(timeline_);
   timeline_ = nullptr;
+  host_->host_impl()->ReleaseCompositorFrameSink();
 }
 
 void LayerTestCommon::LayerImplTest::CalcDrawProps(
     const gfx::Size& viewport_size) {
   LayerImplList layer_list;
-  host_->host_impl()->active_tree()->IncrementRenderSurfaceListIdForTesting();
   LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
-      root_layer(), viewport_size, &layer_list,
-      host_->host_impl()->active_tree()->current_render_surface_list_id());
-  LayerTreeHostCommon::CalculateDrawProperties(&inputs);
+      root_layer_for_testing(), viewport_size, &layer_list);
+  LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
 }
 
 void LayerTestCommon::LayerImplTest::AppendQuadsWithOcclusion(
@@ -210,10 +208,8 @@ void LayerTestCommon::LayerImplTest::AppendSurfaceQuadsWithOcclusion(
 void EmptyCopyOutputCallback(std::unique_ptr<CopyOutputResult> result) {}
 
 void LayerTestCommon::LayerImplTest::RequestCopyOfOutput() {
-  std::vector<std::unique_ptr<CopyOutputRequest>> copy_requests;
-  copy_requests.push_back(
+  root_layer_for_testing()->test_properties()->copy_requests.push_back(
       CopyOutputRequest::CreateRequest(base::Bind(&EmptyCopyOutputCallback)));
-  root_layer()->PassCopyRequests(&copy_requests);
 }
 
 }  // namespace cc

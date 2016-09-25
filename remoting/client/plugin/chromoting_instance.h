@@ -13,7 +13,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/pp_resource.h"
@@ -60,6 +60,7 @@ class DesktopVector;
 
 namespace remoting {
 
+class PepperAudioPlayer;
 class ChromotingClient;
 class ClientContext;
 class DelegatingSignalStrategy;
@@ -248,6 +249,7 @@ class ChromotingInstance : public ClientUserInterface,
   std::unique_ptr<jingle_glue::JingleThreadWrapper> thread_wrapper_;
   ClientContext context_;
   protocol::PerformanceTracker perf_tracker_;
+  std::unique_ptr<PepperAudioPlayer> audio_player_;
   std::unique_ptr<PepperVideoRenderer> video_renderer_;
   pp::View plugin_view_;
 

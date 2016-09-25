@@ -2,24 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "media/audio/win/audio_low_latency_output_win.h"
+
 #include <windows.h>
 #include <mmsystem.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/environment.h"
 #include "base/files/file_util.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
 #include "base/time/time.h"
 #include "base/win/scoped_com_initializer.h"
+#include "media/audio/audio_device_description.h"
 #include "media/audio/audio_io.h"
-#include "media/audio/audio_manager_base.h"
+#include "media/audio/audio_manager.h"
 #include "media/audio/audio_unittest_util.h"
 #include "media/audio/mock_audio_source_callback.h"
-#include "media/audio/win/audio_low_latency_output_win.h"
 #include "media/audio/win/core_audio_util_win.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/seekable_buffer.h"
@@ -138,7 +143,7 @@ class ReadFromFileAudioSource : public AudioOutputStream::AudioSourceCallback {
 
  private:
   scoped_refptr<DecoderBuffer> file_;
-  scoped_ptr<int[]> delta_times_;
+  std::unique_ptr<int[]> delta_times_;
   int pos_;
   base::TimeTicks previous_call_time_;
   FILE* text_file_;
@@ -167,7 +172,7 @@ class AudioOutputStreamWrapper {
         bits_per_sample_(kBitsPerSample) {
     AudioParameters preferred_params;
     EXPECT_TRUE(SUCCEEDED(CoreAudioUtil::GetPreferredAudioParameters(
-        AudioManagerBase::kDefaultDeviceId, true, &preferred_params)));
+        AudioDeviceDescription::kDefaultDeviceId, true, &preferred_params)));
     channel_layout_ = preferred_params.channel_layout();
     sample_rate_ = preferred_params.sample_rate();
     samples_per_packet_ = preferred_params.frames_per_buffer();
@@ -206,7 +211,7 @@ class AudioOutputStreamWrapper {
     AudioOutputStream* aos = audio_man_->MakeAudioOutputStream(
         AudioParameters(format_, channel_layout_, sample_rate_,
                         bits_per_sample_, samples_per_packet_),
-        std::string());
+        std::string(), AudioManager::LogCallback());
     EXPECT_TRUE(aos);
     return aos;
   }
@@ -232,11 +237,11 @@ class WASAPIAudioOutputStreamTest : public ::testing::Test {
   WASAPIAudioOutputStreamTest() {
     audio_manager_ =
         AudioManager::CreateForTesting(message_loop_.task_runner());
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
   ~WASAPIAudioOutputStreamTest() override {
     audio_manager_.reset();
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
  protected:
@@ -397,10 +402,10 @@ TEST_F(WASAPIAudioOutputStreamTest, ValidPacketSize) {
       .WillRepeatedly(Return(0));
 
   aos->Start(&source);
-  message_loop_.PostDelayedTask(FROM_HERE,
-                                base::MessageLoop::QuitWhenIdleClosure(),
-                                TestTimeouts::action_timeout());
-  message_loop_.Run();
+  message_loop_.task_runner()->PostDelayedTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
+      TestTimeouts::action_timeout());
+  base::RunLoop().Run();
   aos->Stop();
   aos->Close();
 }
@@ -587,10 +592,10 @@ TEST_F(WASAPIAudioOutputStreamTest,
       .WillRepeatedly(Return(aosw.samples_per_packet()));
 
   aos->Start(&source);
-  message_loop_.PostDelayedTask(FROM_HERE,
-                                base::MessageLoop::QuitWhenIdleClosure(),
-                                TestTimeouts::action_timeout());
-  message_loop_.Run();
+  message_loop_.task_runner()->PostDelayedTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
+      TestTimeouts::action_timeout());
+  base::RunLoop().Run();
   aos->Stop();
   aos->Close();
 }
@@ -620,10 +625,10 @@ TEST_F(WASAPIAudioOutputStreamTest,
       .WillRepeatedly(Return(aosw.samples_per_packet()));
 
   aos->Start(&source);
-  message_loop_.PostDelayedTask(FROM_HERE,
-                                base::MessageLoop::QuitWhenIdleClosure(),
-                                TestTimeouts::action_timeout());
-  message_loop_.Run();
+  message_loop_.task_runner()->PostDelayedTask(
+      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
+      TestTimeouts::action_timeout());
+  base::RunLoop().Run();
   aos->Stop();
   aos->Close();
 }

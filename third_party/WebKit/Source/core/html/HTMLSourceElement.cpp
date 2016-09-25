@@ -34,7 +34,8 @@
 #include "core/events/EventSender.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/HTMLPictureElement.h"
-#include "platform/Logging.h"
+
+#define SOURCE_LOG_LEVEL 3
 
 namespace blink {
 
@@ -69,7 +70,7 @@ inline HTMLSourceElement::HTMLSourceElement(Document& document)
     : HTMLElement(sourceTag, document)
     , m_listener(new Listener(this))
 {
-    WTF_LOG(Media, "HTMLSourceElement::HTMLSourceElement - %p", this);
+    DVLOG(SOURCE_LOG_LEVEL) << "HTMLSourceElement - " << (void*)this;
 }
 
 DEFINE_NODE_FACTORY(HTMLSourceElement)
@@ -80,14 +81,15 @@ HTMLSourceElement::~HTMLSourceElement()
 
 void HTMLSourceElement::createMediaQueryList(const AtomicString& media)
 {
-    if (media.isEmpty())
+    removeMediaQueryListListener();
+    if (media.isEmpty()) {
+        m_mediaQueryList = nullptr;
         return;
+    }
 
-    if (m_mediaQueryList)
-        m_mediaQueryList->removeListener(m_listener);
     MediaQuerySet* set = MediaQuerySet::create(media);
     m_mediaQueryList = MediaQueryList::create(&document(), &document().mediaQueryMatcher(), set);
-    m_mediaQueryList->addListener(m_listener);
+    addMediaQueryListListener();
 }
 
 void HTMLSourceElement::didMoveToNewDocument(Document& oldDocument)
@@ -114,9 +116,23 @@ void HTMLSourceElement::removedFrom(ContainerNode* removalRoot)
         parent = toElement(removalRoot);
     if (isHTMLMediaElement(parent))
         toHTMLMediaElement(parent)->sourceWasRemoved(this);
-    if (isHTMLPictureElement(parent))
+    if (isHTMLPictureElement(parent)) {
+        removeMediaQueryListListener();
         toHTMLPictureElement(parent)->sourceOrMediaChanged();
+    }
     HTMLElement::removedFrom(removalRoot);
+}
+
+void HTMLSourceElement::removeMediaQueryListListener()
+{
+    if (m_mediaQueryList)
+        m_mediaQueryList->removeListener(m_listener);
+}
+
+void HTMLSourceElement::addMediaQueryListListener()
+{
+    if (m_mediaQueryList)
+        m_mediaQueryList->addListener(m_listener);
 }
 
 void HTMLSourceElement::setSrc(const String& url)
@@ -136,20 +152,20 @@ void HTMLSourceElement::setType(const AtomicString& type)
 
 void HTMLSourceElement::scheduleErrorEvent()
 {
-    WTF_LOG(Media, "HTMLSourceElement::scheduleErrorEvent - %p", this);
+    DVLOG(SOURCE_LOG_LEVEL) << "scheduleErrorEvent - " << (void*)this;
     sourceErrorEventSender().dispatchEventSoon(this);
 }
 
 void HTMLSourceElement::cancelPendingErrorEvent()
 {
-    WTF_LOG(Media, "HTMLSourceElement::cancelPendingErrorEvent - %p", this);
+    DVLOG(SOURCE_LOG_LEVEL) << "cancelPendingErrorEvent - " << (void*)this;
     sourceErrorEventSender().cancelEvent(this);
 }
 
 void HTMLSourceElement::dispatchPendingEvent(SourceEventSender* eventSender)
 {
-    ASSERT_UNUSED(eventSender, eventSender == &sourceErrorEventSender());
-    WTF_LOG(Media, "HTMLSourceElement::dispatchPendingEvent - %p", this);
+    DCHECK_EQ(eventSender, &sourceErrorEventSender());
+    DVLOG(SOURCE_LOG_LEVEL) << "dispatchPendingEvent - " << (void*)this;
     dispatchEvent(Event::createCancelable(EventTypeNames::error));
 }
 

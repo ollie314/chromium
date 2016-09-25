@@ -44,6 +44,10 @@ class ScriptInjectionManager : public UserScriptSetManager::Observer {
   // Removes pending injections of the unloaded extension.
   void OnExtensionUnloaded(const std::string& extension_id);
 
+  void set_activity_logging_enabled(bool enabled) {
+    activity_logging_enabled_ = enabled;
+  }
+
  private:
   // A RenderFrameObserver implementation which watches the various render
   // frames in order to notify the ScriptInjectionManager of different
@@ -53,14 +57,13 @@ class ScriptInjectionManager : public UserScriptSetManager::Observer {
   using FrameStatusMap =
       std::map<content::RenderFrame*, UserScript::RunLocation>;
 
-  using ScriptInjectionVector = std::vector<scoped_ptr<ScriptInjection>>;
+  using ScriptInjectionVector = std::vector<std::unique_ptr<ScriptInjection>>;
 
   // Notifies that an injection has been finished.
   void OnInjectionFinished(ScriptInjection* injection);
 
   // UserScriptSetManager::Observer implementation.
-  void OnUserScriptsUpdated(const std::set<HostID>& changed_hosts,
-                            const std::vector<UserScript*>& scripts) override;
+  void OnUserScriptsUpdated(const std::set<HostID>& changed_hosts) override;
 
   // Notifies that an RFOHelper should be removed.
   void RemoveObserver(RFOHelper* helper);
@@ -77,7 +80,7 @@ class ScriptInjectionManager : public UserScriptSetManager::Observer {
                      UserScript::RunLocation run_location);
 
   // Try to inject and store injection if it has not finished.
-  void TryToInject(scoped_ptr<ScriptInjection> injection,
+  void TryToInject(std::unique_ptr<ScriptInjection> injection,
                    UserScript::RunLocation run_location,
                    ScriptsRunInfo* scripts_run_info);
 
@@ -103,7 +106,7 @@ class ScriptInjectionManager : public UserScriptSetManager::Observer {
   std::set<content::RenderFrame*> active_injection_frames_;
 
   // The collection of RFOHelpers.
-  std::vector<scoped_ptr<RFOHelper>> rfo_helpers_;
+  std::vector<std::unique_ptr<RFOHelper>> rfo_helpers_;
 
   // The set of UserScripts associated with extensions. Owned by the Dispatcher.
   UserScriptSetManager* user_script_set_manager_;
@@ -114,6 +117,9 @@ class ScriptInjectionManager : public UserScriptSetManager::Observer {
 
   // Running injections which are waiting for async callbacks from blink.
   ScriptInjectionVector running_injections_;
+
+  // Whether or not dom activity should be logged for scripts injected.
+  bool activity_logging_enabled_ = false;
 
   ScopedObserver<UserScriptSetManager, UserScriptSetManager::Observer>
       user_script_set_manager_observer_;

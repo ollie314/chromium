@@ -23,10 +23,15 @@
 #ifndef LayoutTheme_h
 #define LayoutTheme_h
 
+#include "core/CSSValueKeywords.h"
 #include "core/CoreExport.h"
-#include "core/layout/LayoutObject.h"
 #include "platform/ThemeTypes.h"
+#include "platform/fonts/Font.h"
+#include "platform/fonts/FontDescription.h"
+#include "platform/fonts/FontTraits.h"
+#include "platform/graphics/Color.h"
 #include "platform/scroll/ScrollTypes.h"
+#include "platform/text/PlatformLocale.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/text/WTFString.h"
@@ -37,6 +42,7 @@ class ComputedStyle;
 class Element;
 class FileList;
 class HTMLInputElement;
+class LayoutObject;
 class Theme;
 class ThemePainter;
 
@@ -68,7 +74,7 @@ public:
     virtual String extraDefaultStyleSheet();
     virtual String extraQuirksStyleSheet() { return String(); }
     virtual String extraMediaControlsStyleSheet() { return String(); }
-    virtual String extraFullScreenStyleSheet() { return String(); }
+    virtual String extraFullscreenStyleSheet() { return String(); }
 
     // A method to obtain the baseline position for a "leaf" control.  This will only be used if a baseline
     // position cannot be determined by examining child content. Checkboxes and radio buttons are examples of
@@ -96,10 +102,9 @@ public:
     // A method asking if the theme's controls actually care about redrawing when hovered.
     virtual bool supportsHover(const ComputedStyle&) const { return false; }
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
-    // A method asking if the platform is able to show a calendar picker for a given input type.
+    // A method asking if the platform is able to show a calendar picker for a
+    // given input type.
     virtual bool supportsCalendarPicker(const AtomicString&) const;
-#endif
 
     // Text selection colors.
     Color activeSelectionBackgroundColor() const;
@@ -125,7 +130,8 @@ public:
     virtual Color platformDefaultCompositionBackgroundColor() const { return defaultCompositionBackgroundColor; }
     virtual void platformColorsDidChange();
 
-    virtual double caretBlinkInterval() const { return 0.5; }
+    void setCaretBlinkInterval(double);
+    virtual double caretBlinkInterval() const;
 
     // System fonts and colors for CSS.
     virtual void systemFont(CSSValueID systemFontID, FontStyle&, FontWeight&, float& fontSize, AtomicString& fontFamily) const = 0;
@@ -140,13 +146,14 @@ public:
 
     virtual void adjustSliderThumbSize(ComputedStyle&) const;
 
-    virtual int popupInternalPaddingLeft(const ComputedStyle&) const { return 0; }
-    virtual int popupInternalPaddingRight(const ComputedStyle&) const { return 0; }
+    virtual int popupInternalPaddingStart(const ComputedStyle&) const { return 0; }
+    virtual int popupInternalPaddingEnd(const ComputedStyle&) const { return 0; }
     virtual int popupInternalPaddingTop(const ComputedStyle&) const { return 0; }
     virtual int popupInternalPaddingBottom(const ComputedStyle&) const { return 0; }
-    virtual bool popupOptionSupportsTextIndent() const { return false; }
 
     virtual ScrollbarControlSize scrollbarControlSizeForPart(ControlPart) { return RegularScrollbar; }
+
+    virtual void adjustProgressBarBounds(ComputedStyle& style) const { }
 
     // Returns the repeat interval of the animation for the progress bar.
     virtual double animationRepeatIntervalForProgressBar() const;
@@ -208,11 +215,10 @@ protected:
 
     virtual void adjustMenuListStyle(ComputedStyle&, Element*) const;
     virtual void adjustMenuListButtonStyle(ComputedStyle&, Element*) const;
+    virtual void adjustSliderContainerStyle(ComputedStyle&, Element*) const;
     virtual void adjustSliderThumbStyle(ComputedStyle&) const;
     virtual void adjustSearchFieldStyle(ComputedStyle&) const;
     virtual void adjustSearchFieldCancelButtonStyle(ComputedStyle&) const;
-    virtual void adjustSearchFieldDecorationStyle(ComputedStyle&) const;
-    virtual void adjustSearchFieldResultsDecorationStyle(ComputedStyle&) const;
     void adjustStyleUsingFallbackTheme(ComputedStyle&);
     void adjustCheckboxStyleUsingFallbackTheme(ComputedStyle&) const;
     void adjustRadioStyleUsingFallbackTheme(ComputedStyle&) const;
@@ -240,6 +246,7 @@ private:
 
     Color m_customFocusRingColor;
     bool m_hasCustomFocusRingColor;
+    double m_caretBlinkInterval = 0.5;
 
     // This color is expected to be drawn on a semi-transparent overlay,
     // making it more transparent than its alpha value indicates.

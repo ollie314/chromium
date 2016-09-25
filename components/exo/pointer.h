@@ -5,12 +5,15 @@
 #ifndef COMPONENTS_EXO_POINTER_H_
 #define COMPONENTS_EXO_POINTER_H_
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "components/exo/surface_delegate.h"
 #include "components/exo/surface_observer.h"
+#include "components/exo/wm_helper.h"
 #include "ui/events/event_handler.h"
 #include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point_f.h"
 
 namespace ui {
 class Event;
@@ -24,11 +27,13 @@ class Widget;
 
 namespace exo {
 class PointerDelegate;
+class PointerStylusDelegate;
 class Surface;
 
 // This class implements a client pointer that represents one or more input
 // devices, such as mice, which control the pointer location and pointer focus.
 class Pointer : public ui::EventHandler,
+                public WMHelper::CursorObserver,
                 public SurfaceDelegate,
                 public SurfaceObserver {
  public:
@@ -42,9 +47,15 @@ class Pointer : public ui::EventHandler,
   // pointer location, in surface local coordinates.
   void SetCursor(Surface* surface, const gfx::Point& hotspot);
 
+  // Set delegate for stylus events.
+  void SetStylusDelegate(PointerStylusDelegate* delegate);
+
   // Overridden from ui::EventHandler:
   void OnMouseEvent(ui::MouseEvent* event) override;
   void OnScrollEvent(ui::ScrollEvent* event) override;
+
+  // Overridden from WMHelper::CursorObserver:
+  void OnCursorSetChanged(ui::CursorSetType cursor_set) override;
 
   // Overridden from SurfaceDelegate:
   void OnSurfaceCommit() override;
@@ -57,26 +68,47 @@ class Pointer : public ui::EventHandler,
   // Creates the |widget_| for pointer.
   void CreatePointerWidget();
 
+  // Updates the scale of the cursor with the latest state.
+  void UpdateCursorScale();
+
   // Returns the effective target for |event|.
   Surface* GetEffectiveTargetForEvent(ui::Event* event) const;
 
   // The delegate instance that all events are dispatched to.
-  PointerDelegate* delegate_;
+  PointerDelegate* const delegate_;
+
+  // The delegate instance that all stylus related events are dispatched to.
+  PointerStylusDelegate* stylus_delegate_ = nullptr;
 
   // The widget for the pointer cursor.
-  scoped_ptr<views::Widget> widget_;
+  std::unique_ptr<views::Widget> widget_;
 
   // The current pointer surface.
-  Surface* surface_;
+  Surface* surface_ = nullptr;
 
   // The current focus surface for the pointer.
-  Surface* focus_;
+  Surface* focus_ = nullptr;
 
   // The location of the pointer in the current focus surface.
-  gfx::Point location_;
+  gfx::PointF location_;
+
+  // The scale applied to the cursor to compensate for the UI scale.
+  float cursor_scale_ = 1.0f;
 
   // The position of the pointer surface relative to the pointer location.
   gfx::Point hotspot_;
+
+  // The current pointer type.
+  ui::EventPointerType pointer_type_;
+
+  // The current pointer tilt.
+  gfx::Vector2dF tilt_;
+
+  // The current pointer force.
+  float force_;
+
+  // True if the pointer is controlled via direct input.
+  bool is_direct_input_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(Pointer);
 };

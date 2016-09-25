@@ -4,8 +4,8 @@
 
 #include "core/css/parser/CSSTokenizerInputStream.h"
 
-#include "core/css/parser/CSSParserString.h"
-#include "core/html/parser/InputStreamPreprocessor.h"
+#include "core/html/parser/HTMLParserIdioms.h"
+#include "wtf/text/StringToNumber.h"
 
 namespace blink {
 
@@ -16,23 +16,23 @@ CSSTokenizerInputStream::CSSTokenizerInputStream(String input)
 {
 }
 
-UChar CSSTokenizerInputStream::peek(unsigned lookaheadOffset)
+void CSSTokenizerInputStream::advanceUntilNonWhitespace()
 {
-    if ((m_offset + lookaheadOffset) >= m_stringLength)
-        return kEndOfFileMarker;
-    UChar result = (*m_string)[m_offset + lookaheadOffset];
-    return result ? result : 0xFFFD;
+    // Using HTML space here rather than CSS space since we don't do preprocessing
+    if (m_string->is8Bit()) {
+        const LChar* characters = m_string->characters8();
+        while (m_offset < m_stringLength && isHTMLSpace(characters[m_offset]))
+            ++m_offset;
+    } else {
+        const UChar* characters = m_string->characters16();
+        while (m_offset < m_stringLength && isHTMLSpace(characters[m_offset]))
+            ++m_offset;
+    }
 }
 
-void CSSTokenizerInputStream::pushBack(UChar cc)
+double CSSTokenizerInputStream::getDouble(unsigned start, unsigned end) const
 {
-    --m_offset;
-    ASSERT(nextInputChar() == cc);
-}
-
-double CSSTokenizerInputStream::getDouble(unsigned start, unsigned end)
-{
-    ASSERT(start <= end && ((m_offset + end) <= m_stringLength));
+    DCHECK(start <= end && ((m_offset + end) <= m_stringLength));
     bool isResultOK = false;
     double result = 0.0;
     if (start < end) {
@@ -43,17 +43,6 @@ double CSSTokenizerInputStream::getDouble(unsigned start, unsigned end)
     }
     // FIXME: It looks like callers ensure we have a valid number
     return isResultOK ? result : 0.0;
-}
-
-CSSParserString CSSTokenizerInputStream::rangeAsCSSParserString(unsigned start, unsigned length) const
-{
-    ASSERT(start + length <= m_stringLength);
-    CSSParserString result;
-    if (m_string->is8Bit())
-        result.init(m_string->characters8() + start, length);
-    else
-        result.init(m_string->characters16() + start, length);
-    return result;
 }
 
 } // namespace blink

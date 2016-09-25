@@ -9,7 +9,6 @@
 #include "media/base/audio_decoder.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/video_decoder.h"
-#include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
 
 namespace media {
@@ -79,6 +78,29 @@ void DecoderStreamTraits<DemuxerStream::VIDEO>::ReportStatistics(
 scoped_refptr<DecoderStreamTraits<DemuxerStream::VIDEO>::OutputType>
     DecoderStreamTraits<DemuxerStream::VIDEO>::CreateEOSOutput() {
   return OutputType::CreateEOSFrame();
+}
+
+DecoderStreamTraits<DemuxerStream::AUDIO>::DecoderStreamTraits(
+    const scoped_refptr<MediaLog>& media_log)
+    : media_log_(media_log) {}
+
+void DecoderStreamTraits<DemuxerStream::AUDIO>::OnStreamReset(
+    DemuxerStream* stream) {
+  DCHECK(stream);
+  // Stream is likely being seeked to a new timestamp, so make new validator to
+  // build new timestamp expectations.
+  audio_ts_validator_.reset(
+      new AudioTimestampValidator(stream->audio_decoder_config(), media_log_));
+}
+
+void DecoderStreamTraits<DemuxerStream::AUDIO>::OnDecode(
+    const scoped_refptr<DecoderBuffer>& buffer) {
+  audio_ts_validator_->CheckForTimestampGap(buffer);
+}
+
+void DecoderStreamTraits<DemuxerStream::AUDIO>::OnDecodeDone(
+    const scoped_refptr<OutputType>& buffer) {
+  audio_ts_validator_->RecordOutputDuration(buffer);
 }
 
 }  // namespace media

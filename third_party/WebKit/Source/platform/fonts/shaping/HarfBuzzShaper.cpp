@@ -31,11 +31,12 @@
 
 #include "platform/fonts/shaping/HarfBuzzShaper.h"
 
-#include "platform/Logging.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/fonts/Font.h"
 #include "platform/fonts/FontFallbackIterator.h"
 #include "platform/fonts/GlyphBuffer.h"
 #include "platform/fonts/UTF16TextIterator.h"
+#include "platform/fonts/opentype/OpenTypeCapsSupport.h"
 #include "platform/fonts/shaping/CaseMappingHarfBuzzBufferFiller.h"
 #include "platform/fonts/shaping/HarfBuzzFace.h"
 #include "platform/fonts/shaping/RunSegmenter.h"
@@ -44,10 +45,11 @@
 #include "platform/text/TextBreakIterator.h"
 #include "wtf/Compiler.h"
 #include "wtf/MathExtras.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/text/Unicode.h"
-
 #include <algorithm>
 #include <hb.h>
+#include <memory>
 #include <unicode/uchar.h>
 #include <unicode/uscript.h>
 
@@ -79,11 +81,6 @@ private:
     DestroyFunction m_destroy;
 };
 
-static inline float harfBuzzPositionToFloat(hb_position_t value)
-{
-    return static_cast<float>(value) / (1 << 16);
-}
-
 static void normalizeCharacters(const TextRun& run, unsigned length, UChar* destination, unsigned* destinationLength)
 {
     unsigned position = 0;
@@ -102,12 +99,16 @@ static void normalizeCharacters(const TextRun& run, unsigned length, UChar* dest
         UChar32 character;
         U16_NEXT(source, position, length, character);
         // Don't normalize tabs as they are not treated as spaces for word-end.
-        if (run.normalizeSpace() && Character::isNormalizedCanvasSpaceCharacter(character))
+        if (run.normalizeSpace() && Character::isNormalizedCanvasSpaceCharacter(character)) {
             character = spaceCharacter;
-        else if (Character::treatAsSpace(character) && character != noBreakSpaceCharacter)
+        } else if (Character::treatAsSpace(character) && character != noBreakSpaceCharacter) {
             character = spaceCharacter;
-        else if (Character::treatAsZeroWidthSpaceInComplexScript(character))
+        } else if (!RuntimeEnabledFeatures::renderUnicodeControlCharactersEnabled()
+            && Character::legacyTreatAsZeroWidthSpaceInComplexScript(character)) {
             character = zeroWidthSpaceCharacter;
+        } else if (Character::treatAsZeroWidthSpaceInComplexScript(character)) {
+            character = zeroWidthSpaceCharacter;
+        }
 
         U16_APPEND(destination, *destinationLength, length, character, error);
         ASSERT_UNUSED(error, !error);
@@ -118,7 +119,7 @@ HarfBuzzShaper::HarfBuzzShaper(const Font* font, const TextRun& run)
     : Shaper(font, run)
     , m_normalizedBufferLength(0)
 {
-    m_normalizedBuffer = adoptArrayPtr(new UChar[m_textRun.length() + 1]);
+    m_normalizedBuffer = wrapArrayUnique(new UChar[m_textRun.length() + 1]);
     normalizeCharacters(m_textRun, m_textRun.length(), m_normalizedBuffer.get(), &m_normalizedBufferLength);
     setFontFeatures();
 }
@@ -209,10 +210,44 @@ void HarfBuzzShaper::setFontFeatures()
         break;
     }
 
+    // font-variant-numeric:
+    static hb_feature_t lnum = createFeature('l', 'n', 'u', 'm', 1);
+    if (description.variantNumeric().numericFigureValue() == FontVariantNumeric::LiningNums)
+        m_features.append(lnum);
+
+    static hb_feature_t onum = createFeature('o', 'n', 'u', 'm', 1);
+    if (description.variantNumeric().numericFigureValue() == FontVariantNumeric::OldstyleNums)
+        m_features.append(onum);
+
+    static hb_feature_t pnum = createFeature('p', 'n', 'u', 'm', 1);
+    if (description.variantNumeric().numericSpacingValue() == FontVariantNumeric::ProportionalNums)
+        m_features.append(pnum);
+    static hb_feature_t tnum = createFeature('t', 'n', 'u', 'm', 1);
+    if (description.variantNumeric().numericSpacingValue() == FontVariantNumeric::TabularNums)
+        m_features.append(tnum);
+
+    static hb_feature_t afrc = createFeature('a', 'f', 'r', 'c', 1);
+    if (description.variantNumeric().numericFractionValue() == FontVariantNumeric::StackedFractions)
+        m_features.append(afrc);
+    static hb_feature_t frac = createFeature('f', 'r', 'a', 'c', 1);
+    if (description.variantNumeric().numericFractionValue() == FontVariantNumeric::DiagonalFractions)
+        m_features.append(frac);
+
+    static hb_feature_t ordn = createFeature('o', 'r', 'd', 'n', 1);
+    if (description.variantNumeric().ordinalValue() == FontVariantNumeric::OrdinalOn)
+        m_features.append(ordn);
+
+    static hb_feature_t zero = createFeature('z', 'e', 'r', 'o', 1);
+    if (description.variantNumeric().slashedZeroValue() == FontVariantNumeric::SlashedZeroOn)
+        m_features.append(zero);
+
+
     FontFeatureSettings* settings = description.featureSettings();
     if (!settings)
         return;
 
+    // TODO(drott): crbug.com/450619 Implement feature resolution instead of
+    // just appending the font-feature-settings.
     unsigned numFeatures = settings->size();
     for (unsigned i = 0; i < numFeatures; ++i) {
         hb_feature_t feature;
@@ -223,6 +258,57 @@ void HarfBuzzShaper::setFontFeatures()
         feature.end = static_cast<unsigned>(-1);
         m_features.append(feature);
     }
+}
+
+HarfBuzzShaper::CapsFeatureSettingsScopedOverlay::CapsFeatureSettingsScopedOverlay(
+    FeaturesVector& features,
+    FontDescription::FontVariantCaps variantCaps)
+    : m_features(features)
+    , m_countFeatures(0)
+{
+    overlayCapsFeatures(variantCaps);
+}
+
+void HarfBuzzShaper::CapsFeatureSettingsScopedOverlay::overlayCapsFeatures(
+    FontDescription::FontVariantCaps variantCaps)
+{
+    static hb_feature_t smcp = createFeature('s', 'm', 'c', 'p', 1);
+    static hb_feature_t pcap = createFeature('p', 'c', 'a', 'p', 1);
+    static hb_feature_t c2sc = createFeature('c', '2', 's', 'c', 1);
+    static hb_feature_t c2pc = createFeature('c', '2', 'p', 'c', 1);
+    static hb_feature_t unic = createFeature('u', 'n', 'i', 'c', 1);
+    static hb_feature_t titl = createFeature('t', 'i', 't', 'l', 1);
+    if (variantCaps == FontDescription::SmallCaps
+        || variantCaps == FontDescription::AllSmallCaps) {
+        prependCounting(smcp);
+        if (variantCaps == FontDescription::AllSmallCaps) {
+            prependCounting(c2sc);
+        }
+    }
+    if (variantCaps == FontDescription::PetiteCaps
+        || variantCaps == FontDescription::AllPetiteCaps) {
+        prependCounting(pcap);
+        if (variantCaps == FontDescription::AllPetiteCaps) {
+            prependCounting(c2pc);
+        }
+    }
+    if (variantCaps == FontDescription::Unicase) {
+        prependCounting(unic);
+    }
+    if (variantCaps == FontDescription::TitlingCaps) {
+        prependCounting(titl);
+    }
+}
+
+void HarfBuzzShaper::CapsFeatureSettingsScopedOverlay::prependCounting(const hb_feature_t& feature)
+{
+    m_features.prepend(feature);
+    m_countFeatures++;
+}
+
+HarfBuzzShaper::CapsFeatureSettingsScopedOverlay::~CapsFeatureSettingsScopedOverlay()
+{
+    m_features.remove(0, m_countFeatures);
 }
 
 // A port of hb_icu_script_to_script because harfbuzz on CrOS is built
@@ -261,8 +347,8 @@ inline bool HarfBuzzShaper::shapeRange(hb_buffer_t* harfBuzzBuffer,
     hb_buffer_set_direction(harfBuzzBuffer, TextDirectionToHBDirection(m_textRun.direction(),
         m_font->getFontDescription().orientation(), currentFont));
 
-    HarfBuzzScopedPtr<hb_font_t> harfBuzzFont(face->createFont(currentFontRangeSet), hb_font_destroy);
-    hb_shape(harfBuzzFont.get(), harfBuzzBuffer, m_features.isEmpty() ? 0 : m_features.data(), m_features.size());
+    hb_font_t* hbFont = face->getScaledFont(std::move(currentFontRangeSet));
+    hb_shape(hbFont, harfBuzzBuffer, m_features.isEmpty() ? 0 : m_features.data(), m_features.size());
 
     return true;
 }
@@ -379,14 +465,16 @@ bool HarfBuzzShaper::extractShapeResults(hb_buffer_t* harfBuzzBuffer,
         // When we're getting here with the last resort font, we have no other
         // choice than adding boxes to the ShapeResult.
         if ((currentClusterResult == NotDef && numCharacters) || isLastResort) {
+            hb_direction_t direction = TextDirectionToHBDirection(
+                m_textRun.direction(),
+                m_font->getFontDescription().orientation(), currentFont);
             // Here we need to specify glyph positions.
-            OwnPtr<ShapeResult::RunInfo> run = adoptPtr(new ShapeResult::RunInfo(currentFont,
-                TextDirectionToHBDirection(m_textRun.direction(),
-                m_font->getFontDescription().orientation(), currentFont),
-                ICUScriptToHBScript(currentRunScript),
-                startIndex,
-                numGlyphsToInsert, numCharacters));
-            insertRunIntoShapeResult(shapeResult, run.release(), lastChangePosition, numGlyphsToInsert, harfBuzzBuffer);
+            ShapeResult::RunInfo* run = new ShapeResult::RunInfo(currentFont,
+                direction, ICUScriptToHBScript(currentRunScript),
+                startIndex, numGlyphsToInsert, numCharacters);
+            shapeResult->insertRun(wrapUnique(run), lastChangePosition,
+                numGlyphsToInsert,
+                harfBuzzBuffer);
         }
         lastChangePosition = glyphIndex;
     }
@@ -407,7 +495,7 @@ static inline const SimpleFontData* fontDataAdjustedForOrientation(const SimpleF
     return originalFont;
 }
 
-bool HarfBuzzShaper::collectFallbackHintChars(Vector<UChar32>& hint, bool needsList)
+bool HarfBuzzShaper::collectFallbackHintChars(Vector<UChar32>& hint)
 {
     if (!m_holesQueue.size())
         return false;
@@ -425,8 +513,6 @@ bool HarfBuzzShaper::collectFallbackHintChars(Vector<UChar32>& hint, bool needsL
         while (iterator.consume(hintChar)) {
             hint.append(hintChar);
             numCharsAdded++;
-            if (!needsList)
-                break;
             iterator.advance();
         }
     }
@@ -440,6 +526,28 @@ void HarfBuzzShaper::appendToHolesQueue(HolesQueueItemAction action,
     m_holesQueue.append(HolesQueueItem(action, startIndex, numCharacters));
 }
 
+void HarfBuzzShaper::prependHolesQueue(HolesQueueItemAction action,
+    unsigned startIndex,
+    unsigned numCharacters)
+{
+    m_holesQueue.prepend(HolesQueueItem(action, startIndex, numCharacters));
+}
+
+void HarfBuzzShaper::splitUntilNextCaseChange(HolesQueueItem& currentQueueItem, SmallCapsIterator::SmallCapsBehavior& smallCapsBehavior)
+{
+    unsigned numCharactersUntilCaseChange = 0;
+    SmallCapsIterator smallCapsIterator(
+        m_normalizedBuffer.get() + currentQueueItem.m_startIndex,
+        currentQueueItem.m_numCharacters);
+    smallCapsIterator.consume(&numCharactersUntilCaseChange, &smallCapsBehavior);
+    if (numCharactersUntilCaseChange > 0 && numCharactersUntilCaseChange < currentQueueItem.m_numCharacters) {
+        prependHolesQueue(HolesQueueRange,
+            currentQueueItem.m_startIndex + numCharactersUntilCaseChange,
+            currentQueueItem.m_numCharacters - numCharactersUntilCaseChange);
+        currentQueueItem.m_numCharacters = numCharactersUntilCaseChange;
+    }
+}
+
 PassRefPtr<ShapeResult> HarfBuzzShaper::shapeResult()
 {
     RefPtr<ShapeResult> result = ShapeResult::create(m_font,
@@ -447,22 +555,21 @@ PassRefPtr<ShapeResult> HarfBuzzShaper::shapeResult()
     HarfBuzzScopedPtr<hb_buffer_t> harfBuzzBuffer(hb_buffer_create(), hb_buffer_destroy);
 
     const FontDescription& fontDescription = m_font->getFontDescription();
-    const String& localeString = fontDescription.locale();
-    CString locale = localeString.latin1();
-    const hb_language_t language = hb_language_from_string(locale.data(), locale.length());
+    const hb_language_t language = fontDescription.localeOrDefault().harfbuzzLanguage();
+
+    bool needsCapsHandling = fontDescription.variantCaps() != FontDescription::CapsNormal;
+    OpenTypeCapsSupport capsSupport;
 
     RunSegmenter::RunSegmenterRange segmentRange = {
         0,
         0,
         USCRIPT_INVALID_CODE,
         OrientationIterator::OrientationInvalid,
-        SmallCapsIterator::SmallCapsSameCase,
         FontFallbackPriority::Invalid };
     RunSegmenter runSegmenter(
         m_normalizedBuffer.get(),
         m_normalizedBufferLength,
-        m_font->getFontDescription().orientation(),
-        fontDescription.variant());
+        m_font->getFontDescription().orientation());
 
     Vector<UChar32> fallbackCharsHint;
 
@@ -476,8 +583,7 @@ PassRefPtr<ShapeResult> HarfBuzzShaper::shapeResult()
         appendToHolesQueue(HolesQueueNextFont, 0, 0);
         appendToHolesQueue(HolesQueueRange, segmentRange.start, segmentRange.end - segmentRange.start);
 
-        const SimpleFontData* currentFont = nullptr;
-        RefPtr<UnicodeRangeSet> currentFontRangeSet;
+        RefPtr<FontDataForRangeSet> currentFontDataForRangeSet;
 
         bool fontCycleQueued = false;
         while (m_holesQueue.size()) {
@@ -490,18 +596,16 @@ PassRefPtr<ShapeResult> HarfBuzzShaper::shapeResult()
                 // for the shaper and check whether any glyphs were found, or
                 // define a new API on the shaper which will give us coverage
                 // information?
-                if (!collectFallbackHintChars(fallbackCharsHint, fallbackIterator->needsHintList())) {
+                if (!collectFallbackHintChars(fallbackCharsHint)) {
                     // Give up shaping since we cannot retrieve a font fallback
                     // font without a hintlist.
                     m_holesQueue.clear();
                     break;
                 }
 
-                FontDataForRangeSet nextFontDataForRangeSet = fallbackIterator->next(fallbackCharsHint);
-                currentFont = nextFontDataForRangeSet.fontData().get();
-                currentFontRangeSet = nextFontDataForRangeSet.ranges();
+                currentFontDataForRangeSet = fallbackIterator->next(fallbackCharsHint);
 
-                if (!currentFont) {
+                if (!currentFontDataForRangeSet->fontData()) {
                     ASSERT(!m_holesQueue.size());
                     break;
                 }
@@ -509,13 +613,22 @@ PassRefPtr<ShapeResult> HarfBuzzShaper::shapeResult()
                 continue;
             }
 
-            // TODO crbug.com/522964: Only use smallCapsFontData when the font does not support true smcp.  The spec
-            // says: "To match the surrounding text, a font may provide alternate glyphs for caseless characters when
-            // these features are enabled but when a user agent simulates small capitals, it must not attempt to
-            // simulate alternates for codepoints which are considered caseless."
-            const SimpleFontData* smallcapsAdjustedFont = segmentRange.smallCapsBehavior == SmallCapsIterator::SmallCapsUppercaseNeeded
-                ? currentFont->smallCapsFontData(fontDescription).get()
-                : currentFont;
+            SmallCapsIterator::SmallCapsBehavior smallCapsBehavior = SmallCapsIterator::SmallCapsSameCase;
+            if (needsCapsHandling) {
+                capsSupport = OpenTypeCapsSupport(
+                    currentFontDataForRangeSet->fontData()->platformData().harfBuzzFace(),
+                    fontDescription.variantCaps(),
+                    ICUScriptToHBScript(segmentRange.script));
+                if (capsSupport.needsRunCaseSplitting())
+                    splitUntilNextCaseChange(currentQueueItem, smallCapsBehavior);
+            }
+
+            ASSERT(currentQueueItem.m_numCharacters);
+
+            const SimpleFontData* smallcapsAdjustedFont = needsCapsHandling
+                && capsSupport.needsSyntheticFont(smallCapsBehavior)
+                ? currentFontDataForRangeSet->fontData()->smallCapsFontData(fontDescription).get()
+                : currentFontDataForRangeSet->fontData();
 
             // Compatibility with SimpleFontData approach of keeping a flag for overriding drawing direction.
             // TODO: crbug.com/506224 This should go away in favor of storing that information elsewhere, for example in
@@ -524,22 +637,27 @@ PassRefPtr<ShapeResult> HarfBuzzShaper::shapeResult()
                 m_font->getFontDescription().orientation(),
                 segmentRange.renderOrientation);
 
-            CaseMapIntend caseMapIntend =
-                m_font->getFontDescription().variant() == FontVariantSmallCaps
-                ? CaseMapIntend::UpperCase : CaseMapIntend::KeepSameCase;
+            CaseMapIntend caseMapIntend = CaseMapIntend::KeepSameCase;
+            if (needsCapsHandling) {
+                caseMapIntend = capsSupport.needsCaseChange(smallCapsBehavior);
+            }
+
             CaseMappingHarfBuzzBufferFiller(
                 caseMapIntend,
+                fontDescription.localeOrDefault(),
                 harfBuzzBuffer.get(),
                 m_normalizedBuffer.get(),
                 m_normalizedBufferLength,
                 currentQueueItem.m_startIndex,
                 currentQueueItem.m_numCharacters);
 
+            CapsFeatureSettingsScopedOverlay capsOverlay(m_features, capsSupport.fontFeatureToUse(smallCapsBehavior));
+
             if (!shapeRange(harfBuzzBuffer.get(),
                 currentQueueItem.m_startIndex,
                 currentQueueItem.m_numCharacters,
                 directionAndSmallCapsAdjustedFont,
-                currentFontRangeSet,
+                currentFontDataForRangeSet->ranges(),
                 segmentRange.script,
                 language))
                 DLOG(ERROR) << "Shaping range failed.";
@@ -558,108 +676,5 @@ PassRefPtr<ShapeResult> HarfBuzzShaper::shapeResult()
     }
     return result.release();
 }
-
-// TODO crbug.com/542701: This should be a method on ShapeResult.
-void HarfBuzzShaper::insertRunIntoShapeResult(ShapeResult* result,
-    PassOwnPtr<ShapeResult::RunInfo> runToInsert, unsigned startGlyph, unsigned numGlyphs,
-    hb_buffer_t* harfBuzzBuffer)
-{
-    ASSERT(numGlyphs > 0);
-    OwnPtr<ShapeResult::RunInfo> run(std::move(runToInsert));
-    ASSERT(numGlyphs == run->m_glyphData.size());
-
-    const SimpleFontData* currentFontData = run->m_fontData.get();
-    const hb_glyph_info_t* glyphInfos = hb_buffer_get_glyph_infos(harfBuzzBuffer, 0);
-    const hb_glyph_position_t* glyphPositions = hb_buffer_get_glyph_positions(harfBuzzBuffer, 0);
-    const unsigned startCluster = HB_DIRECTION_IS_FORWARD(hb_buffer_get_direction(harfBuzzBuffer))
-        ? glyphInfos[startGlyph].cluster : glyphInfos[startGlyph + numGlyphs - 1].cluster;
-
-    float totalAdvance = 0.0f;
-    FloatPoint glyphOrigin;
-    bool hasVerticalOffsets = !HB_DIRECTION_IS_HORIZONTAL(run->m_direction);
-
-    // HarfBuzz returns result in visual order, no need to flip for RTL.
-    for (unsigned i = 0; i < numGlyphs; ++i) {
-        uint16_t glyph = glyphInfos[startGlyph + i].codepoint;
-        float offsetX = harfBuzzPositionToFloat(glyphPositions[startGlyph + i].x_offset);
-        float offsetY = -harfBuzzPositionToFloat(glyphPositions[startGlyph + i].y_offset);
-
-        // One out of x_advance and y_advance is zero, depending on
-        // whether the buffer direction is horizontal or vertical.
-        float advance = harfBuzzPositionToFloat(glyphPositions[startGlyph + i].x_advance - glyphPositions[startGlyph + i].y_advance);
-        RELEASE_ASSERT(m_normalizedBufferLength > glyphInfos[startGlyph + i].cluster);
-
-        // The characterIndex of one ShapeResult run is normalized to the run's
-        // startIndex and length.  TODO crbug.com/542703: Consider changing that
-        // and instead pass the whole run to hb_buffer_t each time.
-        run->m_glyphData[i].characterIndex = glyphInfos[startGlyph + i].cluster - startCluster;
-
-        run->setGlyphAndPositions(i, glyph, advance, offsetX, offsetY);
-        totalAdvance += advance;
-        hasVerticalOffsets |= (offsetY != 0);
-
-        FloatRect glyphBounds = currentFontData->boundsForGlyph(glyph);
-        glyphBounds.move(glyphOrigin.x(), glyphOrigin.y());
-        result->m_glyphBoundingBox.unite(glyphBounds);
-        glyphOrigin += FloatSize(advance + offsetX, offsetY);
-    }
-    run->m_width = std::max(0.0f, totalAdvance);
-    result->m_width += run->m_width;
-    result->m_numGlyphs += numGlyphs;
-    ASSERT(result->m_numGlyphs >= numGlyphs); // no overflow
-    result->m_hasVerticalOffsets |= hasVerticalOffsets;
-
-    // The runs are stored in result->m_runs in visual order. For LTR, we place
-    // the run to be inserted before the next run with a bigger character
-    // start index. For RTL, we place the run before the next run with a lower
-    // character index. Otherwise, for both directions, at the end.
-    if (HB_DIRECTION_IS_FORWARD(run->m_direction)) {
-        for (size_t pos = 0; pos < result->m_runs.size(); ++pos) {
-            if (result->m_runs.at(pos)->m_startIndex > run->m_startIndex) {
-                result->m_runs.insert(pos, run.release());
-                break;
-            }
-        }
-    } else {
-        for (size_t pos = 0; pos < result->m_runs.size(); ++pos) {
-            if (result->m_runs.at(pos)->m_startIndex < run->m_startIndex) {
-                result->m_runs.insert(pos, run.release());
-                break;
-            }
-        }
-    }
-    // If we didn't find an existing slot to place it, append.
-    if (run) {
-        result->m_runs.append(run.release());
-    }
-}
-
-PassRefPtr<ShapeResult> ShapeResult::createForTabulationCharacters(const Font* font,
-    const TextRun& textRun, float positionOffset, unsigned count)
-{
-    const SimpleFontData* fontData = font->primaryFont();
-    OwnPtr<ShapeResult::RunInfo> run = adoptPtr(new ShapeResult::RunInfo(fontData,
-        // Tab characters are always LTR or RTL, not TTB, even when isVerticalAnyUpright().
-        textRun.rtl() ? HB_DIRECTION_RTL : HB_DIRECTION_LTR,
-        HB_SCRIPT_COMMON, 0, count, count));
-    float position = textRun.xPos() + positionOffset;
-    float startPosition = position;
-    for (unsigned i = 0; i < count; i++) {
-        float advance = font->tabWidth(*fontData, textRun.getTabSize(), position);
-        run->m_glyphData[i].characterIndex = i;
-        run->setGlyphAndPositions(i, fontData->spaceGlyph(), advance, 0, 0);
-        position += advance;
-    }
-    run->m_width = position - startPosition;
-
-    RefPtr<ShapeResult> result = ShapeResult::create(font, count, textRun.direction());
-    result->m_width = run->m_width;
-    result->m_numGlyphs = count;
-    ASSERT(result->m_numGlyphs == count); // no overflow
-    result->m_hasVerticalOffsets = fontData->platformData().isVerticalAnyUpright();
-    result->m_runs.append(run.release());
-    return result.release();
-}
-
 
 } // namespace blink

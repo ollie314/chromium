@@ -37,7 +37,7 @@ TEST(SolidColorLayerImplTest, VerifyTilingCompleteAndNoOverlap) {
       SolidColorLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_layer_rect = visible_layer_rect;
   layer->SetBounds(layer_size);
-  layer->SetForceRenderSurface(true);
+  layer->test_properties()->force_render_surface = true;
 
   AppendQuadsData data;
   layer->AppendQuads(render_pass.get(), &data);
@@ -63,7 +63,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBackgroundColorInQuad) {
   layer->draw_properties().visible_layer_rect = visible_layer_rect;
   layer->SetBounds(layer_size);
   layer->SetBackgroundColor(test_color);
-  layer->SetForceRenderSurface(true);
+  layer->test_properties()->force_render_surface = true;
 
   AppendQuadsData data;
   layer->AppendQuads(render_pass.get(), &data);
@@ -91,7 +91,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
   layer->draw_properties().visible_layer_rect = visible_layer_rect;
   layer->SetBounds(layer_size);
   layer->draw_properties().opacity = opacity;
-  layer->SetForceRenderSurface(true);
+  layer->test_properties()->force_render_surface = true;
 
   AppendQuadsData data;
   layer->AppendQuads(render_pass.get(), &data);
@@ -108,7 +108,6 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBlendModeInQuad) {
   std::unique_ptr<RenderPass> render_pass = RenderPass::Create();
 
   gfx::Size layer_size = gfx::Size(100, 100);
-  gfx::Rect visible_layer_rect = gfx::Rect(layer_size);
 
   FakeImplTaskRunnerProvider task_runner_provider;
   TestTaskGraphRunner task_graph_runner;
@@ -133,12 +132,12 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
 
   scoped_refptr<SolidColorLayer> layer = SolidColorLayer::Create();
   layer->SetBounds(layer_size);
-  layer->SetForceRenderSurface(true);
+  layer->SetForceRenderSurfaceForTesting(true);
 
   scoped_refptr<Layer> root = Layer::Create();
   root->AddChild(layer);
 
-  FakeLayerTreeHostClient client(FakeLayerTreeHostClient::DIRECT_3D);
+  FakeLayerTreeHostClient client;
   TestTaskGraphRunner task_graph_runner;
   std::unique_ptr<FakeLayerTreeHost> host =
       FakeLayerTreeHost::Create(&client, &task_graph_runner);

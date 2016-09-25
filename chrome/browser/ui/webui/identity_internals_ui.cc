@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/identity_internals_ui.h"
 
+#include <memory>
 #include <set>
 #include <string>
 
@@ -15,6 +16,7 @@
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_controller.h"
@@ -23,7 +25,6 @@
 #include "extensions/browser/extension_registry.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_constants.h"
-#include "grit/browser_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -78,9 +79,8 @@ class IdentityInternalsUIMessageHandler : public content::WebUIMessageHandler {
 
   // Converts a pair of |token_cache_key| and |token_cache_value| to a
   // DictionaryValue object with corresponding information in a localized and
-  // readable form and returns a pointer to created object. Caller gets the
-  // ownership of the returned object.
-  base::DictionaryValue* GetInfoForToken(
+  // readable form and returns a pointer to created object.
+  std::unique_ptr<base::DictionaryValue> GetInfoForToken(
       const extensions::ExtensionTokenKey& token_cache_key,
       const extensions::IdentityTokenCacheValue& token_cache_value);
 
@@ -155,8 +155,8 @@ void IdentityInternalsUIMessageHandler::OnTokenRevokerDone(
   // Update view about the token being removed.
   base::ListValue result;
   result.AppendString(token_revoker->access_token());
-  web_ui()->CallJavascriptFunction("identity_internals.tokenRevokeDone",
-                                   result);
+  web_ui()->CallJavascriptFunctionUnsafe("identity_internals.tokenRevokeDone",
+                                         result);
 
   // Erase the revoker.
   ScopedVector<IdentityInternalsTokenRevoker>::iterator iter =
@@ -209,10 +209,12 @@ const std::string IdentityInternalsUIMessageHandler::GetExpirationTime(
       token_cache_value.expiration_time()));
 }
 
-base::DictionaryValue* IdentityInternalsUIMessageHandler::GetInfoForToken(
+std::unique_ptr<base::DictionaryValue>
+IdentityInternalsUIMessageHandler::GetInfoForToken(
     const extensions::ExtensionTokenKey& token_cache_key,
     const extensions::IdentityTokenCacheValue& token_cache_value) {
-  base::DictionaryValue* token_data = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> token_data(
+      new base::DictionaryValue());
   token_data->SetString(kExtensionId, token_cache_key.extension_id);
   token_data->SetString(kExtensionName, GetExtensionName(token_cache_key));
   token_data->Set(kScopes, GetScopes(token_cache_key));
@@ -238,7 +240,8 @@ void IdentityInternalsUIMessageHandler::GetInfoForAllTokens(
     results.Append(GetInfoForToken(iter->first, iter->second));
   }
 
-  web_ui()->CallJavascriptFunction("identity_internals.returnTokens", results);
+  web_ui()->CallJavascriptFunctionUnsafe("identity_internals.returnTokens",
+                                         results);
 }
 
 void IdentityInternalsUIMessageHandler::RegisterMessages() {

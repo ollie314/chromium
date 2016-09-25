@@ -23,9 +23,6 @@
 
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
-#include "platform/weborigin/KURL.h"
-#include "wtf/HashMap.h"
-#include "wtf/ListHashSet.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
@@ -91,13 +88,13 @@ public:
     bool isCubicBezierTimingFunctionValue() const { return m_classType == CubicBezierTimingFunctionClass; }
     bool isStepsTimingFunctionValue() const { return m_classType == StepsTimingFunctionClass; }
     bool isGridTemplateAreasValue() const { return m_classType == GridTemplateAreasClass; }
-    bool isSVGDocumentValue() const { return m_classType == CSSSVGDocumentClass; }
     bool isContentDistributionValue() const { return m_classType == CSSContentDistributionClass; }
     bool isUnicodeRangeValue() const { return m_classType == UnicodeRangeClass; }
     bool isGridLineNamesValue() const { return m_classType == GridLineNamesClass; }
     bool isCustomPropertyDeclaration() const { return m_classType == CustomPropertyDeclarationClass; }
     bool isVariableReferenceValue() const { return m_classType == VariableReferenceClass; }
     bool isGridAutoRepeatValue() const { return m_classType == GridAutoRepeatClass; }
+    bool isPendingSubstitutionValue() const { return m_classType == PendingSubstitutionValueClass; }
 
     bool hasFailedOrCanceledSubresources() const;
 
@@ -163,9 +160,7 @@ protected:
         PathClass,
         VariableReferenceClass,
         CustomPropertyDeclarationClass,
-
-        // SVG classes.
-        CSSSVGDocumentClass,
+        PendingSubstitutionValueClass,
 
         CSSContentDistributionClass,
 
@@ -197,9 +192,6 @@ protected:
 
     // NOTE: This class is non-virtual for memory and performance reasons.
     // Don't go making it virtual again unless you know exactly what you're doing!
-
-private:
-    void destroy();
 
 protected:
     // The bits in this section are only used by specific subclasses but kept here

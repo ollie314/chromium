@@ -5,14 +5,17 @@
 #ifndef BaseRenderingContext2D_h
 #define BaseRenderingContext2D_h
 
-#include "bindings/core/v8/UnionTypesCore.h"
-#include "bindings/modules/v8/UnionTypesModules.h"
+#include "bindings/modules/v8/HTMLImageElementOrHTMLVideoElementOrHTMLCanvasElementOrImageBitmapOrOffscreenCanvas.h"
+#include "bindings/modules/v8/StringOrCanvasGradientOrCanvasPattern.h"
+#include "core/html/ImageData.h"
 #include "modules/ModulesExport.h"
 #include "modules/canvas2d/CanvasGradient.h"
 #include "modules/canvas2d/CanvasPathMethods.h"
 #include "modules/canvas2d/CanvasRenderingContext2DState.h"
 #include "modules/canvas2d/CanvasStyle.h"
+#include "platform/graphics/ExpensiveCanvasHeuristicParameters.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/effects/SkComposeImageFilter.h"
 
 namespace blink {
 
@@ -23,7 +26,7 @@ class ImageBuffer;
 class Path2D;
 class SVGMatrixTearOff;
 
-typedef HTMLImageElementOrHTMLVideoElementOrHTMLCanvasElementOrImageBitmap CanvasImageSourceUnion;
+typedef HTMLImageElementOrHTMLVideoElementOrHTMLCanvasElementOrImageBitmapOrOffscreenCanvas CanvasImageSourceUnion;
 
 class MODULES_EXPORT BaseRenderingContext2D : public GarbageCollectedMixin, public CanvasPathMethods {
     WTF_MAKE_NONCOPYABLE(BaseRenderingContext2D);
@@ -106,14 +109,15 @@ public:
     void fillRect(double x, double y, double width, double height);
     void strokeRect(double x, double y, double width, double height);
 
-    void drawImage(const CanvasImageSourceUnion&, double x, double y, ExceptionState&);
-    void drawImage(const CanvasImageSourceUnion&, double x, double y, double width, double height, ExceptionState&);
-    void drawImage(const CanvasImageSourceUnion&, double sx, double sy, double sw, double sh, double dx, double dy, double dw, double dh, ExceptionState&);
-    void drawImage(CanvasImageSource*, double sx, double sy, double sw, double sh, double dx, double dy, double dw, double dh, ExceptionState&);
+    void drawImage(ExecutionContext*, const CanvasImageSourceUnion&, double x, double y, ExceptionState&);
+    void drawImage(ExecutionContext*, const CanvasImageSourceUnion&, double x, double y, double width, double height, ExceptionState&);
+    void drawImage(ExecutionContext*, const CanvasImageSourceUnion&, double sx, double sy, double sw, double sh, double dx, double dy, double dw, double dh, ExceptionState&);
+    void drawImage(ExecutionContext*, CanvasImageSource*, double sx, double sy, double sw, double sh, double dx, double dy, double dw, double dh, ExceptionState&);
 
     CanvasGradient* createLinearGradient(double x0, double y0, double x1, double y1);
     CanvasGradient* createRadialGradient(double x0, double y0, double r0, double x1, double y1, double r1, ExceptionState&);
-    CanvasPattern* createPattern(const CanvasImageSourceUnion&, const String& repetitionType, ExceptionState&);
+    CanvasPattern* createPattern(ExecutionContext*, const CanvasImageSourceUnion&, const String& repetitionType, ExceptionState&);
+    CanvasPattern* createPattern(ExecutionContext*, CanvasImageSource*, const String& repetitionType, ExceptionState&);
 
     ImageData* createImageData(ImageData*, ExceptionState&) const;
     ImageData* createImageData(double width, double height, ExceptionState&) const;
@@ -128,7 +132,7 @@ public:
 
     virtual bool originClean() const = 0;
     virtual void setOriginTainted() = 0;
-    virtual bool wouldTaintOrigin(CanvasImageSource*) = 0;
+    virtual bool wouldTaintOrigin(CanvasImageSource*, ExecutionContext*) = 0;
 
     virtual int width() const = 0;
     virtual int height() const = 0;
@@ -150,13 +154,63 @@ public:
     virtual SkImageFilter* stateGetFilter() = 0;
     virtual void snapshotStateForFilter() = 0;
 
-    virtual void validateStateStack() = 0;
+    virtual void validateStateStack() const = 0;
 
     virtual bool hasAlpha() const = 0;
 
     virtual bool isContextLost() const = 0;
 
+    void restoreMatrixClipStack(SkCanvas*) const;
+
     DECLARE_VIRTUAL_TRACE();
+
+    enum DrawCallType {
+        StrokePath = 0,
+        FillPath,
+        DrawVectorImage,
+        DrawBitmapImage,
+        FillText,
+        StrokeText,
+        FillRect,
+        StrokeRect,
+        DrawCallTypeCount // used to specify the size of storage arrays
+    };
+
+    enum PathFillType {
+        ColorFillType,
+        LinearGradientFillType,
+        RadialGradientFillType,
+        PatternFillType,
+        PathFillTypeCount // used to specify the size of storage arrays
+    };
+
+    struct UsageCounters {
+        int numDrawCalls[DrawCallTypeCount]; // use DrawCallType enum as index
+        float boundingBoxPerimeterDrawCalls[DrawCallTypeCount];
+        float boundingBoxAreaDrawCalls[DrawCallTypeCount];
+        float boundingBoxAreaFillType[PathFillTypeCount];
+        int numNonConvexFillPathCalls;
+        float nonConvexFillPathArea;
+        int numRadialGradients;
+        int numLinearGradients;
+        int numPatterns;
+        int numDrawWithComplexClips;
+        int numBlurredShadows;
+        float boundingBoxAreaTimesShadowBlurSquared;
+        float boundingBoxPerimeterTimesShadowBlurSquared;
+        int numFilters;
+        int numGetImageDataCalls;
+        float areaGetImageDataCalls;
+        int numPutImageDataCalls;
+        float areaPutImageDataCalls;
+        int numClearRectCalls;
+        int numDrawFocusCalls;
+        int numFramesSinceReset;
+
+        UsageCounters();
+    };
+
+    const UsageCounters& getUsage();
 
 protected:
     BaseRenderingContext2D();
@@ -182,6 +236,12 @@ protected:
     HeapVector<Member<CanvasRenderingContext2DState>> m_stateStack;
     AntiAliasingMode m_clipAntialiasing;
 
+    void trackDrawCall(DrawCallType, Path2D* path2d = nullptr, int width = 0, int height = 0);
+
+    mutable UsageCounters m_usageCounters;
+
+
+    float estimateRenderingCost(ExpensiveCanvasHeuristicParameters::RenderingModeCostIndex) const;
 private:
     void realizeSaves();
 
@@ -256,13 +316,11 @@ void BaseRenderingContext2D::compositedDraw(const DrawFunc& drawFunc, SkCanvas* 
         SkPaint shadowPaint = *state().getPaint(paintType, DrawShadowOnly, imageType);
         int saveCount = c->getSaveCount();
         if (filter) {
-            SkPaint filterPaint;
-            filterPaint.setImageFilter(filter);
-            // TODO(junov): crbug.com/502921 We could use primitive bounds if we knew that the filter
-            // does not affect transparent black regions.
-            c->saveLayer(nullptr, &shadowPaint);
-            c->saveLayer(nullptr, &filterPaint);
             SkPaint foregroundPaint = *state().getPaint(paintType, DrawForegroundOnly, imageType);
+            sk_sp<SkImageFilter> composedFilter = sk_ref_sp(foregroundPaint.getImageFilter());
+            composedFilter = SkComposeImageFilter::Make(std::move(composedFilter), sk_ref_sp(shadowPaint.getImageFilter()));
+            composedFilter = SkComposeImageFilter::Make(std::move(composedFilter), sk_ref_sp(filter));
+            foregroundPaint.setImageFilter(std::move(composedFilter));
             c->setMatrix(ctm);
             drawFunc(c, &foregroundPaint);
         } else {

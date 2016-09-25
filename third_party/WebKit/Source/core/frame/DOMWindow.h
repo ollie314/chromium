@@ -20,12 +20,13 @@ class ApplicationCache;
 class BarProp;
 class CSSRuleList;
 class CSSStyleDeclaration;
-class Console;
-class CustomElementsRegistry;
+class CustomElementRegistry;
 class DOMSelection;
+class DOMVisualViewport;
 class DOMWindowCSS;
 class Document;
 class Element;
+class External;
 class Frame;
 class FrameRequestCallback;
 class History;
@@ -33,9 +34,11 @@ class IdleRequestCallback;
 class IdleRequestOptions;
 class Location;
 class LocalDOMWindow;
+class MessageEvent;
 class MediaQueryList;
 class Navigator;
 class Screen;
+class ScriptState;
 class ScrollToOptions;
 class SerializedScriptValue;
 class Storage;
@@ -49,8 +52,8 @@ public:
     // GarbageCollectedFinalized overrides:
     DECLARE_VIRTUAL_TRACE();
 
-    virtual bool isLocalDOMWindow() const { return false; }
-    virtual bool isRemoteDOMWindow() const { return false; }
+    virtual bool isLocalDOMWindow() const = 0;
+    virtual bool isRemoteDOMWindow() const = 0;
 
     virtual Frame* frame() const = 0;
 
@@ -60,6 +63,7 @@ public:
 
     // EventTarget overrides:
     const AtomicString& interfaceName() const override;
+    const DOMWindow* toDOMWindow() const override;
 
     // DOM Level 0
     virtual Screen* screen() const = 0;
@@ -88,6 +92,8 @@ public:
     virtual double scrollY() const = 0;
     double pageXOffset() const { return scrollX(); }
     double pageYOffset() const { return scrollY(); }
+
+    virtual DOMVisualViewport* visualViewport() { return nullptr; }
 
     bool closed() const;
 
@@ -128,19 +134,17 @@ public:
     //  90 is when rotated counter clockwise.
     virtual int orientation() const = 0;
 
-    virtual Console* console() const  = 0;
-
     virtual DOMSelection* getSelection() = 0;
 
     void focus(ExecutionContext*);
     virtual void blur() = 0;
     void close(ExecutionContext*);
-    virtual void print() = 0;
+    virtual void print(ScriptState*) = 0;
     virtual void stop() = 0;
 
-    virtual void alert(const String& message = String()) = 0;
-    virtual bool confirm(const String& message) = 0;
-    virtual String prompt(const String& message, const String& defaultValue) = 0;
+    virtual void alert(ScriptState*, const String& message = String()) = 0;
+    virtual bool confirm(ScriptState*, const String& message) = 0;
+    virtual String prompt(ScriptState*, const String& message, const String& defaultValue) = 0;
 
     virtual bool find(const String&, bool caseSensitive, bool backwards, bool wrap, bool wholeWord, bool searchInFrames, bool showDialog) const = 0;
 
@@ -174,10 +178,12 @@ public:
     virtual void cancelIdleCallback(int id) = 0;
 
     // Custom elements
-    virtual CustomElementsRegistry* customElements() const = 0;
+    virtual CustomElementRegistry* customElements(ScriptState*) const = 0;
 
+    // Obsolete APIs
     void captureEvents() { }
     void releaseEvents() { }
+    External* external() const;
 
     // FIXME: This handles both window[index] and window.frames[index]. However,
     // the spec exposes window.frames[index] across origins but not
@@ -217,6 +223,8 @@ public:
 
 protected:
     DOMWindow();
+
+    virtual void schedulePostMessage(MessageEvent*, PassRefPtr<SecurityOrigin> target, Document* source) = 0;
 
     // Set to true when close() has been called. Needed for
     // |window.closed| determinism; having it return 'true'

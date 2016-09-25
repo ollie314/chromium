@@ -29,6 +29,8 @@
 #include "platform/audio/HRTFDatabase.h"
 
 #include "wtf/MathExtras.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -39,10 +41,9 @@ const unsigned HRTFDatabase::NumberOfRawElevations = 10; // -45 -> +90 (each 15 
 const unsigned HRTFDatabase::InterpolationFactor = 1;
 const unsigned HRTFDatabase::NumberOfTotalElevations = NumberOfRawElevations * InterpolationFactor;
 
-PassOwnPtr<HRTFDatabase> HRTFDatabase::create(float sampleRate)
+std::unique_ptr<HRTFDatabase> HRTFDatabase::create(float sampleRate)
 {
-    OwnPtr<HRTFDatabase> hrtfDatabase = adoptPtr(new HRTFDatabase(sampleRate));
-    return hrtfDatabase.release();
+    return wrapUnique(new HRTFDatabase(sampleRate));
 }
 
 HRTFDatabase::HRTFDatabase(float sampleRate)
@@ -51,12 +52,12 @@ HRTFDatabase::HRTFDatabase(float sampleRate)
 {
     unsigned elevationIndex = 0;
     for (int elevation = MinElevation; elevation <= MaxElevation; elevation += RawElevationAngleSpacing) {
-        OwnPtr<HRTFElevation> hrtfElevation = HRTFElevation::createForSubject("Composite", elevation, sampleRate);
+        std::unique_ptr<HRTFElevation> hrtfElevation = HRTFElevation::createForSubject("Composite", elevation, sampleRate);
         ASSERT(hrtfElevation.get());
         if (!hrtfElevation.get())
             return;
 
-        m_elevations[elevationIndex] = hrtfElevation.release();
+        m_elevations[elevationIndex] = std::move(hrtfElevation);
         elevationIndex += InterpolationFactor;
     }
 

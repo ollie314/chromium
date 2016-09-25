@@ -10,7 +10,7 @@
 #include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
@@ -155,7 +155,8 @@ void SSLErrorHandler::HandleSSLError(
     const GURL& request_url,
     int options_mask,
     std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
-    const base::Callback<void(bool)>& callback) {
+    const base::Callback<void(content::CertificateRequestResultType)>&
+        callback) {
   DCHECK(!FromWebContents(web_contents));
   SSLErrorHandler* error_handler =
       new SSLErrorHandler(web_contents, cert_error, ssl_info, request_url,
@@ -188,7 +189,7 @@ SSLErrorHandler::SSLErrorHandler(
     const GURL& request_url,
     int options_mask,
     std::unique_ptr<SSLCertReporter> ssl_cert_reporter,
-    const base::Callback<void(bool)>& callback)
+    const base::Callback<void(content::CertificateRequestResultType)>& callback)
     : content::WebContentsObserver(web_contents),
       web_contents_(web_contents),
       cert_error_(cert_error),
@@ -379,24 +380,24 @@ void SSLErrorHandler::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
-  if (type == chrome::NOTIFICATION_CAPTIVE_PORTAL_CHECK_RESULT) {
-    timer_.Stop();
-    CaptivePortalService::Results* results =
-        content::Details<CaptivePortalService::Results>(details).ptr();
-    if (results->result == captive_portal::RESULT_BEHIND_CAPTIVE_PORTAL)
-      ShowCaptivePortalInterstitial(results->landing_url);
-    else
-      ShowSSLInterstitial();
-  }
+  DCHECK_EQ(chrome::NOTIFICATION_CAPTIVE_PORTAL_CHECK_RESULT, type);
+
+  timer_.Stop();
+  CaptivePortalService::Results* results =
+      content::Details<CaptivePortalService::Results>(details).ptr();
+  if (results->result == captive_portal::RESULT_BEHIND_CAPTIVE_PORTAL)
+    ShowCaptivePortalInterstitial(results->landing_url);
+  else
+    ShowSSLInterstitial();
 #endif
 }
 
 void SSLErrorHandler::DidStartNavigationToPendingEntry(
     const GURL& /* url */,
-    content::NavigationController::ReloadType /* reload_type */) {
-// Destroy the error handler on all new navigations. This ensures that the
-// handler is properly recreated when a hanging page is navigated to an SSL
-// error, even when the tab's WebContents doesn't change.
+    content::ReloadType /* reload_type */) {
+  // Destroy the error handler on all new navigations. This ensures that the
+  // handler is properly recreated when a hanging page is navigated to an SSL
+  // error, even when the tab's WebContents doesn't change.
   DeleteSSLErrorHandler();
 }
 
@@ -409,7 +410,8 @@ void SSLErrorHandler::DeleteSSLErrorHandler() {
   // Need to explicity deny the certificate via the callback, otherwise memory
   // is leaked.
   if (!callback_.is_null()) {
-    base::ResetAndReturn(&callback_).Run(false);
+    base::ResetAndReturn(&callback_)
+        .Run(content::CERTIFICATE_REQUEST_RESULT_TYPE_DENY);
   }
   if (common_name_mismatch_handler_) {
     common_name_mismatch_handler_->Cancel();

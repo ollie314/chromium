@@ -53,7 +53,7 @@ namespace test_runner {
 class DeviceLightData;
 class GamepadController;
 class WebTask;
-class WebTestProxyBase;
+class WebViewTestProxyBase;
 struct TestPreferences;
 
 class WebTestDelegate {
@@ -83,9 +83,8 @@ class WebTestDelegate {
 
   // The delegate takes ownership of the WebTask objects and is responsible
   // for deleting them.
-  virtual void PostTask(blink::WebTaskRunner::Task* task) = 0;
-  virtual void PostDelayedTask(blink::WebTaskRunner::Task* task,
-                               long long ms) = 0;
+  virtual void PostTask(const base::Closure& task) = 0;
+  virtual void PostDelayedTask(const base::Closure& task, long long ms) = 0;
 
   // Register a new isolated filesystem with the given files, and return the
   // new filesystem id.
@@ -103,8 +102,10 @@ class WebTestDelegate {
   virtual blink::WebURL LocalFileToDataURL(const blink::WebURL& file_url) = 0;
 
   // Replaces file:///tmp/LayoutTests/ with the actual path to the
-  // LayoutTests directory.
-  virtual blink::WebURL RewriteLayoutTestsURL(const std::string& utf8_url) = 0;
+  // LayoutTests directory, or rewrite URLs generated from absolute
+  // path links in web-platform-tests.
+  virtual blink::WebURL RewriteLayoutTestsURL(const std::string& utf8_url,
+                                              bool is_wpt_mode) = 0;
 
   // Manages the settings to used for layout tests.
   virtual TestPreferences* Preferences() = 0;
@@ -156,8 +157,16 @@ class WebTestDelegate {
   // Controls the device scale factor of the main WebView for hidpi tests.
   virtual void SetDeviceScaleFactor(float factor) = 0;
 
+  // When use-zoom-for-dsf mode is enabled, this returns the scale to
+  // convert from window coordinates to viewport coordinates. When
+  // use-zoom-for-dsf is disabled, this return always 1.0f.
+  virtual float GetWindowToViewportScale() = 0;
+
   // Enable zoom-for-dsf option.
   virtual void EnableUseZoomForDSF() = 0;
+
+  // Returns whether or not the use-zoom-for-dsf flag is enabled.
+  virtual bool IsUseZoomForDSFEnabled() = 0;
 
   // Change the device color profile while running a layout test.
   virtual void SetDeviceColorProfile(const std::string& name) = 0;
@@ -185,23 +194,12 @@ class WebTestDelegate {
   virtual void SendBluetoothManualChooserEvent(const std::string& event,
                                                const std::string& argument) = 0;
 
-  // Enables mock geofencing service while running a layout test.
-  // |service_available| indicates if the mock service should mock geofencing
-  // being available or not.
-  virtual void SetGeofencingMockProvider(bool service_available) = 0;
-
-  // Disables mock geofencing service while running a layout test.
-  virtual void ClearGeofencingMockProvider() = 0;
-
-  // Set the mock geofencing position while running a layout test.
-  virtual void SetGeofencingMockPosition(double latitude, double longitude) = 0;
-
   // Controls which WebView should be focused.
   virtual void SetFocus(blink::WebView* web_view, bool focus) = 0;
 
   // Controls whether all cookies should be accepted or writing cookies in a
   // third-party context is blocked.
-  virtual void SetAcceptAllCookies(bool accept) = 0;
+  virtual void SetBlockThirdPartyCookies(bool block) = 0;
 
   // The same as RewriteLayoutTestsURL unless the resource is a path starting
   // with /tmp/, then return a file URL to a temporary file.
@@ -273,7 +271,7 @@ class WebTestDelegate {
     blink::WebLocalFrame* frame,
     const blink::WebPluginParams& params) = 0;
 
-  virtual float GetDeviceScaleFactorForTest() const = 0;
+  virtual float GetDeviceScaleFactor() const = 0;
 
   // Run all pending idle tasks, and then run callback.
   virtual void RunIdleTasks(const base::Closure& callback) = 0;

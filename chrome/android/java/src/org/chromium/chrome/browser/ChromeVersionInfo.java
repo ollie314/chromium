@@ -47,16 +47,16 @@ public class ChromeVersionInfo {
     }
 
     /**
-     * @return Whether this build is a work build.
-     */
-    public static boolean isWorkBuild() {
-        return ChromeVersionConstants.CHANNEL == ChromeVersionConstants.CHANNEL_WORK;
-    }
-
-    /**
      * @return Whether this is an official (i.e. Google Chrome) build.
      */
     public static boolean isOfficialBuild() {
         return ChromeVersionConstants.IS_OFFICIAL_BUILD;
+    }
+
+    /**
+     * @return The version number.
+     */
+    public static String getProductVersion() {
+        return ChromeVersionConstants.PRODUCT_VERSION;
     }
 }

@@ -28,6 +28,7 @@
 
 #include "core/CoreExport.h"
 #include "core/css/CSSSelector.h"
+#include <memory>
 
 namespace blink {
 
@@ -57,7 +58,7 @@ public:
         deleteSelectorsIfNeeded();
     }
 
-    static CSSSelectorList adoptSelectorVector(Vector<OwnPtr<CSSParserSelector>>& selectorVector);
+    static CSSSelectorList adoptSelectorVector(Vector<std::unique_ptr<CSSParserSelector>>& selectorVector);
     CSSSelectorList copy() const;
 
     bool isValid() const { return !!m_selectorArray; }
@@ -66,20 +67,19 @@ public:
     bool hasOneSelector() const { return m_selectorArray && !next(*m_selectorArray); }
     const CSSSelector& selectorAt(size_t index) const { return m_selectorArray[index]; }
 
+    size_t selectorIndex(const CSSSelector& selector) const
+    {
+        return &selector - m_selectorArray;
+    }
+
     size_t indexOfNextSelectorAfter(size_t index) const
     {
         const CSSSelector& current = selectorAt(index);
         const CSSSelector* next = this->next(current);
         if (!next)
             return kNotFound;
-        return next - m_selectorArray;
+        return selectorIndex(*next);
     }
-
-    bool selectorNeedsUpdatedDistribution(size_t index) const;
-
-    bool selectorHasContentPseudo(size_t index) const;
-    bool selectorHasSlottedPseudo(size_t index) const;
-    bool selectorUsesDeepCombinatorOrShadowPseudo(size_t index) const;
 
     String selectorsText() const;
 

@@ -15,6 +15,7 @@ import org.chromium.chrome.browser.media.remote.RemoteVideoInfo.PlayerState;
 import org.chromium.chrome.browser.media.ui.MediaNotificationInfo;
 import org.chromium.chrome.browser.media.ui.MediaNotificationListener;
 import org.chromium.chrome.browser.media.ui.MediaNotificationManager;
+import org.chromium.chrome.browser.metrics.MediaNotificationUma;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content_public.common.MediaMetadata;
 
@@ -59,7 +60,7 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
             if (sInstance == null) {
                 sInstance = new CastNotificationControl(context);
             }
-            sInstance.mMediaRouteController = mediaRouteController;
+            sInstance.setRouteController(mediaRouteController);
             return sInstance;
         }
     }
@@ -100,12 +101,15 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
         mAudioManager.requestAudioFocus(this, AudioManager.USE_DEFAULT_STREAM_TYPE,
                 AudioManager.AUDIOFOCUS_GAIN);
         Intent contentIntent = new Intent(mContext, ExpandedControllerActivity.class);
+        contentIntent.putExtra(MediaNotificationUma.INTENT_EXTRA_NAME,
+                MediaNotificationUma.SOURCE_MEDIA_FLING);
         mNotificationBuilder = new MediaNotificationInfo.Builder()
                 .setPaused(false)
                 .setPrivate(false)
                 .setIcon(R.drawable.ic_notification_media_route)
                 .setContentIntent(contentIntent)
                 .setLargeIcon(mMediaRouteController.getPoster())
+                .setDefaultLargeIcon(R.drawable.cast_playing_square)
                 .setId(R.id.remote_notification)
                 .setListener(this);
         mState = initialState;
@@ -114,10 +118,15 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
     }
 
     public void setRouteController(MediaRouteController controller) {
+        if (mMediaRouteController != null) mMediaRouteController.removeUiListener(this);
         mMediaRouteController = controller;
+        if (controller != null) controller.addUiListener(this);
     }
 
     private void updateNotification() {
+        // Nothing shown yet, nothing to update.
+        if (mNotificationBuilder == null) return;
+
         mNotificationBuilder.setMetadata(new MediaMetadata(mTitle, "", ""));
         if (mState == PlayerState.PAUSED || mState == PlayerState.PLAYING) {
             mNotificationBuilder.setPaused(mState != PlayerState.PLAYING);
@@ -143,6 +152,18 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
     // MediaRouteController.UiListener implementation.
     @Override
     public void onPlaybackStateChanged(PlayerState newState) {
+        if (!mIsShowing
+                && (newState == PlayerState.PLAYING || newState == PlayerState.LOADING
+                        || newState == PlayerState.PAUSED)) {
+            show(newState);
+            return;
+        }
+
+        if (mState == newState
+                || mState == PlayerState.PAUSED && newState == PlayerState.LOADING && mIsShowing) {
+            return;
+        }
+
         mState = newState;
         updateNotification();
     }
@@ -174,7 +195,9 @@ public class CastNotificationControl implements MediaRouteController.UiListener,
 
     @Override
     public void onTitleChanged(String title) {
-        mTitle = (title == null) ? "" : title;
+        if (title == null || title.equals(mTitle)) return;
+
+        mTitle = title;
         updateNotification();
     }
 

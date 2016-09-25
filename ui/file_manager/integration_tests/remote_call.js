@@ -26,7 +26,8 @@ RemoteCall.isStepByStepEnabled = function() {
 };
 
 /**
- * Calls a remote test util in Files.app's extension. See: test_util.js.
+ * Calls a remote test util in Files.app's extension. See:
+ * registerRemoteTestUtils in test_util_base.js.
  *
  * @param {string} func Function name.
  * @param {?string} appId Target window's App ID or null for functions
@@ -59,10 +60,11 @@ RemoteCall.prototype.callRemoteTestUtil =
             appId: appId,
             args: args
           },
+          {},
           function(var_args) {
             if (stepByStep) {
               console.info('Returned value:');
-              console.info(arguments);
+              console.info(JSON.stringify(arguments));
             }
             if (opt_callback)
               opt_callback.apply(null, arguments);
@@ -201,6 +203,7 @@ RemoteCall.prototype.waitForElementLost =
  * Sends a fake key down event.
  * @param {string} windowId Window ID.
  * @param {string} query Query for the target element.
+ * @param {string} key DOM UI Events Key value.
  * @param {string} keyIdentifer Key identifier.
  * @param {boolean} ctrlKey Control key flag.
  * @param {boolean} shiftKey Shift key flag.
@@ -209,10 +212,10 @@ RemoteCall.prototype.waitForElementLost =
  *     result.
  */
 RemoteCall.prototype.fakeKeyDown =
-    function(windowId, query, keyIdentifer, ctrlKey, shiftKey, altKey) {
+    function(windowId, query, key, keyIdentifer, ctrlKey, shiftKey, altKey) {
   var resultPromise = this.callRemoteTestUtil(
       'fakeKeyDown', windowId,
-      [query, keyIdentifer, ctrlKey, shiftKey, altKey]);
+      [query, key, keyIdentifer, ctrlKey, shiftKey, altKey]);
   return resultPromise.then(function(result) {
     if (result)
       return true;
@@ -362,7 +365,7 @@ RemoteCallFilesApp.prototype.checkNextTabFocus =
     function(windowId, elementId) {
   return remoteCall.callRemoteTestUtil('fakeKeyDown',
                                        windowId,
-                                       ['body', 'U+0009', false]).then(
+                                       ['body', 'Tab', 'U+0009', false]).then(
   function(result) {
     chrome.test.assertTrue(result);
     return remoteCall.callRemoteTestUtil('getActiveElement',

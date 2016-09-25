@@ -4,13 +4,15 @@
 
 #include "net/tools/quic/quic_simple_server_session.h"
 
+#include <utility>
+
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "net/quic/proto/cached_network_parameters.pb.h"
-#include "net/quic/quic_connection.h"
-#include "net/quic/quic_flags.h"
-#include "net/quic/quic_spdy_session.h"
-#include "net/quic/reliable_quic_stream.h"
+#include "net/quic/core/proto/cached_network_parameters.pb.h"
+#include "net/quic/core/quic_connection.h"
+#include "net/quic/core/quic_flags.h"
+#include "net/quic/core/quic_spdy_session.h"
+#include "net/quic/core/reliable_quic_stream.h"
 #include "net/tools/quic/quic_simple_server_stream.h"
 #include "url/gurl.h"
 
@@ -21,17 +23,21 @@ namespace net {
 QuicSimpleServerSession::QuicSimpleServerSession(
     const QuicConfig& config,
     QuicConnection* connection,
-    QuicServerSessionVisitor* visitor,
+    QuicServerSessionBase::Visitor* visitor,
+    QuicCryptoServerStream::Helper* helper,
     const QuicCryptoServerConfig* crypto_config,
     QuicCompressedCertsCache* compressed_certs_cache)
     : QuicServerSessionBase(config,
                             connection,
                             visitor,
+                            helper,
                             crypto_config,
                             compressed_certs_cache),
       highest_promised_stream_id_(0) {}
 
-QuicSimpleServerSession::~QuicSimpleServerSession() {}
+QuicSimpleServerSession::~QuicSimpleServerSession() {
+  delete connection();
+}
 
 QuicCryptoServerStreamBase*
 QuicSimpleServerSession::CreateQuicCryptoServerStream(
@@ -39,7 +45,7 @@ QuicSimpleServerSession::CreateQuicCryptoServerStream(
     QuicCompressedCertsCache* compressed_certs_cache) {
   return new QuicCryptoServerStream(crypto_config, compressed_certs_cache,
                                     FLAGS_enable_quic_stateless_reject_support,
-                                    this);
+                                    this, stream_helper());
 }
 
 void QuicSimpleServerSession::StreamDraining(QuicStreamId id) {
@@ -73,9 +79,10 @@ void QuicSimpleServerSession::PromisePushResources(
     SpdyHeaderBlock headers = SynthesizePushRequestHeaders(
         request_url, resource, original_request_headers);
     highest_promised_stream_id_ += 2;
-    SendPushPromise(original_stream_id, highest_promised_stream_id_, headers);
+    SendPushPromise(original_stream_id, highest_promised_stream_id_,
+                    headers.Clone());
     promised_streams_.push_back(PromisedStreamInfo(
-        headers, highest_promised_stream_id_, resource.priority));
+        std::move(headers), highest_promised_stream_id_, resource.priority));
   }
 
   // Procese promised push request as many as possible.
@@ -147,7 +154,7 @@ SpdyHeaderBlock QuicSimpleServerSession::SynthesizePushRequestHeaders(
   GURL push_request_url = resource.request_url;
   string path = push_request_url.path();
 
-  SpdyHeaderBlock spdy_headers = original_request_headers;
+  SpdyHeaderBlock spdy_headers = original_request_headers.Clone();
   // :authority could be different from original request.
   spdy_headers.ReplaceOrAppendHeader(":authority", push_request_url.host());
   spdy_headers.ReplaceOrAppendHeader(":path", path);
@@ -166,16 +173,16 @@ SpdyHeaderBlock QuicSimpleServerSession::SynthesizePushRequestHeaders(
 
 void QuicSimpleServerSession::SendPushPromise(QuicStreamId original_stream_id,
                                               QuicStreamId promised_stream_id,
-                                              const SpdyHeaderBlock& headers) {
+                                              SpdyHeaderBlock headers) {
   DVLOG(1) << "stream " << original_stream_id
            << " send PUSH_PROMISE for promised stream " << promised_stream_id;
   headers_stream()->WritePushPromise(original_stream_id, promised_stream_id,
-                                     headers, nullptr);
+                                     std::move(headers));
 }
 
 void QuicSimpleServerSession::HandlePromisedPushRequests() {
   while (!promised_streams_.empty() && ShouldCreateOutgoingDynamicStream()) {
-    const PromisedStreamInfo& promised_info = promised_streams_.front();
+    PromisedStreamInfo& promised_info = promised_streams_.front();
     DCHECK_EQ(next_outgoing_stream_id(), promised_info.stream_id);
 
     if (promised_info.is_cancelled) {
@@ -192,10 +199,10 @@ void QuicSimpleServerSession::HandlePromisedPushRequests() {
     DCHECK_EQ(promised_info.stream_id, promised_stream->id());
     DVLOG(1) << "created server push stream " << promised_stream->id();
 
-    const SpdyHeaderBlock request_headers(promised_info.request_headers);
+    SpdyHeaderBlock request_headers(std::move(promised_info.request_headers));
 
     promised_streams_.pop_front();
-    promised_stream->PushResponse(request_headers);
+    promised_stream->PushResponse(std::move(request_headers));
   }
 }
 

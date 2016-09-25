@@ -4,53 +4,55 @@
 
 #include "content/renderer/media/media_interface_provider.h"
 
+#include <string>
+
 #include "base/bind.h"
 #include "media/mojo/interfaces/content_decryption_module.mojom.h"
 #include "media/mojo/interfaces/renderer.mojom.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "services/shell/public/cpp/connect.h"
+#include "services/shell/public/cpp/interface_provider.h"
 
 namespace content {
 
 MediaInterfaceProvider::MediaInterfaceProvider(
-    const ConnectToApplicationCB& connect_to_app_cb)
-    : connect_to_app_cb_(connect_to_app_cb) {
-  DCHECK(!connect_to_app_cb_.is_null());
+    shell::InterfaceProvider* remote_interfaces)
+    : remote_interfaces_(remote_interfaces) {
 }
 
 MediaInterfaceProvider::~MediaInterfaceProvider() {
   DCHECK(thread_checker_.CalledOnValidThread());
 }
 
-void MediaInterfaceProvider::GetInterface(const mojo::String& interface_name,
+void MediaInterfaceProvider::GetInterface(const std::string& interface_name,
                                           mojo::ScopedMessagePipeHandle pipe) {
   DVLOG(1) << __FUNCTION__;
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (interface_name == media::interfaces::ContentDecryptionModule::Name_) {
+  if (interface_name == media::mojom::ContentDecryptionModule::Name_) {
     GetMediaServiceFactory()->CreateCdm(
-        mojo::MakeRequest<media::interfaces::ContentDecryptionModule>(
+        mojo::MakeRequest<media::mojom::ContentDecryptionModule>(
             std::move(pipe)));
-  } else if (interface_name == media::interfaces::Renderer::Name_) {
+  } else if (interface_name == media::mojom::Renderer::Name_) {
     GetMediaServiceFactory()->CreateRenderer(
-        mojo::MakeRequest<media::interfaces::Renderer>(std::move(pipe)));
-  } else if (interface_name == media::interfaces::AudioDecoder::Name_) {
+        std::string(),
+        mojo::MakeRequest<media::mojom::Renderer>(std::move(pipe)));
+  } else if (interface_name == media::mojom::AudioDecoder::Name_) {
     GetMediaServiceFactory()->CreateAudioDecoder(
-        mojo::MakeRequest<media::interfaces::AudioDecoder>(std::move(pipe)));
+        mojo::MakeRequest<media::mojom::AudioDecoder>(std::move(pipe)));
+  } else if (interface_name == media::mojom::VideoDecoder::Name_) {
+    GetMediaServiceFactory()->CreateVideoDecoder(
+        mojo::MakeRequest<media::mojom::VideoDecoder>(std::move(pipe)));
   } else {
     NOTREACHED();
   }
 }
 
-media::interfaces::ServiceFactory*
-MediaInterfaceProvider::GetMediaServiceFactory() {
+media::mojom::ServiceFactory* MediaInterfaceProvider::GetMediaServiceFactory() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (!media_service_factory_) {
-    shell::mojom::InterfaceProviderPtr interface_provider =
-        connect_to_app_cb_.Run(GURL("mojo:media"));
-    shell::GetInterface(interface_provider.get(), &media_service_factory_);
+    remote_interfaces_->GetInterface(&media_service_factory_);
     media_service_factory_.set_connection_error_handler(base::Bind(
         &MediaInterfaceProvider::OnConnectionError, base::Unretained(this)));
   }

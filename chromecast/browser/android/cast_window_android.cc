@@ -5,7 +5,7 @@
 #include "chromecast/browser/android/cast_window_android.h"
 
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chromecast/browser/android/cast_window_manager.h"
 #include "chromecast/browser/cast_content_window.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -29,11 +29,6 @@ namespace {
 const int kWebContentsDestructionDelayInMs = 50;
 
 }  // namespace
-
-// static
-bool CastWindowAndroid::RegisterJni(JNIEnv* env) {
-  return RegisterNativesImpl(env);
-}
 
 // static
 CastWindowAndroid* CastWindowAndroid::CreateNewWindow(
@@ -61,8 +56,7 @@ CastWindowAndroid::CastWindowAndroid(content::BrowserContext* browser_context)
 }
 
 void CastWindowAndroid::Initialize() {
-  web_contents_ =
-      content_window_->CreateWebContents(gfx::Size(), browser_context_);
+  web_contents_ = content_window_->CreateWebContents(browser_context_);
   web_contents_->SetDelegate(this);
   content::WebContentsObserver::Observe(web_contents_.get());
 
@@ -77,7 +71,6 @@ void CastWindowAndroid::Initialize() {
   content::RendererPreferences* prefs =
       web_contents_->GetMutableRendererPrefs();
   prefs->use_video_overlay_for_embedded_encrypted_video = true;
-  prefs->use_view_overlay_for_all_video = true;
   web_contents_->GetRenderViewHost()->SyncRendererPrefs();
 }
 

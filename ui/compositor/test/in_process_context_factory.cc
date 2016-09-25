@@ -14,8 +14,12 @@
 #include "cc/output/compositor_frame.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface_client.h"
-#include "cc/surfaces/onscreen_display_client.h"
-#include "cc/surfaces/surface_display_output_surface.h"
+#include "cc/output/texture_mailbox_deleter.h"
+#include "cc/scheduler/begin_frame_source.h"
+#include "cc/scheduler/delay_based_time_source.h"
+#include "cc/surfaces/direct_compositor_frame_sink.h"
+#include "cc/surfaces/display.h"
+#include "cc/surfaces/display_scheduler.h"
 #include "cc/surfaces/surface_id_allocator.h"
 #include "cc/test/pixel_test_output_surface.h"
 #include "cc/test/test_shared_bitmap_manager.h"
@@ -45,33 +49,27 @@ class FakeReflector : public Reflector {
 // GL surface.
 class DirectOutputSurface : public cc::OutputSurface {
  public:
-  DirectOutputSurface(
-      const scoped_refptr<cc::ContextProvider>& context_provider,
-      const scoped_refptr<cc::ContextProvider>& worker_context_provider,
-      std::unique_ptr<cc::BeginFrameSource> begin_frame_source)
-      : cc::OutputSurface(context_provider, worker_context_provider),
-        begin_frame_source_(std::move(begin_frame_source)),
+  DirectOutputSurface(scoped_refptr<InProcessContextProvider> context_provider)
+      : cc::OutputSurface(std::move(context_provider)),
         weak_ptr_factory_(this) {}
 
   ~DirectOutputSurface() override {}
 
-  // cc::OutputSurface implementation
+  // cc::OutputSurface implementation.
   bool BindToClient(cc::OutputSurfaceClient* client) override {
     if (!OutputSurface::BindToClient(client))
       return false;
-
-    client->SetBeginFrameSource(begin_frame_source_.get());
     return true;
   }
-  void SwapBuffers(cc::CompositorFrame* frame) override {
+  void SwapBuffers(cc::CompositorFrame frame) override {
     DCHECK(context_provider_.get());
-    DCHECK(frame->gl_frame_data);
-    if (frame->gl_frame_data->sub_buffer_rect ==
-        gfx::Rect(frame->gl_frame_data->size)) {
+    DCHECK(frame.gl_frame_data);
+    if (frame.gl_frame_data->sub_buffer_rect ==
+        gfx::Rect(frame.gl_frame_data->size)) {
       context_provider_->ContextSupport()->Swap();
     } else {
       context_provider_->ContextSupport()->PartialSwapBuffers(
-          frame->gl_frame_data->sub_buffer_rect);
+          frame.gl_frame_data->sub_buffer_rect);
     }
     gpu::gles2::GLES2Interface* gl = context_provider_->ContextGL();
     const uint64_t fence_sync = gl->InsertFenceSyncCHROMIUM();
@@ -83,12 +81,13 @@ class DirectOutputSurface : public cc::OutputSurface {
     context_provider_->ContextSupport()->SignalSyncToken(
         sync_token, base::Bind(&OutputSurface::OnSwapBuffersComplete,
                                weak_ptr_factory_.GetWeakPtr()));
-    client_->DidSwapBuffers();
+  }
+  uint32_t GetFramebufferCopyTextureFormat() override {
+    auto* gl = static_cast<InProcessContextProvider*>(context_provider());
+    return gl->GetCopyTextureInternalFormat();
   }
 
  private:
-  std::unique_ptr<cc::BeginFrameSource> begin_frame_source_;
-
   base::WeakPtrFactory<DirectOutputSurface> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DirectOutputSurface);
@@ -99,20 +98,25 @@ class DirectOutputSurface : public cc::OutputSurface {
 InProcessContextFactory::InProcessContextFactory(
     bool context_factory_for_test,
     cc::SurfaceManager* surface_manager)
-    : next_surface_id_namespace_(1u),
+    : next_surface_client_id_(1u),
       use_test_surface_(true),
       context_factory_for_test_(context_factory_for_test),
       surface_manager_(surface_manager) {
-  DCHECK_NE(gfx::GetGLImplementation(), gfx::kGLImplementationNone)
+  DCHECK(surface_manager);
+  DCHECK_NE(gl::GetGLImplementation(), gl::kGLImplementationNone)
       << "If running tests, ensure that main() is calling "
-      << "gfx::GLSurfaceTestSupport::InitializeOneOff()";
+      << "gl::GLSurfaceTestSupport::InitializeOneOff()";
 }
 
 InProcessContextFactory::~InProcessContextFactory() {
   DCHECK(per_compositor_data_.empty());
 }
 
-void InProcessContextFactory::CreateOutputSurface(
+void InProcessContextFactory::SendOnLostResources() {
+  FOR_EACH_OBSERVER(ContextFactoryObserver, observer_list_, OnLostResources());
+}
+
+void InProcessContextFactory::CreateCompositorFrameSink(
     base::WeakPtr<Compositor> compositor) {
   // Try to reuse existing shared worker context provider.
   bool shared_worker_context_provider_lost = false;
@@ -130,8 +134,6 @@ void InProcessContextFactory::CreateOutputSurface(
     if (shared_worker_context_provider_ &&
         !shared_worker_context_provider_->BindToCurrentThread())
       shared_worker_context_provider_ = nullptr;
-    if (shared_worker_context_provider_)
-      shared_worker_context_provider_->SetupLock();
   }
 
   gpu::gles2::ContextCreationAttribHelper attribs;
@@ -151,43 +153,35 @@ void InProcessContextFactory::CreateOutputSurface(
           &gpu_memory_buffer_manager_, &image_factory_, compositor->widget(),
           "UICompositor");
 
-  std::unique_ptr<cc::OutputSurface> real_output_surface;
-  std::unique_ptr<cc::SyntheticBeginFrameSource> begin_frame_source(
-      new cc::SyntheticBeginFrameSource(compositor->task_runner().get(),
-                                        cc::BeginFrameArgs::DefaultInterval()));
-
+  std::unique_ptr<cc::OutputSurface> display_output_surface;
   if (use_test_surface_) {
     bool flipped_output_surface = false;
-    real_output_surface = base::WrapUnique(new cc::PixelTestOutputSurface(
-        context_provider, shared_worker_context_provider_,
-        flipped_output_surface, std::move(begin_frame_source)));
+    display_output_surface = base::MakeUnique<cc::PixelTestOutputSurface>(
+        context_provider, flipped_output_surface);
   } else {
-    real_output_surface = base::WrapUnique(new DirectOutputSurface(
-        context_provider, shared_worker_context_provider_,
-        std::move(begin_frame_source)));
+    display_output_surface =
+        base::MakeUnique<DirectOutputSurface>(context_provider);
   }
 
-  if (surface_manager_) {
-    std::unique_ptr<cc::OnscreenDisplayClient> display_client(
-        new cc::OnscreenDisplayClient(
-            std::move(real_output_surface), surface_manager_,
-            GetSharedBitmapManager(), GetGpuMemoryBufferManager(),
-            compositor->GetRendererSettings(), compositor->task_runner(),
-            compositor->surface_id_allocator()->id_namespace()));
-    std::unique_ptr<cc::SurfaceDisplayOutputSurface> surface_output_surface(
-        new cc::SurfaceDisplayOutputSurface(
-            surface_manager_, compositor->surface_id_allocator(),
-            context_provider, shared_worker_context_provider_));
-    display_client->set_surface_output_surface(surface_output_surface.get());
-    surface_output_surface->set_display_client(display_client.get());
+  std::unique_ptr<cc::DelayBasedBeginFrameSource> begin_frame_source(
+      new cc::DelayBasedBeginFrameSource(
+          base::MakeUnique<cc::DelayBasedTimeSource>(
+              compositor->task_runner().get())));
+  std::unique_ptr<cc::DisplayScheduler> scheduler(new cc::DisplayScheduler(
+      begin_frame_source.get(), compositor->task_runner().get(),
+      display_output_surface->capabilities().max_frames_pending));
+  per_compositor_data_[compositor.get()] = base::MakeUnique<cc::Display>(
+      GetSharedBitmapManager(), GetGpuMemoryBufferManager(),
+      compositor->GetRendererSettings(), std::move(begin_frame_source),
+      std::move(display_output_surface), std::move(scheduler),
+      base::MakeUnique<cc::TextureMailboxDeleter>(
+          compositor->task_runner().get()));
 
-    compositor->SetOutputSurface(std::move(surface_output_surface));
-
-    delete per_compositor_data_[compositor.get()];
-    per_compositor_data_[compositor.get()] = display_client.release();
-  } else {
-    compositor->SetOutputSurface(std::move(real_output_surface));
-  }
+  auto* display = per_compositor_data_[compositor.get()].get();
+  auto compositor_frame_sink = base::MakeUnique<cc::DirectCompositorFrameSink>(
+      surface_manager_, compositor->surface_id_allocator(), display,
+      context_provider, shared_worker_context_provider_);
+  compositor->SetCompositorFrameSink(std::move(compositor_frame_sink));
 }
 
 std::unique_ptr<Reflector> InProcessContextFactory::CreateReflector(
@@ -218,7 +212,6 @@ InProcessContextFactory::SharedMainThreadContextProvider() {
 void InProcessContextFactory::RemoveCompositor(Compositor* compositor) {
   if (!per_compositor_data_.count(compositor))
     return;
-  delete per_compositor_data_[compositor];
   per_compositor_data_.erase(compositor);
 }
 
@@ -245,20 +238,34 @@ cc::TaskGraphRunner* InProcessContextFactory::GetTaskGraphRunner() {
   return &task_graph_runner_;
 }
 
-std::unique_ptr<cc::SurfaceIdAllocator>
-InProcessContextFactory::CreateSurfaceIdAllocator() {
-  std::unique_ptr<cc::SurfaceIdAllocator> allocator(
-      new cc::SurfaceIdAllocator(next_surface_id_namespace_++));
-  if (surface_manager_)
-    allocator->RegisterSurfaceIdNamespace(surface_manager_);
-  return allocator;
+uint32_t InProcessContextFactory::AllocateSurfaceClientId() {
+  return next_surface_client_id_++;
+}
+
+cc::SurfaceManager* InProcessContextFactory::GetSurfaceManager() {
+  return surface_manager_;
+}
+
+void InProcessContextFactory::SetDisplayVisible(ui::Compositor* compositor,
+                                                bool visible) {
+  if (!per_compositor_data_.count(compositor))
+    return;
+  per_compositor_data_[compositor]->SetVisible(visible);
 }
 
 void InProcessContextFactory::ResizeDisplay(ui::Compositor* compositor,
                                             const gfx::Size& size) {
   if (!per_compositor_data_.count(compositor))
     return;
-  per_compositor_data_[compositor]->display()->Resize(size);
+  per_compositor_data_[compositor]->Resize(size);
+}
+
+void InProcessContextFactory::AddObserver(ContextFactoryObserver* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void InProcessContextFactory::RemoveObserver(ContextFactoryObserver* observer) {
+  observer_list_.RemoveObserver(observer);
 }
 
 }  // namespace ui

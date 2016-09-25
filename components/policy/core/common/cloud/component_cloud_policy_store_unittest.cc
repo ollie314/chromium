@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/test/test_simple_task_runner.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
@@ -17,9 +18,9 @@
 #include "components/policy/core/common/cloud/resource_cache.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/policy/proto/chrome_extension_policy.pb.h"
+#include "components/policy/proto/device_management_backend.pb.h"
 #include "crypto/sha2.h"
-#include "policy/proto/chrome_extension_policy.pb.h"
-#include "policy/proto/device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -70,9 +71,9 @@ class ComponentCloudPolicyStoreTest : public testing::Test {
  protected:
   void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    cache_.reset(new ResourceCache(
-        temp_dir_.path(),
-        make_scoped_refptr(new base::TestSimpleTaskRunner)));
+    cache_.reset(
+        new ResourceCache(temp_dir_.GetPath(),
+                          make_scoped_refptr(new base::TestSimpleTaskRunner)));
     store_.reset(new ComponentCloudPolicyStore(&store_delegate_, cache_.get()));
     store_->SetCredentials(ComponentPolicyBuilder::kFakeUsername,
                            ComponentPolicyBuilder::kFakeToken);
@@ -85,18 +86,12 @@ class ComponentCloudPolicyStoreTest : public testing::Test {
 
     PolicyNamespace ns(POLICY_DOMAIN_EXTENSIONS, kTestExtension);
     PolicyMap& policy = expected_bundle_.Get(ns);
-    policy.Set("Name",
-               POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER,
+    policy.Set("Name", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                POLICY_SOURCE_CLOUD,
-               new base::StringValue("disabled"),
-               NULL);
-    policy.Set("Second",
-               POLICY_LEVEL_RECOMMENDED,
-               POLICY_SCOPE_USER,
+               base::MakeUnique<base::StringValue>("disabled"), nullptr);
+    policy.Set("Second", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_USER,
                POLICY_SOURCE_CLOUD,
-               new base::StringValue("maybe"),
-               NULL);
+               base::MakeUnique<base::StringValue>("maybe"), nullptr);
   }
 
   // Returns true if the policy exposed by the |store_| is empty.
@@ -104,9 +99,9 @@ class ComponentCloudPolicyStoreTest : public testing::Test {
     return store_->policy().begin() == store_->policy().end();
   }
 
-  scoped_ptr<em::PolicyFetchResponse> CreateResponse() {
+  std::unique_ptr<em::PolicyFetchResponse> CreateResponse() {
     builder_.Build();
-    return make_scoped_ptr(new em::PolicyFetchResponse(builder_.policy()));
+    return base::MakeUnique<em::PolicyFetchResponse>(builder_.policy());
   }
 
   std::string CreateSerializedResponse() {
@@ -115,8 +110,8 @@ class ComponentCloudPolicyStoreTest : public testing::Test {
   }
 
   base::ScopedTempDir temp_dir_;
-  scoped_ptr<ResourceCache> cache_;
-  scoped_ptr<ComponentCloudPolicyStore> store_;
+  std::unique_ptr<ResourceCache> cache_;
+  std::unique_ptr<ComponentCloudPolicyStore> store_;
   MockComponentCloudPolicyStoreDelegate store_delegate_;
   ComponentPolicyBuilder builder_;
   PolicyBundle expected_bundle_;

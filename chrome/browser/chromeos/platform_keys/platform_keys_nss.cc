@@ -20,7 +20,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part_chromeos.h"
@@ -554,8 +554,8 @@ void SelectCertificatesOnIOThread(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   state->cert_store_.reset(new ClientCertStoreChromeOS(
       nullptr,  // no additional provider
-      base::WrapUnique(new ClientCertFilterChromeOS(state->use_system_key_slot_,
-                                                    state->username_hash_)),
+      base::MakeUnique<ClientCertFilterChromeOS>(state->use_system_key_slot_,
+                                                 state->username_hash_),
       ClientCertStoreChromeOS::PasswordDelegateFactory()));
 
   state->certs_.reset(new net::CertificateList);

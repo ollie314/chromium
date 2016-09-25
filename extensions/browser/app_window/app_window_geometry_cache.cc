@@ -56,7 +56,7 @@ void AppWindowGeometryCache::SaveGeometry(const std::string& extension_id,
   if (extension_data[window_id].bounds == bounds &&
       extension_data[window_id].window_state == window_state &&
       extension_data[window_id].screen_bounds == screen_bounds &&
-      !ContainsKey(unsynced_extensions_, extension_id))
+      !base::ContainsKey(unsynced_extensions_, extension_id))
     return;
 
   base::Time now = base::Time::Now();
@@ -106,7 +106,7 @@ void AppWindowGeometryCache::SyncToStorage() {
     const std::string& extension_id = *it;
     const ExtensionData& extension_data = cache_[extension_id];
 
-    scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
+    std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
     for (ExtensionData::const_iterator it = extension_data.begin(),
                                        eit = extension_data.end();
          it != eit;

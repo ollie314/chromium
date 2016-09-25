@@ -25,8 +25,7 @@
 #include "base/gtest_prod_util.h"
 #include "core/CoreExport.h"
 #include "core/dom/AXObjectCache.h"
-#include "core/frame/ConsoleTypes.h"
-#include "core/inspector/ConsoleAPITypes.h"
+#include "core/inspector/ConsoleTypes.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/NavigationPolicy.h"
 #include "core/style/ComputedStyleConstants.h"
@@ -40,8 +39,9 @@
 #include "public/platform/WebEventListenerProperties.h"
 #include "public/platform/WebFocusType.h"
 #include "wtf/Forward.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/Optional.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
@@ -49,6 +49,7 @@ class AXObject;
 class ColorChooser;
 class ColorChooserClient;
 class CompositorAnimationTimeline;
+class CompositorProxyClient;
 class DateTimeChooser;
 class DateTimeChooserClient;
 class Element;
@@ -70,6 +71,7 @@ class PopupOpeningObserver;
 class WebDragData;
 class WebFrameScheduler;
 class WebImage;
+class WebLayer;
 
 struct CompositedSelection;
 struct DateTimeChooserParameters;
@@ -85,8 +87,8 @@ public:
 
     // The specified rectangle is adjusted for the minimum window size and the
     // screen, then setWindowRect with the adjusted rectangle is called.
-    void setWindowRectWithAdjustment(const IntRect&);
-    virtual IntRect windowRect() = 0;
+    void setWindowRectWithAdjustment(const IntRect&, LocalFrame&);
+    virtual IntRect rootWindowRect() = 0;
 
     virtual IntRect pageRect() = 0;
 
@@ -99,6 +101,8 @@ public:
 
     virtual bool hadFormInteraction() const = 0;
 
+    virtual void beginLifecycleUpdates() = 0;
+
     // Start a system drag and drop operation.
     virtual void startDragging(LocalFrame*, const WebDragData&, WebDragOperationsMask, const WebImage& dragImage, const WebPoint& dragImageOffset) = 0;
     virtual bool acceptsLoadDrops() const = 0;
@@ -109,7 +113,7 @@ public:
     // created Page has its show method called.
     // The FrameLoadRequest parameter is only for ChromeClient to check if the
     // request could be fulfilled. The ChromeClient should not load the request.
-    virtual Page* createWindow(LocalFrame*, const FrameLoadRequest&, const WindowFeatures&, NavigationPolicy, ShouldSetOpener) = 0;
+    virtual Page* createWindow(LocalFrame*, const FrameLoadRequest&, const WindowFeatures&, NavigationPolicy) = 0;
     virtual void show(NavigationPolicy = NavigationPolicyIgnore) = 0;
 
     void setWindowFeatures(const WindowFeatures&);
@@ -154,7 +158,7 @@ public:
 
     virtual void* webView() const = 0;
 
-    virtual IntRect windowResizerRect() const = 0;
+    virtual IntRect windowResizerRect(LocalFrame&) const = 0;
 
     // Methods used by HostWindow.
     virtual WebScreenInfo screenInfo() const = 0;
@@ -162,11 +166,15 @@ public:
     // End methods used by HostWindow.
     virtual Cursor lastSetCursorForTesting() const = 0;
 
+    // Returns a custom visible content rect if a viewport override is active.
+    virtual WTF::Optional<IntRect> visibleContentRectForPainting() const { return WTF::nullopt; }
+
     virtual void dispatchViewportPropertiesDidChange(const ViewportDescription&) const { }
 
     virtual void contentsSizeChanged(LocalFrame*, const IntSize&) const = 0;
     virtual void pageScaleFactorChanged() const { }
     virtual float clampPageScaleFactorToLimits(float scale) const { return scale; }
+    virtual void mainFrameScrollOffsetChanged() const { }
     virtual void layoutUpdated(LocalFrame*) const { }
 
     void mouseDidMoveOverElement(const HitTestResult&);
@@ -194,23 +202,24 @@ public:
     // Asychronous request to enumerate all files in a directory chosen by the user.
     virtual void enumerateChosenDirectory(FileChooser*) = 0;
 
-    // Pass 0 as the GraphicsLayer to detach the root layer.
+    // Pass nullptr as the GraphicsLayer to detach the root layer.
     // This sets the graphics layer for the LocalFrame's WebWidget, if it has
     // one. Otherwise it sets it for the WebViewImpl.
     virtual void attachRootGraphicsLayer(GraphicsLayer*, LocalFrame* localRoot) = 0;
 
-    // In Slimming Paint v2, called when the paint artifact is updated, to allow
-    // the underlying web widget to composite it.
-    virtual void didPaint(const PaintArtifact&) { }
+    // Pass nullptr as the WebLayer to detach the root layer.
+    // This sets the WebLayer for the LocalFrame's WebWidget, if it has
+    // one. Otherwise it sets it for the WebViewImpl.
+    virtual void attachRootLayer(WebLayer*, LocalFrame* localRoot) = 0;
 
     virtual void attachCompositorAnimationTimeline(CompositorAnimationTimeline*, LocalFrame* localRoot) { }
     virtual void detachCompositorAnimationTimeline(CompositorAnimationTimeline*, LocalFrame* localRoot) { }
 
-    virtual void enterFullScreenForElement(Element*) { }
-    virtual void exitFullScreenForElement(Element*) { }
+    virtual void enterFullscreenForElement(Element*) { }
+    virtual void exitFullscreenForElement(Element*) { }
 
-    virtual void clearCompositedSelection() { }
-    virtual void updateCompositedSelection(const CompositedSelection&) { }
+    virtual void clearCompositedSelection(LocalFrame*) { }
+    virtual void updateCompositedSelection(LocalFrame*, const CompositedSelection&) { }
 
     virtual void setEventListenerProperties(WebEventListenerClass, WebEventListenerProperties) = 0;
     virtual WebEventListenerProperties eventListenerProperties(WebEventListenerClass) const = 0;
@@ -237,14 +246,14 @@ public:
 
     virtual bool isSVGImageChromeClient() const { return false; }
 
-    virtual bool requestPointerLock() { return false; }
-    virtual void requestPointerUnlock() { }
+    virtual bool requestPointerLock(LocalFrame*) { return false; }
+    virtual void requestPointerUnlock(LocalFrame*) {}
 
     virtual IntSize minimumWindowSize() const { return IntSize(100, 100); }
 
     virtual bool isChromeClientImpl() const { return false; }
 
-    virtual void didAssociateFormControls(const HeapVector<Member<Element>>&, LocalFrame*) { }
+    virtual void didAssociateFormControlsAfterLoad(LocalFrame*) { }
     virtual void didChangeValueInTextField(HTMLFormControlElement&) { }
     virtual void didEndEditingOnTextField(HTMLInputElement&) { }
     virtual void handleKeyboardEventOnTextField(HTMLInputElement&, KeyboardEvent&) { }
@@ -254,7 +263,7 @@ public:
     // Input method editor related functions.
     virtual void didCancelCompositionOnSelectionChange() { }
     virtual void willSetInputMethodState() { }
-    virtual void didUpdateTextOfFocusedElementByNonUserInput() { }
+    virtual void didUpdateTextOfFocusedElementByNonUserInput(LocalFrame&) { }
     virtual void showImeIfNeeded() { }
 
     virtual void registerViewportLayers() const { }
@@ -268,6 +277,8 @@ public:
     virtual void registerPopupOpeningObserver(PopupOpeningObserver*) = 0;
     virtual void unregisterPopupOpeningObserver(PopupOpeningObserver*) = 0;
 
+    virtual CompositorProxyClient* createCompositorProxyClient(LocalFrame*) = 0;
+
     virtual FloatSize elasticOverscroll() const { return FloatSize(); }
 
     // Called when observed XHR, fetch, and other fetch request with non-GET
@@ -275,13 +286,18 @@ public:
     // that this is comprehensive.
     virtual void didObserveNonGetFetchFromScript() const {}
 
-    virtual PassOwnPtr<WebFrameScheduler> createFrameScheduler(BlameContext*) = 0;
+    virtual std::unique_ptr<WebFrameScheduler> createFrameScheduler(BlameContext*) = 0;
+
+    // Returns the time of the beginning of the last beginFrame, in seconds, if any, and 0.0 otherwise.
+    virtual double lastFrameTimeMonotonic() const { return 0.0; }
+
+    virtual void installSupplements(LocalFrame&) { }
 
 protected:
     ~ChromeClient() override { }
 
     virtual void showMouseOverURL(const HitTestResult&) = 0;
-    virtual void setWindowRect(const IntRect&) = 0;
+    virtual void setWindowRect(const IntRect&, LocalFrame&) = 0;
     virtual bool openBeforeUnloadConfirmPanelDelegate(LocalFrame*, bool isReload) = 0;
     virtual bool openJavaScriptAlertDelegate(LocalFrame*, const String&) = 0;
     virtual bool openJavaScriptConfirmDelegate(LocalFrame*, const String&) = 0;

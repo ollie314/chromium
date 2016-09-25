@@ -42,7 +42,7 @@ PresentationAvailability* PresentationAvailability::take(ScriptPromiseResolver* 
 PresentationAvailability::PresentationAvailability(ExecutionContext* executionContext, const KURL& url, bool value)
     : ActiveScriptWrappable(this)
     , ActiveDOMObject(executionContext)
-    , PageLifecycleObserver(toDocument(executionContext)->page())
+    , PageVisibilityObserver(toDocument(executionContext)->page())
     , m_url(url)
     , m_value(value)
     , m_state(State::Active)
@@ -64,12 +64,11 @@ ExecutionContext* PresentationAvailability::getExecutionContext() const
     return ActiveDOMObject::getExecutionContext();
 }
 
-bool PresentationAvailability::addEventListenerInternal(const AtomicString& eventType, EventListener* listener, const EventListenerOptions& options)
+void PresentationAvailability::addedEventListener(const AtomicString& eventType, RegisteredEventListener& registeredListener)
 {
+    EventTargetWithInlineData::addedEventListener(eventType, registeredListener);
     if (eventType == EventTypeNames::change)
         UseCounter::count(getExecutionContext(), UseCounter::PresentationAvailabilityChangeEventListener);
-
-    return EventTarget::addEventListenerInternal(eventType, listener, options);
 }
 
 void PresentationAvailability::availabilityChanged(bool value)
@@ -139,7 +138,7 @@ bool PresentationAvailability::value() const
 DEFINE_TRACE(PresentationAvailability)
 {
     EventTargetWithInlineData::trace(visitor);
-    PageLifecycleObserver::trace(visitor);
+    PageVisibilityObserver::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }
 

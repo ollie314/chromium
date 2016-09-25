@@ -27,7 +27,8 @@
             android:scaleType="center"
             android:contentDescription="@string/accessibility_toolbar_btn_site_info" />
 
-        <ImageButton android:id="@+id/security_button"
+        <org.chromium.chrome.browser.widget.TintedImageButton
+            android:id="@+id/security_button"
             style="@style/LocationBarButton"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
@@ -42,7 +43,7 @@
     <include layout="@layout/location_bar_status" />
 
     <include
-        android:id="@+id/url_container"
+        android:id="@+id/url_bar"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_marginTop="3dp"
@@ -50,7 +51,7 @@
         android:layout_marginStart="@dimen/location_bar_icon_width"
         android:layout_gravity="center_vertical"
         android:nextFocusForward="@+id/tab_switcher_button"
-        layout="@layout/url_container" />
+        layout="@layout/url_bar" />
 
     <FrameLayout android:id="@+id/url_action_container"
         android:layout_width="@dimen/location_bar_icon_width"

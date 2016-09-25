@@ -12,10 +12,10 @@
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "net/base/ip_address.h"
-#include "net/base/socket_performance_watcher.h"
 #include "net/dns/dns_protocol.h"
 #include "net/dns/dns_socket_pool.h"
 #include "net/log/net_log.h"
+#include "net/socket/socket_performance_watcher.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/stream_socket.h"
@@ -89,7 +89,7 @@ class DnsSessionTest : public testing::Test {
 class MockDnsSocketPool : public DnsSocketPool {
  public:
   MockDnsSocketPool(ClientSocketFactory* factory, DnsSessionTest* test)
-     : DnsSocketPool(factory), test_(test) { }
+      : DnsSocketPool(factory, base::Bind(&base::RandInt)), test_(test) {}
 
   ~MockDnsSocketPool() override {}
 
@@ -194,7 +194,7 @@ TestClientSocketFactory::CreateDatagramClientSocket(
 }
 
 TestClientSocketFactory::~TestClientSocketFactory() {
-  STLDeleteElements(&data_providers_);
+  base::STLDeleteElements(&data_providers_);
 }
 
 TEST_F(DnsSessionTest, AllocateFree) {

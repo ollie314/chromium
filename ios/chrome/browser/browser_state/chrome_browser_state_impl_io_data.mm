@@ -335,8 +335,6 @@ void ChromeBrowserStateImplIOData::InitializeInternal(
       io_thread_globals->http_auth_handler_factory.get());
 
   main_context->set_proxy_service(proxy_service());
-  main_context->set_backoff_manager(
-      io_thread_globals->url_request_backoff_manager.get());
 
   net::ChannelIDService* channel_id_service = NULL;
 
@@ -404,7 +402,7 @@ void ChromeBrowserStateImplIOData::InitializeInternal(
   sdch_policy_.reset(new net::SdchOwner(sdch_manager_.get(), main_context));
   main_context->set_sdch_manager(sdch_manager_.get());
   sdch_policy_->EnablePersistentStorage(
-      base::WrapUnique(new SdchOwnerPrefStorage(network_json_store_.get())));
+      base::MakeUnique<SdchOwnerPrefStorage>(network_json_store_.get()));
 
   lazy_params_.reset();
 }
@@ -416,11 +414,23 @@ ChromeBrowserStateImplIOData::InitializeAppRequestContext(
   AppRequestContext* context = new AppRequestContext();
   context->CopyFrom(main_context);
 
+  // Use a separate ChannelIDService.
+  std::unique_ptr<net::ChannelIDService> channel_id_service(
+      new net::ChannelIDService(new net::DefaultChannelIDStore(nullptr),
+                                base::WorkerPool::GetTaskRunner(true)));
+
+  // Build a new HttpNetworkSession that uses the new ChannelIDService.
+  net::HttpNetworkSession::Params network_params =
+      http_network_session_->params();
+  network_params.channel_id_service = channel_id_service.get();
+  std::unique_ptr<net::HttpNetworkSession> http_network_session(
+      new net::HttpNetworkSession(network_params));
+
   // Use a separate HTTP disk cache for isolated apps.
   std::unique_ptr<net::HttpCache::BackendFactory> app_backend =
       net::HttpCache::DefaultBackend::InMemory(0);
   std::unique_ptr<net::HttpCache> app_http_cache =
-      CreateHttpFactory(http_network_session_.get(), std::move(app_backend));
+      CreateHttpFactory(http_network_session.get(), std::move(app_backend));
 
   cookie_util::CookieStoreConfig ios_cookie_config(
       base::FilePath(),
@@ -429,7 +439,10 @@ ChromeBrowserStateImplIOData::InitializeAppRequestContext(
   std::unique_ptr<net::CookieStore> cookie_store =
       cookie_util::CreateCookieStore(ios_cookie_config);
 
-  // Transfer ownership of the cookies and cache to AppRequestContext.
+  // Transfer ownership of the ChannelIDStore, HttpNetworkSession, cookies, and
+  // cache to AppRequestContext.
+  context->SetChannelIDService(std::move(channel_id_service));
+  context->SetHttpNetworkSession(std::move(http_network_session));
   context->SetCookieStore(std::move(cookie_store));
   context->SetHttpTransactionFactory(std::move(app_http_cache));
 

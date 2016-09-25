@@ -22,60 +22,66 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "modules/webaudio/AsyncAudioDecoder.h"
 #include "core/dom/DOMArrayBuffer.h"
-#include "modules/webaudio/AbstractAudioContext.h"
+#include "modules/webaudio/AsyncAudioDecoder.h"
 #include "modules/webaudio/AudioBuffer.h"
 #include "modules/webaudio/AudioBufferCallback.h"
-#include "platform/ThreadSafeFunctional.h"
+#include "modules/webaudio/BaseAudioContext.h"
+#include "platform/CrossThreadFunctional.h"
 #include "platform/audio/AudioBus.h"
 #include "platform/audio/AudioFileReader.h"
+#include "platform/threading/BackgroundTaskRunner.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebTraceLocation.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
-AsyncAudioDecoder::AsyncAudioDecoder()
-    : m_thread(adoptPtr(Platform::current()->createThread("Audio Decoder")))
-{
-}
+// This threshold is determined by the assumption that the target audio
+// file is compressed in AAC or MP3. The decoding time varies upon different
+// audio file encoding types, but it is fair to assume the usage of compressed
+// file.
+static const unsigned kTaskSizeThresholdInByte = 512000;
 
-AsyncAudioDecoder::~AsyncAudioDecoder()
+void AsyncAudioDecoder::decodeAsync(DOMArrayBuffer* audioData, float sampleRate, AudioBufferCallback* successCallback, AudioBufferCallback* errorCallback, ScriptPromiseResolver* resolver, BaseAudioContext* context)
 {
-}
-
-void AsyncAudioDecoder::decodeAsync(DOMArrayBuffer* audioData, float sampleRate, AudioBufferCallback* successCallback, AudioBufferCallback* errorCallback, ScriptPromiseResolver* resolver, AbstractAudioContext* context)
-{
-    ASSERT(isMainThread());
-    ASSERT(audioData);
+    DCHECK(isMainThread());
+    DCHECK(audioData);
     if (!audioData)
         return;
 
-    // The leak references to successCallback and errorCallback are picked up on notifyComplete.
-    m_thread->getWebTaskRunner()->postTask(BLINK_FROM_HERE, threadSafeBind(&AsyncAudioDecoder::decode, AllowCrossThreadAccess(audioData), sampleRate, successCallback, errorCallback, resolver, context));
+    BackgroundTaskRunner::TaskSize taskSize = audioData->byteLength() < kTaskSizeThresholdInByte
+        ? BackgroundTaskRunner::TaskSizeShortRunningTask
+        : BackgroundTaskRunner::TaskSizeLongRunningTask;
+    BackgroundTaskRunner::postOnBackgroundThread(BLINK_FROM_HERE, crossThreadBind(&AsyncAudioDecoder::decodeOnBackgroundThread, wrapCrossThreadPersistent(audioData), sampleRate, wrapCrossThreadPersistent(successCallback), wrapCrossThreadPersistent(errorCallback), wrapCrossThreadPersistent(resolver), wrapCrossThreadPersistent(context)), taskSize);
 }
 
-void AsyncAudioDecoder::decode(DOMArrayBuffer* audioData, float sampleRate, AudioBufferCallback* successCallback, AudioBufferCallback* errorCallback, ScriptPromiseResolver* resolver, AbstractAudioContext* context)
+void AsyncAudioDecoder::decodeOnBackgroundThread(DOMArrayBuffer* audioData, float sampleRate, AudioBufferCallback* successCallback, AudioBufferCallback* errorCallback, ScriptPromiseResolver* resolver, BaseAudioContext* context)
 {
+    DCHECK(!isMainThread());
     RefPtr<AudioBus> bus = createBusFromInMemoryAudioFile(audioData->data(), audioData->byteLength(), false, sampleRate);
 
     // Decoding is finished, but we need to do the callbacks on the main thread.
-    // The leaked reference to audioBuffer is picked up in notifyComplete.
-    Platform::current()->mainThread()->getWebTaskRunner()->postTask(BLINK_FROM_HERE, threadSafeBind(&AsyncAudioDecoder::notifyComplete, AllowCrossThreadAccess(audioData), successCallback, errorCallback, bus.release().leakRef(), resolver, context));
+    // A reference to |*bus| is retained by WTF::Function and will be removed
+    // after notifyComplete() is done.
+    //
+    // We also want to avoid notifying the main thread if AudioContext does not
+    // exist any more.
+    if (context) {
+        Platform::current()->mainThread()->getWebTaskRunner()->postTask(BLINK_FROM_HERE, crossThreadBind(&AsyncAudioDecoder::notifyComplete, wrapCrossThreadPersistent(audioData), wrapCrossThreadPersistent(successCallback), wrapCrossThreadPersistent(errorCallback), bus.release(), wrapCrossThreadPersistent(resolver), wrapCrossThreadPersistent(context)));
+    }
 }
 
-void AsyncAudioDecoder::notifyComplete(DOMArrayBuffer*, AudioBufferCallback* successCallback, AudioBufferCallback* errorCallback, AudioBus* audioBus, ScriptPromiseResolver* resolver, AbstractAudioContext* context)
+void AsyncAudioDecoder::notifyComplete(DOMArrayBuffer*, AudioBufferCallback* successCallback, AudioBufferCallback* errorCallback, AudioBus* audioBus, ScriptPromiseResolver* resolver, BaseAudioContext* context)
 {
-    ASSERT(isMainThread());
-
-    // Adopt references, so everything gets correctly dereffed.
-    RefPtr<AudioBus> audioBusRef = adoptRef(audioBus);
+    DCHECK(isMainThread());
 
     AudioBuffer* audioBuffer = AudioBuffer::createFromAudioBus(audioBus);
 
-    // Let the context finish the notification.
-    context->handleDecodeAudioData(audioBuffer, resolver, successCallback, errorCallback);
+    // If the context is available, let the context finish the notification.
+    if (context) {
+        context->handleDecodeAudioData(audioBuffer, resolver, successCallback, errorCallback);
+    }
 }
 
 } // namespace blink

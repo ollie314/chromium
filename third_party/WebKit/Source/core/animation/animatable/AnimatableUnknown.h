@@ -33,7 +33,7 @@
 
 #include "core/CSSValueKeywords.h"
 #include "core/animation/animatable/AnimatableValue.h"
-#include "core/css/CSSValuePool.h"
+#include "core/css/CSSPrimitiveValue.h"
 
 namespace blink {
 
@@ -47,7 +47,7 @@ public:
     }
     static PassRefPtr<AnimatableUnknown> create(CSSValueID value)
     {
-        return adoptRef(new AnimatableUnknown(cssValuePool().createIdentifierValue(value)));
+        return adoptRef(new AnimatableUnknown(CSSPrimitiveValue::createIdentifier(value)));
     }
 
     CSSValue* toCSSValue() const { return m_value; }
@@ -59,13 +59,13 @@ protected:
         return defaultInterpolateTo(this, value, fraction);
     }
 
-    bool usesDefaultInterpolationWith(const AnimatableValue*) const override { return true; }
+    bool usesDefaultInterpolationWith(const AnimatableValue*) const override;
 
 private:
     explicit AnimatableUnknown(CSSValue* value)
         : m_value(value)
     {
-        ASSERT(m_value);
+        DCHECK(m_value);
     }
     AnimatableType type() const override { return TypeUnknown; }
     bool equalTo(const AnimatableValue*) const override;
@@ -79,6 +79,12 @@ inline bool AnimatableUnknown::equalTo(const AnimatableValue* value) const
 {
     const AnimatableUnknown* unknown = toAnimatableUnknown(value);
     return m_value == unknown->m_value || m_value->equals(*unknown->m_value);
+}
+
+inline bool AnimatableUnknown::usesDefaultInterpolationWith(const AnimatableValue* value) const
+{
+    const AnimatableUnknown& unknown = toAnimatableUnknown(*value);
+    return !m_value->equals(*unknown.m_value);
 }
 
 } // namespace blink

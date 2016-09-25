@@ -7,17 +7,19 @@
 // CrasUnifiedStream object is *not* thread-safe and should only be used
 // from the audio thread.
 
-#ifndef MEDIA_AUDIO_LINUX_CRAS_UNIFIED_H_
-#define MEDIA_AUDIO_LINUX_CRAS_UNIFIED_H_
+#ifndef MEDIA_AUDIO_CRAS_CRAS_UNIFIED_H_
+#define MEDIA_AUDIO_CRAS_CRAS_UNIFIED_H_
 
 #include <cras_client.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "media/audio/audio_io.h"
-#include "media/audio/audio_parameters.h"
+#include "media/base/audio_parameters.h"
 
 namespace media {
 
@@ -106,7 +108,7 @@ class MEDIA_EXPORT CrasUnifiedStream : public AudioOutputStream {
   AudioSourceCallback* source_callback_;
 
   // Container for exchanging data with AudioSourceCallback::OnMoreData().
-  scoped_ptr<AudioBus> output_bus_;
+  std::unique_ptr<AudioBus> output_bus_;
 
   // Direciton of the stream.
   CRAS_STREAM_DIRECTION stream_direction_;
@@ -116,4 +118,4 @@ class MEDIA_EXPORT CrasUnifiedStream : public AudioOutputStream {
 
 }  // namespace media
 
-#endif  // MEDIA_AUDIO_LINUX_CRAS_UNIFIED_H_
+#endif  // MEDIA_AUDIO_CRAS_CRAS_UNIFIED_H_

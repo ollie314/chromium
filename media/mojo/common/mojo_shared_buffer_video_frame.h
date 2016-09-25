@@ -25,7 +25,7 @@ class StructPtr;
 
 namespace media {
 
-namespace interfaces {
+namespace mojom {
 class VideoFrame;
 }
 
@@ -80,7 +80,7 @@ class MojoSharedBufferVideoFrame : public VideoFrame {
  private:
   // mojo::TypeConverter added as a friend so that MojoSharedBufferVideoFrame
   // can be transferred across a mojo connection.
-  friend struct mojo::TypeConverter<mojo::StructPtr<interfaces::VideoFrame>,
+  friend struct mojo::TypeConverter<mojo::StructPtr<mojom::VideoFrame>,
                                     scoped_refptr<VideoFrame>>;
   friend class MojoDecryptorService;
 
@@ -110,9 +110,13 @@ class MojoSharedBufferVideoFrame : public VideoFrame {
   // Returns the size of the shared memory.
   size_t MappedSize() const;
 
+  uint8_t* shared_buffer_data() {
+    return reinterpret_cast<uint8_t*>(shared_buffer_mapping_.get());
+  };
+
   mojo::ScopedSharedBufferHandle shared_buffer_handle_;
+  mojo::ScopedSharedBufferMapping shared_buffer_mapping_;
   size_t shared_buffer_size_;
-  uint8_t* shared_buffer_data_;
   size_t offsets_[kMaxPlanes];
   MojoSharedBufferDoneCB mojo_shared_buffer_done_cb_;
 

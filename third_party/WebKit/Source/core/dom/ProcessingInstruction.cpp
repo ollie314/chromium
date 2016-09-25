@@ -34,6 +34,7 @@
 #include "core/xml/DocumentXSLT.h"
 #include "core/xml/XSLStyleSheet.h"
 #include "core/xml/parser/XMLDocumentParser.h" // for parseAttributes()
+#include <memory>
 
 namespace blink {
 
@@ -80,7 +81,7 @@ String ProcessingInstruction::nodeName() const
 
 Node::NodeType ProcessingInstruction::getNodeType() const
 {
-    return PROCESSING_INSTRUCTION_NODE;
+    return kProcessingInstructionNode;
 }
 
 Node* ProcessingInstruction::cloneNode(bool /*deep*/)
@@ -166,7 +167,7 @@ void ProcessingInstruction::process(const String& href, const String& charset)
     if (resource) {
         m_loading = true;
         if (!m_isXSL)
-            document().styleEngine().addPendingSheet();
+            document().styleEngine().addPendingSheet(m_styleEngineContext);
         setResource(resource);
     }
 }
@@ -184,7 +185,7 @@ bool ProcessingInstruction::sheetLoaded()
 {
     if (!isLoading()) {
         if (!DocumentXSLT::sheetLoaded(document(), this))
-            document().styleEngine().removePendingSheet(this);
+            document().styleEngine().removePendingSheet(*this, m_styleEngineContext);
         return true;
     }
     return false;
@@ -192,19 +193,21 @@ bool ProcessingInstruction::sheetLoaded()
 
 void ProcessingInstruction::setCSSStyleSheet(const String& href, const KURL& baseURL, const String& charset, const CSSStyleSheetResource* sheet)
 {
-    if (!inShadowIncludingDocument()) {
+    if (!isConnected()) {
         DCHECK(!m_sheet);
         return;
     }
 
     DCHECK(m_isCSS);
-    CSSParserContext parserContext(document(), 0, baseURL, charset);
+    CSSParserContext parserContext(document(), nullptr, baseURL, charset);
 
     StyleSheetContents* newSheet = StyleSheetContents::create(href, parserContext);
 
-    CSSStyleSheet* cssSheet = CSSStyleSheet::create(newSheet, this);
+    CSSStyleSheet* cssSheet = CSSStyleSheet::create(newSheet, *this);
     cssSheet->setDisabled(m_alternate);
     cssSheet->setTitle(m_title);
+    if (!m_alternate && !m_title.isEmpty())
+        document().styleEngine().setPreferredStylesheetSetNameIfNotSet(m_title, StyleEngine::DontUpdateActiveSheets);
     cssSheet->setMediaQueries(MediaQuerySet::create(m_media));
 
     m_sheet = cssSheet;
@@ -217,14 +220,14 @@ void ProcessingInstruction::setCSSStyleSheet(const String& href, const KURL& bas
 
 void ProcessingInstruction::setXSLStyleSheet(const String& href, const KURL& baseURL, const String& sheet)
 {
-    if (!inShadowIncludingDocument()) {
+    if (!isConnected()) {
         DCHECK(!m_sheet);
         return;
     }
 
     DCHECK(m_isXSL);
     m_sheet = XSLStyleSheet::create(this, href, baseURL);
-    OwnPtr<IncrementLoadEventDelayCount> delay = IncrementLoadEventDelayCount::create(document());
+    std::unique_ptr<IncrementLoadEventDelayCount> delay = IncrementLoadEventDelayCount::create(document());
     parseStyleSheet(sheet);
 }
 
@@ -247,14 +250,14 @@ void ProcessingInstruction::parseStyleSheet(const String& sheet)
 Node::InsertionNotificationRequest ProcessingInstruction::insertedInto(ContainerNode* insertionPoint)
 {
     CharacterData::insertedInto(insertionPoint);
-    if (!insertionPoint->inShadowIncludingDocument())
+    if (!insertionPoint->isConnected())
         return InsertionDone;
 
     String href;
     String charset;
     bool isValid = checkStyleSheet(href, charset);
     if (!DocumentXSLT::processingInstructionInsertedIntoDocument(document(), this))
-        document().styleEngine().addStyleSheetCandidateNode(this);
+        document().styleEngine().addStyleSheetCandidateNode(*this);
     if (isValid)
         process(href, charset);
     return InsertionDone;
@@ -263,12 +266,12 @@ Node::InsertionNotificationRequest ProcessingInstruction::insertedInto(Container
 void ProcessingInstruction::removedFrom(ContainerNode* insertionPoint)
 {
     CharacterData::removedFrom(insertionPoint);
-    if (!insertionPoint->inShadowIncludingDocument())
+    if (!insertionPoint->isConnected())
         return;
 
     // No need to remove XSLStyleSheet from StyleEngine.
     if (!DocumentXSLT::processingInstructionRemovedFromDocument(document(), this))
-        document().styleEngine().removeStyleSheetCandidateNode(this);
+        document().styleEngine().removeStyleSheetCandidateNode(*this);
 
     StyleSheet* removedSheet = m_sheet;
     if (m_sheet) {
@@ -288,7 +291,7 @@ void ProcessingInstruction::clearSheet()
 {
     DCHECK(m_sheet);
     if (m_sheet->isLoading())
-        document().styleEngine().removePendingSheet(this);
+        document().styleEngine().removePendingSheet(*this, m_styleEngineContext);
     m_sheet.release()->clearOwnerNode();
 }
 

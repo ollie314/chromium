@@ -25,7 +25,7 @@
 #include "base/scoped_observer.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
@@ -250,17 +250,18 @@ class SupervisedUserWhitelistComponentInstallerTraits
   // ComponentInstallerTraits overrides:
   bool VerifyInstallation(const base::DictionaryValue& manifest,
                           const base::FilePath& install_dir) const override;
-  bool CanAutoUpdate() const override;
+  bool SupportsGroupPolicyEnabledComponentUpdates() const override;
   bool RequiresNetworkEncryption() const override;
   bool OnCustomInstall(const base::DictionaryValue& manifest,
                        const base::FilePath& install_dir) override;
   void ComponentReady(const base::Version& version,
                       const base::FilePath& install_dir,
                       std::unique_ptr<base::DictionaryValue> manifest) override;
-  base::FilePath GetBaseDirectory() const override;
+  base::FilePath GetRelativeInstallDir() const override;
   void GetHash(std::vector<uint8_t>* hash) const override;
   std::string GetName() const override;
-  std::string GetAp() const override;
+  update_client::InstallerAttributes GetInstallerAttributes() const override;
+  std::vector<std::string> GetMimeTypes() const override;
 
   std::string crx_id_;
   std::string name_;
@@ -277,8 +278,9 @@ bool SupervisedUserWhitelistComponentInstallerTraits::VerifyInstallation(
   return base::PathExists(GetRawWhitelistPath(manifest, install_dir));
 }
 
-bool SupervisedUserWhitelistComponentInstallerTraits::CanAutoUpdate() const {
-  return true;
+bool SupervisedUserWhitelistComponentInstallerTraits::
+    SupportsGroupPolicyEnabledComponentUpdates() const {
+  return false;
 }
 
 bool SupervisedUserWhitelistComponentInstallerTraits::
@@ -306,10 +308,9 @@ void SupervisedUserWhitelistComponentInstallerTraits::ComponentReady(
 }
 
 base::FilePath
-SupervisedUserWhitelistComponentInstallerTraits::GetBaseDirectory() const {
-  base::FilePath whitelist_directory;
-  PathService::Get(DIR_SUPERVISED_USER_WHITELISTS, &whitelist_directory);
-  return whitelist_directory.AppendASCII(crx_id_);
+SupervisedUserWhitelistComponentInstallerTraits::GetRelativeInstallDir() const {
+  return base::FilePath(component_updater::kSupervisedUserWhitelistDirName)
+      .AppendASCII(crx_id_);
 }
 
 void SupervisedUserWhitelistComponentInstallerTraits::GetHash(
@@ -321,8 +322,15 @@ std::string SupervisedUserWhitelistComponentInstallerTraits::GetName() const {
   return name_;
 }
 
-std::string SupervisedUserWhitelistComponentInstallerTraits::GetAp() const {
-  return std::string();
+update_client::InstallerAttributes
+SupervisedUserWhitelistComponentInstallerTraits::GetInstallerAttributes()
+    const {
+  return update_client::InstallerAttributes();
+}
+
+std::vector<std::string>
+SupervisedUserWhitelistComponentInstallerTraits::GetMimeTypes() const {
+  return std::vector<std::string>();
 }
 
 class SupervisedUserWhitelistInstallerImpl
@@ -534,8 +542,8 @@ void SupervisedUserWhitelistInstallerImpl::RegisterWhitelist(
       clients = new base::ListValue;
       whitelist_dict->Set(kClients, clients);
     }
-    bool success =
-        clients->AppendIfNotPresent(new base::StringValue(client_id));
+    bool success = clients->AppendIfNotPresent(
+        base::MakeUnique<base::StringValue>(client_id));
     DCHECK(success);
   }
 
@@ -634,8 +642,8 @@ std::vector<uint8_t> SupervisedUserWhitelistInstaller::GetHashFromCrxId(
 void SupervisedUserWhitelistInstaller::TriggerComponentUpdate(
     OnDemandUpdater* updater,
     const std::string& crx_id) {
-  const bool result = updater->OnDemandUpdate(crx_id);
-  DCHECK(result);
+  // TODO(sorin): use a callback to check the result (crbug.com/639189).
+  updater->OnDemandUpdate(crx_id, ComponentUpdateService::CompletionCallback());
 }
 
 }  // namespace component_updater

@@ -17,29 +17,12 @@
 
 namespace autofill {
 
-bool IsValidCreditCardExpirationDate(const base::string16& year,
-                                     const base::string16& month,
-                                     const base::Time& now) {
-  base::string16 year_cleaned, month_cleaned;
-  base::TrimWhitespace(year, base::TRIM_ALL, &year_cleaned);
-  base::TrimWhitespace(month, base::TRIM_ALL, &month_cleaned);
-  if (year_cleaned.length() != 4)
-    return false;
-
-  int cc_year;
-  if (!base::StringToInt(year_cleaned, &cc_year))
-    return false;
-
-  int cc_month;
-  if (!base::StringToInt(month_cleaned, &cc_month))
-    return false;
-
-  return IsValidCreditCardExpirationDate(cc_year, cc_month, now);
-}
-
 bool IsValidCreditCardExpirationDate(int year,
                                      int month,
                                      const base::Time& now) {
+  if (month < 1 || month > 12)
+    return false;
+
   base::Time::Exploded now_exploded;
   now.LocalExplode(&now_exploded);
 
@@ -77,11 +60,6 @@ bool IsValidCreditCardNumber(const base::string16& text) {
     return false;
   if (type == kGenericCard && (number.size() < 12 || number.size() > 19))
     return false;
-
-  // Unlike all the other supported types, UnionPay cards lack Luhn checksum
-  // validation.
-  if (type == kUnionPay)
-    return true;
 
   // Use the Luhn formula [3] to validate the number.
   // [3] http://en.wikipedia.org/wiki/Luhn_algorithm

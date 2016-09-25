@@ -9,7 +9,6 @@
 #include "extensions/common/common_manifest_handlers.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/features/api_feature.h"
-#include "extensions/common/features/base_feature_provider.h"
 #include "extensions/common/features/behavior_feature.h"
 #include "extensions/common/features/feature_provider.h"
 #include "extensions/common/features/json_feature_provider_source.h"
@@ -19,6 +18,10 @@
 #include "extensions/common/permissions/extensions_api_permissions.h"
 #include "extensions/common/permissions/permissions_info.h"
 #include "extensions/common/url_pattern_set.h"
+#include "extensions/test/test_api_features.h"
+#include "extensions/test/test_behavior_features.h"
+#include "extensions/test/test_manifest_features.h"
+#include "extensions/test/test_permission_features.h"
 #include "extensions/test/test_permission_message_provider.h"
 #include "grit/extensions_resources.h"
 
@@ -72,46 +75,28 @@ const std::string TestExtensionsClient::GetProductName() {
   return "extensions_test";
 }
 
-scoped_ptr<FeatureProvider> TestExtensionsClient::CreateFeatureProvider(
+std::unique_ptr<FeatureProvider> TestExtensionsClient::CreateFeatureProvider(
     const std::string& name) const {
-  scoped_ptr<FeatureProvider> provider;
-  scoped_ptr<JSONFeatureProviderSource> source(
-      CreateFeatureProviderSource(name));
+  std::unique_ptr<FeatureProvider> provider;
   if (name == "api") {
-    provider.reset(new BaseFeatureProvider(source->dictionary(),
-                                           CreateFeature<APIFeature>));
+    provider.reset(new TestAPIFeatureProvider());
   } else if (name == "manifest") {
-    provider.reset(new BaseFeatureProvider(source->dictionary(),
-                                           CreateFeature<ManifestFeature>));
+    provider.reset(new TestManifestFeatureProvider());
   } else if (name == "permission") {
-    provider.reset(new BaseFeatureProvider(source->dictionary(),
-                                           CreateFeature<PermissionFeature>));
+    provider.reset(new TestPermissionFeatureProvider());
   } else if (name == "behavior") {
-    provider.reset(new BaseFeatureProvider(source->dictionary(),
-                                           CreateFeature<BehaviorFeature>));
+    provider.reset(new TestBehaviorFeatureProvider());
   } else {
     NOTREACHED();
   }
   return provider;
 }
 
-scoped_ptr<JSONFeatureProviderSource>
-TestExtensionsClient::CreateFeatureProviderSource(
-    const std::string& name) const {
-  scoped_ptr<JSONFeatureProviderSource> source(
-      new JSONFeatureProviderSource(name));
-  if (name == "api") {
-    source->LoadJSON(IDR_EXTENSION_API_FEATURES);
-  } else if (name == "manifest") {
-    source->LoadJSON(IDR_EXTENSION_MANIFEST_FEATURES);
-  } else if (name == "permission") {
-    source->LoadJSON(IDR_EXTENSION_PERMISSION_FEATURES);
-  } else if (name == "behavior") {
-    source->LoadJSON(IDR_EXTENSION_BEHAVIOR_FEATURES);
-  } else {
-    NOTREACHED();
-    source.reset();
-  }
+std::unique_ptr<JSONFeatureProviderSource>
+TestExtensionsClient::CreateAPIFeatureSource() const {
+  std::unique_ptr<JSONFeatureProviderSource> source(
+      new JSONFeatureProviderSource("api"));
+  source->LoadJSON(IDR_EXTENSION_API_FEATURES);
   return source;
 }
 
@@ -153,9 +138,6 @@ base::StringPiece TestExtensionsClient::GetAPISchema(
   return api::GeneratedSchemas::Get(name);
 }
 
-void TestExtensionsClient::RegisterAPISchemaResources(ExtensionAPI* api) const {
-}
-
 bool TestExtensionsClient::ShouldSuppressFatalErrors() const {
   return true;
 }
@@ -179,7 +161,7 @@ std::set<base::FilePath> TestExtensionsClient::GetBrowserImagePaths(
     const Extension* extension) {
   std::set<base::FilePath> result =
       ExtensionsClient::GetBrowserImagePaths(extension);
-  for (auto filter : browser_image_filters_)
+  for (auto* filter : browser_image_filters_)
     filter->Filter(extension, &result);
   return result;
 }

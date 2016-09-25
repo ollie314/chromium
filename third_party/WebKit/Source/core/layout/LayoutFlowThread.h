@@ -32,7 +32,6 @@
 
 #include "core/CoreExport.h"
 #include "core/layout/LayoutBlockFlow.h"
-#include "core/paint/PaintLayerFragment.h"
 #include "wtf/ListHashSet.h"
 
 namespace blink {
@@ -40,6 +39,21 @@ namespace blink {
 class LayoutMultiColumnSet;
 
 typedef ListHashSet<LayoutMultiColumnSet*> LayoutMultiColumnSetList;
+
+// Layout state for multicol. To be stored when laying out a block child, so that we can roll back
+// to the initial state if we need to re-lay out said block child.
+class MultiColumnLayoutState {
+    friend class LayoutMultiColumnFlowThread;
+
+public:
+    MultiColumnLayoutState() : m_columnSet(nullptr) { }
+
+private:
+    explicit MultiColumnLayoutState(LayoutMultiColumnSet* columnSet) : m_columnSet(columnSet) { }
+    LayoutMultiColumnSet* columnSet() const { return m_columnSet; }
+
+    LayoutMultiColumnSet* m_columnSet;
+};
 
 // LayoutFlowThread is used to collect all the layout objects that participate in a flow thread. It
 // will also help in doing the layout. However, it will not layout directly to screen. Instead,
@@ -88,6 +102,9 @@ public:
     virtual void contentWasLaidOut(LayoutUnit logicalBottomInFlowThreadAfterPagination) = 0;
     virtual bool canSkipLayout(const LayoutBox&) const = 0;
 
+    virtual MultiColumnLayoutState multiColumnLayoutState() const = 0;
+    virtual void restoreMultiColumnLayoutState(const MultiColumnLayoutState&) = 0;
+
     // Find and return the next logical top after |flowThreadOffset| that can fit unbreakable
     // content as tall as |contentLogicalHeight|. |flowThreadOffset| is expected to be at the exact
     // top of a column that's known to not have enough space for |contentLogicalHeight|. This method
@@ -99,20 +116,18 @@ public:
     virtual bool isPageLogicalHeightKnown() const { return true; }
     bool pageLogicalSizeChanged() const { return m_pageLogicalSizeChanged; }
 
-    void collectLayerFragments(PaintLayerFragments&, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRectInFlowThread);
-
     // Return the visual bounding box based on the supplied flow-thread bounding box. Both
     // rectangles are completely physical in terms of writing mode.
     LayoutRect fragmentsBoundingBox(const LayoutRect& layerBoundingBox) const;
 
-    LayoutPoint flowThreadPointToVisualPoint(const LayoutPoint& flowThreadPoint) const
-    {
-        return flowThreadPoint + columnOffset(flowThreadPoint);
-    }
+    // Convert a logical position in the flow thread coordinate space to a logical position in the
+    // containing coordinate space.
+    void flowThreadToContainingCoordinateSpace(LayoutUnit& blockPosition, LayoutUnit& inlinePosition) const;
 
+    virtual LayoutPoint flowThreadPointToVisualPoint(const LayoutPoint& flowThreadPoint) const = 0;
     virtual LayoutPoint visualPointToFlowThreadPoint(const LayoutPoint& visualPoint) const = 0;
 
-    virtual LayoutMultiColumnSet* columnSetAtBlockOffset(LayoutUnit) const = 0;
+    virtual LayoutMultiColumnSet* columnSetAtBlockOffset(LayoutUnit, PageBoundaryRule) const = 0;
 
     virtual const char* name() const = 0;
 

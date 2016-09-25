@@ -8,6 +8,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include <memory>
+#include <utility>
+
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
@@ -188,7 +191,7 @@ void WebDriverLog::AddEntryTimestamped(const base::Time& timestamp,
   if (!source.empty())
     log_entry_dict->SetString("source", source);
   log_entry_dict->SetString("message", message);
-  entries_->Append(log_entry_dict.release());
+  entries_->Append(std::move(log_entry_dict));
 }
 
 const std::string& WebDriverLog::type() const {

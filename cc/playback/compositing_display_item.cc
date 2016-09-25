@@ -21,7 +21,6 @@
 #include "ui/gfx/skia_util.h"
 
 namespace cc {
-class ImageSerializationProcessor;
 
 CompositingDisplayItem::CompositingDisplayItem(
     uint8_t alpha,
@@ -78,9 +77,7 @@ void CompositingDisplayItem::SetNew(uint8_t alpha,
   lcd_text_requires_opaque_layer_ = lcd_text_requires_opaque_layer;
 }
 
-void CompositingDisplayItem::ToProtobuf(
-    proto::DisplayItem* proto,
-    ImageSerializationProcessor* image_serialization_processor) const {
+void CompositingDisplayItem::ToProtobuf(proto::DisplayItem* proto) const {
   proto->set_type(proto::DisplayItem::Type_Compositing);
 
   proto::CompositingDisplayItem* details = proto->mutable_compositing_item();
@@ -90,8 +87,7 @@ void CompositingDisplayItem::ToProtobuf(
     RectFToProto(gfx::SkRectToRectF(bounds_), details->mutable_bounds());
 
   if (color_filter_) {
-    skia::RefPtr<SkData> data =
-        skia::AdoptRef(SkValidatingSerializeFlattenable(color_filter_.get()));
+    sk_sp<SkData> data(SkValidatingSerializeFlattenable(color_filter_.get()));
     if (data->size() > 0)
       details->set_color_filter(data->data(), data->size());
   }
@@ -101,7 +97,6 @@ void CompositingDisplayItem::ToProtobuf(
 
 void CompositingDisplayItem::Raster(
     SkCanvas* canvas,
-    const gfx::Rect& canvas_target_playback_rect,
     SkPicture::AbortCallback* callback) const {
   SkPaint paint;
   paint.setXfermodeMode(xfermode_);
@@ -144,15 +139,12 @@ EndCompositingDisplayItem::EndCompositingDisplayItem(
 EndCompositingDisplayItem::~EndCompositingDisplayItem() {
 }
 
-void EndCompositingDisplayItem::ToProtobuf(
-    proto::DisplayItem* proto,
-    ImageSerializationProcessor* image_serialization_processor) const {
+void EndCompositingDisplayItem::ToProtobuf(proto::DisplayItem* proto) const {
   proto->set_type(proto::DisplayItem::Type_EndCompositing);
 }
 
 void EndCompositingDisplayItem::Raster(
     SkCanvas* canvas,
-    const gfx::Rect& canvas_target_playback_rect,
     SkPicture::AbortCallback* callback) const {
   canvas->restore();
 }

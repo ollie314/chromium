@@ -17,12 +17,12 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/prefs/pref_change_registrar.h"
+#include "components/sync/api/string_ordinal.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
-#include "sync/api/string_ordinal.h"
 
 class ExtensionEnableFlow;
 class ExtensionService;
@@ -83,10 +83,10 @@ class AppLauncherHandler
   // Populate the given dictionary with all installed app info.
   void FillAppDictionary(base::DictionaryValue* value);
 
-  // Create a dictionary value for the given extension. May return NULL, e.g. if
-  // the given extension is not an app. If non-NULL, the caller assumes
-  // ownership of the pointer.
-  base::DictionaryValue* GetAppInfo(const extensions::Extension* extension);
+  // Create a dictionary value for the given extension. May return null, e.g. if
+  // the given extension is not an app.
+  std::unique_ptr<base::DictionaryValue> GetAppInfo(
+      const extensions::Extension* extension);
 
   // Populate the given dictionary with the web store promo content.
   void FillPromoDictionary(base::DictionaryValue* value);

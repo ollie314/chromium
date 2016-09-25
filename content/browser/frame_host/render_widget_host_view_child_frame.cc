@@ -8,7 +8,10 @@
 #include <utility>
 #include <vector>
 
+#include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "cc/output/copy_output_request.h"
 #include "cc/output/copy_output_result.h"
@@ -25,10 +28,12 @@
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
+#include "content/common/text_input_state.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/guest_mode.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/common/browser_plugin_guest_mode.h"
 #include "gpu/ipc/common/gpu_messages.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/size_f.h"
 
@@ -38,20 +43,66 @@ RenderWidgetHostViewChildFrame::RenderWidgetHostViewChildFrame(
     RenderWidgetHost* widget_host)
     : host_(RenderWidgetHostImpl::From(widget_host)),
       next_surface_sequence_(1u),
-      last_output_surface_id_(0),
+      last_compositor_frame_sink_id_(0),
       current_surface_scale_factor_(1.f),
       ack_pending_count_(0),
       frame_connector_(nullptr),
+      begin_frame_source_(nullptr),
+      parent_surface_client_id_(0),
       weak_factory_(this) {
-  id_allocator_ = CreateSurfaceIdAllocator();
+  id_allocator_.reset(new cc::SurfaceIdAllocator(AllocateSurfaceClientId()));
+  GetSurfaceManager()->RegisterSurfaceClientId(id_allocator_->client_id());
   RegisterSurfaceNamespaceId();
 
   host_->SetView(this);
+  GetTextInputManager();
 }
 
 RenderWidgetHostViewChildFrame::~RenderWidgetHostViewChildFrame() {
   if (!surface_id_.is_null())
     surface_factory_->Destroy(surface_id_);
+
+  if (GetSurfaceManager())
+    GetSurfaceManager()->InvalidateSurfaceClientId(id_allocator_->client_id());
+}
+
+void RenderWidgetHostViewChildFrame::SetCrossProcessFrameConnector(
+    CrossProcessFrameConnector* frame_connector) {
+  if (frame_connector_ == frame_connector)
+    return;
+
+  if (frame_connector_) {
+    if (parent_surface_client_id_) {
+      GetSurfaceManager()->UnregisterSurfaceNamespaceHierarchy(
+          parent_surface_client_id_, GetSurfaceClientId());
+    }
+    // Unregister the client here, as it is not guaranteed in tests that the
+    // destructor will be called.
+    GetSurfaceManager()->UnregisterSurfaceFactoryClient(
+        id_allocator_->client_id());
+
+    parent_surface_client_id_ = 0;
+
+    // After the RenderWidgetHostViewChildFrame loses the frame_connector, it
+    // won't be able to walk up the frame tree anymore. Clean up anything that
+    // needs to be done through the CrossProcessFrameConnector before it's gone.
+
+    // Unlocks the mouse if this RenderWidgetHostView holds the lock.
+    UnlockMouse();
+  }
+  frame_connector_ = frame_connector;
+  if (frame_connector_) {
+    GetSurfaceManager()->RegisterSurfaceFactoryClient(
+        id_allocator_->client_id(), this);
+    RenderWidgetHostViewBase* parent_view =
+        frame_connector_->GetParentRenderWidgetHostView();
+    if (parent_view) {
+      parent_surface_client_id_ = parent_view->GetSurfaceClientId();
+      DCHECK_NE(parent_surface_client_id_, 0u);
+      GetSurfaceManager()->RegisterSurfaceNamespaceHierarchy(
+          parent_surface_client_id_, GetSurfaceClientId());
+    }
+  }
 }
 
 void RenderWidgetHostViewChildFrame::InitAsChild(
@@ -148,19 +199,19 @@ gfx::Vector2dF RenderWidgetHostViewChildFrame::GetLastScrollOffset() const {
 }
 
 gfx::NativeView RenderWidgetHostViewChildFrame::GetNativeView() const {
-  NOTREACHED();
-  return NULL;
-}
-
-gfx::NativeViewId RenderWidgetHostViewChildFrame::GetNativeViewId() const {
-  NOTREACHED();
-  return 0;
+  // TODO(ekaramad): To accomodate MimeHandlerViewGuest while embedded inside
+  // OOPIF-webview, we need to return the native view to be used by
+  // RenderWidgetHostViewGuest. Remove this once https://crbug.com/642826 is
+  // fixed.
+  if (frame_connector_)
+    return frame_connector_->GetParentRenderWidgetHostView()->GetNativeView();
+  return nullptr;
 }
 
 gfx::NativeViewAccessible
 RenderWidgetHostViewChildFrame::GetNativeViewAccessible() {
   NOTREACHED();
-  return NULL;
+  return nullptr;
 }
 
 void RenderWidgetHostViewChildFrame::SetBackgroundColor(SkColor color) {
@@ -172,8 +223,10 @@ void RenderWidgetHostViewChildFrame::SetBackgroundColor(SkColor color) {
 gfx::Size RenderWidgetHostViewChildFrame::GetPhysicalBackingSize() const {
   gfx::Size size;
   if (frame_connector_) {
+    content::ScreenInfo screen_info;
+    host_->GetScreenInfo(&screen_info);
     size = gfx::ScaleToCeiledSize(frame_connector_->ChildFrameRect().size(),
-                                  frame_connector_->device_scale_factor());
+                                  screen_info.device_scale_factor);
   }
   return size;
 }
@@ -189,16 +242,6 @@ void RenderWidgetHostViewChildFrame::InitAsFullscreen(
   NOTREACHED();
 }
 
-void RenderWidgetHostViewChildFrame::ImeCancelComposition() {
-  // TODO(kenrb): Fix OOPIF Ime.
-}
-
-void RenderWidgetHostViewChildFrame::ImeCompositionRangeChanged(
-    const gfx::Range& range,
-    const std::vector<gfx::Rect>& character_bounds) {
-  // TODO(kenrb): Fix OOPIF Ime.
-}
-
 void RenderWidgetHostViewChildFrame::UpdateCursor(const WebCursor& cursor) {
   if (frame_connector_)
     frame_connector_->UpdateCursor(cursor);
@@ -210,18 +253,11 @@ void RenderWidgetHostViewChildFrame::SetIsLoading(bool is_loading) {
   // is a RenderWidgetHostViewChildFrame. In contrast, when there is no
   // inner/outer WebContents, only subframe's RenderWidgetHostView can be a
   // RenderWidgetHostViewChildFrame which do not get a SetIsLoading() call.
-  if (BrowserPluginGuestMode::UseCrossProcessFramesForGuests() &&
-      BrowserPluginGuest::IsGuest(
-          static_cast<RenderViewHostImpl*>(RenderViewHost::From(host_)))) {
+  if (GuestMode::IsCrossProcessFrameGuest(
+          WebContents::FromRenderViewHost(RenderViewHost::From(host_))))
     return;
-  }
 
   NOTREACHED();
-}
-
-void RenderWidgetHostViewChildFrame::TextInputStateChanged(
-    const ViewHostMsg_TextInputState_Params& params) {
-  // TODO(kenrb): Implement.
 }
 
 void RenderWidgetHostViewChildFrame::RenderProcessGone(
@@ -233,12 +269,12 @@ void RenderWidgetHostViewChildFrame::RenderProcessGone(
 }
 
 void RenderWidgetHostViewChildFrame::Destroy() {
-  // SurfaceIdNamespaces registered with RenderWidgetHostInputEventRouter
+  // SurfaceClientIds registered with RenderWidgetHostInputEventRouter
   // have already been cleared when RenderWidgetHostViewBase notified its
   // observers of our impending destruction.
   if (frame_connector_) {
-    frame_connector_->set_view(NULL);
-    frame_connector_ = NULL;
+    frame_connector_->set_view(nullptr);
+    SetCrossProcessFrameConnector(nullptr);
   }
 
   // We notify our observers about shutdown here since we are about to release
@@ -246,23 +282,14 @@ void RenderWidgetHostViewChildFrame::Destroy() {
   // RenderWidgetHostInputEventRouter afterwards.
   NotifyObserversAboutShutdown();
 
-  host_->SetView(NULL);
-  host_ = NULL;
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  host_->SetView(nullptr);
+  host_ = nullptr;
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
 }
 
 void RenderWidgetHostViewChildFrame::SetTooltipText(
     const base::string16& tooltip_text) {
-}
-
-void RenderWidgetHostViewChildFrame::SelectionChanged(
-    const base::string16& text,
-    size_t offset,
-    const gfx::Range& range) {
-}
-
-void RenderWidgetHostViewChildFrame::SelectionBoundsChanged(
-    const ViewHostMsg_SelectionBounds_Params& params) {
+  frame_connector_->GetRootRenderWidgetHostView()->SetTooltipText(tooltip_text);
 }
 
 void RenderWidgetHostViewChildFrame::LockCompositingSurface() {
@@ -273,72 +300,97 @@ void RenderWidgetHostViewChildFrame::UnlockCompositingSurface() {
   NOTIMPLEMENTED();
 }
 
+RenderWidgetHostViewBase* RenderWidgetHostViewChildFrame::GetParentView() {
+  if (!frame_connector_)
+    return nullptr;
+  return frame_connector_->GetParentRenderWidgetHostView();
+}
+
 void RenderWidgetHostViewChildFrame::RegisterSurfaceNamespaceId() {
-  DCHECK(host_);
-  if (host_->delegate() && host_->delegate()->GetInputEventRouter()) {
+  // If Destroy() has been called before we get here, host_ may be null.
+  if (host_ && host_->delegate() && host_->delegate()->GetInputEventRouter()) {
     RenderWidgetHostInputEventRouter* router =
         host_->delegate()->GetInputEventRouter();
-    if (!router->is_registered(GetSurfaceIdNamespace()))
-      router->AddSurfaceIdNamespaceOwner(GetSurfaceIdNamespace(), this);
+    if (!router->is_registered(GetSurfaceClientId()))
+      router->AddSurfaceClientIdOwner(GetSurfaceClientId(), this);
   }
 }
 
 void RenderWidgetHostViewChildFrame::UnregisterSurfaceNamespaceId() {
   DCHECK(host_);
   if (host_->delegate() && host_->delegate()->GetInputEventRouter()) {
-    host_->delegate()->GetInputEventRouter()->RemoveSurfaceIdNamespaceOwner(
-        GetSurfaceIdNamespace());
+    host_->delegate()->GetInputEventRouter()->RemoveSurfaceClientIdOwner(
+        GetSurfaceClientId());
   }
 }
 
-void RenderWidgetHostViewChildFrame::SurfaceDrawn(uint32_t output_surface_id,
-                                                  cc::SurfaceDrawStatus drawn) {
-  cc::CompositorFrameAck ack;
+void RenderWidgetHostViewChildFrame::GestureEventAck(
+    const blink::WebGestureEvent& event,
+    InputEventAckState ack_result) {
+  bool not_consumed = ack_result == INPUT_EVENT_ACK_STATE_NOT_CONSUMED ||
+                      ack_result == INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS;
+  // GestureScrollBegin is consumed by the target frame and not forwarded,
+  // because we don't know whether we will need to bubble scroll until we
+  // receive a GestureScrollUpdate ACK. GestureScrollUpdate with unused
+  // scroll extent is forwarded for bubbling, while GestureScrollEnd is
+  // always forwarded and handled according to current scroll state in the
+  // RenderWidgetHostInputEventRouter.
+  if (!frame_connector_)
+    return;
+  if ((event.type == blink::WebInputEvent::GestureScrollUpdate &&
+       not_consumed) ||
+      event.type == blink::WebInputEvent::GestureScrollEnd)
+    frame_connector_->BubbleScrollEvent(event);
+}
+
+void RenderWidgetHostViewChildFrame::SurfaceDrawn(
+    uint32_t compositor_frame_sink_id) {
   DCHECK_GT(ack_pending_count_, 0U);
-  if (!surface_returned_resources_.empty())
-    ack.resources.swap(surface_returned_resources_);
   if (host_) {
-    host_->Send(new ViewMsg_SwapCompositorFrameAck(host_->GetRoutingID(),
-                                                   output_surface_id, ack));
+    host_->Send(new ViewMsg_ReclaimCompositorResources(
+        host_->GetRoutingID(), compositor_frame_sink_id, true /* is_swap_ack */,
+        surface_returned_resources_));
+    surface_returned_resources_.clear();
   }
   ack_pending_count_--;
 }
 
 void RenderWidgetHostViewChildFrame::OnSwapCompositorFrame(
-    uint32_t output_surface_id,
-    std::unique_ptr<cc::CompositorFrame> frame) {
+    uint32_t compositor_frame_sink_id,
+    cc::CompositorFrame frame) {
   TRACE_EVENT0("content",
                "RenderWidgetHostViewChildFrame::OnSwapCompositorFrame");
 
-  last_scroll_offset_ = frame->metadata.root_scroll_offset;
+  last_scroll_offset_ = frame.metadata.root_scroll_offset;
 
   if (!frame_connector_)
     return;
 
   cc::RenderPass* root_pass =
-      frame->delegated_frame_data->render_pass_list.back().get();
+      frame.delegated_frame_data->render_pass_list.back().get();
 
   gfx::Size frame_size = root_pass->output_rect.size();
-  float scale_factor = frame->metadata.device_scale_factor;
+  float scale_factor = frame.metadata.device_scale_factor;
 
   // Check whether we need to recreate the cc::Surface, which means the child
   // frame renderer has changed its output surface, or size, or scale factor.
-  if (output_surface_id != last_output_surface_id_ && surface_factory_) {
+  if (compositor_frame_sink_id != last_compositor_frame_sink_id_ &&
+      surface_factory_) {
     surface_factory_->Destroy(surface_id_);
     surface_factory_.reset();
   }
-  if (output_surface_id != last_output_surface_id_ ||
+  if (compositor_frame_sink_id != last_compositor_frame_sink_id_ ||
       frame_size != current_surface_size_ ||
       scale_factor != current_surface_scale_factor_) {
     ClearCompositorSurfaceIfNecessary();
-    last_output_surface_id_ = output_surface_id;
+    last_compositor_frame_sink_id_ = compositor_frame_sink_id;
     current_surface_size_ = frame_size;
     current_surface_scale_factor_ = scale_factor;
   }
 
   if (!surface_factory_) {
     cc::SurfaceManager* manager = GetSurfaceManager();
-    surface_factory_ = base::WrapUnique(new cc::SurfaceFactory(manager, this));
+    surface_factory_ = base::MakeUnique<cc::SurfaceFactory>(manager, this);
   }
 
   if (surface_id_.is_null()) {
@@ -346,7 +398,7 @@ void RenderWidgetHostViewChildFrame::OnSwapCompositorFrame(
     surface_factory_->Create(surface_id_);
 
     cc::SurfaceSequence sequence = cc::SurfaceSequence(
-        id_allocator_->id_namespace(), next_surface_sequence_++);
+        id_allocator_->client_id(), next_surface_sequence_++);
     // The renderer process will satisfy this dependency when it creates a
     // SurfaceLayer.
     cc::SurfaceManager* manager = GetSurfaceManager();
@@ -357,7 +409,7 @@ void RenderWidgetHostViewChildFrame::OnSwapCompositorFrame(
 
   cc::SurfaceFactory::DrawCallback ack_callback =
       base::Bind(&RenderWidgetHostViewChildFrame::SurfaceDrawn, AsWeakPtr(),
-                 output_surface_id);
+                 compositor_frame_sink_id);
   ack_pending_count_++;
   // If this value grows very large, something is going wrong.
   DCHECK_LT(ack_pending_count_, 1000U);
@@ -374,22 +426,6 @@ void RenderWidgetHostViewChildFrame::ProcessFrameSwappedCallbacks() {
   process_callbacks.swap(frame_swapped_callbacks_);
   for (std::unique_ptr<base::Closure>& callback : process_callbacks)
     callback->Run();
-}
-
-void RenderWidgetHostViewChildFrame::GetScreenInfo(
-    blink::WebScreenInfo* results) {
-  if (!frame_connector_)
-    return;
-  frame_connector_->GetScreenInfo(results);
-}
-
-bool RenderWidgetHostViewChildFrame::GetScreenColorProfile(
-    std::vector<char>* color_profile) {
-  if (!frame_connector_)
-    return false;
-  DCHECK(color_profile->empty());
-  NOTIMPLEMENTED();
-  return false;
 }
 
 gfx::Rect RenderWidgetHostViewChildFrame::GetBoundsInRootWindow() {
@@ -415,14 +451,26 @@ void RenderWidgetHostViewChildFrame::ProcessAckedTouchEvent(
 }
 
 bool RenderWidgetHostViewChildFrame::LockMouse() {
+  if (frame_connector_)
+    return frame_connector_->LockMouse();
   return false;
 }
 
 void RenderWidgetHostViewChildFrame::UnlockMouse() {
+  if (host_->delegate() && host_->delegate()->HasMouseLock(host_) &&
+      frame_connector_)
+    frame_connector_->UnlockMouse();
 }
 
-uint32_t RenderWidgetHostViewChildFrame::GetSurfaceIdNamespace() {
-  return id_allocator_->id_namespace();
+bool RenderWidgetHostViewChildFrame::IsMouseLocked() {
+  if (!host_->delegate())
+    return false;
+
+  return host_->delegate()->HasMouseLock(host_);
+}
+
+uint32_t RenderWidgetHostViewChildFrame::GetSurfaceClientId() {
+  return id_allocator_->client_id();
 }
 
 void RenderWidgetHostViewChildFrame::ProcessKeyboardEvent(
@@ -431,14 +479,16 @@ void RenderWidgetHostViewChildFrame::ProcessKeyboardEvent(
 }
 
 void RenderWidgetHostViewChildFrame::ProcessMouseEvent(
-    const blink::WebMouseEvent& event) {
-  host_->ForwardMouseEvent(event);
+    const blink::WebMouseEvent& event,
+    const ui::LatencyInfo& latency) {
+  host_->ForwardMouseEventWithLatencyInfo(event, latency);
 }
 
 void RenderWidgetHostViewChildFrame::ProcessMouseWheelEvent(
-    const blink::WebMouseWheelEvent& event) {
+    const blink::WebMouseWheelEvent& event,
+    const ui::LatencyInfo& latency) {
   if (event.deltaX != 0 || event.deltaY != 0)
-    host_->ForwardWheelEvent(event);
+    host_->ForwardWheelEventWithLatencyInfo(event, latency);
 }
 
 void RenderWidgetHostViewChildFrame::ProcessTouchEvent(
@@ -466,7 +516,32 @@ gfx::Point RenderWidgetHostViewChildFrame::TransformPointToRootCoordSpace(
   return frame_connector_->TransformPointToRootCoordSpace(point, surface_id_);
 }
 
+gfx::Point RenderWidgetHostViewChildFrame::TransformPointToLocalCoordSpace(
+    const gfx::Point& point,
+    const cc::SurfaceId& original_surface) {
+  if (!frame_connector_ || surface_id_.is_null())
+    return point;
+
+  return frame_connector_->TransformPointToLocalCoordSpace(
+      point, original_surface, surface_id_);
+}
+
+gfx::Point RenderWidgetHostViewChildFrame::TransformPointToCoordSpaceForView(
+    const gfx::Point& point,
+    RenderWidgetHostViewBase* target_view) {
+  if (!frame_connector_ || surface_id_.is_null() || target_view == this)
+    return point;
+
+  return frame_connector_->TransformPointToCoordSpaceForView(point, target_view,
+                                                             surface_id_);
+}
+
 #if defined(OS_MACOSX)
+ui::AcceleratedWidgetMac*
+RenderWidgetHostViewChildFrame::GetAcceleratedWidgetMac() const {
+  return nullptr;
+}
+
 void RenderWidgetHostViewChildFrame::SetActive(bool active) {
 }
 
@@ -501,9 +576,9 @@ void RenderWidgetHostViewChildFrame::CopyFromCompositingSurface(
   if (!IsSurfaceAvailableForCopy()) {
     // Defer submitting the copy request until after a frame is drawn, at which
     // point we should be guaranteed that the surface is available.
-    RegisterFrameSwappedCallback(base::WrapUnique(new base::Closure(base::Bind(
+    RegisterFrameSwappedCallback(base::MakeUnique<base::Closure>(base::Bind(
         &RenderWidgetHostViewChildFrame::SubmitSurfaceCopyRequest, AsWeakPtr(),
-        src_subrect, output_size, callback, preferred_color_type))));
+        src_subrect, output_size, callback, preferred_color_type)));
     return;
   }
 
@@ -552,11 +627,9 @@ void RenderWidgetHostViewChildFrame::ReturnResources(
     return;
 
   if (!ack_pending_count_ && host_) {
-    cc::CompositorFrameAck ack;
-    std::copy(resources.begin(), resources.end(),
-              std::back_inserter(ack.resources));
     host_->Send(new ViewMsg_ReclaimCompositorResources(
-        host_->GetRoutingID(), last_output_surface_id_, ack));
+        host_->GetRoutingID(), last_compositor_frame_sink_id_,
+        false /* is_swap_ack */, resources));
     return;
   }
 
@@ -565,8 +638,65 @@ void RenderWidgetHostViewChildFrame::ReturnResources(
 }
 
 void RenderWidgetHostViewChildFrame::SetBeginFrameSource(
-    cc::BeginFrameSource* begin_frame_source) {
-  // TODO(tansell): Hook this up.
+    cc::BeginFrameSource* source) {
+  bool needs_begin_frames = host_->needs_begin_frames();
+  if (begin_frame_source_ && needs_begin_frames)
+    begin_frame_source_->RemoveObserver(this);
+  begin_frame_source_ = source;
+  if (begin_frame_source_ && needs_begin_frames)
+    begin_frame_source_->AddObserver(this);
+}
+
+void RenderWidgetHostViewChildFrame::OnBeginFrame(
+    const cc::BeginFrameArgs& args) {
+  host_->Send(new ViewMsg_BeginFrame(host_->GetRoutingID(), args));
+  last_begin_frame_args_ = args;
+}
+
+const cc::BeginFrameArgs&
+RenderWidgetHostViewChildFrame::LastUsedBeginFrameArgs() const {
+  return last_begin_frame_args_;
+}
+
+void RenderWidgetHostViewChildFrame::OnBeginFrameSourcePausedChanged(
+    bool paused) {
+  // Only used on Android WebView.
+}
+
+void RenderWidgetHostViewChildFrame::SetNeedsBeginFrames(
+    bool needs_begin_frames) {
+  if (!begin_frame_source_)
+    return;
+
+  if (needs_begin_frames)
+    begin_frame_source_->AddObserver(this);
+  else
+    begin_frame_source_->RemoveObserver(this);
+}
+
+InputEventAckState RenderWidgetHostViewChildFrame::FilterInputEvent(
+    const blink::WebInputEvent& input_event) {
+  if (input_event.type == blink::WebInputEvent::GestureFlingStart) {
+    const blink::WebGestureEvent& gesture_event =
+        static_cast<const blink::WebGestureEvent&>(input_event);
+    // Zero-velocity touchpad flings are an Aura-specific signal that the
+    // touchpad scroll has ended, and should not be forwarded to the renderer.
+    if (gesture_event.sourceDevice == blink::WebGestureDeviceTouchpad &&
+        !gesture_event.data.flingStart.velocityX &&
+        !gesture_event.data.flingStart.velocityY) {
+      // Here we indicate that there was no consumer for this event, as
+      // otherwise the fling animation system will try to run an animation
+      // and will also expect a notification when the fling ends. Since
+      // CrOS just uses the GestureFlingStart with zero-velocity as a means
+      // of indicating that touchpad scroll has ended, we don't actually want
+      // a fling animation.
+      // Note: this event handling is modeled on similar code in
+      // TenderWidgetHostViewAura::FilterInputEvent().
+      return INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS;
+    }
+  }
+
+  return INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
 }
 
 BrowserAccessibilityManager*

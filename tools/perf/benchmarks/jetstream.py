@@ -24,13 +24,13 @@ from core import perf_benchmark
 
 from telemetry import benchmark
 from telemetry import page as page_module
-from telemetry.page import page_test
+from telemetry.page import legacy_page_test
 from telemetry import story
 from telemetry.util import statistics
 from telemetry.value import list_of_scalar_values
 
 
-class _JetstreamMeasurement(page_test.PageTest):
+class _JetstreamMeasurement(legacy_page_test.LegacyPageTest):
 
   def __init__(self):
     super(_JetstreamMeasurement, self).__init__()
@@ -46,6 +46,7 @@ class _JetstreamMeasurement(page_test.PageTest):
         """
 
   def ValidateAndMeasurePage(self, page, tab, results):
+    del page  # unused
     get_results_js = """
         (function() {
           for (var i = 0; i < __results.length; i++) {

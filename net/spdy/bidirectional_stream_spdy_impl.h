@@ -8,9 +8,12 @@
 #include <stdint.h>
 
 #include <memory>
+#include <vector>
 
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "net/base/load_timing_info.h"
 #include "net/http/bidirectional_stream_impl.h"
 #include "net/http/bidirectional_stream_request_info.h"
 #include "net/http/http_request_info.h"
@@ -24,8 +27,8 @@ class Timer;
 
 namespace net {
 
-class BoundNetLog;
 class IOBuffer;
+class NetLogWithSource;
 class SpdyHeaderBlock;
 
 class NET_EXPORT_PRIVATE BidirectionalStreamSpdyImpl
@@ -39,15 +42,22 @@ class NET_EXPORT_PRIVATE BidirectionalStreamSpdyImpl
 
   // BidirectionalStreamImpl implementation:
   void Start(const BidirectionalStreamRequestInfo* request_info,
-             const BoundNetLog& net_log,
+             const NetLogWithSource& net_log,
+             bool send_request_headers_automatically,
              BidirectionalStreamImpl::Delegate* delegate,
              std::unique_ptr<base::Timer> timer) override;
+  void SendRequestHeaders() override;
   int ReadData(IOBuffer* buf, int buf_len) override;
-  void SendData(IOBuffer* data, int length, bool end_stream) override;
-  void Cancel() override;
+  void SendData(const scoped_refptr<IOBuffer>& data,
+                int length,
+                bool end_stream) override;
+  void SendvData(const std::vector<scoped_refptr<IOBuffer>>& buffers,
+                 const std::vector<int>& lengths,
+                 bool end_stream) override;
   NextProto GetProtocol() const override;
   int64_t GetTotalReceivedBytes() const override;
   int64_t GetTotalSentBytes() const override;
+  bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
 
   // SpdyStream::Delegate implementation:
   void OnRequestHeadersSent() override;
@@ -59,8 +69,11 @@ class NET_EXPORT_PRIVATE BidirectionalStreamSpdyImpl
   void OnClose(int status) override;
 
  private:
-  void SendRequestHeaders();
+  int SendRequestHeadersHelper();
   void OnStreamInitialized(int rv);
+  // Notifies delegate of an error.
+  void NotifyError(int rv);
+  void ResetStream();
   void ScheduleBufferedRead();
   void DoBufferedRead();
   bool ShouldWaitForMoreBufferedData() const;
@@ -92,6 +105,14 @@ class NET_EXPORT_PRIVATE BidirectionalStreamSpdyImpl
   // After |stream_| has been closed, this keeps track of the total number of
   // bytes sent over the network for |stream_| while it was open.
   int64_t closed_stream_sent_bytes_;
+  // True if |stream_| has LoadTimingInfo when it is closed.
+  bool closed_has_load_timing_info_;
+  // LoadTimingInfo populated when |stream_| is closed.
+  LoadTimingInfo closed_load_timing_info_;
+
+  // This is the combined buffer of buffers passed in through SendvData.
+  // Keep a reference here so it is alive until OnDataSent is invoked.
+  scoped_refptr<IOBuffer> pending_combined_buffer_;
 
   base::WeakPtrFactory<BidirectionalStreamSpdyImpl> weak_factory_;
 

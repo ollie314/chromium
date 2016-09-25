@@ -57,6 +57,8 @@ using namespace Unicode;
 namespace blink {
 
 Font::Font()
+    : m_canShapeWordByWord(0)
+    , m_shapeWordByWordComputed(0)
 {
 }
 
@@ -70,6 +72,9 @@ Font::Font(const FontDescription& fd)
 Font::Font(const Font& other)
     : m_fontDescription(other.m_fontDescription)
     , m_fontFallbackList(other.m_fontFallbackList)
+    // TODO(yosin): We should have a comment the reason why don't we copy
+    // |m_canShapeWordByWord| and |m_shapeWordByWordComputed| from |other|,
+    // since |operator=()| copies them from |other|.
     , m_canShapeWordByWord(0)
     , m_shapeWordByWordComputed(0)
 {
@@ -261,7 +266,7 @@ public:
     bool done() const { return m_index >= m_buffer.size(); }
     unsigned blobCount() const { return m_blobCount; }
 
-    std::pair<RefPtr<const SkTextBlob>, BlobRotation> next()
+    std::pair<sk_sp<SkTextBlob>, BlobRotation> next()
     {
         ASSERT(!done());
         const BlobRotation currentRotation = m_rotation;
@@ -286,7 +291,7 @@ public:
         }
 
         m_blobCount++;
-        return std::make_pair(adoptRef(m_builder.build()), currentRotation);
+        return std::make_pair(m_builder.make(), currentRotation);
     }
 
 private:
@@ -345,7 +350,7 @@ void Font::drawGlyphBuffer(SkCanvas* canvas, const SkPaint& paint, const TextRun
     const GlyphBuffer& glyphBuffer, const FloatPoint& point, float deviceScaleFactor) const
 {
     GlyphBufferBloberizer bloberizer(glyphBuffer, this, deviceScaleFactor);
-    std::pair<RefPtr<const SkTextBlob>, BlobRotation> blob;
+    std::pair<sk_sp<SkTextBlob>, BlobRotation> blob;
 
     while (!bloberizer.done()) {
         blob = bloberizer.next();
@@ -360,7 +365,7 @@ void Font::drawGlyphBuffer(SkCanvas* canvas, const SkPaint& paint, const TextRun
             canvas->concat(m);
         }
 
-        canvas->drawTextBlob(blob.first.get(), point.x(), point.y(), paint);
+        canvas->drawTextBlob(blob.first, point.x(), point.y(), paint);
     }
 
     // Cache results when
@@ -369,7 +374,7 @@ void Font::drawGlyphBuffer(SkCanvas* canvas, const SkPaint& paint, const TextRun
     //   3) the blob is not upright/rotated
     if (runInfo.cachedTextBlob && bloberizer.blobCount() == 1 && blob.second == NoRotation) {
         ASSERT(!*runInfo.cachedTextBlob);
-        *runInfo.cachedTextBlob = blob.first.release();
+        *runInfo.cachedTextBlob = std::move(blob.first);
         ASSERT(*runInfo.cachedTextBlob);
     }
 }
@@ -409,18 +414,14 @@ int Font::offsetForPosition(const TextRun& run, float x, bool includePartialGlyp
 
 CodePath Font::codePath(const TextRunPaintInfo& runInfo) const
 {
-// TODO(eae): Disable the always use complex text feature on Android for now as
-// it caused a memory regression for webview. crbug.com/577306
-#if !OS(ANDROID)
     if (RuntimeEnabledFeatures::alwaysUseComplexTextEnabled()
         || LayoutTestSupport::alwaysUseComplexTextForTest()) {
         return ComplexPath;
     }
-#endif
 
     const TextRun& run = runInfo.run;
 
-    if (getFontDescription().getTypesettingFeatures() && (runInfo.from || runInfo.to != run.length()))
+    if (getFontDescription().getTypesettingFeatures())
         return ComplexPath;
 
     if (m_fontDescription.featureSettings() && m_fontDescription.featureSettings()->size() > 0)
@@ -430,9 +431,6 @@ CodePath Font::codePath(const TextRunPaintInfo& runInfo) const
         return ComplexPath;
 
     if (m_fontDescription.widthVariant() != RegularWidth)
-        return ComplexPath;
-
-    if (run.length() > 1 && getFontDescription().getTypesettingFeatures())
         return ComplexPath;
 
     // FIXME: This really shouldn't be needed but for some reason the
@@ -462,16 +460,19 @@ bool Font::computeCanShapeWordByWord() const
     if (!getFontDescription().getTypesettingFeatures())
         return true;
 
+    if (!primaryFont())
+        return false;
+
     const FontPlatformData& platformData = primaryFont()->platformData();
     TypesettingFeatures features = getFontDescription().getTypesettingFeatures();
     return !platformData.hasSpaceInLigaturesOrKerning(features);
 };
 
-void Font::willUseFontData(UChar32 character) const
+void Font::willUseFontData(const String& text) const
 {
     const FontFamily& family = getFontDescription().family();
     if (m_fontFallbackList && m_fontFallbackList->getFontSelector() && !family.familyIsEmpty())
-        m_fontFallbackList->getFontSelector()->willUseFontData(getFontDescription(), family.family(), character);
+        m_fontFallbackList->getFontSelector()->willUseFontData(getFontDescription(), family.family(), text);
 }
 
 static inline GlyphData glyphDataForNonCJKCharacterWithGlyphOrientation(UChar32 character, bool isUpright, GlyphData& data, unsigned pageNumber)
@@ -521,9 +522,8 @@ GlyphData Font::glyphDataForCharacter(UChar32& c, bool mirror, bool normalizeSpa
     ASSERT(isMainThread());
 
     if (variant == AutoVariant) {
-        if (m_fontDescription.variant() == FontVariantSmallCaps) {
-            bool includeDefault = false;
-            UChar32 upperC = toUpper(c, m_fontDescription.locale(includeDefault));
+        if (m_fontDescription.variantCaps() == FontDescription::SmallCaps) {
+            UChar32 upperC = toUpper(c, LayoutLocale::localeString(m_fontDescription.locale()));
             if (upperC != c) {
                 c = upperC;
                 variant = SmallCapsVariant;
@@ -739,7 +739,7 @@ int Font::offsetForPositionForComplexText(const TextRun& run, float xFloat,
     bool includePartialGlyphs) const
 {
     CachingWordShaper shaper(m_fontFallbackList->shapeCache(m_fontDescription));
-    return shaper.offsetForPosition(this, run, xFloat);
+    return shaper.offsetForPosition(this, run, xFloat, includePartialGlyphs);
 }
 
 // Return the rectangle for selecting the given range of code-points in the TextRun.
@@ -751,6 +751,13 @@ FloatRect Font::selectionRectForComplexText(const TextRun& run,
     return FloatRect(point.x() + range.start, point.y(), range.width(), height);
 }
 
+CharacterRange Font::getCharacterRange(const TextRun& run, unsigned from, unsigned to) const
+{
+    FontCachePurgePreventer purgePreventer;
+    CachingWordShaper shaper(m_fontFallbackList->shapeCache(m_fontDescription));
+    return shaper.getCharacterRange(this, run, from, to);
+}
+
 Vector<CharacterRange> Font::individualCharacterRanges(const TextRun& run) const
 {
     // TODO(pdr): Android is temporarily (crbug.com/577306) using the old simple
@@ -760,7 +767,13 @@ Vector<CharacterRange> Font::individualCharacterRanges(const TextRun& run) const
     // will be improved shaping in SVG when compared to HTML.
     FontCachePurgePreventer purgePreventer;
     CachingWordShaper shaper(m_fontFallbackList->shapeCache(m_fontDescription));
-    return shaper.individualCharacterRanges(this, run);
+    auto ranges = shaper.individualCharacterRanges(this, run);
+    // The shaper should return ranges.size == run.length but on some platforms
+    // (OSX10.9.5) we are seeing cases in the upper end of the unicode range
+    // where this is not true (see: crbug.com/620952). To catch these cases on
+    // more popular platforms, and to protect users, we are using a CHECK here.
+    CHECK_EQ(ranges.size(), run.length());
+    return ranges;
 }
 
 float Font::floatWidthForSimpleText(const TextRun& run, HashSet<const SimpleFontData*>* fallbackFonts, FloatRect* glyphBounds) const

@@ -8,16 +8,16 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
 #include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
+#include "components/sync/syncable/directory.h"
+#include "components/sync/test/directory_backing_store_corruption_testing.h"
 #include "content/public/browser/browser_thread.h"
-#include "sync/syncable/directory.h"
-#include "sync/test/directory_backing_store_corruption_testing.h"
 #include "url/gurl.h"
 
 using content::BrowserThread;
@@ -39,7 +39,8 @@ void SignalEvent(base::WaitableEvent* e) {
 }
 
 bool WaitForExistingTasksOnLoop(base::MessageLoop* loop) {
-  base::WaitableEvent e(true, false);
+  base::WaitableEvent e(base::WaitableEvent::ResetPolicy::MANUAL,
+                        base::WaitableEvent::InitialState::NOT_SIGNALED);
   loop->task_runner()->PostTask(FROM_HERE, base::Bind(&SignalEvent, &e));
   // Timeout stolen from StatusChangeChecker::GetTimeoutDuration().
   return e.TimedWait(base::TimeDelta::FromSeconds(45));
@@ -48,7 +49,8 @@ bool WaitForExistingTasksOnLoop(base::MessageLoop* loop) {
 // A status change checker that waits for an unrecoverable sync error to occur.
 class SyncUnrecoverableErrorChecker : public SingleClientStatusChangeChecker {
  public:
-  explicit SyncUnrecoverableErrorChecker(ProfileSyncService* service)
+  explicit SyncUnrecoverableErrorChecker(
+      browser_sync::ProfileSyncService* service)
       : SingleClientStatusChangeChecker(service) {}
 
   bool IsExitConditionSatisfied() override {
@@ -63,10 +65,10 @@ class SyncUnrecoverableErrorChecker : public SingleClientStatusChangeChecker {
 IN_PROC_BROWSER_TEST_F(SingleClientDirectorySyncTest,
                        StopThenDisableDeletesDirectory) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-  ProfileSyncService* sync_service = GetSyncService(0);
+  browser_sync::ProfileSyncService* sync_service = GetSyncService(0);
   base::FilePath directory_path = sync_service->GetDirectoryPathForTest();
   ASSERT_TRUE(base::DirectoryExists(directory_path));
-  sync_service->RequestStop(ProfileSyncService::CLEAR_DATA);
+  sync_service->RequestStop(browser_sync::ProfileSyncService::CLEAR_DATA);
 
   // Wait for StartupController::StartUp()'s tasks to finish.
   base::RunLoop run_loop;
@@ -90,12 +92,12 @@ IN_PROC_BROWSER_TEST_F(SingleClientDirectorySyncTest,
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
   // Sync and wait for syncing to complete.
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService(0)));
   ASSERT_TRUE(bookmarks_helper::ModelMatchesVerifier(0));
 
   // Flush the directory to the backing store and wait until the flush
   // completes.
-  ProfileSyncService* sync_service = GetSyncService(0);
+  browser_sync::ProfileSyncService* sync_service = GetSyncService(0);
   sync_service->FlushDirectory();
   base::MessageLoop* sync_loop = sync_service->GetSyncLoopForTest();
   ASSERT_TRUE(WaitForExistingTasksOnLoop(sync_loop));

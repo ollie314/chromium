@@ -69,6 +69,7 @@ function initialize_extensionsPanelTest()
         function consoleMessageAdded()
         {
             WebInspector.multitargetConsoleModel.removeEventListener(WebInspector.ConsoleModel.Events.MessageAdded, wrappedConsoleMessageAdded);
+            WebInspector.ConsoleView.instance()._viewportThrottler.flush();
             InspectorTest.deprecatedRunAfterPendingDispatches(clickOnMessage)
         }
 
@@ -117,6 +118,12 @@ function initialize_extensionsPanelTest()
         var lastPanelName = WebInspector.inspectorView._tabbedPane._tabs.peekLast().id;
         return WebInspector.inspectorView.showPanel(lastPanelName);
     }
+}
+
+function extension_testThemeName(nextTest)
+{
+    output("Theme name: " + webInspector.panels.themeName);
+    nextTest();
 }
 
 function extension_testCreatePanel(nextTest)
@@ -214,7 +221,7 @@ function extension_testSearch(nextTest)
         panel.onSearch.addListener(callback);
 
         extension_showPanel("extension");
-        
+
         function performSearch(query)
         {
             var panel = WebInspector.inspectorView.currentPanel();
@@ -315,14 +322,14 @@ function extension_testGlobalShortcuts(nextTest)
         testPanel.onShown.removeListener(onPanelShown);
         output("Panel shown, now toggling console...");
         panelWindow.addEventListener("resize", onPanelResized);
-        dispatchKeydownEvent({ keyIdentifier: "U+001B" });
+        dispatchKeydownEvent({ key: "Escape" });
     }
     function onPanelResized()
     {
         panelWindow.removeEventListener("resize", onPanelResized);
         output("Panel resized, switching away...");
         var isMac = platform === "mac";
-        dispatchKeydownEvent({ ctrlKey: !isMac, metaKey: isMac, keyIdentifier: "U+005D" });
+        dispatchKeydownEvent({ ctrlKey: !isMac, metaKey: isMac, key: "]" });
     }
     function onPanelHidden()
     {

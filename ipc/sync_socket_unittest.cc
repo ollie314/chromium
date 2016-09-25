@@ -6,12 +6,14 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <memory>
 #include <sstream>
 #include <string>
 
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
@@ -110,11 +112,12 @@ class SyncSocketServerListener : public IPC::Listener {
 MULTIPROCESS_IPC_TEST_CLIENT_MAIN(SyncSocketServerClient) {
   base::MessageLoopForIO main_message_loop;
   SyncSocketServerListener listener;
-  scoped_ptr<IPC::Channel> channel(IPC::Channel::CreateClient(
-      IPCTestBase::GetChannelName("SyncSocketServerClient"), &listener));
+  std::unique_ptr<IPC::Channel> channel(IPC::Channel::CreateClient(
+      IPCTestBase::GetChannelName("SyncSocketServerClient"), &listener,
+      main_message_loop.task_runner()));
   EXPECT_TRUE(channel->Connect());
   listener.Init(channel.get());
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   return 0;
 }
 
@@ -166,12 +169,7 @@ class SyncSocketClientListener : public IPC::Listener {
 class SyncSocketTest : public IPCTestBase {
 };
 
-#if defined(OS_ANDROID)
-#define MAYBE_SanityTest DISABLED_SanityTest
-#else
-#define MAYBE_SanityTest SanityTest
-#endif
-TEST_F(SyncSocketTest, MAYBE_SanityTest) {
+TEST_F(SyncSocketTest, SanityTest) {
   Init("SyncSocketServerClient");
 
   SyncSocketClientListener listener;
@@ -203,7 +201,7 @@ TEST_F(SyncSocketTest, MAYBE_SanityTest) {
 #endif  // defined(OS_WIN)
   EXPECT_TRUE(sender()->Send(msg));
   // Use the current thread as the I/O thread.
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   // Shut down.
   pair[0].Close();
   pair[1].Close();
@@ -253,13 +251,8 @@ TEST_F(SyncSocketTest, DisconnectTest) {
   EXPECT_EQ(0U, received);
 }
 
-#if defined(OS_ANDROID)
-#define MAYBE_BlockingReceiveTest DISABLED_BlockingReceiveTest
-#else
-#define MAYBE_BlockingReceiveTest BlockingReceiveTest
-#endif
 // Tests that read is a blocking operation.
-TEST_F(SyncSocketTest, MAYBE_BlockingReceiveTest) {
+TEST_F(SyncSocketTest, BlockingReceiveTest) {
   base::CancelableSyncSocket pair[2];
   ASSERT_TRUE(base::CancelableSyncSocket::CreatePair(&pair[0], &pair[1]));
 

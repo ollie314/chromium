@@ -5,7 +5,6 @@
 #include "core/dom/DocumentStatisticsCollector.h"
 
 #include "core/dom/Document.h"
-#include "core/dom/DocumentVisibilityObserver.h"
 #include "core/frame/FrameView.h"
 #include "core/html/HTMLHeadElement.h"
 #include "core/html/HTMLLinkElement.h"
@@ -14,6 +13,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/text/StringBuilder.h"
+#include <memory>
 
 namespace blink {
 
@@ -29,7 +29,7 @@ protected:
 
     void TearDown() override
     {
-        ThreadHeap::collectAllGarbage();
+        ThreadState::current()-> collectAllGarbage();
     }
 
     Document& document() const { return m_dummyPageHolder->document(); }
@@ -37,7 +37,7 @@ protected:
     void setHtmlInnerHTML(const String&);
 
 private:
-    OwnPtr<DummyPageHolder> m_dummyPageHolder;
+    std::unique_ptr<DummyPageHolder> m_dummyPageHolder;
 };
 
 void DocumentStatisticsCollectorTest::SetUp()

@@ -48,12 +48,6 @@ oblique
 // The following is only allowed in @font-face:
 all
 
-//
-// font-variant
-//
-//normal
-small-caps
-
 // font-variant-ligatures:
 //
 // normal
@@ -75,6 +69,17 @@ petite-caps
 all-petite-caps
 unicase
 titling-caps
+
+// font-variant-numeric
+// normal
+lining-nums
+oldstyle-nums
+proportional-nums
+tabular-nums
+diagonal-fractions
+stacked-fractions
+ordinal
+slashed-zero
 
 //
 // font-weigth
@@ -542,6 +547,7 @@ wrap
 wrap-reverse
 
 // grid-auto-flow
+auto-flow
 dense
 
 //
@@ -605,6 +611,9 @@ loose
 strict
 after-white-space
 
+// hyphens
+manual
+
 // -webkit-appearance
 // The order here must match the order in the ControlPart enum in ThemeTypes.h.
 // All appearance values that should be accepted by the parser should be listed between 'checkbox' and 'textarea':
@@ -636,6 +645,11 @@ media-current-time-display
 media-time-remaining-display
 -internal-media-cast-off-button
 -internal-media-overlay-cast-off-button
+-internal-media-track-selection-checkmark
+-internal-media-closed-captions-icon
+-internal-media-subtitles-icon
+-internal-overflow-menu-button
+-internal-media-download-icon
 menulist
 menulist-button
 menulist-text
@@ -649,8 +663,6 @@ sliderthumb-horizontal
 sliderthumb-vertical
 caret
 searchfield
-searchfield-decoration
-searchfield-results-decoration
 searchfield-cancel-button
 textfield
 textarea
@@ -1071,6 +1083,7 @@ from-image
 paint
 style
 layout
+size
 
 // grid auto-repeat
 auto-fill

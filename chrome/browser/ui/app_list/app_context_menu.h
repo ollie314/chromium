@@ -51,8 +51,6 @@ class AppContextMenu : public ui::SimpleMenuModel::Delegate {
   base::string16 GetLabelForCommandId(int command_id) const override;
   bool IsCommandIdChecked(int command_id) const override;
   bool IsCommandIdEnabled(int command_id) const override;
-  bool GetAcceleratorForCommandId(int command_id,
-                                  ui::Accelerator* accelerator) override;
   void ExecuteCommand(int command_id, int event_flags) override;
 
  protected:
@@ -64,6 +62,9 @@ class AppContextMenu : public ui::SimpleMenuModel::Delegate {
   // Creates default items, derived class may override to add their specific
   // items.
   virtual void BuildMenu(ui::SimpleMenuModel* menu_model);
+
+  // Helper that toggles pinning state of provided app.
+  void TogglePin(const std::string& shelf_app_id);
 
   const std::string& app_id() const { return app_id_; }
   Profile* profile() const { return profile_; }

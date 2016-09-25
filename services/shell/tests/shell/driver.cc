@@ -17,7 +17,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/process/process.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
@@ -25,9 +25,9 @@
 #include "services/shell/public/cpp/connection.h"
 #include "services/shell/public/cpp/connector.h"
 #include "services/shell/public/cpp/interface_factory.h"
-#include "services/shell/public/cpp/shell_client.h"
+#include "services/shell/public/cpp/service.h"
 #include "services/shell/public/interfaces/connector.mojom.h"
-#include "services/shell/public/interfaces/shell.mojom.h"
+#include "services/shell/public/interfaces/service_manager.mojom.h"
 #include "services/shell/runner/child/test_native_main.h"
 #include "services/shell/runner/common/client_util.h"
 #include "services/shell/runner/common/switches.h"
@@ -36,7 +36,7 @@
 
 namespace {
 
-class Driver : public shell::ShellClient,
+class Driver : public shell::Service,
                public shell::InterfaceFactory<shell::test::mojom::Driver>,
                public shell::test::mojom::Driver {
  public:
@@ -44,10 +44,8 @@ class Driver : public shell::ShellClient,
   ~Driver() override {}
 
  private:
-  // shell::ShellClient:
-  void Initialize(shell::Connector* connector,
-                  const shell::Identity& identity,
-                  uint32_t id) override {
+  // shell::Service:
+  void OnStart(const shell::Identity& identity) override {
     base::FilePath target_path;
     CHECK(base::PathService::Get(base::DIR_EXE, &target_path));
   #if defined(OS_WIN)
@@ -73,8 +71,10 @@ class Driver : public shell::ShellClient,
     platform_channel_pair.PrepareToPassClientHandleToChildProcess(
         &child_command_line, &handle_passing_info);
 
-    shell::mojom::ShellClientPtr client =
-        shell::PassShellClientRequestOnCommandLine(&child_command_line);
+    std::string child_token = mojo::edk::GenerateRandomToken();
+    shell::mojom::ServicePtr client =
+        shell::PassServiceRequestOnCommandLine(&child_command_line,
+                                                   child_token);
     shell::mojom::PIDReceiverPtr receiver;
 
     shell::Identity target("exe:shell_unittest_target",
@@ -82,7 +82,8 @@ class Driver : public shell::ShellClient,
     shell::Connector::ConnectParams params(target);
     params.set_client_process_connection(std::move(client),
                                          GetProxy(&receiver));
-    std::unique_ptr<shell::Connection> connection = connector->Connect(&params);
+    std::unique_ptr<shell::Connection> connection =
+        connector()->Connect(&params);
     connection->AddConnectionCompletedClosure(
         base::Bind(&Driver::OnConnectionCompleted, base::Unretained(this)));
 
@@ -96,16 +97,18 @@ class Driver : public shell::ShellClient,
     DCHECK(target_.IsValid());
     receiver->SetPID(target_.Pid());
     mojo::edk::ChildProcessLaunched(target_.Handle(),
-                                    platform_channel_pair.PassServerHandle());
+                                    platform_channel_pair.PassServerHandle(),
+                                    child_token);
   }
 
-  bool AcceptConnection(shell::Connection* connection) override {
-    connection->AddInterface<shell::test::mojom::Driver>(this);
+  bool OnConnect(const shell::Identity& remote_identity,
+                 shell::InterfaceRegistry* registry) override {
+    registry->AddInterface<shell::test::mojom::Driver>(this);
     return true;
   }
 
   // shell::InterfaceFactory<Driver>:
-  void Create(shell::Connection* connection,
+  void Create(const shell::Identity& remote_identity,
               shell::test::mojom::DriverRequest request) override {
     bindings_.AddBinding(this, std::move(request));
   }

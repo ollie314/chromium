@@ -12,23 +12,25 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
+#include "content/browser/devtools/page_navigation_throttle.h"
 #include "content/browser/devtools/protocol/color_picker.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/browser/web_contents/web_contents_view.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/referrer.h"
-#include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/codec/jpeg_codec.h"
@@ -102,11 +104,12 @@ PageHandler::PageHandler()
       session_id_(0),
       frame_counter_(0),
       frames_in_flight_(0),
-      color_picker_(new ColorPicker(base::Bind(
-          &PageHandler::OnColorPicked, base::Unretained(this)))),
+      color_picker_(new ColorPicker(
+          base::Bind(&PageHandler::OnColorPicked, base::Unretained(this)))),
+      navigation_throttle_enabled_(false),
+      next_navigation_id_(0),
       host_(nullptr),
-      weak_factory_(this) {
-}
+      weak_factory_(this) {}
 
 PageHandler::~PageHandler() {
 }
@@ -145,8 +148,8 @@ void PageHandler::Detached() {
 }
 
 void PageHandler::OnSwapCompositorFrame(
-    const cc::CompositorFrameMetadata& frame_metadata) {
-  last_compositor_frame_metadata_ = frame_metadata;
+    cc::CompositorFrameMetadata frame_metadata) {
+  last_compositor_frame_metadata_ = std::move(frame_metadata);
   has_compositor_frame_metadata_ = true;
 
   if (screencast_enabled_)
@@ -155,10 +158,15 @@ void PageHandler::OnSwapCompositorFrame(
 }
 
 void PageHandler::OnSynchronousSwapCompositorFrame(
-    const cc::CompositorFrameMetadata& frame_metadata) {
-  last_compositor_frame_metadata_ = has_compositor_frame_metadata_ ?
-      next_compositor_frame_metadata_ : frame_metadata;
-  next_compositor_frame_metadata_ = frame_metadata;
+    cc::CompositorFrameMetadata frame_metadata) {
+  if (has_compositor_frame_metadata_) {
+    last_compositor_frame_metadata_ =
+        std::move(next_compositor_frame_metadata_);
+  } else {
+    last_compositor_frame_metadata_ = frame_metadata.Clone();
+  }
+  next_compositor_frame_metadata_ = std::move(frame_metadata);
+
   has_compositor_frame_metadata_ = true;
 
   if (screencast_enabled_)
@@ -196,6 +204,7 @@ Response PageHandler::Enable() {
 Response PageHandler::Disable() {
   enabled_ = false;
   screencast_enabled_ = false;
+  SetControlNavigations(false);
   color_picker_->SetEnabled(false);
   return Response::FallThrough();
 }
@@ -309,8 +318,8 @@ Response PageHandler::StartScreencast(const std::string* format,
     if (has_compositor_frame_metadata_) {
       InnerSwapCompositorFrame();
     } else {
-      widget_host->Send(
-          new ViewMsg_ForceRedraw(widget_host->GetRoutingID(), 0));
+      widget_host->Send(new ViewMsg_ForceRedraw(widget_host->GetRoutingID(),
+                                                ui::LatencyInfo()));
     }
   }
   return Response::FallThrough();
@@ -368,6 +377,65 @@ Response PageHandler::RequestAppBanner() {
   return Response::OK();
 }
 
+Response PageHandler::SetControlNavigations(bool enabled) {
+  navigation_throttle_enabled_ = enabled;
+  // We don't own the page PageNavigationThrottles so we can't delete them, but
+  // we can turn them into NOPs.
+  for (auto& pair : navigation_throttles_) {
+    pair.second->AlwaysProceed();
+  }
+  navigation_throttles_.clear();
+  return Response::OK();
+}
+
+Response PageHandler::ProcessNavigation(const std::string& response,
+                                        int navigation_id) {
+  auto it = navigation_throttles_.find(navigation_id);
+  if (it == navigation_throttles_.end())
+    return Response::InvalidParams("Unknown navigation id");
+
+  if (response == kNavigationResponseProceed) {
+    it->second->Resume();
+    return Response::OK();
+  } else if (response == kNavigationResponseCancel) {
+    it->second->CancelDeferredNavigation(content::NavigationThrottle::CANCEL);
+    return Response::OK();
+  } else if (response == kNavigationResponseCancelAndIgnore) {
+    it->second->CancelDeferredNavigation(
+        content::NavigationThrottle::CANCEL_AND_IGNORE);
+    return Response::OK();
+  }
+
+  return Response::InvalidParams("Unrecognized response");
+}
+
+std::unique_ptr<PageNavigationThrottle>
+PageHandler::CreateThrottleForNavigation(NavigationHandle* navigation_handle) {
+  if (!navigation_throttle_enabled_)
+    return nullptr;
+
+  std::unique_ptr<PageNavigationThrottle> throttle(new PageNavigationThrottle(
+      weak_factory_.GetWeakPtr(), next_navigation_id_, navigation_handle));
+  navigation_throttles_[next_navigation_id_++] = throttle.get();
+  return throttle;
+}
+
+void PageHandler::OnPageNavigationThrottleDisposed(int navigation_id) {
+  DCHECK(navigation_throttles_.find(navigation_id) !=
+         navigation_throttles_.end());
+  navigation_throttles_.erase(navigation_id);
+}
+
+void PageHandler::NavigationRequested(const PageNavigationThrottle* throttle) {
+  NavigationHandle* navigation_handle = throttle->navigation_handle();
+  client_->NavigationRequested(
+      NavigationRequestedParams::Create()
+          ->set_is_in_main_frame(navigation_handle->IsInMainFrame())
+          ->set_is_redirect(navigation_handle->WasServerRedirect())
+          ->set_navigation_id(throttle->navigation_id())
+          ->set_url(navigation_handle->GetURL().spec()));
+}
+
 WebContentsImpl* PageHandler::GetWebContents() {
   return host_ ?
       static_cast<WebContentsImpl*>(WebContents::FromRenderFrameHost(host_)) :
@@ -402,9 +470,9 @@ void PageHandler::InnerSwapCompositorFrame() {
       gfx::ScaleSize(gfx::SizeF(view->GetPhysicalBackingSize()),
                      1 / metadata.device_scale_factor);
 
-  blink::WebScreenInfo screen_info;
-  view->GetScreenInfo(&screen_info);
-  double device_scale_factor = screen_info.deviceScaleFactor;
+  content::ScreenInfo screen_info;
+  GetWebContents()->GetView()->GetScreenInfo(&screen_info);
+  double device_scale_factor = screen_info.device_scale_factor;
   double scale = 1;
 
   if (screencast_max_width_ > 0) {
@@ -425,20 +493,18 @@ void PageHandler::InnerSwapCompositorFrame() {
   if (snapshot_size_dip.width() > 0 && snapshot_size_dip.height() > 0) {
     gfx::Rect viewport_bounds_dip(gfx::ToRoundedSize(viewport_size_dip));
     view->CopyFromCompositingSurface(
-        viewport_bounds_dip,
-        snapshot_size_dip,
+        viewport_bounds_dip, snapshot_size_dip,
         base::Bind(&PageHandler::ScreencastFrameCaptured,
                    weak_factory_.GetWeakPtr(),
-                   last_compositor_frame_metadata_),
+                   base::Passed(last_compositor_frame_metadata_.Clone())),
         kN32_SkColorType);
     frames_in_flight_++;
   }
 }
 
-void PageHandler::ScreencastFrameCaptured(
-    const cc::CompositorFrameMetadata& metadata,
-    const SkBitmap& bitmap,
-    ReadbackResponse response) {
+void PageHandler::ScreencastFrameCaptured(cc::CompositorFrameMetadata metadata,
+                                          const SkBitmap& bitmap,
+                                          ReadbackResponse response) {
   if (response != READBACK_SUCCESS) {
     if (capture_retry_count_) {
       --capture_retry_count_;
@@ -451,18 +517,17 @@ void PageHandler::ScreencastFrameCaptured(
     return;
   }
   base::PostTaskAndReplyWithResult(
-      base::WorkerPool::GetTaskRunner(true).get(),
-      FROM_HERE,
-      base::Bind(&EncodeScreencastFrame,
-                 bitmap, screencast_format_, screencast_quality_),
+      base::WorkerPool::GetTaskRunner(true).get(), FROM_HERE,
+      base::Bind(&EncodeScreencastFrame, bitmap, screencast_format_,
+                 screencast_quality_),
       base::Bind(&PageHandler::ScreencastFrameEncoded,
-                 weak_factory_.GetWeakPtr(), metadata, base::Time::Now()));
+                 weak_factory_.GetWeakPtr(), base::Passed(&metadata),
+                 base::Time::Now()));
 }
 
-void PageHandler::ScreencastFrameEncoded(
-    const cc::CompositorFrameMetadata& metadata,
-    const base::Time& timestamp,
-    const std::string& data) {
+void PageHandler::ScreencastFrameEncoded(cc::CompositorFrameMetadata metadata,
+                                         const base::Time& timestamp,
+                                         const std::string& data) {
   // Consider metadata empty in case it has no device scale factor.
   if (metadata.device_scale_factor == 0 || !host_ || data.empty()) {
     --frames_in_flight_;
@@ -482,7 +547,8 @@ void PageHandler::ScreencastFrameEncoded(
   scoped_refptr<ScreencastFrameMetadata> param_metadata =
       ScreencastFrameMetadata::Create()
           ->set_page_scale_factor(metadata.page_scale_factor)
-          ->set_offset_top(metadata.location_bar_content_translation.y())
+          ->set_offset_top(metadata.top_controls_height *
+                           metadata.top_controls_shown_ratio)
           ->set_device_width(screen_size_dip.width())
           ->set_device_height(screen_size_dip.height())
           ->set_scroll_offset_x(metadata.root_scroll_offset.x())

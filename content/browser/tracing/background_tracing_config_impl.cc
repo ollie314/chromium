@@ -31,6 +31,10 @@ const char kConfigCategoryBenchmarkGPU[] = "BENCHMARK_GPU";
 const char kConfigCategoryBenchmarkIPC[] = "BENCHMARK_IPC";
 const char kConfigCategoryBenchmarkStartup[] = "BENCHMARK_STARTUP";
 const char kConfigCategoryBenchmarkBlinkGC[] = "BENCHMARK_BLINK_GC";
+const char kConfigCategoryBenchmarkMemoryHeavy[] = "BENCHMARK_MEMORY_HEAVY";
+const char kConfigCategoryBenchmarkMemoryLight[] = "BENCHMARK_MEMORY_LIGHT";
+const char kConfigCategoryBenchmarkExecutionMetric[] =
+    "BENCHMARK_EXECUTION_METRIC";
 const char kConfigCategoryBlinkStyle[] = "BLINK_STYLE";
 
 }  // namespace
@@ -57,8 +61,16 @@ std::string BackgroundTracingConfigImpl::CategoryPresetToString(
       return kConfigCategoryBenchmarkStartup;
     case BackgroundTracingConfigImpl::BENCHMARK_BLINK_GC:
       return kConfigCategoryBenchmarkBlinkGC;
+    case BackgroundTracingConfigImpl::BENCHMARK_MEMORY_HEAVY:
+      return kConfigCategoryBenchmarkMemoryHeavy;
+    case BackgroundTracingConfigImpl::BENCHMARK_MEMORY_LIGHT:
+      return kConfigCategoryBenchmarkMemoryLight;
+    case BackgroundTracingConfigImpl::BENCHMARK_EXECUTION_METRIC:
+      return kConfigCategoryBenchmarkExecutionMetric;
     case BackgroundTracingConfigImpl::BLINK_STYLE:
       return kConfigCategoryBlinkStyle;
+    case BackgroundTracingConfigImpl::CATEGORY_PRESET_UNSET:
+      NOTREACHED();
   }
   NOTREACHED();
   return "";
@@ -97,6 +109,21 @@ bool BackgroundTracingConfigImpl::StringToCategoryPreset(
     return true;
   }
 
+  if (category_preset_string == kConfigCategoryBenchmarkMemoryHeavy) {
+    *category_preset = BackgroundTracingConfigImpl::BENCHMARK_MEMORY_HEAVY;
+    return true;
+  }
+
+  if (category_preset_string == kConfigCategoryBenchmarkMemoryLight) {
+    *category_preset = BackgroundTracingConfigImpl::BENCHMARK_MEMORY_LIGHT;
+    return true;
+  }
+
+  if (category_preset_string == kConfigCategoryBenchmarkExecutionMetric) {
+    *category_preset = BackgroundTracingConfigImpl::BENCHMARK_EXECUTION_METRIC;
+    return true;
+  }
+
   if (category_preset_string == kConfigCategoryBlinkStyle) {
     *category_preset = BackgroundTracingConfigImpl::BLINK_STYLE;
     return true;
@@ -118,7 +145,7 @@ void BackgroundTracingConfigImpl::IntoDict(base::DictionaryValue* dict) const {
   }
 
   std::unique_ptr<base::ListValue> configs_list(new base::ListValue());
-  for (const auto& it : rules_) {
+  for (auto* it : rules_) {
     std::unique_ptr<base::DictionaryValue> config_dict(
         new base::DictionaryValue());
     DCHECK(it);
@@ -139,7 +166,7 @@ void BackgroundTracingConfigImpl::IntoDict(base::DictionaryValue* dict) const {
 void BackgroundTracingConfigImpl::AddPreemptiveRule(
     const base::DictionaryValue* dict) {
   std::unique_ptr<BackgroundTracingRule> rule =
-      BackgroundTracingRule::PreemptiveRuleFromDict(dict);
+      BackgroundTracingRule::CreateRuleFromDict(dict);
   if (rule)
     rules_.push_back(std::move(rule));
 }
@@ -148,9 +175,11 @@ void BackgroundTracingConfigImpl::AddReactiveRule(
     const base::DictionaryValue* dict,
     BackgroundTracingConfigImpl::CategoryPreset category_preset) {
   std::unique_ptr<BackgroundTracingRule> rule =
-      BackgroundTracingRule::ReactiveRuleFromDict(dict, category_preset);
-  if (rule)
+      BackgroundTracingRule::CreateRuleFromDict(dict);
+  if (rule) {
+    rule->set_category_preset(category_preset);
     rules_.push_back(std::move(rule));
+  }
 }
 
 std::unique_ptr<BackgroundTracingConfigImpl>

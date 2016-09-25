@@ -28,6 +28,7 @@
 #include "core/css/CSSCrossfadeValue.h"
 #include "core/css/CSSGradientValue.h"
 #include "core/css/CSSPaintValue.h"
+#include "core/layout/LayoutObject.h"
 #include "platform/graphics/Image.h"
 
 namespace blink {
@@ -114,10 +115,10 @@ Image* CSSImageGeneratorValue::getImage(const LayoutObject* layoutObject, const 
 
 void CSSImageGeneratorValue::putImage(const IntSize& size, PassRefPtr<Image> image)
 {
-    m_images.add(size, image);
+    m_images.add(size, std::move(image));
 }
 
-PassRefPtr<Image> CSSImageGeneratorValue::image(const LayoutObject& layoutObject, const IntSize& size)
+PassRefPtr<Image> CSSImageGeneratorValue::image(const LayoutObject& layoutObject, const IntSize& size, float zoom)
 {
     switch (getClassType()) {
     case CrossfadeClass:
@@ -125,7 +126,7 @@ PassRefPtr<Image> CSSImageGeneratorValue::image(const LayoutObject& layoutObject
     case LinearGradientClass:
         return toCSSLinearGradientValue(this)->image(layoutObject, size);
     case PaintClass:
-        return toCSSPaintValue(this)->image(layoutObject, size);
+        return toCSSPaintValue(this)->image(layoutObject, size, zoom);
     case RadialGradientClass:
         return toCSSRadialGradientValue(this)->image(layoutObject, size);
     default:
@@ -202,7 +203,7 @@ bool CSSImageGeneratorValue::knownToBeOpaque(const LayoutObject& layoutObject) c
     return false;
 }
 
-void CSSImageGeneratorValue::loadSubimages(Document* document)
+void CSSImageGeneratorValue::loadSubimages(const Document& document)
 {
     switch (getClassType()) {
     case CrossfadeClass:

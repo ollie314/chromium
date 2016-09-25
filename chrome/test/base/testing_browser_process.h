@@ -25,6 +25,7 @@ class BackgroundModeManager;
 class CRLSetFetcher;
 class IOThread;
 class MHTMLGenerationManager;
+class NotificationPlatformBridge;
 class NotificationUIManager;
 class PrefService;
 class WatchDogThread;
@@ -69,11 +70,10 @@ class TestingBrowserProcess : public BrowserProcess {
   ProfileManager* profile_manager() override;
   PrefService* local_state() override;
   variations::VariationsService* variations_service() override;
-  web_resource::PromoResourceService* promo_resource_service() override;
   policy::BrowserPolicyConnector* browser_policy_connector() override;
   policy::PolicyService* policy_service() override;
   IconManager* icon_manager() override;
-  GLStringManager* gl_string_manager() override;
+  GpuProfileCache* gpu_profile_cache() override;
   GpuModeManager* gpu_mode_manager() override;
   BackgroundModeManager* background_mode_manager() override;
   void set_background_mode_manager_for_test(
@@ -82,11 +82,14 @@ class TestingBrowserProcess : public BrowserProcess {
   safe_browsing::SafeBrowsingService* safe_browsing_service() override;
   safe_browsing::ClientSideDetectionService* safe_browsing_detection_service()
       override;
+  subresource_filter::RulesetService* subresource_filter_ruleset_service()
+      override;
   net::URLRequestContextGetter* system_request_context() override;
   BrowserProcessPlatformPart* platform_part() override;
 
   extensions::EventRouterForwarder* extension_event_router_forwarder() override;
   NotificationUIManager* notification_ui_manager() override;
+  NotificationPlatformBridge* notification_platform_bridge() override;
   message_center::MessageCenter* message_center() override;
   IntranetRedirectDetector* intranet_redirect_detector() override;
   void CreateDevToolsHttpProtocolHandler(const std::string& ip,
@@ -133,10 +136,15 @@ class TestingBrowserProcess : public BrowserProcess {
   void SetProfileManager(ProfileManager* profile_manager);
   void SetIOThread(IOThread* io_thread);
   void SetSafeBrowsingService(safe_browsing::SafeBrowsingService* sb_service);
+  void SetRulesetService(
+      std::unique_ptr<subresource_filter::RulesetService> ruleset_service);
   void SetSystemRequestContext(net::URLRequestContextGetter* context_getter);
   void SetNotificationUIManager(
       std::unique_ptr<NotificationUIManager> notification_ui_manager);
+  void SetNotificationPlatformBridge(
+      std::unique_ptr<NotificationPlatformBridge> notification_platform_bridge);
   void SetRapporService(rappor::RapporService* rappor_service);
+  void SetShuttingDown(bool is_shutting_down);
   void ShutdownBrowserPolicyConnector();
 
  private:
@@ -146,11 +154,13 @@ class TestingBrowserProcess : public BrowserProcess {
 
   std::unique_ptr<content::NotificationService> notification_service_;
   std::string app_locale_;
+  bool is_shutting_down_;
 
   std::unique_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
   bool created_browser_policy_connector_ = false;
   std::unique_ptr<ProfileManager> profile_manager_;
   std::unique_ptr<NotificationUIManager> notification_ui_manager_;
+  std::unique_ptr<NotificationPlatformBridge> notification_platform_bridge_;
 
 #if defined(ENABLE_PRINTING)
   std::unique_ptr<printing::PrintJobManager> print_job_manager_;
@@ -164,8 +174,16 @@ class TestingBrowserProcess : public BrowserProcess {
 #endif
 
   scoped_refptr<safe_browsing::SafeBrowsingService> sb_service_;
+  std::unique_ptr<subresource_filter::RulesetService>
+      subresource_filter_ruleset_service_;
 
   std::unique_ptr<network_time::NetworkTimeTracker> network_time_tracker_;
+
+  // |tab_manager_| is null by default and will be created when
+  // GetTabManager() is invoked on supported platforms.
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
+  std::unique_ptr<memory::TabManager> tab_manager_;
+#endif
 
   // The following objects are not owned by TestingBrowserProcess:
   PrefService* local_state_;

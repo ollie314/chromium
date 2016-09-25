@@ -18,11 +18,13 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_io_thread.h"
 #include "base/test/trace_event_analyzer.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_provider.h"
+#include "base/trace_event/memory_infra_background_whitelist.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_buffer.h"
 #include "base/trace_event/trace_config_memory_test_util.h"
@@ -48,16 +50,24 @@ MATCHER(IsLightDump, "") {
   return arg.level_of_detail == MemoryDumpLevelOfDetail::LIGHT;
 }
 
+MATCHER(IsBackgroundDump, "") {
+  return arg.level_of_detail == MemoryDumpLevelOfDetail::BACKGROUND;
+}
+
 namespace {
+
+const char* kMDPName = "TestDumpProvider";
+const char* kWhitelistedMDPName = "WhitelistedTestDumpProvider";
+const char* const kTestMDPWhitelist[] = {kWhitelistedMDPName, nullptr};
 
 void RegisterDumpProvider(
     MemoryDumpProvider* mdp,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    const MemoryDumpProvider::Options& options) {
+    const MemoryDumpProvider::Options& options,
+    const char* name = kMDPName) {
   MemoryDumpManager* mdm = MemoryDumpManager::GetInstance();
   mdm->set_dumper_registrations_ignored_for_testing(false);
-  const char* kMDPName = "TestDumpProvider";
-  mdm->RegisterDumpProvider(mdp, kMDPName, std::move(task_runner), options);
+  mdm->RegisterDumpProvider(mdp, name, std::move(task_runner), options);
   mdm->set_dumper_registrations_ignored_for_testing(true);
 }
 
@@ -71,7 +81,6 @@ void RegisterDumpProviderWithSequencedTaskRunner(
     const MemoryDumpProvider::Options& options) {
   MemoryDumpManager* mdm = MemoryDumpManager::GetInstance();
   mdm->set_dumper_registrations_ignored_for_testing(false);
-  const char* kMDPName = "TestDumpProvider";
   mdm->RegisterDumpProviderWithSequencedTaskRunner(mdp, kMDPName, task_runner,
                                                    options);
   mdm->set_dumper_registrations_ignored_for_testing(true);
@@ -84,6 +93,20 @@ void OnTraceDataCollected(Closure quit_closure,
   buffer->AddFragment(json->data());
   if (!has_more_events)
     quit_closure.Run();
+}
+
+// Posts |task| to |task_runner| and blocks until it is executed.
+void PostTaskAndWait(const tracked_objects::Location& from_here,
+                     SequencedTaskRunner* task_runner,
+                     const base::Closure& task) {
+  base::WaitableEvent event(WaitableEvent::ResetPolicy::MANUAL,
+                            WaitableEvent::InitialState::NOT_SIGNALED);
+  task_runner->PostTask(from_here, task);
+  task_runner->PostTask(
+      FROM_HERE, base::Bind(&WaitableEvent::Signal, base::Unretained(&event)));
+  // The SequencedTaskRunner guarantees that |event| will only be signaled after
+  // |task| is executed.
+  event.Wait();
 }
 
 }  // namespace
@@ -139,8 +162,9 @@ class MockMemoryDumpProvider : public MemoryDumpProvider {
 class TestSequencedTaskRunner : public SequencedTaskRunner {
  public:
   TestSequencedTaskRunner()
-      : worker_pool_(
-            new SequencedWorkerPool(2 /* max_threads */, "Test Task Runner")),
+      : worker_pool_(new SequencedWorkerPool(2 /* max_threads */,
+                                             "Test Task Runner",
+                                             base::TaskPriority::USER_VISIBLE)),
         enabled_(true),
         num_of_post_tasks_(0) {}
 
@@ -164,7 +188,7 @@ class TestSequencedTaskRunner : public SequencedTaskRunner {
   }
 
   bool RunsTasksOnCurrentThread() const override {
-    return worker_pool_->IsRunningSequenceOnCurrentThread(token_);
+    return worker_pool_->RunsTasksOnCurrentThread();
   }
 
  private:
@@ -218,7 +242,7 @@ class MemoryDumpManagerTest : public testing::Test {
     RunLoop run_loop;
     MemoryDumpCallback callback =
         Bind(&MemoryDumpManagerTest::DumpCallbackAdapter, Unretained(this),
-             MessageLoop::current()->task_runner(), run_loop.QuitClosure());
+             ThreadTaskRunnerHandle::Get(), run_loop.QuitClosure());
     mdm_->RequestGlobalDump(dump_type, level_of_detail, callback);
     run_loop.Run();
   }
@@ -331,7 +355,8 @@ TEST_F(MemoryDumpManagerTest, SharedSessionState) {
   RegisterDumpProvider(&mdp2);
 
   EnableTracingWithLegacyCategories(MemoryDumpManager::kTraceCategory);
-  const MemoryDumpSessionState* session_state = mdm_->session_state().get();
+  const MemoryDumpSessionState* session_state =
+      mdm_->session_state_for_testing().get();
   EXPECT_CALL(*delegate_, RequestGlobalMemoryDump(_, _)).Times(2);
   EXPECT_CALL(mdp1, OnMemoryDump(_, _))
       .Times(2)
@@ -464,11 +489,11 @@ TEST_F(MemoryDumpManagerTest, RespectTaskRunnerAffinity) {
   // invoked a number of times equal to its index.
   for (uint32_t i = kNumInitialThreads; i > 0; --i) {
     threads.push_back(WrapUnique(new Thread("test thread")));
-    auto thread = threads.back().get();
+    auto* thread = threads.back().get();
     thread->Start();
     scoped_refptr<SingleThreadTaskRunner> task_runner = thread->task_runner();
     mdps.push_back(WrapUnique(new MockMemoryDumpProvider()));
-    auto mdp = mdps.back().get();
+    auto* mdp = mdps.back().get();
     RegisterDumpProvider(mdp, task_runner, kDefaultOptions);
     EXPECT_CALL(*mdp, OnMemoryDump(_, _))
         .Times(i)
@@ -678,13 +703,16 @@ TEST_F(MemoryDumpManagerTest, UnregisterDumperFromThreadWhileDumping) {
   // unregister the other one.
   for (const std::unique_ptr<MockMemoryDumpProvider>& mdp : mdps) {
     int other_idx = (mdps.front() == mdp);
-    TestIOThread* other_thread = threads[other_idx].get();
+    // TestIOThread's task runner must be obtained from the main thread but can
+    // then be used from other threads.
+    scoped_refptr<SingleThreadTaskRunner> other_runner =
+        threads[other_idx]->task_runner();
     MockMemoryDumpProvider* other_mdp = mdps[other_idx].get();
-    auto on_dump = [this, other_thread, other_mdp, &on_memory_dump_call_count](
+    auto on_dump = [this, other_runner, other_mdp, &on_memory_dump_call_count](
         const MemoryDumpArgs& args, ProcessMemoryDump* pmd) {
-      other_thread->PostTaskAndWait(
-          FROM_HERE, base::Bind(&MemoryDumpManager::UnregisterDumpProvider,
-                                base::Unretained(&*mdm_), other_mdp));
+      PostTaskAndWait(FROM_HERE, other_runner.get(),
+                      base::Bind(&MemoryDumpManager::UnregisterDumpProvider,
+                                 base::Unretained(&*mdm_), other_mdp));
       on_memory_dump_call_count++;
       return true;
     };
@@ -729,9 +757,14 @@ TEST_F(MemoryDumpManagerTest, TearDownThreadWhileDumping) {
   for (const std::unique_ptr<MockMemoryDumpProvider>& mdp : mdps) {
     int other_idx = (mdps.front() == mdp);
     TestIOThread* other_thread = threads[other_idx].get();
-    auto on_dump = [other_thread, &on_memory_dump_call_count](
+    // TestIOThread isn't thread-safe and must be stopped on the |main_runner|.
+    scoped_refptr<SequencedTaskRunner> main_runner =
+        SequencedTaskRunnerHandle::Get();
+    auto on_dump = [other_thread, main_runner, &on_memory_dump_call_count](
         const MemoryDumpArgs& args, ProcessMemoryDump* pmd) {
-      other_thread->Stop();
+      PostTaskAndWait(
+          FROM_HERE, main_runner.get(),
+          base::Bind(&TestIOThread::Stop, base::Unretained(other_thread)));
       on_memory_dump_call_count++;
       return true;
     };
@@ -895,7 +928,9 @@ TEST_F(MemoryDumpManagerTest, TraceConfigExpectationsWhenIsCoordinator) {
 // Tests against race conditions that might arise when disabling tracing in the
 // middle of a global memory dump.
 TEST_F(MemoryDumpManagerTest, DisableTracingWhileDumping) {
-  base::WaitableEvent tracing_disabled_event(false, false);
+  base::WaitableEvent tracing_disabled_event(
+      WaitableEvent::ResetPolicy::AUTOMATIC,
+      WaitableEvent::InitialState::NOT_SIGNALED);
   InitializeMemoryDumpManager(false /* is_coordinator */);
 
   // Register a bound dump provider.
@@ -932,7 +967,7 @@ TEST_F(MemoryDumpManagerTest, DisableTracingWhileDumping) {
   RunLoop run_loop;
   MemoryDumpCallback callback =
       Bind(&MemoryDumpManagerTest::DumpCallbackAdapter, Unretained(this),
-           MessageLoop::current()->task_runner(), run_loop.QuitClosure());
+           ThreadTaskRunnerHandle::Get(), run_loop.QuitClosure());
   mdm_->RequestGlobalDump(MemoryDumpType::EXPLICITLY_TRIGGERED,
                           MemoryDumpLevelOfDetail::DETAILED, callback);
   DisableTracing();
@@ -945,7 +980,9 @@ TEST_F(MemoryDumpManagerTest, DisableTracingWhileDumping) {
 // Tests against race conditions that can happen if tracing is disabled before
 // the CreateProcessDump() call. Real-world regression: crbug.com/580295 .
 TEST_F(MemoryDumpManagerTest, DisableTracingRightBeforeStartOfDump) {
-  base::WaitableEvent tracing_disabled_event(false, false);
+  base::WaitableEvent tracing_disabled_event(
+      WaitableEvent::ResetPolicy::AUTOMATIC,
+      WaitableEvent::InitialState::NOT_SIGNALED);
   InitializeMemoryDumpManager(false /* is_coordinator */);
 
   std::unique_ptr<Thread> mdp_thread(new Thread("test thread"));
@@ -1072,8 +1109,8 @@ TEST_F(MemoryDumpManagerTest, UnregisterAndDeleteDumpProviderSoonDuringDump) {
       const MemoryDumpArgs&, ProcessMemoryDump*) -> bool {
     thread_ref = PlatformThread::CurrentRef();
     TestIOThread thread_for_unregistration(TestIOThread::kAutoStart);
-    thread_for_unregistration.PostTaskAndWait(
-        FROM_HERE,
+    PostTaskAndWait(
+        FROM_HERE, thread_for_unregistration.task_runner().get(),
         base::Bind(
             &MemoryDumpManager::UnregisterAndDeleteDumpProviderSoon,
             base::Unretained(MemoryDumpManager::GetInstance()),
@@ -1096,6 +1133,61 @@ TEST_F(MemoryDumpManagerTest, UnregisterAndDeleteDumpProviderSoonDuringDump) {
     RequestGlobalDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
                              MemoryDumpLevelOfDetail::DETAILED);
   }
+  DisableTracing();
+}
+
+TEST_F(MemoryDumpManagerTest, TestWhitelistingMDP) {
+  InitializeMemoryDumpManager(false /* is_coordinator */);
+  SetDumpProviderWhitelistForTesting(kTestMDPWhitelist);
+  std::unique_ptr<MockMemoryDumpProvider> mdp1(new MockMemoryDumpProvider);
+  RegisterDumpProvider(mdp1.get());
+  std::unique_ptr<MockMemoryDumpProvider> mdp2(new MockMemoryDumpProvider);
+  RegisterDumpProvider(mdp2.get(), nullptr, kDefaultOptions,
+                       kWhitelistedMDPName);
+
+  EXPECT_CALL(*mdp1, OnMemoryDump(_, _)).Times(0);
+  EXPECT_CALL(*mdp2, OnMemoryDump(_, _)).Times(1).WillOnce(Return(true));
+  EXPECT_CALL(*delegate_, RequestGlobalMemoryDump(_, _)).Times(1);
+
+  EnableTracingWithLegacyCategories(MemoryDumpManager::kTraceCategory);
+  EXPECT_FALSE(IsPeriodicDumpingEnabled());
+  RequestGlobalDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
+                           MemoryDumpLevelOfDetail::BACKGROUND);
+  DisableTracing();
+}
+
+TEST_F(MemoryDumpManagerTest, TestBackgroundTracingSetup) {
+  InitializeMemoryDumpManager(true /* is_coordinator */);
+
+  RunLoop run_loop;
+  auto quit_closure = run_loop.QuitClosure();
+
+  testing::InSequence sequence;
+  EXPECT_CALL(*delegate_, RequestGlobalMemoryDump(IsBackgroundDump(), _))
+      .Times(5);
+  EXPECT_CALL(*delegate_, RequestGlobalMemoryDump(IsBackgroundDump(), _))
+      .WillOnce(Invoke([quit_closure](const MemoryDumpRequestArgs& args,
+                                      const MemoryDumpCallback& callback) {
+        ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, quit_closure);
+      }));
+  EXPECT_CALL(*delegate_, RequestGlobalMemoryDump(_, _)).Times(AnyNumber());
+
+  EnableTracingWithTraceConfig(
+      TraceConfigMemoryTestUtil::GetTraceConfig_BackgroundTrigger(
+          1 /* period_ms */));
+
+  // Only background mode dumps should be allowed with the trace config.
+  last_callback_success_ = false;
+  RequestGlobalDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
+                           MemoryDumpLevelOfDetail::LIGHT);
+  EXPECT_FALSE(last_callback_success_);
+  last_callback_success_ = false;
+  RequestGlobalDumpAndWait(MemoryDumpType::EXPLICITLY_TRIGGERED,
+                           MemoryDumpLevelOfDetail::DETAILED);
+  EXPECT_FALSE(last_callback_success_);
+
+  ASSERT_TRUE(IsPeriodicDumpingEnabled());
+  run_loop.Run();
   DisableTracing();
 }
 

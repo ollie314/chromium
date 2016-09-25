@@ -9,25 +9,31 @@
 
 namespace blink {
 
-PromiseRejectionEvent::PromiseRejectionEvent()
-{
-}
-
 PromiseRejectionEvent::PromiseRejectionEvent(ScriptState* state, const AtomicString& type, const PromiseRejectionEventInit& initializer)
     : Event(type, initializer)
     , m_scriptState(state)
 {
-    ASSERT(initializer.hasPromise());
+    ThreadState::current()->registerPreFinalizer(this);
+    DCHECK(initializer.hasPromise());
     m_promise.set(initializer.promise().isolate(), initializer.promise().v8Value());
-    m_promise.setWeak(this, &PromiseRejectionEvent::didCollectPromise);
+    m_promise.setPhantom();
     if (initializer.hasReason()) {
         m_reason.set(initializer.reason().isolate(), initializer.reason().v8Value());
-        m_reason.setWeak(this, &PromiseRejectionEvent::didCollectReason);
+        m_reason.setPhantom();
     }
 }
 
 PromiseRejectionEvent::~PromiseRejectionEvent()
 {
+}
+
+void PromiseRejectionEvent::dispose()
+{
+    // Clear ScopedPersistents so that V8 doesn't call phantom callbacks
+    // (and touch the ScopedPersistents) after Oilpan starts lazy sweeping.
+    m_promise.clear();
+    m_reason.clear();
+    m_scriptState.clear();
 }
 
 ScriptPromise PromiseRejectionEvent::promise(ScriptState* state) const
@@ -73,14 +79,10 @@ DEFINE_TRACE(PromiseRejectionEvent)
     Event::trace(visitor);
 }
 
-void PromiseRejectionEvent::didCollectPromise(const v8::WeakCallbackInfo<PromiseRejectionEvent>& data)
+DEFINE_TRACE_WRAPPERS(PromiseRejectionEvent)
 {
-    data.GetParameter()->m_promise.clear();
-}
-
-void PromiseRejectionEvent::didCollectReason(const v8::WeakCallbackInfo<PromiseRejectionEvent>& data)
-{
-    data.GetParameter()->m_reason.clear();
+    visitor->traceWrappers(&m_promise);
+    visitor->traceWrappers(&m_reason);
 }
 
 } // namespace blink

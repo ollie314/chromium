@@ -88,45 +88,16 @@ WebInspector.DataGrid = function(columnsArray, editCallback, deleteCallback, ref
     this._inline = false;
 
     /** @type {!Array.<!WebInspector.DataGrid.ColumnDescriptor>} */
-    this._columnsArray = columnsArray;
-    /** @type {!Array.<!WebInspector.DataGrid.ColumnDescriptor>} */
-    this._visibleColumnsArray = columnsArray;
+    this._columnsArray = [];
     /** @type {!Object.<string, !WebInspector.DataGrid.ColumnDescriptor>} */
     this._columns = {};
+    /** @type {!Array.<!WebInspector.DataGrid.ColumnDescriptor>} */
+    this._visibleColumnsArray = columnsArray;
+
+    columnsArray.forEach(column => this._innerAddColumn(column));
 
     /** @type {?string} */
     this._cellClass = null;
-
-    for (var i = 0; i < columnsArray.length; ++i) {
-        var column = columnsArray[i];
-        var columnIdentifier = column.identifier = column.id || String(i);
-        this._columns[columnIdentifier] = column;
-        if (column.disclosure)
-            this.disclosureColumnIdentifier = columnIdentifier;
-
-        var cell = createElement("th");
-        cell.className = columnIdentifier + "-column";
-        cell.columnIdentifier = String(columnIdentifier);
-        this._headerTableHeaders[columnIdentifier] = cell;
-
-        var div = createElement("div");
-        if (column.titleDOMFragment)
-            div.appendChild(column.titleDOMFragment);
-        else
-            div.textContent = column.title;
-        cell.appendChild(div);
-
-        if (column.sort) {
-            cell.classList.add(column.sort);
-            this._sortColumnCell = cell;
-        }
-
-        if (column.sortable) {
-            cell.addEventListener("click", this._clickInHeaderCell.bind(this), false);
-            cell.classList.add("sortable");
-            cell.createChild("div", "sort-order-icon-container").createChild("div", "sort-order-icon");
-        }
-    }
 
     this._headerTable.appendChild(this._headerTableColumnGroup);
     this.headerTableBody.appendChild(this._headerRow);
@@ -162,7 +133,8 @@ WebInspector.DataGrid.CornerWidth = 14;
 /**
  * @typedef {{
  *   id: string,
- *   title: string,
+ *   title: (string|undefined),
+ *   titleDOMFragment: (?DocumentFragment|undefined),
  *   sortable: boolean,
  *   sort: (?WebInspector.DataGrid.Order|undefined),
  *   align: (?WebInspector.DataGrid.Align|undefined),
@@ -177,11 +149,12 @@ WebInspector.DataGrid.CornerWidth = 14;
  */
 WebInspector.DataGrid.ColumnDescriptor;
 
+/** @enum {symbol} */
 WebInspector.DataGrid.Events = {
-    SelectedNode: "SelectedNode",
-    DeselectedNode: "DeselectedNode",
-    SortingChanged: "SortingChanged",
-    ColumnsResized: "ColumnsResized"
+    SelectedNode: Symbol("SelectedNode"),
+    DeselectedNode: Symbol("DeselectedNode"),
+    SortingChanged: Symbol("SortingChanged"),
+    ColumnsResized: Symbol("ColumnsResized")
 }
 
 /** @enum {string} */
@@ -199,6 +172,82 @@ WebInspector.DataGrid.Align = {
 WebInspector.DataGrid._preferredWidthSymbol = Symbol("preferredWidth");
 
 WebInspector.DataGrid.prototype = {
+    /**
+     * @param {!WebInspector.DataGrid.ColumnDescriptor} column
+     * @param {number=} position
+     */
+    _innerAddColumn: function(column, position)
+    {
+        var columnIdentifier = column.identifier = column.id || String(Object.keys(this._columns).length);
+        if (columnIdentifier in this._columns)
+            this._innerRemoveColumn(columnIdentifier);
+
+        if (position === undefined)
+            position = this._columnsArray.length;
+
+        this._columnsArray.splice(position, 0, column);
+        this._columns[columnIdentifier] = column;
+        if (column.disclosure)
+            this.disclosureColumnIdentifier = columnIdentifier;
+
+        var cell = createElement("th");
+        cell.className = columnIdentifier + "-column";
+        cell.columnIdentifier = String(columnIdentifier);
+        this._headerTableHeaders[columnIdentifier] = cell;
+
+        var div = createElement("div");
+        if (column.titleDOMFragment)
+            div.appendChild(column.titleDOMFragment);
+        else
+            div.textContent = column.title;
+        cell.appendChild(div);
+
+        if (column.sort) {
+            cell.classList.add(column.sort);
+            this._sortColumnCell = cell;
+        }
+
+        if (column.sortable) {
+            cell.addEventListener("click", this._clickInHeaderCell.bind(this), false);
+            cell.classList.add("sortable");
+            cell.createChild("div", "sort-order-icon-container").createChild("div", "sort-order-icon");
+        }
+    },
+
+    /**
+     * @param {!WebInspector.DataGrid.ColumnDescriptor} column
+     * @param {number=} position
+     */
+    addColumn: function(column, position)
+    {
+        this._innerAddColumn(column, position);
+    },
+
+    /**
+     * @param {string} columnIdentifier
+     */
+    _innerRemoveColumn: function(columnIdentifier)
+    {
+        var column = this._columns[columnIdentifier];
+        if (!column)
+            return;
+        delete this._columns[columnIdentifier];
+        var index = this._columnsArray.findIndex(columnConfig => columnConfig.identifier === columnIdentifier);
+        this._columnsArray.splice(index, 1);
+        var cell = this._headerTableHeaders[columnIdentifier];
+        if (cell.parentElement)
+            cell.parentElement.removeChild(cell);
+        delete this._headerTableHeaders[columnIdentifier];
+    },
+
+    /**
+     * @param {string} columnIdentifier
+     */
+    removeColumn: function(columnIdentifier)
+    {
+        this._innerRemoveColumn(columnIdentifier);
+    },
+
     /**
      * @param {string} cellClass
      */
@@ -395,7 +444,7 @@ WebInspector.DataGrid.prototype = {
             }
         }
 
-        if (textBeforeEditing == newText) {
+        if (textBeforeEditing === newText) {
             this._editingCancelled(element);
             moveToNextIfNeeded.call(this, false);
             return;
@@ -746,7 +795,7 @@ WebInspector.DataGrid.prototype = {
             // Get the width of the cell in the first (and only) row of the
             // header table in order to determine the width of the column, since
             // it is not possible to query a column for its width.
-            left[i] = (left[i-1] || 0) + this.headerTableBody.rows[0].cells[i].offsetWidth;
+            left[i] = (left[i - 1] || 0) + this.headerTableBody.rows[0].cells[i].offsetWidth;
         }
 
         // Make n - 1 resizers for n columns.
@@ -789,17 +838,17 @@ WebInspector.DataGrid.prototype = {
 
         var handled = false;
         var nextSelectedNode;
-        if (event.keyIdentifier === "Up" && !event.altKey) {
+        if (event.key === "ArrowUp" && !event.altKey) {
             nextSelectedNode = this.selectedNode.traversePreviousNode(true);
             while (nextSelectedNode && !nextSelectedNode.selectable)
                 nextSelectedNode = nextSelectedNode.traversePreviousNode(true);
             handled = nextSelectedNode ? true : false;
-        } else if (event.keyIdentifier === "Down" && !event.altKey) {
+        } else if (event.key === "ArrowDown" && !event.altKey) {
             nextSelectedNode = this.selectedNode.traverseNextNode(true);
             while (nextSelectedNode && !nextSelectedNode.selectable)
                 nextSelectedNode = nextSelectedNode.traverseNextNode(true);
             handled = nextSelectedNode ? true : false;
-        } else if (event.keyIdentifier === "Left") {
+        } else if (event.key === "ArrowLeft") {
             if (this.selectedNode.expanded) {
                 if (event.altKey)
                     this.selectedNode.collapseRecursively();
@@ -814,7 +863,7 @@ WebInspector.DataGrid.prototype = {
                 } else if (this.selectedNode.parent)
                     this.selectedNode.parent.collapse();
             }
-        } else if (event.keyIdentifier === "Right") {
+        } else if (event.key === "ArrowRight") {
             if (!this.selectedNode.revealed) {
                 this.selectedNode.reveal();
                 handled = true;
@@ -1450,7 +1499,7 @@ WebInspector.DataGridNode.prototype = {
     insertChild: function(child, index)
     {
         if (!child)
-            throw("insertChild: Node can't be undefined or null.");
+            throw "insertChild: Node can't be undefined or null.";
         if (child.parent === this) {
             var currentIndex = this.children.indexOf(child);
             if (currentIndex < 0)
@@ -1503,9 +1552,9 @@ WebInspector.DataGridNode.prototype = {
     removeChild: function(child)
     {
         if (!child)
-            throw("removeChild: Node can't be undefined or null.");
+            throw "removeChild: Node can't be undefined or null.";
         if (child.parent !== this)
-            throw("removeChild: Node is not a child of this node.");
+            throw "removeChild: Node is not a child of this node.";
 
         if (this.dataGrid)
             this.dataGrid.updateSelectionBeforeRemoval(child, false);
@@ -1818,7 +1867,7 @@ WebInspector.DataGridNode.prototype = {
             return;
 
         if (!this.parent)
-            throw("savePosition: Node must have a parent.");
+            throw "savePosition: Node must have a parent.";
         this._savedPosition = {
             parent: this.parent,
             index: this.parent.children.indexOf(this)

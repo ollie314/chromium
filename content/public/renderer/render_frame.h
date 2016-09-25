@@ -15,15 +15,14 @@
 #include "content/public/common/console_message_level.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
+#include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
 #include "third_party/WebKit/public/web/WebNavigationPolicy.h"
 
 class GURL;
 
 namespace blink {
-class WebElement;
 class WebFrame;
 class WebLocalFrame;
-class WebNode;
 class WebPlugin;
 class WebURLRequest;
 class WebURLResponse;
@@ -33,6 +32,11 @@ struct WebPluginParams;
 namespace gfx {
 class Range;
 class Size;
+}
+
+namespace shell {
+class InterfaceRegistry;
+class InterfaceProvider;
 }
 
 namespace url {
@@ -46,10 +50,12 @@ class Isolate;
 }
 
 namespace content {
+class AssociatedInterfaceProvider;
+class AssociatedInterfaceRegistry;
 class ContextMenuClient;
 class PluginInstanceThrottler;
+class RenderAccessibility;
 class RenderView;
-class ServiceRegistry;
 struct ContextMenuParams;
 struct WebPluginInfo;
 struct WebPreferences;
@@ -78,6 +84,11 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
     CONTENT_STATUS_NUM_ITEMS
   };
 
+  enum RecordPeripheralDecision {
+    DONT_RECORD_DECISION = 0,
+    RECORD_DECISION = 1
+  };
+
   // Returns the RenderFrame given a WebFrame.
   static RenderFrame* FromWebFrame(blink::WebFrame* web_frame);
 
@@ -87,17 +98,16 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   // Returns the RenderView associated with this frame.
   virtual RenderView* GetRenderView() = 0;
 
+  // Return the RenderAccessibility associated with this frame.
+  virtual RenderAccessibility* GetRenderAccessibility() = 0;
+
   // Get the routing ID of the frame.
   virtual int GetRoutingID() = 0;
 
   // Returns the associated WebFrame.
   virtual blink::WebLocalFrame* GetWebFrame() = 0;
 
-  // Gets the focused element. If no such element exists then
-  // the element will be Null.
-  virtual blink::WebElement GetFocusedElement() const = 0;
-
-   // Gets WebKit related preferences associated with this frame.
+  // Gets WebKit related preferences associated with this frame.
   virtual WebPreferences& GetWebkitPreferences() = 0;
 
   // Shows a context menu with the given information. The given client will
@@ -117,9 +127,6 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   // Cancels a context menu in the event that the client is destroyed before the
   // menu is closed.
   virtual void CancelContextMenu(int request_id) = 0;
-
-  // Gets the node that the context menu was pressed over.
-  virtual blink::WebNode GetContextMenuNode() const = 0;
 
   // Create a new NPAPI/Pepper plugin depending on |info|. Returns NULL if no
   // plugin was found. |throttler| may be empty.
@@ -142,8 +149,22 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   // Return true if this frame is hidden.
   virtual bool IsHidden() = 0;
 
-  // Returns the ServiceRegistry for this frame.
-  virtual ServiceRegistry* GetServiceRegistry() = 0;
+  // Returns the InterfaceRegistry that this process uses to expose interfaces
+  // to the application running in this frame.
+  virtual shell::InterfaceRegistry* GetInterfaceRegistry() = 0;
+
+  // Returns the InterfaceProvider that this process can use to bind
+  // interfaces exposed to it by the application running in this frame.
+  virtual shell::InterfaceProvider* GetRemoteInterfaces() = 0;
+
+  // Returns the AssociatedInterfaceRegistry this frame can use to expose
+  // frame-specific Channel-associated interfaces to the remote RenderFrameHost.
+  virtual AssociatedInterfaceRegistry* GetAssociatedInterfaceRegistry() = 0;
+
+  // Returns the AssociatedInterfaceProvider this frame can use to access
+  // frame-specific Channel-assocaited interfaces from the remote
+  // RenderFrameHost.
+  virtual AssociatedInterfaceProvider* GetRemoteAssociatedInterfaces() = 0;
 
 #if defined(ENABLE_PLUGINS)
   // Registers a plugin that has been marked peripheral. If the origin
@@ -172,11 +193,17 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   virtual PeripheralContentStatus GetPeripheralContentStatus(
       const url::Origin& main_frame_origin,
       const url::Origin& content_origin,
-      const gfx::Size& unobscured_size) const = 0;
+      const gfx::Size& unobscured_size,
+      RecordPeripheralDecision record_decision) const = 0;
 
   // Whitelists a |content_origin| so its content will never be throttled in
   // this RenderFrame. Whitelist is cleared by top level navigation.
   virtual void WhitelistContentOrigin(const url::Origin& content_origin) = 0;
+
+  // Used by plugins that load data in this RenderFrame to update the loading
+  // notifications.
+  virtual void DidStartLoading() = 0;
+  virtual void DidStopLoading() = 0;
 #endif
 
   // Returns true if this frame is a FTP directory listing.
@@ -209,6 +236,9 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
 
   // Whether or not this frame is currently pasting.
   virtual bool IsPasting() const = 0;
+
+  // Returns the current visibility of the frame.
+  virtual blink::WebPageVisibilityState GetVisibilityState() const = 0;
 
  protected:
   ~RenderFrame() override {}

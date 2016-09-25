@@ -5,12 +5,13 @@
 #include "media/capture/content/thread_safe_capture_oracle.h"
 
 #include <stdint.h>
+
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/bits.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
@@ -34,7 +35,7 @@ const int kTargetMaxPoolUtilizationPercent = 60;
 }  // namespace
 
 ThreadSafeCaptureOracle::ThreadSafeCaptureOracle(
-    scoped_ptr<VideoCaptureDevice::Client> client,
+    std::unique_ptr<VideoCaptureDevice::Client> client,
     const VideoCaptureParams& params,
     bool enable_auto_throttling)
     : client_(std::move(client)),
@@ -60,7 +61,7 @@ bool ThreadSafeCaptureOracle::ObserveEventAndDecideCapture(
 
   gfx::Size visible_size;
   gfx::Size coded_size;
-  scoped_ptr<media::VideoCaptureDevice::Client::Buffer> output_buffer;
+  std::unique_ptr<media::VideoCaptureDevice::Client::Buffer> output_buffer;
   double attenuated_utilization;
   int frame_number;
   base::TimeDelta estimated_frame_duration;
@@ -140,8 +141,15 @@ bool ThreadSafeCaptureOracle::ObserveEventAndDecideCapture(
       static_cast<uint8_t*>(output_buffer->data()),
       output_buffer->mapped_size(), base::SharedMemory::NULLHandle(), 0u,
       base::TimeDelta());
-  if (!(*storage))
+  // If creating the VideoFrame wrapper failed, call DidCaptureFrame() with
+  // !success to execute the required post-capture steps (tracing, notification
+  // of failure to VideoCaptureOracle, etc.).
+  if (!(*storage)) {
+    DidCaptureFrame(frame_number, std::move(output_buffer), capture_begin_time,
+                    estimated_frame_duration, *storage, event_time, false);
     return false;
+  }
+
   *callback = base::Bind(&ThreadSafeCaptureOracle::DidCaptureFrame, this,
                          frame_number, base::Passed(&output_buffer),
                          capture_begin_time, estimated_frame_duration);
@@ -190,18 +198,19 @@ void ThreadSafeCaptureOracle::ReportError(
 
 void ThreadSafeCaptureOracle::DidCaptureFrame(
     int frame_number,
-    scoped_ptr<VideoCaptureDevice::Client::Buffer> buffer,
+    std::unique_ptr<VideoCaptureDevice::Client::Buffer> buffer,
     base::TimeTicks capture_begin_time,
     base::TimeDelta estimated_frame_duration,
     const scoped_refptr<VideoFrame>& frame,
-    base::TimeTicks timestamp,
+    base::TimeTicks reference_time,
     bool success) {
   TRACE_EVENT_ASYNC_END2("gpu.capture", "Capture", buffer.get(), "success",
-                         success, "timestamp", timestamp.ToInternalValue());
+                         success, "timestamp",
+                         reference_time.ToInternalValue());
 
   base::AutoLock guard(lock_);
 
-  if (oracle_.CompleteCapture(frame_number, success, &timestamp)) {
+  if (oracle_.CompleteCapture(frame_number, success, &reference_time)) {
     TRACE_EVENT_INSTANT0("gpu.capture", "CaptureSucceeded",
                          TRACE_EVENT_SCOPE_THREAD);
 
@@ -216,12 +225,14 @@ void ThreadSafeCaptureOracle::DidCaptureFrame(
                                     base::TimeTicks::Now());
     frame->metadata()->SetTimeDelta(VideoFrameMetadata::FRAME_DURATION,
                                     estimated_frame_duration);
+    frame->metadata()->SetTimeTicks(VideoFrameMetadata::REFERENCE_TIME,
+                                    reference_time);
 
     frame->AddDestructionObserver(
         base::Bind(&ThreadSafeCaptureOracle::DidConsumeFrame, this,
                    frame_number, frame->metadata()));
 
-    client_->OnIncomingCapturedVideoFrame(std::move(buffer), frame, timestamp);
+    client_->OnIncomingCapturedVideoFrame(std::move(buffer), frame);
   }
 }
 

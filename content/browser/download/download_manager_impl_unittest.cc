@@ -18,6 +18,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -87,6 +88,7 @@ class MockDownloadItemImpl : public DownloadItemImpl {
                          GURL(),
                          GURL(),
                          GURL(),
+                         GURL(),
                          "application/octet-stream",
                          "application/octet-stream",
                          base::Time(),
@@ -100,7 +102,7 @@ class MockDownloadItemImpl : public DownloadItemImpl {
                          DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
                          DOWNLOAD_INTERRUPT_REASON_NONE,
                          false,
-                         net::BoundNetLog()) {}
+                         net::NetLogWithSource()) {}
   virtual ~MockDownloadItemImpl() {}
 
   MOCK_METHOD4(OnDownloadTargetDetermined,
@@ -176,7 +178,6 @@ class MockDownloadItemImpl : public DownloadItemImpl {
   MOCK_CONST_METHOD0(HasUserGesture, bool());
   MOCK_CONST_METHOD0(GetTransitionType, ui::PageTransition());
   MOCK_CONST_METHOD0(IsTemporary, bool());
-  MOCK_METHOD1(SetIsTemporary, void(bool));
   MOCK_METHOD1(SetOpened, void(bool));
   MOCK_CONST_METHOD0(GetOpened, bool());
   MOCK_CONST_METHOD0(GetLastModifiedTime, const std::string&());
@@ -251,6 +252,7 @@ class MockDownloadItemFactory
       const base::FilePath& target_path,
       const std::vector<GURL>& url_chain,
       const GURL& referrer_url,
+      const GURL& site_url,
       const GURL& tab_url,
       const GURL& tab_referrer_url,
       const std::string& mime_type,
@@ -266,12 +268,12 @@ class MockDownloadItemFactory
       DownloadDangerType danger_type,
       DownloadInterruptReason interrupt_reason,
       bool opened,
-      const net::BoundNetLog& bound_net_log) override;
+      const net::NetLogWithSource& net_log) override;
   DownloadItemImpl* CreateActiveItem(
       DownloadItemImplDelegate* delegate,
       uint32_t download_id,
       const DownloadCreateInfo& info,
-      const net::BoundNetLog& bound_net_log) override;
+      const net::NetLogWithSource& net_log) override;
   DownloadItemImpl* CreateSavePageItem(
       DownloadItemImplDelegate* delegate,
       uint32_t download_id,
@@ -279,7 +281,7 @@ class MockDownloadItemFactory
       const GURL& url,
       const std::string& mime_type,
       std::unique_ptr<DownloadRequestHandleInterface> request_handle,
-      const net::BoundNetLog& bound_net_log) override;
+      const net::NetLogWithSource& net_log) override;
 
  private:
   std::map<uint32_t, MockDownloadItemImpl*> items_;
@@ -322,6 +324,7 @@ DownloadItemImpl* MockDownloadItemFactory::CreatePersistedItem(
     const base::FilePath& target_path,
     const std::vector<GURL>& url_chain,
     const GURL& referrer_url,
+    const GURL& site_url,
     const GURL& tab_url,
     const GURL& tab_referrer_url,
     const std::string& mime_type,
@@ -337,7 +340,7 @@ DownloadItemImpl* MockDownloadItemFactory::CreatePersistedItem(
     DownloadDangerType danger_type,
     DownloadInterruptReason interrupt_reason,
     bool opened,
-    const net::BoundNetLog& bound_net_log) {
+    const net::NetLogWithSource& net_log) {
   DCHECK(items_.find(download_id) == items_.end());
   MockDownloadItemImpl* result =
       new StrictMock<MockDownloadItemImpl>(&item_delegate_);
@@ -352,7 +355,7 @@ DownloadItemImpl* MockDownloadItemFactory::CreateActiveItem(
     DownloadItemImplDelegate* delegate,
     uint32_t download_id,
     const DownloadCreateInfo& info,
-    const net::BoundNetLog& bound_net_log) {
+    const net::NetLogWithSource& net_log) {
   DCHECK(items_.find(download_id) == items_.end());
 
   MockDownloadItemImpl* result =
@@ -378,7 +381,7 @@ DownloadItemImpl* MockDownloadItemFactory::CreateSavePageItem(
     const GURL& url,
     const std::string& mime_type,
     std::unique_ptr<DownloadRequestHandleInterface> request_handle,
-    const net::BoundNetLog& bound_net_log) {
+    const net::NetLogWithSource& net_log) {
   DCHECK(items_.find(download_id) == items_.end());
 
   MockDownloadItemImpl* result =
@@ -405,7 +408,7 @@ class MockDownloadFileFactory
       std::unique_ptr<DownloadSaveInfo> save_info,
       const base::FilePath& default_download_directory,
       std::unique_ptr<ByteStreamReader> byte_stream,
-      const net::BoundNetLog& bound_net_log,
+      const net::NetLogWithSource& net_log,
       base::WeakPtr<DownloadDestinationObserver> observer) override {
     return MockCreateFile(*save_info, byte_stream.get());
   }
@@ -539,10 +542,8 @@ class DownloadManagerTest : public testing::Test {
 
     download_manager_->Shutdown();
     download_manager_.reset();
-    message_loop_.RunUntilIdle();
-    ASSERT_EQ(NULL, mock_download_item_factory_.get());
-    ASSERT_EQ(NULL, mock_download_file_factory_.get());
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
+    ASSERT_FALSE(mock_download_item_factory_);
     mock_download_manager_delegate_.reset();
     mock_browser_context_.reset();
     download_urls_.clear();
@@ -751,27 +752,13 @@ TEST_F(DownloadManagerTest, GetDownloadByGuid) {
 
   const char kGuid[] = "8DF158E8-C980-4618-BB03-EBA3242EB48B";
   DownloadItem* persisted_item = download_manager_->CreateDownloadItem(
-      kGuid,
-      10,
-      base::FilePath(),
-      base::FilePath(),
-      std::vector<GURL>(),
-      GURL("http://example.com/a"),
-      GURL("http://example.com/a"),
-      GURL("http://example.com/a"),
-      "application/octet-stream",
-      "application/octet-stream",
-      base::Time::Now(),
-      base::Time::Now(),
-      std::string(),
-      std::string(),
-      10,
-      10,
-      std::string(),
-      DownloadItem::INTERRUPTED,
-      DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-      DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED,
-      false);
+      kGuid, 10, base::FilePath(), base::FilePath(), std::vector<GURL>(),
+      GURL("http://example.com/a"), GURL("http://example.com/a"),
+      GURL("http://example.com/a"), GURL("http://example.com/a"),
+      "application/octet-stream", "application/octet-stream", base::Time::Now(),
+      base::Time::Now(), std::string(), std::string(), 10, 10, std::string(),
+      DownloadItem::INTERRUPTED, DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+      DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED, false);
   ASSERT_TRUE(persisted_item);
 
   ASSERT_EQ(persisted_item, download_manager_->GetDownloadByGuid(kGuid));

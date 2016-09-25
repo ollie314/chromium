@@ -16,7 +16,7 @@
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/lifetime/keep_alive_types.h"
 #include "chrome/browser/lifetime/scoped_keep_alive.h"
-#include "chrome/browser/media/media_capture_devices_dispatcher.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
@@ -28,7 +28,7 @@
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
-#include "components/ui/zoom/zoom_controller.h"
+#include "components/zoom/zoom_controller.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -39,7 +39,7 @@
 #include "extensions/common/constants.h"
 
 #if defined(USE_ASH)
-#include "ash/shelf/shelf_constants.h"
+#include "ash/common/shelf/shelf_constants.h"  // nogncheck
 #endif
 
 #if defined(ENABLE_PRINTING)
@@ -66,10 +66,10 @@ content::WebContents* OpenURLFromTabInternal(
   // window.
   chrome::NavigateParams new_tab_params(
       static_cast<Browser*>(NULL), params.url, params.transition);
-  if (params.disposition == NEW_BACKGROUND_TAB) {
-    new_tab_params.disposition = NEW_BACKGROUND_TAB;
+  if (params.disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB) {
+    new_tab_params.disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
   } else {
-    new_tab_params.disposition = NEW_FOREGROUND_TAB;
+    new_tab_params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
     new_tab_params.window_action = chrome::NavigateParams::SHOW_WINDOW;
   }
 
@@ -80,7 +80,7 @@ content::WebContents* OpenURLFromTabInternal(
 }
 
 void OnCheckIsDefaultBrowserFinished(
-    content::WebContents* source,
+    std::unique_ptr<content::WebContents> source,
     const content::OpenURLParams& params,
     shell_integration::DefaultWebClientState state) {
   // Open a URL based on if this browser instance is the default system browser.
@@ -136,13 +136,21 @@ ChromeAppDelegate::NewWindowContentsDelegate::OpenURLFromTab(
     content::WebContents* source,
     const content::OpenURLParams& params) {
   if (source) {
+    // This NewWindowContentsDelegate was given ownership of the incoming
+    // WebContents by being assigned as its delegate within
+    // ChromeAppDelegate::AddNewContents(), but this is the first time
+    // NewWindowContentsDelegate actually sees the WebContents. Here ownership
+    // is captured and passed to OnCheckIsDefaultBrowserFinished(), which
+    // destroys it after the default browser worker completes.
+    std::unique_ptr<content::WebContents> source_ptr(source);
     // Object lifetime notes: StartCheckIsDefault() takes lifetime ownership of
     // check_if_default_browser_worker and will clean up after the asynchronous
     // tasks.
     scoped_refptr<shell_integration::DefaultBrowserWorker>
         check_if_default_browser_worker =
-            new shell_integration::DefaultBrowserWorker(base::Bind(
-                &OnCheckIsDefaultBrowserFinished, base::Owned(source), params));
+            new shell_integration::DefaultBrowserWorker(
+                base::Bind(&OnCheckIsDefaultBrowserFinished,
+                           base::Passed(&source_ptr), params));
     check_if_default_browser_worker->StartCheckIsDefault();
   }
   return NULL;
@@ -185,9 +193,7 @@ void ChromeAppDelegate::InitWebContents(content::WebContents* web_contents) {
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents);
 
-  // Kiosk app supports zooming.
-  if (chrome::IsRunningInForcedAppMode())
-    ui_zoom::ZoomController::CreateForWebContents(web_contents);
+  zoom::ZoomController::CreateForWebContents(web_contents);
 }
 
 void ChromeAppDelegate::RenderViewCreated(
@@ -210,7 +216,7 @@ void ChromeAppDelegate::RenderViewCreated(
 
 void ChromeAppDelegate::ResizeWebContents(content::WebContents* web_contents,
                                           const gfx::Size& size) {
-  ::ResizeWebContents(web_contents, size);
+  ::ResizeWebContents(web_contents, gfx::Rect(size));
 }
 
 content::WebContents* ChromeAppDelegate::OpenURLFromTab(
@@ -238,8 +244,9 @@ void ChromeAppDelegate::AddNewContents(content::BrowserContext* context,
       Profile::FromBrowserContext(context));
   // Force all links to open in a new tab, even if they were trying to open a
   // new window.
-  disposition =
-      disposition == NEW_BACKGROUND_TAB ? disposition : NEW_FOREGROUND_TAB;
+  disposition = disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB
+                    ? disposition
+                    : WindowOpenDisposition::NEW_FOREGROUND_TAB;
   chrome::AddWebContents(displayer.browser(),
                          NULL,
                          new_contents,
@@ -256,9 +263,9 @@ content::ColorChooser* ChromeAppDelegate::ShowColorChooser(
 }
 
 void ChromeAppDelegate::RunFileChooser(
-    content::WebContents* tab,
+    content::RenderFrameHost* render_frame_host,
     const content::FileChooserParams& params) {
-  FileSelectHelper::RunFileChooser(tab, params);
+  FileSelectHelper::RunFileChooser(render_frame_host, params);
 }
 
 void ChromeAppDelegate::RequestMediaAccessPermission(
@@ -282,7 +289,7 @@ bool ChromeAppDelegate::CheckMediaAccessPermission(
 
 int ChromeAppDelegate::PreferredIconSize() {
 #if defined(USE_ASH)
-  return ash::kShelfSize;
+  return ash::GetShelfConstant(ash::SHELF_SIZE);
 #else
   return extension_misc::EXTENSION_ICON_SMALL;
 #endif
@@ -336,12 +343,7 @@ void ChromeAppDelegate::OnShow() {
 void ChromeAppDelegate::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_APP_TERMINATING:
-      if (!terminating_callback_.is_null())
-        terminating_callback_.Run();
-      break;
-    default:
-      NOTREACHED() << "Received unexpected notification";
-  }
+  DCHECK_EQ(chrome::NOTIFICATION_APP_TERMINATING, type);
+  if (!terminating_callback_.is_null())
+    terminating_callback_.Run();
 }

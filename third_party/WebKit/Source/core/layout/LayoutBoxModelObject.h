@@ -25,10 +25,13 @@
 #define LayoutBoxModelObject_h
 
 #include "core/CoreExport.h"
+#include "core/layout/BackgroundBleedAvoidance.h"
+#include "core/layout/ContentChangeType.h"
 #include "core/layout/LayoutObject.h"
 #include "core/page/scrolling/StickyPositionScrollingConstraints.h"
-#include "core/style/ShadowData.h"
 #include "platform/geometry/LayoutRect.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -48,20 +51,6 @@ enum PaintLayerType {
 // Modes for some of the line-related functions.
 enum LinePositionMode { PositionOnContainingLine, PositionOfInteriorLineBoxes };
 enum LineDirectionMode { HorizontalLine, VerticalLine };
-typedef unsigned BorderEdgeFlags;
-
-enum BackgroundBleedAvoidance {
-    BackgroundBleedNone,
-    BackgroundBleedShrinkBackground,
-    BackgroundBleedClipOnly,
-    BackgroundBleedClipLayer,
-};
-
-enum ContentChangeType {
-    ImageChanged,
-    CanvasChanged,
-    CanvasContextChanged
-};
 
 class InlineFlowBox;
 
@@ -161,15 +150,15 @@ public:
 
     // IE extensions. Used to calculate offsetWidth/Height.  Overridden by inlines (LayoutFlow)
     // to return the remaining width on a given line (and the height of a single line).
-    virtual LayoutUnit offsetLeft() const;
-    virtual LayoutUnit offsetTop() const;
+    virtual LayoutUnit offsetLeft(const Element*) const;
+    virtual LayoutUnit offsetTop(const Element*) const;
     virtual LayoutUnit offsetWidth() const = 0;
     virtual LayoutUnit offsetHeight() const = 0;
 
-    int pixelSnappedOffsetLeft() const { return roundToInt(offsetLeft()); }
-    int pixelSnappedOffsetTop() const { return roundToInt(offsetTop()); }
-    virtual int pixelSnappedOffsetWidth() const;
-    virtual int pixelSnappedOffsetHeight() const;
+    int pixelSnappedOffsetLeft(const Element* parent) const { return roundToInt(offsetLeft(parent)); }
+    int pixelSnappedOffsetTop(const Element* parent) const { return roundToInt(offsetTop(parent)); }
+    virtual int pixelSnappedOffsetWidth(const Element*) const;
+    virtual int pixelSnappedOffsetHeight(const Element*) const;
 
     bool hasSelfPaintingLayer() const;
     PaintLayer* layer() const { return m_layer.get(); }
@@ -191,6 +180,10 @@ public:
     // will take up space in the layout of the page.
     bool hasNonEmptyLayoutSize() const;
     bool usesCompositedScrolling() const;
+
+    // Checks if all of the background's layers can be painted as locally
+    // attached.
+    bool hasLocalEquivalentBackground() const;
 
     // These return the CSS computed padding values.
     LayoutUnit computedCSSPaddingTop() const { return computedCSSPadding(style()->paddingTop()); }
@@ -239,18 +232,19 @@ public:
     bool hasBorderOrPadding() const { return style()->hasBorder() || style()->hasPadding(); }
 
     LayoutUnit borderAndPaddingStart() const { return borderStart() + paddingStart(); }
-    LayoutUnit borderAndPaddingBefore() const { return borderBefore() + paddingBefore(); }
-    LayoutUnit borderAndPaddingAfter() const { return borderAfter() + paddingAfter(); }
+    DISABLE_CFI_PERF LayoutUnit borderAndPaddingBefore() const { return borderBefore() + paddingBefore(); }
+    DISABLE_CFI_PERF LayoutUnit borderAndPaddingAfter() const { return borderAfter() + paddingAfter(); }
     LayoutUnit borderAndPaddingOver() const { return borderOver() + paddingOver(); }
     LayoutUnit borderAndPaddingUnder() const { return borderUnder() + paddingUnder(); }
 
-    LayoutUnit borderAndPaddingHeight() const { return borderTop() + borderBottom() + paddingTop() + paddingBottom(); }
-    LayoutUnit borderAndPaddingWidth() const { return borderLeft() + borderRight() + paddingLeft() + paddingRight(); }
-    LayoutUnit borderAndPaddingLogicalHeight() const { return hasBorderOrPadding() ? borderAndPaddingBefore() + borderAndPaddingAfter() : LayoutUnit(); }
-    LayoutUnit borderAndPaddingLogicalWidth() const { return borderStart() + borderEnd() + paddingStart() + paddingEnd(); }
-    LayoutUnit borderAndPaddingLogicalLeft() const { return style()->isHorizontalWritingMode() ? borderLeft() + paddingLeft() : borderTop() + paddingTop(); }
+    DISABLE_CFI_PERF LayoutUnit borderAndPaddingHeight() const { return borderTop() + borderBottom() + paddingTop() + paddingBottom(); }
+    DISABLE_CFI_PERF LayoutUnit borderAndPaddingWidth() const { return borderLeft() + borderRight() + paddingLeft() + paddingRight(); }
+    DISABLE_CFI_PERF LayoutUnit borderAndPaddingLogicalHeight() const { return hasBorderOrPadding() ? borderAndPaddingBefore() + borderAndPaddingAfter() : LayoutUnit(); }
+    DISABLE_CFI_PERF LayoutUnit borderAndPaddingLogicalWidth() const { return borderStart() + borderEnd() + paddingStart() + paddingEnd(); }
+    DISABLE_CFI_PERF LayoutUnit borderAndPaddingLogicalLeft() const { return style()->isHorizontalWritingMode() ? borderLeft() + paddingLeft() : borderTop() + paddingTop(); }
 
     LayoutUnit borderLogicalLeft() const { return LayoutUnit(style()->isHorizontalWritingMode() ? borderLeft() : borderTop()); }
+    LayoutUnit borderLogicalRight() const { return LayoutUnit(style()->isHorizontalWritingMode() ? borderRight() : borderBottom()); }
 
     LayoutUnit paddingLogicalWidth() const { return paddingStart() + paddingEnd(); }
     LayoutUnit paddingLogicalHeight() const { return paddingBefore() + paddingAfter(); }
@@ -266,10 +260,10 @@ public:
     virtual LayoutUnit marginEnd(const ComputedStyle* otherStyle = nullptr) const = 0;
     virtual LayoutUnit marginOver() const = 0;
     virtual LayoutUnit marginUnder() const = 0;
-    LayoutUnit marginHeight() const { return marginTop() + marginBottom(); }
-    LayoutUnit marginWidth() const { return marginLeft() + marginRight(); }
-    LayoutUnit marginLogicalHeight() const { return marginBefore() + marginAfter(); }
-    LayoutUnit marginLogicalWidth() const { return marginStart() + marginEnd(); }
+    DISABLE_CFI_PERF LayoutUnit marginHeight() const { return marginTop() + marginBottom(); }
+    DISABLE_CFI_PERF LayoutUnit marginWidth() const { return marginLeft() + marginRight(); }
+    DISABLE_CFI_PERF LayoutUnit marginLogicalHeight() const { return marginBefore() + marginAfter(); }
+    DISABLE_CFI_PERF LayoutUnit marginLogicalWidth() const { return marginStart() + marginEnd(); }
 
     bool hasInlineDirectionBordersPaddingOrMargin() const { return hasInlineDirectionBordersOrPadding() || marginStart() || marginEnd(); }
     bool hasInlineDirectionBordersOrPadding() const { return borderStart() || borderEnd() || paddingStart() || paddingEnd(); }
@@ -299,13 +293,6 @@ public:
 
     void invalidateTreeIfNeeded(const PaintInvalidationState&) override;
 
-    // Indicate that the contents of this layoutObject need to be repainted.
-    // This only has an effect if compositing is being used.
-    // The rect is in the physical coordinate space of this layout object.
-    void setBackingNeedsPaintInvalidationInRect(const LayoutRect&, PaintInvalidationReason, const LayoutObject&) const;
-
-    void invalidateDisplayItemClientOnBacking(const DisplayItemClient&, PaintInvalidationReason) const;
-
     // http://www.w3.org/TR/css3-background/#body-background
     // <html> root element with no background steals background from its first <body> child.
     // The used background for such body element should be the initial value. (i.e. transparent)
@@ -314,9 +301,7 @@ public:
 protected:
     void willBeDestroyed() override;
 
-    LayoutPoint adjustedPositionRelativeToOffsetParent(const LayoutPoint&) const;
-
-    bool calculateHasBoxDecorations() const;
+    LayoutPoint adjustedPositionRelativeTo(const LayoutPoint&, const Element*) const;
 
     // Returns the continuation associated with |this|.
     // Returns nullptr if no continuation is associated with |this|.
@@ -332,6 +317,8 @@ protected:
     //
     // See continuation above for more details.
     void setContinuation(LayoutBoxModelObject*);
+
+    virtual LayoutSize accumulateInFlowPositionOffsets() const { return LayoutSize(); }
 
     LayoutRect localCaretRectForEmptyElement(LayoutUnit width, LayoutUnit textIndentOffset);
 
@@ -374,7 +361,7 @@ public:
     virtual void moveChildrenTo(LayoutBoxModelObject* toBoxModelObject, LayoutObject* startChild, LayoutObject* endChild, LayoutObject* beforeChild, bool fullRemoveInsert = false);
 
 private:
-    void createLayer(PaintLayerType);
+    void createLayer();
 
     LayoutUnit computedCSSPadding(const Length&) const;
     bool isBoxModelObject() const final { return true; }
@@ -382,15 +369,17 @@ private:
     LayoutBoxModelObjectRareData& ensureRareData()
     {
         if (!m_rareData)
-            m_rareData = adoptPtr(new LayoutBoxModelObjectRareData());
+            m_rareData = wrapUnique(new LayoutBoxModelObjectRareData());
         return *m_rareData.get();
     }
 
+    bool hasAutoHeightOrContainingBlockWithAutoHeight(bool checkingContainingBlock) const;
+
     // The PaintLayer associated with this object.
     // |m_layer| can be nullptr depending on the return value of layerTypeRequired().
-    OwnPtr<PaintLayer> m_layer;
+    std::unique_ptr<PaintLayer> m_layer;
 
-    OwnPtr<LayoutBoxModelObjectRareData> m_rareData;
+    std::unique_ptr<LayoutBoxModelObjectRareData> m_rareData;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutBoxModelObject, isBoxModelObject());

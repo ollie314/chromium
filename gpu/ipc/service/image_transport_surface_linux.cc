@@ -5,26 +5,27 @@
 #include "gpu/ipc/service/image_transport_surface.h"
 
 #include "gpu/ipc/service/pass_through_image_transport_surface.h"
+#include "ui/gl/init/gl_factory.h"
 
 namespace gpu {
 
 // static
-scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateNativeSurface(
+scoped_refptr<gl::GLSurface> ImageTransportSurface::CreateNativeSurface(
     GpuChannelManager* manager,
     GpuCommandBufferStub* stub,
     SurfaceHandle surface_handle,
-    gfx::GLSurface::Format format) {
+    gl::GLSurface::Format format) {
   DCHECK_NE(surface_handle, kNullSurfaceHandle);
-  scoped_refptr<gfx::GLSurface> surface;
+  scoped_refptr<gl::GLSurface> surface;
 #if defined(USE_OZONE)
-  surface = gfx::GLSurface::CreateSurfacelessViewGLSurface(surface_handle);
+  surface = gl::init::CreateSurfacelessViewGLSurface(surface_handle);
 #endif
   if (!surface)
-    surface = gfx::GLSurface::CreateViewGLSurface(surface_handle);
+    surface = gl::init::CreateViewGLSurface(surface_handle);
   if (!surface)
     return surface;
-  return scoped_refptr<gfx::GLSurface>(new PassThroughImageTransportSurface(
-      manager, stub, surface.get()));
+  return scoped_refptr<gl::GLSurface>(
+      new PassThroughImageTransportSurface(manager, stub, surface.get()));
 }
 
 }  // namespace gpu

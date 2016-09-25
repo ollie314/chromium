@@ -43,7 +43,7 @@ class NET_EXPORT ElementsUploadDataStream : public UploadDataStream {
   bool IsInMemory() const override;
   const std::vector<std::unique_ptr<UploadElementReader>>* GetElementReaders()
       const override;
-  int InitInternal() override;
+  int InitInternal(const NetLogWithSource& net_log) override;
   int ReadInternal(IOBuffer* buf, int buf_len) override;
   void ResetInternal() override;
 
@@ -77,8 +77,8 @@ class NET_EXPORT ElementsUploadDataStream : public UploadDataStream {
   // |upload_data_|.
   size_t element_index_;
 
-  // True if an error occcured during read operation.
-  bool read_failed_;
+  // Set to actual error if read fails, otherwise set to net::OK.
+  int read_error_;
 
   base::WeakPtrFactory<ElementsUploadDataStream> weak_ptr_factory_;
 

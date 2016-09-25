@@ -8,6 +8,7 @@ CONSOLE MESSAGE: line 31: [object Object]
 CONSOLE MESSAGE: line 32: [object Object]
 CONSOLE MESSAGE: line 34: function get __proto__() { [native code] }
 CONSOLE MESSAGE: line 39: [object Uint8Array]
+CONSOLE MESSAGE: line 44: [object Event]
 Tests that console logging dumps proper messages.
 
 console-dir.html:4 Array[2]
@@ -39,8 +40,8 @@ console-dir.html:19 anonymous()
     name: ""
     prototype: Object
     __proto__: ()
-    <function scope>
-        Global: Window
+    [[FunctionLocation]]: console-dir.html:19
+    [[Scopes]]: Scopes[1]
 console-dir.html:23 inner
     __proto__: Object
 console-dir.html:26 Object
@@ -55,12 +56,27 @@ console-dir.html:29 get __proto__()
     length: 0
     name: "get __proto__"
     __proto__: ()
-    <function scope>
-        No Scopes
+    [[FunctionLocation]]: <unknown>
 console-dir.html:34 Uint8Array[400000000]
     [0 … 99999999]
     [100000000 … 199999999]
     [200000000 … 299999999]
     [300000000 … 399999999]
     __proto__: TypedArray
+console-dir.html:39 Event
+    bubbles: false
+    cancelBubble: false
+    cancelable: false
+    composed: false
+    currentTarget: null
+    defaultPrevented: false
+    eventPhase: 0
+    isTrusted: false
+    path: Array[0]
+    returnValue: true
+    srcElement: null
+    target: null
+    timeStamp: 0
+    type: ""
+    __proto__: Event
 

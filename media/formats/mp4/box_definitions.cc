@@ -7,10 +7,13 @@
 #include <memory>
 #include <utility>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
+#include "media/base/media_switches.h"
 #include "media/base/video_types.h"
 #include "media/base/video_util.h"
+#include "media/filters/h264_parser.h"
 #include "media/formats/mp4/avc.h"
 #include "media/formats/mp4/es_descriptor.h"
 #include "media/formats/mp4/rcheck.h"
@@ -565,6 +568,44 @@ bool AVCDecoderConfigurationRecord::ParseInternal(
   return true;
 }
 
+VPCodecConfigurationRecord::VPCodecConfigurationRecord()
+    : profile(VIDEO_CODEC_PROFILE_UNKNOWN) {}
+
+VPCodecConfigurationRecord::VPCodecConfigurationRecord(
+    const VPCodecConfigurationRecord& other) = default;
+
+VPCodecConfigurationRecord::~VPCodecConfigurationRecord() {}
+
+FourCC VPCodecConfigurationRecord::BoxType() const {
+  return FOURCC_VPCC;
+}
+
+bool VPCodecConfigurationRecord::Parse(BoxReader* reader) {
+  uint8_t profile_indication = 0;
+  RCHECK(reader->ReadFullBoxHeader() && reader->Read1(&profile_indication));
+  // The remaining fields are not parsed as we don't care about them for now.
+
+  switch (profile_indication) {
+    case 0:
+      profile = VP9PROFILE_PROFILE0;
+      break;
+    case 1:
+      profile = VP9PROFILE_PROFILE1;
+      break;
+    case 2:
+      profile = VP9PROFILE_PROFILE2;
+      break;
+    case 3:
+      profile = VP9PROFILE_PROFILE3;
+      break;
+    default:
+      MEDIA_LOG(ERROR, reader->media_log()) << "Unsupported VP9 profile: "
+                                            << profile_indication;
+      return false;
+  }
+  return true;
+}
+
 PixelAspectRatioBox::PixelAspectRatioBox() : h_spacing(1), v_spacing(1) {}
 PixelAspectRatioBox::PixelAspectRatioBox(const PixelAspectRatioBox& other) =
     default;
@@ -625,10 +666,11 @@ bool VideoSampleEntry::Parse(BoxReader* reader) {
       std::unique_ptr<AVCDecoderConfigurationRecord> avcConfig(
           new AVCDecoderConfigurationRecord());
       RCHECK(reader->ReadChild(avcConfig.get()));
+      video_codec = kCodecH264;
+      video_codec_profile = H264Parser::ProfileIDCToVideoCodecProfile(
+          avcConfig->profile_indication);
       frame_bitstream_converter =
           make_scoped_refptr(new AVCBitstreamConverter(std::move(avcConfig)));
-      video_codec = kCodecH264;
-      video_codec_profile = H264PROFILE_MAIN;
       break;
     }
 #if BUILDFLAG(ENABLE_HEVC_DEMUXING)
@@ -639,20 +681,29 @@ bool VideoSampleEntry::Parse(BoxReader* reader) {
       std::unique_ptr<HEVCDecoderConfigurationRecord> hevcConfig(
           new HEVCDecoderConfigurationRecord());
       RCHECK(reader->ReadChild(hevcConfig.get()));
+      video_codec = kCodecHEVC;
+      video_codec_profile = hevcConfig->GetVideoProfile();
       frame_bitstream_converter =
           make_scoped_refptr(new HEVCBitstreamConverter(std::move(hevcConfig)));
-      video_codec = kCodecHEVC;
       break;
     }
 #endif
-#if BUILDFLAG(ENABLE_MP4_VP9_DEMUXING)
     case FOURCC_VP09:
-      frame_bitstream_converter = NULL;
-      video_codec = kCodecVP9;
-      // TODO(kqyang): Read VPCodecConfiguration and extract profile
-      // (crbug.com/604863).
+      if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnableVp9InMp4)) {
+        DVLOG(2) << __FUNCTION__
+                 << " parsing VPCodecConfigurationRecord (vpcC)";
+        std::unique_ptr<VPCodecConfigurationRecord> vp_config(
+            new VPCodecConfigurationRecord());
+        RCHECK(reader->ReadChild(vp_config.get()));
+        frame_bitstream_converter = nullptr;
+        video_codec = kCodecVP9;
+        video_codec_profile = vp_config->profile;
+      } else {
+        MEDIA_LOG(ERROR, reader->media_log()) << "VP9 in MP4 is not enabled.";
+        return false;
+      }
       break;
-#endif
     default:
       // Unknown/unsupported format
       MEDIA_LOG(ERROR, reader->media_log()) << __FUNCTION__
@@ -674,10 +725,10 @@ bool VideoSampleEntry::IsFormatValid() const {
     case FOURCC_HEV1:
     case FOURCC_HVC1:
 #endif
-#if BUILDFLAG(ENABLE_MP4_VP9_DEMUXING)
-    case FOURCC_VP09:
-#endif
       return true;
+    case FOURCC_VP09:
+      return base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableVp9InMp4);
     default:
       return false;
   }

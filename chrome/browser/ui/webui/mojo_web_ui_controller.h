@@ -14,14 +14,10 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_ui_controller.h"
-#include "content/public/common/service_registry.h"
 #include "mojo/public/cpp/system/core.h"
+#include "services/shell/public/cpp/interface_registry.h"
 
 class MojoWebUIHandler;
-
-namespace content {
-class WebUIDataSource;
-}
 
 class MojoWebUIControllerBase : public content::WebUIController {
  public:
@@ -32,9 +28,6 @@ class MojoWebUIControllerBase : public content::WebUIController {
   void RenderViewCreated(content::RenderViewHost* render_view_host) override;
 
  private:
-  // Bindings files are registered here.
-  content::WebUIDataSource* mojo_data_source_;
-
   DISALLOW_COPY_AND_ASSIGN(MojoWebUIControllerBase);
 };
 
@@ -54,8 +47,8 @@ class MojoWebUIController : public MojoWebUIControllerBase {
   ~MojoWebUIController() override {}
   void RenderViewCreated(content::RenderViewHost* render_view_host) override {
     MojoWebUIControllerBase::RenderViewCreated(render_view_host);
-    render_view_host->GetMainFrame()->GetServiceRegistry()->
-        AddService<Interface>(
+    render_view_host->GetMainFrame()->GetInterfaceRegistry()->
+        AddInterface<Interface>(
             base::Bind(&MojoWebUIController::BindUIHandler,
                        weak_factory_.GetWeakPtr()));
   }

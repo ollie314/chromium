@@ -18,21 +18,16 @@ Polymer({
      * The password that is being displayed.
      * @type {!chrome.passwordsPrivate.PasswordUiEntry}
      */
-    item: {
-      type: Object,
-      value: null,
-    },
+    item: Object,
 
-    password: {
-      type: String,
-      value: '',
-    },
+    /** Holds the plaintext password when requested. */
+    password: String,
   },
 
-  /** Opens the dialog. */
-  open: function() {
+  /** @override */
+  attached: function() {
     this.password = '';
-    this.$.dialog.open();
+    this.$.dialog.showModal();
   },
 
   /** Closes the dialog. */

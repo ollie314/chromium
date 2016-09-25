@@ -8,6 +8,8 @@ syntax = "proto2";
 
 option optimize_for = LITE_RUNTIME;
 
+import "common.proto";
+
 package blimp;
 
 // Contains display information that represents resize events coming from the
@@ -19,22 +21,13 @@ message SizeMessage {
 }
 
 message TabControlMessage {
-  enum Type {
-    UNKNOWN = 0;
-
+  // Feature-specific messages follow.
+  oneof tab_control {
     // Client <=> Server types.
-    CREATE_TAB = 1;
-    CLOSE_TAB = 2;
+    EmptyMessage create_tab = 40;
+    EmptyMessage close_tab = 41;
 
     // Client => Server types.
-    SIZE = 3;
+    SizeMessage size = 42;
   }
-
-  optional Type type = 1;
-
-  // Feature-specific messages follow.
-  // Only one of these fields may be set per TabControlMessage.
-  // TODO(kmarshall): use a 'oneof' union when it's supported in Chromium.  See
-  // crbug.com/570371.
-  optional SizeMessage size = 1000;
 }

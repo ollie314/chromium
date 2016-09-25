@@ -37,7 +37,7 @@
 #include "platform/graphics/GraphicsContextStateSaver.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/scroll/ScrollableArea.h"
-#include "platform/scroll/ScrollbarThemeClient.h"
+#include "platform/scroll/Scrollbar.h"
 #include "platform/scroll/ScrollbarThemeOverlay.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebRect.h"
@@ -209,7 +209,7 @@ int ScrollbarThemeAura::minimumThumbLength(const ScrollbarThemeClient& scrollbar
     return size.width();
 }
 
-void ScrollbarThemeAura::paintTickmarks(GraphicsContext& context, const ScrollbarThemeClient& scrollbar, const IntRect& rect)
+void ScrollbarThemeAura::paintTickmarks(GraphicsContext& context, const Scrollbar& scrollbar, const IntRect& rect)
 {
     if (scrollbar.orientation() != VerticalScrollbar)
         return;
@@ -223,10 +223,10 @@ void ScrollbarThemeAura::paintTickmarks(GraphicsContext& context, const Scrollba
     if (!tickmarks.size())
         return;
 
-    if (DrawingRecorder::useCachedDrawingIfPossible(context, scrollbar, DisplayItem::ScrollbarTickmarks))
+    if (DrawingRecorder::useCachedDrawingIfPossible(context, scrollbar, DisplayItem::kScrollbarTickmarks))
         return;
 
-    DrawingRecorder recorder(context, scrollbar, DisplayItem::ScrollbarTickmarks, rect);
+    DrawingRecorder recorder(context, scrollbar, DisplayItem::kScrollbarTickmarks, rect);
     GraphicsContextStateSaver stateSaver(context);
     context.setShouldAntialias(false);
 
@@ -245,14 +245,14 @@ void ScrollbarThemeAura::paintTickmarks(GraphicsContext& context, const Scrollba
     }
 }
 
-void ScrollbarThemeAura::paintTrackBackground(GraphicsContext& context, const ScrollbarThemeClient& scrollbar, const IntRect& rect)
+void ScrollbarThemeAura::paintTrackBackground(GraphicsContext& context, const Scrollbar& scrollbar, const IntRect& rect)
 {
     // Just assume a forward track part. We only paint the track as a single piece when there is no thumb.
     if (!hasThumb(scrollbar) && !rect.isEmpty())
         paintTrackPiece(context, scrollbar, rect, ForwardTrackPart);
 }
 
-void ScrollbarThemeAura::paintTrackPiece(GraphicsContext& gc, const ScrollbarThemeClient& scrollbar, const IntRect& rect, ScrollbarPart partType)
+void ScrollbarThemeAura::paintTrackPiece(GraphicsContext& gc, const Scrollbar& scrollbar, const IntRect& rect, ScrollbarPart partType)
 {
     DisplayItem::Type displayItemType = trackPiecePartToDisplayItemType(partType);
     if (DrawingRecorder::useCachedDrawingIfPossible(gc, scrollbar, displayItemType))
@@ -275,7 +275,7 @@ void ScrollbarThemeAura::paintTrackPiece(GraphicsContext& gc, const ScrollbarThe
     Platform::current()->themeEngine()->paint(gc.canvas(), scrollbar.orientation() == HorizontalScrollbar ? WebThemeEngine::PartScrollbarHorizontalTrack : WebThemeEngine::PartScrollbarVerticalTrack, state, WebRect(rect), &extraParams);
 }
 
-void ScrollbarThemeAura::paintButton(GraphicsContext& gc, const ScrollbarThemeClient& scrollbar, const IntRect& rect, ScrollbarPart part)
+void ScrollbarThemeAura::paintButton(GraphicsContext& gc, const Scrollbar& scrollbar, const IntRect& rect, ScrollbarPart part)
 {
     DisplayItem::Type displayItemType = buttonPartToDisplayItemType(part);
     if (DrawingRecorder::useCachedDrawingIfPossible(gc, scrollbar, displayItemType))
@@ -287,12 +287,12 @@ void ScrollbarThemeAura::paintButton(GraphicsContext& gc, const ScrollbarThemeCl
     Platform::current()->themeEngine()->paint(gc.canvas(), params.part, params.state, WebRect(rect), 0);
 }
 
-void ScrollbarThemeAura::paintThumb(GraphicsContext& gc, const ScrollbarThemeClient& scrollbar, const IntRect& rect)
+void ScrollbarThemeAura::paintThumb(GraphicsContext& gc, const Scrollbar& scrollbar, const IntRect& rect)
 {
-    if (DrawingRecorder::useCachedDrawingIfPossible(gc, scrollbar, DisplayItem::ScrollbarThumb))
+    if (DrawingRecorder::useCachedDrawingIfPossible(gc, scrollbar, DisplayItem::kScrollbarThumb))
         return;
 
-    DrawingRecorder recorder(gc, scrollbar, DisplayItem::ScrollbarThumb, rect);
+    DrawingRecorder recorder(gc, scrollbar, DisplayItem::kScrollbarThumb, rect);
 
     WebThemeEngine::State state;
     WebCanvas* canvas = gc.canvas();
@@ -323,16 +323,28 @@ ScrollbarPart ScrollbarThemeAura::invalidateOnThumbPositionChange(const Scrollba
     return invalidParts;
 }
 
+bool ScrollbarThemeAura::hasScrollbarButtons(ScrollbarOrientation orientation) const
+{
+    WebThemeEngine* themeEngine = Platform::current()->themeEngine();
+    if (orientation == VerticalScrollbar) {
+        return !themeEngine->getSize(WebThemeEngine::PartScrollbarDownArrow).isEmpty();
+    }
+    return !themeEngine->getSize(WebThemeEngine::PartScrollbarLeftArrow).isEmpty();
+};
+
 IntSize ScrollbarThemeAura::buttonSize(const ScrollbarThemeClient& scrollbar)
 {
+    if (!hasScrollbarButtons(scrollbar.orientation()))
+        return IntSize(0, 0);
+
     if (scrollbar.orientation() == VerticalScrollbar) {
-        IntSize size = Platform::current()->themeEngine()->getSize(WebThemeEngine::PartScrollbarUpArrow);
-        return IntSize(size.width(), scrollbar.height() < 2 * size.height() ? scrollbar.height() / 2 : size.height());
+        int squareSize = scrollbar.width();
+        return IntSize(squareSize, scrollbar.height() < 2 * squareSize ? scrollbar.height() / 2 : squareSize);
     }
 
     // HorizontalScrollbar
-    IntSize size = Platform::current()->themeEngine()->getSize(WebThemeEngine::PartScrollbarLeftArrow);
-    return IntSize(scrollbar.width() < 2 * size.width() ? scrollbar.width() / 2 : size.width(), size.height());
+    int squareSize = scrollbar.height();
+    return IntSize(scrollbar.width() < 2 * squareSize ? scrollbar.width() / 2 : squareSize, squareSize);
 }
 
 } // namespace blink

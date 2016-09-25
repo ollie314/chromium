@@ -9,7 +9,9 @@
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/frame/UseCounter.h"
 #include "modules/webaudio/AudioBufferCallback.h"
+#include "platform/Histogram.h"
 #include "platform/audio/AudioUtilities.h"
 
 #if DEBUG_AUDIONODE_REFERENCES
@@ -24,9 +26,12 @@ const unsigned MaxHardwareContexts = 6;
 static unsigned s_hardwareContextCount = 0;
 static unsigned s_contextId = 0;
 
-AbstractAudioContext* AudioContext::create(Document& document, ExceptionState& exceptionState)
+AudioContext* AudioContext::create(Document& document, ExceptionState& exceptionState)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
+
+    UseCounter::countCrossOriginIframe(document, UseCounter::AudioContextCrossOriginIframe);
+
     if (s_hardwareContextCount >= MaxHardwareContexts) {
         exceptionState.throwDOMException(
             NotSupportedError,
@@ -62,15 +67,22 @@ AbstractAudioContext* AudioContext::create(Document& document, ExceptionState& e
     audioContext->startRendering();
     ++s_hardwareContextCount;
 #if DEBUG_AUDIONODE_REFERENCES
-    fprintf(stderr, "%p: AudioContext::AudioContext(): %u #%u\n",
+    fprintf(stderr, "[%16p]: AudioContext::AudioContext(): %u #%u\n",
         audioContext, audioContext->m_contextId, s_hardwareContextCount);
 #endif
+
+    DEFINE_STATIC_LOCAL(SparseHistogram, maxChannelCountHistogram,
+        ("WebAudio.AudioContext.MaxChannelsAvailable"));
+    DEFINE_STATIC_LOCAL(SparseHistogram, sampleRateHistogram,
+        ("WebAudio.AudioContext.HardwareSampleRate"));
+    maxChannelCountHistogram.sample(audioContext->destination()->maxChannelCount());
+    sampleRateHistogram.sample(audioContext->sampleRate());
 
     return audioContext;
 }
 
 AudioContext::AudioContext(Document& document)
-    : AbstractAudioContext(&document)
+    : BaseAudioContext(&document)
     , m_contextId(s_contextId++)
 {
 }
@@ -78,19 +90,19 @@ AudioContext::AudioContext(Document& document)
 AudioContext::~AudioContext()
 {
 #if DEBUG_AUDIONODE_REFERENCES
-    fprintf(stderr, "%p: AudioContext::~AudioContext(): %u\n", this, m_contextId);
+    fprintf(stderr, "[%16p]: AudioContext::~AudioContext(): %u\n", this, m_contextId);
 #endif
 }
 
 DEFINE_TRACE(AudioContext)
 {
     visitor->trace(m_closeResolver);
-    AbstractAudioContext::trace(visitor);
+    BaseAudioContext::trace(visitor);
 }
 
 ScriptPromise AudioContext::suspendContext(ScriptState* scriptState)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
     AutoLocker locker(this);
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
@@ -114,7 +126,7 @@ ScriptPromise AudioContext::suspendContext(ScriptState* scriptState)
 
 ScriptPromise AudioContext::resumeContext(ScriptState* scriptState)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
 
     if (isContextClosed()) {
         return ScriptPromise::rejectWithDOMException(
@@ -123,6 +135,8 @@ ScriptPromise AudioContext::resumeContext(ScriptState* scriptState)
                 InvalidAccessError,
                 "cannot resume a closed AudioContext"));
     }
+
+    recordUserGestureState();
 
     ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
@@ -173,7 +187,7 @@ void AudioContext::didClose()
     // are closed in their completion event.
     setContextState(Closed);
 
-    ASSERT(s_hardwareContextCount);
+    DCHECK(s_hardwareContextCount);
     --s_hardwareContextCount;
 
     if (m_closeResolver)
@@ -182,13 +196,13 @@ void AudioContext::didClose()
 
 bool AudioContext::isContextClosed() const
 {
-    return m_closeResolver || AbstractAudioContext::isContextClosed();
+    return m_closeResolver || BaseAudioContext::isContextClosed();
 }
 
 void AudioContext::stopRendering()
 {
-    ASSERT(isMainThread());
-    ASSERT(destination());
+    DCHECK(isMainThread());
+    DCHECK(destination());
 
     if (contextState() == Running) {
         destination()->audioDestinationHandler().stopRendering();
@@ -198,4 +212,3 @@ void AudioContext::stopRendering()
 }
 
 } // namespace blink
-

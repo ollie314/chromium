@@ -23,9 +23,7 @@ namespace {
 blink::WebCryptoAlgorithm CreateAesCbcAlgorithm(
     const std::vector<uint8_t>& iv) {
   return blink::WebCryptoAlgorithm::adoptParamsAndCreate(
-      blink::WebCryptoAlgorithmIdAesCbc,
-      new blink::WebCryptoAesCbcParams(iv.data(),
-                                       static_cast<unsigned int>(iv.size())));
+      blink::WebCryptoAlgorithmIdAesCbc, new blink::WebCryptoAesCbcParams(iv));
 }
 
 blink::WebCryptoAlgorithm CreateAesCbcKeyGenAlgorithm(
@@ -89,7 +87,7 @@ TEST_F(WebCryptoAesCbcTest, ExportKeyUnsupportedFormat) {
 // Tests importing of keys (in a variety of formats), errors during import,
 // encryption, and decryption, using known answers.
 TEST_F(WebCryptoAesCbcTest, KnownAnswerEncryptDecrypt) {
-  scoped_ptr<base::ListValue> tests;
+  std::unique_ptr<base::ListValue> tests;
   ASSERT_TRUE(ReadJsonTestFileToList("aes_cbc.json", &tests));
 
   for (size_t test_index = 0; test_index < tests->GetSize(); ++test_index) {

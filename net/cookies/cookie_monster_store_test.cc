@@ -9,7 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_util.h"
@@ -252,14 +252,15 @@ std::unique_ptr<CookieMonster> CreateMonsterFromStoreForGC(
             ? current - base::TimeDelta::FromDays(days_old)
             : current;
 
-    CanonicalCookie cc(GURL(), "a", "1", base::StringPrintf("h%05d.izzle", i),
-                       "/path", creation_time, expiration_time,
-                       last_access_time, secure, false,
-                       CookieSameSite::DEFAULT_MODE, COOKIE_PRIORITY_DEFAULT);
-    store->AddCookie(cc);
+    std::unique_ptr<CanonicalCookie> cc(CanonicalCookie::Create(
+        GURL(base::StringPrintf("http://h%05d.izzle/", i)), "a", "1",
+        std::string(), "/path", creation_time, expiration_time, secure, false,
+        CookieSameSite::DEFAULT_MODE, false, COOKIE_PRIORITY_DEFAULT));
+    cc->SetLastAccessDate(last_access_time);
+    store->AddCookie(*cc);
   }
 
-  return base::WrapUnique(new CookieMonster(store.get(), nullptr));
+  return base::MakeUnique<CookieMonster>(store.get(), nullptr);
 }
 
 MockSimplePersistentCookieStore::~MockSimplePersistentCookieStore() {

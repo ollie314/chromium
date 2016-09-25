@@ -6,10 +6,29 @@
 #define WebRTCCertificate_h
 
 #include "public/platform/WebRTCKeyParams.h"
+#include "public/platform/WebString.h"
 
 #include <memory>
 
 namespace blink {
+
+// Corresponds to |rtc::RTCCertificatePEM| in WebRTC.
+// See |WebRTCCertificate::toPEM| and |WebRTCCertificateGenerator::fromPEM|.
+class WebRTCCertificatePEM {
+public:
+    WebRTCCertificatePEM(WebString privateKey, WebString certificate)
+        : m_privateKey(privateKey)
+        , m_certificate(certificate)
+    {
+    }
+
+    WebString privateKey() const { return m_privateKey; }
+    WebString certificate() const { return m_certificate; }
+
+private:
+    WebString m_privateKey;
+    WebString m_certificate;
+};
 
 // WebRTCCertificate is an interface defining what Blink needs to know about certificates,
 // hiding Chromium and WebRTC layer implementation details. It is possible to create
@@ -26,10 +45,14 @@ public:
     // data is freed.
     virtual std::unique_ptr<WebRTCCertificate> shallowCopy() const = 0;
 
-    virtual const WebRTCKeyParams& keyParams() const = 0;
-
     // Returns the expiration time in ms relative to epoch, 1970-01-01T00:00:00Z.
     virtual uint64_t expires() const = 0;
+    // Creates a PEM strings representation of the certificate. See also
+    // |WebRTCCertificateGenerator::fromPEM|.
+    virtual WebRTCCertificatePEM toPEM() const = 0;
+    // Checks if the two certificate objects represent the same certificate value,
+    // as should be the case for a clone and the original.
+    virtual bool equals(const WebRTCCertificate& other) const = 0;
 
 private:
     WebRTCCertificate(const WebRTCCertificate&) = delete;

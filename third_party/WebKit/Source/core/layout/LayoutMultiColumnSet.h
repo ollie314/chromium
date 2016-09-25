@@ -64,13 +64,14 @@ public:
 
     const MultiColumnFragmentainerGroup& firstFragmentainerGroup() const { return m_fragmentainerGroups.first(); }
     const MultiColumnFragmentainerGroup& lastFragmentainerGroup() const { return m_fragmentainerGroups.last(); }
-    MultiColumnFragmentainerGroup& fragmentainerGroupAtFlowThreadOffset(LayoutUnit flowThreadOffset)
+    unsigned fragmentainerGroupIndexAtFlowThreadOffset(LayoutUnit, PageBoundaryRule) const;
+    MultiColumnFragmentainerGroup& fragmentainerGroupAtFlowThreadOffset(LayoutUnit flowThreadOffset, PageBoundaryRule rule)
     {
-        return m_fragmentainerGroups[fragmentainerGroupIndexAtFlowThreadOffset(flowThreadOffset)];
+        return m_fragmentainerGroups[fragmentainerGroupIndexAtFlowThreadOffset(flowThreadOffset, rule)];
     }
-    const MultiColumnFragmentainerGroup& fragmentainerGroupAtFlowThreadOffset(LayoutUnit flowThreadOffset) const
+    const MultiColumnFragmentainerGroup& fragmentainerGroupAtFlowThreadOffset(LayoutUnit flowThreadOffset, PageBoundaryRule rule) const
     {
-        return m_fragmentainerGroups[fragmentainerGroupIndexAtFlowThreadOffset(flowThreadOffset)];
+        return m_fragmentainerGroups[fragmentainerGroupIndexAtFlowThreadOffset(flowThreadOffset, rule)];
     }
     const MultiColumnFragmentainerGroup& fragmentainerGroupAtVisualPoint(const LayoutPoint&) const;
     const MultiColumnFragmentainerGroupList& fragmentainerGroups() const { return m_fragmentainerGroups; }
@@ -123,7 +124,7 @@ public:
 
     // Find the column that contains the given block offset, and return the translation needed to
     // get from flow thread coordinates to visual coordinates.
-    LayoutSize flowThreadTranslationAtOffset(LayoutUnit) const;
+    LayoutSize flowThreadTranslationAtOffset(LayoutUnit, PageBoundaryRule, CoordinateSpaceConversion) const;
 
     LayoutPoint visualPointToFlowThreadPoint(const LayoutPoint& visualPoint) const;
 
@@ -161,8 +162,6 @@ public:
 
     LayoutRect fragmentsBoundingBox(const LayoutRect& boundingBoxInFlowThread) const;
 
-    void collectLayerFragments(PaintLayerFragments&, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRect);
-
     LayoutUnit columnGap() const;
 
     // The "CSS actual" value of column-count. This includes overflowing columns, if any.
@@ -170,12 +169,16 @@ public:
 
     const char* name() const override { return "LayoutMultiColumnSet"; }
 
+    // Sets |columnRuleBounds| to the bounds of each column rule rect's painted extent, adjusted by paint offset,
+    // before pixel snapping. Returns true if column rules should be painted at all.
+    bool computeColumnRuleBounds(const LayoutPoint& paintOffset, Vector<LayoutRect>& columnRuleBounds) const;
+
+    LayoutRect localOverflowRectForPaintInvalidation() const override;
+
 protected:
     LayoutMultiColumnSet(LayoutFlowThread*);
 
 private:
-    unsigned fragmentainerGroupIndexAtFlowThreadOffset(LayoutUnit) const;
-
     void insertedIntoTree() final;
     void willBeRemovedFromTree() final;
 

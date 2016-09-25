@@ -47,9 +47,7 @@ base::string16 ExpectedFallbackNotificationMessage(
 
 class ResolutionNotificationControllerTest : public ash::test::AshTestBase {
  public:
-  ResolutionNotificationControllerTest()
-      : accept_count_(0) {
-  }
+  ResolutionNotificationControllerTest() : accept_count_(0) {}
 
   ~ResolutionNotificationControllerTest() override {}
 
@@ -60,34 +58,36 @@ class ResolutionNotificationControllerTest : public ash::test::AshTestBase {
   }
 
   void SetDisplayResolutionAndNotifyWithResolution(
-      const gfx::Display& display,
+      const display::Display& display,
       const gfx::Size& new_resolution,
       const gfx::Size& actual_new_resolution) {
     DisplayManager* display_manager = Shell::GetInstance()->display_manager();
 
-    const DisplayInfo& info = display_manager->GetDisplayInfo(display.id());
-    DisplayMode old_mode(info.size_in_pixel(),
-                         60 /* refresh_rate */,
-                         false /* interlaced */,
-                         false /* native */);
-    DisplayMode new_mode = old_mode;
-    new_mode.size = new_resolution;
+    const display::ManagedDisplayInfo& info =
+        display_manager->GetDisplayInfo(display.id());
+    scoped_refptr<display::ManagedDisplayMode> old_mode(
+        new display::ManagedDisplayMode(
+            info.size_in_pixel(), 60 /* refresh_rate */, false /* interlaced */,
+            false /* native */));
+    scoped_refptr<display::ManagedDisplayMode> new_mode(
+        new display::ManagedDisplayMode(
+            new_resolution, old_mode->refresh_rate(), old_mode->is_interlaced(),
+            old_mode->native(), old_mode->ui_scale(),
+            old_mode->device_scale_factor()));
 
     if (display_manager->SetDisplayMode(display.id(), new_mode)) {
       controller()->PrepareNotification(
-          display.id(),
-          old_mode,
-          new_mode,
+          display.id(), old_mode, new_mode,
           base::Bind(&ResolutionNotificationControllerTest::OnAccepted,
                      base::Unretained(this)));
     }
 
     // OnConfigurationChanged event won't be emitted in the test environment,
     // so invoke UpdateDisplay() to emit that event explicitly.
-    std::vector<DisplayInfo> info_list;
+    std::vector<display::ManagedDisplayInfo> info_list;
     for (size_t i = 0; i < display_manager->GetNumDisplays(); ++i) {
       int64_t id = display_manager->GetDisplayAt(i).id();
-      DisplayInfo info = display_manager->GetDisplayInfo(id);
+      display::ManagedDisplayInfo info = display_manager->GetDisplayInfo(id);
       if (display.id() == id) {
         gfx::Rect bounds = info.bounds_in_native();
         bounds.set_size(actual_new_resolution);
@@ -99,17 +99,18 @@ class ResolutionNotificationControllerTest : public ash::test::AshTestBase {
     RunAllPendingInMessageLoop();
   }
 
-  void SetDisplayResolutionAndNotify(const gfx::Display& display,
+  void SetDisplayResolutionAndNotify(const display::Display& display,
                                      const gfx::Size& new_resolution) {
-    SetDisplayResolutionAndNotifyWithResolution(
-        display, new_resolution, new_resolution);
+    SetDisplayResolutionAndNotifyWithResolution(display, new_resolution,
+                                                new_resolution);
   }
 
   static base::string16 GetNotificationMessage() {
     const message_center::NotificationList::Notifications& notifications =
         message_center::MessageCenter::Get()->GetVisibleNotifications();
     for (message_center::NotificationList::Notifications::const_iterator iter =
-             notifications.begin(); iter != notifications.end(); ++iter) {
+             notifications.begin();
+         iter != notifications.end(); ++iter) {
       if ((*iter)->id() == ResolutionNotificationController::kNotificationId)
         return (*iter)->title();
     }
@@ -137,17 +138,13 @@ class ResolutionNotificationControllerTest : public ash::test::AshTestBase {
         ResolutionNotificationController::kNotificationId);
   }
 
-  static void TickTimer() {
-    controller()->OnTimerTick();
-  }
+  static void TickTimer() { controller()->OnTimerTick(); }
 
   static ResolutionNotificationController* controller() {
     return Shell::GetInstance()->resolution_notification_controller();
   }
 
-  int accept_count() const {
-    return accept_count_;
-  }
+  int accept_count() const { return accept_count_; }
 
  private:
   void OnAccepted() {
@@ -173,25 +170,27 @@ TEST_F(ResolutionNotificationControllerTest, Basic) {
   EXPECT_FALSE(IsNotificationVisible());
 
   // Changes the resolution and apply the result.
-  SetDisplayResolutionAndNotify(
-      ScreenUtil::GetSecondaryDisplay(), gfx::Size(200, 200));
+  SetDisplayResolutionAndNotify(ScreenUtil::GetSecondaryDisplay(),
+                                gfx::Size(200, 200));
   EXPECT_TRUE(IsNotificationVisible());
   EXPECT_FALSE(controller()->DoesNotificationTimeout());
   EXPECT_EQ(ExpectedNotificationMessage(id2, gfx::Size(200, 200)),
             GetNotificationMessage());
-  DisplayMode mode;
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
-  EXPECT_EQ("200x200", mode.size.ToString());
-  EXPECT_EQ(60.0, mode.refresh_rate);
+  scoped_refptr<display::ManagedDisplayMode> mode =
+      display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("200x200", mode->size().ToString());
+  EXPECT_EQ(60.0, mode->refresh_rate());
 
   // Click the revert button, which reverts to the best resolution.
   ClickOnNotificationButton(0);
   RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsNotificationVisible());
   EXPECT_EQ(0, accept_count());
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
-  EXPECT_EQ("250x250", mode.size.ToString());
-  EXPECT_EQ(59.0, mode.refresh_rate);
+  mode = display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("250x250", mode->size().ToString());
+  EXPECT_EQ(59.0, mode->refresh_rate());
 }
 
 TEST_F(ResolutionNotificationControllerTest, ClickMeansAccept) {
@@ -206,23 +205,25 @@ TEST_F(ResolutionNotificationControllerTest, ClickMeansAccept) {
   EXPECT_FALSE(IsNotificationVisible());
 
   // Changes the resolution and apply the result.
-  SetDisplayResolutionAndNotify(
-      ScreenUtil::GetSecondaryDisplay(), gfx::Size(200, 200));
+  SetDisplayResolutionAndNotify(ScreenUtil::GetSecondaryDisplay(),
+                                gfx::Size(200, 200));
   EXPECT_TRUE(IsNotificationVisible());
   EXPECT_FALSE(controller()->DoesNotificationTimeout());
-  DisplayMode mode;
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
-  EXPECT_EQ("200x200", mode.size.ToString());
-  EXPECT_EQ(60.0, mode.refresh_rate);
+  scoped_refptr<display::ManagedDisplayMode> mode =
+      display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("200x200", mode->size().ToString());
+  EXPECT_EQ(60.0, mode->refresh_rate());
 
   // Click the revert button, which reverts the resolution.
   ClickOnNotification();
   RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsNotificationVisible());
   EXPECT_EQ(1, accept_count());
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
-  EXPECT_EQ("200x200", mode.size.ToString());
-  EXPECT_EQ(60.0, mode.refresh_rate);
+  mode = display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("200x200", mode->size().ToString());
+  EXPECT_EQ(60.0, mode->refresh_rate());
 }
 
 TEST_F(ResolutionNotificationControllerTest, AcceptButton) {
@@ -233,7 +234,8 @@ TEST_F(ResolutionNotificationControllerTest, AcceptButton) {
       ash::Shell::GetInstance()->display_manager();
 
   UpdateDisplay("300x300#300x300%59|200x200%60");
-  const gfx::Display& display = gfx::Screen::GetScreen()->GetPrimaryDisplay();
+  const display::Display& display =
+      display::Screen::GetScreen()->GetPrimaryDisplay();
   SetDisplayResolutionAndNotify(display, gfx::Size(200, 200));
   EXPECT_TRUE(IsNotificationVisible());
 
@@ -243,11 +245,13 @@ TEST_F(ResolutionNotificationControllerTest, AcceptButton) {
   ClickOnNotificationButton(0);
   EXPECT_FALSE(IsNotificationVisible());
   EXPECT_EQ(1, accept_count());
-  DisplayMode mode;
-  EXPECT_TRUE(
-      display_manager->GetSelectedModeForDisplayId(display.id(), &mode));
-  EXPECT_EQ("200x200", mode.size.ToString());
-  EXPECT_EQ(60.0f, mode.refresh_rate);
+
+  scoped_refptr<display::ManagedDisplayMode> mode =
+      display_manager->GetSelectedModeForDisplayId(display.id());
+  EXPECT_TRUE(!!mode);
+
+  EXPECT_EQ("200x200", mode->size().ToString());
+  EXPECT_EQ(60.0f, mode->refresh_rate());
 
   // In that case the second button is revert.
   UpdateDisplay("300x300#300x300%59|200x200%60");
@@ -258,10 +262,11 @@ TEST_F(ResolutionNotificationControllerTest, AcceptButton) {
   ClickOnNotificationButton(1);
   EXPECT_FALSE(IsNotificationVisible());
   EXPECT_EQ(1, accept_count());
-  EXPECT_TRUE(
-      display_manager->GetSelectedModeForDisplayId(display.id(), &mode));
-  EXPECT_EQ("300x300", mode.size.ToString());
-  EXPECT_EQ(59.0f, mode.refresh_rate);
+  mode = display_manager->GetSelectedModeForDisplayId(display.id());
+  EXPECT_TRUE(!!mode);
+
+  EXPECT_EQ("300x300", mode->size().ToString());
+  EXPECT_EQ(59.0f, mode->refresh_rate());
 }
 
 TEST_F(ResolutionNotificationControllerTest, Close) {
@@ -276,14 +281,15 @@ TEST_F(ResolutionNotificationControllerTest, Close) {
   EXPECT_FALSE(IsNotificationVisible());
 
   // Changes the resolution and apply the result.
-  SetDisplayResolutionAndNotify(
-      ScreenUtil::GetSecondaryDisplay(), gfx::Size(200, 200));
+  SetDisplayResolutionAndNotify(ScreenUtil::GetSecondaryDisplay(),
+                                gfx::Size(200, 200));
   EXPECT_TRUE(IsNotificationVisible());
   EXPECT_FALSE(controller()->DoesNotificationTimeout());
-  DisplayMode mode;
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
-  EXPECT_EQ("200x200", mode.size.ToString());
-  EXPECT_EQ(60.0f, mode.refresh_rate);
+  scoped_refptr<display::ManagedDisplayMode> mode =
+      display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("200x200", mode->size().ToString());
+  EXPECT_EQ(60.0f, mode->refresh_rate());
 
   // Close the notification (imitates clicking [x] button). Also verifies if
   // this does not cause a crash.  See crbug.com/271784
@@ -298,12 +304,13 @@ TEST_F(ResolutionNotificationControllerTest, Timeout) {
     return;
 
   UpdateDisplay("300x300#300x300%59|200x200%60");
-  const gfx::Display& display = gfx::Screen::GetScreen()->GetPrimaryDisplay();
+  const display::Display& display =
+      display::Screen::GetScreen()->GetPrimaryDisplay();
   SetDisplayResolutionAndNotify(display, gfx::Size(200, 200));
 
   for (int i = 0; i < ResolutionNotificationController::kTimeoutInSec; ++i) {
-    EXPECT_TRUE(IsNotificationVisible()) << "notification is closed after "
-                                         << i << "-th timer tick";
+    EXPECT_TRUE(IsNotificationVisible()) << "notification is closed after " << i
+                                         << "-th timer tick";
     TickTimer();
     RunAllPendingInMessageLoop();
   }
@@ -311,24 +318,25 @@ TEST_F(ResolutionNotificationControllerTest, Timeout) {
   EXPECT_EQ(0, accept_count());
   ash::DisplayManager* display_manager =
       ash::Shell::GetInstance()->display_manager();
-  DisplayMode mode;
-  EXPECT_TRUE(
-      display_manager->GetSelectedModeForDisplayId(display.id(), &mode));
-  EXPECT_EQ("300x300", mode.size.ToString());
-  EXPECT_EQ(59.0f, mode.refresh_rate);
+  scoped_refptr<display::ManagedDisplayMode> mode =
+      display_manager->GetSelectedModeForDisplayId(display.id());
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("300x300", mode->size().ToString());
+  EXPECT_EQ(59.0f, mode->refresh_rate());
 }
 
 TEST_F(ResolutionNotificationControllerTest, DisplayDisconnected) {
   if (!SupportsMultipleDisplays())
     return;
 
-  UpdateDisplay("300x300#300x300%56|200x200%57,"
-                "200x200#250x250%58|200x200%59|100x100%60");
+  UpdateDisplay(
+      "300x300#300x300%56|200x200%57,"
+      "200x200#250x250%58|200x200%59|100x100%60");
   int64_t id2 = ash::ScreenUtil::GetSecondaryDisplay().id();
   ash::DisplayManager* display_manager =
       ash::Shell::GetInstance()->display_manager();
-  SetDisplayResolutionAndNotify(
-      ScreenUtil::GetSecondaryDisplay(), gfx::Size(100, 100));
+  SetDisplayResolutionAndNotify(ScreenUtil::GetSecondaryDisplay(),
+                                gfx::Size(100, 100));
   ASSERT_TRUE(IsNotificationVisible());
 
   // Disconnects the secondary display and verifies it doesn't cause crashes.
@@ -336,39 +344,43 @@ TEST_F(ResolutionNotificationControllerTest, DisplayDisconnected) {
   RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsNotificationVisible());
   EXPECT_EQ(0, accept_count());
-  DisplayMode mode;
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
+  scoped_refptr<display::ManagedDisplayMode> mode =
+      display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
   gfx::Size resolution;
-  EXPECT_EQ("200x200", mode.size.ToString());
-  EXPECT_EQ(59.0f, mode.refresh_rate);
+  EXPECT_EQ("200x200", mode->size().ToString());
+  EXPECT_EQ(59.0f, mode->refresh_rate());
 }
 
 TEST_F(ResolutionNotificationControllerTest, MultipleResolutionChange) {
   if (!SupportsMultipleDisplays())
     return;
 
-  UpdateDisplay("300x300#300x300%56|200x200%57,"
-                "250x250#250x250%58|200x200%59");
+  UpdateDisplay(
+      "300x300#300x300%56|200x200%57,"
+      "250x250#250x250%58|200x200%59");
   int64_t id2 = ash::ScreenUtil::GetSecondaryDisplay().id();
   ash::DisplayManager* display_manager =
       ash::Shell::GetInstance()->display_manager();
 
-  SetDisplayResolutionAndNotify(
-      ScreenUtil::GetSecondaryDisplay(), gfx::Size(200, 200));
+  SetDisplayResolutionAndNotify(ScreenUtil::GetSecondaryDisplay(),
+                                gfx::Size(200, 200));
   EXPECT_TRUE(IsNotificationVisible());
   EXPECT_FALSE(controller()->DoesNotificationTimeout());
-  DisplayMode mode;
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
-  EXPECT_EQ("200x200", mode.size.ToString());
-  EXPECT_EQ(59.0f, mode.refresh_rate);
+  scoped_refptr<display::ManagedDisplayMode> mode =
+      display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("200x200", mode->size().ToString());
+  EXPECT_EQ(59.0f, mode->refresh_rate());
 
   // Invokes SetDisplayResolutionAndNotify during the previous notification is
   // visible.
-  SetDisplayResolutionAndNotify(
-      ScreenUtil::GetSecondaryDisplay(), gfx::Size(250, 250));
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
-  EXPECT_EQ("250x250", mode.size.ToString());
-  EXPECT_EQ(58.0f, mode.refresh_rate);
+  SetDisplayResolutionAndNotify(ScreenUtil::GetSecondaryDisplay(),
+                                gfx::Size(250, 250));
+  mode = display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("250x250", mode->size().ToString());
+  EXPECT_EQ(58.0f, mode->refresh_rate());
 
   // Then, click the revert button. Although |old_resolution| for the second
   // SetDisplayResolutionAndNotify is 200x200, it should revert to the original
@@ -377,17 +389,19 @@ TEST_F(ResolutionNotificationControllerTest, MultipleResolutionChange) {
   RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsNotificationVisible());
   EXPECT_EQ(0, accept_count());
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
-  EXPECT_EQ("250x250", mode.size.ToString());
-  EXPECT_EQ(58.0f, mode.refresh_rate);
+  mode = display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("250x250", mode->size().ToString());
+  EXPECT_EQ(58.0f, mode->refresh_rate());
 }
 
 TEST_F(ResolutionNotificationControllerTest, Fallback) {
   if (!SupportsMultipleDisplays())
     return;
 
-  UpdateDisplay("300x300#300x300%56|200x200%57,"
-                "250x250#250x250%58|220x220%59|200x200%60");
+  UpdateDisplay(
+      "300x300#300x300%56|200x200%57,"
+      "250x250#250x250%58|220x220%59|200x200%60");
   int64_t id2 = ash::ScreenUtil::GetSecondaryDisplay().id();
   ash::DisplayManager* display_manager =
       ash::Shell::GetInstance()->display_manager();
@@ -395,29 +409,30 @@ TEST_F(ResolutionNotificationControllerTest, Fallback) {
   EXPECT_FALSE(IsNotificationVisible());
 
   // Changes the resolution and apply the result.
-  SetDisplayResolutionAndNotifyWithResolution(
-      ScreenUtil::GetSecondaryDisplay(),
-      gfx::Size(220, 220),
-      gfx::Size(200, 200));
+  SetDisplayResolutionAndNotifyWithResolution(ScreenUtil::GetSecondaryDisplay(),
+                                              gfx::Size(220, 220),
+                                              gfx::Size(200, 200));
   EXPECT_TRUE(IsNotificationVisible());
   EXPECT_FALSE(controller()->DoesNotificationTimeout());
-  EXPECT_EQ(
-      ExpectedFallbackNotificationMessage(
-          id2, gfx::Size(220, 220), gfx::Size(200, 200)),
-      GetNotificationMessage());
-  DisplayMode mode;
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
-  EXPECT_EQ("200x200", mode.size.ToString());
-  EXPECT_EQ(60.0f, mode.refresh_rate);
+  EXPECT_EQ(ExpectedFallbackNotificationMessage(id2, gfx::Size(220, 220),
+                                                gfx::Size(200, 200)),
+            GetNotificationMessage());
+  scoped_refptr<display::ManagedDisplayMode> mode =
+      display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("200x200", mode->size().ToString());
+  EXPECT_EQ(60.0f, mode->refresh_rate());
 
   // Click the revert button, which reverts to the best resolution.
   ClickOnNotificationButton(0);
   RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsNotificationVisible());
   EXPECT_EQ(0, accept_count());
-  EXPECT_TRUE(display_manager->GetSelectedModeForDisplayId(id2, &mode));
-  EXPECT_EQ("250x250", mode.size.ToString());
-  EXPECT_EQ(58.0f, mode.refresh_rate);
+
+  mode = display_manager->GetSelectedModeForDisplayId(id2);
+  EXPECT_TRUE(!!mode);
+  EXPECT_EQ("250x250", mode->size().ToString());
+  EXPECT_EQ(58.0f, mode->refresh_rate());
 }
 
 }  // namespace ash

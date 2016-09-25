@@ -7,6 +7,8 @@
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -14,12 +16,12 @@ namespace {
 
 ScrollState* CreateScrollState(double deltaX, double deltaY, bool beginning, bool ending)
 {
-    OwnPtr<ScrollStateData> scrollStateData = adoptPtr(new ScrollStateData());
+    std::unique_ptr<ScrollStateData> scrollStateData = wrapUnique(new ScrollStateData());
     scrollStateData->delta_x = deltaX;
     scrollStateData->delta_y = deltaY;
     scrollStateData->is_beginning = beginning;
     scrollStateData->is_ending = ending;
-    return ScrollState::create(scrollStateData.release());
+    return ScrollState::create(std::move(scrollStateData));
 }
 
 class ScrollStateTest : public testing::Test {

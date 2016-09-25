@@ -21,7 +21,9 @@ class ClocklessAudioSinkThread : public base::DelegateSimpleThread::Delegate {
                            bool hashing)
       : callback_(callback),
         audio_bus_(AudioBus::Create(params)),
-        stop_event_(new base::WaitableEvent(false, false)) {
+        stop_event_(new base::WaitableEvent(
+            base::WaitableEvent::ResetPolicy::AUTOMATIC,
+            base::WaitableEvent::InitialState::NOT_SIGNALED)) {
     if (hashing)
       audio_hash_.reset(new AudioHash());
   }
@@ -67,15 +69,21 @@ class ClocklessAudioSinkThread : public base::DelegateSimpleThread::Delegate {
    }
 
   AudioRendererSink::RenderCallback* callback_;
-  scoped_ptr<AudioBus> audio_bus_;
-  scoped_ptr<base::WaitableEvent> stop_event_;
-  scoped_ptr<base::DelegateSimpleThread> thread_;
+  std::unique_ptr<AudioBus> audio_bus_;
+  std::unique_ptr<base::WaitableEvent> stop_event_;
+  std::unique_ptr<base::DelegateSimpleThread> thread_;
   base::TimeDelta playback_time_;
-  scoped_ptr<AudioHash> audio_hash_;
+  std::unique_ptr<AudioHash> audio_hash_;
 };
 
 ClocklessAudioSink::ClocklessAudioSink()
-    : initialized_(false), playing_(false), hashing_(false) {}
+    : ClocklessAudioSink(OutputDeviceInfo()) {}
+
+ClocklessAudioSink::ClocklessAudioSink(const OutputDeviceInfo& device_info)
+    : device_info_(device_info),
+      initialized_(false),
+      playing_(false),
+      hashing_(false) {}
 
 ClocklessAudioSink::~ClocklessAudioSink() {}
 
@@ -122,7 +130,12 @@ bool ClocklessAudioSink::SetVolume(double volume) {
 }
 
 OutputDeviceInfo ClocklessAudioSink::GetOutputDeviceInfo() {
-  return OutputDeviceInfo();
+  return device_info_;
+}
+
+bool ClocklessAudioSink::CurrentThreadIsRenderingThread() {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 void ClocklessAudioSink::StartAudioHashForTesting() {

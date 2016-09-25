@@ -32,14 +32,7 @@ class ScrollView;
 
 namespace message_center {
 
-// Interface that MessageView uses to report clicks and other user actions.
-// Provided by creator of MessageView.
-class MessageViewController {
- public:
-  virtual void ClickOnNotification(const std::string& notification_id) = 0;
-  virtual void RemoveNotification(const std::string& notification_id,
-                                  bool by_user) = 0;
-};
+class MessageCenterController;
 
 // Individual notifications constants.
 const int kPaddingBetweenItems = 10;
@@ -52,11 +45,8 @@ const int kWebNotificationIconSize = 40;
 class MESSAGE_CENTER_EXPORT MessageView : public views::SlideOutView,
                                           public views::ButtonListener {
  public:
-  MessageView(MessageViewController* controller,
-              const std::string& notification_id,
-              const NotifierId& notifier_id,
-              const gfx::ImageSkia& small_image,
-              const base::string16& display_source);
+  MessageView(MessageCenterController* controller,
+              const Notification& notification);
   ~MessageView() override;
 
   // Updates this view with the new data contained in the notification.
@@ -68,13 +58,9 @@ class MESSAGE_CENTER_EXPORT MessageView : public views::SlideOutView,
   // Creates a shadow around the notification.
   void CreateShadowBorder();
 
-  virtual bool IsCloseButtonFocused();
-  virtual void RequestFocusOnCloseButton();
-  virtual bool IsPinned();
-
-  void set_accessible_name(const base::string16& accessible_name) {
-    accessible_name_ = accessible_name;
-  }
+  bool IsCloseButtonFocused();
+  void RequestFocusOnCloseButton();
+  bool IsPinned();
 
   // Overridden from views::View:
   void GetAccessibleState(ui::AXViewState* state) override;
@@ -97,30 +83,43 @@ class MESSAGE_CENTER_EXPORT MessageView : public views::SlideOutView,
   NotifierId notifier_id() { return notifier_id_; }
   const base::string16& display_source() const { return display_source_; }
 
+  void set_controller(MessageCenterController* controller) {
+    controller_ = controller;
+  }
+
  protected:
   // Overridden from views::SlideOutView:
   void OnSlideOut() override;
 
+  // Creates and add close button to view hierarchy when necessary. Derived
+  // classes should call this after its view hierarchy is populated to ensure
+  // it is on top of other views.
+  void CreateOrUpdateCloseButtonView(const Notification& notification);
+
+  // Changes the background color being used by |background_view_| and schedules
+  // a paint.
+  virtual void SetDrawBackgroundAsActive(bool active);
+
+  views::View* background_view() { return background_view_; }
   views::ImageView* small_image() { return small_image_view_.get(); }
+  views::ImageButton* close_button() { return close_button_.get(); }
   views::ScrollView* scroller() { return scroller_; }
+  MessageCenterController* controller() { return controller_; }
 
  private:
-  MessageViewController* controller_;
+  MessageCenterController* controller_;  // Weak, lives longer then views.
   std::string notification_id_;
   NotifierId notifier_id_;
-  views::View* background_view_;  // Owned by views hierarchy.
+  views::View* background_view_ = nullptr;  // Owned by views hierarchy.
   std::unique_ptr<views::ImageView> small_image_view_;
-  views::ScrollView* scroller_;
+  std::unique_ptr<views::ImageButton> close_button_;
+  views::ScrollView* scroller_ = nullptr;
 
   base::string16 accessible_name_;
 
   base::string16 display_source_;
 
   std::unique_ptr<views::Painter> focus_painter_;
-
-  // Changes the background color being used by |background_view_| and schedules
-  // a paint.
-  void SetDrawBackgroundAsActive(bool active);
 
   DISALLOW_COPY_AND_ASSIGN(MessageView);
 };

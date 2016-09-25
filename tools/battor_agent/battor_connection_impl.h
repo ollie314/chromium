@@ -5,6 +5,7 @@
 #ifndef TOOLS_BATTOR_AGENT_BATTOR_CONNECTION_IMPL_H_
 #define TOOLS_BATTOR_AGENT_BATTOR_CONNECTION_IMPL_H_
 
+#include <fstream>
 #include <vector>
 
 #include "base/callback_forward.h"
@@ -43,6 +44,7 @@ class BattOrConnectionImpl
                  const void* buffer,
                  size_t bytes_to_send) override;
   void ReadMessage(BattOrMessageType type) override;
+  void CancelReadMessage() override;
   void Flush() override;
 
  protected:
@@ -68,12 +70,24 @@ class BattOrConnectionImpl
                     std::unique_ptr<std::vector<char>> data);
 
   // Pulls off the next complete message from already_read_buffer_, returning
-  // its type and contents (via out parameters) and whether a complete message
-  // was able to be read (via the return value).
-  bool ParseMessage(BattOrMessageType* type, std::vector<char>* data);
+  // its type and contents through out parameters and any error that occurred
+  // through the return value.
+  enum ParseMessageError {
+    NONE = 0,
+    NOT_ENOUGH_BYTES = 1,
+    MISSING_START_BYTE = 2,
+    INVALID_MESSAGE_TYPE = 3,
+    TOO_MANY_START_BYTES = 4
+  };
+
+  ParseMessageError ParseMessage(BattOrMessageType* type,
+                                 std::vector<char>* data);
 
   // Internal callback for when bytes are sent.
   void OnBytesSent(int bytes_sent, device::serial::SendError error);
+
+  // Appends |str| to the serial log file if it exists.
+  void LogSerial(const std::string& str);
 
   // The path of the BattOr.
   std::string path_;
@@ -92,6 +106,8 @@ class BattOrConnectionImpl
   // Threads needed for serial communication.
   scoped_refptr<base::SingleThreadTaskRunner> file_thread_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> ui_thread_task_runner_;
+
+  std::fstream serial_log_;
 
   DISALLOW_COPY_AND_ASSIGN(BattOrConnectionImpl);
 };

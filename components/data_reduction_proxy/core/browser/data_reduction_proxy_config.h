@@ -15,7 +15,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -23,6 +22,8 @@
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_interfaces.h"
 #include "net/log/net_log.h"
+#include "net/nqe/effective_connection_type.h"
+#include "net/nqe/network_quality_estimator.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_retry_info.h"
 
@@ -35,7 +36,6 @@ class SingleThreadTaskRunner;
 namespace net {
 class HostPortPair;
 class NetLog;
-class NetworkQualityEstimator;
 class URLFetcher;
 class URLRequest;
 class URLRequestContextGetter;
@@ -93,9 +93,9 @@ class DataReductionProxyConfig
   // of the |DataReductionProxyConfig| instance, with the exception of
   // |config_values| which is owned by |this|. |event_creator| is used for
   // logging the start and end of a secure proxy check; |net_log| is used to
-  // create a net::BoundNetLog for correlating the start and end of the check.
-  // |config_values| contains the Data Reduction Proxy configuration values.
-  // |configurator| is the target for a configuration update.
+  // create a net::NetLogWithSource for correlating the start and end of the
+  // check. |config_values| contains the Data Reduction Proxy configuration
+  // values. |configurator| is the target for a configuration update.
   DataReductionProxyConfig(
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       net::NetLog* net_log,
@@ -196,6 +196,10 @@ class DataReductionProxyConfig
   // saver proxy is reachable.
   bool enabled_by_user_and_reachable() const;
 
+  // Gets the ProxyConfig that would be used ignoring the holdback experiment.
+  // This should only be used for logging purposes.
+  net::ProxyConfig ProxyConfigIgnoringHoldback() const;
+
  protected:
   // Virtualized for mocking. Records UMA containing the result of requesting
   // the secure proxy check.
@@ -231,6 +235,7 @@ class DataReductionProxyConfig
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
                            AreProxiesBypassedRetryDelay);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest, AutoLoFiParams);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest, AutoLoFiMissingParams);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
                            AutoLoFiParamsSlowConnectionsFlag);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest, LoFiAccuracy);
@@ -289,11 +294,9 @@ class DataReductionProxyConfig
   bool ShouldEnableLoFiModeInternal(
       const net::NetworkQualityEstimator* network_quality_estimator);
 
-  // Returns true if expected throughput is lower than the one specified in the
-  // Auto Lo-Fi field trial parameters OR if the expected round trip time is
-  // higher than the one specified in the Auto Lo-Fi field trial parameters.
-  // |network_quality_estimator| may be NULL.
-  // Virtualized for unit testing.
+  // Returns true if the network quality is at least as poor as the one
+  // specified in the Auto Lo-Fi field trial parameters.
+  // |network_quality_estimator| may be NULL. Virtualized for unit testing.
   virtual bool IsNetworkQualityProhibitivelySlow(
       const net::NetworkQualityEstimator* network_quality_estimator);
 
@@ -304,6 +307,11 @@ class DataReductionProxyConfig
   void RecordAutoLoFiAccuracyRate(
       const net::NetworkQualityEstimator* network_quality_estimator,
       const base::TimeDelta& measuring_duration) const;
+
+  // Returns true if |effective_connection_type| is at least as poor as
+  // |lofi_effective_connection_type_threshold_|.
+  bool IsEffectiveConnectionTypeSlowerThanThreshold(
+      net::EffectiveConnectionType effective_connection_type) const;
 
   std::unique_ptr<SecureProxyChecker> secure_proxy_checker_;
 
@@ -319,12 +327,12 @@ class DataReductionProxyConfig
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 
   // The caller must ensure that the |net_log_|, if set, outlives this instance.
-  // It is used to create new instances of |bound_net_log_| on secure proxy
-  // checks. |bound_net_log_| permits the correlation of the begin and end
-  // phases of a given secure proxy check, and a new one is created for each
-  // secure proxy check (with |net_log_| as a parameter).
+  // It is used to create new instances of |net_log_with_source_| on secure
+  // proxy checks. |net_log_with_source_| permits the correlation of the begin
+  // and end phases of a given secure proxy check, and a new one is created for
+  // each secure proxy check (with |net_log_| as a parameter).
   net::NetLog* net_log_;
-  net::BoundNetLog bound_net_log_;
+  net::NetLogWithSource net_log_with_source_;
 
   // The caller must ensure that the |configurator_| outlives this instance.
   DataReductionProxyConfigurator* configurator_;
@@ -336,13 +344,9 @@ class DataReductionProxyConfig
   base::ThreadChecker thread_checker_;
 
   // Thresholds from the field trial at which auto Lo-Fi is turned on.
-  // If the expected round trip time is higher than |auto_lofi_minimum_rtt_|,
-  // auto Lo-Fi would be turned on.
-  base::TimeDelta auto_lofi_minimum_rtt_;
-
-  // If the expected throughput in Kbps is lower than
-  // |auto_lofi_maximum_kbps_|, auto Lo-Fi would be turned on.
-  int32_t auto_lofi_maximum_kbps_;
+  // If the effective connection type is at least as slow as
+  // |lofi_effective_connection_type_threshold_|, Lo-Fi would be turned on.
+  net::EffectiveConnectionType lofi_effective_connection_type_threshold_;
 
   // State of auto Lo-Fi is not changed more than once in any period of
   // duration shorter than |auto_lofi_hysteresis_|.

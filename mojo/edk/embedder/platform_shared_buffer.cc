@@ -9,10 +9,16 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory.h"
 #include "base/process/process_handle.h"
 #include "base/sys_info.h"
 #include "mojo/edk/embedder/platform_handle_utils.h"
+
+#if defined(OS_NACL)
+// For getpagesize() on NaCl.
+#include <unistd.h>
+#endif
 
 namespace mojo {
 namespace edk {
@@ -108,7 +114,7 @@ bool PlatformSharedBuffer::IsReadOnly() const {
   return read_only_;
 }
 
-scoped_ptr<PlatformSharedBufferMapping> PlatformSharedBuffer::Map(
+std::unique_ptr<PlatformSharedBufferMapping> PlatformSharedBuffer::Map(
     size_t offset,
     size_t length) {
   if (!IsValidMap(offset, length))
@@ -129,7 +135,7 @@ bool PlatformSharedBuffer::IsValidMap(size_t offset, size_t length) {
   return true;
 }
 
-scoped_ptr<PlatformSharedBufferMapping> PlatformSharedBuffer::MapNoCheck(
+std::unique_ptr<PlatformSharedBufferMapping> PlatformSharedBuffer::MapNoCheck(
     size_t offset,
     size_t length) {
   DCHECK(IsValidMap(offset, length));
@@ -142,10 +148,10 @@ scoped_ptr<PlatformSharedBufferMapping> PlatformSharedBuffer::MapNoCheck(
   if (handle == base::SharedMemory::NULLHandle())
     return nullptr;
 
-  scoped_ptr<PlatformSharedBufferMapping> mapping(
+  std::unique_ptr<PlatformSharedBufferMapping> mapping(
       new PlatformSharedBufferMapping(handle, read_only_, offset, length));
   if (mapping->Map())
-    return make_scoped_ptr(mapping.release());
+    return base::WrapUnique(mapping.release());
 
   return nullptr;
 }
@@ -247,21 +253,28 @@ bool PlatformSharedBuffer::InitFromPlatformHandle(
 bool PlatformSharedBuffer::InitFromPlatformHandlePair(
     ScopedPlatformHandle rw_platform_handle,
     ScopedPlatformHandle ro_platform_handle) {
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_MACOSX)
   NOTREACHED();
   return false;
-#else
-  DCHECK(!shared_memory_);
+#else  // defined(OS_MACOSX)
 
+#if defined(OS_WIN)
+  base::SharedMemoryHandle handle(rw_platform_handle.release().handle,
+                                  base::GetCurrentProcId());
+  base::SharedMemoryHandle ro_handle(ro_platform_handle.release().handle,
+                                     base::GetCurrentProcId());
+#else  // defined(OS_WIN)
   base::SharedMemoryHandle handle(rw_platform_handle.release().handle, false);
-  shared_memory_.reset(new base::SharedMemory(handle, false));
-
   base::SharedMemoryHandle ro_handle(ro_platform_handle.release().handle,
                                      false);
-  ro_shared_memory_.reset(new base::SharedMemory(ro_handle, true));
+#endif  // defined(OS_WIN)
 
+  DCHECK(!shared_memory_);
+  shared_memory_.reset(new base::SharedMemory(handle, false));
+  ro_shared_memory_.reset(new base::SharedMemory(ro_handle, true));
   return true;
-#endif
+
+#endif  // defined(OS_MACOSX)
 }
 
 void PlatformSharedBuffer::InitFromSharedMemoryHandle(
@@ -287,7 +300,13 @@ bool PlatformSharedBufferMapping::Map() {
   // Mojo shared buffers can be mapped at any offset. However,
   // base::SharedMemory must be mapped at a page boundary. So calculate what the
   // nearest whole page offset is, and build a mapping that's offset from that.
-  size_t offset_rounding = offset_ % base::SysInfo::VMAllocationGranularity();
+#if defined(OS_NACL)
+  // base::SysInfo isn't available under NaCl.
+  size_t page_size = getpagesize();
+#else
+  size_t page_size = base::SysInfo::VMAllocationGranularity();
+#endif
+  size_t offset_rounding = offset_ % page_size;
   size_t real_offset = offset_ - offset_rounding;
   size_t real_length = length_ + offset_rounding;
 

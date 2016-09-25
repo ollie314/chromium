@@ -9,10 +9,12 @@
 
 #include <string>
 
+#include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/common/frame_message_enums.h"
+#include "content/common/resource_request_body_impl.h"
 #include "content/public/common/page_state.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/request_context_type.h"
@@ -35,9 +37,9 @@ enum LoFiState {
 
 // PlzNavigate
 // Helper function to determine if the navigation to |url| should make a request
-// to the network stack. A request should not be sent for data URLs, JavaScript
-// URLs or about:blank. In these cases, no request needs to be sent.
-bool ShouldMakeNetworkRequestForURL(const GURL& url);
+// to the network stack. A request should not be sent for JavaScript URLs or
+// about:blank. In these cases, no request needs to be sent.
+bool CONTENT_EXPORT ShouldMakeNetworkRequestForURL(const GURL& url);
 
 // The following structures hold parameters used during a navigation. In
 // particular they are used by FrameMsg_Navigate, FrameMsg_CommitNavigation and
@@ -48,19 +50,21 @@ bool ShouldMakeNetworkRequestForURL(const GURL& url);
 // Used by all navigation IPCs.
 struct CONTENT_EXPORT CommonNavigationParams {
   CommonNavigationParams();
-  CommonNavigationParams(const GURL& url,
-                         const Referrer& referrer,
-                         ui::PageTransition transition,
-                         FrameMsg_Navigate_Type::Value navigation_type,
-                         bool allow_download,
-                         bool should_replace_current_entry,
-                         base::TimeTicks ui_timestamp,
-                         FrameMsg_UILoadMetricsReportType::Value report_type,
-                         const GURL& base_url_for_data_url,
-                         const GURL& history_url_for_data_url,
-                         LoFiState lofi_state,
-                         const base::TimeTicks& navigation_start,
-                         std::string method);
+  CommonNavigationParams(
+      const GURL& url,
+      const Referrer& referrer,
+      ui::PageTransition transition,
+      FrameMsg_Navigate_Type::Value navigation_type,
+      bool allow_download,
+      bool should_replace_current_entry,
+      base::TimeTicks ui_timestamp,
+      FrameMsg_UILoadMetricsReportType::Value report_type,
+      const GURL& base_url_for_data_url,
+      const GURL& history_url_for_data_url,
+      LoFiState lofi_state,
+      const base::TimeTicks& navigation_start,
+      std::string method,
+      const scoped_refptr<ResourceRequestBodyImpl>& post_data);
   CommonNavigationParams(const CommonNavigationParams& other);
   ~CommonNavigationParams();
 
@@ -118,6 +122,9 @@ struct CONTENT_EXPORT CommonNavigationParams {
 
   // The request method: GET, POST, etc.
   std::string method;
+
+  // Body of HTTP POST request.
+  scoped_refptr<ResourceRequestBodyImpl> post_data;
 };
 
 // Provided by the renderer ----------------------------------------------------
@@ -172,34 +179,38 @@ struct CONTENT_EXPORT BeginNavigationParams {
 // PlzNavigate: These are not used.
 struct CONTENT_EXPORT StartNavigationParams {
   StartNavigationParams();
-  StartNavigationParams(
-      const std::string& extra_headers,
-      const std::vector<unsigned char>& browser_initiated_post_data,
+  StartNavigationParams(const std::string& extra_headers,
 #if defined(OS_ANDROID)
-      bool has_user_gesture,
+                        bool has_user_gesture,
 #endif
-      int transferred_request_child_id,
-      int transferred_request_request_id);
+                        int transferred_request_child_id,
+                        int transferred_request_request_id);
   StartNavigationParams(const StartNavigationParams& other);
   ~StartNavigationParams();
 
   // Extra headers (separated by \n) to send during the request.
   std::string extra_headers;
 
-  // If is_post is true, holds the post_data information from browser. Empty
-  // otherwise.
-  std::vector<unsigned char> browser_initiated_post_data;
-
 #if defined(OS_ANDROID)
   bool has_user_gesture;
 #endif
 
   // The following two members identify a previous request that has been
-  // created before this navigation is being transferred to a new render view.
+  // created before this navigation is being transferred to a new process.
   // This serves the purpose of recycling the old request.
   // Unless this refers to a transferred navigation, these values are -1 and -1.
   int transferred_request_child_id;
   int transferred_request_request_id;
+};
+
+// PlzNavigate
+// Timings collected in the browser during navigation for the
+// Navigation Timing API. Sent to Blink in RequestNavigationParams when
+// the navigation is ready to be committed.
+struct CONTENT_EXPORT NavigationTiming {
+  base::TimeTicks redirect_start;
+  base::TimeTicks redirect_end;
+  base::TimeTicks fetch_start;
 };
 
 // Used by FrameMsg_Navigate. Holds the parameters needed by the renderer to
@@ -216,6 +227,8 @@ struct CONTENT_EXPORT RequestNavigationParams {
                           int32_t page_id,
                           int nav_entry_id,
                           bool is_same_document_history_load,
+                          bool is_history_navigation_in_new_child,
+                          bool has_subtree_history_items,
                           bool has_committed_real_load,
                           bool intended_as_new_entry,
                           int pending_history_list_offset,
@@ -261,6 +274,19 @@ struct CONTENT_EXPORT RequestNavigationParams {
   // the same document.  Defaults to false.
   bool is_same_document_history_load;
 
+  // Whether this is a history navigation in a newly created child frame, in
+  // which case the browser process is instructing the renderer process to load
+  // a URL from a session history item.  Defaults to false.
+  bool is_history_navigation_in_new_child;
+
+  // If this is a history navigation, this indicates whether the browser process
+  // is aware of any subframe history items for the given frame.  If not, the
+  // renderer does not need to check with the browser if any subframes are
+  // created during the navigation.
+  // TODO(creis): Expand this to a data structure of unique names and
+  // corresponding PageStates in https://crbug.com/639842.
+  bool has_subtree_history_items;
+
   // Whether the frame being navigated has already committed a real page, which
   // affects how new navigations are classified in the renderer process.
   // This currently is only ever set to true in --site-per-process mode.
@@ -296,6 +322,10 @@ struct CONTENT_EXPORT RequestNavigationParams {
   // PlzNavigate
   // Whether a ServiceWorkerProviderHost should be created for the window.
   bool should_create_service_worker;
+
+  // PlzNavigate
+  // Timing of navigation events.
+  NavigationTiming navigation_timing;
 
   // PlzNavigate
   // The ServiceWorkerProviderHost ID used for navigations, if it was already

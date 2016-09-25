@@ -19,8 +19,8 @@ import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.content.app.ChildProcessService;
 import org.chromium.content.app.ChromiumLinkerParams;
+import org.chromium.content.common.FileDescriptorInfo;
 import org.chromium.content.common.IChildProcessCallback;
 import org.chromium.content.common.IChildProcessService;
 
@@ -34,7 +34,6 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
     private final int mServiceNumber;
     private final boolean mInSandbox;
     private final ChildProcessConnection.DeathCallback mDeathCallback;
-    private final Class<? extends ChildProcessService> mServiceClass;
     private final ComponentName mServiceName;
 
     // Synchronization: While most internal flow occurs on the UI thread, the public API
@@ -73,7 +72,7 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
     private ChromiumLinkerParams mLinkerParams = null;
 
     private final boolean mAlwaysInForeground;
-    private final ChildProcessLauncher.ChildProcessCreationParams mCreationParams;
+    private final ChildProcessCreationParams mCreationParams;
 
     // Caches whether non-sandboxed and sandboxed services require an extra
     // binding flag provided via ChildProcessCreationParams.
@@ -211,18 +210,17 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
 
     ChildProcessConnectionImpl(Context context, int number, boolean inSandbox,
             ChildProcessConnection.DeathCallback deathCallback,
-            Class<? extends ChildProcessService> serviceClass,
+            String serviceClassName,
             ChromiumLinkerParams chromiumLinkerParams,
             boolean alwaysInForeground,
-            ChildProcessLauncher.ChildProcessCreationParams creationParams) {
+            ChildProcessCreationParams creationParams) {
         mContext = context;
         mServiceNumber = number;
         mInSandbox = inSandbox;
         mDeathCallback = deathCallback;
-        mServiceClass = serviceClass;
         String packageName =
                 creationParams != null ? creationParams.getPackageName() : context.getPackageName();
-        mServiceName = new ComponentName(packageName, mServiceClass.getName() + mServiceNumber);
+        mServiceName = new ComponentName(packageName, serviceClassName + mServiceNumber);
         mLinkerParams = chromiumLinkerParams;
         mAlwaysInForeground = alwaysInForeground;
         mCreationParams = creationParams;
@@ -268,6 +266,12 @@ public class ChildProcessConnectionImpl implements ChildProcessConnection {
     @Override
     public boolean isInSandbox() {
         return mInSandbox;
+    }
+
+    @Override
+    public String getPackageName() {
+        return mCreationParams != null ? mCreationParams.getPackageName()
+                : mContext.getPackageName();
     }
 
     @Override

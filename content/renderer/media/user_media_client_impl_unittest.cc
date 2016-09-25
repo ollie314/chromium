@@ -62,6 +62,7 @@ class UserMediaClientImplUnderTest : public UserMediaClientImpl {
         result_(NUM_MEDIA_REQUEST_RESULTS),
         result_name_(""),
         factory_(dependency_factory),
+        create_source_that_fails_(false),
         video_source_(NULL) {}
 
   void RequestUserMedia(const blink::WebUserMediaRequest& user_media_request) {
@@ -84,6 +85,15 @@ class UserMediaClientImplUnderTest : public UserMediaClientImpl {
     blink::WebMediaStreamTrackSourcesRequest sources_request;
     state_ = REQUEST_NOT_COMPLETE;
     requestSources(sources_request);
+  }
+
+  void SetMediaDeviceChangeObserver() {
+    blink::WebMediaDeviceChangeObserver observer(true);
+    setMediaDeviceChangeObserver(observer);
+  }
+
+  void RemoveMediaDeviceChangeObserver() {
+    setMediaDeviceChangeObserver(blink::WebMediaDeviceChangeObserver());
   }
 
   void GetUserMediaRequestSucceeded(
@@ -115,6 +125,32 @@ class UserMediaClientImplUnderTest : public UserMediaClientImpl {
       blink::WebVector<blink::WebSourceInfo>& sources) override {
     state_ = REQUEST_SUCCEEDED;
     last_sources_ = sources;
+  }
+
+  void SetCreateSourceThatFails(bool should_fail) {
+    create_source_that_fails_ = should_fail;
+  }
+
+  MediaStreamAudioSource* CreateAudioSource(
+      const StreamDeviceInfo& device,
+      const blink::WebMediaConstraints& constraints) override {
+    MediaStreamAudioSource* source;
+    if (create_source_that_fails_) {
+      class FailedAtLifeAudioSource : public MediaStreamAudioSource {
+       public:
+        FailedAtLifeAudioSource() : MediaStreamAudioSource(true) {}
+        ~FailedAtLifeAudioSource() override {}
+       protected:
+        bool EnsureSourceIsStarted() override {
+          return false;
+        }
+      };
+      source = new FailedAtLifeAudioSource();
+    } else {
+      source = new MediaStreamAudioSource(true);
+    }
+    source->SetDeviceInfo(device);
+    return source;
   }
 
   MediaStreamVideoSource* CreateVideoSource(
@@ -170,6 +206,7 @@ class UserMediaClientImplUnderTest : public UserMediaClientImpl {
   blink::WebVector<blink::WebMediaDeviceInfo> last_devices_;
   blink::WebVector<blink::WebSourceInfo> last_sources_;
   PeerConnectionDependencyFactory* factory_;
+  bool create_source_that_fails_;
   MockMediaStreamVideoCapturerSource* video_source_;
 };
 
@@ -227,12 +264,22 @@ class UserMediaClientImplTest : public ::testing::Test {
   }
 
   void FakeMediaStreamDispatcherRequestMediaDevicesComplete() {
+    // There may be repeated replies due to device or configuration changes.
+    used_media_impl_->OnDevicesEnumerated(
+        ms_dispatcher_->audio_input_request_id(),
+        ms_dispatcher_->audio_input_array());
     used_media_impl_->OnDevicesEnumerated(
         ms_dispatcher_->audio_input_request_id(),
         ms_dispatcher_->audio_input_array());
     used_media_impl_->OnDevicesEnumerated(
         ms_dispatcher_->audio_output_request_id(),
         ms_dispatcher_->audio_output_array());
+    used_media_impl_->OnDevicesEnumerated(
+        ms_dispatcher_->audio_output_request_id(),
+        ms_dispatcher_->audio_output_array());
+    used_media_impl_->OnDevicesEnumerated(
+        ms_dispatcher_->video_request_id(),
+        ms_dispatcher_->video_array());
     used_media_impl_->OnDevicesEnumerated(
         ms_dispatcher_->video_request_id(),
         ms_dispatcher_->video_array());
@@ -259,11 +306,6 @@ class UserMediaClientImplTest : public ::testing::Test {
         used_media_impl_->last_created_video_source();
     if (video_source->SourceHasAttemptedToStart())
       video_source->FailToStartMockedSource();
-    blink::WebHeap::collectGarbageForTesting();
-  }
-
-  void FailToCreateNextAudioCapturer() {
-    dependency_factory_->FailToCreateNextAudioCapturer();
     blink::WebHeap::collectGarbageForTesting();
   }
 
@@ -443,7 +485,7 @@ TEST_F(UserMediaClientImplTest, MediaVideoSourceFailToStart) {
 
 // This test what happens if an audio source fail to initialize.
 TEST_F(UserMediaClientImplTest, MediaAudioSourceFailToInitialize) {
-  FailToCreateNextAudioCapturer();
+  used_media_impl_->SetCreateSourceThatFails(true);
   used_media_impl_->RequestUserMedia();
   FakeMediaStreamDispatcherRequestUserMediaComplete();
   StartMockedVideoSource();
@@ -615,10 +657,13 @@ TEST_F(UserMediaClientImplTest, RenderToAssociatedSinkConstraint) {
   used_media_impl_->DeleteRequest(ms_dispatcher_->audio_input_request_id());
 
   // If audio is requested, but no constraint, it should be true.
+  // Currently we expect it to be false due to a suspected bug in the
+  // device-matching code causing issues with some sound adapters.
+  // See crbug.com/604523
   MockConstraintFactory factory;
   blink::WebMediaConstraints audio_constraints =
       factory.CreateWebMediaConstraints();
-  EXPECT_TRUE(AudioRequestHasAutomaticDeviceSelection(
+  EXPECT_FALSE(AudioRequestHasAutomaticDeviceSelection(
       factory.CreateWebMediaConstraints()));
 
   // If the constraint is present, it should dictate the result.
@@ -636,6 +681,43 @@ TEST_F(UserMediaClientImplTest, RenderToAssociatedSinkConstraint) {
   factory.basic().renderToAssociatedSink.setExact(false);
   EXPECT_FALSE(AudioRequestHasAutomaticDeviceSelection(
       factory.CreateWebMediaConstraints()));
+}
+
+TEST_F(UserMediaClientImplTest, ObserveMediaDeviceChanges) {
+  // For a null UserMediaRequest (no audio requested), we expect false.
+  EXPECT_EQ(0U, ms_dispatcher_->NumDeviceChangeSubscribers());
+  used_media_impl_->SetMediaDeviceChangeObserver();
+  EXPECT_EQ(1U, ms_dispatcher_->NumDeviceChangeSubscribers());
+  used_media_impl_->OnDevicesChanged();
+  used_media_impl_->RemoveMediaDeviceChangeObserver();
+  EXPECT_EQ(0U, ms_dispatcher_->NumDeviceChangeSubscribers());
+  used_media_impl_->OnDevicesChanged();
+}
+
+// This test what happens if the audio stream has same id with video stream.
+TEST_F(UserMediaClientImplTest, AudioVideoWithSameId) {
+  ms_dispatcher_->TestSameId();
+
+  // Generate a stream with both audio and video.
+  blink::WebMediaStream mixed_desc = RequestLocalMediaStream();
+
+  // Remove video track. This should trigger
+  // UserMediaClientImpl::OnLocalSourceStopped, and has video track to be
+  // removed from its |local_sources_|.
+  blink::WebVector<blink::WebMediaStreamTrack> video_tracks;
+  mixed_desc.videoTracks(video_tracks);
+  MediaStreamTrack* video_track = MediaStreamTrack::GetTrack(video_tracks[0]);
+  video_track->Stop();
+  EXPECT_EQ(1, ms_dispatcher_->stop_video_device_counter());
+  EXPECT_EQ(0, ms_dispatcher_->stop_audio_device_counter());
+
+  // Now we close the web frame, if in the above Stop() call,
+  // UserMediaClientImpl accidentally removed audio track, then video track will
+  // be removed again here, which is incorrect.
+  used_media_impl_->FrameWillClose();
+  blink::WebHeap::collectAllGarbageForTesting();
+  EXPECT_EQ(1, ms_dispatcher_->stop_video_device_counter());
+  EXPECT_EQ(1, ms_dispatcher_->stop_audio_device_counter());
 }
 
 }  // namespace content

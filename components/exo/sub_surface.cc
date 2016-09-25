@@ -15,7 +15,7 @@ namespace exo {
 // SubSurface, public:
 
 SubSurface::SubSurface(Surface* surface, Surface* parent)
-    : surface_(surface), parent_(parent), is_synchronized_(true) {
+    : surface_(surface), parent_(parent) {
   surface_->SetSurfaceDelegate(this);
   surface_->AddSurfaceObserver(this);
   parent_->AddSurfaceObserver(this);
@@ -80,8 +80,9 @@ void SubSurface::SetCommitBehavior(bool synchronized) {
   is_synchronized_ = synchronized;
 }
 
-scoped_ptr<base::trace_event::TracedValue> SubSurface::AsTracedValue() const {
-  scoped_ptr<base::trace_event::TracedValue> value(
+std::unique_ptr<base::trace_event::TracedValue> SubSurface::AsTracedValue()
+    const {
+  std::unique_ptr<base::trace_event::TracedValue> value(
       new base::trace_event::TracedValue());
   value->SetBoolean("is_synchronized", is_synchronized_);
   return value;
@@ -95,6 +96,7 @@ void SubSurface::OnSurfaceCommit() {
   if (IsSurfaceSynchronized())
     return;
 
+  surface_->CheckIfSurfaceHierarchyNeedsCommitToNewSurfaces();
   surface_->CommitSurfaceHierarchy();
 }
 

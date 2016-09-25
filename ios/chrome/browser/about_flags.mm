@@ -19,14 +19,13 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/sys_info.h"
-#include "components/autofill/core/common/autofill_switches.h"
 #include "components/dom_distiller/core/dom_distiller_switches.h"
 #include "components/flags_ui/feature_entry.h"
 #include "components/flags_ui/feature_entry_macros.h"
 #include "components/flags_ui/flags_storage.h"
 #include "components/flags_ui/flags_ui_switches.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/sync_driver/sync_driver_switches.h"
+#include "components/sync/driver/sync_driver_switches.h"
 #include "google_apis/gaia/gaia_switches.h"
 #include "ios/chrome/browser/chrome_switches.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -100,13 +99,13 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
     command_line->AppendSwitch(switches::kDisableLRUSnapshotCache);
   }
 
-  // Populate command line flag for the NTP favicons experiment from the
+  // Populate command line flag for the AllBookmarks from the
   // configuration plist.
-  NSString* enableNTPFavicons = [defaults stringForKey:@"EnableNTPFavicons"];
-  if ([enableNTPFavicons isEqualToString:@"Enabled"]) {
-    command_line->AppendSwitch(switches::kEnableNTPFavicons);
-  } else if ([enableNTPFavicons isEqualToString:@"Disabled"]) {
-    command_line->AppendSwitch(switches::kDisableNTPFavicons);
+  NSString* enableAllBookmarks = [defaults stringForKey:@"AllBookmarks"];
+  if ([enableAllBookmarks isEqualToString:@"Enabled"]) {
+    command_line->AppendSwitch(switches::kEnableAllBookmarksView);
+  } else if ([enableAllBookmarks isEqualToString:@"Disabled"]) {
+    command_line->AppendSwitch(switches::kDisableAllBookmarksView);
   }
 
   // Populate command line flags from PasswordGenerationEnabled.
@@ -116,6 +115,15 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
     command_line->AppendSwitch(switches::kEnableIOSPasswordGeneration);
   } else if ([enablePasswordGenerationValue isEqualToString:@"Disabled"]) {
     command_line->AppendSwitch(switches::kDisableIOSPasswordGeneration);
+  }
+
+  // Populate command line flags from PhysicalWebEnabled.
+  NSString* enablePhysicalWebValue =
+      [defaults stringForKey:@"PhysicalWebEnabled"];
+  if ([enablePhysicalWebValue isEqualToString:@"Enabled"]) {
+    command_line->AppendSwitch(switches::kEnableIOSPhysicalWeb);
+  } else if ([enablePhysicalWebValue isEqualToString:@"Disabled"]) {
+    command_line->AppendSwitch(switches::kDisableIOSPhysicalWeb);
   }
 
   // Web page replay flags.
@@ -134,14 +142,6 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
 
   if ([defaults boolForKey:@"EnableCredentialManagement"])
     command_line->AppendSwitch(switches::kEnableCredentialManagerAPI);
-
-  // Populate command line flags from FullFormAutofill.
-  NSString* fullFormAutofillValue = [defaults stringForKey:@"FullFormAutofill"];
-  if ([fullFormAutofillValue isEqualToString:@"Enabled"]) {
-    command_line->AppendSwitch(autofill::switches::kEnableFullFormAutofillIOS);
-  } else if ([fullFormAutofillValue isEqualToString:@"Disabled"]) {
-    command_line->AppendSwitch(autofill::switches::kDisableFullFormAutofillIOS);
-  }
 
   NSString* autoReloadEnabledValue =
       [defaults stringForKey:@"AutoReloadEnabled"];
@@ -176,22 +176,6 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
     }
   }
 
-  // Populate command line flags from EnableWKWebView.
-  NSString* enableWKWebViewValue = [defaults stringForKey:@"EnableWKWebView"];
-  if ([enableWKWebViewValue isEqualToString:@"Enabled"]) {
-    command_line->AppendSwitch(switches::kEnableIOSWKWebView);
-  } else if ([enableWKWebViewValue isEqualToString:@"Disabled"]) {
-    command_line->AppendSwitch(switches::kDisableIOSWKWebView);
-  }
-
-  // Populate command line flags from TabEviction.
-  NSString* tabEviction = [defaults stringForKey:@"TabEviction"];
-  if ([tabEviction isEqualToString:@"Enabled"]) {
-    command_line->AppendSwitch(switches::kEnableTabEviction);
-  } else if ([tabEviction isEqualToString:@"Disabled"]) {
-    command_line->AppendSwitch(switches::kDisableTabEviction);
-  }
-
   // Set the UA flag if UseMobileSafariUA is enabled.
   if ([defaults boolForKey:@"UseMobileSafariUA"]) {
     // Safari uses "Vesion/", followed by the OS version excluding bugfix, where
@@ -204,6 +188,27 @@ void AppendSwitchesFromExperimentalSettings(base::CommandLine* command_line) {
 
     command_line->AppendSwitchASCII(switches::kUserAgent,
                                     web::BuildUserAgentFromProduct(product));
+  }
+
+  // Populate command line flags from QRScanner.
+  if ([defaults boolForKey:@"DisableQRCodeReader"]) {
+    command_line->AppendSwitch(switches::kDisableQRScanner);
+  } else {
+    command_line->AppendSwitch(switches::kEnableQRScanner);
+  }
+
+  // Populate command line flag for the Payment Request API.
+  NSString* enable_payment_request =
+      [defaults stringForKey:@"EnablePaymentRequest"];
+  if ([enable_payment_request isEqualToString:@"Enabled"]) {
+    command_line->AppendSwitch(switches::kEnablePaymentRequest);
+  } else if ([enable_payment_request isEqualToString:@"Disabled"]) {
+    command_line->AppendSwitch(switches::kDisablePaymentRequest);
+  }
+
+  // Populate command line flag for Spotlight Actions.
+  if ([defaults boolForKey:@"DisableSpotlightActions"]) {
+    command_line->AppendSwitch(switches::kDisableSpotlightActions);
   }
 
   // Freeform commandline flags.  These are added last, so that any flags added
@@ -261,6 +266,13 @@ void ConvertFlagsToSwitches(flags_ui::FlagsStorage* flags_storage,
       flags_storage, command_line, flags_ui::kAddSentinels,
       switches::kEnableIOSFeatures, switches::kDisableIOSFeatures);
   AppendSwitchesFromExperimentalSettings(command_line);
+}
+
+std::vector<std::string> RegisterAllFeatureVariationParameters(
+    flags_ui::FlagsStorage* flags_storage,
+    base::FeatureList* feature_list) {
+  return FlagsStateSingleton::GetFlagsState()
+      ->RegisterAllFeatureVariationParameters(flags_storage, feature_list);
 }
 
 void GetFlagFeatureEntries(flags_ui::FlagsStorage* flags_storage,

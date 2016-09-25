@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "ui/base/hit_test.h"
 #include "ui/events/event_utils.h"
@@ -25,7 +26,7 @@ class TestBubbleDialogDelegateView : public BubbleDialogDelegateView {
   TestBubbleDialogDelegateView(View* anchor_view)
       : BubbleDialogDelegateView(anchor_view, BubbleBorder::TOP_LEFT),
         view_(new View()) {
-    view_->SetFocusable(true);
+    view_->SetFocusBehavior(FocusBehavior::ALWAYS);
     AddChildView(view_);
   }
   ~TestBubbleDialogDelegateView() override {}
@@ -48,12 +49,13 @@ class BubbleDialogDelegateTest : public ViewsTestBase {
   BubbleDialogDelegateTest() {}
   ~BubbleDialogDelegateTest() override {}
 
-  // Creates a test widget that owns its native widget.
+  // Creates and shows a test widget that owns its native widget.
   Widget* CreateTestWidget() {
     Widget* widget = new Widget();
     Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     widget->Init(params);
+    widget->Show();
     return widget;
   }
 
@@ -76,12 +78,30 @@ TEST_F(BubbleDialogDelegateTest, CreateDelegate) {
   bubble_widget->Show();
 
   BubbleBorder* border = bubble_delegate->GetBubbleFrameView()->bubble_border();
-  EXPECT_EQ(bubble_delegate->arrow(), border->arrow());
   EXPECT_EQ(bubble_delegate->color(), border->background_color());
 
   EXPECT_FALSE(bubble_observer.widget_closed());
   bubble_widget->CloseNow();
   EXPECT_TRUE(bubble_observer.widget_closed());
+}
+
+TEST_F(BubbleDialogDelegateTest, MirrorArrowInRtl) {
+  std::string default_locale = base::i18n::GetConfiguredLocale();
+  std::unique_ptr<Widget> anchor_widget(CreateTestWidget());
+  for (bool rtl : {false, true}) {
+    base::i18n::SetICUDefaultLocale(rtl ? "he" : "en");
+    EXPECT_EQ(rtl, base::i18n::IsRTL());
+    for (bool mirror : {false, true}) {
+      TestBubbleDialogDelegateView* bubble =
+          new TestBubbleDialogDelegateView(anchor_widget->GetContentsView());
+      bubble->set_mirror_arrow_in_rtl(mirror);
+      BubbleDialogDelegateView::CreateBubble(bubble);
+      EXPECT_EQ(rtl && mirror ? BubbleBorder::horizontal_mirror(bubble->arrow())
+                              : bubble->arrow(),
+                bubble->GetBubbleFrameView()->bubble_border()->arrow());
+    }
+  }
+  base::i18n::SetICUDefaultLocale(default_locale);
 }
 
 TEST_F(BubbleDialogDelegateTest, CloseAnchorWidget) {
@@ -248,7 +268,6 @@ TEST_F(BubbleDialogDelegateTest, VisibleWhenAnchorWidgetBoundsChanged) {
   test::TestWidgetObserver bubble_observer(bubble_widget);
   EXPECT_FALSE(bubble_observer.widget_closed());
 
-  anchor_widget->Show();
   bubble_widget->Show();
   EXPECT_TRUE(bubble_widget->IsVisible());
   anchor_widget->SetBounds(gfx::Rect(10, 10, 100, 100));
@@ -276,7 +295,6 @@ TEST_F(BubbleDialogDelegateTest, CloseMethods) {
     bubble_delegate->set_close_on_deactivate(true);
     Widget* bubble_widget =
         BubbleDialogDelegateView::CreateBubble(bubble_delegate);
-    anchor_widget->Show();
     bubble_widget->Show();
     anchor_widget->Activate();
     EXPECT_TRUE(bubble_widget->IsClosed());
@@ -303,7 +321,7 @@ TEST_F(BubbleDialogDelegateTest, CloseMethods) {
         BubbleDialogDelegateView::CreateBubble(bubble_delegate);
     bubble_widget->Show();
     BubbleFrameView* frame_view = bubble_delegate->GetBubbleFrameView();
-    LabelButton* close_button = frame_view->close_;
+    Button* close_button = frame_view->close_;
     ASSERT_TRUE(close_button);
     frame_view->ButtonPressed(
         close_button,

@@ -20,14 +20,20 @@ class ClipTree;
 struct DrawProperties;
 class Layer;
 class LayerImpl;
-class LayerTreeHost;
+class LayerTree;
 class RenderSurfaceImpl;
 class EffectTree;
 class TransformTree;
 class PropertyTrees;
+struct EffectNode;
 
 namespace draw_property_utils {
 
+void CC_EXPORT PostConcatSurfaceContentsScale(const EffectNode* effect_node,
+                                              gfx::Transform* transform);
+
+void CC_EXPORT ConcatInverseSurfaceContentsScale(const EffectNode* effect_node,
+                                                 gfx::Transform* transform);
 // Computes combined clips for every node in |clip_tree|. This function requires
 // that |transform_tree| has been updated via |ComputeTransforms|.
 void CC_EXPORT ComputeClips(ClipTree* clip_tree,
@@ -56,13 +62,10 @@ void CC_EXPORT BuildPropertyTreesAndComputeVisibleRects(
     PropertyTrees* property_trees,
     LayerImplList* visible_layer_list);
 
-void CC_EXPORT UpdateRenderSurfaces(Layer* root_layer,
-                                    PropertyTrees* property_trees);
-
 void CC_EXPORT UpdatePropertyTrees(PropertyTrees* property_trees,
                                    bool can_render_to_separate_surface);
 
-void CC_EXPORT FindLayersThatNeedUpdates(LayerTreeHost* layer_tree_host,
+void CC_EXPORT FindLayersThatNeedUpdates(LayerTree* layer_tree,
                                          const TransformTree& transform_tree,
                                          const EffectTree& effect_tree,
                                          LayerList* update_layer_list);
@@ -77,10 +80,18 @@ void CC_EXPORT ComputeVisibleRects(LayerImpl* root_layer,
                                    bool can_render_to_separate_surface,
                                    LayerImplList* visible_layer_list);
 
+gfx::Rect CC_EXPORT
+ComputeLayerVisibleRectDynamic(const PropertyTrees* property_trees,
+                               const LayerImpl* layer);
+void CC_EXPORT
+VerifyVisibleRectsCalculations(const LayerImplList& layer_list,
+                               const PropertyTrees* property_trees);
+
 void CC_EXPORT ComputeLayerDrawProperties(LayerImpl* layer,
-                                          const PropertyTrees* property_trees,
-                                          bool layers_always_allowed_lcd_text,
-                                          bool can_use_lcd_text);
+                                          const PropertyTrees* property_trees);
+
+void CC_EXPORT ComputeMaskDrawProperties(LayerImpl* mask_layer,
+                                         const PropertyTrees* property_trees);
 
 void CC_EXPORT ComputeSurfaceDrawProperties(const PropertyTrees* property_trees,
                                             RenderSurfaceImpl* render_surface);
@@ -98,8 +109,15 @@ bool CC_EXPORT LayerNeedsUpdate(LayerImpl* layer,
                                 bool layer_is_drawn,
                                 const TransformTree& tree);
 
+void CC_EXPORT VerifyClipTreeCalculations(const LayerImplList& layer_list,
+                                          PropertyTrees* property_trees);
+
+void CC_EXPORT VerifyTransformTreeCalculations(const LayerImplList& layer_list,
+                                               PropertyTrees* property_trees);
+
 gfx::Transform CC_EXPORT DrawTransform(const LayerImpl* layer,
-                                       const TransformTree& tree);
+                                       const TransformTree& transform_tree,
+                                       const EffectTree& effect_tree);
 
 gfx::Transform CC_EXPORT ScreenSpaceTransform(const Layer* layer,
                                               const TransformTree& tree);

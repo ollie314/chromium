@@ -12,6 +12,12 @@
 #include "base/test/mock_chrome_application_mac.h"
 #endif
 
+#if defined(USE_OZONE)
+#include "base/command_line.h"
+#include "base/message_loop/message_loop.h"
+#include "ui/ozone/public/ozone_platform.h"
+#endif
+
 namespace {
 
 class GlTestSuite : public base::TestSuite {
@@ -22,6 +28,14 @@ class GlTestSuite : public base::TestSuite {
  protected:
   void Initialize() override {
     base::TestSuite::Initialize();
+#if defined(USE_OZONE)
+    main_loop_.reset(new base::MessageLoopForUI());
+    // Make Ozone run in single-process mode, where it doesn't expect a GPU
+    // process and it spawns and starts its own DRM thread.
+    ui::OzonePlatform::InitParams params;
+    params.single_process = true;
+    ui::OzonePlatform::InitializeForUI(params);
+#endif
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
     mock_cr_app::RegisterMockCrApp();
@@ -33,6 +47,11 @@ class GlTestSuite : public base::TestSuite {
   }
 
  private:
+#if defined(USE_OZONE)
+  // On Ozone, the backend initializes the event system using a UI thread.
+  std::unique_ptr<base::MessageLoopForUI> main_loop_;
+#endif
+
   DISALLOW_COPY_AND_ASSIGN(GlTestSuite);
 };
 

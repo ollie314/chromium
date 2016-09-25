@@ -8,7 +8,9 @@
 #include <set>
 #include <utility>
 
+#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
@@ -30,6 +32,8 @@
 #include "google_apis/drive/drive_api_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
+
+using extensions::api::file_manager_private::Verb;
 
 namespace file_manager {
 namespace file_tasks {
@@ -62,38 +66,33 @@ void UpdateDefaultTaskPreferences(TestingPrefServiceSimple* pref_service,
 TEST(FileManagerFileTasksTest,
      FullTaskDescriptor_NonDriveAppWithIconAndDefault) {
   FullTaskDescriptor full_descriptor(
-      TaskDescriptor("app-id",
-                     TASK_TYPE_FILE_BROWSER_HANDLER,
-                     "action-id"),
-      "task title",
-      GURL("http://example.com/icon.png"),
-      true /* is_default */,
-      false /* is_generic_file_handler */);
+      TaskDescriptor("app-id", TASK_TYPE_FILE_BROWSER_HANDLER, "action-id"),
+      "task title", Verb::VERB_OPEN_WITH, GURL("http://example.com/icon.png"),
+      true /* is_default */, false /* is_generic_file_handler */);
 
   const std::string task_id =
       TaskDescriptorToId(full_descriptor.task_descriptor());
   EXPECT_EQ("app-id|file|action-id", task_id);
   EXPECT_EQ("http://example.com/icon.png", full_descriptor.icon_url().spec());
   EXPECT_EQ("task title", full_descriptor.task_title());
+  EXPECT_EQ(Verb::VERB_OPEN_WITH, full_descriptor.task_verb());
   EXPECT_TRUE(full_descriptor.is_default());
 }
 
 TEST(FileManagerFileTasksTest,
      FullTaskDescriptor_DriveAppWithoutIconAndNotDefault) {
   FullTaskDescriptor full_descriptor(
-      TaskDescriptor("app-id",
-                     TASK_TYPE_DRIVE_APP,
-                     "action-id"),
-      "task title",
+      TaskDescriptor("app-id", TASK_TYPE_DRIVE_APP, "action-id"), "task title",
+      Verb::VERB_OPEN_WITH,
       GURL(),  // No icon URL.
-      false /* is_default */,
-      false /* is_generic_file_handler */);
+      false /* is_default */, false /* is_generic_file_handler */);
 
   const std::string task_id =
       TaskDescriptorToId(full_descriptor.task_descriptor());
   EXPECT_EQ("app-id|drive|action-id", task_id);
   EXPECT_TRUE(full_descriptor.icon_url().is_empty());
   EXPECT_EQ("task title", full_descriptor.task_title());
+  EXPECT_EQ(Verb::VERB_OPEN_WITH, full_descriptor.task_verb());
   EXPECT_FALSE(full_descriptor.is_default());
 }
 
@@ -260,16 +259,12 @@ TEST(FileManagerFileTasksTest, ChooseAndSetDefaultTask_MultipleTasks) {
                                "action-id");
   std::vector<FullTaskDescriptor> tasks;
   tasks.push_back(FullTaskDescriptor(
-      text_app_task,
-      "Text.app",
-      GURL("http://example.com/text_app.png"),
-      false /* is_default */,
+      text_app_task, "Text.app", Verb::VERB_OPEN_WITH,
+      GURL("http://example.com/text_app.png"), false /* is_default */,
       false /* is_generic_file_handler */));
   tasks.push_back(FullTaskDescriptor(
-      nice_app_task,
-      "Nice.app",
-      GURL("http://example.com/nice_app.png"),
-      false /* is_default */,
+      nice_app_task, "Nice.app", Verb::VERB_ADD_TO,
+      GURL("http://example.com/nice_app.png"), false /* is_default */,
       false /* is_generic_file_handler */));
   std::vector<extensions::EntryInfo> entries;
   entries.push_back(extensions::EntryInfo(
@@ -328,10 +323,8 @@ TEST(FileManagerFileTasksTest, ChooseAndSetDefaultTask_FallbackFileBrowser) {
                                 "view-in-browser");
   std::vector<FullTaskDescriptor> tasks;
   tasks.push_back(FullTaskDescriptor(
-      files_app_task,
-      "View in browser",
-      GURL("http://example.com/some_icon.png"),
-      false /* is_default */,
+      files_app_task, "View in browser", Verb::VERB_OPEN_WITH,
+      GURL("http://example.com/some_icon.png"), false /* is_default */,
       false /* is_generic_file_handler */));
   std::vector<extensions::EntryInfo> entries;
   entries.push_back(extensions::EntryInfo(
@@ -435,6 +428,31 @@ class FileManagerFileTasksComplexTest : public testing::Test {
         base::FilePath()  /* install_directory */,
         false  /* autoupdate_enabled*/);
   }
+
+  // Helper class for calling FindAllTypesOfTask synchronously.
+  class FindAllTypesOfTasksSynchronousWrapper {
+   public:
+    void Call(Profile* profile,
+              const drive::DriveAppRegistry* drive_app_registry,
+              const std::vector<extensions::EntryInfo>& entries,
+              const std::vector<GURL>& file_urls,
+              std::vector<FullTaskDescriptor>* result) {
+      FindAllTypesOfTasks(
+          profile, drive_app_registry, entries, file_urls,
+          base::Bind(&FindAllTypesOfTasksSynchronousWrapper::OnReply,
+                     base::Unretained(this), result));
+      run_loop_.Run();
+    }
+
+   private:
+    void OnReply(std::vector<FullTaskDescriptor>* out,
+                 std::unique_ptr<std::vector<FullTaskDescriptor>> result) {
+      *out = *result;
+      run_loop_.Quit();
+    }
+
+    base::RunLoop run_loop_;
+  };
 
   content::TestBrowserThreadBundle thread_bundle_;
   chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
@@ -735,8 +753,8 @@ TEST_F(FileManagerFileTasksComplexTest, FindAllTypesOfTasks) {
   file_urls.push_back(GURL("filesystem:chrome-extension://id/dir/foo.txt"));
 
   std::vector<FullTaskDescriptor> tasks;
-  FindAllTypesOfTasks(&test_profile_, &drive_app_registry, entries, file_urls,
-                      &tasks);
+  FindAllTypesOfTasksSynchronousWrapper().Call(
+      &test_profile_, &drive_app_registry, entries, file_urls, &tasks);
   ASSERT_EQ(3U, tasks.size());
 
   // Sort the app IDs, as the order is not guaranteed.
@@ -837,8 +855,8 @@ TEST_F(FileManagerFileTasksComplexTest, FindAllTypesOfTasks_GoogleDocument) {
   file_urls.push_back(GURL("filesystem:chrome-extension://id/dir/foo.gdoc"));
 
   std::vector<FullTaskDescriptor> tasks;
-  FindAllTypesOfTasks(&test_profile_, &drive_app_registry, entries, file_urls,
-                      &tasks);
+  FindAllTypesOfTasksSynchronousWrapper().Call(
+      &test_profile_, &drive_app_registry, entries, file_urls, &tasks);
   ASSERT_EQ(1U, tasks.size());
   EXPECT_EQ(kFileManagerAppId, tasks[0].task_descriptor().app_id);
 }
@@ -1027,6 +1045,140 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Generic) {
   // Confirm that only Bar.app is found and that it is a generic file handler.
   EXPECT_EQ(kBarId, dir_result[0].task_descriptor().app_id);
   EXPECT_TRUE(dir_result[0].is_generic_file_handler());
+}
+
+// The basic logic is similar to a test case for FindDriveAppTasks above.
+TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Verbs) {
+  // kFooId copied from FindFileHandlerTasks test above.
+  const char kFooId[] = "hhgbjpmdppecanaaogonaigmmifgpaph";
+
+  // Foo.app can handle "text/plain" and "text/html".
+  extensions::ExtensionBuilder foo_app;
+  foo_app.SetManifest(
+      extensions::DictionaryBuilder()
+          .Set("name", "Foo")
+          .Set("version", "1.0.0")
+          .Set("manifest_version", 2)
+          .Set("app", extensions::DictionaryBuilder()
+                          .Set("background",
+                               extensions::DictionaryBuilder()
+                                   .Set("scripts", extensions::ListBuilder()
+                                                       .Append("background.js")
+                                                       .Build())
+                                   .Build())
+                          .Build())
+          .Set(
+              "file_handlers",
+              extensions::DictionaryBuilder()
+                  .Set("any",
+                       extensions::DictionaryBuilder()
+                           .Set("types",
+                                extensions::ListBuilder().Append("*").Build())
+                           .Set("verb", "add_to")
+                           .Build())
+                  .Set("any_with_directories",
+                       extensions::DictionaryBuilder()
+                           .SetBoolean("include_directories", true)
+                           .Set("types",
+                                extensions::ListBuilder().Append("*").Build())
+                           .Set("verb", "pack_with")
+                           .Build())
+                  .Set("all_text", extensions::DictionaryBuilder()
+                                       .Set("title", "Text")
+                                       .Set("types", extensions::ListBuilder()
+                                                         .Append("text/plain")
+                                                         .Append("text/html")
+                                                         .Build())
+                                       .Set("verb", "add_to")
+                                       .Build())
+                  .Set("plain_text", extensions::DictionaryBuilder()
+                                         .Set("title", "Plain")
+                                         .Set("types", extensions::ListBuilder()
+                                                           .Append("text/plain")
+                                                           .Build())
+                                         .Set("verb", "open_with")
+                                         .Build())
+                  .Set("html_text_duplicate_verb",
+                       extensions::DictionaryBuilder()
+                           .Set("title", "Html")
+                           .Set("types", extensions::ListBuilder()
+                                             .Append("text/html")
+                                             .Build())
+                           .Set("verb", "add_to")
+                           .Build())
+                  .Set("share_plain_text",
+                       extensions::DictionaryBuilder()
+                           .Set("title", "Share Plain")
+                           .Set("types", extensions::ListBuilder()
+                                             .Append("text/plain")
+                                             .Build())
+                           .Set("verb", "share_with")
+                           .Build())
+                  .Build())
+          .Build());
+  foo_app.SetID(kFooId);
+  extension_service_->AddExtension(foo_app.Build().get());
+
+  // Find app with corresponding verbs for a "text/plain" file.
+  // Foo.app with ADD_TO, OPEN_WITH, PACK_WITH and SHARE_WITH should be found,
+  // but only one ADD_TO that is not a generic handler will be taken into
+  // account, even though there are 2 ADD_TO matches for "text/plain".
+  std::vector<extensions::EntryInfo> entries;
+  entries.push_back(
+      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
+                                .AppendASCII("foo.txt"),
+                            "text/plain", false));
+
+  std::vector<FullTaskDescriptor> tasks;
+  FindFileHandlerTasks(&test_profile_, entries, &tasks);
+
+  ASSERT_EQ(4U, tasks.size());
+  EXPECT_EQ(kFooId, tasks[0].task_descriptor().app_id);
+  EXPECT_EQ("Foo", tasks[0].task_title());
+  EXPECT_EQ(Verb::VERB_ADD_TO, tasks[0].task_verb());
+  EXPECT_EQ(kFooId, tasks[1].task_descriptor().app_id);
+  EXPECT_EQ("Foo", tasks[1].task_title());
+  EXPECT_EQ(Verb::VERB_OPEN_WITH, tasks[1].task_verb());
+  EXPECT_EQ(kFooId, tasks[2].task_descriptor().app_id);
+  EXPECT_EQ("Foo", tasks[2].task_title());
+  EXPECT_EQ(Verb::VERB_PACK_WITH, tasks[2].task_verb());
+  EXPECT_EQ(kFooId, tasks[3].task_descriptor().app_id);
+  EXPECT_EQ("Foo", tasks[3].task_title());
+  EXPECT_EQ(Verb::VERB_SHARE_WITH, tasks[3].task_verb());
+
+  // Find app with corresponding verbs for a "text/html" file.
+  // Foo.app with ADD_TO and PACK_WITH should be found, but only the first
+  // ADD_TO that is a good match will be taken into account, even though there
+  // are 3 ADD_TO matches for "text/html".
+  entries.clear();
+  entries.push_back(
+      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
+                                .AppendASCII("foo.html"),
+                            "text/html", false));
+  tasks.clear();
+  FindFileHandlerTasks(&test_profile_, entries, &tasks);
+
+  ASSERT_EQ(2U, tasks.size());
+  EXPECT_EQ(kFooId, tasks[0].task_descriptor().app_id);
+  EXPECT_EQ("Foo", tasks[0].task_title());
+  EXPECT_EQ(Verb::VERB_ADD_TO, tasks[0].task_verb());
+  EXPECT_EQ(kFooId, tasks[1].task_descriptor().app_id);
+  EXPECT_EQ("Foo", tasks[1].task_title());
+  EXPECT_EQ(Verb::VERB_PACK_WITH, tasks[1].task_verb());
+
+  // Find app with corresponding verbs for directories.
+  // Foo.app with only PACK_WITH should be found.
+  entries.clear();
+  entries.push_back(extensions::EntryInfo(
+      drive::util::GetDriveMountPointPath(&test_profile_).AppendASCII("dir"),
+      "", true));
+  tasks.clear();
+  FindFileHandlerTasks(&test_profile_, entries, &tasks);
+
+  ASSERT_EQ(1U, tasks.size());
+  EXPECT_EQ(kFooId, tasks[0].task_descriptor().app_id);
+  EXPECT_EQ("Foo", tasks[0].task_title());
+  EXPECT_EQ(Verb::VERB_PACK_WITH, tasks[0].task_verb());
 }
 
 }  // namespace file_tasks

@@ -5,12 +5,12 @@
 <translation id="153454903766751181">در حال راه‌اندازی مودم سلولی...</translation>
 <translation id="158849752021629804">شبکه خانگی مورد نیاز است</translation>
 <translation id="1661867754829461514">پین جا افتاده</translation>
-<translation id="1773212559869067373">گواهینامه تأیید اعتبار به صورت محلی رد شد</translation>
+<translation id="1773212559869067373">گواهینامه راستی‌آزمایی به صورت محلی رد شد</translation>
 <translation id="1829129547161959350">پنگوئن</translation>
 <translation id="1850504506766569011">‏Wi-Fi خاموش است.</translation>
 <translation id="2288278176040912387">ضبط صوت</translation>
 <translation id="2354174487190027830">فعال‌سازی <ph name="NAME" /></translation>
-<translation id="2544853746127077729">گواهینامه تأیید اعتبار توسط شبکه رد شد</translation>
+<translation id="2544853746127077729">گواهینامه راستی‌آزمایی توسط شبکه رد شد</translation>
 <translation id="2563185590376525700">قورباغه</translation>
 <translation id="2563856802393254086">تبریک می‌گوییم! خدمات داده «<ph name="NAME" />» شما فعال شده است و آماده استفاده است.</translation>
 <translation id="2649120831653069427">ماهی رنگین‌مکان</translation>
@@ -28,7 +28,7 @@
 <translation id="4237016987259239829">خطای اتصال شبکه</translation>
 <translation id="4274292172790327596">خطای ناشناس</translation>
 <translation id="4326192123064055915">قهوه</translation>
-<translation id="4387004326333427325">گواهینامه تأیید اعتبار، از راه دور، رد شد</translation>
+<translation id="4387004326333427325">گواهینامه راستی‌آزمایی، از راه دور، رد شد</translation>
 <translation id="4442424173763614572">‏جستجوی DNS انجام نشد</translation>
 <translation id="4448844063988177157">‏در حال جستجوی شبکه‌های Wi-Fi...</translation>
 <translation id="4479639480957787382">اترنت</translation>
@@ -36,7 +36,7 @@
 <translation id="4508265954913339219">فعالسازی انجام نشد</translation>
 <translation id="4559767610552730302">بوکه</translation>
 <translation id="4935975195727477204">گل میخک</translation>
-<translation id="5045550434625856497">گذرواژه نامعتبر</translation>
+<translation id="5045550434625856497">گذرواژه نادرست</translation>
 <translation id="5097002363526479830">اتصال ناموفق به شبکه "<ph name="NAME" />":<ph name="DETAILS" /></translation>
 <translation id="515594325917491223">شطرنج</translation>
 <translation id="5257456363153333584">سنجاقک</translation>
@@ -44,10 +44,10 @@
 <translation id="5864471791310927901">‏بررسی DHCP انجام نشد</translation>
 <translation id="6232116551750539448">اتصال به <ph name="NAME" /> قطع شده است</translation>
 <translation id="6267036997247669271"><ph name="NAME" />: در حال فعال‌سازی…</translation>
-<translation id="6312403991423642364">خطای شبکه ناشناخته</translation>
+<translation id="6312403991423642364">خطای شبکه ناشناس</translation>
 <translation id="6490455614072479501">اتصال به «<ph name="NAME" />» انجام نشد: <ph name="DETAILS" />
         پیام سرور: <ph name="SERVER_MSG" /></translation>
-<translation id="6549021752953852991">هیچ شبکه سلولی دردسترس نیست</translation>
+<translation id="6549021752953852991">هیچ شبکه سلولی در دسترس نیست</translation>
 <translation id="6732801395666424405">گواهی‌ها بارگیری نشدند</translation>
 <translation id="6857811139397017780">فعال سازی <ph name="NETWORKSERVICE" /></translation>
 <translation id="6935521024859866267">وارونه</translation>

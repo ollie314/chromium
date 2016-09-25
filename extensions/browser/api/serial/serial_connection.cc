@@ -9,7 +9,10 @@
 
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/memory/ptr_util.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "device/serial/buffer.h"
 #include "extensions/browser/api/api_resource_manager.h"
 #include "extensions/common/api/serial.h"
@@ -164,9 +167,9 @@ SerialConnection::SerialConnection(const std::string& port,
       send_timeout_(0),
       paused_(false),
       io_handler_(device::SerialIoHandler::Create(
-          content::BrowserThread::GetMessageLoopProxyForThread(
+          content::BrowserThread::GetTaskRunnerForThread(
               content::BrowserThread::FILE),
-          content::BrowserThread::GetMessageLoopProxyForThread(
+          content::BrowserThread::GetTaskRunnerForThread(
               content::BrowserThread::UI))) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 }
@@ -222,9 +225,9 @@ bool SerialConnection::Receive(const ReceiveCompleteCallback& callback) {
     return false;
   receive_complete_ = callback;
   receive_buffer_ = new net::IOBuffer(buffer_size_);
-  io_handler_->Read(make_scoped_ptr(new device::ReceiveBuffer(
+  io_handler_->Read(base::MakeUnique<device::ReceiveBuffer>(
       receive_buffer_, buffer_size_,
-      base::Bind(&SerialConnection::OnAsyncReadComplete, AsWeakPtr()))));
+      base::Bind(&SerialConnection::OnAsyncReadComplete, AsWeakPtr())));
   receive_timeout_task_.reset();
   if (receive_timeout_ > 0) {
     receive_timeout_task_.reset(new TimeoutTask(
@@ -240,8 +243,8 @@ bool SerialConnection::Send(const std::vector<char>& data,
   if (!send_complete_.is_null())
     return false;
   send_complete_ = callback;
-  io_handler_->Write(make_scoped_ptr(new device::SendBuffer(
-      data, base::Bind(&SerialConnection::OnAsyncWriteComplete, AsWeakPtr()))));
+  io_handler_->Write(base::MakeUnique<device::SendBuffer>(
+      data, base::Bind(&SerialConnection::OnAsyncWriteComplete, AsWeakPtr())));
   send_timeout_task_.reset();
   if (send_timeout_ > 0) {
     send_timeout_task_.reset(new TimeoutTask(
@@ -363,9 +366,8 @@ void SerialConnection::OnAsyncWriteComplete(int bytes_sent,
 SerialConnection::TimeoutTask::TimeoutTask(const base::Closure& closure,
                                            const base::TimeDelta& delay)
     : closure_(closure), delay_(delay), weak_factory_(this) {
-  base::MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&TimeoutTask::Run, weak_factory_.GetWeakPtr()),
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::Bind(&TimeoutTask::Run, weak_factory_.GetWeakPtr()),
       delay_);
 }
 

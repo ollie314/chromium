@@ -33,7 +33,6 @@
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/RemoteFrameView.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "core/layout/LayoutPart.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/page/FocusController.h"
@@ -93,6 +92,8 @@ void HTMLFrameElementBase::openURL(bool replaceCurrentItem)
     if (!loadOrRedirectSubframe(url, m_frameName, replaceCurrentItem))
         return;
     if (!contentFrame() || scriptURL.isEmpty() || !contentFrame()->isLocalFrame())
+        return;
+    if (contentFrame()->owner()->getSandboxFlags() & SandboxOrigin)
         return;
     toLocalFrame(contentFrame())->script().executeScriptIfJavaScriptURL(scriptURL);
 }
@@ -170,9 +171,9 @@ void HTMLFrameElementBase::didNotifySubtreeInsertionsToDocument()
     setNameAndOpenURL();
 }
 
-void HTMLFrameElementBase::attach(const AttachContext& context)
+void HTMLFrameElementBase::attachLayoutTree(const AttachContext& context)
 {
-    HTMLFrameOwnerElement::attach(context);
+    HTMLFrameOwnerElement::attachLayoutTree(context);
 
     if (layoutPart()) {
         if (Frame* frame = contentFrame()) {
@@ -188,7 +189,7 @@ void HTMLFrameElementBase::setLocation(const String& str)
 {
     m_URL = AtomicString(str);
 
-    if (inShadowIncludingDocument())
+    if (isConnected())
         openURL(false);
 }
 

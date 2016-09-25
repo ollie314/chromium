@@ -29,6 +29,8 @@ const int AutocompleteClassifier::kDefaultOmniboxProviders =
 #else
     // "URL from clipboard" can only be used on iOS.
     AutocompleteProvider::TYPE_CLIPBOARD_URL |
+    // Physical Web omnibox results are only implemented on iOS.
+    AutocompleteProvider::TYPE_PHYSICAL_WEB |
 #endif
     AutocompleteProvider::TYPE_BOOKMARK |
     AutocompleteProvider::TYPE_HISTORY_QUICK |
@@ -36,8 +38,8 @@ const int AutocompleteClassifier::kDefaultOmniboxProviders =
     AutocompleteProvider::TYPE_SEARCH;
 
 AutocompleteClassifier::AutocompleteClassifier(
-    scoped_ptr<AutocompleteController> controller,
-    scoped_ptr<AutocompleteSchemeClassifier> scheme_classifier)
+    std::unique_ptr<AutocompleteController> controller,
+    std::unique_ptr<AutocompleteSchemeClassifier> scheme_classifier)
     : controller_(std::move(controller)),
       scheme_classifier_(std::move(scheme_classifier)),
       inside_classify_(false) {}

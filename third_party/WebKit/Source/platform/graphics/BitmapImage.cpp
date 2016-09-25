@@ -37,6 +37,7 @@
 #include "platform/graphics/skia/SkiaUtils.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "wtf/PassRefPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -57,6 +58,7 @@ PassRefPtr<BitmapImage> BitmapImage::createWithOrientationForTesting(const SkBit
 BitmapImage::BitmapImage(ImageObserver* observer)
     : Image(observer)
     , m_currentFrame(0)
+    , m_cachedFrameIndex(0)
     , m_repetitionCount(cAnimationNone)
     , m_repetitionCountStatus(Unknown)
     , m_repetitionsComplete(0)
@@ -67,7 +69,6 @@ BitmapImage::BitmapImage(ImageObserver* observer)
     , m_allDataReceived(false)
     , m_haveSize(false)
     , m_sizeAvailable(false)
-    , m_hasUniformFrameSize(true)
     , m_haveFrameCount(false)
 {
 }
@@ -76,6 +77,8 @@ BitmapImage::BitmapImage(const SkBitmap& bitmap, ImageObserver* observer)
     : Image(observer)
     , m_size(bitmap.width(), bitmap.height())
     , m_currentFrame(0)
+    , m_cachedFrame(SkImage::MakeFromBitmap(bitmap))
+    , m_cachedFrameIndex(0)
     , m_repetitionCount(cAnimationNone)
     , m_repetitionCountStatus(Unknown)
     , m_repetitionsComplete(0)
@@ -93,7 +96,6 @@ BitmapImage::BitmapImage(const SkBitmap& bitmap, ImageObserver* observer)
 
     m_frames.grow(1);
     m_frames[0].m_hasAlpha = !bitmap.isOpaque();
-    m_frames[0].m_frame = adoptRef(SkImage::NewFromBitmap(bitmap));
     m_frames[0].m_haveMetadata = true;
 }
 
@@ -107,31 +109,18 @@ bool BitmapImage::currentFrameHasSingleSecurityOrigin() const
     return true;
 }
 
-void BitmapImage::destroyDecodedData(bool destroyAll)
+void BitmapImage::destroyDecodedData()
 {
-    for (size_t i = 0; i < m_frames.size(); ++i) {
-        // The underlying frame isn't actually changing (we're just trying to
-        // save the memory for the framebuffer data), so we don't need to clear
-        // the metadata.
-        m_frames[i].clear(false);
-    }
-
-    m_source.clearCacheExceptFrame(destroyAll ? kNotFound : m_currentFrame);
+    m_cachedFrame.reset();
+    for (size_t i = 0; i < m_frames.size(); ++i)
+        m_frames[i].clear(true);
+    m_source.clearCacheExceptFrame(kNotFound);
     notifyMemoryChanged();
 }
 
-void BitmapImage::destroyDecodedDataIfNecessary()
+PassRefPtr<SharedBuffer> BitmapImage::data()
 {
-    // Animated images >5MB are considered large enough that we'll only hang on
-    // to one frame at a time.
-    static const size_t cLargeAnimationCutoff = 5242880;
-    size_t allFrameBytes = 0;
-    for (size_t i = 0; i < m_frames.size(); ++i)
-        allFrameBytes += m_frames[i].m_frameBytes;
-
-    if (allFrameBytes > cLargeAnimationCutoff) {
-        destroyDecodedData(false);
-    }
+    return m_source.data();
 }
 
 void BitmapImage::notifyMemoryChanged()
@@ -149,7 +138,7 @@ size_t BitmapImage::totalFrameBytes()
     return totalBytes;
 }
 
-void BitmapImage::cacheFrame(size_t index)
+sk_sp<SkImage> BitmapImage::decodeAndCacheFrame(size_t index)
 {
     size_t numFrames = frameCount();
     if (m_frames.size() < numFrames)
@@ -157,7 +146,9 @@ void BitmapImage::cacheFrame(size_t index)
 
     // We are caching frame snapshots.  This is OK even for partially decoded frames,
     // as they are cleared by dataChanged() when new data arrives.
-    m_frames[index].m_frame = m_source.createFrameAtIndex(index);
+    sk_sp<SkImage> image = m_source.createFrameAtIndex(index);
+    m_cachedFrame = image;
+    m_cachedFrameIndex = index;
 
     m_frames[index].m_orientation = m_source.orientationAtIndex(index);
     m_frames[index].m_haveMetadata = true;
@@ -167,11 +158,8 @@ void BitmapImage::cacheFrame(size_t index)
     m_frames[index].m_hasAlpha = m_source.frameHasAlphaAtIndex(index);
     m_frames[index].m_frameBytes = m_source.frameBytesAtIndex(index);
 
-    const IntSize frameSize(index ? m_source.frameSizeAtIndex(index) : m_size);
-    if (frameSize != m_size)
-        m_hasUniformFrameSize = false;
-
     notifyMemoryChanged();
+    return image;
 }
 
 void BitmapImage::updateSize() const
@@ -201,7 +189,24 @@ bool BitmapImage::getHotSpot(IntPoint& hotSpot) const
     return m_source.getHotSpot(hotSpot);
 }
 
-bool BitmapImage::dataChanged(bool allDataReceived)
+Image::SizeAvailability BitmapImage::setData(PassRefPtr<SharedBuffer> data, bool allDataReceived)
+{
+    if (!data.get())
+        return SizeAvailable;
+
+    int length = data->size();
+    if (!length)
+        return SizeAvailable;
+
+    // If ImageSource::setData() fails, we know that this is a decode error.
+    // Report size available so that it gets registered as such in ImageResource.
+    if (!m_source.setData(std::move(data), allDataReceived))
+        return SizeAvailable;
+
+    return dataChanged(allDataReceived);
+}
+
+Image::SizeAvailability BitmapImage::dataChanged(bool allDataReceived)
 {
     TRACE_EVENT0("blink", "BitmapImage::dataChanged");
 
@@ -226,18 +231,18 @@ bool BitmapImage::dataChanged(bool allDataReceived)
         // NOTE: Don't call frameIsCompleteAtIndex() here, that will try to
         // decode any uncached (i.e. never-decoded or
         // cleared-on-a-previous-pass) frames!
-        if (m_frames[i].m_haveMetadata && !m_frames[i].m_isComplete)
+        if (m_frames[i].m_haveMetadata && !m_frames[i].m_isComplete) {
             m_frames[i].clear(true);
+            if (i == m_cachedFrameIndex)
+                m_cachedFrame.reset();
+        }
     }
 
     // Feed all the data we've seen so far to the image decoder.
     m_allDataReceived = allDataReceived;
-    ASSERT(data());
-    m_source.setData(*data(), allDataReceived);
 
     m_haveFrameCount = false;
-    m_hasUniformFrameSize = true;
-    return isSizeAvailable();
+    return isSizeAvailable() ? SizeAvailable : SizeUnavailable;
 }
 
 bool BitmapImage::hasColorProfile() const
@@ -254,12 +259,12 @@ void BitmapImage::draw(SkCanvas* canvas, const SkPaint& paint, const FloatRect& 
 {
     TRACE_EVENT0("skia", "BitmapImage::draw");
 
-    RefPtr<SkImage> image = imageForCurrentFrame();
+    sk_sp<SkImage> image = imageForCurrentFrame();
     if (!image)
         return; // It's too early and we don't have an image yet.
 
     FloatRect adjustedSrcRect = srcRect;
-    adjustedSrcRect.intersect(FloatRect(0, 0, image->width(), image->height()));
+    adjustedSrcRect.intersect(SkRect::Make(image->bounds()));
 
     if (adjustedSrcRect.isEmpty() || dstRect.isEmpty())
         return; // Nothing to draw.
@@ -268,7 +273,7 @@ void BitmapImage::draw(SkCanvas* canvas, const SkPaint& paint, const FloatRect& 
     if (shouldRespectImageOrientation == RespectImageOrientation)
         orientation = frameOrientationAtIndex(m_currentFrame);
 
-    int initialSaveCount = canvas->getSaveCount();
+    SkAutoCanvasRestore autoRestore(canvas, false);
     FloatRect adjustedDstRect = dstRect;
     if (orientation != DefaultImageOrientation) {
         canvas->save();
@@ -286,12 +291,10 @@ void BitmapImage::draw(SkCanvas* canvas, const SkPaint& paint, const FloatRect& 
         }
     }
 
-    SkRect skSrcRect = adjustedSrcRect;
-    canvas->drawImageRect(image.get(), skSrcRect, adjustedDstRect, &paint,
+    canvas->drawImageRect(image.get(), adjustedSrcRect, adjustedDstRect, &paint,
         WebCoreClampingModeToSkiaRectConstraint(clampMode));
-    canvas->restoreToCount(initialSaveCount);
 
-    if (currentFrameIsLazyDecoded())
+    if (image->isLazyGenerated())
         PlatformInstrumentation::didDrawLazyPixelRef(image->uniqueID());
 
     if (ImageObserver* observer = getImageObserver())
@@ -333,23 +336,15 @@ bool BitmapImage::isSizeAvailable()
     return m_sizeAvailable;
 }
 
-bool BitmapImage::ensureFrameIsCached(size_t index)
+sk_sp<SkImage> BitmapImage::frameAtIndex(size_t index)
 {
     if (index >= frameCount())
-        return false;
-
-    if (index >= m_frames.size() || !m_frames[index].m_frame)
-        cacheFrame(index);
-
-    return true;
-}
-
-PassRefPtr<SkImage> BitmapImage::frameAtIndex(size_t index)
-{
-    if (!ensureFrameIsCached(index))
         return nullptr;
 
-    return m_frames[index].m_frame;
+    if (index == m_cachedFrameIndex && m_cachedFrame)
+        return m_cachedFrame;
+
+    return decodeAndCacheFrame(index);
 }
 
 bool BitmapImage::frameIsCompleteAtIndex(size_t index)
@@ -368,7 +363,7 @@ float BitmapImage::frameDurationAtIndex(size_t index)
     return m_source.frameDurationAtIndex(index);
 }
 
-PassRefPtr<SkImage> BitmapImage::imageForCurrentFrame()
+sk_sp<SkImage> BitmapImage::imageForCurrentFrame()
 {
     return frameAtIndex(currentFrame());
 }
@@ -376,9 +371,9 @@ PassRefPtr<SkImage> BitmapImage::imageForCurrentFrame()
 PassRefPtr<Image> BitmapImage::imageForDefaultFrame()
 {
     if (frameCount() > 1) {
-        RefPtr<SkImage> firstFrame = frameAtIndex(0);
+        sk_sp<SkImage> firstFrame = frameAtIndex(0);
         if (firstFrame)
-            return StaticBitmapImage::create(firstFrame);
+            return StaticBitmapImage::create(std::move(firstFrame));
     }
 
     return Image::imageForDefaultFrame();
@@ -389,10 +384,17 @@ bool BitmapImage::frameHasAlphaAtIndex(size_t index)
     if (m_frames.size() <= index)
         return true;
 
-    if (m_frames[index].m_haveMetadata)
-        return m_frames[index].m_hasAlpha;
+    if (m_frames[index].m_haveMetadata && !m_frames[index].m_hasAlpha)
+        return false;
 
-    return m_source.frameHasAlphaAtIndex(index);
+    // m_hasAlpha may change after m_haveMetadata is set to true, so always ask
+    // ImageSource for the value if the cached value is the default value.
+    bool hasAlpha = m_source.frameHasAlphaAtIndex(index);
+
+    if (m_frames[index].m_haveMetadata)
+        m_frames[index].m_hasAlpha = hasAlpha;
+
+    return hasAlpha;
 }
 
 bool BitmapImage::currentFrameKnownToBeOpaque(MetadataMode metadataMode)
@@ -412,7 +414,7 @@ bool BitmapImage::currentFrameIsComplete()
 
 bool BitmapImage::currentFrameIsLazyDecoded()
 {
-    RefPtr<SkImage> image = frameAtIndex(currentFrame());
+    sk_sp<SkImage> image = frameAtIndex(currentFrame());
     return image && image->isLazyGenerated();
 }
 
@@ -505,7 +507,7 @@ void BitmapImage::startAnimation(CatchUpAnimation catchUpIfNecessary)
 
     if (catchUpIfNecessary == DoNotCatchUp || time < m_desiredFrameStartTime) {
         // Haven't yet reached time for next frame to start; delay until then.
-        m_frameTimer = adoptPtr(new Timer<BitmapImage>(this, &BitmapImage::advanceAnimation));
+        m_frameTimer = wrapUnique(new Timer<BitmapImage>(this, &BitmapImage::advanceAnimation));
         m_frameTimer->startOneShot(std::max(m_desiredFrameStartTime - time, 0.), BLINK_FROM_HERE);
     } else {
         // We've already reached or passed the time for the next frame to start.
@@ -518,36 +520,21 @@ void BitmapImage::startAnimation(CatchUpAnimation catchUpIfNecessary)
             if (time < frameAfterNextStartTime)
                 break;
 
-            // Yes; skip over it without notifying our observers.
-            if (!internalAdvanceAnimation(true))
+            // Skip the next frame by advancing the animation forward one frame.
+            if (!internalAdvanceAnimation(SkipFramesToCatchUp)) {
+                DCHECK(m_animationFinished);
                 return;
+            }
             m_desiredFrameStartTime = frameAfterNextStartTime;
             nextFrame = frameAfterNext;
         }
 
-        // Draw the next frame immediately.  Note that m_desiredFrameStartTime
+        // Post a task to advance the frame immediately. m_desiredFrameStartTime
         // may be in the past, meaning the next time through this function we'll
         // kick off the next advancement sooner than this frame's duration would
         // suggest.
-        if (internalAdvanceAnimation(false)) {
-            // The image region has been marked dirty, but once we return to our
-            // caller, draw() will clear it, and nothing will cause the
-            // animation to advance again.  We need to start the timer for the
-            // next frame running, or the animation can hang.  (Compare this
-            // with when advanceAnimation() is called, and the region is dirtied
-            // while draw() is not in the callstack, meaning draw() gets called
-            // to update the region and thus startAnimation() is reached again.)
-            // NOTE: For large images with slow or heavily-loaded systems,
-            // throwing away data as we go (see destroyDecodedData()) means we
-            // can spend so much time re-decoding data above that by the time we
-            // reach here we're behind again.  If we let startAnimation() run
-            // the catch-up code again, we can get long delays without painting
-            // as we race the timer, or even infinite recursion.  In this
-            // situation the best we can do is to simply change frames as fast
-            // as possible, so force startAnimation() to set a zero-delay timer
-            // and bail out if we're not caught up.
-            startAnimation(DoNotCatchUp);
-        }
+        m_frameTimer = wrapUnique(new Timer<BitmapImage>(this, &BitmapImage::advanceAnimationWithoutCatchUp));
+        m_frameTimer->startOneShot(0, BLINK_FROM_HERE);
     }
 }
 
@@ -555,7 +542,7 @@ void BitmapImage::stopAnimation()
 {
     // This timer is used to animate all occurrences of this image.  Don't invalidate
     // the timer unless all renderers have stopped drawing.
-    m_frameTimer.clear();
+    m_frameTimer.reset();
 }
 
 void BitmapImage::resetAnimation()
@@ -565,9 +552,7 @@ void BitmapImage::resetAnimation()
     m_repetitionsComplete = 0;
     m_desiredFrameStartTime = 0;
     m_animationFinished = false;
-
-    // For extremely large animations, when the animation is reset, we just throw everything away.
-    destroyDecodedDataIfNecessary();
+    m_cachedFrame.reset();
 }
 
 bool BitmapImage::maybeAnimated()
@@ -588,50 +573,72 @@ void BitmapImage::advanceTime(double deltaTimeInSeconds)
         m_desiredFrameStartTime = monotonicallyIncreasingTime() - deltaTimeInSeconds;
 }
 
-void BitmapImage::advanceAnimation(Timer<BitmapImage>*)
+void BitmapImage::advanceAnimation(TimerBase*)
 {
-    internalAdvanceAnimation(false);
+    internalAdvanceAnimation();
     // At this point the image region has been marked dirty, and if it's
     // onscreen, we'll soon make a call to draw(), which will call
     // startAnimation() again to keep the animation moving.
 }
 
-bool BitmapImage::internalAdvanceAnimation(bool skippingFrames)
+void BitmapImage::advanceAnimationWithoutCatchUp(TimerBase*)
+{
+    if (internalAdvanceAnimation())
+        startAnimation(DoNotCatchUp);
+}
+
+bool BitmapImage::internalAdvanceAnimation(AnimationAdvancement advancement)
 {
     // Stop the animation.
     stopAnimation();
 
     // See if anyone is still paying attention to this animation.  If not, we don't
     // advance and will remain suspended at the current frame until the animation is resumed.
-    if (!skippingFrames && getImageObserver()->shouldPauseAnimation(this))
+    if (advancement != SkipFramesToCatchUp && getImageObserver()->shouldPauseAnimation(this))
         return false;
 
-    ++m_currentFrame;
-    bool advancedAnimation = true;
-    if (m_currentFrame >= frameCount()) {
-        ++m_repetitionsComplete;
+    if (m_currentFrame + 1 < frameCount()) {
+        m_currentFrame++;
+    } else {
+        m_repetitionsComplete++;
 
-        // Get the repetition count again.  If we weren't able to get a
+        // Get the repetition count again. If we weren't able to get a
         // repetition count before, we should have decoded the whole image by
         // now, so it should now be available.
-        // Note that we don't need to special-case cAnimationLoopOnce here
-        // because it is 0 (see comments on its declaration in ImageAnimation.h).
+        // We don't need to special-case cAnimationLoopOnce here because it is
+        // 0 (see comments on its declaration in ImageAnimation.h).
         if ((repetitionCount(true) != cAnimationLoopInfinite && m_repetitionsComplete > m_repetitionCount)
-            || (m_animationPolicy == ImageAnimationPolicyAnimateOnce && m_repetitionsComplete > 0)) {
+            || m_animationPolicy == ImageAnimationPolicyAnimateOnce) {
             m_animationFinished = true;
             m_desiredFrameStartTime = 0;
-            --m_currentFrame;
-            advancedAnimation = false;
-        } else
-            m_currentFrame = 0;
-    }
-    destroyDecodedDataIfNecessary();
 
-    // We need to draw this frame if we advanced to it while not skipping, or if
-    // while trying to skip frames we hit the last frame and thus had to stop.
-    if (skippingFrames != advancedAnimation)
+            // We skipped to the last frame and cannot advance further. The
+            // observer will not receive animationAdvanced notifications while
+            // skipping but we still need to notify the observer to draw the
+            // last frame. Skipping frames occurs while painting so we do not
+            // synchronously notify the observer which could cause a layout.
+            if (advancement == SkipFramesToCatchUp) {
+                m_frameTimer = wrapUnique(new Timer<BitmapImage>(this, &BitmapImage::notifyObserversOfAnimationAdvance));
+                m_frameTimer->startOneShot(0, BLINK_FROM_HERE);
+            }
+
+            return false;
+        }
+
+        // Loop the animation back to the first frame.
+        m_currentFrame = 0;
+    }
+
+    // We need to draw this frame if we advanced to it while not skipping.
+    if (advancement != SkipFramesToCatchUp)
         getImageObserver()->animationAdvanced(this);
-    return advancedAnimation;
+
+    return true;
+}
+
+void BitmapImage::notifyObserversOfAnimationAdvance(TimerBase*)
+{
+    getImageObserver()->animationAdvanced(this);
 }
 
 } // namespace blink

@@ -155,12 +155,12 @@ void TracingCallbackWrapperBase64(
   callback.Run(data_base64);
 }
 
-void AddCustomMetadata(TracingControllerImpl::TraceDataSink* trace_data_sink) {
+void AddCustomMetadata() {
   base::DictionaryValue metadata_dict;
   metadata_dict.SetString(
       "command_line",
       base::CommandLine::ForCurrentProcess()->GetCommandLineString());
-  trace_data_sink->AddMetadata(metadata_dict);
+  TracingController::GetInstance()->AddMetadata(metadata_dict);
 }
 
 bool OnBeginJSONRequest(const std::string& path,
@@ -185,11 +185,13 @@ bool OnBeginJSONRequest(const std::string& path,
         base::Bind(OnTraceBufferStatusResult, callback));
   }
   if (path == "json/end_recording_compressed") {
+    if (!TracingController::GetInstance()->IsTracing())
+      return false;
     scoped_refptr<TracingControllerImpl::TraceDataSink> data_sink =
-        TracingController::CreateCompressedStringSink(
-            TracingController::CreateCallbackEndpoint(
+        TracingControllerImpl::CreateCompressedStringSink(
+            TracingControllerImpl::CreateCallbackEndpoint(
                 base::Bind(TracingCallbackWrapperBase64, callback)));
-    AddCustomMetadata(data_sink.get());
+    AddCustomMetadata();
     return TracingController::GetInstance()->StopTracing(data_sink);
   }
 
@@ -249,8 +251,8 @@ TracingUI::~TracingUI() {
 void TracingUI::DoUploadBase64Encoded(const base::ListValue* args) {
   std::string file_contents_base64;
   if (!args || args->empty() || !args->GetString(0, &file_contents_base64)) {
-    web_ui()->CallJavascriptFunction("onUploadError",
-                                     base::StringValue("Missing data"));
+    web_ui()->CallJavascriptFunctionUnsafe("onUploadError",
+                                           base::StringValue("Missing data"));
     return;
   }
 
@@ -265,8 +267,8 @@ void TracingUI::DoUploadBase64Encoded(const base::ListValue* args) {
 void TracingUI::DoUpload(const base::ListValue* args) {
   std::string file_contents;
   if (!args || args->empty() || !args->GetString(0, &file_contents)) {
-    web_ui()->CallJavascriptFunction("onUploadError",
-                                     base::StringValue("Missing data"));
+    web_ui()->CallJavascriptFunctionUnsafe("onUploadError",
+                                           base::StringValue("Missing data"));
     return;
   }
 
@@ -276,14 +278,14 @@ void TracingUI::DoUpload(const base::ListValue* args) {
 void TracingUI::DoUploadInternal(const std::string& file_contents,
                                  TraceUploader::UploadMode upload_mode) {
   if (!delegate_) {
-    web_ui()->CallJavascriptFunction("onUploadError",
-                                     base::StringValue("Not implemented"));
+    web_ui()->CallJavascriptFunctionUnsafe(
+        "onUploadError", base::StringValue("Not implemented"));
     return;
   }
 
   if (trace_uploader_) {
-    web_ui()->CallJavascriptFunction("onUploadError",
-                                     base::StringValue("Upload in progress"));
+    web_ui()->CallJavascriptFunctionUnsafe(
+        "onUploadError", base::StringValue("Upload in progress"));
     return;
   }
 
@@ -307,21 +309,20 @@ void TracingUI::DoUploadInternal(const std::string& file_contents,
 void TracingUI::OnTraceUploadProgress(int64_t current, int64_t total) {
   DCHECK(current <= total);
   int percent = (current / total) * 100;
-  web_ui()->CallJavascriptFunction(
-        "onUploadProgress",
-        base::FundamentalValue(percent),
-        base::StringValue(base::StringPrintf("%" PRId64, current)),
-        base::StringValue(base::StringPrintf("%" PRId64, total)));
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "onUploadProgress", base::FundamentalValue(percent),
+      base::StringValue(base::StringPrintf("%" PRId64, current)),
+      base::StringValue(base::StringPrintf("%" PRId64, total)));
 }
 
 void TracingUI::OnTraceUploadComplete(bool success,
                                       const std::string& feedback) {
   if (success) {
-    web_ui()->CallJavascriptFunction("onUploadComplete",
-                                     base::StringValue(feedback));
+    web_ui()->CallJavascriptFunctionUnsafe("onUploadComplete",
+                                           base::StringValue(feedback));
   } else {
-    web_ui()->CallJavascriptFunction("onUploadError",
-                                     base::StringValue(feedback));
+    web_ui()->CallJavascriptFunctionUnsafe("onUploadError",
+                                           base::StringValue(feedback));
   }
   trace_uploader_.reset();
 }

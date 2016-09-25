@@ -18,7 +18,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "google_apis/gcm/base/fake_encryptor.h"
 #include "google_apis/gcm/base/mcs_message.h"
 #include "google_apis/gcm/base/mcs_util.h"
@@ -88,7 +88,7 @@ std::unique_ptr<GCMStoreImpl> GCMStoreImplTest::BuildGCMStore() {
       // Pass an non-existent directory as store path to match the exact
       // behavior in the production code. Currently GCMStoreImpl checks if
       // the directory exist or not to determine the store existence.
-      temp_directory_.path().Append(FILE_PATH_LITERAL("GCM Store")),
+      temp_directory_.GetPath().Append(FILE_PATH_LITERAL("GCM Store")),
       task_runner_, base::WrapUnique<Encryptor>(new FakeEncryptor)));
 }
 

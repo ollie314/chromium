@@ -17,10 +17,10 @@
 #include "base/observer_list_threadsafe.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/storage/setting_sync_data.h"
+#include "components/sync/api/sync_change.h"
+#include "components/sync/api/syncable_service.h"
 #include "extensions/browser/api/storage/settings_observer.h"
 #include "extensions/browser/value_store/value_store.h"
-#include "sync/api/sync_change.h"
-#include "sync/api/syncable_service.h"
 
 namespace extensions {
 
@@ -98,21 +98,17 @@ class SyncableSettingsStorage : public ValueStore {
       std::unique_ptr<base::DictionaryValue> sync_state,
       std::unique_ptr<base::DictionaryValue> local_state);
 
-  // Called when an Add/Update/Remove comes from sync. Ownership of Value*s
-  // are taken.
-  syncer::SyncError OnSyncAdd(
-      const std::string& key,
-      base::Value* new_value,
-      ValueStoreChangeList* changes);
-  syncer::SyncError OnSyncUpdate(
-      const std::string& key,
-      base::Value* old_value,
-      base::Value* new_value,
-      ValueStoreChangeList* changes);
-  syncer::SyncError OnSyncDelete(
-      const std::string& key,
-      base::Value* old_value,
-      ValueStoreChangeList* changes);
+  // Called when an Add/Update/Remove comes from sync.
+  syncer::SyncError OnSyncAdd(const std::string& key,
+                              std::unique_ptr<base::Value> new_value,
+                              ValueStoreChangeList* changes);
+  syncer::SyncError OnSyncUpdate(const std::string& key,
+                                 std::unique_ptr<base::Value> old_value,
+                                 std::unique_ptr<base::Value> new_value,
+                                 ValueStoreChangeList* changes);
+  syncer::SyncError OnSyncDelete(const std::string& key,
+                                 std::unique_ptr<base::Value> old_value,
+                                 ValueStoreChangeList* changes);
 
   // List of observers to settings changes.
   const scoped_refptr<SettingsObserverList> observers_;

@@ -8,11 +8,10 @@ import android.os.Environment;
 import android.test.suitebuilder.annotation.MediumTest;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.MetricsUtils.HistogramDelta;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
@@ -25,6 +24,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * Tests for Tab-related histogram collection.
  */
+@RetryOnFailure
 public class TabUmaTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     private static final String TEST_PATH = "/chrome/test/data/android/about.html";
@@ -59,7 +59,6 @@ public class TabUmaTest extends ChromeActivityTestCaseBase<ChromeActivity> {
      * Verify that Tab.StatusWhenSwitchedBackToForeground is correctly recording lazy loads.
      */
     @MediumTest
-    @CommandLineFlags.Add(ChromeSwitches.DISABLE_DOCUMENT_MODE)
     @Feature({"Uma"})
     public void testTabStatusWhenSwitchedToLazyLoads() throws ExecutionException {
         final Tab tab = ThreadUtils.runOnUiThreadBlocking(new Callable<Tab>() {

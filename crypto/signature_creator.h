@@ -7,19 +7,15 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "crypto/crypto_export.h"
 
-#if defined(USE_OPENSSL)
 // Forward declaration for openssl/*.h
 typedef struct env_md_ctx_st EVP_MD_CTX;
-#elif defined(USE_NSS_CERTS) || defined(OS_WIN) || defined(OS_MACOSX)
-// Forward declaration.
-struct SGNContextStr;
-#endif
 
 namespace crypto {
 
@@ -40,8 +36,8 @@ class CRYPTO_EXPORT SignatureCreator {
   // Create an instance. The caller must ensure that the provided PrivateKey
   // instance outlives the created SignatureCreator. Uses the HashAlgorithm
   // specified.
-  static SignatureCreator* Create(RSAPrivateKey* key, HashAlgorithm hash_alg);
-
+  static std::unique_ptr<SignatureCreator> Create(RSAPrivateKey* key,
+                                                  HashAlgorithm hash_alg);
 
   // Signs the precomputed |hash_alg| digest |data| using private |key| as
   // specified in PKCS #1 v1.5.
@@ -61,11 +57,7 @@ class CRYPTO_EXPORT SignatureCreator {
   // Private constructor. Use the Create() method instead.
   SignatureCreator();
 
-#if defined(USE_OPENSSL)
   EVP_MD_CTX* sign_context_;
-#elif defined(USE_NSS_CERTS) || defined(OS_WIN) || defined(OS_MACOSX)
-  SGNContextStr* sign_context_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(SignatureCreator);
 };

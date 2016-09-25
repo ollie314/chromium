@@ -21,6 +21,7 @@
 
 #include "core/dom/Text.h"
 
+#include "bindings/core/v8/DOMDataStore.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/SVGNames.h"
@@ -66,7 +67,7 @@ Node* Text::mergeNextSiblingNodesIfPossible()
 
     // Merge text nodes.
     while (Node* nextSibling = this->nextSibling()) {
-        if (nextSibling->getNodeType() != TEXT_NODE)
+        if (nextSibling->getNodeType() != kTextNode)
             break;
 
         Text* nextText = toText(nextSibling);
@@ -129,6 +130,10 @@ Text* Text::splitText(unsigned offset, ExceptionState& exceptionState)
     if (parentNode())
         document().didSplitTextNode(*this);
 
+    // [NewObject] must always create a new wrapper.  Check that a wrapper
+    // does not exist yet.
+    DCHECK(DOMDataStore::getWrapper(newText, v8::Isolate::GetCurrent()).IsEmpty());
+
     return newText;
 }
 
@@ -136,7 +141,7 @@ static const Text* earliestLogicallyAdjacentTextNode(const Text* t)
 {
     for (const Node* n = t->previousSibling(); n; n = n->previousSibling()) {
         Node::NodeType type = n->getNodeType();
-        if (type == Node::TEXT_NODE || type == Node::CDATA_SECTION_NODE) {
+        if (type == Node::kTextNode || type == Node::kCdataSectionNode) {
             t = toText(n);
             continue;
         }
@@ -150,7 +155,7 @@ static const Text* latestLogicallyAdjacentTextNode(const Text* t)
 {
     for (const Node* n = t->nextSibling(); n; n = n->nextSibling()) {
         Node::NodeType type = n->getNodeType();
-        if (type == Node::TEXT_NODE || type == Node::CDATA_SECTION_NODE) {
+        if (type == Node::kTextNode || type == Node::kCdataSectionNode) {
             t = toText(n);
             continue;
         }
@@ -228,7 +233,7 @@ String Text::nodeName() const
 
 Node::NodeType Text::getNodeType() const
 {
-    return TEXT_NODE;
+    return kTextNode;
 }
 
 Node* Text::cloneNode(bool /*deep*/)
@@ -338,7 +343,7 @@ LayoutText* Text::createTextLayoutObject(const ComputedStyle& style)
     return new LayoutText(this, dataImpl());
 }
 
-void Text::attach(const AttachContext& context)
+void Text::attachLayoutTree(const AttachContext& context)
 {
     if (ContainerNode* layoutParent = LayoutTreeBuilderTraversal::parent(*this)) {
         if (LayoutObject* parentLayoutObject = layoutParent->layoutObject()) {
@@ -346,10 +351,10 @@ void Text::attach(const AttachContext& context)
                 LayoutTreeBuilderForText(*this, parentLayoutObject).createLayoutObject();
         }
     }
-    CharacterData::attach(context);
+    CharacterData::attachLayoutTree(context);
 }
 
-void Text::reattachIfNeeded(const AttachContext& context)
+void Text::reattachLayoutTreeIfNeeded(const AttachContext& context)
 {
     bool layoutObjectIsNeeded = false;
     ContainerNode* layoutParent = LayoutTreeBuilderTraversal::parent(*this);
@@ -363,16 +368,16 @@ void Text::reattachIfNeeded(const AttachContext& context)
     if (layoutObjectIsNeeded == !!layoutObject())
         return;
 
-    // The following is almost the same as Node::reattach() except that we create a layoutObject only if needed.
-    // Not calling reattach() to avoid repeated calls to Text::textLayoutObjectIsNeeded().
+    // The following is almost the same as Node::reattachLayoutTree() except that we create a layoutObject only if needed.
+    // Not calling reattachLayoutTree() to avoid repeated calls to Text::textLayoutObjectIsNeeded().
     AttachContext reattachContext(context);
     reattachContext.performingReattach = true;
 
     if (getStyleChangeType() < NeedsReattachStyleChange)
-        detach(reattachContext);
+        detachLayoutTree(reattachContext);
     if (layoutObjectIsNeeded)
         LayoutTreeBuilderForText(*this, layoutParent->layoutObject()).createLayoutObject();
-    CharacterData::attach(reattachContext);
+    CharacterData::attachLayoutTree(reattachContext);
 }
 
 void Text::recalcTextStyle(StyleRecalcChange change, Text* nextTextSibling)
@@ -384,7 +389,7 @@ void Text::recalcTextStyle(StyleRecalcChange change, Text* nextTextSibling)
             layoutItem.setText(dataImpl());
         clearNeedsStyleRecalc();
     } else if (needsStyleRecalc() || needsWhitespaceLayoutObject()) {
-        reattach();
+        reattachLayoutTree();
         if (this->layoutObject())
             reattachWhitespaceSiblingsIfNeeded(nextTextSibling);
     }
@@ -410,23 +415,20 @@ static bool shouldUpdateLayoutByReattaching(const Text& textNode, LayoutText* te
     if (!textNode.textLayoutObjectIsNeeded(*textLayoutObject->style(), *textLayoutObject->parent()))
         return true;
     if (textLayoutObject->isTextFragment()) {
-        FirstLetterPseudoElement* pseudo = toLayoutTextFragment(textLayoutObject)->firstLetterPseudoElement();
-        if (pseudo && !FirstLetterPseudoElement::firstLetterTextLayoutObject(*pseudo))
-            return true;
+        // Changes of |textNode| may change first letter part, so we should
+        // reattach.
+        return toLayoutTextFragment(textLayoutObject)->firstLetterPseudoElement();
     }
     return false;
 }
 
-void Text::updateTextLayoutObject(unsigned offsetOfReplacedData, unsigned lengthOfReplacedData, RecalcStyleBehavior recalcStyleBehavior)
+void Text::updateTextLayoutObject(unsigned offsetOfReplacedData, unsigned lengthOfReplacedData)
 {
     if (!inActiveDocument())
         return;
     LayoutText* textLayoutObject = layoutObject();
     if (shouldUpdateLayoutByReattaching(*this, textLayoutObject)) {
         lazyReattachIfAttached();
-        // FIXME: Editing should be updated so this is not neccesary.
-        if (recalcStyleBehavior == DeprecatedRecalcStyleImmediatlelyForEditing)
-            document().updateLayoutTree();
         return;
     }
     textLayoutObject->setTextWithOffset(dataImpl(), offsetOfReplacedData, lengthOfReplacedData);
@@ -441,25 +443,5 @@ DEFINE_TRACE(Text)
 {
     CharacterData::trace(visitor);
 }
-
-#ifndef NDEBUG
-void Text::formatForDebugger(char *buffer, unsigned length) const
-{
-    StringBuilder result;
-    String s;
-
-    result.append(nodeName());
-
-    s = data();
-    if (s.length() > 0) {
-        if (result.length())
-            result.appendLiteral("; ");
-        result.appendLiteral("value=");
-        result.append(s);
-    }
-
-    strncpy(buffer, result.toString().utf8().data(), length - 1);
-}
-#endif
 
 } // namespace blink

@@ -24,6 +24,7 @@
 #include "core/layout/LayoutObject.h"
 #include "core/style/ComputedStyle.h"
 #include "core/style/SVGComputedStyle.h"
+#include "platform/graphics/filters/FEFlood.h"
 
 namespace blink {
 
@@ -46,8 +47,7 @@ bool SVGFEFloodElement::setFilterEffectAttribute(FilterEffect* effect, const Qua
     if (attrName == SVGNames::flood_opacityAttr)
         return flood->setFloodOpacity(style.svgStyle().floodOpacity());
 
-    ASSERT_NOT_REACHED();
-    return false;
+    return SVGFilterPrimitiveStandardAttributes::setFilterEffectAttribute(effect, attrName);
 }
 
 FilterEffect* SVGFEFloodElement::build(SVGFilterBuilder*, Filter* filter)

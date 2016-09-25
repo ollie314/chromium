@@ -12,133 +12,22 @@
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/ipc/gfx_ipc_export.h"
 #include "ui/gfx/ipc/gfx_param_traits_macros.h"
+#include "ui/gfx/selection_bound.h"
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 #include "ui/gfx/mac/io_surface.h"
 #endif
 
 namespace gfx {
-class Point;
-class PointF;
-class Point3F;
 class Range;
-class Rect;
-class RectF;
-class ScrollOffset;
-class Size;
-class SizeF;
-class Vector2d;
-class Vector2dF;
-}  // namespace gfx
+}
 
 namespace IPC {
 
 template <>
-struct GFX_IPC_EXPORT ParamTraits<gfx::Point> {
-  typedef gfx::Point param_type;
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct GFX_IPC_EXPORT ParamTraits<gfx::PointF> {
-  typedef gfx::PointF param_type;
-  static void GetSize(base::PickleSizer* s, const param_type& p);
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct GFX_IPC_EXPORT ParamTraits<gfx::Point3F> {
-  typedef gfx::Point3F param_type;
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct GFX_IPC_EXPORT ParamTraits<gfx::Size> {
-  typedef gfx::Size param_type;
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct GFX_IPC_EXPORT ParamTraits<gfx::SizeF> {
-  typedef gfx::SizeF param_type;
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct GFX_IPC_EXPORT ParamTraits<gfx::Vector2d> {
-  typedef gfx::Vector2d param_type;
-  static void GetSize(base::PickleSizer* s, const param_type& p);
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct GFX_IPC_EXPORT ParamTraits<gfx::Vector2dF> {
-  typedef gfx::Vector2dF param_type;
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct GFX_IPC_EXPORT ParamTraits<gfx::Rect> {
-  typedef gfx::Rect param_type;
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct GFX_IPC_EXPORT ParamTraits<gfx::RectF> {
-  typedef gfx::RectF param_type;
-  static void GetSize(base::PickleSizer* s, const param_type& p);
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
 struct GFX_IPC_EXPORT ParamTraits<gfx::Range> {
   typedef gfx::Range param_type;
-  static void Write(base::Pickle* m, const param_type& p);
-  static bool Read(const base::Pickle* m,
-                   base::PickleIterator* iter,
-                   param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
-struct GFX_IPC_EXPORT ParamTraits<gfx::ScrollOffset> {
-  typedef gfx::ScrollOffset param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -150,6 +39,7 @@ struct GFX_IPC_EXPORT ParamTraits<gfx::ScrollOffset> {
 template <>
 struct GFX_IPC_EXPORT ParamTraits<gfx::ScopedRefCountedIOSurfaceMachPort> {
   typedef gfx::ScopedRefCountedIOSurfaceMachPort param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type p);
   // Note: Read() passes ownership of the Mach send right from the IPC message
   // to the ScopedRefCountedIOSurfaceMachPort. Therefore, Read() may only be
@@ -161,6 +51,17 @@ struct GFX_IPC_EXPORT ParamTraits<gfx::ScopedRefCountedIOSurfaceMachPort> {
   static void Log(const param_type& p, std::string* l);
 };
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+
+template <>
+struct GFX_IPC_EXPORT ParamTraits<gfx::SelectionBound> {
+  typedef gfx::SelectionBound param_type;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
+  static void Write(base::Pickle* m, const param_type& p);
+  static bool Read(const base::Pickle* m,
+                   base::PickleIterator* iter,
+                   param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
 
 }  // namespace IPC
 

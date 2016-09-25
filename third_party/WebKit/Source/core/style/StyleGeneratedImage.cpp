@@ -25,7 +25,6 @@
 
 #include "core/css/CSSImageGeneratorValue.h"
 #include "core/css/resolver/StyleResolver.h"
-#include "core/layout/LayoutObject.h"
 
 namespace blink {
 
@@ -34,6 +33,8 @@ StyleGeneratedImage::StyleGeneratedImage(const CSSImageGeneratorValue& value)
     , m_fixedSize(m_imageGeneratorValue->isFixedSize())
 {
     m_isGeneratedImage = true;
+    if (value.isPaintValue())
+        m_isPaintImage = true;
 }
 
 CSSValue* StyleGeneratedImage::cssValue() const
@@ -67,9 +68,9 @@ void StyleGeneratedImage::removeClient(LayoutObject* layoutObject)
     m_imageGeneratorValue->removeClient(layoutObject);
 }
 
-PassRefPtr<Image> StyleGeneratedImage::image(const LayoutObject& layoutObject, const IntSize& size, float) const
+PassRefPtr<Image> StyleGeneratedImage::image(const LayoutObject& layoutObject, const IntSize& size, float zoom) const
 {
-    return m_imageGeneratorValue->image(layoutObject, size);
+    return m_imageGeneratorValue->image(layoutObject, size, zoom);
 }
 
 bool StyleGeneratedImage::knownToBeOpaque(const LayoutObject& layoutObject) const

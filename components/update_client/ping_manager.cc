@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -15,7 +16,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -162,10 +162,10 @@ std::string BuildPing(const Configurator& config, const CrxUpdateItem* item) {
       ping_event.c_str(),                                  // ping event
       BuildDownloadCompleteEventElements(item).c_str()));  // download events
 
-  return BuildProtocolRequest(config.GetBrowserVersion().GetString(),
-                              config.GetChannel(), config.GetLang(),
-                              config.GetOSLongName(),
-                              config.GetDownloadPreference(), app_element, "");
+  return BuildProtocolRequest(
+      config.GetProdId(), config.GetBrowserVersion().GetString(),
+      config.GetChannel(), config.GetLang(), config.GetOSLongName(),
+      config.GetDownloadPreference(), app_element, "");
 }
 
 // Sends a fire and forget ping. The instances of this class have no
@@ -184,7 +184,7 @@ class PingSender {
                                int retry_after_sec);
 
   const scoped_refptr<Configurator> config_;
-  scoped_ptr<RequestSender> request_sender_;
+  std::unique_ptr<RequestSender> request_sender_;
   base::ThreadChecker thread_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(PingSender);
@@ -231,7 +231,7 @@ PingManager::~PingManager() {
 }
 
 bool PingManager::SendPing(const CrxUpdateItem* item) {
-  scoped_ptr<PingSender> ping_sender(new PingSender(config_));
+  std::unique_ptr<PingSender> ping_sender(new PingSender(config_));
   if (!ping_sender->SendPing(item))
     return false;
 

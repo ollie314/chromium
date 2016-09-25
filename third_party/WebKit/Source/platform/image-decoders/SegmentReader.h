@@ -8,6 +8,7 @@
 #include "platform/SharedBuffer.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkRWBuffer.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/ThreadSafeRefCounted.h"
@@ -34,14 +35,14 @@ public:
     static PassRefPtr<SegmentReader> createFromSharedBuffer(PassRefPtr<SharedBuffer>);
 
     // These versions use thread-safe input, so they are always thread-safe.
-    static PassRefPtr<SegmentReader> createFromSkData(PassRefPtr<SkData>);
-    static PassRefPtr<SegmentReader> createFromSkROBuffer(PassRefPtr<SkROBuffer>);
+    static PassRefPtr<SegmentReader> createFromSkData(sk_sp<SkData>);
+    static PassRefPtr<SegmentReader> createFromSkROBuffer(sk_sp<SkROBuffer>);
 
     SegmentReader() {}
     virtual ~SegmentReader() {}
     virtual size_t size() const = 0;
     virtual size_t getSomeData(const char*& data, size_t position) const = 0;
-    virtual PassRefPtr<SkData> getAsSkData() const = 0;
+    virtual sk_sp<SkData> getAsSkData() const = 0;
 };
 
 } // namespace blink

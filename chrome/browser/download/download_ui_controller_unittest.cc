@@ -155,8 +155,8 @@ class DownloadUIControllerTest : public ChromeRenderViewHostTestHarness {
 std::unique_ptr<KeyedService>
 DownloadUIControllerTest::TestingDownloadServiceFactory(
     content::BrowserContext* browser_context) {
-  return base::WrapUnique(
-      new TestDownloadService(Profile::FromBrowserContext(browser_context)));
+  return base::MakeUnique<TestDownloadService>(
+      Profile::FromBrowserContext(browser_context));
 }
 
 DownloadUIControllerTest::DownloadUIControllerTest()
@@ -218,13 +218,12 @@ DownloadUIControllerTest::CreateMockInProgressDownload() {
   EXPECT_CALL(*item, GetState())
       .WillRepeatedly(Return(content::DownloadItem::IN_PROGRESS));
   EXPECT_CALL(*item, GetUrlChain())
-      .WillRepeatedly(testing::ReturnRefOfCopy(std::vector<GURL>()));
-  EXPECT_CALL(*item, GetReferrerUrl())
-      .WillRepeatedly(testing::ReturnRefOfCopy(GURL()));
-  EXPECT_CALL(*item, GetTabUrl())
-      .WillRepeatedly(testing::ReturnRefOfCopy(GURL()));
+      .WillRepeatedly(ReturnRefOfCopy(std::vector<GURL>()));
+  EXPECT_CALL(*item, GetReferrerUrl()).WillRepeatedly(ReturnRefOfCopy(GURL()));
+  EXPECT_CALL(*item, GetSiteUrl()).WillRepeatedly(ReturnRefOfCopy(GURL()));
+  EXPECT_CALL(*item, GetTabUrl()).WillRepeatedly(ReturnRefOfCopy(GURL()));
   EXPECT_CALL(*item, GetTabReferrerUrl())
-      .WillRepeatedly(testing::ReturnRefOfCopy(GURL()));
+      .WillRepeatedly(ReturnRefOfCopy(GURL()));
   EXPECT_CALL(*item, GetStartTime()).WillRepeatedly(Return(base::Time()));
   EXPECT_CALL(*item, GetEndTime()).WillRepeatedly(Return(base::Time()));
   EXPECT_CALL(*item, GetETag()).WillRepeatedly(ReturnRefOfCopy(std::string()));
@@ -240,7 +239,7 @@ DownloadUIControllerTest::CreateMockInProgressDownload() {
       Return(content::DownloadItem::TARGET_DISPOSITION_OVERWRITE));
   EXPECT_CALL(*item, GetOpened()).WillRepeatedly(Return(false));
   EXPECT_CALL(*item, GetMimeType()).WillRepeatedly(Return(std::string()));
-  EXPECT_CALL(*item, GetURL()).WillRepeatedly(testing::ReturnRefOfCopy(GURL()));
+  EXPECT_CALL(*item, GetURL()).WillRepeatedly(ReturnRefOfCopy(GURL()));
   EXPECT_CALL(*item, GetWebContents()).WillRepeatedly(Return(nullptr));
   EXPECT_CALL(*item, IsTemporary()).WillRepeatedly(Return(false));
   return item;

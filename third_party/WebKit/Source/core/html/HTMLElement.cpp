@@ -29,9 +29,10 @@
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
 #include "core/HTMLNames.h"
+#include "core/MathMLNames.h"
 #include "core/XMLNames.h"
+#include "core/css/CSSColorValue.h"
 #include "core/css/CSSMarkup.h"
-#include "core/css/CSSValuePool.h"
 #include "core/css/StylePropertySet.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/ElementTraversal.h"
@@ -42,6 +43,7 @@
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/dom/shadow/FlatTreeTraversal.h"
 #include "core/dom/shadow/ShadowRoot.h"
+#include "core/editing/EditingUtilities.h"
 #include "core/editing/serializers/Serialization.h"
 #include "core/events/EventListener.h"
 #include "core/events/KeyboardEvent.h"
@@ -54,8 +56,10 @@
 #include "core/html/HTMLTemplateElement.h"
 #include "core/html/HTMLTextFormControlElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
+#include "core/layout/LayoutBoxModelObject.h"
 #include "core/layout/LayoutObject.h"
 #include "core/page/SpatialNavigation.h"
+#include "core/svg/SVGSVGElement.h"
 #include "platform/Language.h"
 #include "platform/text/BidiResolver.h"
 #include "platform/text/BidiTextRun.h"
@@ -69,6 +73,41 @@ using namespace HTMLNames;
 using namespace WTF;
 
 using namespace std;
+
+namespace {
+
+// https://w3c.github.io/editing/execCommand.html#editing-host
+bool isEditingHost(const Node& node)
+{
+    if (!node.isHTMLElement())
+        return false;
+    String normalizedValue = toHTMLElement(node).contentEditable();
+    if (normalizedValue == "true" || normalizedValue == "plaintext-only")
+        return true;
+    return node.document().inDesignMode() && node.document().documentElement() == &node;
+}
+
+// https://w3c.github.io/editing/execCommand.html#editable
+bool isEditable(const Node& node)
+{
+    if (isEditingHost(node))
+        return false;
+    if (node.isHTMLElement() && toHTMLElement(node).contentEditable() == "false")
+        return false;
+    if (!node.parentNode())
+        return false;
+    if (!isEditingHost(*node.parentNode()) && !isEditable(*node.parentNode()))
+        return false;
+    if (node.isHTMLElement())
+        return true;
+    if (isSVGSVGElement(node))
+        return true;
+    if (node.isElementNode() && toElement(node).hasTagName(MathMLNames::mathTag))
+        return true;
+    return !node.isElementNode() && node.parentNode()->isHTMLElement();
+}
+
+} // anonymous namespace
 
 DEFINE_ELEMENT_FACTORY_WITH_TAGNAME(HTMLElement);
 
@@ -85,7 +124,7 @@ String HTMLElement::debugNodeName() const
 String HTMLElement::nodeName() const
 {
     // localNameUpper may intern and cache an AtomicString.
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
 
     // FIXME: Would be nice to have an atomicstring lookup based off uppercase
     // chars that does not have to copy the string on a hit in the hash.
@@ -118,11 +157,13 @@ bool HTMLElement::ieForbidsInsertHTML() const
         || hasTagName(imageTag)
         || hasTagName(imgTag)
         || hasTagName(inputTag)
+        || hasTagName(keygenTag)
         || hasTagName(linkTag)
         || (RuntimeEnabledFeatures::contextMenuEnabled() && hasTagName(menuitemTag))
         || hasTagName(metaTag)
         || hasTagName(paramTag)
         || hasTagName(sourceTag)
+        || hasTagName(trackTag)
         || hasTagName(wbrTag))
         return true;
     return false;
@@ -223,9 +264,10 @@ void HTMLElement::collectStyleForPresentationAttribute(const QualifiedName& name
     } else if (name == hiddenAttr) {
         addPropertyToPresentationAttributeStyle(style, CSSPropertyDisplay, CSSValueNone);
     } else if (name == draggableAttr) {
+        UseCounter::count(document(), UseCounter::DraggableAttribute);
         if (equalIgnoringCase(value, "true")) {
             addPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitUserDrag, CSSValueElement);
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitUserSelect, CSSValueNone);
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyUserSelect, CSSValueNone);
         } else if (equalIgnoringCase(value, "false")) {
             addPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitUserDrag, CSSValueNone);
         }
@@ -271,8 +313,6 @@ const AtomicString& HTMLElement::eventNameForAttributeName(const QualifiedName& 
             { onanimationendAttr, EventTypeNames::animationend },
             { onanimationiterationAttr, EventTypeNames::animationiteration },
             { onanimationstartAttr, EventTypeNames::animationstart },
-            { onautocompleteAttr, EventTypeNames::autocomplete },
-            { onautocompleteerrorAttr, EventTypeNames::autocompleteerror },
             { onbeforecopyAttr, EventTypeNames::beforecopy },
             { onbeforecutAttr, EventTypeNames::beforecut },
             { onbeforepasteAttr, EventTypeNames::beforepaste },
@@ -585,6 +625,11 @@ void HTMLElement::setContentEditable(const String& enabled, ExceptionState& exce
         exceptionState.throwDOMException(SyntaxError, "The value provided ('" + enabled + "') is not one of 'true', 'false', 'plaintext-only', or 'inherit'.");
 }
 
+bool HTMLElement::isContentEditableForBinding() const
+{
+    return isEditingHost(*this) || isEditable(*this);
+}
+
 bool HTMLElement::draggable() const
 {
     return equalIgnoringCase(getAttribute(draggableAttr), "true");
@@ -646,7 +691,7 @@ bool HTMLElement::translate() const
     for (const HTMLElement* element = this; element; element = Traversal<HTMLElement>::firstAncestor(*element)) {
         TranslateAttributeMode mode = element->translateAttributeMode();
         if (mode != TranslateAttributeInherit) {
-            ASSERT(mode == TranslateAttributeYes || mode == TranslateAttributeNo);
+            DCHECK(mode == TranslateAttributeYes || mode == TranslateAttributeNo);
             return mode == TranslateAttributeYes;
         }
     }
@@ -736,7 +781,8 @@ TextDirection HTMLElement::directionality(Node** strongDirectionalityTextNode) c
     while (node) {
         // Skip bdi, script, style and text form controls.
         if (equalIgnoringCase(node->nodeName(), "bdi") || isHTMLScriptElement(*node) || isHTMLStyleElement(*node)
-            || (node->isElementNode() && toElement(node)->isTextFormControl())) {
+            || (node->isElementNode() && toElement(node)->isTextFormControl())
+            || (node->isElementNode() && toElement(node)->shadowPseudoId() == "-webkit-input-placeholder")) {
             node = FlatTreeTraversal::nextSkippingChildren(*node, this);
             continue;
         }
@@ -775,6 +821,8 @@ void HTMLElement::dirAttributeChanged(const AtomicString& value)
 {
     // If an ancestor has dir=auto, and this node has the first character,
     // changes to dir attribute may affect the ancestor.
+    if (!canParticipateInFlatTree())
+        return;
     updateDistribution();
     Element* parent = FlatTreeTraversal::parentElement(*this);
     if (parent && parent->isHTMLElement() && toHTMLElement(parent)->selfOrAncestorHasDirAutoAttribute())
@@ -786,7 +834,7 @@ void HTMLElement::dirAttributeChanged(const AtomicString& value)
 
 void HTMLElement::adjustDirectionalityIfNeededAfterChildAttributeChanged(Element* child)
 {
-    ASSERT(selfOrAncestorHasDirAutoAttribute());
+    DCHECK(selfOrAncestorHasDirAutoAttribute());
     TextDirection textDirection = directionality();
     if (layoutObject() && layoutObject()->style() && layoutObject()->style()->direction() != textDirection) {
         Element* elementToAdjust = this;
@@ -890,7 +938,7 @@ static RGBA32 parseColorStringWithCrazyLegacyRules(const String& colorString)
         return makeRGB(toASCIIHexValue(digitBuffer[0]), toASCIIHexValue(digitBuffer[1]), toASCIIHexValue(digitBuffer[2]));
 
     // Split the digits into three components, then search the last 8 digits of each component.
-    ASSERT(digitBuffer.size() >= 6);
+    DCHECK_GE(digitBuffer.size(), 6u);
     size_t componentLength = digitBuffer.size() / 3;
     size_t componentSearchWindowLength = min<size_t>(componentLength, 8);
     size_t redIndex = componentLength - componentSearchWindowLength;
@@ -902,11 +950,11 @@ static RGBA32 parseColorStringWithCrazyLegacyRules(const String& colorString)
         greenIndex++;
         blueIndex++;
     }
-    ASSERT(redIndex + 1 < componentLength);
-    ASSERT(greenIndex >= componentLength);
-    ASSERT(greenIndex + 1 < componentLength * 2);
-    ASSERT(blueIndex >= componentLength * 2);
-    ASSERT_WITH_SECURITY_IMPLICATION(blueIndex + 1 < digitBuffer.size());
+    DCHECK_LT(redIndex + 1, componentLength);
+    DCHECK_GE(greenIndex, componentLength);
+    DCHECK_LT(greenIndex + 1, componentLength * 2);
+    DCHECK_GE(blueIndex, componentLength * 2);
+    SECURITY_DCHECK(blueIndex + 1 < digitBuffer.size());
 
     int redValue = toASCIIHexValue(digitBuffer[redIndex], digitBuffer[redIndex + 1]);
     int greenValue = toASCIIHexValue(digitBuffer[greenIndex], digitBuffer[greenIndex + 1]);
@@ -915,24 +963,41 @@ static RGBA32 parseColorStringWithCrazyLegacyRules(const String& colorString)
 }
 
 // Color parsing that matches HTML's "rules for parsing a legacy color value"
-void HTMLElement::addHTMLColorToStyle(MutableStylePropertySet* style, CSSPropertyID propertyID, const String& attributeValue)
+bool HTMLElement::parseColorWithLegacyRules(const String& attributeValue, Color& parsedColor)
 {
     // An empty string doesn't apply a color. (One containing only whitespace does, which is why this check occurs before stripping.)
     if (attributeValue.isEmpty())
-        return;
+        return false;
 
     String colorString = attributeValue.stripWhiteSpace();
 
     // "transparent" doesn't apply a color either.
     if (equalIgnoringCase(colorString, "transparent"))
+        return false;
+
+    // If the string is a 3/6-digit hex color or a named CSS color, use that. Apply legacy rules otherwise. Note color.setFromString()
+    // accepts 4/8-digit hex color, so restrict its use with length checks here to support legacy HTML attributes.
+
+    bool success = false;
+    if ((colorString.length() == 4 || colorString.length() == 7) && colorString[0] == '#')
+        success = parsedColor.setFromString(colorString);
+    if (!success)
+        success = parsedColor.setNamedColor(colorString);
+    if (!success) {
+        parsedColor.setRGB(parseColorStringWithCrazyLegacyRules(colorString));
+        success = true;
+    }
+
+    return success;
+}
+
+void HTMLElement::addHTMLColorToStyle(MutableStylePropertySet* style, CSSPropertyID propertyID, const String& attributeValue)
+{
+    Color parsedColor;
+    if (!parseColorWithLegacyRules(attributeValue, parsedColor))
         return;
 
-    // If the string is a named CSS color or a 3/6-digit hex color, use that.
-    Color parsedColor;
-    if (!parsedColor.setFromString(colorString))
-        parsedColor.setRGB(parseColorStringWithCrazyLegacyRules(colorString));
-
-    style->setProperty(propertyID, cssValuePool().createColorValue(parsedColor.rgb()));
+    style->setProperty(propertyID, *CSSColorValue::create(parsedColor.rgb()));
 }
 
 bool HTMLElement::isInteractiveContent() const
@@ -1009,17 +1074,18 @@ bool HTMLElement::matchesReadWritePseudoClass() const
         // All other values should be treated as "inherit".
     }
 
-    return parentElement() && parentElement()->hasEditableStyle();
+    return parentElement() && hasEditableStyle(*parentElement());
 }
 
 void HTMLElement::handleKeypressEvent(KeyboardEvent* event)
 {
     if (!isSpatialNavigationEnabled(document().frame()) || !supportsFocus())
         return;
+    document().updateStyleAndLayoutTree();
     // if the element is a text form control (like <input type=text> or <textarea>)
     // or has contentEditable attribute on, we should enter a space or newline
     // even in spatial navigation mode instead of handling it as a "click" action.
-    if (isTextFormControl() || isContentEditable())
+    if (isTextFormControl() || hasEditableStyle(*this))
         return;
     int charCode = event->charCode();
     if (charCode == '\r' || charCode == ' ') {
@@ -1032,6 +1098,50 @@ const AtomicString& HTMLElement::eventParameterName()
 {
     DEFINE_STATIC_LOCAL(const AtomicString, eventString, ("event"));
     return eventString;
+}
+
+int HTMLElement::offsetLeftForBinding()
+{
+    Element* offsetParent = unclosedOffsetParent();
+    if (LayoutBoxModelObject* layoutObject = layoutBoxModelObject())
+        return adjustLayoutUnitForAbsoluteZoom(LayoutUnit(layoutObject->pixelSnappedOffsetLeft(offsetParent)), layoutObject->styleRef()).round();
+    return 0;
+}
+
+int HTMLElement::offsetTopForBinding()
+{
+    Element* offsetParent = unclosedOffsetParent();
+    if (LayoutBoxModelObject* layoutObject = layoutBoxModelObject())
+        return adjustLayoutUnitForAbsoluteZoom(LayoutUnit(layoutObject->pixelSnappedOffsetTop(offsetParent)), layoutObject->styleRef()).round();
+    return 0;
+}
+
+int HTMLElement::offsetWidthForBinding()
+{
+    Element* offsetParent = unclosedOffsetParent();
+    if (LayoutBoxModelObject* layoutObject = layoutBoxModelObject())
+        return adjustLayoutUnitForAbsoluteZoom(LayoutUnit(layoutObject->pixelSnappedOffsetWidth(offsetParent)), layoutObject->styleRef()).round();
+    return 0;
+}
+
+DISABLE_CFI_PERF
+int HTMLElement::offsetHeightForBinding()
+{
+    Element* offsetParent = unclosedOffsetParent();
+    if (LayoutBoxModelObject* layoutObject = layoutBoxModelObject())
+        return adjustLayoutUnitForAbsoluteZoom(LayoutUnit(layoutObject->pixelSnappedOffsetHeight(offsetParent)), layoutObject->styleRef()).round();
+    return 0;
+}
+
+Element* HTMLElement::unclosedOffsetParent()
+{
+    document().updateStyleAndLayoutIgnorePendingStylesheetsForNode(this);
+
+    LayoutObject* layoutObject = this->layoutObject();
+    if (!layoutObject)
+        return nullptr;
+
+    return layoutObject->offsetParent(this);
 }
 
 } // namespace blink

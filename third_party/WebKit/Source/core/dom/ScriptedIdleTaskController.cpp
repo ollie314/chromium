@@ -9,7 +9,6 @@
 #include "core/dom/IdleRequestOptions.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "platform/Histogram.h"
-#include "platform/Logging.h"
 #include "platform/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebScheduler.h"
@@ -87,14 +86,27 @@ DEFINE_TRACE(ScriptedIdleTaskController)
     ActiveDOMObject::trace(visitor);
 }
 
+int ScriptedIdleTaskController::nextCallbackId()
+{
+    while (true) {
+        ++m_nextCallbackId;
+
+        if (!isValidCallbackId(m_nextCallbackId))
+            m_nextCallbackId = 1;
+
+        if (!m_callbacks.contains(m_nextCallbackId))
+            return m_nextCallbackId;
+    }
+}
+
 ScriptedIdleTaskController::CallbackId ScriptedIdleTaskController::registerCallback(IdleRequestCallback* callback, const IdleRequestOptions& options)
 {
-    CallbackId id = ++m_nextCallbackId;
+    CallbackId id = nextCallbackId();
     m_callbacks.set(id, callback);
     long long timeoutMillis = options.timeout();
 
     RefPtr<internal::IdleRequestCallbackWrapper> callbackWrapper = internal::IdleRequestCallbackWrapper::create(id, this);
-    m_scheduler->postIdleTask(BLINK_FROM_HERE, WTF::bind<double>(&internal::IdleRequestCallbackWrapper::idleTaskFired, callbackWrapper));
+    m_scheduler->postIdleTask(BLINK_FROM_HERE, WTF::bind(&internal::IdleRequestCallbackWrapper::idleTaskFired, callbackWrapper));
     if (timeoutMillis > 0)
         m_scheduler->timerTaskRunner()->postDelayedTask(BLINK_FROM_HERE, WTF::bind(&internal::IdleRequestCallbackWrapper::timeoutFired, callbackWrapper), timeoutMillis);
     TRACE_EVENT_INSTANT1("devtools.timeline", "RequestIdleCallback", TRACE_EVENT_SCOPE_THREAD, "data", InspectorIdleCallbackRequestEvent::data(getExecutionContext(), id, timeoutMillis));
@@ -104,6 +116,9 @@ ScriptedIdleTaskController::CallbackId ScriptedIdleTaskController::registerCallb
 void ScriptedIdleTaskController::cancelCallback(CallbackId id)
 {
     TRACE_EVENT_INSTANT1("devtools.timeline", "CancelIdleCallback", TRACE_EVENT_SCOPE_THREAD, "data", InspectorIdleCallbackCancelEvent::data(getExecutionContext(), id));
+    if (!isValidCallbackId(id))
+        return;
+
     m_callbacks.remove(id);
 }
 
@@ -170,7 +185,7 @@ void ScriptedIdleTaskController::resume()
     // Repost idle tasks for any remaining callbacks.
     for (auto& callback : m_callbacks) {
         RefPtr<internal::IdleRequestCallbackWrapper> callbackWrapper = internal::IdleRequestCallbackWrapper::create(callback.key, this);
-        m_scheduler->postIdleTask(BLINK_FROM_HERE, WTF::bind<double>(&internal::IdleRequestCallbackWrapper::idleTaskFired, callbackWrapper));
+        m_scheduler->postIdleTask(BLINK_FROM_HERE, WTF::bind(&internal::IdleRequestCallbackWrapper::idleTaskFired, callbackWrapper));
     }
 }
 

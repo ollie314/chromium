@@ -35,7 +35,7 @@
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
-#include "bindings/modules/v8/UnionTypesModules.h"
+#include "bindings/modules/v8/RenderingContext.h"
 #include "core/CSSPropertyNames.h"
 #include "core/css/StylePropertySet.h"
 #include "core/css/resolver/StyleResolver.h"
@@ -46,6 +46,7 @@
 #include "core/frame/Settings.h"
 #include "core/html/TextMetrics.h"
 #include "core/html/canvas/CanvasFontCache.h"
+#include "core/layout/HitTestCanvasResult.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutTheme.h"
 #include "modules/canvas2d/CanvasStyle.h"
@@ -62,7 +63,6 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
 #include "wtf/MathExtras.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/typed_arrays/ArrayBufferContents.h"
 
@@ -110,8 +110,7 @@ private:
 };
 
 CanvasRenderingContext2D::CanvasRenderingContext2D(HTMLCanvasElement* canvas, const CanvasContextCreationAttributes& attrs, Document& document)
-    : CanvasRenderingContext(canvas)
-    , m_hasAlpha(attrs.alpha())
+    : CanvasRenderingContext(canvas, nullptr, attrs)
     , m_contextLostMode(NotLostContext)
     , m_contextRestorable(true)
     , m_tryRestoreContextAttemptCount(0)
@@ -124,6 +123,7 @@ CanvasRenderingContext2D::CanvasRenderingContext2D(HTMLCanvasElement* canvas, co
         m_clipAntialiasing = AntiAliased;
     setShouldAntialias(true);
     ThreadState::current()->registerPreFinalizer(this);
+    validateStateStack();
 }
 
 void CanvasRenderingContext2D::setCanvasGetContextResult(RenderingContext& result)
@@ -141,18 +141,15 @@ void CanvasRenderingContext2D::unwindStateStack()
     }
 }
 
-CanvasRenderingContext2D::~CanvasRenderingContext2D()
-{
-}
+CanvasRenderingContext2D::~CanvasRenderingContext2D() { }
 
 void CanvasRenderingContext2D::dispose()
 {
     if (m_pruneLocalFontCacheScheduled)
         Platform::current()->currentThread()->removeTaskObserver(this);
-    clearFilterReferences();
 }
 
-void CanvasRenderingContext2D::validateStateStack()
+void CanvasRenderingContext2D::validateStateStack() const
 {
 #if ENABLE(ASSERT)
     SkCanvas* skCanvas = canvas()->existingDrawingCanvas();
@@ -160,6 +157,7 @@ void CanvasRenderingContext2D::validateStateStack()
         ASSERT(static_cast<size_t>(skCanvas->getSaveCount()) == m_stateStack.size());
     }
 #endif
+    CHECK(m_stateStack.first().get()); // Temporary for investigating crbug.com/648510
 }
 
 bool CanvasRenderingContext2D::isAccelerated() const
@@ -187,7 +185,7 @@ void CanvasRenderingContext2D::loseContext(LostContextMode lostMode)
     if (m_contextLostMode != NotLostContext)
         return;
     m_contextLostMode = lostMode;
-    if (m_contextLostMode == SyntheticLostContext) {
+    if (m_contextLostMode == SyntheticLostContext && canvas()) {
         canvas()->discardImageBuffer();
     }
     m_dispatchContextLostEventTimer.startOneShot(0, BLINK_FROM_HERE);
@@ -217,11 +215,12 @@ DEFINE_TRACE(CanvasRenderingContext2D)
     visitor->trace(m_hitRegionManager);
     CanvasRenderingContext::trace(visitor);
     BaseRenderingContext2D::trace(visitor);
+    SVGResourceClient::trace(visitor);
 }
 
-void CanvasRenderingContext2D::dispatchContextLostEvent(Timer<CanvasRenderingContext2D>*)
+void CanvasRenderingContext2D::dispatchContextLostEvent(TimerBase*)
 {
-    if (contextLostRestoredEventsEnabled()) {
+    if (canvas() && contextLostRestoredEventsEnabled()) {
         Event* event = Event::createCancelable(EventTypeNames::contextlost);
         canvas()->dispatchEvent(event);
         if (event->defaultPrevented()) {
@@ -237,7 +236,7 @@ void CanvasRenderingContext2D::dispatchContextLostEvent(Timer<CanvasRenderingCon
     }
 }
 
-void CanvasRenderingContext2D::tryRestoreContextEvent(Timer<CanvasRenderingContext2D>* timer)
+void CanvasRenderingContext2D::tryRestoreContextEvent(TimerBase* timer)
 {
     if (m_contextLostMode == NotLostContext) {
         // Canvas was already restored (possibly thanks to a resize), so stop trying.
@@ -245,7 +244,7 @@ void CanvasRenderingContext2D::tryRestoreContextEvent(Timer<CanvasRenderingConte
         return;
     }
 
-    ASSERT(m_contextLostMode == RealLostContext);
+    DCHECK(m_contextLostMode == RealLostContext);
     if (canvas()->hasImageBuffer() && canvas()->buffer()->restoreSurface()) {
         m_tryRestoreContextEventTimer.stop();
         dispatchContextRestoredEvent(nullptr);
@@ -260,7 +259,7 @@ void CanvasRenderingContext2D::tryRestoreContextEvent(Timer<CanvasRenderingConte
     }
 }
 
-void CanvasRenderingContext2D::dispatchContextRestoredEvent(Timer<CanvasRenderingContext2D>*)
+void CanvasRenderingContext2D::dispatchContextRestoredEvent(TimerBase*)
 {
     if (m_contextLostMode == NotLostContext)
         return;
@@ -289,17 +288,12 @@ void CanvasRenderingContext2D::reset()
 
 void CanvasRenderingContext2D::restoreCanvasMatrixClipStack(SkCanvas* c) const
 {
-    if (!c)
-        return;
-    HeapVector<Member<CanvasRenderingContext2DState>>::const_iterator currState;
-    ASSERT(m_stateStack.begin() < m_stateStack.end());
-    for (currState = m_stateStack.begin(); currState < m_stateStack.end(); currState++) {
-        c->setMatrix(SkMatrix::I());
-        currState->get()->playbackClips(c);
-        c->setMatrix(affineTransformToSkMatrix(currState->get()->transform()));
-        c->save();
-    }
-    c->restore();
+    restoreMatrixClipStack(c);
+}
+
+bool CanvasRenderingContext2D::shouldAntialias() const
+{
+    return state().shouldAntialias();
 }
 
 void CanvasRenderingContext2D::setShouldAntialias(bool doAA)
@@ -322,7 +316,7 @@ void CanvasRenderingContext2D::scrollPathIntoViewInternal(const Path& path)
     if (!state().isTransformInvertible() || path.isEmpty())
         return;
 
-    canvas()->document().updateLayoutIgnorePendingStylesheets();
+    canvas()->document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     LayoutObject* renderer = canvas()->layoutObject();
     LayoutBox* layoutBox = canvas()->layoutBox();
@@ -349,9 +343,9 @@ void CanvasRenderingContext2D::scrollPathIntoViewInternal(const Path& path)
 void CanvasRenderingContext2D::clearRect(double x, double y, double width, double height)
 {
     BaseRenderingContext2D::clearRect(x, y, width, height);
-    FloatRect rect(x, y, width, height);
 
     if (m_hitRegionManager) {
+        FloatRect rect(x, y, width, height);
         m_hitRegionManager->removeHitRegionsInRect(rect, state().transform());
     }
 }
@@ -417,14 +411,14 @@ String CanvasRenderingContext2D::font() const
     const FontDescription& fontDescription = state().font().getFontDescription();
 
     if (fontDescription.style() == FontStyleItalic)
-        serializedFont.appendLiteral("italic ");
+        serializedFont.append("italic ");
     if (fontDescription.weight() == FontWeightBold)
-        serializedFont.appendLiteral("bold ");
-    if (fontDescription.variant() == FontVariantSmallCaps)
-        serializedFont.appendLiteral("small-caps ");
+        serializedFont.append("bold ");
+    if (fontDescription.variantCaps() == FontDescription::SmallCaps)
+        serializedFont.append("small-caps ");
 
     serializedFont.appendNumber(fontDescription.computedPixelSize());
-    serializedFont.appendLiteral("px");
+    serializedFont.append("px");
 
     const FontFamily& firstFontFamily = fontDescription.family();
     for (const FontFamily* fontFamily = &firstFontFamily; fontFamily; fontFamily = fontFamily->next()) {
@@ -447,11 +441,7 @@ String CanvasRenderingContext2D::font() const
 
 void CanvasRenderingContext2D::setFont(const String& newFont)
 {
-    // The style resolution required for rendering text is not available in frame-less documents.
-    if (!canvas()->document().frame())
-        return;
-
-    canvas()->document().updateLayoutTreeForNode(canvas());
+    canvas()->document().updateStyleAndLayoutTreeForNode(canvas());
 
     // The following early exit is dependent on the cache not being empty
     // because an empty cache may indicate that a style change has occured
@@ -513,13 +503,23 @@ void CanvasRenderingContext2D::schedulePruneLocalFontCacheIfNeeded()
 
 void CanvasRenderingContext2D::didProcessTask()
 {
+    Platform::current()->currentThread()->removeTaskObserver(this);
+
+    // This should be the only place where canvas() needs to be checked for nullness
+    // because the circular refence with HTMLCanvasElement mean the canvas and the
+    // context keep each other alive as long as the pair is referenced the task
+    // observer is the only persisten refernce to this object that is not traced,
+    // so didProcessTask() may be call at a time when the canvas has been garbage
+    // collected but not the context.
+    if (!canvas())
+        return;
+
     // The rendering surface needs to be prepared now because it will be too late
     // to create a layer once we are in the paint invalidation phase.
     canvas()->prepareSurfaceForPaintingIfNeeded();
 
     pruneLocalFontCache(canvas()->document().canvasFontCache()->maxFonts());
     m_pruneLocalFontCacheScheduled = false;
-    Platform::current()->currentThread()->removeTaskObserver(this);
 }
 
 void CanvasRenderingContext2D::pruneLocalFontCache(size_t targetSize)
@@ -578,15 +578,22 @@ ImageBuffer* CanvasRenderingContext2D::imageBuffer() const
     return canvas()->buffer();
 }
 
+PassRefPtr<Image> blink::CanvasRenderingContext2D::getImage(AccelerationHint hint, SnapshotReason reason) const
+{
+    if (!hasImageBuffer())
+        return nullptr;
+    return canvas()->buffer()->newImageSnapshot(hint, reason);
+}
+
 bool CanvasRenderingContext2D::parseColorOrCurrentColor(Color& color, const String& colorString) const
 {
     return ::blink::parseColorOrCurrentColor(color, colorString, canvas());
 }
 
-std::pair<Element*, String> CanvasRenderingContext2D::getControlAndIdIfHitRegionExists(const LayoutPoint& location)
+HitTestCanvasResult* CanvasRenderingContext2D::getControlAndIdIfHitRegionExists(const LayoutPoint& location)
 {
     if (hitRegionsCount() <= 0)
-        return std::make_pair(nullptr, String());
+        return HitTestCanvasResult::create(String(), nullptr);
 
     LayoutBox* box = canvas()->layoutBox();
     FloatPoint localPos = box->absoluteToLocal(FloatPoint(location), UseTransforms);
@@ -598,10 +605,10 @@ std::pair<Element*, String> CanvasRenderingContext2D::getControlAndIdIfHitRegion
     if (hitRegion) {
         Element* control = hitRegion->control();
         if (control && canvas()->isSupportedInteractiveCanvasFallback(*control))
-            return std::make_pair(hitRegion->control(), hitRegion->id());
-        return std::make_pair(nullptr, hitRegion->id());
+            return HitTestCanvasResult::create(hitRegion->id(), hitRegion->control());
+        return HitTestCanvasResult::create(hitRegion->id(), nullptr);
     }
-    return std::make_pair(nullptr, String());
+    return HitTestCanvasResult::create(String(), nullptr);
 }
 
 String CanvasRenderingContext2D::getIdFromControl(const Element* element)
@@ -664,7 +671,7 @@ static inline TextDirection toTextDirection(CanvasRenderingContext2DState::Direc
 String CanvasRenderingContext2D::direction() const
 {
     if (state().getDirection() == CanvasRenderingContext2DState::DirectionInherit)
-        canvas()->document().updateLayoutTreeForNode(canvas());
+        canvas()->document().updateStyleAndLayoutTreeForNode(canvas());
     return toTextDirection(state().getDirection(), canvas()) == RTL ? rtl : ltr;
 }
 
@@ -688,21 +695,25 @@ void CanvasRenderingContext2D::setDirection(const String& directionString)
 
 void CanvasRenderingContext2D::fillText(const String& text, double x, double y)
 {
+    trackDrawCall(FillText);
     drawTextInternal(text, x, y, CanvasRenderingContext2DState::FillPaintType);
 }
 
 void CanvasRenderingContext2D::fillText(const String& text, double x, double y, double maxWidth)
 {
+    trackDrawCall(FillText);
     drawTextInternal(text, x, y, CanvasRenderingContext2DState::FillPaintType, &maxWidth);
 }
 
 void CanvasRenderingContext2D::strokeText(const String& text, double x, double y)
 {
+    trackDrawCall(StrokeText);
     drawTextInternal(text, x, y, CanvasRenderingContext2DState::StrokePaintType);
 }
 
 void CanvasRenderingContext2D::strokeText(const String& text, double x, double y, double maxWidth)
 {
+    trackDrawCall(StrokeText);
     drawTextInternal(text, x, y, CanvasRenderingContext2DState::StrokePaintType, &maxWidth);
 }
 
@@ -710,11 +721,7 @@ TextMetrics* CanvasRenderingContext2D::measureText(const String& text)
 {
     TextMetrics* metrics = TextMetrics::create();
 
-    // The style resolution required for rendering text is not available in frame-less documents.
-    if (!canvas()->document().frame())
-        return metrics;
-
-    canvas()->document().updateLayoutTreeForNode(canvas());
+    canvas()->document().updateStyleAndLayoutTreeForNode(canvas());
     const Font& font = accessFont();
 
     TextDirection direction;
@@ -747,22 +754,18 @@ TextMetrics* CanvasRenderingContext2D::measureText(const String& text)
     metrics->setEmHeightAscent(0);
     metrics->setEmHeightDescent(0);
 
-    metrics->setHangingBaseline(-0.8f * ascent + baselineY);
-    metrics->setAlphabeticBaseline(baselineY);
-    metrics->setIdeographicBaseline(descent + baselineY);
+    metrics->setHangingBaseline(0.8f * ascent - baselineY);
+    metrics->setAlphabeticBaseline(-baselineY);
+    metrics->setIdeographicBaseline(-descent - baselineY);
     return metrics;
 }
 
 void CanvasRenderingContext2D::drawTextInternal(const String& text, double x, double y, CanvasRenderingContext2DState::PaintType paintType, double* maxWidth)
 {
-    // The style resolution required for rendering text is not available in frame-less documents.
-    if (!canvas()->document().frame())
-        return;
-
     // accessFont needs the style to be up to date, but updating style can cause script to run,
     // (e.g. due to autofocus) which can free the canvas (set size to 0, for example), so update
     // style before grabbing the drawingCanvas.
-    canvas()->document().updateLayoutTreeForNode(canvas());
+    canvas()->document().updateStyleAndLayoutTreeForNode(canvas());
 
     SkCanvas* c = drawingCanvas();
     if (!c)
@@ -774,10 +777,10 @@ void CanvasRenderingContext2D::drawTextInternal(const String& text, double x, do
         return;
 
     // Currently, SkPictureImageFilter does not support subpixel text anti-aliasing, which
-    // is expected when !m_hasAlpha, so we need to fall out of display list mode when
-    // drawing text to an opaque canvas
+    // is expected when !creationAttributes().alpha(), so we need to fall out of display
+    // list mode when drawing text to an opaque canvas.
     // crbug.com/583809
-    if (!m_hasAlpha && !isAccelerated())
+    if (!creationAttributes().alpha() && !isAccelerated())
         canvas()->disableDeferral(DisableDeferralReasonSubPixelTextAntiAliasingSupport);
 
     const Font& font = accessFont();
@@ -900,7 +903,8 @@ WebLayer* CanvasRenderingContext2D::platformLayer() const
 
 void CanvasRenderingContext2D::getContextAttributes(Canvas2DContextAttributes& attrs) const
 {
-    attrs.setAlpha(m_hasAlpha);
+    attrs.setAlpha(creationAttributes().alpha());
+    attrs.setColorSpace(colorSpaceAsString());
 }
 
 void CanvasRenderingContext2D::drawFocusIfNeeded(Element* element)
@@ -945,6 +949,7 @@ bool CanvasRenderingContext2D::focusRingCallIsValid(const Path& path, Element* e
 
 void CanvasRenderingContext2D::drawFocusRing(const Path& path)
 {
+    m_usageCounters.numDrawFocusCalls++;
     if (!drawingCanvas())
         return;
 
@@ -966,7 +971,7 @@ void CanvasRenderingContext2D::drawFocusRing(const Path& path)
 
 void CanvasRenderingContext2D::updateElementAccessibility(const Path& path, Element* element)
 {
-    element->document().updateLayoutIgnorePendingStylesheets();
+    element->document().updateStyleAndLayoutIgnorePendingStylesheets();
     AXObjectCache* axObjectCache = element->document().existingAXObjectCache();
     LayoutBoxModelObject* lbmo = canvas()->layoutBoxModelObject();
     LayoutObject* renderer = canvas()->layoutObject();
@@ -977,12 +982,12 @@ void CanvasRenderingContext2D::updateElementAccessibility(const Path& path, Elem
     Path transformedPath = path;
     transformedPath.transform(state().transform());
 
-    // Offset by the canvas rect, taking border and padding into account.
-    IntRect canvasRect = renderer->absoluteBoundingBoxRect();
-    canvasRect.move(lbmo->borderLeft() + lbmo->paddingLeft(), lbmo->borderTop() + lbmo->paddingTop());
+    // Add border and padding to the bounding rect.
     LayoutRect elementRect = enclosingLayoutRect(transformedPath.boundingRect());
-    elementRect.moveBy(canvasRect.location());
-    axObjectCache->setCanvasObjectBounds(element, elementRect);
+    elementRect.move(lbmo->borderLeft() + lbmo->paddingLeft(), lbmo->borderTop() + lbmo->paddingTop());
+
+    // Update the accessible object.
+    axObjectCache->setCanvasObjectBounds(canvas(), element, elementRect);
 }
 
 void CanvasRenderingContext2D::addHitRegion(const HitRegionOptions& options, ExceptionState& exceptionState)
@@ -1055,6 +1060,33 @@ unsigned CanvasRenderingContext2D::hitRegionsCount() const
         return m_hitRegionManager->getHitRegionsCount();
 
     return 0;
+}
+
+bool CanvasRenderingContext2D::isAccelerationOptimalForCanvasContent() const
+{
+    // Heuristic to determine if the GPU accelerated rendering pipeline is optimal
+    // for performance based on past usage. It has a bias towards suggesting that the
+    // accelerated pipeline is optimal.
+
+    float acceleratedCost = estimateRenderingCost(ExpensiveCanvasHeuristicParameters::AcceleratedModeIndex);
+
+    float recordingCost = estimateRenderingCost(ExpensiveCanvasHeuristicParameters::RecordingModeIndex);
+
+    float costDifference = acceleratedCost - recordingCost;
+    float percentCostReduction = costDifference / acceleratedCost * 100.0;
+    float costDifferencePerFrame = costDifference / m_usageCounters.numFramesSinceReset;
+
+    if (percentCostReduction >= ExpensiveCanvasHeuristicParameters::MinPercentageImprovementToSuggestDisableAcceleration
+        && costDifferencePerFrame >= ExpensiveCanvasHeuristicParameters::MinCostPerFrameImprovementToSuggestDisableAcceleration) {
+        return false;
+    }
+    return true;
+}
+
+void CanvasRenderingContext2D::resetUsageTracking()
+{
+    UsageCounters newCounters;
+    m_usageCounters = newCounters;
 }
 
 } // namespace blink

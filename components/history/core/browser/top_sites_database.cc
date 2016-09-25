@@ -10,7 +10,7 @@
 
 #include "base/files/file_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "components/history/core/browser/history_types.h"
@@ -216,7 +216,7 @@ void RecoverDatabaseOrRaze(sql::Connection* db, const base::FilePath& db_path) {
   int64_t original_size = 0;
   base::GetFileSize(db_path, &original_size);
 
-  scoped_ptr<sql::Recovery> recovery = sql::Recovery::Begin(db, db_path);
+  std::unique_ptr<sql::Recovery> recovery = sql::Recovery::Begin(db, db_path);
   if (!recovery) {
     RecordRecoveryEvent(RECOVERY_EVENT_FAILED_SCOPER);
     return;
@@ -345,7 +345,7 @@ void DatabaseErrorCallback(sql::Connection* db,
   // are seen.
 
   // The default handling is to assert on debug and to ignore on release.
-  if (!sql::Connection::ShouldIgnoreSqliteError(extended_error))
+  if (!sql::Connection::IsExpectedSqliteError(extended_error))
     DLOG(FATAL) << db->GetErrorMessage();
 }
 
@@ -720,7 +720,7 @@ bool TopSitesDatabase::RemoveURL(const MostVisitedURL& url) {
 }
 
 sql::Connection* TopSitesDatabase::CreateDB(const base::FilePath& db_name) {
-  scoped_ptr<sql::Connection> db(new sql::Connection());
+  std::unique_ptr<sql::Connection> db(new sql::Connection());
   // Settings copied from ThumbnailDatabase.
   db->set_histogram_tag("TopSites");
   db->set_error_callback(base::Bind(&DatabaseErrorCallback, db.get(), db_name));

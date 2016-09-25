@@ -27,16 +27,17 @@
 
 #include "modules/webaudio/AudioParam.h"
 #include "modules/webaudio/AudioScheduledSourceNode.h"
+#include "modules/webaudio/OscillatorOptions.h"
 #include "platform/audio/AudioBus.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Threading.h"
 
 namespace blink {
 
-class AbstractAudioContext;
+class BaseAudioContext;
 class ExceptionState;
+class OscillatorOptions;
 class PeriodicWave;
 
 // OscillatorNode is an audio generator of periodic waveforms.
@@ -100,7 +101,8 @@ private:
 class OscillatorNode final : public AudioScheduledSourceNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static OscillatorNode* create(AbstractAudioContext&, float sampleRate);
+    static OscillatorNode* create(BaseAudioContext&, ExceptionState&);
+    static OscillatorNode* create(BaseAudioContext*, const OscillatorOptions&, ExceptionState&);
     DECLARE_VIRTUAL_TRACE();
 
     String type() const;
@@ -110,7 +112,7 @@ public:
     void setPeriodicWave(PeriodicWave*);
 
 private:
-    OscillatorNode(AbstractAudioContext&, float sampleRate);
+    OscillatorNode(BaseAudioContext&);
     OscillatorHandler& oscillatorHandler() const;
 
     Member<AudioParam> m_frequency;

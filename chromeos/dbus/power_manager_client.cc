@@ -29,6 +29,7 @@
 #include "chromeos/dbus/power_manager/policy.pb.h"
 #include "chromeos/dbus/power_manager/power_supply_properties.pb.h"
 #include "chromeos/dbus/power_manager/suspend.pb.h"
+#include "chromeos/system/statistics_provider.h"
 #include "components/device_event_log/device_event_log.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
@@ -458,8 +459,10 @@ class PowerManagerClientImpl : public PowerManagerClient {
       const GetScreenBrightnessPercentCallback& callback,
       dbus::Response* response) {
     if (!response) {
-      POWER_LOG(ERROR) << "Error calling "
-                       << power_manager::kGetScreenBrightnessPercentMethod;
+      if (!system::StatisticsProvider::GetInstance()->IsRunningOnVm()) {
+        POWER_LOG(ERROR) << "Error calling "
+                         << power_manager::kGetScreenBrightnessPercentMethod;
+      }
       return;
     }
     dbus::MessageReader reader(response);
@@ -540,6 +543,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
     suspend_is_pending_ = true;
     suspending_from_dark_resume_ = in_dark_resume;
     num_pending_suspend_readiness_callbacks_ = 0;
+
     if (suspending_from_dark_resume_)
       FOR_EACH_OBSERVER(Observer, observers_, DarkSuspendImminent());
     else
@@ -564,8 +568,22 @@ class PowerManagerClientImpl : public PowerManagerClient {
                      << " suspend_id=" << proto.suspend_id()
                      << " duration=" << duration.InSeconds() << " sec";
 
-    if (render_process_manager_delegate_)
+    // RenderProcessManagerDelegate is only notified that suspend is imminent
+    // when readiness is being reported to powerd. If the suspend attempt was
+    // cancelled before then, we shouldn't notify the delegate about completion.
+    const bool cancelled_while_regular_suspend_pending =
+        suspend_is_pending_ && !suspending_from_dark_resume_;
+    if (render_process_manager_delegate_ &&
+        !cancelled_while_regular_suspend_pending)
       render_process_manager_delegate_->SuspendDone();
+
+    // powerd always pairs each SuspendImminent signal with SuspendDone before
+    // starting the next suspend attempt, so we should no longer report
+    // readiness for any in-progress suspend attempts.
+    pending_suspend_id_ = -1;
+    suspend_is_pending_ = false;
+    suspending_from_dark_resume_ = false;
+    num_pending_suspend_readiness_callbacks_ = 0;
 
     FOR_EACH_OBSERVER(
         PowerManagerClient::Observer, observers_, SuspendDone(duration));
@@ -631,6 +649,14 @@ class PowerManagerClientImpl : public PowerManagerClient {
             (proto.type() == power_manager::InputEvent_Type_LID_OPEN);
         FOR_EACH_OBSERVER(PowerManagerClient::Observer, observers_,
                           LidEventReceived(open, timestamp));
+        break;
+      }
+      case power_manager::InputEvent_Type_TABLET_MODE_ON:
+      case power_manager::InputEvent_Type_TABLET_MODE_OFF: {
+        bool on =
+            (proto.type() == power_manager::InputEvent_Type_TABLET_MODE_ON);
+        FOR_EACH_OBSERVER(PowerManagerClient::Observer, observers_,
+                          TabletModeEventReceived(on, timestamp));
         break;
       }
     }
@@ -700,7 +726,9 @@ class PowerManagerClientImpl : public PowerManagerClient {
   // Reports suspend readiness to powerd if no observers are still holding
   // suspend readiness callbacks.
   void MaybeReportSuspendReadiness() {
-    if (!suspend_is_pending_ || num_pending_suspend_readiness_callbacks_ > 0)
+    CHECK(suspend_is_pending_);
+
+    if (num_pending_suspend_readiness_callbacks_ > 0)
       return;
 
     std::string method_name;
@@ -745,16 +773,16 @@ class PowerManagerClientImpl : public PowerManagerClient {
   dbus::ObjectProxy* power_manager_proxy_;
   base::ObserverList<Observer> observers_;
 
-  // The delay_id_ obtained from the RegisterSuspendDelay request.
+  // The delay ID obtained from the RegisterSuspendDelay request.
   int32_t suspend_delay_id_;
   bool has_suspend_delay_id_;
 
-  // The delay_id_ obtained from the RegisterDarkSuspendDelay request.
+  // The delay ID obtained from the RegisterDarkSuspendDelay request.
   int32_t dark_suspend_delay_id_;
   bool has_dark_suspend_delay_id_;
 
-  // powerd-supplied ID corresponding to an imminent suspend attempt that is
-  // currently being delayed.
+  // powerd-supplied ID corresponding to an imminent (either regular or dark)
+  // suspend attempt that is currently being delayed.
   int32_t pending_suspend_id_;
   bool suspend_is_pending_;
 
@@ -794,7 +822,7 @@ PowerManagerClient* PowerManagerClient::Create(
     DBusClientImplementationType type) {
   if (type == REAL_DBUS_CLIENT_IMPLEMENTATION)
     return new PowerManagerClientImpl();
-  DCHECK_EQ(STUB_DBUS_CLIENT_IMPLEMENTATION, type);
+  DCHECK_EQ(FAKE_DBUS_CLIENT_IMPLEMENTATION, type);
   return new FakePowerManagerClient();
 }
 

@@ -28,8 +28,9 @@ class ScreenPositionClient;
 }
 }
 
-namespace gfx {
+namespace display {
 class Display;
+class ManagedDisplayInfo;
 }
 
 namespace ui {
@@ -38,10 +39,9 @@ class Reflector;
 
 namespace ash {
 class AshWindowTreeHost;
-class DisplayInfo;
 class RootWindowTransformer;
 
-namespace test{
+namespace test {
 class MirrorWindowTestApi;
 }
 
@@ -55,7 +55,8 @@ class ASH_EXPORT MirrorWindowController : public aura::WindowTreeHostObserver {
 
   // Updates the root window's bounds using |display_info|.
   // Creates the new root window if one doesn't exist.
-  void UpdateWindow(const std::vector<DisplayInfo>& display_info);
+  void UpdateWindow(
+      const std::vector<display::ManagedDisplayInfo>& display_info);
 
   // Same as above, but using existing display info
   // for the mirrored display.
@@ -71,8 +72,8 @@ class ASH_EXPORT MirrorWindowController : public aura::WindowTreeHostObserver {
   // display is not mirrored by the compositor path.
   aura::Window* GetWindow();
 
-  // Returns the gfx::Display for the mirroring root window.
-  gfx::Display GetDisplayForRootWindow(const aura::Window* root) const;
+  // Returns the display::Display for the mirroring root window.
+  display::Display GetDisplayForRootWindow(const aura::Window* root) const;
 
   // Returns the AshWindwoTreeHost created for |display_id|.
   AshWindowTreeHost* GetAshWindowTreeHostForDisplayId(int64_t display_id);

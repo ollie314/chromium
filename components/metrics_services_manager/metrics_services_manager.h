@@ -5,8 +5,10 @@
 #ifndef COMPONENTS_METRICS_SERVICES_MANAGER_METRICS_SERVICES_MANAGER_H_
 #define COMPONENTS_METRICS_SERVICES_MANAGER_METRICS_SERVICES_MANAGER_H_
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/metrics/field_trial.h"
 #include "base/threading/thread_checker.h"
 
 namespace base {
@@ -38,8 +40,18 @@ class MetricsServicesManager {
  public:
   // Creates the MetricsServicesManager with the given client.
   explicit MetricsServicesManager(
-      scoped_ptr<MetricsServicesManagerClient> client);
+      std::unique_ptr<MetricsServicesManagerClient> client);
   virtual ~MetricsServicesManager();
+
+  // Returns the preferred entropy provider used to seed persistent activities
+  // based on whether or not metrics reporting is permitted on this client.
+  //
+  // If there's consent to report metrics, this method returns an entropy
+  // provider that has a high source of entropy, partially based on the client
+  // ID. Otherwise, it returns an entropy provider that is based on a low
+  // entropy source.
+  std::unique_ptr<const base::FieldTrial::EntropyProvider>
+  CreateEntropyProvider();
 
   // Returns the MetricsService, creating it if it hasn't been created yet (and
   // additionally creating the MetricsServiceClient in that case).
@@ -80,7 +92,7 @@ class MetricsServicesManager {
   void UpdateRunningServices();
 
   // The client passed in from the embedder.
-  scoped_ptr<MetricsServicesManagerClient> client_;
+  std::unique_ptr<MetricsServicesManagerClient> client_;
 
   // Ensures that all functions are called from the same thread.
   base::ThreadChecker thread_checker_;
@@ -92,13 +104,13 @@ class MetricsServicesManager {
   bool may_record_;
 
   // The MetricsServiceClient. Owns the MetricsService.
-  scoped_ptr<metrics::MetricsServiceClient> metrics_service_client_;
+  std::unique_ptr<metrics::MetricsServiceClient> metrics_service_client_;
 
   // The RapporService, for RAPPOR metric uploads.
-  scoped_ptr<rappor::RapporService> rappor_service_;
+  std::unique_ptr<rappor::RapporService> rappor_service_;
 
   // The VariationsService, for server-side experiments infrastructure.
-  scoped_ptr<variations::VariationsService> variations_service_;
+  std::unique_ptr<variations::VariationsService> variations_service_;
 
   DISALLOW_COPY_AND_ASSIGN(MetricsServicesManager);
 };

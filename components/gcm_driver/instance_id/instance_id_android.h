@@ -24,10 +24,23 @@ namespace instance_id {
 // InstanceID implementation for Android.
 class InstanceIDAndroid : public InstanceID {
  public:
+  // Tests depending on InstanceID that run without a nested Java message loop
+  // must use this. Operations that would normally be asynchronous will instead
+  // block the UI thread.
+  class ScopedBlockOnAsyncTasksForTesting {
+   public:
+    ScopedBlockOnAsyncTasksForTesting();
+    ~ScopedBlockOnAsyncTasksForTesting();
+
+   private:
+    bool previous_value_;
+    DISALLOW_COPY_AND_ASSIGN(ScopedBlockOnAsyncTasksForTesting);
+  };
+
   // Register JNI methods.
   static bool RegisterJni(JNIEnv* env);
 
-  InstanceIDAndroid(const std::string& app_id);
+  InstanceIDAndroid(const std::string& app_id, gcm::GCMDriver* gcm_driver);
   ~InstanceIDAndroid() override;
 
   // InstanceID implementation:
@@ -37,12 +50,20 @@ class InstanceIDAndroid : public InstanceID {
                 const std::string& scope,
                 const std::map<std::string, std::string>& options,
                 const GetTokenCallback& callback) override;
-  void DeleteToken(const std::string& audience,
-                   const std::string& scope,
-                   const DeleteTokenCallback& callback) override;
-  void DeleteID(const DeleteIDCallback& callback) override;
+  void DeleteTokenImpl(const std::string& audience,
+                       const std::string& scope,
+                       const DeleteTokenCallback& callback) override;
+  void DeleteIDImpl(const DeleteIDCallback& callback) override;
 
   // Methods called from Java via JNI:
+  void DidGetID(JNIEnv* env,
+                const base::android::JavaParamRef<jobject>& obj,
+                jint request_id,
+                const base::android::JavaParamRef<jstring>& jid);
+  void DidGetCreationTime(JNIEnv* env,
+                          const base::android::JavaParamRef<jobject>& obj,
+                          jint request_id,
+                          jlong creation_time_unix_ms);
   void DidGetToken(JNIEnv* env,
                    const base::android::JavaParamRef<jobject>& obj,
                    jint request_id,
@@ -59,6 +80,8 @@ class InstanceIDAndroid : public InstanceID {
  private:
   base::android::ScopedJavaGlobalRef<jobject> java_ref_;
 
+  IDMap<GetIDCallback, IDMapOwnPointer> get_id_callbacks_;
+  IDMap<GetCreationTimeCallback, IDMapOwnPointer> get_creation_time_callbacks_;
   IDMap<GetTokenCallback, IDMapOwnPointer> get_token_callbacks_;
   IDMap<DeleteTokenCallback, IDMapOwnPointer> delete_token_callbacks_;
   IDMap<DeleteIDCallback, IDMapOwnPointer> delete_id_callbacks_;

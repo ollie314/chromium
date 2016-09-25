@@ -10,6 +10,8 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebTaskRunner.h"
 #include "public/platform/WebTraceLocation.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -53,13 +55,13 @@ ScriptStreamerThread* ScriptStreamerThread::shared()
     return s_sharedThread;
 }
 
-void ScriptStreamerThread::postTask(PassOwnPtr<CrossThreadClosure> task)
+void ScriptStreamerThread::postTask(std::unique_ptr<CrossThreadClosure> task)
 {
     ASSERT(isMainThread());
     MutexLocker locker(m_mutex);
     ASSERT(!m_runningTask);
     m_runningTask = true;
-    platformThread().getWebTaskRunner()->postTask(BLINK_FROM_HERE, task);
+    platformThread().getWebTaskRunner()->postTask(BLINK_FROM_HERE, std::move(task));
 }
 
 void ScriptStreamerThread::taskDone()
@@ -72,11 +74,11 @@ void ScriptStreamerThread::taskDone()
 WebThread& ScriptStreamerThread::platformThread()
 {
     if (!isRunning())
-        m_thread = adoptPtr(Platform::current()->createThread("ScriptStreamerThread"));
+        m_thread = wrapUnique(Platform::current()->createThread("ScriptStreamerThread"));
     return *m_thread;
 }
 
-void ScriptStreamerThread::runScriptStreamingTask(PassOwnPtr<v8::ScriptCompiler::ScriptStreamingTask> task, ScriptStreamer* streamer)
+void ScriptStreamerThread::runScriptStreamingTask(std::unique_ptr<v8::ScriptCompiler::ScriptStreamingTask> task, ScriptStreamer* streamer)
 {
     TRACE_EVENT1("v8,devtools.timeline", "v8.parseOnBackground", "data", InspectorParseScriptEvent::data(streamer->scriptResourceIdentifier(), streamer->scriptURLString()));
     // Running the task can and will block: SourceStream::GetSomeData will get

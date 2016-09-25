@@ -4,10 +4,10 @@
 
 #include <string>
 
+#include "ash/common/wm/window_positioner.h"
 #include "ash/display/display_manager.h"
 #include "ash/shell.h"
 #include "ash/test/display_manager_test_api.h"
-#include "ash/wm/window_positioner.h"
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
@@ -18,11 +18,11 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "components/policy/policy_constants.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
-#include "policy/policy_constants.h"
 
 namespace policy {
 

@@ -1,5 +1,34 @@
 {
-  "name": "mojo:ash_sysui",
-  "display_name": "System UI",
-  "capabilities": { "*": [ "*" ] }
+  "manifest_version":  1,
+  "name": "mojo:ash",
+  "display_name": "Ash Window Manager and Shell",
+  "capabilities": {
+    "provided": {
+      "mus:window_manager" : [ "ui::mojom::AcceleratorRegistrar" ]
+    },
+    "required": {
+      "*": { "classes": [ "accessibility", "app" ] },
+      "exe:chrome" : {
+        "interfaces": [
+          "ash::mojom::WallpaperManager",
+          "app_list::mojom::AppListPresenter"
+        ]
+      },
+      "mojo:mash_session": {
+        "interfaces": [ "mash::session::mojom::Session" ]
+      },
+      "mojo:ui": {
+        "interfaces": [
+          "display::mojom::DisplayController",
+          "ui::mojom::AccessibilityManager",
+          "ui::mojom::WindowManagerWindowTreeFactory"
+        ]
+      },
+      "mojo:touch_hud": {
+        "interfaces": [
+          "mash::mojom::Launchable"
+        ]
+      }
+    }
+  }
 }

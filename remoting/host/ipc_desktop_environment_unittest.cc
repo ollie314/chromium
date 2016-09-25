@@ -18,6 +18,7 @@
 #include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "ipc/attachment_broker_privileged.h"
 #include "ipc/ipc_channel.h"
@@ -42,7 +43,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_region.h"
-#include "third_party/webrtc/modules/desktop_capture/screen_capturer_mock_objects.h"
+#include "third_party/webrtc/modules/desktop_capture/screen_capturer.h"
 
 using testing::_;
 using testing::AnyNumber;
@@ -60,6 +61,23 @@ using protocol::test::EqualsTouchEvent;
 using protocol::test::EqualsTouchEventTypeAndId;
 
 namespace {
+
+class MockScreenCapturerCallback : public webrtc::ScreenCapturer::Callback {
+ public:
+  MockScreenCapturerCallback() {}
+  virtual ~MockScreenCapturerCallback() {}
+
+  MOCK_METHOD2(OnCaptureResultPtr,
+               void(webrtc::DesktopCapturer::Result result,
+                    std::unique_ptr<webrtc::DesktopFrame>* frame));
+  void OnCaptureResult(webrtc::DesktopCapturer::Result result,
+                       std::unique_ptr<webrtc::DesktopFrame> frame) override {
+    OnCaptureResultPtr(result, &frame);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockScreenCapturerCallback);
+};
 
 // Receives messages sent from the network process to the daemon.
 class FakeDaemonSender : public IPC::Sender {
@@ -226,7 +244,7 @@ class IpcDesktopEnvironmentTest : public testing::Test {
   // The last |terminal_id| passed to ConnectTermina();
   int terminal_id_;
 
-  webrtc::MockScreenCapturerCallback desktop_capturer_callback_;
+  MockScreenCapturerCallback desktop_capturer_callback_;
 
   MockClientSessionControl client_session_control_;
   base::WeakPtrFactory<ClientSessionControl> client_session_control_factory_;
@@ -357,7 +375,8 @@ DesktopEnvironment* IpcDesktopEnvironmentTest::CreateDesktopEnvironment() {
       .Times(AtMost(1));
 
   // Let tests know that the remote desktop environment is created.
-  message_loop_.PostTask(FROM_HERE, setup_run_loop_->QuitClosure());
+  message_loop_.task_runner()->PostTask(FROM_HERE,
+                                        setup_run_loop_->QuitClosure());
 
   return desktop_environment;
 }
@@ -532,11 +551,9 @@ TEST_F(IpcDesktopEnvironmentTest, CaptureFrame) {
   setup_run_loop_->Run();
 
   // Stop the test when the first frame is captured.
-  EXPECT_CALL(desktop_capturer_callback_, OnCaptureCompleted(_))
-      .WillOnce(DoAll(
-          DeleteArg<0>(),
-          InvokeWithoutArgs(
-              this, &IpcDesktopEnvironmentTest::DeleteDesktopEnvironment)));
+  EXPECT_CALL(desktop_capturer_callback_, OnCaptureResultPtr(_, _))
+      .WillOnce(InvokeWithoutArgs(
+          this, &IpcDesktopEnvironmentTest::DeleteDesktopEnvironment));
 
   // Capture a single frame.
   video_capturer_->Capture(webrtc::DesktopRegion());

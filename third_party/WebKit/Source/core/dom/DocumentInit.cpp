@@ -28,13 +28,13 @@
 #include "core/dom/DocumentInit.h"
 
 #include "core/dom/Document.h"
-#include "core/dom/custom/CustomElementRegistrationContext.h"
+#include "core/dom/custom/V0CustomElementRegistrationContext.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/imports/HTMLImportsController.h"
 #include "core/loader/DocumentLoader.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "public/platform/Platform.h"
+#include "platform/network/NetworkUtils.h"
 
 namespace blink {
 
@@ -108,16 +108,10 @@ SandboxFlags DocumentInit::getSandboxFlags() const
     return flags;
 }
 
-bool DocumentInit::shouldEnforceStrictMixedContentChecking() const
+WebInsecureRequestPolicy DocumentInit::getInsecureRequestPolicy() const
 {
     DCHECK(frameForSecurityContext());
-    return frameForSecurityContext()->loader().shouldEnforceStrictMixedContentChecking();
-}
-
-SecurityContext::InsecureRequestsPolicy DocumentInit::getInsecureRequestsPolicy() const
-{
-    DCHECK(frameForSecurityContext());
-    return frameForSecurityContext()->loader().getInsecureRequestsPolicy();
+    return frameForSecurityContext()->loader().getInsecureRequestPolicy();
 }
 
 SecurityContext::InsecureNavigationsSet* DocumentInit::insecureNavigationsToUpgrade() const
@@ -131,7 +125,7 @@ bool DocumentInit::isHostedInReservedIPRange() const
     if (LocalFrame* frame = frameForSecurityContext()) {
         if (DocumentLoader* loader = frame->loader().provisionalDocumentLoader() ? frame->loader().provisionalDocumentLoader() : frame->loader().documentLoader()) {
             if (!loader->response().remoteIPAddress().isEmpty())
-                return Platform::current()->isReservedIPAddress(loader->response().remoteIPAddress());
+                return NetworkUtils::isReservedIPAddress(loader->response().remoteIPAddress());
         }
     }
     return false;
@@ -148,7 +142,7 @@ KURL DocumentInit::parentBaseURL() const
     return m_parent->baseURL();
 }
 
-DocumentInit& DocumentInit::withRegistrationContext(CustomElementRegistrationContext* registrationContext)
+DocumentInit& DocumentInit::withRegistrationContext(V0CustomElementRegistrationContext* registrationContext)
 {
     DCHECK(!m_createNewRegistrationContext);
     DCHECK(!m_registrationContext);
@@ -164,13 +158,13 @@ DocumentInit& DocumentInit::withNewRegistrationContext()
     return *this;
 }
 
-CustomElementRegistrationContext* DocumentInit::registrationContext(Document* document) const
+V0CustomElementRegistrationContext* DocumentInit::registrationContext(Document* document) const
 {
     if (!document->isHTMLDocument() && !document->isXHTMLDocument())
         return nullptr;
 
     if (m_createNewRegistrationContext)
-        return CustomElementRegistrationContext::create();
+        return V0CustomElementRegistrationContext::create();
 
     return m_registrationContext.get();
 }

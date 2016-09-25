@@ -63,6 +63,10 @@ base::AtomicRefCount g_all_profiles_restored_ = 0;
 
 }  // namespace
 
+bool ShouldAttachNavigationThrottle() {
+  return user_manager::UserManager::IsInitialized();
+}
+
 bool AreAllSessionMergedAlready() {
   return !base::AtomicRefCountIsZero(&g_all_profiles_restored_);
 }
@@ -98,7 +102,7 @@ void UnblockProfile(Profile* profile) {
   }
 }
 
-bool ShouldDelayRequest(content::WebContents* web_contents) {
+bool ShouldDelayRequestForProfile(Profile* profile) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (!user_manager::UserManager::Get()->IsUserLoggedIn()) {
@@ -113,11 +117,6 @@ bool ShouldDelayRequest(content::WebContents* web_contents) {
     return false;
   }
 
-  content::BrowserContext* browser_context = web_contents->GetBrowserContext();
-  if (!browser_context)
-    return false;
-
-  Profile* profile = Profile::FromBrowserContext(browser_context);
   if (!profile)
     return false;
 
@@ -165,6 +164,15 @@ bool ShouldDelayRequest(content::WebContents* web_contents) {
 
   NOTREACHED();
   return false;
+}
+
+bool ShouldDelayRequestForWebContents(content::WebContents* web_contents) {
+  content::BrowserContext* browser_context = web_contents->GetBrowserContext();
+  if (!browser_context)
+    return false;
+
+  return ShouldDelayRequestForProfile(
+      Profile::FromBrowserContext(browser_context));
 }
 
 bool ShouldDelayUrl(const GURL& url) {

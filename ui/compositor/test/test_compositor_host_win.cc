@@ -8,7 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "ui/compositor/compositor.h"
 #include "ui/gfx/win/window_impl.h"
 
@@ -29,7 +29,10 @@ class TestCompositorHostWin : public TestCompositorHost,
   ~TestCompositorHostWin() override { DestroyWindow(hwnd()); }
 
   // Overridden from TestCompositorHost:
-  void Show() override { ShowWindow(hwnd(), SW_SHOWNORMAL); }
+  void Show() override {
+    ShowWindow(hwnd(), SW_SHOWNORMAL);
+    compositor_->SetVisible(true);
+  }
   ui::Compositor* GetCompositor() override { return compositor_.get(); }
 
  private:

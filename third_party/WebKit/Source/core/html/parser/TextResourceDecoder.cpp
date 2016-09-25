@@ -146,7 +146,7 @@ void TextResourceDecoder::setEncoding(const WTF::TextEncoding& encoding, Encodin
     else
         m_encoding = encoding;
 
-    m_codec.clear();
+    m_codec.reset();
     m_source = source;
 }
 
@@ -214,7 +214,7 @@ size_t TextResourceDecoder::checkForBOM(const char* data, size_t len)
         setEncoding(UTF8Encoding(), AutoDetectedEncoding);
         lengthOfBOM = 3;
     } else if (m_encodingDetectionOption != AlwaysUseUTF8ForText) {
-        if (c1 == 0xFF && c2 == 0xFE) {
+        if (c1 == 0xFF && c2 == 0xFE && bufferLength + len >= 4) {
             if (c3 || c4) {
                 setEncoding(UTF16LittleEndianEncoding(), AutoDetectedEncoding);
                 lengthOfBOM = 2;
@@ -344,7 +344,7 @@ void TextResourceDecoder::checkForMetaCharset(const char* data, size_t length)
         return;
 
     setEncoding(m_charsetParser->encoding(), EncodingFromMetaTag);
-    m_charsetParser.clear();
+    m_charsetParser.reset();
     m_checkedForMetaCharset = true;
     return;
 }
@@ -369,8 +369,17 @@ bool TextResourceDecoder::shouldAutoDetect() const
 String TextResourceDecoder::decode(const char* data, size_t len)
 {
     size_t lengthOfBOM = 0;
-    if (!m_checkedForBOM)
+    if (!m_checkedForBOM) {
         lengthOfBOM = checkForBOM(data, len);
+
+        // BOM check can fail when the available data is not enough.
+        if (!m_checkedForBOM) {
+            DCHECK_EQ(0u, lengthOfBOM);
+            m_buffer.append(data, len);
+            return emptyString();
+        }
+    }
+    DCHECK_LE(lengthOfBOM, m_buffer.size() + len);
 
     bool movedDataToBuffer = false;
 
@@ -436,7 +445,7 @@ String TextResourceDecoder::flush()
 
     String result = m_codec->decode(m_buffer.data(), m_buffer.size(), FetchEOF, m_contentType == XMLContent && !m_useLenientXMLDecoding, m_sawError);
     m_buffer.clear();
-    m_codec.clear();
+    m_codec.reset();
     m_checkedForBOM = false; // Skip BOM again when re-decoding.
     return result;
 }

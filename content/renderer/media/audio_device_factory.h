@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
+#include "media/base/audio_latency.h"
 #include "media/base/output_device_info.h"
 
 namespace media {
@@ -32,15 +33,25 @@ namespace content {
 // AudioCapturerSourceFactory.
 class CONTENT_EXPORT AudioDeviceFactory {
  public:
-  // Types of audio sources.
+  // Types of audio sources. Each source can have individual mixing and/or
+  // latency requirements for output. The source is specified by the client when
+  // requesting output sink from the factory, and the factory creates the output
+  // sink basing on those requirements.
   enum SourceType {
     kSourceNone = 0,
     kSourceMediaElement,
     kSourceWebRtc,
     kSourceNonRtcAudioTrack,
-    kSourceWebAudio,
-    kSourceLast = kSourceWebAudio  // Only used for validation of format.
+    kSourceWebAudioInteractive,
+    kSourceWebAudioBalanced,
+    kSourceWebAudioPlayback,
+    kSourceWebAudioExact,
+    kSourceLast = kSourceWebAudioExact  // Only used for validation of format.
   };
+
+  // Maps the source type to the audio latency it requires.
+  static media::AudioLatency::LatencyType GetSourceLatencyType(
+      SourceType source);
 
   // Creates a sink for AudioRendererMixer.
   // |render_frame_id| refers to the RenderFrame containing the entity
@@ -79,6 +90,7 @@ class CONTENT_EXPORT AudioDeviceFactory {
                                  const url::Origin& security_origin);
 
   // A helper to get device info in the absence of AudioOutputDevice.
+  // Must be called on renderer thread only.
   static media::OutputDeviceInfo GetOutputDeviceInfo(
       int render_frame_id,
       int session_id,

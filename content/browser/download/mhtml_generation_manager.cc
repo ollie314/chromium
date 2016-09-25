@@ -15,6 +15,7 @@
 #include "base/scoped_observer.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
@@ -24,6 +25,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/mhtml_generation_params.h"
 #include "net/base/mime_util.h"
 
 namespace content {
@@ -34,6 +36,7 @@ class MHTMLGenerationManager::Job : public RenderProcessHostObserver {
  public:
   Job(int job_id,
       WebContents* web_contents,
+      const MHTMLGenerationParams& params,
       const GenerateMHTMLCallback& callback);
   ~Job() override;
 
@@ -42,11 +45,15 @@ class MHTMLGenerationManager::Job : public RenderProcessHostObserver {
 
   const GenerateMHTMLCallback& callback() const { return callback_; }
 
+  // Indicates whether we expect a message from the |sender| at this time.
+  // We expect only one message per frame - therefore calling this method
+  // will always clear |frame_tree_node_id_of_busy_frame_|.
+  bool IsMessageFromFrameExpected(RenderFrameHostImpl* sender);
+
   // Handler for FrameHostMsg_SerializeAsMHTMLResponse (a notification from the
   // renderer that the MHTML generation for previous frame has finished).
   // Returns |true| upon success; |false| otherwise.
   bool OnSerializeAsMHTMLResponse(
-      RenderFrameHostImpl* sender,
       const std::set<std::string>& digests_of_uris_of_serialized_resources);
 
   // Sends IPC to the renderer, asking for MHTML generation of the next frame.
@@ -73,6 +80,8 @@ class MHTMLGenerationManager::Job : public RenderProcessHostObserver {
                            int exit_code) override;
   void RenderProcessHostDestroyed(RenderProcessHost* host) override;
 
+  void MarkAsFinished();
+
  private:
   static int64_t CloseFileOnFileThread(base::File file);
   void AddFrame(RenderFrameHost* render_frame_host);
@@ -86,6 +95,11 @@ class MHTMLGenerationManager::Job : public RenderProcessHostObserver {
   // Id used to map renderer responses to jobs.
   // See also MHTMLGenerationManager::id_to_job_ map.
   int job_id_;
+
+  // User-configurable parameters. Includes the file location, binary encoding
+  // choices, and whether to skip storing resources marked
+  // Cache-Control: no-store.
+  MHTMLGenerationParams params_;
 
   // The IDs of frames that still need to be processed.
   std::queue<int> pending_frame_tree_node_ids_;
@@ -112,6 +126,11 @@ class MHTMLGenerationManager::Job : public RenderProcessHostObserver {
   // The callback to call once generation is complete.
   const GenerateMHTMLCallback callback_;
 
+  // Whether the job is finished (set to true only for the short duration of
+  // time between MHTMLGenerationManager::JobFinished is called and the job is
+  // destroyed by MHTMLGenerationManager::OnFileClosed).
+  bool is_finished_;
+
   // RAII helper for registering this Job as a RenderProcessHost observer.
   ScopedObserver<RenderProcessHost, MHTMLGenerationManager::Job>
       observed_renderer_process_host_;
@@ -121,12 +140,15 @@ class MHTMLGenerationManager::Job : public RenderProcessHostObserver {
 
 MHTMLGenerationManager::Job::Job(int job_id,
                                  WebContents* web_contents,
+                                 const MHTMLGenerationParams& params,
                                  const GenerateMHTMLCallback& callback)
     : job_id_(job_id),
+      params_(params),
       frame_tree_node_id_of_busy_frame_(FrameTreeNode::kFrameTreeNodeInvalidId),
       mhtml_boundary_marker_(net::GenerateMimeMultipartBoundary()),
       salt_(base::GenerateGUID()),
       callback_(callback),
+      is_finished_(false),
       observed_renderer_process_host_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   web_contents->ForEachFrame(base::Bind(
@@ -172,6 +194,8 @@ bool MHTMLGenerationManager::Job::SendToNextRenderFrame() {
   FrameMsg_SerializeAsMHTML_Params ipc_params;
   ipc_params.job_id = job_id_;
   ipc_params.mhtml_boundary_marker = mhtml_boundary_marker_;
+  ipc_params.mhtml_binary_encoding = params_.use_binary_encoding;
+  ipc_params.mhtml_cache_control_policy = params_.cache_control_policy;
 
   int frame_tree_node_id = pending_frame_tree_node_ids_.front();
   pending_frame_tree_node_ids_.pop();
@@ -200,6 +224,9 @@ bool MHTMLGenerationManager::Job::SendToNextRenderFrame() {
             frame_tree_node_id_of_busy_frame_);
   frame_tree_node_id_of_busy_frame_ = frame_tree_node_id;
   rfh->Send(new FrameMsg_SerializeAsMHTML(rfh->GetRoutingID(), ipc_params));
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN1("page-serialization", "WaitingOnRenderer",
+                                    this, "frame tree node id",
+                                    frame_tree_node_id);
   return true;
 }
 
@@ -209,6 +236,17 @@ void MHTMLGenerationManager::Job::RenderProcessExited(
     int exit_code) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   MHTMLGenerationManager::GetInstance()->RenderProcessExited(this);
+}
+
+void MHTMLGenerationManager::Job::MarkAsFinished() {
+  DCHECK(!is_finished_);
+  is_finished_ = true;
+  TRACE_EVENT_NESTABLE_ASYNC_INSTANT0("page-serialization", "JobFinished",
+                                      this);
+
+  // Stopping RenderProcessExited notifications is needed to avoid calling
+  // JobFinished twice.  See also https://crbug.com/612098.
+  observed_renderer_process_host_.RemoveAll();
 }
 
 void MHTMLGenerationManager::Job::AddFrame(RenderFrameHost* render_frame_host) {
@@ -244,18 +282,21 @@ void MHTMLGenerationManager::Job::CloseFile(
       callback);
 }
 
-bool MHTMLGenerationManager::Job::OnSerializeAsMHTMLResponse(
-    RenderFrameHostImpl* sender,
-    const std::set<std::string>& digests_of_uris_of_serialized_resources) {
-  // Sanitize renderer input / reject unexpected messages.
+bool MHTMLGenerationManager::Job::IsMessageFromFrameExpected(
+    RenderFrameHostImpl* sender) {
   int sender_id = sender->frame_tree_node()->frame_tree_node_id();
-  if (sender_id != frame_tree_node_id_of_busy_frame_) {
-    ReceivedBadMessage(sender->GetProcess(),
-                       bad_message::DWNLD_INVALID_SERIALIZE_AS_MHTML_RESPONSE);
-    return false;  // Report failure.
-  }
+  if (sender_id != frame_tree_node_id_of_busy_frame_)
+    return false;
+
+  // We only expect one message per frame - let's make sure subsequent messages
+  // from the same |sender| will be rejected.
   frame_tree_node_id_of_busy_frame_ = FrameTreeNode::kFrameTreeNodeInvalidId;
 
+  return true;
+}
+
+bool MHTMLGenerationManager::Job::OnSerializeAsMHTMLResponse(
+    const std::set<std::string>& digests_of_uris_of_serialized_resources) {
   // Renderer should be deduping resources with the same uris.
   DCHECK_EQ(0u, base::STLSetIntersection<std::set<std::string>>(
                     digests_of_already_serialized_uris_,
@@ -265,7 +306,7 @@ bool MHTMLGenerationManager::Job::OnSerializeAsMHTMLResponse(
       digests_of_uris_of_serialized_resources.end());
 
   if (pending_frame_tree_node_ids_.empty())
-    return true;  // Report success.
+    return true;  // Report success - all frames have been processed.
 
   return SendToNextRenderFrame();
 }
@@ -286,22 +327,26 @@ MHTMLGenerationManager* MHTMLGenerationManager::GetInstance() {
 MHTMLGenerationManager::MHTMLGenerationManager() : next_job_id_(0) {}
 
 MHTMLGenerationManager::~MHTMLGenerationManager() {
-  STLDeleteValues(&id_to_job_);
+  base::STLDeleteValues(&id_to_job_);
 }
 
 void MHTMLGenerationManager::SaveMHTML(WebContents* web_contents,
-                                       const base::FilePath& file_path,
+                                       const MHTMLGenerationParams& params,
                                        const GenerateMHTMLCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  int job_id = NewJob(web_contents, callback);
+  Job* job = NewJob(web_contents, params, callback);
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN2(
+      "page-serialization", "SavingMhtmlJob", job, "url",
+      web_contents->GetLastCommittedURL().possibly_invalid_spec().c_str(),
+      "file", params.file_path.value().c_str());
 
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&MHTMLGenerationManager::CreateFile, file_path),
+      base::Bind(&MHTMLGenerationManager::CreateFile, params.file_path),
       base::Bind(&MHTMLGenerationManager::OnFileAvailable,
                  base::Unretained(this),  // Safe b/c |this| is a singleton.
-                 job_id));
+                 job->id()));
 }
 
 void MHTMLGenerationManager::OnSerializeAsMHTMLResponse(
@@ -312,11 +357,15 @@ void MHTMLGenerationManager::OnSerializeAsMHTMLResponse(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   Job* job = FindJob(job_id);
-  if (!job) {
+  if (!job || !job->IsMessageFromFrameExpected(sender)) {
+    NOTREACHED();
     ReceivedBadMessage(sender->GetProcess(),
                        bad_message::DWNLD_INVALID_SERIALIZE_AS_MHTML_RESPONSE);
     return;
   }
+
+  TRACE_EVENT_NESTABLE_ASYNC_END0("page-serialization", "WaitingOnRenderer",
+                                  job);
 
   if (!mhtml_generation_in_renderer_succeeded) {
     JobFinished(job, JobStatus::FAILURE);
@@ -324,7 +373,7 @@ void MHTMLGenerationManager::OnSerializeAsMHTMLResponse(
   }
 
   if (!job->OnSerializeAsMHTMLResponse(
-          sender, digests_of_uris_of_serialized_resources)) {
+          digests_of_uris_of_serialized_resources)) {
     JobFinished(job, JobStatus::FAILURE);
     return;
   }
@@ -377,6 +426,7 @@ void MHTMLGenerationManager::JobFinished(Job* job, JobStatus job_status) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(job);
 
+  job->MarkAsFinished();
   job->CloseFile(
       base::Bind(&MHTMLGenerationManager::OnFileClosed,
                  base::Unretained(this),  // Safe b/c |this| is a singleton.
@@ -389,18 +439,24 @@ void MHTMLGenerationManager::OnFileClosed(int job_id,
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   Job* job = FindJob(job_id);
+  TRACE_EVENT_NESTABLE_ASYNC_END2(
+      "page-serialization", "SavingMhtmlJob", job, "job result",
+      job_status == JobStatus::SUCCESS ? "success" : "failure", "file size",
+      file_size);
   job->callback().Run(job_status == JobStatus::SUCCESS ? file_size : -1);
   id_to_job_.erase(job_id);
   delete job;
 }
 
-int MHTMLGenerationManager::NewJob(WebContents* web_contents,
-                                   const GenerateMHTMLCallback& callback) {
+MHTMLGenerationManager::Job* MHTMLGenerationManager::NewJob(
+    WebContents* web_contents,
+    const MHTMLGenerationParams& params,
+    const GenerateMHTMLCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  int job_id = next_job_id_++;
-  id_to_job_[job_id] = new Job(job_id, web_contents, callback);
-  return job_id;
+  Job* job = new Job(++next_job_id_, web_contents, params, callback);
+  id_to_job_[job->id()] = job;
+  return job;
 }
 
 MHTMLGenerationManager::Job* MHTMLGenerationManager::FindJob(int job_id) {

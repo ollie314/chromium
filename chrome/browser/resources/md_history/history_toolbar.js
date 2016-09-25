@@ -2,26 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/**
- * @constructor
- * @implements {SearchFieldDelegate}
- * @param {!HistoryToolbarElement} toolbar This history-toolbar.
- */
-function ToolbarSearchFieldDelegate(toolbar) {
-  this.toolbar_ = toolbar;
-}
-
-ToolbarSearchFieldDelegate.prototype = {
-  /** @override */
-  onSearchTermSearch: function(searchTerm) {
-    this.toolbar_.onSearch(searchTerm);
-  }
-};
-
 Polymer({
   is: 'history-toolbar',
   properties: {
     // Number of history items currently selected.
+    // TODO(calamity): bind this to
+    // listContainer.selectedItem.selectedPaths.length.
     count: {
       type: Number,
       value: 0,
@@ -40,16 +26,63 @@ Polymer({
     // as the user types.
     searchTerm: {
       type: String,
-      value: ''
+      observer: 'searchTermChanged_',
+      notify: true,
     },
 
-    // True if the page has a sidebar that we need to account for when
-    // positioning toolbar items.
-    hasSidebar: {
+    // True if the backend is processing and a spinner should be shown in the
+    // toolbar.
+    spinnerActive: {
       type: Boolean,
-      value: false,
-      reflectToAttribute: true
-    }
+      value: false
+    },
+
+    hasDrawer: {
+      type: Boolean,
+      observer: 'hasDrawerChanged_',
+      reflectToAttribute: true,
+    },
+
+    showSyncNotice: Boolean,
+
+    // Whether domain-grouped history is enabled.
+    isGroupedMode: {
+      type: Boolean,
+      reflectToAttribute: true,
+    },
+
+    // The period to search over. Matches BrowsingHistoryHandler::Range.
+    groupedRange: {
+      type: Number,
+      value: 0,
+      reflectToAttribute: true,
+      notify: true
+    },
+
+    // The start time of the query range.
+    queryStartTime: String,
+
+    // The end time of the query range.
+    queryEndTime: String,
+
+    // Whether to show the menu promo (a tooltip that points at the menu button
+    // in narrow mode).
+    showMenuPromo_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('showMenuPromo');
+      },
+    },
+  },
+
+  /** @return {CrToolbarSearchFieldElement} */
+  get searchField() {
+    return /** @type {CrToolbarElement} */ (this.$['main-toolbar'])
+        .getSearchField();
+  },
+
+  showSearchField: function() {
+    this.searchField.showAndFocus();
   },
 
   /**
@@ -64,44 +97,39 @@ Polymer({
   /**
    * When changing the search term externally, update the search field to
    * reflect the new search term.
-   * @param {string} search
    */
-  setSearchTerm: function(search) {
-    if (this.searchTerm == search)
-      return;
-    this.searchTerm = search;
-    var searchField = /** @type {SearchField} */(this.$['search-input']);
-    searchField.showAndFocus().then(function(showing) {
-      if (showing) searchField.setValue(search);
-    });
-  },
-
-  /**
-   * If the search term has changed reload for the new search.
-   */
-  onSearch: function(searchTerm) {
-    if (searchTerm != this.searchTerm) {
-      this.searchTerm = searchTerm;
-      this.fire('search-changed', {search: searchTerm});
+  searchTermChanged_: function() {
+    if (this.searchField.getValue() != this.searchTerm) {
+      this.searchField.showAndFocus();
+      this.searchField.setValue(this.searchTerm);
     }
   },
 
-  attached: function() {
-    this.searchFieldDelegate_ = new ToolbarSearchFieldDelegate(this);
-    /** @type {SearchField} */(this.$['search-input'])
-        .setDelegate(this.searchFieldDelegate_);
+  /** @private */
+  onMenuPromoShown_: function() {
+    md_history.BrowserService.getInstance().menuPromoShown();
+  },
+
+  /**
+   * @param {!CustomEvent} event
+   * @private
+   */
+  onSearchChanged_: function(event) {
+    this.searchTerm = /** @type {string} */ (event.detail);
+  },
+
+  /** @private */
+  onInfoButtonTap_: function() {
+    var dropdown = this.$.syncNotice.get();
+    dropdown.positionTarget = this.$$('#info-button-icon');
+    // It is possible for this listener to trigger while the dialog is
+    // closing. Ensure the dialog is fully closed before reopening it.
+    if (dropdown.style.display == 'none')
+      dropdown.open();
   },
 
   onClearSelectionTap_: function() {
     this.fire('unselect-all');
-  },
-
-  /**
-   * Relocates the user to the clear browsing data section of the settings page.
-   * @private
-   */
-  onClearBrowsingDataTap_: function() {
-    window.location.href = 'chrome://settings/clearBrowserData';
   },
 
   onDeleteTap_: function() {
@@ -118,5 +146,16 @@ Polymer({
 
   numberOfItemsSelected_: function(count) {
     return count > 0 ? loadTimeData.getStringF('itemsSelected', count) : '';
-  }
+  },
+
+  getHistoryInterval_: function(queryStartTime, queryEndTime) {
+    // TODO(calamity): Fix the format of these dates.
+    return loadTimeData.getStringF(
+      'historyInterval', queryStartTime, queryEndTime);
+  },
+
+  /** @private */
+  hasDrawerChanged_: function() {
+    this.updateStyles();
+  },
 });

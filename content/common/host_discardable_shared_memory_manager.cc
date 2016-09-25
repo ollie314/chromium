@@ -20,7 +20,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/process_memory_dump.h"
@@ -33,7 +33,7 @@
 #if defined(OS_LINUX)
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #endif
 
 namespace content {
@@ -177,7 +177,8 @@ HostDiscardableSharedMemoryManager::HostDiscardableSharedMemoryManager()
       base::Bind(&HostDiscardableSharedMemoryManager::EnforceMemoryPolicy,
                  weak_ptr_factory_.GetWeakPtr());
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-      this, "HostDiscardableSharedMemoryManager", nullptr);
+      this, "HostDiscardableSharedMemoryManager",
+      base::ThreadTaskRunnerHandle::Get());
 }
 
 HostDiscardableSharedMemoryManager::~HostDiscardableSharedMemoryManager() {
@@ -193,8 +194,7 @@ HostDiscardableSharedMemoryManager::current() {
 std::unique_ptr<base::DiscardableMemory>
 HostDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
     size_t size) {
-  // TODO(reveman): Temporary diagnostics for http://crbug.com/577786.
-  CHECK_NE(size, 0u);
+  DCHECK_NE(size, 0u);
 
   DiscardableSharedMemoryId new_id =
       g_next_discardable_shared_memory_id.GetNext();
@@ -212,16 +212,26 @@ HostDiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(
     base::TerminateBecauseOutOfMemory(size);
   // Close file descriptor to avoid running out.
   memory->Close();
-  return base::WrapUnique(new DiscardableMemoryImpl(
+  return base::MakeUnique<DiscardableMemoryImpl>(
       std::move(memory),
       base::Bind(
           &HostDiscardableSharedMemoryManager::DeletedDiscardableSharedMemory,
-          base::Unretained(this), new_id, ChildProcessHost::kInvalidUniqueID)));
+          base::Unretained(this), new_id, ChildProcessHost::kInvalidUniqueID));
 }
 
 bool HostDiscardableSharedMemoryManager::OnMemoryDump(
     const base::trace_event::MemoryDumpArgs& args,
     base::trace_event::ProcessMemoryDump* pmd) {
+  if (args.level_of_detail ==
+      base::trace_event::MemoryDumpLevelOfDetail::BACKGROUND) {
+    base::trace_event::MemoryAllocatorDump* total_dump =
+        pmd->CreateAllocatorDump("discardable");
+    total_dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
+                          base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                          GetBytesAllocated());
+    return true;
+  }
+
   base::AutoLock lock(lock_);
   for (const auto& process_entry : processes_) {
     const int child_process_id = process_entry.first;

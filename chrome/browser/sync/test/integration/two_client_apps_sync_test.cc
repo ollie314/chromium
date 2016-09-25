@@ -18,6 +18,7 @@
 #include "chrome/browser/sync/test/integration/sync_app_helper.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "components/sync/api/string_ordinal.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/app_sorting.h"
@@ -25,7 +26,6 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
-#include "sync/api/string_ordinal.h"
 
 using apps_helper::AllProfilesHaveSameApps;
 using apps_helper::CopyNTPOrdinals;
@@ -368,6 +368,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientAppsSyncTest, UnexpectedLaunchType) {
       original_data.incognito_enabled(),
       original_data.remote_install(),
       original_data.all_urls_enabled(),
+      original_data.installed_by_custodian(),
       original_data.app_launch_ordinal(),
       original_data.page_ordinal(),
       extensions::NUM_LAUNCH_TYPES);

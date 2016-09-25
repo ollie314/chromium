@@ -4,6 +4,8 @@
 
 #include "components/arc/ime/arc_ime_bridge_impl.h"
 
+#include <utility>
+
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/arc/arc_bridge_service.h"
@@ -13,6 +15,9 @@
 
 namespace arc {
 namespace {
+
+constexpr uint32_t kMinVersionForOnKeyboardsBoundsChanging = 3;
+constexpr uint32_t kMinVersionForExtendSelectionAndDelete = 4;
 
 ui::TextInputType ConvertTextInputType(arc::mojom::TextInputType ipc_type) {
   // The two enum types are similar, but intentionally made not identical.
@@ -61,9 +66,10 @@ mojo::Array<arc::mojom::CompositionSegmentPtr> ConvertSegments(
         arc::mojom::CompositionSegment::New();
     segment->start_offset = underline.start_offset;
     segment->end_offset = underline.end_offset;
-    segment->emphasized = (underline.thick ||
-        (composition.selection.start() == underline.start_offset &&
-         composition.selection.end() == underline.end_offset));
+    segment->emphasized =
+        (underline.thick ||
+         (composition.selection.start() == underline.start_offset &&
+          composition.selection.end() == underline.end_offset));
     segments.push_back(std::move(segment));
   }
   return segments;
@@ -74,47 +80,65 @@ mojo::Array<arc::mojom::CompositionSegmentPtr> ConvertSegments(
 ArcImeBridgeImpl::ArcImeBridgeImpl(Delegate* delegate,
                                    ArcBridgeService* bridge_service)
     : binding_(this), delegate_(delegate), bridge_service_(bridge_service) {
-  bridge_service_->AddObserver(this);
+  bridge_service_->ime()->AddObserver(this);
 }
 
 ArcImeBridgeImpl::~ArcImeBridgeImpl() {
-  bridge_service_->RemoveObserver(this);
+  bridge_service_->ime()->RemoveObserver(this);
 }
 
-void ArcImeBridgeImpl::OnImeInstanceReady() {
-  bridge_service_->ime_instance()->Init(binding_.CreateInterfacePtrAndBind());
+void ArcImeBridgeImpl::OnInstanceReady() {
+  bridge_service_->ime()->instance()->Init(
+      binding_.CreateInterfacePtrAndBind());
 }
 
 void ArcImeBridgeImpl::SendSetCompositionText(
     const ui::CompositionText& composition) {
-  mojom::ImeInstance* ime_instance = bridge_service_->ime_instance();
-  if (!ime_instance) {
-    LOG(ERROR) << "ArcImeInstance method called before being ready.";
+  auto* ime_instance =
+      bridge_service_->ime()->GetInstanceForMethod("SetCompositionText");
+  if (!ime_instance)
     return;
-  }
 
   ime_instance->SetCompositionText(base::UTF16ToUTF8(composition.text),
                                    ConvertSegments(composition));
 }
 
 void ArcImeBridgeImpl::SendConfirmCompositionText() {
-  mojom::ImeInstance* ime_instance = bridge_service_->ime_instance();
-  if (!ime_instance) {
-    LOG(ERROR) << "ArcImeInstance method called before being ready.";
+  auto* ime_instance =
+      bridge_service_->ime()->GetInstanceForMethod("ConfirmCompositionText");
+  if (!ime_instance)
     return;
-  }
 
   ime_instance->ConfirmCompositionText();
 }
 
 void ArcImeBridgeImpl::SendInsertText(const base::string16& text) {
-  mojom::ImeInstance* ime_instance = bridge_service_->ime_instance();
-  if (!ime_instance) {
-    LOG(ERROR) << "ArcImeInstance method called before being ready.";
+  auto* ime_instance =
+      bridge_service_->ime()->GetInstanceForMethod("InsertText");
+  if (!ime_instance)
     return;
-  }
 
   ime_instance->InsertText(base::UTF16ToUTF8(text));
+}
+
+void ArcImeBridgeImpl::SendOnKeyboardBoundsChanging(
+    const gfx::Rect& new_bounds) {
+  auto* ime_instance = bridge_service_->ime()->GetInstanceForMethod(
+      "OnKeyboardBoundsChanging", kMinVersionForOnKeyboardsBoundsChanging);
+  if (!ime_instance)
+    return;
+
+  ime_instance->OnKeyboardBoundsChanging(new_bounds);
+}
+
+void ArcImeBridgeImpl::SendExtendSelectionAndDelete(
+    size_t before, size_t after) {
+  auto* ime_instance = bridge_service_->ime()->GetInstanceForMethod(
+      "ExtendSelectionAndDelete", kMinVersionForExtendSelectionAndDelete);
+  if (!ime_instance)
+    return;
+
+  ime_instance->ExtendSelectionAndDelete(before, after);
 }
 
 void ArcImeBridgeImpl::OnTextInputTypeChanged(arc::mojom::TextInputType type) {
@@ -122,15 +146,17 @@ void ArcImeBridgeImpl::OnTextInputTypeChanged(arc::mojom::TextInputType type) {
 }
 
 void ArcImeBridgeImpl::OnCursorRectChanged(arc::mojom::CursorRectPtr rect) {
-  delegate_->OnCursorRectChanged(gfx::Rect(
-      rect->left,
-      rect->top,
-      rect->right - rect->left,
-      rect->bottom - rect->top));
+  delegate_->OnCursorRectChanged(gfx::Rect(rect->left, rect->top,
+                                           rect->right - rect->left,
+                                           rect->bottom - rect->top));
 }
 
 void ArcImeBridgeImpl::OnCancelComposition() {
   delegate_->OnCancelComposition();
+}
+
+void ArcImeBridgeImpl::ShowImeIfNeeded() {
+  delegate_->ShowImeIfNeeded();
 }
 
 }  // namespace arc

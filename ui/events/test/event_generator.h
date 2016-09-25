@@ -122,8 +122,7 @@ class EventGenerator {
                  const gfx::Point& initial_location);
 
   // Creates an EventGenerator with the mouse/touch location centered over
-  // |window|. This is currently the only constructor that works on Mac, since
-  // a specific window is required (and there is no root window).
+  // |window|.
   EventGenerator(gfx::NativeWindow root_window, gfx::NativeWindow window);
 
   virtual ~EventGenerator();
@@ -170,6 +169,9 @@ class EventGenerator {
 
   // Moves the mouse wheel by |delta_x|, |delta_y|.
   void MoveMouseWheel(int delta_x, int delta_y);
+
+  // Generates a mouse enter event.
+  void SendMouseEnter();
 
   // Generates a mouse exit.
   void SendMouseExit();
@@ -221,6 +223,14 @@ class EventGenerator {
   // Generates events to move the mouse to the center of the window.
   void MoveMouseToCenterOf(EventTarget* window);
 
+  // Enter pen-pointer mode, which will cause any generated mouse events to have
+  // a pointer type ui::EventPointerType::POINTER_TYPE_PEN.
+  void EnterPenPointerMode();
+
+  // Exit pen-pointer mode. Generated mouse events will use the default pointer
+  // type event.
+  void ExitPenPointerMode();
+
   // Generates a touch press event.
   void PressTouch();
 
@@ -254,11 +264,6 @@ class EventGenerator {
   // Generates press, move and release events to move touch
   // to the center of the window.
   void PressMoveAndReleaseTouchToCenterOf(EventTarget* window);
-
-  // Generates and dispatches a Win8 edge-swipe event (swipe up from bottom or
-  // swipe down from top).  Note that it is not possible to distinguish between
-  // the two edges with this event.
-  void GestureEdgeSwipe();
 
   // Generates and dispatches touch-events required to generate a TAP gesture.
   // Note that this can generate a number of other gesture events at the same
@@ -368,12 +373,6 @@ class EventGenerator {
     current_target_ = target;
   }
 
-  // Specify an alternative tick clock to be used for simulating time in tests.
-  void SetTickClock(std::unique_ptr<base::TickClock> tick_clock);
-
-  // Get the current time from the tick clock.
-  base::TimeDelta Now();
-
   // Default delegate set by a platform-specific GeneratorDelegate singleton.
   static EventGeneratorDelegate* default_delegate;
 
@@ -402,6 +401,7 @@ class EventGenerator {
   EventTarget* current_target_;
   int flags_;
   bool grab_;
+  bool pen_pointer_mode_ = false;
   std::list<std::unique_ptr<Event>> pending_events_;
   // Set to true to cause events to be posted asynchronously.
   bool async_;

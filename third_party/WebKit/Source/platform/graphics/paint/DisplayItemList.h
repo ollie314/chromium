@@ -11,6 +11,8 @@
 #include "wtf/Alignment.h"
 #include "wtf/Assertions.h"
 
+class SkPictureGpuAnalyzer;
+
 namespace blink {
 
 struct PaintChunk;
@@ -30,30 +32,25 @@ public:
     DisplayItemList(DisplayItemList&& source)
         : ContiguousContainer(std::move(source))
         , m_visualRects(std::move(source.m_visualRects))
-        , m_beginItemIndices(std::move(source.m_beginItemIndices))
     {}
 
     DisplayItemList& operator=(DisplayItemList&& source)
     {
         ContiguousContainer::operator=(std::move(source));
         m_visualRects = std::move(source.m_visualRects);
-        m_beginItemIndices = std::move(source.m_beginItemIndices);
         return *this;
     }
 
-    DisplayItem& appendByMoving(DisplayItem&, const IntRect& visualRect);
+    DisplayItem& appendByMoving(DisplayItem&);
 
-    IntRect visualRect(unsigned index) const
+    bool hasVisualRect(size_t index) const { return index < m_visualRects.size(); }
+    IntRect visualRect(size_t index) const
     {
-        ASSERT(index < m_visualRects.size());
+        DCHECK(hasVisualRect(index));
         return m_visualRects[index];
     }
 
     void appendVisualRect(const IntRect& visualRect);
-
-#if ENABLE(ASSERT)
-    void assertDisplayItemClientsAreAlive() const;
-#endif
 
     // Useful for iterating with a range-based for loop.
     template <typename Iterator>
@@ -71,12 +68,7 @@ public:
     Range<const_iterator> itemsInPaintChunk(const PaintChunk&) const;
 
 private:
-    // If we're currently within a paired display item block, unions the
-    // given visual rect with the begin display item's visual rect.
-    void growCurrentBeginItemVisualRect(const IntRect& visualRect);
-
     Vector<IntRect> m_visualRects;
-    Vector<size_t> m_beginItemIndices;
 };
 
 } // namespace blink

@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "android_webview/browser/compositor_id.h"
 #include "base/macros.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -20,19 +21,19 @@ namespace android_webview {
 
 class ChildFrame {
  public:
-  ChildFrame(uint32_t output_surface_id,
+  ChildFrame(uint32_t compositor_frame_sink_id,
              std::unique_ptr<cc::CompositorFrame> frame,
-             uint32_t compositor_id,
+             const CompositorID& compositor_id,
              bool viewport_rect_for_tile_priority_empty,
              const gfx::Transform& transform_for_tile_priority,
              bool offscreen_pre_raster,
              bool is_layer);
   ~ChildFrame();
 
-  const uint32_t output_surface_id;
+  const uint32_t compositor_frame_sink_id;
   std::unique_ptr<cc::CompositorFrame> frame;
   // The id of the compositor this |frame| comes from.
-  const uint32_t compositor_id;
+  const CompositorID compositor_id;
   const bool viewport_rect_for_tile_priority_empty;
   const gfx::Transform transform_for_tile_priority;
   const bool offscreen_pre_raster;

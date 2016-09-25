@@ -33,7 +33,6 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLFormControlElement.h"
-#include "core/layout/LayoutBlock.h"
 #include "core/style/ComputedStyle.h"
 
 namespace blink {
@@ -56,7 +55,7 @@ static void setFocusForDialog(HTMLDialogElement* dialog)
         Element* element = toElement(node);
         if (element->isFormControlElement()) {
             HTMLFormControlElement* control = toHTMLFormControlElement(node);
-            if (control->isAutofocusable()) {
+            if (control->isAutofocusable() && control->isFocusable()) {
                 control->focus();
                 return;
             }
@@ -123,15 +122,22 @@ void HTMLDialogElement::closeDialog(const String& returnValue)
     if (!returnValue.isNull())
         m_returnValue = returnValue;
 
-    dispatchScopedEvent(Event::create(EventTypeNames::close));
+    scheduleCloseEvent();
 }
 
 void HTMLDialogElement::forceLayoutForCentering()
 {
     m_centeringMode = NeedsCentering;
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     if (m_centeringMode == NeedsCentering)
         setNotCentered();
+}
+
+void HTMLDialogElement::scheduleCloseEvent()
+{
+    Event* event = Event::create(EventTypeNames::close);
+    event->setTarget(this);
+    document().enqueueAnimationFrameEvent(event);
 }
 
 void HTMLDialogElement::show()
@@ -142,7 +148,7 @@ void HTMLDialogElement::show()
 
     // The layout must be updated here because setFocusForDialog calls
     // Element::isFocusable, which requires an up-to-date layout.
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     setFocusForDialog(this);
 }
@@ -153,7 +159,7 @@ void HTMLDialogElement::showModal(ExceptionState& exceptionState)
         exceptionState.throwDOMException(InvalidStateError, "The element already has an 'open' attribute, and therefore cannot be opened modally.");
         return;
     }
-    if (!inShadowIncludingDocument()) {
+    if (!isConnected()) {
         exceptionState.throwDOMException(InvalidStateError, "The element is not in a Document.");
         return;
     }
@@ -178,7 +184,7 @@ void HTMLDialogElement::removedFrom(ContainerNode* insertionPoint)
 
 void HTMLDialogElement::setCentered(LayoutUnit centeredPosition)
 {
-    ASSERT(m_centeringMode == NeedsCentering);
+    DCHECK_EQ(m_centeringMode, NeedsCentering);
     m_centeredPosition = centeredPosition;
     m_centeringMode = Centered;
 }

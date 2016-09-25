@@ -14,14 +14,27 @@
 
 #include "base/containers/small_map.h"
 #include "base/time/time.h"
-#include "base/trace_event/trace_event.h"
 #include "ui/events/events_base_export.h"
+#include "ui/gfx/geometry/point_f.h"
 
 #if !defined(OS_IOS)
 #include "ipc/ipc_param_traits.h"  // nogncheck
+#include "mojo/public/cpp/bindings/struct_traits.h"  // nogncheck
 #endif
 
+namespace base {
+namespace trace_event {
+class ConvertableToTraceFormat;
+}
+}
+
 namespace ui {
+
+#if !defined(OS_IOS)
+namespace mojom {
+class LatencyInfoDataView;
+}
+#endif
 
 // When adding new components, or new metrics based on LatencyInfo,
 // please update latency_info.dot.
@@ -44,6 +57,8 @@ enum LatencyComponentType {
   INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT,
   // Timestamp when the UI event is created.
   INPUT_EVENT_LATENCY_UI_COMPONENT,
+  // Timestamp when the event is dispatched on the main thread of the renderer.
+  INPUT_EVENT_LATENCY_RENDERER_MAIN_COMPONENT,
   // This is special component indicating there is rendering scheduled for
   // the event associated with this LatencyInfo on main thread.
   INPUT_EVENT_LATENCY_RENDERING_SCHEDULED_MAIN_COMPONENT,
@@ -67,6 +82,9 @@ enum LatencyComponentType {
   // Timestamp of when the gpu service began swap buffers, unlike
   // INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT which measures after.
   INPUT_EVENT_GPU_SWAP_BUFFER_COMPONENT,
+  // Timestamp of when the gesture scroll update is generated from a mouse wheel
+  // event.
+  INPUT_EVENT_LATENCY_GENERATE_SCROLL_UPDATE_FROM_MOUSE_WHEEL,
   // ---------------------------TERMINAL COMPONENT-----------------------------
   // TERMINAL COMPONENT is when we show the latency end in chrome://tracing.
   // Timestamp when the mouse event is acked from renderer and it does not
@@ -79,10 +97,10 @@ enum LatencyComponentType {
   // cause any rendering scheduled.
   INPUT_EVENT_LATENCY_TERMINATED_KEYBOARD_COMPONENT,
   // Timestamp when the touch event is acked from renderer and it does not
-  // cause any rendering schedueld and does not generate any gesture event.
+  // cause any rendering scheduled and does not generate any gesture event.
   INPUT_EVENT_LATENCY_TERMINATED_TOUCH_COMPONENT,
   // Timestamp when the gesture event is acked from renderer, and it does not
-  // cause any rendering schedueld.
+  // cause any rendering scheduled.
   INPUT_EVENT_LATENCY_TERMINATED_GESTURE_COMPONENT,
   // Timestamp when the frame is swapped (i.e. when the rendering caused by
   // input event actually takes effect).
@@ -97,7 +115,15 @@ enum LatencyComponentType {
   // but the swap failed.
   INPUT_EVENT_LATENCY_TERMINATED_SWAP_FAILED_COMPONENT,
   LATENCY_COMPONENT_TYPE_LAST =
-    INPUT_EVENT_LATENCY_TERMINATED_SWAP_FAILED_COMPONENT,
+      INPUT_EVENT_LATENCY_TERMINATED_SWAP_FAILED_COMPONENT,
+};
+
+enum SourceEventType {
+  UNKNOWN,
+  WHEEL,
+  TOUCH,
+  OTHER,
+  SOURCE_EVENT_TYPE_LAST = OTHER,
 };
 
 class EVENTS_BASE_EXPORT LatencyInfo {
@@ -113,18 +139,10 @@ class EVENTS_BASE_EXPORT LatencyInfo {
     uint32_t event_count;
   };
 
-  struct EVENTS_BASE_EXPORT InputCoordinate {
-    InputCoordinate();
-    InputCoordinate(float x, float y);
-
-    float x;
-    float y;
-  };
-
   // Empirically determined constant based on a typical scroll sequence.
   enum { kTypicalMaxComponentsPerLatencyInfo = 10 };
 
-  enum { kMaxInputCoordinates = 2 };
+  enum : size_t { kMaxInputCoordinates = 2 };
 
   // Map a Latency Component (with a component-specific int64_t id) to a
   // component info.
@@ -134,6 +152,7 @@ class EVENTS_BASE_EXPORT LatencyInfo {
 
   LatencyInfo();
   LatencyInfo(const LatencyInfo& other);
+  LatencyInfo(SourceEventType type);
   ~LatencyInfo();
 
   // For test only.
@@ -188,14 +207,19 @@ class EVENTS_BASE_EXPORT LatencyInfo {
 
   // Returns true if there is still room for keeping the |input_coordinate|,
   // false otherwise.
-  bool AddInputCoordinate(const InputCoordinate& input_coordinate);
+  bool AddInputCoordinate(const gfx::PointF& input_coordinate);
 
   uint32_t input_coordinates_size() const { return input_coordinates_size_; }
-  const InputCoordinate* input_coordinates() const {
-    return input_coordinates_;
-  }
+  const gfx::PointF* input_coordinates() const { return input_coordinates_; }
 
   const LatencyMap& latency_components() const { return latency_components_; }
+
+  const SourceEventType& source_event_type() const {
+    return source_event_type_;
+  }
+  void set_source_event_type(SourceEventType type) {
+    source_event_type_ = type;
+  }
 
   bool terminated() const { return terminated_; }
   void set_coalesced() { coalesced_ = true; }
@@ -224,7 +248,7 @@ class EVENTS_BASE_EXPORT LatencyInfo {
 
   // These coordinates represent window coordinates of the original input event.
   uint32_t input_coordinates_size_;
-  InputCoordinate input_coordinates_[kMaxInputCoordinates];
+  gfx::PointF input_coordinates_[kMaxInputCoordinates];
 
   // The unique id for matching the ASYNC_BEGIN/END trace event.
   int64_t trace_id_;
@@ -232,9 +256,13 @@ class EVENTS_BASE_EXPORT LatencyInfo {
   bool coalesced_;
   // Whether a terminal component has been added.
   bool terminated_;
+  // Stores the type of the first source event.
+  SourceEventType source_event_type_;
 
 #if !defined(OS_IOS)
   friend struct IPC::ParamTraits<ui::LatencyInfo>;
+  friend struct mojo::StructTraits<ui::mojom::LatencyInfoDataView,
+                                   ui::LatencyInfo>;
 #endif
 };
 

@@ -6,7 +6,7 @@
 #define Keyframe_h
 
 #include "core/CoreExport.h"
-#include "core/animation/AnimationEffect.h"
+#include "core/animation/AnimationEffectReadOnly.h"
 #include "core/animation/EffectModel.h"
 #include "core/animation/PropertyHandle.h"
 #include "core/animation/animatable/AnimatableValue.h"
@@ -68,19 +68,19 @@ public:
         TimingFunction& easing() const { return *m_easing; }
         EffectModel::CompositeOperation composite() const { return m_composite; }
         double underlyingFraction() const { return m_composite == EffectModel::CompositeReplace ? 0 : 1; }
-        virtual bool isNeutral() const { ASSERT_NOT_REACHED(); return false; }
+        virtual bool isNeutral() const { NOTREACHED(); return false; }
         virtual PassRefPtr<PropertySpecificKeyframe> cloneWithOffset(double offset) const = 0;
 
         // FIXME: Remove this once CompositorAnimations no longer depends on AnimatableValues
-        virtual bool populateAnimatableValue(CSSPropertyID, Element&, const ComputedStyle* baseStyle, bool force) const { return false; }
-        virtual const PassRefPtr<AnimatableValue> getAnimatableValue() const = 0;
+        virtual bool populateAnimatableValue(CSSPropertyID, Element&, const ComputedStyle& baseStyle, const ComputedStyle* parentStyle) const { return false; }
+        virtual PassRefPtr<AnimatableValue> getAnimatableValue() const = 0;
 
         virtual bool isAnimatableValuePropertySpecificKeyframe() const { return false; }
         virtual bool isCSSPropertySpecificKeyframe() const { return false; }
         virtual bool isSVGPropertySpecificKeyframe() const { return false; }
 
         virtual PassRefPtr<PropertySpecificKeyframe> neutralKeyframe(double offset, PassRefPtr<TimingFunction> easing) const = 0;
-        virtual PassRefPtr<Interpolation> maybeCreateInterpolation(PropertyHandle, Keyframe::PropertySpecificKeyframe& end, Element*, const ComputedStyle* baseStyle) const = 0;
+        virtual PassRefPtr<Interpolation> createInterpolation(PropertyHandle, const Keyframe::PropertySpecificKeyframe& end) const;
 
     protected:
         PropertySpecificKeyframe(double offset, PassRefPtr<TimingFunction> easing, EffectModel::CompositeOperation);

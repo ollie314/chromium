@@ -6,20 +6,17 @@
 #define BASE_THREADING_THREAD_RESTRICTIONS_H_
 
 #include "base/base_export.h"
+#include "base/logging.h"
 #include "base/macros.h"
-
-// See comment at top of thread_checker.h
-#if (!defined(NDEBUG) || defined(DCHECK_ALWAYS_ON))
-#define ENABLE_THREAD_RESTRICTIONS 1
-#else
-#define ENABLE_THREAD_RESTRICTIONS 0
-#endif
 
 class BrowserProcessImpl;
 class HistogramSynchronizer;
 class NativeBackendKWallet;
 class ScopedAllowWaitForLegacyWebViewApi;
 
+namespace blimp {
+class BlimpBrowserTest;
+}
 namespace cc {
 class CompletionEvent;
 class SingleThreadTaskGraphRunner;
@@ -37,13 +34,14 @@ namespace content {
 class BrowserGpuChannelHostFactory;
 class BrowserGpuMemoryBufferManager;
 class BrowserShutdownProfileDumper;
+class BrowserSurfaceViewManager;
 class BrowserTestBase;
 class NestedMessagePumpAndroid;
 class ScopedAllowWaitForAndroidLayoutTests;
 class ScopedAllowWaitForDebugURL;
 class SoftwareOutputDeviceMus;
 class TextInputClientMac;
-class RasterWorkerPool;
+class CategorizedWorkerPool;
 }  // namespace content
 namespace dbus {
 class Bus;
@@ -52,18 +50,14 @@ namespace disk_cache {
 class BackendImpl;
 class InFlightIO;
 }
-namespace gles2 {
-class CommandBufferClientImpl;
-}
 namespace gpu {
 class GpuChannelHost;
 }
 namespace mojo {
-namespace common {
-class MessagePumpMojo;
+class SyncCallRestrictions;
 }
-}
-namespace mus {
+namespace ui {
+class CommandBufferClientImpl;
 class CommandBufferLocal;
 class GpuState;
 }
@@ -90,6 +84,10 @@ namespace base {
 
 namespace android {
 class JavaHandlerThread;
+}
+
+namespace internal {
+class TaskTracker;
 }
 
 class SequencedWorkerPool;
@@ -151,7 +149,7 @@ class BASE_EXPORT ThreadRestrictions {
     DISALLOW_COPY_AND_ASSIGN(ScopedAllowSingleton);
   };
 
-#if ENABLE_THREAD_RESTRICTIONS
+#if DCHECK_IS_ON()
   // Set whether the current thread to make IO calls.
   // Threads start out in the *allowed* state.
   // Returns the previous value.
@@ -190,16 +188,19 @@ class BASE_EXPORT ThreadRestrictions {
  private:
   // DO NOT ADD ANY OTHER FRIEND STATEMENTS, talk to jam or brettw first.
   // BEGIN ALLOWED USAGE.
+  friend class blimp::BlimpBrowserTest;
   friend class content::BrowserShutdownProfileDumper;
+  friend class content::BrowserSurfaceViewManager;
   friend class content::BrowserTestBase;
   friend class content::NestedMessagePumpAndroid;
   friend class content::ScopedAllowWaitForAndroidLayoutTests;
   friend class content::ScopedAllowWaitForDebugURL;
   friend class ::HistogramSynchronizer;
+  friend class internal::TaskTracker;
   friend class ::ScopedAllowWaitForLegacyWebViewApi;
   friend class cc::CompletionEvent;
   friend class cc::SingleThreadTaskGraphRunner;
-  friend class content::RasterWorkerPool;
+  friend class content::CategorizedWorkerPool;
   friend class remoting::AutoThread;
   friend class ui::WindowResizeHelperMac;
   friend class MessagePumpDefault;
@@ -209,10 +210,10 @@ class BASE_EXPORT ThreadRestrictions {
   friend class ThreadTestHelper;
   friend class PlatformThread;
   friend class android::JavaHandlerThread;
-  friend class gles2::CommandBufferClientImpl;
-  friend class mojo::common::MessagePumpMojo;
-  friend class mus::CommandBufferLocal;
-  friend class mus::GpuState;
+  friend class mojo::SyncCallRestrictions;
+  friend class ui::CommandBufferClientImpl;
+  friend class ui::CommandBufferLocal;
+  friend class ui::GpuState;
 
   // END ALLOWED USAGE.
   // BEGIN USAGE THAT NEEDS TO BE FIXED.
@@ -238,7 +239,7 @@ class BASE_EXPORT ThreadRestrictions {
   friend class views::ScreenMus;
 // END USAGE THAT NEEDS TO BE FIXED.
 
-#if ENABLE_THREAD_RESTRICTIONS
+#if DCHECK_IS_ON()
   static bool SetWaitAllowed(bool allowed);
 #else
   static bool SetWaitAllowed(bool allowed) { return true; }

@@ -5,13 +5,14 @@
 #ifndef CHROME_BROWSER_SYNC_TEST_INTEGRATION_PASSWORDS_HELPER_H_
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_PASSWORDS_HELPER_H_
 
+#include <memory>
 #include <vector>
 
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "components/autofill/core/common/password_form.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 
 namespace password_manager {
 class PasswordStore;
@@ -32,7 +33,7 @@ void UpdateLogin(password_manager::PasswordStore* store,
 
 // Returns all logins from |store| matching a fake signon realm used only by
 // PasswordsSyncPerfTest.
-ScopedVector<autofill::PasswordForm> GetLogins(
+std::vector<std::unique_ptr<autofill::PasswordForm>> GetLogins(
     password_manager::PasswordStore* store);
 
 // Removes the login held in |form| from the password store |store|.  This
@@ -42,17 +43,6 @@ void RemoveLogin(password_manager::PasswordStore* store,
 
 // Removes all password forms from the password store |store|.
 void RemoveLogins(password_manager::PasswordStore* store);
-
-// Sets the cryptographer's encryption passphrase for the profile at index
-// |index| to |passphrase|, and passphrase type |type|.
-void SetEncryptionPassphrase(int index,
-                             const std::string& passphrase,
-                             ProfileSyncService::PassphraseType type);
-
-// Sets the cryptographer's decryption passphrase for the profile at index
-// |index| to |passphrase|. Returns false if the operation failed, and true
-// otherwise.
-bool SetDecryptionPassphrase(int index, const std::string& passphrase);
 
 // Gets the password store of the profile with index |index|.
 password_manager::PasswordStore* GetPasswordStore(int index);

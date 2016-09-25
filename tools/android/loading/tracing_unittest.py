@@ -42,7 +42,7 @@ class TracingTrackTestCase(unittest.TestCase):
   def setUp(self):
     self.tree_threshold = _IntervalTree._TRESHOLD
     _IntervalTree._TRESHOLD = 2  # Expose more edge cases in the tree.
-    self.track = TracingTrack(None)
+    self.track = TracingTrack(None, ['A', 'B', 'C', 'D'])
 
   def tearDown(self):
     _IntervalTree._TRESHOLD = self.tree_threshold
@@ -309,7 +309,7 @@ class TracingTrackTestCase(unittest.TestCase):
          'args': {'frame': _MAIN_FRAME_ID}},
         ]
     self._HandleEvents(events)
-    self.assertEquals(_MAIN_FRAME_ID, self.track._GetMainFrameID())
+    self.assertEquals(_MAIN_FRAME_ID, self.track.GetMainFrameID())
 
   def testGetMatchingEvents(self):
     _MAIN_FRAME_ID = 0xffff
@@ -357,6 +357,53 @@ class TracingTrackTestCase(unittest.TestCase):
     filtered_events = self.track.Filter(categories=set(['B', 'C'])).GetEvents()
     self.assertEquals(3, len(filtered_events))
     self.assertListEqual(tracing_events[1:], filtered_events)
+    self.assertSetEqual(
+        set('A'), self.track.Filter(categories=set('A')).Categories())
+
+  def testHasLoadingSucceeded(self):
+    cat = 'navigation'
+    on_navigate = 'RenderFrameImpl::OnNavigate'
+    fail_provisional = 'RenderFrameImpl::didFailProvisionalLoad'
+    fail_load = 'RenderFrameImpl::didFailLoad'
+
+    track = TracingTrack.FromJsonDict({'categories': [cat], 'events': []})
+    with self.assertRaises(AssertionError):
+      track.HasLoadingSucceeded()
+
+    track = TracingTrack.FromJsonDict({'categories': [cat], 'events': [
+        {'cat': cat, 'name': on_navigate, 'args': {'id': 1},
+            'ts': 5, 'ph': 'X', 'dur': 10, 'pid': 1, 'tid': 1}]})
+    self.assertTrue(track.HasLoadingSucceeded())
+
+    track = TracingTrack.FromJsonDict({'categories': [cat], 'events': [
+        {'cat': cat, 'name': on_navigate, 'args': {'id': 1},
+            'ts': 5, 'ph': 'X', 'dur': 10, 'pid': 1, 'tid': 1},
+        {'cat': cat, 'name': on_navigate, 'args': {'id': 2},
+            'ts': 5, 'ph': 'X', 'dur': 10, 'pid': 1, 'tid': 1},
+        {'cat': cat, 'name': fail_provisional, 'args': {'id': 2},
+            'ts': 5, 'ph': 'X', 'dur': 10, 'pid': 1, 'tid': 1}]})
+    self.assertTrue(track.HasLoadingSucceeded())
+
+    track = TracingTrack.FromJsonDict({'categories': [cat], 'events': [
+        {'cat': cat, 'name': on_navigate, 'args': {'id': 1},
+            'ts': 5, 'ph': 'X', 'dur': 10, 'pid': 1, 'tid': 1},
+        {'cat': cat, 'name': fail_provisional, 'args': {'id': 1},
+            'ts': 5, 'ph': 'X', 'dur': 10, 'pid': 1, 'tid': 1}]})
+    self.assertFalse(track.HasLoadingSucceeded())
+
+    track = TracingTrack.FromJsonDict({'categories': [cat], 'events': [
+        {'cat': cat, 'name': on_navigate, 'args': {'id': 1},
+            'ts': 5, 'ph': 'X', 'dur': 10, 'pid': 1, 'tid': 1},
+        {'cat': cat, 'name': fail_load, 'args': {'id': 1},
+            'ts': 5, 'ph': 'X', 'dur': 10, 'pid': 1, 'tid': 1}]})
+    self.assertFalse(track.HasLoadingSucceeded())
+
+    track = TracingTrack.FromJsonDict({'categories': [cat], 'events': [
+        {'cat': cat, 'name': on_navigate, 'args': {'id': 1},
+            'ts': 5, 'ph': 'X', 'dur': 10, 'pid': 1, 'tid': 1},
+        {'cat': cat, 'name': fail_load, 'args': {'id': 1},
+            'ts': 5, 'ph': 'X', 'dur': 10, 'pid': 1, 'tid': 1}]})
+    self.assertFalse(track.HasLoadingSucceeded())
 
   def _HandleEvents(self, events):
     self.track.Handle('Tracing.dataCollected', {'params': {'value': [

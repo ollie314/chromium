@@ -5,10 +5,11 @@
 #ifndef COMPONENTS_PRECACHE_CORE_FETCHER_POOL_H_
 #define COMPONENTS_PRECACHE_CORE_FETCHER_POOL_H_
 
+#include <memory>
 #include <unordered_map>
 
+#include "base/gtest_prod_util.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 
 namespace precache {
 
@@ -42,13 +43,13 @@ class FetcherPool {
 
   // Takes ownership and adds the given |element| to the pool.
   // The element will live until its deletion.
-  void Add(scoped_ptr<T> element) {
+  void Add(std::unique_ptr<T> element) {
     DCHECK(IsAvailable()) << "FetcherPool size exceeded. "
                              "Did you check IsAvailable?";
     DCHECK(element) << "The element cannot be null.";
     DCHECK(elements_.find(element.get()) == elements_.end())
         << "The pool already contains the given element.";
-    elements_[element.get()].reset(element.release());
+    elements_[element.get()] = std::move(element);
   }
 
   // Deletes the given |element| from the pool.
@@ -67,9 +68,16 @@ class FetcherPool {
   // Returns true iff the pool can accept a new element.
   bool IsAvailable() const { return max_size_ > elements_.size(); }
 
+  const std::unordered_map<const T*, std::unique_ptr<T>>& elements() const {
+    return elements_;
+  }
+
+  // Returns the maximum size of the pool.
+  size_t max_size() const { return max_size_; }
+
  private:
   const size_t max_size_;
-  std::unordered_map<const T*, scoped_ptr<T>> elements_;
+  std::unordered_map<const T*, std::unique_ptr<T>> elements_;
 
   DISALLOW_COPY_AND_ASSIGN(FetcherPool);
 };

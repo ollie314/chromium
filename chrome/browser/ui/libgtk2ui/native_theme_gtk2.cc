@@ -19,6 +19,8 @@
 #include "ui/gfx/path.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/native_theme/common_theme.h"
+#include "ui/native_theme/native_theme_aura.h"
+#include "ui/native_theme/native_theme_dark_aura.h"
 
 namespace libgtk2ui {
 
@@ -327,6 +329,8 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
       return GetSystemColor(kColorId_LinkEnabled);
     case kColorId_TextOnCallToActionColor:
       return GetTextColor(GetLabel(), SELECTED);
+    case kColorId_ButtonPressedShade:
+      return SK_ColorTRANSPARENT;
 
     // Textfield
     case kColorId_TextfieldDefaultColor:
@@ -400,14 +404,11 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
       return GetSystemColor(kColorId_TextfieldSelectionColor);
     case kColorId_ResultsTableNormalDimmedText:
     case kColorId_ResultsTableHoveredDimmedText:
-    case kColorId_ResultsTableNormalHeadline:
-    case kColorId_ResultsTableHoveredHeadline:
       return color_utils::AlphaBlend(
           GetSystemColor(kColorId_TextfieldDefaultColor),
           GetSystemColor(kColorId_TextfieldDefaultBackground),
           0x80);
     case kColorId_ResultsTableSelectedDimmedText:
-    case kColorId_ResultsTableSelectedHeadline:
       return color_utils::AlphaBlend(
           GetSystemColor(kColorId_TextfieldSelectionColor),
           GetSystemColor(kColorId_TextfieldDefaultBackground),
@@ -456,6 +457,18 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
           GetSystemColor(kColorId_TextfieldSelectionBackgroundFocused),
           GetBGColor(GetWindow(), NORMAL),
           0x80);
+
+    // Alert icons
+    // Just fall back to the same colors as Aura.
+    case kColorId_AlertSeverityLow:
+    case kColorId_AlertSeverityMedium:
+    case kColorId_AlertSeverityHigh: {
+      ui::NativeTheme* fallback_theme =
+          color_utils::IsDark(GetTextColor(GetEntry(), NORMAL))
+              ? ui::NativeThemeAura::instance()
+              : ui::NativeThemeDarkAura::instance();
+      return fallback_theme->GetSystemColor(color_id);
+    }
 
     case kColorId_NumColors:
       NOTREACHED();

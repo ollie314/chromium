@@ -37,7 +37,7 @@ class MediaStreamVideoTrackTest : public ::testing::Test {
     blink_source_.initialize(base::UTF8ToUTF16("dummy_source_id"),
                              blink::WebMediaStreamSource::TypeVideo,
                              base::UTF8ToUTF16("dummy_source_name"),
-                             false /* remote */, true /* readonly */);
+                             false /* remote */);
     blink_source_.setExtraData(mock_source_);
   }
 
@@ -88,7 +88,7 @@ class MediaStreamVideoTrackTest : public ::testing::Test {
     blink_source_.initialize(base::UTF8ToUTF16("dummy_source_id"),
                              blink::WebMediaStreamSource::TypeVideo,
                              base::UTF8ToUTF16("dummy_source_name"),
-                             false /* remote */, true /* readonly */);
+                             false /* remote */);
     blink_source_.setExtraData(mock_source_);
   }
 
@@ -124,7 +124,7 @@ TEST_F(MediaStreamVideoTrackTest, AddAndRemoveSink) {
                     MediaStreamVideoSource::kDefaultHeight));
   mock_source()->DeliverVideoFrame(frame);
   // Wait for the IO thread to complete delivering frames.
-  io_message_loop()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(2, sink.number_of_frames());
 }
 

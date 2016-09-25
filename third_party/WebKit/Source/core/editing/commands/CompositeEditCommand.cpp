@@ -36,6 +36,7 @@
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
 #include "core/editing/PlainTextRange.h"
+#include "core/editing/RelocatablePosition.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/editing/commands/AppendNodeCommand.h"
 #include "core/editing/commands/ApplyStyleCommand.h"
@@ -79,18 +80,18 @@ namespace blink {
 using namespace HTMLNames;
 
 EditCommandComposition* EditCommandComposition::create(Document* document,
-    const VisibleSelection& startingSelection, const VisibleSelection& endingSelection, EditAction editAction)
+    const VisibleSelection& startingSelection, const VisibleSelection& endingSelection, InputEvent::InputType inputType)
 {
-    return new EditCommandComposition(document, startingSelection, endingSelection, editAction);
+    return new EditCommandComposition(document, startingSelection, endingSelection, inputType);
 }
 
-EditCommandComposition::EditCommandComposition(Document* document, const VisibleSelection& startingSelection, const VisibleSelection& endingSelection, EditAction editAction)
+EditCommandComposition::EditCommandComposition(Document* document, const VisibleSelection& startingSelection, const VisibleSelection& endingSelection, InputEvent::InputType inputType)
     : m_document(document)
     , m_startingSelection(startingSelection)
     , m_endingSelection(endingSelection)
     , m_startingRootEditableElement(startingSelection.rootEditableElement())
     , m_endingRootEditableElement(endingSelection.rootEditableElement())
-    , m_editAction(editAction)
+    , m_inputType(inputType)
 {
 }
 
@@ -109,7 +110,7 @@ void EditCommandComposition::unapply()
     // Changes to the document may have been made since the last editing operation that require a layout, as in <rdar://problem/5658603>.
     // Low level operations, like RemoveNodeCommand, don't require a layout because the high level operations that use them perform one
     // if one is necessary (like for the creation of VisiblePositions).
-    m_document->updateLayoutIgnorePendingStylesheets();
+    m_document->updateStyleAndLayoutIgnorePendingStylesheets();
 
     {
         size_t size = m_commands.size();
@@ -129,7 +130,7 @@ void EditCommandComposition::reapply()
     // Changes to the document may have been made since the last editing operation that require a layout, as in <rdar://problem/5658603>.
     // Low level operations, like RemoveNodeCommand, don't require a layout because the high level operations that use them perform one
     // if one is necessary (like for the creation of VisiblePositions).
-    m_document->updateLayoutIgnorePendingStylesheets();
+    m_document->updateStyleAndLayoutIgnorePendingStylesheets();
 
     {
         for (const auto& command : m_commands)
@@ -137,6 +138,11 @@ void EditCommandComposition::reapply()
     }
 
     frame->editor().reappliedEditing(this);
+}
+
+InputEvent::InputType EditCommandComposition::inputType() const
+{
+    return m_inputType;
 }
 
 void EditCommandComposition::append(SimpleEditCommand* command)
@@ -180,16 +186,26 @@ CompositeEditCommand::~CompositeEditCommand()
 bool CompositeEditCommand::apply()
 {
     if (!endingSelection().isContentRichlyEditable()) {
-        switch (editingAction()) {
-        case EditActionTyping:
-        case EditActionPaste:
-        case EditActionDrag:
-        case EditActionSetWritingDirection:
-        case EditActionCut:
-        case EditActionUnspecified:
+        switch (inputType()) {
+        case InputEvent::InputType::InsertText:
+        case InputEvent::InputType::InsertLineBreak:
+        case InputEvent::InputType::InsertParagraph:
+        case InputEvent::InputType::InsertFromPaste:
+        case InputEvent::InputType::DeleteComposedCharacterForward:
+        case InputEvent::InputType::DeleteComposedCharacterBackward:
+        case InputEvent::InputType::DeleteWordBackward:
+        case InputEvent::InputType::DeleteWordForward:
+        case InputEvent::InputType::DeleteLineBackward:
+        case InputEvent::InputType::DeleteLineForward:
+        case InputEvent::InputType::DeleteContentBackward:
+        case InputEvent::InputType::DeleteContentForward:
+        case InputEvent::InputType::DeleteByCut:
+        case InputEvent::InputType::Drag:
+        case InputEvent::InputType::SetWritingDirection:
+        case InputEvent::InputType::None:
             break;
         default:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
             return false;
         }
     }
@@ -198,7 +214,7 @@ bool CompositeEditCommand::apply()
     // Changes to the document may have been made since the last editing operation that require a layout, as in <rdar://problem/5658603>.
     // Low level operations, like RemoveNodeCommand, don't require a layout because the high level operations that use them perform one
     // if one is necessary (like for the creation of VisiblePositions).
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     LocalFrame* frame = document().frame();
     DCHECK(frame);
@@ -222,7 +238,7 @@ EditCommandComposition* CompositeEditCommand::ensureComposition()
     while (command && command->parent())
         command = command->parent();
     if (!command->m_composition)
-        command->m_composition = EditCommandComposition::create(&document(), startingSelection(), endingSelection(), editingAction());
+        command->m_composition = EditCommandComposition::create(&document(), startingSelection(), endingSelection(), inputType());
     return command->m_composition.get();
 }
 
@@ -266,7 +282,7 @@ void CompositeEditCommand::applyCommandToComposite(EditCommand* command, Editing
 void CompositeEditCommand::applyCommandToComposite(CompositeEditCommand* command, const VisibleSelection& selection, EditingState* editingState)
 {
     command->setParent(this);
-    if (!equalSelectionsInDOMTree(selection, command->endingSelection())) {
+    if (selection != command->endingSelection()) {
         command->setStartingSelection(selection);
         command->setEndingSelection(selection);
     }
@@ -277,7 +293,7 @@ void CompositeEditCommand::applyCommandToComposite(CompositeEditCommand* command
 
 void CompositeEditCommand::applyStyle(const EditingStyle* style, EditingState* editingState)
 {
-    applyCommandToComposite(ApplyStyleCommand::create(document(), style, EditActionChangeAttributes), editingState);
+    applyCommandToComposite(ApplyStyleCommand::create(document(), style, InputEvent::InputType::ChangeAttributes), editingState);
 }
 
 void CompositeEditCommand::applyStyle(const EditingStyle* style, const Position& start, const Position& end, EditingState* editingState)
@@ -320,7 +336,7 @@ bool CompositeEditCommand::isRemovableBlock(const Node* node)
 void CompositeEditCommand::insertNodeBefore(Node* insertChild, Node* refChild, EditingState* editingState, ShouldAssumeContentIsAlwaysEditable shouldAssumeContentIsAlwaysEditable)
 {
     DCHECK_NE(document().body(), refChild);
-    ABORT_EDITING_COMMAND_IF(!refChild->parentNode()->hasEditableStyle() && refChild->parentNode()->inActiveDocument());
+    ABORT_EDITING_COMMAND_IF(!hasEditableStyle(*refChild->parentNode()) && refChild->parentNode()->inActiveDocument());
     applyCommandToComposite(InsertNodeBeforeCommand::create(insertChild, refChild, shouldAssumeContentIsAlwaysEditable), editingState);
 }
 
@@ -342,7 +358,8 @@ void CompositeEditCommand::insertNodeAfter(Node* insertChild, Node* refChild, Ed
 
 void CompositeEditCommand::insertNodeAt(Node* insertChild, const Position& editingPosition, EditingState* editingState)
 {
-    ABORT_EDITING_COMMAND_IF(!isEditablePosition(editingPosition, ContentIsEditable, DoNotUpdateStyle));
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+    ABORT_EDITING_COMMAND_IF(!isEditablePosition(editingPosition));
     // For editing positions like [table, 0], insert before the table,
     // likewise for replaced elements, brs, etc.
     Position p = editingPosition.parentAnchoredEquivalent();
@@ -363,7 +380,7 @@ void CompositeEditCommand::insertNodeAt(Node* insertChild, const Position& editi
         splitTextNode(toText(refChild), offset);
 
         // Mutation events (bug 22634) from the text node insertion may have removed the refChild
-        if (!refChild->inShadowIncludingDocument())
+        if (!refChild->isConnected())
             return;
         insertNodeBefore(insertChild, refChild, editingState);
     } else {
@@ -384,7 +401,7 @@ void CompositeEditCommand::appendNode(Node* node, ContainerNode* parent, Editing
     // produced by JavaScript.
     ABORT_EDITING_COMMAND_IF(!canHaveChildrenForEditing(parent)
         && !(parent->isElementNode() && toElement(parent)->tagQName() == objectTag));
-    ABORT_EDITING_COMMAND_IF(!parent->hasEditableStyle() && parent->inActiveDocument());
+    ABORT_EDITING_COMMAND_IF(!hasEditableStyle(*parent) && parent->inActiveDocument());
     applyCommandToComposite(AppendNodeCommand::create(parent, node), editingState);
 }
 
@@ -464,7 +481,7 @@ HTMLSpanElement* CompositeEditCommand::replaceElementWithSpanPreservingChildrenA
     // Returning a raw pointer here is OK because the command is retained by
     // applyCommandToComposite (thus retaining the span), and the span is also
     // in the DOM tree, and thus alive whie it has a parent.
-    DCHECK(command->spanElement()->inShadowIncludingDocument()) << command->spanElement();
+    DCHECK(command->spanElement()->isConnected()) << command->spanElement();
     return command->spanElement();
 }
 
@@ -565,10 +582,17 @@ void CompositeEditCommand::replaceTextInNodePreservingMarkers(Text* node, unsign
     Vector<DocumentMarker::MarkerType> types;
     Vector<String> descriptions;
     copyMarkerTypesAndDescriptions(markerController.markersInRange(EphemeralRange(Position(node, offset), Position(node, offset + count)), DocumentMarker::AllMarkers()), types, descriptions);
+
     replaceTextInNode(node, offset, count, replacementText);
+
+    // Re-adding markers requires a clean tree.
+    document().updateStyleAndLayout();
+
+    DocumentLifecycle::DisallowTransitionScope disallowTransition(document().lifecycle());
     Position startPosition(node, offset);
     Position endPosition(node, offset + replacementText.length());
     DCHECK_EQ(types.size(), descriptions.size());
+
     for (size_t i = 0; i < types.size(); ++i)
         markerController.addMarker(startPosition, endPosition, types[i], descriptions[i]);
 }
@@ -581,27 +605,27 @@ Position CompositeEditCommand::positionOutsideTabSpan(const Position& pos)
     switch (pos.anchorType()) {
     case PositionAnchorType::BeforeChildren:
     case PositionAnchorType::AfterChildren:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return pos;
     case PositionAnchorType::OffsetInAnchor:
         break;
     case PositionAnchorType::BeforeAnchor:
-        return positionInParentBeforeNode(*pos.anchorNode());
+        return Position::inParentBeforeNode(*pos.anchorNode());
     case PositionAnchorType::AfterAnchor:
-        return positionInParentAfterNode(*pos.anchorNode());
+        return Position::inParentAfterNode(*pos.anchorNode());
     }
 
     HTMLSpanElement* tabSpan = tabSpanElement(pos.computeContainerNode());
     DCHECK(tabSpan);
 
     if (pos.offsetInContainerNode() <= caretMinOffset(pos.computeContainerNode()))
-        return positionInParentBeforeNode(*tabSpan);
+        return Position::inParentBeforeNode(*tabSpan);
 
     if (pos.offsetInContainerNode() >= caretMaxOffset(pos.computeContainerNode()))
-        return positionInParentAfterNode(*tabSpan);
+        return Position::inParentAfterNode(*tabSpan);
 
     splitTextNodeContainingElement(toText(pos.computeContainerNode()), pos.offsetInContainerNode());
-    return positionInParentBeforeNode(*tabSpan);
+    return Position::inParentBeforeNode(*tabSpan);
 }
 
 void CompositeEditCommand::insertNodeAtTabSpanPosition(Node* node, const Position& pos, EditingState* editingState)
@@ -657,7 +681,7 @@ bool CompositeEditCommand::shouldRebalanceLeadingWhitespaceFor(const String& tex
 bool CompositeEditCommand::canRebalance(const Position& position) const
 {
     Node* node = position.computeContainerNode();
-    if (!position.isOffsetInAnchor() || !node || !node->isTextNode() || !node->layoutObjectIsRichlyEditable())
+    if (!position.isOffsetInAnchor() || !node || !node->isTextNode() || !hasRichlyEditableStyle(*node))
         return false;
 
     Text* textNode = toText(node);
@@ -708,17 +732,21 @@ void CompositeEditCommand::rebalanceWhitespaceOnTextSubstring(Text* textNode, in
     if (!length)
         return;
 
-    VisiblePosition visibleUpstreamPos = createVisiblePosition(Position(textNode, upstream));
-    VisiblePosition visibleDownstreamPos = createVisiblePosition(Position(textNode, downstream));
+    VisiblePosition visibleUpstreamPos = createVisiblePositionDeprecated(Position(textNode, upstream));
+    VisiblePosition visibleDownstreamPos = createVisiblePositionDeprecated(Position(textNode, downstream));
 
     String string = text.substring(upstream, length);
-    String rebalancedString = stringWithRebalancedWhitespace(string,
     // FIXME: Because of the problem mentioned at the top of this function, we
     // must also use nbsps at the start/end of the string because this function
     // doesn't get all surrounding whitespace, just the whitespace in the
-    // current text node.
-        isStartOfParagraph(visibleUpstreamPos) || upstream == 0,
-        isEndOfParagraph(visibleDownstreamPos) || (unsigned)downstream == text.length());
+    // current text node. However, if the next sibling node is a text node
+    // (not empty, see http://crbug.com/632300), we should use a plain space.
+    // See http://crbug.com/310149
+    const bool nextSiblingIsTextNode = textNode->nextSibling() && textNode->nextSibling()->isTextNode()
+        && toText(textNode->nextSibling())->data().length();
+    const bool shouldEmitNBSPbeforeEnd =(isEndOfParagraph(visibleDownstreamPos) || (unsigned)downstream == text.length()) && !nextSiblingIsTextNode;
+    String rebalancedString = stringWithRebalancedWhitespace(string,
+        isStartOfParagraph(visibleUpstreamPos) || !upstream, shouldEmitNBSPbeforeEnd);
 
     if (string != rebalancedString)
         replaceTextInNodePreservingMarkers(textNode, upstream, length, rebalancedString);
@@ -744,7 +772,7 @@ void CompositeEditCommand::prepareWhitespaceAtPositionForSplit(Position& positio
     deleteInsignificantText(upstreamPos, mostForwardCaretPosition(position));
     position = mostForwardCaretPosition(upstreamPos);
 
-    VisiblePosition visiblePos = createVisiblePosition(position);
+    VisiblePosition visiblePos = createVisiblePositionDeprecated(position);
     VisiblePosition previousVisiblePos = previousPositionOf(visiblePos);
     replaceCollapsibleWhitespaceWithNonBreakingSpaceIfNeeded(previousVisiblePos);
     replaceCollapsibleWhitespaceWithNonBreakingSpaceIfNeeded(visiblePos);
@@ -776,7 +804,7 @@ void CompositeEditCommand::deleteInsignificantText(Text* textNode, unsigned star
     if (!textNode || start >= end)
         return;
 
-    document().updateLayout();
+    document().updateStyleAndLayout();
 
     LayoutText* textLayoutObject = textNode->layoutObject();
     if (!textLayoutObject)
@@ -862,7 +890,7 @@ void CompositeEditCommand::deleteInsignificantText(const Position& start, const 
         return;
 
     HeapVector<Member<Text>> nodes;
-    for (Node& node : NodeTraversal::startsAt(start.anchorNode())) {
+    for (Node& node : NodeTraversal::startsAt(*start.anchorNode())) {
         if (node.isTextNode())
             nodes.append(toText(&node));
         if (&node == end.anchorNode())
@@ -879,7 +907,7 @@ void CompositeEditCommand::deleteInsignificantText(const Position& start, const 
 
 void CompositeEditCommand::deleteInsignificantTextDownstream(const Position& pos)
 {
-    Position end = mostForwardCaretPosition(nextPositionOf(createVisiblePosition(pos, VP_DEFAULT_AFFINITY)).deepEquivalent());
+    Position end = mostForwardCaretPosition(nextPositionOf(createVisiblePositionDeprecated(pos, VP_DEFAULT_AFFINITY)).deepEquivalent());
     deleteInsignificantText(pos, end);
 }
 
@@ -888,7 +916,7 @@ HTMLBRElement* CompositeEditCommand::appendBlockPlaceholder(Element* container, 
     if (!container)
         return nullptr;
 
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     // Should assert isLayoutBlockFlow || isInlineFlow when deletion improves. See 4244964.
     DCHECK(container->layoutObject()) << container;
@@ -920,7 +948,7 @@ HTMLBRElement* CompositeEditCommand::addBlockPlaceholderIfNeeded(Element* contai
     if (!container)
         return nullptr;
 
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     LayoutObject* layoutObject = container->layoutObject();
     if (!layoutObject || !layoutObject->isLayoutBlockFlow())
@@ -964,11 +992,11 @@ HTMLElement* CompositeEditCommand::insertNewDefaultParagraphElementAt(const Posi
 // it, and return that block.  Otherwise return 0.
 HTMLElement* CompositeEditCommand::moveParagraphContentsToNewBlockIfNecessary(const Position& pos, EditingState* editingState)
 {
-    DCHECK(isEditablePosition(pos, ContentIsEditable, DoNotUpdateStyle)) << pos;
+    DCHECK(isEditablePosition(pos)) << pos;
 
     // It's strange that this function is responsible for verifying that pos has not been invalidated
     // by an earlier call to this function.  The caller, applyBlockStyle, should do this.
-    VisiblePosition visiblePos = createVisiblePosition(pos, VP_DEFAULT_AFFINITY);
+    VisiblePosition visiblePos = createVisiblePositionDeprecated(pos, VP_DEFAULT_AFFINITY);
     VisiblePosition visibleParagraphStart = startOfParagraph(visiblePos);
     VisiblePosition visibleParagraphEnd = endOfParagraph(visiblePos);
     VisiblePosition next = nextPositionOf(visibleParagraphEnd);
@@ -1018,10 +1046,10 @@ HTMLElement* CompositeEditCommand::moveParagraphContentsToNewBlockIfNecessary(co
 
     // Inserting default paragraph element can change visible position. We
     // should update visible positions before use them.
-    visiblePos = createVisiblePosition(pos, VP_DEFAULT_AFFINITY);
+    visiblePos = createVisiblePositionDeprecated(pos, VP_DEFAULT_AFFINITY);
     visibleParagraphStart = startOfParagraph(visiblePos);
     visibleParagraphEnd = endOfParagraph(visiblePos);
-    moveParagraphs(visibleParagraphStart, visibleParagraphEnd, createVisiblePosition(firstPositionInNode(newBlock)), editingState);
+    moveParagraphs(visibleParagraphStart, visibleParagraphEnd, VisiblePosition::firstPositionInNode(newBlock), editingState);
     if (editingState->isAborted())
         return nullptr;
 
@@ -1046,7 +1074,7 @@ void CompositeEditCommand::pushAnchorElementDown(Element* anchorNode, EditingSta
     if (editingState->isAborted())
         return;
     // Clones of anchorNode have been pushed down, now remove it.
-    if (anchorNode->inShadowIncludingDocument())
+    if (anchorNode->isConnected())
         removeNodePreservingChildren(anchorNode, editingState);
 }
 
@@ -1063,7 +1091,7 @@ void CompositeEditCommand::cloneParagraphUnderNewElement(const Position& start, 
     Node* lastNode = nullptr;
     Node* outerNode = passedOuterNode;
 
-    if (outerNode->isRootEditableElement()) {
+    if (isRootEditableElement(*outerNode)) {
         lastNode = blockElement;
     } else {
         lastNode = outerNode->cloneNode(isDisplayInsideTable(outerNode));
@@ -1076,8 +1104,11 @@ void CompositeEditCommand::cloneParagraphUnderNewElement(const Position& start, 
         HeapVector<Member<Node>> ancestors;
 
         // Insert each node from innerNode to outerNode (excluded) in a list.
-        for (Node* n = start.anchorNode(); n && n != outerNode; n = n->parentNode())
-            ancestors.append(n);
+        for (Node& runner : NodeTraversal::inclusiveAncestorsOf(*start.anchorNode())) {
+            if (runner == outerNode)
+                break;
+            ancestors.append(runner);
+        }
 
         // Clone every node between start.anchorNode() and outerBlock.
 
@@ -1093,7 +1124,7 @@ void CompositeEditCommand::cloneParagraphUnderNewElement(const Position& start, 
 
     // Scripts specified in javascript protocol may remove |outerNode|
     // during insertion, e.g. <iframe src="javascript:...">
-    if (!outerNode->inShadowIncludingDocument())
+    if (!outerNode->isConnected())
         return;
 
     // Handle the case of paragraphs with more than one node,
@@ -1225,8 +1256,14 @@ void CompositeEditCommand::moveParagraphWithClones(const VisiblePosition& startO
     // Imagine moving 'bar' to ^.  'bar' will be deleted and its div pruned.  That would
     // cause 'baz' to collapse onto the line with 'foobar' unless we insert a br.
     // Must recononicalize these two VisiblePositions after the pruning above.
-    beforeParagraph = createVisiblePosition(beforeParagraph.deepEquivalent());
-    afterParagraph = createVisiblePosition(afterParagraph.deepEquivalent());
+    // TODO(yosin): We should abort when |beforeParagraph| is a orphan when
+    // we have a sample.
+    beforeParagraph = createVisiblePositionDeprecated(beforeParagraph.deepEquivalent());
+    if (afterParagraph.isOrphan()) {
+        editingState->abort();
+        return;
+    }
+    afterParagraph = createVisiblePositionDeprecated(afterParagraph.deepEquivalent());
 
     if (beforeParagraph.isNotNull() && !isDisplayInsideTable(beforeParagraph.deepEquivalent().anchorNode())
         && ((!isEndOfParagraph(beforeParagraph) && !isStartOfParagraph(beforeParagraph)) || beforeParagraph.deepEquivalent() == afterParagraph.deepEquivalent())) {
@@ -1235,14 +1272,14 @@ void CompositeEditCommand::moveParagraphWithClones(const VisiblePosition& startO
     }
 }
 
-void CompositeEditCommand::moveParagraph(const VisiblePosition& startOfParagraphToMove, const VisiblePosition& endOfParagraphToMove, const VisiblePosition& destination, EditingState* editingState, bool preserveSelection, bool preserveStyle, Node* constrainingAncestor)
+void CompositeEditCommand::moveParagraph(const VisiblePosition& startOfParagraphToMove, const VisiblePosition& endOfParagraphToMove, const VisiblePosition& destination, EditingState* editingState, ShouldPreserveSelection shouldPreserveSelection, ShouldPreserveStyle shouldPreserveStyle, Node* constrainingAncestor)
 {
     DCHECK(isStartOfParagraph(startOfParagraphToMove)) << startOfParagraphToMove;
     DCHECK(isEndOfParagraph(endOfParagraphToMove)) << endOfParagraphToMove;
-    moveParagraphs(startOfParagraphToMove, endOfParagraphToMove, destination, editingState, preserveSelection, preserveStyle, constrainingAncestor);
+    moveParagraphs(startOfParagraphToMove, endOfParagraphToMove, destination, editingState, shouldPreserveSelection, shouldPreserveStyle, constrainingAncestor);
 }
 
-void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagraphToMove, const VisiblePosition& endOfParagraphToMove, const VisiblePosition& destination, EditingState* editingState, bool preserveSelection, bool preserveStyle, Node* constrainingAncestor)
+void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagraphToMove, const VisiblePosition& endOfParagraphToMove, const VisiblePosition& destination, EditingState* editingState, ShouldPreserveSelection shouldPreserveSelection, ShouldPreserveStyle shouldPreserveStyle, Node* constrainingAncestor)
 {
     if (startOfParagraphToMove.deepEquivalent() == destination.deepEquivalent() || startOfParagraphToMove.isNull())
         return;
@@ -1251,7 +1288,7 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
     int endIndex = -1;
     int destinationIndex = -1;
     bool originalIsDirectional = endingSelection().isDirectional();
-    if (preserveSelection && !endingSelection().isNone()) {
+    if (shouldPreserveSelection == PreserveSelection && !endingSelection().isNone()) {
         VisiblePosition visibleStart = endingSelection().visibleStart();
         VisiblePosition visibleEnd = endingSelection().visibleEnd();
 
@@ -1261,6 +1298,9 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
         if (!startAfterParagraph && !endBeforeParagraph) {
             bool startInParagraph = comparePositions(visibleStart, startOfParagraphToMove) >= 0;
             bool endInParagraph = comparePositions(visibleEnd, endOfParagraphToMove) <= 0;
+
+            // TextIterator::rangeLength requires clean layout.
+            document().updateStyleAndLayoutIgnorePendingStylesheets();
 
             startIndex = 0;
             if (startInParagraph)
@@ -1272,8 +1312,8 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
         }
     }
 
-    VisiblePosition beforeParagraph = previousPositionOf(startOfParagraphToMove, CannotCrossEditingBoundary);
-    VisiblePosition afterParagraph = nextPositionOf(endOfParagraphToMove, CannotCrossEditingBoundary);
+    RelocatablePosition beforeParagraphPosition(previousPositionOf(startOfParagraphToMove, CannotCrossEditingBoundary).deepEquivalent());
+    RelocatablePosition afterParagraphPosition(nextPositionOf(endOfParagraphToMove, CannotCrossEditingBoundary).deepEquivalent());
 
     // We upstream() the end and downstream() the start so that we don't include collapsed whitespace in the move.
     // When we paste a fragment, spaces after the end and before the start are treated as though they were rendered.
@@ -1289,7 +1329,7 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
     // anything if we're given an empty paragraph, but an empty paragraph can have style
     // too, <div><b><br></b></div> for example.  Save it so that we can preserve it later.
     EditingStyle* styleInEmptyParagraph = nullptr;
-    if (startOfParagraphToMove.deepEquivalent() == endOfParagraphToMove.deepEquivalent() && preserveStyle) {
+    if (startOfParagraphToMove.deepEquivalent() == endOfParagraphToMove.deepEquivalent() && shouldPreserveStyle == PreserveStyle) {
         styleInEmptyParagraph = EditingStyle::create(startOfParagraphToMove.deepEquivalent());
         styleInEmptyParagraph->mergeTypingStyle(&document());
         // The moved paragraph should assume the block style of the destination.
@@ -1299,16 +1339,16 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
     // FIXME (5098931): We should add a new insert action "WebViewInsertActionMoved" and call shouldInsertFragment here.
 
     setEndingSelection(VisibleSelection(start, end));
-    document().frame()->spellChecker().clearMisspellingsAndBadGrammar(endingSelection());
+    document().frame()->spellChecker().clearMisspellingsAndBadGrammarForMovingParagraphs(endingSelection());
     deleteSelection(editingState, false, false, false);
     if (editingState->isAborted())
         return;
 
-    DCHECK(destination.deepEquivalent().inShadowIncludingDocument()) << destination;
+    DCHECK(destination.deepEquivalent().isConnected()) << destination;
     cleanupAfterDeletion(editingState, destination);
     if (editingState->isAborted())
         return;
-    DCHECK(destination.deepEquivalent().inShadowIncludingDocument()) << destination;
+    DCHECK(destination.deepEquivalent().isConnected()) << destination;
 
     // Add a br if pruning an empty block level element caused a collapse. For example:
     // foo^
@@ -1317,29 +1357,34 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
     // Imagine moving 'bar' to ^. 'bar' will be deleted and its div pruned. That would
     // cause 'baz' to collapse onto the line with 'foobar' unless we insert a br.
     // Must recononicalize these two VisiblePositions after the pruning above.
-    beforeParagraph = createVisiblePosition(beforeParagraph.deepEquivalent());
-    afterParagraph = createVisiblePosition(afterParagraph.deepEquivalent());
+    VisiblePosition beforeParagraph = createVisiblePositionDeprecated(beforeParagraphPosition.position());
+    VisiblePosition afterParagraph = createVisiblePositionDeprecated(afterParagraphPosition.position());
     if (beforeParagraph.isNotNull() && (!isEndOfParagraph(beforeParagraph) || beforeParagraph.deepEquivalent() == afterParagraph.deepEquivalent())) {
         // FIXME: Trim text between beforeParagraph and afterParagraph if they aren't equal.
         insertNodeAt(HTMLBRElement::create(document()), beforeParagraph.deepEquivalent(), editingState);
         if (editingState->isAborted())
             return;
         // Need an updateLayout here in case inserting the br has split a text node.
-        document().updateLayoutIgnorePendingStylesheets();
+        document().updateStyleAndLayoutIgnorePendingStylesheets();
     }
 
-    destinationIndex = TextIterator::rangeLength(firstPositionInNode(document().documentElement()), destination.toParentAnchoredPosition(), true);
+    destinationIndex = TextIterator::rangeLength(Position::firstPositionInNode(document().documentElement()), destination.toParentAnchoredPosition(), true);
 
-    setEndingSelection(VisibleSelection(destination, originalIsDirectional));
-    DCHECK(endingSelection().isCaretOrRange());
+    VisibleSelection destinationSelection(destination, originalIsDirectional);
+    if (endingSelection().isNone()) {
+        // We abort executing command since |destination| becomes invisible.
+        editingState->abort();
+        return;
+    }
+    setEndingSelection(destinationSelection);
     ReplaceSelectionCommand::CommandOptions options = ReplaceSelectionCommand::SelectReplacement | ReplaceSelectionCommand::MovingParagraph;
-    if (!preserveStyle)
+    if (shouldPreserveStyle == DoNotPreserveStyle)
         options |= ReplaceSelectionCommand::MatchStyle;
     applyCommandToComposite(ReplaceSelectionCommand::create(document(), fragment, options), editingState);
     if (editingState->isAborted())
         return;
 
-    document().frame()->spellChecker().markMisspellingsAndBadGrammar(endingSelection());
+    document().frame()->spellChecker().markMisspellingsAndBadGrammarForMovingParagraphs(endingSelection());
 
     // If the selection is in an empty paragraph, restore styles from the old empty paragraph to the new empty paragraph.
     bool selectionIsEmptyParagraph = endingSelection().isCaret() && isStartOfParagraph(endingSelection().visibleStart()) && isEndOfParagraph(endingSelection().visibleStart());
@@ -1349,11 +1394,15 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
             return;
     }
 
-    if (!preserveSelection || startIndex == -1)
+    if (shouldPreserveSelection ==  DoNotPreserveSelection || startIndex == -1)
         return;
     Element* documentElement = document().documentElement();
     if (!documentElement)
         return;
+
+    // We need clean layout in order to compute plain-text ranges below.
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
+
     // Fragment creation (using createMarkup) incorrectly uses regular spaces
     // instead of nbsps for some spaces that were rendered (11475), which causes
     // spaces to be collapsed during the move operation. This results in a call
@@ -1382,8 +1431,8 @@ bool CompositeEditCommand::breakOutOfEmptyListItem(EditingState* editingState)
     // FIXME: Can't we do something better when the immediate parent wasn't a list node?
     if (!listNode
         || (!isHTMLUListElement(*listNode) && !isHTMLOListElement(*listNode))
-        || !listNode->hasEditableStyle()
-        || listNode == emptyListItem->rootEditableElement())
+        || !hasEditableStyle(*listNode)
+        || listNode == rootEditableElement(*emptyListItem))
         return false;
 
     HTMLElement* newBlock = nullptr;
@@ -1438,7 +1487,7 @@ bool CompositeEditCommand::breakOutOfEmptyListItem(EditingState* editingState)
     appendBlockPlaceholder(newBlock, editingState);
     if (editingState->isAborted())
         return false;
-    setEndingSelection(VisibleSelection(firstPositionInNode(newBlock), TextAffinity::Downstream, endingSelection().isDirectional()));
+    setEndingSelection(VisibleSelection(Position::firstPositionInNode(newBlock), TextAffinity::Downstream, endingSelection().isDirectional()));
 
     style->prepareToApplyAt(endingSelection().start());
     if (!style->isEmpty()) {
@@ -1476,7 +1525,7 @@ bool CompositeEditCommand::breakOutOfEmptyMailBlockquotedParagraph(EditingState*
     insertNodeBefore(br, highestBlockquote, editingState);
     if (editingState->isAborted())
         return false;
-    VisiblePosition atBR = createVisiblePosition(positionBeforeNode(br));
+    VisiblePosition atBR = VisiblePosition::beforeNode(br);
     // If the br we inserted collapsed, for example foo<br><blockquote>...</blockquote>, insert
     // a second one.
     if (!isStartOfParagraph(atBR)) {
@@ -1522,7 +1571,7 @@ Position CompositeEditCommand::positionAvoidingSpecialElementBoundary(const Posi
     if (original.isNull())
         return original;
 
-    VisiblePosition visiblePos = createVisiblePosition(original);
+    VisiblePosition visiblePos = createVisiblePositionDeprecated(original);
     Element* enclosingAnchor = enclosingAnchorElement(original);
     Position result = original;
 
@@ -1531,8 +1580,8 @@ Position CompositeEditCommand::positionAvoidingSpecialElementBoundary(const Posi
 
     // Don't avoid block level anchors, because that would insert content into the wrong paragraph.
     if (enclosingAnchor && !isEnclosingBlock(enclosingAnchor)) {
-        VisiblePosition firstInAnchor = createVisiblePosition(firstPositionInNode(enclosingAnchor));
-        VisiblePosition lastInAnchor = createVisiblePosition(lastPositionInNode(enclosingAnchor));
+        VisiblePosition firstInAnchor = VisiblePosition::firstPositionInNode(enclosingAnchor);
+        VisiblePosition lastInAnchor = VisiblePosition::lastPositionInNode(enclosingAnchor);
         // If visually just after the anchor, insert *inside* the anchor unless it's the last
         // VisiblePosition in the document, to match NSTextView.
         if (visiblePos.deepEquivalent() == lastInAnchor.deepEquivalent()) {
@@ -1552,7 +1601,7 @@ Position CompositeEditCommand::positionAvoidingSpecialElementBoundary(const Posi
             if (lineBreakExistsAtVisiblePosition(visiblePos) && downstream.anchorNode()->isDescendantOf(enclosingAnchor))
                 return original;
 
-            result = positionInParentAfterNode(*enclosingAnchor);
+            result = Position::inParentAfterNode(*enclosingAnchor);
         }
         // If visually just before an anchor, insert *outside* the anchor unless it's the first
         // VisiblePosition in a paragraph, to match NSTextView.
@@ -1568,7 +1617,7 @@ Position CompositeEditCommand::positionAvoidingSpecialElementBoundary(const Posi
             if (!enclosingAnchor)
                 return original;
 
-            result = positionInParentBeforeNode(*enclosingAnchor);
+            result = Position::inParentBeforeNode(*enclosingAnchor);
         }
     }
 
@@ -1598,8 +1647,8 @@ Node* CompositeEditCommand::splitTreeToNode(Node* start, Node* end, bool shouldS
         if (!parentElement)
             break;
         // Do not split a node when doing so introduces an empty node.
-        VisiblePosition positionInParent = createVisiblePosition(firstPositionInNode(parentElement));
-        VisiblePosition positionInNode = createVisiblePosition(firstPositionInOrBeforeNode(node));
+        VisiblePosition positionInParent = VisiblePosition::firstPositionInNode(parentElement);
+        VisiblePosition positionInNode = createVisiblePositionDeprecated(firstPositionInOrBeforeNode(node));
         if (positionInParent.deepEquivalent() != positionInNode.deepEquivalent())
             splitElement(parentElement, node);
     }

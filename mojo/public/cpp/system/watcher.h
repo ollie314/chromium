@@ -5,22 +5,25 @@
 #ifndef MOJO_PUBLIC_CPP_SYSTEM_WATCHER_H_
 #define MOJO_PUBLIC_CPP_SYSTEM_WATCHER_H_
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "mojo/public/c/system/types.h"
 #include "mojo/public/cpp/system/handle.h"
+#include "mojo/public/cpp/system/system_export.h"
 
 namespace mojo {
 
 // A Watcher watches a single Mojo handle for signal state changes.
 //
 // NOTE: Watchers may only be used on threads which have a running MessageLoop.
-class Watcher {
+class MOJO_CPP_SYSTEM_EXPORT Watcher {
  public:
   // A callback to be called any time a watched handle changes state in some
   // interesting way. The |result| argument indicates one of the following
@@ -40,9 +43,8 @@ class Watcher {
   //       Cancel() the watch in this case.
   using ReadyCallback = base::Callback<void(MojoResult result)>;
 
-  // TODO(rockot/yzshen): Support giving Watcher an explicit TaskRunner for
-  // more fine-grained control over dispatch behavior.
-  Watcher();
+  explicit Watcher(scoped_refptr<base::SingleThreadTaskRunner> runner =
+                       base::ThreadTaskRunnerHandle::Get());
 
   // NOTE: This destructor automatically calls |Cancel()| if the Watcher is
   // still active.
@@ -76,6 +78,9 @@ class Watcher {
   // passed to |Start()| will never be called again for this Watcher.
   void Cancel();
 
+  Handle handle() const { return handle_; }
+  ReadyCallback ready_callback() const { return callback_; }
+
  private:
   class MessageLoopObserver;
   friend class MessageLoopObserver;
@@ -92,8 +97,11 @@ class Watcher {
   // The TaskRunner of this Watcher's owning thread. This field is safe to
   // access from any thread.
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  // Whether |task_runner_| is the same as base::ThreadTaskRunnerHandle::Get()
+  // for the thread.
+  const bool is_default_task_runner_;
 
-  scoped_ptr<MessageLoopObserver> message_loop_observer_;
+  std::unique_ptr<MessageLoopObserver> message_loop_observer_;
 
   // A persistent weak reference to this Watcher which can be passed to the
   // Dispatcher any time this object should be signalled. Safe to access (but

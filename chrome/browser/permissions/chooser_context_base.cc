@@ -55,12 +55,8 @@ ChooserContextBase::GetGrantedObjects(const GURL& requesting_origin,
   if (!object_list)
     return results;
 
-  for (base::ListValue::iterator it = object_list->begin();
-       it != object_list->end(); ++it) {
+  for (auto& object : *object_list) {
     // Steal ownership of |object| from |object_list|.
-    std::unique_ptr<base::Value> object(*it);
-    *it = nullptr;
-
     std::unique_ptr<base::DictionaryValue> object_dict =
         base::DictionaryValue::From(std::move(object));
     if (object_dict && IsValidObject(*object_dict))
@@ -88,16 +84,16 @@ ChooserContextBase::GetAllGrantedObjects() {
     if (!setting->GetList(kObjectListKey, &object_list))
       continue;
 
-    for (base::Value* object : *object_list) {
+    for (const auto& object : *object_list) {
       base::DictionaryValue* object_dict;
       if (!object->GetAsDictionary(&object_dict) ||
           !IsValidObject(*object_dict)) {
         continue;
       }
 
-      results.push_back(base::WrapUnique(
-          new Object(requesting_origin, embedding_origin, object_dict,
-                     content_setting.source, content_setting.incognito)));
+      results.push_back(base::MakeUnique<Object>(
+          requesting_origin, embedding_origin, object_dict,
+          content_setting.source, content_setting.incognito));
     }
   }
 
@@ -119,7 +115,7 @@ void ChooserContextBase::GrantObjectPermission(
     object_list = new base::ListValue();
     setting->Set(kObjectListKey, object_list);
   }
-  object_list->AppendIfNotPresent(object.release());
+  object_list->AppendIfNotPresent(std::move(object));
   SetWebsiteSetting(requesting_origin, embedding_origin, std::move(setting));
 }
 
@@ -157,5 +153,5 @@ void ChooserContextBase::SetWebsiteSetting(const GURL& requesting_origin,
                                            std::unique_ptr<base::Value> value) {
   host_content_settings_map_->SetWebsiteSettingDefaultScope(
       requesting_origin, embedding_origin, data_content_settings_type_,
-      std::string(), value.release());
+      std::string(), std::move(value));
 }

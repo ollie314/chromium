@@ -35,6 +35,8 @@ namespace blink {
 class AXObjectCacheImpl;
 
 class AXSpinButton final : public AXMockObject {
+    WTF_MAKE_NONCOPYABLE(AXSpinButton);
+
 public:
     static AXSpinButton* create(AXObjectCacheImpl&);
     ~AXSpinButton() override;
@@ -50,7 +52,7 @@ private:
     bool isSpinButton() const override { return true; }
     bool isNativeSpinButton() const override { return true; }
     void addChildren() override;
-    LayoutRect elementRect() const override;
+    LayoutObject* layoutObjectForRelativeBounds() const override;
     void detach() override;
     void detachFromParent() override;
 
@@ -70,7 +72,7 @@ private:
     bool press() const override;
     AccessibilityRole roleValue() const override { return ButtonRole; }
     bool isSpinButtonPart() const override { return true; }
-    LayoutRect elementRect() const override;
+    void getRelativeBounds(AXObject** outContainer, FloatRect& outBoundsInContainer, SkMatrix44& outContainerTransform) const override;
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXSpinButton, isNativeSpinButton());

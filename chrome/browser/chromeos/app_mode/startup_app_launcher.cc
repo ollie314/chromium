@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/app_mode/startup_app_launcher.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
@@ -14,6 +15,7 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_diagnosis_runner.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
+#include "chrome/browser/chromeos/net/delay_network_call.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
@@ -309,12 +311,13 @@ void StartupAppLauncher::OnExtensionUpdateCheckFinished() {
 void StartupAppLauncher::Observe(int type,
                                  const content::NotificationSource& source,
                                  const content::NotificationDetails& details) {
-  DCHECK(type == extensions::NOTIFICATION_EXTENSION_UPDATE_FOUND);
-  typedef const std::pair<std::string, Version> UpdateDetails;
+  DCHECK_EQ(extensions::NOTIFICATION_EXTENSION_UPDATE_FOUND, type);
+  using UpdateDetails = const std::pair<std::string, base::Version>;
   const std::string& id = content::Details<UpdateDetails>(details)->first;
-  const Version& version = content::Details<UpdateDetails>(details)->second;
+  const base::Version& version =
+      content::Details<UpdateDetails>(details)->second;
   VLOG(1) << "Found extension update id=" << id
-      << " version=" << version.GetString();
+          << " version=" << version.GetString();
   extension_update_found_ = true;
 }
 
@@ -461,9 +464,9 @@ void StartupAppLauncher::LaunchApp() {
   }
 
   // Always open the app in a window.
-  OpenApplication(AppLaunchParams(profile_, extension,
-                                  extensions::LAUNCH_CONTAINER_WINDOW,
-                                  NEW_WINDOW, extensions::SOURCE_KIOSK));
+  OpenApplication(AppLaunchParams(
+      profile_, extension, extensions::LAUNCH_CONTAINER_WINDOW,
+      WindowOpenDisposition::NEW_WINDOW, extensions::SOURCE_KIOSK));
   KioskAppManager::Get()->InitSession(profile_, app_id_);
 
   user_manager::UserManager::Get()->SessionStarted();
@@ -516,7 +519,10 @@ void StartupAppLauncher::BeginInstall() {
 
 void StartupAppLauncher::MaybeInstallSecondaryApps() {
   if (!AreSecondaryAppsInstalled() && !delegate_->IsNetworkReady()) {
-    OnLaunchFailure(KioskAppLaunchError::UNABLE_TO_INSTALL);
+    DelayNetworkCall(
+        base::TimeDelta::FromMilliseconds(kDefaultNetworkRetryDelayMS),
+        base::Bind(&StartupAppLauncher::MaybeInstallSecondaryApps,
+                   AsWeakPtr()));
     return;
   }
 

@@ -24,7 +24,7 @@ void DrmThreadProxy::BindThreadIntoMessagingProxy(
 
 std::unique_ptr<DrmWindowProxy> DrmThreadProxy::CreateDrmWindowProxy(
     gfx::AcceleratedWidget widget) {
-  return base::WrapUnique(new DrmWindowProxy(widget, &drm_thread_));
+  return base::MakeUnique<DrmWindowProxy>(widget, &drm_thread_);
 }
 
 scoped_refptr<GbmBuffer> DrmThreadProxy::CreateBuffer(
@@ -40,16 +40,17 @@ scoped_refptr<GbmBuffer> DrmThreadProxy::CreateBuffer(
   return buffer;
 }
 
-scoped_refptr<GbmBuffer> DrmThreadProxy::CreateBufferFromFD(
+scoped_refptr<GbmBuffer> DrmThreadProxy::CreateBufferFromFds(
+    gfx::AcceleratedWidget widget,
     const gfx::Size& size,
     gfx::BufferFormat format,
-    base::ScopedFD fd,
-    int stride) {
+    std::vector<base::ScopedFD>&& fds,
+    const std::vector<gfx::NativePixmapPlane>& planes) {
   scoped_refptr<GbmBuffer> buffer;
-  PostSyncTask(
-      drm_thread_.task_runner(),
-      base::Bind(&DrmThread::CreateBufferFromFD, base::Unretained(&drm_thread_),
-                 size, format, base::Passed(&fd), stride, &buffer));
+  PostSyncTask(drm_thread_.task_runner(),
+               base::Bind(&DrmThread::CreateBufferFromFds,
+                          base::Unretained(&drm_thread_), widget, size, format,
+                          base::Passed(std::move(fds)), planes, &buffer));
   return buffer;
 }
 
@@ -60,6 +61,13 @@ void DrmThreadProxy::GetScanoutFormats(
       drm_thread_.task_runner(),
       base::Bind(&DrmThread::GetScanoutFormats, base::Unretained(&drm_thread_),
                  widget, scanout_formats));
+}
+
+void DrmThreadProxy::AddBinding(ozone::mojom::DeviceCursorRequest request) {
+  drm_thread_.task_runner()->PostTask(
+      FROM_HERE,
+      base::Bind(&DrmThread::AddBinding, base::Unretained(&drm_thread_),
+                 base::Passed(&request)));
 }
 
 }  // namespace ui

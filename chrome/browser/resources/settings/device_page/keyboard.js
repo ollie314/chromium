@@ -19,10 +19,6 @@ var DropdownMenuOptionList;
 Polymer({
   is: 'settings-keyboard',
 
-  behaviors: [
-    I18nBehavior,
-  ],
-
   properties: {
     /** Preferences state. */
     prefs: {
@@ -44,12 +40,36 @@ Polymer({
      * Caps Lock.
      */
     keyMapTargetsWithCapsLock_: Object,
+
+    /**
+     * Auto-repeat delays (in ms) for the corresponding slider values, from
+     * long to short. The values were chosen to provide a large range while
+     * giving several options near the defaults.
+     * @private {!Array<number>}
+     */
+    autoRepeatDelays_: {
+      type: Array,
+      value: [2000, 1500, 1000, 500, 300, 200, 150],
+      readOnly: true,
+    },
+
+    /**
+     * Auto-repeat intervals (in ms) for the corresponding slider values, from
+     * long to short. The slider itself is labeled "rate", the inverse of
+     * interval, and goes from slow (long interval) to fast (short interval).
+     * @private {!Array<number>}
+     */
+    autoRepeatIntervals_: {
+      type: Array,
+      value: [2000, 1000, 500, 300, 200, 100, 50, 30, 20],
+      readOnly: true,
+    },
   },
 
   /** @override */
   ready: function() {
     cr.addWebUIListener('show-keys-changed', this.onShowKeysChange_.bind(this));
-    chrome.send('initializeKeyboardSettings');
+    settings.DevicePageBrowserProxyImpl.getInstance().initializeKeyboard();
     this.setUpKeyMapTargets_();
   },
 
@@ -83,5 +103,14 @@ Polymer({
   onShowKeysChange_: function(showCapsLock, showDiamondKey) {
     this.showCapsLock_ = showCapsLock;
     this.showDiamondKey_ = showDiamondKey;
+  },
+
+  onShowKeyboardShortcutsOverlayTap_: function() {
+    settings.DevicePageBrowserProxyImpl.getInstance()
+        .showKeyboardShortcutsOverlay();
+  },
+
+  onShowLanguageInputTap_: function() {
+    settings.navigateTo(settings.Route.LANGUAGES);
   },
 });

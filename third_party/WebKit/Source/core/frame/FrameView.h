@@ -30,9 +30,9 @@
 #include "core/frame/FrameViewAutoSizeInfo.h"
 #include "core/frame/LayoutSubtreeRootList.h"
 #include "core/frame/RootFrameViewport.h"
-#include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/ScrollAnchor.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/paint/FirstMeaningfulPaintDetector.h"
+#include "core/paint/ObjectPaintProperties.h"
 #include "core/paint/PaintInvalidationCapableScrollableArea.h"
 #include "core/paint/PaintPhase.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -40,19 +40,17 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/Color.h"
-#include "platform/graphics/paint/ClipPaintPropertyNode.h"
-#include "platform/graphics/paint/TransformPaintPropertyNode.h"
 #include "platform/scroll/ScrollTypes.h"
 #include "platform/scroll/Scrollbar.h"
 #include "public/platform/WebDisplayMode.h"
 #include "public/platform/WebRect.h"
 #include "wtf/Allocator.h"
+#include "wtf/AutoReset.h"
 #include "wtf/Forward.h"
 #include "wtf/HashSet.h"
 #include "wtf/ListHashSet.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/TemporaryChange.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
@@ -64,16 +62,21 @@ class Cursor;
 class Element;
 class FloatSize;
 class HTMLFrameOwnerElement;
+class JSONArray;
+class LayoutViewItem;
 class LayoutPart;
 class LocalFrame;
 class KURL;
 class Node;
+class LayoutAnalyzer;
 class LayoutBox;
 class LayoutEmbeddedObject;
 class LayoutObject;
 class LayoutReplaced;
 class LayoutScrollbarPart;
 class LayoutView;
+class PaintArtifactCompositor;
+class PaintController;
 class PaintInvalidationState;
 class Page;
 class ScrollingCoordinator;
@@ -107,7 +110,10 @@ public:
 
     Page* page() const;
 
+    // TODO(pilgrim) replace all instances of layoutView() with layoutViewItem()
+    // https://crbug.com/499321
     LayoutView* layoutView() const;
+    LayoutViewItem layoutViewItem() const;
 
     void setCanHaveScrollbars(bool);
 
@@ -132,6 +138,7 @@ public:
     void countObjectsNeedingLayout(unsigned& needsLayoutObjects, unsigned& totalObjects, bool& isPartial);
 
     bool needsLayout() const;
+    bool checkDoesNotNeedLayout() const;
     void setNeedsLayout();
 
     void setNeedsUpdateWidgetGeometries() { m_needsUpdateWidgetGeometries = true; }
@@ -146,8 +153,6 @@ public:
     // E.g. WebViewImpl sets its mainFrame's layout size manually
     void setLayoutSizeFixedToFrameSize(bool isFixed) { m_layoutSizeFixedToFrameSize = isFixed; }
     bool layoutSizeFixedToFrameSize() { return m_layoutSizeFixedToFrameSize; }
-
-    bool needsFullPaintInvalidation() const { return m_doFullPaintInvalidation; }
 
     void updateAcceleratedCompositingSettings();
 
@@ -173,6 +178,7 @@ public:
     void updateBackgroundRecursively(const Color&, bool);
 
     void adjustViewSize();
+    void adjustViewSizeAndLayout();
 
     // Scale used to convert incoming input events.
     float inputEventsScaleFactor() const;
@@ -182,6 +188,7 @@ public:
     void setInputEventsTransformForEmulation(const IntSize&, float);
 
     void setScrollPosition(const DoublePoint&, ScrollType, ScrollBehavior = ScrollBehaviorInstant) override;
+    void didChangeScrollOffset();
 
     void didUpdateElasticOverscroll();
 
@@ -201,11 +208,6 @@ public:
     const ViewportConstrainedObjectSet* viewportConstrainedObjects() const { return m_viewportConstrainedObjects.get(); }
     bool hasViewportConstrainedObjects() const { return m_viewportConstrainedObjects && m_viewportConstrainedObjects->size() > 0; }
 
-    // Sticky objects.
-    void addStickyPositionObject() { ++m_stickyPositionObjectCount; }
-    void removeStickyPositionObject() { --m_stickyPositionObjectCount; }
-    bool hasStickyPositionObjects() const { return m_stickyPositionObjectCount; }
-
     // Objects with background-attachment:fixed.
     void addBackgroundAttachmentFixedObject(LayoutObject*);
     void removeBackgroundAttachmentFixedObject(LayoutObject*);
@@ -216,9 +218,11 @@ public:
 
     void updateDocumentAnnotatedRegions() const;
 
+    void didAttachDocument();
+
     void restoreScrollbar();
 
-    void postLayoutTimerFired(Timer<FrameView>*);
+    void postLayoutTimerFired(TimerBase*);
 
     bool safeToPropagateScrollToParent() const { return m_safeToPropagateScrollToParent; }
     void setSafeToPropagateScrollToParent(bool isSafe) { m_safeToPropagateScrollToParent = isSafe; }
@@ -237,6 +241,9 @@ public:
     // (e.g., based on visibility) and will not end up being PaintInvalidationClean.
     void updateAllLifecyclePhases();
 
+    // Everything except paint (the last phase).
+    void updateAllLifecyclePhasesExceptPaint();
+
     // Computes the style, layout and compositing lifecycle stages if needed. After calling this method, all frames will be in a lifecycle
     // state >= CompositingClean, and scrolling has been updated (unless throttling is allowed).
     void updateLifecycleToCompositingCleanPlusScrolling();
@@ -249,6 +256,7 @@ public:
 
     bool invalidateViewportConstrainedObjects();
 
+    void incrementLayoutObjectCount() { m_layoutObjectCounter.increment(); }
     void incrementVisuallyNonEmptyCharacterCount(unsigned);
     void incrementVisuallyNonEmptyPixelCount(const IntSize&);
     bool isVisuallyNonEmpty() const { return m_isVisuallyNonEmpty; }
@@ -310,9 +318,11 @@ public:
 
     static void setInitialTracksPaintInvalidationsForTesting(bool);
 
+    // These methods are for testing.
     void setTracksPaintInvalidations(bool);
-    bool isTrackingPaintInvalidations() const { return m_isTrackingPaintInvalidations; }
-    void resetTrackedPaintInvalidations();
+    bool isTrackingPaintInvalidations() const { return m_trackedObjectPaintInvalidations.get(); }
+    void trackObjectPaintInvalidation(const DisplayItemClient&, PaintInvalidationReason);
+    std::unique_ptr<JSONArray> trackedObjectPaintInvalidationsAsJSON() const;
 
     using ScrollableAreaSet = HeapHashSet<Member<ScrollableArea>>;
     void addScrollableArea(ScrollableArea*);
@@ -358,12 +368,11 @@ public:
     // commit scroll offsets before a WebView::resize occurs, we need to adjust
     // our scroll extents to prevent clamping the scroll offsets.
     void setTopControlsViewportAdjustment(float);
-    IntSize topControlsSize() const { return IntSize(0, roundf(m_topControlsViewportAdjustment)); }
+    IntSize topControlsSize() const { return IntSize(0, ceilf(m_topControlsViewportAdjustment)); }
 
     IntPoint maximumScrollPosition() const override;
 
     // ScrollableArea interface
-    void scrollControlWasSetNeedsPaintInvalidation() override { }
     void getTickmarks(Vector<IntRect>&) const override;
     IntRect scrollableAreaBoundingBox() const override;
     bool scrollAnimatorEnabled() const override;
@@ -379,6 +388,7 @@ public:
     bool shouldPlaceVerticalScrollbarOnLeft() const override;
     Widget* getWidget() override;
     CompositorAnimationTimeline* compositorAnimationTimeline() const override;
+    LayoutBox* layoutBox() const override;
 
     LayoutRect scrollIntoView(
         const LayoutRect& rectInContent,
@@ -389,9 +399,6 @@ public:
     // The window that hosts the FrameView. The FrameView will communicate scrolls and repaints to the
     // host window in the window's coordinate space.
     HostWindow* getHostWindow() const;
-
-    // Returns a clip rect in host window coordinates. Used to clip the blit on a scroll.
-    IntRect windowClipRect(IncludeScrollbarsInRect = ExcludeScrollbars) const;
 
     typedef HeapHashSet<Member<Widget>> ChildrenWidgetSet;
 
@@ -435,6 +442,11 @@ public:
     // rectangle, but an optional boolean argument allows them to be included.
     IntRect visibleContentRect(IncludeScrollbarsInRect = ExcludeScrollbars) const override;
     IntSize visibleContentSize(IncludeScrollbarsInRect = ExcludeScrollbars) const;
+
+    // Clips the provided rect to the visible content area. For this purpose, we
+    // also query the chrome client for any active overrides to the visible area
+    // (e.g. DevTool's viewport override).
+    void clipPaintRect(FloatRect*) const;
 
     // Functions for getting/setting the size of the document contained inside the FrameView (as an IntSize or as individual width and height
     // values).
@@ -560,6 +572,12 @@ public:
     // deltas from CC). For typical scrolling cases, use getScrollableArea().
     ScrollableArea* layoutViewportScrollableArea();
 
+    // If this is the main frame, this will return the RootFrameViewport used
+    // to scroll the main frame. Otherwise returns nullptr. Unless you need a
+    // unique method on RootFrameViewport, you should probably use
+    // getScrollableArea.
+    RootFrameViewport* getRootFrameViewport();
+
     int viewportWidth() const;
 
     LayoutAnalyzer* layoutAnalyzer() { return m_analyzer.get(); }
@@ -572,6 +590,9 @@ public:
     bool canThrottleRendering() const;
     bool isHiddenForThrottling() const { return m_hiddenForThrottling; }
 
+    // For testing, run pending intersection observer notifications for this frame.
+    void notifyRenderThrottlingObserversForTesting();
+
     // Paint properties for SPv2 Only.
     void setPreTranslation(PassRefPtr<TransformPaintPropertyNode> preTranslation) { m_preTranslation = preTranslation; }
     TransformPaintPropertyNode* preTranslation() const { return m_preTranslation.get(); }
@@ -579,8 +600,17 @@ public:
     void setScrollTranslation(PassRefPtr<TransformPaintPropertyNode> scrollTranslation) { m_scrollTranslation = scrollTranslation; }
     TransformPaintPropertyNode* scrollTranslation() const { return m_scrollTranslation.get(); }
 
+    void setScroll(PassRefPtr<ScrollPaintPropertyNode> scroll) { m_scroll = scroll; }
+    ScrollPaintPropertyNode* scroll() const { return m_scroll.get(); }
+
     void setContentClip(PassRefPtr<ClipPaintPropertyNode> contentClip) { m_contentClip = contentClip; }
     ClipPaintPropertyNode* contentClip() const { return m_contentClip.get(); }
+
+    // The property tree state that should be used for painting contents. These
+    // properties are either created by this FrameView or are inherited from
+    // an ancestor.
+    void setTotalPropertyTreeStateForContents(std::unique_ptr<PropertyTreeState> state) { m_totalPropertyTreeStateForContents = std::move(state); }
+    const PropertyTreeState* totalPropertyTreeStateForContents() const { return m_totalPropertyTreeStateForContents.get(); }
 
     // TODO(ojan): Merge this with IntersectionObserver once it lands.
     IntRect computeVisibleArea();
@@ -588,14 +618,19 @@ public:
     // Viewport size that should be used for viewport units (i.e. 'vh'/'vw').
     FloatSize viewportSizeForViewportUnits() const;
 
-    ScrollAnchor& scrollAnchor() { return m_scrollAnchor; }
+    ScrollAnchor* scrollAnchor() override { return &m_scrollAnchor; }
+    void clearScrollAnchor();
+    bool shouldPerformScrollAnchoring() const override;
+
+    // For PaintInvalidator temporarily. TODO(wangxianzhu): Move into PaintInvalidator.
+    void invalidatePaintIfNeeded(const PaintInvalidationState&);
 
 protected:
     // Scroll the content via the compositor.
     bool scrollContentsFastPath(const IntSize& scrollDelta);
 
     // Scroll the content by invalidating everything.
-    void scrollContentsSlowPath(const IntRect& updateRect);
+    void scrollContentsSlowPath();
 
     // These functions are used to create/destroy scrollbars.
     void setHasHorizontalScrollbar(bool);
@@ -621,27 +656,22 @@ protected:
         STACK_ALLOCATED();
     public:
         explicit InUpdateScrollbarsScope(FrameView* view)
-            : m_scope(view->m_inUpdateScrollbars, true)
+            : m_scope(&view->m_inUpdateScrollbars, true)
         { }
     private:
-        TemporaryChange<bool> m_scope;
+        AutoReset<bool> m_scope;
     };
 
     // Only for LayoutPart to traverse into sub frames during paint invalidation.
-    void invalidateTreeIfNeeded(PaintInvalidationState&);
+    void invalidateTreeIfNeeded(const PaintInvalidationState&);
 
 private:
     explicit FrameView(LocalFrame*);
 
     void setScrollOffset(const DoublePoint&, ScrollType) override;
 
-    enum LifeCycleUpdateOption {
-        OnlyUpToLayoutClean,
-        OnlyUpToCompositingCleanPlusScrolling,
-        AllPhases,
-    };
+    void updateLifecyclePhasesInternal(DocumentLifecycle::LifecycleState targetState);
 
-    void updateLifecyclePhasesInternal(LifeCycleUpdateOption);
     void invalidateTreeIfNeededRecursive();
     void scrollContentsIfNeededRecursive();
     void updateStyleAndLayoutIfNeededRecursive();
@@ -693,15 +723,15 @@ private:
     void updateScrollableAreaSet();
 
     void scheduleUpdateWidgetsIfNecessary();
-    void updateWidgetsTimerFired(Timer<FrameView>*);
+    void updateWidgetsTimerFired(TimerBase*);
     bool updateWidgets();
 
     bool processUrlFragmentHelper(const String&, UrlFragmentBehavior);
     void setFragmentAnchor(Node*);
     void scrollToFragmentAnchor();
-    void didScrollTimerFired(Timer<FrameView>*);
+    void didScrollTimerFired(TimerBase*);
 
-    void updateLayersAndCompositingAfterScrollIfNeeded();
+    void updateLayersAndCompositingAfterScrollIfNeeded(const DoubleSize& scrollDelta);
 
     static bool computeCompositedSelection(LocalFrame&, CompositedSelection&);
     void updateCompositedSelectionIfNeeded();
@@ -730,35 +760,33 @@ private:
     void adjustScrollPositionFromUpdateScrollbars();
     bool visualViewportSuppliesScrollbars() const;
 
-    IntRect rectToCopyOnScroll() const;
-
     bool isFrameViewScrollbar(const Widget* child) const { return horizontalScrollbar() == child || verticalScrollbar() == child; }
 
     ScrollingCoordinator* scrollingCoordinator() const;
 
     void prepareLayoutAnalyzer();
-    PassOwnPtr<TracedValue> analyzerCounters();
+    std::unique_ptr<TracedValue> analyzerCounters();
 
     // LayoutObject for the viewport-defining element (see Document::viewportDefiningElement).
-    LayoutObject* viewportLayoutObject();
+    LayoutObject* viewportLayoutObject() const;
 
     void collectAnnotatedRegions(LayoutObject&, Vector<AnnotatedRegionValue>&) const;
 
     template <typename Function> void forAllNonThrottledFrameViews(const Function&);
 
     void setNeedsUpdateViewportIntersection();
-    void updateViewportIntersectionsForSubtree(LifeCycleUpdateOption);
+    void updateViewportIntersectionsForSubtree(DocumentLifecycle::LifecycleState targetState);
     void updateViewportIntersectionIfNeeded();
     void notifyRenderThrottlingObservers();
+    void updateThrottlingStatus();
+    void notifyResizeObservers();
 
     // PaintInvalidationCapableScrollableArea
-    LayoutBox& boxForScrollControlPaintInvalidation() const override;
     LayoutScrollbarPart* resizer() const override { return nullptr; }
 
-    LayoutViewItem layoutViewItem() const
-    {
-        return LayoutViewItem(this->layoutView());
-    }
+    bool checkLayoutInvalidationIsAllowed() const;
+
+    PaintController* paintController() { return m_paintController.get(); }
 
     LayoutSize m_size;
 
@@ -779,8 +807,6 @@ private:
 
     WebDisplayMode m_displayMode;
 
-    bool m_doFullPaintInvalidation;
-
     bool m_canHaveScrollbars;
 
     bool m_hasPendingLayout;
@@ -793,7 +819,7 @@ private:
     unsigned m_nestedLayoutCount;
     Timer<FrameView> m_postLayoutTasksTimer;
     Timer<FrameView> m_updateWidgetsTimer;
-    OwnPtr<CancellableTaskFactory> m_renderThrottlingObserverNotificationFactory;
+    std::unique_ptr<CancellableTaskFactory> m_renderThrottlingObserverNotificationFactory;
 
     bool m_firstLayout;
     bool m_isTransparent;
@@ -806,11 +832,10 @@ private:
 
     bool m_safeToPropagateScrollToParent;
 
-    bool m_isTrackingPaintInvalidations; // Used for testing.
-
     unsigned m_visuallyNonEmptyCharacterCount;
-    unsigned m_visuallyNonEmptyPixelCount;
+    uint64_t m_visuallyNonEmptyPixelCount;
     bool m_isVisuallyNonEmpty;
+    FirstMeaningfulPaintDetector::LayoutObjectCounter m_layoutObjectCounter;
 
     Member<Node> m_fragmentAnchor;
 
@@ -819,8 +844,8 @@ private:
 
     Member<ScrollableAreaSet> m_scrollableAreas;
     Member<ScrollableAreaSet> m_animatingScrollableAreas;
-    OwnPtr<ResizerAreaSet> m_resizerAreas;
-    OwnPtr<ViewportConstrainedObjectSet> m_viewportConstrainedObjects;
+    std::unique_ptr<ResizerAreaSet> m_resizerAreas;
+    std::unique_ptr<ViewportConstrainedObjectSet> m_viewportConstrainedObjects;
     unsigned m_stickyPositionObjectCount;
     ViewportConstrainedObjectSet m_backgroundAttachmentFixedObjects;
     Member<FrameViewAutoSizeInfo> m_autoSizeInfo;
@@ -865,7 +890,7 @@ private:
 
     bool m_inUpdateScrollbars;
 
-    OwnPtr<LayoutAnalyzer> m_analyzer;
+    std::unique_ptr<LayoutAnalyzer> m_analyzer;
 
     // Mark if something has changed in the mapping from Frame to GraphicsLayer
     // and the Frame Timing regions should be recalculated.
@@ -874,7 +899,7 @@ private:
     // Exists only on root frame.
     // TODO(bokan): crbug.com/484188. We should specialize FrameView for the
     // main frame.
-    Member<ScrollableArea> m_viewportScrollableArea;
+    Member<RootFrameViewport> m_viewportScrollableArea;
 
     // This frame's bounds in the root frame's content coordinates, clipped
     // recursively through every ancestor view.
@@ -886,6 +911,7 @@ private:
     // notifications, i.e., not in the middle of the lifecycle.
     bool m_hiddenForThrottling;
     bool m_crossOriginForThrottling;
+    bool m_subtreeThrottled;
 
     // Paint properties for SPv2 Only.
     // The hierarchy of transform subtree created by a FrameView.
@@ -894,14 +920,34 @@ private:
     // TODO(trchen): These will not be needed once settings->rootLayerScrolls() is enabled.
     RefPtr<TransformPaintPropertyNode> m_preTranslation;
     RefPtr<TransformPaintPropertyNode> m_scrollTranslation;
+    RefPtr<ScrollPaintPropertyNode> m_scroll;
     // The content clip clips the document (= LayoutView) but not the scrollbars.
     // TODO(trchen): This will not be needed once settings->rootLayerScrolls() is enabled.
     RefPtr<ClipPaintPropertyNode> m_contentClip;
+    // The property tree state that should be used for painting contents. These
+    // properties are either created by this FrameView or are inherited from
+    // an ancestor.
+    std::unique_ptr<PropertyTreeState> m_totalPropertyTreeStateForContents;
 
-    bool m_isUpdatingAllLifecyclePhases;
+    // This is set on the local root frame view only.
+    DocumentLifecycle::LifecycleState m_currentUpdateLifecyclePhasesTargetState;
+
     ScrollAnchor m_scrollAnchor;
 
     bool m_needsScrollbarsUpdate;
+    bool m_suppressAdjustViewSize;
+    bool m_allowsLayoutInvalidationAfterLayoutClean;
+
+    // For testing.
+    struct ObjectPaintInvalidation {
+        String name;
+        PaintInvalidationReason reason;
+    };
+    std::unique_ptr<Vector<ObjectPaintInvalidation>> m_trackedObjectPaintInvalidations;
+
+    // For Slimming Paint v2 only.
+    std::unique_ptr<PaintController> m_paintController;
+    std::unique_ptr<PaintArtifactCompositor> m_paintArtifactCompositor;
 };
 
 inline void FrameView::incrementVisuallyNonEmptyCharacterCount(unsigned count)
@@ -920,7 +966,7 @@ inline void FrameView::incrementVisuallyNonEmptyPixelCount(const IntSize& size)
 {
     if (m_isVisuallyNonEmpty)
         return;
-    m_visuallyNonEmptyPixelCount += size.width() * size.height();
+    m_visuallyNonEmptyPixelCount += size.area();
     // Use a threshold value to prevent very small amounts of visible content from triggering didMeaningfulLayout.
     static const unsigned visualPixelThreshold = 32 * 32;
     if (m_visuallyNonEmptyPixelCount > visualPixelThreshold)

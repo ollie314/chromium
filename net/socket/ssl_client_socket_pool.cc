@@ -4,6 +4,8 @@
 
 #include "net/socket/ssl_client_socket_pool.h"
 
+#include <openssl/ssl.h>
+
 #include <utility>
 
 #include "base/bind.h"
@@ -18,13 +20,13 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_proxy_client_socket.h"
 #include "net/http/http_proxy_client_socket_pool.h"
+#include "net/log/net_log_source_type.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/socks_client_socket_pool.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/transport_client_socket_pool.h"
 #include "net/ssl/ssl_cert_request_info.h"
-#include "net/ssl/ssl_cipher_suite_names.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/ssl/ssl_info.h"
 
@@ -104,12 +106,13 @@ SSLConnectJob::SSLConnectJob(const std::string& group_name,
                              const SSLClientSocketContext& context,
                              Delegate* delegate,
                              NetLog* net_log)
-    : ConnectJob(group_name,
-                 timeout_duration,
-                 priority,
-                 respect_limits,
-                 delegate,
-                 BoundNetLog::Make(net_log, NetLog::SOURCE_CONNECT_JOB)),
+    : ConnectJob(
+          group_name,
+          timeout_duration,
+          priority,
+          respect_limits,
+          delegate,
+          NetLogWithSource::Make(net_log, NetLogSourceType::CONNECT_JOB)),
       params_(params),
       transport_pool_(transport_pool),
       socks_pool_(socks_pool),
@@ -160,8 +163,6 @@ void SSLConnectJob::GetAdditionalErrorState(ClientSocketHandle* handle) {
   handle->set_ssl_error_response_info(error_response_info_);
   if (!connect_timing_.ssl_start.is_null())
     handle->set_is_ssl_error(true);
-  if (ssl_socket_)
-    handle->set_ssl_failure_state(ssl_socket_->GetSSLFailureState());
 
   handle->set_connection_attempts(connection_attempts_);
 }
@@ -336,10 +337,10 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
     server_address_ = IPEndPoint();
   }
 
-  // If we want SPDY over ALPN/NPN, make sure it succeeded.
+  // If we want SPDY over ALPN, make sure it succeeded.
   if (params_->expect_spdy() &&
-      !NextProtoIsSPDY(ssl_socket_->GetNegotiatedProtocol())) {
-    return ERR_NPN_NEGOTIATION_FAILED;
+      ssl_socket_->GetNegotiatedProtocol() != kProtoHTTP2) {
+    return ERR_ALPN_NEGOTIATION_FAILED;
   }
 
   if (result == OK ||
@@ -373,23 +374,12 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
         SSLConnectionStatusToCipherSuite(ssl_info.connection_status);
     UMA_HISTOGRAM_SPARSE_SLOWLY("Net.SSL_CipherSuite", cipher_suite);
 
-    const char *str, *cipher_str, *mac_str;
-    bool is_aead;
-    SSLCipherSuiteToStrings(&str, &cipher_str, &mac_str, &is_aead,
-                            cipher_suite);
-    // UMA_HISTOGRAM_... macros cache the Histogram instance and thus only work
-    // if the histogram name is constant, so don't generate it dynamically.
-    if (strcmp(str, "RSA") == 0) {
-      UMA_HISTOGRAM_SPARSE_SLOWLY("Net.SSL_KeyExchange.RSA",
-                                  ssl_info.key_exchange_info);
-    } else if (strncmp(str, "DHE_", 4) == 0) {
-      UMA_HISTOGRAM_SPARSE_SLOWLY("Net.SSL_KeyExchange.DHE",
-                                  ssl_info.key_exchange_info);
-    } else if (strncmp(str, "ECDHE_", 6) == 0) {
+    const SSL_CIPHER* cipher = SSL_get_cipher_by_value(cipher_suite);
+    bool is_cecpq1 = cipher && SSL_CIPHER_is_CECPQ1(cipher);
+
+    if (ssl_info.key_exchange_group != 0) {
       UMA_HISTOGRAM_SPARSE_SLOWLY("Net.SSL_KeyExchange.ECDHE",
-                                  ssl_info.key_exchange_info);
-    } else {
-      NOTREACHED();
+                                  ssl_info.key_exchange_group);
     }
 
     if (ssl_info.handshake_type == SSLInfo::HANDSHAKE_RESUME) {
@@ -430,6 +420,27 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
                                    base::TimeDelta::FromMilliseconds(1),
                                    base::TimeDelta::FromMinutes(1),
                                    100);
+
+        // These are hosts that we expect to always offer CECPQ1.  Connections
+        // to them, whether or not this browser is in the experiment group, form
+        // the basis of our comparisons.
+        bool cecpq1_expected_to_be_offered =
+            ssl_info.is_issued_by_known_root &&
+            (host == "play.google.com" || host == "checkout.google.com" ||
+             host == "wallet.google.com");
+        if (cecpq1_expected_to_be_offered) {
+          UMA_HISTOGRAM_CUSTOM_TIMES(
+              "Net.SSL_Connection_Latency_PostQuantumSupported_Full_Handshake",
+              connect_duration, base::TimeDelta::FromMilliseconds(1),
+              base::TimeDelta::FromMinutes(1), 100);
+          if (SSLClientSocket::IsPostQuantumExperimentEnabled()) {
+            // But don't trust that these hosts offer CECPQ1: make sure.  If
+            // we're doing everything right on the server side, |is_cecpq1|
+            // should always be true if we get here, modulo MITM.
+            UMA_HISTOGRAM_BOOLEAN("Net.SSL_Connection_PostQuantum_Negotiated",
+                                  is_cecpq1);
+          }
+        }
       }
     }
   }
@@ -573,7 +584,7 @@ int SSLClientSocketPool::RequestSocket(const std::string& group_name,
                                        RespectLimits respect_limits,
                                        ClientSocketHandle* handle,
                                        const CompletionCallback& callback,
-                                       const BoundNetLog& net_log) {
+                                       const NetLogWithSource& net_log) {
   const scoped_refptr<SSLSocketParams>* casted_socket_params =
       static_cast<const scoped_refptr<SSLSocketParams>*>(socket_params);
 
@@ -581,11 +592,10 @@ int SSLClientSocketPool::RequestSocket(const std::string& group_name,
                              respect_limits, handle, callback, net_log);
 }
 
-void SSLClientSocketPool::RequestSockets(
-    const std::string& group_name,
-    const void* params,
-    int num_sockets,
-    const BoundNetLog& net_log) {
+void SSLClientSocketPool::RequestSockets(const std::string& group_name,
+                                         const void* params,
+                                         int num_sockets,
+                                         const NetLogWithSource& net_log) {
   const scoped_refptr<SSLSocketParams>* casted_params =
       static_cast<const scoped_refptr<SSLSocketParams>*>(params);
 

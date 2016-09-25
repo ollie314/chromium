@@ -3,9 +3,7 @@
 // found in the LICENSE file.
 
 // This class represents contextual information (cookies, cache, etc.)
-// that's useful when processing resource requests.
-// The class is reference-counted so that it can be cleaned up after any
-// requests that are using it have been completed.
+// that's necessary when processing resource requests.
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_CONTEXT_H_
 #define NET_URL_REQUEST_URL_REQUEST_CONTEXT_H_
@@ -31,6 +29,7 @@ namespace net {
 class CertVerifier;
 class ChannelIDService;
 class CookieStore;
+class CTPolicyEnforcer;
 class CTVerifier;
 class HostResolver;
 class HttpAuthHandlerFactory;
@@ -46,9 +45,11 @@ class URLRequestJobFactory;
 class URLRequestThrottlerManager;
 
 // Subclass to provide application-specific context for URLRequest
-// instances. Note that URLRequestContext typically does not provide storage for
-// these member variables, since they may be shared. For the ones that aren't
-// shared, URLRequestContextStorage can be helpful in defining their storage.
+// instances. URLRequestContext does not own these member variables, since they
+// may be shared with other contexts. URLRequestContextStorage can be used for
+// automatic lifetime management. Most callers should use an existing
+// URLRequestContext rather than creating a new one, as guaranteeing that the
+// URLRequestContext is destroyed before its members can be difficult.
 class NET_EXPORT URLRequestContext
     : NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
@@ -137,10 +138,10 @@ class NET_EXPORT URLRequestContext
   NetworkDelegate* network_delegate() const { return network_delegate_; }
 
   void set_http_server_properties(
-      const base::WeakPtr<HttpServerProperties>& http_server_properties) {
+      HttpServerProperties* http_server_properties) {
     http_server_properties_ = http_server_properties;
   }
-  base::WeakPtr<HttpServerProperties> http_server_properties() const {
+  HttpServerProperties* http_server_properties() const {
     return http_server_properties_;
   }
 
@@ -162,6 +163,11 @@ class NET_EXPORT URLRequestContext
   }
   void set_cert_transparency_verifier(CTVerifier* verifier) {
     cert_transparency_verifier_ = verifier;
+  }
+
+  CTPolicyEnforcer* ct_policy_enforcer() const { return ct_policy_enforcer_; }
+  void set_ct_policy_enforcer(CTPolicyEnforcer* enforcer) {
+    ct_policy_enforcer_ = enforcer;
   }
 
   const URLRequestJobFactory* job_factory() const { return job_factory_; }
@@ -220,19 +226,16 @@ class NET_EXPORT URLRequestContext
     network_quality_estimator_ = network_quality_estimator;
   }
 
-  // This is a temporary flag to aid in debugging crbug.com/548423. A
-  // CookieStore that is persisted shouldn't be used with a ChannelIDStore that
-  // is ephemeral, but there are occasional cases where that is ok. This method
-  // returns whether this URLRequestContext is in a situation where the
-  // ephemerality of the stores don't match and it has been determined that it
-  // is ok to do that. This helps in logging to filter legitimate cases of this
-  // mismatch from other cases.
-  bool has_known_mismatched_cookie_store() const {
-    return has_known_mismatched_cookie_store_;
+  void set_enable_brotli(bool enable_brotli) { enable_brotli_ = enable_brotli; }
+
+  bool enable_brotli() const { return enable_brotli_; }
+
+  void set_enable_referrer_policy_header(bool enable_referrer_policy_header) {
+    enable_referrer_policy_header_ = enable_referrer_policy_header;
   }
 
-  void set_has_known_mismatched_cookie_store() {
-    has_known_mismatched_cookie_store_ = true;
+  bool enable_referrer_policy_header() const {
+    return enable_referrer_policy_header_;
   }
 
  private:
@@ -251,11 +254,12 @@ class NET_EXPORT URLRequestContext
   ProxyService* proxy_service_;
   scoped_refptr<SSLConfigService> ssl_config_service_;
   NetworkDelegate* network_delegate_;
-  base::WeakPtr<HttpServerProperties> http_server_properties_;
+  HttpServerProperties* http_server_properties_;
   HttpUserAgentSettings* http_user_agent_settings_;
   CookieStore* cookie_store_;
   TransportSecurityState* transport_security_state_;
   CTVerifier* cert_transparency_verifier_;
+  CTPolicyEnforcer* ct_policy_enforcer_;
   HttpTransactionFactory* http_transaction_factory_;
   const URLRequestJobFactory* job_factory_;
   URLRequestThrottlerManager* throttler_manager_;
@@ -269,7 +273,14 @@ class NET_EXPORT URLRequestContext
   // ---------------------------------------------------------------------------
 
   std::unique_ptr<std::set<const URLRequest*>> url_requests_;
-  bool has_known_mismatched_cookie_store_;
+
+  // Enables Brotli Content-Encoding support.
+  bool enable_brotli_;
+
+  // Enables parsing and applying the Referrer-Policy header when
+  // following redirects. TODO(estark): remove this flag once
+  // Referrer-Policy ships (https://crbug.com/619228).
+  bool enable_referrer_policy_header_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestContext);
 };

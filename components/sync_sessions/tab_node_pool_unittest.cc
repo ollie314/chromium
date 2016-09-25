@@ -8,12 +8,12 @@
 
 #include <vector>
 
-#include "sync/api/sync_change.h"
-#include "sync/protocol/session_specifics.pb.h"
-#include "sync/protocol/sync.pb.h"
+#include "components/sync/api/sync_change.h"
+#include "components/sync/protocol/session_specifics.pb.h"
+#include "components/sync/protocol/sync.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace browser_sync {
+namespace sync_sessions {
 
 class SyncTabNodePoolTest : public testing::Test {
  protected:
@@ -261,4 +261,4 @@ TEST_F(SyncTabNodePoolTest, TabPoolFreeNodeLimits) {
 
 }  // namespace
 
-}  // namespace browser_sync
+}  // namespace sync_sessions

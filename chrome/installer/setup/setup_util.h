@@ -33,6 +33,7 @@ namespace installer {
 class InstallationState;
 class InstallerState;
 class ProductState;
+class MasterPreferences;
 
 // Applies a patch file to source file using Courgette. Returns 0 in case of
 // success. In case of errors, it returns kCourgetteErrorOffset + a Courgette
@@ -44,7 +45,7 @@ int CourgettePatchFiles(const base::FilePath& src,
 // Applies a patch file to source file using bsdiff. This function uses
 // Courgette's flavor of bsdiff. Returns 0 in case of success, or
 // kBsdiffErrorOffset + a bsdiff status code in case of errors.
-// See courgette/third_party/bsdiff.h for details.
+// See courgette/third_party/bsdiff/bsdiff.h for details.
 int BsdiffPatchFiles(const base::FilePath& src,
                      const base::FilePath& patch,
                      const base::FilePath& dest);
@@ -52,7 +53,7 @@ int BsdiffPatchFiles(const base::FilePath& src,
 // Find the version of Chrome from an install source directory.
 // Chrome_path should contain at least one version folder.
 // Returns the maximum version found or NULL if no version is found.
-Version* GetMaxVersionFromArchiveDir(const base::FilePath& chrome_path);
+base::Version* GetMaxVersionFromArchiveDir(const base::FilePath& chrome_path);
 
 // Returns the uncompressed archive of the installed version that serves as the
 // source for patching.  If |desired_version| is valid, only the path to that
@@ -119,6 +120,12 @@ void DeleteRegistryKeyPartial(
 // Converts a product GUID into a SQuished gUID that is used for MSI installer
 // registry entries.
 base::string16 GuidToSquid(const base::string16& guid);
+
+// Returns true if downgrade is allowed by installer data.
+bool IsDowngradeAllowed(const MasterPreferences& prefs);
+
+// Returns true if Chrome has been run within the last 28 days.
+bool IsChromeActivelyUsed(const InstallerState& installer_state);
 
 // This class will enable the privilege defined by |privilege_name| on the
 // current process' token. The privilege will be disabled upon the

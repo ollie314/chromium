@@ -73,12 +73,10 @@ class PushMessagingNotificationManager {
                     content::WebContents* active_web_contents,
                     const GURL& origin);
 
-  void DidGetBudget(const GURL& origin,
-                    int64_t service_worker_registration_id,
-                    bool notification_shown,
-                    bool notification_needed,
-                    const base::Closure& message_handled_closure,
-                    const std::string& data);
+  void ProcessSilentPush(const GURL& origin,
+                         int64_t service_worker_registration_id,
+                         const base::Closure& message_handled_closure,
+                         bool silent_push_allowed);
 
   static void DidWriteNotificationDataIOProxy(
       const base::WeakPtr<PushMessagingNotificationManager>& ui_weak_ptr,
@@ -86,14 +84,14 @@ class PushMessagingNotificationManager {
       const content::PlatformNotificationData& notification_data,
       const base::Closure& message_handled_closure,
       bool success,
-      int64_t persistent_notification_id);
+      const std::string& notification_id);
 
   void DidWriteNotificationData(
       const GURL& origin,
       const content::PlatformNotificationData& notification_data,
       const base::Closure& message_handled_closure,
       bool success,
-      int64_t persistent_notification_id);
+      const std::string& notification_id);
 
   // Weak. This manager is owned by a keyed service on this profile.
   Profile* profile_;

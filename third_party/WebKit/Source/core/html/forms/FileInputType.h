@@ -33,7 +33,8 @@
 #define FileInputType_h
 
 #include "core/CoreExport.h"
-#include "core/html/forms/BaseClickableWithKeyInputType.h"
+#include "core/html/forms/InputType.h"
+#include "core/html/forms/KeyboardClickableInputTypeView.h"
 #include "platform/FileChooser.h"
 #include "platform/heap/Handle.h"
 #include "wtf/RefPtr.h"
@@ -43,17 +44,25 @@ namespace blink {
 class DragData;
 class FileList;
 
-class CORE_EXPORT FileInputType final : public BaseClickableWithKeyInputType, private FileChooserClient {
+class CORE_EXPORT FileInputType final
+    : public InputType
+    , public KeyboardClickableInputTypeView
+    , private FileChooserClient {
+    USING_GARBAGE_COLLECTED_MIXIN(FileInputType);
 public:
     static InputType* create(HTMLInputElement&);
     DECLARE_VIRTUAL_TRACE();
+    using InputType::element;
     static Vector<FileChooserFileInfo> filesFromFormControlState(const FormControlState&);
     static FileList* createFileList(const Vector<FileChooserFileInfo>& files, bool hasWebkitDirectoryAttr);
 
     void countUsage() override;
 
+    void setFilesFromPaths(const Vector<String>&) override;
+
 private:
     FileInputType(HTMLInputElement&);
+    InputTypeView* createView() override;
     const AtomicString& formControlType() const override;
     FormControlState saveFormControlState() const override;
     void restoreFormControlState(const FormControlState&) override;
@@ -73,12 +82,12 @@ private:
     void createShadowSubtree() override;
     void disabledAttributeChanged() override;
     void multipleAttributeChanged() override;
-    String defaultToolTip() const override;
+    String defaultToolTip(const InputTypeView&) const override;
 
     // FileChooserClient implementation.
     void filesChosen(const Vector<FileChooserFileInfo>&) override;
 
-    void receiveDropForDirectoryUpload(const Vector<String>&);
+    void setFilesFromDirectory(const String&);
 
     Member<FileList> m_fileList;
     String m_droppedFileSystemId;

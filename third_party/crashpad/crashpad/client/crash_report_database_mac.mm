@@ -35,6 +35,7 @@
 #include "util/file/file_io.h"
 #include "util/mac/xattr.h"
 #include "util/misc/initialization_state_dcheck.h"
+#include "util/misc/metrics.h"
 
 namespace crashpad {
 
@@ -47,9 +48,9 @@ const char kCompletedDirectory[] = "completed";
 const char kSettings[] = "settings.dat";
 
 const char* const kReportDirectories[] = {
-  kWriteDirectory,
-  kUploadPendingDirectory,
-  kCompletedDirectory,
+    kWriteDirectory,
+    kUploadPendingDirectory,
+    kCompletedDirectory,
 };
 
 const char kCrashReportFileExtension[] = "dmp";
@@ -60,6 +61,7 @@ const char kXattrCreationTime[] = "creation_time";
 const char kXattrIsUploaded[] = "uploaded";
 const char kXattrLastUploadTime[] = "last_upload_time";
 const char kXattrUploadAttemptCount[] = "upload_count";
+const char kXattrIsUploadExplicitlyRequested[] = "upload_explicitly_requested";
 
 const char kXattrDatabaseInitialized[] = "initialized";
 
@@ -140,6 +142,7 @@ class CrashReportDatabaseMac : public CrashReportDatabase {
                                       const std::string& id) override;
   OperationStatus SkipReportUpload(const UUID& uuid) override;
   OperationStatus DeleteReport(const UUID& uuid) override;
+  OperationStatus RequestUpload(const UUID& uuid) override;
 
  private:
   //! \brief A private extension of the Report class that maintains bookkeeping
@@ -200,6 +203,18 @@ class CrashReportDatabaseMac : public CrashReportDatabase {
   //!
   //! \return The long name of the extended attribute.
   std::string XattrName(const base::StringPiece& name);
+
+  //! \brief Marks a report with a given path as completed.
+  //!
+  //! Assumes that the report is locked.
+  //!
+  //! \param[in] report_path The path of the file to mark completed.
+  //! \param[out] out_path The path of the new file. This parameter is optional.
+  //!
+  //! \return The operation status code.
+  CrashReportDatabase::OperationStatus MarkReportCompletedLocked(
+      const base::FilePath& report_path,
+      base::FilePath* out_path);
 
   base::FilePath base_dir_;
   Settings settings_;
@@ -273,7 +288,7 @@ CrashReportDatabase::OperationStatus
 CrashReportDatabaseMac::PrepareNewCrashReport(NewReport** out_report) {
   INITIALIZATION_STATE_DCHECK_VALID(initialized_);
 
-  scoped_ptr<NewReport> report(new NewReport());
+  std::unique_ptr<NewReport> report(new NewReport());
 
   uuid_t uuid_gen;
   uuid_generate(uuid_gen);
@@ -312,7 +327,7 @@ CrashReportDatabaseMac::FinishedWritingCrashReport(NewReport* report,
   base::ScopedFD lock(report->handle);
 
   // Take ownership of the report.
-  scoped_ptr<NewReport> scoped_report(report);
+  std::unique_ptr<NewReport> scoped_report(report);
 
   // Get the report's UUID to return.
   std::string uuid_string;
@@ -344,6 +359,8 @@ CrashReportDatabaseMac::FinishedWritingCrashReport(NewReport* report,
     return kFileSystemError;
   }
 
+  Metrics::CrashReportSize(report->handle);
+
   return kNoError;
 }
 
@@ -355,7 +372,7 @@ CrashReportDatabaseMac::ErrorWritingCrashReport(NewReport* report) {
   base::ScopedFD lock(report->handle);
 
   // Take ownership of the report.
-  scoped_ptr<NewReport> scoped_report(report);
+  std::unique_ptr<NewReport> scoped_report(report);
 
   // Remove the file that the report would have been written to had no error
   // occurred.
@@ -413,7 +430,7 @@ CrashReportDatabaseMac::GetReportForUploading(const UUID& uuid,
   if (report_path.empty())
     return kReportNotFound;
 
-  scoped_ptr<UploadReport> upload_report(new UploadReport());
+  std::unique_ptr<UploadReport> upload_report(new UploadReport());
   upload_report->file_path = report_path;
 
   base::ScopedFD lock(ObtainReportLock(report_path));
@@ -441,7 +458,7 @@ CrashReportDatabaseMac::RecordUploadAttempt(const Report* report,
   if (report_path.empty())
     return kReportNotFound;
 
-  scoped_ptr<const UploadReport> upload_report(
+  std::unique_ptr<const UploadReport> upload_report(
       static_cast<const UploadReport*>(report));
 
   base::ScopedFD lock(upload_report->lock_fd);
@@ -449,14 +466,10 @@ CrashReportDatabaseMac::RecordUploadAttempt(const Report* report,
     return kBusyError;
 
   if (successful) {
-    base::FilePath new_path =
-        base_dir_.Append(kCompletedDirectory).Append(report_path.BaseName());
-    if (rename(report_path.value().c_str(), new_path.value().c_str()) != 0) {
-      PLOG(ERROR) << "rename " << report_path.value() << " to "
-                  << new_path.value();
-      return kFileSystemError;
-    }
-    report_path = new_path;
+    CrashReportDatabase::OperationStatus os =
+        MarkReportCompletedLocked(report_path, &report_path);
+    if (os != kNoError)
+      return os;
   }
 
   if (!WriteXattrBool(report_path, XattrName(kXattrIsUploaded), successful)) {
@@ -500,15 +513,7 @@ CrashReportDatabase::OperationStatus CrashReportDatabaseMac::SkipReportUpload(
   if (!lock.is_valid())
     return kBusyError;
 
-  base::FilePath new_path =
-      base_dir_.Append(kCompletedDirectory).Append(report_path.BaseName());
-  if (rename(report_path.value().c_str(), new_path.value().c_str()) != 0) {
-    PLOG(ERROR) << "rename " << report_path.value() << " to "
-                << new_path.value();
-    return kFileSystemError;
-  }
-
-  return kNoError;
+  return MarkReportCompletedLocked(report_path, nullptr);
 }
 
 CrashReportDatabase::OperationStatus CrashReportDatabaseMac::DeleteReport(
@@ -554,6 +559,45 @@ base::FilePath CrashReportDatabaseMac::LocateCrashReport(const UUID& uuid) {
   }
 
   return base::FilePath();
+}
+
+CrashReportDatabase::OperationStatus CrashReportDatabaseMac::RequestUpload(
+    const UUID& uuid) {
+  INITIALIZATION_STATE_DCHECK_VALID(initialized_);
+
+  base::FilePath report_path = LocateCrashReport(uuid);
+  if (report_path.empty())
+    return kReportNotFound;
+
+  base::ScopedFD lock(ObtainReportLock(report_path));
+  if (!lock.is_valid())
+    return kBusyError;
+
+  // If the crash report has already been uploaded, don't request new upload.
+  bool uploaded = false;
+  XattrStatus status =
+      ReadXattrBool(report_path, XattrName(kXattrIsUploaded), &uploaded);
+  if (status == XattrStatus::kOtherError)
+    return kDatabaseError;
+  if (uploaded)
+    return kCannotRequestUpload;
+
+  // Mark the crash report as having upload explicitly requested by the user,
+  // and move it to the pending state.
+  if (!WriteXattrBool(
+          report_path, XattrName(kXattrIsUploadExplicitlyRequested), true)) {
+    return kDatabaseError;
+  }
+
+  base::FilePath new_path =
+      base_dir_.Append(kUploadPendingDirectory).Append(report_path.BaseName());
+  if (rename(report_path.value().c_str(), new_path.value().c_str()) != 0) {
+    PLOG(ERROR) << "rename " << report_path.value() << " to "
+                << new_path.value();
+    return kFileSystemError;
+  }
+
+  return kNoError;
 }
 
 // static
@@ -604,6 +648,14 @@ bool CrashReportDatabaseMac::ReadReportMetadataLocked(
     return false;
   }
 
+  report->upload_explicitly_requested = false;
+  if (ReadXattrBool(path,
+                    XattrName(kXattrIsUploadExplicitlyRequested),
+                    &report->upload_explicitly_requested) ==
+      XattrStatus::kOtherError) {
+    return false;
+  }
+
   return true;
 }
 
@@ -647,27 +699,50 @@ std::string CrashReportDatabaseMac::XattrName(const base::StringPiece& name) {
   return XattrNameInternal(name, xattr_new_names_);
 }
 
-scoped_ptr<CrashReportDatabase> InitializeInternal(const base::FilePath& path,
-                                                   bool may_create) {
-  scoped_ptr<CrashReportDatabaseMac> database_mac(
+CrashReportDatabase::OperationStatus
+CrashReportDatabaseMac::MarkReportCompletedLocked(
+    const base::FilePath& report_path,
+    base::FilePath* out_path) {
+  if (RemoveXattr(report_path, XattrName(kXattrIsUploadExplicitlyRequested)) ==
+      XattrStatus::kOtherError) {
+    return kDatabaseError;
+  }
+
+  base::FilePath new_path =
+      base_dir_.Append(kCompletedDirectory).Append(report_path.BaseName());
+  if (rename(report_path.value().c_str(), new_path.value().c_str()) != 0) {
+    PLOG(ERROR) << "rename " << report_path.value() << " to "
+                << new_path.value();
+    return kFileSystemError;
+  }
+
+  if (out_path)
+    *out_path = new_path;
+  return kNoError;
+}
+
+std::unique_ptr<CrashReportDatabase> InitializeInternal(
+    const base::FilePath& path,
+    bool may_create) {
+  std::unique_ptr<CrashReportDatabaseMac> database_mac(
       new CrashReportDatabaseMac(path));
   if (!database_mac->Initialize(may_create))
     database_mac.reset();
 
-  return scoped_ptr<CrashReportDatabase>(database_mac.release());
+  return std::unique_ptr<CrashReportDatabase>(database_mac.release());
 }
 
 }  // namespace
 
 // static
-scoped_ptr<CrashReportDatabase> CrashReportDatabase::Initialize(
+std::unique_ptr<CrashReportDatabase> CrashReportDatabase::Initialize(
     const base::FilePath& path) {
   return InitializeInternal(path, true);
 }
 
 // static
-scoped_ptr<CrashReportDatabase> CrashReportDatabase::InitializeWithoutCreating(
-    const base::FilePath& path) {
+std::unique_ptr<CrashReportDatabase>
+CrashReportDatabase::InitializeWithoutCreating(const base::FilePath& path) {
   return InitializeInternal(path, false);
 }
 

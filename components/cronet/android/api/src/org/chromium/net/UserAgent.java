@@ -14,12 +14,8 @@ import java.util.Locale;
 
 /**
  * Constructs a User-Agent string.
- * @deprecated use {@link CronetEngine.Builder#getDefaultUserAgent}.
  */
-// TODO(pauljensen): Make this class package-private once all callers are
-// transitioned to {@link CronetEngine.Builder#getDefaultUserAgent}.
-@Deprecated
-public final class UserAgent {
+final class UserAgent {
     private static final Object sLock = new Object();
 
     private static final int VERSION_CODE_UNINITIALIZED = 0;
@@ -61,8 +57,8 @@ public final class UserAgent {
             builder.append(id);
         }
 
-        builder.append("; Cronet/");
-        builder.append(Version.CRONET_VERSION);
+        builder.append(";");
+        appendCronetVersion(builder);
 
         builder.append(')');
 
@@ -80,8 +76,7 @@ public final class UserAgent {
 
         // Application name and cronet version.
         builder.append(context.getPackageName());
-        builder.append(" Cronet/");
-        builder.append(Version.CRONET_VERSION);
+        appendCronetVersion(builder);
 
         return builder.toString();
     }
@@ -102,5 +97,15 @@ public final class UserAgent {
             }
             return sVersionCode;
         }
+    }
+
+    private static void appendCronetVersion(StringBuilder builder) {
+        builder.append(" Cronet/");
+        // TODO(pauljensen): This is the API version not the implementation
+        // version. The implementation version may be more appropriate for the
+        // UserAgent but is not available until after the CronetEngine is
+        // instantiated. Down the road, if the implementation is loaded via
+        // other means, this should be replaced with the implementation version.
+        builder.append(ApiVersion.CRONET_VERSION);
     }
 }

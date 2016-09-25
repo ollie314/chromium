@@ -6,13 +6,14 @@
 
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/api/storage/settings_sync_processor.h"
 #include "chrome/browser/extensions/api/storage/settings_sync_util.h"
+#include "components/sync/api/sync_data.h"
+#include "components/sync/protocol/extension_setting_specifics.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/api/storage/settings_namespace.h"
-#include "sync/api/sync_data.h"
-#include "sync/protocol/extension_setting_specifics.pb.h"
 
 using content::BrowserThread;
 
@@ -194,7 +195,7 @@ syncer::SyncError SyncableSettingsStorage::SendLocalSettingsToSync(
     std::string key = base::DictionaryValue::Iterator(*local_state).key();
     std::unique_ptr<base::Value> value;
     local_state->RemoveWithoutPathExpansion(key, &value);
-    changes.push_back(ValueStoreChange(key, nullptr, value.release()));
+    changes.push_back(ValueStoreChange(key, nullptr, std::move(value)));
   }
 
   syncer::SyncError error = sync_processor_->SendChanges(changes);
@@ -219,13 +220,13 @@ syncer::SyncError SyncableSettingsStorage::OverwriteLocalSettingsWithSync(
         // Sync and local values are the same, no changes to send.
       } else {
         // Sync value is different, update local setting with new value.
-        changes->push_back(new SettingSyncData(
+        changes->push_back(base::MakeUnique<SettingSyncData>(
             syncer::SyncChange::ACTION_UPDATE, extension_id_, it.key(),
             std::move(sync_value)));
       }
     } else {
       // Not synced, delete local setting.
-      changes->push_back(new SettingSyncData(
+      changes->push_back(base::MakeUnique<SettingSyncData>(
           syncer::SyncChange::ACTION_DELETE, extension_id_, it.key(),
           std::unique_ptr<base::Value>(new base::DictionaryValue())));
     }
@@ -238,7 +239,7 @@ syncer::SyncError SyncableSettingsStorage::OverwriteLocalSettingsWithSync(
     std::string key = base::DictionaryValue::Iterator(*sync_state).key();
     std::unique_ptr<base::Value> value;
     CHECK(sync_state->RemoveWithoutPathExpansion(key, &value));
-    changes->push_back(new SettingSyncData(
+    changes->push_back(base::MakeUnique<SettingSyncData>(
         syncer::SyncChange::ACTION_ADD, extension_id_, key, std::move(value)));
   }
 
@@ -268,11 +269,10 @@ syncer::SyncError SyncableSettingsStorage::ProcessSyncChanges(
   std::vector<syncer::SyncError> errors;
   ValueStoreChangeList changes;
 
-  for (SettingSyncDataList::iterator it = sync_changes->begin();
-       it != sync_changes->end(); ++it) {
-    DCHECK_EQ(extension_id_, (*it)->extension_id());
-    const std::string& key = (*it)->key();
-    std::unique_ptr<base::Value> change_value = (*it)->PassValue();
+  for (const std::unique_ptr<SettingSyncData>& sync_change : *sync_changes) {
+    DCHECK_EQ(extension_id_, sync_change->extension_id());
+    const std::string& key = sync_change->key();
+    std::unique_ptr<base::Value> change_value = sync_change->PassValue();
 
     std::unique_ptr<base::Value> current_value;
     {
@@ -292,35 +292,35 @@ syncer::SyncError SyncableSettingsStorage::ProcessSyncChanges(
 
     syncer::SyncError error;
 
-    switch ((*it)->change_type()) {
+    switch (sync_change->change_type()) {
       case syncer::SyncChange::ACTION_ADD:
         if (!current_value.get()) {
-          error = OnSyncAdd(key, change_value.release(), &changes);
+          error = OnSyncAdd(key, std::move(change_value), &changes);
         } else {
           // Already a value; hopefully a local change has beaten sync in a
           // race and change's not a bug, so pretend change's an update.
           LOG(WARNING) << "Got add from sync for existing setting " <<
               extension_id_ << "/" << key;
-          error = OnSyncUpdate(key, current_value.release(),
-                               change_value.release(), &changes);
+          error = OnSyncUpdate(key, std::move(current_value),
+                               std::move(change_value), &changes);
         }
         break;
 
       case syncer::SyncChange::ACTION_UPDATE:
         if (current_value.get()) {
-          error = OnSyncUpdate(key, current_value.release(),
-                               change_value.release(), &changes);
+          error = OnSyncUpdate(key, std::move(current_value),
+                               std::move(change_value), &changes);
         } else {
           // Similarly, pretend change's an add.
           LOG(WARNING) << "Got update from sync for nonexistent setting" <<
               extension_id_ << "/" << key;
-          error = OnSyncAdd(key, change_value.release(), &changes);
+          error = OnSyncAdd(key, std::move(change_value), &changes);
         }
         break;
 
       case syncer::SyncChange::ACTION_DELETE:
         if (current_value.get()) {
-          error = OnSyncDelete(key, current_value.release(), &changes);
+          error = OnSyncDelete(key, std::move(current_value), &changes);
         } else {
           // Similarly, ignore change.
           LOG(WARNING) << "Got delete from sync for nonexistent setting " <<
@@ -349,7 +349,7 @@ syncer::SyncError SyncableSettingsStorage::ProcessSyncChanges(
 
 syncer::SyncError SyncableSettingsStorage::OnSyncAdd(
     const std::string& key,
-    base::Value* new_value,
+    std::unique_ptr<base::Value> new_value,
     ValueStoreChangeList* changes) {
   DCHECK(new_value);
   WriteResult result =
@@ -361,14 +361,14 @@ syncer::SyncError SyncableSettingsStorage::OnSyncAdd(
                            result->status().message.c_str()),
         sync_processor_->type());
   }
-  changes->push_back(ValueStoreChange(key, NULL, new_value));
+  changes->push_back(ValueStoreChange(key, nullptr, std::move(new_value)));
   return syncer::SyncError();
 }
 
 syncer::SyncError SyncableSettingsStorage::OnSyncUpdate(
     const std::string& key,
-    base::Value* old_value,
-    base::Value* new_value,
+    std::unique_ptr<base::Value> old_value,
+    std::unique_ptr<base::Value> new_value,
     ValueStoreChangeList* changes) {
   DCHECK(old_value);
   DCHECK(new_value);
@@ -381,13 +381,14 @@ syncer::SyncError SyncableSettingsStorage::OnSyncUpdate(
                            result->status().message.c_str()),
         sync_processor_->type());
   }
-  changes->push_back(ValueStoreChange(key, old_value, new_value));
+  changes->push_back(
+      ValueStoreChange(key, std::move(old_value), std::move(new_value)));
   return syncer::SyncError();
 }
 
 syncer::SyncError SyncableSettingsStorage::OnSyncDelete(
     const std::string& key,
-    base::Value* old_value,
+    std::unique_ptr<base::Value> old_value,
     ValueStoreChangeList* changes) {
   DCHECK(old_value);
   WriteResult result = HandleResult(delegate_->Remove(key));
@@ -398,7 +399,7 @@ syncer::SyncError SyncableSettingsStorage::OnSyncDelete(
                            result->status().message.c_str()),
         sync_processor_->type());
   }
-  changes->push_back(ValueStoreChange(key, old_value, NULL));
+  changes->push_back(ValueStoreChange(key, std::move(old_value), nullptr));
   return syncer::SyncError();
 }
 

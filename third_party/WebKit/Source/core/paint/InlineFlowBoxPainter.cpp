@@ -4,13 +4,8 @@
 
 #include "core/paint/InlineFlowBoxPainter.h"
 
-#include "core/layout/LayoutBlock.h"
-#include "core/layout/LayoutInline.h"
-#include "core/layout/LayoutView.h"
 #include "core/layout/api/LineLayoutAPIShim.h"
-#include "core/layout/api/LineLayoutBoxModel.h"
-#include "core/layout/api/SelectionState.h"
-#include "core/layout/line/InlineFlowBox.h"
+#include "core/layout/line/RootInlineBox.h"
 #include "core/paint/BoxPainter.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/PaintLayer.h"
@@ -177,7 +172,7 @@ InlineFlowBoxPainter::BorderPaintingType InlineFlowBoxPainter::getBorderPaintTyp
 void InlineFlowBoxPainter::paintBoxDecorationBackground(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, const LayoutRect& cullRect)
 {
     ASSERT(paintInfo.phase == PaintPhaseForeground);
-    if (m_inlineFlowBox.getLineLayoutItem().style()->visibility() != VISIBLE)
+    if (m_inlineFlowBox.getLineLayoutItem().style()->visibility() != EVisibility::Visible)
         return;
 
     // You can use p::first-line to specify a background. If so, the root line boxes for
@@ -193,10 +188,10 @@ void InlineFlowBoxPainter::paintBoxDecorationBackground(const PaintInfo& paintIn
     if (!shouldPaintBoxDecorationBackground)
         return;
 
-    if (DrawingRecorder::useCachedDrawingIfPossible(paintInfo.context, m_inlineFlowBox, DisplayItem::BoxDecorationBackground))
+    if (DrawingRecorder::useCachedDrawingIfPossible(paintInfo.context, m_inlineFlowBox, DisplayItem::kBoxDecorationBackground))
         return;
 
-    DrawingRecorder recorder(paintInfo.context, m_inlineFlowBox, DisplayItem::BoxDecorationBackground, pixelSnappedIntRect(cullRect));
+    DrawingRecorder recorder(paintInfo.context, m_inlineFlowBox, DisplayItem::kBoxDecorationBackground, pixelSnappedIntRect(cullRect));
 
     LayoutRect frameRect = frameRectClampedToLineTopAndBottomIfNeeded();
 
@@ -237,7 +232,7 @@ void InlineFlowBoxPainter::paintBoxDecorationBackground(const PaintInfo& paintIn
 
 void InlineFlowBoxPainter::paintMask(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    if (m_inlineFlowBox.getLineLayoutItem().style()->visibility() != VISIBLE || paintInfo.phase != PaintPhaseMask)
+    if (m_inlineFlowBox.getLineLayoutItem().style()->visibility() != EVisibility::Visible || paintInfo.phase != PaintPhaseMask)
         return;
 
     LayoutRect frameRect = frameRectClampedToLineTopAndBottomIfNeeded();

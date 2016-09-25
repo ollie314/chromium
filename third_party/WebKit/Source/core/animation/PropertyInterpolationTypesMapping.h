@@ -6,18 +6,19 @@
 #define PropertyInterpolationTypesMapping_h
 
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
 class InterpolationType;
 class PropertyHandle;
 
-using InterpolationTypes = Vector<OwnPtr<const InterpolationType>>;
+using InterpolationTypes = Vector<std::unique_ptr<const InterpolationType>>;
 
-class PropertyInterpolationTypesMapping {
-    STATIC_ONLY(PropertyInterpolationTypesMapping);
-public:
-    static const InterpolationTypes* get(const PropertyHandle&);
+namespace PropertyInterpolationTypesMapping {
+
+const InterpolationTypes& get(const PropertyHandle&);
+
 };
 
 } // namespace blink

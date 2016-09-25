@@ -6,18 +6,16 @@
 
 #include <utility>
 
-#include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
-#include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task_runner_util.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/quirks/pref_names.h"
 #include "components/quirks/quirks_client.h"
-#include "components/quirks/switches.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
@@ -47,7 +45,6 @@ base::FilePath CheckForIccFile(base::FilePath built_in_path,
                                bool quirks_enabled) {
   // First, look for icc file in old read-only location.  If there, we don't use
   // the Quirks server.
-  // TODO(glevin): Awaiting final decision on how to handle old read-only files.
   if (CheckAndLogFile(built_in_path))
     return built_in_path;
 
@@ -78,7 +75,7 @@ std::string IdToFileName(int64_t product_id) {
 // QuirksManager
 
 QuirksManager::QuirksManager(
-    scoped_ptr<Delegate> delegate,
+    std::unique_ptr<Delegate> delegate,
     scoped_refptr<base::SequencedWorkerPool> blocking_pool,
     PrefService* local_state,
     scoped_refptr<net::URLRequestContextGetter> url_context_getter)
@@ -96,7 +93,7 @@ QuirksManager::~QuirksManager() {
 
 // static
 void QuirksManager::Initialize(
-    scoped_ptr<Delegate> delegate,
+    std::unique_ptr<Delegate> delegate,
     scoped_refptr<base::SequencedWorkerPool> blocking_pool,
     PrefService* local_state,
     scoped_refptr<net::URLRequestContextGetter> url_context_getter) {
@@ -126,12 +123,12 @@ void QuirksManager::OnLoginCompleted() {
     return;
 
   waiting_for_login_ = false;
-  if (!QuirksEnabled()) {
-    VLOG(1) << "Quirks Client disabled by device policy.";
-    return;
+  if (!clients_.empty() && !QuirksEnabled()) {
+    VLOG(2) << clients_.size() << " client(s) deleted.";
+    clients_.clear();
   }
 
-  for (const scoped_ptr<QuirksClient>& client : clients_)
+  for (const std::unique_ptr<QuirksClient>& client : clients_)
     client->StartDownload();
 }
 
@@ -156,14 +153,14 @@ void QuirksManager::ClientFinished(QuirksClient* client) {
   DCHECK(thread_checker_.CalledOnValidThread());
   SetLastServerCheck(client->product_id(), base::Time::Now());
   auto it = std::find_if(clients_.begin(), clients_.end(),
-                         [client](const scoped_ptr<QuirksClient>& c) {
+                         [client](const std::unique_ptr<QuirksClient>& c) {
                            return c.get() == client;
                          });
   CHECK(it != clients_.end());
   clients_.erase(it);
 }
 
-scoped_ptr<net::URLFetcher> QuirksManager::CreateURLFetcher(
+std::unique_ptr<net::URLFetcher> QuirksManager::CreateURLFetcher(
     const GURL& url,
     net::URLFetcherDelegate* delegate) {
   if (!fake_quirks_fetcher_creator_.is_null())
@@ -190,14 +187,6 @@ void QuirksManager::OnIccFilePathRequestCompleted(
   local_state_->GetDictionary(prefs::kQuirksClientLastServerCheck)
       ->GetDouble(IdToHexString(product_id), &last_check);
 
-  // If never checked server before, need to check for new device.
-  if (last_check == 0.0) {
-    delegate_->GetDaysSinceOobe(base::Bind(
-        &QuirksManager::OnDaysSinceOobeReceived, weak_ptr_factory_.GetWeakPtr(),
-        product_id, on_request_finished));
-    return;
-  }
-
   const base::TimeDelta time_since =
       base::Time::Now() - base::Time::FromDoubleT(last_check);
 
@@ -210,41 +199,10 @@ void QuirksManager::OnIccFilePathRequestCompleted(
     return;
   }
 
-  CreateClient(product_id, on_request_finished);
-}
-
-void QuirksManager::OnDaysSinceOobeReceived(
-    int64_t product_id,
-    const RequestFinishedCallback& on_request_finished,
-    int days_since_oobe) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  // On newer devices, we want to check server immediately (after OOBE/login).
-  if (days_since_oobe <= kDaysBetweenServerChecks) {
-    CreateClient(product_id, on_request_finished);
-    return;
-  }
-
-  // Otherwise, for the first check on an older device, we want to stagger
-  // it over 30 days, so artificially set last check accordingly.
-  // TODO(glevin): I believe that it makes sense to remove this random delay
-  // in the next Chrome release.
-  const int rand_days = base::RandInt(0, kDaysBetweenServerChecks);
-  const base::Time fake_last_check =
-      base::Time::Now() - base::TimeDelta::FromDays(rand_days);
-  SetLastServerCheck(product_id, fake_last_check);
-  VLOG(2) << "Delaying first Quirks Server check by "
-          << kDaysBetweenServerChecks - rand_days << " days.";
-
-  on_request_finished.Run(base::FilePath(), false);
-}
-
-void QuirksManager::CreateClient(
-    int64_t product_id,
-    const RequestFinishedCallback& on_request_finished) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  // Create and start a client to download file.
   QuirksClient* client =
       new QuirksClient(product_id, on_request_finished, this);
-  clients_.insert(make_scoped_ptr(client));
+  clients_.insert(base::WrapUnique(client));
   if (!waiting_for_login_)
     client->StartDownload();
   else
@@ -252,9 +210,11 @@ void QuirksManager::CreateClient(
 }
 
 bool QuirksManager::QuirksEnabled() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kEnableQuirksClient) &&
-         delegate_->DevicePolicyEnabled();
+  if (!delegate_->DevicePolicyEnabled()) {
+    VLOG(2) << "Quirks Client disabled by device policy.";
+    return false;
+  }
+  return true;
 }
 
 void QuirksManager::SetLastServerCheck(int64_t product_id,

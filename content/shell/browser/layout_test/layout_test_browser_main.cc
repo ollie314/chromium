@@ -13,11 +13,12 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/url_constants.h"
@@ -63,7 +64,7 @@ bool RunOneTest(
 #if defined(OS_ANDROID)
   // There will be left-over tasks in the queue for Android because the
   // main window is being destroyed. Run them before starting the next test.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 #endif
   return true;
 }
@@ -115,10 +116,11 @@ int LayoutTestBrowserMain(
   base::ScopedTempDir browser_context_path_for_layout_tests;
 
   CHECK(browser_context_path_for_layout_tests.CreateUniqueTempDir());
-  CHECK(!browser_context_path_for_layout_tests.path().MaybeAsASCII().empty());
+  CHECK(
+      !browser_context_path_for_layout_tests.GetPath().MaybeAsASCII().empty());
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kContentShellDataPath,
-      browser_context_path_for_layout_tests.path().MaybeAsASCII());
+      browser_context_path_for_layout_tests.GetPath().MaybeAsASCII());
 
 #if defined(OS_ANDROID)
   content::EnsureInitializeForAndroidLayoutTests();
@@ -142,6 +144,7 @@ int LayoutTestBrowserMain(
   }
 
   exit_code = RunTests(main_runner);
+  base::RunLoop().RunUntilIdle();
 
 #if !defined(OS_ANDROID)
   main_runner->Shutdown();

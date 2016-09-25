@@ -7,17 +7,17 @@
 
 #include <string>
 
-#include "ash/shelf/shelf_item_delegate.h"
-#include "ash/shelf/shelf_item_types.h"
+#include "ash/common/shelf/shelf_item_delegate.h"
+#include "ash/common/shelf/shelf_item_types.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
-#include "base/strings/string16.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_types.h"
 #include "ui/events/event.h"
 
 class ChromeLauncherController;
 class ChromeLauncherAppMenuItem;
+class Profile;
 
 typedef ScopedVector<ChromeLauncherAppMenuItem> ChromeLauncherAppMenuItems;
 
@@ -42,13 +42,15 @@ class LauncherItemController : public ash::ShelfItemDelegate {
 
   LauncherItemController(Type type,
                          const std::string& app_id,
+                         const std::string& launch_id,
                          ChromeLauncherController* launcher_controller);
   ~LauncherItemController() override;
 
   Type type() const { return type_; }
   ash::ShelfID shelf_id() const { return shelf_id_; }
   void set_shelf_id(ash::ShelfID id) { shelf_id_ = id; }
-  virtual const std::string& app_id() const;
+  const std::string& app_id() const { return app_id_; }
+  const std::string& launch_id() const { return launch_id_; }
   ChromeLauncherController* launcher_controller() const {
     return launcher_controller_;
   }
@@ -86,15 +88,15 @@ class LauncherItemController : public ash::ShelfItemDelegate {
   // Helper function to get the ash::ShelfItemType for the item type.
   ash::ShelfItemType GetShelfItemType() const;
 
- protected:
-  // Helper function to return the title associated with |app_id_|.
-  // Returns an empty title if no matching extension can be found.
-  base::string16 GetAppTitle() const;
-
  private:
   const Type type_;
   // App id will be empty if there is no app associated with the window.
   const std::string app_id_;
+  // An id that can be passed to an app when launched in order to support
+  // multiple shelf items per app. This id is used together with the app_id to
+  // uniquely identify each shelf item that has the same app_id.
+  const std::string launch_id_;
+  // A unique id assigned by the shelf model for the shelf item.
   ash::ShelfID shelf_id_;
   ChromeLauncherController* launcher_controller_;
 

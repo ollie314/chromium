@@ -22,6 +22,7 @@
 
 namespace {
 const CGFloat kAnimationDuration = 0.2;
+
 }
 
 @implementation AutocompleteTextField
@@ -51,7 +52,7 @@ const CGFloat kAnimationDuration = 0.2;
   // Also, because NSPressureConfiguration is not in the original 10.10 SDK,
   // use NSClassFromString() to instantiate it (otherwise there's a
   // linker error).
-  if (base::mac::IsOSYosemiteOrLater() &&
+  if (base::mac::IsAtLeastOS10_10() &&
       [self respondsToSelector:@selector(setPressureConfiguration:)]) {
     NSPressureConfiguration* pressureConfiguration =
         [[[NSClassFromString(@"NSPressureConfiguration") alloc]
@@ -158,8 +159,7 @@ const CGFloat kAnimationDuration = 0.2;
     if (editor) {
       NSEvent* currentEvent = [NSApp currentEvent];
       if ([currentEvent type] == NSLeftMouseUp &&
-          ![editor selectedRange].length &&
-          (!observer_ || observer_->ShouldSelectAllOnMouseDown())) {
+          ![editor selectedRange].length) {
         [editor selectAll:nil];
       }
     }
@@ -385,8 +385,10 @@ const CGFloat kAnimationDuration = 0.2;
   // Invert the textfield's colors when Material Design and Incognito and not
   // a custom theme.
   bool inDarkMode = [[self window] inIncognitoModeWithSystemTheme];
+  const CGFloat kDarkModeGray = 97 / 255.;
   [self setBackgroundColor:
-      inDarkMode ? [NSColor colorWithCalibratedWhite:115 / 255. alpha:1]
+      inDarkMode ? [NSColor colorWithGenericGamma22White:kDarkModeGray
+                                                   alpha:1]
                  : [NSColor whiteColor]];
   [self setTextColor:OmniboxViewMac::BaseTextColor(inDarkMode)];
 }
@@ -463,7 +465,8 @@ const CGFloat kAnimationDuration = 0.2;
   BOOL doAccept = [super becomeFirstResponder];
   if (doAccept) {
     [[BrowserWindowController browserWindowControllerForView:self]
-        lockBarVisibilityForOwner:self withAnimation:YES delay:NO];
+        lockBarVisibilityForOwner:self
+                    withAnimation:YES];
 
     // Tells the observer that we get the focus.
     // But we can't call observer_->OnKillFocus() in resignFirstResponder:,
@@ -480,7 +483,8 @@ const CGFloat kAnimationDuration = 0.2;
   BOOL doResign = [super resignFirstResponder];
   if (doResign) {
     [[BrowserWindowController browserWindowControllerForView:self]
-        releaseBarVisibilityForOwner:self withAnimation:YES delay:YES];
+        releaseBarVisibilityForOwner:self
+                       withAnimation:YES];
   }
   return doResign;
 }
@@ -509,12 +513,21 @@ const CGFloat kAnimationDuration = 0.2;
   // TODO(viettrungluu): crbug.com/30809 -- this is a hack since it steals focus
   // and doesn't return it.
   [[self window] makeFirstResponder:self];
-  return [dropHandler_ draggingEntered:sender];
+
+  bool canDropAtLocation =
+      [[self cell] canDropAtLocationInWindow:[sender draggingLocation]
+                                      ofView:self];
+  return canDropAtLocation ? [dropHandler_ draggingEntered:sender]
+                           : NSDragOperationNone;
 }
 
 // (URLDropTarget protocol)
 - (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
-  return [dropHandler_ draggingUpdated:sender];
+  bool canDropAtLocation =
+      [[self cell] canDropAtLocationInWindow:[sender draggingLocation]
+                                      ofView:self];
+  return canDropAtLocation ? [dropHandler_ draggingUpdated:sender]
+                           : NSDragOperationNone;
 }
 
 // (URLDropTarget protocol)

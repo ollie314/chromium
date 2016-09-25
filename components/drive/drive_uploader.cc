@@ -15,7 +15,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/task_runner_util.h"
 #include "components/drive/service/drive_service_interface.h"
-#include "content/public/browser/power_save_blocker.h"
+#include "content/public/browser/browser_thread.h"
+#include "device/power_save_blocker/power_save_blocker.h"
 #include "google_apis/drive/drive_api_parser.h"
 
 using google_apis::CancelCallback;
@@ -98,10 +99,14 @@ struct DriveUploader::UploadFileInfo {
         progress_callback(progress_callback),
         content_length(0),
         next_start_position(-1),
-        power_save_blocker(content::PowerSaveBlocker::Create(
-            content::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
-            content::PowerSaveBlocker::kReasonOther,
-            "Upload in progress")),
+        power_save_blocker(new device::PowerSaveBlocker(
+            device::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
+            device::PowerSaveBlocker::kReasonOther,
+            "Upload in progress",
+            content::BrowserThread::GetTaskRunnerForThread(
+                content::BrowserThread::UI),
+            content::BrowserThread::GetTaskRunnerForThread(
+                content::BrowserThread::FILE))),
         cancelled(false),
         weak_ptr_factory_(this) {}
 
@@ -143,7 +148,7 @@ struct DriveUploader::UploadFileInfo {
   int64_t next_start_position;
 
   // Blocks system suspend while upload is in progress.
-  std::unique_ptr<content::PowerSaveBlocker> power_save_blocker;
+  std::unique_ptr<device::PowerSaveBlocker> power_save_blocker;
 
   // Fields for implementing cancellation. |cancel_callback| is non-null if
   // there is an in-flight HTTP request. In that case, |cancell_callback| will
@@ -200,7 +205,7 @@ CancelCallback DriveUploader::UploadNewFile(
 }
 
 void DriveUploader::StartBatchProcessing() {
-  DCHECK(current_batch_request_ == nullptr);
+  DCHECK(!current_batch_request_);
   current_batch_request_ =
       new RefCountedBatchRequest(drive_service_->StartBatchRequest());
 }

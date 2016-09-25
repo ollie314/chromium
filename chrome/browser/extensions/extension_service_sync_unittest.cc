@@ -11,27 +11,35 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/test/mock_entropy_provider.h"
+#include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_with_install.h"
 #include "chrome/browser/extensions/extension_sync_data.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/crx_file/id_util.h"
+#include "components/sync/api/fake_sync_change_processor.h"
+#include "components/sync/api/sync_change_processor_wrapper_for_test.h"
+#include "components/sync/api/sync_data.h"
+#include "components/sync/api/sync_error_factory_mock.h"
 #include "components/variations/variations_associated_data.h"
+#include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -43,19 +51,20 @@
 #include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/value_builder.h"
-#include "sync/api/fake_sync_change_processor.h"
-#include "sync/api/sync_change_processor_wrapper_for_test.h"
-#include "sync/api/sync_data.h"
-#include "sync/api/sync_error_factory_mock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/permission_request_creator.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
+#include "chrome/browser/supervised_user/supervised_user_features.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
+#include "chrome/browser/supervised_user/supervised_user_settings_service.h"
+#include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
+#include "chrome/common/pref_names.h"
 #endif
 
+using extensions::api_test_utils::RunFunctionAndReturnSingleResult;
 using extensions::AppSorting;
 using extensions::Extension;
 using extensions::ExtensionPrefs;
@@ -63,15 +72,21 @@ using extensions::ExtensionSyncData;
 using extensions::ExtensionSystem;
 using extensions::Manifest;
 using extensions::PermissionSet;
+using extensions::ScriptingPermissionsModifier;
+using extensions::WebstorePrivateIsPendingCustodianApprovalFunction;
 using syncer::SyncChange;
 using syncer::SyncChangeList;
+using testing::Mock;
 
 namespace {
 
+const char autoupdate[] = "ogjcoiohnmldgjemafoockdghcjciccf";
 const char good0[] = "behllobkkfkfnphdnhnkndlbkcpglgmj";
 const char good2[] = "bjafgdebaacbbbecmhlhpofkepfkgcpa";
+const char good2048[] = "nmgjhmhbleinmjpbdhgajfjkbijcmgbh";
 const char good_crx[] = "ldnnhddmnhbkjipkidpdiheffobcpfmf";
 const char page_action[] = "obcimlgaoabeegjmmpldobjndiealpln";
+const char permissions_increase[] = "pgdpcfcocojkjfbgpiianjngphoopgmo";
 const char theme2_crx[] = "pjpgmfcmabopnnfonnhmdjglfpjjfkbf";
 
 SyncChangeList MakeSyncChangeList(const std::string& id,
@@ -148,8 +163,7 @@ class StatefulChangeProcessor : public syncer::FakeSyncChangeProcessor {
   // want to
   // give up ownership of a local change processor.
   std::unique_ptr<syncer::SyncChangeProcessor> GetWrapped() {
-    return base::WrapUnique(
-        new syncer::SyncChangeProcessorWrapperForTest(this));
+    return base::MakeUnique<syncer::SyncChangeProcessorWrapperForTest>(this);
   }
 
  protected:
@@ -177,8 +191,8 @@ class ExtensionServiceSyncTest
     ASSERT_TRUE(type == syncer::EXTENSIONS || type == syncer::APPS);
     extension_sync_service()->MergeDataAndStartSyncing(
         type, syncer::SyncDataList(),
-        base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-        base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+        base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+        base::MakeUnique<syncer::SyncErrorFactoryMock>());
   }
 
  protected:
@@ -271,8 +285,8 @@ TEST_F(ExtensionServiceSyncTest, DeferredSyncStartupOnInstall) {
   // Once sync starts, flare should no longer be invoked.
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
   path = data_dir().AppendASCII("page_action.crx");
   InstallCRX(path, INSTALL_NEW);
   EXPECT_FALSE(flare_was_called);
@@ -289,7 +303,7 @@ TEST_F(ExtensionServiceSyncTest, DisableExtensionFromSync) {
   InitializeInstalledExtensionService(pref_path, source_install_dir);
 
   // The user has enabled sync.
-  ProfileSyncService* sync_service =
+  browser_sync::ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile());
   sync_service->SetFirstSetupComplete();
 
@@ -306,13 +320,14 @@ TEST_F(ExtensionServiceSyncTest, DisableExtensionFromSync) {
   // Sync starts up.
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   // Then sync data arrives telling us to disable |good0|.
   ExtensionSyncData disable_good_crx(*extension, false,
                                      Extension::DISABLE_USER_ACTION, false,
-                                     false, ExtensionSyncData::BOOLEAN_UNSET);
+                                     false, ExtensionSyncData::BOOLEAN_UNSET,
+                                     false);
   SyncChangeList list(
       1, disable_good_crx.GetSyncChange(SyncChange::ACTION_UPDATE));
   extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
@@ -330,7 +345,7 @@ TEST_F(ExtensionServiceSyncTest, IgnoreSyncChangesWhenLocalStateIsMoreRecent) {
   InitializeInstalledExtensionService(pref_path, source_install_dir);
 
   // The user has enabled sync.
-  ProfileSyncService* sync_service =
+  browser_sync::ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile());
   sync_service->SetFirstSetupComplete();
   // Make sure ExtensionSyncService is created, so it'll be notified of changes.
@@ -361,17 +376,17 @@ TEST_F(ExtensionServiceSyncTest, IgnoreSyncChangesWhenLocalStateIsMoreRecent) {
   // Now sync data comes in that says to disable good0 and enable good2.
   ExtensionSyncData disable_good0(*extension0, false,
                                   Extension::DISABLE_USER_ACTION, false, false,
-                                  ExtensionSyncData::BOOLEAN_UNSET);
+                                  ExtensionSyncData::BOOLEAN_UNSET, false);
   ExtensionSyncData enable_good2(*extension2, true, Extension::DISABLE_NONE,
                                  false, false,
-                                 ExtensionSyncData::BOOLEAN_UNSET);
+                                 ExtensionSyncData::BOOLEAN_UNSET, false);
   syncer::SyncDataList sync_data;
   sync_data.push_back(disable_good0.GetSyncData());
   sync_data.push_back(enable_good2.GetSyncData());
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, sync_data,
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   // Both sync changes should be ignored, since the local state was changed
   // before sync started, and so the local state is considered more recent.
@@ -402,7 +417,7 @@ TEST_F(ExtensionServiceSyncTest, DontSelfNotify) {
       new syncer::FakeSyncChangeProcessor;
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(), base::WrapUnique(processor),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   processor->changes().clear();
 
@@ -415,7 +430,8 @@ TEST_F(ExtensionServiceSyncTest, DontSelfNotify) {
 
     // Disable the extension.
     ExtensionSyncData data(*extension, false, Extension::DISABLE_USER_ACTION,
-                           false, false, ExtensionSyncData::BOOLEAN_UNSET);
+                           false, false, ExtensionSyncData::BOOLEAN_UNSET,
+                           false);
     SyncChangeList list(1, data.GetSyncChange(SyncChange::ACTION_UPDATE));
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
@@ -429,7 +445,7 @@ TEST_F(ExtensionServiceSyncTest, DontSelfNotify) {
 
     // Set incognito enabled to true.
     ExtensionSyncData data(*extension, false, Extension::DISABLE_NONE, true,
-                           false, ExtensionSyncData::BOOLEAN_UNSET);
+                           false, ExtensionSyncData::BOOLEAN_UNSET, false);
     SyncChangeList list(1, data.GetSyncChange(SyncChange::ACTION_UPDATE));
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
@@ -445,7 +461,8 @@ TEST_F(ExtensionServiceSyncTest, DontSelfNotify) {
     ExtensionSyncData data(*extension, false,
                            Extension::DISABLE_USER_ACTION |
                                Extension::DISABLE_PERMISSIONS_INCREASE,
-                           false, false, ExtensionSyncData::BOOLEAN_UNSET);
+                           false, false, ExtensionSyncData::BOOLEAN_UNSET,
+                           false);
     SyncChangeList list(1, data.GetSyncChange(SyncChange::ACTION_UPDATE));
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
@@ -461,7 +478,8 @@ TEST_F(ExtensionServiceSyncTest, DontSelfNotify) {
     ExtensionSyncData data(*extension, false,
                            Extension::DISABLE_USER_ACTION |
                                Extension::DISABLE_PERMISSIONS_INCREASE,
-                           false, false, ExtensionSyncData::BOOLEAN_UNSET);
+                           false, false, ExtensionSyncData::BOOLEAN_UNSET,
+                           false);
     SyncChangeList list(1, data.GetSyncChange(SyncChange::ACTION_DELETE));
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
@@ -478,8 +496,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncData) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   syncer::SyncDataList list =
       extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -507,8 +525,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataDisableReasons) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   {
     syncer::SyncDataList list =
@@ -579,8 +597,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataTerminated) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   syncer::SyncDataList list =
       extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -608,8 +626,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataFilter) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::APPS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   syncer::SyncDataList list =
       extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -624,8 +642,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncExtensionDataUserSettings) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   {
     syncer::SyncDataList list =
@@ -653,8 +671,10 @@ TEST_F(ExtensionServiceSyncTest, GetSyncExtensionDataUserSettings) {
   }
 
   extensions::util::SetIsIncognitoEnabled(good_crx, profile(), true);
-  extensions::util::SetAllowedScriptingOnAllUrls(
-      good_crx, profile(), false);
+  ScriptingPermissionsModifier permissions_modifier(
+      profile(), registry()->GetExtensionById(
+                     good_crx, extensions::ExtensionRegistry::EVERYTHING));
+  permissions_modifier.SetAllowedOnAllUrls(false);
   {
     syncer::SyncDataList list =
         extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -668,8 +688,7 @@ TEST_F(ExtensionServiceSyncTest, GetSyncExtensionDataUserSettings) {
   }
 
   service()->EnableExtension(good_crx);
-  extensions::util::SetAllowedScriptingOnAllUrls(
-      good_crx, profile(), true);
+  permissions_modifier.SetAllowedOnAllUrls(true);
   {
     syncer::SyncDataList list =
         extension_sync_service()->GetAllSyncData(syncer::EXTENSIONS);
@@ -692,8 +711,8 @@ TEST_F(ExtensionServiceSyncTest, SyncForUninstalledExternalExtension) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
   StartSyncing(syncer::APPS);
 
   UninstallExtension(good_crx, false);
@@ -725,8 +744,8 @@ TEST_F(ExtensionServiceSyncTest, GetSyncAppDataUserSettings) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::APPS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   syncer::StringOrdinal initial_ordinal =
       syncer::StringOrdinal::CreateInitialOrdinal();
@@ -829,12 +848,12 @@ TEST_F(ExtensionServiceSyncTest, GetSyncDataList) {
 
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::APPS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   service()->DisableExtension(page_action, Extension::DISABLE_USER_ACTION);
   TerminateExtension(theme2_crx);
@@ -848,8 +867,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataUninstall) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   sync_pb::EntitySpecifics specifics;
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
@@ -922,18 +941,25 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataSettings) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   InstallCRX(data_dir().AppendASCII("good.crx"), INSTALL_NEW);
   EXPECT_TRUE(service()->IsExtensionEnabled(good_crx));
   EXPECT_FALSE(extensions::util::IsIncognitoEnabled(good_crx, profile()));
-  EXPECT_FALSE(extensions::util::HasSetAllowedScriptingOnAllUrls(
-      good_crx, profile()));
+  // Returns a ScriptingPermissionsModifier for the extension. We use this
+  // because various parts of this test reload the extension, making keeping a
+  // ptr to it inviable.
+  auto get_permissions_modifier = [this]() {
+    const Extension* extension = registry()->GetExtensionById(
+        good_crx, extensions::ExtensionRegistry::EVERYTHING);
+    return base::MakeUnique<ScriptingPermissionsModifier>(profile(), extension);
+  };
+  EXPECT_FALSE(get_permissions_modifier()->HasSetAllowedOnAllUrls());
   const bool kDefaultAllowedScripting =
-      extensions::util::DefaultAllowedScriptingOnAllUrls();
+      ScriptingPermissionsModifier::DefaultAllowedOnAllUrls();
   EXPECT_EQ(kDefaultAllowedScripting,
-            extensions::util::AllowedScriptingOnAllUrls(good_crx, profile()));
+            get_permissions_modifier()->IsAllowedOnAllUrls());
 
   sync_pb::EntitySpecifics specifics;
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
@@ -949,10 +975,9 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataSettings) {
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
     EXPECT_FALSE(service()->IsExtensionEnabled(good_crx));
     EXPECT_FALSE(extensions::util::IsIncognitoEnabled(good_crx, profile()));
-    EXPECT_FALSE(extensions::util::HasSetAllowedScriptingOnAllUrls(
-        good_crx, profile()));
+    EXPECT_FALSE(get_permissions_modifier()->HasSetAllowedOnAllUrls());
     EXPECT_EQ(kDefaultAllowedScripting,
-              extensions::util::AllowedScriptingOnAllUrls(good_crx, profile()));
+              get_permissions_modifier()->IsAllowedOnAllUrls());
   }
 
   {
@@ -988,10 +1013,9 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataSettings) {
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
     EXPECT_TRUE(service()->IsExtensionEnabled(good_crx));
-    EXPECT_TRUE(extensions::util::HasSetAllowedScriptingOnAllUrls(
-        good_crx, profile()));
+    EXPECT_TRUE(get_permissions_modifier()->HasSetAllowedOnAllUrls());
     EXPECT_EQ(!kDefaultAllowedScripting,
-              extensions::util::AllowedScriptingOnAllUrls(good_crx, profile()));
+              get_permissions_modifier()->IsAllowedOnAllUrls());
   }
 
   {
@@ -1002,10 +1026,9 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataSettings) {
 
     extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
     EXPECT_TRUE(service()->IsExtensionEnabled(good_crx));
-    EXPECT_TRUE(extensions::util::HasSetAllowedScriptingOnAllUrls(
-        good_crx, profile()));
+    EXPECT_TRUE(get_permissions_modifier()->HasSetAllowedOnAllUrls());
     EXPECT_EQ(kDefaultAllowedScripting,
-              extensions::util::AllowedScriptingOnAllUrls(good_crx, profile()));
+              get_permissions_modifier()->IsAllowedOnAllUrls());
   }
 
   EXPECT_FALSE(service()->pending_extension_manager()->IsIdPending(good_crx));
@@ -1015,8 +1038,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataNewExtension) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   const base::FilePath path = data_dir().AppendASCII("good.crx");
   const ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
@@ -1089,8 +1112,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataTerminatedExtension) {
   InitializeExtensionServiceWithUpdater();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   InstallCRX(data_dir().AppendASCII("good.crx"), INSTALL_NEW);
   TerminateExtension(good_crx);
@@ -1119,8 +1142,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataVersionCheck) {
   InitializeExtensionServiceWithUpdater();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   InstallCRX(data_dir().AppendASCII("good.crx"), INSTALL_NEW);
   EXPECT_TRUE(service()->IsExtensionEnabled(good_crx));
@@ -1201,8 +1224,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataNotInstalled) {
   InitializeExtensionServiceWithUpdater();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   sync_pb::EntitySpecifics specifics;
   sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
@@ -1235,8 +1258,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataEnableDisable) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   const ExtensionPrefs* prefs = ExtensionPrefs::Get(profile());
 
@@ -1337,8 +1360,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataDeferredEnable) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   base::FilePath base_path = data_dir().AppendASCII("permissions_increase");
   base::FilePath pem_path = base_path.AppendASCII("permissions.pem");
@@ -1387,8 +1410,8 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataPermissionApproval) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
   const base::FilePath base_path =
       data_dir().AppendASCII("permissions_increase");
@@ -1398,9 +1421,9 @@ TEST_F(ExtensionServiceSyncTest, ProcessSyncDataPermissionApproval) {
 
   base::ScopedTempDir crx_dir;
   ASSERT_TRUE(crx_dir.CreateUniqueTempDir());
-  const base::FilePath crx_path_v1 = crx_dir.path().AppendASCII("temp1.crx");
+  const base::FilePath crx_path_v1 = crx_dir.GetPath().AppendASCII("temp1.crx");
   PackCRX(path_v1, pem_path, crx_path_v1);
-  const base::FilePath crx_path_v2 = crx_dir.path().AppendASCII("temp2.crx");
+  const base::FilePath crx_path_v2 = crx_dir.GetPath().AppendASCII("temp2.crx");
   PackCRX(path_v2, pem_path, crx_path_v2);
 
   const std::string v1("1");
@@ -1539,7 +1562,7 @@ class ExtensionServiceTestSupervised : public ExtensionServiceSyncTest,
                                        public SupervisedUserService::Delegate {
  public:
   ExtensionServiceTestSupervised()
-      : field_trial_list_(new base::MockEntropyProvider()) {}
+      : field_trial_list_(base::MakeUnique<base::MockEntropyProvider>()) {}
 
   void SetUp() override {
     ExtensionServiceSyncTest::SetUp();
@@ -1569,9 +1592,36 @@ class ExtensionServiceTestSupervised : public ExtensionServiceSyncTest,
         "SupervisedUserExtensionPermissionIncrease", "group", params);
   }
 
+  void InitSupervisedUserInitiatedExtensionInstallFeature(bool enabled) {
+    base::FeatureList::ClearInstanceForTesting();
+    std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
+    if (enabled) {
+      feature_list->InitializeFromCommandLine(
+          "SupervisedUserInitiatedExtensionInstall", std::string());
+    }
+    base::FeatureList::SetInstance(std::move(feature_list));
+  }
+
+  bool IsPendingCustodianApproval(const std::string& extension_id) {
+    auto function = make_scoped_refptr(
+        new WebstorePrivateIsPendingCustodianApprovalFunction());
+
+    std::unique_ptr<base::Value> result(RunFunctionAndReturnSingleResult(
+        function.get(), "[\"" + extension_id + "\"]", browser_context()));
+
+    bool copy_bool_result = false;
+    EXPECT_TRUE(result->GetAsBoolean(&copy_bool_result));
+    return copy_bool_result;
+  }
+
   void InitServices(bool profile_is_supervised) {
     ExtensionServiceInitParams params = CreateDefaultInitParams();
     params.profile_is_supervised = profile_is_supervised;
+    // If profile is supervised, don't pass a pref file such that the testing
+    // profile creates a pref service that uses SupervisedUserPrefStore.
+    if (profile_is_supervised) {
+      params.pref_file = base::FilePath();
+    }
     InitializeExtensionService(params);
     StartSyncing(syncer::EXTENSIONS);
 
@@ -1579,38 +1629,107 @@ class ExtensionServiceTestSupervised : public ExtensionServiceSyncTest,
     supervised_user_service()->Init();
   }
 
-  std::string InstallPermissionsTestExtension() {
-    const std::string version("1");
-
-    const Extension* extension =
-        PackAndInstallCRX(dir_path(version), pem_path(), INSTALL_NEW,
-                          Extension::WAS_INSTALLED_BY_CUSTODIAN);
-    // The extension must now be installed and enabled.
-    EXPECT_TRUE(extension);
-    EXPECT_TRUE(registry()->enabled_extensions().Contains(extension->id()));
-    EXPECT_EQ(version, extension->VersionString());
-
-    return extension->id();
+  std::string InstallPermissionsTestExtension(bool by_custodian) {
+    return InstallTestExtension(permissions_increase, dir_path("1"), pem_path(),
+                                by_custodian);
   }
 
   void UpdatePermissionsTestExtension(const std::string& id,
                                       const std::string& version,
                                       UpdateState expected_state) {
-    PackCRXAndUpdateExtension(id, dir_path(version), pem_path(),
-                              expected_state);
+    UpdateTestExtension(dir_path(version), pem_path(), id, version,
+                        expected_state);
+  }
+
+  std::string InstallNoPermissionsTestExtension(bool by_custodian) {
+    base::FilePath base_path = data_dir().AppendASCII("autoupdate");
+    base::FilePath pem_path = base_path.AppendASCII("key.pem");
+    base::FilePath dir_path = base_path.AppendASCII("v1");
+
+    return InstallTestExtension(autoupdate, dir_path, pem_path, by_custodian);
+  }
+
+  void UpdateNoPermissionsTestExtension(const std::string& id,
+                                        const std::string& version,
+                                        UpdateState expected_state) {
+    base::FilePath base_path = data_dir().AppendASCII("autoupdate");
+    base::FilePath pem_path = base_path.AppendASCII("key.pem");
+    base::FilePath dir_path = base_path.AppendASCII("v" + version);
+
+    UpdateTestExtension(dir_path, pem_path, id, version, expected_state);
+  }
+
+  std::string InstallTestExtension(const std::string& id,
+                                   const base::FilePath& dir_path,
+                                   const base::FilePath& pem_path,
+                                   bool by_custodian) {
+    InstallState expected_state = INSTALL_WITHOUT_LOAD;
+    if (by_custodian) {
+      extensions::util::SetWasInstalledByCustodian(id, profile(), true);
+      expected_state = INSTALL_NEW;
+    }
+    const Extension* extension =
+        PackAndInstallCRX(dir_path, pem_path, expected_state);
+    // The extension must now be installed.
+    EXPECT_TRUE(extension);
+    EXPECT_EQ(extension->id(), id);
+    if (by_custodian) {
+      EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+    } else {
+      CheckDisabledForCustodianApproval(id);
+    }
+
+    EXPECT_EQ(*extension->version(), base::Version("1"));
+
+    return id;
+  }
+
+  void UpdateTestExtension(const base::FilePath& dir_path,
+                           const base::FilePath& pem_path,
+                           const std::string& id,
+                           const std::string& version,
+                           const UpdateState& expected_state) {
+    PackCRXAndUpdateExtension(id, dir_path, pem_path, expected_state);
     const Extension* extension = registry()->GetInstalledExtension(id);
     ASSERT_TRUE(extension);
     // The version should have been updated.
-    EXPECT_EQ(version, extension->VersionString());
+    EXPECT_EQ(*extension->version(), base::Version(version));
+  }
+
+  // Simulate a custodian approval for enabling the extension coming in
+  // through Sync by adding the approved version to the map of approved
+  // extensions. It doesn't simulate a change in the disable reasons.
+  void SimulateCustodianApprovalChangeViaSync(const std::string& extension_id,
+                                              const std::string& version,
+                                              SyncChange::SyncChangeType type) {
+    std::string key = SupervisedUserSettingsService::MakeSplitSettingKey(
+        supervised_users::kApprovedExtensions, extension_id);
+    syncer::SyncData sync_data =
+        SupervisedUserSettingsService::CreateSyncDataForSetting(
+            key, base::StringValue(version));
+
+    SyncChangeList list(1, SyncChange(FROM_HERE, type, sync_data));
+
+    SupervisedUserSettingsService* supervised_user_settings_service =
+        SupervisedUserSettingsServiceFactory::GetForProfile(profile());
+    supervised_user_settings_service->ProcessSyncChanges(FROM_HERE, list);
+  }
+
+  void CheckDisabledForCustodianApproval(const std::string& extension_id) {
+    EXPECT_TRUE(registry()->disabled_extensions().Contains(extension_id));
+    ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(profile());
+    EXPECT_TRUE(extension_prefs->HasDisableReason(
+        extension_id,
+        extensions::Extension::DISABLE_CUSTODIAN_APPROVAL_REQUIRED));
   }
 
   SupervisedUserService* supervised_user_service() {
     return SupervisedUserServiceFactory::GetForProfile(profile());
   }
 
-  static std::string UpdateRequestId(const std::string& extension_id,
-                                     const std::string& version) {
-    return SupervisedUserService::GetExtensionUpdateRequestId(
+  static std::string RequestId(const std::string& extension_id,
+                               const std::string& version) {
+    return SupervisedUserService::GetExtensionRequestId(
         extension_id, base::Version(version));
   }
 
@@ -1643,6 +1762,10 @@ class MockPermissionRequestCreator : public PermissionRequestCreator {
     FAIL();
   }
 
+  MOCK_METHOD2(CreateExtensionInstallRequest,
+               void(const std::string& id,
+                    const SupervisedUserService::SuccessCallback& callback));
+
   MOCK_METHOD2(CreateExtensionUpdateRequest,
                void(const std::string& id,
                     const SupervisedUserService::SuccessCallback& callback));
@@ -1653,12 +1776,15 @@ class MockPermissionRequestCreator : public PermissionRequestCreator {
 
 TEST_F(ExtensionServiceTestSupervised, InstallOnlyAllowedByCustodian) {
   InitServices(true /* profile_is_supervised */);
+  InitSupervisedUserInitiatedExtensionInstallFeature(false);
+
+  extensions::util::SetWasInstalledByCustodian(good2048, profile(), true);
 
   base::FilePath path1 = data_dir().AppendASCII("good.crx");
   base::FilePath path2 = data_dir().AppendASCII("good2048.crx");
   const Extension* extensions[] = {
     InstallCRX(path1, INSTALL_FAILED),
-    InstallCRX(path2, INSTALL_NEW, Extension::WAS_INSTALLED_BY_CUSTODIAN)
+    InstallCRX(path2, INSTALL_NEW)
   };
 
   // Only the extension with the "installed by custodian" flag should have been
@@ -1666,50 +1792,212 @@ TEST_F(ExtensionServiceTestSupervised, InstallOnlyAllowedByCustodian) {
   EXPECT_FALSE(extensions[0]);
   ASSERT_TRUE(extensions[1]);
   EXPECT_TRUE(registry()->enabled_extensions().Contains(extensions[1]->id()));
+  EXPECT_FALSE(IsPendingCustodianApproval(extensions[1]->id()));
 }
 
-TEST_F(ExtensionServiceTestSupervised, PreinstalledExtension) {
+TEST_F(ExtensionServiceTestSupervised,
+       DelegatedAndPreinstalledExtensionIsSUFirst) {
   InitServices(false /* profile_is_supervised */);
+  InitSupervisedUserInitiatedExtensionInstallFeature(false);
+
+  // Install an extension.
+  base::FilePath path = data_dir().AppendASCII("good.crx");
+  const Extension* extension = InstallCRX(path, INSTALL_NEW);
+  std::string id = extension->id();
+  const std::string version("1.0.0.0");
+  // It should be enabled.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+
+  // Now make the profile supervised.
+  profile()->AsTestingProfile()->SetSupervisedUserId(
+      supervised_users::kChildAccountSUID);
+
+  // It should not be enabled now (it is not loaded at all actually).
+  EXPECT_FALSE(registry()->enabled_extensions().Contains(id));
+
+  // Simulate data sync with the "was_installed_by_custodian" flag set to 1.
+  sync_pb::EntitySpecifics specifics;
+  sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
+  ext_specifics->set_id(id);
+  ext_specifics->set_enabled(true);
+  ext_specifics->set_disable_reasons(Extension::DISABLE_NONE);
+  ext_specifics->set_installed_by_custodian(true);
+  ext_specifics->set_version(version);
+
+  SyncChangeList list =
+      MakeSyncChangeList(id, specifics, SyncChange::ACTION_UPDATE);
+
+  extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
+
+  // The extension should be enabled again.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+  EXPECT_TRUE(extensions::util::WasInstalledByCustodian(id, profile()));
+}
+
+TEST_F(ExtensionServiceTestSupervised,
+       DelegatedAndPreinstalledExtensionSyncFirst) {
+  InitServices(false /* profile_is_supervised */);
+  InitSupervisedUserInitiatedExtensionInstallFeature(false);
+
+  // Install an extension.
+  base::FilePath path = data_dir().AppendASCII("good.crx");
+  const Extension* extension = InstallCRX(path, INSTALL_NEW);
+  std::string id = extension->id();
+  const std::string version("1.0.0.0");
+
+  // It should be enabled.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+
+  // Simulate data sync with the "was_installed_by_custodian" flag set to 1.
+  sync_pb::EntitySpecifics specifics;
+  sync_pb::ExtensionSpecifics* ext_specifics = specifics.mutable_extension();
+  ext_specifics->set_id(id);
+  ext_specifics->set_enabled(true);
+  ext_specifics->set_disable_reasons(Extension::DISABLE_NONE);
+  ext_specifics->set_installed_by_custodian(true);
+  ext_specifics->set_version(version);
+
+  SyncChangeList list =
+      MakeSyncChangeList(id, specifics, SyncChange::ACTION_UPDATE);
+
+  extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
+  // The extension should be enabled.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+  EXPECT_TRUE(extensions::util::WasInstalledByCustodian(id, profile()));
+}
+
+TEST_F(ExtensionServiceTestSupervised,
+       InstallAllowedByCustodianAndSupervisedUser) {
+  InitServices(true /* profile_is_supervised */);
+  InitSupervisedUserInitiatedExtensionInstallFeature(true);
+
+  extensions::util::SetWasInstalledByCustodian(good2048, profile(), true);
+
+  base::FilePath path1 = data_dir().AppendASCII("good.crx");
+  base::FilePath path2 = data_dir().AppendASCII("good2048.crx");
+  const Extension* extensions[] = {
+      InstallCRX(path1, INSTALL_WITHOUT_LOAD),
+      InstallCRX(path2, INSTALL_NEW)
+  };
+
+  // Only the extension with the "installed by custodian" flag should have been
+  // installed and enabled.
+  // The extension missing the "installed by custodian" flag is a
+  // supervised user initiated install and hence not enabled.
+  ASSERT_TRUE(extensions[0]);
+  ASSERT_TRUE(extensions[1]);
+  EXPECT_TRUE(registry()->disabled_extensions().Contains(extensions[0]->id()));
+  EXPECT_TRUE(IsPendingCustodianApproval(extensions[0]->id()));
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(extensions[1]->id()));
+  EXPECT_FALSE(IsPendingCustodianApproval(extensions[1]->id()));
+}
+
+TEST_F(ExtensionServiceTestSupervised,
+       PreinstalledExtensionWithSUInitiatedInstalls) {
+  InitServices(false /* profile_is_supervised */);
+  InitSupervisedUserInitiatedExtensionInstallFeature(true);
+
+  // Install an extension.
+  base::FilePath path = data_dir().AppendASCII("good.crx");
+  const Extension* extension = InstallCRX(path, INSTALL_NEW);
+  std::string id = extension->id();
+  // Make sure it's enabled.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+
+  MockPermissionRequestCreator* creator = new MockPermissionRequestCreator;
+  supervised_user_service()->AddPermissionRequestCreator(
+      base::WrapUnique(creator));
+  const std::string version("1.0.0.0");
+
+  EXPECT_CALL(*creator, CreateExtensionInstallRequest(
+                            RequestId(good_crx, version), testing::_));
+
+  // Now make the profile supervised.
+  profile()->AsTestingProfile()->SetSupervisedUserId(
+      supervised_users::kChildAccountSUID);
+
+  Mock::VerifyAndClearExpectations(creator);
+
+  // The extension should not be enabled anymore.
+  CheckDisabledForCustodianApproval(id);
+  EXPECT_TRUE(IsPendingCustodianApproval(id));
+}
+
+TEST_F(ExtensionServiceTestSupervised,
+       PreinstalledExtensionWithoutSUInitiatedInstalls) {
+  InitServices(false /* profile_is_supervised */);
+  InitSupervisedUserInitiatedExtensionInstallFeature(false);
 
   // Install an extension.
   base::FilePath path = data_dir().AppendASCII("good.crx");
   const Extension* extension = InstallCRX(path, INSTALL_NEW);
   std::string id = extension->id();
 
+  // Make sure it's enabled.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+
+  MockPermissionRequestCreator* creator = new MockPermissionRequestCreator;
+  supervised_user_service()->AddPermissionRequestCreator(
+      base::WrapUnique(creator));
+  const std::string version("1.0.0.0");
+
+  // No request should be sent because supervised user initiated installs
+  // are disabled.
+  EXPECT_CALL(*creator, CreateExtensionInstallRequest(testing::_, testing::_))
+      .Times(0);
+
   // Now make the profile supervised.
   profile()->AsTestingProfile()->SetSupervisedUserId(
       supervised_users::kChildAccountSUID);
 
-  // The extension should not be enabled anymore.
-  EXPECT_FALSE(registry()->enabled_extensions().Contains(id));
+  // The extension should not be loaded anymore.
+  EXPECT_FALSE(registry()->GetInstalledExtension(id));
+}
+
+TEST_F(ExtensionServiceTestSupervised, ExtensionApprovalBeforeInstallation) {
+  // This tests the case when the sync entity flagging the extension as approved
+  // arrives before the extension itself is installed.
+  InitServices(true /* profile_is_supervised */);
+  InitSupervisedUserInitiatedExtensionInstallFeature(true);
+
+  MockPermissionRequestCreator* creator = new MockPermissionRequestCreator;
+  supervised_user_service()->AddPermissionRequestCreator(
+      base::WrapUnique(creator));
+
+  std::string id = good_crx;
+  std::string version("1.0.0.0");
+
+  SimulateCustodianApprovalChangeViaSync(id, version, SyncChange::ACTION_ADD);
+
+  // Now install an extension.
+  base::FilePath path = data_dir().AppendASCII("good.crx");
+  InstallCRX(path, INSTALL_NEW);
+
+  // No approval request should be sent.
+  EXPECT_CALL(*creator, CreateExtensionInstallRequest(testing::_, testing::_))
+      .Times(0);
+
+  // Make sure it's enabled.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+  EXPECT_FALSE(IsPendingCustodianApproval(id));
 }
 
 TEST_F(ExtensionServiceTestSupervised, UpdateWithoutPermissionIncrease) {
   InitServices(true /* profile_is_supervised */);
 
-  base::FilePath base_path = data_dir().AppendASCII("autoupdate");
-  base::FilePath pem_path = base_path.AppendASCII("key.pem");
-
-  const Extension* extension =
-      PackAndInstallCRX(base_path.AppendASCII("v1"), pem_path, INSTALL_NEW,
-                        Extension::WAS_INSTALLED_BY_CUSTODIAN);
-  // The extension must now be installed and enabled.
-  ASSERT_TRUE(extension);
-  ASSERT_TRUE(registry()->enabled_extensions().Contains(extension->id()));
-
   // Save the id, as the extension object will be destroyed during updating.
-  std::string id = extension->id();
-
-  std::string old_version = extension->VersionString();
+  std::string id = InstallNoPermissionsTestExtension(true /* by_custodian */);
 
   // Update to a new version.
-  PackCRXAndUpdateExtension(id, base_path.AppendASCII("v2"), pem_path, ENABLED);
+  std::string version2("2");
+  UpdateNoPermissionsTestExtension(id, version2, ENABLED);
 
   // The extension should still be there and enabled.
-  extension = registry()->enabled_extensions().GetByID(id);
+  const Extension* extension = registry()->enabled_extensions().GetByID(id);
   ASSERT_TRUE(extension);
   // The version should have changed.
-  EXPECT_NE(extension->VersionString(), old_version);
+  EXPECT_EQ(*extension->version(), base::Version(version2));
+  EXPECT_FALSE(IsPendingCustodianApproval(id));
 }
 
 TEST_F(ExtensionServiceTestSupervised, UpdateWithPermissionIncreaseNoApproval) {
@@ -1721,16 +2009,17 @@ TEST_F(ExtensionServiceTestSupervised, UpdateWithPermissionIncreaseNoApproval) {
   supervised_user_service()->AddPermissionRequestCreator(
       base::WrapUnique(creator));
 
-  std::string id = InstallPermissionsTestExtension();
+  std::string id = InstallPermissionsTestExtension(true /* by_custodian */);
 
   // Update to a new version with increased permissions.
   // Since we don't require the custodian's approval, no permission request
   // should be created.
   const std::string version2("2");
   EXPECT_CALL(*creator, CreateExtensionUpdateRequest(
-                            UpdateRequestId(id, version2), testing::_))
+                            RequestId(id, version2), testing::_))
       .Times(0);
   UpdatePermissionsTestExtension(id, version2, DISABLED);
+  EXPECT_FALSE(IsPendingCustodianApproval(id));
 }
 
 TEST_F(ExtensionServiceTestSupervised,
@@ -1746,12 +2035,14 @@ TEST_F(ExtensionServiceTestSupervised,
   const std::string version1("1");
   const std::string version2("2");
 
-  std::string id = InstallPermissionsTestExtension();
+  std::string id = InstallPermissionsTestExtension(true /* by_custodian */);
 
   // Update to a new version with increased permissions.
   EXPECT_CALL(*creator, CreateExtensionUpdateRequest(
-                            UpdateRequestId(id, version2), testing::_));
+                            RequestId(id, version2), testing::_));
   UpdatePermissionsTestExtension(id, version2, DISABLED);
+  Mock::VerifyAndClearExpectations(creator);
+  EXPECT_TRUE(IsPendingCustodianApproval(id));
 
   // Simulate a custodian approval for re-enabling the extension coming in
   // through Sync, but set the old version. This can happen when there already
@@ -1767,7 +2058,7 @@ TEST_F(ExtensionServiceTestSupervised,
   // Attempting to re-enable an old version should result in a permission
   // request for the current version.
   EXPECT_CALL(*creator, CreateExtensionUpdateRequest(
-                            UpdateRequestId(id, version2), testing::_));
+                            RequestId(id, version2), testing::_));
 
   SyncChangeList list =
       MakeSyncChangeList(id, specifics, SyncChange::ACTION_UPDATE);
@@ -1779,6 +2070,8 @@ TEST_F(ExtensionServiceTestSupervised,
       id, base::Version(version1)));
   EXPECT_FALSE(extension_sync_service()->HasPendingReenable(
       id, base::Version(version2)));
+  Mock::VerifyAndClearExpectations(creator);
+  EXPECT_TRUE(IsPendingCustodianApproval(id));
 }
 
 TEST_F(ExtensionServiceTestSupervised,
@@ -1791,13 +2084,15 @@ TEST_F(ExtensionServiceTestSupervised,
   supervised_user_service()->AddPermissionRequestCreator(
       base::WrapUnique(creator));
 
-  std::string id = InstallPermissionsTestExtension();
+  std::string id = InstallPermissionsTestExtension(true /* by_custodian */);
 
   // Update to a new version with increased permissions.
   const std::string version2("2");
   EXPECT_CALL(*creator, CreateExtensionUpdateRequest(
-                            UpdateRequestId(id, version2), testing::_));
+                            RequestId(id, version2), testing::_));
   UpdatePermissionsTestExtension(id, version2, DISABLED);
+  Mock::VerifyAndClearExpectations(creator);
+  EXPECT_TRUE(IsPendingCustodianApproval(id));
 
   // Simulate a custodian approval for re-enabling the extension coming in
   // through Sync.
@@ -1815,6 +2110,7 @@ TEST_F(ExtensionServiceTestSupervised,
   extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
   // The extension should have gotten re-enabled.
   EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+  EXPECT_FALSE(IsPendingCustodianApproval(id));
 }
 
 TEST_F(ExtensionServiceTestSupervised,
@@ -1827,13 +2123,14 @@ TEST_F(ExtensionServiceTestSupervised,
   supervised_user_service()->AddPermissionRequestCreator(
       base::WrapUnique(creator));
 
-  std::string id = InstallPermissionsTestExtension();
+  std::string id = InstallPermissionsTestExtension(true /* by_custodian */);
 
   // Update to a new version with increased permissions.
   const std::string version2("2");
   EXPECT_CALL(*creator, CreateExtensionUpdateRequest(
-                            UpdateRequestId(id, version2), testing::_));
+                            RequestId(id, version2), testing::_));
   UpdatePermissionsTestExtension(id, version2, DISABLED);
+  Mock::VerifyAndClearExpectations(creator);
 
   // Simulate a custodian approval for re-enabling the extension coming in
   // through Sync. Set a newer version than we have installed.
@@ -1848,7 +2145,7 @@ TEST_F(ExtensionServiceTestSupervised,
 
   // This should *not* result in a new permission request.
   EXPECT_CALL(*creator, CreateExtensionUpdateRequest(
-                            UpdateRequestId(id, version3), testing::_))
+                            RequestId(id, version3), testing::_))
       .Times(0);
 
   SyncChangeList list =
@@ -1865,19 +2162,175 @@ TEST_F(ExtensionServiceTestSupervised,
   UpdatePermissionsTestExtension(id, version3, ENABLED);
 }
 
+TEST_F(ExtensionServiceTestSupervised, SupervisedUserInitiatedInstalls) {
+  InitNeedCustodianApprovalFieldTrial(true);
+  InitSupervisedUserInitiatedExtensionInstallFeature(true);
+
+  InitServices(true /* profile_is_supervised */);
+
+  MockPermissionRequestCreator* creator = new MockPermissionRequestCreator;
+  supervised_user_service()->AddPermissionRequestCreator(
+      base::WrapUnique(creator));
+
+  base::FilePath path = data_dir().AppendASCII("good.crx");
+  std::string version("1.0.0.0");
+
+  EXPECT_CALL(*creator, CreateExtensionInstallRequest(
+                            RequestId(good_crx, version), testing::_));
+
+  // Should be installed but disabled, a request for approval should be sent.
+  const Extension* extension = InstallCRX(path, INSTALL_WITHOUT_LOAD);
+  ASSERT_TRUE(extension);
+  ASSERT_EQ(extension->id(), good_crx);
+  EXPECT_TRUE(registry()->disabled_extensions().Contains(good_crx));
+  Mock::VerifyAndClearExpectations(creator);
+  EXPECT_TRUE(IsPendingCustodianApproval(extension->id()));
+
+  SimulateCustodianApprovalChangeViaSync(good_crx, version,
+                                         SyncChange::ACTION_ADD);
+
+  // The extension should be enabled now.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(good_crx));
+  EXPECT_FALSE(IsPendingCustodianApproval(extension->id()));
+
+  // Simulate approval removal coming via Sync.
+  SimulateCustodianApprovalChangeViaSync(good_crx, version,
+                                         SyncChange::ACTION_DELETE);
+
+  // The extension should be disabled now.
+  EXPECT_TRUE(registry()->disabled_extensions().Contains(good_crx));
+  EXPECT_TRUE(IsPendingCustodianApproval(extension->id()));
+}
+
+TEST_F(ExtensionServiceTestSupervised,
+       UpdateSUInitiatedInstallWithoutPermissionIncrease) {
+  InitNeedCustodianApprovalFieldTrial(true);
+  InitSupervisedUserInitiatedExtensionInstallFeature(true);
+
+  InitServices(true /* profile_is_supervised */);
+
+  std::string id = InstallNoPermissionsTestExtension(false /* by_custodian */);
+  std::string version1("1");
+
+  SimulateCustodianApprovalChangeViaSync(id, version1, SyncChange::ACTION_ADD);
+
+  // The extension should be enabled now.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+
+  std::string version2("2");
+
+  // Update to a new version.
+  UpdateNoPermissionsTestExtension(id, version2, ENABLED);
+
+  // The extension should still be there and enabled.
+  const Extension* extension = registry()->enabled_extensions().GetByID(id);
+  ASSERT_TRUE(extension);
+  // The version should have increased.
+  EXPECT_EQ(1, extension->version()->CompareTo(base::Version(version1)));
+
+  // Check that the approved version has been updated in the prefs as well.
+  // Prefs are updated via Sync.  If the prefs are updated, then the new
+  // approved version has been pushed to Sync as well.
+  std::string approved_version;
+  PrefService* pref_service = profile()->GetPrefs();
+  const base::DictionaryValue* approved_extensions =
+      pref_service->GetDictionary(prefs::kSupervisedUserApprovedExtensions);
+  approved_extensions->GetStringWithoutPathExpansion(id, &approved_version);
+
+  EXPECT_EQ(base::Version(approved_version), *extension->version());
+  EXPECT_FALSE(IsPendingCustodianApproval(id));
+}
+
+TEST_F(ExtensionServiceTestSupervised,
+       UpdateSUInitiatedInstallWithPermissionIncrease) {
+  InitNeedCustodianApprovalFieldTrial(true);
+  InitSupervisedUserInitiatedExtensionInstallFeature(true);
+
+  InitServices(true /* profile_is_supervised */);
+
+  std::string id = InstallPermissionsTestExtension(false /* by_custodian */);
+  std::string version1("1");
+
+  SimulateCustodianApprovalChangeViaSync(id, version1, SyncChange::ACTION_ADD);
+
+  // The extension should be enabled now.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+
+  std::string version3("3");
+
+  UpdatePermissionsTestExtension(id, version3, DISABLED);
+
+  // The extension should be disabled.
+  EXPECT_FALSE(registry()->enabled_extensions().Contains(id));
+  EXPECT_TRUE(ExtensionPrefs::Get(profile())->HasDisableReason(
+      id, Extension::DISABLE_PERMISSIONS_INCREASE));
+
+  std::string version2("2");
+  // Approve an older version
+  SimulateCustodianApprovalChangeViaSync(id, version2,
+                                         SyncChange::ACTION_UPDATE);
+
+  // The extension should remain disabled.
+  EXPECT_FALSE(registry()->enabled_extensions().Contains(id));
+  EXPECT_TRUE(ExtensionPrefs::Get(profile())->HasDisableReason(
+      id, Extension::DISABLE_PERMISSIONS_INCREASE));
+  EXPECT_TRUE(ExtensionPrefs::Get(profile())->HasDisableReason(
+      id, Extension::DISABLE_CUSTODIAN_APPROVAL_REQUIRED));
+
+  EXPECT_TRUE(IsPendingCustodianApproval(id));
+  // Approve the latest version
+  SimulateCustodianApprovalChangeViaSync(id, version3,
+                                         SyncChange::ACTION_UPDATE);
+
+  // The extension should be enabled again.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+  EXPECT_FALSE(IsPendingCustodianApproval(id));
+}
+
+TEST_F(ExtensionServiceTestSupervised,
+       UpdateSUInitiatedInstallWithPermissionIncreaseApprovalArrivesFirst) {
+  InitNeedCustodianApprovalFieldTrial(true);
+  InitSupervisedUserInitiatedExtensionInstallFeature(true);
+
+  InitServices(true /* profile_is_supervised */);
+
+  std::string id = InstallPermissionsTestExtension(false /* by_custodian */);
+
+  std::string version1("1");
+  SimulateCustodianApprovalChangeViaSync(id, version1, SyncChange::ACTION_ADD);
+
+  // The extension should be enabled now.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+
+  std::string version2("2");
+  // Approve a newer version
+  SimulateCustodianApprovalChangeViaSync(id, version2,
+                                         SyncChange::ACTION_UPDATE);
+
+  // The extension should be disabled.
+  CheckDisabledForCustodianApproval(id);
+
+  // Now update the extension to the same version that was approved.
+  UpdatePermissionsTestExtension(id, version2, ENABLED);
+  // The extension should be enabled again.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(id));
+  EXPECT_FALSE(IsPendingCustodianApproval(id));
+}
+
 TEST_F(ExtensionServiceSyncTest, SyncUninstallByCustodianSkipsPolicy) {
   InitializeEmptyExtensionService();
   extension_sync_service()->MergeDataAndStartSyncing(
       syncer::EXTENSIONS, syncer::SyncDataList(),
-      base::WrapUnique(new syncer::FakeSyncChangeProcessor()),
-      base::WrapUnique(new syncer::SyncErrorFactoryMock()));
+      base::MakeUnique<syncer::FakeSyncChangeProcessor>(),
+      base::MakeUnique<syncer::SyncErrorFactoryMock>());
 
+  extensions::util::SetWasInstalledByCustodian(good2048, profile(), true);
   // Install two extensions.
   base::FilePath path1 = data_dir().AppendASCII("good.crx");
   base::FilePath path2 = data_dir().AppendASCII("good2048.crx");
   const Extension* extensions[] = {
     InstallCRX(path1, INSTALL_NEW),
-    InstallCRX(path2, INSTALL_NEW, Extension::WAS_INSTALLED_BY_CUSTODIAN)
+    InstallCRX(path2, INSTALL_NEW)
   };
 
   // Add a policy provider that will disallow any changes.
@@ -1895,7 +2348,8 @@ TEST_F(ExtensionServiceSyncTest, SyncUninstallByCustodianSkipsPolicy) {
     ext_specifics->set_id(id);
     ext_specifics->set_version("1.0");
     ext_specifics->set_installed_by_custodian(
-        extensions[i]->was_installed_by_custodian());
+        extensions::util::WasInstalledByCustodian(id, profile()));
+
     syncer::SyncData sync_data =
         syncer::SyncData::CreateLocalData(id, "Name", specifics);
     list.push_back(SyncChange(FROM_HERE, SyncChange::ACTION_DELETE, sync_data));
@@ -1961,10 +2415,12 @@ TEST_F(ExtensionServiceSyncTest, SyncExtensionHasAllhostsWithheld) {
 
   extension_sync_service()->ProcessSyncChanges(FROM_HERE, list);
 
-  EXPECT_TRUE(registry()->enabled_extensions().GetByID(id));
-  EXPECT_FALSE(extensions::util::AllowedScriptingOnAllUrls(id, profile()));
-  EXPECT_TRUE(extensions::util::HasSetAllowedScriptingOnAllUrls(id, profile()));
-  EXPECT_FALSE(extensions::util::AllowedScriptingOnAllUrls(id, profile()));
+  const Extension* enabled_extension =
+      registry()->enabled_extensions().GetByID(id);
+  ASSERT_TRUE(enabled_extension);
+  ScriptingPermissionsModifier modifier(profile(), enabled_extension);
+  EXPECT_FALSE(modifier.IsAllowedOnAllUrls());
+  EXPECT_TRUE(modifier.HasSetAllowedOnAllUrls());
 }
 
 #endif  // defined(ENABLE_SUPERVISED_USERS)

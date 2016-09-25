@@ -32,11 +32,11 @@
 #define DrawLooperBuilder_h
 
 #include "platform/PlatformExport.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/effects/SkLayerDrawLooper.h"
 #include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/PassOwnPtr.h"
-#include "wtf/PassRefPtr.h"
+#include <memory>
 
 class SkDrawLooper;
 
@@ -64,11 +64,11 @@ public:
     DrawLooperBuilder();
     ~DrawLooperBuilder();
 
-    static PassOwnPtr<DrawLooperBuilder> create();
+    static std::unique_ptr<DrawLooperBuilder> create();
 
     // Creates the SkDrawLooper and passes ownership to the caller. The builder
     // should not be used any more after calling this method.
-    PassRefPtr<SkDrawLooper> detachDrawLooper();
+    sk_sp<SkDrawLooper> detachDrawLooper();
 
     void addUnmodifiedContent();
     void addShadow(const FloatSize& offset, float blur, const Color&,

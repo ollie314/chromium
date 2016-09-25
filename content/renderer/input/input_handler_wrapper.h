@@ -28,8 +28,7 @@ class InputHandlerWrapper : public ui::InputHandlerProxyClient {
       const scoped_refptr<base::SingleThreadTaskRunner>& main_task_runner,
       const base::WeakPtr<cc::InputHandler>& input_handler,
       const base::WeakPtr<RenderViewImpl>& render_view_impl,
-      bool enable_smooth_scrolling,
-      bool enable_wheel_gestures);
+      bool enable_smooth_scrolling);
   ~InputHandlerWrapper() override;
 
   int routing_id() const { return routing_id_; }
@@ -37,19 +36,24 @@ class InputHandlerWrapper : public ui::InputHandlerProxyClient {
     return &input_handler_proxy_;
   }
 
+  void NeedsMainFrame();
+
   // InputHandlerProxyClient implementation.
   void WillShutdown() override;
   void TransferActiveWheelFlingAnimation(
       const blink::WebActiveWheelFlingParameters& params) override;
+  void DispatchNonBlockingEventToMainThread(
+      ui::ScopedWebInputEvent event,
+      const ui::LatencyInfo& latency_info) override;
   blink::WebGestureCurve* CreateFlingAnimationCurve(
       blink::WebGestureDevice deviceSource,
       const blink::WebFloatPoint& velocity,
       const blink::WebSize& cumulativeScroll) override;
-  void DidOverscroll(
-        const gfx::Vector2dF& accumulated_overscroll,
-        const gfx::Vector2dF& latest_overscroll_delta,
-        const gfx::Vector2dF& current_fling_velocity,
-        const gfx::PointF& causal_event_viewport_point) override;
+  void DidOverscroll(const gfx::Vector2dF& accumulated_overscroll,
+                     const gfx::Vector2dF& latest_overscroll_delta,
+                     const gfx::Vector2dF& current_fling_velocity,
+                     const gfx::PointF& causal_event_viewport_point) override;
+  void DidStartFlinging() override;
   void DidStopFlinging() override;
   void DidAnimateForInput() override;
 

@@ -23,6 +23,7 @@
  */
 
 #include "modules/webaudio/WaveShaperDSPKernel.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/Threading.h"
 #include <algorithm>
 
@@ -40,12 +41,12 @@ WaveShaperDSPKernel::WaveShaperDSPKernel(WaveShaperProcessor* processor)
 void WaveShaperDSPKernel::lazyInitializeOversampling()
 {
     if (!m_tempBuffer) {
-        m_tempBuffer = adoptPtr(new AudioFloatArray(RenderingQuantum * 2));
-        m_tempBuffer2 = adoptPtr(new AudioFloatArray(RenderingQuantum * 4));
-        m_upSampler = adoptPtr(new UpSampler(RenderingQuantum));
-        m_downSampler = adoptPtr(new DownSampler(RenderingQuantum * 2));
-        m_upSampler2 = adoptPtr(new UpSampler(RenderingQuantum * 2));
-        m_downSampler2 = adoptPtr(new DownSampler(RenderingQuantum * 4));
+        m_tempBuffer = wrapUnique(new AudioFloatArray(RenderingQuantum * 2));
+        m_tempBuffer2 = wrapUnique(new AudioFloatArray(RenderingQuantum * 4));
+        m_upSampler = wrapUnique(new UpSampler(RenderingQuantum));
+        m_downSampler = wrapUnique(new DownSampler(RenderingQuantum * 2));
+        m_upSampler2 = wrapUnique(new UpSampler(RenderingQuantum * 2));
+        m_downSampler2 = wrapUnique(new DownSampler(RenderingQuantum * 4));
     }
 }
 
@@ -69,11 +70,11 @@ void WaveShaperDSPKernel::process(const float* source, float* destination, size_
 
 void WaveShaperDSPKernel::processCurve(const float* source, float* destination, size_t framesToProcess)
 {
-    ASSERT(source);
-    ASSERT(destination);
-    ASSERT(getWaveShaperProcessor());
+    DCHECK(source);
+    DCHECK(destination);
+    DCHECK(getWaveShaperProcessor());
 
-    DOMFloat32Array* curve = getWaveShaperProcessor()->curve();
+    Vector<float>* curve = getWaveShaperProcessor()->curve();
     if (!curve) {
         // Act as "straight wire" pass-through if no curve is set.
         memcpy(destination, source, sizeof(float) * framesToProcess);
@@ -81,9 +82,9 @@ void WaveShaperDSPKernel::processCurve(const float* source, float* destination, 
     }
 
     float* curveData = curve->data();
-    int curveLength = curve->length();
+    int curveLength = curve->size();
 
-    ASSERT(curveData);
+    DCHECK(curveData);
 
     if (!curveData || !curveLength) {
         memcpy(destination, source, sizeof(float) * framesToProcess);
@@ -125,7 +126,7 @@ void WaveShaperDSPKernel::processCurve(const float* source, float* destination, 
 void WaveShaperDSPKernel::processCurve2x(const float* source, float* destination, size_t framesToProcess)
 {
     bool isSafe = framesToProcess == RenderingQuantum;
-    ASSERT(isSafe);
+    DCHECK(isSafe);
     if (!isSafe)
         return;
 
@@ -142,7 +143,7 @@ void WaveShaperDSPKernel::processCurve2x(const float* source, float* destination
 void WaveShaperDSPKernel::processCurve4x(const float* source, float* destination, size_t framesToProcess)
 {
     bool isSafe = framesToProcess == RenderingQuantum;
-    ASSERT(isSafe);
+    DCHECK(isSafe);
     if (!isSafe)
         return;
 

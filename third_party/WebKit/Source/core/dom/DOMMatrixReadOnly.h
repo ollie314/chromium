@@ -5,18 +5,25 @@
 #ifndef DOMMatrixReadOnly_h
 #define DOMMatrixReadOnly_h
 
+#include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/DOMTypedArray.h"
 #include "platform/heap/Handle.h"
 #include "platform/transforms/TransformationMatrix.h"
+#include <memory>
 
 namespace blink {
 
 class DOMMatrix;
+class DOMMatrixInit;
 
-class DOMMatrixReadOnly : public GarbageCollectedFinalized<DOMMatrixReadOnly>, public ScriptWrappable {
+class CORE_EXPORT DOMMatrixReadOnly : public GarbageCollectedFinalized<DOMMatrixReadOnly>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
+    static DOMMatrixReadOnly* create(Vector<double>, ExceptionState&);
+    static DOMMatrixReadOnly* fromFloat32Array(DOMFloat32Array*, ExceptionState&);
+    static DOMMatrixReadOnly* fromFloat64Array(DOMFloat64Array*, ExceptionState&);
+    static DOMMatrixReadOnly* fromMatrix(DOMMatrixInit&, ExceptionState&);
     virtual ~DOMMatrixReadOnly();
 
     double a() const { return m_matrix->m11(); }
@@ -46,26 +53,56 @@ public:
     bool is2D() const;
     bool isIdentity() const;
 
-    DOMMatrix* multiply(DOMMatrix*);
+    DOMMatrix* multiply(DOMMatrixInit&, ExceptionState&);
     DOMMatrix* translate(double tx, double ty, double tz = 0);
     DOMMatrix* scale(double scale, double ox = 0, double oy = 0);
     DOMMatrix* scale3d(double scale, double ox = 0, double oy = 0, double oz = 0);
     DOMMatrix* scaleNonUniform(double sx, double sy = 1, double sz = 1,
         double ox = 0, double oy = 0, double oz = 0);
+    DOMMatrix* skewX(double sx);
+    DOMMatrix* skewY(double sy);
+    DOMMatrix* flipX();
+    DOMMatrix* flipY();
+    DOMMatrix* inverse();
 
     DOMFloat32Array* toFloat32Array() const;
     DOMFloat64Array* toFloat64Array() const;
+
+    const String toString() const;
 
     const TransformationMatrix& matrix() const { return *m_matrix; }
 
     DEFINE_INLINE_TRACE() { }
 
 protected:
+    DOMMatrixReadOnly() {}
+
+    template <typename T>
+    DOMMatrixReadOnly(T sequence, int size)
+    {
+        if (size == 6) {
+            m_matrix = TransformationMatrix::create(
+                sequence[0], sequence[1], sequence[2], sequence[3],
+                sequence[4], sequence[5]);
+            m_is2D = true;
+        } else if (size == 16) {
+            m_matrix = TransformationMatrix::create(
+                sequence[0], sequence[1], sequence[2], sequence[3],
+                sequence[4], sequence[5], sequence[6], sequence[7],
+                sequence[8], sequence[9], sequence[10], sequence[11],
+                sequence[12], sequence[13], sequence[14], sequence[15]);
+            m_is2D = false;
+        } else {
+            NOTREACHED();
+        }
+    }
+
+    static bool validateAndFixup(DOMMatrixInit&, ExceptionState&);
     // TransformationMatrix needs to be 16-byte aligned. PartitionAlloc
-    // supports 16-byte alignment but Oilpan doesn't. So we use an OwnPtr
+    // supports 16-byte alignment but Oilpan doesn't. So we use an std::unique_ptr
     // to allocate TransformationMatrix on PartitionAlloc.
     // TODO(oilpan): Oilpan should support 16-byte aligned allocations.
-    OwnPtr<TransformationMatrix> m_matrix;
+    std::unique_ptr<TransformationMatrix> m_matrix;
     bool m_is2D;
 };
 

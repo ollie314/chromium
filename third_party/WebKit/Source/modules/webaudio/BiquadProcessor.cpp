@@ -22,8 +22,10 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "modules/webaudio/BiquadProcessor.h"
 #include "modules/webaudio/BiquadDSPKernel.h"
+#include "modules/webaudio/BiquadProcessor.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -45,9 +47,9 @@ BiquadProcessor::~BiquadProcessor()
         uninitialize();
 }
 
-PassOwnPtr<AudioDSPKernel> BiquadProcessor::createKernel()
+std::unique_ptr<AudioDSPKernel> BiquadProcessor::createKernel()
 {
-    return adoptPtr(new BiquadDSPKernel(this));
+    return wrapUnique(new BiquadDSPKernel(this));
 }
 
 void BiquadProcessor::checkForDirtyCoefficients()
@@ -89,6 +91,14 @@ void BiquadProcessor::process(const AudioBus* source, AudioBus* destination, siz
         return;
     }
 
+    // Synchronize with possible dynamic changes to the impulse response.
+    MutexTryLocker tryLocker(m_processLock);
+    if (!tryLocker.locked()) {
+        // Can't get the lock. We must be in the middle of changing something.
+        destination->zero();
+        return;
+    }
+
     checkForDirtyCoefficients();
 
     // For each channel of our input, process using the corresponding BiquadDSPKernel into the output channel.
@@ -110,7 +120,7 @@ void BiquadProcessor::getFrequencyResponse(int nFrequencies, const float* freque
     // to avoid interfering with the processing running in the audio
     // thread on the main kernels.
 
-    OwnPtr<BiquadDSPKernel> responseKernel = adoptPtr(new BiquadDSPKernel(this));
+    std::unique_ptr<BiquadDSPKernel> responseKernel = wrapUnique(new BiquadDSPKernel(this));
     responseKernel->getFrequencyResponse(nFrequencies, frequencyHz, magResponse, phaseResponse);
 }
 

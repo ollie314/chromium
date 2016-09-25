@@ -6,6 +6,7 @@
 
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_id_provider.h"
+#include "platform/animation/CompositorAnimationHost.h"
 #include "platform/animation/CompositorAnimationPlayer.h"
 #include "platform/animation/CompositorAnimationPlayerClient.h"
 
@@ -29,16 +30,21 @@ cc::AnimationTimeline* CompositorAnimationTimeline::animationTimeline() const
     return m_animationTimeline.get();
 }
 
+CompositorAnimationHost CompositorAnimationTimeline::compositorAnimationHost()
+{
+    return CompositorAnimationHost(m_animationTimeline->animation_host());
+}
+
 void CompositorAnimationTimeline::playerAttached(const blink::CompositorAnimationPlayerClient& client)
 {
     if (client.compositorPlayer())
-        m_animationTimeline->AttachPlayer(client.compositorPlayer()->animationPlayer());
+        m_animationTimeline->AttachPlayer(client.compositorPlayer()->ccAnimationPlayer());
 }
 
 void CompositorAnimationTimeline::playerDestroyed(const blink::CompositorAnimationPlayerClient& client)
 {
     if (client.compositorPlayer())
-        m_animationTimeline->DetachPlayer(client.compositorPlayer()->animationPlayer());
+        m_animationTimeline->DetachPlayer(client.compositorPlayer()->ccAnimationPlayer());
 }
 
 } // namespace blink

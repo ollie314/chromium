@@ -16,9 +16,10 @@
 #include "base/macros.h"
 #include "cc/base/cc_export.h"
 #include "cc/base/list_container.h"
+#include "cc/quads/draw_quad.h"
+#include "cc/quads/largest_draw_quad.h"
 #include "cc/quads/render_pass_id.h"
 #include "cc/surfaces/surface_id.h"
-#include "skia/ext/refptr.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/transform.h"
@@ -38,8 +39,9 @@ class RenderPassDrawQuad;
 class SharedQuadState;
 
 // A list of DrawQuad objects, sorted internally in front-to-back order.
-class QuadList : public ListContainer<DrawQuad> {
+class CC_EXPORT QuadList : public ListContainer<DrawQuad> {
  public:
+  QuadList();
   explicit QuadList(size_t default_size_to_reserve);
 
   typedef QuadList::ReverseIterator BackToFrontIterator;
@@ -65,6 +67,9 @@ class CC_EXPORT RenderPass {
   // A shallow copy of the render pass, which does not include its quads or copy
   // requests.
   std::unique_ptr<RenderPass> Copy(RenderPassId new_id) const;
+
+  // A deep copy of the render pass that includes quads.
+  std::unique_ptr<RenderPass> DeepCopy() const;
 
   // A deep copy of the render passes in the list including the quads.
   static void CopyAll(const std::vector<std::unique_ptr<RenderPass>>& in,

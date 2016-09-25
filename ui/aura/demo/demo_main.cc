@@ -12,7 +12,9 @@
 #include "base/message_loop/message_loop.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_monitor_device_source.h"
+#include "base/run_loop.h"
 #include "build/build_config.h"
+#include "cc/surfaces/surface_manager.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/window_tree_client.h"
@@ -29,7 +31,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/skia_util.h"
-#include "ui/gl/gl_surface.h"
+#include "ui/gl/init/gl_factory.h"
 
 #if defined(USE_X11)
 #include "ui/gfx/x/x11_connection.h"  // nogncheck
@@ -130,7 +132,7 @@ int DemoMain() {
   gfx::InitializeThreadedX11();
 #endif
 
-  gfx::GLSurface::InitializeOneOff();
+  gl::init::InitializeGLOneOff();
 
 #if defined(OS_WIN)
   display::win::SetDefaultDeviceScaleFactor(1.0f);
@@ -138,8 +140,10 @@ int DemoMain() {
 
   // The ContextFactory must exist before any Compositors are created.
   bool context_factory_for_test = false;
+  cc::SurfaceManager surface_manager;
   std::unique_ptr<ui::InProcessContextFactory> context_factory(
-      new ui::InProcessContextFactory(context_factory_for_test, nullptr));
+      new ui::InProcessContextFactory(context_factory_for_test,
+                                      &surface_manager));
   context_factory->set_use_test_surface(false);
 
   // Create the message-loop here before creating the root window.
@@ -152,7 +156,7 @@ int DemoMain() {
   env->set_context_factory(context_factory.get());
   std::unique_ptr<aura::TestScreen> test_screen(
       aura::TestScreen::Create(gfx::Size()));
-  gfx::Screen::SetScreenInstance(test_screen.get());
+  display::Screen::SetScreenInstance(test_screen.get());
   std::unique_ptr<aura::WindowTreeHost> host(
       test_screen->CreateHostForPrimaryDisplay());
   std::unique_ptr<DemoWindowTreeClient> window_tree_client(
@@ -189,7 +193,7 @@ int DemoMain() {
   window2.AddChild(&window3);
 
   host->Show();
-  base::MessageLoopForUI::current()->Run();
+  base::RunLoop().Run();
 
   return 0;
 }

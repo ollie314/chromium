@@ -23,7 +23,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "content/common/content_export.h"
-#include "media/audio/audio_parameters.h"
+#include "media/base/audio_parameters.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -39,8 +39,19 @@ namespace content {
 // The enumerations returned by AudioOutputDeviceEnumerator::Enumerate() contain
 // elements of this type. It is used only in the browser side.
 struct AudioOutputDeviceInfo {
+  AudioOutputDeviceInfo();
+  AudioOutputDeviceInfo(const AudioOutputDeviceInfo& audio_output_device_info);
+  AudioOutputDeviceInfo(AudioOutputDeviceInfo&& audio_output_device_info);
+  AudioOutputDeviceInfo& operator=(
+      const AudioOutputDeviceInfo& audio_output_device_info);
+  AudioOutputDeviceInfo(const std::string& unique_id,
+                        const std::string& device_name,
+                        const std::string& group_id,
+                        media::AudioParameters output_params);
+  ~AudioOutputDeviceInfo();
   std::string unique_id;
   std::string device_name;
+  std::string group_id;
   media::AudioParameters output_params;
 };
 

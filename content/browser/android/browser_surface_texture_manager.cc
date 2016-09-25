@@ -27,7 +27,7 @@ BrowserSurfaceTextureManager* BrowserSurfaceTextureManager::GetInstance() {
 void BrowserSurfaceTextureManager::RegisterSurfaceTexture(
     int surface_texture_id,
     int client_id,
-    gfx::SurfaceTexture* surface_texture) {
+    gl::SurfaceTexture* surface_texture) {
   content::CreateSurfaceTextureSurface(
       surface_texture_id, client_id, surface_texture);
 }
@@ -41,10 +41,9 @@ void BrowserSurfaceTextureManager::UnregisterSurfaceTexture(
 gfx::AcceleratedWidget
 BrowserSurfaceTextureManager::AcquireNativeWidgetForSurfaceTexture(
     int surface_texture_id) {
-  gfx::ScopedJavaSurface surface(
-      content::GetSurfaceTextureSurface(
-          surface_texture_id,
-          BrowserGpuChannelHostFactory::instance()->GetGpuChannelId()));
+  gl::ScopedJavaSurface surface(content::GetSurfaceTextureSurface(
+      surface_texture_id,
+      BrowserGpuChannelHostFactory::instance()->GetGpuChannelId()));
   if (surface.j_surface().is_null())
     return NULL;
 
@@ -59,26 +58,10 @@ BrowserSurfaceTextureManager::AcquireNativeWidgetForSurfaceTexture(
   return native_window;
 }
 
-void BrowserSurfaceTextureManager::EstablishSurfaceTexturePeer(
-    base::ProcessHandle render_process_handle,
-    scoped_refptr<gfx::SurfaceTexture> surface_texture,
-    int render_frame_id,
-    int player_id) {
-  if (!surface_texture.get())
-    return;
-
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&BrowserMediaPlayerManager::SetSurfacePeer, surface_texture,
-                 render_process_handle, render_frame_id, player_id));
-}
-
 BrowserSurfaceTextureManager::BrowserSurfaceTextureManager() {
-  SurfaceTexturePeer::InitInstance(this);
 }
 
 BrowserSurfaceTextureManager::~BrowserSurfaceTextureManager() {
-  SurfaceTexturePeer::InitInstance(nullptr);
 }
 
 }  // namespace content

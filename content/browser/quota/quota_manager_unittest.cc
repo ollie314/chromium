@@ -21,7 +21,7 @@
 #include "base/stl_util.h"
 #include "base/sys_info.h"
 #include "base/test/histogram_tester.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "content/public/test/mock_special_storage_policy.h"
 #include "content/public/test/mock_storage_client.h"
@@ -123,7 +123,7 @@ class QuotaManagerTest : public testing::Test {
 
  protected:
   void ResetQuotaManager(bool is_incognito) {
-    quota_manager_ = new QuotaManager(is_incognito, data_dir_.path(),
+    quota_manager_ = new QuotaManager(is_incognito, data_dir_.GetPath(),
                                       base::ThreadTaskRunnerHandle::Get().get(),
                                       base::ThreadTaskRunnerHandle::Get().get(),
                                       mock_special_storage_policy_.get());
@@ -453,7 +453,7 @@ class QuotaManagerTest : public testing::Test {
   const OriginInfoTableEntries& origin_info_entries() const {
     return origin_info_entries_;
   }
-  base::FilePath profile_path() const { return data_dir_.path(); }
+  base::FilePath profile_path() const { return data_dir_.GetPath(); }
   int status_callback_count() const { return status_callback_count_; }
   void reset_status_callback_count() { status_callback_count_ = 0; }
 

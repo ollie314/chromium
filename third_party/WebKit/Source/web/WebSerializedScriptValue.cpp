@@ -39,13 +39,13 @@ namespace blink {
 
 WebSerializedScriptValue WebSerializedScriptValue::fromString(const WebString& s)
 {
-    return SerializedScriptValueFactory::instance().createFromWire(s);
+    return SerializedScriptValue::create(s);
 }
 
 WebSerializedScriptValue WebSerializedScriptValue::serialize(v8::Local<v8::Value> value)
 {
     TrackExceptionState exceptionState;
-    WebSerializedScriptValue serializedValue = SerializedScriptValueFactory::instance().create(v8::Isolate::GetCurrent(), value, nullptr, exceptionState);
+    WebSerializedScriptValue serializedValue = SerializedScriptValue::serialize(v8::Isolate::GetCurrent(), value, nullptr, nullptr, exceptionState);
     if (exceptionState.hadException())
         return createInvalid();
     return serializedValue;
@@ -53,7 +53,7 @@ WebSerializedScriptValue WebSerializedScriptValue::serialize(v8::Local<v8::Value
 
 WebSerializedScriptValue WebSerializedScriptValue::createInvalid()
 {
-    return SerializedScriptValueFactory::instance().create();
+    return SerializedScriptValue::create();
 }
 
 void WebSerializedScriptValue::reset()
@@ -76,12 +76,12 @@ v8::Local<v8::Value> WebSerializedScriptValue::deserialize()
     return m_private->deserialize();
 }
 
-WebSerializedScriptValue::WebSerializedScriptValue(const PassRefPtr<SerializedScriptValue>& value)
+WebSerializedScriptValue::WebSerializedScriptValue(PassRefPtr<SerializedScriptValue> value)
     : m_private(value)
 {
 }
 
-WebSerializedScriptValue& WebSerializedScriptValue::operator=(const PassRefPtr<SerializedScriptValue>& value)
+WebSerializedScriptValue& WebSerializedScriptValue::operator=(PassRefPtr<SerializedScriptValue> value)
 {
     m_private = value;
     return *this;

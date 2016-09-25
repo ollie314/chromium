@@ -9,7 +9,7 @@
 
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
@@ -214,7 +214,7 @@ bool RenderbufferManager::ComputeEstimatedRenderbufferSize(
   if (!SafeMultiplyUint32(width, height, &temp)) {
     return false;
   }
-  if (!SafeMultiplyUint32(temp, samples, &temp)) {
+  if (!SafeMultiplyUint32(temp, (samples == 0 ? 1 : samples), &temp)) {
     return false;
   }
   GLenum impl_format = InternalRenderbufferFormatToImplFormat(internal_format);
@@ -264,7 +264,7 @@ bool RenderbufferManager::OnMemoryDump(
                     base::trace_event::MemoryAllocatorDump::kUnitsBytes,
                     static_cast<uint64_t>(renderbuffer->EstimatedSize()));
 
-    auto guid = gfx::GetGLRenderbufferGUIDForTracing(
+    auto guid = gl::GetGLRenderbufferGUIDForTracing(
         memory_tracker_->ShareGroupTracingGUID(), client_renderbuffer_id);
     pmd->CreateSharedGlobalAllocatorDump(guid);
     pmd->AddOwnershipEdge(dump->guid(), guid);

@@ -27,13 +27,13 @@ enum class PasswordTittleType {
 class Profile;
 
 // The desired width and height in pixels for an account avatar.
-extern const int kAvatarImageSize;
+constexpr int kAvatarImageSize = 32;
 
 // Crops and scales |image_skia| to the desired size for an account avatar.
 gfx::ImageSkia ScaleImageForAccountAvatar(gfx::ImageSkia image_skia);
 
 // Returns the upper and lower label to be displayed in the account chooser UI
-// for |form|.
+// for |form|. The lower label can be multiline.
 std::pair<base::string16, base::string16> GetCredentialLabelsForAccountChooser(
     const autofill::PasswordForm& form);
 

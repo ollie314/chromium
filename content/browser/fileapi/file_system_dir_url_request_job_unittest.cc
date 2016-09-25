@@ -14,9 +14,10 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/public/test/mock_special_storage_policy.h"
 #include "content/public/test/test_file_system_backend.h"
@@ -132,8 +133,8 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     special_storage_policy_ = new MockSpecialStoragePolicy;
-    file_system_context_ = CreateFileSystemContextForTesting(
-        NULL, temp_dir_.path());
+    file_system_context_ =
+        CreateFileSystemContextForTesting(NULL, temp_dir_.GetPath());
 
     file_system_context_->OpenFileSystem(
         GURL("http://remote/"),
@@ -151,7 +152,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   }
 
   void SetUpAutoMountContext(base::FilePath* mnt_point) {
-    *mnt_point = temp_dir_.path().AppendASCII("auto_mount_dir");
+    *mnt_point = temp_dir_.GetPath().AppendASCII("auto_mount_dir");
     ASSERT_TRUE(base::CreateDirectory(*mnt_point));
 
     ScopedVector<storage::FileSystemBackend> additional_providers;
@@ -162,7 +163,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     handlers.push_back(base::Bind(&TestAutoMountForURLRequest));
 
     file_system_context_ = CreateFileSystemContextWithAutoMountersForTesting(
-        NULL, std::move(additional_providers), handlers, temp_dir_.path());
+        NULL, std::move(additional_providers), handlers, temp_dir_.GetPath());
   }
 
   void OnOpenFileSystem(const GURL& root_url,
@@ -184,7 +185,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     request_->Start();
     ASSERT_TRUE(request_->is_pending());  // verify that we're starting async
     if (run_to_completion)
-      base::MessageLoop::current()->Run();
+      base::RunLoop().Run();
   }
 
   void TestRequest(const GURL& url) {
@@ -368,7 +369,8 @@ TEST_F(FileSystemDirURLRequestJobTest, Cancel) {
   CreateDirectory("foo");
   TestRequestNoRun(CreateFileSystemURL("foo/"));
   // Run StartAsync() and only StartAsync().
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, request_.release());
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE,
+                                                  request_.release());
   base::RunLoop().RunUntilIdle();
   // If we get here, success! we didn't crash!
 }
@@ -377,7 +379,7 @@ TEST_F(FileSystemDirURLRequestJobTest, Incognito) {
   CreateDirectory("foo");
 
   scoped_refptr<FileSystemContext> file_system_context =
-      CreateIncognitoFileSystemContextForTesting(NULL, temp_dir_.path());
+      CreateIncognitoFileSystemContextForTesting(NULL, temp_dir_.GetPath());
 
   TestRequestWithContext(CreateFileSystemURL("/"),
                          file_system_context.get());

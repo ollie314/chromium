@@ -43,14 +43,14 @@
 #include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutTableCell.h"
 #include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/layout/compositing/CompositedLayerMapping.h"
 #include "core/layout/line/InlineTextBox.h"
-#include "core/layout/svg/LayoutSVGContainer.h"
 #include "core/layout/svg/LayoutSVGGradientStop.h"
 #include "core/layout/svg/LayoutSVGImage.h"
 #include "core/layout/svg/LayoutSVGInlineText.h"
-#include "core/layout/svg/LayoutSVGPath.h"
 #include "core/layout/svg/LayoutSVGRoot.h"
+#include "core/layout/svg/LayoutSVGShape.h"
 #include "core/layout/svg/LayoutSVGText.h"
 #include "core/layout/svg/SVGLayoutTreeAsText.h"
 #include "core/page/PrintContext.h"
@@ -106,7 +106,7 @@ static String getTagName(Node* n)
 {
     if (n->isDocumentNode())
         return "";
-    if (n->getNodeType() == Node::COMMENT_NODE)
+    if (n->getNodeType() == Node::kCommentNode)
         return "COMMENT";
     return n->nodeName();
 }
@@ -183,43 +183,8 @@ void LayoutTreeAsText::writeLayoutObject(TextStream& ts, const LayoutObject& o, 
         }
     }
 
-    LayoutBlock* cb = o.containingBlock();
-    bool adjustForTableCells = cb ? cb->isTableCell() : false;
-
-    LayoutRect r;
-    if (o.isText()) {
-        // FIXME: Would be better to dump the bounding box x and y rather than the first run's x and y, but that would involve updating
-        // many test results.
-        const LayoutText& text = toLayoutText(o);
-        IntRect linesBox = text.linesBoundingBox();
-        r = LayoutRect(IntRect(text.firstRunX(), text.firstRunY(), linesBox.width(), linesBox.height()));
-        if (adjustForTableCells && !text.hasTextBoxes())
-            adjustForTableCells = false;
-    } else if (o.isLayoutInline()) {
-        // FIXME: Would be better not to just dump 0, 0 as the x and y here.
-        const LayoutInline& inlineFlow = toLayoutInline(o);
-        r = LayoutRect(IntRect(0, 0, inlineFlow.linesBoundingBox().width(), inlineFlow.linesBoundingBox().height()));
-        adjustForTableCells = false;
-    } else if (o.isTableCell()) {
-        // FIXME: Deliberately dump the "inner" box of table cells, since that is what current results reflect.  We'd like
-        // to clean up the results to dump both the outer box and the intrinsic padding so that both bits of information are
-        // captured by the results.
-        const LayoutTableCell& cell = toLayoutTableCell(o);
-        r = LayoutRect(cell.location().x(), cell.location().y() + cell.intrinsicPaddingBefore(), cell.size().width(), cell.size().height() - cell.intrinsicPaddingBefore() - cell.intrinsicPaddingAfter());
-    } else if (o.isBox()) {
-        r = toLayoutBox(&o)->frameRect();
-    }
-
-    // FIXME: Temporary in order to ensure compatibility with existing layout test results.
-    if (adjustForTableCells)
-        r.move(0, -toLayoutTableCell(o.containingBlock())->intrinsicPaddingBefore());
-
-    if (o.isLayoutView()) {
-        r.setWidth(LayoutUnit(toLayoutView(o).viewWidth(IncludeScrollbars)));
-        r.setHeight(LayoutUnit(toLayoutView(o).viewHeight(IncludeScrollbars)));
-    }
-
-    ts << " " << r;
+    LayoutRect rect = o.debugRect();
+    ts << " " << rect;
 
     if (!(o.isText() && !o.isBR())) {
         if (o.isFileUploadControl())
@@ -455,8 +420,8 @@ static void writeTextRun(TextStream& ts, const LayoutText& o, const InlineTextBo
 {
     // FIXME: For now use an "enclosingIntRect" model for x, y and logicalWidth, although this makes it harder
     // to detect any changes caused by the conversion to floating point. :(
-    int x = run.x();
-    int y = run.y();
+    int x = run.x().toInt();
+    int y = run.y().toInt();
     int logicalWidth = (run.left() + run.logicalWidth()).ceil() - x;
 
     // FIXME: Table cell adjustment is temporary until results can be updated.
@@ -538,10 +503,10 @@ void write(TextStream& ts, const LayoutObject& o, int indent, LayoutAsTextBehavi
         Widget* widget = toLayoutPart(o).widget();
         if (widget && widget->isFrameView()) {
             FrameView* view = toFrameView(widget);
-            LayoutView* root = view->layoutView();
-            if (root) {
-                root->document().updateLayout();
-                PaintLayer* layer = root->layer();
+            LayoutViewItem rootItem = view->layoutViewItem();
+            if (!rootItem.isNull()) {
+                rootItem.updateStyleAndLayout();
+                PaintLayer* layer = rootItem.layer();
                 if (layer)
                     LayoutTreeAsText::writeLayers(ts, layer, layer, layer->rect(), indent + 1, behavior);
             }
@@ -565,8 +530,7 @@ static void write(TextStream& ts, PaintLayer& layer,
     IntRect adjustedBackgroundClipRect = pixelSnappedIntRect(backgroundClipRect);
     IntRect adjustedClipRect = pixelSnappedIntRect(clipRect);
 
-    Settings* settings = layer.layoutObject()->document().settings();
-    bool reportFrameScrollInfo = layer.layoutObject()->isLayoutView() && settings && !settings->rootLayerScrolls();
+    bool reportFrameScrollInfo = layer.layoutObject()->isLayoutView() && !RuntimeEnabledFeatures::rootLayerScrollingEnabled();
 
     if (reportFrameScrollInfo) {
         LayoutView* layoutView = toLayoutView(layer.layoutObject());
@@ -580,7 +544,7 @@ static void write(TextStream& ts, PaintLayer& layer,
 
     writeIndent(ts, indent);
 
-    if (layer.layoutObject()->style()->visibility() == HIDDEN)
+    if (layer.layoutObject()->style()->visibility() == EVisibility::Hidden)
         ts << "hidden ";
 
     ts << "layer ";
@@ -659,7 +623,7 @@ void LayoutTreeAsText::writeLayers(TextStream& ts, const PaintLayer* rootLayer, 
     ClipRect damageRect, clipRectToApply;
     layer->clipper().calculateRects(ClipRectsContext(rootLayer, UncachedClipRects), paintRect, layerBounds, damageRect, clipRectToApply);
 
-    // Ensure our lists are up-to-date.
+    // Ensure our lists are up to date.
     layer->stackingNode()->updateLayerListsIfNeeded();
 
     LayoutPoint offsetFromRoot;
@@ -721,11 +685,11 @@ String nodePositionAsStringForTesting(Node* node)
     for (Node* n = node; n; n = parent) {
         parent = n->parentOrShadowHostNode();
         if (n != node)
-            result.appendLiteral(" of ");
+            result.append(" of ");
         if (parent) {
             if (body && n == body) {
                 // We don't care what offset body may be in the document.
-                result.appendLiteral("body");
+                result.append("body");
                 break;
             }
             if (n->isShadowRoot()) {
@@ -733,14 +697,14 @@ String nodePositionAsStringForTesting(Node* node)
                 result.append(getTagName(n));
                 result.append('}');
             } else {
-                result.appendLiteral("child ");
+                result.append("child ");
                 result.appendNumber(n->nodeIndex());
-                result.appendLiteral(" {");
+                result.append(" {");
                 result.append(getTagName(n));
                 result.append('}');
             }
         } else {
-            result.appendLiteral("document");
+            result.append("document");
         }
     }
 
@@ -785,7 +749,7 @@ static String externalRepresentation(LayoutBox* layoutObject, LayoutAsTextBehavi
 String externalRepresentation(LocalFrame* frame, LayoutAsTextBehavior behavior, const PaintLayer* markedLayer)
 {
     if (!(behavior & LayoutAsTextDontUpdateLayout))
-        frame->document()->updateLayout();
+        frame->document()->updateStyleAndLayout();
 
     LayoutObject* layoutObject = frame->contentLayoutObject();
     if (!layoutObject || !layoutObject->isBox())
@@ -805,7 +769,7 @@ String externalRepresentation(Element* element, LayoutAsTextBehavior behavior)
     // Doesn't support printing mode.
     ASSERT(!(behavior & LayoutAsTextPrintingMode));
     if (!(behavior & LayoutAsTextDontUpdateLayout))
-        element->document().updateLayout();
+        element->document().updateStyleAndLayout();
 
     LayoutObject* layoutObject = element->layoutObject();
     if (!layoutObject || !layoutObject->isBox())
@@ -829,7 +793,7 @@ static void writeCounterValuesFromChildren(TextStream& stream, LayoutObject* par
 
 String counterValueForElement(Element* element)
 {
-    element->document().updateLayout();
+    element->document().updateStyleAndLayout();
     TextStream stream;
     bool isFirstCounter = true;
     // The counter layoutObjects should be children of :before or :after pseudo-elements.
@@ -842,7 +806,7 @@ String counterValueForElement(Element* element)
 
 String markerTextForListItem(Element* element)
 {
-    element->document().updateLayout();
+    element->document().updateStyleAndLayout();
 
     LayoutObject* layoutObject = element->layoutObject();
     if (!layoutObject || !layoutObject->isListItem())

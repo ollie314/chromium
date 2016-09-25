@@ -69,7 +69,7 @@ protected:
     void SetUp() override
     {
         // We want the images to load and JavaScript to be on.
-        m_helper.initialize(true, 0, 0, &configureSettings);
+        m_helper.initialize(true, nullptr, nullptr, nullptr, &configureSettings);
     }
 
     void TearDown() override
@@ -105,7 +105,6 @@ protected:
         error.domain = "FrameSerializerTest";
 
         WebURLResponse response;
-        response.initialize();
         response.setMIMEType("text/html");
         response.setHTTPStatusCode(statusCode);
 
@@ -121,7 +120,7 @@ protected:
     {
         FrameTestHelpers::loadFrame(m_helper.webView()->mainFrame(), KURL(m_baseUrl, url).getString().utf8().data());
         FrameSerializer serializer(m_resources, *this);
-        Frame* frame = m_helper.webViewImpl()->mainFrameImpl()->frame();
+        Frame* frame = m_helper.webView()->mainFrameImpl()->frame();
         for (; frame; frame = frame->tree().traverseNext()) {
             // This is safe, because tests do not do cross-site navigation
             // (and therefore don't have remote frames).
@@ -141,7 +140,7 @@ protected:
         for (size_t i = 0; i < m_resources.size(); ++i) {
             const SerializedResource& resource = m_resources[i];
             if (resource.url == url && !resource.data->isEmpty()
-                && (mime.isNull() || equalIgnoringCase(resource.mimeType, mime)))
+                && (mime.isNull() || equalIgnoringASCIICase(resource.mimeType, mime)))
                 return &resource;
         }
         return nullptr;
@@ -184,7 +183,7 @@ private:
 
         StringBuilder uriBuilder;
         uriBuilder.append(m_rewriteFolder);
-        uriBuilder.appendLiteral("/");
+        uriBuilder.append('/');
         uriBuilder.append(m_rewriteURLs.get(completeURL));
         rewrittenLink = uriBuilder.toString();
         return true;
@@ -403,7 +402,7 @@ TEST_F(FrameSerializerTest, CSSImport)
 
 TEST_F(FrameSerializerTest, XMLDeclaration)
 {
-    V8TestingScope scope(v8::Isolate::GetCurrent());
+    V8TestingScope scope;
     setBaseFolder("frameserializer/xml/");
 
     registerURL("xmldecl.xml", "text/xml");

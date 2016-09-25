@@ -8,12 +8,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/memory/aligned_memory.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "media/base/channel_layout.h"
 #include "media/base/media_export.h"
@@ -29,7 +29,7 @@ class StructPtr;
 namespace media {
 class AudioBus;
 
-namespace interfaces {
+namespace mojom {
 class AudioBuffer;
 }
 
@@ -58,7 +58,7 @@ class MEDIA_EXPORT AudioBuffer
                                              const base::TimeDelta timestamp);
 
   // Create an AudioBuffer with |frame_count| frames. Buffer is allocated, but
-  // not initialized. Timestamp and duration are set to kNoTimestamp().
+  // not initialized. Timestamp and duration are set to kNoTimestamp.
   static scoped_refptr<AudioBuffer> CreateBuffer(SampleFormat sample_format,
                                                  ChannelLayout channel_layout,
                                                  int channel_count,
@@ -93,16 +93,6 @@ class MEDIA_EXPORT AudioBuffer
                   int source_frame_offset,
                   int dest_frame_offset,
                   AudioBus* dest);
-
-  // Copy |frames_to_copy| frames into |dest|, |frames_to_copy| is the number of
-  // frames to copy. The frames are converted from their source format into
-  // interleaved int32_t.
-  void ReadFramesInterleavedS32(int frames_to_copy, int32_t* dest);
-
-  // Copy |frames_to_copy| frames into |dest|, |frames_to_copy| is the number of
-  // frames to copy. The frames are converted from their source format into
-  // interleaved int16_t.
-  void ReadFramesInterleavedS16(int frames_to_copy, int16_t* dest);
 
   // Trim an AudioBuffer by removing |frames_to_trim| frames from the start.
   // Timestamp and duration are adjusted to reflect the fewer frames.
@@ -152,7 +142,7 @@ class MEDIA_EXPORT AudioBuffer
 
   // mojo::TypeConverter added as a friend so that AudioBuffer can be
   // transferred across a mojo connection.
-  friend struct mojo::TypeConverter<mojo::StructPtr<interfaces::AudioBuffer>,
+  friend struct mojo::TypeConverter<mojo::StructPtr<mojom::AudioBuffer>,
                                     scoped_refptr<AudioBuffer>>;
 
   // Allocates aligned contiguous buffer to hold all channel data (1 block for
@@ -176,13 +166,12 @@ class MEDIA_EXPORT AudioBuffer
   const int channel_count_;
   int sample_rate_;
   int adjusted_frame_count_;
-  int trim_start_;
   const bool end_of_stream_;
   base::TimeDelta timestamp_;
   base::TimeDelta duration_;
 
   // Contiguous block of channel data.
-  scoped_ptr<uint8_t, base::AlignedFreeDeleter> data_;
+  std::unique_ptr<uint8_t, base::AlignedFreeDeleter> data_;
   size_t data_size_;
 
   // For planar data, points to each channels data.

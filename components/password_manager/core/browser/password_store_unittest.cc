@@ -15,11 +15,12 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/password_manager/core/browser/affiliated_match_helper.h"
@@ -47,8 +48,6 @@ const char kTestWebRealm2[] = "https://two.example.com/";
 const char kTestWebOrigin2[] = "https://two.example.com/origin";
 const char kTestWebRealm3[] = "https://three.example.com/";
 const char kTestWebOrigin3[] = "https://three.example.com/origin";
-const char kTestWebRealm4[] = "https://four.example.com/";
-const char kTestWebOrigin4[] = "https://four.example.com/origin";
 const char kTestWebRealm5[] = "https://five.example.com/";
 const char kTestWebOrigin5[] = "https://five.example.com/origin";
 const char kTestPSLMatchingWebRealm[] = "https://psl.example.com/";
@@ -66,11 +65,12 @@ const char kTestUnrelatedAndroidRealm[] =
 class MockPasswordStoreConsumer : public PasswordStoreConsumer {
  public:
   MOCK_METHOD1(OnGetPasswordStoreResultsConstRef,
-               void(const std::vector<PasswordForm*>&));
+               void(const std::vector<std::unique_ptr<PasswordForm>>&));
 
   // GMock cannot mock methods with move-only args.
-  void OnGetPasswordStoreResults(ScopedVector<PasswordForm> results) override {
-    OnGetPasswordStoreResultsConstRef(results.get());
+  void OnGetPasswordStoreResults(
+      std::vector<std::unique_ptr<PasswordForm>> results) override {
+    OnGetPasswordStoreResultsConstRef(results);
   }
 };
 
@@ -86,14 +86,12 @@ class StartSyncFlareMock {
 
 class PasswordStoreTest : public testing::Test {
  protected:
-  void SetUp() override {
-    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  }
+  void SetUp() override { ASSERT_TRUE(temp_dir_.CreateUniqueTempDir()); }
 
   void TearDown() override { ASSERT_TRUE(temp_dir_.Delete()); }
 
   base::FilePath test_login_db_file_path() const {
-    return temp_dir_.path().Append(FILE_PATH_LITERAL("login_test"));
+    return temp_dir_.GetPath().Append(FILE_PATH_LITERAL("login_test"));
   }
 
   base::MessageLoopForUI message_loop_;
@@ -101,72 +99,45 @@ class PasswordStoreTest : public testing::Test {
 };
 
 ACTION(STLDeleteElements0) {
-  STLDeleteContainerPointers(arg0.begin(), arg0.end());
+  base::STLDeleteContainerPointers(arg0.begin(), arg0.end());
 }
 
 TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
-      base::WrapUnique(new LoginDatabase(test_login_db_file_path()))));
+      base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
   store->Init(syncer::SyncableService::StartSyncFlare());
 
   const time_t cutoff = 1325376000;  // 00:00 Jan 1 2012 UTC
   static const PasswordFormData form_data[] = {
-    // A form on https://www.google.com/ older than the cutoff. Will be ignored.
-    { PasswordForm::SCHEME_HTML,
-      "https://www.google.com",
-      "https://www.google.com/origin",
-      "https://www.google.com/action",
-      L"submit_element",
-      L"username_element",
-      L"password_element",
-      L"username_value_1",
-      L"",
-      true, true, cutoff - 1 },
-    // A form on https://www.google.com/ older than the cutoff. Will be ignored.
-    { PasswordForm::SCHEME_HTML,
-      "https://www.google.com",
-      "https://www.google.com/origin",
-      "https://www.google.com/action",
-      L"submit_element",
-      L"username_element",
-      L"password_element",
-      L"username_value_2",
-      L"",
-      true, true, cutoff - 1 },
-    // A form on https://www.google.com/ newer than the cutoff.
-    { PasswordForm::SCHEME_HTML,
-      "https://www.google.com",
-      "https://www.google.com/origin",
-      "https://www.google.com/action",
-      L"submit_element",
-      L"username_element",
-      L"password_element",
-      L"username_value_3",
-      L"",
-      true, true, cutoff + 1 },
-    // A form on https://accounts.google.com/ older than the cutoff.
-    { PasswordForm::SCHEME_HTML,
-      "https://accounts.google.com",
-      "https://accounts.google.com/origin",
-      "https://accounts.google.com/action",
-      L"submit_element",
-      L"username_element",
-      L"password_element",
-      L"username_value",
-      L"",
-      true, true, cutoff - 1 },
-    // A form on http://bar.example.com/ older than the cutoff.
-    { PasswordForm::SCHEME_HTML,
-      "http://bar.example.com",
-      "http://bar.example.com/origin",
-      "http://bar.example.com/action",
-      L"submit_element",
-      L"username_element",
-      L"password_element",
-      L"username_value",
-      L"",
-      true, false, cutoff - 1 },
+      // A form on https://www.google.com/ older than the cutoff. Will be
+      // ignored.
+      {PasswordForm::SCHEME_HTML, "https://www.google.com",
+       "https://www.google.com/origin", "https://www.google.com/action",
+       L"submit_element", L"username_element", L"password_element",
+       L"username_value_1", L"", true, cutoff - 1},
+      // A form on https://www.google.com/ older than the cutoff. Will be
+      // ignored.
+      {PasswordForm::SCHEME_HTML, "https://www.google.com",
+       "https://www.google.com/origin", "https://www.google.com/action",
+       L"submit_element", L"username_element", L"password_element",
+       L"username_value_2", L"", true, cutoff - 1},
+      // A form on https://www.google.com/ newer than the cutoff.
+      {PasswordForm::SCHEME_HTML, "https://www.google.com",
+       "https://www.google.com/origin", "https://www.google.com/action",
+       L"submit_element", L"username_element", L"password_element",
+       L"username_value_3", L"", true, cutoff + 1},
+      // A form on https://accounts.google.com/ older than the cutoff.
+      {PasswordForm::SCHEME_HTML, "https://accounts.google.com",
+       "https://accounts.google.com/origin",
+       "https://accounts.google.com/action", L"submit_element",
+       L"username_element", L"password_element", L"username_value", L"", true,
+       cutoff - 1},
+      // A form on http://bar.example.com/ older than the cutoff.
+      {PasswordForm::SCHEME_HTML, "http://bar.example.com",
+       "http://bar.example.com/origin", "http://bar.example.com/action",
+       L"submit_element", L"username_element", L"password_element",
+       L"username_value", L"", true, cutoff - 1},
   };
 
   // Build the forms vector and add the forms to the store.
@@ -175,62 +146,60 @@ TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
     all_forms.push_back(CreatePasswordFormFromDataForTesting(form_data[i]));
     store->AddLogin(*all_forms.back());
   }
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   // We expect to get back only the "recent" www.google.com login.
   // Theoretically these should never actually exist since there are no longer
   // any login forms on www.google.com to save, but we technically allow them.
   // We should not get back the older saved password though.
-  PasswordForm www_google;
-  www_google.scheme = PasswordForm::SCHEME_HTML;
-  www_google.signon_realm = "https://www.google.com";
-  std::vector<PasswordForm*> www_google_expected;
-  www_google_expected.push_back(all_forms[2]);
+  const PasswordStore::FormDigest www_google = {
+      PasswordForm::SCHEME_HTML, "https://www.google.com", GURL()};
+  std::vector<std::unique_ptr<PasswordForm>> www_google_expected;
+  www_google_expected.push_back(base::MakeUnique<PasswordForm>(*all_forms[2]));
 
   // We should still get the accounts.google.com login even though it's older
   // than our cutoff - this is the new location of all Google login forms.
-  PasswordForm accounts_google;
-  accounts_google.scheme = PasswordForm::SCHEME_HTML;
-  accounts_google.signon_realm = "https://accounts.google.com";
-  std::vector<PasswordForm*> accounts_google_expected;
-  accounts_google_expected.push_back(all_forms[3]);
+  const PasswordStore::FormDigest accounts_google = {
+      PasswordForm::SCHEME_HTML, "https://accounts.google.com", GURL()};
+  std::vector<std::unique_ptr<PasswordForm>> accounts_google_expected;
+  accounts_google_expected.push_back(
+      base::MakeUnique<PasswordForm>(*all_forms[3]));
 
   // Same thing for a generic saved login.
-  PasswordForm bar_example;
-  bar_example.scheme = PasswordForm::SCHEME_HTML;
-  bar_example.signon_realm = "http://bar.example.com";
-  std::vector<PasswordForm*> bar_example_expected;
-  bar_example_expected.push_back(all_forms[4]);
+  const PasswordStore::FormDigest bar_example = {
+      PasswordForm::SCHEME_HTML, "http://bar.example.com", GURL()};
+  std::vector<std::unique_ptr<PasswordForm>> bar_example_expected;
+  bar_example_expected.push_back(base::MakeUnique<PasswordForm>(*all_forms[4]));
 
   MockPasswordStoreConsumer consumer;
   testing::InSequence s;
   EXPECT_CALL(consumer,
               OnGetPasswordStoreResultsConstRef(
-                  UnorderedPasswordFormElementsAre(www_google_expected)))
+                  UnorderedPasswordFormElementsAre(&www_google_expected)))
       .RetiresOnSaturation();
   EXPECT_CALL(consumer,
               OnGetPasswordStoreResultsConstRef(
-                  UnorderedPasswordFormElementsAre(accounts_google_expected)))
+                  UnorderedPasswordFormElementsAre(&accounts_google_expected)))
       .RetiresOnSaturation();
   EXPECT_CALL(consumer,
               OnGetPasswordStoreResultsConstRef(
-                  UnorderedPasswordFormElementsAre(bar_example_expected)))
+                  UnorderedPasswordFormElementsAre(&bar_example_expected)))
       .RetiresOnSaturation();
 
   store->GetLogins(www_google, &consumer);
   store->GetLogins(accounts_google, &consumer);
   store->GetLogins(bar_example, &consumer);
 
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   store->ShutdownOnUIThread();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(PasswordStoreTest, StartSyncFlare) {
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
-      base::WrapUnique(new LoginDatabase(test_login_db_file_path()))));
+      base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
   StartSyncFlareMock mock;
   store->Init(
       base::Bind(&StartSyncFlareMock::StartSyncFlare, base::Unretained(&mock)));
@@ -240,10 +209,10 @@ TEST_F(PasswordStoreTest, StartSyncFlare) {
     form.signon_realm = "http://accounts.google.com/";
     EXPECT_CALL(mock, StartSyncFlare(syncer::PASSWORDS));
     store->AddLogin(form);
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
   store->ShutdownOnUIThread();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(PasswordStoreTest, GetLoginImpl) {
@@ -254,12 +223,12 @@ TEST_F(PasswordStoreTest, GetLoginImpl) {
       kTestWebOrigin1,
       "", L"", L"username_element",  L"password_element",
       L"username_value",
-      L"", true, true, 1};
+      L"", true, 1};
   /* clang-format on */
 
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
-      base::WrapUnique(new LoginDatabase(test_login_db_file_path()))));
+      base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
   store->Init(syncer::SyncableService::StartSyncFlare());
 
   // For each attribute in the primary key, create one form that mismatches on
@@ -288,17 +257,17 @@ TEST_F(PasswordStoreTest, GetLoginImpl) {
   store->AddLogin(*mismatching_form_3);
   store->AddLogin(*mismatching_form_4);
   store->AddLogin(*mismatching_form_5);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(store->GetLoginImpl(*test_form));
 
   store->AddLogin(*test_form);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   std::unique_ptr<PasswordForm> returned_form = store->GetLoginImpl(*test_form);
   ASSERT_TRUE(returned_form);
   EXPECT_EQ(*test_form, *returned_form);
 
   store->ShutdownOnUIThread();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(PasswordStoreTest, UpdateLoginPrimaryKeyFields) {
@@ -310,25 +279,25 @@ TEST_F(PasswordStoreTest, UpdateLoginPrimaryKeyFields) {
        kTestWebOrigin1,
        "", L"", L"username_element_1",  L"password_element_1",
        L"username_value_1",
-       L"", true, true, 1},
+       L"", true, 1},
       // The new credential with different values for all primary key fields.
       {PasswordForm::SCHEME_HTML,
        kTestWebRealm2,
        kTestWebOrigin2,
        "", L"", L"username_element_2",  L"password_element_2",
        L"username_value_2",
-       L"", true, true, 1}};
+       L"", true, 1}};
   /* clang-format on */
 
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
       base::ThreadTaskRunnerHandle::Get(), base::ThreadTaskRunnerHandle::Get(),
-      base::WrapUnique(new LoginDatabase(test_login_db_file_path()))));
+      base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
   store->Init(syncer::SyncableService::StartSyncFlare());
 
   std::unique_ptr<PasswordForm> old_form(
       CreatePasswordFormFromDataForTesting(kTestCredentials[0]));
   store->AddLogin(*old_form);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   MockPasswordStoreObserver mock_observer;
   store->AddObserver(&mock_observer);
@@ -343,20 +312,20 @@ TEST_F(PasswordStoreTest, UpdateLoginPrimaryKeyFields) {
   old_primary_key.username_value = old_form->username_value;
   old_primary_key.password_element = old_form->password_element;
   store->UpdateLoginWithPrimaryKey(*new_form, old_primary_key);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   MockPasswordStoreConsumer mock_consumer;
-  ScopedVector<autofill::PasswordForm> expected_forms;
+  std::vector<std::unique_ptr<PasswordForm>> expected_forms;
   expected_forms.push_back(std::move(new_form));
   EXPECT_CALL(mock_consumer,
               OnGetPasswordStoreResultsConstRef(
-                  UnorderedPasswordFormElementsAre(expected_forms.get())));
+                  UnorderedPasswordFormElementsAre(&expected_forms)));
   store->GetAutofillableLogins(&mock_consumer);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   store->RemoveObserver(&mock_observer);
   store->ShutdownOnUIThread();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // Verify that RemoveLoginsCreatedBetween() fires the completion callback after
@@ -370,7 +339,7 @@ TEST_F(PasswordStoreTest, RemoveLoginsCreatedBetweenCallbackIsCalled) {
        kTestWebOrigin1,
        "", L"", L"username_element_1",  L"password_element_1",
        L"username_value_1",
-       L"", true, true, 1};
+       L"", true, 1};
   /* clang-format on */
 
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
@@ -381,7 +350,7 @@ TEST_F(PasswordStoreTest, RemoveLoginsCreatedBetweenCallbackIsCalled) {
   std::unique_ptr<PasswordForm> test_form(
       CreatePasswordFormFromDataForTesting(kTestCredential));
   store->AddLogin(*test_form);
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   MockPasswordStoreObserver mock_observer;
   store->AddObserver(&mock_observer);
@@ -390,12 +359,12 @@ TEST_F(PasswordStoreTest, RemoveLoginsCreatedBetweenCallbackIsCalled) {
   store->RemoveLoginsCreatedBetween(
       base::Time::FromDoubleT(0), base::Time::FromDoubleT(2),
       base::MessageLoop::current()->QuitWhenIdleClosure());
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   testing::Mock::VerifyAndClearExpectations(&mock_observer);
 
   store->RemoveObserver(&mock_observer);
   store->ShutdownOnUIThread();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // When no Android applications are actually affiliated with the realm of the
@@ -410,20 +379,20 @@ TEST_F(PasswordStoreTest, GetLoginsWithoutAffiliations) {
        kTestWebOrigin1,
        "", L"", L"",  L"",
        L"username_value_1",
-       L"", true, true, 1},
+       L"", true, 1},
       // Credential that is a PSL match of the observed form.
       {PasswordForm::SCHEME_HTML,
        kTestPSLMatchingWebRealm,
        kTestPSLMatchingWebOrigin,
        "", L"", L"",  L"",
        L"username_value_2",
-       L"", true, true, 1},
+       L"", true, 1},
       // Credential for an unrelated Android application.
       {PasswordForm::SCHEME_HTML,
        kTestUnrelatedAndroidRealm,
        "", "", L"", L"", L"",
        L"username_value_3",
-       L"", true, true, 1}};
+       L"", true, 1}};
   /* clang-format on */
 
   scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
@@ -439,20 +408,19 @@ TEST_F(PasswordStoreTest, GetLoginsWithoutAffiliations) {
     all_credentials.push_back(
         CreatePasswordFormFromDataForTesting(kTestCredentials[i]));
     store->AddLogin(*all_credentials.back());
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
-  PasswordForm observed_form;
-  observed_form.scheme = PasswordForm::SCHEME_HTML;
-  observed_form.origin = GURL(kTestWebOrigin1);
-  observed_form.ssl_valid = true;
-  observed_form.signon_realm = kTestWebRealm1;
+  PasswordStore::FormDigest observed_form = {
+      PasswordForm::SCHEME_HTML, kTestWebRealm1, GURL(kTestWebOrigin1)};
 
   MockPasswordStoreConsumer mock_consumer;
-  ScopedVector<PasswordForm> expected_results;
-  expected_results.push_back(new PasswordForm(*all_credentials[0]));
-  expected_results.push_back(new PasswordForm(*all_credentials[1]));
-  for (PasswordForm* result : expected_results) {
+  std::vector<std::unique_ptr<PasswordForm>> expected_results;
+  expected_results.push_back(
+      base::MakeUnique<PasswordForm>(*all_credentials[0]));
+  expected_results.push_back(
+      base::MakeUnique<PasswordForm>(*all_credentials[1]));
+  for (const auto& result : expected_results) {
     if (result->signon_realm != observed_form.signon_realm)
       result->is_public_suffix_match = true;
   }
@@ -463,10 +431,10 @@ TEST_F(PasswordStoreTest, GetLoginsWithoutAffiliations) {
 
   EXPECT_CALL(mock_consumer,
               OnGetPasswordStoreResultsConstRef(
-                  UnorderedPasswordFormElementsAre(expected_results.get())));
+                  UnorderedPasswordFormElementsAre(&expected_results)));
   store->GetLogins(observed_form, &mock_consumer);
   store->ShutdownOnUIThread();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // There are 3 Android applications affiliated with the realm of the observed
@@ -483,53 +451,53 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliations) {
        kTestWebOrigin1,
        "", L"", L"",  L"",
        L"username_value_1",
-       L"", true, true, 1},
+       L"", true, 1},
       // Credential that is a PSL match of the observed form.
       {PasswordForm::SCHEME_HTML,
        kTestPSLMatchingWebRealm,
        kTestPSLMatchingWebOrigin,
        "", L"", L"",  L"",
        L"username_value_2",
-       L"", true, true, 1},
+       L"", true, 1},
       // Credential for an Android application affiliated with the realm of the
       // observed from.
       {PasswordForm::SCHEME_HTML,
        kTestAndroidRealm1,
        "", "", L"", L"", L"",
        L"username_value_3",
-       L"", true, true, 1},
+       L"", true, 1},
       // Second credential for the same Android application.
       {PasswordForm::SCHEME_HTML,
        kTestAndroidRealm1,
        "", "", L"", L"", L"",
        L"username_value_3b",
-       L"", true, true, 1},
+       L"", true, 1},
       // Third credential for the same application which is username-only.
       {PasswordForm::SCHEME_USERNAME_ONLY,
        kTestAndroidRealm1,
        "", "", L"", L"", L"",
        L"username_value_3c",
-       L"", true, true, 1},
+       L"", true, 1},
       // Credential for another Android application affiliated with the realm
       // of the observed from.
       {PasswordForm::SCHEME_HTML,
        kTestAndroidRealm2,
        "", "", L"", L"", L"",
        L"username_value_4",
-       L"", true, true, 1},
+       L"", true, 1},
       // Federated credential for this second Android application; this should
       // not be returned.
       {PasswordForm::SCHEME_HTML,
        kTestAndroidRealm2,
        "", "", L"", L"", L"",
        L"username_value_4b",
-       kTestingFederatedLoginMarker, true, true, 1},
+       kTestingFederatedLoginMarker, true, 1},
       // Credential for an unrelated Android application.
       {PasswordForm::SCHEME_HTML,
        kTestUnrelatedAndroidRealm,
        "", "", L"", L"", L"",
        L"username_value_5",
-       L"", true, true, 1}
+       L"", true, 1}
        };
   /* clang-format on */
 
@@ -546,24 +514,26 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliations) {
     all_credentials.push_back(
         CreatePasswordFormFromDataForTesting(kTestCredentials[i]));
     store->AddLogin(*all_credentials.back());
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
-  PasswordForm observed_form;
-  observed_form.scheme = PasswordForm::SCHEME_HTML;
-  observed_form.origin = GURL(kTestWebOrigin1);
-  observed_form.ssl_valid = true;
-  observed_form.signon_realm = kTestWebRealm1;
+  PasswordStore::FormDigest observed_form = {
+      PasswordForm::SCHEME_HTML, kTestWebRealm1, GURL(kTestWebOrigin1)};
 
   MockPasswordStoreConsumer mock_consumer;
-  ScopedVector<PasswordForm> expected_results;
-  expected_results.push_back(new PasswordForm(*all_credentials[0]));
-  expected_results.push_back(new PasswordForm(*all_credentials[1]));
-  expected_results.push_back(new PasswordForm(*all_credentials[2]));
-  expected_results.push_back(new PasswordForm(*all_credentials[3]));
-  expected_results.push_back(new PasswordForm(*all_credentials[5]));
+  std::vector<std::unique_ptr<PasswordForm>> expected_results;
+  expected_results.push_back(
+      base::MakeUnique<PasswordForm>(*all_credentials[0]));
+  expected_results.push_back(
+      base::MakeUnique<PasswordForm>(*all_credentials[1]));
+  expected_results.push_back(
+      base::MakeUnique<PasswordForm>(*all_credentials[2]));
+  expected_results.push_back(
+      base::MakeUnique<PasswordForm>(*all_credentials[3]));
+  expected_results.push_back(
+      base::MakeUnique<PasswordForm>(*all_credentials[5]));
 
-  for (PasswordForm* result : expected_results) {
+  for (const auto& result : expected_results) {
     if (result->signon_realm != observed_form.signon_realm &&
         !IsValidAndroidFacetURI(result->signon_realm))
       result->is_public_suffix_match = true;
@@ -580,11 +550,11 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliations) {
 
   EXPECT_CALL(mock_consumer,
               OnGetPasswordStoreResultsConstRef(
-                  UnorderedPasswordFormElementsAre(expected_results.get())));
+                  UnorderedPasswordFormElementsAre(&expected_results)));
 
   store->GetLogins(observed_form, &mock_consumer);
   store->ShutdownOnUIThread();
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 // This test must use passwords, which are not stored on Mac, therefore the test
@@ -617,7 +587,7 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
        kTestAndroidRealm1,
        "", "", L"", L"", L"",
        kTestUsername,
-       kTestOldPassword, true, true, 2},
+       kTestOldPassword, true, 2},
 
       // --- Positive samples --- Credentials that the password update should be
       // automatically propagated to.
@@ -628,7 +598,7 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
        kTestWebOrigin1,
        "", L"", L"",  L"",
        kTestUsername,
-       kTestOldPassword, true, true, 1},
+       kTestOldPassword, true, 1},
       // Credential for another affiliated web site with the same username.
       // Although the password is different than the current/old password for
       // the Android application, it should be updated regardless.
@@ -637,7 +607,7 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
        kTestWebOrigin2,
        "", L"", L"",  L"",
        kTestUsername,
-       kTestOtherPassword, true, true, 1},
+       kTestOtherPassword, true, 1},
 
       // --- Negative samples --- Credentials that the password update should
       // not be propagated to.
@@ -649,29 +619,21 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
        kTestWebOrigin3,
        "", L"", L"",  L"",
        kTestUsername,
-       kTestNewPassword, true, true, 1},
-      // Credential for another affiliated web site, but one that was saved
-      // under insecure conditions.
-      {PasswordForm::SCHEME_HTML,
-       kTestWebRealm4,
-       kTestWebOrigin4,
-       "", L"", L"",  L"",
-       kTestUsername,
-       kTestOldPassword, true, false, 1},
+       kTestNewPassword, true, 1},
       // Credential for the HTTP version of an affiliated web site.
       {PasswordForm::SCHEME_HTML,
        kTestInsecureWebRealm,
        kTestInsecureWebOrigin,
        "", L"", L"",  L"",
        kTestUsername,
-       kTestOldPassword, true, false, 1},
+       kTestOldPassword, true, 1},
       // Credential for an affiliated web site, but with a different username.
       {PasswordForm::SCHEME_HTML,
        kTestWebRealm1,
        kTestWebOrigin1,
        "", L"", L"",  L"",
        kTestOtherUsername,
-       kTestOldPassword, true, true, 1},
+       kTestOldPassword, true, 1},
       // Credential for a web site that is a PSL match to a web sites affiliated
       // with the Android application.
       {PasswordForm::SCHEME_HTML,
@@ -679,26 +641,26 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
        kTestPSLMatchingWebOrigin,
        "poisoned", L"poisoned", L"",  L"",
        kTestUsername,
-       kTestOldPassword, true, true, 1},
+       kTestOldPassword, true, 1},
       // Credential for an unrelated web site.
       {PasswordForm::SCHEME_HTML,
        kTestUnrelatedWebRealm,
        kTestUnrelatedWebOrigin,
        "", L"", L"",  L"",
        kTestUsername,
-       kTestOldPassword, true, true, 1},
+       kTestOldPassword, true, 1},
       // Credential for an affiliated Android application.
       {PasswordForm::SCHEME_HTML,
        kTestAndroidRealm2,
        "", "", L"", L"", L"",
        kTestUsername,
-       kTestOldPassword, true, true, 1},
+       kTestOldPassword, true, 1},
       // Credential for an unrelated Android application.
       {PasswordForm::SCHEME_HTML,
        kTestUnrelatedAndroidRealm,
        "", "", L"", L"", L"",
        kTestUsername,
-       kTestOldPassword, true, true, 1},
+       kTestOldPassword, true, 1},
       // Credential for an affiliated web site with the same username, but one
       // that was updated at the same time via Sync as the Android credential.
       {PasswordForm::SCHEME_HTML,
@@ -706,7 +668,7 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
        kTestWebOrigin5,
        "", L"", L"",  L"",
        kTestUsername,
-       kTestOtherPassword, true, true, 2}};
+       kTestOtherPassword, true, 2}};
   /* clang-format on */
 
   // The number of positive samples in |kTestCredentials|.
@@ -736,7 +698,7 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
         all_credentials.back()->date_synced =
             all_credentials.back()->date_created;
         store->AddLogin(*all_credentials.back());
-        base::MessageLoop::current()->RunUntilIdle();
+        base::RunLoop().RunUntilIdle();
       }
 
       // The helper must be injected after the initial test data is set up,
@@ -750,10 +712,11 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
       // Calculate how the correctly updated test data set should look like.
       size_t expected_number_of_propageted_updates =
           propagation_enabled ? kExpectedNumberOfPropagatedUpdates : 0u;
-      ScopedVector<PasswordForm> expected_credentials_after_update;
+      std::vector<std::unique_ptr<PasswordForm>>
+          expected_credentials_after_update;
       for (size_t i = 0; i < all_credentials.size(); ++i) {
         expected_credentials_after_update.push_back(
-            new autofill::PasswordForm(*all_credentials[i]));
+            base::MakeUnique<PasswordForm>(*all_credentials[i]));
         if (i < 1 + expected_number_of_propageted_updates) {
           expected_credentials_after_update.back()->password_value =
               base::WideToUTF16(kTestNewPassword);
@@ -765,10 +728,10 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
         affiliated_web_realms.push_back(kTestWebRealm1);
         affiliated_web_realms.push_back(kTestWebRealm2);
         affiliated_web_realms.push_back(kTestWebRealm3);
-        affiliated_web_realms.push_back(kTestWebRealm4);
         affiliated_web_realms.push_back(kTestWebRealm5);
         mock_helper->ExpectCallToGetAffiliatedWebRealms(
-            *expected_credentials_after_update[0], affiliated_web_realms);
+            PasswordStore::FormDigest(*expected_credentials_after_update[0]),
+            affiliated_web_realms);
       }
 
       // Explicitly update the Android credential, wait until things calm down,
@@ -791,17 +754,16 @@ TEST_F(PasswordStoreTest, MAYBE_UpdatePasswordsStoredForAffiliatedWebsites) {
       } else {
         store->UpdateLoginSync(*expected_credentials_after_update[0]);
       }
-      base::MessageLoop::current()->RunUntilIdle();
+      base::RunLoop().RunUntilIdle();
       store->RemoveObserver(&mock_observer);
 
       MockPasswordStoreConsumer mock_consumer;
-      EXPECT_CALL(
-          mock_consumer,
-          OnGetPasswordStoreResultsConstRef(UnorderedPasswordFormElementsAre(
-              expected_credentials_after_update.get())));
+      EXPECT_CALL(mock_consumer, OnGetPasswordStoreResultsConstRef(
+                                     UnorderedPasswordFormElementsAre(
+                                         &expected_credentials_after_update)));
       store->GetAutofillableLogins(&mock_consumer);
       store->ShutdownOnUIThread();
-      base::MessageLoop::current()->RunUntilIdle();
+      base::RunLoop().RunUntilIdle();
     }
   }
 }
@@ -813,17 +775,17 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliatedRealms) {
        kTestAndroidRealm1,
        "", "", L"", L"", L"",
        L"username_value_1",
-       L"", true, true, 1},
+       L"", true, 1},
       {PasswordForm::SCHEME_HTML,
        kTestAndroidRealm2,
        "", "", L"", L"", L"",
        L"username_value_2",
-       L"", true, true, 1},
+       L"", true, 1},
       {PasswordForm::SCHEME_HTML,
        kTestAndroidRealm3,
        "", "", L"", L"", L"",
        L"username_value_3",
-       L"", true, true, 1}};
+       L"", true, 1}};
   /* clang-format on */
 
   const bool kFalseTrue[] = {false, true};
@@ -832,7 +794,7 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliatedRealms) {
     scoped_refptr<PasswordStoreDefault> store(new PasswordStoreDefault(
         base::ThreadTaskRunnerHandle::Get(),
         base::ThreadTaskRunnerHandle::Get(),
-        base::WrapUnique(new LoginDatabase(test_login_db_file_path()))));
+        base::MakeUnique<LoginDatabase>(test_login_db_file_path())));
     store->Init(syncer::SyncableService::StartSyncFlare());
     store->RemoveLoginsCreatedBetween(base::Time(), base::Time::Max(),
                                       base::Closure());
@@ -844,13 +806,15 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliatedRealms) {
       if (blacklisted)
         all_credentials.back()->blacklisted_by_user = true;
       store->AddLogin(*all_credentials.back());
-      base::MessageLoop::current()->RunUntilIdle();
+      base::RunLoop().RunUntilIdle();
     }
 
     MockPasswordStoreConsumer mock_consumer;
-    ScopedVector<PasswordForm> expected_results;
-    for (size_t i = 0; i < arraysize(kTestCredentials); ++i)
-      expected_results.push_back(new PasswordForm(*all_credentials[i]));
+    std::vector<std::unique_ptr<PasswordForm>> expected_results;
+    for (size_t i = 0; i < arraysize(kTestCredentials); ++i) {
+      expected_results.push_back(
+          base::MakeUnique<PasswordForm>(*all_credentials[i]));
+    }
 
     MockAffiliatedMatchHelper* mock_helper = new MockAffiliatedMatchHelper;
     store->SetAffiliatedMatchHelper(base::WrapUnique(mock_helper));
@@ -865,7 +829,7 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliatedRealms) {
 
     EXPECT_CALL(mock_consumer,
                 OnGetPasswordStoreResultsConstRef(
-                    UnorderedPasswordFormElementsAre(expected_results.get())));
+                    UnorderedPasswordFormElementsAre(&expected_results)));
     if (blacklisted)
       store->GetBlacklistLoginsWithAffiliatedRealms(&mock_consumer);
     else
@@ -874,9 +838,9 @@ TEST_F(PasswordStoreTest, GetLoginsWithAffiliatedRealms) {
     // Since GetAutofillableLoginsWithAffiliatedRealms schedules a request for
     // affiliated realms to UI thread, don't shutdown UI thread until there are
     // no tasks in the UI queue.
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     store->ShutdownOnUIThread();
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 }
 

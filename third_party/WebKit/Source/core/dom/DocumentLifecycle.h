@@ -67,12 +67,12 @@ public:
         InPaintInvalidation,
         PaintInvalidationClean,
 
-        // When RuntimeEnabledFeatures::slimmingPaintV2Enabled.
-        InUpdatePaintProperties,
-        UpdatePaintPropertiesClean,
+        // In InPrePaint step, any data needed by painting are prepared.
+        // When RuntimeEnabledFeatures::slimmingPaintV2Enabled, paint property trees are built.
+        // Otherwise these steps are not applicable.
+        InPrePaint,
+        PrePaintClean,
 
-        // When RuntimeEnabledFeatures::slimmingPaintSynchronizedPaintingEnabled
-        // (implied by slimmingPaintV2Enabled).
         InPaint,
         PaintClean,
 
@@ -80,7 +80,6 @@ public:
         // to the style/layout/compositing states.
         Stopping,
         Stopped,
-        Disposed,
     };
 
     class Scope {
@@ -111,6 +110,27 @@ public:
         LifecycleState m_to;
     };
 
+    // Within this scope, state transitions are not allowed.
+    // Any attempts to advance or rewind will result in a DCHECK.
+    class DisallowTransitionScope {
+        STACK_ALLOCATED();
+        WTF_MAKE_NONCOPYABLE(DisallowTransitionScope);
+    public:
+        explicit DisallowTransitionScope(DocumentLifecycle& documentLifecycle)
+            : m_documentLifecycle(documentLifecycle)
+        {
+            m_documentLifecycle.incrementNoTransitionCount();
+        }
+
+        ~DisallowTransitionScope()
+        {
+            m_documentLifecycle.decrementNoTransitionCount();
+        }
+
+    private:
+        DocumentLifecycle& m_documentLifecycle;
+    };
+
     class DetachScope {
         STACK_ALLOCATED();
         WTF_MAKE_NONCOPYABLE(DetachScope);
@@ -130,12 +150,28 @@ public:
         DocumentLifecycle& m_documentLifecycle;
     };
 
+    // Throttling is disabled by default. Instantiating this class allows
+    // throttling (e.g., during BeginMainFrame). If a script needs to run inside
+    // this scope, DisallowThrottlingScope should be used to let the script
+    // perform a synchronous layout if necessary.
     class CORE_EXPORT AllowThrottlingScope {
         STACK_ALLOCATED();
         WTF_MAKE_NONCOPYABLE(AllowThrottlingScope);
     public:
         AllowThrottlingScope(DocumentLifecycle&);
         ~AllowThrottlingScope();
+    };
+
+    class CORE_EXPORT DisallowThrottlingScope {
+        STACK_ALLOCATED();
+        WTF_MAKE_NONCOPYABLE(DisallowThrottlingScope);
+
+    public:
+        DisallowThrottlingScope(DocumentLifecycle&);
+        ~DisallowThrottlingScope();
+
+    private:
+        int m_savedCount;
     };
 
     DocumentLifecycle();
@@ -152,6 +188,14 @@ public:
 
     void advanceTo(LifecycleState);
     void ensureStateAtMost(LifecycleState);
+
+    bool stateTransitionDisallowed() const { return m_disallowTransitionCount; }
+    void incrementNoTransitionCount() { m_disallowTransitionCount++; }
+    void decrementNoTransitionCount()
+    {
+        DCHECK_GT(m_disallowTransitionCount, 0);
+        m_disallowTransitionCount--;
+    }
 
     bool inDetach() const { return m_detachCount; }
     void incrementDetachCount() { m_detachCount++; }
@@ -173,6 +217,7 @@ private:
 
     LifecycleState m_state;
     int m_detachCount;
+    int m_disallowTransitionCount;
 };
 
 inline bool DocumentLifecycle::stateAllowsTreeMutations() const
@@ -182,7 +227,7 @@ inline bool DocumentLifecycle::stateAllowsTreeMutations() const
     return m_state != InStyleRecalc
         && m_state != InPerformLayout
         && m_state != InCompositingUpdate
-        && m_state != InUpdatePaintProperties
+        && m_state != InPrePaint
         && m_state != InPaint;
 }
 
@@ -206,7 +251,7 @@ inline bool DocumentLifecycle::stateAllowsDetach() const
         || m_state == LayoutClean
         || m_state == CompositingClean
         || m_state == PaintInvalidationClean
-        || m_state == UpdatePaintPropertiesClean
+        || m_state == PrePaintClean
         || m_state == PaintClean
         || m_state == Stopping;
 }
@@ -216,7 +261,7 @@ inline bool DocumentLifecycle::stateAllowsLayoutInvalidation() const
     return m_state != InPerformLayout
         && m_state != InCompositingUpdate
         && m_state != InPaintInvalidation
-        && m_state != InUpdatePaintProperties
+        && m_state != InPrePaint
         && m_state != InPaint;
 }
 

@@ -20,6 +20,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/pepper_flash.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -74,14 +75,10 @@ base::string16 GetPluginDescription(const WebPluginInfo& plugin) {
                      &system_flash_path);
     if (base::FilePath::CompareEqualIgnoreCase(plugin.path.value(),
                                                system_flash_path.value())) {
-#if defined(GOOGLE_CHROME_BUILD)
-      // Existing documentation for debugging Flash describe this plugin as
-      // "Debug" so preserve this nomenclature here.
-      desc += base::ASCIIToUTF16(" Debug");
-#else
-      // On Chromium, we can name it what it really is; the system plugin.
-      desc += base::ASCIIToUTF16(" System");
-#endif
+      if (chrome::IsSystemFlashScriptDebuggerPresent())
+        desc += base::ASCIIToUTF16(" Debug");
+      else
+        desc += base::ASCIIToUTF16(" System");
     }
   }
   return desc;
@@ -105,9 +102,9 @@ mojo::Array<mojom::MimeTypePtr> GeneratePluginMimeTypes(
 
 }  // namespace
 
-PluginsHandler::PluginsHandler(
+PluginsPageHandler::PluginsPageHandler(
     content::WebUI* web_ui,
-    mojo::InterfaceRequest<mojom::PluginsHandlerMojo> request)
+    mojo::InterfaceRequest<mojom::PluginsPageHandler> request)
     : web_ui_(web_ui),
       binding_(this, std::move(request)),
       weak_ptr_factory_(this) {
@@ -119,10 +116,10 @@ PluginsHandler::PluginsHandler(
                  content::Source<Profile>(profile));
 }
 
-PluginsHandler::~PluginsHandler() {}
+PluginsPageHandler::~PluginsPageHandler() {}
 
-void PluginsHandler::SetPluginEnabled(const mojo::String& plugin_path,
-                                      bool enable) {
+void PluginsPageHandler::SetPluginEnabled(const mojo::String& plugin_path,
+                                          bool enable) {
   Profile* profile = Profile::FromWebUI(web_ui_);
   PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile).get();
   plugin_prefs->EnablePlugin(
@@ -130,8 +127,8 @@ void PluginsHandler::SetPluginEnabled(const mojo::String& plugin_path,
       base::Bind(&AssertPluginEnabled));
 }
 
-void PluginsHandler::SetPluginGroupEnabled(const mojo::String& group_name,
-                                           bool enable) {
+void PluginsPageHandler::SetPluginGroupEnabled(const mojo::String& group_name,
+                                               bool enable) {
   Profile* profile = Profile::FromWebUI(web_ui_);
   PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile).get();
   base::string16 group_name_as_string16 = group_name.To<base::string16>();
@@ -151,16 +148,17 @@ void PluginsHandler::SetPluginGroupEnabled(const mojo::String& group_name,
     plugin_prefs->EnablePluginGroup(false, adobereader);
 }
 
-void PluginsHandler::GetShowDetails(const GetShowDetailsCallback& callback) {
+void PluginsPageHandler::GetShowDetails(
+    const GetShowDetailsCallback& callback) {
   callback.Run(show_details_.GetValue());
 }
 
-void PluginsHandler::SaveShowDetailsToPrefs(bool details_mode) {
+void PluginsPageHandler::SaveShowDetailsToPrefs(bool details_mode) {
   show_details_.SetValue(details_mode);
 }
 
-void PluginsHandler::SetPluginAlwaysAllowed(const mojo::String& plugin,
-                                            bool allowed) {
+void PluginsPageHandler::SetPluginAlwaysAllowed(const mojo::String& plugin,
+                                                bool allowed) {
   Profile* profile = Profile::FromWebUI(web_ui_);
   HostContentSettingsMapFactory::GetForProfile(profile)
       ->SetContentSettingCustomScope(
@@ -173,47 +171,49 @@ void PluginsHandler::SetPluginAlwaysAllowed(const mojo::String& plugin,
   // whitelisted by the user from automatically whitelisted ones.
   DictionaryPrefUpdate update(profile->GetPrefs(),
                               prefs::kContentSettingsPluginWhitelist);
-  update->SetBoolean(plugin, allowed);
+  update->SetBoolean(plugin.get(), allowed);
 }
 
-void PluginsHandler::GetPluginsData(const GetPluginsDataCallback& callback) {
+void PluginsPageHandler::GetPluginsData(
+    const GetPluginsDataCallback& callback) {
   if (weak_ptr_factory_.HasWeakPtrs())
     return;
 
   content::PluginService::GetInstance()->GetPlugins(
-      base::Bind(&PluginsHandler::RespondWithPluginsData,
+      base::Bind(&PluginsPageHandler::RespondWithPluginsData,
                  weak_ptr_factory_.GetWeakPtr(), callback));
 }
 
-void PluginsHandler::SetClientPage(mojom::PluginsPageMojoPtr page) {
+void PluginsPageHandler::SetClientPage(mojom::PluginsPagePtr page) {
   page_ = std::move(page);
 }
 
-void PluginsHandler::Observe(int type,
-                             const content::NotificationSource& source,
-                             const content::NotificationDetails& details) {
+void PluginsPageHandler::Observe(int type,
+                                 const content::NotificationSource& source,
+                                 const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED, type);
 
   if (weak_ptr_factory_.HasWeakPtrs())
     return;
 
-  content::PluginService::GetInstance()->GetPlugins(base::Bind(
-      &PluginsHandler::NotifyWithPluginsData, weak_ptr_factory_.GetWeakPtr()));
+  content::PluginService::GetInstance()->GetPlugins(
+      base::Bind(&PluginsPageHandler::NotifyWithPluginsData,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
-void PluginsHandler::RespondWithPluginsData(
+void PluginsPageHandler::RespondWithPluginsData(
     const GetPluginsDataCallback& callback,
     const std::vector<WebPluginInfo>& plugins) {
   callback.Run(GeneratePluginsData(plugins));
 }
 
-void PluginsHandler::NotifyWithPluginsData(
+void PluginsPageHandler::NotifyWithPluginsData(
     const std::vector<WebPluginInfo>& plugins) {
   if (page_)
     page_->OnPluginsUpdated(GeneratePluginsData(plugins));
 }
 
-mojo::Array<mojom::PluginDataPtr> PluginsHandler::GeneratePluginsData(
+mojo::Array<mojom::PluginDataPtr> PluginsPageHandler::GeneratePluginsData(
     const std::vector<WebPluginInfo>& plugins) {
   Profile* profile = Profile::FromWebUI(web_ui_);
   PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile).get();
@@ -244,7 +244,7 @@ mojo::Array<mojom::PluginDataPtr> PluginsHandler::GeneratePluginsData(
     bool group_enabled = false;
 
     mojo::Array<mojom::PluginFilePtr> plugin_files;
-    for (const auto& group_plugin : group_plugins) {
+    for (const auto* group_plugin : group_plugins) {
       bool plugin_enabled = plugin_prefs->IsPluginEnabled(*group_plugin);
 
       plugin_files.push_back(GeneratePluginFile(
@@ -261,13 +261,14 @@ mojo::Array<mojom::PluginDataPtr> PluginsHandler::GeneratePluginsData(
 
     plugin_data->always_allowed = false;
     plugin_data->trusted = false;
+    plugin_data->policy_click_to_play = GetClickToPlayPolicyEnabled();
 
     if (group_enabled) {
       if (plugin_metadata->GetSecurityStatus(*active_plugin) ==
           PluginMetadata::SECURITY_STATUS_FULLY_TRUSTED) {
         plugin_data->trusted = true;
         plugin_data->always_allowed = true;
-      } else {
+      } else if (!GetClickToPlayPolicyEnabled()) {
         const base::DictionaryValue* whitelist =
             profile->GetPrefs()->GetDictionary(
                 prefs::kContentSettingsPluginWhitelist);
@@ -294,7 +295,17 @@ mojo::Array<mojom::PluginDataPtr> PluginsHandler::GeneratePluginsData(
   return plugins_data;
 }
 
-mojom::PluginFilePtr PluginsHandler::GeneratePluginFile(
+bool PluginsPageHandler::GetClickToPlayPolicyEnabled() const {
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(profile);
+  std::string provider_id;
+  ContentSetting setting = map->GetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, &provider_id);
+  return (setting == CONTENT_SETTING_ASK && provider_id == "policy");
+}
+
+mojom::PluginFilePtr PluginsPageHandler::GeneratePluginFile(
     const WebPluginInfo& plugin,
     const base::string16& group_name,
     bool plugin_enabled) const {
@@ -311,7 +322,7 @@ mojom::PluginFilePtr PluginsHandler::GeneratePluginFile(
   return plugin_file;
 }
 
-std::string PluginsHandler::GetPluginEnabledMode(
+std::string PluginsPageHandler::GetPluginEnabledMode(
     const base::string16& plugin_name,
     const base::string16& group_name,
     bool plugin_enabled) const {
@@ -333,7 +344,7 @@ std::string PluginsHandler::GetPluginEnabledMode(
   return plugin_enabled ? "enabledByUser" : "disabledByUser";
 }
 
-std::string PluginsHandler::GetPluginGroupEnabledMode(
+std::string PluginsPageHandler::GetPluginGroupEnabledMode(
     const mojo::Array<mojom::PluginFilePtr>& plugin_files,
     bool group_enabled) const {
   bool plugins_enabled_by_policy = true;

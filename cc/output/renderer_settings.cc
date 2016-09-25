@@ -20,7 +20,8 @@ RendererSettings::RendererSettings()
       finish_rendering_on_resize(false),
       should_clear_root_render_pass(true),
       disable_display_vsync(false),
-      release_overlay_resources_on_swap_complete(false),
+      release_overlay_resources_after_gpu_query(false),
+      gl_composited_texture_quad_border(false),
       refresh_rate(60.0),
       highp_threshold_min(0),
       texture_id_allocation_chunk_size(64),
@@ -40,13 +41,20 @@ void RendererSettings::ToProtobuf(proto::RendererSettings* proto) const {
   proto->set_finish_rendering_on_resize(finish_rendering_on_resize);
   proto->set_should_clear_root_render_pass(should_clear_root_render_pass);
   proto->set_disable_display_vsync(disable_display_vsync);
-  proto->set_release_overlay_resources_on_swap_complete(
-      release_overlay_resources_on_swap_complete);
+  proto->set_release_overlay_resources_after_gpu_query(
+      release_overlay_resources_after_gpu_query);
   proto->set_refresh_rate(refresh_rate);
   proto->set_highp_threshold_min(highp_threshold_min);
   proto->set_texture_id_allocation_chunk_size(texture_id_allocation_chunk_size);
   proto->set_use_gpu_memory_buffer_resources(use_gpu_memory_buffer_resources);
   proto->set_preferred_tile_format(preferred_tile_format);
+
+  for (const auto& target : buffer_to_texture_target_map) {
+    auto* proto_target = proto->add_buffer_to_texture_target();
+    proto_target->set_buffer_usage(static_cast<uint32_t>(target.first.first));
+    proto_target->set_buffer_format(static_cast<uint32_t>(target.first.second));
+    proto_target->set_texture_target(target.second);
+  }
 }
 
 void RendererSettings::FromProtobuf(const proto::RendererSettings& proto) {
@@ -57,8 +65,8 @@ void RendererSettings::FromProtobuf(const proto::RendererSettings& proto) {
   finish_rendering_on_resize = proto.finish_rendering_on_resize();
   should_clear_root_render_pass = proto.should_clear_root_render_pass();
   disable_display_vsync = proto.disable_display_vsync();
-  release_overlay_resources_on_swap_complete =
-      proto.release_overlay_resources_on_swap_complete();
+  release_overlay_resources_after_gpu_query =
+      proto.release_overlay_resources_after_gpu_query();
   refresh_rate = proto.refresh_rate();
   highp_threshold_min = proto.highp_threshold_min();
   texture_id_allocation_chunk_size = proto.texture_id_allocation_chunk_size();
@@ -68,6 +76,16 @@ void RendererSettings::FromProtobuf(const proto::RendererSettings& proto) {
             static_cast<uint32_t>(RESOURCE_FORMAT_MAX));
   preferred_tile_format =
       static_cast<ResourceFormat>(proto.preferred_tile_format());
+
+  // |buffer_to_texture_target_map| may contain existing values, so clear first.
+  buffer_to_texture_target_map.clear();
+  for (const auto& proto_target : proto.buffer_to_texture_target()) {
+    buffer_to_texture_target_map.insert(BufferToTextureTargetMap::value_type(
+        BufferToTextureTargetKey(
+            static_cast<gfx::BufferUsage>(proto_target.buffer_usage()),
+            static_cast<gfx::BufferFormat>(proto_target.buffer_format())),
+        proto_target.texture_target()));
+  }
 }
 
 bool RendererSettings::operator==(const RendererSettings& other) const {
@@ -78,15 +96,16 @@ bool RendererSettings::operator==(const RendererSettings& other) const {
          finish_rendering_on_resize == other.finish_rendering_on_resize &&
          should_clear_root_render_pass == other.should_clear_root_render_pass &&
          disable_display_vsync == other.disable_display_vsync &&
-         release_overlay_resources_on_swap_complete ==
-             other.release_overlay_resources_on_swap_complete &&
+         release_overlay_resources_after_gpu_query ==
+             other.release_overlay_resources_after_gpu_query &&
          refresh_rate == other.refresh_rate &&
          highp_threshold_min == other.highp_threshold_min &&
          texture_id_allocation_chunk_size ==
              other.texture_id_allocation_chunk_size &&
          use_gpu_memory_buffer_resources ==
              other.use_gpu_memory_buffer_resources &&
-         preferred_tile_format == other.preferred_tile_format;
+         preferred_tile_format == other.preferred_tile_format &&
+         buffer_to_texture_target_map == other.buffer_to_texture_target_map;
 }
 
 }  // namespace cc

@@ -22,11 +22,8 @@
 #define CSSValuePair_h
 
 #include "core/CoreExport.h"
-#include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSValue.h"
-#include "core/style/ComputedStyle.h"
-#include "platform/Length.h"
-#include "wtf/text/StringBuilder.h"
+#include "wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -34,20 +31,12 @@ class CORE_EXPORT CSSValuePair : public CSSValue {
 public:
     enum IdenticalValuesPolicy { DropIdenticalValues, KeepIdenticalValues };
 
-    static CSSValuePair* create(CSSValue* first, CSSValue* second,
+    static CSSValuePair* create(const CSSValue* first, const CSSValue* second,
         IdenticalValuesPolicy identicalValuesPolicy)
     {
         return new CSSValuePair(first, second, identicalValuesPolicy);
     }
 
-    static CSSValuePair* create(const LengthSize& lengthSize, const ComputedStyle& style)
-    {
-        return new CSSValuePair(CSSPrimitiveValue::create(lengthSize.width(), style.effectiveZoom()), CSSPrimitiveValue::create(lengthSize.height(), style.effectiveZoom()), KeepIdenticalValues);
-    }
-
-    // TODO(sashab): Remove these non-const versions.
-    CSSValue& first() { return *m_first; }
-    CSSValue& second() { return *m_second; }
     const CSSValue& first() const { return *m_first; }
     const CSSValue& second() const { return *m_second; }
 
@@ -70,7 +59,7 @@ public:
     DECLARE_TRACE_AFTER_DISPATCH();
 
 private:
-    CSSValuePair(CSSValue* first, CSSValue* second, IdenticalValuesPolicy identicalValuesPolicy)
+    CSSValuePair(const CSSValue* first, const CSSValue* second, IdenticalValuesPolicy identicalValuesPolicy)
         : CSSValue(ValuePairClass)
         , m_first(first)
         , m_second(second)
@@ -80,8 +69,8 @@ private:
         ASSERT(m_second);
     }
 
-    Member<CSSValue> m_first;
-    Member<CSSValue> m_second;
+    Member<const CSSValue> m_first;
+    Member<const CSSValue> m_second;
     IdenticalValuesPolicy m_identicalValuesPolicy;
 };
 

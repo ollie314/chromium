@@ -24,11 +24,11 @@
 #include "core/css/resolver/FontBuilder.h"
 
 #include "core/CSSValueKeywords.h"
+#include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
-#include "core/layout/LayoutTheme.h"
-#include "core/layout/LayoutView.h"
 #include "core/layout/TextAutosizer.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/FontFamilyNames.h"
 #include "platform/fonts/FontDescription.h"
 
@@ -38,7 +38,6 @@ FontBuilder::FontBuilder(const Document& document)
     : m_document(&document)
     , m_flags(0)
 {
-    ASSERT(document.frame());
 }
 
 void FontBuilder::setInitial(float effectiveZoom)
@@ -141,11 +140,11 @@ void FontBuilder::setStretch(FontStretch fontStretch)
     m_fontDescription.setStretch(fontStretch);
 }
 
-void FontBuilder::setLocale(const AtomicString& locale)
+void FontBuilder::setLocale(PassRefPtr<const LayoutLocale> locale)
 {
     set(PropertySetFlag::Locale);
 
-    m_fontDescription.setLocale(locale);
+    m_fontDescription.setLocale(std::move(locale));
 }
 
 void FontBuilder::setStyle(FontStyle italic)
@@ -153,13 +152,6 @@ void FontBuilder::setStyle(FontStyle italic)
     set(PropertySetFlag::Style);
 
     m_fontDescription.setStyle(italic);
-}
-
-void FontBuilder::setVariant(FontVariant smallCaps)
-{
-    set(PropertySetFlag::Variant);
-
-    m_fontDescription.setVariant(smallCaps);
 }
 
 void FontBuilder::setVariantCaps(FontDescription::FontVariantCaps caps)
@@ -174,6 +166,13 @@ void FontBuilder::setVariantLigatures(const FontDescription::VariantLigatures& l
     set(PropertySetFlag::VariantLigatures);
 
     m_fontDescription.setVariantLigatures(ligatures);
+}
+
+void FontBuilder::setVariantNumeric(const FontVariantNumeric& variantNumeric)
+{
+    set(PropertySetFlag::VariantNumeric);
+
+    m_fontDescription.setVariantNumeric(variantNumeric);
 }
 
 void FontBuilder::setTextRendering(TextRenderingMode textRenderingMode)
@@ -201,7 +200,7 @@ void FontBuilder::setFeatureSettings(PassRefPtr<FontFeatureSettings> settings)
 {
     set(PropertySetFlag::FeatureSettings);
 
-    m_fontDescription.setFeatureSettings(settings);
+    m_fontDescription.setFeatureSettings(std::move(settings));
 }
 
 void FontBuilder::setFamilyDescription(FontDescription& fontDescription, const FontDescription::FamilyDescription& familyDescription)
@@ -332,8 +331,7 @@ void FontBuilder::updateAdjustedSize(FontDescription& fontDescription, const Com
     adjustedSize = getComputedSizeFromSpecifiedSize(fontDescription, style.effectiveZoom(), adjustedSize);
 
     float multiplier = style.textAutosizingMultiplier();
-    if (multiplier > 1)
-        adjustedSize = TextAutosizer::computeAutosizedFontSize(adjustedSize, multiplier);
+    adjustedSize = TextAutosizer::computeAutosizedFontSize(adjustedSize, multiplier);
     fontDescription.setAdjustedSize(adjustedSize);
 }
 
@@ -341,8 +339,7 @@ void FontBuilder::updateComputedSize(FontDescription& fontDescription, const Com
 {
     float computedSize = getComputedSizeFromSpecifiedSize(fontDescription, style.effectiveZoom(), fontDescription.specifiedSize());
     float multiplier = style.textAutosizingMultiplier();
-    if (multiplier > 1)
-        computedSize = TextAutosizer::computeAutosizedFontSize(computedSize, multiplier);
+    computedSize = TextAutosizer::computeAutosizedFontSize(computedSize, multiplier);
     fontDescription.setComputedSize(computedSize);
 }
 
@@ -371,15 +368,15 @@ void FontBuilder::createFont(FontSelector* fontSelector, ComputedStyle& style)
     if (isSet(PropertySetFlag::FeatureSettings))
         description.setFeatureSettings(m_fontDescription.featureSettings());
     if (isSet(PropertySetFlag::Locale))
-        description.setLocale(m_fontDescription.locale(false));
+        description.setLocale(m_fontDescription.locale());
     if (isSet(PropertySetFlag::Style))
         description.setStyle(m_fontDescription.style());
-    if (isSet(PropertySetFlag::Variant))
-        description.setVariant(m_fontDescription.variant());
     if (isSet(PropertySetFlag::VariantCaps))
         description.setVariantCaps(m_fontDescription.variantCaps());
     if (isSet(PropertySetFlag::VariantLigatures))
         description.setVariantLigatures(m_fontDescription.getVariantLigatures());
+    if (isSet(PropertySetFlag::VariantNumeric))
+        description.setVariantNumeric(m_fontDescription.variantNumeric());
     if (isSet(PropertySetFlag::TextRendering))
         description.setTextRendering(m_fontDescription.textRendering());
     if (isSet(PropertySetFlag::Kerning))
@@ -401,7 +398,7 @@ void FontBuilder::createFont(FontSelector* fontSelector, ComputedStyle& style)
 void FontBuilder::createFontForDocument(FontSelector* fontSelector, ComputedStyle& documentStyle)
 {
     FontDescription fontDescription = FontDescription();
-    fontDescription.setLocale(documentStyle.locale());
+    fontDescription.setLocale(documentStyle.getFontDescription().locale());
 
     setFamilyDescription(fontDescription, FontBuilder::initialFamilyDescription());
     setSize(fontDescription, FontDescription::Size(FontSize::initialKeywordSize(), 0.0f, false));

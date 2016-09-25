@@ -71,13 +71,29 @@ def _CompareVersion(version1, version2):
   size = min(len(ver_num1), len(ver_num2))
   return cmp(ver_num1[0:size], ver_num2[0:size])
 
+
+def GenerateTestNameFromTestPath(test_path):
+  return  ('WebglConformance.%s' %
+           test_path.replace('/', '_').replace('-', '_').
+           replace('\\', '_').rpartition('.')[0].replace('.', '_'))
+
+
 class WebglConformanceValidator(gpu_test_base.ValidatorBase):
   def __init__(self):
     super(WebglConformanceValidator, self).__init__()
 
   def ValidateAndMeasurePage(self, page, tab, results):
     if not _DidWebGLTestSucceed(tab):
-      raise page_test.Failure(_WebGLTestMessages(tab))
+      messages = _WebGLTestMessages(tab)
+      is_valid_dump = False
+      # Problems have been seen attempting to get stack traces on
+      # Android via this API; see crbug.com/609252. Skip this logic
+      # there for the time being.
+      if tab.browser.platform.GetOSName() != 'android':
+        is_valid_dump, trace_output = tab.browser.GetStackTrace()
+      if is_valid_dump:
+        messages += '\nStack Trace:\n' + trace_output
+      raise page_test.Failure(messages)
 
   def CustomizeBrowserOptions(self, options):
     # --test-type=gpu is used only to suppress the "Google API Keys are missing"
@@ -175,9 +191,7 @@ class WebglConformancePage(gpu_test_base.PageBase):
     super(WebglConformancePage, self).__init__(
       url='file://' + test, page_set=story_set, base_dir=story_set.base_dir,
       shared_page_state_class=gpu_test_base.DesktopGpuSharedPageState,
-      name=('WebglConformance.%s' %
-              test.replace('/', '_').replace('-', '_').
-                 replace('\\', '_').rpartition('.')[0].replace('.', '_')),
+      name=(GenerateTestNameFromTestPath(test)),
       expectations=expectations)
     self.script_to_evaluate_on_commit = conformance_harness_script
 
@@ -315,17 +329,24 @@ class WebglConformance(gpu_test_base.TestBase):
 
         i = 0
         min_version = None
+        max_version = None
         while i < len(line_tokens):
           token = line_tokens[i]
           if token == '--min-version':
             i += 1
             min_version = line_tokens[i]
+          elif token == '--max-version':
+            i += 1
+            max_version = line_tokens[i]
           i += 1
 
         min_version_to_compare = min_version or folder_min_version
 
         if (min_version_to_compare and
             _CompareVersion(version, min_version_to_compare) < 0):
+          continue
+
+        if max_version and _CompareVersion(version, max_version) > 0:
           continue
 
         if (webgl2_only and not '.txt' in test_name and

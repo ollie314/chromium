@@ -19,9 +19,11 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/process/kill.h"
 #include "base/process/launch.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
@@ -31,12 +33,14 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/gtest_util.h"
+#include "base/test/launcher/test_launcher_tracer.h"
 #include "base/test/launcher/test_results_tracker.h"
 #include "base/test/sequenced_worker_pool_owner.h"
 #include "base/test/test_switches.h"
 #include "base/test/test_timeouts.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -89,6 +93,9 @@ const size_t kOutputSnippetLinesLimit = 5000;
 LazyInstance<std::map<ProcessHandle, CommandLine> > g_live_processes
     = LAZY_INSTANCE_INITIALIZER;
 LazyInstance<Lock> g_live_processes_lock = LAZY_INSTANCE_INITIALIZER;
+
+// Performance trace generator.
+LazyInstance<TestLauncherTracer> g_tracer = LAZY_INSTANCE_INITIALIZER;
 
 #if defined(OS_POSIX)
 // Self-pipe that makes it possible to do complex shutdown handling
@@ -253,6 +260,8 @@ int LaunchChildTestProcessWithOptions(
     TimeDelta timeout,
     const TestLauncher::GTestProcessLaunchedCallback& launched_callback,
     bool* was_timeout) {
+  TimeTicks start_time(TimeTicks::Now());
+
 #if defined(OS_POSIX)
   // Make sure an option we rely on is present - see LaunchChildGTestProcess.
   DCHECK(options.new_process_group);
@@ -343,6 +352,9 @@ int LaunchChildTestProcessWithOptions(
 
     g_live_processes.Get().erase(process.Handle());
   }
+
+  g_tracer.Get().RecordProcessExecution(start_time,
+                                        TimeTicks::Now() - start_time);
 
   return exit_code;
 }
@@ -535,7 +547,7 @@ bool TestLauncher::Run() {
   ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, Bind(&TestLauncher::RunTestIteration, Unretained(this)));
 
-  MessageLoop::current()->Run();
+  RunLoop().Run();
 
   if (requested_cycles != 1)
     results_tracker_.PrintSummaryOfAllIterations();
@@ -563,7 +575,7 @@ void TestLauncher::LaunchChildGTestProcess(
   // JSON summary.
   bool redirect_stdio = (parallel_jobs_ > 1) || BotModeEnabled();
 
-  worker_pool_owner_->pool()->PostWorkerTask(
+  GetTaskRunner()->PostTask(
       FROM_HERE,
       Bind(&DoLaunchChildTestProcess, new_command_line, timeout, options,
            redirect_stdio, RetainedRef(ThreadTaskRunnerHandle::Get()),
@@ -791,10 +803,10 @@ bool TestLauncher::Init() {
     force_run_broken_tests_ = true;
 
   if (command_line->HasSwitch(switches::kTestLauncherJobs)) {
-    int jobs = -1;
-    if (!StringToInt(command_line->GetSwitchValueASCII(
+    size_t jobs = 0U;
+    if (!StringToSizeT(command_line->GetSwitchValueASCII(
                          switches::kTestLauncherJobs), &jobs) ||
-        jobs < 0) {
+        !jobs) {
       LOG(ERROR) << "Invalid value for " << switches::kTestLauncherJobs;
       return false;
     }
@@ -803,13 +815,18 @@ bool TestLauncher::Init() {
   } else if (command_line->HasSwitch(kGTestFilterFlag) && !BotModeEnabled()) {
     // Do not run jobs in parallel by default if we are running a subset of
     // the tests and if bot mode is off.
-    parallel_jobs_ = 1;
+    parallel_jobs_ = 1U;
   }
 
   fprintf(stdout, "Using %" PRIuS " parallel jobs.\n", parallel_jobs_);
   fflush(stdout);
-  worker_pool_owner_.reset(
-      new SequencedWorkerPoolOwner(parallel_jobs_, "test_launcher"));
+  if (parallel_jobs_ > 1U) {
+    worker_pool_owner_ = MakeUnique<SequencedWorkerPoolOwner>(
+        parallel_jobs_, "test_launcher");
+  } else {
+    worker_thread_ = MakeUnique<Thread>("test_launcher");
+    worker_thread_->Start();
+  }
 
   if (command_line->HasSwitch(switches::kTestLauncherFilterFile) &&
       command_line->HasSwitch(kGTestFilterFlag)) {
@@ -1034,6 +1051,13 @@ void TestLauncher::MaybeSaveSummaryAsJSON() {
       LOG(ERROR) << "Failed to save test launcher output summary.";
     }
   }
+  if (command_line->HasSwitch(switches::kTestLauncherTrace)) {
+    FilePath trace_path(
+        command_line->GetSwitchValuePath(switches::kTestLauncherTrace));
+    if (!g_tracer.Get().Dump(trace_path)) {
+      LOG(ERROR) << "Failed to save test launcher trace.";
+    }
+  }
 }
 
 void TestLauncher::OnLaunchTestProcessFinished(
@@ -1094,6 +1118,17 @@ void TestLauncher::OnOutputTimeout() {
 
   // Arm the timer again - otherwise it would fire only once.
   watchdog_timer_.Reset();
+}
+
+scoped_refptr<TaskRunner> TestLauncher::GetTaskRunner() {
+  // One and only one of |worker_pool_owner_| or |worker_thread_| should be
+  // ready.
+  DCHECK_NE(!!worker_pool_owner_, !!worker_thread_);
+
+  if (worker_pool_owner_)
+    return worker_pool_owner_->pool();
+  DCHECK(worker_thread_->IsRunning());
+  return worker_thread_->task_runner();
 }
 
 std::string GetTestOutputSnippet(const TestResult& result,

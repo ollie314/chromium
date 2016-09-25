@@ -35,11 +35,13 @@
 #include "core/loader/FrameLoaderClient.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
-#include "wtf/PassOwnPtr.h"
+#include "public/platform/WebInsecureRequestPolicy.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
+class WebDevToolsAgentImpl;
 class WebLocalFrameImpl;
 
 class FrameLoaderClientImpl final : public FrameLoaderClient {
@@ -82,14 +84,12 @@ public:
     Frame* lastChild() const override;
     void willBeDetached() override;
     void detached(FrameDetachType) override;
-    void dispatchWillSendRequest(DocumentLoader*, unsigned long identifier, ResourceRequest&, const ResourceResponse& redirectResponse) override;
-    void dispatchDidReceiveResponse(DocumentLoader*, unsigned long identifier, const ResourceResponse&) override;
-    void dispatchDidChangeResourcePriority(unsigned long identifier, ResourceLoadPriority, int intraPriorityValue) override;
-    void dispatchDidFinishLoading(DocumentLoader*, unsigned long identifier) override;
+    void dispatchWillSendRequest(ResourceRequest&) override;
+    void dispatchDidReceiveResponse(const ResourceResponse&) override;
     void dispatchDidLoadResourceFromMemoryCache(const ResourceRequest&, const ResourceResponse&) override;
     void dispatchDidHandleOnloadEvents() override;
     void dispatchDidReceiveServerRedirectForProvisionalLoad() override;
-    void dispatchDidNavigateWithinPage(HistoryItem*, HistoryCommitType) override;
+    void dispatchDidNavigateWithinPage(HistoryItem*, HistoryCommitType, bool contentInitiated) override;
     void dispatchWillClose() override;
     void dispatchDidStartProvisionalLoad(double triggeringEventTime) override;
     void dispatchDidReceiveTitle(const String&) override;
@@ -102,7 +102,6 @@ public:
 
     void dispatchDidChangeThemeColor() override;
     NavigationPolicy decidePolicyForNavigation(const ResourceRequest&, DocumentLoader*, NavigationType, NavigationPolicy, bool shouldReplaceCurrentEntry, bool isClientRedirect) override;
-    bool hasPendingNavigation() override;
     void dispatchWillSendSubmitEvent(HTMLFormElement*) override;
     void dispatchWillSubmitForm(HTMLFormElement*) override;
     void didStartLoading(LoadStartType) override;
@@ -115,8 +114,8 @@ public:
     void didRunInsecureContent(SecurityOrigin*, const KURL& insecureURL) override;
     void didDetectXSS(const KURL&, bool didBlockEntirePage) override;
     void didDispatchPingLoader(const KURL&) override;
-    void didDisplayContentWithCertificateErrors(const KURL&, const CString& securityInfo, const WebURL& mainResourceUrl, const CString& mainResourceSecurityInfo) override;
-    void didRunContentWithCertificateErrors(const KURL&, const CString& securityInfo, const WebURL& mainResourceUrl, const CString& mainResourceSecurityInfo) override;
+    void didDisplayContentWithCertificateErrors(const KURL&) override;
+    void didRunContentWithCertificateErrors(const KURL&) override;
     void didChangePerformanceTiming() override;
     void didObserveLoadingBehavior(WebLoadingBehaviorFlag) override;
     void selectorMatchChanged(const Vector<String>& addedSelectors, const Vector<String>& removedSelectors) override;
@@ -130,49 +129,44 @@ public:
         HTMLPlugInElement*, const KURL&,
         const Vector<WTF::String>&, const Vector<WTF::String>&,
         const WTF::String&, bool loadManually, DetachedPluginPolicy) override;
-    PassOwnPtr<WebMediaPlayer> createWebMediaPlayer(HTMLMediaElement&, const WebMediaPlayerSource&, WebMediaPlayerClient*) override;
-    PassOwnPtr<WebMediaSession> createWebMediaSession() override;
+    std::unique_ptr<WebMediaPlayer> createWebMediaPlayer(HTMLMediaElement&, const WebMediaPlayerSource&, WebMediaPlayerClient*) override;
+    std::unique_ptr<WebMediaSession> createWebMediaSession() override;
     ObjectContentType getObjectContentType(
         const KURL&, const WTF::String& mimeType, bool shouldPreferPlugInsForImages) override;
     void didChangeScrollOffset() override;
     void didUpdateCurrentHistoryItem() override;
-    void didRemoveAllPendingStylesheet() override;
     bool allowScript(bool enabledPerSettings) override;
     bool allowScriptFromSource(bool enabledPerSettings, const KURL& scriptURL) override;
     bool allowPlugins(bool enabledPerSettings) override;
     bool allowImage(bool enabledPerSettings, const KURL& imageURL) override;
-    bool allowMedia(const KURL& mediaURL) override;
-    bool allowDisplayingInsecureContent(bool enabledPerSettings, const KURL&) override;
     bool allowRunningInsecureContent(bool enabledPerSettings, SecurityOrigin*, const KURL&) override;
+    bool allowAutoplay(bool defaultValue) override;
+    void passiveInsecureContentFound(const KURL&) override;
     void didNotAllowScript() override;
     void didNotAllowPlugins() override;
     void didUseKeygen() override;
 
     WebCookieJar* cookieJar() const override;
-    bool willCheckAndDispatchMessageEvent(SecurityOrigin* target, MessageEvent*, LocalFrame* sourceFrame) const override;
     void frameFocused() const override;
     void didChangeName(const String& name, const String& uniqueName) override;
-    void didEnforceStrictMixedContentChecking() override;
+    void didEnforceInsecureRequestPolicy(WebInsecureRequestPolicy) override;
     void didUpdateToUniqueOrigin() override;
     void didChangeSandboxFlags(Frame* childFrame, SandboxFlags) override;
+    void didAddContentSecurityPolicy(const String& headerValue, ContentSecurityPolicyHeaderType, ContentSecurityPolicyHeaderSource) override;
     void didChangeFrameOwnerProperties(HTMLFrameElementBase*) override;
 
-    void dispatchWillOpenWebSocket(WebSocketHandle*) override;
-
     void dispatchWillStartUsingPeerConnectionHandler(WebRTCPeerConnectionHandler*) override;
-
-    void didRequestAutocomplete(HTMLFormElement*) override;
 
     bool allowWebGL(bool enabledPerSettings) override;
 
     void dispatchWillInsertBody() override;
 
-    PassOwnPtr<WebServiceWorkerProvider> createServiceWorkerProvider() override;
+    std::unique_ptr<WebServiceWorkerProvider> createServiceWorkerProvider() override;
     bool isControlledByServiceWorker(DocumentLoader&) override;
     int64_t serviceWorkerID(DocumentLoader&) override;
     SharedWorkerRepositoryClient* sharedWorkerRepositoryClient() override;
 
-    PassOwnPtr<WebApplicationCacheHost> createApplicationCacheHost(WebApplicationCacheHostClient*) override;
+    std::unique_ptr<WebApplicationCacheHost> createApplicationCacheHost(WebApplicationCacheHostClient*) override;
 
     void dispatchDidChangeManifest() override;
 
@@ -184,10 +178,15 @@ public:
 
     LinkResource* createServiceWorkerLinkResource(HTMLLinkElement*) override;
 
+    WebEffectiveConnectionType getEffectiveConnectionType() override;
+
+    KURL overrideFlashEmbedWithHTML(const KURL&) override;
+
 private:
     explicit FrameLoaderClientImpl(WebLocalFrameImpl*);
 
     bool isFrameLoaderClientImpl() const override { return true; }
+    WebDevToolsAgentImpl* devToolsAgent();
 
     // The WebFrame that owns this object and manages its lifetime. Therefore,
     // the web frame object is guaranteed to exist.

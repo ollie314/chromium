@@ -11,7 +11,7 @@
 #include "base/location.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/task_runner.h"
-#include "components/webp_transcode/webp_decoder.h"
+#include "ios/chrome/browser/webp_transcode/webp_decoder.h"
 #include "ios/web/public/web_thread.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
@@ -59,8 +59,6 @@ base::scoped_nsobject<NSData> DecodeWebpImage(
 }
 
 }  // namespace
-
-namespace image_fetcher {
 
 ImageFetcher::ImageFetcher(const scoped_refptr<base::TaskRunner>& task_runner)
     : request_context_getter_(nullptr),
@@ -174,5 +172,3 @@ void ImageFetcher::SetRequestContextGetter(
     const scoped_refptr<net::URLRequestContextGetter>& request_context_getter) {
   request_context_getter_ = request_context_getter;
 }
-
-}  // namespace image_fetcher

@@ -12,8 +12,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "ui/chromeos/ime/candidate_view.h"
 #include "ui/chromeos/ime/candidate_window_constants.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gfx/screen.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
@@ -55,8 +56,9 @@ class CandidateWindowBorder : public views::BubbleBorder {
     // It cannot use the normal logic of arrow offset for horizontal offscreen,
     // because the arrow must be in the content's edge. But CandidateWindow has
     // to be visible even when |anchor_rect| is out of the screen.
-    gfx::Rect work_area =
-        gfx::Screen::GetScreen()->GetDisplayNearestWindow(parent_).work_area();
+    gfx::Rect work_area = display::Screen::GetScreen()
+                              ->GetDisplayNearestWindow(parent_)
+                              .work_area();
     if (bounds.right() > work_area.right())
       bounds.set_x(work_area.right() - bounds.width());
     if (bounds.x() < work_area.x())
@@ -357,7 +359,7 @@ void CandidateWindowView::MaybeInitializeCandidateViews(
 
   // Reset all candidate_views_ when orientation changes.
   if (orientation != candidate_window_.orientation())
-    STLDeleteElements(&candidate_views_);
+    base::STLDeleteElements(&candidate_views_);
 
   while (page_size < candidate_views_.size()) {
     delete candidate_views_.back();

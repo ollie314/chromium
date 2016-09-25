@@ -41,6 +41,17 @@ namespace blink {
 
 using namespace HTMLNames;
 
+DEFINE_TRACE(BaseCheckableInputType)
+{
+    InputTypeView::trace(visitor);
+    InputType::trace(visitor);
+}
+
+InputTypeView* BaseCheckableInputType::createView()
+{
+    return this;
+}
+
 FormControlState BaseCheckableInputType::saveFormControlState() const
 {
     return FormControlState(element().checked() ? "on" : "off");
@@ -59,8 +70,8 @@ void BaseCheckableInputType::appendToFormData(FormData& formData) const
 
 void BaseCheckableInputType::handleKeydownEvent(KeyboardEvent* event)
 {
-    const String& key = event->keyIdentifier();
-    if (key == "U+0020") {
+    const String& key = event->key();
+    if (key == " ") {
         element().setActive(true);
         // No setDefaultHandled(), because IE dispatches a keypress in this case
         // and the caller will only dispatch a keypress if we don't call setDefaultHandled().
@@ -80,10 +91,11 @@ bool BaseCheckableInputType::canSetStringValue() const
     return false;
 }
 
-// FIXME: Could share this with BaseClickableWithKeyInputType and RangeInputType if we had a common base class.
+// FIXME: Could share this with KeyboardClickableInputTypeView and
+// RangeInputType if we had a common base class.
 void BaseCheckableInputType::accessKeyAction(bool sendMouseEvents)
 {
-    InputType::accessKeyAction(sendMouseEvents);
+    InputTypeView::accessKeyAction(sendMouseEvents);
 
     element().dispatchSimulatedClick(0, sendMouseEvents ? SendMouseUpDownEvents : SendNoEvents);
 }

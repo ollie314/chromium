@@ -35,11 +35,9 @@ import org.chromium.chrome.browser.favicon.LargeIconBridge.LargeIconCallback;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.partnerbookmarks.PartnerBookmarksShim;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.widget.RoundedIconGenerator;
 import org.chromium.components.bookmarks.BookmarkId;
-import org.chromium.components.bookmarks.BookmarkType;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -64,7 +62,7 @@ public class BookmarkWidgetService extends RemoteViewsService {
 
     private static final String TAG = "BookmarkWidget";
     private static final String ACTION_CHANGE_FOLDER_SUFFIX = ".CHANGE_FOLDER";
-    private static final String PREF_CURRENT_FOLDER = "current_folder";
+    private static final String PREF_CURRENT_FOLDER = "bookmarkswidget.current_folder";
     private static final String EXTRA_FOLDER_ID = "folderId";
 
     @UiThread
@@ -101,10 +99,10 @@ public class BookmarkWidgetService extends RemoteViewsService {
 
     static void changeFolder(Context context, Intent intent) {
         int widgetId = IntentUtils.safeGetIntExtra(intent, AppWidgetManager.EXTRA_APPWIDGET_ID, -1);
-        long folderId = IntentUtils.safeGetLongExtra(intent, EXTRA_FOLDER_ID, -1);
-        if (widgetId >= 0 && folderId >= 0) {
+        String serializedFolder = IntentUtils.safeGetStringExtra(intent, EXTRA_FOLDER_ID);
+        if (widgetId >= 0 && serializedFolder != null) {
             SharedPreferences prefs = getWidgetState(context, widgetId);
-            prefs.edit().putLong(PREF_CURRENT_FOLDER, folderId).apply();
+            prefs.edit().putString(PREF_CURRENT_FOLDER, serializedFolder).apply();
             AppWidgetManager.getInstance(context)
                     .notifyAppWidgetViewDataChanged(widgetId, R.id.bookmarks_list);
         }
@@ -123,11 +121,6 @@ public class BookmarkWidgetService extends RemoteViewsService {
 
         public static Bookmark fromBookmarkItem(BookmarkItem item) {
             if (item == null) return null;
-
-            // The bookmarks widget doesn't support showing partner bookmarks. The main hurdle is
-            // that the current folder ID is stored in shared prefs as a long, not a BookmarkId.
-            // This support could be added if there's a strong desire.
-            if (item.getId().getType() == BookmarkType.PARTNER) return null;
 
             Bookmark bookmark = new Bookmark();
             bookmark.title = item.getTitle();
@@ -162,7 +155,6 @@ public class BookmarkWidgetService extends RemoteViewsService {
      *
      * This class must be used only on the UI thread.
      */
-    @UiThread
     private static class BookmarkLoader {
         private BookmarkLoaderCallback mCallback;
         private BookmarkFolder mFolder;
@@ -174,19 +166,20 @@ public class BookmarkWidgetService extends RemoteViewsService {
         private int mCornerRadius;
         private int mRemainingTaskCount;
 
-        BookmarkLoader(Context context, final BookmarkId folderId,
+        @UiThread
+        public void initialize(Context context, final BookmarkId folderId,
                 BookmarkLoaderCallback callback) {
             mCallback = callback;
 
             Resources res = context.getResources();
             mLargeIconBridge = new LargeIconBridge(
                     Profile.getLastUsedProfile().getOriginalProfile());
-            mMinIconSizeDp = (int) res.getDimension(R.dimen.bookmark_item_min_icon_size);
-            mDisplayedIconSize = res.getDimensionPixelSize(R.dimen.bookmark_item_icon_size);
-            mCornerRadius = res.getDimensionPixelSize(R.dimen.bookmark_item_corner_radius);
-            int textSize = res.getDimensionPixelSize(R.dimen.bookmark_item_icon_text_size);
-            int iconColor = ApiCompatibilityUtils.getColor(res,
-                    R.color.bookmark_icon_background_color);
+            mMinIconSizeDp = (int) res.getDimension(R.dimen.default_favicon_min_size);
+            mDisplayedIconSize = res.getDimensionPixelSize(R.dimen.default_favicon_size);
+            mCornerRadius = res.getDimensionPixelSize(R.dimen.default_favicon_corner_radius);
+            int textSize = res.getDimensionPixelSize(R.dimen.default_favicon_icon_text_size);
+            int iconColor =
+                    ApiCompatibilityUtils.getColor(res, R.color.default_favicon_background_color);
             mIconGenerator = new RoundedIconGenerator(mDisplayedIconSize, mDisplayedIconSize,
                     mCornerRadius, iconColor, textSize);
 
@@ -200,6 +193,7 @@ public class BookmarkWidgetService extends RemoteViewsService {
             });
         }
 
+        @UiThread
         private void loadBookmarks(BookmarkId folderId) {
             mFolder = new BookmarkFolder();
 
@@ -236,6 +230,7 @@ public class BookmarkWidgetService extends RemoteViewsService {
             taskFinished();
         }
 
+        @UiThread
         private void loadFavicon(final Bookmark bookmark) {
             if (bookmark.isFolder) return;
 
@@ -257,6 +252,7 @@ public class BookmarkWidgetService extends RemoteViewsService {
             mLargeIconBridge.getLargeIconForUrl(bookmark.url, mMinIconSizeDp, callback);
         }
 
+        @UiThread
         private void taskFinished() {
             mRemainingTaskCount--;
             if (mRemainingTaskCount == 0) {
@@ -265,6 +261,7 @@ public class BookmarkWidgetService extends RemoteViewsService {
             }
         }
 
+        @UiThread
         private void destroy() {
             mBookmarkModel.destroy();
             mLargeIconBridge.destroy();
@@ -333,8 +330,8 @@ public class BookmarkWidgetService extends RemoteViewsService {
         private boolean isWidgetNewlyCreated() {
             // This method relies on the fact that PREF_CURRENT_FOLDER is not yet
             // set when onCreate is called for a newly created widget.
-            long currentFolder = mPreferences.getLong(PREF_CURRENT_FOLDER, Tab.INVALID_BOOKMARK_ID);
-            return currentFolder == Tab.INVALID_BOOKMARK_ID;
+            String serializedFolder = mPreferences.getString(PREF_CURRENT_FOLDER, null);
+            return serializedFolder == null;
         }
 
         @UiThread
@@ -374,27 +371,23 @@ public class BookmarkWidgetService extends RemoteViewsService {
 
         @BinderThread
         private void updateBookmarkList() {
-            long folderIdLong = mPreferences.getLong(PREF_CURRENT_FOLDER, Tab.INVALID_BOOKMARK_ID);
-            BookmarkId folderId = folderIdLong != Tab.INVALID_BOOKMARK_ID
-                    ? new BookmarkId(folderIdLong, BookmarkType.NORMAL)
-                    : null;
-
+            BookmarkId folderId = BookmarkId
+                    .getBookmarkIdFromString(mPreferences.getString(PREF_CURRENT_FOLDER, null));
             mCurrentFolder = loadBookmarks(folderId);
-
-            mPreferences.edit()
-                .putLong(PREF_CURRENT_FOLDER, mCurrentFolder != null
-                        ? mCurrentFolder.folder.id.getId()
-                        : Tab.INVALID_BOOKMARK_ID)
-                .apply();
+            mPreferences.edit().putString(PREF_CURRENT_FOLDER, mCurrentFolder.folder.id.toString())
+                    .apply();
         }
 
         @BinderThread
         private BookmarkFolder loadBookmarks(final BookmarkId folderId) {
             final LinkedBlockingQueue<BookmarkFolder> resultQueue = new LinkedBlockingQueue<>(1);
+            //A reference of BookmarkLoader is needed in binder thread to
+            //prevent it from being garbage collected.
+            final BookmarkLoader bookmarkLoader = new BookmarkLoader();
             ThreadUtils.runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    new BookmarkLoader(mContext, folderId, new BookmarkLoaderCallback() {
+                    bookmarkLoader.initialize(mContext, folderId, new BookmarkLoaderCallback() {
                         @Override
                         public void onBookmarksLoaded(BookmarkFolder folder) {
                             resultQueue.add(folder);
@@ -437,7 +430,20 @@ public class BookmarkWidgetService extends RemoteViewsService {
         @BinderThread
         @Override
         public int getCount() {
-            if (mCurrentFolder == null) return 0;
+            //On some Sony devices, getCount() could be called before onDatasetChanged()
+            //returns. If it happens, refresh widget until the bookmarks are all loaded.
+            if (mCurrentFolder == null || !mPreferences.getString(PREF_CURRENT_FOLDER, "")
+                    .equals(mCurrentFolder.folder.id.toString())) {
+                ThreadUtils.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        refreshWidget();
+                    }
+                });
+            }
+            if (mCurrentFolder == null) {
+                return 0;
+            }
             return mCurrentFolder.children.size() + (mCurrentFolder.parent != null ? 1 : 0);
         }
 
@@ -469,9 +475,9 @@ public class BookmarkWidgetService extends RemoteViewsService {
 
             String title = bookmark.title;
             String url = bookmark.url;
-            long id = (bookmark == mCurrentFolder.folder)
-                    ? mCurrentFolder.parent.id.getId()
-                    : bookmark.id.getId();
+            BookmarkId id = (bookmark == mCurrentFolder.folder)
+                    ? mCurrentFolder.parent.id
+                    : bookmark.id;
 
             RemoteViews views = new RemoteViews(mContext.getPackageName(),
                     R.layout.bookmark_widget_item);
@@ -480,7 +486,7 @@ public class BookmarkWidgetService extends RemoteViewsService {
             views.setTextViewText(R.id.title, TextUtils.isEmpty(title) ? url : title);
 
             if (bookmark == mCurrentFolder.folder) {
-                views.setImageViewResource(R.id.favicon, R.drawable.bookmark_back_normal);
+                views.setImageViewResource(R.id.favicon, R.drawable.back_normal);
             } else if (bookmark.isFolder) {
                 views.setImageViewResource(R.id.favicon, R.drawable.bookmark_folder);
             } else {
@@ -491,7 +497,7 @@ public class BookmarkWidgetService extends RemoteViewsService {
             if (bookmark.isFolder) {
                 fillIn = new Intent(getChangeFolderAction(mContext))
                         .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, mWidgetId)
-                        .putExtra(EXTRA_FOLDER_ID, id);
+                        .putExtra(EXTRA_FOLDER_ID, id.toString());
             } else {
                 fillIn = new Intent(Intent.ACTION_VIEW);
                 if (!TextUtils.isEmpty(url)) {

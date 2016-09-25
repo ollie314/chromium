@@ -34,14 +34,13 @@
 #include "platform/geometry/FloatSize.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/graphics/Color.h"
+#include "platform/graphics/CompositorElementId.h"
 #include "platform/graphics/ContentLayerDelegate.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayerClient.h"
 #include "platform/graphics/GraphicsLayerDebugInfo.h"
 #include "platform/graphics/ImageOrientation.h"
 #include "platform/graphics/PaintInvalidationReason.h"
-#include "platform/graphics/filters/FilterOperations.h"
-#include "platform/graphics/paint/CachedDisplayItem.h"
 #include "platform/graphics/paint/DisplayItemClient.h"
 #include "platform/graphics/paint/PaintController.h"
 #include "platform/heap/Handle.h"
@@ -49,17 +48,19 @@
 #include "public/platform/WebContentLayer.h"
 #include "public/platform/WebImageLayer.h"
 #include "public/platform/WebLayerScrollClient.h"
-#include "third_party/skia/include/core/SkPaint.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "public/platform/WebLayerStickyPositionConstraint.h"
+#include "third_party/skia/include/core/SkFilterQuality.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
+class CompositorFilterOperations;
 class FloatRect;
 class Image;
-class LinkHighlight;
 class JSONObject;
+class LinkHighlight;
 class PaintController;
 class ScrollableArea;
 class WebLayer;
@@ -72,7 +73,7 @@ typedef Vector<GraphicsLayer*, 64> GraphicsLayerVector;
 class PLATFORM_EXPORT GraphicsLayer : public WebLayerScrollClient, public cc::LayerClient, public DisplayItemClient {
     WTF_MAKE_NONCOPYABLE(GraphicsLayer); USING_FAST_MALLOC(GraphicsLayer);
 public:
-    static PassOwnPtr<GraphicsLayer> create(GraphicsLayerClient*);
+    static std::unique_ptr<GraphicsLayer> create(GraphicsLayerClient*);
 
     ~GraphicsLayer() override;
 
@@ -142,6 +143,8 @@ public:
     void setTransform(const TransformationMatrix&);
     void setShouldFlattenTransform(bool);
     void setRenderingContext(int id);
+
+    bool masksToBounds() const;
     void setMasksToBounds(bool);
 
     bool drawsContent() const { return m_drawsContent; }
@@ -171,8 +174,10 @@ public:
     void setBlendMode(WebBlendMode);
     void setIsRootForIsolatedGroup(bool);
 
-    void setFilters(const FilterOperations&);
-    void setBackdropFilters(const FilterOperations&);
+    void setFilters(CompositorFilterOperations);
+    void setBackdropFilters(CompositorFilterOperations);
+
+    void setStickyPositionConstraint(const WebLayerStickyPositionConstraint&);
 
     void setFilterQuality(SkFilterQuality);
 
@@ -186,8 +191,6 @@ public:
 
     void setContentsNeedsDisplay();
 
-    void invalidateDisplayItemClient(const DisplayItemClient&, PaintInvalidationReason);
-
     // Set that the position/size of the contents (image or video).
     void setContentsRect(const IntRect&);
 
@@ -199,19 +202,23 @@ public:
     // For hosting this GraphicsLayer in a native layer hierarchy.
     WebLayer* platformLayer() const;
 
-    typedef HashMap<int, int> RenderingContextMap;
-    PassRefPtr<JSONObject> layerTreeAsJSON(LayerTreeFlags, RenderingContextMap&) const;
-
     int paintCount() const { return m_paintCount; }
 
     // Return a string with a human readable form of the layer tree, If debug is true
     // pointers for the layers and timing data will be included in the returned string.
     String layerTreeAsText(LayerTreeFlags = LayerTreeNormal) const;
 
-    bool isTrackingPaintInvalidations() const { return m_client->isTrackingPaintInvalidations(); }
+    std::unique_ptr<JSONObject> layerTreeAsJSON(LayerTreeFlags) const;
+
+    void setTracksPaintInvalidations(bool);
+    bool isTrackingOrCheckingPaintInvalidations() const
+    {
+        return RuntimeEnabledFeatures::paintUnderInvalidationCheckingEnabled() || m_isTrackingPaintInvalidations;
+    }
+
     void resetTrackedPaintInvalidations();
     bool hasTrackedPaintInvalidations() const;
-    void trackPaintInvalidation(const DisplayItemClient&, const FloatRect&, PaintInvalidationReason);
+    void trackPaintInvalidation(const DisplayItemClient&, const IntRect&, PaintInvalidationReason);
 
     void addLinkHighlight(LinkHighlight*);
     void removeLinkHighlight(LinkHighlight*);
@@ -219,7 +226,7 @@ public:
     unsigned numLinkHighlights() { return m_linkHighlights.size(); }
     LinkHighlight* getLinkHighlight(int i) { return m_linkHighlights[i]; }
 
-    void setScrollableArea(ScrollableArea*, bool isViewport);
+    void setScrollableArea(ScrollableArea*, bool isVisualViewport);
     ScrollableArea* getScrollableArea() const { return m_scrollableArea; }
 
     WebContentLayer* contentLayer() const { return m_layer.get(); }
@@ -235,21 +242,23 @@ public:
 
     // cc::LayerClient implementation.
     std::unique_ptr<base::trace_event::ConvertableToTraceFormat> TakeDebugInfo(cc::Layer*) override;
+    void didUpdateMainThreadScrollingReasons() override;
 
     PaintController& getPaintController();
 
     // Exposed for tests.
     WebLayer* contentsLayer() const { return m_contentsLayer; }
 
-    void setElementId(uint64_t);
+    void setElementId(const CompositorElementId&);
     void setCompositorMutableProperties(uint32_t);
 
-    static void setDrawDebugRedFillForTesting(bool);
     ContentLayerDelegate* contentLayerDelegateForTesting() const { return m_contentLayerDelegate.get(); }
 
     // DisplayItemClient methods
     String debugName() const final { return m_client->debugName(this); }
     LayoutRect visualRect() const override;
+
+    void setHasWillChangeTransformHint(bool);
 
 protected:
     String debugName(cc::Layer*) const;
@@ -288,6 +297,12 @@ private:
     void clearContentsLayerIfUnregistered();
     WebLayer* contentsLayerIfRegistered();
 
+    typedef HashMap<int, int> RenderingContextMap;
+    std::unique_ptr<JSONObject> layerTreeAsJSONInternal(LayerTreeFlags, RenderingContextMap&) const;
+
+    sk_sp<SkPicture> capturePicture();
+    void checkPaintUnderInvalidations(const SkPicture&);
+
     GraphicsLayerClient* m_client;
 
     // Offset from the owning layoutObject
@@ -309,7 +324,6 @@ private:
     bool m_contentsOpaque : 1;
     bool m_shouldFlattenTransform: 1;
     bool m_backfaceVisibility : 1;
-    bool m_masksToBounds : 1;
     bool m_drawsContent : 1;
     bool m_contentsVisible : 1;
     bool m_isRootForIsolatedGroup : 1;
@@ -318,8 +332,8 @@ private:
     bool m_hasClipParent : 1;
 
     bool m_painted : 1;
-    bool m_textPainted : 1;
-    bool m_imagePainted : 1;
+
+    bool m_isTrackingPaintInvalidations : 1;
 
     GraphicsLayerPaintingPhase m_paintingPhase;
 
@@ -339,8 +353,8 @@ private:
 
     int m_paintCount;
 
-    OwnPtr<WebContentLayer> m_layer;
-    OwnPtr<WebImageLayer> m_imageLayer;
+    std::unique_ptr<WebContentLayer> m_layer;
+    std::unique_ptr<WebImageLayer> m_imageLayer;
     WebLayer* m_contentsLayer;
     // We don't have ownership of m_contentsLayer, but we do want to know if a given layer is the
     // same as our current layer in setContentsTo(). Since m_contentsLayer may be deleted at this point,
@@ -350,13 +364,13 @@ private:
 
     Vector<LinkHighlight*> m_linkHighlights;
 
-    OwnPtr<ContentLayerDelegate> m_contentLayerDelegate;
+    std::unique_ptr<ContentLayerDelegate> m_contentLayerDelegate;
 
     WeakPersistent<ScrollableArea> m_scrollableArea;
     GraphicsLayerDebugInfo m_debugInfo;
-    int m_3dRenderingContext;
+    int m_renderingContext3d;
 
-    OwnPtr<PaintController> m_paintController;
+    std::unique_ptr<PaintController> m_paintController;
 
     IntRect m_previousInterestRect;
 };

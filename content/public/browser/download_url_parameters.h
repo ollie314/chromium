@@ -14,16 +14,17 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_save_info.h"
 #include "content/public/common/referrer.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "storage/browser/blob/blob_data_handle.h"
 #include "url/gurl.h"
 
 namespace content {
 
 class DownloadItem;
-class ResourceContext;
 class ResourceDispatcherHost;
 class WebContents;
 
@@ -60,29 +61,34 @@ class CONTENT_EXPORT DownloadUrlParameters {
   typedef std::vector<RequestHeadersNameValuePair> RequestHeadersType;
 
   // Construct DownloadUrlParameters for downloading the resource at |url| and
-  // associating the download with |web_contents|.
-  static std::unique_ptr<DownloadUrlParameters> FromWebContents(
+  // associating the download with the main frame of the given WebContents.
+  static std::unique_ptr<DownloadUrlParameters> CreateForWebContentsMainFrame(
       WebContents* web_contents,
       const GURL& url);
 
-  // Construct DownloadUrlParameters for downloading the resource at |url| and
-  // associating the download with the WebContents identified by
-  // |render_process_host_id| and |render_view_host_routing_id|.
+  // Constructs a download not associated with a frame.
   //
-  // If the download is not associated with a WebContents, then set the IDs to
-  // -1.
-  // NOTE: This is not safe and should only be done in a limited set of cases
-  // where the download URL has been previously vetted. A download that's
-  // initiated without associating it with a WebContents don't receive the same
-  // security checks as a request that's associated with one. Hence, downloads
-  // that are not associated with a WebContents should only be made for URLs
-  // that are either trusted or URLs that have previously been successfully
-  // issued using a non-privileged WebContents.
-  DownloadUrlParameters(const GURL& url,
-                        int render_process_host_id,
-                        int render_view_host_routing_id,
-                        int render_frame_host_routing_id,
-                        ResourceContext* resource_context);
+  // It is not safe to have downloads not associated with a frame and
+  // this should only be done in a limited set of cases where the download URL
+  // has been previously vetted. A download that's initiated without
+  // associating it with a frame don't receive the same security checks
+  // as a request that's associated with one. Hence, downloads that are not
+  // associated with a frame should only be made for URLs that are either
+  // trusted or URLs that have previously been successfully issued using a
+  // non-privileged frame.
+  DownloadUrlParameters(
+      const GURL& url,
+      net::URLRequestContextGetter* url_request_context_getter);
+
+  // The RenderView routing ID must correspond to the RenderView of the
+  // RenderFrame, both of which share the same RenderProcess. This may be a
+  // different RenderView than the WebContents' main RenderView.
+  DownloadUrlParameters(
+      const GURL& url,
+      int render_process_host_id,
+      int render_view_host_routing_id,
+      int render_frame_host_routing_id,
+      net::URLRequestContextGetter* url_request_context_getter);
 
   ~DownloadUrlParameters();
 
@@ -205,6 +211,9 @@ class CONTENT_EXPORT DownloadUrlParameters {
   bool prefer_cache() const { return prefer_cache_; }
   const Referrer& referrer() const { return referrer_; }
   const std::string& referrer_encoding() const { return referrer_encoding_; }
+
+  // These will be -1 if the request is not associated with a frame. See
+  // the constructors for more.
   int render_process_host_id() const { return render_process_host_id_; }
   int render_view_host_routing_id() const {
     return render_view_host_routing_id_;
@@ -212,8 +221,11 @@ class CONTENT_EXPORT DownloadUrlParameters {
   int render_frame_host_routing_id() const {
     return render_frame_host_routing_id_;
   }
+
   const RequestHeadersType& request_headers() const { return request_headers_; }
-  ResourceContext* resource_context() const { return resource_context_; }
+  net::URLRequestContextGetter* url_request_context_getter() {
+    return url_request_context_getter_.get();
+  }
   const base::FilePath& file_path() const { return save_info_.file_path; }
   const base::string16& suggested_name() const {
     return save_info_.suggested_name;
@@ -250,7 +262,7 @@ class CONTENT_EXPORT DownloadUrlParameters {
   int render_process_host_id_;
   int render_view_host_routing_id_;
   int render_frame_host_routing_id_;
-  ResourceContext* resource_context_;
+  scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
   DownloadSaveInfo save_info_;
   GURL url_;
   bool do_not_prompt_for_login_;

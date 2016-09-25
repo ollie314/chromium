@@ -27,30 +27,32 @@ class DesktopResizer;
 
 // Uses the specified DesktopResizer to match host desktop size to the client
 // view size as closely as is possible. When the connection closes, restores
-// the original desktop size.
+// the original desktop size if restore is true.
 class ResizingHostObserver : public ScreenControls {
  public:
   explicit ResizingHostObserver(
-      std::unique_ptr<DesktopResizer> desktop_resizer);
+      std::unique_ptr<DesktopResizer> desktop_resizer,
+      bool restore);
   ~ResizingHostObserver() override;
 
   // ScreenControls interface.
   void SetScreenResolution(const ScreenResolution& resolution) override;
 
-  // Provide a replacement for base::Time::Now so that this class can be
+  // Provide a replacement for base::TimeTicks::Now so that this class can be
   // unit-tested in a timely manner. This function will be called exactly
   // once for each call to SetScreenResolution.
   void SetNowFunctionForTesting(
-      const base::Callback<base::Time(void)>& now_function);
+      const base::Callback<base::TimeTicks(void)>& now_function);
 
  private:
   std::unique_ptr<DesktopResizer> desktop_resizer_;
   ScreenResolution original_resolution_;
+  bool restore_;
 
   // State to manage rate-limiting of desktop resizes.
   base::OneShotTimer deferred_resize_timer_;
-  base::Time previous_resize_time_;
-  base::Callback<base::Time(void)> now_function_;
+  base::TimeTicks previous_resize_time_;
+  base::Callback<base::TimeTicks(void)> now_function_;
 
   base::WeakPtrFactory<ResizingHostObserver> weak_factory_;
 

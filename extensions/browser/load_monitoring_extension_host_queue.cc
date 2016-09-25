@@ -8,9 +8,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_host_observer.h"
@@ -19,7 +21,7 @@
 namespace extensions {
 
 LoadMonitoringExtensionHostQueue::LoadMonitoringExtensionHostQueue(
-    scoped_ptr<ExtensionHostQueue> delegate,
+    std::unique_ptr<ExtensionHostQueue> delegate,
     base::TimeDelta monitor_time,
     const FinishedCallback& finished_callback)
     : delegate_(std::move(delegate)),
@@ -33,7 +35,7 @@ LoadMonitoringExtensionHostQueue::LoadMonitoringExtensionHostQueue(
       weak_ptr_factory_(this) {}
 
 LoadMonitoringExtensionHostQueue::LoadMonitoringExtensionHostQueue(
-    scoped_ptr<ExtensionHostQueue> delegate)
+    std::unique_ptr<ExtensionHostQueue> delegate)
     : LoadMonitoringExtensionHostQueue(std::move(delegate),
                                        base::TimeDelta::FromMinutes(1),
                                        FinishedCallback()) {}
@@ -46,7 +48,7 @@ void LoadMonitoringExtensionHostQueue::StartMonitoring() {
     return;
   }
   started_ = true;
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::Bind(&LoadMonitoringExtensionHostQueue::FinishMonitoring,
                             weak_ptr_factory_.GetWeakPtr()),
       monitor_time_);

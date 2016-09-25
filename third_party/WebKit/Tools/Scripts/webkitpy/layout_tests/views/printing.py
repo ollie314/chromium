@@ -33,7 +33,8 @@ import optparse
 
 from webkitpy.tool import grammar
 from webkitpy.layout_tests.models import test_expectations
-from webkitpy.layout_tests.models.test_expectations import TestExpectations, TestExpectationParser
+from webkitpy.layout_tests.models.test_expectations import TestExpectationParser
+from webkitpy.layout_tests.models.test_expectations import TestExpectations
 from webkitpy.layout_tests.views.metered_stream import MeteredStream
 
 
@@ -79,6 +80,8 @@ class Printer(object):
         self._print_default("Test configuration: %s" % self._port.test_configuration())
         self._print_default("View the test results at file://%s/results.html" % results_directory)
         self._print_default("View the archived results dashboard at file://%s/dashboard.html" % results_directory)
+        if self._options.order == 'random':
+            self._print_default("Using random order with seed: %d" % self._options.seed)
 
         # FIXME: should these options be in printing_options?
         if self._options.new_baseline:
@@ -193,11 +196,11 @@ class Printer(object):
             if test_name in run_results.failures_by_name:
                 result = run_results.results_by_name[test_name].type
                 if (result == test_expectations.TIMEOUT or
-                    result == test_expectations.CRASH):
+                        result == test_expectations.CRASH):
                     is_timeout_crash_or_slow = True
                     timeout_or_crash_tests.append(test_tuple)
 
-            if (not is_timeout_crash_or_slow and num_printed < NUM_SLOW_TESTS_TO_LOG):
+            if not is_timeout_crash_or_slow and num_printed < NUM_SLOW_TESTS_TO_LOG:
                 num_printed = num_printed + 1
                 unexpected_slow_tests.append(test_tuple)
 

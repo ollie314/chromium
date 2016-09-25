@@ -24,13 +24,13 @@ CSPSource::CSPSource(ContentSecurityPolicy* policy, const String& scheme, const 
 {
 }
 
-bool CSPSource::matches(const KURL& url, ContentSecurityPolicy::RedirectStatus redirectStatus) const
+bool CSPSource::matches(const KURL& url, ResourceRequest::RedirectStatus redirectStatus) const
 {
     if (!schemeMatches(url))
         return false;
     if (isSchemeOnly())
         return true;
-    bool pathsMatch = (redirectStatus == ContentSecurityPolicy::DidRedirect) || pathMatches(url);
+    bool pathsMatch = (redirectStatus == RedirectStatus::FollowedRedirect) || pathMatches(url);
     return hostMatches(url) && portMatches(url) && pathsMatch;
 }
 
@@ -53,7 +53,7 @@ bool CSPSource::hostMatches(const KURL& url) const
 
     bool equalHosts = equalIgnoringCase(host, m_host);
     if (m_hostWildcard == HasWildcard) {
-        match = host.endsWith("." + m_host, TextCaseInsensitive);
+        match = host.endsWith(String("." + m_host), TextCaseInsensitive);
 
         // Chrome used to, incorrectly, match *.x.y to x.y. This was fixed, but
         // the following count measures when a match fails that would have
@@ -89,6 +89,9 @@ bool CSPSource::portMatches(const KURL& url) const
     int port = url.port();
 
     if (port == m_port)
+        return true;
+
+    if (m_port == 80 && (port == 443 || (port == 0 && defaultPortForProtocol(url.protocol()) == 443)))
         return true;
 
     if (!port)

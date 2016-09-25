@@ -42,9 +42,6 @@ class ListValue;
 class StringValue;
 class Value;
 
-typedef std::vector<Value*> ValueVector;
-typedef std::map<std::string, Value*> ValueMap;
-
 // The Value class is the base class for Values. A Value can be instantiated
 // via the Create*Value() factory methods, or by directly creating instances of
 // the subclasses.
@@ -67,6 +64,9 @@ class BASE_EXPORT Value {
   virtual ~Value();
 
   static std::unique_ptr<Value> CreateNullValue();
+
+  // Returns the name for a given |type|.
+  static const char* GetTypeName(Type type);
 
   // Returns the type of the value stored by the current Value object.
   // Each type will be implemented by only one subclass of Value, so it's
@@ -149,7 +149,7 @@ class BASE_EXPORT FundamentalValue : public Value {
 class BASE_EXPORT StringValue : public Value {
  public:
   // Initializes a StringValue with a UTF-8 narrow character string.
-  explicit StringValue(const std::string& in_value);
+  explicit StringValue(StringPiece in_value);
 
   // Initializes a StringValue with a string16.
   explicit StringValue(const string16& in_value);
@@ -185,7 +185,8 @@ class BASE_EXPORT BinaryValue: public Value {
   // For situations where you want to keep ownership of your buffer, this
   // factory method creates a new BinaryValue by copying the contents of the
   // buffer that's passed in.
-  static BinaryValue* CreateWithCopiedBuffer(const char* buffer, size_t size);
+  static std::unique_ptr<BinaryValue> CreateWithCopiedBuffer(const char* buffer,
+                                                             size_t size);
 
   size_t GetSize() const { return size_; }
 
@@ -210,6 +211,7 @@ class BASE_EXPORT BinaryValue: public Value {
 // are |std::string|s and should be UTF-8 encoded.
 class BASE_EXPORT DictionaryValue : public Value {
  public:
+  using Storage = std::map<std::string, std::unique_ptr<Value>>;
   // Returns |value| if it is a dictionary, nullptr otherwise.
   static std::unique_ptr<DictionaryValue> From(std::unique_ptr<Value> value);
 
@@ -221,7 +223,7 @@ class BASE_EXPORT DictionaryValue : public Value {
   bool GetAsDictionary(const DictionaryValue** out_value) const override;
 
   // Returns true if the current dictionary has a value for the given key.
-  bool HasKey(const std::string& key) const;
+  bool HasKey(StringPiece key) const;
 
   // Returns the number of Values in this dictionary.
   size_t size() const { return dictionary_.size(); }
@@ -239,32 +241,31 @@ class BASE_EXPORT DictionaryValue : public Value {
   // If the key at any step of the way doesn't exist, or exists but isn't
   // a DictionaryValue, a new DictionaryValue will be created and attached
   // to the path in that location. |in_value| must be non-null.
-  void Set(const std::string& path, std::unique_ptr<Value> in_value);
+  void Set(StringPiece path, std::unique_ptr<Value> in_value);
   // Deprecated version of the above. TODO(estade): remove.
-  void Set(const std::string& path, Value* in_value);
+  void Set(StringPiece path, Value* in_value);
 
   // Convenience forms of Set().  These methods will replace any existing
   // value at that path, even if it has a different type.
-  void SetBoolean(const std::string& path, bool in_value);
-  void SetInteger(const std::string& path, int in_value);
-  void SetDouble(const std::string& path, double in_value);
-  void SetString(const std::string& path, const std::string& in_value);
-  void SetString(const std::string& path, const string16& in_value);
+  void SetBoolean(StringPiece path, bool in_value);
+  void SetInteger(StringPiece path, int in_value);
+  void SetDouble(StringPiece path, double in_value);
+  void SetString(StringPiece path, StringPiece in_value);
+  void SetString(StringPiece path, const string16& in_value);
 
   // Like Set(), but without special treatment of '.'.  This allows e.g. URLs to
   // be used as paths.
-  void SetWithoutPathExpansion(const std::string& key,
+  void SetWithoutPathExpansion(StringPiece key,
                                std::unique_ptr<Value> in_value);
   // Deprecated version of the above. TODO(estade): remove.
-  void SetWithoutPathExpansion(const std::string& key, Value* in_value);
+  void SetWithoutPathExpansion(StringPiece key, Value* in_value);
 
   // Convenience forms of SetWithoutPathExpansion().
-  void SetBooleanWithoutPathExpansion(const std::string& path, bool in_value);
-  void SetIntegerWithoutPathExpansion(const std::string& path, int in_value);
-  void SetDoubleWithoutPathExpansion(const std::string& path, double in_value);
-  void SetStringWithoutPathExpansion(const std::string& path,
-                                     const std::string& in_value);
-  void SetStringWithoutPathExpansion(const std::string& path,
+  void SetBooleanWithoutPathExpansion(StringPiece path, bool in_value);
+  void SetIntegerWithoutPathExpansion(StringPiece path, int in_value);
+  void SetDoubleWithoutPathExpansion(StringPiece path, double in_value);
+  void SetStringWithoutPathExpansion(StringPiece path, StringPiece in_value);
+  void SetStringWithoutPathExpansion(StringPiece path,
                                      const string16& in_value);
 
   // Gets the Value associated with the given path starting from this object.
@@ -282,46 +283,41 @@ class BASE_EXPORT DictionaryValue : public Value {
   // and the return value will be true if the path is valid and the value at
   // the end of the path can be returned in the form specified.
   // |out_value| is optional and will only be set if non-NULL.
-  bool GetBoolean(const std::string& path, bool* out_value) const;
-  bool GetInteger(const std::string& path, int* out_value) const;
+  bool GetBoolean(StringPiece path, bool* out_value) const;
+  bool GetInteger(StringPiece path, int* out_value) const;
   // Values of both type TYPE_INTEGER and TYPE_DOUBLE can be obtained as
   // doubles.
-  bool GetDouble(const std::string& path, double* out_value) const;
-  bool GetString(const std::string& path, std::string* out_value) const;
-  bool GetString(const std::string& path, string16* out_value) const;
-  bool GetStringASCII(const std::string& path, std::string* out_value) const;
-  bool GetBinary(const std::string& path, const BinaryValue** out_value) const;
-  bool GetBinary(const std::string& path, BinaryValue** out_value);
+  bool GetDouble(StringPiece path, double* out_value) const;
+  bool GetString(StringPiece path, std::string* out_value) const;
+  bool GetString(StringPiece path, string16* out_value) const;
+  bool GetStringASCII(StringPiece path, std::string* out_value) const;
+  bool GetBinary(StringPiece path, const BinaryValue** out_value) const;
+  bool GetBinary(StringPiece path, BinaryValue** out_value);
   bool GetDictionary(StringPiece path,
                      const DictionaryValue** out_value) const;
   bool GetDictionary(StringPiece path, DictionaryValue** out_value);
-  bool GetList(const std::string& path, const ListValue** out_value) const;
-  bool GetList(const std::string& path, ListValue** out_value);
+  bool GetList(StringPiece path, const ListValue** out_value) const;
+  bool GetList(StringPiece path, ListValue** out_value);
 
   // Like Get(), but without special treatment of '.'.  This allows e.g. URLs to
   // be used as paths.
-  bool GetWithoutPathExpansion(const std::string& key,
-                               const Value** out_value) const;
-  bool GetWithoutPathExpansion(const std::string& key, Value** out_value);
-  bool GetBooleanWithoutPathExpansion(const std::string& key,
-                                      bool* out_value) const;
-  bool GetIntegerWithoutPathExpansion(const std::string& key,
-                                      int* out_value) const;
-  bool GetDoubleWithoutPathExpansion(const std::string& key,
-                                     double* out_value) const;
-  bool GetStringWithoutPathExpansion(const std::string& key,
+  bool GetWithoutPathExpansion(StringPiece key, const Value** out_value) const;
+  bool GetWithoutPathExpansion(StringPiece key, Value** out_value);
+  bool GetBooleanWithoutPathExpansion(StringPiece key, bool* out_value) const;
+  bool GetIntegerWithoutPathExpansion(StringPiece key, int* out_value) const;
+  bool GetDoubleWithoutPathExpansion(StringPiece key, double* out_value) const;
+  bool GetStringWithoutPathExpansion(StringPiece key,
                                      std::string* out_value) const;
-  bool GetStringWithoutPathExpansion(const std::string& key,
+  bool GetStringWithoutPathExpansion(StringPiece key,
                                      string16* out_value) const;
   bool GetDictionaryWithoutPathExpansion(
-      const std::string& key,
+      StringPiece key,
       const DictionaryValue** out_value) const;
-  bool GetDictionaryWithoutPathExpansion(const std::string& key,
+  bool GetDictionaryWithoutPathExpansion(StringPiece key,
                                          DictionaryValue** out_value);
-  bool GetListWithoutPathExpansion(const std::string& key,
+  bool GetListWithoutPathExpansion(StringPiece key,
                                    const ListValue** out_value) const;
-  bool GetListWithoutPathExpansion(const std::string& key,
-                                   ListValue** out_value);
+  bool GetListWithoutPathExpansion(StringPiece key, ListValue** out_value);
 
   // Removes the Value with the specified path from this dictionary (or one
   // of its child dictionaries, if the path is more than just a local key).
@@ -329,18 +325,16 @@ class BASE_EXPORT DictionaryValue : public Value {
   // |out_value|.  If |out_value| is NULL, the removed value will be deleted.
   // This method returns true if |path| is a valid path; otherwise it will
   // return false and the DictionaryValue object will be unchanged.
-  virtual bool Remove(const std::string& path,
-                      std::unique_ptr<Value>* out_value);
+  virtual bool Remove(StringPiece path, std::unique_ptr<Value>* out_value);
 
   // Like Remove(), but without special treatment of '.'.  This allows e.g. URLs
   // to be used as paths.
-  virtual bool RemoveWithoutPathExpansion(const std::string& key,
+  virtual bool RemoveWithoutPathExpansion(StringPiece key,
                                           std::unique_ptr<Value>* out_value);
 
   // Removes a path, clearing out all dictionaries on |path| that remain empty
   // after removing the value at |path|.
-  virtual bool RemovePath(const std::string& path,
-                          std::unique_ptr<Value>* out_value);
+  virtual bool RemovePath(StringPiece path, std::unique_ptr<Value>* out_value);
 
   // Makes a copy of |this| but doesn't include empty dictionaries and lists in
   // the copy.  This never returns NULL, even if |this| itself is empty.
@@ -372,7 +366,7 @@ class BASE_EXPORT DictionaryValue : public Value {
 
    private:
     const DictionaryValue& target_;
-    ValueMap::const_iterator it_;
+    Storage::const_iterator it_;
   };
 
   // Overridden from Value:
@@ -382,7 +376,7 @@ class BASE_EXPORT DictionaryValue : public Value {
   bool Equals(const Value* other) const override;
 
  private:
-  ValueMap dictionary_;
+  Storage dictionary_;
 
   DISALLOW_COPY_AND_ASSIGN(DictionaryValue);
 };
@@ -390,8 +384,9 @@ class BASE_EXPORT DictionaryValue : public Value {
 // This type of Value represents a list of other Value values.
 class BASE_EXPORT ListValue : public Value {
  public:
-  typedef ValueVector::iterator iterator;
-  typedef ValueVector::const_iterator const_iterator;
+  using Storage = std::vector<std::unique_ptr<Value>>;
+  using const_iterator = Storage::const_iterator;
+  using iterator = Storage::iterator;
 
   // Returns |value| if it is a list, nullptr otherwise.
   static std::unique_ptr<ListValue> From(std::unique_ptr<Value> value);
@@ -462,26 +457,27 @@ class BASE_EXPORT ListValue : public Value {
 
   // Appends a Value to the end of the list.
   void Append(std::unique_ptr<Value> in_value);
+#if !defined(OS_LINUX) || defined(OS_CHROMEOS)
   // Deprecated version of the above. TODO(estade): remove.
   void Append(Value* in_value);
+#endif
 
   // Convenience forms of Append.
   void AppendBoolean(bool in_value);
   void AppendInteger(int in_value);
   void AppendDouble(double in_value);
-  void AppendString(const std::string& in_value);
+  void AppendString(StringPiece in_value);
   void AppendString(const string16& in_value);
   void AppendStrings(const std::vector<std::string>& in_values);
   void AppendStrings(const std::vector<string16>& in_values);
 
-  // Appends a Value if it's not already present. Takes ownership of the
-  // |in_value|. Returns true if successful, or false if the value was already
-  // present. If the value was already present the |in_value| is deleted.
-  bool AppendIfNotPresent(Value* in_value);
+  // Appends a Value if it's not already present. Returns true if successful,
+  // or false if the value was already
+  bool AppendIfNotPresent(std::unique_ptr<Value> in_value);
 
   // Insert a Value at index.
   // Returns true if successful, or false if the index was out of range.
-  bool Insert(size_t index, Value* in_value);
+  bool Insert(size_t index, std::unique_ptr<Value> in_value);
 
   // Searches for the first instance of |value| in the list using the Equals
   // method of the Value type.
@@ -508,7 +504,7 @@ class BASE_EXPORT ListValue : public Value {
   std::unique_ptr<ListValue> CreateDeepCopy() const;
 
  private:
-  ValueVector list_;
+  Storage list_;
 
   DISALLOW_COPY_AND_ASSIGN(ListValue);
 };

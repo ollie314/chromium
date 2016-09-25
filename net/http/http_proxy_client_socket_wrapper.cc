@@ -15,6 +15,8 @@
 #include "net/base/proxy_delegate.h"
 #include "net/http/http_proxy_client_socket.h"
 #include "net/http/http_response_info.h"
+#include "net/log/net_log_event_type.h"
+#include "net/log/net_log_source_type.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/spdy/spdy_proxy_client_socket.h"
 #include "net/spdy/spdy_session.h"
@@ -42,7 +44,7 @@ HttpProxyClientSocketWrapper::HttpProxyClientSocketWrapper(
     SpdySessionPool* spdy_session_pool,
     bool tunnel,
     ProxyDelegate* proxy_delegate,
-    const BoundNetLog& net_log)
+    const NetLogWithSource& net_log)
     : next_state_(STATE_NONE),
       group_name_(group_name),
       priority_(priority),
@@ -55,8 +57,6 @@ HttpProxyClientSocketWrapper::HttpProxyClientSocketWrapper(
       ssl_params_(ssl_params),
       user_agent_(user_agent),
       endpoint_(endpoint),
-      http_auth_cache_(http_auth_cache),
-      http_auth_handler_factory_(http_auth_handler_factory),
       spdy_session_pool_(spdy_session_pool),
       tunnel_(tunnel),
       proxy_delegate_(proxy_delegate),
@@ -69,9 +69,10 @@ HttpProxyClientSocketWrapper::HttpProxyClientSocketWrapper(
                        http_auth_cache,
                        http_auth_handler_factory)
                  : nullptr),
-      net_log_(BoundNetLog::Make(net_log.net_log(),
-                                 NetLog::SOURCE_PROXY_CLIENT_SOCKET_WRAPPER)) {
-  net_log_.BeginEvent(NetLog::TYPE_SOCKET_ALIVE,
+      net_log_(NetLogWithSource::Make(
+          net_log.net_log(),
+          NetLogSourceType::PROXY_CLIENT_SOCKET_WRAPPER)) {
+  net_log_.BeginEvent(NetLogEventType::SOCKET_ALIVE,
                       net_log.source().ToEventParametersCallback());
   DCHECK(transport_params || ssl_params);
   DCHECK(!transport_params || !ssl_params);
@@ -81,7 +82,7 @@ HttpProxyClientSocketWrapper::~HttpProxyClientSocketWrapper() {
   // Make sure no sockets are returned to the lower level socket pools.
   Disconnect();
 
-  net_log_.EndEvent(NetLog::TYPE_SOCKET_ALIVE);
+  net_log_.EndEvent(NetLogEventType::SOCKET_ALIVE);
 }
 
 LoadState HttpProxyClientSocketWrapper::GetConnectLoadState() const {
@@ -149,9 +150,9 @@ bool HttpProxyClientSocketWrapper::IsUsingSpdy() const {
   return false;
 }
 
-NextProto HttpProxyClientSocketWrapper::GetProtocolNegotiated() const {
+NextProto HttpProxyClientSocketWrapper::GetProxyNegotiatedProtocol() const {
   if (transport_socket_)
-    return transport_socket_->GetProtocolNegotiated();
+    return transport_socket_->GetProxyNegotiatedProtocol();
   return kProtoUnknown;
 }
 
@@ -206,7 +207,7 @@ bool HttpProxyClientSocketWrapper::IsConnectedAndIdle() const {
   return false;
 }
 
-const BoundNetLog& HttpProxyClientSocketWrapper::NetLog() const {
+const NetLogWithSource& HttpProxyClientSocketWrapper::NetLog() const {
   return net_log_;
 }
 
@@ -472,8 +473,8 @@ int HttpProxyClientSocketWrapper::DoSSLConnectComplete(int result) {
 
   SSLClientSocket* ssl =
       static_cast<SSLClientSocket*>(transport_socket_handle_->socket());
-  protocol_negotiated_ = ssl->GetNegotiatedProtocol();
-  using_spdy_ = NextProtoIsSPDY(protocol_negotiated_);
+  negotiated_protocol_ = ssl->GetNegotiatedProtocol();
+  using_spdy_ = negotiated_protocol_ == kProtoHTTP2;
 
   // Reset the timer to just the length of time allowed for HttpProxy handshake
   // so that a fast SSL connection plus a slow HttpProxy failure doesn't take
@@ -501,7 +502,7 @@ int HttpProxyClientSocketWrapper::DoHttpProxyConnect() {
   transport_socket_.reset(new HttpProxyClientSocket(
       transport_socket_handle_.release(), user_agent_, endpoint_,
       GetDestination().host_port_pair(), http_auth_controller_.get(), tunnel_,
-      using_spdy_, protocol_negotiated_, proxy_delegate_,
+      using_spdy_, negotiated_protocol_, proxy_delegate_,
       ssl_params_.get() != nullptr));
   return transport_socket_->Connect(base::Bind(
       &HttpProxyClientSocketWrapper::OnIOComplete, base::Unretained(this)));

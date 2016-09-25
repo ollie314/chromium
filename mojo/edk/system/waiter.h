@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
@@ -61,9 +62,9 @@ class MOJO_SYSTEM_IMPL_EXPORT Waiter final : public Awakable {
   bool Awake(MojoResult result, uintptr_t context) override;
 
  private:
-  base::ConditionVariable cv_;  // Associated to |lock_|.
   base::Lock lock_;             // Protects the following members.
-#ifndef NDEBUG
+  base::ConditionVariable cv_;  // Associated to |lock_|.
+#if DCHECK_IS_ON()
   bool initialized_;
 #endif
   bool awoken_;

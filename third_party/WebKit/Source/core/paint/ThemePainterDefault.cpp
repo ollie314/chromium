@@ -42,6 +42,10 @@ namespace blink {
 namespace {
 
 const unsigned defaultButtonBackgroundColor = 0xffdddddd;
+const unsigned mockDropdownMenuListArrowPadding = 3;
+// This is equal to the padding provided by the LayoutMenuList which is
+// calculated based on |menuListArrowPaddingSize| in LayoutThemeDefault.
+const unsigned mockDropdownMenuListArrowWidth = 18;
 
 bool useMockTheme()
 {
@@ -134,7 +138,7 @@ IntRect convertToPaintingRect(const LayoutObject& inputLayoutObject, const Layou
 } // namespace
 
 ThemePainterDefault::ThemePainterDefault()
-    : ThemePainter(nullptr)
+    : ThemePainter()
 {
 }
 
@@ -177,7 +181,7 @@ bool ThemePainterDefault::paintButton(const LayoutObject& o, const PaintInfo& i,
     WebCanvas* canvas = i.context.canvas();
     extraParams.button.hasBorder = true;
     extraParams.button.backgroundColor = useMockTheme() ? 0xffc0c0c0 : defaultButtonBackgroundColor;
-    if (o.hasBackground())
+    if (o.styleRef().hasBackground())
         extraParams.button.backgroundColor = o.resolveColor(CSSPropertyBackgroundColor).rgb();
 
     Platform::current()->themeEngine()->paint(canvas, WebThemeEngine::PartButton, getWebThemeState(o), WebRect(rect), &extraParams);
@@ -218,7 +222,7 @@ bool ThemePainterDefault::paintMenuList(const LayoutObject& o, const PaintInfo& 
     extraParams.menuList.hasBorderRadius = o.styleRef().hasBorderRadius();
     // Fallback to transparent if the specified color object is invalid.
     Color backgroundColor(Color::transparent);
-    if (o.hasBackground())
+    if (o.styleRef().hasBackground())
         backgroundColor = o.resolveColor(CSSPropertyBackgroundColor);
     extraParams.menuList.backgroundColor = backgroundColor.rgb();
 
@@ -262,17 +266,17 @@ void ThemePainterDefault::setupMenuListArrow(const LayoutBox& box, const IntRect
     if (useMockTheme()) {
         // The size and position of the drop-down button is different between
         // the mock theme and the regular aura theme.
-        int spacingTop = box.borderTop() + box.paddingTop();
-        int spacingBottom = box.borderBottom() + box.paddingBottom();
-        int spacingRight = box.borderRight() + box.paddingRight();
-        extraParams.menuList.arrowX = (box.styleRef().direction() == RTL) ? rect.x() + 4 + spacingRight: right - 10 - spacingRight;
-        extraParams.menuList.arrowSize = rect.height() - spacingBottom - spacingTop;
+        int extraPadding = mockDropdownMenuListArrowPadding * box.styleRef().effectiveZoom();
+        int arrowBoxWidth = mockDropdownMenuListArrowWidth * box.styleRef().effectiveZoom();
+        int arrowSize = std::min(arrowBoxWidth, rect.height()) - 2 * extraPadding;
+        extraParams.menuList.arrowX = (box.styleRef().direction() == RTL) ? rect.x() + extraPadding + (arrowSize / 2) : right - (arrowSize / 2) - extraPadding;
+        extraParams.menuList.arrowSize = arrowSize;
     } else {
         const int arrowSize = 6;
-        const int arrowPadding = 7;
+        const int arrowPadding = 6;
         extraParams.menuList.arrowX = (box.styleRef().direction() == RTL)
-            ? rect.x() + arrowPadding * box.styleRef().effectiveZoom()
-            : right - (arrowSize + arrowPadding) * box.styleRef().effectiveZoom();
+            ? rect.x() + arrowPadding * box.styleRef().effectiveZoom() + box.borderLeft()
+            : right - (arrowSize + arrowPadding) * box.styleRef().effectiveZoom() - box.borderRight();
         extraParams.menuList.arrowSize = arrowSize * box.styleRef().effectiveZoom();
     }
     extraParams.menuList.arrowColor = box.resolveColor(CSSPropertyColor).rgb();
@@ -375,7 +379,7 @@ bool ThemePainterDefault::paintSearchFieldCancelButton(const LayoutObject& cance
     // Get the layoutObject of <input> element.
     if (!cancelButtonObject.node())
         return false;
-    Node* input = cancelButtonObject.node()->shadowHost();
+    Node* input = cancelButtonObject.node()->ownerShadowHost();
     const LayoutObject& baseLayoutObject = input ? *input->layoutObject() : cancelButtonObject;
     if (!baseLayoutObject.isBox())
         return false;
@@ -395,33 +399,6 @@ bool ThemePainterDefault::paintSearchFieldCancelButton(const LayoutObject& cance
     DEFINE_STATIC_REF(Image, cancelImage, (Image::loadPlatformResource("searchCancel")));
     DEFINE_STATIC_REF(Image, cancelPressedImage, (Image::loadPlatformResource("searchCancelPressed")));
     paintInfo.context.drawImage(LayoutTheme::isPressed(cancelButtonObject) ? cancelPressedImage : cancelImage, paintingRect);
-    return false;
-}
-
-bool ThemePainterDefault::paintSearchFieldResultsDecoration(const LayoutObject& magnifierObject, const PaintInfo& paintInfo, const IntRect& r)
-{
-    // Get the layoutObject of <input> element.
-    if (!magnifierObject.node())
-        return false;
-    Node* input = magnifierObject.node()->shadowHost();
-    const LayoutObject& baseLayoutObject = input ? *input->layoutObject() : magnifierObject;
-    if (!baseLayoutObject.isBox())
-        return false;
-    const LayoutBox& inputLayoutBox = toLayoutBox(baseLayoutObject);
-    LayoutRect inputContentBox = inputLayoutBox.contentBoxRect();
-
-    // Make sure the scaled decoration stays square and will fit in its parent's box.
-    LayoutUnit magnifierSize = std::min(inputContentBox.width(), std::min(inputContentBox.height(), LayoutUnit(r.height())));
-    // Calculate decoration's coordinates relative to the input element.
-    // Center the decoration vertically.  Round up though, so if it has to be one pixel off-center, it will
-    // be one pixel closer to the bottom of the field.  This tends to look better with the text.
-    LayoutRect magnifierRect(magnifierObject.offsetFromAncestorContainer(&inputLayoutBox).width(),
-        inputContentBox.y() + (inputContentBox.height() - magnifierSize + 1) / 2,
-        magnifierSize, magnifierSize);
-    IntRect paintingRect = convertToPaintingRect(inputLayoutBox, magnifierObject, magnifierRect, r);
-
-    DEFINE_STATIC_REF(Image, magnifierImage, (Image::loadPlatformResource("searchMagnifier")));
-    paintInfo.context.drawImage(magnifierImage, paintingRect);
     return false;
 }
 

@@ -347,10 +347,6 @@
 // simple, since -[NSWindow attachedSheet] returns nil while the sheet is still
 // closing.
 - (void)registerKeyStateEventTap {
-  // Parent key state sharing is only avaiable on 10.7+.
-  if (!base::mac::IsOSLionOrLater())
-    return;
-
   NSWindow* window = self.window;
   NSNotification* note =
       [NSNotification notificationWithName:NSWindowDidResignKeyNotification
@@ -362,13 +358,21 @@
       addLocalMonitorForEventsMatchingMask:NSLeftMouseDownMask |
                                            NSRightMouseDownMask
       handler:^NSEvent* (NSEvent* event) {
-          if ([event window] != window && ![[event window] isSheet]) {
-            // Do it right now, because if this event is right mouse event,
-            // it may pop up a menu. windowDidResignKey: will not run until
-            // the menu is closed.
-            if ([self respondsToSelector:@selector(windowDidResignKey:)]) {
-              [self windowDidResignKey:note];
-            }
+          NSWindow* eventWindow = [event window];
+          if (eventWindow == window || [eventWindow isSheet])
+            return event;
+          // Do not close the bubble if the event happened on a window with a
+          // higher level.  For example, the content of a browser action bubble
+          // opens a calendar picker window with NSPopUpMenuWindowLevel, and a
+          // date selection closes the picker window, but it should not close
+          // the bubble.
+          if ([eventWindow level] > [window level])
+            return event;
+          // Do it right now, because if this event is right mouse event,
+          // it may pop up a menu. windowDidResignKey: will not run until
+          // the menu is closed.
+          if ([self respondsToSelector:@selector(windowDidResignKey:)]) {
+            [self windowDidResignKey:note];
           }
           return event;
       }];

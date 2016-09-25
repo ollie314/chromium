@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "components/safe_browsing_db/remote_database_manager.h"
+
+#include <memory>
+
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "components/safe_browsing_db/remote_database_manager.h"
 #include "components/safe_browsing_db/safe_browsing_api_handler.h"
 #include "components/variations/variations_associated_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -27,7 +29,8 @@ class TestSafeBrowsingApiHandler : public SafeBrowsingApiHandler {
 
 class RemoteDatabaseManagerTest : public testing::Test {
  protected:
-  RemoteDatabaseManagerTest() : field_trials_(new base::FieldTrialList(NULL)) {}
+  RemoteDatabaseManagerTest()
+      : field_trials_(new base::FieldTrialList(nullptr)) {}
 
   void SetUp() override {
     SafeBrowsingApiHandler::SetInstance(&api_handler_);
@@ -39,7 +42,7 @@ class RemoteDatabaseManagerTest : public testing::Test {
     // Destroy the existing FieldTrialList before creating a new one to avoid
     // a DCHECK.
     field_trials_.reset();
-    field_trials_.reset(new base::FieldTrialList(NULL));
+    field_trials_.reset(new base::FieldTrialList(nullptr));
     variations::testing::ClearAllVariationIDs();
     variations::testing::ClearAllVariationParams();
 
@@ -56,7 +59,7 @@ class RemoteDatabaseManagerTest : public testing::Test {
                                                      group_name, params));
   }
 
-  scoped_ptr<base::FieldTrialList> field_trials_;
+  std::unique_ptr<base::FieldTrialList> field_trials_;
   TestSafeBrowsingApiHandler api_handler_;
   scoped_refptr<RemoteSafeBrowsingDatabaseManager> db_;
 };

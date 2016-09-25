@@ -8,13 +8,19 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/test/test_support_android.h"
 #include "base/trace_event/trace_event.h"
 #include "net/test/jni/EmbeddedTestServerImpl_jni.h"
+
+using base::android::JavaParamRef;
+using base::android::JavaRef;
 
 namespace net {
 namespace test_server {
 
-EmbeddedTestServerAndroid::EmbeddedTestServerAndroid(JNIEnv* env, jobject jobj)
+EmbeddedTestServerAndroid::EmbeddedTestServerAndroid(
+    JNIEnv* env,
+    const JavaRef<jobject>& jobj)
     : weak_java_server_(env, jobj), test_server_() {
   Java_EmbeddedTestServerImpl_setNativePtr(env, jobj,
                                            reinterpret_cast<intptr_t>(this));
@@ -22,8 +28,7 @@ EmbeddedTestServerAndroid::EmbeddedTestServerAndroid(JNIEnv* env, jobject jobj)
 
 EmbeddedTestServerAndroid::~EmbeddedTestServerAndroid() {
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_EmbeddedTestServerImpl_clearNativePtr(env,
-                                             weak_java_server_.get(env).obj());
+  Java_EmbeddedTestServerImpl_clearNativePtr(env, weak_java_server_.get(env));
 }
 
 jboolean EmbeddedTestServerAndroid::Start(JNIEnv* env,
@@ -69,8 +74,13 @@ void EmbeddedTestServerAndroid::Destroy(JNIEnv* env,
   delete this;
 }
 
-static void Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
+static void Init(JNIEnv* env,
+                 const JavaParamRef<jobject>& jobj,
+                 const JavaParamRef<jstring>& jtest_data_dir) {
   TRACE_EVENT0("native", "EmbeddedTestServerAndroid::Init");
+  base::FilePath test_data_dir(
+      base::android::ConvertJavaStringToUTF8(env, jtest_data_dir));
+  base::InitAndroidTestPaths(test_data_dir);
   new EmbeddedTestServerAndroid(env, jobj);
 }
 

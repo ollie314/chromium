@@ -27,8 +27,9 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "platform/graphics/StrokeData.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "third_party/skia/include/effects/SkDashPathEffect.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -48,7 +49,7 @@ void StrokeData::setLineDash(const DashArray& dashes, float dashOffset)
     }
 
     size_t count = !(dashLength % 2) ? dashLength : dashLength * 2;
-    OwnPtr<SkScalar[]> intervals = adoptArrayPtr(new SkScalar[count]);
+    std::unique_ptr<SkScalar[]> intervals = wrapArrayUnique(new SkScalar[count]);
 
     for (unsigned i = 0; i < count; i++)
         intervals[i] = dashes[i % dashLength];

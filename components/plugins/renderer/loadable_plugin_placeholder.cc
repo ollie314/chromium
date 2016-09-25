@@ -4,13 +4,15 @@
 
 #include "components/plugins/renderer/loadable_plugin_placeholder.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/json/string_escape.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/render_frame.h"
@@ -30,6 +32,7 @@
 
 using base::UserMetricsAction;
 using content::PluginInstanceThrottler;
+using content::RenderFrame;
 using content::RenderThread;
 
 namespace plugins {
@@ -49,15 +52,18 @@ void LoadablePluginPlaceholder::SetPremadePlugin(
     content::PluginInstanceThrottler* throttler) {
   DCHECK(throttler);
   DCHECK(!premade_throttler_);
+  heuristic_run_before_ = true;
   premade_throttler_ = throttler;
 }
 
 LoadablePluginPlaceholder::LoadablePluginPlaceholder(
-    content::RenderFrame* render_frame,
+    RenderFrame* render_frame,
     blink::WebLocalFrame* frame,
     const blink::WebPluginParams& params,
     const std::string& html_data)
     : PluginPlaceholderBase(render_frame, frame, params, html_data),
+      heuristic_run_before_(false),
+      is_blocked_for_tinyness_(false),
       is_blocked_for_background_tab_(false),
       is_blocked_for_prerendering_(false),
       is_blocked_for_power_saver_poster_(false),
@@ -65,7 +71,6 @@ LoadablePluginPlaceholder::LoadablePluginPlaceholder(
       premade_throttler_(nullptr),
       allow_loading_(false),
       finished_loading_(false),
-      heuristic_run_before_(premade_throttler_ != nullptr),
       weak_factory_(this) {}
 
 LoadablePluginPlaceholder::~LoadablePluginPlaceholder() {
@@ -83,11 +88,10 @@ void LoadablePluginPlaceholder::MarkPluginEssential(
   else if (method != PluginInstanceThrottler::UNTHROTTLE_METHOD_DO_NOT_RECORD)
     PluginInstanceThrottler::RecordUnthrottleMethodMetric(method);
 
-  if (is_blocked_for_power_saver_poster_) {
-    is_blocked_for_power_saver_poster_ = false;
-    if (!LoadingBlocked())
-      LoadPlugin();
-  }
+  is_blocked_for_power_saver_poster_ = false;
+  is_blocked_for_tinyness_ = false;
+  if (!LoadingBlocked())
+    LoadPlugin();
 }
 
 void LoadablePluginPlaceholder::ReplacePlugin(blink::WebPlugin* new_plugin) {
@@ -102,9 +106,6 @@ void LoadablePluginPlaceholder::ReplacePlugin(blink::WebPlugin* new_plugin) {
   }
 
   container->setPlugin(new_plugin);
-  // Save the element in case the plugin is removed from the page during
-  // initialization.
-  blink::WebElement element = container->element();
   bool plugin_needs_initialization =
       !premade_throttler_ || new_plugin != premade_throttler_->GetWebPlugin();
   if (plugin_needs_initialization && !new_plugin->initialize(container)) {
@@ -113,14 +114,11 @@ void LoadablePluginPlaceholder::ReplacePlugin(blink::WebPlugin* new_plugin) {
       // still exists, restore the placeholder and destroy the new plugin.
       container->setPlugin(plugin());
       new_plugin->destroy();
+    } else {
+      // The container has been destroyed, along with the new plugin. Destroy
+      // our placeholder plugin also.
+      plugin()->destroy();
     }
-    return;
-  }
-
-  // The plugin has been removed from the page. Destroy the old plugin. We
-  // will be destroyed as soon as V8 garbage collects us.
-  if (!element.pluginContainer()) {
-    plugin()->destroy();
     return;
   }
 
@@ -129,10 +127,11 @@ void LoadablePluginPlaceholder::ReplacePlugin(blink::WebPlugin* new_plugin) {
   // this point.
   new_plugin = container->plugin();
 
-  plugin()->RestoreTitleText();
   container->invalidate();
   container->reportGeometry();
-  plugin()->ReplayReceivedData(new_plugin);
+  if (plugin()->focused())
+    new_plugin->updateFocus(true, blink::WebFocusTypeNone);
+  container->element().setAttribute("title", plugin()->old_title());
   plugin()->destroy();
 }
 
@@ -183,7 +182,11 @@ v8::Local<v8::Object> LoadablePluginPlaceholder::GetV8ScriptableObject(
 void LoadablePluginPlaceholder::OnUnobscuredRectUpdate(
     const gfx::Rect& unobscured_rect) {
   DCHECK(content::RenderThread::Get());
-  if (!plugin() || !power_saver_enabled_ || !finished_loading_)
+
+  if (!plugin() || !finished_loading_)
+    return;
+
+  if (!is_blocked_for_tinyness_ && !is_blocked_for_power_saver_poster_)
     return;
 
   if (unobscured_rect_ == unobscured_rect)
@@ -194,37 +197,58 @@ void LoadablePluginPlaceholder::OnUnobscuredRectUpdate(
   float zoom_factor = plugin()->container()->pageZoomFactor();
   int width = roundf(unobscured_rect_.width() / zoom_factor);
   int height = roundf(unobscured_rect_.height() / zoom_factor);
+  int x = roundf(unobscured_rect_.x() / zoom_factor);
+  int y = roundf(unobscured_rect_.y() / zoom_factor);
+
+  // On a size update check if we now qualify as a essential plugin.
+  url::Origin content_origin = url::Origin(GetPluginParams().url);
+  RenderFrame::PeripheralContentStatus status =
+      render_frame()->GetPeripheralContentStatus(
+          render_frame()->GetWebFrame()->top()->getSecurityOrigin(),
+          content_origin, gfx::Size(width, height),
+          heuristic_run_before_ ? RenderFrame::DONT_RECORD_DECISION
+                                : RenderFrame::RECORD_DECISION);
+
+  bool plugin_is_tiny_and_blocked =
+      is_blocked_for_tinyness_ &&
+      status == RenderFrame::CONTENT_STATUS_ESSENTIAL_CROSS_ORIGIN_TINY;
+
+  // Early exit for plugins that we've discovered to be essential.
+  if (!plugin_is_tiny_and_blocked &&
+      status != RenderFrame::CONTENT_STATUS_PERIPHERAL) {
+    MarkPluginEssential(
+        heuristic_run_before_
+            ? PluginInstanceThrottler::UNTHROTTLE_METHOD_BY_SIZE_CHANGE
+            : PluginInstanceThrottler::UNTHROTTLE_METHOD_DO_NOT_RECORD);
+
+    if (!heuristic_run_before_ &&
+        status == RenderFrame::CONTENT_STATUS_ESSENTIAL_CROSS_ORIGIN_BIG) {
+      render_frame()->WhitelistContentOrigin(content_origin);
+    }
+
+    return;
+  }
+  heuristic_run_before_ = true;
+
+  if (is_blocked_for_tinyness_) {
+    if (plugin_is_tiny_and_blocked) {
+      OnBlockedTinyContent();
+    } else {
+      is_blocked_for_tinyness_ = false;
+      if (!LoadingBlocked()) {
+        LoadPlugin();
+      }
+    }
+  }
 
   if (is_blocked_for_power_saver_poster_) {
     // Adjust poster container padding and dimensions to center play button for
     // plugins and plugin posters that have their top or left portions obscured.
-    int x = roundf(unobscured_rect_.x() / zoom_factor);
-    int y = roundf(unobscured_rect_.y() / zoom_factor);
     std::string script = base::StringPrintf(
         "window.resizePoster('%dpx', '%dpx', '%dpx', '%dpx')", x, y, width,
         height);
     plugin()->web_view()->mainFrame()->executeScript(
         blink::WebScriptSource(base::UTF8ToUTF16(script)));
-
-    // On a size update check if we now qualify as a essential plugin.
-    url::Origin content_origin = url::Origin(GetPluginParams().url);
-    auto status = render_frame()->GetPeripheralContentStatus(
-        render_frame()->GetWebFrame()->top()->getSecurityOrigin(),
-        content_origin, gfx::Size(width, height));
-    if (status != content::RenderFrame::CONTENT_STATUS_PERIPHERAL) {
-      MarkPluginEssential(
-          heuristic_run_before_
-              ? PluginInstanceThrottler::UNTHROTTLE_METHOD_BY_SIZE_CHANGE
-              : PluginInstanceThrottler::UNTHROTTLE_METHOD_DO_NOT_RECORD);
-
-      if (!heuristic_run_before_ &&
-          status ==
-              content::RenderFrame::CONTENT_STATUS_ESSENTIAL_CROSS_ORIGIN_BIG) {
-        render_frame()->WhitelistContentOrigin(content_origin);
-      }
-    }
-
-    heuristic_run_before_ = true;
   }
 }
 
@@ -242,6 +266,8 @@ void LoadablePluginPlaceholder::OnLoadBlockedPlugins(
     return;
 
   RenderThread::Get()->RecordAction(UserMetricsAction("Plugin_Load_UI"));
+  MarkPluginEssential(
+      PluginInstanceThrottler::UNTHROTTLE_METHOD_BY_OMNIBOX_ICON);
   LoadPlugin();
 }
 
@@ -309,7 +335,7 @@ void LoadablePluginPlaceholder::DidFinishIconRepositionForTestingCallback() {
   blink::WebElement element = plugin()->container()->element();
   element.setAttribute("placeholderReady", "true");
 
-  scoped_ptr<content::V8ValueConverter> converter(
+  std::unique_ptr<content::V8ValueConverter> converter(
       content::V8ValueConverter::create());
   base::StringValue value("placeholderReady");
   blink::WebSerializedScriptValue message_data =
@@ -339,8 +365,8 @@ const std::string& LoadablePluginPlaceholder::GetIdentifier() const {
 
 bool LoadablePluginPlaceholder::LoadingBlocked() const {
   DCHECK(allow_loading_);
-  return is_blocked_for_background_tab_ || is_blocked_for_power_saver_poster_ ||
-         is_blocked_for_prerendering_;
+  return is_blocked_for_tinyness_ || is_blocked_for_background_tab_ ||
+         is_blocked_for_power_saver_poster_ || is_blocked_for_prerendering_;
 }
 
 }  // namespace plugins

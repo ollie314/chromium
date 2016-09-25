@@ -8,7 +8,7 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/test_message_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "media/audio/alsa/alsa_output.h"
 #include "media/audio/alsa/alsa_wrapper.h"
 #include "media/audio/alsa/audio_manager_alsa.h"
@@ -82,13 +82,17 @@ class MockAudioManagerAlsa : public AudioManagerAlsa {
   MOCK_METHOD0(Init, void());
   MOCK_METHOD0(HasAudioOutputDevices, bool());
   MOCK_METHOD0(HasAudioInputDevices, bool());
-  MOCK_METHOD1(MakeLinearOutputStream, AudioOutputStream*(
-      const AudioParameters& params));
-  MOCK_METHOD2(MakeLowLatencyOutputStream, AudioOutputStream*(
-      const AudioParameters& params,
-      const std::string& device_id));
-  MOCK_METHOD2(MakeLowLatencyInputStream, AudioInputStream*(
-      const AudioParameters& params, const std::string& device_id));
+  MOCK_METHOD2(MakeLinearOutputStream,
+               AudioOutputStream*(const AudioParameters& params,
+                                  const LogCallback& log_callback));
+  MOCK_METHOD3(MakeLowLatencyOutputStream,
+               AudioOutputStream*(const AudioParameters& params,
+                                  const std::string& device_id,
+                                  const LogCallback& log_callback));
+  MOCK_METHOD3(MakeLowLatencyInputStream,
+               AudioInputStream*(const AudioParameters& params,
+                                 const std::string& device_id,
+                                 const LogCallback& log_callback));
 
   // We need to override this function in order to skip the checking the number
   // of active output streams. It is because the number of active streams

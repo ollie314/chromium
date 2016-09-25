@@ -4,8 +4,10 @@
 
 import collections
 import itertools
+import logging
 import os
 import posixpath
+import tempfile
 
 from devil.android import device_errors
 from devil.android import device_temp_file
@@ -18,13 +20,11 @@ from pylib.local import local_test_server_spawner
 from pylib.local.device import local_device_environment
 from pylib.local.device import local_device_test_run
 
-_COMMAND_LINE_FLAGS_SUPPORTED = True
-
 _MAX_INLINE_FLAGS_LENGTH = 50  # Arbitrarily chosen.
 _EXTRA_COMMAND_LINE_FILE = (
-    'org.chromium.native_test.NativeTestActivity.CommandLineFile')
+    'org.chromium.native_test.NativeTest.CommandLineFile')
 _EXTRA_COMMAND_LINE_FLAGS = (
-    'org.chromium.native_test.NativeTestActivity.CommandLineFlags')
+    'org.chromium.native_test.NativeTest.CommandLineFlags')
 _EXTRA_TEST_LIST = (
     'org.chromium.native_test.NativeTestInstrumentationTestRunner'
         '.TestList')
@@ -115,6 +115,9 @@ class _ApkDelegate(object):
       device.Install(self._apk_helper, reinstall=True,
                      permissions=self._permissions)
 
+  def ResultsDirectory(self, device):
+    return device.GetApplicationDataDirectory(self._package)
+
   def Run(self, test, device, flags=None, **kwargs):
     extras = dict(self._extras)
 
@@ -174,6 +177,11 @@ class _ExeDelegate(object):
     device.PushChangedFiles([(self._host_dist_dir, self._device_dist_dir)],
                             delete_device_stale=True)
 
+  def ResultsDirectory(self, device):
+    # pylint: disable=no-self-use
+    # pylint: disable=unused-argument
+    return constants.TEST_EXECUTABLE_DIR
+
   def Run(self, test, device, flags=None, **kwargs):
     tool = self._test_run.GetTool(device).GetTestWrapper()
     if tool:
@@ -201,7 +209,7 @@ class _ExeDelegate(object):
       pass
 
     output = device.RunShellCommand(
-        cmd, cwd=cwd, env=env, check_return=True, large_output=True, **kwargs)
+        cmd, cwd=cwd, env=env, check_return=False, large_output=True, **kwargs)
     return output
 
   def PullAppFiles(self, device, files, directory):
@@ -231,7 +239,7 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
 
   #override
   def SetUp(self):
-    @local_device_test_run.handle_shard_failures_with(
+    @local_device_environment.handle_shard_failures_with(
         on_failure=self._env.BlacklistDevice)
     def individual_device_set_up(dev):
       def install_apk():
@@ -240,12 +248,16 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
 
       def push_test_data():
         # Push data dependencies.
-        external_storage = dev.GetExternalStoragePath()
+        device_root = posixpath.join(dev.GetExternalStoragePath(),
+                                     'chromium_tests_root')
         data_deps = self._test_instance.GetDataDependencies()
         host_device_tuples = [
-            (h, d if d is not None else external_storage)
+            (h, d if d is not None else device_root)
             for h, d in data_deps]
-        dev.PushChangedFiles(host_device_tuples)
+        dev.PushChangedFiles(host_device_tuples, delete_device_stale=True)
+        if not host_device_tuples:
+          dev.RunShellCommand(['rm', '-rf', device_root], check_return=True)
+          dev.RunShellCommand(['mkdir', '-p', device_root], check_return=True)
 
       def init_tool_and_start_servers():
         tool = self.GetTool(dev)
@@ -308,12 +320,16 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
     # Even when there's only one device, it still makes sense to retrieve the
     # test list so that tests can be split up and run in batches rather than all
     # at once (since test output is not streamed).
-    @local_device_test_run.handle_shard_failures_with(
+    @local_device_environment.handle_shard_failures_with(
         on_failure=self._env.BlacklistDevice)
     def list_tests(dev):
-      tests = self._delegate.Run(
-          None, dev, flags='--gtest_list_tests', timeout=20)
-      tests = gtest_test_instance.ParseGTestListTests(tests)
+      raw_test_list = self._delegate.Run(
+          None, dev, flags='--gtest_list_tests', timeout=30)
+      tests = gtest_test_instance.ParseGTestListTests(raw_test_list)
+      if not tests:
+        logging.info('No tests found. Output:')
+        for l in raw_test_list:
+          logging.info('  %s', l)
       tests = self._test_instance.FilterTests(tests)
       return tests
 
@@ -321,7 +337,8 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
     test_lists = self._env.parallel_devices.pMap(list_tests).pGet(None)
 
     # If all devices failed to list tests, raise an exception.
-    if all([tl is None for tl in test_lists]):
+    # Check that tl is not None and is not empty.
+    if all(not tl for tl in test_lists):
       raise device_errors.CommandFailedError(
           'Failed to list tests on any device')
     return list(sorted(set().union(*[set(tl) for tl in test_lists if tl])))
@@ -331,20 +348,40 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
     # Run the test.
     timeout = (self._test_instance.shard_timeout
                * self.GetTool(device).GetTimeoutScale())
-    output = self._delegate.Run(
-        test, device, flags=self._test_instance.test_arguments,
-        timeout=timeout, retries=0)
-    for s in self._servers[str(device)]:
-      s.Reset()
-    if self._test_instance.app_files:
-      self._delegate.PullAppFiles(device, self._test_instance.app_files,
-                                  self._test_instance.app_file_dir)
-    if not self._test_instance.skip_clear_data:
-      self._delegate.Clear(device)
+    with tempfile.NamedTemporaryFile(suffix='.xml') as host_tmp_results_file:
+      with device_temp_file.DeviceTempFile(
+          adb=device.adb,
+          dir=self._delegate.ResultsDirectory(device),
+          suffix='.xml') as device_tmp_results_file:
 
-    # Parse the output.
-    # TODO(jbudorick): Transition test scripts away from parsing stdout.
-    results = self._test_instance.ParseGTestOutput(output)
+        flags = self._test_instance.test_arguments or ''
+        if self._test_instance.enable_xml_result_parsing:
+          flags += ' --gtest_output=xml:%s' % device_tmp_results_file.name
+
+        output = self._delegate.Run(
+            test, device, flags=flags,
+            timeout=timeout, retries=0)
+
+        if self._test_instance.enable_xml_result_parsing:
+          device.PullFile(
+              device_tmp_results_file.name,
+              host_tmp_results_file.name)
+
+      for s in self._servers[str(device)]:
+        s.Reset()
+      if self._test_instance.app_files:
+        self._delegate.PullAppFiles(device, self._test_instance.app_files,
+                                    self._test_instance.app_file_dir)
+      if not self._env.skip_clear_data:
+        self._delegate.Clear(device)
+
+      # Parse the output.
+      # TODO(jbudorick): Transition test scripts away from parsing stdout.
+      if self._test_instance.enable_xml_result_parsing:
+        with open(host_tmp_results_file.name) as xml_results_file:
+          results = gtest_test_instance.ParseGTestXML(xml_results_file.read())
+      else:
+        results = gtest_test_instance.ParseGTestOutput(output)
 
     # Check whether there are any crashed testcases.
     self._crashes.update(r.GetName() for r in results
@@ -353,7 +390,7 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
 
   #override
   def TearDown(self):
-    @local_device_test_run.handle_shard_failures
+    @local_device_environment.handle_shard_failures
     def individual_device_tear_down(dev):
       for s in self._servers.get(str(dev), []):
         s.TearDown()

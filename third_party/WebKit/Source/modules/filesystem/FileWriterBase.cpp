@@ -34,6 +34,7 @@
 #include "core/fileapi/Blob.h"
 #include "core/fileapi/FileError.h"
 #include "public/platform/WebFileWriter.h"
+#include <memory>
 
 namespace blink {
 
@@ -41,11 +42,11 @@ FileWriterBase::~FileWriterBase()
 {
 }
 
-void FileWriterBase::initialize(PassOwnPtr<WebFileWriter> writer, long long length)
+void FileWriterBase::initialize(std::unique_ptr<WebFileWriter> writer, long long length)
 {
     ASSERT(!m_writer);
     ASSERT(length >= 0);
-    m_writer = writer;
+    m_writer = std::move(writer);
     m_length = length;
 }
 

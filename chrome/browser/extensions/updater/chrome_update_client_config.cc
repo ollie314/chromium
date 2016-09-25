@@ -10,6 +10,7 @@
 #include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
 #include "chrome/common/channel_info.h"
 #include "components/prefs/pref_service.h"
+#include "components/update_client/update_query_params.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 
@@ -52,6 +53,11 @@ std::vector<GURL> ChromeUpdateClientConfig::PingUrl() const {
   return impl_.PingUrl();
 }
 
+std::string ChromeUpdateClientConfig::GetProdId() const {
+  return update_client::UpdateQueryParams::GetProdIdString(
+      update_client::UpdateQueryParams::ProdId::CRX);
+}
+
 base::Version ChromeUpdateClientConfig::GetBrowserVersion() const {
   return impl_.GetBrowserVersion();
 }
@@ -91,16 +97,20 @@ ChromeUpdateClientConfig::CreateOutOfProcessPatcher() const {
   return make_scoped_refptr(new component_updater::ChromeOutOfProcessPatcher);
 }
 
-bool ChromeUpdateClientConfig::DeltasEnabled() const {
-  return impl_.DeltasEnabled();
+bool ChromeUpdateClientConfig::EnabledDeltas() const {
+  return impl_.EnabledDeltas();
 }
 
-bool ChromeUpdateClientConfig::UseBackgroundDownloader() const {
-  return impl_.UseBackgroundDownloader();
+bool ChromeUpdateClientConfig::EnabledComponentUpdates() const {
+  return impl_.EnabledComponentUpdates();
 }
 
-bool ChromeUpdateClientConfig::UseCupSigning() const {
-  return impl_.UseCupSigning();
+bool ChromeUpdateClientConfig::EnabledBackgroundDownloader() const {
+  return impl_.EnabledBackgroundDownloader();
+}
+
+bool ChromeUpdateClientConfig::EnabledCupSigning() const {
+  return impl_.EnabledCupSigning();
 }
 
 PrefService* ChromeUpdateClientConfig::GetPrefService() const {

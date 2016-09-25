@@ -14,7 +14,7 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/speech/speech_recognition_engine.h"
 #include "content/browser/speech/speech_recognition_manager_impl.h"
 #include "content/browser/speech/speech_recognizer_impl.h"
@@ -120,9 +120,10 @@ class SpeechRecognitionBrowserTest :
 
   void SetUpOnMainThread() override {
     ASSERT_TRUE(SpeechRecognitionManagerImpl::GetInstance());
-    SpeechRecognizerImpl::SetAudioManagerForTesting(
-        new media::MockAudioManager(BrowserThread::GetMessageLoopProxyForThread(
-            BrowserThread::IO)));
+    media::AudioManager::StartHangMonitorIfNeeded(
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
+    SpeechRecognizerImpl::SetAudioManagerForTesting(new media::MockAudioManager(
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO)));
   }
 
   void TearDownOnMainThread() override {

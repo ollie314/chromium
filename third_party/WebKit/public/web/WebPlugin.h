@@ -92,14 +92,13 @@ public:
     // if the container has been assigned a new plugin, then the container will
     // own the new plugin, not this old plugin.
     virtual WebPluginContainer* container() const { return nullptr; }
-    virtual void containerDidDetachFromParent() { }
 
     virtual v8::Local<v8::Object> v8ScriptableObject(v8::Isolate*) { return v8::Local<v8::Object>(); }
 
     virtual bool supportsKeyboardFocus() const { return false; }
     virtual bool supportsEditCommands() const { return false; }
     // Returns true if this plugin supports input method, which implements
-    // setComposition() and confirmComposition() below.
+    // setComposition(), commitText() and finishComposingText() below.
     virtual bool supportsInputMethod() const { return false; }
 
     virtual bool canProcessDrag() const { return false; }
@@ -155,9 +154,15 @@ public:
     // Sets composition text from input method, and returns true if the
     // composition is set successfully.
     virtual bool setComposition(const WebString& text, const WebVector<WebCompositionUnderline>& underlines, int selectionStart, int selectionEnd) { return false; }
-    // Confirms an ongoing composition and returns true if there is an ongoing
-    // composition or the text is inserted.
-    virtual bool confirmComposition(const WebString& text, WebWidget::ConfirmCompositionBehavior selectionBehavior) { return false; }
+
+    // Deletes the ongoing composition if any, inserts the specified text, and
+    // moves the caret according to relativeCaretPosition.
+    virtual bool commitText(const WebString& text, int relativeCaretPosition) { return false; }
+
+    // Confirms an ongoing composition; holds or moves selections accroding to
+    // selectionBehavior.
+    virtual bool finishComposingText(WebWidget::ConfirmCompositionBehavior selectionBehavior) { return false; }
+
     // Deletes the current selection plus the specified number of characters
     // before and after the selection or caret.
     virtual void extendSelectionAndDelete(int before, int after) { }
@@ -172,7 +177,7 @@ public:
     // Returns true if the search started, or false if the plugin doesn't support search.
     virtual bool startFind(const WebString& searchText, bool caseSensitive, int identifier) { return false; }
     // Tells the plugin to jump forward or backward in the list of find results.
-    virtual void selectFindResult(bool forward) { }
+    virtual void selectFindResult(bool forward, int identifier) { }
     // Tells the plugin that the user has stopped the find operation.
     virtual void stopFind() { }
 

@@ -7,8 +7,6 @@
 #include <string>
 
 #include "base/base64.h"
-#include "base/i18n/icu_encoding_detection.h"
-#include "base/i18n/icu_string_conversions.h"
 #include "base/logging.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
@@ -22,6 +20,12 @@
 #include "net/http/http_version.h"
 #include "net/url_request/url_request.h"
 #include "url/gurl.h"
+#include "url/url_features.h"
+
+#if !BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
+#include "base/i18n/encoding_detection.h"  // nogncheck
+#include "base/i18n/icu_string_conversions.h"  // nogncheck
+#endif  // !BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
 
 namespace {
 
@@ -111,6 +115,10 @@ NSURLResponse* GetNSURLResponseForRequest(URLRequest* request) {
         NSString* v = base::SysUTF8ToNSString(value);
         if (!v) {
           DLOG(ERROR) << "Header \"" << name << "\" is not in UTF8: " << value;
+#if BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
+          DCHECK(FALSE) << "ICU support is required, but not included.";
+          continue;
+#else
           // Infer the encoding, or skip the header if it's not possible.
           std::string encoding;
           if (!base::DetectEncoding(value, &encoding))
@@ -120,6 +128,7 @@ NSURLResponse* GetNSURLResponseForRequest(URLRequest* request) {
             continue;
           v = base::SysUTF8ToNSString(value_utf8);
           DCHECK(v);
+#endif  // !BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
         }
 
         // Duplicate keys are appended using a comma separator (RFC 2616).

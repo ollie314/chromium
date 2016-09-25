@@ -9,6 +9,8 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "chrome/service/cloud_print/connector_settings.h"
 #include "printing/backend/print_backend.h"
@@ -50,16 +52,14 @@ class CloudPrintProxyFrontend {
 
  protected:
   // Don't delete through SyncFrontend interface.
-  virtual ~CloudPrintProxyFrontend() {
-  }
+  virtual ~CloudPrintProxyFrontend() {}
+
  private:
   DISALLOW_COPY_AND_ASSIGN(CloudPrintProxyFrontend);
 };
 
 class CloudPrintProxyBackend {
  public:
-  // It is OK for print_system_settings to be NULL. In this case system should
-  // use system default settings.
   CloudPrintProxyBackend(CloudPrintProxyFrontend* frontend,
                          const ConnectorSettings& settings,
                          const gaia::OAuthClientInfo& oauth_client_info,
@@ -80,19 +80,26 @@ class CloudPrintProxyBackend {
   void UnregisterPrinters();
 
  private:
+  bool PostCoreTask(const tracked_objects::Location& from_here,
+                    const base::Closure& task);
+
   // The real guts of SyncBackendHost, to keep the public client API clean.
   class Core;
-  // A thread we dedicate for use to perform initialization and
-  // authentication.
+
+  // A thread dedicated for use to perform initialization and authentication.
   base::Thread core_thread_;
-  // Our core, which communicates with AuthWatcher for GAIA authentication and
+
+  // The core, which communicates with AuthWatcher for GAIA authentication and
   // which contains printer registration code.
   scoped_refptr<Core> core_;
-  // A reference to the MessageLoop used to construct |this|, so we know how
-  // to safely talk back to the SyncFrontend.
-  base::MessageLoop* const frontend_loop_;
-  // The frontend which is responsible for displaying UI and updating Prefs
-  CloudPrintProxyFrontend* frontend_;
+
+  // A reference to the TaskRunner used to construct |this|, so we know how to
+  // safely talk back to the SyncFrontend.
+  const scoped_refptr<base::SingleThreadTaskRunner> frontend_task_runner_;
+
+  // The frontend which is responsible for displaying UI and updating Prefs.
+  // Outlives this backend.
+  CloudPrintProxyFrontend* const frontend_;
 
   friend class base::RefCountedThreadSafe<CloudPrintProxyBackend::Core>;
 

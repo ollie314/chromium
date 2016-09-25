@@ -50,11 +50,11 @@
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkSurface.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/WTFString.h"
-
 #include <algorithm>
+#include <memory>
 
 namespace blink {
 
@@ -73,7 +73,7 @@ const float kDragLinkUrlFontSize = 10;
 
 } // anonymous namespace
 
-PassRefPtr<SkImage> DragImage::resizeAndOrientImage(PassRefPtr<SkImage> image, ImageOrientation orientation,
+sk_sp<SkImage> DragImage::resizeAndOrientImage(sk_sp<SkImage> image, ImageOrientation orientation,
     FloatSize imageScale, float opacity, InterpolationQuality interpolationQuality)
 {
     IntSize size(image->width(), image->height());
@@ -107,11 +107,10 @@ PassRefPtr<SkImage> DragImage::resizeAndOrientImage(PassRefPtr<SkImage> image, I
         ? kNone_SkFilterQuality : kHigh_SkFilterQuality);
 
     SkCanvas* canvas = surface->getCanvas();
-    canvas->clear(SK_ColorTRANSPARENT);
     canvas->concat(affineTransformToSkMatrix(transform));
-    canvas->drawImage(image.get(), 0, 0, &paint);
+    canvas->drawImage(image, 0, 0, &paint);
 
-    return adoptRef(surface->newImageSnapshot());
+    return surface->makeImageSnapshot();
 }
 
 FloatSize DragImage::clampedImageScale(const IntSize& imageSize, const IntSize& size,
@@ -132,14 +131,14 @@ FloatSize DragImage::clampedImageScale(const IntSize& imageSize, const IntSize& 
     return imageScale;
 }
 
-PassOwnPtr<DragImage> DragImage::create(Image* image,
+std::unique_ptr<DragImage> DragImage::create(Image* image,
     RespectImageOrientationEnum shouldRespectImageOrientation, float deviceScaleFactor,
     InterpolationQuality interpolationQuality, float opacity, FloatSize imageScale)
 {
     if (!image)
         return nullptr;
 
-    RefPtr<SkImage> skImage = image->imageForCurrentFrame();
+    sk_sp<SkImage> skImage = image->imageForCurrentFrame();
     if (!skImage)
         return nullptr;
 
@@ -148,12 +147,12 @@ PassOwnPtr<DragImage> DragImage::create(Image* image,
         orientation = toBitmapImage(image)->currentFrameOrientation();
 
     SkBitmap bm;
-    RefPtr<SkImage> resizedImage =
-        resizeAndOrientImage(skImage.release(), orientation, imageScale, opacity, interpolationQuality);
+    sk_sp<SkImage> resizedImage =
+        resizeAndOrientImage(std::move(skImage), orientation, imageScale, opacity, interpolationQuality);
     if (!resizedImage || !resizedImage->asLegacyBitmap(&bm, SkImage::kRO_LegacyBitmapMode))
         return nullptr;
 
-    return adoptPtr(new DragImage(bm, deviceScaleFactor, interpolationQuality));
+    return wrapUnique(new DragImage(bm, deviceScaleFactor, interpolationQuality));
 }
 
 static Font deriveDragLabelFont(int size, FontWeight fontWeight, const FontDescription& systemFont)
@@ -167,7 +166,7 @@ static Font deriveDragLabelFont(int size, FontWeight fontWeight, const FontDescr
     return result;
 }
 
-PassOwnPtr<DragImage> DragImage::create(const KURL& url, const String& inLabel, const FontDescription& systemFont, float deviceScaleFactor)
+std::unique_ptr<DragImage> DragImage::create(const KURL& url, const String& inLabel, const FontDescription& systemFont, float deviceScaleFactor)
 {
     const Font labelFont = deriveDragLabelFont(kDragLinkLabelFontSize, FontWeightBold, systemFont);
     const Font urlFont = deriveDragLabelFont(kDragLinkUrlFontSize, FontWeightNormal, systemFont);
@@ -213,7 +212,7 @@ PassOwnPtr<DragImage> DragImage::create(const KURL& url, const String& inLabel, 
     // fill the background
     IntSize scaledImageSize = imageSize;
     scaledImageSize.scale(deviceScaleFactor);
-    OwnPtr<ImageBuffer> buffer(ImageBuffer::create(scaledImageSize));
+    std::unique_ptr<ImageBuffer> buffer(ImageBuffer::create(scaledImageSize));
     if (!buffer)
         return nullptr;
 

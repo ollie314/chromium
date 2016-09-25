@@ -71,17 +71,26 @@ class TestScreenCapturer : public webrtc::DesktopCapturer {
     callback_ = callback;
   }
   void Capture(const webrtc::DesktopRegion& region) override {
-    // Return black 10x10 frame.
+    // Return black 100x100 frame.
     std::unique_ptr<webrtc::DesktopFrame> frame(
         new webrtc::BasicDesktopFrame(webrtc::DesktopSize(100, 100)));
     memset(frame->data(), 0, frame->stride() * frame->size().height());
-    frame->mutable_updated_region()->SetRect(
-        webrtc::DesktopRect::MakeSize(frame->size()));
-    callback_->OnCaptureCompleted(frame.release());
+
+    // Set updated_region only for the first frame, as the frame content
+    // doesn't change.
+    if (!first_frame_sent_) {
+      first_frame_sent_ = true;
+      frame->mutable_updated_region()->SetRect(
+          webrtc::DesktopRect::MakeSize(frame->size()));
+    }
+
+    callback_->OnCaptureResult(webrtc::DesktopCapturer::Result::SUCCESS,
+                               std::move(frame));
   }
 
  private:
   Callback* callback_ = nullptr;
+  bool first_frame_sent_ = false;
 };
 
 }  // namespace
@@ -90,6 +99,11 @@ class ConnectionTest : public testing::Test,
                        public testing::WithParamInterface<bool> {
  public:
   ConnectionTest() {}
+
+  void DestroyHost() {
+    host_connection_.reset();
+    run_loop_->Quit();
+  }
 
  protected:
   bool is_using_webrtc() { return GetParam(); }
@@ -112,7 +126,7 @@ class ConnectionTest : public testing::Test,
       host_connection_.reset(new IceConnectionToClient(
           base::WrapUnique(host_session_),
           TransportContext::ForTests(protocol::TransportRole::SERVER),
-          message_loop_.task_runner()));
+          message_loop_.task_runner(), message_loop_.task_runner()));
       client_connection_.reset(new IceConnectionToHost());
     }
 
@@ -186,6 +200,59 @@ class ConnectionTest : public testing::Test,
     client_connected_ = true;
     if (host_connected_ && run_loop_)
       run_loop_->Quit();
+  }
+
+  void WaitFirstVideoFrame() {
+    base::RunLoop run_loop;
+
+    // Expect frames to be passed to FrameConsumer when WebRTC is used, or to
+    // VideoStub otherwise.
+    if (is_using_webrtc()) {
+      client_video_renderer_.GetFrameConsumer()->set_on_frame_callback(
+          base::Bind(&base::RunLoop::Quit, base::Unretained(&run_loop)));
+    } else {
+      client_video_renderer_.GetVideoStub()->set_on_frame_callback(
+          base::Bind(&base::RunLoop::Quit, base::Unretained(&run_loop)));
+    }
+
+    run_loop.Run();
+
+    if (is_using_webrtc()) {
+      EXPECT_EQ(
+          client_video_renderer_.GetFrameConsumer()->received_frames().size(),
+          1U);
+      EXPECT_EQ(
+          client_video_renderer_.GetVideoStub()->received_packets().size(), 0U);
+      client_video_renderer_.GetFrameConsumer()->set_on_frame_callback(
+          base::Closure());
+    } else {
+      EXPECT_EQ(
+          client_video_renderer_.GetFrameConsumer()->received_frames().size(),
+          0U);
+      EXPECT_EQ(
+          client_video_renderer_.GetVideoStub()->received_packets().size(), 1U);
+      client_video_renderer_.GetVideoStub()->set_on_frame_callback(
+          base::Closure());
+    }
+  }
+
+  void WaitFirstFrameStats() {
+    if (!client_video_renderer_.GetFrameStatsConsumer()
+             ->received_stats()
+             .empty()) {
+      return;
+    }
+
+    base::RunLoop run_loop;
+    client_video_renderer_.GetFrameStatsConsumer()->set_on_stats_callback(
+        base::Bind(&base::RunLoop::Quit, base::Unretained(&run_loop)));
+    run_loop.Run();
+    client_video_renderer_.GetFrameStatsConsumer()->set_on_stats_callback(
+        base::Closure());
+
+    EXPECT_FALSE(client_video_renderer_.GetFrameStatsConsumer()
+                     ->received_stats()
+                     .empty());
   }
 
   base::MessageLoopForIO message_loop_;
@@ -272,7 +339,7 @@ TEST_P(ConnectionTest, Events) {
   EXPECT_CALL(host_input_stub_, InjectKeyEvent(EqualsKeyEvent(event)))
       .WillOnce(QuitRunLoop(&run_loop));
 
-  // Send capabilities from the client.
+  // Send key event from the client.
   client_connection_->input_stub()->InjectKeyEvent(event);
 
   run_loop.Run();
@@ -283,36 +350,99 @@ TEST_P(ConnectionTest, Video) {
 
   std::unique_ptr<VideoStream> video_stream =
       host_connection_->StartVideoStream(
+          base::MakeUnique<TestScreenCapturer>());
+
+  WaitFirstVideoFrame();
+}
+
+// Verifies that the VideoStream doesn't loose any video frames while the
+// connection is being established.
+TEST_P(ConnectionTest, VideoWithSlowSignaling) {
+  // Add signaling delay to slow down connection handshake.
+  host_session_->set_signaling_delay(base::TimeDelta::FromMilliseconds(100));
+  client_session_->set_signaling_delay(base::TimeDelta::FromMilliseconds(100));
+
+  Connect();
+
+  std::unique_ptr<VideoStream> video_stream =
+      host_connection_->StartVideoStream(
           base::WrapUnique(new TestScreenCapturer()));
+
+  WaitFirstVideoFrame();
+}
+
+TEST_P(ConnectionTest, DestroyOnIncomingMessage) {
+  Connect();
+
+  KeyEvent event;
+  event.set_usb_keycode(3);
+  event.set_pressed(true);
 
   base::RunLoop run_loop;
 
-  // Expect frames to be passed to FrameConsumer when WebRTC is used, or to
-  // VideoStub otherwise.
-  if (is_using_webrtc()) {
-    client_video_renderer_.GetFrameConsumer()->set_on_frame_callback(
-        base::Bind(&base::RunLoop::Quit, base::Unretained(&run_loop)));
-  } else {
-    client_video_renderer_.GetVideoStub()->set_on_frame_callback(
-        base::Bind(&base::RunLoop::Quit, base::Unretained(&run_loop)));
-  }
+  EXPECT_CALL(host_event_handler_,
+              OnInputEventReceived(host_connection_.get(), _));
+  EXPECT_CALL(host_input_stub_, InjectKeyEvent(EqualsKeyEvent(event)))
+      .WillOnce(DoAll(InvokeWithoutArgs(this, &ConnectionTest::DestroyHost),
+                      QuitRunLoop(&run_loop)));
+
+  // Send key event from the client.
+  client_connection_->input_stub()->InjectKeyEvent(event);
 
   run_loop.Run();
+}
 
-  if (is_using_webrtc()) {
-    EXPECT_EQ(
-        client_video_renderer_.GetFrameConsumer()->received_frames().size(),
-        1U);
-    EXPECT_EQ(client_video_renderer_.GetVideoStub()->received_packets().size(),
-              0U);
-  } else {
-    EXPECT_EQ(
-        client_video_renderer_.GetFrameConsumer()->received_frames().size(),
-        0U);
-    EXPECT_EQ(client_video_renderer_.GetVideoStub()->received_packets().size(),
-              1U);
-  }
+TEST_P(ConnectionTest, VideoStats) {
+  // Currently this test only works for WebRTC because for ICE connections stats
+  // are reported by SoftwareVideoRenderer which is not used in this test.
+  // TODO(sergeyu): Fix this.
+  if (!is_using_webrtc())
+    return;
 
+  Connect();
+
+  base::TimeTicks start_time = base::TimeTicks::Now();
+
+  std::unique_ptr<VideoStream> video_stream =
+      host_connection_->StartVideoStream(
+          base::MakeUnique<TestScreenCapturer>());
+
+  // Simulate an input invent injected at the start.
+  video_stream->OnInputEventReceived(start_time.ToInternalValue());
+
+  WaitFirstVideoFrame();
+
+  base::TimeTicks finish_time = base::TimeTicks::Now();
+
+  WaitFirstFrameStats();
+
+  const FrameStats& stats =
+      client_video_renderer_.GetFrameStatsConsumer()->received_stats().front();
+
+  EXPECT_TRUE(stats.host_stats.frame_size > 0);
+
+  EXPECT_TRUE(stats.host_stats.latest_event_timestamp == start_time);
+  EXPECT_TRUE(stats.host_stats.capture_delay != base::TimeDelta::Max());
+  EXPECT_TRUE(stats.host_stats.capture_overhead_delay !=
+              base::TimeDelta::Max());
+  EXPECT_TRUE(stats.host_stats.encode_delay != base::TimeDelta::Max());
+  EXPECT_TRUE(stats.host_stats.send_pending_delay != base::TimeDelta::Max());
+
+  EXPECT_FALSE(stats.client_stats.time_received.is_null());
+  EXPECT_FALSE(stats.client_stats.time_decoded.is_null());
+  EXPECT_FALSE(stats.client_stats.time_rendered.is_null());
+
+  EXPECT_TRUE(start_time + stats.host_stats.capture_pending_delay +
+                  stats.host_stats.capture_delay +
+                  stats.host_stats.capture_overhead_delay +
+                  stats.host_stats.encode_delay +
+                  stats.host_stats.send_pending_delay <=
+              stats.client_stats.time_received);
+  EXPECT_TRUE(stats.client_stats.time_received <=
+              stats.client_stats.time_decoded);
+  EXPECT_TRUE(stats.client_stats.time_decoded <=
+              stats.client_stats.time_rendered);
+  EXPECT_TRUE(stats.client_stats.time_rendered <= finish_time);
 }
 
 }  // namespace protocol

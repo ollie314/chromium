@@ -37,7 +37,7 @@ public:
     ExecutionContext* getExecutionContext() const override;
     void removeAllEventListeners() override;
 
-    // ActiveScriptWrappable
+    // ScriptWrappable
     bool hasPendingActivity() const final;
 
     // ActiveDOMObject overrides.
@@ -50,8 +50,8 @@ public:
 
 protected:
     // EventTarget overrides.
-    bool addEventListenerInternal(const AtomicString& eventType, EventListener*, const EventListenerOptions&) override;
-    bool removeEventListenerInternal(const AtomicString& eventType, EventListener*, const EventListenerOptions&) override;
+    void addedEventListener(const AtomicString& eventType, RegisteredEventListener&) final;
+    void removedEventListener(const AtomicString& eventType, const RegisteredEventListener&) final;
 
 private:
     explicit NetworkInformation(ExecutionContext*);

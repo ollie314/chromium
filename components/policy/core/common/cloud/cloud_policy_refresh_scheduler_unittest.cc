@@ -2,17 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "components/policy/core/common/cloud/cloud_policy_refresh_scheduler.h"
+
 #include <stdint.h>
+
+#include <memory>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/test/test_simple_task_runner.h"
 #include "build/build_config.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
-#include "components/policy/core/common/cloud/cloud_policy_refresh_scheduler.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_store.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -56,16 +59,16 @@ class CloudPolicyRefreshSchedulerTest : public testing::Test {
   }
 
   CloudPolicyRefreshScheduler* CreateRefreshScheduler() {
-    EXPECT_EQ(0u, task_runner_->GetPendingTasks().size());
+    EXPECT_EQ(0u, task_runner_->NumPendingTasks());
     CloudPolicyRefreshScheduler* scheduler =
         new CloudPolicyRefreshScheduler(&client_, &store_, task_runner_);
-    scheduler->SetRefreshDelay(kPolicyRefreshRate);
+    scheduler->SetDesiredRefreshDelay(kPolicyRefreshRate);
     return scheduler;
   }
 
   void NotifyIPAddressChanged() {
     net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
-    loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   base::TimeDelta GetLastDelay() const {
@@ -85,7 +88,7 @@ class CloudPolicyRefreshSchedulerTest : public testing::Test {
   // |cache_age| is how old the cache was when the refresh was issued.
   void CheckTimingWithAge(const base::TimeDelta& offset_from_last_refresh,
                           const base::TimeDelta& cache_age) const {
-    EXPECT_FALSE(task_runner_->GetPendingTasks().empty());
+    EXPECT_TRUE(task_runner_->HasPendingTask());
     base::Time now(base::Time::NowFromSystemTime());
     // |last_update_| was updated and then a refresh was scheduled at time S,
     // so |last_update_| is a bit before that.
@@ -142,7 +145,7 @@ class CloudPolicyRefreshSchedulerTest : public testing::Test {
   MockCloudPolicyClient client_;
   MockCloudPolicyStore store_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-  scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
+  std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   // Base time for the refresh that the scheduler should be using.
   base::Time last_update_;
@@ -150,8 +153,9 @@ class CloudPolicyRefreshSchedulerTest : public testing::Test {
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InitialRefreshNoPolicy) {
   store_.policy_.reset();
-  scoped_ptr<CloudPolicyRefreshScheduler> scheduler(CreateRefreshScheduler());
-  EXPECT_FALSE(task_runner_->GetPendingTasks().empty());
+  std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
+      CreateRefreshScheduler());
+  EXPECT_TRUE(task_runner_->HasPendingTask());
   EXPECT_EQ(GetLastDelay(), base::TimeDelta());
   EXPECT_CALL(client_, FetchPolicy()).Times(1);
   task_runner_->RunUntilIdle();
@@ -159,15 +163,17 @@ TEST_F(CloudPolicyRefreshSchedulerTest, InitialRefreshNoPolicy) {
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InitialRefreshUnmanaged) {
   store_.policy_->set_state(em::PolicyData::UNMANAGED);
-  scoped_ptr<CloudPolicyRefreshScheduler> scheduler(CreateRefreshScheduler());
+  std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
+      CreateRefreshScheduler());
   CheckTiming(CloudPolicyRefreshScheduler::kUnmanagedRefreshDelayMs);
   EXPECT_CALL(client_, FetchPolicy()).Times(1);
   task_runner_->RunUntilIdle();
 }
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InitialRefreshManagedNotYetFetched) {
-  scoped_ptr<CloudPolicyRefreshScheduler> scheduler(CreateRefreshScheduler());
-  EXPECT_FALSE(task_runner_->GetPendingTasks().empty());
+  std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
+      CreateRefreshScheduler());
+  EXPECT_TRUE(task_runner_->HasPendingTask());
   CheckInitialRefresh(false);
   EXPECT_CALL(client_, FetchPolicy()).Times(1);
   task_runner_->RunUntilIdle();
@@ -177,7 +183,8 @@ TEST_F(CloudPolicyRefreshSchedulerTest, InitialRefreshManagedAlreadyFetched) {
   last_update_ = base::Time::NowFromSystemTime();
   client_.SetPolicy(dm_protocol::kChromeUserPolicyType, std::string(),
                     em::PolicyFetchResponse());
-  scoped_ptr<CloudPolicyRefreshScheduler> scheduler(CreateRefreshScheduler());
+  std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
+      CreateRefreshScheduler());
   CheckTiming(kPolicyRefreshRate);
   EXPECT_CALL(client_, FetchPolicy()).Times(1);
   task_runner_->RunUntilIdle();
@@ -185,18 +192,20 @@ TEST_F(CloudPolicyRefreshSchedulerTest, InitialRefreshManagedAlreadyFetched) {
 
 TEST_F(CloudPolicyRefreshSchedulerTest, Unregistered) {
   client_.SetDMToken(std::string());
-  scoped_ptr<CloudPolicyRefreshScheduler> scheduler(CreateRefreshScheduler());
+  std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
+      CreateRefreshScheduler());
   client_.NotifyPolicyFetched();
   client_.NotifyRegistrationStateChanged();
   client_.NotifyClientError();
-  scheduler->SetRefreshDelay(12 * 60 * 60 * 1000);
+  scheduler->SetDesiredRefreshDelay(12 * 60 * 60 * 1000);
   store_.NotifyStoreLoaded();
   store_.NotifyStoreError();
-  EXPECT_TRUE(task_runner_->GetPendingTasks().empty());
+  EXPECT_FALSE(task_runner_->HasPendingTask());
 }
 
 TEST_F(CloudPolicyRefreshSchedulerTest, RefreshSoon) {
-  scoped_ptr<CloudPolicyRefreshScheduler> scheduler(CreateRefreshScheduler());
+  std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
+      CreateRefreshScheduler());
   EXPECT_CALL(client_, FetchPolicy()).Times(1);
   scheduler->RefreshSoon();
   task_runner_->RunUntilIdle();
@@ -204,16 +213,18 @@ TEST_F(CloudPolicyRefreshSchedulerTest, RefreshSoon) {
 }
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsAvailable) {
-  scoped_ptr<CloudPolicyRefreshScheduler> scheduler(
+  std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
       new CloudPolicyRefreshScheduler(&client_, &store_, task_runner_));
-  scheduler->SetRefreshDelay(kPolicyRefreshRate);
+  scheduler->SetDesiredRefreshDelay(kPolicyRefreshRate);
 
   // The scheduler has scheduled refreshes at the initial refresh rate.
-  EXPECT_EQ(2u, task_runner_->GetPendingTasks().size());
+  EXPECT_EQ(2u, task_runner_->NumPendingTasks());
 
   // Signal that invalidations are available.
   scheduler->SetInvalidationServiceAvailability(true);
-  EXPECT_EQ(3u, task_runner_->GetPendingTasks().size());
+  EXPECT_EQ(CloudPolicyRefreshScheduler::kWithInvalidationsRefreshDelayMs,
+            scheduler->GetActualRefreshDelay());
+  EXPECT_EQ(3u, task_runner_->NumPendingTasks());
 
   CheckInitialRefresh(true);
 
@@ -226,24 +237,25 @@ TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsAvailable) {
   client_.NotifyPolicyFetched();
 
   // The next refresh has been scheduled using a lower refresh rate.
-  EXPECT_EQ(1u, task_runner_->GetPendingTasks().size());
+  EXPECT_EQ(1u, task_runner_->NumPendingTasks());
   CheckTiming(CloudPolicyRefreshScheduler::kWithInvalidationsRefreshDelayMs);
 }
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsNotAvailable) {
-  scoped_ptr<CloudPolicyRefreshScheduler> scheduler(
+  std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
       new CloudPolicyRefreshScheduler(&client_, &store_, task_runner_));
-  scheduler->SetRefreshDelay(kPolicyRefreshRate);
+  scheduler->SetDesiredRefreshDelay(kPolicyRefreshRate);
 
   // Signal that invalidations are not available. The scheduler will not
   // schedule refreshes since the available state is not changed.
   for (int i = 0; i < 10; ++i) {
     scheduler->SetInvalidationServiceAvailability(false);
-    EXPECT_EQ(2u, task_runner_->GetPendingTasks().size());
+    EXPECT_EQ(2u, task_runner_->NumPendingTasks());
   }
 
   // This scheduled the initial refresh.
   CheckInitialRefresh(false);
+  EXPECT_EQ(kPolicyRefreshRate, scheduler->GetActualRefreshDelay());
 
   // Perform that fetch now.
   EXPECT_CALL(client_, FetchPolicy()).Times(1);
@@ -255,14 +267,14 @@ TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsNotAvailable) {
   client_.NotifyPolicyFetched();
 
   // The next refresh has been scheduled at the normal rate.
-  EXPECT_EQ(1u, task_runner_->GetPendingTasks().size());
+  EXPECT_EQ(1u, task_runner_->NumPendingTasks());
   CheckTiming(kPolicyRefreshRate);
 }
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsOffAndOn) {
-  scoped_ptr<CloudPolicyRefreshScheduler> scheduler(
+  std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
       new CloudPolicyRefreshScheduler(&client_, &store_, task_runner_));
-  scheduler->SetRefreshDelay(kPolicyRefreshRate);
+  scheduler->SetDesiredRefreshDelay(kPolicyRefreshRate);
   scheduler->SetInvalidationServiceAvailability(true);
   // Initial fetch.
   EXPECT_CALL(client_, FetchPolicy()).Times(1);
@@ -287,9 +299,9 @@ TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsOffAndOn) {
 }
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsDisconnected) {
-  scoped_ptr<CloudPolicyRefreshScheduler> scheduler(
+  std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
       new CloudPolicyRefreshScheduler(&client_, &store_, task_runner_));
-  scheduler->SetRefreshDelay(kPolicyRefreshRate);
+  scheduler->SetDesiredRefreshDelay(kPolicyRefreshRate);
   scheduler->SetInvalidationServiceAvailability(true);
   // Initial fetch.
   EXPECT_CALL(client_, FetchPolicy()).Times(1);
@@ -318,14 +330,14 @@ class CloudPolicyRefreshSchedulerSteadyStateTest
 
   void SetUp() override {
     refresh_scheduler_.reset(CreateRefreshScheduler());
-    refresh_scheduler_->SetRefreshDelay(kPolicyRefreshRate);
+    refresh_scheduler_->SetDesiredRefreshDelay(kPolicyRefreshRate);
     CloudPolicyRefreshSchedulerTest::SetUp();
     last_update_ = base::Time::NowFromSystemTime();
     client_.NotifyPolicyFetched();
     CheckTiming(kPolicyRefreshRate);
   }
 
-  scoped_ptr<CloudPolicyRefreshScheduler> refresh_scheduler_;
+  std::unique_ptr<CloudPolicyRefreshScheduler> refresh_scheduler_;
 };
 
 TEST_F(CloudPolicyRefreshSchedulerSteadyStateTest, OnPolicyFetched) {
@@ -341,7 +353,7 @@ TEST_F(CloudPolicyRefreshSchedulerSteadyStateTest, OnRegistrationStateChanged) {
   task_runner_->ClearPendingTasks();
   client_.SetDMToken(std::string());
   client_.NotifyRegistrationStateChanged();
-  EXPECT_TRUE(task_runner_->GetPendingTasks().empty());
+  EXPECT_FALSE(task_runner_->HasPendingTask());
 }
 
 TEST_F(CloudPolicyRefreshSchedulerSteadyStateTest, OnStoreLoaded) {
@@ -352,20 +364,20 @@ TEST_F(CloudPolicyRefreshSchedulerSteadyStateTest, OnStoreLoaded) {
 TEST_F(CloudPolicyRefreshSchedulerSteadyStateTest, OnStoreError) {
   task_runner_->ClearPendingTasks();
   store_.NotifyStoreError();
-  EXPECT_TRUE(task_runner_->GetPendingTasks().empty());
+  EXPECT_FALSE(task_runner_->HasPendingTask());
 }
 
 TEST_F(CloudPolicyRefreshSchedulerSteadyStateTest, RefreshDelayChange) {
   const int delay_short_ms = 5 * 60 * 1000;
-  refresh_scheduler_->SetRefreshDelay(delay_short_ms);
+  refresh_scheduler_->SetDesiredRefreshDelay(delay_short_ms);
   CheckTiming(CloudPolicyRefreshScheduler::kRefreshDelayMinMs);
 
   const int delay_ms = 12 * 60 * 60 * 1000;
-  refresh_scheduler_->SetRefreshDelay(delay_ms);
+  refresh_scheduler_->SetDesiredRefreshDelay(delay_ms);
   CheckTiming(delay_ms);
 
   const int delay_long_ms = 20 * 24 * 60 * 60 * 1000;
-  refresh_scheduler_->SetRefreshDelay(delay_long_ms);
+  refresh_scheduler_->SetDesiredRefreshDelay(delay_long_ms);
   CheckTiming(CloudPolicyRefreshScheduler::kRefreshDelayMaxMs);
 }
 
@@ -440,7 +452,7 @@ TEST_P(CloudPolicyRefreshSchedulerClientErrorTest, OnClientError) {
              expected_delay_ms <= kPolicyRefreshRate);
   } else {
     EXPECT_EQ(base::TimeDelta(), GetLastDelay());
-    EXPECT_TRUE(task_runner_->GetPendingTasks().empty());
+    EXPECT_FALSE(task_runner_->HasPendingTask());
   }
 }
 

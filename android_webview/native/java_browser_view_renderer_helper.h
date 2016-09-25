@@ -9,7 +9,6 @@
 
 #include <memory>
 
-#include "skia/ext/refptr.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/vector2d.h"
 
@@ -33,8 +32,6 @@ class SoftwareCanvasHolder {
 };
 
 void RasterHelperSetAwDrawSWFunctionTable(AwDrawSWFunctionTable* table);
-
-bool RegisterJavaBrowserViewRendererHelper(JNIEnv* env);
 
 }  // namespace android_webview
 

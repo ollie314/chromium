@@ -30,8 +30,7 @@
 
 #include "modules/quota/DeprecatedStorageQuotaCallbacksImpl.h"
 
-#include "core/dom/DOMError.h"
-#include "core/dom/ExceptionCode.h"
+#include "modules/quota/DOMError.h"
 
 namespace blink {
 

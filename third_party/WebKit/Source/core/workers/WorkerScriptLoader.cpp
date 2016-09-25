@@ -30,16 +30,19 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/loader/WorkerThreadableLoader.h"
+#include "core/origin_trials/OriginTrialContext.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "platform/HTTPNames.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/network/ContentSecurityPolicyResponseHeaders.h"
+#include "platform/network/NetworkUtils.h"
 #include "platform/network/ResourceResponse.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "public/platform/Platform.h"
 #include "public/platform/WebAddressSpace.h"
 #include "public/platform/WebURLRequest.h"
-#include "wtf/OwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -70,7 +73,7 @@ void WorkerScriptLoader::loadSynchronously(ExecutionContext& executionContext, c
     m_url = url;
 
     ResourceRequest request(createResourceRequest(creationAddressSpace));
-    ASSERT_WITH_SECURITY_IMPLICATION(executionContext.isWorkerGlobalScope());
+    SECURITY_DCHECK(executionContext.isWorkerGlobalScope());
 
     ThreadableLoaderOptions options;
     options.crossOriginRequestPolicy = crossOriginRequestPolicy;
@@ -83,11 +86,11 @@ void WorkerScriptLoader::loadSynchronously(ExecutionContext& executionContext, c
     WorkerThreadableLoader::loadResourceSynchronously(toWorkerGlobalScope(executionContext), request, *this, options, resourceLoaderOptions);
 }
 
-void WorkerScriptLoader::loadAsynchronously(ExecutionContext& executionContext, const KURL& url, CrossOriginRequestPolicy crossOriginRequestPolicy, WebAddressSpace creationAddressSpace, PassOwnPtr<SameThreadClosure> responseCallback, PassOwnPtr<SameThreadClosure> finishedCallback)
+void WorkerScriptLoader::loadAsynchronously(ExecutionContext& executionContext, const KURL& url, CrossOriginRequestPolicy crossOriginRequestPolicy, WebAddressSpace creationAddressSpace, std::unique_ptr<WTF::Closure> responseCallback, std::unique_ptr<WTF::Closure> finishedCallback)
 {
-    ASSERT(responseCallback || finishedCallback);
-    m_responseCallback = responseCallback;
-    m_finishedCallback = finishedCallback;
+    DCHECK(responseCallback || finishedCallback);
+    m_responseCallback = std::move(responseCallback);
+    m_finishedCallback = std::move(finishedCallback);
     m_url = url;
 
     ResourceRequest request(createResourceRequest(creationAddressSpace));
@@ -111,7 +114,7 @@ void WorkerScriptLoader::loadAsynchronously(ExecutionContext& executionContext, 
 
 const KURL& WorkerScriptLoader::responseURL() const
 {
-    ASSERT(!failed());
+    DCHECK(!failed());
     return m_responseURL;
 }
 
@@ -124,9 +127,9 @@ ResourceRequest WorkerScriptLoader::createResourceRequest(WebAddressSpace creati
     return request;
 }
 
-void WorkerScriptLoader::didReceiveResponse(unsigned long identifier, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
+void WorkerScriptLoader::didReceiveResponse(unsigned long identifier, const ResourceResponse& response, std::unique_ptr<WebDataConsumerHandle> handle)
 {
-    ASSERT_UNUSED(handle, !handle);
+    DCHECK(!handle);
     if (response.httpStatusCode() / 100 != 2 && response.httpStatusCode()) {
         notifyError();
         return;
@@ -135,9 +138,13 @@ void WorkerScriptLoader::didReceiveResponse(unsigned long identifier, const Reso
     m_responseURL = response.url();
     m_responseEncoding = response.textEncodingName();
     m_appCacheID = response.appCacheID();
-    processContentSecurityPolicy(response);
 
-    if (Platform::current()->isReservedIPAddress(response.remoteIPAddress())) {
+    if (RuntimeEnabledFeatures::referrerPolicyHeaderEnabled())
+        m_referrerPolicy = response.httpHeaderField(HTTPNames::Referrer_Policy);
+    processContentSecurityPolicy(response);
+    m_originTrialTokens = OriginTrialContext::parseHeaderValue(response.httpHeaderField(HTTPNames::Origin_Trial));
+
+    if (NetworkUtils::isReservedIPAddress(response.remoteIPAddress())) {
         m_responseAddressSpace = SecurityOrigin::create(m_responseURL)->isLocalhost()
             ? WebAddressSpaceLocal
             : WebAddressSpacePrivate;
@@ -167,7 +174,7 @@ void WorkerScriptLoader::didReceiveData(const char* data, unsigned len)
 
 void WorkerScriptLoader::didReceiveCachedMetadata(const char* data, int size)
 {
-    m_cachedMetadata = adoptPtr(new Vector<char>(size));
+    m_cachedMetadata = wrapUnique(new Vector<char>(size));
     memcpy(m_cachedMetadata->data(), data, size);
 }
 
@@ -223,7 +230,7 @@ void WorkerScriptLoader::notifyFinished()
     if (!m_finishedCallback)
         return;
 
-    OwnPtr<SameThreadClosure> callback = m_finishedCallback.release();
+    std::unique_ptr<WTF::Closure> callback = std::move(m_finishedCallback);
     (*callback)();
 }
 

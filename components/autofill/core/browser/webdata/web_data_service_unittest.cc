@@ -12,14 +12,15 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_profile.h"
@@ -100,7 +101,7 @@ class WebDataServiceTest : public testing::Test {
     db_thread_.Start();
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    base::FilePath path = temp_dir_.path().AppendASCII("TestWebDB");
+    base::FilePath path = temp_dir_.GetPath().AppendASCII("TestWebDB");
 
     wdbs_ = new WebDatabaseService(path, base::ThreadTaskRunnerHandle::Get(),
                                    db_thread_.task_runner());
@@ -122,12 +123,13 @@ class WebDataServiceTest : public testing::Test {
 
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
     db_thread_.Stop();
   }
 
   void WaitForDatabaseThread() {
-    base::WaitableEvent done(false, false);
+    base::WaitableEvent done(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                             base::WaitableEvent::InitialState::NOT_SIGNALED);
     db_thread_.task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
@@ -149,7 +151,8 @@ class WebDataServiceAutofillTest : public WebDataServiceTest {
         unique_id1_(1),
         unique_id2_(2),
         test_timeout_(TimeDelta::FromSeconds(kWebDataServiceTimeoutSeconds)),
-        done_event_(false, false) {}
+        done_event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                    base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 
  protected:
   virtual void SetUp() {
@@ -224,7 +227,7 @@ TEST_F(WebDataServiceAutofillTest, FormFillAdd) {
       name1_, base::string16(), limit, &consumer);
 
   // The message loop will exit when the consumer is called.
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   EXPECT_EQ(handle, consumer.handle());
   ASSERT_EQ(1U, consumer.result().size());
@@ -301,11 +304,11 @@ TEST_F(WebDataServiceAutofillTest, ProfileAdd) {
   // Check that it was added.
   AutofillWebDataServiceConsumer<std::vector<AutofillProfile*> > consumer;
   WebDataServiceBase::Handle handle = wds_->GetAutofillProfiles(&consumer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle, consumer.handle());
   ASSERT_EQ(1U, consumer.result().size());
   EXPECT_EQ(profile, *consumer.result()[0]);
-  STLDeleteElements(&consumer.result());
+  base::STLDeleteElements(&consumer.result());
 }
 
 TEST_F(WebDataServiceAutofillTest, ProfileRemove) {
@@ -320,11 +323,11 @@ TEST_F(WebDataServiceAutofillTest, ProfileRemove) {
   // Check that it was added.
   AutofillWebDataServiceConsumer<std::vector<AutofillProfile*> > consumer;
   WebDataServiceBase::Handle handle = wds_->GetAutofillProfiles(&consumer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle, consumer.handle());
   ASSERT_EQ(1U, consumer.result().size());
   EXPECT_EQ(profile, *consumer.result()[0]);
-  STLDeleteElements(&consumer.result());
+  base::STLDeleteElements(&consumer.result());
 
   // Check that GUID-based notification was sent.
   const AutofillProfileChange expected_change(
@@ -339,7 +342,7 @@ TEST_F(WebDataServiceAutofillTest, ProfileRemove) {
   // Check that it was removed.
   AutofillWebDataServiceConsumer<std::vector<AutofillProfile*> > consumer2;
   WebDataServiceBase::Handle handle2 = wds_->GetAutofillProfiles(&consumer2);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle2, consumer2.handle());
   ASSERT_EQ(0U, consumer2.result().size());
 }
@@ -364,12 +367,12 @@ TEST_F(WebDataServiceAutofillTest, ProfileUpdate) {
   // Check that they were added.
   AutofillWebDataServiceConsumer<std::vector<AutofillProfile*> > consumer;
   WebDataServiceBase::Handle handle = wds_->GetAutofillProfiles(&consumer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle, consumer.handle());
   ASSERT_EQ(2U, consumer.result().size());
   EXPECT_EQ(profile2, *consumer.result()[0]);
   EXPECT_EQ(profile1, *consumer.result()[1]);
-  STLDeleteElements(&consumer.result());
+  base::STLDeleteElements(&consumer.result());
 
   AutofillProfile profile2_changed(profile2);
   profile2_changed.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Bill"));
@@ -386,13 +389,13 @@ TEST_F(WebDataServiceAutofillTest, ProfileUpdate) {
   // Check that the updates were made.
   AutofillWebDataServiceConsumer<std::vector<AutofillProfile*> > consumer2;
   WebDataServiceBase::Handle handle2 = wds_->GetAutofillProfiles(&consumer2);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle2, consumer2.handle());
   ASSERT_EQ(2U, consumer2.result().size());
   EXPECT_EQ(profile2_changed, *consumer2.result()[0]);
   EXPECT_NE(profile2, *consumer2.result()[0]);
   EXPECT_EQ(profile1, *consumer2.result()[1]);
-  STLDeleteElements(&consumer2.result());
+  base::STLDeleteElements(&consumer2.result());
 }
 
 TEST_F(WebDataServiceAutofillTest, CreditAdd) {
@@ -403,11 +406,11 @@ TEST_F(WebDataServiceAutofillTest, CreditAdd) {
   // Check that it was added.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > consumer;
   WebDataServiceBase::Handle handle = wds_->GetCreditCards(&consumer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle, consumer.handle());
   ASSERT_EQ(1U, consumer.result().size());
   EXPECT_EQ(card, *consumer.result()[0]);
-  STLDeleteElements(&consumer.result());
+  base::STLDeleteElements(&consumer.result());
 }
 
 TEST_F(WebDataServiceAutofillTest, CreditCardRemove) {
@@ -420,11 +423,11 @@ TEST_F(WebDataServiceAutofillTest, CreditCardRemove) {
   // Check that it was added.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > consumer;
   WebDataServiceBase::Handle handle = wds_->GetCreditCards(&consumer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle, consumer.handle());
   ASSERT_EQ(1U, consumer.result().size());
   EXPECT_EQ(credit_card, *consumer.result()[0]);
-  STLDeleteElements(&consumer.result());
+  base::STLDeleteElements(&consumer.result());
 
   // Remove the credit card.
   wds_->RemoveCreditCard(credit_card.guid());
@@ -433,7 +436,7 @@ TEST_F(WebDataServiceAutofillTest, CreditCardRemove) {
   // Check that it was removed.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > consumer2;
   WebDataServiceBase::Handle handle2 = wds_->GetCreditCards(&consumer2);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle2, consumer2.handle());
   ASSERT_EQ(0U, consumer2.result().size());
 }
@@ -453,12 +456,12 @@ TEST_F(WebDataServiceAutofillTest, CreditUpdate) {
   // Check that they got added.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > consumer;
   WebDataServiceBase::Handle handle = wds_->GetCreditCards(&consumer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle, consumer.handle());
   ASSERT_EQ(2U, consumer.result().size());
   EXPECT_EQ(card2, *consumer.result()[0]);
   EXPECT_EQ(card1, *consumer.result()[1]);
-  STLDeleteElements(&consumer.result());
+  base::STLDeleteElements(&consumer.result());
 
   CreditCard card2_changed(card2);
   card2_changed.SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Bill"));
@@ -469,13 +472,13 @@ TEST_F(WebDataServiceAutofillTest, CreditUpdate) {
   // Check that the updates were made.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > consumer2;
   WebDataServiceBase::Handle handle2 = wds_->GetCreditCards(&consumer2);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle2, consumer2.handle());
   ASSERT_EQ(2U, consumer2.result().size());
   EXPECT_NE(card2, *consumer2.result()[0]);
   EXPECT_EQ(card2_changed, *consumer2.result()[0]);
   EXPECT_EQ(card1, *consumer2.result()[1]);
-  STLDeleteElements(&consumer2.result());
+  base::STLDeleteElements(&consumer2.result());
 }
 
 TEST_F(WebDataServiceAutofillTest, AutofillRemoveModifiedBetween) {
@@ -491,11 +494,11 @@ TEST_F(WebDataServiceAutofillTest, AutofillRemoveModifiedBetween) {
       profile_consumer;
   WebDataServiceBase::Handle handle =
       wds_->GetAutofillProfiles(&profile_consumer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle, profile_consumer.handle());
   ASSERT_EQ(1U, profile_consumer.result().size());
   EXPECT_EQ(profile, *profile_consumer.result()[0]);
-  STLDeleteElements(&profile_consumer.result());
+  base::STLDeleteElements(&profile_consumer.result());
 
   // Add a credit card.
   CreditCard credit_card;
@@ -505,11 +508,11 @@ TEST_F(WebDataServiceAutofillTest, AutofillRemoveModifiedBetween) {
   // Check that it was added.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > card_consumer;
   handle = wds_->GetCreditCards(&card_consumer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle, card_consumer.handle());
   ASSERT_EQ(1U, card_consumer.result().size());
   EXPECT_EQ(credit_card, *card_consumer.result()[0]);
-  STLDeleteElements(&card_consumer.result());
+  base::STLDeleteElements(&card_consumer.result());
 
   // Check that GUID-based notification was sent for the profile.
   const AutofillProfileChange expected_profile_change(
@@ -527,14 +530,14 @@ TEST_F(WebDataServiceAutofillTest, AutofillRemoveModifiedBetween) {
       profile_consumer2;
   WebDataServiceBase::Handle handle2 =
       wds_->GetAutofillProfiles(&profile_consumer2);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle2, profile_consumer2.handle());
   ASSERT_EQ(0U, profile_consumer2.result().size());
 
   // Check that the credit card was removed.
   AutofillWebDataServiceConsumer<std::vector<CreditCard*> > card_consumer2;
   handle2 = wds_->GetCreditCards(&card_consumer2);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(handle2, card_consumer2.handle());
   ASSERT_EQ(0U, card_consumer2.result().size());
 }

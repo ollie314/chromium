@@ -29,7 +29,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/fake_auth_status_provider.h"
 #include "components/signin/core/browser/signin_manager.h"
-#include "components/sync_driver/sync_prefs.h"
+#include "components/sync/driver/sync_prefs.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -42,12 +42,16 @@ using ::testing::Mock;
 using ::testing::Return;
 using ::testing::ReturnRef;
 using ::testing::Values;
+using browser_sync::ProfileSyncService;
+using browser_sync::ProfileSyncServiceMock;
 
 typedef GoogleServiceAuthError AuthError;
 
 namespace {
 
-MATCHER_P(ModelTypeSetMatches, value, "") { return arg.Equals(value); }
+MATCHER_P(ModelTypeSetMatches, value, "") {
+  return arg == value;
+}
 
 const char kTestUser[] = "chrome.p13n.test@gmail.com";
 
@@ -58,8 +62,7 @@ syncer::ModelTypeSet GetAllTypes() {
 
 enum SyncAllDataConfig {
   SYNC_ALL_DATA,
-  CHOOSE_WHAT_TO_SYNC,
-  SYNC_NOTHING
+  CHOOSE_WHAT_TO_SYNC
 };
 
 enum EncryptAllConfig {
@@ -85,7 +88,6 @@ std::string GetConfiguration(const base::DictionaryValue* extra_values,
   if (extra_values)
     result.MergeDictionary(extra_values);
   result.SetBoolean("syncAllDataTypes", sync_all == SYNC_ALL_DATA);
-  result.SetBoolean("syncNothing", sync_all == SYNC_NOTHING);
   result.SetBoolean("encryptAllData", encrypt_all == ENCRYPT_ALL_DATA);
   result.SetBoolean("usePassphrase", !passphrase.empty());
   if (!passphrase.empty())
@@ -100,8 +102,6 @@ std::string GetConfiguration(const base::DictionaryValue* extra_values,
   result.SetBoolean("tabsSynced", types.Has(syncer::PROXY_TABS));
   result.SetBoolean("themesSynced", types.Has(syncer::THEMES));
   result.SetBoolean("typedUrlsSynced", types.Has(syncer::TYPED_URLS));
-  result.SetBoolean("wifiCredentialsSynced",
-                    types.Has(syncer::WIFI_CREDENTIALS));
   result.SetBoolean("paymentsIntegrationEnabled",
                     payments_integration == PAYMENTS_INTEGRATION_ENABLED);
   std::string args;
@@ -141,7 +141,6 @@ void CheckConfigDataTypeArguments(const base::DictionaryValue* dictionary,
                                   SyncAllDataConfig config,
                                   syncer::ModelTypeSet types) {
   CheckBool(dictionary, "syncAllDataTypes", config == SYNC_ALL_DATA);
-  CheckBool(dictionary, "syncNothing", config == SYNC_NOTHING);
   CheckBool(dictionary, "appsSynced", types.Has(syncer::APPS));
   CheckBool(dictionary, "autofillSynced", types.Has(syncer::AUTOFILL));
   CheckBool(dictionary, "bookmarksSynced", types.Has(syncer::BOOKMARKS));
@@ -151,8 +150,6 @@ void CheckConfigDataTypeArguments(const base::DictionaryValue* dictionary,
   CheckBool(dictionary, "tabsSynced", types.Has(syncer::PROXY_TABS));
   CheckBool(dictionary, "themesSynced", types.Has(syncer::THEMES));
   CheckBool(dictionary, "typedUrlsSynced", types.Has(syncer::TYPED_URLS));
-  CheckBool(dictionary, "wifiCredentialsSynced",
-            types.Has(syncer::WIFI_CREDENTIALS));
 }
 
 
@@ -208,8 +205,8 @@ class SyncSetupHandlerTest : public testing::Test {
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             profile_.get(), BuildMockProfileSyncService));
     EXPECT_CALL(*mock_pss_, GetAuthError()).WillRepeatedly(ReturnRef(error_));
-    ON_CALL(*mock_pss_, GetPassphraseType()).WillByDefault(
-        Return(syncer::IMPLICIT_PASSPHRASE));
+    ON_CALL(*mock_pss_, GetPassphraseType())
+        .WillByDefault(Return(syncer::PassphraseType::IMPLICIT_PASSPHRASE));
     ON_CALL(*mock_pss_, GetExplicitPassphraseTime()).WillByDefault(
         Return(base::Time()));
     ON_CALL(*mock_pss_, GetRegisteredDataTypes())
@@ -446,7 +443,7 @@ TEST_F(SyncSetupHandlerTest,
   // tell it we're through with the setup progress.
   testing::InSequence seq;
   EXPECT_CALL(*mock_pss_, RequestStop(ProfileSyncService::CLEAR_DATA));
-  EXPECT_CALL(*mock_pss_, SetSetupInProgress(false));
+  EXPECT_CALL(*mock_pss_, OnSetupInProgressHandleDestroyed());
 
   handler_->CloseSyncSetup();
   EXPECT_EQ(NULL,
@@ -523,7 +520,7 @@ TEST_F(SyncSetupHandlerTest, TestSyncEverything) {
       GetConfiguration(NULL, SYNC_ALL_DATA, GetAllTypes(), std::string(),
                        ENCRYPT_PASSWORDS, PAYMENTS_INTEGRATION_ENABLED);
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(args));
+  list_args.AppendString(args);
   EXPECT_CALL(*mock_pss_, IsPassphraseRequiredForDecryption())
       .WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
@@ -537,28 +534,12 @@ TEST_F(SyncSetupHandlerTest, TestSyncEverything) {
   ExpectDone();
 }
 
-TEST_F(SyncSetupHandlerTest, TestSyncNothing) {
-  std::string args =
-      GetConfiguration(NULL, SYNC_NOTHING, GetAllTypes(), std::string(),
-                       ENCRYPT_PASSWORDS, PAYMENTS_INTEGRATION_ENABLED);
-  base::ListValue list_args;
-  list_args.Append(new base::StringValue(args));
-  EXPECT_CALL(*mock_pss_, RequestStop(ProfileSyncService::CLEAR_DATA));
-  SetupInitializedProfileSyncService();
-  handler_->HandleConfigure(&list_args);
-
-  // We expect a call to SyncSetupOverlay.showSyncSetupPage.
-  ASSERT_EQ(1U, web_ui_.call_data().size());
-  const content::TestWebUI::CallData& data = *web_ui_.call_data()[0];
-  EXPECT_EQ("SyncSetupOverlay.showSyncSetupPage", data.function_name());
-}
-
 TEST_F(SyncSetupHandlerTest, TurnOnEncryptAll) {
   std::string args =
       GetConfiguration(NULL, SYNC_ALL_DATA, GetAllTypes(), std::string(),
                        ENCRYPT_ALL_DATA, PAYMENTS_INTEGRATION_ENABLED);
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(args));
+  list_args.AppendString(args);
   EXPECT_CALL(*mock_pss_, IsPassphraseRequiredForDecryption())
       .WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
@@ -580,7 +561,7 @@ TEST_F(SyncSetupHandlerTest, TestPassphraseStillRequired) {
       GetConfiguration(NULL, SYNC_ALL_DATA, GetAllTypes(), std::string(),
                        ENCRYPT_PASSWORDS, PAYMENTS_INTEGRATION_ENABLED);
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(args));
+  list_args.AppendString(args);
   EXPECT_CALL(*mock_pss_, IsPassphraseRequiredForDecryption())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
@@ -604,7 +585,7 @@ TEST_F(SyncSetupHandlerTest, SuccessfullySetPassphrase) {
       GetConfiguration(&dict, SYNC_ALL_DATA, GetAllTypes(), "gaiaPassphrase",
                        ENCRYPT_PASSWORDS, PAYMENTS_INTEGRATION_ENABLED);
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(args));
+  list_args.AppendString(args);
   // Act as if an encryption passphrase is required the first time, then never
   // again after that.
   EXPECT_CALL(*mock_pss_, IsPassphraseRequired()).WillOnce(Return(true));
@@ -629,7 +610,7 @@ TEST_F(SyncSetupHandlerTest, SelectCustomEncryption) {
       GetConfiguration(&dict, SYNC_ALL_DATA, GetAllTypes(), "custom_passphrase",
                        ENCRYPT_PASSWORDS, PAYMENTS_INTEGRATION_ENABLED);
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(args));
+  list_args.AppendString(args);
   EXPECT_CALL(*mock_pss_, IsPassphraseRequiredForDecryption())
       .WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
@@ -654,7 +635,7 @@ TEST_F(SyncSetupHandlerTest, UnsuccessfullySetPassphrase) {
                                       "invalid_passphrase", ENCRYPT_PASSWORDS,
                                       PAYMENTS_INTEGRATION_ENABLED);
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(args));
+  list_args.AppendString(args);
   EXPECT_CALL(*mock_pss_, IsPassphraseRequiredForDecryption())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
@@ -692,7 +673,7 @@ TEST_F(SyncSetupHandlerTest, TestSyncIndividualTypes) {
         GetConfiguration(NULL, CHOOSE_WHAT_TO_SYNC, type_to_set, std::string(),
                          ENCRYPT_PASSWORDS, PAYMENTS_INTEGRATION_ENABLED);
     base::ListValue list_args;
-    list_args.Append(new base::StringValue(args));
+    list_args.AppendString(args);
     EXPECT_CALL(*mock_pss_, IsPassphraseRequiredForDecryption())
         .WillRepeatedly(Return(false));
     EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
@@ -713,7 +694,7 @@ TEST_F(SyncSetupHandlerTest, TestSyncAllManually) {
       GetConfiguration(NULL, CHOOSE_WHAT_TO_SYNC, GetAllTypes(), std::string(),
                        ENCRYPT_PASSWORDS, PAYMENTS_INTEGRATION_ENABLED);
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(args));
+  list_args.AppendString(args);
   EXPECT_CALL(*mock_pss_, IsPassphraseRequiredForDecryption())
       .WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, IsPassphraseRequired())
@@ -801,7 +782,6 @@ TEST_F(SyncSetupHandlerTest, ShowSetupSyncEverything) {
   CheckBool(dictionary, "extensionsRegistered", true);
   CheckBool(dictionary, "passwordsRegistered", true);
   CheckBool(dictionary, "preferencesRegistered", true);
-  CheckBool(dictionary, "wifiCredentialsRegistered", true);
   CheckBool(dictionary, "tabsRegistered", true);
   CheckBool(dictionary, "themesRegistered", true);
   CheckBool(dictionary, "typedUrlsRegistered", true);
@@ -892,7 +872,7 @@ TEST_F(SyncSetupHandlerTest, ShowSetupCustomPassphraseRequired) {
   EXPECT_CALL(*mock_pss_, IsUsingSecondaryPassphrase())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_pss_, GetPassphraseType())
-      .WillRepeatedly(Return(syncer::CUSTOM_PASSPHRASE));
+      .WillRepeatedly(Return(syncer::PassphraseType::CUSTOM_PASSPHRASE));
   SetupInitializedProfileSyncService();
   SetDefaultExpectationsForConfigPage();
 
@@ -954,7 +934,7 @@ TEST_F(SyncSetupHandlerTest, TurnOnEncryptAllDisallowed) {
       GetConfiguration(NULL, SYNC_ALL_DATA, GetAllTypes(), std::string(),
                        ENCRYPT_ALL_DATA, PAYMENTS_INTEGRATION_ENABLED);
   base::ListValue list_args;
-  list_args.Append(new base::StringValue(args));
+  list_args.AppendString(args);
   EXPECT_CALL(*mock_pss_, IsPassphraseRequiredForDecryption())
       .WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, IsPassphraseRequired())

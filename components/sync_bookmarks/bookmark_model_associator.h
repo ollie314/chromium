@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <stack>
 #include <string>
@@ -21,9 +22,9 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/threading/thread_checker.h"
-#include "components/sync_driver/data_type_error_handler.h"
-#include "components/sync_driver/model_associator.h"
-#include "sync/internal_api/public/util/unrecoverable_error_handler.h"
+#include "components/sync/api/data_type_error_handler.h"
+#include "components/sync/base/unrecoverable_error_handler.h"
+#include "components/sync/driver/model_associator.h"
 
 class GURL;
 
@@ -43,7 +44,7 @@ namespace sync_driver {
 class SyncClient;
 }
 
-namespace browser_sync {
+namespace sync_bookmarks {
 
 // Contains all model association related logic:
 // * Algorithm to associate bookmark model and sync model.
@@ -61,7 +62,7 @@ class BookmarkModelAssociator
       bookmarks::BookmarkModel* bookmark_model,
       sync_driver::SyncClient* sync_client,
       syncer::UserShare* user_share,
-      sync_driver::DataTypeErrorHandler* unrecoverable_error_handler,
+      std::unique_ptr<syncer::DataTypeErrorHandler> unrecoverable_error_handler,
       bool expect_mobile_bookmarks_folder);
   ~BookmarkModelAssociator() override;
 
@@ -294,7 +295,7 @@ class BookmarkModelAssociator
   bookmarks::BookmarkModel* bookmark_model_;
   sync_driver::SyncClient* sync_client_;
   syncer::UserShare* user_share_;
-  sync_driver::DataTypeErrorHandler* unrecoverable_error_handler_;
+  std::unique_ptr<syncer::DataTypeErrorHandler> unrecoverable_error_handler_;
   const bool expect_mobile_bookmarks_folder_;
   BookmarkIdToSyncIdMap id_map_;
   SyncIdToBookmarkNodeMap id_map_inverse_;
@@ -309,6 +310,6 @@ class BookmarkModelAssociator
   DISALLOW_COPY_AND_ASSIGN(BookmarkModelAssociator);
 };
 
-}  // namespace browser_sync
+}  // namespace sync_bookmarks
 
 #endif  // COMPONENTS_SYNC_BOOKMARKS_BOOKMARK_MODEL_ASSOCIATOR_H_

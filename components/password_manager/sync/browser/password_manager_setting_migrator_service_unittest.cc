@@ -13,15 +13,15 @@
 #include "components/password_manager/sync/browser/password_manager_setting_migrator_service.h"
 #include "components/pref_registry/testing_pref_service_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/sync_driver/fake_sync_service.h"
+#include "components/sync/api/fake_sync_change_processor.h"
+#include "components/sync/api/sync_error_factory.h"
+#include "components/sync/api/sync_error_factory_mock.h"
+#include "components/sync/core/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/driver/fake_sync_service.h"
+#include "components/sync/protocol/sync.pb.h"
 #include "components/syncable_prefs/pref_model_associator_client.h"
 #include "components/syncable_prefs/pref_service_mock_factory.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
-#include "sync/api/fake_sync_change_processor.h"
-#include "sync/api/sync_error_factory.h"
-#include "sync/api/sync_error_factory_mock.h"
-#include "sync/internal_api/public/attachments/attachment_service_proxy_for_test.h"
-#include "sync/protocol/sync.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -264,19 +264,8 @@ TEST_F(PasswordManagerSettingMigratorServiceTest, TestMigrationOnLocalChanges) {
   }
 }
 
-// TODO(crbug.com/604721): original CL never compiled this file with gyp and
-// thus the test was never run on iOS and is now failing. Disabled until the
-// bug is fixed to unblock conversion to gn.
-#if !defined(OS_IOS)
-#define MAYBE_ReconcileWhenWhenBothPrefsTypesArrivesFromSync \
-  ReconcileWhenWhenBothPrefsTypesArrivesFromSync
-#else
-#define MAYBE_ReconcileWhenWhenBothPrefsTypesArrivesFromSync \
-  DISABLED_ReconcileWhenWhenBothPrefsTypesArrivesFromSync
-#endif
-
 TEST_F(PasswordManagerSettingMigratorServiceTest,
-       MAYBE_ReconcileWhenWhenBothPrefsTypesArrivesFromSync) {
+       ReconcileWhenWhenBothPrefsTypesArrivesFromSync) {
   const struct {
     BooleanPrefState new_pref_local_value;
     BooleanPrefState old_pref_local_value;
@@ -286,7 +275,7 @@ TEST_F(PasswordManagerSettingMigratorServiceTest,
     PasswordManagerPreferencesInitialValues histogram_initial_value;
     PasswordManagerPreferencesInitialAndFinalValues histogram_initial_and_final;
   } kTestingTable[] = {
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
     {ON, OFF, ON, EMPTY, false, N1L0, I10F00},
     {ON, OFF, OFF, EMPTY, false, N1L0, I10F00},
     {ON, OFF, EMPTY, EMPTY, false, N1L0, I10F00},
@@ -342,7 +331,7 @@ TEST_F(PasswordManagerSettingMigratorServiceTest,
     NotifyProfileAdded();
     StartSyncingPref(prefs(), prefs::kCredentialsEnableService,
                      test_case.new_pref_sync_value);
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
     StartSyncingPref(prefs(), prefs::kPasswordManagerSavingEnabled,
                      test_case.old_pref_sync_value);
 #endif
@@ -368,7 +357,7 @@ TEST_F(PasswordManagerSettingMigratorServiceTest,
     bool result_old_pref_value;
     PasswordManagerPreferencesInitialValues histogram_initial_value;
   } kTestingTable[] = {
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_IOS)
     {ON, OFF, ON, EMPTY, true, false, N1L0},
     {ON, OFF, OFF, EMPTY, false, false, N1L0},
     {ON, OFF, EMPTY, EMPTY, true, false, N1L0},
@@ -422,7 +411,7 @@ TEST_F(PasswordManagerSettingMigratorServiceTest,
     NotifyProfileAdded();
     StartSyncingPref(prefs(), prefs::kCredentialsEnableService,
                      test_case.new_pref_sync_value);
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
     StartSyncingPref(prefs(), prefs::kPasswordManagerSavingEnabled,
                      test_case.old_pref_sync_value);
 #endif

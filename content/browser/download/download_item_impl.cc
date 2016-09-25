@@ -31,8 +31,7 @@
 #include "base/format_macros.h"
 #include "base/guid.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -52,8 +51,10 @@
 #include "content/public/browser/download_danger_type.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_url_parameters.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/referrer.h"
+#include "net/log/net_log_event_type.h"
 
 namespace content {
 
@@ -94,10 +95,6 @@ static void DownloadFileCancel(std::unique_ptr<DownloadFile> download_file) {
   download_file->Cancel();
 }
 
-bool IsDownloadResumptionEnabled() {
-  return base::FeatureList::IsEnabled(features::kDownloadResumption);
-}
-
 }  // namespace
 
 const uint32_t DownloadItem::kInvalidId = 0;
@@ -113,6 +110,7 @@ DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
                                    const base::FilePath& target_path,
                                    const std::vector<GURL>& url_chain,
                                    const GURL& referrer_url,
+                                   const GURL& site_url,
                                    const GURL& tab_url,
                                    const GURL& tab_refererr_url,
                                    const std::string& mime_type,
@@ -128,12 +126,13 @@ DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
                                    DownloadDangerType danger_type,
                                    DownloadInterruptReason interrupt_reason,
                                    bool opened,
-                                   const net::BoundNetLog& bound_net_log)
+                                   const net::NetLogWithSource& net_log)
     : guid_(base::ToUpperASCII(guid)),
       download_id_(download_id),
       target_path_(target_path),
       url_chain_(url_chain),
       referrer_url_(referrer_url),
+      site_url_(site_url),
       tab_url_(tab_url),
       tab_referrer_url_(tab_refererr_url),
       mime_type_(mime_type),
@@ -153,7 +152,7 @@ DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
       hash_(hash),
       last_modified_time_(last_modified),
       etag_(etag),
-      bound_net_log_(bound_net_log),
+      net_log_(net_log),
       weak_ptr_factory_(this) {
   delegate_->Attach();
   DCHECK(state_ == COMPLETE_INTERNAL || state_ == INTERRUPTED_INTERNAL ||
@@ -166,7 +165,7 @@ DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
 DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
                                    uint32_t download_id,
                                    const DownloadCreateInfo& info,
-                                   const net::BoundNetLog& bound_net_log)
+                                   const net::NetLogWithSource& net_log)
     : guid_(base::ToUpperASCII(base::GenerateGUID())),
       download_id_(download_id),
       target_disposition_((info.save_info->prompt_for_save_location)
@@ -174,6 +173,7 @@ DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
                               : TARGET_DISPOSITION_OVERWRITE),
       url_chain_(info.url_chain),
       referrer_url_(info.referrer_url),
+      site_url_(info.site_url),
       tab_url_(info.tab_url),
       tab_referrer_url_(info.tab_referrer_url),
       suggested_filename_(base::UTF16ToUTF8(info.save_info->suggested_name)),
@@ -193,19 +193,19 @@ DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
       is_temporary_(!info.save_info->file_path.empty()),
       last_modified_time_(info.last_modified),
       etag_(info.etag),
-      bound_net_log_(bound_net_log),
+      net_log_(net_log),
       weak_ptr_factory_(this) {
   delegate_->Attach();
   Init(true /* actively downloading */, SRC_ACTIVE_DOWNLOAD);
 
   // Link the event sources.
-  bound_net_log_.AddEvent(
-      net::NetLog::TYPE_DOWNLOAD_URL_REQUEST,
-      info.request_bound_net_log.source().ToEventParametersCallback());
+  net_log_.AddEvent(
+      net::NetLogEventType::DOWNLOAD_URL_REQUEST,
+      info.request_net_log.source().ToEventParametersCallback());
 
-  info.request_bound_net_log.AddEvent(
-      net::NetLog::TYPE_DOWNLOAD_STARTED,
-      bound_net_log_.source().ToEventParametersCallback());
+  info.request_net_log.AddEvent(
+      net::NetLogEventType::DOWNLOAD_STARTED,
+      net_log_.source().ToEventParametersCallback());
 }
 
 // Constructing for the "Save Page As..." feature:
@@ -216,7 +216,7 @@ DownloadItemImpl::DownloadItemImpl(
     const GURL& url,
     const std::string& mime_type,
     std::unique_ptr<DownloadRequestHandleInterface> request_handle,
-    const net::BoundNetLog& bound_net_log)
+    const net::NetLogWithSource& net_log)
     : is_save_package_download_(true),
       request_handle_(std::move(request_handle)),
       guid_(base::ToUpperASCII(base::GenerateGUID())),
@@ -230,7 +230,7 @@ DownloadItemImpl::DownloadItemImpl(
       start_time_(base::Time::Now()),
       delegate_(delegate),
       current_path_(path),
-      bound_net_log_(bound_net_log),
+      net_log_(net_log),
       weak_ptr_factory_(this) {
   delegate_->Attach();
   Init(true /* actively downloading */, SRC_SAVE_PAGE_AS);
@@ -262,7 +262,7 @@ void DownloadItemImpl::RemoveObserver(Observer* observer) {
 
 void DownloadItemImpl::UpdateObservers() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DVLOG(20) << __FUNCTION__ << "()";
+  DVLOG(20) << __func__ << "()";
 
   FOR_EACH_OBSERVER(Observer, observers_, OnDownloadUpdated(this));
 }
@@ -272,7 +272,7 @@ void DownloadItemImpl::ValidateDangerousDownload() {
   DCHECK(!IsDone());
   DCHECK(IsDangerous());
 
-  DVLOG(20) << __FUNCTION__ << " download=" << DebugString(true);
+  DVLOG(20) << __func__ << "() download=" << DebugString(true);
 
   if (IsDone() || !IsDangerous())
     return;
@@ -282,8 +282,8 @@ void DownloadItemImpl::ValidateDangerousDownload() {
 
   danger_type_ = DOWNLOAD_DANGER_TYPE_USER_VALIDATED;
 
-  bound_net_log_.AddEvent(
-      net::NetLog::TYPE_DOWNLOAD_ITEM_SAFETY_STATE_UPDATED,
+  net_log_.AddEvent(
+      net::NetLogEventType::DOWNLOAD_ITEM_SAFETY_STATE_UPDATED,
       base::Bind(&ItemCheckedNetLogCallback, GetDangerType()));
 
   UpdateObservers();  // TODO(asanka): This is potentially unsafe. The download
@@ -295,7 +295,7 @@ void DownloadItemImpl::ValidateDangerousDownload() {
 
 void DownloadItemImpl::StealDangerousDownload(
     const AcquireFileCallback& callback) {
-  DVLOG(20) << __FUNCTION__ << "() download = " << DebugString(true);
+  DVLOG(20) << __func__ << "() download = " << DebugString(true);
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(IsDangerous());
 
@@ -350,7 +350,7 @@ void DownloadItemImpl::Pause() {
 
 void DownloadItemImpl::Resume() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DVLOG(20) << __FUNCTION__ << "() download = " << DebugString(true);
+  DVLOG(20) << __func__ << "() download = " << DebugString(true);
   switch (state_) {
     case CANCELLED_INTERNAL:  // Nothing to resume.
     case COMPLETE_INTERNAL:
@@ -371,7 +371,7 @@ void DownloadItemImpl::Resume() {
 
     case INTERRUPTED_INTERNAL:
       auto_resume_count_ = 0;  // User input resets the counter.
-      ResumeInterruptedDownload();
+      ResumeInterruptedDownload(ResumptionRequestSource::USER);
       UpdateObservers();
       return;
 
@@ -383,7 +383,7 @@ void DownloadItemImpl::Resume() {
 
 void DownloadItemImpl::Cancel(bool user_cancel) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DVLOG(20) << __FUNCTION__ << "() download = " << DebugString(true);
+  DVLOG(20) << __func__ << "() download = " << DebugString(true);
   InterruptAndDiscardPartialState(
       user_cancel ? DOWNLOAD_INTERRUPT_REASON_USER_CANCELED
                   : DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN);
@@ -391,7 +391,7 @@ void DownloadItemImpl::Cancel(bool user_cancel) {
 }
 
 void DownloadItemImpl::Remove() {
-  DVLOG(20) << __FUNCTION__ << "() download = " << DebugString(true);
+  DVLOG(20) << __func__ << "() download = " << DebugString(true);
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   delegate_->AssertStateConsistent(this);
@@ -479,9 +479,8 @@ bool DownloadItemImpl::CanResume() const {
       ResumeMode resume_mode = GetResumeMode();
       // Only allow Resume() calls if the resumption mode requires a user
       // action.
-      return IsDownloadResumptionEnabled() &&
-             (resume_mode == RESUME_MODE_USER_RESTART ||
-              resume_mode == RESUME_MODE_USER_CONTINUE);
+      return resume_mode == RESUME_MODE_USER_RESTART ||
+             resume_mode == RESUME_MODE_USER_CONTINUE;
     }
 
     case MAX_DOWNLOAD_INTERNAL_STATE:
@@ -530,6 +529,10 @@ const GURL& DownloadItemImpl::GetOriginalUrl() const {
 
 const GURL& DownloadItemImpl::GetReferrerUrl() const {
   return referrer_url_;
+}
+
+const GURL& DownloadItemImpl::GetSiteUrl() const {
+  return site_url_;
 }
 
 const GURL& DownloadItemImpl::GetTabUrl() const {
@@ -754,7 +757,7 @@ void DownloadItemImpl::OnContentCheckCompleted(DownloadDangerType danger_type) {
   // OnContentCheckCompleted() during which no disk or network activity
   // should've taken place.
   DCHECK_EQ(state_, IN_PROGRESS_INTERNAL);
-  DVLOG(20) << __FUNCTION__ << " danger_type=" << danger_type
+  DVLOG(20) << __func__ << "() danger_type=" << danger_type
             << " download=" << DebugString(true);
   SetDangerType(danger_type);
   UpdateObservers();
@@ -762,10 +765,6 @@ void DownloadItemImpl::OnContentCheckCompleted(DownloadDangerType danger_type) {
 
 void DownloadItemImpl::SetOpenWhenComplete(bool open) {
   open_when_complete_ = open;
-}
-
-void DownloadItemImpl::SetIsTemporary(bool temporary) {
-  is_temporary_ = temporary;
 }
 
 void DownloadItemImpl::SetOpened(bool opened) {
@@ -812,21 +811,18 @@ std::string DownloadItemImpl::DebugString(bool verbose) const {
         " url_chain = \n\t\"%s\"\n\t"
         " current_path = \"%" PRFilePath
         "\"\n\t"
-        " target_path = \"%" PRFilePath "\"",
-        GetTotalBytes(),
-        GetReceivedBytes(),
+        " target_path = \"%" PRFilePath
+        "\""
+        " referrer = \"%s\""
+        " site_url = \"%s\"",
+        GetTotalBytes(), GetReceivedBytes(),
         DownloadInterruptReasonToString(last_reason_).c_str(),
-        IsPaused() ? 'T' : 'F',
-        DebugResumeModeString(GetResumeMode()),
-        auto_resume_count_,
-        GetDangerType(),
-        AllDataSaved() ? 'T' : 'F',
-        GetLastModifiedTime().c_str(),
-        GetETag().c_str(),
-        download_file_.get() ? "true" : "false",
-        url_list.c_str(),
-        GetFullPath().value().c_str(),
-        GetTargetFilePath().value().c_str());
+        IsPaused() ? 'T' : 'F', DebugResumeModeString(GetResumeMode()),
+        auto_resume_count_, GetDangerType(), AllDataSaved() ? 'T' : 'F',
+        GetLastModifiedTime().c_str(), GetETag().c_str(),
+        download_file_.get() ? "true" : "false", url_list.c_str(),
+        GetFullPath().value().c_str(), GetTargetFilePath().value().c_str(),
+        GetReferrerUrl().spec().c_str(), GetSiteUrl().spec().c_str());
   } else {
     description += base::StringPrintf(" url = \"%s\"", url_list.c_str());
   }
@@ -838,9 +834,6 @@ std::string DownloadItemImpl::DebugString(bool verbose) const {
 
 DownloadItemImpl::ResumeMode DownloadItemImpl::GetResumeMode() const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  if (!IsDownloadResumptionEnabled())
-    return RESUME_MODE_INVALID;
 
   // Only support resumption for HTTP(S).
   if (!GetURL().SchemeIsHTTPOrHTTPS())
@@ -983,7 +976,7 @@ void DownloadItemImpl::NotifyRemoved() {
 
 void DownloadItemImpl::OnDownloadedFileRemoved() {
   file_externally_removed_ = true;
-  DVLOG(20) << __FUNCTION__ << " download=" << DebugString(true);
+  DVLOG(20) << __func__ << "() download=" << DebugString(true);
   UpdateObservers();
 }
 
@@ -992,8 +985,8 @@ DownloadItemImpl::DestinationObserverAsWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
 }
 
-const net::BoundNetLog& DownloadItemImpl::GetBoundNetLog() const {
-  return bound_net_log_;
+const net::NetLogWithSource& DownloadItemImpl::GetNetLogWithSource() const {
+  return net_log_;
 }
 
 void DownloadItemImpl::SetTotalBytes(int64_t total_bytes) {
@@ -1013,7 +1006,7 @@ void DownloadItemImpl::OnAllDataSaved(
                         // the download and don't expect to receive any more
                         // data.
 
-  DVLOG(20) << __FUNCTION__ << " download=" << DebugString(true);
+  DVLOG(20) << __func__ << "() download=" << DebugString(true);
   UpdateObservers();
 }
 
@@ -1039,14 +1032,14 @@ void DownloadItemImpl::DestinationUpdate(int64_t bytes_so_far,
   // There must be no pending destination_error_.
   DCHECK_EQ(destination_error_, DOWNLOAD_INTERRUPT_REASON_NONE);
 
-  DVLOG(20) << __FUNCTION__ << " so_far=" << bytes_so_far
+  DVLOG(20) << __func__ << "() so_far=" << bytes_so_far
             << " per_sec=" << bytes_per_sec
             << " download=" << DebugString(true);
 
   UpdateProgress(bytes_so_far, bytes_per_sec);
-  if (bound_net_log_.IsCapturing()) {
-    bound_net_log_.AddEvent(
-        net::NetLog::TYPE_DOWNLOAD_ITEM_UPDATED,
+  if (net_log_.IsCapturing()) {
+    net_log_.AddEvent(
+        net::NetLogEventType::DOWNLOAD_ITEM_UPDATED,
         net::NetLog::Int64Callback("bytes_so_far", received_bytes_));
   }
 
@@ -1064,7 +1057,7 @@ void DownloadItemImpl::DestinationError(
   // reference held by the DownloadFile and hence cuts off any pending
   // callbacks.
   DCHECK(state_ == TARGET_PENDING_INTERNAL || state_ == IN_PROGRESS_INTERNAL);
-  DVLOG(20) << __FUNCTION__
+  DVLOG(20) << __func__
             << "() reason:" << DownloadInterruptReasonToString(reason);
 
   // Postpone recognition of this error until after file name determination
@@ -1091,7 +1084,7 @@ void DownloadItemImpl::DestinationCompleted(
   // reference held by the DownloadFile and hence cuts off any pending
   // callbacks.
   DCHECK(state_ == TARGET_PENDING_INTERNAL || state_ == IN_PROGRESS_INTERNAL);
-  DVLOG(20) << __FUNCTION__ << " download=" << DebugString(true);
+  DVLOG(20) << __func__ << "() download=" << DebugString(true);
 
   OnAllDataSaved(total_bytes, std::move(secure_hash));
   MaybeCompleteDownload();
@@ -1124,14 +1117,14 @@ void DownloadItemImpl::Init(bool active,
   net::NetLog::ParametersCallback active_data =
       base::Bind(&ItemActivatedNetLogCallback, this, download_type, &file_name);
   if (active) {
-    bound_net_log_.BeginEvent(
-        net::NetLog::TYPE_DOWNLOAD_ITEM_ACTIVE, active_data);
+    net_log_.BeginEvent(net::NetLogEventType::DOWNLOAD_ITEM_ACTIVE,
+                              active_data);
   } else {
-    bound_net_log_.AddEvent(
-        net::NetLog::TYPE_DOWNLOAD_ITEM_ACTIVE, active_data);
+    net_log_.AddEvent(net::NetLogEventType::DOWNLOAD_ITEM_ACTIVE,
+                            active_data);
   }
 
-  DVLOG(20) << __FUNCTION__ << "() " << DebugString(true);
+  DVLOG(20) << __func__ << "() " << DebugString(true);
 }
 
 // We're starting the download.
@@ -1141,7 +1134,7 @@ void DownloadItemImpl::Start(
     const DownloadCreateInfo& new_create_info) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!download_file_.get());
-  DVLOG(20) << __FUNCTION__ << "() this=" << DebugString(true);
+  DVLOG(20) << __func__ << "() this=" << DebugString(true);
 
   download_file_ = std::move(file);
   request_handle_ = std::move(req_handle);
@@ -1178,9 +1171,9 @@ void DownloadItemImpl::Start(
 
     int64_t offset = new_create_info.save_info->offset;
     std::unique_ptr<crypto::SecureHash> hash_state =
-        base::WrapUnique(new_create_info.save_info->hash_state
-                             ? new_create_info.save_info->hash_state->Clone()
-                             : nullptr);
+        new_create_info.save_info->hash_state
+            ? new_create_info.save_info->hash_state->Clone()
+            : nullptr;
 
     // Interrupted downloads also need a target path.
     if (target_path_.empty()) {
@@ -1224,7 +1217,7 @@ void DownloadItemImpl::OnDownloadFileInitialized(
     DownloadInterruptReason result) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_EQ(state_, TARGET_PENDING_INTERNAL);
-  DVLOG(20) << __FUNCTION__
+  DVLOG(20) << __func__
             << "() result:" << DownloadInterruptReasonToString(result);
   if (result != DOWNLOAD_INTERRUPT_REASON_NONE) {
     // Whoops. That didn't work. Proceed as an interrupted download, but reset
@@ -1242,7 +1235,7 @@ void DownloadItemImpl::OnDownloadFileInitialized(
 
 void DownloadItemImpl::DetermineDownloadTarget() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DVLOG(20) << __FUNCTION__ << "() " << DebugString(true);
+  DVLOG(20) << __func__ << "() " << DebugString(true);
 
   delegate_->DetermineDownloadTarget(
       this, base::Bind(&DownloadItemImpl::OnDownloadTargetDetermined,
@@ -1266,7 +1259,7 @@ void DownloadItemImpl::OnDownloadTargetDetermined(
     return;
   }
 
-  DVLOG(20) << __FUNCTION__ << "() target_path:" << target_path.value()
+  DVLOG(20) << __func__ << "() target_path:" << target_path.value()
             << " disposition:" << disposition << " danger_type:" << danger_type
             << " this:" << DebugString(true);
 
@@ -1325,7 +1318,7 @@ void DownloadItemImpl::OnDownloadRenamedToIntermediateName(
     const base::FilePath& full_path) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_EQ(state_, TARGET_PENDING_INTERNAL);
-  DVLOG(20) << __FUNCTION__ << " download=" << DebugString(true);
+  DVLOG(20) << __func__ << "() download=" << DebugString(true);
 
   TransitionTo(TARGET_RESOLVED_INTERNAL);
 
@@ -1393,8 +1386,7 @@ void DownloadItemImpl::OnDownloadCompleting() {
   if (state_ != IN_PROGRESS_INTERNAL)
     return;
 
-  DVLOG(20) << __FUNCTION__ << "()"
-            << " " << DebugString(true);
+  DVLOG(20) << __func__ << "() " << DebugString(true);
   DCHECK(!GetTargetFilePath().empty());
   DCHECK(!IsDangerous());
 
@@ -1438,9 +1430,8 @@ void DownloadItemImpl::OnDownloadRenamedToFinalName(
   if (state_ != IN_PROGRESS_INTERNAL)
     return;
 
-  DVLOG(20) << __FUNCTION__ << "()"
-            << " full_path = \"" << full_path.value() << "\""
-            << " " << DebugString(false);
+  DVLOG(20) << __func__ << "() full_path = \"" << full_path.value() << "\" "
+            << DebugString(false);
 
   if (DOWNLOAD_INTERRUPT_REASON_NONE != reason) {
     // Failure to perform the final rename is considered fatal. TODO(asanka): It
@@ -1489,7 +1480,7 @@ void DownloadItemImpl::DelayedDownloadOpened(bool auto_opened) {
 void DownloadItemImpl::Completed() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  DVLOG(20) << __FUNCTION__ << "() " << DebugString(false);
+  DVLOG(20) << __func__ << "() " << DebugString(false);
 
   DCHECK(all_data_saved_);
   end_time_ = base::Time::Now();
@@ -1525,7 +1516,7 @@ void DownloadItemImpl::InterruptWithPartialState(
     DownloadInterruptReason reason) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_NE(DOWNLOAD_INTERRUPT_REASON_NONE, reason);
-  DVLOG(20) << __FUNCTION__
+  DVLOG(20) << __func__
             << "() reason:" << DownloadInterruptReasonToString(reason)
             << " bytes_so_far:" << bytes_so_far
             << " hash_state:" << (hash_state ? "Valid" : "Invalid")
@@ -1663,7 +1654,7 @@ void DownloadItemImpl::SetHashState(
 
 void DownloadItemImpl::ReleaseDownloadFile(bool destroy_file) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DVLOG(20) << __FUNCTION__ << "() destroy_file:" << destroy_file;
+  DVLOG(20) << __func__ << "() destroy_file:" << destroy_file;
 
   if (destroy_file) {
     BrowserThread::PostTask(
@@ -1764,35 +1755,32 @@ void DownloadItemImpl::TransitionTo(DownloadInternalState new_state) {
       DCHECK(current_path_ == target_path_)
           << "Current output path must match target path.";
 
-      bound_net_log_.AddEvent(
-          net::NetLog::TYPE_DOWNLOAD_ITEM_COMPLETING,
+      net_log_.AddEvent(
+          net::NetLogEventType::DOWNLOAD_ITEM_COMPLETING,
           base::Bind(&ItemCompletingNetLogCallback, received_bytes_, &hash_));
       break;
 
     case COMPLETE_INTERNAL:
-      bound_net_log_.AddEvent(
-          net::NetLog::TYPE_DOWNLOAD_ITEM_FINISHED,
+      net_log_.AddEvent(
+          net::NetLogEventType::DOWNLOAD_ITEM_FINISHED,
           base::Bind(&ItemFinishedNetLogCallback, auto_opened_));
       break;
 
     case INTERRUPTED_INTERNAL:
-      bound_net_log_.AddEvent(
-          net::NetLog::TYPE_DOWNLOAD_ITEM_INTERRUPTED,
-          base::Bind(
-              &ItemInterruptedNetLogCallback, last_reason_, received_bytes_));
+      net_log_.AddEvent(net::NetLogEventType::DOWNLOAD_ITEM_INTERRUPTED,
+                              base::Bind(&ItemInterruptedNetLogCallback,
+                                         last_reason_, received_bytes_));
       break;
 
     case RESUMING_INTERNAL:
-      bound_net_log_.AddEvent(net::NetLog::TYPE_DOWNLOAD_ITEM_RESUMED,
-                              base::Bind(&ItemResumingNetLogCallback,
-                                         false,
-                                         last_reason_,
-                                         received_bytes_));
+      net_log_.AddEvent(net::NetLogEventType::DOWNLOAD_ITEM_RESUMED,
+                              base::Bind(&ItemResumingNetLogCallback, false,
+                                         last_reason_, received_bytes_));
       break;
 
     case CANCELLED_INTERNAL:
-      bound_net_log_.AddEvent(
-          net::NetLog::TYPE_DOWNLOAD_ITEM_CANCELED,
+      net_log_.AddEvent(
+          net::NetLogEventType::DOWNLOAD_ITEM_CANCELED,
           base::Bind(&ItemCanceledNetLogCallback, received_bytes_));
       break;
 
@@ -1801,8 +1789,7 @@ void DownloadItemImpl::TransitionTo(DownloadInternalState new_state) {
       break;
   }
 
-  DVLOG(20) << " " << __FUNCTION__ << "()"
-            << " from:" << DebugDownloadStateString(old_state)
+  DVLOG(20) << __func__ << "() from:" << DebugDownloadStateString(old_state)
             << " to:" << DebugDownloadStateString(state_)
             << " this = " << DebugString(true);
   bool is_done =
@@ -1814,22 +1801,21 @@ void DownloadItemImpl::TransitionTo(DownloadInternalState new_state) {
 
   // Termination
   if (is_done && !was_done)
-    bound_net_log_.EndEvent(net::NetLog::TYPE_DOWNLOAD_ITEM_ACTIVE);
+    net_log_.EndEvent(net::NetLogEventType::DOWNLOAD_ITEM_ACTIVE);
 
   // Resumption
   if (was_done && !is_done) {
     std::string file_name(target_path_.BaseName().AsUTF8Unsafe());
-    bound_net_log_.BeginEvent(net::NetLog::TYPE_DOWNLOAD_ITEM_ACTIVE,
-                              base::Bind(&ItemActivatedNetLogCallback,
-                                         this, SRC_ACTIVE_DOWNLOAD,
-                                         &file_name));
+    net_log_.BeginEvent(net::NetLogEventType::DOWNLOAD_ITEM_ACTIVE,
+                              base::Bind(&ItemActivatedNetLogCallback, this,
+                                         SRC_ACTIVE_DOWNLOAD, &file_name));
   }
 }
 
 void DownloadItemImpl::SetDangerType(DownloadDangerType danger_type) {
   if (danger_type != danger_type_) {
-    bound_net_log_.AddEvent(
-        net::NetLog::TYPE_DOWNLOAD_ITEM_SAFETY_STATE_UPDATED,
+    net_log_.AddEvent(
+        net::NetLogEventType::DOWNLOAD_ITEM_SAFETY_STATE_UPDATED,
         base::Bind(&ItemCheckedNetLogCallback, danger_type));
   }
   // Only record the Malicious UMA stat if it's going from {not malicious} ->
@@ -1849,20 +1835,19 @@ void DownloadItemImpl::SetDangerType(DownloadDangerType danger_type) {
 
 void DownloadItemImpl::SetFullPath(const base::FilePath& new_path) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DVLOG(20) << __FUNCTION__ << "()"
-            << " new_path = \"" << new_path.value() << "\""
-            << " " << DebugString(true);
+  DVLOG(20) << __func__ << "() new_path = \"" << new_path.value() << "\" "
+            << DebugString(true);
   DCHECK(!new_path.empty());
 
-  bound_net_log_.AddEvent(
-      net::NetLog::TYPE_DOWNLOAD_ITEM_RENAMED,
+  net_log_.AddEvent(
+      net::NetLogEventType::DOWNLOAD_ITEM_RENAMED,
       base::Bind(&ItemRenamedNetLogCallback, &current_path_, &new_path));
 
   current_path_ = new_path;
 }
 
 void DownloadItemImpl::AutoResumeIfValid() {
-  DVLOG(20) << __FUNCTION__ << "() " << DebugString(true);
+  DVLOG(20) << __func__ << "() " << DebugString(true);
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ResumeMode mode = GetResumeMode();
 
@@ -1873,14 +1858,12 @@ void DownloadItemImpl::AutoResumeIfValid() {
 
   auto_resume_count_++;
 
-  ResumeInterruptedDownload();
+  ResumeInterruptedDownload(ResumptionRequestSource::AUTOMATIC);
 }
 
-void DownloadItemImpl::ResumeInterruptedDownload() {
+void DownloadItemImpl::ResumeInterruptedDownload(
+    ResumptionRequestSource source) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (!IsDownloadResumptionEnabled())
-    return;
-
   // If we're not interrupted, ignore the request; our caller is drunk.
   if (state_ != INTERRUPTED_INTERNAL)
     return;
@@ -1900,13 +1883,17 @@ void DownloadItemImpl::ResumeInterruptedDownload() {
     hash_state_.reset();
   }
 
+  StoragePartition* storage_partition =
+      BrowserContext::GetStoragePartitionForSite(GetBrowserContext(),
+                                                 site_url_);
+
   // Avoid using the WebContents even if it's still around. Resumption requests
   // are consistently routed through the no-renderer code paths so that the
   // request will not be dropped if the WebContents (and by extension, the
   // associated renderer) goes away before a response is received.
   std::unique_ptr<DownloadUrlParameters> download_params(
-      new DownloadUrlParameters(GetURL(), -1, -1, -1,
-                                GetBrowserContext()->GetResourceContext()));
+      new DownloadUrlParameters(GetURL(),
+                                storage_partition->GetURLRequestContext()));
   download_params->set_file_path(GetFullPath());
   download_params->set_offset(GetReceivedBytes());
   download_params->set_last_modified(GetLastModifiedTime());
@@ -1914,7 +1901,16 @@ void DownloadItemImpl::ResumeInterruptedDownload() {
   download_params->set_hash_of_partial_file(hash_);
   download_params->set_hash_state(std::move(hash_state_));
 
+  // Note that resumed downloads disallow redirects. Hence the referrer URL
+  // (which is the contents of the Referer header for the last download request)
+  // will only be sent to the URL returned by GetURL().
+  download_params->set_referrer(
+      Referrer(GetReferrerUrl(), blink::WebReferrerPolicyAlways));
+
   TransitionTo(RESUMING_INTERNAL);
+  RecordDownloadSource(source == ResumptionRequestSource::USER
+                           ? INITIATED_BY_MANUAL_RESUMPTION
+                           : INITIATED_BY_AUTOMATIC_RESUMPTION);
   delegate_->ResumeInterruptedDownload(std::move(download_params), GetId());
   // Just in case we were interrupted while paused.
   is_paused_ = false;

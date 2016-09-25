@@ -29,16 +29,25 @@
 #include "modules/ModulesExport.h"
 #include "modules/webaudio/AudioNode.h"
 #include "modules/webaudio/AudioParam.h"
-#include "wtf/OwnPtr.h"
+#include <memory>
 
 namespace blink {
 
-class AbstractAudioContext;
+class BaseAudioContext;
 class DynamicsCompressor;
+class DynamicsCompressorOptions;
 
 class MODULES_EXPORT DynamicsCompressorHandler final : public AudioHandler {
 public:
-    static PassRefPtr<DynamicsCompressorHandler> create(AudioNode&, float sampleRate, AudioParamHandler& threshold, AudioParamHandler& knee, AudioParamHandler& ratio, AudioParamHandler& reduction, AudioParamHandler& attack, AudioParamHandler& release);
+    static PassRefPtr<DynamicsCompressorHandler> create(
+        AudioNode&,
+        float sampleRate,
+        AudioParamHandler& threshold,
+        AudioParamHandler& knee,
+        AudioParamHandler& ratio,
+        AudioParamHandler& attack,
+        AudioParamHandler& release);
+
     ~DynamicsCompressorHandler();
 
     // AudioHandler
@@ -46,16 +55,24 @@ public:
     void initialize() override;
     void clearInternalStateWhenDisabled() override;
 
+    float reductionValue() const { return m_reduction; }
 private:
-    DynamicsCompressorHandler(AudioNode&, float sampleRate, AudioParamHandler& threshold, AudioParamHandler& knee, AudioParamHandler& ratio, AudioParamHandler& reduction, AudioParamHandler& attack, AudioParamHandler& release);
+    DynamicsCompressorHandler(
+        AudioNode&,
+        float sampleRate,
+        AudioParamHandler& threshold,
+        AudioParamHandler& knee,
+        AudioParamHandler& ratio,
+        AudioParamHandler& attack,
+        AudioParamHandler& release);
     double tailTime() const override;
     double latencyTime() const override;
 
-    OwnPtr<DynamicsCompressor> m_dynamicsCompressor;
+    std::unique_ptr<DynamicsCompressor> m_dynamicsCompressor;
     RefPtr<AudioParamHandler> m_threshold;
     RefPtr<AudioParamHandler> m_knee;
     RefPtr<AudioParamHandler> m_ratio;
-    RefPtr<AudioParamHandler> m_reduction;
+    float m_reduction;
     RefPtr<AudioParamHandler> m_attack;
     RefPtr<AudioParamHandler> m_release;
 
@@ -65,24 +82,24 @@ private:
 class MODULES_EXPORT DynamicsCompressorNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static DynamicsCompressorNode* create(AbstractAudioContext&, float sampleRate);
+    static DynamicsCompressorNode* create(BaseAudioContext&, ExceptionState&);
+    static DynamicsCompressorNode* create(BaseAudioContext*, const DynamicsCompressorOptions&, ExceptionState&);
     DECLARE_VIRTUAL_TRACE();
 
     AudioParam* threshold() const;
     AudioParam* knee() const;
     AudioParam* ratio() const;
-    AudioParam* reduction() const;
+    float reduction() const;
     AudioParam* attack() const;
     AudioParam* release() const;
 
 private:
-    DynamicsCompressorNode(AbstractAudioContext&, float sampleRate);
+    DynamicsCompressorNode(BaseAudioContext&);
     DynamicsCompressorHandler& dynamicsCompressorHandler() const;
 
     Member<AudioParam> m_threshold;
     Member<AudioParam> m_knee;
     Member<AudioParam> m_ratio;
-    Member<AudioParam> m_reduction;
     Member<AudioParam> m_attack;
     Member<AudioParam> m_release;
 

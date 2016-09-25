@@ -20,6 +20,7 @@
 #include "media/base/cdm_promise.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
+#include "media/base/limits.h"
 #include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
 #include "media/cdm/json_web_key.h"
@@ -41,13 +42,13 @@ class AesDecryptor::SessionIdDecryptionKeyMap {
 
  public:
   SessionIdDecryptionKeyMap() {}
-  ~SessionIdDecryptionKeyMap() { STLDeleteValues(&key_list_); }
+  ~SessionIdDecryptionKeyMap() { base::STLDeleteValues(&key_list_); }
 
   // Replaces value if |session_id| is already present, or adds it if not.
   // This |decryption_key| becomes the latest until another insertion or
   // |session_id| is erased.
   void Insert(const std::string& session_id,
-              scoped_ptr<DecryptionKey> decryption_key);
+              std::unique_ptr<DecryptionKey> decryption_key);
 
   // Deletes the entry for |session_id| if present.
   void Erase(const std::string& session_id);
@@ -79,7 +80,7 @@ class AesDecryptor::SessionIdDecryptionKeyMap {
 
 void AesDecryptor::SessionIdDecryptionKeyMap::Insert(
     const std::string& session_id,
-    scoped_ptr<DecryptionKey> decryption_key) {
+    std::unique_ptr<DecryptionKey> decryption_key) {
   KeyList::iterator it = Find(session_id);
   if (it != key_list_.end())
     Erase(it);
@@ -208,7 +209,7 @@ static scoped_refptr<DecoderBuffer> DecryptData(const DecoderBuffer& input,
   // copy all encrypted subsamples to a contiguous buffer, decrypt them, then
   // copy the decrypted bytes over the encrypted bytes in the output.
   // TODO(strobe): attempt to reduce number of memory copies
-  scoped_ptr<uint8_t[]> encrypted_bytes(new uint8_t[total_encrypted_size]);
+  std::unique_ptr<uint8_t[]> encrypted_bytes(new uint8_t[total_encrypted_size]);
   CopySubsamples(subsamples, kSrcContainsClearBytes,
                  reinterpret_cast<const uint8_t*>(sample),
                  encrypted_bytes.get());
@@ -249,8 +250,9 @@ AesDecryptor::~AesDecryptor() {
   key_map_.clear();
 }
 
-void AesDecryptor::SetServerCertificate(const std::vector<uint8_t>& certificate,
-                                        scoped_ptr<SimpleCdmPromise> promise) {
+void AesDecryptor::SetServerCertificate(
+    const std::vector<uint8_t>& certificate,
+    std::unique_ptr<SimpleCdmPromise> promise) {
   promise->reject(
       NOT_SUPPORTED_ERROR, 0, "SetServerCertificate() is not supported.");
 }
@@ -259,7 +261,7 @@ void AesDecryptor::CreateSessionAndGenerateRequest(
     SessionType session_type,
     EmeInitDataType init_data_type,
     const std::vector<uint8_t>& init_data,
-    scoped_ptr<NewSessionCdmPromise> promise) {
+    std::unique_ptr<NewSessionCdmPromise> promise) {
   std::string session_id(base::UintToString(next_session_id_++));
   valid_sessions_.insert(session_id);
 
@@ -267,58 +269,55 @@ void AesDecryptor::CreateSessionAndGenerateRequest(
   // TODO(jrummell): Validate |session_type|.
 
   std::vector<uint8_t> message;
-  // TODO(jrummell): Since unprefixed will never send NULL, remove this check
-  // when prefixed EME is removed (http://crbug.com/249976).
-  if (!init_data.empty()) {
-    std::vector<std::vector<uint8_t>> keys;
-    switch (init_data_type) {
-      case EmeInitDataType::WEBM:
-        // |init_data| is simply the key needed.
-        keys.push_back(init_data);
-        break;
-      case EmeInitDataType::CENC:
-#if defined(USE_PROPRIETARY_CODECS)
-        // |init_data| is a set of 0 or more concatenated 'pssh' boxes.
-        if (!GetKeyIdsForCommonSystemId(init_data, &keys)) {
-          promise->reject(NOT_SUPPORTED_ERROR, 0,
-                          "No supported PSSH box found.");
-          return;
-        }
-        break;
-#else
-        promise->reject(NOT_SUPPORTED_ERROR, 0,
-                        "Initialization data type CENC is not supported.");
+  std::vector<std::vector<uint8_t>> keys;
+  switch (init_data_type) {
+    case EmeInitDataType::WEBM:
+      // |init_data| is simply the key needed.
+      if (init_data.size() < limits::kMinKeyIdLength ||
+          init_data.size() > limits::kMaxKeyIdLength) {
+        promise->reject(NOT_SUPPORTED_ERROR, 0, "Incorrect length");
         return;
-#endif
-      case EmeInitDataType::KEYIDS: {
-        std::string init_data_string(init_data.begin(), init_data.end());
-        std::string error_message;
-        if (!ExtractKeyIdsFromKeyIdsInitData(init_data_string, &keys,
-                                             &error_message)) {
-          promise->reject(NOT_SUPPORTED_ERROR, 0, error_message);
-          return;
-        }
-        break;
       }
-      default:
-        NOTREACHED();
-        promise->reject(NOT_SUPPORTED_ERROR, 0,
-                        "init_data_type not supported.");
+      keys.push_back(init_data);
+      break;
+    case EmeInitDataType::CENC:
+#if defined(USE_PROPRIETARY_CODECS)
+      // |init_data| is a set of 0 or more concatenated 'pssh' boxes.
+      if (!GetKeyIdsForCommonSystemId(init_data, &keys)) {
+        promise->reject(NOT_SUPPORTED_ERROR, 0, "No supported PSSH box found.");
         return;
+      }
+      break;
+#else
+      promise->reject(NOT_SUPPORTED_ERROR, 0,
+                      "Initialization data type CENC is not supported.");
+      return;
+#endif
+    case EmeInitDataType::KEYIDS: {
+      std::string init_data_string(init_data.begin(), init_data.end());
+      std::string error_message;
+      if (!ExtractKeyIdsFromKeyIdsInitData(init_data_string, &keys,
+                                           &error_message)) {
+        promise->reject(NOT_SUPPORTED_ERROR, 0, error_message);
+        return;
+      }
+      break;
     }
-    CreateLicenseRequest(keys, session_type, &message);
+    default:
+      NOTREACHED();
+      promise->reject(NOT_SUPPORTED_ERROR, 0, "init_data_type not supported.");
+      return;
   }
+  CreateLicenseRequest(keys, session_type, &message);
 
   promise->resolve(session_id);
 
-  // No URL needed for license requests.
-  GURL empty_gurl;
-  session_message_cb_.Run(session_id, LICENSE_REQUEST, message, empty_gurl);
+  session_message_cb_.Run(session_id, LICENSE_REQUEST, message);
 }
 
 void AesDecryptor::LoadSession(SessionType session_type,
                                const std::string& session_id,
-                               scoped_ptr<NewSessionCdmPromise> promise) {
+                               std::unique_ptr<NewSessionCdmPromise> promise) {
   // TODO(xhwang): Change this to NOTREACHED() when blink checks for key systems
   // that do not support loadSession. See http://crbug.com/342481
   promise->reject(NOT_SUPPORTED_ERROR, 0, "LoadSession() is not supported.");
@@ -326,7 +325,7 @@ void AesDecryptor::LoadSession(SessionType session_type,
 
 void AesDecryptor::UpdateSession(const std::string& session_id,
                                  const std::vector<uint8_t>& response,
-                                 scoped_ptr<SimpleCdmPromise> promise) {
+                                 std::unique_ptr<SimpleCdmPromise> promise) {
   CHECK(!response.empty());
 
   // TODO(jrummell): Convert back to a DCHECK once prefixed EME is removed.
@@ -400,7 +399,7 @@ void AesDecryptor::UpdateSession(const std::string& session_id,
 }
 
 void AesDecryptor::CloseSession(const std::string& session_id,
-                                scoped_ptr<SimpleCdmPromise> promise) {
+                                std::unique_ptr<SimpleCdmPromise> promise) {
   // Validate that this is a reference to an active session and then forget it.
   std::set<std::string>::iterator it = valid_sessions_.find(session_id);
   DCHECK(it != valid_sessions_.end());
@@ -410,25 +409,19 @@ void AesDecryptor::CloseSession(const std::string& session_id,
   // Close the session.
   DeleteKeysForSession(session_id);
   promise->resolve();
+
+  // Update key statuses. All keys have been destroyed, so it's an empty set.
+  session_keys_change_cb_.Run(session_id, false, CdmKeysInfo());
+
+  // Update expiration time to NaN. (http://crbug.com/624192)
+
+  // Resolve the closed attribute.
   session_closed_cb_.Run(session_id);
 }
 
 void AesDecryptor::RemoveSession(const std::string& session_id,
-                                 scoped_ptr<SimpleCdmPromise> promise) {
-  // AesDecryptor doesn't keep any persistent data, so this should be
-  // NOT_REACHED().
-  // TODO(jrummell): Make sure persistent session types are rejected.
-  // http://crbug.com/384152.
-  //
-  // However, v0.1b calls to CancelKeyRequest() will call this, so close the
-  // session, if it exists.
-  // TODO(jrummell): Remove the close() call when prefixed EME is removed.
-  // http://crbug.com/249976.
-  if (valid_sessions_.find(session_id) != valid_sessions_.end()) {
-    CloseSession(session_id, std::move(promise));
-    return;
-  }
-
+                                 std::unique_ptr<SimpleCdmPromise> promise) {
+  NOTIMPLEMENTED() << "Need to address https://crbug.com/616166.";
   promise->reject(INVALID_ACCESS_ERROR, 0, "Session does not exist.");
 }
 
@@ -480,9 +473,8 @@ void AesDecryptor::Decrypt(StreamType stream_type,
       return;
     }
 
-    crypto::SymmetricKey* decryption_key = key->decryption_key();
-    decrypted = DecryptData(*encrypted.get(), decryption_key);
-    if (!decrypted.get()) {
+    decrypted = DecryptData(*encrypted.get(), key->decryption_key());
+    if (!decrypted) {
       DVLOG(1) << "Decryption failed.";
       decrypt_cb.Run(kError, NULL);
       return;
@@ -535,7 +527,7 @@ void AesDecryptor::DeinitializeDecoder(StreamType stream_type) {
 bool AesDecryptor::AddDecryptionKey(const std::string& session_id,
                                     const std::string& key_id,
                                     const std::string& key_string) {
-  scoped_ptr<DecryptionKey> decryption_key(new DecryptionKey(key_string));
+  std::unique_ptr<DecryptionKey> decryption_key(new DecryptionKey(key_string));
   if (!decryption_key->Init()) {
     DVLOG(1) << "Could not initialize decryption key.";
     return false;
@@ -549,7 +541,7 @@ bool AesDecryptor::AddDecryptionKey(const std::string& session_id,
   }
 
   // |key_id| not found, so need to create new entry.
-  scoped_ptr<SessionIdDecryptionKeyMap> inner_map(
+  std::unique_ptr<SessionIdDecryptionKeyMap> inner_map(
       new SessionIdDecryptionKeyMap());
   inner_map->Insert(session_id, std::move(decryption_key));
   key_map_.add(key_id, std::move(inner_map));
@@ -606,8 +598,8 @@ AesDecryptor::DecryptionKey::~DecryptionKey() {}
 
 bool AesDecryptor::DecryptionKey::Init() {
   CHECK(!secret_.empty());
-  decryption_key_.reset(crypto::SymmetricKey::Import(
-      crypto::SymmetricKey::AES, secret_));
+  decryption_key_ =
+      crypto::SymmetricKey::Import(crypto::SymmetricKey::AES, secret_);
   if (!decryption_key_)
     return false;
   return true;

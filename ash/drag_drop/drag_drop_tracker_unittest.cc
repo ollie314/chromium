@@ -6,8 +6,11 @@
 
 #include <memory>
 
+#include "ash/aura/wm_window_aura.h"
+#include "ash/common/scoped_root_window_for_new_windows.h"
+#include "ash/common/shell_window_ids.h"
+#include "ash/common/wm_shell.h"
 #include "ash/shell.h"
-#include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
@@ -25,8 +28,7 @@ class DragDropTrackerTest : public test::AshTestBase {
     static int window_id = 0;
     return CreateTestWindowInShellWithDelegate(
         aura::test::TestWindowDelegate::CreateSelfDestroyingDelegate(),
-        window_id++,
-        bounds);
+        window_id++, bounds);
   }
 
   static aura::Window* GetTarget(const gfx::Point& location) {
@@ -39,7 +41,7 @@ class DragDropTrackerTest : public test::AshTestBase {
   }
 
   static ui::LocatedEvent* ConvertEvent(aura::Window* target,
-                                           const ui::MouseEvent& event) {
+                                        const ui::MouseEvent& event) {
     std::unique_ptr<DragDropTracker> tracker(
         new DragDropTracker(Shell::GetPrimaryRootWindow(), NULL));
     ui::LocatedEvent* converted = tracker->ConvertEvent(target, event);
@@ -67,8 +69,9 @@ TEST_F(DragDropTrackerTest, GetTarget) {
   EXPECT_EQ("0,0 100x100", window0->GetBoundsInScreen().ToString());
   EXPECT_EQ("300,100 100x100", window1->GetBoundsInScreen().ToString());
 
-  // Make RootWindow0 active so that capture window is parented to it.
-  Shell::GetInstance()->set_target_root_window(root_windows[0]);
+  // RootWindow0 is active so the capture window is parented to it.
+  EXPECT_EQ(WmWindowAura::Get(root_windows[0]),
+            WmShell::Get()->GetRootWindowForNewWindows());
 
   // Start tracking from the RootWindow1 and check the point on RootWindow0 that
   // |window0| covers.
@@ -89,7 +92,8 @@ TEST_F(DragDropTrackerTest, GetTarget) {
   EXPECT_NE(window1.get(), GetTarget(gfx::Point(50, 250)));
 
   // Make RootWindow1 active so that capture window is parented to it.
-  Shell::GetInstance()->set_target_root_window(root_windows[1]);
+  ScopedRootWindowForNewWindows root_for_new_windows(
+      WmWindowAura::Get(root_windows[1]));
 
   // Start tracking from the RootWindow1 and check the point on RootWindow0 that
   // |window0| covers.
@@ -126,8 +130,9 @@ TEST_F(DragDropTrackerTest, ConvertEvent) {
       CreateTestWindow(gfx::Rect(300, 100, 100, 100)));
   window1->Show();
 
-  // Make RootWindow0 active so that capture window is parented to it.
-  Shell::GetInstance()->set_target_root_window(root_windows[0]);
+  // RootWindow0 is active so the capture window is parented to it.
+  EXPECT_EQ(WmWindowAura::Get(root_windows[0]),
+            WmShell::Get()->GetRootWindowForNewWindows());
 
   // Start tracking from the RootWindow0 and converts the mouse event into
   // |window0|'s coodinates.
@@ -154,7 +159,8 @@ TEST_F(DragDropTrackerTest, ConvertEvent) {
   EXPECT_EQ(original01.flags(), converted01->flags());
 
   // Make RootWindow1 active so that capture window is parented to it.
-  Shell::GetInstance()->set_target_root_window(root_windows[1]);
+  ScopedRootWindowForNewWindows root_for_new_windows(
+      WmWindowAura::Get(root_windows[1]));
 
   // Start tracking from the RootWindow1 and converts the mouse event into
   // |window0|'s coodinates.

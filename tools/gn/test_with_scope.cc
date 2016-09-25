@@ -10,13 +10,22 @@
 #include "tools/gn/parser.h"
 #include "tools/gn/tokenizer.h"
 
+namespace {
+
+BuildSettings CreateBuildSettingsForTest() {
+  BuildSettings build_settings;
+  build_settings.SetBuildDir(SourceDir("//out/Debug/"));
+  return build_settings;
+}
+
+}  // namespace
+
 TestWithScope::TestWithScope()
-    : build_settings_(),
+    : build_settings_(CreateBuildSettingsForTest()),
       settings_(&build_settings_, std::string()),
       toolchain_(&settings_, Label(SourceDir("//toolchain/"), "default")),
       scope_(&settings_),
       scope_progammatic_provider_(&scope_, true) {
-  build_settings_.SetBuildDir(SourceDir("//out/Debug/"));
   build_settings_.set_print_callback(
       base::Bind(&TestWithScope::AppendPrintOutput, base::Unretained(this)));
 
@@ -24,6 +33,7 @@ TestWithScope::TestWithScope()
   settings_.set_default_toolchain_label(toolchain_.label());
 
   SetupToolchain(&toolchain_);
+  scope_.set_item_collector(&items_);
 }
 
 TestWithScope::~TestWithScope() {
@@ -35,6 +45,28 @@ Label TestWithScope::ParseLabel(const std::string& str) const {
                                 Value(nullptr, str), &err);
   CHECK(!err.has_error());
   return result;
+}
+
+bool TestWithScope::ExecuteSnippet(const std::string& str, Err* err) {
+  TestParseInput input(str);
+  if (input.has_error()) {
+    *err = input.parse_err();
+    return false;
+  }
+
+  size_t first_item = items_.size();
+  input.parsed()->Execute(&scope_, err);
+  if (err->has_error())
+    return false;
+
+  for (size_t i = first_item; i < items_.size(); ++i) {
+    CHECK(items_[i]->AsTarget() != nullptr)
+        << "Only targets are supported in ExecuteSnippet()";
+    items_[i]->AsTarget()->SetToolchain(&toolchain_);
+    if (!items_[i]->OnResolved(err))
+      return false;
+  }
+  return true;
 }
 
 // static

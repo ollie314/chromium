@@ -9,20 +9,18 @@
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/debug/leak_annotations.h"
-#include "base/feature_list.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/pending_task.h"
+#include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
 #include "base/threading/platform_thread.h"
 #include "base/timer/hi_res_timer_manager.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "components/scheduler/renderer/renderer_scheduler.h"
 #include "content/child/child_process.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/mojo/mojo_shell_connection_impl.h"
@@ -32,6 +30,7 @@
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
+#include "third_party/WebKit/public/platform/scheduler/renderer/renderer_scheduler.h"
 #include "third_party/skia/include/core/SkGraphics.h"
 #include "ui/base/ui_base_switches.h"
 
@@ -54,7 +53,7 @@
 #endif
 
 #if defined(ENABLE_WEBRTC)
-#include "third_party/libjingle/overrides/init_webrtc.h"
+#include "third_party/webrtc_overrides/init_webrtc.h"
 #endif
 
 #if defined(USE_OZONE)
@@ -92,8 +91,6 @@ int RendererMain(const MainFunctionParams& parameters) {
       kTraceEventRendererProcessSortIndex);
 
   const base::CommandLine& parsed_command_line = parameters.command_line;
-
-  MojoShellConnectionImpl::Create();
 
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool;
@@ -151,30 +148,12 @@ int RendererMain(const MainFunctionParams& parameters) {
   base::StatisticsRecorder::Initialize();
 
 #if defined(OS_ANDROID)
-  // If we have a pending chromium android linker histogram, record it.
-  base::android::RecordChromiumAndroidLinkerRendererHistogram();
+  // If we have any pending LibraryLoader histograms, record them.
+  base::android::RecordLibraryLoaderRendererHistograms();
 #endif
 
-  // Initialize statistical testing infrastructure.  We set the entropy provider
-  // to NULL to disallow the renderer process from creating its own one-time
-  // randomized trials; they should be created in the browser process.
-  base::FieldTrialList field_trial_list(NULL);
-  // Ensure any field trials in browser are reflected into renderer.
-  if (parsed_command_line.HasSwitch(switches::kForceFieldTrials)) {
-    bool result = base::FieldTrialList::CreateTrialsFromString(
-        parsed_command_line.GetSwitchValueASCII(switches::kForceFieldTrials),
-        std::set<std::string>());
-    DCHECK(result);
-  }
-
-  std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-  feature_list->InitializeFromCommandLine(
-      parsed_command_line.GetSwitchValueASCII(switches::kEnableFeatures),
-      parsed_command_line.GetSwitchValueASCII(switches::kDisableFeatures));
-  base::FeatureList::SetInstance(std::move(feature_list));
-
-  std::unique_ptr<scheduler::RendererScheduler> renderer_scheduler(
-      scheduler::RendererScheduler::Create());
+  std::unique_ptr<blink::scheduler::RendererScheduler> renderer_scheduler(
+      blink::scheduler::RendererScheduler::Create());
 
   // PlatformInitialize uses FieldTrials, so this must happen later.
   platform.PlatformInitialize();
@@ -216,11 +195,9 @@ int RendererMain(const MainFunctionParams& parameters) {
         pool->Recycle();
 #endif
       TRACE_EVENT_ASYNC_BEGIN0("toplevel", "RendererMain.START_MSG_LOOP", 0);
-      base::MessageLoop::current()->Run();
+      base::RunLoop().Run();
       TRACE_EVENT_ASYNC_END0("toplevel", "RendererMain.START_MSG_LOOP", 0);
     }
-
-    MojoShellConnectionImpl::Destroy();
 
 #if defined(LEAK_SANITIZER)
     // Run leak detection before RenderProcessImpl goes out of scope. This helps

@@ -29,7 +29,7 @@
 #include "core/css/StyleSheetContents.h"
 #include "core/fetch/FetchRequest.h"
 #include "core/fetch/MemoryCache.h"
-#include "core/fetch/ResourceClientOrObserverWalker.h"
+#include "core/fetch/ResourceClientWalker.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/fetch/StyleSheetResourceClient.h"
 #include "platform/SharedBuffer.h"
@@ -39,7 +39,7 @@ namespace blink {
 
 CSSStyleSheetResource* CSSStyleSheetResource::fetch(FetchRequest& request, ResourceFetcher* fetcher)
 {
-    ASSERT(request.resourceRequest().frameType() == WebURLRequest::FrameTypeNone);
+    DCHECK_EQ(request.resourceRequest().frameType(), WebURLRequest::FrameTypeNone);
     request.mutableResourceRequest().setRequestContext(WebURLRequest::RequestContextStyle);
     return toCSSStyleSheetResource(fetcher->requestResource(request, CSSStyleSheetResourceFactory()));
 }
@@ -51,6 +51,7 @@ CSSStyleSheetResource* CSSStyleSheetResource::createForTest(const ResourceReques
 
 CSSStyleSheetResource::CSSStyleSheetResource(const ResourceRequest& resourceRequest, const ResourceLoaderOptions& options, const String& charset)
     : StyleSheetResource(resourceRequest, CSSStyleSheet, options, "text/css", charset)
+    , m_didNotifyFirstData(false)
 {
 }
 
@@ -58,12 +59,13 @@ CSSStyleSheetResource::~CSSStyleSheetResource()
 {
 }
 
-void CSSStyleSheetResource::removedFromMemoryCache()
+void CSSStyleSheetResource::setParsedStyleSheetCache(StyleSheetContents* newSheet)
 {
     if (m_parsedStyleSheetCache)
-        m_parsedStyleSheetCache->removedFromMemoryCache();
-    m_parsedStyleSheetCache.clear();
-    Resource::removedFromMemoryCache();
+        m_parsedStyleSheetCache->clearReferencedFromResource();
+    m_parsedStyleSheetCache = newSheet;
+    if (m_parsedStyleSheetCache)
+        m_parsedStyleSheetCache->setReferencedFromResource(this);
 }
 
 DEFINE_TRACE(CSSStyleSheetResource)
@@ -74,21 +76,23 @@ DEFINE_TRACE(CSSStyleSheetResource)
 
 void CSSStyleSheetResource::didAddClient(ResourceClient* c)
 {
-    ASSERT(StyleSheetResourceClient::isExpectedType(c));
+    DCHECK(StyleSheetResourceClient::isExpectedType(c));
     // Resource::didAddClient() must be before setCSSStyleSheet(),
     // because setCSSStyleSheet() may cause scripts to be executed, which could destroy 'c' if it is an instance of HTMLLinkElement.
     // see the comment of HTMLLinkElement::setCSSStyleSheet.
     Resource::didAddClient(c);
+    if (m_didNotifyFirstData)
+        static_cast<StyleSheetResourceClient*>(c)->didAppendFirstData(this);
 
-    if (!isLoading())
-        static_cast<StyleSheetResourceClient*>(c)->setCSSStyleSheet(m_resourceRequest.url(), m_response.url(), encoding(), this);
+    // |c| might be removed in didAppendFirstData, so ensure it is still a
+    // client.
+    if (hasClient(c) && !isLoading())
+        static_cast<StyleSheetResourceClient*>(c)->setCSSStyleSheet(resourceRequest().url(), response().url(), encoding(), this);
 }
 
 const String CSSStyleSheetResource::sheetText(MIMETypeCheck mimeTypeCheck) const
 {
-    ASSERT(!isPurgeable());
-
-    if (!m_data || m_data->isEmpty() || !canUseSheet(mimeTypeCheck))
+    if (!data() || data()->isEmpty() || !canUseSheet(mimeTypeCheck))
         return String();
 
     if (!m_decodedSheetText.isNull())
@@ -98,22 +102,30 @@ const String CSSStyleSheetResource::sheetText(MIMETypeCheck mimeTypeCheck) const
     return decodedText();
 }
 
+void CSSStyleSheetResource::appendData(const char* data, size_t length)
+{
+    Resource::appendData(data, length);
+    if (m_didNotifyFirstData)
+        return;
+    ResourceClientWalker<StyleSheetResourceClient> w(clients());
+    while (StyleSheetResourceClient* c = w.next())
+        c->didAppendFirstData(this);
+    m_didNotifyFirstData = true;
+}
+
 void CSSStyleSheetResource::checkNotify()
 {
     // Decode the data to find out the encoding and keep the sheet text around during checkNotify()
-    if (m_data)
+    if (data())
         m_decodedSheetText = decodedText();
 
-    ResourceClientWalker<StyleSheetResourceClient> w(m_clients);
-    while (StyleSheetResourceClient* c = w.next())
-        c->setCSSStyleSheet(m_resourceRequest.url(), m_response.url(), encoding(), this);
+    ResourceClientWalker<StyleSheetResourceClient> w(clients());
+    while (StyleSheetResourceClient* c = w.next()) {
+        markClientFinished(c);
+        c->setCSSStyleSheet(resourceRequest().url(), response().url(), encoding(), this);
+    }
     // Clear the decoded text as it is unlikely to be needed immediately again and is cheap to regenerate.
     m_decodedSheetText = String();
-}
-
-bool CSSStyleSheetResource::isSafeToUnlock() const
-{
-    return m_data->hasOneRef();
 }
 
 void CSSStyleSheetResource::destroyDecodedDataIfPossible()
@@ -121,9 +133,7 @@ void CSSStyleSheetResource::destroyDecodedDataIfPossible()
     if (!m_parsedStyleSheetCache)
         return;
 
-    m_parsedStyleSheetCache->removedFromMemoryCache();
-    m_parsedStyleSheetCache.clear();
-
+    setParsedStyleSheetCache(nullptr);
     setDecodedSize(0);
 }
 
@@ -150,13 +160,12 @@ StyleSheetContents* CSSStyleSheetResource::restoreParsedStyleSheet(const CSSPars
     if (!m_parsedStyleSheetCache)
         return nullptr;
     if (m_parsedStyleSheetCache->hasFailedOrCanceledSubresources()) {
-        m_parsedStyleSheetCache->removedFromMemoryCache();
-        m_parsedStyleSheetCache.clear();
+        setParsedStyleSheetCache(nullptr);
         return nullptr;
     }
 
-    ASSERT(m_parsedStyleSheetCache->isCacheable());
-    ASSERT(m_parsedStyleSheetCache->isInMemoryCache());
+    DCHECK(m_parsedStyleSheetCache->isCacheableForResource());
+    DCHECK(m_parsedStyleSheetCache->isReferencedFromResource());
 
     // Contexts must be identical so we know we would get the same exact result if we parsed again.
     if (m_parsedStyleSheetCache->parserContext() != context)
@@ -169,18 +178,17 @@ StyleSheetContents* CSSStyleSheetResource::restoreParsedStyleSheet(const CSSPars
 
 void CSSStyleSheetResource::saveParsedStyleSheet(StyleSheetContents* sheet)
 {
-    ASSERT(sheet && sheet->isCacheable());
+    DCHECK(sheet);
+    DCHECK(sheet->isCacheableForResource());
 
-    if (m_parsedStyleSheetCache)
-        m_parsedStyleSheetCache->removedFromMemoryCache();
-    m_parsedStyleSheetCache = sheet;
-
+    if (!memoryCache()->contains(this)) {
+        // This stylesheet resource did conflict with another resource and was
+        // not added to the cache.
+        setParsedStyleSheetCache(nullptr);
+        return;
+    }
+    setParsedStyleSheetCache(sheet);
     setDecodedSize(m_parsedStyleSheetCache->estimatedSizeInBytes());
-
-    // Check if this stylesheet resource didn't conflict with
-    // another resource and has indeed been added to the cache.
-    if (memoryCache()->contains(this))
-        m_parsedStyleSheetCache->addedToMemoryCache();
 }
 
 } // namespace blink

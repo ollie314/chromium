@@ -7,37 +7,46 @@
 #include "mojo/public/cpp/bindings/lib/serialization.h"
 
 namespace mojo {
+namespace internal {
 
-size_t GetSerializedSize_(const NativeStructPtr& input,
-                          internal::SerializationContext* context) {
+// static
+size_t UnmappedNativeStructSerializerImpl::PrepareToSerialize(
+    const NativeStructPtr& input,
+    SerializationContext* context) {
   if (!input)
     return 0;
-  return GetSerializedSize_(input->data, context);
+  return internal::PrepareToSerialize<ArrayDataView<uint8_t>>(input->data,
+                                                              context);
 }
 
-void Serialize_(NativeStructPtr input,
-                internal::Buffer* buffer,
-                internal::NativeStruct_Data** output,
-                internal::SerializationContext* context) {
+// static
+void UnmappedNativeStructSerializerImpl::Serialize(
+    const NativeStructPtr& input,
+    Buffer* buffer,
+    NativeStruct_Data** output,
+    SerializationContext* context) {
   if (!input) {
     *output = nullptr;
     return;
   }
 
-  internal::Array_Data<uint8_t>* data = nullptr;
-  const internal::ArrayValidateParams params(0, false, nullptr);
-  SerializeArray_(std::move(input->data), buffer, &data, &params, context);
-  *output = reinterpret_cast<internal::NativeStruct_Data*>(data);
+  Array_Data<uint8_t>* data = nullptr;
+  const ContainerValidateParams params(0, false, nullptr);
+  internal::Serialize<ArrayDataView<uint8_t>>(input->data, buffer, &data,
+                                              &params, context);
+  *output = reinterpret_cast<NativeStruct_Data*>(data);
 }
 
-bool Deserialize_(internal::NativeStruct_Data* input,
-                  NativeStructPtr* output,
-                  internal::SerializationContext* context) {
-  internal::Array_Data<uint8_t>* data =
-      reinterpret_cast<internal::Array_Data<uint8_t>*>(input);
+// static
+bool UnmappedNativeStructSerializerImpl::Deserialize(
+    NativeStruct_Data* input,
+    NativeStructPtr* output,
+    SerializationContext* context) {
+  Array_Data<uint8_t>* data = reinterpret_cast<Array_Data<uint8_t>*>(input);
 
   NativeStructPtr result(NativeStruct::New());
-  if (!Deserialize_(data, &result->data, context)) {
+  if (!internal::Deserialize<ArrayDataView<uint8_t>>(data, &result->data,
+                                                     context)) {
     output = nullptr;
     return false;
   }
@@ -48,4 +57,5 @@ bool Deserialize_(internal::NativeStruct_Data* input,
   return true;
 }
 
+}  // namespace internal
 }  // namespace mojo

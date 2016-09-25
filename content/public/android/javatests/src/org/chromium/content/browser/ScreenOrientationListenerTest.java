@@ -9,7 +9,9 @@ import android.content.pm.ActivityInfo;
 import android.test.suitebuilder.annotation.MediumTest;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.MockOrientationObserver;
@@ -175,8 +177,11 @@ public class ScreenOrientationListenerTest extends ContentShellTestBase {
         super.tearDown();
     }
 
-    @MediumTest
-    @Feature({"ScreenOrientation"})
+    //@MediumTest
+    //@Feature({"ScreenOrientation"})
+    //@RetryOnFailure
+    // Disabled due to flakiness. See crbug.com/645609.
+    @DisabledTest
     public void testVariousOrientationChanges() throws Exception {
         lockOrientationAndWait(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         assertTrue(checkOrientationForLock(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));
@@ -201,8 +206,10 @@ public class ScreenOrientationListenerTest extends ContentShellTestBase {
         assertTrue(checkOrientationForLock(ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT));
     }
 
+    @DisabledTest(message = "crbug.com/645609")
     @MediumTest
     @Feature({"ScreenOrientation"})
+    @RetryOnFailure
     public void testFlipLandscape() throws Exception {
         lockOrientationAndWait(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         assertTrue(checkOrientationForLock(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE));

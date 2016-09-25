@@ -35,10 +35,12 @@
 #include "core/fetch/ImageResource.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/ImageBitmap.h"
+#include "core/frame/LocalDOMWindow.h"
 #include "core/html/HTMLAnchorElement.h"
 #include "core/html/HTMLCanvasElement.h"
 #include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLImageFallbackHelper.h"
+#include "core/html/HTMLPictureElement.h"
 #include "core/html/HTMLSourceElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/parser/HTMLSrcsetParser.h"
@@ -95,7 +97,7 @@ HTMLImageElement::HTMLImageElement(Document& document, HTMLFormElement* form, bo
     , m_referrerPolicy(ReferrerPolicyDefault)
 {
     setHasCustomStyleCallbacks();
-    if (form && form->inShadowIncludingDocument()) {
+    if (form && form->isConnected()) {
         m_form = form;
         m_formWasSetByParser = true;
         m_form->associate(*this);
@@ -200,7 +202,7 @@ HTMLFormElement* HTMLImageElement::formOwner() const
 
 void HTMLImageElement::formRemovedFromTree(const Node& formRoot)
 {
-    ASSERT(m_form);
+    DCHECK(m_form);
     if (NodeTraversal::highestAncestorOrSelf(*this) != formRoot)
         resetFormOwner();
 }
@@ -226,6 +228,7 @@ void HTMLImageElement::setBestFitURLAndDPRFromImageCandidate(const ImageCandidat
 {
     m_bestFitImageURL = candidate.url();
     float candidateDensity = candidate.density();
+    float oldImageDevicePixelRatio = m_imageDevicePixelRatio;
     if (candidateDensity >= 0)
         m_imageDevicePixelRatio = 1.0 / candidateDensity;
 
@@ -236,8 +239,12 @@ void HTMLImageElement::setBestFitURLAndDPRFromImageCandidate(const ImageCandidat
     } else if (!candidate.srcOrigin()) {
         UseCounter::count(document(), UseCounter::SrcsetXDescriptor);
     }
-    if (layoutObject() && layoutObject()->isImage())
+    if (layoutObject() && layoutObject()->isImage()) {
         LayoutImageItem(toLayoutImage(layoutObject())).setImageDevicePixelRatio(m_imageDevicePixelRatio);
+
+        if (oldImageDevicePixelRatio != m_imageDevicePixelRatio)
+            toLayoutImage(layoutObject())->intrinsicSizeChanged();
+    }
 
     if (intrinsicSizingViewportDependant) {
         if (!m_listener)
@@ -265,7 +272,7 @@ void HTMLImageElement::parseAttribute(const QualifiedName& name, const AtomicStr
     } else if (name == referrerpolicyAttr) {
         m_referrerPolicy = ReferrerPolicyDefault;
         if (!value.isNull())
-            SecurityPolicy::referrerPolicyFromString(value, &m_referrerPolicy);
+            SecurityPolicy::referrerPolicyFromStringWithLegacyKeywords(value, &m_referrerPolicy);
     } else {
         HTMLElement::parseAttribute(name, oldValue, value);
     }
@@ -295,7 +302,7 @@ static bool supportedImageType(const String& type)
 // http://picture.responsiveimages.org/#update-source-set
 ImageCandidate HTMLImageElement::findBestFitImageFromPictureParent()
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
     Node* parent = parentNode();
     m_source = nullptr;
     if (!parent || !isHTMLPictureElement(*parent))
@@ -348,9 +355,9 @@ LayoutObject* HTMLImageElement::createLayoutObject(const ComputedStyle& style)
     return image;
 }
 
-void HTMLImageElement::attach(const AttachContext& context)
+void HTMLImageElement::attachLayoutTree(const AttachContext& context)
 {
-    HTMLElement::attach(context);
+    HTMLElement::attachLayoutTree(context);
 
     if (layoutObject() && layoutObject()->isImage()) {
         LayoutImage* layoutImage = toLayoutImage(layoutObject());
@@ -376,6 +383,9 @@ Node::InsertionNotificationRequest HTMLImageElement::insertedInto(ContainerNode*
         resetFormOwner();
     if (m_listener)
         document().mediaQueryMatcher().addViewportListener(m_listener);
+    Node* parent = parentNode();
+    if (parent && isHTMLPictureElement(*parent))
+        toHTMLPictureElement(parent)->addListenerToSourceChildren();
 
     bool imageWasModified = false;
     if (document().isActive()) {
@@ -388,7 +398,7 @@ Node::InsertionNotificationRequest HTMLImageElement::insertedInto(ContainerNode*
 
     // If we have been inserted from a layoutObject-less document,
     // our loader may have not fetched the image, so do it now.
-    if ((insertionPoint->inShadowIncludingDocument() && !imageLoader().image()) || imageWasModified)
+    if ((insertionPoint->isConnected() && !imageLoader().image()) || imageWasModified)
         imageLoader().updateFromElement(ImageLoader::UpdateNormal, m_referrerPolicy);
 
     return HTMLElement::insertedInto(insertionPoint);
@@ -398,15 +408,19 @@ void HTMLImageElement::removedFrom(ContainerNode* insertionPoint)
 {
     if (!m_form || NodeTraversal::highestAncestorOrSelf(*m_form.get()) != NodeTraversal::highestAncestorOrSelf(*this))
         resetFormOwner();
-    if (m_listener)
+    if (m_listener) {
         document().mediaQueryMatcher().removeViewportListener(m_listener);
+        Node* parent = parentNode();
+        if (parent && isHTMLPictureElement(*parent))
+            toHTMLPictureElement(parent)->removeListenerFromSourceChildren();
+    }
     HTMLElement::removedFrom(insertionPoint);
 }
 
 int HTMLImageElement::width()
 {
     if (inActiveDocument())
-        document().updateLayoutIgnorePendingStylesheets();
+        document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     if (!layoutObject()) {
         // check the attribute first for an explicit pixel value
@@ -417,7 +431,7 @@ int HTMLImageElement::width()
 
         // if the image is available, use its width
         if (imageLoader().image())
-            return imageLoader().image()->imageSize(LayoutObject::shouldRespectImageOrientation(nullptr), 1.0f).width();
+            return imageLoader().image()->imageSize(LayoutObject::shouldRespectImageOrientation(nullptr), 1.0f).width().toInt();
     }
 
     LayoutBox* box = layoutBox();
@@ -427,7 +441,7 @@ int HTMLImageElement::width()
 int HTMLImageElement::height()
 {
     if (inActiveDocument())
-        document().updateLayoutIgnorePendingStylesheets();
+        document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     if (!layoutObject()) {
         // check the attribute first for an explicit pixel value
@@ -438,7 +452,7 @@ int HTMLImageElement::height()
 
         // if the image is available, use its height
         if (imageLoader().image())
-            return imageLoader().image()->imageSize(LayoutObject::shouldRespectImageOrientation(nullptr), 1.0f).height();
+            return imageLoader().image()->imageSize(LayoutObject::shouldRespectImageOrientation(nullptr), 1.0f).height().toInt();
     }
 
     LayoutBox* box = layoutBox();
@@ -450,7 +464,7 @@ int HTMLImageElement::naturalWidth() const
     if (!imageLoader().image())
         return 0;
 
-    return imageLoader().image()->imageSize(LayoutObject::shouldRespectImageOrientation(layoutObject()), m_imageDevicePixelRatio, ImageResource::IntrinsicCorrectedToDPR).width();
+    return imageLoader().image()->imageSize(LayoutObject::shouldRespectImageOrientation(layoutObject()), m_imageDevicePixelRatio, ImageResource::IntrinsicCorrectedToDPR).width().toInt();
 }
 
 int HTMLImageElement::naturalHeight() const
@@ -458,13 +472,17 @@ int HTMLImageElement::naturalHeight() const
     if (!imageLoader().image())
         return 0;
 
-    return imageLoader().image()->imageSize(LayoutObject::shouldRespectImageOrientation(layoutObject()), m_imageDevicePixelRatio, ImageResource::IntrinsicCorrectedToDPR).height();
+    return imageLoader().image()->imageSize(LayoutObject::shouldRespectImageOrientation(layoutObject()), m_imageDevicePixelRatio, ImageResource::IntrinsicCorrectedToDPR).height().toInt();
 }
 
 const String& HTMLImageElement::currentSrc() const
 {
     // http://www.whatwg.org/specs/web-apps/current-work/multipage/edits.html#dom-img-currentsrc
     // The currentSrc IDL attribute must return the img element's current request's current URL.
+
+    // Return the picked URL string in case of load error.
+    if (imageLoader().hadError())
+        return m_bestFitImageURL;
     // Initially, the pending request turns into current request when it is either available or broken.
     // We use the image's dimensions as a proxy to it being in any of these states.
     if (!imageLoader().image() || !imageLoader().image()->getImage() || !imageLoader().image()->getImage()->width())
@@ -520,7 +538,7 @@ void HTMLImageElement::setWidth(int value)
 
 int HTMLImageElement::x() const
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     LayoutObject* r = layoutObject();
     if (!r)
         return 0;
@@ -532,7 +550,7 @@ int HTMLImageElement::x() const
 
 int HTMLImageElement::y() const
 {
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     LayoutObject* r = layoutObject();
     if (!r)
         return 0;
@@ -682,25 +700,15 @@ void HTMLImageElement::forceReload() const
     imageLoader().updateFromElement(ImageLoader::UpdateForcedReload, m_referrerPolicy);
 }
 
-ScriptPromise HTMLImageElement::createImageBitmap(ScriptState* scriptState, EventTarget& eventTarget, int sx, int sy, int sw, int sh, const ImageBitmapOptions& options, ExceptionState& exceptionState)
+ScriptPromise HTMLImageElement::createImageBitmap(ScriptState* scriptState, EventTarget& eventTarget, Optional<IntRect> cropRect, const ImageBitmapOptions& options, ExceptionState& exceptionState)
 {
-    ASSERT(eventTarget.toDOMWindow());
-    if (!cachedImage()) {
-        exceptionState.throwDOMException(InvalidStateError, "No image can be retrieved from the provided element.");
+    DCHECK(eventTarget.toLocalDOMWindow());
+    if ((cropRect && !ImageBitmap::isSourceSizeValid(cropRect->width(), cropRect->height(), exceptionState))
+        || !ImageBitmap::isSourceSizeValid(bitmapSourceSize().width(), bitmapSourceSize().height(), exceptionState))
         return ScriptPromise();
-    }
-    if (cachedImage()->getImage()->isSVGImage()) {
-        SVGImage* image = toSVGImage(cachedImage()->getImage());
-        if (!image->hasIntrinsicDimensions()) {
-            exceptionState.throwDOMException(InvalidStateError, "The image element contains an SVG image without intrinsic dimensions.");
-            return ScriptPromise();
-        }
-    }
-    if (!sw || !sh) {
-        exceptionState.throwDOMException(IndexSizeError, String::format("The source %s provided is 0.", sw ? "height" : "width"));
+    if (!ImageBitmap::isResizeOptionValid(options, exceptionState))
         return ScriptPromise();
-    }
-    return ImageBitmapSource::fulfillImageBitmap(scriptState, ImageBitmap::create(this, IntRect(sx, sy, sw, sh), eventTarget.toDOMWindow()->document(), options));
+    return ImageBitmapSource::fulfillImageBitmap(scriptState, ImageBitmap::create(this, cropRect, eventTarget.toLocalDOMWindow()->document(), options));
 }
 
 void HTMLImageElement::selectSourceURL(ImageLoader::UpdateFromElementBehavior behavior)
@@ -725,6 +733,7 @@ void HTMLImageElement::selectSourceURL(ImageLoader::UpdateFromElementBehavior be
     bool imageHasLoaded = imageLoader().image() && !imageLoader().image()->isLoading() && !imageLoader().image()->errorOccurred();
     bool imageStillLoading = !imageHasLoaded && imageLoader().hasPendingActivity() && !imageLoader().hasPendingError() && !imageSourceURL().isEmpty();
     bool imageHasImage = imageLoader().image() && imageLoader().image()->hasImage();
+    bool imageIsDocument = imageLoader().isLoadingImageDocument() && imageLoader().image() && !imageLoader().image()->errorOccurred();
 
     // Icky special case for deferred images:
     // A deferred image is not loading, does have pending activity, does not
@@ -738,7 +747,7 @@ void HTMLImageElement::selectSourceURL(ImageLoader::UpdateFromElementBehavior be
     // Instead of dealing with that, there's a separate check that the
     // ImageResource has non-null image data associated with it, which isn't
     // folded into imageHasLoaded above.
-    if ((imageHasLoaded && imageHasImage) || imageStillLoading)
+    if ((imageHasLoaded && imageHasImage) || imageStillLoading || imageIsDocument)
         ensurePrimaryContent();
     else
         ensureFallbackContent();
@@ -778,10 +787,10 @@ void HTMLImageElement::ensurePrimaryContent()
 
 void HTMLImageElement::reattachFallbackContent()
 {
-    // This can happen inside of attach() in the middle of a recalcStyle so we need to
+    // This can happen inside of attachLayoutTree() in the middle of a recalcStyle so we need to
     // reattach synchronously here.
     if (document().inStyleRecalc())
-        reattach();
+        reattachLayoutTree();
     else
         lazyReattachIfAttached();
 }
@@ -812,14 +821,30 @@ bool HTMLImageElement::isOpaque() const
     return image && image->currentFrameKnownToBeOpaque();
 }
 
+int HTMLImageElement::sourceWidth()
+{
+    SourceImageStatus status;
+    FloatSize defaultObjectSize(width(), height());
+    RefPtr<Image> image = getSourceImageForCanvas(&status, PreferNoAcceleration, SnapshotReasonCopyToWebGLTexture, defaultObjectSize);
+    return image->width();
+}
+
+int HTMLImageElement::sourceHeight()
+{
+    SourceImageStatus status;
+    FloatSize defaultObjectSize(width(), height());
+    RefPtr<Image> image = getSourceImageForCanvas(&status, PreferNoAcceleration, SnapshotReasonCopyToWebGLTexture, defaultObjectSize);
+    return image->height();
+}
+
 IntSize HTMLImageElement::bitmapSourceSize() const
 {
     ImageResource* image = cachedImage();
     if (!image)
         return IntSize();
     LayoutSize lSize = image->imageSize(LayoutObject::shouldRespectImageOrientation(layoutObject()), 1.0f);
-    ASSERT(lSize.fraction().isZero());
-    return IntSize(lSize.width(), lSize.height());
+    DCHECK(lSize.fraction().isZero());
+    return IntSize(lSize.width().toInt(), lSize.height().toInt());
 }
 
 } // namespace blink

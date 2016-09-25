@@ -45,12 +45,10 @@
 #include "core/html/HTMLOptionElement.h"
 #include "core/html/forms/ColorChooser.h"
 #include "core/layout/LayoutTheme.h"
-#include "core/layout/LayoutView.h"
 #include "core/page/ChromeClient.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/graphics/Color.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
@@ -76,6 +74,12 @@ static bool isValidColorString(const String& value)
     return color.setFromString(value) && !color.hasAlpha();
 }
 
+ColorInputType::ColorInputType(HTMLInputElement& element)
+    : InputType(element)
+    , KeyboardClickableInputTypeView(element)
+{
+}
+
 InputType* ColorInputType::create(HTMLInputElement& element)
 {
     return new ColorInputType(element);
@@ -88,8 +92,14 @@ ColorInputType::~ColorInputType()
 DEFINE_TRACE(ColorInputType)
 {
     visitor->trace(m_chooser);
-    BaseClickableWithKeyInputType::trace(visitor);
+    KeyboardClickableInputTypeView::trace(visitor);
     ColorChooserClient::trace(visitor);
+    InputType::trace(visitor);
+}
+
+InputTypeView* ColorInputType::createView()
+{
+    return this;
 }
 
 void ColorInputType::countUsage()
@@ -124,13 +134,13 @@ Color ColorInputType::valueAsColor() const
 {
     Color color;
     bool success = color.setFromString(element().value());
-    ASSERT_UNUSED(success, success);
+    DCHECK(success);
     return color;
 }
 
 void ColorInputType::createShadowSubtree()
 {
-    ASSERT(element().shadow());
+    DCHECK(element().shadow());
 
     Document& document = element().document();
     HTMLDivElement* wrapperElement = HTMLDivElement::create(document);
@@ -157,7 +167,7 @@ void ColorInputType::setValue(const String& value, bool valueChanged, TextFieldE
 
 void ColorInputType::handleDOMActivateEvent(Event* event)
 {
-    if (element().isDisabledFormControl() || !element().layoutObject())
+    if (element().isDisabledFormControl())
         return;
 
     if (!UserGestureIndicator::utilizeUserGesture())

@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include "base/stl_util.h"
 #include "components/sessions/core/session_command.h"
 
 namespace sessions {
@@ -68,12 +67,9 @@ SessionWindow::SessionWindow()
     : selected_tab_index(-1),
       type(TYPE_TABBED),
       is_constrained(true),
-      show_state(ui::SHOW_STATE_DEFAULT) {
-}
+      show_state(ui::SHOW_STATE_DEFAULT) {}
 
-SessionWindow::~SessionWindow() {
-  STLDeleteElements(&tabs);
-}
+SessionWindow::~SessionWindow() {}
 
 sync_pb::SessionWindow SessionWindow::ToSyncData() const {
   sync_pb::SessionWindow sync_data;
@@ -92,8 +88,8 @@ sync_pb::SessionWindow SessionWindow::ToSyncData() const {
       NOTREACHED() << "Unhandled browser type.";
   }
 
-  for (size_t i = 0; i < tabs.size(); i++)
-    sync_data.add_tab(tabs[i]->tab_id.id());
+  for (const auto& tab : tabs)
+    sync_data.add_tab(tab->tab_id.id());
 
   return sync_data;
 }

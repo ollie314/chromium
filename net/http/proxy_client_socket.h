@@ -52,7 +52,7 @@ class NET_EXPORT_PRIVATE ProxyClientSocket : public StreamSocket {
   virtual bool IsUsingSpdy() const = 0;
 
   // Returns the protocol negotiated with the proxy.
-  virtual NextProto GetProtocolNegotiated() const = 0;
+  virtual NextProto GetProxyNegotiatedProtocol() const = 0;
 
  protected:
   // The HTTP CONNECT method for establishing a tunnel connection is documented
@@ -68,7 +68,7 @@ class NET_EXPORT_PRIVATE ProxyClientSocket : public StreamSocket {
   // construction/ this method should be called.
   static int HandleProxyAuthChallenge(HttpAuthController* auth,
                                       HttpResponseInfo* response,
-                                      const BoundNetLog& net_log);
+                                      const NetLogWithSource& net_log);
 
   // Logs (to the log and in a histogram) a blocked CONNECT response.
   static void LogBlockedTunnelResponse(int http_response_code,

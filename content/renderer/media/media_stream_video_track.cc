@@ -10,7 +10,7 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 
 namespace content {
 
@@ -202,10 +202,8 @@ blink::WebMediaStreamTrack MediaStreamVideoTrack::CreateVideoTrack(
     bool enabled) {
   blink::WebMediaStreamTrack track;
   track.initialize(source->owner());
-  track.setExtraData(new MediaStreamVideoTrack(source,
-                                               constraints,
-                                               callback,
-                                               enabled));
+  track.setTrackData(
+      new MediaStreamVideoTrack(source, constraints, callback, enabled));
   return track;
 }
 
@@ -216,7 +214,7 @@ MediaStreamVideoTrack* MediaStreamVideoTrack::GetVideoTrack(
       track.source().getType() != blink::WebMediaStreamSource::TypeVideo) {
     return nullptr;
   }
-  return static_cast<MediaStreamVideoTrack*>(track.getExtraData());
+  return static_cast<MediaStreamVideoTrack*>(track.getTrackData());
 }
 
 MediaStreamVideoTrack::MediaStreamVideoTrack(
@@ -229,7 +227,7 @@ MediaStreamVideoTrack::MediaStreamVideoTrack(
           new MediaStreamVideoTrack::FrameDeliverer(source->io_task_runner(),
                                                     enabled)),
       constraints_(constraints),
-      source_(source) {
+      source_(source->GetWeakPtr()) {
   DCHECK(!constraints.isNull());
   source->AddTrack(this,
                    base::Bind(
@@ -245,15 +243,20 @@ MediaStreamVideoTrack::~MediaStreamVideoTrack() {
   DVLOG(3) << "~MediaStreamVideoTrack()";
 }
 
-void MediaStreamVideoTrack::AddSink(
-    MediaStreamVideoSink* sink, const VideoCaptureDeliverFrameCB& callback) {
+void MediaStreamVideoTrack::AddSink(MediaStreamVideoSink* sink,
+                                    const VideoCaptureDeliverFrameCB& callback,
+                                    bool is_sink_secure) {
   DCHECK(main_render_thread_checker_.CalledOnValidThread());
   DCHECK(std::find(sinks_.begin(), sinks_.end(), sink) == sinks_.end());
   sinks_.push_back(sink);
   frame_deliverer_->AddCallback(sink, callback);
+  secure_tracker_.Add(sink, is_sink_secure);
   // Request source to deliver a frame because a new sink is added.
-  if (source_)
+  if (source_) {
     source_->RequestRefreshFrame();
+    source_->UpdateCapturingLinkSecure(this,
+                                       secure_tracker_.is_capturing_secure());
+  }
 }
 
 void MediaStreamVideoTrack::RemoveSink(MediaStreamVideoSink* sink) {
@@ -263,6 +266,10 @@ void MediaStreamVideoTrack::RemoveSink(MediaStreamVideoSink* sink) {
   DCHECK(it != sinks_.end());
   sinks_.erase(it);
   frame_deliverer_->RemoveCallback(sink);
+  secure_tracker_.Remove(sink);
+  if (source_)
+    source_->UpdateCapturingLinkSecure(this,
+                                       secure_tracker_.is_capturing_secure());
 }
 
 void MediaStreamVideoTrack::SetEnabled(bool enabled) {
@@ -279,6 +286,20 @@ void MediaStreamVideoTrack::Stop() {
     source_ = NULL;
   }
   OnReadyStateChanged(blink::WebMediaStreamSource::ReadyStateEnded);
+}
+
+void MediaStreamVideoTrack::getSettings(
+    blink::WebMediaStreamTrack::Settings& settings) {
+  if (source_) {
+    const media::VideoCaptureFormat* format = source_->GetCurrentFormat();
+    if (format) {
+      settings.frameRate = format->frame_rate;
+      settings.width = format->frame_size.width();
+      settings.height = format->frame_size.height();
+    }
+  }
+  // TODO(hta): Extract the real value.
+  settings.deviceId = blink::WebString("video device ID");
 }
 
 void MediaStreamVideoTrack::OnReadyStateChanged(

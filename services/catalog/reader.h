@@ -5,16 +5,18 @@
 #ifndef SERVICES_CATALOG_READER_H_
 #define SERVICES_CATALOG_READER_H_
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "services/catalog/types.h"
-#include "services/shell/public/interfaces/shell_resolver.mojom.h"
+#include "services/shell/public/interfaces/resolver.mojom.h"
 
 namespace base {
-class TaskRunner;
+class SequencedWorkerPool;
+class SingleThreadTaskRunner;
 }
 
 namespace catalog {
@@ -25,12 +27,13 @@ class ManifestProvider;
 // Responsible for loading manifests & building the Entry data structures.
 class Reader {
  public:
-   using ReadManifestCallback =
-      base::Callback<void(scoped_ptr<Entry>)>;
-   using CreateEntryForNameCallback =
+  using ReadManifestCallback = base::Callback<void(std::unique_ptr<Entry>)>;
+  using CreateEntryForNameCallback =
       base::Callback<void(shell::mojom::ResolveResultPtr)>;
 
-  Reader(base::TaskRunner* file_task_runner,
+  Reader(base::SequencedWorkerPool* worker_pool,
+         ManifestProvider* manifest_provider);
+  Reader(base::SingleThreadTaskRunner* task_runner,
          ManifestProvider* manifest_provider);
   ~Reader();
 
@@ -48,12 +51,14 @@ class Reader {
       const CreateEntryForNameCallback& entry_created_callback);
 
  private:
+  explicit Reader(ManifestProvider* manifest_provider);
+
   void OnReadManifest(EntryCache* cache,
                       const CreateEntryForNameCallback& entry_created_callback,
-                      scoped_ptr<Entry> entry);
+                      std::unique_ptr<Entry> entry);
 
   base::FilePath system_package_dir_;
-  base::TaskRunner* file_task_runner_;
+  scoped_refptr<base::TaskRunner> file_task_runner_;
   ManifestProvider* const manifest_provider_;
   base::WeakPtrFactory<Reader> weak_factory_;
 

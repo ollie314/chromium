@@ -24,6 +24,8 @@
 #include "third_party/WebKit/public/web/WebHeap.h"
 
 using media::VideoFrame;
+using video_track_recorder::kVEAEncoderMinResolutionWidth;
+using video_track_recorder::kVEAEncoderMinResolutionHeight;
 
 using ::testing::_;
 using ::testing::DoAll;
@@ -41,10 +43,21 @@ ACTION_P(RunClosure, closure) {
 }
 
 const VideoTrackRecorder::CodecId kTrackRecorderTestCodec[] = {
-    VideoTrackRecorder::CodecId::VP8, VideoTrackRecorder::CodecId::VP9};
+    VideoTrackRecorder::CodecId::VP8,
+    VideoTrackRecorder::CodecId::VP9
+#if BUILDFLAG(RTC_USE_H264)
+    , VideoTrackRecorder::CodecId::H264
+#endif
+};
+const gfx::Size kTrackRecorderTestSize[] = {
+    gfx::Size(kVEAEncoderMinResolutionWidth / 2,
+              kVEAEncoderMinResolutionHeight / 2),
+    gfx::Size(kVEAEncoderMinResolutionWidth, kVEAEncoderMinResolutionHeight)};
+static const int kTrackRecorderTestSizeDiff = 20;
 
 class VideoTrackRecorderTest
-    : public TestWithParam<VideoTrackRecorder::CodecId> {
+    : public TestWithParam<
+          testing::tuple<VideoTrackRecorder::CodecId, gfx::Size>> {
  public:
   VideoTrackRecorderTest()
       : mock_source_(new MockMediaStreamVideoSource(false)) {
@@ -60,10 +73,10 @@ class VideoTrackRecorderTest
     track_ = new MediaStreamVideoTrack(mock_source_, constraints,
                                        MediaStreamSource::ConstraintsCallback(),
                                        true /* enabled */);
-    blink_track_.setExtraData(track_);
+    blink_track_.setTrackData(track_);
 
     video_track_recorder_.reset(new VideoTrackRecorder(
-        GetParam() /* codec */, blink_track_,
+        testing::get<0>(GetParam()) /* codec */, blink_track_,
         base::Bind(&VideoTrackRecorderTest::OnEncodedVideo,
                    base::Unretained(this)),
         0 /* bits_per_second */));
@@ -125,7 +138,7 @@ TEST_P(VideoTrackRecorderTest, ConstructAndDestruct) {}
 // of larger size is sent and is expected to be encoded as a keyframe.
 TEST_P(VideoTrackRecorderTest, VideoEncoding) {
   // |frame_size| cannot be arbitrarily small, should be reasonable.
-  const gfx::Size frame_size(160, 80);
+  const gfx::Size& frame_size = testing::get<1>(GetParam());
   const scoped_refptr<VideoFrame> video_frame =
       VideoFrame::CreateBlackFrame(frame_size);
   const double kFrameRate = 60.0f;
@@ -149,7 +162,8 @@ TEST_P(VideoTrackRecorderTest, VideoEncoding) {
   Encode(video_frame, timeticks_later);
 
   // Send another Video Frame and expect only an DoOnEncodedVideo() callback.
-  const gfx::Size frame_size2(180, 80);
+  const gfx::Size frame_size2(frame_size.width() + kTrackRecorderTestSizeDiff,
+                              frame_size.height());
   const scoped_refptr<VideoFrame> video_frame2 =
       VideoFrame::CreateBlackFrame(frame_size2);
 
@@ -165,7 +179,7 @@ TEST_P(VideoTrackRecorderTest, VideoEncoding) {
 
   run_loop.Run();
 
-  const size_t kEncodedSizeThreshold = 18;
+  const size_t kEncodedSizeThreshold = 14;
   EXPECT_GE(first_frame_encoded_data.size(), kEncodedSizeThreshold);
   EXPECT_GE(second_frame_encoded_data.size(), kEncodedSizeThreshold);
   EXPECT_GE(third_frame_encoded_data.size(), kEncodedSizeThreshold);
@@ -175,6 +189,7 @@ TEST_P(VideoTrackRecorderTest, VideoEncoding) {
 
 INSTANTIATE_TEST_CASE_P(,
                         VideoTrackRecorderTest,
-                        ValuesIn(kTrackRecorderTestCodec));
+                        ::testing::Combine(ValuesIn(kTrackRecorderTestCodec),
+                                           ValuesIn(kTrackRecorderTestSize)));
 
 }  // namespace content

@@ -55,7 +55,7 @@ class ShellDevToolsFrontend : public WebContentsObserver,
   void AgentHostClosed(DevToolsAgentHost* agent_host, bool replaced) override;
   void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
                                const std::string& message) override;
-  base::DictionaryValue* preferences() { return &preferences_; }
+  void SetPreferences(const std::string& json);
   virtual void HandleMessageFromDevToolsFrontend(const std::string& message);
 
  private:
@@ -73,6 +73,8 @@ class ShellDevToolsFrontend : public WebContentsObserver,
   Shell* frontend_shell_;
   WebContents* inspected_contents_;
   scoped_refptr<DevToolsAgentHost> agent_host_;
+  int inspect_element_at_x_;
+  int inspect_element_at_y_;
   std::unique_ptr<DevToolsFrontendHost> frontend_host_;
   using PendingRequestsMap = std::map<const net::URLFetcher*, int>;
   PendingRequestsMap pending_requests_;

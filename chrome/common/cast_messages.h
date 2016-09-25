@@ -21,6 +21,18 @@ namespace IPC {
 template<>
 struct ParamTraits<media::cast::RtpTimeTicks> {
   using param_type = media::cast::RtpTimeTicks;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
+  static void Write(base::Pickle* m, const param_type& p);
+  static bool Read(const base::Pickle* m,
+                   base::PickleIterator* iter,
+                   param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template<>
+struct ParamTraits<media::cast::FrameId> {
+  using param_type = media::cast::FrameId;
+  static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,
@@ -49,6 +61,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(media::cast::CastLoggingEvent,
                           media::cast::kNumOfLoggingEvents)
 IPC_ENUM_TRAITS_MAX_VALUE(media::cast::EventMediaType,
                           media::cast::EVENT_MEDIA_TYPE_LAST)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(media::cast::RtpPayloadType,
+                              media::cast::RtpPayloadType::FIRST,
+                              media::cast::RtpPayloadType::LAST)
 
 IPC_STRUCT_TRAITS_BEGIN(media::cast::EncodedFrame)
   IPC_STRUCT_TRAITS_MEMBER(dependency)
@@ -67,6 +82,7 @@ IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(media::cast::CastTransportRtpConfig)
   IPC_STRUCT_TRAITS_MEMBER(ssrc)
+  IPC_STRUCT_TRAITS_MEMBER(rtp_stream_id)
   IPC_STRUCT_TRAITS_MEMBER(feedback_ssrc)
   IPC_STRUCT_TRAITS_MEMBER(rtp_payload_type)
   IPC_STRUCT_TRAITS_MEMBER(aes_key)
@@ -163,11 +179,7 @@ IPC_MESSAGE_CONTROL3(CastMsg_RawEvents,
 
 // Cast messages sent from the renderer to the browser.
 
-IPC_MESSAGE_CONTROL2(CastHostMsg_InitializeAudio,
-                     int32_t /*channel_id*/,
-                     media::cast::CastTransportRtpConfig /*config*/)
-
-IPC_MESSAGE_CONTROL2(CastHostMsg_InitializeVideo,
+IPC_MESSAGE_CONTROL2(CastHostMsg_InitializeStream,
                      int32_t /*channel_id*/,
                      media::cast::CastTransportRtpConfig /*config*/)
 
@@ -185,12 +197,12 @@ IPC_MESSAGE_CONTROL4(CastHostMsg_SendSenderReport,
 IPC_MESSAGE_CONTROL3(CastHostMsg_CancelSendingFrames,
                      int32_t /* channel_id */,
                      uint32_t /* ssrc */,
-                     std::vector<uint32_t> /* frame_ids */)
+                     std::vector<media::cast::FrameId> /* frame_ids */)
 
 IPC_MESSAGE_CONTROL3(CastHostMsg_ResendFrameForKickstart,
                      int32_t /* channel_id */,
                      uint32_t /* ssrc */,
-                     uint32_t /* frame_id */)
+                     media::cast::FrameId /* frame_id */)
 
 IPC_MESSAGE_CONTROL3(CastHostMsg_AddValidRtpReceiver,
                      int32_t /* channel id */,

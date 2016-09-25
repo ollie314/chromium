@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/api/developer_private/extension_info_generator.h"
 
+#include <string>
 #include <utility>
 
 #include "base/callback_helpers.h"
@@ -20,6 +21,7 @@
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/permissions_updater.h"
+#include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/developer_private.h"
 #include "chrome/common/pref_names.h"
@@ -29,6 +31,8 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/feature_switch.h"
+#include "extensions/common/permissions/permission_message.h"
+#include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/value_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -47,6 +51,18 @@ std::unique_ptr<base::DictionaryValue> DeserializeJSONTestData(
   return base::DictionaryValue::From(deserializer.Deserialize(nullptr, error));
 }
 
+// Returns a pointer to the ExtensionInfo for an extension with |id| if it
+// is present in |list|.
+const developer::ExtensionInfo* GetInfoFromList(
+    const ExtensionInfoGenerator::ExtensionInfoList& list,
+    const std::string& id) {
+  for (const auto& item : list) {
+    if (item.id == id)
+      return &item;
+  }
+  return nullptr;
+}
+
 }  // namespace
 
 class ExtensionInfoGeneratorUnitTest : public ExtensionServiceTestBase {
@@ -60,8 +76,8 @@ class ExtensionInfoGeneratorUnitTest : public ExtensionServiceTestBase {
     InitializeEmptyExtensionService();
   }
 
-  void OnInfosGenerated(std::unique_ptr<developer::ExtensionInfo>* info_out,
-                        ExtensionInfoGenerator::ExtensionInfoList list) {
+  void OnInfoGenerated(std::unique_ptr<developer::ExtensionInfo>* info_out,
+                       ExtensionInfoGenerator::ExtensionInfoList list) {
     EXPECT_EQ(1u, list.size());
     if (!list.empty())
       info_out->reset(new developer::ExtensionInfo(std::move(list[0])));
@@ -77,11 +93,30 @@ class ExtensionInfoGeneratorUnitTest : public ExtensionServiceTestBase {
         new ExtensionInfoGenerator(browser_context()));
     generator->CreateExtensionInfo(
         extension_id,
-        base::Bind(&ExtensionInfoGeneratorUnitTest::OnInfosGenerated,
-                   base::Unretained(this),
-                   base::Unretained(&info)));
+        base::Bind(&ExtensionInfoGeneratorUnitTest::OnInfoGenerated,
+                   base::Unretained(this), base::Unretained(&info)));
     run_loop.Run();
     return info;
+  }
+
+  void OnInfosGenerated(ExtensionInfoGenerator::ExtensionInfoList* out,
+                        ExtensionInfoGenerator::ExtensionInfoList list) {
+    *out = std::move(list);
+    base::ResetAndReturn(&quit_closure_).Run();
+  }
+
+  ExtensionInfoGenerator::ExtensionInfoList GenerateExtensionsInfo() {
+    base::RunLoop run_loop;
+    quit_closure_ = run_loop.QuitClosure();
+    ExtensionInfoGenerator generator(browser_context());
+    ExtensionInfoGenerator::ExtensionInfoList result;
+    generator.CreateExtensionsInfo(
+        true, /* include_disabled */
+        true, /* include_terminated */
+        base::Bind(&ExtensionInfoGeneratorUnitTest::OnInfosGenerated,
+                   base::Unretained(this), base::Unretained(&result)));
+    run_loop.Run();
+    return result;
   }
 
   const scoped_refptr<const Extension> CreateExtension(
@@ -189,7 +224,8 @@ TEST_F(ExtensionInfoGeneratorUnitTest, BasicInfoTest) {
           .Set("version", kVersion)
           .Set("manifest_version", 2)
           .Set("description", "an extension")
-          .Set("permissions", ListBuilder().Append("file://*/*").Build())
+          .Set("permissions",
+               ListBuilder().Append("file://*/*").Append("tabs").Build())
           .Build();
   std::unique_ptr<base::DictionaryValue> manifest_copy(manifest->DeepCopy());
   scoped_refptr<const Extension> extension =
@@ -235,6 +271,14 @@ TEST_F(ExtensionInfoGeneratorUnitTest, BasicInfoTest) {
   EXPECT_FALSE(info->file_access.is_active);
   EXPECT_TRUE(info->incognito_access.is_enabled);
   EXPECT_FALSE(info->incognito_access.is_active);
+  PermissionMessages messages =
+      extension->permissions_data()->GetPermissionMessages();
+  ASSERT_EQ(messages.size(), info->permissions.size());
+  size_t i = 0;
+  for (const PermissionMessage& message : messages) {
+    EXPECT_EQ(message.message(), base::UTF8ToUTF16(info->permissions[i]));
+    ++i;
+  }
   ASSERT_EQ(2u, info->runtime_errors.size());
   const api::developer_private::RuntimeError& runtime_error =
       info->runtime_errors[0];
@@ -352,7 +396,9 @@ TEST_F(ExtensionInfoGeneratorUnitTest, ExtensionInfoRunOnAllUrls) {
   EXPECT_FALSE(info->run_on_all_urls.is_active);
 
   // Give the extension all urls.
-  util::SetAllowedScriptingOnAllUrls(all_urls_extension->id(), profile(), true);
+  ScriptingPermissionsModifier permissions_modifier(profile(),
+                                                    all_urls_extension);
+  permissions_modifier.SetAllowedOnAllUrls(true);
 
   // Now the extension should both want and have all urls.
   info = GenerateExtensionInfo(all_urls_extension->id());
@@ -365,8 +411,7 @@ TEST_F(ExtensionInfoGeneratorUnitTest, ExtensionInfoRunOnAllUrls) {
   EXPECT_FALSE(info->run_on_all_urls.is_active);
 
   // Revoke the first extension's permissions.
-  util::SetAllowedScriptingOnAllUrls(
-      all_urls_extension->id(), profile(), false);
+  permissions_modifier.SetAllowedOnAllUrls(false);
 
   // Turn off the switch and load another extension (so permissions are
   // re-initialized).
@@ -380,7 +425,7 @@ TEST_F(ExtensionInfoGeneratorUnitTest, ExtensionInfoRunOnAllUrls) {
 
   // If we grant the extension all urls, then the checkbox should still be
   // there, since it has an explicitly-set user preference.
-  util::SetAllowedScriptingOnAllUrls(all_urls_extension->id(), profile(), true);
+  permissions_modifier.SetAllowedOnAllUrls(true);
   info = GenerateExtensionInfo(all_urls_extension->id());
   EXPECT_TRUE(info->run_on_all_urls.is_enabled);
   EXPECT_TRUE(info->run_on_all_urls.is_active);
@@ -394,6 +439,37 @@ TEST_F(ExtensionInfoGeneratorUnitTest, ExtensionInfoRunOnAllUrls) {
   info = GenerateExtensionInfo(all_urls_extension->id());
   EXPECT_FALSE(info->run_on_all_urls.is_enabled);
   EXPECT_TRUE(info->run_on_all_urls.is_active);
+}
+
+// Tests that blacklisted extensions are returned by the ExtensionInfoGenerator.
+TEST_F(ExtensionInfoGeneratorUnitTest, Blacklisted) {
+  const scoped_refptr<const Extension> extension1 =
+      CreateExtension("test1", base::WrapUnique(new base::ListValue()));
+  const scoped_refptr<const Extension> extension2 =
+      CreateExtension("test2", base::WrapUnique(new base::ListValue()));
+
+  std::string id1 = extension1->id();
+  std::string id2 = extension2->id();
+  ASSERT_NE(id1, id2);
+
+  ExtensionInfoGenerator::ExtensionInfoList info_list =
+      GenerateExtensionsInfo();
+  const developer::ExtensionInfo* info1 = GetInfoFromList(info_list, id1);
+  const developer::ExtensionInfo* info2 = GetInfoFromList(info_list, id2);
+  ASSERT_NE(nullptr, info1);
+  ASSERT_NE(nullptr, info2);
+  EXPECT_EQ(developer::EXTENSION_STATE_ENABLED, info1->state);
+  EXPECT_EQ(developer::EXTENSION_STATE_ENABLED, info2->state);
+
+  service()->BlacklistExtensionForTest(id1);
+
+  info_list = GenerateExtensionsInfo();
+  info1 = GetInfoFromList(info_list, id1);
+  info2 = GetInfoFromList(info_list, id2);
+  ASSERT_NE(nullptr, info1);
+  ASSERT_NE(nullptr, info2);
+  EXPECT_EQ(developer::EXTENSION_STATE_BLACKLISTED, info1->state);
+  EXPECT_EQ(developer::EXTENSION_STATE_ENABLED, info2->state);
 }
 
 }  // namespace extensions

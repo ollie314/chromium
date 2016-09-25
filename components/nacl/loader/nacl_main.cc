@@ -14,16 +14,20 @@
 #include "components/nacl/loader/nacl_main_platform_delegate.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
+#include "mojo/edk/embedder/embedder.h"
 
 // main() routine for the NaCl loader process.
 int NaClMain(const content::MainFunctionParams& parameters) {
   const base::CommandLine& parsed_command_line = parameters.command_line;
 
+  // The Mojo EDK must be initialized before using IPC.
+  mojo::edk::Init();
+
   // The main thread of the plugin services IO.
   base::MessageLoopForIO main_message_loop;
   base::PlatformThread::SetName("CrNaClMain");
 
-  scoped_ptr<base::PowerMonitorSource> power_monitor_source(
+  std::unique_ptr<base::PowerMonitorSource> power_monitor_source(
       new base::PowerMonitorDeviceSource());
   base::PowerMonitor power_monitor(std::move(power_monitor_source));
   base::HighResolutionTimerManager hi_res_timer_manager;

@@ -7,8 +7,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "base/thread_task_runner_handle.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "ipc/ipc_message_macros.h"
@@ -18,9 +17,8 @@
 namespace media {
 
 GpuVideoDecodeAcceleratorHost::GpuVideoDecodeAcceleratorHost(
-    gpu::GpuChannelHost* channel,
     gpu::CommandBufferProxyImpl* impl)
-    : channel_(channel),
+    : channel_(impl->channel()),
       decoder_route_id_(MSG_ROUTING_NONE),
       client_(NULL),
       impl_(impl),
@@ -99,13 +97,6 @@ bool GpuVideoDecodeAcceleratorHost::Initialize(const Config& config,
   }
   decoder_route_id_ = route_id;
   return true;
-}
-
-void GpuVideoDecodeAcceleratorHost::SetCdm(int cdm_id) {
-  DCHECK(CalledOnValidThread());
-  if (!channel_)
-    return;
-  Send(new AcceleratedVideoDecoderMsg_SetCdm(decoder_route_id_, cdm_id));
 }
 
 void GpuVideoDecodeAcceleratorHost::Decode(
@@ -220,6 +211,7 @@ void GpuVideoDecodeAcceleratorHost::OnBitstreamBufferProcessed(
 
 void GpuVideoDecodeAcceleratorHost::OnProvidePictureBuffer(
     uint32_t num_requested_buffers,
+    VideoPixelFormat format,
     uint32_t textures_per_buffer,
     const gfx::Size& dimensions,
     uint32_t texture_target) {
@@ -233,8 +225,9 @@ void GpuVideoDecodeAcceleratorHost::OnProvidePictureBuffer(
   }
 
   if (client_) {
-    client_->ProvidePictureBuffers(num_requested_buffers, textures_per_buffer,
-                                   dimensions, texture_target);
+    client_->ProvidePictureBuffers(num_requested_buffers, format,
+                                   textures_per_buffer, dimensions,
+                                   texture_target);
   }
 }
 

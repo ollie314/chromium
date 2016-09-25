@@ -22,26 +22,17 @@ class Size;
 }
 
 #if defined(OS_ANDROID)
-namespace gfx {
+namespace gl {
 class SurfaceTexture;
 }
 #endif
 
 namespace gpu {
+struct SharedMemoryLimits;
 
 namespace gles2 {
 class GLES2Implementation;
 }
-
-struct GL_IN_PROCESS_CONTEXT_EXPORT GLInProcessContextSharedMemoryLimits {
-  GLInProcessContextSharedMemoryLimits();
-
-  int32_t command_buffer_size;
-  unsigned int start_transfer_buffer_size;
-  unsigned int min_transfer_buffer_size;
-  unsigned int max_transfer_buffer_size;
-  unsigned int mapped_memory_reclaim_limit;
-};
 
 class GL_IN_PROCESS_CONTEXT_EXPORT GLInProcessContext {
  public:
@@ -50,29 +41,26 @@ class GL_IN_PROCESS_CONTEXT_EXPORT GLInProcessContext {
   // Create a GLInProcessContext, if |is_offscreen| is true, renders to an
   // offscreen context. |attrib_list| must be NULL or a NONE-terminated list
   // of attribute/value pairs.
-  // If |surface| is not NULL, then it must match |is_offscreen| and |size|,
+  // If |surface| is not NULL, then it must match |is_offscreen|,
   // |window| must be gfx::kNullAcceleratedWidget, and the command buffer
   // service must run on the same thread as this client because GLSurface is
   // not thread safe. If |surface| is NULL, then the other parameters are used
   // to correctly create a surface.
   static GLInProcessContext* Create(
       scoped_refptr<gpu::InProcessCommandBuffer::Service> service,
-      scoped_refptr<gfx::GLSurface> surface,
+      scoped_refptr<gl::GLSurface> surface,
       bool is_offscreen,
       gfx::AcceleratedWidget window,
-      const gfx::Size& size,
       GLInProcessContext* share_context,
       const gpu::gles2::ContextCreationAttribHelper& attribs,
-      gfx::GpuPreference gpu_preference,
-      const GLInProcessContextSharedMemoryLimits& memory_limits,
+      const SharedMemoryLimits& memory_limits,
       GpuMemoryBufferManager* gpu_memory_buffer_manager,
-      ImageFactory* image_factory);
+      ImageFactory* image_factory,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   // Allows direct access to the GLES2 implementation so a GLInProcessContext
   // can be used without making it current.
   virtual gles2::GLES2Implementation* GetImplementation() = 0;
-
-  virtual size_t GetMappedMemoryLimit() = 0;
 
   virtual void SetLock(base::Lock* lock) = 0;
 };

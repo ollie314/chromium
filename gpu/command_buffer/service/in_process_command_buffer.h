@@ -37,10 +37,13 @@ namespace base {
 class SequenceChecker;
 }
 
-namespace gfx {
+namespace gl {
 class GLContext;
 class GLShareGroup;
 class GLSurface;
+}
+
+namespace gfx {
 class Size;
 }
 
@@ -48,15 +51,14 @@ namespace gpu {
 class SyncPointClient;
 class SyncPointOrderData;
 class SyncPointManager;
-class ValueStateMap;
 
 namespace gles2 {
+struct ContextCreationAttribHelper;
 class FramebufferCompletenessCache;
 class GLES2Decoder;
 class MailboxManager;
 class ProgramCache;
 class ShaderTranslatorCache;
-class SubscriptionRefSet;
 }
 
 class CommandBufferServiceBase;
@@ -79,18 +81,16 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   // If |surface| is not null, use it directly; in this case, the command
   // buffer gpu thread must be the same as the client thread. Otherwise create
   // a new GLSurface.
-  bool Initialize(scoped_refptr<gfx::GLSurface> surface,
+  bool Initialize(scoped_refptr<gl::GLSurface> surface,
                   bool is_offscreen,
                   gfx::AcceleratedWidget window,
-                  const gfx::Size& size,
-                  const std::vector<int32_t>& attribs,
-                  gfx::GpuPreference gpu_preference,
+                  const gles2::ContextCreationAttribHelper& attribs,
                   InProcessCommandBuffer* share_group,
                   GpuMemoryBufferManager* gpu_memory_buffer_manager,
-                  ImageFactory* image_factory);
+                  ImageFactory* image_factory,
+                  scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   // CommandBuffer implementation:
-  bool Initialize() override;
   State GetLastState() override;
   int32_t GetLastToken() override;
   void Flush(int32_t put_offset) override;
@@ -118,7 +118,6 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
                                      unsigned usage) override;
   void SignalQuery(uint32_t query_id, const base::Closure& callback) override;
   void SetLock(base::Lock*) override;
-  bool IsGpuChannelLost() override;
   void EnsureWorkVisible() override;
   CommandBufferNamespace GetNamespaceID() const override;
   CommandBufferId GetCommandBufferID() const override;
@@ -156,19 +155,15 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
     virtual SyncPointManager* sync_point_manager() = 0;
     const GpuPreferences& gpu_preferences();
     const GpuDriverBugWorkarounds& gpu_driver_bug_workarounds();
-    scoped_refptr<gfx::GLShareGroup> share_group();
+    scoped_refptr<gl::GLShareGroup> share_group();
     scoped_refptr<gles2::MailboxManager> mailbox_manager();
-    scoped_refptr<gles2::SubscriptionRefSet> subscription_ref_set();
-    scoped_refptr<gpu::ValueStateMap> pending_valuebuffer_state();
     gpu::gles2::ProgramCache* program_cache();
 
    private:
     const GpuPreferences gpu_preferences_;
     const GpuDriverBugWorkarounds gpu_driver_bug_workarounds_;
-    scoped_refptr<gfx::GLShareGroup> share_group_;
+    scoped_refptr<gl::GLShareGroup> share_group_;
     scoped_refptr<gles2::MailboxManager> mailbox_manager_;
-    scoped_refptr<gles2::SubscriptionRefSet> subscription_ref_set_;
-    scoped_refptr<gpu::ValueStateMap> pending_valuebuffer_state_;
     std::unique_ptr<gpu::gles2::ProgramCache> program_cache_;
   };
 
@@ -176,26 +171,21 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   struct InitializeOnGpuThreadParams {
     bool is_offscreen;
     gfx::AcceleratedWidget window;
-    const gfx::Size& size;
-    const std::vector<int32_t>& attribs;
-    gfx::GpuPreference gpu_preference;
+    const gles2::ContextCreationAttribHelper& attribs;
     gpu::Capabilities* capabilities;  // Ouptut.
     InProcessCommandBuffer* context_group;
     ImageFactory* image_factory;
 
-    InitializeOnGpuThreadParams(bool is_offscreen,
-                                gfx::AcceleratedWidget window,
-                                const gfx::Size& size,
-                                const std::vector<int32_t>& attribs,
-                                gfx::GpuPreference gpu_preference,
-                                gpu::Capabilities* capabilities,
-                                InProcessCommandBuffer* share_group,
-                                ImageFactory* image_factory)
+    InitializeOnGpuThreadParams(
+        bool is_offscreen,
+        gfx::AcceleratedWidget window,
+        const gles2::ContextCreationAttribHelper& attribs,
+        gpu::Capabilities* capabilities,
+        InProcessCommandBuffer* share_group,
+        ImageFactory* image_factory)
         : is_offscreen(is_offscreen),
           window(window),
-          size(size),
           attribs(attribs),
-          gpu_preference(gpu_preference),
           capabilities(capabilities),
           context_group(share_group),
           image_factory(image_factory) {}
@@ -215,6 +205,8 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   bool WaitFenceSyncOnGpuThread(gpu::CommandBufferNamespace namespace_id,
                                 gpu::CommandBufferId command_buffer_id,
                                 uint64_t release);
+  void DescheduleUntilFinishedOnGpuThread();
+  void RescheduleAfterFinishedOnGpuThread();
   void SignalSyncTokenOnGpuThread(const SyncToken& sync_token,
                                   const base::Closure& callback);
   void SignalQueryOnGpuThread(unsigned query_id, const base::Closure& callback);
@@ -244,8 +236,8 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   scoped_refptr<TransferBufferManagerInterface> transfer_buffer_manager_;
   std::unique_ptr<CommandExecutor> executor_;
   std::unique_ptr<gles2::GLES2Decoder> decoder_;
-  scoped_refptr<gfx::GLContext> context_;
-  scoped_refptr<gfx::GLSurface> surface_;
+  scoped_refptr<gl::GLContext> context_;
+  scoped_refptr<gl::GLSurface> surface_;
   scoped_refptr<SyncPointOrderData> sync_point_order_data_;
   std::unique_ptr<SyncPointClient> sync_point_client_;
   base::Closure context_lost_callback_;
@@ -273,7 +265,7 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   scoped_refptr<Service> service_;
   State state_after_last_flush_;
   base::Lock state_after_last_flush_lock_;
-  scoped_refptr<gfx::GLShareGroup> gl_share_group_;
+  scoped_refptr<gl::GLShareGroup> gl_share_group_;
   base::WaitableEvent fence_sync_wait_event_;
 
   // Only used with explicit scheduling and the gpu thread is the same as

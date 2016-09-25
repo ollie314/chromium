@@ -10,13 +10,14 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -56,6 +57,11 @@ using storage::FileSystemURL;
 namespace {
 
 const char kMediaGalleryMountPrefix[] = "media_galleries-";
+
+#if DCHECK_IS_ON()
+base::LazyInstance<base::SequenceChecker>::Leaky g_media_sequence_checker =
+    LAZY_INSTANCE_INITIALIZER;
+#endif
 
 void OnPreferencesInit(
     const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
@@ -150,11 +156,10 @@ MediaFileSystemBackend::~MediaFileSystemBackend() {
 }
 
 // static
-bool MediaFileSystemBackend::CurrentlyOnMediaTaskRunnerThread() {
-  base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
-  base::SequencedWorkerPool::SequenceToken media_sequence_token =
-      pool->GetNamedSequenceToken(kMediaTaskRunnerName);
-  return pool->IsRunningSequenceOnCurrentThread(media_sequence_token);
+void MediaFileSystemBackend::AssertCurrentlyOnMediaSequence() {
+#if DCHECK_IS_ON()
+  DCHECK(g_media_sequence_checker.Get().CalledOnValidSequence());
+#endif
 }
 
 // static

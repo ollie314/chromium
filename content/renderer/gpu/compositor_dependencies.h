@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
+#include "cc/output/renderer_settings.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -26,8 +27,10 @@ namespace gpu {
 class GpuMemoryBufferManager;
 }
 
+namespace blink {
 namespace scheduler {
 class RendererScheduler;
+}
 }
 
 namespace content {
@@ -36,6 +39,7 @@ class CompositorDependencies {
  public:
   virtual bool IsGpuRasterizationForced() = 0;
   virtual bool IsGpuRasterizationEnabled() = 0;
+  virtual bool IsAsyncWorkerContextEnabled() = 0;
   virtual int GetGpuRasterizationMSAASampleCount() = 0;
   virtual bool IsLcdTextEnabled() = 0;
   virtual bool IsDistanceFieldTextEnabled() = 0;
@@ -43,7 +47,7 @@ class CompositorDependencies {
   virtual bool IsPartialRasterEnabled() = 0;
   virtual bool IsGpuMemoryBufferCompositorResourcesEnabled() = 0;
   virtual bool IsElasticOverscrollEnabled() = 0;
-  virtual std::vector<unsigned> GetImageTextureTargets() = 0;
+  virtual const cc::BufferToTextureTargetMap& GetBufferToTextureTargetMap() = 0;
   virtual scoped_refptr<base::SingleThreadTaskRunner>
   GetCompositorMainThreadTaskRunner() = 0;
   // Returns null if the compositor is in single-threaded mode (ie. there is no
@@ -52,10 +56,7 @@ class CompositorDependencies {
   GetCompositorImplThreadTaskRunner() = 0;
   virtual cc::SharedBitmapManager* GetSharedBitmapManager() = 0;
   virtual gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() = 0;
-  virtual scheduler::RendererScheduler* GetRendererScheduler() = 0;
-  virtual cc::ContextProvider* GetSharedMainThreadContextProvider() = 0;
-  virtual std::unique_ptr<cc::BeginFrameSource> CreateExternalBeginFrameSource(
-      int routing_id) = 0;
+  virtual blink::scheduler::RendererScheduler* GetRendererScheduler() = 0;
   virtual cc::ImageSerializationProcessor* GetImageSerializationProcessor() = 0;
   virtual cc::TaskGraphRunner* GetTaskGraphRunner() = 0;
   virtual bool AreImageDecodeTasksEnabled() = 0;

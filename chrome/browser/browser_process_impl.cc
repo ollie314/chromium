@@ -18,14 +18,17 @@
 #include "base/debug/alias.h"
 #include "base/debug/leak_annotations.h"
 #include "base/files/file_path.h"
+#include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
 #include "base/trace_event/trace_event.h"
@@ -42,17 +45,19 @@
 #include "chrome/browser/devtools/remote_debugging_server.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_status_updater.h"
-#include "chrome/browser/gpu/gl_string_manager.h"
 #include "chrome/browser/gpu/gpu_mode_manager.h"
+#include "chrome/browser/gpu/gpu_profile_cache.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/loader/chrome_resource_dispatcher_host_delegate.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/metrics/chrome_metrics_services_manager_client.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/net/chrome_net_log_helper.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
+#include "chrome/browser/notifications/notification_platform_bridge.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_finder.h"
@@ -62,7 +67,6 @@
 #include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/renderer_host/chrome_resource_dispatcher_host_delegate.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/status_icons/status_tray.h"
@@ -94,9 +98,12 @@
 #include "components/prefs/pref_service.h"
 #include "components/safe_json/safe_json_parser.h"
 #include "components/signin/core/common/profile_management_switches.h"
+#include "components/subresource_filter/content/browser/content_ruleset_distributor.h"
+#include "components/subresource_filter/core/browser/ruleset_service.h"
+#include "components/subresource_filter/core/browser/subresource_filter_constants.h"
+#include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/update_client/update_query_params.h"
-#include "components/web_resource/promo_resource_service.h"
 #include "components/web_resource/web_resource_pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -116,7 +123,6 @@
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
-#include "components/startup_metric_utils/common/pre_read_field_trial_utils_win.h"
 #include "ui/views/focus/view_storage.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/chrome_browser_main_mac.h"
@@ -124,6 +130,7 @@
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/lifetime/keep_alive_registry.h"
+#include "chrome/browser/services/gcm/gcm_product_util.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "components/gcm_driver/gcm_client_factory.h"
 #include "components/gcm_driver/gcm_desktop_utils.h"
@@ -151,10 +158,10 @@
 #endif
 
 #if defined(ENABLE_WEBRTC)
-#include "chrome/browser/media/webrtc_log_uploader.h"
+#include "chrome/browser/media/webrtc/webrtc_log_uploader.h"
 #endif
 
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
 #include "chrome/browser/memory/tab_manager.h"
 #endif
 
@@ -190,7 +197,9 @@ BrowserProcessImpl::BrowserProcessImpl(
       created_local_state_(false),
       created_icon_manager_(false),
       created_notification_ui_manager_(false),
+      created_notification_bridge_(false),
       created_safe_browsing_service_(false),
+      created_subresource_filter_ruleset_service_(false),
       shutting_down_(false),
       tearing_down_(false),
       download_status_updater_(new DownloadStatusUpdater),
@@ -249,6 +258,10 @@ BrowserProcessImpl::BrowserProcessImpl(
 }
 
 BrowserProcessImpl::~BrowserProcessImpl() {
+#if defined(ENABLE_EXTENSIONS)
+  extensions::ExtensionsBrowserClient::Set(nullptr);
+#endif
+
 #if !defined(OS_ANDROID)
   KeepAliveRegistry::GetInstance()->RemoveObserver(this);
 #endif  // !defined(OS_ANDROID)
@@ -266,15 +279,16 @@ void BrowserProcessImpl::StartTearDown() {
   tearing_down_ = true;
   DCHECK(IsShuttingDown());
   // We need to destroy the MetricsServicesManager, IntranetRedirectDetector,
-  // PromoResourceService, and SafeBrowsing ClientSideDetectionService (owned by
-  // the SafeBrowsingService) before the io_thread_ gets destroyed, since their
-  // destructors can call the URLFetcher destructor, which does a
-  // PostDelayedTask operation on the IO thread. (The IO thread will handle that
-  // URLFetcher operation before going away.)
+  // NetworkTimeTracker, and SafeBrowsing ClientSideDetectionService
+  // (owned by the SafeBrowsingService) before the io_thread_ gets destroyed,
+  // since their destructors can call the URLFetcher destructor, which does a
+  // PostDelayedTask operation on the IO thread. (The IO thread will handle
+  // that URLFetcher operation before going away.)
   metrics_services_manager_.reset();
   intranet_redirect_detector_.reset();
   if (safe_browsing_service_.get())
     safe_browsing_service()->ShutDown();
+  network_time_tracker_.reset();
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   plugins_resource_service_.reset();
 #endif
@@ -303,10 +317,6 @@ void BrowserProcessImpl::StartTearDown() {
     UserManager::Hide();
     profile_manager_.reset();
   }
-
-  // PromoResourceService must be destroyed after the keyed services and before
-  // the IO thread.
-  promo_resource_service_.reset();
 
   child_process_watcher_.reset();
 
@@ -403,8 +413,9 @@ class RundownTaskCounter :
 };
 
 RundownTaskCounter::RundownTaskCounter()
-    : count_(1), waitable_event_(true, false) {
-}
+    : count_(1),
+      waitable_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                      base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 
 void RundownTaskCounter::Post(base::SequencedTaskRunner* task_runner) {
   // As the count starts off at one, it should never get to zero unless
@@ -496,8 +507,9 @@ BrowserProcessImpl::GetMetricsServicesManager() {
   DCHECK(CalledOnValidThread());
   if (!metrics_services_manager_) {
     metrics_services_manager_.reset(
-        new metrics_services_manager::MetricsServicesManager(base::WrapUnique(
-            new ChromeMetricsServicesManagerClient(local_state()))));
+        new metrics_services_manager::MetricsServicesManager(
+            base::MakeUnique<ChromeMetricsServicesManagerClient>(
+                local_state())));
   }
   return metrics_services_manager_.get();
 }
@@ -550,12 +562,6 @@ variations::VariationsService* BrowserProcessImpl::variations_service() {
   return GetMetricsServicesManager()->GetVariationsService();
 }
 
-web_resource::PromoResourceService*
-BrowserProcessImpl::promo_resource_service() {
-  DCHECK(CalledOnValidThread());
-  return promo_resource_service_.get();
-}
-
 BrowserProcessPlatformPart* BrowserProcessImpl::platform_part() {
   return platform_part_.get();
 }
@@ -571,9 +577,25 @@ BrowserProcessImpl::extension_event_router_forwarder() {
 
 NotificationUIManager* BrowserProcessImpl::notification_ui_manager() {
   DCHECK(CalledOnValidThread());
+// TODO(miguelg) return NULL for MAC as well once native notifications
+// are enabled by default.
+#if defined(OS_ANDROID)
+  return nullptr;
+#else
   if (!created_notification_ui_manager_)
     CreateNotificationUIManager();
   return notification_ui_manager_.get();
+#endif
+}
+
+NotificationPlatformBridge* BrowserProcessImpl::notification_platform_bridge() {
+#if defined(OS_ANDROID) || defined(OS_MACOSX)
+  if (!created_notification_bridge_)
+    CreateNotificationPlatformBridge();
+  return notification_bridge_.get();
+#else
+  return nullptr;
+#endif
 }
 
 message_center::MessageCenter* BrowserProcessImpl::message_center() {
@@ -602,11 +624,11 @@ IconManager* BrowserProcessImpl::icon_manager() {
   return icon_manager_.get();
 }
 
-GLStringManager* BrowserProcessImpl::gl_string_manager() {
+GpuProfileCache* BrowserProcessImpl::gpu_profile_cache() {
   DCHECK(CalledOnValidThread());
-  if (!gl_string_manager_.get())
-    gl_string_manager_.reset(new GLStringManager());
-  return gl_string_manager_.get();
+  if (!gpu_profile_cache_.get())
+    gpu_profile_cache_.reset(GpuProfileCache::Create());
+  return gpu_profile_cache_.get();
 }
 
 GpuModeManager* BrowserProcessImpl::gpu_mode_manager() {
@@ -729,7 +751,8 @@ network_time::NetworkTimeTracker* BrowserProcessImpl::network_time_tracker() {
   if (!network_time_tracker_) {
     network_time_tracker_.reset(new network_time::NetworkTimeTracker(
         base::WrapUnique(new base::DefaultClock()),
-        base::WrapUnique(new base::DefaultTickClock()), local_state()));
+        base::WrapUnique(new base::DefaultTickClock()), local_state(),
+        system_request_context()));
   }
   return network_time_tracker_.get();
 }
@@ -743,7 +766,7 @@ gcm::GCMDriver* BrowserProcessImpl::gcm_driver() {
 
 memory::TabManager* BrowserProcessImpl::GetTabManager() {
   DCHECK(CalledOnValidThread());
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
   if (!tab_manager_.get())
     tab_manager_.reset(new memory::TabManager());
   return tab_manager_.get();
@@ -785,14 +808,8 @@ void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
                                std::string());
 #endif  // defined(OS_CHROMEOS)
 
-#if defined(ENABLE_REPORTING_BLIMP)
-  // Enables reporting for the (headless) blimp engine. Defined in
-  // components/metrics/BUILD.gn
-  registry->RegisterBooleanPref(metrics::prefs::kMetricsReportingEnabled, true);
-#else
   registry->RegisterBooleanPref(metrics::prefs::kMetricsReportingEnabled,
                                 GoogleUpdateSettings::GetCollectStatsConsent());
-#endif // defined(ENABLE_REPORTING_HEADLESS)
 
 #if BUILDFLAG(ANDROID_JAVA_UI)
   registry->RegisterBooleanPref(
@@ -849,6 +866,14 @@ safe_browsing::ClientSideDetectionService*
   return NULL;
 }
 
+subresource_filter::RulesetService*
+BrowserProcessImpl::subresource_filter_ruleset_service() {
+  DCHECK(CalledOnValidThread());
+  if (!created_subresource_filter_ruleset_service_)
+    CreateSubresourceFilterRulesetService();
+  return subresource_filter_ruleset_service_.get();
+}
+
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
 void BrowserProcessImpl::StartAutoupdateTimer() {
   autoupdate_timer_.Start(FROM_HERE,
@@ -864,18 +889,18 @@ net_log::ChromeNetLog* BrowserProcessImpl::net_log() {
 
 component_updater::ComponentUpdateService*
 BrowserProcessImpl::component_updater() {
-  if (!component_updater_.get()) {
-    if (!BrowserThread::CurrentlyOn(BrowserThread::UI))
-      return NULL;
-    scoped_refptr<update_client::Configurator> configurator =
-        component_updater::MakeChromeComponentUpdaterConfigurator(
-            base::CommandLine::ForCurrentProcess(),
-            io_thread()->system_url_request_context_getter());
-    // Creating the component updater does not do anything, components
-    // need to be registered and Start() needs to be called.
-    component_updater_.reset(component_updater::ComponentUpdateServiceFactory(
-                                 configurator).release());
-  }
+  if (component_updater_)
+    return component_updater_.get();
+
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI))
+    return nullptr;
+
+  component_updater_ = component_updater::ComponentUpdateServiceFactory(
+      component_updater::MakeChromeComponentUpdaterConfigurator(
+          base::CommandLine::ForCurrentProcess(),
+          io_thread()->system_url_request_context_getter(),
+          g_browser_process->local_state()));
+
   return component_updater_.get();
 }
 
@@ -930,11 +955,10 @@ void BrowserProcessImpl::OnKeepAliveStateChanged(bool is_keeping_alive) {
     Unpin();
 }
 
-void BrowserProcessImpl::OnKeepAliveRestartStateChanged(bool can_restart){
-}
+void BrowserProcessImpl::OnKeepAliveRestartStateChanged(bool can_restart) {}
 
 void BrowserProcessImpl::CreateWatchdogThread() {
-  DCHECK(!created_watchdog_thread_ && watchdog_thread_.get() == NULL);
+  DCHECK(!created_watchdog_thread_ && !watchdog_thread_);
   created_watchdog_thread_ = true;
 
   std::unique_ptr<WatchDogThread> thread(new WatchDogThread());
@@ -946,7 +970,7 @@ void BrowserProcessImpl::CreateWatchdogThread() {
 }
 
 void BrowserProcessImpl::CreateProfileManager() {
-  DCHECK(!created_profile_manager_ && profile_manager_.get() == NULL);
+  DCHECK(!created_profile_manager_ && !profile_manager_);
   created_profile_manager_ = true;
 
   base::FilePath user_data_dir;
@@ -955,7 +979,7 @@ void BrowserProcessImpl::CreateProfileManager() {
 }
 
 void BrowserProcessImpl::CreateLocalState() {
-  DCHECK(!created_local_state_ && local_state_.get() == NULL);
+  DCHECK(!created_local_state_ && !local_state_);
   created_local_state_ = true;
 
   base::FilePath local_state_path;
@@ -1046,29 +1070,39 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
 }
 
 void BrowserProcessImpl::CreateIconManager() {
-  DCHECK(!created_icon_manager_ && icon_manager_.get() == NULL);
+  DCHECK(!created_icon_manager_ && !icon_manager_);
   created_icon_manager_ = true;
   icon_manager_.reset(new IconManager);
 }
 
 void BrowserProcessImpl::CreateIntranetRedirectDetector() {
-  DCHECK(intranet_redirect_detector_.get() == NULL);
+  DCHECK(!intranet_redirect_detector_);
   std::unique_ptr<IntranetRedirectDetector> intranet_redirect_detector(
       new IntranetRedirectDetector);
   intranet_redirect_detector_.swap(intranet_redirect_detector);
 }
 
+void BrowserProcessImpl::CreateNotificationPlatformBridge() {
+#if (defined(OS_ANDROID) || defined(OS_MACOSX)) && defined(ENABLE_NOTIFICATIONS)
+  DCHECK(!notification_bridge_);
+  notification_bridge_.reset(NotificationPlatformBridge::Create());
+  created_notification_bridge_ = true;
+#endif
+}
+
 void BrowserProcessImpl::CreateNotificationUIManager() {
-#if defined(ENABLE_NOTIFICATIONS)
-  DCHECK(notification_ui_manager_.get() == NULL);
-  notification_ui_manager_.reset(NotificationUIManager::Create(local_state()));
+// Android does not use the NotificationUIManager anymore
+// All notification traffic is routed through NotificationPlatformBridge.
+#if defined(ENABLE_NOTIFICATIONS) && !defined(OS_ANDROID)
+  DCHECK(!notification_ui_manager_);
+  notification_ui_manager_.reset(NotificationUIManager::Create());
   created_notification_ui_manager_ = true;
 #endif
 }
 
 void BrowserProcessImpl::CreateBackgroundModeManager() {
 #if BUILDFLAG(ENABLE_BACKGROUND)
-  DCHECK(background_mode_manager_.get() == NULL);
+  DCHECK(!background_mode_manager_);
   background_mode_manager_.reset(
       new BackgroundModeManager(
               *base::CommandLine::ForCurrentProcess(),
@@ -1077,13 +1111,13 @@ void BrowserProcessImpl::CreateBackgroundModeManager() {
 }
 
 void BrowserProcessImpl::CreateStatusTray() {
-  DCHECK(status_tray_.get() == NULL);
+  DCHECK(!status_tray_);
   status_tray_.reset(StatusTray::Create());
 }
 
 void BrowserProcessImpl::CreatePrintPreviewDialogController() {
 #if defined(ENABLE_PRINT_PREVIEW)
-  DCHECK(print_preview_dialog_controller_.get() == NULL);
+  DCHECK(!print_preview_dialog_controller_);
   print_preview_dialog_controller_ =
       new printing::PrintPreviewDialogController();
 #else
@@ -1093,7 +1127,7 @@ void BrowserProcessImpl::CreatePrintPreviewDialogController() {
 
 void BrowserProcessImpl::CreateBackgroundPrintingManager() {
 #if defined(ENABLE_PRINT_PREVIEW)
-  DCHECK(background_printing_manager_.get() == NULL);
+  DCHECK(!background_printing_manager_);
   background_printing_manager_.reset(new printing::BackgroundPrintingManager());
 #else
   NOTIMPLEMENTED();
@@ -1101,13 +1135,41 @@ void BrowserProcessImpl::CreateBackgroundPrintingManager() {
 }
 
 void BrowserProcessImpl::CreateSafeBrowsingService() {
-  DCHECK(safe_browsing_service_.get() == NULL);
+  DCHECK(!safe_browsing_service_);
   // Set this flag to true so that we don't retry indefinitely to
   // create the service class if there was an error.
   created_safe_browsing_service_ = true;
   safe_browsing_service_ =
       safe_browsing::SafeBrowsingService::CreateSafeBrowsingService();
   safe_browsing_service_->Initialize();
+}
+
+void BrowserProcessImpl::CreateSubresourceFilterRulesetService() {
+  DCHECK(!subresource_filter_ruleset_service_);
+  created_subresource_filter_ruleset_service_ = true;
+
+  if (!base::FeatureList::IsEnabled(
+          subresource_filter::kSafeBrowsingSubresourceFilter)) {
+    return;
+  }
+
+  base::SequencedWorkerPool* blocking_pool =
+      content::BrowserThread::GetBlockingPool();
+  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner(
+      blocking_pool->GetSequencedTaskRunnerWithShutdownBehavior(
+          blocking_pool->GetSequenceToken(),
+          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
+
+  base::FilePath user_data_dir;
+  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  base::FilePath indexed_ruleset_base_dir =
+      user_data_dir.Append(subresource_filter::kTopLevelDirectoryName)
+          .Append(subresource_filter::kIndexedRulesetBaseDirectoryName);
+  subresource_filter_ruleset_service_.reset(
+      new subresource_filter::RulesetService(
+          local_state(), blocking_task_runner, indexed_ruleset_base_dir));
+  subresource_filter_ruleset_service_->RegisterDistributor(
+      base::WrapUnique(new subresource_filter::ContentRulesetDistributor));
 }
 
 void BrowserProcessImpl::CreateGCMDriver() {
@@ -1132,9 +1194,10 @@ void BrowserProcessImpl::CreateGCMDriver() {
   gcm_driver_ = gcm::CreateGCMDriverDesktop(
       base::WrapUnique(new gcm::GCMClientFactory), local_state(), store_path,
       system_request_context(), chrome::GetChannel(),
-      content::BrowserThread::GetMessageLoopProxyForThread(
+      gcm::GetProductCategoryForSubtypes(local_state()),
+      content::BrowserThread::GetTaskRunnerForThread(
           content::BrowserThread::UI),
-      content::BrowserThread::GetMessageLoopProxyForThread(
+      content::BrowserThread::GetTaskRunnerForThread(
           content::BrowserThread::IO),
       blocking_task_runner);
 #endif  // defined(OS_ANDROID)
@@ -1215,7 +1278,7 @@ void BrowserProcessImpl::Unpin() {
   CHECK(base::MessageLoop::current()->is_running());
 
 #if defined(OS_MACOSX)
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(ChromeBrowserMainPartsMac::DidEndMainMessageLoop));
 #endif
   base::MessageLoop::current()->QuitWhenIdle();
@@ -1271,8 +1334,7 @@ void BrowserProcessImpl::RestartBackgroundInstance() {
   }
 
 #if defined(OS_WIN)
-  if (startup_metric_utils::GetPreReadOptions().use_prefetch_argument)
-    new_cl->AppendArg(switches::kPrefetchArgumentBrowserBackground);
+  new_cl->AppendArg(switches::kPrefetchArgumentBrowserBackground);
 #endif  // defined(OS_WIN)
 
   DLOG(WARNING) << "Shutting down current instance of the browser.";

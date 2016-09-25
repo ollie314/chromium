@@ -88,11 +88,11 @@ const Invalidation& SingleObjectInvalidationSet::back() const {
   return *invalidations_.rbegin();
 }
 
-scoped_ptr<base::ListValue> SingleObjectInvalidationSet::ToValue() const {
-  scoped_ptr<base::ListValue> value(new base::ListValue);
+std::unique_ptr<base::ListValue> SingleObjectInvalidationSet::ToValue() const {
+  std::unique_ptr<base::ListValue> value(new base::ListValue);
   for (InvalidationsSet::const_iterator it = invalidations_.begin();
        it != invalidations_.end(); ++it) {
-    value->Append(it->ToValue().release());
+    value->Append(it->ToValue());
   }
   return value;
 }
@@ -105,7 +105,8 @@ bool SingleObjectInvalidationSet::ResetFromValue(
       DLOG(WARNING) << "Could not find invalidation at index " << i;
       return false;
     }
-    scoped_ptr<Invalidation> invalidation = Invalidation::InitFromValue(*dict);
+    std::unique_ptr<Invalidation> invalidation =
+        Invalidation::InitFromValue(*dict);
     if (!invalidation) {
       DLOG(WARNING) << "Failed to parse invalidation at index " << i;
       return false;

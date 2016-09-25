@@ -11,8 +11,8 @@
 #include "base/logging.h"
 #include "content/public/child/image_decoder_utils.h"
 #include "ipc/ipc_channel.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "skia/ext/image_operations.h"
-#include "skia/public/type_converters.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -26,14 +26,10 @@ int64_t kMaxMessageSize = IPC::Channel::kMaximumMessageSize;
 int64_t kPadding = 64;
 }
 
-ImageDecoderImpl::ImageDecoderImpl(int64_t max_message_size)
-    : max_message_size_(max_message_size), binding_(this) {
-}
+ImageDecoderImpl::ImageDecoderImpl() : ImageDecoderImpl(kMaxMessageSize) {}
 
-ImageDecoderImpl::ImageDecoderImpl(
-    mojo::InterfaceRequest<mojom::ImageDecoder> request)
-    : max_message_size_(kMaxMessageSize), binding_(this, std::move(request)) {
-}
+ImageDecoderImpl::ImageDecoderImpl(int64_t max_message_size)
+    : max_message_size_(max_message_size) {}
 
 ImageDecoderImpl::~ImageDecoderImpl() {
 }
@@ -42,9 +38,9 @@ void ImageDecoderImpl::DecodeImage(
     mojo::Array<uint8_t> encoded_data,
     mojom::ImageCodec codec,
     bool shrink_to_fit,
-    const mojo::Callback<void(skia::mojom::BitmapPtr)>& callback) {
+    const DecodeImageCallback& callback) {
   if (encoded_data.size() == 0) {
-    callback.Run(nullptr);
+    callback.Run(SkBitmap());
     return;
   }
 
@@ -75,9 +71,11 @@ void ImageDecoderImpl::DecodeImage(
   }
 
   if (!decoded_image.isNull()) {
-    skia::mojom::BitmapPtr dummy_image = skia::mojom::Bitmap::New();
-    int64_t struct_size =
-        skia::mojom::GetSerializedSize_(dummy_image, nullptr) + kPadding;
+    // When serialized, the space taken up by a skia::mojom::Bitmap excluding
+    // the pixel data payload should be:
+    //   sizeof(skia::mojom::Bitmap::Data_) + pixel data array header (8 bytes)
+    // Use a bigger number in case we need padding at the end.
+    int64_t struct_size = sizeof(skia::mojom::Bitmap::Data_) + kPadding;
     int64_t image_size = decoded_image.computeSize64();
     int halves = 0;
     while (struct_size + (image_size >> 2 * halves) > max_message_size_)
@@ -97,8 +95,5 @@ void ImageDecoderImpl::DecodeImage(
     }
   }
 
-  if (decoded_image.isNull())
-    callback.Run(nullptr);
-  else
-    callback.Run(skia::mojom::Bitmap::From(decoded_image));
+  callback.Run(decoded_image);
 }

@@ -6,17 +6,21 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -26,14 +30,15 @@
 #include "chrome/browser/supervised_user/legacy/supervised_user_sync_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/referrer.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -45,6 +50,25 @@ SigninSupervisedUserImportHandler::SigninSupervisedUserImportHandler()
 SigninSupervisedUserImportHandler::~SigninSupervisedUserImportHandler() {
 }
 
+void SigninSupervisedUserImportHandler::GetLocalizedValues(
+    base::DictionaryValue* localized_strings) {
+  DCHECK(localized_strings);
+
+  localized_strings->SetString("supervisedUserImportTitle",
+      l10n_util::GetStringUTF16(
+          IDS_IMPORT_EXISTING_LEGACY_SUPERVISED_USER_TITLE));
+  localized_strings->SetString("supervisedUserImportText",
+      l10n_util::GetStringUTF16(
+          IDS_IMPORT_EXISTING_LEGACY_SUPERVISED_USER_TEXT));
+  localized_strings->SetString("noSupervisedUserImportText",
+      l10n_util::GetStringUTF16(IDS_IMPORT_NO_EXISTING_SUPERVISED_USER_TEXT));
+  localized_strings->SetString("supervisedUserImportOk",
+      l10n_util::GetStringUTF16(IDS_IMPORT_EXISTING_LEGACY_SUPERVISED_USER_OK));
+  localized_strings->SetString("supervisedUserAlreadyOnThisDevice",
+      l10n_util::GetStringUTF16(
+          IDS_LEGACY_SUPERVISED_USER_ALREADY_ON_THIS_DEVICE));
+}
+
 void SigninSupervisedUserImportHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("getExistingSupervisedUsers",
       base::Bind(&SigninSupervisedUserImportHandler::GetExistingSupervisedUsers,
@@ -53,6 +77,15 @@ void SigninSupervisedUserImportHandler::RegisterMessages() {
       base::Bind(
           &SigninSupervisedUserImportHandler::OpenUrlInLastActiveProfileBrowser,
           base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "authenticateCustodian",
+      base::Bind(&SigninSupervisedUserImportHandler::AuthenticateCustodian,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "cancelLoadingSupervisedUsers",
+      base::Bind(
+          &SigninSupervisedUserImportHandler::HandleCancelLoadSupervisedUsers,
+          base::Unretained(this)));
 }
 
 void SigninSupervisedUserImportHandler::AssignWebUICallbackId(
@@ -60,6 +93,7 @@ void SigninSupervisedUserImportHandler::AssignWebUICallbackId(
   CHECK_LE(1U, args->GetSize());
   CHECK(webui_callback_id_.empty());
   CHECK(args->GetString(0, &webui_callback_id_));
+  AllowJavascript();
 }
 
 void SigninSupervisedUserImportHandler::OpenUrlInLastActiveProfileBrowser(
@@ -68,17 +102,46 @@ void SigninSupervisedUserImportHandler::OpenUrlInLastActiveProfileBrowser(
   std::string url;
   bool success = args->GetString(0, &url);
   DCHECK(success);
-  content::OpenURLParams params(GURL(url),
-                                content::Referrer(),
-                                NEW_BACKGROUND_TAB,
-                                ui::PAGE_TRANSITION_LINK,
-                                false);
-  // Get the browser owned by the last used profile.
-  Browser* browser =
-      chrome::FindLastActiveWithProfile(ProfileManager::GetLastUsedProfile());
-  DCHECK(browser);
-  if (browser)
+  content::OpenURLParams params(GURL(url), content::Referrer(),
+                                WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                                ui::PAGE_TRANSITION_LINK, false);
+  // ProfileManager::GetLastUsedProfile() will attempt to load the default
+  // profile if there is no last used profile. If the default profile is not
+  // fully loaded and initialized, it will attempt to do so synchronously.
+  // Therefore we cannot use that method here. If the last used profile is not
+  // loaded, we do nothing. This is an edge case and should not happen often.
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  base::FilePath last_used_profile_dir =
+      profile_manager->GetLastUsedProfileDir(profile_manager->user_data_dir());
+  Profile* last_used_profile =
+      profile_manager->GetProfileByPath(last_used_profile_dir);
+
+  if (last_used_profile) {
+    // Last used profile may be the Guest Profile.
+    if (ProfileManager::IncognitoModeForced(last_used_profile))
+      last_used_profile = last_used_profile->GetOffTheRecordProfile();
+
+    // Get the browser owned by the last used profile or create a new one if
+    // it doesn't exist.
+    Browser* browser = chrome::FindLastActiveWithProfile(last_used_profile);
+    if (!browser)
+      browser = new Browser(Browser::CreateParams(Browser::TYPE_TABBED,
+                                                  last_used_profile));
     browser->OpenURL(params);
+  }
+}
+
+void SigninSupervisedUserImportHandler::AuthenticateCustodian(
+    const base::ListValue* args) {
+  CHECK_EQ(1U, args->GetSize());
+
+  std::string email;
+  bool success = args->GetString(0, &email);
+  DCHECK(success);
+
+  UserManager::ShowReauthDialog(
+      web_ui()->GetWebContents()->GetBrowserContext(), email,
+      signin_metrics::Reason::REASON_REAUTHENTICATION);
 }
 
 void SigninSupervisedUserImportHandler::GetExistingSupervisedUsers(
@@ -103,14 +166,18 @@ void SigninSupervisedUserImportHandler::GetExistingSupervisedUsers(
       base::string16(), std::string(), std::string());
 }
 
+void SigninSupervisedUserImportHandler::HandleCancelLoadSupervisedUsers(
+    const base::ListValue* args) {
+  webui_callback_id_.clear();
+}
+
 void SigninSupervisedUserImportHandler::LoadCustodianProfileCallback(
     Profile* profile, Profile::CreateStatus status) {
 
   // This method gets called once before with Profile::CREATE_STATUS_CREATED.
   switch (status) {
     case Profile::CREATE_STATUS_LOCAL_FAIL: {
-      // TODO(mahmadi): see if a better error message is required here.
-      RejectCallback(GetLocalErorrMessage());
+      RejectCallback(GetLocalErrorMessage());
       break;
     }
     case Profile::CREATE_STATUS_CREATED: {
@@ -126,7 +193,7 @@ void SigninSupervisedUserImportHandler::LoadCustodianProfileCallback(
       }
 
       if (!IsAccountConnected(profile) || HasAuthError(profile)) {
-        RejectCallback(GetAuthErorrMessage());
+        RejectCallback(GetAuthErrorMessage(profile));
         return;
       }
 
@@ -151,35 +218,35 @@ void SigninSupervisedUserImportHandler::LoadCustodianProfileCallback(
 
 void SigninSupervisedUserImportHandler::RejectCallback(
     const base::string16& error) {
-  web_ui()->CallJavascriptFunction("cr.webUIResponse",
+  RejectJavascriptCallback(
       base::StringValue(webui_callback_id_),
-      base::FundamentalValue(false),
       base::StringValue(error));
   webui_callback_id_.clear();
 }
 
-base::string16 SigninSupervisedUserImportHandler::GetLocalErorrMessage() const {
+base::string16 SigninSupervisedUserImportHandler::GetLocalErrorMessage() const {
   return l10n_util::GetStringUTF16(
       IDS_LEGACY_SUPERVISED_USER_IMPORT_LOCAL_ERROR);
 }
 
-base::string16 SigninSupervisedUserImportHandler::GetAuthErorrMessage() const {
-  return l10n_util::GetStringUTF16(
-      IDS_PROFILES_CREATE_CUSTODIAN_ACCOUNT_DETAILS_OUT_OF_DATE_ERROR);
+base::string16 SigninSupervisedUserImportHandler::GetAuthErrorMessage(
+    Profile* profile) const {
+  return l10n_util::GetStringFUTF16(
+      IDS_PROFILES_CREATE_CUSTODIAN_ACCOUNT_DETAILS_OUT_OF_DATE_ERROR,
+      base::ASCIIToUTF16(profile->GetProfileUserName()));
 }
 
 void SigninSupervisedUserImportHandler::SendExistingSupervisedUsers(
     Profile* profile,
     const base::DictionaryValue* dict) {
   DCHECK(dict);
-  ProfileInfoCache& cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
   std::vector<ProfileAttributesEntry*> entries =
-      cache.GetAllProfilesAttributes();
+      g_browser_process->profile_manager()->GetProfileAttributesStorage().
+          GetAllProfilesAttributes();
 
   // Collect the ids of local supervised user profiles.
   std::set<std::string> supervised_user_ids;
-  for (auto& entry : entries) {
+  for (auto* entry : entries) {
     // Filter out omitted profiles. These are currently being imported, and
     // shouldn't show up as "already on this device" just yet.
     if (entry->IsLegacySupervised() && !entry->IsOmitted()) {
@@ -197,7 +264,8 @@ void SigninSupervisedUserImportHandler::SendExistingSupervisedUsers(
     std::string name;
     value->GetString(SupervisedUserSyncService::kName, &name);
 
-    base::DictionaryValue* supervised_user = new base::DictionaryValue;
+    std::unique_ptr<base::DictionaryValue> supervised_user(
+        new base::DictionaryValue);
     supervised_user->SetString("id", it.key());
     supervised_user->SetString("name", name);
 
@@ -225,13 +293,12 @@ void SigninSupervisedUserImportHandler::SendExistingSupervisedUsers(
         supervised_user_ids.find(it.key()) != supervised_user_ids.end();
     supervised_user->SetBoolean("onCurrentDevice", on_current_device);
 
-    supervised_users.Append(supervised_user);
+    supervised_users.Append(std::move(supervised_user));
   }
 
   // Resolve callback with response.
-  web_ui()->CallJavascriptFunction("cr.webUIResponse",
+  ResolveJavascriptCallback(
       base::StringValue(webui_callback_id_),
-      base::FundamentalValue(true),
       supervised_users);
   webui_callback_id_.clear();
 }

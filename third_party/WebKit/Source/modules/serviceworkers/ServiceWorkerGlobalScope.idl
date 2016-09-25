@@ -40,13 +40,11 @@
 
   [CallWith=ScriptState, RaisesException] Promise<Response> fetch(RequestInfo input, optional Dictionary init);
 
-  [RaisesException] void close();
-
   [CallWith=ScriptState] Promise<void> skipWaiting();
 
   attribute EventHandler onactivate;
   attribute EventHandler onfetch;
   attribute EventHandler oninstall;
   attribute EventHandler onmessage;
-  [RuntimeEnabled=ForeignFetch] attribute EventHandler onforeignfetch;
+  [OriginTrialEnabled=ForeignFetch] attribute EventHandler onforeignfetch;
 };

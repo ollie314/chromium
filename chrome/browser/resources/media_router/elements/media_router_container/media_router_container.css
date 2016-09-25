@@ -3,7 +3,7 @@
  * found in the LICENSE file. */
 
 .active-sink {
-  color: var(--paper-blue-500);
+  color: var(--paper-blue-700);
 }
 
 .cast-mode-icon,
@@ -24,16 +24,20 @@
   width: 100%;
 }
 
+#content {
+  position: relative;
+}
+
 #device-missing {
   align-items: center;
   background-color: white;
   display: flex;
   justify-content: center;
-  margin: 60px 0;
+  padding: 60px 0;
 }
 
 #device-missing a {
-  color: rgb(25, 118, 210);
+  color: var(--paper-blue-700);
   margin: 8px 0;
   text-decoration: none;
 }
@@ -67,7 +71,7 @@
 }
 
 #first-run-flow {
-  background-color: var(--paper-blue-500);
+  background-color: var(--paper-blue-700);
   box-sizing: border-box;
   padding: 24px 16px 4px 16px;
   position: fixed;
@@ -114,7 +118,7 @@
 
 paper-checkbox {
   --paper-checkbox-checked-color: white;
-  --paper-checkbox-checkmark-color: var(--paper-blue-500);
+  --paper-checkbox-checkmark-color: var(--paper-blue-700);
   --paper-checkbox-unchecked-color: white;
 }
 
@@ -144,6 +148,19 @@ paper-menu {
   flex-grow: 1;
 }
 
+#search-results-container {
+  bottom: 0;
+  left: 0;
+  overflow-x: hidden;
+  /* overflow-y is set to auto when the results are actually displayed to allow
+   * scrolling. It is set to hidden by default so the scrollbar isn't displayed
+   * while animating. */
+  overflow-y: hidden;
+  position: absolute;
+  right: 0;
+  top: 100%;
+}
+
 #searching-devices-spinner {
   height: 30px;
   width: 30px;
@@ -151,7 +168,7 @@ paper-menu {
 
 #share-screen-text {
   -webkit-padding-start: var(--dialog-padding-start);
-  color: var(--subtext-color);
+  color: var(--paper-grey-600);
   cursor: default;
   font-weight: normal;
   padding-bottom: 4px;
@@ -171,27 +188,34 @@ paper-menu {
 
 .sink-domain {
   -webkit-padding-start: 6px;
-  color: var(--subtext-color);
+  color: var(--paper-grey-600);
   /* TODO(crbug/589697): Handle overflow of very long domain names. */
 }
 
-#sink-list {
-  padding-bottom: 0;
+#sink-list-view {
+  position: relative;
 }
 
 .sink-name {
   min-width: 10%;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-#sink-search.bottom {
+#sink-search {
+  padding-bottom: 0;
+  padding-top: 4px;
+  position: absolute;
+  top: 100%;
+  width: 100%;
+  z-index: 1;
+}
+
+:host([search-use-bottom-padding]) #sink-search {
   padding-bottom: 16px;
+  padding-top: 0;
 }
 
 /* Separate icon class is a consequence of box-sizing: border-box set by
- * paper-icon-button. This should achieve the same dimensions as .sink-icon.
- */
+ * paper-icon-button. This should achieve the same dimensions as .sink-icon. */
 #sink-search-icon {
   -webkit-margin-start: 4px;
   -webkit-padding-end: 12px;
@@ -215,17 +239,16 @@ paper-menu {
 }
 
 .sink-subtext {
-  color: var(--subtext-color);
+  color: var(--paper-grey-600);
   padding-top: 8px;
 }
 
 .sink-text {
-  -webkit-padding-end: var(--dialog-padding-end);
-  display: inline-flex;
-  flex-direction: row;
   flex-flow: row nowrap;
   line-height: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  width: 250px;
+  width: 275px;
 }
 

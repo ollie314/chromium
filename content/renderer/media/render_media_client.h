@@ -29,8 +29,12 @@ class CONTENT_EXPORT RenderMediaClient : public media::MediaClient {
       std::vector<media::KeySystemInfoForUMA>* key_systems_info_for_uma) final;
   bool IsKeySystemsUpdateNeeded() final;
   void AddSupportedKeySystems(
-      std::vector<media::KeySystemInfo>* key_systems_info) final;
+      std::vector<std::unique_ptr<media::KeySystemProperties>>*
+          key_systems_properties) final;
   void RecordRapporURL(const std::string& metric, const GURL& url) final;
+  bool IsSupportedVideoConfig(media::VideoCodec codec,
+                              media::VideoCodecProfile profile,
+                              int level) override;
 
   void SetTickClockForTesting(std::unique_ptr<base::TickClock> tick_clock);
 

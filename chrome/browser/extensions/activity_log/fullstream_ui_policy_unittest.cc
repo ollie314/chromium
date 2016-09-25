@@ -19,7 +19,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/test/simple_test_clock.h"
 #include "base/test/test_timeouts.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -45,21 +45,18 @@ namespace extensions {
 class FullStreamUIPolicyTest : public testing::Test {
  public:
   FullStreamUIPolicyTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        saved_cmdline_(base::CommandLine::NO_PROGRAM) {
+      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {
 #if defined OS_CHROMEOS
     test_user_manager_.reset(new chromeos::ScopedTestUserManager());
 #endif
-    base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-    saved_cmdline_ = *base::CommandLine::ForCurrentProcess();
+    base::CommandLine no_program_command_line(base::CommandLine::NO_PROGRAM);
     profile_.reset(new TestingProfile());
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableExtensionActivityLogging);
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableExtensionActivityLogTesting);
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+    command_line->AppendSwitch(switches::kEnableExtensionActivityLogging);
+    command_line->AppendSwitch(switches::kEnableExtensionActivityLogTesting);
     extension_service_ = static_cast<TestExtensionSystem*>(
         ExtensionSystem::Get(profile_.get()))->CreateExtensionService
-            (&command_line, base::FilePath(), false);
+            (&no_program_command_line, base::FilePath(), false);
   }
 
   ~FullStreamUIPolicyTest() override {
@@ -69,8 +66,6 @@ class FullStreamUIPolicyTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
     profile_.reset(NULL);
     base::RunLoop().RunUntilIdle();
-    // Restore the original command line and undo the affects of SetUp().
-    *base::CommandLine::ForCurrentProcess() = saved_cmdline_;
   }
 
   // A wrapper function for CheckReadFilteredData, so that we don't need to
@@ -113,7 +108,7 @@ class FullStreamUIPolicyTest : public testing::Test {
 
     // Wait for results; either the checker or the timeout callbacks should
     // cause the main loop to exit.
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
 
     timeout.Cancel();
   }
@@ -158,121 +153,52 @@ class FullStreamUIPolicyTest : public testing::Test {
 
   static void Arguments_Present(std::unique_ptr<Action::ActionVector> i) {
     scoped_refptr<Action> last = i->front();
-    CheckAction(*last.get(),
-                "odlameecjipmbmbejkplpemijjgpljce",
-                Action::ACTION_API_CALL,
-                "extension.connect",
-                "[\"hello\",\"world\"]",
-                "",
-                "",
-                "");
+    CheckAction(*last, "odlameecjipmbmbejkplpemijjgpljce",
+                Action::ACTION_API_CALL, "extension.connect",
+                "[\"hello\",\"world\"]", "", "", "");
   }
 
   static void Arguments_GetTodaysActions(
       std::unique_ptr<Action::ActionVector> actions) {
     ASSERT_EQ(2, static_cast<int>(actions->size()));
-    CheckAction(*actions->at(0).get(),
-                "punky",
-                Action::ACTION_DOM_ACCESS,
-                "lets",
-                "[\"vamoose\"]",
-                "http://www.google.com/",
-                "Page Title",
+    CheckAction(*actions->at(0), "punky", Action::ACTION_DOM_ACCESS, "lets",
+                "[\"vamoose\"]", "http://www.google.com/", "Page Title",
                 "http://www.arg-url.com/");
-    CheckAction(*actions->at(1).get(),
-                "punky",
-                Action::ACTION_API_CALL,
-                "brewster",
-                "[\"woof\"]",
-                "",
-                "Page Title",
-                "http://www.arg-url.com/");
+    CheckAction(*actions->at(1), "punky", Action::ACTION_API_CALL, "brewster",
+                "[\"woof\"]", "", "Page Title", "http://www.arg-url.com/");
   }
 
   static void Arguments_GetOlderActions(
       std::unique_ptr<Action::ActionVector> actions) {
     ASSERT_EQ(2, static_cast<int>(actions->size()));
-    CheckAction(*actions->at(0).get(),
-                "punky",
-                Action::ACTION_DOM_ACCESS,
-                "lets",
-                "[\"vamoose\"]",
-                "http://www.google.com/",
-                "",
-                "");
-    CheckAction(*actions->at(1).get(),
-                "punky",
-                Action::ACTION_API_CALL,
-                "brewster",
-                "[\"woof\"]",
-                "",
-                "",
-                "");
+    CheckAction(*actions->at(0), "punky", Action::ACTION_DOM_ACCESS, "lets",
+                "[\"vamoose\"]", "http://www.google.com/", "", "");
+    CheckAction(*actions->at(1), "punky", Action::ACTION_API_CALL, "brewster",
+                "[\"woof\"]", "", "", "");
   }
 
   static void AllURLsRemoved(std::unique_ptr<Action::ActionVector> actions) {
     ASSERT_EQ(2, static_cast<int>(actions->size()));
-    CheckAction(*actions->at(0).get(),
-                "punky",
-                Action::ACTION_API_CALL,
-                "lets",
-                "[\"vamoose\"]",
-                "",
-                "",
-                "");
-    CheckAction(*actions->at(1).get(),
-                "punky",
-                Action::ACTION_DOM_ACCESS,
-                "lets",
-                "[\"vamoose\"]",
-                "",
-                "",
-                "");
+    CheckAction(*actions->at(0), "punky", Action::ACTION_API_CALL, "lets",
+                "[\"vamoose\"]", "", "", "");
+    CheckAction(*actions->at(1), "punky", Action::ACTION_DOM_ACCESS, "lets",
+                "[\"vamoose\"]", "", "", "");
   }
 
   static void SomeURLsRemoved(std::unique_ptr<Action::ActionVector> actions) {
     // These will be in the vector in reverse time order.
     ASSERT_EQ(5, static_cast<int>(actions->size()));
-    CheckAction(*actions->at(0).get(),
-                "punky",
-                Action::ACTION_DOM_ACCESS,
-                "lets",
-                "[\"vamoose\"]",
-                "http://www.google.com/",
-                "Google",
+    CheckAction(*actions->at(0), "punky", Action::ACTION_DOM_ACCESS, "lets",
+                "[\"vamoose\"]", "http://www.google.com/", "Google",
                 "http://www.args-url.com/");
-    CheckAction(*actions->at(1).get(),
-                "punky",
-                Action::ACTION_DOM_ACCESS,
-                "lets",
-                "[\"vamoose\"]",
-                "http://www.google.com/",
-                "Google",
-                "");
-    CheckAction(*actions->at(2).get(),
-                "punky",
-                Action::ACTION_DOM_ACCESS,
-                "lets",
-                "[\"vamoose\"]",
-                "",
-                "",
-                "");
-    CheckAction(*actions->at(3).get(),
-                "punky",
-                Action::ACTION_DOM_ACCESS,
-                "lets",
-                "[\"vamoose\"]",
-                "",
-                "",
-                "http://www.google.com/");
-    CheckAction(*actions->at(4).get(),
-                "punky",
-                Action::ACTION_DOM_ACCESS,
-                "lets",
-                "[\"vamoose\"]",
-                "",
-                "",
-                "");
+    CheckAction(*actions->at(1), "punky", Action::ACTION_DOM_ACCESS, "lets",
+                "[\"vamoose\"]", "http://www.google.com/", "Google", "");
+    CheckAction(*actions->at(2), "punky", Action::ACTION_DOM_ACCESS, "lets",
+                "[\"vamoose\"]", "", "", "");
+    CheckAction(*actions->at(3), "punky", Action::ACTION_DOM_ACCESS, "lets",
+                "[\"vamoose\"]", "", "", "http://www.google.com/");
+    CheckAction(*actions->at(4), "punky", Action::ACTION_DOM_ACCESS, "lets",
+                "[\"vamoose\"]", "", "", "");
   }
 
   static void CheckAction(const Action& action,
@@ -355,40 +281,20 @@ class FullStreamUIPolicyTest : public testing::Test {
   static void NoActionsDeleted(std::unique_ptr<Action::ActionVector> actions) {
     // These will be in the vector in reverse time order.
     ASSERT_EQ(4, static_cast<int>(actions->size()));
-    CheckAction(*actions->at(0).get(),
-                "punky2",
-                Action::ACTION_API_CALL,
-                "lets2",
-                "[\"vamoose2\"]",
-                "http://www.google2.com/",
-                "Google2",
+    CheckAction(*actions->at(0), "punky2", Action::ACTION_API_CALL, "lets2",
+                "[\"vamoose2\"]", "http://www.google2.com/", "Google2",
                 "http://www.args-url2.com/");
     ASSERT_EQ(3, actions->at(0)->action_id());
-    CheckAction(*actions->at(1).get(),
-                "punky2",
-                Action::ACTION_API_CALL,
-                "lets2",
-                "[\"vamoose2\"]",
-                "http://www.google2.com/",
-                "Google2",
+    CheckAction(*actions->at(1), "punky2", Action::ACTION_API_CALL, "lets2",
+                "[\"vamoose2\"]", "http://www.google2.com/", "Google2",
                 "http://www.args-url2.com/");
     ASSERT_EQ(4, actions->at(1)->action_id());
-    CheckAction(*actions->at(2).get(),
-                "punky1",
-                Action::ACTION_DOM_ACCESS,
-                "lets1",
-                "[\"vamoose1\"]",
-                "http://www.google1.com/",
-                "Google1",
+    CheckAction(*actions->at(2), "punky1", Action::ACTION_DOM_ACCESS, "lets1",
+                "[\"vamoose1\"]", "http://www.google1.com/", "Google1",
                 "http://www.args-url1.com/");
     ASSERT_EQ(1, actions->at(2)->action_id());
-    CheckAction(*actions->at(3).get(),
-                "punky1",
-                Action::ACTION_DOM_ACCESS,
-                "lets1",
-                "[\"vamoose1\"]",
-                "http://www.google1.com/",
-                "Google1",
+    CheckAction(*actions->at(3), "punky1", Action::ACTION_DOM_ACCESS, "lets1",
+                "[\"vamoose1\"]", "http://www.google1.com/", "Google1",
                 "http://www.args-url1.com/");
     ASSERT_EQ(2, actions->at(3)->action_id());
   }
@@ -396,22 +302,12 @@ class FullStreamUIPolicyTest : public testing::Test {
   static void Action1Deleted(std::unique_ptr<Action::ActionVector> actions) {
     // These will be in the vector in reverse time order.
     ASSERT_EQ(2, static_cast<int>(actions->size()));
-    CheckAction(*actions->at(0).get(),
-                "punky2",
-                Action::ACTION_API_CALL,
-                "lets2",
-                "[\"vamoose2\"]",
-                "http://www.google2.com/",
-                "Google2",
+    CheckAction(*actions->at(0), "punky2", Action::ACTION_API_CALL, "lets2",
+                "[\"vamoose2\"]", "http://www.google2.com/", "Google2",
                 "http://www.args-url2.com/");
     ASSERT_EQ(3, actions->at(0)->action_id());
-    CheckAction(*actions->at(1).get(),
-                "punky2",
-                Action::ACTION_API_CALL,
-                "lets2",
-                "[\"vamoose2\"]",
-                "http://www.google2.com/",
-                "Google2",
+    CheckAction(*actions->at(1), "punky2", Action::ACTION_API_CALL, "lets2",
+                "[\"vamoose2\"]", "http://www.google2.com/", "Google2",
                 "http://www.args-url2.com/");
     ASSERT_EQ(4, actions->at(1)->action_id());
   }
@@ -419,22 +315,12 @@ class FullStreamUIPolicyTest : public testing::Test {
   static void Action2Deleted(std::unique_ptr<Action::ActionVector> actions) {
     // These will be in the vector in reverse time order.
     ASSERT_EQ(2, static_cast<int>(actions->size()));
-    CheckAction(*actions->at(0).get(),
-                "punky1",
-                Action::ACTION_DOM_ACCESS,
-                "lets1",
-                "[\"vamoose1\"]",
-                "http://www.google1.com/",
-                "Google1",
+    CheckAction(*actions->at(0), "punky1", Action::ACTION_DOM_ACCESS, "lets1",
+                "[\"vamoose1\"]", "http://www.google1.com/", "Google1",
                 "http://www.args-url1.com/");
     ASSERT_EQ(1, actions->at(0)->action_id());
-    CheckAction(*actions->at(1).get(),
-                "punky1",
-                Action::ACTION_DOM_ACCESS,
-                "lets1",
-                "[\"vamoose1\"]",
-                "http://www.google1.com/",
-                "Google1",
+    CheckAction(*actions->at(1), "punky1", Action::ACTION_DOM_ACCESS, "lets1",
+                "[\"vamoose1\"]", "http://www.google1.com/", "Google1",
                 "http://www.args-url1.com/");
     ASSERT_EQ(2, actions->at(1)->action_id());
   }
@@ -443,11 +329,6 @@ class FullStreamUIPolicyTest : public testing::Test {
   ExtensionService* extension_service_;
   std::unique_ptr<TestingProfile> profile_;
   content::TestBrowserThreadBundle thread_bundle_;
-  // Used to preserve a copy of the original command line.
-  // The test framework will do this itself as well. However, by then,
-  // it is too late to call ActivityLog::RecomputeLoggingIsEnabled() in
-  // TearDown().
-  base::CommandLine saved_cmdline_;
 
 #if defined OS_CHROMEOS
   chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
@@ -497,14 +378,14 @@ TEST_F(FullStreamUIPolicyTest, LogAndFetchActions) {
                                                 base::Time::Now(),
                                                 Action::ACTION_API_CALL,
                                                 "tabs.testMethod");
-  action_api->set_args(base::WrapUnique(new base::ListValue()));
+  action_api->set_args(base::MakeUnique<base::ListValue>());
   policy->ProcessAction(action_api);
 
   scoped_refptr<Action> action_dom = new Action(extension->id(),
                                                 base::Time::Now(),
                                                 Action::ACTION_DOM_ACCESS,
                                                 "document.write");
-  action_dom->set_args(base::WrapUnique(new base::ListValue()));
+  action_dom->set_args(base::MakeUnique<base::ListValue>());
   action_dom->set_page_url(gurl);
   policy->ProcessAction(action_dom);
 
@@ -536,14 +417,14 @@ TEST_F(FullStreamUIPolicyTest, LogAndFetchFilteredActions) {
                                                 base::Time::Now(),
                                                 Action::ACTION_API_CALL,
                                                 "tabs.testMethod");
-  action_api->set_args(base::WrapUnique(new base::ListValue()));
+  action_api->set_args(base::MakeUnique<base::ListValue>());
   policy->ProcessAction(action_api);
 
   scoped_refptr<Action> action_dom = new Action(extension->id(),
                                                 base::Time::Now(),
                                                 Action::ACTION_DOM_ACCESS,
                                                 "document.write");
-  action_dom->set_args(base::WrapUnique(new base::ListValue()));
+  action_dom->set_args(base::MakeUnique<base::ListValue>());
   action_dom->set_page_url(gurl);
   policy->ProcessAction(action_dom);
 
@@ -943,7 +824,7 @@ TEST_F(FullStreamUIPolicyTest, CapReturns) {
   BrowserThread::PostTaskAndReply(
       BrowserThread::DB, FROM_HERE, base::Bind(&base::DoNothing),
       base::MessageLoop::current()->QuitWhenIdleClosure());
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   CheckReadFilteredData(
       policy,
@@ -977,14 +858,14 @@ TEST_F(FullStreamUIPolicyTest, DeleteDatabase) {
                                                 base::Time::Now(),
                                                 Action::ACTION_API_CALL,
                                                 "tabs.testMethod");
-  action_api->set_args(base::WrapUnique(new base::ListValue()));
+  action_api->set_args(base::MakeUnique<base::ListValue>());
   policy->ProcessAction(action_api);
 
   scoped_refptr<Action> action_dom = new Action(extension->id(),
                                                 base::Time::Now(),
                                                 Action::ACTION_DOM_ACCESS,
                                                 "document.write");
-  action_dom->set_args(base::WrapUnique(new base::ListValue()));
+  action_dom->set_args(base::MakeUnique<base::ListValue>());
   action_dom->set_page_url(gurl);
   policy->ProcessAction(action_dom);
 

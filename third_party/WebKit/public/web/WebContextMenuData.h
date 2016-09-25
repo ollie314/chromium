@@ -39,7 +39,6 @@
 #include "../platform/WebVector.h"
 #include "WebHistoryItem.h"
 #include "WebMenuItemInfo.h"
-#include "WebNode.h"
 
 #define WEBCONTEXT_MEDIATYPEFILE_DEFINED
 
@@ -185,17 +184,11 @@ struct WebContextMenuData {
     // Which edit operations are available in the context.
     int editFlags;
 
-    // Security information for the context.
-    WebCString securityInfo;
-
     // The referrer policy applicable to this context.
     WebReferrerPolicy referrerPolicy;
 
     // Custom context menu items provided by the WebCore internals.
     WebVector<WebMenuItemInfo> customItems;
-
-    // The node that was clicked.
-    WebNode node;
 
     WebContextMenuData()
         : mediaType(MediaTypeNone)

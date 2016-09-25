@@ -10,12 +10,26 @@ import("//build/config/linux/pkg_config.gni")
 import("//media/media_options.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 
-source_set("base") {
-  # This is part of the media component.
-  visibility = [
-    "//media",
-    "//media/capture",
+config("base_config") {
+  configs = [
+    # This target uses the ALLOCATOR_SHIM define.
+    "//base/allocator:allocator_shim_define",
+    "//build/config:precompiled_headers",
+    "//build/config/compiler:no_size_t_to_int_warning",
+    "//media:media_config",
+    "//media:media_dependent_config",
+    "//media:media_implementation",
   ]
+}
+
+if (is_component_build) {
+  link_target_type = "source_set"
+} else {
+  link_target_type = "static_library"
+}
+target(link_target_type, "base") {
+  # This is part of the media component.
+  visibility = [ "//media/*" ]
   sources = [
     "audio_block_fifo.cc",
     "audio_block_fifo.h",
@@ -38,8 +52,6 @@ source_set("base") {
     "audio_discard_helper.h",
     "audio_fifo.cc",
     "audio_fifo.h",
-    "audio_hardware_config.cc",
-    "audio_hardware_config.h",
     "audio_hash.cc",
     "audio_hash.h",
     "audio_pull_fifo.cc",
@@ -52,6 +64,7 @@ source_set("base") {
     "audio_renderer_mixer.h",
     "audio_renderer_mixer_input.cc",
     "audio_renderer_mixer_input.h",
+    "audio_renderer_mixer_pool.h",
     "audio_renderer_sink.h",
     "audio_shifter.cc",
     "audio_shifter.h",
@@ -117,10 +130,14 @@ source_set("base") {
     "eme_constants.h",
     "encryption_scheme.cc",
     "encryption_scheme.h",
-    "key_system_info.cc",
-    "key_system_info.h",
+    "feedback_signal_accumulator.h",
+    "hdr_metadata.cc",
+    "hdr_metadata.h",
+    "key_system_names.cc",
+    "key_system_names.h",
+    "key_system_properties.cc",
+    "key_system_properties.h",
     "key_systems.cc",
-    "key_systems.h",
     "key_systems.h",
     "loopback_audio_converter.cc",
     "loopback_audio_converter.h",
@@ -128,6 +145,8 @@ source_set("base") {
     "media.h",
     "media_client.cc",
     "media_client.h",
+    "media_content_type.cc",
+    "media_content_type.h",
     "media_keys.cc",
     "media_keys.h",
     "media_log.cc",
@@ -143,6 +162,8 @@ source_set("base") {
     "media_track.h",
     "media_tracks.cc",
     "media_tracks.h",
+    "media_url_demuxer.cc",
+    "media_url_demuxer.h",
     "media_util.cc",
     "media_util.h",
     "mime_util.cc",
@@ -160,6 +181,7 @@ source_set("base") {
     "pipeline.h",
     "pipeline_impl.cc",
     "pipeline_impl.h",
+    "pipeline_metadata.h",
     "pipeline_status.h",
     "player_tracker.cc",
     "player_tracker.h",
@@ -167,6 +189,7 @@ source_set("base") {
     "ranges.h",
     "renderer.cc",
     "renderer.h",
+    "renderer_client.h",
     "renderer_factory.cc",
     "renderer_factory.h",
     "sample_format.cc",
@@ -187,6 +210,7 @@ source_set("base") {
     "stream_parser.h",
     "stream_parser_buffer.cc",
     "stream_parser_buffer.h",
+    "subsample_entry.h",
     "surface_manager.h",
     "text_cue.cc",
     "text_cue.h",
@@ -236,17 +260,17 @@ source_set("base") {
   defines = []
   public_deps = []
   deps = [
+    "//base/third_party/dynamic_annotations:dynamic_annotations",
+    "//gpu",
+    "//media:media_features",
+    "//media:shared_memory_support",
     "//skia",
+    "//third_party/libyuv",
     "//ui/events:events_base",
+    "//url:url",
   ]
   libs = []
-  configs += [
-    # This target uses the ALLOCATOR_SHIM define.
-    "//base/allocator:allocator_shim_define",
-    "//build/config:precompiled_headers",
-    "//media:media_config",
-    "//media:media_implementation",
-  ]
+  configs += [ ":base_config" ]
 
   if (media_use_ffmpeg) {
     if (!is_android) {
@@ -256,6 +280,7 @@ source_set("base") {
         "media_file_checker.cc",
         "media_file_checker.h",
       ]
+      deps += [ "//media:filters_common" ]
     }
 
     deps += [ "//third_party/ffmpeg" ]
@@ -305,8 +330,6 @@ source_set("base") {
     deps += [ ":media_yasm" ]
   }
 
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
-
   if (is_linux || is_win) {
     sources += [
       "keyboard_event_counter.cc",
@@ -315,40 +338,7 @@ source_set("base") {
   }
 }
 
-# Minimal media component for media/cast on iOS.
-config("base_for_cast_ios_dependent_config") {
-  defines = [ "MEDIA_FOR_CAST_IOS" ]
-}
-
-if (is_ios) {
-  source_set("base_for_cast_ios") {
-    sources = [
-      "simd/convert_rgb_to_yuv.h",
-      "simd/convert_rgb_to_yuv_c.cc",
-      "simd/convert_yuv_to_rgb.h",
-      "simd/convert_yuv_to_rgb_c.cc",
-      "simd/filter_yuv.h",
-      "simd/filter_yuv_c.cc",
-      "video_frame.cc",
-      "video_frame.h",
-      "video_frame_metadata.cc",
-      "video_frame_metadata.h",
-      "video_types.cc",
-      "video_types.h",
-      "video_util.cc",
-      "video_util.h",
-      "yuv_convert.cc",
-      "yuv_convert.h",
-    ]
-    configs += [
-      "//build/config/compiler:no_size_t_to_int_warning",
-      "//media:media_config",
-    ]
-    all_dependent_configs = [ ":base_for_cast_ios_dependent_config" ]
-  }
-}
-
-source_set("test_support") {
+static_library("test_support") {
   testonly = true
   sources = [
     "fake_audio_render_callback.cc",
@@ -377,11 +367,17 @@ source_set("test_support") {
     "test_helpers.cc",
     "test_helpers.h",
     "test_random.h",
+    "vector_math_testing.h",
   ]
   configs += [ "//media:media_config" ]
   deps = [
+    "//base",
+    "//base/test:test_support",
+    "//media",
+    "//media:media_features",
     "//media:shared_memory_support",
     "//testing/gmock",
+    "//ui/gfx:test_support",
   ]
 }
 
@@ -396,12 +392,15 @@ source_set("unittests") {
     "audio_converter_unittest.cc",
     "audio_discard_helper_unittest.cc",
     "audio_fifo_unittest.cc",
-    "audio_hardware_config_unittest.cc",
     "audio_hash_unittest.cc",
+    "audio_latency_unittest.cc",
+    "audio_parameters_unittest.cc",
+    "audio_point_unittest.cc",
     "audio_pull_fifo_unittest.cc",
     "audio_push_fifo_unittest.cc",
     "audio_renderer_mixer_input_unittest.cc",
     "audio_renderer_mixer_unittest.cc",
+    "audio_sample_types_unittest.cc",
     "audio_shifter_unittest.cc",
     "audio_splicer_unittest.cc",
     "audio_timestamp_helper_unittest.cc",
@@ -417,8 +416,10 @@ source_set("unittests") {
     "decoder_buffer_unittest.cc",
     "djb2_unittest.cc",
     "fake_demuxer_stream_unittest.cc",
+    "feedback_signal_accumulator_unittest.cc",
     "gmock_callback_support_unittest.cc",
     "key_systems_unittest.cc",
+    "media_url_demuxer_unittest.cc",
     "mime_util_unittest.cc",
     "moving_average_unittest.cc",
     "multi_channel_resampler_unittest.cc",
@@ -434,8 +435,8 @@ source_set("unittests") {
     "text_renderer_unittest.cc",
     "time_delta_interpolator_unittest.cc",
     "user_input_monitor_unittest.cc",
-    "vector_math_testing.h",
     "vector_math_unittest.cc",
+    "video_codecs_unittest.cc",
     "video_decoder_config_unittest.cc",
     "video_frame_pool_unittest.cc",
     "video_frame_unittest.cc",
@@ -449,8 +450,10 @@ source_set("unittests") {
   ]
   deps = [
     ":test_support",
+    "//base/test:test_support",
     "//gpu/command_buffer/common",
     "//media",
+    "//media/base/android:anywhere_unittests",
     "//skia",
     "//testing/gmock",
     "//testing/gtest",
@@ -487,18 +490,17 @@ source_set("perftests") {
   configs += [ "//media:media_config" ]
   deps = [
     ":test_support",
+    "//base",
+    "//base/test:test_support",
     "//media",
     "//testing/gmock",
     "//testing/gtest",
+    "//testing/perf",
     "//third_party/libyuv",
   ]
 
   if (media_use_ffmpeg) {
     sources += [ "demuxer_perftest.cc" ]
-  }
-
-  if (is_android) {
-    deps += [ "//ui/gl" ]
   }
 }
 
@@ -516,16 +518,18 @@ if (current_cpu == "x86" || current_cpu == "x64") {
       "simd/scale_yuv_to_rgb_sse.asm",
     ]
 
-    # TODO(ajwong): Only export if shared_library build...
     yasm_flags = [
       "-DCHROMIUM",
-      "-DEXPORT_SYMBOLS",
 
       # In addition to the same path as source asm, let yasm %include
       # search path be relative to src/ per Chromium policy.
       "-I",
       rebase_path("..", root_build_dir),
     ]
+
+    if (is_component_build) {
+      yasm_flags += [ "-DEXPORT_SYMBOLS" ]
+    }
 
     inputs = [
       "//third_party/x86inc/x86inc.asm",
@@ -569,6 +573,7 @@ fuzzer_test("media_bit_reader_fuzzer") {
     "bit_reader_fuzzertest.cc",
   ]
   deps = [
+    ":test_support",
     "//base",
     "//media",
   ]

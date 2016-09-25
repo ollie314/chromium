@@ -22,9 +22,11 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-[
-    NoInterfaceObject
-] interface MediaStreamTrackEvent : Event {
-   readonly attribute MediaStreamTrack track;
-};
+// https://w3c.github.io/mediacapture-main/#mediastreamtrackevent
 
+[
+    Exposed=Window,
+    Constructor(DOMString type, MediaStreamTrackEventInit eventInitDict),
+] interface MediaStreamTrackEvent : Event {
+   [SameObject] readonly attribute MediaStreamTrack track;
+};

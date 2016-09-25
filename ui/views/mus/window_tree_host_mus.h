@@ -6,12 +6,13 @@
 #define UI_VIEWS_MUS_WINDOW_TREE_HOST_MUS_H_
 
 #include "base/macros.h"
+#include "services/shell/public/cpp/connector.h"
 #include "ui/aura/window_tree_host_platform.h"
 #include "ui/views/mus/mus_export.h"
 
 class SkBitmap;
 
-namespace mus {
+namespace ui {
 class Window;
 }
 
@@ -21,31 +22,28 @@ class Connector;
 
 namespace views {
 
-class InputMethodMUS;
+class InputMethodMus;
 class NativeWidgetMus;
 class PlatformWindowMus;
 
 class VIEWS_MUS_EXPORT WindowTreeHostMus : public aura::WindowTreeHostPlatform {
  public:
-  WindowTreeHostMus(shell::Connector* connector,
-                    NativeWidgetMus* native_widget,
-                    mus::Window* window);
+  WindowTreeHostMus(NativeWidgetMus* native_widget, ui::Window* window);
   ~WindowTreeHostMus() override;
+  NativeWidgetMus* native_widget() { return native_widget_; }
 
-  PlatformWindowMus* platform_window();
-  ui::PlatformWindowState show_state() const { return show_state_; }
+  void InitInputMethod(shell::Connector* connector);
 
  private:
   // aura::WindowTreeHostPlatform:
   void DispatchEvent(ui::Event* event) override;
   void OnClosed() override;
-  void OnWindowStateChanged(ui::PlatformWindowState new_state) override;
   void OnActivationChanged(bool active) override;
   void OnCloseRequest() override;
+  gfx::ICCProfile GetICCProfileForCurrentDisplay() override;
 
   NativeWidgetMus* native_widget_;
-  std::unique_ptr<InputMethodMUS> input_method_;
-  ui::PlatformWindowState show_state_;
+  std::unique_ptr<InputMethodMus> input_method_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowTreeHostMus);
 };

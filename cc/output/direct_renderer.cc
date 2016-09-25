@@ -10,14 +10,16 @@
 #include <utility>
 #include <vector>
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/base/math_util.h"
 #include "cc/output/bsp_tree.h"
 #include "cc/output/bsp_walk_action.h"
 #include "cc/output/copy_output_request.h"
+#include "cc/output/renderer_settings.h"
 #include "cc/quads/draw_quad.h"
+#include "cc/resources/scoped_resource.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/transform.h"
@@ -61,13 +63,33 @@ static gfx::Transform window_matrix(int x, int y, int width, int height) {
 
 namespace cc {
 
-DirectRenderer::DrawingFrame::DrawingFrame()
-    : root_render_pass(NULL), current_render_pass(NULL), current_texture(NULL) {
+DirectRenderer::DrawingFrame::DrawingFrame() = default;
+DirectRenderer::DrawingFrame::~DrawingFrame() = default;
+
+DirectRenderer::DirectRenderer(const RendererSettings* settings,
+                               OutputSurface* output_surface,
+                               ResourceProvider* resource_provider)
+    : settings_(settings),
+      output_surface_(output_surface),
+      resource_provider_(resource_provider),
+      overlay_processor_(new OverlayProcessor(output_surface)) {}
+
+DirectRenderer::~DirectRenderer() = default;
+
+void DirectRenderer::Initialize() {
+  overlay_processor_->Initialize();
+
+  auto* context_provider = output_surface_->context_provider();
+
+  use_partial_swap_ = settings_->partial_swap_enabled && CanPartialSwap();
+  allow_empty_swap_ = use_partial_swap_;
+  if (context_provider &&
+      context_provider->ContextCapabilities().commit_overlay_planes)
+    allow_empty_swap_ = true;
+
+  initialized_ = true;
 }
 
-DirectRenderer::DrawingFrame::~DrawingFrame() {}
-
-//
 // static
 gfx::RectF DirectRenderer::QuadVertexRect() {
   return gfx::RectF(-0.5f, -0.5f, 1.f, 1.f);
@@ -128,32 +150,37 @@ gfx::Rect DirectRenderer::MoveFromDrawToWindowSpace(
   return window_rect;
 }
 
-DirectRenderer::DirectRenderer(RendererClient* client,
-                               const RendererSettings* settings,
-                               OutputSurface* output_surface,
-                               ResourceProvider* resource_provider)
-    : Renderer(client, settings),
-      output_surface_(output_surface),
-      resource_provider_(resource_provider),
-      overlay_processor_(new OverlayProcessor(output_surface)) {
-  overlay_processor_->Initialize();
+const TileDrawQuad* DirectRenderer::CanPassBeDrawnDirectly(
+    const RenderPass* pass) {
+  return nullptr;
 }
 
-DirectRenderer::~DirectRenderer() {}
-
-void DirectRenderer::SetEnlargePassTextureAmountForTesting(
-    const gfx::Vector2d& amount) {
-  enlarge_pass_texture_amount_ = amount;
+void DirectRenderer::SetVisible(bool visible) {
+  DCHECK(initialized_);
+  if (visible_ == visible)
+    return;
+  visible_ = visible;
+  DidChangeVisibility();
 }
 
 void DirectRenderer::DecideRenderPassAllocationsForFrame(
     const RenderPassList& render_passes_in_draw_order) {
+  render_pass_bypass_quads_.clear();
+
   std::unordered_map<RenderPassId, gfx::Size, RenderPassIdHash>
       render_passes_in_frame;
-  for (size_t i = 0; i < render_passes_in_draw_order.size(); ++i)
+  RenderPass* root_render_pass = render_passes_in_draw_order.back().get();
+  for (size_t i = 0; i < render_passes_in_draw_order.size(); ++i) {
+    RenderPass* pass = render_passes_in_draw_order[i].get();
+    if (pass != root_render_pass) {
+      if (const TileDrawQuad* tile_quad = CanPassBeDrawnDirectly(pass)) {
+        render_pass_bypass_quads_[pass->id] = *tile_quad;
+        continue;
+      }
+    }
     render_passes_in_frame.insert(std::pair<RenderPassId, gfx::Size>(
-        render_passes_in_draw_order[i]->id,
-        RenderPassTextureSize(render_passes_in_draw_order[i].get())));
+        pass->id, RenderPassTextureSize(pass)));
+  }
 
   std::vector<RenderPassId> passes_to_delete;
   for (auto pass_iter = render_pass_textures_.begin();
@@ -179,21 +206,19 @@ void DirectRenderer::DecideRenderPassAllocationsForFrame(
   for (size_t i = 0; i < passes_to_delete.size(); ++i)
     render_pass_textures_.erase(passes_to_delete[i]);
 
-  for (size_t i = 0; i < render_passes_in_draw_order.size(); ++i) {
-    if (render_pass_textures_.count(render_passes_in_draw_order[i]->id) == 0) {
-      std::unique_ptr<ScopedResource> texture =
-          ScopedResource::Create(resource_provider_);
-      render_pass_textures_[render_passes_in_draw_order[i]->id] =
-          std::move(texture);
-    }
+  for (auto& pass : render_passes_in_draw_order) {
+    auto& resource = render_pass_textures_[pass->id];
+    if (!resource)
+      resource = ScopedResource::Create(resource_provider_);
   }
 }
 
 void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
                                float device_scale_factor,
+                               const gfx::ColorSpace& device_color_space,
                                const gfx::Rect& device_viewport_rect,
-                               const gfx::Rect& device_clip_rect,
-                               bool disable_picture_quad_image_filtering) {
+                               const gfx::Rect& device_clip_rect) {
+  DCHECK(visible_);
   TRACE_EVENT0("cc", "DirectRenderer::DrawFrame");
   UMA_HISTOGRAM_COUNTS(
       "Renderer4.renderPassCount",
@@ -210,15 +235,12 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
   frame.root_damage_rect.Intersect(gfx::Rect(device_viewport_rect.size()));
   frame.device_viewport_rect = device_viewport_rect;
   frame.device_clip_rect = device_clip_rect;
-  frame.disable_picture_quad_image_filtering =
-      disable_picture_quad_image_filtering;
-
-  EnsureBackbuffer();
 
   // Only reshape when we know we are going to draw. Otherwise, the reshape
   // can leave the window at the wrong size if we never draw and the proper
   // viewport size is never set.
   output_surface_->Reshape(device_viewport_rect.size(), device_scale_factor,
+                           device_color_space,
                            frame.root_render_pass->has_transparent_background);
 
   BeginDrawingFrame(&frame);
@@ -251,11 +273,11 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
 
   // We can skip all drawing if the damage rect is now empty.
   bool skip_drawing_root_render_pass =
-      frame.root_damage_rect.IsEmpty() && Capabilities().allow_empty_swap;
+      frame.root_damage_rect.IsEmpty() && allow_empty_swap_;
 
   // If we have to draw but don't support partial swap, the whole output should
   // be considered damaged.
-  if (!skip_drawing_root_render_pass && !Capabilities().using_partial_swap)
+  if (!skip_drawing_root_render_pass && !use_partial_swap_)
     frame.root_damage_rect = root_render_pass->output_rect;
 
   if (skip_drawing_root_render_pass) {
@@ -278,23 +300,18 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
 
 gfx::Rect DirectRenderer::ComputeScissorRectForRenderPass(
     const DrawingFrame* frame) {
-  gfx::Rect render_pass_scissor = frame->current_render_pass->output_rect;
+  if (frame->current_render_pass == frame->root_render_pass)
+    return frame->root_damage_rect;
 
-  if (frame->root_damage_rect == frame->root_render_pass->output_rect ||
-      !frame->current_render_pass->copy_requests.empty())
-    return render_pass_scissor;
+  // If the root damage rect has been expanded due to overlays, all the other
+  // damage rect calculations are incorrect.
+  if (!frame->root_render_pass->damage_rect.Contains(frame->root_damage_rect))
+    return frame->current_render_pass->output_rect;
 
-  gfx::Transform inverse_transform(gfx::Transform::kSkipInitialization);
-  if (frame->current_render_pass->transform_to_root_target.GetInverse(
-          &inverse_transform)) {
-    // Only intersect inverse-projected damage if the transform is invertible.
-    gfx::Rect damage_rect_in_render_pass_space =
-        MathUtil::ProjectEnclosingClippedRect(inverse_transform,
-                                              frame->root_damage_rect);
-    render_pass_scissor.Intersect(damage_rect_in_render_pass_space);
-  }
-
-  return render_pass_scissor;
+  DCHECK(frame->current_render_pass->copy_requests.empty() ||
+         (frame->current_render_pass->damage_rect ==
+          frame->current_render_pass->output_rect));
+  return frame->current_render_pass->damage_rect;
 }
 
 bool DirectRenderer::NeedDeviceClip(const DrawingFrame* frame) const {
@@ -373,8 +390,6 @@ void DirectRenderer::SetScissorTestRectInDrawSpace(
   SetScissorTestRect(window_space_rect);
 }
 
-void DirectRenderer::FinishDrawingQuadList() {}
-
 void DirectRenderer::DoDrawPolygon(const DrawPolygon& poly,
                                    DrawingFrame* frame,
                                    const gfx::Rect& render_pass_scissor,
@@ -415,6 +430,11 @@ void DirectRenderer::FlushPolygons(
 void DirectRenderer::DrawRenderPassAndExecuteCopyRequests(
     DrawingFrame* frame,
     RenderPass* render_pass) {
+  if (render_pass_bypass_quads_.find(render_pass->id) !=
+      render_pass_bypass_quads_.end()) {
+    return;
+  }
+
   DrawRenderPass(frame, render_pass);
 
   bool first_request = true;
@@ -443,7 +463,7 @@ void DirectRenderer::DrawRenderPass(DrawingFrame* frame,
         DeviceViewportRectInDrawSpace(frame));
   }
 
-  if (Capabilities().using_partial_swap) {
+  if (use_partial_swap_) {
     render_pass_scissor_in_draw_space.Intersect(
         ComputeScissorRectForRenderPass(frame));
   }
@@ -541,12 +561,13 @@ bool DirectRenderer::UseRenderPass(DrawingFrame* frame,
   DCHECK(texture);
 
   gfx::Size size = RenderPassTextureSize(render_pass);
-  size.Enlarge(enlarge_pass_texture_amount_.x(),
-               enlarge_pass_texture_amount_.y());
+  size.Enlarge(enlarge_pass_texture_amount_.width(),
+               enlarge_pass_texture_amount_.height());
   if (!texture->id()) {
     texture->Allocate(size,
                       ResourceProvider::TEXTURE_HINT_IMMUTABLE_FRAMEBUFFER,
-                      resource_provider_->best_texture_format());
+                      resource_provider_->best_texture_format(),
+                      output_surface_->device_color_space());
   }
   DCHECK(texture->id());
 

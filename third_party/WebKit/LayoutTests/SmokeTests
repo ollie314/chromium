@@ -173,13 +173,10 @@ fast/xsl/import-non-document-node.xhtml
 fast/xsl/xslt-doc-enc.xml
 fullscreen/full-screen-request-rejected.html
 http/tests/download/inherited-encoding-form-submission-result.html
-http/tests/media/media-source/mediasource-play.html
-http/tests/media/media-source/webkitmediasource-play.html
 http/tests/security/no-javascript-refresh.php
 inspector-protocol/input/dispatchMouseEvent.html
 loader/reload-subresource-when-type-changes.html
 media/media-load-event.html
-media/video-autoplay.html
 printing/css2.1/page-break-before-001.html
 storage/domstorage/localstorage/simple-usage.html
 storage/storagequota-query-usage.html
@@ -194,7 +191,6 @@ svg/dom/SVGStyleElement/style-langspace.html
 svg/foreignObject/absolute-position-foreign-object-child-crash.html
 svg/foreignObject/fO-fixed-position-crash.html
 svg/in-html/svg-assert-failure-percentage.html
-svg/overflow/overflow-on-outermost-svg-element-in-xhtml-defaults.xhtml
 svg/stroke/zero-width-hang.html
 svg/text/tspan-getComputedTextLength.svg
 svg/W3C-SVG-1.1-SE/coords-dom-02-f.svg
@@ -209,6 +205,11 @@ userstyles/simple-stylesheet.html
 virtual/deferred/fast/images/link-body-content-imageDimensionChanged-crash.html
 virtual/prefer_compositing_to_lcd_text/compositing/scrollbars/scrollbar-large-overflow-rectangle.html
 virtual/stable/webexposed/internal-properties-should-not-be-exposed.html
+virtual/media-gpu-accelerated/media/video-autoplay.html
+virtual/media-gpu-accelerated/http/tests/media/media-source/mediasource-play.html
+virtual/media-gpu-accelerated/http/tests/media/media-source/mediasource-config-change-mp4-av-audio-bitrate.html
+virtual/media-gpu-accelerated/http/tests/media/media-source/mediasource-config-change-mp4-av-framesize.html
+virtual/media-gpu-accelerated/http/tests/media/media-source/mediasource-config-change-mp4-v-framerate.html
 webaudio/codec-tests/vorbis/vbr-96kbps-44khz.html
 webaudio/codec-tests/vorbis/vbr-128kbps-44khz.html
 webaudio/codec-tests/vorbis/vbr-70kbps-44khz.html

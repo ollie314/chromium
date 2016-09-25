@@ -5,7 +5,6 @@
 package org.chromium.content.browser.webcontents;
 
 import android.graphics.Bitmap;
-import android.graphics.Color;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Parcel;
@@ -13,18 +12,22 @@ import android.os.ParcelUuid;
 import android.os.Parcelable;
 
 import org.chromium.base.ObserverList;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.content_public.browser.AccessibilitySnapshotCallback;
 import org.chromium.content_public.browser.AccessibilitySnapshotNode;
 import org.chromium.content_public.browser.ContentBitmapCallback;
+import org.chromium.content_public.browser.ImageDownloadCallback;
 import org.chromium.content_public.browser.JavaScriptCallback;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.ui.accessibility.AXTextStyle;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -133,6 +136,9 @@ import java.util.UUID;
 
     @Override
     public void destroy() {
+        if (!ThreadUtils.runningOnUiThread()) {
+            throw new IllegalStateException("Attempting to destroy WebContents on non-UI thread");
+        }
         if (mNativeWebContentsAndroid != 0) nativeDestroyWebContents(mNativeWebContentsAndroid);
     }
 
@@ -203,12 +209,6 @@ import java.util.UUID;
         // safely guard against this case.
         if (isDestroyed()) return;
         nativeUnselect(mNativeWebContentsAndroid);
-    }
-
-    @Override
-    public void insertCSS(String css) {
-        if (isDestroyed()) return;
-        nativeInsertCSS(mNativeWebContentsAndroid, css);
     }
 
     @Override
@@ -349,18 +349,13 @@ import java.util.UUID;
     }
 
     @Override
-    public int getThemeColor(int defaultColor) {
-        int color = nativeGetThemeColor(mNativeWebContentsAndroid);
-        if (color == Color.TRANSPARENT) return defaultColor;
-
-        return (color | 0xFF000000);
+    public int getThemeColor() {
+        return nativeGetThemeColor(mNativeWebContentsAndroid);
     }
 
     @Override
-    public void requestAccessibilitySnapshot(AccessibilitySnapshotCallback callback,
-            float offsetY, float scrollX) {
-        nativeRequestAccessibilitySnapshot(mNativeWebContentsAndroid, callback,
-                offsetY, scrollX);
+    public void requestAccessibilitySnapshot(AccessibilitySnapshotCallback callback) {
+        nativeRequestAccessibilitySnapshot(mNativeWebContentsAndroid, callback);
     }
 
     @Override
@@ -378,11 +373,6 @@ import java.util.UUID;
         nativeStopMediaSession(mNativeWebContentsAndroid);
     }
 
-    @Override
-    public String getEncoding() {
-        return nativeGetEncoding(mNativeWebContentsAndroid);
-    }
-
     // root node can be null if parsing fails.
     @CalledByNative
     private static void onAccessibilitySnapshot(AccessibilitySnapshotNode root,
@@ -397,12 +387,11 @@ import java.util.UUID;
     }
 
     @CalledByNative
-    private static AccessibilitySnapshotNode createAccessibilitySnapshotNode(int x,
-            int y, int scrollX, int scrollY, int width, int height, String text,
+    private static AccessibilitySnapshotNode createAccessibilitySnapshotNode(int parentRelativeLeft,
+            int parentRelativeTop, int width, int height, boolean isRootNode, String text,
             int color, int bgcolor, float size, int textStyle, String className) {
+        AccessibilitySnapshotNode node = new AccessibilitySnapshotNode(text, className);
 
-        AccessibilitySnapshotNode node = new AccessibilitySnapshotNode(x, y, scrollX,
-                scrollY, width, height, text, className);
         // if size is smaller than 0, then style information does not exist.
         if (size >= 0.0) {
             boolean bold = (textStyle & AXTextStyle.text_style_bold) > 0;
@@ -411,6 +400,7 @@ import java.util.UUID;
             boolean lineThrough = (textStyle & AXTextStyle.text_style_line_through) > 0;
             node.setStyle(color, bgcolor, size, bold, italic, underline, lineThrough);
         }
+        node.setLocationInfo(parentRelativeLeft, parentRelativeTop, width, height, isRootNode);
         return node;
     }
 
@@ -475,6 +465,39 @@ import java.util.UUID;
         nativeReloadLoFiImages(mNativeWebContentsAndroid);
     }
 
+    @Override
+    public int downloadImage(String url, boolean isFavicon, int maxBitmapSize,
+            boolean bypassCache, ImageDownloadCallback callback) {
+        return nativeDownloadImage(mNativeWebContentsAndroid,
+                url, isFavicon, maxBitmapSize, bypassCache, callback);
+    }
+
+    @CalledByNative
+    private void onDownloadImageFinished(ImageDownloadCallback callback, int id, int httpStatusCode,
+            String imageUrl, List<Bitmap> bitmaps, List<Rect> sizes) {
+        callback.onFinishDownloadImage(id, httpStatusCode, imageUrl, bitmaps, sizes);
+    }
+
+    @CalledByNative
+    private static List<Bitmap> createBitmapList() {
+        return new ArrayList<Bitmap>();
+    }
+
+    @CalledByNative
+    private static void addToBitmapList(List<Bitmap> bitmaps, Bitmap bitmap) {
+        bitmaps.add(bitmap);
+    }
+
+    @CalledByNative
+    private static List<Rect> createSizeList() {
+        return new ArrayList<Rect>();
+    }
+
+    @CalledByNative
+    private static void createSizeAndAddToList(List<Rect> sizes, int width, int height) {
+        sizes.add(new Rect(0, 0, width, height));
+    }
+
     // This is static to avoid exposing a public destroy method on the native side of this class.
     private static native void nativeDestroyWebContents(long webContentsAndroidPtr);
 
@@ -491,7 +514,6 @@ import java.util.UUID;
     private native void nativeReplace(long nativeWebContentsAndroid, String word);
     private native void nativeSelectAll(long nativeWebContentsAndroid);
     private native void nativeUnselect(long nativeWebContentsAndroid);
-    private native void nativeInsertCSS(long nativeWebContentsAndroid, String css);
     private native void nativeOnHide(long nativeWebContentsAndroid);
     private native void nativeOnShow(long nativeWebContentsAndroid);
     private native void nativeSuspendAllMediaPlayers(long nativeWebContentsAndroid);
@@ -525,15 +547,17 @@ import java.util.UUID;
     private native boolean nativeHasAccessedInitialDocument(
             long nativeWebContentsAndroid);
     private native int nativeGetThemeColor(long nativeWebContentsAndroid);
-    private native void nativeRequestAccessibilitySnapshot(long nativeWebContentsAndroid,
-            AccessibilitySnapshotCallback callback, float offsetY, float scrollX);
+    private native void nativeRequestAccessibilitySnapshot(
+            long nativeWebContentsAndroid, AccessibilitySnapshotCallback callback);
     private native void nativeResumeMediaSession(long nativeWebContentsAndroid);
     private native void nativeSuspendMediaSession(long nativeWebContentsAndroid);
     private native void nativeStopMediaSession(long nativeWebContentsAndroid);
-    private native String nativeGetEncoding(long nativeWebContentsAndroid);
     private native void nativeGetContentBitmap(long nativeWebContentsAndroid,
             ContentBitmapCallback callback, Bitmap.Config config, float scale,
             float x, float y, float width, float height);
     private native void nativeOnContextMenuClosed(long nativeWebContentsAndroid);
     private native void nativeReloadLoFiImages(long nativeWebContentsAndroid);
+    private native int nativeDownloadImage(long nativeWebContentsAndroid,
+            String url, boolean isFavicon, int maxBitmapSize,
+            boolean bypassCache, ImageDownloadCallback callback);
 }

@@ -26,11 +26,11 @@
 #include "content/browser/cache_storage/cache_storage_scheduler.h"
 #include "content/browser/service_worker/service_worker_context_observer.h"
 #include "content/browser/service_worker/service_worker_storage.h"
-#include "content/common/background_sync_service.mojom.h"
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/public/browser/background_sync_parameters.h"
 #include "content/public/browser/browser_thread.h"
+#include "third_party/WebKit/public/platform/modules/background_sync/background_sync.mojom.h"
 #include "third_party/WebKit/public/platform/modules/permissions/permission_status.mojom.h"
 #include "url/gurl.h"
 
@@ -64,7 +64,7 @@ class CONTENT_EXPORT BackgroundSyncManager
       std::unique_ptr<ScopedVector<BackgroundSyncRegistration>>)>;
 
   static std::unique_ptr<BackgroundSyncManager> Create(
-      const scoped_refptr<ServiceWorkerContextWrapper>& service_worker_context);
+      scoped_refptr<ServiceWorkerContextWrapper> service_worker_context);
   ~BackgroundSyncManager() override;
 
   // Stores the given background sync registration and adds it to the scheduling
@@ -102,9 +102,16 @@ class CONTENT_EXPORT BackgroundSyncManager
     clock_ = std::move(clock);
   }
 
+  // Called from DevTools
+  void EmulateDispatchSyncEvent(
+      const std::string& tag,
+      scoped_refptr<ServiceWorkerVersion> active_version,
+      bool last_chance,
+      const ServiceWorkerVersion::StatusCallback& callback);
+
  protected:
   explicit BackgroundSyncManager(
-      const scoped_refptr<ServiceWorkerContextWrapper>& context);
+      scoped_refptr<ServiceWorkerContextWrapper> context);
 
   // Init must be called before any public member function. Only call it once.
   void Init();
@@ -122,8 +129,8 @@ class CONTENT_EXPORT BackgroundSyncManager
           callback);
   virtual void DispatchSyncEvent(
       const std::string& tag,
-      const scoped_refptr<ServiceWorkerVersion>& active_version,
-      mojom::BackgroundSyncEventLastChance last_chance,
+      scoped_refptr<ServiceWorkerVersion> active_version,
+      blink::mojom::BackgroundSyncEventLastChance last_chance,
       const ServiceWorkerVersion::StatusCallback& callback);
   virtual void ScheduleDelayedTask(const base::Closure& callback,
                                    base::TimeDelta delay);
@@ -242,17 +249,16 @@ class CONTENT_EXPORT BackgroundSyncManager
       const base::Closure& event_fired_callback,
       const base::Closure& event_completed_callback,
       ServiceWorkerStatusCode service_worker_status,
-      const scoped_refptr<ServiceWorkerRegistration>&
-          service_worker_registration);
+      scoped_refptr<ServiceWorkerRegistration> service_worker_registration);
   void FireReadyEventsAllEventsFiring(const base::Closure& callback);
 
   // Called when a sync event has completed.
-  void EventComplete(const scoped_refptr<ServiceWorkerRegistration>&
-                         service_worker_registration,
-                     int64_t service_worker_id,
-                     const std::string& tag,
-                     const base::Closure& callback,
-                     ServiceWorkerStatusCode status_code);
+  void EventComplete(
+      scoped_refptr<ServiceWorkerRegistration> service_worker_registration,
+      int64_t service_worker_id,
+      const std::string& tag,
+      const base::Closure& callback,
+      ServiceWorkerStatusCode status_code);
   void EventCompleteImpl(int64_t service_worker_id,
                          const std::string& tag,
                          ServiceWorkerStatusCode status_code,
@@ -278,26 +284,7 @@ class CONTENT_EXPORT BackgroundSyncManager
   void SetMaxSyncAttemptsImpl(int max_sync_attempts,
                               const base::Closure& callback);
 
-  // Operation Scheduling callback and convenience functions.
-  template <typename CallbackT, typename... Params>
-  void CompleteOperationCallback(const CallbackT& callback,
-                                 Params... parameters);
-  void CompleteStatusAndRegistrationCallback(
-      StatusAndRegistrationCallback callback,
-      BackgroundSyncStatus status,
-      std::unique_ptr<BackgroundSyncRegistration> registration);
-  void CompleteStatusAndRegistrationsCallback(
-      StatusAndRegistrationsCallback callback,
-      BackgroundSyncStatus status,
-      std::unique_ptr<ScopedVector<BackgroundSyncRegistration>> registrations);
   base::Closure MakeEmptyCompletion();
-  base::Closure MakeClosureCompletion(const base::Closure& callback);
-  StatusAndRegistrationCallback MakeStatusAndRegistrationCompletion(
-      const StatusAndRegistrationCallback& callback);
-  StatusAndRegistrationsCallback MakeStatusAndRegistrationsCompletion(
-      const StatusAndRegistrationsCallback& callback);
-  BackgroundSyncManager::StatusCallback MakeStatusCompletion(
-      const StatusCallback& callback);
 
   SWIdToRegistrationsMap active_registrations_;
   CacheStorageScheduler op_scheduler_;

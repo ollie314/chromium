@@ -4,24 +4,31 @@
 
 #import "ios/web/shell/view_controller.h"
 
+#import <MobileCoreServices/MobileCoreServices.h>
+
 #include <stdint.h>
 
 #include <memory>
 #include <utility>
 
-#include "base/mac/objc_property_releaser.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/net/cookies/cookie_store_ios.h"
 #import "ios/net/crn_http_protocol_handler.h"
 #import "ios/net/empty_nsurlcache.h"
+#import "ios/net/request_tracker.h"
+#import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/referrer.h"
+#import "ios/web/public/web_state/context_menu_params.h"
 #include "ios/web/public/web_state/web_state.h"
 #import "ios/web/public/web_state/web_state_delegate_bridge.h"
 #import "ios/web/public/web_state/web_state_observer_bridge.h"
-#include "ios/web/shell/shell_browser_state.h"
-#include "ios/web/web_state/web_state_impl.h"
+#import "net/base/mac/url_conversions.h"
 #include "ui/base/page_transition_types.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 NSString* const kWebShellBackButtonAccessibilityLabel = @"Back";
 NSString* const kWebShellForwardButtonAccessibilityLabel = @"Forward";
@@ -31,16 +38,15 @@ using web::NavigationManager;
 
 @interface ViewController ()<CRWWebStateDelegate,
                              CRWWebStateObserver,
-                             UITextFieldDelegate> {
+                             UITextFieldDelegate,
+                             UIToolbarDelegate> {
   web::BrowserState* _browserState;
-  std::unique_ptr<web::WebStateImpl> _webState;
+  std::unique_ptr<web::WebState> _webState;
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserver;
   std::unique_ptr<web::WebStateDelegateBridge> _webStateDelegate;
-
-  base::mac::ObjCPropertyReleaser _propertyReleaser_ViewController;
 }
 @property(nonatomic, assign, readonly) NavigationManager* navigationManager;
-@property(nonatomic, readwrite, retain) UITextField* field;
+@property(nonatomic, readwrite, strong) UITextField* field;
 @end
 
 @implementation ViewController
@@ -50,9 +56,8 @@ using web::NavigationManager;
 @synthesize toolbarView = _toolbarView;
 
 - (instancetype)initWithBrowserState:(web::BrowserState*)browserState {
-  self = [super initWithNibName:@"MainView" bundle:nil];
+  self = [super initWithNibName:nil bundle:nil];
   if (self) {
-    _propertyReleaser_ViewController.Init(self, [ViewController class]);
     _browserState = browserState;
   }
   return self;
@@ -61,11 +66,31 @@ using web::NavigationManager;
 - (void)dealloc {
   net::HTTPProtocolHandlerDelegate::SetInstance(nullptr);
   net::RequestTracker::SetRequestTrackerFactory(nullptr);
-  [super dealloc];
 }
 
 - (void)viewDidLoad {
   [super viewDidLoad];
+
+  CGRect bounds = self.view.bounds;
+
+  // Set up the toolbar.
+  _toolbarView = [[UIToolbar alloc] init];
+  _toolbarView.barTintColor =
+      [UIColor colorWithRed:0.337 green:0.467 blue:0.988 alpha:1.0];
+  _toolbarView.frame = CGRectMake(0, 20, CGRectGetWidth(bounds), 44);
+  _toolbarView.autoresizingMask =
+      UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleBottomMargin;
+  _toolbarView.delegate = self;
+  [self.view addSubview:_toolbarView];
+
+  // Set up the container view.
+  _containerView = [[UIView alloc] init];
+  _containerView.frame =
+      CGRectMake(0, 64, CGRectGetWidth(bounds), CGRectGetHeight(bounds) - 64);
+  _containerView.backgroundColor = [UIColor lightGrayColor];
+  _containerView.autoresizingMask =
+      UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  [self.view addSubview:_containerView];
 
   // Set up the toolbar buttons.
   UIButton* back = [UIButton buttonWithType:UIButtonTypeCustom];
@@ -111,8 +136,8 @@ using web::NavigationManager;
   // Set up the network stack before creating the WebState.
   [self setUpNetworkStack];
 
-  _webState.reset(new web::WebStateImpl(_browserState));
-  _webState->GetNavigationManagerImpl().InitializeSession(nil, nil, NO, 0);
+  web::WebState::CreateParams webStateCreateParams(_browserState);
+  _webState = web::WebState::Create(webStateCreateParams);
   _webState->SetWebUsageEnabled(true);
 
   _webStateObserver.reset(
@@ -131,6 +156,10 @@ using web::NavigationManager;
 
 - (NavigationManager*)navigationManager {
   return _webState->GetNavigationManager();
+}
+
+- (web::WebState*)webState {
+  return _webState.get();
 }
 
 - (void)setUpNetworkStack {
@@ -256,6 +285,45 @@ using web::NavigationManager;
 - (void)webStateDidLoadPage:(web::WebState*)webState {
   DCHECK_EQ(_webState.get(), webState);
   [self updateToolbar];
+}
+
+// -----------------------------------------------------------------------
+// WebStateDelegate implementation.
+
+- (BOOL)webState:(web::WebState*)webState
+    handleContextMenu:(const web::ContextMenuParams&)params {
+  GURL link = params.link_url;
+  if (!link.is_valid()) {
+    return NO;
+  }
+
+  UIAlertController* alert = [UIAlertController
+      alertControllerWithTitle:params.menu_title
+                       message:nil
+                preferredStyle:UIAlertControllerStyleActionSheet];
+  alert.popoverPresentationController.sourceView = params.view;
+  alert.popoverPresentationController.sourceRect =
+      CGRectMake(params.location.x, params.location.y, 1.0, 1.0);
+
+  void (^handler)(UIAlertAction*) = ^(UIAlertAction*) {
+    NSDictionary* item = @{
+      static_cast<NSString*>(kUTTypeURL) : net::NSURLWithGURL(link),
+      static_cast<NSString*>(kUTTypeUTF8PlainText) : [base::SysUTF8ToNSString(
+          link.spec()) dataUsingEncoding:NSUTF8StringEncoding],
+    };
+    [[UIPasteboard generalPasteboard] setItems:@[ item ]];
+  };
+  [alert addAction:[UIAlertAction actionWithTitle:@"Copy Link"
+                                            style:UIAlertActionStyleDefault
+                                          handler:handler]];
+
+  [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                            style:UIAlertActionStyleCancel
+                                          handler:nil]];
+
+  [self presentViewController:alert animated:YES completion:nil];
+
+  return YES;
 }
 
 @end

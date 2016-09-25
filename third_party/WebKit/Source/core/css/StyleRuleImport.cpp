@@ -38,7 +38,7 @@ StyleRuleImport* StyleRuleImport::create(const String& href, MediaQuerySet* medi
 StyleRuleImport::StyleRuleImport(const String& href, MediaQuerySet* media)
     : StyleRuleBase(Import)
     , m_parentStyleSheet(nullptr)
-    , m_styleSheetClient(this)
+    , m_styleSheetClient(new ImportedStyleSheetClient(this))
     , m_strHref(href)
     , m_mediaQueries(media)
     , m_loading(false)
@@ -56,7 +56,7 @@ StyleRuleImport::~StyleRuleImport()
 void StyleRuleImport::dispose()
 {
     if (m_resource)
-        m_resource->removeClient(&m_styleSheetClient);
+        m_resource->removeClient(m_styleSheetClient);
     m_resource = nullptr;
 }
 
@@ -80,6 +80,8 @@ void StyleRuleImport::setCSSStyleSheet(const String& href, const KURL& baseURL, 
     Document* document = m_parentStyleSheet ? m_parentStyleSheet->singleOwnerDocument() : nullptr;
     if (!baseURL.isNull()) {
         context.setBaseURL(baseURL);
+        if (document)
+            context.setReferrer(Referrer(baseURL.strippedForUseAsReferrer(), document->getReferrerPolicy()));
     }
 
     m_styleSheet = StyleSheetContents::create(this, href, context);
@@ -138,7 +140,7 @@ void StyleRuleImport::requestStyleSheet()
         if (m_parentStyleSheet && m_parentStyleSheet->loadCompleted() && rootSheet == m_parentStyleSheet)
             m_parentStyleSheet->startLoadingDynamicSheet();
         m_loading = true;
-        m_resource->addClient(&m_styleSheetClient);
+        m_resource->addClient(m_styleSheetClient);
     }
 }
 

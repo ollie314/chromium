@@ -10,6 +10,35 @@ from telemetry import benchmark
 DESKTOP_PLATFORMS = ['mac', 'linux', 'win', 'chromeos']
 WEBVIEW_PLATFORMS = ['android-webview', 'android-webview-shell']
 
+
+class ChromeProxyBypassOnTimeout(ChromeProxyBenchmark):
+  """Check that the proxy bypasses when origin times out.
+
+  If the origin site does not make an HTTP response in a reasonable
+  amount of time, the proxy should bypass.
+  """
+  tag = 'timeout_bypass'
+  test = measurements.ChromeProxyBypassOnTimeout
+  page_set = pagesets.BypassOnTimeoutStorySet
+
+  @classmethod
+  def Name(cls):
+    return 'chrome_proxy_benchmark.timeout_bypass.timeout_bypass'
+
+class ChromeProxyBadHTTPSFallback(ChromeProxyBenchmark):
+  """Check that the client falls back to HTTP on bad HTTPS response.
+
+  If the HTTPS proxy responds with a bad response code (like 500) then the
+  client should fallback to HTTP.
+  """
+  tag = 'badhttps_bypass'
+  test = measurements.ChromeProxyBadHTTPSFallback
+  page_set = pagesets.SyntheticStorySet
+
+  @classmethod
+  def Name(cls):
+    return 'chrome_proxy_benchmark.badhttps_fallback.badhttps_fallback'
+
 class ChromeProxyClientType(ChromeProxyBenchmark):
   tag = 'client_type'
   test = measurements.ChromeProxyClientType
@@ -235,6 +264,14 @@ class ChromeProxySmoke(ChromeProxyBenchmark):
   def Name(cls):
     return 'chrome_proxy_benchmark.smoke.smoke'
 
+class ChromeProxyQuicSmoke(ChromeProxyBenchmark):
+  tag = 'smoke'
+  test = measurements.ChromeProxyQuicSmoke
+  page_set = pagesets.SmokeStorySet
+
+  @classmethod
+  def Name(cls):
+    return 'chrome_proxy_benchmark.quic.smoke'
 
 class ChromeProxyClientConfig(ChromeProxyBenchmark):
   tag = 'client_config'
@@ -307,3 +344,24 @@ class ChromeProxyVideoAudio(benchmark.Benchmark):
   @classmethod
   def Name(cls):
     return 'chrome_proxy_benchmark.video.audio'
+
+class ChromeProxyPingback(ChromeProxyBenchmark):
+  """Check that the pingback is sent and the server responds. """
+  tag = 'pingback'
+  test = measurements.ChromeProxyPingback
+  page_set = pagesets.PingbackStorySet
+
+  @classmethod
+  def Name(cls):
+    return 'chrome_proxy_benchmark.pingback'
+
+class ChromeProxyQuicTransaction(ChromeProxyBenchmark):
+  """Check that Chrome uses QUIC correctly when connecting to a proxy
+  that supports QUIC. """
+  tag = 'quic-proxy'
+  test = measurements.ChromeProxyQuicTransaction
+  page_set = pagesets.QuicStorySet
+
+  @classmethod
+  def Name(cls):
+    return 'chrome_proxy_benchmark.quic.transaction'

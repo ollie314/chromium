@@ -74,6 +74,17 @@
           },
 
           /**
+           * By default, the dropdown will constrain scrolling on the page
+           * to itself when opened.
+           * Set to true in order to prevent scroll from being constrained
+           * to the dropdown when it opens.
+           */
+          allowOutsideScroll: {
+            type: Boolean,
+            value: false
+          },
+
+          /**
            * Set to true to disable the floating label. Bind this to the
            * `<paper-input-container>`'s `noLabelFloat` property.
            */
@@ -135,6 +146,7 @@
         },
 
         hostAttributes: {
+          tabindex: 0,
           role: 'combobox',
           'aria-autocomplete': 'none',
           'aria-haspopup': 'true'
@@ -216,7 +228,7 @@
           if (!selectedItem) {
             value = '';
           } else {
-            value = selectedItem.label || selectedItem.textContent.trim();
+            value = selectedItem.label || selectedItem.getAttribute('label') || selectedItem.textContent.trim();
           }
 
           this._setValue(value);
@@ -274,12 +286,7 @@
           if (this.$.input && this.$.input.textContent !== this.value) {
             this.$.input.textContent = this.value;
           }
-
-          if (this.value || this.value === 0 || this.value === false) {
-            this._setHasContent(true);
-          } else {
-            this._setHasContent(false);
-          }
+          this._setHasContent(!!this.value);
         },
       });
     })();

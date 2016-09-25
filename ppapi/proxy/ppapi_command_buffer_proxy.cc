@@ -41,10 +41,6 @@ PpapiCommandBufferProxy::~PpapiCommandBufferProxy() {
   // deleted, closing the handle in this process.
 }
 
-bool PpapiCommandBufferProxy::Initialize() {
-  return true;
-}
-
 gpu::CommandBuffer::State PpapiCommandBufferProxy::GetLastState() {
   ppapi::ProxyLock::AssertAcquiredDebugOnly();
   return last_state_;
@@ -177,11 +173,6 @@ void PpapiCommandBufferProxy::DestroyTransferBuffer(int32_t id) {
 
 void PpapiCommandBufferProxy::SetLock(base::Lock*) {
   NOTIMPLEMENTED();
-}
-
-bool PpapiCommandBufferProxy::IsGpuChannelLost() {
-  NOTIMPLEMENTED();
-  return false;
 }
 
 void PpapiCommandBufferProxy::EnsureWorkVisible() {

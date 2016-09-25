@@ -7,7 +7,7 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
   /** @const */ var INJECTED_WEBVIEW_SCRIPT = String.raw`
                       (function() {
                          <include src="../keyboard/keyboard_utils.js">
-                         keyboard.initializeKeyboardFlow();
+                         keyboard.initializeKeyboardFlow(true);
                        })();`;
 
   /** @const */ var STEP_SIGNIN = 'signin';
@@ -15,6 +15,7 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
   /** @const */ var STEP_ATTRIBUTE_PROMPT = 'attribute-prompt';
   /** @const */ var STEP_ERROR = 'error';
   /** @const */ var STEP_SUCCESS = 'success';
+  /** @const */ var STEP_ABE_SUCCESS = 'abe-success';
 
   /* TODO(dzhioev): define this step on C++ side.
   /** @const */ var STEP_ATTRIBUTE_PROMPT_ERROR = 'attribute-prompt-error';
@@ -27,6 +28,7 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
       'showError',
       'doReload',
       'showAttributePromptStep',
+      'showAttestationBasedEnrollmentSuccess',
     ],
 
     /**
@@ -70,6 +72,24 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
 
       this.authenticator_ =
           new cr.login.Authenticator($('oauth-enroll-auth-view'));
+
+      // Establish an initial messaging between content script and
+      // host script so that content script can message back.
+      $('oauth-enroll-auth-view').addEventListener('loadstop',
+          function(e) {
+            e.target.contentWindow.postMessage(
+                'initialMessage', $('oauth-enroll-auth-view').src);
+          });
+
+      // When we get the advancing focus command message from injected content
+      // script, we can execute it on host script context.
+      window.addEventListener('message',
+          function(e) {
+            if (e.data == 'forwardFocus')
+              keyboard.onAdvanceFocus(false);
+            else if (e.data == 'backwardFocus')
+              keyboard.onAdvanceFocus(true);
+          });
 
       this.authenticator_.addEventListener('ready',
           (function() {
@@ -138,6 +158,8 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
       $('oauth-enroll-attribute-prompt-error-card').addEventListener(
           'buttonclick', doneCallback);
       $('oauth-enroll-success-card').addEventListener(
+          'buttonclick', doneCallback);
+      $('oauth-enroll-abe-success-card').addEventListener(
           'buttonclick', doneCallback);
 
       this.navigation_.addEventListener('close', this.cancel.bind(this));
@@ -224,14 +246,25 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
      * Shows attribute-prompt step with pre-filled asset ID and
      * location.
      */
-    showAttributePromptStep: function(annotated_asset_id, annotated_location) {
-      $('oauth-enroll-asset-id').value = annotated_asset_id;
-      $('oauth-enroll-location').value = annotated_location;
+    showAttributePromptStep: function(annotatedAssetId, annotatedLocation) {
+      $('oauth-enroll-asset-id').value = annotatedAssetId;
+      $('oauth-enroll-location').value = annotatedLocation;
       this.showStep(STEP_ATTRIBUTE_PROMPT);
     },
 
     /**
-     * Cancels enrollment and drops the user back to the login screen.
+     * Shows a success card for attestation-based enrollment that shows
+     * which domain the device was enrolled into.
+     */
+    showAttestationBasedEnrollmentSuccess: function(device, enterpriseDomain) {
+      $('oauth-enroll-abe-success-card').innerHTML = loadTimeData.getStringF(
+          'oauthEnrollAbeSuccess', device, enterpriseDomain);
+      this.showStep(STEP_ABE_SUCCESS);
+    },
+
+    /**
+     * Cancels the current authentication and drops the user back to the next
+     * screen (either the next authentication or the login screen).
      */
     cancel: function() {
       if (this.isCancelDisabled)
@@ -255,6 +288,8 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
         $('oauth-enroll-error-card').submitButton.focus();
       } else if (step == STEP_SUCCESS) {
         $('oauth-enroll-success-card').submitButton.focus();
+      } else if (step == STEP_ABE_SUCCESS) {
+        $('oauth-enroll-abe-success-card').submitButton.focus();
       } else if (step == STEP_ATTRIBUTE_PROMPT) {
         $('oauth-enroll-asset-id').focus();
       } else if (step == STEP_ATTRIBUTE_PROMPT_ERROR) {
@@ -277,6 +312,7 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
         this.showStep(STEP_ATTRIBUTE_PROMPT_ERROR);
         return;
       }
+      this.isCancelDisabled_ = false;  // Re-enable if called before Gaia loads.
       $('oauth-enroll-error-card').textContent = message;
       $('oauth-enroll-error-card').buttonLabel =
           retry ? loadTimeData.getString('oauthEnrollRetry') : '';

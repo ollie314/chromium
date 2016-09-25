@@ -4,35 +4,42 @@
 
 #include "chrome/browser/ui/bluetooth/bluetooth_chooser_desktop.h"
 
-#include "chrome/browser/ui/bluetooth/bluetooth_chooser_bubble_controller.h"
+#include "base/logging.h"
+#include "chrome/browser/ui/bluetooth/bluetooth_chooser_controller.h"
 
 BluetoothChooserDesktop::BluetoothChooserDesktop(
-    const content::BluetoothChooser::EventHandler& event_handler)
-    : event_handler_(event_handler),
-      bluetooth_chooser_bubble_controller_(nullptr) {}
-
-BluetoothChooserDesktop::~BluetoothChooserDesktop() {
-  if (bluetooth_chooser_bubble_controller_)
-    bluetooth_chooser_bubble_controller_->set_bluetooth_chooser(nullptr);
+    BluetoothChooserController* bluetooth_chooser_controller)
+    : bluetooth_chooser_controller_(bluetooth_chooser_controller) {
+  DCHECK(bluetooth_chooser_controller_);
 }
 
-void BluetoothChooserDesktop::SetAdapterPresence(AdapterPresence presence) {}
+BluetoothChooserDesktop::~BluetoothChooserDesktop() {
+  // This satisfies the WebContentsDelegate::RunBluetoothChooser() requirement
+  // that the EventHandler can be destroyed any time after the BluetoothChooser
+  // instance.
+  bluetooth_chooser_controller_->ResetEventHandler();
+}
 
-void BluetoothChooserDesktop::ShowDiscoveryState(DiscoveryState state) {}
+void BluetoothChooserDesktop::SetAdapterPresence(AdapterPresence presence) {
+  bluetooth_chooser_controller_->OnAdapterPresenceChanged(presence);
+}
 
-void BluetoothChooserDesktop::AddDevice(const std::string& device_id,
-                                        const base::string16& device_name) {
-  if (bluetooth_chooser_bubble_controller_)
-    bluetooth_chooser_bubble_controller_->AddDevice(device_id, device_name);
+void BluetoothChooserDesktop::ShowDiscoveryState(DiscoveryState state) {
+  bluetooth_chooser_controller_->OnDiscoveryStateChanged(state);
+}
+
+void BluetoothChooserDesktop::AddOrUpdateDevice(
+    const std::string& device_id,
+    bool should_update_name,
+    const base::string16& device_name,
+    bool is_gatt_connected,
+    bool is_paired,
+    int signal_strength_level) {
+  bluetooth_chooser_controller_->AddOrUpdateDevice(
+      device_id, should_update_name, device_name, is_gatt_connected, is_paired,
+      signal_strength_level);
 }
 
 void BluetoothChooserDesktop::RemoveDevice(const std::string& device_id) {
-  if (bluetooth_chooser_bubble_controller_)
-    bluetooth_chooser_bubble_controller_->RemoveDevice(device_id);
-}
-
-void BluetoothChooserDesktop::CallEventHandler(
-    content::BluetoothChooser::Event event,
-    const std::string& device_id) {
-  event_handler_.Run(event, device_id);
+  bluetooth_chooser_controller_->RemoveDevice(device_id);
 }

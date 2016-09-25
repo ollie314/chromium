@@ -4,8 +4,8 @@
 
 #include "extensions/browser/quota_service.h"
 
-#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/common/error_utils.h"
 
@@ -14,16 +14,18 @@ namespace {
 // If the browser stays open long enough, we reset state once a day.
 // Whatever this value is, it should be an order of magnitude longer than
 // the longest interval in any of the QuotaLimitHeuristics in use.
-const int kPurgeIntervalInDays = 1;
+constexpr int kPurgeIntervalInDays = 1;
 
-const char kOverQuotaError[] = "This request exceeds the * quota.";
+constexpr char kOverQuotaError[] = "This request exceeds the * quota.";
+
+bool g_purge_disabled_for_testing = false;
 
 }  // namespace
 
 namespace extensions {
 
 QuotaService::QuotaService() {
-  if (base::MessageLoop::current() != NULL) {  // Null in unit tests.
+  if (!g_purge_disabled_for_testing && base::ThreadTaskRunnerHandle::IsSet()) {
     purge_timer_.Start(FROM_HERE,
                        base::TimeDelta::FromDays(kPurgeIntervalInDays),
                        this,
@@ -76,10 +78,20 @@ std::string QuotaService::Assess(const std::string& extension_id,
   return error;
 }
 
+QuotaService::ScopedDisablePurgeForTesting::ScopedDisablePurgeForTesting() {
+  DCHECK(!g_purge_disabled_for_testing);
+  g_purge_disabled_for_testing = true;
+}
+
+QuotaService::ScopedDisablePurgeForTesting::~ScopedDisablePurgeForTesting() {
+  DCHECK(g_purge_disabled_for_testing);
+  g_purge_disabled_for_testing = false;
+}
+
 void QuotaService::PurgeFunctionHeuristicsMap(FunctionHeuristicsMap* map) {
   FunctionHeuristicsMap::iterator heuristics = map->begin();
   while (heuristics != map->end()) {
-    STLDeleteElements(&heuristics->second);
+    base::STLDeleteElements(&heuristics->second);
     map->erase(heuristics++);
   }
 }

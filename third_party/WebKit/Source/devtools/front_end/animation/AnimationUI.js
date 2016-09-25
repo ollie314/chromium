@@ -305,7 +305,7 @@ WebInspector.AnimationUI.prototype = {
      */
     _mouseDown: function(mouseEventType, keyframeIndex, event)
     {
-        if (event.buttons == 2)
+        if (event.buttons === 2)
             return false;
         if (this._svg.enclosingNodeOrSelfWithClass("animation-node-removed"))
             return false;
@@ -321,7 +321,7 @@ WebInspector.AnimationUI.prototype = {
     /**
      * @param {!Event} event
      */
-    _mouseMove: function (event)
+    _mouseMove: function(event)
     {
         this._movementInMs = (event.clientX - this._downMouseX) / this._timeline.pixelMsRatio();
         if (this._delay() + this._duration() > this._timeline.duration() * 0.8)

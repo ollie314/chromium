@@ -10,19 +10,25 @@
 #include <memory>
 #include <string>
 
+#include "ash/common/material_design/material_design_controller.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/gfx/display.h"
+#include "ui/display/display.h"
 #include "ui/wm/public/window_types.h"
 
 #if defined(OS_WIN)
 #include "ui/base/win/scoped_ole_initializer.h"
 #endif
+
+namespace aura {
+class RootWindow;
+class Window;
+class WindowDelegate;
+}  // namespace aura
 
 namespace gfx {
 class Rect;
@@ -34,23 +40,22 @@ class EventGenerator;
 }
 }
 
-namespace aura {
-class RootWindow;
-class Window;
-class WindowDelegate;
-}  // namespace aura
+namespace views {
+class Widget;
+class WidgetDelegate;
+}
 
 namespace ash {
 class DisplayManager;
+class SystemTray;
+class WmShelf;
 
 namespace test {
 
+class AshTestEnvironment;
 class AshTestHelper;
 class TestScreenshotDelegate;
 class TestSystemTrayDelegate;
-#if defined(OS_WIN)
-class TestMetroViewerProcessHost;
-#endif
 
 class AshTestBase : public testing::Test {
  public:
@@ -61,6 +66,12 @@ class AshTestBase : public testing::Test {
   void SetUp() override;
   void TearDown() override;
 
+  // Returns the WmShelf for the primary display.
+  static WmShelf* GetPrimaryShelf();
+
+  // Returns the system tray on the primary display.
+  static SystemTray* GetPrimarySystemTray();
+
   // Update the display configuration as given in |display_specs|.
   // See ash::test::DisplayManagerTestApi::UpdateDisplay for more details.
   void UpdateDisplay(const std::string& display_specs);
@@ -69,6 +80,13 @@ class AshTestBase : public testing::Test {
   // method can return NULL sometimes, and in those cases, we fall back on the
   // primary root Window.
   aura::Window* CurrentContext();
+
+  // Creates and shows a widget. See ash/common/shell_window_ids.h for values
+  // for |container_id|.
+  static std::unique_ptr<views::Widget> CreateTestWidget(
+      views::WidgetDelegate* delegate,
+      int container_id,
+      const gfx::Rect& bounds);
 
   // Versions of the functions in aura::test:: that go through our shell
   // StackingController instead of taking a parent.
@@ -105,10 +123,10 @@ class AshTestBase : public testing::Test {
   };
 
   // Returns the rotation currentl active for the display |id|.
-  static gfx::Display::Rotation GetActiveDisplayRotation(int64_t id);
+  static display::Display::Rotation GetActiveDisplayRotation(int64_t id);
 
   // Returns the rotation currently active for the internal display.
-  static gfx::Display::Rotation GetCurrentInternalDisplayRotation();
+  static display::Display::Rotation GetCurrentInternalDisplayRotation();
 
   // Proxy to AshTestHelper::SupportsMultipleDisplays().
   static bool SupportsMultipleDisplays();
@@ -118,11 +136,19 @@ class AshTestBase : public testing::Test {
 
   void set_start_session(bool start_session) { start_session_ = start_session; }
 
+  // Sets material mode for the test. This will override material mode set via
+  // command line switches.
+  void set_material_mode(MaterialDesignController::Mode material_mode) {
+    CHECK(!setup_called_);
+    material_mode_ = material_mode;
+  }
+
   AshTestHelper* ash_test_helper() { return ash_test_helper_.get(); }
 
   void RunAllPendingInMessageLoop();
 
   TestScreenshotDelegate* GetScreenshotDelegate();
+
   TestSystemTrayDelegate* GetSystemTrayDelegate();
 
   // Utility methods to emulate user logged in or not, session started or not
@@ -149,7 +175,8 @@ class AshTestBase : public testing::Test {
   bool teardown_called_;
   // |SetUp()| doesn't activate session if this is set to false.
   bool start_session_;
-  std::unique_ptr<content::TestBrowserThreadBundle> thread_bundle_;
+  MaterialDesignController::Mode material_mode_;
+  std::unique_ptr<AshTestEnvironment> ash_test_environment_;
   std::unique_ptr<AshTestHelper> ash_test_helper_;
   std::unique_ptr<ui::test::EventGenerator> event_generator_;
 #if defined(OS_WIN)
@@ -161,9 +188,7 @@ class AshTestBase : public testing::Test {
 
 class NoSessionAshTestBase : public AshTestBase {
  public:
-  NoSessionAshTestBase() {
-    set_start_session(false);
-  }
+  NoSessionAshTestBase() { set_start_session(false); }
   ~NoSessionAshTestBase() override {}
 
  private:

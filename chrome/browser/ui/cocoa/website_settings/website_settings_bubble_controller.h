@@ -19,6 +19,10 @@ namespace content {
 class WebContents;
 }
 
+namespace net {
+class X509Certificate;
+}
+
 // This NSWindowController subclass manages the InfoBubbleWindow and view that
 // are displayed when the user clicks the favicon or security lock icon.
 //
@@ -33,26 +37,38 @@ class WebContents;
   // The main content view for the Permissions tab.
   NSView* securitySectionView_;
 
-  // Displays the web site identity.
-  NSTextField* identityField_;
-
-  // Displays the security summary for the page (private/not private/etc.).
+  // Displays the short security summary for the page
+  // (private/not private/etc.).
   NSTextField* securitySummaryField_;
+
+  // Displays a longer explanation of the page's security state, and how the
+  // user should treat it.
+  NSTextField* securityDetailsField_;
 
   // The link button for opening security details for the page. This is the
   // DevTools Security panel for most users, but may be the certificate viewer
   // for enterprise users with DevTools disabled.
   NSButton* securityDetailsButton_;
 
+  // URL of the page for which the bubble is shown.
+  GURL url_;
+
+  // Displays a paragraph to accompany the reset decisions button, explaining
+  // that the user has made a decision to trust an invalid security certificate
+  // for the current site.
+  // This field only shows when there is an acrive certificate exception.
+  NSTextField* resetDecisionsField_;
+
+  // The link button for revoking certificate decisions.
+  // This link only shows when there is an acrive certificate exception.
+  NSButton* resetDecisionsButton_;
+
   // Whether DevTools is disabled for the relevant profile.
   BOOL isDevToolsDisabled_;
 
-  // The ID of the server certificate from the identity info. This should
-  // always be non-zero on a cryptographic connection, and 0 otherwise.
-  int certificateId_;
-
-  // The link button for revoking certificate decisions.
-  NSButton* resetDecisionsButton_;
+  // The server certificate from the identity info. This should always be
+  // non-null on a cryptographic connection, and null otherwise.
+  scoped_refptr<net::X509Certificate> certificate_;
 
   // Separator line.
   NSView* separatorAfterSecuritySection_;
@@ -87,7 +103,7 @@ class WebContents;
 - (id)initWithParentWindow:(NSWindow*)parentWindow
     websiteSettingsUIBridge:(WebsiteSettingsUIBridge*)bridge
                 webContents:(content::WebContents*)webContents
-             isInternalPage:(BOOL)isInternalPage
+                        url:(const GURL&)url
          isDevToolsDisabled:(BOOL)isDevToolsDisabled;
 
 // Return the default width of the window. It may be wider to fit the content.
@@ -107,7 +123,7 @@ class WebsiteSettingsUIBridge : public content::WebContentsObserver,
   // Creates a |WebsiteSettingsBubbleController| and displays the UI. |parent|
   // is the currently active window. |profile| points to the currently active
   // profile. |web_contents| points to the WebContents that wraps the currently
-  // active tab. |url| is the GURL of the currently active
+  // active tab. |virtual_url| is the virtual GURL of the currently active
   // tab. |security_info| is the
   // |security_state::SecurityStateModel::SecurityInfo| of
   // the connection to the website in the currently active tab.
@@ -115,7 +131,7 @@ class WebsiteSettingsUIBridge : public content::WebContentsObserver,
       gfx::NativeWindow parent,
       Profile* profile,
       content::WebContents* web_contents,
-      const GURL& url,
+      const GURL& virtual_url,
       const security_state::SecurityStateModel::SecurityInfo& security_info);
 
   void set_bubble_controller(

@@ -14,6 +14,13 @@ cr.define('cr.ui', function() {
   var DisplayManager = cr.ui.login.DisplayManager;
 
   /**
+   * Maximum possible height of the #login-header-bar, including the padding
+   * and the border.
+   * @const {number}
+   */
+  var MAX_LOGIN_HEADER_BAR_HEIGHT = 57;
+
+  /**
    * Manages initialization of screens, transitions, and error messages.
    * @constructor
    * @extends {DisplayManager}
@@ -24,6 +31,47 @@ cr.define('cr.ui', function() {
 
   UserManager.prototype = {
     __proto__: DisplayManager.prototype,
+
+    /**
+     * Indicates that this is the Material Design Desktop User Manager.
+     * @type {boolean}
+     */
+    newDesktopUserManager: true,
+
+    /**
+     * Indicates whether the user pods page is visible.
+     * @type {boolean}
+     */
+    userPodsPageVisible: true,
+
+    /**
+     * @override
+     * Overrides clientAreaSize in DisplayManager. When a new profile is created
+     * the user pods page may not be visible yet, so user-pods cannot be
+     * placed correctly. Therefore, we use dimensions of the #animated-pages.
+     * @type {{width: number, height: number}}
+     */
+    get clientAreaSize() {
+      var userManagerPages = document.querySelector('user-manager-pages');
+      var width = userManagerPages.offsetWidth;
+      // Deduct the maximum possible height of the #login-header-bar from the
+      // height of #animated-pages. Result is the remaining visible height.
+      var height = userManagerPages.offsetHeight - MAX_LOGIN_HEADER_BAR_HEIGHT;
+      return {width: width, height: height};
+    }
+  };
+
+  /**
+   * Listens for the page change event to see if the user pods page is visible.
+   * Updates userPodsPageVisible property accordingly and if the page is visible
+   * re-arranges the user pods.
+   * @param {!Event} event The event containing ID of the selected page.
+   */
+  UserManager.onPageChanged_ = function(event) {
+    var userPodsPageVisible = event.detail.page == 'user-pods-page';
+    cr.ui.UserManager.getInstance().userPodsPageVisible = userPodsPageVisible;
+    if (userPodsPageVisible)
+      $('pod-row').rebuildPods();
   };
 
   /**
@@ -36,6 +84,7 @@ cr.define('cr.ui', function() {
 
     signin.ProfileBrowserProxyImpl.getInstance().initializeUserManager(
         window.location.hash);
+    cr.addWebUIListener('show-error-dialog', cr.ui.UserManager.showErrorDialog);
   };
 
   /**
@@ -102,6 +151,14 @@ cr.define('cr.ui', function() {
     DisplayManager.clearErrors();
   };
 
+  /**
+   * Shows the error dialog populated with the given message.
+   * @param {string} message Error message to show.
+   */
+  UserManager.showErrorDialog = function(message) {
+    document.querySelector('error-dialog').show(message);
+  };
+
   // Export
   return {
     UserManager: UserManager
@@ -121,3 +178,5 @@ disableTextSelectAndDrag(function(e) {
 });
 
 document.addEventListener('DOMContentLoaded', cr.ui.UserManager.initialize);
+
+document.addEventListener('change-page', cr.ui.UserManager.onPageChanged_);

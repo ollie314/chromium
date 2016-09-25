@@ -41,12 +41,10 @@ Value::Value(const ParseNode* origin, int64_t int_val)
 
 Value::Value(const ParseNode* origin, std::string str_val)
     : type_(STRING),
-      string_value_(),
+      string_value_(std::move(str_val)),
       boolean_value_(false),
       int_value_(0),
-      origin_(origin) {
-  string_value_.swap(str_val);
-}
+      origin_(origin) {}
 
 Value::Value(const ParseNode* origin, const char* str_val)
     : type_(STRING),
@@ -74,6 +72,8 @@ Value::Value(const Value& other)
   if (type() == SCOPE && other.scope_value_.get())
     scope_value_ = other.scope_value_->MakeClosure();
 }
+
+Value::Value(Value&& other) = default;
 
 Value::~Value() {
 }

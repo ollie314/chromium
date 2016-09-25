@@ -30,7 +30,7 @@ class HTMLProgressElement;
 
 class CORE_EXPORT LayoutProgress final : public LayoutBlockFlow {
 public:
-    explicit LayoutProgress(HTMLElement*);
+    explicit LayoutProgress(HTMLProgressElement*);
     ~LayoutProgress() override;
 
     double position() const { return m_position; }
@@ -52,7 +52,7 @@ protected:
 private:
     bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectProgress || LayoutBlockFlow::isOfType(type); }
 
-    void animationTimerFired(Timer<LayoutProgress>*);
+    void animationTimerFired(TimerBase*);
     void updateAnimationState();
 
     double m_position;

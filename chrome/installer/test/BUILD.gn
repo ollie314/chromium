@@ -17,13 +17,14 @@ executable("alternate_version_generator") {
     "//base",
     "//base/test:test_support",
     "//build/config/sanitizers:deps",
+    "//build/win:default_exe_manifest",
     "//chrome/common:constants",
     "//chrome/installer/util:with_rc_strings",
     "//testing/gtest",
   ]
 }
 
-source_set("alternate_version_generator_lib") {
+static_library("alternate_version_generator_lib") {
   testonly = true
   sources = [
     "alternate_version_generator.cc",
@@ -57,6 +58,6 @@ test("upgrade_test") {
     "//testing/gtest",
   ]
   data_deps = [
-    # 'mini_installer.gyp:mini_installer',  TODO(GYP)
+    "//chrome/installer/mini_installer",
   ]
 }

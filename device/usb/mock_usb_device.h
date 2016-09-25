@@ -7,11 +7,13 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "device/usb/usb_device.h"
 #include "device/usb/usb_device_handle.h"
+#include "device/usb/webusb_descriptors.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace device {
@@ -41,10 +43,16 @@ class MockUsbDevice : public UsbDevice {
                 const std::vector<UsbConfigDescriptor>& configurations);
 
   MOCK_METHOD1(Open, void(const OpenCallback&));
-  MOCK_CONST_METHOD0(GetActiveConfiguration,
-                     const device::UsbConfigDescriptor*());
 
-  // Public wrapper around UsbDevice::NotifyDeviceRemoved().
+  void AddMockConfig(const UsbConfigDescriptor& config);
+
+  void set_webusb_allowed_origins(
+      std::unique_ptr<WebUsbAllowedOrigins> webusb_allowed_origins) {
+    webusb_allowed_origins_ = std::move(webusb_allowed_origins);
+  }
+
+  // Public wrappers around protected functions.
+  void ActiveConfigurationChanged(int configuration_value);
   void NotifyDeviceRemoved();
 
  private:

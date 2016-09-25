@@ -32,11 +32,8 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/URLSearchParams.h"
 #include "core/fetch/MemoryCache.h"
-#include "core/fileapi/Blob.h"
 #include "core/html/PublicURLManager.h"
-#include "platform/blob/BlobURL.h"
-#include "platform/weborigin/SecurityOrigin.h"
-#include "wtf/TemporaryChange.h"
+#include "wtf/AutoReset.h"
 
 namespace blink {
 
@@ -83,37 +80,9 @@ void DOMURL::setSearch(const String& value)
         updateSearchParams(value);
 }
 
-String DOMURL::createObjectURL(ExecutionContext* executionContext, Blob* blob, ExceptionState& exceptionState)
-{
-    DCHECK(blob);
-    if (!executionContext)
-        return String();
-    if (blob->hasBeenClosed()) {
-        exceptionState.throwDOMException(InvalidStateError, String(blob->isFile() ? "File" : "Blob") + " has been closed.");
-        return String();
-    }
-    return createPublicURL(executionContext, blob, blob->uuid());
-}
-
 String DOMURL::createPublicURL(ExecutionContext* executionContext, URLRegistrable* registrable, const String& uuid)
 {
-    KURL publicURL = BlobURL::createPublicURL(executionContext->getSecurityOrigin());
-    if (publicURL.isEmpty())
-        return String();
-
-    executionContext->publicURLManager().registerURL(executionContext->getSecurityOrigin(), publicURL, registrable, uuid);
-
-    return publicURL.getString();
-}
-
-void DOMURL::revokeObjectURL(ExecutionContext* executionContext, const String& urlString)
-{
-    if (!executionContext)
-        return;
-
-    KURL url(KURL(), urlString);
-    executionContext->removeURLFromMemoryCache(url);
-    executionContext->publicURLManager().revoke(url);
+    return executionContext->publicURLManager().registerURL(executionContext, registrable, uuid);
 }
 
 void DOMURL::revokeObjectUUID(ExecutionContext* executionContext, const String& uuid)
@@ -142,7 +111,7 @@ void DOMURL::updateSearchParams(const String& queryString)
     if (!m_searchParams)
         return;
 
-    TemporaryChange<bool> scope(m_isInUpdate, true);
+    AutoReset<bool> scope(&m_isInUpdate, true);
     ASSERT(m_searchParams->urlObject() == this);
     m_searchParams->setInput(queryString);
 }

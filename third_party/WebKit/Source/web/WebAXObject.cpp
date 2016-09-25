@@ -35,11 +35,11 @@
 #include "core/css/CSSPrimitiveValueMappings.h"
 #include "core/dom/Document.h"
 #include "core/dom/Node.h"
+#include "core/editing/markers/DocumentMarker.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/VisualViewport.h"
-#include "core/input/EventHandler.h"
-#include "core/layout/LayoutView.h"
+#include "core/input/KeyboardEventManager.h"
 #include "core/style/ComputedStyle.h"
 #include "core/page/Page.h"
 #include "modules/accessibility/AXObject.h"
@@ -48,7 +48,7 @@
 #include "modules/accessibility/AXTableCell.h"
 #include "modules/accessibility/AXTableColumn.h"
 #include "modules/accessibility/AXTableRow.h"
-#include "platform/PlatformKeyboardEvent.h"
+#include "public/platform/WebFloatRect.h"
 #include "public/platform/WebPoint.h"
 #include "public/platform/WebRect.h"
 #include "public/platform/WebString.h"
@@ -119,6 +119,14 @@ int WebAXObject::axID() const
         return -1;
 
     return m_private->axObjectID();
+}
+
+int WebAXObject::generateAXID() const
+{
+    if (isDetached())
+        return -1;
+
+    return m_private->axObjectCache().platformGenerateAXID();
 }
 
 bool WebAXObject::updateLayoutAndCheckValidity()
@@ -230,7 +238,7 @@ bool WebAXObject::isAriaReadOnly() const
     if (isDetached())
         return false;
 
-    return equalIgnoringCase(m_private->getAttribute(HTMLNames::aria_readonlyAttr), "true");
+    return equalIgnoringASCIICase(m_private->getAttribute(HTMLNames::aria_readonlyAttr), "true");
 }
 
 WebString WebAXObject::ariaAutoComplete() const
@@ -239,6 +247,14 @@ WebString WebAXObject::ariaAutoComplete() const
         return WebString();
 
     return m_private->ariaAutoComplete();
+}
+
+WebAXAriaCurrentState WebAXObject::ariaCurrentState() const
+{
+    if (isDetached())
+        return WebAXAriaCurrentStateUndefined;
+
+    return static_cast<WebAXAriaCurrentState>(m_private->ariaCurrentState());
 }
 
 bool WebAXObject::isButtonStateMixed() const
@@ -584,6 +600,17 @@ WebString WebAXObject::liveRegionStatus() const
     return m_private->liveRegionStatus();
 }
 
+WebAXObject WebAXObject::liveRegionRoot() const
+{
+    if (isDetached())
+        return WebAXObject();
+
+    AXObject* liveRegionRoot = m_private->liveRegionRoot();
+    if (liveRegionRoot)
+        return WebAXObject(liveRegionRoot);
+    return WebAXObject();
+}
+
 bool WebAXObject::containerLiveRegionAtomic() const
 {
     if (isDetached())
@@ -627,18 +654,6 @@ bool WebAXObject::ariaOwns(WebVector<WebAXObject>& ownsElements) const
     return false;
 }
 
-WebRect WebAXObject::boundingBoxRect() const
-{
-    if (isDetached())
-        return WebRect();
-
-#if DCHECK_IS_ON()
-    DCHECK(isLayoutClean(m_private->getDocument()));
-#endif
-
-    return pixelSnappedIntRect(m_private->elementRect());
-}
-
 WebString WebAXObject::fontFamily() const
 {
     if (isDetached())
@@ -661,14 +676,6 @@ bool WebAXObject::canvasHasFallbackContent() const
         return false;
 
     return m_private->canvasHasFallbackContent();
-}
-
-WebPoint WebAXObject::clickPoint() const
-{
-    if (isDetached())
-        return WebPoint();
-
-    return WebPoint(m_private->clickPoint());
 }
 
 WebAXInvalidState WebAXObject::invalidState() const
@@ -726,7 +733,7 @@ WebAXObject WebAXObject::hitTest(const WebPoint& point) const
     if (hit)
         return WebAXObject(hit);
 
-    if (m_private->elementRect().contains(contentsPoint))
+    if (m_private->getBoundsInFrameCoordinates().contains(contentsPoint))
         return *this;
 
     return WebAXObject();
@@ -743,19 +750,19 @@ WebString WebAXObject::keyboardShortcut() const
 
     DEFINE_STATIC_LOCAL(String, modifierString, ());
     if (modifierString.isNull()) {
-        unsigned modifiers = EventHandler::accessKeyModifiers();
+        unsigned modifiers = KeyboardEventManager::kAccessKeyModifiers;
         // Follow the same order as Mozilla MSAA implementation:
         // Ctrl+Alt+Shift+Meta+key. MSDN states that keyboard shortcut strings
         // should not be localized and defines the separator as "+".
         StringBuilder modifierStringBuilder;
-        if (modifiers & PlatformEvent::CtrlKey)
-            modifierStringBuilder.appendLiteral("Ctrl+");
-        if (modifiers & PlatformEvent::AltKey)
-            modifierStringBuilder.appendLiteral("Alt+");
-        if (modifiers & PlatformEvent::ShiftKey)
-            modifierStringBuilder.appendLiteral("Shift+");
-        if (modifiers & PlatformEvent::MetaKey)
-            modifierStringBuilder.appendLiteral("Win+");
+        if (modifiers & WebInputEvent::ControlKey)
+            modifierStringBuilder.append("Ctrl+");
+        if (modifiers & WebInputEvent::AltKey)
+            modifierStringBuilder.append("Alt+");
+        if (modifiers & WebInputEvent::ShiftKey)
+            modifierStringBuilder.append("Shift+");
+        if (modifiers & WebInputEvent::MetaKey)
+            modifierStringBuilder.append("Win+");
         modifierString = modifierStringBuilder.toString();
     }
 
@@ -826,22 +833,26 @@ WebAXRole WebAXObject::role() const
     return static_cast<WebAXRole>(m_private->roleValue());
 }
 
-void WebAXObject::selection(WebAXObject& anchorObject, int& anchorOffset,
-    WebAXObject& focusObject, int& focusOffset) const
+void WebAXObject::selection(WebAXObject& anchorObject, int& anchorOffset, WebAXTextAffinity& anchorAffinity,
+    WebAXObject& focusObject, int& focusOffset, WebAXTextAffinity& focusAffinity) const
 {
     if (isDetached()) {
         anchorObject = WebAXObject();
         anchorOffset = -1;
+        anchorAffinity = WebAXTextAffinityDownstream;
         focusObject = WebAXObject();
         focusOffset = -1;
+        focusAffinity = WebAXTextAffinityDownstream;
         return;
     }
 
     AXObject::AXRange axSelection = m_private->selection();
     anchorObject = WebAXObject(axSelection.anchorObject);
     anchorOffset = axSelection.anchorOffset;
+    anchorAffinity = static_cast<WebAXTextAffinity>(axSelection.anchorAffinity);
     focusObject = WebAXObject(axSelection.focusObject);
     focusOffset = axSelection.focusOffset;
+    focusAffinity = static_cast<WebAXTextAffinity>(axSelection.focusAffinity);
     return;
 }
 
@@ -851,8 +862,8 @@ void WebAXObject::setSelection(const WebAXObject& anchorObject, int anchorOffset
     if (isDetached())
         return;
 
-    AXObject::AXRange axSelection(anchorObject, anchorOffset,
-        focusObject, focusOffset);
+    AXObject::AXRange axSelection(anchorObject, anchorOffset, TextAffinity::Upstream,
+        focusObject, focusOffset, TextAffinity::Downstream);
     m_private->setSelection(axSelection);
     return;
 }
@@ -941,9 +952,13 @@ void WebAXObject::showContextMenu() const
     Element* element = nullptr;
     if (node->isElementNode()) {
         element = toElement(node);
+    } else if (node->isDocumentNode()) {
+        element = node->document().documentElement();
     } else {
         node->updateDistribution();
         ContainerNode* parent = FlatTreeTraversal::parent(*node);
+        if (!parent)
+            return;
         ASSERT_WITH_SECURITY_IMPLICATION(parent->isElementNode());
         element = toElement(parent);
     }
@@ -1119,7 +1134,7 @@ bool WebAXObject::hasComputedStyle() const
 
     Document* document = m_private->getDocument();
     if (document)
-        document->updateLayoutTree();
+        document->updateStyleAndLayoutTree();
 
     Node* node = m_private->getNode();
     if (!node)
@@ -1135,7 +1150,7 @@ WebString WebAXObject::computedStyleDisplay() const
 
     Document* document = m_private->getDocument();
     if (document)
-        document->updateLayoutTree();
+        document->updateStyleAndLayoutTree();
 
     Node* node = m_private->getNode();
     if (!node)
@@ -1416,6 +1431,34 @@ WebAXObject WebAXObject::previousOnLine() const
     return WebAXObject(m_private.get()->previousOnLine());
 }
 
+void WebAXObject::markers(
+    WebVector<WebAXMarkerType>& types,
+    WebVector<int>& starts,
+    WebVector<int>& ends) const
+{
+    if (isDetached())
+        return;
+
+    Vector<DocumentMarker::MarkerType> markerTypes;
+    Vector<AXObject::AXRange> markerRanges;
+    m_private->markers(markerTypes, markerRanges);
+    DCHECK_EQ(markerTypes.size(), markerRanges.size());
+
+    WebVector<WebAXMarkerType> webMarkerTypes(markerTypes.size());
+    WebVector<int> startOffsets(markerRanges.size());
+    WebVector<int> endOffsets(markerRanges.size());
+    for (size_t i = 0; i < markerTypes.size(); ++i) {
+        webMarkerTypes[i] = static_cast<WebAXMarkerType>(markerTypes[i]);
+        DCHECK(markerRanges[i].isSimple());
+        startOffsets[i] = markerRanges[i].anchorOffset;
+        endOffsets[i] = markerRanges[i].focusOffset;
+    }
+
+    types.swap(webMarkerTypes);
+    starts.swap(startOffsets);
+    ends.swap(endOffsets);
+}
+
 void WebAXObject::characterOffsets(WebVector<int>& offsets) const
 {
     if (isDetached())
@@ -1491,6 +1534,22 @@ void WebAXObject::setScrollOffset(const WebPoint& offset) const
     m_private->setScrollOffset(offset);
 }
 
+void WebAXObject::getRelativeBounds(WebAXObject& offsetContainer, WebFloatRect& boundsInContainer, SkMatrix44& containerTransform) const
+{
+    if (isDetached())
+        return;
+
+#if DCHECK_IS_ON()
+    DCHECK(isLayoutClean(m_private->getDocument()));
+#endif
+
+    AXObject* container = nullptr;
+    FloatRect bounds;
+    m_private->getRelativeBounds(&container, bounds, containerTransform);
+    offsetContainer = WebAXObject(container);
+    boundsInContainer = WebFloatRect(bounds);
+}
+
 void WebAXObject::scrollToMakeVisible() const
 {
     if (!isDetached())
@@ -1507,14 +1566,6 @@ void WebAXObject::scrollToGlobalPoint(const WebPoint& point) const
 {
     if (!isDetached())
         m_private->scrollToGlobalPoint(point);
-}
-
-SkMatrix44 WebAXObject::transformFromLocalParentFrame() const
-{
-    if (isDetached())
-        return SkMatrix44();
-
-    return m_private->transformFromLocalParentFrame();
 }
 
 WebAXObject::WebAXObject(AXObject* object)

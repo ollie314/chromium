@@ -24,6 +24,7 @@
 using base::android::AttachCurrentThread;
 using base::android::CheckException;
 using base::android::ConvertJavaStringToUTF16;
+using base::android::JavaParamRef;
 using bookmarks::BookmarkNode;
 using bookmarks::BookmarkPermanentNode;
 using content::BrowserThread;
@@ -79,7 +80,8 @@ void PrepareAndSetFavicon(JNIEnv* env, jbyte* icon_bytes, int icon_len,
                    node->url(), fake_icon_url,
                    image_data, icon_type);
   } else {
-    base::WaitableEvent event(false, false);
+    base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED);
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,

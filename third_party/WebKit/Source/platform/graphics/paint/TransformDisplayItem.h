@@ -7,14 +7,13 @@
 
 #include "platform/graphics/paint/DisplayItem.h"
 #include "platform/transforms/AffineTransform.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
 class PLATFORM_EXPORT BeginTransformDisplayItem final : public PairedBeginDisplayItem {
 public:
     BeginTransformDisplayItem(const DisplayItemClient& client, const AffineTransform& transform)
-        : PairedBeginDisplayItem(client, BeginTransform, sizeof(*this))
+        : PairedBeginDisplayItem(client, kBeginTransform, sizeof(*this))
         , m_transform(transform) { }
 
     void replay(GraphicsContext&) const override;
@@ -26,13 +25,11 @@ private:
 #ifndef NDEBUG
     void dumpPropertiesAsDebugString(WTF::StringBuilder&) const final;
 #endif
-#if ENABLE(ASSERT)
     bool equals(const DisplayItem& other) const final
     {
         return DisplayItem::equals(other)
             && m_transform == static_cast<const BeginTransformDisplayItem&>(other).m_transform;
     }
-#endif
 
     const AffineTransform m_transform;
 };
@@ -40,14 +37,14 @@ private:
 class PLATFORM_EXPORT EndTransformDisplayItem final : public PairedEndDisplayItem {
 public:
     EndTransformDisplayItem(const DisplayItemClient& client)
-        : PairedEndDisplayItem(client, EndTransform, sizeof(*this)) { }
+        : PairedEndDisplayItem(client, kEndTransform, sizeof(*this)) { }
 
     void replay(GraphicsContext&) const override;
     void appendToWebDisplayItemList(const IntRect&, WebDisplayItemList*) const override;
 
 private:
 #if ENABLE(ASSERT)
-    bool isEndAndPairedWith(DisplayItem::Type otherType) const final { return otherType == BeginTransform; }
+    bool isEndAndPairedWith(DisplayItem::Type otherType) const final { return otherType == kBeginTransform; }
 #endif
 };
 

@@ -13,7 +13,7 @@
 #include "base/stl_util.h"
 #include "base/synchronization/lock.h"
 #include "base/task_runner_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/url_util.h"
 #include "storage/browser/fileapi/async_file_util_adapter.h"
 #include "storage/browser/fileapi/file_stream_reader.h"
@@ -48,7 +48,7 @@ class PluginPrivateFileSystemBackend::FileSystemIDToPluginMap {
                           const std::string& plugin_id) {
     DCHECK(task_runner_->RunsTasksOnCurrentThread());
     DCHECK(!filesystem_id.empty());
-    DCHECK(!ContainsKey(map_, filesystem_id)) << filesystem_id;
+    DCHECK(!base::ContainsKey(map_, filesystem_id)) << filesystem_id;
     map_[filesystem_id] = plugin_id;
   }
 

@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/** @type {string}
+/**
+ * @type {string}
  * @const
  */
-var FEEDBACK_LANDING_PAGE =
-    'https://support.google.com/chrome/go/feedback_confirmation';
+var SRT_DOWNLOAD_PAGE = 'https://www.google.com/chrome/cleanup-tool/';
 
 /** @type {number}
  * @const
@@ -52,12 +52,13 @@ var SYSINFO_WINDOW_ID = 'sysinfo_window';
 var STATS_WINDOW_ID = 'stats_window';
 
 /**
- * Feedback flow defined in feedback_private.idl.
+ * SRT Prompt Result defined in feedback_private.idl.
  * @enum {string}
  */
-var FeedbackFlow = {
-  REGULAR: 'regular',  // Flow in a regular user session.
-  LOGIN: 'login'       // Flow on the login screen.
+var SrtPromptResult = {
+  ACCEPTED: 'accepted',  // User accepted prompt.
+  DECLINED: 'declined',  // User declined prompt.
+  CLOSED: 'closed',      // User closed window without responding to prompt.
 };
 
 var attachedFileBlob = null;
@@ -69,6 +70,12 @@ var lastReader = null;
  * @type {boolean}
  */
 var isSystemInfoReady = false;
+
+/**
+ * Indicates whether the SRT Prompt is currently being displayed.
+ * @type {boolean}
+ */
+var isShowingSrtPrompt = false;
 
 /**
  * The callback used by the sys_info_page to receive the event that the system
@@ -181,12 +188,19 @@ function sendReport() {
   if (!$('screenshot-checkbox').checked)
     feedbackInfo.screenshot = null;
 
+  var productId = parseInt('' + feedbackInfo.productId);
+  if (isNaN(productId)) {
+    // For apps that still use a string value as the |productId|, we must clear
+    // that value since the API uses an integer value, and a conflict in data
+    // types will cause the report to fail to be sent.
+    productId = null;
+  }
+  feedbackInfo.productId = productId;
+
   // Request sending the report, show the landing page (if allowed), and close
   // this window right away. The FeedbackRequest object that represents this
   // report will take care of sending the report in the background.
   sendFeedbackReport(useSystemInfo);
-  if (feedbackInfo.flow != FeedbackFlow.LOGIN)
-    window.open(FEEDBACK_LANDING_PAGE, '_blank');
   window.close();
   return true;
 }
@@ -284,6 +298,32 @@ function initialize() {
       if (!feedbackInfo.flow)
         feedbackInfo.flow = FeedbackFlow.REGULAR;
 
+      if (feedbackInfo.flow == FeedbackFlow.SHOW_SRT_PROMPT) {
+        isShowingSrtPrompt = true;
+        $('content-pane').hidden = true;
+
+        $('srt-decline-button').onclick = function() {
+          isShowingSrtPrompt = false;
+          chrome.feedbackPrivate.logSrtPromptResult(SrtPromptResult.DECLINED);
+          $('srt-prompt').hidden = true;
+          $('content-pane').hidden = false;
+        };
+
+        $('srt-accept-button').onclick = function() {
+          chrome.feedbackPrivate.logSrtPromptResult(SrtPromptResult.ACCEPTED);
+          window.open(SRT_DOWNLOAD_PAGE, '_blank');
+          window.close();
+        };
+
+        $('close-button').addEventListener('click', function() {
+          if (isShowingSrtPrompt) {
+            chrome.feedbackPrivate.logSrtPromptResult(SrtPromptResult.CLOSED);
+          }
+        });
+      } else {
+        $('srt-prompt').hidden = true;
+      }
+
       $('description-text').textContent = feedbackInfo.description;
       if (feedbackInfo.pageUrl)
         $('page-url-text').value = feedbackInfo.pageUrl;
@@ -335,7 +375,6 @@ function initialize() {
         $('performance-info-link').onclick = openSlowTraceWindow;
       }
 </if>
-
       chrome.feedbackPrivate.getStrings(function(strings) {
         loadTimeData.data = strings;
         i18nTemplate.process(document, loadTimeData);

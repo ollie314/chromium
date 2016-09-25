@@ -47,7 +47,7 @@ AXInlineTextBox::AXInlineTextBox(PassRefPtr<AbstractInlineTextBox> inlineTextBox
 
 AXInlineTextBox* AXInlineTextBox::create(PassRefPtr<AbstractInlineTextBox> inlineTextBox, AXObjectCacheImpl& axObjectCache)
 {
-    return new AXInlineTextBox(inlineTextBox, axObjectCache);
+    return new AXInlineTextBox(std::move(inlineTextBox), axObjectCache);
 }
 
 void AXInlineTextBox::init()
@@ -60,12 +60,17 @@ void AXInlineTextBox::detach()
     m_inlineTextBox = nullptr;
 }
 
-LayoutRect AXInlineTextBox::elementRect() const
+void AXInlineTextBox::getRelativeBounds(AXObject** outContainer, FloatRect& outBoundsInContainer, SkMatrix44& outContainerTransform) const
 {
-    if (!m_inlineTextBox)
-        return LayoutRect();
+    *outContainer = nullptr;
+    outBoundsInContainer = FloatRect();
+    outContainerTransform.setIdentity();
 
-    return m_inlineTextBox->bounds();
+    if (!m_inlineTextBox)
+        return;
+
+    *outContainer = parentObject();
+    outBoundsInContainer = FloatRect(m_inlineTextBox->localBounds());
 }
 
 bool AXInlineTextBox::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const

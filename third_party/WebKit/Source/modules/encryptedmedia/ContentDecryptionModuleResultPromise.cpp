@@ -7,6 +7,8 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "core/dom/DOMException.h"
+#include "core/dom/ExecutionContext.h"
+#include "core/dom/ExecutionContextTask.h"
 #include "public/platform/WebString.h"
 #include "wtf/Assertions.h"
 
@@ -33,7 +35,7 @@ ExceptionCode WebCdmExceptionToExceptionCode(WebContentDecryptionModuleException
         return UnknownError;
     }
 
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return UnknownError;
 }
 
@@ -48,19 +50,19 @@ ContentDecryptionModuleResultPromise::~ContentDecryptionModuleResultPromise()
 
 void ContentDecryptionModuleResultPromise::complete()
 {
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     reject(InvalidStateError, "Unexpected completion.");
 }
 
 void ContentDecryptionModuleResultPromise::completeWithContentDecryptionModule(WebContentDecryptionModule* cdm)
 {
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     reject(InvalidStateError, "Unexpected completion.");
 }
 
 void ContentDecryptionModuleResultPromise::completeWithSession(WebContentDecryptionModuleResult::SessionStatus status)
 {
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     reject(InvalidStateError, "Unexpected completion.");
 }
 
@@ -69,13 +71,16 @@ void ContentDecryptionModuleResultPromise::completeWithError(WebContentDecryptio
     // Non-zero |systemCode| is appended to the |errorMessage|. If the
     // |errorMessage| is empty, we'll report "Rejected with system code
     // (systemCode)".
-    String errorString = errorMessage;
+    StringBuilder result;
+    result.append(errorMessage);
     if (systemCode != 0) {
-        if (errorString.isEmpty())
-            errorString.append("Rejected with system code");
-        errorString.append(" (" + String::number(systemCode) + ")");
+        if (result.isEmpty())
+            result.append("Rejected with system code");
+        result.append(" (");
+        result.appendNumber(systemCode);
+        result.append(')');
     }
-    reject(WebCdmExceptionToExceptionCode(exceptionCode), errorString);
+    reject(WebCdmExceptionToExceptionCode(exceptionCode), result.toString());
 }
 
 ScriptPromise ContentDecryptionModuleResultPromise::promise()
@@ -84,6 +89,19 @@ ScriptPromise ContentDecryptionModuleResultPromise::promise()
 }
 
 void ContentDecryptionModuleResultPromise::reject(ExceptionCode code, const String& errorMessage)
+{
+    // Reject the promise asynchronously. This avoids problems when gc is
+    // destroying objects that result in unfulfilled promises being rejected.
+    // (Resolving promises is still done synchronously as there may be events
+    // already posted that need to happen only after the promise is resolved.)
+    // TODO(jrummell): Make resolving a promise asynchronous as well (including
+    // making sure events still happen after the promise is resolved).
+    if (getExecutionContext()) {
+        getExecutionContext()->postTask(BLINK_FROM_HERE, createSameThreadTask(&ContentDecryptionModuleResultPromise::rejectInternal, wrapPersistent(this), code, errorMessage));
+    }
+}
+
+void ContentDecryptionModuleResultPromise::rejectInternal(ExceptionCode code, const String& errorMessage)
 {
     m_resolver->reject(DOMException::create(code, errorMessage));
     m_resolver.clear();

@@ -13,6 +13,9 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/local_discovery/test_service_discovery_client.h"
 #include "chrome/browser/profiles/profile.h"
@@ -303,7 +306,7 @@ class TestMessageLoopCondition {
   void Wait() {
     while (!signaled_) {
       waiting_ = true;
-      base::MessageLoop::current()->Run();
+      base::RunLoop().Run();
       waiting_ = false;
     }
     signaled_ = false;
@@ -451,10 +454,10 @@ class LocalDiscoveryUITest : public WebUIBrowserTest {
     base::CancelableCallback<void()> callback(
         base::Bind(&base::MessageLoop::QuitWhenIdle,
                    base::Unretained(base::MessageLoop::current())));
-    base::MessageLoop::current()->task_runner()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, callback.callback(), time_period);
 
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
     callback.Cancel();
   }
 
@@ -500,7 +503,7 @@ IN_PROC_BROWSER_TEST_F(LocalDiscoveryUITest, AddRowTest) {
   test_service_discovery_client()->SimulateReceive(
       kAnnouncePacket, sizeof(kAnnouncePacket));
 
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(WebUIBrowserTest::RunJavascriptTest("checkOneDevice"));
 
@@ -523,7 +526,7 @@ IN_PROC_BROWSER_TEST_F(LocalDiscoveryUITest, RegisterTest) {
   test_service_discovery_client()->SimulateReceive(
       kAnnouncePacket, sizeof(kAnnouncePacket));
 
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(WebUIBrowserTest::RunJavascriptTest("checkOneDevice"));
 
@@ -576,7 +579,7 @@ IN_PROC_BROWSER_TEST_F(LocalDiscoveryUITest, RegisterTest) {
   test_service_discovery_client()->SimulateReceive(
       kAnnouncePacketRegistered, sizeof(kAnnouncePacketRegistered));
 
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(WebUIBrowserTest::RunJavascriptTest("expectRegisterDone"));
 }

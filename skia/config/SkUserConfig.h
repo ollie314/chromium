@@ -17,8 +17,6 @@
 #ifndef SkUserConfig_DEFINED
 #define SkUserConfig_DEFINED
 
-#include "skia/ext/skia_histogram.h"
-
 /*  SkTypes.h, the root of the public header files, does the following trick:
 
     #include <SkPreConfig.h>
@@ -76,18 +74,10 @@
 //#define SK_CPU_BENDIAN
 //#define SK_CPU_LENDIAN
 
-/*  If zlib is available and you want to support the flate compression
-    algorithm (used in PDF generation), define SK_ZLIB_INCLUDE to be the
-    include path.
- */
-//#define SK_ZLIB_INCLUDE <zlib.h>
-#define SK_ZLIB_INCLUDE "third_party/zlib/zlib.h"
-
 /*  Define this to provide font subsetter for font subsetting when generating
     PDF documents.
  */
-#define SK_SFNTLY_SUBSETTER \
-    "third_party/sfntly/src/cpp/src/sample/chromium/font_subsetter.h"
+#define SK_PDF_USE_SFNTLY
 
 /*  To write debug messages to a console, skia will call SkDebugf(...) following
     printf conventions (e.g. const char* format, ...). If you want to redirect
@@ -211,6 +201,14 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_SUPPORT_LEGACY_GETDEVICE
 #endif
 
+#ifndef    SK_SUPPORT_LEGACY_PICTUREINSTALLPIXELREF
+#   define SK_SUPPORT_LEGACY_PICTUREINSTALLPIXELREF
+#endif
+
+#ifndef SK_SUPPORT_LEGACY_CLIP_REGIONOPS
+#define SK_SUPPORT_LEGACY_CLIP_REGIONOPS
+#endif
+
 // Workaround for poor anisotropic mipmap quality,
 // pending Skia ripmap support.
 // (https://bugs.chromium.org/p/skia/issues/detail?id=4863)
@@ -226,24 +224,8 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_IGNORE_GPU_DITHER
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_IMAGEFACTORY
-#   define SK_SUPPORT_LEGACY_IMAGEFACTORY
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_IMAGEFILTER_PTR
-#   define SK_SUPPORT_LEGACY_IMAGEFILTER_PTR
-#endif
-
 #ifndef    SK_SUPPORT_LEGACY_EVAL_CUBIC
 #   define SK_SUPPORT_LEGACY_EVAL_CUBIC
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_TYPEFACE_PTR
-#   define SK_SUPPORT_LEGACY_TYPEFACE_PTR
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_IMAGEFILTER_CTM
-#   define SK_SUPPORT_LEGACY_IMAGEFILTER_CTM
 #endif
 
 ///////////////////////// Imported from BUILD.gn and skia_common.gypi
@@ -257,6 +239,9 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
  */
 #define SK_GDI_ALWAYS_USE_TEXTMETRICS_FOR_FONT_METRICS
 
+/* Restrict formats for Skia font matching to SFNT type fonts. */
+#define SK_FONT_CONFIG_INTERFACE_ONLY_ALLOW_SFNT_FONTS
+
 #define SK_IGNORE_BLURRED_RRECT_OPT
 #define SK_USE_DISCARDABLE_SCALEDIMAGECACHE
 #define SK_WILL_NEVER_DRAW_PERSPECTIVE_TEXT
@@ -265,13 +250,16 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #define SK_ENABLE_INST_COUNT        0
 #define GR_GL_CUSTOM_SETUP_HEADER   "GrGLConfig_chrome.h"
 
-// Blink layout tests are baselined to Clang optimizing through the UB in SkDivBits.
-#define SK_SUPPORT_LEGACY_DIVBITS_UB
-
 // mtklein's fiddling with Src / SrcOver.  Will rebaseline these only once when done.
 #define SK_SUPPORT_LEGACY_X86_BLITS
 
 #define SK_DISABLE_TILE_IMAGE_FILTER_OPTIMIZATION
+
+// Updating to a correct SkPMColor lerp will require layout test rebaselines.
+#define SK_SUPPORT_LEGACY_BROKEN_LERP
+
+// Enabling the screenspace AA tessellating path renderer needs rebaselines.
+#define SK_DISABLE_SCREENSPACE_TESS_AA_PATH_RENDERER
 
 // ===== End Chrome-specific definitions =====
 

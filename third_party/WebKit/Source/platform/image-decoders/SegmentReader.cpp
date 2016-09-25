@@ -23,7 +23,7 @@ public:
     SharedBufferSegmentReader(PassRefPtr<SharedBuffer>);
     size_t size() const override;
     size_t getSomeData(const char*& data, size_t position) const override;
-    PassRefPtr<SkData> getAsSkData() const override;
+    sk_sp<SkData> getAsSkData() const override;
 private:
     RefPtr<SharedBuffer> m_sharedBuffer;
 };
@@ -41,7 +41,7 @@ size_t SharedBufferSegmentReader::getSomeData(const char*& data, size_t position
     return m_sharedBuffer->getSomeData(data, position);
 }
 
-PassRefPtr<SkData> SharedBufferSegmentReader::getAsSkData() const
+sk_sp<SkData> SharedBufferSegmentReader::getAsSkData() const
 {
     return m_sharedBuffer->getAsSkData();
 }
@@ -52,16 +52,16 @@ PassRefPtr<SkData> SharedBufferSegmentReader::getAsSkData() const
 class DataSegmentReader final : public SegmentReader {
     WTF_MAKE_NONCOPYABLE(DataSegmentReader);
 public:
-    DataSegmentReader(PassRefPtr<SkData>);
+    DataSegmentReader(sk_sp<SkData>);
     size_t size() const override;
     size_t getSomeData(const char*& data, size_t position) const override;
-    PassRefPtr<SkData> getAsSkData() const override;
+    sk_sp<SkData> getAsSkData() const override;
 private:
-    RefPtr<SkData> m_data;
+    sk_sp<SkData> m_data;
 };
 
-DataSegmentReader::DataSegmentReader(PassRefPtr<SkData> data)
-    : m_data(data) {}
+DataSegmentReader::DataSegmentReader(sk_sp<SkData> data)
+    : m_data(std::move(data)) {}
 
 size_t DataSegmentReader::size() const
 {
@@ -77,9 +77,9 @@ size_t DataSegmentReader::getSomeData(const char*& data, size_t position) const
     return m_data->size() - position;
 }
 
-PassRefPtr<SkData> DataSegmentReader::getAsSkData() const
+sk_sp<SkData> DataSegmentReader::getAsSkData() const
 {
-    return m_data.get();
+    return m_data;
 }
 
 // ROBufferSegmentReader -------------------------------------------------------
@@ -87,14 +87,14 @@ PassRefPtr<SkData> DataSegmentReader::getAsSkData() const
 class ROBufferSegmentReader final : public SegmentReader {
     WTF_MAKE_NONCOPYABLE(ROBufferSegmentReader);
 public:
-    ROBufferSegmentReader(PassRefPtr<SkROBuffer>);
+    ROBufferSegmentReader(sk_sp<SkROBuffer>);
 
     size_t size() const override;
     size_t getSomeData(const char*& data, size_t position) const override;
-    PassRefPtr<SkData> getAsSkData() const override;
+    sk_sp<SkData> getAsSkData() const override;
 
 private:
-    RefPtr<SkROBuffer> m_roBuffer;
+    sk_sp<SkROBuffer> m_roBuffer;
     // Protects access to mutable fields.
     mutable Mutex m_readMutex;
     // Position of the first char in the current block of m_iter.
@@ -102,8 +102,8 @@ private:
     mutable SkROBuffer::Iter m_iter;
 };
 
-ROBufferSegmentReader::ROBufferSegmentReader(PassRefPtr<SkROBuffer> buffer)
-    : m_roBuffer(buffer)
+ROBufferSegmentReader::ROBufferSegmentReader(sk_sp<SkROBuffer> buffer)
+    : m_roBuffer(std::move(buffer))
     , m_positionOfBlock(0)
     , m_iter(m_roBuffer.get())
     {}
@@ -153,7 +153,7 @@ static void unrefROBuffer(const void* ptr, void* context)
     static_cast<SkROBuffer*>(context)->unref();
 }
 
-PassRefPtr<SkData> ROBufferSegmentReader::getAsSkData() const
+sk_sp<SkData> ROBufferSegmentReader::getAsSkData() const
 {
     if (!m_roBuffer)
         return nullptr;
@@ -166,34 +166,34 @@ PassRefPtr<SkData> ROBufferSegmentReader::getAsSkData() const
     if (!multipleBlocks) {
         // Contiguous data. No need to copy.
         m_roBuffer->ref();
-        return adoptRef(SkData::NewWithProc(iter.data(), iter.size(), &unrefROBuffer, m_roBuffer.get()));
+        return SkData::MakeWithProc(iter.data(), iter.size(), &unrefROBuffer, m_roBuffer.get());
     }
 
-    RefPtr<SkData> data = adoptRef(SkData::NewUninitialized(m_roBuffer->size()));
+    sk_sp<SkData> data = SkData::MakeUninitialized(m_roBuffer->size());
     char* dst = static_cast<char*>(data->writable_data());
     do {
         size_t size = iter.size();
         memcpy(dst, iter.data(), size);
         dst += size;
     } while (iter.next());
-    return data.release();
+    return data;
 }
 
 // SegmentReader ---------------------------------------------------------------
 
 PassRefPtr<SegmentReader> SegmentReader::createFromSharedBuffer(PassRefPtr<SharedBuffer> buffer)
 {
-    return adoptRef(new SharedBufferSegmentReader(buffer));
+    return adoptRef(new SharedBufferSegmentReader(std::move(buffer)));
 }
 
-PassRefPtr<SegmentReader> SegmentReader::createFromSkData(PassRefPtr<SkData> data)
+PassRefPtr<SegmentReader> SegmentReader::createFromSkData(sk_sp<SkData> data)
 {
-    return adoptRef(new DataSegmentReader(data));
+    return adoptRef(new DataSegmentReader(std::move(data)));
 }
 
-PassRefPtr<SegmentReader> SegmentReader::createFromSkROBuffer(PassRefPtr<SkROBuffer> buffer)
+PassRefPtr<SegmentReader> SegmentReader::createFromSkROBuffer(sk_sp<SkROBuffer> buffer)
 {
-    return adoptRef(new ROBufferSegmentReader(buffer));
+    return adoptRef(new ROBufferSegmentReader(std::move(buffer)));
 }
 
 } // namespace blink

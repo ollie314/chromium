@@ -13,12 +13,15 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/process/launch.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "tools/gn/command_format.h"
 #include "tools/gn/commands.h"
 #include "tools/gn/filesystem_utils.h"
 #include "tools/gn/input_file.h"
@@ -138,12 +141,16 @@ base::FilePath FindDotFile(const base::FilePath& current_dir) {
 }
 
 // Called on any thread. Post the item to the builder on the main thread.
-void ItemDefinedCallback(base::MessageLoop* main_loop,
-                         scoped_refptr<Builder> builder,
-                         std::unique_ptr<Item> item) {
+void ItemDefinedCallback(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    Builder* builder_call_on_main_thread_only,
+    std::unique_ptr<Item> item) {
   DCHECK(item);
-  main_loop->PostTask(FROM_HERE, base::Bind(&Builder::ItemDefined, builder,
-                                            base::Passed(&item)));
+  task_runner->PostTask(
+      FROM_HERE,
+      base::Bind(&Builder::ItemDefined,
+                 base::Unretained(builder_call_on_main_thread_only),
+                 base::Passed(&item)));
 }
 
 void DecrementWorkCount() {
@@ -248,20 +255,21 @@ const char Setup::kBuildArgFileName[] = "args.gn";
 Setup::Setup()
     : build_settings_(),
       loader_(new LoaderImpl(&build_settings_)),
-      builder_(new Builder(loader_.get())),
+      builder_(loader_.get()),
       root_build_file_("//BUILD.gn"),
       check_public_headers_(false),
       dotfile_settings_(&build_settings_, std::string()),
       dotfile_scope_(&dotfile_settings_),
       fill_arguments_(true) {
   dotfile_settings_.set_toolchain_label(Label());
+
   build_settings_.set_item_defined_callback(
-      base::Bind(&ItemDefinedCallback, scheduler_.main_loop(), builder_));
+      base::Bind(&ItemDefinedCallback, scheduler_.task_runner(), &builder_));
 
   loader_->set_complete_callback(base::Bind(&DecrementWorkCount));
-  // The scheduler's main loop wasn't created when the Loader was created, so
+  // The scheduler's task runner wasn't created when the Loader was created, so
   // we need to set it now.
-  loader_->set_main_loop(scheduler_.main_loop());
+  loader_->set_task_runner(scheduler_.task_runner());
 }
 
 Setup::~Setup() {
@@ -299,7 +307,7 @@ bool Setup::DoSetup(const std::string& build_dir, bool force_create) {
     if (!FillArguments(*cmdline))
       return false;
   }
-  FillPythonPath();
+  FillPythonPath(*cmdline);
 
   return true;
 }
@@ -326,21 +334,25 @@ void Setup::RunPreMessageLoop() {
 bool Setup::RunPostMessageLoop() {
   Err err;
   if (build_settings_.check_for_bad_items()) {
-    if (!builder_->CheckForBadItems(&err)) {
+    if (!builder_.CheckForBadItems(&err)) {
       err.PrintToStdout();
       return false;
     }
 
     if (!build_settings_.build_args().VerifyAllOverridesUsed(&err)) {
-      // TODO(brettw) implement a system of warnings. Until we have a better
-      // system, print the error but don't return failure.
+      // TODO(brettw) implement a system to have a different marker for
+      // warnings. Until we have a better system, print the error but don't
+      // return failure unless requested on the command line.
       err.PrintToStdout();
+      if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kFailOnUnusedArgs))
+        return false;
       return true;
     }
   }
 
   if (check_public_headers_) {
-    std::vector<const Target*> all_targets = builder_->GetAllResolvedTargets();
+    std::vector<const Target*> all_targets = builder_.GetAllResolvedTargets();
     std::vector<const Target*> to_check;
     if (check_patterns()) {
       commands::FilterTargetsByPatterns(all_targets, *check_patterns(),
@@ -430,6 +442,10 @@ bool Setup::FillArgsFromArgsInputFile() {
   }
 
   Scope arg_scope(&dotfile_settings_);
+  // Set soure dir so relative imports in args work.
+  SourceDir root_source_dir =
+      SourceDirForCurrentDirectory(build_settings_.root_path());
+  arg_scope.set_source_dir(root_source_dir);
   args_root_->Execute(&arg_scope, &err);
   if (err.has_error()) {
     err.PrintToStdout();
@@ -446,12 +462,6 @@ bool Setup::FillArgsFromArgsInputFile() {
 bool Setup::SaveArgsToFile() {
   ScopedTrace setup_trace(TraceItem::TRACE_SETUP, "Save args file");
 
-  std::ostringstream stream;
-  for (const auto& pair : build_settings_.build_args().GetAllOverrides()) {
-    stream << pair.first.as_string() << " = " << pair.second.ToString(true);
-    stream << std::endl;
-  }
-
   // For the first run, the build output dir might not be created yet, so do
   // that so we can write a file into it. Ignore errors, we'll catch the error
   // when we try to write a file to it below.
@@ -459,7 +469,8 @@ bool Setup::SaveArgsToFile() {
       build_settings_.GetFullPath(GetBuildArgFile());
   base::CreateDirectory(build_arg_file.DirName());
 
-  std::string contents = stream.str();
+  std::string contents = args_input_file_->contents();
+  commands::FormatStringToString(contents, false, &contents);
 #if defined(OS_WIN)
   // Use Windows lineendings for this file since it will often open in
   // Notepad which can't handle Unix ones.
@@ -508,7 +519,7 @@ bool Setup::FillSourceDir(const base::CommandLine& cmdline) {
       if (dotfile_name_.empty()) {
         Err(Location(), "Could not load dotfile.",
             "The file \"" + FilePathToUTF8(dot_file_path) +
-            "\" cound't be loaded.").PrintToStdout();
+            "\" couldn't be loaded.").PrintToStdout();
         return false;
       }
     }
@@ -590,20 +601,25 @@ bool Setup::FillBuildDir(const std::string& build_dir, bool require_exists) {
   return true;
 }
 
-void Setup::FillPythonPath() {
+void Setup::FillPythonPath(const base::CommandLine& cmdline) {
   // Trace this since it tends to be a bit slow on Windows.
   ScopedTrace setup_trace(TraceItem::TRACE_SETUP, "Fill Python Path");
+  if (cmdline.HasSwitch(switches::kScriptExecutable)) {
+    build_settings_.set_python_path(
+        cmdline.GetSwitchValuePath(switches::kScriptExecutable));
+  } else {
 #if defined(OS_WIN)
-  base::FilePath python_path = FindWindowsPython();
-  if (python_path.empty()) {
-    scheduler_.Log("WARNING", "Could not find python on path, using "
-        "just \"python.exe\"");
-    python_path = base::FilePath(kPythonExeName);
-  }
-  build_settings_.set_python_path(python_path.NormalizePathSeparatorsTo('/'));
+    base::FilePath python_path = FindWindowsPython();
+    if (python_path.empty()) {
+      scheduler_.Log("WARNING", "Could not find python on path, using "
+          "just \"python.exe\"");
+      python_path = base::FilePath(kPythonExeName);
+    }
+    build_settings_.set_python_path(python_path.NormalizePathSeparatorsTo('/'));
 #else
-  build_settings_.set_python_path(base::FilePath("python"));
+    build_settings_.set_python_path(base::FilePath("python"));
 #endif
+  }
 }
 
 bool Setup::RunConfigFile() {
@@ -613,7 +629,7 @@ bool Setup::RunConfigFile() {
   dotfile_input_file_.reset(new InputFile(SourceFile("//.gn")));
   if (!dotfile_input_file_->Load(dotfile_name_)) {
     Err(Location(), "Could not load dotfile.",
-        "The file \"" + FilePathToUTF8(dotfile_name_) + "\" cound't be loaded")
+        "The file \"" + FilePathToUTF8(dotfile_name_) + "\" couldn't be loaded")
         .PrintToStdout();
     return false;
   }

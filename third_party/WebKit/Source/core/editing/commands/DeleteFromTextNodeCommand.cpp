@@ -28,6 +28,7 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/dom/Text.h"
+#include "core/editing/EditingUtilities.h"
 
 namespace blink {
 
@@ -46,7 +47,8 @@ void DeleteFromTextNodeCommand::doApply(EditingState*)
 {
     DCHECK(m_node);
 
-    if (!m_node->isContentEditable(Node::UserSelectAllIsAlwaysNonEditable))
+    document().updateStyleAndLayoutTree();
+    if (!hasEditableStyle(*m_node))
         return;
 
     TrackExceptionState exceptionState;
@@ -54,17 +56,19 @@ void DeleteFromTextNodeCommand::doApply(EditingState*)
     if (exceptionState.hadException())
         return;
 
-    m_node->deleteData(m_offset, m_count, exceptionState, CharacterData::DeprecatedRecalcStyleImmediatlelyForEditing);
+    m_node->deleteData(m_offset, m_count, exceptionState);
+    m_node->document().updateStyleAndLayout();
 }
 
 void DeleteFromTextNodeCommand::doUnapply()
 {
     DCHECK(m_node);
 
-    if (!m_node->hasEditableStyle())
+    if (!hasEditableStyle(*m_node))
         return;
 
-    m_node->insertData(m_offset, m_text, IGNORE_EXCEPTION, CharacterData::DeprecatedRecalcStyleImmediatlelyForEditing);
+    m_node->insertData(m_offset, m_text, IGNORE_EXCEPTION);
+    m_node->document().updateStyleAndLayout();
 }
 
 DEFINE_TRACE(DeleteFromTextNodeCommand)

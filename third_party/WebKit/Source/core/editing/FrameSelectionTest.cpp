@@ -9,9 +9,9 @@
 #include "core/dom/Element.h"
 #include "core/dom/Text.h"
 #include "core/editing/EditingTestBase.h"
+#include "core/editing/FrameCaret.h"
 #include "core/frame/FrameView.h"
 #include "core/html/HTMLBodyElement.h"
-#include "core/html/HTMLDocument.h"
 #include "core/layout/LayoutView.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/PaintLayer.h"
@@ -19,10 +19,10 @@
 #include "platform/graphics/paint/DrawingRecorder.h"
 #include "platform/graphics/paint/PaintController.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/StdLibExtras.h"
+#include <memory>
 
 namespace blink {
 
@@ -38,6 +38,11 @@ protected:
 
     bool shouldPaintCaretForTesting() const { return selection().shouldPaintCaretForTesting(); }
     bool isPreviousCaretDirtyForTesting() const { return selection().isPreviousCaretDirtyForTesting(); }
+
+    PositionWithAffinity caretPosition() const
+    {
+        return selection().m_frameCaret->caretPosition();
+    }
 
 private:
     Persistent<Text> m_textNode;
@@ -69,25 +74,6 @@ TEST_F(FrameSelectionTest, SetValidSelection)
     EXPECT_FALSE(selection().isNone());
 }
 
-TEST_F(FrameSelectionTest, SetInvalidSelection)
-{
-    // Create a new document without frame by using DOMImplementation.
-    DocumentInit dummy;
-    Document* documentWithoutFrame = Document::create();
-    Element* body = HTMLBodyElement::create(*documentWithoutFrame);
-    documentWithoutFrame->appendChild(body);
-    Text* anotherText = documentWithoutFrame->createTextNode("Hello, another world");
-    body->appendChild(anotherText);
-
-    // Create a new VisibleSelection for the new document without frame and
-    // update FrameSelection with the selection.
-    VisibleSelection invalidSelection;
-    invalidSelection.setWithoutValidation(Position(anotherText, 0), Position(anotherText, 5));
-    setSelection(invalidSelection);
-
-    EXPECT_TRUE(selection().isNone());
-}
-
 TEST_F(FrameSelectionTest, InvalidateCaretRect)
 {
     Text* text = appendTextNode("Hello, World!");
@@ -101,7 +87,7 @@ TEST_F(FrameSelectionTest, InvalidateCaretRect)
     EXPECT_FALSE(selection().isCaretBoundsDirty());
 
     document().body()->removeChild(text);
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     selection().setCaretRectNeedsUpdate();
     EXPECT_TRUE(selection().isCaretBoundsDirty());
     selection().invalidateCaretRect();
@@ -132,10 +118,12 @@ TEST_F(FrameSelectionTest, PaintCaretShouldNotLayout)
         frameRect.setHeight(frameRect.height() + 1);
         dummyPageHolder().frameView().setFrameRect(frameRect);
     }
-    OwnPtr<PaintController> paintController = PaintController::create();
-    GraphicsContext context(*paintController);
-    DrawingRecorder drawingRecorder(context, *dummyPageHolder().frameView().layoutView(), DisplayItem::Caret, LayoutRect::infiniteIntRect());
-    selection().paintCaret(context, LayoutPoint());
+    std::unique_ptr<PaintController> paintController = PaintController::create();
+    {
+        GraphicsContext context(*paintController);
+        selection().paintCaret(context, LayoutPoint());
+    }
+    paintController->commitNewDisplayItems();
     EXPECT_EQ(startCount, layoutCount());
 }
 
@@ -154,6 +142,7 @@ TEST_F(FrameSelectionTest, InvalidatePreviousCaretAfterRemovingLastCharacter)
 
     // Simulate to type "Hello, World!".
     DisableCompositingQueryAsserts disabler;
+    document().updateStyleAndLayout();
     selection().moveTo(createVisiblePosition(selection().end(), selection().affinity()), NotUserTriggered);
     selection().setCaretRectNeedsUpdate();
     EXPECT_TRUE(selection().isCaretBoundsDirty());
@@ -164,6 +153,7 @@ TEST_F(FrameSelectionTest, InvalidatePreviousCaretAfterRemovingLastCharacter)
 
     // Simulate to remove all except for "H".
     text->replaceWholeText("H");
+    document().updateStyleAndLayout();
     selection().moveTo(createVisiblePosition(selection().end(), selection().affinity()), NotUserTriggered);
     selection().setCaretRectNeedsUpdate();
     EXPECT_TRUE(selection().isCaretBoundsDirty());
@@ -178,7 +168,7 @@ TEST_F(FrameSelectionTest, InvalidatePreviousCaretAfterRemovingLastCharacter)
     // This line is the objective of this test.
     // As removing the last character, early previousCaret invalidation is executed.
     EXPECT_FALSE(isPreviousCaretDirtyForTesting());
-    document().updateLayoutIgnorePendingStylesheets();
+    document().updateStyleAndLayoutIgnorePendingStylesheets();
     selection().setCaretRectNeedsUpdate();
     EXPECT_TRUE(selection().isCaretBoundsDirty());
     EXPECT_FALSE(isPreviousCaretDirtyForTesting());
@@ -194,6 +184,8 @@ TEST_F(FrameSelectionTest, SelectWordAroundPosition)
 {
     // "Foo Bar  Baz,"
     Text* text = appendTextNode("Foo Bar&nbsp;&nbsp;Baz,");
+    updateAllLifecyclePhases();
+
     // "Fo|o Bar  Baz,"
     EXPECT_TRUE(selection().selectWordAroundPosition(createVisiblePosition(Position(text, 2))));
     EXPECT_EQ_SELECTED_TEXT("Foo");
@@ -223,10 +215,30 @@ TEST_F(FrameSelectionTest, ModifyExtendWithFlatTree)
     EXPECT_EQ(PositionInFlatTree(two, 3), visibleSelectionInFlatTree().end());
 }
 
+TEST_F(FrameSelectionTest, ModifyWithUserTriggered)
+{
+    setBodyContent("<div id=sample>abc</div>");
+    Element* sample = document().getElementById("sample");
+    const Position endOfText(sample->firstChild(), 3);
+    selection().setSelection(VisibleSelection(endOfText));
+
+    EXPECT_FALSE(selection().modify(FrameSelection::AlterationMove, DirectionForward, CharacterGranularity, NotUserTriggered))
+        << "Selection.modify() returns false for non-user-triggered call when selection isn't modified.";
+    EXPECT_EQ(endOfText, selection().start())
+        << "Selection isn't modified";
+
+    EXPECT_TRUE(selection().modify(FrameSelection::AlterationMove, DirectionForward, CharacterGranularity, UserTriggered))
+        << "Selection.modify() returns true for user-triggered call";
+    EXPECT_EQ(endOfText, selection().start())
+        << "Selection isn't modified";
+}
+
 TEST_F(FrameSelectionTest, MoveRangeSelectionTest)
 {
     // "Foo Bar Baz,"
     Text* text = appendTextNode("Foo Bar Baz,");
+    updateAllLifecyclePhases();
+
     // Itinitializes with "Foo B|a>r Baz," (| means start and > means end).
     selection().setSelection(VisibleSelection(Position(text, 5), Position(text, 6)));
     EXPECT_EQ_SELECTED_TEXT("a");
@@ -287,6 +299,28 @@ TEST_F(FrameSelectionTest, SelectAllWithUnselectableRoot)
     document().replaceChild(select, document().documentElement());
     selection().selectAll();
     EXPECT_TRUE(selection().isNone()) << "Nothing should be selected if the content of the documentElement is not selctable.";
+}
+
+TEST_F(FrameSelectionTest, updateIfNeededAndFrameCaret)
+{
+    setBodyContent("<style id=sample></style>");
+    document().setDesignMode("on");
+    Element* sample = document().getElementById("sample");
+    setSelection(VisibleSelection(Position(sample, 0)));
+    EXPECT_EQ(Position(document().body(), 0), selection().start());
+    EXPECT_EQ(selection().start(), caretPosition().position());
+    document().body()->remove();
+    // TODO(yosin): Once lazy canonicalization implemented, selection.start
+    // should be Position(HTML, 0).
+    EXPECT_EQ(Position(document().documentElement(), 1), selection().start());
+    EXPECT_EQ(selection().start(), caretPosition().position());
+    selection().updateIfNeeded();
+
+    // TODO(yosin): Once lazy canonicalization implemented, selection.start
+    // should be Position(HTML, 0).
+    EXPECT_EQ(Position(), selection().start())
+        << "updateIfNeeded() makes selection to null.";
+    EXPECT_EQ(selection().start(), caretPosition().position());
 }
 
 } // namespace blink

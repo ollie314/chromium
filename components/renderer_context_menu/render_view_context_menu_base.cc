@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <utility>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/logging.h"
@@ -229,6 +230,14 @@ void RenderViewContextMenuBase::UpdateMenuItem(int command_id,
   }
 }
 
+void RenderViewContextMenuBase::UpdateMenuIcon(int command_id,
+                                               const gfx::Image& image) {
+#if defined(OS_CHROMEOS)
+  if (toolkit_delegate_)
+    toolkit_delegate_->UpdateMenuIcon(command_id, image);
+#endif
+}
+
 RenderViewHost* RenderViewContextMenuBase::GetRenderViewHost() const {
   return source_web_contents_->GetRenderViewHost();
 }
@@ -382,7 +391,8 @@ void RenderViewContextMenuBase::OpenURLWithExtraHeaders(
       content::Referrer(referring_url.GetAsReferrer(),
                         params_.referrer_policy));
 
-  if (params_.link_url == url && disposition != OFF_THE_RECORD)
+  if (params_.link_url == url &&
+      disposition != WindowOpenDisposition::OFF_THE_RECORD)
     params_.custom_context.link_followed = url;
 
   OpenURLParams open_url_params(url, referrer, disposition, transition, false);
@@ -403,4 +413,3 @@ bool RenderViewContextMenuBase::IsCustomItemChecked(int id) const {
 bool RenderViewContextMenuBase::IsCustomItemEnabled(int id) const {
   return IsCustomItemEnabledInternal(params_.custom_items, id);
 }
-

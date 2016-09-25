@@ -26,6 +26,7 @@
 #include "platform/graphics/Color.h"
 
 #include "platform/Decimal.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "wtf/Assertions.h"
 #include "wtf/HexNumber.h"
 #include "wtf/MathExtras.h"
@@ -119,7 +120,9 @@ RGBA32 makeRGBAFromCMYKA(float c, float m, float y, float k, float a)
 template <typename CharacterType>
 static inline bool parseHexColorInternal(const CharacterType* name, unsigned length, RGBA32& rgb)
 {
-    if (length != 3 && length != 6)
+    if (length != 3 && length != 4 && length != 6 && length != 8)
+        return false;
+    if ((length == 8 || length == 4) && !RuntimeEnabledFeatures::cssHexAlphaColorEnabled())
         return false;
     unsigned value = 0;
     for (unsigned i = 0; i < length; ++i) {
@@ -130,6 +133,20 @@ static inline bool parseHexColorInternal(const CharacterType* name, unsigned len
     }
     if (length == 6) {
         rgb = 0xFF000000 | value;
+        return true;
+    }
+    if (length == 8) {
+        // We parsed the values into RGBA order, but the RGBA32 type
+        // expects them to be in ARGB order, so we right rotate eight bits.
+        rgb = value << 24 | value >> 8;
+        return true;
+    }
+    if (length == 4) {
+        // #abcd converts to ddaabbcc in RGBA32.
+        rgb = (value & 0xF) << 28 | (value & 0xF) << 24
+            | (value & 0xF000) << 8 | (value & 0xF000) << 4
+            | (value & 0xF00) << 4 | (value & 0xF00)
+            | (value & 0xF0) | (value & 0xF0) >> 4;
         return true;
     }
     // #abc converts to #aabbcc
@@ -150,11 +167,9 @@ bool Color::parseHexColor(const UChar* name, unsigned length, RGBA32& rgb)
     return parseHexColorInternal(name, length, rgb);
 }
 
-bool Color::parseHexColor(const String& name, RGBA32& rgb)
+bool Color::parseHexColor(const StringView& name, RGBA32& rgb)
 {
-    unsigned length = name.length();
-
-    if (!length)
+    if (name.isEmpty())
         return false;
     if (name.is8Bit())
         return parseHexColor(name.characters8(), name.length(), rgb);
@@ -184,23 +199,20 @@ String Color::serializedAsCSSComponentValue() const
     result.reserveCapacity(32);
     bool colorHasAlpha = hasAlpha();
     if (colorHasAlpha)
-        result.appendLiteral("rgba(");
+        result.append("rgba(");
     else
-        result.appendLiteral("rgb(");
+        result.append("rgb(");
 
     result.appendNumber(static_cast<unsigned char>(red()));
-    result.appendLiteral(", ");
+    result.append(", ");
 
     result.appendNumber(static_cast<unsigned char>(green()));
-    result.appendLiteral(", ");
+    result.append(", ");
 
     result.appendNumber(static_cast<unsigned char>(blue()));
     if (colorHasAlpha) {
-        result.appendLiteral(", ");
-
-        NumberToStringBuffer buffer;
-        const char* alphaString = numberToFixedPrecisionString(alpha() / 255.0f, 6, buffer, true);
-        result.append(alphaString, strlen(alphaString));
+        result.append(", ");
+        result.appendNumber(alpha() / 255.0f, 6);
     }
 
     result.append(')');
@@ -222,13 +234,13 @@ String Color::serialized() const
     StringBuilder result;
     result.reserveCapacity(28);
 
-    result.appendLiteral("rgba(");
+    result.append("rgba(");
     result.appendNumber(red());
-    result.appendLiteral(", ");
+    result.append(", ");
     result.appendNumber(green());
-    result.appendLiteral(", ");
+    result.append(", ");
     result.appendNumber(blue());
-    result.appendLiteral(", ");
+    result.append(", ");
 
     if (!alpha())
         result.append('0');

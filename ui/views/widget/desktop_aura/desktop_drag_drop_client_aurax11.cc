@@ -23,13 +23,13 @@
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_aurax11.h"
 #include "ui/base/x/selection_utils.h"
-#include "ui/base/x/x11_foreign_window_manager.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/base/x/x11_window_event_manager.h"
+#include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/screen.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/widget/desktop_aura/desktop_native_cursor_manager.h"
 #include "ui/views/widget/desktop_aura/x11_topmost_window_finder.h"
@@ -128,7 +128,7 @@ const int kRepeatMouseMoveTimeoutMs = 350;
 const uint32_t kMinAlpha = 32;
 
 // |drag_widget_|'s opacity.
-const unsigned char kDragWidgetOpacity = 0xc0;
+const float kDragWidgetOpacity = .75f;
 
 static base::LazyInstance<
     std::map< ::Window, views::DesktopDragDropClientAuraX11*> >::Leaky
@@ -197,13 +197,12 @@ class DesktopDragDropClientAuraX11::X11DragContext
   // The XID of the window that's initiated the drag.
   unsigned long source_window_;
 
+  // Events that we have selected on |source_window_|.
+  std::unique_ptr<ui::XScopedEventSelector> source_window_events_;
+
   // The DesktopDragDropClientAuraX11 for |source_window_| if |source_window_|
   // belongs to a Chrome window.
   DesktopDragDropClientAuraX11* source_client_;
-
-  // Used to unselect PropertyChangeMask on |source_window_| if |source_window_|
-  // does not belong to a Chrome window when X11DragContext is destroyed.
-  int foreign_window_manager_source_window_id_;
 
   // The client we inform once we're done with requesting data.
   DesktopDragDropClientAuraX11* drag_drop_client_;
@@ -241,7 +240,6 @@ DesktopDragDropClientAuraX11::X11DragContext::X11DragContext(
       source_window_(event.data.l[0]),
       source_client_(
           DesktopDragDropClientAuraX11::GetForWindow(source_window_)),
-      foreign_window_manager_source_window_id_(0),
       drag_drop_client_(NULL),
       waiting_to_handle_position_(false),
       suggested_action_(None) {
@@ -266,9 +264,8 @@ DesktopDragDropClientAuraX11::X11DragContext::X11DragContext(
     // The window doesn't have a DesktopDragDropClientAuraX11, that means it's
     // created by some other process. Listen for messages on it.
     ui::PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
-    foreign_window_manager_source_window_id_ =
-        ui::XForeignWindowManager::GetInstance()->RequestEvents(
-            source_window_, PropertyChangeMask);
+    source_window_events_.reset(
+        new ui::XScopedEventSelector(source_window_, PropertyChangeMask));
 
     // We must perform a full sync here because we could be racing
     // |source_window_|.
@@ -287,8 +284,6 @@ DesktopDragDropClientAuraX11::X11DragContext::~X11DragContext() {
   if (!source_client_) {
     // Unsubscribe from message events.
     ui::PlatformEventSource::GetInstance()->RemovePlatformEventDispatcher(this);
-    ui::XForeignWindowManager::GetInstance()->CancelRequest(
-        foreign_window_manager_source_window_id_);
   }
 }
 
@@ -607,8 +602,9 @@ void DesktopDragDropClientAuraX11::OnXdndDrop(
     aura::client::DragDropDelegate* delegate =
         aura::client::GetDragDropDelegate(target_window_);
     if (delegate) {
-      ui::OSExchangeData data(new ui::OSExchangeDataProviderAuraX11(
-          xwindow_, target_current_context_->fetched_targets()));
+      ui::OSExchangeData data(
+          base::MakeUnique<ui::OSExchangeDataProviderAuraX11>(
+              xwindow_, target_current_context_->fetched_targets()));
 
       ui::DropTargetEvent event(data,
                                 target_window_location_,
@@ -765,11 +761,15 @@ void DesktopDragDropClientAuraX11::OnWindowDestroyed(aura::Window* window) {
 void DesktopDragDropClientAuraX11::OnMouseMovement(
     const gfx::Point& screen_point,
     int flags,
-    base::TimeDelta event_time) {
+    base::TimeTicks event_time) {
   if (drag_widget_.get()) {
+    display::Display display =
+        display::Screen::GetScreen()->GetDisplayNearestWindow(
+            drag_widget_->GetNativeWindow());
+    gfx::Point scaled_point = gfx::ScaleToRoundedPoint(
+        screen_point, 1.f / display.device_scale_factor());
     drag_widget_->SetBounds(
-        gfx::Rect(screen_point - drag_widget_offset_,
-                  drag_widget_->GetWindowBoundsInScreen().size()));
+        gfx::Rect(scaled_point - drag_widget_offset_, drag_image_size_));
     drag_widget_->StackAtTop();
   }
 
@@ -781,7 +781,8 @@ void DesktopDragDropClientAuraX11::OnMouseMovement(
   current_modifier_state_ = flags & kModifiers;
 
   repeat_mouse_move_timer_.Stop();
-  ProcessMouseMove(screen_point, event_time.InMilliseconds());
+  ProcessMouseMove(screen_point,
+                   (event_time - base::TimeTicks()).InMilliseconds());
 }
 
 void DesktopDragDropClientAuraX11::OnMouseReleased() {
@@ -976,8 +977,9 @@ void DesktopDragDropClientAuraX11::DragTranslate(
   if (!*delegate)
     return;
 
-  data->reset(new OSExchangeData(new ui::OSExchangeDataProviderAuraX11(
-      xwindow_, target_current_context_->fetched_targets())));
+  data->reset(new OSExchangeData(
+      base::MakeUnique<ui::OSExchangeDataProviderAuraX11>(
+          xwindow_, target_current_context_->fetched_targets())));
   gfx::Point location = root_location;
   aura::Window::ConvertPointToTarget(root_window_, target_window_, &location);
 
@@ -1187,8 +1189,8 @@ void DesktopDragDropClientAuraX11::CreateDragWidget(
   params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.accept_events = false;
 
-  gfx::Point location =
-      gfx::Screen::GetScreen()->GetCursorScreenPoint() - drag_widget_offset_;
+  gfx::Point location = display::Screen::GetScreen()->GetCursorScreenPoint() -
+                        drag_widget_offset_;
   params.bounds = gfx::Rect(location, image.size());
   widget->set_focus_on_creation(false);
   widget->set_frame_type(Widget::FRAME_TYPE_FORCE_NATIVE);
@@ -1196,9 +1198,10 @@ void DesktopDragDropClientAuraX11::CreateDragWidget(
   widget->SetOpacity(kDragWidgetOpacity);
   widget->GetNativeWindow()->SetName("DragWindow");
 
+  drag_image_size_ = image.size();
   ImageView* image_view = new ImageView();
   image_view->SetImage(image);
-  image_view->SetBounds(0, 0, image.width(), image.height());
+  image_view->SetBoundsRect(gfx::Rect(drag_image_size_));
   widget->SetContentsView(image_view);
   widget->Show();
   widget->GetNativeWindow()->layer()->SetFillsBoundsOpaquely(false);

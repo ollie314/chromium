@@ -5,8 +5,9 @@
 #ifndef EXTENSIONS_RENDERER_PROGRAMMATIC_SCRIPT_INJECTOR_H_
 #define EXTENSIONS_RENDERER_PROGRAMMATIC_SCRIPT_INJECTOR_H_
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "extensions/renderer/script_injection.h"
 #include "url/gurl.h"
@@ -32,19 +33,25 @@ class ProgrammaticScriptInjector : public ScriptInjector {
   bool ShouldExecuteInMainWorld() const override;
   bool IsUserGesture() const override;
   bool ExpectsResults() const override;
-  bool ShouldInjectJs(UserScript::RunLocation run_location) const override;
-  bool ShouldInjectCss(UserScript::RunLocation run_location) const override;
+  bool ShouldInjectJs(
+      UserScript::RunLocation run_location,
+      const std::set<std::string>& executing_scripts) const override;
+  bool ShouldInjectCss(
+      UserScript::RunLocation run_location,
+      const std::set<std::string>& injected_stylesheets) const override;
   PermissionsData::AccessType CanExecuteOnFrame(
       const InjectionHost* injection_host,
       blink::WebLocalFrame* web_frame,
       int tab_id) const override;
   std::vector<blink::WebScriptSource> GetJsSources(
-      UserScript::RunLocation run_location) const override;
-  std::vector<std::string> GetCssSources(
-      UserScript::RunLocation run_location) const override;
-  void GetRunInfo(ScriptsRunInfo* scripts_run_info,
-                  UserScript::RunLocation run_location) const override;
-  void OnInjectionComplete(scoped_ptr<base::Value> execution_result,
+      UserScript::RunLocation run_location,
+      std::set<std::string>* executing_scripts,
+      size_t* num_injected_js_scripts) const override;
+  std::vector<blink::WebString> GetCssSources(
+      UserScript::RunLocation run_location,
+      std::set<std::string>* injected_stylesheets,
+      size_t* num_injected_stylesheets) const override;
+  void OnInjectionComplete(std::unique_ptr<base::Value> execution_result,
                            UserScript::RunLocation run_location,
                            content::RenderFrame* render_frame) override;
   void OnWillNotInject(InjectFailureReason reason,
@@ -61,7 +68,7 @@ class ProgrammaticScriptInjector : public ScriptInjector {
   void Finish(const std::string& error, content::RenderFrame* render_frame);
 
   // The parameters for injecting the script.
-  scoped_ptr<ExtensionMsg_ExecuteCode_Params> params_;
+  std::unique_ptr<ExtensionMsg_ExecuteCode_Params> params_;
 
   // The url of the frame into which we are injecting.
   GURL url_;

@@ -305,7 +305,7 @@ bool TargetGenerator::FillOutputs(bool allow_substitutions) {
     if (!outputs.required_types().empty()) {
       *err_ = Err(*value, "Source expansions not allowed here.",
           "The outputs of this target used source {{expansions}} but this "
-          "targe type\ndoesn't support them. Just express the outputs "
+          "target type\ndoesn't support them. Just express the outputs "
           "literally.");
       return false;
     }
@@ -403,6 +403,5 @@ bool TargetGenerator::FillWriteRuntimeDeps() {
   OutputFile output_file(GetBuildSettings(), source_file);
   target_->set_write_runtime_deps_output(output_file);
 
-  g_scheduler->AddWriteRuntimeDepsTarget(target_);
   return true;
 }

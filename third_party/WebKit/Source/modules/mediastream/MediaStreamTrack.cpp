@@ -31,13 +31,18 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/events/Event.h"
 #include "core/frame/Deprecation.h"
+#include "modules/mediastream/MediaConstraintsImpl.h"
 #include "modules/mediastream/MediaStream.h"
 #include "modules/mediastream/MediaStreamTrackSourcesCallback.h"
 #include "modules/mediastream/MediaStreamTrackSourcesRequestImpl.h"
+#include "modules/mediastream/MediaTrackSettings.h"
 #include "modules/mediastream/UserMediaController.h"
 #include "platform/mediastream/MediaStreamCenter.h"
 #include "platform/mediastream/MediaStreamComponent.h"
+#include "public/platform/WebMediaStreamTrack.h"
 #include "public/platform/WebSourceInfo.h"
+#include "wtf/Assertions.h"
+#include <memory>
 
 namespace blink {
 
@@ -55,6 +60,8 @@ MediaStreamTrack::MediaStreamTrack(ExecutionContext* context, MediaStreamCompone
     , m_isIteratingRegisteredMediaStreams(false)
     , m_stopped(false)
     , m_component(component)
+    // The source's constraints aren't yet initialized at creation time.
+    , m_constraints()
 {
     m_component->source()->addObserver(this);
 }
@@ -115,11 +122,6 @@ bool MediaStreamTrack::remote() const
     return m_component->source()->remote();
 }
 
-bool MediaStreamTrack::readonly() const
-{
-    return m_component->source()->readonly();
-}
-
 String MediaStreamTrack::readyState() const
 {
     if (ended())
@@ -170,6 +172,32 @@ MediaStreamTrack* MediaStreamTrack::clone(ExecutionContext* context)
     return clonedTrack;
 }
 
+void MediaStreamTrack::getConstraints(MediaTrackConstraints& constraints)
+{
+    MediaConstraintsImpl::convertConstraints(m_constraints, constraints);
+}
+
+void MediaStreamTrack::setConstraints(const WebMediaConstraints& constraints)
+{
+    m_constraints = constraints;
+}
+
+void MediaStreamTrack::getSettings(MediaTrackSettings& settings)
+{
+    WebMediaStreamTrack::Settings platformSettings;
+    m_component->getSettings(platformSettings);
+    if (platformSettings.hasFrameRate()) {
+        settings.setFrameRate(platformSettings.frameRate);
+    }
+    if (platformSettings.hasWidth()) {
+        settings.setWidth(platformSettings.width);
+    }
+    if (platformSettings.hasHeight()) {
+        settings.setHeight(platformSettings.height);
+    }
+    settings.setDeviceId(platformSettings.deviceId);
+}
+
 bool MediaStreamTrack::ended() const
 {
     return m_stopped || (m_readyState == MediaStreamSource::ReadyStateEnded);
@@ -199,8 +227,7 @@ void MediaStreamTrack::sourceChangedState()
 
 void MediaStreamTrack::propagateTrackEnded()
 {
-    // TODO(mcasas): Substitute with CHECK, see https://crbug.com/599867.
-    RELEASE_ASSERT(!m_isIteratingRegisteredMediaStreams);
+    CHECK(!m_isIteratingRegisteredMediaStreams);
     m_isIteratingRegisteredMediaStreams = true;
     for (HeapHashSet<Member<MediaStream>>::iterator iter = m_registeredMediaStreams.begin(); iter != m_registeredMediaStreams.end(); ++iter)
         (*iter)->trackEnded();
@@ -229,25 +256,23 @@ bool MediaStreamTrack::hasPendingActivity() const
     return !ended() && hasEventListeners(EventTypeNames::ended);
 }
 
-PassOwnPtr<AudioSourceProvider> MediaStreamTrack::createWebAudioSource()
+std::unique_ptr<AudioSourceProvider> MediaStreamTrack::createWebAudioSource()
 {
     return MediaStreamCenter::instance().createWebAudioSourceFromMediaStreamTrack(component());
 }
 
 void MediaStreamTrack::registerMediaStream(MediaStream* mediaStream)
 {
-    // TODO(mcasas): Substitute with CHECK, see https://crbug.com/599867.
-    RELEASE_ASSERT(!m_isIteratingRegisteredMediaStreams);
-    RELEASE_ASSERT(!m_registeredMediaStreams.contains(mediaStream));
+    CHECK(!m_isIteratingRegisteredMediaStreams);
+    CHECK(!m_registeredMediaStreams.contains(mediaStream));
     m_registeredMediaStreams.add(mediaStream);
 }
 
 void MediaStreamTrack::unregisterMediaStream(MediaStream* mediaStream)
 {
-    // TODO(mcasas): Substitute with CHECK, see https://crbug.com/599867.
-    RELEASE_ASSERT(!m_isIteratingRegisteredMediaStreams);
+    CHECK(!m_isIteratingRegisteredMediaStreams);
     HeapHashSet<Member<MediaStream>>::iterator iter = m_registeredMediaStreams.find(mediaStream);
-    RELEASE_ASSERT(iter != m_registeredMediaStreams.end());
+    CHECK(iter != m_registeredMediaStreams.end());
     m_registeredMediaStreams.remove(iter);
 }
 

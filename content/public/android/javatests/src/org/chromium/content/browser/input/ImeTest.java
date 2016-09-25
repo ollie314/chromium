@@ -13,21 +13,27 @@ import android.os.Handler;
 import android.os.Looper;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.SmallTest;
+import android.text.InputType;
 import android.text.TextUtils;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.FlakyTest;
-import org.chromium.base.test.util.UrlUtils;
+import org.chromium.base.test.util.RetryOnFailure;
+import org.chromium.base.test.util.parameter.Parameter;
+import org.chromium.base.test.util.parameter.ParameterizedTest;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
+import org.chromium.content.browser.test.util.JavaScriptUtils;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content.browser.test.util.TestInputMethodManagerWrapper;
 import org.chromium.content_public.browser.WebContents;
@@ -42,26 +48,32 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Integration tests for text input using cases based on fixed regressions.
+ * IME (input method editor) and text input tests. Note that we run each test case twice,
+ * once with ImeThread feature and once without it.
  */
+@ParameterizedTest.Set(tests = {
+        @ParameterizedTest(parameters = {
+                @Parameter(
+                        tag = CommandLineFlags.Parameter.PARAMETER_TAG,
+                        arguments = {
+                                @Parameter.Argument(
+                                        name = CommandLineFlags.Parameter.ADD_ARG,
+                                        stringArray = {"enable-features=ImeThread"})})}),
+        @ParameterizedTest(parameters = {
+                @Parameter(
+                        tag = CommandLineFlags.Parameter.PARAMETER_TAG,
+                        arguments = {
+                                @Parameter.Argument(
+                                        name = CommandLineFlags.Parameter.ADD_ARG,
+                                        stringArray = {"disable-features=ImeThread"})})})
+        })
 public class ImeTest extends ContentShellTestBase {
-    private static final String DATA_URL = UrlUtils.encodeHtmlDataUri(
-            "<html><head><meta name=\"viewport\""
-            + "content=\"width=device-width\" /></head>"
-            + "<body><form action=\"about:blank\">"
-            + "<input id=\"input_text\" type=\"text\" /><br/></form><form>"
-            + "<br/><input id=\"input_radio\" type=\"radio\" style=\"width:50px;height:50px\" />"
-            + "<br/><textarea id=\"textarea\" rows=\"4\" cols=\"20\"></textarea>"
-            + "<br/><textarea id=\"textarea2\" rows=\"4\" cols=\"20\" autocomplete=\"off\">"
-            + "</textarea>"
-            + "<br/><input id=\"input_number1\" type=\"number\" /><br/>"
-            + "<br/><input id=\"input_number2\" type=\"number\" /><br/>"
-            + "<br/><p><span id=\"plain_text\">This is Plain Text One</span></p>"
-            + "</form></body></html>");
-
     protected ChromiumBaseInputConnection mConnection;
     private TestInputConnectionFactory mConnectionFactory;
     private ImeAdapter mImeAdapter;
+
+    private static final String INPUT_FORM_HTML =
+            "content/test/data/android/input/input_forms.html";
 
     private ContentViewCore mContentViewCore;
     private WebContents mWebContents;
@@ -71,9 +83,7 @@ public class ImeTest extends ContentShellTestBase {
     @Override
     public void setUp() throws Exception {
         super.setUp();
-
-        launchContentShellWithUrl(DATA_URL);
-        waitForActiveShellToBeDoneLoading();
+        startActivityWithTestUrl(INPUT_FORM_HTML);
         mContentViewCore = getContentViewCore();
         mWebContents = getWebContents();
 
@@ -85,8 +95,6 @@ public class ImeTest extends ContentShellTestBase {
         getImeAdapter().setInputConnectionFactory(mConnectionFactory);
 
         mCallbackContainer = new TestCallbackHelperContainer(mContentViewCore);
-        // TODO(aurimas) remove this wait once crbug.com/179511 is fixed.
-        assertWaitForPageScaleFactorMatch(1);
         DOMUtils.waitForNonZeroNodeBounds(mWebContents, "input_text");
         DOMUtils.clickNode(this, mContentViewCore, "input_text");
         assertWaitForKeyboardStatus(true);
@@ -101,6 +109,9 @@ public class ImeTest extends ContentShellTestBase {
         waitForKeyboardStates(1, 0, 1, new Integer[] {TextInputType.TEXT});
         assertEquals(0, mConnectionFactory.getOutAttrs().initialSelStart);
         assertEquals(0, mConnectionFactory.getOutAttrs().initialSelEnd);
+
+        waitForEventLogs("selectionchange");
+        clearEventLogs();
 
         resetAllStates();
     }
@@ -118,7 +129,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @MediumTest
     @Feature({"TextInput", "Main"})
-    @FlakyTest
+    @RetryOnFailure
     public void testDoesNotHang_getTextAfterKeyboardHides() throws Throwable {
         setComposingText("hello", 1);
         waitAndVerifyUpdateSelection(0, 5, 5, 0, 5);
@@ -134,8 +145,21 @@ public class ImeTest extends ContentShellTestBase {
         assertWaitForKeyboardStatus(false);
     }
 
+    // crbug.com/643519
     @SmallTest
     @Feature({"TextInput", "Main"})
+    public void testCompositionWithNullTextNotCrash() throws Throwable {
+        if (usingReplicaInputConnection()) return;
+        commitText(null, 1);
+        assertTextsAroundCursor("", null, "");
+
+        setComposingText(null, 1);
+        assertTextsAroundCursor("", null, "");
+    }
+
+    @SmallTest
+    @Feature({"TextInput", "Main"})
+    @RetryOnFailure
     public void testDeleteSurroundingTextWithZeroValue() throws Throwable {
         commitText("hello", 1);
         waitAndVerifyUpdateSelection(0, 5, 5, -1, -1);
@@ -148,11 +172,143 @@ public class ImeTest extends ContentShellTestBase {
         setSelection(2, 2);
         waitAndVerifyUpdateSelection(2, 2, 2, -1, -1);
         deleteSurroundingText(0, 0);
-        assertTextsAroundCursor("he", "", "llo");
+        assertTextsAroundCursor("he", null, "llo");
     }
 
     @SmallTest
     @Feature({"TextInput", "Main"})
+    public void testSetComposingTextForNewCursorPositions() throws Throwable {
+        // When newCursorPosition != 1, setComposingText doesn't work for ReplicaInputConnection
+        // because there is a bug in BaseInputConnection.
+        if (usingReplicaInputConnection()) return;
+
+        // Cursor is on the right of composing text when newCursorPosition > 0.
+        setComposingText("ab", 1);
+        waitAndVerifyUpdateSelection(0, 2, 2, 0, 2);
+
+        finishComposingText();
+        waitAndVerifyUpdateSelection(1, 2, 2, -1, -1);
+
+        // Cursor exceeds the left boundary.
+        setComposingText("cdef", -100);
+        waitAndVerifyUpdateSelection(2, 0, 0, 2, 6);
+
+        // Cursor is on the left boundary.
+        setComposingText("cd", -2);
+        waitAndVerifyUpdateSelection(3, 0, 0, 2, 4);
+
+        // Cursor is between the left boundary and the composing text.
+        setComposingText("cd", -1);
+        waitAndVerifyUpdateSelection(4, 1, 1, 2, 4);
+
+        // Cursor is on the left of composing text.
+        setComposingText("cd", 0);
+        waitAndVerifyUpdateSelection(5, 2, 2, 2, 4);
+
+        finishComposingText();
+        waitAndVerifyUpdateSelection(6, 2, 2, -1, -1);
+
+        // Cursor is on the right of composing text.
+        setComposingText("ef", 1);
+        waitAndVerifyUpdateSelection(7, 4, 4, 2, 4);
+
+        // Cursor is between the composing text and the right boundary.
+        setComposingText("ef", 2);
+        waitAndVerifyUpdateSelection(8, 5, 5, 2, 4);
+
+        // Cursor is on the right boundary.
+        setComposingText("ef", 3);
+        waitAndVerifyUpdateSelection(9, 6, 6, 2, 4);
+
+        // Cursor exceeds the right boundary.
+        setComposingText("efgh", 100);
+        waitAndVerifyUpdateSelection(10, 8, 8, 2, 6);
+    }
+
+    @SmallTest
+    @Feature({"TextInput", "Main"})
+    @RetryOnFailure
+    public void testCommitTextForNewCursorPositions() throws Throwable {
+        // When newCursorPosition != 1, commitText doesn't work for ReplicaInputConnection
+        // because there is a bug in BaseInputConnection.
+        if (usingReplicaInputConnection()) return;
+
+        // Cursor is on the left of committing text.
+        commitText("ab", 0);
+        waitAndVerifyUpdateSelection(0, 0, 0, -1, -1);
+
+        // Cursor is on the right of committing text.
+        commitText("cd", 1);
+        waitAndVerifyUpdateSelection(1, 2, 2, -1, -1);
+
+        // Cursor is between the committing text and the right boundary.
+        commitText("ef", 2);
+        waitAndVerifyUpdateSelection(2, 5, 5, -1, -1);
+
+        // Cursor is between the left boundary and the committing text.
+        commitText("gh", -3);
+        waitAndVerifyUpdateSelection(3, 2, 2, -1, -1);
+
+        // Cursor is on the right boundary.
+        commitText("ij", 7);
+        waitAndVerifyUpdateSelection(4, 10, 10, -1, -1);
+
+        // Cursor is on the left boundary.
+        commitText("kl", -10);
+        waitAndVerifyUpdateSelection(5, 0, 0, -1, -1);
+
+        // Cursor exceeds the right boundary.
+        commitText("mn", 100);
+        waitAndVerifyUpdateSelection(6, 14, 14, -1, -1);
+
+        // Cursor exceeds the left boundary.
+        commitText("op", -100);
+        waitAndVerifyUpdateSelection(7, 0, 0, -1, -1);
+    }
+
+    @SmallTest
+    @Feature({"TextInput", "Main"})
+    public void testSetComposingTextWithEmptyText() throws Throwable {
+        commitText("hello", 1);
+        waitAndVerifyUpdateSelection(0, 5, 5, -1, -1);
+
+        setComposingText("AB", 1);
+        waitAndVerifyUpdateSelection(1, 7, 7, 5, 7);
+
+        // With previous composition.
+        setComposingText("", -3);
+        waitAndVerifyUpdateSelection(2, 2, 2, -1, -1);
+        assertTextsAroundCursor("he", null, "llo");
+
+        // Without previous composition.
+        setComposingText("", 3);
+        waitAndVerifyUpdateSelection(3, 4, 4, -1, -1);
+        assertTextsAroundCursor("hell", null, "o");
+    }
+
+    @SmallTest
+    @Feature({"TextInput", "Main"})
+    @RetryOnFailure
+    public void testCommitTextWithEmptyText() throws Throwable {
+        commitText("hello", 1);
+        waitAndVerifyUpdateSelection(0, 5, 5, -1, -1);
+        setSelection(2, 2);
+        waitAndVerifyUpdateSelection(1, 2, 2, -1, -1);
+
+        setComposingText("world", 1);
+        waitAndVerifyUpdateSelection(2, 7, 7, 2, 7);
+        // With previous composition.
+        commitText("", 2);
+        waitAndVerifyUpdateSelection(3, 3, 3, -1, -1);
+
+        // Without previous composition.
+        commitText("", -1);
+        waitAndVerifyUpdateSelection(4, 2, 2, -1, -1);
+    }
+
+    @SmallTest
+    @Feature({"TextInput", "Main"})
+    @RetryOnFailure
     public void testCommitWhileComposingText() throws Throwable {
         setComposingText("h", 1);
         waitAndVerifyUpdateSelection(0, 1, 1, 0, 1);
@@ -172,11 +328,12 @@ public class ImeTest extends ContentShellTestBase {
         commitText("", 1);
         waitAndVerifyUpdateSelection(5, 3, 3, -1, -1);
 
-        assertTextsAroundCursor("hel", "", "");
+        assertTextsAroundCursor("hel", null, "");
     }
 
     @SmallTest
     @Feature({"TextInput", "Main"})
+    @RetryOnFailure
     public void testCommitEnterKeyWhileComposingText() throws Throwable {
         focusElementAndWaitForStateUpdate("textarea");
 
@@ -188,15 +345,16 @@ public class ImeTest extends ContentShellTestBase {
         waitAndVerifyUpdateSelection(1, 1, 1, -1, -1);
         // The second new line is not a user visible/editable one, it is a side-effect of Blink
         // using <br> internally. This only happens when \n is at the end.
-        assertTextsAroundCursor("\n", "", "\n");
+        assertTextsAroundCursor("\n", null, "\n");
 
         commitText("world", 1);
         waitAndVerifyUpdateSelection(2, 6, 6, -1, -1);
-        assertTextsAroundCursor("\nworld", "", "");
+        assertTextsAroundCursor("\nworld", null, "");
     }
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testImeCopy() throws Exception {
         commitText("hello", 1);
         waitAndVerifyUpdateSelection(0, 5, 5, -1, -1);
@@ -210,6 +368,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testEnterTextAndRefocus() throws Exception {
         commitText("hello", 1);
         waitAndVerifyUpdateSelection(0, 5, 5, -1, -1);
@@ -223,6 +382,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testShowAndHideSoftInput() throws Exception {
         focusElement("input_radio", false);
 
@@ -272,10 +432,6 @@ public class ImeTest extends ContentShellTestBase {
         assertEquals(before, getTextBeforeCursor(100, 0));
 
         CharSequence actualSelected = getSelectedText(0);
-        if (usingReplicaInputConnection() && TextUtils.isEmpty(actualSelected)) {
-            // ReplicaInputConnection will return null but ChromiumInputConnection will return "".
-            actualSelected = "";
-        }
         assertEquals(selected, actualSelected);
 
         if (usingReplicaInputConnection() && after.equals("\n")) {
@@ -319,6 +475,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testKeyboardNotDismissedAfterCopySelection() throws Exception {
         commitText("Sample Text", 1);
         waitAndVerifyUpdateSelection(0, 11, 11, -1, -1);
@@ -337,6 +494,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testImeNotDismissedAfterCutSelection() throws Exception {
         commitText("Sample Text", 1);
         waitAndVerifyUpdateSelection(0, 11, 11, -1, -1);
@@ -350,6 +508,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testImeNotShownOnLongPressingEmptyInput() throws Exception {
         DOMUtils.focusNode(mWebContents, "input_radio");
         DOMUtils.longPressNode(this, mContentViewCore, "input_text");
@@ -361,6 +520,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testSelectActionBarShownOnLongPressingInput() throws Exception {
         DOMUtils.longPressNode(this, mContentViewCore, "input_text");
         assertWaitForSelectActionBarStatus(false);
@@ -371,6 +531,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testLongPressInputWhileComposingText() throws Exception {
         assertWaitForSelectActionBarStatus(false);
         setComposingText("Sample Text", 1);
@@ -392,6 +553,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testImeShownWhenLongPressOnAlreadySelectedText() throws Exception {
         assertWaitForSelectActionBarStatus(false);
         commitText("Sample Text", 1);
@@ -441,8 +603,20 @@ public class ImeTest extends ContentShellTestBase {
         });
     }
 
+    private void reloadPage() {
+        // Reload the page, then focus will be lost and keyboard should be hidden.
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                final String currentUrl = getContentViewCore().getWebContents().getUrl();
+                getActivity().getActiveShell().loadUrl(currentUrl);
+            }
+        });
+    }
+
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testPhysicalKeyboard_AttachDetach() throws Exception {
         attachPhysicalKeyboard();
         // We still call showSoftKeyboard, which will be ignored by physical keyboard.
@@ -454,13 +628,8 @@ public class ImeTest extends ContentShellTestBase {
         // Now we really show soft keyboard. We also call restartInput when configuration changes.
         waitForKeyboardStates(2, 0, 2, new Integer[] {TextInputType.TEXT, TextInputType.TEXT});
 
-        // Reload the page, then focus will be lost and keyboard should be hidden.
-        getInstrumentation().runOnMainSync(new Runnable() {
-            @Override
-            public void run() {
-                getActivity().getActiveShell().loadUrl(DATA_URL);
-            }
-        });
+        reloadPage();
+
         // Depending on the timing, hideSoftInput and restartInput call counts may vary here
         // because render widget gets restarted. But the end result should be the same.
         assertWaitForKeyboardStatus(false);
@@ -483,6 +652,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testSelectActionBarClearedOnTappingInput() throws Exception {
         commitText("Sample Text", 1);
         DOMUtils.longPressNode(this, mContentViewCore, "input_text");
@@ -494,6 +664,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testSelectActionBarClearedOnTappingOutsideInput() throws Exception {
         commitText("Sample Text", 1);
         DOMUtils.longPressNode(this, mContentViewCore, "input_text");
@@ -516,21 +687,32 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testImeStaysOnLongPressingDifferentNonEmptyInputs() throws Exception {
         DOMUtils.focusNode(mWebContents, "input_text");
         assertWaitForKeyboardStatus(true);
+
         commitText("Sample Text", 1);
+        // We should wait to avoid race condition.
+        waitAndVerifyUpdateSelection(0, 11, 11, -1, -1);
+
         DOMUtils.focusNode(mWebContents, "textarea");
+        waitAndVerifyUpdateSelection(1, 0, 0, -1, -1);
+
         commitText("Sample Text", 1);
+        waitAndVerifyUpdateSelection(2, 11, 11, -1, -1);
+
         DOMUtils.longPressNode(this, mContentViewCore, "input_text");
         assertWaitForKeyboardStatus(true);
         assertWaitForSelectActionBarStatus(true);
+
         DOMUtils.longPressNode(this, mContentViewCore, "textarea");
         assertWaitForKeyboardStatus(true);
     }
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testImeCut() throws Exception {
         commitText("snarful", 1);
         waitAndVerifyUpdateSelection(0, 7, 7, -1, -1);
@@ -540,12 +722,13 @@ public class ImeTest extends ContentShellTestBase {
 
         cut();
         waitAndVerifyUpdateSelection(2, 1, 1, -1, -1);
-        assertTextsAroundCursor("s", "", "ul");
+        assertTextsAroundCursor("s", null, "ul");
         assertClipboardContents(getActivity(), "narf");
     }
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testImePaste() throws Exception {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -560,7 +743,7 @@ public class ImeTest extends ContentShellTestBase {
         paste();
         // Paste is a two step process when there is a non-zero selection.
         waitAndVerifyUpdateSelection(0, 5, 5, -1, -1);
-        assertTextsAroundCursor("blarg", "", "");
+        assertTextsAroundCursor("blarg", null, "");
 
         setSelection(3, 5);
         waitAndVerifyUpdateSelection(1, 3, 5, -1, -1);
@@ -570,16 +753,51 @@ public class ImeTest extends ContentShellTestBase {
         // Paste is a two step process when there is a non-zero selection.
         waitAndVerifyUpdateSelection(2, 3, 3, -1, -1);
         waitAndVerifyUpdateSelection(3, 8, 8, -1, -1);
-        assertTextsAroundCursor("blablarg", "", "");
+        assertTextsAroundCursor("blablarg", null, "");
 
         paste();
         waitAndVerifyUpdateSelection(4, 13, 13, -1, -1);
-        assertTextsAroundCursor("blablargblarg", "", "");
+        assertTextsAroundCursor("blablargblarg", null, "");
+    }
+
+    @MediumTest
+    @Feature({"TextInput"})
+    @RetryOnFailure
+    public void testPasteLongText() throws Exception {
+        // Chrome can crash after pasting long text into textarea, becasue there is an overflow bug
+        // in SpannableStringBuilder#replace(). This can be avoided by enabling ImeThread.
+        // crbug.com/606059
+        if (usingReplicaInputConnection()) return;
+
+        int textLength = 25000;
+        String text = new String(new char[textLength]).replace("\0", "a");
+
+        commitText(text, 1);
+        waitAndVerifyUpdateSelection(0, textLength, textLength, -1, -1);
+        selectAll();
+        waitAndVerifyUpdateSelection(1, 0, textLength, -1, -1);
+        copy();
+        assertClipboardContents(getActivity(), text);
+
+        focusElement("textarea");
+        waitAndVerifyUpdateSelection(2, 0, 0, -1, -1);
+
+        // In order to reproduce the bug, we need some text after the pasting text.
+        commitText("hello", 1);
+        waitAndVerifyUpdateSelection(3, 5, 5, -1, -1);
+
+        setSelection(0, 0);
+        waitAndVerifyUpdateSelection(4, 0, 0, -1, -1);
+
+        // It will crash after the 3rd paste if ImeThread is not enabled.
+        for (int i = 0; i < 10; i++) {
+            paste();
+            waitAndVerifyUpdateSelection(5 + i, textLength * (i + 1), textLength * (i + 1), -1, -1);
+        }
     }
 
     @SmallTest
     @Feature({"TextInput"})
-    @FlakyTest(message = "crbug.com/598482")
     public void testImeSelectAndUnSelectAll() throws Exception {
         commitText("hello", 1);
         waitAndVerifyUpdateSelection(0, 5, 5, -1, -1);
@@ -594,6 +812,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput", "Main"})
+    @RetryOnFailure
     public void testShowImeIfNeeded() throws Throwable {
         // showImeIfNeeded() is now implicitly called by the updated focus
         // heuristic so no need to call explicitly. http://crbug.com/371927
@@ -606,6 +825,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput", "Main"})
+    @RetryOnFailure
     public void testFinishComposingText() throws Throwable {
         focusElementAndWaitForStateUpdate("textarea");
 
@@ -617,7 +837,7 @@ public class ImeTest extends ContentShellTestBase {
 
         setSelection(1, 1);
         waitAndVerifyUpdateSelection(2, 1, 1, -1, -1);
-        assertTextsAroundCursor("h", "", "llo ");
+        assertTextsAroundCursor("h", null, "llo ");
 
         setComposingRegion(0, 4);
         waitAndVerifyUpdateSelection(3, 1, 1, 0, 4);
@@ -627,12 +847,13 @@ public class ImeTest extends ContentShellTestBase {
 
         commitText("\n", 1);
         waitAndVerifyUpdateSelection(5, 2, 2, -1, -1);
-        assertTextsAroundCursor("h\n", "", "llo ");
+        assertTextsAroundCursor("h\n", null, "llo ");
     }
 
     // http://crbug.com/445499
     @SmallTest
     @Feature({"TextInput", "Main"})
+    @RetryOnFailure
     public void testDeleteText() throws Throwable {
         focusElement("textarea");
 
@@ -679,7 +900,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput", "Main"})
-    @FlakyTest
+    @RetryOnFailure
     public void testSwipingText() throws Throwable {
         focusElement("textarea");
 
@@ -706,13 +927,14 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput", "Main"})
+    @RetryOnFailure
     public void testDeleteMultiCharacterCodepoint() throws Throwable {
         // This smiley is a multi character codepoint.
         final String smiley = "\uD83D\uDE0A";
 
         commitText(smiley, 1);
         waitAndVerifyUpdateSelection(0, 2, 2, -1, -1);
-        assertTextsAroundCursor(smiley, "", "");
+        assertTextsAroundCursor(smiley, null, "");
 
         // DEL, sent via dispatchKeyEvent like it is in Android WebView or a physical keyboard.
         dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
@@ -729,6 +951,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput", "Main"})
+    @RetryOnFailure
     public void testBackspaceKeycode() throws Throwable {
         focusElement("textarea");
 
@@ -750,6 +973,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput", "Main"})
+    @RetryOnFailure
     public void testRepeatBackspaceKeycode() throws Throwable {
         focusElement("textarea");
 
@@ -785,13 +1009,13 @@ public class ImeTest extends ContentShellTestBase {
         dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
         dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
         waitAndVerifyUpdateSelection(1, 2, 2, -1, -1);
-        assertTextsAroundCursor("a\n", "", "\n");
+        assertTextsAroundCursor("a\n", null, "\n");
 
         // Type 'b'.
         dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_B));
         dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_B));
         waitAndVerifyUpdateSelection(2, 3, 3, -1, -1);
-        assertTextsAroundCursor("a\nb", "", "");
+        assertTextsAroundCursor("a\nb", null, "");
     }
 
     @SmallTest
@@ -871,12 +1095,16 @@ public class ImeTest extends ContentShellTestBase {
     @SmallTest
     @Feature({"TextInput", "Main"})
     public void testSetComposingRegionOutOfBounds() throws Throwable {
-        focusElement("textarea");
+        focusElementAndWaitForStateUpdate("textarea");
         setComposingText("hello", 1);
+        waitAndVerifyUpdateSelection(0, 5, 5, 0, 5);
 
         setComposingRegion(0, 0);
+        waitAndVerifyUpdateSelection(1, 5, 5, -1, -1);
         setComposingRegion(0, 9);
-        setComposingRegion(9, 0);
+        waitAndVerifyUpdateSelection(2, 5, 5, 0, 5);
+        setComposingRegion(9, 1);
+        waitAndVerifyUpdateSelection(3, 5, 5, 1, 5);
     }
 
     @SmallTest
@@ -890,11 +1118,11 @@ public class ImeTest extends ContentShellTestBase {
         dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
         dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
         waitAndVerifyUpdateSelection(1, 6, 6, -1, -1);
-        assertTextsAroundCursor("hello\n", "", "\n");
+        assertTextsAroundCursor("hello\n", null, "\n");
 
         commitText("world", 1);
         waitAndVerifyUpdateSelection(2, 11, 11, -1, -1);
-        assertTextsAroundCursor("hello\nworld", "", "");
+        assertTextsAroundCursor("hello\nworld", null, "");
     }
 
     @SmallTest
@@ -918,11 +1146,12 @@ public class ImeTest extends ContentShellTestBase {
 
         commitText("world", 1);
         waitAndVerifyUpdateSelection(3, 11, 11, -1, -1);
-        assertTextsAroundCursor("hello\nworld", "", "");
+        assertTextsAroundCursor("hello\nworld", null, "");
     }
 
     @SmallTest
     @Feature({"TextInput", "Main"})
+    @RetryOnFailure
     public void testDpadKeyCodesWhileSwipingText() throws Throwable {
         focusElement("textarea");
 
@@ -949,7 +1178,7 @@ public class ImeTest extends ContentShellTestBase {
             // make take some round trip time until we get the correct value.
             waitUntilGetCharacterBeforeCursorBecomes("l");
         } else {
-            assertTextsAroundCursor("hell", "", "o");
+            assertTextsAroundCursor("hell", null, "o");
         }
     }
 
@@ -991,7 +1220,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
-    @FlakyTest(message = "crbug.com/598482")
+    @RetryOnFailure
     public void testPastePopupShowAndHide() throws Throwable {
         commitText("hello", 1);
         waitAndVerifyUpdateSelection(0, 5, 5, -1, -1);
@@ -1002,7 +1231,7 @@ public class ImeTest extends ContentShellTestBase {
 
         cut();
         waitAndVerifyUpdateSelection(2, 0, 0, -1, -1);
-        assertTextsAroundCursor("", "", "");
+        assertTextsAroundCursor("", null, "");
 
         DOMUtils.longPressNode(this, mContentViewCore, "input_text");
         CriteriaHelper.pollUiThread(new Criteria() {
@@ -1025,8 +1254,8 @@ public class ImeTest extends ContentShellTestBase {
     @SmallTest
     @Feature({"TextInput"})
     public void testSelectionClearedOnKeyEvent() throws Throwable {
-        commitText("hello", 1);
-        waitAndVerifyUpdateSelection(0, 5, 5, -1, -1);
+        commitText("Sample Text", 1);
+        waitAndVerifyUpdateSelection(0, 11, 11, -1, -1);
 
         DOMUtils.longPressNode(this, mContentViewCore, "input_text");
         assertWaitForSelectActionBarStatus(true);
@@ -1038,6 +1267,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testTextHandlesPreservedWithDpadNavigation() throws Throwable {
         DOMUtils.longPressNode(this, mContentViewCore, "plain_text");
         assertWaitForSelectActionBarStatus(true);
@@ -1050,6 +1280,7 @@ public class ImeTest extends ContentShellTestBase {
 
     @MediumTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testRestartInputWhileComposingText() throws Throwable {
         setComposingText("abc", 1);
         waitAndVerifyUpdateSelection(0, 3, 3, 0, 3);
@@ -1063,10 +1294,240 @@ public class ImeTest extends ContentShellTestBase {
 
     @MediumTest
     @Feature({"TextInput"})
+    @RetryOnFailure
     public void testRestartInputKeepsTextAndCursor() throws Exception {
         commitText("ab", 2);
         restartInput();
         assertEquals("ab", getTextBeforeCursor(10, 0));
+    }
+
+    @MediumTest
+    @Feature({"TextInput"})
+    @DisabledTest(message = "crbug.com/628964")
+    public void testContentEditableEvents_SetComposingText() throws Throwable {
+        focusElementAndWaitForStateUpdate("contenteditable_event");
+        waitForEventLogs("selectionchange,selectionchange");
+        clearEventLogs();
+
+        beginBatchEdit();
+        setComposingText("a", 1);
+        finishComposingText();
+        endBatchEdit();
+        waitAndVerifyUpdateSelection(0, 1, 1, -1, -1);
+
+        // TODO(changwan): reduce the number of selection changes
+        waitForEventLogs("keydown(229),compositionstart(),compositionupdate(a),input,keyup(229),"
+                + "compositionupdate(a),input,compositionend(a),selectionchange,selectionchange,"
+                + "selectionchange,selectionchange,selectionchange");
+    }
+
+    @MediumTest
+    @Feature({"TextInput"})
+    @RetryOnFailure
+    public void testInputTextEvents_SetComposingText() throws Throwable {
+        beginBatchEdit();
+        setComposingText("a", 1);
+        finishComposingText();
+        endBatchEdit();
+        waitAndVerifyUpdateSelection(0, 1, 1, -1, -1);
+
+        // TODO(changwan): reduce the number of selection changes
+        waitForEventLogs("keydown(229),compositionstart(),compositionupdate(a),"
+                + "input,keyup(229),compositionupdate(a),input,compositionend(a),selectionchange,"
+                + "selectionchange,selectionchange,selectionchange,selectionchange");
+    }
+
+    @MediumTest
+    @Feature({"TextInput"})
+    @DisabledTest(message = "crbug.com/628964")
+    public void testContentEditableEvents_CommitText() throws Throwable {
+        focusElementAndWaitForStateUpdate("contenteditable_event");
+        waitForEventLogs("selectionchange,selectionchange");
+        clearEventLogs();
+
+        commitText("a", 1);
+        waitAndVerifyUpdateSelection(0, 1, 1, -1, -1);
+
+        waitForEventLogs("keydown(229),input,keyup(229),selectionchange");
+    }
+
+    @MediumTest
+    @Feature({"TextInput"})
+    @RetryOnFailure
+    public void testInputTextEvents_CommitText() throws Throwable {
+        commitText("a", 1);
+        waitAndVerifyUpdateSelection(0, 1, 1, -1, -1);
+
+        waitForEventLogs("keydown(229),input,keyup(229),selectionchange");
+    }
+
+    @MediumTest
+    @Feature({"TextInput"})
+    @DisabledTest(message = "crbug.com/628964")
+    public void testContentEditableEvents_DeleteSurroundingText() throws Throwable {
+        focusElementAndWaitForStateUpdate("contenteditable_event");
+        waitForEventLogs("selectionchange,selectionchange");
+        clearEventLogs();
+
+        commitText("a", 1);
+        waitAndVerifyUpdateSelection(0, 1, 1, -1, -1);
+        waitForEventLogs("keydown(229),input,keyup(229),selectionchange");
+        clearEventLogs();
+
+        deleteSurroundingText(1, 0);
+        waitAndVerifyUpdateSelection(1, 0, 0, -1, -1);
+
+        waitForEventLogs("keydown(229),input,keyup(229),selectionchange,selectionchange");
+    }
+
+    @MediumTest
+    @Feature({"TextInput"})
+    @RetryOnFailure
+    public void testInputTextEvents_DeleteSurroundingText() throws Throwable {
+        commitText("a", 1);
+        waitAndVerifyUpdateSelection(0, 1, 1, -1, -1);
+        waitForEventLogs("keydown(229),input,keyup(229),selectionchange");
+        clearEventLogs();
+
+        deleteSurroundingText(1, 0);
+        waitAndVerifyUpdateSelection(1, 0, 0, -1, -1);
+
+        waitForEventLogs("keydown(229),input,keyup(229),selectionchange,selectionchange");
+    }
+
+    @MediumTest
+    @Feature({"TextInput"})
+    @RetryOnFailure
+    public void testGetCursorCapsMode() throws Throwable {
+        commitText("Hello World", 1);
+        waitAndVerifyUpdateSelection(0, 11, 11, -1, -1);
+        assertEquals(0,
+                getCursorCapsMode(InputType.TYPE_TEXT_FLAG_CAP_WORDS));
+        setSelection(6, 6);
+        waitAndVerifyUpdateSelection(1, 6, 6, -1, -1);
+        assertEquals(InputType.TYPE_TEXT_FLAG_CAP_WORDS,
+                getCursorCapsMode(InputType.TYPE_TEXT_FLAG_CAP_WORDS));
+        commitText("\n", 1);
+        assertEquals(InputType.TYPE_TEXT_FLAG_CAP_WORDS,
+                getCursorCapsMode(InputType.TYPE_TEXT_FLAG_CAP_WORDS));
+    }
+
+    private void clearEventLogs() throws Exception {
+        final String code = "clearEventLogs()";
+        JavaScriptUtils.executeJavaScriptAndWaitForResult(
+                getContentViewCore().getWebContents(), code);
+    }
+
+    private void waitForEventLogs(String expectedLogs) throws Exception {
+        final String code = "getEventLogs()";
+        final String sanitizedExpectedLogs = "\"" + expectedLogs + "\"";
+        if (usingReplicaInputConnection()) {
+            // When using replica input connection, update from JavaScript will come at a later
+            // time.
+            CriteriaHelper.pollInstrumentationThread(new Criteria() {
+                @Override
+                public boolean isSatisfied() {
+                    try {
+                        String eventLogs = JavaScriptUtils.executeJavaScriptAndWaitForResult(
+                                getContentViewCore().getWebContents(), code);
+                        updateFailureReason(eventLogs);
+                        return sanitizedExpectedLogs.equals(eventLogs);
+                    } catch (InterruptedException | TimeoutException e) {
+                        updateFailureReason(e.getMessage());
+                        return false;
+                    }
+                }
+            });
+        } else {
+            assertEquals(sanitizedExpectedLogs, JavaScriptUtils.executeJavaScriptAndWaitForResult(
+                    getContentViewCore().getWebContents(), code));
+        }
+    }
+
+    // https://crbug.com/604675
+    @MediumTest
+    @Feature({"TextInput"})
+    @RetryOnFailure
+    public void testAlertInKeyUpListenerDoesNotCrash() throws Exception {
+        // Call 'alert()' when 'keyup' event occurs. Since we are in contentshell,
+        // this does not actually pops up the alert window.
+        String code = "(function() { "
+                + "var editor = document.getElementById('input_text');"
+                + "editor.addEventListener('keyup', function(e) { alert('keyup') });"
+                + "})();";
+        JavaScriptUtils.executeJavaScriptAndWaitForResult(
+                getContentViewCore().getWebContents(), code);
+        setComposingText("ab", 1);
+        finishComposingText();
+        assertEquals("ab", getTextBeforeCursor(10, 0));
+    }
+
+    // https://crbug.com/616334
+    @SmallTest
+    @Feature({"TextInput"})
+    @RetryOnFailure
+    public void testCastToBaseInputConnection() throws Exception {
+        commitText("a", 1);
+        final BaseInputConnection baseInputConnection = (BaseInputConnection) mConnection;
+        assertEquals("a", runBlockingOnImeThread(new Callable<CharSequence>() {
+            @Override
+            public CharSequence call() {
+                return baseInputConnection.getTextBeforeCursor(10, 0);
+            }
+        }));
+    }
+
+    // Tests that the method call order is kept and get updates correctly.
+    // crbug.com/601707, crbug.com/643473
+    @MediumTest
+    @Feature({"TextInput"})
+    @RetryOnFailure
+    public void testAsynchronousSequence() throws Exception {
+        final ChromiumBaseInputConnection connection = mConnection;
+        runBlockingOnImeThread(new Callable<Void>() {
+            @Override
+            public Void call() {
+                connection.commitText("hi ", 1);
+                connection.beginBatchEdit();
+                connection.commitText("hello world", 1);
+                connection.setSelection(9, 9);
+                connection.deleteSurroundingText(3, 8);
+                connection.commitText("'", 1);
+                connection.commitText("world", 1);
+                connection.setSelection(10, 10);
+                connection.setComposingText("", 1);
+                connection.endBatchEdit();
+                return null;
+            }
+        });
+        waitAndVerifyUpdateSelection(0, 3, 3, -1, -1);
+        waitAndVerifyUpdateSelection(1, 10, 10, -1, -1);
+    }
+
+    // crbug.com/643477
+    @MediumTest
+    @Feature({"TextInput"})
+    @RetryOnFailure
+    public void testUiThreadAccess() throws Exception {
+        final ChromiumBaseInputConnection connection = mConnection;
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                assertTrue(connection.commitText("a", 1));
+                assertTrue(connection.setComposingText("b", 1));
+                // Note that the result of this function may not be up-to-date.
+                connection.getTextBeforeCursor(10, 0);
+
+                assertTrue(connection.setComposingText("bc", 1));
+                assertTrue(connection.finishComposingText());
+            }
+        });
+        assertEquals("abc", runBlockingOnImeThread(new Callable<CharSequence>() {
+            @Override
+            public CharSequence call() throws Exception {
+                return connection.getTextBeforeCursor(5, 0);
+            }
+        }));
     }
 
     private void performGo(TestCallbackHelperContainer testCallbackHelperContainer)
@@ -1184,6 +1645,8 @@ public class ImeTest extends ContentShellTestBase {
         });
     }
 
+    // After calling this method, we should call assertClipboardContents() to wait for the clipboard
+    // to get updated. See cubug.com/621046
     private void copy() {
         final WebContents webContents = mWebContents;
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
@@ -1234,8 +1697,33 @@ public class ImeTest extends ContentShellTestBase {
         });
     }
 
-    private <T> T runBlockingOnImeThread(Callable<T> c) throws Exception {
+    /**
+     * Run the {@Callable} on IME thread (or UI thread if not applicable).
+     * @param c The callable
+     * @return The result from running the callable.
+     */
+    protected <T> T runBlockingOnImeThread(Callable<T> c) throws Exception {
         return ImeTestUtils.runBlockingOnHandler(mConnectionFactory.getHandler(), c);
+    }
+
+    private boolean beginBatchEdit() throws Exception {
+        final ChromiumBaseInputConnection connection = mConnection;
+        return runBlockingOnImeThread(new Callable<Boolean>() {
+            @Override
+            public Boolean call() {
+                return connection.beginBatchEdit();
+            }
+        });
+    }
+
+    private boolean endBatchEdit() throws Exception {
+        final ChromiumBaseInputConnection connection = mConnection;
+        return runBlockingOnImeThread(new Callable<Boolean>() {
+            @Override
+            public Boolean call() {
+                return connection.endBatchEdit();
+            }
+        });
     }
 
     private boolean commitText(final CharSequence text, final int newCursorPosition)
@@ -1330,6 +1818,16 @@ public class ImeTest extends ContentShellTestBase {
         });
     }
 
+    private int getCursorCapsMode(final int reqModes) throws Throwable {
+        final ChromiumBaseInputConnection connection = mConnection;
+        return runBlockingOnImeThread(new Callable<Integer>() {
+            @Override
+            public Integer call() {
+                return connection.getCursorCapsMode(reqModes);
+            }
+        });
+    }
+
     private void dispatchKeyEvent(final KeyEvent event) {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -1409,6 +1907,26 @@ public class ImeTest extends ContentShellTestBase {
 
         public EditorInfo getOutAttrs() {
             return mOutAttrs;
+        }
+
+        @Override
+        public void onWindowFocusChanged(boolean gainFocus) {
+            mFactory.onWindowFocusChanged(gainFocus);
+        }
+
+        @Override
+        public void onViewFocusChanged(boolean gainFocus) {
+            mFactory.onViewFocusChanged(gainFocus);
+        }
+
+        @Override
+        public void onViewAttachedToWindow() {
+            mFactory.onViewAttachedToWindow();
+        }
+
+        @Override
+        public void onViewDetachedFromWindow() {
+            mFactory.onViewDetachedFromWindow();
         }
     }
 }

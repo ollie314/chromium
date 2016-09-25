@@ -14,9 +14,10 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
+#include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace offline_pages {
@@ -28,6 +29,7 @@ const base::FilePath::CharType kTestFilePath[] = FILE_PATH_LITERAL(
     "/archive_dir/offline_page.mhtml");
 const int64_t kTestFileSize = 123456LL;
 const int64_t kTestArcihveId = 123456789LL;
+const base::string16 kTestTitle = base::UTF8ToUTF16("a title");
 
 class TestMHTMLArchiver : public OfflinePageMHTMLArchiver {
  public:
@@ -35,6 +37,7 @@ class TestMHTMLArchiver : public OfflinePageMHTMLArchiver {
     SUCCESS,
     NOT_ABLE_TO_ARCHIVE,
     WEB_CONTENTS_MISSING,
+    CONNECTION_SECURITY_ERROR,
   };
 
   TestMHTMLArchiver(const GURL& url, const TestScenario test_scenario);
@@ -43,6 +46,7 @@ class TestMHTMLArchiver : public OfflinePageMHTMLArchiver {
  private:
   void GenerateMHTML(const base::FilePath& archives_dir,
                      int64_t archive_id) override;
+  bool HasConnectionSecurityError() override;
 
   const GURL url_;
   const TestScenario test_scenario_;
@@ -74,10 +78,12 @@ void TestMHTMLArchiver::GenerateMHTML(const base::FilePath& archives_dir,
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&TestMHTMLArchiver::OnGenerateMHTMLDone,
-                 base::Unretained(this),
-                 url_,
-                 base::FilePath(kTestFilePath),
-                 kTestFileSize));
+                 base::Unretained(this), url_, base::FilePath(kTestFilePath),
+                 kTestTitle, kTestFileSize));
+}
+
+bool TestMHTMLArchiver::HasConnectionSecurityError() {
+  return test_scenario_ == TestScenario::CONNECTION_SECURITY_ERROR;
 }
 
 }  // namespace
@@ -116,6 +122,7 @@ class OfflinePageMHTMLArchiverTest : public testing::Test {
                            OfflinePageArchiver::ArchiverResult result,
                            const GURL& url,
                            const base::FilePath& file_path,
+                           const base::string16& title,
                            int64_t file_size);
 
   OfflinePageArchiver* last_archiver_;
@@ -154,6 +161,7 @@ void OfflinePageMHTMLArchiverTest::OnCreateArchiveDone(
     OfflinePageArchiver::ArchiverResult result,
     const GURL& url,
     const base::FilePath& file_path,
+    const base::string16& title,
     int64_t file_size) {
   last_url_ = url;
   last_archiver_ = archiver;
@@ -172,6 +180,7 @@ TEST_F(OfflinePageMHTMLArchiverTest, WebContentsMissing) {
   std::unique_ptr<TestMHTMLArchiver> archiver(CreateArchiver(
       page_url, TestMHTMLArchiver::TestScenario::WEB_CONTENTS_MISSING));
   archiver->CreateArchive(GetTestFilePath(), kTestArcihveId, callback());
+  PumpLoop();
 
   EXPECT_EQ(archiver.get(), last_archiver());
   EXPECT_EQ(OfflinePageArchiver::ArchiverResult::ERROR_CONTENT_UNAVAILABLE,
@@ -179,15 +188,31 @@ TEST_F(OfflinePageMHTMLArchiverTest, WebContentsMissing) {
   EXPECT_EQ(base::FilePath(), last_file_path());
 }
 
-// Tests for successful creation of the offline page archive.
+// Tests for archiver failing save an archive.
 TEST_F(OfflinePageMHTMLArchiverTest, NotAbleToGenerateArchive) {
   GURL page_url = GURL(kTestURL);
   std::unique_ptr<TestMHTMLArchiver> archiver(CreateArchiver(
       page_url, TestMHTMLArchiver::TestScenario::NOT_ABLE_TO_ARCHIVE));
   archiver->CreateArchive(GetTestFilePath(), kTestArcihveId, callback());
+  PumpLoop();
 
   EXPECT_EQ(archiver.get(), last_archiver());
   EXPECT_EQ(OfflinePageArchiver::ArchiverResult::ERROR_ARCHIVE_CREATION_FAILED,
+            last_result());
+  EXPECT_EQ(base::FilePath(), last_file_path());
+  EXPECT_EQ(0LL, last_file_size());
+}
+
+// Tests for archiver handling of non-secure connection.
+TEST_F(OfflinePageMHTMLArchiverTest, ConnectionNotSecure) {
+  GURL page_url = GURL(kTestURL);
+  std::unique_ptr<TestMHTMLArchiver> archiver(CreateArchiver(
+      page_url, TestMHTMLArchiver::TestScenario::CONNECTION_SECURITY_ERROR));
+  archiver->CreateArchive(GetTestFilePath(), kTestArcihveId, callback());
+  PumpLoop();
+
+  EXPECT_EQ(archiver.get(), last_archiver());
+  EXPECT_EQ(OfflinePageArchiver::ArchiverResult::ERROR_SECURITY_CERTIFICATE,
             last_result());
   EXPECT_EQ(base::FilePath(), last_file_path());
   EXPECT_EQ(0LL, last_file_size());
@@ -238,6 +263,7 @@ TEST_F(OfflinePageMHTMLArchiverTest, GenerateFileName) {
                         "-123456789.mhtml"));
   base::FilePath actual_3(
       OfflinePageMHTMLArchiver::GenerateFileName(url_3, title_3, 123456789LL));
-  EXPECT_EQ(expected_3, actual_3);}
+  EXPECT_EQ(expected_3, actual_3);
+}
 
 }  // namespace offline_pages

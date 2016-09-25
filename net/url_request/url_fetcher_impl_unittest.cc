@@ -26,9 +26,9 @@
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "net/base/elements_upload_data_stream.h"
@@ -39,13 +39,15 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_response_headers.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/gtest_util.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_test_util.h"
 #include "net/url_request/url_request_throttler_manager.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
 #include "net/cert_net/nss_ocsp.h"
 #endif
 
@@ -53,6 +55,8 @@ namespace net {
 
 using base::Time;
 using base::TimeDelta;
+using net::test::IsError;
+using net::test::IsOk;
 
 // TODO(eroman): Add a regression test for http://crbug.com/40505.
 
@@ -175,7 +179,7 @@ class FetcherTestURLRequestContext : public TestURLRequestContext {
     context_storage_.set_host_resolver(
         std::unique_ptr<HostResolver>(mock_resolver_));
     context_storage_.set_throttler_manager(
-        base::WrapUnique(new URLRequestThrottlerManager()));
+        base::MakeUnique<URLRequestThrottlerManager>());
     Init();
   }
 
@@ -425,14 +429,14 @@ class URLFetcherTest : public testing::Test {
         kDefaultResponsePath));
     ASSERT_TRUE(hanging_url_.is_valid());
 
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
     crypto::EnsureNSSInit();
     EnsureNSSHttpIOInit();
 #endif
   }
 
   void TearDown() override {
-#if defined(USE_NSS_VERIFIER)
+#if defined(USE_NSS_CERTS)
     ShutdownNSSHttpIO();
 #endif
   }
@@ -563,7 +567,8 @@ TEST_F(URLFetcherTest, DontRetryOnNetworkChangedByDefault) {
   // And the owner of the fetcher gets the ERR_NETWORK_CHANGED error.
   EXPECT_EQ(hanging_url(), delegate.fetcher()->GetOriginalURL());
   ASSERT_FALSE(delegate.fetcher()->GetStatus().is_success());
-  EXPECT_EQ(ERR_NETWORK_CHANGED, delegate.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate.fetcher()->GetStatus().error(),
+              IsError(ERR_NETWORK_CHANGED));
 }
 
 TEST_F(URLFetcherTest, RetryOnNetworkChangedAndFail) {
@@ -610,7 +615,8 @@ TEST_F(URLFetcherTest, RetryOnNetworkChangedAndFail) {
   // And the owner of the fetcher gets the ERR_NETWORK_CHANGED error.
   EXPECT_EQ(hanging_url(), delegate.fetcher()->GetOriginalURL());
   ASSERT_FALSE(delegate.fetcher()->GetStatus().is_success());
-  EXPECT_EQ(ERR_NETWORK_CHANGED, delegate.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate.fetcher()->GetStatus().error(),
+              IsError(ERR_NETWORK_CHANGED));
 }
 
 TEST_F(URLFetcherTest, RetryOnNetworkChangedAndSucceed) {
@@ -836,7 +842,8 @@ TEST_F(URLFetcherTest, PostAppendChunkAfterError) {
 
   // Make sure the request failed, as expected.
   EXPECT_FALSE(delegate.fetcher()->GetStatus().is_success());
-  EXPECT_EQ(ERR_UNSAFE_PORT, delegate.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate.fetcher()->GetStatus().error(),
+              IsError(ERR_UNSAFE_PORT));
 }
 
 // Checks that upload progress increases over time, never exceeds what's already
@@ -1073,7 +1080,7 @@ TEST_F(URLFetcherTest, StopOnRedirect) {
   EXPECT_EQ(GURL(kRedirectTarget), delegate.fetcher()->GetURL());
   EXPECT_EQ(URLRequestStatus::CANCELED,
             delegate.fetcher()->GetStatus().status());
-  EXPECT_EQ(ERR_ABORTED, delegate.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate.fetcher()->GetStatus().error(), IsError(ERR_ABORTED));
   EXPECT_EQ(301, delegate.fetcher()->GetResponseCode());
 }
 
@@ -1383,12 +1390,14 @@ TEST_F(URLFetcherTest, ShutdownSameThread) {
   // Wait for the first fetcher, make sure it failed.
   delegate1.WaitForComplete();
   EXPECT_FALSE(delegate1.fetcher()->GetStatus().is_success());
-  EXPECT_EQ(ERR_CONTEXT_SHUT_DOWN, delegate1.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate1.fetcher()->GetStatus().error(),
+              IsError(ERR_CONTEXT_SHUT_DOWN));
 
   // Wait for the second fetcher, make sure it failed.
   delegate2.WaitForComplete();
   EXPECT_FALSE(delegate2.fetcher()->GetStatus().is_success());
-  EXPECT_EQ(ERR_CONTEXT_SHUT_DOWN, delegate2.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate2.fetcher()->GetStatus().error(),
+              IsError(ERR_CONTEXT_SHUT_DOWN));
 
   // New fetchers should automatically fail without making new requests. This
   // should follow the same path as the second fetcher, but best to be safe.
@@ -1397,7 +1406,8 @@ TEST_F(URLFetcherTest, ShutdownSameThread) {
   delegate3.fetcher()->Start();
   delegate3.WaitForComplete();
   EXPECT_FALSE(delegate3.fetcher()->GetStatus().is_success());
-  EXPECT_EQ(ERR_CONTEXT_SHUT_DOWN, delegate3.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate3.fetcher()->GetStatus().error(),
+              IsError(ERR_CONTEXT_SHUT_DOWN));
 }
 
 TEST_F(URLFetcherTest, ShutdownCrossThread) {
@@ -1412,14 +1422,16 @@ TEST_F(URLFetcherTest, ShutdownCrossThread) {
   context_getter->Shutdown();
   delegate1.WaitForComplete();
   EXPECT_FALSE(delegate1.fetcher()->GetStatus().is_success());
-  EXPECT_EQ(ERR_CONTEXT_SHUT_DOWN, delegate1.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate1.fetcher()->GetStatus().error(),
+              IsError(ERR_CONTEXT_SHUT_DOWN));
 
   // New requests should automatically fail without making new requests.
   WaitingURLFetcherDelegate delegate2;
   delegate2.CreateFetcher(hanging_url(), URLFetcher::GET, context_getter);
   delegate2.StartFetcherAndWait();
   EXPECT_FALSE(delegate2.fetcher()->GetStatus().is_success());
-  EXPECT_EQ(ERR_CONTEXT_SHUT_DOWN, delegate2.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate2.fetcher()->GetStatus().error(),
+              IsError(ERR_CONTEXT_SHUT_DOWN));
 }
 
 // Get a small file.
@@ -1428,7 +1440,7 @@ TEST_F(URLFetcherTest, FileTestSmallGet) {
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  base::FilePath out_path = temp_dir.path().AppendASCII(kFileToFetch);
+  base::FilePath out_path = temp_dir.GetPath().AppendASCII(kFileToFetch);
   SaveFileTest(kFileToFetch, false, out_path, false);
 }
 
@@ -1439,7 +1451,7 @@ TEST_F(URLFetcherTest, FileTestLargeGet) {
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  base::FilePath out_path = temp_dir.path().AppendASCII(kFileToFetch);
+  base::FilePath out_path = temp_dir.GetPath().AppendASCII(kFileToFetch);
   SaveFileTest(kFileToFetch, false, out_path, false);
 }
 
@@ -1450,7 +1462,7 @@ TEST_F(URLFetcherTest, FileTestTakeOwnership) {
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  base::FilePath out_path = temp_dir.path().AppendASCII(kFileToFetch);
+  base::FilePath out_path = temp_dir.GetPath().AppendASCII(kFileToFetch);
   SaveFileTest(kFileToFetch, false, out_path, true);
 }
 
@@ -1462,7 +1474,7 @@ TEST_F(URLFetcherTest, FileTestOverwriteExisting) {
   // Create a file before trying to fetch.
   const char kFileToFetch[] = "simple.html";
   std::string data(10000, '?');  // Meant to be larger than simple.html.
-  base::FilePath out_path = temp_dir.path().AppendASCII(kFileToFetch);
+  base::FilePath out_path = temp_dir.GetPath().AppendASCII(kFileToFetch);
   ASSERT_EQ(static_cast<int>(data.size()),
             base::WriteFile(out_path, data.data(), data.size()));
   ASSERT_TRUE(base::PathExists(out_path));
@@ -1477,7 +1489,7 @@ TEST_F(URLFetcherTest, FileTestTryToOverwriteDirectory) {
 
   // Create a directory before trying to fetch.
   static const char kFileToFetch[] = "simple.html";
-  base::FilePath out_path = temp_dir.path().AppendASCII(kFileToFetch);
+  base::FilePath out_path = temp_dir.GetPath().AppendASCII(kFileToFetch);
   ASSERT_TRUE(base::CreateDirectory(out_path));
   ASSERT_TRUE(base::PathExists(out_path));
 
@@ -1491,7 +1503,8 @@ TEST_F(URLFetcherTest, FileTestTryToOverwriteDirectory) {
   delegate.StartFetcherAndWait();
 
   EXPECT_FALSE(delegate.fetcher()->GetStatus().is_success());
-  EXPECT_EQ(ERR_ACCESS_DENIED, delegate.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate.fetcher()->GetStatus().error(),
+              IsError(ERR_ACCESS_DENIED));
 }
 
 // Get a small file and save it to a temp file.
@@ -1519,9 +1532,9 @@ TEST_F(URLFetcherBadHTTPSTest, BadHTTPS) {
 
   EXPECT_EQ(URLRequestStatus::CANCELED,
             delegate.fetcher()->GetStatus().status());
-  EXPECT_EQ(ERR_ABORTED, delegate.fetcher()->GetStatus().error());
+  EXPECT_THAT(delegate.fetcher()->GetStatus().error(), IsError(ERR_ABORTED));
   EXPECT_EQ(-1, delegate.fetcher()->GetResponseCode());
-  EXPECT_TRUE(delegate.fetcher()->GetCookies().empty());
+  EXPECT_FALSE(delegate.fetcher()->GetResponseHeaders());
   std::string data;
   EXPECT_TRUE(delegate.fetcher()->GetResponseAsString(&data));
   EXPECT_TRUE(data.empty());

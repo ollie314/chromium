@@ -14,8 +14,9 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "ui/events/devices/events_devices_export.h"
+#include "ui/events/devices/x11/events_devices_x11_export.h"
 #include "ui/gfx/sequential_id_generator.h"
+#include "ui/gfx/x/x11_types.h"
 
 namespace base {
 
@@ -24,13 +25,11 @@ template <typename T> struct DefaultSingletonTraits;
 
 typedef unsigned long Cursor;
 typedef unsigned long Window;
-typedef struct _XDisplay Display;
-typedef union _XEvent XEvent;
 
 namespace ui {
 
 // Functions related to determining touch devices.
-class EVENTS_DEVICES_EXPORT TouchFactory {
+class EVENTS_DEVICES_X11_EXPORT TouchFactory {
  private:
   TouchFactory();
   ~TouchFactory();
@@ -43,7 +42,7 @@ class EVENTS_DEVICES_EXPORT TouchFactory {
   static void SetTouchDeviceListFromCommandLine();
 
   // Updates the list of devices.
-  void UpdateDeviceList(Display* display);
+  void UpdateDeviceList(XDisplay* display);
 
   // Checks whether an XI2 event should be processed or not (i.e. if the event
   // originated from a device we are interested in).

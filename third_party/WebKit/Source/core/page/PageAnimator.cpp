@@ -10,7 +10,8 @@
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/svg/SVGDocumentExtensions.h"
-#include "platform/Logging.h"
+#include "platform/TraceEvent.h"
+#include "wtf/AutoReset.h"
 
 namespace blink {
 
@@ -33,21 +34,27 @@ DEFINE_TRACE(PageAnimator)
 
 void PageAnimator::serviceScriptedAnimations(double monotonicAnimationStartTime)
 {
-    TemporaryChange<bool> servicing(m_servicingAnimations, true);
+    AutoReset<bool> servicing(&m_servicingAnimations, true);
     clock().updateTime(monotonicAnimationStartTime);
 
-    HeapVector<Member<Document>> documents;
+    HeapVector<Member<Document>, 32> documents;
     for (Frame* frame = m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
         if (frame->isLocalFrame())
             documents.append(toLocalFrame(frame)->document());
     }
 
     for (auto& document : documents) {
+        ScopedFrameBlamer frameBlamer(document->frame());
+        TRACE_EVENT0("blink,rail", "PageAnimator::serviceScriptedAnimations");
         DocumentAnimations::updateAnimationTimingForAnimationFrame(*document);
         if (document->view()) {
             if (document->view()->shouldThrottleRendering())
                 continue;
-            document->view()->getScrollableArea()->serviceScrollAnimations(monotonicAnimationStartTime);
+            // Disallow throttling in case any script needs to do a synchronous
+            // lifecycle update in other frames which are throttled.
+            DocumentLifecycle::DisallowThrottlingScope noThrottlingScope(document->lifecycle());
+            if (ScrollableArea* scrollableArea = document->view()->getScrollableArea())
+                scrollableArea->serviceScrollAnimations(monotonicAnimationStartTime);
 
             if (const FrameView::ScrollableAreaSet* animatingScrollableAreas = document->view()->animatingScrollableAreas()) {
                 // Iterate over a copy, since ScrollableAreas may deregister
@@ -57,15 +64,12 @@ void PageAnimator::serviceScriptedAnimations(double monotonicAnimationStartTime)
                 for (ScrollableArea* scrollableArea : animatingScrollableAreasCopy)
                     scrollableArea->serviceScrollAnimations(monotonicAnimationStartTime);
             }
+            SVGDocumentExtensions::serviceOnAnimationFrame(*document);
         }
-        // TODO(skyostil): These functions should not run for documents without views.
-        SVGDocumentExtensions::serviceOnAnimationFrame(*document, monotonicAnimationStartTime);
+        // TODO(skyostil): This function should not run for documents without views.
+        DocumentLifecycle::DisallowThrottlingScope noThrottlingScope(document->lifecycle());
         document->serviceScriptedAnimations(monotonicAnimationStartTime);
     }
-
-    // Oilpan: This is performance optimization to promptly clear the backing
-    // storage of the vector and reuse it in the next PageAnimator::serviceScriptedAnimations.
-    documents.clear();
 }
 
 void PageAnimator::scheduleVisualUpdate(LocalFrame* frame)
@@ -78,7 +82,7 @@ void PageAnimator::scheduleVisualUpdate(LocalFrame* frame)
 void PageAnimator::updateAllLifecyclePhases(LocalFrame& rootFrame)
 {
     FrameView* view = rootFrame.view();
-    TemporaryChange<bool> servicing(m_updatingLayoutAndStyleForPainting, true);
+    AutoReset<bool> servicing(&m_updatingLayoutAndStyleForPainting, true);
     view->updateAllLifecyclePhases();
 }
 

@@ -7,7 +7,6 @@
 #include <string.h>
 
 #include "base/bind.h"
-#include "base/strings/stringize_macros.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/context_state.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
@@ -17,8 +16,6 @@
 #include "gpu/ipc/service/gpu_channel.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_context.h"
-#include "ui/gl/gl_helper.h"
-#include "ui/gl/scoped_binders.h"
 #include "ui/gl/scoped_make_current.h"
 
 namespace gpu {
@@ -51,7 +48,7 @@ bool StreamTexture::Create(GpuCommandBufferStub* owner_stub,
                                   GL_UNSIGNED_BYTE, gfx::Rect(size));
     texture_manager->SetLevelStreamTextureImage(
         texture, GL_TEXTURE_EXTERNAL_OES, 0, gl_image.get(),
-        gles2::Texture::UNBOUND);
+        gles2::Texture::UNBOUND, 0);
     return true;
   }
 
@@ -61,19 +58,13 @@ bool StreamTexture::Create(GpuCommandBufferStub* owner_stub,
 StreamTexture::StreamTexture(GpuCommandBufferStub* owner_stub,
                              int32_t route_id,
                              uint32_t texture_id)
-    : surface_texture_(gfx::SurfaceTexture::Create(texture_id)),
+    : surface_texture_(gl::SurfaceTexture::Create(texture_id)),
       size_(0, 0),
       has_pending_frame_(false),
       owner_stub_(owner_stub),
       route_id_(route_id),
       has_listener_(false),
       texture_id_(texture_id),
-      framebuffer_(0),
-      vertex_shader_(0),
-      fragment_shader_(0),
-      program_(0),
-      vertex_buffer_(0),
-      u_xform_location_(-1),
       weak_factory_(this) {
   owner_stub->AddDestructionObserver(this);
   memset(current_matrix_, 0, sizeof(current_matrix_));
@@ -91,30 +82,17 @@ StreamTexture::~StreamTexture() {
 
 // gpu::gles2::GLStreamTextureMatrix implementation
 void StreamTexture::GetTextureMatrix(float xform[16]) {
-  UpdateTexImage();
-  surface_texture_->GetTransformMatrix(xform);
+  if (surface_texture_) {
+    UpdateTexImage();
+    surface_texture_->GetTransformMatrix(current_matrix_);
+  }
+  memcpy(xform, current_matrix_, sizeof(current_matrix_));
+  YInvertMatrix(xform);
 }
 
 void StreamTexture::OnWillDestroyStub() {
   owner_stub_->RemoveDestructionObserver(this);
   owner_stub_->channel()->RemoveRoute(route_id_);
-
-  if (framebuffer_) {
-    std::unique_ptr<ui::ScopedMakeCurrent> scoped_make_current(
-        MakeStubCurrent());
-
-    glDeleteProgram(program_);
-    glDeleteShader(vertex_shader_);
-    glDeleteShader(fragment_shader_);
-    glDeleteBuffersARB(1, &vertex_buffer_);
-    glDeleteFramebuffersEXT(1, &framebuffer_);
-    program_ = 0;
-    vertex_shader_ = 0;
-    fragment_shader_ = 0;
-    vertex_buffer_ = 0;
-    framebuffer_ = 0;
-    u_xform_location_ = -1;
-  }
 
   owner_stub_ = NULL;
 
@@ -195,7 +173,7 @@ bool StreamTexture::CopyTexImage(unsigned target) {
     // CopyTexImage() is called each time the surface texture is used for
     // drawing.
     texture->SetLevelStreamTextureImage(GL_TEXTURE_EXTERNAL_OES, 0, this,
-                                        gles2::Texture::UNBOUND);
+                                        gles2::Texture::UNBOUND, 0);
   }
 
   return true;

@@ -13,16 +13,17 @@
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
@@ -45,6 +46,8 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/profile_auth_data.h"
+#include "chrome/browser/chromeos/login/quick_unlock/pin_storage.h"
+#include "chrome/browser/chromeos/login/quick_unlock/pin_storage_factory.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter_factory.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
@@ -76,6 +79,7 @@
 #include "chrome/browser/supervised_user/child_accounts/child_account_service.h"
 #include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
 #include "chrome/browser/ui/app_list/start_page_service.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/common/chrome_switches.h"
@@ -478,9 +482,7 @@ void UserSessionManager::StartSession(
   delegate_ = delegate;
   start_session_type_ = start_session_type;
 
-  VLOG(1) << "Starting session for "
-          << user_context.GetAccountId().GetUserEmail();
-
+  VLOG(1) << "Starting user session.";
   PreStartSession();
   CreateUserSession(user_context, has_auth_cookies);
 
@@ -716,7 +718,8 @@ bool UserSessionManager::RestartToApplyPerSessionFlagsIfNeed(
 
   LogCustomSwitches(command_line_difference);
 
-  about_flags::ReportCustomFlags("Login.CustomFlags", command_line_difference);
+  about_flags::ReportAboutFlagsHistogram(
+      "Login.CustomFlags", command_line_difference, std::set<std::string>());
 
   base::CommandLine::StringVector flags;
   // argv[0] is the program name |base::CommandLine::NO_PROGRAM|.
@@ -1155,9 +1158,14 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
 
     if (arc::ArcBridgeService::GetEnabled(
             base::CommandLine::ForCurrentProcess())) {
+      const AccountId& account_id =
+          multi_user_util::GetAccountIdFromProfile(profile);
+      std::unique_ptr<BooleanPrefMember> arc_enabled_pref =
+          base::MakeUnique<BooleanPrefMember>();
+      arc_enabled_pref->Init(prefs::kArcEnabled, profile->GetPrefs());
       DCHECK(arc::ArcServiceManager::Get());
       arc::ArcServiceManager::Get()->OnPrimaryUserProfilePrepared(
-          multi_user_util::GetAccountIdFromProfile(profile));
+          account_id, std::move(arc_enabled_pref));
       arc::ArcAuthService* arc_auth_service = arc::ArcAuthService::Get();
       DCHECK(arc_auth_service);
       arc_auth_service->OnPrimaryUserProfilePrepared(profile);
@@ -1273,6 +1281,12 @@ bool UserSessionManager::InitializeUserSession(Profile* profile) {
         user_flow->ShouldSkipPostLoginScreens() ||
         (oobe_controller && oobe_controller->skip_post_login_screens()) ||
         cmdline->HasSwitch(chromeos::switches::kOobeSkipPostLogin);
+
+    // The user just signed into the profile session, so it means that they
+    // entered a password (or used easy unlock). We will enable quick unlock.
+    PinStorage* pin_storage = PinStorageFactory::GetForProfile(profile);
+    if (pin_storage)
+      pin_storage->MarkStrongAuth();
 
     if (user_manager->IsCurrentUserNew() && !skip_post_login_screens) {
       // Don't specify start URLs if the administrator has configured the start
@@ -1582,7 +1596,7 @@ UserSessionManager::GetAuthRequestContext() const {
 void UserSessionManager::AttemptRestart(Profile* profile) {
   // Restart unconditionally in case if we are stuck somewhere in a session
   // restore process. http://crbug.com/520346.
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::Bind(RestartOnTimeout),
       base::TimeDelta::FromSeconds(kMaxRestartDelaySeconds));
 
@@ -1640,6 +1654,7 @@ void UserSessionManager::ActiveUserChanged(
       input_method::InputMethodManager::Get();
   manager->SetState(
       GetDefaultIMEState(ProfileHelper::Get()->GetProfileByUser(active_user)));
+  manager->MaybeNotifyImeMenuActivationChanged();
 }
 
 scoped_refptr<input_method::InputMethodManager::State>
@@ -1652,6 +1667,18 @@ UserSessionManager::GetDefaultIMEState(Profile* profile) {
     default_ime_states_[profile] = state;
   }
   return state;
+}
+
+void UserSessionManager::CheckEolStatus(Profile* profile) {
+  std::map<Profile*, std::unique_ptr<EolNotification>, ProfileCompare>::iterator
+      iter = eol_notification_handler_.find(profile);
+  if (iter == eol_notification_handler_.end()) {
+    auto eol_notification = base::MakeUnique<EolNotification>(profile);
+    iter = eol_notification_handler_
+               .insert(std::make_pair(profile, std::move(eol_notification)))
+               .first;
+  }
+  iter->second->CheckEolStatus();
 }
 
 EasyUnlockKeyManager* UserSessionManager::GetEasyUnlockKeyManager() {
@@ -1710,6 +1737,18 @@ void UserSessionManager::DoBrowserLaunchInternal(Profile* profile,
                  << " is false. This is normal in some tests.";
   }
 
+  if (HatsNotificationController::ShouldShowSurveyToProfile(profile))
+    hats_notification_controller_ = new HatsNotificationController(profile);
+
+  if (QuickUnlockNotificationController::ShouldShow(profile) &&
+      quick_unlock_notification_handler_.find(profile) ==
+          quick_unlock_notification_handler_.end()) {
+    auto* qu_feature_notification_controller =
+        new QuickUnlockNotificationController(profile);
+    quick_unlock_notification_handler_.insert(
+        std::make_pair(profile, qu_feature_notification_controller));
+  }
+
   // Mark login host for deletion after browser starts.  This
   // guarantees that the message loop will be referenced by the
   // browser before it is dereferenced by the login host.
@@ -1718,6 +1757,12 @@ void UserSessionManager::DoBrowserLaunchInternal(Profile* profile,
   user_manager::UserManager::Get()->SessionStarted();
   chromeos::BootTimesRecorder::Get()->LoginDone(
       user_manager::UserManager::Get()->IsCurrentUserNew());
+
+  // Check to see if this profile should show EndOfLife Notification and show
+  // the message accordingly.
+  if (!ShouldShowEolNotification(profile))
+    return;
+  CheckEolStatus(profile);
 }
 
 void UserSessionManager::RespectLocalePreferenceWrapper(
@@ -1725,6 +1770,12 @@ void UserSessionManager::RespectLocalePreferenceWrapper(
     const base::Closure& callback) {
   if (browser_shutdown::IsTryingToQuit())
     return;
+
+  // InputEventsBlocker is not available in Mash
+  if (chrome::IsRunningInMash()) {
+    callback.Run();
+    return;
+  }
 
   const user_manager::User* const user =
       ProfileHelper::Get()->GetUserByProfile(profile);
@@ -1804,7 +1855,7 @@ bool UserSessionManager::TokenHandlesEnabled() {
     return false;
   bool ephemeral_users_enabled = false;
   bool show_names_on_signin = true;
-  auto cros_settings = CrosSettings::Get();
+  auto* cros_settings = CrosSettings::Get();
   cros_settings->GetBoolean(kAccountsPrefEphemeralUsersEnabled,
                             &ephemeral_users_enabled);
   cros_settings->GetBoolean(kAccountsPrefShowUserNamesOnSignIn,
@@ -1828,6 +1879,24 @@ void UserSessionManager::Shutdown() {
 void UserSessionManager::CreateTokenUtilIfMissing() {
   if (!token_handle_util_.get())
     token_handle_util_.reset(new TokenHandleUtil());
+}
+
+bool UserSessionManager::ShouldShowEolNotification(Profile* profile) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kDisableEolNotification)) {
+    return false;
+  }
+
+  // Do not show end of life notification if this device is managed by
+  // enterprise user.
+  if (g_browser_process->platform_part()
+          ->browser_policy_connector_chromeos()
+          ->IsEnterpriseManaged()) {
+    return false;
+  }
+
+  // Do not show end of life notification if this is a guest session
+  return !profile->IsGuestSession();
 }
 
 }  // namespace chromeos

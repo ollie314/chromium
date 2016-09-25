@@ -24,19 +24,15 @@ by `gclient runhooks`.
 Regenerate the ninja build files with Clang enabled. Again, on Linux and Mac,
 Clang is the default compiler.
 
-If you use gyp: `GYP_DEFINES=clang=1 build/gyp_chromium`
-
-If you use gn, run `gn args` and add `is_clang = true` to your args.gn file.
+Run `gn args` and add `is_clang = true` to your args.gn file.
 
 Build: `ninja -C out/Debug chrome`
 
 ## Reverting to gcc on linux
 
 We don't have bots that test this, but building with gcc4.8+ should still work
-on Linux. If your system gcc is new enough, use this to build with gcc if you
-don't want to build with clang:
-
-    GYP_DEFINES=clang=0 build/gyp_chromium
+on Linux. If your system gcc is new enough, run `gn args` and add `is_clang =
+false`.
 
 ## Mailing List
 
@@ -61,8 +57,10 @@ To test the FindBadConstructs plugin, run:
      ./test.py ../../../../third_party/llvm-build/Release+Asserts/bin/clang \
                ../../../../third_party/llvm-build/Release+Asserts/lib/libFindBadConstructs.so)
 
-To run [other plugins](writing_clang_plugins.md), add these to your
-`GYP_DEFINES`:
+These instructions are for GYP which no longer works. Something similar needs
+to be set up for the GN build if you want to do this. For reference, here are
+the old instructions: To run [other plugins](writing_clang_plugins.md), add
+these to your `GYP_DEFINES`:
 
 *   `clang_load`: Absolute path to a dynamic library containing your plugin
 *   `clang_add_plugin`: tells clang to run a specific PluginASTAction
@@ -87,23 +85,26 @@ http://build.chromium.org/p/chromium.fyi/console?category=win%20clang
 
 ``` shell
 python tools\clang\scripts\update.py
-set GYP_DEFINES=clang=1
-python build\gyp_chromium
-
-# or, if you use gn, run `gn args` and add `is_clang = true` to your args.gn
+# run `gn args` and add `is_clang = true` to your args.gn, then...
 ninja -C out\Debug chrome
 ```
 
 The `update.py` script only needs to be run once per checkout. Clang will be
-kept up-to-date by `gclient runhooks`.
+kept up to date by `gclient runhooks`.
 
 Current brokenness:
 
-*   Debug info is very limited.
 *   To get colored diagnostics, you need to be running
     [ansicon](https://github.com/adoxa/ansicon/releases).
+*   Debug info does now work, but support for it is new.  If you see something
+    not working right, please file a bug and mark it as blocking the
+    [clang/win debug info tracking bug](https://crbug.com/636111).
 
 ## Using a custom clang binary
+
+These instructions are for GYP which no longer works. Something similar needs
+to be set up for the GN build if you want to do this. For reference, here are
+the old instructions:
 
 If you want to try building Chromium with your own clang binary that you've
 already built, set `make_clang_dir` to the directory containing `bin/clang`
@@ -140,6 +141,5 @@ Linux support, where it can link Chrome approximately twice as fast as gold and
 MSVC's link.exe as of this writing. LLD does not yet support generating PDB
 files, which makes it hard to debug Chrome while using LLD.
 
-If you use gyp, you can enable it with `GYP_DEFINES=lld=1`. If you use gn, set
-`use_lld = true` in args.gn. Currently this configuration is only supported on
-Windows.
+Set `use_lld = true` in args.gn. Currently this configuration is only supported
+on Windows.

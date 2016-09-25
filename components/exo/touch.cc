@@ -4,9 +4,9 @@
 
 #include "components/exo/touch.h"
 
-#include "ash/shell.h"
 #include "components/exo/surface.h"
 #include "components/exo/touch_delegate.h"
+#include "components/exo/wm_helper.h"
 #include "ui/aura/window.h"
 #include "ui/events/event.h"
 
@@ -31,15 +31,15 @@ bool VectorContainsItem(T& vector, U value) {
 ////////////////////////////////////////////////////////////////////////////////
 // Touch, public:
 
-Touch::Touch(TouchDelegate* delegate) : delegate_(delegate), focus_(nullptr) {
-  ash::Shell::GetInstance()->AddPreTargetHandler(this);
+Touch::Touch(TouchDelegate* delegate) : delegate_(delegate) {
+  WMHelper::GetInstance()->AddPreTargetHandler(this);
 }
 
 Touch::~Touch() {
   delegate_->OnTouchDestroying(this);
   if (focus_)
     focus_->RemoveSurfaceObserver(this);
-  ash::Shell::GetInstance()->RemovePreTargetHandler(this);
+  WMHelper::GetInstance()->RemovePreTargetHandler(this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -67,7 +67,8 @@ void Touch::OnTouchEvent(ui::TouchEvent* event) {
       // Convert location to focus surface coordinate space.
       DCHECK(focus_);
       gfx::Point location = event->location();
-      aura::Window::ConvertPointToTarget(target, focus_, &location);
+      aura::Window::ConvertPointToTarget(target->window(), focus_->window(),
+                                         &location);
 
       // Generate a touch down event for the focus surface. Note that this can
       // be different from the target surface.
@@ -96,7 +97,8 @@ void Touch::OnTouchEvent(ui::TouchEvent* event) {
         // Convert location to focus surface coordinate space.
         gfx::Point location = event->location();
         aura::Window::ConvertPointToTarget(
-            static_cast<aura::Window*>(event->target()), focus_, &location);
+            static_cast<aura::Window*>(event->target()), focus_->window(),
+            &location);
 
         delegate_->OnTouchMotion(event->time_stamp(), event->touch_id(),
                                  location);

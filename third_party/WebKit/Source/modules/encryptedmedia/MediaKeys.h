@@ -38,6 +38,7 @@
 #include "public/platform/WebVector.h"
 #include "wtf/Forward.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
@@ -54,7 +55,7 @@ class MediaKeys : public GarbageCollectedFinalized<MediaKeys>, public ActiveScri
     USING_GARBAGE_COLLECTED_MIXIN(MediaKeys);
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static MediaKeys* create(ExecutionContext*, const WebVector<WebEncryptedMediaSessionType>& supportedSessionTypes, PassOwnPtr<WebContentDecryptionModule>);
+    static MediaKeys* create(ExecutionContext*, const WebVector<WebEncryptedMediaSessionType>& supportedSessionTypes, std::unique_ptr<WebContentDecryptionModule>);
     ~MediaKeys() override;
 
     MediaKeySession* createSession(ScriptState*, const String& sessionTypeString, ExceptionState&);
@@ -87,18 +88,18 @@ public:
     void contextDestroyed() override;
     void stop() override;
 
-    // ActiveScriptWrappable implementation.
+    // ScriptWrappable implementation.
     bool hasPendingActivity() const final;
 
 private:
-    MediaKeys(ExecutionContext*, const WebVector<WebEncryptedMediaSessionType>& supportedSessionTypes, PassOwnPtr<WebContentDecryptionModule>);
+    MediaKeys(ExecutionContext*, const WebVector<WebEncryptedMediaSessionType>& supportedSessionTypes, std::unique_ptr<WebContentDecryptionModule>);
     class PendingAction;
 
     bool sessionTypeSupported(WebEncryptedMediaSessionType);
-    void timerFired(Timer<MediaKeys>*);
+    void timerFired(TimerBase*);
 
     const WebVector<WebEncryptedMediaSessionType> m_supportedSessionTypes;
-    OwnPtr<WebContentDecryptionModule> m_cdm;
+    std::unique_ptr<WebContentDecryptionModule> m_cdm;
 
     // Keep track of the HTMLMediaElement that references this object. Keeping
     // a WeakMember so that HTMLMediaElement's lifetime isn't dependent on

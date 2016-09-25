@@ -36,7 +36,6 @@ public class PrivacyPreferences extends PreferenceFragment
     private static final String PREF_SAFE_BROWSING = "safe_browsing";
     private static final String PREF_CONTEXTUAL_SEARCH = "contextual_search";
     private static final String PREF_NETWORK_PREDICTIONS = "network_predictions";
-    private static final String PREF_CRASH_DUMP_UPLOAD = "crash_dump_upload";
     private static final String PREF_CRASH_DUMP_UPLOAD_NO_CELLULAR =
             "crash_dump_upload_no_cellular";
     private static final String PREF_DO_NOT_TRACK = "do_not_track";
@@ -45,11 +44,13 @@ public class PrivacyPreferences extends PreferenceFragment
 
     private ManagedPreferenceDelegate mManagedPreferenceDelegate;
 
+    // Needed for ChromeBackupAgent
+    public static final String PREF_CRASH_DUMP_UPLOAD = "crash_dump_upload";
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        PrivacyPreferencesManager privacyPrefManager =
-                PrivacyPreferencesManager.getInstance(getActivity());
+        PrivacyPreferencesManager privacyPrefManager = PrivacyPreferencesManager.getInstance();
         privacyPrefManager.migrateNetworkPredictionPreferences();
         addPreferencesFromResource(R.xml.privacy_preferences);
         getActivity().setTitle(R.string.prefs_privacy);
@@ -99,7 +100,7 @@ public class PrivacyPreferences extends PreferenceFragment
         searchSuggestionsPref.setOnPreferenceChangeListener(this);
         searchSuggestionsPref.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
 
-        if (!ContextualSearchFieldTrial.isEnabled(getActivity())) {
+        if (!ContextualSearchFieldTrial.isEnabled()) {
             preferenceScreen.removePreference(findPreference(PREF_CONTEXTUAL_SEARCH));
         }
 
@@ -144,10 +145,9 @@ public class PrivacyPreferences extends PreferenceFragment
         } else if (PREF_NAVIGATION_ERROR.equals(key)) {
             PrefServiceBridge.getInstance().setResolveNavigationErrorEnabled((boolean) newValue);
         } else if (PREF_CRASH_DUMP_UPLOAD_NO_CELLULAR.equals(key)) {
-            PrefServiceBridge.getInstance().setCrashReporting((boolean) newValue);
+            PrefServiceBridge.getInstance().setCrashReportingEnabled((boolean) newValue);
         } else if (PREF_CRASH_DUMP_UPLOAD.equals(key)) {
-            PrivacyPreferencesManager.getInstance(getActivity()).setUploadCrashDump(
-                    (String) newValue);
+            PrivacyPreferencesManager.getInstance().setUploadCrashDump((String) newValue);
         }
 
         return true;
@@ -165,31 +165,41 @@ public class PrivacyPreferences extends PreferenceFragment
     public void updateSummaries() {
         PrefServiceBridge prefServiceBridge = PrefServiceBridge.getInstance();
 
-        PrivacyPreferencesManager privacyPrefManager =
-                PrivacyPreferencesManager.getInstance(getActivity());
+        PrivacyPreferencesManager privacyPrefManager = PrivacyPreferencesManager.getInstance();
 
         CharSequence textOn = getActivity().getResources().getText(R.string.text_on);
         CharSequence textOff = getActivity().getResources().getText(R.string.text_off);
 
         CheckBoxPreference navigationErrorPref = (CheckBoxPreference) findPreference(
                 PREF_NAVIGATION_ERROR);
-        navigationErrorPref.setChecked(prefServiceBridge.isResolveNavigationErrorEnabled());
+        if (navigationErrorPref != null) {
+            navigationErrorPref.setChecked(
+                    prefServiceBridge.isResolveNavigationErrorEnabled());
+        }
 
         CheckBoxPreference searchSuggestionsPref = (CheckBoxPreference) findPreference(
                 PREF_SEARCH_SUGGESTIONS);
-        searchSuggestionsPref.setChecked(prefServiceBridge.isSearchSuggestEnabled());
+        if (searchSuggestionsPref != null) {
+            searchSuggestionsPref.setChecked(prefServiceBridge.isSearchSuggestEnabled());
+        }
 
         CheckBoxPreference extendedReportingPref =
                 (CheckBoxPreference) findPreference(PREF_SAFE_BROWSING_EXTENDED_REPORTING);
-        extendedReportingPref.setChecked(
-                prefServiceBridge.isSafeBrowsingExtendedReportingEnabled());
+        if (extendedReportingPref != null) {
+            extendedReportingPref.setChecked(
+                    prefServiceBridge.isSafeBrowsingExtendedReportingEnabled());
+        }
 
         CheckBoxPreference safeBrowsingPref =
                 (CheckBoxPreference) findPreference(PREF_SAFE_BROWSING);
-        safeBrowsingPref.setChecked(prefServiceBridge.isSafeBrowsingEnabled());
+        if (safeBrowsingPref != null) {
+            safeBrowsingPref.setChecked(prefServiceBridge.isSafeBrowsingEnabled());
+        }
 
         Preference doNotTrackPref = findPreference(PREF_DO_NOT_TRACK);
-        doNotTrackPref.setSummary(prefServiceBridge.isDoNotTrackEnabled() ? textOn : textOff);
+        if (doNotTrackPref != null) {
+            doNotTrackPref.setSummary(prefServiceBridge.isDoNotTrackEnabled() ? textOn : textOff);
+        }
 
         Preference contextualPref = findPreference(PREF_CONTEXTUAL_SEARCH);
         if (contextualPref != null) {
@@ -205,8 +215,10 @@ public class PrivacyPreferences extends PreferenceFragment
 
         if (privacyPrefManager.isCellularExperimentEnabled()) {
             Preference usageAndCrashPref = findPreference(PREF_USAGE_AND_CRASH_REPORTING);
-            usageAndCrashPref.setSummary(privacyPrefManager.isUsageAndCrashReportingEnabled()
-                    ? textOn : textOff);
+            if (usageAndCrashPref != null) {
+                usageAndCrashPref.setSummary(privacyPrefManager.isUsageAndCrashReportingEnabled()
+                        ? textOn : textOff);
+            }
         }
     }
 

@@ -12,9 +12,12 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/invalidation/impl/fake_invalidation_state_tracker.h"
 #include "components/invalidation/impl/push_client_channel.h"
 #include "components/invalidation/impl/sync_invalidation_listener.h"
@@ -264,8 +267,8 @@ class SyncInvalidationListenerTest : public testing::Test {
         kAppsId_(kChromeSyncSourceId, "APP"),
         fake_push_client_(new notifier::FakePushClient()),
         fake_invalidation_client_(NULL),
-        listener_(scoped_ptr<SyncNetworkChannel>(new PushClientChannel(
-            scoped_ptr<notifier::PushClient>(fake_push_client_)))),
+        listener_(base::WrapUnique(
+            new PushClientChannel(base::WrapUnique(fake_push_client_)))),
         fake_delegate_(&listener_) {}
 
   void SetUp() override {
@@ -425,9 +428,7 @@ class SyncInvalidationListenerTest : public testing::Test {
     FlushPendingWrites();
   }
 
-  void FlushPendingWrites() {
-    message_loop_.RunUntilIdle();
-  }
+  void FlushPendingWrites() { base::RunLoop().RunUntilIdle(); }
 
   void EnableNotifications() {
     fake_push_client_->EnableNotifications();
@@ -778,18 +779,18 @@ TEST_F(SyncInvalidationListenerTest, UnregisterCleansUpStateMapCache) {
   EXPECT_TRUE(GetSavedInvalidations().empty());
   FireInvalidate(id, 1, "hello");
   EXPECT_EQ(1U, GetSavedInvalidations().size());
-  EXPECT_TRUE(ContainsKey(GetSavedInvalidations(), id));
+  EXPECT_TRUE(base::ContainsKey(GetSavedInvalidations(), id));
   FireInvalidate(kPreferencesId_, 2, "world");
   EXPECT_EQ(2U, GetSavedInvalidations().size());
 
-  EXPECT_TRUE(ContainsKey(GetSavedInvalidations(), id));
-  EXPECT_TRUE(ContainsKey(GetSavedInvalidations(), kPreferencesId_));
+  EXPECT_TRUE(base::ContainsKey(GetSavedInvalidations(), id));
+  EXPECT_TRUE(base::ContainsKey(GetSavedInvalidations(), kPreferencesId_));
 
   ObjectIdSet ids;
   ids.insert(id);
   listener_.UpdateRegisteredIds(ids);
   EXPECT_EQ(1U, GetSavedInvalidations().size());
-  EXPECT_TRUE(ContainsKey(GetSavedInvalidations(), id));
+  EXPECT_TRUE(base::ContainsKey(GetSavedInvalidations(), id));
 }
 
 TEST_F(SyncInvalidationListenerTest, DuplicateInvaldiations_Simple) {

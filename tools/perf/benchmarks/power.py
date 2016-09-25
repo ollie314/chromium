@@ -44,6 +44,7 @@ class PowerTypical10Mobile(perf_benchmark.PerfBenchmark):
 
 
 @benchmark.Enabled('android')
+@benchmark.Disabled('android-webview')  # http://crbug.com/622300
 class PowerToughAdCases(perf_benchmark.PerfBenchmark):
   """Android power test with tough ad pages."""
   test = power.Power
@@ -178,3 +179,25 @@ class PowerGpuRasterizationTop25(perf_benchmark.PerfBenchmark):
     if found:
       stories.RemoveStory(found)
     return stories
+
+
+@benchmark.Enabled('mac')
+class PowerScrollingTrivialPage(perf_benchmark.PerfBenchmark):
+  """Measure power consumption for some very simple pages."""
+  test = power.QuiescentPower
+  page_set = page_sets.MacGpuTrivialPagesStorySet
+
+  @classmethod
+  def Name(cls):
+    return 'power.trivial_pages'
+
+@benchmark.Enabled('mac')
+class PowerSteadyStatePages(perf_benchmark.PerfBenchmark):
+  """Measure power consumption for real web sites in steady state (no user
+  interactions)."""
+  test = power.QuiescentPower
+  page_set = page_sets.IdleAfterLoadingStories
+
+  @classmethod
+  def Name(cls):
+    return 'power.steady_state'

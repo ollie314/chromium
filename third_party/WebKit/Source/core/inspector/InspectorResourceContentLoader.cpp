@@ -24,6 +24,7 @@
 namespace blink {
 
 class InspectorResourceContentLoader::ResourceClient final : public GarbageCollectedFinalized<InspectorResourceContentLoader::ResourceClient>, private RawResourceClient, private StyleSheetResourceClient {
+    USING_GARBAGE_COLLECTED_MIXIN(ResourceClient);
 public:
     explicit ResourceClient(InspectorResourceContentLoader* loader)
         : m_loader(loader)
@@ -41,6 +42,8 @@ public:
     DEFINE_INLINE_TRACE()
     {
         visitor->trace(m_loader);
+        StyleSheetResourceClient::trace(visitor);
+        RawResourceClient::trace(visitor);
     }
 
 private:
@@ -81,6 +84,7 @@ InspectorResourceContentLoader::InspectorResourceContentLoader(LocalFrame* inspe
     : m_allRequestsStarted(false)
     , m_started(false)
     , m_inspectedFrame(inspectedFrame)
+    , m_lastClientId(0)
 {
 }
 
@@ -145,12 +149,22 @@ void InspectorResourceContentLoader::start()
     checkDone();
 }
 
-void InspectorResourceContentLoader::ensureResourcesContentLoaded(PassOwnPtr<SameThreadClosure> callback)
+int InspectorResourceContentLoader::createClientId()
+{
+    return ++m_lastClientId;
+}
+
+void InspectorResourceContentLoader::ensureResourcesContentLoaded(int clientId, std::unique_ptr<WTF::Closure> callback)
 {
     if (!m_started)
         start();
-    m_callbacks.append(callback);
+    m_callbacks.add(clientId, Callbacks()).storedValue->value.append(std::move(callback));
     checkDone();
+}
+
+void InspectorResourceContentLoader::cancel(int clientId)
+{
+    m_callbacks.remove(clientId);
 }
 
 InspectorResourceContentLoader::~InspectorResourceContentLoader()
@@ -198,10 +212,12 @@ void InspectorResourceContentLoader::checkDone()
 {
     if (!hasFinished())
         return;
-    Vector<OwnPtr<SameThreadClosure>> callbacks;
+    HashMap<int, Callbacks> callbacks;
     callbacks.swap(m_callbacks);
-    for (const auto& callback : callbacks)
-        (*callback)();
+    for (const auto& keyValue : callbacks) {
+        for (const auto& callback : keyValue.value)
+            (*callback)();
+    }
 }
 
 void InspectorResourceContentLoader::resourceFinished(ResourceClient* client)

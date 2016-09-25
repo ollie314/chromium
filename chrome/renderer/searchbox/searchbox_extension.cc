@@ -16,8 +16,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/common/instant_types.h"
-#include "chrome/common/ntp_logging_events.h"
+#include "chrome/common/search/instant_types.h"
+#include "chrome/common/search/ntp_logging_events.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/renderer_resources.h"
 #include "chrome/renderer/searchbox/searchbox.h"
@@ -421,14 +421,6 @@ class SearchBoxExtensionWrapper : public v8::Extension {
   // Focuses the omnibox.
   static void Focus(const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  // Gets whether or not the app launcher is enabled.
-  static void GetAppLauncherEnabled(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Gets the desired navigation behavior from a click event.
-  static void GetDispositionFromClick(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-
   // Gets Most Visited Items.
   static void GetMostVisitedItems(
       const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -480,10 +472,6 @@ class SearchBoxExtensionWrapper : public v8::Extension {
   static void LogMostVisitedNavigation(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
-  // Navigates the window to a URL represented by a restricted ID.
-  static void NavigateContentWindow(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-
   // Pastes provided value or clipboard's content into the omnibox.
   static void Paste(const v8::FunctionCallbackInfo<v8::Value>& args);
 
@@ -501,10 +489,6 @@ class SearchBoxExtensionWrapper : public v8::Extension {
 
   // Undoes the deletion of a Most Visited item.
   static void UndoMostVisitedDeletion(
-      const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // Indicates whether the page supports Instant.
-  static void GetDisplayInstantResults(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
  private:
@@ -609,10 +593,6 @@ SearchBoxExtensionWrapper::GetNativeFunctionTemplate(
     return v8::FunctionTemplate::New(isolate, DeleteMostVisitedItem);
   if (name->Equals(v8::String::NewFromUtf8(isolate, "Focus")))
     return v8::FunctionTemplate::New(isolate, Focus);
-  if (name->Equals(v8::String::NewFromUtf8(isolate, "GetAppLauncherEnabled")))
-    return v8::FunctionTemplate::New(isolate, GetAppLauncherEnabled);
-  if (name->Equals(v8::String::NewFromUtf8(isolate, "GetDispositionFromClick")))
-    return v8::FunctionTemplate::New(isolate, GetDispositionFromClick);
   if (name->Equals(v8::String::NewFromUtf8(isolate, "GetMostVisitedItems")))
     return v8::FunctionTemplate::New(isolate, GetMostVisitedItems);
   if (name->Equals(v8::String::NewFromUtf8(isolate, "GetMostVisitedItemData")))
@@ -643,8 +623,6 @@ SearchBoxExtensionWrapper::GetNativeFunctionTemplate(
           v8::String::NewFromUtf8(isolate, "LogMostVisitedNavigation"))) {
     return v8::FunctionTemplate::New(isolate, LogMostVisitedNavigation);
   }
-  if (name->Equals(v8::String::NewFromUtf8(isolate, "NavigateContentWindow")))
-    return v8::FunctionTemplate::New(isolate, NavigateContentWindow);
   if (name->Equals(v8::String::NewFromUtf8(isolate, "Paste")))
     return v8::FunctionTemplate::New(isolate, Paste);
   if (name->Equals(
@@ -657,9 +635,6 @@ SearchBoxExtensionWrapper::GetNativeFunctionTemplate(
     return v8::FunctionTemplate::New(isolate, UndoAllMostVisitedDeletions);
   if (name->Equals(v8::String::NewFromUtf8(isolate, "UndoMostVisitedDeletion")))
     return v8::FunctionTemplate::New(isolate, UndoMostVisitedDeletion);
-  if (name->Equals(
-          v8::String::NewFromUtf8(isolate, "GetDisplayInstantResults")))
-    return v8::FunctionTemplate::New(isolate, GetDisplayInstantResults);
   return v8::Local<v8::FunctionTemplate>();
 }
 
@@ -727,42 +702,6 @@ void SearchBoxExtensionWrapper::Focus(
 
   DVLOG(1) << render_view << " Focus";
   SearchBox::Get(render_view)->Focus();
-}
-
-// static
-void SearchBoxExtensionWrapper::GetAppLauncherEnabled(
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
-  content::RenderView* render_view = GetRenderView();
-  if (!render_view) return;
-
-  args.GetReturnValue().Set(
-      SearchBox::Get(render_view)->app_launcher_enabled());
-}
-
-// static
-void SearchBoxExtensionWrapper::GetDispositionFromClick(
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
-  content::RenderView* render_view = GetRenderView();
-  if (!render_view) return;
-
-  if (args.Length() != 5) {
-    ThrowInvalidParameters(args);
-    return;
-  }
-
-  bool middle_button = args[0]->BooleanValue();
-  bool alt_key = args[1]->BooleanValue();
-  bool ctrl_key = args[2]->BooleanValue();
-  bool meta_key = args[3]->BooleanValue();
-  bool shift_key = args[4]->BooleanValue();
-
-  WindowOpenDisposition disposition = ui::DispositionFromClick(middle_button,
-                                                               alt_key,
-                                                               ctrl_key,
-                                                               meta_key,
-                                                               shift_key);
-  v8::Isolate* isolate = args.GetIsolate();
-  args.GetReturnValue().Set(v8::Int32::New(isolate, disposition));
 }
 
 // static
@@ -1098,15 +1037,19 @@ void SearchBoxExtensionWrapper::LogMostVisitedImpression(
       GURL(chrome::kChromeSearchMostVisitedUrl));
   if (!render_view) return;
 
-  if (args.Length() < 2 || !args[0]->IsNumber() || args[1]->IsUndefined()) {
+  if (args.Length() < 2 || !args[0]->IsNumber() || !args[1]->IsNumber()) {
     ThrowInvalidParameters(args);
     return;
   }
 
   DVLOG(1) << render_view << " LogMostVisitedImpression";
 
-  SearchBox::Get(render_view)->LogMostVisitedImpression(
-      args[0]->IntegerValue(), V8ValueToUTF16(args[1]));
+  if (args[1]->Uint32Value() <= static_cast<int>(NTPLoggingTileSource::LAST)) {
+    NTPLoggingTileSource tile_source =
+        static_cast<NTPLoggingTileSource>(args[1]->Uint32Value());
+    SearchBox::Get(render_view)->LogMostVisitedImpression(
+        args[0]->IntegerValue(), tile_source);
+  }
 }
 
 // static
@@ -1116,47 +1059,18 @@ void SearchBoxExtensionWrapper::LogMostVisitedNavigation(
       GURL(chrome::kChromeSearchMostVisitedUrl));
   if (!render_view) return;
 
-  if (args.Length() < 2 || !args[0]->IsNumber() || args[1]->IsUndefined()) {
+  if (args.Length() < 2 || !args[0]->IsNumber() || !args[1]->IsNumber()) {
     ThrowInvalidParameters(args);
     return;
   }
 
   DVLOG(1) << render_view << " LogMostVisitedNavigation";
 
-  SearchBox::Get(render_view)->LogMostVisitedNavigation(
-      args[0]->IntegerValue(), V8ValueToUTF16(args[1]));
-}
-
-// static
-void SearchBoxExtensionWrapper::NavigateContentWindow(
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
-  content::RenderView* render_view = GetRenderView();
-  if (!render_view) return;
-
-  if (!args.Length() || !args[0]->IsNumber()) {
-    ThrowInvalidParameters(args);
-    return;
-  }
-
-  InstantRestrictedID rid = args[0]->Int32Value();
-  InstantMostVisitedItem item;
-  if (!SearchBox::Get(render_view)->GetMostVisitedItemWithID(rid, &item))
-    return;
-
-  GURL destination_url = item.url;
-
-  DVLOG(1) << render_view << " NavigateContentWindow: " << destination_url;
-
-  // Navigate the main frame. Note that the security checks are enforced by the
-  // browser process in InstantService::IsValidURLForNavigation(), but some
-  // simple checks here are useful for avoiding unnecessary IPCs.
-  if (destination_url.is_valid() &&
-      !destination_url.SchemeIs(url::kJavaScriptScheme)) {
-    WindowOpenDisposition disposition = CURRENT_TAB;
-    if (args[1]->IsNumber()) {
-      disposition = (WindowOpenDisposition) args[1]->Uint32Value();
-    }
-    SearchBox::Get(render_view)->NavigateToURL(destination_url, disposition);
+  if (args[1]->Uint32Value() <= static_cast<int>(NTPLoggingTileSource::LAST)) {
+    NTPLoggingTileSource tile_source =
+        static_cast<NTPLoggingTileSource>(args[1]->Uint32Value());
+    SearchBox::Get(render_view)->LogMostVisitedNavigation(
+        args[0]->IntegerValue(), tile_source);
   }
 }
 
@@ -1219,19 +1133,6 @@ void SearchBoxExtensionWrapper::UndoMostVisitedDeletion(
   DVLOG(1) << render_view << " UndoMostVisitedDeletion";
   SearchBox::Get(render_view)
       ->UndoMostVisitedDeletion(args[0]->ToInteger()->Value());
-}
-
-// static
-void SearchBoxExtensionWrapper::GetDisplayInstantResults(
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
-  content::RenderView* render_view = GetRenderView();
-  if (!render_view) return;
-
-  bool display_instant_results =
-      SearchBox::Get(render_view)->display_instant_results();
-  DVLOG(1) << render_view << " GetDisplayInstantResults" <<
-      display_instant_results;
-  args.GetReturnValue().Set(display_instant_results);
 }
 
 }  // namespace extensions_v8

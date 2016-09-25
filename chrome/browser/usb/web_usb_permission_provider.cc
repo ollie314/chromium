@@ -34,18 +34,18 @@ bool FindOriginInDescriptorSet(const device::WebUsbAllowedOrigins* set,
 
   if (!set)
     return false;
-  if (ContainsValue(set->origins, origin))
+  if (base::ContainsValue(set->origins, origin))
     return true;
   for (const auto& configuration : set->configurations) {
     if (configuration_value &&
         *configuration_value != configuration.configuration_value)
       continue;
-    if (ContainsValue(configuration.origins, origin))
+    if (base::ContainsValue(configuration.origins, origin))
       return true;
     for (const auto& function : configuration.functions) {
       if (first_interface && *first_interface != function.first_interface)
         continue;
-      if (ContainsValue(function.origins, origin))
+      if (base::ContainsValue(function.origins, origin))
         return true;
     }
   }
@@ -82,10 +82,20 @@ bool WebUSBPermissionProvider::HasDevicePermission(
   UsbChooserContext* chooser_context =
       UsbChooserContextFactory::GetForProfile(profile);
 
+  if (!chooser_context->HasDevicePermission(requesting_origin, embedding_origin,
+                                            device)) {
+    return false;
+  }
+
+  // On Android it is not possible to read the WebUSB descriptors until Chrome
+  // has been granted permission to open it. Instead we grant provisional access
+  // to the device and perform the allowed origins check when the client tries
+  // to open it.
+  if (!device->permission_granted())
+    return true;
+
   return FindOriginInDescriptorSet(device->webusb_allowed_origins(),
-                                   requesting_origin, nullptr, nullptr) &&
-         chooser_context->HasDevicePermission(requesting_origin,
-                                              embedding_origin, device);
+                                   requesting_origin, nullptr, nullptr);
 }
 
 bool WebUSBPermissionProvider::HasConfigurationPermission(

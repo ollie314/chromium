@@ -3,15 +3,15 @@
         "platform"
     ],
     "scripts": [
-        "WorkerRuntime.js",
         "WebInspector.js",
+        "Worker.js",
         "TextDictionary.js",
         "Object.js",
-        "NotificationService.js",
         "Color.js",
         "Geometry.js",
         "Console.js",
         "ContentProvider.js",
+        "CSSShadowModel.js",
         "ParsedURL.js",
         "Progress.js",
         "ResourceType.js",
@@ -24,6 +24,7 @@
         "TextUtils.js",
         "Throttler.js",
         "UIString.js",
-        "ModuleExtensionInterfaces.js"
+        "ModuleExtensionInterfaces.js",
+        "FormatterWorkerPool.js"
     ]
 }

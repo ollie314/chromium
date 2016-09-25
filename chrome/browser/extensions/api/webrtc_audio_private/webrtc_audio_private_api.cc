@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/api/webrtc_audio_private/webrtc_audio_private_api.h"
 
 #include <utility>
+#include <vector>
 
 #include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
@@ -19,8 +20,10 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "media/audio/audio_manager_base.h"
+#include "media/audio/audio_device_description.h"
 #include "media/audio/audio_output_controller.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 namespace extensions {
 
@@ -70,7 +73,7 @@ const char* WebrtcAudioPrivateEventService::service_name() {
 void WebrtcAudioPrivateEventService::OnDevicesChanged(
     base::SystemMonitor::DeviceType device_type) {
   switch (device_type) {
-    case base::SystemMonitor::DEVTYPE_AUDIO_CAPTURE:
+    case base::SystemMonitor::DEVTYPE_AUDIO:
     case base::SystemMonitor::DEVTYPE_VIDEO_CAPTURE:
       SignalEvent();
       break;
@@ -93,9 +96,9 @@ void WebrtcAudioPrivateEventService::SignalEvent() {
     const std::string& extension_id = extension->id();
     if (router->ExtensionHasEventListener(extension_id, kEventName) &&
         extension->permissions_data()->HasAPIPermission("webrtcAudioPrivate")) {
-      std::unique_ptr<Event> event(
-          new Event(events::WEBRTC_AUDIO_PRIVATE_ON_SINKS_CHANGED, kEventName,
-                    base::WrapUnique(new base::ListValue())));
+      std::unique_ptr<Event> event = base::MakeUnique<Event>(
+          events::WEBRTC_AUDIO_PRIVATE_ON_SINKS_CHANGED, kEventName,
+          base::MakeUnique<base::ListValue>());
       router->DispatchEventToExtension(extension_id, std::move(event));
     }
   }
@@ -137,9 +140,9 @@ bool WebrtcAudioPrivateFunction::GetControllerList(const RequestInfo& request) {
   // If |guest_process_id| is defined, directly use this id to find the
   // corresponding RenderProcessHost.
   if (request.guest_process_id.get()) {
-    rph = content::RenderProcessHost::FromID(*request.guest_process_id.get());
+    rph = content::RenderProcessHost::FromID(*request.guest_process_id);
   } else if (request.tab_id.get()) {
-    int tab_id = *request.tab_id.get();
+    int tab_id = *request.tab_id;
     content::WebContents* contents = NULL;
     if (!ExtensionTabUtil::GetTabById(tab_id, GetProfile(), true, NULL, NULL,
                                       &contents, NULL)) {
@@ -195,10 +198,10 @@ std::string WebrtcAudioPrivateFunction::CalculateHMACImpl(
   // that transforms "default" to the empty string, and code in
   // GetActiveSink that ensures we return "default" if we get the
   // empty string as the current device ID.
-  if (raw_id.empty() || raw_id == media::AudioManagerBase::kDefaultDeviceId)
-    return media::AudioManagerBase::kDefaultDeviceId;
+  if (media::AudioDeviceDescription::IsDefaultDevice(raw_id))
+    return media::AudioDeviceDescription::kDefaultDeviceId;
 
-  GURL security_origin(source_url().GetOrigin());
+  url::Origin security_origin(source_url().GetOrigin());
   return content::GetHMACForMediaDeviceID(device_id_salt(), security_origin,
                                           raw_id);
 }
@@ -207,9 +210,7 @@ void WebrtcAudioPrivateFunction::InitDeviceIDSalt() {
   device_id_salt_ = GetProfile()->GetResourceContext()->GetMediaDeviceIDSalt();
 }
 
-const content::ResourceContext::SaltCallback&
-WebrtcAudioPrivateFunction::device_id_salt() const {
-  DCHECK(!device_id_salt_.is_null());
+std::string WebrtcAudioPrivateFunction::device_id_salt() const {
   return device_id_salt_;
 }
 
@@ -297,7 +298,7 @@ void WebrtcAudioPrivateGetActiveSinkFunction::OnHMACCalculated(
   std::string result = hmac_id;
   if (result.empty()) {
     DVLOG(2) << "Received empty ID, replacing with default ID.";
-    result = media::AudioManagerBase::kDefaultDeviceId;
+    result = media::AudioDeviceDescription::kDefaultDeviceId;
   }
   results_.reset(wap::GetActiveSink::Results::Create(result).release());
   SendResponse(true);
@@ -322,9 +323,9 @@ bool WebrtcAudioPrivateSetActiveSinkFunction::RunAsync() {
 
   if (params->request.guest_process_id.get()) {
     request_info_.guest_process_id.reset(
-        new int(*params->request.guest_process_id.get()));
+        new int(*params->request.guest_process_id));
   } else if (params->request.tab_id.get()) {
-    request_info_.tab_id.reset(new int(*params->request.tab_id.get()));
+    request_info_.tab_id.reset(new int(*params->request.tab_id));
   } else {
     return false;
   }
@@ -342,10 +343,10 @@ void WebrtcAudioPrivateSetActiveSinkFunction::OnControllerList(
   int requested_process_id;
   if (request_info_.guest_process_id.get()) {
     requested_process_type = "guestProcessId";
-    requested_process_id = *request_info_.guest_process_id.get();
+    requested_process_id = *request_info_.guest_process_id;
   } else {
     requested_process_type = "tabId";
-    requested_process_id = *request_info_.tab_id.get();
+    requested_process_id = *request_info_.tab_id;
   }
 
   controllers_ = controllers;
@@ -368,7 +369,7 @@ void WebrtcAudioPrivateSetActiveSinkFunction::OnOutputDeviceNames(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   std::string raw_sink_id;
-  if (sink_id_ == media::AudioManagerBase::kDefaultDeviceId) {
+  if (sink_id_ == media::AudioDeviceDescription::kDefaultDeviceId) {
     DVLOG(2) << "Received default ID, replacing with empty ID.";
     raw_sink_id = "";
   } else {
@@ -446,7 +447,7 @@ void
 WebrtcAudioPrivateGetAssociatedSinkFunction::GetRawSourceIDOnIOThread() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  GURL security_origin(params_->security_origin);
+  url::Origin security_origin(GURL(params_->security_origin));
   std::string source_id_in_origin(params_->source_id_in_origin);
 
   // Find the raw source ID for source_id_in_origin.
@@ -491,7 +492,7 @@ void WebrtcAudioPrivateGetAssociatedSinkFunction::OnHMACCalculated(
     const std::string& associated_sink_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  if (associated_sink_id == media::AudioManagerBase::kDefaultDeviceId) {
+  if (associated_sink_id == media::AudioDeviceDescription::kDefaultDeviceId) {
     DVLOG(2) << "Got default ID, replacing with empty ID.";
     results_.reset(wap::GetAssociatedSink::Results::Create("").release());
   } else {

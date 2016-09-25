@@ -108,10 +108,6 @@ Extended attributes on partial interface members work as normal. However, only t
 * If different members should be controlled by different flags, this must be specified individually.
 * If a flag obviously applies to only one member of a single-member interface (i.e., it is named after that member), the extended attribute should be on the member.
 
-*** note
-**FIXME:** Currently, `[OriginTrialEnabled]` doesn't work for partial interfaces, see [Bug 585656](https://crbug.com/585656).
-***
-
 The remaining extended attribute, `[ImplementedAs]`, allows the implementation of the partial interface to be different than the implementation of the main interface; for members of the partial interface, this acts as if this `[ImplementedAs=...]` were specified on the interface, for only these members (overriding any existing value). This is stored internally via `[PartialInterfaceImplementedAs]` (see below).
 
 ### implements
@@ -139,6 +135,16 @@ These are defined in the [ECMAScript-specific extended attributes](http://heycam
 *** note
 Unsupported: `[ArrayClass]`, `[ImplicitThis]`, `[LenientThis]`, `[NamedPropertiesObject]`, `[TreatNonCallableAsNull]`
 ***
+
+### [CEReactions] _(m, a)_
+
+Standard: [CEReactions](https://html.spec.whatwg.org/multipage/scripting.html#cereactions)
+
+Summary: `[CEReactoins]` indicates that
+[custom element reactions](https://html.spec.whatwg.org/multipage/scripting.html#concept-custom-element-reaction)
+are triggered for this method or attribute.
+
+Usage: `[CEReactions]` takes no arguments.
 
 ### [Clamp] _(a, p)_
 
@@ -269,7 +275,7 @@ Standard: [NewObject](https://heycam.github.io/webidl/#NewObject)
 
 Summary: Signals that a method that returns an object type always returns a new object.
 
-This attribute has no effect on code generation and should simply be used in Blink IDL files if the specification uses it.
+Generates a test in debug mode to ensure that no wrapper object for the returned DOM object exists yet. Also see `[DoNotTestNewObject]`.
 
 ### [NoInterfaceObject] _(i)_
 
@@ -412,13 +418,19 @@ window.screenX; // Evaluates to 0. 0 remains.
 
 Whether `[Replaceable]` should be specified or not depends on the spec of each attribute.
 
-### [SameObject] _(m)_
+### [SameObject] _(a)_
 
 Standard: [SameObject](http://heycam.github.io/webidl/#SameObject)
 
 Summary: Signals that a `readonly` attribute that returns an object type always returns the same object.
 
-This attribute has no effect on code generation and should simply be used in Blink IDL files if the specification uses it.
+This attribute has no effect on code generation and should simply be used in Blink IDL files if the specification uses it. If you want the binding layer to cache the resulting object, use `[SaveSameObject]`.
+
+### [SecureContext] _(a, i, m)_
+
+Standard: [SecureContext](https://heycam.github.io/webidl/#SecureContext)
+
+Summary: Interfaces and interface members with a `SecureContext` attribute are exposed only inside ["Secure Contexts"](https://w3c.github.io/webappsec-secure-contexts/).
 
 ### [TreatNullAs] _(a,p)_, [TreatUndefinedAs] _(a,p)_
 
@@ -466,9 +478,9 @@ By default, interface members are configurable (i.e. you can modify a property d
 
 Implementation: **Non-standard**: `[Unforgeable]` for attributes has an unspeced side-effect that it makes the property data-type property (`{writable: ..., value: ...}`) although it must be accessor-type property (`{get: ..., set: ...}`). ([Bug 497616](https://crbug.co/497616))
 
-### [Unscopeable] _(o, a)_
+### [Unscopable] _(o, a)_
 
-Standard: [Unscopeable](http://heycam.github.io/webidl/#Unscopeable)
+Standard: [Unscopable](http://heycam.github.io/webidl/#Unscopable)
 
 Summary: The interface member will not appear as a named property within `with` statements.
 
@@ -497,18 +509,21 @@ If an interface X has `[ActiveScriptWrappable]` and an interface Y inherits the 
 ```webidl
 [
     ActiveScriptWrappable,
+    DependentLifetime,
 ] interface Foo {};
-```
 
 interface Bar : Foo {};  // inherits [ActiveScriptWrappable] from Foo
+```
+
 If a given DOM object needs to be kept alive as long as the DOM object has pending activities, you need to specify `[ActiveScriptWrappable]` and `[DependentLifetime]`. For example, `[ActiveScriptWrappable]` can be used when the DOM object is expecting events to be raised in the future.
 
-If you use `[ActiveScriptWrappable]`, the corresponding Blink class needs to inherit ActiveScriptWrappable. For example, in case of XMLHttpRequest, core/xml/XMLHttpRequest.h would look like this:
+If you use `[ActiveScriptWrappable]`, the corresponding Blink class needs to inherit ActiveScriptWrappable and override hasPendingActivity(). For example, in case of XMLHttpRequest, core/xml/XMLHttpRequest.h would look like this:
 
 ```c++
 class XMLHttpRequest : public ActiveScriptWrappable
 {
-    ...;
+    // Returns true if the object needs to be kept alive.
+    bool hasPendingActivity() const override { return ...; }
 }
 ```
 
@@ -829,7 +844,7 @@ v8::Handle<v8::Value> V8XXX::callAsFunctionCallback(const v8::Arguments& args)
 #### [Custom=VisitDOMWrapper] _(i)_
 
 
-Summary: Allows you to write custom code for visitDOMWrapper: like `[SetWrapperReferenceFrom]`, but does not generate the function. One use (Nodelist.idl).
+Summary: Allows you to write custom code for visitDOMWrapper: like `[SetWrapperReferenceFrom]`, but with custom code. One use (Nodelist.idl).
 
 Usage:
 
@@ -844,7 +859,7 @@ Usage:
 And then in V8XXXCustom.cpp:
 
 ```c++
-void V8XXX::visitDOMWrapper(DOMDataStore* store, void* object, v8::Persistent<v8::Object> wrapper)
+void V8XXX::visitDOMWrapperCustom(v8::Isolate* isolate, ScriptWrappable* scriptWrappable, v8::Persistent<v8::Object> wrapper)
 {
     ...
 }
@@ -853,6 +868,11 @@ void V8XXX::visitDOMWrapper(DOMDataStore* store, void* object, v8::Persistent<v8
 ### [CustomElementCallbacks] _(m, a)_
 
 Summary: Wraps the method/accessor with a Custom Elements "callback delivery scope" which will dispatch Custom Element callbacks (createdCallback, attributeChangedCallback, etc.) before returning to script.
+
+*** note
+This attribute is only for Custom Elements V0,
+and is superceded by `[CEReactions]` for V1.
+***
 
 If the method/accessor creates elements or modifies DOM nodes in any way, it should be tagged with this extended attribute. Even if you're not a Node, this may apply to you! For example [DOMTokenList.toggle](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/dom/DOMTokenList.idl&l=34) can be reflected in the attribute of its associated element, so it needs to be tagged with CustomElementCallbacks. If the method/accessor only calls something that may modify the DOM (for example, it runs user script as a callback) you don't need to tag your method with `[CustomElementCallbacks]`; that is the responsibility of the binding that actually modifies the DOM. In general over-applying this extended attribute is safe, with one caveat:
 
@@ -923,6 +943,12 @@ Usage: `[DeprecateAs]` can be specified on methods, attributes, and constants.
 
 The deprecation message show on the console can be specified via the [UseCounter::deprecationMessage](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/frame/UseCounter.cpp&q=UseCounter::deprecationMessage&l=615) method.
 
+### [DoNotTestNewObject] _(m)_
+
+Summary: Does not generate a test for `[NewObject]` in the binding layer.
+
+When specified, does not generate a test for `[NewObject]`. Some implementation creates a new DOM object and its wrapper before passing through the binding layer. In that case, the generated test doesn't make sense. See Text.splitText() for example.
+
 ### [Iterable] _(i)_
 
 Summary: Installs a @@iterator method.
@@ -966,13 +992,13 @@ for (var value of iter) {
 Currently the code generator doesn't take care of the name conflict. Namely, it is not allowed to have "iterator" method in an iterable interface.
 ***
 
-### [Measure] _(m, a, c)_
+### [Measure] _(i, m, a, c)_
 
 Summary: Measures usage of a specific feature via UseCounter.
 
 In order to measure usage of specific features, Chrome submits anonymous statistics through the Histogram recording system for users who opt-in to sharing usage statistics. This extended attribute hooks up a specific feature to this measurement system.
 
-Usage: `[Measure]` can be specified on methods, attributes, and constants. The generated feature name must be added to [UseCounter::Feature](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/frame/UseCounter.h&q=%22enum%20Feature%22&sq=package:chromium&type=cs&l=61) (in [core/frame/UseCounter.h](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/frame/UseCounter.h)).
+Usage: `[Measure]` can be specified on interfaces, methods, attributes, and constants. When specified on an interface usage of the constructor will be measured. The generated feature name must be added to [UseCounter::Feature](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/frame/UseCounter.h&q=%22enum%20Feature%22&sq=package:chromium&type=cs&l=61) (in [core/frame/UseCounter.h](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/frame/UseCounter.h)).
 
 ```webidl
 [Measure] attribute Node interestingAttribute;
@@ -980,12 +1006,12 @@ Usage: `[Measure]` can be specified on methods, attributes, and constants. The g
 [Measure] const INTERESTING_CONSTANT = 1;
 ```
 
-### [MeasureAs] _(m, a, c)_
+### [MeasureAs] _(i, m, a, c)_
 
 Summary: Like `[Measure]`, but the feature name is provided as the extended attribute value.
 This is similar to the standard `[DeprecateAs]` extended attribute, but does not display a deprecation warning.
 
-Usage: `[MeasureAs]` can be specified on methods, attributes, and constants. The value must match one of the enumeration values in [UseCounter::Feature](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/frame/UseCounter.h&q=%22enum%20Feature%22&sq=package:chromium&type=cs&l=61) (in [core/frame/UseCounter.h](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/frame/UseCounter.h)).
+Usage: `[MeasureAs]` can be specified on interfaces, methods, attributes, and constants. The value must match one of the enumeration values in [UseCounter::Feature](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/frame/UseCounter.h&q=%22enum%20Feature%22&sq=package:chromium&type=cs&l=61) (in [core/frame/UseCounter.h](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/frame/UseCounter.h)).
 
 ```webidl
 [MeasureAs=AttributeWeAreInterestedIn] attribute Node interestingAttribute;
@@ -1029,6 +1055,10 @@ When there is an active origin trial for the current execution context, the feat
 `[OriginTrialEnabled]` has similar semantics to `[RuntimeEnabled]`, and is intended as a drop-in replacement. For example, `[OriginTrialEnabled]` _cannot_ be applied to arguments, see `[RuntimeEnabled]` for reasoning. The key implementation difference is that `[OriginTrialEnabled]` wraps the generated code with `if (OriginTrials::FeatureNameEnabled(...)) { ...code... }`.
 
 For more information, see [RuntimeEnabledFeatures](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/platform/RuntimeEnabledFeatures.in) and [OriginTrialContext](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/core/origin_trials/OriginTrialContext.h).
+
+*** note
+**FIXME:** Currently, `[OriginTrialEnabled]` can only be applied to interfaces, attributes, and constants. Methods (including those generated by `iterable`, `setlike`, `maplike`, `serializer` and `stringifier`) are not supported. See [Bug 621641](https://crbug.com/621641).
+***
 
 ### [PostMessage] _(m)_
 
@@ -1241,13 +1271,19 @@ foo(long x);
 
 For more information, see [RuntimeEnabledFeatures](https://code.google.com/p/chromium/codesearch#chromium/src/third_party/WebKit/Source/platform/RuntimeEnabledFeatures.in).
 
+### [SaveSameObject] _(a)_
+
+Summary: Caches the resulting object and always returns the same object.
+
+When specified, caches the resulting object and returns it in later calls so that the attribute always returns the same object. Must be accompanied with `[SameObject]`.
+
 ### [SetWrapperReferenceFrom=xxx] _(i)_
 
 ### [SetWrapperReferenceTo=xxx] _(i)_
 
 Summary: This generates code that allows you to set up implicit references between wrappers which can be used to keep wrappers alive during GC.
 
-Usage: `[SetWrapperReferenceFrom]` and `[SetWrapperReferenceTo]` can be specified on an interface. Use `[Custom=VisitDOMWrapper]` instead if want to write a custom function.
+Usage: `[SetWrapperReferenceFrom]` and `[SetWrapperReferenceTo]` can be specified on an interface. Use `[Custom=VisitDOMWrapper]` if want to write a custom function.
 
 ```webidl
 [
@@ -1469,6 +1505,10 @@ Without `[NoImplHeader]`, the IDL compiler assumes that there is XXX.h in the im
 ## Temporary Blink-specific IDL Extended Attributes
 
 These extended attributes are _temporary_ and are only in use while some change is in progress. Unless you are involved with the change, you can generally ignore them, and should not use them.
+
+### [ExperimentalCallbackFunction]
+
+Summary: `[ExperimentalCallbackFunction]` on a callback function is a flag to collect callback functions. Currently the code generator doesn't generate bindings for IDL callback functions (instead, it just uses `ScriptValue`). While generating bindings for callback functions, to change existing code which uses callback functions until the generated bindings are stabilized is undesirable. To implement bindings generation for IDL callback functions incrementally, [ExperimentalCallbackFunction] extended attribute is added. The code generator keeps using ScriptValue for IDL callback functions which don't have this extended attribute.
 
 ### [LegacyTreatAsPartialInterface] _(i)_
 

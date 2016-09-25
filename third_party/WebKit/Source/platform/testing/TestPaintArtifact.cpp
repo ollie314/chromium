@@ -14,6 +14,8 @@
 #include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "wtf/Assertions.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -23,20 +25,20 @@ public:
     DummyRectClient(const FloatRect& rect, Color color) : m_rect(rect), m_color(color) {}
     String debugName() const final { return "<dummy>"; }
     LayoutRect visualRect() const final { return enclosingLayoutRect(m_rect); }
-    PassRefPtr<SkPicture> makePicture() const;
+    sk_sp<SkPicture> makePicture() const;
 private:
     FloatRect m_rect;
     Color m_color;
 };
 
-PassRefPtr<SkPicture> TestPaintArtifact::DummyRectClient::makePicture() const
+sk_sp<SkPicture> TestPaintArtifact::DummyRectClient::makePicture() const
 {
     SkPictureRecorder recorder;
     SkCanvas* canvas = recorder.beginRecording(m_rect);
     SkPaint paint;
     paint.setColor(m_color.rgb());
     canvas->drawRect(m_rect, paint);
-    return fromSkSp(recorder.finishRecordingAsPicture());
+    return recorder.finishRecordingAsPicture();
 }
 
 TestPaintArtifact::TestPaintArtifact()
@@ -51,12 +53,14 @@ TestPaintArtifact::~TestPaintArtifact()
 TestPaintArtifact& TestPaintArtifact::chunk(
     PassRefPtr<TransformPaintPropertyNode> transform,
     PassRefPtr<ClipPaintPropertyNode> clip,
-    PassRefPtr<EffectPaintPropertyNode> effect)
+    PassRefPtr<EffectPaintPropertyNode> effect,
+    PassRefPtr<ScrollPaintPropertyNode> scroll)
 {
     PaintChunkProperties properties;
     properties.transform = transform;
     properties.clip = clip;
     properties.effect = effect;
+    properties.scroll = scroll;
     return chunk(properties);
 }
 
@@ -73,20 +77,20 @@ TestPaintArtifact& TestPaintArtifact::chunk(const PaintChunkProperties& properti
 
 TestPaintArtifact& TestPaintArtifact::rectDrawing(const FloatRect& bounds, Color color)
 {
-    OwnPtr<DummyRectClient> client = adoptPtr(new DummyRectClient(bounds, color));
+    std::unique_ptr<DummyRectClient> client = wrapUnique(new DummyRectClient(bounds, color));
     m_displayItemList.allocateAndConstruct<DrawingDisplayItem>(
-        *client, DisplayItem::DrawingFirst, client->makePicture());
-    m_dummyClients.append(client.release());
+        *client, DisplayItem::kDrawingFirst, client->makePicture());
+    m_dummyClients.append(std::move(client));
     return *this;
 }
 
 TestPaintArtifact& TestPaintArtifact::foreignLayer(const FloatPoint& location, const IntSize& size, scoped_refptr<cc::Layer> layer)
 {
     FloatRect floatBounds(location, FloatSize(size));
-    OwnPtr<DummyRectClient> client = adoptPtr(new DummyRectClient(floatBounds, Color::transparent));
+    std::unique_ptr<DummyRectClient> client = wrapUnique(new DummyRectClient(floatBounds, Color::transparent));
     m_displayItemList.allocateAndConstruct<ForeignLayerDisplayItem>(
-        *client, DisplayItem::ForeignLayerFirst, std::move(layer), location, size);
-    m_dummyClients.append(client.release());
+        *client, DisplayItem::kForeignLayerFirst, std::move(layer), location, size);
+    m_dummyClients.append(std::move(client));
     return *this;
 }
 
@@ -97,7 +101,7 @@ const PaintArtifact& TestPaintArtifact::build()
 
     if (!m_paintChunks.isEmpty())
         m_paintChunks.last().endIndex = m_displayItemList.size();
-    m_paintArtifact = PaintArtifact(std::move(m_displayItemList), std::move(m_paintChunks));
+    m_paintArtifact = PaintArtifact(std::move(m_displayItemList), std::move(m_paintChunks), true);
     m_built = true;
     return m_paintArtifact;
 }

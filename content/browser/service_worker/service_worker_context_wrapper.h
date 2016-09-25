@@ -17,12 +17,15 @@
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/service_worker_context.h"
-#include "net/url_request/url_request_context_getter_observer.h"
 
 namespace base {
 class FilePath;
 class SequencedTaskRunner;
 class SingleThreadTaskRunner;
+}
+
+namespace blink {
+enum class WebNavigationHintType;
 }
 
 namespace storage {
@@ -44,7 +47,6 @@ class StoragePartitionImpl;
 // is what is used internally in the service worker lib.
 class CONTENT_EXPORT ServiceWorkerContextWrapper
     : NON_EXPORTED_BASE(public ServiceWorkerContext),
-      public net::URLRequestContextGetterObserver,
       public base::RefCountedThreadSafe<ServiceWorkerContextWrapper> {
  public:
   using StatusCallback = base::Callback<void(ServiceWorkerStatusCode)>;
@@ -67,12 +69,7 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   void Shutdown();
 
   // Must be called on the IO thread.
-  void InitializeResourceContext(
-      ResourceContext* resource_context,
-      scoped_refptr<net::URLRequestContextGetter> request_context_getter);
-
-  // For net::URLRequestContextGetterObserver
-  void OnContextShuttingDown() override;
+  void InitializeResourceContext(ResourceContext* resource_context);
 
   // Deletes all files on disk and restarts the system asynchronously. This
   // leaves the system in a disabled state until it's done. This should be
@@ -110,6 +107,11 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
       const CheckHasServiceWorkerCallback& callback) override;
   void StopAllServiceWorkersForOrigin(const GURL& origin) override;
   void ClearAllServiceWorkersForTest(const base::Closure& callback) override;
+  void StartServiceWorkerForNavigationHint(
+      const GURL& document_url,
+      blink::WebNavigationHintType type,
+      int render_process_id,
+      const ResultCallback& callback) override;
 
   // These methods must only be called from the IO thread.
   ServiceWorkerRegistration* GetLiveRegistration(int64_t registration_id);
@@ -154,15 +156,15 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   // All these methods must be called from the IO thread.
   void GetAllRegistrations(const GetRegistrationsInfosCallback& callback);
   void GetRegistrationUserData(int64_t registration_id,
-                               const std::string& key,
+                               const std::vector<std::string>& keys,
                                const GetUserDataCallback& callback);
-  void StoreRegistrationUserData(int64_t registration_id,
-                                 const GURL& origin,
-                                 const std::string& key,
-                                 const std::string& data,
-                                 const StatusCallback& callback);
+  void StoreRegistrationUserData(
+      int64_t registration_id,
+      const GURL& origin,
+      const std::vector<std::pair<std::string, std::string>>& key_value_pairs,
+      const StatusCallback& callback);
   void ClearRegistrationUserData(int64_t registration_id,
-                                 const std::string& key,
+                                 const std::vector<std::string>& keys,
                                  const StatusCallback& callback);
   void GetUserDataForAllRegistrations(
       const std::string& key,
@@ -171,6 +173,9 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   // This function can be called from any thread, but the callback will always
   // be called on the UI thread.
   void StartServiceWorker(const GURL& pattern, const StatusCallback& callback);
+
+  // This function can be called from any thread.
+  void SkipWaitingWorker(const GURL& pattern);
 
   // These methods can be called from any thread.
   void UpdateRegistration(const GURL& pattern);
@@ -182,6 +187,9 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
 
   // Must be called from the IO thread.
   bool OriginHasForeignFetchRegistrations(const GURL& origin);
+
+  // Must be called from the UI thread.
+  bool IsRunningNavigationHintTask(int render_process_id) const;
 
  private:
   friend class BackgroundSyncManagerTest;
@@ -209,10 +217,10 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   void DidFindRegistrationForFindReady(
       const FindRegistrationCallback& callback,
       ServiceWorkerStatusCode status,
-      const scoped_refptr<ServiceWorkerRegistration>& registration);
+      scoped_refptr<ServiceWorkerRegistration> registration);
   void OnStatusChangedForFindReadyRegistration(
       const FindRegistrationCallback& callback,
-      const scoped_refptr<ServiceWorkerRegistration>& registration);
+      scoped_refptr<ServiceWorkerRegistration> registration);
 
   void DidDeleteAndStartOver(ServiceWorkerStatusCode status);
 
@@ -226,7 +234,27 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
 
   void DidFindRegistrationForUpdate(
       ServiceWorkerStatusCode status,
-      const scoped_refptr<content::ServiceWorkerRegistration>& registration);
+      scoped_refptr<content::ServiceWorkerRegistration> registration);
+
+  void DidCheckRenderProcessForNavigationHint(const GURL& document_url,
+                                              blink::WebNavigationHintType type,
+                                              int render_process_id,
+                                              const ResultCallback& callback);
+
+  void DidFindRegistrationForNavigationHint(
+      blink::WebNavigationHintType type,
+      int render_process_id,
+      const ResultCallback& callback,
+      ServiceWorkerStatusCode status,
+      scoped_refptr<ServiceWorkerRegistration> registration);
+
+  void DidStartServiceWorkerForNavigationHint(const GURL& pattern,
+                                              int render_process_id,
+                                              const ResultCallback& callback,
+                                              ServiceWorkerStatusCode code);
+  void DidFinishNavigationHintTaskOnUI(int render_process_id,
+                                       const ResultCallback& callback,
+                                       bool result);
 
   // The core context is only for use on the IO thread.
   // Can be null before/during init, during/after shutdown, and after
@@ -248,7 +276,8 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   // The ResourceContext associated with this context.
   ResourceContext* resource_context_;
 
-  scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
+  // Must be touched on the UI thread.
+  std::map<int, int> navigation_hint_task_count_per_process_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerContextWrapper);
 };

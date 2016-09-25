@@ -15,9 +15,9 @@
 #include "components/autofill/core/browser/webdata/autofill_wallet_metadata_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_wallet_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
-#include "components/browser_sync/browser/profile_sync_components_factory_impl.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
-#include "components/browser_sync/common/browser_sync_switches.h"
+#include "components/browser_sync/browser_sync_switches.h"
+#include "components/browser_sync/profile_sync_components_factory_impl.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/history/core/browser/history_model_worker.h"
 #include "components/history/core/browser/history_service.h"
@@ -27,12 +27,14 @@
 #include "components/password_manager/sync/browser/password_model_worker.h"
 #include "components/search_engines/search_engine_data_type_controller.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "components/sync_driver/glue/browser_thread_model_worker.h"
-#include "components/sync_driver/glue/chrome_report_unrecoverable_error.h"
-#include "components/sync_driver/glue/ui_model_worker.h"
-#include "components/sync_driver/sync_api_component_factory.h"
-#include "components/sync_driver/sync_util.h"
-#include "components/sync_driver/ui_data_type_controller.h"
+#include "components/sync/base/extensions_activity.h"
+#include "components/sync/driver/glue/browser_thread_model_worker.h"
+#include "components/sync/driver/glue/chrome_report_unrecoverable_error.h"
+#include "components/sync/driver/glue/ui_model_worker.h"
+#include "components/sync/driver/sync_api_component_factory.h"
+#include "components/sync/driver/sync_util.h"
+#include "components/sync/driver/ui_data_type_controller.h"
+#include "components/sync/engine/passive_model_worker.h"
 #include "components/sync_sessions/favicon_cache.h"
 #include "components/sync_sessions/local_session_event_router.h"
 #include "components/sync_sessions/sync_sessions_client.h"
@@ -59,8 +61,6 @@
 #include "ios/chrome/common/channel_info.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/web/public/web_thread.h"
-#include "sync/internal_api/public/engine/passive_model_worker.h"
-#include "sync/util/extensions_activity.h"
 #include "ui/base/device_form_factor.h"
 
 namespace {
@@ -106,23 +106,23 @@ class SyncSessionsClientImpl : public sync_sessions::SyncSessionsClient {
            !url.SchemeIsFile();
   }
 
-  browser_sync::SyncedWindowDelegatesGetter* GetSyncedWindowDelegatesGetter()
+  sync_sessions::SyncedWindowDelegatesGetter* GetSyncedWindowDelegatesGetter()
       override {
     return window_delegates_getter_.get();
   }
 
-  std::unique_ptr<browser_sync::LocalSessionEventRouter>
+  std::unique_ptr<sync_sessions::LocalSessionEventRouter>
   GetLocalSessionEventRouter() override {
     syncer::SyncableService::StartSyncFlare flare(
         ios::sync_start_util::GetFlareForSyncableService(
             browser_state_->GetStatePath()));
-    return base::WrapUnique(
-        new IOSChromeLocalSessionEventRouter(browser_state_, this, flare));
+    return base::MakeUnique<IOSChromeLocalSessionEventRouter>(browser_state_,
+                                                              this, flare);
   }
 
  private:
   ios::ChromeBrowserState* const browser_state_;
-  const std::unique_ptr<browser_sync::SyncedWindowDelegatesGetter>
+  const std::unique_ptr<sync_sessions::SyncedWindowDelegatesGetter>
       window_delegates_getter_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSessionsClientImpl);
@@ -158,7 +158,7 @@ void IOSChromeSyncClient::Initialize() {
     net::URLRequestContextGetter* url_request_context_getter =
         browser_state_->GetRequestContext();
 
-    component_factory_.reset(new ProfileSyncComponentsFactoryImpl(
+    component_factory_.reset(new browser_sync::ProfileSyncComponentsFactoryImpl(
         this, ::GetChannel(), ::GetVersionString(),
         ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET,
         *base::CommandLine::ForCurrentProcess(),
@@ -199,7 +199,8 @@ history::HistoryService* IOSChromeSyncClient::GetHistoryService() {
 
 autofill::PersonalDataManager* IOSChromeSyncClient::GetPersonalDataManager() {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  return PersonalDataManagerFactory::GetForBrowserState(browser_state_);
+  return autofill::PersonalDataManagerFactory::GetForBrowserState(
+      browser_state_);
 }
 
 base::Closure IOSChromeSyncClient::GetPasswordStateChangedCallback() {
@@ -296,7 +297,7 @@ IOSChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
     }
     case syncer::FAVICON_IMAGES:
     case syncer::FAVICON_TRACKING: {
-      browser_sync::FaviconCache* favicons =
+      sync_sessions::FaviconCache* favicons =
           IOSChromeProfileSyncServiceFactory::GetForBrowserState(browser_state_)
               ->GetFaviconCache();
       return favicons ? favicons->AsWeakPtr()
@@ -326,16 +327,17 @@ IOSChromeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
   }
 }
 
-syncer_v2::ModelTypeService* IOSChromeSyncClient::GetModelTypeServiceForType(
-    syncer::ModelType type) {
+base::WeakPtr<syncer_v2::ModelTypeService>
+IOSChromeSyncClient::GetModelTypeServiceForType(syncer::ModelType type) {
   switch (type) {
     case syncer::DEVICE_INFO:
       return IOSChromeProfileSyncServiceFactory::GetForBrowserState(
                  browser_state_)
-          ->GetDeviceInfoService();
+          ->GetDeviceInfoService()
+          ->AsWeakPtr();
     default:
       NOTREACHED();
-      return nullptr;
+      return base::WeakPtr<syncer_v2::ModelTypeService>();
   }
 }
 
@@ -395,7 +397,7 @@ void IOSChromeSyncClient::GetDeviceInfoTrackers(
           ->GetChromeBrowserStateManager()
           ->GetLoadedBrowserStates();
   for (ios::ChromeBrowserState* browser_state : browser_state_list) {
-    ProfileSyncService* profile_sync_service =
+    browser_sync::ProfileSyncService* profile_sync_service =
         IOSChromeProfileSyncServiceFactory::GetForBrowserState(browser_state);
     if (profile_sync_service != nullptr) {
       const sync_driver::DeviceInfoTracker* tracker =

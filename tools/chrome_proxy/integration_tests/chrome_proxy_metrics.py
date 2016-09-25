@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import json
 import logging
 import os
 import time
@@ -11,6 +12,7 @@ from common import network_metrics
 from common.chrome_proxy_metrics import ChromeProxyMetricException
 from telemetry.page import page_test
 from telemetry.value import scalar
+from telemetry.value import histogram_util
 from metrics import Metric
 
 class ChromeProxyMetric(network_metrics.NetworkMetric):
@@ -222,6 +224,10 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
 
     for resp in self.IterResponses(tab):
       if 'favicon.ico' in resp.response.url:
+        continue
+      if not resp.response.url.endswith('png'):
+        continue
+      if not resp.response.request_headers:
         continue
 
       if resp.HasChromeProxyLoFiRequest():
@@ -814,6 +820,145 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
         results.current_page, 'new_auth', 'count', resources_with_new_auth))
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'old_auth', 'count', resources_with_old_auth))
+
+  def AddResultsForPingback(self, tab, results):
+    # Force the pingback by loading a new page.
+    tab.Navigate('http://check.googlezip.net/test.html')
+    histogram_type = histogram_util.BROWSER_HISTOGRAM
+    # This histogram should be synchronously created when the Navigate occurs.
+    attempted = histogram_util.GetHistogramSum(
+        histogram_type,
+        'DataReductionProxy.Pingback.Attempted',
+        tab)
+    # Verify that a pingback URLFetcher was created.
+    if attempted != 1:
+      raise ChromeProxyMetricException, (
+          'Expected one pingback attempt, but '
+          'received %d.' % attempted)
+    count = 0
+    seconds_slept = 0
+    # This test relies on the proxy server responding to the pingback after
+    # receiving it. This should very likely take under 10 seconds for the
+    # integration test.
+    max_seconds_to_sleep = 10
+    while count < 1 and seconds_slept < max_seconds_to_sleep:
+      # This histogram will be created when the URLRequest either fails or
+      # succeeds.
+      count = histogram_util.GetHistogramCount(
+        histogram_type,
+        'DataReductionProxy.Pingback.Succeeded',
+        tab)
+      if count < 1:
+        time.sleep(1)
+        seconds_slept += 1
+
+    # The pingback should always succeed. Successful pingbacks contribute to the
+    # sum of samples in the histogram, whereas failures only contribute to the
+    # count of samples. Since DataReductionProxy.Pingback.Succeeded is a boolean
+    # histogram, the sum of all samples in that histogram is equal to the
+    # number of successful pingbacks.
+    succeeded = histogram_util.GetHistogramSum(
+      histogram_type,
+      'DataReductionProxy.Pingback.Succeeded',
+      tab)
+    if succeeded != 1 or count != 1:
+      raise ChromeProxyMetricException, (
+          'Expected 1 pingback success and no failures, but '
+          'there were %d succesful pingbacks and %d failed pingback attempts'
+          % (succeeded, count - succeeded))
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'attempted', 'count', attempted))
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'succeeded_count', 'count', count))
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'succeeded_sum', 'count', succeeded))
+
+  def AddResultsForQuicTransaction(self, tab, results):
+    histogram_type = histogram_util.BROWSER_HISTOGRAM
+    # This histogram should be synchronously created when the Navigate occurs.
+    # Verify that histogram DataReductionProxy.Quic.ProxyStatus has no samples
+    # in bucket >=1.
+    fail_counts_proxy_status = histogram_util.GetHistogramSum(
+        histogram_type,
+        'DataReductionProxy.Quic.ProxyStatus',
+        tab)
+    if fail_counts_proxy_status != 0:
+      raise ChromeProxyMetricException, (
+          'fail_counts_proxy_status is %d.' % fail_counts_proxy_status)
+
+    # Verify that histogram DataReductionProxy.Quic.ProxyStatus has at least 1
+    # sample. This sample must be in bucket 0 (QUIC_PROXY_STATUS_AVAILABLE).
+    success_counts_proxy_status = histogram_util.GetHistogramCount(
+        histogram_type,
+        'DataReductionProxy.Quic.ProxyStatus',
+        tab)
+    if success_counts_proxy_status <= 0:
+      raise ChromeProxyMetricException, (
+          'success_counts_proxy_status is %d.' % success_counts_proxy_status)
+
+    # Navigate to one more page to ensure that established QUIC connection
+    # is used for the next request. Give 1 second extra headroom for the QUIC
+    # connection to be established.
+    time.sleep(1)
+    tab.Navigate('http://check.googlezip.net/test.html')
+
+    proxy_usage_histogram_json = histogram_util.GetHistogram(histogram_type,
+        'Net.QuicAlternativeProxy.Usage',
+        tab)
+    proxy_usage_histogram = json.loads(proxy_usage_histogram_json)
+
+    # Bucket ALTERNATIVE_PROXY_USAGE_NO_RACE should have at least one sample.
+    if proxy_usage_histogram['buckets'][0]['count'] <= 0:
+      raise ChromeProxyMetricException, (
+          'Number of samples in ALTERNATIVE_PROXY_USAGE_NO_RACE bucket is %d.'
+             % proxy_usage_histogram['buckets'][0]['count'])
+
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'fail_counts_proxy_status', 'count',
+        fail_counts_proxy_status))
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'success_counts_proxy_status', 'count',
+        success_counts_proxy_status))
+
+  def AddResultsForBypassOnTimeout(self, tab, results):
+    bypass_count = 0
+    # Wait maximum of 120 seconds for test to complete. Should complete soon
+    # after 90 second test server delay in case of failure, and much sooner in
+    # case of success.
+    tab.WaitForDocumentReadyStateToBeComplete(timeout=120)
+    for resp in self.IterResponses(tab):
+      if resp.HasChromeProxyViaHeader() and not resp.response.url.endswith(
+          'favicon.ico'):
+        r = resp.response
+        raise ChromeProxyMetricException, (
+            'Response for %s should not have via header after HTTP timeout.\n'
+            'Reponse: status=(%d)\nHeaders:\n %s' % (
+                r.url, r.status, r.headers))
+      elif not resp.response.url.endswith('favicon.ico'):
+        bypass_count += 1
+    if bypass_count == 0:
+      raise ChromeProxyMetricException('No pages were tested!')
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'bypass', 'count', bypass_count))
+
+  def AddResultsForBadHTTPSFallback(self, tab, results):
+    via_count = 0
+    tab.WaitForDocumentReadyStateToBeComplete(timeout=30)
+    for resp in self.IterResponses(tab):
+      if resp.HasChromeProxyViaHeader() and (resp.remote_port == 80
+          or resp.remote_port == None):
+        via_count += 1
+      else:
+        r = resp.response
+        raise ChromeProxyMetricException, (
+            'Response for %s should have via header and be on port 80 after '
+            'bad proxy HTTPS response.\nReponse: status=(%d)\nport=(%d)\n'
+            'Headers:\n %s' % (
+                r.url, r.status, resp.remote_port, r.headers))
+    if via_count == 0:
+      raise ChromeProxyMetricException('No pages were tested!')
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'via', 'count', via_count))
 
 PROXIED = 'proxied'
 DIRECT = 'direct'

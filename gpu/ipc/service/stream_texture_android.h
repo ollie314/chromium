@@ -56,6 +56,7 @@ class StreamTexture : public gpu::gles2::GLStreamTextureImage,
                             gfx::OverlayTransform transform,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect) override;
+  void Flush() override {}
   void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                     uint64_t process_tracing_id,
                     const std::string& dump_name) override;
@@ -81,7 +82,7 @@ class StreamTexture : public gpu::gles2::GLStreamTextureImage,
   void OnEstablishPeer(int32_t primary_id, int32_t secondary_id);
   void OnSetSize(const gfx::Size& size) { size_ = size; }
 
-  scoped_refptr<gfx::SurfaceTexture> surface_texture_;
+  scoped_refptr<gl::SurfaceTexture> surface_texture_;
 
   // Current transform matrix of the surface texture.
   float current_matrix_[16];
@@ -96,13 +97,6 @@ class StreamTexture : public gpu::gles2::GLStreamTextureImage,
   int32_t route_id_;
   bool has_listener_;
   uint32_t texture_id_;
-
-  unsigned framebuffer_;
-  unsigned vertex_shader_;
-  unsigned fragment_shader_;
-  unsigned program_;
-  unsigned vertex_buffer_;
-  int u_xform_location_;
 
   base::WeakPtrFactory<StreamTexture> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(StreamTexture);

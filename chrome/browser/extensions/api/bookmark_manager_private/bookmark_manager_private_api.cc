@@ -7,11 +7,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/lazy_instance.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -34,6 +34,7 @@
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
 #include "components/prefs/pref_service.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/undo/bookmark_undo_service.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/render_view_host.h"
@@ -41,7 +42,6 @@
 #include "content/public/browser/web_ui.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/view_type_utils.h"
-#include "grit/components_strings.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -157,7 +157,7 @@ bookmark_manager_private::BookmarkNodeData CreateApiBookmarkNodeData(
 
   if (node_data.same_profile) {
     std::vector<const BookmarkNode*> nodes = data.GetNodes(
-        BookmarkModelFactory::GetForProfile(profile), profile_path);
+        BookmarkModelFactory::GetForBrowserContext(profile), profile_path);
     for (size_t i = 0; i < nodes.size(); ++i) {
       node_data.elements.push_back(
           CreateNodeDataElementFromBookmarkNode(*nodes[i]));
@@ -189,8 +189,8 @@ void BookmarkManagerPrivateEventRouter::DispatchEvent(
     const std::string& event_name,
     std::unique_ptr<base::ListValue> event_args) {
   EventRouter::Get(browser_context_)
-      ->BroadcastEvent(base::WrapUnique(
-          new Event(histogram_value, event_name, std::move(event_args))));
+      ->BroadcastEvent(base::MakeUnique<Event>(histogram_value, event_name,
+                                               std::move(event_args)));
 }
 
 void BookmarkManagerPrivateEventRouter::BookmarkModelChanged() {}
@@ -279,8 +279,7 @@ void BookmarkManagerPrivateAPI::OnListenerAdded(
   EventRouter::Get(browser_context_)->UnregisterObserver(this);
   event_router_.reset(new BookmarkManagerPrivateEventRouter(
       browser_context_,
-      BookmarkModelFactory::GetForProfile(
-          Profile::FromBrowserContext(browser_context_))));
+      BookmarkModelFactory::GetForBrowserContext(browser_context_)));
 }
 
 BookmarkManagerPrivateDragEventRouter::BookmarkManagerPrivateDragEventRouter(
@@ -399,7 +398,8 @@ bool BookmarkManagerPrivatePasteFunction::RunOnReady() {
 
   std::unique_ptr<Paste::Params> params(Paste::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(GetProfile());
   const BookmarkNode* parent_node = GetNodeFromString(model, params->parent_id);
   if (!CanBeModified(parent_node))
     return false;
@@ -430,18 +430,19 @@ bool BookmarkManagerPrivateCanPasteFunction::RunOnReady() {
 
   PrefService* prefs = user_prefs::UserPrefs::Get(GetProfile());
   if (!prefs->GetBoolean(bookmarks::prefs::kEditBookmarksEnabled)) {
-    SetResult(new base::FundamentalValue(false));
+    SetResult(base::MakeUnique<base::FundamentalValue>(false));
     return true;
   }
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(GetProfile());
   const BookmarkNode* parent_node = GetNodeFromString(model, params->parent_id);
   if (!parent_node) {
     error_ = bookmark_keys::kNoParentError;
     return false;
   }
   bool can_paste = bookmarks::CanPasteFromClipboard(model, parent_node);
-  SetResult(new base::FundamentalValue(can_paste));
+  SetResult(base::MakeUnique<base::FundamentalValue>(can_paste));
   return true;
 }
 
@@ -453,7 +454,8 @@ bool BookmarkManagerPrivateSortChildrenFunction::RunOnReady() {
       SortChildren::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(GetProfile());
   const BookmarkNode* parent_node = GetNodeFromString(model, params->parent_id);
   if (!CanBeModified(parent_node))
     return false;
@@ -461,8 +463,10 @@ bool BookmarkManagerPrivateSortChildrenFunction::RunOnReady() {
   return true;
 }
 
-bool BookmarkManagerPrivateGetStringsFunction::RunAsync() {
-  base::DictionaryValue* localized_strings = new base::DictionaryValue();
+ExtensionFunction::ResponseAction
+BookmarkManagerPrivateGetStringsFunction::Run() {
+  std::unique_ptr<base::DictionaryValue> localized_strings(
+      new base::DictionaryValue());
 
   localized_strings->SetString("title",
       l10n_util::GetStringUTF16(IDS_BOOKMARK_MANAGER_TITLE));
@@ -532,15 +536,9 @@ bool BookmarkManagerPrivateGetStringsFunction::RunAsync() {
       l10n_util::GetStringUTF16(IDS_CANCEL));
 
   const std::string& app_locale = g_browser_process->GetApplicationLocale();
-  webui::SetLoadTimeDataDefaults(app_locale, localized_strings);
+  webui::SetLoadTimeDataDefaults(app_locale, localized_strings.get());
 
-  SetResult(localized_strings);
-
-  // This is needed because unlike the rest of these functions, this class
-  // inherits from AsyncFunction directly, rather than BookmarkFunction.
-  SendResponse(true);
-
-  return true;
+  return RespondNow(OneArgument(std::move(localized_strings)));
 }
 
 bool BookmarkManagerPrivateStartDragFunction::RunOnReady() {
@@ -555,7 +553,8 @@ bool BookmarkManagerPrivateStartDragFunction::RunOnReady() {
   std::unique_ptr<StartDrag::Params> params(StartDrag::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(GetProfile());
   std::vector<const BookmarkNode*> nodes;
   EXTENSION_FUNCTION_VALIDATE(
       GetNodesFromVector(model, params->id_list, &nodes));
@@ -581,7 +580,8 @@ bool BookmarkManagerPrivateDropFunction::RunOnReady() {
   std::unique_ptr<Drop::Params> params(Drop::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(GetProfile());
 
   const BookmarkNode* drop_parent = GetNodeFromString(model, params->parent_id);
   if (!CanBeModified(drop_parent))
@@ -628,7 +628,8 @@ bool BookmarkManagerPrivateGetSubtreeFunction::RunOnReady() {
   const BookmarkNode* node = NULL;
 
   if (params->id.empty()) {
-    BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+    BookmarkModel* model =
+        BookmarkModelFactory::GetForBrowserContext(GetProfile());
     node = model->root_node();
   } else {
     node = GetBookmarkNodeFromId(params->id);
@@ -648,7 +649,7 @@ bool BookmarkManagerPrivateGetSubtreeFunction::RunOnReady() {
 
 bool BookmarkManagerPrivateCanEditFunction::RunOnReady() {
   PrefService* prefs = user_prefs::UserPrefs::Get(GetProfile());
-  SetResult(new base::FundamentalValue(
+  SetResult(base::MakeUnique<base::FundamentalValue>(
       prefs->GetBoolean(bookmarks::prefs::kEditBookmarksEnabled)));
   return true;
 }
@@ -666,7 +667,8 @@ bool BookmarkManagerPrivateCreateWithMetaInfoFunction::RunOnReady() {
       CreateWithMetaInfo::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(GetProfile());
   const BookmarkNode* node = CreateBookmarkNode(
       model, params->bookmark, &params->meta_info.additional_properties);
   if (!node)
@@ -717,7 +719,8 @@ bool BookmarkManagerPrivateGetMetaInfoFunction::RunOnReady() {
       return true;
     }
 
-    BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+    BookmarkModel* model =
+        BookmarkModelFactory::GetForBrowserContext(GetProfile());
     const BookmarkNode* node = model->root_node();
 
     GetMetaInfo::Results::Value result;
@@ -747,7 +750,8 @@ bool BookmarkManagerPrivateSetMetaInfoFunction::RunOnReady() {
   if (!CanBeModified(node))
     return false;
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(GetProfile());
   if (model->is_permanent_node(node)) {
     error_ = bookmark_keys::kModifySpecialError;
     return false;
@@ -772,7 +776,8 @@ bool BookmarkManagerPrivateUpdateMetaInfoFunction::RunOnReady() {
   if (!CanBeModified(node))
     return false;
 
-  BookmarkModel* model = BookmarkModelFactory::GetForProfile(GetProfile());
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(GetProfile());
   if (model->is_permanent_node(node)) {
     error_ = bookmark_keys::kModifySpecialError;
     return false;
@@ -791,7 +796,7 @@ bool BookmarkManagerPrivateUpdateMetaInfoFunction::RunOnReady() {
 
 bool BookmarkManagerPrivateCanOpenNewWindowsFunction::RunOnReady() {
   bool can_open_new_windows = true;
-  SetResult(new base::FundamentalValue(can_open_new_windows));
+  SetResult(base::MakeUnique<base::FundamentalValue>(can_open_new_windows));
   return true;
 }
 

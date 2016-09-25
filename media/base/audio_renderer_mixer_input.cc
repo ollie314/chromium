@@ -8,26 +8,32 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/trace_event/trace_event.h"
 #include "media/base/audio_renderer_mixer.h"
+#include "media/base/audio_renderer_mixer_pool.h"
 
 namespace media {
 
 AudioRendererMixerInput::AudioRendererMixerInput(
-    const GetMixerCB& get_mixer_cb,
-    const RemoveMixerCB& remove_mixer_cb,
+    AudioRendererMixerPool* mixer_pool,
+    int owner_id,
     const std::string& device_id,
-    const url::Origin& security_origin)
-    : started_(false),
+    const url::Origin& security_origin,
+    AudioLatency::LatencyType latency)
+    : mixer_pool_(mixer_pool),
+      started_(false),
       playing_(false),
       volume_(1.0f),
-      get_mixer_cb_(get_mixer_cb),
-      remove_mixer_cb_(remove_mixer_cb),
+      owner_id_(owner_id),
       device_id_(device_id),
       security_origin_(security_origin),
+      latency_(latency),
       mixer_(nullptr),
       callback_(nullptr),
       error_cb_(base::Bind(&AudioRendererMixerInput::OnRenderError,
-                           base::Unretained(this))) {}
+                           base::Unretained(this))) {
+  DCHECK(mixer_pool_);
+}
 
 AudioRendererMixerInput::~AudioRendererMixerInput() {
   DCHECK(!started_);
@@ -51,7 +57,8 @@ void AudioRendererMixerInput::Start() {
   DCHECK(callback_);  // Initialized.
 
   started_ = true;
-  mixer_ = get_mixer_cb_.Run(params_, device_id_, security_origin_, nullptr);
+  mixer_ = mixer_pool_->GetMixer(owner_id_, params_, latency_, device_id_,
+                                 security_origin_, nullptr);
   if (!mixer_) {
     callback_->OnRenderError();
     return;
@@ -59,12 +66,6 @@ void AudioRendererMixerInput::Start() {
 
   // Note: OnRenderError() may be called immediately after this call returns.
   mixer_->AddErrorCallback(error_cb_);
-
-  if (!pending_switch_callback_.is_null()) {
-    SwitchOutputDevice(pending_switch_device_id_,
-                       pending_switch_security_origin_,
-                       base::ResetAndReturn(&pending_switch_callback_));
-  }
 }
 
 void AudioRendererMixerInput::Stop() {
@@ -77,16 +78,11 @@ void AudioRendererMixerInput::Stop() {
     // Stop() by an error event since it may outlive this ref-counted object. We
     // should instead have sane ownership semantics: http://crbug.com/151051
     mixer_->RemoveErrorCallback(error_cb_);
-    remove_mixer_cb_.Run(params_, device_id_, security_origin_);
+    mixer_pool_->ReturnMixer(mixer_);
     mixer_ = nullptr;
   }
 
   started_ = false;
-
-  if (!pending_switch_callback_.is_null()) {
-    base::ResetAndReturn(&pending_switch_callback_)
-        .Run(OUTPUT_DEVICE_STATUS_ERROR_INTERNAL);
-  }
 }
 
 void AudioRendererMixerInput::Play() {
@@ -112,26 +108,20 @@ bool AudioRendererMixerInput::SetVolume(double volume) {
 }
 
 OutputDeviceInfo AudioRendererMixerInput::GetOutputDeviceInfo() {
-  return mixer_ ? mixer_->GetOutputDeviceInfo() : OutputDeviceInfo();
+  return mixer_
+             ? mixer_->GetOutputDeviceInfo()
+             : mixer_pool_->GetOutputDeviceInfo(owner_id_, 0 /* session_id */,
+                                                device_id_, security_origin_);
+}
+
+bool AudioRendererMixerInput::CurrentThreadIsRenderingThread() {
+  return mixer_->CurrentThreadIsRenderingThread();
 }
 
 void AudioRendererMixerInput::SwitchOutputDevice(
     const std::string& device_id,
     const url::Origin& security_origin,
     const OutputDeviceStatusCB& callback) {
-  if (!mixer_) {
-    if (pending_switch_callback_.is_null()) {
-      pending_switch_callback_ = callback;
-      pending_switch_device_id_ = device_id;
-      pending_switch_security_origin_ = security_origin;
-    } else {
-      callback.Run(OUTPUT_DEVICE_STATUS_ERROR_INTERNAL);
-    }
-
-    return;
-  }
-
-  DCHECK(pending_switch_callback_.is_null());
   if (device_id == device_id_) {
     callback.Run(OUTPUT_DEVICE_STATUS_OK);
     return;
@@ -139,34 +129,34 @@ void AudioRendererMixerInput::SwitchOutputDevice(
 
   OutputDeviceStatus new_mixer_status = OUTPUT_DEVICE_STATUS_ERROR_INTERNAL;
   AudioRendererMixer* new_mixer =
-      get_mixer_cb_.Run(params_, device_id, security_origin, &new_mixer_status);
+      mixer_pool_->GetMixer(owner_id_, params_, latency_, device_id,
+                            security_origin, &new_mixer_status);
   if (new_mixer_status != OUTPUT_DEVICE_STATUS_OK) {
     callback.Run(new_mixer_status);
     return;
   }
 
-  bool was_playing = playing_;
-  Stop();
   device_id_ = device_id;
   security_origin_ = security_origin;
-  mixer_ = new_mixer;
-  mixer_->AddErrorCallback(error_cb_);
-  started_ = true;
 
-  if (was_playing)
-    Play();
+  if (mixer_) {
+    bool was_playing = playing_;
+    Stop();
+    mixer_ = new_mixer;
+    mixer_->AddErrorCallback(error_cb_);
+    started_ = true;
+    if (was_playing)
+      Play();
+  } else {
+    mixer_pool_->ReturnMixer(new_mixer);
+  }
 
   callback.Run(OUTPUT_DEVICE_STATUS_OK);
 }
 
 double AudioRendererMixerInput::ProvideInput(AudioBus* audio_bus,
-                                             base::TimeDelta buffer_delay) {
-  // TODO(chcunningham): Delete this conversion and change ProvideInput to more
-  // precisely describe delay as a count of frames delayed instead of TimeDelta.
-  // See http://crbug.com/587522.
-  uint32_t frames_delayed = std::round(buffer_delay.InMicroseconds() /
-                                       params_.GetMicrosecondsPerFrame());
-
+                                             uint32_t frames_delayed) {
+  TRACE_EVENT0("audio", "AudioRendererMixerInput::ProvideInput");
   int frames_filled = callback_->Render(audio_bus, frames_delayed, 0);
 
   // AudioConverter expects unfilled frames to be zeroed.

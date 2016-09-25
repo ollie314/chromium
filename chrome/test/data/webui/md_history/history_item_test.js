@@ -10,7 +10,7 @@ cr.define('md_history.history_item_test', function() {
       var SEARCH_HISTORY_RESULTS;
 
       suiteSetup(function() {
-        element = $('history-list');
+        element = $('history-app').$['history'].$['infinite-list'];
         TEST_HISTORY_RESULTS = [
           createHistoryEntry('2016-03-16 10:00', 'http://www.google.com'),
           createHistoryEntry('2016-03-16 9:00', 'http://www.example.com'),
@@ -22,14 +22,14 @@ cr.define('md_history.history_item_test', function() {
 
         SEARCH_HISTORY_RESULTS = [
           createSearchEntry('2016-03-16', "http://www.google.com"),
-          createSearchEntry('2016-03-14', "http://calendar.google.com"),
-          createSearchEntry('2016-03-14', "http://mail.google.com")
+          createSearchEntry('2016-03-14 11:00', "http://calendar.google.com"),
+          createSearchEntry('2016-03-14 10:00', "http://mail.google.com")
         ];
       });
 
-      test('basic separator insertion', function(done) {
-        element.addNewResults(TEST_HISTORY_RESULTS, '');
-        flush(function() {
+      test('basic separator insertion', function() {
+        element.addNewResults(TEST_HISTORY_RESULTS);
+        return flush().then(function() {
           // Check that the correct number of time gaps are inserted.
           var items =
               Polymer.dom(element.root).querySelectorAll('history-item');
@@ -40,52 +40,66 @@ cr.define('md_history.history_item_test', function() {
           assertTrue(items[3].hasTimeGap);
           assertFalse(items[4].hasTimeGap);
           assertFalse(items[5].hasTimeGap);
-
-          done();
         });
       });
 
-      test('separator insertion for search', function(done) {
-        element.addNewResults(SEARCH_HISTORY_RESULTS, 'search');
-        flush(function() {
+      test('separator insertion for search', function() {
+        element.addNewResults(SEARCH_HISTORY_RESULTS);
+        element.searchedTerm = 'search';
+
+        return flush().then(function() {
           var items =
               Polymer.dom(element.root).querySelectorAll('history-item');
 
           assertTrue(items[0].hasTimeGap);
           assertFalse(items[1].hasTimeGap);
           assertFalse(items[2].hasTimeGap);
-
-          done();
         });
       });
 
-      test('separator insertion after deletion', function(done) {
-        element.addNewResults(TEST_HISTORY_RESULTS, '');
-        flush(function() {
+      test('separator insertion after deletion', function() {
+        element.addNewResults(TEST_HISTORY_RESULTS);
+        return flush().then(function() {
           var items =
               Polymer.dom(element.root).querySelectorAll('history-item');
 
-          element.set('historyData.3.selected', true);
-          items[3].onCheckboxSelected_();
-
-          element.removeDeletedHistory(1);
-          assertEquals(element.historyData.length, 5);
+          element.removeItemsByPath(['historyData_.3']);
+          assertEquals(5, element.historyData_.length);
 
           // Checks that a new time gap separator has been inserted.
           assertTrue(items[2].hasTimeGap);
 
-          element.set('historyData.3.selected', true);
-          items[3].onCheckboxSelected_();
-          element.removeDeletedHistory(1);
+          element.removeItemsByPath(['historyData_.3']);
 
           // Checks time gap separator is removed.
           assertFalse(items[2].hasTimeGap);
-          done();
+        });
+      });
+
+      test('remove bookmarks', function() {
+        element.addNewResults(TEST_HISTORY_RESULTS);
+        return flush().then(function() {
+          element.set('historyData_.1.starred', true);
+          element.set('historyData_.5.starred', true);
+          return flush();
+        }).then(function() {
+
+          items = Polymer.dom(element.root).querySelectorAll('history-item');
+
+          items[1].$$('#bookmark-star').focus();
+          MockInteractions.tap(items[1].$$('#bookmark-star'));
+
+          // Check that focus is shifted to overflow menu icon.
+          assertEquals(items[1].root.activeElement, items[1].$['menu-button']);
+          // Check that all items matching this url are unstarred.
+          assertEquals(element.historyData_[1].starred, false);
+          assertEquals(element.historyData_[5].starred, false);
         });
       });
 
       teardown(function() {
-        element.historyData = [];
+        element.historyData_ = [];
+        element.searchedTerm = '';
       });
     });
   }

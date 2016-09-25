@@ -31,7 +31,6 @@ class FontList;
 namespace views {
 class BubbleDialogDelegateView;
 class ImageView;
-class InkDropDelegate;
 class Label;
 }
 
@@ -45,18 +44,13 @@ class ContentSettingImageView : public IconLabelBubbleView,
   // ContentSettingImageView takes ownership of its |image_model|.
   ContentSettingImageView(ContentSettingImageModel* image_model,
                           LocationBarView* parent,
-                          const gfx::FontList& font_list,
-                          SkColor parent_background_color);
+                          const gfx::FontList& font_list);
   ~ContentSettingImageView() override;
 
   // Updates the decoration from the shown WebContents.
   void Update(content::WebContents* web_contents);
 
  private:
-  // Number of milliseconds spent animating open; also the time spent animating
-  // closed.
-  static const int kOpenTimeMS;
-
   // The total animation time, including open and close as well as an
   // intervening "stay open" period.
   static const int kAnimationDurationMS;
@@ -66,14 +60,16 @@ class ContentSettingImageView : public IconLabelBubbleView,
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
-  bool OnKeyPressed(const ui::KeyEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
+  bool GetTooltipText(const gfx::Point& p,
+                      base::string16* tooltip) const override;
   void OnNativeThemeChanged(const ui::NativeTheme* native_theme) override;
+  bool ShouldShowInkDropForFocus() const override;
   SkColor GetTextColor() const override;
-  SkColor GetBorderColor() const override;
-  bool ShouldShowBackground() const override;
+  bool ShouldShowLabel() const override;
   double WidthMultiplier() const override;
   bool IsShrinking() const override;
+  bool OnActivate(const ui::Event& event) override;
 
   // gfx::AnimationDelegate:
   void AnimationEnded(const gfx::Animation* animation) override;
@@ -83,10 +79,6 @@ class ContentSettingImageView : public IconLabelBubbleView,
   // views::WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
   void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;
-
-  // Called when the user clicks the view; this freezes the animation or snaps
-  // it to its end state as necessary and then opens a content setting bubble.
-  void OnClick();
 
   // Updates the image and tooltip to match the current model state.
   void UpdateImage();
@@ -102,9 +94,6 @@ class ContentSettingImageView : public IconLabelBubbleView,
   // event. If this is true then the mouse released event is ignored to prevent
   // the bubble from reshowing.
   bool suppress_mouse_released_action_;
-
-  // Animation delegate for the ink drop ripple effect.
-  std::unique_ptr<views::InkDropDelegate> ink_drop_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingImageView);
 };

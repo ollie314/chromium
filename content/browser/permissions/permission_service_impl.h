@@ -5,12 +5,14 @@
 #ifndef CONTENT_BROWSER_PERMISSIONS_PERMISSION_SERVICE_IMPL_H_
 #define CONTENT_BROWSER_PERMISSIONS_PERMISSION_SERVICE_IMPL_H_
 
+#include "base/callback.h"
 #include "base/id_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/permissions/permission_service_context.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/WebKit/public/platform/modules/permissions/permission.mojom.h"
+#include "url/origin.h"
 
 namespace content {
 
@@ -41,51 +43,53 @@ class PermissionServiceImpl : public blink::mojom::PermissionService {
 
  private:
   using PermissionStatusCallback =
-      mojo::Callback<void(blink::mojom::PermissionStatus)>;
-  using PermissionsStatusCallback =
-      mojo::Callback<void(mojo::Array<blink::mojom::PermissionStatus>)>;
+      base::Callback<void(blink::mojom::PermissionStatus)>;
 
   struct PendingRequest {
-    PendingRequest(const PermissionsStatusCallback& callback,
+    PendingRequest(const RequestPermissionsCallback& callback,
                    int request_count);
     ~PendingRequest();
 
     // Request ID received from the PermissionManager.
     int id;
-    PermissionsStatusCallback callback;
+    RequestPermissionsCallback callback;
     int request_count;
   };
   using RequestsMap = IDMap<PendingRequest, IDMapOwnPointer>;
 
   struct PendingSubscription {
-    PendingSubscription(PermissionType permission, const GURL& origin,
+    PendingSubscription(PermissionType permission,
+                        const url::Origin& origin,
                         const PermissionStatusCallback& callback);
     ~PendingSubscription();
 
     // Subscription ID received from the PermissionManager.
     int id;
     PermissionType permission;
-    GURL origin;
+    url::Origin origin;
     PermissionStatusCallback callback;
   };
   using SubscriptionsMap = IDMap<PendingSubscription, IDMapOwnPointer>;
 
   // blink::mojom::PermissionService.
   void HasPermission(blink::mojom::PermissionName permission,
-                     const mojo::String& origin,
+                     const url::Origin& origin,
                      const PermissionStatusCallback& callback) override;
   void RequestPermission(blink::mojom::PermissionName permission,
-                         const mojo::String& origin,
+                         const url::Origin& origin,
+                         bool user_gesture,
                          const PermissionStatusCallback& callback) override;
-  void RequestPermissions(mojo::Array<blink::mojom::PermissionName> permissions,
-                          const mojo::String& origin,
-                          const PermissionsStatusCallback& callback) override;
+  void RequestPermissions(
+      const std::vector<blink::mojom::PermissionName>& permissions,
+      const url::Origin& origin,
+      bool user_gesture,
+      const RequestPermissionsCallback& callback) override;
   void RevokePermission(blink::mojom::PermissionName permission,
-                        const mojo::String& origin,
+                        const url::Origin& origin,
                         const PermissionStatusCallback& callback) override;
   void GetNextPermissionChange(
       blink::mojom::PermissionName permission,
-      const mojo::String& origin,
+      const url::Origin& origin,
       blink::mojom::PermissionStatus last_known_status,
       const PermissionStatusCallback& callback) override;
 
@@ -99,11 +103,11 @@ class PermissionServiceImpl : public blink::mojom::PermissionService {
 
   blink::mojom::PermissionStatus GetPermissionStatusFromName(
       blink::mojom::PermissionName permission,
-      const GURL& origin);
+      const url::Origin& origin);
   blink::mojom::PermissionStatus GetPermissionStatusFromType(
       PermissionType type,
-      const GURL& origin);
-  void ResetPermissionStatus(PermissionType type, const GURL& origin);
+      const url::Origin& origin);
+  void ResetPermissionStatus(PermissionType type, const url::Origin& origin);
 
   void OnPermissionStatusChanged(int pending_subscription_id,
                                  blink::mojom::PermissionStatus status);

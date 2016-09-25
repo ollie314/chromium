@@ -7,11 +7,11 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/metrics/data_use_tracker.h"
@@ -19,6 +19,8 @@
 #if defined(OS_ANDROID)
 #include "base/android/application_status_listener.h"
 #endif
+
+class GURL;
 
 namespace net {
 class URLRequest;
@@ -38,8 +40,20 @@ class DataUseMeasurement {
       const metrics::UpdateUsagePrefCallbackType& metrics_data_use_forwarder);
   ~DataUseMeasurement();
 
-  // Records the data use of the |request|, thus |request| must be non-null.
-  void ReportDataUseUMA(const net::URLRequest* request) const;
+  // Called right after a redirect response code was received for |request|.
+  void OnBeforeRedirect(const net::URLRequest& request,
+                        const GURL& new_location);
+
+  // Called when data is received or sent on the network, respectively.
+  void OnNetworkBytesReceived(const net::URLRequest& request,
+                              int64_t bytes_received);
+  void OnNetworkBytesSent(const net::URLRequest& request, int64_t bytes_sent);
+
+  // Indicates that |request| has been completed or failed.
+  void OnCompleted(const net::URLRequest& request, bool started);
+
+  // Returns true if the URLRequest |request| is initiated by user traffic.
+  static bool IsUserInitiatedRequest(const net::URLRequest& request);
 
 #if defined(OS_ANDROID)
   // This function should just be used for testing purposes. A change in
@@ -75,7 +89,14 @@ class DataUseMeasurement {
   // and vice versa.
   void OnApplicationStateChange(
       base::android::ApplicationState application_state);
+
+  // Records the count of bytes received and sent by Chrome on the network as
+  // reported by the operating system.
+  void MaybeRecordNetworkBytesOS();
 #endif
+
+  // Records the data use of the |request|, thus |request| must be non-null.
+  void ReportDataUseUMA(const net::URLRequest& request) const;
 
   // A helper function used to record data use of services. It gets the size of
   // exchanged message, its direction (which is upstream or downstream) and
@@ -100,7 +121,18 @@ class DataUseMeasurement {
 
   // ApplicationStatusListener used to monitor whether the application is in the
   // foreground or in the background. It is owned by DataUseMeasurement.
-  scoped_ptr<base::android::ApplicationStatusListener> app_listener_;
+  std::unique_ptr<base::android::ApplicationStatusListener> app_listener_;
+
+  // Number of bytes received and sent by Chromium as reported by the operating
+  // system when it was last queried for traffic statistics. Set to 0 if the
+  // operating system was never queried.
+  int64_t rx_bytes_os_;
+  int64_t tx_bytes_os_;
+
+  // Number of bytes received and sent by Chromium as reported by the network
+  // delegate since the operating system was last queried for traffic
+  // statistics.
+  int64_t bytes_transferred_since_last_traffic_stats_query_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(DataUseMeasurement);

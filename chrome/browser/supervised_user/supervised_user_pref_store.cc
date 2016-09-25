@@ -32,6 +32,10 @@ struct SupervisedUserSettingsPrefMappingEntry {
 
 SupervisedUserSettingsPrefMappingEntry kSupervisedUserSettingsPrefMapping[] = {
   {
+    supervised_users::kApprovedExtensions,
+    prefs::kSupervisedUserApprovedExtensions,
+  },
+  {
     supervised_users::kContentPackDefaultFilteringBehavior,
     prefs::kDefaultSupervisedUserFilteringBehavior,
   },
@@ -48,9 +52,6 @@ SupervisedUserSettingsPrefMappingEntry kSupervisedUserSettingsPrefMapping[] = {
   },
   {
     supervised_users::kForceSafeSearch, prefs::kForceYouTubeSafetyMode,
-  },
-  {
-    supervised_users::kRecordHistory, prefs::kRecordHistory,
   },
   {
     supervised_users::kSafeSitesEnabled, prefs::kSupervisedUserSafeSites,
@@ -75,7 +76,7 @@ SupervisedUserPrefStore::SupervisedUserPrefStore(
   // TODO(peconn): Remove this once SupervisedUserPrefStore is (partially at
   // least) a KeyedService. The user_settings_subscription_ must be reset or
   // destroyed before the SupervisedUserSettingsService is.
-  if (supervised_user_settings_service->GetProfile() != nullptr){
+  if (supervised_user_settings_service->GetProfile()) {
     unsubscriber_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
         content::Source<Profile>(
           supervised_user_settings_service->GetProfile()));
@@ -84,10 +85,6 @@ SupervisedUserPrefStore::SupervisedUserPrefStore(
 
 bool SupervisedUserPrefStore::GetValue(const std::string& key,
                                        const base::Value** value) const {
-  // TODO(bauerb): Temporary CHECK to force a clean crash while investigating
-  // https://crbug.com/425785. Remove (or change back to DCHECK) once the bug
-  // is fixed.
-  CHECK(prefs_);
   return prefs_->GetValue(key, value);
 }
 
@@ -116,15 +113,11 @@ void SupervisedUserPrefStore::OnNewSettingsAvailable(
   prefs_.reset(new PrefValueMap);
   if (settings) {
     // Set hardcoded prefs and defaults.
-    prefs_->SetBoolean(prefs::kAllowDeletingBrowserHistory, false);
     prefs_->SetInteger(prefs::kDefaultSupervisedUserFilteringBehavior,
                        SupervisedUserURLFilter::ALLOW);
     prefs_->SetBoolean(prefs::kForceGoogleSafeSearch, true);
     prefs_->SetBoolean(prefs::kForceYouTubeSafetyMode, true);
     prefs_->SetBoolean(prefs::kHideWebStoreIcon, true);
-    prefs_->SetInteger(prefs::kIncognitoModeAvailability,
-                       IncognitoModePrefs::DISABLED);
-    prefs_->SetBoolean(prefs::kRecordHistory, true);
     prefs_->SetBoolean(prefs::kSigninAllowed, false);
 
     // Copy supervised user settings to prefs.
@@ -135,14 +128,19 @@ void SupervisedUserPrefStore::OnNewSettingsAvailable(
     }
 
     // Manually set preferences that aren't direct copies of the settings value.
-    bool record_history;
-    if (settings->GetBoolean(supervised_users::kRecordHistory,
-                             &record_history)) {
-      prefs_->SetBoolean(prefs::kAllowDeletingBrowserHistory, !record_history);
-      prefs_->SetInteger(prefs::kIncognitoModeAvailability,
-                         record_history ? IncognitoModePrefs::DISABLED
-                                        : IncognitoModePrefs::ENABLED);
-    }
+
+    bool record_history = true;
+    settings->GetBoolean(supervised_users::kRecordHistory, &record_history);
+    prefs_->SetBoolean(prefs::kAllowDeletingBrowserHistory, !record_history);
+    prefs_->SetInteger(prefs::kIncognitoModeAvailability,
+                       record_history ? IncognitoModePrefs::DISABLED
+                                      : IncognitoModePrefs::ENABLED);
+
+    bool record_history_includes_session_sync = true;
+    settings->GetBoolean(supervised_users::kRecordHistoryIncludesSessionSync,
+                         &record_history_includes_session_sync);
+    prefs_->SetBoolean(prefs::kForceSessionSync,
+                       record_history && record_history_includes_session_sync);
 
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kEnableSupervisedUserManagedBookmarksFolder)) {

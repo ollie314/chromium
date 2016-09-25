@@ -100,7 +100,7 @@ void SVGStyleElement::setTitle(const AtomicString& title)
 void SVGStyleElement::parseAttribute(const QualifiedName& name, const AtomicString& oldValue, const AtomicString& value)
 {
     if (name == SVGNames::titleAttr) {
-        if (m_sheet)
+        if (m_sheet && isInDocumentTree())
             m_sheet->setTitle(value);
 
         return;
@@ -111,7 +111,7 @@ void SVGStyleElement::parseAttribute(const QualifiedName& name, const AtomicStri
 
 void SVGStyleElement::finishParsingChildren()
 {
-    StyleElement::ProcessingResult result = StyleElement::finishParsingChildren(this);
+    StyleElement::ProcessingResult result = StyleElement::finishParsingChildren(*this);
     SVGElement::finishParsingChildren();
     if (result == StyleElement::ProcessingFatalError)
         notifyLoadedSheetAndAllCriticalSubresources(ErrorOccurredLoadingSubresource);
@@ -120,26 +120,26 @@ void SVGStyleElement::finishParsingChildren()
 Node::InsertionNotificationRequest SVGStyleElement::insertedInto(ContainerNode* insertionPoint)
 {
     SVGElement::insertedInto(insertionPoint);
-    StyleElement::insertedInto(this, insertionPoint);
+    StyleElement::insertedInto(*this, insertionPoint);
     return InsertionShouldCallDidNotifySubtreeInsertions;
 }
 
 void SVGStyleElement::didNotifySubtreeInsertionsToDocument()
 {
-    if (StyleElement::processStyleSheet(document(), this) == StyleElement::ProcessingFatalError)
+    if (StyleElement::processStyleSheet(document(), *this) == StyleElement::ProcessingFatalError)
         notifyLoadedSheetAndAllCriticalSubresources(ErrorOccurredLoadingSubresource);
 }
 
 void SVGStyleElement::removedFrom(ContainerNode* insertionPoint)
 {
     SVGElement::removedFrom(insertionPoint);
-    StyleElement::removedFrom(this, insertionPoint);
+    StyleElement::removedFrom(*this, insertionPoint);
 }
 
 void SVGStyleElement::childrenChanged(const ChildrenChange& change)
 {
     SVGElement::childrenChanged(change);
-    if (StyleElement::childrenChanged(this) == StyleElement::ProcessingFatalError)
+    if (StyleElement::childrenChanged(*this) == StyleElement::ProcessingFatalError)
         notifyLoadedSheetAndAllCriticalSubresources(ErrorOccurredLoadingSubresource);
 }
 

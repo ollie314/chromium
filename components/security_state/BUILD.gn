@@ -7,8 +7,7 @@ if (is_android) {
   import("//build/config/android/rules.gni")
 }
 
-# GYP version: components/security_state.gyp
-source_set("security_state") {
+static_library("security_state") {
   sources = [
     "security_state_model.cc",
     "security_state_model.h",
@@ -24,24 +23,11 @@ source_set("security_state") {
 }
 
 if (is_android) {
-  # GYP: //components/security_state.gypi:security_state_enums_java
   java_cpp_enum("security_state_enums_java") {
     sources = [
       "security_state_model.h",
     ]
   }
-}
-
-bundle_data("unit_tests_bundle_data") {
-  visibility = [ ":unit_tests" ]
-  testonly = true
-  sources = [
-    "//net/data/ssl/certificates/sha1_2016.pem",
-  ]
-  outputs = [
-    "{{bundle_resources_dir}}/" +
-        "{{source_root_relative_dir}}/{{source_file_part}}",
-  ]
 }
 
 source_set("unit_tests") {
@@ -52,12 +38,7 @@ source_set("unit_tests") {
 
   deps = [
     ":security_state",
-    ":unit_tests_bundle_data",
     "//net:test_support",
     "//testing/gtest",
-  ]
-
-  data = [
-    "//net/data/",
   ]
 }

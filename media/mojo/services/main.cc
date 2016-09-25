@@ -3,20 +3,36 @@
 // found in the LICENSE file.
 
 #include "base/at_exit.h"
+#include "base/bind.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "media/mojo/services/mojo_media_application.h"
-#include "media/mojo/services/test_mojo_media_client.h"
-#include "mojo/logging/init_logging.h"
-#include "mojo/public/c/system/main.h"
-#include "services/shell/public/cpp/application_runner.h"
+#include "media/mojo/services/mojo_media_application_factory.h"
+#include "services/shell/public/c/main.h"
+#include "services/shell/public/cpp/service_runner.h"
 
-MojoResult MojoMain(MojoHandle mojo_handle) {
+namespace {
+
+shell::ServiceRunner* g_runner = nullptr;
+
+void QuitApplication() {
+  DCHECK(g_runner);
+  g_runner->Quit();
+}
+
+}  // namespace
+
+MojoResult ServiceMain(MojoHandle mojo_handle) {
   // Enable logging.
   base::AtExitManager at_exit;
-  shell::ApplicationRunner::InitBaseCommandLine();
-  mojo::InitLogging();
+  shell::ServiceRunner::InitBaseCommandLine();
 
-  shell::ApplicationRunner runner(new media::MojoMediaApplication(
-      base::WrapUnique(new media::TestMojoMediaClient())));
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+  logging::InitLogging(settings);
+
+  std::unique_ptr<shell::Service> service =
+      media::CreateMojoMediaApplication(base::Bind(&QuitApplication));
+  shell::ServiceRunner runner(service.release());
+  g_runner = &runner;
   return runner.Run(mojo_handle, false /* init_base */);
 }

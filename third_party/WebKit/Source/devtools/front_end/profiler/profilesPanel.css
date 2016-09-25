@@ -72,55 +72,23 @@
     border-bottom: 1px solid rgb(202, 202, 202);
 }
 
-.profile-launcher-view-tree-item > .icon {
-    width: 4px !important;
-    visibility: hidden;
-}
-
 .profiles-sidebar-tree-box {
     overflow: auto;
     flex: auto;
 }
 
-.profiles-sidebar-tree-box > ol {
-    overflow: auto;
-    flex: auto;
-}
-
-.profile-sidebar-tree-item .icon {
-    content: url(Images/profileIcon.png);
-}
-
-.profile-sidebar-tree-item.small .icon {
-    content: url(Images/profileSmallIcon.png);
-}
-
-.profile-group-sidebar-tree-item .icon {
-    content: url(Images/profileGroupIcon.png);
-}
-
-.sidebar-tree-item .title-container > .save-link {
-    text-decoration: underline;
-    margin-left: auto;
-    display: none;
-}
-
-.sidebar-tree-item.selected .title-container > .save-link {
-    display: block;
-}
-
-.cpu-profile-view {
+.profile-view {
     display: flex;
     overflow: hidden;
 }
 
-.cpu-profile-view .data-grid {
+.profile-view .data-grid {
     border: none;
     flex: auto;
 }
 
-.cpu-profile-view .data-grid th.self-column,
-.cpu-profile-view .data-grid th.total-column {
+.profile-view .data-grid th.self-column,
+.profile-view .data-grid th.total-column {
     text-align: center;
 }
 
@@ -130,9 +98,9 @@
 }
 
 .profile-warn-marker {
-    background-image: url(Images/toolbarButtonGlyphs.png);
-    background-size: 352px 168px;
-    background-position: -202px -107px;
+    background-image: url(Images/smallIcons.png);
+    background-size: 190px 30px;
+    background-position: -60px 0;
     width: 10px;
     height: 10px;
     vertical-align: -1px;

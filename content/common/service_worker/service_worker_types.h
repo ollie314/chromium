@@ -66,11 +66,8 @@ enum ServiceWorkerProviderType {
   // For ServiceWorkers.
   SERVICE_WORKER_PROVIDER_FOR_CONTROLLER,
 
-  // For sandboxed frames.
-  SERVICE_WORKER_PROVIDER_FOR_SANDBOXED_FRAME,
-
   SERVICE_WORKER_PROVIDER_TYPE_LAST =
-      SERVICE_WORKER_PROVIDER_FOR_SANDBOXED_FRAME
+      SERVICE_WORKER_PROVIDER_FOR_CONTROLLER
 };
 
 // The enum entries below are written to histograms and thus cannot be deleted
@@ -100,6 +97,19 @@ enum class FetchRedirectMode {
   LAST = MANUAL_MODE
 };
 
+// Indicates which types of ServiceWorkers should skip handling a request.
+enum class SkipServiceWorker {
+  // Request can be handled both by a controlling same-origin worker and
+  // a cross-origin foreign fetch service worker.
+  NONE,
+  // Request should not be handled by a same-origin controlling worker,
+  // but can be intercepted by a foreign fetch service worker.
+  CONTROLLING,
+  // Request should skip all possible service workers.
+  ALL,
+  LAST = ALL
+};
+
 // Indicates how the service worker handled a fetch event.
 enum ServiceWorkerFetchEventResult {
   // Browser should fallback to native fetch.
@@ -121,8 +131,10 @@ struct ServiceWorkerCaseInsensitiveCompare {
   }
 };
 
-typedef std::map<std::string, std::string, ServiceWorkerCaseInsensitiveCompare>
-    ServiceWorkerHeaderMap;
+using ServiceWorkerHeaderMap =
+    std::map<std::string, std::string, ServiceWorkerCaseInsensitiveCompare>;
+
+using ServiceWorkerHeaderList = std::vector<std::string>;
 
 // To dispatch fetch request from browser to child process.
 struct CONTENT_EXPORT ServiceWorkerFetchRequest {
@@ -134,7 +146,9 @@ struct CONTENT_EXPORT ServiceWorkerFetchRequest {
                             bool is_reload);
   ServiceWorkerFetchRequest(const ServiceWorkerFetchRequest& other);
   ~ServiceWorkerFetchRequest();
+  size_t EstimatedStructSize();
 
+  // Be sure to update EstimatedSize() when adding members.
   FetchRequestMode mode;
   bool is_main_resource_load;
   RequestContextType request_context_type;
@@ -155,21 +169,25 @@ struct CONTENT_EXPORT ServiceWorkerFetchRequest {
 // Represents a response to a fetch.
 struct CONTENT_EXPORT ServiceWorkerResponse {
   ServiceWorkerResponse();
-  ServiceWorkerResponse(const GURL& url,
-                        int status_code,
-                        const std::string& status_text,
-                        blink::WebServiceWorkerResponseType response_type,
-                        const ServiceWorkerHeaderMap& headers,
-                        const std::string& blob_uuid,
-                        uint64_t blob_size,
-                        const GURL& stream_url,
-                        blink::WebServiceWorkerResponseError error,
-                        base::Time response_time,
-                        bool is_in_cache_storage,
-                        const std::string& cache_storage_cache_name);
+  ServiceWorkerResponse(
+      const GURL& url,
+      int status_code,
+      const std::string& status_text,
+      blink::WebServiceWorkerResponseType response_type,
+      const ServiceWorkerHeaderMap& headers,
+      const std::string& blob_uuid,
+      uint64_t blob_size,
+      const GURL& stream_url,
+      blink::WebServiceWorkerResponseError error,
+      base::Time response_time,
+      bool is_in_cache_storage,
+      const std::string& cache_storage_cache_name,
+      const ServiceWorkerHeaderList& cors_exposed_header_names);
   ServiceWorkerResponse(const ServiceWorkerResponse& other);
   ~ServiceWorkerResponse();
+  size_t EstimatedStructSize();
 
+  // Be sure to update EstimatedSize() when adding members.
   GURL url;
   int status_code;
   std::string status_text;
@@ -182,6 +200,7 @@ struct CONTENT_EXPORT ServiceWorkerResponse {
   base::Time response_time;
   bool is_in_cache_storage = false;
   std::string cache_storage_cache_name;
+  ServiceWorkerHeaderList cors_exposed_header_names;
 };
 
 // Represents initialization info for a WebServiceWorker object.

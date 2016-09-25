@@ -9,6 +9,7 @@
 #include <queue>
 #include <set>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -16,7 +17,6 @@
 #include "device/usb/public/interfaces/device_manager.mojom.h"
 #include "device/usb/usb_service.h"
 #include "mojo/public/cpp/bindings/array.h"
-#include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 
 namespace base {
@@ -41,11 +41,10 @@ class DeviceManagerImpl : public DeviceManager, public UsbService::Observer {
                      mojo::InterfaceRequest<DeviceManager> request);
 
   DeviceManagerImpl(base::WeakPtr<PermissionProvider> permission_provider,
-                    UsbService* usb_service,
-                    mojo::InterfaceRequest<DeviceManager> request);
+                    UsbService* usb_service);
   ~DeviceManagerImpl() override;
 
-  void set_connection_error_handler(const mojo::Closure& error_handler) {
+  void set_connection_error_handler(const base::Closure& error_handler) {
     connection_error_handler_ = error_handler;
   }
 
@@ -53,9 +52,9 @@ class DeviceManagerImpl : public DeviceManager, public UsbService::Observer {
   // DeviceManager implementation:
   void GetDevices(EnumerationOptionsPtr options,
                   const GetDevicesCallback& callback) override;
-  void GetDeviceChanges(const GetDeviceChangesCallback& callback) override;
-  void GetDevice(const mojo::String& guid,
+  void GetDevice(const std::string& guid,
                  mojo::InterfaceRequest<Device> device_request) override;
+  void SetClient(DeviceManagerClientPtr client) override;
 
   // Callbacks to handle the async responses from the underlying UsbService.
   void OnGetDevices(EnumerationOptionsPtr options,
@@ -71,20 +70,12 @@ class DeviceManagerImpl : public DeviceManager, public UsbService::Observer {
 
   base::WeakPtr<PermissionProvider> permission_provider_;
 
-  // If there are unfinished calls to GetDeviceChanges their callbacks
-  // are stored in |device_change_callbacks_|. Otherwise device changes
-  // are collected in |devices_added_| and |devices_removed_| until the
-  // next call to GetDeviceChanges.
-  std::queue<GetDeviceChangesCallback> device_change_callbacks_;
-  std::map<std::string, DeviceInfoPtr> devices_added_;
-  std::vector<DeviceInfoPtr> devices_removed_;
-
   UsbService* usb_service_;
   ScopedObserver<UsbService, UsbService::Observer> observer_;
+  DeviceManagerClientPtr client_;
 
-  mojo::Closure connection_error_handler_;
+  base::Closure connection_error_handler_;
 
-  mojo::Binding<DeviceManager> binding_;
   base::WeakPtrFactory<DeviceManagerImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DeviceManagerImpl);

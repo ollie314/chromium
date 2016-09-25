@@ -15,10 +15,13 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -57,6 +60,7 @@
 #include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/browser/ui/webui/help/help_utils_chromeos.h"
@@ -140,6 +144,13 @@ bool IsRemoraRequisition() {
       ->browser_policy_connector_chromeos()
       ->GetDeviceCloudPolicyManager()
       ->IsRemoraRequisition();
+}
+
+bool IsSharkRequisition() {
+  return g_browser_process->platform_part()
+      ->browser_policy_connector_chromeos()
+      ->GetDeviceCloudPolicyManager()
+      ->IsSharkRequisition();
 }
 
 // Checks if a controller device ("Master") is detected during the bootstrapping
@@ -237,16 +248,20 @@ WizardController::WizardController(LoginDisplayHost* host, OobeUI* oobe_ui)
     : host_(host), oobe_ui_(oobe_ui), weak_factory_(this) {
   DCHECK(default_controller_ == nullptr);
   default_controller_ = this;
-  AccessibilityManager* accessibility_manager = AccessibilityManager::Get();
-  CHECK(accessibility_manager);
-  accessibility_subscription_ = accessibility_manager->RegisterCallback(
-      base::Bind(&WizardController::OnAccessibilityStatusChanged,
-                 base::Unretained(this)));
+  if (!chrome::IsRunningInMash()) {
+    AccessibilityManager* accessibility_manager = AccessibilityManager::Get();
+    CHECK(accessibility_manager);
+    accessibility_subscription_ = accessibility_manager->RegisterCallback(
+        base::Bind(&WizardController::OnAccessibilityStatusChanged,
+                   base::Unretained(this)));
+  } else {
+    NOTIMPLEMENTED();
+  }
 }
 
 WizardController::~WizardController() {
   if (shark_connection_listener_.get()) {
-    base::MessageLoop::current()->DeleteSoon(
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(
         FROM_HERE, shark_connection_listener_.release());
   }
   if (default_controller_ == this) {
@@ -305,6 +320,23 @@ void WizardController::Init(const std::string& first_screen_name) {
   // the choice to setup the device manually. The pref will be set properly if
   // an eligible controller is detected later.
   SetControllerDetectedPref(false);
+
+  // Show Material Design unless explicitly disabled or for an untested UX,
+  // or when resuming an OOBE that had it disabled or unset. We use an if/else
+  // here to try and not set state when it is the default value so it can
+  // change and affect the OOBE again.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kDisableMdOobe))
+    SetShowMdOobe(false);
+  else if ((screen_pref.empty() ||
+            GetLocalState()->HasPrefPath(prefs::kOobeMdMode)) ||
+           GetLocalState()->GetBoolean(prefs::kOobeMdMode))
+    SetShowMdOobe(true);
+
+  // TODO(drcrash): Remove this after testing (http://crbug.com/647411).
+  if (IsRemoraPairingOobe() || IsSharkRequisition() || IsRemoraRequisition()) {
+    SetShowMdOobe(false);
+  }
 
   AdvanceToScreen(first_screen_name_);
   if (!IsMachineHWIDCorrect() && !StartupUtils::IsDeviceRegistered() &&
@@ -376,7 +408,8 @@ BaseScreen* WizardController::CreateScreen(const std::string& screen_name) {
   } else if (screen_name == kHostPairingScreenName) {
     if (!remora_controller_) {
       remora_controller_.reset(
-          new pairing_chromeos::BluetoothHostPairingController());
+          new pairing_chromeos::BluetoothHostPairingController(
+              BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE)));
       remora_controller_->StartPairing();
     }
     return new HostPairingScreen(this, this,
@@ -401,6 +434,10 @@ void WizardController::ShowNetworkScreen() {
 }
 
 void WizardController::ShowLoginScreen(const LoginScreenContext& context) {
+  // This may be triggered by multiply asynchronous events from the JS side.
+  if (login_screen_started_)
+    return;
+
   if (!time_eula_accepted_.is_null()) {
     base::TimeDelta delta = base::Time::Now() - time_eula_accepted_;
     UMA_HISTOGRAM_MEDIUM_TIMES("OOBE.EULAToSignInTime", delta);
@@ -409,7 +446,6 @@ void WizardController::ShowLoginScreen(const LoginScreenContext& context) {
   SetStatusAreaVisible(true);
   host_->StartSignInScreen(context);
   smooth_show_timer_.Stop();
-  oobe_ui_ = nullptr;
   login_screen_started_ = true;
 }
 
@@ -452,7 +488,7 @@ void WizardController::ShowEnrollmentScreen() {
   prescribed_enrollment_config_ = g_browser_process->platform_part()
                                       ->browser_policy_connector_chromeos()
                                       ->GetPrescribedEnrollmentConfig();
-  StartEnrollmentScreen();
+  StartEnrollmentScreen(false);
 }
 
 void WizardController::ShowResetScreen() {
@@ -519,6 +555,8 @@ void WizardController::ShowSupervisedUserCreationScreen() {
 
 void WizardController::ShowHIDDetectionScreen() {
   VLOG(1) << "Showing HID discovery screen.";
+  // TODO(drcrash): Remove this after testing (http://crbug.com/647411).
+  SetShowMdOobe(false);  // Disable the MD OOBE from there on.
   SetStatusAreaVisible(true);
   SetCurrentScreen(GetScreen(kHIDDetectionScreenName));
   MaybeStartListeningForSharkConnection();
@@ -548,6 +586,11 @@ void WizardController::SkipToLoginForTesting(
   StartupUtils::MarkEulaAccepted();
   PerformPostEulaActions();
   OnDeviceDisabledChecked(false /* device_disabled */);
+}
+
+pairing_chromeos::SharkConnectionListener*
+WizardController::GetSharkConnectionListenerForTesting() {
+  return shark_connection_listener_.get();
 }
 
 void WizardController::AddObserver(Observer* observer) {
@@ -582,7 +625,7 @@ void WizardController::OnNetworkConnected() {
       // Possible cases:
       // 1. EULA was accepted, forced shutdown/reboot during update.
       // 2. EULA was accepted, planned reboot after update.
-      // Make sure that device is up-to-date.
+      // Make sure that device is up to date.
       InitiateOOBEUpdate();
     }
   } else {
@@ -602,11 +645,7 @@ void WizardController::OnConnectionFailed() {
 }
 
 void WizardController::OnUpdateCompleted() {
-  const bool is_shark = g_browser_process->platform_part()
-                            ->browser_policy_connector_chromeos()
-                            ->GetDeviceCloudPolicyManager()
-                            ->IsSharkRequisition();
-  if (is_shark || IsBootstrappingMaster()) {
+  if (IsSharkRequisition() || IsBootstrappingMaster()) {
     ShowControllerPairingScreen();
   } else if (IsControllerDetected()) {
     ShowHostPairingScreen();
@@ -618,9 +657,9 @@ void WizardController::OnUpdateCompleted() {
 void WizardController::OnEulaAccepted() {
   time_eula_accepted_ = base::Time::Now();
   StartupUtils::MarkEulaAccepted();
-  InitiateMetricsReportingChange(
+  ChangeMetricsReportingStateWithReply(
       usage_statistics_reporting_,
-      base::Bind(&WizardController::InitiateMetricsReportingChangeCallback,
+      base::Bind(&WizardController::OnChangedMetricsReportingState,
                  weak_factory_.GetWeakPtr()));
   PerformPostEulaActions();
 
@@ -631,7 +670,7 @@ void WizardController::OnEulaAccepted() {
   }
 }
 
-void WizardController::InitiateMetricsReportingChangeCallback(bool enabled) {
+void WizardController::OnChangedMetricsReportingState(bool enabled) {
   CrosSettings::Get()->SetBoolean(kStatsReportingPref, enabled);
   if (!enabled)
     return;
@@ -777,7 +816,7 @@ void WizardController::OnDeviceDisabledChecked(bool device_disabled) {
     ShowDeviceDisabledScreen();
   } else if (skip_update_enroll_after_eula_ ||
              prescribed_enrollment_config_.should_enroll()) {
-    StartEnrollmentScreen();
+    StartEnrollmentScreen(skip_update_enroll_after_eula_);
   } else {
     PerformOOBECompletedActions();
     ShowLoginScreen(LoginScreenContext());
@@ -839,6 +878,9 @@ void WizardController::PerformOOBECompletedActions() {
   GetLocalState()->ClearPref(prefs::kTimesHIDDialogShown);
   StartupUtils::MarkOobeCompleted();
   oobe_marked_completed_ = true;
+
+  if (shark_connection_listener_.get())
+    shark_connection_listener_->ResetController();
 }
 
 void WizardController::SetCurrentScreen(BaseScreen* new_current) {
@@ -896,13 +938,19 @@ void WizardController::SetStatusAreaVisible(bool visible) {
   host_->SetStatusAreaVisible(visible);
 }
 
+void WizardController::SetShowMdOobe(bool show) {
+  GetLocalState()->SetBoolean(prefs::kOobeMdMode, show);
+}
+
 void WizardController::OnHIDScreenNecessityCheck(bool screen_needed) {
   if (!oobe_ui_)
     return;
-  if (screen_needed)
+
+  if (screen_needed) {
     ShowHIDDetectionScreen();
-  else
+  } else {
     ShowNetworkScreen();
+  }
 }
 
 void WizardController::AdvanceToScreen(const std::string& screen_name) {
@@ -1115,6 +1163,9 @@ void WizardController::ConfigureHostRequested(
 }
 
 void WizardController::AddNetworkRequested(const std::string& onc_spec) {
+  remora_controller_->OnNetworkConnectivityChanged(
+      pairing_chromeos::HostPairingController::CONNECTIVITY_CONNECTING);
+
   NetworkScreen* network_screen = NetworkScreen::Get(this);
   const chromeos::NetworkState* network_state = chromeos::NetworkHandler::Get()
                                                     ->network_state_handler()
@@ -1125,7 +1176,7 @@ void WizardController::AddNetworkRequested(const std::string& onc_spec) {
         onc_spec, base::Bind(&base::DoNothing), base::Bind(&base::DoNothing));
   } else {
     network_screen->CreateAndConnectNetworkFromOnc(
-        onc_spec, base::Bind(&WizardController::InitiateOOBEUpdate,
+        onc_spec, base::Bind(&WizardController::OnSetHostNetworkSuccessful,
                              weak_factory_.GetWeakPtr()),
         base::Bind(&WizardController::OnSetHostNetworkFailed,
                    weak_factory_.GetWeakPtr()));
@@ -1336,6 +1387,7 @@ void WizardController::MaybeStartListeningForSharkConnection() {
   if (!shark_connection_listener_) {
     shark_connection_listener_.reset(
         new pairing_chromeos::SharkConnectionListener(
+            BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
             base::Bind(&WizardController::OnSharkConnected,
                        weak_factory_.GetWeakPtr())));
   }
@@ -1346,10 +1398,16 @@ void WizardController::OnSharkConnected(
         remora_controller) {
   VLOG(1) << "OnSharkConnected";
   remora_controller_ = std::move(remora_controller);
-  base::MessageLoop::current()->DeleteSoon(
+  base::ThreadTaskRunnerHandle::Get()->DeleteSoon(
       FROM_HERE, shark_connection_listener_.release());
   SetControllerDetectedPref(true);
   ShowHostPairingScreen();
+}
+
+void WizardController::OnSetHostNetworkSuccessful() {
+  remora_controller_->OnNetworkConnectivityChanged(
+      pairing_chromeos::HostPairingController::CONNECTIVITY_CONNECTED);
+  InitiateOOBEUpdate();
 }
 
 void WizardController::OnSetHostNetworkFailed() {
@@ -1357,14 +1415,16 @@ void WizardController::OnSetHostNetworkFailed() {
       pairing_chromeos::HostPairingController::CONNECTIVITY_NONE);
 }
 
-void WizardController::StartEnrollmentScreen() {
-  VLOG(1) << "Showing enrollment screen.";
+void WizardController::StartEnrollmentScreen(bool force_interactive) {
+  VLOG(1) << "Showing enrollment screen."
+          << " Forcing interactive enrollment: " << force_interactive << ".";
 
   // Determine the effective enrollment configuration. If there is a valid
   // prescribed configuration, use that. If not, figure out which variant of
   // manual enrollment is taking place.
   policy::EnrollmentConfig effective_config = prescribed_enrollment_config_;
-  if (!effective_config.should_enroll()) {
+  if (!effective_config.should_enroll() ||
+      (force_interactive && !effective_config.should_enroll_interactively())) {
     effective_config.mode =
         prescribed_enrollment_config_.management_domain.empty()
             ? policy::EnrollmentConfig::MODE_MANUAL

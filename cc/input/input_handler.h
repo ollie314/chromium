@@ -31,7 +31,6 @@ class LatencyInfo;
 
 namespace cc {
 
-class LayerScrollOffsetDelegate;
 class ScrollElasticityHelper;
 
 struct CC_EXPORT InputHandlerScrollResult {
@@ -129,8 +128,12 @@ class CC_EXPORT InputHandler {
   virtual ScrollStatus ScrollAnimatedBegin(
       const gfx::Point& viewport_point) = 0;
 
+  // Returns SCROLL_ON_IMPL_THREAD if an animation is initiated on the impl
+  // thread. delayed_by is the delay that is taken into account when determining
+  // the duration of the animation.
   virtual ScrollStatus ScrollAnimated(const gfx::Point& viewport_point,
-                                      const gfx::Vector2dF& scroll_delta) = 0;
+                                      const gfx::Vector2dF& scroll_delta,
+                                      base::TimeDelta delayed_by) = 0;
 
   // Scroll the layer selected by |ScrollBegin| by given |scroll_state| delta.
   // Internally, the delta is transformed to local layer's coordinate space for
@@ -144,9 +147,6 @@ class CC_EXPORT InputHandler {
   // value's |accumulated_overscroll| field. Should only be called if
   // ScrollBegin() returned SCROLL_STARTED.
   virtual InputHandlerScrollResult ScrollBy(ScrollState* scroll_state) = 0;
-
-  virtual bool ScrollVerticallyByPage(const gfx::Point& viewport_point,
-                                      ScrollDirection direction) = 0;
 
   // Returns SCROLL_STARTED if a layer was actively being scrolled,
   // SCROLL_IGNORED if not.
@@ -198,6 +198,12 @@ class CC_EXPORT InputHandler {
   CreateLatencyInfoSwapPromiseMonitor(ui::LatencyInfo* latency) = 0;
 
   virtual ScrollElasticityHelper* CreateScrollElasticityHelper() = 0;
+
+  // Called by the single-threaded UI Compositor to get or set the scroll offset
+  // on the impl side. Retruns false if |layer_id| isn't in the active tree.
+  virtual bool GetScrollOffsetForLayer(int layer_id,
+                                       gfx::ScrollOffset* offset) = 0;
+  virtual bool ScrollLayerTo(int layer_id, const gfx::ScrollOffset& offset) = 0;
 
  protected:
   InputHandler() {}

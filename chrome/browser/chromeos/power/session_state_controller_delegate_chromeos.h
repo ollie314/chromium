@@ -20,8 +20,6 @@ class SessionStateControllerDelegateChromeos
 
  private:
   // ash::LockStateControllerDelegate implementation.
-  bool IsLoading() const override;
-  void RequestLockScreen() override;
   void RequestShutdown() override;
 
   base::WeakPtrFactory<SessionStateControllerDelegateChromeos> weak_factory_;

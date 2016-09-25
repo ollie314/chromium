@@ -20,6 +20,12 @@
 class PrefRegistrySimple;
 class PrefService;
 
+namespace chromeos {
+namespace attestation {
+class AttestationFlow;
+}
+}
+
 namespace net {
 class URLRequestContextGetter;
 }
@@ -30,7 +36,6 @@ class AffiliatedCloudPolicyInvalidator;
 class AffiliatedInvalidationServiceProvider;
 class AffiliatedRemoteCommandsInvalidator;
 class BluetoothPolicyHandler;
-class ConsumerManagementService;
 class DeviceCloudPolicyInitializer;
 class DeviceLocalAccountPolicyService;
 class DeviceManagementService;
@@ -116,18 +121,6 @@ class BrowserPolicyConnectorChromeOS
   // delegate, if there is one.
   void SetUserPolicyDelegate(ConfigurationPolicyProvider* user_policy_provider);
 
-  ConsumerManagementService* GetConsumerManagementService() const {
-    return consumer_management_service_.get();
-  }
-
-  DeviceManagementService* GetDeviceManagementServiceForConsumer() const {
-    return consumer_device_management_service_.get();
-  }
-
-  // Sets the consumer management service for testing.
-  void SetConsumerManagementServiceForTesting(
-      std::unique_ptr<ConsumerManagementService> service);
-
   // Sets the device cloud policy initializer for testing.
   void SetDeviceCloudPolicyInitializerForTesting(
       std::unique_ptr<DeviceCloudPolicyInitializer> initializer);
@@ -156,15 +149,18 @@ class BrowserPolicyConnectorChromeOS
   // registration status changed from registered to unregistered.
   void RestartDeviceCloudPolicyInitializer();
 
+  // Creates an attestation flow using our async method handler and
+  // cryptohome client.
+  std::unique_ptr<chromeos::attestation::AttestationFlow>
+  CreateAttestationFlow();
+
   // Components of the device cloud policy implementation.
   std::unique_ptr<ServerBackedStateKeysBroker> state_keys_broker_;
   std::unique_ptr<EnterpriseInstallAttributes> install_attributes_;
   std::unique_ptr<AffiliatedInvalidationServiceProvider>
       affiliated_invalidation_service_provider_;
-  std::unique_ptr<ConsumerManagementService> consumer_management_service_;
   DeviceCloudPolicyManagerChromeOS* device_cloud_policy_manager_;
   PrefService* local_state_;
-  std::unique_ptr<DeviceManagementService> consumer_device_management_service_;
   std::unique_ptr<DeviceCloudPolicyInitializer>
       device_cloud_policy_initializer_;
   std::unique_ptr<DeviceLocalAccountPolicyService>

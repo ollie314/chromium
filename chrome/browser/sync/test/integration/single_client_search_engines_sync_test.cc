@@ -6,7 +6,7 @@
 #include "chrome/browser/sync/test/integration/search_engines_helper.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/search_engines/template_url_service.h"
 
 using sync_integration_test_util::AwaitCommitActivityCompletion;
@@ -26,6 +26,6 @@ IN_PROC_BROWSER_TEST_F(SingleClientSearchEnginesSyncTest, Sanity) {
 
   search_engines_helper::AddSearchEngine(0, 0);
 
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService(0)));
   ASSERT_TRUE(search_engines_helper::ServiceMatchesVerifier(0));
 }

@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser;
 
+import android.content.pm.ActivityInfo;
 import android.os.Environment;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.Smoke;
@@ -11,16 +12,18 @@ import android.text.TextUtils;
 import android.util.Base64;
 import android.view.KeyEvent;
 
+import junit.framework.Assert;
+
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.omnibox.LocationBarLayout;
 import org.chromium.chrome.browser.omnibox.UrlBar;
-import org.chromium.chrome.browser.omnibox.UrlContainer;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
@@ -75,12 +78,20 @@ public class NavigateTest extends ChromeTabbedActivityTestBase {
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                final UrlContainer urlContainer =
-                        (UrlContainer) getActivity().findViewById(R.id.url_container);
-                assertNotNull("URL Container is null", urlContainer);
+                final UrlBar urlBar = (UrlBar) getActivity().findViewById(R.id.url_bar);
+                assertNotNull("urlBar is null", urlBar);
 
-                return TextUtils.equals(expectedLocation(endUrl), urlContainer.getText())
-                        && TextUtils.equals(endUrl, getActivity().getActivityTab().getUrl());
+                if (!TextUtils.equals(expectedLocation(endUrl), urlBar.getText().toString())) {
+                    updateFailureReason(Assert.format(
+                            "Url bar text", expectedLocation(endUrl), urlBar.getText().toString()));
+                    return false;
+                }
+                if (!TextUtils.equals(endUrl, getActivity().getActivityTab().getUrl())) {
+                    updateFailureReason(Assert.format(
+                            "Tab url", endUrl, getActivity().getActivityTab().getUrl()));
+                    return false;
+                }
+                return true;
             }
         });
     }
@@ -117,9 +128,7 @@ public class NavigateTest extends ChromeTabbedActivityTestBase {
         observer.assertLoaded();
 
         // The URL has been set before the page notification was broadcast, so it is safe to access.
-        final UrlContainer urlContainer =
-                (UrlContainer) getActivity().findViewById(R.id.url_container);
-        return urlContainer.getText();
+        return urlBar.getText().toString();
     }
 
     /**
@@ -136,13 +145,14 @@ public class NavigateTest extends ChromeTabbedActivityTestBase {
     @Smoke
     @MediumTest
     @Feature({"Navigation", "Main"})
+    @RetryOnFailure
     public void testNavigate() throws Exception {
         String url = mTestServer.getURL("/chrome/test/data/android/navigate/simple.html");
         String result = typeInOmniboxAndNavigate(url, "Simple");
         assertEquals(expectedLocation(url), result);
     }
 
-    @DisabledTest // https://crbug.com/516018
+    @DisabledTest(message = "crbug.com/516018")
     @Restriction(ChromeRestriction.RESTRICTION_TYPE_TABLET)
     @MediumTest
     @Feature({"Navigation"})
@@ -168,9 +178,9 @@ public class NavigateTest extends ChromeTabbedActivityTestBase {
      */
     @MediumTest
     @Feature({"Navigation"})
+    @RetryOnFailure
     public void testNavigateLandscape() throws Exception {
-        // '0' is Landscape Mode. '1' is Portrait.
-        getActivity().setRequestedOrientation(0);
+        getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         String url = mTestServer.getURL("/chrome/test/data/android/navigate/simple.html");
         String result = typeInOmniboxAndNavigate(url, "Simple");
         assertEquals(expectedLocation(url), result);
@@ -181,6 +191,7 @@ public class NavigateTest extends ChromeTabbedActivityTestBase {
      */
     @MediumTest
     @Feature({"Navigation"})
+    @RetryOnFailure
     public void testOpenAndNavigate() throws Exception {
         final String url =
                 mTestServer.getURL("/chrome/test/data/android/navigate/simple.html");
@@ -201,6 +212,7 @@ public class NavigateTest extends ChromeTabbedActivityTestBase {
      */
     @MediumTest
     @Feature({"Navigation"})
+    @RetryOnFailure
     public void testOpenLink() throws Exception {
         String url1 = mTestServer.getURL("/chrome/test/data/android/google.html");
         String url2 = mTestServer.getURL("/chrome/test/data/android/about.html");
@@ -220,6 +232,7 @@ public class NavigateTest extends ChromeTabbedActivityTestBase {
      */
     @MediumTest
     @Feature({"Navigation"})
+    @RetryOnFailure
     public void testTabObserverOnPageLoadStarted() throws Exception {
         final String url1 = mTestServer.getURL("/chrome/test/data/android/google.html");
         final String url2 = mTestServer.getURL("/chrome/test/data/android/about.html");

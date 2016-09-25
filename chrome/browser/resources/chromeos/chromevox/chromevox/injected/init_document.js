@@ -83,6 +83,28 @@ cvox.ChromeVox.initDocument = function() {
     return;
   }
 
+  // Look for ChromeVox-specific meta attributes.
+  var disableContentScript = false;
+  if (document.head) {
+    var metaNodes = document.head.querySelectorAll('meta[name="chromevox"]');
+    for (var i = 0, meta; meta = metaNodes[i]; i++) {
+      var contentScript = meta.getAttribute('content-script');
+      if (contentScript && contentScript.toLowerCase() == 'no') {
+        disableContentScript = true;
+      }
+    }
+  }
+  if (disableContentScript) {
+    var url = location.href;
+    url = url.substring(0, url.indexOf('#')) || url;
+    cvox.ExtensionBridge.send({
+      target: 'next',
+      action: 'enableCompatForUrl',
+      url: url
+    });
+    return;
+  }
+
   cvox.ExtensionBridge.send({
     target: 'next',
     action: 'getIsClassicEnabled',

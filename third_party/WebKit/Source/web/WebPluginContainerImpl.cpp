@@ -38,6 +38,7 @@
 #include "core/clipboard/DataObject.h"
 #include "core/clipboard/DataTransfer.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/dom/Fullscreen.h"
 #include "core/events/DragEvent.h"
 #include "core/events/EventQueue.h"
 #include "core/events/GestureEvent.h"
@@ -56,8 +57,9 @@
 #include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutBox.h"
-#include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutPartItem.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
@@ -90,7 +92,9 @@
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/web/WebDOMMessageEvent.h"
+#include "public/web/WebDocument.h"
 #include "public/web/WebElement.h"
+#include "public/web/WebFrameClient.h"
 #include "public/web/WebInputEvent.h"
 #include "public/web/WebPlugin.h"
 #include "public/web/WebPrintParams.h"
@@ -99,6 +103,7 @@
 #include "web/ChromeClientImpl.h"
 #include "web/WebDataSourceImpl.h"
 #include "web/WebInputEventConversion.h"
+#include "web/WebLocalFrameImpl.h"
 #include "web/WebViewImpl.h"
 #include "wtf/Assertions.h"
 
@@ -132,15 +137,15 @@ void WebPluginContainerImpl::paint(GraphicsContext& context, const CullRect& cul
         // With Slimming Paint v2, composited plugins should have their layers
         // inserted rather than invoking WebPlugin::paint.
         recordForeignLayer(
-            context, *m_element->layoutObject(), DisplayItem::ForeignLayerPlugin,
+            context, *m_element->layoutObject(), DisplayItem::kForeignLayerPlugin,
             m_webLayer, location(), size());
         return;
     }
 
-    if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(context, *m_element->layoutObject(), DisplayItem::Type::WebPlugin))
+    if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(context, *m_element->layoutObject(), DisplayItem::Type::kWebPlugin))
         return;
 
-    LayoutObjectDrawingRecorder drawingRecorder(context, *m_element->layoutObject(), DisplayItem::Type::WebPlugin, cullRect.m_rect);
+    LayoutObjectDrawingRecorder drawingRecorder(context, *m_element->layoutObject(), DisplayItem::Type::kWebPlugin, cullRect.m_rect);
     context.save();
 
     DCHECK(parent()->isFrameView());
@@ -170,8 +175,8 @@ void WebPluginContainerImpl::invalidateRect(const IntRect& rect)
 
     IntRect dirtyRect = rect;
     dirtyRect.move(
-        layoutObject->borderLeft() + layoutObject->paddingLeft(),
-        layoutObject->borderTop() + layoutObject->paddingTop());
+        (layoutObject->borderLeft() + layoutObject->paddingLeft()).toInt(),
+        (layoutObject->borderTop() + layoutObject->paddingTop()).toInt());
 
     m_pendingInvalidationRect.unite(dirtyRect);
 
@@ -263,20 +268,6 @@ void WebPluginContainerImpl::setParentVisible(bool parentVisible)
         m_webPlugin->updateVisibility(isVisible());
 }
 
-void WebPluginContainerImpl::setParent(Widget* widget)
-{
-    // We override this function so that if the plugin is windowed, we can call
-    // NPP_SetWindow at the first possible moment.  This ensures that
-    // NPP_SetWindow is called before the manual load data is sent to a plugin.
-    // If this order is reversed, Flash won't load videos.
-
-    Widget::setParent(widget);
-    if (widget)
-        reportGeometry();
-    else if (m_webPlugin)
-        m_webPlugin->containerDidDetachFromParent();
-}
-
 void WebPluginContainerImpl::setPlugin(WebPlugin* plugin)
 {
     if (plugin == m_webPlugin)
@@ -327,6 +318,21 @@ void WebPluginContainerImpl::setWebLayer(WebLayer* layer)
         m_element->setNeedsCompositingUpdate();
 }
 
+void WebPluginContainerImpl::requestFullscreen()
+{
+    Fullscreen::requestFullscreen(*m_element, Fullscreen::PrefixedRequest);
+}
+
+bool WebPluginContainerImpl::isFullscreenElement() const
+{
+    return Fullscreen::isCurrentFullScreenElement(*m_element);
+}
+
+void WebPluginContainerImpl::cancelFullscreen()
+{
+    Fullscreen::fullyExitFullscreen(m_element->document());
+}
+
 bool WebPluginContainerImpl::supportsPaginatedPrint() const
 {
     return m_webPlugin->supportsPaginatedPrint();
@@ -349,10 +355,10 @@ int WebPluginContainerImpl::printBegin(const WebPrintParams& printParams) const
 
 void WebPluginContainerImpl::printPage(int pageNumber, GraphicsContext& gc, const IntRect& printRect)
 {
-    if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(gc, *m_element->layoutObject(), DisplayItem::Type::WebPlugin))
+    if (LayoutObjectDrawingRecorder::useCachedDrawingIfPossible(gc, *m_element->layoutObject(), DisplayItem::Type::kWebPlugin))
         return;
 
-    LayoutObjectDrawingRecorder drawingRecorder(gc, *m_element->layoutObject(), DisplayItem::Type::WebPlugin, printRect);
+    LayoutObjectDrawingRecorder drawingRecorder(gc, *m_element->layoutObject(), DisplayItem::Type::kWebPlugin, printRect);
     gc.save();
     WebCanvas* canvas = gc.canvas();
     m_webPlugin->printPage(pageNumber, canvas);
@@ -392,6 +398,11 @@ bool WebPluginContainerImpl::executeEditCommand(const WebString& name, const Web
 WebElement WebPluginContainerImpl::element()
 {
     return WebElement(m_element);
+}
+
+WebDocument WebPluginContainerImpl::document()
+{
+    return WebDocument(&m_element->document());
 }
 
 void WebPluginContainerImpl::dispatchProgressEvent(const WebString& type, bool lengthComputable, unsigned long long loaded, unsigned long long total, const WebString& url)
@@ -435,7 +446,7 @@ void WebPluginContainerImpl::scheduleAnimation()
 void WebPluginContainerImpl::reportGeometry()
 {
     // We cannot compute geometry without a parent or layoutObject.
-    if (!parent() || !m_element || !m_element->layoutObject())
+    if (!parent() || !m_element || !m_element->layoutObject() || !m_webPlugin)
         return;
 
     IntRect windowRect, clipRect, unobscuredRect;
@@ -652,7 +663,7 @@ bool WebPluginContainerImpl::wantsWheelEvents()
 // Private methods -------------------------------------------------------------
 
 WebPluginContainerImpl::WebPluginContainerImpl(HTMLPlugInElement* element, WebPlugin* webPlugin)
-    : LocalFrameLifecycleObserver(element->document().frame())
+    : DOMWindowProperty(element->document().frame())
     , m_element(element)
     , m_webPlugin(webPlugin)
     , m_webLayer(nullptr)
@@ -691,7 +702,7 @@ void WebPluginContainerImpl::dispose()
 DEFINE_TRACE(WebPluginContainerImpl)
 {
     visitor->trace(m_element);
-    LocalFrameLifecycleObserver::trace(visitor);
+    DOMWindowProperty::trace(visitor);
     PluginView::trace(visitor);
 }
 
@@ -703,7 +714,7 @@ void WebPluginContainerImpl::handleMouseEvent(MouseEvent* event)
     // in the call to HandleEvent. See http://b/issue?id=1362948
     FrameView* parentView = toFrameView(parent());
 
-    WebMouseEventBuilder webEvent(this, m_element->layoutObject(), *event);
+    WebMouseEventBuilder webEvent(this, LayoutItem(m_element->layoutObject()), *event);
     if (webEvent.type == WebInputEvent::Undefined)
         return;
 
@@ -744,14 +755,14 @@ void WebPluginContainerImpl::handleDragEvent(MouseEvent* event)
     WebDragData dragData = dataTransfer->dataObject()->toWebDragData();
     WebDragOperationsMask dragOperationMask = static_cast<WebDragOperationsMask>(dataTransfer->sourceOperation());
     WebPoint dragScreenLocation(event->screenX(), event->screenY());
-    WebPoint dragLocation(event->absoluteLocation().x() - location().x(), event->absoluteLocation().y() - location().y());
+    WebPoint dragLocation((event->absoluteLocation().x() - location().x()).toInt(), (event->absoluteLocation().y() - location().y()).toInt());
 
     m_webPlugin->handleDragStatusUpdate(dragStatus, dragData, dragOperationMask, dragLocation, dragScreenLocation);
 }
 
 void WebPluginContainerImpl::handleWheelEvent(WheelEvent* event)
 {
-    WebMouseWheelEventBuilder webEvent(this, m_element->layoutObject(), *event);
+    WebMouseWheelEventBuilder webEvent(this, LayoutItem(m_element->layoutObject()), *event);
     if (webEvent.type == WebInputEvent::Undefined)
         return;
 
@@ -794,9 +805,9 @@ void WebPluginContainerImpl::handleKeyboardEvent(KeyboardEvent* event)
     }
 
     // Give the client a chance to issue edit comamnds.
-    WebViewImpl* view = WebViewImpl::fromPage(m_element->document().frame()->page());
-    if (m_webPlugin->supportsEditCommands() && view->client())
-        view->client()->handleCurrentKeyboardEvent();
+    WebLocalFrameImpl* webFrame = WebLocalFrameImpl::fromFrame(m_element->document().frame());
+    if (m_webPlugin->supportsEditCommands())
+        webFrame->client()->handleCurrentKeyboardEvent();
 
     WebCursorInfo cursorInfo;
     if (m_webPlugin->handleInputEvent(webEvent, cursorInfo) != WebInputEventResult::NotHandled)
@@ -809,7 +820,7 @@ void WebPluginContainerImpl::handleTouchEvent(TouchEvent* event)
     case TouchEventRequestTypeNone:
         return;
     case TouchEventRequestTypeRaw: {
-        WebTouchEventBuilder webEvent(m_element->layoutObject(), *event);
+        WebTouchEventBuilder webEvent(LayoutItem(m_element->layoutObject()), *event);
         if (webEvent.type == WebInputEvent::Undefined)
             return;
 
@@ -830,7 +841,7 @@ void WebPluginContainerImpl::handleTouchEvent(TouchEvent* event)
 
 void WebPluginContainerImpl::handleGestureEvent(GestureEvent* event)
 {
-    WebGestureEventBuilder webEvent(m_element->layoutObject(), *event);
+    WebGestureEventBuilder webEvent(LayoutItem(m_element->layoutObject()), *event);
     if (webEvent.type == WebInputEvent::Undefined)
         return;
     if (event->type() == EventTypeNames::gesturetapdown)
@@ -846,7 +857,7 @@ void WebPluginContainerImpl::handleGestureEvent(GestureEvent* event)
 
 void WebPluginContainerImpl::synthesizeMouseEventIfPossible(TouchEvent* event)
 {
-    WebMouseEventBuilder webEvent(this, m_element->layoutObject(), *event);
+    WebMouseEventBuilder webEvent(this, LayoutItem(m_element->layoutObject()), *event);
     if (webEvent.type == WebInputEvent::Undefined)
         return;
 
@@ -894,17 +905,16 @@ void WebPluginContainerImpl::computeClipRectsForPlugin(
 
     LayoutBox* box = toLayoutBox(ownerElement->layoutObject());
 
-    // Plugin frameRects are in absolute space within their frame.
-    FloatRect frameRectInOwnerElementSpace = box->absoluteToLocalQuad(FloatRect(frameRect()), UseTransforms).boundingBox();
-
-    LayoutRect unclippedAbsoluteRect(frameRectInOwnerElementSpace);
+    // Note: frameRect() for this plugin is equal to contentBoxRect, mapped to the containing view space, and rounded off.
+    // See LayoutPart.cpp::updateWidgetGeometryInternal. To remove the lossy effect of rounding off, use contentBoxRect directly.
+    LayoutRect unclippedAbsoluteRect(box->contentBoxRect());
     box->mapToVisualRectInAncestorSpace(rootView, unclippedAbsoluteRect);
 
     // The frameRect is already in absolute space of the local frame to the plugin.
     windowRect = frameRect();
     // Map up to the root frame.
     LayoutRect layoutWindowRect =
-        LayoutRect(m_element->document().view()->layoutView()->localToAbsoluteQuad(FloatQuad(FloatRect(frameRect())), TraverseDocumentBoundaries).boundingBox());
+        LayoutRect(m_element->document().view()->layoutViewItem().localToAbsoluteQuad(FloatQuad(FloatRect(frameRect())), TraverseDocumentBoundaries).boundingBox());
     // Finally, adjust for scrolling of the root frame, which the above does not take into account.
     layoutWindowRect.moveBy(-rootView->viewRect().location());
     windowRect = pixelSnappedIntRect(layoutWindowRect);
@@ -913,11 +923,10 @@ void WebPluginContainerImpl::computeClipRectsForPlugin(
     LayoutRect unclippedLayoutLocalRect = layoutClippedLocalRect;
     layoutClippedLocalRect.intersect(LayoutRect(rootView->frameView()->visibleContentRect()));
 
-    // TODO(chrishtr): intentionally ignore transform, because the positioning of frameRect() does also. This is probably wrong.
-    unclippedIntLocalRect = box->absoluteToLocalQuad(FloatRect(unclippedLayoutLocalRect), TraverseDocumentBoundaries).enclosingBoundingBox();
+    unclippedIntLocalRect = box->absoluteToLocalQuad(FloatRect(unclippedLayoutLocalRect), TraverseDocumentBoundaries | UseTransforms).enclosingBoundingBox();
     // As a performance optimization, map the clipped rect separately if is different than the unclipped rect.
     if (layoutClippedLocalRect != unclippedLayoutLocalRect)
-        clippedLocalRect = box->absoluteToLocalQuad(FloatRect(layoutClippedLocalRect), TraverseDocumentBoundaries).enclosingBoundingBox();
+        clippedLocalRect = box->absoluteToLocalQuad(FloatRect(layoutClippedLocalRect), TraverseDocumentBoundaries | UseTransforms).enclosingBoundingBox();
     else
         clippedLocalRect = unclippedIntLocalRect;
 }
@@ -927,7 +936,7 @@ void WebPluginContainerImpl::calculateGeometry(IntRect& windowRect, IntRect& cli
     // document().layoutView() can be null when we receive messages from the
     // plugins while we are destroying a frame.
     // FIXME: Can we just check m_element->document().isActive() ?
-    if (m_element->layoutObject()->document().layoutView()) {
+    if (!m_element->layoutObject()->document().layoutViewItem().isNull()) {
         // Take our element and get the clip rect from the enclosing layer and
         // frame view.
         computeClipRectsForPlugin(m_element, windowRect, clipRect, unobscuredRect);

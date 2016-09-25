@@ -8,6 +8,7 @@
 #include "core/CoreExport.h"
 #include "core/animation/Keyframe.h"
 #include "core/animation/animatable/AnimatableValue.h"
+#include "core/css/CSSPropertyIDTemplates.h"
 
 namespace blink {
 
@@ -19,12 +20,12 @@ public:
     }
     void setPropertyValue(CSSPropertyID property, PassRefPtr<AnimatableValue> value)
     {
-        m_propertyValues.set(property, value);
+        m_propertyValues.set(property, std::move(value));
     }
     void clearPropertyValue(CSSPropertyID property) { m_propertyValues.remove(property); }
     AnimatableValue* propertyValue(CSSPropertyID property) const
     {
-        ASSERT(m_propertyValues.contains(property));
+        DCHECK(m_propertyValues.contains(property));
         return m_propertyValues.get(property);
     }
     PropertyHandleSet properties() const override;
@@ -33,18 +34,18 @@ public:
     public:
         static PassRefPtr<PropertySpecificKeyframe> create(double offset, PassRefPtr<TimingFunction> easing, PassRefPtr<AnimatableValue> value, EffectModel::CompositeOperation composite)
         {
-            return adoptRef(new PropertySpecificKeyframe(offset, easing, value, composite));
+            return adoptRef(new PropertySpecificKeyframe(offset, std::move(easing), std::move(value), composite));
         }
 
         AnimatableValue* value() const { return m_value.get(); }
-        const PassRefPtr<AnimatableValue> getAnimatableValue() const final { return m_value; }
+        PassRefPtr<AnimatableValue> getAnimatableValue() const final { return m_value; }
 
         PassRefPtr<Keyframe::PropertySpecificKeyframe> neutralKeyframe(double offset, PassRefPtr<TimingFunction> easing) const final;
-        PassRefPtr<Interpolation> maybeCreateInterpolation(PropertyHandle, Keyframe::PropertySpecificKeyframe& end, Element*, const ComputedStyle*) const final;
+        PassRefPtr<Interpolation> createInterpolation(PropertyHandle, const Keyframe::PropertySpecificKeyframe& end) const final;
 
     private:
         PropertySpecificKeyframe(double offset, PassRefPtr<TimingFunction> easing, PassRefPtr<AnimatableValue> value, EffectModel::CompositeOperation composite)
-            : Keyframe::PropertySpecificKeyframe(offset, easing, composite)
+            : Keyframe::PropertySpecificKeyframe(offset, std::move(easing), composite)
             , m_value(value)
         { }
 

@@ -33,7 +33,7 @@ class TestClient : public TestContentClient {
     return base::string16();
   }
 
-  base::RefCountedStaticMemory* GetDataResourceBytes(
+  base::RefCountedMemory* GetDataResourceBytes(
       int resource_id) const override {
     base::RefCountedStaticMemory* bytes = NULL;
     if (resource_id == kDummyDefaultResourceId) {
@@ -57,7 +57,8 @@ class WebUIDataSourceTest : public testing::Test {
 
   void StartDataRequest(const std::string& path,
                         const URLDataSource::GotDataCallback& callback) {
-    source_->StartDataRequest(path, 0, 0, callback);
+    source_->StartDataRequest(path, ResourceRequestInfo::WebContentsGetter(),
+                              callback);
   }
 
   std::string GetMimeType(const std::string& path) const {
@@ -82,7 +83,7 @@ class WebUIDataSourceTest : public testing::Test {
     WebUIDataSource* source = WebUIDataSourceImpl::Create("host");
     WebUIDataSourceImpl* source_impl = static_cast<WebUIDataSourceImpl*>(
         source);
-    source_impl->disable_set_font_strings_for_testing();
+    source_impl->disable_load_time_data_defaults_for_testing();
     source_ = make_scoped_refptr(source_impl);
   }
 

@@ -11,8 +11,8 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/fuzzed_data_provider.h"
 #include "net/base/address_list.h"
 #include "net/base/auth.h"
 #include "net/base/host_port_pair.h"
@@ -33,23 +33,14 @@
 // |data| is used to create a FuzzedSocket to fuzz reads and writes, see that
 // class for details.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  // Needed for thread checks and waits.
-  base::MessageLoopForIO message_loop;
-
   // Use a test NetLog, to exercise logging code.
-  net::BoundTestNetLog bound_test_net_log;
+  net::TestNetLog test_net_log;
 
-  // Use last byte to determine if the HttpProxyClientSocket should be told the
-  // underlying socket is HTTPS.
-  bool is_https_proxy = 0;
-  if (size > 0) {
-    is_https_proxy = !(data[size - 1] & 1);
-    size--;
-  }
+  base::FuzzedDataProvider data_provider(data, size);
 
   net::TestCompletionCallback callback;
   std::unique_ptr<net::FuzzedSocket> fuzzed_socket(
-      new net::FuzzedSocket(data, size, bound_test_net_log.bound()));
+      new net::FuzzedSocket(&data_provider, &test_net_log));
   CHECK_EQ(net::OK, fuzzed_socket->Connect(callback.callback()));
 
   std::unique_ptr<net::ClientSocketHandle> socket_handle(
@@ -69,6 +60,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       new net::HttpAuthController(net::HttpAuth::AUTH_PROXY,
                                   GURL("http://proxy:42/"), &auth_cache,
                                   &auth_handler_factory));
+  // Determine if the HttpProxyClientSocket should be told the underlying socket
+  // is HTTPS.
+  bool is_https_proxy = data_provider.ConsumeBool();
   net::HttpProxyClientSocket socket(
       socket_handle.release(), "Bond/007", net::HostPortPair("foo", 80),
       net::HostPortPair("proxy", 42), auth_controller.get(), true /* tunnel */,

@@ -61,7 +61,7 @@ void StreamDelegateBase::OnRequestHeadersSent() {
 SpdyResponseHeadersStatus StreamDelegateBase::OnResponseHeadersUpdated(
     const SpdyHeaderBlock& response_headers) {
   EXPECT_EQ(stream_->type() != SPDY_PUSH_STREAM, send_headers_completed_);
-  response_headers_ = response_headers;
+  response_headers_ = response_headers.Clone();
   return RESPONSE_HEADERS_ARE_COMPLETE;
 }
 
@@ -92,9 +92,8 @@ std::string StreamDelegateBase::TakeReceivedData() {
   size_t len = received_data_queue_.GetTotalSize();
   std::string received_data(len, '\0');
   if (len > 0) {
-    EXPECT_EQ(
-        len,
-        received_data_queue_.Dequeue(string_as_array(&received_data), len));
+    EXPECT_EQ(len, received_data_queue_.Dequeue(
+                       base::string_as_array(&received_data), len));
   }
   return received_data;
 }

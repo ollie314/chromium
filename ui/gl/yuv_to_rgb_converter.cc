@@ -7,7 +7,7 @@
 #include "base/strings/stringize_macros.h"
 #include "base/strings/stringprintf.h"
 #include "ui/gl/gl_helper.h"
-#include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_version_info.h"
 #include "ui/gl/scoped_api.h"
 #include "ui/gl/scoped_binders.h"
 
@@ -70,29 +70,28 @@ STRINGIZE(
 
 }  // namespace
 
-YUVToRGBConverter::YUVToRGBConverter() {
-  bool use_core_profile =
-      gfx::GetGLImplementation() == gfx::kGLImplementationDesktopGLCoreProfile;
-  gfx::ScopedSetGLToRealGLApi scoped_set_gl_api;
+YUVToRGBConverter::YUVToRGBConverter(const GLVersionInfo& gl_version_info) {
+  bool use_core_profile = gl_version_info.is_desktop_core_profile;
+  ScopedSetGLToRealGLApi scoped_set_gl_api;
   glGenFramebuffersEXT(1, &framebuffer_);
-  vertex_buffer_ = gfx::GLHelper::SetupQuadVertexBuffer();
-  vertex_shader_ = gfx::GLHelper::LoadShader(
+  vertex_buffer_ = GLHelper::SetupQuadVertexBuffer();
+  vertex_shader_ = GLHelper::LoadShader(
       GL_VERTEX_SHADER,
       base::StringPrintf("%s\n%s",
                          use_core_profile ? kVertexHeaderCoreProfile
                                           : kVertexHeaderCompatiblityProfile,
                          kVertexShader)
           .c_str());
-  fragment_shader_ = gfx::GLHelper::LoadShader(
+  fragment_shader_ = GLHelper::LoadShader(
       GL_FRAGMENT_SHADER,
       base::StringPrintf("%s\n%s",
                          use_core_profile ? kFragmentHeaderCoreProfile
                                           : kFragmentHeaderCompatiblityProfile,
                          kFragmentShader)
           .c_str());
-  program_ = gfx::GLHelper::SetupProgram(vertex_shader_, fragment_shader_);
+  program_ = GLHelper::SetupProgram(vertex_shader_, fragment_shader_);
 
-  gfx::ScopedUseProgram use_program(program_);
+  ScopedUseProgram use_program(program_);
   size_location_ = glGetUniformLocation(program_, "a_texScale");
   DCHECK_NE(-1, size_location_);
   int y_sampler_location = glGetUniformLocation(program_, "a_y_texture");
@@ -100,12 +99,17 @@ YUVToRGBConverter::YUVToRGBConverter() {
   int uv_sampler_location = glGetUniformLocation(program_, "a_uv_texture");
   DCHECK_NE(-1, uv_sampler_location);
 
+  glGenTextures(1, &y_texture_);
+  glGenTextures(1, &uv_texture_);
+
   glUniform1i(y_sampler_location, 0);
   glUniform1i(uv_sampler_location, 1);
 }
 
 YUVToRGBConverter::~YUVToRGBConverter() {
-  gfx::ScopedSetGLToRealGLApi scoped_set_gl_api;
+  ScopedSetGLToRealGLApi scoped_set_gl_api;
+  glDeleteTextures(1, &y_texture_);
+  glDeleteTextures(1, &uv_texture_);
   glDeleteProgram(program_);
   glDeleteShader(vertex_shader_);
   glDeleteShader(fragment_shader_);
@@ -114,13 +118,9 @@ YUVToRGBConverter::~YUVToRGBConverter() {
 }
 
 void YUVToRGBConverter::CopyYUV420ToRGB(unsigned target,
-                                        unsigned y_texture,
-                                        unsigned uv_texture,
                                         const gfx::Size& size,
                                         unsigned rgb_texture) {
-  // Only support for rectangle targets exists so far.
-  DCHECK_EQ(static_cast<GLenum>(GL_TEXTURE_RECTANGLE_ARB), target);
-  gfx::ScopedSetGLToRealGLApi scoped_set_gl_api;
+  ScopedSetGLToRealGLApi scoped_set_gl_api;
 
   // Note that state restoration is done explicitly instead of scoped binders to
   // avoid https://crbug.com/601729.
@@ -134,28 +134,28 @@ void YUVToRGBConverter::CopyYUV420ToRGB(unsigned target,
   glGetIntegerv(GL_TEXTURE_BINDING_RECTANGLE_ARB, &old_texture1_binding);
 
   // Allocate the rgb texture.
-  glBindTexture(GL_TEXTURE_RECTANGLE_ARB, rgb_texture);
-  glTexImage2D(GL_TEXTURE_RECTANGLE_ARB, 0, GL_RGB, size.width(), size.height(),
+  glBindTexture(target, rgb_texture);
+  glTexImage2D(target, 0, GL_RGB, size.width(), size.height(),
                0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
 
   // Set up and issue the draw call.
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_RECTANGLE_ARB, y_texture);
+  glBindTexture(GL_TEXTURE_RECTANGLE_ARB, y_texture_);
   glActiveTexture(GL_TEXTURE1);
-  glBindTexture(GL_TEXTURE_RECTANGLE_ARB, uv_texture);
-  gfx::ScopedFrameBufferBinder framebuffer_binder(framebuffer_);
-  gfx::ScopedViewport viewport(0, 0, size.width(), size.height());
+  glBindTexture(GL_TEXTURE_RECTANGLE_ARB, uv_texture_);
+  ScopedFramebufferBinder framebuffer_binder(framebuffer_);
+  ScopedViewport viewport(0, 0, size.width(), size.height());
   glFramebufferTexture2DEXT(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                            GL_TEXTURE_RECTANGLE_ARB, rgb_texture, 0);
+                            target, rgb_texture, 0);
   DCHECK_EQ(static_cast<GLenum>(GL_FRAMEBUFFER_COMPLETE),
             glCheckFramebufferStatusEXT(GL_FRAMEBUFFER));
-  gfx::ScopedUseProgram use_program(program_);
+  ScopedUseProgram use_program(program_);
   glUniform2f(size_location_, size.width(), size.height());
-  gfx::GLHelper::DrawQuad(vertex_buffer_);
+  GLHelper::DrawQuad(vertex_buffer_);
 
   // Restore previous state.
   glFramebufferTexture2DEXT(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                            GL_TEXTURE_RECTANGLE_ARB, 0, 0);
+                            target, 0, 0);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_RECTANGLE_ARB, old_texture0_binding);
   glActiveTexture(GL_TEXTURE1);

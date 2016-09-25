@@ -12,6 +12,14 @@
 #include "crypto/ec_private_key.h"
 #include "net/base/net_errors.h"
 
+namespace {
+
+bool AllDomainsPredicate(const std::string& domain) {
+  return true;
+}
+
+}  // namespace
+
 namespace net {
 
 // --------------------------------------------------------------------------
@@ -133,39 +141,43 @@ void DefaultChannelIDStore::DeleteChannelIDTask::Run(
 }
 
 // --------------------------------------------------------------------------
-// DeleteAllCreatedBetweenTask
-class DefaultChannelIDStore::DeleteAllCreatedBetweenTask
+// DeleteForDomainssCreatedBetweenTask
+class DefaultChannelIDStore::DeleteForDomainsCreatedBetweenTask
     : public DefaultChannelIDStore::Task {
  public:
-  DeleteAllCreatedBetweenTask(base::Time delete_begin,
-                              base::Time delete_end,
-                              const base::Closure& callback);
-  ~DeleteAllCreatedBetweenTask() override;
+  DeleteForDomainsCreatedBetweenTask(
+      const base::Callback<bool(const std::string&)>& domain_predicate,
+      base::Time delete_begin,
+      base::Time delete_end,
+      const base::Closure& callback);
+  ~DeleteForDomainsCreatedBetweenTask() override;
   void Run(DefaultChannelIDStore* store) override;
 
  private:
+  const base::Callback<bool(const std::string&)> domain_predicate_;
   base::Time delete_begin_;
   base::Time delete_end_;
   base::Closure callback_;
 };
 
-DefaultChannelIDStore::DeleteAllCreatedBetweenTask::
-    DeleteAllCreatedBetweenTask(
+DefaultChannelIDStore::DeleteForDomainsCreatedBetweenTask::
+    DeleteForDomainsCreatedBetweenTask(
+        const base::Callback<bool(const std::string&)>& domain_predicate,
         base::Time delete_begin,
         base::Time delete_end,
         const base::Closure& callback)
-        : delete_begin_(delete_begin),
-          delete_end_(delete_end),
-          callback_(callback) {
-}
+    : domain_predicate_(domain_predicate),
+      delete_begin_(delete_begin),
+      delete_end_(delete_end),
+      callback_(callback) {}
 
-DefaultChannelIDStore::DeleteAllCreatedBetweenTask::
-    ~DeleteAllCreatedBetweenTask() {
-}
+DefaultChannelIDStore::DeleteForDomainsCreatedBetweenTask::
+    ~DeleteForDomainsCreatedBetweenTask() {}
 
-void DefaultChannelIDStore::DeleteAllCreatedBetweenTask::Run(
+void DefaultChannelIDStore::DeleteForDomainsCreatedBetweenTask::Run(
     DefaultChannelIDStore* store) {
-  store->SyncDeleteAllCreatedBetween(delete_begin_, delete_end_);
+  store->SyncDeleteForDomainsCreatedBetween(domain_predicate_, delete_begin_,
+                                            delete_end_);
 
   InvokeCallback(callback_);
 }
@@ -230,14 +242,14 @@ int DefaultChannelIDStore::GetChannelID(
     return ERR_FILE_NOT_FOUND;
 
   ChannelID* channel_id = it->second;
-  key_result->reset(channel_id->key()->Copy());
+  *key_result = channel_id->key()->Copy();
 
   return OK;
 }
 
 void DefaultChannelIDStore::SetChannelID(
     std::unique_ptr<ChannelID> channel_id) {
-  auto task = new SetChannelIDTask(std::move(channel_id));
+  auto* task = new SetChannelIDTask(std::move(channel_id));
   RunOrEnqueueTask(std::unique_ptr<Task>(task));
 }
 
@@ -248,17 +260,19 @@ void DefaultChannelIDStore::DeleteChannelID(
       new DeleteChannelIDTask(server_identifier, callback)));
 }
 
-void DefaultChannelIDStore::DeleteAllCreatedBetween(
+void DefaultChannelIDStore::DeleteForDomainsCreatedBetween(
+    const base::Callback<bool(const std::string&)>& domain_predicate,
     base::Time delete_begin,
     base::Time delete_end,
     const base::Closure& callback) {
-  RunOrEnqueueTask(std::unique_ptr<Task>(
-      new DeleteAllCreatedBetweenTask(delete_begin, delete_end, callback)));
+  RunOrEnqueueTask(std::unique_ptr<Task>(new DeleteForDomainsCreatedBetweenTask(
+      domain_predicate, delete_begin, delete_end, callback)));
 }
 
 void DefaultChannelIDStore::DeleteAll(
     const base::Closure& callback) {
-  DeleteAllCreatedBetween(base::Time(), base::Time(), callback);
+  DeleteForDomainsCreatedBetween(base::Bind(&AllDomainsPredicate), base::Time(),
+                                 base::Time(), callback);
 }
 
 void DefaultChannelIDStore::GetAllChannelIDs(
@@ -276,7 +290,7 @@ void DefaultChannelIDStore::SetForceKeepSessionState() {
   DCHECK(CalledOnValidThread());
   InitIfNecessary();
 
-  if (store_.get())
+  if (store_)
     store_->SetForceKeepSessionState();
 }
 
@@ -296,7 +310,7 @@ void DefaultChannelIDStore::DeleteAllInMemory() {
 
 void DefaultChannelIDStore::InitStore() {
   DCHECK(CalledOnValidThread());
-  DCHECK(store_.get()) << "Store must exist to initialize";
+  DCHECK(store_) << "Store must exist to initialize";
   DCHECK(!loaded_);
 
   store_->Load(base::Bind(&DefaultChannelIDStore::OnLoaded,
@@ -351,7 +365,8 @@ void DefaultChannelIDStore::SyncDeleteChannelID(
   InternalDeleteChannelID(server_identifier);
 }
 
-void DefaultChannelIDStore::SyncDeleteAllCreatedBetween(
+void DefaultChannelIDStore::SyncDeleteForDomainsCreatedBetween(
+    const base::Callback<bool(const std::string&)>& domain_predicate,
     base::Time delete_begin,
     base::Time delete_end) {
   DCHECK(CalledOnValidThread());
@@ -361,10 +376,12 @@ void DefaultChannelIDStore::SyncDeleteAllCreatedBetween(
     ChannelIDMap::iterator cur = it;
     ++it;
     ChannelID* channel_id = cur->second;
+
     if ((delete_begin.is_null() ||
          channel_id->creation_time() >= delete_begin) &&
-        (delete_end.is_null() || channel_id->creation_time() < delete_end)) {
-      if (store_.get())
+        (delete_end.is_null() || channel_id->creation_time() < delete_end) &&
+        domain_predicate.Run(channel_id->server_identifier())) {
+      if (store_)
         store_->DeleteChannelID(*channel_id);
       delete channel_id;
       channel_ids_.erase(cur);
@@ -411,7 +428,7 @@ void DefaultChannelIDStore::InternalDeleteChannelID(
     return;  // There is nothing to delete.
 
   ChannelID* channel_id = it->second;
-  if (store_.get())
+  if (store_)
     store_->DeleteChannelID(*channel_id);
   channel_ids_.erase(it);
   delete channel_id;
@@ -422,14 +439,14 @@ void DefaultChannelIDStore::InternalInsertChannelID(
   DCHECK(CalledOnValidThread());
   DCHECK(loaded_);
 
-  if (store_.get())
-    store_->AddChannelID(*(channel_id.get()));
+  if (store_)
+    store_->AddChannelID(*channel_id);
   const std::string& server_identifier = channel_id->server_identifier();
   channel_ids_[server_identifier] = channel_id.release();
 }
 
 bool DefaultChannelIDStore::IsEphemeral() {
-  return store_.get() == nullptr;
+  return !store_;
 }
 
 DefaultChannelIDStore::PersistentStore::PersistentStore() {}

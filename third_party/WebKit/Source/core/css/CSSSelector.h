@@ -25,9 +25,8 @@
 #include "core/CoreExport.h"
 #include "core/dom/QualifiedName.h"
 #include "core/style/ComputedStyleConstants.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/RefCounted.h"
+#include <memory>
 
 namespace blink {
 class CSSSelectorList;
@@ -193,17 +192,22 @@ public:
         PseudoFullScreenAncestor,
         PseudoInRange,
         PseudoOutOfRange,
+        // Pseudo elements in UA ShadowRoots. Available in any stylesheets.
         PseudoWebKitCustomElement,
+        // Pseudo elements in UA ShadowRoots. Availble only in UA stylesheets.
+        PseudoBlinkInternalElement,
         PseudoCue,
         PseudoFutureCue,
         PseudoPastCue,
         PseudoUnresolved,
+        PseudoDefined,
         PseudoContent,
         PseudoHost,
         PseudoHostContext,
         PseudoShadow,
         PseudoSpatialNavigationFocus,
         PseudoListBox,
+        PseudoHostHasAppearance,
         PseudoSlotted
     };
 
@@ -216,6 +220,7 @@ public:
     void updatePseudoType(const AtomicString&, bool hasArguments);
 
     static PseudoType parsePseudoType(const AtomicString&, bool hasArguments);
+    static PseudoId parsePseudoId(const String&);
     static PseudoId pseudoId(PseudoType);
 
     // Selectors are kept in an array by CSSSelectorList. The next component of the selector is
@@ -247,7 +252,7 @@ public:
     void setValue(const AtomicString&, bool matchLowerCase);
     void setAttribute(const QualifiedName&, AttributeMatchType);
     void setArgument(const AtomicString&);
-    void setSelectorList(PassOwnPtr<CSSSelectorList>);
+    void setSelectorList(std::unique_ptr<CSSSelectorList>);
 
     void setNth(int a, int b);
     bool matchNth(int count) const;
@@ -256,7 +261,9 @@ public:
     bool isShadowSelector() const { return m_relation == ShadowPseudo || m_relation == ShadowDeep; }
     bool isAttributeSelector() const { return m_match >= FirstAttributeSelectorMatch; }
     bool isHostPseudoClass() const { return m_pseudoType == PseudoHost || m_pseudoType == PseudoHostContext; }
+    bool isUserActionPseudoClass() const;
     bool isInsertionPointCrossing() const { return m_pseudoType == PseudoHostContext || m_pseudoType == PseudoContent; }
+    bool isIdClassOrAttributeSelector() const;
 
     RelationType relation() const { return static_cast<RelationType>(m_relation); }
     void setRelation(RelationType relation)
@@ -290,6 +297,11 @@ public:
     void setRelationIsAffectedByPseudoContent() { m_relationIsAffectedByPseudoContent = true; }
 
     bool matchesPseudoElement() const;
+
+    bool hasContentPseudo() const;
+    bool hasSlottedPseudo() const;
+    bool hasDeepCombinatorOrShadowPseudo() const;
+    bool needsUpdatedDistribution() const;
 
 private:
     unsigned m_relation               : 3; // enum RelationType
@@ -333,7 +345,7 @@ private:
         } m_bits;
         QualifiedName m_attribute; // used for attribute selector
         AtomicString m_argument; // Used for :contains, :lang, :nth-*
-        OwnPtr<CSSSelectorList> m_selectorList; // Used for :-webkit-any and :not
+        std::unique_ptr<CSSSelectorList> m_selectorList; // Used for :-webkit-any and :not
 
     private:
         RareData(const AtomicString& value);
@@ -477,6 +489,21 @@ inline const AtomicString& CSSSelector::serializingValue() const
     // AtomicString is really just a StringImpl* so the cast below is safe.
     // FIXME: Perhaps call sites could be changed to accept StringImpl?
     return *reinterpret_cast<const AtomicString*>(&m_data.m_value);
+}
+
+inline bool CSSSelector::isUserActionPseudoClass() const
+{
+    return m_pseudoType == PseudoHover
+        || m_pseudoType == PseudoActive
+        || m_pseudoType == PseudoFocus
+        || m_pseudoType == PseudoDrag;
+}
+
+inline bool CSSSelector::isIdClassOrAttributeSelector() const
+{
+    return isAttributeSelector()
+        || match() == CSSSelector::Id
+        || match() == CSSSelector::Class;
 }
 
 } // namespace blink

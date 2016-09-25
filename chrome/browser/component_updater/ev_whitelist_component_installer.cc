@@ -4,6 +4,7 @@
 
 #include "chrome/browser/component_updater/ev_whitelist_component_installer.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -71,8 +72,9 @@ const uint8_t kPublicKeySHA256[32] = {
 
 const char kEVWhitelistManifestName[] = "EV Certs CT whitelist";
 
-bool EVWhitelistComponentInstallerTraits::CanAutoUpdate() const {
-  return true;
+bool EVWhitelistComponentInstallerTraits::
+    SupportsGroupPolicyEnabledComponentUpdates() const {
+  return false;
 }
 
 bool EVWhitelistComponentInstallerTraits::RequiresNetworkEncryption() const {
@@ -116,10 +118,9 @@ bool EVWhitelistComponentInstallerTraits::VerifyInstallation(
   return base::PathExists(GetInstalledPath(install_dir));
 }
 
-base::FilePath EVWhitelistComponentInstallerTraits::GetBaseDirectory() const {
-  base::FilePath result;
-  PathService::Get(DIR_COMPONENT_EV_WHITELIST, &result);
-  return result;
+base::FilePath EVWhitelistComponentInstallerTraits::GetRelativeInstallDir()
+    const {
+  return base::FilePath(FILE_PATH_LITERAL("EVWhitelist"));
 }
 
 void EVWhitelistComponentInstallerTraits::GetHash(
@@ -132,8 +133,14 @@ std::string EVWhitelistComponentInstallerTraits::GetName() const {
   return kEVWhitelistManifestName;
 }
 
-std::string EVWhitelistComponentInstallerTraits::GetAp() const {
-  return std::string();
+update_client::InstallerAttributes
+EVWhitelistComponentInstallerTraits::GetInstallerAttributes() const {
+  return update_client::InstallerAttributes();
+}
+
+std::vector<std::string> EVWhitelistComponentInstallerTraits::GetMimeTypes()
+    const {
+  return std::vector<std::string>();
 }
 
 void RegisterEVWhitelistComponent(ComponentUpdateService* cus,

@@ -99,11 +99,12 @@ bool WebRequestCondition::IsFulfilled(
 
   // Check URL attributes if present.
   if (url_matcher_conditions_.get() &&
-      !ContainsKey(request_data.url_match_ids, url_matcher_conditions_->id()))
+      !base::ContainsKey(request_data.url_match_ids,
+                         url_matcher_conditions_->id()))
     return false;
   if (first_party_url_matcher_conditions_.get() &&
-      !ContainsKey(request_data.first_party_url_match_ids,
-                   first_party_url_matcher_conditions_->id()))
+      !base::ContainsKey(request_data.first_party_url_match_ids,
+                         first_party_url_matcher_conditions_->id()))
     return false;
 
   // All condition attributes must be fulfilled for a fulfilled condition.
@@ -125,7 +126,7 @@ void WebRequestCondition::GetURLMatcherConditionSets(
 }
 
 // static
-scoped_ptr<WebRequestCondition> WebRequestCondition::Create(
+std::unique_ptr<WebRequestCondition> WebRequestCondition::Create(
     const Extension* extension,
     URLMatcherConditionFactory* url_matcher_condition_factory,
     const base::Value& condition,
@@ -133,18 +134,18 @@ scoped_ptr<WebRequestCondition> WebRequestCondition::Create(
   const base::DictionaryValue* condition_dict = NULL;
   if (!condition.GetAsDictionary(&condition_dict)) {
     *error = kExpectedDictionary;
-    return scoped_ptr<WebRequestCondition>();
+    return std::unique_ptr<WebRequestCondition>();
   }
 
   // Verify that we are dealing with a Condition whose type we understand.
   std::string instance_type;
   if (!condition_dict->GetString(keys::kInstanceTypeKey, &instance_type)) {
     *error = kConditionWithoutInstanceType;
-    return scoped_ptr<WebRequestCondition>();
+    return std::unique_ptr<WebRequestCondition>();
   }
   if (instance_type != keys::kRequestMatcherType) {
     *error = kExpectedOtherConditionType;
-    return scoped_ptr<WebRequestCondition>();
+    return std::unique_ptr<WebRequestCondition>();
   }
 
   WebRequestConditionAttributes attributes;
@@ -185,17 +186,16 @@ scoped_ptr<WebRequestCondition> WebRequestCondition::Create(
         attributes.push_back(attribute);
     }
     if (!error->empty())
-      return scoped_ptr<WebRequestCondition>();
+      return std::unique_ptr<WebRequestCondition>();
   }
 
-  scoped_ptr<WebRequestCondition> result(
-      new WebRequestCondition(url_matcher_condition_set,
-                              first_party_url_matcher_condition_set,
-                              attributes));
+  std::unique_ptr<WebRequestCondition> result(new WebRequestCondition(
+      url_matcher_condition_set, first_party_url_matcher_condition_set,
+      attributes));
 
   if (!result->stages()) {
     *error = kConditionCannotBeFulfilled;
-    return scoped_ptr<WebRequestCondition>();
+    return std::unique_ptr<WebRequestCondition>();
   }
 
   return result;

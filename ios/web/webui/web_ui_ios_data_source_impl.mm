@@ -61,7 +61,6 @@ WebUIIOSDataSourceImpl::WebUIIOSDataSourceImpl(const std::string& source_name)
       source_name_(source_name),
       default_resource_(-1),
       deny_xframe_options_(true),
-      disable_set_font_strings_(false),
       replace_existing_source_(true) {}
 
 WebUIIOSDataSourceImpl::~WebUIIOSDataSourceImpl() {}
@@ -145,10 +144,8 @@ void WebUIIOSDataSourceImpl::StartDataRequest(
 void WebUIIOSDataSourceImpl::SendLocalizedStringsAsJSON(
     const URLDataSourceIOS::GotDataCallback& callback) {
   std::string template_data;
-  if (!disable_set_font_strings_) {
-    webui::SetLoadTimeDataDefaults(web::GetWebClient()->GetApplicationLocale(),
-                                   &localized_strings_);
-  }
+  webui::SetLoadTimeDataDefaults(web::GetWebClient()->GetApplicationLocale(),
+                                 &localized_strings_);
 
   webui::AppendJsonJS(&localized_strings_, &template_data);
   callback.Run(base::RefCountedString::TakeString(&template_data));
@@ -157,7 +154,7 @@ void WebUIIOSDataSourceImpl::SendLocalizedStringsAsJSON(
 void WebUIIOSDataSourceImpl::SendFromResourceBundle(
     const URLDataSourceIOS::GotDataCallback& callback,
     int idr) {
-  scoped_refptr<base::RefCountedStaticMemory> response(
+  scoped_refptr<base::RefCountedMemory> response(
       GetWebClient()->GetDataResourceBytes(idr));
   callback.Run(response);
 }

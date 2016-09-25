@@ -118,7 +118,7 @@ int TableLayoutAlgorithmFixed::calcWidthArray()
                 spanInCurrentEffectiveColumn = m_table->spanOfEffectiveColumn(currentEffectiveColumn);
             }
             // TODO(alancutter): Make this work correctly for calc lengths.
-            if ((colStyleLogicalWidth.isFixed() || colStyleLogicalWidth.hasPercent()) && colStyleLogicalWidth.isPositive()) {
+            if ((colStyleLogicalWidth.isFixed() || colStyleLogicalWidth.isPercentOrCalc()) && colStyleLogicalWidth.isPositive()) {
                 m_width[currentEffectiveColumn] = colStyleLogicalWidth;
                 m_width[currentEffectiveColumn] *= spanInCurrentEffectiveColumn;
                 usedWidth += effectiveColWidth * spanInCurrentEffectiveColumn;
@@ -148,7 +148,7 @@ int TableLayoutAlgorithmFixed::calcWidthArray()
         // FIXME: Support other length types. If the width is non-auto, it should probably just use
         // LayoutBox::computeLogicalWidthUsing to compute the width.
         if (logicalWidth.isFixed() && logicalWidth.isPositive()) {
-            fixedBorderBoxLogicalWidth = cell->adjustBorderBoxLogicalWidthForBoxSizing(logicalWidth.value());
+            fixedBorderBoxLogicalWidth = cell->adjustBorderBoxLogicalWidthForBoxSizing(logicalWidth.value()).toInt();
             logicalWidth.setValue(fixedBorderBoxLogicalWidth);
         }
 
@@ -199,13 +199,13 @@ void TableLayoutAlgorithmFixed::applyPreferredLogicalWidthQuirks(LayoutUnit& min
     // In this example, the two inner tables should be as large as the outer table.
     // We can achieve this effect by making the maxwidth of fixed tables with percentage
     // widths be infinite.
-    if (m_table->style()->logicalWidth().hasPercent() && maxWidth < tableMaxWidth)
+    if (m_table->style()->logicalWidth().isPercentOrCalc() && maxWidth < tableMaxWidth)
         maxWidth = LayoutUnit(tableMaxWidth);
 }
 
 void TableLayoutAlgorithmFixed::layout()
 {
-    int tableLogicalWidth = m_table->logicalWidth() - m_table->bordersPaddingAndSpacingInRowDirection();
+    int tableLogicalWidth = (m_table->logicalWidth() - m_table->bordersPaddingAndSpacingInRowDirection()).toInt();
     unsigned nEffCols = m_table->numEffectiveColumns();
 
     // FIXME: It is possible to be called without having properly updated our internal representation.
@@ -232,9 +232,9 @@ void TableLayoutAlgorithmFixed::layout()
         if (m_width[i].isFixed()) {
             calcWidth[i] = m_width[i].value();
             totalFixedWidth += calcWidth[i];
-        } else if (m_width[i].hasPercent()) {
+        } else if (m_width[i].isPercentOrCalc()) {
             // TODO(alancutter): Make this work correctly for calc lengths.
-            calcWidth[i] = valueForLength(m_width[i], LayoutUnit(tableLogicalWidth));
+            calcWidth[i] = valueForLength(m_width[i], LayoutUnit(tableLogicalWidth)).toInt();
             totalPercentWidth += calcWidth[i];
             totalPercent += m_width[i].percent();
         } else if (m_width[i].isAuto()) {
@@ -263,7 +263,7 @@ void TableLayoutAlgorithmFixed::layout()
                 totalPercentWidth = 0;
                 for (unsigned i = 0; i < nEffCols; i++) {
                     // TODO(alancutter): Make this work correctly for calc lengths.
-                    if (m_width[i].hasPercent()) {
+                    if (m_width[i].isPercentOrCalc()) {
                         calcWidth[i] = m_width[i].percent() * (tableLogicalWidth - totalFixedWidth) / totalPercent;
                         totalPercentWidth += calcWidth[i];
                     }
@@ -326,15 +326,7 @@ void TableLayoutAlgorithmFixed::willChangeTableLayout()
     // (see calcWidthArray above.) This optimization is preferred to always
     // computing the logical widths we never intended to use.
     m_table->recalcSectionsIfNeeded();
-    for (LayoutTableSection* section = m_table->topNonEmptySection(); section; section = m_table->sectionBelow(section)) {
-        for (unsigned i = 0; i < section->numRows(); i++) {
-            LayoutTableRow* row = section->rowLayoutObjectAt(i);
-            if (!row)
-                continue;
-            for (LayoutTableCell* cell = row->firstCell(); cell; cell = cell->nextCell())
-                cell->setPreferredLogicalWidthsDirty();
-        }
-    }
+    m_table->markAllCellsWidthsDirtyAndOrNeedsLayout(LayoutTable::MarkDirtyOnly);
 }
 
 } // namespace blink

@@ -14,7 +14,7 @@
 #include "content/browser/service_worker/service_worker_provider_host.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_url_request_job.h"
-#include "content/common/resource_request_body.h"
+#include "content/common/resource_request_body_impl.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/resource_context.h"
@@ -66,15 +66,12 @@ void FinalizeHandlerInitialization(
     ResourceType resource_type,
     RequestContextType request_context_type,
     RequestContextFrameType frame_type,
-    scoped_refptr<ResourceRequestBody> body) {
+    scoped_refptr<ResourceRequestBodyImpl> body) {
   if (skip_service_worker) {
     // TODO(horo): Does this work properly for PlzNavigate?
     if (ServiceWorkerUtils::IsMainResourceType(resource_type)) {
       provider_host->SetDocumentUrl(net::SimplifyUrlForRequest(request->url()));
       provider_host->SetTopmostFrameUrl(request->first_party_for_cookies());
-      // A page load with skip_service_worker should be triggered by
-      // shift-reload, so retain all live matching registrations.
-      provider_host->AddAllMatchingRegistrations();
     }
     return;
   }
@@ -101,7 +98,8 @@ void ServiceWorkerRequestHandler::InitializeForNavigation(
     ResourceType resource_type,
     RequestContextType request_context_type,
     RequestContextFrameType frame_type,
-    scoped_refptr<ResourceRequestBody> body) {
+    bool is_parent_frame_secure,
+    scoped_refptr<ResourceRequestBodyImpl> body) {
   CHECK(IsBrowserSideNavigationEnabled());
 
   // Only create a handler when there is a ServiceWorkerNavigationHandlerCore
@@ -124,7 +122,8 @@ void ServiceWorkerRequestHandler::InitializeForNavigation(
   // Initialize the SWProviderHost.
   std::unique_ptr<ServiceWorkerProviderHost> provider_host =
       ServiceWorkerProviderHost::PreCreateNavigationHost(
-          navigation_handle_core->context_wrapper()->context()->AsWeakPtr());
+          navigation_handle_core->context_wrapper()->context()->AsWeakPtr(),
+          is_parent_frame_secure);
 
   FinalizeHandlerInitialization(
       request, provider_host.get(), blob_storage_context, skip_service_worker,
@@ -153,7 +152,7 @@ void ServiceWorkerRequestHandler::InitializeHandler(
     ResourceType resource_type,
     RequestContextType request_context_type,
     RequestContextFrameType frame_type,
-    scoped_refptr<ResourceRequestBody> body) {
+    scoped_refptr<ResourceRequestBodyImpl> body) {
   // Create the handler even for insecure HTTP since it's used in the
   // case of redirect to HTTPS.
   if (!request->url().SchemeIsHTTPOrHTTPS() &&
@@ -178,7 +177,7 @@ void ServiceWorkerRequestHandler::InitializeHandler(
 }
 
 ServiceWorkerRequestHandler* ServiceWorkerRequestHandler::GetHandler(
-    net::URLRequest* request) {
+    const net::URLRequest* request) {
   return static_cast<ServiceWorkerRequestHandler*>(
       request->GetUserData(&kUserDataKey));
 }
@@ -191,12 +190,18 @@ ServiceWorkerRequestHandler::CreateInterceptor(
 }
 
 bool ServiceWorkerRequestHandler::IsControlledByServiceWorker(
-    net::URLRequest* request) {
+    const net::URLRequest* request) {
   ServiceWorkerRequestHandler* handler = GetHandler(request);
   if (!handler || !handler->provider_host_)
     return false;
   return handler->provider_host_->associated_registration() ||
          handler->provider_host_->running_hosted_version();
+}
+
+ServiceWorkerProviderHost* ServiceWorkerRequestHandler::GetProviderHost(
+    const net::URLRequest* request) {
+  ServiceWorkerRequestHandler* handler = GetHandler(request);
+  return handler ? handler->provider_host_.get() : nullptr;
 }
 
 void ServiceWorkerRequestHandler::PrepareForCrossSiteTransfer(

@@ -9,16 +9,11 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
-#include "base/location.h"
-#include "base/memory/ptr_util.h"
-#include "base/posix/eintr_wrapper.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "gpu/ipc/client/command_buffer_proxy_impl.h"
 #include "gpu/ipc/common/gpu_messages.h"
 #include "gpu/ipc/common/gpu_param_traits_macros.h"
 #include "ipc/ipc_sync_message_filter.h"
@@ -140,11 +135,14 @@ uint32_t GpuChannelHost::OrderingBarrier(
     uint32_t flush_count,
     const std::vector<ui::LatencyInfo>& latency_info,
     bool put_offset_changed,
-    bool do_flush) {
+    bool do_flush,
+    uint32_t* highest_verified_flush_id) {
   AutoLock lock(context_lock_);
   StreamFlushInfo& flush_info = stream_flush_info_[stream_id];
   if (flush_info.flush_pending && flush_info.route_id != route_id)
     InternalFlush(&flush_info);
+
+  *highest_verified_flush_id = flush_info.verified_stream_flush_id;
 
   if (put_offset_changed) {
     const uint32_t flush_id = flush_info.next_stream_flush_id++;
@@ -189,74 +187,6 @@ void GpuChannelHost::InternalFlush(StreamFlushInfo* flush_info) {
   flush_info->flushed_stream_flush_id = flush_info->flush_id;
 }
 
-std::unique_ptr<CommandBufferProxyImpl> GpuChannelHost::CreateCommandBuffer(
-    gpu::SurfaceHandle surface_handle,
-    const gfx::Size& size,
-    CommandBufferProxyImpl* share_group,
-    int32_t stream_id,
-    gpu::GpuStreamPriority stream_priority,
-    const std::vector<int32_t>& attribs,
-    const GURL& active_url,
-    gfx::GpuPreference gpu_preference) {
-  DCHECK(!share_group || (stream_id == share_group->stream_id()));
-  TRACE_EVENT1("gpu", "GpuChannelHost::CreateViewCommandBuffer",
-               "surface_handle", surface_handle);
-
-  GPUCreateCommandBufferConfig init_params;
-  init_params.share_group_id =
-      share_group ? share_group->route_id() : MSG_ROUTING_NONE;
-  init_params.stream_id = stream_id;
-  init_params.stream_priority = stream_priority;
-  init_params.attribs = attribs;
-  init_params.active_url = active_url;
-  init_params.gpu_preference = gpu_preference;
-
-  int32_t route_id = GenerateRouteID();
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/125248 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "125248 GpuChannelHost::CreateCommandBuffer"));
-
-  // We're blocking the UI thread, which is generally undesirable.
-  // In this case we need to wait for this before we can show any UI /anyway/,
-  // so it won't cause additional jank.
-  // TODO(piman): Make this asynchronous (http://crbug.com/125248).
-
-  bool succeeded = false;
-  if (!Send(new GpuChannelMsg_CreateCommandBuffer(
-          surface_handle, size, init_params, route_id, &succeeded))) {
-    LOG(ERROR) << "Failed to send GpuChannelMsg_CreateCommandBuffer.";
-    return nullptr;
-  }
-
-  if (!succeeded) {
-    LOG(ERROR) << "GpuChannelMsg_CreateCommandBuffer returned failure.";
-    return nullptr;
-  }
-
-  std::unique_ptr<CommandBufferProxyImpl> command_buffer =
-      base::WrapUnique(new CommandBufferProxyImpl(this, route_id, stream_id));
-  AddRoute(route_id, command_buffer->AsWeakPtr());
-
-  return command_buffer;
-}
-
-void GpuChannelHost::DestroyCommandBuffer(
-    CommandBufferProxyImpl* command_buffer) {
-  TRACE_EVENT0("gpu", "GpuChannelHost::DestroyCommandBuffer");
-
-  int32_t route_id = command_buffer->route_id();
-  int32_t stream_id = command_buffer->stream_id();
-  Send(new GpuChannelMsg_DestroyCommandBuffer(route_id));
-  RemoveRoute(route_id);
-
-  AutoLock lock(context_lock_);
-  StreamFlushInfo& flush_info = stream_flush_info_[stream_id];
-  if (flush_info.flush_pending && flush_info.route_id == route_id)
-    flush_info.flush_pending = false;
-}
-
 void GpuChannelHost::DestroyChannel() {
   DCHECK(factory_->IsMainThread());
   AutoLock lock(context_lock_);
@@ -278,7 +208,7 @@ void GpuChannelHost::AddRouteWithTaskRunner(
   io_task_runner->PostTask(
       FROM_HERE,
       base::Bind(&GpuChannelHost::MessageFilter::AddRoute,
-                 channel_filter_.get(), route_id, listener, task_runner));
+                 channel_filter_, route_id, listener, task_runner));
 }
 
 void GpuChannelHost::RemoveRoute(int route_id) {
@@ -286,7 +216,7 @@ void GpuChannelHost::RemoveRoute(int route_id) {
       factory_->GetIOThreadTaskRunner();
   io_task_runner->PostTask(
       FROM_HERE, base::Bind(&GpuChannelHost::MessageFilter::RemoveRoute,
-                            channel_filter_.get(), route_id));
+                            channel_filter_, route_id));
 }
 
 base::SharedMemoryHandle GpuChannelHost::ShareToGpuProcess(
@@ -315,9 +245,31 @@ gfx::GpuMemoryBufferHandle GpuChannelHost::ShareGpuMemoryBufferToGpuProcess(
       *requires_sync_point = false;
       return handle;
     }
+#if defined(USE_OZONE)
+    case gfx::OZONE_NATIVE_PIXMAP: {
+      std::vector<base::ScopedFD> scoped_fds;
+      for (auto& fd : source_handle.native_pixmap_handle.fds) {
+        base::ScopedFD scoped_fd(HANDLE_EINTR(dup(fd.fd)));
+        if (!scoped_fd.is_valid()) {
+          PLOG(ERROR) << "dup";
+          return gfx::GpuMemoryBufferHandle();
+        }
+        scoped_fds.emplace_back(std::move(scoped_fd));
+      }
+      gfx::GpuMemoryBufferHandle handle;
+      handle.type = gfx::OZONE_NATIVE_PIXMAP;
+      handle.id = source_handle.id;
+      for (auto& scoped_fd : scoped_fds) {
+        handle.native_pixmap_handle.fds.emplace_back(scoped_fd.release(),
+                                                     true /* auto_close */);
+      }
+      handle.native_pixmap_handle.planes =
+          source_handle.native_pixmap_handle.planes;
+      *requires_sync_point = false;
+      return handle;
+    }
+#endif
     case gfx::IO_SURFACE_BUFFER:
-    case gfx::SURFACE_TEXTURE_BUFFER:
-    case gfx::OZONE_NATIVE_PIXMAP:
       *requires_sync_point = true;
       return source_handle;
     default:
@@ -336,8 +288,8 @@ int32_t GpuChannelHost::GenerateRouteID() {
 
 int32_t GpuChannelHost::GenerateStreamID() {
   const int32_t stream_id = next_stream_id_.GetNext();
-  DCHECK_NE(0, stream_id);
-  DCHECK_NE(kDefaultStreamId, stream_id);
+  DCHECK_NE(gpu::GPU_STREAM_INVALID, stream_id);
+  DCHECK_NE(gpu::GPU_STREAM_DEFAULT, stream_id);
   return stream_id;
 }
 

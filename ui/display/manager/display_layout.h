@@ -20,22 +20,19 @@ class Value;
 template <typename T> class JSONValueConverter;
 }
 
-namespace gfx {
-class Display;
-}
-
 namespace display {
+class Display;
 
 // An identifier used to manage display layout in DisplayManager /
 // DisplayLayoutStore.
 using DisplayIdList = std::vector<int64_t>;
 
-using DisplayList = std::vector<gfx::Display>;
+using Displays = std::vector<Display>;
 
-// DisplayPlacement specifies where the display (D) is placed relative
-// to parent (P) display.  In the following example, the display (D)
-// given by |display_id| is placed at the left side of the parent
-// display (P) given by |parent_display_id|, with a negative offset.
+// DisplayPlacement specifies where the display (D) is placed relative to
+// parent (P) display. In the following example, D given by |display_id| is
+// placed at the left side of P given by |parent_display_id|, with a negative
+// offset and a top-left offset reference.
 //
 //        +      +--------+
 // offset |      |        |
@@ -56,12 +53,25 @@ struct DISPLAY_EXPORT DisplayPlacement {
   enum Position { TOP, RIGHT, BOTTOM, LEFT };
   Position position;
 
-  // The offset of the position of the secondary display. The offset is
-  // based on the top/left edge of the primary display.
+  // The offset of the position with respect to the parent.
   int offset;
 
-  DisplayPlacement(Position position, int offset);
+  // Determines if the offset is relative to the TOP_LEFT or the BOTTOM_RIGHT.
+  // Defaults to TOP_LEFT.
+  enum OffsetReference { TOP_LEFT, BOTTOM_RIGHT };
+  OffsetReference offset_reference;
+
   DisplayPlacement();
+  DisplayPlacement(Position position, int offset);
+  DisplayPlacement(Position position,
+                   int offset,
+                   OffsetReference offset_reference);
+  DisplayPlacement(int64_t display_id,
+                   int64_t parent_display_id,
+                   Position position,
+                   int offset,
+                   OffsetReference offset_reference);
+
   DisplayPlacement(const DisplayPlacement& placement);
 
   DisplayPlacement& Swap();
@@ -82,7 +92,7 @@ class DISPLAY_EXPORT DisplayLayout final {
   // |updated_ids| (optional) contains the ids for displays whose bounds have
   // changed. |minimum_offset_overlap| represents the minimum required overlap
   // between displays.
-  void ApplyToDisplayList(DisplayList* display_list,
+  void ApplyToDisplayList(Displays* display_list,
                           std::vector<int64_t>* updated_ids,
                           int minimum_offset_overlap) const;
 
@@ -117,7 +127,7 @@ class DISPLAY_EXPORT DisplayLayout final {
   // Apply the display placement to |display_list|.
   // Returns true if the display bounds were updated.
   static bool ApplyDisplayPlacement(const DisplayPlacement& placement,
-                                    DisplayList* display_list,
+                                    Displays* display_list,
                                     int minimum_offset_overlap);
 
   DISALLOW_COPY_AND_ASSIGN(DisplayLayout);

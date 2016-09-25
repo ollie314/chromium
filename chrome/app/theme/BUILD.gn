@@ -4,7 +4,6 @@
 
 import("//tools/grit/grit_rule.gni")
 
-# GYP version: chrome/chrome_resources.gyp:theme_resources
 grit("theme_resources") {
   source = "theme_resources.grd"
   outputs = [
@@ -14,8 +13,6 @@ grit("theme_resources") {
     "theme_resources_100_percent.pak",
     "theme_resources_200_percent.pak",
     "theme_resources_300_percent.pak",
-    "theme_resources_material_100_percent.pak",
-    "theme_resources_material_200_percent.pak",
   ]
 
   deps = [
@@ -26,9 +23,9 @@ grit("theme_resources") {
   output_dir = "$root_gen_dir/chrome"
 }
 
-# GYP version: chrome/chrome_resources.gyp:chrome_unscaled_resources
 grit("chrome_unscaled_resources") {
   source = "chrome_unscaled_resources.grd"
+  use_qualified_include = true
   outputs = [
     "grit/chrome_unscaled_resources.h",
     "chrome_unscaled_resources.pak",

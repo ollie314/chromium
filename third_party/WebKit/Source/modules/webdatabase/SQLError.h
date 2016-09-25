@@ -30,24 +30,26 @@
 #define SQLError_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
 class SQLErrorData {
     USING_FAST_MALLOC(SQLErrorData);
 public:
-    static PassOwnPtr<SQLErrorData> create(unsigned code, const String& message)
+    static std::unique_ptr<SQLErrorData> create(unsigned code, const String& message)
     {
-        return adoptPtr(new SQLErrorData(code, message));
+        return wrapUnique(new SQLErrorData(code, message));
     }
 
-    static PassOwnPtr<SQLErrorData> create(unsigned code, const char* message, int sqliteCode, const char* sqliteMessage)
+    static std::unique_ptr<SQLErrorData> create(unsigned code, const char* message, int sqliteCode, const char* sqliteMessage)
     {
         return create(code, String::format("%s (%d %s)", message, sqliteCode, sqliteMessage));
     }
 
-    static PassOwnPtr<SQLErrorData> create(const SQLErrorData& data)
+    static std::unique_ptr<SQLErrorData> create(const SQLErrorData& data)
     {
         return create(data.code(), data.message());
     }
@@ -74,14 +76,14 @@ public:
     String message() const { return m_data.message(); }
 
     enum SQLErrorCode {
-        UNKNOWN_ERR = 0,
-        DATABASE_ERR = 1,
-        VERSION_ERR = 2,
-        TOO_LARGE_ERR = 3,
-        QUOTA_ERR = 4,
-        SYNTAX_ERR = 5,
-        CONSTRAINT_ERR = 6,
-        TIMEOUT_ERR = 7
+        kUnknownErr = 0,
+        kDatabaseErr = 1,
+        kVersionErr = 2,
+        kTooLargeErr = 3,
+        kQuotaErr = 4,
+        kSyntaxErr = 5,
+        kConstraintErr = 6,
+        kTimeoutErr = 7
     };
 
     static const char quotaExceededErrorMessage[];

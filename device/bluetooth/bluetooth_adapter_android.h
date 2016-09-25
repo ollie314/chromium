@@ -44,7 +44,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterAndroid final
   // The BluetoothAdapterAndroid instance will indirectly hold a Java reference
   // to |bluetooth_adapter_wrapper|.
   static base::WeakPtr<BluetoothAdapterAndroid> Create(
-      jobject bluetooth_adapter_wrapper);  // Java Type: bluetoothAdapterWrapper
+      const base::android::JavaRef<jobject>&
+          bluetooth_adapter_wrapper);  // Java Type: bluetoothAdapterWrapper
 
   // Register C++ methods exposed to Java using JNI.
   static bool RegisterJNI(JNIEnv* env);
@@ -84,7 +85,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterAndroid final
   void RegisterAdvertisement(
       std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
       const CreateAdvertisementCallback& callback,
-      const CreateAdvertisementErrorCallback& error_callback) override;
+      const AdvertisementErrorCallback& error_callback) override;
+  BluetoothLocalGattService* GetGattService(
+      const std::string& identifier) const override;
 
   // Called when adapter state changes.
   void OnAdapterStateChanged(JNIEnv* env,
@@ -103,8 +106,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterAndroid final
       const base::android::JavaParamRef<jstring>& address,
       const base::android::JavaParamRef<jobject>&
           bluetooth_device_wrapper,  // Java Type: bluetoothDeviceWrapper
-      const base::android::JavaParamRef<jobject>&
-          advertised_uuids);  // Java Type: List<ParcelUuid>
+      int32_t rssi,
+      const base::android::JavaParamRef<jobjectArray>&
+          advertised_uuids,  // Java Type: String[]
+      int32_t tx_power);
 
  protected:
   BluetoothAdapterAndroid();
@@ -126,8 +131,15 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterAndroid final
   void RemovePairingDelegateInternal(
       BluetoothDevice::PairingDelegate* pairing_delegate) override;
 
+  void PurgeTimedOutDevices();
+
+  scoped_refptr<base::SequencedTaskRunner> ui_task_runner_;
+
   // Java object org.chromium.device.bluetooth.ChromeBluetoothAdapter.
   base::android::ScopedJavaGlobalRef<jobject> j_adapter_;
+
+ private:
+  size_t num_discovery_sessions_ = 0;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

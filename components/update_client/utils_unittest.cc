@@ -23,17 +23,22 @@ base::FilePath MakeTestFilePath(const char* file) {
 
 namespace update_client {
 
-TEST(UpdateClientUtils, BuildProtocolRequest_DownloadPreference) {
-  const string emptystr;
+TEST(UpdateClientUtils, BuildProtocolRequest_ProdIdVersion) {
+  // Verifies that |prod_id| and |version| are serialized.
+  const string request =
+      BuildProtocolRequest("some_prod_id", "1.0", "", "", "", "", "", "");
+  EXPECT_NE(string::npos, request.find(" version=\"some_prod_id-1.0\" "));
+}
 
+TEST(UpdateClientUtils, BuildProtocolRequest_DownloadPreference) {
   // Verifies that an empty |download_preference| is not serialized.
-  const string request_no_dlpref = BuildProtocolRequest(
-      emptystr, emptystr, emptystr, emptystr, emptystr, emptystr, emptystr);
+  const string request_no_dlpref =
+      BuildProtocolRequest("", "", "", "", "", "", "", "");
   EXPECT_EQ(string::npos, request_no_dlpref.find(" dlpref="));
 
   // Verifies that |download_preference| is serialized.
-  const string request_with_dlpref = BuildProtocolRequest(
-      emptystr, emptystr, emptystr, emptystr, "some pref", emptystr, emptystr);
+  const string request_with_dlpref =
+      BuildProtocolRequest("", "", "", "", "", "some pref", "", "");
   EXPECT_NE(string::npos, request_with_dlpref.find(" dlpref=\"some pref\""));
 }
 
@@ -75,33 +80,59 @@ TEST(UpdateClientUtils, IsValidBrand) {
   EXPECT_FALSE(IsValidBrand(std::string("T ES")));   // Contains white space.
   EXPECT_FALSE(IsValidBrand(std::string("<TE")));    // Has <.
   EXPECT_FALSE(IsValidBrand(std::string("TE>")));    // Has >.
-  EXPECT_FALSE(IsValidAp(std::string("\"")));        // Has "
-  EXPECT_FALSE(IsValidAp(std::string("\\")));        // Has backslash.
+  EXPECT_FALSE(IsValidBrand(std::string("\"")));     // Has "
+  EXPECT_FALSE(IsValidBrand(std::string("\\")));     // Has backslash.
   EXPECT_FALSE(IsValidBrand(std::string("\xaa")));   // Has non-ASCII char.
 }
 
-// Tests that the ap matches ^[-+_=a-zA-Z0-9]{0,256}$
-TEST(UpdateClientUtils, IsValidAp) {
-  EXPECT_TRUE(IsValidAp(std::string("a=1")));
-  EXPECT_TRUE(IsValidAp(std::string("")));
-  EXPECT_TRUE(IsValidAp(std::string("A")));
-  EXPECT_TRUE(IsValidAp(std::string("Z")));
-  EXPECT_TRUE(IsValidAp(std::string("a")));
-  EXPECT_TRUE(IsValidAp(std::string("z")));
-  EXPECT_TRUE(IsValidAp(std::string("0")));
-  EXPECT_TRUE(IsValidAp(std::string("9")));
-  EXPECT_TRUE(IsValidAp(std::string(256, 'a')));
-  EXPECT_TRUE(IsValidAp(std::string("-+_=")));
+// Tests that the name of an InstallerAttribute matches ^[-_=a-zA-Z0-9]{1,256}$
+TEST(UpdateClientUtils, IsValidInstallerAttributeName) {
+  // Test the length boundaries.
+  EXPECT_FALSE(IsValidInstallerAttribute(
+      make_pair(std::string(0, 'a'), std::string("value"))));
+  EXPECT_TRUE(IsValidInstallerAttribute(
+      make_pair(std::string(1, 'a'), std::string("value"))));
+  EXPECT_TRUE(IsValidInstallerAttribute(
+      make_pair(std::string(256, 'a'), std::string("value"))));
+  EXPECT_FALSE(IsValidInstallerAttribute(
+      make_pair(std::string(257, 'a'), std::string("value"))));
 
-  EXPECT_FALSE(IsValidAp(std::string(257, 'a')));  // Too long.
-  EXPECT_FALSE(IsValidAp(std::string(" ap")));     // Begins with white space.
-  EXPECT_FALSE(IsValidAp(std::string("ap ")));     // Ends with white space.
-  EXPECT_FALSE(IsValidAp(std::string("a p")));     // Contains white space.
-  EXPECT_FALSE(IsValidAp(std::string("<ap")));     // Has <.
-  EXPECT_FALSE(IsValidAp(std::string("ap>")));     // Has >.
-  EXPECT_FALSE(IsValidAp(std::string("\"")));      // Has "
-  EXPECT_FALSE(IsValidAp(std::string("\\")));      // Has backspace.
-  EXPECT_FALSE(IsValidAp(std::string("\xaa")));    // Has non-ASCII char.
+  const char* const valid_names[] = {"A", "Z", "a", "a-b", "A_B",
+                                     "z", "0", "9", "-_"};
+  for (const char* name : valid_names)
+    EXPECT_TRUE(IsValidInstallerAttribute(
+        make_pair(std::string(name), std::string("value"))));
+
+  const char* const invalid_names[] = {
+      "",   "a=1", " name", "name ", "na me", "<name", "name>",
+      "\"", "\\",  "\xaa",  ".",     ",",     ";",     "+"};
+  for (const char* name : invalid_names)
+    EXPECT_FALSE(IsValidInstallerAttribute(
+        make_pair(std::string(name), std::string("value"))));
+}
+
+// Tests that the value of an InstallerAttribute matches
+// ^[-.,;+_=a-zA-Z0-9]{0,256}$
+TEST(UpdateClientUtils, IsValidInstallerAttributeValue) {
+  // Test the length boundaries.
+  EXPECT_TRUE(IsValidInstallerAttribute(
+      make_pair(std::string("name"), std::string(0, 'a'))));
+  EXPECT_TRUE(IsValidInstallerAttribute(
+      make_pair(std::string("name"), std::string(256, 'a'))));
+  EXPECT_FALSE(IsValidInstallerAttribute(
+      make_pair(std::string("name"), std::string(257, 'a'))));
+
+  const char* const valid_values[] = {"",  "a=1", "A", "Z",      "a",
+                                      "z", "0",   "9", "-.,;+_="};
+  for (const char* value : valid_values)
+    EXPECT_TRUE(IsValidInstallerAttribute(
+        make_pair(std::string("name"), std::string(value))));
+
+  const char* const invalid_values[] = {" ap", "ap ", "a p", "<ap",
+                                        "ap>", "\"",  "\\",  "\xaa"};
+  for (const char* value : invalid_values)
+    EXPECT_FALSE(IsValidInstallerAttribute(
+        make_pair(std::string("name"), std::string(value))));
 }
 
 TEST(UpdateClientUtils, RemoveUnsecureUrls) {

@@ -18,6 +18,8 @@
 #include "base/macros.h"
 #include "base/numerics/safe_math.h"
 #include "gpu/command_buffer/common/gles2_utils_export.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gl/gpu_preference.h"
 
 namespace gpu {
 namespace gles2 {
@@ -51,6 +53,24 @@ inline bool SafeAddInt32(int32_t a, int32_t b, int32_t* dst) {
   checked += b;
   *dst = checked.ValueOrDefault(0);
   return checked.IsValid();
+}
+
+// Returns the address of the first byte after a struct.
+template <typename T>
+const volatile void* AddressAfterStruct(const volatile T& pod) {
+  return reinterpret_cast<const volatile uint8_t*>(&pod) + sizeof(pod);
+}
+
+// Returns the address of the frst byte after the struct or NULL if size >
+// immediate_data_size.
+template <typename RETURN_TYPE, typename COMMAND_TYPE>
+RETURN_TYPE GetImmediateDataAs(const volatile COMMAND_TYPE& pod,
+                               uint32_t size,
+                               uint32_t immediate_data_size) {
+  return (size <= immediate_data_size)
+             ? static_cast<RETURN_TYPE>(
+                   const_cast<volatile void*>(AddressAfterStruct(pod)))
+             : NULL;
 }
 
 struct GLES2_UTILS_EXPORT PixelStoreParams {
@@ -176,6 +196,7 @@ class GLES2_UTILS_EXPORT GLES2Util {
   static uint32_t IndexToGLFaceTarget(int index);
 
   static size_t GLTargetToFaceIndex(uint32_t target);
+  static uint32_t GLFaceTargetToTextureTarget(uint32_t target);
 
   static uint32_t GetGLReadPixelsImplementationFormat(uint32_t internal_format,
                                                       uint32_t texture_type,
@@ -219,6 +240,17 @@ class GLES2_UTILS_EXPORT GLES2Util {
   static bool IsSignedIntegerFormat(uint32_t internal_format);
   static bool IsIntegerFormat(uint32_t internal_format);
   static bool IsFloatFormat(uint32_t internal_format);
+  static uint32_t ConvertToSizedFormat(uint32_t format, uint32_t type);
+
+  static bool IsSizedColorFormat(uint32_t internal_format);
+  static void GetColorFormatComponentSizes(
+      uint32_t internal_format, uint32_t type, int* r, int* g, int* b, int* a);
+
+  // Computes the data size for certain gl commands like glUniform.
+  static bool ComputeDataSize(uint32_t count,
+                              size_t size,
+                              unsigned int elements_per_unit,
+                              uint32_t* dst);
 
   #include "../common/gles2_cmd_utils_autogen.h"
 
@@ -267,16 +299,18 @@ enum ContextType {
   CONTEXT_TYPE_WEBGL1,
   CONTEXT_TYPE_WEBGL2,
   CONTEXT_TYPE_OPENGLES2,
-  CONTEXT_TYPE_OPENGLES3
+  CONTEXT_TYPE_OPENGLES3,
+  CONTEXT_TYPE_LAST = CONTEXT_TYPE_OPENGLES3
 };
 
 struct GLES2_UTILS_EXPORT ContextCreationAttribHelper {
   ContextCreationAttribHelper();
   ContextCreationAttribHelper(const ContextCreationAttribHelper& other);
 
-  void Serialize(std::vector<int32_t>* attribs) const;
   bool Parse(const std::vector<int32_t>& attribs);
 
+  gfx::Size offscreen_framebuffer_size;
+  gl::GpuPreference gpu_preference;
   // -1 if invalid or unspecified.
   int32_t alpha_size;
   int32_t blue_size;
@@ -290,6 +324,8 @@ struct GLES2_UTILS_EXPORT ContextCreationAttribHelper {
   bool bind_generates_resource;
   bool fail_if_major_perf_caveat;
   bool lose_context_when_out_of_memory;
+  bool should_use_native_gmb_for_backbuffer;
+
   ContextType context_type;
 };
 

@@ -105,7 +105,7 @@ void SandboxedZipAnalyzer::OnProcessCrashed(int exit_code) {
   OnAnalyzeZipFileFinished(zip_analyzer::Results());
 }
 
-void SandboxedZipAnalyzer::OnProcessLaunchFailed() {
+void SandboxedZipAnalyzer::OnProcessLaunchFailed(int error_code) {
   OnAnalyzeZipFileFinished(zip_analyzer::Results());
 }
 
@@ -122,10 +122,10 @@ bool SandboxedZipAnalyzer::OnMessageReceived(const IPC::Message& message) {
 
 void SandboxedZipAnalyzer::StartProcessOnIOThread() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  utility_process_host_ = content::UtilityProcessHost::Create(
-      this,
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get())
-      ->AsWeakPtr();
+  utility_process_host_ =
+      content::UtilityProcessHost::Create(
+          this, BrowserThread::GetTaskRunnerForThread(BrowserThread::IO).get())
+          ->AsWeakPtr();
   utility_process_host_->SetName(l10n_util::GetStringUTF16(
       IDS_UTILITY_PROCESS_SAFE_BROWSING_ZIP_FILE_ANALYZER_NAME));
   utility_process_host_->Send(

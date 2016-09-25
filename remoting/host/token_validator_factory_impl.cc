@@ -17,6 +17,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringize_macros.h"
 #include "base/values.h"
 #include "crypto/random.h"
 #include "net/base/elements_upload_data_stream.h"
@@ -89,6 +90,20 @@ void TokenValidatorImpl::StartValidateRequest(const std::string& token) {
   request_ = request_context_getter_->GetURLRequestContext()->CreateRequest(
       third_party_auth_config_.token_validation_url, net::DEFAULT_PRIORITY,
       this);
+
+#if defined(GOOGLE_CHROME_BUILD)
+  std::string app_name = "Chrome Remote Desktop";
+#else
+  std::string app_name = "Chromoting";
+#endif
+#ifndef VERSION
+#error VERSION is not set.
+#endif
+  // Set a user-agent for logging/auditing purposes.
+  request_->SetExtraRequestHeaderByName(net::HttpRequestHeaders::kUserAgent,
+                                        app_name + " " + STRINGIZE(VERSION),
+                                        true);
+
   request_->SetExtraRequestHeaderByName(
       net::HttpRequestHeaders::kContentType,
       "application/x-www-form-urlencoded", true);
@@ -126,9 +141,9 @@ TokenValidatorFactoryImpl::~TokenValidatorFactoryImpl() {
 std::unique_ptr<protocol::TokenValidator>
 TokenValidatorFactoryImpl::CreateTokenValidator(const std::string& local_jid,
                                                 const std::string& remote_jid) {
-  return base::WrapUnique(
-      new TokenValidatorImpl(third_party_auth_config_, key_pair_, local_jid,
-                             remote_jid, request_context_getter_));
+  return base::MakeUnique<TokenValidatorImpl>(third_party_auth_config_,
+                                              key_pair_, local_jid, remote_jid,
+                                              request_context_getter_);
 }
 
 }  // namespace remoting

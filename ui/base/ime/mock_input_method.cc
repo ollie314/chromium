@@ -80,8 +80,8 @@ void MockInputMethod::CancelComposition(const TextInputClient* client) {
 void MockInputMethod::OnInputLocaleChanged() {
 }
 
-std::string MockInputMethod::GetInputLocale() {
-  return "";
+bool MockInputMethod::IsInputLocaleCJK() const {
+  return false;
 }
 
 TextInputType MockInputMethod::GetTextInputType() const {
@@ -114,6 +114,11 @@ void MockInputMethod::AddObserver(InputMethodObserver* observer) {
 
 void MockInputMethod::RemoveObserver(InputMethodObserver* observer) {
   observer_list_.RemoveObserver(observer);
+}
+
+const std::vector<std::unique_ptr<ui::KeyEvent>>&
+MockInputMethod::GetKeyEventsForTesting() {
+  return key_events_for_testing_;
 }
 
 }  // namespace ui

@@ -8,10 +8,11 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Bundle;
-import android.preference.PreferenceManager;
 
-import org.chromium.sync.signin.AccountManagerHelper;
+import org.chromium.base.ContextUtils;
+import org.chromium.components.sync.signin.AccountManagerHelper;
 
 import java.util.HashSet;
 import java.util.List;
@@ -27,12 +28,14 @@ public class ToSAckedReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) return;
+
         Bundle args = intent.getExtras();
         if (args == null) return;
         String accountName = args.getString(EXTRA_ACCOUNT_NAME, null);
         if (accountName == null) return;
 
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
         // Make sure to construct a new set so it can be modified safely. See crbug.com/568369.
         Set<String> accounts =
                 new HashSet<String>(prefs.getStringSet(TOS_ACKED_ACCOUNTS, new HashSet<String>()));
@@ -47,8 +50,10 @@ public class ToSAckedReceiver extends BroadcastReceiver {
      * @return Whether or not the the ToS has been seen.
      */
     public static boolean checkAnyUserHasSeenToS(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) return false;
+
         Set<String> toSAckedAccounts =
-                PreferenceManager.getDefaultSharedPreferences(context).getStringSet(
+                ContextUtils.getAppSharedPreferences().getStringSet(
                         TOS_ACKED_ACCOUNTS, null);
         if (toSAckedAccounts == null || toSAckedAccounts.isEmpty()) return false;
         AccountManagerHelper accountHelper = AccountManagerHelper.get(context);

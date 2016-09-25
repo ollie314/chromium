@@ -6,6 +6,8 @@
 
 #include "core/css/CSSPrimitiveValueMappings.h"
 #include "core/css/resolver/StyleResolverState.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -20,7 +22,7 @@ public:
 
     EVisibility visibility() const
     {
-        ASSERT(m_isSingle);
+        DCHECK(m_isSingle);
         return m_start;
     }
 
@@ -30,8 +32,8 @@ public:
             return m_start;
         if (fraction >= 1)
             return m_end;
-        if (m_start == VISIBLE || m_end == VISIBLE)
-            return VISIBLE;
+        if (m_start == EVisibility::Visible || m_end == EVisibility::Visible)
+            return EVisibility::Visible;
         return fraction < 0.5 ? m_start : m_end;
     }
 
@@ -56,9 +58,9 @@ class UnderlyingVisibilityChecker : public InterpolationType::ConversionChecker 
 public:
     ~UnderlyingVisibilityChecker() final {}
 
-    static PassOwnPtr<UnderlyingVisibilityChecker> create(EVisibility visibility)
+    static std::unique_ptr<UnderlyingVisibilityChecker> create(EVisibility visibility)
     {
-        return adoptPtr(new UnderlyingVisibilityChecker(visibility));
+        return wrapUnique(new UnderlyingVisibilityChecker(visibility));
     }
 
 private:
@@ -78,9 +80,9 @@ private:
 
 class ParentVisibilityChecker : public InterpolationType::ConversionChecker {
 public:
-    static PassOwnPtr<ParentVisibilityChecker> create(EVisibility visibility)
+    static std::unique_ptr<ParentVisibilityChecker> create(EVisibility visibility)
     {
-        return adoptPtr(new ParentVisibilityChecker(visibility));
+        return wrapUnique(new ParentVisibilityChecker(visibility));
     }
 
 private:
@@ -93,7 +95,7 @@ private:
         return m_visibility == environment.state().parentStyle()->visibility();
     }
 
-    const double m_visibility;
+    const EVisibility m_visibility;
 };
 
 InterpolationValue CSSVisibilityInterpolationType::createVisibilityValue(EVisibility visibility) const
@@ -109,9 +111,9 @@ InterpolationValue CSSVisibilityInterpolationType::maybeConvertNeutral(const Int
     return createVisibilityValue(underlyingVisibility);
 }
 
-InterpolationValue CSSVisibilityInterpolationType::maybeConvertInitial(const StyleResolverState&) const
+InterpolationValue CSSVisibilityInterpolationType::maybeConvertInitial(const StyleResolverState&, ConversionCheckers&) const
 {
-    return createVisibilityValue(VISIBLE);
+    return createVisibilityValue(EVisibility::Visible);
 }
 
 InterpolationValue CSSVisibilityInterpolationType::maybeConvertInherit(const StyleResolverState& state, ConversionCheckers& conversionCheckers) const
@@ -146,7 +148,7 @@ InterpolationValue CSSVisibilityInterpolationType::maybeConvertUnderlyingValue(c
     return createVisibilityValue(environment.state().style()->visibility());
 }
 
-PairwiseInterpolationValue CSSVisibilityInterpolationType::mergeSingleConversions(InterpolationValue&& start, InterpolationValue&& end) const
+PairwiseInterpolationValue CSSVisibilityInterpolationType::maybeMergeSingles(InterpolationValue&& start, InterpolationValue&& end) const
 {
     return PairwiseInterpolationValue(
         InterpolableNumber::create(0),

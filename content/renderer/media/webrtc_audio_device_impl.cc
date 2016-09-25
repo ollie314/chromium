@@ -4,16 +4,16 @@
 
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 
-#include "base/bind.h"
-#include "base/metrics/histogram.h"
+#include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/windows_version.h"
-#include "content/renderer/media/media_stream_audio_processor.h"
-#include "content/renderer/media/webrtc_audio_capturer.h"
+#include "content/renderer/media/webrtc/processed_local_audio_source.h"
 #include "content/renderer/media/webrtc_audio_renderer.h"
-#include "content/renderer/render_thread_impl.h"
-#include "media/audio/audio_parameters.h"
 #include "media/audio/sample_rates.h"
+#include "media/base/audio_bus.h"
+#include "media/base/audio_parameters.h"
 
 using media::AudioParameters;
 using media::ChannelLayout;
@@ -64,9 +64,15 @@ void WebRtcAudioDeviceImpl::RenderData(media::AudioBus* audio_bus,
                                        int sample_rate,
                                        int audio_delay_milliseconds,
                                        base::TimeDelta* current_time) {
-  DCHECK(audio_renderer_thread_checker_.CalledOnValidThread());
   {
     base::AutoLock auto_lock(lock_);
+#if DCHECK_IS_ON()
+    DCHECK(renderer_->CurrentThreadIsRenderingThread());
+    if (!audio_renderer_thread_checker_.CalledOnValidThread()) {
+      for (auto* sink : playout_sinks_)
+        sink->OnRenderThreadChanged();
+    }
+#endif
     if (!playing_) {
       // Force silence to AudioBus after stopping playout in case
       // there is lingering audio data in AudioBus.
@@ -89,9 +95,12 @@ void WebRtcAudioDeviceImpl::RenderData(media::AudioBus* audio_bus,
   int64_t ntp_time_ms = -1;
   static const int kBitsPerByte = 8;
   int16_t* audio_data = &render_buffer_[0];
+
+  TRACE_EVENT_BEGIN0("audio", "VoE::PullRenderData");
   audio_transport_callback_->PullRenderData(
       bytes_per_sample * kBitsPerByte, sample_rate, audio_bus->channels(),
       frames_per_10_ms, audio_data, &elapsed_time_ms, &ntp_time_ms);
+  TRACE_EVENT_END0("audio", "VoE::PullRenderData");
   if (elapsed_time_ms >= 0) {
     *current_time = base::TimeDelta::FromMilliseconds(elapsed_time_ms);
   }
@@ -129,7 +138,7 @@ void WebRtcAudioDeviceImpl::AudioRendererThreadStopped() {
   // Notify the playout sink of the change.
   // Not holding |lock_| because the caller must guarantee that the audio
   // renderer thread is dead, so no race is possible with |playout_sinks_|
-  for (const auto& sink : playout_sinks_)
+  for (auto* sink : playout_sinks_)
     sink->OnPlayoutDataSourceChanged();
 }
 
@@ -360,7 +369,7 @@ int32_t WebRtcAudioDeviceImpl::RecordingDelay(uint16_t* delay_ms) const {
   DCHECK(signaling_thread_checker_.CalledOnValidThread());
 
   // There is no way to report a correct delay value to WebRTC since there
-  // might be multiple WebRtcAudioCapturer instances.
+  // might be multiple ProcessedLocalAudioSource instances.
   NOTREACHED();
   return -1;
 }
@@ -421,7 +430,8 @@ bool WebRtcAudioDeviceImpl::SetAudioRenderer(WebRtcAudioRenderer* renderer) {
   return true;
 }
 
-void WebRtcAudioDeviceImpl::AddAudioCapturer(WebRtcAudioCapturer* capturer) {
+void WebRtcAudioDeviceImpl::AddAudioCapturer(
+    ProcessedLocalAudioSource* capturer) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   DVLOG(1) << "WebRtcAudioDeviceImpl::AddAudioCapturer()";
   DCHECK(capturer);
@@ -433,7 +443,8 @@ void WebRtcAudioDeviceImpl::AddAudioCapturer(WebRtcAudioCapturer* capturer) {
   capturers_.push_back(capturer);
 }
 
-void WebRtcAudioDeviceImpl::RemoveAudioCapturer(WebRtcAudioCapturer* capturer) {
+void WebRtcAudioDeviceImpl::RemoveAudioCapturer(
+    ProcessedLocalAudioSource* capturer) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   DVLOG(1) << "WebRtcAudioDeviceImpl::RemoveAudioCapturer()";
   DCHECK(capturer);

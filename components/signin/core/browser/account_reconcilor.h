@@ -6,6 +6,7 @@
 
 #include <deque>
 #include <functional>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -15,7 +16,6 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
@@ -147,6 +147,7 @@ class AccountReconcilor : public KeyedService,
       const GoogleServiceAuthError& error) override;
   void OnGaiaAccountsInCookieUpdated(
         const std::vector<gaia::ListedAccount>& accounts,
+        const std::vector<gaia::ListedAccount>& signed_out_accounts,
         const GoogleServiceAuthError& error) override;
 
   // Overriden from OAuth2TokenService::Observer.

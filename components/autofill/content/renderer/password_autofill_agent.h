@@ -10,13 +10,17 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/weak_ptr.h"
+#include "components/autofill/content/public/interfaces/autofill_agent.mojom.h"
+#include "components/autofill/content/public/interfaces/autofill_driver.mojom.h"
+#include "components/autofill/content/renderer/autofill_agent.h"
 #include "components/autofill/content/renderer/password_form_conversion_utils.h"
 #include "components/autofill/core/common/form_data_predictions.h"
+#include "components/autofill/core/common/password_form.h"
 #include "components/autofill/core/common/password_form_field_prediction_map.h"
 #include "components/autofill/core/common/password_form_fill_data.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_view_observer.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 
 namespace blink {
@@ -27,16 +31,33 @@ class WebSecurityOrigin;
 
 namespace autofill {
 
+class RendererSavePasswordProgressLogger;
+
 // This class is responsible for filling password forms.
-class PasswordAutofillAgent : public content::RenderFrameObserver {
+class PasswordAutofillAgent : public content::RenderFrameObserver,
+                              public mojom::PasswordAutofillAgent {
  public:
   explicit PasswordAutofillAgent(content::RenderFrame* render_frame);
   ~PasswordAutofillAgent() override;
 
+  void BindRequest(mojom::PasswordAutofillAgentRequest request);
+
+  void SetAutofillAgent(AutofillAgent* autofill_agent);
+
+  const mojom::PasswordManagerDriverPtr& GetPasswordManagerDriver();
+
+  // mojom::PasswordAutofillAgent:
+  void FillPasswordForm(int key,
+                        const PasswordFormFillData& form_data) override;
+  void SetLoggingState(bool active) override;
+  void AutofillUsernameAndPasswordDataReceived(
+      const FormsPredictionsMap& predictions) override;
+  void FindFocusedPasswordForm(
+      const FindFocusedPasswordFormCallback& callback) override;
+
   // WebFrameClient editor related calls forwarded by AutofillAgent.
   // If they return true, it indicates the event was consumed and should not
   // be used for any other autofill activity.
-  bool TextFieldDidEndEditing(const blink::WebInputElement& element);
   bool TextDidChangeInTextField(const blink::WebInputElement& element);
 
   // Function that should be called whenever the value of |element| changes due
@@ -47,9 +68,9 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
 
   // Fills the username and password fields of this form with the given values.
   // Returns true if the fields were filled, false otherwise.
-  bool FillSuggestion(const blink::WebFormControlElement& node,
-                      const blink::WebString& username,
-                      const blink::WebString& password);
+  bool FillSuggestion(const blink::WebFormControlElement& control_element,
+                      const base::string16& username,
+                      const base::string16& password);
 
   // Previews the username and password fields of this form with the given
   // values. Returns true if the fields were previewed, false otherwise.
@@ -85,6 +106,22 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // signal to make autofilled values of password input elements accessible to
   // JavaScript.
   void FirstUserGestureObserved();
+
+  // Given password form data |form_data| and a supplied key |key| for
+  // referencing the password info, returns a set of WebInputElements in
+  // |elements|, which must be non-null, that the password manager has values
+  // for filling. Also takes an optional logger |logger| for logging password
+  // autofill behavior.
+  void GetFillableElementFromFormData(
+      int key,
+      const PasswordFormFillData& form_data,
+      RendererSavePasswordProgressLogger* logger,
+      std::vector<blink::WebInputElement>* elements);
+
+  // Called when the focused node has changed.
+  void FocusedNodeHasChanged(const blink::WebNode& node);
+
+  bool logging_state_active() const { return logging_state_active_; }
 
  protected:
   virtual bool OriginCanAccessPasswordManager(
@@ -144,7 +181,6 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   };
 
   // RenderFrameObserver:
-  bool OnMessageReceived(const IPC::Message& message) override;
   void DidFinishDocumentLoad() override;
   void DidFinishLoad() override;
   void FrameDetached() override;
@@ -154,13 +190,7 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
                                 bool is_same_page_navigation) override;
   void WillSendSubmitEvent(const blink::WebFormElement& form) override;
   void WillSubmitForm(const blink::WebFormElement& form) override;
-
-  // RenderView IPC handlers:
-  void OnFillPasswordForm(int key, const PasswordFormFillData& form_data);
-  void OnSetLoggingState(bool active);
-  void OnAutofillUsernameAndPasswordDataReceived(
-      const FormsPredictionsMap& predictions);
-  void OnFindFocusedPasswordForm();
+  void OnDestruct() override;
 
   // Scans the given frame for password forms and sends them up to the browser.
   // If |only_visible| is true, only forms visible in the layout are sent.
@@ -209,6 +239,8 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // Helper function called when in-page navigation completed
   void OnSamePageNavigationCompleted();
 
+  const mojom::AutofillDriverPtr& GetAutofillDriver();
+
   // The logins we have filled so far with their associated info.
   WebInputToPasswordInfoMap web_input_to_password_info_;
   // A (sort-of) reverse map to |login_to_password_info_|.
@@ -218,10 +250,13 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // but the submit may still fail (i.e. doesn't pass JavaScript validation).
   std::unique_ptr<PasswordForm> provisionally_saved_form_;
 
-  // Contains the most recent text that user typed or PasswordManager autofilled
-  // in input elements. Used for storing username/password before JavaScript
+  // Map WebFormControlElement to the pair of:
+  // 1) The most recent text that user typed or PasswordManager autofilled in
+  // input elements. Used for storing username/password before JavaScript
   // changes them.
-  ModifiedValues nonscript_modified_values_;
+  // 2) Field properties mask, i.e. whether the field was autofilled, modified
+  // by user, etc. (see FieldPropertiesMask).
+  FieldValueAndPropertiesMaskMap field_value_and_properties_map_;
 
   PasswordValueGatekeeper gatekeeper_;
 
@@ -240,7 +275,11 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // fields for individual forms.
   FormsPredictionsMap form_predictions_;
 
-  base::WeakPtrFactory<PasswordAutofillAgent> weak_ptr_factory_;
+  AutofillAgent* autofill_agent_;  // Weak reference.
+
+  mojom::PasswordManagerDriverPtr password_manager_driver_;
+
+  mojo::Binding<mojom::PasswordAutofillAgent> binding_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordAutofillAgent);
 };

@@ -32,7 +32,26 @@ interface ExternalNavigationDelegate {
      * Search for intent handlers that are specific to this URL aka, specialized apps like
      * google maps or youtube
      */
-    boolean isSpecializedHandlerAvailable(List<ResolveInfo> intent);
+    boolean isSpecializedHandlerAvailable(List<ResolveInfo> infos);
+
+    /**
+     * Returns true if the current activity is a webapp and {@params url} lies within the scope of
+     * that webapp.
+     */
+    boolean isWithinCurrentWebappScope(String url);
+
+    /**
+     * Returns the number of specialized intent handlers in {@params infos}. Specialized intent
+     * handlers are intent handlers which handle only a few URLs (e.g. google maps or youtube).
+     */
+    int countSpecializedHandlers(List<ResolveInfo> infos);
+
+    /**
+     * Returns the package name of the first valid WebAPK in {@link infos}.
+     * @param infos ResolveInfos to search.
+     * @return The package name of the first valid WebAPK. Null if no valid WebAPK was found.
+     */
+    String findWebApkPackageName(List<ResolveInfo> infos);
 
     /**
      * Get the name of the package of the currently running activity so that incoming intents
@@ -90,18 +109,33 @@ interface ExternalNavigationDelegate {
      */
     OverrideUrlLoadingResult clobberCurrentTab(String url, String referrerUrl, Tab tab);
 
+    /** Adds a window id to the intent, if necessary. */
+    void maybeSetWindowId(Intent intent);
+
+    /** Adds the package name of a specialized intent handler. */
+    void maybeRecordAppHandlersInIntent(Intent intent, List<ResolveInfo> info);
+
     /**
      * Determine if the Chrome app is in the foreground.
      */
     boolean isChromeAppInForeground();
 
     /**
-     * Check if Chrome is running in document mode.
-     */
-    boolean isDocumentMode();
-
-    /**
      * @return Default SMS application's package name. Null if there isn't any.
      */
     String getDefaultSmsPackageName();
+
+    /**
+     * @return Whether the URL is a file download.
+     */
+    boolean isPdfDownload(String url);
+
+    /**
+     * Check if the URL should be handled by an instant app, or kick off an async request for an
+     * instant app banner.
+     * @param url The current URL.
+     * @param referrerUrl The referrer URL.
+     * @return Whether we launched an instant app.
+     */
+    boolean maybeLaunchInstantApp(String url, String referrerUrl);
 }

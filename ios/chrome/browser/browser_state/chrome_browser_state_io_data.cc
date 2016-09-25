@@ -22,8 +22,8 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/about_handler/about_protocol_handler.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
@@ -32,7 +32,7 @@
 #include "components/net_log/chrome_net_log.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/common/signin_pref_names.h"
-#include "components/sync_driver/pref_names.h"
+#include "components/sync/driver/pref_names.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_url_constants.h"
@@ -45,7 +45,6 @@
 #include "ios/chrome/browser/net/proxy_service_factory.h"
 #include "ios/web/public/web_thread.h"
 #include "net/base/keygen_handler.h"
-#include "net/base/network_quality_estimator.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/multi_log_ct_verifier.h"
 #include "net/cookies/canonical_cookie.h"
@@ -53,13 +52,14 @@
 #include "net/http/http_transaction_factory.h"
 #include "net/http/http_util.h"
 #include "net/http/transport_security_persister.h"
+#include "net/nqe/network_quality_estimator.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
 #include "net/ssl/channel_id_service.h"
-#include "net/url_request/certificate_report_sender.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/file_protocol_handler.h"
+#include "net/url_request/report_sender.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
@@ -128,8 +128,6 @@ void ChromeBrowserStateIOData::InitializeOnUIThread(
     signin_allowed_.Init(prefs::kSigninAllowed, pref_service);
     signin_allowed_.MoveToThread(io_task_runner);
   }
-
-  initialized_on_UI_thread_ = true;
 }
 
 ChromeBrowserStateIOData::AppRequestContext::AppRequestContext() {}
@@ -138,6 +136,17 @@ void ChromeBrowserStateIOData::AppRequestContext::SetCookieStore(
     std::unique_ptr<net::CookieStore> cookie_store) {
   cookie_store_ = std::move(cookie_store);
   set_cookie_store(cookie_store_.get());
+}
+
+void ChromeBrowserStateIOData::AppRequestContext::SetChannelIDService(
+    std::unique_ptr<net::ChannelIDService> channel_id_service) {
+  channel_id_service_ = std::move(channel_id_service);
+  set_channel_id_service(channel_id_service_.get());
+}
+
+void ChromeBrowserStateIOData::AppRequestContext::SetHttpNetworkSession(
+    std::unique_ptr<net::HttpNetworkSession> http_network_session) {
+  http_network_session_ = std::move(http_network_session);
 }
 
 void ChromeBrowserStateIOData::AppRequestContext::SetHttpTransactionFactory(
@@ -164,7 +173,6 @@ ChromeBrowserStateIOData::ProfileParams::~ProfileParams() {}
 ChromeBrowserStateIOData::ChromeBrowserStateIOData(
     ios::ChromeBrowserStateType browser_state_type)
     : initialized_(false),
-      initialized_on_UI_thread_(false),
       browser_state_type_(browser_state_type) {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
 }
@@ -260,7 +268,7 @@ net::URLRequestContext* ChromeBrowserStateIOData::GetIsolatedAppRequestContext(
     const base::FilePath& partition_path) const {
   DCHECK(initialized_);
   AppRequestContext* context = nullptr;
-  if (ContainsKey(app_request_context_map_, partition_path)) {
+  if (base::ContainsKey(app_request_context_map_, partition_path)) {
     context = app_request_context_map_[partition_path];
   } else {
     context = AcquireIsolatedAppRequestContext(main_context);
@@ -273,7 +281,7 @@ net::URLRequestContext* ChromeBrowserStateIOData::GetIsolatedAppRequestContext(
 void ChromeBrowserStateIOData::SetCookieStoreForPartitionPath(
     std::unique_ptr<net::CookieStore> cookie_store,
     const base::FilePath& partition_path) {
-  DCHECK(ContainsKey(app_request_context_map_, partition_path));
+  DCHECK(base::ContainsKey(app_request_context_map_, partition_path));
   app_request_context_map_[partition_path]->SetCookieStore(
       std::move(cookie_store));
 }
@@ -310,9 +318,9 @@ bool ChromeBrowserStateIOData::GetMetricsEnabledStateOnIOThread() const {
   return enable_metrics_.GetValue();
 }
 
-base::WeakPtr<net::HttpServerProperties>
-ChromeBrowserStateIOData::http_server_properties() const {
-  return http_server_properties_->GetWeakPtr();
+net::HttpServerProperties* ChromeBrowserStateIOData::http_server_properties()
+    const {
+  return http_server_properties_.get();
 }
 
 void ChromeBrowserStateIOData::set_http_server_properties(
@@ -327,12 +335,7 @@ void ChromeBrowserStateIOData::Init(
   // functions have been provided to assist in common operations.
   DCHECK_CURRENTLY_ON(web::WebThread::IO);
   DCHECK(!initialized_);
-
-  // TODO(jhawkins): Remove once crbug.com/102004 is fixed.
-  CHECK(initialized_on_UI_thread_);
-
-  // TODO(jhawkins): Return to DCHECK once crbug.com/102004 is fixed.
-  CHECK(profile_params_.get());
+  DCHECK(profile_params_.get());
 
   IOSChromeIOThread* const io_thread = profile_params_->io_thread;
   IOSChromeIOThread::Globals* const io_thread_globals = io_thread->globals();
@@ -361,9 +364,8 @@ void ChromeBrowserStateIOData::Init(
           pool->GetSequenceToken(), base::SequencedWorkerPool::BLOCK_SHUTDOWN),
       IsOffTheRecord()));
 
-  certificate_report_sender_.reset(new net::CertificateReportSender(
-      main_request_context_.get(),
-      net::CertificateReportSender::DO_NOT_SEND_COOKIES));
+  certificate_report_sender_.reset(new net::ReportSender(
+      main_request_context_.get(), net::ReportSender::DO_NOT_SEND_COOKIES));
   transport_security_state_->SetReportSender(certificate_report_sender_.get());
 
   // Take ownership over these parameters.
@@ -372,6 +374,10 @@ void ChromeBrowserStateIOData::Init(
 
   main_request_context_->set_cert_verifier(
       io_thread_globals->cert_verifier.get());
+  main_request_context_->set_ct_policy_enforcer(
+      io_thread_globals->ct_policy_enforcer.get());
+  main_request_context_->set_cert_transparency_verifier(
+      io_thread_globals->cert_transparency_verifier.get());
 
   InitializeInternal(std::move(network_delegate), profile_params_.get(),
                      protocol_handlers);
@@ -395,18 +401,18 @@ ChromeBrowserStateIOData::SetUpJobFactoryDefaults(
   // ChromeBrowserStateIOData::IsHandledProtocol().
   bool set_protocol = job_factory->SetProtocolHandler(
       url::kFileScheme,
-      base::WrapUnique(new net::FileProtocolHandler(
+      base::MakeUnique<net::FileProtocolHandler>(
           web::WebThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
-              base::SequencedWorkerPool::SKIP_ON_SHUTDOWN))));
+              base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
   DCHECK(set_protocol);
 
   set_protocol = job_factory->SetProtocolHandler(
-      url::kDataScheme, base::WrapUnique(new net::DataProtocolHandler()));
+      url::kDataScheme, base::MakeUnique<net::DataProtocolHandler>());
   DCHECK(set_protocol);
 
   job_factory->SetProtocolHandler(
       url::kAboutScheme,
-      base::WrapUnique(new about_handler::AboutProtocolHandler()));
+      base::MakeUnique<about_handler::AboutProtocolHandler>());
 
   // Set up interceptors in the reverse order.
   std::unique_ptr<net::URLRequestJobFactory> top_job_factory =
@@ -455,12 +461,11 @@ void ChromeBrowserStateIOData::set_channel_id_service(
 std::unique_ptr<net::HttpNetworkSession>
 ChromeBrowserStateIOData::CreateHttpNetworkSession(
     const ProfileParams& profile_params) const {
-  net::HttpNetworkSession::Params params;
   net::URLRequestContext* context = main_request_context();
 
   IOSChromeIOThread* const io_thread = profile_params.io_thread;
 
-  io_thread->InitializeNetworkSessionParams(&params);
+  net::HttpNetworkSession::Params params(io_thread->NetworkSessionParams());
   net::URLRequestContextBuilder::SetHttpNetworkSessionComponents(context,
                                                                  &params);
   if (!IsOffTheRecord() && io_thread->globals()->network_quality_estimator) {

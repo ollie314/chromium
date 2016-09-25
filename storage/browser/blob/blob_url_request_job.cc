@@ -15,11 +15,13 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_util_proxy.h"
 #include "base/format_macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -63,7 +65,7 @@ BlobURLRequestJob::BlobURLRequestJob(
 
 void BlobURLRequestJob::Start() {
   // Continue asynchronously.
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&BlobURLRequestJob::DidStart, weak_factory_.GetWeakPtr()));
 }
@@ -208,9 +210,28 @@ void BlobURLRequestJob::DidCalculateSize(int result) {
     blob_reader_->SetReadRange(byte_range_.first_byte_position(), length);
 
   net::HttpStatusCode status_code = net::HTTP_OK;
-  if (byte_range_set_ && byte_range_.IsValid())
+  if (byte_range_set_ && byte_range_.IsValid()) {
     status_code = net::HTTP_PARTIAL_CONTENT;
+  } else {
+    // TODO(horo): When the requester doesn't need the side data (ex:FileReader)
+    // we should skip reading the side data.
+    if (blob_reader_->has_side_data() &&
+        blob_reader_->ReadSideData(base::Bind(
+            &BlobURLRequestJob::DidReadMetadata, weak_factory_.GetWeakPtr())) ==
+            BlobReader::Status::IO_PENDING) {
+      return;
+    }
+  }
+
   HeadersCompleted(status_code);
+}
+
+void BlobURLRequestJob::DidReadMetadata(BlobReader::Status result) {
+  if (result != BlobReader::Status::DONE) {
+    NotifyFailure(blob_reader_->net_error());
+    return;
+  }
+  HeadersCompleted(net::HTTP_OK);
 }
 
 void BlobURLRequestJob::DidReadRawData(int result) {
@@ -240,10 +261,16 @@ void BlobURLRequestJob::NotifyFailure(int error_code) {
     case net::ERR_REQUEST_RANGE_NOT_SATISFIABLE:
       status_code = net::HTTP_REQUESTED_RANGE_NOT_SATISFIABLE;
       break;
+    case net::ERR_INVALID_ARGUMENT:
+      status_code = net::HTTP_BAD_REQUEST;
+      break;
+    case net::ERR_CACHE_READ_FAILURE:
+    case net::ERR_CACHE_CHECKSUM_READ_FAILURE:
+    case net::ERR_UNEXPECTED:
     case net::ERR_FAILED:
       break;
     default:
-      DCHECK(false);
+      DCHECK(false) << "Error code not supported: " << error_code;
       break;
   }
   HeadersCompleted(status_code);
@@ -294,6 +321,8 @@ void BlobURLRequestJob::HeadersCompleted(net::HttpStatusCode status_code) {
 
   response_info_.reset(new net::HttpResponseInfo());
   response_info_->headers = headers;
+  if (blob_reader_)
+    response_info_->metadata = blob_reader_->side_data();
 
   NotifyHeadersComplete();
 }

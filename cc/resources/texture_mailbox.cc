@@ -31,12 +31,13 @@ TextureMailbox::TextureMailbox(const gpu::Mailbox& mailbox,
       secure_output_only_(false),
       nearest_neighbor_(false) {}
 
-TextureMailbox::TextureMailbox(const gpu::Mailbox& mailbox,
-                               const gpu::SyncToken& sync_token,
-                               uint32_t target,
-                               const gfx::Size& size_in_pixels,
-                               bool is_overlay_candidate,
-                               bool secure_output_only)
+TextureMailbox::TextureMailbox(
+    const gpu::Mailbox& mailbox,
+    const gpu::SyncToken& sync_token,
+    uint32_t target,
+    const gfx::Size& size_in_pixels,
+    bool is_overlay_candidate,
+    bool secure_output_only)
     : mailbox_holder_(mailbox, sync_token, target),
       shared_bitmap_(nullptr),
       size_in_pixels_(size_in_pixels),

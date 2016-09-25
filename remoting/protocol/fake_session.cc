@@ -5,7 +5,7 @@
 #include "remoting/protocol/fake_session.h"
 
 #include "base/location.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "remoting/protocol/fake_authenticator.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
 
@@ -86,7 +86,20 @@ void FakeSession::SendTransportInfo(
     std::unique_ptr<buzz::XmlElement> transport_info) {
   if (!peer_)
     return;
-  peer_->transport_->ProcessTransportInfo(transport_info.get());
+
+  if (signaling_delay_.is_zero()) {
+    peer_->ProcessTransportInfo(std::move(transport_info));
+  } else {
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::Bind(&FakeSession::ProcessTransportInfo, peer_,
+                              base::Passed(&transport_info)),
+        signaling_delay_);
+  }
+}
+
+void FakeSession::ProcessTransportInfo(
+    std::unique_ptr<buzz::XmlElement> transport_info) {
+  transport_->ProcessTransportInfo(transport_info.get());
 }
 
 }  // namespace protocol

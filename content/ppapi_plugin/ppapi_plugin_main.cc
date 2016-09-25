@@ -6,11 +6,12 @@
 #include "base/command_line.h"
 #include "base/debug/crash_logging.h"
 #include "base/debug/debugger.h"
-#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
 #include "content/child/child_process.h"
@@ -32,7 +33,7 @@
 #include "sandbox/win/src/sandbox.h"
 #include "third_party/WebKit/public/web/win/WebFontRendering.h"
 #include "third_party/skia/include/ports/SkTypeface_win.h"
-#include "ui/display/win/dpi.h"
+#include "ui/gfx/font_render_params.h"
 #include "ui/gfx/win/direct_write.h"
 #endif
 
@@ -59,18 +60,6 @@ void* g_target_services = 0;
 #endif
 
 namespace content {
-
-namespace {
-
-#if defined(OS_WIN)
-// Windows-only skia sandbox support
-void SkiaPreCacheFont(const LOGFONT& logfont) {
-  ppapi::proxy::PluginGlobals::Get()->PreCacheFontForFlash(
-      reinterpret_cast<const void*>(&logfont));
-}
-#endif
-
-}  // namespace
 
 // Main function for starting the PPAPI plugin process.
 int PpapiPluginMain(const MainFunctionParams& parameters) {
@@ -135,12 +124,6 @@ int PpapiPluginMain(const MainFunctionParams& parameters) {
   LinuxSandbox::InitializeSandbox();
 #endif
 
-  std::unique_ptr<base::FeatureList> feature_list(new base::FeatureList);
-  feature_list->InitializeFromCommandLine(
-      command_line.GetSwitchValueASCII(switches::kEnableFeatures),
-      command_line.GetSwitchValueASCII(switches::kDisableFeatures));
-  base::FeatureList::SetInstance(std::move(feature_list));
-
   ChildProcess ppapi_process;
   ppapi_process.set_main_thread(
       new PpapiThread(parameters.command_line, false));  // Not a broker.
@@ -148,18 +131,30 @@ int PpapiPluginMain(const MainFunctionParams& parameters) {
 #if defined(OS_WIN)
   if (!base::win::IsUser32AndGdi32Available())
     gfx::win::MaybeInitializeDirectWrite();
-  bool use_direct_write = gfx::win::IsDirectWriteEnabled();
-  if (use_direct_write) {
-    InitializeDWriteFontProxy();
-  } else {
-    SkTypeface_SetEnsureLOGFONTAccessibleProc(SkiaPreCacheFont);
-  }
+  InitializeDWriteFontProxy();
 
-  blink::WebFontRendering::setUseDirectWrite(use_direct_write);
-  blink::WebFontRendering::setDeviceScaleFactor(display::win::GetDPIScale());
+  double device_scale_factor = 1.0;
+  base::StringToDouble(
+      command_line.GetSwitchValueASCII(switches::kDeviceScaleFactor),
+      &device_scale_factor);
+  blink::WebFontRendering::setDeviceScaleFactor(device_scale_factor);
+
+  int antialiasing_enabled = 1;
+  base::StringToInt(
+      command_line.GetSwitchValueASCII(switches::kPpapiAntialiasedTextEnabled),
+      &antialiasing_enabled);
+  blink::WebFontRendering::setAntialiasedTextEnabled(
+      antialiasing_enabled ? true : false);
+
+  int subpixel_rendering = 0;
+  base::StringToInt(command_line.GetSwitchValueASCII(
+                        switches::kPpapiSubpixelRenderingSetting),
+                    &subpixel_rendering);
+  blink::WebFontRendering::setLCDTextEnabled(
+      subpixel_rendering != gfx::FontRenderParams::SUBPIXEL_RENDERING_NONE);
 #endif
 
-  main_message_loop.Run();
+  base::RunLoop().Run();
 
 #if defined(OS_WIN)
   UninitializeDWriteFontProxy();

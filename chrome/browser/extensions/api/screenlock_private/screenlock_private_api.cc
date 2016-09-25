@@ -4,9 +4,11 @@
 
 #include "chrome/browser/extensions/api/screenlock_private/screenlock_private_api.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/lazy_instance.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/chrome_proximity_auth_client.h"
@@ -54,7 +56,7 @@ ScreenlockPrivateGetLockedFunction::ScreenlockPrivateGetLockedFunction() {}
 ScreenlockPrivateGetLockedFunction::~ScreenlockPrivateGetLockedFunction() {}
 
 bool ScreenlockPrivateGetLockedFunction::RunAsync() {
-  SetResult(new base::FundamentalValue(
+  SetResult(base::MakeUnique<base::FundamentalValue>(
       proximity_auth::ScreenlockBridge::Get()->IsLocked()));
   SendResponse(error_.empty());
   return true;
@@ -118,14 +120,14 @@ void ScreenlockPrivateEventRouter::OnScreenDidLock(
     proximity_auth::ScreenlockBridge::LockHandler::ScreenType screen_type) {
   DispatchEvent(events::SCREENLOCK_PRIVATE_ON_CHANGED,
                 screenlock::OnChanged::kEventName,
-                new base::FundamentalValue(true));
+                base::MakeUnique<base::FundamentalValue>(true));
 }
 
 void ScreenlockPrivateEventRouter::OnScreenDidUnlock(
     proximity_auth::ScreenlockBridge::LockHandler::ScreenType screen_type) {
   DispatchEvent(events::SCREENLOCK_PRIVATE_ON_CHANGED,
                 screenlock::OnChanged::kEventName,
-                new base::FundamentalValue(false));
+                base::MakeUnique<base::FundamentalValue>(false));
 }
 
 void ScreenlockPrivateEventRouter::OnFocusedUserChanged(
@@ -134,10 +136,10 @@ void ScreenlockPrivateEventRouter::OnFocusedUserChanged(
 void ScreenlockPrivateEventRouter::DispatchEvent(
     events::HistogramValue histogram_value,
     const std::string& event_name,
-    base::Value* arg) {
+    std::unique_ptr<base::Value> arg) {
   std::unique_ptr<base::ListValue> args(new base::ListValue());
   if (arg)
-    args->Append(arg);
+    args->Append(std::move(arg));
   std::unique_ptr<Event> event(
       new Event(histogram_value, event_name, std::move(args)));
   EventRouter::Get(browser_context_)->BroadcastEvent(std::move(event));

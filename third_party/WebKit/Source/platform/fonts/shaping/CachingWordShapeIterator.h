@@ -55,7 +55,7 @@ public:
         m_shapeByWord = m_font->canShapeWordByWord();
     }
 
-    bool next(RefPtr<ShapeResult>* wordResult)
+    bool next(RefPtr<const ShapeResult>* wordResult)
     {
         if (UNLIKELY(m_textRun.allowTabs()))
             return nextForAllowTabs(wordResult);
@@ -72,14 +72,16 @@ public:
     }
 
 private:
-    PassRefPtr<ShapeResult> shapeWordWithoutSpacing(const TextRun& wordRun, const Font* font)
+    PassRefPtr<const ShapeResult> shapeWordWithoutSpacing(
+        const TextRun& wordRun, const Font* font)
     {
-        ShapeCacheEntry* cacheEntry = m_shapeCache->add(wordRun, ShapeCacheEntry());
+        ShapeCacheEntry* cacheEntry = m_shapeCache->add(wordRun,
+            ShapeCacheEntry());
         if (cacheEntry && cacheEntry->m_shapeResult)
             return cacheEntry->m_shapeResult;
 
         HarfBuzzShaper shaper(font, wordRun);
-        RefPtr<ShapeResult> shapeResult = shaper.shapeResult();
+        RefPtr<const ShapeResult> shapeResult = shaper.shapeResult();
         if (!shapeResult)
             return nullptr;
 
@@ -89,16 +91,17 @@ private:
         return shapeResult.release();
     }
 
-    PassRefPtr<ShapeResult> shapeWord(const TextRun& wordRun, const Font* font)
+    PassRefPtr<const ShapeResult> shapeWord(const TextRun& wordRun,
+        const Font* font)
     {
         if (LIKELY(!m_spacing.hasSpacing()))
             return shapeWordWithoutSpacing(wordRun, font);
 
-        RefPtr<ShapeResult> result = shapeWordWithoutSpacing(wordRun, font);
+        RefPtr<const ShapeResult> result = shapeWordWithoutSpacing(wordRun, font);
         return result->applySpacingToCopy(m_spacing, wordRun);
     }
 
-    bool nextWord(RefPtr<ShapeResult>* wordResult)
+    bool nextWord(RefPtr<const ShapeResult>* wordResult)
     {
         return shapeToEndIndex(wordResult, nextWordEndIndex());
     }
@@ -108,7 +111,7 @@ private:
         return ch == spaceCharacter || ch == tabulationCharacter;
     }
 
-    unsigned nextWordEndIndex()
+    unsigned nextWordEndIndex() const
     {
         const unsigned length = m_textRun.length();
         if (m_startIndex >= length)
@@ -117,50 +120,52 @@ private:
         if (m_startIndex + 1u == length || isWordDelimiter(m_textRun[m_startIndex]))
             return m_startIndex + 1;
 
-        // Delimit every CJK character because these scripts do not delimit
-        // words by spaces, and not delimiting hits the performance.
-        if (!m_textRun.is8Bit()) {
-            UChar32 ch;
-            unsigned end = m_startIndex;
-            U16_NEXT(m_textRun.characters16(), end, length, ch);
-            if (Character::isCJKIdeographOrSymbol(ch)) {
-                bool hasAnyScript = !Character::isCommonOrInheritedScript(ch);
-                for (unsigned i = end; i < length; end = i) {
-                    U16_NEXT(m_textRun.characters16(), i, length, ch);
-                    // ZWJ and modifier check in order not to split those Emoji sequences.
-                    if (U_GET_GC_MASK(ch) & (U_GC_M_MASK | U_GC_LM_MASK | U_GC_SK_MASK)
-                        || ch == zeroWidthJoinerCharacter || Character::isModifier(ch))
-                        continue;
-                    // Avoid delimiting COMMON/INHERITED alone, which makes harder to
-                    // identify the script.
-                    if (Character::isCJKIdeographOrSymbol(ch)) {
-                        if (Character::isCommonOrInheritedScript(ch))
-                            continue;
-                        if (!hasAnyScript) {
-                            hasAnyScript = true;
-                            continue;
-                        }
-                    }
-                    return end;
-                }
-                return length;
-            }
-        }
-
-        for (unsigned i = m_startIndex + 1; ; i++) {
-            if (i == length || isWordDelimiter(m_textRun[i])) {
-                return i;
-            }
-            if (!m_textRun.is8Bit()) {
-                UChar32 nextChar;
-                U16_GET(m_textRun.characters16(), 0, i, length, nextChar);
-                if (Character::isCJKIdeographOrSymbolBase(nextChar))
+        // 8Bit words end at isWordDelimiter().
+        if (m_textRun.is8Bit()) {
+            for (unsigned i = m_startIndex + 1; ; i++) {
+                if (i == length || isWordDelimiter(m_textRun[i]))
                     return i;
             }
         }
+
+        // Non-CJK/Emoji words end at isWordDelimiter() or CJK/Emoji characters.
+        unsigned end = m_startIndex;
+        UChar32 ch = m_textRun.codepointAtAndNext(end);
+        if (!Character::isCJKIdeographOrSymbol(ch)) {
+            for (unsigned nextEnd = end; end < length; end = nextEnd) {
+                ch = m_textRun.codepointAtAndNext(nextEnd);
+                if (isWordDelimiter(ch) || Character::isCJKIdeographOrSymbolBase(ch))
+                    return end;
+            }
+            return length;
+        }
+
+        // For CJK/Emoji words, delimit every character because these scripts do
+        // not delimit words by spaces, and delimiting only at isWordDelimiter()
+        // worsen the cache efficiency.
+        bool hasAnyScript = !Character::isCommonOrInheritedScript(ch);
+        for (unsigned nextEnd = end; end < length; end = nextEnd) {
+            ch = m_textRun.codepointAtAndNext(nextEnd);
+            // ZWJ and modifier check in order not to split those Emoji sequences.
+            if (U_GET_GC_MASK(ch) & (U_GC_M_MASK | U_GC_LM_MASK | U_GC_SK_MASK)
+                || ch == zeroWidthJoinerCharacter || Character::isModifier(ch))
+                continue;
+            // Avoid delimiting COMMON/INHERITED alone, which makes harder to
+            // identify the script.
+            if (Character::isCJKIdeographOrSymbol(ch)) {
+                if (Character::isCommonOrInheritedScript(ch))
+                    continue;
+                if (!hasAnyScript) {
+                    hasAnyScript = true;
+                    continue;
+                }
+            }
+            return end;
+        }
+        return length;
     }
 
-    bool shapeToEndIndex(RefPtr<ShapeResult>* result, unsigned endIndex)
+    bool shapeToEndIndex(RefPtr<const ShapeResult>* result, unsigned endIndex)
     {
         if (!endIndex || endIndex <= m_startIndex)
             return false;
@@ -177,7 +182,7 @@ private:
         return result->get();
     }
 
-    unsigned endIndexUntil(UChar ch)
+    unsigned endIndexUntil(UChar ch) const
     {
         unsigned length = m_textRun.length();
         ASSERT(m_startIndex < length);
@@ -187,7 +192,7 @@ private:
         }
     }
 
-    bool nextForAllowTabs(RefPtr<ShapeResult>* wordResult)
+    bool nextForAllowTabs(RefPtr<const ShapeResult>* wordResult)
     {
         unsigned length = m_textRun.length();
         if (m_startIndex >= length)

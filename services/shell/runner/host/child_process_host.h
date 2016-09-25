@@ -22,7 +22,7 @@
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "services/shell/public/cpp/identity.h"
-#include "services/shell/public/interfaces/shell_client_factory.mojom.h"
+#include "services/shell/public/interfaces/service_factory.mojom.h"
 #include "services/shell/runner/host/child_process_host.h"
 
 namespace base {
@@ -60,7 +60,7 @@ class ChildProcessHost {
 
   // |Start()|s the child process; calls |DidStart()| (on the thread on which
   // |Start()| was called) when the child has been started (or failed to start).
-  mojom::ShellClientPtr Start(const Identity& target,
+  mojom::ServicePtr Start(const Identity& target,
                               const ProcessReadyCallback& callback,
                               const base::Closure& quit_closure);
 
@@ -83,6 +83,7 @@ class ChildProcessHost {
   // Used to initialize the Mojo IPC channel between parent and child.
   std::unique_ptr<mojo::edk::PlatformChannelPair> mojo_ipc_channel_;
   mojo::edk::HandlePassingInformation handle_passing_info_;
+  const std::string child_token_;
 
   // Since Start() calls a method on another thread, we use an event to block
   // the main thread if it tries to destruct |this| while launching the process.

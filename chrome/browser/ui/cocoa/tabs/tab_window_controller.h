@@ -53,7 +53,8 @@
 @property(readonly, nonatomic) NSView* chromeContentView;
 
 // This is the designated initializer for this class.
-- (id)initTabWindowControllerWithTabStrip:(BOOL)hasTabStrip;
+- (id)initTabWindowControllerWithTabStrip:(BOOL)hasTabStrip
+                                 titleBar:(BOOL)hasTitleBar;
 
 // Used during tab dragging to turn on/off the overlay window when a tab
 // is torn off. If -deferPerformClose (below) is used, -removeOverlay will
@@ -157,6 +158,9 @@
 // In any fullscreen mode, the y offset to use for the content at the top of
 // the screen (tab strip, omnibox, bookmark bar, etc). Ranges from 0 to -22.
 - (CGFloat)menubarOffset;
+
+// Returns the view of the avatar button.
+- (NSView*)avatarView;
 
 // Tell the window that it needs to call performClose: as soon as the current
 // drag is complete. This prevents a window (and its overlay) from going away

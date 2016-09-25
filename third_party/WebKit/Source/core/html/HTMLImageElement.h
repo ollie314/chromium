@@ -33,7 +33,6 @@
 #include "core/imagebitmap/ImageBitmapSource.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/network/ResourceResponse.h"
-#include "wtf/WeakPtr.h"
 
 namespace blink {
 
@@ -44,6 +43,7 @@ class ImageBitmapOptions;
 
 class CORE_EXPORT HTMLImageElement final : public HTMLElement, public CanvasImageSource, public ImageBitmapSource, public ActiveScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
+    USING_GARBAGE_COLLECTED_MIXIN(HTMLImageElement);
 public:
     class ViewportChangeListener;
 
@@ -104,6 +104,8 @@ public:
     FloatSize defaultDestinationSize(const FloatSize&) const override;
     const KURL& sourceURL() const override;
     bool isOpaque() const override;
+    int sourceWidth() override;
+    int sourceHeight() override;
 
     // public so that HTMLPictureElement can call this as well.
     void selectSourceURL(ImageLoader::UpdateFromElementBehavior);
@@ -118,7 +120,7 @@ public:
 
     // ImageBitmapSource implementation
     IntSize bitmapSourceSize() const override;
-    ScriptPromise createImageBitmap(ScriptState*, EventTarget&, int sx, int sy, int sw, int sh, const ImageBitmapOptions&, ExceptionState&) override;
+    ScriptPromise createImageBitmap(ScriptState*, EventTarget&, Optional<IntRect> cropRect, const ImageBitmapOptions&, ExceptionState&) override;
 
 protected:
     explicit HTMLImageElement(Document&, HTMLFormElement* = 0, bool createdByParser = false);
@@ -135,7 +137,7 @@ private:
     bool isPresentationAttribute(const QualifiedName&) const override;
     void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
 
-    void attach(const AttachContext& = AttachContext()) override;
+    void attachLayoutTree(const AttachContext& = AttachContext()) override;
     LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
     bool canStartSelection() const override { return false; }

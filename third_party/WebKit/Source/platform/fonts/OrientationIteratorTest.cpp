@@ -4,7 +4,6 @@
 
 #include "platform/fonts/OrientationIterator.h"
 
-#include "platform/Logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include <string>
 
@@ -82,6 +81,11 @@ TEST_F(OrientationIteratorTest, OneCharLatin)
 TEST_F(OrientationIteratorTest, OneAceOfSpades)
 {
     CHECK_RUNS({ { "🂡", OrientationIterator::OrientationKeep } });
+}
+
+TEST_F(OrientationIteratorTest, CombiningCircle)
+{
+    CHECK_RUNS({ { "◌́◌̀◌̈◌̂◌̄◌̊", OrientationIterator::OrientationKeep } });
 }
 
 TEST_F(OrientationIteratorTest, OneEthiopicSyllable)

@@ -4,7 +4,7 @@
 
 #include "core/animation/CSSPositionAxisListInterpolationType.h"
 
-#include "core/animation/CSSLengthInterpolationType.h"
+#include "core/animation/LengthInterpolationFunctions.h"
 #include "core/animation/ListInterpolationFunctions.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSValueList.h"
@@ -16,10 +16,10 @@ InterpolationValue CSSPositionAxisListInterpolationType::convertPositionAxisCSSV
 {
     if (value.isValuePair()) {
         const CSSValuePair& pair = toCSSValuePair(value);
-        InterpolationValue result = CSSLengthInterpolationType::maybeConvertCSSValue(pair.second());
+        InterpolationValue result = LengthInterpolationFunctions::maybeConvertCSSValue(pair.second());
         CSSValueID side = toCSSPrimitiveValue(pair.first()).getValueID();
         if (side == CSSValueRight || side == CSSValueBottom)
-            CSSLengthInterpolationType::subtractFromOneHundredPercent(result);
+            LengthInterpolationFunctions::subtractFromOneHundredPercent(result);
         return result;
     }
 
@@ -28,19 +28,19 @@ InterpolationValue CSSPositionAxisListInterpolationType::convertPositionAxisCSSV
 
     const CSSPrimitiveValue& primitveValue = toCSSPrimitiveValue(value);
     if (!primitveValue.isValueID())
-        return CSSLengthInterpolationType::maybeConvertCSSValue(value);
+        return LengthInterpolationFunctions::maybeConvertCSSValue(value);
 
     switch (primitveValue.getValueID()) {
     case CSSValueLeft:
     case CSSValueTop:
-        return CSSLengthInterpolationType::createInterpolablePercent(0);
+        return LengthInterpolationFunctions::createInterpolablePercent(0);
     case CSSValueRight:
     case CSSValueBottom:
-        return CSSLengthInterpolationType::createInterpolablePercent(100);
+        return LengthInterpolationFunctions::createInterpolablePercent(100);
     case CSSValueCenter:
-        return CSSLengthInterpolationType::createInterpolablePercent(50);
+        return LengthInterpolationFunctions::createInterpolablePercent(50);
     default:
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return nullptr;
     }
 }
@@ -55,7 +55,7 @@ InterpolationValue CSSPositionAxisListInterpolationType::maybeConvertValue(const
 
     const CSSValueList& list = toCSSValueList(value);
     return ListInterpolationFunctions::createList(list.length(), [&list](size_t index) {
-        return convertPositionAxisCSSValue(*list.item(index));
+        return convertPositionAxisCSSValue(list.item(index));
     });
 }
 

@@ -14,6 +14,9 @@ namespace {
 bool IsNodeIdIntAttribute(AXIntAttribute attr) {
   switch (attr) {
     case AX_ATTR_ACTIVEDESCENDANT_ID:
+    case AX_ATTR_MEMBER_OF_ID:
+    case AX_ATTR_NEXT_ON_LINE_ID:
+    case AX_ATTR_PREVIOUS_ON_LINE_ID:
     case AX_ATTR_TABLE_HEADER_ID:
     case AX_ATTR_TABLE_COLUMN_HEADER_ID:
     case AX_ATTR_TABLE_ROW_HEADER_ID:
@@ -48,6 +51,7 @@ bool IsNodeIdIntAttribute(AXIntAttribute attr) {
     case AX_ATTR_SET_SIZE:
     case AX_ATTR_POS_IN_SET:
     case AX_ATTR_COLOR_VALUE:
+    case AX_ATTR_ARIA_CURRENT_STATE:
     case AX_ATTR_BACKGROUND_COLOR:
     case AX_ATTR_COLOR:
     case AX_ATTR_INVALID_STATE:
@@ -78,8 +82,11 @@ bool IsNodeIdIntListAttribute(AXIntListAttribute attr) {
     // add a new attribute without explicitly considering whether it's
     // a node id attribute or not.
     case AX_INT_LIST_ATTRIBUTE_NONE:
-    case AX_ATTR_LINE_BREAKS:
+    case AX_ATTR_MARKER_TYPES:
+    case AX_ATTR_MARKER_STARTS:
+    case AX_ATTR_MARKER_ENDS:
     case AX_ATTR_CHARACTER_OFFSETS:
+    case AX_ATTR_CACHED_LINE_STARTS:
     case AX_ATTR_WORD_STARTS:
     case AX_ATTR_WORD_ENDS:
       return false;
@@ -121,6 +128,9 @@ bool AXTreeCombiner::Combine() {
   // Process the nodes recursively, starting with the root tree.
   const AXTreeUpdate* root = tree_id_map_.find(root_tree_id_)->second;
   ProcessTree(root);
+
+  // Set the root id.
+  combined_.root_id = combined_.nodes[0].id;
 
   // Finally, handle the tree ID, taking into account which subtree might
   // have focus and mapping IDs from the tree data appropriately.
@@ -168,17 +178,16 @@ void AXTreeCombiner::ProcessTree(const AXTreeUpdate* tree) {
     AXNodeData node = tree->nodes[i];
     int32_t child_tree_id = node.GetIntAttribute(AX_ATTR_CHILD_TREE_ID);
 
-    // It's not valid to have an accessibility tree with more than one
-    // ROOT_WEB_AREA role, so change subdocuments into just groups.
-    if (node.role == AX_ROLE_ROOT_WEB_AREA && tree_id != root_tree_id_)
-      node.role = AX_ROLE_GROUP;
-
     // Map the node's ID.
     node.id = MapId(tree_id, node.id);
 
     // Map the node's child IDs.
     for (size_t j = 0; j < node.child_ids.size(); ++j)
       node.child_ids[j] = MapId(tree_id, node.child_ids[j]);
+
+    // Reset the offset container ID because we make all bounding boxes
+    // absolute.
+    node.offset_container_id = -1;
 
     // Map other int attributes that refer to node IDs, and remove the
     // AX_ATTR_CHILD_TREE_ID attribute.
@@ -203,10 +212,7 @@ void AXTreeCombiner::ProcessTree(const AXTreeUpdate* tree) {
 
     // Apply the transformation to the object's bounds to put it in
     // the coordinate space of the root frame.
-    gfx::RectF boundsf(node.location);
-    transform_.TransformRect(&boundsf);
-    node.location = gfx::Rect(boundsf.x(), boundsf.y(),
-                              boundsf.width(), boundsf.height());
+    transform_.TransformRect(&node.location);
 
     // See if this node has a child tree. As a sanity check make sure the
     // child tree lists this tree as its parent tree id.

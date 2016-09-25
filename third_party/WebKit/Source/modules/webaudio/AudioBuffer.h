@@ -40,13 +40,16 @@
 namespace blink {
 
 class AudioBus;
+class AudioBufferOptions;
+class BaseAudioContext;
 class ExceptionState;
 
-class MODULES_EXPORT AudioBuffer final : public GarbageCollectedFinalized<AudioBuffer>, public ScriptWrappable {
+class MODULES_EXPORT AudioBuffer final : public GarbageCollected<AudioBuffer>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static AudioBuffer* create(unsigned numberOfChannels, size_t numberOfFrames, float sampleRate);
     static AudioBuffer* create(unsigned numberOfChannels, size_t numberOfFrames, float sampleRate, ExceptionState&);
+    static AudioBuffer* create(BaseAudioContext*, const AudioBufferOptions&, ExceptionState&);
 
     // Returns 0 if data is not a valid audio file.
     static AudioBuffer* createFromAudioFileData(const void* data, size_t dataSize, bool mixToMono, float sampleRate);
@@ -75,11 +78,11 @@ public:
     }
 
 private:
+    explicit AudioBuffer(AudioBus*);
+
     static DOMFloat32Array* createFloat32ArrayOrNull(size_t length);
 
-protected:
     AudioBuffer(unsigned numberOfChannels, size_t numberOfFrames, float sampleRate);
-    explicit AudioBuffer(AudioBus*);
     bool createdSuccessfully(unsigned desiredNumberOfChannels) const;
 
     float m_sampleRate;

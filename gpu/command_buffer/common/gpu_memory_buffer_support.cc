@@ -34,8 +34,8 @@ gfx::BufferFormat BufferFormatForInternalFormat(unsigned internalformat) {
       return gfx::BufferFormat::DXT5;
     case GL_ETC1_RGB8_OES:
       return gfx::BufferFormat::ETC1;
-    case GL_RGB_YUV_420_CHROMIUM:
-      return gfx::BufferFormat::YUV_420;
+    case GL_RGB_YCRCB_420_CHROMIUM:
+      return gfx::BufferFormat::YVU_420;
     case GL_RGB_YCBCR_420V_CHROMIUM:
       return gfx::BufferFormat::YUV_420_BIPLANAR;
     case GL_RGB_YCBCR_422_CHROMIUM:
@@ -73,11 +73,13 @@ bool IsImageFormatCompatibleWithGpuMemoryBufferFormat(
     case gfx::BufferFormat::ETC1:
     case gfx::BufferFormat::R_8:
     case gfx::BufferFormat::RGBA_8888:
-    case gfx::BufferFormat::RGBX_8888:
-    case gfx::BufferFormat::YUV_420:
+    case gfx::BufferFormat::YVU_420:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
     case gfx::BufferFormat::UYVY_422:
       return format == BufferFormatForInternalFormat(internalformat);
+    case gfx::BufferFormat::BGR_565:
+    case gfx::BufferFormat::RGBX_8888:
+      return internalformat == GL_RGB;
     case gfx::BufferFormat::RGBA_4444:
       return internalformat == GL_RGBA;
   }
@@ -105,13 +107,20 @@ bool IsGpuMemoryBufferFormatSupported(gfx::BufferFormat format,
       return capabilities.texture_rg;
     case gfx::BufferFormat::UYVY_422:
       return capabilities.image_ycbcr_422;
+    case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBA_8888:
     case gfx::BufferFormat::RGBX_8888:
-    case gfx::BufferFormat::YUV_420:
+    case gfx::BufferFormat::YVU_420:
       return true;
     case gfx::BufferFormat::YUV_420_BIPLANAR:
+#if defined(OS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+      // TODO(dcastagna): Determine ycbcr_420v_image on CrOS at runtime
+      // querying minigbm. crbug.com/646148
+      return true;
+#else
       return capabilities.image_ycbcr_420v;
+#endif
   }
 
   NOTREACHED();
@@ -130,13 +139,14 @@ bool IsImageSizeValidForGpuMemoryBufferFormat(const gfx::Size& size,
       // by the block size.
       return size.width() % 4 == 0 && size.height() % 4 == 0;
     case gfx::BufferFormat::R_8:
+    case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBA_8888:
     case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::BGRA_8888:
     case gfx::BufferFormat::BGRX_8888:
       return true;
-    case gfx::BufferFormat::YUV_420:
+    case gfx::BufferFormat::YVU_420:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
       // U and V planes are subsampled by a factor of 2.
       return size.width() % 2 == 0 && size.height() % 2 == 0;

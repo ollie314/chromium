@@ -40,7 +40,6 @@
 #include "modules/storage/Storage.h"
 #include "modules/storage/StorageNamespace.h"
 #include "modules/storage/StorageNamespaceController.h"
-#include "platform/inspector_protocol/Values.h"
 #include "platform/weborigin/SecurityOrigin.h"
 
 namespace blink {
@@ -65,8 +64,7 @@ static bool hadException(ExceptionState& exceptionState, ErrorString* errorStrin
 }
 
 InspectorDOMStorageAgent::InspectorDOMStorageAgent(Page* page)
-    : InspectorBaseAgent<InspectorDOMStorageAgent, protocol::Frontend::DOMStorage>("DOMStorage")
-    , m_page(page)
+    : m_page(page)
     , m_isEnabled(false)
 {
 }
@@ -107,14 +105,14 @@ void InspectorDOMStorageAgent::disable(ErrorString*)
         controller->setInspectorAgent(nullptr);
 }
 
-void InspectorDOMStorageAgent::getDOMStorageItems(ErrorString* errorString, PassOwnPtr<protocol::DOMStorage::StorageId> storageId, OwnPtr<protocol::Array<protocol::Array<String>>>* items)
+void InspectorDOMStorageAgent::getDOMStorageItems(ErrorString* errorString, std::unique_ptr<protocol::DOMStorage::StorageId> storageId, std::unique_ptr<protocol::Array<protocol::Array<String>>>* items)
 {
     LocalFrame* frame;
-    StorageArea* storageArea = findStorageArea(errorString, storageId, frame);
+    StorageArea* storageArea = findStorageArea(errorString, std::move(storageId), frame);
     if (!storageArea)
         return;
 
-    OwnPtr<protocol::Array<protocol::Array<String>>> storageItems = protocol::Array<protocol::Array<String>>::create();
+    std::unique_ptr<protocol::Array<protocol::Array<String>>> storageItems = protocol::Array<protocol::Array<String>>::create();
 
     TrackExceptionState exceptionState;
     for (unsigned i = 0; i < storageArea->length(exceptionState, frame); ++i) {
@@ -124,12 +122,12 @@ void InspectorDOMStorageAgent::getDOMStorageItems(ErrorString* errorString, Pass
         String value(storageArea->getItem(name, exceptionState, frame));
         if (hadException(exceptionState, errorString))
             return;
-        OwnPtr<protocol::Array<String>> entry = protocol::Array<String>::create();
+        std::unique_ptr<protocol::Array<String>> entry = protocol::Array<String>::create();
         entry->addItem(name);
         entry->addItem(value);
-        storageItems->addItem(entry.release());
+        storageItems->addItem(std::move(entry));
     }
-    *items = storageItems.release();
+    *items = std::move(storageItems);
 }
 
 static String toErrorString(ExceptionState& exceptionState)
@@ -139,10 +137,10 @@ static String toErrorString(ExceptionState& exceptionState)
     return "";
 }
 
-void InspectorDOMStorageAgent::setDOMStorageItem(ErrorString* errorString, PassOwnPtr<protocol::DOMStorage::StorageId> storageId, const String& key, const String& value)
+void InspectorDOMStorageAgent::setDOMStorageItem(ErrorString* errorString, std::unique_ptr<protocol::DOMStorage::StorageId> storageId, const String& key, const String& value)
 {
     LocalFrame* frame;
-    StorageArea* storageArea = findStorageArea(0, storageId, frame);
+    StorageArea* storageArea = findStorageArea(0, std::move(storageId), frame);
     if (!storageArea) {
         *errorString = "Storage not found";
         return;
@@ -153,10 +151,10 @@ void InspectorDOMStorageAgent::setDOMStorageItem(ErrorString* errorString, PassO
     *errorString = toErrorString(exceptionState);
 }
 
-void InspectorDOMStorageAgent::removeDOMStorageItem(ErrorString* errorString, PassOwnPtr<protocol::DOMStorage::StorageId> storageId, const String& key)
+void InspectorDOMStorageAgent::removeDOMStorageItem(ErrorString* errorString, std::unique_ptr<protocol::DOMStorage::StorageId> storageId, const String& key)
 {
     LocalFrame* frame;
-    StorageArea* storageArea = findStorageArea(0, storageId, frame);
+    StorageArea* storageArea = findStorageArea(0, std::move(storageId), frame);
     if (!storageArea) {
         *errorString = "Storage not found";
         return;
@@ -167,7 +165,7 @@ void InspectorDOMStorageAgent::removeDOMStorageItem(ErrorString* errorString, Pa
     *errorString = toErrorString(exceptionState);
 }
 
-PassOwnPtr<protocol::DOMStorage::StorageId> InspectorDOMStorageAgent::storageId(SecurityOrigin* securityOrigin, bool isLocalStorage)
+std::unique_ptr<protocol::DOMStorage::StorageId> InspectorDOMStorageAgent::storageId(SecurityOrigin* securityOrigin, bool isLocalStorage)
 {
     return protocol::DOMStorage::StorageId::create()
         .setSecurityOrigin(securityOrigin->toRawString())
@@ -179,19 +177,19 @@ void InspectorDOMStorageAgent::didDispatchDOMStorageEvent(const String& key, con
     if (!frontend())
         return;
 
-    OwnPtr<protocol::DOMStorage::StorageId> id = storageId(securityOrigin, storageType == LocalStorage);
+    std::unique_ptr<protocol::DOMStorage::StorageId> id = storageId(securityOrigin, storageType == LocalStorage);
 
     if (key.isNull())
-        frontend()->domStorageItemsCleared(id.release());
+        frontend()->domStorageItemsCleared(std::move(id));
     else if (newValue.isNull())
-        frontend()->domStorageItemRemoved(id.release(), key);
+        frontend()->domStorageItemRemoved(std::move(id), key);
     else if (oldValue.isNull())
-        frontend()->domStorageItemAdded(id.release(), key, newValue);
+        frontend()->domStorageItemAdded(std::move(id), key, newValue);
     else
-        frontend()->domStorageItemUpdated(id.release(), key, oldValue, newValue);
+        frontend()->domStorageItemUpdated(std::move(id), key, oldValue, newValue);
 }
 
-StorageArea* InspectorDOMStorageAgent::findStorageArea(ErrorString* errorString, PassOwnPtr<protocol::DOMStorage::StorageId> storageId, LocalFrame*& targetFrame)
+StorageArea* InspectorDOMStorageAgent::findStorageArea(ErrorString* errorString, std::unique_ptr<protocol::DOMStorage::StorageId> storageId, LocalFrame*& targetFrame)
 {
     String securityOrigin = storageId->getSecurityOrigin();
     bool isLocalStorage = storageId->getIsLocalStorage();

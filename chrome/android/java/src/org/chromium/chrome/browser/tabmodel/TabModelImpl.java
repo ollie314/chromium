@@ -4,11 +4,12 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
-import org.chromium.base.ApplicationStatus;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
+import org.chromium.chrome.browser.ntp.RecentlyClosedBridge;
 import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
@@ -45,6 +46,7 @@ public class TabModelImpl extends TabModelJniBridge {
     private final TabPersistentStore mTabSaver;
     private final TabModelDelegate mModelDelegate;
     private final ObserverList<TabModelObserver> mObservers;
+    private RecentlyClosedBridge mRecentlyClosedBridge;
 
     // Undo State Tracking -------------------------------------------------------------------------
 
@@ -81,11 +83,12 @@ public class TabModelImpl extends TabModelJniBridge {
         mModelDelegate = modelDelegate;
         mIsUndoSupported = supportUndo;
         mObservers = new ObserverList<TabModelObserver>();
+        mRecentlyClosedBridge = new RecentlyClosedBridge(getProfile());
     }
 
     @Override
     public void removeTab(Tab tab) {
-        removeTabAndSelectNext(tab, TabSelectionType.FROM_USER, true, true);
+        removeTabAndSelectNext(tab, TabSelectionType.FROM_CLOSE, false, true);
 
         for (TabModelObserver obs : mObservers) obs.tabRemoved(tab);
     }
@@ -99,7 +102,7 @@ public class TabModelImpl extends TabModelJniBridge {
         mRewoundList.destroy();
         mTabs.clear();
         mObservers.clear();
-
+        mRecentlyClosedBridge.destroy();
         super.destroy();
     }
 
@@ -387,7 +390,7 @@ public class TabModelImpl extends TabModelJniBridge {
 
         if (allowDelegation && mModelDelegate.closeAllTabsRequest(isIncognito())) return;
 
-        if (HomepageManager.isHomepageEnabled(ApplicationStatus.getApplicationContext())) {
+        if (HomepageManager.isHomepageEnabled(ContextUtils.getApplicationContext())) {
             commitAllTabClosures();
 
             for (int i = 0; i < getCount(); i++) getTabAt(i).setClosing(true);
@@ -452,7 +455,9 @@ public class TabModelImpl extends TabModelJniBridge {
 
     // TODO(aurimas): Move this method to TabModelSelector when notifications move there.
     private int getLastId(TabSelectionType type) {
-        if (type == TabSelectionType.FROM_CLOSE) return Tab.INVALID_TAB_ID;
+        if (type == TabSelectionType.FROM_CLOSE || type == TabSelectionType.FROM_EXIT) {
+            return Tab.INVALID_TAB_ID;
+        }
 
         // Get the current tab in the current tab model.
         Tab currentTab = TabModelUtils.getCurrentTab(mModelDelegate.getCurrentModel());
@@ -533,6 +538,9 @@ public class TabModelImpl extends TabModelJniBridge {
      */
     private void removeTabAndSelectNext(Tab tab, TabSelectionType selectionType, boolean pauseMedia,
             boolean updateRewoundList) {
+        assert selectionType == TabSelectionType.FROM_CLOSE
+                || selectionType == TabSelectionType.FROM_EXIT;
+
         final int closingTabId = tab.getId();
         final int closingTabIndex = indexOf(tab);
 
@@ -737,5 +745,22 @@ public class TabModelImpl extends TabModelJniBridge {
     @Override
     protected boolean isSessionRestoreInProgress() {
         return mModelDelegate.isSessionRestoreInProgress();
+    }
+
+    @Override
+    public void openMostRecentlyClosedTab() {
+        // First try to recover tab from rewound list, same as {@link UndoBarController}.
+        if (mRewoundList.hasPendingClosures()) {
+            Tab tab = mRewoundList.getNextRewindableTab();
+            if (tab == null) return;
+            cancelTabClosure(tab.getId());
+            return;
+        }
+
+        // If there are no pending closures in the rewound list,
+        // then try to restore the tab from the native tab restore service.
+        mRecentlyClosedBridge.openRecentlyClosedTab();
+        // If there is only one tab, select it.
+        if (getCount() == 1) setIndex(0, TabSelectionType.FROM_NEW);
     }
 }

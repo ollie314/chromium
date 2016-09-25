@@ -31,11 +31,12 @@
 #define AXObject_h
 
 #include "core/editing/VisiblePosition.h"
+#include "core/editing/markers/DocumentMarker.h"
+#include "core/inspector/protocol/Accessibility.h"
 #include "modules/ModulesExport.h"
 #include "platform/geometry/FloatQuad.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/Color.h"
-#include "platform/inspector_protocol/TypeBuilder.h"
 #include "wtf/Forward.h"
 #include "wtf/Vector.h"
 
@@ -49,7 +50,6 @@ class AXObjectCacheImpl;
 class Element;
 class FrameView;
 class IntPoint;
-class NameSource;
 class Node;
 class LayoutObject;
 class ScrollableArea;
@@ -58,65 +58,67 @@ typedef unsigned AXID;
 
 enum AccessibilityRole {
     UnknownRole = 0,
-    AbbrRole, // No mapping to ARIA role
+    AbbrRole, // No mapping to ARIA role.
     AlertDialogRole,
     AlertRole,
-    AnnotationRole, // No mapping to ARIA role
+    AnnotationRole, // No mapping to ARIA role.
     ApplicationRole,
     ArticleRole,
+    AudioRole, // No mapping to ARIA role.
     BannerRole,
-    BlockquoteRole, // No mapping to ARIA role
-    BusyIndicatorRole, // No mapping to ARIA role
+    BlockquoteRole, // No mapping to ARIA role.
+    BusyIndicatorRole, // No mapping to ARIA role.
     ButtonRole,
-    CanvasRole, // No mapping to ARIA role
-    CaptionRole, // No mapping to ARIA role
+    CanvasRole, // No mapping to ARIA role.
+    CaptionRole, // No mapping to ARIA role.
     CellRole,
     CheckBoxRole,
-    ColorWellRole, // No mapping to ARIA role
+    ColorWellRole, // No mapping to ARIA role.
     ColumnHeaderRole,
-    ColumnRole, // No mapping to ARIA role
+    ColumnRole, // No mapping to ARIA role.
     ComboBoxRole,
     ComplementaryRole,
     ContentInfoRole,
-    DateRole, // No mapping to ARIA role
-    DateTimeRole, // No mapping to ARIA role
+    DateRole, // No mapping to ARIA role.
+    DateTimeRole, // No mapping to ARIA role.
     DefinitionRole,
-    DescriptionListDetailRole, // No mapping to ARIA role
-    DescriptionListRole, // No mapping to ARIA role
-    DescriptionListTermRole, // No mapping to ARIA role
-    DetailsRole, // No mapping to ARIA role
+    DescriptionListDetailRole, // No mapping to ARIA role.
+    DescriptionListRole, // No mapping to ARIA role.
+    DescriptionListTermRole, // No mapping to ARIA role.
+    DetailsRole, // No mapping to ARIA role.
     DialogRole,
     DirectoryRole,
-    DisclosureTriangleRole, // No mapping to ARIA role
-    DivRole, // No mapping to ARIA role
+    DisclosureTriangleRole, // No mapping to ARIA role.
+    DivRole, // No mapping to ARIA role.
     DocumentRole,
-    EmbeddedObjectRole, // No mapping to ARIA role
-    FigcaptionRole, // No mapping to ARIA role
-    FigureRole, // No mapping to ARIA role
+    EmbeddedObjectRole, // No mapping to ARIA role.
+    FigcaptionRole, // No mapping to ARIA role.
+    FigureRole, // No mapping to ARIA role.
     FooterRole,
     FormRole,
     GridRole,
     GroupRole,
     HeadingRole,
-    IframePresentationalRole, // No mapping to ARIA role
-    IframeRole, // No mapping to ARIA role
-    IgnoredRole, // No mapping to ARIA role
-    ImageMapLinkRole, // No mapping to ARIA role
-    ImageMapRole, // No mapping to ARIA role
+    IframePresentationalRole, // No mapping to ARIA role.
+    IframeRole, // No mapping to ARIA role.
+    IgnoredRole, // No mapping to ARIA role.
+    ImageMapLinkRole, // No mapping to ARIA role.
+    ImageMapRole, // No mapping to ARIA role.
     ImageRole,
-    InlineTextBoxRole, // No mapping to ARIA role
-    InputTimeRole, // No mapping to ARIA role
+    InlineTextBoxRole, // No mapping to ARIA role.
+    InputTimeRole, // No mapping to ARIA role.
     LabelRole,
-    LegendRole, // No mapping to ARIA role
+    LegendRole, // No mapping to ARIA role.
+    LineBreakRole, // No mapping to ARIA role.
     LinkRole,
     ListBoxOptionRole,
     ListBoxRole,
     ListItemRole,
-    ListMarkerRole, // No mapping to ARIA role
+    ListMarkerRole, // No mapping to ARIA role.
     ListRole,
     LogRole,
     MainRole,
-    MarkRole, // No mapping to ARIA role
+    MarkRole, // No mapping to ARIA role.
     MarqueeRole,
     MathRole,
     MenuBarRole,
@@ -129,44 +131,44 @@ enum AccessibilityRole {
     MenuRole,
     MeterRole,
     NavigationRole,
-    NoneRole, // No mapping to ARIA role
+    NoneRole, // No mapping to ARIA role.
     NoteRole,
-    OutlineRole, // No mapping to ARIA role
-    ParagraphRole, // No mapping to ARIA role
+    OutlineRole, // No mapping to ARIA role.
+    ParagraphRole, // No mapping to ARIA role.
     PopUpButtonRole,
-    PreRole, // No mapping to ARIA role
+    PreRole, // No mapping to ARIA role.
     PresentationalRole,
     ProgressIndicatorRole,
     RadioButtonRole,
     RadioGroupRole,
     RegionRole,
-    RootWebAreaRole, // No mapping to ARIA role
+    RootWebAreaRole, // No mapping to ARIA role.
     RowHeaderRole,
     RowRole,
-    RubyRole, // No mapping to ARIA role
-    RulerRole, // No mapping to ARIA role
-    SVGRootRole, // No mapping to ARIA role
-    ScrollAreaRole, // No mapping to ARIA role
+    RubyRole, // No mapping to ARIA role.
+    RulerRole, // No mapping to ARIA role.
+    SVGRootRole, // No mapping to ARIA role.
+    ScrollAreaRole, // No mapping to ARIA role.
     ScrollBarRole,
-    SeamlessWebAreaRole, // No mapping to ARIA role
+    SeamlessWebAreaRole, // No mapping to ARIA role.
     SearchRole,
     SearchBoxRole,
     SliderRole,
-    SliderThumbRole, // No mapping to ARIA role
-    SpinButtonPartRole, // No mapping to ARIA role
+    SliderThumbRole, // No mapping to ARIA role.
+    SpinButtonPartRole, // No mapping to ARIA role.
     SpinButtonRole,
     SplitterRole,
-    StaticTextRole, // No mapping to ARIA role
+    StaticTextRole, // No mapping to ARIA role.
     StatusRole,
     SwitchRole,
-    TabGroupRole, // No mapping to ARIA role
+    TabGroupRole, // No mapping to ARIA role.
     TabListRole,
     TabPanelRole,
     TabRole,
-    TableHeaderContainerRole, // No mapping to ARIA role
+    TableHeaderContainerRole, // No mapping to ARIA role.
     TableRole,
     TextFieldRole,
-    TimeRole, // No mapping to ARIA role
+    TimeRole, // No mapping to ARIA role.
     TimerRole,
     ToggleButtonRole,
     ToolbarRole,
@@ -174,9 +176,9 @@ enum AccessibilityRole {
     TreeItemRole,
     TreeRole,
     UserInterfaceTooltipRole,
-    WebAreaRole, // No mapping to ARIA role
-    LineBreakRole, // No mapping to ARIA role
-    WindowRole, // No mapping to ARIA role
+    VideoRole, // No mapping to ARIA role.
+    WebAreaRole, // No mapping to ARIA role.
+    WindowRole, // No mapping to ARIA role.
     NumRoles
 };
 
@@ -216,6 +218,8 @@ enum AccessibilityState {
 };
 
 class AccessibilityText final : public GarbageCollectedFinalized<AccessibilityText> {
+    WTF_MAKE_NONCOPYABLE(AccessibilityText);
+
 public:
     DEFINE_INLINE_TRACE()
     {
@@ -275,6 +279,17 @@ enum AccessibilityOptionalBool {
     OptionalBoolUndefined = 0,
     OptionalBoolTrue,
     OptionalBoolFalse
+};
+
+enum AriaCurrentState {
+    AriaCurrentStateUndefined = 0,
+    AriaCurrentStateFalse,
+    AriaCurrentStateTrue,
+    AriaCurrentStatePage,
+    AriaCurrentStateStep,
+    AriaCurrentStateLocation,
+    AriaCurrentStateDate,
+    AriaCurrentStateTime
 };
 
 enum InvalidState {
@@ -380,6 +395,8 @@ public:
 };
 
 class NameSourceRelatedObject : public GarbageCollectedFinalized<NameSourceRelatedObject> {
+    WTF_MAKE_NONCOPYABLE(NameSourceRelatedObject);
+
 public:
     WeakMember<AXObject> object;
     String text;
@@ -457,7 +474,16 @@ public:
     }
 };
 
+} // namespace blink
+
+WTF_ALLOW_INIT_WITH_MEM_FUNCTIONS(blink::IgnoredReason);
+WTF_ALLOW_INIT_WITH_MEM_FUNCTIONS(blink::NameSource);
+WTF_ALLOW_INIT_WITH_MEM_FUNCTIONS(blink::DescriptionSource);
+
+namespace blink {
+
 class MODULES_EXPORT AXObject : public GarbageCollectedFinalized<AXObject> {
+    WTF_MAKE_NONCOPYABLE(AXObject);
 public:
     typedef HeapVector<Member<AXObject>> AXObjectVector;
 
@@ -469,33 +495,48 @@ public:
         // The number of characters and child objects in the anchor object
         // before the range starts.
         int anchorOffset;
+        // When the same character offset could correspond to two possible
+        // cursor positions, upstream means it's on the previous line rather
+        // than the next line.
+        TextAffinity anchorAffinity;
+
         // The deepest descendant in which the range ends.
         // (nullptr means the current object.)
         Persistent<AXObject> focusObject;
         // The number of characters and child objects in the focus object
         // before the range ends.
         int focusOffset;
+        // When the same character offset could correspond to two possible
+        // cursor positions, upstream means it's on the previous line rather
+        // than the next line.
+        TextAffinity focusAffinity;
 
         AXRange()
             : anchorObject(nullptr)
             , anchorOffset(-1)
+            , anchorAffinity(TextAffinity::Upstream)
             , focusObject(nullptr)
             , focusOffset(-1)
+            , focusAffinity(TextAffinity::Downstream)
         { }
 
         AXRange(int startOffset, int endOffset)
             : anchorObject(nullptr)
             , anchorOffset(startOffset)
+            , anchorAffinity(TextAffinity::Upstream)
             , focusObject(nullptr)
             , focusOffset(endOffset)
+            , focusAffinity(TextAffinity::Downstream)
         { }
 
-        AXRange(AXObject* anchorObject, int anchorOffset,
-            AXObject* focusObject, int focusOffset)
+        AXRange(AXObject* anchorObject, int anchorOffset, TextAffinity anchorAffinity,
+            AXObject* focusObject, int focusOffset, TextAffinity focusAffinity)
             : anchorObject(anchorObject)
             , anchorOffset(anchorOffset)
+            , anchorAffinity(anchorAffinity)
             , focusObject(focusObject)
             , focusOffset(focusOffset)
+            , focusAffinity(focusAffinity)
         { }
 
         bool isValid() const
@@ -698,7 +739,8 @@ public:
     //
 
     virtual const AtomicString& accessKey() const { return nullAtom; }
-    virtual RGBA32 backgroundColor() const { return Color::transparent; }
+    RGBA32 backgroundColor() const;
+    virtual RGBA32 computeBackgroundColor() const { return Color::transparent; }
     virtual RGBA32 color() const { return Color::black; }
     // Used by objects of role ColorWellRole.
     virtual RGBA32 colorValue() const { return Color::transparent; }
@@ -706,8 +748,9 @@ public:
     virtual String fontFamily() const { return nullAtom; }
     // Font size is in pixels.
     virtual float fontSize() const { return 0.0f; }
+    // Value should be 1-based. 0 means not supported.
     virtual int headingLevel() const { return 0; }
-    // 1-based, to match the aria-level spec.
+    // Value should be 1-based. 0 means not supported.
     virtual unsigned hierarchicalLevel() const { return 0; }
     virtual AccessibilityOrientation orientation() const;
     virtual String text() const { return String(); }
@@ -725,15 +768,19 @@ public:
     virtual AXObject* nextOnLine() const { return nullptr; }
     virtual AXObject* previousOnLine() const { return nullptr; }
 
+    // For all node objects. The start and end character offset of each
+    // marker, such as spelling or grammar error.
+    virtual void markers(Vector<DocumentMarker::MarkerType>&, Vector<AXRange>&) const {}
     // For an inline text box.
     // The integer horizontal pixel offset of each character in the string; negative values for RTL.
     virtual void textCharacterOffsets(Vector<int>&) const { }
-    // The start and end character offset of each word in the inline text box.
-    virtual void wordBoundaries(Vector<AXRange>& words) const { }
+    // The start and end character offset of each word in the object's text.
+    virtual void wordBoundaries(Vector<AXRange>&) const {}
 
     // Properties of interactive elements.
     String actionVerb() const;
     virtual AccessibilityButtonState checkboxOrRadioValue() const;
+    virtual AriaCurrentState ariaCurrentState() const { return AriaCurrentStateUndefined; }
     virtual InvalidState getInvalidState() const { return InvalidStateUndefined; }
     // Only used when invalidState() returns InvalidStateOther.
     virtual String ariaInvalidValue() const { return String(); }
@@ -744,7 +791,7 @@ public:
     virtual String stringValue() const { return String(); }
 
     // ARIA attributes.
-    virtual AXObject* activeDescendant() const { return nullptr; }
+    virtual AXObject* activeDescendant() { return nullptr; }
     virtual String ariaAutoComplete() const { return String(); }
     virtual String ariaDescribedByAttribute() const { return String(); }
     virtual void ariaFlowToElements(AXObjectVector&) const { }
@@ -773,14 +820,14 @@ public:
     // Returns 0-based index.
     int indexInParent() const;
 
-    // Returns 1-based position in set.
+    // Value should be 1-based. 0 means not supported.
     virtual int posInSet() const { return 0; }
     virtual int setSize() const { return 0; }
     bool supportsSetSizeAndPosInSet() const;
 
     // ARIA live-region features.
     bool isLiveRegion() const;
-    const AXObject* liveRegionRoot() const;
+    AXObject* liveRegionRoot() const;
     virtual const AtomicString& liveRegionStatus() const { return nullAtom; }
     virtual const AtomicString& liveRegionRelevant() const { return nullAtom; }
     virtual bool liveRegionAtomic() const { return false; }
@@ -791,14 +838,25 @@ public:
     bool containerLiveRegionAtomic() const;
     bool containerLiveRegionBusy() const;
 
-    // Location and click point in frame-relative coordinates.
-    virtual LayoutRect elementRect() const { return m_explicitElementRect; }
-    void setElementRect(LayoutRect r) { m_explicitElementRect = r; }
-    virtual void markCachedElementRectDirty() const;
-    virtual IntPoint clickPoint();
+    // Every object's bounding box is returned relative to a
+    // container object (which is guaranteed to be an ancestor) and
+    // optionally a transformation matrix that needs to be applied too.
+    // To compute the absolute bounding box of an element, start with its
+    // boundsInContainer and apply the transform. Then as long as its container is
+    // not null, walk up to its container and offset by the container's offset from
+    // origin, the container's scroll position if any, and apply the container's transform.
+    // Do this until you reach the root of the tree.
+    virtual void getRelativeBounds(AXObject** outContainer, FloatRect& outBoundsInContainer, SkMatrix44& outContainerTransform) const;
 
-    // Transformation relative to the parent frame, if local (otherwise returns identity).
-    virtual SkMatrix44 transformFromLocalParentFrame() const;
+    // Get the bounds in frame-relative coordinates as a LayoutRect.
+    LayoutRect getBoundsInFrameCoordinates() const;
+
+    // Explicitly set an object's bounding rect and offset container.
+    void setElementRect(LayoutRect r, AXObject* container)
+    {
+        m_explicitElementRect = r;
+        m_explicitContainerID = container->axObjectID();
+    }
 
     // Hit testing.
     // Called on the root AX object to return the deepest available element.
@@ -897,7 +955,6 @@ public:
     static bool isARIAControl(AccessibilityRole);
     static bool isARIAInput(AccessibilityRole);
     static AccessibilityRole ariaRoleToWebCoreRole(const String&);
-    static IntRect boundingBoxForQuads(LayoutObject*, const Vector<FloatQuad>&);
     static const AtomicString& roleName(AccessibilityRole);
     static const AtomicString& internalRoleName(AccessibilityRole);
     static bool isInsideFocusableElementOrARIAWidget(const Node&);
@@ -909,6 +966,7 @@ protected:
     AccessibilityRole m_role;
     AXObjectInclusion m_lastKnownIsIgnoredValue;
     LayoutRect m_explicitElementRect;
+    AXID m_explicitContainerID;
 
     // Used only inside textAlternative():
     static String collapseWhitespace(const String&);
@@ -928,11 +986,14 @@ protected:
 
     AccessibilityRole buttonRoleType() const;
 
+    virtual LayoutObject* layoutObjectForRelativeBounds() const { return nullptr; }
+
     mutable Member<AXObject> m_parent;
 
     // The following cached attribute values (the ones starting with m_cached*)
     // are only valid if m_lastModificationCount matches AXObjectCacheImpl::modificationCount().
     mutable int m_lastModificationCount;
+    mutable RGBA32 m_cachedBackgroundColor;
     mutable bool m_cachedIsIgnored : 1;
     mutable bool m_cachedIsInertOrAriaHidden : 1;
     mutable bool m_cachedIsDescendantOfLeafNode : 1;
@@ -940,7 +1001,7 @@ protected:
     mutable bool m_cachedHasInheritedPresentationalRole : 1;
     mutable bool m_cachedIsPresentationalChild : 1;
     mutable bool m_cachedAncestorExposesActiveDescendant : 1;
-    mutable Member<const AXObject> m_cachedLiveRegionRoot;
+    mutable Member<AXObject> m_cachedLiveRegionRoot;
 
     Member<AXObjectCacheImpl> m_axObjectCache;
 
@@ -959,9 +1020,5 @@ private:
     DEFINE_TYPE_CASTS(thisType, AXObject, object, object->predicate, object.predicate)
 
 } // namespace blink
-
-WTF_ALLOW_INIT_WITH_MEM_FUNCTIONS(blink::IgnoredReason);
-WTF_ALLOW_INIT_WITH_MEM_FUNCTIONS(blink::NameSource);
-WTF_ALLOW_INIT_WITH_MEM_FUNCTIONS(blink::DescriptionSource);
 
 #endif // AXObject_h

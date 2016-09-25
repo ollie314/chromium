@@ -109,6 +109,8 @@ public class StripLayoutHelperManager implements SceneOverlay {
     public void destroy() {
         mTabStripTreeProvider.destroy();
         mTabStripTreeProvider = null;
+        mIncognitoHelper.destroy();
+        mNormalHelper.destroy();
     }
 
     @Override
@@ -123,6 +125,13 @@ public class StripLayoutHelperManager implements SceneOverlay {
                 getActiveStripLayoutHelper().getStripLayoutTabsToRender(), yOffset,
                 selectedTabId);
         return mTabStripTreeProvider;
+    }
+
+    @Override
+    public boolean isSceneOverlayTreeShowing() {
+        // TODO(mdjones): This matches existing behavior but can be improved to return false if
+        // the top controls offset is equal to the top controls height.
+        return true;
     }
 
     @Override
@@ -187,13 +196,6 @@ public class StripLayoutHelperManager implements SceneOverlay {
      */
     public float getBackgroundTabBrightness() {
         return getActiveStripLayoutHelper().getBackgroundTabBrightness();
-    }
-
-    /**
-     * @param brightness Sets the brightness for the entire tabstrip.
-     */
-    public void setBrightness(float brightness) {
-        getActiveStripLayoutHelper().setBrightness(brightness);
     }
 
     /**

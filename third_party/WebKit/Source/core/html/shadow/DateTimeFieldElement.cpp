@@ -25,7 +25,6 @@
 
 #include "core/html/shadow/DateTimeFieldElement.h"
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 #include "core/HTMLNames.h"
 #include "core/dom/Document.h"
 #include "core/dom/StyleChangeReason.h"
@@ -39,11 +38,6 @@
 namespace blink {
 
 using namespace HTMLNames;
-
-static String emptyValueAXText()
-{
-    return Locale::defaultLocale().queryString(WebLocalizedString::AXDateTimeFieldEmptyValueText);
-}
 
 DateTimeFieldElement::FieldOwner::~FieldOwner()
 {
@@ -96,9 +90,9 @@ void DateTimeFieldElement::defaultKeyboardEventHandler(KeyboardEvent* keyboardEv
     if (isDisabled() || isFieldOwnerDisabled())
         return;
 
-    const String& keyIdentifier = keyboardEvent->keyIdentifier();
+    const String& key = keyboardEvent->key();
 
-    if (keyIdentifier == "Left") {
+    if (key == "ArrowLeft") {
         if (!m_fieldOwner)
             return;
         // FIXME: We'd like to use FocusController::advanceFocus(FocusDirectionLeft, ...)
@@ -108,7 +102,7 @@ void DateTimeFieldElement::defaultKeyboardEventHandler(KeyboardEvent* keyboardEv
         return;
     }
 
-    if (keyIdentifier == "Right") {
+    if (key == "ArrowRight") {
         if (!m_fieldOwner)
             return;
         // FIXME: We'd like to use FocusController::advanceFocus(FocusDirectionRight, ...)
@@ -121,7 +115,7 @@ void DateTimeFieldElement::defaultKeyboardEventHandler(KeyboardEvent* keyboardEv
     if (isFieldOwnerReadOnly())
         return;
 
-    if (keyIdentifier == "Down") {
+    if (key == "ArrowDown") {
         if (keyboardEvent->getModifierState("Alt"))
             return;
         keyboardEvent->setDefaultHandled();
@@ -129,13 +123,13 @@ void DateTimeFieldElement::defaultKeyboardEventHandler(KeyboardEvent* keyboardEv
         return;
     }
 
-    if (keyIdentifier == "Up") {
+    if (key == "ArrowUp") {
         keyboardEvent->setDefaultHandled();
         stepUp();
         return;
     }
 
-    if (keyIdentifier == "U+0008" || keyIdentifier == "U+007F") {
+    if (key == "Backspace" || key == "Delete") {
         keyboardEvent->setDefaultHandled();
         setEmptyValue(DispatchEvent);
         return;
@@ -160,7 +154,7 @@ void DateTimeFieldElement::initialize(const AtomicString& pseudo, const String& 
 {
     // On accessibility, DateTimeFieldElement acts like spin button.
     setAttribute(roleAttr, AtomicString("spinbutton"));
-    setAttribute(aria_valuetextAttr, AtomicString(emptyValueAXText()));
+    setAttribute(aria_valuetextAttr, AtomicString(visibleValue()));
     setAttribute(aria_valueminAttr, AtomicString::number(axMinimum));
     setAttribute(aria_valuemaxAttr, AtomicString::number(axMaximum));
 
@@ -221,19 +215,18 @@ void DateTimeFieldElement::updateVisibleValue(EventBehavior eventBehavior)
 {
     Text* const textNode = toText(firstChild());
     const String newVisibleValue = visibleValue();
-    ASSERT(newVisibleValue.length() > 0);
+    DCHECK_GT(newVisibleValue.length(), 0u);
 
     if (textNode->wholeText() == newVisibleValue)
         return;
 
     textNode->replaceWholeText(newVisibleValue);
     if (hasValue()) {
-        setAttribute(aria_valuetextAttr, AtomicString(newVisibleValue));
         setAttribute(aria_valuenowAttr, AtomicString::number(valueForARIAValueNow()));
     } else {
-        setAttribute(aria_valuetextAttr, AtomicString(emptyValueAXText()));
         removeAttribute(aria_valuenowAttr);
     }
+    setAttribute(aria_valuetextAttr, AtomicString(newVisibleValue));
 
     if (eventBehavior == DispatchEvent && m_fieldOwner)
         m_fieldOwner->fieldValueChanged();
@@ -246,4 +239,3 @@ int DateTimeFieldElement::valueForARIAValueNow() const
 
 } // namespace blink
 
-#endif

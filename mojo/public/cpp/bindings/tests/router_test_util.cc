@@ -19,8 +19,7 @@ void AllocRequestMessage(uint32_t name, const char* text, Message* message) {
   size_t payload_size = strlen(text) + 1;  // Plus null terminator.
   internal::RequestMessageBuilder builder(name, payload_size);
   memcpy(builder.buffer()->Allocate(payload_size), text, payload_size);
-
-  builder.message()->MoveTo(message);
+  *message = std::move(*builder.message());
 }
 
 void AllocResponseMessage(uint32_t name,
@@ -30,8 +29,7 @@ void AllocResponseMessage(uint32_t name,
   size_t payload_size = strlen(text) + 1;  // Plus null terminator.
   internal::ResponseMessageBuilder builder(name, payload_size, request_id);
   memcpy(builder.buffer()->Allocate(payload_size), text, payload_size);
-
-  builder.message()->MoveTo(message);
+  *message = std::move(*builder.message());
 }
 
 MessageAccumulator::MessageAccumulator(MessageQueue* queue,
@@ -58,7 +56,7 @@ bool ResponseGenerator::Accept(Message* message) {
 bool ResponseGenerator::AcceptWithResponder(
     Message* message,
     MessageReceiverWithStatus* responder) {
-  EXPECT_TRUE(message->has_flag(internal::kMessageExpectsResponse));
+  EXPECT_TRUE(message->has_flag(Message::kFlagExpectsResponse));
 
   bool result = SendResponse(message->name(), message->request_id(),
                              reinterpret_cast<const char*>(message->payload()),

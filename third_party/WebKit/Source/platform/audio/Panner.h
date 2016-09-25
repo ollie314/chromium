@@ -30,14 +30,14 @@
 #define Panner_h
 
 #include "platform/PlatformExport.h"
+#include "platform/audio/AudioBus.h"
 #include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/build_config.h"
+#include <memory>
 
 namespace blink {
 
-class AudioBus;
 class HRTFDatabaseLoader;
 
 // Abstract base class for panning a mono or stereo source.
@@ -46,6 +46,7 @@ class PLATFORM_EXPORT Panner {
     USING_FAST_MALLOC(Panner);
     WTF_MAKE_NONCOPYABLE(Panner);
 public:
+    // This values are used in histograms and should not be renumbered or deleted.
     enum {
         PanningModelEqualPower = 0,
         PanningModelHRTF = 1
@@ -53,11 +54,12 @@ public:
 
     typedef unsigned PanningModel;
 
-    static PassOwnPtr<Panner> create(PanningModel, float sampleRate, HRTFDatabaseLoader*);
+    static std::unique_ptr<Panner> create(PanningModel, float sampleRate, HRTFDatabaseLoader*);
 
     virtual ~Panner() { };
 
-    virtual void pan(double azimuth, double elevation, const AudioBus* inputBus, AudioBus* outputBus, size_t framesToProcess) = 0;
+    virtual void pan(double azimuth, double elevation, const AudioBus* inputBus, AudioBus* outputBus, size_t framesToProcess, AudioBus::ChannelInterpretation) = 0;
+    virtual void panWithSampleAccurateValues(double* azimuth, double* elevation, const AudioBus* inputBus, AudioBus* outputBus, size_t framesToProcess, AudioBus::ChannelInterpretation) = 0;
 
     virtual void reset() = 0;
 

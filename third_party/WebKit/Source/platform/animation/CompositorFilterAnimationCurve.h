@@ -8,12 +8,12 @@
 #include "platform/PlatformExport.h"
 #include "platform/animation/CompositorAnimationCurve.h"
 #include "platform/animation/CompositorFilterKeyframe.h"
+#include "platform/animation/TimingFunction.h"
 #include "wtf/Noncopyable.h"
-
+#include "wtf/PtrUtil.h"
 #include <memory>
 
 namespace cc {
-class AnimationCurve;
 class KeyframedFilterAnimationCurve;
 }
 
@@ -27,27 +27,22 @@ namespace blink {
 class PLATFORM_EXPORT CompositorFilterAnimationCurve : public CompositorAnimationCurve {
     WTF_MAKE_NONCOPYABLE(CompositorFilterAnimationCurve);
 public:
-    CompositorFilterAnimationCurve();
+    static std::unique_ptr<CompositorFilterAnimationCurve> create()
+    {
+        return wrapUnique(new CompositorFilterAnimationCurve());
+    }
     ~CompositorFilterAnimationCurve() override;
 
-    virtual void add(const CompositorFilterKeyframe&, TimingFunctionType = TimingFunctionTypeEase);
-    // Adds the keyframe with a custom, bezier timing function. Note, it is
-    // assumed that x0 = y0, and x3 = y3 = 1.
-    virtual void add(const CompositorFilterKeyframe&, double x1, double y1, double x2, double y2);
-    // Adds the keyframe with a steps timing function.
-    virtual void add(const CompositorFilterKeyframe&, int steps, float stepsStartOffset);
-
-    virtual void setLinearTimingFunction();
-    virtual void setCubicBezierTimingFunction(TimingFunctionType);
-    virtual void setCubicBezierTimingFunction(double x1, double y1, double x2, double y2);
-    virtual void setStepsTimingFunction(int numberOfSteps, float stepsStartOffset);
+    void addKeyframe(const CompositorFilterKeyframe&);
+    void setTimingFunction(const TimingFunction&);
+    void setScaledDuration(double);
 
     // blink::CompositorAnimationCurve implementation.
-    AnimationCurveType type() const override;
-
-    std::unique_ptr<cc::AnimationCurve> cloneToAnimationCurve() const;
+    std::unique_ptr<cc::AnimationCurve> cloneToAnimationCurve() const override;
 
 private:
+    CompositorFilterAnimationCurve();
+
     std::unique_ptr<cc::KeyframedFilterAnimationCurve> m_curve;
 };
 

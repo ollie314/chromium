@@ -12,7 +12,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -93,11 +93,11 @@ std::unique_ptr<EventConverterEvdev> CreateConverter(
   // EventReaderLibevdevCros -> GestureInterpreterLibevdevCros -> DispatchEvent
   if (devinfo.HasTouchpad() || devinfo.HasMouse()) {
     std::unique_ptr<GestureInterpreterLibevdevCros> gesture_interp =
-        base::WrapUnique(new GestureInterpreterLibevdevCros(
+        base::MakeUnique<GestureInterpreterLibevdevCros>(
             params.id, params.cursor, params.gesture_property_provider,
-            params.dispatcher));
-    return base::WrapUnique(new EventReaderLibevdevCros(
-        fd, params.path, params.id, devinfo, std::move(gesture_interp)));
+            params.dispatcher);
+    return base::MakeUnique<EventReaderLibevdevCros>(
+        fd, params.path, params.id, devinfo, std::move(gesture_interp));
   }
 #endif
 
@@ -189,7 +189,7 @@ InputDeviceFactoryEvdev::InputDeviceFactoryEvdev(
 }
 
 InputDeviceFactoryEvdev::~InputDeviceFactoryEvdev() {
-  STLDeleteValues(&converters_);
+  base::STLDeleteValues(&converters_);
 }
 
 void InputDeviceFactoryEvdev::AddInputDevice(int id,
@@ -238,6 +238,13 @@ void InputDeviceFactoryEvdev::AttachInputDevice(
     // devices with the same name open at the same time.
     if (converters_[path])
       DetachInputDevice(path);
+
+    if (converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
+        converter->HasPen()) {
+      converter->SetPalmSuppressionCallback(
+          base::Bind(&InputDeviceFactoryEvdev::EnablePalmSuppression,
+                     base::Unretained(this)));
+    }
 
     // Add initialized device to map.
     converters_[path] = converter.release();
@@ -376,6 +383,11 @@ bool InputDeviceFactoryEvdev::IsDeviceEnabled(
       converter->HasTouchscreen())
     return false;
 
+  if (palm_suppression_enabled_ &&
+      converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
+      converter->HasTouchscreen() && !converter->HasPen())
+    return false;
+
   return input_device_settings_.enable_devices;
 }
 
@@ -419,8 +431,11 @@ void InputDeviceFactoryEvdev::NotifyTouchscreensUpdated() {
   std::vector<TouchscreenDevice> touchscreens;
   for (auto it = converters_.begin(); it != converters_.end(); ++it) {
     if (it->second->HasTouchscreen()) {
-      touchscreens.push_back(TouchscreenDevice(it->second->input_device(),
-          it->second->GetTouchscreenSize(), it->second->GetTouchPoints()));
+      TouchscreenDevice device(it->second->input_device(),
+          it->second->GetTouchscreenSize(), it->second->GetTouchPoints());
+      if (it->second->HasPen())
+        device.is_stylus = true;
+      touchscreens.push_back(device);
     }
   }
 
@@ -428,10 +443,10 @@ void InputDeviceFactoryEvdev::NotifyTouchscreensUpdated() {
 }
 
 void InputDeviceFactoryEvdev::NotifyKeyboardsUpdated() {
-  std::vector<KeyboardDevice> keyboards;
+  std::vector<InputDevice> keyboards;
   for (auto it = converters_.begin(); it != converters_.end(); ++it) {
     if (it->second->HasKeyboard()) {
-      keyboards.push_back(KeyboardDevice(it->second->input_device()));
+      keyboards.push_back(InputDevice(it->second->input_device()));
     }
   }
 
@@ -489,6 +504,16 @@ void InputDeviceFactoryEvdev::SetBoolPropertyForOneType(
                            value);
   }
 #endif
+}
+
+void InputDeviceFactoryEvdev::EnablePalmSuppression(bool enabled) {
+  if (enabled == palm_suppression_enabled_)
+    return;
+  palm_suppression_enabled_ = enabled;
+
+  for (const auto& it : converters_) {
+    it.second->SetEnabled(IsDeviceEnabled(it.second));
+  }
 }
 
 }  // namespace ui

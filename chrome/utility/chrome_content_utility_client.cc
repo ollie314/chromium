@@ -17,15 +17,16 @@
 #include "chrome/common/safe_browsing/zip_analyzer_results.h"
 #include "chrome/utility/chrome_content_utility_ipc_whitelist.h"
 #include "chrome/utility/image_decoder_impl.h"
-#include "chrome/utility/safe_json_parser_handler.h"
 #include "chrome/utility/utility_message_handler.h"
+#include "components/safe_json/utility/safe_json_parser_mojo_impl.h"
 #include "content/public/child/image_decoder_utils.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/service_registry.h"
 #include "content/public/utility/utility_thread.h"
 #include "courgette/courgette.h"
-#include "courgette/third_party/bsdiff.h"
+#include "courgette/third_party/bsdiff/bsdiff.h"
 #include "ipc/ipc_channel.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "services/shell/public/cpp/interface_registry.h"
 #include "third_party/zlib/google/zip.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -38,7 +39,8 @@
 #endif
 
 #if defined(OS_WIN)
-#include "chrome/utility/shell_handler_win.h"
+#include "chrome/utility/ipc_shell_handler_win.h"
+#include "chrome/utility/shell_handler_impl_win.h"
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
@@ -46,7 +48,8 @@
 #include "chrome/utility/image_writer/image_writer_handler.h"
 #endif
 
-#if defined(ENABLE_PRINT_PREVIEW) || defined(OS_WIN)
+#if defined(ENABLE_PRINT_PREVIEW) || \
+    (defined(ENABLE_BASIC_PRINTING) && defined(OS_WIN))
 #include "chrome/utility/printing_handler.h"
 #endif
 
@@ -66,24 +69,18 @@ void ReleaseProcessIfNeeded() {
 
 #if !defined(OS_ANDROID)
 void CreateProxyResolverFactory(
-    mojo::InterfaceRequest<net::interfaces::ProxyResolverFactory> request) {
-  // MojoProxyResolverFactoryImpl is strongly bound to the Mojo message pipe it
-  // is connected to. When that message pipe is closed, either explicitly on the
-  // other end (in the browser process), or by a connection error, this object
-  // will be destroyed.
-  new net::MojoProxyResolverFactoryImpl(std::move(request));
+    net::interfaces::ProxyResolverFactoryRequest request) {
+  mojo::MakeStrongBinding(base::MakeUnique<net::MojoProxyResolverFactoryImpl>(),
+                          std::move(request));
 }
 
 class ResourceUsageReporterImpl : public mojom::ResourceUsageReporter {
  public:
-  explicit ResourceUsageReporterImpl(
-      mojo::InterfaceRequest<mojom::ResourceUsageReporter> req)
-      : binding_(this, std::move(req)) {}
+  ResourceUsageReporterImpl() {}
   ~ResourceUsageReporterImpl() override {}
 
  private:
-  void GetUsageData(const mojo::Callback<void(mojom::ResourceUsageDataPtr)>&
-                        callback) override {
+  void GetUsageData(const GetUsageDataCallback& callback) override {
     mojom::ResourceUsageDataPtr data = mojom::ResourceUsageData::New();
     size_t total_heap_size = net::ProxyResolverV8::GetTotalHeapSize();
     if (total_heap_size) {
@@ -93,19 +90,19 @@ class ResourceUsageReporterImpl : public mojom::ResourceUsageReporter {
     }
     callback.Run(std::move(data));
   }
-
-  mojo::StrongBinding<mojom::ResourceUsageReporter> binding_;
 };
 
 void CreateResourceUsageReporter(
     mojo::InterfaceRequest<mojom::ResourceUsageReporter> request) {
-  new ResourceUsageReporterImpl(std::move(request));
+  mojo::MakeStrongBinding(base::MakeUnique<ResourceUsageReporterImpl>(),
+                          std::move(request));
 }
-#endif  // OS_ANDROID
+#endif  // !defined(OS_ANDROID)
 
 void CreateImageDecoder(mojo::InterfaceRequest<mojom::ImageDecoder> request) {
   content::UtilityThread::Get()->EnsureBlinkInitialized();
-  new ImageDecoderImpl(std::move(request));
+  mojo::MakeStrongBinding(base::MakeUnique<ImageDecoderImpl>(),
+                          std::move(request));
 }
 
 }  // namespace
@@ -121,15 +118,14 @@ ChromeContentUtilityClient::ChromeContentUtilityClient()
   handlers_.push_back(new image_writer::ImageWriterHandler());
 #endif
 
-#if defined(ENABLE_PRINT_PREVIEW) || defined(OS_WIN)
+#if defined(ENABLE_PRINT_PREVIEW) || \
+    (defined(ENABLE_BASIC_PRINTING) && defined(OS_WIN))
   handlers_.push_back(new printing::PrintingHandler());
 #endif
 
 #if defined(OS_WIN)
-  handlers_.push_back(new ShellHandler());
+  handlers_.push_back(new IPCShellHandler());
 #endif
-
-  handlers_.push_back(new SafeJsonParserHandler());
 }
 
 ChromeContentUtilityClient::~ChromeContentUtilityClient() {
@@ -152,8 +148,10 @@ void ChromeContentUtilityClient::UtilityThreadStarted() {
 
 bool ChromeContentUtilityClient::OnMessageReceived(
     const IPC::Message& message) {
-  if (filter_messages_ && !ContainsKey(message_id_whitelist_, message.type()))
+  if (filter_messages_ &&
+      !base::ContainsKey(message_id_whitelist_, message.type())) {
     return false;
+  }
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromeContentUtilityClient, message)
@@ -175,31 +173,44 @@ bool ChromeContentUtilityClient::OnMessageReceived(
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
-  for (Handlers::iterator it = handlers_.begin();
-       !handled && it != handlers_.end(); ++it) {
-    handled = (*it)->OnMessageReceived(message);
+  if (handled)
+    return true;
+
+  for (auto* handler : handlers_) {
+    // At least one of the utility process handlers adds a new handler to
+    // |handlers_| when it handles a message. This causes any iterator over
+    // |handlers_| to become invalid. Therefore, it is necessary to break the
+    // loop at this point instead of evaluating it as a loop condition (if the
+    // for loop was using iterators explicitly, as originally done).
+    if (handler->OnMessageReceived(message))
+      return true;
   }
 
-  return handled;
+  return false;
 }
 
-void ChromeContentUtilityClient::RegisterMojoServices(
-    content::ServiceRegistry* registry) {
+void ChromeContentUtilityClient::ExposeInterfacesToBrowser(
+    shell::InterfaceRegistry* registry) {
   // When the utility process is running with elevated privileges, we need to
   // filter messages so that only a whitelist of IPCs can run. In Mojo, there's
   // no way of filtering individual messages. Instead, we can avoid adding
-  // non-whitelisted Mojo services to the ServiceRegistry.
+  // non-whitelisted Mojo services to the shell::InterfaceRegistry.
   // TODO(amistry): Use a whitelist once the whistlisted IPCs have been
   // converted to Mojo.
   if (filter_messages_)
     return;
 
 #if !defined(OS_ANDROID)
-  registry->AddService<net::interfaces::ProxyResolverFactory>(
+  registry->AddInterface<net::interfaces::ProxyResolverFactory>(
       base::Bind(CreateProxyResolverFactory));
-  registry->AddService(base::Bind(CreateResourceUsageReporter));
+  registry->AddInterface(base::Bind(CreateResourceUsageReporter));
 #endif
-  registry->AddService(base::Bind(&CreateImageDecoder));
+  registry->AddInterface(base::Bind(&CreateImageDecoder));
+  registry->AddInterface(
+      base::Bind(&safe_json::SafeJsonParserMojoImpl::Create));
+#if defined(OS_WIN)
+  registry->AddInterface(base::Bind(&ShellHandlerImpl::Create));
+#endif
 }
 
 void ChromeContentUtilityClient::AddHandler(
@@ -253,9 +264,9 @@ void ChromeContentUtilityClient::OnPatchFileBsdiff(
   if (input_file.empty() || patch_file.empty() || output_file.empty()) {
     Send(new ChromeUtilityHostMsg_PatchFile_Finished(-1));
   } else {
-    const int patch_status = courgette::ApplyBinaryPatch(input_file,
-                                                         patch_file,
-                                                         output_file);
+    const int patch_status = bsdiff::ApplyBinaryPatch(input_file,
+                                                      patch_file,
+                                                      output_file);
     Send(new ChromeUtilityHostMsg_PatchFile_Finished(patch_status));
   }
   ReleaseProcessIfNeeded();

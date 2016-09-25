@@ -51,11 +51,11 @@ static LayoutSize contentsScrollOffset(AbstractView* abstractView)
     return LayoutSize(frameView->scrollX() / scaleFactor, frameView->scrollY() / scaleFactor);
 }
 
-MouseRelatedEvent::MouseRelatedEvent(const AtomicString& eventType, bool canBubble, bool cancelable, EventTarget* relatedTarget,
+MouseRelatedEvent::MouseRelatedEvent(const AtomicString& eventType, bool canBubble, bool cancelable,
     AbstractView* abstractView, int detail, const IntPoint& screenLocation,
     const IntPoint& rootFrameLocation, const IntPoint& movementDelta, PlatformEvent::Modifiers modifiers,
     double platformTimeStamp, PositionType positionType, InputDeviceCapabilities* sourceCapabilities)
-    : UIEventWithKeyState(eventType, canBubble, cancelable, relatedTarget, abstractView, detail, modifiers, platformTimeStamp, sourceCapabilities)
+    : UIEventWithKeyState(eventType, canBubble, cancelable, abstractView, detail, modifiers, platformTimeStamp, sourceCapabilities)
     , m_screenLocation(screenLocation)
     , m_movementDelta(movementDelta)
     , m_positionType(positionType)
@@ -132,6 +132,22 @@ void MouseRelatedEvent::receivedTarget()
     m_hasCachedRelativePosition = false;
 }
 
+static const LayoutObject* findTargetLayoutObject(Node*& targetNode)
+{
+    LayoutObject* layoutObject = targetNode->layoutObject();
+    if (!layoutObject || !layoutObject->isSVG())
+        return layoutObject;
+    // If this is an SVG node, compute the offset to the padding box of the
+    // outermost SVG root (== the closest ancestor that has a CSS layout box.)
+    while (!layoutObject->isSVGRoot())
+        layoutObject = layoutObject->parent();
+    // Update the target node to point to the SVG root.
+    targetNode = layoutObject->node();
+    DCHECK(!targetNode
+        || (targetNode->isSVGElement() && toSVGElement(*targetNode).isOutermostSVGSVGElement()));
+    return layoutObject;
+}
+
 void MouseRelatedEvent::computeRelativePosition()
 {
     Node* targetNode = target() ? target()->toNode() : nullptr;
@@ -143,16 +159,16 @@ void MouseRelatedEvent::computeRelativePosition()
     m_offsetLocation = m_pageLocation;
 
     // Must have an updated layout tree for this math to work correctly.
-    targetNode->document().updateLayoutIgnorePendingStylesheets();
+    targetNode->document().updateStyleAndLayoutIgnorePendingStylesheets();
 
     // Adjust offsetLocation to be relative to the target's padding box.
-    if (LayoutObject* r = targetNode->layoutObject()) {
-        FloatPoint localPos = r->absoluteToLocal(FloatPoint(absoluteLocation()), UseTransforms);
+    if (const LayoutObject* layoutObject = findTargetLayoutObject(targetNode)) {
+        FloatPoint localPos = layoutObject->absoluteToLocal(FloatPoint(absoluteLocation()), UseTransforms);
 
         // Adding this here to address crbug.com/570666. Basically we'd like to
         // find the local coordinates relative to the padding box not the border box.
-        if (r->isBoxModelObject()) {
-            LayoutBoxModelObject* layoutBox = toLayoutBoxModelObject(r);
+        if (layoutObject->isBoxModelObject()) {
+            const LayoutBoxModelObject* layoutBox = toLayoutBoxModelObject(layoutObject);
             localPos.move(-layoutBox->borderLeft(), -layoutBox->borderTop());
         }
 
@@ -183,14 +199,14 @@ int MouseRelatedEvent::layerX()
 {
     if (!m_hasCachedRelativePosition)
         computeRelativePosition();
-    return m_layerLocation.x();
+    return m_layerLocation.x().toInt();
 }
 
 int MouseRelatedEvent::layerY()
 {
     if (!m_hasCachedRelativePosition)
         computeRelativePosition();
-    return m_layerLocation.y();
+    return m_layerLocation.y().toInt();
 }
 
 int MouseRelatedEvent::offsetX()
@@ -213,26 +229,26 @@ int MouseRelatedEvent::offsetY()
 
 int MouseRelatedEvent::pageX() const
 {
-    return m_pageLocation.x();
+    return m_pageLocation.x().toInt();
 }
 
 int MouseRelatedEvent::pageY() const
 {
-    return m_pageLocation.y();
+    return m_pageLocation.y().toInt();
 }
 
 int MouseRelatedEvent::x() const
 {
     // FIXME: This is not correct.
     // See Microsoft documentation and <http://www.quirksmode.org/dom/w3c_events.html>.
-    return m_clientLocation.x();
+    return m_clientLocation.x().toInt();
 }
 
 int MouseRelatedEvent::y() const
 {
     // FIXME: This is not correct.
     // See Microsoft documentation and <http://www.quirksmode.org/dom/w3c_events.html>.
-    return m_clientLocation.y();
+    return m_clientLocation.y().toInt();
 }
 
 DEFINE_TRACE(MouseRelatedEvent)

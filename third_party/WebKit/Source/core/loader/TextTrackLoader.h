@@ -32,7 +32,6 @@
 #include "platform/CrossOriginAttributeValue.h"
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
@@ -81,7 +80,7 @@ private:
 
     TextTrackLoader(TextTrackLoaderClient&, Document&);
 
-    void cueLoadTimerFired(Timer<TextTrackLoader>*);
+    void cueLoadTimerFired(TimerBase*);
     void corsPolicyPreventedLoad(SecurityOrigin*, const KURL&);
 
     Document& document() const { return *m_document; }

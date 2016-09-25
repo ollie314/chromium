@@ -11,10 +11,10 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "ui/display/display_change_notifier.h"
 #include "ui/display/display_export.h"
-#include "ui/gfx/display_change_notifier.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/win/singleton_hwnd_observer.h"
 
 namespace gfx {
@@ -30,7 +30,7 @@ namespace win {
 class DisplayInfo;
 class ScreenWinDisplay;
 
-class DISPLAY_EXPORT ScreenWin : public gfx::Screen {
+class DISPLAY_EXPORT ScreenWin : public display::Screen {
  public:
   ScreenWin();
   ~ScreenWin() override;
@@ -89,6 +89,19 @@ class DISPLAY_EXPORT ScreenWin : public gfx::Screen {
   // The DPI scale is performed relative to the display nearest to |hwnd|.
   static gfx::Size DIPToScreenSize(HWND hwnd, const gfx::Size& dip_size);
 
+  // Returns the result of GetSystemMetrics for |metric| scaled to |hwnd|'s DPI.
+  // Use this function if you're already working with screen pixels, as this
+  // helps reduce any cascading rounding errors from DIP to the |hwnd|'s DPI.
+  static int GetSystemMetricsForHwnd(HWND hwnd, int metric);
+
+  // Returns the result of GetSystemMetrics for |metric| in DIP.
+  // Use this function if you need to work in DIP and can tolerate cascading
+  // rounding errors towards screen pixels.
+  static int GetSystemMetricsInDIP(int metric);
+
+  // Returns |hwnd|'s scale factor.
+  static float GetScaleFactorForHWND(HWND hwnd);
+
   // Returns the HWND associated with the NativeView.
   virtual HWND GetHWNDFromNativeView(gfx::NativeView window) const;
 
@@ -96,18 +109,25 @@ class DISPLAY_EXPORT ScreenWin : public gfx::Screen {
   virtual gfx::NativeWindow GetNativeWindowFromHWND(HWND hwnd) const;
 
  protected:
-  // gfx::Screen:
+  // display::Screen:
   gfx::Point GetCursorScreenPoint() override;
-  gfx::NativeWindow GetWindowUnderCursor() override;
+  bool IsWindowUnderCursor(gfx::NativeWindow window) override;
   gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point) override;
   int GetNumDisplays() const override;
-  std::vector<gfx::Display> GetAllDisplays() const override;
-  gfx::Display GetDisplayNearestWindow(gfx::NativeView window) const override;
-  gfx::Display GetDisplayNearestPoint(const gfx::Point& point) const override;
-  gfx::Display GetDisplayMatching(const gfx::Rect& match_rect) const override;
-  gfx::Display GetPrimaryDisplay() const override;
-  void AddObserver(gfx::DisplayObserver* observer) override;
-  void RemoveObserver(gfx::DisplayObserver* observer) override;
+  std::vector<display::Display> GetAllDisplays() const override;
+  display::Display GetDisplayNearestWindow(
+      gfx::NativeView window) const override;
+  display::Display GetDisplayNearestPoint(
+      const gfx::Point& point) const override;
+  display::Display GetDisplayMatching(
+      const gfx::Rect& match_rect) const override;
+  display::Display GetPrimaryDisplay() const override;
+  void AddObserver(display::DisplayObserver* observer) override;
+  void RemoveObserver(display::DisplayObserver* observer) override;
+  gfx::Rect ScreenToDIPRectInWindow(
+      gfx::NativeView view, const gfx::Rect& screen_rect) const override;
+  gfx::Rect DIPToScreenRectInWindow(
+      gfx::NativeView view, const gfx::Rect& dip_rect) const override;
 
   void UpdateFromDisplayInfos(const std::vector<DisplayInfo>& display_infos);
 
@@ -120,6 +140,7 @@ class DISPLAY_EXPORT ScreenWin : public gfx::Screen {
   virtual MONITORINFOEX MonitorInfoFromWindow(HWND hwnd, DWORD default_options)
       const;
   virtual HWND GetRootWindow(HWND hwnd) const;
+  virtual int GetSystemMetrics(int metric) const;
 
  private:
   void OnWndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
@@ -135,13 +156,29 @@ class DISPLAY_EXPORT ScreenWin : public gfx::Screen {
   ScreenWinDisplay GetScreenWinDisplayNearestScreenPoint(
       const gfx::Point& screen_point) const;
 
+  // Returns the ScreenWinDisplay closest to or enclosing |dip_point|.
+  ScreenWinDisplay GetScreenWinDisplayNearestDIPPoint(
+      const gfx::Point& dip_point) const;
+
+  // Returns the ScreenWinDisplay closest to or enclosing |dip_rect|.
+  ScreenWinDisplay GetScreenWinDisplayNearestDIPRect(
+      const gfx::Rect& dip_rect) const;
+
   // Returns the ScreenWinDisplay corresponding to the primary monitor.
   ScreenWinDisplay GetPrimaryScreenWinDisplay() const;
 
   ScreenWinDisplay GetScreenWinDisplay(const MONITORINFOEX& monitor_info) const;
 
+  // Returns the result of calling |getter| with |value| on the global
+  // ScreenWin if it exists, otherwise return the default ScreenWinDisplay.
+  template <typename Getter, typename GetterType>
+  static ScreenWinDisplay GetScreenWinDisplayVia(Getter getter,
+                                                 GetterType value);
+
+  void RecordDisplayScaleFactors() const;
+
   // Helper implementing the DisplayObserver handling.
-  gfx::DisplayChangeNotifier change_notifier_;
+  DisplayChangeNotifier change_notifier_;
 
   std::unique_ptr<gfx::SingletonHwndObserver> singleton_hwnd_observer_;
 

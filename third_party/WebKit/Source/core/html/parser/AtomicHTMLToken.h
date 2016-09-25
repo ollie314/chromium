@@ -31,6 +31,8 @@
 #include "core/html/parser/CompactHTMLToken.h"
 #include "core/html/parser/HTMLToken.h"
 #include "wtf/Allocator.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -151,11 +153,11 @@ public:
             break;
         case HTMLToken::DOCTYPE:
             m_name = AtomicString(token.data());
-            m_doctypeData = adoptPtr(new DoctypeData());
+            m_doctypeData = wrapUnique(new DoctypeData());
             m_doctypeData->m_hasPublicIdentifier = true;
-            append(m_doctypeData->m_publicIdentifier, token.publicIdentifier());
+            token.publicIdentifier().appendTo(m_doctypeData->m_publicIdentifier);
             m_doctypeData->m_hasSystemIdentifier = true;
-            append(m_doctypeData->m_systemIdentifier, token.systemIdentifier());
+            token.systemIdentifier().appendTo(m_doctypeData->m_systemIdentifier);
             m_doctypeData->m_forceQuirks = token.doctypeForcesQuirks();
             break;
         case HTMLToken::EndOfFile:
@@ -195,6 +197,10 @@ public:
         ASSERT(usesName());
     }
 
+#ifndef NDEBUG
+    void show() const;
+#endif
+
 private:
     HTMLToken::TokenType m_type;
 
@@ -212,7 +218,7 @@ private:
     String m_data;
 
     // For DOCTYPE
-    OwnPtr<DoctypeData> m_doctypeData;
+    std::unique_ptr<DoctypeData> m_doctypeData;
 
     // For StartTag and EndTag
     bool m_selfClosing;
@@ -233,10 +239,8 @@ inline void AtomicHTMLToken::initializeAttributes(const HTMLToken::AttributeList
         if (attribute.nameAsVector().isEmpty())
             continue;
 
-        ASSERT(attribute.nameRange().start);
-        ASSERT(attribute.nameRange().end);
-        ASSERT(attribute.valueRange().start);
-        ASSERT(attribute.valueRange().end);
+        attribute.nameRange().checkValid();
+        attribute.valueRange().checkValid();
 
         AtomicString value(attribute.value8BitIfNecessary());
         const QualifiedName& name = nameForAttribute(attribute);

@@ -19,7 +19,7 @@ class LayoutObject;
 class LayoutRect;
 
 class BackgroundImageGeometry {
-    STACK_ALLOCATED();
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 public:
     BackgroundImageGeometry()
         : m_hasNonLocalGeometry(false)
@@ -28,12 +28,12 @@ public:
     void calculate(const LayoutBoxModelObject&, const LayoutBoxModelObject* paintContainer,
         const GlobalPaintFlags, const FillLayer&, const LayoutRect& paintRect);
 
-    LayoutRect destRect() const { return m_destRect; }
-    LayoutSize tileSize() const { return m_tileSize; }
-    LayoutPoint phase() const { return m_phase; }
+    const LayoutRect& destRect() const { return m_destRect; }
+    const LayoutSize& tileSize() const { return m_tileSize; }
+    const LayoutPoint& phase() const { return m_phase; }
     // Space-size represents extra width and height that may be added to
     // the image if used as a pattern with background-repeat: space.
-    LayoutSize spaceSize() const { return m_repeatSpacing; }
+    const LayoutSize& spaceSize() const { return m_repeatSpacing; }
     // Has background-attachment: fixed. Implies that we can't always cheaply compute destRect.
     bool hasNonLocalGeometry() const { return m_hasNonLocalGeometry; }
 
@@ -44,6 +44,7 @@ private:
     void setSpaceSize(const LayoutSize& repeatSpacing) { m_repeatSpacing = repeatSpacing; }
     void setPhaseX(LayoutUnit x) { m_phase.setX(x); }
     void setPhaseY(LayoutUnit y) { m_phase.setY(y); }
+
     void setNoRepeatX(LayoutUnit xOffset);
     void setNoRepeatY(LayoutUnit yOffset);
     void setRepeatX(const FillLayer&, LayoutUnit, LayoutUnit, LayoutUnit, LayoutUnit);
@@ -54,6 +55,7 @@ private:
     void useFixedAttachment(const LayoutPoint& attachmentPoint);
     void setHasNonLocalGeometry() { m_hasNonLocalGeometry = true; }
 
+    // TODO(schenney): Convert these to IntPoints for values that we snap
     LayoutRect m_destRect;
     LayoutPoint m_phase;
     LayoutSize m_tileSize;

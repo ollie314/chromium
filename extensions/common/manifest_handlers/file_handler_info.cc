@@ -6,7 +6,8 @@
 
 #include <stddef.h>
 
-#include "base/memory/scoped_ptr.h"
+#include <memory>
+
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -20,12 +21,31 @@ namespace extensions {
 namespace keys = manifest_keys;
 namespace errors = manifest_errors;
 
+namespace file_handler_verbs {
+
+const char kOpenWith[] = "open_with";
+const char kAddTo[] = "add_to";
+const char kPackWith[] = "pack_with";
+const char kShareWith[] = "share_with";
+
+}  // namespace file_handler_verbs
+
 namespace {
+
 const int kMaxTypeAndExtensionHandlers = 200;
 const char kNotRecognized[] = "'%s' is not a recognized file handler property.";
+
+bool IsSupportedVerb(const std::string& verb) {
+  return verb == file_handler_verbs::kOpenWith ||
+         verb == file_handler_verbs::kAddTo ||
+         verb == file_handler_verbs::kPackWith ||
+         verb == file_handler_verbs::kShareWith;
 }
 
-FileHandlerInfo::FileHandlerInfo() : include_directories(false) {}
+}  // namespace
+
+FileHandlerInfo::FileHandlerInfo()
+    : include_directories(false), verb(file_handler_verbs::kOpenWith) {}
 FileHandlerInfo::FileHandlerInfo(const FileHandlerInfo& other) = default;
 FileHandlerInfo::~FileHandlerInfo() {}
 
@@ -73,11 +93,20 @@ bool LoadFileHandler(const std::string& handler_id,
   }
 
   handler.include_directories = false;
-  if (handler_info.HasKey("include_directories") &&
-      !handler_info.GetBoolean("include_directories",
+  if (handler_info.HasKey(keys::kFileHandlerIncludeDirectories) &&
+      !handler_info.GetBoolean(keys::kFileHandlerIncludeDirectories,
                                &handler.include_directories)) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
         errors::kInvalidFileHandlerIncludeDirectories, handler_id);
+    return false;
+  }
+
+  handler.verb = file_handler_verbs::kOpenWith;
+  if (handler_info.HasKey(keys::kFileHandlerVerb) &&
+      (!handler_info.GetString(keys::kFileHandlerVerb, &handler.verb) ||
+       !IsSupportedVerb(handler.verb))) {
+    *error = ErrorUtils::FormatErrorMessageUTF16(
+        errors::kInvalidFileHandlerVerb, handler_id);
     return false;
   }
 
@@ -122,7 +151,9 @@ bool LoadFileHandler(const std::string& handler_id,
   for (base::DictionaryValue::Iterator it(handler_info); !it.IsAtEnd();
        it.Advance()) {
     if (it.key() != keys::kFileHandlerExtensions &&
-        it.key() != keys::kFileHandlerTypes) {
+        it.key() != keys::kFileHandlerTypes &&
+        it.key() != keys::kFileHandlerIncludeDirectories &&
+        it.key() != keys::kFileHandlerVerb) {
       install_warnings->push_back(
           InstallWarning(base::StringPrintf(kNotRecognized, it.key().c_str()),
                          keys::kFileHandlers,
@@ -134,7 +165,7 @@ bool LoadFileHandler(const std::string& handler_id,
 }
 
 bool FileHandlersParser::Parse(Extension* extension, base::string16* error) {
-  scoped_ptr<FileHandlers> info(new FileHandlers);
+  std::unique_ptr<FileHandlers> info(new FileHandlers);
   const base::DictionaryValue* all_handlers = NULL;
   if (!extension->manifest()->GetDictionary(keys::kFileHandlers,
                                             &all_handlers)) {

@@ -28,10 +28,9 @@
 
 #include "WebColor.h"
 #include "WebCommon.h"
+#include "WebCompositorMutatorClient.h"
 #include "WebEventListenerProperties.h"
 #include "WebFloatPoint.h"
-#include "WebNonCopyable.h"
-#include "WebPrivateOwnPtr.h"
 #include "WebSize.h"
 #include "WebTopControlsState.h"
 
@@ -67,7 +66,9 @@ public:
 
     // View properties ---------------------------------------------------
 
+    // Viewport size is given in physical pixels.
     virtual void setViewportSize(const WebSize& deviceViewportSize) { }
+    virtual WebSize getViewportSize() const { return WebSize(); }
 
     virtual void setDeviceScaleFactor(float) { }
 
@@ -88,6 +89,9 @@ public:
     // If useAnchor is true, destination is a point on the screen that will remain fixed for the duration of the animation.
     // If useAnchor is false, destination is the final top-left scroll position.
     virtual void startPageScaleAnimation(const WebPoint& destination, bool useAnchor, float newPageScale, double durationSec) { }
+
+    // Returns true if the page scale animation had started.
+    virtual bool hasPendingPageScaleAnimation() const { return false; }
 
     virtual void heuristicsForGpuRasterizationUpdated(bool) { }
 
@@ -141,6 +145,9 @@ public:
     // Used to update the active selection bounds.
     virtual void registerSelection(const WebSelection&) { }
     virtual void clearSelection() { }
+
+    // Mutations are plumbed back to the layer tree via the mutator client.
+    virtual void setMutatorClient(std::unique_ptr<WebCompositorMutatorClient>) { }
 
     // Input properties ---------------------------------------------------
     virtual void setEventListenerProperties(WebEventListenerClass, WebEventListenerProperties) { };

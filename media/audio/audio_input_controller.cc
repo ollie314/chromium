@@ -4,6 +4,8 @@
 
 #include "media/audio/audio_input_controller.h"
 
+#include <algorithm>
+#include <limits>
 #include <utility>
 
 #include "base/bind.h"
@@ -11,30 +13,15 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "media/audio/audio_input_writer.h"
 #include "media/base/user_input_monitor.h"
 
-using base::TimeDelta;
-
 namespace {
 
 const int kMaxInputChannels = 3;
-
-// TODO(henrika): remove usage of timers and add support for proper
-// notification of when the input device is removed.  This was originally added
-// to resolve http://crbug.com/79936 for Windows platforms.  This then caused
-// breakage (very hard to repro bugs!) on other platforms: See
-// http://crbug.com/226327 and http://crbug.com/230972.
-// See also that the timer has been disabled on Mac now due to
-// crbug.com/357501.
-const int kTimerResetIntervalSeconds = 1;
-// We have received reports that the timer can be too trigger happy on some
-// Mac devices and the initial timer interval has therefore been increased
-// from 1 second to 5 seconds.
-const int kTimerInitialIntervalSeconds = 5;
 
 #if defined(AUDIO_POWER_MONITORING)
 // Time in seconds between two successive measurements of audio power levels.
@@ -91,33 +78,12 @@ float AveragePower(const media::AudioBus& buffer) {
 }
 #endif  // AUDIO_POWER_MONITORING
 
-}
-
-// Used to log the result of capture startup.
-// This was previously logged as a boolean with only the no callback and OK
-// options. The enum order is kept to ensure backwards compatibility.
-// Elements in this enum should not be deleted or rearranged; the only
-// permitted operation is to add new elements before CAPTURE_STARTUP_RESULT_MAX
-// and update CAPTURE_STARTUP_RESULT_MAX.
-enum CaptureStartupResult {
-  CAPTURE_STARTUP_NO_DATA_CALLBACK = 0,
-  CAPTURE_STARTUP_OK = 1,
-  CAPTURE_STARTUP_CREATE_STREAM_FAILED = 2,
-  CAPTURE_STARTUP_OPEN_STREAM_FAILED = 3,
-  CAPTURE_STARTUP_RESULT_MAX = CAPTURE_STARTUP_OPEN_STREAM_FAILED
-};
-
-void LogCaptureStartupResult(CaptureStartupResult result) {
-  UMA_HISTOGRAM_ENUMERATION("Media.AudioInputControllerCaptureStartupSuccess",
-                            result,
-                            CAPTURE_STARTUP_RESULT_MAX + 1);
-
-}
+}  // namespace
 
 namespace media {
 
 // static
-AudioInputController::Factory* AudioInputController::factory_ = NULL;
+AudioInputController::Factory* AudioInputController::factory_ = nullptr;
 
 AudioInputController::AudioInputController(EventHandler* handler,
                                            SyncWriter* sync_writer,
@@ -125,8 +91,8 @@ AudioInputController::AudioInputController(EventHandler* handler,
                                            const bool agc_is_enabled)
     : creator_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       handler_(handler),
-      stream_(NULL),
-      data_is_active_(false),
+      stream_(nullptr),
+      should_report_stats(0),
       state_(CLOSED),
       sync_writer_(sync_writer),
       max_volume_(0.0),
@@ -156,14 +122,14 @@ scoped_refptr<AudioInputController> AudioInputController::Create(
   DCHECK(audio_manager);
 
   if (!params.IsValid() || (params.channels() > kMaxInputChannels))
-    return NULL;
+    return nullptr;
 
   if (factory_) {
     return factory_->Create(
         audio_manager, event_handler, params, user_input_monitor);
   }
-  scoped_refptr<AudioInputController> controller(
-      new AudioInputController(event_handler, NULL, user_input_monitor, false));
+  scoped_refptr<AudioInputController> controller(new AudioInputController(
+      event_handler, nullptr, user_input_monitor, false));
 
   controller->task_runner_ = audio_manager->GetTaskRunner();
 
@@ -176,7 +142,7 @@ scoped_refptr<AudioInputController> AudioInputController::Create(
                      base::Unretained(audio_manager),
                      params,
                      device_id))) {
-    controller = NULL;
+    controller = nullptr;
   }
 
   return controller;
@@ -195,7 +161,7 @@ scoped_refptr<AudioInputController> AudioInputController::CreateLowLatency(
   DCHECK(sync_writer);
 
   if (!params.IsValid() || (params.channels() > kMaxInputChannels))
-    return NULL;
+    return nullptr;
 
   // Create the AudioInputController object and ensure that it runs on
   // the audio-manager thread.
@@ -212,7 +178,7 @@ scoped_refptr<AudioInputController> AudioInputController::CreateLowLatency(
                      base::Unretained(audio_manager),
                      params,
                      device_id))) {
-    controller = NULL;
+    controller = nullptr;
   }
 
   return controller;
@@ -234,17 +200,12 @@ scoped_refptr<AudioInputController> AudioInputController::CreateForStream(
       event_handler, sync_writer, user_input_monitor, false));
   controller->task_runner_ = task_runner;
 
-  // TODO(miu): See TODO at top of file.  Until that's resolved, we need to
-  // disable the error auto-detection here (since the audio mirroring
-  // implementation will reliably report error and close events).  Note, of
-  // course, that we're assuming CreateForStream() has been called for the audio
-  // mirroring use case only.
   if (!controller->task_runner_->PostTask(
           FROM_HERE,
           base::Bind(&AudioInputController::DoCreateForStream,
                      controller,
                      stream))) {
-    controller = NULL;
+    controller = nullptr;
   }
 
   return controller;
@@ -284,11 +245,8 @@ void AudioInputController::DoCreate(AudioManager* audio_manager,
   silence_state_ = SILENCE_STATE_NO_MEASUREMENT;
 #endif
 
-  // TODO(miu): See TODO at top of file.  Until that's resolved, assume all
-  // platform audio input requires the |no_data_timer_| be used to auto-detect
-  // errors.  In reality, probably only Windows needs to be treated as
-  // unreliable here.
-  DoCreateForStream(audio_manager->MakeAudioInputStream(params, device_id));
+  DoCreateForStream(audio_manager->MakeAudioInputStream(
+      params, device_id, base::Bind(&AudioInputController::LogMessage, this)));
 }
 
 void AudioInputController::DoCreateForLowLatency(AudioManager* audio_manager,
@@ -313,6 +271,7 @@ void AudioInputController::DoCreateForStream(
 
   DCHECK(!stream_);
   stream_ = stream_to_control;
+  should_report_stats = 1;
 
   if (!stream_) {
     if (handler_)
@@ -323,14 +282,12 @@ void AudioInputController::DoCreateForStream(
 
   if (stream_ && !stream_->Open()) {
     stream_->Close();
-    stream_ = NULL;
+    stream_ = nullptr;
     if (handler_)
       handler_->OnError(this, STREAM_OPEN_ERROR);
     LogCaptureStartupResult(CAPTURE_STARTUP_OPEN_STREAM_FAILED);
     return;
   }
-
-  DCHECK(!no_data_timer_.get());
 
   // Set AGC state using mode in |agc_is_enabled_| which can only be enabled in
   // CreateLowLatency().
@@ -346,18 +303,6 @@ void AudioInputController::DoCreateForStream(
   stream_->SetAutomaticGainControl(agc_is_enabled_);
 #endif
 
-  // Create the data timer which will call FirstCheckForNoData(). The timer
-  // is started in DoRecord() and restarted in each DoCheckForNoData()
-  // callback.
-  // The timer is enabled for logging purposes. The NO_DATA_ERROR triggered
-  // from the timer must be ignored by the EventHandler.
-  // TODO(henrika): remove usage of timer when it has been verified on Canary
-  // that we are safe doing so. Goal is to get rid of |no_data_timer_| and
-  // everything that is tied to it. crbug.com/357569.
-  no_data_timer_.reset(new base::Timer(
-      FROM_HERE, base::TimeDelta::FromSeconds(kTimerInitialIntervalSeconds),
-      base::Bind(&AudioInputController::FirstCheckForNoData,
-                 base::Unretained(this)), false));
 
   state_ = CREATED;
   if (handler_)
@@ -384,12 +329,6 @@ void AudioInputController::DoRecord() {
   if (handler_)
     handler_->OnLog(this, "AIC::DoRecord");
 
-  if (no_data_timer_) {
-    // Start the data timer. Once |kTimerResetIntervalSeconds| have passed,
-    // a callback to FirstCheckForNoData() is made.
-    no_data_timer_->Reset();
-  }
-
   stream_->Start(this);
   if (handler_)
     handler_->OnRecording(this);
@@ -398,6 +337,9 @@ void AudioInputController::DoRecord() {
 void AudioInputController::DoClose() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   SCOPED_UMA_HISTOGRAM_TIMER("Media.AudioInputController.CloseTime");
+  // If we have already logged something, this does nothing.
+  // Otherwise, we haven't recieved data.
+  LogCaptureStartupResult(CAPTURE_STARTUP_NEVER_GOT_DATA);
 
   if (state_ == CLOSED)
     return;
@@ -417,11 +359,7 @@ void AudioInputController::DoClose() {
     }
   }
 
-  // Delete the timer on the same thread that created it.
-  no_data_timer_.reset();
-
   DoStopCloseAndClearStream();
-  SetDataIsActive(false);
 
   if (SharedMemoryAndSyncSocketMode())
     sync_writer_->Close();
@@ -470,43 +408,6 @@ void AudioInputController::DoSetVolume(double volume) {
   stream_->SetVolume(max_volume_ * volume);
 }
 
-void AudioInputController::FirstCheckForNoData() {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-  LogCaptureStartupResult(GetDataIsActive() ?
-                          CAPTURE_STARTUP_OK :
-                          CAPTURE_STARTUP_NO_DATA_CALLBACK);
-  if (handler_) {
-    handler_->OnLog(this, GetDataIsActive() ?
-                    "AIC::FirstCheckForNoData => data is active" :
-                    "AIC::FirstCheckForNoData => data is NOT active");
-  }
-  DoCheckForNoData();
-}
-
-void AudioInputController::DoCheckForNoData() {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-
-  if (!GetDataIsActive()) {
-    // The data-is-active marker will be false only if it has been more than
-    // one second since a data packet was recorded. This can happen if a
-    // capture device has been removed or disabled.
-    if (handler_)
-      handler_->OnError(this, NO_DATA_ERROR);
-  }
-
-  // Mark data as non-active. The flag will be re-enabled in OnData() each
-  // time a data packet is received. Hence, under normal conditions, the
-  // flag will only be disabled during a very short period.
-  SetDataIsActive(false);
-
-  // Restart the timer to ensure that we check the flag again in
-  // |kTimerResetIntervalSeconds|.
-  no_data_timer_->Start(
-      FROM_HERE, base::TimeDelta::FromSeconds(kTimerResetIntervalSeconds),
-      base::Bind(&AudioInputController::DoCheckForNoData,
-      base::Unretained(this)));
-}
-
 void AudioInputController::OnData(AudioInputStream* stream,
                                   const AudioBus* source,
                                   uint32_t hardware_delay_bytes,
@@ -515,7 +416,7 @@ void AudioInputController::OnData(AudioInputStream* stream,
   // to avoid copying data and posting on the audio thread, we just check for
   // non-null here.
   if (input_writer_) {
-    scoped_ptr<AudioBus> source_copy =
+    std::unique_ptr<AudioBus> source_copy =
         AudioBus::Create(source->channels(), source->frames());
     source->CopyTo(source_copy.get());
     task_runner_->PostTask(
@@ -525,10 +426,8 @@ void AudioInputController::OnData(AudioInputStream* stream,
             this,
             base::Passed(&source_copy)));
   }
-
-  // Mark data as active to ensure that the periodic calls to
-  // DoCheckForNoData() does not report an error to the event handler.
-  SetDataIsActive(true);
+  // Now we have data, so we know for sure that startup was ok.
+  LogCaptureStartupResult(CAPTURE_STARTUP_OK);
 
   {
     base::AutoLock auto_lock(lock_);
@@ -582,7 +481,7 @@ void AudioInputController::OnData(AudioInputStream* stream,
   // TODO(henrika): Investigate if we can avoid the extra copy here.
   // (see http://crbug.com/249316 for details). AFAIK, this scope is only
   // active for WebSpeech clients.
-  scoped_ptr<AudioBus> audio_data =
+  std::unique_ptr<AudioBus> audio_data =
       AudioBus::Create(source->channels(), source->frames());
   source->CopyTo(audio_data.get());
 
@@ -594,7 +493,7 @@ void AudioInputController::OnData(AudioInputStream* stream,
           &AudioInputController::DoOnData, this, base::Passed(&audio_data)));
 }
 
-void AudioInputController::DoOnData(scoped_ptr<AudioBus> data) {
+void AudioInputController::DoOnData(std::unique_ptr<AudioBus> data) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   if (handler_)
     handler_->OnData(this, data.get());
@@ -668,22 +567,14 @@ void AudioInputController::DoStopCloseAndClearStream() {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
   // Allow calling unconditionally and bail if we don't have a stream to close.
-  if (stream_ != NULL) {
+  if (stream_ != nullptr) {
     stream_->Stop();
     stream_->Close();
-    stream_ = NULL;
+    stream_ = nullptr;
   }
 
   // The event handler should not be touched after the stream has been closed.
-  handler_ = NULL;
-}
-
-void AudioInputController::SetDataIsActive(bool enabled) {
-  base::subtle::Release_Store(&data_is_active_, enabled);
-}
-
-bool AudioInputController::GetDataIsActive() {
-  return (base::subtle::Acquire_Load(&data_is_active_) != false);
+  handler_ = nullptr;
 }
 
 #if defined(AUDIO_POWER_MONITORING)
@@ -716,6 +607,19 @@ void AudioInputController::LogSilenceState(SilenceState value) {
 }
 #endif
 
+void AudioInputController::LogCaptureStartupResult(
+    CaptureStartupResult result) {
+  // Decrement shall_report_stats and check if it was 1 before decrement,
+  // which would imply that this is the first time this method is called
+  // after initialization. To avoid underflow, we
+  // also check if should_report_stats is one before decrementing.
+  if (base::AtomicRefCountIsOne(&should_report_stats) &&
+      !base::AtomicRefCountDec(&should_report_stats)) {
+    UMA_HISTOGRAM_ENUMERATION("Media.AudioInputControllerCaptureStartupSuccess",
+                              result, CAPTURE_STARTUP_RESULT_MAX + 1);
+  }
+}
+
 void AudioInputController::DoEnableDebugRecording(
     AudioInputWriter* input_writer) {
   DCHECK(task_runner_->BelongsToCurrentThread());
@@ -729,10 +633,15 @@ void AudioInputController::DoDisableDebugRecording() {
 }
 
 void AudioInputController::WriteInputDataForDebugging(
-    scoped_ptr<AudioBus> data) {
+    std::unique_ptr<AudioBus> data) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   if (input_writer_)
     input_writer_->Write(std::move(data));
+}
+
+void AudioInputController::LogMessage(const std::string& message) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  handler_->OnLog(this, message);
 }
 
 }  // namespace media

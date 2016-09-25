@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -25,6 +26,7 @@
 #include "ui/message_center/notification_types.h"
 #include "ui/message_center/views/constants.h"
 #include "ui/message_center/views/message_center_controller.h"
+#include "ui/message_center/views/message_view_factory.h"
 #include "ui/message_center/views/notification_button.h"
 #include "ui/message_center/views/proportional_image_view.h"
 #include "ui/views/controls/button/image_button.h"
@@ -38,7 +40,7 @@ namespace {
 std::unique_ptr<ui::GestureEvent> GenerateGestureEvent(ui::EventType type) {
   ui::GestureEventDetails detail(type);
   std::unique_ptr<ui::GestureEvent> event(
-      new ui::GestureEvent(0, 0, 0, base::TimeDelta(), detail));
+      new ui::GestureEvent(0, 0, 0, base::TimeTicks(), detail));
   return event;
 }
 
@@ -46,7 +48,7 @@ std::unique_ptr<ui::GestureEvent> GenerateGestureVerticalScrollUpdateEvent(
     int dx) {
   ui::GestureEventDetails detail(ui::ET_GESTURE_SCROLL_UPDATE, dx, 0);
   std::unique_ptr<ui::GestureEvent> event(
-      new ui::GestureEvent(0, 0, 0, base::TimeDelta(), detail));
+      new ui::GestureEvent(0, 0, 0, base::TimeTicks(), detail));
   return event;
 }
 
@@ -179,12 +181,11 @@ class NotificationViewTest : public views::ViewsTestBase,
   }
 
   views::ImageButton* GetCloseButton() {
-    return notification_view()->close_button_.get();
+    return notification_view()->close_button();
   }
 
   void UpdateNotificationViews() {
-    notification_view()->CreateOrUpdateViews(*notification());
-    notification_view()->Layout();
+    notification_view()->UpdateWithNotification(*notification());
   }
 
   float GetNotificationScrollAmount() const {
@@ -228,8 +229,8 @@ void NotificationViewTest::SetUp() {
   notification_->set_image(CreateTestImage(320, 240));
 
   // Then create a new NotificationView with that single notification.
-  notification_view_.reset(
-      NotificationView::Create(this, *notification_, true));
+  notification_view_.reset(static_cast<NotificationView*>(
+      MessageViewFactory::Create(this, *notification_, true)));
   notification_view_->set_owned_by_client();
 
   views::Widget::InitParams init_params(
@@ -641,10 +642,12 @@ TEST_F(NotificationViewTest, FormatContextMessageTest) {
   // The url has been elided (it starts with an ellipsis)
   // The end of the domainsuffix is shown
   // the url piece is not shown
-  EXPECT_TRUE(base::UTF16ToUTF8(result).find(
-                  ".veryveryveyrylong.chromium.org") != std::string::npos);
-  EXPECT_TRUE(base::UTF16ToUTF8(result).find("\xE2\x80\xA6") == 0);
-  EXPECT_TRUE(base::UTF16ToUTF8(result).find("hello") == std::string::npos);
+  std::string result_utf8 = base::UTF16ToUTF8(result);
+  EXPECT_TRUE(result_utf8.find(".veryveryveyrylong.chromium.org") !=
+              std::string::npos);
+  EXPECT_TRUE(base::StartsWith(result_utf8, "\xE2\x80\xA6",
+                               base::CompareCase::SENSITIVE));
+  EXPECT_TRUE(result_utf8.find("hello") == std::string::npos);
 }
 
 TEST_F(NotificationViewTest, SlideOut) {

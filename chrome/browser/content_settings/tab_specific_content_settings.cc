@@ -21,8 +21,8 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/chrome_content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/media/media_capture_devices_dispatcher.h"
-#include "chrome/browser/media/media_stream_capture_indicator.h"
+#include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
+#include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -103,6 +103,8 @@ TabSpecificContentSettings::TabSpecificContentSettings(WebContents* tab)
       pending_protocol_handler_setting_(CONTENT_SETTING_DEFAULT),
       load_plugins_link_enabled_(true),
       microphone_camera_state_(MICROPHONE_CAMERA_NOT_ACCESSED),
+      subresource_filter_enabled_(false),
+      subresource_filter_blockage_indicated_(false),
       observer_(this) {
   ClearBlockedContentSettingsExceptForCookies();
   ClearCookieSpecificContentSettings();
@@ -257,6 +259,10 @@ bool TabSpecificContentSettings::IsContentBlocked(
   return false;
 }
 
+bool TabSpecificContentSettings::IsSubresourceBlocked() const {
+  return subresource_filter_enabled_;
+}
+
 bool TabSpecificContentSettings::IsBlockageIndicated(
     ContentSettingsType content_type) const {
   const auto& it = content_settings_status_.find(content_type);
@@ -265,9 +271,17 @@ bool TabSpecificContentSettings::IsBlockageIndicated(
   return false;
 }
 
+bool TabSpecificContentSettings::IsSubresourceBlockageIndicated() const {
+  return subresource_filter_blockage_indicated_;
+}
+
 void TabSpecificContentSettings::SetBlockageHasBeenIndicated(
     ContentSettingsType content_type) {
   content_settings_status_[content_type].blockage_indicated_to_user = true;
+}
+
+void TabSpecificContentSettings::SetSubresourceBlockageIndicated() {
+  subresource_filter_blockage_indicated_ = true;
 }
 
 bool TabSpecificContentSettings::IsContentAllowed(
@@ -343,9 +357,9 @@ void TabSpecificContentSettings::OnContentBlockedWithDetail(
     if (type == CONTENT_SETTINGS_TYPE_MIXEDSCRIPT) {
       content_settings::RecordMixedScriptAction(
           content_settings::MIXED_SCRIPT_ACTION_DISPLAYED_SHIELD);
-      content_settings::RecordMixedScriptActionWithRAPPOR(
-          content_settings::MIXED_SCRIPT_ACTION_DISPLAYED_SHIELD,
-          GURL(base::UTF16ToUTF8(details)));
+    } else if (type == CONTENT_SETTINGS_TYPE_PLUGINS) {
+      content_settings::RecordPluginsAction(
+          content_settings::PLUGINS_ACTION_DISPLAYED_BLOCKED_ICON_IN_OMNIBOX);
     }
   }
 }
@@ -693,6 +707,10 @@ void TabSpecificContentSettings::SetPopupsBlocked(bool blocked) {
       content::NotificationService::NoDetails());
 }
 
+void TabSpecificContentSettings::SetSubresourceBlocked(bool enabled) {
+  subresource_filter_enabled_ = enabled;
+}
+
 void TabSpecificContentSettings::SetPepperBrokerAllowed(bool allowed) {
   if (allowed) {
     OnContentAllowed(CONTENT_SETTINGS_TYPE_PPAPI_BROKER);
@@ -769,6 +787,11 @@ void TabSpecificContentSettings::DidNavigateMainFrame(
     blocked_plugin_names_.clear();
     GeolocationDidNavigate(details);
     MidiDidNavigate(details);
+
+    if (web_contents()->GetVisibleURL().SchemeIsHTTPOrHTTPS()) {
+      content_settings::RecordPluginsAction(
+          content_settings::PLUGINS_ACTION_TOTAL_NAVIGATIONS);
+    }
   }
 }
 

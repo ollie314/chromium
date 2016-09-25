@@ -21,16 +21,32 @@
 #include "platform/image-decoders/ImageDecoder.h"
 
 #include "platform/PlatformInstrumentation.h"
-#include "platform/graphics/DeferredImageDecoder.h"
+#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/graphics/BitmapImageMetrics.h"
+#include "platform/image-decoders/FastSharedBufferReader.h"
 #include "platform/image-decoders/bmp/BMPImageDecoder.h"
 #include "platform/image-decoders/gif/GIFImageDecoder.h"
 #include "platform/image-decoders/ico/ICOImageDecoder.h"
 #include "platform/image-decoders/jpeg/JPEGImageDecoder.h"
 #include "platform/image-decoders/png/PNGImageDecoder.h"
 #include "platform/image-decoders/webp/WEBPImageDecoder.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
+
+#if USE(QCMSLIB)
+struct QCMSProfileDeleter {
+    void operator()(qcms_profile* profile)
+    {
+        if (profile)
+            qcms_profile_release(profile);
+    }
+};
+
+using QCMSProfileUniquePtr = std::unique_ptr<qcms_profile, QCMSProfileDeleter>;
+#endif // USE(QCMSLIB)
+
 
 inline bool matchesJPEGSignature(const char* contents)
 {
@@ -39,7 +55,7 @@ inline bool matchesJPEGSignature(const char* contents)
 
 inline bool matchesPNGSignature(const char* contents)
 {
-    return !memcmp(contents, "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A", 8);
+    return !memcmp(contents, "\x89PNG\r\n\x1A\n", 8);
 }
 
 inline bool matchesGIFSignature(const char* contents)
@@ -67,49 +83,81 @@ inline bool matchesBMPSignature(const char* contents)
     return !memcmp(contents, "BM", 2);
 }
 
-PassOwnPtr<ImageDecoder> ImageDecoder::create(const char* contents, size_t length, AlphaOption alphaOption, GammaAndColorProfileOption colorOptions)
-{
-    const size_t longestSignatureLength = sizeof("RIFF????WEBPVP") - 1;
-    ASSERT(longestSignatureLength == 14);
+// This needs to be updated if we ever add a matches*Signature() which requires more characters.
+static constexpr size_t kLongestSignatureLength = sizeof("RIFF????WEBPVP") - 1;
 
-    if (length < longestSignatureLength)
+std::unique_ptr<ImageDecoder> ImageDecoder::create(PassRefPtr<SegmentReader> passData, bool dataComplete,
+    AlphaOption alphaOption, GammaAndColorProfileOption colorOptions)
+{
+    RefPtr<SegmentReader> data = passData;
+
+    // We need at least kLongestSignatureLength bytes to run the signature matcher.
+    if (data->size() < kLongestSignatureLength)
         return nullptr;
 
-    size_t maxDecodedBytes = Platform::current() ? Platform::current()->maxDecodedImageBytes() : noDecodedImageByteLimit;
+    const size_t maxDecodedBytes = Platform::current()
+        ? Platform::current()->maxDecodedImageBytes()
+        : noDecodedImageByteLimit;
+
+    // Access the first kLongestSignatureLength chars to sniff the signature.
+    // (note: FastSharedBufferReader only makes a copy if the bytes are segmented)
+    char buffer[kLongestSignatureLength];
+    const FastSharedBufferReader fastReader(data);
+    const ImageDecoder::SniffResult sniffResult = determineImageType(
+        fastReader.getConsecutiveData(0, kLongestSignatureLength, buffer), kLongestSignatureLength);
+
+    std::unique_ptr<ImageDecoder> decoder;
+    switch (sniffResult) {
+    case SniffResult::JPEG:
+        decoder.reset(new JPEGImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
+        break;
+    case SniffResult::PNG:
+        decoder.reset(new PNGImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
+        break;
+    case SniffResult::GIF:
+        decoder.reset(new GIFImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
+        break;
+    case SniffResult::WEBP:
+        decoder.reset(new WEBPImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
+        break;
+    case SniffResult::ICO:
+        decoder.reset(new ICOImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
+        break;
+    case SniffResult::BMP:
+        decoder.reset(new BMPImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
+        break;
+    case SniffResult::Invalid:
+        break;
+    }
+
+    if (decoder)
+        decoder->setData(data.release(), dataComplete);
+
+    return decoder;
+}
+
+bool ImageDecoder::hasSufficientDataToSniffImageType(const SharedBuffer& data)
+{
+    return data.size() >= kLongestSignatureLength;
+}
+
+ImageDecoder::SniffResult ImageDecoder::determineImageType(const char* contents, size_t length)
+{
+    DCHECK_GE(length, kLongestSignatureLength);
 
     if (matchesJPEGSignature(contents))
-        return adoptPtr(new JPEGImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
-
+        return SniffResult::JPEG;
     if (matchesPNGSignature(contents))
-        return adoptPtr(new PNGImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
-
+        return SniffResult::PNG;
     if (matchesGIFSignature(contents))
-        return adoptPtr(new GIFImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
-
+        return SniffResult::GIF;
     if (matchesWebPSignature(contents))
-        return adoptPtr(new WEBPImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
-
+        return SniffResult::WEBP;
     if (matchesICOSignature(contents) || matchesCURSignature(contents))
-        return adoptPtr(new ICOImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
-
+        return SniffResult::ICO;
     if (matchesBMPSignature(contents))
-        return adoptPtr(new BMPImageDecoder(alphaOption, colorOptions, maxDecodedBytes));
-
-    return nullptr;
-}
-
-PassOwnPtr<ImageDecoder> ImageDecoder::create(const SharedBuffer& data, AlphaOption alphaOption, GammaAndColorProfileOption colorOptions)
-{
-    const char* contents;
-    const size_t length = data.getSomeData<size_t>(contents);
-    return create(contents, length, alphaOption, colorOptions);
-}
-
-PassOwnPtr<ImageDecoder> ImageDecoder::create(const SegmentReader& data, AlphaOption alphaOption, GammaAndColorProfileOption colorOptions)
-{
-    const char* contents;
-    const size_t length = data.getSomeData(contents, 0);
-    return create(contents, length, alphaOption, colorOptions);
+        return SniffResult::BMP;
+    return SniffResult::Invalid;
 }
 
 size_t ImageDecoder::frameCount()
@@ -169,11 +217,6 @@ size_t ImageDecoder::frameBytesAtIndex(size_t index) const
     };
 
     return ImageSize(frameSizeAtIndex(index)).area * sizeof(ImageFrame::PixelData);
-}
-
-bool ImageDecoder::deferredImageDecodingEnabled()
-{
-    return DeferredImageDecoder::enabled();
 }
 
 size_t ImageDecoder::clearCacheExceptFrame(size_t clearExceptFrame)
@@ -269,17 +312,9 @@ size_t ImagePlanes::rowBytes(int i) const
     return m_rowBytes[i];
 }
 
-bool ImageDecoder::hasColorProfile() const
-{
-#if USE(QCMSLIB)
-    return m_sourceToOutputDeviceColorTransform.get();
-#else
-    return false;
-#endif
-}
+namespace {
 
 #if USE(QCMSLIB)
-namespace {
 
 const unsigned kIccColorProfileHeaderLength = 128;
 
@@ -298,20 +333,66 @@ bool inputDeviceColorProfile(const char* profileData, unsigned profileLength)
 }
 
 // The output device color profile is global and shared across multiple threads.
-SpinLock gOutputDeviceProfileLock;
-qcms_profile* gOutputDeviceProfile = nullptr;
+SpinLock gTargetColorProfileLock;
+qcms_profile* gTargetColorProfile = nullptr;
+
+#endif // USE(QCMSLIB)
 
 } // namespace
 
 // static
-void ImageDecoder::setColorProfileAndTransform(const char* iccData, unsigned iccLength, bool hasAlpha, bool useSRGB)
+void ImageDecoder::setTargetColorProfile(const WebVector<char>& profile)
 {
-    m_sourceToOutputDeviceColorTransform.clear();
+#if USE(QCMSLIB)
+    if (profile.isEmpty())
+        return;
+
+    // Take a lock around initializing and accessing the global device color profile.
+    SpinLock::Guard guard(gTargetColorProfileLock);
+
+    // Layout tests expect that only the first call will take effect.
+    if (gTargetColorProfile)
+        return;
+
+    {
+        sk_sp<SkColorSpace> colorSpace = SkColorSpace::NewICC(profile.data(), profile.size());
+        BitmapImageMetrics::countGamma(colorSpace.get());
+    }
+
+    // FIXME: Add optional ICCv4 support and support for multiple monitors.
+    gTargetColorProfile = qcms_profile_from_memory(profile.data(), profile.size());
+    if (!gTargetColorProfile)
+        return;
+
+    if (qcms_profile_is_bogus(gTargetColorProfile)) {
+        qcms_profile_release(gTargetColorProfile);
+        gTargetColorProfile = nullptr;
+        return;
+    }
+
+    qcms_profile_precache_output_transform(gTargetColorProfile);
+#endif // USE(QCMSLIB)
+}
+
+void ImageDecoder::setColorProfileAndComputeTransform(const char* iccData, unsigned iccLength, bool hasAlpha, bool useSRGB)
+{
+    // Sub-classes should not call this if they were instructed to ignore embedded color profiles.
+    DCHECK(!m_ignoreGammaAndColorProfile);
+
+    m_colorProfile.assign(iccData, iccLength);
+    m_hasColorProfile = true;
+
+    // With color correct rendering, we use Skia instead of QCMS to color correct images.
+    if (RuntimeEnabledFeatures::colorCorrectRenderingEnabled())
+        return;
+
+#if USE(QCMSLIB)
+    m_sourceToOutputDeviceColorTransform.reset();
 
     // Create the input profile
-    OwnPtr<qcms_profile> inputProfile;
+    QCMSProfileUniquePtr inputProfile;
     if (useSRGB) {
-        inputProfile = adoptPtr(qcms_profile_sRGB());
+        inputProfile.reset(qcms_profile_sRGB());
     } else {
         // Only accept RGB color profiles from input class devices.
         if (iccLength < kIccColorProfileHeaderLength)
@@ -320,7 +401,7 @@ void ImageDecoder::setColorProfileAndTransform(const char* iccData, unsigned icc
             return;
         if (!inputDeviceColorProfile(iccData, iccLength))
             return;
-        inputProfile = adoptPtr(qcms_profile_from_memory(iccData, iccLength));
+        inputProfile.reset(qcms_profile_from_memory(iccData, iccLength));
     }
     if (!inputProfile)
         return;
@@ -329,37 +410,22 @@ void ImageDecoder::setColorProfileAndTransform(const char* iccData, unsigned icc
     ASSERT(rgbData == qcms_profile_get_color_space(inputProfile.get()));
 
     // Take a lock around initializing and accessing the global device color profile.
-    SpinLock::Guard guard(gOutputDeviceProfileLock);
+    SpinLock::Guard guard(gTargetColorProfileLock);
 
-    // Initialize the output device profile.
-    if (!gOutputDeviceProfile) {
-        // FIXME: Add optional ICCv4 support and support for multiple monitors.
-        WebVector<char> profile;
-        Platform::current()->screenColorProfile(&profile);
-
-        if (!profile.isEmpty())
-            gOutputDeviceProfile = qcms_profile_from_memory(profile.data(), profile.size());
-
-        if (gOutputDeviceProfile && qcms_profile_is_bogus(gOutputDeviceProfile)) {
-            qcms_profile_release(gOutputDeviceProfile);
-            gOutputDeviceProfile = nullptr;
-        }
-
-        if (!gOutputDeviceProfile)
-            gOutputDeviceProfile = qcms_profile_sRGB();
-
-        qcms_profile_precache_output_transform(gOutputDeviceProfile);
+    // Initialize the output device profile to sRGB if it has not yet been initialized.
+    if (!gTargetColorProfile) {
+        gTargetColorProfile = qcms_profile_sRGB();
+        qcms_profile_precache_output_transform(gTargetColorProfile);
     }
 
-    if (qcms_profile_match(inputProfile.get(), gOutputDeviceProfile))
+    if (qcms_profile_match(inputProfile.get(), gTargetColorProfile))
         return;
 
     qcms_data_type dataFormat = hasAlpha ? QCMS_DATA_RGBA_8 : QCMS_DATA_RGB_8;
 
     // FIXME: Don't force perceptual intent if the image profile contains an intent.
-    m_sourceToOutputDeviceColorTransform = adoptPtr(qcms_transform_create(inputProfile.get(), dataFormat, gOutputDeviceProfile, QCMS_DATA_RGBA_8, QCMS_INTENT_PERCEPTUAL));
-}
-
+    m_sourceToOutputDeviceColorTransform.reset(qcms_transform_create(inputProfile.get(), dataFormat, gTargetColorProfile, QCMS_DATA_RGBA_8, QCMS_INTENT_PERCEPTUAL));
 #endif // USE(QCMSLIB)
+}
 
 } // namespace blink

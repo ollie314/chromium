@@ -4,7 +4,6 @@
 
 #include "ash/display/mirror_window_controller.h"
 
-#include "ash/ash_switches.h"
 #include "ash/display/display_manager.h"
 #include "ash/display/window_tree_host_manager.h"
 #include "ash/screen_util.h"
@@ -21,13 +20,16 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/hit_test.h"
+#include "ui/display/display_switches.h"
 #include "ui/events/test/event_generator.h"
 
 namespace ash {
 
 namespace {
-DisplayInfo CreateDisplayInfo(int64_t id, const gfx::Rect& bounds) {
-  DisplayInfo info(id, base::StringPrintf("x-%d", static_cast<int>(id)), false);
+display::ManagedDisplayInfo CreateDisplayInfo(int64_t id,
+                                              const gfx::Rect& bounds) {
+  display::ManagedDisplayInfo info(
+      id, base::StringPrintf("x-%d", static_cast<int>(id)), false);
   info.SetBounds(bounds);
   return info;
 }
@@ -39,9 +41,9 @@ class MirrorOnBootTest : public test::AshTestBase {
 
   void SetUp() override {
     base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        switches::kAshHostWindowBounds, "1+1-300x300,1+301-300x300");
+        ::switches::kHostWindowBounds, "1+1-300x300,1+301-300x300");
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kAshEnableSoftwareMirroring);
+        ::switches::kEnableSoftwareMirroring);
     test::AshTestBase::SetUp();
   }
   void TearDown() override { test::AshTestBase::TearDown(); }
@@ -49,7 +51,6 @@ class MirrorOnBootTest : public test::AshTestBase {
  private:
   DISALLOW_COPY_AND_ASSIGN(MirrorOnBootTest);
 };
-
 }
 
 typedef test::AshTestBase MirrorWindowControllerTest;
@@ -227,7 +228,8 @@ TEST_F(MirrorWindowControllerTest, MAYBE_MirrorCursorMoveOnEnter) {
   EXPECT_EQ("300,200", env->last_mouse_location().ToString());
   test::CursorManagerTestApi cursor_test_api(shell->cursor_manager());
   EXPECT_EQ(1.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
-  EXPECT_EQ(gfx::Display::ROTATE_0, cursor_test_api.GetCurrentCursorRotation());
+  EXPECT_EQ(display::Display::ROTATE_0,
+            cursor_test_api.GetCurrentCursorRotation());
 
   shell->display_manager()->SetMultiDisplayMode(DisplayManager::MIRRORING);
   UpdateDisplay("400x400*2/r,400x400");
@@ -237,12 +239,11 @@ TEST_F(MirrorWindowControllerTest, MAYBE_MirrorCursorMoveOnEnter) {
   // Check real cursor's position and properties.
   EXPECT_EQ("100,100", env->last_mouse_location().ToString());
   EXPECT_EQ(2.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
-  EXPECT_EQ(gfx::Display::ROTATE_90,
+  EXPECT_EQ(display::Display::ROTATE_90,
             cursor_test_api.GetCurrentCursorRotation());
 
   // Check mirrored cursor's location.
   test::MirrorWindowTestApi test_api;
-  gfx::Point hot_point = test_api.GetCursorHotPoint();
   // Rotated hot point must be (25-7, 7).
   EXPECT_EQ("18,7", test_api.GetCursorHotPoint().ToString());
   // New coordinates are not (200,200) because (200,200) is not the center of
@@ -258,11 +259,11 @@ TEST_F(MirrorWindowControllerTest, MAYBE_DockMode) {
   const int64_t internal_id = 1;
   const int64_t external_id = 2;
 
-  const DisplayInfo internal_display_info =
+  const display::ManagedDisplayInfo internal_display_info =
       CreateDisplayInfo(internal_id, gfx::Rect(0, 0, 500, 500));
-  const DisplayInfo external_display_info =
+  const display::ManagedDisplayInfo external_display_info =
       CreateDisplayInfo(external_id, gfx::Rect(1, 1, 100, 100));
-  std::vector<DisplayInfo> display_info_list;
+  std::vector<display::ManagedDisplayInfo> display_info_list;
 
   display_manager->SetMultiDisplayMode(DisplayManager::MIRRORING);
 

@@ -101,7 +101,6 @@ ExceptionHandler* g_breakpad = nullptr;
 const char* g_asan_report_str = nullptr;
 #endif
 #if defined(OS_ANDROID)
-const char kWebViewProcessType[] = "webview";
 char* g_process_type = nullptr;
 ExceptionHandler* g_microdump = nullptr;
 int g_signal_code_pipe_fd = -1;
@@ -137,6 +136,7 @@ class MicrodumpInfo {
   const char* microdump_build_fingerprint_;
   const char* microdump_product_info_;
   const char* microdump_gpu_fingerprint_;
+  const char* microdump_process_type_;
 };
 
 base::LazyInstance<MicrodumpInfo> g_microdump_info =
@@ -603,8 +603,6 @@ bool FinalizeCrashDoneAndroid(bool is_browser_process) {
                       android_build_info->package_version_name());
   __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
                       android_build_info->package_version_code());
-  __android_log_write(ANDROID_LOG_WARN, kGoogleBreakpad,
-                      CHROME_BUILD_ID);
   AndroidLogWriteHorizontalRule();
 
   if (!is_browser_process &&
@@ -880,8 +878,12 @@ void MicrodumpInfo::Initialize(const std::string& process_type,
                                const char* android_build_fp) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!g_microdump);
-  bool is_browser_process =
-      process_type.empty() || process_type == kWebViewProcessType;
+  // |process_type| for webview's browser process is kBrowserProcessType or
+  // kWebViewSingleProcessType. |process_type| for chrome's browser process is
+  // an empty string.
+  bool is_browser_process = process_type.empty() ||
+                            process_type == kWebViewSingleProcessType ||
+                            process_type == kBrowserProcessType;
 
   MinidumpDescriptor descriptor(MinidumpDescriptor::kMicrodumpOnConsole);
 
@@ -891,6 +893,11 @@ void MicrodumpInfo::Initialize(const std::string& process_type,
     ANNOTATE_LEAKING_OBJECT_PTR(microdump_product_info_);
     descriptor.microdump_extra_info()->product_info = microdump_product_info_;
   }
+
+  microdump_process_type_ =
+      strdup(process_type.empty() ? kBrowserProcessType : process_type.c_str());
+  ANNOTATE_LEAKING_OBJECT_PTR(microdump_process_type_);
+  descriptor.microdump_extra_info()->process_type = microdump_process_type_;
 
   if (android_build_fp) {
     microdump_build_fingerprint_ = strdup(android_build_fp);
@@ -910,7 +917,10 @@ void MicrodumpInfo::Initialize(const std::string& process_type,
                            true,  // Install handlers.
                            -1);   // Server file descriptor. -1 for in-process.
 
-  if (process_type == kWebViewProcessType) {
+  if (process_type == kWebViewSingleProcessType ||
+      process_type == kBrowserProcessType) {
+    // TODO(tobiasjs): figure out what to do with on demand minidump on the
+    // renderer process of webview.
     // We do not use |DumpProcess()| for handling programatically
     // generated dumps for WebView because we only know the file
     // descriptor to which we are dumping at the time of the call to
@@ -922,7 +932,7 @@ void MicrodumpInfo::Initialize(const std::string& process_type,
         &GenerateMinidumpOnDemandForAndroid);
   } else if (!process_type.empty()) {
     g_signal_code_pipe_fd =
-        GetCrashReporterClient()->GetAndroidMinidumpDescriptor();
+        GetCrashReporterClient()->GetAndroidCrashSignalFD();
     if (g_signal_code_pipe_fd != -1)
       g_microdump->set_crash_handler(WriteSignalCodeToPipe);
   }
@@ -1596,6 +1606,7 @@ void HandleCrashDump(const BreakpadInfo& info) {
     static const char android_build_id[] = "android_build_id";
     static const char android_build_fp[] = "android_build_fp";
     static const char device[] = "device";
+    static const char gms_core_version[] = "gms_core_version";
     static const char model[] = "model";
     static const char brand[] = "brand";
     static const char exception_info[] = "exception_info";
@@ -1613,6 +1624,9 @@ void HandleCrashDump(const BreakpadInfo& info) {
     writer.AddPairString(model, android_build_info->model());
     writer.AddBoundary();
     writer.AddPairString(brand, android_build_info->brand());
+    writer.AddBoundary();
+    writer.AddPairString(gms_core_version,
+        android_build_info->gms_version_code());
     writer.AddBoundary();
     if (android_build_info->java_exception_info() != nullptr) {
       writer.AddPairString(exception_info,

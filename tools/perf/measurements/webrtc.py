@@ -2,23 +2,21 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.page import page_test
+from telemetry.page import legacy_page_test
 
 from metrics import cpu
 from metrics import media
-from metrics import memory
 from metrics import power
 from metrics import webrtc_stats
 
 
-class WebRTC(page_test.PageTest):
+class WebRTC(legacy_page_test.LegacyPageTest):
   """Gathers WebRTC-related metrics on a page set."""
 
   def __init__(self):
     super(WebRTC, self).__init__()
     self._cpu_metric = None
     self._media_metric = None
-    self._memory_metric = None
     self._power_metric = None
     self._webrtc_stats_metric = None
 
@@ -27,19 +25,16 @@ class WebRTC(page_test.PageTest):
 
   def DidStartBrowser(self, browser):
     self._cpu_metric = cpu.CpuMetric(browser)
-    self._memory_metric = memory.MemoryMetric(browser)
     self._webrtc_stats_metric = webrtc_stats.WebRtcStatisticsMetric()
 
   def DidNavigateToPage(self, page, tab):
     self._cpu_metric.Start(page, tab)
     self._media_metric = media.MediaMetric(tab)
     self._media_metric.Start(page, tab)
-    self._memory_metric.Start(page, tab)
     self._power_metric.Start(page, tab)
     self._webrtc_stats_metric.Start(page, tab)
 
   def CustomizeBrowserOptions(self, options):
-    memory.MemoryMetric.CustomizeBrowserOptions(options)
     options.AppendExtraBrowserArgs('--use-fake-device-for-media-stream')
     options.AppendExtraBrowserArgs('--use-fake-ui-for-media-stream')
     power.PowerMetric.CustomizeBrowserOptions(options)
@@ -55,9 +50,6 @@ class WebRTC(page_test.PageTest):
     self._media_metric.Stop(page, tab)
     self._media_metric.AddResults(tab, results, exclude_metrics=exclude_metrics)
 
-    self._memory_metric.Stop(page, tab)
-    self._memory_metric.AddResults(tab, results)
-
     self._power_metric.Stop(page, tab)
     self._power_metric.AddResults(tab, results)
 
@@ -65,4 +57,5 @@ class WebRTC(page_test.PageTest):
     self._webrtc_stats_metric.AddResults(tab, results)
 
   def DidRunPage(self, platform):
+    del platform  # unused
     self._power_metric.Close()

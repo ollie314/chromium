@@ -56,8 +56,13 @@ void CreateLinkCommand::doApply(EditingState* editingState)
         appendNode(textNode, anchorElement, editingState);
         if (editingState->isAborted())
             return;
-        setEndingSelection(VisibleSelection(positionInParentBeforeNode(*anchorElement), positionInParentAfterNode(*anchorElement), TextAffinity::Downstream, endingSelection().isDirectional()));
+        setEndingSelection(VisibleSelection(Position::inParentBeforeNode(*anchorElement), Position::inParentAfterNode(*anchorElement), TextAffinity::Downstream, endingSelection().isDirectional()));
     }
+}
+
+InputEvent::InputType CreateLinkCommand::inputType() const
+{
+    return InputEvent::InputType::CreateLink;
 }
 
 } // namespace blink

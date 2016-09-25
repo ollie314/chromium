@@ -8,12 +8,12 @@
 
 #include "ui/base/x/x11_util.h"
 
-#include <X11/Xcursor/Xcursor.h>
-#include <X11/extensions/XInput2.h>
-#include <X11/extensions/shape.h>
 #include <ctype.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <X11/extensions/shape.h>
+#include <X11/extensions/XInput2.h>
+#include <X11/Xcursor/Xcursor.h>
 
 #include <list>
 #include <map>
@@ -22,17 +22,20 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_byteorder.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "skia/ext/image_operations.h"
@@ -55,11 +58,6 @@
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/x/x11_error_tracker.h"
 
-#if !defined(OS_CHROMEOS)
-#include "base/command_line.h"
-#include "ui/gfx/x/x11_switches.h"
-#endif
-
 #if defined(OS_FREEBSD)
 #include <sys/sysctl.h>
 #include <sys/types.h>
@@ -71,7 +69,7 @@ namespace {
 
 int DefaultX11ErrorHandler(XDisplay* d, XErrorEvent* e) {
   if (base::MessageLoop::current()) {
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::Bind(&LogErrorEventDescription, d, *e));
   } else {
     LOG(ERROR)
@@ -559,7 +557,7 @@ bool IsWindowVisible(XID window) {
   std::vector<XAtom> wm_states;
   if (GetAtomArrayProperty(window, "_NET_WM_STATE", &wm_states)) {
     XAtom hidden_atom = GetAtom("_NET_WM_STATE_HIDDEN");
-    if (ContainsValue(wm_states, hidden_atom))
+    if (base::ContainsValue(wm_states, hidden_atom))
       return false;
   }
 
@@ -1251,7 +1249,7 @@ bool IsX11WindowFullScreen(XID window) {
   if (!ui::GetOuterWindowBounds(window, &window_rect))
     return false;
 
-  // We can't use gfx::Screen here because we don't have an aura::Window. So
+  // We can't use display::Screen here because we don't have an aura::Window. So
   // instead just look at the size of the default display.
   //
   // TODO(erg): Actually doing this correctly would require pulling out xrandr,
@@ -1414,16 +1412,19 @@ void LogErrorEventDescription(XDisplay* dpy,
 }
 
 #if !defined(OS_CHROMEOS)
-void ChooseVisualForWindow(Visual** visual, int* depth) {
-  static Visual* s_visual = NULL;
-  static int s_depth = 0;
+void ChooseVisualForWindow(bool enable_transparent_visuals,
+                           Visual** visual,
+                           int* depth) {
+  static Visual* s_default_visual = nullptr;
+  static Visual* s_transparent_visual = nullptr;
+  static int s_default_depth = 0;
+  static int s_transparent_depth = 0;
 
-  if (!s_visual) {
+  if (!s_default_visual || !s_transparent_visual) {
     XDisplay* display = gfx::GetXDisplay();
     XAtom NET_WM_CM_S0 = XInternAtom(display, "_NET_WM_CM_S0", False);
 
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableTransparentVisuals) &&
+    if (enable_transparent_visuals &&
         XGetSelectionOwner(display, NET_WM_CM_S0) != None) {
       // Choose the first ARGB8888 visual
       XVisualInfo visual_template;
@@ -1436,38 +1437,41 @@ void ChooseVisualForWindow(Visual** visual, int* depth) {
         // Why support only 8888 ARGB? Because it's all that GTK+ supports. In
         // gdkvisual-x11.cc, they look for this specific visual and use it for
         // all their alpha channel using needs.
-        //
-        // TODO(erg): While the following does find a valid visual, some GL
-        // drivers
-        // don't believe that this has an alpha channel. According to marcheu@,
-        // this should work on open source driver though. (It doesn't work with
-        // NVidia's binaries currently.) http://crbug.com/369209
         const XVisualInfo& info = visual_list[i];
         if (info.depth == 32 && info.visual->red_mask == 0xff0000 &&
             info.visual->green_mask == 0x00ff00 &&
             info.visual->blue_mask == 0x0000ff) {
-          s_visual = info.visual;
-          s_depth = info.depth;
+          s_transparent_visual = info.visual;
+          s_transparent_depth = info.depth;
+          DCHECK(s_transparent_visual);
           break;
         }
       }
-    } else {
-      XWindowAttributes windowAttribs;
-      Window root = XDefaultRootWindow(display);
-      Status status = XGetWindowAttributes(display, root, &windowAttribs);
-      DCHECK(status != 0);
-      s_visual = windowAttribs.visual;
-      s_depth = windowAttribs.depth;
     }
-  }  // !s_visual
 
-  DCHECK(s_visual);
-  DCHECK(s_depth > 0);
+    XWindowAttributes attribs;
+    Window root = XDefaultRootWindow(display);
+    Status status = XGetWindowAttributes(display, root, &attribs);
+    DCHECK_NE(0, status);
+    s_default_visual = attribs.visual;
+    s_default_depth = attribs.depth;
+
+    if (!s_transparent_visual) {
+      s_transparent_visual = s_default_visual;
+      s_transparent_depth = s_default_depth;
+    }
+  }  // !s_default_visual || !s_transparent_visual
+
+  DCHECK(s_default_visual);
+  DCHECK(s_default_depth > 0);
+  DCHECK(s_transparent_visual);
+  DCHECK(s_transparent_depth > 0);
 
   if (visual)
-    *visual = s_visual;
+    *visual =
+        enable_transparent_visuals ? s_transparent_visual : s_default_visual;
   if (depth)
-    *depth = s_depth;
+    *depth = enable_transparent_visuals ? s_transparent_depth : s_default_depth;
 }
 #endif
 

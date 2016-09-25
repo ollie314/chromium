@@ -14,6 +14,7 @@
 #include "gpu/command_buffer/service/framebuffer_manager.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
+#include "gpu/command_buffer/service/transform_feedback_manager.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_version_info.h"
@@ -68,7 +69,8 @@ bool TargetIsSupported(const FeatureInfo* feature_info, GLuint target) {
     case GL_TEXTURE_RECTANGLE_ARB:
       return feature_info->feature_flags().arb_texture_rectangle;
     case GL_TEXTURE_EXTERNAL_OES:
-      return feature_info->feature_flags().oes_egl_image_external;
+      return feature_info->feature_flags().oes_egl_image_external ||
+             feature_info->feature_flags().nv_egl_stream_consumer_external;
     default:
       NOTREACHED();
       return false;
@@ -96,23 +98,26 @@ bool Vec4::Equal(const Vec4& other) const {
   if (type_ != other.type_)
     return false;
   switch (type_) {
-    case kFloat:
+    case SHADER_VARIABLE_FLOAT:
       for (size_t ii = 0; ii < 4; ++ii) {
         if (v_[ii].float_value != other.v_[ii].float_value)
           return false;
       }
       break;
-    case kInt:
+    case SHADER_VARIABLE_INT:
       for (size_t ii = 0; ii < 4; ++ii) {
         if (v_[ii].int_value != other.v_[ii].int_value)
           return false;
       }
       break;
-    case kUInt:
+    case SHADER_VARIABLE_UINT:
       for (size_t ii = 0; ii < 4; ++ii) {
         if (v_[ii].uint_value != other.v_[ii].uint_value)
           return false;
       }
+      break;
+    default:
+      NOTREACHED();
       break;
   }
   return true;
@@ -122,17 +127,20 @@ template <>
 void Vec4::GetValues<GLfloat>(GLfloat* values) const {
   DCHECK(values);
   switch (type_) {
-    case kFloat:
+    case SHADER_VARIABLE_FLOAT:
       for (size_t ii = 0; ii < 4; ++ii)
         values[ii] = v_[ii].float_value;
       break;
-    case kInt:
+    case SHADER_VARIABLE_INT:
       for (size_t ii = 0; ii < 4; ++ii)
         values[ii] = static_cast<GLfloat>(v_[ii].int_value);
       break;
-    case kUInt:
+    case SHADER_VARIABLE_UINT:
       for (size_t ii = 0; ii < 4; ++ii)
         values[ii] = static_cast<GLfloat>(v_[ii].uint_value);
+      break;
+    default:
+      NOTREACHED();
       break;
   }
 }
@@ -141,17 +149,20 @@ template <>
 void Vec4::GetValues<GLint>(GLint* values) const {
   DCHECK(values);
   switch (type_) {
-    case kFloat:
+    case SHADER_VARIABLE_FLOAT:
       for (size_t ii = 0; ii < 4; ++ii)
         values[ii] = static_cast<GLint>(v_[ii].float_value);
       break;
-    case kInt:
+    case SHADER_VARIABLE_INT:
       for (size_t ii = 0; ii < 4; ++ii)
         values[ii] = v_[ii].int_value;
       break;
-    case kUInt:
+    case SHADER_VARIABLE_UINT:
       for (size_t ii = 0; ii < 4; ++ii)
         values[ii] = static_cast<GLint>(v_[ii].uint_value);
+      break;
+    default:
+      NOTREACHED();
       break;
   }
 }
@@ -160,17 +171,20 @@ template<>
 void Vec4::GetValues<GLuint>(GLuint* values) const {
   DCHECK(values);
   switch (type_) {
-    case kFloat:
+    case SHADER_VARIABLE_FLOAT:
       for (size_t ii = 0; ii < 4; ++ii)
         values[ii] = static_cast<GLuint>(v_[ii].float_value);
       break;
-    case kInt:
+    case SHADER_VARIABLE_INT:
       for (size_t ii = 0; ii < 4; ++ii)
         values[ii] = static_cast<GLuint>(v_[ii].int_value);
       break;
-    case kUInt:
+    case SHADER_VARIABLE_UINT:
       for (size_t ii = 0; ii < 4; ++ii)
         values[ii] = v_[ii].uint_value;
+      break;
+    default:
+      NOTREACHED();
       break;
   }
 }
@@ -180,7 +194,7 @@ void Vec4::SetValues<GLfloat>(const GLfloat* values) {
   DCHECK(values);
   for (size_t ii = 0; ii < 4; ++ii)
     v_[ii].float_value = values[ii];
-  type_ = kFloat;
+  type_ = SHADER_VARIABLE_FLOAT;
 }
 
 template <>
@@ -188,7 +202,7 @@ void Vec4::SetValues<GLint>(const GLint* values) {
   DCHECK(values);
   for (size_t ii = 0; ii < 4; ++ii)
     v_[ii].int_value = values[ii];
-  type_ = kInt;
+  type_ = SHADER_VARIABLE_INT;
 }
 
 template <>
@@ -196,7 +210,7 @@ void Vec4::SetValues<GLuint>(const GLuint* values) {
   DCHECK(values);
   for (size_t ii = 0; ii < 4; ++ii)
     v_[ii].uint_value = values[ii];
-  type_ = kUInt;
+  type_ = SHADER_VARIABLE_UINT;
 }
 
 ContextState::ContextState(FeatureInfo* feature_info,
@@ -207,6 +221,7 @@ ContextState::ContextState(FeatureInfo* feature_info,
       pack_reverse_row_order(false),
       ignore_cached_state(false),
       fbo_binding_for_scissor_workaround_dirty(false),
+      framebuffer_srgb_(false),
       feature_info_(feature_info),
       error_state_(ErrorState::Create(error_state_client, logger)) {
   Initialize();
@@ -226,7 +241,9 @@ void ContextState::RestoreTextureUnitBindings(
 
   bool bind_texture_2d = true;
   bool bind_texture_cube = true;
-  bool bind_texture_oes = feature_info_->feature_flags().oes_egl_image_external;
+  bool bind_texture_oes =
+      feature_info_->feature_flags().oes_egl_image_external ||
+      feature_info_->feature_flags().nv_egl_stream_consumer_external;
   bool bind_texture_arb = feature_info_->feature_flags().arb_texture_rectangle;
 
   if (prev_state) {
@@ -260,6 +277,26 @@ void ContextState::RestoreTextureUnitBindings(
   }
 }
 
+void ContextState::PushTextureDecompressionUnpackState() const {
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+  if (bound_pixel_unpack_buffer.get()) {
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+  }
+}
+
+void ContextState::RestoreUnpackState() const {
+  glPixelStorei(GL_UNPACK_ALIGNMENT, unpack_alignment);
+  if (bound_pixel_unpack_buffer.get()) {
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER,
+                 GetBufferId(bound_pixel_unpack_buffer.get()));
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, unpack_row_length);
+    glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, unpack_image_height);
+  }
+}
+
 void ContextState::RestoreBufferBindings() const {
   if (vertex_attrib_manager.get()) {
     Buffer* element_array_buffer =
@@ -289,8 +326,34 @@ void ContextState::RestoreRenderbufferBindings() {
   bound_renderbuffer_valid = false;
 }
 
-void ContextState::RestoreProgramBindings() const {
+void ContextState::RestoreProgramSettings(
+    const ContextState* prev_state,
+    bool restore_transform_feedback_bindings) const {
+  bool flag = (restore_transform_feedback_bindings &&
+               feature_info_->IsES3Capable());
+  if (flag && prev_state) {
+    if (prev_state->bound_transform_feedback.get() &&
+        prev_state->bound_transform_feedback->active() &&
+        !prev_state->bound_transform_feedback->paused()) {
+      glPauseTransformFeedback();
+    }
+  }
   glUseProgram(current_program.get() ? current_program->service_id() : 0);
+  if (flag) {
+    if (bound_transform_feedback.get()) {
+      bound_transform_feedback->DoBindTransformFeedback(GL_TRANSFORM_FEEDBACK);
+    } else {
+      glBindTransformFeedback(GL_TRANSFORM_FEEDBACK, 0);
+    }
+  }
+}
+
+void ContextState::RestoreIndexedUniformBufferBindings(
+    const ContextState* prev_state) {
+  if (!feature_info_->IsES3Capable())
+    return;
+  indexed_uniform_buffer_bindings->RestoreBindings(
+      prev_state ? prev_state->indexed_uniform_buffer_bindings.get() : nullptr);
 }
 
 void ContextState::RestoreActiveTexture() const {
@@ -317,26 +380,29 @@ void ContextState::RestoreVertexAttribValues() const {
   for (size_t attrib = 0; attrib < vertex_attrib_manager->num_attribs();
        ++attrib) {
     switch (attrib_values[attrib].type()) {
-      case Vec4::kFloat:
+      case SHADER_VARIABLE_FLOAT:
         {
           GLfloat v[4];
           attrib_values[attrib].GetValues(v);
           glVertexAttrib4fv(attrib, v);
         }
         break;
-      case Vec4::kInt:
+      case SHADER_VARIABLE_INT:
         {
           GLint v[4];
           attrib_values[attrib].GetValues(v);
           glVertexAttribI4iv(attrib, v);
         }
         break;
-      case Vec4::kUInt:
+      case SHADER_VARIABLE_UINT:
         {
           GLuint v[4];
           attrib_values[attrib].GetValues(v);
           glVertexAttribI4uiv(attrib, v);
         }
+        break;
+      default:
+        NOTREACHED();
         break;
     }
   }
@@ -425,8 +491,19 @@ void ContextState::RestoreState(const ContextState* prev_state) {
   RestoreVertexAttribs();
   RestoreBufferBindings();
   RestoreRenderbufferBindings();
-  RestoreProgramBindings();
+  RestoreProgramSettings(prev_state, true);
+  RestoreIndexedUniformBufferBindings(prev_state);
   RestoreGlobalState(prev_state);
+
+  if (!prev_state) {
+    if (feature_info_->feature_flags().desktop_srgb_support) {
+      framebuffer_srgb_ = false;
+      glDisable(GL_FRAMEBUFFER_SRGB);
+    }
+  } else if (framebuffer_srgb_ != prev_state->framebuffer_srgb_) {
+    // FRAMEBUFFER_SRGB will be restored lazily at render time.
+    framebuffer_srgb_ = prev_state->framebuffer_srgb_;
+  }
 }
 
 ErrorState* ContextState::GetErrorState() {
@@ -613,6 +690,13 @@ PixelStoreParams ContextState::GetUnpackParams(Dimension dimension) {
     params.image_height = unpack_image_height;
   }
   return params;
+}
+
+void ContextState::EnableDisableFramebufferSRGB(bool enable) {
+  if (framebuffer_srgb_ == enable)
+    return;
+  EnableDisable(GL_FRAMEBUFFER_SRGB, enable);
+  framebuffer_srgb_ = enable;
 }
 
 void ContextState::InitStateManual(const ContextState*) const {

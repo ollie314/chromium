@@ -40,14 +40,22 @@ goog.require('cvox.PlatformFilter');
  * was active by looking at the originalEvent.
  * from key events when the cvox modifiers are set. Defaults to false.
  * @param {boolean=} opt_doubleTap Whether this is triggered via double tap.
+ * @param {boolean=} opt_skipStripping Whether to strip cvox modifiers.
+ * @param {boolean=} opt_requireStickyMode Whether to require sticky mode.
  * @constructor
  */
-cvox.KeySequence = function(originalEvent, opt_cvoxModifier, opt_doubleTap) {
+cvox.KeySequence = function(originalEvent, opt_cvoxModifier, opt_doubleTap,
+                            opt_skipStripping, opt_requireStickyMode) {
   /** @type {boolean} */
   this.doubleTap = !!opt_doubleTap;
 
+  /** @type {boolean} */
+  this.requireStickyMode = !!opt_requireStickyMode;
+
   /** @type {cvox.PlatformFilter} */
   this.platformFilter;
+  /** @type {boolean} */
+  this.skipStripping = !!opt_skipStripping;
 
   if (opt_cvoxModifier == undefined) {
     this.cvoxModifier = this.isCVoxModifierActive(originalEvent);
@@ -164,6 +172,14 @@ cvox.KeySequence.prototype.equals = function(rhs) {
   }
 
   // So now we know the actual keys are the same.
+
+  // If one key sequence requires sticky mode, return early the strict
+  // sticky mode state.
+  if (this.requireStickyMode || rhs.requireStickyMode) {
+    return (this.stickyMode || rhs.stickyMode) &&
+        !this.cvoxModifier && !rhs.cvoxModifier;
+  }
+
   // If they both have the ChromeVox modifier, or they both don't have the
   // ChromeVox modifier, then they are considered equal.
   if (this.cvoxModifier === rhs.cvoxModifier) {
@@ -225,6 +241,10 @@ cvox.KeySequence.prototype.extractKey_ = function(keyEvent) {
  * @private
  */
 cvox.KeySequence.prototype.rationalizeKeys_ = function() {
+  if (this.skipStripping) {
+    return;
+  }
+
   // TODO (rshearer): This is a hack. When the modifier key becomes customizable
   // then we will not have to deal with strings here.
   var modifierKeyCombo = cvox.ChromeVox.modKeyStr.split(/\+/g);
@@ -423,7 +443,6 @@ cvox.KeySequence.deserialize = function(sequenceObject) {
   firstSequenceEvent['prefixKey'] = (sequenceObject.prefixKey == undefined) ?
       false : sequenceObject.prefixKey;
 
-
   var secondKeyPressed = sequenceObject.keys.keyCode.length > 1;
   var secondSequenceEvent = {};
 
@@ -433,9 +452,13 @@ cvox.KeySequence.deserialize = function(sequenceObject) {
       secondSequenceEvent[keyPressed] = sequenceObject.keys[keyPressed][1];
     }
   }
-
+  var skipStripping = sequenceObject.skipStripping !== undefined ?
+      sequenceObject.skipStripping : true;
   var keySeq = new cvox.KeySequence(firstSequenceEvent,
-      sequenceObject.cvoxModifier, sequenceObject.doubleTap);
+                                    sequenceObject.cvoxModifier,
+                                    sequenceObject.doubleTap,
+                                    skipStripping,
+                                    sequenceObject.requireStickyMode);
   if (secondKeyPressed) {
     cvox.ChromeVox.sequenceSwitchKeyCodes.push(
         new cvox.KeySequence(firstSequenceEvent, sequenceObject.cvoxModifier));

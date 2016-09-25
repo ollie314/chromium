@@ -88,7 +88,7 @@ ISearch.prototype = {
       var cur = cursors.Cursor.fromNode(curNode);
       var prev = cur;
       cur =
-          cur.move(cursors.Unit.DOM_NODE, cursors.Movement.DIRECTIONAL, dir);
+          cur.move(cursors.Unit.NODE, cursors.Movement.DIRECTIONAL, dir);
       if (prev.equals(cur)) {
         this.handler_.onSearchReachedBoundary(this.node_);
         return;
@@ -112,9 +112,9 @@ ISearch.prototype = {
  * @implements {ISearchHandler}
  */
 ISearchUI = function(input) {
-  /** @type {ChromeVoxState} */
+  /** @type {ChromeVoxState} @private */
   this.background_ =
-      chrome.extension.getBackgroundPage()['global']['backgroundObj'];
+      chrome.extension.getBackgroundPage()['ChromeVoxState']['instance'];
   this.iSearch_ = new ISearch(this.background_.currentRange.start.node);
   this.input_ = input;
   this.dir_ = Dir.FORWARD;
@@ -147,14 +147,14 @@ ISearchUI.prototype = {
    * @return {boolean}
    */
   onKeyDown: function(evt) {
-    switch (evt.keyIdentifier) {
-      case 'Up':
+    switch (evt.key) {
+      case 'ArrowUp':
         this.dir_ = Dir.BACKWARD;
         break;
-      case 'Down':
+      case 'ArrowDown':
         this.dir_ = Dir.FORWARD;
         break;
-      case 'U+001B':  // Escape
+      case 'Escape':
         this.pendingSearchId_ = 0;
         this.background_['endExcursion']();
         Panel.closeMenusAndRestoreFocus();
@@ -204,7 +204,7 @@ ISearchUI.prototype = {
    * @private
    */
   output_: function(node) {
-    Output.flushNextSpeechUtterance();
+    Output.forceModeForNextSpeechUtterance(cvox.QueueMode.FLUSH);
     var o = new Output().withRichSpeechAndBraille(
         cursors.Range.fromNode(node), null, Output.EventType.NAVIGATE).go();
 

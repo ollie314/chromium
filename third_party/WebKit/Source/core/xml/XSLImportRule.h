@@ -25,7 +25,6 @@
 
 #include "core/xml/XSLStyleSheet.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -33,7 +32,7 @@ class XSLImportRule final : public GarbageCollectedFinalized<XSLImportRule> {
 public:
     static XSLImportRule* create(XSLStyleSheet* parentSheet, const String& href)
     {
-        ASSERT(RuntimeEnabledFeatures::xsltEnabled());
+        DCHECK(RuntimeEnabledFeatures::xsltEnabled());
         return new XSLImportRule(parentSheet, href);
     }
 

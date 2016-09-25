@@ -21,16 +21,18 @@
 #include "core/css/parser/CSSParserSelector.h"
 
 #include "core/css/CSSSelectorList.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
 CSSParserSelector::CSSParserSelector()
-    : m_selector(adoptPtr(new CSSSelector()))
+    : m_selector(wrapUnique(new CSSSelector()))
 {
 }
 
 CSSParserSelector::CSSParserSelector(const QualifiedName& tagQName, bool isImplicit)
-    : m_selector(adoptPtr(new CSSSelector(tagQName, isImplicit)))
+    : m_selector(wrapUnique(new CSSSelector(tagQName, isImplicit)))
 {
 }
 
@@ -38,26 +40,26 @@ CSSParserSelector::~CSSParserSelector()
 {
     if (!m_tagHistory)
         return;
-    Vector<OwnPtr<CSSParserSelector>, 16> toDelete;
-    OwnPtr<CSSParserSelector> selector = m_tagHistory.release();
+    Vector<std::unique_ptr<CSSParserSelector>, 16> toDelete;
+    std::unique_ptr<CSSParserSelector> selector = std::move(m_tagHistory);
     while (true) {
-        OwnPtr<CSSParserSelector> next = selector->m_tagHistory.release();
-        toDelete.append(selector.release());
+        std::unique_ptr<CSSParserSelector> next = std::move(selector->m_tagHistory);
+        toDelete.append(std::move(selector));
         if (!next)
             break;
-        selector = next.release();
+        selector = std::move(next);
     }
 }
 
-void CSSParserSelector::adoptSelectorVector(Vector<OwnPtr<CSSParserSelector>>& selectorVector)
+void CSSParserSelector::adoptSelectorVector(Vector<std::unique_ptr<CSSParserSelector>>& selectorVector)
 {
     CSSSelectorList* selectorList = new CSSSelectorList(CSSSelectorList::adoptSelectorVector(selectorVector));
-    m_selector->setSelectorList(adoptPtr(selectorList));
+    m_selector->setSelectorList(wrapUnique(selectorList));
 }
 
-void CSSParserSelector::setSelectorList(PassOwnPtr<CSSSelectorList> selectorList)
+void CSSParserSelector::setSelectorList(std::unique_ptr<CSSSelectorList> selectorList)
 {
-    m_selector->setSelectorList(selectorList);
+    m_selector->setSelectorList(std::move(selectorList));
 }
 
 bool CSSParserSelector::isSimple() const
@@ -80,28 +82,28 @@ bool CSSParserSelector::isSimple() const
     return false;
 }
 
-void CSSParserSelector::appendTagHistory(CSSSelector::RelationType relation, PassOwnPtr<CSSParserSelector> selector)
+void CSSParserSelector::appendTagHistory(CSSSelector::RelationType relation, std::unique_ptr<CSSParserSelector> selector)
 {
     CSSParserSelector* end = this;
     while (end->tagHistory())
         end = end->tagHistory();
     end->setRelation(relation);
-    end->setTagHistory(selector);
+    end->setTagHistory(std::move(selector));
 }
 
-PassOwnPtr<CSSParserSelector> CSSParserSelector::releaseTagHistory()
+std::unique_ptr<CSSParserSelector> CSSParserSelector::releaseTagHistory()
 {
     setRelation(CSSSelector::SubSelector);
-    return m_tagHistory.release();
+    return std::move(m_tagHistory);
 }
 
 void CSSParserSelector::prependTagSelector(const QualifiedName& tagQName, bool isImplicit)
 {
-    OwnPtr<CSSParserSelector> second = CSSParserSelector::create();
-    second->m_selector = m_selector.release();
-    second->m_tagHistory = m_tagHistory.release();
-    m_tagHistory = second.release();
-    m_selector = adoptPtr(new CSSSelector(tagQName, isImplicit));
+    std::unique_ptr<CSSParserSelector> second = CSSParserSelector::create();
+    second->m_selector = std::move(m_selector);
+    second->m_tagHistory = std::move(m_tagHistory);
+    m_tagHistory = std::move(second);
+    m_selector = wrapUnique(new CSSSelector(tagQName, isImplicit));
 }
 
 bool CSSParserSelector::isHostPseudoSelector() const

@@ -21,7 +21,6 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/theme_resources.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/window_open_disposition.h"
@@ -118,7 +117,7 @@ void BookmarkMenuDelegate::SetPageNavigator(PageNavigator* navigator) {
 }
 
 const BookmarkModel* BookmarkMenuDelegate::GetBookmarkModel() const {
-  return BookmarkModelFactory::GetForProfile(profile_);
+  return BookmarkModelFactory::GetForBrowserContext(profile_);
 }
 
 bookmarks::ManagedBookmarkService*
@@ -177,7 +176,8 @@ bool BookmarkMenuDelegate::ShouldExecuteCommandWithoutClosingMenu(
     int id,
     const ui::Event& event) {
   return (event.flags() & ui::EF_LEFT_MOUSE_BUTTON) &&
-         ui::DispositionFromEventFlags(event.flags()) == NEW_BACKGROUND_TAB;
+         ui::DispositionFromEventFlags(event.flags()) ==
+             WindowOpenDisposition::NEW_BACKGROUND_TAB;
 }
 
 bool BookmarkMenuDelegate::GetDropFormats(

@@ -8,18 +8,17 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace device {
 
 // static
-void BatteryMonitorImpl::Create(
-    mojo::InterfaceRequest<BatteryMonitor> request) {
-  new BatteryMonitorImpl(std::move(request));
+void BatteryMonitorImpl::Create(BatteryMonitorRequest request) {
+  mojo::MakeStrongBinding(base::MakeUnique<BatteryMonitorImpl>(),
+                          std::move(request));
 }
 
-BatteryMonitorImpl::BatteryMonitorImpl(
-    mojo::InterfaceRequest<BatteryMonitor> request)
-    : binding_(this, std::move(request)), status_to_report_(false) {
+BatteryMonitorImpl::BatteryMonitorImpl() : status_to_report_(false) {
   // NOTE: DidChange may be called before AddCallback returns. This is done to
   // report current status.
   subscription_ = BatteryStatusService::GetInstance()->AddCallback(
@@ -30,7 +29,7 @@ BatteryMonitorImpl::~BatteryMonitorImpl() {
 }
 
 void BatteryMonitorImpl::QueryNextStatus(
-    const BatteryStatusCallback& callback) {
+    const QueryNextStatusCallback& callback) {
   if (!callback_.is_null()) {
     DVLOG(1) << "Overlapped call to QueryNextStatus!";
     delete this;
@@ -55,7 +54,7 @@ void BatteryMonitorImpl::DidChange(const BatteryStatus& battery_status) {
 
 void BatteryMonitorImpl::ReportStatus() {
   callback_.Run(status_.Clone());
-  callback_.reset();
+  callback_.Reset();
 
   status_to_report_ = false;
 }

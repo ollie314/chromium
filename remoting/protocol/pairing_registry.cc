@@ -16,7 +16,7 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "crypto/random.h"
 
@@ -286,7 +286,7 @@ void PairingRegistry::SanitizePairings(
         pairing.client_name(),
         pairing.client_id(),
         "");
-    sanitized_pairings->Append(sanitized_pairing.ToValue().release());
+    sanitized_pairings->Append(sanitized_pairing.ToValue());
   }
 
   callback.Run(std::move(sanitized_pairings));

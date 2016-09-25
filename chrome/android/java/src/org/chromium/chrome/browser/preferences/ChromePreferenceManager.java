@@ -6,12 +6,11 @@ package org.chromium.chrome.browser.preferences;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.preference.PreferenceManager;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.crash.MinidumpUploadService.ProcessType;
-import org.chromium.chrome.browser.signin.SigninPromoUma;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 
 import java.util.Locale;
@@ -21,12 +20,6 @@ import java.util.Locale;
  * ChromePreferenceManager stores and retrieves various values in Android shared preferences.
  */
 public class ChromePreferenceManager {
-    /**
-     * Preference that denotes that Chrome has attempted to migrate from tabbed mode to document
-     * mode.
-     */
-    public static final String MIGRATION_ON_UPGRADE_ATTEMPTED = "migration_on_upgrade_attempted";
-
     private static final String TAG = "preferences";
 
     private static final String PROMOS_SKIPPED_ON_FIRST_START = "promos_skipped_on_first_start";
@@ -43,8 +36,13 @@ public class ChromePreferenceManager {
             "contextual_search_peek_promo_show_count";
     private static final String CONTEXTUAL_SEARCH_LAST_ANIMATION_TIME =
             "contextual_search_last_animation_time";
-    private static final String ENABLE_CUSTOM_TABS = "enable_custom_tabs";
+    private static final String CONTEXTUAL_SEARCH_TAP_QUICK_ANSWER_COUNT =
+            "contextual_search_tap_quick_answer_count";
     private static final String HERB_FLAVOR_KEY = "herb_flavor";
+    private static final String INSTANT_APPS_KEY = "applink.app_link_enabled";
+    private static final String WEBAPK_RUNTIME_KEY = "webapk.runtime_enabled";
+
+    private static final String CHROME_DEFAULT_BROWSER = "applink.chrome_default_browser";
 
     private static final String SUCCESS_UPLOAD_SUFFIX = "_crash_success_upload";
     private static final String FAILURE_UPLOAD_SUFFIX = "_crash_failure_upload";
@@ -59,7 +57,7 @@ public class ChromePreferenceManager {
 
     private ChromePreferenceManager(Context context) {
         mContext = context.getApplicationContext();
-        mSharedPreferences = PreferenceManager.getDefaultSharedPreferences(mContext);
+        mSharedPreferences = ContextUtils.getAppSharedPreferences();
     }
 
     /**
@@ -124,44 +122,10 @@ public class ChromePreferenceManager {
     }
 
     /**
-     * @return Whether we have attempted to migrate tabbed state to document mode after OS upgrade.
-     */
-    public boolean hasAttemptedMigrationOnUpgrade() {
-        return mSharedPreferences.getBoolean(MIGRATION_ON_UPGRADE_ATTEMPTED, false);
-    }
-
-    /**
-     * Mark that we have made an attempt to migrate tabbed state to document mode after OS upgrade.
-     */
-    public void setAttemptedMigrationOnUpgrade() {
-        SharedPreferences.Editor sharedPreferencesEditor = mSharedPreferences.edit();
-        sharedPreferencesEditor.putBoolean(MIGRATION_ON_UPGRADE_ATTEMPTED, true);
-        sharedPreferencesEditor.apply();
-    }
-
-    /**
      * @return Whether the promotion for data reduction has been skipped on first invocation.
      */
     public boolean getPromosSkippedOnFirstStart() {
         return mSharedPreferences.getBoolean(PROMOS_SKIPPED_ON_FIRST_START, false);
-    }
-
-    /**
-     * Enables custom tabs when true. This will take effect next time an activity is created.
-     * @param enabled Whether custom tabs should be enabled.
-     */
-    public void setCustomTabsEnabled(boolean enabled) {
-        SharedPreferences.Editor ed = mSharedPreferences.edit();
-        ed.putBoolean(ENABLE_CUSTOM_TABS, enabled);
-        ed.apply();
-    }
-
-    /**
-     * @return Whether custom tabs is enabled. This return value is designed to be used as a kill
-     *         switch for the feature, so it returns true by default if the preference is not set.
-     */
-    public boolean getCustomTabsEnabled() {
-        return mSharedPreferences.getBoolean(ENABLE_CUSTOM_TABS, true);
     }
 
     /**
@@ -240,8 +204,6 @@ public class ChromePreferenceManager {
     public void setShowSigninPromo(boolean shouldShow) {
         SharedPreferences.Editor sharedPreferencesEditor = mSharedPreferences.edit();
         sharedPreferencesEditor.putBoolean(SHOW_SIGNIN_PROMO, shouldShow).apply();
-
-        if (shouldShow) SigninPromoUma.recordAction(SigninPromoUma.SIGNIN_PROMO_ENABLED);
     }
 
     /**
@@ -310,18 +272,38 @@ public class ChromePreferenceManager {
     }
 
     /**
-     * @return Number of tap gestures that have been received when not waiting for the promo.
+     * @return Number of tap gestures that have been received since the last time the panel was
+     *         opened.
      */
     public int getContextualSearchTapCount() {
         return mSharedPreferences.getInt(CONTEXTUAL_SEARCH_TAP_COUNT, 0);
     }
 
     /**
-     * Sets the number of tap gestures that have been received when not waiting for the promo.
-     * @param count Number of taps that have been received when not waiting for the promo.
+     * Sets the number of tap gestures that have been received since the last time the panel was
+     * opened.
+     * @param count Number of taps that have been received since the last time the panel was opened.
      */
     public void setContextualSearchTapCount(int count) {
         writeInt(CONTEXTUAL_SEARCH_TAP_COUNT, count);
+    }
+
+    /**
+     * @return Number of Tap triggered Quick Answers (that "do answer") that have been shown since
+     *         the last time the panel was opened.
+     */
+    public int getContextualSearchTapQuickAnswerCount() {
+        return mSharedPreferences.getInt(CONTEXTUAL_SEARCH_TAP_QUICK_ANSWER_COUNT, 0);
+    }
+
+    /**
+     * Sets the number of tap triggered Quick Answers (that "do answer") that have been shown since
+     * the last time the panel was opened.
+     * @param count Number of Tap triggered Quick Answers (that "do answer") that have been shown
+     *              since the last time the panel was opened.
+     */
+    public void setContextualSearchTapQuickAnswerCount(int count) {
+        writeInt(CONTEXTUAL_SEARCH_TAP_QUICK_ANSWER_COUNT, count);
     }
 
     /**
@@ -337,6 +319,40 @@ public class ChromePreferenceManager {
      */
     public void setCachedHerbFlavor(String flavor) {
         writeString(HERB_FLAVOR_KEY, flavor);
+    }
+
+    /** Checks the cached value for the app link feature. */
+    public boolean getCachedInstantAppsEnabled() {
+        return mSharedPreferences.getBoolean(INSTANT_APPS_KEY, false);
+    }
+
+    /** Writes the cached value for whether app link is enabled. */
+    public void setCachedInstantAppsEnabled(boolean isEnabled) {
+        SharedPreferences.Editor ed = mSharedPreferences.edit();
+        ed.putBoolean(INSTANT_APPS_KEY, isEnabled);
+        ed.apply();
+    }
+
+    /** Checks the cached value for the webapk feature. */
+    public boolean getCachedWebApkRuntimeEnabled() {
+        return mSharedPreferences.getBoolean(WEBAPK_RUNTIME_KEY, false);
+    }
+
+    /** Writes the cached value for the webapk feature is enabled. */
+    public void setCachedWebApkRuntimeEnabled(boolean isEnabled) {
+        SharedPreferences.Editor ed = mSharedPreferences.edit();
+        ed.putBoolean(WEBAPK_RUNTIME_KEY, isEnabled);
+        ed.apply();
+    }
+
+    public boolean getCachedChromeDefaultBrowser() {
+        return mSharedPreferences.getBoolean(CHROME_DEFAULT_BROWSER, false);
+    }
+
+    public void setCachedChromeDefaultBrowser(boolean isDefault) {
+        SharedPreferences.Editor ed = mSharedPreferences.edit();
+        ed.putBoolean(CHROME_DEFAULT_BROWSER, isDefault);
+        ed.apply();
     }
 
     /**

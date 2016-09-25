@@ -4,21 +4,12 @@
 
 #include "chrome/browser/browsing_data/origin_filter_builder.h"
 
-#include <string>
 #include <vector>
 
 #include "base/bind.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 
 using Relation = ContentSettingsPattern::Relation;
-
-namespace {
-
-bool DontDeleteCookiesFilter(const net::CanonicalCookie& cookie) {
-  return false;
-}
-
-}  // namespace
 
 OriginFilterBuilder::OriginFilterBuilder(Mode mode)
     : BrowsingDataFilterBuilder(mode) {
@@ -74,7 +65,27 @@ OriginFilterBuilder::BuildCookieFilter() const {
   NOTREACHED() <<
       "Origin-based deletion is not suitable for cookies. Please use "
       "different scoping, such as RegistrableDomainFilterBuilder.";
-  return base::Bind(DontDeleteCookiesFilter);
+  return base::Callback<bool(const net::CanonicalCookie&)>();
+}
+
+base::Callback<bool(const std::string& channel_id_server_id)>
+OriginFilterBuilder::BuildChannelIDFilter() const {
+  NOTREACHED() <<
+      "Origin-based deletion is not suitable for channel IDs. Please use "
+      "different scoping, such as RegistrableDomainFilterBuilder.";
+  return base::Callback<bool(const std::string&)>();
+}
+
+base::Callback<bool(const std::string& site)>
+OriginFilterBuilder::BuildPluginFilter() const {
+  NOTREACHED() <<
+      "Origin-based deletion is not suitable for plugins. Please use "
+      "different scoping, such as RegistrableDomainFilterBuilder.";
+  return base::Callback<bool(const std::string&)>();
+}
+
+bool OriginFilterBuilder::operator==(const OriginFilterBuilder& other) const {
+  return origin_list_ == other.origin_list_ && mode() == other.mode();
 }
 
 bool OriginFilterBuilder::IsEmpty() const {

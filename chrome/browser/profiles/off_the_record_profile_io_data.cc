@@ -162,7 +162,7 @@ void OffTheRecordProfileIOData::Handle::LazyInitialize() const {
   io_data_->safe_browsing_enabled()->Init(prefs::kSafeBrowsingEnabled,
       profile_->GetPrefs());
   io_data_->safe_browsing_enabled()->MoveToThread(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
   io_data_->InitializeOnUIThread(profile_);
 }
 
@@ -205,6 +205,10 @@ void OffTheRecordProfileIOData::InitializeInternal(
   ApplyProfileParamsToContext(main_context);
 
   main_context->set_transport_security_state(transport_security_state());
+  main_context->set_cert_transparency_verifier(
+      io_thread_globals->cert_transparency_verifier.get());
+  main_context->set_ct_policy_enforcer(
+      io_thread_globals->ct_policy_enforcer.get());
 
   main_context->set_net_log(io_thread->net_log());
 
@@ -217,11 +221,6 @@ void OffTheRecordProfileIOData::InitializeInternal(
   main_context->set_http_auth_handler_factory(
       io_thread_globals->http_auth_handler_factory.get());
   main_context->set_proxy_service(proxy_service());
-
-  main_context->set_cert_transparency_verifier(
-      io_thread_globals->cert_transparency_verifier.get());
-  main_context->set_backoff_manager(
-      io_thread_globals->url_request_backoff_manager.get());
 
   // For incognito, we use the default non-persistent HttpServerPropertiesImpl.
   set_http_server_properties(std::unique_ptr<net::HttpServerProperties>(
@@ -289,8 +288,6 @@ void OffTheRecordProfileIOData::
   extensions_context->set_cert_transparency_verifier(
       io_thread_globals->cert_transparency_verifier.get());
 
-  extensions_context->set_backoff_manager(
-      io_thread_globals->url_request_backoff_manager.get());
   // All we care about for extensions is the cookie store. For incognito, we
   // use a non-persistent cookie store.
   content::CookieStoreConfig cookie_config;
@@ -330,13 +327,27 @@ net::URLRequestContext* OffTheRecordProfileIOData::InitializeAppRequestContext(
   // Use a separate in-memory cookie store for the app.
   // TODO(creis): We should have a cookie delegate for notifying the cookie
   // extensions API, but we need to update it to understand isolated apps first.
-  context->SetCookieStore(
-      content::CreateCookieStore(content::CookieStoreConfig()));
+  std::unique_ptr<net::CookieStore> cookie_store =
+      content::CreateCookieStore(content::CookieStoreConfig());
+  std::unique_ptr<net::ChannelIDService> channel_id_service(
+      new net::ChannelIDService(new net::DefaultChannelIDStore(nullptr),
+                                base::WorkerPool::GetTaskRunner(true)));
+  cookie_store->SetChannelIDServiceID(channel_id_service->GetUniqueID());
+  context->SetCookieStore(std::move(cookie_store));
+
+  // Build a new HttpNetworkSession that uses the new ChannelIDService.
+  net::HttpNetworkSession::Params network_params =
+      http_network_session_->params();
+  network_params.channel_id_service = channel_id_service.get();
+  std::unique_ptr<net::HttpNetworkSession> http_network_session(
+      new net::HttpNetworkSession(network_params));
 
   // Use a separate in-memory cache for the app.
   std::unique_ptr<net::HttpCache> app_http_cache = CreateHttpFactory(
-      http_network_session_.get(), net::HttpCache::DefaultBackend::InMemory(0));
+      http_network_session.get(), net::HttpCache::DefaultBackend::InMemory(0));
 
+  context->SetChannelIDService(std::move(channel_id_service));
+  context->SetHttpNetworkSession(std::move(http_network_session));
   context->SetHttpTransactionFactory(std::move(app_http_cache));
 
   std::unique_ptr<net::URLRequestJobFactoryImpl> job_factory(

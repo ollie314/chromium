@@ -30,10 +30,12 @@
 
 #include "core/loader/TextResourceDecoderBuilder.h"
 
+#include "core/dom/DOMImplementation.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "platform/weborigin/SecurityOrigin.h"
+#include <memory>
 
 namespace blink {
 
@@ -128,12 +130,14 @@ TextResourceDecoderBuilder::~TextResourceDecoderBuilder()
 }
 
 
-inline PassOwnPtr<TextResourceDecoder> TextResourceDecoderBuilder::createDecoderInstance(Document* document)
+inline std::unique_ptr<TextResourceDecoder> TextResourceDecoderBuilder::createDecoderInstance(Document* document)
 {
     const WTF::TextEncoding encodingFromDomain = getEncodingFromDomain(document->url());
     if (LocalFrame* frame = document->frame()) {
-        if (Settings* settings = frame->settings())
-            return TextResourceDecoder::create(m_mimeType, encodingFromDomain.isValid() ? encodingFromDomain : settings->defaultTextEncodingName(), settings->usesEncodingDetector());
+        if (Settings* settings = frame->settings()) {
+            // Disable autodetection for XML to honor the default encoding (UTF-8) for unlabelled documents.
+            return TextResourceDecoder::create(m_mimeType, encodingFromDomain.isValid() ? encodingFromDomain : settings->defaultTextEncodingName(), !DOMImplementation::isXMLMIMEType(m_mimeType));
+        }
     }
 
     return TextResourceDecoder::create(m_mimeType, encodingFromDomain);
@@ -167,11 +171,11 @@ inline void TextResourceDecoderBuilder::setupEncoding(TextResourceDecoder* decod
     }
 }
 
-PassOwnPtr<TextResourceDecoder> TextResourceDecoderBuilder::buildFor(Document* document)
+std::unique_ptr<TextResourceDecoder> TextResourceDecoderBuilder::buildFor(Document* document)
 {
-    OwnPtr<TextResourceDecoder> decoder = createDecoderInstance(document);
+    std::unique_ptr<TextResourceDecoder> decoder = createDecoderInstance(document);
     setupEncoding(decoder.get(), document);
-    return decoder.release();
+    return decoder;
 }
 
 void TextResourceDecoderBuilder::clear()

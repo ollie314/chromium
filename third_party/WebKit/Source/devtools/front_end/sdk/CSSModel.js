@@ -32,20 +32,24 @@
  * @constructor
  * @extends {WebInspector.SDKModel}
  * @param {!WebInspector.Target} target
+ * @param {!WebInspector.DOMModel} domModel
  */
-WebInspector.CSSModel = function(target)
+WebInspector.CSSModel = function(target, domModel)
 {
     WebInspector.SDKModel.call(this, WebInspector.CSSModel, target);
-    this._domModel = WebInspector.DOMModel.fromTarget(target);
+    this._domModel = domModel;
     this._agent = target.cssAgent();
     this._styleLoader = new WebInspector.CSSModel.ComputedStyleLoader(this);
-    target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.MainFrameNavigated, this._mainFrameNavigated, this);
+    WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.MainFrameNavigated, this._mainFrameNavigated, this);
     target.registerCSSDispatcher(new WebInspector.CSSDispatcher(this));
     this._agent.enable().then(this._wasEnabled.bind(this));
     /** @type {!Map.<string, !WebInspector.CSSStyleSheetHeader>} */
     this._styleSheetIdToHeader = new Map();
     /** @type {!Map.<string, !Object.<!PageAgent.FrameId, !Array.<!CSSAgent.StyleSheetId>>>} */
     this._styleSheetIdsForURL = new Map();
+
+    /** @type {!Map.<!WebInspector.CSSStyleSheetHeader, !Promise<string>>} */
+    this._originalStyleSheetText = new Map();
 
     /** @type {!Multimap<string, !CSSAgent.StyleSheetId>} */
     this._sourceMapLoadingStyleSheetsIds = new Multimap();
@@ -57,17 +61,19 @@ WebInspector.CSSModel = function(target)
     WebInspector.moduleSetting("cssSourceMapsEnabled").addChangeListener(this._toggleSourceMapSupport, this);
 }
 
+/** @enum {symbol} */
 WebInspector.CSSModel.Events = {
-    LayoutEditorChange: "LayoutEditorChange",
-    MediaQueryResultChanged: "MediaQueryResultChanged",
-    ModelWasEnabled: "ModelWasEnabled",
-    PseudoStateForced: "PseudoStateForced",
-    StyleSheetAdded: "StyleSheetAdded",
-    StyleSheetChanged: "StyleSheetChanged",
-    StyleSheetRemoved: "StyleSheetRemoved",
-    SourceMapAttached: "SourceMapAttached",
-    SourceMapDetached: "SourceMapDetached",
-    SourceMapChanged: "SourceMapChanged"
+    LayoutEditorChange: Symbol("LayoutEditorChange"),
+    FontsUpdated: Symbol("FontsUpdated"),
+    MediaQueryResultChanged: Symbol("MediaQueryResultChanged"),
+    ModelWasEnabled: Symbol("ModelWasEnabled"),
+    PseudoStateForced: Symbol("PseudoStateForced"),
+    StyleSheetAdded: Symbol("StyleSheetAdded"),
+    StyleSheetChanged: Symbol("StyleSheetChanged"),
+    StyleSheetRemoved: Symbol("StyleSheetRemoved"),
+    SourceMapAttached: Symbol("SourceMapAttached"),
+    SourceMapDetached: Symbol("SourceMapDetached"),
+    SourceMapChanged: Symbol("SourceMapChanged")
 }
 
 WebInspector.CSSModel.MediaTypes = ["all", "braille", "embossed", "handheld", "print", "projection", "screen", "speech", "tty", "tv"];
@@ -157,8 +163,7 @@ WebInspector.CSSModel.prototype = {
             var factoryExtension = this._factoryForSourceMap(sourceMap);
             if (!factoryExtension)
                 return Promise.resolve(/** @type {?WebInspector.SourceMap} */(sourceMap));
-
-            return factoryExtension.instancePromise()
+            return factoryExtension.instance()
                 .then(factory => factory.editableSourceMap(this.target(), sourceMap))
                 .then(map => map || sourceMap)
                 .catchException(/** @type {?WebInspector.SourceMap} */(null));
@@ -184,8 +189,6 @@ WebInspector.CSSModel.prototype = {
             }
             if (!headers.size)
                 return;
-            if (sourceMap.editable())
-                WebInspector.console.log(WebInspector.UIString("LiveSASS started: %s", sourceMapURL));
             this._sourceMapByURL.set(sourceMapURL, sourceMap);
             for (var header of headers)
                 attach.call(this, sourceMapURL, header);
@@ -209,7 +212,7 @@ WebInspector.CSSModel.prototype = {
      */
     _factoryForSourceMap: function(sourceMap)
     {
-        var sourceExtensions = new Set(sourceMap.sourceURLs().map(url => WebInspector.TextUtils.extension(url)));
+        var sourceExtensions = new Set(sourceMap.sourceURLs().map(url => WebInspector.ParsedURL.extractExtension(url)));
         for (var runtimeExtension of self.runtime.extensions(WebInspector.SourceMapFactory)) {
             var supportedExtensions = new Set(runtimeExtension.descriptor()["extensions"]);
             if (supportedExtensions.containsAll(sourceExtensions))
@@ -227,9 +230,6 @@ WebInspector.CSSModel.prototype = {
             return;
         this._sourceMapURLToHeaders.remove(header.sourceMapURL, header);
         if (!this._sourceMapURLToHeaders.has(header.sourceMapURL))
-            var sourceMap = this._sourceMapByURL.get(header.sourceMapURL);
-            if (sourceMap.editable())
-                WebInspector.console.log(WebInspector.UIString("LiveSASS stopped: %s", header.sourceMapURL));
             this._sourceMapByURL.delete(header.sourceMapURL);
         this.dispatchEventToListeners(WebInspector.CSSModel.Events.SourceMapDetached, header);
     },
@@ -239,7 +239,7 @@ WebInspector.CSSModel.prototype = {
      */
     domModel: function()
     {
-        return /** @type {!WebInspector.DOMModel} */(this._domModel);
+        return this._domModel;
     },
 
     /**
@@ -263,7 +263,7 @@ WebInspector.CSSModel.prototype = {
         var originalAndDetach = originalAndDetachIfSuccess.bind(this, header);
 
         if (!sourceMap.editable())
-            return originalAndDetach();
+            return original();
 
         return /** @type {!Promise<boolean>} */(sourceMap.editCompiled([range], [text])
             .then(onEditingDone.bind(this))
@@ -277,7 +277,7 @@ WebInspector.CSSModel.prototype = {
         function onEditingDone(editResult)
         {
             if (!editResult)
-                return originalAndDetach();
+                return Promise.resolve(false);
 
             var edits = editResult.compiledEdits;
             if (!edits.length)
@@ -386,15 +386,18 @@ WebInspector.CSSModel.prototype = {
 
         console.assert(styleSheetIds.length === ranges.length && ranges.length === texts.length, "Array lengths must be equal");
         var edits = [];
+        var ensureContentPromises = [];
         for (var i = 0; i < styleSheetIds.length; ++i) {
             edits.push({
                 styleSheetId: styleSheetIds[i],
                 range: ranges[i].serializeToObject(),
                 text: texts[i]
             });
+            ensureContentPromises.push(this._ensureOriginalStyleSheetText(styleSheetIds[i]));
         }
 
-        return this._agent.setStyleTexts(edits, parsePayload.bind(this))
+        return Promise.all(ensureContentPromises)
+            .then(() => this._agent.setStyleTexts(edits, parsePayload.bind(this)))
             .catchException(false);
     },
 
@@ -418,12 +421,13 @@ WebInspector.CSSModel.prototype = {
                 return false;
             this._domModel.markUndoableState();
             var edit = new WebInspector.CSSModel.Edit(styleSheetId, range, text, selectorPayload);
-            this._fireStyleSheetChangedAndDetach(styleSheetId, edit);
+            this._fireStyleSheetChanged(styleSheetId, edit);
             return true;
         }
 
         WebInspector.userMetrics.actionTaken(WebInspector.UserMetrics.Action.StyleRuleEdited);
-        return this._agent.setRuleSelector(styleSheetId, range, text, callback.bind(this))
+        return this._ensureOriginalStyleSheetText(styleSheetId)
+            .then(() => this._agent.setRuleSelector(styleSheetId, range, text, callback.bind(this)))
             .catchException(false);
     },
 
@@ -447,12 +451,13 @@ WebInspector.CSSModel.prototype = {
                 return false;
             this._domModel.markUndoableState();
             var edit = new WebInspector.CSSModel.Edit(styleSheetId, range, text, payload);
-            this._fireStyleSheetChangedAndDetach(styleSheetId, edit);
+            this._fireStyleSheetChanged(styleSheetId, edit);
             return true;
         }
 
         WebInspector.userMetrics.actionTaken(WebInspector.UserMetrics.Action.StyleRuleEdited);
-        return this._agent.setKeyframeKey(styleSheetId, range, text, callback.bind(this))
+        return this._ensureOriginalStyleSheetText(styleSheetId)
+            .then(() => this._agent.setKeyframeKey(styleSheetId, range, text, callback.bind(this)))
             .catchException(false);
     },
 
@@ -661,11 +666,12 @@ WebInspector.CSSModel.prototype = {
     },
 
     /**
-     * @param {!WebInspector.CSSMedia} media
+     * @param {!CSSAgent.StyleSheetId} styleSheetId
+     * @param {!WebInspector.TextRange} range
      * @param {string} newMediaText
-     * @param {function(?WebInspector.CSSMedia)} userCallback
+     * @return {!Promise<boolean>}
      */
-    setMediaText: function(media, newMediaText, userCallback)
+    setMediaText: function(styleSheetId, range, newMediaText)
     {
         /**
          * @param {?Protocol.Error} error
@@ -678,16 +684,15 @@ WebInspector.CSSModel.prototype = {
             if (!mediaPayload)
                 return false;
             this._domModel.markUndoableState();
-            var edit = new WebInspector.CSSModel.Edit(media.parentStyleSheetId, media.range, newMediaText, mediaPayload);
-            this._fireStyleSheetChangedAndDetach(media.parentStyleSheetId, edit);
+            var edit = new WebInspector.CSSModel.Edit(styleSheetId, range, newMediaText, mediaPayload);
+            this._fireStyleSheetChanged(styleSheetId, edit);
             return true;
         }
 
-        console.assert(!!media.parentStyleSheetId);
         WebInspector.userMetrics.actionTaken(WebInspector.UserMetrics.Action.StyleRuleEdited);
-        this._agent.setMediaText(media.parentStyleSheetId, media.range, newMediaText, parsePayload.bind(this))
-            .catchException(null)
-            .then(userCallback);
+        return this._ensureOriginalStyleSheetText(styleSheetId)
+            .then(() => this._agent.setMediaText(styleSheetId, range, newMediaText, parsePayload.bind(this)))
+            .catchException(false);
     },
 
     /**
@@ -698,7 +703,8 @@ WebInspector.CSSModel.prototype = {
      */
     addRule: function(styleSheetId, ruleText, ruleLocation)
     {
-        return this._agent.addRule(styleSheetId, ruleText, ruleLocation, parsePayload.bind(this))
+        return this._ensureOriginalStyleSheetText(styleSheetId)
+            .then(() => this._agent.addRule(styleSheetId, ruleText, ruleLocation, parsePayload.bind(this)))
             .catchException(/** @type {?WebInspector.CSSStyleRule} */(null))
 
         /**
@@ -713,7 +719,7 @@ WebInspector.CSSModel.prototype = {
                 return null;
             this._domModel.markUndoableState();
             var edit = new WebInspector.CSSModel.Edit(styleSheetId, ruleLocation, ruleText, rulePayload);
-            this._fireStyleSheetChangedAndDetach(styleSheetId, edit);
+            this._fireStyleSheetChanged(styleSheetId, edit);
             return new WebInspector.CSSStyleRule(this, rulePayload);
         }
     },
@@ -724,7 +730,7 @@ WebInspector.CSSModel.prototype = {
      */
     requestViaInspectorStylesheet: function(node, userCallback)
     {
-        var frameId = node.frameId() || this.target().resourceTreeModel.mainFrame.id;
+        var frameId = node.frameId() || WebInspector.ResourceTreeModel.fromTarget(this.target()).mainFrame.id;
         var headers = this._styleSheetIdToHeader.valuesArray();
         for (var i = 0; i < headers.length; ++i) {
             var styleSheetHeader = headers[i];
@@ -755,6 +761,11 @@ WebInspector.CSSModel.prototype = {
         this.dispatchEventToListeners(WebInspector.CSSModel.Events.MediaQueryResultChanged);
     },
 
+    fontsUpdated: function()
+    {
+        this.dispatchEventToListeners(WebInspector.CSSModel.Events.FontsUpdated);
+    },
+
     /**
      * @param {!CSSAgent.StyleSheetId} id
      * @return {?WebInspector.CSSStyleSheetHeader}
@@ -783,14 +794,34 @@ WebInspector.CSSModel.prototype = {
 
     /**
      * @param {!CSSAgent.StyleSheetId} styleSheetId
-     * @param {!WebInspector.CSSModel.Edit=} edit
+     * @return {!Promise<string>}
      */
-    _fireStyleSheetChangedAndDetach: function(styleSheetId, edit)
+    _ensureOriginalStyleSheetText: function(styleSheetId)
     {
-        this.dispatchEventToListeners(WebInspector.CSSModel.Events.StyleSheetChanged, { styleSheetId: styleSheetId, edit: edit });
         var header = this.styleSheetHeaderForId(styleSheetId);
-        if (header)
-            this._detachSourceMap(header);
+        if (!header)
+            return Promise.resolve("");
+        var promise = this._originalStyleSheetText.get(header);
+        if (!promise) {
+            promise = this.getStyleSheetText(header.id);
+            this._originalStyleSheetText.set(header, promise);
+            this._originalContentRequestedForTest(header);
+        }
+        return promise;
+    },
+
+    /**
+     * @param {!WebInspector.CSSStyleSheetHeader} header
+     */
+    _originalContentRequestedForTest: function(header) { },
+
+    /**
+     * @param {!WebInspector.CSSStyleSheetHeader} header
+     * @return {!Promise<string>}
+     */
+    originalStyleSheetText: function(header)
+    {
+        return this._ensureOriginalStyleSheetText(header.id);
     },
 
     /**
@@ -834,6 +865,7 @@ WebInspector.CSSModel.prototype = {
             if (!Object.keys(frameIdToStyleSheetIds).length)
                 this._styleSheetIdsForURL.remove(url);
         }
+        this._originalStyleSheetText.remove(header);
         this._detachSourceMap(header);
         this.dispatchEventToListeners(WebInspector.CSSModel.Events.StyleSheetRemoved, header);
     },
@@ -867,7 +899,8 @@ WebInspector.CSSModel.prototype = {
         newText = WebInspector.CSSModel.trimSourceURL(newText);
         if (header.hasSourceURL)
             newText += "\n/*# sourceURL=" + header.sourceURL + " */";
-        return this._agent.setStyleSheetText(header.id, newText, callback.bind(this));
+        return this._ensureOriginalStyleSheetText(styleSheetId)
+            .then(() => this._agent.setStyleSheetText(header.id, newText, callback.bind(this)));
 
         /**
          * @param {?Protocol.Error} error
@@ -903,7 +936,7 @@ WebInspector.CSSModel.prototype = {
         function textCallback(error, text)
         {
             if (error || text === null) {
-                WebInspector.console.error("Failed to get text for stylesheet " + styleSheetId + ": " + error)
+                console.error("Failed to get text for stylesheet " + styleSheetId + ": " + error)
                 text = "";
                 // Fall through.
             }
@@ -914,8 +947,13 @@ WebInspector.CSSModel.prototype = {
             .catchException(/** @type {string} */(""));
     },
 
-    _mainFrameNavigated: function()
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _mainFrameNavigated: function(event)
     {
+        if (event.data.target() !== this.target())
+            return;
         this._resetStyleSheets();
     },
 
@@ -969,6 +1007,26 @@ WebInspector.CSSModel.prototype = {
     setEffectivePropertyValueForNode: function(nodeId, name, value)
     {
         this._agent.setEffectivePropertyValueForNode(nodeId, name, value);
+    },
+
+    /**
+     * @param {!WebInspector.DOMNode} node
+     * @return {!Promise.<?WebInspector.CSSMatchedStyles>}
+     */
+    cachedMatchedCascadeForNode: function(node)
+    {
+        if (this._cachedMatchedCascadeNode !== node)
+            this.discardCachedMatchedCascade();
+        this._cachedMatchedCascadeNode = node;
+        if (!this._cachedMatchedCascadePromise)
+            this._cachedMatchedCascadePromise = this.matchedStylesPromise(node.id);
+        return this._cachedMatchedCascadePromise;
+    },
+
+    discardCachedMatchedCascade: function()
+    {
+        delete this._cachedMatchedCascadeNode;
+        delete this._cachedMatchedCascadePromise;
     },
 
     __proto__: WebInspector.SDKModel.prototype
@@ -1055,11 +1113,19 @@ WebInspector.CSSDispatcher.prototype = {
 
     /**
      * @override
+     */
+    fontsUpdated: function()
+    {
+        this._cssModel.fontsUpdated();
+    },
+
+    /**
+     * @override
      * @param {!CSSAgent.StyleSheetId} styleSheetId
      */
     styleSheetChanged: function(styleSheetId)
     {
-        this._cssModel._fireStyleSheetChangedAndDetach(styleSheetId);
+        this._cssModel._fireStyleSheetChanged(styleSheetId);
     },
 
     /**
@@ -1148,8 +1214,6 @@ WebInspector.CSSModel.ComputedStyleLoader.prototype = {
  */
 WebInspector.CSSModel.fromTarget = function(target)
 {
-    if (!target.isPage())
-        return null;
     return /** @type {?WebInspector.CSSModel} */ (target.model(WebInspector.CSSModel));
 }
 

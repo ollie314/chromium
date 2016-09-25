@@ -17,8 +17,6 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "url/gurl.h"
 
-class Profile;
-
 namespace content {
 struct Referrer;
 }
@@ -109,10 +107,6 @@ class PrerenderLinkManager : public KeyedService,
     // by this struct, and must be deleted before destructing this struct.
     PrerenderHandle* handle;
 
-    // True if this prerender has become a MatchComplete replacement. This state
-    // is maintained so the renderer is not notified of a stop twice.
-    bool is_match_complete_replacement;
-
     // True if this prerender has been abandoned by its launcher.
     bool has_been_abandoned;
   };
@@ -155,8 +149,6 @@ class PrerenderLinkManager : public KeyedService,
   void OnPrerenderStopLoading(PrerenderHandle* prerender_handle) override;
   void OnPrerenderDomContentLoaded(PrerenderHandle* prerender_handle) override;
   void OnPrerenderStop(PrerenderHandle* prerender_handle) override;
-  void OnPrerenderCreatedMatchCompleteReplacement(
-      PrerenderHandle* handle) override;
 
   bool has_shutdown_;
 

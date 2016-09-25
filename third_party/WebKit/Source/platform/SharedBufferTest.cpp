@@ -31,12 +31,12 @@
 #include "platform/SharedBuffer.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
 #include <algorithm>
 #include <cstdlib>
+#include <memory>
 
 namespace blink {
 
@@ -51,12 +51,38 @@ TEST(SharedBufferTest, getAsBytes)
     sharedBuffer->append(testData2, strlen(testData2));
 
     const size_t size = sharedBuffer->size();
-    OwnPtr<char[]> data = adoptArrayPtr(new char[size]);
+    std::unique_ptr<char[]> data = wrapArrayUnique(new char[size]);
     ASSERT_TRUE(sharedBuffer->getAsBytes(data.get(), size));
 
     char expectedConcatenation[] = "HelloWorldGoodbye";
     ASSERT_EQ(strlen(expectedConcatenation), size);
     EXPECT_EQ(0, memcmp(expectedConcatenation, data.get(), strlen(expectedConcatenation)));
+}
+
+TEST(SharedBufferTest, getPartAsBytes)
+{
+    char testData0[] = "Hello";
+    char testData1[] = "World";
+    char testData2[] = "Goodbye";
+
+    RefPtr<SharedBuffer> sharedBuffer = SharedBuffer::create(testData0, strlen(testData0));
+    sharedBuffer->append(testData1, strlen(testData1));
+    sharedBuffer->append(testData2, strlen(testData2));
+
+    struct TestData {
+        size_t position;
+        size_t size;
+        const char* expected;
+    } testData[] = {
+        {0, 17, "HelloWorldGoodbye"},
+        {0, 7, "HelloWo"},
+        {4, 7, "oWorldG"},
+    };
+    for (TestData& test : testData) {
+        std::unique_ptr<char[]> data = wrapArrayUnique(new char[test.size]);
+        ASSERT_TRUE(sharedBuffer->getPartAsBytes(data.get(), test.position, test.size));
+        EXPECT_EQ(0, memcmp(test.expected, data.get(), test.size));
+    }
 }
 
 TEST(SharedBufferTest, getAsBytesLargeSegments)
@@ -76,7 +102,7 @@ TEST(SharedBufferTest, getAsBytesLargeSegments)
     sharedBuffer->append(vector2);
 
     const size_t size = sharedBuffer->size();
-    OwnPtr<char[]> data = adoptArrayPtr(new char[size]);
+    std::unique_ptr<char[]> data = wrapArrayUnique(new char[size]);
     ASSERT_TRUE(sharedBuffer->getAsBytes(data.get(), size));
 
     ASSERT_EQ(0x4000U + 0x4000U + 0x4000U, size);
@@ -126,26 +152,6 @@ TEST(SharedBufferTest, constructorWithSizeOnly)
     // directly return the full size.
     const char* data;
     ASSERT_EQ(length, sharedBuffer->getSomeData(data, static_cast<size_t>(0u)));
-}
-
-TEST(SharedBufferTest, createPurgeable)
-{
-    Vector<char> testData(30000);
-    std::generate(testData.begin(), testData.end(), &std::rand);
-
-    size_t length = testData.size();
-    RefPtr<SharedBuffer> sharedBuffer = SharedBuffer::createPurgeable(testData.data(), length);
-    ASSERT_EQ(length, sharedBuffer->size());
-    // Merge the segments into a single vector.
-    const char* data = sharedBuffer->data();
-    ASSERT_EQ(0, memcmp(data, testData.data(), length));
-
-    // Do another append + merge the segments again.
-    size_t previousTestDataSize = testData.size();
-    testData.resize(2 * previousTestDataSize);
-    std::generate(testData.begin() + previousTestDataSize, testData.end(), &std::rand);
-    sharedBuffer->append(testData.data() + previousTestDataSize, previousTestDataSize);
-    ASSERT_EQ(0, memcmp(data, testData.data(), length));
 }
 
 } // namespace blink

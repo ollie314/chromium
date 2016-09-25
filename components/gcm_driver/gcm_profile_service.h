@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_GCM_DRIVER_GCM_PROFILE_SERVICE_H_
 #define COMPONENTS_GCM_DRIVER_GCM_PROFILE_SERVICE_H_
 
+#include <memory>
 #include <string>
 
 #include "base/callback_forward.h"
@@ -12,7 +13,6 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/profile_identity_provider.h"
@@ -56,8 +56,9 @@ class GCMProfileService : public KeyedService {
       base::FilePath path,
       net::URLRequestContextGetter* request_context,
       version_info::Channel channel,
-      scoped_ptr<ProfileIdentityProvider> identity_provider,
-      scoped_ptr<GCMClientFactory> gcm_client_factory,
+      const std::string& product_category_for_subtypes,
+      std::unique_ptr<ProfileIdentityProvider> identity_provider,
+      std::unique_ptr<GCMClientFactory> gcm_client_factory,
       const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,
       scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner);
@@ -80,15 +81,15 @@ class GCMProfileService : public KeyedService {
   GCMProfileService();
 
  private:
-  net::URLRequestContextGetter* request_context_;
-  scoped_ptr<ProfileIdentityProvider> profile_identity_provider_;
+  std::unique_ptr<ProfileIdentityProvider> profile_identity_provider_;
+  std::unique_ptr<GCMDriver> driver_;
 
-  scoped_ptr<GCMDriver> driver_;
-
-// Used for both account tracker and GCM.UserSignedIn UMA.
 #if !defined(OS_ANDROID)
+  net::URLRequestContextGetter* request_context_ = nullptr;
+
+  // Used for both account tracker and GCM.UserSignedIn UMA.
   class IdentityObserver;
-  scoped_ptr<IdentityObserver> identity_observer_;
+  std::unique_ptr<IdentityObserver> identity_observer_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(GCMProfileService);

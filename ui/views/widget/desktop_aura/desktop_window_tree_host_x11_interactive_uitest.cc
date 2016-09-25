@@ -128,7 +128,7 @@ class DesktopWindowTreeHostX11Test : public ViewsTestBase {
   ~DesktopWindowTreeHostX11Test() override {}
 
   static void SetUpTestCase() {
-    gfx::GLSurfaceTestSupport::InitializeOneOff();
+    gl::GLSurfaceTestSupport::InitializeOneOff();
     ui::RegisterPathProvider();
     base::FilePath ui_test_pak_path;
     ASSERT_TRUE(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
@@ -270,6 +270,9 @@ TEST_F(DesktopWindowTreeHostX11Test, InputMethodFocus) {
   //          widget->GetInputMethod()->GetTextInputType());
 
   widget->Activate();
+  ActivationWaiter waiter(
+      widget->GetNativeWindow()->GetHost()->GetAcceleratedWidget());
+  waiter.Wait();
 
   EXPECT_TRUE(widget->IsActive());
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_TEXT,

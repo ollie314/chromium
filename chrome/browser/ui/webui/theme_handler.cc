@@ -10,9 +10,9 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/webui/theme_source.h"
+#include "chrome/grit/theme_resources.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/theme_resources.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // ThemeHandler
@@ -43,7 +43,7 @@ void ThemeHandler::Observe(int type,
                            .HasCustomImage(IDR_THEME_NTP_BACKGROUND);
   base::DictionaryValue dictionary;
   dictionary.SetBoolean("hasCustomBackground", has_custom_bg);
-  web_ui()->CallJavascriptFunction("ntp.themeChanged", dictionary);
+  web_ui()->CallJavascriptFunctionUnsafe("ntp.themeChanged", dictionary);
 }
 
 void ThemeHandler::InitializeCSSCaches() {

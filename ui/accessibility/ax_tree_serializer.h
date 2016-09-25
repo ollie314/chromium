@@ -8,11 +8,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <set>
+#include <vector>
 
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
 #include "ui/accessibility/ax_export.h"
 #include "ui/accessibility/ax_tree_source.h"
 #include "ui/accessibility/ax_tree_update.h"
@@ -324,8 +323,9 @@ bool AXTreeSerializer<AXSourceNode, AXNodeData, AXTreeData>::SerializeChanges(
     AXSourceNode node,
     AXTreeUpdateBase<AXNodeData, AXTreeData>* out_update) {
   // Send the tree data if it's changed since the last update.
-  AXTreeData new_tree_data = tree_->GetTreeData();
-  if (new_tree_data != client_tree_data_) {
+  AXTreeData new_tree_data;
+  if (tree_->GetTreeData(&new_tree_data) &&
+      new_tree_data != client_tree_data_) {
     out_update->has_tree_data = true;
     out_update->tree_data = new_tree_data;
     client_tree_data_ = new_tree_data;
@@ -494,10 +494,8 @@ bool AXTreeSerializer<AXSourceNode, AXNodeData, AXTreeData>::
     AXNodeData* serialized_node = &out_update->nodes[serialized_node_index];
 
     tree_->SerializeNode(node, serialized_node);
-    // TODO(dmazzoni/dtseng): Make the serializer not depend on roles to
-    // identify the root.
-    if (serialized_node->id == client_root_->id && !serialized_node->IsRoot())
-      serialized_node->SetRoot();
+    if (serialized_node->id == client_root_->id)
+      out_update->root_id = serialized_node->id;
   }
 
   // Iterate over the children, serialize them, and update the ClientTreeNode

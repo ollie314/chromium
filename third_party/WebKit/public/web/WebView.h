@@ -38,8 +38,6 @@
 #include "../platform/WebPageVisibilityState.h"
 #include "../platform/WebString.h"
 #include "../platform/WebVector.h"
-#include "WebHistoryCommitType.h"
-#include "WebHistoryItem.h"
 #include "WebWidget.h"
 
 namespace blink {
@@ -53,7 +51,6 @@ class WebFrame;
 class WebHitTestResult;
 class WebLocalFrame;
 class WebPageImportanceSignals;
-class WebPageOverlay;
 class WebPrerendererClient;
 class WebRemoteFrame;
 class WebSettings;
@@ -69,7 +66,7 @@ struct WebPluginAction;
 struct WebPoint;
 struct WebWindowFeatures;
 
-class WebView : public WebWidget {
+class WebView : protected WebWidget {
 public:
     BLINK_EXPORT static const double textSizeMultiplierRatio;
     BLINK_EXPORT static const double minTextSizeMultiplier;
@@ -80,13 +77,56 @@ public:
         InjectStyleInTopFrameOnly
     };
 
+    // WebWidget overrides.
+    using WebWidget::close;
+    using WebWidget::size;
+    using WebWidget::resize;
+    using WebWidget::resizeVisualViewport;
+    using WebWidget::didEnterFullscreen;
+    using WebWidget::didExitFullscreen;
+    using WebWidget::beginFrame;
+    using WebWidget::updateAllLifecyclePhases;
+    using WebWidget::paint;
+    using WebWidget::paintIgnoringCompositing;
+    using WebWidget::layoutAndPaintAsync;
+    using WebWidget::compositeAndReadbackAsync;
+    using WebWidget::themeChanged;
+    using WebWidget::handleInputEvent;
+    using WebWidget::setCursorVisibilityState;
+    using WebWidget::hasTouchEventHandlersAt;
+    using WebWidget::applyViewportDeltas;
+    using WebWidget::mouseCaptureLost;
+    using WebWidget::setFocus;
+    using WebWidget::setComposition;
+    using WebWidget::commitText;
+    using WebWidget::finishComposingText;
+    using WebWidget::compositionRange;
+    using WebWidget::textInputInfo;
+    using WebWidget::textInputType;
+    using WebWidget::selectionBounds;
+    using WebWidget::selectionTextDirection;
+    using WebWidget::isSelectionAnchorFirst;
+    using WebWidget::caretOrSelectionRange;
+    using WebWidget::setTextDirection;
+    using WebWidget::isAcceleratedCompositingActive;
+    using WebWidget::isWebView;
+    using WebWidget::isPagePopup;
+    using WebWidget::willCloseLayerTreeView;
+    using WebWidget::didAcquirePointerLock;
+    using WebWidget::didNotAcquirePointerLock;
+    using WebWidget::didLosePointerLock;
+    using WebWidget::didChangeWindowResizerRect;
+    using WebWidget::backgroundColor;
+    using WebWidget::pagePopup;
+    using WebWidget::updateTopControlsState;
 
     // Initialization ------------------------------------------------------
 
     // Creates a WebView that is NOT yet initialized. You will need to
     // call setMainFrame to finish the initialization. It is valid
-    // to pass a null client pointer.
-    BLINK_EXPORT static WebView* create(WebViewClient*);
+    // to pass a null client pointer. The WebPageVisibilityState defines the
+    // initial visibility of the page.
+    BLINK_EXPORT static WebView* create(WebViewClient*, WebPageVisibilityState);
 
     // After creating a WebView, you should immediately call this method.
     // You can optionally modify the settings before calling this method.
@@ -107,7 +147,6 @@ public:
     // Corresponds to the encoding of the main frame.  Setting the page
     // encoding may cause the main frame to reload.
     virtual WebString pageEncoding() const = 0;
-    virtual void setPageEncoding(const WebString&) = 0;
 
     // Controls whether pressing Tab key advances focus to links.
     virtual bool tabsToLinks() const = 0;
@@ -152,7 +191,7 @@ public:
 
     // Focus ---------------------------------------------------------------
 
-    virtual WebFrame* focusedFrame() = 0;
+    virtual WebLocalFrame* focusedFrame() = 0;
     virtual void setFocusedFrame(WebFrame*) = 0;
 
     // Sets the provided frame as focused and fires blur/focus events on any
@@ -160,6 +199,10 @@ public:
     // is different from setFocusedFrame, which does not fire events on focused
     // elements.
     virtual void focusDocumentView(WebFrame*) = 0;
+
+    // Sets no frame as focused and fires blur events on any currently focused
+    // element.
+    virtual void unfocusDocumentView() = 0;
 
     // Focus the first (last if reverse is true) focusable node.
     virtual void setInitialFocus(bool reverse) = 0;
@@ -169,9 +212,10 @@ public:
     // send it.
     virtual void clearFocusedElement() = 0;
 
-    // Scrolls the node currently in focus into |rect|, where |rect| is in
-    // viewport space. Returns true if an animation was started.
-    virtual bool scrollFocusedNodeIntoRect(const WebRect&) { return false; }
+    // If it is editable, scrolls the element currently in focus into |rect|,
+    // where |rect| is in viewport space.
+    // Returns false if there is currently no currently focused element.
+    virtual bool scrollFocusedEditableElementIntoRect(const WebRect&) { return false; }
 
     // Smooth scroll the root layer to |targetX|, |targetY| in |durationMs|.
     virtual void smoothScroll(int targetX, int targetY, long durationMs) { }
@@ -283,7 +327,14 @@ public:
 
     // Set and reset the device color profile.
     virtual void setDeviceColorProfile(const WebVector<char>&) = 0;
-    virtual void resetDeviceColorProfileForTesting() = 0;
+
+    // Resize the view at the same time as changing the state of the top
+    // controls. If |topControlsShrinkLayout| is true, the embedder shrunk the
+    // WebView size by the top controls height.
+    virtual void resizeWithTopControls(
+        const WebSize&,
+        float topControlsHeight,
+        bool topControlsShrinkLayout) = 0;
 
     // Auto-Resize -----------------------------------------------------------
 
@@ -317,14 +368,6 @@ public:
     virtual WebHitTestResult hitTestResultForTap(const WebPoint& tapPoint,
         const WebSize& tapArea) = 0;
 
-    // Copy to the clipboard the image located at a particular point in the
-    // WebView (if there is such an image)
-    virtual void copyImageAt(const WebPoint&) = 0;
-
-    // Save as the image located at a particular point in the
-    // WebView (if there is such an image)
-    virtual void saveImageAt(const WebPoint&) = 0;
-
     // Notifies the WebView that a drag has terminated.
     virtual void dragSourceEndedAt(
         const WebPoint& clientPoint, const WebPoint& screenPoint,
@@ -346,6 +389,7 @@ public:
         int modifiers) = 0;
     virtual void dragTargetDragLeave() = 0;
     virtual void dragTargetDrop(
+        const WebDragData&,
         const WebPoint& clientPoint, const WebPoint& screenPoint,
         int modifiers) = 0;
 
@@ -479,6 +523,10 @@ public:
     // Force the drawing buffer used by webgl contexts to fail so that the webgl
     // context's ability to deal with that failure gracefully can be tested.
     virtual void forceNextDrawingBufferCreationToFail() = 0;
+
+    // TODO(lfg): Remove this once the refactor of WebView/WebWidget is
+    // completed.
+    WebWidget* widget() { return this; }
 
 protected:
     ~WebView() {}

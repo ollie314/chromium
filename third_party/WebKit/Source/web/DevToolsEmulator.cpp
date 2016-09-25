@@ -7,14 +7,20 @@
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
+#include "core/frame/VisualViewport.h"
 #include "core/page/Page.h"
 #include "core/style/ComputedStyle.h"
 #include "platform/RuntimeEnabledFeatures.h"
+#include "platform/geometry/FloatRect.h"
+#include "platform/geometry/FloatSize.h"
+#include "platform/geometry/IntRect.h"
+#include "platform/geometry/IntSize.h"
 #include "public/platform/WebLayerTreeView.h"
 #include "web/WebInputEventConversion.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebSettingsImpl.h"
 #include "web/WebViewImpl.h"
+#include "wtf/PtrUtil.h"
 
 namespace {
 
@@ -65,9 +71,9 @@ DevToolsEmulator::DevToolsEmulator(WebViewImpl* webViewImpl)
     , m_embedderPrimaryPointerType(webViewImpl->page()->settings().primaryPointerType())
     , m_embedderAvailableHoverTypes(webViewImpl->page()->settings().availableHoverTypes())
     , m_embedderPrimaryHoverType(webViewImpl->page()->settings().primaryHoverType())
+    , m_embedderMainFrameResizesAreOrientationChanges(webViewImpl->page()->settings().mainFrameResizesAreOrientationChanges())
     , m_touchEventEmulationEnabled(false)
     , m_doubleTapToZoomEnabled(false)
-    , m_mainFrameResizesAreOrientationChanges(false)
     , m_originalTouchEnabled(false)
     , m_originalDeviceSupportsMouse(false)
     , m_originalDeviceSupportsTouch(false)
@@ -147,15 +153,12 @@ bool DevToolsEmulator::doubleTapToZoomEnabled() const
     return m_touchEventEmulationEnabled ? true : m_doubleTapToZoomEnabled;
 }
 
-void DevToolsEmulator::setMainFrameResizesAreOrientationChanges(bool enabled)
+void DevToolsEmulator::setMainFrameResizesAreOrientationChanges(bool value)
 {
-    m_mainFrameResizesAreOrientationChanges = enabled;
-}
-
-bool DevToolsEmulator::mainFrameResizesAreOrientationChanges() const
-{
+    m_embedderMainFrameResizesAreOrientationChanges = value;
     bool emulateMobileEnabled = m_deviceMetricsEnabled && m_emulateMobileEnabled;
-    return emulateMobileEnabled ? true : m_mainFrameResizesAreOrientationChanges;
+    if (!emulateMobileEnabled)
+        m_webViewImpl->page()->settings().setMainFrameResizesAreOrientationChanges(value);
 }
 
 void DevToolsEmulator::setAvailablePointerTypes(int types)
@@ -207,7 +210,6 @@ void DevToolsEmulator::enableDeviceEmulation(const WebDeviceEmulationParams& par
         m_deviceMetricsEnabled = true;
         if (params.viewSize.width || params.viewSize.height)
             m_webViewImpl->setBackgroundColorOverride(Color::darkGray);
-        m_webViewImpl->updateShowFPSCounter();
     }
 
     m_webViewImpl->page()->settings().setDeviceScaleAdjustment(calculateDeviceScaleAdjustment(params.viewSize.width, params.viewSize.height, params.deviceScaleFactor));
@@ -218,7 +220,7 @@ void DevToolsEmulator::enableDeviceEmulation(const WebDeviceEmulationParams& par
         disableMobileEmulation();
 
     m_webViewImpl->setCompositorDeviceScaleFactorOverride(params.deviceScaleFactor);
-    m_webViewImpl->setRootLayerTransform(WebSize(params.offset.x, params.offset.y), params.scale);
+    updateRootLayerTransform();
     // TODO(dgozman): mainFrameImpl() is null when it's remote. Figure out how
     // we end up with enabling emulation in this case.
     if (m_webViewImpl->mainFrameImpl()) {
@@ -234,22 +236,16 @@ void DevToolsEmulator::disableDeviceEmulation()
 
     m_deviceMetricsEnabled = false;
     m_webViewImpl->setBackgroundColorOverride(Color::transparent);
-    m_webViewImpl->updateShowFPSCounter();
     m_webViewImpl->page()->settings().setDeviceScaleAdjustment(m_embedderDeviceScaleAdjustment);
     disableMobileEmulation();
     m_webViewImpl->setCompositorDeviceScaleFactorOverride(0.f);
-    m_webViewImpl->setRootLayerTransform(WebSize(0.f, 0.f), 1.f);
     m_webViewImpl->setPageScaleFactor(1.f);
+    updateRootLayerTransform();
     // mainFrameImpl() could be null during cleanup or remote <-> local swap.
     if (m_webViewImpl->mainFrameImpl()) {
         if (Document* document = m_webViewImpl->mainFrameImpl()->frame()->document())
             document->mediaQueryAffectingValueChanged();
     }
-}
-
-bool DevToolsEmulator::resizeIsDeviceSizeChange()
-{
-    return m_deviceMetricsEnabled && m_emulateMobileEnabled;
 }
 
 void DevToolsEmulator::enableMobileEmulation()
@@ -276,7 +272,7 @@ void DevToolsEmulator::enableMobileEmulation()
     m_webViewImpl->page()->settings().setPrimaryPointerType(PointerTypeCoarse);
     m_webViewImpl->page()->settings().setAvailableHoverTypes(HoverTypeOnDemand);
     m_webViewImpl->page()->settings().setPrimaryHoverType(HoverTypeOnDemand);
-    m_webViewImpl->page()->settings().setResizeIsDeviceSizeChange(true);
+    m_webViewImpl->page()->settings().setMainFrameResizesAreOrientationChanges(true);
     m_webViewImpl->setZoomFactorOverride(1);
 
     m_originalDefaultMinimumPageScaleFactor = m_webViewImpl->defaultMinimumPageScaleFactor();
@@ -308,7 +304,7 @@ void DevToolsEmulator::disableMobileEmulation()
     m_webViewImpl->page()->settings().setPrimaryPointerType(m_embedderPrimaryPointerType);
     m_webViewImpl->page()->settings().setAvailableHoverTypes(m_embedderAvailableHoverTypes);
     m_webViewImpl->page()->settings().setPrimaryHoverType(m_embedderPrimaryHoverType);
-    m_webViewImpl->page()->settings().setResizeIsDeviceSizeChange(false);
+    m_webViewImpl->page()->settings().setMainFrameResizesAreOrientationChanges(m_embedderMainFrameResizesAreOrientationChanges);
     m_webViewImpl->setZoomFactorOverride(0);
     m_emulateMobileEnabled = false;
     m_webViewImpl->setDefaultPageScaleLimits(
@@ -317,6 +313,119 @@ void DevToolsEmulator::disableMobileEmulation()
     // mainFrameImpl() could be null during cleanup or remote <-> local swap.
     if (m_webViewImpl->mainFrameImpl())
         m_webViewImpl->mainFrameImpl()->frameView()->layout();
+}
+
+float DevToolsEmulator::compositorDeviceScaleFactor() const
+{
+    if (m_deviceMetricsEnabled)
+        return m_emulationParams.deviceScaleFactor;
+    return m_webViewImpl->page()->deviceScaleFactor();
+}
+
+void DevToolsEmulator::forceViewport(const WebFloatPoint& position, float scale)
+{
+    GraphicsLayer* containerLayer = m_webViewImpl->page()->frameHost().visualViewport().containerLayer();
+    if (!m_viewportOverride) {
+        m_viewportOverride = ViewportOverride();
+
+        // Disable clipping on the visual viewport layer, to ensure the whole area is painted.
+        if (containerLayer) {
+            m_viewportOverride->originalVisualViewportMasking = containerLayer->masksToBounds();
+            containerLayer->setMasksToBounds(false);
+        }
+    }
+
+    m_viewportOverride->position = position;
+    m_viewportOverride->scale = scale;
+
+    // Move the correct (scaled) content area to show in the top left of the
+    // CompositorFrame via the root transform.
+    updateRootLayerTransform();
+}
+
+void DevToolsEmulator::resetViewport()
+{
+    if (!m_viewportOverride)
+        return;
+
+    bool originalMasking = m_viewportOverride->originalVisualViewportMasking;
+    m_viewportOverride = WTF::nullopt;
+
+    GraphicsLayer* containerLayer = m_webViewImpl->page()->frameHost().visualViewport().containerLayer();
+    if (containerLayer)
+        containerLayer->setMasksToBounds(originalMasking);
+    updateRootLayerTransform();
+}
+
+void DevToolsEmulator::mainFrameScrollOrScaleChanged()
+{
+    // Viewport override has to take current page scale and scroll offset into
+    // account. Update the transform if override is active.
+    if (m_viewportOverride)
+        updateRootLayerTransform();
+}
+
+void DevToolsEmulator::applyDeviceEmulationTransform(TransformationMatrix* transform)
+{
+    if (m_deviceMetricsEnabled) {
+        WebSize offset(m_emulationParams.offset.x, m_emulationParams.offset.y);
+        // Scale first, so that translation is unaffected.
+        transform->translate(offset.width, offset.height);
+        transform->scale(m_emulationParams.scale);
+        if (m_webViewImpl->mainFrameImpl())
+            m_webViewImpl->mainFrameImpl()->setInputEventsTransformForEmulation(offset, m_emulationParams.scale);
+    } else {
+        if (m_webViewImpl->mainFrameImpl())
+            m_webViewImpl->mainFrameImpl()->setInputEventsTransformForEmulation(WebSize(0, 0), 1.0);
+    }
+}
+
+void DevToolsEmulator::applyViewportOverride(TransformationMatrix* transform)
+{
+    if (!m_viewportOverride)
+        return;
+
+    // Transform operations follow in reverse application.
+    // Last, scale positioned area according to override.
+    transform->scale(m_viewportOverride->scale);
+
+    // Translate while taking into account current scroll offset.
+    WebSize scrollOffset = m_webViewImpl->mainFrame()->scrollOffset();
+    WebFloatPoint visualOffset = m_webViewImpl->visualViewportOffset();
+    float scrollX = scrollOffset.width + visualOffset.x;
+    float scrollY = scrollOffset.height + visualOffset.y;
+    transform->translate(
+        -m_viewportOverride->position.x + scrollX,
+        -m_viewportOverride->position.y + scrollY);
+
+    // First, reverse page scale, so we don't have to take it into account for
+    // calculation of the translation.
+    transform->scale(1. / m_webViewImpl->pageScaleFactor());
+}
+
+void DevToolsEmulator::updateRootLayerTransform()
+{
+    TransformationMatrix transform;
+
+    // Apply device emulation transform first, so that it is affected by the
+    // viewport override.
+    applyViewportOverride(&transform);
+    applyDeviceEmulationTransform(&transform);
+    m_webViewImpl->setRootLayerTransform(transform);
+}
+
+WTF::Optional<IntRect> DevToolsEmulator::visibleContentRectForPainting() const
+{
+    if (!m_viewportOverride)
+        return WTF::nullopt;
+    FloatSize viewportSize(m_webViewImpl->layerTreeView()->getViewportSize());
+    viewportSize.scale(1. / compositorDeviceScaleFactor());
+    viewportSize.scale(1. / m_viewportOverride->scale);
+    return enclosingIntRect(FloatRect(
+        m_viewportOverride->position.x,
+        m_viewportOverride->position.y,
+        viewportSize.width(),
+        viewportSize.height()));
 }
 
 void DevToolsEmulator::setTouchEventEmulationEnabled(bool enabled)
@@ -367,8 +476,8 @@ bool DevToolsEmulator::handleInputEvent(const WebInputEvent& inputEvent)
         PlatformGestureEventBuilder gestureEvent(frameView, static_cast<const WebGestureEvent&>(inputEvent));
         float pageScaleFactor = page->pageScaleFactor();
         if (gestureEvent.type() == PlatformEvent::GesturePinchBegin) {
-            m_lastPinchAnchorCss = adoptPtr(new IntPoint(frameView->scrollPosition() + gestureEvent.position()));
-            m_lastPinchAnchorDip = adoptPtr(new IntPoint(gestureEvent.position()));
+            m_lastPinchAnchorCss = wrapUnique(new IntPoint(frameView->scrollPosition() + gestureEvent.position()));
+            m_lastPinchAnchorDip = wrapUnique(new IntPoint(gestureEvent.position()));
             m_lastPinchAnchorDip->scale(pageScaleFactor, pageScaleFactor);
         }
         if (gestureEvent.type() == PlatformEvent::GesturePinchUpdate && m_lastPinchAnchorCss) {
@@ -379,8 +488,8 @@ bool DevToolsEmulator::handleInputEvent(const WebInputEvent& inputEvent)
             m_webViewImpl->mainFrame()->setScrollOffset(toIntSize(*m_lastPinchAnchorCss.get() - toIntSize(anchorCss)));
         }
         if (gestureEvent.type() == PlatformEvent::GesturePinchEnd) {
-            m_lastPinchAnchorCss.clear();
-            m_lastPinchAnchorDip.clear();
+            m_lastPinchAnchorCss.reset();
+            m_lastPinchAnchorDip.reset();
         }
         return true;
     }

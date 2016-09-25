@@ -36,8 +36,10 @@ class WebUIResourceBrowserTest : public InProcessBrowserTest {
 
   void LoadResource(int idr) {
     ResourceBundle& bundle = ResourceBundle::GetSharedInstance();
-    base::StringPiece resource = bundle.GetRawDataResource(idr);
-    RunTest(GURL(std::string("data:text/html,") + resource.as_string()));
+    scoped_refptr<base::RefCountedMemory> resource =
+        bundle.LoadDataResourceBytes(idr);
+    RunTest(GURL(std::string("data:text/html,") +
+                 std::string(resource->front_as<char>(), resource->size())));
   }
 
   // Queues the library corresponding to |resource_id| for injection into the
@@ -240,8 +242,22 @@ IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, UtilTest) {
   LoadFile(base::FilePath(FILE_PATH_LITERAL("util_test.html")));
 }
 
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, IconTest) {
+  AddLibrary(IDR_WEBUI_JS_CR);
+  AddLibrary(IDR_WEBUI_JS_UTIL);
+  AddLibrary(IDR_WEBUI_JS_ICON);
+  LoadFile(base::FilePath(FILE_PATH_LITERAL("icon_test.html")));
+}
+
 IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, PromiseResolverTest) {
   AddLibrary(IDR_WEBUI_JS_ASSERT);
   AddLibrary(IDR_WEBUI_JS_PROMISE_RESOLVER);
   LoadFile(base::FilePath(FILE_PATH_LITERAL("promise_resolver_test.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(WebUIResourceBrowserTest, I18nBehaviorTest) {
+  AddLibrary(IDR_WEBUI_JS_LOAD_TIME_DATA);
+  AddLibrary(IDR_WEBUI_JS_PARSE_HTML_SUBSET);
+  AddLibrary(IDR_WEBUI_JS_I18N_BEHAVIOR);
+  LoadFile(base::FilePath(FILE_PATH_LITERAL("i18n_behavior_test.html")));
 }

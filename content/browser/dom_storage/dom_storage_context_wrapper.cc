@@ -11,11 +11,12 @@
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
+#include "base/memory/memory_coordinator_client_registry.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/filesystem/public/interfaces/directory.mojom.h"
 #include "components/leveldb/public/interfaces/leveldb.mojom.h"
 #include "content/browser/dom_storage/dom_storage_area.h"
@@ -23,14 +24,16 @@
 #include "content/browser/dom_storage/dom_storage_task_runner.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/leveldb_wrapper_impl.h"
+#include "content/browser/memory/memory_coordinator.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/local_storage_usage_info.h"
 #include "content/public/browser/session_storage_usage_info.h"
+#include "content/public/common/content_features.h"
 #include "mojo/common/common_type_converters.h"
+#include "services/file/public/cpp/constants.h"
+#include "services/file/public/interfaces/file_system.mojom.h"
 #include "services/shell/public/cpp/connection.h"
 #include "services/shell/public/cpp/connector.h"
-#include "services/user/public/cpp/constants.h"
-#include "services/user/public/interfaces/user_service.mojom.h"
 
 namespace content {
 namespace {
@@ -82,7 +85,9 @@ class DOMStorageContextWrapper::MojoState {
  public:
   MojoState(shell::Connector* connector, const base::FilePath& subdirectory)
       : connector_(connector),
-        subdirectory_(subdirectory),
+        // TODO(michaeln): Enable writing to disk when db is versioned,
+        // for now using an empty subdirectory to use an in-memory db.
+        // subdirectory_(subdirectory),
         connection_state_(NO_CONNECTION),
         weak_ptr_factory_(this) {}
 
@@ -96,9 +101,18 @@ class DOMStorageContextWrapper::MojoState {
     level_db_wrappers_.erase(origin);
   }
 
+  void OnUserServiceConnectionComplete() {
+    CHECK_EQ(shell::mojom::ConnectResult::SUCCEEDED,
+             file_service_connection_->GetResult());
+  }
+
+  void OnUserServiceConnectionError() {
+    CHECK(false);
+  }
+
   // Part of our asynchronous directory opening called from OpenLocalStorage().
-  void OnDirectoryOpened(filesystem::FileError err);
-  void OnDatabaseOpened(leveldb::DatabaseError status);
+  void OnDirectoryOpened(filesystem::mojom::FileError err);
+  void OnDatabaseOpened(leveldb::mojom::DatabaseError status);
 
   // The (possibly delayed) implementation of OpenLocalStorage(). Can be called
   // directly from that function, or through |on_database_open_callbacks_|.
@@ -118,13 +132,13 @@ class DOMStorageContextWrapper::MojoState {
     CONNECTION_FINISHED
   } connection_state_;
 
-  std::unique_ptr<shell::Connection> user_service_connection_;
+  std::unique_ptr<shell::Connection> file_service_connection_;
 
-  user_service::mojom::UserServicePtr user_service_;
-  filesystem::DirectoryPtr directory_;
+  file::mojom::FileSystemPtr file_system_;
+  filesystem::mojom::DirectoryPtr directory_;
 
-  leveldb::LevelDBServicePtr leveldb_service_;
-  leveldb::LevelDBDatabasePtr database_;
+  leveldb::mojom::LevelDBServicePtr leveldb_service_;
+  leveldb::mojom::LevelDBDatabasePtr database_;
 
   std::vector<base::Closure> on_database_opened_callbacks_;
 
@@ -138,22 +152,28 @@ void DOMStorageContextWrapper::MojoState::OpenLocalStorage(
   // If we don't have a filesystem_connection_, we'll need to establish one.
   if (connection_state_ == NO_CONNECTION) {
     CHECK(connector_);
-    user_service_connection_ =
-        connector_->Connect(user_service::kUserServiceName);
+    file_service_connection_ =
+        connector_->Connect(file::kFileServiceName);
     connection_state_ = CONNECTION_IN_PROGRESS;
+    file_service_connection_->AddConnectionCompletedClosure(
+        base::Bind(&MojoState::OnUserServiceConnectionComplete,
+                   weak_ptr_factory_.GetWeakPtr()));
+    file_service_connection_->SetConnectionLostClosure(
+        base::Bind(&MojoState::OnUserServiceConnectionError,
+                   weak_ptr_factory_.GetWeakPtr()));
 
     if (!subdirectory_.empty()) {
       // We were given a subdirectory to write to. Get it and use a disk backed
       // database.
-      user_service_connection_->GetInterface(&user_service_);
-      user_service_->GetSubDirectory(
+      file_service_connection_->GetInterface(&file_system_);
+      file_system_->GetSubDirectory(
           mojo::String::From(subdirectory_.AsUTF8Unsafe()),
           GetProxy(&directory_),
           base::Bind(&MojoState::OnDirectoryOpened,
                      weak_ptr_factory_.GetWeakPtr()));
     } else {
       // We were not given a subdirectory. Use a memory backed database.
-      user_service_connection_->GetInterface(&leveldb_service_);
+      file_service_connection_->GetInterface(&leveldb_service_);
       leveldb_service_->OpenInMemory(
           GetProxy(&database_),
           base::Bind(&MojoState::OnDatabaseOpened,
@@ -173,17 +193,17 @@ void DOMStorageContextWrapper::MojoState::OpenLocalStorage(
 }
 
 void DOMStorageContextWrapper::MojoState::OnDirectoryOpened(
-    filesystem::FileError err) {
-  if (err != filesystem::FileError::OK) {
+    filesystem::mojom::FileError err) {
+  if (err != filesystem::mojom::FileError::OK) {
     // We failed to open the directory; continue with startup so that we create
     // the |level_db_wrappers_|.
-    OnDatabaseOpened(leveldb::DatabaseError::IO_ERROR);
+    OnDatabaseOpened(leveldb::mojom::DatabaseError::IO_ERROR);
     return;
   }
 
   // Now that we have a directory, connect to the LevelDB service and get our
   // database.
-  user_service_connection_->GetInterface(&leveldb_service_);
+  file_service_connection_->GetInterface(&leveldb_service_);
 
   leveldb_service_->Open(
       std::move(directory_), "leveldb", GetProxy(&database_),
@@ -191,19 +211,18 @@ void DOMStorageContextWrapper::MojoState::OnDirectoryOpened(
 }
 
 void DOMStorageContextWrapper::MojoState::OnDatabaseOpened(
-    leveldb::DatabaseError status) {
-  if (status != leveldb::DatabaseError::OK) {
+    leveldb::mojom::DatabaseError status) {
+  if (status != leveldb::mojom::DatabaseError::OK) {
     // If we failed to open the database, reset the service object so we pass
     // null pointers to our wrappers.
     database_.reset();
     leveldb_service_.reset();
   }
 
-  // We no longer need the user service; we've either transferred
-  // |directory_| to the leveldb service, or we got a file error and no more is
-  // possible.
+  // We no longer need the file service; we've either transferred |directory_|
+  // to the leveldb service, or we got a file error and no more is possible.
   directory_.reset();
-  user_service_.reset();
+  file_system_.reset();
 
   // |leveldb_| should be known to either be valid or invalid by now. Run our
   // delayed bindings.
@@ -217,13 +236,24 @@ void DOMStorageContextWrapper::MojoState::BindLocalStorage(
     const url::Origin& origin,
     mojom::LevelDBObserverPtr observer,
     mojom::LevelDBWrapperRequest request) {
+  // Delay for a moment after a value is set in anticipation
+  // of other values being set, so changes are batched.
+  const int kCommitDefaultDelaySecs = 5;
+
+  // To avoid excessive IO we apply limits to the amount of data being written
+  // and the frequency of writes.
+  const int kMaxBytesPerHour = kPerStorageAreaQuota;
+  const int kMaxCommitsPerHour = 60;
+
   auto found = level_db_wrappers_.find(origin);
   if (found == level_db_wrappers_.end()) {
-    level_db_wrappers_[origin] = base::WrapUnique(new LevelDBWrapperImpl(
+    level_db_wrappers_[origin] = base::MakeUnique<LevelDBWrapperImpl>(
         database_.get(), origin.Serialize(),
         kPerStorageAreaQuota + kPerStorageAreaOverQuotaAllowance,
+        base::TimeDelta::FromSeconds(kCommitDefaultDelaySecs), kMaxBytesPerHour,
+        kMaxCommitsPerHour,
         base::Bind(&MojoState::OnLevelDDWrapperHasNoBindings,
-                   base::Unretained(this), origin)));
+                   base::Unretained(this), origin));
     found = level_db_wrappers_.find(origin);
   }
 
@@ -255,8 +285,14 @@ DOMStorageContextWrapper::DOMStorageContextWrapper(
           worker_pool,
           worker_pool->GetNamedSequenceToken("dom_storage_primary"),
           worker_pool->GetNamedSequenceToken("dom_storage_commit"),
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)
-              .get()));
+          BrowserThread::GetTaskRunnerForThread(BrowserThread::IO).get()));
+
+  if (base::FeatureList::IsEnabled(features::kMemoryCoordinator)) {
+    base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
+  } else {
+    memory_pressure_listener_.reset(new base::MemoryPressureListener(
+        base::Bind(&DOMStorageContextWrapper::OnMemoryPressure, this)));
+  }
 }
 
 DOMStorageContextWrapper::~DOMStorageContextWrapper() {}
@@ -331,10 +367,15 @@ void DOMStorageContextWrapper::SetForceKeepSessionState() {
 void DOMStorageContextWrapper::Shutdown() {
   DCHECK(context_.get());
   mojo_state_.reset();
+  memory_pressure_listener_.reset();
   context_->task_runner()->PostShutdownBlockingTask(
       FROM_HERE,
       DOMStorageTaskRunner::PRIMARY_SEQUENCE,
       base::Bind(&DOMStorageContextImpl::Shutdown, context_));
+  if (base::FeatureList::IsEnabled(features::kMemoryCoordinator)) {
+    base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
+  }
+
 }
 
 void DOMStorageContextWrapper::Flush() {
@@ -350,6 +391,46 @@ void DOMStorageContextWrapper::OpenLocalStorage(
     mojom::LevelDBWrapperRequest request) {
   mojo_state_->OpenLocalStorage(
       origin, std::move(observer), std::move(request));
+}
+
+void DOMStorageContextWrapper::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+  DOMStorageContextImpl::PurgeOption purge_option =
+      DOMStorageContextImpl::PURGE_UNOPENED;
+  if (memory_pressure_level ==
+      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL) {
+    purge_option = DOMStorageContextImpl::PURGE_AGGRESSIVE;
+  }
+  PurgeMemory(purge_option);
+}
+
+void DOMStorageContextWrapper::OnMemoryStateChange(base::MemoryState state) {
+  // TODO(hajimehoshi): As OnMemoryStateChange changes the state, we should
+  // adjust the limitation to the amount of cache, DomStroageContextImpl doesn't
+  // have such limitation so far though.
+  switch (state) {
+    case base::MemoryState::NORMAL:
+      // Don't have to purge memory here.
+      break;
+    case base::MemoryState::THROTTLED:
+      // TOOD(hajimehoshi): We don't have throttling 'level' so far. When we
+      // have such value, let's change the argument accroding to the value.
+      PurgeMemory(DOMStorageContextImpl::PURGE_AGGRESSIVE);
+      break;
+    case base::MemoryState::SUSPENDED:
+      // Note that SUSPENDED never occurs in the main browser process so far.
+      // Fall through.
+    case base::MemoryState::UNKNOWN:
+      NOTREACHED();
+      break;
+  }
+}
+
+void DOMStorageContextWrapper::PurgeMemory(DOMStorageContextImpl::PurgeOption
+    purge_option) {
+  context_->task_runner()->PostTask(
+      FROM_HERE,
+      base::Bind(&DOMStorageContextImpl::PurgeMemory, context_, purge_option));
 }
 
 }  // namespace content

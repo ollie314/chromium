@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/test/fuzzed_data_provider.h"
 #include "net/base/address_list.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -24,25 +24,18 @@
 // |data| is used to create a FuzzedSocket to fuzz reads and writes, see that
 // class for details.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  // Needed for thread checks and waits.
-  base::MessageLoopForIO message_loop;
-
   // Use a test NetLog, to exercise logging code.
-  net::BoundTestNetLog bound_test_net_log;
+  net::TestNetLog test_net_log;
 
-  // Consume the last byte of |data| to determine if the DNS lookup returns
-  // synchronously or asynchronously, and succeeds or fails, and returns an IPv4
-  // or IPv6 address.
+  base::FuzzedDataProvider data_provider(data, size);
+
+  // Determine if the DNS lookup returns synchronously or asynchronously,
+  // succeeds or fails, and returns an IPv4 or IPv6 address.
   net::MockHostResolver mock_host_resolver;
   scoped_refptr<net::RuleBasedHostResolverProc> rules(
       new net::RuleBasedHostResolverProc(nullptr));
-  uint8_t resolver_result = 0;
-  if (size > 0) {
-    resolver_result = data[size - 1];
-    size--;
-  }
-  mock_host_resolver.set_synchronous_mode(!!(resolver_result & 0x1));
-  switch ((resolver_result >> 1) % 3) {
+  mock_host_resolver.set_synchronous_mode(data_provider.ConsumeBool());
+  switch (data_provider.ConsumeInt32InRange(0, 2)) {
     case 0:
       rules->AddRule("*", "127.0.0.1");
       break;
@@ -57,7 +50,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   net::TestCompletionCallback callback;
   std::unique_ptr<net::FuzzedSocket> fuzzed_socket(
-      new net::FuzzedSocket(data, size, bound_test_net_log.bound()));
+      new net::FuzzedSocket(&data_provider, &test_net_log));
   CHECK_EQ(net::OK, fuzzed_socket->Connect(callback.callback()));
 
   std::unique_ptr<net::ClientSocketHandle> socket_handle(

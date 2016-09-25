@@ -9,7 +9,7 @@
 #include "bindings/core/v8/V8PerContextData.h"
 #include "core/CoreExport.h"
 #include "wtf/RefCounted.h"
-#include "wtf/Vector.h"
+#include <memory>
 #include <v8-debug.h>
 #include <v8.h>
 
@@ -52,9 +52,28 @@ public:
     static PassRefPtr<ScriptState> create(v8::Local<v8::Context>, PassRefPtr<DOMWrapperWorld>);
     virtual ~ScriptState();
 
-    static ScriptState* current(v8::Isolate* isolate)
+    static ScriptState* current(v8::Isolate* isolate) // DEPRECATED
     {
         return from(isolate->GetCurrentContext());
+    }
+
+    static ScriptState* forFunctionObject(const v8::FunctionCallbackInfo<v8::Value>& info)
+    {
+        // We're assuming that the current context is not yet changed since
+        // the callback function has got called back.
+        // TODO(yukishiino): Once info.GetFunctionContext() gets implemented,
+        // we should use it instead.
+        return from(info.GetIsolate()->GetCurrentContext());
+    }
+
+    static ScriptState* forReceiverObject(const v8::FunctionCallbackInfo<v8::Value>& info)
+    {
+        return from(info.Holder()->CreationContext());
+    }
+
+    static ScriptState* forReceiverObject(const v8::PropertyCallbackInfo<v8::Value>& info)
+    {
+        return from(info.Holder()->CreationContext());
     }
 
     // Debugger context doesn't have associated ScriptState and when current
@@ -89,7 +108,6 @@ public:
     LocalDOMWindow* domWindow() const;
     virtual ExecutionContext* getExecutionContext() const;
     virtual void setExecutionContext(ExecutionContext*);
-    int contextIdInDebugger();
 
     // This can return an empty handle if the v8::Context is gone.
     v8::Local<v8::Context> context() const { return m_context.newLocal(m_isolate); }
@@ -103,9 +121,6 @@ public:
     V8PerContextData* perContextData() const { return m_perContextData.get(); }
     void disposePerContextData();
 
-    bool evalEnabled() const;
-    void setEvalEnabled(bool);
-    ScriptValue getFromGlobalObject(const char* name);
     ScriptValue getFromExtrasExports(const char* name);
 
 protected:
@@ -119,11 +134,11 @@ private:
     // This RefPtr doesn't cause a cycle because all persistent handles that DOMWrapperWorld holds are weak.
     RefPtr<DOMWrapperWorld> m_world;
 
-    // This OwnPtr causes a cycle:
-    // V8PerContextData --(Persistent)--> v8::Context --(RefPtr)--> ScriptState --(OwnPtr)--> V8PerContextData
-    // So you must explicitly clear the OwnPtr by calling disposePerContextData()
+    // This std::unique_ptr causes a cycle:
+    // V8PerContextData --(Persistent)--> v8::Context --(RefPtr)--> ScriptState --(std::unique_ptr)--> V8PerContextData
+    // So you must explicitly clear the std::unique_ptr by calling disposePerContextData()
     // once you no longer need V8PerContextData. Otherwise, the v8::Context will leak.
-    OwnPtr<V8PerContextData> m_perContextData;
+    std::unique_ptr<V8PerContextData> m_perContextData;
 
 #if ENABLE(ASSERT)
     bool m_globalObjectDetached;

@@ -40,6 +40,8 @@
 #include "public/platform/modules/mediasession/WebMediaSession.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProviderClient.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -62,7 +64,7 @@ class EmptyPopupMenu : public PopupMenu {
 public:
     void show() override { }
     void hide() override { }
-    void updateFromElement() override { }
+    void updateFromElement(UpdateReason) override { }
     void disconnectClient() override { }
 };
 
@@ -71,6 +73,7 @@ public:
     void setFrameVisible(bool) override { }
     WebTaskRunner* loadingTaskRunner() override;
     WebTaskRunner* timerTaskRunner() override;
+    WebTaskRunner* unthrottledTaskRunner() override;
 };
 
 WebTaskRunner* EmptyFrameScheduler::loadingTaskRunner()
@@ -79,6 +82,11 @@ WebTaskRunner* EmptyFrameScheduler::loadingTaskRunner()
 }
 
 WebTaskRunner* EmptyFrameScheduler::timerTaskRunner()
+{
+    return Platform::current()->currentThread()->getWebTaskRunner();
+}
+
+WebTaskRunner* EmptyFrameScheduler::unthrottledTaskRunner()
 {
     return Platform::current()->currentThread()->getWebTaskRunner();
 }
@@ -111,19 +119,14 @@ String EmptyChromeClient::acceptLanguages()
     return String();
 }
 
-PassOwnPtr<WebFrameScheduler> EmptyChromeClient::createFrameScheduler(BlameContext*)
+std::unique_ptr<WebFrameScheduler> EmptyChromeClient::createFrameScheduler(BlameContext*)
 {
-    return adoptPtr(new EmptyFrameScheduler());
+    return wrapUnique(new EmptyFrameScheduler());
 }
 
 NavigationPolicy EmptyFrameLoaderClient::decidePolicyForNavigation(const ResourceRequest&, DocumentLoader*, NavigationType, NavigationPolicy, bool, bool)
 {
     return NavigationPolicyIgnore;
-}
-
-bool EmptyFrameLoaderClient::hasPendingNavigation()
-{
-    return false;
 }
 
 void EmptyFrameLoaderClient::dispatchWillSendSubmitEvent(HTMLFormElement*)
@@ -149,12 +152,12 @@ Widget* EmptyFrameLoaderClient::createPlugin(HTMLPlugInElement*, const KURL&, co
     return nullptr;
 }
 
-PassOwnPtr<WebMediaPlayer> EmptyFrameLoaderClient::createWebMediaPlayer(HTMLMediaElement&, const WebMediaPlayerSource&, WebMediaPlayerClient*)
+std::unique_ptr<WebMediaPlayer> EmptyFrameLoaderClient::createWebMediaPlayer(HTMLMediaElement&, const WebMediaPlayerSource&, WebMediaPlayerClient*)
 {
     return nullptr;
 }
 
-PassOwnPtr<WebMediaSession> EmptyFrameLoaderClient::createWebMediaSession()
+std::unique_ptr<WebMediaSession> EmptyFrameLoaderClient::createWebMediaSession()
 {
     return nullptr;
 }
@@ -163,16 +166,16 @@ void EmptyTextCheckerClient::requestCheckingOfString(TextCheckingRequest*)
 {
 }
 
-void EmptyFrameLoaderClient::didRequestAutocomplete(HTMLFormElement*)
+void EmptyTextCheckerClient::cancelAllPendingRequests()
 {
 }
 
-PassOwnPtr<WebServiceWorkerProvider> EmptyFrameLoaderClient::createServiceWorkerProvider()
+std::unique_ptr<WebServiceWorkerProvider> EmptyFrameLoaderClient::createServiceWorkerProvider()
 {
     return nullptr;
 }
 
-PassOwnPtr<WebApplicationCacheHost> EmptyFrameLoaderClient::createApplicationCacheHost(WebApplicationCacheHostClient*)
+std::unique_ptr<WebApplicationCacheHost> EmptyFrameLoaderClient::createApplicationCacheHost(WebApplicationCacheHostClient*)
 {
     return nullptr;
 }

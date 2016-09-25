@@ -71,6 +71,7 @@ WebInspector.SoftContextMenu.prototype = {
         if (!this._parentMenu) {
             this._glassPaneElement = createElementWithClass("div", "soft-context-menu-glass-pane fill");
             this._glassPaneElement.tabIndex = 0;
+            this._glassPaneElement.style.zIndex = "20000";
             this._glassPaneElement.addEventListener("mouseup", this._glassPaneMouseUp.bind(this), false);
             this._glassPaneElement.appendChild(this.element);
             document.body.appendChild(this._glassPaneElement);
@@ -300,18 +301,18 @@ WebInspector.SoftContextMenu.prototype = {
 
     _menuKeyDown: function(event)
     {
-        switch (event.keyIdentifier) {
-        case "Up":
+        switch (event.key) {
+        case "ArrowUp":
             this._highlightPrevious(); break;
-        case "Down":
+        case "ArrowDown":
             this._highlightNext(); break;
-        case "Left":
+        case "ArrowLeft":
             if (this._parentMenu) {
                 this._highlightMenuItem(null, false);
                 this._parentMenu._hideSubMenu();
             }
             break;
-        case "Right":
+        case "ArrowRight":
             if (!this._highlightedMenuItemElement)
                 break;
             if (this._highlightedMenuItemElement._subItems) {
@@ -320,13 +321,13 @@ WebInspector.SoftContextMenu.prototype = {
                 this._subMenu._highlightNext();
             }
             break;
-        case "U+001B": // Escape
+        case "Escape":
             this._discardMenu(false, event); break;
         case "Enter":
             if (!isEnterKey(event))
                 break;
             // Fall through
-        case "U+0020": // Space
+        case " ": // Space
             if (this._highlightedMenuItemElement)
                 this._triggerAction(this._highlightedMenuItemElement, event);
             if (this._highlightedMenuItemElement._subItems) {
@@ -391,7 +392,8 @@ WebInspector.SoftContextMenu.prototype = {
     {
         if (this._subMenu)
             this._subMenu._discardSubMenus();
-        this.element.remove();
+        if (this.element)
+            this.element.remove();
         if (this._parentMenu)
             delete this._parentMenu._subMenu;
     }

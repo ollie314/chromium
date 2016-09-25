@@ -17,15 +17,16 @@
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/global_request_id.h"
+#include "content/public/browser/restore_type.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/common/referrer.h"
+#include "content/public/common/resource_request_body.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
 namespace base {
 
-class RefCountedMemory;
 class RefCountedString;
 
 }  // namespace base
@@ -43,17 +44,6 @@ class WebContents;
 // exactly one NavigationController.
 class NavigationController {
  public:
-  // Note: NO_RELOAD is used in general, but behaviors depend on context.
-  // If it is used for tab restore, or history navigation, it loads preferring
-  // cache (which may be stale).
-  enum ReloadType {
-    NO_RELOAD,                   // Normal load, restore, or history navigation.
-    RELOAD,                      // Normal (cache-validating) reload.
-    RELOAD_BYPASSING_CACHE,      // Reload bypassing the cache (shift-reload).
-    RELOAD_ORIGINAL_REQUEST_URL, // Reload using the original request URL.
-    RELOAD_DISABLE_LOFI_MODE     // Reload with Lo-Fi mode disabled.
-  };
-
   // Load type used in LoadURLParams.
   //
   // A Java counterpart will be generated for this enum.
@@ -64,9 +54,8 @@ class NavigationController {
     // For loads that do not fall into any types below.
     LOAD_TYPE_DEFAULT,
 
-    // An http post load request initiated from browser side.
-    // The post data is passed in |browser_initiated_post_data|.
-    LOAD_TYPE_BROWSER_INITIATED_HTTP_POST,
+    // An http post load request.  The post data is passed in |post_data|.
+    LOAD_TYPE_HTTP_POST,
 
     // Loads a 'data:' scheme URL with specified base URL and a history entry
     // URL. This is only safe to be used for browser-initiated data: URL
@@ -96,16 +85,6 @@ class NavigationController {
 
     // Adding new UserAgentOverrideOption? Also update LoadUrlParams.java
     // static constants.
-  };
-
-  enum RestoreType {
-    // Indicates the restore is from the current session. For example, restoring
-    // a closed tab.
-    RESTORE_CURRENT_SESSION,
-
-    // Restore from the previous session.
-    RESTORE_LAST_SESSION_EXITED_CLEANLY,
-    RESTORE_LAST_SESSION_CRASHED,
   };
 
   // Creates a navigation entry and translates the virtual url to a real one.
@@ -177,10 +156,10 @@ class NavigationController {
     scoped_refptr<base::RefCountedString> data_url_as_string;
 #endif
 
-    // Used in LOAD_TYPE_BROWSER_INITIATED_HTTP_POST loads only. Carries the
-    // post data of the load. Ownership is transferred to NavigationController
-    // after LoadURLWithParams call.
-    scoped_refptr<base::RefCountedMemory> browser_initiated_post_data;
+    // Used in LOAD_TYPE_HTTP_POST loads only. Carries the post data of the
+    // load.  Ownership is transferred to NavigationController after
+    // LoadURLWithParams call.
+    scoped_refptr<ResourceRequestBody> post_data;
 
     // True if this URL should be able to access local resources.
     bool can_load_local_resources;
@@ -230,9 +209,8 @@ class NavigationController {
   // nullptr.
   virtual WebContents* GetWebContents() const = 0;
 
-  // Get/set the browser context for this controller. It can never be nullptr.
+  // Get the browser context for this controller. It can never be nullptr.
   virtual BrowserContext* GetBrowserContext() const = 0;
-  virtual void SetBrowserContext(BrowserContext* browser_context) = 0;
 
   // Initializes this NavigationController with the given saved navigations,
   // using |selected_navigation| as the currently loaded entry. Before this call

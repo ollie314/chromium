@@ -10,12 +10,13 @@
 #include <memory>
 #include <utility>
 
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
 #include "base/test/test_timeouts.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/autofill_type.h"
@@ -276,7 +277,7 @@ TEST_F(AutofillDownloadManagerTest, QueryAndUploadTest) {
   EXPECT_EQ(AutofillDownloadManagerTest::REQUEST_UPLOAD_FAILED,
             responses_.front().type_of_response);
   EXPECT_EQ(net::HTTP_NOT_FOUND, responses_.front().error);
-  EXPECT_EQ(form_structures[1]->FormSignature(),
+  EXPECT_EQ(form_structures[1]->FormSignatureAsStr(),
             responses_.front().signature);
   // Expected response on non-query request is an empty string.
   EXPECT_EQ(std::string(), responses_.front().response);
@@ -363,7 +364,7 @@ TEST_F(AutofillDownloadManagerTest, BackoffLogic_Query) {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       base::TimeDelta::FromMilliseconds(1100));
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   // Get the retried request.
   fetcher = factory.GetFetcherByID(1);
@@ -419,13 +420,13 @@ TEST_F(AutofillDownloadManagerTest, BackoffLogic_Upload) {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       base::TimeDelta::FromMilliseconds(1100));
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
 
   // Check that it was a failure.
   EXPECT_EQ(AutofillDownloadManagerTest::REQUEST_UPLOAD_FAILED,
             responses_.front().type_of_response);
   EXPECT_EQ(net::HTTP_NOT_FOUND, responses_.front().error);
-  EXPECT_EQ(form_structure->FormSignature(), responses_.front().signature);
+  EXPECT_EQ(form_structure->FormSignatureAsStr(), responses_.front().signature);
   // Expected response on non-query request is an empty string.
   EXPECT_EQ(std::string(), responses_.front().response);
   responses_.pop_front();

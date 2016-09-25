@@ -115,7 +115,6 @@ void DataReductionProxySettings::SetCallbackToRegisterSyntheticFieldTrial(
         on_data_reduction_proxy_enabled) {
   register_synthetic_field_trial_ = on_data_reduction_proxy_enabled;
   RegisterDataReductionProxyFieldTrial();
-  RegisterLoFiFieldTrial();
 }
 
 bool DataReductionProxySettings::IsDataReductionProxyEnabled() const {
@@ -172,13 +171,11 @@ void DataReductionProxySettings::SetLoFiModeActiveOnMainFrame(
     prefs_->SetBoolean(prefs::kLoFiWasUsedThisSession, true);
   lo_fi_load_image_requested_ = false;
   lo_fi_mode_active_ = lo_fi_mode_active;
-  if (!register_synthetic_field_trial_.is_null()) {
-    RegisterLoFiFieldTrial();
-  }
 }
 
 bool DataReductionProxySettings::WasLoFiModeActiveOnMainFrame() const {
-  return lo_fi_mode_active_;
+  return lo_fi_mode_active_ && !params::AreLoFiPreviewsEnabledViaFlags() &&
+         !params::IsIncludedInLoFiPreviewFieldTrial();
 }
 
 bool DataReductionProxySettings::WasLoFiLoadImageRequestedBefore() {
@@ -189,10 +186,9 @@ void DataReductionProxySettings::SetLoFiLoadImageRequested() {
   lo_fi_load_image_requested_ = true;
 }
 
-void DataReductionProxySettings::IncrementLoFiSnackbarShown() {
-  prefs_->SetInteger(
-      prefs::kLoFiSnackbarsShownPerSession,
-      prefs_->GetInteger(prefs::kLoFiSnackbarsShownPerSession) + 1);
+void DataReductionProxySettings::IncrementLoFiUIShown() {
+  prefs_->SetInteger(prefs::kLoFiUIShownPerSession,
+                     prefs_->GetInteger(prefs::kLoFiUIShownPerSession) + 1);
 }
 
 void DataReductionProxySettings::IncrementLoFiUserRequestsForImages() {
@@ -221,19 +217,10 @@ void DataReductionProxySettings::RegisterDataReductionProxyFieldTrial() {
       IsDataReductionProxyEnabled() ? "Enabled" : "Disabled");
 }
 
-void DataReductionProxySettings::RegisterLoFiFieldTrial() {
-  register_synthetic_field_trial_.Run(
-      "SyntheticDataReductionProxyLoFiSetting",
-      IsDataReductionProxyEnabled() && WasLoFiModeActiveOnMainFrame()
-          ? "Enabled"
-          : "Disabled");
-}
-
 void DataReductionProxySettings::OnProxyEnabledPrefChange() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!register_synthetic_field_trial_.is_null()) {
     RegisterDataReductionProxyFieldTrial();
-    RegisterLoFiFieldTrial();
   }
   if (!allowed_)
     return;
@@ -376,6 +363,17 @@ void DataReductionProxySettings::GetContentLengths(
 
   data_reduction_proxy_service_->compression_stats()->GetContentLengths(
       days, original_content_length, received_content_length, last_update_time);
+}
+
+bool DataReductionProxySettings::UpdateDataSavings(
+    const std::string& data_usage_host,
+    int64_t data_used,
+    int64_t original_size) {
+  if (!IsDataReductionProxyEnabled())
+    return false;
+  data_reduction_proxy_service_->compression_stats()->UpdateDataSavings(
+      data_usage_host, data_used, original_size);
+  return true;
 }
 
 }  // namespace data_reduction_proxy

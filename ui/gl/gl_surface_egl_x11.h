@@ -11,9 +11,10 @@
 
 #include "base/macros.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
+#include "ui/gl/gl_export.h"
 #include "ui/gl/gl_surface_egl.h"
 
-namespace gfx {
+namespace gl {
 
 // Encapsulates an EGL surface bound to a view using the X Window System.
 class GL_EXPORT NativeViewGLSurfaceEGLX11 : public NativeViewGLSurfaceEGL,
@@ -41,6 +42,6 @@ class GL_EXPORT NativeViewGLSurfaceEGLX11 : public NativeViewGLSurfaceEGL,
   DISALLOW_COPY_AND_ASSIGN(NativeViewGLSurfaceEGLX11);
 };
 
-}  // namespace gfx
+}  // namespace gl
 
 #endif  // UI_GL_GL_SURFACE_EGL_X11_H_

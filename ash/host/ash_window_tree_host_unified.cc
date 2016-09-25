@@ -63,7 +63,7 @@ AshWindowTreeHostUnified::~AshWindowTreeHostUnified() {
 void AshWindowTreeHostUnified::PrepareForShutdown() {
   AshWindowTreeHostPlatform::PrepareForShutdown();
 
-  for (auto host : mirroring_hosts_)
+  for (auto* host : mirroring_hosts_)
     host->PrepareForShutdown();
 }
 
@@ -71,7 +71,7 @@ void AshWindowTreeHostUnified::RegisterMirroringHost(
     AshWindowTreeHost* mirroring_ash_host) {
   aura::Window* src_root = mirroring_ash_host->AsWindowTreeHost()->window();
   src_root->SetEventTargeter(
-      base::WrapUnique(new UnifiedEventTargeter(src_root, window())));
+      base::MakeUnique<UnifiedEventTargeter>(src_root, window()));
   DCHECK(std::find(mirroring_hosts_.begin(), mirroring_hosts_.end(),
                    mirroring_ash_host) == mirroring_hosts_.end());
   mirroring_hosts_.push_back(mirroring_ash_host);
@@ -84,12 +84,12 @@ void AshWindowTreeHostUnified::SetBounds(const gfx::Rect& bounds) {
 }
 
 void AshWindowTreeHostUnified::SetCursorNative(gfx::NativeCursor cursor) {
-  for (auto host : mirroring_hosts_)
+  for (auto* host : mirroring_hosts_)
     host->AsWindowTreeHost()->SetCursor(cursor);
 }
 
 void AshWindowTreeHostUnified::OnCursorVisibilityChangedNative(bool show) {
-  for (auto host : mirroring_hosts_)
+  for (auto* host : mirroring_hosts_)
     host->AsWindowTreeHost()->OnCursorVisibilityChanged(show);
 }
 

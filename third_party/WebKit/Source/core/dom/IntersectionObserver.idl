@@ -7,17 +7,17 @@
 
 callback IntersectionObserverCallback = void (sequence<IntersectionObserverEntry> entries, IntersectionObserver observer);
 
-// TODO(szager): Add the thresholds attribute when FrozenArray has been implemented for IDL:
-//   readonly attribute FrozenArray<double> thresholds;
 [
     CustomConstructor(IntersectionObserverCallback callback, IntersectionObserverInit options),
     Custom=VisitDOMWrapper,
+    MeasureAs=IntersectionObserver_Constructor,
     RuntimeEnabled=IntersectionObserver,
 ] interface IntersectionObserver {
-    void observe(Element target);
-    void unobserve(Element target);
-    void disconnect();
-    sequence<IntersectionObserverEntry> takeRecords();
+    [RaisesException] void observe(Element target);
+    [RaisesException] void unobserve(Element target);
+    [RaisesException] void disconnect();
+    [RaisesException] sequence<IntersectionObserverEntry> takeRecords();
     readonly attribute Element? root;
     readonly attribute DOMString rootMargin;
+    readonly attribute FrozenArray<double> thresholds;
 };

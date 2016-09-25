@@ -46,6 +46,7 @@
 #include "public/platform/WebVector.h"
 #include "public/platform/modules/indexeddb/WebIDBKey.h"
 #include "public/platform/modules/indexeddb/WebIDBKeyRange.h"
+#include <memory>
 #include <v8.h>
 
 using blink::WebBlobInfo;
@@ -56,11 +57,17 @@ using blink::WebVector;
 
 namespace blink {
 
+namespace {
+
+using IndexKeys = HeapVector<Member<IDBKey>>;
+
+}
+
 IDBObjectStore::IDBObjectStore(const IDBObjectStoreMetadata& metadata, IDBTransaction* transaction)
     : m_metadata(metadata)
     , m_transaction(transaction)
 {
-    ASSERT(m_transaction);
+    DCHECK(m_transaction);
 }
 
 DEFINE_TRACE(IDBObjectStore)
@@ -70,16 +77,59 @@ DEFINE_TRACE(IDBObjectStore)
     visitor->trace(m_createdIndexes);
 }
 
+void IDBObjectStore::setName(const String& name, ExceptionState& exceptionState)
+{
+    if (!RuntimeEnabledFeatures::indexedDBExperimentalEnabled())
+        return;
+
+    IDB_TRACE("IDBObjectStore::setName");
+    if (!m_transaction->isVersionChange()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::notVersionChangeTransactionErrorMessage);
+        return;
+    }
+    if (isDeleted()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::objectStoreDeletedErrorMessage);
+        return;
+    }
+    if (m_transaction->isFinished() || m_transaction->isFinishing()) {
+        exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionFinishedErrorMessage);
+        return;
+    }
+    if (!m_transaction->isActive()) {
+        exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionInactiveErrorMessage);
+        return;
+    }
+
+    if (this->name() == name)
+        return;
+    if (m_transaction->db()->containsObjectStore(name)) {
+        exceptionState.throwDOMException(ConstraintError, IDBDatabase::objectStoreNameTakenErrorMessage);
+        return;
+    }
+    if (!backendDB()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::databaseClosedErrorMessage);
+        return;
+    }
+
+    backendDB()->renameObjectStore(m_transaction->id(), id(), name);
+    m_transaction->objectStoreRenamed(m_metadata.name, name);
+    m_metadata.name = name;
+
+    // The name inside the database's version of the object store metadata is used by IDBDatabase.objectStoreNames().
+    // If the transaction is aborted, this name will be reverted when the metadata is overwritten with the previousMetadata in IDBTransaction.
+    m_transaction->db()->objectStoreRenamed(id(), name);
+}
+
 ScriptValue IDBObjectStore::keyPath(ScriptState* scriptState) const
 {
-    return ScriptValue::from(scriptState, m_metadata.keyPath);
+    return ScriptValue::from(scriptState, metadata().keyPath);
 }
 
 DOMStringList* IDBObjectStore::indexNames() const
 {
     IDB_TRACE("IDBObjectStore::indexNames");
     DOMStringList* indexNames = DOMStringList::create(DOMStringList::IndexedDB);
-    for (const auto& it : m_metadata.indexes)
+    for (const auto& it : metadata().indexes)
         indexNames->append(it.value.name);
     indexNames->sort();
     return indexNames;
@@ -113,7 +163,39 @@ IDBRequest* IDBObjectStore::get(ScriptState* scriptState, const ScriptValue& key
     }
 
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
-    backendDB()->get(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, keyRange, false, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->get(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, keyRange, false /* keyOnly */, WebIDBCallbacksImpl::create(request).release());
+    return request;
+}
+
+IDBRequest* IDBObjectStore::getKey(ScriptState* scriptState, const ScriptValue& key, ExceptionState& exceptionState)
+{
+    IDB_TRACE("IDBObjectStore::getKey");
+    if (isDeleted()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::objectStoreDeletedErrorMessage);
+        return nullptr;
+    }
+    if (m_transaction->isFinished() || m_transaction->isFinishing()) {
+        exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionFinishedErrorMessage);
+        return nullptr;
+    }
+    if (!m_transaction->isActive()) {
+        exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionInactiveErrorMessage);
+        return nullptr;
+    }
+    IDBKeyRange* keyRange = IDBKeyRange::fromScriptValue(scriptState->getExecutionContext(), key, exceptionState);
+    if (exceptionState.hadException())
+        return nullptr;
+    if (!keyRange) {
+        exceptionState.throwDOMException(DataError, IDBDatabase::noKeyOrKeyRangeErrorMessage);
+        return nullptr;
+    }
+    if (!backendDB()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::databaseClosedErrorMessage);
+        return nullptr;
+    }
+
+    IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
+    backendDB()->get(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, keyRange, true /* keyOnly */, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
@@ -149,7 +231,7 @@ IDBRequest* IDBObjectStore::getAll(ScriptState* scriptState, const ScriptValue& 
     }
 
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
-    backendDB()->getAll(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, range, maxCount, false, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->getAll(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, range, maxCount, false, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
@@ -185,13 +267,13 @@ IDBRequest* IDBObjectStore::getAllKeys(ScriptState* scriptState, const ScriptVal
     }
 
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
-    backendDB()->getAll(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, range, maxCount, true, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->getAll(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, range, maxCount, true, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
-static void generateIndexKeysForValue(v8::Isolate* isolate, const IDBIndexMetadata& indexMetadata, const ScriptValue& objectValue, IDBObjectStore::IndexKeys* indexKeys)
+static void generateIndexKeysForValue(v8::Isolate* isolate, const IDBIndexMetadata& indexMetadata, const ScriptValue& objectValue, IndexKeys* indexKeys)
 {
-    ASSERT(indexKeys);
+    DCHECK(indexKeys);
     NonThrowableExceptionState exceptionState;
     IDBKey* indexKey = ScriptValue::to<IDBKey*>(isolate, objectValue, exceptionState, indexMetadata.keyPath);
 
@@ -204,8 +286,8 @@ static void generateIndexKeysForValue(v8::Isolate* isolate, const IDBIndexMetada
 
         indexKeys->append(indexKey);
     } else {
-        ASSERT(indexMetadata.multiEntry);
-        ASSERT(indexKey->getType() == IDBKey::ArrayType);
+        DCHECK(indexMetadata.multiEntry);
+        DCHECK_EQ(indexKey->getType(), IDBKey::ArrayType);
         indexKey = IDBKey::createMultiEntryArray(indexKey->array());
 
         for (size_t i = 0; i < indexKey->array().size(); ++i)
@@ -252,8 +334,10 @@ IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode,
         return nullptr;
     }
 
+    v8::Isolate* isolate = scriptState->isolate();
+    DCHECK(isolate->InContext());
     Vector<WebBlobInfo> blobInfo;
-    RefPtr<SerializedScriptValue> serializedValue = SerializedScriptValueFactory::instance().create(scriptState->isolate(), value, &blobInfo, exceptionState);
+    RefPtr<SerializedScriptValue> serializedValue = SerializedScriptValue::serialize(isolate, value.v8Value(), nullptr, &blobInfo, exceptionState);
     if (exceptionState.hadException())
         return nullptr;
 
@@ -262,7 +346,7 @@ IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode,
     // clone lazily since the operation may be expensive.
     ScriptValue clone;
 
-    const IDBKeyPath& keyPath = m_metadata.keyPath;
+    const IDBKeyPath& keyPath = idbKeyPath();
     const bool usesInLineKeys = !keyPath.isNull();
     const bool hasKeyGenerator = autoIncrement();
 
@@ -273,7 +357,7 @@ IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode,
 
     // This test logically belongs in IDBCursor, but must operate on the cloned value.
     if (putMode == WebIDBPutModeCursorUpdate && usesInLineKeys) {
-        ASSERT(key);
+        DCHECK(key);
         if (clone.isEmpty())
             clone = deserializeScriptValue(scriptState, serializedValue.get(), &blobInfo);
         IDBKey* keyPathKey = ScriptValue::to<IDBKey*>(scriptState->isolate(), clone, exceptionState, keyPath);
@@ -324,7 +408,7 @@ IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode,
 
     Vector<int64_t> indexIds;
     HeapVector<IndexKeys> indexKeys;
-    for (const auto& it : m_metadata.indexes) {
+    for (const auto& it : metadata().indexes) {
         if (clone.isEmpty())
             clone = deserializeScriptValue(scriptState, serializedValue.get(), &blobInfo);
         IndexKeys keys;
@@ -338,7 +422,7 @@ IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode,
     serializedValue->toWireBytes(wireBytes);
     RefPtr<SharedBuffer> valueBuffer = SharedBuffer::adoptVector(wireBytes);
 
-    backendDB()->put(m_transaction->id(), id(), WebData(valueBuffer), blobInfo, key, static_cast<WebIDBPutMode>(putMode), WebIDBCallbacksImpl::create(request).leakPtr(), indexIds, indexKeys);
+    backendDB()->put(m_transaction->id(), id(), WebData(valueBuffer), blobInfo, key, static_cast<WebIDBPutMode>(putMode), WebIDBCallbacksImpl::create(request).release(), indexIds, indexKeys);
     return request;
 }
 
@@ -375,7 +459,7 @@ IDBRequest* IDBObjectStore::deleteFunction(ScriptState* scriptState, const Scrip
     }
 
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
-    backendDB()->deleteRange(m_transaction->id(), id(), keyRange, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->deleteRange(m_transaction->id(), id(), keyRange, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
@@ -404,7 +488,7 @@ IDBRequest* IDBObjectStore::clear(ScriptState* scriptState, ExceptionState& exce
     }
 
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
-    backendDB()->clear(m_transaction->id(), id(), WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->clear(m_transaction->id(), id(), WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
@@ -443,10 +527,12 @@ private:
     {
     }
 
+    const IDBIndexMetadata& indexMetadata() const { return m_indexMetadata; }
+
     void handleEvent(ExecutionContext* executionContext, Event* event) override
     {
-        ASSERT(m_scriptState->getExecutionContext() == executionContext);
-        ASSERT(event->type() == EventTypeNames::success);
+        DCHECK_EQ(m_scriptState->getExecutionContext(), executionContext);
+        DCHECK_EQ(event->type(), EventTypeNames::success);
         EventTarget* target = event->target();
         IDBRequest* request = static_cast<IDBRequest*>(target);
 
@@ -459,17 +545,17 @@ private:
             cursor = cursorAny->idbCursorWithValue();
 
         Vector<int64_t> indexIds;
-        indexIds.append(m_indexMetadata.id);
+        indexIds.append(indexMetadata().id);
         if (cursor && !cursor->isDeleted()) {
             cursor->continueFunction(nullptr, nullptr, ASSERT_NO_EXCEPTION);
 
             IDBKey* primaryKey = cursor->idbPrimaryKey();
             ScriptValue value = cursor->value(m_scriptState.get());
 
-            IDBObjectStore::IndexKeys indexKeys;
-            generateIndexKeysForValue(m_scriptState->isolate(), m_indexMetadata, value, &indexKeys);
+            IndexKeys indexKeys;
+            generateIndexKeysForValue(m_scriptState->isolate(), indexMetadata(), value, &indexKeys);
 
-            HeapVector<IDBObjectStore::IndexKeys> indexKeysList;
+            HeapVector<IndexKeys> indexKeysList;
             indexKeysList.append(indexKeys);
 
             m_database->backend()->setIndexKeys(m_transactionId, m_objectStoreId, primaryKey, indexIds, indexKeysList);
@@ -509,15 +595,14 @@ IDBIndex* IDBObjectStore::createIndex(ScriptState* scriptState, const String& na
         exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionInactiveErrorMessage);
         return nullptr;
     }
+    if (containsIndex(name)) {
+        exceptionState.throwDOMException(ConstraintError, IDBDatabase::indexNameTakenErrorMessage);
+        return nullptr;
+    }
     if (!keyPath.isValid()) {
         exceptionState.throwDOMException(SyntaxError, "The keyPath argument contains an invalid key path.");
         return nullptr;
     }
-    if (containsIndex(name)) {
-        exceptionState.throwDOMException(ConstraintError, "An index with the specified name already exists.");
-        return nullptr;
-    }
-
     if (keyPath.getType() == IDBKeyPath::ArrayType && options.multiEntry()) {
         exceptionState.throwDOMException(InvalidAccessError, "The keyPath argument was an array and the multiEntry option is true.");
         return nullptr;
@@ -528,18 +613,19 @@ IDBIndex* IDBObjectStore::createIndex(ScriptState* scriptState, const String& na
     }
 
     int64_t indexId = m_metadata.maxIndexId + 1;
+    DCHECK_NE(indexId, IDBIndexMetadata::InvalidId);
     backendDB()->createIndex(m_transaction->id(), id(), indexId, name, keyPath, options.unique(), options.multiEntry());
 
     ++m_metadata.maxIndexId;
 
-    IDBIndexMetadata metadata(name, indexId, keyPath, options.unique(), options.multiEntry());
-    IDBIndex* index = IDBIndex::create(metadata, this, m_transaction.get());
+    IDBIndexMetadata indexMetadata(name, indexId, keyPath, options.unique(), options.multiEntry());
+    IDBIndex* index = IDBIndex::create(indexMetadata, this, m_transaction.get());
     m_indexMap.set(name, index);
     m_createdIndexes.add(index);
-    m_metadata.indexes.set(indexId, metadata);
-    m_transaction->db()->indexCreated(id(), metadata);
+    m_metadata.indexes.set(indexId, indexMetadata);
+    m_transaction->db()->indexCreated(id(), indexMetadata);
 
-    ASSERT(!exceptionState.hadException());
+    DCHECK(!exceptionState.hadException());
     if (exceptionState.hadException())
         return nullptr;
 
@@ -547,7 +633,7 @@ IDBIndex* IDBObjectStore::createIndex(ScriptState* scriptState, const String& na
     indexRequest->preventPropagation();
 
     // This is kept alive by being the success handler of the request, which is in turn kept alive by the owning transaction.
-    IndexPopulator* indexPopulator = IndexPopulator::create(scriptState, transaction()->db(), m_transaction->id(), id(), metadata);
+    IndexPopulator* indexPopulator = IndexPopulator::create(scriptState, transaction()->db(), m_transaction->id(), id(), indexMetadata);
     indexRequest->setOnsuccess(indexPopulator);
     return index;
 }
@@ -574,17 +660,9 @@ IDBIndex* IDBObjectStore::index(const String& name, ExceptionState& exceptionSta
         return nullptr;
     }
 
-    const IDBIndexMetadata* indexMetadata(nullptr);
-    for (const auto& it : m_metadata.indexes) {
-        if (it.value.name == name) {
-            indexMetadata = &it.value;
-            break;
-        }
-    }
-    ASSERT(indexMetadata);
-    ASSERT(indexMetadata->id != IDBIndexMetadata::InvalidId);
-
-    IDBIndex* index = IDBIndex::create(*indexMetadata, this, m_transaction.get());
+    DCHECK(metadata().indexes.contains(indexId));
+    const IDBIndexMetadata& indexMetadata = metadata().indexes.get(indexId);
+    IDBIndex* index = IDBIndex::create(indexMetadata, this, m_transaction.get());
     m_indexMap.set(name, index);
     return index;
 }
@@ -663,7 +741,7 @@ IDBRequest* IDBObjectStore::openCursor(ScriptState* scriptState, IDBKeyRange* ra
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
     request->setCursorDetails(IndexedDB::CursorKeyAndValue, direction);
 
-    backendDB()->openCursor(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, range, direction, false, taskType, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->openCursor(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, range, direction, false, taskType, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
@@ -696,7 +774,7 @@ IDBRequest* IDBObjectStore::openKeyCursor(ScriptState* scriptState, const Script
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
     request->setCursorDetails(IndexedDB::CursorKeyOnly, direction);
 
-    backendDB()->openCursor(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, keyRange, direction, true, WebIDBTaskTypeNormal, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->openCursor(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, keyRange, direction, true, WebIDBTaskTypeNormal, WebIDBCallbacksImpl::create(request).release());
     return request;
 }
 
@@ -726,8 +804,14 @@ IDBRequest* IDBObjectStore::count(ScriptState* scriptState, const ScriptValue& r
     }
 
     IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
-    backendDB()->count(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, keyRange, WebIDBCallbacksImpl::create(request).leakPtr());
+    backendDB()->count(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, keyRange, WebIDBCallbacksImpl::create(request).release());
     return request;
+}
+
+void IDBObjectStore::markDeleted()
+{
+    DCHECK(m_transaction->isVersionChange()) << "An object store got deleted outside a versionchange transaction.";
+    m_deleted = true;
 }
 
 void IDBObjectStore::abort()
@@ -738,7 +822,7 @@ void IDBObjectStore::abort()
 
 void IDBObjectStore::transactionFinished()
 {
-    ASSERT(m_transaction->isFinished());
+    DCHECK(!m_transaction->isActive());
 
     // Break reference cycles.
     // TODO(jsbell): This can be removed c/o Oilpan.
@@ -746,11 +830,27 @@ void IDBObjectStore::transactionFinished()
     m_createdIndexes.clear();
 }
 
+void IDBObjectStore::indexRenamed(int64_t indexId, const String& newName)
+{
+    DCHECK(m_transaction->isVersionChange());
+    DCHECK(m_transaction->isActive());
+
+    auto metadataIterator = m_metadata.indexes.find(indexId);
+    DCHECK_NE(metadataIterator, m_metadata.indexes.end()) << "Invalid indexId";
+    const String& oldName = metadataIterator->value.name;
+
+    DCHECK(m_indexMap.contains(oldName)) << "The index had to be accessed in order to be renamed.";
+    DCHECK(!m_indexMap.contains(newName));
+    m_indexMap.set(newName, m_indexMap.take(oldName));
+
+    metadataIterator->value.name = newName;
+}
+
 int64_t IDBObjectStore::findIndexId(const String& name) const
 {
-    for (const auto& it : m_metadata.indexes) {
+    for (const auto& it : metadata().indexes) {
         if (it.value.name == name) {
-            ASSERT(it.key != IDBIndexMetadata::InvalidId);
+            DCHECK_NE(it.key, IDBIndexMetadata::InvalidId);
             return it.key;
         }
     }

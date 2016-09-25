@@ -62,8 +62,8 @@ HTMLTextFormControlElement::HTMLTextFormControlElement(const QualifiedName& tagN
     , m_lastChangeWasUserEdit(false)
     , m_cachedSelectionStart(0)
     , m_cachedSelectionEnd(0)
-    , m_cachedSelectionDirection(SelectionHasNoDirection)
 {
+    m_cachedSelectionDirection = doc.frame() && doc.frame()->editor().behavior().shouldConsiderSelectionAsDirectional() ? SelectionHasForwardDirection : SelectionHasNoDirection;
 }
 
 HTMLTextFormControlElement::~HTMLTextFormControlElement()
@@ -73,7 +73,7 @@ HTMLTextFormControlElement::~HTMLTextFormControlElement()
 Node::InsertionNotificationRequest HTMLTextFormControlElement::insertedInto(ContainerNode* insertionPoint)
 {
     HTMLFormControlElementWithState::insertedInto(insertionPoint);
-    if (!insertionPoint->inShadowIncludingDocument())
+    if (!insertionPoint->isConnected())
         return InsertionDone;
     String initialValue = value();
     setTextAsOfLastFormControlChangeEvent(initialValue.isNull() ? emptyString() : initialValue);
@@ -174,23 +174,26 @@ void HTMLTextFormControlElement::updatePlaceholderVisibility()
 
 void HTMLTextFormControlElement::setSelectionStart(int start)
 {
-    setSelectionRange(start, std::max(start, selectionEnd()), selectionDirection());
+    setSelectionRangeForBinding(start, std::max(start, selectionEnd()), selectionDirection());
 }
 
 void HTMLTextFormControlElement::setSelectionEnd(int end)
 {
-    setSelectionRange(std::min(end, selectionStart()), end, selectionDirection());
+    setSelectionRangeForBinding(std::min(end, selectionStart()), end, selectionDirection());
 }
 
 void HTMLTextFormControlElement::setSelectionDirection(const String& direction)
 {
-    setSelectionRange(selectionStart(), selectionEnd(), direction);
+    setSelectionRangeForBinding(selectionStart(), selectionEnd(), direction);
 }
 
-void HTMLTextFormControlElement::select(NeedToDispatchSelectEvent eventBehaviour)
+void HTMLTextFormControlElement::select()
 {
-    document().updateLayoutIgnorePendingStylesheets();
-    setSelectionRange(0, std::numeric_limits<int>::max(), SelectionHasNoDirection, eventBehaviour, isFocusable() ? ChangeSelectionAndFocus : NotChangeSelection);
+    setSelectionRangeForBinding(0, std::numeric_limits<int>::max());
+    // Avoid SelectionBehaviorOnFocus::Restore, which scrolls containers to show
+    // the selection.
+    focus(FocusParams(SelectionBehaviorOnFocus::None, WebFocusTypeNone, nullptr));
+    restoreCachedSelection();
 }
 
 bool HTMLTextFormControlElement::shouldDispatchFormControlChangeEvent(String& oldValue, String& newValue)
@@ -246,7 +249,7 @@ void HTMLTextFormControlElement::setRangeText(const String& replacement, unsigne
     } else if (selectionMode == "end") {
         newSelectionStart = newSelectionEnd = start + replacementLength;
     } else {
-        ASSERT(selectionMode == "preserve");
+        DCHECK_EQ(selectionMode, "preserve");
         long delta = replacementLength - (end - start);
 
         if (newSelectionStart > end)
@@ -260,26 +263,23 @@ void HTMLTextFormControlElement::setRangeText(const String& replacement, unsigne
             newSelectionEnd = start + replacementLength;
     }
 
-    setSelectionRange(newSelectionStart, newSelectionEnd, SelectionHasNoDirection);
+    setSelectionRangeForBinding(newSelectionStart, newSelectionEnd);
 }
 
-void HTMLTextFormControlElement::setSelectionRange(int start, int end, const String& directionString)
+void HTMLTextFormControlElement::setSelectionRangeForBinding(int start, int end, const String& directionString)
 {
     TextFieldSelectionDirection direction = SelectionHasNoDirection;
     if (directionString == "forward")
         direction = SelectionHasForwardDirection;
     else if (directionString == "backward")
         direction = SelectionHasBackwardDirection;
-
-    if (direction == SelectionHasNoDirection && document().frame() && document().frame()->editor().behavior().shouldConsiderSelectionAsDirectional())
-        direction = SelectionHasForwardDirection;
-
-    return setSelectionRange(start, end, direction);
+    if (setSelectionRange(start, end, direction))
+        scheduleSelectEvent();
 }
 
 static Position positionForIndex(HTMLElement* innerEditor, int index)
 {
-    ASSERT(index >= 0);
+    DCHECK_GE(index, 0);
     if (index == 0) {
         Node* node = NodeTraversal::next(*innerEditor, innerEditor);
         if (node && node->isTextNode())
@@ -289,10 +289,10 @@ static Position positionForIndex(HTMLElement* innerEditor, int index)
     int remainingCharactersToMoveForward = index;
     Node* lastBrOrText = innerEditor;
     for (Node& node : NodeTraversal::descendantsOf(*innerEditor)) {
-        ASSERT(remainingCharactersToMoveForward >= 0);
+        DCHECK_GE(remainingCharactersToMoveForward, 0);
         if (node.hasTagName(brTag)) {
             if (remainingCharactersToMoveForward == 0)
-                return positionBeforeNode(&node);
+                return Position::beforeNode(&node);
             --remainingCharactersToMoveForward;
             lastBrOrText = &node;
             continue;
@@ -307,25 +307,27 @@ static Position positionForIndex(HTMLElement* innerEditor, int index)
             continue;
         }
 
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
     }
     return lastPositionInOrAfterNode(lastBrOrText);
 }
 
-static int indexForPosition(HTMLElement* innerEditor, const Position& passedPosition)
+int HTMLTextFormControlElement::indexForPosition(HTMLElement* innerEditor, const Position& passedPosition)
 {
     if (!innerEditor || !innerEditor->contains(passedPosition.anchorNode()) || passedPosition.isNull())
         return 0;
 
-    if (positionBeforeNode(innerEditor) == passedPosition)
+    if (Position::beforeNode(innerEditor) == passedPosition)
         return 0;
 
     int index = 0;
     Node* startNode = passedPosition.computeNodeBeforePosition();
     if (!startNode)
         startNode = passedPosition.computeContainerNode();
-    ASSERT(startNode);
-    ASSERT(innerEditor->contains(startNode));
+    if (startNode == innerEditor && passedPosition.isAfterAnchor())
+        startNode = innerEditor->lastChild();
+    DCHECK(startNode);
+    DCHECK(innerEditor->contains(startNode));
 
     for (Node* node = startNode; node; node = NodeTraversal::previous(*node, innerEditor)) {
         if (node->isTextNode()) {
@@ -339,45 +341,44 @@ static int indexForPosition(HTMLElement* innerEditor, const Position& passedPosi
         }
     }
 
-    ASSERT(index >= 0);
+    DCHECK_GE(index, 0);
     return index;
 }
 
-void HTMLTextFormControlElement::setSelectionRange(int start, int end, TextFieldSelectionDirection direction, NeedToDispatchSelectEvent eventBehaviour, SelectionOption selectionOption)
+bool HTMLTextFormControlElement::setSelectionRange(int start, int end, TextFieldSelectionDirection direction)
 {
     if (openShadowRoot() || !isTextFormControl())
-        return;
+        return false;
     const int editorValueLength = static_cast<int>(innerEditorValue().length());
-    ASSERT(editorValueLength >= 0);
+    DCHECK_GE(editorValueLength, 0);
     end = std::max(std::min(end, editorValueLength), 0);
     start = std::min(std::max(start, 0), end);
+    LocalFrame* frame = document().frame();
+    if (direction == SelectionHasNoDirection && frame && frame->editor().behavior().shouldConsiderSelectionAsDirectional())
+        direction = SelectionHasForwardDirection;
     cacheSelection(start, end, direction);
 
-    if (selectionOption == NotChangeSelection || (selectionOption == ChangeSelectionIfFocused && document().focusedElement() != this) || !inShadowIncludingDocument()) {
-        if (eventBehaviour == DispatchSelectEvent)
-            scheduleSelectEvent();
-        return;
-    }
+    if (document().focusedElement() != this)
+        return true;
 
-    LocalFrame* frame = document().frame();
     HTMLElement* innerEditor = innerEditorElement();
     if (!frame || !innerEditor)
-        return;
+        return true;
 
     Position startPosition = positionForIndex(innerEditor, start);
     Position endPosition = start == end ? startPosition : positionForIndex(innerEditor, end);
 
-    ASSERT(start == indexForPosition(innerEditor, startPosition));
-    ASSERT(end == indexForPosition(innerEditor, endPosition));
+    DCHECK_EQ(start, indexForPosition(innerEditor, startPosition));
+    DCHECK_EQ(end, indexForPosition(innerEditor, endPosition));
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
     // startPosition and endPosition can be null position for example when
     // "-webkit-user-select: none" style attribute is specified.
     if (startPosition.isNotNull() && endPosition.isNotNull()) {
-        ASSERT(startPosition.anchorNode()->shadowHost() == this
-            && endPosition.anchorNode()->shadowHost() == this);
+        DCHECK_EQ(startPosition.anchorNode()->ownerShadowHost(), this);
+        DCHECK_EQ(endPosition.anchorNode()->ownerShadowHost(), this);
     }
-#endif // ENABLE(ASSERT)
+#endif // DCHECK_IS_ON()
     VisibleSelection newSelection;
     if (direction == SelectionHasBackwardDirection)
         newSelection.setWithoutValidation(endPosition, startPosition);
@@ -385,15 +386,14 @@ void HTMLTextFormControlElement::setSelectionRange(int start, int end, TextField
         newSelection.setWithoutValidation(startPosition, endPosition);
     newSelection.setIsDirectional(direction != SelectionHasNoDirection);
 
-    frame->selection().setSelection(newSelection, FrameSelection::DoNotAdjustInFlatTree | FrameSelection::CloseTyping | FrameSelection::ClearTypingStyle | (selectionOption == ChangeSelectionAndFocus ? 0 : FrameSelection::DoNotSetFocus));
-    if (eventBehaviour == DispatchSelectEvent)
-        scheduleSelectEvent();
+    frame->selection().setSelection(newSelection, FrameSelection::DoNotAdjustInFlatTree | FrameSelection::CloseTyping | FrameSelection::ClearTypingStyle | FrameSelection::DoNotSetFocus);
+    return true;
 }
 
 VisiblePosition HTMLTextFormControlElement::visiblePositionForIndex(int index) const
 {
     if (index <= 0)
-        return createVisiblePosition(firstPositionInNode(innerEditorElement()));
+        return VisiblePosition::firstPositionInNode(innerEditorElement());
     Position start, end;
     bool selected = Range::selectNodeContents(innerEditorElement(), start, end);
     if (!selected)
@@ -408,7 +408,7 @@ int HTMLTextFormControlElement::indexForVisiblePosition(const VisiblePosition& p
     Position indexPosition = pos.deepEquivalent().parentAnchoredEquivalent();
     if (enclosingTextFormControl(indexPosition) != this)
         return 0;
-    ASSERT(indexPosition.document());
+    DCHECK(indexPosition.document());
     Range* range = Range::create(*indexPosition.document());
     range->setStart(innerEditorElement(), 0, ASSERT_NO_EXCEPTION);
     range->setEnd(indexPosition.computeContainerNode(), indexPosition.offsetInContainerNode(), ASSERT_NO_EXCEPTION);
@@ -427,12 +427,10 @@ int HTMLTextFormControlElement::selectionStart() const
 
 int HTMLTextFormControlElement::computeSelectionStart() const
 {
-    ASSERT(isTextFormControl());
-    LocalFrame* frame = document().frame();
-    if (!frame)
-        return 0;
-
-    return indexForPosition(innerEditorElement(), frame->selection().start());
+    DCHECK(isTextFormControl());
+    if (LocalFrame* frame = document().frame())
+        return indexForPosition(innerEditorElement(), frame->selection().start());
+    return 0;
 }
 
 int HTMLTextFormControlElement::selectionEnd() const
@@ -446,12 +444,10 @@ int HTMLTextFormControlElement::selectionEnd() const
 
 int HTMLTextFormControlElement::computeSelectionEnd() const
 {
-    ASSERT(isTextFormControl());
-    LocalFrame* frame = document().frame();
-    if (!frame)
-        return 0;
-
-    return indexForPosition(innerEditorElement(), frame->selection().end());
+    DCHECK(isTextFormControl());
+    if (LocalFrame* frame = document().frame())
+        return indexForPosition(innerEditorElement(), frame->selection().end());
+    return 0;
 }
 
 static const AtomicString& directionString(TextFieldSelectionDirection direction)
@@ -469,23 +465,22 @@ static const AtomicString& directionString(TextFieldSelectionDirection direction
         return backward;
     }
 
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return none;
 }
 
 const AtomicString& HTMLTextFormControlElement::selectionDirection() const
 {
-    if (!isTextFormControl())
-        return directionString(SelectionHasNoDirection);
+    // Ensured by HTMLInputElement::selectionDirectionForBinding().
+    DCHECK(isTextFormControl());
     if (document().focusedElement() != this)
         return directionString(m_cachedSelectionDirection);
-
     return directionString(computeSelectionDirection());
 }
 
 TextFieldSelectionDirection HTMLTextFormControlElement::computeSelectionDirection() const
 {
-    ASSERT(isTextFormControl());
+    DCHECK(isTextFormControl());
     LocalFrame* frame = document().frame();
     if (!frame)
         return SelectionHasNoDirection;
@@ -513,7 +508,7 @@ Range* HTMLTextFormControlElement::selection() const
     int start = m_cachedSelectionStart;
     int end = m_cachedSelectionEnd;
 
-    ASSERT(start <= end);
+    DCHECK_LE(start, end);
     HTMLElement* innerText = innerEditorElement();
     if (!innerText)
         return nullptr;
@@ -525,9 +520,9 @@ Range* HTMLTextFormControlElement::selection() const
     Node* startNode = 0;
     Node* endNode = 0;
     for (Node& node : NodeTraversal::descendantsOf(*innerText)) {
-        ASSERT(!node.hasChildren());
-        ASSERT(node.isTextNode() || isHTMLBRElement(node));
-        int length = node.isTextNode() ? lastOffsetInNode(&node) : 1;
+        DCHECK(!node.hasChildren());
+        DCHECK(node.isTextNode() || isHTMLBRElement(node));
+        int length = node.isTextNode() ? Position::lastOffsetInNode(&node) : 1;
 
         if (offset <= start && start <= offset + length)
             setContainerAndOffsetForRange(&node, start - offset, startNode, start);
@@ -575,7 +570,8 @@ void HTMLTextFormControlElement::setAutocapitalize(const AtomicString& autocapit
 
 void HTMLTextFormControlElement::restoreCachedSelection()
 {
-    setSelectionRange(m_cachedSelectionStart, m_cachedSelectionEnd, m_cachedSelectionDirection, DispatchSelectEvent);
+    if (setSelectionRange(m_cachedSelectionStart, m_cachedSelectionEnd, m_cachedSelectionDirection))
+        scheduleSelectEvent();
 }
 
 void HTMLTextFormControlElement::selectionChanged(bool userTriggered)
@@ -639,7 +635,7 @@ void HTMLTextFormControlElement::addPlaceholderBreakElementIfNecessary()
 
 void HTMLTextFormControlElement::setInnerEditorValue(const String& value)
 {
-    ASSERT(!openShadowRoot());
+    DCHECK(!openShadowRoot());
     if (!isTextFormControl() || openShadowRoot())
         return;
 
@@ -671,7 +667,7 @@ void HTMLTextFormControlElement::setInnerEditorValue(const String& value)
 
 String HTMLTextFormControlElement::innerEditorValue() const
 {
-    ASSERT(!openShadowRoot());
+    DCHECK(!openShadowRoot());
     HTMLElement* innerEditor = innerEditorElement();
     if (!innerEditor || !isTextFormControl())
         return emptyString();
@@ -679,7 +675,7 @@ String HTMLTextFormControlElement::innerEditorValue() const
     StringBuilder result;
     for (Node& node : NodeTraversal::inclusiveDescendantsOf(*innerEditor)) {
         if (isHTMLBRElement(node)) {
-            ASSERT(&node == innerEditor->lastChild());
+            DCHECK_EQ(&node, innerEditor->lastChild());
             if (&node != innerEditor->lastChild())
                 result.append(newlineCharacter);
         } else if (node.isTextNode()) {
@@ -695,7 +691,7 @@ static void getNextSoftBreak(RootInlineBox*& line, Node*& breakNode, unsigned& b
     for (; line; line = next) {
         next = line->nextRootBox();
         if (next && !line->endsWithBreak()) {
-            ASSERT(line->lineBreakObj());
+            DCHECK(line->lineBreakObj());
             breakNode = line->lineBreakObj().node();
             breakOffset = line->lineBreakPos();
             line = next;
@@ -729,7 +725,7 @@ String HTMLTextFormControlElement::valueWithHardLineBreaks() const
     StringBuilder result;
     for (Node& node : NodeTraversal::descendantsOf(*innerText)) {
         if (isHTMLBRElement(node)) {
-            ASSERT(&node == innerText->lastChild());
+            DCHECK_EQ(&node, innerText->lastChild());
             if (&node != innerText->lastChild())
                 result.append(newlineCharacter);
         } else if (node.isTextNode()) {
@@ -754,8 +750,8 @@ String HTMLTextFormControlElement::valueWithHardLineBreaks() const
 
 HTMLTextFormControlElement* enclosingTextFormControl(const Position& position)
 {
-    ASSERT(position.isNull() || position.isOffsetInAnchor()
-        || position.computeContainerNode() || !position.anchorNode()->shadowHost()
+    DCHECK(position.isNull() || position.isOffsetInAnchor()
+        || position.computeContainerNode() || !position.anchorNode()->ownerShadowHost()
         || (position.anchorNode()->parentNode() && position.anchorNode()->parentNode()->isShadowRoot()));
     return enclosingTextFormControl(position.computeContainerNode());
 }
@@ -764,7 +760,7 @@ HTMLTextFormControlElement* enclosingTextFormControl(Node* container)
 {
     if (!container)
         return nullptr;
-    Element* ancestor = container->shadowHost();
+    Element* ancestor = container->ownerShadowHost();
     return ancestor && isHTMLTextFormControlElement(*ancestor) && container->containingShadowRoot()->type() == ShadowRootType::UserAgent ? toHTMLTextFormControlElement(ancestor) : 0;
 }
 
@@ -795,10 +791,10 @@ HTMLElement* HTMLTextFormControlElement::innerEditorElement() const
 
 static Position innerNodePosition(const Position& innerPosition)
 {
-    ASSERT(!innerPosition.isBeforeAnchor());
-    ASSERT(!innerPosition.isAfterAnchor());
+    DCHECK(!innerPosition.isBeforeAnchor());
+    DCHECK(!innerPosition.isAfterAnchor());
     HTMLElement* element = toHTMLElement(innerPosition.anchorNode());
-    ASSERT(element);
+    DCHECK(element);
     NodeList* childNodes = element->childNodes();
     if (!childNodes->length())
         return Position(element, 0);
@@ -832,9 +828,9 @@ static Position findWordBoundary(const HTMLElement* innerEditor, const Position&
     HeapVector<Member<Text>> textList;
 
     if (startPosition.anchorNode()->isTextNode())
-        ASSERT(startPosition.isOffsetInAnchor());
+        DCHECK(startPosition.isOffsetInAnchor());
     if (endPosition.anchorNode()->isTextNode())
-        ASSERT(endPosition.isOffsetInAnchor());
+        DCHECK(endPosition.isOffsetInAnchor());
 
     // Traverse text nodes.
     for (Node* node = startPosition.anchorNode(); node; node = NodeTraversal::next(*node, innerEditor)) {
@@ -869,8 +865,8 @@ static Position findWordBoundary(const HTMLElement* innerEditor, const Position&
         concatTexts.toString().appendTo(characters);
         findWordBoundary(characters.data(), characters.size(), findOption == FindStart ? characters.size() : 0, &start, &end);
     }
-    ASSERT(start >= 0);
-    ASSERT(end >= 0);
+    DCHECK_GE(start, 0);
+    DCHECK_GE(end, 0);
     unsigned remainingOffset = findOption == FindStart ? start : end;
     // Find position.
     for (unsigned i = 0; i < lengthList.size(); ++i) {
@@ -879,14 +875,14 @@ static Position findWordBoundary(const HTMLElement* innerEditor, const Position&
         remainingOffset -= lengthList[i];
     }
 
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return Position();
 }
 
 Position HTMLTextFormControlElement::startOfWord(const Position& position)
 {
     const HTMLTextFormControlElement* textFormControl = enclosingTextFormControl(position);
-    ASSERT(textFormControl);
+    DCHECK(textFormControl);
     HTMLElement* innerEditor = textFormControl->innerEditorElement();
 
     const Position startPosition = startOfSentence(position);
@@ -900,7 +896,7 @@ Position HTMLTextFormControlElement::startOfWord(const Position& position)
 Position HTMLTextFormControlElement::endOfWord(const Position& position)
 {
     const HTMLTextFormControlElement* textFormControl = enclosingTextFormControl(position);
-    ASSERT(textFormControl);
+    DCHECK(textFormControl);
     HTMLElement* innerEditor = textFormControl->innerEditorElement();
 
     const Position endPosition = endOfSentence(position);
@@ -939,7 +935,7 @@ static Position previousIfPositionIsAfterLineBreak(const Position& position, HTM
             return previousIfPositionIsAfterLineBreak(endOfPrevious(*position.anchorNode(), innerEditor), innerEditor);
         // We don't place caret into BR element, since well-formed BR element
         // doesn't have child nodes.
-        ASSERT_NOT_REACHED();
+        NOTREACHED();
         return position;
     }
 
@@ -965,7 +961,7 @@ static inline Position startOfInnerText(const HTMLTextFormControlElement* textFo
 Position HTMLTextFormControlElement::startOfSentence(const Position& position)
 {
     HTMLTextFormControlElement* textFormControl = enclosingTextFormControl(position);
-    ASSERT(textFormControl);
+    DCHECK(textFormControl);
 
     HTMLElement* innerEditor = textFormControl->innerEditorElement();
     if (!innerEditor->childNodes()->length())
@@ -1001,7 +997,7 @@ static Position endOfInnerText(const HTMLTextFormControlElement* textFormControl
 Position HTMLTextFormControlElement::endOfSentence(const Position& position)
 {
     HTMLTextFormControlElement* textFormControl = enclosingTextFormControl(position);
-    ASSERT(textFormControl);
+    DCHECK(textFormControl);
 
     HTMLElement* innerEditor = textFormControl->innerEditorElement();
     if (innerEditor->childNodes()->length() == 0)

@@ -57,8 +57,9 @@ WebInspector.FilterBar.FilterBarState = {
     Shown : "on"
 };
 
+/** @enum {symbol} */
 WebInspector.FilterBar.Events = {
-    Toggled: "Toggled"
+    Toggled: Symbol("Toggled")
 };
 
 WebInspector.FilterBar.prototype = {
@@ -188,8 +189,9 @@ WebInspector.FilterUI = function()
 {
 }
 
+/** @enum {symbol} */
 WebInspector.FilterUI.Events = {
-    FilterChanged: "FilterChanged"
+    FilterChanged: Symbol("FilterChanged")
 }
 
 WebInspector.FilterUI.prototype = {
@@ -287,6 +289,15 @@ WebInspector.TextFilterUI.prototype = {
     {
         this._filterInputElement.value = value;
         this._valueChanged(false);
+    },
+
+    /**
+     * @param {boolean} checked
+     */
+    setRegexChecked: function(checked)
+    {
+        if (this._supportRegex)
+            this._regexCheckBox.checked = checked;
     },
 
     /**
@@ -408,13 +419,13 @@ WebInspector.TextFilterUI.prototype = {
     _onInputKeyDown: function(event)
     {
         var handled = false;
-        if (event.keyIdentifier === "U+0008") { // Backspace
+        if (event.key === "Backspace") {
             this._suppressSuggestion = true;
         } else if (this._suggestBox.visible()) {
-            if (event.keyIdentifier === "U+001B") { // Esc
+            if (event.key === "Escape") {
                 this._cancelSuggestion();
                 handled = true;
-            } else if (event.keyIdentifier === "U+0009") { // Tab
+            } else if (event.key === "Tab") {
                 this._suggestBox.acceptSuggestion();
                 this._valueChanged(true);
                 handled = true;
@@ -503,7 +514,7 @@ WebInspector.NamedBitSetFilterUI = function(items, setting)
         setting.addChangeListener(this._settingChanged.bind(this));
         this._settingChanged();
     } else {
-        this._toggleTypeFilter(WebInspector.NamedBitSetFilterUI.ALL_TYPES, false);
+        this._toggleTypeFilter(WebInspector.NamedBitSetFilterUI.ALL_TYPES, false /* allowMultiSelect */);
     }
 }
 
@@ -513,6 +524,11 @@ WebInspector.NamedBitSetFilterUI.Item;
 WebInspector.NamedBitSetFilterUI.ALL_TYPES = "all";
 
 WebInspector.NamedBitSetFilterUI.prototype = {
+    reset: function()
+    {
+        this._toggleTypeFilter(WebInspector.NamedBitSetFilterUI.ALL_TYPES, false /* allowMultiSelect */);
+    },
+
     /**
      * @override
      * @return {boolean}
@@ -733,6 +749,14 @@ WebInspector.CheckboxFilterUI.prototype = {
     checked: function()
     {
         return this._checkboxElement.checked;
+    },
+
+    /**
+     * @param {boolean} checked
+     */
+    setChecked: function(checked)
+    {
+        this._checkboxElement.checked = checked;
     },
 
     /**

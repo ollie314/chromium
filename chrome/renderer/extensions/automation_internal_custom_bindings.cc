@@ -11,7 +11,7 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
 #include "chrome/common/extensions/manifest_handlers/automation.h"
@@ -24,6 +24,7 @@
 #include "ipc/message_filter.h"
 #include "ui/accessibility/ax_enums.h"
 #include "ui/accessibility/ax_node.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace extensions {
 
@@ -84,15 +85,15 @@ v8::Local<v8::Object> RectToV8Object(v8::Isolate* isolate,
 
 // Compute the bounding box of a node, fixing nodes with empty bounds by
 // unioning the bounds of their children.
-static gfx::Rect ComputeLocalNodeBounds(TreeCache* cache, ui::AXNode* node) {
-  gfx::Rect bounds = node->data().location;
+static gfx::RectF ComputeLocalNodeBounds(TreeCache* cache, ui::AXNode* node) {
+  gfx::RectF bounds = node->data().location;
   if (bounds.width() > 0 && bounds.height() > 0)
     return bounds;
 
   // Compute the bounds of each child.
   for (size_t i = 0; i < node->children().size(); i++) {
     ui::AXNode* child = node->children()[i];
-    gfx::Rect child_bounds = ComputeLocalNodeBounds(cache, child);
+    gfx::RectF child_bounds = ComputeLocalNodeBounds(cache, child);
 
     // Ignore children that don't have valid bounds themselves.
     if (child_bounds.width() == 0 || child_bounds.height() == 0)
@@ -114,33 +115,39 @@ static gfx::Rect ComputeLocalNodeBounds(TreeCache* cache, ui::AXNode* node) {
 // Compute the bounding box of a node in global coordinates, walking up the
 // parent hierarchy to offset by frame offsets and scroll offsets.
 static gfx::Rect ComputeGlobalNodeBounds(TreeCache* cache, ui::AXNode* node) {
-  gfx::Rect bounds = ComputeLocalNodeBounds(cache, node);
-  ui::AXNode* parent = node->parent();
-  bool need_to_offset_web_area = node->data().role == ui::AX_ROLE_WEB_AREA ||
-                                 node->data().role == ui::AX_ROLE_ROOT_WEB_AREA;
-  while (parent) {
-    if (bounds.IsEmpty()) {
-      bounds = parent->data().location;
-    } else if (need_to_offset_web_area && parent->data().location.width() > 0 &&
-               parent->data().location.height() > 0) {
-      bounds.Offset(parent->data().location.x(), parent->data().location.y());
-      need_to_offset_web_area = false;
+  gfx::RectF bounds = ComputeLocalNodeBounds(cache, node);
+
+  while (node) {
+    if (node->data().transform)
+      node->data().transform->TransformRect(&bounds);
+
+    ui::AXNode* container =
+        cache->tree.GetFromId(node->data().offset_container_id);
+    if (!container) {
+      if (node == cache->tree.root()) {
+        container = cache->owner->GetParent(node, &cache);
+      } else {
+        container = cache->tree.root();
+      }
     }
 
-    if (parent->data().role == ui::AX_ROLE_WEB_AREA ||
-        parent->data().role == ui::AX_ROLE_ROOT_WEB_AREA) {
-      int sx = 0;
-      int sy = 0;
-      if (parent->data().GetIntAttribute(ui::AX_ATTR_SCROLL_X, &sx) &&
-          parent->data().GetIntAttribute(ui::AX_ATTR_SCROLL_Y, &sy)) {
-        bounds.Offset(-sx, -sy);
-      }
-      need_to_offset_web_area = true;
+    if (!container || container == node)
+      break;
+
+    gfx::RectF container_bounds = container->data().location;
+    bounds.Offset(container_bounds.x(), container_bounds.y());
+
+    int scroll_x = 0;
+    int scroll_y = 0;
+    if (container->data().GetIntAttribute(ui::AX_ATTR_SCROLL_X, &scroll_x) &&
+        container->data().GetIntAttribute(ui::AX_ATTR_SCROLL_Y, &scroll_y)) {
+      bounds.Offset(-scroll_x, -scroll_y);
     }
-    parent = cache->owner->GetParent(parent, &cache);
+
+    node = container;
   }
 
-  return bounds;
+  return gfx::ToEnclosingRect(bounds);
 }
 
 ui::AXNode* FindNodeWithChildTreeId(ui::AXNode* node, int child_tree_id) {
@@ -414,8 +421,7 @@ AutomationInternalCustomBindings::AutomationInternalCustomBindings(
     ScriptContext* context)
     : ObjectBackedNativeHandler(context),
       is_active_profile_(true),
-      tree_change_observer_overall_filter_(
-          api::automation::TREE_CHANGE_OBSERVER_FILTER_NOTREECHANGES) {
+      tree_change_observer_overall_filter_(0) {
   // It's safe to use base::Unretained(this) here because these bindings
   // will only be called on a valid AutomationInternalCustomBindings instance
   // and none of the functions have any side effects.
@@ -432,6 +438,7 @@ AutomationInternalCustomBindings::AutomationInternalCustomBindings(
   ROUTE_FUNCTION(RemoveTreeChangeObserver);
   ROUTE_FUNCTION(GetChildIDAtIndex);
   ROUTE_FUNCTION(GetFocus);
+  ROUTE_FUNCTION(GetHtmlAttributes);
   ROUTE_FUNCTION(GetState);
   #undef ROUTE_FUNCTION
 
@@ -520,6 +527,31 @@ AutomationInternalCustomBindings::AutomationInternalCustomBindings(
         location.Offset(cache->location_offset);
         result.Set(RectToV8Object(isolate, location));
       });
+  RouteNodeIDFunction(
+      "GetLineStartOffsets",
+      [](v8::Isolate* isolate, v8::ReturnValue<v8::Value> result,
+         TreeCache* cache, ui::AXNode* node) {
+        const std::vector<int> line_starts =
+            node->GetOrComputeLineStartOffsets();
+        v8::Local<v8::Array> array_result(
+            v8::Array::New(isolate, line_starts.size()));
+        for (size_t i = 0; i < line_starts.size(); ++i) {
+          array_result->Set(static_cast<uint32_t>(i),
+                            v8::Integer::New(isolate, line_starts[i]));
+        }
+        result.Set(array_result);
+      });
+  RouteNodeIDFunction("GetChildIDs", [](v8::Isolate* isolate,
+                                        v8::ReturnValue<v8::Value> result,
+                                        TreeCache* cache, ui::AXNode* node) {
+    const std::vector<ui::AXNode*>& children = node->children();
+    v8::Local<v8::Array> array_result(v8::Array::New(isolate, children.size()));
+    for (size_t i = 0; i < children.size(); ++i) {
+      array_result->Set(static_cast<uint32_t>(i),
+                        v8::Integer::New(isolate, children[i]->id()));
+    }
+    result.Set(array_result);
+  });
 
   // Bindings that take a Tree ID and Node ID and string attribute name
   // and return a property of the node.
@@ -667,6 +699,8 @@ void AutomationInternalCustomBindings::OnMessageReceived(
     const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(AutomationInternalCustomBindings, message)
     IPC_MESSAGE_HANDLER(ExtensionMsg_AccessibilityEvent, OnAccessibilityEvent)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_AccessibilityLocationChange,
+                        OnAccessibilityLocationChange)
   IPC_END_MESSAGE_MAP()
 }
 
@@ -783,7 +817,9 @@ void AutomationInternalCustomBindings::AddTreeChangeObserver(
 
 void AutomationInternalCustomBindings::RemoveTreeChangeObserver(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  if (args.Length() != 1 || !args[0]->IsNumber()) {
+  // The argument is an integer key for an object which is automatically
+  // converted to a string.
+  if (args.Length() != 1 || !args[0]->IsString()) {
     ThrowInvalidArgumentsException(this);
     return;
   }
@@ -871,6 +907,33 @@ void AutomationInternalCustomBindings::GetFocus(
   args.GetReturnValue().Set(result);
 }
 
+void AutomationInternalCustomBindings::GetHtmlAttributes(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  v8::Isolate* isolate = GetIsolate();
+  if (args.Length() < 2 || !args[0]->IsNumber() || !args[1]->IsNumber())
+    ThrowInvalidArgumentsException(this);
+
+  int tree_id = args[0]->Int32Value();
+  int node_id = args[1]->Int32Value();
+
+  TreeCache* cache = GetTreeCacheFromTreeID(tree_id);
+  if (!cache)
+    return;
+
+  ui::AXNode* node = cache->tree.GetFromId(node_id);
+  if (!node)
+    return;
+
+  v8::Local<v8::Object> dst(v8::Object::New(isolate));
+  base::StringPairs src = node->data().html_attributes;
+  for (size_t i = 0; i < src.size(); i++) {
+    std::string& key = src[i].first;
+    std::string& value = src[i].second;
+    dst->Set(CreateV8String(isolate, key), CreateV8String(isolate, value));
+  }
+  args.GetReturnValue().Set(dst);
+}
+
 void AutomationInternalCustomBindings::GetState(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   v8::Isolate* isolate = GetIsolate();
@@ -919,12 +982,9 @@ void AutomationInternalCustomBindings::GetState(
 }
 
 void AutomationInternalCustomBindings::UpdateOverallTreeChangeObserverFilter() {
-  tree_change_observer_overall_filter_ =
-      api::automation::TREE_CHANGE_OBSERVER_FILTER_NOTREECHANGES;
-  for (const auto& observer : tree_change_observers_) {
-    tree_change_observer_overall_filter_ =
-        std::max(observer.filter, tree_change_observer_overall_filter_);
-  }
+  tree_change_observer_overall_filter_ = 0;
+  for (const auto& observer : tree_change_observers_)
+    tree_change_observer_overall_filter_ |= 1 << observer.filter;
 }
 
 ui::AXNode* AutomationInternalCustomBindings::GetParent(
@@ -1078,8 +1138,25 @@ void AutomationInternalCustomBindings::OnAccessibilityEvent(
                     v8::Integer::New(GetIsolate(), params.id));
   event_params->Set(CreateV8String(isolate, "eventType"),
                     CreateV8String(isolate, ToString(params.event_type)));
+  event_params->Set(CreateV8String(isolate, "eventFrom"),
+                    CreateV8String(isolate, ToString(params.event_from)));
   args->Set(0U, event_params);
   context()->DispatchEvent("automationInternal.onAccessibilityEvent", args);
+}
+
+void AutomationInternalCustomBindings::OnAccessibilityLocationChange(
+    const ExtensionMsg_AccessibilityLocationChangeParams& params) {
+  int tree_id = params.tree_id;
+  auto iter = tree_id_to_tree_cache_map_.find(tree_id);
+  if (iter == tree_id_to_tree_cache_map_.end())
+    return;
+  TreeCache* cache = iter->second;
+  ui::AXNode* node = cache->tree.GetFromId(params.id);
+  if (!node)
+    return;
+  node->SetLocation(params.new_location.offset_container_id,
+                    params.new_location.bounds,
+                    params.new_location.transform.get());
 }
 
 void AutomationInternalCustomBindings::OnNodeDataWillChange(
@@ -1109,8 +1186,27 @@ void AutomationInternalCustomBindings::OnSubtreeWillBeDeleted(
   // be needed for something.
 }
 
+void AutomationInternalCustomBindings::OnNodeWillBeReparented(
+    ui::AXTree* tree,
+    ui::AXNode* node) {
+  // Don't do anything here since the node will soon go away and be re-created.
+}
+
+void AutomationInternalCustomBindings::OnSubtreeWillBeReparented(
+    ui::AXTree* tree,
+    ui::AXNode* node) {
+  // Don't do anything here since the node will soon go away and be re-created.
+}
+
 void AutomationInternalCustomBindings::OnNodeCreated(ui::AXTree* tree,
                                                      ui::AXNode* node) {
+  // Not needed, this is called in the middle of an update so it's not
+  // safe to trigger JS from here. Wait for the notification in
+  // OnAtomicUpdateFinished instead.
+}
+
+void AutomationInternalCustomBindings::OnNodeReparented(ui::AXTree* tree,
+                                                        ui::AXNode* node) {
   // Not needed, this is called in the middle of an update so it's not
   // safe to trigger JS from here. Wait for the notification in
   // OnAtomicUpdateFinished instead.
@@ -1149,6 +1245,10 @@ void AutomationInternalCustomBindings::OnAtomicUpdateFinished(
             api::automation::TREE_CHANGE_TYPE_NODECHANGED,
             tree, node);
         break;
+      // Unhandled.
+      case NODE_REPARENTED:
+      case SUBTREE_REPARENTED:
+        break;
     }
   }
 
@@ -1172,19 +1272,28 @@ void AutomationInternalCustomBindings::SendTreeChangeEvent(
   if (node->data().HasIntAttribute(ui::AX_ATTR_CHILD_TREE_ID))
     SendChildTreeIDEvent(tree, node);
 
-  switch (tree_change_observer_overall_filter_) {
-    case api::automation::TREE_CHANGE_OBSERVER_FILTER_NOTREECHANGES:
-    default:
-      return;
-    case api::automation::TREE_CHANGE_OBSERVER_FILTER_LIVEREGIONTREECHANGES:
-      if (!node->data().HasStringAttribute(ui::AX_ATTR_CONTAINER_LIVE_STATUS) &&
-          node->data().role != ui::AX_ROLE_ALERT) {
-        return;
-      }
-      break;
-    case api::automation::TREE_CHANGE_OBSERVER_FILTER_ALLTREECHANGES:
-      break;
+  bool has_filter = false;
+  if (tree_change_observer_overall_filter_ &
+      (1 <<
+       api::automation::TREE_CHANGE_OBSERVER_FILTER_LIVEREGIONTREECHANGES)) {
+    if (node->data().HasStringAttribute(ui::AX_ATTR_CONTAINER_LIVE_STATUS) ||
+        node->data().role == ui::AX_ROLE_ALERT) {
+      has_filter = true;
+    }
   }
+
+  if (tree_change_observer_overall_filter_ &
+      (1 << api::automation::TREE_CHANGE_OBSERVER_FILTER_TEXTMARKERCHANGES)) {
+    if (node->data().HasIntListAttribute(ui::AX_ATTR_MARKER_TYPES))
+      has_filter = true;
+  }
+
+  if (tree_change_observer_overall_filter_ &
+      (1 << api::automation::TREE_CHANGE_OBSERVER_FILTER_ALLTREECHANGES))
+    has_filter = true;
+
+  if (!has_filter)
+    return;
 
   auto iter = axtree_to_tree_cache_map_.find(tree);
   if (iter == axtree_to_tree_cache_map_.end())
@@ -1207,6 +1316,10 @@ void AutomationInternalCustomBindings::SendTreeChangeEvent(
             node->data().role != ui::AX_ROLE_ALERT) {
           continue;
         }
+        break;
+      case api::automation::TREE_CHANGE_OBSERVER_FILTER_TEXTMARKERCHANGES:
+        if (!node->data().HasIntListAttribute(ui::AX_ATTR_MARKER_TYPES))
+          continue;
         break;
       case api::automation::TREE_CHANGE_OBSERVER_FILTER_ALLTREECHANGES:
         break;

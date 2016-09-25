@@ -17,6 +17,8 @@ namespace cc {
 
 class FakePictureLayerImpl : public PictureLayerImpl {
  public:
+  using TileRequirementCheck = bool (PictureLayerTiling::*)(const Tile*) const;
+
   static std::unique_ptr<FakePictureLayerImpl> Create(LayerTreeImpl* tree_impl,
                                                       int id) {
     bool is_mask = false;
@@ -122,8 +124,6 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   }
 
   void set_fixed_tile_size(const gfx::Size& size) { fixed_tile_size_ = size; }
-
-  void SetIsDrawnRenderSurfaceLayerListMember(bool is);
 
   void CreateAllTiles();
   void SetAllTilesReady();

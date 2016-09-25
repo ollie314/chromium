@@ -45,12 +45,13 @@ namespace {
 class ChromeStarter : public base::RefCountedThreadSafe<ChromeStarter> {
  public:
   ChromeStarter(base::TimeDelta timeout, const base::FilePath& user_data_dir)
-      : ready_event_(false /* manual */, false /* signaled */),
-        done_event_(false /* manual */, false /* signaled */),
+      : ready_event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                     base::WaitableEvent::InitialState::NOT_SIGNALED),
+        done_event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                    base::WaitableEvent::InitialState::NOT_SIGNALED),
         process_terminated_(false),
         timeout_(timeout),
-        user_data_dir_(user_data_dir) {
-  }
+        user_data_dir_(user_data_dir) {}
 
   // We must reset some data members since we reuse the same ChromeStarter
   // object and start/stop it a few times. We must start fresh! :-)
@@ -139,7 +140,8 @@ class ProcessSingletonTest : public InProcessBrowserTest {
   ProcessSingletonTest()
       // We use a manual reset so that all threads wake up at once when signaled
       // and thus we must manually reset it for each attempt.
-      : threads_waker_(true /* manual */, false /* signaled */) {
+      : threads_waker_(base::WaitableEvent::ResetPolicy::MANUAL,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED) {
     EXPECT_TRUE(temp_profile_dir_.CreateUniqueTempDir());
   }
 
@@ -150,7 +152,7 @@ class ProcessSingletonTest : public InProcessBrowserTest {
       chrome_starter_threads_[i].reset(new base::Thread("ChromeStarter"));
       ASSERT_TRUE(chrome_starter_threads_[i]->Start());
       chrome_starters_[i] = new ChromeStarter(
-          TestTimeouts::action_max_timeout(), temp_profile_dir_.path());
+          TestTimeouts::action_max_timeout(), temp_profile_dir_.GetPath());
     }
   }
 
@@ -260,7 +262,7 @@ IN_PROC_BROWSER_TEST_F(ProcessSingletonTest, DISABLED_StartupRaceCondition) {
 
       chrome_starter_threads_[i]->task_runner()->PostTask(
           FROM_HERE,
-          base::Bind(&ChromeStarter::StartChrome, chrome_starters_[i].get(),
+          base::Bind(&ChromeStarter::StartChrome, chrome_starters_[i],
                      &threads_waker_, first_run));
     }
 

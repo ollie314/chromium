@@ -9,7 +9,7 @@
 #include <string>
 
 #include "net/base/ip_endpoint.h"
-#include "net/quic/quic_session.h"
+#include "net/quic/core/quic_session.h"
 #include "net/tools/quic/quic_dispatcher.h"
 #include "net/tools/quic/quic_server.h"
 #include "net/tools/quic/quic_simple_server_session.h"
@@ -34,7 +34,8 @@ class QuicTestServer : public QuicServer {
     virtual QuicServerSessionBase* CreateSession(
         const QuicConfig& config,
         QuicConnection* connection,
-        QuicServerSessionVisitor* visitor,
+        QuicServerSessionBase::Visitor* visitor,
+        QuicCryptoServerStream::Helper* helper,
         const QuicCryptoServerConfig* crypto_config,
         QuicCompressedCertsCache* compressed_certs_cache) = 0;
   };
@@ -56,11 +57,11 @@ class QuicTestServer : public QuicServer {
     // Returns a new QuicCryptoServerStreamBase owned by the caller
     virtual QuicCryptoServerStreamBase* CreateCryptoStream(
         const QuicCryptoServerConfig* crypto_config,
-        QuicSpdySession* session) = 0;
+        QuicServerSessionBase* session) = 0;
   };
 
-  explicit QuicTestServer(ProofSource* proof_source);
-  QuicTestServer(ProofSource* proof_source,
+  explicit QuicTestServer(std::unique_ptr<ProofSource> proof_source);
+  QuicTestServer(std::unique_ptr<ProofSource> proof_source,
                  const QuicConfig& config,
                  const QuicVersionVector& supported_versions);
 
@@ -89,9 +90,12 @@ class ImmediateGoAwaySession : public QuicSimpleServerSession {
  public:
   ImmediateGoAwaySession(const QuicConfig& config,
                          QuicConnection* connection,
-                         QuicServerSessionVisitor* visitor,
+                         QuicServerSessionBase::Visitor* visitor,
+                         QuicCryptoServerStream::Helper* helper,
                          const QuicCryptoServerConfig* crypto_config,
                          QuicCompressedCertsCache* compressed_certs_cache);
+  // Override to send GoAway.
+  void OnStreamFrame(const QuicStreamFrame& frame) override;
 };
 
 }  // namespace test

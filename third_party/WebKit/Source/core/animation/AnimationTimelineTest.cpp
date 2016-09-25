@@ -31,7 +31,7 @@
 #include "core/animation/AnimationTimeline.h"
 
 #include "core/animation/AnimationClock.h"
-#include "core/animation/AnimationEffect.h"
+#include "core/animation/AnimationEffectReadOnly.h"
 #include "core/animation/CompositorPendingAnimations.h"
 #include "core/animation/KeyframeEffect.h"
 #include "core/animation/KeyframeEffectModel.h"
@@ -42,6 +42,7 @@
 #include "platform/weborigin/KURL.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include <memory>
 
 namespace blink {
 
@@ -76,7 +77,7 @@ protected:
         document.release();
         element.release();
         timeline.release();
-        ThreadHeap::collectAllGarbage();
+        ThreadState::current()-> collectAllGarbage();
     }
 
     void updateClockAndService(double time)
@@ -87,7 +88,7 @@ protected:
         timeline->scheduleNextService();
     }
 
-    OwnPtr<DummyPageHolder> pageHolder;
+    std::unique_ptr<DummyPageHolder> pageHolder;
     Persistent<Document> document;
     Persistent<Element> element;
     Persistent<AnimationTimeline> timeline;
@@ -123,7 +124,7 @@ TEST_F(AnimationAnimationTimelineTest, EmptyKeyframeAnimation)
 TEST_F(AnimationAnimationTimelineTest, EmptyForwardsKeyframeAnimation)
 {
     AnimatableValueKeyframeEffectModel* effect = AnimatableValueKeyframeEffectModel::create(AnimatableValueKeyframeVector());
-    timing.fillMode = Timing::FillModeForwards;
+    timing.fillMode = Timing::FillMode::FORWARDS;
     KeyframeEffect* keyframeEffect = KeyframeEffect::create(element.get(), effect, timing);
 
     timeline->play(keyframeEffect);
@@ -304,7 +305,7 @@ TEST_F(AnimationAnimationTimelineTest, SetCurrentTime)
 TEST_F(AnimationAnimationTimelineTest, PauseForTesting)
 {
     float seekTime = 1;
-    timing.fillMode = Timing::FillModeForwards;
+    timing.fillMode = Timing::FillMode::FORWARDS;
     KeyframeEffect* anim1 = KeyframeEffect::create(element.get(), AnimatableValueKeyframeEffectModel::create(AnimatableValueKeyframeVector()), timing);
     KeyframeEffect* anim2  = KeyframeEffect::create(element.get(), AnimatableValueKeyframeEffectModel::create(AnimatableValueKeyframeVector()), timing);
     Animation* animation1 = timeline->play(anim1);
@@ -336,20 +337,6 @@ TEST_F(AnimationAnimationTimelineTest, DelayBeforeAnimationStart)
 
     EXPECT_CALL(*platformTiming, serviceOnNextFrame());
     updateClockAndService(4.98);
-}
-
-TEST_F(AnimationAnimationTimelineTest, PlayAfterDocumentDeref)
-{
-    timing.iterationDuration = 2;
-    timing.startDelay = 5;
-
-    timeline = &document->timeline();
-    element = nullptr;
-    document = nullptr;
-
-    KeyframeEffect* keyframeEffect = KeyframeEffect::create(0, nullptr, timing);
-    // Test passes if this does not crash.
-    timeline->play(keyframeEffect);
 }
 
 TEST_F(AnimationAnimationTimelineTest, UseAnimationAfterTimelineDeref)

@@ -14,22 +14,25 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/files/file.h"
+#include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/bookmarks/browser/bookmark_codec.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_types.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
-#include "grit/components_strings.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/favicon_size.h"
@@ -40,7 +43,7 @@ using content::BrowserThread;
 
 namespace {
 
-static BookmarkFaviconFetcher* fetcher = NULL;
+BookmarkFaviconFetcher* g_fetcher = nullptr;
 
 // File header.
 const char kHeader[] =
@@ -407,10 +410,12 @@ BookmarkFaviconFetcher::~BookmarkFaviconFetcher() {
 }
 
 void BookmarkFaviconFetcher::ExportBookmarks() {
-  ExtractUrls(BookmarkModelFactory::GetForProfile(
-      profile_)->bookmark_bar_node());
-  ExtractUrls(BookmarkModelFactory::GetForProfile(profile_)->other_node());
-  ExtractUrls(BookmarkModelFactory::GetForProfile(profile_)->mobile_node());
+  ExtractUrls(BookmarkModelFactory::GetForBrowserContext(profile_)
+                  ->bookmark_bar_node());
+  ExtractUrls(
+      BookmarkModelFactory::GetForBrowserContext(profile_)->other_node());
+  ExtractUrls(
+      BookmarkModelFactory::GetForBrowserContext(profile_)->mobile_node());
   if (!bookmark_urls_.empty())
     FetchNextFavicon();
   else
@@ -421,9 +426,10 @@ void BookmarkFaviconFetcher::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (chrome::NOTIFICATION_PROFILE_DESTROYED == type && fetcher != NULL) {
-    base::MessageLoop::current()->DeleteSoon(FROM_HERE, fetcher);
-    fetcher = NULL;
+  DCHECK_EQ(chrome::NOTIFICATION_PROFILE_DESTROYED, type);
+  if (g_fetcher) {
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, g_fetcher);
+    g_fetcher = nullptr;
   }
 }
 
@@ -445,13 +451,14 @@ void BookmarkFaviconFetcher::ExecuteWriter() {
   BookmarkCodec codec;
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&Writer::DoWrite,
-                 new Writer(codec.Encode(BookmarkModelFactory::GetForProfile(
-                                profile_)),
-                            path_, favicons_map_.release(), observer_)));
-  if (fetcher != NULL) {
-    base::MessageLoop::current()->DeleteSoon(FROM_HERE, fetcher);
-    fetcher = NULL;
+      base::Bind(
+          &Writer::DoWrite,
+          new Writer(codec.Encode(
+                         BookmarkModelFactory::GetForBrowserContext(profile_)),
+                     path_, favicons_map_.release(), observer_)));
+  if (g_fetcher) {
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, g_fetcher);
+    g_fetcher = nullptr;
   }
 }
 
@@ -508,9 +515,9 @@ void WriteBookmarks(Profile* profile,
   // BookmarkModel isn't thread safe (nor would we want to lock it down
   // for the duration of the write), as such we make a copy of the
   // BookmarkModel using BookmarkCodec then write from that.
-  if (fetcher == NULL) {
-    fetcher = new BookmarkFaviconFetcher(profile, path, observer);
-    fetcher->ExportBookmarks();
+  if (!g_fetcher) {
+    g_fetcher = new BookmarkFaviconFetcher(profile, path, observer);
+    g_fetcher->ExportBookmarks();
   }
 }
 

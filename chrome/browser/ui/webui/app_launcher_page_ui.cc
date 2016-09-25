@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/memory/ref_counted_memory.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/app_launcher_login_handler.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
@@ -18,11 +18,12 @@
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "extensions/browser/extension_system.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -104,8 +105,7 @@ std::string AppLauncherPageUI::HTMLSource::GetSource() const {
 
 void AppLauncherPageUI::HTMLSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -113,7 +113,7 @@ void AppLauncherPageUI::HTMLSource::StartDataRequest(
   resource->set_should_show_other_devices_menu(false);
 
   content::RenderProcessHost* render_host =
-      content::RenderProcessHost::FromID(render_process_id);
+      wc_getter.Run()->GetRenderProcessHost();
   NTPResourceCache::WindowType win_type = NTPResourceCache::GetWindowType(
       profile_, render_host);
   scoped_refptr<base::RefCountedMemory> html_bytes(
@@ -131,8 +131,21 @@ bool AppLauncherPageUI::HTMLSource::ShouldReplaceExistingSource() const {
   return false;
 }
 
-bool AppLauncherPageUI::HTMLSource::ShouldAddContentSecurityPolicy() const {
-  return false;
+std::string AppLauncherPageUI::HTMLSource::GetContentSecurityPolicyScriptSrc()
+    const {
+  // 'unsafe-inline' is added to script-src.
+  return "script-src chrome://resources 'self' 'unsafe-eval' 'unsafe-inline';";
+}
+
+std::string AppLauncherPageUI::HTMLSource::GetContentSecurityPolicyStyleSrc()
+    const {
+  return "style-src 'self' chrome://resources chrome://theme 'unsafe-inline';";
+}
+
+std::string AppLauncherPageUI::HTMLSource::GetContentSecurityPolicyImgSrc()
+    const {
+  return "img-src chrome://extension-icon chrome://theme chrome://resources "
+      "data:;";
 }
 
 AppLauncherPageUI::HTMLSource::~HTMLSource() {}

@@ -131,6 +131,7 @@ public class OmniboxTestUtils {
         private final Map<String, List<SuggestionsResult>> mSuggestions;
         private Runnable mSuggestionsDispatcher;
         private int mZeroSuggestCalledCount;
+        private boolean mStartAutocompleteCalled;
 
         public TestAutocompleteController(
                 View view,
@@ -145,6 +146,7 @@ public class OmniboxTestUtils {
         public void start(
                 Profile profile, String url ,
                 final String text, boolean preventInlineAutocomplete) {
+            mStartAutocompleteCalled = true;
             mSuggestionsDispatcher = new Runnable() {
                 @Override
                 public void run() {
@@ -165,12 +167,16 @@ public class OmniboxTestUtils {
 
         @Override
         public void startZeroSuggest(Profile profile, String omniboxText, String url,
-                boolean isQueryInOmnibox, boolean focusedFromFakebox) {
+                boolean focusedFromFakebox) {
             mZeroSuggestCalledCount++;
         }
 
         public int numZeroSuggestRequests() {
             return mZeroSuggestCalledCount;
+        }
+
+        public boolean isStartAutocompleteCalled() {
+            return mStartAutocompleteCalled;
         }
 
         @Override
@@ -216,7 +222,7 @@ public class OmniboxTestUtils {
 
         @Override
         public void startZeroSuggest(Profile profile, String omniboxText, String url,
-                boolean isQueryInOmnibox, boolean focusedFromFakebox) {
+                boolean focusedFromFakebox) {
         }
 
         @Override

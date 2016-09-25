@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -202,10 +203,7 @@ class AutomationWebContentsObserver
   void AccessibilityEventReceived(
       const std::vector<content::AXEventNotificationDetails>& details)
       override {
-    std::vector<content::AXEventNotificationDetails>::const_iterator iter =
-        details.begin();
-    for (; iter != details.end(); ++iter) {
-      const content::AXEventNotificationDetails& event = *iter;
+    for (const auto& event : details) {
       ExtensionMsg_AccessibilityEventParams params;
       params.tree_id = event.ax_tree_id;
       params.id = event.id;
@@ -213,9 +211,23 @@ class AutomationWebContentsObserver
       params.update = event.update;
       params.location_offset =
           web_contents()->GetContainerBounds().OffsetFromOrigin();
+      params.event_from = event.event_from;
 
       AutomationEventRouter* router = AutomationEventRouter::GetInstance();
       router->DispatchAccessibilityEvent(params);
+    }
+  }
+
+  void AccessibilityLocationChangesReceived(
+      const std::vector<content::AXLocationChangeNotificationDetails>& details)
+      override {
+    for (const auto& src : details) {
+      ExtensionMsg_AccessibilityLocationChangeParams dst;
+      dst.id = src.id;
+      dst.tree_id = src.ax_tree_id;
+      dst.new_location = src.new_location;
+      AutomationEventRouter* router = AutomationEventRouter::GetInstance();
+      router->DispatchAccessibilityLocationChange(dst);
     }
   }
 
@@ -306,7 +318,11 @@ ExtensionFunction::ResponseAction AutomationInternalEnableFrameFunction::Run() {
   content::WebContents* contents =
       content::WebContents::FromRenderFrameHost(rfh);
   AutomationWebContentsObserver::CreateForWebContents(contents);
-  contents->EnableTreeOnlyAccessibilityMode();
+
+  // Only call this if this is the root of a frame tree, to avoid resetting
+  // the accessibility state multiple times.
+  if (!rfh->GetParent())
+    contents->EnableTreeOnlyAccessibilityMode();
 
   return RespondNow(NoArguments());
 }
@@ -448,7 +464,8 @@ void AutomationInternalQuerySelectorFunction::OnResponse(
     return;
   }
 
-  Respond(OneArgument(new base::FundamentalValue(result_acc_obj_id)));
+  Respond(
+      OneArgument(base::MakeUnique<base::FundamentalValue>(result_acc_obj_id)));
 }
 
 }  // namespace extensions

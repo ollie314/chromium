@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,15 +14,14 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_message.h"
@@ -42,28 +42,37 @@ class Worker : public Listener, public Sender {
   Worker(Channel::Mode mode,
          const std::string& thread_name,
          const std::string& channel_name)
-      : done_(new WaitableEvent(false, false)),
-        channel_created_(new WaitableEvent(false, false)),
+      : done_(
+            new WaitableEvent(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED)),
+        channel_created_(
+            new WaitableEvent(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED)),
         channel_name_(channel_name),
         mode_(mode),
         ipc_thread_((thread_name + "_ipc").c_str()),
         listener_thread_((thread_name + "_listener").c_str()),
         overrided_thread_(NULL),
-        shutdown_event_(true, false),
+        shutdown_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                        base::WaitableEvent::InitialState::NOT_SIGNALED),
         is_shutdown_(false) {}
 
   // Will create a named channel and use this name for the threads' name.
   Worker(const std::string& channel_name, Channel::Mode mode)
-      : done_(new WaitableEvent(false, false)),
-        channel_created_(new WaitableEvent(false, false)),
+      : done_(
+            new WaitableEvent(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED)),
+        channel_created_(
+            new WaitableEvent(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED)),
         channel_name_(channel_name),
         mode_(mode),
         ipc_thread_((channel_name + "_ipc").c_str()),
         listener_thread_((channel_name + "_listener").c_str()),
         overrided_thread_(NULL),
-        shutdown_event_(true, false),
-        is_shutdown_(false) {
-  }
+        shutdown_event_(base::WaitableEvent::ResetPolicy::MANUAL,
+                        base::WaitableEvent::InitialState::NOT_SIGNALED),
+        is_shutdown_(false) {}
 
   ~Worker() override {
     // Shutdown() must be called before destruction.
@@ -74,7 +83,7 @@ class Worker : public Listener, public Sender {
   bool Send(Message* msg) override { return channel_->Send(msg); }
   void WaitForChannelCreation() { channel_created_->Wait(); }
   void CloseChannel() {
-    DCHECK(base::MessageLoop::current() == ListenerThread()->message_loop());
+    DCHECK(ListenerThread()->task_runner()->BelongsToCurrentThread());
     channel_->Close();
   }
   void Start() {
@@ -86,7 +95,11 @@ class Worker : public Listener, public Sender {
     // The IPC thread needs to outlive SyncChannel. We can't do this in
     // ~Worker(), since that'll reset the vtable pointer (to Worker's), which
     // may result in a race conditions. See http://crbug.com/25841.
-    WaitableEvent listener_done(false, false), ipc_done(false, false);
+    WaitableEvent listener_done(
+        base::WaitableEvent::ResetPolicy::AUTOMATIC,
+        base::WaitableEvent::InitialState::NOT_SIGNALED),
+        ipc_done(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                 base::WaitableEvent::InitialState::NOT_SIGNALED);
     ListenerThread()->task_runner()->PostTask(
         FROM_HERE, base::Bind(&Worker::OnListenerThreadShutdown1, this,
                               &listener_done, &ipc_done));
@@ -158,7 +171,7 @@ class Worker : public Listener, public Sender {
   }
 
   virtual SyncChannel* CreateChannel() {
-    scoped_ptr<SyncChannel> channel = SyncChannel::Create(
+    std::unique_ptr<SyncChannel> channel = SyncChannel::Create(
         channel_name_, mode_, this, ipc_thread_.task_runner().get(), true,
         &shutdown_event_);
     return channel.release();
@@ -187,7 +200,7 @@ class Worker : public Listener, public Sender {
 
     base::RunLoop().RunUntilIdle();
 
-    ipc_thread_.message_loop()->PostTask(
+    ipc_thread_.task_runner()->PostTask(
         FROM_HERE, base::Bind(&Worker::OnIPCThreadShutdown, this,
                               listener_event, ipc_event));
   }
@@ -224,11 +237,11 @@ class Worker : public Listener, public Sender {
     thread->StartWithOptions(options);
   }
 
-  scoped_ptr<WaitableEvent> done_;
-  scoped_ptr<WaitableEvent> channel_created_;
+  std::unique_ptr<WaitableEvent> done_;
+  std::unique_ptr<WaitableEvent> channel_created_;
   std::string channel_name_;
   Channel::Mode mode_;
-  scoped_ptr<SyncChannel> channel_;
+  std::unique_ptr<SyncChannel> channel_;
   base::Thread ipc_thread_;
   base::Thread listener_thread_;
   base::Thread* overrided_thread_;
@@ -454,7 +467,9 @@ class NoHangClient : public Worker {
 };
 
 void NoHang(bool pump_during_send) {
-  WaitableEvent got_first_reply(false, false);
+  WaitableEvent got_first_reply(
+      base::WaitableEvent::ResetPolicy::AUTOMATIC,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
   std::vector<Worker*> workers;
   workers.push_back(
       new NoHangServer(&got_first_reply, pump_during_send, "NoHang"));
@@ -730,8 +745,12 @@ void Multiple(bool server_pump, bool client_pump) {
   // Server1 sends a sync msg to client1, which blocks the reply until
   // server2 (which runs on the same worker thread as server1) responds
   // to a sync msg from client2.
-  WaitableEvent client1_msg_received(false, false);
-  WaitableEvent client1_can_reply(false, false);
+  WaitableEvent client1_msg_received(
+      base::WaitableEvent::ResetPolicy::AUTOMATIC,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
+  WaitableEvent client1_can_reply(
+      base::WaitableEvent::ResetPolicy::AUTOMATIC,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
 
   Worker* worker;
 
@@ -972,12 +991,12 @@ class TestSyncMessageFilter : public SyncMessageFilter {
       base::WaitableEvent* shutdown_event,
       Worker* worker,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-      : SyncMessageFilter(shutdown_event, false),
+      : SyncMessageFilter(shutdown_event),
         worker_(worker),
         task_runner_(task_runner) {}
 
-  void OnFilterAdded(Sender* sender) override {
-    SyncMessageFilter::OnFilterAdded(sender);
+  void OnFilterAdded(Channel* channel) override {
+    SyncMessageFilter::OnFilterAdded(channel);
     task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&TestSyncMessageFilter::SendMessageOnHelperThread, this));
@@ -1251,12 +1270,15 @@ class RestrictedDispatchClient : public Worker {
   NonRestrictedDispatchServer* server2_;
   int* success_;
   WaitableEvent* sent_ping_event_;
-  scoped_ptr<SyncChannel> non_restricted_channel_;
+  std::unique_ptr<SyncChannel> non_restricted_channel_;
 };
 
 TEST_F(IPCSyncChannelTest, RestrictedDispatch) {
-  WaitableEvent sent_ping_event(false, false);
-  WaitableEvent wait_event(false, false);
+  WaitableEvent sent_ping_event(
+      base::WaitableEvent::ResetPolicy::AUTOMATIC,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
+  WaitableEvent wait_event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                           base::WaitableEvent::InitialState::NOT_SIGNALED);
   RestrictedDispatchServer* server =
       new RestrictedDispatchServer(&sent_ping_event, &wait_event);
   NonRestrictedDispatchServer* server2 =
@@ -1486,13 +1508,19 @@ TEST_F(IPCSyncChannelTest, RestrictedDispatchDeadlock) {
   base::Thread worker_thread("RestrictedDispatchDeadlock");
   ASSERT_TRUE(worker_thread.Start());
 
-  WaitableEvent server1_ready(false, false);
-  WaitableEvent server2_ready(false, false);
+  WaitableEvent server1_ready(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED);
+  WaitableEvent server2_ready(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED);
 
-  WaitableEvent event0(false, false);
-  WaitableEvent event1(false, false);
-  WaitableEvent event2(false, false);
-  WaitableEvent event3(false, false);
+  WaitableEvent event0(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED);
+  WaitableEvent event1(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED);
+  WaitableEvent event2(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED);
+  WaitableEvent event3(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED);
   WaitableEvent* events[4] = {&event0, &event1, &event2, &event3};
 
   RestrictedDispatchDeadlockServer* server1;
@@ -1599,7 +1627,7 @@ class RestrictedDispatchPipeWorker : public Worker {
     return true;
   }
 
-  scoped_ptr<SyncChannel> other_channel_;
+  std::unique_ptr<SyncChannel> other_channel_;
   WaitableEvent* event1_;
   WaitableEvent* event2_;
   std::string other_channel_name_;
@@ -1616,10 +1644,14 @@ class RestrictedDispatchPipeWorker : public Worker {
 TEST_F(IPCSyncChannelTest, MAYBE_RestrictedDispatch4WayDeadlock) {
   int success = 0;
   std::vector<Worker*> workers;
-  WaitableEvent event0(true, false);
-  WaitableEvent event1(true, false);
-  WaitableEvent event2(true, false);
-  WaitableEvent event3(true, false);
+  WaitableEvent event0(base::WaitableEvent::ResetPolicy::MANUAL,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED);
+  WaitableEvent event1(base::WaitableEvent::ResetPolicy::MANUAL,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED);
+  WaitableEvent event2(base::WaitableEvent::ResetPolicy::MANUAL,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED);
+  WaitableEvent event3(base::WaitableEvent::ResetPolicy::MANUAL,
+                       base::WaitableEvent::InitialState::NOT_SIGNALED);
   workers.push_back(new RestrictedDispatchPipeWorker(
         "channel0", &event0, "channel1", &event1, 1, &success));
   workers.push_back(new RestrictedDispatchPipeWorker(
@@ -1680,7 +1712,7 @@ class ReentrantReplyServer1 : public Worker {
   }
 
   WaitableEvent* server_ready_;
-  scoped_ptr<SyncChannel> server2_channel_;
+  std::unique_ptr<SyncChannel> server2_channel_;
 };
 
 class ReentrantReplyServer2 : public Worker {
@@ -1734,7 +1766,8 @@ class ReentrantReplyClient : public Worker {
 
 TEST_F(IPCSyncChannelTest, ReentrantReply) {
   std::vector<Worker*> workers;
-  WaitableEvent server_ready(false, false);
+  WaitableEvent server_ready(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                             base::WaitableEvent::InitialState::NOT_SIGNALED);
   workers.push_back(new ReentrantReplyServer2());
   workers.push_back(new ReentrantReplyServer1(&server_ready));
   workers.push_back(new ReentrantReplyClient(&server_ready));
@@ -1777,7 +1810,12 @@ class VerifiedClient : public Worker {
     Worker::OverrideThread(listener_thread);
   }
 
-  void Run() override {
+  void OnChannelConnected(int32_t peer_pid) override {
+    ListenerThread()->task_runner()->PostTask(
+        FROM_HERE, base::Bind(&VerifiedClient::RunTestOnConnected, this));
+  }
+
+  void RunTestOnConnected() {
     std::string response;
     SyncMessage* msg = new SyncChannelNestedTestMsg_String(&response);
     bool result = Send(msg);

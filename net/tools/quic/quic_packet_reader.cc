@@ -15,8 +15,8 @@
 #include "base/logging.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
-#include "net/quic/quic_bug_tracker.h"
-#include "net/quic/quic_flags.h"
+#include "net/quic/core/quic_bug_tracker.h"
+#include "net/quic/core/quic_flags.h"
 #include "net/tools/quic/quic_dispatcher.h"
 #include "net/tools/quic/quic_process_packet_interface.h"
 #include "net/tools/quic/quic_socket_utils.h"
@@ -63,21 +63,23 @@ QuicPacketReader::~QuicPacketReader() {}
 bool QuicPacketReader::ReadAndDispatchPackets(
     int fd,
     int port,
+    bool potentially_small_mtu,
     const QuicClock& clock,
     ProcessPacketInterface* processor,
     QuicPacketCount* packets_dropped) {
 #if MMSG_MORE
-  return ReadAndDispatchManyPackets(fd, port, clock, processor,
-                                    packets_dropped);
+  return ReadAndDispatchManyPackets(fd, port, potentially_small_mtu, clock,
+                                    processor, packets_dropped);
 #else
-  return ReadAndDispatchSinglePacket(fd, port, clock, processor,
-                                     packets_dropped);
+  return ReadAndDispatchSinglePacket(fd, port, potentially_small_mtu, clock,
+                                     processor, packets_dropped);
 #endif
 }
 
 bool QuicPacketReader::ReadAndDispatchManyPackets(
     int fd,
     int port,
+    bool potentially_small_mtu,
     const QuicClock& clock,
     ProcessPacketInterface* processor,
     QuicPacketCount* packets_dropped) {
@@ -98,7 +100,7 @@ bool QuicPacketReader::ReadAndDispatchManyPackets(
     return false;  // recvmmsg failed.
   }
 
-  QuicTime fallback_timestamp = QuicTime::Zero();
+  QuicWallTime fallback_walltimestamp = QuicWallTime::Zero();
   for (int i = 0; i < packets_read; ++i) {
     if (mmsg_hdr_[i].msg_len == 0) {
       continue;
@@ -112,28 +114,30 @@ bool QuicPacketReader::ReadAndDispatchManyPackets(
     }
 
     IPEndPoint client_address = IPEndPoint(packets_[i].raw_address);
-    IPAddressNumber server_ip;
-    QuicTime packet_timestamp = QuicTime::Zero();
+    IPAddress server_ip;
+    QuicWallTime packet_walltimestamp = QuicWallTime::Zero();
     QuicSocketUtils::GetAddressAndTimestampFromMsghdr(
-        &mmsg_hdr_[i].msg_hdr, &server_ip, &packet_timestamp);
+        &mmsg_hdr_[i].msg_hdr, &server_ip, &packet_walltimestamp);
     if (!IsInitializedAddress(server_ip)) {
       QUIC_BUG << "Unable to get server address.";
       continue;
     }
 
-    if (FLAGS_quic_use_socket_timestamp) {
-      if (packet_timestamp == QuicTime::Zero()) {
-        // This isn't particularly desirable, but not all platforms support
-        // socket timestamping.
-        if (fallback_timestamp == QuicTime::Zero()) {
-          fallback_timestamp = clock.Now();
-        }
-        packet_timestamp = fallback_timestamp;
+    // This isn't particularly desirable, but not all platforms support socket
+    // timestamping.
+    if (packet_walltimestamp.IsZero()) {
+      if (fallback_walltimestamp.IsZero()) {
+        fallback_walltimestamp = clock.WallNow();
       }
+      packet_walltimestamp = fallback_walltimestamp;
     }
-
+    QuicTime timestamp = clock.ConvertWallTimeToQuicTime(packet_walltimestamp);
+    int ttl = 0;
+    bool has_ttl =
+        QuicSocketUtils::GetTtlFromMsghdr(&mmsg_hdr_[i].msg_hdr, &ttl);
     QuicReceivedPacket packet(reinterpret_cast<char*>(packets_[i].iov.iov_base),
-                              mmsg_hdr_[i].msg_len, packet_timestamp, false);
+                              mmsg_hdr_[i].msg_len, timestamp, false,
+                              potentially_small_mtu, ttl, has_ttl);
     IPEndPoint server_address(server_ip, port);
     processor->ProcessPacket(server_address, client_address, packet);
   }
@@ -155,6 +159,7 @@ bool QuicPacketReader::ReadAndDispatchManyPackets(
 bool QuicPacketReader::ReadAndDispatchSinglePacket(
     int fd,
     int port,
+    bool potentially_small_mtu,
     const QuicClock& clock,
     ProcessPacketInterface* processor,
     QuicPacketCount* packets_dropped) {
@@ -162,11 +167,10 @@ bool QuicPacketReader::ReadAndDispatchSinglePacket(
 
   IPEndPoint client_address;
   IPAddress server_ip;
-  QuicTime timestamp = QuicTime::Zero();
+  QuicWallTime walltimestamp = QuicWallTime::Zero();
   int bytes_read =
       QuicSocketUtils::ReadPacket(fd, buf, arraysize(buf), packets_dropped,
-                                  &server_ip, &timestamp, &client_address);
-
+                                  &server_ip, &walltimestamp, &client_address);
   if (bytes_read < 0) {
     return false;  // ReadPacket failed.
   }
@@ -175,13 +179,16 @@ bool QuicPacketReader::ReadAndDispatchSinglePacket(
     QUIC_BUG << "Unable to get server address.";
     return false;
   }
-  if (FLAGS_quic_use_socket_timestamp && timestamp == QuicTime::Zero()) {
-    // This isn't particularly desirable, but not all platforms support socket
-    // timestamping.
-    timestamp = clock.Now();
+  // This isn't particularly desirable, but not all platforms support socket
+  // timestamping.
+  if (walltimestamp.IsZero()) {
+    walltimestamp = clock.WallNow();
   }
+  QuicTime timestamp = clock.ConvertWallTimeToQuicTime(walltimestamp);
 
-  QuicReceivedPacket packet(buf, bytes_read, timestamp, false);
+  QuicReceivedPacket packet(buf, bytes_read, timestamp, false /* owns_buffer */,
+                            potentially_small_mtu, -1 /* ttl */,
+                            false /* ttl_valid */);
   IPEndPoint server_address(server_ip, port);
   processor->ProcessPacket(server_address, client_address, packet);
 

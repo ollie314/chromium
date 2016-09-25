@@ -7,7 +7,9 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -24,7 +26,7 @@
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
@@ -106,12 +108,13 @@ std::unique_ptr<base::DictionaryValue> SessionWindowToValue(
   std::unique_ptr<base::ListValue> tab_values(new base::ListValue());
   // Calculate the last |modification_time| for all entries within a window.
   base::Time modification_time = window.timestamp;
-  for (const ::sessions::SessionTab* tab : window.tabs) {
-    std::unique_ptr<base::DictionaryValue> tab_value(SessionTabToValue(*tab));
+  for (const std::unique_ptr<sessions::SessionTab>& tab : window.tabs) {
+    std::unique_ptr<base::DictionaryValue> tab_value(
+        SessionTabToValue(*tab.get()));
     if (tab_value.get()) {
       modification_time = std::max(modification_time,
                                    tab->timestamp);
-      tab_values->Append(tab_value.release());
+      tab_values->Append(std::move(tab_value));
     }
   }
   if (tab_values->GetSize() == 0)
@@ -143,7 +146,7 @@ void ForeignSessionHandler::OpenForeignSessionTab(
     SessionID::id_type window_num,
     SessionID::id_type tab_id,
     const WindowOpenDisposition& disposition) {
-  sync_driver::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate(web_ui);
+  sync_sessions::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate(web_ui);
   if (!open_tabs)
     return;
 
@@ -167,7 +170,7 @@ void ForeignSessionHandler::OpenForeignSessionWindows(
     content::WebUI* web_ui,
     const std::string& session_string_value,
     SessionID::id_type window_num) {
-  sync_driver::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate(web_ui);
+  sync_sessions::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate(web_ui);
   if (!open_tabs)
     return;
 
@@ -189,10 +192,10 @@ void ForeignSessionHandler::OpenForeignSessionWindows(
 }
 
 // static
-sync_driver::OpenTabsUIDelegate* ForeignSessionHandler::GetOpenTabsUIDelegate(
+sync_sessions::OpenTabsUIDelegate* ForeignSessionHandler::GetOpenTabsUIDelegate(
     content::WebUI* web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
 
   // Only return the delegate if it exists and it is done syncing sessions.
@@ -205,7 +208,7 @@ sync_driver::OpenTabsUIDelegate* ForeignSessionHandler::GetOpenTabsUIDelegate(
 void ForeignSessionHandler::RegisterMessages() {
   Profile* profile = Profile::FromWebUI(web_ui());
 
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
 
   // NOTE: The ProfileSyncService can be null in tests.
@@ -236,7 +239,7 @@ void ForeignSessionHandler::OnForeignSessionUpdated() {
 
 bool ForeignSessionHandler::IsTabSyncEnabled() {
   Profile* profile = Profile::FromWebUI(web_ui());
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
   return service && service->GetActiveDataTypes().Has(syncer::PROXY_TABS);
 }
@@ -253,8 +256,9 @@ base::string16 ForeignSessionHandler::FormatSessionTime(
 
 void ForeignSessionHandler::HandleGetForeignSessions(
     const base::ListValue* /*args*/) {
-  sync_driver::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate(web_ui());
-  std::vector<const sync_driver::SyncedSession*> sessions;
+  sync_sessions::OpenTabsUIDelegate* open_tabs =
+      GetOpenTabsUIDelegate(web_ui());
+  std::vector<const sync_sessions::SyncedSession*> sessions;
 
   base::ListValue session_list;
   if (open_tabs && open_tabs->GetAllForeignSessions(&sessions)) {
@@ -276,7 +280,7 @@ void ForeignSessionHandler::HandleGetForeignSessions(
 
     // Note: we don't own the SyncedSessions themselves.
     for (size_t i = 0; i < sessions.size() && i < kMaxSessionsToShow; ++i) {
-      const sync_driver::SyncedSession* session = sessions[i];
+      const sync_sessions::SyncedSession* session = sessions[i];
       const std::string& session_tag = session->session_tag;
       std::unique_ptr<base::DictionaryValue> session_data(
           new base::DictionaryValue());
@@ -301,11 +305,11 @@ void ForeignSessionHandler::HandleGetForeignSessions(
           base::FieldTrialList::FindFullName("TabSyncByRecency");
       if (group_name != "Enabled") {
         // Order tabs by visual order within window.
-        for (auto map_iter : session->windows) {
+        for (const auto& window_pair : session->windows) {
           std::unique_ptr<base::DictionaryValue> window_data(
-              SessionWindowToValue(*map_iter.second));
+              SessionWindowToValue(*window_pair.second.get()));
           if (window_data.get())
-            window_list->Append(window_data.release());
+            window_list->Append(std::move(window_data));
         }
       } else {
         // Order tabs by recency. This involves creating a synthetic singleton
@@ -319,24 +323,24 @@ void ForeignSessionHandler::HandleGetForeignSessions(
               SessionTabToValue(*tab));
           if (tab_value.get()) {
             modification_time = std::max(modification_time, tab->timestamp);
-            tab_values->Append(tab_value.release());
+            tab_values->Append(std::move(tab_value));
           }
         }
         if (tab_values->GetSize() != 0) {
           std::unique_ptr<base::DictionaryValue> window_data(
               BuildWindowData(modification_time, 1));
           window_data->Set("tabs", tab_values.release());
-          window_list->Append(window_data.release());
+          window_list->Append(std::move(window_data));
         }
       }
 
       session_data->Set("windows", window_list.release());
-      session_list.Append(session_data.release());
+      session_list.Append(std::move(session_data));
     }
   }
   base::FundamentalValue tab_sync_enabled(IsTabSyncEnabled());
-  web_ui()->CallJavascriptFunction("setForeignSessions", session_list,
-                                   tab_sync_enabled);
+  web_ui()->CallJavascriptFunctionUnsafe("setForeignSessions", session_list,
+                                         tab_sync_enabled);
 }
 
 void ForeignSessionHandler::HandleOpenForeignSession(
@@ -401,7 +405,8 @@ void ForeignSessionHandler::HandleDeleteForeignSession(
     return;
   }
 
-  sync_driver::OpenTabsUIDelegate* open_tabs = GetOpenTabsUIDelegate(web_ui());
+  sync_sessions::OpenTabsUIDelegate* open_tabs =
+      GetOpenTabsUIDelegate(web_ui());
   if (open_tabs)
     open_tabs->DeleteForeignSession(session_tag);
 }

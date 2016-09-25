@@ -10,6 +10,8 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
+
+#include "base/process/process_handle.h"
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
 #include <mach/mach.h>
 #endif
@@ -51,20 +53,32 @@ struct MOJO_SYSTEM_IMPL_EXPORT PlatformHandle {
 
   int handle = -1;
 
+  // A POSIX handle may be a listen handle that can accept a connection.
+  bool needs_connection = false;
+
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   mach_port_t port = MACH_PORT_NULL;
 #endif
 };
 #elif defined(OS_WIN)
 struct MOJO_SYSTEM_IMPL_EXPORT PlatformHandle {
-  PlatformHandle() : handle(INVALID_HANDLE_VALUE) {}
-  explicit PlatformHandle(HANDLE handle) : handle(handle) {}
+  PlatformHandle() : PlatformHandle(INVALID_HANDLE_VALUE) {}
+  explicit PlatformHandle(HANDLE handle)
+      : handle(handle), owning_process(base::GetCurrentProcessHandle()) {}
 
   void CloseIfNecessary();
 
   bool is_valid() const { return handle != INVALID_HANDLE_VALUE; }
 
   HANDLE handle;
+
+  // A Windows HANDLE may be duplicated to another process but not yet sent to
+  // that process. This tracks the handle's owning process.
+  base::ProcessHandle owning_process;
+
+  // A Windows HANDLE may be an unconnected named pipe. In this case, we need to
+  // wait for a connection before communicating on the pipe.
+  bool needs_connection = false;
 };
 #else
 #error "Platform not yet supported."

@@ -9,7 +9,6 @@
 #include "base/macros.h"
 #include "chrome/browser/extensions/extension_view.h"
 #include "content/public/browser/native_web_keyboard_event.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
 #include "ui/views/controls/webview/webview.h"
 
@@ -43,7 +42,7 @@ class ExtensionViewViews : public views::WebView,
   Browser* GetBrowser() override;
 
   // views::WebView:
-  void SetVisible(bool is_visible) override;
+  void VisibilityChanged(View* starting_from, bool is_visible) override;
 
   void set_minimum_size(const gfx::Size& minimum_size) {
     minimum_size_ = minimum_size;

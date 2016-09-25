@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
+#include "base/run_loop.h"
 #include "base/sys_byteorder.h"
 #include "base/test/test_timeouts.h"
 #include "net/base/ip_address.h"
@@ -25,7 +26,11 @@
 #include "net/dns/dns_util.h"
 #include "net/log/net_log.h"
 #include "net/socket/socket_test_util.h"
+#include "net/test/gtest_util.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using net::test::IsOk;
 
 namespace net {
 
@@ -92,8 +97,8 @@ class DnsSocketData {
   // Adds pre-built response from |data| buffer.
   void AddResponseData(const uint8_t* data, size_t length, IoMode mode) {
     CHECK(!provider_.get());
-    AddResponse(base::WrapUnique(new DnsResponse(
-                    reinterpret_cast<const char*>(data), length, 0)),
+    AddResponse(base::MakeUnique<DnsResponse>(
+                    reinterpret_cast<const char*>(data), length, 0),
                 mode);
   }
 
@@ -247,11 +252,9 @@ class TransactionHelper {
   void StartTransaction(DnsTransactionFactory* factory) {
     EXPECT_EQ(NULL, transaction_.get());
     transaction_ = factory->CreateTransaction(
-        hostname_,
-        qtype_,
-        base::Bind(&TransactionHelper::OnTransactionComplete,
-                   base::Unretained(this)),
-        BoundNetLog());
+        hostname_, qtype_, base::Bind(&TransactionHelper::OnTransactionComplete,
+                                      base::Unretained(this)),
+        NetLogWithSource());
     EXPECT_EQ(hostname_, transaction_->GetHostname());
     EXPECT_EQ(qtype_, transaction_->GetType());
     transaction_->Start();
@@ -280,7 +283,7 @@ class TransactionHelper {
       base::MessageLoop::current()->QuitWhenIdle();
 
     if (expected_answer_count_ >= 0) {
-      ASSERT_EQ(OK, rv);
+      ASSERT_THAT(rv, IsOk());
       ASSERT_TRUE(response != NULL);
       EXPECT_EQ(static_cast<unsigned>(expected_answer_count_),
                 response->answer_count());
@@ -304,7 +307,7 @@ class TransactionHelper {
 
   bool Run(DnsTransactionFactory* factory) {
     StartTransaction(factory);
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     return has_completed();
   }
 
@@ -312,7 +315,7 @@ class TransactionHelper {
   bool RunUntilDone(DnsTransactionFactory* factory) {
     set_quit_in_callback();
     StartTransaction(factory);
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
     return has_completed();
   }
 
@@ -345,8 +348,8 @@ class DnsTransactionTest : public testing::Test {
   void ConfigureFactory() {
     socket_factory_.reset(new TestSocketFactory());
     session_ = new DnsSession(
-        config_,
-        DnsSocketPool::CreateNull(socket_factory_.get()),
+        config_, DnsSocketPool::CreateNull(socket_factory_.get(),
+                                           base::Bind(base::RandInt)),
         base::Bind(&DnsTransactionTest::GetNextId, base::Unretained(this)),
         NULL /* NetLog */);
     transaction_factory_ = DnsTransactionFactory::CreateFactory(session_.get());
@@ -497,7 +500,7 @@ TEST_F(DnsTransactionTest, ConcurrentLookup) {
   TransactionHelper helper1(kT1HostName, kT1Qtype, kT1RecordCount);
   helper1.StartTransaction(transaction_factory_.get());
 
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(helper0.has_completed());
   EXPECT_TRUE(helper1.has_completed());
@@ -516,7 +519,7 @@ TEST_F(DnsTransactionTest, CancelLookup) {
 
   helper0.Cancel();
 
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_FALSE(helper0.has_completed());
   EXPECT_TRUE(helper1.has_completed());
@@ -532,7 +535,7 @@ TEST_F(DnsTransactionTest, DestroyFactory) {
   // Destroying the client does not affect running requests.
   transaction_factory_.reset(NULL);
 
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   EXPECT_TRUE(helper0.has_completed());
 }
@@ -905,9 +908,9 @@ TEST_F(DnsTransactionTest, TCPMalformed) {
   // examine the answer section until asked to parse it, so truncating it in
   // the answer section would result in the DnsTransaction itself succeeding.
   data->AddResponseWithLength(
-      base::WrapUnique(
-          new DnsResponse(reinterpret_cast<const char*>(kT0ResponseDatagram),
-                          arraysize(kT0ResponseDatagram), 0)),
+      base::MakeUnique<DnsResponse>(
+          reinterpret_cast<const char*>(kT0ResponseDatagram),
+          arraysize(kT0ResponseDatagram), 0),
       ASYNC, static_cast<uint16_t>(kT0QuerySize - 1));
   AddSocketData(std::move(data));
 
@@ -920,8 +923,8 @@ TEST_F(DnsTransactionTest, TCPTimeout) {
   ConfigureFactory();
   AddAsyncQueryAndRcode(kT0HostName, kT0Qtype,
                         dns_protocol::kRcodeNOERROR | dns_protocol::kFlagTC);
-  AddSocketData(base::WrapUnique(
-      new DnsSocketData(1 /* id */, kT0HostName, kT0Qtype, ASYNC, true)));
+  AddSocketData(base::MakeUnique<DnsSocketData>(1 /* id */, kT0HostName,
+                                                kT0Qtype, ASYNC, true));
 
   TransactionHelper helper0(kT0HostName, kT0Qtype, ERR_DNS_TIMED_OUT);
   EXPECT_TRUE(helper0.RunUntilDone(transaction_factory_.get()));
@@ -934,9 +937,9 @@ TEST_F(DnsTransactionTest, TCPReadReturnsZeroAsync) {
       new DnsSocketData(0 /* id */, kT0HostName, kT0Qtype, ASYNC, true));
   // Return all but the last byte of the response.
   data->AddResponseWithLength(
-      base::WrapUnique(
-          new DnsResponse(reinterpret_cast<const char*>(kT0ResponseDatagram),
-                          arraysize(kT0ResponseDatagram) - 1, 0)),
+      base::MakeUnique<DnsResponse>(
+          reinterpret_cast<const char*>(kT0ResponseDatagram),
+          arraysize(kT0ResponseDatagram) - 1, 0),
       ASYNC, static_cast<uint16_t>(arraysize(kT0ResponseDatagram)));
   // Then return a 0-length read.
   data->AddReadError(0, ASYNC);
@@ -953,9 +956,9 @@ TEST_F(DnsTransactionTest, TCPReadReturnsZeroSynchronous) {
       new DnsSocketData(0 /* id */, kT0HostName, kT0Qtype, ASYNC, true));
   // Return all but the last byte of the response.
   data->AddResponseWithLength(
-      base::WrapUnique(
-          new DnsResponse(reinterpret_cast<const char*>(kT0ResponseDatagram),
-                          arraysize(kT0ResponseDatagram) - 1, 0)),
+      base::MakeUnique<DnsResponse>(
+          reinterpret_cast<const char*>(kT0ResponseDatagram),
+          arraysize(kT0ResponseDatagram) - 1, 0),
       SYNCHRONOUS, static_cast<uint16_t>(arraysize(kT0ResponseDatagram)));
   // Then return a 0-length read.
   data->AddReadError(0, SYNCHRONOUS);

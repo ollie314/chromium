@@ -53,6 +53,7 @@
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
+#include "core/origin_trials/OriginTrialContext.h"
 #include "platform/Histogram.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/ScriptForbiddenScope.h"
@@ -61,7 +62,6 @@
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/Platform.h"
 #include "wtf/Assertions.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/StringExtras.h"
 #include "wtf/text/CString.h"
 #include <algorithm>
@@ -225,6 +225,7 @@ bool WindowProxy::initialize()
 {
     TRACE_EVENT0("v8", "WindowProxy::initialize");
     TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "InitializeWindow");
+    SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.Binding.InitializeWindowProxy");
 
     ScriptForbiddenScope::AllowUserAgentScript allowScript;
 
@@ -268,6 +269,16 @@ bool WindowProxy::initialize()
         LocalFrame* frame = toLocalFrame(m_frame);
         MainThreadDebugger::instance()->contextCreated(m_scriptState.get(), frame, origin);
         frame->loader().client()->didCreateScriptContext(context, m_world->extensionGroup(), m_world->worldId());
+    }
+    // If Origin Trials have been registered before the V8 context was ready,
+    // then inject them into the context now
+    if (m_world->isMainWorld()) {
+        ExecutionContext* executionContext = m_scriptState->getExecutionContext();
+        if (executionContext) {
+            OriginTrialContext* originTrialContext = OriginTrialContext::from(executionContext);
+            if (originTrialContext)
+                originTrialContext->initializePendingFeatures();
+        }
     }
     return true;
 }
@@ -360,11 +371,11 @@ bool WindowProxy::setupWindowPrototypeChain()
     // The prototype object of Window interface.
     v8::Local<v8::Object> windowPrototype = windowWrapper->GetPrototype().As<v8::Object>();
     RELEASE_ASSERT(!windowPrototype.IsEmpty());
-    V8DOMWrapper::setNativeInfo(windowPrototype, wrapperTypeInfo, window);
+    V8DOMWrapper::setNativeInfo(m_isolate, windowPrototype, wrapperTypeInfo, window);
     // The named properties object of Window interface.
     v8::Local<v8::Object> windowProperties = windowPrototype->GetPrototype().As<v8::Object>();
     RELEASE_ASSERT(!windowProperties.IsEmpty());
-    V8DOMWrapper::setNativeInfo(windowProperties, wrapperTypeInfo, window);
+    V8DOMWrapper::setNativeInfo(m_isolate, windowProperties, wrapperTypeInfo, window);
 
     // TODO(keishi): Remove installPagePopupController and implement
     // PagePopupController in another way.
@@ -416,12 +427,11 @@ void WindowProxy::setSecurityToken(SecurityOrigin* origin)
     // If two tokens are not equal, then we have to call canAccess.
     // Note: we can't use the HTTPOrigin if it was set from the DOM.
     String token;
-    // There are several situations where v8 needs to do a full canAccess check,
+    // There are two situations where v8 needs to do a full canAccess check,
     // so set an empty security token instead:
     // - document.domain was modified
-    // - the frame is showing the initial empty document
     // - the frame is remote
-    bool delaySet = m_frame->isRemoteFrame() || (m_world->isMainWorld() && (origin->domainWasSetInDOM() || toLocalFrame(m_frame)->loader().stateMachine()->isDisplayingInitialEmptyDocument()));
+    bool delaySet = m_frame->isRemoteFrame() || (m_world->isMainWorld() && origin->domainWasSetInDOM());
     if (origin && !delaySet)
         token = origin->toString();
 
@@ -455,10 +465,9 @@ void WindowProxy::setSecurityToken(SecurityOrigin* origin)
         token = frameSecurityToken + token;
     }
 
-    CString utf8Token = token.utf8();
     // NOTE: V8 does identity comparison in fast path, must use a symbol
     // as the security token.
-    context->SetSecurityToken(v8AtomicString(m_isolate, utf8Token.data(), utf8Token.length()));
+    context->SetSecurityToken(v8AtomicString(m_isolate, token));
 }
 
 void WindowProxy::updateDocument()
@@ -495,6 +504,8 @@ static v8::Local<v8::Value> getNamedProperty(HTMLDocument* htmlDocument, const A
 
 static void getter(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
+    if (!property->IsString())
+        return;
     // FIXME: Consider passing StringImpl directly.
     AtomicString name = toCoreAtomicString(property.As<v8::String>());
     HTMLDocument* htmlDocument = V8HTMLDocument::toImpl(info.Holder());
@@ -504,12 +515,9 @@ static void getter(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<
         v8SetReturnValue(info, result);
         return;
     }
-    v8::Local<v8::Value> prototype = info.Holder()->GetPrototype();
-    if (prototype->IsObject()) {
-        v8::Local<v8::Value> value;
-        if (prototype.As<v8::Object>()->Get(info.GetIsolate()->GetCurrentContext(), property).ToLocal(&value))
-            v8SetReturnValue(info, value);
-    }
+    v8::Local<v8::Value> value;
+    if (info.Holder()->GetRealNamedPropertyInPrototypeChain(info.GetIsolate()->GetCurrentContext(), property.As<v8::String>()).ToLocal(&value))
+        v8SetReturnValue(info, value);
 }
 
 void WindowProxy::namedItemAdded(HTMLDocument* document, const AtomicString& name)

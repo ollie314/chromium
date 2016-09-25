@@ -29,32 +29,35 @@ int NetworkDelegate::NotifyBeforeURLRequest(
   return OnBeforeURLRequest(request, callback, new_url);
 }
 
-int NetworkDelegate::NotifyBeforeSendHeaders(
-    URLRequest* request, const CompletionCallback& callback,
+int NetworkDelegate::NotifyBeforeStartTransaction(
+    URLRequest* request,
+    const CompletionCallback& callback,
     HttpRequestHeaders* headers) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("net"),
-               "NetworkDelegate::NotifyBeforeSendHeaders");
+               "NetworkDelegate::NotifyBeforeStartTransation");
   DCHECK(CalledOnValidThread());
   DCHECK(headers);
   DCHECK(!callback.is_null());
-  return OnBeforeSendHeaders(request, callback, headers);
+  return OnBeforeStartTransaction(request, callback, headers);
 }
 
-void NetworkDelegate::NotifyBeforeSendProxyHeaders(
+void NetworkDelegate::NotifyBeforeSendHeaders(
     URLRequest* request,
     const ProxyInfo& proxy_info,
+    const ProxyRetryInfoMap& proxy_retry_info,
     HttpRequestHeaders* headers) {
   DCHECK(CalledOnValidThread());
   DCHECK(headers);
-  OnBeforeSendProxyHeaders(request, proxy_info, headers);
+  OnBeforeSendHeaders(request, proxy_info, proxy_retry_info, headers);
 }
 
-void NetworkDelegate::NotifySendHeaders(URLRequest* request,
-                                        const HttpRequestHeaders& headers) {
+void NetworkDelegate::NotifyStartTransaction(
+    URLRequest* request,
+    const HttpRequestHeaders& headers) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("net"),
-               "NetworkDelegate::NotifySendHeaders");
+               "NetworkDelegate::NotifyStartTransaction");
   DCHECK(CalledOnValidThread());
-  OnSendHeaders(request, headers);
+  OnStartTransaction(request, headers);
 }
 
 int NetworkDelegate::NotifyHeadersReceived(
@@ -75,10 +78,12 @@ int NetworkDelegate::NotifyHeadersReceived(
                            allowed_unsafe_redirect_url);
 }
 
-void NetworkDelegate::NotifyResponseStarted(URLRequest* request) {
+void NetworkDelegate::NotifyResponseStarted(URLRequest* request,
+                                            int net_error) {
   DCHECK(CalledOnValidThread());
   DCHECK(request);
-  OnResponseStarted(request);
+
+  OnResponseStarted(request, net_error);
 }
 
 void NetworkDelegate::NotifyNetworkBytesReceived(URLRequest* request,
@@ -104,7 +109,9 @@ void NetworkDelegate::NotifyBeforeRedirect(URLRequest* request,
   OnBeforeRedirect(request, new_location);
 }
 
-void NetworkDelegate::NotifyCompleted(URLRequest* request, bool started) {
+void NetworkDelegate::NotifyCompleted(URLRequest* request,
+                                      bool started,
+                                      int net_error) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("net"),
                "NetworkDelegate::NotifyCompleted");
   DCHECK(CalledOnValidThread());
@@ -112,7 +119,8 @@ void NetworkDelegate::NotifyCompleted(URLRequest* request, bool started) {
   // TODO(cbentzel): Remove ScopedTracker below once crbug.com/475753 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION("475753 NetworkDelegate::OnCompleted"));
-  OnCompleted(request, started);
+
+  OnCompleted(request, started, net_error);
 }
 
 void NetworkDelegate::NotifyURLRequestDestroyed(URLRequest* request) {
@@ -183,6 +191,26 @@ bool NetworkDelegate::CancelURLRequestWithPolicyViolatingReferrerHeader(
   DCHECK(CalledOnValidThread());
   return OnCancelURLRequestWithPolicyViolatingReferrerHeader(
       request, target_url, referrer_url);
+}
+
+void NetworkDelegate::OnResponseStarted(URLRequest* request, int net_error) {
+  OnResponseStarted(request);
+}
+
+// Deprecated
+void NetworkDelegate::OnResponseStarted(URLRequest* request) {
+  NOTREACHED();
+}
+
+void NetworkDelegate::OnCompleted(URLRequest* request,
+                                  bool started,
+                                  int net_error) {
+  OnCompleted(request, started);
+}
+
+// Deprecated.
+void NetworkDelegate::OnCompleted(URLRequest* request, bool started) {
+  NOTREACHED();
 }
 
 }  // namespace net

@@ -50,6 +50,7 @@
 #include "public/web/WebPopupMenuInfo.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebViewImpl.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -95,10 +96,7 @@ bool ExternalPopupMenu::showInternal()
         FloatQuad quad(toLayoutBox(layoutObject)->localToAbsoluteQuad(FloatQuad(toLayoutBox(layoutObject)->borderBoundingBox())));
         IntRect rect(quad.enclosingBoundingBox());
         IntRect rectInViewport = m_localFrame->view()->soonToBeRemovedContentsToUnscaledViewport(rect);
-        // TODO(tkent): If the anchor rectangle is not visible, we should not
-        // show a popup.
         m_webExternalPopupMenu->show(rectInViewport);
-        m_shownDOMTreeVersion = m_ownerElement->document().domTreeVersion();
         return true;
     } else {
         // The client might refuse to create a popup (when there is already one pending to be shown for example).
@@ -114,7 +112,7 @@ void ExternalPopupMenu::show()
 #if OS(MACOSX)
     const WebInputEvent* currentEvent = WebViewImpl::currentInputEvent();
     if (currentEvent && currentEvent->type == WebInputEvent::MouseDown) {
-        m_syntheticEvent = adoptPtr(new WebMouseEvent);
+        m_syntheticEvent = wrapUnique(new WebMouseEvent);
         *m_syntheticEvent = *static_cast<const WebMouseEvent*>(currentEvent);
         m_syntheticEvent->type = WebInputEvent::MouseUp;
         m_dispatchEventTimer.startOneShot(0, BLINK_FROM_HERE);
@@ -126,10 +124,10 @@ void ExternalPopupMenu::show()
 #endif
 }
 
-void ExternalPopupMenu::dispatchEvent(Timer<ExternalPopupMenu>*)
+void ExternalPopupMenu::dispatchEvent(TimerBase*)
 {
     m_webView.handleInputEvent(*m_syntheticEvent);
-    m_syntheticEvent.clear();
+    m_syntheticEvent.reset();
 }
 
 void ExternalPopupMenu::hide()
@@ -142,24 +140,30 @@ void ExternalPopupMenu::hide()
     m_webExternalPopupMenu = 0;
 }
 
-void ExternalPopupMenu::updateFromElement()
+void ExternalPopupMenu::updateFromElement(UpdateReason reason)
 {
-    if (m_needsUpdate)
-        return;
-    // TOOD(tkent): Even if DOMTreeVersion is not changed, we should update the
-    // popup location/content in some cases.  e.g. Updating ComputedStyle of the
-    // SELECT element affects popup position and OPTION style.
-    if (m_shownDOMTreeVersion == m_ownerElement->document().domTreeVersion())
-        return;
-    m_needsUpdate = true;
-    m_ownerElement->document().postTask(BLINK_FROM_HERE, createSameThreadTask(&ExternalPopupMenu::update, this));
+    switch (reason) {
+    case BySelectionChange:
+    case ByDOMChange:
+        if (m_needsUpdate)
+            return;
+        m_needsUpdate = true;
+        m_ownerElement->document().postTask(BLINK_FROM_HERE, createSameThreadTask(&ExternalPopupMenu::update, wrapPersistent(this)));
+        break;
+
+    case ByStyleChange:
+        // TOOD(tkent): We should update the popup location/content in some
+        // cases.  e.g. Updating ComputedStyle of the SELECT element affects
+        // popup position and OPTION style.
+        break;
+    }
 }
 
 void ExternalPopupMenu::update()
 {
     if (!m_webExternalPopupMenu || !m_ownerElement)
         return;
-    m_ownerElement->document().updateLayoutTree();
+    m_ownerElement->document().updateStyleAndLayoutTree();
     // disconnectClient() might have been called.
     if (!m_ownerElement)
         return;
@@ -190,11 +194,12 @@ void ExternalPopupMenu::didAcceptIndex(int index)
 
     if (m_ownerElement) {
         m_ownerElement->popupDidHide();
-        m_ownerElement->valueChanged(popupMenuItemIndex);
+        m_ownerElement->selectOptionByPopup(popupMenuItemIndex);
     }
     m_webExternalPopupMenu = 0;
 }
 
+// Android uses this function even for single SELECT.
 void ExternalPopupMenu::didAcceptIndices(const WebVector<int>& indices)
 {
     if (!m_ownerElement) {
@@ -206,10 +211,15 @@ void ExternalPopupMenu::didAcceptIndices(const WebVector<int>& indices)
     ownerElement->popupDidHide();
 
     if (indices.size() == 0) {
-        ownerElement->valueChanged(static_cast<unsigned>(-1));
+        ownerElement->selectOptionByPopup(-1);
+    } else if (!ownerElement->multiple()) {
+        ownerElement->selectOptionByPopup(toPopupMenuItemIndex(indices[indices.size() - 1], *ownerElement));
     } else {
+        Vector<int> listIndices;
+        listIndices.reserveCapacity(indices.size());
         for (size_t i = 0; i < indices.size(); ++i)
-            ownerElement->listBoxSelectItem(toPopupMenuItemIndex(indices[i], *ownerElement), (i > 0), false, (i == indices.size() - 1));
+            listIndices.append(toPopupMenuItemIndex(indices[i], *ownerElement));
+        ownerElement->selectMultipleOptionsByPopup(listIndices);
     }
 
     m_webExternalPopupMenu = 0;
@@ -254,7 +264,7 @@ void ExternalPopupMenu::getPopupMenuInfo(WebPopupMenuInfo& info, HTMLSelectEleme
     const ComputedStyle& menuStyle = ownerElement.computedStyle() ? *ownerElement.computedStyle() : *ownerElement.ensureComputedStyle();
     info.itemHeight = menuStyle.font().getFontMetrics().height();
     info.itemFontSize = static_cast<int>(menuStyle.font().getFontDescription().computedSize());
-    info.selectedIndex = toExternalPopupMenuItemIndex(ownerElement.optionToListIndex(ownerElement.selectedIndex()), ownerElement);
+    info.selectedIndex = toExternalPopupMenuItemIndex(ownerElement.selectedListIndex(), ownerElement);
     info.rightAligned = menuStyle.direction() == RTL;
     info.allowMultipleSelection = ownerElement.multiple();
     if (count < itemCount)

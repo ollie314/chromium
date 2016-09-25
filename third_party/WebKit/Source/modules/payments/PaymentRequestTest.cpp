@@ -4,139 +4,466 @@
 
 #include "modules/payments/PaymentRequest.h"
 
-#include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/ScriptState.h"
+#include "bindings/core/v8/JSONValuesForV8.h"
+#include "bindings/core/v8/V8BindingForTesting.h"
+#include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/testing/DummyPageHolder.h"
-#include "modules/payments/CurrencyAmount.h"
-#include "modules/payments/PaymentDetailsTestHelper.h"
-#include "modules/payments/PaymentItem.h"
-#include "modules/payments/ShippingOption.h"
+#include "modules/payments/PaymentTestHelper.h"
 #include "platform/heap/HeapAllocator.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
-
 namespace {
 
-class PaymentRequestTest : public testing::Test {
-public:
-    PaymentRequestTest()
-        : m_page(DummyPageHolder::create())
-    {
-        setSecurityOrigin("https://www.example.com/");
-    }
-
-    ~PaymentRequestTest() override {}
-
-    ScriptState* getScriptState() { return ScriptState::forMainWorld(m_page->document().frame()); }
-    ExceptionState& getExceptionState() { return m_exceptionState; }
-
-    void setSecurityOrigin(const String& securityOrigin)
-    {
-        m_page->document().setSecurityOrigin(SecurityOrigin::create(KURL(KURL(), securityOrigin)));
-    }
-
-private:
-    OwnPtr<DummyPageHolder> m_page;
-    TrackExceptionState m_exceptionState;
-};
-
-TEST_F(PaymentRequestTest, NoExceptionWithValidData)
+TEST(PaymentRequestTest, SecureContextRequired)
 {
-    PaymentRequest::create(getScriptState(), Vector<String>(1, "foo"), buildPaymentDetailsForTest(), getExceptionState());
+    V8TestingScope scope;
+    scope.document().setSecurityOrigin(SecurityOrigin::create(KURL(KURL(), "http://www.example.com/")));
 
-    EXPECT_FALSE(getExceptionState().hadException());
+    PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+
+    EXPECT_TRUE(scope.getExceptionState().hadException());
+    EXPECT_EQ(SecurityError, scope.getExceptionState().code());
 }
 
-TEST_F(PaymentRequestTest, SecureContextRequired)
+TEST(PaymentRequestTest, NoExceptionWithValidData)
 {
-    setSecurityOrigin("http://www.example.com");
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
 
-    PaymentRequest::create(getScriptState(), Vector<String>(1, "foo"), buildPaymentDetailsForTest(), getExceptionState());
-
-    EXPECT_TRUE(getExceptionState().hadException());
-    EXPECT_EQ(SecurityError, getExceptionState().code());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
 }
 
-TEST_F(PaymentRequestTest, SupportedMethodListRequired)
-{
-    PaymentRequest::create(getScriptState(), Vector<String>(), buildPaymentDetailsForTest(), getExceptionState());
 
-    EXPECT_TRUE(getExceptionState().hadException());
-    EXPECT_EQ(V8TypeError, getExceptionState().code());
+TEST(PaymentRequestTest, SupportedMethodListRequired)
+{
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest::create(scope.getScriptState(), HeapVector<PaymentMethodData>(), buildPaymentDetailsForTest(), scope.getExceptionState());
+
+    EXPECT_TRUE(scope.getExceptionState().hadException());
+    EXPECT_EQ(V8TypeError, scope.getExceptionState().code());
 }
 
-TEST_F(PaymentRequestTest, ItemListRequired)
+TEST(PaymentRequestTest, TotalRequired)
 {
-    PaymentRequest::create(getScriptState(), Vector<String>(1, "foo"), PaymentDetails(), getExceptionState());
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), PaymentDetails(), scope.getExceptionState());
 
-    EXPECT_TRUE(getExceptionState().hadException());
-    EXPECT_EQ(V8TypeError, getExceptionState().code());
+    EXPECT_TRUE(scope.getExceptionState().hadException());
+    EXPECT_EQ(V8TypeError, scope.getExceptionState().code());
 }
 
-TEST_F(PaymentRequestTest, ItemListIsNotEmpty)
+TEST(PaymentRequestTest, NullShippingOptionWhenNoOptionsAvailable)
 {
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
     PaymentDetails details;
-    details.setItems(HeapVector<PaymentItem>());
+    details.setTotal(buildPaymentItemForTest());
+    PaymentOptions options;
+    options.setRequestShipping(true);
 
-    PaymentRequest::create(getScriptState(), Vector<String>(1, "foo"), details, getExceptionState());
-
-    EXPECT_TRUE(getExceptionState().hadException());
-    EXPECT_EQ(V8TypeError, getExceptionState().code());
-}
-
-TEST_F(PaymentRequestTest, AtLeastOnePaymentDetailsItemRequired)
-{
-    PaymentDetails details;
-    details.setShippingOptions(HeapVector<ShippingOption>(2, buildShippingOptionForTest()));
-
-    PaymentRequest::create(getScriptState(), Vector<String>(1, "foo"), details, getExceptionState());
-
-    EXPECT_TRUE(getExceptionState().hadException());
-    EXPECT_EQ(V8TypeError, getExceptionState().code());
-}
-
-TEST_F(PaymentRequestTest, NullShippingOptionWhenNoOptionsAvailable)
-{
-    PaymentDetails details;
-    details.setItems(HeapVector<PaymentItem>(1, buildPaymentItemForTest()));
-
-    PaymentRequest* request = PaymentRequest::create(getScriptState(), Vector<String>(1, "foo"), details, getExceptionState());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
 
     EXPECT_TRUE(request->shippingOption().isNull());
 }
 
-TEST_F(PaymentRequestTest, NullShippingOptionWhenMultipleOptionsAvailable)
+TEST(PaymentRequestTest, NullShippingOptionWhenMultipleOptionsAvailable)
 {
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
     PaymentDetails details;
-    details.setItems(HeapVector<PaymentItem>(1, buildPaymentItemForTest()));
-    details.setShippingOptions(HeapVector<ShippingOption>(2, buildShippingOptionForTest()));
+    details.setTotal(buildPaymentItemForTest());
+    details.setShippingOptions(HeapVector<PaymentShippingOption>(2, buildShippingOptionForTest()));
+    PaymentOptions options;
+    options.setRequestShipping(true);
 
-    PaymentRequest* request = PaymentRequest::create(getScriptState(), Vector<String>(1, "foo"), details, getExceptionState());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
 
     EXPECT_TRUE(request->shippingOption().isNull());
 }
 
-TEST_F(PaymentRequestTest, SelectSingleAvailableShippingOption)
+TEST(PaymentRequestTest, DontSelectSingleAvailableShippingOptionByDefault)
 {
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
     PaymentDetails details;
-    details.setItems(HeapVector<PaymentItem>(1, buildPaymentItemForTest()));
-    details.setShippingOptions(HeapVector<ShippingOption>(1, buildShippingOptionForTest()));
+    details.setTotal(buildPaymentItemForTest());
+    details.setShippingOptions(HeapVector<PaymentShippingOption>(1, buildShippingOptionForTest(PaymentTestDataId, PaymentTestOverwriteValue, "standard")));
 
-    PaymentRequest* request = PaymentRequest::create(getScriptState(), Vector<String>(1, "foo"), details, getExceptionState());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, scope.getExceptionState());
+
+    EXPECT_TRUE(request->shippingOption().isNull());
+}
+
+TEST(PaymentRequestTest, DontSelectSingleAvailableShippingOptionWhenShippingNotRequested)
+{
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    details.setShippingOptions(HeapVector<PaymentShippingOption>(1, buildShippingOptionForTest()));
+    PaymentOptions options;
+    options.setRequestShipping(false);
+
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
+
+    EXPECT_TRUE(request->shippingOption().isNull());
+}
+
+TEST(PaymentRequestTest, DontSelectSingleUnselectedShippingOptionWhenShippingRequested)
+{
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    details.setShippingOptions(HeapVector<PaymentShippingOption>(1, buildShippingOptionForTest()));
+    PaymentOptions options;
+    options.setRequestShipping(true);
+
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
+
+    EXPECT_TRUE(request->shippingOption().isNull());
+}
+
+TEST(PaymentRequestTest, SelectSingleSelectedShippingOptionWhenShippingRequested)
+{
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    HeapVector<PaymentShippingOption> shippingOptions(1, buildShippingOptionForTest(PaymentTestDataId, PaymentTestOverwriteValue, "standard"));
+    shippingOptions[0].setSelected(true);
+    details.setShippingOptions(shippingOptions);
+    PaymentOptions options;
+    options.setRequestShipping(true);
+
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
 
     EXPECT_EQ("standard", request->shippingOption());
 }
 
-TEST_F(PaymentRequestTest, AbortWithoutShowShouldThrow)
+TEST(PaymentRequestTest, SelectOnlySelectedShippingOptionWhenShippingRequested)
 {
-    PaymentRequest* request = PaymentRequest::create(getScriptState(), Vector<String>(1, "foo"), buildPaymentDetailsForTest(), getExceptionState());
-    EXPECT_FALSE(getExceptionState().hadException());
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    HeapVector<PaymentShippingOption> shippingOptions(2);
+    shippingOptions[0] = buildShippingOptionForTest(PaymentTestDataId, PaymentTestOverwriteValue, "standard");
+    shippingOptions[0].setSelected(true);
+    shippingOptions[1] = buildShippingOptionForTest(PaymentTestDataId, PaymentTestOverwriteValue, "express");
+    details.setShippingOptions(shippingOptions);
+    PaymentOptions options;
+    options.setRequestShipping(true);
 
-    request->abort(getExceptionState());
-    EXPECT_TRUE(getExceptionState().hadException());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
+
+    EXPECT_EQ("standard", request->shippingOption());
+}
+
+TEST(PaymentRequestTest, SelectLastSelectedShippingOptionWhenShippingRequested)
+{
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    HeapVector<PaymentShippingOption> shippingOptions(2);
+    shippingOptions[0] = buildShippingOptionForTest(PaymentTestDataId, PaymentTestOverwriteValue, "standard");
+    shippingOptions[0].setSelected(true);
+    shippingOptions[1] = buildShippingOptionForTest(PaymentTestDataId, PaymentTestOverwriteValue, "express");
+    shippingOptions[1].setSelected(true);
+    details.setShippingOptions(shippingOptions);
+    PaymentOptions options;
+    options.setRequestShipping(true);
+
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
+
+    EXPECT_EQ("express", request->shippingOption());
+}
+
+TEST(PaymentRequestTest, NullShippingTypeWhenRequestShippingIsFalse)
+{
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    PaymentOptions options;
+    options.setRequestShipping(false);
+
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
+
+    EXPECT_TRUE(request->shippingType().isNull());
+}
+
+TEST(PaymentRequestTest, DefaultShippingTypeWhenRequestShippingIsTrueWithNoSpecificType)
+{
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    PaymentOptions options;
+    options.setRequestShipping(true);
+
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
+
+    EXPECT_EQ("shipping", request->shippingType());
+}
+
+TEST(PaymentRequestTest, DeliveryShippingTypeWhenShippingTypeIsDelivery)
+{
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    PaymentOptions options;
+    options.setRequestShipping(true);
+    options.setShippingType("delivery");
+
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
+
+    EXPECT_EQ("delivery", request->shippingType());
+}
+
+TEST(PaymentRequestTest, PickupShippingTypeWhenShippingTypeIsPickup)
+{
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    PaymentOptions options;
+    options.setRequestShipping(true);
+    options.setShippingType("pickup");
+
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
+
+    EXPECT_EQ("pickup", request->shippingType());
+}
+
+TEST(PaymentRequestTest, DefaultShippingTypeWhenShippingTypeIsInvalid)
+{
+    V8TestingScope scope;
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    PaymentOptions options;
+    options.setRequestShipping(true);
+    options.setShippingType("invalid");
+
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
+
+    EXPECT_EQ("shipping", request->shippingType());
+}
+
+TEST(PaymentRequestTest, RejectShowPromiseOnInvalidShippingAddress)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectCall());
+
+    static_cast<mojom::blink::PaymentRequestClient*>(request)->OnShippingAddressChange(mojom::blink::PaymentAddress::New());
+}
+
+TEST(PaymentRequestTest, OnShippingOptionChange)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectNoCall());
+
+    static_cast<mojom::blink::PaymentRequestClient*>(request)->OnShippingOptionChange("standardShipping");
+}
+
+TEST(PaymentRequestTest, CannotCallShowTwice)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+    request->show(scope.getScriptState());
+
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectCall());
+}
+
+TEST(PaymentRequestTest, CannotShowAfterAborted)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+    request->show(scope.getScriptState());
+    request->abort(scope.getScriptState());
+    static_cast<mojom::blink::PaymentRequestClient*>(request)->OnAbort(true);
+
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectCall());
+}
+
+TEST(PaymentRequestTest, RejectShowPromiseOnErrorPaymentMethodNotSupported)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+
+    String errorMessage;
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectCall(&errorMessage));
+
+    static_cast<mojom::blink::PaymentRequestClient*>(request)->OnError(mojom::blink::PaymentErrorReason::NOT_SUPPORTED);
+
+    v8::MicrotasksScope::PerformCheckpoint(scope.getScriptState()->isolate());
+    EXPECT_EQ("NotSupportedError: The payment method is not supported", errorMessage);
+}
+
+TEST(PaymentRequestTest, RejectShowPromiseOnErrorCancelled)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+
+    String errorMessage;
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectCall(&errorMessage));
+
+    static_cast<mojom::blink::PaymentRequestClient*>(request)->OnError(mojom::blink::PaymentErrorReason::USER_CANCEL);
+
+    v8::MicrotasksScope::PerformCheckpoint(scope.getScriptState()->isolate());
+    EXPECT_EQ("Request cancelled", errorMessage);
+}
+
+TEST(PaymentRequestTest, RejectShowPromiseOnUpdateDetailsFailure)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+
+    String errorMessage;
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectCall(&errorMessage));
+
+    request->onUpdatePaymentDetailsFailure("oops");
+
+    v8::MicrotasksScope::PerformCheckpoint(scope.getScriptState()->isolate());
+    EXPECT_EQ("AbortError: oops", errorMessage);
+}
+
+TEST(PaymentRequestTest, IgnoreUpdatePaymentDetailsAfterShowPromiseResolved)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+    request->show(scope.getScriptState()).then(funcs.expectCall(), funcs.expectNoCall());
+    static_cast<mojom::blink::PaymentRequestClient*>(request)->OnPaymentResponse(buildPaymentResponseForTest());
+
+    request->onUpdatePaymentDetails(ScriptValue::from(scope.getScriptState(), "foo"));
+}
+
+TEST(PaymentRequestTest, RejectShowPromiseOnNonPaymentDetailsUpdate)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectCall());
+
+    request->onUpdatePaymentDetails(ScriptValue::from(scope.getScriptState(), "NotPaymentDetails"));
+}
+
+TEST(PaymentRequestTest, RejectShowPromiseOnInvalidPaymentDetailsUpdate)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectCall());
+
+    request->onUpdatePaymentDetails(ScriptValue::from(scope.getScriptState(), fromJSONString(scope.getScriptState(), "{}", scope.getExceptionState())));
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+}
+
+TEST(PaymentRequestTest, ClearShippingOptionOnPaymentDetailsUpdateWithoutShippingOptions)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentDetails details;
+    details.setTotal(buildPaymentItemForTest());
+    PaymentOptions options;
+    options.setRequestShipping(true);
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), details, options, scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+    EXPECT_TRUE(request->shippingOption().isNull());
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectNoCall());
+    String detailWithShippingOptions = "{\"total\": {\"label\": \"Total\", \"amount\": {\"currency\": \"USD\", \"value\": \"5.00\"}},"
+        "\"shippingOptions\": [{\"id\": \"standardShippingOption\", \"label\": \"Standard shipping\", \"amount\": {\"currency\": \"USD\", \"value\": \"5.00\"}, \"selected\": true}]}";
+    request->onUpdatePaymentDetails(ScriptValue::from(scope.getScriptState(), fromJSONString(scope.getScriptState(), detailWithShippingOptions, scope.getExceptionState())));
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+    EXPECT_EQ("standardShippingOption", request->shippingOption());
+    String detailWithoutShippingOptions = "{\"total\": {\"label\": \"Total\", \"amount\": {\"currency\": \"USD\", \"value\": \"5.00\"}}}";
+
+    request->onUpdatePaymentDetails(ScriptValue::from(scope.getScriptState(), fromJSONString(scope.getScriptState(), detailWithoutShippingOptions, scope.getExceptionState())));
+
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+    EXPECT_TRUE(request->shippingOption().isNull());
+}
+
+TEST(PaymentRequestTest, ClearShippingOptionOnPaymentDetailsUpdateWithMultipleUnselectedShippingOptions)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentOptions options;
+    options.setRequestShipping(true);
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), options, scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectNoCall());
+    String detail = "{\"total\": {\"label\": \"Total\", \"amount\": {\"currency\": \"USD\", \"value\": \"5.00\"}},"
+        "\"shippingOptions\": [{\"id\": \"slow\", \"label\": \"Slow\", \"amount\": {\"currency\": \"USD\", \"value\": \"5.00\"}},"
+        "{\"id\": \"fast\", \"label\": \"Fast\", \"amount\": {\"currency\": \"USD\", \"value\": \"50.00\"}}]}";
+
+    request->onUpdatePaymentDetails(ScriptValue::from(scope.getScriptState(), fromJSONString(scope.getScriptState(), detail, scope.getExceptionState())));
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+
+    EXPECT_TRUE(request->shippingOption().isNull());
+}
+
+TEST(PaymentRequestTest, UseTheSelectedShippingOptionFromPaymentDetailsUpdate)
+{
+    V8TestingScope scope;
+    PaymentRequestMockFunctionScope funcs(scope.getScriptState());
+    makePaymentRequestOriginSecure(scope.document());
+    PaymentOptions options;
+    options.setRequestShipping(true);
+    PaymentRequest* request = PaymentRequest::create(scope.getScriptState(), buildPaymentMethodDataForTest(), buildPaymentDetailsForTest(), options, scope.getExceptionState());
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+    request->show(scope.getScriptState()).then(funcs.expectNoCall(), funcs.expectNoCall());
+    String detail = "{\"total\": {\"label\": \"Total\", \"amount\": {\"currency\": \"USD\", \"value\": \"5.00\"}},"
+        "\"shippingOptions\": [{\"id\": \"slow\", \"label\": \"Slow\", \"amount\": {\"currency\": \"USD\", \"value\": \"5.00\"}},"
+        "{\"id\": \"fast\", \"label\": \"Fast\", \"amount\": {\"currency\": \"USD\", \"value\": \"50.00\"}, \"selected\": true}]}";
+
+    request->onUpdatePaymentDetails(ScriptValue::from(scope.getScriptState(), fromJSONString(scope.getScriptState(), detail, scope.getExceptionState())));
+    EXPECT_FALSE(scope.getExceptionState().hadException());
+
+    EXPECT_EQ("fast", request->shippingOption());
 }
 
 } // namespace

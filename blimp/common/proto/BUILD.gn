@@ -27,7 +27,10 @@ proto_library("proto_internal") {
   sources = [
     "blimp_message.proto",
     "blob_cache.proto",
+    "blob_channel.proto",
+    "common.proto",
     "compositor.proto",
+    "geolocation.proto",
     "ime.proto",
     "input.proto",
     "navigation.proto",
@@ -39,6 +42,7 @@ proto_library("proto_internal") {
 
   cc_generator_options = "dllexport_decl=BLIMP_PROTO_EXPORT:"
   cc_include = "blimp/common/proto/blimp_proto_export.h"
+  component_build_force_source_set = true
 
   defines = [ "BLIMP_PROTO_IMPLEMENTATION" ]
 

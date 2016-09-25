@@ -2,21 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ipc/unix_domain_socket_util.h"
+
 #include <stddef.h>
 #include <sys/socket.h>
+
+#include <memory>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
-#include "ipc/unix_domain_socket_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -26,8 +28,11 @@ class SocketAcceptor : public base::MessageLoopForIO::Watcher {
   SocketAcceptor(int fd, base::SingleThreadTaskRunner* target_thread)
       : server_fd_(-1),
         target_thread_(target_thread),
-        started_watching_event_(false, false),
-        accepted_event_(false, false) {
+        started_watching_event_(
+            base::WaitableEvent::ResetPolicy::AUTOMATIC,
+            base::WaitableEvent::InitialState::NOT_SIGNALED),
+        accepted_event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                        base::WaitableEvent::InitialState::NOT_SIGNALED) {
     target_thread->PostTask(FROM_HERE,
         base::Bind(&SocketAcceptor::StartWatching, base::Unretained(this), fd));
   }
@@ -67,7 +72,7 @@ class SocketAcceptor : public base::MessageLoopForIO::Watcher {
   }
   void OnFileCanReadWithoutBlocking(int fd) override {
     ASSERT_EQ(-1, server_fd_);
-    IPC::ServerAcceptConnection(fd, &server_fd_);
+    IPC::ServerOnConnect(fd, &server_fd_);
     watcher_->StopWatchingFileDescriptor();
     accepted_event_.Signal();
   }
@@ -75,7 +80,7 @@ class SocketAcceptor : public base::MessageLoopForIO::Watcher {
 
   int server_fd_;
   base::SingleThreadTaskRunner* target_thread_;
-  scoped_ptr<base::MessageLoopForIO::FileDescriptorWatcher> watcher_;
+  std::unique_ptr<base::MessageLoopForIO::FileDescriptorWatcher> watcher_;
   base::WaitableEvent started_watching_event_;
   base::WaitableEvent accepted_event_;
 
@@ -144,7 +149,7 @@ class TestUnixSocketConnection {
   int server_listen_fd_;
   int server_fd_;
   int client_fd_;
-  scoped_ptr<SocketAcceptor> acceptor_;
+  std::unique_ptr<SocketAcceptor> acceptor_;
 };
 
 // Ensure that IPC::CreateServerUnixDomainSocket creates a socket that

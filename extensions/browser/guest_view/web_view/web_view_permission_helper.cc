@@ -6,6 +6,10 @@
 
 #include <utility>
 
+#include "base/location.h"
+#include "base/memory/ptr_util.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/guest_view/browser/guest_view_event.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -230,14 +234,14 @@ void WebViewPermissionHelper::OnMediaPermissionResponse(
   if (!allow) {
     callback.Run(content::MediaStreamDevices(),
                  content::MEDIA_DEVICE_PERMISSION_DENIED,
-                 scoped_ptr<content::MediaStreamUI>());
+                 std::unique_ptr<content::MediaStreamUI>());
     return;
   }
   if (!web_view_guest()->attached() ||
       !web_view_guest()->embedder_web_contents()->GetDelegate()) {
     callback.Run(content::MediaStreamDevices(),
                  content::MEDIA_DEVICE_INVALID_STATE,
-                 scoped_ptr<content::MediaStreamUI>());
+                 std::unique_ptr<content::MediaStreamUI>());
     return;
   }
 
@@ -267,9 +271,10 @@ void WebViewPermissionHelper::RequestPointerLockPermission(
 void WebViewPermissionHelper::RequestGeolocationPermission(
     int bridge_id,
     const GURL& requesting_frame,
+    bool user_gesture,
     const base::Callback<void(bool)>& callback) {
   web_view_permission_helper_delegate_->RequestGeolocationPermission(
-      bridge_id, requesting_frame, callback);
+      bridge_id, requesting_frame, user_gesture, callback);
 }
 
 void WebViewPermissionHelper::CancelGeolocationPermissionRequest(
@@ -316,37 +321,36 @@ int WebViewPermissionHelper::RequestPermission(
     // objects held by the permission request are not destroyed immediately
     // after creation. This is to allow those same objects to be accessed again
     // in the same scope without fear of use after freeing.
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&PermissionResponseCallback::Run,
                    base::Owned(new PermissionResponseCallback(callback)),
-                   allowed_by_default,
-                   std::string()));
+                   allowed_by_default, std::string()));
     return webview::kInvalidPermissionRequestID;
   }
 
   int request_id = next_permission_request_id_++;
   pending_permission_requests_[request_id] =
       PermissionResponseInfo(callback, permission_type, allowed_by_default);
-  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
+  std::unique_ptr<base::DictionaryValue> args(new base::DictionaryValue());
   args->Set(webview::kRequestInfo, request_info.DeepCopy());
   args->SetInteger(webview::kRequestId, request_id);
   switch (permission_type) {
     case WEB_VIEW_PERMISSION_TYPE_NEW_WINDOW: {
-      web_view_guest_->DispatchEventToView(make_scoped_ptr(
-          new GuestViewEvent(webview::kEventNewWindow, std::move(args))));
+      web_view_guest_->DispatchEventToView(base::MakeUnique<GuestViewEvent>(
+          webview::kEventNewWindow, std::move(args)));
       break;
     }
     case WEB_VIEW_PERMISSION_TYPE_JAVASCRIPT_DIALOG: {
-      web_view_guest_->DispatchEventToView(make_scoped_ptr(
-          new GuestViewEvent(webview::kEventDialog, std::move(args))));
+      web_view_guest_->DispatchEventToView(base::MakeUnique<GuestViewEvent>(
+          webview::kEventDialog, std::move(args)));
       break;
     }
     default: {
       args->SetString(webview::kPermission,
                       PermissionTypeToString(permission_type));
-      web_view_guest_->DispatchEventToView(make_scoped_ptr(new GuestViewEvent(
-          webview::kEventPermissionRequest, std::move(args))));
+      web_view_guest_->DispatchEventToView(base::MakeUnique<GuestViewEvent>(
+          webview::kEventPermissionRequest, std::move(args)));
       break;
     }
   }

@@ -7,8 +7,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "net/quic/quic_clock.h"
-#include "net/quic/quic_time.h"
+#include "net/quic/core/quic_clock.h"
+#include "net/quic/core/quic_time.h"
 
 namespace net {
 
@@ -32,6 +32,11 @@ class QuicEpollClock : public QuicClock {
   // Returns the current time as a QuicWallTime object.
   // Note: this uses significant resources, please use only if needed.
   QuicWallTime WallNow() const override;
+
+  // Override to do less work in this implementation.  The epoll clock is
+  // already based on system (unix epoch) time, no conversion required.
+  QuicTime ConvertWallTimeToQuicTime(
+      const QuicWallTime& walltime) const override;
 
  protected:
   EpollServer* epoll_server_;

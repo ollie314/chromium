@@ -33,8 +33,6 @@
 
 #include "core/animation/Animation.h"
 #include "core/animation/AnimationTimeline.h"
-#include "core/animation/CompositorAnimationsImpl.h"
-#include "core/animation/CompositorAnimationsTestHelper.h"
 #include "core/animation/CompositorPendingAnimations.h"
 #include "core/animation/ElementAnimations.h"
 #include "core/animation/KeyframeEffect.h"
@@ -46,27 +44,23 @@
 #include "core/layout/LayoutObject.h"
 #include "core/testing/DummyPageHolder.h"
 #include "platform/animation/CompositorAnimation.h"
+#include "platform/animation/CompositorFloatAnimationCurve.h"
+#include "platform/animation/CompositorFloatKeyframe.h"
 #include "platform/geometry/FloatBox.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/filters/FilterOperations.h"
 #include "platform/transforms/TransformOperations.h"
 #include "platform/transforms/TranslateTransformOperation.h"
-#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/HashFunctions.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
+#include <memory>
 
 namespace blink {
 
-using ::testing::ExpectationSet;
-using ::testing::Ref;
-using ::testing::Return;
-using ::testing::_;
-
-class AnimationCompositorAnimationsTest : public AnimationCompositorAnimationsTestBase {
+class AnimationCompositorAnimationsTest : public ::testing::Test {
 protected:
     RefPtr<TimingFunction> m_linearTimingFunction;
     RefPtr<TimingFunction> m_cubicEaseTimingFunction;
@@ -74,35 +68,29 @@ protected:
     RefPtr<TimingFunction> m_stepTimingFunction;
 
     Timing m_timing;
-    CompositorAnimationsImpl::CompositorTiming m_compositorTiming;
-    OwnPtr<AnimatableValueKeyframeVector> m_keyframeVector2;
+    CompositorAnimations::CompositorTiming m_compositorTiming;
+    std::unique_ptr<AnimatableValueKeyframeVector> m_keyframeVector2;
     Persistent<AnimatableValueKeyframeEffectModel> m_keyframeAnimationEffect2;
-    OwnPtr<AnimatableValueKeyframeVector> m_keyframeVector5;
+    std::unique_ptr<AnimatableValueKeyframeVector> m_keyframeVector5;
     Persistent<AnimatableValueKeyframeEffectModel> m_keyframeAnimationEffect5;
 
     Persistent<Document> m_document;
     Persistent<Element> m_element;
     Persistent<AnimationTimeline> m_timeline;
-    OwnPtr<DummyPageHolder> m_pageHolder;
-    CompositorFactoryMock* m_mockCompositorFactory;
+    std::unique_ptr<DummyPageHolder> m_pageHolder;
 
     void SetUp() override
     {
-        AnimationCompositorAnimationsTestBase::SetUp();
-
-        m_mockCompositorFactory = new CompositorFactoryMock();
-        CompositorFactory::initializeForTesting(adoptPtr(m_mockCompositorFactory));
-
         m_linearTimingFunction = LinearTimingFunction::shared();
-        m_cubicEaseTimingFunction = CubicBezierTimingFunction::preset(CubicBezierTimingFunction::Ease);
+        m_cubicEaseTimingFunction = CubicBezierTimingFunction::preset(CubicBezierTimingFunction::EaseType::EASE);
         m_cubicCustomTimingFunction = CubicBezierTimingFunction::create(1, 2, 3, 4);
-        m_stepTimingFunction = StepsTimingFunction::create(1, StepsTimingFunction::End);
+        m_stepTimingFunction = StepsTimingFunction::create(1, StepsTimingFunction::StepPosition::END);
 
         m_timing = createCompositableTiming();
-        m_compositorTiming = CompositorAnimationsImpl::CompositorTiming();
+        m_compositorTiming = CompositorAnimations::CompositorTiming();
         // Make sure the CompositableTiming is really compositable, otherwise
         // most other tests will fail.
-        ASSERT(convertTimingForCompositor(m_timing, m_compositorTiming));
+        ASSERT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
 
         m_keyframeVector2 = createCompositableFloatKeyframeVector(2);
         m_keyframeAnimationEffect2 = AnimatableValueKeyframeEffectModel::create(*m_keyframeVector2);
@@ -110,47 +98,35 @@ protected:
         m_keyframeVector5 = createCompositableFloatKeyframeVector(5);
         m_keyframeAnimationEffect5 = AnimatableValueKeyframeEffectModel::create(*m_keyframeVector5);
 
-        EXPECT_CALL(*m_mockCompositorFactory, createAnimationTimeline())
-            .WillOnce(Return(new WebCompositorAnimationTimelineMock()));
-
         m_pageHolder = DummyPageHolder::create();
         m_document = &m_pageHolder->document();
         m_document->animationClock().resetTimeForTesting();
-
-        EXPECT_CALL(*m_mockCompositorFactory, createAnimationTimeline())
-            .WillOnce(Return(new WebCompositorAnimationTimelineMock()));
 
         m_timeline = AnimationTimeline::create(m_document.get());
         m_timeline->resetForTesting();
         m_element = m_document->createElement("test", ASSERT_NO_EXCEPTION);
     }
 
-    void TearDown() override
-    {
-        m_mockCompositorFactory = nullptr;
-        CompositorFactory::shutdown();
-    }
-
 public:
-    bool convertTimingForCompositor(const Timing& t, CompositorAnimationsImpl::CompositorTiming& out)
+    bool convertTimingForCompositor(const Timing& t, CompositorAnimations::CompositorTiming& out)
     {
-        return CompositorAnimationsImpl::convertTimingForCompositor(t, 0, out, 1);
+        return CompositorAnimations::convertTimingForCompositor(t, 0, out, 1);
     }
     bool isCandidateForAnimationOnCompositor(const Timing& timing, const EffectModel& effect)
     {
-        return CompositorAnimations::instance()->isCandidateForAnimationOnCompositor(timing, *m_element.get(), nullptr, effect, 1);
+        return CompositorAnimations::isCandidateForAnimationOnCompositor(timing, *m_element.get(), nullptr, effect, 1);
     }
-    void getAnimationOnCompositor(Timing& timing, AnimatableValueKeyframeEffectModel& effect, Vector<OwnPtr<CompositorAnimation>>& animations)
+    void getAnimationOnCompositor(Timing& timing, AnimatableValueKeyframeEffectModel& effect, Vector<std::unique_ptr<CompositorAnimation>>& animations)
     {
-        return getAnimationOnCompositor(timing, effect, animations, 1);
+        getAnimationOnCompositor(timing, effect, animations, 1);
     }
-    void getAnimationOnCompositor(Timing& timing, AnimatableValueKeyframeEffectModel& effect, Vector<OwnPtr<CompositorAnimation>>& animations, double playerPlaybackRate)
+    void getAnimationOnCompositor(Timing& timing, AnimatableValueKeyframeEffectModel& effect, Vector<std::unique_ptr<CompositorAnimation>>& animations, double playerPlaybackRate)
     {
-        return CompositorAnimationsImpl::getAnimationOnCompositor(timing, 0, std::numeric_limits<double>::quiet_NaN(), 0, effect, animations, playerPlaybackRate);
+        CompositorAnimations::getAnimationOnCompositor(timing, 0, std::numeric_limits<double>::quiet_NaN(), 0, effect, animations, playerPlaybackRate);
     }
     bool getAnimationBounds(FloatBox& boundingBox, const EffectModel& effect, double minValue, double maxValue)
     {
-        return CompositorAnimations::instance()->getAnimatedBoundingBox(boundingBox, effect, minValue, maxValue);
+        return CompositorAnimations::getAnimatedBoundingBox(boundingBox, effect, minValue, maxValue);
     }
 
     bool duplicateSingleKeyframeAndTestIsCandidateOnResult(AnimatableValueKeyframe* frame)
@@ -170,13 +146,12 @@ public:
     {
         Timing timing;
         timing.startDelay = 0;
-        timing.fillMode = Timing::FillModeNone;
+        timing.fillMode = Timing::FillMode::NONE;
         timing.iterationStart = 0;
         timing.iterationCount = 1;
         timing.iterationDuration = 1.0;
         timing.playbackRate = 1.0;
-        timing.direction = Timing::PlaybackDirectionNormal;
-        ASSERT(m_linearTimingFunction);
+        timing.direction = Timing::PlaybackDirection::NORMAL;
         timing.timingFunction = m_linearTimingFunction;
         return timing;
     }
@@ -204,7 +179,7 @@ public:
         return keyframe;
     }
 
-    PassOwnPtr<AnimatableValueKeyframeVector> createCompositableFloatKeyframeVector(size_t n)
+    std::unique_ptr<AnimatableValueKeyframeVector> createCompositableFloatKeyframeVector(size_t n)
     {
         Vector<double> values;
         for (size_t i = 0; i < n; i++) {
@@ -213,26 +188,26 @@ public:
         return createCompositableFloatKeyframeVector(values);
     }
 
-    PassOwnPtr<AnimatableValueKeyframeVector> createCompositableFloatKeyframeVector(Vector<double>& values)
+    std::unique_ptr<AnimatableValueKeyframeVector> createCompositableFloatKeyframeVector(Vector<double>& values)
     {
-        OwnPtr<AnimatableValueKeyframeVector> frames = adoptPtr(new AnimatableValueKeyframeVector);
+        std::unique_ptr<AnimatableValueKeyframeVector> frames = wrapUnique(new AnimatableValueKeyframeVector);
         for (size_t i = 0; i < values.size(); i++) {
             double offset = 1.0 / (values.size() - 1) * i;
             RefPtr<AnimatableDouble> value = AnimatableDouble::create(values[i]);
             frames->append(createReplaceOpKeyframe(CSSPropertyOpacity, value.get(), offset).get());
         }
-        return frames.release();
+        return frames;
     }
 
-    PassOwnPtr<AnimatableValueKeyframeVector> createCompositableTransformKeyframeVector(const Vector<TransformOperations>& values)
+    std::unique_ptr<AnimatableValueKeyframeVector> createCompositableTransformKeyframeVector(const Vector<TransformOperations>& values)
     {
-        OwnPtr<AnimatableValueKeyframeVector> frames = adoptPtr(new AnimatableValueKeyframeVector);
+        std::unique_ptr<AnimatableValueKeyframeVector> frames = wrapUnique(new AnimatableValueKeyframeVector);
         for (size_t i = 0; i < values.size(); ++i) {
             double offset = 1.0f / (values.size() - 1) * i;
             RefPtr<AnimatableTransform> value = AnimatableTransform::create(values[i], 1);
             frames->append(createReplaceOpKeyframe(CSSPropertyTransform, value.get(), offset).get());
         }
-        return frames.release();
+        return frames;
     }
 
     AnimatableValueKeyframeEffectModel* createKeyframeEffectModel(PassRefPtr<AnimatableValueKeyframe> prpFrom, PassRefPtr<AnimatableValueKeyframe> prpTo, PassRefPtr<AnimatableValueKeyframe> prpC = nullptr, PassRefPtr<AnimatableValueKeyframe> prpD = nullptr)
@@ -270,6 +245,27 @@ public:
         m_document->compositorPendingAnimations().update(false);
         m_timeline->serviceAnimations(TimingUpdateForAnimationFrame);
     }
+
+    std::unique_ptr<CompositorAnimation> convertToCompositorAnimation(AnimatableValueKeyframeEffectModel& effect, double playerPlaybackRate)
+    {
+        Vector<std::unique_ptr<CompositorAnimation>> result;
+        getAnimationOnCompositor(m_timing, effect, result, playerPlaybackRate);
+        DCHECK_EQ(1U, result.size());
+        return std::move(result[0]);
+    }
+
+    std::unique_ptr<CompositorAnimation> convertToCompositorAnimation(AnimatableValueKeyframeEffectModel& effect)
+    {
+        return convertToCompositorAnimation(effect, 1.0);
+    }
+
+    void ExpectKeyframeTimingFunctionCubic(const CompositorFloatKeyframe& keyframe, const CubicBezierTimingFunction::EaseType easeType)
+    {
+        auto keyframeTimingFunction = keyframe.getTimingFunctionForTesting();
+        DCHECK_EQ(keyframeTimingFunction->getType(), TimingFunction::Type::CUBIC_BEZIER);
+        const auto& cubicTimingFunction = toCubicBezierTimingFunction(*keyframeTimingFunction);
+        EXPECT_EQ(cubicTimingFunction.getEaseType(), easeType);
+    }
 };
 
 class LayoutObjectProxy : public LayoutObject {
@@ -286,6 +282,7 @@ public:
 
     const char* name() const override { return nullptr; }
     void layout() override { }
+    FloatRect localBoundingBoxRectForAccessibility() const { return FloatRect(); }
 
 private:
     explicit LayoutObjectProxy(Node* node)
@@ -359,7 +356,7 @@ TEST_F(AnimationCompositorAnimationsTest, AnimatedBoundingBox)
     transformVector.last().operations().append(TranslateTransformOperation::create(Length(0, Fixed), Length(0, Fixed), 0.0, TransformOperation::Translate3D));
     transformVector.append(TransformOperations());
     transformVector.last().operations().append(TranslateTransformOperation::create(Length(200, Fixed), Length(200, Fixed), 0.0, TransformOperation::Translate3D));
-    OwnPtr<AnimatableValueKeyframeVector> frames = createCompositableTransformKeyframeVector(transformVector);
+    std::unique_ptr<AnimatableValueKeyframeVector> frames = createCompositableTransformKeyframeVector(transformVector);
     FloatBox bounds;
     EXPECT_TRUE(getAnimationBounds(bounds, *AnimatableValueKeyframeEffectModel::create(*frames), 0, 1));
     EXPECT_EQ(FloatBox(0.0f, 0.f, 0.0f, 200.0f, 200.0f, 0.0f), bounds);
@@ -405,12 +402,6 @@ TEST_F(AnimationCompositorAnimationsTest, ConvertTimingForCompositorIterationCou
     m_timing.iterationCount = 5.5;
     EXPECT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
     EXPECT_EQ(5.5, m_compositorTiming.adjustedIterationCount);
-
-    // EXPECT_DEATH tests are flaky on Android.
-#if ENABLE(ASSERT) && !OS(ANDROID)
-    m_timing.iterationCount = -1;
-    EXPECT_DEATH(convertTimingForCompositor(m_timing, m_compositorTiming), "");
-#endif
 
     m_timing.iterationCount = std::numeric_limits<double>::infinity();
     EXPECT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
@@ -460,60 +451,60 @@ TEST_F(AnimationCompositorAnimationsTest, ConvertTimingForCompositorPlaybackRate
 
 TEST_F(AnimationCompositorAnimationsTest, ConvertTimingForCompositorDirection)
 {
-    m_timing.direction = Timing::PlaybackDirectionNormal;
+    m_timing.direction = Timing::PlaybackDirection::NORMAL;
     EXPECT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
-    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirectionNormal);
+    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirection::NORMAL);
 
-    m_timing.direction = Timing::PlaybackDirectionAlternate;
+    m_timing.direction = Timing::PlaybackDirection::ALTERNATE_NORMAL;
     EXPECT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
-    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirectionAlternate);
+    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirection::ALTERNATE_NORMAL);
 
-    m_timing.direction = Timing::PlaybackDirectionAlternateReverse;
+    m_timing.direction = Timing::PlaybackDirection::ALTERNATE_REVERSE;
     EXPECT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
-    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirectionAlternateReverse);
+    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirection::ALTERNATE_REVERSE);
 
-    m_timing.direction = Timing::PlaybackDirectionReverse;
+    m_timing.direction = Timing::PlaybackDirection::REVERSE;
     EXPECT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
-    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirectionReverse);
+    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirection::REVERSE);
 }
 
 TEST_F(AnimationCompositorAnimationsTest, ConvertTimingForCompositorDirectionIterationsAndStartDelay)
 {
-    m_timing.direction = Timing::PlaybackDirectionAlternate;
+    m_timing.direction = Timing::PlaybackDirection::ALTERNATE_NORMAL;
     m_timing.iterationCount = 4.0;
     m_timing.iterationDuration = 5.0;
     m_timing.startDelay = -6.0;
     EXPECT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
     EXPECT_DOUBLE_EQ(6.0, m_compositorTiming.scaledTimeOffset);
     EXPECT_EQ(4, m_compositorTiming.adjustedIterationCount);
-    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirectionAlternate);
+    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirection::ALTERNATE_NORMAL);
 
-    m_timing.direction = Timing::PlaybackDirectionAlternate;
+    m_timing.direction = Timing::PlaybackDirection::ALTERNATE_NORMAL;
     m_timing.iterationCount = 4.0;
     m_timing.iterationDuration = 5.0;
     m_timing.startDelay = -11.0;
     EXPECT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
     EXPECT_DOUBLE_EQ(11.0, m_compositorTiming.scaledTimeOffset);
     EXPECT_EQ(4, m_compositorTiming.adjustedIterationCount);
-    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirectionAlternate);
+    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirection::ALTERNATE_NORMAL);
 
-    m_timing.direction = Timing::PlaybackDirectionAlternateReverse;
+    m_timing.direction = Timing::PlaybackDirection::ALTERNATE_REVERSE;
     m_timing.iterationCount = 4.0;
     m_timing.iterationDuration = 5.0;
     m_timing.startDelay = -6.0;
     EXPECT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
     EXPECT_DOUBLE_EQ(6.0, m_compositorTiming.scaledTimeOffset);
     EXPECT_EQ(4, m_compositorTiming.adjustedIterationCount);
-    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirectionAlternateReverse);
+    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirection::ALTERNATE_REVERSE);
 
-    m_timing.direction = Timing::PlaybackDirectionAlternateReverse;
+    m_timing.direction = Timing::PlaybackDirection::ALTERNATE_REVERSE;
     m_timing.iterationCount = 4.0;
     m_timing.iterationDuration = 5.0;
     m_timing.startDelay = -11.0;
     EXPECT_TRUE(convertTimingForCompositor(m_timing, m_compositorTiming));
     EXPECT_DOUBLE_EQ(11.0, m_compositorTiming.scaledTimeOffset);
     EXPECT_EQ(4, m_compositorTiming.adjustedIterationCount);
-    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirectionAlternateReverse);
+    EXPECT_EQ(m_compositorTiming.direction, Timing::PlaybackDirection::ALTERNATE_REVERSE);
 }
 
 TEST_F(AnimationCompositorAnimationsTest, isCandidateForAnimationOnCompositorTimingFunctionLinear)
@@ -622,8 +613,6 @@ TEST_F(AnimationCompositorAnimationsTest, isCandidateForAnimationOnCompositorTim
 
 TEST_F(AnimationCompositorAnimationsTest, isCandidateForAnimationOnCompositor)
 {
-    Timing linearTiming(createCompositableTiming());
-
     AnimatableValueKeyframeVector basicFramesVector;
     basicFramesVector.append(createDefaultKeyframe(CSSPropertyOpacity, EffectModel::CompositeReplace, 0.0).get());
     basicFramesVector.append(createDefaultKeyframe(CSSPropertyOpacity, EffectModel::CompositeReplace, 1.0).get());
@@ -635,16 +624,16 @@ TEST_F(AnimationCompositorAnimationsTest, isCandidateForAnimationOnCompositor)
 
     basicFramesVector[0]->setEasing(m_linearTimingFunction.get());
     AnimatableValueKeyframeEffectModel* basicFrames = AnimatableValueKeyframeEffectModel::create(basicFramesVector);
-    EXPECT_TRUE(isCandidateForAnimationOnCompositor(linearTiming, *basicFrames));
+    EXPECT_TRUE(isCandidateForAnimationOnCompositor(m_timing, *basicFrames));
 
-    basicFramesVector[0]->setEasing(CubicBezierTimingFunction::preset(CubicBezierTimingFunction::EaseIn));
+    basicFramesVector[0]->setEasing(CubicBezierTimingFunction::preset(CubicBezierTimingFunction::EaseType::EASE_IN));
     basicFrames = AnimatableValueKeyframeEffectModel::create(basicFramesVector);
-    EXPECT_TRUE(isCandidateForAnimationOnCompositor(linearTiming, *basicFrames));
+    EXPECT_TRUE(isCandidateForAnimationOnCompositor(m_timing, *basicFrames));
 
     nonBasicFramesVector[0]->setEasing(m_linearTimingFunction.get());
-    nonBasicFramesVector[1]->setEasing(CubicBezierTimingFunction::preset(CubicBezierTimingFunction::EaseIn));
+    nonBasicFramesVector[1]->setEasing(CubicBezierTimingFunction::preset(CubicBezierTimingFunction::EaseType::EASE_IN));
     AnimatableValueKeyframeEffectModel* nonBasicFrames = AnimatableValueKeyframeEffectModel::create(nonBasicFramesVector);
-    EXPECT_TRUE(isCandidateForAnimationOnCompositor(linearTiming, *nonBasicFrames));
+    EXPECT_TRUE(isCandidateForAnimationOnCompositor(m_timing, *nonBasicFrames));
 }
 
 // -----------------------------------------------------------------------
@@ -656,41 +645,26 @@ TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimation)
     AnimatableValueKeyframeEffectModel* effect = createKeyframeEffectModel(
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(2.0).get(), 0),
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(5.0).get(), 1.0));
-    // --
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock;
-    ExpectationSet usesMockCurve;
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect);
+    EXPECT_EQ(CompositorTargetProperty::OPACITY, animation->targetProperty());
+    EXPECT_EQ(1.0, animation->iterations());
+    EXPECT_EQ(0, animation->timeOffset());
+    EXPECT_EQ(CompositorAnimation::Direction::NORMAL, animation->getDirection());
+    EXPECT_EQ(1.0, animation->playbackRate());
 
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(1.0, 5.0)));
+    std::unique_ptr<CompositorFloatAnimationCurve> keyframedFloatCurve = animation->floatCurveForTesting();
 
-    // Create animation
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
+    CompositorFloatAnimationCurve::Keyframes keyframes = keyframedFloatCurve->keyframesForTesting();
+    ASSERT_EQ(2UL, keyframes.size());
 
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
+    EXPECT_EQ(0, keyframes[0]->time());
+    EXPECT_EQ(2.0f, keyframes[0]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[0]->getTimingFunctionForTesting()->getType());
 
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(1));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(0.0));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionNormal));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(1));
-
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
-
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    getAnimationOnCompositor(m_timing, *effect, result);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    EXPECT_EQ(1.0, keyframes[1]->time());
+    EXPECT_EQ(5.0f, keyframes[1]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[1]->getTimingFunctionForTesting()->getType());
 }
 
 TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationDuration)
@@ -700,42 +674,16 @@ TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationDuration)
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(2.0).get(), 0),
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(5.0).get(), 1.0));
 
-    m_timing.iterationDuration = 10.0;
-    // --
+    const double duration = 10.0;
+    m_timing.iterationDuration = duration;
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock;
-    ExpectationSet usesMockCurve;
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect);
+    std::unique_ptr<CompositorFloatAnimationCurve> keyframedFloatCurve = animation->floatCurveForTesting();
 
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(10.0, 5.0)));
+    CompositorFloatAnimationCurve::Keyframes keyframes = keyframedFloatCurve->keyframesForTesting();
+    ASSERT_EQ(2UL, keyframes.size());
 
-    // Create animation
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
-
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
-
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(1));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(0.0));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionNormal));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(1));
-
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
-
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    getAnimationOnCompositor(m_timing, *effect, result);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    EXPECT_EQ(duration, keyframes[1]->time() * duration);
 }
 
 TEST_F(AnimationCompositorAnimationsTest, createMultipleKeyframeOpacityAnimationLinear)
@@ -748,46 +696,36 @@ TEST_F(AnimationCompositorAnimationsTest, createMultipleKeyframeOpacityAnimation
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(5.0).get(), 1.0));
 
     m_timing.iterationCount = 5;
-    m_timing.direction = Timing::PlaybackDirectionAlternate;
+    m_timing.direction = Timing::PlaybackDirection::ALTERNATE_NORMAL;
     m_timing.playbackRate = 2.0;
-    // --
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock();
-    ExpectationSet usesMockCurve;
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect);
+    EXPECT_EQ(CompositorTargetProperty::OPACITY, animation->targetProperty());
+    EXPECT_EQ(5.0, animation->iterations());
+    EXPECT_EQ(0, animation->timeOffset());
+    EXPECT_EQ(CompositorAnimation::Direction::ALTERNATE_NORMAL, animation->getDirection());
+    EXPECT_EQ(2.0, animation->playbackRate());
 
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
+    std::unique_ptr<CompositorFloatAnimationCurve> keyframedFloatCurve = animation->floatCurveForTesting();
 
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.25, -1.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.5, 20.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(1.0, 5.0)));
+    CompositorFloatAnimationCurve::Keyframes keyframes = keyframedFloatCurve->keyframesForTesting();
+    ASSERT_EQ(4UL, keyframes.size());
 
-    // KeyframeEffect is created
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
+    EXPECT_EQ(0, keyframes[0]->time());
+    EXPECT_EQ(2.0f, keyframes[0]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[0]->getTimingFunctionForTesting()->getType());
 
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
+    EXPECT_EQ(0.25, keyframes[1]->time());
+    EXPECT_EQ(-1.0f, keyframes[1]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[1]->getTimingFunctionForTesting()->getType());
 
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(5));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(0.0));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionAlternate));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(2.0));
+    EXPECT_EQ(0.5, keyframes[2]->time());
+    EXPECT_EQ(20.0f, keyframes[2]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[2]->getTimingFunctionForTesting()->getType());
 
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
-
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    getAnimationOnCompositor(m_timing, *effect, result);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    EXPECT_EQ(1.0, keyframes[3]->time());
+    EXPECT_EQ(5.0f, keyframes[3]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[3]->getTimingFunctionForTesting()->getType());
 }
 
 TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationStartDelay)
@@ -797,44 +735,25 @@ TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationStartDelay
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(2.0).get(), 0),
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(5.0).get(), 1.0));
 
+    const double startDelay = 3.25;
+
     m_timing.iterationCount = 5.0;
     m_timing.iterationDuration = 1.75;
-    m_timing.startDelay = 3.25;
-    // --
+    m_timing.startDelay = startDelay;
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock;
-    ExpectationSet usesMockCurve;
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect);
 
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(1.75, 5.0)));
+    EXPECT_EQ(CompositorTargetProperty::OPACITY, animation->targetProperty());
+    EXPECT_EQ(5.0, animation->iterations());
+    EXPECT_EQ(-startDelay, animation->timeOffset());
 
-    // Create animation
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
+    std::unique_ptr<CompositorFloatAnimationCurve> keyframedFloatCurve = animation->floatCurveForTesting();
 
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
+    CompositorFloatAnimationCurve::Keyframes keyframes = keyframedFloatCurve->keyframesForTesting();
+    ASSERT_EQ(2UL, keyframes.size());
 
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(5));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(-3.25));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionNormal));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(1));
-
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
-
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    getAnimationOnCompositor(m_timing, *effect, result);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    EXPECT_EQ(1.75, keyframes[1]->time() * m_timing.iterationDuration);
+    EXPECT_EQ(5.0f, keyframes[1]->value());
 }
 
 TEST_F(AnimationCompositorAnimationsTest, createMultipleKeyframeOpacityAnimationChained)
@@ -853,45 +772,35 @@ TEST_F(AnimationCompositorAnimationsTest, createMultipleKeyframeOpacityAnimation
     m_timing.timingFunction = m_linearTimingFunction.get();
     m_timing.iterationDuration = 2.0;
     m_timing.iterationCount = 10;
-    m_timing.direction = Timing::PlaybackDirectionAlternate;
-    // --
+    m_timing.direction = Timing::PlaybackDirection::ALTERNATE_NORMAL;
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock();
-    ExpectationSet usesMockCurve;
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect);
+    EXPECT_EQ(CompositorTargetProperty::OPACITY, animation->targetProperty());
+    EXPECT_EQ(10.0, animation->iterations());
+    EXPECT_EQ(0, animation->timeOffset());
+    EXPECT_EQ(CompositorAnimation::Direction::ALTERNATE_NORMAL, animation->getDirection());
+    EXPECT_EQ(1.0, animation->playbackRate());
 
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
+    std::unique_ptr<CompositorFloatAnimationCurve> keyframedFloatCurve = animation->floatCurveForTesting();
 
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeEase));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.5, -1.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(1.0, 20.0), 1.0, 2.0, 3.0, 4.0));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(2.0, 5.0)));
+    CompositorFloatAnimationCurve::Keyframes keyframes = keyframedFloatCurve->keyframesForTesting();
+    ASSERT_EQ(4UL, keyframes.size());
 
-    // KeyframeEffect is created
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
+    EXPECT_EQ(0, keyframes[0]->time() * m_timing.iterationDuration);
+    EXPECT_EQ(2.0f, keyframes[0]->value());
+    ExpectKeyframeTimingFunctionCubic(*keyframes[0], CubicBezierTimingFunction::EaseType::EASE);
 
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
+    EXPECT_EQ(0.5, keyframes[1]->time() * m_timing.iterationDuration);
+    EXPECT_EQ(-1.0f, keyframes[1]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[1]->getTimingFunctionForTesting()->getType());
 
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(10));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(0.0));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionAlternate));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(1));
+    EXPECT_EQ(1.0, keyframes[2]->time() * m_timing.iterationDuration);
+    EXPECT_EQ(20.0f, keyframes[2]->value());
+    ExpectKeyframeTimingFunctionCubic(*keyframes[2], CubicBezierTimingFunction::EaseType::CUSTOM);
 
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
-
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    getAnimationOnCompositor(m_timing, *effect, result);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    EXPECT_EQ(2.0, keyframes[3]->time() * m_timing.iterationDuration);
+    EXPECT_EQ(5.0f, keyframes[3]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[3]->getTimingFunctionForTesting()->getType());
 }
 
 TEST_F(AnimationCompositorAnimationsTest, createReversedOpacityAnimation)
@@ -904,52 +813,44 @@ TEST_F(AnimationCompositorAnimationsTest, createReversedOpacityAnimation)
     frames.append(createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(-1.0).get(), 0.25));
     frames.append(createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(20.0).get(), 0.5));
     frames.append(createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(5.0).get(), 1.0));
-    frames[0]->setEasing(CubicBezierTimingFunction::preset(CubicBezierTimingFunction::EaseIn));
+    frames[0]->setEasing(CubicBezierTimingFunction::preset(CubicBezierTimingFunction::EaseType::EASE_IN));
     frames[1]->setEasing(m_linearTimingFunction.get());
     frames[2]->setEasing(cubicEasyFlipTimingFunction.get());
     AnimatableValueKeyframeEffectModel* effect = AnimatableValueKeyframeEffectModel::create(frames);
 
     m_timing.timingFunction = m_linearTimingFunction.get();
     m_timing.iterationCount = 10;
-    m_timing.direction = Timing::PlaybackDirectionAlternateReverse;
-    // --
+    m_timing.direction = Timing::PlaybackDirection::ALTERNATE_REVERSE;
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock();
-    ExpectationSet usesMockCurve;
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect);
+    EXPECT_EQ(CompositorTargetProperty::OPACITY, animation->targetProperty());
+    EXPECT_EQ(10.0, animation->iterations());
+    EXPECT_EQ(0, animation->timeOffset());
+    EXPECT_EQ(CompositorAnimation::Direction::ALTERNATE_REVERSE, animation->getDirection());
+    EXPECT_EQ(1.0, animation->playbackRate());
 
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
+    std::unique_ptr<CompositorFloatAnimationCurve> keyframedFloatCurve = animation->floatCurveForTesting();
 
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeEaseIn));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.25, -1.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.5, 20.0), 0.0, 0.0, 0.0, 1.0));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(1.0, 5.0)));
+    CompositorFloatAnimationCurve::Keyframes keyframes = keyframedFloatCurve->keyframesForTesting();
+    ASSERT_EQ(4UL, keyframes.size());
 
-    // Create the animation
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
+    EXPECT_EQ(keyframedFloatCurve->getTimingFunctionForTesting()->getType(), TimingFunction::Type::LINEAR);
 
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
+    EXPECT_EQ(0, keyframes[0]->time());
+    EXPECT_EQ(2.0f, keyframes[0]->value());
+    ExpectKeyframeTimingFunctionCubic(*keyframes[0], CubicBezierTimingFunction::EaseType::EASE_IN);
 
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(10));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(0.0));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionAlternateReverse));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(1));
+    EXPECT_EQ(0.25, keyframes[1]->time());
+    EXPECT_EQ(-1.0f, keyframes[1]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[1]->getTimingFunctionForTesting()->getType());
 
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
+    EXPECT_EQ(0.5, keyframes[2]->time());
+    EXPECT_EQ(20.0f, keyframes[2]->value());
+    ExpectKeyframeTimingFunctionCubic(*keyframes[2], CubicBezierTimingFunction::EaseType::CUSTOM);
 
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    getAnimationOnCompositor(m_timing, *effect, result);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    EXPECT_EQ(1.0, keyframes[3]->time());
+    EXPECT_EQ(5.0f, keyframes[3]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[3]->getTimingFunctionForTesting()->getType());
 }
 
 TEST_F(AnimationCompositorAnimationsTest, createReversedOpacityAnimationNegativeStartDelay)
@@ -959,45 +860,24 @@ TEST_F(AnimationCompositorAnimationsTest, createReversedOpacityAnimationNegative
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(2.0).get(), 0),
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(5.0).get(), 1.0));
 
+    const double negativeStartDelay = -3;
+
     m_timing.iterationCount = 5.0;
     m_timing.iterationDuration = 1.5;
-    m_timing.startDelay = -3;
-    m_timing.direction = Timing::PlaybackDirectionAlternateReverse;
-    // --
+    m_timing.startDelay = negativeStartDelay;
+    m_timing.direction = Timing::PlaybackDirection::ALTERNATE_REVERSE;
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock;
-    ExpectationSet usesMockCurve;
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect);
+    EXPECT_EQ(CompositorTargetProperty::OPACITY, animation->targetProperty());
+    EXPECT_EQ(5.0, animation->iterations());
+    EXPECT_EQ(-negativeStartDelay, animation->timeOffset());
+    EXPECT_EQ(CompositorAnimation::Direction::ALTERNATE_REVERSE, animation->getDirection());
+    EXPECT_EQ(1.0, animation->playbackRate());
 
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(1.5, 5.0)));
+    std::unique_ptr<CompositorFloatAnimationCurve> keyframedFloatCurve = animation->floatCurveForTesting();
 
-    // Create animation
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
-
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
-
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(5));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(3.0));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionAlternateReverse));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(1));
-
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
-
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    getAnimationOnCompositor(m_timing, *effect, result);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    CompositorFloatAnimationCurve::Keyframes keyframes = keyframedFloatCurve->keyframesForTesting();
+    ASSERT_EQ(2UL, keyframes.size());
 }
 
 TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationPlaybackRates)
@@ -1007,43 +887,22 @@ TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationPlaybackRa
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(2.0).get(), 0),
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(5.0).get(), 1.0));
 
-    m_timing.playbackRate = 2;
-    // --
+    const double playbackRate = 2;
+    const double playerPlaybackRate = -1.5;
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock;
-    ExpectationSet usesMockCurve;
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
+    m_timing.playbackRate = playbackRate;
 
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(1.0, 5.0)));
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect, playerPlaybackRate);
+    EXPECT_EQ(CompositorTargetProperty::OPACITY, animation->targetProperty());
+    EXPECT_EQ(1.0, animation->iterations());
+    EXPECT_EQ(0, animation->timeOffset());
+    EXPECT_EQ(CompositorAnimation::Direction::NORMAL, animation->getDirection());
+    EXPECT_EQ(playbackRate * playerPlaybackRate, animation->playbackRate());
 
-    // Create animation
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
+    std::unique_ptr<CompositorFloatAnimationCurve> keyframedFloatCurve = animation->floatCurveForTesting();
 
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
-
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(1));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(0.0));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionNormal));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(-3));
-
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
-
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    // Set player plaback rate also
-    getAnimationOnCompositor(m_timing, *effect, result, -1.5);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    CompositorFloatAnimationCurve::Keyframes keyframes = keyframedFloatCurve->keyframesForTesting();
+    ASSERT_EQ(2UL, keyframes.size());
 }
 
 TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationFillModeNone)
@@ -1053,42 +912,10 @@ TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationFillModeNo
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(2.0).get(), 0),
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(5.0).get(), 1.0));
 
-    m_timing.fillMode = Timing::FillModeNone;
+    m_timing.fillMode = Timing::FillMode::NONE;
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock;
-    ExpectationSet usesMockCurve;
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
-
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(1.0, 5.0)));
-
-    // Create animation
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
-
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
-
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(1));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(0.0));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionNormal));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(1));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setFillMode(CompositorAnimation::FillModeNone));
-
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
-
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    getAnimationOnCompositor(m_timing, *effect, result);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect);
+    EXPECT_EQ(CompositorAnimation::FillMode::NONE, animation->getFillMode());
 }
 
 TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationFillModeAuto)
@@ -1098,42 +925,15 @@ TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationFillModeAu
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(2.0).get(), 0),
         createReplaceOpKeyframe(CSSPropertyOpacity, AnimatableDouble::create(5.0).get(), 1.0));
 
-    m_timing.fillMode = Timing::FillModeAuto;
+    m_timing.fillMode = Timing::FillMode::AUTO;
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock;
-    ExpectationSet usesMockCurve;
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
-
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(1.0, 5.0)));
-
-    // Create animation
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
-
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
-
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(1));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(0.0));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionNormal));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(1));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setFillMode(CompositorAnimation::FillModeNone));
-
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
-
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    getAnimationOnCompositor(m_timing, *effect, result);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect);
+    EXPECT_EQ(CompositorTargetProperty::OPACITY, animation->targetProperty());
+    EXPECT_EQ(1.0, animation->iterations());
+    EXPECT_EQ(0, animation->timeOffset());
+    EXPECT_EQ(CompositorAnimation::Direction::NORMAL, animation->getDirection());
+    EXPECT_EQ(1.0, animation->playbackRate());
+    EXPECT_EQ(CompositorAnimation::FillMode::NONE, animation->getFillMode());
 }
 
 TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationWithTimingFunction)
@@ -1145,43 +945,32 @@ TEST_F(AnimationCompositorAnimationsTest, createSimpleOpacityAnimationWithTiming
 
     m_timing.timingFunction = m_cubicCustomTimingFunction;
 
-    // Curve is created
-    WebFloatAnimationCurveMock* mockCurvePtr = new WebFloatAnimationCurveMock;
-    ExpectationSet usesMockCurve;
-    EXPECT_CALL(*m_mockCompositorFactory, createFloatAnimationCurve())
-        .WillOnce(Return(mockCurvePtr));
+    std::unique_ptr<CompositorAnimation> animation = convertToCompositorAnimation(*effect);
 
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(0.0, 2.0), CompositorAnimationCurve::TimingFunctionTypeLinear));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, add(CompositorFloatKeyframe(1.0, 5.0)));
-    usesMockCurve += EXPECT_CALL(*mockCurvePtr, setCubicBezierTimingFunction(1, 2, 3, 4));
+    std::unique_ptr<CompositorFloatAnimationCurve> keyframedFloatCurve = animation->floatCurveForTesting();
 
-    // Create animation
-    WebCompositorAnimationMock* mockAnimationPtr = new WebCompositorAnimationMock(CompositorTargetProperty::OPACITY);
-    ExpectationSet usesMockAnimation;
+    auto curveTimingFunction = keyframedFloatCurve->getTimingFunctionForTesting();
+    EXPECT_EQ(curveTimingFunction->getType(), TimingFunction::Type::CUBIC_BEZIER);
+    const auto& cubicTimingFunction = toCubicBezierTimingFunction(*curveTimingFunction);
+    EXPECT_EQ(cubicTimingFunction.getEaseType(), CubicBezierTimingFunction::EaseType::CUSTOM);
+    EXPECT_EQ(cubicTimingFunction.x1(), 1.0);
+    EXPECT_EQ(cubicTimingFunction.y1(), 2.0);
+    EXPECT_EQ(cubicTimingFunction.x2(), 3.0);
+    EXPECT_EQ(cubicTimingFunction.y2(), 4.0);
 
-    usesMockCurve += EXPECT_CALL(*m_mockCompositorFactory, createAnimation(Ref(*mockCurvePtr), CompositorTargetProperty::OPACITY, _, _))
-        .WillOnce(Return(mockAnimationPtr));
+    CompositorFloatAnimationCurve::Keyframes keyframes = keyframedFloatCurve->keyframesForTesting();
+    ASSERT_EQ(2UL, keyframes.size());
 
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setIterations(1));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setTimeOffset(0.0));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setDirection(CompositorAnimation::DirectionNormal));
-    usesMockAnimation += EXPECT_CALL(*mockAnimationPtr, setPlaybackRate(1));
+    EXPECT_EQ(0, keyframes[0]->time());
+    EXPECT_EQ(2.0f, keyframes[0]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[0]->getTimingFunctionForTesting()->getType());
 
-    EXPECT_CALL(*mockAnimationPtr, delete_())
-        .Times(1)
-        .After(usesMockAnimation);
-    EXPECT_CALL(*mockCurvePtr, delete_())
-        .Times(1)
-        .After(usesMockCurve);
-
-    // Go!
-    Vector<OwnPtr<CompositorAnimation>> result;
-    getAnimationOnCompositor(m_timing, *effect, result);
-    EXPECT_EQ(1U, result.size());
-    result[0].clear();
+    EXPECT_EQ(1.0, keyframes[1]->time());
+    EXPECT_EQ(5.0f, keyframes[1]->value());
+    EXPECT_EQ(TimingFunction::Type::LINEAR, keyframes[1]->getTimingFunctionForTesting()->getType());
 }
 
-TEST_F(AnimationCompositorAnimationsTest, CancelIncompatibleCompositorAnimations)
+TEST_F(AnimationCompositorAnimationsTest, cancelIncompatibleCompositorAnimations)
 {
     Persistent<Element> element = m_document->createElement("shared", ASSERT_NO_EXCEPTION);
 
@@ -1200,7 +989,7 @@ TEST_F(AnimationCompositorAnimationsTest, CancelIncompatibleCompositorAnimations
     // The first animation for opacity is ok to run on compositor.
     KeyframeEffect* keyframeEffect1 = KeyframeEffect::create(element.get(), animationEffect1, timing);
     Animation* animation1 = m_timeline->play(keyframeEffect1);
-    EXPECT_TRUE(CompositorAnimations::instance()->isCandidateForAnimationOnCompositor(timing, *element.get(), animation1, *animationEffect1, 1));
+    EXPECT_TRUE(CompositorAnimations::isCandidateForAnimationOnCompositor(timing, *element.get(), animation1, *animationEffect1, 1));
 
     // simulate KeyframeEffect::maybeStartAnimationOnCompositor
     Vector<int> compositorAnimationIds;
@@ -1211,7 +1000,7 @@ TEST_F(AnimationCompositorAnimationsTest, CancelIncompatibleCompositorAnimations
     // The second animation for opacity is not ok to run on compositor.
     KeyframeEffect* keyframeEffect2 = KeyframeEffect::create(element.get(), animationEffect2, timing);
     Animation* animation2 = m_timeline->play(keyframeEffect2);
-    EXPECT_FALSE(CompositorAnimations::instance()->isCandidateForAnimationOnCompositor(timing, *element.get(), animation2, *animationEffect2, 1));
+    EXPECT_FALSE(CompositorAnimations::isCandidateForAnimationOnCompositor(timing, *element.get(), animation2, *animationEffect2, 1));
     EXPECT_FALSE(animation2->hasActiveAnimationsOnCompositor());
 
     // A fallback to blink implementation needed, so cancel all compositor-side opacity animations for this element.
@@ -1227,7 +1016,7 @@ TEST_F(AnimationCompositorAnimationsTest, CancelIncompatibleCompositorAnimations
     element->setLayoutObject(nullptr);
     LayoutObjectProxy::dispose(layoutObject);
 
-    ThreadHeap::collectAllGarbage();
+    ThreadState::current()-> collectAllGarbage();
     EXPECT_TRUE(element->elementAnimations()->animations().isEmpty());
 }
 

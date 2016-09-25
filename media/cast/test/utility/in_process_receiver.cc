@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind_helpers.h"
+#include "base/memory/ptr_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -32,7 +33,7 @@ void InProcessReceiver::TransportClient::OnStatusChanged(
 }
 
 void InProcessReceiver::TransportClient::ProcessRtpPacket(
-    scoped_ptr<Packet> packet) {
+    std::unique_ptr<Packet> packet) {
   in_process_receiver_->ReceivePacket(std::move(packet));
 }
 
@@ -61,7 +62,8 @@ void InProcessReceiver::Start() {
 }
 
 void InProcessReceiver::Stop() {
-  base::WaitableEvent event(false, false);
+  base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                            base::WaitableEvent::InitialState::NOT_SIGNALED);
   if (cast_environment_->CurrentlyOn(CastEnvironment::MAIN)) {
     StopOnMainThread(&event);
   } else {
@@ -95,12 +97,12 @@ void InProcessReceiver::StartOnMainThread() {
 
   transport_ = CastTransport::Create(
       cast_environment_->Clock(), base::TimeDelta(),
-      make_scoped_ptr(new InProcessReceiver::TransportClient(this)),
-      make_scoped_ptr(new UdpTransport(
+      base::WrapUnique(new InProcessReceiver::TransportClient(this)),
+      base::MakeUnique<UdpTransport>(
           nullptr, cast_environment_->GetTaskRunner(CastEnvironment::MAIN),
           local_end_point_, remote_end_point_,
           base::Bind(&InProcessReceiver::UpdateCastTransportStatus,
-                     base::Unretained(this)))),
+                     base::Unretained(this))),
       cast_environment_->GetTaskRunner(CastEnvironment::MAIN));
 
   cast_receiver_ = CastReceiver::Create(
@@ -110,7 +112,7 @@ void InProcessReceiver::StartOnMainThread() {
   PullNextVideoFrame();
 }
 
-void InProcessReceiver::GotAudioFrame(scoped_ptr<AudioBus> audio_frame,
+void InProcessReceiver::GotAudioFrame(std::unique_ptr<AudioBus> audio_frame,
                                       const base::TimeTicks& playout_time,
                                       bool is_continuous) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
@@ -142,7 +144,7 @@ void InProcessReceiver::PullNextVideoFrame() {
       &InProcessReceiver::GotVideoFrame, weak_factory_.GetWeakPtr()));
 }
 
-void InProcessReceiver::ReceivePacket(scoped_ptr<Packet> packet) {
+void InProcessReceiver::ReceivePacket(std::unique_ptr<Packet> packet) {
   // TODO(Hubbe): Make an InsertPacket method instead.
   cast_receiver_->ReceivePacket(std::move(packet));
 }

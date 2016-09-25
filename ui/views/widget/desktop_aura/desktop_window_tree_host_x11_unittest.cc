@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <X11/Xlib.h>
-#include <X11/extensions/shape.h>
 #include <stddef.h>
+#include <X11/extensions/shape.h>
+#include <X11/Xlib.h>
 
 #include <memory>
 #include <vector>
@@ -23,13 +23,13 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/display/display_switches.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/platform/x11/x11_event_source_glib.h"
 #include "ui/events/test/platform_event_source_test_api.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/path.h"
-#include "ui/gfx/switches.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/test/x11_property_change_waiter.h"
@@ -53,10 +53,9 @@ class WMStateWaiter : public X11PropertyChangeWaiter {
       : X11PropertyChangeWaiter(window, "_NET_WM_STATE"),
         hint_(hint),
         wait_till_set_(wait_till_set) {
-
-    const char* kAtomsToCache[] = {
+    const char* const kAtomsToCache[] = {
         hint,
-        NULL
+        nullptr
     };
     atom_cache_.reset(new ui::X11AtomCache(gfx::GetXDisplay(), kAtomsToCache));
   }
@@ -90,7 +89,7 @@ class WMStateWaiter : public X11PropertyChangeWaiter {
 // A NonClientFrameView with a window mask with the bottom right corner cut out.
 class ShapedNonClientFrameView : public NonClientFrameView {
  public:
-  explicit ShapedNonClientFrameView() {
+  ShapedNonClientFrameView() {
   }
 
   ~ShapedNonClientFrameView() override {}
@@ -287,12 +286,12 @@ TEST_F(DesktopWindowTreeHostX11Test, Shape) {
   shape2.lineTo(100, 0);
   shape2.close();
 
-  SkRegion* shape_region = new SkRegion;
+  auto shape_region = base::MakeUnique<SkRegion>();
   shape_region->setPath(shape2, SkRegion(shape2.getBounds().round()));
 
-  std::unique_ptr<Widget> widget2(CreateWidget(NULL));
+  std::unique_ptr<Widget> widget2(CreateWidget(nullptr));
   widget2->Show();
-  widget2->SetShape(shape_region);
+  widget2->SetShape(std::move(shape_region));
   ui::X11EventSource::GetInstance()->DispatchXEvents();
 
   XID xid2 = widget2->GetNativeWindow()->GetHost()->GetAcceleratedWidget();
@@ -346,10 +345,10 @@ TEST_F(DesktopWindowTreeHostX11Test, WindowManagerTogglesFullscreen) {
   // Emulate the window manager exiting fullscreen via a window manager
   // accelerator key. It should not affect the widget's fullscreen state.
   {
-    const char* kAtomsToCache[] = {
+    const char* const kAtomsToCache[] = {
         "_NET_WM_STATE",
         "_NET_WM_STATE_FULLSCREEN",
-        NULL
+        nullptr
     };
     Display* display = gfx::GetXDisplay();
     ui::X11AtomCache atom_cache(display, kAtomsToCache);
@@ -397,10 +396,10 @@ TEST_F(DesktopWindowTreeHostX11Test, ToggleMinimizePropogateToContentWindow) {
 
   // Minimize by sending _NET_WM_STATE_HIDDEN
   {
-    const char* kAtomsToCache[] = {
+    const char* const kAtomsToCache[] = {
         "_NET_WM_STATE",
         "_NET_WM_STATE_HIDDEN",
-        NULL
+        nullptr
     };
 
     ui::X11AtomCache atom_cache(display, kAtomsToCache);
@@ -429,10 +428,10 @@ TEST_F(DesktopWindowTreeHostX11Test, ToggleMinimizePropogateToContentWindow) {
 
   // Show from minimized by sending _NET_WM_STATE_FOCUSED
   {
-    const char* kAtomsToCache[] = {
+    const char* const kAtomsToCache[] = {
         "_NET_WM_STATE",
         "_NET_WM_STATE_FOCUSED",
-        NULL
+        nullptr
     };
 
     ui::X11AtomCache atom_cache(display, kAtomsToCache);

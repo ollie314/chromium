@@ -23,8 +23,8 @@
  */
 
 #include "modules/webaudio/BiquadDSPKernel.h"
-#include "platform/FloatConversion.h"
 #include "platform/audio/AudioUtilities.h"
+#include "wtf/MathExtras.h"
 #include "wtf/Vector.h"
 #include <limits.h>
 
@@ -115,9 +115,9 @@ void BiquadDSPKernel::updateCoefficients(int numberOfFrames, const float* cutoff
 
 void BiquadDSPKernel::process(const float* source, float* destination, size_t framesToProcess)
 {
-    ASSERT(source);
-    ASSERT(destination);
-    ASSERT(getBiquadProcessor());
+    DCHECK(source);
+    DCHECK(destination);
+    DCHECK(getBiquadProcessor());
 
     // Recompute filter coefficients if any of the parameters have changed.
     // FIXME: as an optimization, implement a way that a Biquad object can simply copy its internal filter coefficients from another Biquad object.
@@ -138,7 +138,7 @@ void BiquadDSPKernel::process(const float* source, float* destination, size_t fr
 void BiquadDSPKernel::getFrequencyResponse(int nFrequencies, const float* frequencyHz, float* magResponse, float* phaseResponse)
 {
     bool isGood = nFrequencies > 0 && frequencyHz && magResponse && phaseResponse;
-    ASSERT(isGood);
+    DCHECK(isGood);
     if (!isGood)
         return;
 
@@ -149,7 +149,7 @@ void BiquadDSPKernel::getFrequencyResponse(int nFrequencies, const float* freque
     // Convert from frequency in Hz to normalized frequency (0 -> 1),
     // with 1 equal to the Nyquist frequency.
     for (int k = 0; k < nFrequencies; ++k)
-        frequency[k] = narrowPrecisionToFloat(frequencyHz[k] / nyquist);
+        frequency[k] = clampTo<float>(frequencyHz[k] / nyquist);
 
     float cutoffFrequency;
     float Q;

@@ -19,7 +19,6 @@ class BrowserView;
 class NativeBrowserFrame;
 class NonClientFrameView;
 class SystemMenuModelBuilder;
-class ThemeService;
 
 namespace gfx {
 class FontList;
@@ -32,6 +31,7 @@ class MenuModel;
 }
 
 namespace views {
+class MenuModelAdapter;
 class MenuRunner;
 class View;
 }
@@ -86,6 +86,10 @@ class BrowserFrame
   // Returns |true| if we should use the custom frame.
   bool UseCustomFrame() const;
 
+  // Returns whether we should custom draw the titlebar even if we're using the
+  // native frame. Only applicable to Windows.
+  bool CustomDrawSystemTitlebar() const;
+
   // Returns true when the window placement should be saved.
   bool ShouldSaveWindowPlacement() const;
 
@@ -105,13 +109,13 @@ class BrowserFrame
   const ui::NativeTheme* GetNativeTheme() const override;
   void SchedulePaintInRect(const gfx::Rect& rect) override;
   void OnNativeWidgetActivationChanged(bool active) override;
+  void OnNativeWidgetWorkspaceChanged() override;
 
   // Overridden from views::ContextMenuController:
   void ShowContextMenuForView(views::View* source,
                               const gfx::Point& p,
                               ui::MenuSourceType source_type) override;
 
-  AvatarMenuButton* GetAvatarMenuButton();
   views::View* GetNewAvatarMenuButton();
 
   // Returns the menu model. BrowserFrame owns the returned model.
@@ -119,6 +123,9 @@ class BrowserFrame
   ui::MenuModel* GetSystemMenuModel();
 
  private:
+  // Callback for MenuModelAdapter.
+  void OnMenuClosed();
+
   NativeBrowserFrame* native_browser_frame_;
 
   // A weak reference to the root view associated with the window. We save a
@@ -136,9 +143,8 @@ class BrowserFrame
 
   // Used to show the system menu. Only used if
   // NativeBrowserFrame::UsesNativeSystemMenu() returns false.
+  std::unique_ptr<views::MenuModelAdapter> menu_model_adapter_;
   std::unique_ptr<views::MenuRunner> menu_runner_;
-
-  const ThemeService* theme_service_;
 
   std::unique_ptr<ui::EventHandler> browser_command_handler_;
 

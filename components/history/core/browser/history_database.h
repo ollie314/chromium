@@ -75,7 +75,7 @@ class HistoryDatabase : public DownloadDatabase,
   // underlying database connection.
   void set_error_callback(
       const sql::Connection::ErrorCallback& error_callback) {
-    error_callback_ = error_callback;
+    db_.set_error_callback(error_callback);
   }
 
   // Must call this function to complete initialization. Will return
@@ -145,6 +145,8 @@ class HistoryDatabase : public DownloadDatabase,
   // Razes the database. Returns true if successful.
   bool Raze();
 
+  std::string GetDiagnosticInfo(int extended_error, sql::Statement* statement);
+
   // Visit table functions ----------------------------------------------------
 
   // Update the segment id of a visit. Return true on success.
@@ -174,9 +176,9 @@ class HistoryDatabase : public DownloadDatabase,
 
   // Migration -----------------------------------------------------------------
 
-  // Makes sure the version is up-to-date, updating if necessary. If the
+  // Makes sure the version is up to date, updating if necessary. If the
   // database is too old to migrate, the user will be notified. Returns
-  // sql::INIT_OK iff  the DB is up-to-date and ready for use.
+  // sql::INIT_OK iff  the DB is up to date and ready for use.
   //
   // This assumes it is called from the init function inside a transaction. It
   // may commit the transaction and start a new one if migration requires it.
@@ -190,7 +192,6 @@ class HistoryDatabase : public DownloadDatabase,
 
   // ---------------------------------------------------------------------------
 
-  sql::Connection::ErrorCallback error_callback_;
   sql::Connection db_;
   sql::MetaTable meta_table_;
 

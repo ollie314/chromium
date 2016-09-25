@@ -36,7 +36,6 @@
 #include "extensions/common/feature_switch.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
-#include "grit/theme_resources.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -722,7 +721,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionPopupWithIframe) {
       extensions::ProcessManager::Get(browser()->profile());
   std::set<content::RenderFrameHost*> frame_hosts =
       manager->GetRenderFrameHostsForExtension(extension->id());
-  for (auto host : frame_hosts) {
+  for (auto* host : frame_hosts) {
     if (host->GetFrameName() == "child_frame") {
       frame_host = host;
       break;
@@ -766,7 +765,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionOpenPopupOnPopup) {
   // Open a new web popup window.
   chrome::NavigateParams params(browser(), GURL("http://www.google.com/"),
                                 ui::PAGE_TRANSITION_LINK);
-  params.disposition = NEW_POPUP;
+  params.disposition = WindowOpenDisposition::NEW_POPUP;
   params.window_action = chrome::NavigateParams::SHOW_WINDOW;
   ui_test_utils::NavigateToURL(&params);
   Browser* popup_browser = params.browser;

@@ -16,26 +16,20 @@ class GraphicsContext;
 class LayoutObject;
 class LayoutSVGResourceClipper;
 
+enum class ClipperState;
+
 class SVGClipPainter {
     STACK_ALLOCATED();
 public:
-    enum ClipperState {
-        ClipperNotApplied,
-        ClipperAppliedPath,
-        ClipperAppliedMask
-    };
-
     SVGClipPainter(LayoutSVGResourceClipper& clip) : m_clip(clip) { }
 
-    // FIXME: Filters are also stateful resources that could benefit from having their state managed
-    //        on the caller stack instead of the current hashmap. We should look at refactoring these
-    //        into a general interface that can be shared.
-    bool prepareEffect(const LayoutObject&, const FloatRect&, const FloatRect&, GraphicsContext&, ClipperState&);
+    bool prepareEffect(const LayoutObject&, const FloatRect&, const FloatRect&, const FloatPoint&, GraphicsContext&, ClipperState&);
     void finishEffect(const LayoutObject&, GraphicsContext&, ClipperState&);
 
 private:
     // Return false if there is a problem drawing the mask.
-    bool drawClipAsMask(GraphicsContext&, const LayoutObject&, const FloatRect& targetBoundingBox, const FloatRect& targetPaintInvalidationRect, const AffineTransform&);
+    bool drawClipAsMask(GraphicsContext&, const LayoutObject&, const FloatRect& targetBoundingBox,
+        const FloatRect& targetPaintInvalidationRect, const AffineTransform&, const FloatPoint&);
 
     LayoutSVGResourceClipper& m_clip;
 };

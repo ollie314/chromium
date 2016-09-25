@@ -9,6 +9,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "net/base/request_priority.h"
+#include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/mock_cert_verifier.h"
+#include "net/cert/multi_log_ct_verifier.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_auth_handler_mock.h"
 #include "net/http/http_network_session.h"
@@ -19,7 +22,11 @@
 #include "net/proxy/proxy_service.h"
 #include "net/socket/socket_test_util.h"
 #include "net/ssl/default_channel_id_store.h"
+#include "net/test/gtest_util.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using net::test::IsOk;
 
 namespace net {
 
@@ -85,9 +92,11 @@ class HttpNetworkTransactionSSLTest : public testing::Test {
 
     session_params_.client_socket_factory = &mock_socket_factory_;
     session_params_.host_resolver = &mock_resolver_;
-    session_params_.http_server_properties =
-        http_server_properties_.GetWeakPtr();
+    session_params_.http_server_properties = &http_server_properties_;
+    session_params_.cert_verifier = &cert_verifier_;
     session_params_.transport_security_state = &transport_security_state_;
+    session_params_.cert_transparency_verifier = &ct_verifier_;
+    session_params_.ct_policy_enforcer = &ct_policy_enforcer_;
   }
 
   HttpRequestInfo* GetRequestInfo(const std::string& url) {
@@ -109,51 +118,13 @@ class HttpNetworkTransactionSSLTest : public testing::Test {
   MockClientSocketFactory mock_socket_factory_;
   MockHostResolver mock_resolver_;
   HttpServerPropertiesImpl http_server_properties_;
+  MockCertVerifier cert_verifier_;
   TransportSecurityState transport_security_state_;
+  MultiLogCTVerifier ct_verifier_;
+  CTPolicyEnforcer ct_policy_enforcer_;
   HttpNetworkSession::Params session_params_;
   std::vector<std::unique_ptr<HttpRequestInfo>> request_info_vector_;
 };
-
-// Tests that HttpNetworkTransaction attempts to fallback from
-// TLS 1.2 to TLS 1.1.
-TEST_F(HttpNetworkTransactionSSLTest, SSLFallback) {
-  ssl_config_service_ = new TLS12SSLConfigService;
-  session_params_.ssl_config_service = ssl_config_service_.get();
-  // |ssl_data1| is for the first handshake (TLS 1.2), which will fail
-  // for protocol reasons (e.g., simulating a version rollback attack).
-  SSLSocketDataProvider ssl_data1(ASYNC, ERR_SSL_PROTOCOL_ERROR);
-  mock_socket_factory_.AddSSLSocketDataProvider(&ssl_data1);
-  StaticSocketDataProvider data1(NULL, 0, NULL, 0);
-  mock_socket_factory_.AddSocketDataProvider(&data1);
-
-  // |ssl_data2| contains the handshake result for a TLS 1.1
-  // handshake which will be attempted after the TLS 1.2
-  // handshake fails.
-  SSLSocketDataProvider ssl_data2(ASYNC, ERR_SSL_PROTOCOL_ERROR);
-  mock_socket_factory_.AddSSLSocketDataProvider(&ssl_data2);
-  StaticSocketDataProvider data2(NULL, 0, NULL, 0);
-  mock_socket_factory_.AddSocketDataProvider(&data2);
-
-  HttpNetworkSession session(session_params_);
-  HttpNetworkTransaction trans(DEFAULT_PRIORITY, &session);
-
-  TestCompletionCallback callback;
-  // This will consume |ssl_data1| and |ssl_data2|.
-  int rv =
-      callback.GetResult(trans.Start(GetRequestInfo("https://www.paypal.com/"),
-                                     callback.callback(), BoundNetLog()));
-  EXPECT_EQ(ERR_SSL_PROTOCOL_ERROR, rv);
-
-  SocketDataProviderArray<SocketDataProvider>& mock_data =
-      mock_socket_factory_.mock_data();
-  // Confirms that |ssl_data1| and |ssl_data2| are consumed.
-  EXPECT_EQ(2u, mock_data.next_index());
-
-  SSLConfig& ssl_config = GetServerSSLConfig(&trans);
-  // |version_max| falls back to TLS 1.1.
-  EXPECT_EQ(SSL_PROTOCOL_VERSION_TLS1_1, ssl_config.version_max);
-  EXPECT_TRUE(ssl_config.version_fallback);
-}
 
 #if !defined(OS_IOS)
 TEST_F(HttpNetworkTransactionSSLTest, TokenBinding) {
@@ -178,8 +149,8 @@ TEST_F(HttpNetworkTransactionSSLTest, TokenBinding) {
   TestCompletionCallback callback;
   int rv = callback.GetResult(
       trans1.Start(GetRequestInfo("https://www.example.com/"),
-                   callback.callback(), BoundNetLog()));
-  EXPECT_EQ(OK, rv);
+                   callback.callback(), NetLogWithSource()));
+  EXPECT_THAT(rv, IsOk());
 
   HttpRequestHeaders headers1;
   ASSERT_TRUE(trans1.GetFullRequestHeaders(&headers1));
@@ -196,8 +167,8 @@ TEST_F(HttpNetworkTransactionSSLTest, TokenBinding) {
 
   rv = callback.GetResult(
       trans2.Start(GetRequestInfo("https://www.example.com/"),
-                   callback.callback(), BoundNetLog()));
-  EXPECT_EQ(OK, rv);
+                   callback.callback(), NetLogWithSource()));
+  EXPECT_THAT(rv, IsOk());
 
   HttpRequestHeaders headers2;
   ASSERT_TRUE(trans2.GetFullRequestHeaders(&headers2));
@@ -230,8 +201,8 @@ TEST_F(HttpNetworkTransactionSSLTest, NoTokenBindingOverHttp) {
   TestCompletionCallback callback;
   int rv =
       callback.GetResult(trans.Start(GetRequestInfo("http://www.example.com/"),
-                                     callback.callback(), BoundNetLog()));
-  EXPECT_EQ(OK, rv);
+                                     callback.callback(), NetLogWithSource()));
+  EXPECT_THAT(rv, IsOk());
 
   HttpRequestHeaders headers;
   ASSERT_TRUE(trans.GetFullRequestHeaders(&headers));

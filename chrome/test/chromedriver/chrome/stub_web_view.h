@@ -24,8 +24,8 @@ class StubWebView : public WebView {
   Status HandleReceivedEvents() override;
   Status GetUrl(std::string* url) override;
   Status Load(const std::string& url, const Timeout* timeout) override;
-  Status Reload() override;
-  Status TraverseHistory(int delta) override;
+  Status Reload(const Timeout* timeout) override;
+  Status TraverseHistory(int delta, const Timeout* timeout) override;
   Status EvaluateScript(const std::string& frame,
                         const std::string& function,
                         std::unique_ptr<base::Value>* result) override;
@@ -80,6 +80,9 @@ class StubWebView : public WebView {
                                  int xoffset,
                                  int yoffset) override;
   Status SynthesizePinchGesture(int x, int y, double scale_factor) override;
+  Status GetScreenOrientation(std::string* orientation) override;
+  Status SetScreenOrientation(std::string orientation) override;
+  Status DeleteScreenOrientation() override;
 
  private:
   std::string id_;

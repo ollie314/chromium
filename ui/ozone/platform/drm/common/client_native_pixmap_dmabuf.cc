@@ -24,6 +24,8 @@ struct local_dma_buf_sync {
 
 #define LOCAL_DMA_BUF_SYNC_READ (1 << 0)
 #define LOCAL_DMA_BUF_SYNC_WRITE (2 << 0)
+#define LOCAL_DMA_BUF_SYNC_RW \
+  (LOCAL_DMA_BUF_SYNC_READ | LOCAL_DMA_BUF_SYNC_WRITE)
 #define LOCAL_DMA_BUF_SYNC_START (0 << 2)
 #define LOCAL_DMA_BUF_SYNC_END (1 << 2)
 
@@ -39,7 +41,7 @@ namespace {
 void PrimeSyncStart(int dmabuf_fd) {
   struct local_dma_buf_sync sync_start = {0};
 
-  sync_start.flags = LOCAL_DMA_BUF_SYNC_START | LOCAL_DMA_BUF_SYNC_READ;
+  sync_start.flags = LOCAL_DMA_BUF_SYNC_START | LOCAL_DMA_BUF_SYNC_RW;
   if (drmIoctl(dmabuf_fd, LOCAL_DMA_BUF_IOCTL_SYNC, &sync_start))
     PLOG(ERROR) << "Failed DMA_BUF_SYNC_START";
 }
@@ -47,7 +49,7 @@ void PrimeSyncStart(int dmabuf_fd) {
 void PrimeSyncEnd(int dmabuf_fd) {
   struct local_dma_buf_sync sync_end = {0};
 
-  sync_end.flags = LOCAL_DMA_BUF_SYNC_END | LOCAL_DMA_BUF_SYNC_WRITE;
+  sync_end.flags = LOCAL_DMA_BUF_SYNC_END | LOCAL_DMA_BUF_SYNC_RW;
   if (drmIoctl(dmabuf_fd, LOCAL_DMA_BUF_IOCTL_SYNC, &sync_end))
     PLOG(ERROR) << "Failed DMA_BUF_SYNC_END";
 }
@@ -60,25 +62,31 @@ std::unique_ptr<ClientNativePixmap> ClientNativePixmapDmaBuf::ImportFromDmabuf(
     const gfx::Size& size,
     int stride) {
   DCHECK_GE(dmabuf_fd, 0);
-  return base::WrapUnique(
-      new ClientNativePixmapDmaBuf(dmabuf_fd, size, stride));
+  base::CheckedNumeric<size_t> map_size = stride;
+  map_size *= size.height();
+  if (!map_size.IsValid())
+    return nullptr;
+  return base::WrapUnique(new ClientNativePixmapDmaBuf(dmabuf_fd, size, stride,
+                                                       map_size.ValueOrDie()));
 }
 
 ClientNativePixmapDmaBuf::ClientNativePixmapDmaBuf(int dmabuf_fd,
                                                    const gfx::Size& size,
-                                                   int stride)
-    : dmabuf_fd_(dmabuf_fd), size_(size), stride_(stride) {
+                                                   int stride,
+                                                   size_t map_size)
+    : dmabuf_fd_(dmabuf_fd), map_size_(map_size), size_(size), stride_(stride) {
   TRACE_EVENT0("drm", "ClientNativePixmapDmaBuf");
-  size_t map_size = stride_ * size_.height();
-  data_ = mmap(nullptr, map_size, (PROT_READ | PROT_WRITE), MAP_SHARED,
+  data_ = mmap(nullptr, map_size_, (PROT_READ | PROT_WRITE), MAP_SHARED,
                dmabuf_fd, 0);
-  CHECK_NE(data_, MAP_FAILED);
+  if (data_ == MAP_FAILED) {
+    PLOG(ERROR) << "Failed mmap().";
+    base::TerminateBecauseOutOfMemory(map_size_);
+  }
 }
 
 ClientNativePixmapDmaBuf::~ClientNativePixmapDmaBuf() {
   TRACE_EVENT0("drm", "~ClientNativePixmapDmaBuf");
-  size_t size = stride_ * size_.height();
-  int ret = munmap(data_, size);
+  int ret = munmap(data_, map_size_);
   DCHECK(!ret);
 }
 

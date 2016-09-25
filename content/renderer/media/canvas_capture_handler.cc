@@ -20,30 +20,13 @@
 #include "third_party/WebKit/public/platform/WebMediaStreamSource.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/libyuv/include/libyuv.h"
+#include "third_party/skia/include/core/SkImage.h"
 
 namespace {
 
-static void CopyAlphaChannelIntoVideoFrame(
-    const uint8_t* const source,
-    const scoped_refptr<media::VideoFrame>& dest_frame) {
-  const gfx::Size& size = dest_frame->coded_size();
-  const int stride = dest_frame->stride(media::VideoFrame::kAPlane);
+using media::VideoFrame;
 
-  if (stride == size.width()) {
-    for (int p = 0; p < size.GetArea(); ++p)
-      dest_frame->data(media::VideoFrame::kAPlane)[p] = source[p * 4 + 3];
-    return;
-  }
-
-  // Copy apha values one-by-one if the destination stride != source width.
-  for (int h = 0; h < size.height(); ++h) {
-    const uint8_t* const src_ptr = &source[4 * h * size.width()];
-    uint8_t* dest_ptr =
-        &dest_frame->data(media::VideoFrame::kAPlane)[h * stride];
-    for (int pixel_index = 0; pixel_index < 4 * size.width(); pixel_index += 4)
-      *(dest_ptr++) = src_ptr[pixel_index + 3];
-  }
-}
+const size_t kArgbBytesPerPixel = 4;
 
 }  // namespace
 
@@ -152,7 +135,7 @@ CanvasCaptureHandler::CanvasCaptureHandler(
 }
 
 CanvasCaptureHandler::~CanvasCaptureHandler() {
-  DVLOG(3) << __FUNCTION__;
+  DVLOG(3) << __func__;
   DCHECK(main_render_thread_checker_.CalledOnValidThread());
   io_task_runner_->DeleteSoon(FROM_HERE, delegate_.release());
 }
@@ -185,7 +168,7 @@ void CanvasCaptureHandler::StartVideoCapture(
     const media::VideoCapturerSource::VideoCaptureDeliverFrameCB&
         new_frame_callback,
     const media::VideoCapturerSource::RunningCallback& running_callback) {
-  DVLOG(3) << __FUNCTION__ << " requested "
+  DVLOG(3) << __func__ << " requested "
            << media::VideoCaptureFormat::ToString(params.requested_format);
   DCHECK(main_render_thread_checker_.CalledOnValidThread());
   DCHECK(params.requested_format.IsValid());
@@ -199,7 +182,7 @@ void CanvasCaptureHandler::StartVideoCapture(
 }
 
 void CanvasCaptureHandler::RequestRefreshFrame() {
-  DVLOG(3) << __FUNCTION__;
+  DVLOG(3) << __func__;
   DCHECK(main_render_thread_checker_.CalledOnValidThread());
   if (last_frame_ && delegate_) {
     io_task_runner_->PostTask(
@@ -212,30 +195,29 @@ void CanvasCaptureHandler::RequestRefreshFrame() {
 }
 
 void CanvasCaptureHandler::StopVideoCapture() {
-  DVLOG(3) << __FUNCTION__;
+  DVLOG(3) << __func__;
   DCHECK(main_render_thread_checker_.CalledOnValidThread());
   ask_for_new_frame_ = false;
   io_task_runner_->DeleteSoon(FROM_HERE, delegate_.release());
 }
 
 void CanvasCaptureHandler::CreateNewFrame(const SkImage* image) {
-  DVLOG(4) << __FUNCTION__;
+  DVLOG(4) << __func__;
   DCHECK(main_render_thread_checker_.CalledOnValidThread());
   DCHECK(image);
 
   const gfx::Size size(image->width(), image->height());
   if (size != last_size) {
-    temp_data_.resize(
-        media::VideoFrame::AllocationSize(media::PIXEL_FORMAT_ARGB, size));
-    row_bytes_ =
-        media::VideoFrame::RowBytes(0, media::PIXEL_FORMAT_ARGB, size.width());
+    temp_data_stride_ = kArgbBytesPerPixel * size.width();
+    temp_data_.resize(temp_data_stride_ * size.height());
     image_info_ =
         SkImageInfo::Make(size.width(), size.height(), kBGRA_8888_SkColorType,
                           kUnpremul_SkAlphaType);
     last_size = size;
   }
 
-  if(!image->readPixels(image_info_, &temp_data_[0], row_bytes_, 0, 0)) {
+  if (!image->readPixels(image_info_, &temp_data_[0], temp_data_stride_, 0,
+                         0)) {
     DLOG(ERROR) << "Couldn't read SkImage pixels";
     return;
   }
@@ -247,18 +229,19 @@ void CanvasCaptureHandler::CreateNewFrame(const SkImage* image) {
       gfx::Rect(size), size, timestamp - base::TimeTicks());
   DCHECK(video_frame);
 
-  libyuv::ARGBToI420(temp_data_.data(), row_bytes_,
-                     video_frame->data(media::VideoFrame::kYPlane),
+  libyuv::ARGBToI420(temp_data_.data(), temp_data_stride_,
+                     video_frame->visible_data(media::VideoFrame::kYPlane),
                      video_frame->stride(media::VideoFrame::kYPlane),
-                     video_frame->data(media::VideoFrame::kUPlane),
+                     video_frame->visible_data(media::VideoFrame::kUPlane),
                      video_frame->stride(media::VideoFrame::kUPlane),
-                     video_frame->data(media::VideoFrame::kVPlane),
+                     video_frame->visible_data(media::VideoFrame::kVPlane),
                      video_frame->stride(media::VideoFrame::kVPlane),
                      size.width(), size.height());
   if (!isOpaque) {
-    // TODO(emircan): Use https://code.google.com/p/libyuv/issues/detail?id=572
-    // when it becomes available.
-    CopyAlphaChannelIntoVideoFrame(temp_data_.data(), video_frame);
+    libyuv::ARGBExtractAlpha(temp_data_.data(), temp_data_stride_,
+                             video_frame->visible_data(VideoFrame::kAPlane),
+                             video_frame->stride(VideoFrame::kAPlane),
+                             size.width(), size.height());
   }
 
   last_frame_ = video_frame;
@@ -280,13 +263,13 @@ void CanvasCaptureHandler::AddVideoCapturerSourceToVideoTrack(
       new MediaStreamVideoCapturerSource(
           MediaStreamSource::SourceStoppedCallback(), std::move(source)));
   webkit_source.initialize(track_id, blink::WebMediaStreamSource::TypeVideo,
-                           track_id, false, true);
+                           track_id, false);
   webkit_source.setExtraData(media_stream_source.get());
 
   web_track->initialize(webkit_source);
   blink::WebMediaConstraints constraints;
   constraints.initialize();
-  web_track->setExtraData(new MediaStreamVideoTrack(
+  web_track->setTrackData(new MediaStreamVideoTrack(
       media_stream_source.release(), constraints,
       MediaStreamVideoSource::ConstraintsCallback(), true));
 }

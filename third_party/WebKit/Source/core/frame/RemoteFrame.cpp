@@ -12,12 +12,14 @@
 #include "core/frame/RemoteFrameClient.h"
 #include "core/frame/RemoteFrameView.h"
 #include "core/html/HTMLFrameOwnerElement.h"
-#include "core/layout/LayoutPart.h"
+#include "core/layout/api/LayoutPartItem.h"
 #include "core/loader/FrameLoadRequest.h"
+#include "core/loader/FrameLoader.h"
 #include "core/paint/PaintLayer.h"
 #include "platform/PluginScriptForbiddenScope.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/graphics/GraphicsLayer.h"
+#include "platform/network/ResourceRequest.h"
 #include "platform/weborigin/SecurityPolicy.h"
 #include "public/platform/WebLayer.h"
 
@@ -67,23 +69,27 @@ WindowProxy* RemoteFrame::windowProxy(DOMWrapperWorld& world)
 
 void RemoteFrame::navigate(Document& originDocument, const KURL& url, bool replaceCurrentItem, UserGestureStatus userGestureStatus)
 {
-    // The process where this frame actually lives won't have sufficient information to determine
-    // correct referrer, since it won't have access to the originDocument. Set it now.
-    ResourceRequest request(url);
-    request.setHTTPReferrer(SecurityPolicy::generateReferrer(originDocument.getReferrerPolicy(), url, originDocument.outgoingReferrer()));
-    request.setHasUserGesture(userGestureStatus == UserGestureStatus::Active);
-    remoteFrameClient()->navigate(request, replaceCurrentItem);
+    FrameLoadRequest frameRequest(&originDocument, url);
+    frameRequest.setReplacesCurrentItem(replaceCurrentItem);
+    frameRequest.resourceRequest().setHasUserGesture(userGestureStatus == UserGestureStatus::Active);
+    navigate(frameRequest);
 }
 
 void RemoteFrame::navigate(const FrameLoadRequest& passedRequest)
 {
-    UserGestureStatus gesture = UserGestureIndicator::processingUserGesture() ? UserGestureStatus::Active : UserGestureStatus::None;
-    navigate(*passedRequest.originDocument(), passedRequest.resourceRequest().url(), passedRequest.replacesCurrentItem(), gesture);
+    FrameLoadRequest frameRequest(passedRequest);
+
+    // The process where this frame actually lives won't have sufficient information to determine
+    // correct referrer, since it won't have access to the originDocument. Set it now.
+    FrameLoader::setReferrerForFrameRequest(frameRequest);
+
+    frameRequest.resourceRequest().setHasUserGesture(UserGestureIndicator::processingUserGesture());
+    client()->navigate(frameRequest.resourceRequest(), frameRequest.replacesCurrentItem());
 }
 
 void RemoteFrame::reload(FrameLoadType frameLoadType, ClientRedirectPolicy clientRedirectPolicy)
 {
-    remoteFrameClient()->reload(frameLoadType, clientRedirectPolicy);
+    client()->reload(frameLoadType, clientRedirectPolicy);
 }
 
 void RemoteFrame::detach(FrameDetachType type)
@@ -125,18 +131,18 @@ bool RemoteFrame::shouldClose()
 
 void RemoteFrame::forwardInputEvent(Event* event)
 {
-    remoteFrameClient()->forwardInputEvent(event);
+    client()->forwardInputEvent(event);
 }
 
 void RemoteFrame::frameRectsChanged(const IntRect& frameRect)
 {
-    remoteFrameClient()->frameRectsChanged(frameRect);
+    client()->frameRectsChanged(frameRect);
 }
 
 void RemoteFrame::visibilityChanged(bool visible)
 {
-    if (remoteFrameClient())
-        remoteFrameClient()->visibilityChanged(visible);
+    if (client())
+        client()->visibilityChanged(visible);
 }
 
 void RemoteFrame::setView(RemoteFrameView* view)
@@ -165,13 +171,13 @@ void RemoteFrame::createView()
 
     setView(RemoteFrameView::create(this));
 
-    if (ownerLayoutObject())
+    if (!ownerLayoutItem().isNull())
         deprecatedLocalOwner()->setWidget(m_view);
 }
 
-RemoteFrameClient* RemoteFrame::remoteFrameClient() const
+RemoteFrameClient* RemoteFrame::client() const
 {
-    return static_cast<RemoteFrameClient*>(client());
+    return static_cast<RemoteFrameClient*>(Frame::client());
 }
 
 void RemoteFrame::setRemotePlatformLayer(WebLayer* layer)
@@ -188,7 +194,18 @@ void RemoteFrame::setRemotePlatformLayer(WebLayer* layer)
 
 void RemoteFrame::advanceFocus(WebFocusType type, LocalFrame* source)
 {
-    remoteFrameClient()->advanceFocus(type, source);
+    client()->advanceFocus(type, source);
+}
+
+void RemoteFrame::detachChildren()
+{
+    using FrameVector = HeapVector<Member<Frame>>;
+    FrameVector childrenToDetach;
+    childrenToDetach.reserveCapacity(tree().childCount());
+    for (Frame* child = tree().firstChild(); child; child = child->tree().nextSibling())
+        childrenToDetach.append(child);
+    for (const auto& child : childrenToDetach)
+        child->detach(FrameDetachType::Remove);
 }
 
 } // namespace blink

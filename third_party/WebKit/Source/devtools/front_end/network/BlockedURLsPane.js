@@ -38,7 +38,7 @@ WebInspector.BlockedURLsPane = function()
 
     /** @type {!Map<string, number>} */
     this._blockedCountForUrl = new Map();
-    WebInspector.targetManager.addModelListener(WebInspector.NetworkManager, WebInspector.NetworkManager.EventTypes.RequestFinished, this._onRequestFinished, this);
+    WebInspector.targetManager.addModelListener(WebInspector.NetworkManager, WebInspector.NetworkManager.Events.RequestFinished, this._onRequestFinished, this);
 
     this._updateThrottler = new WebInspector.Throttler(200);
 
@@ -118,7 +118,7 @@ WebInspector.BlockedURLsPane.prototype = {
             if (isEnterKey(event)) {
                 event.consume();
                 commit.call(this);
-            } else if (event.keyCode === WebInspector.KeyboardShortcut.Keys.Esc.code || event.keyIdentifier === "U+001B") {
+            } else if (event.keyCode === WebInspector.KeyboardShortcut.Keys.Esc.code || event.key === "Escape") {
                 event.consume();
                 finish.call(this);
                 this._update();
@@ -304,7 +304,7 @@ WebInspector.BlockedURLsPane.ActionDelegate.prototype = {
      */
     handleAction: function(context, actionId)
     {
-        WebInspector.inspectorView.showViewInDrawer("network.blocked-urls");
+        WebInspector.viewManager.showView("network.blocked-urls");
         return true;
     }
 }

@@ -14,8 +14,8 @@
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
-#include "base/stl_util.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/messaging/extension_message_port.h"
 #include "chrome/browser/extensions/api/messaging/incognito_connectability.h"
@@ -43,6 +43,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
+#include "extensions/browser/extension_web_contents_observer.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "extensions/browser/lazy_background_task_queue.h"
@@ -232,7 +233,6 @@ MessageService::MessageService(BrowserContext* context)
 MessageService::~MessageService() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  STLDeleteContainerPairSecondPointers(channels_.begin(), channels_.end());
   channels_.clear();
 }
 
@@ -406,7 +406,6 @@ void MessageService::OpenChannelToNativeApp(
     int source_process_id,
     int source_routing_id,
     int receiver_port_id,
-    const std::string& source_extension_id,
     const std::string& native_app_name) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -416,25 +415,29 @@ void MessageService::OpenChannelToNativeApp(
     return;
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
-  Profile* profile =
-      Profile::FromBrowserContext(source->GetProcess()->GetBrowserContext());
-  ExtensionService* extension_service =
-      ExtensionSystem::Get(profile)->extension_service();
-  bool has_permission = false;
-  if (extension_service) {
-    const Extension* extension =
-        extension_service->GetExtensionById(source_extension_id, false);
-    has_permission = extension &&
-                     extension->permissions_data()->HasAPIPermission(
-                         APIPermission::kNativeMessaging);
-  }
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderFrameHost(source);
+  ExtensionWebContentsObserver* extension_web_contents_observer =
+      web_contents ?
+          ExtensionWebContentsObserver::GetForWebContents(web_contents) :
+          nullptr;
+  const Extension* extension =
+      extension_web_contents_observer ?
+          extension_web_contents_observer->GetExtensionFromFrame(source, true) :
+          nullptr;
+
+  bool has_permission = extension &&
+                        extension->permissions_data()->HasAPIPermission(
+                            APIPermission::kNativeMessaging);
 
   if (!has_permission) {
     DispatchOnDisconnect(source, receiver_port_id, kMissingPermissionError);
     return;
   }
 
-  PrefService* pref_service = profile->GetPrefs();
+  PrefService* pref_service =
+      Profile::FromBrowserContext(source->GetProcess()->GetBrowserContext())->
+          GetPrefs();
 
   // Verify that the host is not blocked by policies.
   PolicyPermission policy_permission =
@@ -448,7 +451,7 @@ void MessageService::OpenChannelToNativeApp(
   channel->opener.reset(
       new ExtensionMessagePort(weak_factory_.GetWeakPtr(),
                                GET_OPPOSITE_PORT_ID(receiver_port_id),
-                               source_extension_id, source, false));
+                               extension->id(), source, false));
   if (!channel->opener->IsValidPort())
     return;
   channel->opener->OpenPort(source_process_id, source_routing_id);
@@ -458,7 +461,7 @@ void MessageService::OpenChannelToNativeApp(
 
   std::string error = kReceivingEndDoesntExistError;
   std::unique_ptr<NativeMessageHost> native_host = NativeMessageHost::Create(
-      native_view, source_extension_id, native_app_name,
+      native_view, extension->id(), native_app_name,
       policy_permission == ALLOW_ALL, &error);
 
   // Abandon the channel.
@@ -473,7 +476,7 @@ void MessageService::OpenChannelToNativeApp(
   // Keep the opener alive until the channel is closed.
   channel->opener->IncrementLazyKeepaliveCount();
 
-  AddChannel(channel.release(), receiver_port_id);
+  AddChannel(std::move(channel), receiver_port_id);
 #else  // !(defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX))
   const char kNativeMessagingNotSupportedError[] =
       "Native Messaging is not supported on this platform.";
@@ -569,13 +572,14 @@ void MessageService::OpenChannelImpl(BrowserContext* browser_context,
     return;
   }
 
-  std::unique_ptr<MessagePort> opener(
+  std::unique_ptr<ExtensionMessagePort> opener(
       new ExtensionMessagePort(weak_factory_.GetWeakPtr(),
                                GET_OPPOSITE_PORT_ID(params->receiver_port_id),
                                params->source_extension_id, source, false));
   if (!opener->IsValidPort())
     return;
   opener->OpenPort(params->source_process_id, params->source_routing_id);
+  opener->RevalidatePort();
 
   params->receiver->RemoveCommonFrames(*opener);
   if (!params->receiver->IsValidPort()) {
@@ -583,10 +587,12 @@ void MessageService::OpenChannelImpl(BrowserContext* browser_context,
     return;
   }
 
-  MessageChannel* channel(new MessageChannel());
+  std::unique_ptr<MessageChannel> channel_ptr =
+      base::MakeUnique<MessageChannel>();
+  MessageChannel* channel = channel_ptr.get();
   channel->opener.reset(opener.release());
   channel->receiver.reset(params->receiver.release());
-  AddChannel(channel, params->receiver_port_id);
+  AddChannel(std::move(channel_ptr), params->receiver_port_id);
 
   // TODO(robwu): Could |guest_process_id| and |guest_render_frame_routing_id|
   // be removed? In the past extension message routing was process-based, but
@@ -647,12 +653,13 @@ void MessageService::OpenChannelImpl(BrowserContext* browser_context,
   channel->receiver->IncrementLazyKeepaliveCount();
 }
 
-void MessageService::AddChannel(MessageChannel* channel, int receiver_port_id) {
+void MessageService::AddChannel(std::unique_ptr<MessageChannel> channel,
+                                int receiver_port_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   int channel_id = GET_CHANNEL_ID(receiver_port_id);
   CHECK(channels_.find(channel_id) == channels_.end());
-  channels_[channel_id] = channel;
+  channels_[channel_id] = std::move(channel);
   pending_lazy_background_page_channels_.erase(channel_id);
 }
 
@@ -721,7 +728,7 @@ void MessageService::CloseChannelImpl(
     bool notify_other_port) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  MessageChannel* channel = channel_iter->second;
+  std::unique_ptr<MessageChannel> channel = std::move(channel_iter->second);
   // Remove from map to make sure that it is impossible for CloseChannelImpl to
   // run twice for the same channel.
   channels_.erase(channel_iter);
@@ -736,8 +743,6 @@ void MessageService::CloseChannelImpl(
   // Balance the IncrementLazyKeepaliveCount() in OpenChannelImpl.
   channel->opener->DecrementLazyKeepaliveCount();
   channel->receiver->DecrementLazyKeepaliveCount();
-
-  delete channel;
 }
 
 void MessageService::PostMessage(int source_port_id, const Message& message) {
@@ -752,7 +757,7 @@ void MessageService::PostMessage(int source_port_id, const Message& message) {
     return;
   }
 
-  DispatchMessage(source_port_id, iter->second, message);
+  DispatchMessage(source_port_id, iter->second.get(), message);
 }
 
 void MessageService::EnqueuePendingMessage(int source_port_id,
@@ -767,8 +772,9 @@ void MessageService::EnqueuePendingMessage(int source_port_id,
         PendingMessage(source_port_id, message));
     // A channel should only be holding pending messages because it is in one
     // of these states.
-    DCHECK(!ContainsKey(pending_tls_channel_id_channels_, channel_id));
-    DCHECK(!ContainsKey(pending_lazy_background_page_channels_, channel_id));
+    DCHECK(!base::ContainsKey(pending_tls_channel_id_channels_, channel_id));
+    DCHECK(
+        !base::ContainsKey(pending_lazy_background_page_channels_, channel_id));
     return;
   }
   PendingChannelMap::iterator pending_for_tls_channel_id =
@@ -778,7 +784,8 @@ void MessageService::EnqueuePendingMessage(int source_port_id,
         PendingMessage(source_port_id, message));
     // A channel should only be holding pending messages because it is in one
     // of these states.
-    DCHECK(!ContainsKey(pending_lazy_background_page_channels_, channel_id));
+    DCHECK(
+        !base::ContainsKey(pending_lazy_background_page_channels_, channel_id));
     return;
   }
   EnqueuePendingMessageForLazyBackgroundLoad(source_port_id,
@@ -1011,7 +1018,8 @@ void MessageService::DispatchPendingMessages(const PendingMessagesQueue& queue,
   MessageChannelMap::iterator channel_iter = channels_.find(channel_id);
   if (channel_iter != channels_.end()) {
     for (const PendingMessage& message : queue) {
-      DispatchMessage(message.first, channel_iter->second, message.second);
+      DispatchMessage(message.first, channel_iter->second.get(),
+                      message.second);
     }
   }
 }

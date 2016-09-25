@@ -16,10 +16,12 @@
     "accessibilityPrivate",
     "bookmarks",
     "brailleDisplayPrivate",
+    "clipboardRead",        
     "commands.accessibility",
     "commandLinePrivate",
     "experimental",
     "history",
+    "notifications",
     "storage",
     "tabs",
     "tts",
@@ -30,15 +32,13 @@
     {
       "matches": [ "<all_urls>" ],
       "exclude_globs": [
-          "chrome-extension://mndnfokpggljbaajbnioimlmbfngpief/cvox2/background/background.html",
-          "chrome-extension://mndnfokpggljbaajbnioimlmbfngpief/chromevox/background/kbexplorer.html",
-          "chrome-extension://mndnfokpggljbaajbnioimlmbfngpief/cvox2/background/panel.html",
-          "chrome-extension://nlkncpkkdoccmpiclbokaimcnedabhhm/gallery.html*",
-          "chrome://md-settings*",
-          "chrome://downloads*",
-          "chrome://media-router*",
-          "chrome://oobe/login*",
-          "https://accounts.google.com/embedded/setup/chromeos*"
+{% if is_webstore is not defined %}
+          "chrome-extension://*",
+          "chrome://*",
+          "https://accounts.google.com/embedded/setup/chromeos*",
+          "https://talkgadget.google.com/hangouts*",
+          "*.pdf"
+{% endif %}
       ],
       "all_frames": true,
       "js": [

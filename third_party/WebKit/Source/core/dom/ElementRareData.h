@@ -31,18 +31,23 @@
 #include "core/dom/NodeIntersectionObserverData.h"
 #include "core/dom/NodeRareData.h"
 #include "core/dom/PseudoElement.h"
+#include "core/dom/PseudoElementData.h"
 #include "core/dom/custom/CustomElementDefinition.h"
+#include "core/dom/custom/V0CustomElementDefinition.h"
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/html/ClassList.h"
+#include "core/layout/LayoutObject.h"
 #include "core/style/StyleInheritedData.h"
 #include "platform/heap/Handle.h"
 #include "wtf/HashSet.h"
-#include "wtf/OwnPtr.h"
+#include <memory>
 
 namespace blink {
 
 class HTMLElement;
 class CompositorProxiedPropertySet;
+class ResizeObservation;
+class ResizeObserver;
 
 class ElementRareData : public NodeRareData {
 public:
@@ -87,9 +92,25 @@ public:
     NamedNodeMap* attributeMap() const { return m_attributeMap.get(); }
     void setAttributeMap(NamedNodeMap* attributeMap) { m_attributeMap = attributeMap; }
 
-    ComputedStyle* ensureComputedStyle() const { return m_computedStyle.get(); }
-    void setComputedStyle(PassRefPtr<ComputedStyle> computedStyle) { m_computedStyle = computedStyle; }
-    void clearComputedStyle() { m_computedStyle = nullptr; }
+    ComputedStyle* computedStyle() const
+    {
+        DCHECK(!(layoutObject() && m_computedStyle));
+        if (layoutObject())
+            return layoutObject()->mutableStyle();
+        return m_computedStyle.get();
+    }
+    void setComputedStyle(PassRefPtr<ComputedStyle> computedStyle)
+    {
+        if (layoutObject())
+            layoutObject()->setStyleInternal(std::move(computedStyle));
+        else
+            m_computedStyle = computedStyle;
+    }
+    void clearComputedStyleIfNoLayoutObject()
+    {
+        DCHECK(!(layoutObject() && m_computedStyle));
+        m_computedStyle = nullptr;
+    }
 
     ClassList* classList() const { return m_classList.get(); }
     void setClassList(ClassList* classList) { m_classList = classList; }
@@ -122,8 +143,12 @@ public:
     void decrementCompositorProxiedProperties(uint32_t properties);
     CompositorProxiedPropertySet* proxiedPropertyCounts() const { return m_proxiedProperties.get(); }
 
+    void v0SetCustomElementDefinition(V0CustomElementDefinition* definition) { m_v0CustomElementDefinition = definition; }
+    V0CustomElementDefinition* v0CustomElementDefinition() const { return m_v0CustomElementDefinition.get(); }
+
     void setCustomElementDefinition(CustomElementDefinition* definition) { m_customElementDefinition = definition; }
     CustomElementDefinition* customElementDefinition() const { return m_customElementDefinition.get(); }
+
 
     AttrNodeList& ensureAttrNodeList();
     AttrNodeList* attrNodeList() { return m_attrNodeList.get(); }
@@ -137,7 +162,14 @@ public:
         return *m_intersectionObserverData;
     }
 
+    using ResizeObserverDataMap = HeapHashMap<Member<ResizeObserver>, Member<ResizeObservation>>;
+
+    ResizeObserverDataMap* resizeObserverData() const { return m_resizeObserverData; }
+    ResizeObserverDataMap& ensureResizeObserverData();
+
     DECLARE_TRACE_AFTER_DISPATCH();
+
+    DECLARE_TRACE_WRAPPERS_AFTER_DISPATCH();
 
 private:
     CompositorProxiedPropertySet& ensureCompositorProxiedPropertySet();
@@ -155,18 +187,18 @@ private:
     Member<AttrNodeList> m_attrNodeList;
     Member<InlineCSSStyleDeclaration> m_cssomWrapper;
     Member<InlineStylePropertyMap> m_cssomMapWrapper;
-    OwnPtr<CompositorProxiedPropertySet> m_proxiedProperties;
+    std::unique_ptr<CompositorProxiedPropertySet> m_proxiedProperties;
 
     Member<ElementAnimations> m_elementAnimations;
     Member<NodeIntersectionObserverData> m_intersectionObserverData;
+    Member<ResizeObserverDataMap> m_resizeObserverData;
 
     RefPtr<ComputedStyle> m_computedStyle;
+    // TODO(davaajav):remove this field when v0 custom elements are deprecated
+    Member<V0CustomElementDefinition> m_v0CustomElementDefinition;
     Member<CustomElementDefinition> m_customElementDefinition;
 
-    Member<PseudoElement> m_generatedBefore;
-    Member<PseudoElement> m_generatedAfter;
-    Member<PseudoElement> m_generatedFirstLetter;
-    Member<PseudoElement> m_backdrop;
+    Member<PseudoElementData> m_pseudoElementData;
 
     explicit ElementRareData(LayoutObject*);
 };
@@ -187,67 +219,34 @@ inline ElementRareData::ElementRareData(LayoutObject* layoutObject)
 
 inline ElementRareData::~ElementRareData()
 {
-    DCHECK(!m_generatedBefore);
-    DCHECK(!m_generatedAfter);
-    DCHECK(!m_generatedFirstLetter);
-    DCHECK(!m_backdrop);
+    DCHECK(!m_pseudoElementData);
 }
 
 inline bool ElementRareData::hasPseudoElements() const
 {
-    return m_generatedBefore || m_generatedAfter || m_backdrop || m_generatedFirstLetter;
+    return (m_pseudoElementData && m_pseudoElementData->hasPseudoElements());
 }
 
 inline void ElementRareData::clearPseudoElements()
 {
-    setPseudoElement(PseudoIdBefore, nullptr);
-    setPseudoElement(PseudoIdAfter, nullptr);
-    setPseudoElement(PseudoIdBackdrop, nullptr);
-    setPseudoElement(PseudoIdFirstLetter, nullptr);
+    if (m_pseudoElementData) {
+        m_pseudoElementData->clearPseudoElements();
+        m_pseudoElementData.clear();
+    }
 }
 
 inline void ElementRareData::setPseudoElement(PseudoId pseudoId, PseudoElement* element)
 {
-    switch (pseudoId) {
-    case PseudoIdBefore:
-        if (m_generatedBefore)
-            m_generatedBefore->dispose();
-        m_generatedBefore = element;
-        break;
-    case PseudoIdAfter:
-        if (m_generatedAfter)
-            m_generatedAfter->dispose();
-        m_generatedAfter = element;
-        break;
-    case PseudoIdBackdrop:
-        if (m_backdrop)
-            m_backdrop->dispose();
-        m_backdrop = element;
-        break;
-    case PseudoIdFirstLetter:
-        if (m_generatedFirstLetter)
-            m_generatedFirstLetter->dispose();
-        m_generatedFirstLetter = element;
-        break;
-    default:
-        ASSERT_NOT_REACHED();
-    }
+    if (!m_pseudoElementData)
+        m_pseudoElementData = PseudoElementData::create();
+    m_pseudoElementData->setPseudoElement(pseudoId, element);
 }
 
 inline PseudoElement* ElementRareData::pseudoElement(PseudoId pseudoId) const
 {
-    switch (pseudoId) {
-    case PseudoIdBefore:
-        return m_generatedBefore.get();
-    case PseudoIdAfter:
-        return m_generatedAfter.get();
-    case PseudoIdBackdrop:
-        return m_backdrop.get();
-    case PseudoIdFirstLetter:
-        return m_generatedFirstLetter.get();
-    default:
-        return 0;
-    }
+    if (!m_pseudoElementData)
+        return nullptr;
+    return m_pseudoElementData->pseudoElement(pseudoId);
 }
 
 inline void ElementRareData::incrementCompositorProxiedProperties(uint32_t properties)

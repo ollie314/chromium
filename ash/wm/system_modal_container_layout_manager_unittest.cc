@@ -2,24 +2,32 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/wm/system_modal_container_layout_manager.h"
+#include "ash/common/wm/system_modal_container_layout_manager.h"
 
+#include <memory>
+
+#include "ash/aura/wm_window_aura.h"
+#include "ash/common/session/session_state_delegate.h"
+#include "ash/common/shell_window_ids.h"
+#include "ash/common/wm/container_finder.h"
+#include "ash/common/wm_root_window_controller.h"
+#include "ash/common/wm_shell.h"
 #include "ash/root_window_controller.h"
-#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
-#include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/run_loop.h"
+#include "ui/aura/client/aura_constants.h"
+#include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/base/hit_test.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/test/layer_animator_test_controller.h"
 #include "ui/events/test/event_generator.h"
-#include "ui/gfx/screen.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
 #include "ui/keyboard/keyboard_ui.h"
@@ -40,13 +48,13 @@ aura::Window* GetModalContainer() {
 }
 
 bool AllRootWindowsHaveModalBackgroundsForContainer(int container_id) {
-  std::vector<aura::Window*> containers =
-      Shell::GetContainersFromAllRootWindows(container_id, NULL);
+  WmWindow::Windows containers =
+      wm::GetContainersFromAllRootWindows(container_id);
   bool has_modal_screen = !containers.empty();
-  for (std::vector<aura::Window*>::iterator iter = containers.begin();
-       iter != containers.end(); ++iter) {
+  for (WmWindow* container : containers) {
     has_modal_screen &= static_cast<SystemModalContainerLayoutManager*>(
-                            (*iter)->layout_manager())->has_modal_background();
+                            container->GetLayoutManager())
+                            ->has_window_dimmer();
   }
   return has_modal_screen;
 }
@@ -89,8 +97,7 @@ class TestWindow : public views::WidgetDelegateView {
 
 class EventTestWindow : public TestWindow {
  public:
-  explicit EventTestWindow(bool modal) : TestWindow(modal),
-                                         mouse_presses_(0) {}
+  explicit EventTestWindow(bool modal) : TestWindow(modal), mouse_presses_(0) {}
   ~EventTestWindow() override {}
 
   aura::Window* OpenTestWindowWithContext(aura::Window* context) {
@@ -102,8 +109,7 @@ class EventTestWindow : public TestWindow {
 
   aura::Window* OpenTestWindowWithParent(aura::Window* parent) {
     DCHECK(parent);
-    views::Widget* widget =
-        views::Widget::CreateWindowWithParent(this, parent);
+    views::Widget* widget = views::Widget::CreateWindowWithParent(this, parent);
     widget->Show();
     return widget->GetNativeView();
   }
@@ -115,6 +121,7 @@ class EventTestWindow : public TestWindow {
   }
 
   int mouse_presses() const { return mouse_presses_; }
+
  private:
   int mouse_presses_;
 
@@ -191,7 +198,6 @@ class SystemModalContainerLayoutManagerTest : public AshTestBase {
 
     DCHECK_EQ(show, keyboard->keyboard_visible());
   }
-
 };
 
 TEST_F(SystemModalContainerLayoutManagerTest, NonModalTransient) {
@@ -343,8 +349,7 @@ TEST_F(SystemModalContainerLayoutManagerTest, EventFocusContainers) {
   EXPECT_EQ(1, transient_delegate->mouse_presses());
 
   for (int block_reason = FIRST_BLOCK_REASON;
-       block_reason < NUMBER_OF_BLOCK_REASONS;
-       ++block_reason) {
+       block_reason < NUMBER_OF_BLOCK_REASONS; ++block_reason) {
     // Create a window in the lock screen container and ensure that it receives
     // the mouse event instead of the modal window (crbug.com/110920).
     BlockUserSession(static_cast<UserSessionBlockReason>(block_reason));
@@ -370,6 +375,93 @@ TEST_F(SystemModalContainerLayoutManagerTest, EventFocusContainers) {
     EXPECT_EQ(1, transient_delegate->mouse_presses());
     UnblockUserSession();
   }
+}
+
+TEST_F(SystemModalContainerLayoutManagerTest, ModalTransientChildEvents) {
+  // Create a normal window and attempt to receive a click event.
+  EventTestWindow* main_delegate = new EventTestWindow(false);
+  std::unique_ptr<aura::Window> main(
+      main_delegate->OpenTestWindowWithContext(CurrentContext()));
+  EXPECT_TRUE(wm::IsActiveWindow(main.get()));
+  ui::test::EventGenerator e1(Shell::GetPrimaryRootWindow(), main.get());
+  e1.ClickLeftButton();
+  EXPECT_EQ(1, main_delegate->mouse_presses());
+
+  // Create a modal window for the main window and verify that the main window
+  // no longer receives mouse events.
+  EventTestWindow* modal1_delegate = new EventTestWindow(true);
+  aura::Window* modal1 = modal1_delegate->OpenTestWindowWithParent(main.get());
+  EXPECT_TRUE(wm::IsActiveWindow(modal1));
+  e1.ClickLeftButton();
+  EXPECT_EQ(1, modal1_delegate->mouse_presses());
+  EXPECT_EQ(1, main_delegate->mouse_presses());
+
+  // Create a non-modal transient child of modal1 and verify it receives mouse
+  // events instead of main and modal1.
+  EventTestWindow* modal1_transient_delegate = new EventTestWindow(false);
+  aura::Window* modal1_transient =
+      modal1_transient_delegate->OpenTestWindowWithParent(modal1);
+  EXPECT_TRUE(wm::IsActiveWindow(modal1_transient));
+  e1.ClickLeftButton();
+  EXPECT_EQ(1, modal1_transient_delegate->mouse_presses());
+  EXPECT_EQ(1, modal1_delegate->mouse_presses());
+  EXPECT_EQ(1, main_delegate->mouse_presses());
+
+  // Create a child control for modal1_transient and it receives mouse events.
+  aura::test::EventCountDelegate control_delegate;
+  control_delegate.set_window_component(HTCLIENT);
+  std::unique_ptr<aura::Window> child(new aura::Window(&control_delegate));
+  child->SetType(ui::wm::WINDOW_TYPE_CONTROL);
+  child->Init(ui::LAYER_TEXTURED);
+  modal1_transient->AddChild(child.get());
+  child->SetBounds(gfx::Rect(100, 100));
+  child->Show();
+  e1.ClickLeftButton();
+  EXPECT_EQ("1 1", control_delegate.GetMouseButtonCountsAndReset());
+  EXPECT_EQ(1, modal1_transient_delegate->mouse_presses());
+  EXPECT_EQ(1, modal1_delegate->mouse_presses());
+  EXPECT_EQ(1, main_delegate->mouse_presses());
+
+  // Create another modal window for the main window and it receives mouse
+  // events instead of all others.
+  EventTestWindow* modal2_delegate = new EventTestWindow(true);
+  aura::Window* modal2 = modal2_delegate->OpenTestWindowWithParent(main.get());
+  EXPECT_TRUE(wm::IsActiveWindow(modal2));
+  e1.ClickLeftButton();
+  EXPECT_EQ(1, modal2_delegate->mouse_presses());
+  EXPECT_EQ("0 0", control_delegate.GetMouseButtonCountsAndReset());
+  EXPECT_EQ(1, modal1_transient_delegate->mouse_presses());
+  EXPECT_EQ(1, modal1_delegate->mouse_presses());
+  EXPECT_EQ(1, main_delegate->mouse_presses());
+
+  // Create a non-modal transient child of modal2 and it receives events.
+  EventTestWindow* modal2_transient_delegate = new EventTestWindow(false);
+  aura::Window* modal2_transient =
+      modal2_transient_delegate->OpenTestWindowWithParent(modal2);
+  EXPECT_TRUE(wm::IsActiveWindow(modal2_transient));
+  e1.ClickLeftButton();
+  EXPECT_EQ(1, modal2_transient_delegate->mouse_presses());
+  EXPECT_EQ(1, modal2_delegate->mouse_presses());
+  EXPECT_EQ("0 0", control_delegate.GetMouseButtonCountsAndReset());
+  EXPECT_EQ(1, modal1_transient_delegate->mouse_presses());
+  EXPECT_EQ(1, modal1_delegate->mouse_presses());
+  EXPECT_EQ(1, main_delegate->mouse_presses());
+
+  // Create a non-modal transient grandchild of modal2 and it receives events.
+  EventTestWindow* modal2_transient_grandchild_delegate =
+      new EventTestWindow(false);
+  aura::Window* modal2_transient_grandchild =
+      modal2_transient_grandchild_delegate->OpenTestWindowWithParent(
+          modal2_transient);
+  EXPECT_TRUE(wm::IsActiveWindow(modal2_transient_grandchild));
+  e1.ClickLeftButton();
+  EXPECT_EQ(1, modal2_transient_grandchild_delegate->mouse_presses());
+  EXPECT_EQ(1, modal2_transient_delegate->mouse_presses());
+  EXPECT_EQ(1, modal2_delegate->mouse_presses());
+  EXPECT_EQ("0 0", control_delegate.GetMouseButtonCountsAndReset());
+  EXPECT_EQ(1, modal1_transient_delegate->mouse_presses());
+  EXPECT_EQ(1, modal1_delegate->mouse_presses());
+  EXPECT_EQ(1, main_delegate->mouse_presses());
 }
 
 // Makes sure we don't crash if a modal window is shown while the parent window
@@ -460,8 +552,7 @@ TEST_F(SystemModalContainerLayoutManagerTest, ShowNormalBackgroundOrLocked) {
   EXPECT_FALSE(AllRootWindowsHaveLockedModalBackgrounds());
 
   for (int block_reason = FIRST_BLOCK_REASON;
-       block_reason < NUMBER_OF_BLOCK_REASONS;
-       ++block_reason) {
+       block_reason < NUMBER_OF_BLOCK_REASONS; ++block_reason) {
     // Normal system modal window while blocked.  Shows blocked system modal
     // background.
     BlockUserSession(static_cast<UserSessionBlockReason>(block_reason));
@@ -647,6 +738,158 @@ TEST_F(SystemModalContainerLayoutManagerTest,
   EXPECT_EQ(0, modal_window->bounds().y());
 
   ShowKeyboard(false);
+}
+
+TEST_F(SystemModalContainerLayoutManagerTest, UpdateModalType) {
+  aura::Window* modal_container = Shell::GetContainer(
+      Shell::GetPrimaryRootWindow(), kShellWindowId_SystemModalContainer);
+  views::Widget* widget = views::Widget::CreateWindowWithParent(
+      new TestWindow(false), modal_container);
+  widget->Show();
+  aura::Window* window = widget->GetNativeWindow();
+  EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+
+  window->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_SYSTEM);
+  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+
+  // Setting twice should not cause error.
+  window->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_SYSTEM);
+  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+
+  window->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_NONE);
+  EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+
+  window->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_SYSTEM);
+  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+
+  widget->Close();
+  EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+}
+
+TEST_F(SystemModalContainerLayoutManagerTest, VisibilityChange) {
+  std::unique_ptr<aura::Window> window(OpenToplevelTestWindow(false));
+  std::unique_ptr<aura::Window> modal_window(
+      views::Widget::CreateWindowWithContext(new TestWindow(true),
+                                             CurrentContext())
+          ->GetNativeWindow());
+  SystemModalContainerLayoutManager* layout_manager =
+      WmShell::Get()
+          ->GetPrimaryRootWindowController()
+          ->GetSystemModalLayoutManager(WmWindowAura::Get(modal_window.get()));
+
+  EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_FALSE(layout_manager->has_window_dimmer());
+
+  modal_window->Show();
+  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(layout_manager->has_window_dimmer());
+
+  modal_window->Hide();
+  EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_FALSE(layout_manager->has_window_dimmer());
+
+  modal_window->Show();
+  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(layout_manager->has_window_dimmer());
+}
+
+namespace {
+
+class InputTestDelegate : public aura::test::TestWindowDelegate {
+ public:
+  InputTestDelegate() {}
+  ~InputTestDelegate() override {}
+
+  void RunTest(test::AshTestBase* test_base) {
+    std::unique_ptr<aura::Window> window(
+        test_base->CreateTestWindowInShellWithDelegate(
+            this, 0, gfx::Rect(0, 0, 100, 100)));
+    window->Show();
+
+    GenerateEvents(window.get());
+
+    EXPECT_EQ(2, mouse_event_count_);
+    EXPECT_EQ(3, scroll_event_count_);
+    EXPECT_EQ(4, touch_event_count_);
+    EXPECT_EQ(10, gesture_event_count_);
+    Reset();
+
+    views::Widget* widget = views::Widget::CreateWindowWithContextAndBounds(
+        new TestWindow(true), Shell::GetPrimaryRootWindow(),
+        gfx::Rect(200, 200, 100, 100));
+    widget->Show();
+    EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+
+    // Events should be blocked.
+    GenerateEvents(window.get());
+
+    EXPECT_EQ(0, mouse_event_count_);
+    EXPECT_EQ(0, scroll_event_count_);
+    EXPECT_EQ(0, touch_event_count_);
+    EXPECT_EQ(0, gesture_event_count_);
+    Reset();
+
+    widget->Close();
+    EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
+
+    GenerateEvents(window.get());
+
+    EXPECT_EQ(2, mouse_event_count_);
+    EXPECT_EQ(3, scroll_event_count_);
+    EXPECT_EQ(4, touch_event_count_);
+    EXPECT_EQ(10, gesture_event_count_);
+  }
+
+ private:
+  // ui::EventHandler:
+  void OnMouseEvent(ui::MouseEvent* event) override { mouse_event_count_++; }
+  void OnScrollEvent(ui::ScrollEvent* event) override { scroll_event_count_++; }
+  void OnTouchEvent(ui::TouchEvent* event) override { touch_event_count_++; }
+  void OnGestureEvent(ui::GestureEvent* event) override {
+    gesture_event_count_++;
+  }
+
+  void GenerateEvents(aura::Window* window) {
+    ui::test::EventGenerator event_generator(Shell::GetPrimaryRootWindow(),
+                                             window);
+    event_generator.ClickLeftButton();
+    event_generator.ScrollSequence(window->bounds().CenterPoint(),
+                                   base::TimeDelta(), 0, 10, 1, 2);
+    event_generator.PressTouch();
+    event_generator.ReleaseTouch();
+    event_generator.GestureTapAt(window->bounds().CenterPoint());
+  }
+
+  void Reset() {
+    mouse_event_count_ = 0;
+    scroll_event_count_ = 0;
+    touch_event_count_ = 0;
+    gesture_event_count_ = 0;
+  }
+
+  int mouse_event_count_ = 0;
+  int scroll_event_count_ = 0;
+  int touch_event_count_ = 0;
+  int gesture_event_count_ = 0;
+
+  DISALLOW_COPY_AND_ASSIGN(InputTestDelegate);
+};
+
+}  // namespace
+
+TEST_F(SystemModalContainerLayoutManagerTest, BlockAllEvents) {
+  InputTestDelegate delegate;
+  delegate.RunTest(this);
+}
+
+// Make sure that events are properly blocked in multi displays environment.
+TEST_F(SystemModalContainerLayoutManagerTest, BlockEventsInMultiDisplays) {
+  if (!SupportsMultipleDisplays())
+    return;
+
+  UpdateDisplay("500x500, 500x500");
+  InputTestDelegate delegate;
+  delegate.RunTest(this);
 }
 
 }  // namespace test

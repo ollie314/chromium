@@ -530,39 +530,30 @@ TEST(RectTest, ToEnclosingRect) {
     int y2;
     int w2;
     int h2;
-  } tests[] = {{0.0f, 0.0f, 0.0f, 0.0f, 0, 0, 0, 0},
-               {5.5f, 5.5f, 0.0f, 0.0f, 5, 5, 0, 0},
-               {-1.5f, -1.5f, 3.0f, 3.0f, -2, -2, 4, 4},
-               {-1.5f, -1.5f, 3.5f, 3.5f, -2, -2, 4, 4},
-               {max_float, max_float, 2.0f, 2.0f, max_int, max_int, 0, 0},
-               {0.0f, 0.0f, max_float, max_float, 0, 0, max_int, max_int},
-               {20000.5f, 20000.5f, 0.5f, 0.5f, 20000, 20000, 1, 1},
-               {static_cast<float>(min_int),
-                static_cast<float>(min_int),
-                max_int * 2.f,
-                max_int * 2.f,
-                min_int,
-                min_int,
-                max_int,
-                max_int},
-               {static_cast<float>(max_int),
-                static_cast<float>(max_int),
-                static_cast<float>(max_int),
-                static_cast<float>(max_int),
-                max_int,
-                max_int,
-                0,
-                0}};
+  } tests[] = {
+      {0.0f, 0.0f, 0.0f, 0.0f, 0, 0, 0, 0},
+      {5.5f, 5.5f, 0.0f, 0.0f, 5, 5, 0, 0},
+      {-1.5f, -1.5f, 3.0f, 3.0f, -2, -2, 4, 4},
+      {-1.5f, -1.5f, 3.5f, 3.5f, -2, -2, 4, 4},
+      {max_float, max_float, 2.0f, 2.0f, max_int, max_int, 0, 0},
+      {0.0f, 0.0f, max_float, max_float, 0, 0, max_int, max_int},
+      {20000.5f, 20000.5f, 0.5f, 0.5f, 20000, 20000, 1, 1},
+      {static_cast<float>(min_int), static_cast<float>(min_int), max_int * 2.f,
+       max_int * 2.f, min_int, min_int, max_int, max_int},
+      {static_cast<float>(max_int), static_cast<float>(max_int),
+       static_cast<float>(max_int), static_cast<float>(max_int), max_int,
+       max_int, 0, 0},
+      {-0.5f, -0.5f, 22777712.f, 1.f, -1, -1, 22777713, 2}};
 
   for (size_t i = 0; i < arraysize(tests); ++i) {
     RectF r1(tests[i].x1, tests[i].y1, tests[i].w1, tests[i].h1);
     Rect r2(tests[i].x2, tests[i].y2, tests[i].w2, tests[i].h2);
 
     Rect enclosed = ToEnclosingRect(r1);
-    EXPECT_FLOAT_AND_NAN_EQ(r2.x(), enclosed.x());
-    EXPECT_FLOAT_AND_NAN_EQ(r2.y(), enclosed.y());
-    EXPECT_FLOAT_AND_NAN_EQ(r2.width(), enclosed.width());
-    EXPECT_FLOAT_AND_NAN_EQ(r2.height(), enclosed.height());
+    EXPECT_EQ(r2.x(), enclosed.x());
+    EXPECT_EQ(r2.y(), enclosed.y());
+    EXPECT_EQ(r2.width(), enclosed.width());
+    EXPECT_EQ(r2.height(), enclosed.height());
   }
 }
 
@@ -913,6 +904,83 @@ TEST(RectTest, ManhattanInternalDistance) {
   EXPECT_FLOAT_EQ(
       kEpsilon,
       f.ManhattanInternalDistance(gfx::RectF(-1.5f, 0.0f, 1.5f, 1.0f)));
+}
+
+TEST(RectTest, IntegerOverflow) {
+  int expected = 10;
+  int large_number = std::numeric_limits<int>::max() - expected;
+
+  Rect height_overflow(0, large_number, 100, 100);
+  EXPECT_EQ(large_number, height_overflow.y());
+  EXPECT_EQ(expected, height_overflow.height());
+
+  Rect width_overflow(large_number, 0, 100, 100);
+  EXPECT_EQ(large_number, width_overflow.x());
+  EXPECT_EQ(expected, width_overflow.width());
+
+  Rect size_height_overflow(Point(0, large_number), Size(100, 100));
+  EXPECT_EQ(large_number, size_height_overflow.y());
+  EXPECT_EQ(expected, size_height_overflow.height());
+
+  Rect size_width_overflow(Point(large_number, 0), Size(100, 100));
+  EXPECT_EQ(large_number, size_width_overflow.x());
+  EXPECT_EQ(expected, size_width_overflow.width());
+
+  Rect set_height_overflow(0, large_number, 100, 5);
+  EXPECT_EQ(5, set_height_overflow.height());
+  set_height_overflow.set_height(100);
+  EXPECT_EQ(expected, set_height_overflow.height());
+
+  Rect set_y_overflow(100, 100, 100, 100);
+  EXPECT_EQ(100, set_y_overflow.height());
+  set_y_overflow.set_y(large_number);
+  EXPECT_EQ(expected, set_y_overflow.height());
+
+  Rect set_width_overflow(large_number, 0, 5, 100);
+  EXPECT_EQ(5, set_width_overflow.width());
+  set_width_overflow.set_width(100);
+  EXPECT_EQ(expected, set_width_overflow.width());
+
+  Rect set_x_overflow(100, 100, 100, 100);
+  EXPECT_EQ(100, set_x_overflow.width());
+  set_x_overflow.set_x(large_number);
+  EXPECT_EQ(expected, set_x_overflow.width());
+
+  Point large_offset(large_number, large_number);
+  Size size(100, 100);
+  Size expected_size(10, 10);
+
+  Rect set_origin_overflow(100, 100, 100, 100);
+  EXPECT_EQ(size, set_origin_overflow.size());
+  set_origin_overflow.set_origin(large_offset);
+  EXPECT_EQ(large_offset, set_origin_overflow.origin());
+  EXPECT_EQ(expected_size, set_origin_overflow.size());
+
+  Rect set_size_overflow(large_number, large_number, 5, 5);
+  EXPECT_EQ(Size(5, 5), set_size_overflow.size());
+  set_size_overflow.set_size(size);
+  EXPECT_EQ(large_offset, set_size_overflow.origin());
+  EXPECT_EQ(expected_size, set_size_overflow.size());
+
+  Rect set_rect_overflow;
+  set_rect_overflow.SetRect(large_number, large_number, 100, 100);
+  EXPECT_EQ(large_offset, set_rect_overflow.origin());
+  EXPECT_EQ(expected_size, set_rect_overflow.size());
+
+  Rect inset_overflow;
+  inset_overflow.Inset(large_number, large_number, 100, 100);
+  EXPECT_EQ(large_offset, inset_overflow.origin());
+  EXPECT_EQ(expected_size, inset_overflow.size());
+
+  Rect offset_overflow(0, 0, 100, 100);
+  offset_overflow.Offset(large_number, large_number);
+  EXPECT_EQ(large_offset, offset_overflow.origin());
+  EXPECT_EQ(expected_size, offset_overflow.size());
+
+  Rect operator_overflow(0, 0, 100, 100);
+  operator_overflow += Vector2d(large_number, large_number);
+  EXPECT_EQ(large_offset, operator_overflow.origin());
+  EXPECT_EQ(expected_size, operator_overflow.size());
 }
 
 }  // namespace gfx

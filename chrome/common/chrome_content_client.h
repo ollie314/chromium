@@ -5,13 +5,15 @@
 #ifndef CHROME_COMMON_CHROME_CONTENT_CLIENT_H_
 #define CHROME_COMMON_CHROME_CONTENT_CLIENT_H_
 
+#include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "build/build_config.h"
-#include "chrome/common/origin_trials/origin_trial_key_manager.h"
+#include "chrome/common/origin_trials/chrome_origin_trial_policy.h"
 #include "content/public/common/content_client.h"
 
 #if defined(ENABLE_PLUGINS)
@@ -25,9 +27,18 @@ std::string GetUserAgent();
 
 class ChromeContentClient : public content::ContentClient {
  public:
+#if defined(GOOGLE_CHROME_BUILD)
+  // kNotPresent is a placeholder plugin location for plugins that are not
+  // currently present in this installation of Chrome, but which can be fetched
+  // on-demand and therefore should still appear in navigator.plugins.
+  static const char kNotPresent[];
+#endif
   static const char kPDFPluginName[];
   static const char kPDFPluginPath[];
   static const char kRemotingViewerPluginPath[];
+
+  ChromeContentClient();
+  ~ChromeContentClient() override;
 
   // The methods below are called by child processes to set the function
   // pointers for built-in plugins. We avoid linking these plugins into
@@ -60,17 +71,18 @@ class ChromeContentClient : public content::ContentClient {
   void SetGpuInfo(const gpu::GPUInfo& gpu_info) override;
   void AddPepperPlugins(
       std::vector<content::PepperPluginInfo>* plugins) override;
+  void AddContentDecryptionModules(
+      std::vector<content::CdmInfo>* cdms) override;
   void AddAdditionalSchemes(std::vector<url::SchemeWithType>* standard_schemes,
                             std::vector<url::SchemeWithType>* referrer_schemes,
                             std::vector<std::string>* saveable_shemes) override;
-  bool CanSendWhileSwappedOut(const IPC::Message* message) override;
   std::string GetProduct() const override;
   std::string GetUserAgent() const override;
   base::string16 GetLocalizedString(int message_id) const override;
   base::StringPiece GetDataResource(
       int resource_id,
       ui::ScaleFactor scale_factor) const override;
-  base::RefCountedStaticMemory* GetDataResourceBytes(
+  base::RefCountedMemory* GetDataResourceBytes(
       int resource_id) const override;
   gfx::Image& GetNativeImageNamed(int resource_id) const override;
   std::string GetProcessTypeNameInEnglish(int type) override;
@@ -85,12 +97,18 @@ class ChromeContentClient : public content::ContentClient {
                                   std::set<GURL>* origins) override;
 
   void AddServiceWorkerSchemes(std::set<std::string>* schemes) override;
+  bool AllowScriptExtensionForServiceWorker(const GURL& script_url) override;
 
   bool IsSupplementarySiteIsolationModeEnabled() override;
-  base::StringPiece GetOriginTrialPublicKey() override;
+
+  content::OriginTrialPolicy* GetOriginTrialPolicy() override;
+
+#if defined(OS_ANDROID)
+  media::MediaClientAndroid* GetMediaClientAndroid() override;
+#endif  // OS_ANDROID
 
  private:
-  OriginTrialKeyManager origin_trial_key_manager_;
+  std::unique_ptr<ChromeOriginTrialPolicy> origin_trial_policy_;
 };
 
 #endif  // CHROME_COMMON_CHROME_CONTENT_CLIENT_H_

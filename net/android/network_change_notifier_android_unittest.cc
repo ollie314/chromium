@@ -8,8 +8,10 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "net/android/network_change_notifier_android.h"
 #include "net/android/network_change_notifier_delegate_android.h"
+#include "net/base/ip_address.h"
 #include "net/base/network_change_notifier.h"
 #include "net/dns/dns_config_service.h"
 #include "net/dns/dns_protocol.h"
@@ -213,18 +215,18 @@ class BaseNetworkChangeNotifierAndroidTest : public testing::Test {
     delegate_.SetOnline();
     // Note that this is needed because base::ObserverListThreadSafe uses
     // PostTask().
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void SetOffline() {
     delegate_.SetOffline();
     // See comment above.
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void FakeMaxBandwidthChange(double max_bandwidth_mbps) {
     delegate_.FakeMaxBandwidthChanged(max_bandwidth_mbps);
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void FakeNetworkChange(ChangeType change,
@@ -248,14 +250,13 @@ class BaseNetworkChangeNotifierAndroidTest : public testing::Test {
         break;
     }
     // See comment above.
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
-  void FakeUpdateActiveNetworkList(
-      NetworkChangeNotifier::NetworkList networks) {
-    delegate_.FakeUpdateActiveNetworkList(networks);
+  void FakePurgeActiveNetworkList(NetworkChangeNotifier::NetworkList networks) {
+    delegate_.FakePurgeActiveNetworkList(networks);
     // See comment above.
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   NetworkChangeNotifierDelegateAndroid delegate_;
@@ -293,10 +294,8 @@ class NetworkChangeNotifierAndroidTest
     : public BaseNetworkChangeNotifierAndroidTest {
  protected:
   void SetUp() override {
-    IPAddressNumber dns_number;
-    ASSERT_TRUE(ParseIPLiteralToNumber("8.8.8.8", &dns_number));
     dns_config_.nameservers.push_back(
-        IPEndPoint(dns_number, dns_protocol::kDefaultPort));
+        IPEndPoint(IPAddress(8, 8, 8, 8), dns_protocol::kDefaultPort));
     notifier_.reset(new NetworkChangeNotifierAndroid(&delegate_, &dns_config_));
     NetworkChangeNotifier::AddConnectionTypeObserver(
         &connection_type_observer_);
@@ -424,7 +423,7 @@ TEST_F(NetworkChangeNotifierDelegateAndroidTest,
 TEST_F(NetworkChangeNotifierAndroidTest, InitialSignal) {
   DNSChangeObserver dns_change_observer;
   NetworkChangeNotifier::AddDNSObserver(&dns_change_observer);
-  base::MessageLoop::current()->Run();
+  base::RunLoop().Run();
   EXPECT_EQ(1, dns_change_observer.initial_notifications_count());
   EXPECT_EQ(0, dns_change_observer.change_notifications_count());
   NetworkChangeNotifier::RemoveDNSObserver(&dns_change_observer);
@@ -516,7 +515,7 @@ TEST_F(NetworkChangeNotifierAndroidTest, NetworkCallbacks) {
   EXPECT_EQ(100, network_list[0]);
   EXPECT_EQ(101, network_list[1]);
   network_list.erase(network_list.begin() + 1);  // Remove network 101
-  FakeUpdateActiveNetworkList(network_list);
+  FakePurgeActiveNetworkList(network_list);
   network_observer.ExpectChange(DISCONNECTED, 101);
   NetworkChangeNotifier::GetConnectedNetworks(&network_list);
   EXPECT_EQ(1u, network_list.size());

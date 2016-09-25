@@ -86,8 +86,7 @@ class MediaStreamVideoCapturerSourceTest : public testing::Test {
     webkit_source_.initialize(base::UTF8ToUTF16("dummy_source_id"),
                               blink::WebMediaStreamSource::TypeVideo,
                               base::UTF8ToUTF16("dummy_source_name"),
-                              false /* remote */,
-                              true /* readonly */);
+                              false /* remote */);
     webkit_source_.setExtraData(source_);
     webkit_source_id_ = webkit_source_.id();
   }
@@ -302,7 +301,7 @@ TEST_F(MediaStreamVideoCapturerSourceTest, Ended) {
   webkit_source_.initialize(base::UTF8ToUTF16("dummy_source_id"),
                             blink::WebMediaStreamSource::TypeVideo,
                             base::UTF8ToUTF16("dummy_source_name"),
-                            false /* remote */, true /* readonly */);
+                            false /* remote */);
   webkit_source_.setExtraData(source_);
   webkit_source_id_ = webkit_source_.id();
 
@@ -310,10 +309,10 @@ TEST_F(MediaStreamVideoCapturerSourceTest, Ended) {
   EXPECT_CALL(mock_delegate(), GetCurrentSupportedFormats(_, _, _, _));
   EXPECT_CALL(mock_delegate(), StartCapture(_, _, _));
   blink::WebMediaStreamTrack track = StartSource();
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   OnStarted(true);
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(blink::WebMediaStreamSource::ReadyStateLive,
             webkit_source_.getReadyState());
 
@@ -321,7 +320,7 @@ TEST_F(MediaStreamVideoCapturerSourceTest, Ended) {
 
   EXPECT_CALL(mock_delegate(), StopCapture());
   OnStarted(false);
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(blink::WebMediaStreamSource::ReadyStateEnded,
             webkit_source_.getReadyState());
   // Verify that MediaStreamSource::SourceStoppedCallback has been triggered.
@@ -339,9 +338,9 @@ class FakeMediaStreamVideoSink : public MediaStreamVideoSink {
 
   void ConnectToTrack(const blink::WebMediaStreamTrack& track) {
     MediaStreamVideoSink::ConnectToTrack(
-        track,
-        base::Bind(&FakeMediaStreamVideoSink::OnVideoFrame,
-                   base::Unretained(this)));
+        track, base::Bind(&FakeMediaStreamVideoSink::OnVideoFrame,
+                          base::Unretained(this)),
+        true);
   }
 
   void DisconnectFromTrack() {

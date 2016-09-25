@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -14,6 +16,7 @@
 #include "base/guid.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -26,17 +29,17 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/autofill/content/browser/wallet/wallet_service_url.h"
 #include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_data_util.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
+#include "components/autofill/core/browser/payments/payments_service_url.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/phone_number_i18n.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_switches.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/components_strings.h"
 #include "third_party/libaddressinput/messages.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_ui.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_ui_component.h"
@@ -53,8 +56,6 @@ using autofill::PersonalDataManager;
 using i18n::addressinput::AddressUiComponent;
 
 namespace {
-
-const char kSettingsOrigin[] = "Chrome settings";
 
 static const char kFullNameField[] = "fullName";
 static const char kCompanyNameField[] = "companyName";
@@ -116,7 +117,7 @@ void GetAddressComponents(const std::string& country_code,
         components[i - 1].length_hint == AddressUiComponent::HINT_LONG ||
         components[i].length_hint == AddressUiComponent::HINT_LONG) {
       line = new base::ListValue;
-      address_components->Append(line);
+      address_components->Append(base::WrapUnique(line));
     }
 
     std::unique_ptr<base::DictionaryValue> component(new base::DictionaryValue);
@@ -161,7 +162,7 @@ void GetAddressComponents(const std::string& country_code,
         break;
     }
 
-    line->Append(component.release());
+    line->Append(std::move(component));
   }
 }
 
@@ -183,7 +184,7 @@ void SetCountryData(const PersonalDataManager& manager,
     option_details->SetString(
         "value",
         countries[i] ? countries[i]->country_code() : "separator");
-    country_list->Append(option_details.release());
+    country_list->Append(std::move(option_details));
   }
   localized_strings->Set("autofillCountrySelectList", country_list.release());
 
@@ -204,8 +205,7 @@ void SetCountryData(const PersonalDataManager& manager,
 
 namespace options {
 
-AutofillOptionsHandler::AutofillOptionsHandler()
-    : personal_data_(nullptr), prior_profile_(nullptr) {}
+AutofillOptionsHandler::AutofillOptionsHandler() : personal_data_(nullptr) {}
 
 AutofillOptionsHandler::~AutofillOptionsHandler() {
   if (personal_data_)
@@ -247,11 +247,11 @@ void AutofillOptionsHandler::GetLocalizedValues(
   SetCreditCardOverlayStrings(localized_strings);
 
   localized_strings->SetString(
-      "manageWalletAddressesUrl",
-      autofill::wallet::GetManageAddressesUrl(0).spec());
+      "paymentsManageAddressesUrl",
+      autofill::payments::GetManageAddressesUrl(0).spec());
   localized_strings->SetString(
-      "manageWalletPaymentMethodsUrl",
-      autofill::wallet::GetManageInstrumentsUrl(0).spec());
+      "paymentsManageInstrumentsUrl",
+      autofill::payments::GetManageInstrumentsUrl(0).spec());
 }
 
 void AutofillOptionsHandler::InitializeHandler() {
@@ -346,8 +346,8 @@ void AutofillOptionsHandler::LoadAutofillData() {
 
     base::string16 separator =
         l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_SUMMARY_SEPARATOR);
-    std::vector<base::string16> label_parts;
-    base::SplitStringUsingSubstr(labels[i], separator, &label_parts);
+    std::vector<base::string16> label_parts = base::SplitStringUsingSubstr(
+        labels[i], separator, base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
     std::unique_ptr<base::DictionaryValue> value(new base::DictionaryValue);
     value->SetString("guid", profiles[i]->guid());
@@ -355,19 +355,20 @@ void AutofillOptionsHandler::LoadAutofillData() {
     value->SetString("sublabel", labels[i].substr(label_parts[0].size()));
     value->SetBoolean("isLocal", profiles[i]->record_type() ==
                                      AutofillProfile::LOCAL_PROFILE);
-    addresses.Append(value.release());
+    addresses.Append(std::move(value));
   }
 
-  web_ui()->CallJavascriptFunction("AutofillOptions.setAddressList", addresses);
+  web_ui()->CallJavascriptFunctionUnsafe("AutofillOptions.setAddressList",
+                                         addresses);
 
   base::ListValue credit_cards;
   const std::vector<CreditCard*>& cards = personal_data_->GetCreditCards();
   for (const CreditCard* card : cards) {
-    credit_cards.Append(CreditCardToDictionary(*card).release());
+    credit_cards.Append(CreditCardToDictionary(*card));
   }
 
-  web_ui()->CallJavascriptFunction("AutofillOptions.setCreditCardList",
-                                   credit_cards);
+  web_ui()->CallJavascriptFunctionUnsafe("AutofillOptions.setCreditCardList",
+                                         credit_cards);
 }
 
 void AutofillOptionsHandler::RemoveData(const base::ListValue* args) {
@@ -391,8 +392,8 @@ void AutofillOptionsHandler::LoadAddressEditor(const base::ListValue* args) {
     return;
   }
 
-  prior_profile_ = personal_data_->GetProfileByGUID(guid);
-  if (!prior_profile_) {
+  const AutofillProfile* prior_profile = personal_data_->GetProfileByGUID(guid);
+  if (!prior_profile) {
     // There is a race where a user can click once on the close button and
     // quickly click again on the list item before the item is removed (since
     // the list is not updated until the model tells the list an item has been
@@ -402,9 +403,10 @@ void AutofillOptionsHandler::LoadAddressEditor(const base::ListValue* args) {
   }
 
   base::DictionaryValue address;
-  AutofillProfileToDictionary(*prior_profile_, &address);
+  AutofillProfileToDictionary(*prior_profile, &address);
 
-  web_ui()->CallJavascriptFunction("AutofillOptions.editAddress", address);
+  web_ui()->CallJavascriptFunctionUnsafe("AutofillOptions.editAddress",
+                                         address);
 }
 
 void AutofillOptionsHandler::LoadAddressEditorComponents(
@@ -423,7 +425,7 @@ void AutofillOptionsHandler::LoadAddressEditorComponents(
   input.Set(kComponents, components.release());
   input.SetString(kLanguageCode, language_code);
 
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "AutofillEditAddressOverlay.loadAddressComponents", input);
 }
 
@@ -460,8 +462,8 @@ void AutofillOptionsHandler::LoadCreditCardEditor(const base::ListValue* args) {
       "expirationYear",
       credit_card->GetRawInfo(autofill::CREDIT_CARD_EXP_4_DIGIT_YEAR));
 
-  web_ui()->CallJavascriptFunction("AutofillOptions.editCreditCard",
-                                   credit_card_data);
+  web_ui()->CallJavascriptFunctionUnsafe("AutofillOptions.editCreditCard",
+                                         credit_card_data);
 }
 
 void AutofillOptionsHandler::SetAddress(const base::ListValue* args) {
@@ -475,25 +477,30 @@ void AutofillOptionsHandler::SetAddress(const base::ListValue* args) {
     return;
   }
 
-  AutofillProfile profile(guid, kSettingsOrigin);
+  AutofillProfile profile(guid, autofill::kSettingsOrigin);
 
   base::string16 full_name;
   if (args->GetString(arg_counter++, &full_name)) {
     // Although First/Middle/Last are not displayed on the form, we transfer
-    // this information when they match the full name given. This is because it
-    // may not be possible later to correctly tokenize the concatenated full
-    // name; e.g., when the last name contains a space, the first word would be
-    // treated as a middle name.
-    if (prior_profile_ && autofill::data_util::ProfileMatchesFullName(
-                              full_name, *prior_profile_)) {
+    // this information when they match the full name in the old version of the
+    // profile, if one exists. This is because it may not be possible later to
+    // correctly tokenize the concatenated full name; e.g., when the last name
+    // contains a space, the first word would be treated as a middle name.
+    const AutofillProfile* prior_profile =
+        base::IsValidGUID(profile.guid())
+            ? personal_data_->GetProfileByGUID(guid)
+            : nullptr;
+
+    if (prior_profile && autofill::data_util::ProfileMatchesFullName(
+                             full_name, *prior_profile)) {
       profile.SetRawInfo(autofill::NAME_FULL, full_name);
 
       profile.SetRawInfo(autofill::NAME_FIRST,
-                         prior_profile_->GetRawInfo(autofill::NAME_FIRST));
+                         prior_profile->GetRawInfo(autofill::NAME_FIRST));
       profile.SetRawInfo(autofill::NAME_MIDDLE,
-                         prior_profile_->GetRawInfo(autofill::NAME_MIDDLE));
+                         prior_profile->GetRawInfo(autofill::NAME_MIDDLE));
       profile.SetRawInfo(autofill::NAME_LAST,
-                         prior_profile_->GetRawInfo(autofill::NAME_LAST));
+                         prior_profile->GetRawInfo(autofill::NAME_LAST));
     } else {
       // In contrast to SetRawInfo, SetInfo will naively attempt to populate the
       // First/Middle/Last fields by tokenization.
@@ -554,7 +561,7 @@ void AutofillOptionsHandler::SetCreditCard(const base::ListValue* args) {
     return;
   }
 
-  CreditCard credit_card(guid, kSettingsOrigin);
+  CreditCard credit_card(guid, autofill::kSettingsOrigin);
 
   base::string16 value;
   if (args->GetString(1, &value))

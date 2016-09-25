@@ -31,7 +31,6 @@
 #ifndef WebServiceWorkerContextProxy_h
 #define WebServiceWorkerContextProxy_h
 
-#include "public/platform/WebGeofencingEventType.h"
 #include "public/platform/WebMessagePortChannel.h"
 #include "public/platform/modules/serviceworker/WebServiceWorker.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerRegistration.h"
@@ -42,7 +41,6 @@ namespace blink {
 
 class WebServiceWorkerRequest;
 class WebString;
-struct WebCircularGeofencingRegion;
 struct WebNotificationData;
 struct WebServiceWorkerClientInfo;
 
@@ -58,12 +56,13 @@ public:
     virtual void dispatchExtendableMessageEvent(int eventID, const WebString& message, const WebSecurityOrigin& sourceOrigin, const WebMessagePortChannelArray&, const WebServiceWorkerClientInfo&) = 0;
     virtual void dispatchExtendableMessageEvent(int eventID, const WebString& message, const WebSecurityOrigin& sourceOrigin, const WebMessagePortChannelArray&, std::unique_ptr<WebServiceWorker::Handle>) = 0;
     virtual void dispatchInstallEvent(int eventID) = 0;
-    virtual void dispatchFetchEvent(int eventID, const WebServiceWorkerRequest& webRequest) = 0;
-    virtual void dispatchForeignFetchEvent(int eventID, const WebServiceWorkerRequest& webRequest) = 0;
-    virtual void dispatchGeofencingEvent(int eventID, WebGeofencingEventType, const WebString& regionID, const WebCircularGeofencingRegion&) = 0;
-    virtual void dispatchNotificationClickEvent(int eventID, int64_t notificationID, const WebNotificationData&, int actionIndex) = 0;
-    virtual void dispatchNotificationCloseEvent(int eventID, int64_t notificationID, const WebNotificationData&) = 0;
+    virtual void dispatchFetchEvent(int responseID, int eventFinishID, const WebServiceWorkerRequest& webRequest) = 0;
+    virtual void dispatchForeignFetchEvent(int responseID, int eventFinishID, const WebServiceWorkerRequest& webRequest) = 0;
+    virtual void dispatchNotificationClickEvent(int eventID, const WebString& notificationID, const WebNotificationData&, int actionIndex) = 0;
+    virtual void dispatchNotificationCloseEvent(int eventID, const WebString& notificationID, const WebNotificationData&) = 0;
     virtual void dispatchPushEvent(int eventID, const WebString& data) = 0;
+
+    virtual bool hasFetchEventHandler() = 0;
 
     enum LastChanceOption {
         IsNotLastChance,

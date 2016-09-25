@@ -4,18 +4,16 @@
 
 #include "ash/screen_util.h"
 
+#include "ash/aura/wm_shelf_aura.h"
 #include "ash/display/display_manager.h"
 #include "ash/root_window_controller.h"
-#include "ash/shelf/shelf_layout_manager.h"
-#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
-#include "ash/wm/coordinate_conversion.h"
 #include "base/logging.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/window_event_dispatcher.h"
-#include "ui/gfx/display.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/geometry/size_conversions.h"
-#include "ui/gfx/screen.h"
 
 namespace ash {
 
@@ -26,13 +24,15 @@ DisplayManager* GetDisplayManager() {
 }
 
 // static
-gfx::Display ScreenUtil::FindDisplayContainingPoint(const gfx::Point& point) {
+display::Display ScreenUtil::FindDisplayContainingPoint(
+    const gfx::Point& point) {
   return GetDisplayManager()->FindDisplayContainingPoint(point);
 }
 
 // static
 gfx::Rect ScreenUtil::GetMaximizedWindowBoundsInParent(aura::Window* window) {
-  if (GetRootWindowController(window->GetRootWindow())->shelf())
+  aura::Window* root_window = window->GetRootWindow();
+  if (GetRootWindowController(root_window)->wm_shelf_aura()->shelf_widget())
     return GetDisplayWorkAreaBoundsInParent(window);
   else
     return GetDisplayBoundsInParent(window);
@@ -42,67 +42,41 @@ gfx::Rect ScreenUtil::GetMaximizedWindowBoundsInParent(aura::Window* window) {
 gfx::Rect ScreenUtil::GetDisplayBoundsInParent(aura::Window* window) {
   return ConvertRectFromScreen(
       window->parent(),
-      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window).bounds());
+      display::Screen::GetScreen()->GetDisplayNearestWindow(window).bounds());
 }
 
 // static
 gfx::Rect ScreenUtil::GetDisplayWorkAreaBoundsInParent(aura::Window* window) {
-  return ConvertRectFromScreen(
-      window->parent(),
-      gfx::Screen::GetScreen()->GetDisplayNearestWindow(window).work_area());
-}
-
-gfx::Rect ScreenUtil::GetShelfDisplayBoundsInRoot(aura::Window* window) {
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  if (display_manager->IsInUnifiedMode()) {
-    // In unified desktop mode, there is only one shelf in the 1st display.
-    const gfx::Display& first =
-        display_manager->software_mirroring_display_list()[0];
-    float scale =
-        static_cast<float>(window->GetRootWindow()->bounds().height()) /
-        first.size().height();
-    gfx::SizeF size(first.size());
-    size.Scale(scale, scale);
-    return gfx::Rect(gfx::ToCeiledSize(size));
-  } else {
-    if (window->GetRootWindow()->bounds().IsEmpty()) {
-      // TODO(sad): This only happens when running with mustash, since the
-      // root-window here refers to the shelf Widget, which has not been
-      // sized/positioned yet. Use the bounds of the display in this case.
-      // Ideally, we would not run this code at all for mustash.
-      NOTIMPLEMENTED();
-      gfx::Display display =
-          gfx::Screen::GetScreen()->GetDisplayNearestWindow(window);
-      return gfx::Rect(display.size());
-    }
-    return window->GetRootWindow()->bounds();
-  }
+  return ConvertRectFromScreen(window->parent(),
+                               display::Screen::GetScreen()
+                                   ->GetDisplayNearestWindow(window)
+                                   .work_area());
 }
 
 // static
 gfx::Rect ScreenUtil::ConvertRectToScreen(aura::Window* window,
-                                         const gfx::Rect& rect) {
+                                          const gfx::Rect& rect) {
   gfx::Point point = rect.origin();
-  aura::client::GetScreenPositionClient(window->GetRootWindow())->
-      ConvertPointToScreen(window, &point);
+  aura::client::GetScreenPositionClient(window->GetRootWindow())
+      ->ConvertPointToScreen(window, &point);
   return gfx::Rect(point, rect.size());
 }
 
 // static
 gfx::Rect ScreenUtil::ConvertRectFromScreen(aura::Window* window,
-                                           const gfx::Rect& rect) {
+                                            const gfx::Rect& rect) {
   gfx::Point point = rect.origin();
-  aura::client::GetScreenPositionClient(window->GetRootWindow())->
-      ConvertPointFromScreen(window, &point);
+  aura::client::GetScreenPositionClient(window->GetRootWindow())
+      ->ConvertPointFromScreen(window, &point);
   return gfx::Rect(point, rect.size());
 }
 
 // static
-const gfx::Display& ScreenUtil::GetSecondaryDisplay() {
+const display::Display& ScreenUtil::GetSecondaryDisplay() {
   DisplayManager* display_manager = GetDisplayManager();
   CHECK_LE(2U, display_manager->GetNumDisplays());
   return display_manager->GetDisplayAt(0).id() ==
-                 gfx::Screen::GetScreen()->GetPrimaryDisplay().id()
+                 display::Screen::GetScreen()->GetPrimaryDisplay().id()
              ? display_manager->GetDisplayAt(1)
              : display_manager->GetDisplayAt(0);
 }

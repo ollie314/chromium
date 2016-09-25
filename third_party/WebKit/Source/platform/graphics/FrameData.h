@@ -29,11 +29,12 @@
 #define FrameData_h
 
 #include "platform/graphics/ImageOrientation.h"
-#include "third_party/skia/include/core/SkImage.h"
 #include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/RefPtr.h"
 #include "wtf/VectorTraits.h"
+
+class SkImage;
 
 namespace blink {
 
@@ -46,9 +47,8 @@ public:
 
     // Clear the cached image data on the frame, and (optionally) the metadata.
     // Returns whether there was cached image data to clear.
-    bool clear(bool clearMetadata);
+    void clear(bool clearMetadata);
 
-    RefPtr<SkImage> m_frame;
     ImageOrientation m_orientation;
     float m_duration;
     bool m_haveMetadata : 1;

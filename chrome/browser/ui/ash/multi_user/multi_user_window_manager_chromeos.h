@@ -9,7 +9,7 @@
 #include <memory>
 #include <string>
 
-#include "ash/session/session_state_observer.h"
+#include "ash/common/session/session_state_observer.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
@@ -178,6 +178,9 @@ class MultiUserWindowManagerChromeOS
   void SetWindowVisibility(aura::Window* window,
                            bool visible,
                            int animation_time_in_ms);
+
+  // Notify the observers after the user switching animation is finished.
+  void NotifyAfterUserSwitchAnimationFinished();
 
   const WindowToEntryMap& window_to_entry() { return window_to_entry_; }
   MultiUserNotificationBlockerChromeOS* notification_blocker() {

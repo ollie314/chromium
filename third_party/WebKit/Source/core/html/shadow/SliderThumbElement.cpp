@@ -31,17 +31,17 @@
 
 #include "core/html/shadow/SliderThumbElement.h"
 
+#include "core/dom/shadow/ShadowRoot.h"
 #include "core/events/Event.h"
 #include "core/events/MouseEvent.h"
-#include "core/dom/shadow/ShadowRoot.h"
+#include "core/events/TouchEvent.h"
+#include "core/frame/EventHandlerRegistry.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/forms/StepRange.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/shadow/ShadowElementNames.h"
 #include "core/input/EventHandler.h"
-#include "core/layout/LayoutFlexibleBox.h"
-#include "core/layout/LayoutSlider.h"
 #include "core/layout/LayoutSliderContainer.h"
 #include "core/layout/LayoutSliderThumb.h"
 #include "core/layout/LayoutTheme.h"
@@ -52,7 +52,7 @@ using namespace HTMLNames;
 
 inline static bool hasVerticalAppearance(HTMLInputElement* input)
 {
-    ASSERT(input->layoutObject());
+    DCHECK(input->layoutObject());
     const ComputedStyle& sliderStyle = input->layoutObject()->styleRef();
 
     return sliderStyle.appearance() == SliderVerticalPart;
@@ -208,7 +208,7 @@ void SliderThumbElement::defaultEventHandler(Event* event)
     }
 
     MouseEvent* mouseEvent = toMouseEvent(event);
-    bool isLeftButton = mouseEvent->button() == LeftButton;
+    bool isLeftButton = mouseEvent->button() == static_cast<short>(WebPointerProperties::Button::Left);
     const AtomicString& eventType = event->type();
 
     // We intentionally do not call event->setDefaultHandled() here because
@@ -217,10 +217,12 @@ void SliderThumbElement::defaultEventHandler(Event* event)
     if (eventType == EventTypeNames::mousedown && isLeftButton) {
         startDragging();
         return;
-    } else if (eventType == EventTypeNames::mouseup && isLeftButton) {
+    }
+    if (eventType == EventTypeNames::mouseup && isLeftButton) {
         stopDragging();
         return;
-    } else if (eventType == EventTypeNames::mousemove) {
+    }
+    if (eventType == EventTypeNames::mousemove) {
         if (m_inDragMode)
             setPositionFromPoint(mouseEvent->absoluteLocation());
         return;
@@ -247,20 +249,20 @@ bool SliderThumbElement::willRespondToMouseClickEvents()
     return HTMLDivElement::willRespondToMouseClickEvents();
 }
 
-void SliderThumbElement::detach(const AttachContext& context)
+void SliderThumbElement::detachLayoutTree(const AttachContext& context)
 {
     if (m_inDragMode) {
         if (LocalFrame* frame = document().frame())
             frame->eventHandler().setCapturingMouseEventsNode(nullptr);
     }
-    HTMLDivElement::detach(context);
+    HTMLDivElement::detachLayoutTree(context);
 }
 
 HTMLInputElement* SliderThumbElement::hostInput() const
 {
     // Only HTMLInputElement creates SliderThumbElement instances as its shadow nodes.
-    // So, shadowHost() must be an HTMLInputElement.
-    return toHTMLInputElement(shadowHost());
+    // So, ownerShadowHost() must be an HTMLInputElement.
+    return toHTMLInputElement(ownerShadowHost());
 }
 
 static const AtomicString& sliderThumbShadowPartId()
@@ -287,8 +289,8 @@ const AtomicString& SliderThumbElement::shadowPseudoId() const
     case MediaSliderThumbPart:
     case MediaVolumeSliderPart:
     case MediaVolumeSliderThumbPart:
-    case MediaFullScreenVolumeSliderPart:
-    case MediaFullScreenVolumeSliderThumbPart:
+    case MediaFullscreenVolumeSliderPart:
+    case MediaFullscreenVolumeSliderThumbPart:
         return mediaSliderThumbShadowPartId();
     default:
         return sliderThumbShadowPartId();
@@ -299,14 +301,106 @@ const AtomicString& SliderThumbElement::shadowPseudoId() const
 
 inline SliderContainerElement::SliderContainerElement(Document& document)
     : HTMLDivElement(document)
+    , m_hasTouchEventHandler(false)
+    , m_touchStarted(false)
+    , m_slidingDirection(NoMove)
 {
+    updateTouchEventHandlerRegistry();
 }
 
 DEFINE_NODE_FACTORY(SliderContainerElement)
 
+HTMLInputElement* SliderContainerElement::hostInput() const
+{
+    return toHTMLInputElement(ownerShadowHost());
+}
+
 LayoutObject* SliderContainerElement::createLayoutObject(const ComputedStyle&)
 {
     return new LayoutSliderContainer(this);
+}
+
+void SliderContainerElement::defaultEventHandler(Event* event)
+{
+    if (event->isTouchEvent()) {
+        handleTouchEvent(toTouchEvent(event));
+        return;
+    }
+}
+
+void SliderContainerElement::handleTouchEvent(TouchEvent* event)
+{
+    HTMLInputElement* input = hostInput();
+    if (input->isDisabledOrReadOnly())
+        return;
+
+    if (event->type() == EventTypeNames::touchend) {
+        input->dispatchFormControlChangeEvent();
+        event->setDefaultHandled();
+        m_slidingDirection = NoMove;
+        m_touchStarted = false;
+        return;
+    }
+
+    // The direction of this series of touch actions has been determined, which is
+    // perpendicular to the slider, so no need to adjust the value.
+    if (!canSlide()) {
+        return;
+    }
+
+    TouchList* touches = event->targetTouches();
+    SliderThumbElement* thumb = toSliderThumbElement(treeScope().getElementById(ShadowElementNames::sliderThumb()));
+    if (touches->length() == 1) {
+        if (event->type() == EventTypeNames::touchstart) {
+            m_startPoint = touches->item(0)->absoluteLocation();
+            m_slidingDirection = NoMove;
+            m_touchStarted = true;
+            thumb->setPositionFromPoint(touches->item(0)->absoluteLocation());
+        } else if (m_touchStarted) {
+            LayoutPoint currentPoint = touches->item(0)->absoluteLocation();
+            if (m_slidingDirection == NoMove) { // Still needs to update the direction.
+                m_slidingDirection = getDirection(currentPoint, m_startPoint);
+            }
+
+            // m_slidingDirection has been updated, so check whether it's okay to slide again.
+            if (canSlide()) {
+                thumb->setPositionFromPoint(touches->item(0)->absoluteLocation());
+                event->setDefaultHandled();
+            }
+        }
+    }
+}
+
+SliderContainerElement::Direction SliderContainerElement::getDirection(LayoutPoint& point1, LayoutPoint& point2)
+{
+    if (point1 == point2) {
+        return NoMove;
+    }
+    if ((point1.x() - point2.x()).abs() >= (point1.y() - point2.y()).abs()) {
+        return Horizontal;
+    }
+    return Vertical;
+}
+
+bool SliderContainerElement::canSlide()
+{
+    if (!hostInput() || !hostInput()->layoutObject() || !hostInput()->layoutObject()->style()) {
+        return false;
+    }
+    const ComputedStyle* sliderStyle = hostInput()->layoutObject()->style();
+    const TransformOperations& transforms = sliderStyle->transform();
+    int transformSize = transforms.size();
+    if (transformSize > 0) {
+        for (int i = 0; i < transformSize; ++i) {
+            if (transforms.at(i)->type() == TransformOperation::Rotate) {
+                return true;
+            }
+        }
+    }
+    if ((m_slidingDirection == Vertical && sliderStyle->appearance() == SliderHorizontalPart) || (m_slidingDirection == Horizontal && sliderStyle->appearance() == SliderVerticalPart)) {
+        return false;
+    }
+    return true;
 }
 
 const AtomicString& SliderContainerElement::shadowPseudoId() const
@@ -314,21 +408,45 @@ const AtomicString& SliderContainerElement::shadowPseudoId() const
     DEFINE_STATIC_LOCAL(const AtomicString, mediaSliderContainer, ("-webkit-media-slider-container"));
     DEFINE_STATIC_LOCAL(const AtomicString, sliderContainer, ("-webkit-slider-container"));
 
-    if (!shadowHost() || !shadowHost()->layoutObject())
+    if (!ownerShadowHost() || !ownerShadowHost()->layoutObject())
         return sliderContainer;
 
-    const ComputedStyle& sliderStyle = shadowHost()->layoutObject()->styleRef();
+    const ComputedStyle& sliderStyle = ownerShadowHost()->layoutObject()->styleRef();
     switch (sliderStyle.appearance()) {
     case MediaSliderPart:
     case MediaSliderThumbPart:
     case MediaVolumeSliderPart:
     case MediaVolumeSliderThumbPart:
-    case MediaFullScreenVolumeSliderPart:
-    case MediaFullScreenVolumeSliderThumbPart:
+    case MediaFullscreenVolumeSliderPart:
+    case MediaFullscreenVolumeSliderThumbPart:
         return mediaSliderContainer;
     default:
         return sliderContainer;
     }
+}
+
+void SliderContainerElement::updateTouchEventHandlerRegistry()
+{
+    if (m_hasTouchEventHandler) {
+        return;
+    }
+    if (document().frameHost() && document().lifecycle().state() < DocumentLifecycle::Stopping) {
+        EventHandlerRegistry& registry = document().frameHost()->eventHandlerRegistry();
+        registry.didAddEventHandler(*this, EventHandlerRegistry::TouchStartOrMoveEventPassive);
+        m_hasTouchEventHandler = true;
+    }
+}
+
+void SliderContainerElement::didMoveToNewDocument(Document& oldDocument)
+{
+    updateTouchEventHandlerRegistry();
+    HTMLElement::didMoveToNewDocument(oldDocument);
+}
+
+void SliderContainerElement::removeAllEventListeners()
+{
+    Node::removeAllEventListeners();
+    m_hasTouchEventHandler = false;
 }
 
 } // namespace blink

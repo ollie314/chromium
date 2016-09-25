@@ -25,7 +25,6 @@
 #include "net/filter/filter.h"
 #include "net/http/http_request_info.h"
 #include "net/socket/connection_attempts.h"
-#include "net/url_request/url_request_backoff_manager.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_throttler_entry_interface.h"
 
@@ -76,9 +75,6 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
 
   class HttpFilterContext;
 
-  // Shadows URLRequestJob's version of this method.
-  void NotifyBeforeNetworkStart(bool* defer);
-
   // Shadows URLRequestJob's version of this method so we can grab cookies.
   void NotifyHeadersComplete();
 
@@ -107,10 +103,9 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   void OnHeadersReceivedCallback(int result);
   void OnStartCompleted(int result);
   void OnReadCompleted(int result);
-  void NotifyBeforeSendHeadersCallback(int result);
-  void NotifyBeforeSendProxyHeadersCallback(
-      const ProxyInfo& proxy_info,
-      HttpRequestHeaders* request_headers);
+  void NotifyBeforeStartTransactionCallback(int result);
+  void NotifyBeforeSendHeadersCallback(const ProxyInfo& proxy_info,
+                                       HttpRequestHeaders* request_headers);
 
   void RestartTransactionWithAuth(const AuthCredentials& credentials);
 
@@ -118,16 +113,14 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   void SetUpload(UploadDataStream* upload) override;
   void SetExtraRequestHeaders(const HttpRequestHeaders& headers) override;
   LoadState GetLoadState() const override;
-  UploadProgress GetUploadProgress() const override;
   bool GetMimeType(std::string* mime_type) const override;
   bool GetCharset(std::string* charset) override;
   void GetResponseInfo(HttpResponseInfo* info) override;
   void GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
   bool GetRemoteEndpoint(IPEndPoint* endpoint) const override;
-  bool GetResponseCookies(std::vector<std::string>* cookies) override;
   int GetResponseCode() const override;
   void PopulateNetErrorDetails(NetErrorDetails* details) const override;
-  Filter* SetupFilter() const override;
+  std::unique_ptr<Filter> SetupFilter() const override;
   bool CopyFragmentOnRedirect(const GURL& location) const override;
   bool IsSafeRedirect(const GURL& location) override;
   bool NeedsAuth() override;
@@ -137,7 +130,6 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   void ContinueWithCertificate(X509Certificate* client_cert,
                                SSLPrivateKey* client_private_key) override;
   void ContinueDespiteLastError() override;
-  void ResumeNetworkStart() override;
   int ReadRawData(IOBuffer* buf, int buf_size) override;
   void StopCaching() override;
   bool GetFullRequestHeaders(HttpRequestHeaders* headers) const override;
@@ -270,8 +262,6 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   bool awaiting_callback_;
 
   const HttpUserAgentSettings* http_user_agent_settings_;
-
-  URLRequestBackoffManager* backoff_manager_;
 
   // Keeps track of total received bytes over the network from transactions used
   // by this job that have already been destroyed.

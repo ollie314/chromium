@@ -15,6 +15,7 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Process;
 import android.preference.Preference;
 import android.provider.Settings;
 import android.text.SpannableString;
@@ -33,6 +34,7 @@ import org.chromium.ui.text.SpanApplier.SpanInfo;
 public class SiteSettingsCategory {
     // Valid values for passing to fromString() in this class.
     public static final String CATEGORY_ALL_SITES = "all_sites";
+    public static final String CATEGORY_AUTOPLAY = "autoplay";
     public static final String CATEGORY_BACKGROUND_SYNC = "background_sync";
     public static final String CATEGORY_CAMERA = "camera";
     public static final String CATEGORY_COOKIES = "cookies";
@@ -44,6 +46,7 @@ public class SiteSettingsCategory {
     public static final String CATEGORY_POPUPS = "popups";
     public static final String CATEGORY_PROTECTED_MEDIA = "protected_content";
     public static final String CATEGORY_USE_STORAGE = "use_storage";
+    public static final String CATEGORY_USB = "usb";
 
     // The id of this category.
     private String mCategory;
@@ -79,6 +82,10 @@ public class SiteSettingsCategory {
         assert !category.isEmpty();
         if (CATEGORY_ALL_SITES.equals(category)) {
             return new SiteSettingsCategory(CATEGORY_ALL_SITES, "", -1);
+        }
+        if (CATEGORY_AUTOPLAY.equals(category)) {
+            return new SiteSettingsCategory(CATEGORY_AUTOPLAY, "",
+                    ContentSettingsType.CONTENT_SETTINGS_TYPE_AUTOPLAY);
         }
         if (CATEGORY_BACKGROUND_SYNC.equals(category)) {
             return new SiteSettingsCategory(CATEGORY_BACKGROUND_SYNC, "",
@@ -126,6 +133,10 @@ public class SiteSettingsCategory {
         if (CATEGORY_USE_STORAGE.equals(category)) {
             return new SiteSettingsCategory(CATEGORY_USE_STORAGE, "", -1);
         }
+        if (CATEGORY_USB.equals(category)) {
+            return new SiteSettingsCategory(
+                    CATEGORY_USB, "", ContentSettingsType.CONTENT_SETTINGS_TYPE_USB_CHOOSER_DATA);
+        }
 
         return null;
     }
@@ -136,6 +147,9 @@ public class SiteSettingsCategory {
      * fromString().
      */
     public static SiteSettingsCategory fromContentSettingsType(int contentSettingsType) {
+        if (contentSettingsType == ContentSettingsType.CONTENT_SETTINGS_TYPE_AUTOPLAY) {
+            return fromString(CATEGORY_AUTOPLAY);
+        }
         if (contentSettingsType == ContentSettingsType.CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC) {
             return fromString(CATEGORY_BACKGROUND_SYNC);
         }
@@ -167,6 +181,9 @@ public class SiteSettingsCategory {
                 == ContentSettingsType.CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER) {
             return fromString(CATEGORY_PROTECTED_MEDIA);
         }
+        if (contentSettingsType == ContentSettingsType.CONTENT_SETTINGS_TYPE_USB_CHOOSER_DATA) {
+            return fromString(CATEGORY_USB);
+        }
 
         return null;
     }
@@ -183,6 +200,13 @@ public class SiteSettingsCategory {
      */
     public boolean showAllSites() {
         return CATEGORY_ALL_SITES.equals(mCategory);
+    }
+
+    /**
+     * Returns whether this category is the Autoplay category.
+     */
+    public boolean showAutoplaySites() {
+        return mContentSettingsType == ContentSettingsType.CONTENT_SETTINGS_TYPE_AUTOPLAY;
     }
 
     /**
@@ -263,6 +287,13 @@ public class SiteSettingsCategory {
      */
     public boolean showStorageSites() {
         return CATEGORY_USE_STORAGE.equals(mCategory);
+    }
+
+    /**
+     * Returns whether this category is the USB category.
+     */
+    public boolean showUsbDevices() {
+        return mContentSettingsType == ContentSettingsType.CONTENT_SETTINGS_TYPE_USB_CHOOSER_DATA;
     }
 
     /**
@@ -455,7 +486,7 @@ public class SiteSettingsCategory {
     private boolean permissionOnInAndroid(String permission, Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
 
-        return PackageManager.PERMISSION_GRANTED == context.getPackageManager().checkPermission(
-                permission, context.getPackageName());
+        return PackageManager.PERMISSION_GRANTED == ApiCompatibilityUtils.checkPermission(
+                context, permission, Process.myPid(), Process.myUid());
     }
 }

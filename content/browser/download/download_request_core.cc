@@ -16,7 +16,7 @@
 #include "base/metrics/sparse_histogram.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/byte_stream.h"
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_interrupt_reasons_impl.h"
@@ -29,9 +29,9 @@
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/power_save_blocker.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/web_contents.h"
+#include "device/power_save_blocker/power_save_blocker.h"
 #include "net/base/elements_upload_data_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
@@ -115,8 +115,9 @@ std::unique_ptr<net::URLRequest> DownloadRequestCore::CreateRequestOnIOThread(
   // DownloadUrlParameters can-not include resource_dispatcher_host_impl.h, so
   // we must down cast. RDHI is the only subclass of RDH as of 2012 May 4.
   std::unique_ptr<net::URLRequest> request(
-      params->resource_context()->GetRequestContext()->CreateRequest(
-          params->url(), net::DEFAULT_PRIORITY, nullptr));
+      params->url_request_context_getter()
+          ->GetURLRequestContext()
+          ->CreateRequest(params->url(), net::DEFAULT_PRIORITY, nullptr));
   request->set_method(params->method());
 
   if (!params->post_body().empty()) {
@@ -135,8 +136,8 @@ std::unique_ptr<net::URLRequest> DownloadRequestCore::CreateRequestOnIOThread(
     DCHECK(params->prefer_cache());
     DCHECK_EQ("POST", params->method());
     std::vector<std::unique_ptr<net::UploadElementReader>> element_readers;
-    request->set_upload(base::WrapUnique(new net::ElementsUploadDataStream(
-        std::move(element_readers), params->post_id())));
+    request->set_upload(base::MakeUnique<net::ElementsUploadDataStream>(
+        std::move(element_readers), params->post_id()));
   }
 
   int load_flags = request->load_flags();
@@ -184,7 +185,7 @@ std::unique_ptr<net::URLRequest> DownloadRequestCore::CreateRequestOnIOThread(
     request->SetExtraRequestHeaderByName(header.first, header.second,
                                          false /*overwrite*/);
 
-  DownloadRequestData::Attach(request.get(), std::move(params), download_id);
+  DownloadRequestData::Attach(request.get(), params, download_id);
   return request;
 }
 
@@ -203,9 +204,11 @@ DownloadRequestCore::DownloadRequestCore(net::URLRequest* request,
   DCHECK(request_);
   DCHECK(delegate_);
   RecordDownloadCount(UNTHROTTLED_COUNT);
-  power_save_blocker_ = PowerSaveBlocker::Create(
-      PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
-      PowerSaveBlocker::kReasonOther, "Download in progress");
+  power_save_blocker_.reset(new device::PowerSaveBlocker(
+      device::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
+      device::PowerSaveBlocker::kReasonOther, "Download in progress",
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::UI),
+      BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE)));
   DownloadRequestData* request_data = DownloadRequestData::Get(request_);
   if (request_data) {
     save_info_ = request_data->TakeSaveInfo();
@@ -247,7 +250,7 @@ DownloadRequestCore::CreateDownloadCreateInfo(DownloadInterruptReason result) {
 bool DownloadRequestCore::OnResponseStarted(
     const std::string& override_mime_type) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DVLOG(20) << __FUNCTION__ << "()" << DebugString();
+  DVLOG(20) << __func__ << "() " << DebugString();
   download_start_time_ = base::TimeTicks::Now();
 
   DownloadInterruptReason result =
@@ -282,10 +285,9 @@ bool DownloadRequestCore::OnResponseStarted(
 
   // Create the ByteStream for sending data to the download sink.
   std::unique_ptr<ByteStreamReader> stream_reader;
-  CreateByteStream(
-      base::ThreadTaskRunnerHandle::Get(),
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-      kDownloadByteStreamSize, &stream_writer_, &stream_reader);
+  CreateByteStream(base::ThreadTaskRunnerHandle::Get(),
+                   BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE),
+                   kDownloadByteStreamSize, &stream_writer_, &stream_reader);
   stream_writer_->RegisterCallback(
       base::Bind(&DownloadRequestCore::ResumeRequest, AsWeakPtr()));
 
@@ -335,7 +337,7 @@ bool DownloadRequestCore::OnResponseStarted(
 }
 
 bool DownloadRequestCore::OnRequestRedirected() {
-  DVLOG(20) << __FUNCTION__ << "() " << DebugString();
+  DVLOG(20) << __func__ << "() " << DebugString();
   if (is_partial_request_) {
     // A redirect while attempting a partial resumption indicates a potential
     // middle box. Trigger another interruption so that the DownloadItem can
@@ -403,7 +405,7 @@ bool DownloadRequestCore::OnReadCompleted(int bytes_read, bool* defer) {
 }
 
 void DownloadRequestCore::OnWillAbort(DownloadInterruptReason reason) {
-  DVLOG(20) << __FUNCTION__ << "() reason=" << reason << " " << DebugString();
+  DVLOG(20) << __func__ << "() reason=" << reason << " " << DebugString();
   DCHECK(!started_);
   abort_reason_ = reason;
 }
@@ -412,7 +414,7 @@ void DownloadRequestCore::OnResponseCompleted(
     const net::URLRequestStatus& status) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   int response_code = status.is_success() ? request()->GetResponseCode() : 0;
-  DVLOG(20) << __FUNCTION__ << "()" << DebugString()
+  DVLOG(20) << __func__ << "() " << DebugString()
             << " status.status() = " << status.status()
             << " status.error() = " << status.error()
             << " response_code = " << response_code;
@@ -522,23 +524,19 @@ std::string DownloadRequestCore::DebugString() const {
 DownloadInterruptReason DownloadRequestCore::HandleRequestStatus(
     const net::URLRequestStatus& status) {
   net::Error error_code = net::OK;
-  if (status.status() == net::URLRequestStatus::FAILED ||
-      // Note cancels as failures too.
-      status.status() == net::URLRequestStatus::CANCELED) {
+  if (!status.is_success()) {
     error_code = static_cast<net::Error>(status.error());  // Normal case.
     // Make sure that at least the fact of failure comes through.
     if (error_code == net::OK)
       error_code = net::ERR_FAILED;
   }
 
-  // ERR_CONTENT_LENGTH_MISMATCH and ERR_INCOMPLETE_CHUNKED_ENCODING are
-  // allowed since a number of servers in the wild close the connection too
-  // early by mistake. Other browsers - IE9, Firefox 11.0, and Safari 5.1.4 -
-  // treat downloads as complete in both cases, so we follow their lead.
-  if (error_code == net::ERR_CONTENT_LENGTH_MISMATCH ||
-      error_code == net::ERR_INCOMPLETE_CHUNKED_ENCODING) {
+  // ERR_CONTENT_LENGTH_MISMATCH is allowed since a number of servers in the
+  // wild close the connection too early by mistake. Other browsers - IE9,
+  // Firefox 11.0, and Safari 5.1.4 - treat downloads as complete in both cases,
+  // so we follow their lead.
+  if (error_code == net::ERR_CONTENT_LENGTH_MISMATCH)
     error_code = net::OK;
-  }
   DownloadInterruptReason reason = ConvertNetErrorToInterruptReason(
       error_code, DOWNLOAD_INTERRUPT_FROM_NETWORK);
 

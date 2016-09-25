@@ -16,7 +16,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/task_management/task_manager_interface.h"
+#include "chrome/browser/task_manager/task_manager_interface.h"
 #include "chrome/browser/ui/task_manager/task_manager_columns.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -29,7 +29,7 @@
 #include "ui/base/models/table_model_observer.h"
 #include "ui/base/text/bytes_formatting.h"
 
-namespace task_management {
+namespace task_manager {
 
 namespace {
 
@@ -562,17 +562,20 @@ int TaskManagerTableModel::CompareValues(int row1,
 void TaskManagerTableModel::GetRowsGroupRange(int row_index,
                                               int* out_start,
                                               int* out_length) {
+  const base::ProcessId process_id =
+      observed_task_manager()->GetProcessId(tasks_[row_index]);
   int i = row_index;
-  for ( ; i >= 0; --i) {
-    if (IsTaskFirstInGroup(i))
-      break;
+  int limit = row_index + 1;
+  while (i > 0 &&
+         observed_task_manager()->GetProcessId(tasks_[i - 1]) == process_id) {
+    --i;
   }
-
-  CHECK_GE(i, 0);
-
+  while (limit < RowCount() &&
+         observed_task_manager()->GetProcessId(tasks_[limit]) == process_id) {
+    ++limit;
+  }
   *out_start = i;
-  *out_length = observed_task_manager()->GetNumberOfTasksOnSameProcess(
-      tasks_[row_index]);
+  *out_length = limit - i;
 }
 
 void TaskManagerTableModel::OnTaskAdded(TaskId id) {
@@ -583,8 +586,12 @@ void TaskManagerTableModel::OnTaskAdded(TaskId id) {
   // adding |id| to |tasks_| because we want to keep |tasks_| sorted by proc IDs
   // and then by Task IDs.
   tasks_ = observed_task_manager()->GetTaskIdsList();
-  if (table_model_observer_)
-    table_model_observer_->OnItemsAdded(RowCount() - 1, 1);
+
+  if (table_model_observer_) {
+    std::vector<TaskId>::difference_type index =
+        std::find(tasks_.begin(), tasks_.end(), id) - tasks_.begin();
+    table_model_observer_->OnItemsAdded(static_cast<int>(index), 1);
+  }
 }
 
 void TaskManagerTableModel::OnTaskToBeRemoved(TaskId id) {
@@ -629,13 +636,14 @@ void TaskManagerTableModel::UpdateRefreshTypes(int column_id, bool visibility) {
       break;
 
     case IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN:
+      type = REFRESH_TYPE_PHYSICAL_MEMORY;
+      break;
+
     case IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN:
     case IDS_TASK_MANAGER_SHARED_MEM_COLUMN:
     case IDS_TASK_MANAGER_SWAPPED_MEM_COLUMN:
-      type = REFRESH_TYPE_MEMORY;
+      type = REFRESH_TYPE_MEMORY_DETAILS;
       if (table_view_delegate_->IsColumnVisible(
-              IDS_TASK_MANAGER_PHYSICAL_MEM_COLUMN) ||
-          table_view_delegate_->IsColumnVisible(
               IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN) ||
           table_view_delegate_->IsColumnVisible(
               IDS_TASK_MANAGER_SHARED_MEM_COLUMN) ||
@@ -711,9 +719,8 @@ void TaskManagerTableModel::UpdateRefreshTypes(int column_id, bool visibility) {
     RemoveRefreshType(type);
 }
 
-bool TaskManagerTableModel::IsBrowserProcess(int row_index) const {
-  return observed_task_manager()->GetProcessId(tasks_[row_index]) ==
-      base::GetCurrentProcId();
+bool TaskManagerTableModel::IsTaskKillable(int row_index) const {
+  return observed_task_manager()->IsTaskKillable(tasks_[row_index]);
 }
 
 void TaskManagerTableModel::RetrieveSavedColumnsSettingsAndUpdateTable() {
@@ -752,18 +759,8 @@ void TaskManagerTableModel::RetrieveSavedColumnsSettingsAndUpdateTable() {
 
     if (col_visibility) {
       if (sorted_col_id == col_id_key) {
-        if (sort_is_ascending == kColumns[i].initial_sort_is_ascending) {
-          table_view_delegate_->ToggleSortOrder(current_visible_column_index);
-        } else {
-          // Unfortunately the API of ui::TableView doesn't provide a clean way
-          // to sort by a particular column ID and a sort direction. If the
-          // retrieved sort direction is different than the initial one, we have
-          // to toggle the sort order twice!
-          // Note that the function takes the visible_column_index rather than
-          // a column ID.
-          table_view_delegate_->ToggleSortOrder(current_visible_column_index);
-          table_view_delegate_->ToggleSortOrder(current_visible_column_index);
-        }
+        table_view_delegate_->SetSortDescriptor(
+            TableSortDescriptor(col_id, sort_is_ascending));
       }
 
       ++current_visible_column_index;
@@ -804,6 +801,16 @@ void TaskManagerTableModel::ToggleColumnVisibility(int column_id) {
   UpdateRefreshTypes(column_id, new_visibility);
 }
 
+int TaskManagerTableModel::GetRowForWebContents(
+    content::WebContents* web_contents) {
+  TaskId task_id =
+      observed_task_manager()->GetTaskIdForWebContents(web_contents);
+  auto index = std::find(tasks_.begin(), tasks_.end(), task_id);
+  if (index == tasks_.end())
+    return -1;
+  return static_cast<int>(index - tasks_.begin());
+}
+
 void TaskManagerTableModel::StartUpdating() {
   TaskManagerInterface::GetTaskManager()->AddObserver(this);
   tasks_ = observed_task_manager()->GetTaskIdsList();
@@ -834,5 +841,4 @@ bool TaskManagerTableModel::IsTaskFirstInGroup(int row_index) const {
       observed_task_manager()->GetProcessId(tasks_[row_index]);
 }
 
-
-}  // namespace task_management
+}  // namespace task_manager

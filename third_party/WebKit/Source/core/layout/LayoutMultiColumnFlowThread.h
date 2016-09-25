@@ -36,6 +36,16 @@ namespace blink {
 class LayoutMultiColumnSet;
 class LayoutMultiColumnSpannerPlaceholder;
 
+// What to translate *to* when translating from a flow thread coordinate space.
+enum class CoordinateSpaceConversion {
+    // Just translate to the nearest containing coordinate space (i.e. where our multicol container
+    // lives) of this flow thread, i.e. don't walk ancestral flow threads, if any.
+    Containing,
+
+    // Translate to visual coordinates, by walking all ancestral flow threads.
+    Visual
+};
+
 // Flow thread implementation for CSS multicol. This will be inserted as an anonymous child block of
 // the actual multicol container (i.e. the LayoutBlockFlow whose style computes to non-auto
 // column-count and/or column-width). LayoutMultiColumnFlowThread is the heart of the multicol
@@ -181,13 +191,15 @@ public:
 
     bool isPageLogicalHeightKnown() const final;
 
-    LayoutSize flowThreadTranslationAtOffset(LayoutUnit) const;
+    LayoutSize flowThreadTranslationAtOffset(LayoutUnit, PageBoundaryRule, CoordinateSpaceConversion) const;
+    LayoutSize flowThreadTranslationAtPoint(const LayoutPoint& flowThreadPoint, CoordinateSpaceConversion) const;
 
+    LayoutPoint flowThreadPointToVisualPoint(const LayoutPoint& flowThreadPoint) const override;
     LayoutPoint visualPointToFlowThreadPoint(const LayoutPoint& visualPoint) const override;
 
     int inlineBlockBaseline(LineDirectionMode) const override;
 
-    LayoutMultiColumnSet* columnSetAtBlockOffset(LayoutUnit) const final;
+    LayoutMultiColumnSet* columnSetAtBlockOffset(LayoutUnit, PageBoundaryRule) const final;
 
     void layoutColumns(SubtreeLayoutScope&);
 
@@ -251,6 +263,8 @@ private:
     void updateLogicalWidth() override;
     void contentWasLaidOut(LayoutUnit logicalBottomInFlowThreadAfterPagination) override;
     bool canSkipLayout(const LayoutBox&) const override;
+    MultiColumnLayoutState multiColumnLayoutState() const override;
+    void restoreMultiColumnLayoutState(const MultiColumnLayoutState&) override;
 
     // The last set we worked on. It's not to be used as the "current set". The concept of a
     // "current set" is difficult, since layout may jump back and forth in the tree, due to wrong

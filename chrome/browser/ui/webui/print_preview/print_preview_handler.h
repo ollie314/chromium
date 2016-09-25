@@ -13,7 +13,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/ui/webui/print_preview/print_preview_distiller.h"
 #include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -79,7 +78,6 @@ class PrintPreviewHandler
 #if defined(ENABLE_SERVICE_DISCOVERY)
   // PrivetLocalPrinterLister::Delegate implementation.
   void LocalPrinterChanged(
-      bool added,
       const std::string& name,
       bool has_local_printing,
       const cloud_print::DeviceDescription& description) override;
@@ -209,12 +207,11 @@ class PrintPreviewHandler
                        const std::string& access_token);
 
   // Sends the printer capabilities to the Web UI. |settings_info| contains
-  // printer capabilities information.
-  void SendPrinterCapabilities(const base::DictionaryValue* settings_info);
-
-  // Sends error notification to the Web UI when unable to return the printer
-  // capabilities.
-  void SendFailedToGetPrinterCapabilities(const std::string& printer_name);
+  // printer capabilities information. If |settings_info| is empty, sends
+  // error notification to the Web UI instead.
+  void SendPrinterCapabilities(
+      const std::string& printer_name,
+      std::unique_ptr<base::DictionaryValue> settings_info);
 
   // Send the list of printers to the Web UI.
   void SetupPrinterList(const base::ListValue* printers);
@@ -382,10 +379,6 @@ class PrintPreviewHandler
   // Notifies tests that want to know if the PDF has been saved. This doesn't
   // notify the test if it was a successful save, only that it was attempted.
   base::Closure pdf_file_saved_closure_;
-
-  // A print preview that is responsible for rendering the page after
-  // being processed by the DOM Distiller.
-  std::unique_ptr<PrintPreviewDistiller> print_preview_distiller_;
 
   base::WeakPtrFactory<PrintPreviewHandler> weak_factory_;
 

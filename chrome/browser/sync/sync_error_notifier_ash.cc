@@ -4,9 +4,7 @@
 
 #include "chrome/browser/sync/sync_error_notifier_ash.h"
 
-#include "ash/shell.h"
-#include "ash/shell_delegate.h"
-#include "ash/system/system_notifier.h"
+#include "ash/common/system/system_notifier.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
@@ -22,8 +20,8 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/signin/core/account_id/account_id.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/message_center/notification.h"
@@ -34,7 +32,6 @@
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "components/user_manager/user_manager.h"
 #endif
-
 
 namespace {
 
@@ -74,6 +71,7 @@ SyncNotificationDelegate::SyncNotificationDelegate(
 
 SyncNotificationDelegate::~SyncNotificationDelegate() {
 }
+
 void SyncNotificationDelegate::Click() {
   ShowSyncSetup();
 }

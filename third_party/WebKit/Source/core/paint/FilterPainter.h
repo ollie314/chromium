@@ -7,7 +7,7 @@
 
 #include "core/paint/PaintLayerPaintingInfo.h"
 #include "wtf/Allocator.h"
-#include "wtf/OwnPtr.h"
+#include <memory>
 
 namespace blink {
 
@@ -19,13 +19,13 @@ class LayerClipRecorder;
 class FilterPainter {
     STACK_ALLOCATED();
 public:
-    FilterPainter(PaintLayer&, GraphicsContext&, const LayoutPoint& offsetFromRoot, const ClipRect&, PaintLayerPaintingInfo&, PaintLayerFlags paintFlags, LayoutRect& rootRelativeBounds, bool& rootRelativeBoundsComputed);
+    FilterPainter(PaintLayer&, GraphicsContext&, const LayoutPoint& offsetFromRoot, const ClipRect&, PaintLayerPaintingInfo&, PaintLayerFlags paintFlags);
     ~FilterPainter();
 
 private:
     bool m_filterInProgress;
     GraphicsContext& m_context;
-    OwnPtr<LayerClipRecorder> m_clipRecorder;
+    std::unique_ptr<LayerClipRecorder> m_clipRecorder;
     LayoutObject* m_layoutObject;
 };
 

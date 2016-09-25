@@ -32,6 +32,7 @@
 #include "wtf/HashMap.h"
 #include "wtf/Vector.h"
 #include "wtf/text/AtomicStringHash.h"
+#include <memory>
 
 namespace blink {
 
@@ -41,7 +42,7 @@ class Document;
 class Element;
 class ExceptionState;
 template <typename NodeType> class StaticNodeTypeList;
-typedef StaticNodeTypeList<Element> StaticElementList;
+using StaticElementList = StaticNodeTypeList<Element>;
 
 class SelectorDataList {
     DISALLOW_NEW();
@@ -78,7 +79,6 @@ private:
     void executeSlowTraversingShadowTree(ContainerNode& rootNode, typename SelectorQueryTrait::OutputType&) const;
     template <typename SelectorQueryTrait>
     void execute(ContainerNode& rootNode, typename SelectorQueryTrait::OutputType&) const;
-    const CSSSelector* selectorForIdLookup(const CSSSelector&) const;
 
     Vector<const CSSSelector*> m_selectors;
     bool m_usesDeepCombinatorOrShadowPseudo : 1;
@@ -89,7 +89,7 @@ class CORE_EXPORT SelectorQuery {
     WTF_MAKE_NONCOPYABLE(SelectorQuery);
     USING_FAST_MALLOC(SelectorQuery);
 public:
-    static PassOwnPtr<SelectorQuery> adopt(CSSSelectorList);
+    static std::unique_ptr<SelectorQuery> adopt(CSSSelectorList);
 
     bool matches(Element&) const;
     Element* closest(Element&) const;
@@ -109,7 +109,7 @@ public:
     void invalidate();
 
 private:
-    HashMap<AtomicString, OwnPtr<SelectorQuery>> m_entries;
+    HashMap<AtomicString, std::unique_ptr<SelectorQuery>> m_entries;
 };
 
 } // namespace blink

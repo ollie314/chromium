@@ -42,6 +42,7 @@
 
 namespace blink {
 
+class CallbackFunctionTest;
 class CanvasRenderingContext;
 class ClientRect;
 class ClientRectList;
@@ -61,6 +62,7 @@ class LayerRectList;
 class LocalDOMWindow;
 class LocalFrame;
 class Node;
+class OriginTrialsTest;
 class Page;
 class PrivateScriptTest;
 class Range;
@@ -70,7 +72,7 @@ class TypeConversions;
 class UnionTypesTest;
 class ScrollState;
 template <typename NodeType> class StaticNodeTypeList;
-typedef StaticNodeTypeList<Node> StaticNodeList;
+using StaticNodeList = StaticNodeTypeList<Node>;
 
 class Internals final : public GarbageCollectedFinalized<Internals>, public ScriptWrappable, public ContextLifecycleObserver, public ValueIterable<int> {
     DEFINE_WRAPPERTYPEINFO();
@@ -90,6 +92,7 @@ public:
     bool isPreloaded(const String& url);
     bool isPreloadedBy(const String& url, Document*);
     bool isLoadingFromMemoryCache(const String& url);
+    int getResourcePriority(const String& url, Document*);
 
     bool isSharingStyle(Element*, Element*) const;
 
@@ -161,6 +164,7 @@ public:
     Range* markerRangeForNode(Node*, const String& markerType, unsigned index, ExceptionState&);
     String markerDescriptionForNode(Node*, const String& markerType, unsigned index, ExceptionState&);
     void addTextMatchMarker(const Range*, bool isActive);
+    void addCompositionMarker(const Range*, const String& underlineColorValue, bool thick, const String& backgroundColorValue, ExceptionState&);
     void setMarkersActive(Node*, unsigned startOffset, unsigned endOffset, bool);
     void setMarkedTextMatchesAreHighlighted(Document*, bool);
 
@@ -210,7 +214,10 @@ public:
 
     bool hasSpellingMarker(Document*, int from, int length);
     bool hasGrammarMarker(Document*, int from, int length);
-    void setContinuousSpellCheckingEnabled(bool);
+    void setSpellCheckingEnabled(bool);
+
+    bool canHyphenate(const AtomicString& locale);
+    void setMockHyphenation(const AtomicString& locale);
 
     bool isOverwriteModeEnabled(Document*);
     void toggleOverwriteModeEnabled(Document*);
@@ -243,7 +250,6 @@ public:
     unsigned numberOfLiveNodes() const;
     unsigned numberOfLiveDocuments() const;
     String dumpRefCountedInstanceCounts() const;
-    Vector<String> consoleMessageArgumentCounts(Document*) const;
     LocalDOMWindow* openDummyInspectorFrontend(const String& url);
     void closeDummyInspectorFrontend();
     Vector<unsigned long> setMemoryCacheCapacities(unsigned long minDeadBytes, unsigned long maxDeadBytes, unsigned long totalBytes);
@@ -258,6 +264,7 @@ public:
     String pageProperty(String, int, ExceptionState& = ASSERT_NO_EXCEPTION) const;
     String pageSizeAndMarginsInPixels(int, int, int, int, int, int, int, ExceptionState& = ASSERT_NO_EXCEPTION) const;
 
+    float pageScaleFactor(ExceptionState&);
     void setPageScaleFactor(float scaleFactor, ExceptionState&);
     void setPageScaleFactorLimits(float minScaleFactor, float maxScaleFactor, ExceptionState&);
 
@@ -280,6 +287,8 @@ public:
     PrivateScriptTest* privateScriptTest() const;
     DictionaryTest* dictionaryTest() const;
     UnionTypesTest* unionTypesTest() const;
+    OriginTrialsTest* originTrialsTest() const;
+    CallbackFunctionTest* callbackFunctionTest() const;
 
     Vector<String> getReferencedFilePaths() const;
 
@@ -287,10 +296,6 @@ public:
     void stopTrackingRepaints(Document*, ExceptionState&);
     void updateLayoutIgnorePendingStylesheetsAndRunPostLayoutTasks(Node*, ExceptionState&);
     void forceFullRepaint(Document*, ExceptionState&);
-
-    void startTrackingPaintInvalidationObjects();
-    void stopTrackingPaintInvalidationObjects();
-    Vector<String> trackedPaintInvalidationObjects();
 
     ClientRectList* draggableRegions(Document*, ExceptionState&);
     ClientRectList* nonDraggableRegions(Document*, ExceptionState&);
@@ -345,10 +350,8 @@ public:
 
     bool ignoreLayoutWithPendingStylesheets(Document*);
 
-    // Test must call setNetworkStateNotifierTestOnly(true) before calling setNetworkConnectionInfo or
-    // setNetworkStateMaxBandwidth.
-    void setNetworkStateNotifierTestOnly(bool);
-    void setNetworkConnectionInfo(const String&, double downlinkMaxMbps, ExceptionState&);
+    void setNetworkConnectionInfoOverride(bool, const String&, double downlinkMaxMbps, ExceptionState&);
+    void clearNetworkConnectionInfoOverride();
 
     unsigned countHitRegions(CanvasRenderingContext*);
 
@@ -377,8 +380,8 @@ public:
     bool isUseCounted(Document*, int useCounterId);
     bool isCSSPropertyUseCounted(Document*, const String&);
 
-    String unscopeableAttribute();
-    String unscopeableMethod();
+    String unscopableAttribute();
+    String unscopableMethod();
 
     ClientRectList* focusRingRects(Element*);
     ClientRectList* outlineRects(Element*);
@@ -386,8 +389,6 @@ public:
     void setCapsLockState(bool enabled);
 
     bool setScrollbarVisibilityInScrollableArea(Node*, bool visible);
-
-    void forceRestrictIFramePermissions();
 
     // Translate given platform monotonic time in seconds to high resolution
     // document time in seconds
@@ -405,6 +406,12 @@ public:
     // Returns the run state of the node's programmatic scroll animator (see ScrollAnimatorCompositorCoordinater::RunState),
     // or -1 if the node does not have a scrollable area.
     String getProgrammaticScrollAnimationState(Node*) const;
+
+    // Returns the visual rect of a node's LayoutObject.
+    ClientRect* visualRect(Node*);
+
+    // Intentional crash.
+    void crash();
 
 private:
     explicit Internals(ScriptState*);

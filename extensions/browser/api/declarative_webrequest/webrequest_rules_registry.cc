@@ -130,7 +130,7 @@ std::list<LinkedPtrEventResponseDelta> WebRequestRulesRegistry::CreateDeltas(
     if (!rule->tags().empty() && !ignore_tags[extension_id].empty()) {
       bool ignore_rule = false;
       for (const std::string& tag : rule->tags())
-        ignore_rule |= ContainsKey(ignore_tags[extension_id], tag);
+        ignore_rule |= base::ContainsKey(ignore_tags[extension_id], tag);
       if (ignore_rule)
         continue;
     }
@@ -170,7 +170,7 @@ std::string WebRequestRulesRegistry::AddRulesImpl(
     const WebRequestRule::RuleId& rule_id(*rule->id);
     DCHECK(registered_rules.find(rule_id) == registered_rules.end());
 
-    scoped_ptr<WebRequestRule> webrequest_rule(WebRequestRule::Create(
+    std::unique_ptr<WebRequestRule> webrequest_rule(WebRequestRule::Create(
         url_matcher_.condition_factory(), browser_context(), extension,
         extension_installation_time, rule,
         base::Bind(&Checker, base::Unretained(extension)), &error));
@@ -381,7 +381,7 @@ void WebRequestRulesRegistry::AddTriggeredRules(
   for (url_matcher::URLMatcherConditionSet::ID url_match : url_matches) {
     RuleTriggers::const_iterator rule_trigger = rule_triggers_.find(url_match);
     CHECK(rule_trigger != rule_triggers_.end());
-    if (!ContainsKey(*result, rule_trigger->second) &&
+    if (!base::ContainsKey(*result, rule_trigger->second) &&
         rule_trigger->second->conditions().IsFulfilled(url_match, request_data))
       result->insert(rule_trigger->second);
   }

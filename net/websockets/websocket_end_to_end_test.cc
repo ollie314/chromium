@@ -22,13 +22,13 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/auth.h"
 #include "net/base/proxy_delegate.h"
-#include "net/base/test_data_directory.h"
 #include "net/proxy/proxy_service.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/test_data_directory.h"
 #include "net/url_request/url_request_test_util.h"
 #include "net/websockets/websocket_channel.h"
 #include "net/websockets/websocket_event_interface.h"
@@ -213,7 +213,6 @@ class TestProxyDelegateWithProxyInfo : public ProxyDelegate {
  protected:
   void OnResolveProxy(const GURL& url,
                       const std::string& method,
-                      int load_flags,
                       const ProxyService& proxy_service,
                       ProxyInfo* result) override {
     resolved_proxy_info_.url = url;
@@ -224,9 +223,6 @@ class TestProxyDelegateWithProxyInfo : public ProxyDelegate {
                                 const HostPortPair& proxy_server,
                                 int net_error) override {}
   void OnFallback(const ProxyServer& bad_proxy, int net_error) override {}
-  void OnBeforeSendHeaders(URLRequest* request,
-                           const ProxyInfo& proxy_info,
-                           HttpRequestHeaders* headers) override {}
   void OnBeforeTunnelRequest(const HostPortPair& proxy_server,
                              HttpRequestHeaders* extra_headers) override {}
   void OnTunnelHeadersReceived(
@@ -236,6 +232,12 @@ class TestProxyDelegateWithProxyInfo : public ProxyDelegate {
   bool IsTrustedSpdyProxy(const net::ProxyServer& proxy_server) override {
     return true;
   }
+  void GetAlternativeProxy(
+      const GURL& url,
+      const ProxyServer& resolved_proxy_server,
+      ProxyServer* alternative_proxy_server) const override {}
+  void OnAlternativeProxyBroken(
+      const ProxyServer& alternative_proxy_server) override {}
 
  private:
   ResolvedProxyInfo resolved_proxy_info_;
@@ -268,10 +270,12 @@ class WebSocketEndToEndTest : public ::testing::Test {
       InitialiseContext();
     }
     url::Origin origin(GURL("http://localhost"));
+    GURL first_party_for_cookies("http://localhost/");
     event_interface_ = new ConnectTestingEventInterface;
     channel_.reset(
         new WebSocketChannel(base::WrapUnique(event_interface_), &context_));
-    channel_->SendAddChannelRequest(GURL(socket_url), sub_protocols_, origin);
+    channel_->SendAddChannelRequest(GURL(socket_url), sub_protocols_, origin,
+                                    first_party_for_cookies, "");
     event_interface_->WaitForResponse();
     return !event_interface_->failed();
   }
@@ -431,7 +435,7 @@ TEST_F(WebSocketEndToEndTest, DISABLED_ON_ANDROID(HstsHttpsToWebSocket)) {
   request->Start();
   // TestDelegate exits the message loop when the request completes.
   base::RunLoop().Run();
-  EXPECT_TRUE(request->status().is_success());
+  EXPECT_EQ(OK, delegate.request_status());
 
   // Check HSTS with ws:
   // Change the scheme from wss: to ws: to verify that it is switched back.
@@ -465,7 +469,7 @@ TEST_F(WebSocketEndToEndTest, DISABLED_ON_ANDROID(HstsWebSocketToHttps)) {
   request->Start();
   // TestDelegate exits the message loop when the request completes.
   base::RunLoop().Run();
-  EXPECT_TRUE(request->status().is_success());
+  EXPECT_EQ(OK, delegate.request_status());
   EXPECT_TRUE(request->url().SchemeIs("https"));
 }
 

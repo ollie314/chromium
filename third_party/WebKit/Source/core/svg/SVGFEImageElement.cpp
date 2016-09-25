@@ -55,6 +55,7 @@ DEFINE_TRACE(SVGFEImageElement)
     visitor->trace(m_cachedImage);
     SVGFilterPrimitiveStandardAttributes::trace(visitor);
     SVGURIReference::trace(visitor);
+    ResourceClient::trace(visitor);
 }
 
 bool SVGFEImageElement::currentFrameHasSingleSecurityOrigin() const
@@ -87,7 +88,7 @@ void SVGFEImageElement::fetchImageResource()
 void SVGFEImageElement::buildPendingResource()
 {
     clearResourceReferences();
-    if (!inShadowIncludingDocument())
+    if (!isConnected())
         return;
 
     AtomicString id;
@@ -135,13 +136,13 @@ Node::InsertionNotificationRequest SVGFEImageElement::insertedInto(ContainerNode
 void SVGFEImageElement::removedFrom(ContainerNode* rootParent)
 {
     SVGFilterPrimitiveStandardAttributes::removedFrom(rootParent);
-    if (rootParent->inShadowIncludingDocument())
+    if (rootParent->isConnected())
         clearResourceReferences();
 }
 
 void SVGFEImageElement::notifyFinished(Resource*)
 {
-    if (!inShadowIncludingDocument())
+    if (!isConnected())
         return;
 
     Element* parent = parentElement();

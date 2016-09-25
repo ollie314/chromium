@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// TODO(bmcquade): delete this class in October 2016, as it is deprecated by the
+// new PageLoad.* UMA histograms.
+
 #ifndef CHROME_RENDERER_PAGE_LOAD_HISTOGRAMS_H_
 #define CHROME_RENDERER_PAGE_LOAD_HISTOGRAMS_H_
 
@@ -25,6 +28,7 @@ class PageLoadHistograms : public content::RenderViewObserver {
   // RenderViewObserver implementation.
   void FrameWillClose(blink::WebFrame* frame) override;
   void ClosePage() override;
+  void OnDestruct() override;
 
   // Dump all page load histograms appropriate for the given frame.
   //

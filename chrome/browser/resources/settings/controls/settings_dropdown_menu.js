@@ -35,7 +35,7 @@ Polymer({
 
     /**
      * List of options for the drop-down menu.
-     * @type {DropdownMenuOptionList}
+     * @type {!DropdownMenuOptionList}
      */
     menuOptions: {
       type: Array,
@@ -75,7 +75,6 @@ Polymer({
   },
 
   behaviors: [
-    I18nBehavior,
     PrefControlBehavior,
   ],
 
@@ -97,7 +96,9 @@ Polymer({
     if (!this.menuOptions.length)
       return;
 
-    this.menuLabel_ = this.label;
+    // Do not set |menuLabel_| to a falsy value: http://goo.gl/OnKYko
+    // (paper-dropdown-menu#181).
+    this.menuLabel_ = this.label || ' ';
     this.updateSelected_();
   },
 
@@ -121,7 +122,7 @@ Polymer({
    * @private
    */
   updateSelected_: function() {
-    if (!this.pref)
+    if (!this.pref || !this.menuOptions.length)
       return;
     var prefValue = this.pref.value;
     var option = this.menuOptions.find(function(menuItem) {
@@ -139,7 +140,7 @@ Polymer({
    * @private
    */
   isSelectedNotFound_: function(selected) {
-    return this.menuOptions && selected == this.notFoundValue_;
+    return this.menuOptions.length > 0 && selected == this.notFoundValue_;
   },
 
   /**

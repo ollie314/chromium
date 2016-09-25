@@ -32,23 +32,19 @@
 
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/RetainedDOMInfo.h"
+#include "bindings/core/v8/ScriptWrappableVisitor.h"
 #include "bindings/core/v8/V8AbstractEventListener.h"
 #include "bindings/core/v8/V8Binding.h"
-#include "bindings/core/v8/V8MutationObserver.h"
 #include "bindings/core/v8/V8Node.h"
 #include "bindings/core/v8/V8ScriptRunner.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
 #include "core/dom/Attr.h"
-#include "core/dom/Document.h"
-#include "core/dom/NodeTraversal.h"
-#include "core/dom/TemplateContentDocumentFragment.h"
-#include "core/dom/shadow/ElementShadow.h"
-#include "core/dom/shadow/ShadowRoot.h"
-#include "core/html/HTMLTemplateElement.h"
+#include "core/dom/Element.h"
+#include "core/dom/Node.h"
 #include "core/html/imports/HTMLImportsController.h"
 #include "core/inspector/InspectorTraceEvents.h"
-#include "core/svg/SVGElement.h"
 #include "platform/Histogram.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TraceEvent.h"
 #include "public/platform/BlameContext.h"
 #include "public/platform/Platform.h"
@@ -78,7 +74,7 @@ static void addReferencesForNodeWithEventListeners(v8::Isolate* isolate, Node* n
 Node* V8GCController::opaqueRootForGC(v8::Isolate*, Node* node)
 {
     ASSERT(node);
-    if (node->inShadowIncludingDocument()) {
+    if (node->isConnected()) {
         Document& document = node->document();
         if (HTMLImportsController* controller = document.importsController())
             return controller->master();
@@ -120,7 +116,8 @@ public:
 
         v8::Local<v8::Object> wrapper = v8::Local<v8::Object>::New(m_isolate, v8::Persistent<v8::Object>::Cast(*value));
         ASSERT(V8DOMWrapper::hasInternalFieldsSet(wrapper));
-        if (toWrapperTypeInfo(wrapper)->hasPendingActivity(wrapper)) {
+        if (toWrapperTypeInfo(wrapper)->isActiveScriptWrappable()
+            && toScriptWrappable(wrapper)->hasPendingActivity()) {
             v8::Persistent<v8::Object>::Cast(*value).MarkActive();
             return;
         }
@@ -161,24 +158,21 @@ public:
         if (classId != WrapperTypeInfo::NodeClassId && classId != WrapperTypeInfo::ObjectClassId)
             return;
 
+        if (value->IsIndependent())
+            return;
+
         v8::Local<v8::Object> wrapper = v8::Local<v8::Object>::New(m_isolate, v8::Persistent<v8::Object>::Cast(*value));
-        ASSERT(V8DOMWrapper::hasInternalFieldsSet(wrapper));
+        DCHECK(V8DOMWrapper::hasInternalFieldsSet(wrapper));
 
         const WrapperTypeInfo* type = toWrapperTypeInfo(wrapper);
-        if (type->hasPendingActivity(wrapper)) {
-            // If you hit this assert, you'll need to add a [DependentiLifetime]
-            // extended attribute to the DOM interface. A DOM interface that
-            // overrides hasPendingActivity must be marked as [DependentiLifetime].
-            RELEASE_ASSERT(!value->IsIndependent());
+        if (type->isActiveScriptWrappable()
+            && toScriptWrappable(wrapper)->hasPendingActivity()) {
             m_isolate->SetObjectGroupId(*value, liveRootId());
             ++m_domObjectsWithPendingActivity;
         }
 
-        if (value->IsIndependent())
-            return;
-
         if (classId == WrapperTypeInfo::NodeClassId) {
-            ASSERT(V8Node::hasInstance(wrapper, m_isolate));
+            DCHECK(V8Node::hasInstance(wrapper, m_isolate));
             Node* node = V8Node::toImpl(wrapper);
             if (node->hasEventListeners())
                 addReferencesForNodeWithEventListeners(m_isolate, node, v8::Persistent<v8::Object>::Cast(*value));
@@ -189,7 +183,7 @@ public:
         } else if (classId == WrapperTypeInfo::ObjectClassId) {
             type->visitDOMWrapper(m_isolate, toScriptWrappable(wrapper), v8::Persistent<v8::Object>::Cast(*value));
         } else {
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
         }
     }
 
@@ -259,7 +253,10 @@ void objectGroupingForMajorGC(v8::Isolate* isolate, bool constructRetainedObject
 
 void gcPrologueForMajorGC(v8::Isolate* isolate, bool constructRetainedObjectInfos)
 {
-    objectGroupingForMajorGC(isolate, constructRetainedObjectInfos);
+    // TODO(hlopko): Collect retained object infos for heap profiler
+    if (!RuntimeEnabledFeatures::traceWrappablesEnabled()) {
+        objectGroupingForMajorGC(isolate, constructRetainedObjectInfos);
+    }
 }
 
 } // namespace
@@ -311,8 +308,21 @@ void V8GCController::gcPrologue(v8::Isolate* isolate, v8::GCType type, v8::GCCal
     }
 }
 
+namespace {
+
+void UpdateCollectedPhantomHandles(v8::Isolate* isolate)
+{
+    ThreadHeapStats& heapStats = ThreadState::current()->heap().heapStats();
+    size_t count = isolate->NumberOfPhantomHandleResetsSinceLastCall();
+    heapStats.decreaseWrapperCount(count);
+    heapStats.increaseCollectedWrapperCount(count);
+}
+
+} // namespace
+
 void V8GCController::gcEpilogue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags)
 {
+    UpdateCollectedPhantomHandles(isolate);
     switch (type) {
     case v8::kGCTypeScavenge:
         TRACE_EVENT_END1("devtools.timeline,v8", "MinorGC", "usedHeapSizeAfter", usedHeapSize(isolate));
@@ -341,41 +351,41 @@ void V8GCController::gcEpilogue(v8::Isolate* isolate, v8::GCType type, v8::GCCal
     if (BlameContext* blameContext = Platform::current()->topLevelBlameContext())
         blameContext->Leave();
 
-    // v8::kGCCallbackFlagForced forces a Blink heap garbage collection
-    // when a garbage collection was forced from V8. This is either used
-    // for tests that force GCs from JavaScript to verify that objects die
-    // when expected.
-    if (flags & v8::kGCCallbackFlagForced) {
-        // This single GC is not enough for two reasons:
-        //   (1) The GC is not precise because the GC scans on-stack pointers conservatively.
-        //   (2) One GC is not enough to break a chain of persistent handles. It's possible that
-        //       some heap allocated objects own objects that contain persistent handles
-        //       pointing to other heap allocated objects. To break the chain, we need multiple GCs.
-        //
-        // Regarding (1), we force a precise GC at the end of the current event loop. So if you want
-        // to collect all garbage, you need to wait until the next event loop.
-        // Regarding (2), it would be OK in practice to trigger only one GC per gcEpilogue, because
-        // GCController.collectAll() forces multiple V8's GC.
-        ThreadHeap::collectGarbage(BlinkGC::HeapPointersOnStack, BlinkGC::GCWithSweep, BlinkGC::ForcedGC);
+    ThreadState* currentThreadState = ThreadState::current();
+    if (currentThreadState && !currentThreadState->isGCForbidden()) {
+        // v8::kGCCallbackFlagForced forces a Blink heap garbage collection
+        // when a garbage collection was forced from V8. This is either used
+        // for tests that force GCs from JavaScript to verify that objects die
+        // when expected.
+        if (flags & v8::kGCCallbackFlagForced) {
+            // This single GC is not enough for two reasons:
+            //   (1) The GC is not precise because the GC scans on-stack pointers conservatively.
+            //   (2) One GC is not enough to break a chain of persistent handles. It's possible that
+            //       some heap allocated objects own objects that contain persistent handles
+            //       pointing to other heap allocated objects. To break the chain, we need multiple GCs.
+            //
+            // Regarding (1), we force a precise GC at the end of the current event loop. So if you want
+            // to collect all garbage, you need to wait until the next event loop.
+            // Regarding (2), it would be OK in practice to trigger only one GC per gcEpilogue, because
+            // GCController.collectAll() forces multiple V8's GC.
+            currentThreadState->collectGarbage(BlinkGC::HeapPointersOnStack, BlinkGC::GCWithSweep, BlinkGC::ForcedGC);
 
-        // Forces a precise GC at the end of the current event loop.
-        if (ThreadState::current()) {
-            RELEASE_ASSERT(!ThreadState::current()->isInGC());
-            ThreadState::current()->setGCState(ThreadState::FullGCScheduled);
+            // Forces a precise GC at the end of the current event loop.
+            RELEASE_ASSERT(!currentThreadState->isInGC());
+            currentThreadState->setGCState(ThreadState::FullGCScheduled);
         }
-    }
 
-    // v8::kGCCallbackFlagCollectAllAvailableGarbage is used when V8 handles
-    // low memory notifications.
-    if (flags & v8::kGCCallbackFlagCollectAllAvailableGarbage) {
-        // This single GC is not enough. See the above comment.
-        ThreadHeap::collectGarbage(BlinkGC::HeapPointersOnStack, BlinkGC::GCWithSweep, BlinkGC::ForcedGC);
+        // v8::kGCCallbackFlagCollectAllAvailableGarbage is used when V8 handles
+        // low memory notifications.
+        if ((flags & v8::kGCCallbackFlagCollectAllAvailableGarbage)
+            || (flags & v8::kGCCallbackFlagCollectAllExternalMemory)) {
+            // This single GC is not enough. See the above comment.
+            currentThreadState->collectGarbage(BlinkGC::HeapPointersOnStack, BlinkGC::GCWithSweep, BlinkGC::ForcedGC);
 
-        // Do not force a precise GC at the end of the current event loop.
-        // According to UMA stats, the collection rate of the precise GC
-        // scheduled at the end of the low memory handling is extremely low,
-        // because the above conservative GC is sufficient for collecting
-        // most objects. So we intentionally don't schedule a precise GC here.
+            // The conservative GC might have left floating garbage. Schedule
+            // precise GC to ensure that we collect all available garbage.
+            currentThreadState->schedulePreciseGC();
+        }
     }
 
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data", InspectorUpdateCountersEvent::data());
@@ -446,7 +456,8 @@ public:
         v8::Local<v8::Object> wrapper = v8::Local<v8::Object>::New(m_isolate, v8::Persistent<v8::Object>::Cast(*value));
         ASSERT(V8DOMWrapper::hasInternalFieldsSet(wrapper));
         // The ExecutionContext check is heavy, so it should be done at the last.
-        if (toWrapperTypeInfo(wrapper)->hasPendingActivity(wrapper)
+        if (toWrapperTypeInfo(wrapper)->isActiveScriptWrappable()
+            && toScriptWrappable(wrapper)->hasPendingActivity()
             // TODO(haraken): Currently we don't have a way to get a creation
             // context from a wrapper. We should implement the way and enable
             // the following condition.

@@ -22,12 +22,15 @@ class CastMemoryPressureMonitor : public base::MemoryPressureMonitor {
 
   // base::MemoryPressureMonitor implementation:
   MemoryPressureLevel GetCurrentPressureLevel() const override;
+  void SetDispatchCallback(const DispatchCallback& callback) override;
 
  private:
   void PollPressureLevel();
   void UpdateMemoryPressureLevel(MemoryPressureLevel new_level);
 
   MemoryPressureLevel current_level_;
+  const int system_reserved_kb_;
+  DispatchCallback dispatch_callback_;
   base::WeakPtrFactory<CastMemoryPressureMonitor> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CastMemoryPressureMonitor);

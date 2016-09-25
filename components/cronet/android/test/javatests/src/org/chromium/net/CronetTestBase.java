@@ -12,7 +12,7 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
-import java.lang.reflect.Method;
+import java.lang.reflect.AnnotatedElement;
 import java.net.URL;
 
 /**
@@ -79,18 +79,6 @@ public class CronetTestBase extends AndroidTestCase {
     }
 
     /**
-     * Starts the CronetTest framework for the legacy API.
-     * @param url if non-null, a request will be made with that url.
-     */
-    protected CronetTestFramework startCronetTestFrameworkForLegacyApi(String url) {
-        String[] commandLineArgs = {
-                CronetTestFramework.LIBRARY_INIT_KEY, CronetTestFramework.LibraryInitType.LEGACY};
-        mCronetTestFramework =
-                startCronetTestFrameworkWithUrlAndCommandLineArgs(url, commandLineArgs);
-        return mCronetTestFramework;
-    }
-
-    /**
      * Returns {@code true} when test is being run against system HttpURLConnection implementation.
      */
     protected boolean testingSystemHttpURLConnection() {
@@ -111,7 +99,7 @@ public class CronetTestBase extends AndroidTestCase {
         String packageName = getClass().getPackage().getName();
         if (packageName.equals("org.chromium.net.urlconnection")) {
             try {
-                Method method = getClass().getMethod(getName(), (Class[]) null);
+                AnnotatedElement method = getClass().getMethod(getName(), (Class[]) null);
                 if (method.isAnnotationPresent(CompareDefaultWithCronet.class)) {
                     // Run with the default HttpURLConnection implementation first.
                     mTestingSystemHttpURLConnection = true;
@@ -133,7 +121,7 @@ public class CronetTestBase extends AndroidTestCase {
             }
         } else if (packageName.equals("org.chromium.net")) {
             try {
-                Method method = getClass().getMethod(getName(), (Class[]) null);
+                AnnotatedElement method = getClass().getMethod(getName(), (Class[]) null);
                 super.runTest();
                 if (!method.isAnnotationPresent(OnlyRunNativeCronet.class)) {
                     if (mCronetTestFramework != null) {
@@ -148,26 +136,6 @@ public class CronetTestBase extends AndroidTestCase {
             }
         } else {
             super.runTest();
-        }
-    }
-
-    /**
-     * Registers test host resolver for testing with the new API.
-     */
-    protected void registerHostResolver(CronetTestFramework framework) {
-        registerHostResolver(framework, false);
-    }
-
-    /**
-     * Registers test host resolver.
-     *
-     * @param isLegacyAPI true if the test should use the legacy API.
-     */
-    protected void registerHostResolver(CronetTestFramework framework, boolean isLegacyAPI) {
-        if (isLegacyAPI) {
-            CronetTestUtil.registerHostResolverProc(framework.mRequestFactory, LOOPBACK_ADDRESS);
-        } else {
-            CronetTestUtil.registerHostResolverProc(framework.mCronetEngine, LOOPBACK_ADDRESS);
         }
     }
 

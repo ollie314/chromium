@@ -12,7 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -25,6 +25,8 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/syncable_prefs/pref_service_syncable_factory.h"
+#include "content/public/test/test_browser_thread_bundle.h"
+#include "extensions/browser/quota_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_WIN)
@@ -72,11 +74,11 @@ class StateStoreTest : public PlatformStateStoreTestBase {
   StateStoreTest()
       : profile_(nullptr),
         task_runner_(new base::TestSimpleTaskRunner()),
-        thread_task_runner_handle_(task_runner_),
         profile_manager_(TestingBrowserProcess::GetGlobal()) {}
 
   void SetUp() override {
     PlatformStateStoreTestBase::SetUp();
+    base::MessageLoop::current()->SetTaskRunner(task_runner_);
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     ASSERT_TRUE(profile_manager_.SetUp());
     CreateProfile();
@@ -118,16 +120,18 @@ class StateStoreTest : public PlatformStateStoreTestBase {
 
   static const char kProfileName_[];
   static const TestData kTestData_[];
+  content::TestBrowserThreadBundle thread_bundle_;
   TestingProfile* profile_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
 
  private:
   base::FilePath GetPrefsPath() {
-    return temp_dir_.path().AppendASCII("prefs");
+    return temp_dir_.GetPath().AppendASCII("prefs");
   }
 
+  extensions::QuotaService::ScopedDisablePurgeForTesting
+      disable_purge_for_testing_;
   base::ScopedTempDir temp_dir_;
-  base::ThreadTaskRunnerHandle thread_task_runner_handle_;
   TestingProfileManager profile_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(StateStoreTest);

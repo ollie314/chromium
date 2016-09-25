@@ -5,10 +5,11 @@
 #include "components/prefs/pref_value_map.h"
 
 #include <map>
+#include <memory>
 #include <utility>
 
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/values.h"
 
@@ -34,7 +35,7 @@ bool PrefValueMap::GetValue(const std::string& key, base::Value** value) {
 }
 
 bool PrefValueMap::SetValue(const std::string& key,
-                            scoped_ptr<base::Value> value) {
+                            std::unique_ptr<base::Value> value) {
   DCHECK(value);
 
   base::Value* old_value = prefs_.get(key);
@@ -73,6 +74,10 @@ PrefValueMap::const_iterator PrefValueMap::end() const {
   return prefs_.end();
 }
 
+bool PrefValueMap::empty() const {
+  return prefs_.empty();
+}
+
 bool PrefValueMap::GetBoolean(const std::string& key,
                               bool* value) const {
   const base::Value* stored_value = nullptr;
@@ -80,7 +85,7 @@ bool PrefValueMap::GetBoolean(const std::string& key,
 }
 
 void PrefValueMap::SetBoolean(const std::string& key, bool value) {
-  SetValue(key, make_scoped_ptr(new base::FundamentalValue(value)));
+  SetValue(key, base::MakeUnique<base::FundamentalValue>(value));
 }
 
 bool PrefValueMap::GetString(const std::string& key,
@@ -91,7 +96,7 @@ bool PrefValueMap::GetString(const std::string& key,
 
 void PrefValueMap::SetString(const std::string& key,
                              const std::string& value) {
-  SetValue(key, make_scoped_ptr(new base::StringValue(value)));
+  SetValue(key, base::MakeUnique<base::StringValue>(value));
 }
 
 bool PrefValueMap::GetInteger(const std::string& key, int* value) const {
@@ -100,11 +105,11 @@ bool PrefValueMap::GetInteger(const std::string& key, int* value) const {
 }
 
 void PrefValueMap::SetInteger(const std::string& key, const int value) {
-  SetValue(key, make_scoped_ptr(new base::FundamentalValue(value)));
+  SetValue(key, base::MakeUnique<base::FundamentalValue>(value));
 }
 
 void PrefValueMap::SetDouble(const std::string& key, const double value) {
-  SetValue(key, make_scoped_ptr(new base::FundamentalValue(value)));
+  SetValue(key, base::MakeUnique<base::FundamentalValue>(value));
 }
 
 void PrefValueMap::GetDifferingKeys(

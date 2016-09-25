@@ -9,13 +9,12 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_switches.h"
@@ -26,14 +25,22 @@
 #include "components/search_engines/template_url_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/web_cache/browser/web_cache_manager.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/context_menu_params.h"
 #include "net/base/load_states.h"
+#include "net/base/url_util.h"
 #include "net/http/http_request_headers.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/browser.h"
+#endif
 
 using content::WebContents;
 
@@ -133,7 +140,7 @@ bool CoreTabHelper::GetStatusTextForWebContents(
   tracked_objects::ScopedTracker tracking_profile1(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "467185 CoreTabHelper::GetStatusTextForWebContents1"));
-  auto guest_manager = guest_view::GuestViewManager::FromBrowserContext(
+  auto* guest_manager = guest_view::GuestViewManager::FromBrowserContext(
       source->GetBrowserContext());
   if (!source->IsLoading() ||
       source->GetLoadState().state == net::LOAD_STATE_IDLE) {
@@ -247,6 +254,33 @@ void CoreTabHelper::DidStartLoading() {
   UpdateContentRestrictions(0);
 }
 
+void CoreTabHelper::DocumentOnLoadCompletedInMainFrame() {
+  bool allow_localhost = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kAllowInsecureLocalhost);
+  if (!allow_localhost)
+    return;
+
+  content::NavigationEntry* entry =
+      web_contents()->GetController().GetLastCommittedEntry();
+  if (!entry || !net::IsLocalhost(entry->GetURL().host()))
+    return;
+
+  content::SSLStatus ssl_status = entry->GetSSL();
+  bool is_cert_error = net::IsCertStatusError(ssl_status.cert_status) &&
+                       !net::IsCertStatusMinorError(ssl_status.cert_status);
+  if (!is_cert_error)
+    return;
+
+  web_contents()->GetMainFrame()->AddMessageToConsole(
+      content::CONSOLE_MESSAGE_LEVEL_WARNING,
+      base::StringPrintf(
+          "This site does not have a valid SSL "
+          "certificate! Without SSL, your site's and "
+          "visitors' data is vulnerable to theft and "
+          "tampering. Get a valid SSL certificate before"
+          " releasing your website to the public."));
+}
+
 void CoreTabHelper::WasShown() {
   web_cache::WebCacheManager::GetInstance()->ObserveActivity(
       web_contents()->GetRenderProcessHost()->GetID());
@@ -347,15 +381,15 @@ void CoreTabHelper::DoSearchByImageInNewTab(const GURL& src_url,
     return;
 
   content::OpenURLParams open_url_params(
-      result, content::Referrer(), NEW_FOREGROUND_TAB,
+      result, content::Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui::PAGE_TRANSITION_LINK, false);
   const std::string& content_type = post_content.first;
-  std::string* post_data = &post_content.second;
-  if (!post_data->empty()) {
+  const std::string& post_data = post_content.second;
+  if (!post_data.empty()) {
     DCHECK(!content_type.empty());
     open_url_params.uses_post = true;
-    open_url_params.browser_initiated_post_data =
-        base::RefCountedString::TakeString(post_data);
+    open_url_params.post_data = content::ResourceRequestBody::CreateFromBytes(
+        post_data.data(), post_data.size());
     open_url_params.extra_headers += base::StringPrintf(
         "%s: %s\r\n", net::HttpRequestHeaders::kContentType,
         content_type.c_str());

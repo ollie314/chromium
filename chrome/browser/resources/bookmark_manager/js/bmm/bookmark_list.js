@@ -423,19 +423,31 @@ cr.define('bmm', function() {
 
       var labelEl = this.ownerDocument.createElement('div');
       labelEl.className = 'label';
-      labelEl.textContent = bookmarkNode.title;
+      var labelImgWrapper = this.ownerDocument.createElement('div');
+      labelImgWrapper.className = 'label-img-wrapper';
+      var labelImg = this.ownerDocument.createElement('div');
+      var labelText = this.ownerDocument.createElement('div');
+      labelText.className = 'label-text';
+      labelText.textContent = bookmarkNode.title;
 
       var urlEl = this.ownerDocument.createElement('div');
       urlEl.className = 'url';
 
       if (bmm.isFolder(bookmarkNode)) {
         this.className = 'folder';
+        // TODO(pkasting): Condense folder icon resources together.
+        labelImg.style.content = cr.icon.getImage(
+            cr.isMac ?
+                'chrome://theme/IDR_BOOKMARK_BAR_FOLDER' :
+                'chrome://theme/IDR_FOLDER_CLOSED');
       } else {
-        labelEl.style.backgroundImage = getFaviconImageSet(bookmarkNode.url);
-        labelEl.style.backgroundSize = '16px';
+        labelImg.style.content = cr.icon.getFavicon(bookmarkNode.url);
         urlEl.textContent = bookmarkNode.url;
       }
 
+      labelImgWrapper.appendChild(labelImg);
+      labelEl.appendChild(labelImgWrapper);
+      labelEl.appendChild(labelText);
       this.appendChild(labelEl);
       this.appendChild(urlEl);
 
@@ -478,8 +490,8 @@ cr.define('bmm', function() {
 
         // Calling list.focus blurs the input which will stop editing the list
         // item.
-        switch (e.keyIdentifier) {
-          case 'U+001B':  // Esc
+        switch (e.key) {
+          case 'Escape':  // Esc
             labelInput.value = title;
             if (!isFolder)
               urlInput.value = url;
@@ -489,7 +501,7 @@ cr.define('bmm', function() {
             if (listItem.parentNode)
               listItem.parentNode.focus();
             break;
-          case 'U+0009':  // Tab
+          case 'Tab':  // Tab
             // urlInput is the last focusable element in the page.  If we
             // allowed Tab focus navigation and the page loses focus, we
             // couldn't give focus on urlInput programatically. So, we prevent

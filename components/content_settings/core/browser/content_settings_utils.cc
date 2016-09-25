@@ -6,11 +6,12 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -122,24 +123,39 @@ bool ParseContentSettingValue(const base::Value* value,
   return *setting != CONTENT_SETTING_DEFAULT;
 }
 
-scoped_ptr<base::Value> ContentSettingToValue(ContentSetting setting) {
+std::unique_ptr<base::Value> ContentSettingToValue(ContentSetting setting) {
   if (setting <= CONTENT_SETTING_DEFAULT ||
       setting >= CONTENT_SETTING_NUM_SETTINGS) {
     return nullptr;
   }
-  return make_scoped_ptr(new base::FundamentalValue(setting));
+  return base::MakeUnique<base::FundamentalValue>(setting);
 }
 
 void GetRendererContentSettingRules(const HostContentSettingsMap* map,
                                     RendererContentSettingRules* rules) {
+#if !defined(OS_ANDROID)
   map->GetSettingsForOneType(
       CONTENT_SETTINGS_TYPE_IMAGES,
       ResourceIdentifier(),
       &(rules->image_rules));
+#else
+  // Android doesn't use image content settings, so ALLOW rule is added for
+  // all origins.
+  rules->image_rules.push_back(
+      ContentSettingPatternSource(ContentSettingsPattern::Wildcard(),
+                                  ContentSettingsPattern::Wildcard(),
+                                  CONTENT_SETTING_ALLOW,
+                                  std::string(),
+                                  map->is_off_the_record()));
+#endif
   map->GetSettingsForOneType(
       CONTENT_SETTINGS_TYPE_JAVASCRIPT,
       ResourceIdentifier(),
       &(rules->script_rules));
+  map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_AUTOPLAY,
+      ResourceIdentifier(),
+      &(rules->autoplay_rules));
 }
 
 }  // namespace content_settings

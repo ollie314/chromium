@@ -35,11 +35,6 @@ void ChromeBrowserProvider::AssertBrowserContextKeyedFactoriesBuilt() {}
 void ChromeBrowserProvider::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {}
 
-ProfileOAuth2TokenServiceIOSProvider*
-ChromeBrowserProvider::GetProfileOAuth2TokenServiceIOSProvider() {
-  return nullptr;
-}
-
 UpdatableResourceProvider*
 ChromeBrowserProvider::GetUpdatableResourceProvider() {
   return nullptr;
@@ -54,6 +49,9 @@ InfoBarViewPlaceholder ChromeBrowserProvider::CreateInfoBarView(
 SigninResourcesProvider* ChromeBrowserProvider::GetSigninResourcesProvider() {
   return nullptr;
 }
+
+void ChromeBrowserProvider::SetChromeIdentityServiceForTesting(
+    std::unique_ptr<ChromeIdentityService> service) {}
 
 ChromeIdentityService* ChromeBrowserProvider::GetChromeIdentityService() {
   return nullptr;
@@ -104,7 +102,7 @@ bool ChromeBrowserProvider::IsSafeBrowsingEnabled(
   return false;
 }
 
-std::unique_ptr<browser_sync::SyncedWindowDelegatesGetter>
+std::unique_ptr<sync_sessions::SyncedWindowDelegatesGetter>
 ChromeBrowserProvider::CreateSyncedWindowDelegatesGetter(
     ios::ChromeBrowserState* browser_state) {
   return nullptr;

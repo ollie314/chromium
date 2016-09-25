@@ -25,6 +25,7 @@
 #include "components/history/core/browser/history_context.h"
 #include "components/history/core/browser/url_row.h"
 #include "components/history/core/common/thumbnail_score.h"
+#include "components/query_parser/query_parser.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
@@ -272,6 +273,9 @@ struct QueryOptions {
   // be handled. The default is REMOVE_DUPLICATES.
   DuplicateHandling duplicate_policy;
 
+  // Allows the caller to specify the matching algorithm for text queries.
+  query_parser::MatchingAlgorithm matching_algorithm;
+
   // Helpers to get the effective parameters values, since a value of 0 means
   // "unspecified".
   int EffectiveMaxCount() const;
@@ -328,7 +332,7 @@ struct MostVisitedURL {
 
   RedirectList redirects;
 
-  bool operator==(const MostVisitedURL& other) {
+  bool operator==(const MostVisitedURL& other) const {
     return url == other.url;
   }
 };
@@ -368,7 +372,7 @@ struct HistoryAddPageArgs {
   //   HistoryAddPageArgs(
   //       GURL(), base::Time(), NULL, 0, GURL(),
   //       RedirectList(), ui::PAGE_TRANSITION_LINK,
-  //       SOURCE_BROWSED, false)
+  //       SOURCE_BROWSED, false, true)
   HistoryAddPageArgs();
   HistoryAddPageArgs(const GURL& url,
                      base::Time time,
@@ -378,7 +382,8 @@ struct HistoryAddPageArgs {
                      const RedirectList& redirects,
                      ui::PageTransition transition,
                      VisitSource source,
-                     bool did_replace_entry);
+                     bool did_replace_entry,
+                     bool consider_for_ntp_most_visited);
   HistoryAddPageArgs(const HistoryAddPageArgs& other);
   ~HistoryAddPageArgs();
 
@@ -391,6 +396,11 @@ struct HistoryAddPageArgs {
   ui::PageTransition transition;
   VisitSource visit_source;
   bool did_replace_entry;
+  // Specifies whether a page visit should contribute to the Most Visited tiles
+  // in the New Tab Page. Note that setting this to true (most common case)
+  // doesn't guarantee it's relevant for Most Visited, since other requirements
+  // exist (e.g. certain page transition types).
+  bool consider_for_ntp_most_visited;
 };
 
 // TopSites -------------------------------------------------------------------

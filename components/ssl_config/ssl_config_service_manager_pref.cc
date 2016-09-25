@@ -79,12 +79,14 @@ uint16_t SSLProtocolVersionFromString(const std::string& version_str) {
     version = net::SSL_PROTOCOL_VERSION_TLS1_1;
   } else if (version_str == switches::kSSLVersionTLSv12) {
     version = net::SSL_PROTOCOL_VERSION_TLS1_2;
+  } else if (version_str == switches::kSSLVersionTLSv13) {
+    version = net::SSL_PROTOCOL_VERSION_TLS1_3;
   }
   return version;
 }
 
-const base::Feature kSSLVersionFallbackTLSv11 {
-    "SSLVersionFallbackTLSv1.1", base::FEATURE_DISABLED_BY_DEFAULT,
+const base::Feature kDHECiphersFeature{
+    "DHECiphers", base::FEATURE_DISABLED_BY_DEFAULT,
 };
 
 }  // namespace
@@ -170,10 +172,10 @@ class SSLConfigServiceManagerPref : public ssl_config::SSLConfigServiceManager {
   // The local_state prefs (should only be accessed from UI thread)
   BooleanPrefMember rev_checking_enabled_;
   BooleanPrefMember rev_checking_required_local_anchors_;
+  BooleanPrefMember sha1_local_anchors_enabled_;
   StringPrefMember ssl_version_min_;
   StringPrefMember ssl_version_max_;
-  StringPrefMember ssl_version_fallback_min_;
-  BooleanPrefMember rc4_enabled_;
+  BooleanPrefMember dhe_enabled_;
 
   // The cached list of disabled SSL cipher suites.
   std::vector<uint16_t> disabled_cipher_suites_;
@@ -192,13 +194,12 @@ SSLConfigServiceManagerPref::SSLConfigServiceManagerPref(
       io_task_runner_(io_task_runner) {
   DCHECK(local_state);
 
-  // Restore the TLS 1.1 fallback leg if enabled via features.
-  // TODO(davidben): Remove this when the fallback removal has succeeded.
-  // https://crbug.com/536200.
-  if (base::FeatureList::IsEnabled(kSSLVersionFallbackTLSv11)) {
-    local_state->SetDefaultPrefValue(
-        ssl_config::prefs::kSSLVersionFallbackMin,
-        new base::StringValue(switches::kSSLVersionTLSv11));
+  // Restore DHE-based ciphers if enabled via features.
+  // TODO(davidben): Remove this when the removal has succeeded.
+  // https://crbug.com/619194.
+  if (base::FeatureList::IsEnabled(kDHECiphersFeature)) {
+    local_state->SetDefaultPrefValue(ssl_config::prefs::kDHEEnabled,
+                                     new base::FundamentalValue(true));
   }
 
   PrefChangeRegistrar::NamedChangeCallback local_state_callback =
@@ -210,13 +211,14 @@ SSLConfigServiceManagerPref::SSLConfigServiceManagerPref(
   rev_checking_required_local_anchors_.Init(
       ssl_config::prefs::kCertRevocationCheckingRequiredLocalAnchors,
       local_state, local_state_callback);
+  sha1_local_anchors_enabled_.Init(
+      ssl_config::prefs::kCertEnableSha1LocalAnchors, local_state,
+      local_state_callback);
   ssl_version_min_.Init(ssl_config::prefs::kSSLVersionMin, local_state,
                         local_state_callback);
   ssl_version_max_.Init(ssl_config::prefs::kSSLVersionMax, local_state,
                         local_state_callback);
-  ssl_version_fallback_min_.Init(ssl_config::prefs::kSSLVersionFallbackMin,
-                                 local_state, local_state_callback);
-  rc4_enabled_.Init(ssl_config::prefs::kRC4Enabled, local_state,
+  dhe_enabled_.Init(ssl_config::prefs::kDHEEnabled, local_state,
                     local_state_callback);
 
   local_state_change_registrar_.Init(local_state);
@@ -239,15 +241,15 @@ void SSLConfigServiceManagerPref::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(
       ssl_config::prefs::kCertRevocationCheckingRequiredLocalAnchors,
       default_config.rev_checking_required_local_anchors);
+  registry->RegisterBooleanPref(ssl_config::prefs::kCertEnableSha1LocalAnchors,
+                                default_config.sha1_local_anchors_enabled);
   registry->RegisterStringPref(ssl_config::prefs::kSSLVersionMin,
                                std::string());
   registry->RegisterStringPref(ssl_config::prefs::kSSLVersionMax,
                                std::string());
-  registry->RegisterStringPref(ssl_config::prefs::kSSLVersionFallbackMin,
-                               std::string());
   registry->RegisterListPref(ssl_config::prefs::kCipherSuiteBlacklist);
-  registry->RegisterBooleanPref(ssl_config::prefs::kRC4Enabled,
-                                default_config.rc4_enabled);
+  registry->RegisterBooleanPref(ssl_config::prefs::kDHEEnabled,
+                                default_config.dhe_enabled);
 }
 
 net::SSLConfigService* SSLConfigServiceManagerPref::Get() {
@@ -268,7 +270,7 @@ void SSLConfigServiceManagerPref::OnPreferenceChanged(
   // update |cached_config_|.
   io_task_runner_->PostTask(FROM_HERE,
                             base::Bind(&SSLConfigServicePref::SetNewSSLConfig,
-                                       ssl_config_service_.get(), new_config));
+                                       ssl_config_service_, new_config));
 }
 
 void SSLConfigServiceManagerPref::GetSSLConfigFromPrefs(
@@ -281,30 +283,21 @@ void SSLConfigServiceManagerPref::GetSSLConfigFromPrefs(
     config->rev_checking_enabled = false;
   config->rev_checking_required_local_anchors =
       rev_checking_required_local_anchors_.GetValue();
+  config->sha1_local_anchors_enabled = sha1_local_anchors_enabled_.GetValue();
   std::string version_min_str = ssl_version_min_.GetValue();
   std::string version_max_str = ssl_version_max_.GetValue();
-  std::string version_fallback_min_str = ssl_version_fallback_min_.GetValue();
   config->version_min = net::kDefaultSSLVersionMin;
   config->version_max = net::kDefaultSSLVersionMax;
-  config->version_fallback_min = net::kDefaultSSLVersionFallbackMin;
   uint16_t version_min = SSLProtocolVersionFromString(version_min_str);
   uint16_t version_max = SSLProtocolVersionFromString(version_max_str);
-  uint16_t version_fallback_min =
-      SSLProtocolVersionFromString(version_fallback_min_str);
   if (version_min) {
     config->version_min = version_min;
   }
   if (version_max) {
-    uint16_t supported_version_max = config->version_max;
-    config->version_max = std::min(supported_version_max, version_max);
-  }
-  // Values below TLS 1.1 are invalid.
-  if (version_fallback_min &&
-      version_fallback_min >= net::SSL_PROTOCOL_VERSION_TLS1_1) {
-    config->version_fallback_min = version_fallback_min;
+    config->version_max = version_max;
   }
   config->disabled_cipher_suites = disabled_cipher_suites_;
-  config->rc4_enabled = rc4_enabled_.GetValue();
+  config->dhe_enabled = dhe_enabled_.GetValue();
 }
 
 void SSLConfigServiceManagerPref::OnDisabledCipherSuitesChange(

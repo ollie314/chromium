@@ -149,7 +149,7 @@ Element.prototype.positionAt = function(x, y, relativeTo)
 {
     var shift = {x: 0, y: 0};
     if (relativeTo)
-       shift = relativeTo.boxInWindow(this.ownerDocument.defaultView);
+        shift = relativeTo.boxInWindow(this.ownerDocument.defaultView);
 
     if (typeof x === "number")
         this.style.setProperty("left", (shift.x + x) + "px");
@@ -186,7 +186,7 @@ Element.prototype.isScrolledToBottom = function()
  */
 function removeSubsequentNodes(fromNode, toNode)
 {
-    for (var node = fromNode; node && node !== toNode; ) {
+    for (var node = fromNode; node && node !== toNode;) {
         var nodeToRemove = node;
         node = node.nextSibling;
         nodeToRemove.remove();
@@ -303,6 +303,16 @@ Node.prototype.isComponentSelectionCollapsed = function()
     var selection = this.getComponentSelection();
     var range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
     return range ? range.collapsed : true;
+}
+
+/**
+ * @return {boolean}
+ */
+Node.prototype.hasSelection = function()
+{
+    if (this.isComponentSelectionCollapsed())
+        return false;
+    return this.getComponentSelection().containsNode(this, true);
 }
 
 /**
@@ -629,25 +639,6 @@ Element.prototype.setTextAndTitle = function(text)
     this.title = text;
 }
 
-KeyboardEvent.prototype.__defineGetter__("data", function()
-{
-    // Emulate "data" attribute from DOM 3 TextInput event.
-    // See http://www.w3.org/TR/DOM-Level-3-Events/#events-Events-TextEvent-data
-    switch (this.type) {
-        case "keypress":
-            if (!this.ctrlKey && !this.metaKey)
-                return String.fromCharCode(this.charCode);
-            else
-                return "";
-        case "keydown":
-        case "keyup":
-            if (!this.ctrlKey && !this.metaKey && !this.altKey)
-                return String.fromCharCode(this.which);
-            else
-                return "";
-    }
-});
-
 /**
  * @param {boolean=} preventDefault
  */
@@ -746,7 +737,7 @@ Node.prototype.appendChildren = function(var_args)
  */
 Node.prototype.deepTextContent = function()
 {
-    return this.childTextNodes().map(function (node) { return node.textContent; }).join("");
+    return this.childTextNodes().map(function(node) { return node.textContent; }).join("");
 }
 
 /**
@@ -932,7 +923,7 @@ Event.prototype.deepElementFromPoint = function()
 Event.prototype.deepActiveElement = function()
 {
     var activeElement = this.target && this.target.ownerDocument ? this.target.ownerDocument.activeElement : null;
-    while (activeElement && activeElement.shadowRoot)
+    while (activeElement && activeElement.shadowRoot && activeElement.shadowRoot.activeElement)
         activeElement = activeElement.shadowRoot.activeElement;
     return activeElement;
 }
@@ -957,7 +948,7 @@ Document.prototype.deepElementFromPoint = function(x, y)
 function isEnterKey(event)
 {
     // Check if in IME.
-    return event.keyCode !== 229 && event.keyIdentifier === "Enter";
+    return event.keyCode !== 229 && event.key === "Enter";
 }
 
 /**

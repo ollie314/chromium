@@ -30,7 +30,6 @@
 
 /**
  * @constructor
- * @implements {WebInspector.CSSSourceMapping}
  * @param {!WebInspector.CSSModel} cssModel
  * @param {!WebInspector.NetworkMapping} networkMapping
  * @param {!WebInspector.NetworkProject} networkProject
@@ -40,9 +39,11 @@ WebInspector.SASSSourceMapping = function(cssModel, networkMapping, networkProje
     this._cssModel = cssModel;
     this._networkProject = networkProject;
     this._networkMapping = networkMapping;
-    this._cssModel.addEventListener(WebInspector.CSSModel.Events.SourceMapAttached, this._sourceMapAttached, this);
-    this._cssModel.addEventListener(WebInspector.CSSModel.Events.SourceMapDetached, this._sourceMapDetached, this);
-    this._cssModel.addEventListener(WebInspector.CSSModel.Events.SourceMapChanged, this._sourceMapChanged, this);
+    this._eventListeners = [
+        this._cssModel.addEventListener(WebInspector.CSSModel.Events.SourceMapAttached, this._sourceMapAttached, this),
+        this._cssModel.addEventListener(WebInspector.CSSModel.Events.SourceMapDetached, this._sourceMapDetached, this),
+        this._cssModel.addEventListener(WebInspector.CSSModel.Events.SourceMapChanged, this._sourceMapChanged, this)
+    ];
 }
 
 WebInspector.SASSSourceMapping.prototype = {
@@ -56,7 +57,7 @@ WebInspector.SASSSourceMapping.prototype = {
         for (var sassURL of sourceMap.sourceURLs()) {
             if (!this._networkMapping.hasMappingForNetworkURL(sassURL)) {
                 var contentProvider = sourceMap.sourceContentProvider(sassURL, WebInspector.resourceTypes.SourceMapStyleSheet);
-                this._networkProject.addFileForURL(sassURL, contentProvider, WebInspector.ResourceTreeFrame.fromStyleSheet(header));
+                this._networkProject.addFile(contentProvider, WebInspector.ResourceTreeFrame.fromStyleSheet(header));
             }
         }
         WebInspector.cssWorkspaceBinding.updateLocations(header);
@@ -92,33 +93,12 @@ WebInspector.SASSSourceMapping.prototype = {
                     continue;
                 handledUISourceCodes.add(uiSourceCode);
                 var sassText = /** @type {string} */(newSources.get(sourceURL));
-                uiSourceCode.addRevision(sassText);
+                uiSourceCode.setWorkingCopy(sassText);
             }
         }
     },
 
     /**
-     * @param {!WebInspector.CSSStyleSheetHeader} header
-     */
-    addHeader: function(header)
-    {
-        if (!header.sourceMapURL)
-            return;
-        WebInspector.cssWorkspaceBinding.pushSourceMapping(header, this);
-    },
-
-    /**
-     * @param {!WebInspector.CSSStyleSheetHeader} header
-     */
-    removeHeader: function(header)
-    {
-        if (!header.sourceMapURL)
-            return;
-        WebInspector.cssWorkspaceBinding.updateLocations(header);
-    },
-
-    /**
-     * @override
      * @param {!WebInspector.CSSLocation} rawLocation
      * @return {?WebInspector.UILocation}
      */
@@ -136,43 +116,8 @@ WebInspector.SASSSourceMapping.prototype = {
         return uiSourceCode.uiLocation(entry.sourceLineNumber || 0, entry.sourceColumnNumber);
     },
 
-    /**
-     * @override
-     * @param {!WebInspector.UISourceCode} uiSourceCode
-     * @param {number} lineNumber
-     * @param {number} columnNumber
-     * @return {?WebInspector.CSSLocation}
-     */
-    uiLocationToRawLocation: function(uiSourceCode, lineNumber, columnNumber)
+    dispose: function()
     {
-        return null;
-    },
-
-    /**
-     * @override
-     * @return {boolean}
-     */
-    isIdentity: function()
-    {
-        return false;
-    },
-
-    /**
-     * @override
-     * @param {!WebInspector.UISourceCode} uiSourceCode
-     * @param {number} lineNumber
-     * @return {boolean}
-     */
-    uiLineHasMapping: function(uiSourceCode, lineNumber)
-    {
-        return true;
-    },
-
-    /**
-     * @return {!WebInspector.Target}
-     */
-    target: function()
-    {
-        return this._cssModel.target();
+        WebInspector.EventTarget.removeEventListeners(this._eventListeners);
     }
 }

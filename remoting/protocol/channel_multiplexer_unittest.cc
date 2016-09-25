@@ -7,8 +7,11 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
 #include "net/socket/socket.h"
 #include "net/socket/stream_socket.h"
@@ -36,7 +39,7 @@ const char kTestChannelName2[] = "test2";
 
 
 void QuitCurrentThread() {
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
 }
 
@@ -96,7 +99,7 @@ class ChannelMultiplexerTest : public testing::Test {
         &ChannelMultiplexerTest::OnChannelConnected, base::Unretained(this),
         client_socket, &counter));
 
-    message_loop_.Run();
+    base::RunLoop().Run();
 
     EXPECT_TRUE(host_socket->get());
     EXPECT_TRUE(client_socket->get());
@@ -121,8 +124,11 @@ class ChannelMultiplexerTest : public testing::Test {
     return result;
   }
 
+ private:
+  // Must be instantiated before the FakeStreamChannelFactories below.
   base::MessageLoop message_loop_;
 
+ protected:
   FakeStreamChannelFactory host_channel_factory_;
   FakeStreamChannelFactory client_channel_factory_;
 
@@ -145,7 +151,7 @@ TEST_F(ChannelMultiplexerTest, OneChannel) {
   StreamConnectionTester tester(host_socket.get(), client_socket.get(),
                                 kMessageSize, kMessages);
   tester.Start();
-  message_loop_.Run();
+  base::RunLoop().Run();
   tester.CheckResults();
 }
 
@@ -167,7 +173,7 @@ TEST_F(ChannelMultiplexerTest, TwoChannels) {
   tester1.Start();
   tester2.Start();
   while (!tester1.done() || !tester2.done()) {
-    message_loop_.Run();
+    base::RunLoop().Run();
   }
   tester1.CheckResults();
   tester2.CheckResults();
@@ -209,7 +215,7 @@ TEST_F(ChannelMultiplexerTest, FourChannels) {
   tester4.Start();
   while (!tester1.done() || !tester2.done() ||
          !tester3.done() || !tester4.done()) {
-    message_loop_.Run();
+    base::RunLoop().Run();
   }
   tester1.CheckResults();
   tester2.CheckResults();

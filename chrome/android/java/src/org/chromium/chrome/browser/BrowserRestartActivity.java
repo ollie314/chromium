@@ -13,13 +13,14 @@ import android.os.Looper;
 import android.os.Process;
 import android.text.TextUtils;
 
-import org.chromium.base.ApplicationStatus;
+import org.chromium.base.ContextUtils;
 import org.chromium.chrome.browser.util.IntentUtils;
 
 /**
  * Kills and (optionally) restarts the main Chrome process, then immediately kills itself.
  *
- * Starting this Activity should only be done by the {@link ChromeLifetimeController}, and requires
+ * Starting this Activity should only be done by the
+ * {@link org.chromium.chrome.browser.init.ChromeLifetimeController}, and requires
  * passing in the process ID (the Intent should have the value of Process#myPid() as an extra).
  *
  * This Activity runs on a separate process from the main Chrome browser and cannot see the main
@@ -27,14 +28,14 @@ import org.chromium.chrome.browser.util.IntentUtils;
  * AlarmManager, which requires a minimum alarm duration of 5 seconds: https://crbug.com/515919.
  */
 public class BrowserRestartActivity extends Activity {
-    static final String ACTION_START_WATCHDOG =
+    public static final String ACTION_START_WATCHDOG =
             "org.chromium.chrome.browser.BrowserRestartActivity.start_watchdog";
-    static final String ACTION_KILL_PROCESS =
+    public static final String ACTION_KILL_PROCESS =
             "org.chromium.chrome.browser.BrowserRestartActivity.kill_process";
 
-    static final String EXTRA_MAIN_PID =
+    public static final String EXTRA_MAIN_PID =
             "org.chromium.chrome.browser.BrowserRestartActivity.main_pid";
-    static final String EXTRA_RESTART =
+    public static final String EXTRA_RESTART =
             "org.chromium.chrome.browser.BrowserRestartActivity.restart";
 
     private static final String TAG = "BrowserRestartActivity";
@@ -82,7 +83,7 @@ public class BrowserRestartActivity extends Activity {
         boolean restart = IntentUtils.safeGetBooleanExtra(
                 intent, BrowserRestartActivity.EXTRA_RESTART, false);
         if (restart) {
-            Context context = ApplicationStatus.getApplicationContext();
+            Context context = ContextUtils.getApplicationContext();
             Intent restartIntent = new Intent(Intent.ACTION_MAIN);
             restartIntent.setPackage(context.getPackageName());
             restartIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

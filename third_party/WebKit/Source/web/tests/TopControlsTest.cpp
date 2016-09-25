@@ -33,7 +33,7 @@
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
-#include "core/layout/LayoutView.h"
+#include "core/frame/VisualViewport.h"
 #include "core/page/Page.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "public/platform/Platform.h"
@@ -78,7 +78,7 @@ public:
 
         // Load a page with large body and set viewport size to 400x400 to ensure
         // main frame is scrollable.
-        m_helper.initializeAndLoad(m_baseURL + pageName, true, 0, 0, &configureSettings);
+        m_helper.initializeAndLoad(m_baseURL + pageName, true, nullptr, nullptr, nullptr, &configureSettings);
 
         webViewImpl()->resize(IntSize(400, 400));
         return webViewImpl();
@@ -129,9 +129,9 @@ public:
     }
 
 
-    WebViewImpl* webViewImpl() const { return m_helper.webViewImpl(); }
-    LocalFrame* frame() const { return m_helper.webViewImpl()->mainFrameImpl()->frame(); }
-    VisualViewport& visualViewport() const { return m_helper.webViewImpl()->page()->frameHost().visualViewport(); }
+    WebViewImpl* webViewImpl() const { return m_helper.webView(); }
+    LocalFrame* frame() const { return m_helper.webView()->mainFrameImpl()->frame(); }
+    VisualViewport& visualViewport() const { return m_helper.webView()->page()->frameHost().visualViewport(); }
 
 private:
     std::string m_baseURL;
@@ -158,7 +158,7 @@ TEST_F(TopControlsTest, MAYBE(HideOnScrollDown))
 {
     WebViewImpl* webView = initialize();
     // initialize top controls to be shown.
-    webView->setTopControlsHeight(50.f, true);
+    webView->resizeWithTopControls(webView->size(), 50.f, true);
     webView->topControls().setShownRatio(1);
 
     webView->handleInputEvent(generateEvent(WebInputEvent::GestureScrollBegin));
@@ -185,7 +185,7 @@ TEST_F(TopControlsTest, MAYBE(ShowOnScrollUp))
 {
     WebViewImpl* webView = initialize();
     // initialize top controls to be hidden.
-    webView->setTopControlsHeight(50.f, false);
+    webView->resizeWithTopControls(webView->size(), 50.f, false);
     webView->topControls().setShownRatio(0);
 
     webView->handleInputEvent(generateEvent(WebInputEvent::GestureScrollBegin));
@@ -206,7 +206,7 @@ TEST_F(TopControlsTest, MAYBE(ScrollDownThenUp))
 {
     WebViewImpl* webView = initialize();
     // initialize top controls to be shown and position page at 100px.
-    webView->setTopControlsHeight(50.f, true);
+    webView->resizeWithTopControls(webView->size(), 50.f, true);
     webView->topControls().setShownRatio(1);
     frame()->view()->getScrollableArea()->setScrollPosition(IntPoint(0, 100), ProgrammaticScroll);
 
@@ -244,7 +244,7 @@ TEST_F(TopControlsTest, MAYBE(ScrollUpThenDown))
 {
     WebViewImpl* webView = initialize();
     // initialize top controls to be hidden and position page at 100px.
-    webView->setTopControlsHeight(50.f, false);
+    webView->resizeWithTopControls(webView->size(), 50.f, false);
     webView->topControls().setShownRatio(0);
     frame()->view()->getScrollableArea()->setScrollPosition(IntPoint(0, 100), ProgrammaticScroll);
 
@@ -271,7 +271,7 @@ TEST_F(TopControlsTest, MAYBE(HorizontalScroll))
 {
     WebViewImpl* webView = initialize();
     // initialize top controls to be shown.
-    webView->setTopControlsHeight(50.f, true);
+    webView->resizeWithTopControls(webView->size(), 50.f, true);
     webView->topControls().setShownRatio(1);
 
     webView->handleInputEvent(generateEvent(WebInputEvent::GestureScrollBegin));
@@ -295,7 +295,7 @@ TEST_F(TopControlsTest, MAYBE(PageScaleHasNoImpact))
     webView->setPageScaleFactor(2.0);
 
     // Initialize top controls to be shown.
-    webView->setTopControlsHeight(50.f, true);
+    webView->resizeWithTopControls(webView->size(), 50.f, true);
     webView->topControls().setShownRatio(1);
 
     webView->handleInputEvent(generateEvent(WebInputEvent::GestureScrollBegin));
@@ -341,7 +341,7 @@ TEST_F(TopControlsTest, MAYBE(FloatingPointSlippage))
     webView->setPageScaleFactor(2.0);
 
     // Initialize top controls to be shown.
-    webView->setTopControlsHeight(50.f, true);
+    webView->resizeWithTopControls(webView->size(), 50.f, true);
     webView->topControls().setShownRatio(1);
 
     webView->topControls().scrollBegin();
@@ -358,7 +358,7 @@ TEST_F(TopControlsTest, MAYBE(FloatingPointSlippage))
 TEST_F(TopControlsTest, MAYBE(ScrollableSubregionScrollFirst))
 {
     WebViewImpl* webView = initialize("overflow-scrolling.html");
-    webView->setTopControlsHeight(50.f, true);
+    webView->resizeWithTopControls(webView->size(), 50.f, true);
     webView->topControls().setShownRatio(1);
     frame()->view()->getScrollableArea()->setScrollPosition(IntPoint(0, 50), ProgrammaticScroll);
 
@@ -400,7 +400,7 @@ TEST_F(TopControlsTest, MAYBE(ScrollableSubregionScrollFirst))
 TEST_F(TopControlsTest, MAYBE(ScrollableIframeScrollFirst))
 {
     WebViewImpl* webView = initialize("iframe-scrolling.html");
-    webView->setTopControlsHeight(50.f, true);
+    webView->resizeWithTopControls(webView->size(), 50.f, true);
     webView->topControls().setShownRatio(1);
     frame()->view()->getScrollableArea()->setScrollPosition(IntPoint(0, 50), ProgrammaticScroll);
 
@@ -441,13 +441,13 @@ TEST_F(TopControlsTest, MAYBE(ScrollableIframeScrollFirst))
 TEST_F(TopControlsTest, MAYBE(HeightChangeMaintainsVisibility))
 {
     WebViewImpl* webView = initialize();
-    webView->setTopControlsHeight(20.f, false);
+    webView->resizeWithTopControls(webView->size(), 20.f, false);
     webView->topControls().setShownRatio(0);
 
-    webView->setTopControlsHeight(20.f, false);
+    webView->resizeWithTopControls(webView->size(), 20.f, false);
     EXPECT_FLOAT_EQ(0.f, webView->topControls().contentOffset());
 
-    webView->setTopControlsHeight(40.f, false);
+    webView->resizeWithTopControls(webView->size(), 40.f, false);
     EXPECT_FLOAT_EQ(0.f, webView->topControls().contentOffset());
 
     // Scroll up to show top controls.
@@ -455,7 +455,7 @@ TEST_F(TopControlsTest, MAYBE(HeightChangeMaintainsVisibility))
     EXPECT_FLOAT_EQ(40.f, webView->topControls().contentOffset());
 
     // Changing height of a fully shown top controls should correctly adjust content offset
-    webView->setTopControlsHeight(30.f, false);
+    webView->resizeWithTopControls(webView->size(), 30.f, false);
     EXPECT_FLOAT_EQ(30.f, webView->topControls().contentOffset());
 }
 
@@ -463,7 +463,7 @@ TEST_F(TopControlsTest, MAYBE(HeightChangeMaintainsVisibility))
 TEST_F(TopControlsTest, MAYBE(ZeroHeightMeansNoEffect))
 {
     WebViewImpl* webView = initialize();
-    webView->setTopControlsHeight(0, false);
+    webView->resizeWithTopControls(webView->size(), 0, false);
     webView->topControls().setShownRatio(0);
     frame()->view()->getScrollableArea()->setScrollPosition(IntPoint(0, 100), ProgrammaticScroll);
 
@@ -486,7 +486,7 @@ TEST_F(TopControlsTest, MAYBE(ScrollUpPastLimitDoesNotHide))
 {
     WebViewImpl* webView = initialize();
     // Initialize top controls to be shown
-    webView->setTopControlsHeight(50.f, true);
+    webView->resizeWithTopControls(webView->size(), 50.f, true);
     webView->topControls().setShownRatio(1);
     // Use 2x scale so that both visual viewport and frameview are scrollable
     webView->setPageScaleFactor(2.0);
@@ -518,28 +518,22 @@ TEST_F(TopControlsTest, MAYBE(ScrollUpPastLimitDoesNotHide))
 TEST_F(TopControlsTest, MAYBE(StateConstraints))
 {
     WebViewImpl* webView = initialize();
-    webView->setTopControlsHeight(50.f, false);
+    webView->resizeWithTopControls(webView->size(), 50.f, false);
     frame()->view()->getScrollableArea()->setScrollPosition(IntPoint(0, 100), ProgrammaticScroll);
 
-    // Setting permitted state should not change content offset
+    // Setting permitted state should change the content offset to match the
+    // constraint.
     webView->updateTopControlsState(WebTopControlsShown, WebTopControlsShown, false);
-    EXPECT_FLOAT_EQ(0.f, webView->topControls().contentOffset());
-
-    // Showing is permitted
-    webView->topControls().setShownRatio(1);
-    EXPECT_FLOAT_EQ(50, webView->topControls().contentOffset());
+    EXPECT_FLOAT_EQ(50.f, webView->topControls().contentOffset());
 
     // Only shown state is permitted so controls cannot hide
     verticalScroll(-20.f);
     EXPECT_FLOAT_EQ(50, webView->topControls().contentOffset());
     EXPECT_POINT_EQ(IntPoint(0, 120), frame()->view()->scrollPosition());
 
-    // Setting permitted state should not change content offset
+    // Setting permitted state should change content offset to match the
+    // constraint.
     webView->updateTopControlsState(WebTopControlsHidden, WebTopControlsHidden, false);
-    EXPECT_FLOAT_EQ(50, webView->topControls().contentOffset());
-
-    // Hiding is permitted
-    webView->topControls().setShownRatio(0);
     EXPECT_FLOAT_EQ(0, webView->topControls().contentOffset());
 
     // Only hidden state is permitted so controls cannot show
@@ -547,7 +541,7 @@ TEST_F(TopControlsTest, MAYBE(StateConstraints))
     EXPECT_FLOAT_EQ(0, webView->topControls().contentOffset());
     EXPECT_POINT_EQ(IntPoint(0, 90), frame()->view()->scrollPosition());
 
-    // Setting permitted state should not change content offset
+    // Setting permitted state to "both" should not change content offset.
     webView->updateTopControlsState(WebTopControlsBoth, WebTopControlsBoth, false);
     EXPECT_FLOAT_EQ(0, webView->topControls().contentOffset());
 
@@ -559,6 +553,27 @@ TEST_F(TopControlsTest, MAYBE(StateConstraints))
     verticalScroll(-50.f);
     EXPECT_FLOAT_EQ(0, webView->topControls().contentOffset());
     EXPECT_POINT_EQ(IntPoint(0, 90), frame()->view()->scrollPosition());
+
+    // Setting permitted state to "both" should not change an in-flight offset.
+    verticalScroll(20.f);
+    EXPECT_FLOAT_EQ(20, webView->topControls().contentOffset());
+    webView->updateTopControlsState(WebTopControlsBoth, WebTopControlsBoth, false);
+    EXPECT_FLOAT_EQ(20, webView->topControls().contentOffset());
+
+    // An animated state change shouldn't cause a change to the content offset
+    // since it'll be driven from the compositor.
+    webView->updateTopControlsState(WebTopControlsHidden, WebTopControlsHidden, true);
+    EXPECT_FLOAT_EQ(20, webView->topControls().contentOffset());
+
+    webView->updateTopControlsState(WebTopControlsShown, WebTopControlsShown, true);
+    EXPECT_FLOAT_EQ(20, webView->topControls().contentOffset());
+
+    // Setting just the constraint should affect the content offset.
+    webView->updateTopControlsState(WebTopControlsHidden, WebTopControlsBoth, false);
+    EXPECT_FLOAT_EQ(0, webView->topControls().contentOffset());
+
+    webView->updateTopControlsState(WebTopControlsShown, WebTopControlsBoth, false);
+    EXPECT_FLOAT_EQ(50, webView->topControls().contentOffset());
 }
 
 // Ensure that top controls do not affect the layout by showing and hiding
@@ -567,11 +582,10 @@ TEST_F(TopControlsTest, MAYBE(DontAffectLayoutHeight))
 {
     // Initialize with the top controls showing.
     WebViewImpl* webView = initialize("percent-height.html");
-    webView->setTopControlsHeight(100.f, true);
+    webView->resizeWithTopControls(WebSize(400, 300), 100.f, true);
     webView->updateTopControlsState(
         WebTopControlsBoth, WebTopControlsShown, false);
     webView->topControls().setShownRatio(1);
-    webView->resize(WebSize(400, 300));
     webView->updateAllLifecyclePhases();
 
     ASSERT_EQ(100.f, webView->topControls().contentOffset());
@@ -591,8 +605,7 @@ TEST_F(TopControlsTest, MAYBE(DontAffectLayoutHeight))
 
     // Hide the top controls.
     verticalScroll(-100.f);
-    webView->setTopControlsHeight(100.f, false);
-    webView->resize(WebSize(400, 400));
+    webView->resizeWithTopControls(WebSize(400, 400), 100.f, false);
     webView->updateAllLifecyclePhases();
 
     ASSERT_EQ(0.f, webView->topControls().contentOffset());
@@ -612,11 +625,10 @@ TEST_F(TopControlsTest, MAYBE(DontAffectVHUnits))
 {
     // Initialize with the top controls showing.
     WebViewImpl* webView = initialize("vh-height.html");
-    webView->setTopControlsHeight(100.f, true);
+    webView->resizeWithTopControls(WebSize(400, 300), 100.f, true);
     webView->updateTopControlsState(
         WebTopControlsBoth, WebTopControlsShown, false);
     webView->topControls().setShownRatio(1);
-    webView->resize(WebSize(400, 300));
     webView->updateAllLifecyclePhases();
 
     ASSERT_EQ(100.f, webView->topControls().contentOffset());
@@ -636,8 +648,7 @@ TEST_F(TopControlsTest, MAYBE(DontAffectVHUnits))
 
     // Hide the top controls.
     verticalScroll(-100.f);
-    webView->setTopControlsHeight(100.f, false);
-    webView->resize(WebSize(400, 400));
+    webView->resizeWithTopControls(WebSize(400, 400), 100.f, false);
     webView->updateAllLifecyclePhases();
 
     ASSERT_EQ(0.f, webView->topControls().contentOffset());
@@ -659,11 +670,10 @@ TEST_F(TopControlsTest, MAYBE(DontAffectVHUnitsWithScale))
 {
     // Initialize with the top controls showing.
     WebViewImpl* webView = initialize("vh-height-width-800.html");
-    webView->setTopControlsHeight(100.f, true);
+    webView->resizeWithTopControls(WebSize(400, 300), 100.f, true);
     webView->updateTopControlsState(
         WebTopControlsBoth, WebTopControlsShown, false);
     webView->topControls().setShownRatio(1);
-    webView->resize(WebSize(400, 300));
     webView->updateAllLifecyclePhases();
 
     ASSERT_EQ(100.f, webView->topControls().contentOffset());
@@ -690,8 +700,7 @@ TEST_F(TopControlsTest, MAYBE(DontAffectVHUnitsWithScale))
 
     // Hide the top controls.
     verticalScroll(-100.f);
-    webView->setTopControlsHeight(100.f, false);
-    webView->resize(WebSize(400, 400));
+    webView->resizeWithTopControls(WebSize(400, 400), 100.f, false);
     webView->updateAllLifecyclePhases();
 
     ASSERT_EQ(0.f, webView->topControls().contentOffset());
@@ -714,11 +723,10 @@ TEST_F(TopControlsTest, MAYBE(DontAffectVHUnitsUseLayoutSize))
 {
     // Initialize with the top controls showing.
     WebViewImpl* webView = initialize("vh-height-width-800-extra-wide.html");
-    webView->setTopControlsHeight(100.f, true);
+    webView->resizeWithTopControls(WebSize(400, 300), 100.f, true);
     webView->updateTopControlsState(
         WebTopControlsBoth, WebTopControlsShown, false);
     webView->topControls().setShownRatio(1);
-    webView->resize(WebSize(400, 300));
     webView->updateAllLifecyclePhases();
 
     ASSERT_EQ(100.f, webView->topControls().contentOffset());
@@ -731,6 +739,96 @@ TEST_F(TopControlsTest, MAYBE(DontAffectVHUnitsUseLayoutSize))
     // for vh should be (300 / 0.5) for the layout height + (100 / 0.5) for top
     // controls = 800.
     EXPECT_EQ(800, frame()->view()->viewportSizeForViewportUnits().height());
+}
+
+// This tests that the viewport remains anchored when top controls are brought
+// in while the document is fully scrolled. This normally causes clamping of the
+// visual viewport to keep it bounded by the layout viewport so we're testing
+// that the viewport anchoring logic is working to keep the view unchanged.
+TEST_F(TopControlsTest, MAYBE(AnchorViewportDuringTopControlsAdjustment))
+{
+    int contentHeight = 1016;
+    int layoutViewportHeight = 500;
+    int visualViewportHeight = 500;
+    int topControlsHeight = 100;
+    int pageScale = 2;
+    int minScale = 1;
+
+    // Initialize with the top controls showing.
+    WebViewImpl* webView = initialize("large-div.html");
+    webViewImpl()->setDefaultPageScaleLimits(minScale, 5);
+    webView->resizeWithTopControls(
+        WebSize(800, layoutViewportHeight),
+        topControlsHeight,
+        true);
+    webView->updateTopControlsState(
+        WebTopControlsBoth, WebTopControlsShown, false);
+    webView->topControls().setShownRatio(1);
+    webView->updateAllLifecyclePhases();
+
+    FrameView* view = frame()->view();
+    ScrollableArea* rootViewport = frame()->view()->getScrollableArea();
+
+    int expectedVisualOffset =
+        ((layoutViewportHeight + topControlsHeight / minScale) * pageScale
+        - (visualViewportHeight + topControlsHeight))
+        / pageScale;
+    int expectedLayoutOffset =
+        contentHeight - (layoutViewportHeight + topControlsHeight / minScale);
+    int expectedRootOffset = expectedVisualOffset + expectedLayoutOffset;
+
+    // Zoom in to 2X and fully scroll both viewports.
+    webView->setPageScaleFactor(pageScale);
+    {
+        webView->handleInputEvent(
+            generateEvent(WebInputEvent::GestureScrollBegin));
+        webView->handleInputEvent(
+            generateEvent(WebInputEvent::GestureScrollUpdate, 0, -10000));
+
+        ASSERT_EQ(0.f, webView->topControls().contentOffset());
+
+        EXPECT_EQ(expectedVisualOffset, visualViewport().location().y());
+        EXPECT_EQ(expectedLayoutOffset,
+            view->layoutViewportScrollableArea()->scrollPosition().y());
+        EXPECT_EQ(expectedRootOffset, rootViewport->scrollPosition().y());
+
+        webView->handleInputEvent(
+            generateEvent(WebInputEvent::GestureScrollEnd));
+    }
+
+    // Commit the top controls resize so that the top controls do not shrink the
+    // layout size. This should not have moved any of the viewports.
+    webView->resizeWithTopControls(
+        WebSize(800, layoutViewportHeight + topControlsHeight),
+        topControlsHeight,
+        false);
+    webView->updateAllLifecyclePhases();
+    ASSERT_EQ(expectedVisualOffset, visualViewport().location().y());
+    ASSERT_EQ(expectedLayoutOffset,
+        view->layoutViewportScrollableArea()->scrollPosition().y());
+    ASSERT_EQ(expectedRootOffset, rootViewport->scrollPosition().y());
+
+    // Now scroll back up just enough to show the top controls. The top controls
+    // should shrink both viewports but the layout viewport by a greater amount.
+    // This means the visual viewport's offset must be clamped to keep it within
+    // the layout viewport. Make sure we adjust the scroll position to account
+    // for this and keep the visual viewport at the same location relative to
+    // the document (i.e. the user shouldn't see a movement).
+    {
+        webView->handleInputEvent(
+            generateEvent(WebInputEvent::GestureScrollBegin));
+        webView->handleInputEvent(
+            generateEvent(WebInputEvent::GestureScrollUpdate, 0, 80));
+
+        visualViewport().clampToBoundaries();
+        view->setScrollPosition(view->scrollPosition(), ProgrammaticScroll);
+
+        ASSERT_EQ(80.f, webView->topControls().contentOffset());
+        EXPECT_EQ(expectedRootOffset, rootViewport->scrollPosition().y());
+
+        webView->handleInputEvent(
+            generateEvent(WebInputEvent::GestureScrollEnd));
+    }
 }
 
 } // namespace blink

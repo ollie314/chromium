@@ -113,7 +113,7 @@ void BreakBlockquoteCommand::doApply(EditingState* editingState)
         insertNodeBefore(breakElement, topBlockquote, editingState);
         if (editingState->isAborted())
             return;
-        setEndingSelection(VisibleSelection(positionBeforeNode(breakElement), TextAffinity::Downstream, endingSelection().isDirectional()));
+        setEndingSelection(VisibleSelection(Position::beforeNode(breakElement), TextAffinity::Downstream, endingSelection().isDirectional()));
         rebalanceWhitespace();
         return;
     }
@@ -125,7 +125,7 @@ void BreakBlockquoteCommand::doApply(EditingState* editingState)
 
     // If we're inserting the break at the end of the quoted content, we don't need to break the quote.
     if (isLastVisPosInNode) {
-        setEndingSelection(VisibleSelection(positionBeforeNode(breakElement), TextAffinity::Downstream, endingSelection().isDirectional()));
+        setEndingSelection(VisibleSelection(Position::beforeNode(breakElement), TextAffinity::Downstream, endingSelection().isDirectional()));
         rebalanceWhitespace();
         return;
     }
@@ -137,7 +137,7 @@ void BreakBlockquoteCommand::doApply(EditingState* editingState)
     }
 
     // Adjust the position so we don't split at the beginning of a quote.
-    while (isFirstVisiblePositionInNode(createVisiblePosition(pos), toHTMLQuoteElement(enclosingNodeOfType(pos, isMailHTMLBlockquoteElement)))) {
+    while (isFirstVisiblePositionInNode(createVisiblePositionDeprecated(pos), toHTMLQuoteElement(enclosingNodeOfType(pos, isMailHTMLBlockquoteElement)))) {
         pos = previousPositionOf(pos, PositionMoveType::GraphemeCluster);
     }
 
@@ -163,7 +163,7 @@ void BreakBlockquoteCommand::doApply(EditingState* editingState)
 
     // If there's nothing inside topBlockquote to move, we're finished.
     if (!startNode->isDescendantOf(topBlockquote)) {
-        setEndingSelection(VisibleSelection(createVisiblePosition(firstPositionInOrBeforeNode(startNode)), endingSelection().isDirectional()));
+        setEndingSelection(VisibleSelection(createVisiblePositionDeprecated(firstPositionInOrBeforeNode(startNode)), endingSelection().isDirectional()));
         return;
     }
 
@@ -236,7 +236,7 @@ void BreakBlockquoteCommand::doApply(EditingState* editingState)
         return;
 
     // Put the selection right before the break.
-    setEndingSelection(VisibleSelection(positionBeforeNode(breakElement), TextAffinity::Downstream, endingSelection().isDirectional()));
+    setEndingSelection(VisibleSelection(Position::beforeNode(breakElement), TextAffinity::Downstream, endingSelection().isDirectional()));
     rebalanceWhitespace();
 }
 

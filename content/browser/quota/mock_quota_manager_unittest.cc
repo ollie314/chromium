@@ -12,7 +12,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/public/test/mock_special_storage_policy.h"
 #include "content/public/test/mock_storage_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -47,10 +47,10 @@ class MockQuotaManagerTest : public testing::Test {
   void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     policy_ = new MockSpecialStoragePolicy;
-    manager_ = new MockQuotaManager(false /* is_incognito */, data_dir_.path(),
-                                    base::ThreadTaskRunnerHandle::Get().get(),
-                                    base::ThreadTaskRunnerHandle::Get().get(),
-                                    policy_.get());
+    manager_ = new MockQuotaManager(
+        false /* is_incognito */, data_dir_.GetPath(),
+        base::ThreadTaskRunnerHandle::Get().get(),
+        base::ThreadTaskRunnerHandle::Get().get(), policy_.get());
   }
 
   void TearDown() override {

@@ -41,40 +41,64 @@ WebInspector.RenderingOptionsView = function()
     /** @type {!Map.<string, !Element>} */
     this._settings = new Map();
 
-    this._appendCheckbox(WebInspector.UIString("Enable paint flashing"), "setShowPaintRects");
-    this._appendCheckbox(WebInspector.UIString("Show layer borders"), "setShowDebugBorders");
-    this._appendCheckbox(WebInspector.UIString("Show FPS meter"), "setShowFPSCounter");
-    var scrollingTitle = WebInspector.UIString("Shows areas of the page that slow down scrolling:\nTouch and mousewheel event listeners can delay scrolling.\nSome areas need to repaint their content when scrolled.");
-    this._appendCheckbox(WebInspector.UIString("Show scrolling perf issues"), "setShowScrollBottleneckRects", scrollingTitle);
+    var options = [
+        {
+            label: WebInspector.UIString("Paint Flashing"),
+            subtitle: WebInspector.UIString("Highlights areas of the page that need to be repainted"),
+            setterName: "setShowPaintRects"
+        },
+        {
+            label: WebInspector.UIString("Layer Borders"),
+            subtitle: WebInspector.UIString("Shows layer borders (orange/olive) and tiles (cyan)"),
+            setterName: "setShowDebugBorders"
+        },
+        {
+            label: WebInspector.UIString("FPS Meter"),
+            subtitle: WebInspector.UIString("Plots frames per second, frame rate distribution, and GPU memory"),
+            setterName: "setShowFPSCounter"
+        },
+        {
+            label: WebInspector.UIString("Scrolling Performance Issues"),
+            subtitle: WebInspector.UIString("Shows areas of the page that slow down scrolling"),
+            setterName: "setShowScrollBottleneckRects",
+            tooltip: "Touch and mousewheel event listeners can delay scrolling.\nSome areas need to repaint their content when scrolled."
+        }
+    ];
+    for (var i = 0; i < options.length; i++)
+        this._appendCheckbox(options[i].label, options[i].setterName, options[i].subtitle, options[i].tooltip);
 
-    // CSS media.
-    var mediaRow = this.contentElement.createChild("div", "media-row");
-    var checkboxLabel = createCheckboxLabel(WebInspector.UIString("Emulate media"), false);
+    this.contentElement.createChild("div").classList.add("panel-section-separator");
+
+    var cssMediaSubtitle = WebInspector.UIString("Forces media type for testing print and screen styles");
+    var checkboxLabel = createCheckboxLabel(WebInspector.UIString("Emulate CSS Media"), false, cssMediaSubtitle);
     this._mediaCheckbox = checkboxLabel.checkboxElement;
     this._mediaCheckbox.addEventListener("click", this._mediaToggled.bind(this), false);
-    mediaRow.appendChild(checkboxLabel);
+    this.contentElement.appendChild(checkboxLabel);
+
+    var mediaRow = this.contentElement.createChild("div", "media-row");
     this._mediaSelect = mediaRow.createChild("select", "chrome-select");
     this._mediaSelect.appendChild(new Option(WebInspector.UIString("print"), "print"));
     this._mediaSelect.appendChild(new Option(WebInspector.UIString("screen"), "screen"));
     this._mediaSelect.addEventListener("change", this._mediaToggled.bind(this), false);
     this._mediaSelect.disabled = true;
 
-    WebInspector.targetManager.observeTargets(this, WebInspector.Target.Type.Page);
+    WebInspector.targetManager.observeTargets(this, WebInspector.Target.Capability.Browser);
 }
 
 WebInspector.RenderingOptionsView.prototype = {
     /**
      * @param {string} label
      * @param {string} setterName
-     * @param {string=} title
+     * @param {string=} subtitle
+     * @param {string=} tooltip
      */
-    _appendCheckbox: function(label, setterName, title)
+    _appendCheckbox: function(label, setterName, subtitle, tooltip)
     {
-        var checkboxLabel = createCheckboxLabel(label, false);
+        var checkboxLabel = createCheckboxLabel(label, false, subtitle);
         this._settings.set(setterName, checkboxLabel.checkboxElement);
         checkboxLabel.checkboxElement.addEventListener("click", this._settingToggled.bind(this, setterName));
-        if (title)
-            checkboxLabel.title = title;
+        if (tooltip)
+            checkboxLabel.title = tooltip;
         this.contentElement.appendChild(checkboxLabel);
     },
 
@@ -84,9 +108,8 @@ WebInspector.RenderingOptionsView.prototype = {
     _settingToggled: function(setterName)
     {
         var enabled = this._settings.get(setterName).checked;
-        var targets = WebInspector.targetManager.targets(WebInspector.Target.Type.Page);
-        for (var i = 0; i < targets.length; ++i)
-            targets[i].renderingAgent()[setterName](enabled);
+        for (var target of WebInspector.targetManager.targets(WebInspector.Target.Capability.Browser))
+            target.renderingAgent()[setterName](enabled);
     },
 
     /**
@@ -106,7 +129,7 @@ WebInspector.RenderingOptionsView.prototype = {
     _mediaToggled: function()
     {
         this._mediaSelect.disabled = !this._mediaCheckbox.checked;
-        var targets = WebInspector.targetManager.targets(WebInspector.Target.Type.Page);
+        var targets = WebInspector.targetManager.targets(WebInspector.Target.Capability.Browser);
         for (var target of targets)
             this._applyPrintMediaOverride(target);
     },
@@ -141,26 +164,4 @@ WebInspector.RenderingOptionsView.instance = function()
     if (!WebInspector.RenderingOptionsView._instanceObject)
         WebInspector.RenderingOptionsView._instanceObject = new WebInspector.RenderingOptionsView();
     return WebInspector.RenderingOptionsView._instanceObject;
-}
-
-/**
- * @constructor
- * @implements {WebInspector.ActionDelegate}
- */
-WebInspector.RenderingOptionsView.ShowActionDelegate = function()
-{
-}
-
-WebInspector.RenderingOptionsView.ShowActionDelegate.prototype = {
-    /**
-     * @override
-     * @param {!WebInspector.Context} context
-     * @param {string} actionId
-     * @return {boolean}
-     */
-    handleAction: function(context, actionId)
-    {
-        WebInspector.inspectorView.showViewInDrawer("rendering");
-        return true;
-    }
 }

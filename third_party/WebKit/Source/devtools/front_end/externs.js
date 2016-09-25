@@ -43,6 +43,17 @@ Event.prototype.isMetaOrCtrlForTest;
 Event.prototype.code;
 
 /**
+ * TODO(luoe): MouseEvent properties movementX and movementY from the
+ * PointerLock API are not yet standard. Once they are included in
+ * Closure Compiler, these custom externs can be removed.
+ */
+/** @type {number} */
+MouseEvent.prototype.movementX;
+
+/** @type {number} */
+MouseEvent.prototype.movementY;
+
+/**
  * @type {number}
  */
 KeyboardEvent.DOM_KEY_LOCATION_NUMPAD;
@@ -301,7 +312,7 @@ function ExtensionReloadOptions() {
 }
 
 var Adb = {};
-/** @typedef {{id: string, name: string, url: string, adbAttachedForeign: boolean}} */
+/** @typedef {{id: string, name: string, url: string, attached: boolean}} */
 Adb.Page;
 /** @typedef {{id: string, adbBrowserChromeVersion: string, compatibleVersion: boolean, adbBrowserName: string, source: string, adbBrowserVersion: string, pages: !Array<!Adb.Page>}} */
 Adb.Browser;
@@ -371,7 +382,10 @@ CodeMirror.prototype = {
     doc: null,
     addKeyMap: function(map) { },
     addLineClass: function(handle, where, cls) { },
-    /** @param {?Object=} options */
+    /**
+     * @param {?Object=} options
+     * @return {!CodeMirror.LineWidget}
+     */
     addLineWidget: function(handle, node, options) { },
     /**
      * @param {string|!Object} spec
@@ -397,6 +411,7 @@ CodeMirror.prototype = {
     eachLine: function(from, to, op) { },
     execCommand: function(cmd) { },
     extendSelection: function(from, to) { },
+    findMarks: function(from, to) { },
     findMarksAt: function(pos) { },
     /**
      * @param {!CodeMirror.Pos} from
@@ -574,6 +589,20 @@ CodeMirror.StringStream.prototype = {
     sol: function() { }
 }
 
+/** @constructor */
+CodeMirror.TextMarker = function(doc, type) { }
+CodeMirror.TextMarker.prototype = {
+    clear: function() { },
+    find: function() { }
+}
+
+/** @constructor */
+CodeMirror.LineWidget = function() { }
+CodeMirror.LineWidget.prototype = {
+    clear: function() { }
+}
+
+
 /** @type {Object.<string, !Object.<string, string>>} */
 CodeMirror.keyMap;
 
@@ -614,6 +643,7 @@ var acorn = {
     tokTypes: {
         _true: new Acorn.TokenType(),
         _false: new Acorn.TokenType(),
+        _null: new Acorn.TokenType(),
         num: new Acorn.TokenType(),
         regexp: new Acorn.TokenType(),
         string: new Acorn.TokenType(),
@@ -685,6 +715,10 @@ ESTree.Node = function()
     this.id;
     /** @type {(number|undefined)} */
     this.length;
+    /** @type {(?ESTree.Node|undefined)} */
+    this.argument;
+    /** @type {(string|undefined)} */
+    this.operator;
 }
 
 /**
@@ -698,3 +732,48 @@ ESTree.TemplateLiteralNode = function()
     /** @type {!Array.<!ESTree.Node>} */
     this.expressions;
 }
+
+var Gonzales = {}
+var gonzales = {
+    /**
+     * @param {string} text
+     * @param {!Object=} options
+     * @return {!Gonzales.Node}
+     */
+    parse: function(text, options) { },
+}
+
+/**
+ * @constructor
+ */
+Gonzales.Location = function()
+{
+    /** @type {number} */
+    this.line;
+    /** @type {number} */
+    this.column;
+}
+
+/**
+ * @constructor
+ */
+Gonzales.Node = function()
+{
+    /** @type {string} */
+    this.type;
+    /** @type {string} */
+    this.syntax;
+    /** @type {!Gonzales.Location} */
+    this.start;
+    /** @type {!Gonzales.Location} */
+    this.end;
+    /** @type {(string|!Array<!Gonzales.Node>)} */
+    this.content;
+}
+
+/**
+ * @type {string}
+ * @see http://heycam.github.io/webidl/#es-DOMException-prototype-object
+ * TODO(jsbell): DOMException should be a subclass of Error.
+ */
+DOMException.prototype.message;

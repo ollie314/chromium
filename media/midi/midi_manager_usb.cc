@@ -15,10 +15,12 @@
 namespace media {
 namespace midi {
 
-MidiManagerUsb::MidiManagerUsb(scoped_ptr<UsbMidiDevice::Factory> factory)
+MidiManagerUsb::MidiManagerUsb(std::unique_ptr<UsbMidiDevice::Factory> factory)
     : device_factory_(std::move(factory)) {}
 
 MidiManagerUsb::~MidiManagerUsb() {
+  base::AutoLock auto_lock(scheduler_lock_);
+  CHECK(!scheduler_);
 }
 
 void MidiManagerUsb::StartInitialization() {
@@ -26,9 +28,20 @@ void MidiManagerUsb::StartInitialization() {
       base::Bind(&MidiManager::CompleteInitialization, base::Unretained(this)));
 }
 
+void MidiManagerUsb::Finalize() {
+  // Destruct MidiScheduler on Chrome_IOThread.
+  base::AutoLock auto_lock(scheduler_lock_);
+  scheduler_.reset();
+}
+
 void MidiManagerUsb::Initialize(base::Callback<void(Result result)> callback) {
   initialize_callback_ = callback;
-  scheduler_.reset(new MidiScheduler(this));
+
+  {
+    base::AutoLock auto_lock(scheduler_lock_);
+    scheduler_.reset(new MidiScheduler(this));
+  }
+
   // This is safe because EnumerateDevices cancels the operation on destruction.
   device_factory_->EnumerateDevices(
       this,
@@ -68,7 +81,7 @@ void MidiManagerUsb::ReceiveUsbMidiData(UsbMidiDevice* device,
                                 time);
 }
 
-void MidiManagerUsb::OnDeviceAttached(scoped_ptr<UsbMidiDevice> device) {
+void MidiManagerUsb::OnDeviceAttached(std::unique_ptr<UsbMidiDevice> device) {
   int device_id = static_cast<int>(devices_.size());
   devices_.push_back(std::move(device));
   AddPorts(devices_.back(), device_id);

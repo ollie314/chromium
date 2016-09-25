@@ -7,8 +7,9 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/upload_data_stream.h"
 
@@ -66,7 +67,7 @@ class CronetUploadDataStream : public net::UploadDataStream {
 
  private:
   // net::UploadDataStream implementation:
-  int InitInternal() override;
+  int InitInternal(const net::NetLogWithSource& net_log) override;
   int ReadInternal(net::IOBuffer* buf, int buf_len) override;
   void ResetInternal() override;
 

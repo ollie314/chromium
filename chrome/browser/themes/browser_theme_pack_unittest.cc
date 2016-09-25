@@ -15,8 +15,8 @@
 #include "build/build_config.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/grit/theme_resources.h"
 #include "content/public/test/test_browser_thread.h"
-#include "grit/theme_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
@@ -434,16 +434,18 @@ TEST_F(BrowserThemePackTest, ProvideNtpHeaderColor) {
 }
 
 TEST_F(BrowserThemePackTest, SupportsAlpha) {
-  // Verify that valid alpha values are parsed correctly.
-  std::string color_json = "{ \"toolbar\": [0, 20, 40, 0], "
-                           "  \"tab_text\": [60, 80, 100, 1], "
-                           "  \"tab_background_text\": [120, 140, 160, 0.0], "
-                           "  \"bookmark_text\": [180, 200, 220, 1.0], "
-                           "  \"ntp_text\": [240, 255, 0, 0.5] }";
+  std::string color_json =
+      "{ \"toolbar\": [0, 20, 40, 1], "
+      "  \"tab_text\": [60, 80, 100, 1], "
+      "  \"tab_background_text\": [120, 140, 160, 0.0], "
+      "  \"bookmark_text\": [180, 200, 220, 1.0], "
+      "  \"ntp_text\": [240, 255, 0, 0.5] }";
   LoadColorJSON(color_json);
 
   std::map<int, SkColor> colors = GetDefaultColorMap();
-  colors[ThemeProperties::COLOR_TOOLBAR] = SkColorSetARGB(0, 0, 20, 40);
+  // Verify that valid alpha values are parsed correctly.
+  // The toolbar color's alpha value is intentionally ignored by theme provider.
+  colors[ThemeProperties::COLOR_TOOLBAR] = SkColorSetARGB(255, 0, 20, 40);
   colors[ThemeProperties::COLOR_TAB_TEXT] = SkColorSetARGB(255, 60, 80, 100);
   colors[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT] =
       SkColorSetARGB(0, 120, 140, 160);
@@ -614,7 +616,7 @@ TEST_F(BrowserThemePackTest, TestNonExistantImages) {
 TEST_F(BrowserThemePackTest, CanBuildAndReadPack) {
   base::ScopedTempDir dir;
   ASSERT_TRUE(dir.CreateUniqueTempDir());
-  base::FilePath file = dir.path().AppendASCII("data.pak");
+  base::FilePath file = dir.GetPath().AppendASCII("data.pak");
 
   // Part 1: Build the pack from an extension.
   {
@@ -638,7 +640,7 @@ TEST_F(BrowserThemePackTest, CanBuildAndReadPack) {
 TEST_F(BrowserThemePackTest, HiDpiThemeTest) {
   base::ScopedTempDir dir;
   ASSERT_TRUE(dir.CreateUniqueTempDir());
-  base::FilePath file = dir.path().AppendASCII("theme_data.pak");
+  base::FilePath file = dir.GetPath().AppendASCII("theme_data.pak");
 
   // Part 1: Build the pack from an extension.
   {

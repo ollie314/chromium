@@ -13,11 +13,10 @@
 
 namespace ui {
 class LatencyInfo;
+struct DidOverscrollParams;
 }
 
 namespace content {
-
-struct DidOverscrollParams;
 
 class CONTENT_EXPORT InputRouterClient {
  public:
@@ -49,7 +48,7 @@ class CONTENT_EXPORT InputRouterClient {
 
   // Called when the router has received an overscroll notification from the
   // renderer.
-  virtual void DidOverscroll(const DidOverscrollParams& params) = 0;
+  virtual void DidOverscroll(const ui::DidOverscrollParams& params) = 0;
 
   // Called when a renderer fling has terminated.
   virtual void DidStopFlinging() = 0;
@@ -57,8 +56,9 @@ class CONTENT_EXPORT InputRouterClient {
   // Called when the input router generates an event. It is intended that the
   // client will do some processing on |gesture_event| and then send it back
   // to the InputRouter via SendGestureEvent.
-  virtual void ForwardGestureEvent(
-      const blink::WebGestureEvent& gesture_event) = 0;
+  virtual void ForwardGestureEventWithLatencyInfo(
+      const blink::WebGestureEvent& gesture_event,
+      const ui::LatencyInfo& latency_info) = 0;
 };
 
 } // namespace content

@@ -27,11 +27,11 @@
 
 #include "modules/webaudio/AudioDestinationNode.h"
 #include "platform/audio/AudioDestination.h"
-#include "wtf/OwnPtr.h"
+#include <memory>
 
 namespace blink {
 
-class AbstractAudioContext;
+class BaseAudioContext;
 class ExceptionState;
 
 class DefaultAudioDestinationHandler final : public AudioDestinationHandler {
@@ -54,17 +54,17 @@ private:
     explicit DefaultAudioDestinationHandler(AudioNode&);
     void createDestination();
 
-    OwnPtr<AudioDestination> m_destination;
+    std::unique_ptr<AudioDestination> m_destination;
     String m_inputDeviceId;
     unsigned m_numberOfInputChannels;
 };
 
 class DefaultAudioDestinationNode final : public AudioDestinationNode {
 public:
-    static DefaultAudioDestinationNode* create(AbstractAudioContext*);
+    static DefaultAudioDestinationNode* create(BaseAudioContext*);
 
 private:
-    explicit DefaultAudioDestinationNode(AbstractAudioContext&);
+    explicit DefaultAudioDestinationNode(BaseAudioContext&);
 };
 
 } // namespace blink

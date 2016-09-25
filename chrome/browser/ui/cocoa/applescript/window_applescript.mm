@@ -200,7 +200,7 @@
   base::TimeTicks newTabStartTime = base::TimeTicks::Now();
   chrome::NavigateParams params(browser_, GURL(chrome::kChromeUINewTabURL),
                                 ui::PAGE_TRANSITION_TYPED);
-  params.disposition = NEW_FOREGROUND_TAB;
+  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   params.tabstrip_index = index;
   chrome::Navigate(&params);
   CoreTabHelper* core_tab_helper =
@@ -257,28 +257,6 @@
   // window() can be NULL during startup.
   if (browser_->window())
     browser_->window()->Close();
-}
-
-- (NSNumber*)presenting {
-  BOOL presentingValue = browser_->window() &&
-                         browser_->window()->IsFullscreen() &&
-                         !browser_->window()
-                              ->GetExclusiveAccessContext()
-                              ->IsFullscreenWithToolbar();
-  return [NSNumber numberWithBool:presentingValue];
-}
-
-- (void)handlesEnterPresentationMode:(NSScriptCommand*)command {
-  AppleScript::LogAppleScriptUMA(
-      AppleScript::AppleScriptCommand::WINDOW_ENTER_PRESENTATION_MODE);
-  browser_->exclusive_access_manager()->context()->EnterFullscreen(
-      GURL(), EXCLUSIVE_ACCESS_BUBBLE_TYPE_FULLSCREEN_EXIT_INSTRUCTION, false);
-}
-
-- (void)handlesExitPresentationMode:(NSScriptCommand*)command {
-  AppleScript::LogAppleScriptUMA(
-      AppleScript::AppleScriptCommand::WINDOW_EXIT_PRESENTATION_MODE);
-  browser_->exclusive_access_manager()->context()->ExitFullscreen();
 }
 
 @end

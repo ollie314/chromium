@@ -18,7 +18,7 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "chrome/grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #import "ui/base/cocoa/appkit_utils.h"
 #import "ui/base/cocoa/nsgraphics_context_additions.h"
 #import "ui/base/cocoa/nsview_additions.h"
@@ -61,28 +61,7 @@
   if (!themeProvider)
     return;
 
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    // First draw the toolbar bitmap, so that theme colors can shine through.
-    NSRect backgroundRect = [self bounds];
-    backgroundRect.size.height = 2 * [self cr_lineWidth];
-    if (NSIntersectsRect(backgroundRect, dirtyRect))
-      [self drawBackground:backgroundRect];
-
-    // Draw the border bitmap, which is partially transparent.
-    NSImage* image = themeProvider->GetNSImageNamed(IDR_TOOLBAR_SHADE_TOP);
-    NSRect borderRect = backgroundRect;
-    borderRect.size.height = [image size].height;
-    if (NSIntersectsRect(borderRect, dirtyRect)) {
-      BOOL focused = [window isMainWindow];
-      NSDrawThreePartImage(borderRect, nil, image, nil, /*vertical=*/ NO,
-                           NSCompositeSourceOver,
-                           focused ?  1.0 : tabs::kImageNoFocusAlpha,
-                           /*flipped=*/ NO);
-    }
-
-    return;
-  }
-
+  NSColor* strokeColor;
   if (themeProvider->HasCustomImage(IDR_THEME_TOOLBAR) ||
       themeProvider->HasCustomColor(ThemeProperties::COLOR_TOOLBAR)) {
     // First draw the toolbar bitmap, so that theme colors can shine through.
@@ -96,15 +75,21 @@
     // which helped dark toolbars stand out from dark frames. Lay down a thin
     // highlight in MD also.
     if ([window isMainWindow]) {
-      [themeProvider->GetNSColor(
-          ThemeProperties::COLOR_TOOLBAR_STROKE_THEME) set];
+      strokeColor = themeProvider->GetNSColor(
+          ThemeProperties::COLOR_TOOLBAR_STROKE_THEME);
     } else {
-      [themeProvider->GetNSColor(
-          ThemeProperties::COLOR_TOOLBAR_STROKE_THEME_INACTIVE) set];
+      strokeColor = themeProvider->GetNSColor(
+          ThemeProperties::COLOR_TOOLBAR_STROKE_THEME_INACTIVE);
     }
   } else {
-    [themeProvider->GetNSColor(ThemeProperties::COLOR_TOOLBAR_STROKE) set];
+    strokeColor =
+        themeProvider->GetNSColor(ThemeProperties::COLOR_TOOLBAR_STROKE);
   }
+
+  if (themeProvider->ShouldIncreaseContrast())
+    strokeColor = [strokeColor colorWithAlphaComponent:100];
+  [strokeColor set];
+
   NSRect borderRect = NSMakeRect(0.0, 0.0, self.bounds.size.width,
       [self cr_lineWidth]);
   NSRectFillUsingOperation(NSIntersectionRect(dirtyRect, borderRect),
@@ -115,7 +100,6 @@
   const ui::ThemeProvider* themeProvider = [[self window] themeProvider];
   bool hasCustomThemeImage = themeProvider &&
       themeProvider->HasCustomImage(IDR_THEME_FRAME);
-  bool isModeMaterial = ui::MaterialDesignController::IsModeMaterial();
   BOOL supportsVibrancy = [self visualEffectView] != nil;
   BOOL isMainWindow = [[self window] isMainWindow];
 
@@ -124,14 +108,18 @@
   // and not being used to drag tabs between browser windows). The gray is
   // somewhat opaque for Incognito mode, very opaque for non-Incognito mode, and
   // completely opaque when the window is not active.
-  if (themeProvider && !hasCustomThemeImage && isModeMaterial &&
-      !inATabDraggingOverlayWindow_) {
+  if (themeProvider && !hasCustomThemeImage && !inATabDraggingOverlayWindow_) {
     NSColor* theColor = nil;
     if (isMainWindow) {
       if (supportsVibrancy &&
           !themeProvider->HasCustomColor(ThemeProperties::COLOR_FRAME)) {
         theColor = themeProvider->GetNSColor(
             ThemeProperties::COLOR_FRAME_VIBRANCY_OVERLAY);
+      } else if (!supportsVibrancy && themeProvider->InIncognitoMode()) {
+        theColor = [NSColor colorWithSRGBRed:20 / 255.
+                                       green:22 / 255.
+                                        blue:24 / 255.
+                                       alpha:1];
       } else {
         theColor = themeProvider->GetNSColor(ThemeProperties::COLOR_FRAME);
       }
@@ -220,6 +208,17 @@
 // background.
 - (BOOL)acceptsFirstMouse:(NSEvent*)event {
   return YES;
+}
+
+// When displaying a modal sheet, interaction with the tabs (e.g. middle-click
+// to close a tab) should be blocked. -[NSWindow sendEvent] blocks left-click,
+// but not others. To prevent clicks going to subviews, absorb them here. This
+// is also done in FastResizeView, but TabStripView is in the title bar, so is
+// not contained in a FastResizeView.
+- (NSView*)hitTest:(NSPoint)aPoint {
+  if ([[self window] attachedSheet])
+    return self;
+  return [super hitTest:aPoint];
 }
 
 // Trap double-clicks and make them miniaturize the browser window.
@@ -348,12 +347,9 @@
 }
 
 - (NSVisualEffectView*)visualEffectView {
-  // NSVisualEffectView is only used in Material Design, and only available on
-  // OS X 10.10 and higher.
-  if (!ui::MaterialDesignController::IsModeMaterial() ||
-      !base::mac::IsOSYosemiteOrLater()) {
+  // NSVisualEffectView is only available on OS X 10.10 and higher.
+  if (!base::mac::IsAtLeastOS10_10())
     return nil;
-  }
 
   NSView* rootView = [[[self window] contentView] superview];
   Class nsVisualEffectViewClass = NSClassFromString(@"NSVisualEffectView");
@@ -397,7 +393,19 @@
 
 - (void)windowDidChangeTheme {
   [self setNeedsDisplay:YES];
+  [self updateVisualEffectState];
+}
 
+- (void)windowDidChangeActive {
+  [self setNeedsDisplay:YES];
+}
+
+- (void)setVisualEffectsDisabledForFullscreen:(BOOL)disabled {
+  visualEffectsDisabledForFullscreen_ = disabled;
+  [self updateVisualEffectState];
+}
+
+- (void)updateVisualEffectState {
   // Configure the NSVisualEffectView so that it does nothing if the user has
   // switched to a custom theme, or uses vibrancy if the user has switched back
   // to the default theme.
@@ -406,17 +414,13 @@
   if (!visualEffectView || !themeProvider) {
     return;
   }
-
-  if (themeProvider->HasCustomImage(IDR_THEME_FRAME) ||
+  if (visualEffectsDisabledForFullscreen_ ||
+      themeProvider->HasCustomImage(IDR_THEME_FRAME) ||
       themeProvider->HasCustomColor(ThemeProperties::COLOR_FRAME)) {
     [visualEffectView setState:NSVisualEffectStateInactive];
   } else {
     [visualEffectView setState:NSVisualEffectStateFollowsWindowActiveState];
   }
-}
-
-- (void)windowDidChangeActive {
-  [self setNeedsDisplay:YES];
 }
 
 @end

@@ -32,7 +32,7 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptState.h"
-#include "bindings/core/v8/UnionTypesCore.h"
+#include "bindings/core/v8/StringOrArrayBufferOrArrayBufferView.h"
 #include "core/CSSValueKeywords.h"
 #include "core/css/BinaryDataFontFaceSource.h"
 #include "core/css/CSSFontFace.h"
@@ -63,7 +63,7 @@
 
 namespace blink {
 
-static CSSValue* parseCSSValue(const Document* document, const String& value, CSSPropertyID propertyID)
+static const CSSValue* parseCSSValue(const Document* document, const String& value, CSSPropertyID propertyID)
 {
     CSSParserContext context(*document, UseCounter::getFrom(document));
     return CSSParser::parseFontFaceDescriptor(propertyID, value, context);
@@ -85,7 +85,7 @@ FontFace* FontFace::create(ExecutionContext* context, const AtomicString& family
 {
     FontFace* fontFace = new FontFace(context, family, descriptors);
 
-    CSSValue* src = parseCSSValue(toDocument(context), source, CSSPropertySrc);
+    const CSSValue* src = parseCSSValue(toDocument(context), source, CSSPropertySrc);
     if (!src || !src->isValueList())
         fontFace->setError(DOMException::create(SyntaxError, "The source provided ('" + source + "') could not be parsed as a value list."));
 
@@ -112,10 +112,10 @@ FontFace* FontFace::create(Document* document, const StyleRuleFontFace* fontFace
     const StylePropertySet& properties = fontFaceRule->properties();
 
     // Obtain the font-family property and the src property. Both must be defined.
-    CSSValue* family = properties.getPropertyCSSValue(CSSPropertyFontFamily);
+    const CSSValue* family = properties.getPropertyCSSValue(CSSPropertyFontFamily);
     if (!family || (!family->isFontFamilyValue() && !family->isPrimitiveValue()))
         return nullptr;
-    CSSValue* src = properties.getPropertyCSSValue(CSSPropertySrc);
+    const CSSValue* src = properties.getPropertyCSSValue(CSSPropertySrc);
     if (!src || !src->isValueList())
         return nullptr;
 
@@ -228,7 +228,7 @@ void FontFace::setFeatureSettings(ExecutionContext* context, const String& s, Ex
 
 void FontFace::setPropertyFromString(const Document* document, const String& s, CSSPropertyID propertyID, ExceptionState* exceptionState)
 {
-    CSSValue* value = parseCSSValue(document, s, propertyID);
+    const CSSValue* value = parseCSSValue(document, s, propertyID);
     if (value && setPropertyValue(value, propertyID))
         return;
 
@@ -244,7 +244,7 @@ bool FontFace::setPropertyFromStyle(const StylePropertySet& properties, CSSPrope
     return setPropertyValue(properties.getPropertyCSSValue(propertyID), propertyID);
 }
 
-bool FontFace::setPropertyValue(CSSValue* value, CSSPropertyID propertyID)
+bool FontFace::setPropertyValue(const CSSValue* value, CSSPropertyID propertyID)
 {
     switch (propertyID) {
     case CSSPropertyFontStyle:
@@ -500,40 +500,17 @@ FontTraits FontFace::traits() const
         }
     }
 
-    FontVariant variant = FontVariantNormal;
-    if (CSSValue* fontVariant = m_variant) {
-        // font-variant descriptor can be a value list.
-        if (fontVariant->isPrimitiveValue()) {
-            CSSValueList* list = CSSValueList::createCommaSeparated();
-            list->append(fontVariant);
-            fontVariant = list;
-        } else if (!fontVariant->isValueList()) {
-            return 0;
-        }
-
-        CSSValueList* variantList = toCSSValueList(fontVariant);
-        unsigned numVariants = variantList->length();
-        if (!numVariants)
-            return 0;
-
-        for (unsigned i = 0; i < numVariants; ++i) {
-            switch (toCSSPrimitiveValue(variantList->item(i))->getValueID()) {
-            case CSSValueNormal:
-                variant = FontVariantNormal;
-                break;
-            case CSSValueSmallCaps:
-                variant = FontVariantSmallCaps;
-                break;
-            default:
-                break;
-            }
-        }
-    }
-
-    return FontTraits(style, variant, weight, stretch);
+    return FontTraits(style, weight, stretch);
 }
 
-static FontDisplay CSSValueToFontDisplay(CSSValue* value)
+size_t FontFace::approximateBlankCharacterCount() const
+{
+    if (m_status == Loading)
+        return m_cssFontFace->approximateBlankCharacterCount();
+    return 0;
+}
+
+static FontDisplay CSSValueToFontDisplay(const CSSValue* value)
 {
     if (value && value->isPrimitiveValue()) {
         switch (toCSSPrimitiveValue(value)->getValueID()) {
@@ -554,21 +531,21 @@ static FontDisplay CSSValueToFontDisplay(CSSValue* value)
     return FontDisplayAuto;
 }
 
-static CSSFontFace* createCSSFontFace(FontFace* fontFace, CSSValue* unicodeRange)
+static CSSFontFace* createCSSFontFace(FontFace* fontFace, const CSSValue* unicodeRange)
 {
     Vector<UnicodeRange> ranges;
-    if (CSSValueList* rangeList = toCSSValueList(unicodeRange)) {
+    if (const CSSValueList* rangeList = toCSSValueList(unicodeRange)) {
         unsigned numRanges = rangeList->length();
         for (unsigned i = 0; i < numRanges; i++) {
-            CSSUnicodeRangeValue* range = toCSSUnicodeRangeValue(rangeList->item(i));
-            ranges.append(UnicodeRange(range->from(), range->to()));
+            const CSSUnicodeRangeValue& range = toCSSUnicodeRangeValue(rangeList->item(i));
+            ranges.append(UnicodeRange(range.from(), range.to()));
         }
     }
 
     return new CSSFontFace(fontFace, ranges);
 }
 
-void FontFace::initCSSFontFace(Document* document, CSSValue* src)
+void FontFace::initCSSFontFace(Document* document, const CSSValue* src)
 {
     m_cssFontFace = createCSSFontFace(this, m_unicodeRange.get());
     if (m_error)
@@ -577,26 +554,26 @@ void FontFace::initCSSFontFace(Document* document, CSSValue* src)
     // Each item in the src property's list is a single CSSFontFaceSource. Put them all into a CSSFontFace.
     ASSERT(src);
     ASSERT(src->isValueList());
-    CSSValueList* srcList = toCSSValueList(src);
+    const CSSValueList* srcList = toCSSValueList(src);
     int srcLength = srcList->length();
 
     for (int i = 0; i < srcLength; i++) {
         // An item in the list either specifies a string (local font name) or a URL (remote font to download).
-        CSSFontFaceSrcValue* item = toCSSFontFaceSrcValue(srcList->item(i));
+        const CSSFontFaceSrcValue& item = toCSSFontFaceSrcValue(srcList->item(i));
         CSSFontFaceSource* source = nullptr;
 
-        if (!item->isLocal()) {
+        if (!item.isLocal()) {
             const Settings* settings = document ? document->settings() : nullptr;
             bool allowDownloading = settings && settings->downloadableBinaryFontsEnabled();
-            if (allowDownloading && item->isSupportedFormat() && document) {
-                FontResource* fetched = item->fetch(document);
+            if (allowDownloading && item.isSupportedFormat() && document) {
+                FontResource* fetched = item.fetch(document);
                 if (fetched) {
                     CSSFontSelector* fontSelector = document->styleEngine().fontSelector();
                     source = new RemoteFontFaceSource(fetched, fontSelector, CSSValueToFontDisplay(m_display.get()));
                 }
             }
         } else {
-            source = new LocalFontFaceSource(item->resource());
+            source = new LocalFontFaceSource(item.resource());
         }
 
         if (source)

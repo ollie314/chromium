@@ -12,6 +12,7 @@
 #include "extensions/browser/api/storage/weak_unlimited_settings_storage.h"
 #include "extensions/browser/value_store/value_store_factory.h"
 #include "extensions/common/api/storage.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/permissions/permissions_data.h"
 
 using content::BrowserThread;
@@ -78,14 +79,15 @@ ValueStore* LocalValueStoreCache::GetStorage(const Extension* extension) {
   ValueStoreFactory::ModelType model_type =
       extension->is_app() ? ValueStoreFactory::ModelType::APP
                           : ValueStoreFactory::ModelType::EXTENSION;
-  scoped_ptr<ValueStore> store = storage_factory_->CreateSettingsStore(
+  std::unique_ptr<ValueStore> store = storage_factory_->CreateSettingsStore(
       settings_namespace::LOCAL, model_type, extension->id());
-  linked_ptr<SettingsStorageQuotaEnforcer> storage(
+  std::unique_ptr<SettingsStorageQuotaEnforcer> storage(
       new SettingsStorageQuotaEnforcer(quota_, std::move(store)));
   DCHECK(storage.get());
 
-  storage_map_[extension->id()] = storage;
-  return storage.get();
+  ValueStore* storage_ptr = storage.get();
+  storage_map_[extension->id()] = std::move(storage);
+  return storage_ptr;
 }
 
 }  // namespace extensions

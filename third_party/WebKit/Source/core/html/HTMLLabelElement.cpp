@@ -42,17 +42,15 @@ namespace blink {
 
 using namespace HTMLNames;
 
-inline HTMLLabelElement::HTMLLabelElement(Document& document, HTMLFormElement* form)
+inline HTMLLabelElement::HTMLLabelElement(Document& document)
     : HTMLElement(labelTag, document)
     , m_processingClick(false)
 {
-    FormAssociatedElement::associateByParser(form);
 }
 
-HTMLLabelElement* HTMLLabelElement::create(Document& document, HTMLFormElement* form)
+HTMLLabelElement* HTMLLabelElement::create(Document& document)
 {
-    HTMLLabelElement* labelElement = new HTMLLabelElement(document, form);
-    return labelElement;
+    return new HTMLLabelElement(document);
 }
 
 LabelableElement* HTMLLabelElement::control() const
@@ -83,24 +81,11 @@ LabelableElement* HTMLLabelElement::control() const
     return nullptr;
 }
 
-HTMLFormElement* HTMLLabelElement::formOwner() const
+HTMLFormElement* HTMLLabelElement::form() const
 {
-    return FormAssociatedElement::form();
-}
-
-HTMLFormElement* HTMLLabelElement::formForBinding() const
-{
-    HTMLFormElement* formOwner = FormAssociatedElement::form();
-    HTMLFormElement* controlForm = nullptr;
-    if (LabelableElement* control = this->control()) {
-        if (control->isFormControlElement())
-            controlForm = toHTMLFormControlElement(control)->form();
-    }
-    if (formOwner != controlForm)
-        UseCounter::count(document(), UseCounter::HTMLLabelElementFormIsDifferentFromControlForm);
-    if (!controlForm && formOwner && formOwner == findFormAncestor())
-        UseCounter::count(document(), UseCounter::HTMLLabelElementHasNoControlAndFormIsAncestor);
-    return formOwner;
+    if (LabelableElement* control = this->control())
+        return control->isFormControlElement() ? toHTMLFormControlElement(control)->form() : nullptr;
+    return nullptr;
 }
 
 void HTMLLabelElement::setActive(bool down)
@@ -187,14 +172,14 @@ void HTMLLabelElement::defaultEventHandler(Event* evt)
                 // should pass click event to control element.
                 // Only in case of drag, *neither* we pass the click event,
                 // *nor* we focus the control element.
-                if (isLabelTextSelected && frame->eventHandler().clickCount() == 1)
+                if (isLabelTextSelected && toMouseEvent(evt)->clickCount() == 1)
                     return;
             }
         }
 
         m_processingClick = true;
 
-        document().updateLayoutIgnorePendingStylesheets();
+        document().updateStyleAndLayoutIgnorePendingStylesheets();
         if (element->isMouseFocusable()) {
             // If the label is *not* selected, or if the click happened on
             // selection of label, only then focus the control element.
@@ -225,7 +210,7 @@ bool HTMLLabelElement::willRespondToMouseClickEvents()
 
 void HTMLLabelElement::focus(const FocusParams& params)
 {
-    document().updateLayoutTreeForNode(this);
+    document().updateStyleAndLayoutTreeForNode(this);
     if (isFocusable()) {
         HTMLElement::focus(params);
         return;
@@ -241,70 +226,6 @@ void HTMLLabelElement::accessKeyAction(bool sendMouseEvents)
         element->accessKeyAction(sendMouseEvents);
     else
         HTMLElement::accessKeyAction(sendMouseEvents);
-}
-
-void HTMLLabelElement::updateLabel(TreeScope& scope, const AtomicString& oldForAttributeValue, const AtomicString& newForAttributeValue)
-{
-    if (!inShadowIncludingDocument())
-        return;
-
-    if (oldForAttributeValue == newForAttributeValue)
-        return;
-
-    if (!oldForAttributeValue.isEmpty())
-        scope.removeLabel(oldForAttributeValue, this);
-    if (!newForAttributeValue.isEmpty())
-        scope.addLabel(newForAttributeValue, this);
-}
-
-Node::InsertionNotificationRequest HTMLLabelElement::insertedInto(ContainerNode* insertionPoint)
-{
-    InsertionNotificationRequest result = HTMLElement::insertedInto(insertionPoint);
-    FormAssociatedElement::insertedInto(insertionPoint);
-    if (insertionPoint->isInTreeScope()) {
-        TreeScope& scope = insertionPoint->treeScope();
-        if (scope == treeScope() && scope.shouldCacheLabelsByForAttribute())
-            updateLabel(scope, nullAtom, fastGetAttribute(forAttr));
-    }
-
-    // Trigger for elements outside of forms.
-    if (!formOwner() && insertionPoint->inShadowIncludingDocument())
-        document().didAssociateFormControl(this);
-
-    return result;
-}
-
-void HTMLLabelElement::removedFrom(ContainerNode* insertionPoint)
-{
-    if (insertionPoint->isInTreeScope() && treeScope() == document()) {
-        TreeScope& treeScope = insertionPoint->treeScope();
-        if (treeScope.shouldCacheLabelsByForAttribute())
-            updateLabel(treeScope, fastGetAttribute(forAttr), nullAtom);
-    }
-    HTMLElement::removedFrom(insertionPoint);
-    FormAssociatedElement::removedFrom(insertionPoint);
-    document().removeFormAssociation(this);
-}
-
-DEFINE_TRACE(HTMLLabelElement)
-{
-    HTMLElement::trace(visitor);
-    FormAssociatedElement::trace(visitor);
-}
-
-void HTMLLabelElement::parseAttribute(const QualifiedName& attributeName, const AtomicString& oldValue, const AtomicString& attributeValue)
-{
-    if (attributeName == formAttr) {
-        formAttributeChanged();
-        UseCounter::count(document(), UseCounter::HTMLLabelElementFormContentAttribute);
-    } else {
-        if (attributeName == forAttr) {
-            TreeScope& scope = treeScope();
-            if (scope.shouldCacheLabelsByForAttribute())
-                updateLabel(scope, oldValue, attributeValue);
-        }
-        HTMLElement::parseAttribute(attributeName, oldValue, attributeValue);
-    }
 }
 
 } // namespace blink

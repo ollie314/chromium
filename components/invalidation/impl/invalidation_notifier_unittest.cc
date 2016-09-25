@@ -4,10 +4,11 @@
 
 #include "components/invalidation/impl/invalidation_notifier.h"
 
+#include <memory>
 #include <utility>
 
-#include "base/memory/scoped_ptr.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/run_loop.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/invalidation/impl/fake_invalidation_handler.h"
 #include "components/invalidation/impl/fake_invalidation_state_tracker.h"
 #include "components/invalidation/impl/invalidation_state_tracker.h"
@@ -37,9 +38,9 @@ class InvalidationNotifierTestDelegate {
       const base::WeakPtr<InvalidationStateTracker>&
           invalidation_state_tracker) {
     DCHECK(!invalidator_.get());
-    scoped_ptr<notifier::PushClient> push_client(
+    std::unique_ptr<notifier::PushClient> push_client(
         new notifier::FakePushClient());
-    scoped_ptr<SyncNetworkChannel> network_channel(
+    std::unique_ptr<SyncNetworkChannel> network_channel(
         new PushClientChannel(std::move(push_client)));
     invalidator_.reset(new InvalidationNotifier(
         std::move(network_channel), invalidator_client_id,
@@ -57,13 +58,11 @@ class InvalidationNotifierTestDelegate {
     // another task, so they must be run in order to avoid leaking the inner
     // task.  Stopping does not schedule any tasks, so it's both necessary and
     // sufficient to drain the task queue before stopping the notifier.
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     invalidator_.reset();
   }
 
-  void WaitForInvalidator() {
-    message_loop_.RunUntilIdle();
-  }
+  void WaitForInvalidator() { base::RunLoop().RunUntilIdle(); }
 
   void TriggerOnInvalidatorStateChange(InvalidatorState state) {
     invalidator_->OnInvalidatorStateChange(state);
@@ -76,7 +75,7 @@ class InvalidationNotifierTestDelegate {
 
  private:
   base::MessageLoop message_loop_;
-  scoped_ptr<InvalidationNotifier> invalidator_;
+  std::unique_ptr<InvalidationNotifier> invalidator_;
 };
 
 INSTANTIATE_TYPED_TEST_CASE_P(

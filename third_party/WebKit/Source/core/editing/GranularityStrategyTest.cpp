@@ -10,15 +10,14 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLBodyElement.h"
-#include "core/html/HTMLDocument.h"
 #include "core/html/HTMLSpanElement.h"
 #include "core/testing/DummyPageHolder.h"
 #include "platform/heap/Handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/StdLibExtras.h"
+#include <memory>
 
 namespace blink {
 
@@ -41,7 +40,7 @@ protected:
     void SetUp() override;
 
     DummyPageHolder& dummyPageHolder() const { return *m_dummyPageHolder; }
-    HTMLDocument& document() const;
+    Document& document() const;
     void setSelection(const VisibleSelection&);
     FrameSelection& selection() const;
     Text* appendTextNode(const String& data);
@@ -69,20 +68,20 @@ protected:
     Vector<IntPoint> m_wordMiddles;
 
 private:
-    OwnPtr<DummyPageHolder> m_dummyPageHolder;
-    Persistent<HTMLDocument> m_document;
+    std::unique_ptr<DummyPageHolder> m_dummyPageHolder;
+    Persistent<Document> m_document;
 };
 
 void GranularityStrategyTest::SetUp()
 {
     m_dummyPageHolder = DummyPageHolder::create(IntSize(800, 600));
-    m_document = toHTMLDocument(&m_dummyPageHolder->document());
+    m_document = &m_dummyPageHolder->document();
     DCHECK(m_document);
     dummyPageHolder().frame().settings()->setDefaultFontSize(12);
     dummyPageHolder().frame().settings()->setSelectionStrategy(SelectionStrategy::Direction);
 }
 
-HTMLDocument& GranularityStrategyTest::document() const
+Document& GranularityStrategyTest::document() const
 {
     return *m_document;
 }
@@ -126,7 +125,7 @@ void GranularityStrategyTest::parseText(const TextNodeVector& textNodes)
         String str = text->wholeText();
         for (size_t i = 0; i < str.length(); i++) {
             m_letterPos.append(visiblePositionToContentsPoint(createVisiblePosition(Position(text, i))));
-            char c = str.characterAt(i);
+            char c = str[i];
             if (isASCIIAlphanumeric(c) && !wordStarted) {
                 wordStartIndex = i + wordStartIndexOffset;
                 wordStarted = true;
@@ -481,6 +480,8 @@ TEST_F(GranularityStrategyTest, Character)
     dummyPageHolder().frame().settings()->setDefaultFontSize(12);
     // "Foo Bar Baz,"
     Text* text = appendTextNode("Foo Bar Baz,");
+    document().updateStyleAndLayout();
+
     // "Foo B^a|>r Baz," (^ means base, | means extent, , < means start, and > means end).
     selection().setSelection(VisibleSelection(Position(text, 5), Position(text, 6)));
     EXPECT_EQ_SELECTED_TEXT("a");
@@ -615,6 +616,7 @@ TEST_F(GranularityStrategyTest, DirectionSwitchSideWordGranularityThenShrink)
     String str = "ab cd efghijkl mnopqr iiin, abc";
     Text* text = document().createTextNode(str);
     document().body()->appendChild(text);
+    document().updateStyleAndLayout();
     dummyPageHolder().frame().settings()->setSelectionStrategy(SelectionStrategy::Direction);
 
     parseText(text);
@@ -647,6 +649,7 @@ TEST_F(GranularityStrategyTest, DirectionSwitchStartOnBoundary)
     String str = "ab cd efghijkl mnopqr iiin, abc";
     Text* text = document().createTextNode(str);
     document().body()->appendChild(text);
+    document().updateStyleAndLayout();
     dummyPageHolder().frame().settings()->setSelectionStrategy(SelectionStrategy::Direction);
 
     parseText(text);

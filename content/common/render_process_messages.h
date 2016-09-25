@@ -14,6 +14,7 @@
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 #if defined(OS_MACOSX)
 #include "content/common/mac/font_descriptor.h"
@@ -54,6 +55,16 @@ IPC_MESSAGE_CONTROL3(RenderProcessHostMsg_DidGenerateCacheableMetadata,
                      base::Time /* expected_response_time */,
                      std::vector<char> /* data */)
 
+// Message sent from the renderer to the browser to request that the browser
+// cache |data| for the specified CacheStorage entry.
+IPC_MESSAGE_CONTROL5(
+    RenderProcessHostMsg_DidGenerateCacheableMetadataInCacheStorage,
+    GURL /* url */,
+    base::Time /* expected_response_time */,
+    std::vector<char> /* data */,
+    url::Origin /* cache_storage_origin*/,
+    std::string /* cache_storage_cache_name */)
+
 // Notify the browser that this render process can or can't be suddenly
 // terminated.
 IPC_MESSAGE_CONTROL1(RenderProcessHostMsg_SuddenTerminationChanged,
@@ -66,15 +77,4 @@ IPC_SYNC_MESSAGE_CONTROL1_3(RenderProcessHostMsg_LoadFont,
                             uint32_t /* buffer size */,
                             base::SharedMemoryHandle /* font data */,
                             uint32_t /* font id */)
-#elif defined(OS_WIN)
-// Request that the given font characters be loaded by the browser so it's
-// cached by the OS. Please see RenderMessageFilter::OnPreCacheFontCharacters
-// for details.
-IPC_SYNC_MESSAGE_CONTROL2_0(RenderProcessHostMsg_PreCacheFontCharacters,
-                            LOGFONT /* font_data */,
-                            base::string16 /* characters */)
-
-// Asks the browser for the user's monitor profile.
-IPC_SYNC_MESSAGE_CONTROL0_1(RenderProcessHostMsg_GetMonitorColorProfile,
-                            std::vector<char> /* profile */)
 #endif

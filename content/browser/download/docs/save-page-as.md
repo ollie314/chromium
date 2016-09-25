@@ -16,10 +16,9 @@ are described by their code comments or by their code structure).
     * UI-thread object
 
 * SaveFileCreateInfo::SaveFileSource enum
-    * classifies `SaveItem` and `SaveFile` processing into 3 flavours:
+    * classifies `SaveItem` and `SaveFile` processing into 2 flavours:
         * `SAVE_FILE_FROM_NET` (see `SaveFileResourceHandler`)
         * `SAVE_FILE_FROM_DOM` (see "Complete HTML" section below)
-        * `SAVE_FILE_FROM_FILE` (see `SaveFileManager::SaveLocalFile`)
 
 * SaveItem class
     * tracks saving a single file
@@ -32,8 +31,9 @@ are described by their code comments or by their code structure).
           `SavePackage` on the UI thread.
         * Shephards data (received from the network OR from DOM) into
           FILE thread - via `SaveFileManager::UpdateSaveProgress`
-    * created and owned by `ResourceDispatchedHostImpl`
+    * created and owned by `BrowserMainLoop`
       (ref-counted today, but it is unnecessary - see https://crbug.com/596953)
+    * The global instance can be retrieved by the Get method.
 
 * SaveFile class
     * tracks saving a single file
@@ -68,8 +68,8 @@ Very high-level flow of saving a page as "Complete HTML":
 * Step 1: `SavePackage` asks all frames for "savable resources"
           and creates `SaveItem` for each of files that need to be saved
 
-* Step 2: `SavePackage` first processes `SAVE_FILE_FROM_NET` and
-          `SAVE_FILE_FROM_FILE` `SaveItem`s and asks `SaveFileManager` to save
+* Step 2: `SavePackage` first processes `SAVE_FILE_FROM_NET`
+          `SaveItem`s and asks `SaveFileManager` to save
           them.
 
 * Step 3: `SavePackage` handles remaining `SAVE_FILE_FROM_DOM` `SaveItem`s and
@@ -88,13 +88,16 @@ Very high-level flow of saving a page as MHTML:
           API) or by an embedder of `WebContents` (since this is public API of
           //content).
 
-* Step 2: `MHTMLGenerationManager` coordinates generation of the MHTML file
-          by sequentially (one-at-a-time) asking each frame to write its portion
-          of MHTML to a file handle.  Other classes (i.e. `SavePackage` and/or
-          `SaveFileManager`) are not used at this step at all.
+* Step 2: `MHTMLGenerationManager` creates a new instance of
+          `MHTMLGenerationManager::Job` that coordinates generation of
+          the MHTML file by sequentially (one-at-a-time) asking each
+          frame to write its portion of MHTML to a file handle.  Other
+          classes (i.e. `SavePackage` and/or `SaveFileManager`) are not
+          used at this step at all.
 
-* Step 3: When done `MHTMLGenerationManager` calls a completion callback
-          which in case of Save-Page-As will end up in
+* Step 3: When done `MHTMLGenerationManager` destroys
+          `MHTMLGenerationManager::Job` instance and calls a completion
+          callback which in case of Save-Page-As will end up in
           `SavePackage::OnMHTMLGenerated`.
 
 Note: MHTML format is by default disabled in Save-Page-As UI on Windows, MacOS
@@ -106,8 +109,8 @@ changed using `--save-page-as-mhtml` command line switch.
 
 Very high-level flow of saving a page as "HTML Only":
 
-* `SavePackage` creates only a single `SaveItem` (either `SAVE_FILE_FROM_NET` or
-  `SAVE_FILE_FROM_FILE`) and asks `SaveFileManager` to process it
+* `SavePackage` creates only a single `SaveItem` (always `SAVE_FILE_FROM_NET`)
+  and asks `SaveFileManager` to process it
   (as in the Complete HTML individual SaveItem handling above.).
 
 

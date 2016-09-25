@@ -13,20 +13,19 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/sys_info.h"
 #include "build/build_config.h"
-#include "ui/events/devices/keyboard_device.h"
+#include "ui/display/display.h"
 #include "ui/events/devices/x11/device_list_cache_x11.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_switches.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
-#include "ui/gfx/display.h"
 #include "ui/gfx/geometry/point3_f.h"
-#include "ui/gfx/x/x11_types.h"
 
 // XIScrollClass was introduced in XI 2.1 so we need to define it here
 // for backward-compatibility with older versions of XInput.
@@ -125,6 +124,15 @@ Iterator FindDeviceWithId(Iterator begin, Iterator end, int id) {
   return end;
 }
 
+// Disables high precision scrolling in X11
+const char kDisableHighPrecisionScrolling[] =
+    "disable-high-precision-scrolling";
+
+bool IsHighPrecisionScrollingDisabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      kDisableHighPrecisionScrolling);
+}
+
 }  // namespace
 
 bool DeviceDataManagerX11::IsCMTDataType(const int type) {
@@ -156,6 +164,7 @@ DeviceDataManagerX11* DeviceDataManagerX11::GetInstance() {
 
 DeviceDataManagerX11::DeviceDataManagerX11()
     : xi_opcode_(-1),
+      high_precision_scrolling_disabled_(IsHighPrecisionScrollingDisabled()),
       atom_cache_(gfx::GetXDisplay(), kCachedAtoms),
       button_map_count_(0) {
   CHECK(gfx::GetXDisplay());
@@ -561,10 +570,16 @@ void DeviceDataManagerX11::GetScrollClassOffsets(const XEvent& xev,
   }
 }
 
-void DeviceDataManagerX11::InvalidateScrollClasses() {
-  for (int i = 0; i < kMaxDeviceNum; i++) {
-    scroll_data_[i].horizontal.seen = false;
-    scroll_data_[i].vertical.seen = false;
+void DeviceDataManagerX11::InvalidateScrollClasses(int device_id) {
+  if (device_id == kAllDevices) {
+    for (int i = 0; i < kMaxDeviceNum; i++) {
+      scroll_data_[i].horizontal.seen = false;
+      scroll_data_[i].vertical.seen = false;
+    }
+  } else {
+    CHECK(device_id >= 0 && device_id < kMaxDeviceNum);
+    scroll_data_[device_id].horizontal.seen = false;
+    scroll_data_[device_id].vertical.seen = false;
   }
 }
 
@@ -769,8 +784,21 @@ bool DeviceDataManagerX11::UpdateValuatorClassDevice(
 void DeviceDataManagerX11::UpdateScrollClassDevice(
     XIScrollClassInfo* scroll_class_info,
     int deviceid) {
+  if (high_precision_scrolling_disabled_)
+    return;
+
   DCHECK(deviceid >= 0 && deviceid < kMaxDeviceNum);
   ScrollInfo& info = scroll_data_[deviceid];
+
+  bool legacy_scroll_available =
+      (scroll_class_info->flags & XIScrollFlagNoEmulation) == 0;
+  // If the device's highest resolution is lower than the resolution of xinput1
+  // then use xinput1's events instead (ie. don't configure smooth scrolling).
+  if (legacy_scroll_available &&
+      std::abs(scroll_class_info->increment) <= 1.0) {
+    return;
+  }
+
   switch (scroll_class_info->scroll_type) {
     case XIScrollTypeVertical:
       info.vertical.number = scroll_class_info->number;
@@ -808,12 +836,12 @@ void DeviceDataManagerX11::SetDisabledKeyboardAllowedKeys(
 void DeviceDataManagerX11::DisableDevice(int deviceid) {
   blocked_devices_.set(deviceid, true);
   // TODO(rsadam@): Support blocking touchscreen devices.
-  std::vector<KeyboardDevice> keyboards = keyboard_devices();
-  std::vector<KeyboardDevice>::iterator it =
+  std::vector<InputDevice> keyboards = GetKeyboardDevices();
+  std::vector<InputDevice>::iterator it =
       FindDeviceWithId(keyboards.begin(), keyboards.end(), deviceid);
   if (it != std::end(keyboards)) {
-    blocked_keyboards_.insert(
-        std::pair<int, KeyboardDevice>(deviceid, *it));
+    blocked_keyboard_devices_.insert(
+        std::pair<int, InputDevice>(deviceid, *it));
     keyboards.erase(it);
     DeviceDataManager::OnKeyboardDevicesUpdated(keyboards);
   }
@@ -821,13 +849,13 @@ void DeviceDataManagerX11::DisableDevice(int deviceid) {
 
 void DeviceDataManagerX11::EnableDevice(int deviceid) {
   blocked_devices_.set(deviceid, false);
-  std::map<int, KeyboardDevice>::iterator it =
-      blocked_keyboards_.find(deviceid);
-  if (it != blocked_keyboards_.end()) {
-    std::vector<KeyboardDevice> devices = keyboard_devices();
+  std::map<int, InputDevice>::iterator it =
+      blocked_keyboard_devices_.find(deviceid);
+  if (it != blocked_keyboard_devices_.end()) {
+    std::vector<InputDevice> devices = GetKeyboardDevices();
     // Add device to current list of active devices.
     devices.push_back((*it).second);
-    blocked_keyboards_.erase(it);
+    blocked_keyboard_devices_.erase(it);
     DeviceDataManager::OnKeyboardDevicesUpdated(devices);
   }
 }
@@ -854,20 +882,20 @@ bool DeviceDataManagerX11::IsEventBlocked(const XEvent& xev) {
 }
 
 void DeviceDataManagerX11::OnKeyboardDevicesUpdated(
-    const std::vector<KeyboardDevice>& devices) {
-  std::vector<KeyboardDevice> keyboards(devices);
-  for (std::map<int, KeyboardDevice>::iterator blocked_iter =
-           blocked_keyboards_.begin();
-       blocked_iter != blocked_keyboards_.end();) {
+    const std::vector<InputDevice>& devices) {
+  std::vector<InputDevice> keyboards(devices);
+  for (std::map<int, InputDevice>::iterator blocked_iter =
+           blocked_keyboard_devices_.begin();
+       blocked_iter != blocked_keyboard_devices_.end();) {
     // Check if the blocked device still exists in list of devices.
     int device_id = blocked_iter->first;
-    std::vector<KeyboardDevice>::iterator it =
+    std::vector<InputDevice>::iterator it =
         FindDeviceWithId(keyboards.begin(), keyboards.end(), device_id);
     // If the device no longer exists, unblock it, else filter it out from our
     // active list.
     if (it == keyboards.end()) {
       blocked_devices_.set((*blocked_iter).first, false);
-      blocked_keyboards_.erase(blocked_iter++);
+      blocked_keyboard_devices_.erase(blocked_iter++);
     } else {
       keyboards.erase(it);
       ++blocked_iter;

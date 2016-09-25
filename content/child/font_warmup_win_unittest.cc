@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <windows.h>
 
 #include <memory>
 #include <vector>
@@ -14,7 +15,6 @@
 #include "base/logging.h"
 #include "base/sys_byteorder.h"
 #include "base/win/windows_version.h"
-#include "skia/ext/refptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkString.h"
 #include "third_party/skia/include/core/SkTypeface.h"
@@ -52,11 +52,6 @@ class TestSkTypeface : public SkTypeface {
   }
 
   SkStreamAsset* onOpenStream(int* ttcIndex) const override {
-    ADD_FAILURE();
-    return nullptr;
-  }
-
-  SkFontData* onCreateFontData() const override {
     ADD_FAILURE();
     return nullptr;
   }
@@ -186,11 +181,6 @@ class TestSkFontMgr : public SkFontMgr {
   }
 
   SkTypeface* onCreateFromStream(SkStreamAsset*, int ttcIndex) const override {
-    ADD_FAILURE();
-    return nullptr;
-  }
-
-  SkTypeface* onCreateFromFontData(SkFontData*) const override {
     ADD_FAILURE();
     return nullptr;
   }

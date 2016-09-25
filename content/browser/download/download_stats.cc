@@ -5,7 +5,7 @@
 #include "content/browser/download/download_stats.h"
 
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_util.h"
 #include "content/browser/download/download_resource_handler.h"
@@ -70,9 +70,9 @@ void RecordContentDispositionCountFlag(
 }
 
 // Do not insert, delete, or reorder; this is being histogrammed. Append only.
-// All of the download_extensions.cc file types should be in this list.
-// TODO(asanka): This enum and the UMA metrics for dangerous/malicious downloads
-// should be moved to //chrome/browser/download.
+// All of the download_file_types.asciipb entries should be in this list.
+// TODO(asanka): Replace this enum with calls to FileTypePolicies and move the
+// UMA metrics for dangerous/malicious downloads to //chrome/browser/download.
 const base::FilePath::CharType* kDangerousFileTypes[] = {
   FILE_PATH_LITERAL(".ad"),
   FILE_PATH_LITERAL(".ade"),
@@ -696,7 +696,7 @@ void RecordOpen(const base::Time& end, bool first) {
 void RecordClearAllSize(int size) {
   UMA_HISTOGRAM_CUSTOM_COUNTS("Download.ClearAllSize",
                               size,
-                              0/*min*/,
+                              1/*min*/,
                               (1 << 10)/*max*/,
                               32/*num_buckets*/);
 }
@@ -704,7 +704,7 @@ void RecordClearAllSize(int size) {
 void RecordOpensOutstanding(int size) {
   UMA_HISTOGRAM_CUSTOM_COUNTS("Download.OpensOutstanding",
                               size,
-                              0/*min*/,
+                              1/*min*/,
                               (1 << 10)/*max*/,
                               64/*num_buckets*/);
 }
@@ -718,7 +718,7 @@ void RecordNetworkBlockage(base::TimeDelta resource_handler_lifetime,
                            base::TimeDelta resource_handler_blocked_time) {
   int percentage = 0;
   // Avoid division by zero errors.
-  if (resource_handler_blocked_time != base::TimeDelta()) {
+  if (!resource_handler_blocked_time.is_zero()) {
     percentage =
         resource_handler_blocked_time * 100 / resource_handler_lifetime;
   }

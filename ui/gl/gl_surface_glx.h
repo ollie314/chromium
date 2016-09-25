@@ -7,11 +7,11 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/vsync_provider.h"
@@ -19,7 +19,7 @@
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_surface.h"
 
-namespace gfx {
+namespace gl {
 
 // Base class for GLX surfaces.
 class GL_EXPORT GLSurfaceGLX : public GLSurface {
@@ -35,6 +35,8 @@ class GL_EXPORT GLSurfaceGLX : public GLSurface {
   static bool HasGLXExtension(const char* name);
   static bool IsCreateContextSupported();
   static bool IsCreateContextRobustnessSupported();
+  static bool IsCreateContextProfileSupported();
+  static bool IsCreateContextES2ProfileSupported();
   static bool IsTextureFromPixmapSupported();
   static bool IsOMLSyncControlSupported();
 
@@ -52,8 +54,7 @@ class GL_EXPORT GLSurfaceGLX : public GLSurface {
 };
 
 // A surface used to render to a view.
-class GL_EXPORT NativeViewGLSurfaceGLX : public GLSurfaceGLX,
-                                         public ui::PlatformEventDispatcher {
+class GL_EXPORT NativeViewGLSurfaceGLX : public GLSurfaceGLX {
  public:
   explicit NativeViewGLSurfaceGLX(gfx::AcceleratedWidget window);
 
@@ -70,18 +71,26 @@ class GL_EXPORT NativeViewGLSurfaceGLX : public GLSurfaceGLX,
   bool SupportsPostSubBuffer() override;
   void* GetConfig() override;
   gfx::SwapResult PostSubBuffer(int x, int y, int width, int height) override;
-  VSyncProvider* GetVSyncProvider() override;
+  gfx::VSyncProvider* GetVSyncProvider() override;
 
  protected:
   ~NativeViewGLSurfaceGLX() override;
 
+  // Handle registering and unregistering for Expose events.
+  virtual void RegisterEvents() = 0;
+  virtual void UnregisterEvents() = 0;
+
+  // Forwards Expose event to child window.
+  void ForwardExposeEvent(XEvent* xevent);
+
+  // Checks if event is Expose for child window.
+  bool CanHandleEvent(XEvent* xevent);
+
+  gfx::AcceleratedWidget window() const { return window_; }
+
  private:
   // The handle for the drawable to make current or swap.
   GLXDrawable GetDrawableHandle() const;
-
-  // PlatformEventDispatcher implementation
-  bool CanDispatchEvent(const ui::PlatformEvent& event) override;
-  uint32_t DispatchEvent(const ui::PlatformEvent& event) override;
 
   // Window passed in at creation. Always valid.
   gfx::AcceleratedWidget parent_window_;
@@ -95,7 +104,7 @@ class GL_EXPORT NativeViewGLSurfaceGLX : public GLSurfaceGLX,
   GLXFBConfig config_;
   gfx::Size size_;
 
-  std::unique_ptr<VSyncProvider> vsync_provider_;
+  std::unique_ptr<gfx::VSyncProvider> vsync_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeViewGLSurfaceGLX);
 };
@@ -129,6 +138,6 @@ class GL_EXPORT UnmappedNativeViewGLSurfaceGLX : public GLSurfaceGLX {
   DISALLOW_COPY_AND_ASSIGN(UnmappedNativeViewGLSurfaceGLX);
 };
 
-}  // namespace gfx
+}  // namespace gl
 
 #endif  // UI_GL_GL_SURFACE_GLX_H_

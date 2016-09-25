@@ -28,7 +28,7 @@ cr.define('login', function() {
    * @type {Array<number>}
    * @const
    */
-  var DESKTOP_MARGIN_BY_COLUMNS = [undefined, 15, 15, 15, 15, 15, 15];
+  var DESKTOP_MARGIN_BY_COLUMNS = [undefined, 32, 32, 32, 32, 32, 32];
 
   /**
    * Maximal number of columns currently supported by pod-row.
@@ -48,14 +48,18 @@ cr.define('login', function() {
    * Variables used for pod placement processing. Width and height should be
    * synced with computed CSS sizes of pods.
    */
-  var POD_WIDTH = 180;
+  var CROS_POD_WIDTH = 180;
+  var DESKTOP_POD_WIDTH = 180;
+  var MD_DESKTOP_POD_WIDTH = 160;
   var PUBLIC_EXPANDED_BASIC_WIDTH = 500;
   var PUBLIC_EXPANDED_ADVANCED_WIDTH = 610;
   var CROS_POD_HEIGHT = 213;
   var DESKTOP_POD_HEIGHT = 226;
+  var MD_DESKTOP_POD_HEIGHT = 200;
   var POD_ROW_PADDING = 10;
-  var DESKTOP_ROW_PADDING = 15;
+  var DESKTOP_ROW_PADDING = 32;
   var CUSTOM_ICON_CONTAINER_SIZE = 40;
+  var CROS_PIN_POD_HEIGHT = 417;
 
   /**
    * Minimal padding between user pod and virtual keyboard.
@@ -85,11 +89,11 @@ cr.define('login', function() {
    * @const
    */
   var UserPodTabOrder = {
-    POD_INPUT: 1,        // Password input fields (and whole pods themselves).
-    POD_CUSTOM_ICON: 2,  // Pod custom icon next to passwrod input field.
+    POD_INPUT: 1,        // Password input field, Action box menu button, and
+                         // the pod itself.
+    POD_CUSTOM_ICON: 2,  // Pod custom icon next to password input field.
     HEADER_BAR: 3,       // Buttons on the header bar (Shutdown, Add User).
-    ACTION_BOX: 4,       // Action box buttons.
-    PAD_MENU_ITEM: 5     // User pad menu items (Remove this user).
+    POD_MENU_ITEM: 4     // User pad menu items (User info, Remove user).
   };
 
   /**
@@ -472,7 +476,7 @@ cr.define('login', function() {
      * @private
      */
     handleKeyDown_: function(e) {
-      if (!this.actionHandler_ || e.keyIdentifier != 'Enter')
+      if (!this.actionHandler_ || e.key != 'Enter')
         return;
       this.actionHandler_(e);
       stopEventPropagation(e);
@@ -703,11 +707,16 @@ cr.define('login', function() {
     /** @override */
     decorate: function() {
       this.tabIndex = UserPodTabOrder.POD_INPUT;
-      this.actionBoxAreaElement.tabIndex = UserPodTabOrder.ACTION_BOX;
+      this.actionBoxAreaElement.tabIndex = UserPodTabOrder.POD_INPUT;
 
       this.addEventListener('keydown', this.handlePodKeyDown_.bind(this));
       this.addEventListener('click', this.handleClickOnPod_.bind(this));
       this.addEventListener('mousedown', this.handlePodMouseDown_.bind(this));
+
+      if (this.pinKeyboard) {
+        this.pinKeyboard.addEventListener('pin-change',
+            this.handlePinChanged_.bind(this));
+      }
 
       this.actionBoxAreaElement.addEventListener('mousedown',
                                                  stopEventPropagation);
@@ -716,18 +725,21 @@ cr.define('login', function() {
       this.actionBoxAreaElement.addEventListener('keydown',
           this.handleActionAreaButtonKeyDown_.bind(this));
 
+      this.actionBoxMenuTitleElement.addEventListener('keydown',
+          this.handleMenuTitleElementKeyDown_.bind(this));
+      this.actionBoxMenuTitleElement.addEventListener('blur',
+          this.handleMenuTitleElementBlur_.bind(this));
+
       this.actionBoxMenuRemoveElement.addEventListener('click',
           this.handleRemoveCommandClick_.bind(this));
       this.actionBoxMenuRemoveElement.addEventListener('keydown',
           this.handleRemoveCommandKeyDown_.bind(this));
       this.actionBoxMenuRemoveElement.addEventListener('blur',
           this.handleRemoveCommandBlur_.bind(this));
-      this.actionBoxRemoveUserWarningButtonElement.addEventListener(
-          'click',
+      this.actionBoxRemoveUserWarningButtonElement.addEventListener('click',
           this.handleRemoveUserConfirmationClick_.bind(this));
-        this.actionBoxRemoveUserWarningButtonElement.addEventListener(
-            'keydown',
-            this.handleRemoveUserConfirmationKeyDown_.bind(this));
+      this.actionBoxRemoveUserWarningButtonElement.addEventListener('keydown',
+          this.handleRemoveUserConfirmationKeyDown_.bind(this));
 
       var customIcon = this.customIconElement;
       customIcon.parentNode.replaceChild(new UserPodCustomIcon(), customIcon);
@@ -741,6 +753,13 @@ cr.define('login', function() {
           this.parentNode.handleKeyDown.bind(this.parentNode));
       this.passwordElement.addEventListener('keypress',
           this.handlePasswordKeyPress_.bind(this));
+      this.passwordElement.addEventListener('input',
+          this.handleInputChanged_.bind(this));
+
+      if (this.submitButton) {
+        this.submitButton.addEventListener('click',
+            this.handleSubmitButtonClick_.bind(this));
+      }
 
       this.imageElement.addEventListener('load',
           this.parentNode.handlePodImageLoad.bind(this.parentNode, this));
@@ -750,6 +769,18 @@ cr.define('login', function() {
       this.setAuthType(initialAuthType, null);
 
       this.userClickAuthAllowed_ = false;
+
+      // Lazy load the assets needed for the polymer submit button.
+      var isLockScreen = (Oobe.getInstance().displayType == DISPLAY_TYPE.LOCK);
+      if (cr.isChromeOS && isLockScreen &&
+          !cr.ui.login.ResourceLoader.alreadyLoadedAssets(
+              'custom-elements-user-pod')) {
+        cr.ui.login.ResourceLoader.registerAssets({
+            id: 'custom-elements-user-pod',
+            html: [{ url: 'custom_elements_user_pod.html' }]
+         });
+        cr.ui.login.ResourceLoader.loadAssetsOnIdle('custom-elements-user-pod');
+      }
     },
 
     /**
@@ -774,6 +805,14 @@ cr.define('login', function() {
         return;
       }
       this.customIconElement.cancelDelayedTooltipShow();
+    },
+
+    /**
+     * Handles a click event on submit button.
+     * @param {Event} e Click event.
+     */
+    handleSubmitButtonClick_: function(e) {
+      this.parentNode.setActivatedPod(this, e);
     },
 
     /**
@@ -854,12 +893,32 @@ cr.define('login', function() {
     },
 
     /**
+     * Gets submit button.
+     * @type {!HTMLInputElement}
+     */
+    get submitButton() {
+      return this.querySelector('.submit-button');
+    },
+
+    /**
      * Gets the password label, which is used to show a message where the
      * password field is normally.
      * @type {!HTMLInputElement}
      */
     get passwordLabelElement() {
       return this.querySelector('.password-label');
+    },
+
+    get pinContainer() {
+      return this.querySelector('.pin-container');
+    },
+
+    /**
+     * Gets the pin-keyboard of the pod.
+     * @type {!HTMLElement}
+     */
+    get pinKeyboard() {
+      return this.querySelector('pin-keyboard');
     },
 
     /**
@@ -912,15 +971,23 @@ cr.define('login', function() {
 
     /**
      * Gets action box menu.
-     * @type {!HTMLInputElement}
+     * @type {!HTMLDivElement}
      */
     get actionBoxMenu() {
       return this.querySelector('.action-box-menu');
     },
 
     /**
+     * Gets action box menu title (user name and email).
+     * @type {!HTMLDivElement}
+     */
+    get actionBoxMenuTitleElement() {
+      return this.querySelector('.action-box-menu-title');
+    },
+
+    /**
      * Gets action box menu title, user name item.
-     * @type {!HTMLInputElement}
+     * @type {!HTMLSpanElement}
      */
     get actionBoxMenuTitleNameElement() {
       return this.querySelector('.action-box-menu-title-name');
@@ -928,7 +995,7 @@ cr.define('login', function() {
 
     /**
      * Gets action box menu title, user email item.
-     * @type {!HTMLInputElement}
+     * @type {!HTMLSpanElement}
      */
     get actionBoxMenuTitleEmailElement() {
       return this.querySelector('.action-box-menu-title-email');
@@ -1063,6 +1130,49 @@ cr.define('login', function() {
       }
     },
 
+    isPinReady: function() {
+      return this.pinKeyboard && this.pinKeyboard.offsetHeight > 0;
+    },
+
+    set showError(visible) {
+      if (this.submitButton)
+        this.submitButton.classList.toggle('error-shown', visible);
+    },
+
+    toggleTransitions: function(enable) {
+      this.classList.toggle('flying-pin-pod', enable);
+    },
+
+    updatePinClass_: function(element, enable) {
+      element.classList.toggle('pin-enabled', enable);
+      element.classList.toggle('pin-disabled', !enable);
+    },
+
+    setPinVisibility: function(visible) {
+      if (this.isPinShown() == visible)
+        return;
+
+      // Do not show pin if virtual keyboard is there.
+      if (visible && Oobe.getInstance().virtualKeyboardShown)
+        return;
+
+      var elements = this.getElementsByClassName('pin-tag');
+      for (var i = 0; i < elements.length; ++i)
+        this.updatePinClass_(elements[i], visible);
+      this.updatePinClass_(this, visible);
+
+      // Set the focus to the input element after showing/hiding pin keyboard.
+      this.mainInput.focus();
+
+      // Change the password placeholder based on pin keyboard visibility.
+      this.passwordElement.placeholder = loadTimeData.getString(visible ?
+          'pinKeyboardPlaceholderPinPassword' : 'passwordHint');
+    },
+
+    isPinShown: function() {
+      return this.classList.contains('pin-enabled');
+    },
+
     setUserPodIconType: function(userTypeClass) {
       this.userTypeIconAreaElement.classList.add(userTypeClass);
       this.userTypeIconAreaElement.hidden = false;
@@ -1131,6 +1241,10 @@ cr.define('login', function() {
         this.userTypeBubbleElement.classList.remove('bubble-shown');
 
         this.actionBoxAreaElement.classList.add('active');
+
+        // Invisible focus causes ChromeVox to read user name and email.
+        this.actionBoxMenuTitleElement.tabIndex = UserPodTabOrder.POD_MENU_ITEM;
+        this.actionBoxMenuTitleElement.focus();
 
         // If the user pod is on either edge of the screen, then the menu
         // could be displayed partially ofscreen.
@@ -1260,11 +1374,13 @@ cr.define('login', function() {
         this.classList.toggle('signing-in', true);
         chrome.send('attemptUnlock', [this.user.username]);
       } else if (this.isAuthTypePassword) {
-        if (!this.passwordElement.value)
+        var pinValue = this.pinKeyboard ? this.pinKeyboard.value : '';
+        var password = this.passwordElement.value || pinValue;
+        if (!password)
           return false;
         Oobe.disableSigninUI();
-        chrome.send('authenticateUser',
-                    [this.user.username, this.passwordElement.value]);
+        chrome.send('authenticateUser', [this.user.username, password,
+                                         this.isPinShown()]);
       } else {
         console.error('Activating user pod with invalid authentication type: ' +
             this.authType);
@@ -1326,6 +1442,9 @@ cr.define('login', function() {
      */
     reset: function(takeFocus) {
       this.passwordElement.value = '';
+      if (this.pinKeyboard)
+        this.pinKeyboard.value = '';
+      this.updateInput_();
       this.classList.toggle('signing-in', false);
       if (takeFocus) {
         if (!this.multiProfilesPolicyApplied)
@@ -1362,27 +1481,32 @@ cr.define('login', function() {
     handleActionAreaButtonKeyDown_: function(e) {
       if (this.disabled)
         return;
-      switch (e.keyIdentifier) {
+      switch (e.key) {
         case 'Enter':
-        case 'U+0020':  // Space
+        case ' ':
           if (this.parentNode.focusedPod_ && !this.isActionBoxMenuActive)
             this.isActionBoxMenuActive = true;
           e.stopPropagation();
           break;
-        case 'Up':
-        case 'Down':
+        case 'ArrowUp':
+        case 'ArrowDown':
           if (this.isActionBoxMenuActive) {
             this.actionBoxMenuRemoveElement.tabIndex =
-                UserPodTabOrder.PAD_MENU_ITEM;
+                UserPodTabOrder.POD_MENU_ITEM;
             this.actionBoxMenuRemoveElement.focus();
           }
           e.stopPropagation();
           break;
-        case 'U+001B':  // Esc
+        // Ignore these two, so ChromeVox hotkeys don't close the menu before
+        // they can navigate through it.
+        case 'Shift':
+        case 'Meta':
+          break;
+        case 'Escape':
           this.isActionBoxMenuActive = false;
           e.stopPropagation();
           break;
-        case 'U+0009':  // Tab
+        case 'Tab':
           if (!this.parentNode.alwaysFocusSinglePod)
             this.parentNode.focusPod();
         default:
@@ -1392,16 +1516,50 @@ cr.define('login', function() {
     },
 
     /**
+     * Handles a keydown event on menu title.
+     * @param {Event} e KeyDown event.
+     */
+    handleMenuTitleElementKeyDown_: function(e) {
+      if (this.disabled)
+        return;
+
+      if (e.key != 'Tab') {
+        this.handleActionAreaButtonKeyDown_(e);
+        return;
+      }
+
+      if (e.shiftKey == false) {
+        if (this.actionBoxMenuRemoveElement.hidden) {
+          this.isActionBoxMenuActive = false;
+        } else {
+          this.actionBoxMenuRemoveElement.tabIndex =
+              UserPodTabOrder.POD_MENU_ITEM;
+          this.actionBoxMenuRemoveElement.focus();
+          e.preventDefault();
+        }
+      } else {
+        this.isActionBoxMenuActive = false;
+        this.focusInput();
+        e.preventDefault();
+      }
+    },
+
+    /**
+     * Handles a blur event on menu title.
+     * @param {Event} e Blur event.
+     */
+    handleMenuTitleElementBlur_: function(e) {
+      if (this.disabled)
+        return;
+      this.actionBoxMenuTitleElement.tabIndex = -1;
+    },
+
+    /**
      * Handles a click event on remove user command.
      * @param {Event} e Click event.
      */
     handleRemoveCommandClick_: function(e) {
-      if (this.user.legacySupervisedUser || this.user.isDesktopUser) {
-        this.showRemoveWarning_();
-        return;
-      }
-      if (this.isActionBoxMenuActive)
-        chrome.send('removeUser', [this.user.username]);
+      this.showRemoveWarning_();
     },
 
     /**
@@ -1424,19 +1582,29 @@ cr.define('login', function() {
     },
 
     /**
-     * Shows remove user warning. Used for legacy supervised users on CrOS, and
-     * for all users on desktop.
+     * Shows remove user warning. Used for legacy supervised users
+     * and non-device-owner on CrOS, and for all users on desktop.
      */
     showRemoveWarning_: function() {
       this.actionBoxMenuRemoveElement.hidden = true;
       this.actionBoxRemoveUserWarningElement.hidden = false;
-      this.actionBoxRemoveUserWarningButtonElement.focus();
 
-      // Show extra statistics information for desktop users
-      var message;
-      if (this.user.isLegacySupervisedUser) {
+      if (!this.user.isDesktopUser) {
         this.moveActionMenuUpIfNeeded_();
+        if (!this.user.legacySupervisedUser) {
+          this.querySelector(
+              '.action-box-remove-user-warning-text').style.display = 'none';
+          this.querySelector(
+              '.action-box-remove-user-warning-table-nonsync').style.display
+              = 'none';
+          var message = loadTimeData.getString('removeNonOwnerUserWarningText');
+          this.updateRemoveNonOwnerUserWarningMessage_(this.user.profilePath,
+                                                       message);
+        }
       } else {
+        // Show extra statistics information for desktop users
+        this.querySelector(
+          '.action-box-remove-non-owner-user-warning-text').hidden = true;
         this.RemoveWarningDialogSetMessage_(true, false);
         // set a global handler for the callback
         window.updateRemoveWarningDialog =
@@ -1478,7 +1646,7 @@ cr.define('login', function() {
      * a in-progress message.
      * @param {boolean} Whether any actual query to the statistics have failed.
      * Should be true only if there is an error and the corresponding statistic
-     * is also unavailable in ProfileInfoCache.
+     * is also unavailable in ProfileAttributesStorage.
      */
     RemoveWarningDialogSetMessage_: function(isInitial, hasErrors) {
       var stats_elements = this.statsMapElements;
@@ -1548,19 +1716,55 @@ cr.define('login', function() {
       if (profilePath !== this.user.profilePath)
         return;
       // Add localized messages where $1 will be replaced with
-      // <span class="total-count"></span>.
+      // <span class="total-count"></span> and $2 will be replaced with
+      // <span class="email"></span>.
       var element = this.querySelector('.action-box-remove-user-warning-text');
       element.textContent = '';
 
-      messageParts = message.split('$1');
+      messageParts = message.split(/(\$[12])/);
       var numParts = messageParts.length;
       for (var j = 0; j < numParts; j++) {
-        element.appendChild(document.createTextNode(messageParts[j]));
-        if (j < numParts - 1) {
+        if (messageParts[j] === '$1') {
           var elementToAdd = document.createElement('span');
           elementToAdd.classList.add('total-count');
           elementToAdd.textContent = count;
           element.appendChild(elementToAdd);
+        } else if (messageParts[j] === '$2') {
+          var elementToAdd = document.createElement('span');
+          elementToAdd.classList.add('email');
+          elementToAdd.textContent = this.user.emailAddress;
+          element.appendChild(elementToAdd);
+        } else {
+          element.appendChild(document.createTextNode(messageParts[j]));
+        }
+      }
+      this.moveActionMenuUpIfNeeded_();
+    },
+
+    /**
+     * Update the message in the "remove non-owner user warning" dialog on CrOS.
+     * @param {string} profilePath The filepath of the URL (must be verified).
+     * @param (string) message The message to be written.
+     */
+    updateRemoveNonOwnerUserWarningMessage_: function(profilePath, message) {
+      if (profilePath !== this.user.profilePath)
+        return;
+      // Add localized messages where $1 will be replaced with
+      // <span class="email"></span>.
+      var element = this.querySelector(
+          '.action-box-remove-non-owner-user-warning-text');
+      element.textContent = '';
+
+      messageParts = message.split(/(\$[1])/);
+      var numParts = messageParts.length;
+      for (var j = 0; j < numParts; j++) {
+        if (messageParts[j] == '$1') {
+          var elementToAdd = document.createElement('span');
+          elementToAdd.classList.add('email');
+          elementToAdd.textContent = this.user.emailAddress;
+          element.appendChild(elementToAdd);
+        } else {
+          element.appendChild(document.createTextNode(messageParts[j]));
         }
       }
       this.moveActionMenuUpIfNeeded_();
@@ -1588,7 +1792,7 @@ cr.define('login', function() {
 
       // Only handle pressing 'Enter' or 'Space', and let all other events
       // bubble to the action box menu.
-      if (e.keyIdentifier == 'Enter' || e.keyIdentifier == 'U+0020') {
+      if (e.key == 'Enter' || e.key == ' ') {
         this.isActionBoxMenuActive = false;
         this.removeUser(this.user);
         e.stopPropagation();
@@ -1604,23 +1808,22 @@ cr.define('login', function() {
     handleRemoveCommandKeyDown_: function(e) {
       if (this.disabled)
         return;
-      switch (e.keyIdentifier) {
+      switch (e.key) {
         case 'Enter':
-          if (this.user.legacySupervisedUser || this.user.isDesktopUser) {
-            // Prevent default so that we don't trigger a 'click' event on the
-            // remove button that will be focused.
-            e.preventDefault();
-            this.showRemoveWarning_();
-          } else {
-            this.removeUser(this.user);
-          }
+          e.preventDefault();
+          this.showRemoveWarning_();
           e.stopPropagation();
           break;
-        case 'Up':
-        case 'Down':
+        case 'ArrowUp':
+        case 'ArrowDown':
           e.stopPropagation();
           break;
-        case 'U+001B':  // Esc
+        // Ignore these two, so ChromeVox hotkeys don't close the menu before
+        // they can navigate through it.
+        case 'Shift':
+        case 'Meta':
+          break;
+        case 'Escape':
           this.actionBoxAreaElement.focus();
           this.isActionBoxMenuActive = false;
           e.stopPropagation();
@@ -1653,6 +1856,38 @@ cr.define('login', function() {
     },
 
     /**
+     * Called when the input of the password element changes. Updates the submit
+     * button color and state and hides the error popup bubble.
+     */
+    updateInput_: function() {
+      if (this.submitButton)
+        this.submitButton.disabled = this.passwordElement.value.length <= 0;
+      this.showError = false;
+      $('bubble').hide();
+    },
+
+    /**
+     * Handles pin change event from the pin keyboard.
+     * @param {Event} e Pin change event.
+     */
+    handlePinChanged_: function(e) {
+      this.passwordElement.value = e.detail.pin;
+      this.updateInput_();
+    },
+
+    /**
+     * Handles input event on the password element.
+     * @param {Event} e Input event.
+     */
+    handleInputChanged_: function(e) {
+      if (this.pinKeyboard)
+        this.pinKeyboard.value = this.passwordElement.value;
+      if (this.submitButton)
+        this.submitButton.disabled = this.passwordElement.value.length <= 0;
+      this.updateInput_();
+    },
+
+    /**
      * Handles click event on a user pod.
      * @param {Event} e Click event.
      */
@@ -1667,13 +1902,20 @@ cr.define('login', function() {
           // Note that this.userClickAuthAllowed_ is set in mouse down event
           // handler.
           this.parentNode.setActivatedPod(this);
+        } else if (this.pinKeyboard &&
+                   e.target == this.pinKeyboard.submitButton) {
+          // Sets the pod as activated if the submit button is clicked so that
+          // it simulates what the enter button does for the password/pin.
+          this.parentNode.setActivatedPod(this);
         }
 
         if (this.multiProfilesPolicyApplied)
           this.userTypeBubbleElement.classList.add('bubble-shown');
 
-        // Prevent default so that we don't trigger 'focus' event.
-        e.preventDefault();
+        // Prevent default so that we don't trigger 'focus' event and
+        // stop propagation so that the 'click' event does not bubble
+        // up and accidentally closes the bubble tooltip.
+        stopEventPropagation(e);
       }
     },
 
@@ -1684,9 +1926,9 @@ cr.define('login', function() {
     handlePodKeyDown_: function(e) {
       if (!this.isAuthTypeUserClick || this.disabled)
         return;
-      switch (e.keyIdentifier) {
+      switch (e.key) {
         case 'Enter':
-        case 'U+0020':  // Space
+        case ' ':
           if (this.parentNode.isFocused(this))
             this.parentNode.setActivatedPod(this);
           break;
@@ -1786,7 +2028,7 @@ cr.define('login', function() {
       this.classList.add('public-account');
 
       this.nameElement.addEventListener('keydown', (function(e) {
-        if (e.keyIdentifier == 'Enter') {
+        if (e.key == 'Enter') {
           this.parentNode.setActivatedPod(this, e);
           // Stop this keydown event from bubbling up to PodRow handler.
           e.stopPropagation();
@@ -2312,10 +2554,15 @@ cr.define('login', function() {
 
       var isDesktopUserManager = Oobe.getInstance().displayType ==
           DISPLAY_TYPE.DESKTOP_USER_MANAGER;
-      this.userPodHeight_ = isDesktopUserManager ? DESKTOP_POD_HEIGHT :
-                                                   CROS_POD_HEIGHT;
-      // Same for Chrome OS and desktop.
-      this.userPodWidth_ = POD_WIDTH;
+      var isNewDesktopUserManager = Oobe.getInstance().newDesktopUserManager;
+      this.userPodHeight_ = isDesktopUserManager ?
+          isNewDesktopUserManager ? MD_DESKTOP_POD_HEIGHT :
+                                    DESKTOP_POD_HEIGHT :
+          CROS_POD_HEIGHT;
+      this.userPodWidth_ = isDesktopUserManager ?
+          isNewDesktopUserManager ? MD_DESKTOP_POD_WIDTH :
+                                    DESKTOP_POD_WIDTH :
+          CROS_POD_WIDTH;
     },
 
     /**
@@ -2413,6 +2660,33 @@ cr.define('login', function() {
     },
 
     /**
+     * Enables or disables transitions on the user pod.
+     * @param {boolean} enable
+     */
+    togglePinTransitions: function(enable) {
+      for (var i = 0; i < this.pods.length; ++i)
+        this.pods[i].toggleTransitions(enable);
+    },
+
+    /**
+     * Performs visual changes on the user pod if there is an error.
+     * @param {boolean} visible Whether to show or hide the display.
+     */
+    setFocusedPodErrorDisplay: function(visible) {
+      if (this.focusedPod_)
+        this.focusedPod_.showError = visible;
+    },
+
+    /**
+     * Shows or hides the pin keyboard for the current focused pod.
+     * @param {boolean} visible
+     */
+    setFocusedPodPinVisibility: function(visible) {
+      if (this.focusedPod_ && this.focusedPod_.user.showPin)
+        this.focusedPod_.setPinVisibility(visible);
+    },
+
+    /**
      * Runs app with a given id from the list of loaded apps.
      * @param {!string} app_id of an app to run.
      * @param {boolean=} opt_diagnosticMode Whether to run the app in
@@ -2430,14 +2704,40 @@ cr.define('login', function() {
     },
 
     /**
+     * Function that hides the pin keyboard. Meant to be called when the virtual
+     * keyboard is enabled and being toggled.
+     * @param {boolean} hidden
+     */
+    setPinHidden: function(hidden) {
+      this.setFocusedPodPinVisibility(!hidden);
+    },
+
+    /**
+     * Remove the pin keyboard from the pod with the given |username|.
+     * @param {!user} username
+     * @param {boolean} visible
+     */
+    removePinKeyboard: function(username) {
+      var pod = this.getPodWithUsername_(username);
+      if (!pod) {
+        console.warn('Attempt to remove pin keyboard of missing pod.');
+        return;
+      }
+      // Remove the child, so that the virtual keyboard cannot bring it up
+      // again after three tries.
+      if (pod.pinContainer)
+        pod.removeChild(pod.pinContainer);
+      pod.setPinVisibility(false);
+    },
+
+    /**
      * Removes user pod from pod row.
-     * @param {string} email User's email.
+     * @param {!user} username
      */
     removeUserPod: function(username) {
       var podToRemove = this.getPodWithUsername_(username);
       if (podToRemove == null) {
-        console.warn('Attempt to remove not existing pod for ' + username +
-            '.');
+        console.warn('Attempt to remove pod that does not exist');
         return;
       }
       this.removeChild(podToRemove);
@@ -2745,7 +3045,19 @@ cr.define('login', function() {
       if (layout.columns != this.columns || layout.rows != this.rows)
         this.placePods_();
 
-      this.scrollFocusedPodIntoView();
+      // Wrap this in a set timeout so the function is called after the pod is
+      // finished transitioning so that we work with the final pod dimensions.
+      // If there is no focused pod that may be transitioning when this function
+      // is called, we can call scrollFocusedPodIntoView() right away.
+      var timeOut = 0;
+      if (this.focusedPod_) {
+        var style = getComputedStyle(this.focusedPod_);
+        timeOut = parseFloat(style.transitionDuration) * 1000;
+      }
+
+      setTimeout(function() {
+        this.scrollFocusedPodIntoView();
+      }.bind(this), timeOut);
     },
 
     /**
@@ -2793,9 +3105,11 @@ cr.define('login', function() {
           $('signin-banner'), null).getPropertyValue('display') != 'none') {
         rows = Math.min(rows, MAX_NUMBER_OF_ROWS_UNDER_SIGNIN_BANNER);
       }
-      var maxHeigth = Oobe.getInstance().clientAreaSize.height;
-      while (maxHeigth < this.rowsToHeight_(rows) && rows > 1)
-        --rows;
+      if (!Oobe.getInstance().newDesktopUserManager) {
+        var maxHeigth = Oobe.getInstance().clientAreaSize.height;
+        while (maxHeigth < this.rowsToHeight_(rows) && rows > 1)
+         --rows;
+      }
       // One more iteration if it's not enough cells to place all pods.
       while (maxWidth >= this.columnsToWidth_(columns + 1) &&
              columns * rows < this.pods.length &&
@@ -2810,25 +3124,33 @@ cr.define('login', function() {
      * @private
      */
     placePods_: function() {
+      var isDesktopUserManager = Oobe.getInstance().displayType ==
+          DISPLAY_TYPE.DESKTOP_USER_MANAGER;
+      if (isDesktopUserManager && !Oobe.getInstance().userPodsPageVisible)
+        return;
+
       var layout = this.calculateLayout_();
       var columns = this.columns = layout.columns;
       var rows = this.rows = layout.rows;
       var maxPodsNumber = columns * rows;
-      var isDesktopUserManager = Oobe.getInstance().displayType ==
-          DISPLAY_TYPE.DESKTOP_USER_MANAGER;
       var margin = isDesktopUserManager ? DESKTOP_MARGIN_BY_COLUMNS[columns] :
                                           MARGIN_BY_COLUMNS[columns];
       this.parentNode.setPreferredSize(
           this.columnsToWidth_(columns), this.rowsToHeight_(rows));
       var height = this.userPodHeight_;
       var width = this.userPodWidth_;
+      var pinPodLocation = { column: columns + 1, row: rows + 1 };
+      if (this.focusedPod_ && this.focusedPod_.isPinShown())
+        pinPodLocation = this.findPodLocation_(this.focusedPod_, columns, rows);
+
       this.pods.forEach(function(pod, index) {
         if (index >= maxPodsNumber) {
            pod.hidden = true;
            return;
         }
         pod.hidden = false;
-        if (pod.offsetHeight != height) {
+        if (pod.offsetHeight != height &&
+            pod.offsetHeight != CROS_PIN_POD_HEIGHT) {
           console.error('Pod offsetHeight (' + pod.offsetHeight +
               ') and POD_HEIGHT (' + height + ') are not equal.');
         }
@@ -2838,6 +3160,7 @@ cr.define('login', function() {
         }
         var column = index % columns;
         var row = Math.floor(index / columns);
+
         var rowPadding = isDesktopUserManager ? DESKTOP_ROW_PADDING :
                                                 POD_ROW_PADDING;
         pod.left = rowPadding + column * (width + margin);
@@ -2911,6 +3234,7 @@ cr.define('login', function() {
         if (pod != podToFocus) {
           pod.isActionBoxMenuHovered = false;
           pod.classList.remove('focused');
+          pod.setPinVisibility(false);
           // On Desktop, the faded style is not set correctly, so we should
           // manually fade out non-focused pods if there is a focused pod.
           if (pod.user.isDesktopUser && podToFocus)
@@ -2925,9 +3249,11 @@ cr.define('login', function() {
       if (!this.isFocused(podToFocus))
         Oobe.clearErrors();
 
-      var hadFocus = !!this.focusedPod_;
       this.focusedPod_ = podToFocus;
       if (podToFocus) {
+        // Only show the keyboard if it is fully loaded.
+        if (podToFocus.isPinReady())
+          podToFocus.setPinVisibility(true);
         podToFocus.classList.remove('faded');
         podToFocus.classList.add('focused');
         if (!podToFocus.multiProfilesPolicyApplied) {
@@ -3201,8 +3527,8 @@ cr.define('login', function() {
       if (this.disabled)
         return;
       var editing = e.target.tagName == 'INPUT' && e.target.value;
-      switch (e.keyIdentifier) {
-        case 'Left':
+      switch (e.key) {
+        case 'ArrowLeft':
           if (!editing) {
             if (this.focusedPod_ && this.focusedPod_.previousElementSibling)
               this.focusPod(this.focusedPod_.previousElementSibling);
@@ -3212,7 +3538,7 @@ cr.define('login', function() {
             e.stopPropagation();
           }
           break;
-        case 'Right':
+        case 'ArrowRight':
           if (!editing) {
             if (this.focusedPod_ && this.focusedPod_.nextElementSibling)
               this.focusPod(this.focusedPod_.nextElementSibling);
@@ -3226,6 +3552,8 @@ cr.define('login', function() {
           if (this.focusedPod_) {
             var targetTag = e.target.tagName;
             if (e.target == this.focusedPod_.passwordElement ||
+                (this.focusedPod_.pinKeyboard &&
+                 e.target == this.focusedPod_.pinKeyboard.inputElement) ||
                 (targetTag != 'INPUT' &&
                  targetTag != 'BUTTON' &&
                  targetTag != 'A')) {
@@ -3234,7 +3562,7 @@ cr.define('login', function() {
             }
           }
           break;
-        case 'U+001B':  // Esc
+        case 'Escape':
           if (!this.alwaysFocusSinglePod)
             this.focusPod();
           break;

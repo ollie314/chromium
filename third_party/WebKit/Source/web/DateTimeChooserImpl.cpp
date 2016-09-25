@@ -30,7 +30,6 @@
 
 #include "web/DateTimeChooserImpl.h"
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 #include "core/InputTypeNames.h"
 #include "core/frame/FrameView.h"
 #include "core/html/forms/DateTimeChooserClient.h"
@@ -52,6 +51,7 @@ DateTimeChooserImpl::DateTimeChooserImpl(ChromeClientImpl* chromeClient, DateTim
     , m_parameters(parameters)
     , m_locale(Locale::create(parameters.locale))
 {
+    DCHECK(RuntimeEnabledFeatures::inputMultipleFieldsUIEnabled());
     DCHECK(m_chromeClient);
     DCHECK(m_client);
     m_popup = m_chromeClient->openPagePopup(this);
@@ -106,7 +106,7 @@ static String valueToDateTimeString(double value, AtomicString type)
 void DateTimeChooserImpl::writeDocument(SharedBuffer* data)
 {
     String stepString = String::number(m_parameters.step);
-    String stepBaseString = String::number(m_parameters.stepBase, 11, WTF::TruncateTrailingZeros);
+    String stepBaseString = String::number(m_parameters.stepBase, 11);
     String todayLabelString;
     String otherDateLabelString;
     if (m_parameters.type == InputTypeNames::month) {
@@ -161,7 +161,7 @@ void DateTimeChooserImpl::writeDocument(SharedBuffer* data)
         addProperty("suggestionValues", suggestionValues, data);
         addProperty("localizedSuggestionValues", localizedSuggestionValues, data);
         addProperty("suggestionLabels", suggestionLabels, data);
-        addProperty("inputWidth", static_cast<unsigned>(m_parameters.anchorRectInRootFrame.width()), data);
+        addProperty("inputWidth", static_cast<unsigned>(m_parameters.anchorRectInScreen.width()), data);
         addProperty("showOtherDateEntry", LayoutTheme::theme().supportsCalendarPicker(m_parameters.type), data);
         addProperty("otherDateLabel", otherDateLabelString, data);
         addProperty("suggestionHighlightColor", LayoutTheme::theme().activeListBoxSelectionBackgroundColor().serialized(), data);
@@ -210,5 +210,3 @@ void DateTimeChooserImpl::didClosePopup()
 }
 
 } // namespace blink
-
-#endif // ENABLE(INPUT_MULTIPLE_FIELDS_UI)

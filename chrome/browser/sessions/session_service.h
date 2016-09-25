@@ -118,6 +118,10 @@ class SessionService : public sessions::BaseSessionServiceDelegate,
                        const gfx::Rect& bounds,
                        ui::WindowShowState show_state);
 
+  // Sets the workspace the window resides in.
+  void SetWindowWorkspace(const SessionID& window_id,
+                          const std::string& workspace);
+
   // Sets the visual index of the tab in its parent window.
   void SetTabIndexInWindow(const SessionID& window_id,
                            const SessionID& tab_id,
@@ -240,7 +244,7 @@ class SessionService : public sessions::BaseSessionServiceDelegate,
 
   // Removes unrestorable windows from the previous windows list.
   void RemoveUnusedRestoreWindows(
-      std::vector<sessions::SessionWindow*>* window_list);
+      std::vector<std::unique_ptr<sessions::SessionWindow>>* window_list);
 
   // Implementation of RestoreIfNecessary. If |browser| is non-null and we need
   // to restore, the tabs are added to it, otherwise a new browser is created.

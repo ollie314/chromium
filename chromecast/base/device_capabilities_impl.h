@@ -5,9 +5,10 @@
 #ifndef CHROMECAST_BASE_DEVICE_CAPABILITIES_IMPL_H_
 #define CHROMECAST_BASE_DEVICE_CAPABILITIES_IMPL_H_
 
+#include <memory>
 #include <string>
+#include <unordered_map>
 
-#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list_threadsafe.h"
@@ -28,12 +29,14 @@ class DeviceCapabilitiesImpl : public DeviceCapabilities {
   void Register(const std::string& key, Validator* validator) override;
   void Unregister(const std::string& key, const Validator* validator) override;
   Validator* GetValidator(const std::string& key) const override;
+  bool AssistantSupported() const override;
   bool BluetoothSupported() const override;
   bool DisplaySupported() const override;
   bool HiResAudioSupported() const override;
   std::unique_ptr<base::Value> GetCapability(
       const std::string& path) const override;
-  scoped_refptr<Data> GetData() const override;
+  scoped_refptr<Data> GetAllData() const override;
+  scoped_refptr<Data> GetPublicData() const override;
   void SetCapability(const std::string& path,
                      std::unique_ptr<base::Value> proposed_value) override;
   void MergeDictionary(const base::DictionaryValue& dict_value) override;
@@ -65,26 +68,40 @@ class DeviceCapabilitiesImpl : public DeviceCapabilities {
 
   // For DeviceCapabilitiesImpl()
   friend class DeviceCapabilities;
-  // For SetValidatedValueInternal()
-  friend class DeviceCapabilities::Validator;
 
   // Map from capability key to corresponding ValidatorInfo. Gets updated
   // in Register()/Unregister().
-  typedef base::ScopedPtrHashMap<std::string, std::unique_ptr<ValidatorInfo>>
-      ValidatorMap;
+  using ValidatorMap =
+      std::unordered_map<std::string, std::unique_ptr<ValidatorInfo>>;
 
   // Internal constructor used by static DeviceCapabilities::Create*() methods.
   DeviceCapabilitiesImpl();
 
-  void SetValidatedValue(const std::string& path,
-                         std::unique_ptr<base::Value> new_value) override;
+  void SetPublicValidatedValue(const std::string& path,
+                               std::unique_ptr<base::Value> new_value) override;
+  void SetPrivateValidatedValue(
+      const std::string& path,
+      std::unique_ptr<base::Value> new_value) override;
+  void SetValidatedValueInternal(const std::string& path,
+                                 std::unique_ptr<base::Value> new_value);
 
-  // Lock for reading/writing data_ pointer
+  scoped_refptr<Data> GenerateDataWithNewValue(
+      const base::DictionaryValue& dict,
+      const std::string& path,
+      std::unique_ptr<base::Value> new_value);
+
+  // Lock for reading/writing all_data_ or public_data_ pointers
   mutable base::Lock data_lock_;
   // Lock for reading/writing validator_map_
   mutable base::Lock validation_lock_;
 
-  scoped_refptr<Data> data_;
+  // Contains all public and private capabilities.
+  scoped_refptr<Data> all_data_;
+  // Contains only public capabilities. All capabilities in public_data_ are
+  // present and duplicated in all_data_. This duplication allows callers to
+  // quickly query public capabilities without having build a new data
+  // dictionary.
+  scoped_refptr<Data> public_data_;
   // TaskRunner for capability writes. All internal writes to data_ must occur
   // on task_runner_for_writes_'s thread.
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_for_writes_;

@@ -43,7 +43,7 @@ class CORE_EXPORT HTMLSlotElement final : public HTMLElement {
 public:
     DECLARE_NODE_FACTORY(HTMLSlotElement);
 
-    const HeapVector<Member<Node>>& assignedNodes() const { ASSERT(!needsDistributionRecalc()); return m_assignedNodes; }
+    const HeapVector<Member<Node>>& assignedNodes();
     const HeapVector<Member<Node>>& getDistributedNodes();
     const HeapVector<Member<Node>> assignedNodesForBinding(const AssignedNodesOptions&);
 
@@ -54,50 +54,52 @@ public:
     Node* distributedNodePreviousTo(const Node&) const;
 
     void appendAssignedNode(Node&);
+
+    void resolveDistributedNodes();
     void appendDistributedNode(Node&);
     void appendDistributedNodesFrom(const HTMLSlotElement& other);
-    void willUpdateDistribution();
-
-    bool hasSlotChangeEventListener();
 
     void updateDistributedNodesWithFallback();
-    void didUpdateDistribution();
 
-    void attach(const AttachContext& = AttachContext()) final;
-    void detach(const AttachContext& = AttachContext()) final;
+    void lazyReattachDistributedNodesIfNeeded();
+
+    void attachLayoutTree(const AttachContext& = AttachContext()) final;
+    void detachLayoutTree(const AttachContext& = AttachContext()) final;
 
     void attributeChanged(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue, AttributeModificationReason = ModifiedDirectly) final;
 
     short tabIndex() const override;
     AtomicString name() const;
 
+    // This method can be slow because this has to traverse the children of a shadow host.
+    // This method should be used only when m_assignedNodes is dirty.
+    // e.g. To detect a slotchange event in DOM mutations.
+    bool hasAssignedNodesSlow() const;
+    bool findHostChildWithSameSlotName() const;
+
+    void enqueueSlotChangeEvent();
+
+    void clearDistribution();
+    void saveAndClearDistribution();
+
+    static AtomicString normalizeSlotName(const AtomicString&);
+
     DECLARE_VIRTUAL_TRACE();
 
 private:
     HTMLSlotElement(Document&);
 
-    enum DistributionState {
-        DistributionOnGoing,
-        DistributionDone,
-        DistributionChanged,
-        DistributionUnchanged
-    };
-
-    void clearDistribution();
-    void childrenChanged(const ChildrenChange&) final;
     InsertionNotificationRequest insertedInto(ContainerNode*) final;
     void removedFrom(ContainerNode*) final;
     void willRecalcStyle(StyleRecalcChange) final;
 
     void dispatchSlotChangeEvent();
-    bool distributionChanged();
 
     HeapVector<Member<Node>> m_assignedNodes;
     HeapVector<Member<Node>> m_distributedNodes;
-    HeapHashMap<Member<const Node>, size_t> m_distributedIndices;
-    // TODO(hayato): Remove m_oldDistibutedNodes and make SlotAssignment check the diffirence between old and new distributed nodes for each slot to save the memories.
     HeapVector<Member<Node>> m_oldDistributedNodes;
-    DistributionState m_distributionState;
+    HeapHashMap<Member<const Node>, size_t> m_distributedIndices;
+    bool m_slotchangeEventEnqueued = false;
 };
 
 } // namespace blink

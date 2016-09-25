@@ -27,12 +27,22 @@ TEST(RendererSettingsTest, AllFieldsFlipped) {
   settings.finish_rendering_on_resize = true;
   settings.should_clear_root_render_pass = false;
   settings.disable_display_vsync = true;
-  settings.release_overlay_resources_on_swap_complete = true;
+  settings.release_overlay_resources_after_gpu_query = true;
   settings.refresh_rate = 6.0;
   settings.highp_threshold_min = 1;
   settings.texture_id_allocation_chunk_size = 46;
   settings.use_gpu_memory_buffer_resources = true;
   settings.preferred_tile_format = RGBA_4444;
+  settings.buffer_to_texture_target_map.insert(
+      BufferToTextureTargetMap::value_type(
+          BufferToTextureTargetKey(gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
+                                   gfx::BufferFormat::R_8),
+          54));
+  settings.buffer_to_texture_target_map.insert(
+      BufferToTextureTargetMap::value_type(
+          BufferToTextureTargetKey(gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
+                                   gfx::BufferFormat::BGRA_8888),
+          55));
   VerifySerializeAndDeserializeProto(settings);
 }
 
@@ -45,12 +55,22 @@ TEST(RendererSettingsTest, ArbitraryFieldValues) {
   settings.finish_rendering_on_resize = false;
   settings.should_clear_root_render_pass = false;
   settings.disable_display_vsync = true;
-  settings.release_overlay_resources_on_swap_complete = true;
+  settings.release_overlay_resources_after_gpu_query = true;
   settings.refresh_rate = 999.0;
   settings.highp_threshold_min = 1;
   settings.texture_id_allocation_chunk_size = 12;
   settings.use_gpu_memory_buffer_resources = true;
   settings.preferred_tile_format = RGBA_4444;
+  settings.buffer_to_texture_target_map.insert(
+      BufferToTextureTargetMap::value_type(
+          BufferToTextureTargetKey(gfx::BufferUsage::SCANOUT,
+                                   gfx::BufferFormat::UYVY_422),
+          10));
+  settings.buffer_to_texture_target_map.insert(
+      BufferToTextureTargetMap::value_type(
+          BufferToTextureTargetKey(gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
+                                   gfx::BufferFormat::RGBA_8888),
+          19));
   VerifySerializeAndDeserializeProto(settings);
 }
 

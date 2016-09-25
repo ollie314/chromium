@@ -6,18 +6,17 @@
 
 #include <utility>
 
+#include "ash/common/session/session_state_delegate.h"
+#include "ash/common/shell_window_ids.h"
+#include "ash/common/system/status_area_widget.h"
+#include "ash/common/system/web_notification/web_notification_tray.h"
+#include "ash/common/wm_shell.h"
 #include "ash/content/shell_content_state.h"
 #include "ash/root_window_controller.h"
-#include "ash/session/session_state_delegate.h"
-#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell/example_factory.h"
 #include "ash/shell/panel_window.h"
 #include "ash/shell/toplevel_window.h"
-#include "ash/shell_delegate.h"
-#include "ash/shell_window_ids.h"
-#include "ash/system/status_area_widget.h"
-#include "ash/system/web_notification/web_notification_tray.h"
 #include "ash/test/child_modal_window.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/window.h"
@@ -26,7 +25,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/notification_types.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/examples/examples_window_with_content.h"
@@ -34,6 +33,7 @@
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/shadow_types.h"
 
+using views::MdTextButton;
 using views::MenuItemView;
 using views::MenuRunner;
 
@@ -42,10 +42,7 @@ namespace shell {
 
 namespace {
 
-SkColor g_colors[] = { SK_ColorRED,
-                       SK_ColorYELLOW,
-                       SK_ColorBLUE,
-                       SK_ColorGREEN };
+SkColor g_colors[] = {SK_ColorRED, SK_ColorYELLOW, SK_ColorBLUE, SK_ColorGREEN};
 int g_color_index = 0;
 
 class ModalWindow : public views::WidgetDelegateView,
@@ -54,18 +51,15 @@ class ModalWindow : public views::WidgetDelegateView,
   explicit ModalWindow(ui::ModalType modal_type)
       : modal_type_(modal_type),
         color_(g_colors[g_color_index]),
-        open_button_(new views::LabelButton(this,
-                                            base::ASCIIToUTF16("Moar!"))) {
+        open_button_(MdTextButton::Create(this, base::ASCIIToUTF16("Moar!"))) {
     ++g_color_index %= arraysize(g_colors);
-    open_button_->SetStyle(views::Button::STYLE_BUTTON);
     AddChildView(open_button_);
   }
   ~ModalWindow() override {}
 
   static void OpenModalWindow(aura::Window* parent, ui::ModalType modal_type) {
-    views::Widget* widget =
-        views::Widget::CreateWindowWithParent(new ModalWindow(modal_type),
-                                              parent);
+    views::Widget* widget = views::Widget::CreateWindowWithParent(
+        new ModalWindow(modal_type), parent);
     widget->GetNativeView()->SetName("ModalWindow");
     widget->Show();
   }
@@ -78,9 +72,8 @@ class ModalWindow : public views::WidgetDelegateView,
   void Layout() override {
     gfx::Size open_ps = open_button_->GetPreferredSize();
     gfx::Rect local_bounds = GetLocalBounds();
-    open_button_->SetBounds(
-        5, local_bounds.bottom() - open_ps.height() - 5,
-        open_ps.width(), open_ps.height());
+    open_button_->SetBounds(5, local_bounds.bottom() - open_ps.height() - 5,
+                            open_ps.width(), open_ps.height());
   }
 
   // Overridden from views::WidgetDelegate:
@@ -100,15 +93,14 @@ class ModalWindow : public views::WidgetDelegateView,
  private:
   ui::ModalType modal_type_;
   SkColor color_;
-  views::LabelButton* open_button_;
+  views::Button* open_button_;
 
   DISALLOW_COPY_AND_ASSIGN(ModalWindow);
 };
 
 class NonModalTransient : public views::WidgetDelegateView {
  public:
-  NonModalTransient()
-      : color_(g_colors[g_color_index]) {
+  NonModalTransient() : color_(g_colors[g_color_index]) {
     ++g_color_index %= arraysize(g_colors);
   }
   ~NonModalTransient() override {}
@@ -171,67 +163,56 @@ void AddViewToLayout(views::GridLayout* layout, views::View* view) {
 }  // namespace
 
 void InitWindowTypeLauncher() {
-  views::Widget* widget =
-      views::Widget::CreateWindowWithContextAndBounds(
-          new WindowTypeLauncher,
-          Shell::GetPrimaryRootWindow(),
-          gfx::Rect(120, 150, 300, 410));
+  views::Widget* widget = views::Widget::CreateWindowWithContextAndBounds(
+      new WindowTypeLauncher, Shell::GetPrimaryRootWindow(),
+      gfx::Rect(120, 150, 300, 410));
   widget->GetNativeView()->SetName("WindowTypeLauncher");
   ::wm::SetShadowType(widget->GetNativeView(), ::wm::SHADOW_TYPE_RECTANGULAR);
   widget->Show();
 }
 
 WindowTypeLauncher::WindowTypeLauncher()
-    : create_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Create Window"))),
-      panel_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Create Panel"))),
-      create_nonresizable_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Create Non-Resizable Window"))),
-      bubble_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Create Pointy Bubble"))),
-      lock_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Lock Screen"))),
-      widgets_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Show Example Widgets"))),
-      system_modal_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Open System Modal Window"))),
-      window_modal_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Open Window Modal Window"))),
-      child_modal_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Open Child Modal Window"))),
-      transient_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Open Non-Modal Transient Window"))),
-      examples_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Open Views Examples Window"))),
-      show_hide_window_button_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Show/Hide a Window"))),
-      show_web_notification_(new views::LabelButton(
-          this, base::ASCIIToUTF16("Show a web/app notification"))) {
-  create_button_->SetStyle(views::Button::STYLE_BUTTON);
-  panel_button_->SetStyle(views::Button::STYLE_BUTTON);
-  create_nonresizable_button_->SetStyle(views::Button::STYLE_BUTTON);
-  bubble_button_->SetStyle(views::Button::STYLE_BUTTON);
-  lock_button_->SetStyle(views::Button::STYLE_BUTTON);
-  widgets_button_->SetStyle(views::Button::STYLE_BUTTON);
-  system_modal_button_->SetStyle(views::Button::STYLE_BUTTON);
-  window_modal_button_->SetStyle(views::Button::STYLE_BUTTON);
-  child_modal_button_->SetStyle(views::Button::STYLE_BUTTON);
-  transient_button_->SetStyle(views::Button::STYLE_BUTTON);
-  examples_button_->SetStyle(views::Button::STYLE_BUTTON);
-  show_hide_window_button_->SetStyle(views::Button::STYLE_BUTTON);
-  show_web_notification_->SetStyle(views::Button::STYLE_BUTTON);
-
+    : create_button_(
+          MdTextButton::Create(this, base::ASCIIToUTF16("Create Window"))),
+      panel_button_(
+          MdTextButton::Create(this, base::ASCIIToUTF16("Create Panel"))),
+      create_nonresizable_button_(MdTextButton::Create(
+          this,
+          base::ASCIIToUTF16("Create Non-Resizable Window"))),
+      bubble_button_(
+          MdTextButton::Create(this,
+                               base::ASCIIToUTF16("Create Pointy Bubble"))),
+      lock_button_(
+          MdTextButton::Create(this, base::ASCIIToUTF16("Lock Screen"))),
+      widgets_button_(
+          MdTextButton::Create(this,
+                               base::ASCIIToUTF16("Show Example Widgets"))),
+      system_modal_button_(
+          MdTextButton::Create(this,
+                               base::ASCIIToUTF16("Open System Modal Window"))),
+      window_modal_button_(
+          MdTextButton::Create(this,
+                               base::ASCIIToUTF16("Open Window Modal Window"))),
+      child_modal_button_(
+          MdTextButton::Create(this,
+                               base::ASCIIToUTF16("Open Child Modal Window"))),
+      transient_button_(MdTextButton::Create(
+          this,
+          base::ASCIIToUTF16("Open Non-Modal Transient Window"))),
+      examples_button_(MdTextButton::Create(
+          this,
+          base::ASCIIToUTF16("Open Views Examples Window"))),
+      show_hide_window_button_(
+          MdTextButton::Create(this, base::ASCIIToUTF16("Show/Hide a Window"))),
+      show_web_notification_(MdTextButton::Create(
+          this,
+          base::ASCIIToUTF16("Show a web/app notification"))) {
   views::GridLayout* layout = new views::GridLayout(this);
   layout->SetInsets(5, 5, 5, 5);
   SetLayoutManager(layout);
   views::ColumnSet* column_set = layout->AddColumnSet(0);
-  column_set->AddColumn(views::GridLayout::LEADING,
-                        views::GridLayout::CENTER,
-                        0,
-                        views::GridLayout::USE_PREF,
-                        0,
-                        0);
+  column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::CENTER,
+                        0, views::GridLayout::USE_PREF, 0, 0);
   AddViewToLayout(layout, create_button_);
   AddViewToLayout(layout, panel_button_);
   AddViewToLayout(layout, create_nonresizable_button_);
@@ -248,8 +229,7 @@ WindowTypeLauncher::WindowTypeLauncher()
   set_context_menu_controller(this);
 }
 
-WindowTypeLauncher::~WindowTypeLauncher() {
-}
+WindowTypeLauncher::~WindowTypeLauncher() {}
 
 void WindowTypeLauncher::OnPaint(gfx::Canvas* canvas) {
   canvas->FillRect(GetLocalBounds(), SK_ColorWHITE);
@@ -294,7 +274,7 @@ void WindowTypeLauncher::ButtonPressed(views::Button* sender,
   } else if (sender == bubble_button_) {
     CreatePointyBubble(sender);
   } else if (sender == lock_button_) {
-    Shell::GetInstance()->session_state_delegate()->LockScreen();
+    WmShell::Get()->GetSessionStateDelegate()->LockScreen();
   } else if (sender == widgets_button_) {
     CreateWidgetsWindow();
   } else if (sender == system_modal_button_) {
@@ -304,8 +284,7 @@ void WindowTypeLauncher::ButtonPressed(views::Button* sender,
     ModalWindow::OpenModalWindow(GetWidget()->GetNativeView(),
                                  ui::MODAL_TYPE_WINDOW);
   } else if (sender == child_modal_button_) {
-    ash::test::CreateChildModalParent(
-        GetWidget()->GetNativeView()->GetRootWindow());
+    test::CreateChildModalParent(GetWidget()->GetNativeView()->GetRootWindow());
   } else if (sender == transient_button_) {
     NonModalTransient::OpenNonModalTransient(GetWidget()->GetNativeView());
   } else if (sender == show_hide_window_button_) {
@@ -321,9 +300,8 @@ void WindowTypeLauncher::ButtonPressed(views::Button* sender,
                                    "test-id"),
         message_center::RichNotificationData(), NULL /* delegate */));
 
-    ash::Shell::GetPrimaryRootWindowController()
-        ->shelf()
-        ->status_area_widget()
+    Shell::GetPrimaryRootWindowController()
+        ->GetStatusAreaWidget()
         ->web_notification_tray()
         ->message_center()
         ->AddNotification(std::move(notification));
@@ -352,18 +330,16 @@ void WindowTypeLauncher::ShowContextMenuForView(
     const gfx::Point& point,
     ui::MenuSourceType source_type) {
   MenuItemView* root = new MenuItemView(this);
-  root->AppendMenuItem(COMMAND_NEW_WINDOW,
-                       base::ASCIIToUTF16("New Window"),
+  root->AppendMenuItem(COMMAND_NEW_WINDOW, base::ASCIIToUTF16("New Window"),
                        MenuItemView::NORMAL);
   root->AppendMenuItem(COMMAND_TOGGLE_FULLSCREEN,
                        base::ASCIIToUTF16("Toggle FullScreen"),
                        MenuItemView::NORMAL);
   // MenuRunner takes ownership of root.
-  menu_runner_.reset(new MenuRunner(
-      root, MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU));
-  if (menu_runner_->RunMenuAt(GetWidget(),
-                              NULL,
-                              gfx::Rect(point, gfx::Size()),
+  menu_runner_.reset(new MenuRunner(root, MenuRunner::HAS_MNEMONICS |
+                                              views::MenuRunner::CONTEXT_MENU |
+                                              views::MenuRunner::ASYNC));
+  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
                               views::MENU_ANCHOR_TOPLEFT,
                               source_type) == MenuRunner::MENU_DELETED) {
     return;

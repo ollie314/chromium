@@ -7,18 +7,20 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
-#include "content/browser/background_sync/background_sync_context_impl.h"
+#include "content/browser/background_sync/background_sync_context.h"
+#include "content/browser/broadcast_channel/broadcast_channel_provider.h"
 #include "content/browser/cache_storage/cache_storage_context_impl.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/host_zoom_level_context.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
-#include "content/browser/media/webrtc/webrtc_identity_store.h"
 #include "content/browser/notifications/platform_notification_context_impl.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/common/content_export.h"
@@ -30,24 +32,28 @@
 
 namespace content {
 
-class StoragePartitionImpl : public StoragePartition,
-                             public mojom::StoragePartitionService {
+class CONTENT_EXPORT  StoragePartitionImpl
+    : public StoragePartition,
+      public NON_EXPORTED_BASE(mojom::StoragePartitionService) {
  public:
-  CONTENT_EXPORT ~StoragePartitionImpl() override;
+  // It is guaranteed that storage partitions are destructed before the
+  // browser context starts shutting down its corresponding IO thread residents
+  // (e.g. resource context).
+  ~StoragePartitionImpl() override;
 
   // Quota managed data uses a different bitmask for types than
   // StoragePartition uses. This method generates that mask.
-  CONTENT_EXPORT static int GenerateQuotaClientMask(uint32_t remove_mask);
+  static int GenerateQuotaClientMask(uint32_t remove_mask);
 
   // This creates a CookiePredicate that matches all host (NOT domain) cookies
   // that match the host of |url|. This is intended to be used with
   // DeleteAllCreatedBetweenWithPredicateAsync.
-  CONTENT_EXPORT static net::CookieStore::CookiePredicate
+  static net::CookieStore::CookiePredicate
   CreatePredicateForHostCookies(const GURL& url);
 
-  CONTENT_EXPORT void OverrideQuotaManagerForTesting(
+  void OverrideQuotaManagerForTesting(
       storage::QuotaManager* quota_manager);
-  CONTENT_EXPORT void OverrideSpecialStoragePolicyForTesting(
+  void OverrideSpecialStoragePolicyForTesting(
       storage::SpecialStoragePolicy* special_storage_policy);
 
   // StoragePartition interface.
@@ -62,12 +68,13 @@ class StoragePartitionImpl : public StoragePartition,
   IndexedDBContextImpl* GetIndexedDBContext() override;
   CacheStorageContextImpl* GetCacheStorageContext() override;
   ServiceWorkerContextWrapper* GetServiceWorkerContext() override;
-  GeofencingManager* GetGeofencingManager() override;
   HostZoomMap* GetHostZoomMap() override;
   HostZoomLevelContext* GetHostZoomLevelContext() override;
   ZoomLevelDelegate* GetZoomLevelDelegate() override;
   PlatformNotificationContextImpl* GetPlatformNotificationContext() override;
-  BackgroundSyncContextImpl* GetBackgroundSyncContext() override;
+
+  BackgroundSyncContext* GetBackgroundSyncContext();
+  BroadcastChannelProvider* GetBroadcastChannelProvider();
 
   // mojom::StoragePartitionService interface.
   void OpenLocalStorage(
@@ -97,8 +104,6 @@ class StoragePartitionImpl : public StoragePartition,
                  const base::Closure& callback) override;
 
   void Flush() override;
-
-  WebRTCIdentityStore* GetWebRTCIdentityStore();
 
   // Can return nullptr while |this| is being destroyed.
   BrowserContext* browser_context() const;
@@ -152,12 +157,12 @@ class StoragePartitionImpl : public StoragePartition,
   // If |in_memory| is true, the |relative_partition_path| is (ab)used as a way
   // of distinguishing different in-memory partitions, but nothing is persisted
   // on to disk.
-  static StoragePartitionImpl* Create(
+  static std::unique_ptr<StoragePartitionImpl> Create(
       BrowserContext* context,
       bool in_memory,
       const base::FilePath& relative_partition_path);
 
-  CONTENT_EXPORT StoragePartitionImpl(
+  StoragePartitionImpl(
       BrowserContext* browser_context,
       const base::FilePath& partition_path,
       storage::QuotaManager* quota_manager,
@@ -168,12 +173,11 @@ class StoragePartitionImpl : public StoragePartition,
       IndexedDBContextImpl* indexed_db_context,
       CacheStorageContextImpl* cache_storage_context,
       ServiceWorkerContextWrapper* service_worker_context,
-      WebRTCIdentityStore* webrtc_identity_store,
       storage::SpecialStoragePolicy* special_storage_policy,
-      GeofencingManager* geofencing_manager,
       HostZoomLevelContext* host_zoom_level_context,
       PlatformNotificationContextImpl* platform_notification_context,
-      BackgroundSyncContextImpl* background_sync_context);
+      BackgroundSyncContext* background_sync_context,
+      scoped_refptr<BroadcastChannelProvider>broadcast_channel_provider);
 
   // We will never have both remove_origin be populated and a cookie_matcher.
   void ClearDataImpl(uint32_t remove_mask,
@@ -198,7 +202,7 @@ class StoragePartitionImpl : public StoragePartition,
   // appropriate time.  These should move back into the constructor once
   // URLRequestContextGetter's lifetime is sorted out. We should also move the
   // PostCreateInitialization() out of StoragePartitionImplMap.
-  CONTENT_EXPORT void SetURLRequestContext(
+  void SetURLRequestContext(
       net::URLRequestContextGetter* url_request_context);
   void SetMediaURLRequestContext(
       net::URLRequestContextGetter* media_url_request_context);
@@ -214,12 +218,11 @@ class StoragePartitionImpl : public StoragePartition,
   scoped_refptr<IndexedDBContextImpl> indexed_db_context_;
   scoped_refptr<CacheStorageContextImpl> cache_storage_context_;
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
-  scoped_refptr<WebRTCIdentityStore> webrtc_identity_store_;
   scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy_;
-  scoped_refptr<GeofencingManager> geofencing_manager_;
   scoped_refptr<HostZoomLevelContext> host_zoom_level_context_;
   scoped_refptr<PlatformNotificationContextImpl> platform_notification_context_;
-  scoped_refptr<BackgroundSyncContextImpl> background_sync_context_;
+  scoped_refptr<BackgroundSyncContext> background_sync_context_;
+  scoped_refptr<BroadcastChannelProvider> broadcast_channel_provider_;
 
   mojo::BindingSet<mojom::StoragePartitionService> bindings_;
 

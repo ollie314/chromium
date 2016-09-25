@@ -7,6 +7,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "chrome/browser/download/download_status_updater.h"
 #include "content/public/test/mock_download_item.h"
@@ -64,9 +65,9 @@ class DownloadStatusUpdaterTest : public testing::Test {
     managers_.clear();
     for (std::vector<Items>::iterator it = manager_items_.begin();
          it != manager_items_.end(); ++it)
-      STLDeleteContainerPointers(it->begin(), it->end());
+      base::STLDeleteContainerPointers(it->begin(), it->end());
 
-    loop_.RunUntilIdle();  // Allow DownloadManager destruction.
+    base::RunLoop().RunUntilIdle();  // Allow DownloadManager destruction.
   }
 
  protected:

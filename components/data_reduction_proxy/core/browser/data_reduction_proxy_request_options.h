@@ -17,6 +17,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_util.h"
 
 namespace net {
 class HostPortPair;
@@ -40,27 +41,6 @@ extern const char kExperimentsOption[];
 extern const char kAndroidWebViewProtocolVersion[];
 #endif
 
-#define CLIENT_ENUMS_LIST                  \
-  CLIENT_ENUM(UNKNOWN, "")                 \
-  CLIENT_ENUM(CRONET_ANDROID, "cronet")    \
-  CLIENT_ENUM(WEBVIEW_ANDROID, "webview")  \
-  CLIENT_ENUM(CHROME_ANDROID, "android")   \
-  CLIENT_ENUM(CHROME_IOS, "ios")           \
-  CLIENT_ENUM(CHROME_MAC, "mac")           \
-  CLIENT_ENUM(CHROME_CHROMEOS, "chromeos") \
-  CLIENT_ENUM(CHROME_LINUX, "linux")       \
-  CLIENT_ENUM(CHROME_WINDOWS, "win")       \
-  CLIENT_ENUM(CHROME_FREEBSD, "freebsd")   \
-  CLIENT_ENUM(CHROME_OPENBSD, "openbsd")   \
-  CLIENT_ENUM(CHROME_SOLARIS, "solaris")   \
-  CLIENT_ENUM(CHROME_QNX, "qnx")
-
-#define CLIENT_ENUM(name, str_value) name,
-typedef enum {
-  CLIENT_ENUMS_LIST
-} Client;
-#undef CLIENT_ENUM
-
 class DataReductionProxyConfig;
 
 class DataReductionProxyRequestOptions {
@@ -80,10 +60,8 @@ class DataReductionProxyRequestOptions {
   void Init();
 
   // Adds a 'Chrome-Proxy' header to |request_headers| with the data reduction
-  // proxy authentication credentials. Only adds this header if the
-  // provided |proxy_server| is a data reduction proxy.
-  void MaybeAddRequestHeader(const net::ProxyServer& proxy_server,
-                             net::HttpRequestHeaders* request_headers);
+  // proxy authentication credentials.
+  void AddRequestHeader(net::HttpRequestHeaders* request_headers);
 
   // Stores the supplied key and sets up credentials suitable for authenticating
   // with the data reduction proxy.
@@ -108,8 +86,6 @@ class DataReductionProxyRequestOptions {
       const net::HttpRequestHeaders& request_headers) const;
 
  protected:
-  void SetHeader(net::HttpRequestHeaders* headers);
-
   // Returns a UTF16 string that's the hash of the configured authentication
   // |key| and |salt|. Returns an empty UTF16 string if no key is configured or
   // the data reduction proxy feature isn't available.
@@ -135,7 +111,7 @@ class DataReductionProxyRequestOptions {
   void UpdateExperiments();
 
   // Adds the server-side experiment from the field trial.
-  void AddExperimentFromFieldTrial();
+  void AddServerExperimentFromFieldTrial();
 
   // Generates a session ID and credentials suitable for authenticating with
   // the data reduction proxy.

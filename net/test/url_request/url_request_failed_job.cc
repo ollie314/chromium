@@ -10,7 +10,7 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
@@ -122,6 +122,13 @@ int URLRequestFailedJob::GetResponseCode() const {
 
 void URLRequestFailedJob::GetResponseInfo(HttpResponseInfo* info) {
   *info = response_info_;
+}
+
+void URLRequestFailedJob::PopulateNetErrorDetails(
+    NetErrorDetails* details) const {
+  if (net_error_ == ERR_QUIC_PROTOCOL_ERROR) {
+    details->quic_connection_error = QUIC_INTERNAL_ERROR;
+  }
 }
 
 // static

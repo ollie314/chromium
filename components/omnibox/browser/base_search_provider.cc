@@ -9,6 +9,7 @@
 
 #include "base/i18n/case_conversion.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
@@ -19,7 +20,6 @@
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/suggestion_answer.h"
 #include "components/search_engines/template_url.h"
-#include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/url_request/url_fetcher.h"
@@ -48,7 +48,7 @@ class SuggestionDeletionHandler : public net::URLFetcherDelegate {
   // net::URLFetcherDelegate:
   void OnURLFetchComplete(const net::URLFetcher* source) override;
 
-  scoped_ptr<net::URLFetcher> deletion_fetcher_;
+  std::unique_ptr<net::URLFetcher> deletion_fetcher_;
   DeletionCompletedCallback callback_;
 
   DISALLOW_COPY_AND_ASSIGN(SuggestionDeletionHandler);
@@ -125,11 +125,11 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
 void BaseSearchProvider::DeleteMatch(const AutocompleteMatch& match) {
   DCHECK(match.deletable);
   if (!match.GetAdditionalInfo(BaseSearchProvider::kDeletionUrlKey).empty()) {
-    deletion_handlers_.push_back(make_scoped_ptr(new SuggestionDeletionHandler(
+    deletion_handlers_.push_back(base::MakeUnique<SuggestionDeletionHandler>(
         match.GetAdditionalInfo(BaseSearchProvider::kDeletionUrlKey),
         client_->GetRequestContext(),
         base::Bind(&BaseSearchProvider::OnDeletionComplete,
-                   base::Unretained(this)))));
+                   base::Unretained(this))));
   }
 
   TemplateURL* template_url =
@@ -232,17 +232,13 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
         &match.description_class, 0, ACMatchClassification::NONE);
   }
 
+  const base::string16 input_lower = base::i18n::ToLower(input.text());
   // suggestion.match_contents() should have already been collapsed.
   match.allowed_to_be_default_match =
       (!in_keyword_mode || suggestion.from_keyword_provider()) &&
-      (base::CollapseWhitespace(input.text(), false) ==
-       suggestion.match_contents());
+      (base::CollapseWhitespace(input_lower, false) ==
+       base::i18n::ToLower(suggestion.match_contents()));
 
-  // When the user forced a query, we need to make sure all the fill_into_edit
-  // values preserve that property.  Otherwise, if the user starts editing a
-  // suggestion, non-Search results will suddenly appear.
-  if (input.type() == metrics::OmniboxInputType::FORCED_QUERY)
-    match.fill_into_edit.assign(base::ASCIIToUTF16("?"));
   if (suggestion.from_keyword_provider())
     match.fill_into_edit.append(match.keyword + base::char16(' '));
   // We only allow inlinable navsuggestions that were received before the
@@ -251,8 +247,8 @@ AutocompleteMatch BaseSearchProvider::CreateSearchSuggestion(
       !suggestion.received_after_last_keystroke() &&
       (!in_keyword_mode || suggestion.from_keyword_provider()) &&
       base::StartsWith(
-          base::i18n::ToLower(suggestion.suggestion()),
-          base::i18n::ToLower(input.text()), base::CompareCase::SENSITIVE)) {
+          base::i18n::ToLower(suggestion.suggestion()), input_lower,
+          base::CompareCase::SENSITIVE)) {
     match.inline_autocompletion =
         suggestion.suggestion().substr(input.text().length());
     match.allowed_to_be_default_match = true;
@@ -320,8 +316,7 @@ bool BaseSearchProvider::ZeroSuggestEnabled(
   // (currently only the prepopulated Google provider).
   if (template_url == NULL ||
       !template_url->SupportsReplacement(search_terms_data) ||
-      TemplateURLPrepopulateData::GetEngineType(
-          *template_url, search_terms_data) != SEARCH_ENGINE_GOOGLE)
+      template_url->GetEngineType(search_terms_data) != SEARCH_ENGINE_GOOGLE)
     return false;
 
   return true;
@@ -483,7 +478,7 @@ void BaseSearchProvider::OnDeletionComplete(
   RecordDeletionResult(success);
   deletion_handlers_.erase(std::remove_if(
       deletion_handlers_.begin(), deletion_handlers_.end(),
-      [handler](const scoped_ptr<SuggestionDeletionHandler>& elem) {
-          return elem.get() == handler;
+      [handler](const std::unique_ptr<SuggestionDeletionHandler>& elem) {
+        return elem.get() == handler;
       }));
 }

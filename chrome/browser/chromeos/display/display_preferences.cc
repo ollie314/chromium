@@ -6,10 +6,8 @@
 
 #include <stddef.h>
 
-#include "ash/display/display_layout_store.h"
 #include "ash/display/display_manager.h"
 #include "ash/display/display_pref_util.h"
-#include "ash/display/display_util.h"
 #include "ash/display/json_converter.h"
 #include "ash/shell.h"
 #include "base/strings/string16.h"
@@ -25,9 +23,10 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/user_manager/user_manager.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
-#include "ui/gfx/display.h"
+#include "ui/display/display.h"
+#include "ui/display/manager/display_layout_store.h"
+#include "ui/display/manager/display_manager_utilities.h"
 #include "ui/gfx/geometry/insets.h"
-#include "ui/gfx/screen.h"
 #include "url/url_canon.h"
 #include "url/url_util.h"
 
@@ -112,7 +111,8 @@ bool UserCanSaveDisplayPreference() {
 
 void LoadDisplayLayouts() {
   PrefService* local_state = g_browser_process->local_state();
-  ash::DisplayLayoutStore* layout_store = GetDisplayManager()->layout_store();
+  display::DisplayLayoutStore* layout_store =
+      GetDisplayManager()->layout_store();
 
   const base::DictionaryValue* layouts = local_state->GetDictionary(
       prefs::kSecondaryDisplays);
@@ -135,7 +135,7 @@ void LoadDisplayLayouts() {
         ids.push_back(id);
       }
       display::DisplayIdList list =
-          ash::GenerateDisplayIdList(ids.begin(), ids.end());
+          display::GenerateDisplayIdList(ids.begin(), ids.end());
       layout_store->RegisterLayoutForDisplayIdList(list, std::move(layout));
     }
   }
@@ -150,18 +150,18 @@ void LoadDisplayProperties() {
     const base::DictionaryValue* dict_value = nullptr;
     if (!it.value().GetAsDictionary(&dict_value) || dict_value == nullptr)
       continue;
-    int64_t id = gfx::Display::kInvalidDisplayID;
+    int64_t id = display::Display::kInvalidDisplayID;
     if (!base::StringToInt64(it.key(), &id) ||
-        id == gfx::Display::kInvalidDisplayID) {
+        id == display::Display::kInvalidDisplayID) {
       continue;
     }
-    gfx::Display::Rotation rotation = gfx::Display::ROTATE_0;
+    display::Display::Rotation rotation = display::Display::ROTATE_0;
     float ui_scale = 1.0f;
     const gfx::Insets* insets_to_set = nullptr;
 
     int rotation_value = 0;
     if (dict_value->GetInteger("rotation", &rotation_value)) {
-      rotation = static_cast<gfx::Display::Rotation>(rotation_value);
+      rotation = static_cast<display::Display::Rotation>(rotation_value);
     }
     int ui_scale_value = 0;
     if (dict_value->GetInteger("ui-scale", &ui_scale_value))
@@ -204,17 +204,17 @@ void LoadDisplayRotationState() {
   if (!properties->GetBoolean("lock", &rotation_lock))
     return;
 
-  int rotation = gfx::Display::ROTATE_0;
+  int rotation = display::Display::ROTATE_0;
   if (!properties->GetInteger("orientation", &rotation))
     return;
 
-  GetDisplayManager()->RegisterDisplayRotationProperties(rotation_lock,
-      static_cast<gfx::Display::Rotation>(rotation));
+  GetDisplayManager()->RegisterDisplayRotationProperties(
+      rotation_lock, static_cast<display::Display::Rotation>(rotation));
 }
 
 void StoreDisplayLayoutPref(const display::DisplayIdList& list,
                             const display::DisplayLayout& display_layout) {
-  std::string name = ash::DisplayIdListToString(list);
+  std::string name = display::DisplayIdListToString(list);
 
   PrefService* local_state = g_browser_process->local_state();
   DictionaryPrefUpdate update(local_state, prefs::kSecondaryDisplays);
@@ -251,9 +251,9 @@ void StoreCurrentDisplayProperties() {
 
   size_t num = display_manager->GetNumDisplays();
   for (size_t i = 0; i < num; ++i) {
-    const gfx::Display& display = display_manager->GetDisplayAt(i);
+    const display::Display& display = display_manager->GetDisplayAt(i);
     int64_t id = display.id();
-    ash::DisplayInfo info = display_manager->GetDisplayInfo(id);
+    display::ManagedDisplayInfo info = display_manager->GetDisplayInfo(id);
 
     std::unique_ptr<base::DictionaryValue> property_value(
         new base::DictionaryValue());
@@ -261,21 +261,20 @@ void StoreCurrentDisplayProperties() {
     // size and modes can change depending on the combination of displays.
     if (display_manager->IsInUnifiedMode())
       continue;
-    property_value->SetInteger(
-        "rotation",
-        static_cast<int>(info.GetRotation(gfx::Display::ROTATION_SOURCE_USER)));
+    property_value->SetInteger("rotation",
+                               static_cast<int>(info.GetRotation(
+                                   display::Display::ROTATION_SOURCE_USER)));
     property_value->SetInteger(
         "ui-scale", static_cast<int>(info.configured_ui_scale() * 1000));
 
-    ash::DisplayMode mode;
-    if (!display.IsInternal() &&
-        display_manager->GetSelectedModeForDisplayId(id, &mode) &&
-        !mode.native) {
-      property_value->SetInteger("width", mode.size.width());
-      property_value->SetInteger("height", mode.size.height());
+    scoped_refptr<display::ManagedDisplayMode> mode =
+        display_manager->GetSelectedModeForDisplayId(id);
+    if (!display.IsInternal() && mode && !mode->native()) {
+      property_value->SetInteger("width", mode->size().width());
+      property_value->SetInteger("height", mode->size().height());
       property_value->SetInteger(
           "device-scale-factor",
-          static_cast<int>(mode.device_scale_factor * 1000));
+          static_cast<int>(mode->device_scale_factor() * 1000));
     }
     if (!info.overscan_insets_in_dip().IsEmpty())
       InsetsToValue(info.overscan_insets_in_dip(), property_value.get());
@@ -360,17 +359,17 @@ void StoreDisplayPrefs() {
 }
 
 void StoreDisplayRotationPrefs(bool rotation_lock) {
-  if (!gfx::Display::HasInternalDisplay())
+  if (!display::Display::HasInternalDisplay())
     return;
 
   PrefService* local_state = g_browser_process->local_state();
   DictionaryPrefUpdate update(local_state, prefs::kDisplayRotationLock);
   base::DictionaryValue* pref_data = update.Get();
   pref_data->SetBoolean("lock", rotation_lock);
-  gfx::Display::Rotation rotation =
+  display::Display::Rotation rotation =
       GetDisplayManager()
-          ->GetDisplayInfo(gfx::Display::InternalDisplayId())
-          .GetRotation(gfx::Display::ROTATION_SOURCE_ACCELEROMETER);
+          ->GetDisplayInfo(display::Display::InternalDisplayId())
+          .GetRotation(display::Display::ROTATION_SOURCE_ACCELEROMETER);
   pref_data->SetInteger("orientation", static_cast<int>(rotation));
 }
 

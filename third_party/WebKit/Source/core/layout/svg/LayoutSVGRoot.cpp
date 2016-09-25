@@ -26,8 +26,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutAnalyzer.h"
-#include "core/layout/LayoutPart.h"
-#include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutPartItem.h"
 #include "core/layout/svg/LayoutSVGText.h"
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/SVGResourcesCache.h"
@@ -44,6 +43,7 @@ LayoutSVGRoot::LayoutSVGRoot(SVGElement* node)
     : LayoutReplaced(node)
     , m_objectBoundingBoxValid(false)
     , m_isLayoutSizeChanged(false)
+    , m_didScreenScaleFactorChange(false)
     , m_needsBoundariesOrTransformUpdate(true)
     , m_hasBoxDecorationBackground(false)
     , m_hasNonIsolatedBlendingDescendants(false)
@@ -105,7 +105,7 @@ bool LayoutSVGRoot::isEmbeddedThroughFrameContainingSVGDocument() const
 
     // If our frame has an owner layoutObject, we're embedded through eg. object/embed/iframe,
     // but we only negotiate if we're in an SVG document inside a embedded object (object/embed).
-    if (!frame->ownerLayoutObject() || !frame->ownerLayoutObject()->isEmbeddedObject())
+    if (frame->ownerLayoutItem().isNull() || !frame->ownerLayoutItem().isEmbeddedObject())
         return false;
     return frame->document()->isSVGDocument();
 }
@@ -122,7 +122,7 @@ LayoutUnit LayoutSVGRoot::computeReplacedLogicalWidth(ShouldComputePreferred sho
     return LayoutReplaced::computeReplacedLogicalWidth(shouldComputePreferred);
 }
 
-LayoutUnit LayoutSVGRoot::computeReplacedLogicalHeight() const
+LayoutUnit LayoutSVGRoot::computeReplacedLogicalHeight(LayoutUnit estimatedUsedWidth) const
 {
     // When we're embedded through SVGImage (border-image/background-image/<html:img>/...) we're forced to resize to a specific size.
     if (!m_containerSize.isEmpty())
@@ -131,7 +131,7 @@ LayoutUnit LayoutSVGRoot::computeReplacedLogicalHeight() const
     if (isEmbeddedThroughFrameContainingSVGDocument())
         return containingBlock()->availableLogicalHeight(IncludeMarginBorderPadding);
 
-    return LayoutReplaced::computeReplacedLogicalHeight();
+    return LayoutReplaced::computeReplacedLogicalHeight(estimatedUsedWidth);
 }
 
 void LayoutSVGRoot::layout()
@@ -139,46 +139,42 @@ void LayoutSVGRoot::layout()
     ASSERT(needsLayout());
     LayoutAnalyzer::Scope analyzer(*this);
 
-    bool needsLayout = selfNeedsLayout();
-
     LayoutSize oldSize = size();
     updateLogicalWidth();
     updateLogicalHeight();
+
     buildLocalToBorderBoxTransform();
+    // TODO(fs): Temporarily, needing a layout implies that the local transform
+    // has changed. This should be updated to be more precise and factor in the
+    // actual (relevant) changes to the computed user-space transform.
+    m_didScreenScaleFactorChange = selfNeedsLayout();
 
     SVGLayoutSupport::layoutResourcesIfNeeded(this);
 
     SVGSVGElement* svg = toSVGSVGElement(node());
     ASSERT(svg);
-    m_isLayoutSizeChanged = needsLayout || (svg->hasRelativeLengths() && oldSize != size());
     // When hasRelativeLengths() is false, no descendants have relative lengths
     // (hence no one is interested in viewport size changes).
-    bool layoutSizeChanged = m_isLayoutSizeChanged && svg->hasRelativeLengths();
+    m_isLayoutSizeChanged = svg->hasRelativeLengths() && (selfNeedsLayout() || oldSize != size());
 
-    // If any of this root's children need to be laid out, and a filter is
-    // applied to it, we need to issue paint invalidations for all descendants.
-    bool forceLayoutOfChildren = needsLayout
-        || (normalChildNeedsLayout() && SVGLayoutSupport::hasFilterResource(*this));
-
-    const bool transformToRootChanged = false;
-    SVGLayoutSupport::layoutChildren(firstChild(), forceLayoutOfChildren, transformToRootChanged, layoutSizeChanged);
+    SVGLayoutSupport::layoutChildren(firstChild(), false, m_didScreenScaleFactorChange, m_isLayoutSizeChanged);
 
     if (m_needsBoundariesOrTransformUpdate) {
         updateCachedBoundaries();
         m_needsBoundariesOrTransformUpdate = false;
     }
 
-    m_overflow.clear();
+    m_overflow.reset();
     addVisualEffectOverflow();
 
     if (!shouldApplyViewportClip()) {
         FloatRect contentPaintInvalidationRect = paintInvalidationRectInLocalSVGCoordinates();
         contentPaintInvalidationRect = m_localToBorderBoxTransform.mapRect(contentPaintInvalidationRect);
-        addVisualOverflow(enclosingLayoutRect(contentPaintInvalidationRect));
+        addContentsVisualOverflow(enclosingLayoutRect(contentPaintInvalidationRect));
     }
 
     updateLayerTransformAfterLayout();
-    m_hasBoxDecorationBackground = isDocumentElement() ? calculateHasBoxDecorations() : hasBoxDecorationBackground();
+    m_hasBoxDecorationBackground = isDocumentElement() ? styleRef().hasBoxDecorationBackground() : hasBoxDecorationBackground();
     invalidateBackgroundObscurationStatus();
 
     clearNeedsLayout();
@@ -195,9 +191,22 @@ bool LayoutSVGRoot::shouldApplyViewportClip() const
         || this->isDocumentElement();
 }
 
+LayoutRect LayoutSVGRoot::visualOverflowRect() const
+{
+    LayoutRect rect = LayoutReplaced::selfVisualOverflowRect();
+    if (!shouldApplyViewportClip())
+        rect.unite(contentsVisualOverflowRect());
+    return rect;
+}
+
+LayoutRect LayoutSVGRoot::overflowClipRect(const LayoutPoint& location, OverlayScrollbarClipBehavior) const
+{
+    return LayoutRect(pixelSnappedIntRect(LayoutReplaced::overflowClipRect(location, IgnoreOverlayScrollbarSize)));
+}
+
 void LayoutSVGRoot::paintReplaced(const PaintInfo& paintInfo, const LayoutPoint& paintOffset) const
 {
-    SVGRootPainter(*this).paint(paintInfo, paintOffset);
+    SVGRootPainter(*this).paintReplaced(paintInfo, paintOffset);
 }
 
 void LayoutSVGRoot::willBeDestroyed()
@@ -212,7 +221,7 @@ void LayoutSVGRoot::styleDidChange(StyleDifference diff, const ComputedStyle* ol
         setNeedsBoundariesUpdate();
     if (diff.needsPaintInvalidation()) {
         // Box decorations may have appeared/disappeared - recompute status.
-        m_hasBoxDecorationBackground = calculateHasBoxDecorations();
+        m_hasBoxDecorationBackground = styleRef().hasBoxDecorationBackground();
     }
 
     LayoutReplaced::styleDidChange(diff, oldStyle);
@@ -337,7 +346,7 @@ LayoutRect LayoutSVGRoot::localOverflowRectForPaintInvalidation() const
     // (does not have background/border/etc., see LayoutSVGRootTest.OverflowRectMappingWithViewportClipWithoutBorder).
 
     // Return early for any cases where we don't actually paint.
-    if (style()->visibility() != VISIBLE && !enclosingLayer()->hasVisibleContent())
+    if (style()->visibility() != EVisibility::Visible && !enclosingLayer()->hasVisibleContent())
         return LayoutRect();
 
     // Compute the paint invalidation rect of the content of the SVG in the border-box coordinate space.

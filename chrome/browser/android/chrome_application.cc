@@ -25,6 +25,8 @@
 #include "net/url_request/url_request_context_getter.h"
 
 using base::android::ConvertUTF8ToJavaString;
+using base::android::JavaParamRef;
+using base::android::ScopedJavaLocalRef;
 
 namespace {
 
@@ -42,12 +44,12 @@ void CommitPendingWritesForProfile(Profile* profile) {
   // These calls are asynchronous. They may not finish (and may not even
   // start!) before the Android OS kills our process. But we can't wait for them
   // to finish because blocking the UI thread is illegal.
+  profile->GetNetworkPredictor()->SaveStateForNextStartup();
   profile->GetPrefs()->CommitPendingWrite();
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
       base::Bind(&FlushCookiesOnIOThread,
                  make_scoped_refptr(profile->GetRequestContext())));
-  profile->GetNetworkPredictor()->SaveStateForNextStartupAndTrim();
   content::BrowserContext::ForEachStoragePartition(
       profile, base::Bind(FlushStoragePartition));
 }
@@ -118,8 +120,7 @@ void ChromeApplication::OpenClearBrowsingData(
   DCHECK(tab);
   Java_ChromeApplication_openClearBrowsingData(
       base::android::AttachCurrentThread(),
-      base::android::GetApplicationContext(),
-      tab->GetJavaObject().obj());
+      base::android::GetApplicationContext(), tab->GetJavaObject());
 }
 
 bool ChromeApplication::AreParentalControlsEnabled() {

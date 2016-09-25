@@ -8,6 +8,7 @@
 #include "core/svg/SVGPathBlender.h"
 #include "core/svg/SVGPathByteStreamBuilder.h"
 #include "core/svg/SVGPathByteStreamSource.h"
+#include <memory>
 
 namespace blink {
 
@@ -28,8 +29,8 @@ bool AnimatablePath::usesDefaultInterpolationWith(const AnimatableValue* value) 
 
         PathSegmentData fromSeg = fromSource.parseSegment();
         PathSegmentData toSeg = toSource.parseSegment();
-        ASSERT(fromSeg.command != PathSegUnknown);
-        ASSERT(toSeg.command != PathSegUnknown);
+        DCHECK_NE(fromSeg.command, PathSegUnknown);
+        DCHECK_NE(toSeg.command, PathSegUnknown);
 
         if (toAbsolutePathSegType(fromSeg.command) != toAbsolutePathSegType(toSeg.command))
             return true;
@@ -43,7 +44,7 @@ PassRefPtr<AnimatableValue> AnimatablePath::interpolateTo(const AnimatableValue*
     if (usesDefaultInterpolationWith(value))
         return defaultInterpolateTo(this, value, fraction);
 
-    OwnPtr<SVGPathByteStream> byteStream = SVGPathByteStream::create();
+    std::unique_ptr<SVGPathByteStream> byteStream = SVGPathByteStream::create();
     SVGPathByteStreamBuilder builder(*byteStream);
 
     SVGPathByteStreamSource fromSource(path()->byteStream());
@@ -51,8 +52,8 @@ PassRefPtr<AnimatableValue> AnimatablePath::interpolateTo(const AnimatableValue*
 
     SVGPathBlender blender(&fromSource, &toSource, &builder);
     bool ok = blender.blendAnimatedPath(fraction);
-    ASSERT_UNUSED(ok, ok);
-    return AnimatablePath::create(StylePath::create(byteStream.release()));
+    ALLOW_UNUSED_LOCAL(ok);
+    return AnimatablePath::create(StylePath::create(std::move(byteStream)));
 }
 
 bool AnimatablePath::equalTo(const AnimatableValue* value) const

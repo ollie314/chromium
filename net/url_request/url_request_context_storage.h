@@ -16,6 +16,8 @@ namespace net {
 class CertVerifier;
 class ChannelIDService;
 class CookieStore;
+class CTPolicyEnforcer;
+class CTVerifier;
 class FtpTransactionFactory;
 class HostResolver;
 class HttpAuthHandlerFactory;
@@ -31,7 +33,6 @@ class SdchManager;
 class SSLConfigService;
 class TransportSecurityState;
 class URLRequestContext;
-class URLRequestBackoffManager;
 class URLRequestJobFactory;
 class URLRequestThrottlerManager;
 
@@ -64,6 +65,10 @@ class NET_EXPORT URLRequestContextStorage {
   void set_cookie_store(std::unique_ptr<CookieStore> cookie_store);
   void set_transport_security_state(
       std::unique_ptr<TransportSecurityState> transport_security_state);
+  void set_cert_transparency_verifier(
+      std::unique_ptr<CTVerifier> cert_transparency_verifier);
+  void set_ct_policy_enforcer(
+      std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer);
   void set_http_network_session(
       std::unique_ptr<HttpNetworkSession> http_network_session);
   void set_http_transaction_factory(
@@ -71,8 +76,6 @@ class NET_EXPORT URLRequestContextStorage {
   void set_job_factory(std::unique_ptr<URLRequestJobFactory> job_factory);
   void set_throttler_manager(
       std::unique_ptr<URLRequestThrottlerManager> throttler_manager);
-  void set_backoff_manager(
-      std::unique_ptr<URLRequestBackoffManager> backoff_manager);
   void set_http_user_agent_settings(
       std::unique_ptr<HttpUserAgentSettings> http_user_agent_settings);
   void set_sdch_manager(std::unique_ptr<SdchManager> sdch_manager);
@@ -84,9 +87,7 @@ class NET_EXPORT URLRequestContextStorage {
   }
 
  private:
-  // We use a raw pointer to prevent reference cycles, since
-  // URLRequestContextStorage can often be contained within a URLRequestContext
-  // subclass.
+  // Not owned.
   URLRequestContext* const context_;
 
   // Owned members.
@@ -97,7 +98,7 @@ class NET_EXPORT URLRequestContextStorage {
   std::unique_ptr<ChannelIDService> channel_id_service_;
   std::unique_ptr<HttpAuthHandlerFactory> http_auth_handler_factory_;
   std::unique_ptr<ProxyService> proxy_service_;
-  // TODO(willchan): Remove refcounting on these members.
+  // TODO(willchan): Remove refcounting on this member.
   scoped_refptr<SSLConfigService> ssl_config_service_;
   std::unique_ptr<NetworkDelegate> network_delegate_;
   std::unique_ptr<ProxyDelegate> proxy_delegate_;
@@ -105,6 +106,8 @@ class NET_EXPORT URLRequestContextStorage {
   std::unique_ptr<HttpUserAgentSettings> http_user_agent_settings_;
   std::unique_ptr<CookieStore> cookie_store_;
   std::unique_ptr<TransportSecurityState> transport_security_state_;
+  std::unique_ptr<CTVerifier> cert_transparency_verifier_;
+  std::unique_ptr<CTPolicyEnforcer> ct_policy_enforcer_;
 
   // Not actually pointed at by the URLRequestContext, but may be used (but not
   // owned) by the HttpTransactionFactory.
@@ -113,7 +116,6 @@ class NET_EXPORT URLRequestContextStorage {
   std::unique_ptr<HttpTransactionFactory> http_transaction_factory_;
   std::unique_ptr<URLRequestJobFactory> job_factory_;
   std::unique_ptr<URLRequestThrottlerManager> throttler_manager_;
-  std::unique_ptr<URLRequestBackoffManager> backoff_manager_;
   std::unique_ptr<SdchManager> sdch_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestContextStorage);

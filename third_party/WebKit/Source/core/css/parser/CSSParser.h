@@ -10,6 +10,7 @@
 #include "core/css/CSSValue.h"
 #include "core/css/parser/CSSParserMode.h"
 #include "platform/graphics/Color.h"
+#include <memory>
 
 namespace blink {
 
@@ -41,13 +42,13 @@ public:
     static ImmutableStylePropertySet* parseCustomPropertySet(CSSParserTokenRange);
 
     // This is for non-shorthands only
-    static CSSValue* parseSingleValue(CSSPropertyID, const String&, const CSSParserContext& = strictCSSParserContext());
+    static const CSSValue* parseSingleValue(CSSPropertyID, const String&, const CSSParserContext& = strictCSSParserContext());
 
-    static CSSValue* parseFontFaceDescriptor(CSSPropertyID, const String&, const CSSParserContext&);
+    static const CSSValue* parseFontFaceDescriptor(CSSPropertyID, const String&, const CSSParserContext&);
 
     static ImmutableStylePropertySet* parseInlineStyleDeclaration(const String&, Element*);
 
-    static PassOwnPtr<Vector<double>> parseKeyframeKeyList(const String&);
+    static std::unique_ptr<Vector<double>> parseKeyframeKeyList(const String&);
     static StyleRuleKeyframe* parseKeyframeRule(const CSSParserContext&, const String&);
 
     static bool parseSupportsCondition(const String&);

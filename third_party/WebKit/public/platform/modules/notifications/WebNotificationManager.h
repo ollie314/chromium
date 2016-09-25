@@ -15,17 +15,13 @@
 
 namespace blink {
 
-namespace mojom {
-enum class PermissionStatus;
-}
-
 class WebNotificationDelegate;
 class WebSecurityOrigin;
 class WebServiceWorkerRegistration;
 
 // Structure representing the info associated with a persistent notification.
 struct WebPersistentNotificationInfo {
-    int64_t persistentId = 0;
+    WebString notificationId;
     WebNotificationData data;
 };
 
@@ -54,15 +50,12 @@ public:
     // Closes a notification previously shown, and removes it if being shown.
     virtual void close(WebNotificationDelegate*) = 0;
 
-    // Closes a persistent notification identified by its persistent notification Id.
-    virtual void closePersistent(const WebSecurityOrigin&, int64_t persistentNotificationId) = 0;
+    // Closes a persistent notification identified by its notification Id.
+    virtual void closePersistent(const WebSecurityOrigin&, const WebString& tag, const WebString& notificationId) = 0;
 
     // Indicates that the delegate object is being destroyed, and must no longer
     // be used by the embedder to dispatch events.
     virtual void notifyDelegateDestroyed(WebNotificationDelegate*) = 0;
-
-    // Synchronously checks the permission level for the given origin.
-    virtual mojom::PermissionStatus checkPermission(const WebSecurityOrigin&) = 0;
 };
 
 } // namespace blink

@@ -40,6 +40,7 @@
 #include "core/input/EventHandler.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutTreeAsText.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
@@ -210,6 +211,13 @@ WebView* TouchActionTest::setupTest(std::string file, TouchActionTrackingWebView
     return webView;
 }
 
+IntRect windowClipRect(const FrameView& frameView)
+{
+    LayoutRect clipRect(LayoutPoint(), LayoutSize(frameView.visibleContentSize(ExcludeScrollbars)));
+    frameView.layoutViewItem().mapToVisualRectInAncestorSpace(&frameView.layoutView()->containerForPaintInvalidation(), clipRect);
+    return enclosingIntRect(clipRect);
+}
+
 void TouchActionTest::runTestOnTree(ContainerNode* root, WebView* webView, TouchActionTrackingWebViewClient& client)
 {
     // Find all elements to test the touch-action of in the document.
@@ -271,7 +279,7 @@ void TouchActionTest::runTestOnTree(ContainerNode* root, WebView* webView, Touch
 
             LocalFrame* mainFrame = static_cast<LocalFrame*>(webView->mainFrame()->toImplBase()->frame());
             FrameView* mainFrameView = mainFrame->view();
-            IntRect visibleRect = mainFrameView->windowClipRect();
+            IntRect visibleRect = windowClipRect(*mainFrameView);
             ASSERT_TRUE(visibleRect.contains(windowPoint)) << failureContextPos
                 << " Test point not contained in visible area: " << visibleRect.x() << "," << visibleRect.y()
                 << "-" << visibleRect.maxX() << "," << visibleRect.maxY();
@@ -329,7 +337,7 @@ void TouchActionTest::sendTouchEvent(WebView* webView, WebInputEvent::Type type,
     WebTouchEvent webTouchEvent;
     webTouchEvent.type = type;
     if (type == WebInputEvent::TouchCancel)
-        webTouchEvent.cancelable = false;
+        webTouchEvent.dispatchType = WebInputEvent::EventNonBlocking;
     webTouchEvent.touchesLength = 1;
     webTouchEvent.touches[0].state = (type == WebInputEvent::TouchStart ?
         WebTouchPoint::StatePressed :

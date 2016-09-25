@@ -4,13 +4,15 @@
 
 #include "media/base/mime_util_internal.h"
 
+#include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "media/base/media.h"
+#include "media/base/media_client.h"
+#include "media/base/media_switches.h"
 #include "media/base/video_codecs.h"
-#include "media/media_features.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/build_info.h"
@@ -149,42 +151,6 @@ static bool IsValidH264Level(uint8_t level_idc) {
           (level_idc >= 50 && level_idc <= 51));
 }
 
-#if BUILDFLAG(ENABLE_HEVC_DEMUXING)
-// ISO/IEC FDIS 14496-15 standard section E.3 describes the syntax of codec ids
-// reserved for HEVC. According to that spec HEVC codec id must start with
-// either "hev1." or "hvc1.". We don't yet support full parsing of HEVC codec
-// ids, but since no other codec id starts with those string we'll just treat
-// any string starting with "hev1." or "hvc1." as valid HEVC codec ids.
-// crbug.com/482761
-static bool ParseHEVCCodecID(const std::string& codec_id,
-                             MimeUtil::Codec* codec,
-                             bool* is_ambiguous) {
-  if (base::StartsWith(codec_id, "hev1.", base::CompareCase::SENSITIVE) ||
-      base::StartsWith(codec_id, "hvc1.", base::CompareCase::SENSITIVE)) {
-    *codec = MimeUtil::HEVC_MAIN;
-
-    // TODO(servolk): Full HEVC codec id parsing is not implemented yet (see
-    // crbug.com/482761). So treat HEVC codec ids as ambiguous for now.
-    *is_ambiguous = true;
-
-    // TODO(servolk): Most HEVC codec ids are treated as ambiguous (see above),
-    // but we need to recognize at least one valid unambiguous HEVC codec id,
-    // which is added into kMP4VideoCodecsExpression. We need it to be
-    // unambiguous to avoid DCHECK(!is_ambiguous) in InitializeMimeTypeMaps. We
-    // also use these in unit tests (see
-    // content/browser/media/media_canplaytype_browsertest.cc).
-    // Remove this workaround after crbug.com/482761 is fixed.
-    if (codec_id == "hev1.1.6.L93.B0" || codec_id == "hvc1.1.6.L93.B0") {
-      *is_ambiguous = false;
-    }
-
-    return true;
-  }
-
-  return false;
-}
-#endif
-
 // Handle parsing of vp9 codec IDs.
 static bool ParseVp9CodecID(const std::string& mime_type_lower_case,
                             const std::string& codec_id,
@@ -202,7 +168,11 @@ static bool ParseVp9CodecID(const std::string& mime_type_lower_case,
     return false;
   }
 
-#if BUILDFLAG(ENABLE_MP4_VP9_DEMUXING)
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableVp9InMp4)) {
+    return false;
+  }
+
   std::vector<std::string> fields = base::SplitString(
       codec_id, ".", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
   if (fields.size() < 1)
@@ -271,9 +241,6 @@ static bool ParseVp9CodecID(const std::string& mime_type_lower_case,
     return false;
 
   return true;
-#else
-  return false;
-#endif  // #if BUILDFLAG(ENABLE_MP4_VP9_DEMUXING)
 }
 
 MimeUtil::MimeUtil() : allow_proprietary_codecs_(false) {
@@ -296,6 +263,24 @@ MimeUtil::MimeUtil() : allow_proprietary_codecs_(false) {
 
 MimeUtil::~MimeUtil() {}
 
+VideoCodec MimeUtilToVideoCodec(MimeUtil::Codec codec) {
+  switch (codec) {
+    case MimeUtil::H264:
+      return kCodecH264;
+    case MimeUtil::HEVC:
+      return kCodecHEVC;
+    case MimeUtil::VP8:
+      return kCodecVP8;
+    case MimeUtil::VP9:
+      return kCodecVP9;
+    case MimeUtil::THEORA:
+      return kCodecTheora;
+    default:
+      break;
+  }
+  return kUnknownVideoCodec;
+}
+
 SupportsType MimeUtil::AreSupportedCodecs(
     const CodecSet& supported_codecs,
     const std::vector<std::string>& codecs,
@@ -308,8 +293,18 @@ SupportsType MimeUtil::AreSupportedCodecs(
   for (size_t i = 0; i < codecs.size(); ++i) {
     bool is_ambiguous = true;
     Codec codec = INVALID_CODEC;
+    VideoCodecProfile video_profile = VIDEO_CODEC_PROFILE_UNKNOWN;
+    uint8_t video_level = 0;
     if (!StringToCodec(mime_type_lower_case, codecs[i], &codec, &is_ambiguous,
-                       is_encrypted)) {
+                       &video_profile, &video_level, is_encrypted)) {
+      return IsNotSupported;
+    }
+
+    VideoCodec video_codec = MimeUtilToVideoCodec(codec);
+
+    if (GetMediaClient() && video_codec != kUnknownVideoCodec &&
+        !GetMediaClient()->IsSupportedVideoConfig(video_codec, video_profile,
+                                                  video_level)) {
       return IsNotSupported;
     }
 
@@ -392,13 +387,11 @@ void MimeUtil::AddSupportedMediaFormats() {
   CodecSet mp4_video_codecs;
   mp4_video_codecs.insert(H264);
 #if BUILDFLAG(ENABLE_HEVC_DEMUXING)
-  mp4_video_codecs.insert(HEVC_MAIN);
+  mp4_video_codecs.insert(HEVC);
 #endif  // BUILDFLAG(ENABLE_HEVC_DEMUXING)
-#if BUILDFLAG(ENABLE_MP4_VP9_DEMUXING)
   // Only VP9 with valid codec string vp09.xx.xx.xx.xx.xx.xx.xx is supported.
   // See ParseVp9CodecID for details.
   mp4_video_codecs.insert(VP9);
-#endif  // BUILDFLAG(ENABLE_MP4_VP9_DEMUXING)
   CodecSet mp4_codecs(mp4_audio_codecs);
   mp4_codecs.insert(mp4_video_codecs.begin(), mp4_video_codecs.end());
 #endif  // defined(USE_PROPRIETARY_CODECS)
@@ -608,15 +601,11 @@ bool MimeUtil::IsCodecSupportedOnPlatform(
       return true;
 
     case H264:
-      // The unified pipeline requires platform support for h264.
-      if (platform_info.is_unified_media_pipeline_enabled)
-        return platform_info.has_platform_decoders;
+      // When content is not encrypted we fall back to MediaPlayer, thus we
+      // always support H264. For EME we need MediaCodec.
+      return !is_encrypted || platform_info.has_platform_decoders;
 
-      // When MediaPlayer or MediaCodec is used, h264 is always supported.
-      DCHECK(!is_encrypted || platform_info.has_platform_decoders);
-      return true;
-
-    case HEVC_MAIN:
+    case HEVC:
 #if BUILDFLAG(ENABLE_HEVC_DEMUXING)
       if (platform_info.is_unified_media_pipeline_enabled &&
           !platform_info.has_platform_decoders) {
@@ -647,6 +636,11 @@ bool MimeUtil::IsCodecSupportedOnPlatform(
       return true;
 
     case VP9: {
+      if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kReportVp9AsAnUnsupportedMimeType)) {
+        return false;
+      }
+
       // If clear, the unified pipeline can always decode VP9 in software.
       if (!is_encrypted && platform_info.is_unified_media_pipeline_enabled)
         return true;
@@ -670,7 +664,14 @@ bool MimeUtil::StringToCodec(const std::string& mime_type_lower_case,
                              const std::string& codec_id,
                              Codec* codec,
                              bool* is_ambiguous,
+                             VideoCodecProfile* out_profile,
+                             uint8_t* out_level,
                              bool is_encrypted) const {
+  DCHECK(out_profile);
+  DCHECK(out_level);
+  *out_profile = VIDEO_CODEC_PROFILE_UNKNOWN;
+  *out_level = 0;
+
   StringToCodecMappings::const_iterator itr =
       string_to_codec_map_.find(codec_id);
   if (itr != string_to_codec_map_.end()) {
@@ -682,18 +683,9 @@ bool MimeUtil::StringToCodec(const std::string& mime_type_lower_case,
 // If |codec_id| is not in |string_to_codec_map_|, then we assume that it is
 // either H.264 or HEVC/H.265 codec ID because currently those are the only
 // ones that are not added to the |string_to_codec_map_| and require parsing.
-
-#if BUILDFLAG(ENABLE_HEVC_DEMUXING)
-  if (ParseHEVCCodecID(codec_id, codec, is_ambiguous)) {
-    return true;
-  }
-#endif
-
-  VideoCodecProfile profile = VIDEO_CODEC_PROFILE_UNKNOWN;
-  uint8_t level_idc = 0;
-  if (ParseAVCCodecId(codec_id, &profile, &level_idc)) {
+  if (ParseAVCCodecId(codec_id, out_profile, out_level)) {
     *codec = MimeUtil::H264;
-    switch (profile) {
+    switch (*out_profile) {
 // HIGH10PROFILE is supported through fallback to the ffmpeg decoder
 // which is not available on Android, or if FFMPEG is not used.
 #if !defined(MEDIA_DISABLE_FFMPEG) && !defined(OS_ANDROID)
@@ -710,7 +702,7 @@ bool MimeUtil::StringToCodec(const std::string& mime_type_lower_case,
       case H264PROFILE_BASELINE:
       case H264PROFILE_MAIN:
       case H264PROFILE_HIGH:
-        *is_ambiguous = !IsValidH264Level(level_idc);
+        *is_ambiguous = !IsValidH264Level(*out_level);
         break;
       default:
         *is_ambiguous = true;
@@ -718,9 +710,10 @@ bool MimeUtil::StringToCodec(const std::string& mime_type_lower_case,
     return true;
   }
 
-  if (ParseVp9CodecID(mime_type_lower_case, codec_id, &profile)) {
+  if (ParseVp9CodecID(mime_type_lower_case, codec_id, out_profile)) {
     *codec = MimeUtil::VP9;
-    switch (profile) {
+    *out_level = 1;
+    switch (*out_profile) {
       case VP9PROFILE_PROFILE0:
         // Profile 0 should always be supported if VP9 is supported.
         *is_ambiguous = false;
@@ -734,7 +727,15 @@ bool MimeUtil::StringToCodec(const std::string& mime_type_lower_case,
     return true;
   }
 
-  DVLOG(4) << __FUNCTION__ << ": Unrecognized codec id " << codec_id;
+#if BUILDFLAG(ENABLE_HEVC_DEMUXING)
+  if (ParseHEVCCodecId(codec_id, out_profile, out_level)) {
+    *codec = MimeUtil::HEVC;
+    *is_ambiguous = false;
+    return true;
+  }
+#endif
+
+  DVLOG(4) << __func__ << ": Unrecognized codec id " << codec_id;
   return false;
 }
 
@@ -762,7 +763,7 @@ bool MimeUtil::IsCodecProprietary(Codec codec) const {
     case MPEG2_AAC:
     case MPEG4_AAC:
     case H264:
-    case HEVC_MAIN:
+    case HEVC:
       return true;
 
     case PCM:

@@ -11,7 +11,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "ui/compositor/compositor.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -30,8 +30,6 @@ class TestCompositorHostOzone : public TestCompositorHost {
 
   gfx::Rect bounds_;
 
-  ui::ContextFactory* context_factory_;
-
   ui::Compositor compositor_;
 
   DISALLOW_COPY_AND_ASSIGN(TestCompositorHostOzone);
@@ -41,7 +39,6 @@ TestCompositorHostOzone::TestCompositorHostOzone(
     const gfx::Rect& bounds,
     ui::ContextFactory* context_factory)
     : bounds_(bounds),
-      context_factory_(context_factory),
       compositor_(context_factory, base::ThreadTaskRunnerHandle::Get()) {}
 
 TestCompositorHostOzone::~TestCompositorHostOzone() {}
@@ -56,6 +53,7 @@ void TestCompositorHostOzone::Show() {
   // available: http://crbug.com/255128
   compositor_.SetAcceleratedWidget(1);
   compositor_.SetScaleAndSize(1.0f, bounds_.size());
+  compositor_.SetVisible(true);
 }
 
 ui::Compositor* TestCompositorHostOzone::GetCompositor() {

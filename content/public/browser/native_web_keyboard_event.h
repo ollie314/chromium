@@ -30,14 +30,7 @@ struct CONTENT_EXPORT NativeWebKeyboardEvent :
 
   explicit NativeWebKeyboardEvent(gfx::NativeEvent native_event);
 #if defined(OS_ANDROID)
-  NativeWebKeyboardEvent(blink::WebInputEvent::Type type,
-                         int modifiers,
-                         double time_secs,
-                         int keycode,
-                         int scancode,
-                         int unicode_character,
-                         bool is_system_key);
-  // Takes ownership of android_key_event.
+  // Holds a global ref to android_key_event (allowed to be null).
   NativeWebKeyboardEvent(
       JNIEnv* env,
       const base::android::JavaRef<jobject>& android_key_event,
@@ -69,13 +62,6 @@ struct CONTENT_EXPORT NativeWebKeyboardEvent :
   // it is hit in ime mode.
   // Currently, it's only used by Linux and Mac ports.
   bool skip_in_browser;
-
-#if defined(USE_AURA)
-  // True if the key event matches an edit command. In order to ensure the edit
-  // command always work in web page, the browser should not pre-handle this key
-  // event as a reserved accelerator. See http://crbug.com/54573
-  bool match_edit_command;
-#endif
 };
 
 }  // namespace content

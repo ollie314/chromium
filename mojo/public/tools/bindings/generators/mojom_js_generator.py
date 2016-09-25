@@ -331,8 +331,14 @@ def IsHandleField(field):
 def IsInterfaceField(field):
   return mojom.IsInterfaceKind(field.kind)
 
+def IsInterfaceRequestField(field):
+  return mojom.IsInterfaceRequestKind(field.kind)
+
 def IsUnionField(field):
   return mojom.IsUnionKind(field.kind)
+
+def IsBoolField(field):
+  return mojom.IsBoolKind(field.kind)
 
 
 class Generator(generator.Generator):
@@ -348,12 +354,14 @@ class Generator(generator.Generator):
     "field_offset": JavaScriptFieldOffset,
     "has_callbacks": mojom.HasCallbacks,
     "is_array_pointer_field": IsArrayPointerField,
+    "is_bool_field": IsBoolField,
     "is_map_pointer_field": IsMapPointerField,
     "is_struct_pointer_field": IsStructPointerField,
     "is_string_pointer_field": IsStringPointerField,
     "is_union_field": IsUnionField,
     "is_handle_field": IsHandleField,
     "is_interface_field": IsInterfaceField,
+    "is_interface_request_field": IsInterfaceRequestField,
     "js_type": JavaScriptType,
     "js_proxy_method_parameter_value": JavaScriptProxyMethodParameterValue,
     "js_stub_method_parameter_value": JavaScriptStubMethodParameterValue,

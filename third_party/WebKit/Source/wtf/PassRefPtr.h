@@ -18,6 +18,9 @@
  *
  */
 
+// PassRefPtr will soon be deleted.
+// New code should instead pass ownership of the contents of a RefPtr using std::move().
+
 #ifndef WTF_PassRefPtr_h
 #define WTF_PassRefPtr_h
 
@@ -61,17 +64,18 @@ public:
     PassRefPtr() : m_ptr(nullptr) {}
     PassRefPtr(std::nullptr_t) : m_ptr(nullptr) {}
     PassRefPtr(T* ptr) : m_ptr(ptr) { refIfNotNull(ptr); }
-    explicit PassRefPtr(T& ptr) : m_ptr(&ptr) { m_ptr->ref(); }
     // It somewhat breaks the type system to allow transfer of ownership out of
     // a const PassRefPtr. However, it makes it much easier to work with
     // PassRefPtr temporaries, and we don't have a need to use real const
     // PassRefPtrs anyway.
     PassRefPtr(const PassRefPtr& o) : m_ptr(o.leakRef()) {}
+    PassRefPtr(PassRefPtr&& o) : m_ptr(o.leakRef()) {}
     template <typename U> PassRefPtr(const PassRefPtr<U>& o, EnsurePtrConvertibleArgDecl(U, T)) : m_ptr(o.leakRef()) {}
 
     ALWAYS_INLINE ~PassRefPtr() { derefIfNotNull(m_ptr); }
 
     template <typename U> PassRefPtr(const RefPtr<U>&, EnsurePtrConvertibleArgDecl(U, T));
+    template <typename U> PassRefPtr(RefPtr<U>&&, EnsurePtrConvertibleArgDecl(U, T));
 
     T* get() const { return m_ptr; }
 
@@ -81,7 +85,7 @@ public:
     T* operator->() const { return m_ptr; }
 
     bool operator!() const { return !m_ptr; }
-    explicit operator bool() const { return m_ptr; }
+    explicit operator bool() const { return m_ptr != nullptr; }
 
     friend PassRefPtr adoptRef<T>(T*);
 
@@ -99,11 +103,23 @@ private:
 };
 
 template <typename T>
+PassRefPtr<T> wrapPassRefPtr(T* ptr)
+{
+    return PassRefPtr<T>(ptr);
+}
+
+template <typename T>
 template <typename U> inline PassRefPtr<T>::PassRefPtr(const RefPtr<U>& o, EnsurePtrConvertibleArgDefn(U, T))
     : m_ptr(o.get())
 {
     T* ptr = m_ptr;
     refIfNotNull(ptr);
+}
+
+template <typename T>
+template <typename U> inline PassRefPtr<T>::PassRefPtr(RefPtr<U>&& o, EnsurePtrConvertibleArgDefn(U, T))
+    : m_ptr(o.release().leakRef())
+{
 }
 
 template <typename T> inline T* PassRefPtr<T>::leakRef() const
@@ -189,11 +205,6 @@ template <typename T> PassRefPtr<T> adoptRef(T* p)
     return PassRefPtr<T>(p, PassRefPtr<T>::AdoptRef);
 }
 
-template <typename T, typename U> inline PassRefPtr<T> static_pointer_cast(const PassRefPtr<U>& p)
-{
-    return adoptRef(static_cast<T*>(p.leakRef()));
-}
-
 template <typename T> inline T* getPtr(const PassRefPtr<T>& p)
 {
     return p.get();
@@ -203,6 +214,5 @@ template <typename T> inline T* getPtr(const PassRefPtr<T>& p)
 
 using WTF::PassRefPtr;
 using WTF::adoptRef;
-using WTF::static_pointer_cast;
 
 #endif // WTF_PassRefPtr_h

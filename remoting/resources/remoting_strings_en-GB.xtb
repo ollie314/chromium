@@ -34,6 +34,7 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
 <translation id="1779766957982586368">Close window</translation>
 <translation id="1841799852846221389">Disabling remote connections for this computer…</translation>
 <translation id="189172778771606813">Close navigation drawer</translation>
+<translation id="1897488610212723051">Delete</translation>
 <translation id="195619862187186579">Keyboard layouts</translation>
 <translation id="1996161829609978754">Chrome is downloading the Chromoting Host installer.  Once the download is complete, please run the installer before continuing.</translation>
 <translation id="2009755455353575666">Connection failed</translation>
@@ -73,7 +74,6 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
 <translation id="2676780859508944670">Working…</translation>
 <translation id="2699970397166997657">Chromoting</translation>
 <translation id="2747641796667576127">Software updates usually happen automatically, but can fail in some rare cases. Updating the software should take no more than a few minutes and can be done while connected to your computer remotely.</translation>
-<translation id="2813770873348017932">Connections to the remote computer are temporarily blocked because somebody was trying to connect to it with invalid PIN. Please try again later.</translation>
 <translation id="2841013758207633010">Time</translation>
 <translation id="2851674870054673688">Once they have entered the code your sharing session will begin.</translation>
 <translation id="2851754573186462851">Chromium App Streaming</translation>
@@ -122,9 +122,6 @@ Host</translation>
 <translation id="3950820424414687140">Sign in</translation>
 <translation id="3989511127559254552">To continue, you must first grant extended access permissions to your computer. You only have to do this once.</translation>
 <translation id="4006787130661126000">You must enable remote connections if you want to use Chrome Remote Desktop to access this computer.</translation>
-<translation id="4028465833180158312">• Material Design UI updates.
-• Third-party licensing credits.
-• Information shown for remote computers that are offline.</translation>
 <translation id="405887016757208221">The remote computer has failed to initialise the session. If problem persists please try to configure the host again.</translation>
 <translation id="4068946408131579958">All connections</translation>
 <translation id="409800995205263688">NOTE: Policy settings permit connections only between computers within your network.</translation>
@@ -132,6 +129,7 @@ Host</translation>
 <translation id="4156740505453712750">To protect access to this computer, please choose a PIN of <ph name="BOLD_START" />at least six digits<ph name="BOLD_END" />. This PIN will be required when connecting from another location.</translation>
 <translation id="4176825807642096119">Access code</translation>
 <translation id="4207623512727273241">Please run the installer before continuing.</translation>
+<translation id="4227991223508142681">Host Provisioning Utility</translation>
 <translation id="4240294130679914010">Chromoting Host Uninstaller</translation>
 <translation id="4277463233460010382">This computer is configured to allow one or more clients to connect without entering a PIN.</translation>
 <translation id="4277736576214464567">The access code is invalid. Please try again.</translation>
@@ -150,7 +148,6 @@ Host</translation>
 <translation id="4573676252416618192">Chrome Remote
 Desktop Host</translation>
 <translation id="4619978527973181021">Accept and install</translation>
-<translation id="4647791084836149355">Show Cardboard view</translation>
 <translation id="4703302905453407178">A required component has stopped working. Please report this problem to the developers.</translation>
 <translation id="4703799847237267011">Your Chromoting session has ended.</translation>
 <translation id="4736223761657662401">Connection History</translation>
@@ -168,6 +165,7 @@ Desktop Host</translation>
 <translation id="4985296110227979402">You need to first set up your computer for remote access</translation>
 <translation id="5064360042339518108"><ph name="HOSTNAME" /> (offline)</translation>
 <translation id="5070121137485264635">The remote host requires you to authenticate to a third-party website. To continue, you must grant Chrome Remote Desktop additional permissions to access this address:</translation>
+<translation id="507204348399810022">Are you sure that you want to disable remote connections to <ph name="HOSTNAME" />?</translation>
 <translation id="5156271271724754543">Please enter the same PIN in both boxes.</translation>
 <translation id="5168917394043976756">Open navigation drawer</translation>
 <translation id="5170982930780719864">Invalid host id.</translation>
@@ -178,7 +176,6 @@ Desktop Host</translation>
 <translation id="533625276787323658">There's nothing to connect to</translation>
 <translation id="5363265567587775042">Ask the user whose computer you wish to access to click “<ph name="SHARE" />” and give you the access code.</translation>
 <translation id="5379087427956679853">Chrome Remote Desktop allows you to securely share your computer over the Web. Both users must be running the Chrome Remote Desktop app, which can be found at <ph name="URL" />.</translation>
-<translation id="5394895745784982830">For Mac (OS X 10.6 and above)</translation>
 <translation id="5397086374758643919">Chrome Remote Desktop Host Uninstaller</translation>
 <translation id="5419185025274123272">Could not reset the application. You can still send a bug report.</translation>
 <translation id="544077782045763683">Host has shut down.</translation>
@@ -211,9 +208,12 @@ Desktop Host</translation>
 <translation id="6284412385303060032">Host running at the console logic screen has shut down to support curtain mode by switching to a host running in a user-specific session.</translation>
 <translation id="629730747756840877">Account</translation>
 <translation id="6304318647555713317">Client</translation>
-<translation id="6324708100353784493">You have enabled Google Cardboard integration mode. To use this mode, insert your device into a Google Cardboard-compatible viewer.</translation>
 <translation id="6381670701864002291">Something else.</translation>
 <translation id="6398765197997659313">Exit full screen</translation>
+<translation id="6408143143164565232">• Listen to audio from Windows or Linux computers.
+• Remove unwanted connections by long-pressing on the computer name.
+• Smoother pinch-to-zoom and two-finger scrolling.
+• New Help &amp; Feedback screen.</translation>
 <translation id="6441316101718669559">Desktop integration is not supported on this platform. You can still use the application, but the user experience will be degraded.</translation>
 <translation id="652218476070540101">The PIN for this computer is being updated…</translation>
 <translation id="6527303717912515753">Share</translation>
@@ -221,6 +221,7 @@ Desktop Host</translation>
 <translation id="6542902059648396432">Report an issue…</translation>
 <translation id="6550675742724504774">Options</translation>
 <translation id="6570205395680337606">Reset the application. You will lose any unsaved work.</translation>
+<translation id="6572345186230665992">For Mac (OS X Mavericks 10.9 and above)</translation>
 <translation id="6612717000975622067">Send Ctrl-Alt-Del</translation>
 <translation id="6640610550128933069">last online <ph name="DATE" /></translation>
 <translation id="6668065415969892472">Your PIN has been updated.</translation>
@@ -232,7 +233,7 @@ Desktop Host</translation>
 <translation id="6930242544192836755">Duration</translation>
 <translation id="6939719207673461467">Show/hide keyboard.</translation>
 <translation id="6944854424004126054">Restore window</translation>
-<translation id="6962773374262604195">For Windows (XP and above)</translation>
+<translation id="6963936880795878952">Connections to the remote computer are temporarily blocked because somebody was trying to connect to it with an invalid PIN. Please try again later.</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="6985691951107243942">Are you sure you want to disable remote connections to <ph name="HOSTNAME" />? If you change your mind, you'll need to visit that computer to re-enable connections.</translation>
 <translation id="6998989275928107238">To</translation>
@@ -259,6 +260,7 @@ Desktop Host</translation>
 <translation id="7836926030608666805">Some required components are missing. Please make sure that you're running the latest version of Chrome and try again.</translation>
 <translation id="7868137160098754906">Please enter your PIN for the remote computer.</translation>
 <translation id="7869445566579231750">You do not have permission to run this application.</translation>
+<translation id="7895403300744144251">Security policies on the remote computer do not allow connections from your account.</translation>
 <translation id="7948001860594368197">Screen options</translation>
 <translation id="7970576581263377361">Authentication failed. Please sign in to Chromium again.</translation>
 <translation id="7981525049612125370">The remote session has expired.</translation>
@@ -288,6 +290,7 @@ Desktop Host</translation>
 <translation id="8759753423332885148">Learn more.</translation>
 <translation id="8791202241915690908">Download Chromoting Host Installer</translation>
 <translation id="894763922177556086">Good</translation>
+<translation id="895780780740011433">For Windows 7 and above</translation>
 <translation id="897805526397249209">To enable remote connections to a different computer, install Chromoting there and click “<ph name="BUTTON_NAME" />”.</translation>
 <translation id="8998327464021325874">Chrome Remote Desktop Host Controller</translation>
 <translation id="9016232822027372900">Connect anyway</translation>

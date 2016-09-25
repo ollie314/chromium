@@ -52,15 +52,14 @@ static PassRefPtr<StringImpl> normalizeWhitespace(PassRefPtr<StringImpl> string)
 }
 
 LayoutSVGInlineText::LayoutSVGInlineText(Node* n, PassRefPtr<StringImpl> string)
-    : LayoutText(n, normalizeWhitespace(string))
+    : LayoutText(n, normalizeWhitespace(std::move(string)))
     , m_scalingFactor(1)
-    , m_layoutAttributes(this)
 {
 }
 
 void LayoutSVGInlineText::setTextInternal(PassRefPtr<StringImpl> text)
 {
-    LayoutText::setTextInternal(text);
+    LayoutText::setTextInternal(std::move(text));
     if (LayoutSVGText* textLayoutObject = LayoutSVGText::locateLayoutSVGTextAncestor(this))
         textLayoutObject->subtreeTextDidChange();
 }
@@ -123,9 +122,9 @@ FloatRect LayoutSVGInlineText::floatLinesBoundingBox() const
     return boundingBox;
 }
 
-IntRect LayoutSVGInlineText::linesBoundingBox() const
+LayoutRect LayoutSVGInlineText::linesBoundingBox() const
 {
-    return enclosingIntRect(floatLinesBoundingBox());
+    return enclosingLayoutRect(floatLinesBoundingBox());
 }
 
 bool LayoutSVGInlineText::characterStartsNewTextChunk(int position) const
@@ -137,11 +136,11 @@ bool LayoutSVGInlineText::characterStartsNewTextChunk(int position) const
     if (!position && parent()->isSVGTextPath() && !previousSibling())
         return true;
 
-    const SVGCharacterDataMap::const_iterator it = m_layoutAttributes.characterDataMap().find(static_cast<unsigned>(position + 1));
-    if (it == m_layoutAttributes.characterDataMap().end())
+    const SVGCharacterDataMap::const_iterator it = m_characterDataMap.find(static_cast<unsigned>(position + 1));
+    if (it == m_characterDataMap.end())
         return false;
 
-    return !SVGTextLayoutAttributes::isEmptyValue(it->value.x) || !SVGTextLayoutAttributes::isEmptyValue(it->value.y);
+    return it->value.hasX() || it->value.hasY();
 }
 
 PositionWithAffinity LayoutSVGInlineText::positionForPoint(const LayoutPoint& point)
@@ -198,7 +197,7 @@ inline bool isValidSurrogatePair(const TextRun& run, unsigned index)
 {
     if (!U16_IS_LEAD(run[index]))
         return false;
-    if (index + 1 >= static_cast<unsigned>(run.charactersLength()))
+    if (index + 1 >= run.length())
         return false;
     return U16_IS_TRAIL(run[index + 1]);
 }
@@ -276,7 +275,7 @@ void LayoutSVGInlineText::addMetricsFromRun(
 
     const float cachedFontHeight = scaledFont().getFontMetrics().floatHeight() / m_scalingFactor;
     const bool preserveWhiteSpace = styleRef().whiteSpace() == PRE;
-    const unsigned runLength = static_cast<unsigned>(run.length());
+    const unsigned runLength = run.length();
 
     // TODO(pdr): Character-based iteration is ambiguous and error-prone. It
     // should be unified under a single concept. See: https://crbug.com/593570

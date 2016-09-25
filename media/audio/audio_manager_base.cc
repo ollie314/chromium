@@ -10,8 +10,9 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "media/audio/audio_device_description.h"
 #include "media/audio/audio_output_dispatcher_impl.h"
 #include "media/audio/audio_output_proxy.h"
 #include "media/audio/audio_output_resampler.h"
@@ -35,10 +36,6 @@ const int kDefaultMaxInputStreams = 16;
 const int kMaxInputChannels = 3;
 
 }  // namespace
-
-const char AudioManagerBase::kDefaultDeviceId[] = "default";
-const char AudioManagerBase::kCommunicationsDeviceId[] = "communications";
-const char AudioManagerBase::kLoopbackInputDeviceId[] = "loopback";
 
 struct AudioManagerBase::DispatcherParams {
   DispatcherParams(const AudioParameters& input,
@@ -77,18 +74,6 @@ class AudioManagerBase::CompareByParams {
   const DispatcherParams* dispatcher_;
 };
 
-// static
-bool AudioManagerBase::IsDefaultDeviceId(const std::string& device_id) {
-  return device_id.empty() || device_id == AudioManagerBase::kDefaultDeviceId;
-}
-
-// static
-bool AudioManagerBase::UseSessionIdToSelectDevice(
-    int session_id,
-    const std::string& device_id) {
-  return session_id && device_id.empty();
-}
-
 AudioManagerBase::AudioManagerBase(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
@@ -120,10 +105,9 @@ base::string16 AudioManagerBase::GetAudioInputDeviceModel() {
 
 AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
     const AudioParameters& params,
-    const std::string& device_id) {
-  // TODO(miu): Fix ~50 call points across several unit test modules to call
-  // this method on the audio thread, then uncomment the following:
-  // DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+    const std::string& device_id,
+    const LogCallback& log_callback) {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
 
   if (!params.IsValid()) {
     DLOG(ERROR) << "Audio parameters are invalid";
@@ -145,12 +129,12 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
   AudioOutputStream* stream;
   switch (params.format()) {
     case AudioParameters::AUDIO_PCM_LINEAR:
-      DCHECK(IsDefaultDeviceId(device_id))
+      DCHECK(AudioDeviceDescription::IsDefaultDevice(device_id))
           << "AUDIO_PCM_LINEAR supports only the default device.";
-      stream = MakeLinearOutputStream(params);
+      stream = MakeLinearOutputStream(params, log_callback);
       break;
     case AudioParameters::AUDIO_PCM_LOW_LATENCY:
-      stream = MakeLowLatencyOutputStream(params, device_id);
+      stream = MakeLowLatencyOutputStream(params, device_id, log_callback);
       break;
     case AudioParameters::AUDIO_FAKE:
       stream = FakeAudioOutputStream::MakeFakeStream(this, params);
@@ -169,10 +153,9 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStream(
 
 AudioInputStream* AudioManagerBase::MakeAudioInputStream(
     const AudioParameters& params,
-    const std::string& device_id) {
-  // TODO(miu): Fix ~20 call points across several unit test modules to call
-  // this method on the audio thread, then uncomment the following:
-  // DCHECK(GetTaskRunner()->BelongsToCurrentThread());
+    const std::string& device_id,
+    const LogCallback& log_callback) {
+  DCHECK(GetTaskRunner()->BelongsToCurrentThread());
 
   if (!params.IsValid() || (params.channels() > kMaxInputChannels) ||
       device_id.empty()) {
@@ -193,10 +176,10 @@ AudioInputStream* AudioManagerBase::MakeAudioInputStream(
   AudioInputStream* stream;
   switch (params.format()) {
     case AudioParameters::AUDIO_PCM_LINEAR:
-      stream = MakeLinearInputStream(params, device_id);
+      stream = MakeLinearInputStream(params, device_id, log_callback);
       break;
     case AudioParameters::AUDIO_PCM_LOW_LATENCY:
-      stream = MakeLowLatencyInputStream(params, device_id);
+      stream = MakeLowLatencyInputStream(params, device_id, log_callback);
       break;
     case AudioParameters::AUDIO_FAKE:
       stream = FakeAudioInputStream::MakeFakeStream(this, params);
@@ -225,7 +208,9 @@ AudioOutputStream* AudioManagerBase::MakeAudioOutputStreamProxy(
   // NOTE: Implementations that don't yet support opening non-default output
   // devices may return an empty string from GetDefaultOutputDeviceID().
   std::string output_device_id =
-      IsDefaultDeviceId(device_id) ? GetDefaultOutputDeviceID() : device_id;
+      AudioDeviceDescription::IsDefaultDevice(device_id)
+          ? GetDefaultOutputDeviceID()
+          : device_id;
 
   // If we're not using AudioOutputResampler our output parameters are the same
   // as our input parameters.
@@ -360,6 +345,28 @@ std::string AudioManagerBase::GetAssociatedOutputDeviceID(
   return "";
 }
 
+std::string AudioManagerBase::GetGroupIDOutput(
+    const std::string& output_device_id) {
+  if (output_device_id == AudioDeviceDescription::kDefaultDeviceId) {
+    std::string real_device_id = GetDefaultOutputDeviceID();
+    if (!real_device_id.empty()) {
+      return real_device_id;
+    }
+  }
+  return output_device_id;
+}
+
+std::string AudioManagerBase::GetGroupIDInput(
+    const std::string& input_device_id) {
+  std::string output_device_id = GetAssociatedOutputDeviceID(input_device_id);
+  if (output_device_id.empty()) {
+    // Some characters are added to avoid accidentally
+    // giving the input the same group id as an output.
+    return input_device_id + "input";
+  }
+  return GetGroupIDOutput(output_device_id);
+}
+
 std::string AudioManagerBase::GetDefaultOutputDeviceID() {
   return "";
 }
@@ -375,7 +382,7 @@ int AudioManagerBase::GetUserBufferSize() {
   return 0;
 }
 
-scoped_ptr<AudioLog> AudioManagerBase::CreateAudioLog(
+std::unique_ptr<AudioLog> AudioManagerBase::CreateAudioLog(
     AudioLogFactory::AudioComponent component) {
   return audio_log_factory_->CreateAudioLog(component);
 }

@@ -9,8 +9,10 @@
 #include <vector>
 
 #include "base/lazy_instance.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/process/process_handle.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
@@ -102,6 +104,7 @@ void MockRenderProcessHost::EnableSendQueue() {
 
 bool MockRenderProcessHost::Init() {
   has_connection_ = true;
+  remote_interfaces_.reset(new shell::InterfaceProvider);
   return true;
 }
 
@@ -210,7 +213,7 @@ void MockRenderProcessHost::Cleanup() {
     FOR_EACH_OBSERVER(RenderProcessHostObserver,
                       observers_,
                       RenderProcessHostDestroyed(this));
-    base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
     RenderProcessHostImpl::UnregisterHost(GetID());
     deletion_callback_called_ = true;
   }
@@ -256,15 +259,8 @@ base::TimeDelta MockRenderProcessHost::GetChildProcessIdleTime() const {
   return base::TimeDelta::FromMilliseconds(0);
 }
 
-void MockRenderProcessHost::NotifyTimezoneChange(const std::string& zone_id) {
-}
-
-ServiceRegistry* MockRenderProcessHost::GetServiceRegistry() {
-  return service_registry_.get();
-}
-
-shell::Connection* MockRenderProcessHost::GetChildConnection() {
-  return nullptr;
+shell::InterfaceProvider* MockRenderProcessHost::GetRemoteInterfaces() {
+  return remote_interfaces_.get();
 }
 
 std::unique_ptr<base::SharedPersistentMemoryAllocator>
@@ -276,20 +272,6 @@ const base::TimeTicks& MockRenderProcessHost::GetInitTimeForNavigationMetrics()
     const {
   static base::TimeTicks dummy_time = base::TimeTicks::Now();
   return dummy_time;
-}
-
-bool MockRenderProcessHost::SubscribeUniformEnabled() const {
-  return false;
-}
-
-void MockRenderProcessHost::OnAddSubscription(unsigned int target) {
-}
-
-void MockRenderProcessHost::OnRemoveSubscription(unsigned int target) {
-}
-
-void MockRenderProcessHost::SendUpdateValueState(
-    unsigned int target, const gpu::ValueState& state) {
 }
 
 #if defined(ENABLE_BROWSER_CDMS)
@@ -304,13 +286,31 @@ bool MockRenderProcessHost::IsProcessBackgrounded() const {
   return is_process_backgrounded_;
 }
 
-void MockRenderProcessHost::IncrementWorkerRefCount() {
+void MockRenderProcessHost::IncrementServiceWorkerRefCount() {
   ++worker_ref_count_;
 }
 
-void MockRenderProcessHost::DecrementWorkerRefCount() {
+void MockRenderProcessHost::DecrementServiceWorkerRefCount() {
   --worker_ref_count_;
 }
+
+void MockRenderProcessHost::IncrementSharedWorkerRefCount() {
+  ++worker_ref_count_;
+}
+
+void MockRenderProcessHost::DecrementSharedWorkerRefCount() {
+  --worker_ref_count_;
+}
+
+void MockRenderProcessHost::ForceReleaseWorkerRefCounts() {
+  worker_ref_count_ = 0;
+}
+
+bool MockRenderProcessHost::IsWorkerRefCountDisabled() {
+  return false;
+}
+
+void MockRenderProcessHost::PurgeAndSuspend() {}
 
 void MockRenderProcessHost::FilterURL(bool empty_allowed, GURL* url) {
   RenderProcessHostImpl::FilterURL(this, empty_allowed, url);
@@ -323,10 +323,14 @@ void MockRenderProcessHost::EnableAudioDebugRecordings(
 
 void MockRenderProcessHost::DisableAudioDebugRecordings() {}
 
-void MockRenderProcessHost::EnableEventLogRecordings(
-    const base::FilePath& file) {}
+bool MockRenderProcessHost::StartWebRTCEventLog(
+    const base::FilePath& file_path) {
+  return false;
+}
 
-void MockRenderProcessHost::DisableEventLogRecordings() {}
+bool MockRenderProcessHost::StopWebRTCEventLog() {
+  return false;
+}
 
 void MockRenderProcessHost::SetWebRtcLogMessageCallback(
     base::Callback<void(const std::string&)> callback) {

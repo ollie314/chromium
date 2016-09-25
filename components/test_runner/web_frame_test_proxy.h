@@ -5,13 +5,14 @@
 #ifndef COMPONENTS_TEST_RUNNER_WEB_FRAME_TEST_PROXY_H_
 #define COMPONENTS_TEST_RUNNER_WEB_FRAME_TEST_PROXY_H_
 
+#include <memory>
 #include <utility>
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "components/test_runner/test_runner_export.h"
 #include "components/test_runner/web_frame_test_client.h"
+#include "third_party/WebKit/public/platform/WebEffectiveConnectionType.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebFrameClient.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -20,10 +21,17 @@ namespace test_runner {
 
 class TEST_RUNNER_EXPORT WebFrameTestProxyBase {
  public:
-  void set_test_client(scoped_ptr<WebFrameTestClient> client) {
+  void set_test_client(std::unique_ptr<WebFrameTestClient> client) {
     DCHECK(client);
     DCHECK(!test_client_);
     test_client_ = std::move(client);
+  }
+
+  blink::WebLocalFrame* web_frame() const { return web_frame_; }
+  void set_web_frame(blink::WebLocalFrame* frame) {
+    DCHECK(frame);
+    DCHECK(!web_frame_);
+    web_frame_ = frame;
   }
 
  protected:
@@ -32,14 +40,15 @@ class TEST_RUNNER_EXPORT WebFrameTestProxyBase {
   blink::WebFrameClient* test_client() { return test_client_.get(); }
 
  private:
-  scoped_ptr<WebFrameTestClient> test_client_;
+  std::unique_ptr<WebFrameTestClient> test_client_;
+  blink::WebLocalFrame* web_frame_;
 
   DISALLOW_COPY_AND_ASSIGN(WebFrameTestProxyBase);
 };
 
-// WebTestProxy is used during LayoutTests and always instantiated, at time of
-// writing with Base=RenderFrameImpl. It does not directly inherit from it for
-// layering purposes.
+// WebFrameTestProxy is used during LayoutTests and always instantiated, at time
+// of writing with Base=RenderFrameImpl. It does not directly inherit from it
+// for layering purposes.
 template <class Base, typename P>
 class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
  public:
@@ -155,6 +164,21 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
     test_client()->didFinishLoad(frame);
   }
 
+  void didNavigateWithinPage(blink::WebLocalFrame* frame,
+                             const blink::WebHistoryItem& history_item,
+                             blink::WebHistoryCommitType commit_type,
+                             bool content_initiated) override {
+    Base::didNavigateWithinPage(frame, history_item, commit_type,
+                                content_initiated);
+    test_client()->didNavigateWithinPage(frame, history_item, commit_type,
+                                         content_initiated);
+  }
+
+  void didStopLoading() override {
+    Base::didStopLoading();
+    test_client()->didStopLoading();
+  }
+
   void didChangeSelection(bool is_selection_empty) override {
     test_client()->didChangeSelection(is_selection_empty);
     Base::didChangeSelection(is_selection_empty);
@@ -166,6 +190,14 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
       const blink::WebVector<blink::WebColorSuggestion>& suggestions) override {
     return test_client()->createColorChooser(client, initial_color,
                                              suggestions);
+  }
+
+  blink::WebEffectiveConnectionType getEffectiveConnectionType() override {
+    if (test_client()->getEffectiveConnectionType() !=
+        blink::WebEffectiveConnectionType::TypeUnknown) {
+      return test_client()->getEffectiveConnectionType();
+    }
+    return Base::getEffectiveConnectionType();
   }
 
   void runModalAlertDialog(const blink::WebString& message) override {
@@ -208,36 +240,15 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
     Base::didDispatchPingLoader(url);
   }
 
-  void willSendRequest(
-      blink::WebLocalFrame* frame,
-      unsigned identifier,
-      blink::WebURLRequest& request,
-      const blink::WebURLResponse& redirect_response) override {
-    Base::willSendRequest(frame, identifier, request, redirect_response);
-    test_client()->willSendRequest(frame, identifier, request,
-                                   redirect_response);
+  void willSendRequest(blink::WebLocalFrame* frame,
+                       blink::WebURLRequest& request) override {
+    Base::willSendRequest(frame, request);
+    test_client()->willSendRequest(frame, request);
   }
 
-  void didReceiveResponse(unsigned identifier,
-                          const blink::WebURLResponse& response) override {
-    test_client()->didReceiveResponse(identifier, response);
-    Base::didReceiveResponse(identifier, response);
-  }
-
-  void didChangeResourcePriority(unsigned identifier,
-                                 const blink::WebURLRequest::Priority& priority,
-                                 int intra_priority_value) override {
-    // This is not implemented in RenderFrameImpl, so need to explicitly call
-    // into the base proxy.
-    test_client()->didChangeResourcePriority(identifier, priority,
-                                             intra_priority_value);
-    Base::didChangeResourcePriority(
-        identifier, priority, intra_priority_value);
-  }
-
-  void didFinishResourceLoad(blink::WebLocalFrame* frame,
-                             unsigned identifier) override {
-    test_client()->didFinishResourceLoad(frame, identifier);
+  void didReceiveResponse(const blink::WebURLResponse& response) override {
+    test_client()->didReceiveResponse(response);
+    Base::didReceiveResponse(response);
   }
 
   blink::WebNavigationPolicy decidePolicyForNavigation(
@@ -250,6 +261,11 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
     return Base::decidePolicyForNavigation(info);
   }
 
+  void didStartLoading(bool to_different_document) override {
+    Base::didStartLoading(to_different_document);
+    test_client()->didStartLoading(to_different_document);
+  }
+
   void willStartUsingPeerConnectionHandler(
       blink::WebRTCPeerConnectionHandler* handler) override {
     // RenderFrameImpl::willStartUsingPeerConnectionHandler can not be mocked.
@@ -258,18 +274,6 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
 
   blink::WebUserMediaClient* userMediaClient() override {
     return test_client()->userMediaClient();
-  }
-
-  bool willCheckAndDispatchMessageEvent(
-      blink::WebLocalFrame* source_frame,
-      blink::WebFrame* target_frame,
-      blink::WebSecurityOrigin target,
-      blink::WebDOMMessageEvent event) override {
-    if (test_client()->willCheckAndDispatchMessageEvent(
-            source_frame, target_frame, target, event))
-      return true;
-    return Base::willCheckAndDispatchMessageEvent(
-        source_frame, target_frame, target, event);
   }
 
   void postAccessibilityEvent(const blink::WebAXObject& object,
@@ -284,6 +288,15 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
       blink::WebSetSinkIdCallbacks* web_callbacks) override {
     test_client()->checkIfAudioSinkExistsAndIsAuthorized(
         sink_id, security_origin, web_callbacks);
+  }
+
+  void didClearWindowObject(blink::WebLocalFrame* frame) override {
+    test_client()->didClearWindowObject(frame);
+    Base::didClearWindowObject(frame);
+  }
+  bool runFileChooser(const blink::WebFileChooserParams& params,
+                      blink::WebFileChooserCompletion* completion) override {
+    return test_client()->runFileChooser(params, completion);
   }
 
  private:

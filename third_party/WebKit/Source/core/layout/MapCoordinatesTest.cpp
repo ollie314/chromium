@@ -450,8 +450,78 @@ TEST_F(MapCoordinatesTest, FixedPosInFixedPos)
     EXPECT_EQ(FloatPoint(), mappedPoint);
 }
 
+TEST_F(MapCoordinatesTest, FixedPosInTransform)
+{
+    setBodyInnerHTML("<style>#container { transform: translateY(100px); position: absolute; left: 0; top: 100px; }"
+        ".fixed { position: fixed; top: 0; }"
+        ".spacer { height: 2000px; } </style>"
+        "<div id='container'><div class='fixed' id='target'></div></div>"
+        "<div class='spacer'></div>");
+
+    document().view()->setScrollPosition(DoublePoint(0.0, 50), ProgrammaticScroll);
+    document().view()->updateAllLifecyclePhases();
+    EXPECT_EQ(50, document().view()->scrollPosition().y());
+
+    LayoutBox* target = toLayoutBox(getLayoutObjectByElementId("target"));
+    LayoutBox* container = toLayoutBox(getLayoutObjectByElementId("container"));
+    LayoutBox* body = container->parentBox();
+    LayoutBox* html = body->parentBox();
+    LayoutBox* view = html->parentBox();
+    ASSERT_TRUE(view->isLayoutView());
+
+    FloatPoint mappedPoint = mapLocalToAncestor(target, view, FloatPoint());
+    EXPECT_EQ(FloatPoint(0, 100), mappedPoint);
+    mappedPoint = mapAncestorToLocal(target, view, FloatPoint(0, 100));
+    EXPECT_EQ(FloatPoint(), mappedPoint);
+
+    mappedPoint = mapLocalToAncestor(target, container, FloatPoint());
+    EXPECT_EQ(FloatPoint(0, 0), mappedPoint);
+    mappedPoint = mapAncestorToLocal(target, container, FloatPoint(0, 0));
+    EXPECT_EQ(FloatPoint(), mappedPoint);
+
+    mappedPoint = mapLocalToAncestor(container, view, FloatPoint());
+    EXPECT_EQ(FloatPoint(0, 100), mappedPoint);
+    mappedPoint = mapAncestorToLocal(container, view, FloatPoint(0, 100));
+    EXPECT_EQ(FloatPoint(), mappedPoint);
+}
+
+TEST_F(MapCoordinatesTest, FixedPosInContainPaint)
+{
+    setBodyInnerHTML("<style>#container { contain: paint; position: absolute; left: 0; top: 100px; }"
+        ".fixed { position: fixed; top: 0; }"
+        ".spacer { height: 2000px; } </style>"
+        "<div id='container'><div class='fixed' id='target'></div></div>"
+        "<div class='spacer'></div>");
+
+    document().view()->setScrollPosition(DoublePoint(0.0, 50), ProgrammaticScroll);
+    document().view()->updateAllLifecyclePhases();
+    EXPECT_EQ(50, document().view()->scrollPosition().y());
+
+    LayoutBox* target = toLayoutBox(getLayoutObjectByElementId("target"));
+    LayoutBox* container = toLayoutBox(getLayoutObjectByElementId("container"));
+    LayoutBox* body = container->parentBox();
+    LayoutBox* html = body->parentBox();
+    LayoutBox* view = html->parentBox();
+    ASSERT_TRUE(view->isLayoutView());
+
+    FloatPoint mappedPoint = mapLocalToAncestor(target, view, FloatPoint());
+    EXPECT_EQ(FloatPoint(0, 100), mappedPoint);
+    mappedPoint = mapAncestorToLocal(target, view, FloatPoint(0, 100));
+    EXPECT_EQ(FloatPoint(), mappedPoint);
+
+    mappedPoint = mapLocalToAncestor(target, container, FloatPoint());
+    EXPECT_EQ(FloatPoint(0, 0), mappedPoint);
+    mappedPoint = mapAncestorToLocal(target, container, FloatPoint(0, 0));
+    EXPECT_EQ(FloatPoint(), mappedPoint);
+
+    mappedPoint = mapLocalToAncestor(container, view, FloatPoint());
+    EXPECT_EQ(FloatPoint(0, 100), mappedPoint);
+    mappedPoint = mapAncestorToLocal(container, view, FloatPoint(0, 100));
+    EXPECT_EQ(FloatPoint(), mappedPoint);
+}
+
 // TODO(chrishtr): add more multi-frame tests.
-TEST_F(MapCoordinatesTest, FixedPosInScrolledIFrame)
+TEST_F(MapCoordinatesTest, FixedPosInIFrameWhenMainFrameScrolled)
 {
     document().setBaseURLOverride(KURL(ParsedURLString, "http://test.com"));
     setBodyInnerHTML(
@@ -475,10 +545,60 @@ TEST_F(MapCoordinatesTest, FixedPosInScrolledIFrame)
     EXPECT_EQ(FloatPoint(10, -7930), mappedPoint);
 }
 
+TEST_F(MapCoordinatesTest, IFrameTransformed)
+{
+    document().setBaseURLOverride(KURL(ParsedURLString, "http://test.com"));
+    setBodyInnerHTML(
+        "<style>body { margin: 0; }</style>"
+        "<iframe style='transform: scale(2)' id=frame src='http://test.com' width='500' height='500' frameBorder='0'>"
+        "</iframe>");
+
+    Document& frameDocument = setupChildIframe("frame", "<style>body { margin: 0; } #target { width: 200px; height: 8000px}</style><div id=target></div>");
+
+    document().view()->updateAllLifecyclePhases();
+
+    frameDocument.view()->setScrollPosition(DoublePoint(0.0, 1000), ProgrammaticScroll);
+    frameDocument.view()->updateAllLifecyclePhases();
+
+    Element* target = frameDocument.getElementById("target");
+    ASSERT_TRUE(target);
+    FloatPoint mappedPoint = mapAncestorToLocal(target->layoutObject(), nullptr, FloatPoint(200, 200), TraverseDocumentBoundaries | UseTransforms);
+
+    // Derivation:
+    // (200, 200) -> (-50, -50)  (Adjust for transform origin of scale, which is at the center of the 500x500 iframe)
+    // (-50, -50) -> (-25, -25)  (Divide by 2 to invert the scale)
+    // (-25, -25) -> (225, 225)  (Add the origin back in)
+    // (225, 225) -> (225, 1225) (Adjust by scroll offset of y=1000)
+    EXPECT_EQ(FloatPoint(225, 1225), mappedPoint);
+}
+
+TEST_F(MapCoordinatesTest, FixedPosInScrolledIFrameWithTransform)
+{
+    document().setBaseURLOverride(KURL(ParsedURLString, "http://test.com"));
+    setBodyInnerHTML(
+        "<style>* { margin: 0; }</style>"
+        "<div style='position: absolute; left: 0px; top: 0px; width: 1024px; height: 768px; transform-origin: 0 0; transform: scale(0.5, 0.5);'>"
+        "    <iframe id='frame' frameborder=0 src='http://test.com' class='frame' sandbox='allow-same-origin' width='1024' height='768'></iframe>"
+        "</div>");
+
+    Document& frameDocument = setupChildIframe("frame",
+        "<style>* { margin: 0; } #target { width: 200px; height: 200px; position:fixed}</style><div id=target></div>"
+        "<div style='width: 200; height: 8000px'></div>");
+
+    document().view()->updateAllLifecyclePhases();
+    frameDocument.view()->setScrollPosition(DoublePoint(0.0, 1000), ProgrammaticScroll);
+
+    Element* target = frameDocument.getElementById("target");
+    ASSERT_TRUE(target);
+    FloatPoint mappedPoint = mapAncestorToLocal(target->layoutObject(), nullptr, FloatPoint(0, 0), UseTransforms | TraverseDocumentBoundaries);
+
+    EXPECT_EQ(FloatPoint(0, 0), mappedPoint);
+}
+
 TEST_F(MapCoordinatesTest, MulticolWithText)
 {
     setBodyInnerHTML(
-        "<div id='multicol' style='-webkit-columns:2; -webkit-column-gap:20px; width:400px; line-height:50px; padding:5px;'>"
+        "<div id='multicol' style='columns:2; column-gap:20px; width:400px; line-height:50px; padding:5px; orphans:1; widows:1;'>"
         "    <br id='sibling'>"
         "    text"
         "</div>");
@@ -491,21 +611,19 @@ TEST_F(MapCoordinatesTest, MulticolWithText)
 
     FloatPoint mappedPoint = mapLocalToAncestor(target, flowThread, FloatPoint(10, 70));
     EXPECT_EQ(FloatPoint(10, 70), mappedPoint);
-
-    mappedPoint = mapLocalToAncestor(flowThread, multicol, mappedPoint);
-    EXPECT_EQ(FloatPoint(225, 25), mappedPoint);
-
-    mappedPoint = mapAncestorToLocal(flowThread, multicol, mappedPoint);
-    EXPECT_EQ(FloatPoint(220, 20), mappedPoint);
-
     mappedPoint = mapAncestorToLocal(target, flowThread, mappedPoint);
+    EXPECT_EQ(FloatPoint(10, 70), mappedPoint);
+
+    mappedPoint = mapLocalToAncestor(flowThread, multicol, FloatPoint(10, 70));
+    EXPECT_EQ(FloatPoint(225, 25), mappedPoint);
+    mappedPoint = mapAncestorToLocal(flowThread, multicol, mappedPoint);
     EXPECT_EQ(FloatPoint(10, 70), mappedPoint);
 }
 
 TEST_F(MapCoordinatesTest, MulticolWithInline)
 {
     setBodyInnerHTML(
-        "<div id='multicol' style='-webkit-columns:2; -webkit-column-gap:20px; width:400px; line-height:50px; padding:5px;'>"
+        "<div id='multicol' style='columns:2; column-gap:20px; width:400px; line-height:50px; padding:5px; orphans:1; widows:1;'>"
         "    <span id='target'><br>text</span>"
         "</div>");
 
@@ -516,14 +634,12 @@ TEST_F(MapCoordinatesTest, MulticolWithInline)
 
     FloatPoint mappedPoint = mapLocalToAncestor(target, flowThread, FloatPoint(10, 70));
     EXPECT_EQ(FloatPoint(10, 70), mappedPoint);
-
-    mappedPoint = mapLocalToAncestor(flowThread, multicol, mappedPoint);
-    EXPECT_EQ(FloatPoint(225, 25), mappedPoint);
-
-    mappedPoint = mapAncestorToLocal(flowThread, multicol, mappedPoint);
-    EXPECT_EQ(FloatPoint(220, 20), mappedPoint);
-
     mappedPoint = mapAncestorToLocal(target, flowThread, mappedPoint);
+    EXPECT_EQ(FloatPoint(10, 70), mappedPoint);
+
+    mappedPoint = mapLocalToAncestor(flowThread, multicol, FloatPoint(10, 70));
+    EXPECT_EQ(FloatPoint(225, 25), mappedPoint);
+    mappedPoint = mapAncestorToLocal(flowThread, multicol, mappedPoint);
     EXPECT_EQ(FloatPoint(10, 70), mappedPoint);
 }
 
@@ -549,15 +665,59 @@ TEST_F(MapCoordinatesTest, MulticolWithBlock)
 
     mappedPoint = mapLocalToAncestor(target, flowThread, FloatPoint());
     EXPECT_EQ(FloatPoint(10, 120), mappedPoint);
-
-    mappedPoint = mapLocalToAncestor(flowThread, container, mappedPoint);
-    EXPECT_EQ(FloatPoint(125, 35), mappedPoint);
-
-    mappedPoint = mapAncestorToLocal(flowThread, container, mappedPoint);
-    EXPECT_EQ(FloatPoint(110, 20), mappedPoint);
-
     mappedPoint = mapAncestorToLocal(target, flowThread, mappedPoint);
     EXPECT_EQ(FloatPoint(), mappedPoint);
+
+    mappedPoint = mapLocalToAncestor(flowThread, container, FloatPoint(10, 120));
+    EXPECT_EQ(FloatPoint(125, 35), mappedPoint);
+    mappedPoint = mapAncestorToLocal(flowThread, container, mappedPoint);
+    EXPECT_EQ(FloatPoint(10, 120), mappedPoint);
+}
+
+TEST_F(MapCoordinatesTest, NestedMulticolWithBlock)
+{
+    setBodyInnerHTML(
+        "<div id='outerMulticol' style='columns:2; column-gap:0; column-fill:auto; width:560px; height:215px; border:8px solid; padding:7px;'>"
+        "    <div style='height:10px;'></div>"
+        "    <div id='innerMulticol' style='columns:2; column-gap:0; border:8px solid; padding:7px;'>"
+        "        <div style='height:630px;'></div>"
+        "        <div id='target' style='width:50px; height:50px;'></div>"
+        "    </div>"
+        "</div>");
+
+    LayoutBox* target = toLayoutBox(getLayoutObjectByElementId("target"));
+    LayoutBox* outerMulticol = toLayoutBox(getLayoutObjectByElementId("outerMulticol"));
+    LayoutBox* innerMulticol = toLayoutBox(getLayoutObjectByElementId("innerMulticol"));
+    LayoutBox* innerFlowThread = target->parentBox();
+    ASSERT_TRUE(innerFlowThread->isLayoutFlowThread());
+    LayoutBox* outerFlowThread = innerMulticol->parentBox();
+    ASSERT_TRUE(outerFlowThread->isLayoutFlowThread());
+
+    FloatPoint mappedPoint = mapLocalToAncestor(target, outerMulticol, FloatPoint());
+    EXPECT_EQ(FloatPoint(435, 115), mappedPoint);
+    mappedPoint = mapAncestorToLocal(target, outerMulticol, mappedPoint);
+    EXPECT_EQ(FloatPoint(), mappedPoint);
+
+    // Walk each ancestor in the chain separately, to verify each step on the way.
+    mappedPoint = mapLocalToAncestor(target, innerFlowThread, FloatPoint());
+    EXPECT_EQ(FloatPoint(0, 630), mappedPoint);
+    mappedPoint = mapAncestorToLocal(target, innerFlowThread, mappedPoint);
+    EXPECT_EQ(FloatPoint(), mappedPoint);
+
+    mappedPoint = mapLocalToAncestor(innerFlowThread, innerMulticol, FloatPoint(0, 630));
+    EXPECT_EQ(FloatPoint(140, 305), mappedPoint);
+    mappedPoint = mapAncestorToLocal(innerFlowThread, innerMulticol, mappedPoint);
+    EXPECT_EQ(FloatPoint(0, 630), mappedPoint);
+
+    mappedPoint = mapLocalToAncestor(innerMulticol, outerFlowThread, FloatPoint(140, 305));
+    EXPECT_EQ(FloatPoint(140, 315), mappedPoint);
+    mappedPoint = mapAncestorToLocal(innerMulticol, outerFlowThread, mappedPoint);
+    EXPECT_EQ(FloatPoint(140, 305), mappedPoint);
+
+    mappedPoint = mapLocalToAncestor(outerFlowThread, outerMulticol, FloatPoint(140, 315));
+    EXPECT_EQ(FloatPoint(435, 115), mappedPoint);
+    mappedPoint = mapAncestorToLocal(outerFlowThread, outerMulticol, mappedPoint);
+    EXPECT_EQ(FloatPoint(140, 315), mappedPoint);
 }
 
 TEST_F(MapCoordinatesTest, MulticolWithAbsPosInRelPos)
@@ -585,21 +745,18 @@ TEST_F(MapCoordinatesTest, MulticolWithAbsPosInRelPos)
 
     mappedPoint = mapLocalToAncestor(target, relpos, FloatPoint());
     EXPECT_EQ(FloatPoint(25, 25), mappedPoint);
+    mappedPoint = mapAncestorToLocal(target, relpos, mappedPoint);
+    EXPECT_EQ(FloatPoint(), mappedPoint);
 
-    mappedPoint = mapLocalToAncestor(relpos, flowThread, mappedPoint);
+    mappedPoint = mapLocalToAncestor(relpos, flowThread, FloatPoint(25, 25));
     EXPECT_EQ(FloatPoint(29, 139), mappedPoint);
-
-    mappedPoint = mapLocalToAncestor(flowThread, multicol, mappedPoint);
-    EXPECT_EQ(FloatPoint(144, 54), mappedPoint);
-
-    mappedPoint = mapAncestorToLocal(flowThread, multicol, mappedPoint);
-    EXPECT_EQ(FloatPoint(129, 39), mappedPoint);
-
     mappedPoint = mapAncestorToLocal(relpos, flowThread, mappedPoint);
     EXPECT_EQ(FloatPoint(25, 25), mappedPoint);
 
-    mappedPoint = mapAncestorToLocal(target, relpos, mappedPoint);
-    EXPECT_EQ(FloatPoint(), mappedPoint);
+    mappedPoint = mapLocalToAncestor(flowThread, multicol, FloatPoint(29, 139));
+    EXPECT_EQ(FloatPoint(144, 54), mappedPoint);
+    mappedPoint = mapAncestorToLocal(flowThread, multicol, mappedPoint);
+    EXPECT_EQ(FloatPoint(29, 139), mappedPoint);
 }
 
 TEST_F(MapCoordinatesTest, MulticolWithAbsPosNotContained)

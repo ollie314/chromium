@@ -50,17 +50,6 @@ void SchemaMap::FilterBundle(PolicyBundle* bundle) const {
       continue;
     }
 
-    // TODO(joaodasilva): if a component is registered but doesn't have a schema
-    // then its policies aren't filtered. This behavior is enabled to allow a
-    // graceful update of the Legacy Browser Support extension; it'll be removed
-    // in a future release. http://crbug.com/240704
-    static const char kLegacyBrowserSupportExtensionId[] =
-        "heildphpnddilhkemkielfhnkaagiabh";
-    if (it->first.domain == POLICY_DOMAIN_EXTENSIONS &&
-        it->first.component_id == kLegacyBrowserSupportExtensionId) {
-      continue;
-    }
-
     if (!schema->valid()) {
       // Don't serve unknown policies.
       it->second->Clear();
@@ -71,7 +60,7 @@ void SchemaMap::FilterBundle(PolicyBundle* bundle) const {
     for (PolicyMap::const_iterator it_map = map->begin();
          it_map != map->end();) {
       const std::string& policy_name = it_map->first;
-      const base::Value* policy_value = it_map->second.value;
+      const base::Value* policy_value = it_map->second.value.get();
       Schema policy_schema = schema->GetProperty(policy_name);
       ++it_map;
       std::string error_path;

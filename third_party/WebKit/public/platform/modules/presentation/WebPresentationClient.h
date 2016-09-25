@@ -16,7 +16,10 @@ class WebPresentationAvailabilityObserver;
 class WebPresentationController;
 class WebPresentationConnectionClient;
 class WebString;
+class WebURL;
 struct WebPresentationError;
+template <typename T>
+class WebVector;
 
 // If session was created, callback's onSuccess() is invoked with the information about the
 // presentation session created by the embedder. Otherwise, onError() is invoked with the error code
@@ -36,33 +39,34 @@ public:
 
     // Called when the frame requests to start a new session.
     // The ownership of the |callbacks| argument is transferred to the embedder.
-    virtual void startSession(const WebString& presentationUrl, WebPresentationConnectionClientCallbacks*) = 0;
+    virtual void startSession(const WebVector<WebURL>& presentationUrls, WebPresentationConnectionClientCallbacks*) = 0;
 
     // Called when the frame requests to join an existing session.
     // The ownership of the |callbacks| argument is transferred to the embedder.
-    virtual void joinSession(const WebString& presentationUrl, const WebString& presentationId, WebPresentationConnectionClientCallbacks*) = 0;
+    virtual void joinSession(const WebVector<WebURL>& presentationUrls, const WebString& presentationId, WebPresentationConnectionClientCallbacks*) = 0;
 
     // Called when the frame requests to send String message to an existing session.
-    virtual void sendString(const WebString& presentationUrl, const WebString& presentationId, const WebString& message) = 0;
+
+    virtual void sendString(const WebURL& presentationUrl, const WebString& presentationId, const WebString& message) = 0;
 
     // Called when the frame requests to send ArrayBuffer/View data to an existing session.
     // Embedder copies the |data| and the ownership is not transferred.
-    virtual void sendArrayBuffer(const WebString& presentationUrl, const WebString& presentationId, const uint8_t* data, size_t length) = 0;
+    virtual void sendArrayBuffer(const WebURL& presentationUrl, const WebString& presentationId, const uint8_t* data, size_t length) = 0;
 
     // Called when the frame requests to send Blob data to an existing session.
     // Embedder copies the |data| and the ownership is not transferred.
-    virtual void sendBlobData(const WebString& presentationUrl, const WebString& presentationId, const uint8_t* data, size_t length) = 0;
+    virtual void sendBlobData(const WebURL& presentationUrl, const WebString& presentationId, const uint8_t* data, size_t length) = 0;
 
     // Called when the frame requests to close an existing session.
-    virtual void closeSession(const WebString& presentationUrl, const WebString& presentationId) = 0;
+    virtual void closeSession(const WebURL& presentationUrl, const WebString& presentationId) = 0;
 
     // Called when the frame requests to terminate an existing session.
-    virtual void terminateSession(const WebString& presentationUrl, const WebString& presentationId) = 0;
+    virtual void terminateSession(const WebURL& presentationUrl, const WebString& presentationId) = 0;
 
     // Called when the frame wants to know the availability of a presentation
     // display for |availabilityUrl|.  The ownership of the callbacks argument
     // is transferred to the embedder.
-    virtual void getAvailability(const WebString& availabilityUrl, WebPresentationAvailabilityCallbacks*) = 0;
+    virtual void getAvailability(const WebURL& availabilityUrl, WebPresentationAvailabilityCallbacks*) = 0;
 
     // Start listening to changes in presentation displays availability. The
     // observer will be notified in case of a change. The observer is
@@ -75,7 +79,7 @@ public:
 
     // Called when a defaultRequest has been set. It sends the url associated
     // with it for the embedder.
-    virtual void setDefaultPresentationUrl(const WebString&) = 0;
+    virtual void setDefaultPresentationUrls(const WebVector<WebURL>&) = 0;
 };
 
 } // namespace blink

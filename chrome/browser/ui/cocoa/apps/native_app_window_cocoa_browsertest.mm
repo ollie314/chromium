@@ -66,9 +66,9 @@ class NativeAppWindowCocoaBrowserTest
       content::WindowedNotificationObserver app_loaded_observer(
           content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
           content::NotificationService::AllSources());
-      OpenApplication(
-          AppLaunchParams(profile(), app_, extensions::LAUNCH_CONTAINER_NONE,
-                          NEW_WINDOW, extensions::SOURCE_TEST));
+      OpenApplication(AppLaunchParams(
+          profile(), app_, extensions::LAUNCH_CONTAINER_NONE,
+          WindowOpenDisposition::NEW_WINDOW, extensions::SOURCE_TEST));
       app_loaded_observer.Wait();
     }
   }
@@ -223,9 +223,6 @@ IN_PROC_BROWSER_TEST_P(NativeAppWindowCocoaBrowserTest,
 // Test that NativeAppWindow and AppWindow fullscreen state is updated when
 // the window is fullscreened natively.
 IN_PROC_BROWSER_TEST_P(NativeAppWindowCocoaBrowserTest, Fullscreen) {
-  if (!base::mac::IsOSLionOrLater())
-    return;
-
   ui::test::ScopedFakeNSWindowFullscreen fake_fullscreen;
 
   extensions::AppWindow* app_window =
@@ -552,16 +549,14 @@ void TestControls(AppWindow* app_window) {
   BOOL can_fullscreen =
       ![NSStringFromClass([ns_window class]) isEqualTo:@"AppFramelessNSWindow"];
   // The window can fullscreen and maximize.
-  if (base::mac::IsOSLionOrLater()) {
-    EXPECT_EQ(can_fullscreen, !!([ns_window collectionBehavior] &
-                                 NSWindowCollectionBehaviorFullScreenPrimary));
-  }
+  EXPECT_EQ(can_fullscreen, !!([ns_window collectionBehavior] &
+                               NSWindowCollectionBehaviorFullScreenPrimary));
 
   // In OSX 10.10+, the zoom button performs the zoom action rather than the
   // fullscreen action. The above check that collectionBehavior does not include
   // NSWindowCollectionBehaviorFullScreenPrimary is sufficient to determine that
   // the window can't be fullscreened.
-  if (base::mac::IsOSMavericksOrEarlier()) {
+  if (base::mac::IsOS10_9()) {
     EXPECT_EQ(can_fullscreen,
               [[ns_window standardWindowButton:NSWindowZoomButton] isEnabled]);
   }
@@ -578,9 +573,8 @@ void TestControls(AppWindow* app_window) {
   EXPECT_TRUE([ns_window styleMask] & NSResizableWindowMask);
 
   // Fullscreen and maximize are disabled.
-  if (base::mac::IsOSLionOrLater())
-    EXPECT_FALSE([ns_window collectionBehavior] &
-                 NSWindowCollectionBehaviorFullScreenPrimary);
+  EXPECT_FALSE([ns_window collectionBehavior] &
+               NSWindowCollectionBehaviorFullScreenPrimary);
   EXPECT_FALSE([[ns_window standardWindowButton:NSWindowZoomButton] isEnabled]);
 
   // Set a minimum size equal to the maximum size.
@@ -594,22 +588,20 @@ void TestControls(AppWindow* app_window) {
 
   // If a window is made fullscreen by the API, fullscreen should be enabled so
   // the user can exit fullscreen.
-  if (base::mac::IsOSLionOrLater()) {
-    ui::test::ScopedFakeNSWindowFullscreen fake_fullscreen;
-    base::scoped_nsobject<NSWindowFullscreenNotificationWaiter> waiter([
-        [NSWindowFullscreenNotificationWaiter alloc] initWithWindow:ns_window]);
-    app_window->SetFullscreen(AppWindow::FULLSCREEN_TYPE_WINDOW_API, true);
-    [waiter waitForEnterCount:1 exitCount:0];
-    EXPECT_TRUE([ns_window collectionBehavior] &
-                NSWindowCollectionBehaviorFullScreenPrimary);
-    EXPECT_EQ(NSWidth([[ns_window contentView] frame]),
-              NSWidth([ns_window frame]));
-    // Once it leaves fullscreen, it is disabled again.
-    app_window->SetFullscreen(AppWindow::FULLSCREEN_TYPE_WINDOW_API, false);
-    [waiter waitForEnterCount:1 exitCount:1];
-    EXPECT_FALSE([ns_window collectionBehavior] &
-                 NSWindowCollectionBehaviorFullScreenPrimary);
-  }
+  ui::test::ScopedFakeNSWindowFullscreen fake_fullscreen;
+  base::scoped_nsobject<NSWindowFullscreenNotificationWaiter> waiter(
+      [[NSWindowFullscreenNotificationWaiter alloc] initWithWindow:ns_window]);
+  app_window->SetFullscreen(AppWindow::FULLSCREEN_TYPE_WINDOW_API, true);
+  [waiter waitForEnterCount:1 exitCount:0];
+  EXPECT_TRUE([ns_window collectionBehavior] &
+              NSWindowCollectionBehaviorFullScreenPrimary);
+  EXPECT_EQ(NSWidth([[ns_window contentView] frame]),
+            NSWidth([ns_window frame]));
+  // Once it leaves fullscreen, it is disabled again.
+  app_window->SetFullscreen(AppWindow::FULLSCREEN_TYPE_WINDOW_API, false);
+  [waiter waitForEnterCount:1 exitCount:1];
+  EXPECT_FALSE([ns_window collectionBehavior] &
+               NSWindowCollectionBehaviorFullScreenPrimary);
 }
 
 }  // namespace
@@ -644,7 +636,7 @@ NSBitmapImageRep* ScreenshotNSWindow(NSWindow* window) {
   // NOTE: This doesn't work with Views, but the regular test does, so use that.
   bool mac_views = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableMacViewsNativeAppWindows);
-  if (base::mac::IsOSMavericks() && !mac_views) {
+  if (base::mac::IsOS10_9() && !mac_views) {
     // -[NSView setNeedsDisplay:YES] doesn't synchronously display the view, it
     // gets drawn by another event in the queue, so let that run first.
     content::RunAllPendingInMessageLoop();

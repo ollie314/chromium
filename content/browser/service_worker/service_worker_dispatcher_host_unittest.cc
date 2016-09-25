@@ -12,16 +12,19 @@
 #include "base/files/file_path.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/time/time.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/message_port_service.h"
 #include "content/browser/service_worker/embedded_worker_instance.h"
 #include "content/browser/service_worker/embedded_worker_registry.h"
+#include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_handle.h"
 #include "content/common/service_worker/embedded_worker_messages.h"
 #include "content/common/service_worker/service_worker_messages.h"
+#include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/mock_resource_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -39,13 +42,11 @@ static void SaveStatusCallback(bool* called,
   *out = status;
 }
 
-void SetUpDummyMessagePort(std::vector<TransferredMessagePort>* ports) {
+void SetUpDummyMessagePort(std::vector<int>* ports) {
   int port_id = -1;
   MessagePortService::GetInstance()->Create(MSG_ROUTING_NONE, nullptr,
                                             &port_id);
-  TransferredMessagePort dummy_port;
-  dummy_port.id = port_id;
-  ports->push_back(dummy_port);
+  ports->push_back(port_id);
 }
 
 }  // namespace
@@ -98,8 +99,7 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
       : browser_thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP) {}
 
   void SetUp() override {
-    Initialize(
-        base::WrapUnique(new EmbeddedWorkerTestHelper(base::FilePath())));
+    Initialize(base::MakeUnique<EmbeddedWorkerTestHelper>(base::FilePath()));
   }
 
   void TearDown() override {
@@ -129,6 +129,9 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
     records.push_back(
         ServiceWorkerDatabase::ResourceRecord(10, version_->script_url(), 100));
     version_->script_cache_map()->SetResources(records);
+    version_->set_fetch_handler_existence(
+        ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
+    version_->SetStatus(ServiceWorkerVersion::INSTALLING);
 
     // Make the registration findable via storage functions.
     helper_->context()->storage()->LazyInitialize(base::Bind(&base::DoNothing));
@@ -143,16 +146,19 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
     EXPECT_EQ(SERVICE_WORKER_OK, status);
   }
 
-  void SendSetHostedVersionId(int provider_id, int64_t version_id) {
-    dispatcher_host_->OnMessageReceived(
-        ServiceWorkerHostMsg_SetVersionId(provider_id, version_id));
+  void SendSetHostedVersionId(int provider_id,
+                              int64_t version_id,
+                              int embedded_worker_id) {
+    dispatcher_host_->OnMessageReceived(ServiceWorkerHostMsg_SetVersionId(
+        provider_id, version_id, embedded_worker_id));
   }
 
   void SendProviderCreated(ServiceWorkerProviderType type,
                            const GURL& pattern) {
     const int64_t kProviderId = 99;
     dispatcher_host_->OnMessageReceived(ServiceWorkerHostMsg_ProviderCreated(
-        kProviderId, MSG_ROUTING_NONE, type));
+        kProviderId, MSG_ROUTING_NONE, type,
+        true /* is_parent_frame_secure */));
     helper_->SimulateAddProcessToPattern(pattern,
                                          helper_->mock_render_process_id());
     provider_host_ = context()->GetProviderHost(
@@ -225,7 +231,7 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
       scoped_refptr<ServiceWorkerVersion> worker,
       const base::string16& message,
       const url::Origin& source_origin,
-      const std::vector<TransferredMessagePort>& sent_message_ports,
+      const std::vector<int>& sent_message_ports,
       ServiceWorkerProviderHost* sender_provider_host,
       const ServiceWorkerDispatcherHost::StatusCallback& callback) {
     dispatcher_host_->DispatchExtendableMessageEvent(
@@ -236,8 +242,9 @@ class ServiceWorkerDispatcherHostTest : public testing::Test {
   ServiceWorkerProviderHost* CreateServiceWorkerProviderHost(int provider_id) {
     return new ServiceWorkerProviderHost(
         helper_->mock_render_process_id(), kRenderFrameId, provider_id,
-        SERVICE_WORKER_PROVIDER_FOR_WINDOW, context()->AsWeakPtr(),
-        dispatcher_host_.get());
+        SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+        ServiceWorkerProviderHost::FrameSecurityLevel::SECURE,
+        context()->AsWeakPtr(), dispatcher_host_.get());
   }
 
   TestBrowserThreadBundle browser_thread_bundle_;
@@ -498,12 +505,14 @@ TEST_F(ServiceWorkerDispatcherHostTest, ProviderCreatedAndDestroyed) {
   int process_id = helper_->mock_render_process_id();
 
   dispatcher_host_->OnMessageReceived(ServiceWorkerHostMsg_ProviderCreated(
-      kProviderId, MSG_ROUTING_NONE, SERVICE_WORKER_PROVIDER_FOR_WINDOW));
+      kProviderId, MSG_ROUTING_NONE, SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+      true /* is_parent_frame_secure */));
   EXPECT_TRUE(context()->GetProviderHost(process_id, kProviderId));
 
   // Two with the same ID should be seen as a bad message.
   dispatcher_host_->OnMessageReceived(ServiceWorkerHostMsg_ProviderCreated(
-      kProviderId, MSG_ROUTING_NONE, SERVICE_WORKER_PROVIDER_FOR_WINDOW));
+      kProviderId, MSG_ROUTING_NONE, SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+      true /* is_parent_frame_secure */));
   EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
 
   dispatcher_host_->OnMessageReceived(
@@ -518,7 +527,8 @@ TEST_F(ServiceWorkerDispatcherHostTest, ProviderCreatedAndDestroyed) {
   // Deletion of the dispatcher_host should cause providers for that
   // process to get deleted as well.
   dispatcher_host_->OnMessageReceived(ServiceWorkerHostMsg_ProviderCreated(
-      kProviderId, MSG_ROUTING_NONE, SERVICE_WORKER_PROVIDER_FOR_WINDOW));
+      kProviderId, MSG_ROUTING_NONE, SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+      true /* is_parent_frame_secure */));
   EXPECT_TRUE(context()->GetProviderHost(process_id, kProviderId));
   EXPECT_TRUE(dispatcher_host_->HasOneRef());
   dispatcher_host_ = NULL;
@@ -634,14 +644,14 @@ TEST_F(ServiceWorkerDispatcherHostTest, CleanupOnRendererCrash) {
   EXPECT_EQ(SERVICE_WORKER_OK, status);
 
   EXPECT_TRUE(context()->GetProviderHost(process_id, provider_id));
-  EXPECT_EQ(ServiceWorkerVersion::RUNNING, version_->running_status());
+  EXPECT_EQ(EmbeddedWorkerStatus::RUNNING, version_->running_status());
 
   // Simulate the render process crashing.
   dispatcher_host_->OnFilterRemoved();
 
   // The dispatcher host should clean up the state from the process.
   EXPECT_FALSE(context()->GetProviderHost(process_id, provider_id));
-  EXPECT_EQ(ServiceWorkerVersion::STOPPED, version_->running_status());
+  EXPECT_EQ(EmbeddedWorkerStatus::STOPPED, version_->running_status());
 
   // We should be able to hook up a new dispatcher host although the old object
   // is not yet destroyed. This is what the browser does when reusing a crashed
@@ -654,7 +664,8 @@ TEST_F(ServiceWorkerDispatcherHostTest, CleanupOnRendererCrash) {
   // the old dispatcher cleaned up the old provider host, the new one won't
   // complain.
   new_dispatcher_host->OnMessageReceived(ServiceWorkerHostMsg_ProviderCreated(
-      provider_id, MSG_ROUTING_NONE, SERVICE_WORKER_PROVIDER_FOR_WINDOW));
+      provider_id, MSG_ROUTING_NONE, SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+      true /* is_parent_frame_secure */));
   EXPECT_EQ(0, new_dispatcher_host->bad_messages_received_count_);
 }
 
@@ -677,23 +688,23 @@ TEST_F(ServiceWorkerDispatcherHostTest, DispatchExtendableMessageEvent) {
   const int ref_count = sender_worker_handle->ref_count();
 
   // Dispatch ExtendableMessageEvent.
-  std::vector<TransferredMessagePort> ports;
+  std::vector<int> ports;
   SetUpDummyMessagePort(&ports);
   bool called = false;
   ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_MAX_VALUE;
   DispatchExtendableMessageEvent(
       version_, base::string16(), url::Origin(version_->scope().GetOrigin()),
       ports, provider_host_, base::Bind(&SaveStatusCallback, &called, &status));
-  for (TransferredMessagePort port : ports)
-    EXPECT_TRUE(MessagePortService::GetInstance()->AreMessagesHeld(port.id));
+  for (int port : ports)
+    EXPECT_TRUE(MessagePortService::GetInstance()->AreMessagesHeld(port));
   EXPECT_EQ(ref_count + 1, sender_worker_handle->ref_count());
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(called);
   EXPECT_EQ(SERVICE_WORKER_OK, status);
 
   // Messages should be held until ports are created at the destination.
-  for (TransferredMessagePort port : ports)
-    EXPECT_TRUE(MessagePortService::GetInstance()->AreMessagesHeld(port.id));
+  for (int port : ports)
+    EXPECT_TRUE(MessagePortService::GetInstance()->AreMessagesHeld(port));
 
   EXPECT_EQ(ref_count + 1, sender_worker_handle->ref_count());
 }
@@ -719,23 +730,23 @@ TEST_F(ServiceWorkerDispatcherHostTest, DispatchExtendableMessageEvent_Fail) {
 
   // Try to dispatch ExtendableMessageEvent. This should fail to start the
   // worker and to dispatch the event.
-  std::vector<TransferredMessagePort> ports;
+  std::vector<int> ports;
   SetUpDummyMessagePort(&ports);
   bool called = false;
   ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_MAX_VALUE;
   DispatchExtendableMessageEvent(
       version_, base::string16(), url::Origin(version_->scope().GetOrigin()),
       ports, provider_host_, base::Bind(&SaveStatusCallback, &called, &status));
-  for (TransferredMessagePort port : ports)
-    EXPECT_TRUE(MessagePortService::GetInstance()->AreMessagesHeld(port.id));
+  for (int port : ports)
+    EXPECT_TRUE(MessagePortService::GetInstance()->AreMessagesHeld(port));
   EXPECT_EQ(ref_count + 1, sender_worker_handle->ref_count());
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(called);
   EXPECT_EQ(SERVICE_WORKER_ERROR_START_WORKER_FAILED, status);
 
   // The error callback should clean up the ports and handle.
-  for (TransferredMessagePort port : ports)
-    EXPECT_FALSE(MessagePortService::GetInstance()->AreMessagesHeld(port.id));
+  for (int port : ports)
+    EXPECT_FALSE(MessagePortService::GetInstance()->AreMessagesHeld(port));
   EXPECT_EQ(ref_count, sender_worker_handle->ref_count());
 }
 
@@ -757,11 +768,69 @@ TEST_F(ServiceWorkerDispatcherHostTest, OnSetHostedVersionId) {
   EXPECT_NE(version_->embedded_worker()->process_id(),
             provider_host_->process_id());
   // SendSetHostedVersionId should reject because the provider host process id
-  // is different.
-  SendSetHostedVersionId(kProviderId, version_->version_id());
+  // is different. It should call BadMessageReceived because it's not an
+  // expected error state.
+  SendSetHostedVersionId(kProviderId, version_->version_id(),
+                         version_->embedded_worker()->embedded_worker_id());
   base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(dispatcher_host_->ipc_sink()->GetUniqueMessageMatching(
       ServiceWorkerMsg_AssociateRegistration::ID));
+  EXPECT_EQ(1, dispatcher_host_->bad_messages_received_count_);
+}
+
+TEST_F(ServiceWorkerDispatcherHostTest, OnSetHostedVersionId_DetachedWorker) {
+  GURL pattern = GURL("http://www.example.com/");
+  GURL script_url = GURL("http://www.example.com/service_worker.js");
+
+  Initialize(base::WrapUnique(new FailToStartWorkerTestHelper));
+  SendProviderCreated(SERVICE_WORKER_PROVIDER_FOR_CONTROLLER, pattern);
+  SetUpRegistration(pattern, script_url);
+
+  const int64_t kProviderId = 99;  // Dummy value
+  bool called;
+  ServiceWorkerStatusCode status;
+  // StartWorker puts the worker in STARTING state.
+  version_->StartWorker(ServiceWorkerMetrics::EventType::UNKNOWN,
+                        base::Bind(&SaveStatusCallback, &called, &status));
+
+  // SendSetHostedVersionId should bail because the embedded worker is
+  // different. It shouldn't call BadMessageReceived because receiving a message
+  // for a detached worker is a legitimite possibility.
+  int bad_embedded_worker_id =
+      version_->embedded_worker()->embedded_worker_id() + 1;
+  SendSetHostedVersionId(kProviderId, version_->version_id(),
+                         bad_embedded_worker_id);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(dispatcher_host_->ipc_sink()->GetUniqueMessageMatching(
+      ServiceWorkerMsg_AssociateRegistration::ID));
+  EXPECT_EQ(0, dispatcher_host_->bad_messages_received_count_);
+}
+
+TEST_F(ServiceWorkerDispatcherHostTest, ReceivedTimedOutRequestResponse) {
+  GURL pattern = GURL("https://www.example.com/");
+  GURL script_url = GURL("https://www.example.com/service_worker.js");
+
+  SendProviderCreated(SERVICE_WORKER_PROVIDER_FOR_WINDOW, pattern);
+  SetUpRegistration(pattern, script_url);
+
+  version_->StartWorker(ServiceWorkerMetrics::EventType::UNKNOWN,
+                        base::Bind(&ServiceWorkerUtils::NoOpStatusCallback));
+  base::RunLoop().RunUntilIdle();
+
+  // Set the worker status to STOPPING.
+  version_->embedded_worker()->Stop();
+  EXPECT_EQ(EmbeddedWorkerStatus::STOPPING, version_->running_status());
+
+  // Receive a response for a timed out request. The bad message count should
+  // not increase.
+  const int kRequestId = 91;  // Dummy value
+  dispatcher_host_->OnMessageReceived(ServiceWorkerHostMsg_FetchEventResponse(
+      version_->embedded_worker()->embedded_worker_id(), kRequestId,
+      SERVICE_WORKER_FETCH_EVENT_RESULT_FALLBACK, ServiceWorkerResponse(),
+      base::Time::Now()));
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(0, dispatcher_host_->bad_messages_received_count_);
 }
 
 }  // namespace content

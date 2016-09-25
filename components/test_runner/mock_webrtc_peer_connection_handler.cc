@@ -6,12 +6,15 @@
 
 #include <stddef.h>
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "components/test_runner/mock_webrtc_data_channel_handler.h"
 #include "components/test_runner/mock_webrtc_dtmf_sender_handler.h"
 #include "components/test_runner/test_interfaces.h"
-#include "components/test_runner/web_task.h"
 #include "components/test_runner/web_test_delegate.h"
 #include "third_party/WebKit/public/platform/WebMediaStream.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamSource.h"
@@ -28,6 +31,84 @@
 using namespace blink;
 
 namespace test_runner {
+
+namespace {
+
+class MockWebRTCLegacyStats : public blink::WebRTCLegacyStats {
+ public:
+  class MemberIterator : public blink::WebRTCLegacyStatsMemberIterator {
+   public:
+    MemberIterator(
+        const std::vector<std::pair<std::string, std::string>>* values)
+        : values_(values) {}
+
+    // blink::WebRTCLegacyStatsMemberIterator
+    bool isEnd() const override { return i >= values_->size(); }
+    void next() override { ++i; }
+    blink::WebString name() const override {
+      return blink::WebString::fromUTF8((*values_)[i].first);
+    }
+    blink::WebRTCLegacyStatsMemberType type() const override {
+      return blink::WebRTCLegacyStatsMemberTypeString;
+    }
+    int valueInt() const override {
+      NOTREACHED();
+      return 0;
+    }
+    int64_t valueInt64() const override {
+      NOTREACHED();
+      return 0;
+    }
+    float valueFloat() const override {
+      NOTREACHED();
+      return 0.0f;
+    }
+    blink::WebString valueString() const override {
+      return blink::WebString::fromUTF8((*values_)[i].second);
+    }
+    bool valueBool() const override {
+      NOTREACHED();
+      return false;
+    }
+    blink::WebString valueToString() const override {
+      return valueString();
+    }
+
+   private:
+    size_t i = 0;
+    const std::vector<std::pair<std::string, std::string>>* values_;
+  };
+
+  MockWebRTCLegacyStats(const char* id, const char* type_name, double timestamp)
+      : id_(id), type_name_(type_name), timestamp_(timestamp) {}
+
+  // blink::WebRTCLegacyStats
+  blink::WebString id() const override {
+    return blink::WebString::fromUTF8(id_);
+  }
+  blink::WebString type() const override {
+    return blink::WebString::fromUTF8(type_name_);
+  }
+  double timestamp() const override {
+    return timestamp_;
+  }
+  blink::WebRTCLegacyStatsMemberIterator* iterator() const override {
+    return new MemberIterator(&values_);
+  }
+
+  void addStatistic(const std::string& name, const std::string& value) {
+    values_.push_back(std::make_pair(name, value));
+  }
+
+ private:
+  const std::string id_;
+  const std::string type_name_;
+  const double timestamp_;
+  // (name, value) pairs.
+  std::vector<std::pair<std::string, std::string>> values_;
+};
+
+}  // namespace
 
 MockWebRTCPeerConnectionHandler::MockWebRTCPeerConnectionHandler()
     : weak_factory_(this) {}
@@ -54,9 +135,9 @@ void MockWebRTCPeerConnectionHandler::ReportInitializeCompleted() {
 bool MockWebRTCPeerConnectionHandler::initialize(
     const WebRTCConfiguration& configuration,
     const WebMediaConstraints& constraints) {
-  interfaces_->GetDelegate()->PostTask(new WebCallbackTask(
+  interfaces_->GetDelegate()->PostTask(
       base::Bind(&MockWebRTCPeerConnectionHandler::ReportInitializeCompleted,
-                 weak_factory_.GetWeakPtr())));
+                 weak_factory_.GetWeakPtr()));
   return true;
 }
 
@@ -69,38 +150,39 @@ void MockWebRTCPeerConnectionHandler::createOffer(
 void MockWebRTCPeerConnectionHandler::PostRequestResult(
     const WebRTCSessionDescriptionRequest& request,
     const WebRTCSessionDescription& session_description) {
-  interfaces_->GetDelegate()->PostTask(new WebCallbackTask(
+  interfaces_->GetDelegate()->PostTask(
       base::Bind(&WebRTCSessionDescriptionRequest::requestSucceeded,
                  base::Owned(new WebRTCSessionDescriptionRequest(request)),
-                 session_description)));
+                 session_description));
 }
 
 void MockWebRTCPeerConnectionHandler::PostRequestFailure(
     const WebRTCSessionDescriptionRequest& request) {
-  interfaces_->GetDelegate()->PostTask(new WebCallbackTask(
+  interfaces_->GetDelegate()->PostTask(
       base::Bind(&WebRTCSessionDescriptionRequest::requestFailed,
                  base::Owned(new WebRTCSessionDescriptionRequest(request)),
-                 WebString("TEST_ERROR"))));
+                 WebString("TEST_ERROR")));
 }
 
 void MockWebRTCPeerConnectionHandler::PostRequestResult(
     const WebRTCVoidRequest& request) {
-  interfaces_->GetDelegate()->PostTask(new WebCallbackTask(
+  interfaces_->GetDelegate()->PostTask(
       base::Bind(&WebRTCVoidRequest::requestSucceeded,
-                 base::Owned(new WebRTCVoidRequest(request)))));
+                 base::Owned(new WebRTCVoidRequest(request))));
 }
 
 void MockWebRTCPeerConnectionHandler::PostRequestFailure(
     const WebRTCVoidRequest& request) {
-  interfaces_->GetDelegate()->PostTask(new WebCallbackTask(base::Bind(
+  interfaces_->GetDelegate()->PostTask(base::Bind(
       &WebRTCVoidRequest::requestFailed,
-      base::Owned(new WebRTCVoidRequest(request)), WebString("TEST_ERROR"))));
+      base::Owned(new WebRTCVoidRequest(request)), WebString("TEST_ERROR")));
 }
 
 void MockWebRTCPeerConnectionHandler::createOffer(
     const WebRTCSessionDescriptionRequest& request,
     const blink::WebRTCOfferOptions& options) {
-  if (options.iceRestart() && options.voiceActivityDetection()) {
+  if (options.iceRestart() && options.voiceActivityDetection() &&
+      options.offerToReceiveAudio() > 0 && options.offerToReceiveVideo() > 0) {
     WebRTCSessionDescription session_description;
     session_description.initialize("offer", "local");
     PostRequestResult(request, session_description);
@@ -210,7 +292,7 @@ void MockWebRTCPeerConnectionHandler::UpdateRemoteStreams() {
       webkit_source.initialize(local_audio_tracks[i].id(),
                                blink::WebMediaStreamSource::TypeAudio,
                                local_audio_tracks[i].id(),
-                               true /* remote */, true /* readonly */);
+                               true /* remote */);
       remote_audio_tracks[i].initialize(webkit_source);
     }
 
@@ -223,7 +305,7 @@ void MockWebRTCPeerConnectionHandler::UpdateRemoteStreams() {
       webkit_source.initialize(local_video_tracks[i].id(),
                                blink::WebMediaStreamSource::TypeVideo,
                                local_video_tracks[i].id(),
-                               true /* remote */, true /* readonly */);
+                               true /* remote */);
       remote_video_tracks[i].initialize(webkit_source);
     }
 
@@ -248,6 +330,9 @@ bool MockWebRTCPeerConnectionHandler::updateICE(
     const WebRTCConfiguration& configuration) {
   return true;
 }
+
+void MockWebRTCPeerConnectionHandler::logSelectedRtcpMuxPolicy(
+    blink::RtcpMuxPolicy selectedRtcpMuxPolicy) {}
 
 bool MockWebRTCPeerConnectionHandler::addICECandidate(
     const WebRTCICECandidate& ice_candidate) {
@@ -287,21 +372,30 @@ void MockWebRTCPeerConnectionHandler::getStats(
       interfaces_->GetDelegate()->GetCurrentTimeInMillisecond();
   if (request.hasSelector()) {
     // FIXME: There is no check that the fetched values are valid.
-    size_t report_index =
-        response.addReport("Mock video", "ssrc", current_date);
-    response.addStatistic(report_index, "type", "video");
+    MockWebRTCLegacyStats stats("Mock video", "ssrc", current_date);
+    stats.addStatistic("type", "video");
+    response.addStats(stats);
   } else {
     for (int i = 0; i < stream_count_; ++i) {
-      size_t report_index =
-          response.addReport("Mock audio", "ssrc", current_date);
-      response.addStatistic(report_index, "type", "audio");
-      report_index = response.addReport("Mock video", "ssrc", current_date);
-      response.addStatistic(report_index, "type", "video");
+      MockWebRTCLegacyStats audio_stats("Mock audio", "ssrc", current_date);
+      audio_stats.addStatistic("type", "audio");
+      response.addStats(audio_stats);
+
+      MockWebRTCLegacyStats video_stats("Mock video", "ssrc", current_date);
+      video_stats.addStatistic("type", "video");
+      response.addStats(video_stats);
     }
   }
-  interfaces_->GetDelegate()->PostTask(new WebCallbackTask(
+  interfaces_->GetDelegate()->PostTask(
       base::Bind(&blink::WebRTCStatsRequest::requestSucceeded,
-                 base::Owned(new WebRTCStatsRequest(request)), response)));
+                 base::Owned(new WebRTCStatsRequest(request)), response));
+}
+
+void MockWebRTCPeerConnectionHandler::getStats(
+    std::unique_ptr<blink::WebRTCStatsReportCallback> callback) {
+  // TODO(hbos): When blink::RTCPeerConnection starts using the new |getStats|
+  // this needs to be implemented. crbug.com/627816.
+  NOTREACHED();
 }
 
 void MockWebRTCPeerConnectionHandler::ReportCreationOfDataChannel() {
@@ -315,9 +409,9 @@ void MockWebRTCPeerConnectionHandler::ReportCreationOfDataChannel() {
 WebRTCDataChannelHandler* MockWebRTCPeerConnectionHandler::createDataChannel(
     const WebString& label,
     const blink::WebRTCDataChannelInit& init) {
-  interfaces_->GetDelegate()->PostTask(new WebCallbackTask(
+  interfaces_->GetDelegate()->PostTask(
       base::Bind(&MockWebRTCPeerConnectionHandler::ReportCreationOfDataChannel,
-                 weak_factory_.GetWeakPtr())));
+                 weak_factory_.GetWeakPtr()));
 
   // TODO(lukasza): Unclear if it is okay to return a different object than the
   // one created in ReportCreationOfDataChannel.

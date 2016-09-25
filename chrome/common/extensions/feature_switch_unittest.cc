@@ -15,10 +15,9 @@ namespace {
 const char kSwitchName[] = "test-switch";
 const char kFieldTrialName[] = "field-trial";
 
-// Create and register a field trial named |field_trial_name| that will always
-// return the given |group_name|.
-scoped_refptr<base::FieldTrial> CreateFieldTrialWithName(
-    const std::string& field_trial_name,
+// Create and register a field trial that will always return the given
+// |group_name|.
+scoped_refptr<base::FieldTrial> CreateFieldTrial(
     const std::string& group_name) {
   const int kTotalProbability = 10;
   // Note: This code will probably fail in the year 5000. But all the cycles we
@@ -26,17 +25,17 @@ scoped_refptr<base::FieldTrial> CreateFieldTrialWithName(
   // worth it.
   scoped_refptr<base::FieldTrial> trial =
       base::FieldTrialList::FactoryGetFieldTrial(
-          field_trial_name, kTotalProbability, "default", 5000, 1, 1,
-          base::FieldTrial::SESSION_RANDOMIZED, nullptr);
+          kFieldTrialName, kTotalProbability, "default",
+// TODO(maksims): remove architecture check
+// in the future. https://crbug.com/619828
+#if defined(OS_LINUX) && defined(ARCH_CPU_64_BITS)
+          5000,
+#else
+          2038,
+#endif
+          1, 1, base::FieldTrial::SESSION_RANDOMIZED, nullptr);
   trial->AppendGroup(group_name, kTotalProbability);
   return trial;
-}
-
-// Create and register a field trial that will always return the given
-// |group_name|.
-scoped_refptr<base::FieldTrial> CreateFieldTrial(
-    const std::string& group_name) {
-  return CreateFieldTrialWithName(kFieldTrialName, group_name);
 }
 
 template<FeatureSwitch::DefaultValue T>
@@ -163,10 +162,9 @@ TEST_F(FeatureSwitchEnabledTest, TrueFieldTrialValue) {
   scoped_refptr<base::FieldTrial> enabled_trial = CreateFieldTrial("Enabled");
   {
     // A default-enabled switch should be enabled (naturally).
-    FeatureSwitch default_enabled_switch(
-        &command_line_, kSwitchName,
-        std::vector<std::string>(1, kFieldTrialName),
-        FeatureSwitch::DEFAULT_ENABLED);
+    FeatureSwitch default_enabled_switch(&command_line_, kSwitchName,
+                                         kFieldTrialName,
+                                         FeatureSwitch::DEFAULT_ENABLED);
     EXPECT_TRUE(default_enabled_switch.IsEnabled());
     // Scoped overrides override everything.
     FeatureSwitch::ScopedOverride scoped_override(&default_enabled_switch,
@@ -176,10 +174,9 @@ TEST_F(FeatureSwitchEnabledTest, TrueFieldTrialValue) {
 
   {
     // A default-disabled switch should be enabled because of the field trial.
-    FeatureSwitch default_disabled_switch(
-        &command_line_, kSwitchName,
-        std::vector<std::string>(1, kFieldTrialName),
-        FeatureSwitch::DEFAULT_DISABLED);
+    FeatureSwitch default_disabled_switch(&command_line_, kSwitchName,
+                                          kFieldTrialName,
+                                          FeatureSwitch::DEFAULT_DISABLED);
     EXPECT_TRUE(default_disabled_switch.IsEnabled());
     // Scoped overrides override everything.
     FeatureSwitch::ScopedOverride scoped_override(&default_disabled_switch,
@@ -195,10 +192,9 @@ TEST_F(FeatureSwitchEnabledTest, TrueFieldTrialDogfoodValue) {
       CreateFieldTrial("Enabled_Dogfood");
   {
     // A default-enabled switch should be enabled (naturally).
-    FeatureSwitch default_enabled_switch(
-        &command_line_, kSwitchName,
-        std::vector<std::string>(1, kFieldTrialName),
-        FeatureSwitch::DEFAULT_ENABLED);
+    FeatureSwitch default_enabled_switch(&command_line_, kSwitchName,
+                                         kFieldTrialName,
+                                         FeatureSwitch::DEFAULT_ENABLED);
     EXPECT_TRUE(default_enabled_switch.IsEnabled());
     // Scoped overrides override everything.
     FeatureSwitch::ScopedOverride scoped_override(&default_enabled_switch,
@@ -208,10 +204,9 @@ TEST_F(FeatureSwitchEnabledTest, TrueFieldTrialDogfoodValue) {
 
   {
     // A default-disabled switch should be enabled because of the field trial.
-    FeatureSwitch default_disabled_switch(
-        &command_line_, kSwitchName,
-        std::vector<std::string>(1, kFieldTrialName),
-        FeatureSwitch::DEFAULT_DISABLED);
+    FeatureSwitch default_disabled_switch(&command_line_, kSwitchName,
+                                          kFieldTrialName,
+                                          FeatureSwitch::DEFAULT_DISABLED);
     EXPECT_TRUE(default_disabled_switch.IsEnabled());
     // Scoped overrides override everything.
     FeatureSwitch::ScopedOverride scoped_override(&default_disabled_switch,
@@ -226,10 +221,9 @@ TEST_F(FeatureSwitchEnabledTest, FalseFieldTrialValue) {
   scoped_refptr<base::FieldTrial> disabled_trial = CreateFieldTrial("Disabled");
   {
     // A default-enabled switch should be disabled because of the field trial.
-    FeatureSwitch default_enabled_switch(
-        &command_line_, kSwitchName,
-        std::vector<std::string>(1, kFieldTrialName),
-        FeatureSwitch::DEFAULT_ENABLED);
+    FeatureSwitch default_enabled_switch(&command_line_, kSwitchName,
+                                         kFieldTrialName,
+                                         FeatureSwitch::DEFAULT_ENABLED);
     EXPECT_FALSE(default_enabled_switch.IsEnabled());
     // Scoped overrides override everything.
     FeatureSwitch::ScopedOverride scoped_override(&default_enabled_switch,
@@ -239,10 +233,9 @@ TEST_F(FeatureSwitchEnabledTest, FalseFieldTrialValue) {
 
   {
     // A default-disabled switch should remain disabled.
-    FeatureSwitch default_disabled_switch(
-        &command_line_, kSwitchName,
-        std::vector<std::string>(1, kFieldTrialName),
-        FeatureSwitch::DEFAULT_DISABLED);
+    FeatureSwitch default_disabled_switch(&command_line_, kSwitchName,
+                                          kFieldTrialName,
+                                          FeatureSwitch::DEFAULT_DISABLED);
     EXPECT_FALSE(default_disabled_switch.IsEnabled());
     // Scoped overrides override everything.
     FeatureSwitch::ScopedOverride scoped_override(&default_disabled_switch,
@@ -258,19 +251,17 @@ TEST_F(FeatureSwitchEnabledTest, FalseFieldTrialDogfoodValue) {
       CreateFieldTrial("Disabled_Dogfood");
   {
     // A default-enabled switch should be disabled because of the field trial.
-    FeatureSwitch default_enabled_switch(
-        &command_line_, kSwitchName,
-        std::vector<std::string>(1, kFieldTrialName),
-        FeatureSwitch::DEFAULT_ENABLED);
+    FeatureSwitch default_enabled_switch(&command_line_, kSwitchName,
+                                         kFieldTrialName,
+                                         FeatureSwitch::DEFAULT_ENABLED);
     EXPECT_FALSE(default_enabled_switch.IsEnabled());
   }
 
   {
     // A default-disabled switch should remain disabled.
-    FeatureSwitch default_disabled_switch(
-        &command_line_, kSwitchName,
-        std::vector<std::string>(1, kFieldTrialName),
-        FeatureSwitch::DEFAULT_DISABLED);
+    FeatureSwitch default_disabled_switch(&command_line_, kSwitchName,
+                                          kFieldTrialName,
+                                          FeatureSwitch::DEFAULT_DISABLED);
     EXPECT_FALSE(default_disabled_switch.IsEnabled());
   }
 }
@@ -282,51 +273,17 @@ TEST_F(FeatureSwitchEnabledTest, InvalidGroupFieldTrial) {
       CreateFieldTrial("InvalidGroup");
   {
     // A default-enabled switch should be enabled (the group has no effect).
-    FeatureSwitch default_enabled_switch(
-        &command_line_, kSwitchName,
-        std::vector<std::string>(1, kFieldTrialName),
-        FeatureSwitch::DEFAULT_ENABLED);
+    FeatureSwitch default_enabled_switch(&command_line_, kSwitchName,
+                                         kFieldTrialName,
+                                         FeatureSwitch::DEFAULT_ENABLED);
     EXPECT_TRUE(default_enabled_switch.IsEnabled());
   }
 
   {
     // A default-disabled switch should remain disabled.
-    FeatureSwitch default_disabled_switch(
-        &command_line_, kSwitchName,
-        std::vector<std::string>(1, kFieldTrialName),
-        FeatureSwitch::DEFAULT_DISABLED);
+    FeatureSwitch default_disabled_switch(&command_line_, kSwitchName,
+                                          kFieldTrialName,
+                                          FeatureSwitch::DEFAULT_DISABLED);
     EXPECT_FALSE(default_disabled_switch.IsEnabled());
   }
-}
-
-TEST_F(FeatureSwitchEnabledTest,
-       TrueFieldTrialValueAndTrueRequiredFieldTrialValue) {
-  std::vector<std::string> required_trials;
-  base::FieldTrialList field_trials(nullptr);
-  scoped_refptr<base::FieldTrial> enabled_trial = CreateFieldTrial("Enabled");
-  required_trials.push_back(kFieldTrialName);
-  const char* required_trial_name = "required-trial";
-  scoped_refptr<base::FieldTrial> enabled_required_trial =
-      CreateFieldTrialWithName(required_trial_name, "Enabled");
-  required_trials.push_back(required_trial_name);
-  FeatureSwitch trial_enabled_switch(&command_line_, kSwitchName,
-                                     required_trials,
-                                     FeatureSwitch::DEFAULT_DISABLED);
-  EXPECT_TRUE(trial_enabled_switch.IsEnabled());
-}
-
-TEST_F(FeatureSwitchEnabledTest,
-       TrueFieldTrialValueAndFalseRequiredFieldTrialValue) {
-  std::vector<std::string> required_trials;
-  base::FieldTrialList field_trials(nullptr);
-  scoped_refptr<base::FieldTrial> enabled_trial = CreateFieldTrial("Enabled");
-  required_trials.push_back(kFieldTrialName);
-  const char* required_trial_name = "required-trial";
-  scoped_refptr<base::FieldTrial> enabled_required_trial =
-      CreateFieldTrialWithName(required_trial_name, "Disabled");
-  required_trials.push_back(required_trial_name);
-  FeatureSwitch trial_enabled_switch(&command_line_, kSwitchName,
-                                     required_trials,
-                                     FeatureSwitch::DEFAULT_DISABLED);
-  EXPECT_FALSE(trial_enabled_switch.IsEnabled());
 }

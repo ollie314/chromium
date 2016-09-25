@@ -16,14 +16,14 @@
 #include "ui/accessibility/ax_enums.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
-#include "ui/gfx/screen.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/message_center_tray.h"
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_list.h"
+#include "ui/message_center/views/message_view.h"
 #include "ui/message_center/views/message_view_context_menu_controller.h"
-#include "ui/message_center/views/notification_view.h"
+#include "ui/message_center/views/message_view_factory.h"
 #include "ui/message_center/views/popup_alignment_delegate.h"
 #include "ui/message_center/views/toast_contents_view.h"
 #include "ui/views/background.h"
@@ -48,17 +48,16 @@ const int kToastMarginY = kMarginBetweenItems;
 }  // namespace.
 
 MessagePopupCollection::MessagePopupCollection(
-    gfx::NativeView parent,
     MessageCenter* message_center,
     MessageCenterTray* tray,
     PopupAlignmentDelegate* alignment_delegate)
-    : parent_(parent),
-      message_center_(message_center),
+    : message_center_(message_center),
       tray_(tray),
       alignment_delegate_(alignment_delegate),
       defer_counter_(0),
       latest_toast_entered_(NULL),
       user_is_closing_toasts_by_clicking_(false),
+      target_top_edge_(0),
       context_menu_controller_(new MessageViewContextMenuController(this)),
       weak_factory_(this) {
   DCHECK(message_center_);
@@ -157,7 +156,7 @@ void MessagePopupCollection::UpdateWidgets() {
     if (FindToast((*iter)->id()))
       continue;
 
-    NotificationView* view;
+    MessageView* view;
     // Create top-level notification.
 #if defined(OS_CHROMEOS)
     if ((*iter)->pinned()) {
@@ -165,11 +164,11 @@ void MessagePopupCollection::UpdateWidgets() {
       // Override pinned status, since toasts should be closable even when it's
       // pinned.
       notification.set_pinned(false);
-      view = NotificationView::Create(NULL, notification, true);
+      view = MessageViewFactory::Create(NULL, notification, true);
     } else
 #endif  // defined(OS_CHROMEOS)
     {
-      view = NotificationView::Create(NULL, *(*iter), true);
+      view = MessageViewFactory::Create(NULL, *(*iter), true);
     }
 
     view->set_context_menu_controller(context_menu_controller_.get());
@@ -182,8 +181,8 @@ void MessagePopupCollection::UpdateWidgets() {
       break;
     }
 
-    ToastContentsView* toast =
-        new ToastContentsView((*iter)->id(), weak_factory_.GetWeakPtr());
+    ToastContentsView* toast = new ToastContentsView(
+        (*iter)->id(), alignment_delegate_, weak_factory_.GetWeakPtr());
     // There will be no contents already since this is a new ToastContentsView.
     toast->SetContents(view, /*a11y_feedback_for_updates=*/false);
     toasts_.push_back(toast);
@@ -506,7 +505,7 @@ void MessagePopupCollection::DoUpdateIfPossible() {
 }
 
 void MessagePopupCollection::OnDisplayMetricsChanged(
-    const gfx::Display& display) {
+    const display::Display& display) {
   alignment_delegate_->RecomputeAlignment(display);
 }
 

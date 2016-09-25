@@ -23,6 +23,7 @@
 
 #include "core/CoreExport.h"
 #include "core/dom/PendingScript.h"
+#include "core/dom/ScriptRunner.h"
 #include "core/fetch/FetchRequest.h"
 #include "core/fetch/ResourceClient.h"
 #include "core/fetch/ScriptResource.h"
@@ -37,6 +38,7 @@ class ScriptSourceCode;
 class LocalFrame;
 
 class CORE_EXPORT ScriptLoader : public GarbageCollectedFinalized<ScriptLoader>, public ScriptResourceClient {
+    USING_GARBAGE_COLLECTED_MIXIN(ScriptLoader);
 public:
     static ScriptLoader* create(Element* element, bool createdByParser, bool isEvaluated, bool createdDuringDocumentWrite = false)
     {
@@ -49,12 +51,14 @@ public:
     Element* element() const { return m_element; }
 
     enum LegacyTypeSupport { DisallowLegacyTypeInTypeAttribute, AllowLegacyTypeInTypeAttribute };
+    static bool isValidScriptTypeAndLanguage(const String& typeAttributeValue, const String& languageAttributeValue, LegacyTypeSupport supportLegacyTypes);
+
     bool prepareScript(const TextPosition& scriptStartPosition = TextPosition::minimumPosition(), LegacyTypeSupport = DisallowLegacyTypeInTypeAttribute);
 
     String scriptCharset() const { return m_characterEncoding; }
     String scriptContent() const;
     // Returns false if and only if execution was blocked.
-    bool executeScript(const ScriptSourceCode&, double* compilationFinishTime = 0);
+    bool executeScript(const ScriptSourceCode&);
     virtual void execute();
 
     // XML parser calls these
@@ -87,6 +91,9 @@ public:
 
     bool wasCreatedDuringDocumentWrite() { return m_createdDuringDocumentWrite; }
 
+    bool disallowedFetchForDocWrittenScript() { return m_documentWriteIntervention == DocumentWriteIntervention::DoNotFetchDocWrittenScript; }
+    void setFetchDocWrittenScriptDeferIdle();
+
 protected:
     ScriptLoader(Element*, bool createdByParser, bool isEvaluated, bool createdDuringDocumentWrite);
 
@@ -96,6 +103,7 @@ private:
     void logScriptMimetype(ScriptResource*, LocalFrame*, String);
 
     bool fetchScript(const String& sourceUrl, FetchRequest::DeferOption);
+    bool doExecuteScript(const ScriptSourceCode&);
 
     ScriptLoaderClient* client() const;
 
@@ -115,10 +123,25 @@ private:
     bool m_haveFiredLoad : 1;
     bool m_willBeParserExecuted : 1; // Same as "The parser will handle executing the script."
     bool m_readyToBeParserExecuted : 1;
-    bool m_willExecuteInOrder : 1;
     bool m_willExecuteWhenDocumentFinishedParsing : 1;
     bool m_forceAsync : 1;
     const bool m_createdDuringDocumentWrite : 1;
+
+    ScriptRunner::AsyncExecutionType m_asyncExecType;
+    enum DocumentWriteIntervention {
+        DocumentWriteInterventionNone = 0,
+        // Based on what shouldDisallowFetchForMainFrameScript() returns.
+        // This script will be blocked if not present in http cache.
+        DoNotFetchDocWrittenScript,
+        // If a parser blocking doc.written script was not fetched and was not
+        // present in the http cache, send a GET for it with an interventions
+        // header to allow the server to know of the intervention. This fetch
+        // will be using DeferOption::IdleLoad to keep it out of the critical
+        // path.
+        FetchDocWrittenScriptDeferIdle,
+    };
+
+    DocumentWriteIntervention m_documentWriteIntervention;
 
     Member<PendingScript> m_pendingScript;
 };

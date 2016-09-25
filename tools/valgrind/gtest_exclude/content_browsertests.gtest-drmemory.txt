@@ -1,9 +1,6 @@
 # http://crbug.com/293125
 WebRtcBrowserTest.CanMakeEmptyCallThenAddStreamsAndRenegotiate
 
-# https://crbug.com/376668
-TouchActionBrowserTest.DefaultAuto
-
 # crbug.com/395172
 WebRtcBrowserTest.CanForwardRemoteStream
 WebRtcBrowserTest.CanForwardRemoteStream720p
@@ -26,20 +23,11 @@ WebRtcBrowserTest.CallWithDataAndMedia
 BrowserSideNavigationBrowserTest.BrowserInitiatedNavigations
 BrowserSideNavigationBrowserTest.FailedNavigation
 
-# crbug.com/461489
-ServiceWorkerVersionBrowserTest.TimeoutStartingWorker
-
 # http://crbug.com/464029
 WebRtcBrowserTest.CallAndModifyStream
 
 # http://crbug.com/470507
 SRC_ClearKey/EncryptedMediaTest.Playback_VideoClearAudio_WebM/0
-
-# http://crbug.com/484351
-PluginTest.VerifyPluginWindowRect
-
-# http://crbug.com/484852
-PluginTest.NPObjectIdentity
 
 # http://crbug.com/500070
 DumpAccessibilityEventsTest.AccessibilityEventsListboxNext
@@ -67,3 +55,23 @@ SitePerProcessBrowserTest.SubframeGestureEventRouting
 
 # https://crbug.com/603337
 SingleProcessMemoryTracingTest.ManyInterleavedDumps
+SingleProcessMemoryTracingTest.RendererInitiatedSingleDump
+
+# https://crbug.com/608081
+SitePerProcessBrowserTest.NavigateRemoteFrameToBlankAndDataURLs
+SitePerProcessBrowserTest.RFPHDestruction
+
+# https://crbug.com/608117
+WebRtcDataChannelTest.DataChannelGC
+
+# https://crbug.com/611557
+FindRequestManagerTest.RapidFire
+
+# https://crbug.com/614466
+IFrameZoomBrowserTest.SubframesDontZoomIndependently
+
+# https://crbug.com/614470
+DumpAccessibilityEventsTest.AccessibilityEventsMenuListFocus
+
+# https://crbug.com/617727
+VibrationTest.CancelVibrationFromMainFrameWhenMainFrameIsReloaded

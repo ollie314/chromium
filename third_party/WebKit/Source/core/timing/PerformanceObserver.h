@@ -6,6 +6,7 @@
 #define PerformanceObserver_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "core/CoreExport.h"
 #include "core/timing/PerformanceEntry.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Vector.h"
@@ -20,22 +21,19 @@ class PerformanceObserverInit;
 
 using PerformanceEntryVector = HeapVector<Member<PerformanceEntry>>;
 
-class PerformanceObserver final : public GarbageCollectedFinalized<PerformanceObserver>, public ScriptWrappable {
+class CORE_EXPORT PerformanceObserver final : public GarbageCollected<PerformanceObserver>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
     friend class PerformanceBase;
+    friend class PerformanceObserverTest;
 public:
     static PerformanceObserver* create(PerformanceBase*, PerformanceObserverCallback*);
     static void resumeSuspendedObservers();
-
-    ~PerformanceObserver();
 
     void observe(const PerformanceObserverInit&, ExceptionState&);
     void disconnect();
     void enqueuePerformanceEntry(PerformanceEntry&);
     PerformanceEntryTypeMask filterOptions() const { return m_filterOptions; }
 
-    // Eagerly finalized as destructor accesses heap object members.
-    EAGERLY_FINALIZE();
     DECLARE_TRACE();
 
 private:

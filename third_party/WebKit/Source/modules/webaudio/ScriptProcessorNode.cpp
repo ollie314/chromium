@@ -24,14 +24,15 @@
 
 #include "modules/webaudio/ScriptProcessorNode.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/dom/CrossThreadTask.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
-#include "modules/webaudio/AbstractAudioContext.h"
+#include "core/dom/ExecutionContextTask.h"
 #include "modules/webaudio/AudioBuffer.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/AudioNodeOutput.h"
 #include "modules/webaudio/AudioProcessingEvent.h"
+#include "modules/webaudio/BaseAudioContext.h"
+#include "platform/WaitableEvent.h"
 #include "public/platform/Platform.h"
 
 namespace blink {
@@ -49,13 +50,13 @@ ScriptProcessorHandler::ScriptProcessorHandler(AudioNode& node, float sampleRate
     if (m_bufferSize < ProcessingSizeInFrames)
         m_bufferSize = ProcessingSizeInFrames;
 
-    ASSERT(numberOfInputChannels <= AbstractAudioContext::maxNumberOfChannels());
+    DCHECK_LE(numberOfInputChannels, BaseAudioContext::maxNumberOfChannels());
 
     addInput();
     addOutput(numberOfOutputChannels);
 
     m_channelCount = numberOfInputChannels;
-    m_channelCountMode = Explicit;
+    setInternalChannelCountMode(Explicit);
 
     initialize();
 }
@@ -105,7 +106,7 @@ void ScriptProcessorHandler::process(size_t framesToProcess)
     // Get input and output buffers. We double-buffer both the input and output sides.
     unsigned doubleBufferIndex = this->doubleBufferIndex();
     bool isDoubleBufferIndexGood = doubleBufferIndex < 2 && doubleBufferIndex < m_inputBuffers.size() && doubleBufferIndex < m_outputBuffers.size();
-    ASSERT(isDoubleBufferIndexGood);
+    DCHECK(isDoubleBufferIndexGood);
     if (!isDoubleBufferIndexGood)
         return;
 
@@ -120,20 +121,20 @@ void ScriptProcessorHandler::process(size_t framesToProcess)
     if (m_internalInputBus->numberOfChannels())
         buffersAreGood = buffersAreGood && inputBuffer && bufferSize() == inputBuffer->length();
 
-    ASSERT(buffersAreGood);
+    DCHECK(buffersAreGood);
     if (!buffersAreGood)
         return;
 
     // We assume that bufferSize() is evenly divisible by framesToProcess - should always be true, but we should still check.
     bool isFramesToProcessGood = framesToProcess && bufferSize() >= framesToProcess && !(bufferSize() % framesToProcess);
-    ASSERT(isFramesToProcessGood);
+    DCHECK(isFramesToProcessGood);
     if (!isFramesToProcessGood)
         return;
 
     unsigned numberOfOutputChannels = outputBus->numberOfChannels();
 
     bool channelsAreGood = (numberOfInputChannels == m_numberOfInputChannels) && (numberOfOutputChannels == m_numberOfOutputChannels);
-    ASSERT(channelsAreGood);
+    DCHECK(channelsAreGood);
     if (!channelsAreGood)
         return;
 
@@ -162,10 +163,34 @@ void ScriptProcessorHandler::process(size_t framesToProcess)
             // The best we can do is clear out the buffer ourself here.
             outputBuffer->zero();
         } else if (context()->getExecutionContext()) {
-            // Fire the event on the main thread with the appropriate buffer
-            // index.
-            context()->getExecutionContext()->postTask(BLINK_FROM_HERE,
-                createCrossThreadTask(&ScriptProcessorHandler::fireProcessEvent, this, m_doubleBufferIndex));
+            // With the realtime context, execute the script code asynchronously
+            // and do not wait.
+            if (context()->hasRealtimeConstraint()) {
+                // Fire the event on the main thread with the appropriate buffer
+                // index.
+                context()->getExecutionContext()->postTask(
+                    BLINK_FROM_HERE,
+                    createCrossThreadTask(
+                        &ScriptProcessorHandler::fireProcessEvent,
+                        crossThreadUnretained(this),
+                        m_doubleBufferIndex));
+            } else {
+                // If this node is in the offline audio context, use the
+                // waitable event to synchronize to the offline rendering thread.
+                std::unique_ptr<WaitableEvent> waitableEvent = wrapUnique(new WaitableEvent());
+
+                context()->getExecutionContext()->postTask(
+                    BLINK_FROM_HERE,
+                    createCrossThreadTask(
+                        &ScriptProcessorHandler::fireProcessEventForOfflineAudioContext,
+                        crossThreadUnretained(this),
+                        m_doubleBufferIndex,
+                        crossThreadUnretained(waitableEvent.get())));
+
+                // Okay to block the offline audio rendering thread since it is
+                // not the actual audio device thread.
+                waitableEvent->wait();
+            }
         }
 
         swapBuffers();
@@ -174,15 +199,15 @@ void ScriptProcessorHandler::process(size_t framesToProcess)
 
 void ScriptProcessorHandler::fireProcessEvent(unsigned doubleBufferIndex)
 {
-    ASSERT(isMainThread());
+    DCHECK(isMainThread());
 
-    ASSERT(doubleBufferIndex < 2);
+    DCHECK_LT(doubleBufferIndex, 2u);
     if (doubleBufferIndex > 1)
         return;
 
     AudioBuffer* inputBuffer = m_inputBuffers[doubleBufferIndex].get();
     AudioBuffer* outputBuffer = m_outputBuffers[doubleBufferIndex].get();
-    ASSERT(outputBuffer);
+    DCHECK(outputBuffer);
     if (!outputBuffer)
         return;
 
@@ -200,6 +225,35 @@ void ScriptProcessorHandler::fireProcessEvent(unsigned doubleBufferIndex)
     }
 }
 
+void ScriptProcessorHandler::fireProcessEventForOfflineAudioContext(
+    unsigned doubleBufferIndex, WaitableEvent* waitableEvent)
+{
+    DCHECK(isMainThread());
+
+    DCHECK_LT(doubleBufferIndex, 2u);
+    if (doubleBufferIndex > 1) {
+        waitableEvent->signal();
+        return;
+    }
+
+    AudioBuffer* inputBuffer = m_inputBuffers[doubleBufferIndex].get();
+    AudioBuffer* outputBuffer = m_outputBuffers[doubleBufferIndex].get();
+    DCHECK(outputBuffer);
+    if (!outputBuffer) {
+        waitableEvent->signal();
+        return;
+    }
+
+    if (node() && context() && context()->getExecutionContext()) {
+        // We do not need a process lock here because the offline render thread
+        // is locked by the waitable event.
+        double playbackTime = (context()->currentSampleFrame() + m_bufferSize) / static_cast<double>(context()->sampleRate());
+        node()->dispatchEvent(AudioProcessingEvent::create(inputBuffer, outputBuffer, playbackTime));
+    }
+
+    waitableEvent->signal();
+}
+
 double ScriptProcessorHandler::tailTime() const
 {
     return std::numeric_limits<double>::infinity();
@@ -212,8 +266,8 @@ double ScriptProcessorHandler::latencyTime() const
 
 void ScriptProcessorHandler::setChannelCount(unsigned long channelCount, ExceptionState& exceptionState)
 {
-    ASSERT(isMainThread());
-    AbstractAudioContext::AutoLocker locker(context());
+    DCHECK(isMainThread());
+    BaseAudioContext::AutoLocker locker(context());
 
     if (channelCount != m_channelCount) {
         exceptionState.throwDOMException(
@@ -224,8 +278,8 @@ void ScriptProcessorHandler::setChannelCount(unsigned long channelCount, Excepti
 
 void ScriptProcessorHandler::setChannelCountMode(const String& mode, ExceptionState& exceptionState)
 {
-    ASSERT(isMainThread());
-    AbstractAudioContext::AutoLocker locker(context());
+    DCHECK(isMainThread());
+    BaseAudioContext::AutoLocker locker(context());
 
     if ((mode == "max") || (mode == "clamped-max")) {
         exceptionState.throwDOMException(
@@ -236,7 +290,7 @@ void ScriptProcessorHandler::setChannelCountMode(const String& mode, ExceptionSt
 
 // ----------------------------------------------------------------
 
-ScriptProcessorNode::ScriptProcessorNode(AbstractAudioContext& context, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels)
+ScriptProcessorNode::ScriptProcessorNode(BaseAudioContext& context, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels)
     : AudioNode(context)
     , ActiveScriptWrappable(this)
 {
@@ -259,8 +313,79 @@ static size_t chooseBufferSize()
     return bufferSize;
 }
 
-ScriptProcessorNode* ScriptProcessorNode::create(AbstractAudioContext& context, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels)
+ScriptProcessorNode* ScriptProcessorNode::create(
+    BaseAudioContext& context,
+    ExceptionState& exceptionState)
 {
+    DCHECK(isMainThread());
+
+    // Default buffer size is 0 (let WebAudio choose) with 2 inputs and 2
+    // outputs.
+    return create(context, 0, 2, 2, exceptionState);
+}
+
+ScriptProcessorNode* ScriptProcessorNode::create(
+    BaseAudioContext& context,
+    size_t bufferSize,
+    ExceptionState& exceptionState)
+{
+    DCHECK(isMainThread());
+
+    // Default is 2 inputs and 2 outputs.
+    return create(context, bufferSize, 2, 2, exceptionState);
+}
+
+ScriptProcessorNode* ScriptProcessorNode::create(
+    BaseAudioContext& context,
+    size_t bufferSize,
+    unsigned numberOfInputChannels,
+    ExceptionState& exceptionState)
+{
+    DCHECK(isMainThread());
+
+    // Default is 2 outputs.
+    return create(context, bufferSize, numberOfInputChannels, 2, exceptionState);
+}
+
+ScriptProcessorNode* ScriptProcessorNode::create(
+    BaseAudioContext& context,
+    size_t bufferSize,
+    unsigned numberOfInputChannels,
+    unsigned numberOfOutputChannels,
+    ExceptionState& exceptionState)
+{
+    DCHECK(isMainThread());
+
+    if (context.isContextClosed()) {
+        context.throwExceptionForClosedState(exceptionState);
+        return nullptr;
+    }
+
+    if (numberOfInputChannels == 0 && numberOfOutputChannels == 0) {
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            "number of input channels and output channels cannot both be zero.");
+        return nullptr;
+    }
+
+    if (numberOfInputChannels > BaseAudioContext::maxNumberOfChannels()) {
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            "number of input channels (" + String::number(numberOfInputChannels)
+            + ") exceeds maximum ("
+            + String::number(BaseAudioContext::maxNumberOfChannels()) + ").");
+        return nullptr;
+    }
+
+    if (numberOfOutputChannels > BaseAudioContext::maxNumberOfChannels()) {
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            "number of output channels (" + String::number(numberOfOutputChannels)
+            + ") exceeds maximum ("
+            + String::number(BaseAudioContext::maxNumberOfChannels()) + ").");
+        return nullptr;
+    }
+
     // Check for valid buffer size.
     switch (bufferSize) {
     case 0:
@@ -275,19 +400,22 @@ ScriptProcessorNode* ScriptProcessorNode::create(AbstractAudioContext& context, 
     case 16384:
         break;
     default:
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            "buffer size (" + String::number(bufferSize)
+            + ") must be 0 or a power of two between 256 and 16384.");
         return nullptr;
     }
 
-    if (!numberOfInputChannels && !numberOfOutputChannels)
+    ScriptProcessorNode* node =  new ScriptProcessorNode(context, context.sampleRate(), bufferSize, numberOfInputChannels, numberOfOutputChannels);
+
+    if (!node)
         return nullptr;
 
-    if (numberOfInputChannels > AbstractAudioContext::maxNumberOfChannels())
-        return nullptr;
+    // context keeps reference until we stop making javascript rendering callbacks
+    context.notifySourceNodeStartedProcessing(node);
 
-    if (numberOfOutputChannels > AbstractAudioContext::maxNumberOfChannels())
-        return nullptr;
-
-    return new ScriptProcessorNode(context, sampleRate, bufferSize, numberOfInputChannels, numberOfOutputChannels);
+    return node;
 }
 
 size_t ScriptProcessorNode::bufferSize() const

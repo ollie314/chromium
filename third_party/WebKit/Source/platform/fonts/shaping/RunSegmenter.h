@@ -14,7 +14,7 @@
 #include "platform/fonts/UTF16TextIterator.h"
 #include "wtf/Allocator.h"
 #include "wtf/Noncopyable.h"
-
+#include <memory>
 #include <unicode/uscript.h>
 
 namespace blink {
@@ -34,31 +34,27 @@ public:
         unsigned end;
         UScriptCode script;
         OrientationIterator::RenderOrientation renderOrientation;
-        SmallCapsIterator::SmallCapsBehavior smallCapsBehavior;
         FontFallbackPriority fontFallbackPriority;
     };
 
-    RunSegmenter(const UChar* buffer, unsigned bufferSize, FontOrientation, FontVariant);
+    RunSegmenter(const UChar* buffer, unsigned bufferSize, FontOrientation);
 
     bool consume(RunSegmenterRange*);
 
 private:
 
     void consumeOrientationIteratorPastLastSplit();
-    void consumeSmallCapsIteratorPastLastSplit();
     void consumeScriptIteratorPastLastSplit();
     void consumeSymbolsIteratorPastLastSplit();
 
     unsigned m_bufferSize;
     RunSegmenterRange m_candidateRange;
-    OwnPtr<ScriptRunIterator> m_scriptRunIterator;
-    OwnPtr<OrientationIterator> m_orientationIterator;
-    OwnPtr<SmallCapsIterator> m_smallCapsIterator;
-    OwnPtr<SymbolsIterator> m_symbolsIterator;
+    std::unique_ptr<ScriptRunIterator> m_scriptRunIterator;
+    std::unique_ptr<OrientationIterator> m_orientationIterator;
+    std::unique_ptr<SymbolsIterator> m_symbolsIterator;
     unsigned m_lastSplit;
     unsigned m_scriptRunIteratorPosition;
     unsigned m_orientationIteratorPosition;
-    unsigned m_smallCapsIteratorPosition;
     unsigned m_symbolsIteratorPosition;
     bool m_atEnd;
 };

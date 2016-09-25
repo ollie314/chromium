@@ -12,8 +12,8 @@
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
 #include "content/browser/renderer_host/input/touch_emulator_client.h"
-#include "content/common/input/web_input_event_traits.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/events/blink/web_input_event_traits.h"
 
 using blink::WebGestureEvent;
 using blink::WebInputEvent;
@@ -63,8 +63,14 @@ class TouchEmulatorTest : public testing::Test,
     EXPECT_EQ(1U, event.touchesLength);
     EXPECT_EQ(last_mouse_x_, event.touches[0].position.x);
     EXPECT_EQ(last_mouse_y_, event.touches[0].position.y);
-    bool expected_cancelable = event.type != WebInputEvent::TouchCancel;
-    EXPECT_EQ(expected_cancelable, !!event.cancelable);
+    const int all_buttons = WebInputEvent::LeftButtonDown |
+        WebInputEvent::MiddleButtonDown | WebInputEvent::RightButtonDown;
+    EXPECT_EQ(0, event.modifiers & all_buttons);
+    WebInputEvent::DispatchType expected_dispatch_type =
+        event.type == WebInputEvent::TouchCancel
+            ? WebInputEvent::EventNonBlocking
+            : WebInputEvent::Blocking;
+    EXPECT_EQ(expected_dispatch_type, event.dispatchType);
     if (ack_touches_synchronously_) {
       emulator()->HandleTouchEventAck(
           event, INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS);
@@ -81,7 +87,8 @@ class TouchEmulatorTest : public testing::Test,
   }
 
   int modifiers() const {
-    return shift_pressed_ ? WebInputEvent::ShiftKey : 0;
+    return (shift_pressed_ ? WebInputEvent::ShiftKey : 0) |
+        (mouse_pressed_ ? WebInputEvent::LeftButtonDown : 0);
   }
 
   std::string ExpectedEvents() {
@@ -89,7 +96,7 @@ class TouchEmulatorTest : public testing::Test,
     for (size_t i = 0; i < forwarded_events_.size(); ++i) {
       if (i != 0)
         result += " ";
-      result += WebInputEventTraits::GetName(forwarded_events_[i]);
+      result += WebInputEvent::GetName(forwarded_events_[i]);
     }
     forwarded_events_.clear();
     return result;
@@ -128,8 +135,8 @@ class TouchEmulatorTest : public testing::Test,
     WebMouseEvent event;
     event.timeStampSeconds = GetNextEventTimeSeconds();
     event.type = type;
-    event.button = mouse_pressed_ ? WebMouseEvent::ButtonLeft :
-        WebMouseEvent::ButtonNone;
+    event.button = mouse_pressed_ ? WebMouseEvent::Button::Left :
+        WebMouseEvent::Button::NoButton;
     event.modifiers = modifiers();
     last_mouse_x_ = x;
     last_mouse_y_ = y;
@@ -212,7 +219,7 @@ class TouchEmulatorTest : public testing::Test,
 
     if (ack) {
       // Can't send ack if there are some pending acks.
-      DCHECK(!touch_events_to_ack_.size());
+      DCHECK(touch_events_to_ack_.empty());
 
       // Touch event is forwarded, ack should not be handled by emulator.
       EXPECT_FALSE(emulator()->HandleTouchEventAck(

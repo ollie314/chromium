@@ -8,10 +8,11 @@
 #include <memory>
 
 #include "base/compiler_specific.h"
+#include "build/build_config.h"
 #include "content/public/renderer/content_renderer_client.h"
 
 namespace web_cache {
-class WebCacheRenderThreadObserver;
+class WebCacheImpl;
 }
 
 namespace content {
@@ -30,8 +31,20 @@ class ShellContentRendererClient : public ContentRendererClient {
   bool IsPluginAllowedToUseCompositorAPI(const GURL& url) override;
   bool IsPluginAllowedToUseDevChannelAPIs() override;
 
+  void DidInitializeWorkerContextOnWorkerThread(
+      v8::Local<v8::Context> context) override;
+
+  void ExposeInterfacesToBrowser(
+      shell::InterfaceRegistry* interface_registry) override;
+
+#if defined(OS_ANDROID)
+  void AddSupportedKeySystems(
+      std::vector<std::unique_ptr<media::KeySystemProperties>>* key_systems)
+      override;
+#endif
+
  private:
-  std::unique_ptr<web_cache::WebCacheRenderThreadObserver> web_cache_observer_;
+  std::unique_ptr<web_cache::WebCacheImpl> web_cache_impl_;
 };
 
 }  // namespace content

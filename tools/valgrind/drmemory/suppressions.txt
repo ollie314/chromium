@@ -74,6 +74,11 @@ name=https://github.com/DynamoRIO/drmemory/issues/68 (UNADDR 2)
 ...
 ntdll.dll!RtlValidateUnicodeString
 
+INVALID HEAP ARGUMENT
+name=https://crbug.com/647420
+...
+ucrtbase.dll!register_onexit_function
+
 ############################
 # TODO(timurrrr): investigate these
 UNADDRESSABLE ACCESS
@@ -487,27 +492,6 @@ NPCTRL.dll!DllGetClassObject
 NPCTRL.dll!DllGetClassObject
 
 HANDLE LEAK
-name=http://crbug.com/373333
-system call NtGdiCreateCompatibleDC
-*!CreateCompatibleDC
-*!SkScalerContext_GDI::SkScalerContext_GDI
-*!LogFontTypeface::onCreateScalerContext
-*!SkTypeface::createScalerContext
-*!SkGlyphCache::VisitCache
-...
-*!SkPaint::descriptorProc
-...
-*!blink::RenderBlockFlow::layoutBlockFlow
-*!blink::RenderBlockFlow::layoutBlock
-*!blink::RenderBlock::layout
-
-HANDLE LEAK
-name=https://github.com/DynamoRIO/drmemory/issues/1545
-system call NtGdiCreateCompatibleDC
-GDI32.dll!CreateCompatibleDC
-skia.dll!LogFontTypeface::onGetTableData
-
-HANDLE LEAK
 name=http://crbug.com/379000
 system call NtCreate*
 ...
@@ -816,3 +800,57 @@ name=bug_604078
 content.dll!content::BluetoothBlacklist::PopulateWithServerProvidedValues
 content.dll!content::BluetoothBlacklist::BluetoothBlacklist
 content.dll!content::BluetoothBlacklist::Get
+
+
+UNINITIALIZED READ
+name=bug_608111
+DWrite.dll!DWriteCreateFactory
+skia.dll!SkDWriteFontFileStreamWrapper::GetFileSize
+...
+blink_platform.dll!blink::SimpleFontData::platformWidthForGlyph
+
+UNADDRESSABLE ACCESS
+name=bug_608064
+*!ExtensionService::NotifyExtensionLoaded
+*!ExtensionService::AddExtension
+
+UNADDRESSABLE ACCESS
+name=https://bugs.chromium.org/p/webrtc/issues/detail?id=5151
+...
+*!sctp_close
+*!sofree
+*!usrsctp_close
+*!cricket::SctpDataMediaChannel::CloseSctpSocket
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/615121_a
+cc.dll!cc::ResourceProvider::CreateBitmap
+cc.dll!cc::ResourceProvider::CreateResource
+cc.dll!cc::ScopedResource::Allocate
+cc.dll!cc::ResourcePool::AcquireResource
+cc.dll!cc::TileManager::CreateRasterTask
+cc.dll!cc::TileManager::ScheduleTasks
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/615121_b
+cc.dll!cc::ResourceProvider::CreateBitmap
+cc.dll!cc::ResourceProvider::CreateResource
+cc.dll!cc::LayerTreeHostImpl::CreateUIResource
+cc.dll!cc::LayerTreeImpl::ProcessUIResourceRequestQueue
+cc.dll!cc::LayerTreeHostImpl::ActivateSyncTree
+
+GDI USAGE ERROR
+name=http://crbug.com/615911
+skia.dll!HDCOffscreen::draw
+skia.dll!SkScalerContext_GDI::generateImage
+skia.dll!SkScalerContext::getImage
+
+UNINITIALIZED READ
+name=http://crbug.com/616556
+wtf.dll!WTF::equalIgnoringASCIICase
+webcore_shared.dll!blink::CSSSelectorParser::consumeAttributeFlags
+webcore_shared.dll!blink::CSSSelectorParser::consumeAttribute
+webcore_shared.dll!blink::CSSSelectorParser::consumeSimpleSelector
+webcore_shared.dll!blink::CSSSelectorParser::consumeCompoundSelector
+...
+webcore_shared.dll!blink::CSSParser::parseSheet

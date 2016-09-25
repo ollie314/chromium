@@ -6,15 +6,15 @@
 #define CrossThreadHolder_h
 
 #include "core/dom/ActiveDOMObject.h"
-#include "core/dom/CrossThreadTask.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/dom/ExecutionContextTask.h"
 #include "public/platform/WebTraceLocation.h"
 #include "wtf/Locker.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
 #include "wtf/ThreadingPrimitives.h"
+#include <memory>
 
 namespace blink {
 
@@ -33,10 +33,10 @@ public:
     // Must be called on the thread where |obj| is created
     // (== the thread of |executionContext|).
     // The current thread must be attached to Oilpan.
-    static PassOwnPtr<CrossThreadHolder<T>> create(ExecutionContext* executionContext, PassOwnPtr<T> obj)
+    static std::unique_ptr<CrossThreadHolder<T>> create(ExecutionContext* executionContext, std::unique_ptr<T> obj)
     {
         ASSERT(executionContext->isContextThread());
-        return adoptPtr(new CrossThreadHolder(executionContext, obj));
+        return wrapUnique(new CrossThreadHolder(executionContext, std::move(obj)));
     }
 
     // Can be called from any thread.
@@ -46,14 +46,14 @@ public:
     // destructed (possibly on the calling thread or on the thread of
     // |executionContext|) when |executionContext| is stopped or
     // CrossThreadHolder is destructed.
-    void postTask(PassOwnPtr<WTF::Function<void(T*, ExecutionContext*), WTF::CrossThreadAffinity>> task)
+    void postTask(std::unique_ptr<WTF::Function<void(T*, ExecutionContext*), WTF::CrossThreadAffinity>> task)
     {
         MutexLocker locker(m_mutex->mutex());
         if (!m_bridge) {
             // The bridge has already disappeared.
             return;
         }
-        m_bridge->getExecutionContext()->postTask(BLINK_FROM_HERE, createCrossThreadTask(&Bridge::runTask, m_bridge.get(), task));
+        m_bridge->getExecutionContext()->postTask(BLINK_FROM_HERE, createCrossThreadTask(&Bridge::runTask, wrapCrossThreadPersistent(m_bridge.get()), passed(std::move(task))));
     }
 
     ~CrossThreadHolder()
@@ -64,12 +64,12 @@ public:
 
 private:
     // Object graph:
-    //                 +------+                          +-----------------+
-    //     T <-OwnPtr- |Bridge| ---------*-------------> |CrossThreadHolder|
-    //                 |      | <-CrossThreadPersistent- |                 |
-    //                 +------+                          +-----------------+
-    //                    |                                    |
-    //                    +--RefPtr--> MutexWrapper <--RefPtr--+
+    //                     +------+                          +-----------------+
+    //     T <-unique_ptr- |Bridge| ---------*-------------> |CrossThreadHolder|
+    //                     |      | <-CrossThreadPersistent- |                 |
+    //                     +------+                          +-----------------+
+    //                        |                                    |
+    //                        +--RefPtr--> MutexWrapper <--RefPtr--+
     // The CrossThreadPersistent<T>/T* between CrossThreadHolder and Bridge
     // are protected by MutexWrapper
     // and cleared when CrossThreadHolder::clearInternal() is called, i.e.:
@@ -93,9 +93,9 @@ private:
         , public ActiveDOMObject {
         USING_GARBAGE_COLLECTED_MIXIN(Bridge);
     public:
-        Bridge(ExecutionContext* executionContext, PassOwnPtr<T> obj, PassRefPtr<MutexWrapper> mutex, CrossThreadHolder* holder)
+        Bridge(ExecutionContext* executionContext, std::unique_ptr<T> obj, PassRefPtr<MutexWrapper> mutex, CrossThreadHolder* holder)
             : ActiveDOMObject(executionContext)
-            , m_obj(obj)
+            , m_obj(std::move(obj))
             , m_mutex(mutex)
             , m_holder(holder)
         {
@@ -119,7 +119,7 @@ private:
             m_holder = nullptr;
         }
 
-        void runTask(PassOwnPtr<WTF::Function<void(T*, ExecutionContext*), WTF::CrossThreadAffinity>> task)
+        void runTask(std::unique_ptr<WTF::Function<void(T*, ExecutionContext*), WTF::CrossThreadAffinity>> task)
         {
             ASSERT(getExecutionContext()->isContextThread());
             if (m_obj)
@@ -141,11 +141,11 @@ private:
             // We have to destruct |*m_obj| here because destructing |*m_obj|
             // in ~Bridge() might be too late when |executionContext| is
             // stopped.
-            m_obj.clear();
+            m_obj.reset();
         }
 
 
-        OwnPtr<T> m_obj;
+        std::unique_ptr<T> m_obj;
         // All accesses to |m_holder| must be protected by |m_mutex|.
         RefPtr<MutexWrapper> m_mutex;
         CrossThreadHolder* m_holder;
@@ -159,9 +159,9 @@ private:
         m_bridge.clear();
     }
 
-    CrossThreadHolder(ExecutionContext* executionContext, PassOwnPtr<T> obj)
+    CrossThreadHolder(ExecutionContext* executionContext, std::unique_ptr<T> obj)
         : m_mutex(MutexWrapper::create())
-        , m_bridge(new Bridge(executionContext, obj, m_mutex, this))
+        , m_bridge(new Bridge(executionContext, std::move(obj), m_mutex, this))
     {
     }
 

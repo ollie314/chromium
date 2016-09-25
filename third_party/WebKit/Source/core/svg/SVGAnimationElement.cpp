@@ -33,7 +33,6 @@
 #include "core/svg/SVGAnimateElement.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/SVGParserUtilities.h"
-#include "platform/FloatConversion.h"
 #include "wtf/MathExtras.h"
 
 namespace blink {
@@ -106,7 +105,7 @@ fail:
 }
 
 template<typename CharType>
-static bool parseKeySplinesInternal(const String& string, Vector<UnitBezier>& result)
+static bool parseKeySplinesInternal(const String& string, Vector<gfx::CubicBezier>& result)
 {
     const CharType* ptr = string.getCharacters<CharType>();
     const CharType* end = ptr + string.length();
@@ -136,13 +135,13 @@ static bool parseKeySplinesInternal(const String& string, Vector<UnitBezier>& re
             ptr++;
         skipOptionalSVGSpaces(ptr, end);
 
-        result.append(UnitBezier(posA, posB, posC, posD));
+        result.append(gfx::CubicBezier(posA, posB, posC, posD));
     }
 
     return ptr == end;
 }
 
-static bool parseKeySplines(const String& string, Vector<UnitBezier>& result)
+static bool parseKeySplines(const String& string, Vector<gfx::CubicBezier>& result)
 {
     result.clear();
     if (string.isEmpty())
@@ -244,12 +243,12 @@ float SVGAnimationElement::getStartTime(ExceptionState& exceptionState) const
         exceptionState.throwDOMException(InvalidStateError, "No current interval.");
         return 0;
     }
-    return narrowPrecisionToFloat(startTime.value());
+    return clampTo<float>(startTime.value());
 }
 
 float SVGAnimationElement::getCurrentTime() const
 {
-    return narrowPrecisionToFloat(elapsed().value());
+    return clampTo<float>(elapsed().value());
 }
 
 float SVGAnimationElement::getSimpleDuration(ExceptionState& exceptionState) const
@@ -259,7 +258,7 @@ float SVGAnimationElement::getSimpleDuration(ExceptionState& exceptionState) con
         exceptionState.throwDOMException(NotSupportedError, "No simple duration defined.");
         return 0;
     }
-    return narrowPrecisionToFloat(duration.value());
+    return clampTo<float>(duration.value());
 }
 
 void SVGAnimationElement::beginElement()
@@ -376,7 +375,11 @@ bool SVGAnimationElement::isTargetAttributeCSSProperty(SVGElement* targetElement
 
 SVGAnimationElement::ShouldApplyAnimationType SVGAnimationElement::shouldApplyAnimation(SVGElement* targetElement, const QualifiedName& attributeName)
 {
-    if (!hasValidAttributeType() || !targetElement || attributeName == anyQName() || !targetElement->inActiveDocument())
+    if (!hasValidAttributeType()
+        || attributeName == anyQName()
+        || !targetElement
+        || !targetElement->inActiveDocument()
+        || !targetElement->parentNode())
         return DontApplyAnimation;
 
     // Always animate CSS properties, using the ApplyCSSAnimation code path, regardless of the attributeType value.
@@ -451,11 +454,11 @@ float SVGAnimationElement::calculatePercentForSpline(float percent, unsigned spl
 {
     ASSERT(getCalcMode() == CalcModeSpline);
     ASSERT_WITH_SECURITY_IMPLICATION(splineIndex < m_keySplines.size());
-    UnitBezier bezier = m_keySplines[splineIndex];
+    gfx::CubicBezier bezier = m_keySplines[splineIndex];
     SMILTime duration = simpleDuration();
     if (!duration.isFinite())
         duration = 100.0;
-    return narrowPrecisionToFloat(bezier.solveWithEpsilon(percent, solveEpsilon(duration.value())));
+    return clampTo<float>(bezier.SolveWithEpsilon(percent, solveEpsilon(duration.value())));
 }
 
 float SVGAnimationElement::calculatePercentFromKeyPoints(float percent) const
@@ -625,6 +628,9 @@ void SVGAnimationElement::startedActiveInterval()
     } else if (animationMode == PathAnimation) {
         m_animationValid = calcMode == CalcModePaced || !fastHasAttribute(SVGNames::keyPointsAttr) || (m_keyTimes.size() > 1 && m_keyTimes.size() == m_keyPoints.size());
     }
+
+    if (m_animationValid && (isAdditive() || isAccumulated()))
+        UseCounter::count(&document(), UseCounter::SVGSMILAdditiveAnimation);
 }
 
 void SVGAnimationElement::updateAnimation(float percent, unsigned repeatCount, SVGSMILElement* resultElement)

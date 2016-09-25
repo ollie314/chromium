@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/download/download_target_info.h"
+#include "chrome/common/safe_browsing/download_file_types.pb.h"
 
 class SavePackage;
 
@@ -90,6 +91,10 @@ class DownloadItemModel {
   // Implies IsDangerous() and MightBeMalicious().
   bool IsMalicious() const;
 
+  // Does this download have a MIME type (either explicit or inferred from its
+  // extension) suggesting that it is a supported image type?
+  bool HasSupportedImageMimeType() const;
+
   // Is safe browsing download feedback feature available for this download?
   bool ShouldAllowDownloadFeedback() const;
 
@@ -143,10 +148,11 @@ class DownloadItemModel {
   // Return the danger level determined during download target determination.
   // The value returned here is independent of the danger level as determined by
   // the Safe Browsing.
-  download_util::DownloadDangerLevel GetDangerLevel() const;
+  safe_browsing::DownloadFileType::DangerLevel GetDangerLevel() const;
 
   // Change what's returned by GetDangerLevel().
-  void SetDangerLevel(download_util::DownloadDangerLevel danger_level);
+  void SetDangerLevel(
+      safe_browsing::DownloadFileType::DangerLevel danger_level);
 
   // Open the download using the platform handler for the download. The behavior
   // of this method will be different from DownloadItem::OpenDownload() if

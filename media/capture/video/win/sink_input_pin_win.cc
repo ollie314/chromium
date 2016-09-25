@@ -13,6 +13,7 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "media/base/timestamp_constants.h"
 
 namespace media {
 
@@ -98,7 +99,7 @@ bool SinkInputPin::IsMediaTypeValid(const AM_MEDIA_TYPE* media_type) {
 #ifndef NDEBUG
   WCHAR guid_str[128];
   StringFromGUID2(sub_type, guid_str, arraysize(guid_str));
-  DVLOG(2) << __FUNCTION__ << " unsupported media type: " << guid_str;
+  DVLOG(2) << __func__ << " unsupported media type: " << guid_str;
 #endif
   return false;
 }
@@ -201,14 +202,11 @@ HRESULT SinkInputPin::Receive(IMediaSample* sample) {
     return S_FALSE;
 
   REFERENCE_TIME start_time, end_time;
-  base::TimeTicks timestamp;
+  base::TimeDelta timestamp = media::kNoTimestamp;
   if (SUCCEEDED(sample->GetTime(&start_time, &end_time))) {
     DCHECK(start_time <= end_time);
-    timestamp += base::TimeDelta::FromMicroseconds(start_time / 10);
-  } else {
-    timestamp = base::TimeTicks::Now();
+    timestamp = base::TimeDelta::FromMicroseconds(start_time / 10);
   }
-
 
   observer_->FrameReceived(buffer, length, timestamp);
   return S_OK;

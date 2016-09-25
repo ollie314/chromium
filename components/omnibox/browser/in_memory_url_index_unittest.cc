@@ -157,9 +157,9 @@ class InMemoryURLIndexTest : public testing::Test {
   base::MessageLoop message_loop_;
   base::SequencedWorkerPoolOwner pool_owner_;
   base::ScopedTempDir history_dir_;
-  scoped_ptr<history::HistoryService> history_service_;
+  std::unique_ptr<history::HistoryService> history_service_;
   history::HistoryDatabase* history_database_;
-  scoped_ptr<InMemoryURLIndex> url_index_;
+  std::unique_ptr<InMemoryURLIndex> url_index_;
 };
 
 InMemoryURLIndexTest::InMemoryURLIndexTest()
@@ -218,7 +218,8 @@ bool InMemoryURLIndexTest::DeleteURL(const GURL& url) {
 void InMemoryURLIndexTest::SetUp() {
   // We cannot access the database until the backend has been loaded.
   if (history_dir_.CreateUniqueTempDir())
-    history_service_ = history::CreateHistoryService(history_dir_.path(), true);
+    history_service_ =
+        history::CreateHistoryService(history_dir_.GetPath(), true);
   ASSERT_TRUE(history_service_);
   BlockUntilInMemoryURLIndexIsRefreshed(url_index_.get());
 
@@ -431,7 +432,8 @@ void InMemoryURLIndexTest::ExpectPrivateDataEqual(
     for (size_t i = 0;
          i < std::min(expected_visits.size(), actual_visits.size()); ++i) {
       EXPECT_EQ(expected_visits[i].first, actual_visits[i].first);
-      EXPECT_EQ(expected_visits[i].second, actual_visits[i].second);
+      EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
+          actual_visits[i].second, expected_visits[i].second));
     }
   }
 
@@ -1004,9 +1006,9 @@ TEST_F(InMemoryURLIndexTest, ReadVisitsFromHistory) {
   {
     const VisitInfoVector& visits = entry->second.visits;
     ASSERT_EQ(3u, visits.size());
-    EXPECT_EQ(static_cast<ui::PageTransition>(0u), visits[0].second);
-    EXPECT_EQ(static_cast<ui::PageTransition>(1u), visits[1].second);
-    EXPECT_EQ(static_cast<ui::PageTransition>(0u), visits[2].second);
+    EXPECT_EQ(0, static_cast<int32_t>(visits[0].second));
+    EXPECT_EQ(1, static_cast<int32_t>(visits[1].second));
+    EXPECT_EQ(0, static_cast<int32_t>(visits[2].second));
   }
 
   // Ditto but for URL with id 35.
@@ -1014,9 +1016,9 @@ TEST_F(InMemoryURLIndexTest, ReadVisitsFromHistory) {
   ASSERT_TRUE(entry != history_info_map.end());
   {
     const VisitInfoVector& visits = entry->second.visits;
-    ASSERT_EQ(2u, visits.size());
-    EXPECT_EQ(static_cast<ui::PageTransition>(1u), visits[0].second);
-    EXPECT_EQ(static_cast<ui::PageTransition>(1u), visits[1].second);
+    ASSERT_EQ(2, static_cast<int32_t>(visits.size()));
+    EXPECT_EQ(1, static_cast<int32_t>(visits[0].second));
+    EXPECT_EQ(1, static_cast<int32_t>(visits[1].second));
   }
 
   // The URL with id 32 has many visits listed in the database, but we
@@ -1027,14 +1029,14 @@ TEST_F(InMemoryURLIndexTest, ReadVisitsFromHistory) {
     const VisitInfoVector& visits = entry->second.visits;
     EXPECT_EQ(10u, visits.size());
     for (size_t i = 0; i < visits.size(); ++i)
-      EXPECT_EQ(static_cast<ui::PageTransition>(0u), visits[i].second);
+      EXPECT_EQ(0, static_cast<int32_t>(visits[i].second));
   }
 }
 
 TEST_F(InMemoryURLIndexTest, CacheSaveRestore) {
   base::ScopedTempDir temp_directory;
   ASSERT_TRUE(temp_directory.CreateUniqueTempDir());
-  set_history_dir(temp_directory.path());
+  set_history_dir(temp_directory.GetPath());
 
   URLIndexPrivateData& private_data(*GetPrivateData());
 
@@ -1103,7 +1105,7 @@ TEST_F(InMemoryURLIndexTest, CacheSaveRestore) {
 TEST_F(InMemoryURLIndexTest, RebuildFromHistoryIfCacheOld) {
   base::ScopedTempDir temp_directory;
   ASSERT_TRUE(temp_directory.CreateUniqueTempDir());
-  set_history_dir(temp_directory.path());
+  set_history_dir(temp_directory.GetPath());
 
   URLIndexPrivateData& private_data(*GetPrivateData());
 
@@ -1270,7 +1272,7 @@ class InMemoryURLIndexCacheTest : public testing::Test {
   base::MessageLoop message_loop_;
   base::SequencedWorkerPoolOwner pool_owner_;
   base::ScopedTempDir temp_dir_;
-  scoped_ptr<InMemoryURLIndex> url_index_;
+  std::unique_ptr<InMemoryURLIndex> url_index_;
 };
 
 InMemoryURLIndexCacheTest::InMemoryURLIndexCacheTest()
@@ -1278,7 +1280,7 @@ InMemoryURLIndexCacheTest::InMemoryURLIndexCacheTest()
 
 void InMemoryURLIndexCacheTest::SetUp() {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   url_index_.reset(new InMemoryURLIndex(nullptr, nullptr, nullptr,
                                         pool_owner_.pool().get(), path,
                                         SchemeSet()));
@@ -1302,7 +1304,7 @@ bool InMemoryURLIndexCacheTest::GetCacheFilePath(
 
 TEST_F(InMemoryURLIndexCacheTest, CacheFilePath) {
   base::FilePath expectedPath =
-      temp_dir_.path().Append(FILE_PATH_LITERAL("History Provider Cache"));
+      temp_dir_.GetPath().Append(FILE_PATH_LITERAL("History Provider Cache"));
   std::vector<base::FilePath::StringType> expected_parts;
   expectedPath.GetComponents(&expected_parts);
   base::FilePath full_file_path;

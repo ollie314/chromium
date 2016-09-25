@@ -5,21 +5,27 @@
 cr.define('md_history.history_toolbar_test', function() {
   function registerTests() {
     suite('history-toolbar', function() {
+      var app;
       var element;
       var toolbar;
       var TEST_HISTORY_RESULTS;
 
       suiteSetup(function() {
-        element = $('history-list');
-        toolbar = $('toolbar');
         TEST_HISTORY_RESULTS =
             [createHistoryEntry('2016-03-15', 'https://google.com')];
       });
 
-      test('selecting checkbox causes toolbar to change', function(done) {
-        element.addNewResults(TEST_HISTORY_RESULTS, '');
+      setup(function() {
+        app = replaceApp();
+        element = app.$['history'].$['infinite-list'];
+        toolbar = app.$['toolbar'];
+        return flush();
+      });
 
-        flush(function() {
+      test('selecting checkbox causes toolbar to change', function() {
+        element.addNewResults(TEST_HISTORY_RESULTS);
+
+        return flush().then(function() {
           var item = element.$$('history-item');
           MockInteractions.tap(item.$.checkbox);
 
@@ -37,41 +43,113 @@ cr.define('md_history.history_toolbar_test', function() {
           assertEquals(0, toolbar.count);
           // Ensure that the toolbar boolean states that no items are selected.
           assertFalse(toolbar.itemsSelected_);
-
-          done();
         });
       });
 
       test('search term gathered correctly from toolbar', function(done) {
+        app.queryState_.queryingDisabled = false;
         registerMessageCallback('queryHistory', this, function (info) {
-          assertEquals(info[0], 'Test');
+          assertEquals('Test', info[0]);
           done();
         });
 
-        toolbar.onSearch('Test');
+        toolbar.$$('cr-toolbar').fire('search-changed', 'Test');
       });
 
-      test('more from this site sends and sets correct data', function(done) {
+      test('shortcuts to open search field', function() {
+        var field = toolbar.$['main-toolbar'].getSearchField();
+        field.blur();
+        assertFalse(field.showingSearch);
+
+        MockInteractions.pressAndReleaseKeyOn(
+            document.body, 191, '', '/');
+        assertTrue(field.showingSearch);
+        assertEquals(field.$.searchInput, field.root.activeElement);
+
+        MockInteractions.pressAndReleaseKeyOn(
+            field.$.searchInput, 27, '', 'Escape');
+        assertFalse(field.showingSearch, 'Pressing escape closes field.');
+        assertNotEquals(field.$.searchInput, field.root.activeElement);
+
+        var modifier = 'ctrl';
+        if (cr.isMac)
+          modifier = 'meta';
+
+        MockInteractions.pressAndReleaseKeyOn(
+            document.body, 70, modifier, 'f');
+        assertTrue(field.showingSearch);
+        assertEquals(field.$.searchInput, field.root.activeElement);
+      });
+
+      test('spinner is active on search' , function(done) {
+        app.queryState_.queryingDisabled = false;
         registerMessageCallback('queryHistory', this, function (info) {
-          assertEquals(info[0], 'example.com');
-          flush(function() {
-            assertEquals(toolbar.$$('#search-input').$$('#search-input').value,
-                'example.com');
-            done();
-          });
+          assertTrue(toolbar.spinnerActive);
+          app.historyResult(createHistoryInfo(), TEST_HISTORY_RESULTS);
+          assertFalse(toolbar.spinnerActive);
+          done();
         });
 
-        element.$.sharedMenu.itemData = {domain: 'example.com'};
-        MockInteractions.tap(element.$.menuMoreButton);
+        toolbar.$$('cr-toolbar').fire('search-changed', 'Test2');
       });
 
       teardown(function() {
-        element.historyData = [];
-        registerMessageCallback('queryHistory', this, undefined);
-        toolbar.count = 0;
+        registerMessageCallback('queryHistory', this, function() {});
+        app.set('queryState_.searchTerm', '');
       });
     });
   }
+  return {
+    registerTests: registerTests
+  };
+});
+
+
+cr.define('md_history.history_toolbar_focus_test', function() {
+  function registerTests() {
+    suite('history-toolbar', function() {
+      var app;
+      var element;
+      var toolbar;
+      var TEST_HISTORY_RESULTS =
+          [createHistoryEntry('2016-03-15', 'https://google.com')];
+      ;
+
+      setup(function() {
+        app = replaceApp();
+
+        element = app.$['history'].$['infinite-list'];
+        toolbar = app.$['toolbar'];
+      });
+
+      test('search bar is focused on load in wide mode', function() {
+        window.resultsRendered = false;
+        app.hasDrawer_ = false;
+
+        historyResult(createHistoryInfo(), []);
+        return flush().then(() => {
+          // Ensure the search bar is focused on load.
+          assertTrue(
+              app.$.toolbar.$['main-toolbar']
+                  .getSearchField()
+                  .isSearchFocused());
+        });
+      });
+
+      test('search bar is not focused on load in narrow mode', function() {
+        app.hasDrawer_ = true;
+
+        historyResult(createHistoryInfo(), []);
+        // Ensure the search bar is focused on load.
+        assertFalse(
+            $('history-app')
+                .$.toolbar.$['main-toolbar']
+                .getSearchField()
+                .isSearchFocused());
+      });
+    });
+  };
+
   return {
     registerTests: registerTests
   };

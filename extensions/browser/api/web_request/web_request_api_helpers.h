@@ -8,13 +8,13 @@
 #define EXTENSIONS_BROWSER_API_WEB_REQUEST_WEB_REQUEST_API_HELPERS_H_
 
 #include <list>
+#include <memory>
 #include <set>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "content/public/common/resource_type.h"
 #include "extensions/browser/warning_set.h"
@@ -37,7 +37,7 @@ class Extension;
 }
 
 namespace net {
-class BoundNetLog;
+class NetLogWithSource;
 class URLRequest;
 }
 
@@ -66,8 +66,9 @@ struct ExtraInfoSpec {
 struct RequestCookie {
   RequestCookie();
   ~RequestCookie();
-  scoped_ptr<std::string> name;
-  scoped_ptr<std::string> value;
+  std::unique_ptr<std::string> name;
+  std::unique_ptr<std::string> value;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(RequestCookie);
 };
@@ -79,14 +80,15 @@ bool NullableEquals(const RequestCookie* a, const RequestCookie* b);
 struct ResponseCookie {
   ResponseCookie();
   ~ResponseCookie();
-  scoped_ptr<std::string> name;
-  scoped_ptr<std::string> value;
-  scoped_ptr<std::string> expires;
-  scoped_ptr<int> max_age;
-  scoped_ptr<std::string> domain;
-  scoped_ptr<std::string> path;
-  scoped_ptr<bool> secure;
-  scoped_ptr<bool> http_only;
+  std::unique_ptr<std::string> name;
+  std::unique_ptr<std::string> value;
+  std::unique_ptr<std::string> expires;
+  std::unique_ptr<int> max_age;
+  std::unique_ptr<std::string> domain;
+  std::unique_ptr<std::string> path;
+  std::unique_ptr<bool> secure;
+  std::unique_ptr<bool> http_only;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(ResponseCookie);
 };
@@ -98,9 +100,10 @@ bool NullableEquals(const ResponseCookie* a, const ResponseCookie* b);
 struct FilterResponseCookie : ResponseCookie {
   FilterResponseCookie();
   ~FilterResponseCookie();
-  scoped_ptr<int> age_lower_bound;
-  scoped_ptr<int> age_upper_bound;
-  scoped_ptr<bool> session_cookie;
+  std::unique_ptr<int> age_lower_bound;
+  std::unique_ptr<int> age_upper_bound;
+  std::unique_ptr<bool> session_cookie;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(FilterResponseCookie);
 };
@@ -119,9 +122,10 @@ struct RequestCookieModification {
   ~RequestCookieModification();
   CookieModificationType type;
   // Used for EDIT and REMOVE. NULL for ADD.
-  scoped_ptr<RequestCookie> filter;
+  std::unique_ptr<RequestCookie> filter;
   // Used for ADD and EDIT. NULL for REMOVE.
-  scoped_ptr<RequestCookie> modification;
+  std::unique_ptr<RequestCookie> modification;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(RequestCookieModification);
 };
@@ -134,9 +138,10 @@ struct ResponseCookieModification {
   ~ResponseCookieModification();
   CookieModificationType type;
   // Used for EDIT and REMOVE.
-  scoped_ptr<FilterResponseCookie> filter;
+  std::unique_ptr<FilterResponseCookie> filter;
   // Used for ADD and EDIT.
-  scoped_ptr<ResponseCookie> modification;
+  std::unique_ptr<ResponseCookie> modification;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(ResponseCookieModification);
 };
@@ -177,7 +182,7 @@ struct EventResponseDelta {
   ResponseHeaders deleted_response_headers;
 
   // Authentication Credentials to use.
-  scoped_ptr<net::AuthCredentials> auth_credentials;
+  std::unique_ptr<net::AuthCredentials> auth_credentials;
 
   // Modifications to cookies in request headers.
   RequestCookieModifications request_cookie_modifications;
@@ -243,7 +248,7 @@ EventResponseDelta* CalculateOnAuthRequiredDelta(
     const std::string& extension_id,
     const base::Time& extension_install_time,
     bool cancel,
-    scoped_ptr<net::AuthCredentials>* auth_credentials);
+    std::unique_ptr<net::AuthCredentials>* auth_credentials);
 
 // These functions merge the responses (the |deltas|) of request handlers.
 // The |deltas| need to be sorted in decreasing order of precedence of
@@ -252,18 +257,16 @@ EventResponseDelta* CalculateOnAuthRequiredDelta(
 // reported will be stored in |event_log_entries|.
 
 // Stores in |canceled| whether any extension wanted to cancel the request.
-void MergeCancelOfResponses(
-    const EventResponseDeltas& deltas,
-    bool* canceled,
-    const net::BoundNetLog* net_log);
+void MergeCancelOfResponses(const EventResponseDeltas& deltas,
+                            bool* canceled,
+                            const net::NetLogWithSource* net_log);
 // Stores in |*new_url| the redirect request of the extension with highest
 // precedence. Extensions that did not command to redirect the request are
 // ignored in this logic.
-void MergeRedirectUrlOfResponses(
-    const EventResponseDeltas& deltas,
-    GURL* new_url,
-    extensions::WarningSet* conflicting_extensions,
-    const net::BoundNetLog* net_log);
+void MergeRedirectUrlOfResponses(const EventResponseDeltas& deltas,
+                                 GURL* new_url,
+                                 extensions::WarningSet* conflicting_extensions,
+                                 const net::NetLogWithSource* net_log);
 // Stores in |*new_url| the redirect request of the extension with highest
 // precedence. Extensions that did not command to redirect the request are
 // ignored in this logic.
@@ -271,7 +274,7 @@ void MergeOnBeforeRequestResponses(
     const EventResponseDeltas& deltas,
     GURL* new_url,
     extensions::WarningSet* conflicting_extensions,
-    const net::BoundNetLog* net_log);
+    const net::NetLogWithSource* net_log);
 // Modifies the "Cookie" header in |request_headers| according to
 // |deltas.request_cookie_modifications|. Conflicts are currently ignored
 // silently.
@@ -279,14 +282,14 @@ void MergeCookiesInOnBeforeSendHeadersResponses(
     const EventResponseDeltas& deltas,
     net::HttpRequestHeaders* request_headers,
     extensions::WarningSet* conflicting_extensions,
-    const net::BoundNetLog* net_log);
+    const net::NetLogWithSource* net_log);
 // Modifies the headers in |request_headers| according to |deltas|. Conflicts
 // are tried to be resolved.
 void MergeOnBeforeSendHeadersResponses(
     const EventResponseDeltas& deltas,
     net::HttpRequestHeaders* request_headers,
     extensions::WarningSet* conflicting_extensions,
-    const net::BoundNetLog* net_log);
+    const net::NetLogWithSource* net_log);
 // Modifies the "Set-Cookie" headers in |override_response_headers| according to
 // |deltas.response_cookie_modifications|. If |override_response_headers| is
 // NULL, a copy of |original_response_headers| is created. Conflicts are
@@ -296,7 +299,7 @@ void MergeCookiesInOnHeadersReceivedResponses(
     const net::HttpResponseHeaders* original_response_headers,
     scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
     extensions::WarningSet* conflicting_extensions,
-    const net::BoundNetLog* net_log);
+    const net::NetLogWithSource* net_log);
 // Stores a copy of |original_response_header| into |override_response_headers|
 // that is modified according to |deltas|. If |deltas| does not instruct to
 // modify the response headers, |override_response_headers| remains empty.
@@ -309,7 +312,7 @@ void MergeOnHeadersReceivedResponses(
     scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
     GURL* allowed_unsafe_redirect_url,
     extensions::WarningSet* conflicting_extensions,
-    const net::BoundNetLog* net_log);
+    const net::NetLogWithSource* net_log);
 // Merge the responses of blocked onAuthRequired handlers. The first
 // registered listener that supplies authentication credentials in a response,
 // if any, will have its authentication credentials used. |request| must be
@@ -320,7 +323,7 @@ bool MergeOnAuthRequiredResponses(
     const EventResponseDeltas& deltas,
     net::AuthCredentials* auth_credentials,
     extensions::WarningSet* conflicting_extensions,
-    const net::BoundNetLog* net_log);
+    const net::NetLogWithSource* net_log);
 
 // Triggers clearing each renderer's in-memory cache the next time it navigates.
 void ClearCacheOnNavigation();
@@ -337,9 +340,10 @@ void NotifyWebRequestAPIUsed(void* browser_context_id,
 void SendExtensionWebRequestStatusToHost(content::RenderProcessHost* host);
 
 // Converts the |name|, |value| pair of a http header to a HttpHeaders
-// dictionary. Ownership is passed to the caller.
-base::DictionaryValue* CreateHeaderDictionary(
-    const std::string& name, const std::string& value);
+// dictionary.
+std::unique_ptr<base::DictionaryValue> CreateHeaderDictionary(
+    const std::string& name,
+    const std::string& value);
 
 // Returns whether |type| is a ResourceType that is handled by the web request
 // API.

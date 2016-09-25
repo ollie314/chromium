@@ -34,6 +34,7 @@
 #include "core/fetch/FetchRequest.h"
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceFetcher.h"
+#include "core/fetch/ResourceLoadingLog.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
@@ -45,11 +46,12 @@
 #include "core/layout/LayoutVideo.h"
 #include "core/layout/svg/LayoutSVGImage.h"
 #include "core/svg/graphics/SVGImage.h"
-#include "platform/Logging.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/SecurityPolicy.h"
 #include "public/platform/WebCachePolicy.h"
 #include "public/platform/WebURLRequest.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -72,18 +74,18 @@ static inline bool pageIsBeingDismissed(Document* document)
 
 static ImageLoader::BypassMainWorldBehavior shouldBypassMainWorldCSP(ImageLoader* loader)
 {
-    ASSERT(loader);
-    ASSERT(loader->element());
+    DCHECK(loader);
+    DCHECK(loader->element());
     if (loader->element()->document().frame() && loader->element()->document().frame()->script().shouldBypassMainWorldCSP())
         return ImageLoader::BypassMainWorldCSP;
     return ImageLoader::DoNotBypassMainWorldCSP;
 }
 
-class ImageLoader::Task : public WebTaskRunner::Task {
+class ImageLoader::Task {
 public:
-    static PassOwnPtr<Task> create(ImageLoader* loader, UpdateFromElementBehavior updateBehavior, ReferrerPolicy referrerPolicy)
+    static std::unique_ptr<Task> create(ImageLoader* loader, UpdateFromElementBehavior updateBehavior, ReferrerPolicy referrerPolicy)
     {
-        return adoptPtr(new Task(loader, updateBehavior, referrerPolicy));
+        return wrapUnique(new Task(loader, updateBehavior, referrerPolicy));
     }
 
     Task(ImageLoader* loader, UpdateFromElementBehavior updateBehavior, ReferrerPolicy referrerPolicy)
@@ -103,15 +105,12 @@ public:
             m_scriptState = ScriptState::current(isolate);
         } else {
             m_scriptState = ScriptState::forMainWorld(loader->element()->document().frame());
-            ASSERT(m_scriptState);
+            DCHECK(m_scriptState);
         }
+        m_requestURL = loader->imageSourceToKURL(loader->element()->imageSourceURL());
     }
 
-    ~Task() override
-    {
-    }
-
-    void run() override
+    void run()
     {
         if (!m_loader)
             return;
@@ -119,9 +118,9 @@ public:
         InspectorInstrumentation::AsyncTask asyncTask(&context, this);
         if (m_scriptState->contextIsValid()) {
             ScriptState::Scope scope(m_scriptState.get());
-            m_loader->doUpdateFromElement(m_shouldBypassMainWorldCSP, m_updateBehavior, m_referrerPolicy);
+            m_loader->doUpdateFromElement(m_shouldBypassMainWorldCSP, m_updateBehavior, m_requestURL, m_referrerPolicy);
         } else {
-            m_loader->doUpdateFromElement(m_shouldBypassMainWorldCSP, m_updateBehavior, m_referrerPolicy);
+            m_loader->doUpdateFromElement(m_shouldBypassMainWorldCSP, m_updateBehavior, m_requestURL, m_referrerPolicy);
         }
     }
 
@@ -143,6 +142,7 @@ private:
     RefPtr<ScriptState> m_scriptState;
     WeakPtrFactory<Task> m_weakFactory;
     ReferrerPolicy m_referrerPolicy;
+    KURL m_requestURL;
 };
 
 ImageLoader::ImageLoader(Element* element)
@@ -155,7 +155,7 @@ ImageLoader::ImageLoader(Element* element)
     , m_elementIsProtected(false)
     , m_suppressErrorEvents(false)
 {
-    WTF_LOG(Timers, "new ImageLoader %p", this);
+    RESOURCE_LOADING_DVLOG(1) << "new ImageLoader " << this;
     ThreadState::current()->registerPreFinalizer(this);
 }
 
@@ -165,8 +165,9 @@ ImageLoader::~ImageLoader()
 
 void ImageLoader::dispose()
 {
-    WTF_LOG(Timers, "~ImageLoader %p; m_hasPendingLoadEvent=%d, m_hasPendingErrorEvent=%d",
-        this, m_hasPendingLoadEvent, m_hasPendingErrorEvent);
+    RESOURCE_LOADING_DVLOG(1) << "~ImageLoader " << this
+        << "; m_hasPendingLoadEvent=" << m_hasPendingLoadEvent
+        << ", m_hasPendingErrorEvent=" << m_hasPendingErrorEvent;
 
     if (m_image) {
         m_image->removeObserver(this);
@@ -191,7 +192,7 @@ void ImageLoader::setImage(ImageResource* newImage)
 
 void ImageLoader::setImageWithoutConsideringPendingLoadEvent(ImageResource* newImage)
 {
-    ASSERT(m_failedLoadURL.isEmpty());
+    DCHECK(m_failedLoadURL.isEmpty());
     ImageResource* oldImage = m_image.get();
     if (newImage != oldImage) {
         m_image = newImage;
@@ -247,13 +248,13 @@ inline void ImageLoader::clearFailedLoadURL()
 
 inline void ImageLoader::enqueueImageLoadingMicroTask(UpdateFromElementBehavior updateBehavior, ReferrerPolicy referrerPolicy)
 {
-    OwnPtr<Task> task = Task::create(this, updateBehavior, referrerPolicy);
+    std::unique_ptr<Task> task = Task::create(this, updateBehavior, referrerPolicy);
     m_pendingTask = task->createWeakPtr();
-    Microtask::enqueueMicrotask(task.release());
+    Microtask::enqueueMicrotask(WTF::bind(&Task::run, passed(std::move(task))));
     m_loadDelayCounter = IncrementLoadEventDelayCount::create(m_element->document());
 }
 
-void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, UpdateFromElementBehavior updateBehavior, ReferrerPolicy referrerPolicy)
+void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, UpdateFromElementBehavior updateBehavior, const KURL& url, ReferrerPolicy referrerPolicy)
 {
     // FIXME: According to
     // http://www.whatwg.org/specs/web-apps/current-work/multipage/embedded-content.html#the-img-element:the-img-element-55
@@ -263,9 +264,9 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
     // We don't need to call clearLoader here: Either we were called from the
     // task, or our caller updateFromElement cleared the task's loader (and set
     // m_pendingTask to null).
-    m_pendingTask.clear();
+    m_pendingTask.reset();
     // Make sure to only decrement the count when we exit this function
-    OwnPtr<IncrementLoadEventDelayCount> loadDelayCounter;
+    std::unique_ptr<IncrementLoadEventDelayCount> loadDelayCounter;
     loadDelayCounter.swap(m_loadDelayCounter);
 
     Document& document = m_element->document();
@@ -273,7 +274,6 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
         return;
 
     AtomicString imageSourceURL = m_element->imageSourceURL();
-    KURL url = imageSourceToKURL(imageSourceURL);
     ImageResource* newImage = nullptr;
     if (!url.isNull()) {
         // Unlike raw <img>, we block mixed content inside of <picture> or <img srcset>.
@@ -282,9 +282,6 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
         if (updateBehavior == UpdateForcedReload) {
             resourceRequest.setCachePolicy(WebCachePolicy::BypassingCache);
             resourceRequest.setLoFiState(WebURLRequest::LoFiOff);
-            // ImageLoader defers the load of images when in an ImageDocument.
-            // Don't defer this load on a forced reload.
-            m_loadingImageDocument = false;
         }
 
         if (referrerPolicy != ReferrerPolicyDefault)
@@ -295,18 +292,7 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
         FetchRequest request(resourceRequest, element()->localName(), resourceLoaderOptions);
         configureRequest(request, bypassBehavior, *m_element, document.clientHintsPreferences());
 
-        // Prevent the immediate creation of a ResourceLoader (and therefore a network
-        // request) for ImageDocument loads. In this case, the image contents have already
-        // been requested as a main resource and ImageDocumentParser will take care of
-        // funneling the main resource bytes into the ImageResource.
-        if (m_loadingImageDocument) {
-            request.setDefer(FetchRequest::DeferredByClient);
-            request.setContentSecurityCheck(DoNotCheckContentSecurityPolicy);
-        }
-
         newImage = ImageResource::fetch(request, document.fetcher());
-        if (m_loadingImageDocument && newImage)
-            newImage->setStatus(Resource::Pending);
 
         if (!newImage && !pageIsBeingDismissed(&document)) {
             crossSiteOrCSPViolationOccurred(imageSourceURL);
@@ -374,16 +360,27 @@ void ImageLoader::updateFromElement(UpdateFromElementBehavior updateBehavior, Re
     if (!m_failedLoadURL.isEmpty() && imageSourceURL == m_failedLoadURL)
         return;
 
+    // Prevent the creation of a ResourceLoader (and therefore a network
+    // request) for ImageDocument loads. In this case, the image contents have already
+    // been requested as a main resource and ImageDocumentParser will take care of
+    // funneling the main resource bytes into m_image, so just create an ImageResource
+    // to be populated later.
+    if (m_loadingImageDocument && updateBehavior != UpdateForcedReload) {
+        setImage(ImageResource::create(imageSourceToKURL(m_element->imageSourceURL())));
+        m_image->setStatus(Resource::Pending);
+        return;
+    }
+
     // If we have a pending task, we have to clear it -- either we're
     // now loading immediately, or we need to reset the task's state.
     if (m_pendingTask) {
         m_pendingTask->clearLoader();
-        m_pendingTask.clear();
+        m_pendingTask.reset();
     }
 
     KURL url = imageSourceToKURL(imageSourceURL);
     if (shouldLoadImmediately(url)) {
-        doUpdateFromElement(DoNotBypassMainWorldCSP, updateBehavior, referrerPolicy);
+        doUpdateFromElement(DoNotBypassMainWorldCSP, updateBehavior, url, referrerPolicy);
         return;
     }
     // Allow the idiom "img.src=''; img.src='.." to clear down the image before
@@ -432,16 +429,16 @@ bool ImageLoader::shouldLoadImmediately(const KURL& url) const
         if (resource && !resource->errorOccurred())
             return true;
     }
-    return (m_loadingImageDocument || isHTMLObjectElement(m_element) || isHTMLEmbedElement(m_element) || url.protocolIsData());
+    return (isHTMLObjectElement(m_element) || isHTMLEmbedElement(m_element) || url.protocolIsData());
 }
 
 void ImageLoader::imageNotifyFinished(ImageResource* resource)
 {
-    WTF_LOG(Timers, "ImageLoader::imageNotifyFinished %p; m_hasPendingLoadEvent=%d",
-        this, m_hasPendingLoadEvent);
+    RESOURCE_LOADING_DVLOG(1) << "ImageLoader::imageNotifyFinished " << this
+        << "; m_hasPendingLoadEvent=" << m_hasPendingLoadEvent;
 
-    ASSERT(m_failedLoadURL.isEmpty());
-    ASSERT(resource == m_image.get());
+    DCHECK(m_failedLoadURL.isEmpty());
+    DCHECK_EQ(resource, m_image.get());
 
     m_imageComplete = true;
 
@@ -537,20 +534,20 @@ void ImageLoader::updatedHasPendingEvent()
         else
             m_keepAlive = m_element;
     } else {
-        ASSERT(!m_derefElementTimer.isActive());
+        DCHECK(!m_derefElementTimer.isActive());
         m_derefElementTimer.startOneShot(0, BLINK_FROM_HERE);
     }
 }
 
-void ImageLoader::timerFired(Timer<ImageLoader>*)
+void ImageLoader::timerFired(TimerBase*)
 {
     m_keepAlive.clear();
 }
 
 void ImageLoader::dispatchPendingEvent(ImageEventSender* eventSender)
 {
-    WTF_LOG(Timers, "ImageLoader::dispatchPendingEvent %p", this);
-    ASSERT(eventSender == &loadEventSender() || eventSender == &errorEventSender());
+    RESOURCE_LOADING_DVLOG(1) << "ImageLoader::dispatchPendingEvent " << this;
+    DCHECK(eventSender == &loadEventSender() || eventSender == &errorEventSender());
     const AtomicString& eventType = eventSender->eventType();
     if (eventType == EventTypeNames::load)
         dispatchPendingLoadEvent();

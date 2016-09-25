@@ -7,8 +7,12 @@ package org.chromium.chrome.browser.precache;
 import android.content.Context;
 import android.test.suitebuilder.annotation.SmallTest;
 
+import com.google.android.gms.gcm.Task;
+
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.content.browser.test.NativeLibraryTestBase;
 
@@ -23,6 +27,7 @@ import java.util.concurrent.Callable;
 public class PrecacheLauncherTest extends NativeLibraryTestBase {
     private StubProfileSyncService mSync;
     private PrecacheLauncherUnderTest mLauncher;
+    private MockPrecacheTaskScheduler mPrecacheTaskScheduler;
 
     private class PrecacheLauncherUnderTest extends PrecacheLauncher {
         private boolean mShouldRun = false;
@@ -63,12 +68,27 @@ public class PrecacheLauncherTest extends NativeLibraryTestBase {
         }
     }
 
+    static class MockPrecacheTaskScheduler extends PrecacheTaskScheduler {
+        @Override
+        boolean scheduleTask(Context context, Task task) {
+            return true;
+        }
+
+        @Override
+        boolean cancelTask(Context context, String tag) {
+            return true;
+        }
+    }
+
     @Override
     protected void setUp() throws Exception {
         super.setUp();
         // This is a PrecacheLauncher with a stubbed out nativeShouldRun so we can change that on
         // the fly without needing to set up a sync backend.
         mLauncher = new PrecacheLauncherUnderTest();
+
+        mPrecacheTaskScheduler = new MockPrecacheTaskScheduler();
+        PrecacheController.setTaskScheduler(mPrecacheTaskScheduler);
 
         // The target context persists throughout the entire test run, and so leaks state between
         // tests. We reset the is_precaching_enabled pref to false to make the test run consistent,
@@ -100,6 +120,7 @@ public class PrecacheLauncherTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Precache"})
+    @RetryOnFailure
     public void testUpdateEnabled_SyncNotReady_ThenDisabled() {
         mLauncher.updateEnabled(getTargetContext());
         waitUntilUiThreadIdle();
@@ -117,6 +138,7 @@ public class PrecacheLauncherTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Precache"})
+    @RetryOnFailure
     public void testUpdateEnabled_SyncNotReady_ThenEnabled() {
         mLauncher.updateEnabled(getTargetContext());
         waitUntilUiThreadIdle();
@@ -135,6 +157,7 @@ public class PrecacheLauncherTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Precache"})
+    @RetryOnFailure
     public void testUpdateEnabled_Disabled_ThenEnabled() {
         setSyncInitialized(true);
         mLauncher.updateEnabled(getTargetContext());
@@ -150,6 +173,7 @@ public class PrecacheLauncherTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Precache"})
+    @RetryOnFailure
     public void testUpdateEnabled_Enabled_ThenDisabled() {
         mLauncher.setShouldRun(true);
         setSyncInitialized(true);
@@ -166,6 +190,8 @@ public class PrecacheLauncherTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Precache"})
+    @RetryOnFailure
+    @DisabledTest(message = "crbug.com/648749")
     public void testUpdateEnabledNullProfileSyncService() {
         ProfileSyncService.overrideForTests(null);
 

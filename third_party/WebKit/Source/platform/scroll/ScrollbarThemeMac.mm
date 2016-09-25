@@ -43,7 +43,6 @@
 #include "wtf/HashSet.h"
 #include "wtf/RetainPtr.h"
 #include "wtf/StdLibExtras.h"
-#include "wtf/TemporaryChange.h"
 
 // FIXME: There are repainting problems due to Aqua scroll bar buttons' visual overflow.
 
@@ -58,18 +57,17 @@ using namespace blink;
     RetainPtr<ScrollbarPainter> _scrollbarPainter;
     BOOL _visible;
 }
-- (id)initWithScrollbar:(blink::ScrollbarThemeClient*)scrollbar painter:(ScrollbarPainter)painter;
+- (id)initWithScrollbar:(blink::ScrollbarThemeClient*)scrollbar painter:(const RetainPtr<ScrollbarPainter>&)painter;
 @end
 
 @implementation BlinkScrollbarObserver
 
-- (id)initWithScrollbar:(blink::ScrollbarThemeClient*)scrollbar painter:(ScrollbarPainter)painter
+- (id)initWithScrollbar:(blink::ScrollbarThemeClient*)scrollbar painter:(const RetainPtr<ScrollbarPainter>&)painter
 {
     if (!(self = [super init]))
         return nil;
     _scrollbar = scrollbar;
     _scrollbarPainter = painter;
-
     [_scrollbarPainter.get() addObserver:self forKeyPath:@"knobAlpha" options:0 context:nil];
     return self;
 }
@@ -81,7 +79,6 @@ using namespace blink;
 
 - (void)dealloc
 {
-
     [_scrollbarPainter.get() removeObserver:self forKeyPath:@"knobAlpha"];
     [super dealloc];
 }
@@ -137,7 +134,7 @@ ScrollbarTheme& ScrollbarTheme::nativeTheme()
     return overlayTheme;
 }
 
-void ScrollbarThemeMac::paintGivenTickmarks(SkCanvas* canvas, const ScrollbarThemeClient& scrollbar, const IntRect& rect, const Vector<IntRect>& tickmarks)
+void ScrollbarThemeMac::paintGivenTickmarks(SkCanvas* canvas, const Scrollbar& scrollbar, const IntRect& rect, const Vector<IntRect>& tickmarks)
 {
     if (scrollbar.orientation() != VerticalScrollbar)
         return;
@@ -176,7 +173,7 @@ void ScrollbarThemeMac::paintGivenTickmarks(SkCanvas* canvas, const ScrollbarThe
     }
 }
 
-void ScrollbarThemeMac::paintTickmarks(GraphicsContext& context, const ScrollbarThemeClient& scrollbar, const IntRect& rect)
+void ScrollbarThemeMac::paintTickmarks(GraphicsContext& context, const Scrollbar& scrollbar, const IntRect& rect)
 {
     // Note: This is only used for css-styled scrollbars on mac.
     if (scrollbar.orientation() != VerticalScrollbar)
@@ -190,10 +187,10 @@ void ScrollbarThemeMac::paintTickmarks(GraphicsContext& context, const Scrollbar
     if (!tickmarks.size())
         return;
 
-    if (DrawingRecorder::useCachedDrawingIfPossible(context, scrollbar, DisplayItem::ScrollbarTickmarks))
+    if (DrawingRecorder::useCachedDrawingIfPossible(context, scrollbar, DisplayItem::kScrollbarTickmarks))
         return;
 
-    DrawingRecorder recorder(context, scrollbar, DisplayItem::ScrollbarTickmarks, rect);
+    DrawingRecorder recorder(context, scrollbar, DisplayItem::kScrollbarTickmarks, rect);
 
     // Inset a bit.
     IntRect tickmarkTrackRect = rect;
@@ -266,8 +263,8 @@ void ScrollbarThemeMac::registerScrollbar(ScrollbarThemeClient& scrollbar)
     scrollbarSet().add(&scrollbar);
 
     bool isHorizontal = scrollbar.orientation() == HorizontalScrollbar;
-    ScrollbarPainter scrollbarPainter = [NSClassFromString(@"NSScrollerImp") scrollerImpWithStyle:recommendedScrollerStyle() controlSize:(NSControlSize)scrollbar.controlSize() horizontal:isHorizontal replacingScrollerImp:nil];
-    RetainPtr<BlinkScrollbarObserver> observer = [[BlinkScrollbarObserver alloc] initWithScrollbar:&scrollbar painter:scrollbarPainter];
+    RetainPtr<ScrollbarPainter> scrollbarPainter(AdoptNS, [[NSClassFromString(@"NSScrollerImp") scrollerImpWithStyle:recommendedScrollerStyle() controlSize:(NSControlSize)scrollbar.controlSize() horizontal:isHorizontal replacingScrollerImp:nil] retain]);
+    RetainPtr<BlinkScrollbarObserver> observer(AdoptNS, [[BlinkScrollbarObserver alloc] initWithScrollbar:&scrollbar painter:scrollbarPainter]);
 
     scrollbarPainterMap().add(&scrollbar, observer);
     updateEnabledState(scrollbar);
@@ -282,7 +279,8 @@ void ScrollbarThemeMac::unregisterScrollbar(ScrollbarThemeClient& scrollbar)
 
 void ScrollbarThemeMac::setNewPainterForScrollbar(ScrollbarThemeClient& scrollbar, ScrollbarPainter newPainter)
 {
-    RetainPtr<BlinkScrollbarObserver> observer = [[BlinkScrollbarObserver alloc] initWithScrollbar:&scrollbar painter:newPainter];
+    RetainPtr<ScrollbarPainter> scrollbarPainter(AdoptNS, [newPainter retain]);
+    RetainPtr<BlinkScrollbarObserver> observer(AdoptNS, [[BlinkScrollbarObserver alloc] initWithScrollbar:&scrollbar painter:scrollbarPainter]);
     scrollbarPainterMap().set(&scrollbar, observer);
     updateEnabledState(scrollbar);
     updateScrollbarOverlayStyle(scrollbar);
@@ -293,11 +291,11 @@ ScrollbarPainter ScrollbarThemeMac::painterForScrollbar(const ScrollbarThemeClie
     return [scrollbarPainterMap().get(const_cast<ScrollbarThemeClient*>(&scrollbar)).get() painter];
 }
 
-void ScrollbarThemeMac::paintTrackBackground(GraphicsContext& context, const ScrollbarThemeClient& scrollbar, const IntRect& rect) {
-    if (DrawingRecorder::useCachedDrawingIfPossible(context, scrollbar, DisplayItem::ScrollbarTrackBackground))
+void ScrollbarThemeMac::paintTrackBackground(GraphicsContext& context, const Scrollbar& scrollbar, const IntRect& rect) {
+    if (DrawingRecorder::useCachedDrawingIfPossible(context, scrollbar, DisplayItem::kScrollbarTrackBackground))
         return;
 
-    DrawingRecorder recorder(context, scrollbar, DisplayItem::ScrollbarTrackBackground, rect);
+    DrawingRecorder recorder(context, scrollbar, DisplayItem::kScrollbarTrackBackground, rect);
 
     GraphicsContextStateSaver stateSaver(context);
     context.translate(rect.x(), rect.y());
@@ -311,14 +309,14 @@ void ScrollbarThemeMac::paintTrackBackground(GraphicsContext& context, const Scr
     [scrollbarPainter drawKnobSlotInRect:trackRect highlight:NO];
 }
 
-void ScrollbarThemeMac::paintThumb(GraphicsContext& context, const ScrollbarThemeClient& scrollbar, const IntRect& rect) {
-    if (DrawingRecorder::useCachedDrawingIfPossible(context, scrollbar, DisplayItem::ScrollbarThumb))
+void ScrollbarThemeMac::paintThumb(GraphicsContext& context, const Scrollbar& scrollbar, const IntRect& rect) {
+    if (DrawingRecorder::useCachedDrawingIfPossible(context, scrollbar, DisplayItem::kScrollbarThumb))
         return;
 
     // Expand dirty rect to allow for scroll thumb anti-aliasing in minimum thumb size case.
     IntRect dirtyRect = IntRect(rect);
     dirtyRect.inflate(1);
-    DrawingRecorder recorder(context, scrollbar, DisplayItem::ScrollbarThumb, dirtyRect);
+    DrawingRecorder recorder(context, scrollbar, DisplayItem::kScrollbarThumb, dirtyRect);
 
     GraphicsContextStateSaver stateSaver(context);
     context.translate(rect.x(), rect.y());

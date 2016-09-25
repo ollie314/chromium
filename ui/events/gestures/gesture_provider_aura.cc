@@ -9,6 +9,7 @@
 #include "base/auto_reset.h"
 #include "base/logging.h"
 #include "ui/events/event.h"
+#include "ui/events/event_utils.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/gesture_detection/gesture_event_data.h"
 #include "ui/events/gesture_detection/gesture_provider_config_helper.h"
@@ -41,19 +42,20 @@ bool GestureProviderAura::OnTouchEvent(TouchEvent* event) {
   return true;
 }
 
-void GestureProviderAura::OnTouchEventAck(uint32_t unique_event_id,
-                                          bool event_consumed) {
+void GestureProviderAura::OnTouchEventAck(uint32_t unique_touch_event_id,
+    bool event_consumed) {
   DCHECK(pending_gestures_.empty());
   DCHECK(!handling_event_);
   base::AutoReset<bool> handling_event(&handling_event_, true);
-  filtered_gesture_provider_.OnTouchEventAck(unique_event_id, event_consumed);
+  filtered_gesture_provider_.OnTouchEventAck(unique_touch_event_id,
+      event_consumed);
 }
 
-void GestureProviderAura::OnGestureEvent(
-    const GestureEventData& gesture) {
+void GestureProviderAura::OnGestureEvent(const GestureEventData& gesture) {
   std::unique_ptr<ui::GestureEvent> event(
       new ui::GestureEvent(gesture.x, gesture.y, gesture.flags,
-                           gesture.time - base::TimeTicks(), gesture.details));
+                           gesture.time, gesture.details,
+                           gesture.unique_touch_event_id));
 
   if (!handling_event_) {
     // Dispatching event caused by timer.
@@ -72,6 +74,18 @@ ScopedVector<GestureEvent>* GestureProviderAura::GetAndResetPendingGestures() {
       new ScopedVector<GestureEvent>();
   old_pending_gestures->swap(pending_gestures_);
   return old_pending_gestures;
+}
+
+void GestureProviderAura::OnTouchEnter(int pointer_id, float x, float y) {
+  std::unique_ptr<TouchEvent> touch_event(new TouchEvent(
+      ET_TOUCH_PRESSED, gfx::Point(), EF_IS_SYNTHESIZED, pointer_id,
+      ui::EventTimeForNow(), 0.0f, 0.0f, 0.0f, 0.0f));
+  gfx::PointF point(x, y);
+  touch_event->set_location_f(point);
+  touch_event->set_root_location_f(point);
+
+  OnTouchEvent(touch_event.get());
+  OnTouchEventAck(touch_event->unique_event_id(), true);
 }
 
 }  // namespace content

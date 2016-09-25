@@ -25,8 +25,9 @@
 
 #include "core/layout/compositing/PaintLayerCompositor.h"
 
-#include "core/animation/AnimationTimeline.h"
 #include "core/animation/DocumentAnimations.h"
+#include "core/animation/DocumentTimeline.h"
+#include "core/animation/ElementAnimations.h"
 #include "core/dom/DOMNodeIds.h"
 #include "core/dom/Fullscreen.h"
 #include "core/editing/FrameSelection.h"
@@ -34,6 +35,7 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/frame/VisualViewport.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/html/HTMLVideoElement.h"
 #include "core/inspector/InspectorInstrumentation.h"
@@ -50,7 +52,9 @@
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
+#include "core/page/scrolling/TopDocumentRootScrollerController.h"
 #include "core/paint/FramePainter.h"
+#include "core/paint/ObjectPaintInvalidator.h"
 #include "core/paint/TransformRecorder.h"
 #include "platform/Histogram.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -64,6 +68,7 @@
 #include "platform/graphics/paint/PaintController.h"
 #include "platform/graphics/paint/SkPictureBuilder.h"
 #include "platform/graphics/paint/TransformDisplayItem.h"
+#include "platform/json/JSONValues.h"
 
 namespace blink {
 
@@ -115,7 +120,7 @@ void PaintLayerCompositor::setCompositingModeEnabled(bool enable)
 
     // Schedule an update in the parent frame so the <iframe>'s layer in the owner
     // document matches the compositing state here.
-    if (HTMLFrameOwnerElement* ownerElement = m_layoutView.document().ownerElement())
+    if (HTMLFrameOwnerElement* ownerElement = m_layoutView.document().localOwner())
         ownerElement->setNeedsCompositingUpdate();
 }
 
@@ -154,7 +159,7 @@ void PaintLayerCompositor::updateAcceleratedCompositingSettings()
 
 bool PaintLayerCompositor::preferCompositingToLCDTextEnabled() const
 {
-    return m_compositingReasonFinder.hasOverflowScrollTrigger();
+    return m_layoutView.document().settings()->preferCompositingToLCDTextEnabled();
 }
 
 static LayoutVideo* findFullscreenVideoLayoutObject(Document& document)
@@ -169,6 +174,8 @@ static LayoutVideo* findFullscreenVideoLayoutObject(Document& document)
         fullscreenElement = Fullscreen::fullscreenElementFrom(*contentDocument);
     }
     // Get the current fullscreen element from the document.
+    // TODO(foolip): When |currentFullScreenElementFrom| is removed, this will
+    // become a no-op and can be removed. https://crbug.com/402421
     fullscreenElement = Fullscreen::currentFullScreenElementFrom(*contentDocument);
     if (!isHTMLVideoElement(fullscreenElement))
         return nullptr;
@@ -238,7 +245,7 @@ void PaintLayerCompositor::updateIfNeededRecursiveInternal()
     updateIfNeeded();
     lifecycle().advanceTo(DocumentLifecycle::CompositingClean);
 
-    DocumentAnimations::updateCompositorAnimations(m_layoutView.document());
+    DocumentAnimations::updateAnimations(m_layoutView.document());
 
     m_layoutView.frameView()->getScrollableArea()->updateCompositorScrollAnimations();
     if (const FrameView::ScrollableAreaSet* animatingScrollableAreas = m_layoutView.frameView()->animatingScrollableAreas()) {
@@ -264,7 +271,8 @@ void PaintLayerCompositor::setNeedsCompositingUpdate(CompositingUpdateType updat
 {
     ASSERT(updateType != CompositingUpdateNone);
     m_pendingUpdateType = std::max(m_pendingUpdateType, updateType);
-    page()->animator().scheduleVisualUpdate(m_layoutView.frame());
+    if (Page* page = this->page())
+        page->animator().scheduleVisualUpdate(m_layoutView.frame());
     lifecycle().ensureStateAtMost(DocumentLifecycle::LayoutClean);
 }
 
@@ -344,7 +352,6 @@ static void forceRecomputePaintInvalidationRectsIncludingNonCompositingDescendan
     // changing the previous position from our paint invalidation container, which is fine as
     // we want a full paint invalidation anyway.
     layoutObject->clearPreviousPaintInvalidationRects();
-    layoutObject->setShouldDoFullPaintInvalidation();
 
     for (LayoutObject* child = layoutObject->slowFirstChild(); child; child = child->nextSibling()) {
         if (!child->isPaintInvalidationContainer())
@@ -401,17 +408,19 @@ void PaintLayerCompositor::updateIfNeeded()
 
     if (updateType != CompositingUpdateNone) {
         if (RuntimeEnabledFeatures::compositorWorkerEnabled() && m_scrollLayer) {
-            if (Element* scrollingElement = m_layoutView.document().scrollingElement()) {
-                uint64_t elementId = 0;
-                uint32_t mutableProperties = CompositorMutableProperty::kNone;
-                if (scrollingElement->hasCompositorProxy()) {
-                    elementId = DOMNodeIds::idForNode(scrollingElement);
-                    mutableProperties = (CompositorMutableProperty::kScrollLeft | CompositorMutableProperty::kScrollTop) & scrollingElement->compositorMutableProperties();
+            // If rootLayerScrolls is enabled, these properties are applied in
+            // CompositedLayerMapping::updateElementIdAndCompositorMutableProperties.
+            if (!RuntimeEnabledFeatures::rootLayerScrollingEnabled()) {
+                if (Element* scrollingElement = m_layoutView.document().scrollingElement()) {
+                    uint32_t mutableProperties = CompositorMutableProperty::kNone;
+                    if (scrollingElement->hasCompositorProxy())
+                        mutableProperties = (CompositorMutableProperty::kScrollLeft | CompositorMutableProperty::kScrollTop) & scrollingElement->compositorMutableProperties();
+                    m_scrollLayer->setCompositorMutableProperties(mutableProperties);
                 }
-                m_scrollLayer->setElementId(elementId);
-                m_scrollLayer->setCompositorMutableProperties(mutableProperties);
             }
         }
+
+        updateClippingOnCompositorLayers();
 
         GraphicsLayerUpdater updater;
         updater.update(*updateRoot, layersNeedingPaintInvalidation);
@@ -434,10 +443,10 @@ void PaintLayerCompositor::updateIfNeeded()
             GraphicsLayerTreeBuilder().rebuild(*updateRoot, ancestorInfo);
         }
 
-        if (childList.isEmpty())
-            destroyRootLayer();
-        else if (m_rootContentLayer)
+        if (!childList.isEmpty()) {
+            CHECK(m_rootContentLayer && m_compositing);
             m_rootContentLayer->setChildren(childList);
+        }
 
         applyOverlayFullscreenVideoAdjustmentIfNeeded();
     }
@@ -453,6 +462,42 @@ void PaintLayerCompositor::updateIfNeeded()
     // Inform the inspector that the layer tree has changed.
     if (m_layoutView.frame()->isMainFrame())
         InspectorInstrumentation::layerTreeDidChange(m_layoutView.frame());
+}
+
+void PaintLayerCompositor::updateClippingOnCompositorLayers()
+{
+    bool shouldClip = !rootLayer()->hasRootScrollerAsDescendant();
+    if (m_rootContentLayer) {
+        // FIXME: with rootLayerScrolls, we probably don't even need
+        // m_rootContentLayer?
+        m_rootContentLayer->setMasksToBounds(
+            !RuntimeEnabledFeatures::rootLayerScrollingEnabled() && shouldClip);
+    }
+
+    const TopDocumentRootScrollerController& globalRootScrollerController =
+        m_layoutView.document().frameHost()->globalRootScrollerController();
+
+    Element* documentElement = m_layoutView.document().documentElement();
+    bool frameIsRootScroller = documentElement && documentElement->isSameNode(
+        globalRootScrollerController.globalRootScroller());
+
+    // We normally clip iframes' (but not the root frame) overflow controls
+    // host and container layers but if the root scroller is the iframe itself
+    // we want it to behave like the root frame.
+    shouldClip &= !frameIsRootScroller && !m_layoutView.frame()->isLocalRoot();
+
+    if (m_containerLayer)
+        m_containerLayer->setMasksToBounds(shouldClip);
+    if (m_overflowControlsHostLayer)
+        m_overflowControlsHostLayer->setMasksToBounds(shouldClip);
+}
+
+static void restartAnimationOnCompositor(const LayoutObject& layoutObject)
+{
+    Node* node = layoutObject.node();
+    ElementAnimations* elementAnimations = (node && node->isElementNode()) ? toElement(node)->elementAnimations() : nullptr;
+    if (elementAnimations)
+        elementAnimations->restartAnimationOnCompositor();
 }
 
 bool PaintLayerCompositor::allocateOrClearCompositedLayerMapping(PaintLayer* layer, const CompositingStateTransitionType compositedLayerUpdate)
@@ -481,7 +526,9 @@ bool PaintLayerCompositor::allocateOrClearCompositedLayerMapping(PaintLayer* lay
         layer->ensureCompositedLayerMapping();
         compositedLayerMappingChanged = true;
 
-        // At this time, the ScrollingCooridnator only supports the top-level frame.
+        restartAnimationOnCompositor(*layer->layoutObject());
+
+        // At this time, the ScrollingCoordinator only supports the top-level frame.
         if (layer->isRootLayer() && m_layoutView.frame()->isLocalRoot()) {
             if (ScrollingCoordinator* scrollingCoordinator = this->scrollingCoordinator())
                 scrollingCoordinator->frameViewRootLayerDidChange(m_layoutView.frameView());
@@ -545,7 +592,7 @@ void PaintLayerCompositor::paintInvalidationOnCompositingChange(PaintLayer* laye
     // FIXME: We should not allow paint invalidation out of paint invalidation state. crbug.com/457415
     DisablePaintInvalidationStateAsserts paintInvalidationAssertisabler;
 
-    layer->layoutObject()->invalidatePaintIncludingNonCompositingDescendants();
+    ObjectPaintInvalidator(*layer->layoutObject()).invalidatePaintIncludingNonCompositingDescendants();
 }
 
 void PaintLayerCompositor::frameViewDidChangeLocation(const IntPoint& contentsOffset)
@@ -633,12 +680,12 @@ bool PaintLayerCompositor::scrollingLayerDidChange(PaintLayer* layer)
     return false;
 }
 
-String PaintLayerCompositor::layerTreeAsText(LayerTreeFlags flags)
+std::unique_ptr<JSONObject> PaintLayerCompositor::layerTreeAsJSON(LayerTreeFlags flags) const
 {
     ASSERT(lifecycle().state() >= DocumentLifecycle::PaintInvalidationClean || m_layoutView.frameView()->shouldThrottleRendering());
 
     if (!m_rootContentLayer)
-        return String();
+        return nullptr;
 
     // We skip dumping the scroll and clip layers to keep layerTreeAsText output
     // similar between platforms (unless we explicitly request dumping from the
@@ -647,7 +694,7 @@ String PaintLayerCompositor::layerTreeAsText(LayerTreeFlags flags)
     if (flags & LayerTreeIncludesRootLayer)
         rootLayer = rootGraphicsLayer();
 
-    return rootLayer->layerTreeAsText(flags);
+    return rootLayer->layerTreeAsJSON(flags);
 }
 
 PaintLayerCompositor* PaintLayerCompositor::frameContentsCompositor(LayoutPart* layoutObject)
@@ -721,6 +768,11 @@ GraphicsLayer* PaintLayerCompositor::scrollLayer() const
 GraphicsLayer* PaintLayerCompositor::containerLayer() const
 {
     return m_containerLayer.get();
+}
+
+GraphicsLayer* PaintLayerCompositor::rootContentLayer() const
+{
+    return m_rootContentLayer.get();
 }
 
 void PaintLayerCompositor::setIsInWindow(bool isInWindow)
@@ -824,7 +876,7 @@ void PaintLayerCompositor::paintContents(const GraphicsLayer* graphicsLayer, Gra
     if (!scrollbar && graphicsLayer != layerForScrollCorner())
         return;
 
-    if (DrawingRecorder::useCachedDrawingIfPossible(context, *graphicsLayer, DisplayItem::ScrollbarCompositedScrollbar))
+    if (DrawingRecorder::useCachedDrawingIfPossible(context, *graphicsLayer, DisplayItem::kScrollbarCompositedScrollbar))
         return;
 
     FloatRect layerBounds(FloatPoint(), graphicsLayer->size());
@@ -838,7 +890,7 @@ void PaintLayerCompositor::paintContents(const GraphicsLayer* graphicsLayer, Gra
     // Replay the painted scrollbar content with the GraphicsLayer backing as the DisplayItemClient
     // in order for the resulting DrawingDisplayItem to produce the correct visualRect (i.e., the
     // bounds of the involved GraphicsLayer).
-    DrawingRecorder drawingRecorder(context, *graphicsLayer, DisplayItem::ScrollbarCompositedScrollbar, layerBounds);
+    DrawingRecorder drawingRecorder(context, *graphicsLayer, DisplayItem::kScrollbarCompositedScrollbar, layerBounds);
     pictureBuilder.endRecording()->playback(context.canvas());
 }
 
@@ -881,30 +933,24 @@ GraphicsLayer* PaintLayerCompositor::fixedRootBackgroundLayer() const
     return nullptr;
 }
 
-static void resetTrackedPaintInvalidationRectsRecursive(GraphicsLayer* graphicsLayer)
+static void setTracksPaintInvalidationsRecursive(GraphicsLayer* graphicsLayer, bool tracksPaintInvalidations)
 {
     if (!graphicsLayer)
         return;
 
-    graphicsLayer->resetTrackedPaintInvalidations();
+    graphicsLayer->setTracksPaintInvalidations(tracksPaintInvalidations);
 
     for (size_t i = 0; i < graphicsLayer->children().size(); ++i)
-        resetTrackedPaintInvalidationRectsRecursive(graphicsLayer->children()[i]);
+        setTracksPaintInvalidationsRecursive(graphicsLayer->children()[i], tracksPaintInvalidations);
 
     if (GraphicsLayer* replicaLayer = graphicsLayer->replicaLayer())
-        resetTrackedPaintInvalidationRectsRecursive(replicaLayer);
+        setTracksPaintInvalidationsRecursive(replicaLayer, tracksPaintInvalidations);
 
     if (GraphicsLayer* maskLayer = graphicsLayer->maskLayer())
-        resetTrackedPaintInvalidationRectsRecursive(maskLayer);
+        setTracksPaintInvalidationsRecursive(maskLayer, tracksPaintInvalidations);
 
     if (GraphicsLayer* clippingMaskLayer = graphicsLayer->contentsClippingMaskLayer())
-        resetTrackedPaintInvalidationRectsRecursive(clippingMaskLayer);
-}
-
-void PaintLayerCompositor::resetTrackedPaintInvalidationRects()
-{
-    if (GraphicsLayer* rootLayer = rootGraphicsLayer())
-        resetTrackedPaintInvalidationRectsRecursive(rootLayer);
+        setTracksPaintInvalidationsRecursive(clippingMaskLayer, tracksPaintInvalidations);
 }
 
 void PaintLayerCompositor::setTracksPaintInvalidations(bool tracksPaintInvalidations)
@@ -916,6 +962,8 @@ void PaintLayerCompositor::setTracksPaintInvalidations(bool tracksPaintInvalidat
 #endif
 
     m_isTrackingPaintInvalidations = tracksPaintInvalidations;
+    if (GraphicsLayer* rootLayer = rootGraphicsLayer())
+        setTracksPaintInvalidationsRecursive(rootLayer, tracksPaintInvalidations);
 }
 
 bool PaintLayerCompositor::isTrackingPaintInvalidations() const
@@ -1006,39 +1054,29 @@ void PaintLayerCompositor::ensureRootLayer()
     if (expectedAttachment == m_rootLayerAttachment)
         return;
 
-    Settings* settings = m_layoutView.document().settings();
     if (!m_rootContentLayer) {
         m_rootContentLayer = GraphicsLayer::create(this);
         IntRect overflowRect = m_layoutView.pixelSnappedLayoutOverflowRect();
         m_rootContentLayer->setSize(FloatSize(overflowRect.maxX(), overflowRect.maxY()));
         m_rootContentLayer->setPosition(FloatPoint());
-        m_rootContentLayer->setOwnerNodeId(DOMNodeIds::idForNode(m_layoutView.generatingNode()));
-
-        // FIXME: with rootLayerScrolls, we probably don't even need m_rootContentLayer?
-        if (!(settings && settings->rootLayerScrolls())) {
-            // Need to clip to prevent transformed content showing outside this frame
-            m_rootContentLayer->setMasksToBounds(true);
-        }
+        m_rootContentLayer->setOwnerNodeId(DOMNodeIds::idForNode(m_layoutView.node()));
     }
 
     if (!m_overflowControlsHostLayer) {
         ASSERT(!m_scrollLayer);
         ASSERT(!m_containerLayer);
 
-        // Create a layer to host the clipping layer and the overflow controls layers.
+        // Create a layer to host the clipping layer and the overflow controls
+        // layers.  Whether these layers mask the content below is determined
+        // in updateClippingOnCompositorLayers.
         m_overflowControlsHostLayer = GraphicsLayer::create(this);
-
-        // Clip iframe's overflow controls layer.
-        bool containerMasksToBounds = !m_layoutView.frame()->isLocalRoot();
-        m_overflowControlsHostLayer->setMasksToBounds(containerMasksToBounds);
-
-        // Create a clipping layer if this is an iframe or settings require to clip.
         m_containerLayer = GraphicsLayer::create(this);
-        m_containerLayer->setMasksToBounds(containerMasksToBounds);
 
         m_scrollLayer = GraphicsLayer::create(this);
         if (ScrollingCoordinator* scrollingCoordinator = this->scrollingCoordinator())
             scrollingCoordinator->setLayerIsContainerForFixedPositionLayers(m_scrollLayer.get(), true);
+
+        m_scrollLayer->setElementId(createCompositorElementId(DOMNodeIds::idForNode(&m_layoutView.document()), CompositorSubElementId::Scroll));
 
         // Hook them up
         m_overflowControlsHostLayer->addChild(m_containerLayer.get());
@@ -1118,7 +1156,7 @@ void PaintLayerCompositor::attachRootLayer(RootLayerAttachment attachment)
         break;
     }
     case RootLayerAttachedViaEnclosingFrame: {
-        HTMLFrameOwnerElement* ownerElement = m_layoutView.document().ownerElement();
+        HTMLFrameOwnerElement* ownerElement = m_layoutView.document().localOwner();
         ASSERT(ownerElement);
         // The layer will get hooked up via CompositedLayerMapping::updateGraphicsLayerConfiguration()
         // for the frame's layoutObject in the parent document.
@@ -1144,7 +1182,7 @@ void PaintLayerCompositor::detachRootLayer()
         else
             m_rootContentLayer->removeFromParent();
 
-        if (HTMLFrameOwnerElement* ownerElement = m_layoutView.document().ownerElement())
+        if (HTMLFrameOwnerElement* ownerElement = m_layoutView.document().localOwner())
             ownerElement->setNeedsCompositingUpdate();
         break;
     }

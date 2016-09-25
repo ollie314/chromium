@@ -207,15 +207,15 @@ WebInspector.TextSourceMap.load = function(sourceMapURL, compiledURL)
         }
 
         if (content.slice(0, 3) === ")]}")
-            content = content.substring(content.indexOf('\n'));
+            content = content.substring(content.indexOf("\n"));
         try {
             var payload = /** @type {!SourceMapV3} */ (JSON.parse(content));
             var baseURL = sourceMapURL.startsWith("data:") ? compiledURL : sourceMapURL;
 
             callback(new WebInspector.TextSourceMap(compiledURL, baseURL, payload));
-        } catch(e) {
+        } catch (e) {
             console.error(e);
-            WebInspector.console.error("Failed to parse SourceMap: " + sourceMapURL);
+            WebInspector.console.warn("DevTools failed to parse SourceMap: " + sourceMapURL);
             callback(null);
         }
     }
@@ -259,7 +259,7 @@ WebInspector.TextSourceMap.prototype = {
     {
         var sourceContent = this._sourceContentByURL[sourceURL];
         if (sourceContent)
-            return new WebInspector.StaticContentProvider(contentType, sourceContent);
+            return WebInspector.StaticContentProvider.fromString(sourceURL, contentType, sourceContent);
         return new WebInspector.CompilerSourceMappingContentProvider(sourceURL, contentType);
     },
 
@@ -316,15 +316,15 @@ WebInspector.TextSourceMap.prototype = {
         var first = 0;
         var count = this._mappings.length;
         while (count > 1) {
-          var step = count >> 1;
-          var middle = first + step;
-          var mapping = this._mappings[middle];
-          if (lineNumber < mapping.lineNumber || (lineNumber === mapping.lineNumber && columnNumber < mapping.columnNumber))
-              count = step;
-          else {
-              first = middle;
-              count -= step;
-          }
+            var step = count >> 1;
+            var middle = first + step;
+            var mapping = this._mappings[middle];
+            if (lineNumber < mapping.lineNumber || (lineNumber === mapping.lineNumber && columnNumber < mapping.columnNumber)) {
+                count = step;
+            } else {
+                first = middle;
+                count -= step;
+            }
         }
         var entry = this._mappings[first];
         if (!first && entry && (lineNumber < entry.lineNumber || (lineNumber === entry.lineNumber && columnNumber < entry.columnNumber)))
@@ -457,9 +457,13 @@ WebInspector.TextSourceMap.prototype = {
             }
             sourceLineNumber += this._decodeVLQ(stringCharIterator);
             sourceColumnNumber += this._decodeVLQ(stringCharIterator);
-            if (!this._isSeparator(stringCharIterator.peek()))
-                nameIndex += this._decodeVLQ(stringCharIterator);
 
+            if (!stringCharIterator.hasNext() || this._isSeparator(stringCharIterator.peek())) {
+                this._mappings.push(new WebInspector.SourceMapEntry(lineNumber, columnNumber, sourceURL, sourceLineNumber, sourceColumnNumber));
+                continue;
+            }
+
+            nameIndex += this._decodeVLQ(stringCharIterator);
             this._mappings.push(new WebInspector.SourceMapEntry(lineNumber, columnNumber, sourceURL, sourceLineNumber, sourceColumnNumber, names[nameIndex]));
         }
 

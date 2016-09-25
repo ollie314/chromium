@@ -6,13 +6,15 @@
 #define InspectorEmulationAgent_h
 
 #include "core/inspector/InspectorBaseAgent.h"
+#include "core/inspector/protocol/Emulation.h"
 
 namespace blink {
 
+class CancellableTaskFactory;
 class WebLocalFrameImpl;
 class WebViewImpl;
 
-class InspectorEmulationAgent final : public InspectorBaseAgent<InspectorEmulationAgent, protocol::Frontend::Emulation>, public protocol::Backend::Emulation {
+class InspectorEmulationAgent final : public InspectorBaseAgent<protocol::Emulation::Metainfo> {
     WTF_MAKE_NONCOPYABLE(InspectorEmulationAgent);
 public:
     class Client {
@@ -26,12 +28,15 @@ public:
     ~InspectorEmulationAgent() override;
 
     // protocol::Dispatcher::EmulationCommandHandler implementation.
+    void forceViewport(ErrorString*, double in_x, double in_y, double in_scale) override;
+    void resetViewport(ErrorString*) override;
     void resetPageScaleFactor(ErrorString*) override;
     void setPageScaleFactor(ErrorString*, double in_pageScaleFactor) override;
     void setScriptExecutionDisabled(ErrorString*, bool in_value) override;
     void setTouchEmulationEnabled(ErrorString*, bool in_enabled, const protocol::Maybe<String>& in_configuration) override;
     void setEmulatedMedia(ErrorString*, const String& in_media) override;
     void setCPUThrottlingRate(ErrorString*, double in_rate) override;
+    void setVirtualTimePolicy(ErrorString*, const String& in_policy, const protocol::Maybe<int>& in_virtualTimeBudgetMs) override;
 
     // InspectorBaseAgent overrides.
     void disable(ErrorString*) override;
@@ -42,9 +47,11 @@ public:
 private:
     InspectorEmulationAgent(WebLocalFrameImpl*, Client*);
     WebViewImpl* webViewImpl();
+    void virtualTimeBudgetExpired();
 
     Member<WebLocalFrameImpl> m_webLocalFrameImpl;
     Client* m_client;
+    std::unique_ptr<CancellableTaskFactory> m_virtualTimeBudgetExpiredTask;
 };
 
 } // namespace blink

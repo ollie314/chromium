@@ -11,6 +11,7 @@
 #include "base/id_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/permissions/permission_util.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -38,12 +39,14 @@ class PermissionManager : public KeyedService,
       content::PermissionType permission,
       content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
+      bool user_gesture,
       const base::Callback<void(blink::mojom::PermissionStatus)>& callback)
       override;
   int RequestPermissions(
       const std::vector<content::PermissionType>& permissions,
       content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
+      bool user_gesture,
       const base::Callback<
           void(const std::vector<blink::mojom::PermissionStatus>&)>& callback)
       override;
@@ -78,10 +81,6 @@ class PermissionManager : public KeyedService,
   struct Subscription;
   using SubscriptionsMap = IDMap<Subscription, IDMapOwnPointer>;
 
-  struct PermissionTypeHash {
-    std::size_t operator()(const content::PermissionType& type) const;
-  };
-
   PermissionContextBase* GetPermissionContext(content::PermissionType type);
 
   // Called when a permission was decided for a given PendingRequest. The
@@ -94,10 +93,6 @@ class PermissionManager : public KeyedService,
       int request_id,
       int permission_id,
       blink::mojom::PermissionStatus status);
-
-  // Not all WebContents are able to display permission requests. If the PBM
-  // is required but missing for |web_contents|, don't pass along the request.
-  bool IsPermissionBubbleManagerMissing(content::WebContents* web_contents);
 
   // content_settings::Observer implementation.
   void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,

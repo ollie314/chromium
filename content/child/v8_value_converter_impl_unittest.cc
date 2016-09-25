@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/test/values_test_util.h"
 #include "base/values.h"
@@ -104,6 +105,26 @@ class V8ValueConverterImplTest : public testing::Test {
     return std::string(*utf8, utf8.length());
   }
 
+  int32_t GetInt(v8::Local<v8::Object> value, const std::string& key) {
+    v8::Local<v8::Int32> temp =
+        value->Get(v8::String::NewFromUtf8(isolate_, key.c_str()))
+            .As<v8::Int32>();
+    if (temp.IsEmpty()) {
+      ADD_FAILURE();
+      return -1;
+    }
+    return temp->Value();
+  }
+
+  int32_t GetInt(v8::Local<v8::Object> value, uint32_t index) {
+    v8::Local<v8::Int32> temp = value->Get(index).As<v8::Int32>();
+    if (temp.IsEmpty()) {
+      ADD_FAILURE();
+      return -1;
+    }
+    return temp->Value();
+  }
+
   bool IsNull(base::DictionaryValue* value, const std::string& key) {
     base::Value* child = NULL;
     if (!value->Get(key, &child)) {
@@ -160,8 +181,7 @@ class V8ValueConverterImplTest : public testing::Test {
     v8::Local<v8::Object> object(v8::Object::New(isolate_));
     object->Set(v8::String::NewFromUtf8(isolate_, "test"), val);
     std::unique_ptr<base::DictionaryValue> dictionary(
-        static_cast<base::DictionaryValue*>(
-            converter.FromV8Value(object, context)));
+        base::DictionaryValue::From(converter.FromV8Value(object, context)));
     ASSERT_TRUE(dictionary.get());
 
     if (expected_value) {
@@ -176,7 +196,7 @@ class V8ValueConverterImplTest : public testing::Test {
     v8::Local<v8::Array> array(v8::Array::New(isolate_));
     array->Set(0, val);
     std::unique_ptr<base::ListValue> list(
-        static_cast<base::ListValue*>(converter.FromV8Value(array, context)));
+        base::ListValue::From(converter.FromV8Value(array, context)));
     ASSERT_TRUE(list.get());
     if (expected_value) {
       base::Value* temp = NULL;
@@ -309,8 +329,7 @@ TEST_F(V8ValueConverterImplTest, ObjectExceptions) {
   // Converting from v8 value should replace the foo property with null.
   V8ValueConverterImpl converter;
   std::unique_ptr<base::DictionaryValue> converted(
-      static_cast<base::DictionaryValue*>(
-          converter.FromV8Value(object, context)));
+      base::DictionaryValue::From(converter.FromV8Value(object, context)));
   EXPECT_TRUE(converted.get());
   // http://code.google.com/p/v8/issues/detail?id=1342
   // EXPECT_EQ(2u, converted->size());
@@ -318,12 +337,13 @@ TEST_F(V8ValueConverterImplTest, ObjectExceptions) {
   EXPECT_EQ(1u, converted->size());
   EXPECT_EQ("bar", GetString(converted.get(), "bar"));
 
-  // Converting to v8 value should drop the foo property.
+  // Converting to v8 value should not trigger the setter.
   converted->SetString("foo", "foo");
   v8::Local<v8::Object> copy =
       converter.ToV8Value(converted.get(), context).As<v8::Object>();
   EXPECT_FALSE(copy.IsEmpty());
   EXPECT_EQ(2u, copy->GetPropertyNames()->Length());
+  EXPECT_EQ("foo", GetString(copy, "foo"));
   EXPECT_EQ("bar", GetString(copy, "bar"));
 }
 
@@ -353,19 +373,22 @@ TEST_F(V8ValueConverterImplTest, ArrayExceptions) {
   // Converting from v8 value should replace the first item with null.
   V8ValueConverterImpl converter;
   std::unique_ptr<base::ListValue> converted(
-      static_cast<base::ListValue*>(converter.FromV8Value(array, context)));
+      base::ListValue::From(converter.FromV8Value(array, context)));
   ASSERT_TRUE(converted.get());
   // http://code.google.com/p/v8/issues/detail?id=1342
   EXPECT_EQ(2u, converted->GetSize());
   EXPECT_TRUE(IsNull(converted.get(), 0));
 
-  // Converting to v8 value should drop the first item and leave a hole.
+  // Converting to v8 value should not be affected by the getter/setter
+  // because the setters/getters are defined on the array instance, not
+  // on the Array's prototype.
   converted.reset(static_cast<base::ListValue*>(
       base::test::ParseJson("[ \"foo\", \"bar\" ]").release()));
   v8::Local<v8::Array> copy =
       converter.ToV8Value(converted.get(), context).As<v8::Array>();
   ASSERT_FALSE(copy.IsEmpty());
   EXPECT_EQ(2u, copy->Length());
+  EXPECT_EQ("foo", GetString(copy, 0));
   EXPECT_EQ("bar", GetString(copy, 1));
 }
 
@@ -418,10 +441,149 @@ TEST_F(V8ValueConverterImplTest, Prototype) {
 
   V8ValueConverterImpl converter;
   std::unique_ptr<base::DictionaryValue> result(
-      static_cast<base::DictionaryValue*>(
-          converter.FromV8Value(object, context)));
+      base::DictionaryValue::From(converter.FromV8Value(object, context)));
   ASSERT_TRUE(result.get());
   EXPECT_EQ(0u, result->size());
+}
+
+TEST_F(V8ValueConverterImplTest, ObjectPrototypeSetter) {
+  std::unique_ptr<base::Value> original =
+      base::test::ParseJson("{ \"foo\": \"good value\" }");
+
+  v8::HandleScope handle_scope(isolate_);
+  v8::Local<v8::Context> context =
+      v8::Local<v8::Context>::New(isolate_, context_);
+  v8::Context::Scope context_scope(context);
+  v8::MicrotasksScope microtasks(isolate_,
+                                 v8::MicrotasksScope::kDoNotRunMicrotasks);
+
+  const char* source =
+      "var result = { getters: 0, setters: 0 };"
+      "Object.defineProperty(Object.prototype, 'foo', {"
+      "  get() { ++result.getters; return 'bogus'; },"
+      "  set() { ++result.setters; },"
+      "});"
+      "result;";
+
+  const char* source_sanity =
+      "({}).foo = 'Trigger setter';"
+      "({}).foo;";
+
+  v8::Local<v8::Script> script(
+      v8::Script::Compile(v8::String::NewFromUtf8(isolate_, source)));
+  v8::Local<v8::Object> result = script->Run().As<v8::Object>();
+  ASSERT_FALSE(result.IsEmpty());
+
+  // Sanity checks: the getters/setters are normally triggered.
+  v8::Script::Compile(v8::String::NewFromUtf8(isolate_, source_sanity))->Run();
+  EXPECT_EQ(1, GetInt(result, "getters"));
+  EXPECT_EQ(1, GetInt(result, "setters"));
+
+  V8ValueConverterImpl converter;
+  v8::Local<v8::Object> converted =
+      converter.ToV8Value(original.get(), context).As<v8::Object>();
+  EXPECT_FALSE(converted.IsEmpty());
+
+  // Getters/setters shouldn't be triggered.
+  EXPECT_EQ(1, GetInt(result, "getters"));
+  EXPECT_EQ(1, GetInt(result, "setters"));
+
+  EXPECT_EQ(1u, converted->GetPropertyNames()->Length());
+  EXPECT_EQ("good value", GetString(converted, "foo"));
+
+  // Getters/setters shouldn't be triggered while accessing existing values.
+  EXPECT_EQ(1, GetInt(result, "getters"));
+  EXPECT_EQ(1, GetInt(result, "setters"));
+
+  // Repeat the same exercise with a dictionary without the key.
+  base::DictionaryValue missing_key_dict;
+  missing_key_dict.SetString("otherkey", "hello");
+  v8::Local<v8::Object> converted2 =
+      converter.ToV8Value(&missing_key_dict, context).As<v8::Object>();
+  EXPECT_FALSE(converted2.IsEmpty());
+
+  // Getters/setters shouldn't be triggered.
+  EXPECT_EQ(1, GetInt(result, "getters"));
+  EXPECT_EQ(1, GetInt(result, "setters"));
+
+  EXPECT_EQ(1u, converted2->GetPropertyNames()->Length());
+  EXPECT_EQ("hello", GetString(converted2, "otherkey"));
+
+  // Missing key = should trigger getter upon access.
+  EXPECT_EQ("bogus", GetString(converted2, "foo"));
+  EXPECT_EQ(2, GetInt(result, "getters"));
+  EXPECT_EQ(1, GetInt(result, "setters"));
+}
+
+TEST_F(V8ValueConverterImplTest, ArrayPrototypeSetter) {
+  std::unique_ptr<base::Value> original =
+      base::test::ParseJson("[100, 200, 300]");
+
+  v8::HandleScope handle_scope(isolate_);
+  v8::Local<v8::Context> context =
+      v8::Local<v8::Context>::New(isolate_, context_);
+  v8::Context::Scope context_scope(context);
+  v8::MicrotasksScope microtasks(isolate_,
+                                 v8::MicrotasksScope::kDoNotRunMicrotasks);
+
+  const char* source =
+      "var result = { getters: 0, setters: 0 };"
+      "Object.defineProperty(Array.prototype, '1', {"
+      "  get() { ++result.getters; return 1337; },"
+      "  set() { ++result.setters; },"
+      "});"
+      "result;";
+
+  const char* source_sanity =
+      "[][1] = 'Trigger setter';"
+      "[][1];";
+
+  v8::Local<v8::Script> script(
+      v8::Script::Compile(v8::String::NewFromUtf8(isolate_, source)));
+  v8::Local<v8::Object> result = script->Run().As<v8::Object>();
+  ASSERT_FALSE(result.IsEmpty());
+
+  // Sanity checks: the getters/setters are normally triggered.
+  v8::Script::Compile(v8::String::NewFromUtf8(isolate_, source_sanity))->Run();
+  EXPECT_EQ(1, GetInt(result, "getters"));
+  EXPECT_EQ(1, GetInt(result, "setters"));
+
+  V8ValueConverterImpl converter;
+  v8::Local<v8::Array> converted =
+      converter.ToV8Value(original.get(), context).As<v8::Array>();
+  EXPECT_FALSE(converted.IsEmpty());
+
+  // Getters/setters shouldn't be triggered during the conversion.
+  EXPECT_EQ(1, GetInt(result, "getters"));
+  EXPECT_EQ(1, GetInt(result, "setters"));
+
+  EXPECT_EQ(3u, converted->Length());
+  EXPECT_EQ(100, GetInt(converted, 0));
+  EXPECT_EQ(200, GetInt(converted, 1));
+  EXPECT_EQ(300, GetInt(converted, 2));
+
+  // Getters/setters shouldn't be triggered while accessing existing values.
+  EXPECT_EQ(1, GetInt(result, "getters"));
+  EXPECT_EQ(1, GetInt(result, "setters"));
+
+  // Try again, using an array without the index.
+  base::ListValue one_item_list;
+  one_item_list.AppendInteger(123456);
+  v8::Local<v8::Array> converted2 =
+      converter.ToV8Value(&one_item_list, context).As<v8::Array>();
+  EXPECT_FALSE(converted2.IsEmpty());
+
+  // Getters/setters shouldn't be triggered during the conversion.
+  EXPECT_EQ(1, GetInt(result, "getters"));
+  EXPECT_EQ(1, GetInt(result, "setters"));
+
+  EXPECT_EQ(1u, converted2->Length());
+  EXPECT_EQ(123456, GetInt(converted2, 0));
+
+  // Accessing missing index 1 triggers the getter.
+  EXPECT_EQ(1337, GetInt(converted2, 1));
+  EXPECT_EQ(2, GetInt(result, "getters"));
+  EXPECT_EQ(1, GetInt(result, "setters"));
 }
 
 TEST_F(V8ValueConverterImplTest, StripNullFromObjects) {
@@ -445,8 +607,7 @@ TEST_F(V8ValueConverterImplTest, StripNullFromObjects) {
   converter.SetStripNullFromObjects(true);
 
   std::unique_ptr<base::DictionaryValue> result(
-      static_cast<base::DictionaryValue*>(
-          converter.FromV8Value(object, context)));
+      base::DictionaryValue::From(converter.FromV8Value(object, context)));
   ASSERT_TRUE(result.get());
   EXPECT_EQ(0u, result->size());
 }
@@ -466,8 +627,7 @@ TEST_F(V8ValueConverterImplTest, RecursiveObjects) {
   object->Set(v8::String::NewFromUtf8(isolate_, "obj"), object);
 
   std::unique_ptr<base::DictionaryValue> object_result(
-      static_cast<base::DictionaryValue*>(
-          converter.FromV8Value(object, context)));
+      base::DictionaryValue::From(converter.FromV8Value(object, context)));
   ASSERT_TRUE(object_result.get());
   EXPECT_EQ(2u, object_result->size());
   EXPECT_TRUE(IsNull(object_result.get(), "obj"));
@@ -478,7 +638,7 @@ TEST_F(V8ValueConverterImplTest, RecursiveObjects) {
   array->Set(1, array);
 
   std::unique_ptr<base::ListValue> list_result(
-      static_cast<base::ListValue*>(converter.FromV8Value(array, context)));
+      base::ListValue::From(converter.FromV8Value(array, context)));
   ASSERT_TRUE(list_result.get());
   EXPECT_EQ(2u, list_result->GetSize());
   EXPECT_TRUE(IsNull(list_result.get(), 1));
@@ -545,7 +705,7 @@ TEST_F(V8ValueConverterImplTest, ArrayGetters) {
 
   V8ValueConverterImpl converter;
   std::unique_ptr<base::ListValue> result(
-      static_cast<base::ListValue*>(converter.FromV8Value(array, context)));
+      base::ListValue::From(converter.FromV8Value(array, context)));
   ASSERT_TRUE(result.get());
   EXPECT_EQ(2u, result->GetSize());
 }
@@ -685,6 +845,74 @@ TEST_F(V8ValueConverterImplTest, DetectCycles) {
   EXPECT_TRUE(expected_dictionary.Equals(actual_dictionary.get()));
 }
 
+// Tests that reused object values with no cycles do not get nullified.
+TEST_F(V8ValueConverterImplTest, ReuseObjects) {
+  v8::HandleScope handle_scope(isolate_);
+  v8::Local<v8::Context> context =
+      v8::Local<v8::Context>::New(isolate_, context_);
+  v8::Context::Scope context_scope(context);
+  v8::MicrotasksScope microtasks(
+      isolate_, v8::MicrotasksScope::kDoNotRunMicrotasks);
+  V8ValueConverterImpl converter;
+
+  // Object with reused values in different keys.
+  {
+    const char* source = "(function() {"
+        "var objA = {key: 'another same value'};"
+        "var obj = {one: objA, two: objA};"
+        "return obj;"
+        "})();";
+    v8::Local<v8::Script> script(
+        v8::Script::Compile(v8::String::NewFromUtf8(isolate_, source)));
+    v8::Local<v8::Object> object = script->Run().As<v8::Object>();
+    ASSERT_FALSE(object.IsEmpty());
+
+    // The actual result.
+    std::unique_ptr<base::DictionaryValue> result(
+        base::DictionaryValue::From(converter.FromV8Value(object, context)));
+    ASSERT_TRUE(result.get());
+    EXPECT_EQ(2u, result->size());
+
+    {
+      base::DictionaryValue* one_dict = nullptr;
+      const char* key1 = "one";
+      ASSERT_TRUE(result->GetDictionary(key1, &one_dict));
+      EXPECT_EQ("another same value", GetString(one_dict, "key"));
+    }
+    {
+      base::DictionaryValue* two_dict = nullptr;
+      const char* key2 = "two";
+      ASSERT_TRUE(result->GetDictionary(key2, &two_dict));
+      EXPECT_EQ("another same value", GetString(two_dict, "key"));
+    }
+  }
+
+  // Array with reused values.
+  {
+    const char* source = "(function() {"
+        "var objA = {key: 'same value'};"
+        "var arr = [objA, objA];"
+        "return arr;"
+        "})();";
+    v8::Local<v8::Script> script(
+        v8::Script::Compile(v8::String::NewFromUtf8(isolate_, source)));
+    v8::Local<v8::Array> array = script->Run().As<v8::Array>();
+    ASSERT_FALSE(array.IsEmpty());
+
+    // The actual result.
+    std::unique_ptr<base::ListValue> list_result(
+        base::ListValue::From(converter.FromV8Value(array, context)));
+    ASSERT_TRUE(list_result.get());
+    ASSERT_EQ(2u, list_result->GetSize());
+    for (size_t i = 0; i < list_result->GetSize(); ++i) {
+      ASSERT_FALSE(IsNull(list_result.get(), i));
+      base::DictionaryValue* dict_value = nullptr;
+      ASSERT_TRUE(list_result->GetDictionary(0u, &dict_value));
+      EXPECT_EQ("same value", GetString(dict_value, "key"));
+    }
+  }
+}
+
 TEST_F(V8ValueConverterImplTest, MaxRecursionDepth) {
   v8::HandleScope handle_scope(isolate_);
   v8::Local<v8::Context> context =
@@ -730,39 +958,39 @@ class V8ValueConverterOverridingStrategyForTesting
   V8ValueConverterOverridingStrategyForTesting()
       : reference_value_(NewReferenceValue()) {}
   bool FromV8Object(v8::Local<v8::Object> value,
-                    base::Value** out,
+                    std::unique_ptr<base::Value>* out,
                     v8::Isolate* isolate,
                     const FromV8ValueCallback& callback) const override {
     *out = NewReferenceValue();
     return true;
   }
   bool FromV8Array(v8::Local<v8::Array> value,
-                   base::Value** out,
+                   std::unique_ptr<base::Value>* out,
                    v8::Isolate* isolate,
                    const FromV8ValueCallback& callback) const override {
     *out = NewReferenceValue();
     return true;
   }
   bool FromV8ArrayBuffer(v8::Local<v8::Object> value,
-                         base::Value** out,
+                         std::unique_ptr<base::Value>* out,
                          v8::Isolate* isolate) const override {
     *out = NewReferenceValue();
     return true;
   }
   bool FromV8Number(v8::Local<v8::Number> value,
-                    base::Value** out) const override {
+                    std::unique_ptr<base::Value>* out) const override {
     *out = NewReferenceValue();
     return true;
   }
-  bool FromV8Undefined(base::Value** out) const override {
+  bool FromV8Undefined(std::unique_ptr<base::Value>* out) const override {
     *out = NewReferenceValue();
     return true;
   }
   base::Value* reference_value() const { return reference_value_.get(); }
 
  private:
-  static base::Value* NewReferenceValue() {
-    return new base::StringValue("strategy");
+  static std::unique_ptr<base::Value> NewReferenceValue() {
+    return base::MakeUnique<base::StringValue>("strategy");
   }
   std::unique_ptr<base::Value> reference_value_;
 };
@@ -825,27 +1053,29 @@ class V8ValueConverterBypassStrategyForTesting
     : public V8ValueConverter::Strategy {
  public:
   bool FromV8Object(v8::Local<v8::Object> value,
-                    base::Value** out,
+                    std::unique_ptr<base::Value>* out,
                     v8::Isolate* isolate,
                     const FromV8ValueCallback& callback) const override {
     return false;
   }
   bool FromV8Array(v8::Local<v8::Array> value,
-                   base::Value** out,
+                   std::unique_ptr<base::Value>* out,
                    v8::Isolate* isolate,
                    const FromV8ValueCallback& callback) const override {
     return false;
   }
   bool FromV8ArrayBuffer(v8::Local<v8::Object> value,
-                         base::Value** out,
+                         std::unique_ptr<base::Value>* out,
                          v8::Isolate* isolate) const override {
     return false;
   }
   bool FromV8Number(v8::Local<v8::Number> value,
-                    base::Value** out) const override {
+                    std::unique_ptr<base::Value>* out) const override {
     return false;
   }
-  bool FromV8Undefined(base::Value** out) const override { return false; }
+  bool FromV8Undefined(std::unique_ptr<base::Value>* out) const override {
+    return false;
+  }
 };
 
 // Verify that having a strategy that fallbacks to default behaviour

@@ -4,21 +4,22 @@
 
 package org.chromium.chrome.browser.partnercustomizations;
 
+import android.annotation.TargetApi;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Environment;
-import android.preference.PreferenceManager;
 import android.support.v7.widget.SwitchCompat;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.preferences.HomepageEditor;
 import org.chromium.chrome.browser.preferences.HomepagePreferences;
@@ -51,8 +52,7 @@ public class PartnerHomepageIntegrationTest extends BasePartnerBrowserCustomizat
             public void run() {
                 // TODO(newt): Remove this once SharedPreferences is cleared automatically at the
                 // beginning of every test. http://crbug.com/441859
-                SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(
-                        getInstrumentation().getTargetContext());
+                SharedPreferences sp = ContextUtils.getAppSharedPreferences();
                 sp.edit().clear().apply();
             }
         });
@@ -65,6 +65,7 @@ public class PartnerHomepageIntegrationTest extends BasePartnerBrowserCustomizat
      */
     @MediumTest
     @Feature({"Homepage" })
+    @RetryOnFailure
     public void testHomepageInitialLoading() {
         assertEquals(Uri.parse(TestPartnerBrowserCustomizationsProvider.HOMEPAGE_URI),
                 Uri.parse(getActivity().getActivityTab().getUrl()));
@@ -108,6 +109,7 @@ public class PartnerHomepageIntegrationTest extends BasePartnerBrowserCustomizat
      */
     @MediumTest
     @Feature({"Homepage"})
+    @RetryOnFailure
     public void testHomepageButtonEnableDisable() throws InterruptedException {
         // Disable homepage.
         Preferences homepagePreferenceActivity =
@@ -168,6 +170,8 @@ public class PartnerHomepageIntegrationTest extends BasePartnerBrowserCustomizat
      */
     @MediumTest
     @Feature({"Homepage"})
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR1)
+    @RetryOnFailure
     public void testPreferenceCustomUriFixup() throws InterruptedException {
         // Change home page custom URI on hompage edit screen.
         final Preferences editHomepagePreferenceActivity =
@@ -196,9 +200,10 @@ public class PartnerHomepageIntegrationTest extends BasePartnerBrowserCustomizat
     /**
      * Closing the last tab should also close Chrome on Tabbed mode.
      */
-    @CommandLineFlags.Add(ChromeSwitches.DISABLE_DOCUMENT_MODE)
     @MediumTest
     @Feature({"Homepage" })
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR1)
+    @RetryOnFailure
     public void testLastTabClosed() throws InterruptedException {
         ChromeTabUtils.closeCurrentTab(getInstrumentation(), (ChromeTabbedActivity) getActivity());
         assertTrue("Activity was not closed.",
@@ -208,9 +213,9 @@ public class PartnerHomepageIntegrationTest extends BasePartnerBrowserCustomizat
     /**
      * Closing all tabs should finalize all tab closures and close Chrome on Tabbed mode.
      */
-    @CommandLineFlags.Add(ChromeSwitches.DISABLE_DOCUMENT_MODE)
     @MediumTest
     @Feature({"Homepage" })
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR1)
     public void testCloseAllTabs() throws InterruptedException {
         final CallbackHelper tabClosed = new CallbackHelper();
         final TabModel tabModel = getActivity().getCurrentTabModel();

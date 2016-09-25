@@ -87,6 +87,7 @@ public:
 
     int offsetForPosition(const TextRun&, float position, bool includePartialGlyphs) const;
     FloatRect selectionRectForText(const TextRun&, const FloatPoint&, int h, int from = 0, int to = -1, bool accountForGlyphBounds = false) const;
+    CharacterRange getCharacterRange(const TextRun&, unsigned from, unsigned to) const;
     Vector<CharacterRange> individualCharacterRanges(const TextRun&) const;
 
     // Metrics that we query the FontFallbackList for.
@@ -145,7 +146,7 @@ public:
     PassRefPtr<FontFallbackIterator> createFontFallbackIterator(
         FontFallbackPriority) const;
 
-    void willUseFontData(UChar32) const;
+    void willUseFontData(const String& text) const;
 
     bool loadingCustomFonts() const;
     bool isFallbackValid() const;
@@ -193,9 +194,9 @@ inline float Font::tabWidth(const SimpleFontData& fontData, const TabSize& tabSi
         return getFontDescription().letterSpacing();
     float distanceToTabStop = baseTabWidth - fmodf(position, baseTabWidth);
 
-    // The smallest allowable tab space is letterSpacing() (but must be at least one layout unit).
+    // Let the minimum width be the half of the space width so that it's always recognizable.
     // if the distance to the next tab stop is less than that, advance an additional tab stop.
-    if (distanceToTabStop < std::max(getFontDescription().letterSpacing(), LayoutUnit::epsilon()))
+    if (distanceToTabStop < fontData.spaceWidth() / 2)
         distanceToTabStop += baseTabWidth;
 
     return distanceToTabStop;

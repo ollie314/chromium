@@ -13,6 +13,8 @@
 #include "base/threading/simple_thread.h"
 #include "base/values.h"
 #include "net/base/net_errors.h"
+#include "net/log/net_log_event_type.h"
+#include "net/log/net_log_source_type.h"
 #include "net/log/test_net_log.h"
 #include "net/log/test_net_log_entry.h"
 #include "net/log/test_net_log_util.h"
@@ -41,8 +43,8 @@ int CaptureModeToInt(NetLogCaptureMode capture_mode) {
 
 std::unique_ptr<base::Value> CaptureModeToValue(
     NetLogCaptureMode capture_mode) {
-  return base::WrapUnique(
-      new base::FundamentalValue(CaptureModeToInt(capture_mode)));
+  return base::MakeUnique<base::FundamentalValue>(
+      CaptureModeToInt(capture_mode));
 }
 
 std::unique_ptr<base::Value> NetCaptureModeCallback(
@@ -58,14 +60,14 @@ TEST(NetLogTest, Basic) {
   net_log.GetEntries(&entries);
   EXPECT_EQ(0u, entries.size());
 
-  net_log.AddGlobalEntry(NetLog::TYPE_CANCELLED);
+  net_log.AddGlobalEntry(NetLogEventType::CANCELLED);
 
   net_log.GetEntries(&entries);
   ASSERT_EQ(1u, entries.size());
-  EXPECT_EQ(NetLog::TYPE_CANCELLED, entries[0].type);
-  EXPECT_EQ(NetLog::SOURCE_NONE, entries[0].source.type);
+  EXPECT_EQ(NetLogEventType::CANCELLED, entries[0].type);
+  EXPECT_EQ(NetLogSourceType::NONE, entries[0].source.type);
   EXPECT_NE(NetLog::Source::kInvalidId, entries[0].source.id);
-  EXPECT_EQ(NetLog::PHASE_NONE, entries[0].phase);
+  EXPECT_EQ(NetLogEventPhase::NONE, entries[0].phase);
   EXPECT_GE(base::TimeTicks::Now(), entries[0].time);
   EXPECT_FALSE(entries[0].params);
 }
@@ -84,17 +86,17 @@ TEST(NetLogTest, CaptureModes) {
     net_log.SetCaptureMode(mode);
     EXPECT_EQ(mode, net_log.GetObserver()->capture_mode());
 
-    net_log.AddGlobalEntry(NetLog::TYPE_SOCKET_ALIVE,
+    net_log.AddGlobalEntry(NetLogEventType::SOCKET_ALIVE,
                            base::Bind(NetCaptureModeCallback));
 
     TestNetLogEntry::List entries;
     net_log.GetEntries(&entries);
 
     ASSERT_EQ(1u, entries.size());
-    EXPECT_EQ(NetLog::TYPE_SOCKET_ALIVE, entries[0].type);
-    EXPECT_EQ(NetLog::SOURCE_NONE, entries[0].source.type);
+    EXPECT_EQ(NetLogEventType::SOCKET_ALIVE, entries[0].type);
+    EXPECT_EQ(NetLogSourceType::NONE, entries[0].source.type);
     EXPECT_NE(NetLog::Source::kInvalidId, entries[0].source.id);
-    EXPECT_EQ(NetLog::PHASE_NONE, entries[0].phase);
+    EXPECT_EQ(NetLogEventPhase::NONE, entries[0].phase);
     EXPECT_GE(base::TimeTicks::Now(), entries[0].time);
 
     int logged_capture_mode;
@@ -134,7 +136,7 @@ class LoggingObserver : public NetLog::ThreadSafeObserver {
 
   void OnAddEntry(const NetLog::Entry& entry) override {
     std::unique_ptr<base::DictionaryValue> dict =
-        base::DictionaryValue::From(base::WrapUnique(entry.ToValue()));
+        base::DictionaryValue::From(entry.ToValue());
     ASSERT_TRUE(dict);
     values_.push_back(std::move(dict));
   }
@@ -149,7 +151,7 @@ class LoggingObserver : public NetLog::ThreadSafeObserver {
 };
 
 void AddEvent(NetLog* net_log) {
-  net_log->AddGlobalEntry(NetLog::TYPE_CANCELLED,
+  net_log->AddGlobalEntry(NetLogEventType::CANCELLED,
                           base::Bind(CaptureModeToValue));
 }
 
@@ -241,7 +243,9 @@ class AddRemoveObserverTestThread : public NetLogTestThread {
 template <class ThreadType>
 void RunTestThreads(NetLog* net_log) {
   ThreadType threads[kThreads];
-  base::WaitableEvent start_event(true, false);
+  base::WaitableEvent start_event(
+      base::WaitableEvent::ResetPolicy::MANUAL,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
 
   for (size_t i = 0; i < arraysize(threads); ++i) {
     threads[i].Init(net_log, &start_event);

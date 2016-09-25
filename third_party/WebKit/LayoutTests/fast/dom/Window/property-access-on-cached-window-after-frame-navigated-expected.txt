@@ -1,6 +1,6 @@
-CONSOLE WARNING: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
-CONSOLE WARNING: 'webkitIndexedDB' is deprecated. Please use 'indexedDB' instead.
-CONSOLE WARNING: 'Performance.onwebkitresourcetimingbufferfull' is deprecated. Please use 'Performance.onresourcetimingbufferfull' instead.
+CONSOLE WARNING: line 98: 'window.webkitStorageInfo' is deprecated. Please use 'navigator.webkitTemporaryStorage' or 'navigator.webkitPersistentStorage' instead.
+CONSOLE WARNING: line 98: 'webkitIndexedDB' is deprecated. Please use 'indexedDB' instead.
+CONSOLE WARNING: line 98: 'Performance.onwebkitresourcetimingbufferfull' is deprecated. Please use 'Performance.onresourcetimingbufferfull' instead.
 Tests property access on a cached DOMWindow after the associated frame is navigated. Test should not crash and properties read from the cached DOMWindow should be identical to properties through the 'current' DOMWindow.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -52,10 +52,10 @@ PASS oldChildWindow.navigator.doNotTrack is newChildWindow.navigator.doNotTrack
 PASS oldChildWindow.navigator.hardwareConcurrency is newChildWindow.navigator.hardwareConcurrency
 PASS oldChildWindow.navigator.language is newChildWindow.navigator.language
 PASS oldChildWindow.navigator.maxTouchPoints is newChildWindow.navigator.maxTouchPoints
+PASS oldChildWindow.navigator.mediaDevices.ondevicechange is newChildWindow.navigator.mediaDevices.ondevicechange
 PASS oldChildWindow.navigator.onLine is newChildWindow.navigator.onLine
 PASS oldChildWindow.navigator.platform is newChildWindow.navigator.platform
 PASS oldChildWindow.navigator.presentation.defaultRequest is newChildWindow.navigator.presentation.defaultRequest
-PASS oldChildWindow.navigator.presentation.receiver.onconnectionavailable is newChildWindow.navigator.presentation.receiver.onconnectionavailable
 PASS oldChildWindow.navigator.product is newChildWindow.navigator.product
 PASS oldChildWindow.navigator.productSub is newChildWindow.navigator.productSub
 PASS oldChildWindow.navigator.serviceWorker.controller is newChildWindow.navigator.serviceWorker.controller
@@ -70,8 +70,7 @@ PASS oldChildWindow.onabort is newChildWindow.onabort
 PASS oldChildWindow.onanimationend is newChildWindow.onanimationend
 PASS oldChildWindow.onanimationiteration is newChildWindow.onanimationiteration
 PASS oldChildWindow.onanimationstart is newChildWindow.onanimationstart
-PASS oldChildWindow.onautocomplete is newChildWindow.onautocomplete
-PASS oldChildWindow.onautocompleteerror is newChildWindow.onautocompleteerror
+PASS oldChildWindow.onauxclick is newChildWindow.onauxclick
 PASS oldChildWindow.onbeforeunload is newChildWindow.onbeforeunload
 PASS oldChildWindow.onblur is newChildWindow.onblur
 PASS oldChildWindow.oncancel is newChildWindow.oncancel
@@ -125,6 +124,14 @@ PASS oldChildWindow.onpageshow is newChildWindow.onpageshow
 PASS oldChildWindow.onpause is newChildWindow.onpause
 PASS oldChildWindow.onplay is newChildWindow.onplay
 PASS oldChildWindow.onplaying is newChildWindow.onplaying
+PASS oldChildWindow.onpointercancel is newChildWindow.onpointercancel
+PASS oldChildWindow.onpointerdown is newChildWindow.onpointerdown
+PASS oldChildWindow.onpointerenter is newChildWindow.onpointerenter
+PASS oldChildWindow.onpointerleave is newChildWindow.onpointerleave
+PASS oldChildWindow.onpointermove is newChildWindow.onpointermove
+PASS oldChildWindow.onpointerout is newChildWindow.onpointerout
+PASS oldChildWindow.onpointerover is newChildWindow.onpointerover
+PASS oldChildWindow.onpointerup is newChildWindow.onpointerup
 PASS oldChildWindow.onpopstate is newChildWindow.onpopstate
 PASS oldChildWindow.onprogress is newChildWindow.onprogress
 PASS oldChildWindow.onratechange is newChildWindow.onratechange
@@ -165,6 +172,7 @@ PASS oldChildWindow.pageYOffset is newChildWindow.pageYOffset
 PASS oldChildWindow.performance.navigation.redirectCount is newChildWindow.performance.navigation.redirectCount
 PASS oldChildWindow.performance.navigation.type is newChildWindow.performance.navigation.type
 PASS oldChildWindow.performance.onframetimingbufferfull is newChildWindow.performance.onframetimingbufferfull
+PASS oldChildWindow.performance.onlongtasktimingbufferfull is newChildWindow.performance.onlongtasktimingbufferfull
 PASS oldChildWindow.performance.onresourcetimingbufferfull is newChildWindow.performance.onresourcetimingbufferfull
 PASS oldChildWindow.performance.onwebkitresourcetimingbufferfull is newChildWindow.performance.onwebkitresourcetimingbufferfull
 PASS oldChildWindow.performance.timing.connectEnd is newChildWindow.performance.timing.connectEnd
@@ -216,6 +224,13 @@ PASS oldChildWindow.status is newChildWindow.status
 PASS oldChildWindow.statusbar.visible is newChildWindow.statusbar.visible
 PASS oldChildWindow.styleMedia.type is newChildWindow.styleMedia.type
 PASS oldChildWindow.toolbar.visible is newChildWindow.toolbar.visible
+PASS oldChildWindow.visualViewport.clientHeight is newChildWindow.visualViewport.clientHeight
+PASS oldChildWindow.visualViewport.clientWidth is newChildWindow.visualViewport.clientWidth
+PASS oldChildWindow.visualViewport.pageX is newChildWindow.visualViewport.pageX
+PASS oldChildWindow.visualViewport.pageY is newChildWindow.visualViewport.pageY
+PASS oldChildWindow.visualViewport.scale is newChildWindow.visualViewport.scale
+PASS oldChildWindow.visualViewport.scrollLeft is newChildWindow.visualViewport.scrollLeft
+PASS oldChildWindow.visualViewport.scrollTop is newChildWindow.visualViewport.scrollTop
 PASS oldChildWindow.wasPostTestScriptParsed is newChildWindow.wasPostTestScriptParsed
 PASS successfullyParsed is true
 

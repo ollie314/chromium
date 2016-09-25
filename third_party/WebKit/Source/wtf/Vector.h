@@ -30,6 +30,7 @@
 #include "wtf/VectorTraits.h"
 #include "wtf/allocator/PartitionAllocator.h"
 #include <algorithm>
+#include <initializer_list>
 #include <iterator>
 #include <string.h>
 #include <utility>
@@ -270,6 +271,26 @@ struct VectorComparer<true, T> {
 };
 
 template <typename T>
+struct VectorElementComparer {
+    STATIC_ONLY(VectorElementComparer);
+    template <typename U>
+    static bool compareElement(const T& left, const U& right)
+    {
+        return left == right;
+    }
+};
+
+template <typename T>
+struct VectorElementComparer<std::unique_ptr<T>> {
+    STATIC_ONLY(VectorElementComparer);
+    template <typename U>
+    static bool compareElement(const std::unique_ptr<T>& left, const U& right)
+    {
+        return left.get() == right;
+    }
+};
+
+template <typename T>
 struct VectorTypeOperations {
     STATIC_ONLY(VectorTypeOperations);
     static void destruct(T* begin, T* end)
@@ -310,6 +331,12 @@ struct VectorTypeOperations {
     static bool compare(const T* a, const T* b, size_t size)
     {
         return VectorComparer<VectorTraits<T>::canCompareWithMemcmp, T>::compare(a, b, size);
+    }
+
+    template <typename U>
+    static bool compareElement(const T& left, U&& right)
+    {
+        return VectorElementComparer<T>::compareElement(left, std::forward<U>(right));
     }
 };
 
@@ -354,13 +381,13 @@ public:
         // If the vector backing is garbage-collected and needs tracing or
         // finalizing, we clear out the unused slots so that the visitor or the
         // finalizer does not cause a problem when visiting the unused slots.
-        VectorUnusedSlotClearer<Allocator::isGarbageCollected && (VectorTraits<T>::needsDestruction || NeedsTracingTrait<VectorTraits<T>>::value), T>::clear(from, to);
+        VectorUnusedSlotClearer<Allocator::isGarbageCollected && (VectorTraits<T>::needsDestruction || IsTraceableInCollectionTrait<VectorTraits<T>>::value), T>::clear(from, to);
     }
 
     void checkUnusedSlots(const T* from, const T* to)
     {
 #if ENABLE(ASSERT) && !defined(ANNOTATE_CONTIGUOUS_CONTAINER)
-        VectorUnusedSlotClearer<Allocator::isGarbageCollected && (VectorTraits<T>::needsDestruction || NeedsTracingTrait<VectorTraits<T>>::value), T>::checkCleared(from, to);
+        VectorUnusedSlotClearer<Allocator::isGarbageCollected && (VectorTraits<T>::needsDestruction || IsTraceableInCollectionTrait<VectorTraits<T>>::value), T>::checkCleared(from, to);
 #endif
     }
 
@@ -406,7 +433,7 @@ public:
     {
     }
 
-    VectorBuffer(size_t capacity)
+    explicit VectorBuffer(size_t capacity)
     {
         // Calling malloc(0) might take a lock and may actually do an allocation
         // on some systems.
@@ -777,7 +804,7 @@ public:
     Vector()
     {
         static_assert(!std::is_polymorphic<T>::value || !VectorTraits<T>::canInitializeWithMemset, "Cannot initialize with memset if there is a vtable");
-        static_assert(Allocator::isGarbageCollected || !AllowsOnlyPlacementNew<T>::value || !NeedsTracing<T>::value, "Cannot put DISALLOW_NEW_EXCEPT_PLACEMENT_NEW objects that have trace methods into an off-heap Vector");
+        static_assert(Allocator::isGarbageCollected || !AllowsOnlyPlacementNew<T>::value || !IsTraceable<T>::value, "Cannot put DISALLOW_NEW_EXCEPT_PLACEMENT_NEW objects that have trace methods into an off-heap Vector");
         static_assert(Allocator::isGarbageCollected || !IsPointerToGarbageCollectedType<T>::value, "Cannot put raw pointers to garbage-collected classes into an off-heap Vector.  Use HeapVector<Member<T>> instead.");
 
         ANNOTATE_NEW_BUFFER(begin(), capacity(), 0);
@@ -788,7 +815,7 @@ public:
         : Base(size)
     {
         static_assert(!std::is_polymorphic<T>::value || !VectorTraits<T>::canInitializeWithMemset, "Cannot initialize with memset if there is a vtable");
-        static_assert(Allocator::isGarbageCollected || !AllowsOnlyPlacementNew<T>::value || !NeedsTracing<T>::value, "Cannot put DISALLOW_NEW_EXCEPT_PLACEMENT_NEW objects that have trace methods into an off-heap Vector");
+        static_assert(Allocator::isGarbageCollected || !AllowsOnlyPlacementNew<T>::value || !IsTraceable<T>::value, "Cannot put DISALLOW_NEW_EXCEPT_PLACEMENT_NEW objects that have trace methods into an off-heap Vector");
         static_assert(Allocator::isGarbageCollected || !IsPointerToGarbageCollectedType<T>::value, "Cannot put raw pointers to garbage-collected classes into an off-heap Vector.  Use HeapVector<Member<T>> instead.");
 
         ANNOTATE_NEW_BUFFER(begin(), capacity(), size);
@@ -830,6 +857,9 @@ public:
 
     Vector(Vector&&);
     Vector& operator=(Vector&&);
+
+    Vector(std::initializer_list<T> elements);
+    Vector& operator=(std::initializer_list<T> elements);
 
     size_t size() const { return m_size; }
     size_t capacity() const { return Base::capacity(); }
@@ -887,6 +917,7 @@ public:
 
     template <typename U> void append(const U*, size_t);
     template <typename U> void append(U&&);
+    template <typename... Args> void emplaceAppend(Args&&...);
     template <typename U> void uncheckedAppend(U&& val);
     template <typename U, size_t otherCapacity, typename V> void appendVector(const Vector<U, otherCapacity, V>&);
 
@@ -1050,6 +1081,34 @@ Vector<T, inlineCapacity, Allocator>& Vector<T, inlineCapacity, Allocator>::oper
 }
 
 template <typename T, size_t inlineCapacity, typename Allocator>
+Vector<T, inlineCapacity, Allocator>::Vector(std::initializer_list<T> elements)
+    : Base(elements.size())
+{
+    ANNOTATE_NEW_BUFFER(begin(), capacity(), elements.size());
+    m_size = elements.size();
+    TypeOperations::uninitializedCopy(elements.begin(), elements.end(), begin());
+}
+
+template <typename T, size_t inlineCapacity, typename Allocator>
+Vector<T, inlineCapacity, Allocator>& Vector<T, inlineCapacity, Allocator>::operator=(std::initializer_list<T> elements)
+{
+    if (size() > elements.size()) {
+        shrink(elements.size());
+    } else if (elements.size() > capacity()) {
+        clear();
+        reserveCapacity(elements.size());
+        DCHECK(begin());
+    }
+
+    ANNOTATE_CHANGE_SIZE(begin(), capacity(), m_size, elements.size());
+    std::copy(elements.begin(), elements.begin() + m_size, begin());
+    TypeOperations::uninitializedCopy(elements.begin() + m_size, elements.end(), end());
+    m_size = elements.size();
+
+    return *this;
+}
+
+template <typename T, size_t inlineCapacity, typename Allocator>
 template <typename U>
 bool Vector<T, inlineCapacity, Allocator>::contains(const U& value) const
 {
@@ -1063,7 +1122,7 @@ size_t Vector<T, inlineCapacity, Allocator>::find(const U& value) const
     const T* b = begin();
     const T* e = end();
     for (const T* iter = b; iter < e; ++iter) {
-        if (*iter == value)
+        if (TypeOperations::compareElement(*iter, value))
             return iter - b;
     }
     return kNotFound;
@@ -1077,7 +1136,7 @@ size_t Vector<T, inlineCapacity, Allocator>::reverseFind(const U& value) const
     const T* iter = end();
     while (iter > b) {
         --iter;
-        if (*iter == value)
+        if (TypeOperations::compareElement(*iter, value))
             return iter - b;
     }
     return kNotFound;
@@ -1309,6 +1368,23 @@ ALWAYS_INLINE void Vector<T, inlineCapacity, Allocator>::append(U&& val)
     appendSlowCase(std::forward<U>(val));
 }
 
+
+template <typename T, size_t inlineCapacity, typename Allocator>
+template <typename... Args>
+ALWAYS_INLINE void Vector<T, inlineCapacity, Allocator>::emplaceAppend(Args&&... args)
+{
+    static_assert(sizeof...(Args), "grow() must be called instead");
+    static_assert(sizeof...(Args) != 1, "append() must be called instead");
+
+    DCHECK(Allocator::isAllocationAllowed());
+    if (UNLIKELY(size() == capacity()))
+        expandCapacity(size() + 1);
+
+    ANNOTATE_CHANGE_SIZE(begin(), capacity(), m_size, m_size + 1);
+    new (NotNull, end()) T(std::forward<Args>(args)...);
+    ++m_size;
+}
+
 template <typename T, size_t inlineCapacity, typename Allocator>
 template <typename U>
 NEVER_INLINE void Vector<T, inlineCapacity, Allocator>::appendSlowCase(U&& val)
@@ -1491,7 +1567,7 @@ void Vector<T, inlineCapacity, Allocator>::trace(VisitorDispatcher visitor)
     }
     const T* bufferBegin = buffer();
     const T* bufferEnd = buffer() + size();
-    if (NeedsTracingTrait<VectorTraits<T>>::value) {
+    if (IsTraceableInCollectionTrait<VectorTraits<T>>::value) {
         for (const T* bufferEntry = bufferBegin; bufferEntry != bufferEnd; bufferEntry++)
             Allocator::template trace<VisitorDispatcher, T, VectorTraits<T>>(visitor, *const_cast<T*>(bufferEntry));
         checkUnusedSlots(buffer() + size(), buffer() + capacity());

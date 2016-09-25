@@ -46,7 +46,7 @@ class InlineTextBox;
 // was a natural choice.
 //
 // The actual layout of text is handled by the containing inline
-// (LayoutInline) or block (LayoutBlock). They will invoke the Unicode
+// (LayoutInline) or block (LayoutBlockFlow). They will invoke the Unicode
 // Bidirectional Algorithm to break the text into actual lines.
 // The result of layout is the line box tree, which represents lines
 // on the screen. It is stored into m_firstTextBox and m_lastTextBox.
@@ -57,7 +57,7 @@ class InlineTextBox;
 // ***** LINE BOXES OWNERSHIP *****
 // m_firstTextBox and m_lastTextBox are not owned by LayoutText
 // but are pointers into the enclosing inline / block (see LayoutInline's
-// and LayoutBlock's m_lineBoxes).
+// and LayoutBlockFlow's m_lineBoxes).
 //
 //
 // This class implements the preferred logical widths computation
@@ -66,7 +66,7 @@ class InlineTextBox;
 // m_preferredLogicalWidthsDirty.
 //
 // The previous comment applies also for painting. See e.g.
-// BlockPainter::paintContents in particular the use of LineBoxListPainter.
+// BlockFlowPainter::paintContents in particular the use of LineBoxListPainter.
 class CORE_EXPORT LayoutText : public LayoutObject {
 public:
     // FIXME: If the node argument is not a Text node or the string argument is
@@ -101,9 +101,11 @@ public:
 
     void absoluteQuads(Vector<FloatQuad>&) const final;
     void absoluteQuadsForRange(Vector<FloatQuad>&, unsigned startOffset = 0, unsigned endOffset = INT_MAX, bool useSelectionHeight = false);
+    FloatRect localBoundingBoxRectForAccessibility() const final;
 
     enum ClippingOption { NoClipping, ClipToEllipsis };
-    void absoluteQuads(Vector<FloatQuad>&, ClippingOption = NoClipping) const;
+    enum LocalOrAbsoluteOption { LocalQuads, AbsoluteQuads };
+    void quads(Vector<FloatQuad>&, ClippingOption = NoClipping, LocalOrAbsoluteOption = AbsoluteQuads) const;
 
     PositionWithAffinity positionForPoint(const LayoutPoint&) override;
 
@@ -132,7 +134,7 @@ public:
         LayoutUnit& minWidth, LayoutUnit& maxWidth, bool& stripFrontSpaces,
         TextDirection);
 
-    virtual IntRect linesBoundingBox() const;
+    virtual LayoutRect linesBoundingBox() const;
 
     // Returns the bounding box of visual overflow rects of all line boxes.
     LayoutRect visualOverflowRect() const;
@@ -179,6 +181,10 @@ public:
 
     float hyphenWidth(const Font&, TextDirection);
 
+    void applyTextTransformFromTo(int from, int len, const ComputedStyle*);
+
+    LayoutRect debugRect() const override;
+
 protected:
     void willBeDestroyed() override;
 
@@ -192,7 +198,7 @@ protected:
 
     virtual InlineTextBox* createTextBox(int start, unsigned short length); // Subclassed by SVG.
 
-    void invalidateDisplayItemClients(const LayoutBoxModelObject& paintInvalidationContainer, PaintInvalidationReason) const override;
+    void invalidateDisplayItemClients(PaintInvalidationReason) const override;
 
 private:
     void computePreferredLogicalWidths(float leadWidth);

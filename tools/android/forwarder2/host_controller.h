@@ -39,6 +39,7 @@ class HostController {
   // If |device_port| is zero then a dynamic port is allocated (and retrievable
   // through device_port() below).
   static std::unique_ptr<HostController> Create(
+      const std::string& device_serial,
       int device_port,
       int host_port,
       int adb_port,
@@ -55,10 +56,10 @@ class HostController {
   int device_port() const { return device_port_; }
 
  private:
-  HostController(int device_port,
+  HostController(const std::string& device_serial,
+                 int device_port,
                  int host_port,
                  int adb_port,
-                 int exit_notifier_fd,
                  const ErrorCallback& error_callback,
                  std::unique_ptr<Socket> adb_control_socket,
                  std::unique_ptr<PipeNotifier> delete_controller_notifier);
@@ -74,11 +75,10 @@ class HostController {
   void UnmapPortOnDevice();
 
   SelfDeleterHelper<HostController> self_deleter_helper_;
+  const std::string device_serial_;
   const int device_port_;
   const int host_port_;
   const int adb_port_;
-  // Used to notify the controller when the process is killed.
-  const int global_exit_notifier_fd_;
   std::unique_ptr<Socket> adb_control_socket_;
   // Used to cancel the pending blocking IO operations when the host controller
   // instance is deleted.

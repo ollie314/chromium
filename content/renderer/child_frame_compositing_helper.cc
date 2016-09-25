@@ -67,13 +67,6 @@ ChildFrameCompositingHelper::ChildFrameCompositingHelper(
 ChildFrameCompositingHelper::~ChildFrameCompositingHelper() {
 }
 
-BrowserPluginManager* ChildFrameCompositingHelper::GetBrowserPluginManager() {
-  if (!browser_plugin_)
-    return nullptr;
-
-  return BrowserPluginManager::Get();
-}
-
 blink::WebPluginContainer* ChildFrameCompositingHelper::GetContainer() {
   if (!browser_plugin_)
     return nullptr;
@@ -81,20 +74,14 @@ blink::WebPluginContainer* ChildFrameCompositingHelper::GetContainer() {
   return browser_plugin_->container();
 }
 
-int ChildFrameCompositingHelper::GetInstanceID() {
-  if (!browser_plugin_)
-    return 0;
-
-  return browser_plugin_->browser_plugin_instance_id();
-}
-
-void ChildFrameCompositingHelper::UpdateWebLayer(blink::WebLayer* layer) {
+void ChildFrameCompositingHelper::UpdateWebLayer(
+    std::unique_ptr<blink::WebLayer> layer) {
   if (GetContainer()) {
-    GetContainer()->setWebLayer(layer);
+    GetContainer()->setWebLayer(layer.get());
   } else if (frame_) {
-    frame_->setRemoteWebLayer(layer);
+    frame_->setRemoteWebLayer(layer.get());
   }
-  web_layer_.reset(layer);
+  web_layer_ = std::move(layer);
 }
 
 void ChildFrameCompositingHelper::CheckSizeAndAdjustLayerProperties(
@@ -129,9 +116,7 @@ void ChildFrameCompositingHelper::ChildFrameGone() {
         web_layer_->bounds().height > sad_bitmap->height()) {
       scoped_refptr<cc::PictureImageLayer> sad_layer =
           cc::PictureImageLayer::Create();
-      skia::RefPtr<SkImage> image =
-          skia::AdoptRef(SkImage::NewFromBitmap(*sad_bitmap));
-      sad_layer->SetImage(image);
+      sad_layer->SetImage(SkImage::MakeFromBitmap(*sad_bitmap));
       sad_layer->SetBounds(
           gfx::Size(sad_bitmap->width(), sad_bitmap->height()));
       sad_layer->SetPosition(gfx::PointF(
@@ -143,15 +128,16 @@ void ChildFrameCompositingHelper::ChildFrameGone() {
     }
   }
 
-  blink::WebLayer* layer = new cc_blink::WebLayerImpl(crashed_layer);
-  UpdateWebLayer(layer);
+  std::unique_ptr<blink::WebLayer> layer(
+      new cc_blink::WebLayerImpl(crashed_layer));
+  UpdateWebLayer(std::move(layer));
 }
 
 // static
 void ChildFrameCompositingHelper::SatisfyCallback(
     scoped_refptr<ThreadSafeSender> sender,
     int host_routing_id,
-    cc::SurfaceSequence sequence) {
+    const cc::SurfaceSequence& sequence) {
   // This may be called on either the main or impl thread.
   sender->Send(new FrameHostMsg_SatisfySequence(host_routing_id, sequence));
 }
@@ -161,7 +147,7 @@ void ChildFrameCompositingHelper::SatisfyCallbackBrowserPlugin(
     scoped_refptr<ThreadSafeSender> sender,
     int host_routing_id,
     int browser_plugin_instance_id,
-    cc::SurfaceSequence sequence) {
+    const cc::SurfaceSequence& sequence) {
   sender->Send(new BrowserPluginHostMsg_SatisfySequence(
       host_routing_id, browser_plugin_instance_id, sequence));
 }
@@ -170,8 +156,8 @@ void ChildFrameCompositingHelper::SatisfyCallbackBrowserPlugin(
 void ChildFrameCompositingHelper::RequireCallback(
     scoped_refptr<ThreadSafeSender> sender,
     int host_routing_id,
-    cc::SurfaceId id,
-    cc::SurfaceSequence sequence) {
+    const cc::SurfaceId& id,
+    const cc::SurfaceSequence& sequence) {
   // This may be called on either the main or impl thread.
   sender->Send(new FrameHostMsg_RequireSequence(host_routing_id, id, sequence));
 }
@@ -180,8 +166,8 @@ void ChildFrameCompositingHelper::RequireCallbackBrowserPlugin(
     scoped_refptr<ThreadSafeSender> sender,
     int host_routing_id,
     int browser_plugin_instance_id,
-    cc::SurfaceId id,
-    cc::SurfaceSequence sequence) {
+    const cc::SurfaceId& id,
+    const cc::SurfaceSequence& sequence) {
   // This may be called on either the main or impl thread.
   sender->Send(new BrowserPluginHostMsg_RequireSequence(
       host_routing_id, browser_plugin_instance_id, id, sequence));
@@ -221,8 +207,13 @@ void ChildFrameCompositingHelper::OnSetSurface(
 
   surface_layer->SetSurfaceId(surface_id, scale_factor, frame_size);
   surface_layer->SetMasksToBounds(true);
-  blink::WebLayer* layer = new cc_blink::WebLayerImpl(surface_layer);
-  UpdateWebLayer(layer);
+  std::unique_ptr<cc_blink::WebLayerImpl> layer(
+      new cc_blink::WebLayerImpl(surface_layer));
+  // TODO(lfg): Investigate if it's possible to propagate the information about
+  // the child surface's opacity. https://crbug.com/629851.
+  layer->setOpaque(false);
+  layer->SetContentsOpaqueIsFixed(true);
+  UpdateWebLayer(std::move(layer));
 
   UpdateVisibility(true);
 

@@ -52,7 +52,8 @@ TEST(TimeFormattingTest, MAYBE_TimeFormatTimeOfDayDefault12h) {
   test::ScopedRestoreICUDefaultLocale restore_locale;
   i18n::SetICUDefaultLocale("en_US");
 
-  Time time(Time::FromLocalExploded(kTestDateTimeExploded));
+  Time time;
+  EXPECT_TRUE(Time::FromLocalExploded(kTestDateTimeExploded, &time));
   string16 clock24h(ASCIIToUTF16("15:42"));
   string16 clock12h_pm(ASCIIToUTF16("3:42 PM"));
   string16 clock12h(ASCIIToUTF16("3:42"));
@@ -94,7 +95,8 @@ TEST(TimeFormattingTest, MAYBE_TimeFormatTimeOfDayDefault24h) {
   test::ScopedRestoreICUDefaultLocale restore_locale;
   i18n::SetICUDefaultLocale("en_GB");
 
-  Time time(Time::FromLocalExploded(kTestDateTimeExploded));
+  Time time;
+  EXPECT_TRUE(Time::FromLocalExploded(kTestDateTimeExploded, &time));
   string16 clock24h(ASCIIToUTF16("15:42"));
   string16 clock12h_pm(ASCIIToUTF16("3:42 pm"));
   string16 clock12h(ASCIIToUTF16("3:42"));
@@ -135,7 +137,8 @@ TEST(TimeFormattingTest, MAYBE_TimeFormatTimeOfDayJP) {
   test::ScopedRestoreICUDefaultLocale restore_locale;
   i18n::SetICUDefaultLocale("ja_JP");
 
-  Time time(Time::FromLocalExploded(kTestDateTimeExploded));
+  Time time;
+  EXPECT_TRUE(Time::FromLocalExploded(kTestDateTimeExploded, &time));
   string16 clock24h(ASCIIToUTF16("15:42"));
   string16 clock12h_pm(WideToUTF16(L"\x5348\x5f8c" L"3:42"));
   string16 clock12h(ASCIIToUTF16("3:42"));
@@ -174,7 +177,8 @@ TEST(TimeFormattingTest, MAYBE_TimeFormatDateUS) {
   test::ScopedRestoreICUDefaultLocale restore_locale;
   i18n::SetICUDefaultLocale("en_US");
 
-  Time time(Time::FromLocalExploded(kTestDateTimeExploded));
+  Time time;
+  EXPECT_TRUE(Time::FromLocalExploded(kTestDateTimeExploded, &time));
 
   EXPECT_EQ(ASCIIToUTF16("Apr 30, 2011"), TimeFormatShortDate(time));
   EXPECT_EQ(ASCIIToUTF16("4/30/11"), TimeFormatShortDateNumeric(time));
@@ -202,7 +206,8 @@ TEST(TimeFormattingTest, MAYBE_TimeFormatDateGB) {
   test::ScopedRestoreICUDefaultLocale restore_locale;
   i18n::SetICUDefaultLocale("en_GB");
 
-  Time time(Time::FromLocalExploded(kTestDateTimeExploded));
+  Time time;
+  EXPECT_TRUE(Time::FromLocalExploded(kTestDateTimeExploded, &time));
 
   EXPECT_EQ(ASCIIToUTF16("30 Apr 2011"), TimeFormatShortDate(time));
   EXPECT_EQ(ASCIIToUTF16("30/04/2011"), TimeFormatShortDateNumeric(time));
@@ -214,6 +219,50 @@ TEST(TimeFormattingTest, MAYBE_TimeFormatDateGB) {
             TimeFormatFriendlyDateAndTime(time));
   EXPECT_EQ(ASCIIToUTF16("Saturday, 30 April 2011"),
             TimeFormatFriendlyDate(time));
+}
+
+TEST(TimeFormattingTest, TimeDurationFormat) {
+  test::ScopedRestoreICUDefaultLocale restore_locale;
+  TimeDelta delta = TimeDelta::FromMinutes(15 * 60 + 42);
+
+  // US English.
+  i18n::SetICUDefaultLocale("en_US");
+  EXPECT_EQ(ASCIIToUTF16("15 hours, 42 minutes"),
+            TimeDurationFormat(delta, DURATION_WIDTH_WIDE));
+  EXPECT_EQ(ASCIIToUTF16("15 hr, 42 min"),
+            TimeDurationFormat(delta, DURATION_WIDTH_SHORT));
+  EXPECT_EQ(ASCIIToUTF16("15h 42m"),
+            TimeDurationFormat(delta, DURATION_WIDTH_NARROW));
+  EXPECT_EQ(ASCIIToUTF16("15:42"),
+            TimeDurationFormat(delta, DURATION_WIDTH_NUMERIC));
+
+  // Danish, with Latin alphabet but different abbreviations and punctuation.
+  i18n::SetICUDefaultLocale("da");
+  EXPECT_EQ(ASCIIToUTF16("15 timer og 42 minutter"),
+            TimeDurationFormat(delta, DURATION_WIDTH_WIDE));
+  EXPECT_EQ(ASCIIToUTF16("15 t og 42 min."),
+            TimeDurationFormat(delta, DURATION_WIDTH_SHORT));
+  EXPECT_EQ(ASCIIToUTF16("15 t og 42 min"),
+            TimeDurationFormat(delta, DURATION_WIDTH_NARROW));
+  EXPECT_EQ(ASCIIToUTF16("15.42"),
+            TimeDurationFormat(delta, DURATION_WIDTH_NUMERIC));
+
+  // Persian, with non-Arabic numbers.
+  i18n::SetICUDefaultLocale("fa");
+  string16 fa_wide = WideToUTF16(
+      L"\x6f1\x6f5\x20\x633\x627\x639\x62a\x20\x648\x20\x6f4\x6f2\x20\x62f\x642"
+      L"\x6cc\x642\x647");
+  string16 fa_short = WideToUTF16(
+      L"\x6f1\x6f5\x20\x633\x627\x639\x62a\x60c\x200f\x20\x6f4\x6f2\x20\x62f"
+      L"\x642\x6cc\x642\x647");
+  string16 fa_narrow = WideToUTF16(
+      L"\x6f1\x6f5\x20\x633\x627\x639\x62a\x20\x6f4\x6f2\x20\x62f\x642\x6cc"
+      L"\x642\x647");
+  string16 fa_numeric = WideToUTF16(L"\x6f1\x6f5\x3a\x6f4\x6f2");
+  EXPECT_EQ(fa_wide, TimeDurationFormat(delta, DURATION_WIDTH_WIDE));
+  EXPECT_EQ(fa_short, TimeDurationFormat(delta, DURATION_WIDTH_SHORT));
+  EXPECT_EQ(fa_narrow, TimeDurationFormat(delta, DURATION_WIDTH_NARROW));
+  EXPECT_EQ(fa_numeric, TimeDurationFormat(delta, DURATION_WIDTH_NUMERIC));
 }
 
 }  // namespace

@@ -26,11 +26,11 @@
 #include "core/CoreExport.h"
 #include "core/fetch/ImageResource.h"
 #include "core/fetch/ImageResourceObserver.h"
-#include "core/fetch/ResourceClient.h"
 #include "platform/heap/Handle.h"
 #include "wtf/HashSet.h"
 #include "wtf/WeakPtr.h"
 #include "wtf/text/AtomicString.h"
+#include <memory>
 
 namespace blink {
 
@@ -84,6 +84,7 @@ public:
     ImageResource* image() const { return m_image.get(); }
     void setImage(ImageResource*); // Cancels pending load events, and doesn't dispatch new ones.
 
+    bool isLoadingImageDocument() { return m_loadingImageDocument; }
     void setLoadingImageDocument() { m_loadingImageDocument = true; }
 
     bool hasPendingActivity() const
@@ -94,6 +95,11 @@ public:
     bool hasPendingError() const
     {
         return m_hasPendingErrorEvent;
+    }
+
+    bool hadError() const
+    {
+        return !m_failedLoadURL.isEmpty();
     }
 
     void dispatchPendingEvent(ImageEventSender*);
@@ -109,7 +115,7 @@ private:
     class Task;
 
     // Called from the task or from updateFromElement to initiate the load.
-    void doUpdateFromElement(BypassMainWorldBehavior, UpdateFromElementBehavior, ReferrerPolicy = ReferrerPolicyDefault);
+    void doUpdateFromElement(BypassMainWorldBehavior, UpdateFromElementBehavior, const KURL&, ReferrerPolicy = ReferrerPolicyDefault);
 
     virtual void dispatchLoadEvent() = 0;
     virtual void noImageResourceToLoad() { }
@@ -128,7 +134,7 @@ private:
     void crossSiteOrCSPViolationOccurred(AtomicString);
     void enqueueImageLoadingMicroTask(UpdateFromElementBehavior, ReferrerPolicy);
 
-    void timerFired(Timer<ImageLoader>*);
+    void timerFired(TimerBase*);
 
     KURL imageSourceToKURL(AtomicString) const;
 
@@ -153,7 +159,7 @@ private:
     Timer<ImageLoader> m_derefElementTimer;
     AtomicString m_failedLoadURL;
     WeakPtr<Task> m_pendingTask; // owned by Microtask
-    OwnPtr<IncrementLoadEventDelayCount> m_loadDelayCounter;
+    std::unique_ptr<IncrementLoadEventDelayCount> m_loadDelayCounter;
     bool m_hasPendingLoadEvent : 1;
     bool m_hasPendingErrorEvent : 1;
     bool m_imageComplete : 1;

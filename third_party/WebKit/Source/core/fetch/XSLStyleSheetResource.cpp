@@ -27,7 +27,7 @@
 #include "core/fetch/XSLStyleSheetResource.h"
 
 #include "core/fetch/FetchRequest.h"
-#include "core/fetch/ResourceClientOrObserverWalker.h"
+#include "core/fetch/ResourceClientWalker.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/fetch/StyleSheetResourceClient.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -50,19 +50,16 @@ static void applyXSLRequestProperties(ResourceRequest& request)
 XSLStyleSheetResource* XSLStyleSheetResource::fetchSynchronously(FetchRequest& request, ResourceFetcher* fetcher)
 {
     applyXSLRequestProperties(request.mutableResourceRequest());
-    request.mutableResourceRequest().setTimeoutInterval(10);
-    ResourceLoaderOptions options(request.options());
-    options.synchronousPolicy = RequestSynchronously;
-    request.setOptions(options);
+    request.makeSynchronous();
     XSLStyleSheetResource* resource = toXSLStyleSheetResource(fetcher->requestResource(request, XSLStyleSheetResourceFactory()));
-    if (resource && resource->m_data)
+    if (resource && resource->data())
         resource->m_sheet = resource->decodedText();
     return resource;
 }
 
 XSLStyleSheetResource* XSLStyleSheetResource::fetch(FetchRequest& request, ResourceFetcher* fetcher)
 {
-    ASSERT(RuntimeEnabledFeatures::xsltEnabled());
+    DCHECK(RuntimeEnabledFeatures::xsltEnabled());
     applyXSLRequestProperties(request.mutableResourceRequest());
     return toXSLStyleSheetResource(fetcher->requestResource(request, XSLStyleSheetResourceFactory()));
 }
@@ -74,20 +71,22 @@ XSLStyleSheetResource::XSLStyleSheetResource(const ResourceRequest& resourceRequ
 
 void XSLStyleSheetResource::didAddClient(ResourceClient* c)
 {
-    ASSERT(StyleSheetResourceClient::isExpectedType(c));
+    DCHECK(StyleSheetResourceClient::isExpectedType(c));
     Resource::didAddClient(c);
     if (!isLoading())
-        static_cast<StyleSheetResourceClient*>(c)->setXSLStyleSheet(m_resourceRequest.url(), m_response.url(), m_sheet);
+        static_cast<StyleSheetResourceClient*>(c)->setXSLStyleSheet(resourceRequest().url(), response().url(), m_sheet);
 }
 
 void XSLStyleSheetResource::checkNotify()
 {
-    if (m_data.get())
+    if (data())
         m_sheet = decodedText();
 
-    ResourceClientWalker<StyleSheetResourceClient> w(m_clients);
-    while (StyleSheetResourceClient* c = w.next())
-        c->setXSLStyleSheet(m_resourceRequest.url(), m_response.url(), m_sheet);
+    ResourceClientWalker<StyleSheetResourceClient> w(clients());
+    while (StyleSheetResourceClient* c = w.next()) {
+        markClientFinished(c);
+        c->setXSLStyleSheet(resourceRequest().url(), response().url(), m_sheet);
+    }
 }
 
 } // namespace blink

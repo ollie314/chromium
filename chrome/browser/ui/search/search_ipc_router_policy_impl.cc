@@ -26,10 +26,6 @@ bool SearchIPCRouterPolicyImpl::ShouldProcessFocusOmnibox(bool is_active_tab) {
   return is_active_tab && !is_incognito_ && search::IsInstantNTP(web_contents_);
 }
 
-bool SearchIPCRouterPolicyImpl::ShouldProcessNavigateToURL(bool is_active_tab) {
-  return is_active_tab && !is_incognito_ && search::IsInstantNTP(web_contents_);
-}
-
 bool SearchIPCRouterPolicyImpl::ShouldProcessDeleteMostVisitedItem() {
   return !is_incognito_ && search::IsInstantNTP(web_contents_);
 }
@@ -57,14 +53,6 @@ bool SearchIPCRouterPolicyImpl::ShouldProcessChromeIdentityCheck() {
 
 bool SearchIPCRouterPolicyImpl::ShouldProcessHistorySyncCheck() {
   return !is_incognito_ && search::IsInstantNTP(web_contents_);
-}
-
-bool SearchIPCRouterPolicyImpl::ShouldSendSetPromoInformation() {
-  return !is_incognito_ && search::IsInstantNTP(web_contents_);
-}
-
-bool SearchIPCRouterPolicyImpl::ShouldSendSetDisplayInstantResults() {
-  return !is_incognito_;
 }
 
 bool SearchIPCRouterPolicyImpl::ShouldSendSetSuggestionToPrefetch() {

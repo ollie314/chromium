@@ -7,8 +7,12 @@
 #include <limits.h>
 #include <stddef.h>
 
+#include <memory>
+#include <utility>
+
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/values.h"
 #include "chrome/browser/net/predictor.h"
@@ -104,23 +108,6 @@ void Referrer::DeleteLeastUseful() {
     erase(least_useful_url);
 }
 
-bool Referrer::Trim(double reduce_rate, double threshold) {
-  std::vector<GURL> discarded_urls;
-  for (SubresourceMap::iterator it = begin(); it != end(); ++it) {
-    if (!it->second.Trim(reduce_rate, threshold))
-      discarded_urls.push_back(it->first);
-  }
-  for (size_t i = 0; i < discarded_urls.size(); ++i)
-    erase(discarded_urls[i]);
-  return size() > 0;
-}
-
-bool ReferrerValue::Trim(double reduce_rate, double threshold) {
-  subresource_use_rate_ *= reduce_rate;
-  return subresource_use_rate_ > threshold;
-}
-
-
 void Referrer::Deserialize(const base::Value& value) {
   if (value.GetType() != base::Value::TYPE_LIST)
     return;
@@ -146,15 +133,11 @@ void Referrer::Deserialize(const base::Value& value) {
   }
 }
 
-base::Value* Referrer::Serialize() const {
-  base::ListValue* subresource_list(new base::ListValue);
+std::unique_ptr<base::ListValue> Referrer::Serialize() const {
+  auto subresource_list = base::MakeUnique<base::ListValue>();
   for (const_iterator it = begin(); it != end(); ++it) {
-    base::StringValue* url_spec(new base::StringValue(it->first.spec()));
-    base::FundamentalValue* rate(new base::FundamentalValue(
-        it->second.subresource_use_rate()));
-
-    subresource_list->Append(url_spec);
-    subresource_list->Append(rate);
+    subresource_list->AppendString(it->first.spec());
+    subresource_list->AppendDouble(it->second.subresource_use_rate());
   }
   return subresource_list;
 }

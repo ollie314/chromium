@@ -16,6 +16,7 @@
 #include "base/memory/linked_ptr.h"
 #include "chrome/test/chromedriver/chrome/devtools_client.h"
 #include "chrome/test/chromedriver/net/sync_websocket_factory.h"
+#include "chrome/test/chromedriver/net/timeout.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -103,6 +104,9 @@ class DevToolsClientImpl : public DevToolsClient {
       const base::DictionaryValue& params,
       const Timeout* timeout,
       std::unique_ptr<base::DictionaryValue>* result) override;
+  Status SendCommandAndIgnoreResponse(
+      const std::string& method,
+      const base::DictionaryValue& params) override;
   void AddListener(DevToolsEventListener* listener) override;
   Status HandleEventsUntil(const ConditionalFunc& conditional_func,
                            const Timeout& timeout) override;
@@ -127,6 +131,7 @@ class DevToolsClientImpl : public DevToolsClient {
     ResponseState state;
     std::string method;
     internal::InspectorCommandResponse response;
+    Timeout command_timeout;
   };
   typedef std::map<int, linked_ptr<ResponseInfo> > ResponseInfoMap;
 
@@ -134,6 +139,7 @@ class DevToolsClientImpl : public DevToolsClient {
       const std::string& method,
       const base::DictionaryValue& params,
       std::unique_ptr<base::DictionaryValue>* result,
+      bool expect_response,
       bool wait_for_response,
       const Timeout* timeout);
   Status ProcessNextMessage(int expected_id, const Timeout& timeout);

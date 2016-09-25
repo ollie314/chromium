@@ -4,7 +4,11 @@
 
 #include "base/task_scheduler/sequence.h"
 
+#include <utility>
+
+#include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -13,6 +17,31 @@ namespace internal {
 
 namespace {
 
+// A class that pushes a Task to a Sequence in its destructor.
+class PushTaskInDestructor {
+ public:
+  explicit PushTaskInDestructor(scoped_refptr<Sequence> sequence)
+      : sequence_(std::move(sequence)) {}
+  PushTaskInDestructor(PushTaskInDestructor&&) = default;
+  PushTaskInDestructor& operator=(PushTaskInDestructor&&) = default;
+
+  ~PushTaskInDestructor() {
+    // |sequence_| may be nullptr in a temporary instance of this class.
+    if (sequence_) {
+      EXPECT_FALSE(sequence_->PeekTask());
+      sequence_->PushTask(WrapUnique(
+          new Task(FROM_HERE, Closure(), TaskTraits(), TimeDelta())));
+    }
+  }
+
+ private:
+  scoped_refptr<Sequence> sequence_;
+
+  DISALLOW_COPY_AND_ASSIGN(PushTaskInDestructor);
+};
+
+void DoNothing(const PushTaskInDestructor&) {}
+
 class TaskSchedulerSequenceTest : public testing::Test {
  public:
   TaskSchedulerSequenceTest()
@@ -20,27 +49,27 @@ class TaskSchedulerSequenceTest : public testing::Test {
             new Task(FROM_HERE,
                      Closure(),
                      TaskTraits().WithPriority(TaskPriority::BACKGROUND),
-                     TimeTicks())),
+                     TimeDelta())),
         task_b_owned_(
             new Task(FROM_HERE,
                      Closure(),
                      TaskTraits().WithPriority(TaskPriority::USER_VISIBLE),
-                     TimeTicks())),
+                     TimeDelta())),
         task_c_owned_(
             new Task(FROM_HERE,
                      Closure(),
                      TaskTraits().WithPriority(TaskPriority::USER_BLOCKING),
-                     TimeTicks())),
+                     TimeDelta())),
         task_d_owned_(
             new Task(FROM_HERE,
                      Closure(),
                      TaskTraits().WithPriority(TaskPriority::USER_BLOCKING),
-                     TimeTicks())),
+                     TimeDelta())),
         task_e_owned_(
             new Task(FROM_HERE,
                      Closure(),
                      TaskTraits().WithPriority(TaskPriority::BACKGROUND),
-                     TimeTicks())),
+                     TimeDelta())),
         task_a_(task_a_owned_.get()),
         task_b_(task_b_owned_.get()),
         task_c_(task_c_owned_.get()),
@@ -67,13 +96,6 @@ class TaskSchedulerSequenceTest : public testing::Test {
  private:
   DISALLOW_COPY_AND_ASSIGN(TaskSchedulerSequenceTest);
 };
-
-void ExpectSortKey(TaskPriority expected_priority,
-                   TimeTicks expected_sequenced_time,
-                   const SequenceSortKey& actual_sort_key) {
-  EXPECT_EQ(expected_priority, actual_sort_key.priority);
-  EXPECT_EQ(expected_sequenced_time, actual_sort_key.next_task_sequenced_time);
-}
 
 }  // namespace
 
@@ -133,56 +155,79 @@ TEST_F(TaskSchedulerSequenceTest, GetSortKey) {
   // Push task A in the sequence. The highest priority is from task A
   // (BACKGROUND). Task A is in front of the sequence.
   sequence->PushTask(std::move(task_a_owned_));
-  ExpectSortKey(TaskPriority::BACKGROUND, task_a_->sequenced_time,
-                sequence->GetSortKey());
+  EXPECT_EQ(SequenceSortKey(TaskPriority::BACKGROUND, task_a_->sequenced_time),
+            sequence->GetSortKey());
 
   // Push task B in the sequence. The highest priority is from task B
   // (USER_VISIBLE). Task A is still in front of the sequence.
   sequence->PushTask(std::move(task_b_owned_));
-  ExpectSortKey(TaskPriority::USER_VISIBLE, task_a_->sequenced_time,
-                sequence->GetSortKey());
+  EXPECT_EQ(
+      SequenceSortKey(TaskPriority::USER_VISIBLE, task_a_->sequenced_time),
+      sequence->GetSortKey());
 
   // Push task C in the sequence. The highest priority is from task C
   // (USER_BLOCKING). Task A is still in front of the sequence.
   sequence->PushTask(std::move(task_c_owned_));
-  ExpectSortKey(TaskPriority::USER_BLOCKING, task_a_->sequenced_time,
-                sequence->GetSortKey());
+  EXPECT_EQ(
+      SequenceSortKey(TaskPriority::USER_BLOCKING, task_a_->sequenced_time),
+      sequence->GetSortKey());
 
   // Push task D in the sequence. The highest priority is from tasks C/D
   // (USER_BLOCKING). Task A is still in front of the sequence.
   sequence->PushTask(std::move(task_d_owned_));
-  ExpectSortKey(TaskPriority::USER_BLOCKING, task_a_->sequenced_time,
-                sequence->GetSortKey());
+  EXPECT_EQ(
+      SequenceSortKey(TaskPriority::USER_BLOCKING, task_a_->sequenced_time),
+      sequence->GetSortKey());
 
   // Pop task A. The highest priority is still USER_BLOCKING. The task in front
   // of the sequence is now task B.
   sequence->PopTask();
-  ExpectSortKey(TaskPriority::USER_BLOCKING, task_b_->sequenced_time,
-                sequence->GetSortKey());
+  EXPECT_EQ(
+      SequenceSortKey(TaskPriority::USER_BLOCKING, task_b_->sequenced_time),
+      sequence->GetSortKey());
 
   // Pop task B. The highest priority is still USER_BLOCKING. The task in front
   // of the sequence is now task C.
   sequence->PopTask();
-  ExpectSortKey(TaskPriority::USER_BLOCKING, task_c_->sequenced_time,
-                sequence->GetSortKey());
+  EXPECT_EQ(
+      SequenceSortKey(TaskPriority::USER_BLOCKING, task_c_->sequenced_time),
+      sequence->GetSortKey());
 
   // Pop task C. The highest priority is still USER_BLOCKING. The task in front
   // of the sequence is now task D.
   sequence->PopTask();
-  ExpectSortKey(TaskPriority::USER_BLOCKING, task_d_->sequenced_time,
-                sequence->GetSortKey());
+  EXPECT_EQ(
+      SequenceSortKey(TaskPriority::USER_BLOCKING, task_d_->sequenced_time),
+      sequence->GetSortKey());
 
   // Push task E in the sequence. The highest priority is still USER_BLOCKING.
   // The task in front of the sequence is still task D.
   sequence->PushTask(std::move(task_e_owned_));
-  ExpectSortKey(TaskPriority::USER_BLOCKING, task_d_->sequenced_time,
-                sequence->GetSortKey());
+  EXPECT_EQ(
+      SequenceSortKey(TaskPriority::USER_BLOCKING, task_d_->sequenced_time),
+      sequence->GetSortKey());
 
   // Pop task D. The highest priority is now from task E (BACKGROUND). The
   // task in front of the sequence is now task E.
   sequence->PopTask();
-  ExpectSortKey(TaskPriority::BACKGROUND, task_e_->sequenced_time,
-                sequence->GetSortKey());
+  EXPECT_EQ(SequenceSortKey(TaskPriority::BACKGROUND, task_e_->sequenced_time),
+            sequence->GetSortKey());
+}
+
+TEST_F(TaskSchedulerSequenceTest, CanPushTaskInTaskDestructor) {
+  scoped_refptr<Sequence> sequence(new Sequence);
+  sequence->PushTask(MakeUnique<Task>(
+      FROM_HERE, Bind(&DoNothing, PushTaskInDestructor(sequence)), TaskTraits(),
+      TimeDelta()));
+
+  // PushTask() is invoked on |sequence| when the popped Task is destroyed. If
+  // PopTask() destroys the Task outside the scope of its lock as expected, no
+  // deadlock will occur when PushTask() tries to acquire the Sequence's lock.
+  sequence->PopTask();
+
+  // Verify that |sequence| contains exactly one Task.
+  EXPECT_TRUE(sequence->PeekTask());
+  EXPECT_TRUE(sequence->PopTask());
 }
 
 }  // namespace internal

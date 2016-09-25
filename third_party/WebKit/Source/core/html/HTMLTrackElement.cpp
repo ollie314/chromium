@@ -32,13 +32,13 @@
 #include "core/html/CrossOriginAttribute.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/track/LoadableTextTrack.h"
-#include "platform/Logging.h"
+
+#define TRACK_LOG_LEVEL 3
 
 namespace blink {
 
 using namespace HTMLNames;
 
-#if !LOG_DISABLED
 static String urlForLoggingTrack(const KURL& url)
 {
     static const unsigned maximumURLLengthForLogging = 128;
@@ -47,13 +47,12 @@ static String urlForLoggingTrack(const KURL& url)
         return url.getString();
     return url.getString().substring(0, maximumURLLengthForLogging) + "...";
 }
-#endif
 
 inline HTMLTrackElement::HTMLTrackElement(Document& document)
     : HTMLElement(trackTag, document)
     , m_loadTimer(this, &HTMLTrackElement::loadTimerFired)
 {
-    WTF_LOG(Media, "HTMLTrackElement::HTMLTrackElement - %p", this);
+    DVLOG(TRACK_LOG_LEVEL) << "HTMLTrackElement - " << (void*)this;
 }
 
 DEFINE_NODE_FACTORY(HTMLTrackElement)
@@ -64,7 +63,7 @@ HTMLTrackElement::~HTMLTrackElement()
 
 Node::InsertionNotificationRequest HTMLTrackElement::insertedInto(ContainerNode* insertionPoint)
 {
-    WTF_LOG(Media, "HTMLTrackElement::insertedInto");
+    DVLOG(TRACK_LOG_LEVEL) << "insertedInto";
 
     // Since we've moved to a new parent, we may now be able to load.
     scheduleLoad();
@@ -94,7 +93,15 @@ void HTMLTrackElement::parseAttribute(const QualifiedName& name, const AtomicStr
     // 4.8.10.12.3 Sourcing out-of-band text tracks
     // As the kind, label, and srclang attributes are set, changed, or removed, the text track must update accordingly...
     } else if (name == kindAttr) {
-        track()->setKind(value.lower());
+        AtomicString lowerCaseValue = value.lower();
+        // 'missing value default' ("subtitles")
+        if (lowerCaseValue.isNull())
+            lowerCaseValue = TextTrack::subtitlesKeyword();
+        // 'invalid value default' ("metadata")
+        else if (!TextTrack::isValidKindKeyword(lowerCaseValue))
+            lowerCaseValue = TextTrack::metadataKeyword();
+
+        track()->setKind(lowerCaseValue);
     } else if (name == labelAttr) {
         track()->setLabel(value);
     } else if (name == srclangAttr) {
@@ -137,7 +144,7 @@ bool HTMLTrackElement::isURLAttribute(const Attribute& attribute) const
 
 void HTMLTrackElement::scheduleLoad()
 {
-    WTF_LOG(Media, "HTMLTrackElement::scheduleLoad");
+    DVLOG(TRACK_LOG_LEVEL) << "scheduleLoad";
 
     // 1. If another occurrence of this algorithm is already running for this text track and its track element,
     // abort these steps, letting that other algorithm take care of this element.
@@ -160,12 +167,12 @@ void HTMLTrackElement::scheduleLoad()
     // FIXME: We use a timer to approximate a "stable state" - i.e. this is not 100% per spec.
 }
 
-void HTMLTrackElement::loadTimerFired(Timer<HTMLTrackElement>*)
+void HTMLTrackElement::loadTimerFired(TimerBase*)
 {
-    WTF_LOG(Media, "HTMLTrackElement::loadTimerFired");
+    DVLOG(TRACK_LOG_LEVEL) << "loadTimerFired";
 
     // 6. [X] Set the text track readiness state to loading.
-    setReadyState(LOADING);
+    setReadyState(kLoading);
 
     // 7. [X] Let URL be the track URL of the track element.
     KURL url = getNonEmptyURLAttribute(srcAttr);
@@ -185,7 +192,7 @@ void HTMLTrackElement::loadTimerFired(Timer<HTMLTrackElement>*)
     }
 
     if (url == m_url) {
-        ASSERT(m_loader);
+        DCHECK(m_loader);
         switch (m_loader->loadState()) {
         case TextTrackLoader::Idle:
         case TextTrackLoader::Loading:
@@ -198,7 +205,7 @@ void HTMLTrackElement::loadTimerFired(Timer<HTMLTrackElement>*)
             didCompleteLoad(Failure);
             break;
         default:
-            ASSERT_NOT_REACHED();
+            NOTREACHED();
         }
         return;
     }
@@ -223,7 +230,7 @@ bool HTMLTrackElement::canLoadUrl(const KURL& url)
         return false;
 
     if (!document().contentSecurityPolicy()->allowMediaFromSource(url)) {
-        WTF_LOG(Media, "HTMLTrackElement::canLoadUrl(%s) -> rejected by Content Security Policy", urlForLoggingTrack(url).utf8().data());
+        DVLOG(TRACK_LOG_LEVEL) << "canLoadUrl(" << urlForLoggingTrack(url) << ") -> rejected by Content Security Policy";
         return false;
     }
 
@@ -249,7 +256,7 @@ void HTMLTrackElement::didCompleteLoad(LoadStatus status)
     // task that is queued by the networking task source in which the aforementioned problem is found must change the
     // text track readiness state to failed to load and fire a simple event named error at the track element.
     if (status == Failure) {
-        setReadyState(TRACK_ERROR);
+        setReadyState(kError);
         dispatchEvent(Event::create(EventTypeNames::error));
         return;
     }
@@ -257,14 +264,14 @@ void HTMLTrackElement::didCompleteLoad(LoadStatus status)
     // If the fetching algorithm does not fail, and the file was successfully processed, then the final task that is
     // queued by the networking task source, after it has finished parsing the data, must change the text track
     // readiness state to loaded, and fire a simple event named load at the track element.
-    setReadyState(LOADED);
+    setReadyState(kLoaded);
     dispatchEvent(Event::create(EventTypeNames::load));
 }
 
 void HTMLTrackElement::newCuesAvailable(TextTrackLoader* loader)
 {
-    ASSERT_UNUSED(loader, m_loader == loader);
-    ASSERT(m_track);
+    DCHECK_EQ(m_loader, loader);
+    DCHECK(m_track);
 
     HeapVector<Member<TextTrackCue>> newCues;
     m_loader->getNewCues(newCues);
@@ -274,8 +281,8 @@ void HTMLTrackElement::newCuesAvailable(TextTrackLoader* loader)
 
 void HTMLTrackElement::newRegionsAvailable(TextTrackLoader* loader)
 {
-    ASSERT_UNUSED(loader, m_loader == loader);
-    ASSERT(m_track);
+    DCHECK_EQ(m_loader, loader);
+    DCHECK(m_track);
 
     HeapVector<Member<VTTRegion>> newRegions;
     m_loader->getNewRegions(newRegions);
@@ -285,16 +292,16 @@ void HTMLTrackElement::newRegionsAvailable(TextTrackLoader* loader)
 
 void HTMLTrackElement::cueLoadingCompleted(TextTrackLoader* loader, bool loadingFailed)
 {
-    ASSERT_UNUSED(loader, m_loader == loader);
+    DCHECK_EQ(m_loader, loader);
 
     didCompleteLoad(loadingFailed ? Failure : Success);
 }
 
 // NOTE: The values in the TextTrack::ReadinessState enum must stay in sync with those in HTMLTrackElement::ReadyState.
-static_assert(HTMLTrackElement::NONE == static_cast<HTMLTrackElement::ReadyState>(TextTrack::NotLoaded), "HTMLTrackElement::NONE should be in sync with TextTrack::NotLoaded");
-static_assert(HTMLTrackElement::LOADING == static_cast<HTMLTrackElement::ReadyState>(TextTrack::Loading), "HTMLTrackElement::LOADING should be in sync with TextTrack::Loading");
-static_assert(HTMLTrackElement::LOADED == static_cast<HTMLTrackElement::ReadyState>(TextTrack::Loaded), "HTMLTrackElement::LOADED should be in sync with TextTrack::Loaded");
-static_assert(HTMLTrackElement::TRACK_ERROR == static_cast<HTMLTrackElement::ReadyState>(TextTrack::FailedToLoad), "HTMLTrackElement::TRACK_ERROR should be in sync with TextTrack::FailedToLoad");
+static_assert(HTMLTrackElement::kNone == static_cast<HTMLTrackElement::ReadyState>(TextTrack::NotLoaded), "HTMLTrackElement::kNone should be in sync with TextTrack::NotLoaded");
+static_assert(HTMLTrackElement::kLoading == static_cast<HTMLTrackElement::ReadyState>(TextTrack::Loading), "HTMLTrackElement::kLoading should be in sync with TextTrack::Loading");
+static_assert(HTMLTrackElement::kLoaded == static_cast<HTMLTrackElement::ReadyState>(TextTrack::Loaded), "HTMLTrackElement::kLoaded should be in sync with TextTrack::Loaded");
+static_assert(HTMLTrackElement::kError == static_cast<HTMLTrackElement::ReadyState>(TextTrack::FailedToLoad), "HTMLTrackElement::kError should be in sync with TextTrack::FailedToLoad");
 
 void HTMLTrackElement::setReadyState(ReadyState state)
 {

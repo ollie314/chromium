@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "media/base/media_log.h"
+#include "media/blink/buffered_data_source_host_impl.h"
 #include "media/blink/multibuffer_reader.h"
 #include "net/base/net_errors.h"
 
@@ -65,7 +66,7 @@ class MultibufferDataSource::ReadOperation {
 
   // Runs |callback_| with the given |result|, deleting the operation
   // afterwards.
-  static void Run(scoped_ptr<ReadOperation> read_op, int result);
+  static void Run(std::unique_ptr<ReadOperation> read_op, int result);
 
   int64_t position() { return position_; }
   int size() { return size_; }
@@ -95,7 +96,7 @@ MultibufferDataSource::ReadOperation::~ReadOperation() {
 
 // static
 void MultibufferDataSource::ReadOperation::Run(
-    scoped_ptr<ReadOperation> read_op,
+    std::unique_ptr<ReadOperation> read_op,
     int result) {
   base::ResetAndReturn(&read_op->callback_).Run(result);
 }
@@ -113,6 +114,7 @@ MultibufferDataSource::MultibufferDataSource(
       total_bytes_(kPositionNotSpecified),
       streaming_(false),
       loading_(false),
+      failed_(false),
       render_task_runner_(task_runner),
       url_index_(url_index),
       frame_(frame),
@@ -185,17 +187,16 @@ void MultibufferDataSource::OnRedirect(
     const scoped_refptr<UrlData>& destination) {
   if (!destination) {
     // A failure occured.
+    failed_ = true;
     if (!init_cb_.is_null()) {
       render_task_runner_->PostTask(
           FROM_HERE,
           base::Bind(&MultibufferDataSource::StartCallback, weak_ptr_));
     } else {
-      {
-        base::AutoLock auto_lock(lock_);
-        StopInternal_Locked();
-      }
-      StopLoader();
+      base::AutoLock auto_lock(lock_);
+      StopInternal_Locked();
     }
+    StopLoader();
     return;
   }
   if (url_data_->url().GetOrigin() != destination->url().GetOrigin()) {
@@ -232,7 +233,7 @@ void MultibufferDataSource::OnRedirect(
 }
 
 void MultibufferDataSource::SetPreload(Preload preload) {
-  DVLOG(1) << __FUNCTION__ << "(" << preload << ")";
+  DVLOG(1) << __func__ << "(" << preload << ")";
   DCHECK(render_task_runner_->BelongsToCurrentThread());
   preload_ = preload;
   UpdateBufferSizes();
@@ -247,8 +248,8 @@ void MultibufferDataSource::SetBufferingStrategy(
 
 bool MultibufferDataSource::HasSingleOrigin() {
   DCHECK(render_task_runner_->BelongsToCurrentThread());
-  DCHECK(init_cb_.is_null() && reader_.get())
-      << "Initialize() must complete before calling HasSingleOrigin()";
+  // Before initialization completes there is no risk of leaking data. Callers
+  // are required to order checks such that this isn't a race.
   return single_origin_;
 }
 
@@ -258,20 +259,9 @@ bool MultibufferDataSource::DidPassCORSAccessCheck() const {
   // If init_cb is set, we initialization is not finished yet.
   if (!init_cb_.is_null())
     return false;
-  // Loader will be false if there was a failure.
-  if (!reader_)
+  if (failed_)
     return false;
   return true;
-}
-
-void MultibufferDataSource::Abort() {
-  DCHECK(render_task_runner_->BelongsToCurrentThread());
-  {
-    base::AutoLock auto_lock(lock_);
-    StopInternal_Locked();
-  }
-  StopLoader();
-  frame_ = NULL;
 }
 
 void MultibufferDataSource::MediaPlaybackRateChanged(double playback_rate) {
@@ -308,6 +298,17 @@ void MultibufferDataSource::Stop() {
                                            weak_factory_.GetWeakPtr()));
 }
 
+void MultibufferDataSource::Abort() {
+  base::AutoLock auto_lock(lock_);
+  DCHECK(init_cb_.is_null());
+  if (read_op_)
+    ReadOperation::Run(std::move(read_op_), kAborted);
+
+  // Abort does not call StopLoader() since it is typically called prior to a
+  // seek or suspend. Let the loader logic make the decision about whether a new
+  // loader is necessary upon the seek or resume.
+}
+
 void MultibufferDataSource::SetBitrate(int bitrate) {
   render_task_runner_->PostTask(
       FROM_HERE, base::Bind(&MultibufferDataSource::SetBitrateTask,
@@ -328,6 +329,10 @@ int64_t MultibufferDataSource::GetMemoryUsage() const {
   // TODO(hubbe): Make more accurate when url_data_ is shared.
   return url_data_->CachedSize()
          << url_data_->multibuffer()->block_size_shift();
+}
+
+GURL MultibufferDataSource::GetUrlAfterRedirects() const {
+  return url_data_->url();
 }
 
 void MultibufferDataSource::Read(int64_t position,
@@ -377,9 +382,8 @@ void MultibufferDataSource::ReadTask() {
 
   base::AutoLock auto_lock(lock_);
   int bytes_read = 0;
-  if (stop_signal_received_)
+  if (stop_signal_received_ || !read_op_)
     return;
-  DCHECK(read_op_);
   DCHECK(read_op_->size());
 
   if (!reader_) {
@@ -398,11 +402,21 @@ void MultibufferDataSource::ReadTask() {
     bytes_read =
         static_cast<int>(std::min<int64_t>(available, read_op_->size()));
     bytes_read = reader_->TryRead(read_op_->data(), bytes_read);
+
+    if (bytes_read == 0 && total_bytes_ == kPositionNotSpecified) {
+      // We've reached the end of the file and we didn't know the total size
+      // before. Update the total size so Read()s past the end of the file will
+      // fail like they would if we had known the file size at the beginning.
+      total_bytes_ = reader_->Tell();
+      if (total_bytes_ != kPositionNotSpecified)
+        host_->SetTotalBytes(total_bytes_);
+    }
+
     ReadOperation::Run(std::move(read_op_), bytes_read);
   } else {
     reader_->Wait(1, base::Bind(&MultibufferDataSource::ReadTask,
                                 weak_factory_.GetWeakPtr()));
-    UpdateLoadingState(false);
+    UpdateLoadingState_Locked(false);
   }
 }
 
@@ -493,35 +507,39 @@ void MultibufferDataSource::StartCallback() {
 
   // Even if data is cached, say that we're loading at this point for
   // compatibility.
-  UpdateLoadingState(true);
+  UpdateLoadingState_Locked(true);
 }
 
 void MultibufferDataSource::ProgressCallback(int64_t begin, int64_t end) {
-  DVLOG(1) << __FUNCTION__ << "(" << begin << ", " << end << ")";
+  DVLOG(1) << __func__ << "(" << begin << ", " << end << ")";
   DCHECK(render_task_runner_->BelongsToCurrentThread());
 
   if (assume_fully_buffered())
     return;
 
+  base::AutoLock auto_lock(lock_);
+
   if (end > begin) {
     // TODO(scherkus): we shouldn't have to lock to signal host(), see
     // http://crbug.com/113712 for details.
-    base::AutoLock auto_lock(lock_);
     if (stop_signal_received_)
       return;
 
     host_->AddBufferedByteRange(begin, end);
   }
 
-  UpdateLoadingState(false);
+  UpdateLoadingState_Locked(false);
 }
 
-void MultibufferDataSource::UpdateLoadingState(bool force_loading) {
-  DVLOG(1) << __FUNCTION__;
+void MultibufferDataSource::UpdateLoadingState_Locked(bool force_loading) {
+  DVLOG(1) << __func__;
+  lock_.AssertAcquired();
   if (assume_fully_buffered())
     return;
   // Update loading state.
   bool is_loading = !!reader_ && reader_->IsLoading();
+  if (read_op_)
+    is_loading = true;
   if (force_loading || is_loading != loading_) {
     loading_ = is_loading || force_loading;
 
@@ -535,7 +553,7 @@ void MultibufferDataSource::UpdateLoadingState(bool force_loading) {
 }
 
 void MultibufferDataSource::UpdateBufferSizes() {
-  DVLOG(1) << __FUNCTION__;
+  DVLOG(1) << __func__;
   if (!reader_)
     return;
 
@@ -567,16 +585,25 @@ void MultibufferDataSource::UpdateBufferSizes() {
 
   int64_t preload = clamp(kTargetSecondsBufferedAhead * bytes_per_second,
                           kMinBufferPreload, kMaxBufferPreload);
+  int64_t preload_high = preload + kPreloadHighExtra;
+
+  // Assert that kMaxBufferSize is big enough that the subtraction on the next
+  // line cannot go negative.
+  static_assert(kMaxBufferSize > kMaxBufferPreload + kPreloadHighExtra,
+                "kMaxBufferSize too small to contain preload.");
   int64_t back_buffer = clamp(kTargetSecondsBufferedBehind * bytes_per_second,
-                              kMinBufferPreload, kMaxBufferPreload);
-  int64_t pin_forwards = kMaxBufferSize - back_buffer;
-  DCHECK_LE(preload + kPreloadHighExtra, pin_forwards);
-  reader_->SetMaxBuffer(back_buffer, preload + kPreloadHighExtra);
+                              kMinBufferPreload, kMaxBufferSize - preload_high);
+  int64_t buffer_size =
+      std::min((kTargetSecondsBufferedAhead + kTargetSecondsBufferedBehind) *
+                   bytes_per_second,
+               kMaxBufferSize);
+  reader_->SetMaxBuffer(buffer_size);
+  reader_->SetPinRange(back_buffer, kMaxBufferPreload + kPreloadHighExtra);
 
   if (preload_ == METADATA) {
     reader_->SetPreload(0, 0);
   } else {
-    reader_->SetPreload(preload + kPreloadHighExtra, preload);
+    reader_->SetPreload(preload_high, preload);
   }
 }
 

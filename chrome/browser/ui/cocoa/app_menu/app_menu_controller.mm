@@ -10,11 +10,11 @@
 #include "base/mac/bundle_locations.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/scoped_observer.h"
 #include "base/strings/string16.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/profiles/profile.h"
@@ -26,7 +26,6 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
-#import "chrome/browser/ui/cocoa/encoding_menu_controller_delegate_mac.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
 #import "chrome/browser/ui/cocoa/l10n_util.h"
@@ -36,7 +35,7 @@
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_observer.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/ui/zoom/zoom_event_manager.h"
+#include "components/zoom/zoom_event_manager.h"
 #include "content/public/browser/user_metrics.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
@@ -68,7 +67,6 @@ using base::UserMetricsAction;
 - (void)performCommandDispatch:(NSNumber*)tag;
 - (NSButton*)zoomDisplay;
 - (void)menu:(NSMenu*)menu willHighlightItem:(NSMenuItem*)item;
-- (void)removeAllItems:(NSMenu*)menu;
 - (NSMenu*)recentTabsSubmenu;
 - (RecentTabsSubMenuModel*)recentTabsMenuModel;
 - (int)maxWidthForMenuModel:(ui::MenuModel*)model
@@ -80,8 +78,9 @@ namespace AppMenuControllerInternal {
 // A C++ delegate that handles the accelerators in the app menu.
 class AcceleratorDelegate : public ui::AcceleratorProvider {
  public:
-  bool GetAcceleratorForCommandId(int command_id,
-                                  ui::Accelerator* out_accelerator) override {
+  bool GetAcceleratorForCommandId(
+      int command_id,
+      ui::Accelerator* out_accelerator) const override {
     AcceleratorsCocoa* keymap = AcceleratorsCocoa::GetInstance();
     const ui::Accelerator* accelerator =
         keymap->GetAcceleratorForCommand(command_id);
@@ -95,7 +94,7 @@ class AcceleratorDelegate : public ui::AcceleratorProvider {
 class ZoomLevelObserver {
  public:
   ZoomLevelObserver(AppMenuController* controller,
-                    ui_zoom::ZoomEventManager* manager)
+                    zoom::ZoomEventManager* manager)
       : controller_(controller) {
     subscription_ = manager->AddZoomLevelChangedCallback(
         base::Bind(&ZoomLevelObserver::OnZoomLevelChanged,
@@ -142,10 +141,9 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
     // Edge case: If the resize is caused by an action being added while the
     // menu is open, we need to wait for both toolbars to be updated. This can
     // happen if a user's data is synced with the menu open.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&ToolbarActionsBarObserverHelper::UpdateSubmenu,
-                   weak_ptr_factory_.GetWeakPtr()));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&ToolbarActionsBarObserverHelper::UpdateSubmenu,
+                              weak_ptr_factory_.GetWeakPtr()));
   }
 
   void UpdateSubmenu() {
@@ -352,11 +350,8 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
 - (void)menuWillOpen:(NSMenu*)menu {
   [super menuWillOpen:menu];
 
-  zoom_level_observer_.reset(
-      new AppMenuControllerInternal::ZoomLevelObserver(
-          self,
-          ui_zoom::ZoomEventManager::GetForBrowserContext(
-              browser_->profile())));
+  zoom_level_observer_.reset(new AppMenuControllerInternal::ZoomLevelObserver(
+      self, zoom::ZoomEventManager::GetForBrowserContext(browser_->profile())));
   NSString* title = base::SysUTF16ToNSString(
       [self appMenuModel]->GetLabelForCommandId(IDC_ZOOM_PERCENT_DISPLAY));
   [[[buttonViewController_ zoomItem] viewWithTag:IDC_ZOOM_PERCENT_DISPLAY]
@@ -401,7 +396,7 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
   DCHECK(!browserActionsController_.get());
 
   // First empty out the menu and create a new model.
-  [self removeAllItems:menu];
+  [menu removeAllItems];
   [self createModel];
   [menu setMinimumWidth:0];
 
@@ -409,7 +404,7 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
   // start, so simply copy the items.
   NSMenu* newMenu = [self menuFromModel:model_];
   NSArray* itemArray = [newMenu itemArray];
-  [self removeAllItems:newMenu];
+  [newMenu removeAllItems];
   for (NSMenuItem* item in itemArray) {
     [menu addItem:item];
   }
@@ -542,13 +537,6 @@ class ToolbarActionsBarObserverHelper : public ToolbarActionsBarObserver {
   if (browserActionsController_.get()) {
     [browserActionsController_ setFocusedInOverflow:
         (item == browserActionsMenuItem_)];
-  }
-}
-
-// -[NSMenu removeAllItems] is only available on 10.6+.
-- (void)removeAllItems:(NSMenu*)menu {
-  while ([menu numberOfItems]) {
-    [menu removeItemAtIndex:0];
   }
 }
 

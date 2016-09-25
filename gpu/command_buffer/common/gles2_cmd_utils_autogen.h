@@ -12,6 +12,7 @@
 #define GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_UTILS_AUTOGEN_H_
 
 static std::string GetStringAttachment(uint32_t value);
+static std::string GetStringAttachmentQuery(uint32_t value);
 static std::string GetStringBackbufferAttachment(uint32_t value);
 static std::string GetStringBlitFilter(uint32_t value);
 static std::string GetStringBufferMode(uint32_t value);
@@ -32,8 +33,8 @@ static std::string GetStringDstBlendFactor(uint32_t value);
 static std::string GetStringEquation(uint32_t value);
 static std::string GetStringFaceMode(uint32_t value);
 static std::string GetStringFaceType(uint32_t value);
-static std::string GetStringFrameBufferParameter(uint32_t value);
-static std::string GetStringFrameBufferTarget(uint32_t value);
+static std::string GetStringFramebufferParameter(uint32_t value);
+static std::string GetStringFramebufferTarget(uint32_t value);
 static std::string GetStringGLState(uint32_t value);
 static std::string GetStringGetMaxIndexType(uint32_t value);
 static std::string GetStringGetTexParamTarget(uint32_t value);
@@ -77,7 +78,6 @@ static std::string GetStringShaderType(uint32_t value);
 static std::string GetStringSrcBlendFactor(uint32_t value);
 static std::string GetStringStencilOp(uint32_t value);
 static std::string GetStringStringType(uint32_t value);
-static std::string GetStringSubscriptionTarget(uint32_t value);
 static std::string GetStringSyncCondition(uint32_t value);
 static std::string GetStringSyncParameter(uint32_t value);
 static std::string GetStringTexture3DTarget(uint32_t value);
@@ -107,7 +107,6 @@ static std::string GetStringTransformFeedbackBindTarget(uint32_t value);
 static std::string GetStringTransformFeedbackPrimitiveMode(uint32_t value);
 static std::string GetStringUniformBlockParameter(uint32_t value);
 static std::string GetStringUniformParameter(uint32_t value);
-static std::string GetStringValueBufferTarget(uint32_t value);
 static std::string GetStringVertexAttribIType(uint32_t value);
 static std::string GetStringVertexAttribType(uint32_t value);
 static std::string GetStringVertexAttribute(uint32_t value);

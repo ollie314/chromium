@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.page import page_test
+from telemetry.page import legacy_page_test
 from telemetry.timeline import model
 from telemetry.timeline import tracing_config
 from telemetry.value import scalar
@@ -10,7 +10,7 @@ from telemetry.value import scalar
 from metrics import power
 
 
-class ImageDecoding(page_test.PageTest):
+class ImageDecoding(legacy_page_test.LegacyPageTest):
 
   def __init__(self):
     super(ImageDecoding, self).__init__()
@@ -40,14 +40,15 @@ class ImageDecoding(page_test.PageTest):
     # the ref builds are updated. crbug.com/386847
     # FIXME: Remove the devtools.timeline category when impl-side painting is
     # on everywhere.
-    config.tracing_category_filter.AddDisabledByDefault(
+    config.chrome_trace_config.category_filter.AddDisabledByDefault(
         'disabled-by-default-devtools.timeline')
     for c in ['blink', 'devtools.timeline', 'webkit.console', 'blink.console']:
-      config.tracing_category_filter.AddIncludedCategory(c)
+      config.chrome_trace_config.category_filter.AddIncludedCategory(c)
     config.enable_chrome_trace = True
     tab.browser.platform.tracing_controller.StartTracing(config)
 
   def StopBrowserAfterPage(self, browser, page):
+    del page  # unused
     return not browser.tabs[0].ExecuteJavaScript("""
         window.chrome &&
             chrome.gpuBenchmarking &&

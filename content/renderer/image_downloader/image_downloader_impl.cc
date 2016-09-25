@@ -7,17 +7,17 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/child/image_decoder.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/renderer/fetchers/multi_resolution_image_resource_fetcher.h"
-#include "mojo/common/url_type_converters.h"
-#include "mojo/converters/geometry/geometry_type_converters.h"
 #include "net/base/data_url.h"
 #include "skia/ext/image_operations.h"
-#include "skia/public/type_converters.h"
+#include "third_party/WebKit/public/platform/WebCachePolicy.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -79,7 +79,7 @@ void FilterAndResizeImagesForMaximalSize(
   images->clear();
   original_image_sizes->clear();
 
-  if (!unfiltered.size())
+  if (unfiltered.empty())
     return;
 
   if (max_image_size == 0)
@@ -108,7 +108,11 @@ void FilterAndResizeImagesForMaximalSize(
     return;
   // Proportionally resize the minimal image to fit in a box of size
   // |max_image_size|.
-  images->push_back(ResizeImage(*min_image, max_image_size));
+  SkBitmap resized = ResizeImage(*min_image, max_image_size);
+  // Drop null or empty SkBitmap.
+  if (resized.drawsNothing())
+    return;
+  images->push_back(resized);
   original_image_sizes->push_back(
       gfx::Size(min_image->width(), min_image->height()));
 }
@@ -119,23 +123,32 @@ namespace content {
 
 ImageDownloaderImpl::ImageDownloaderImpl(
     RenderFrame* render_frame,
-    mojo::InterfaceRequest<content::mojom::ImageDownloader> request)
-    : RenderFrameObserver(render_frame), binding_(this, std::move(request)) {
+    mojom::ImageDownloaderRequest request)
+    : RenderFrameObserver(render_frame),
+      binding_(this, std::move(request)) {
   DCHECK(render_frame);
   RenderThread::Get()->AddObserver(this);
+  binding_.set_connection_error_handler(
+      base::Bind(&ImageDownloaderImpl::OnDestruct, base::Unretained(this)));
 }
 
 ImageDownloaderImpl::~ImageDownloaderImpl() {
-  RenderThread::Get()->RemoveObserver(this);
+  RenderThread* thread = RenderThread::Get();
+  // As ImageDownloaderImpl is a strong binding with message pipe, the
+  // destructor may run after message loop shutdown, so we need to check whether
+  // RenderThread is null.
+  if (thread)
+    thread->RemoveObserver(this);
 }
 
 // static
 void ImageDownloaderImpl::CreateMojoService(
     RenderFrame* render_frame,
-    mojo::InterfaceRequest<content::mojom::ImageDownloader> request) {
-  DVLOG(1) << "ImageDownloaderImpl::CreateService";
+    mojom::ImageDownloaderRequest request) {
+  DVLOG(1) << "ImageDownloaderImpl::CreateMojoService";
   DCHECK(render_frame);
 
+  // Owns itself.
   new ImageDownloaderImpl(render_frame, std::move(request));
 }
 
@@ -145,20 +158,20 @@ void ImageDownloaderImpl::OnRenderProcessShutdown() {
 }
 
 // ImageDownloader methods:
-void ImageDownloaderImpl::DownloadImage(const mojo::String& url,
+void ImageDownloaderImpl::DownloadImage(const GURL& image_url,
                                         bool is_favicon,
                                         uint32_t max_bitmap_size,
                                         bool bypass_cache,
                                         const DownloadImageCallback& callback) {
-  const GURL image_url = url.To<GURL>();
-
   std::vector<SkBitmap> result_images;
   std::vector<gfx::Size> result_original_image_sizes;
 
   if (image_url.SchemeIs(url::kDataScheme)) {
     SkBitmap data_image = ImageFromDataUrl(image_url);
-    if (!data_image.empty()) {
-      result_images.push_back(ResizeImage(data_image, max_bitmap_size));
+    SkBitmap resized = ResizeImage(data_image, max_bitmap_size);
+    // Drop null or empty SkBitmap.
+    if (!resized.drawsNothing()) {
+      result_images.push_back(resized);
       result_original_image_sizes.push_back(
           gfx::Size(data_image.width(), data_image.height()));
     }
@@ -211,7 +224,7 @@ void ImageDownloaderImpl::DidFetchImage(
       std::find(image_fetchers_.begin(), image_fetchers_.end(), fetcher);
   if (iter != image_fetchers_.end()) {
     image_fetchers_.weak_erase(iter);
-    base::MessageLoop::current()->DeleteSoon(FROM_HERE, fetcher);
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, fetcher);
   }
 }
 
@@ -220,9 +233,11 @@ void ImageDownloaderImpl::ReplyDownloadResult(
     const std::vector<SkBitmap>& result_images,
     const std::vector<gfx::Size>& result_original_image_sizes,
     const DownloadImageCallback& callback) {
-  callback.Run(http_status_code,
-               mojo::Array<skia::mojom::BitmapPtr>::From(result_images),
-               mojo::Array<mojo::SizePtr>::From(result_original_image_sizes));
+  callback.Run(http_status_code, result_images, result_original_image_sizes);
+}
+
+void ImageDownloaderImpl::OnDestruct() {
+  delete this;
 }
 
 }  // namespace content

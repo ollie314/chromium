@@ -7,10 +7,9 @@
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
-#include "ios/web/public/cert_store.h"
 #include "ios/web/public/navigation_item.h"
 #import "ios/web/public/navigation_manager.h"
-#include "ios/web/public/origin_util.h"
+#import "ios/web/public/origin_util.h"
 #include "ios/web/public/security_style.h"
 #include "ios/web/public/ssl_status.h"
 #include "ios/web/public/web_state/web_state.h"
@@ -56,20 +55,20 @@ IOSChromeSecurityStateModelClient::IOSChromeSecurityStateModelClient(
 
 IOSChromeSecurityStateModelClient::~IOSChromeSecurityStateModelClient() {}
 
-const security_state::SecurityStateModel::SecurityInfo&
-IOSChromeSecurityStateModelClient::GetSecurityInfo() const {
-  return security_state_model_->GetSecurityInfo();
+void IOSChromeSecurityStateModelClient::GetSecurityInfo(
+    security_state::SecurityStateModel::SecurityInfo* result) const {
+  return security_state_model_->GetSecurityInfo(result);
 }
 
 bool IOSChromeSecurityStateModelClient::RetrieveCert(
     scoped_refptr<net::X509Certificate>* cert) {
   web::NavigationItem* item =
       web_state_->GetNavigationManager()->GetVisibleItem();
-  if (!item)
+  if (!item || !item->GetSSL().certificate)
     return false;
 
-  int cert_id = item->GetSSL().cert_id;
-  return web::CertStore::GetInstance()->RetrieveCert(cert_id, cert);
+  *cert = item->GetSSL().certificate;
+  return true;
 }
 
 bool IOSChromeSecurityStateModelClient::UsedPolicyInstalledCertificate() {
@@ -89,12 +88,12 @@ void IOSChromeSecurityStateModelClient::GetVisibleSecurityState(
     return;
   }
 
-  state->initialized = true;
+  state->connection_info_initialized = true;
   state->url = item->GetURL();
   const web::SSLStatus& ssl = item->GetSSL();
   state->initial_security_level =
       GetSecurityLevelForSecurityStyle(ssl.security_style);
-  state->cert_id = ssl.cert_id;
+  state->certificate = ssl.certificate;
   state->cert_status = ssl.cert_status;
   state->connection_status = ssl.connection_status;
   state->security_bits = ssl.security_bits;

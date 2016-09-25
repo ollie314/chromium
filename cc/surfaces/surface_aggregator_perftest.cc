@@ -12,15 +12,17 @@
 #include "cc/surfaces/surface_factory.h"
 #include "cc/surfaces/surface_factory_client.h"
 #include "cc/surfaces/surface_manager.h"
-#include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/fake_resource_provider.h"
+#include "cc/test/test_context_provider.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/perf/perf_test.h"
 
 namespace cc {
 namespace {
+
+static constexpr uint32_t kArbitraryClientId = 0;
 
 class EmptySurfaceFactoryClient : public SurfaceFactoryClient {
  public:
@@ -31,13 +33,12 @@ class EmptySurfaceFactoryClient : public SurfaceFactoryClient {
 class SurfaceAggregatorPerfTest : public testing::Test {
  public:
   SurfaceAggregatorPerfTest() : factory_(&manager_, &empty_client_) {
-    output_surface_ = FakeOutputSurface::CreateSoftware(
-        base::WrapUnique(new SoftwareOutputDevice));
-    output_surface_->BindToClient(&output_surface_client_);
+    context_provider_ = TestContextProvider::Create();
+    context_provider_->BindToCurrentThread();
     shared_bitmap_manager_.reset(new TestSharedBitmapManager);
 
     resource_provider_ = FakeResourceProvider::Create(
-        output_surface_.get(), shared_bitmap_manager_.get());
+        context_provider_.get(), shared_bitmap_manager_.get());
   }
 
   void RunTest(int num_surfaces,
@@ -49,7 +50,7 @@ class SurfaceAggregatorPerfTest : public testing::Test {
     aggregator_.reset(new SurfaceAggregator(&manager_, resource_provider_.get(),
                                             optimize_damage));
     for (int i = 1; i <= num_surfaces; i++) {
-      factory_.Create(SurfaceId(i));
+      factory_.Create(SurfaceId(kArbitraryClientId, i, 0));
       std::unique_ptr<RenderPass> pass(RenderPass::Create());
       std::unique_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
 
@@ -78,7 +79,7 @@ class SurfaceAggregatorPerfTest : public testing::Test {
         quad->SetAll(sqs, rect, opaque_rect, visible_rect, needs_blending, j,
                      gfx::Size(), premultiplied_alpha, uv_top_left,
                      uv_bottom_right, background_color, vertex_opacity, flipped,
-                     nearest_neighbor);
+                     nearest_neighbor, false);
       }
       sqs = pass->CreateAndAppendSharedQuadState();
       sqs->opacity = opacity;
@@ -86,17 +87,18 @@ class SurfaceAggregatorPerfTest : public testing::Test {
         SurfaceDrawQuad* surface_quad =
             pass->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
         surface_quad->SetNew(sqs, gfx::Rect(0, 0, 1, 1), gfx::Rect(0, 0, 1, 1),
-                             SurfaceId(i - 1));
+                             SurfaceId(kArbitraryClientId, i - 1, 0));
       }
 
       frame_data->render_pass_list.push_back(std::move(pass));
-      std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
-      frame->delegated_frame_data = std::move(frame_data);
-      factory_.SubmitCompositorFrame(SurfaceId(i), std::move(frame),
+      CompositorFrame frame;
+      frame.delegated_frame_data = std::move(frame_data);
+      factory_.SubmitCompositorFrame(SurfaceId(kArbitraryClientId, i, 0),
+                                     std::move(frame),
                                      SurfaceFactory::DrawCallback());
     }
 
-    factory_.Create(SurfaceId(num_surfaces + 1));
+    factory_.Create(SurfaceId(kArbitraryClientId, num_surfaces + 1, 0));
     timer_.Reset();
     do {
       std::unique_ptr<RenderPass> pass(RenderPass::Create());
@@ -106,7 +108,8 @@ class SurfaceAggregatorPerfTest : public testing::Test {
       SurfaceDrawQuad* surface_quad =
           pass->CreateAndAppendDrawQuad<SurfaceDrawQuad>();
       surface_quad->SetNew(sqs, gfx::Rect(0, 0, 100, 100),
-                           gfx::Rect(0, 0, 100, 100), SurfaceId(num_surfaces));
+                           gfx::Rect(0, 0, 100, 100),
+                           SurfaceId(kArbitraryClientId, num_surfaces, 0));
 
       if (full_damage)
         pass->damage_rect = gfx::Rect(0, 0, 100, 100);
@@ -114,31 +117,30 @@ class SurfaceAggregatorPerfTest : public testing::Test {
         pass->damage_rect = gfx::Rect(0, 0, 1, 1);
 
       frame_data->render_pass_list.push_back(std::move(pass));
-      std::unique_ptr<CompositorFrame> frame(new CompositorFrame);
-      frame->delegated_frame_data = std::move(frame_data);
-      factory_.SubmitCompositorFrame(SurfaceId(num_surfaces + 1),
-                                     std::move(frame),
-                                     SurfaceFactory::DrawCallback());
+      CompositorFrame frame;
+      frame.delegated_frame_data = std::move(frame_data);
+      factory_.SubmitCompositorFrame(
+          SurfaceId(kArbitraryClientId, num_surfaces + 1, 0), std::move(frame),
+          SurfaceFactory::DrawCallback());
 
-      std::unique_ptr<CompositorFrame> aggregated =
-          aggregator_->Aggregate(SurfaceId(num_surfaces + 1));
+      CompositorFrame aggregated = aggregator_->Aggregate(
+          SurfaceId(kArbitraryClientId, num_surfaces + 1, 0));
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 
     perf_test::PrintResult("aggregator_speed", "", name, timer_.LapsPerSecond(),
                            "runs/s", true);
 
-    factory_.Destroy(SurfaceId(num_surfaces + 1));
+    factory_.Destroy(SurfaceId(kArbitraryClientId, num_surfaces + 1, 0));
     for (int i = 1; i <= num_surfaces; i++)
-      factory_.Destroy(SurfaceId(i));
+      factory_.Destroy(SurfaceId(kArbitraryClientId, i, 0));
   }
 
  protected:
   SurfaceManager manager_;
   EmptySurfaceFactoryClient empty_client_;
   SurfaceFactory factory_;
-  FakeOutputSurfaceClient output_surface_client_;
-  std::unique_ptr<OutputSurface> output_surface_;
+  scoped_refptr<TestContextProvider> context_provider_;
   std::unique_ptr<SharedBitmapManager> shared_bitmap_manager_;
   std::unique_ptr<ResourceProvider> resource_provider_;
   std::unique_ptr<SurfaceAggregator> aggregator_;

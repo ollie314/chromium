@@ -48,8 +48,18 @@ const gpu::GpuPreferences GetGpuPreferencesFromCommandLine() {
       command_line->HasSwitch(switches::kDisableWebRtcHWEncoding);
 #endif
 #if defined(OS_WIN)
-  gpu_preferences.enable_accelerated_vpx_decode =
-      command_line->HasSwitch(switches::kEnableAcceleratedVpxDecode);
+  uint32_t enable_accelerated_vpx_decode_val =
+      gpu::GpuPreferences::VPX_VENDOR_MICROSOFT;
+  if (GetUintFromSwitch(command_line, switches::kEnableAcceleratedVpxDecode,
+                        &enable_accelerated_vpx_decode_val)) {
+    gpu_preferences.enable_accelerated_vpx_decode =
+        static_cast<gpu::GpuPreferences::VpxDecodeVendors>(
+            enable_accelerated_vpx_decode_val);
+  }
+  gpu_preferences.enable_zero_copy_dxgi_video =
+      !command_line->HasSwitch(switches::kDisableZeroCopyDxgiVideo);
+  gpu_preferences.enable_nv12_dxgi_video =
+      !command_line->HasSwitch(switches::kDisableNv12DxgiVideo);
 #endif
   gpu_preferences.compile_shader_always_succeeds =
       command_line->HasSwitch(switches::kCompileShaderAlwaysSucceeds);
@@ -83,8 +93,6 @@ const gpu::GpuPreferences GetGpuPreferencesFromCommandLine() {
       command_line->HasSwitch(switches::kDisableGpuShaderDiskCache);
   gpu_preferences.enable_share_group_async_texture_upload =
       command_line->HasSwitch(switches::kEnableShareGroupAsyncTextureUpload);
-  gpu_preferences.enable_subscribe_uniform_extension =
-      command_line->HasSwitch(switches::kEnableSubscribeUniformExtension);
   gpu_preferences.enable_threaded_texture_mailboxes =
       command_line->HasSwitch(switches::kEnableThreadedTextureMailboxes);
   gpu_preferences.gl_shader_interm_output =
@@ -97,6 +105,8 @@ const gpu::GpuPreferences GetGpuPreferencesFromCommandLine() {
       command_line->HasSwitch(switches::kEnableGPUServiceTracing);
   gpu_preferences.enable_unsafe_es3_apis =
       command_line->HasSwitch(switches::kEnableUnsafeES3APIs);
+  gpu_preferences.use_passthrough_cmd_decoder =
+      command_line->HasSwitch(switches::kUsePassthroughCmdDecoder);
   return gpu_preferences;
 }
 

@@ -2,5 +2,20 @@
   "manifest_version": 1,
   "name": "exe:chrome",
   "display_name": "Chrome",
-  "capabilities": {}
+  "capabilities": {
+    "required": {
+      "*": { "classes": [ "app", "mash:launchable" ] },
+      "mojo:ash": {
+        "interfaces": [
+          "ash::mojom::ShelfController",
+          "ash::mojom::SystemTray",
+          "ash::mojom::WallpaperController"
+        ]
+      },
+      "mojo:accessibility_autoclick": {
+         "interfaces": [ "ash::autoclick::mojom::AutoclickController" ]
+      }
+    },
+    "provided": { "mash:launchable": [ "mash::mojom::Launchable" ] }
+  }
 }

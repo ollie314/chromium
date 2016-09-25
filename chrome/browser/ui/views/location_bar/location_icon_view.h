@@ -7,6 +7,8 @@
 
 #include "base/macros.h"
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
+#include "ui/gfx/animation/animation_delegate.h"
+#include "ui/gfx/animation/slide_animation.h"
 
 class LocationBarView;
 
@@ -18,10 +20,10 @@ class LocatedEvent;
 // Use a LocationIconView to display an icon on the leading side of the edit
 // field. It shows the user's current action (while the user is editing), or the
 // page security status (after navigation has completed).
-class LocationIconView : public IconLabelBubbleView {
+class LocationIconView : public IconLabelBubbleView,
+                         public gfx::AnimationDelegate {
  public:
   LocationIconView(const gfx::FontList& font_list,
-                   SkColor parent_background_color,
                    LocationBarView* location_bar);
   ~LocationIconView() override;
 
@@ -30,13 +32,11 @@ class LocationIconView : public IconLabelBubbleView {
   bool OnMousePressed(const ui::MouseEvent& event) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
-  bool OnKeyPressed(const ui::KeyEvent& event) override;
-  bool OnKeyReleased(const ui::KeyEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   bool GetTooltipText(const gfx::Point& p,
                       base::string16* tooltip) const override;
   SkColor GetTextColor() const override;
-  SkColor GetBorderColor() const override;
+  bool OnActivate(const ui::Event& event) override;
 
   // Whether we should show the tooltip for this icon or not.
   void set_show_tooltip(bool show_tooltip) { show_tooltip_ = show_tooltip; }
@@ -46,13 +46,19 @@ class LocationIconView : public IconLabelBubbleView {
 
   const gfx::FontList& GetFontList() const { return font_list(); }
 
-  // Set the background image. Pass false for |should_show_ev| for all non-EV
-  // HTTPS contexts.
-  void SetBackground(bool should_show_ev);
+  // Sets whether the verbose security state text should be visible.
+  // |should_animate| controls whether any necessary transition to this state
+  // should be animated.
+  void SetSecurityState(bool should_show, bool should_animate);
 
  private:
-  void ProcessEvent(const ui::LocatedEvent& event);
-  void ProcessEvent(const ui::KeyEvent& event);
+  // IconLabelBubbleView:
+  double WidthMultiplier() const override;
+
+  // gfx::AnimationDelegate:
+  void AnimationProgressed(const gfx::Animation*) override;
+
+  void ProcessLocatedEvent(const ui::LocatedEvent& event);
 
   // Returns what the minimum size would be if the preferred size were |size|.
   gfx::Size GetMinimumSizeForPreferredSize(gfx::Size size) const;
@@ -70,6 +76,7 @@ class LocationIconView : public IconLabelBubbleView {
   bool show_tooltip_;
 
   LocationBarView* location_bar_;
+  gfx::SlideAnimation animation_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationIconView);
 };

@@ -23,9 +23,9 @@
 #include "build/build_config.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/common/extensions/manifest_handlers/theme_handler.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
-#include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/base/resource/data_pack.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -37,7 +37,6 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/resources/grit/ui_resources.h"
 
@@ -50,7 +49,7 @@ namespace {
 // theme packs that aren't int-equal to this. Increment this number if you
 // change default theme assets or if you need themes to recreate their generated
 // images (which are cached).
-const int kThemePackVersion = 41;
+const int kThemePackVersion = 42;
 
 // IDs that are in the DataPack won't clash with the positive integer
 // uint16_t. kHeaderID should always have the maximum value because we want the
@@ -108,42 +107,31 @@ struct PersistingImagesTable {
 // should be removed once the cocoa port no longer uses them.
 PersistingImagesTable kPersistingImages[] = {
     {PRS_THEME_FRAME, IDR_THEME_FRAME, "theme_frame"},
-    {PRS_THEME_FRAME_INACTIVE,
-     IDR_THEME_FRAME_INACTIVE,
+    {PRS_THEME_FRAME_INACTIVE, IDR_THEME_FRAME_INACTIVE,
      "theme_frame_inactive"},
-    {PRS_THEME_FRAME_INCOGNITO,
-     IDR_THEME_FRAME_INCOGNITO,
+    {PRS_THEME_FRAME_INCOGNITO, IDR_THEME_FRAME_INCOGNITO,
      "theme_frame_incognito"},
-    {PRS_THEME_FRAME_INCOGNITO_INACTIVE,
-     IDR_THEME_FRAME_INCOGNITO_INACTIVE,
+    {PRS_THEME_FRAME_INCOGNITO_INACTIVE, IDR_THEME_FRAME_INCOGNITO_INACTIVE,
      "theme_frame_incognito_inactive"},
     {PRS_THEME_TOOLBAR, IDR_THEME_TOOLBAR, "theme_toolbar"},
-    {PRS_THEME_TAB_BACKGROUND,
-     IDR_THEME_TAB_BACKGROUND,
+    {PRS_THEME_TAB_BACKGROUND, IDR_THEME_TAB_BACKGROUND,
      "theme_tab_background"},
 #if !defined(OS_MACOSX)
-    {PRS_THEME_TAB_BACKGROUND_INCOGNITO,
-     IDR_THEME_TAB_BACKGROUND_INCOGNITO,
+    {PRS_THEME_TAB_BACKGROUND_INCOGNITO, IDR_THEME_TAB_BACKGROUND_INCOGNITO,
      "theme_tab_background_incognito"},
 #endif
-    {PRS_THEME_TAB_BACKGROUND_V,
-     IDR_THEME_TAB_BACKGROUND_V,
+    {PRS_THEME_TAB_BACKGROUND_V, IDR_THEME_TAB_BACKGROUND_V,
      "theme_tab_background_v"},
-    {PRS_THEME_NTP_BACKGROUND,
-     IDR_THEME_NTP_BACKGROUND,
+    {PRS_THEME_NTP_BACKGROUND, IDR_THEME_NTP_BACKGROUND,
      "theme_ntp_background"},
     {PRS_THEME_FRAME_OVERLAY, IDR_THEME_FRAME_OVERLAY, "theme_frame_overlay"},
-    {PRS_THEME_FRAME_OVERLAY_INACTIVE,
-     IDR_THEME_FRAME_OVERLAY_INACTIVE,
+    {PRS_THEME_FRAME_OVERLAY_INACTIVE, IDR_THEME_FRAME_OVERLAY_INACTIVE,
      "theme_frame_overlay_inactive"},
-    {PRS_THEME_BUTTON_BACKGROUND,
-     IDR_THEME_BUTTON_BACKGROUND,
+    {PRS_THEME_BUTTON_BACKGROUND, IDR_THEME_BUTTON_BACKGROUND,
      "theme_button_background"},
-    {PRS_THEME_NTP_ATTRIBUTION,
-     IDR_THEME_NTP_ATTRIBUTION,
+    {PRS_THEME_NTP_ATTRIBUTION, IDR_THEME_NTP_ATTRIBUTION,
      "theme_ntp_attribution"},
-    {PRS_THEME_WINDOW_CONTROL_BACKGROUND,
-     IDR_THEME_WINDOW_CONTROL_BACKGROUND,
+    {PRS_THEME_WINDOW_CONTROL_BACKGROUND, IDR_THEME_WINDOW_CONTROL_BACKGROUND,
      "theme_window_control_background"},
 
     // The rest of these entries have no key because they can't be overridden
@@ -156,9 +144,11 @@ PersistingImagesTable kPersistingImages[] = {
     {20, IDR_FORWARD_D, NULL},
     {21, IDR_FORWARD_H, NULL},
     {22, IDR_FORWARD_P, NULL},
+#if defined(OS_MACOSX)
     {23, IDR_HOME, NULL},
     {24, IDR_HOME_H, NULL},
     {25, IDR_HOME_P, NULL},
+#endif
     {26, IDR_RELOAD, NULL},
     {27, IDR_RELOAD_H, NULL},
     {28, IDR_RELOAD_P, NULL},
@@ -166,16 +156,13 @@ PersistingImagesTable kPersistingImages[] = {
     {30, IDR_STOP_D, NULL},
     {31, IDR_STOP_H, NULL},
     {32, IDR_STOP_P, NULL},
-    {33, IDR_BROWSER_ACTIONS_OVERFLOW, NULL},
-    {34, IDR_BROWSER_ACTIONS_OVERFLOW_H, NULL},
-    {35, IDR_BROWSER_ACTIONS_OVERFLOW_P, NULL},
-    {36, IDR_TOOLS, NULL},
-    {37, IDR_TOOLS_H, NULL},
-    {38, IDR_TOOLS_P, NULL},
-    {39, IDR_MENU_DROPARROW, NULL},
-    {40, IDR_TOOLBAR_BEZEL_HOVER, NULL},
-    {41, IDR_TOOLBAR_BEZEL_PRESSED, NULL},
-    {42, IDR_TOOLS_BAR, NULL},
+    {33, IDR_TOOLS, NULL},
+    {34, IDR_TOOLS_H, NULL},
+    {35, IDR_TOOLS_P, NULL},
+    {36, IDR_MENU_DROPARROW, NULL},
+    {37, IDR_TOOLBAR_BEZEL_HOVER, NULL},
+    {38, IDR_TOOLBAR_BEZEL_PRESSED, NULL},
+    {39, IDR_TOOLS_BAR, NULL},
 };
 const size_t kPersistingImagesLength = arraysize(kPersistingImages);
 
@@ -794,6 +781,10 @@ bool BrowserThemePack::GetColor(int id, SkColor* color) const {
     for (size_t i = 0; i < kColorTableLength; ++i) {
       if (colors_[i].id == id) {
         *color = colors_[i].color;
+        // The theme provider is intentionally made to ignore alpha for toolbar
+        // color, as we don't want to allow transparent toolbars.
+        if (id == ThemeProperties::COLOR_TOOLBAR)
+          *color = SkColorSetA(*color, SK_AlphaOPAQUE);
         return true;
       }
     }
@@ -889,7 +880,7 @@ BrowserThemePack::BrowserThemePack()
       source_images_(NULL) {
   scale_factors_ = ui::GetSupportedScaleFactors();
   // On Windows HiDPI SCALE_FACTOR_100P may not be supported by default.
-  if (!ContainsValue(scale_factors_, ui::SCALE_FACTOR_100P))
+  if (!base::ContainsValue(scale_factors_, ui::SCALE_FACTOR_100P))
     scale_factors_.push_back(ui::SCALE_FACTOR_100P);
 }
 

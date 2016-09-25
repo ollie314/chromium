@@ -32,28 +32,28 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/KnownPorts.h"
 #include "platform/weborigin/SchemeRegistry.h"
-#include "platform/weborigin/SecurityOriginCache.h"
 #include "platform/weborigin/SecurityPolicy.h"
+#include "platform/weborigin/URLSecurityOriginMap.h"
 #include "url/url_canon_ip.h"
 #include "wtf/HexNumber.h"
 #include "wtf/NotFound.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/text/StringBuilder.h"
+#include <memory>
 
 namespace blink {
 
 const int InvalidPort = 0;
 const int MaxAllowedPort = 65535;
 
-static SecurityOriginCache* s_originCache = 0;
+static URLSecurityOriginMap* s_urlOriginMap = 0;
 
-static SecurityOrigin* cachedOrigin(const KURL& url)
+static SecurityOrigin* getOriginFromMap(const KURL& url)
 {
-    if (s_originCache)
-        return s_originCache->cachedOrigin(url);
-    return 0;
+    if (s_urlOriginMap)
+        return s_urlOriginMap->getOrigin(url);
+    return nullptr;
 }
 
 bool SecurityOrigin::shouldUseInnerURL(const KURL& url)
@@ -78,9 +78,9 @@ KURL SecurityOrigin::extractInnerURL(const KURL& url)
     return KURL(ParsedURLString, url.path());
 }
 
-void SecurityOrigin::setCache(SecurityOriginCache* originCache)
+void SecurityOrigin::setMap(URLSecurityOriginMap* map)
 {
-    s_originCache = originCache;
+    s_urlOriginMap = map;
 }
 
 static bool shouldTreatAsUniqueOrigin(const KURL& url)
@@ -129,7 +129,7 @@ SecurityOrigin::SecurityOrigin(const KURL& url)
 {
     // Suborigins are serialized into the host, so extract it if necessary.
     String suboriginName;
-    if (deserializeSuboriginAndHost(m_host, suboriginName, m_host))
+    if (deserializeSuboriginAndProtocolAndHost(m_protocol, m_host, suboriginName, m_protocol, m_host))
         m_suborigin.setName(suboriginName);
 
     // document.domain starts as m_host, but can be set by the DOM.
@@ -175,7 +175,7 @@ SecurityOrigin::SecurityOrigin(const SecurityOrigin* other)
 
 PassRefPtr<SecurityOrigin> SecurityOrigin::create(const KURL& url)
 {
-    if (RefPtr<SecurityOrigin> origin = cachedOrigin(url))
+    if (RefPtr<SecurityOrigin> origin = getOriginFromMap(url))
         return origin.release();
 
     if (shouldTreatAsUniqueOrigin(url)) {
@@ -281,7 +281,7 @@ bool SecurityOrigin::canRequest(const KURL& url) const
     if (m_universalAccess)
         return true;
 
-    if (cachedOrigin(url) == this)
+    if (getOriginFromMap(url) == this)
         return true;
 
     if (isUnique())
@@ -402,6 +402,7 @@ bool SecurityOrigin::isLocal() const
 
 bool SecurityOrigin::isLocalhost() const
 {
+    // TODO(mkwst): Update this to call into net::IsLocalhost.
     if (m_host == "localhost")
         return true;
 
@@ -472,15 +473,25 @@ String SecurityOrigin::toRawStringIgnoreSuborigin() const
 
 // Returns true if and only if a suborigin component was found. If false, no
 // guarantees about the return value |suboriginName| are made.
-bool SecurityOrigin::deserializeSuboriginAndHost(const String& oldHost, String& suboriginName, String& newHost)
+bool SecurityOrigin::deserializeSuboriginAndProtocolAndHost(const String& oldProtocol, const String& oldHost, String& suboriginName, String& newProtocol, String& newHost)
 {
     if (!RuntimeEnabledFeatures::suboriginsEnabled())
         return false;
 
-    size_t suboriginEnd = oldHost.find('_');
-    // Suborigins cannot be empty
-    if (suboriginEnd == 0 || suboriginEnd == WTF::kNotFound)
+    String originalProtocol = oldProtocol;
+    if (oldProtocol != "http-so" && oldProtocol != "https-so")
         return false;
+
+    size_t protocolEnd = oldProtocol.reverseFind("-so");
+    DCHECK_NE(protocolEnd, WTF::kNotFound);
+    newProtocol = oldProtocol.substring(0, protocolEnd);
+
+    size_t suboriginEnd = oldHost.find('.');
+    // Suborigins cannot be empty.
+    if (suboriginEnd == 0 || suboriginEnd == WTF::kNotFound) {
+        newProtocol = originalProtocol;
+        return false;
+    }
 
     suboriginName = oldHost.substring(0, suboriginEnd);
     newHost = oldHost.substring(suboriginEnd + 1);
@@ -502,10 +513,12 @@ AtomicString SecurityOrigin::toRawAtomicString() const
 void SecurityOrigin::buildRawString(StringBuilder& builder, bool includeSuborigin) const
 {
     builder.append(m_protocol);
-    builder.appendLiteral("://");
     if (includeSuborigin && hasSuborigin()) {
+        builder.append("-so://");
         builder.append(m_suborigin.name());
-        builder.appendLiteral("_");
+        builder.append('.');
+    } else {
+        builder.append("://");
     }
     builder.append(m_host);
 
@@ -524,13 +537,21 @@ PassRefPtr<SecurityOrigin> SecurityOrigin::create(const String& protocol, const 
 {
     if (port < 0 || port > MaxAllowedPort)
         return createUnique();
-    String decodedHost = decodeURLEscapeSequences(host);
+
+    DCHECK_EQ(host, decodeURLEscapeSequences(host));
+
     String portPart = port ? ":" + String::number(port) : String();
     return create(KURL(KURL(), protocol + "://" + host + portPart + "/"));
 }
 
 bool SecurityOrigin::isSameSchemeHostPort(const SecurityOrigin* other) const
 {
+    if (this == other)
+        return true;
+
+    if (isUnique() || other->isUnique())
+        return false;
+
     if (m_host != other->m_host)
         return false;
 
@@ -559,16 +580,16 @@ const KURL& SecurityOrigin::urlWithUniqueSecurityOrigin()
     return uniqueSecurityOriginURL;
 }
 
-PassOwnPtr<SecurityOrigin::PrivilegeData> SecurityOrigin::createPrivilegeData() const
+std::unique_ptr<SecurityOrigin::PrivilegeData> SecurityOrigin::createPrivilegeData() const
 {
-    OwnPtr<PrivilegeData> privilegeData = adoptPtr(new PrivilegeData);
+    std::unique_ptr<PrivilegeData> privilegeData = wrapUnique(new PrivilegeData);
     privilegeData->m_universalAccess = m_universalAccess;
     privilegeData->m_canLoadLocalResources = m_canLoadLocalResources;
     privilegeData->m_blockLocalAccessFromLocalOrigin = m_blockLocalAccessFromLocalOrigin;
-    return privilegeData.release();
+    return privilegeData;
 }
 
-void SecurityOrigin::transferPrivilegesFrom(PassOwnPtr<PrivilegeData> privilegeData)
+void SecurityOrigin::transferPrivilegesFrom(std::unique_ptr<PrivilegeData> privilegeData)
 {
     m_universalAccess = privilegeData->m_universalAccess;
     m_canLoadLocalResources = privilegeData->m_canLoadLocalResources;

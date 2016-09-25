@@ -20,10 +20,12 @@
 #include "base/power_monitor/power_monitor.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
-#include "media/audio/audio_manager_factory.h"
 #include "media/audio/fake_audio_log_factory.h"
-#include "media/base/media_resources.h"
 #include "media/base/media_switches.h"
+
+#if defined(OS_MACOSX)
+#include "media/audio/mac/audio_manager_mac.h"
+#endif
 
 #if defined(OS_WIN)
 #include "base/win/scoped_com_initializer.h"
@@ -35,13 +37,6 @@ namespace {
 
 // The singleton instance of AudioManager. This is set when Create() is called.
 AudioManager* g_last_created = nullptr;
-
-// The singleton instance of AudioManagerFactory. This is only set if
-// SetFactory() is called. If it is set when Create() is called, its
-// CreateInstance() function is used to set |g_last_created|. Otherwise, the
-// linked implementation of media::CreateAudioManager is used to set
-// |g_last_created|.
-AudioManagerFactory* g_audio_manager_factory = nullptr;
 
 // Maximum number of failed pings to the audio thread allowed. A UMA will be
 // recorded once this count is reached; if enabled, a non-crash dump will be
@@ -73,9 +68,8 @@ class AudioManagerHelper : public base::PowerObserver {
       scoped_refptr<base::SingleThreadTaskRunner> monitor_task_runner) {
     CHECK(!monitor_task_runner_);
     CHECK(!audio_task_runner_);
-    CHECK(g_last_created);
     monitor_task_runner_ = std::move(monitor_task_runner);
-    audio_task_runner_ = g_last_created->GetTaskRunner();
+    audio_task_runner_ = AudioManager::Get()->GetTaskRunner();
     base::PowerMonitor::Get()->AddObserver(this);
 
     io_task_running_ = audio_task_running_ = true;
@@ -88,6 +82,9 @@ class AudioManagerHelper : public base::PowerObserver {
                               base::Unretained(this)));
   }
 
+  base::SingleThreadTaskRunner* monitor_task_runner() const {
+    return monitor_task_runner_.get();
+  }
   AudioLogFactory* fake_log_factory() { return &fake_log_factory_; }
 
 #if defined(OS_WIN)
@@ -253,7 +250,7 @@ class AudioManagerHelper : public base::PowerObserver {
   uint32_t successful_pings_ = 0;
 
 #if defined(OS_WIN)
-  scoped_ptr<base::win::ScopedCOMInitializer> com_initializer_for_testing_;
+  std::unique_ptr<base::win::ScopedCOMInitializer> com_initializer_for_testing_;
 #endif
 
 #if defined(OS_LINUX)
@@ -281,10 +278,23 @@ void AudioManagerDeleter::operator()(const AudioManager* instance) const {
     LOG(WARNING) << "Multiple instances of AudioManager detected";
   }
 
+#if defined(OS_MACOSX)
+  // If we are on Mac, tasks after this point are not executed, hence this is
+  // the only chance to delete the audio manager (which on Mac lives on the
+  // main browser thread instead of a dedicated audio thread). If we don't
+  // delete here, the CoreAudio thread can keep providing callbacks, which
+  // uses a state that is destroyed in ~BrowserMainLoop().
+  // See http://crbug.com/623703 for more details.
+  DCHECK(instance->GetTaskRunner()->BelongsToCurrentThread());
+  AudioManagerMac* mac_instance =
+      static_cast<AudioManagerMac*>(const_cast<AudioManager*>(instance));
+  delete mac_instance;
+#else
   // AudioManager must be destroyed on the audio thread.
   if (!instance->GetTaskRunner()->DeleteSoon(FROM_HERE, instance)) {
     LOG(WARNING) << "Failed to delete AudioManager instance.";
   }
+#endif
 }
 
 // Forward declaration of the platform specific AudioManager factory function.
@@ -316,44 +326,14 @@ AudioManager::~AudioManager() {
 }
 
 // static
-void AudioManager::SetFactory(AudioManagerFactory* factory) {
-  CHECK(factory);
-  CHECK(!g_last_created);
-  CHECK(!g_audio_manager_factory);
-  g_audio_manager_factory = factory;
-}
-
-// static
-void AudioManager::ResetFactoryForTesting() {
-  if (g_audio_manager_factory) {
-    delete g_audio_manager_factory;
-    g_audio_manager_factory = nullptr;
-  }
-}
-
-// static
 ScopedAudioManagerPtr AudioManager::Create(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> worker_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> monitor_task_runner,
     AudioLogFactory* audio_log_factory) {
   DCHECK(task_runner);
   DCHECK(worker_task_runner);
-  ScopedAudioManagerPtr manager;
-  if (g_audio_manager_factory) {
-    manager = g_audio_manager_factory->CreateInstance(
-        std::move(task_runner), std::move(worker_task_runner),
-        audio_log_factory);
-  } else {
-    manager =
-        CreateAudioManager(std::move(task_runner),
-                           std::move(worker_task_runner), audio_log_factory);
-  }
-
-  if (monitor_task_runner)
-    g_helper.Pointer()->StartHangTimer(std::move(monitor_task_runner));
-
-  return manager;
+  return CreateAudioManager(std::move(task_runner),
+                            std::move(worker_task_runner), audio_log_factory);
 }
 
 // static
@@ -362,8 +342,21 @@ ScopedAudioManagerPtr AudioManager::CreateForTesting(
 #if defined(OS_WIN)
   g_helper.Pointer()->InitializeCOMForTesting();
 #endif
-  return Create(task_runner, task_runner, nullptr,
+  return Create(task_runner, task_runner,
                 g_helper.Pointer()->fake_log_factory());
+}
+
+// static
+void AudioManager::StartHangMonitorIfNeeded(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  if (g_helper.Pointer()->monitor_task_runner())
+    return;
+
+  DCHECK(AudioManager::Get());
+  DCHECK(task_runner);
+  DCHECK_NE(task_runner, AudioManager::Get()->GetTaskRunner());
+
+  g_helper.Pointer()->StartHangTimer(std::move(task_runner));
 }
 
 // static
@@ -387,26 +380,6 @@ const std::string& AudioManager::GetGlobalAppName() {
 // static
 AudioManager* AudioManager::Get() {
   return g_last_created;
-}
-
-// static
-std::string AudioManager::GetDefaultDeviceName() {
-#if !defined(OS_IOS)
-  return GetLocalizedStringUTF8(DEFAULT_AUDIO_DEVICE_NAME);
-#else
-  NOTREACHED();
-  return "";
-#endif
-}
-
-// static
-std::string AudioManager::GetCommunicationsDeviceName() {
-#if defined(OS_WIN)
-  return GetLocalizedStringUTF8(COMMUNICATIONS_AUDIO_DEVICE_NAME);
-#else
-  NOTREACHED();
-  return "";
-#endif
 }
 
 }  // namespace media

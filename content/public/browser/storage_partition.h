@@ -41,11 +41,9 @@ class DatabaseTracker;
 namespace content {
 
 class AppCacheService;
-class BackgroundSyncContext;
 class BrowserContext;
 class CacheStorageContext;
 class DOMStorageContext;
-class GeofencingManager;
 class HostZoomLevelContext;
 class HostZoomMap;
 class IndexedDBContext;
@@ -72,12 +70,10 @@ class CONTENT_EXPORT StoragePartition {
   virtual IndexedDBContext* GetIndexedDBContext() = 0;
   virtual ServiceWorkerContext* GetServiceWorkerContext() = 0;
   virtual CacheStorageContext* GetCacheStorageContext() = 0;
-  virtual GeofencingManager* GetGeofencingManager() = 0;
   virtual HostZoomMap* GetHostZoomMap() = 0;
   virtual HostZoomLevelContext* GetHostZoomLevelContext() = 0;
   virtual ZoomLevelDelegate* GetZoomLevelDelegate() = 0;
   virtual PlatformNotificationContext* GetPlatformNotificationContext() = 0;
-  virtual BackgroundSyncContext* GetBackgroundSyncContext() = 0;
 
   enum : uint32_t {
     REMOVE_DATA_MASK_APPCACHE = 1 << 0,
@@ -87,9 +83,9 @@ class CONTENT_EXPORT StoragePartition {
     REMOVE_DATA_MASK_LOCAL_STORAGE = 1 << 4,
     REMOVE_DATA_MASK_SHADER_CACHE = 1 << 5,
     REMOVE_DATA_MASK_WEBSQL = 1 << 6,
-    REMOVE_DATA_MASK_WEBRTC_IDENTITY = 1 << 7,
-    REMOVE_DATA_MASK_SERVICE_WORKERS = 1 << 8,
-    REMOVE_DATA_MASK_CACHE_STORAGE = 1 << 9,
+    REMOVE_DATA_MASK_SERVICE_WORKERS = 1 << 7,
+    REMOVE_DATA_MASK_CACHE_STORAGE = 1 << 8,
+    REMOVE_DATA_MASK_PLUGIN_PRIVATE_DATA = 1 << 9,
     REMOVE_DATA_MASK_ALL = 0xFFFFFFFF,
 
     // Corresponds to storage::kStorageTypeTemporary.

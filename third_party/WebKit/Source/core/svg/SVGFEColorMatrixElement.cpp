@@ -22,7 +22,6 @@
 
 #include "core/SVGNames.h"
 #include "core/svg/graphics/filters/SVGFilterBuilder.h"
-#include "platform/graphics/filters/FilterEffect.h"
 
 namespace blink {
 
@@ -67,8 +66,7 @@ bool SVGFEColorMatrixElement::setFilterEffectAttribute(FilterEffect* effect, con
     if (attrName == SVGNames::valuesAttr)
         return colorMatrix->setValues(m_values->currentValue()->toFloatVector());
 
-    ASSERT_NOT_REACHED();
-    return false;
+    return SVGFilterPrimitiveStandardAttributes::setFilterEffectAttribute(effect, attrName);
 }
 
 void SVGFEColorMatrixElement::svgAttributeChanged(const QualifiedName& attrName)

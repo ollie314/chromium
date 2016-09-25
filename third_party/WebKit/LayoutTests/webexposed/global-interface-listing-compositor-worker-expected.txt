@@ -18,6 +18,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method size
 [Worker] interface CompositorProxy
 [Worker]     attribute @@toStringTag
+[Worker]     getter initialized
 [Worker]     getter opacity
 [Worker]     getter scrollLeft
 [Worker]     getter scrollTop
@@ -115,6 +116,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method getKey
 [Worker]     method openCursor
 [Worker]     method openKeyCursor
+[Worker]     setter name
 [Worker] interface webkitIDBKeyRange
 [Worker]     static method bound
 [Worker]     static method lowerBound
@@ -144,10 +146,12 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method get
 [Worker]     method getAll
 [Worker]     method getAllKeys
+[Worker]     method getKey
 [Worker]     method index
 [Worker]     method openCursor
 [Worker]     method openKeyCursor
 [Worker]     method put
+[Worker]     setter name
 [Worker] interface webkitIDBRequest : EventTarget
 [Worker]     attribute @@toStringTag
 [Worker]     getter error
@@ -176,7 +180,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     setter oncomplete
 [Worker]     setter onerror
 [Worker] [GLOBAL OBJECT]
-[Worker]     getter caches
+[Worker]     attribute internals
 [Worker]     getter onmessage
 [Worker]     method cancelAnimationFrame
 [Worker]     method gc

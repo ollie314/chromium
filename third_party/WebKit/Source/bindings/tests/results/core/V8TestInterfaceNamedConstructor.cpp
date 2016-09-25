@@ -7,6 +7,7 @@
 #include "V8TestInterfaceNamedConstructor.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/GeneratedCodeHelper.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "core/dom/Document.h"
@@ -22,7 +23,7 @@ namespace blink {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestInterfaceNamedConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceNamedConstructor::domTemplate, V8TestInterfaceNamedConstructor::trace, V8TestInterfaceNamedConstructor::toActiveScriptWrappable, 0, V8TestInterfaceNamedConstructor::preparePrototypeAndInterfaceObject, V8TestInterfaceNamedConstructor::installConditionallyEnabledProperties, "TestInterfaceNamedConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Dependent };
+const WrapperTypeInfo V8TestInterfaceNamedConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceNamedConstructor::domTemplate, V8TestInterfaceNamedConstructor::trace, V8TestInterfaceNamedConstructor::traceWrappers, 0, nullptr, "TestInterfaceNamedConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::InheritFromActiveScriptWrappable, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Dependent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -31,6 +32,19 @@ const WrapperTypeInfo V8TestInterfaceNamedConstructor::wrapperTypeInfo = { gin::
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
 // bindings/core/v8/ScriptWrappable.h.
 const WrapperTypeInfo& TestInterfaceNamedConstructor::s_wrapperTypeInfo = V8TestInterfaceNamedConstructor::wrapperTypeInfo;
+
+// [ActiveScriptWrappable]
+static_assert(
+    std::is_base_of<ActiveScriptWrappable, TestInterfaceNamedConstructor>::value,
+    "TestInterfaceNamedConstructor does not inherit from ActiveScriptWrappable, but specifying "
+    "[ActiveScriptWrappable] extended attribute in the IDL file.  "
+    "Be consistent.");
+static_assert(
+    !std::is_same<decltype(&TestInterfaceNamedConstructor::hasPendingActivity),
+                  decltype(&ScriptWrappable::hasPendingActivity)>::value,
+    "TestInterfaceNamedConstructor is not overriding hasPendingActivity(), but is specifying "
+    "[ActiveScriptWrappable] extended attribute in the IDL file.  "
+    "Be consistent.");
 
 namespace TestInterfaceNamedConstructorV8Internal {
 
@@ -55,7 +69,7 @@ const V8DOMConfiguration::AttributeConfiguration V8TestInterfaceNamedConstructor
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestInterfaceNamedConstructorConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceNamedConstructorConstructor::domTemplate, V8TestInterfaceNamedConstructor::trace, V8TestInterfaceNamedConstructor::toActiveScriptWrappable, 0, V8TestInterfaceNamedConstructor::preparePrototypeAndInterfaceObject, V8TestInterfaceNamedConstructor::installConditionallyEnabledProperties, "TestInterfaceNamedConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Dependent };
+const WrapperTypeInfo V8TestInterfaceNamedConstructorConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceNamedConstructorConstructor::domTemplate, V8TestInterfaceNamedConstructor::trace, V8TestInterfaceNamedConstructor::traceWrappers, 0, nullptr, "TestInterfaceNamedConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::InheritFromActiveScriptWrappable, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Dependent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -71,64 +85,67 @@ static void V8TestInterfaceNamedConstructorConstructorCallback(const v8::Functio
         v8SetReturnValue(info, info.Holder());
         return;
     }
-    ExceptionState exceptionState(ExceptionState::ConstructionContext, "TestInterfaceNamedConstructor", info.Holder(), info.GetIsolate());
+
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::ConstructionContext, "TestInterfaceNamedConstructor");
+
     if (UNLIKELY(info.Length() < 1)) {
-        setMinimumArityTypeError(exceptionState, 1, info.Length());
-        exceptionState.throwIfNeeded();
+        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(1, info.Length()));
         return;
     }
+
     V8StringResource<> stringArg;
     bool defaultUndefinedOptionalBooleanArg;
     int defaultUndefinedOptionalLongArg;
     V8StringResource<> defaultUndefinedOptionalStringArg;
     V8StringResource<> defaultNullStringOptionalstringArg;
     V8StringResource<> optionalStringArg;
-    {
-        int numArgsPassed = info.Length();
-        while (numArgsPassed > 0) {
-            if (!info[numArgsPassed - 1]->IsUndefined())
-                break;
-            --numArgsPassed;
-        }
-        stringArg = info[0];
-        if (!stringArg.prepare())
-            return;
-        defaultUndefinedOptionalBooleanArg = toBoolean(info.GetIsolate(), info[1], exceptionState);
-        if (exceptionState.throwIfNeeded())
-            return;
-        defaultUndefinedOptionalLongArg = toInt32(info.GetIsolate(), info[2], NormalConversion, exceptionState);
-        if (exceptionState.throwIfNeeded())
-            return;
-        defaultUndefinedOptionalStringArg = info[3];
-        if (!defaultUndefinedOptionalStringArg.prepare())
-            return;
-        if (!info[4]->IsUndefined()) {
-            defaultNullStringOptionalstringArg = info[4];
-            if (!defaultNullStringOptionalstringArg.prepare())
-                return;
-        } else {
-            defaultNullStringOptionalstringArg = nullptr;
-        }
-        if (UNLIKELY(numArgsPassed <= 5)) {
-            Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
-            TestInterfaceNamedConstructor* impl = TestInterfaceNamedConstructor::createForJSConstructor(document, stringArg, defaultUndefinedOptionalBooleanArg, defaultUndefinedOptionalLongArg, defaultUndefinedOptionalStringArg, defaultNullStringOptionalstringArg, exceptionState);
-            if (exceptionState.hadException()) {
-                exceptionState.throwIfNeeded();
-                return;
-            }
-            v8::Local<v8::Object> wrapper = info.Holder();
-            wrapper = impl->associateWithWrapper(info.GetIsolate(), &V8TestInterfaceNamedConstructorConstructor::wrapperTypeInfo, wrapper);
-            v8SetReturnValue(info, wrapper);
-            return;
-        }
-        optionalStringArg = info[5];
-        if (!optionalStringArg.prepare())
-            return;
+    int numArgsPassed = info.Length();
+    while (numArgsPassed > 0) {
+        if (!info[numArgsPassed - 1]->IsUndefined())
+            break;
+        --numArgsPassed;
     }
+    stringArg = info[0];
+    if (!stringArg.prepare())
+        return;
+
+    defaultUndefinedOptionalBooleanArg = toBoolean(info.GetIsolate(), info[1], exceptionState);
+    if (exceptionState.hadException())
+        return;
+
+    defaultUndefinedOptionalLongArg = toInt32(info.GetIsolate(), info[2], NormalConversion, exceptionState);
+    if (exceptionState.hadException())
+        return;
+
+    defaultUndefinedOptionalStringArg = info[3];
+    if (!defaultUndefinedOptionalStringArg.prepare())
+        return;
+
+    if (!info[4]->IsUndefined()) {
+        defaultNullStringOptionalstringArg = info[4];
+        if (!defaultNullStringOptionalstringArg.prepare())
+            return;
+    } else {
+        defaultNullStringOptionalstringArg = nullptr;
+    }
+    if (UNLIKELY(numArgsPassed <= 5)) {
+        Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
+        TestInterfaceNamedConstructor* impl = TestInterfaceNamedConstructor::createForJSConstructor(document, stringArg, defaultUndefinedOptionalBooleanArg, defaultUndefinedOptionalLongArg, defaultUndefinedOptionalStringArg, defaultNullStringOptionalstringArg, exceptionState);
+        if (exceptionState.hadException()) {
+            return;
+        }
+        v8::Local<v8::Object> wrapper = info.Holder();
+        wrapper = impl->associateWithWrapper(info.GetIsolate(), &V8TestInterfaceNamedConstructorConstructor::wrapperTypeInfo, wrapper);
+        v8SetReturnValue(info, wrapper);
+        return;
+    }
+    optionalStringArg = info[5];
+    if (!optionalStringArg.prepare())
+        return;
+
     Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
     TestInterfaceNamedConstructor* impl = TestInterfaceNamedConstructor::createForJSConstructor(document, stringArg, defaultUndefinedOptionalBooleanArg, defaultUndefinedOptionalLongArg, defaultUndefinedOptionalStringArg, defaultNullStringOptionalstringArg, optionalStringArg, exceptionState);
     if (exceptionState.hadException()) {
-        exceptionState.throwIfNeeded();
         return;
     }
     v8::Local<v8::Object> wrapper = info.Holder();
@@ -184,12 +201,7 @@ v8::Local<v8::Object> V8TestInterfaceNamedConstructor::findInstanceInPrototypeCh
 
 TestInterfaceNamedConstructor* V8TestInterfaceNamedConstructor::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
-    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
-}
-
-ActiveScriptWrappable* V8TestInterfaceNamedConstructor::toActiveScriptWrappable(v8::Local<v8::Object> wrapper)
-{
-    return toImpl(wrapper);
+    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : nullptr;
 }
 
 } // namespace blink

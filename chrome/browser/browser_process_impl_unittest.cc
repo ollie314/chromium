@@ -8,8 +8,9 @@
 
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/user_metrics.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
@@ -30,6 +31,7 @@ class BrowserProcessImplTest : public ::testing::Test {
         browser_process_impl_(
             new BrowserProcessImpl(base::ThreadTaskRunnerHandle::Get().get(),
                                    command_line_)) {
+    base::SetRecordActionTaskRunner(loop_.task_runner());
     browser_process_impl_->SetApplicationLocale("en");
   }
 

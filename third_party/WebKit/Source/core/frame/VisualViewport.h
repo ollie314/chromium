@@ -40,12 +40,11 @@
 #include "platform/scroll/ScrollableArea.h"
 #include "public/platform/WebScrollbar.h"
 #include "public/platform/WebSize.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include <memory>
 
 namespace blink {
-class WebLayerTreeView;
 class WebScrollbarLayer;
+class WebLayer;
 }
 
 namespace blink {
@@ -65,10 +64,8 @@ class LocalFrame;
 class CORE_EXPORT VisualViewport final
     : public GarbageCollectedFinalized<VisualViewport>
     , public GraphicsLayerClient
-    , public ScriptWrappable
     , public ScrollableArea {
     USING_GARBAGE_COLLECTED_MIXIN(VisualViewport);
-    DEFINE_WRAPPERTYPEINFO();
 public:
     static VisualViewport* create(FrameHost& host)
     {
@@ -91,6 +88,14 @@ public:
     GraphicsLayer* scrollLayer()
     {
         return m_innerViewportScrollLayer.get();
+    }
+    GraphicsLayer* pageScaleLayer()
+    {
+        return m_pageScaleLayer.get();
+    }
+    GraphicsLayer* overscrollElasticityLayer()
+    {
+        return m_overscrollElasticityLayer.get();
     }
 
     void initializeScrollbars();
@@ -127,8 +132,7 @@ public:
     // scale factor is left unchanged.
     bool magnifyScaleAroundAnchor(float magnifyDelta, const FloatPoint& anchor);
 
-    void registerLayersWithTreeView(WebLayerTreeView*) const;
-    void clearLayersForTreeView(WebLayerTreeView*) const;
+    void setScrollLayerOnScrollbars(WebLayer*) const;
 
     // The portion of the unzoomed frame visible in the visual viewport,
     // in partial CSS pixels. Relative to the main frame.
@@ -176,6 +180,7 @@ public:
     DoubleRect visibleContentRectDouble(IncludeScrollbarsInRect = ExcludeScrollbars) const override;
     IntRect visibleContentRect(IncludeScrollbarsInRect = ExcludeScrollbars) const override;
     bool shouldUseIntegerScrollOffset() const override;
+    void setScrollPosition(const DoublePoint&, ScrollType, ScrollBehavior = ScrollBehaviorInstant) override;
     LayoutRect visualRectForScrollbarParts() const override { ASSERT_NOT_REACHED(); return LayoutRect(); }
     bool isActive() const override { return false; }
     int scrollSize(ScrollbarOrientation) const override;
@@ -206,8 +211,6 @@ public:
     // Visual Viewport API implementation.
     double scrollLeft();
     double scrollTop();
-    void setScrollLeft(double x);
-    void setScrollTop(double y);
     double clientWidth();
     double clientHeight();
     double pageScale();
@@ -224,11 +227,14 @@ public:
 private:
     explicit VisualViewport(FrameHost&);
 
+    bool didSetScaleOrLocation(float scale, const FloatPoint& location);
+
     bool visualViewportSuppliesScrollbars() const;
 
-    void updateLayoutIgnorePendingStylesheets();
+    void updateStyleAndLayoutIgnorePendingStylesheets();
 
-    void enqueueChangedEvent();
+    void enqueueScrollEvent();
+    void enqueueResizeEvent();
 
     // GraphicsLayerClient implementation.
     bool needsRepaint(const GraphicsLayer&) const { ASSERT_NOT_REACHED(); return true; }
@@ -239,6 +245,8 @@ private:
     void setupScrollbar(WebScrollbar::Orientation);
     FloatPoint clampOffsetToBoundaries(const FloatPoint&);
 
+    void notifyRootFrameViewport() const;
+
     LocalFrame* mainFrame() const;
 
     FrameHost& frameHost() const
@@ -248,15 +256,15 @@ private:
     }
 
     Member<FrameHost> m_frameHost;
-    OwnPtr<GraphicsLayer> m_rootTransformLayer;
-    OwnPtr<GraphicsLayer> m_innerViewportContainerLayer;
-    OwnPtr<GraphicsLayer> m_overscrollElasticityLayer;
-    OwnPtr<GraphicsLayer> m_pageScaleLayer;
-    OwnPtr<GraphicsLayer> m_innerViewportScrollLayer;
-    OwnPtr<GraphicsLayer> m_overlayScrollbarHorizontal;
-    OwnPtr<GraphicsLayer> m_overlayScrollbarVertical;
-    OwnPtr<WebScrollbarLayer> m_webOverlayScrollbarHorizontal;
-    OwnPtr<WebScrollbarLayer> m_webOverlayScrollbarVertical;
+    std::unique_ptr<GraphicsLayer> m_rootTransformLayer;
+    std::unique_ptr<GraphicsLayer> m_innerViewportContainerLayer;
+    std::unique_ptr<GraphicsLayer> m_overscrollElasticityLayer;
+    std::unique_ptr<GraphicsLayer> m_pageScaleLayer;
+    std::unique_ptr<GraphicsLayer> m_innerViewportScrollLayer;
+    std::unique_ptr<GraphicsLayer> m_overlayScrollbarHorizontal;
+    std::unique_ptr<GraphicsLayer> m_overlayScrollbarVertical;
+    std::unique_ptr<WebScrollbarLayer> m_webOverlayScrollbarHorizontal;
+    std::unique_ptr<WebScrollbarLayer> m_webOverlayScrollbarVertical;
 
     // Offset of the visual viewport from the main frame's origin, in CSS pixels.
     FloatPoint m_offset;

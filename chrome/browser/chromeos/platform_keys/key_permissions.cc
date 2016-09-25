@@ -16,11 +16,11 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/core/common/policy_service.h"
+#include "components/policy/policy_constants.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "extensions/browser/state_store.h"
-#include "policy/policy_constants.h"
 
 namespace chromeos {
 
@@ -246,7 +246,7 @@ void KeyPermissions::PermissionsForExtension::KeyEntriesFromState(
     LOG(ERROR) << "Found a state store of wrong type.";
     return;
   }
-  for (const base::Value* entry : *entries) {
+  for (const auto& entry : *entries) {
     if (!entry) {
       LOG(ERROR) << "Found invalid NULL entry in PlatformKeys state store.";
       continue;
@@ -377,9 +377,8 @@ void KeyPermissions::CreatePermissionObjectAndPassToCallback(
     const std::string& extension_id,
     const PermissionsCallback& callback,
     std::unique_ptr<base::Value> value) {
-  callback.Run(base::WrapUnique(
-      new PermissionsForExtension(extension_id, std::move(value),
-                                  profile_prefs_, profile_policies_, this)));
+  callback.Run(base::MakeUnique<PermissionsForExtension>(
+      extension_id, std::move(value), profile_prefs_, profile_policies_, this));
 }
 
 void KeyPermissions::SetPlatformKeysOfExtension(

@@ -36,6 +36,7 @@
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/SVGResourcesCache.h"
 #include "core/paint/PaintLayer.h"
+#include "core/paint/SVGModelObjectPaintInvalidator.h"
 #include "core/svg/SVGGraphicsElement.h"
 
 namespace blink {
@@ -50,9 +51,9 @@ bool LayoutSVGModelObject::isChildAllowed(LayoutObject* child, const ComputedSty
     return child->isSVG() && !(child->isSVGInline() || child->isSVGInlineText() || child->isSVGGradientStop());
 }
 
-void LayoutSVGModelObject::mapLocalToAncestor(const LayoutBoxModelObject* ancestor, TransformState& transformState, MapCoordinatesFlags) const
+void LayoutSVGModelObject::mapLocalToAncestor(const LayoutBoxModelObject* ancestor, TransformState& transformState, MapCoordinatesFlags flags) const
 {
-    SVGLayoutSupport::mapLocalToAncestor(this, ancestor, transformState);
+    SVGLayoutSupport::mapLocalToAncestor(this, ancestor, transformState, flags);
 }
 
 LayoutRect LayoutSVGModelObject::absoluteClippedOverflowRect() const
@@ -82,10 +83,20 @@ void LayoutSVGModelObject::absoluteQuads(Vector<FloatQuad>& quads) const
     quads.append(localToAbsoluteQuad(strokeBoundingBox()));
 }
 
+FloatRect LayoutSVGModelObject::localBoundingBoxRectForAccessibility() const
+{
+    return strokeBoundingBox();
+}
+
 void LayoutSVGModelObject::willBeDestroyed()
 {
     SVGResourcesCache::clientDestroyed(this);
     LayoutObject::willBeDestroyed();
+}
+
+PaintInvalidationReason LayoutSVGModelObject::invalidatePaintIfNeeded(const PaintInvalidatorContext& context) const
+{
+    return SVGModelObjectPaintInvalidator(*this, context).invalidatePaintIfNeeded();
 }
 
 void LayoutSVGModelObject::computeLayerHitTestRects(LayerHitTestRects& rects) const
@@ -128,23 +139,6 @@ bool LayoutSVGModelObject::nodeAtPoint(HitTestResult&, const HitTestLocation&, c
 IntRect LayoutSVGModelObject::absoluteElementBoundingBoxRect() const
 {
     return localToAbsoluteQuad(FloatQuad(paintInvalidationRectInLocalSVGCoordinates())).enclosingBoundingBox();
-}
-
-void LayoutSVGModelObject::invalidateTreeIfNeeded(const PaintInvalidationState& paintInvalidationState)
-{
-    ASSERT(!needsLayout());
-
-    // If we didn't need paint invalidation then our children don't need as well.
-    // Skip walking down the tree as everything should be fine below us.
-    if (!shouldCheckForPaintInvalidation(paintInvalidationState))
-        return;
-
-    PaintInvalidationState newPaintInvalidationState(paintInvalidationState, *this);
-    invalidatePaintIfNeeded(newPaintInvalidationState);
-    clearPaintInvalidationFlags(newPaintInvalidationState);
-
-    newPaintInvalidationState.updateForChildren();
-    invalidatePaintOfSubtreesIfNeeded(newPaintInvalidationState);
 }
 
 } // namespace blink

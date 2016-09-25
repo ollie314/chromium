@@ -4,16 +4,23 @@
 
 #include "blimp/common/blob_cache/in_memory_blob_cache.h"
 
+#include <utility>
+
 #include "base/logging.h"
-#include "base/sha1.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
 
 namespace blimp {
 
 InMemoryBlobCache::InMemoryBlobCache() {}
 
 InMemoryBlobCache::~InMemoryBlobCache() {}
+
+std::vector<BlobId> InMemoryBlobCache::GetCachedBlobIds() const {
+  std::vector<BlobId> cached_ids;
+  for (const auto& blob_id_and_data_pair : cache_) {
+    cached_ids.push_back(blob_id_and_data_pair.first);
+  }
+  return cached_ids;
+}
 
 void InMemoryBlobCache::Put(const BlobId& id, BlobDataPtr data) {
   if (Contains(id)) {

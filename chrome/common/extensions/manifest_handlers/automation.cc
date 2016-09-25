@@ -10,7 +10,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/extensions/api/manifest_types.h"
-#include "chrome/grit/generated_resources.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/manifest_constants.h"
@@ -21,7 +20,6 @@
 #include "extensions/common/url_pattern.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_utils.h"
-#include "ui/base/l10n/l10n_util.h"
 
 namespace extensions {
 
@@ -306,10 +304,9 @@ AutomationInfo::AutomationInfo() : desktop(false), interact(false) {
 }
 
 AutomationInfo::AutomationInfo(bool desktop,
-                               const URLPatternSet matches,
+                               const URLPatternSet& matches,
                                bool interact)
-    : desktop(desktop), matches(matches), interact(interact) {
-}
+    : desktop(desktop), matches(matches), interact(interact) {}
 
 AutomationInfo::~AutomationInfo() {
 }

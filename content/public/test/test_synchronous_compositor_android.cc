@@ -10,8 +10,9 @@
 
 namespace content {
 
-TestSynchronousCompositor::TestSynchronousCompositor() : client_(NULL) {
-}
+TestSynchronousCompositor::TestSynchronousCompositor(int process_id,
+                                                     int routing_id)
+    : client_(NULL), process_id_(process_id), routing_id_(routing_id) {}
 
 TestSynchronousCompositor::~TestSynchronousCompositor() {
   SetClient(NULL);
@@ -19,30 +20,30 @@ TestSynchronousCompositor::~TestSynchronousCompositor() {
 
 void TestSynchronousCompositor::SetClient(SynchronousCompositorClient* client) {
   if (client_)
-    client_->DidDestroyCompositor(this);
+    client_->DidDestroyCompositor(this, process_id_, routing_id_);
   client_ = client;
-  if (client_) {
-    client_->DidInitializeCompositor(this);
-    client_->DidBecomeCurrent(this);
-  }
+  if (client_)
+    client_->DidInitializeCompositor(this, process_id_, routing_id_);
 }
 
 SynchronousCompositor::Frame TestSynchronousCompositor::DemandDrawHw(
-    const gfx::Size& surface_size,
-    const gfx::Transform& transform,
-    const gfx::Rect& viewport,
-    const gfx::Rect& clip,
+    const gfx::Size& viewport_size,
     const gfx::Rect& viewport_rect_for_tile_priority,
     const gfx::Transform& transform_for_tile_priority) {
   return std::move(hardware_frame_);
 }
 
+void TestSynchronousCompositor::DemandDrawHwAsync(
+    const gfx::Size& viewport_size,
+    const gfx::Rect& viewport_rect_for_tile_priority,
+    const gfx::Transform& transform_for_tile_priority) {}
+
 void TestSynchronousCompositor::ReturnResources(
-    uint32_t output_surface_id,
-    const cc::CompositorFrameAck& frame_ack) {
+    uint32_t compositor_frame_sink_id,
+    const cc::ReturnedResourceArray& resources) {
   ReturnedResources returned_resources;
-  returned_resources.output_surface_id = output_surface_id;
-  returned_resources.resources = frame_ack.resources;
+  returned_resources.compositor_frame_sink_id = compositor_frame_sink_id;
+  returned_resources.resources = resources;
   frame_ack_array_.push_back(returned_resources);
 }
 
@@ -57,14 +58,14 @@ bool TestSynchronousCompositor::DemandDrawSw(SkCanvas* canvas) {
 }
 
 void TestSynchronousCompositor::SetHardwareFrame(
-    uint32_t output_surface_id,
+    uint32_t compositor_frame_sink_id,
     std::unique_ptr<cc::CompositorFrame> frame) {
-  hardware_frame_.output_surface_id = output_surface_id;
+  hardware_frame_.compositor_frame_sink_id = compositor_frame_sink_id;
   hardware_frame_.frame = std::move(frame);
 }
 
 TestSynchronousCompositor::ReturnedResources::ReturnedResources()
-    : output_surface_id(0u) {}
+    : compositor_frame_sink_id(0u) {}
 
 TestSynchronousCompositor::ReturnedResources::ReturnedResources(
     const ReturnedResources& other) = default;

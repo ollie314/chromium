@@ -4,6 +4,12 @@
 
 #include "chrome/browser/extensions/api/bluetooth_low_energy/utils.h"
 
+#include <stddef.h>
+#include <iterator>
+#include <vector>
+
+#include "base/logging.h"
+
 namespace extensions {
 namespace api {
 namespace bluetooth_low_energy {
@@ -18,7 +24,7 @@ std::unique_ptr<base::ListValue> CharacteristicPropertiesToValue(
            properties.begin();
        iter != properties.end();
        ++iter)
-    property_list->Append(new base::StringValue(ToString(*iter)));
+    property_list->AppendString(ToString(*iter));
   return property_list;
 }
 
@@ -38,10 +44,13 @@ std::unique_ptr<base::DictionaryValue> CharacteristicToValue(
 }
 
 std::unique_ptr<base::DictionaryValue> DescriptorToValue(Descriptor* from) {
+  if (!from->characteristic)
+    return from->ToValue();
+
   // Copy the characteristic properties and set them later manually.
   std::vector<CharacteristicProperty> properties =
-      from->characteristic.properties;
-  from->characteristic.properties.clear();
+      from->characteristic->properties;
+  from->characteristic->properties.clear();
   std::unique_ptr<base::DictionaryValue> to = from->ToValue();
 
   base::DictionaryValue* chrc_value = NULL;

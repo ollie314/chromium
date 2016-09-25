@@ -53,7 +53,6 @@ NSString* const NSAccessibilityInvalidAttribute = @"AXInvalid";
 NSString* const NSAccessibilityIsMultiSelectableAttribute =
     @"AXIsMultiSelectable";
 NSString* const NSAccessibilityLoadingProgressAttribute = @"AXLoadingProgress";
-NSString* const NSAccessibilityRequiredAttribute = @"AXRequired";
 NSString* const
     NSAccessibilityUIElementCountForSearchPredicateParameterizedAttribute =
         @"AXUIElementCountForSearchPredicate";
@@ -82,6 +81,12 @@ NSString* const
         @"AXLineTextMarkerRangeForTextMarker";
 NSString* const NSAccessibilitySelectTextWithCriteriaParameterizedAttribute =
     @"AXSelectTextWithCriteria";
+NSString* const NSAccessibilityBoundsForTextMarkerRangeParameterizedAttribute =
+    @"AXBoundsForTextMarkerRange";
+NSString* const NSAccessibilityTextMarkerRangeForUnorderedTextMarkersParameterizedAttribute =
+    @"AXTextMarkerRangeForUnorderedTextMarkers";
+NSString* const NSAccessibilityIndexForChildUIElementParameterizedAttribute =
+    @"AXIndexForChildUIElement";
 
 // Actions.
 NSString* const NSAccessibilityScrollToVisibleAction = @"AXScrollToVisible";
@@ -93,6 +98,7 @@ struct AXTextMarkerData {
   AXTreeIDRegistry::AXTreeID tree_id;
   int32_t node_id;
   int offset;
+  ui::AXTextAffinity affinity;
 };
 
 // VoiceOver uses -1 to mean "no limit" for AXResultsLimit.
@@ -130,11 +136,14 @@ AXTextMarkerRef AXTextMarkerRangeCopyEndMarker(
 
 }  // extern "C"
 
-id CreateTextMarker(const BrowserAccessibility& object, int offset) {
+id CreateTextMarker(const BrowserAccessibility& object,
+                    int offset,
+                    ui::AXTextAffinity affinity) {
   AXTextMarkerData marker_data;
   marker_data.tree_id = object.manager() ? object.manager()->ax_tree_id() : -1;
   marker_data.node_id = object.GetId();
   marker_data.offset = offset;
+  marker_data.affinity = affinity;
   return (id)base::mac::CFTypeRefToNSObjectAutorelease(AXTextMarkerCreate(
       kCFAllocatorDefault, reinterpret_cast<const UInt8*>(&marker_data),
       sizeof(marker_data)));
@@ -142,20 +151,24 @@ id CreateTextMarker(const BrowserAccessibility& object, int offset) {
 
 id CreateTextMarkerRange(const BrowserAccessibility& start_object,
                          int start_offset,
+                         ui::AXTextAffinity start_affinity,
                          const BrowserAccessibility& end_object,
-                         int end_offset) {
-  id start_marker = CreateTextMarker(start_object, start_offset);
-  id end_marker = CreateTextMarker(end_object, end_offset);
+                         int end_offset,
+                         ui::AXTextAffinity end_affinity) {
+  id start_marker = CreateTextMarker(
+        start_object, start_offset, start_affinity);
+  id end_marker = CreateTextMarker(end_object, end_offset, end_affinity);
   return (id)base::mac::CFTypeRefToNSObjectAutorelease(
       AXTextMarkerRangeCreate(kCFAllocatorDefault, start_marker, end_marker));
 }
 
 bool GetTextMarkerData(AXTextMarkerRef text_marker,
                        BrowserAccessibility** object,
-                       int* offset) {
+                       int* offset,
+                       ui::AXTextAffinity* affinity) {
   DCHECK(text_marker);
   DCHECK(object && offset);
-  auto marker_data = reinterpret_cast<const AXTextMarkerData*>(
+  const auto* marker_data = reinterpret_cast<const AXTextMarkerData*>(
       AXTextMarkerGetBytePtr(text_marker));
   if (!marker_data)
     return false;
@@ -173,14 +186,18 @@ bool GetTextMarkerData(AXTextMarkerRef text_marker,
   if (*offset < 0)
     return false;
 
+  *affinity = marker_data->affinity;
+
   return true;
 }
 
 bool GetTextMarkerRange(AXTextMarkerRangeRef marker_range,
                         BrowserAccessibility** start_object,
                         int* start_offset,
+                        ui::AXTextAffinity* start_affinity,
                         BrowserAccessibility** end_object,
-                        int* end_offset) {
+                        int* end_offset,
+                        ui::AXTextAffinity* end_affinity) {
   DCHECK(marker_range);
   DCHECK(start_object && start_offset);
   DCHECK(end_object && end_offset);
@@ -192,16 +209,50 @@ bool GetTextMarkerRange(AXTextMarkerRangeRef marker_range,
   if (!start_marker.get() || !end_marker.get())
     return false;
 
-  return GetTextMarkerData(start_marker.get(), start_object, start_offset) &&
-         GetTextMarkerData(end_marker.get(), end_object, end_offset);
+  return GetTextMarkerData(start_marker.get(),
+                           start_object, start_offset, start_affinity) &&
+         GetTextMarkerData(end_marker.get(),
+                           end_object, end_offset, end_affinity);
+}
+
+void AddMisspelledTextAttributes(
+    const std::vector<const BrowserAccessibility*>& text_only_objects,
+    NSMutableAttributedString* attributed_string) {
+  [attributed_string beginEditing];
+  for (const BrowserAccessibility* text_object : text_only_objects) {
+    const std::vector<int32_t>& marker_types =
+        text_object->GetIntListAttribute(ui::AX_ATTR_MARKER_TYPES);
+    const std::vector<int>& marker_starts =
+        text_object->GetIntListAttribute(ui::AX_ATTR_MARKER_STARTS);
+    const std::vector<int>& marker_ends =
+        text_object->GetIntListAttribute(ui::AX_ATTR_MARKER_ENDS);
+    for (size_t i = 0; i < marker_types.size(); ++i) {
+      if (!(static_cast<ui::AXMarkerType>(marker_types[i]) &
+            ui::AX_MARKER_TYPE_SPELLING)) {
+        continue;
+      }
+
+      int misspelling_start = marker_starts[i];
+      int misspelling_end = marker_ends[i];
+      int misspelling_length = misspelling_end - misspelling_start;
+      DCHECK_GT(misspelling_length, 0);
+      [attributed_string
+          addAttribute:NSAccessibilityMarkedMisspelledTextAttribute
+                 value:@YES
+                 range:NSMakeRange(misspelling_start, misspelling_length)];
+    }
+  }
+  [attributed_string endEditing];
 }
 
 NSString* GetTextForTextMarkerRange(AXTextMarkerRangeRef marker_range) {
   BrowserAccessibility* start_object;
   BrowserAccessibility* end_object;
   int start_offset, end_offset;
-  if (!GetTextMarkerRange(marker_range, &start_object, &start_offset,
-                          &end_object, &end_offset)) {
+  ui::AXTextAffinity start_affinity, end_affinity;
+  if (!GetTextMarkerRange(marker_range,
+                          &start_object, &start_offset, &start_affinity,
+                          &end_object, &end_offset, &end_affinity)) {
     return nil;
   }
   DCHECK(start_object && end_object);
@@ -210,6 +261,46 @@ NSString* GetTextForTextMarkerRange(AXTextMarkerRangeRef marker_range) {
 
   return base::SysUTF16ToNSString(BrowserAccessibilityManager::GetTextForRange(
       *start_object, start_offset, *end_object, end_offset));
+}
+
+NSAttributedString* GetAttributedTextForTextMarkerRange(
+    AXTextMarkerRangeRef marker_range) {
+  BrowserAccessibility* start_object;
+  BrowserAccessibility* end_object;
+  int start_offset, end_offset;
+  ui::AXTextAffinity start_affinity, end_affinity;
+  if (!GetTextMarkerRange(marker_range,
+                          &start_object, &start_offset, &start_affinity,
+                          &end_object, &end_offset, &end_affinity)) {
+    return nil;
+  }
+
+  NSString* text = base::SysUTF16ToNSString(
+      BrowserAccessibilityManager::GetTextForRange(*start_object, *end_object));
+  if ([text length] == 0)
+    return nil;
+
+  // Be permissive with the start and end offsets.
+  if (start_object == end_object && end_offset < start_offset)
+    std::swap(start_offset, end_offset);
+
+  int trim_length = 0;
+  if ((end_object->IsSimpleTextControl() || end_object->IsTextOnlyObject()) &&
+      end_offset < static_cast<int>(end_object->GetText().length())) {
+    trim_length = static_cast<int>(end_object->GetText().length()) - end_offset;
+  }
+  int range_length = [text length] - start_offset - trim_length;
+  DCHECK_GE(range_length, 0);
+  NSRange range = NSMakeRange(start_offset, range_length);
+  DCHECK_LE(NSMaxRange(range), [text length]);
+
+  NSMutableAttributedString* attributed_text =
+      [[[NSMutableAttributedString alloc] initWithString:text] autorelease];
+  std::vector<const BrowserAccessibility*> text_only_objects =
+      BrowserAccessibilityManager::FindTextOnlyObjectsInRange(*start_object,
+                                                              *end_object);
+  AddMisspelledTextAttributes(text_only_objects, attributed_text);
+  return [attributed_text attributedSubstringFromRange:range];
 }
 
 // Returns an autoreleased copy of the AXNodeData's attribute.
@@ -411,6 +502,14 @@ bool InitializeAccessibilityTreeSearch(
 }
 
 }  // namespace
+
+// The following private WebKit accessibility attribute became public in 10.12.
+#if !defined(MAC_OS_X_VERSION_10_12) || \
+    MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_12
+extern "C" {
+NSString* const NSAccessibilityRequiredAttribute = @"AXRequired";
+}
+#endif  // MAC_OS_X_VERSION_10_12
 
 @implementation BrowserAccessibilityCocoa
 
@@ -673,24 +772,15 @@ bool InitializeAccessibilityTreeSearch(
   if ([self shouldExposeNameInAXValue])
     return @"";
 
-  // If the name came from a single related element and it's present in the
-  // tree, it will be exposed in AXTitleUIElement.
-  std::vector<int32_t> labelledby_ids =
-      browserAccessibility_->GetIntListAttribute(ui::AX_ATTR_LABELLEDBY_IDS);
+  // If we're exposing the title in TitleUIElement, don't also redundantly
+  // expose it in AXDescription.
+  if ([self shouldExposeTitleUIElement])
+    return @"";
+
   ui::AXNameFrom nameFrom = static_cast<ui::AXNameFrom>(
       browserAccessibility_->GetIntAttribute(ui::AX_ATTR_NAME_FROM));
   std::string name = browserAccessibility_->GetStringAttribute(
       ui::AX_ATTR_NAME);
-
-  // VoiceOver ignores titleUIElement on non-control AX nodes, so this special
-  // case expressly returns a nonempty text name for these nodes.
-  if (nameFrom == ui::AX_NAME_FROM_RELATED_ELEMENT &&
-      labelledby_ids.size() == 1 &&
-      browserAccessibility_->manager()->GetFromID(labelledby_ids[0]) &&
-      !browserAccessibility_->IsControl()) {
-    return base::SysUTF8ToNSString(name);
-  }
-
   if (!name.empty()) {
     // On Mac OS X, the accessible name of an object is exposed as its
     // title if it comes from visible text, and as its description
@@ -800,7 +890,7 @@ bool InitializeAccessibilityTreeSearch(
   if (![self instanceActive])
     return nil;
   return [NSNumber numberWithBool:
-      GetState(browserAccessibility_, ui::AX_STATE_ENABLED)];
+      !GetState(browserAccessibility_, ui::AX_STATE_DISABLED)];
 }
 
 // Returns a text marker that points to the last character in the document that
@@ -828,7 +918,8 @@ bool InitializeAccessibilityTreeSearch(
     return nil;
 
   return CreateTextMarker(*last_text_object,
-                          last_text_object->GetText().length());
+                          last_text_object->GetText().length(),
+                          ui::AX_TEXT_AFFINITY_DOWNSTREAM);
 }
 
 - (NSNumber*)expanded {
@@ -922,8 +1013,8 @@ bool InitializeAccessibilityTreeSearch(
   if (selStart > selEnd)
     std::swap(selStart, selEnd);
 
-  const std::vector<int32_t>& line_breaks =
-      browserAccessibility_->GetIntListAttribute(ui::AX_ATTR_LINE_BREAKS);
+  const std::vector<int> line_breaks =
+      browserAccessibility_->GetLineStartOffsets();
   for (int i = 0; i < static_cast<int>(line_breaks.size()); ++i) {
     if (line_breaks[i] > selStart)
       return [NSNumber numberWithInt:i];
@@ -1079,7 +1170,7 @@ bool InitializeAccessibilityTreeSearch(
 - (NSPoint)origin {
   if (![self instanceActive])
     return NSMakePoint(0, 0);
-  gfx::Rect bounds = browserAccessibility_->GetLocalBoundsRect();
+  gfx::Rect bounds = browserAccessibility_->GetPageBoundsRect();
   return NSMakePoint(bounds.x(), bounds.y());
 }
 
@@ -1093,9 +1184,11 @@ bool InitializeAccessibilityTreeSearch(
   } else {
     // Hook back up to RenderWidgetHostViewCocoa.
     BrowserAccessibilityManagerMac* manager =
-        static_cast<BrowserAccessibilityManagerMac*>(
-            browserAccessibility_->manager());
-    return manager->parent_view();
+        browserAccessibility_->manager()->GetRootManager()
+            ->ToBrowserAccessibilityManagerMac();
+    if (manager)
+      return manager->parent_view();
+    return nil;
   }
 }
 
@@ -1133,6 +1226,35 @@ bool InitializeAccessibilityTreeSearch(
     default:
       return false;
   }
+}
+
+// Returns true if this object should expose its accessible name using
+// AXTitleUIElement rather than AXTitle or AXDescription. We only do
+// this if it's a control, if there's a single label, and the label has
+// nonempty text.
+// internal
+- (BOOL)shouldExposeTitleUIElement {
+  // VoiceOver ignores TitleUIElement if the element isn't a control.
+  if (!browserAccessibility_->IsControl())
+    return false;
+
+  ui::AXNameFrom nameFrom = static_cast<ui::AXNameFrom>(
+      browserAccessibility_->GetIntAttribute(ui::AX_ATTR_NAME_FROM));
+  if (nameFrom != ui::AX_NAME_FROM_RELATED_ELEMENT)
+    return false;
+
+  std::vector<int32_t> labelledby_ids =
+  browserAccessibility_->GetIntListAttribute(ui::AX_ATTR_LABELLEDBY_IDS);
+  if (labelledby_ids.size() != 1)
+    return false;
+
+  BrowserAccessibility* label =
+      browserAccessibility_->manager()->GetFromID(labelledby_ids[0]);
+  if (!label)
+    return false;
+
+  std::string labelName = label->GetStringAttribute(ui::AX_ATTR_NAME);
+  return !labelName.empty();
 }
 
 // internal
@@ -1504,14 +1626,18 @@ bool InitializeAccessibilityTreeSearch(
   if (anchorOffset < 0 || focusOffset < 0)
     return nil;
 
-  return CreateTextMarkerRange(*anchorObject, anchorOffset, *focusObject,
-                               focusOffset);
+  ui::AXTextAffinity anchorAffinity =
+        manager->GetTreeData().sel_anchor_affinity;
+  ui::AXTextAffinity focusAffinity = manager->GetTreeData().sel_focus_affinity;
+
+  return CreateTextMarkerRange(*anchorObject, anchorOffset, anchorAffinity,
+                               *focusObject, focusOffset, focusAffinity);
 }
 
 - (NSValue*)size {
   if (![self instanceActive])
     return nil;
-  gfx::Rect bounds = browserAccessibility_->GetLocalBoundsRect();
+  gfx::Rect bounds = browserAccessibility_->GetPageBoundsRect();
   return  [NSValue valueWithSize:NSMakeSize(bounds.width(), bounds.height())];
 }
 
@@ -1563,7 +1689,7 @@ bool InitializeAccessibilityTreeSearch(
   if (!first_text_object)
     return nil;
 
-  return CreateTextMarker(*first_text_object, 0);
+  return CreateTextMarker(*first_text_object, 0, ui::AX_TEXT_AFFINITY_UPSTREAM);
 }
 
 // Returns a subrole based upon the role.
@@ -1573,14 +1699,14 @@ bool InitializeAccessibilityTreeSearch(
   ui::AXRole browserAccessibilityRole = [self internalRole];
   if (browserAccessibilityRole == ui::AX_ROLE_TEXT_FIELD &&
       GetState(browserAccessibility_, ui::AX_STATE_PROTECTED)) {
-    return @"AXSecureTextField";
+    return NSAccessibilitySecureTextFieldSubrole;
   }
 
   if (browserAccessibilityRole == ui::AX_ROLE_DESCRIPTION_LIST)
-    return @"AXDefinitionList";
+    return NSAccessibilityDefinitionListSubrole;
 
   if (browserAccessibilityRole == ui::AX_ROLE_LIST)
-    return @"AXContentList";
+    return NSAccessibilityContentListSubrole;
 
   return [AXPlatformNodeCocoa nativeSubroleFromAXRole:browserAccessibilityRole];
 }
@@ -1610,21 +1736,16 @@ bool InitializeAccessibilityTreeSearch(
   if ([self shouldExposeNameInAXValue])
     return @"";
 
-  // If the name came from a single related element and it's present in the
-  // tree, it will be exposed in AXTitleUIElement.
-  std::vector<int32_t> labelledby_ids =
-      browserAccessibility_->GetIntListAttribute(ui::AX_ATTR_LABELLEDBY_IDS);
-  ui::AXNameFrom nameFrom = static_cast<ui::AXNameFrom>(
-      browserAccessibility_->GetIntAttribute(ui::AX_ATTR_NAME_FROM));
-  if (nameFrom == ui::AX_NAME_FROM_RELATED_ELEMENT &&
-      labelledby_ids.size() == 1 &&
-      browserAccessibility_->manager()->GetFromID(labelledby_ids[0])) {
+  // If we're exposing the title in TitleUIElement, don't also redundantly
+  // expose it in AXDescription.
+  if ([self shouldExposeTitleUIElement])
     return @"";
-  }
 
   // On Mac OS X, the accessible name of an object is exposed as its
   // title if it comes from visible text, and as its description
   // otherwise, but never both.
+  ui::AXNameFrom nameFrom = static_cast<ui::AXNameFrom>(
+      browserAccessibility_->GetIntAttribute(ui::AX_ATTR_NAME_FROM));
   if (nameFrom == ui::AX_NAME_FROM_CONTENTS ||
       nameFrom == ui::AX_NAME_FROM_RELATED_ELEMENT ||
       nameFrom == ui::AX_NAME_FROM_VALUE) {
@@ -1638,6 +1759,9 @@ bool InitializeAccessibilityTreeSearch(
 - (id)titleUIElement {
   if (![self instanceActive])
     return nil;
+  if (![self shouldExposeTitleUIElement])
+    return nil;
+
   std::vector<int32_t> labelledby_ids =
       browserAccessibility_->GetIntListAttribute(ui::AX_ATTR_LABELLEDBY_IDS);
   ui::AXNameFrom nameFrom = static_cast<ui::AXNameFrom>(
@@ -1697,7 +1821,9 @@ bool InitializeAccessibilityTreeSearch(
     return [NSNumber numberWithInt:value];
 
   } else if ([role isEqualToString:NSAccessibilityCheckBoxRole] ||
-             [role isEqualToString:NSAccessibilityRadioButtonRole]) {
+             [role isEqualToString:NSAccessibilityRadioButtonRole] ||
+             [self internalRole] == ui::AX_ROLE_MENU_ITEM_CHECK_BOX ||
+             [self internalRole] == ui::AX_ROLE_MENU_ITEM_RADIO) {
     int value = 0;
     value = GetState(
         browserAccessibility_, ui::AX_STATE_CHECKED) ? 1 : 0;
@@ -1801,8 +1927,8 @@ bool InitializeAccessibilityTreeSearch(
     return nil;
 
   BrowserAccessibilityManagerMac* manager =
-      static_cast<BrowserAccessibilityManagerMac*>(
-          browserAccessibility_->manager());
+      browserAccessibility_->manager()->GetRootManager()
+          ->ToBrowserAccessibilityManagerMac();
   if (!manager || !manager->parent_view())
     return nil;
 
@@ -1817,16 +1943,31 @@ bool InitializeAccessibilityTreeSearch(
   children_.swap(*other);
 }
 
-// Returns the requested text range from this object's value attribute.
 - (NSString*)valueForRange:(NSRange)range {
   if (![self instanceActive])
     return nil;
 
   base::string16 value = browserAccessibility_->GetValue();
-  if (NSMaxRange(range) > value.size())
+  if (NSMaxRange(range) > value.length())
     return nil;
 
   return base::SysUTF16ToNSString(value.substr(range.location, range.length));
+}
+
+- (NSAttributedString*)attributedValueForRange:(NSRange)range {
+  if (![self instanceActive])
+    return nil;
+
+  // We need to get the whole text because a spelling mistake might start or end
+  // outside our range.
+  NSString* value = base::SysUTF16ToNSString(browserAccessibility_->GetValue());
+  NSMutableAttributedString* attributedValue =
+      [[[NSMutableAttributedString alloc] initWithString:value] autorelease];
+  std::vector<const BrowserAccessibility*> textOnlyObjects =
+      BrowserAccessibilityManager::FindTextOnlyObjectsInRange(
+          *browserAccessibility_, *browserAccessibility_);
+  AddMisspelledTextAttributes(textOnlyObjects, attributedValue);
+  return [attributedValue attributedSubstringFromRange:range];
 }
 
 // Returns the accessibility value for the given attribute.  If the value isn't
@@ -1851,8 +1992,8 @@ bool InitializeAccessibilityTreeSearch(
   if (![self instanceActive])
     return nil;
 
-  const std::vector<int32_t>& line_breaks =
-      browserAccessibility_->GetIntListAttribute(ui::AX_ATTR_LINE_BREAKS);
+  const std::vector<int> line_breaks =
+      browserAccessibility_->GetLineStartOffsets();
   base::string16 value = browserAccessibility_->GetValue();
   int len = static_cast<int>(value.size());
 
@@ -1864,8 +2005,7 @@ bool InitializeAccessibilityTreeSearch(
   if ([attribute
           isEqualToString:
               NSAccessibilityAttributedStringForRangeParameterizedAttribute]) {
-    NSString* value = [self valueForRange:[(NSValue*)parameter rangeValue]];
-    return [[[NSAttributedString alloc] initWithString:value] autorelease];
+    return [self attributedValueForRange:[(NSValue*)parameter rangeValue]];
   }
 
   if ([attribute isEqualToString:
@@ -1896,7 +2036,9 @@ bool InitializeAccessibilityTreeSearch(
         [self internalRole] != ui::AX_ROLE_GRID) {
       return nil;
     }
-    if (![parameter isKindOfClass:[NSArray self]])
+    if (![parameter isKindOfClass:[NSArray class]])
+      return nil;
+    if (2 != [parameter count])
       return nil;
     NSArray* array = parameter;
     int column = [[array objectAtIndex:0] intValue];
@@ -1948,7 +2090,8 @@ bool InitializeAccessibilityTreeSearch(
   if ([attribute isEqualToString:@"AXUIElementForTextMarker"]) {
     BrowserAccessibility* object;
     int offset;
-    if (GetTextMarkerData(parameter, &object, &offset))
+    ui::AXTextAffinity affinity;
+    if (GetTextMarkerData(parameter, &object, &offset, &affinity))
       return ToBrowserAccessibilityCocoa(object);
 
     return nil;
@@ -1956,22 +2099,23 @@ bool InitializeAccessibilityTreeSearch(
 
   if ([attribute isEqualToString:@"AXTextMarkerRangeForUIElement"]) {
     return CreateTextMarkerRange(*browserAccessibility_, 0,
+                                 ui::AX_TEXT_AFFINITY_UPSTREAM,
                                  *browserAccessibility_,
-                                 browserAccessibility_->GetText().length());
+                                 browserAccessibility_->GetText().length(),
+                                 ui::AX_TEXT_AFFINITY_DOWNSTREAM);
   }
 
   if ([attribute isEqualToString:@"AXStringForTextMarkerRange"])
-    return GetTextForTextMarkerRange(parameter);
+    GetTextForTextMarkerRange(parameter);
 
-  if ([attribute isEqualToString:@"AXAttributedStringForTextMarkerRange"]) {
-    NSString* text = GetTextForTextMarkerRange(parameter);
-    return [[[NSAttributedString alloc] initWithString:text] autorelease];
-  }
+  if ([attribute isEqualToString:@"AXAttributedStringForTextMarkerRange"])
+    return GetAttributedTextForTextMarkerRange(parameter);
 
   if ([attribute isEqualToString:@"AXNextTextMarkerForTextMarker"]) {
     BrowserAccessibility* object;
     int offset;
-    if (!GetTextMarkerData(parameter, &object, &offset))
+    ui::AXTextAffinity affinity;
+    if (!GetTextMarkerData(parameter, &object, &offset, &affinity))
       return nil;
 
     DCHECK(object);
@@ -1990,13 +2134,14 @@ bool InitializeAccessibilityTreeSearch(
       offset = 0;
     }
 
-    return CreateTextMarker(*object, offset);
+    return CreateTextMarker(*object, offset, ui::AX_TEXT_AFFINITY_DOWNSTREAM);
   }
 
   if ([attribute isEqualToString:@"AXPreviousTextMarkerForTextMarker"]) {
     BrowserAccessibility* object;
     int offset;
-    if (!GetTextMarkerData(parameter, &object, &offset))
+    ui::AXTextAffinity affinity;
+    if (!GetTextMarkerData(parameter, &object, &offset, &affinity))
       return nil;
 
     DCHECK(object);
@@ -2015,19 +2160,109 @@ bool InitializeAccessibilityTreeSearch(
       offset = object->GetText().length() - 1;
     }
 
-    return CreateTextMarker(*object, offset);
+    return CreateTextMarker(*object, offset, ui::AX_TEXT_AFFINITY_DOWNSTREAM);
+  }
+
+  // Currently we approximate end offsets of words and do not actually calculate
+  // end offsets of lines, but use the start offset of the next line instead.
+  // This seems to work in simple text fields.
+  // TODO(nektar): Fix end offsets of words and lines.
+  if ([attribute isEqualToString:@"AXLeftWordTextMarkerRangeForTextMarker"]) {
+    BrowserAccessibility* object;
+    int original_offset;
+    ui::AXTextAffinity affinity;
+    if (!GetTextMarkerData(parameter, &object, &original_offset, &affinity))
+      return nil;
+
+    int start_offset =
+        object->GetWordStartBoundary(original_offset, ui::BACKWARDS_DIRECTION);
+    DCHECK_GE(start_offset, 0);
+
+    int end_offset =
+        object->GetWordStartBoundary(start_offset, ui::FORWARDS_DIRECTION);
+    DCHECK_GE(end_offset, 0);
+    if (start_offset < end_offset &&
+        end_offset < static_cast<int>(object->GetText().length())) {
+      --end_offset;
+    }
+    return CreateTextMarkerRange(*object, start_offset, affinity,
+                                 *object, end_offset, affinity);
+  }
+
+  if ([attribute isEqualToString:@"AXRightWordTextMarkerRangeForTextMarker"]) {
+    BrowserAccessibility* object;
+    int original_offset;
+    ui::AXTextAffinity affinity;
+    if (!GetTextMarkerData(parameter, &object, &original_offset, &affinity))
+      return nil;
+
+    int start_offset =
+        object->GetWordStartBoundary(original_offset, ui::FORWARDS_DIRECTION);
+    DCHECK_GE(start_offset, 0);
+
+    int end_offset =
+        object->GetWordStartBoundary(start_offset, ui::FORWARDS_DIRECTION);
+    DCHECK_GE(end_offset, 0);
+    if (start_offset < end_offset &&
+        end_offset < static_cast<int>(object->GetText().length())) {
+      --end_offset;
+    }
+    return CreateTextMarkerRange(*object, start_offset, affinity,
+                                 *object, end_offset, affinity);
+  }
+
+  if ([attribute isEqualToString:@"AXNextWordEndTextMarkerForTextMarker"]) {
+    BrowserAccessibility* object;
+    int offset;
+    ui::AXTextAffinity affinity;
+    if (!GetTextMarkerData(parameter, &object, &offset, &affinity))
+      return nil;
+
+    offset = object->GetWordStartBoundary(offset, ui::FORWARDS_DIRECTION);
+    DCHECK_GE(offset, 0);
+    if (offset > 0 && offset < static_cast<int>(object->GetText().length()))
+      --offset;
+    return CreateTextMarker(*object, offset, affinity);
   }
 
   if ([attribute
           isEqualToString:@"AXPreviousWordStartTextMarkerForTextMarker"]) {
     BrowserAccessibility* object;
     int offset;
-    if (!GetTextMarkerData(parameter, &object, &offset))
+    ui::AXTextAffinity affinity;
+    if (!GetTextMarkerData(parameter, &object, &offset, &affinity))
       return nil;
 
-    DCHECK(object);
     offset = object->GetWordStartBoundary(offset, ui::BACKWARDS_DIRECTION);
-    return CreateTextMarker(*object, offset);
+    DCHECK_GE(offset, 0);
+    return CreateTextMarker(*object, offset, affinity);
+  }
+
+  if ([attribute isEqualToString:@"AXNextLineEndTextMarkerForTextMarker"]) {
+    BrowserAccessibility* object;
+    int offset;
+    ui::AXTextAffinity affinity;
+    if (!GetTextMarkerData(parameter, &object, &offset, &affinity))
+      return nil;
+
+    offset = object->GetLineStartBoundary(
+        offset, ui::FORWARDS_DIRECTION, affinity);
+    DCHECK_GE(offset, 0);
+    return CreateTextMarker(*object, offset, affinity);
+  }
+
+  if ([attribute
+          isEqualToString:@"AXPreviousLineStartTextMarkerForTextMarker"]) {
+    BrowserAccessibility* object;
+    int offset;
+    ui::AXTextAffinity affinity;
+    if (!GetTextMarkerData(parameter, &object, &offset, &affinity))
+      return nil;
+
+    offset = object->GetLineStartBoundary(
+        offset, ui::BACKWARDS_DIRECTION, affinity);
+    DCHECK_GE(offset, 0);
+    return CreateTextMarker(*object, offset, affinity);
   }
 
   if ([attribute isEqualToString:@"AXLengthForTextMarkerRange"]) {
@@ -2040,7 +2275,7 @@ bool InitializeAccessibilityTreeSearch(
     if ([self internalRole] != ui::AX_ROLE_STATIC_TEXT)
       return nil;
     NSRange range = [(NSValue*)parameter rangeValue];
-    gfx::Rect rect = browserAccessibility_->GetGlobalBoundsForRange(
+    gfx::Rect rect = browserAccessibility_->GetScreenBoundsForRange(
         range.location, range.length);
     NSPoint origin = NSMakePoint(rect.x(), rect.y());
     NSSize size = NSMakeSize(rect.width(), rect.height());
@@ -2071,6 +2306,111 @@ bool InitializeAccessibilityTreeSearch(
     return nil;
   }
 
+  if ([attribute isEqualToString:
+           NSAccessibilityLineTextMarkerRangeForTextMarkerParameterizedAttribute]) {
+    BrowserAccessibility* object;
+    int offset;
+    ui::AXTextAffinity affinity;
+    if (!GetTextMarkerData(parameter, &object, &offset, &affinity))
+      return nil;
+
+    DCHECK(object);
+    int startOffset =
+        object->GetLineStartBoundary(offset, ui::BACKWARDS_DIRECTION, affinity);
+    int endOffset =
+        object->GetLineStartBoundary(offset, ui::FORWARDS_DIRECTION, affinity);
+    return CreateTextMarkerRange(
+        *object, startOffset, ui::AX_TEXT_AFFINITY_UPSTREAM,
+        *object, endOffset, ui::AX_TEXT_AFFINITY_DOWNSTREAM);
+  }
+
+  if ([attribute isEqualToString:
+           NSAccessibilityBoundsForTextMarkerRangeParameterizedAttribute]) {
+    BrowserAccessibility* startObject;
+    BrowserAccessibility* endObject;
+    int startOffset, endOffset;
+    ui::AXTextAffinity startAffinity, endAffinity;
+    if (!GetTextMarkerRange(parameter,
+                            &startObject, &startOffset, &startAffinity,
+                            &endObject, &endOffset, &endAffinity)) {
+      return nil;
+    }
+    DCHECK(startObject && endObject);
+    DCHECK_GE(startOffset, 0);
+    DCHECK_GE(endOffset, 0);
+
+    gfx::Rect rect = BrowserAccessibilityManager::GetPageBoundsForRange(
+        *startObject, startOffset, *endObject, endOffset);
+    NSPoint origin = NSMakePoint(rect.x(), rect.y());
+    NSSize size = NSMakeSize(rect.width(), rect.height());
+    NSPoint pointInScreen = [self pointInScreen:origin size:size];
+    NSRect nsrect = NSMakeRect(
+        pointInScreen.x, pointInScreen.y, rect.width(), rect.height());
+    return [NSValue valueWithRect:nsrect];
+  }
+
+  if ([attribute isEqualToString:
+           NSAccessibilityTextMarkerRangeForUnorderedTextMarkersParameterizedAttribute]) {
+    if (![parameter isKindOfClass:[NSArray class]])
+      return nil;
+
+    NSArray* array = parameter;
+    id first = [array objectAtIndex:0];
+    id second = [array objectAtIndex:1];
+    BrowserAccessibility* object1;
+    int offset1;
+    ui::AXTextAffinity affinity1;
+    if (!GetTextMarkerData(first, &object1, &offset1, &affinity1))
+      return nil;
+
+    BrowserAccessibility* object2;
+    int offset2;
+    ui::AXTextAffinity affinity2;
+    if (!GetTextMarkerData(second, &object2, &offset2, &affinity2))
+      return nil;
+
+    bool isInOrder = true;
+    if (object1 == object2) {
+      if (offset2 > offset1)
+        isInOrder = true;
+      else if (offset2 < offset1)
+        isInOrder = false;
+      else
+        return nil;
+    }
+
+    ui::AXTreeOrder order = BrowserAccessibilityManager::CompareNodes(
+        *object1, *object2);
+    if (order == ui::AX_TREE_ORDER_BEFORE ||
+        (order == ui::AX_TREE_ORDER_EQUAL && offset1 < offset2)) {
+      return CreateTextMarkerRange(*object1, offset1, affinity1,
+                                   *object2, offset2, affinity2);
+    }
+    if (order == ui::AX_TREE_ORDER_AFTER ||
+        (order == ui::AX_TREE_ORDER_EQUAL && offset1 > offset2)) {
+      return CreateTextMarkerRange(*object2, offset2, affinity2,
+                                   *object1, offset1, affinity1);
+    }
+    return nil;
+  }
+
+  if ([attribute isEqualToString:
+           NSAccessibilityIndexForChildUIElementParameterizedAttribute]) {
+    if (![parameter isKindOfClass:[BrowserAccessibilityCocoa class]])
+      return nil;
+
+    BrowserAccessibilityCocoa* childCocoaObj =
+        (BrowserAccessibilityCocoa*)parameter;
+    BrowserAccessibility* child = [childCocoaObj browserAccessibility];
+    if (!child)
+      return nil;
+
+    if (child->GetParent() != browserAccessibility_)
+      return nil;
+
+    return @(child->GetIndexInParent());
+  }
+
   return nil;
 }
 
@@ -2086,9 +2426,7 @@ bool InitializeAccessibilityTreeSearch(
           @"AXUIElementForTextMarker", @"AXTextMarkerRangeForUIElement",
           @"AXLineForTextMarker", @"AXTextMarkerRangeForLine",
           @"AXStringForTextMarkerRange", @"AXTextMarkerForPosition",
-          @"AXBoundsForTextMarkerRange",
           @"AXAttributedStringForTextMarkerRange",
-          @"AXTextMarkerRangeForUnorderedTextMarkers",
           @"AXNextTextMarkerForTextMarker",
           @"AXPreviousTextMarkerForTextMarker",
           @"AXLeftWordTextMarkerRangeForTextMarker",
@@ -2106,6 +2444,9 @@ bool InitializeAccessibilityTreeSearch(
           @"AXNextParagraphEndTextMarkerForTextMarker",
           @"AXPreviousParagraphStartTextMarkerForTextMarker",
           @"AXStyleTextMarkerRangeForTextMarker", @"AXLengthForTextMarkerRange",
+          NSAccessibilityBoundsForTextMarkerRangeParameterizedAttribute,
+          NSAccessibilityTextMarkerRangeForUnorderedTextMarkersParameterizedAttribute,
+          NSAccessibilityIndexForChildUIElementParameterizedAttribute,
           NSAccessibilityBoundsForRangeParameterizedAttribute,
           NSAccessibilityStringForRangeParameterizedAttribute,
           NSAccessibilityUIElementCountForSearchPredicateParameterizedAttribute,

@@ -14,7 +14,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/socket_performance_watcher.h"
+#include "net/socket/socket_performance_watcher.h"
 
 namespace net {
 
@@ -235,7 +235,7 @@ int TCPClientSocket::GetLocalAddress(IPEndPoint* address) const {
   return socket_->GetLocalAddress(address);
 }
 
-const BoundNetLog& TCPClientSocket::NetLog() const {
+const NetLogWithSource& TCPClientSocket::NetLog() const {
   return socket_->net_log();
 }
 

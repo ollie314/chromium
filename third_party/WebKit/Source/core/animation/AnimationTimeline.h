@@ -41,16 +41,16 @@
 #include "platform/heap/Handle.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
 class Document;
-class AnimationEffect;
+class AnimationEffectReadOnly;
 
 // AnimationTimeline is constructed and owned by Document, and tied to its lifecycle.
-class CORE_EXPORT AnimationTimeline final : public GarbageCollectedFinalized<AnimationTimeline>, public ScriptWrappable {
+class CORE_EXPORT AnimationTimeline : public GarbageCollectedFinalized<AnimationTimeline>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
-    USING_PRE_FINALIZER(AnimationTimeline, dispose);
 public:
     class PlatformTiming : public GarbageCollectedFinalized<PlatformTiming> {
     public:
@@ -62,13 +62,13 @@ public:
     };
 
     static AnimationTimeline* create(Document*, PlatformTiming* = nullptr);
-    ~AnimationTimeline();
-    void dispose();
+
+    virtual ~AnimationTimeline() {}
 
     void serviceAnimations(TimingUpdateReason);
     void scheduleNextService();
 
-    Animation* play(AnimationEffect*);
+    Animation* play(AnimationEffectReadOnly*);
     HeapVector<Member<Animation>> getAnimations();
 
     void animationAttached(Animation&);
@@ -90,6 +90,7 @@ public:
     void clearOutdatedAnimation(Animation*);
     bool hasOutdatedAnimation() const { return m_outdatedAnimationCount > 0; }
     bool needsAnimationTimingUpdate();
+    void invalidateKeyframeEffects();
 
     void setPlaybackRate(double);
     double playbackRate() const;
@@ -123,7 +124,7 @@ private:
     Member<PlatformTiming> m_timing;
     double m_lastCurrentTimeInternal;
 
-    OwnPtr<CompositorAnimationTimeline> m_compositorTimeline;
+    std::unique_ptr<CompositorAnimationTimeline> m_compositorTimeline;
 
     class AnimationTimelineTiming final : public PlatformTiming {
     public:
@@ -131,13 +132,13 @@ private:
             : m_timeline(timeline)
             , m_timer(this, &AnimationTimelineTiming::timerFired)
         {
-            ASSERT(m_timeline);
+            DCHECK(m_timeline);
         }
 
         void wakeAfter(double duration) override;
         void serviceOnNextFrame() override;
 
-        void timerFired(Timer<AnimationTimelineTiming>*) { m_timeline->wake(); }
+        void timerFired(TimerBase*) { m_timeline->wake(); }
 
         DECLARE_VIRTUAL_TRACE();
 

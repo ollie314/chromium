@@ -101,7 +101,7 @@ template <class T>
 bool PopulateArrayFromList(const base::ListValue& list, std::vector<T>* out) {
   out->clear();
   T item;
-  for (const base::Value* value : list) {
+  for (const auto& value : list) {
     if (!PopulateItem(*value, &item))
       return false;
     // T might not be movable, but in that case it should be copyable, and this
@@ -120,7 +120,7 @@ bool PopulateArrayFromList(const base::ListValue& list,
                            base::string16* error) {
   out->clear();
   T item;
-  for (const base::Value* value : list) {
+  for (const auto& value : list) {
     if (!PopulateItem(*value, &item, error))
       return false;
     out->push_back(std::move(item));
@@ -207,12 +207,8 @@ std::unique_ptr<base::Value> CreateValueFromArray(const std::vector<T>& from) {
 template <class T>
 std::unique_ptr<base::Value> CreateValueFromOptionalArray(
     const std::unique_ptr<std::vector<T>>& from) {
-  if (from)
-    return CreateValueFromArray(*from);
-  return nullptr;
+  return from ? CreateValueFromArray(*from) : nullptr;
 }
-
-std::string ValueTypeToString(base::Value::Type type);
 
 }  // namespace util
 }  // namespace json_schema_compiler

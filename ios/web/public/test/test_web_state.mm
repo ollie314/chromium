@@ -12,6 +12,7 @@ namespace web {
 
 TestWebState::TestWebState()
     : web_usage_enabled_(false),
+      is_loading_(false),
       trust_level_(kAbsolute),
       content_is_html_(true) {}
 
@@ -35,7 +36,17 @@ void TestWebState::SetWebUsageEnabled(bool enabled) {
   web_usage_enabled_ = enabled;
 }
 
+bool TestWebState::ShouldSuppressDialogs() const {
+  return false;
+}
+
+void TestWebState::SetShouldSuppressDialogs(bool should_suppress) {}
+
 UIView* TestWebState::GetView() {
+  return nullptr;
+}
+
+const NavigationManager* TestWebState::GetNavigationManager() const {
   return nullptr;
 }
 
@@ -87,10 +98,6 @@ WebInterstitial* TestWebState::GetWebInterstitial() const {
   return nullptr;
 }
 
-int TestWebState::GetCertGroupId() const {
-  return 0;
-}
-
 void TestWebState::SetContentIsHTML(bool content_is_html) {
   content_is_html_ = content_is_html;
 }
@@ -100,11 +107,19 @@ const base::string16& TestWebState::GetTitle() const {
 }
 
 bool TestWebState::IsLoading() const {
-  return false;
+  return is_loading_;
+}
+
+double TestWebState::GetLoadingProgress() const {
+  return 0.0;
 }
 
 bool TestWebState::IsBeingDestroyed() const {
   return false;
+}
+
+void TestWebState::SetLoading(bool is_loading) {
+  is_loading_ = is_loading;
 }
 
 void TestWebState::SetCurrentURL(const GURL& url) {
@@ -125,6 +140,10 @@ int TestWebState::DownloadImage(const GURL& url,
                                 bool bypass_cache,
                                 const ImageDownloadCallback& callback) {
   return 0;
+}
+
+shell::InterfaceRegistry* TestWebState::GetMojoInterfaceRegistry() {
+  return nullptr;
 }
 
 base::WeakPtr<WebState> TestWebState::AsWeakPtr() {

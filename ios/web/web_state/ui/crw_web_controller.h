@@ -98,6 +98,10 @@ class WebStateImpl;
 // Returns the current page loading phase.
 @property(nonatomic, readonly) web::LoadPhase loadPhase;
 
+// The fraction of the page load that has completed as a number between 0.0
+// (nothing loaded) and 1.0 (fully loaded).
+@property(nonatomic, readonly) double loadingProgress;
+
 // Returns whether the page can navigate backwards or forwards.
 @property(nonatomic, readonly) BOOL canGoBack;
 @property(nonatomic, readonly) BOOL canGoForward;
@@ -127,10 +131,6 @@ class WebStateImpl;
 // Clear the transient content view, if one is shown.
 - (void)clearTransientContentView;
 
-// Give the unload listeners a chance to fire. Returns YES if they complete
-// and the CRWWebController is in a state it may be closed.
-- (BOOL)runUnloadListenerBeforeClosing;
-
 // Call to stop the CRWWebController from doing stuff, in particular to
 // stop all network requests. Called as part of the close sequence if it hasn't
 // already been halted; also called from [Tab halt] as part of the shutdown
@@ -140,9 +140,8 @@ class WebStateImpl;
 // Dismisses all modals owned by the web view or native view.
 - (void)dismissModals;
 
-// Call when the CRWWebController needs go away. Do not call until first calling
-// |-runUnloadListenerBeforeClosing|. Caller must reset the delegate before
-// calling.
+// Call when the CRWWebController needs go away. Caller must reset the delegate
+// before calling.
 - (void)close;
 
 // Call when there is a need to free up memory.
@@ -205,8 +204,9 @@ class WebStateImpl;
 // TODO(rohitrao): Remove this from the public API.
 - (void)prepareForGoBack;
 
-// Evaluates the user-entered |script| in the web view.
-- (void)evaluateUserJavaScript:(NSString*)script;
+// Executes |script| in the web view, registering user interaction.
+- (void)executeUserJavaScript:(NSString*)script
+            completionHandler:(web::JavaScriptResultBlock)completion;
 
 // Dismisses the soft keyboard.
 - (void)dismissKeyboard;
@@ -238,11 +238,6 @@ class WebStateImpl;
 // TODO(stuartmorgan): This is public only temporarily; once refactoring is
 // complete it will be handled internally.
 - (void)restoreStateFromHistory;
-
-// Asynchronously checks whether the element at the location of
-// |gestureRecognizer| is a link.
-- (void)checkLinkPresenceUnderGesture:(UIGestureRecognizer*)gestureRecognizer
-                    completionHandler:(void (^)(BOOL))completionHandler;
 
 // Notifies the CRWWebController that it has been shown.
 - (void)wasShown;
@@ -300,14 +295,18 @@ class WebStateImpl;
 
 @interface CRWWebController (UsedOnlyForTesting)  // Testing or internal API.
 
+// YES if a user interaction has been registered at any time since the page has
+// loaded.
+@property(nonatomic, readwrite) BOOL userInteractionRegistered;
+// Returns whether the user is interacting with the page.
+@property(nonatomic, readonly) BOOL userIsInteracting;
+
 // Injects a CRWWebViewContentView for testing.  Takes ownership of
 // |webViewContentView|.
 - (void)injectWebViewContentView:(CRWWebViewContentView*)webViewContentView;
 - (void)resetInjectedWebViewContentView;
 // Returns the number of observers registered for this CRWWebController.
 - (NSUInteger)observerCount;
-- (NSString*)windowId;
-- (void)setWindowId:(NSString*)windowId;
 - (void)setURLOnStartLoading:(const GURL&)url;
 - (void)simulateLoadRequestWithURL:(const GURL&)URL;
 - (NSString*)externalRequestWindowName;
@@ -315,9 +314,18 @@ class WebStateImpl;
 // Returns the header height.
 - (CGFloat)headerHeight;
 
+// Loads the HTML into the page at the given URL.
+- (void)loadHTML:(NSString*)HTML forURL:(const GURL&)URL;
+
 // Caches request POST data in the given session entry.  Exposed for testing.
 - (void)cachePOSTDataForRequest:(NSURLRequest*)request
                  inSessionEntry:(CRWSessionEntry*)currentSessionEntry;
+
+// Acts on a single message from the JS object, parsed from JSON into a
+// DictionaryValue. Returns NO if the format for the message was invalid.
+- (BOOL)respondToMessage:(base::DictionaryValue*)crwMessage
+       userIsInteracting:(BOOL)userIsInteracting
+               originURL:(const GURL&)originURL;
 
 @end
 

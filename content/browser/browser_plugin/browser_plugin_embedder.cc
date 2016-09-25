@@ -50,7 +50,7 @@ void BrowserPluginEmbedder::DragLeftGuest(BrowserPluginGuest* guest) {
 bool BrowserPluginEmbedder::NotifyScreenInfoChanged(
     WebContents* guest_web_contents) {
   if (guest_web_contents->GetRenderViewHost()) {
-    auto render_widget_host = RenderWidgetHostImpl::From(
+    auto* render_widget_host = RenderWidgetHostImpl::From(
         guest_web_contents->GetRenderViewHost()->GetWidget());
     render_widget_host->NotifyScreenInfoChanged();
   }
@@ -216,6 +216,17 @@ BrowserPluginGuest* BrowserPluginEmbedder::GetFullPageGuest() {
   if (!guest_contents)
     return nullptr;
   return guest_contents->GetBrowserPluginGuest();
+}
+
+// static
+bool BrowserPluginEmbedder::GuestRecentlyAudibleCallback(WebContents* guest) {
+  return guest->WasRecentlyAudible();
+}
+
+bool BrowserPluginEmbedder::WereAnyGuestsRecentlyAudible() {
+  return GetBrowserPluginGuestManager()->ForEachGuest(
+      web_contents(),
+      base::Bind(&BrowserPluginEmbedder::GuestRecentlyAudibleCallback));
 }
 
 // static

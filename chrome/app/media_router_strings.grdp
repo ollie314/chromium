@@ -60,14 +60,20 @@
   </message>
   <if expr="_google_chrome">
     <message name="IDS_MEDIA_ROUTER_CLOUD_SERVICES_TOGGLE" desc="Title of a menu item which, on click, toggles the preference to opt in or out of cloud services.">
-     Enable Cloud Services
+     Enable cloud services
     </message>
   </if>
   <message name="IDS_MEDIA_ROUTER_HELP" desc="Title of a menu item which, on click, opens a page to the Chromecast help center.">
    Help
   </message>
+  <message name="IDS_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION" desc="Title of a menu item which, on click, toggles whether or not the Media Router action icon is always shown. When toggled off, the icon is shown only when the Media Router dialog is open or if there is an active local Media Route or an issue.">
+   Always show icon
+  </message>
   <message name="IDS_MEDIA_ROUTER_REPORT_ISSUE" desc="Title of a menu item which, on click, opens a page to give feedback or report an issue with Chromecast integration.">
    Report an issue
+  </message>
+  <message name="IDS_MEDIA_ROUTER_MANAGE_DEVICES" desc="Title of a menu item which, on click, opens a page that allows the user to manage Cast devices: view, reboot, reset, and manage settings of available Cast devices, or set up new Cast devices.">
+   Manage Cast devices
   </message>
 
   <!-- First Run Flow -->
@@ -115,6 +121,9 @@
   <message name="IDS_MEDIA_ROUTER_ISSUE_PENDING_ROUTE" desc="Title of an issue to show when the user attempts to create more than one route at a time.">
     Only one session can be created at a time.
   </message>
+  <message name="IDS_MEDIA_ROUTER_ISSUE_UNABLE_TO_CAST_DESKTOP" desc="Title of an issue to show when creating a route for desktop mirroring fails for a reason other than timeout.">
+    Unable to cast desktop.
+  </message>
 
   <!-- Route Details -->
   <message name="IDS_MEDIA_ROUTER_CASTING_ACTIVITY_STATUS" desc="Label of activity status, which describes the media that is currently being casted.">
@@ -128,8 +137,8 @@
   </message>
 
   <!-- Sink List -->
-  <message name="IDS_MEDIA_ROUTER_DEVICE_MISSING" desc="Link to display when no devices are found which, on click, opens a page to the Chromecast help center explaining possible reasons why no devices are detected.">
-    Device missing?
+  <message name="IDS_MEDIA_ROUTER_DESTINATION_MISSING" desc="Link to display when no Cast destinations are found which, on click, opens a page to the Chromecast help center explaining possible reasons why none are detected.">
+    No Cast destinations found. Need help?
   </message>
 
   <!-- Sink Search -->

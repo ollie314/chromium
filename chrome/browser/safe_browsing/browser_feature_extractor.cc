@@ -16,7 +16,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -356,11 +356,11 @@ void BrowserFeatureExtractor::QueryUrlHistoryDone(
     if (it->visit_time < threshold) {
       ++num_visits_24h_ago;
     }
-    ui::PageTransition transition = ui::PageTransitionStripQualifier(
-        it->transition);
-    if (transition == ui::PAGE_TRANSITION_TYPED) {
+    if (ui::PageTransitionCoreTypeIs(it->transition,
+                                     ui::PAGE_TRANSITION_TYPED)) {
       ++num_visits_typed;
-    } else if (transition == ui::PAGE_TRANSITION_LINK) {
+    } else if (ui::PageTransitionCoreTypeIs(it->transition,
+                                            ui::PAGE_TRANSITION_LINK)) {
       ++num_visits_link;
     }
   }

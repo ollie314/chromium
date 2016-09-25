@@ -199,21 +199,6 @@ WebInspector.SearchableView.prototype = {
     },
 
     /**
-     * @override
-     * @return {!Element}
-     */
-    defaultFocusedElement: function()
-    {
-        var children = this.children();
-        for (var i = 0; i < children.length; ++i) {
-            var element = children[i].defaultFocusedElement();
-            if (element)
-                return element;
-        }
-        return WebInspector.Widget.prototype.defaultFocusedElement.call(this);
-    },
-
-    /**
      * @param {number} minimalSearchQuerySize
      */
     setMinimalSearchQuerySize: function(minimalSearchQuerySize)
@@ -417,6 +402,11 @@ WebInspector.SearchableView.prototype = {
      */
     _onSearchKeyDown: function(event)
     {
+        if (isEscKey(event)) {
+            this.closeSearch();
+            event.consume(true);
+            return;
+        }
         if (!isEnterKey(event))
             return;
 
@@ -522,7 +512,7 @@ WebInspector.SearchableView.prototype = {
         var caseSensitive = this._caseSensitiveButton ? this._caseSensitiveButton.toggled() : false;
         var isRegex = this._regexButton ? this._regexButton.toggled() : false;
         return new WebInspector.SearchableView.SearchConfig(query, caseSensitive, isRegex);
-     },
+    },
 
     _updateSecondRowVisibility: function()
     {
@@ -568,6 +558,8 @@ WebInspector.SearchableView.prototype = {
 
     _onValueChanged: function()
     {
+        if (!this._searchIsVisible)
+            return;
         delete this._valueChangedTimeoutId;
         this._performSearch(false, true);
     },

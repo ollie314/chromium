@@ -32,7 +32,7 @@
 #define UnacceleratedImageBufferSurface_h
 
 #include "platform/graphics/ImageBufferSurface.h"
-#include "wtf/RefPtr.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 
 class SkSurface;
 
@@ -41,13 +41,13 @@ namespace blink {
 class PLATFORM_EXPORT UnacceleratedImageBufferSurface : public ImageBufferSurface {
     WTF_MAKE_NONCOPYABLE(UnacceleratedImageBufferSurface); USING_FAST_MALLOC(UnacceleratedImageBufferSurface);
 public:
-    UnacceleratedImageBufferSurface(const IntSize&, OpacityMode = NonOpaque, ImageInitializationMode = InitializeImagePixels);
+    UnacceleratedImageBufferSurface(const IntSize&, OpacityMode = NonOpaque, ImageInitializationMode = InitializeImagePixels, sk_sp<SkColorSpace> = nullptr);
     ~UnacceleratedImageBufferSurface() override;
 
     SkCanvas* canvas() override;
     bool isValid() const override;
 
-    PassRefPtr<SkImage> newImageSnapshot(AccelerationHint, SnapshotReason) override;
+    sk_sp<SkImage> newImageSnapshot(AccelerationHint, SnapshotReason) override;
 private:
     sk_sp<SkSurface> m_surface;
 };

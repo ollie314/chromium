@@ -9,7 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chromeos/dbus/services/service_provider_test_helper.h"
 #include "dbus/message.h"
 #include "net/url_request/url_request_test_util.h"
@@ -53,8 +53,8 @@ class ProxyResolutionServiceProviderTest : public testing::Test {
     // Create the proxy resolution service with the mock bus and the mock
     // resolver injected.
     service_provider_.reset(ProxyResolutionServiceProvider::Create(
-        base::WrapUnique(new TestProxyResolverDelegate(
-            base::ThreadTaskRunnerHandle::Get()))));
+        base::MakeUnique<TestProxyResolverDelegate>(
+            base::ThreadTaskRunnerHandle::Get())));
 
     test_helper_.SetUp(kResolveNetworkProxy, service_provider_.get());
 

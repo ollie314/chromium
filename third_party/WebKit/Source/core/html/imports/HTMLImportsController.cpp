@@ -41,35 +41,10 @@
 
 namespace blink {
 
-const char* HTMLImportsController::supplementName()
-{
-    return "HTMLImportsController";
-}
-
-void HTMLImportsController::provideTo(Document& master)
-{
-    HTMLImportsController* controller = new HTMLImportsController(master);
-    master.setImportsController(controller);
-    Supplement<Document>::provideTo(master, supplementName(), controller);
-}
-
-void HTMLImportsController::removeFrom(Document& master)
-{
-    HTMLImportsController* controller = master.importsController();
-    ASSERT(controller);
-    controller->dispose();
-    static_cast<Supplementable<Document>&>(master).removeSupplement(supplementName());
-    master.setImportsController(nullptr);
-}
-
 HTMLImportsController::HTMLImportsController(Document& master)
     : m_root(HTMLImportTreeRoot::create(&master))
 {
     UseCounter::count(master, UseCounter::HTMLImports);
-}
-
-HTMLImportsController::~HTMLImportsController()
-{
 }
 
 void HTMLImportsController::dispose()
@@ -109,12 +84,13 @@ HTMLImportChild* HTMLImportsController::createChild(const KURL& url, HTMLImportL
 
 HTMLImportChild* HTMLImportsController::load(HTMLImport* parent, HTMLImportChildClient* client, FetchRequest request)
 {
-    ASSERT(!request.url().isEmpty() && request.url().isValid());
-    ASSERT(parent == root() || toHTMLImportChild(parent)->loader()->isFirstImport(toHTMLImportChild(parent)));
+    DCHECK(!request.url().isEmpty());
+    DCHECK(request.url().isValid());
+    DCHECK(parent == root() || toHTMLImportChild(parent)->loader()->isFirstImport(toHTMLImportChild(parent)));
 
     if (HTMLImportChild* childToShareWith = root()->find(request.url())) {
         HTMLImportLoader* loader = childToShareWith->loader();
-        ASSERT(loader);
+        DCHECK(loader);
         HTMLImportChild* child = createChild(request.url(), loader, parent, client);
         child->didShareLoader();
         return child;
@@ -141,7 +117,7 @@ Document* HTMLImportsController::master() const
 
 bool HTMLImportsController::shouldBlockScriptExecution(const Document& document) const
 {
-    ASSERT(document.importsController() == this);
+    DCHECK_EQ(document.importsController(), this);
     if (HTMLImportLoader* loader = loaderFor(document))
         return loader->shouldBlockScriptExecution();
     return root()->state().shouldBlockScriptExecution();
@@ -163,16 +139,15 @@ HTMLImportLoader* HTMLImportsController::loaderFor(const Document& document) con
     return nullptr;
 }
 
-Document* HTMLImportsController::loaderDocumentAt(size_t i) const
-{
-    return loaderAt(i)->document();
-}
-
 DEFINE_TRACE(HTMLImportsController)
 {
     visitor->trace(m_root);
     visitor->trace(m_loaders);
-    Supplement<Document>::trace(visitor);
+}
+
+DEFINE_TRACE_WRAPPERS(HTMLImportsController)
+{
+    visitor->traceWrappers(master());
 }
 
 } // namespace blink

@@ -49,6 +49,7 @@
 
 #include "base/atomic_ref_count.h"
 #include "base/gtest_prod_util.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/process/process.h"
@@ -86,7 +87,7 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
                     AudioMirroringManager* mirroring_manager,
                     MediaInternals* media_internals,
                     MediaStreamManager* media_stream_manager,
-                    const ResourceContext::SaltCallback& salt_callback);
+                    const std::string& salt);
 
   // Calls |callback| with the list of AudioOutputControllers for this object.
   void GetOutputControllers(
@@ -101,10 +102,6 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
   // Returns true if any streams managed by this host are actively playing.  Can
   // be called from any thread.
   bool HasActiveAudio();
-
-  // Returns true if any streams managed by the RenderFrame identified by
-  // |render_frame_id| are actively playing. Can be called from any thread.
-  bool RenderFrameHasActiveAudio(int render_frame_id) const;
 
  private:
   friend class AudioRendererHostTest;
@@ -129,6 +126,14 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
                               const AudioOutputDeviceInfo& device_info)>
       OutputDeviceInfoCB;
 
+  // The type of a function that is run on the UI thread to check whether the
+  // routing IDs reference a valid RenderFrameHost. The function then runs
+  // |callback| on the IO thread with true/false if valid/invalid.
+  using ValidateRenderFrameIdFunction =
+      void (*)(int render_process_id,
+               int render_frame_id,
+               const base::Callback<void(bool)>& callback);
+
   ~AudioRendererHost() override;
 
   // Methods called on IO thread ----------------------------------------------
@@ -147,7 +152,7 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
                                     int render_frame_id,
                                     int session_id,
                                     const std::string& device_id,
-                                    const url::Origin& gurl_security_origin);
+                                    const url::Origin& security_origin);
 
   // Creates an audio output stream with the specified format.
   // Upon success/failure, the peer is notified via the NotifyStreamCreated
@@ -173,25 +178,24 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
   // Proceed with device authorization after checking permissions.
   void OnDeviceAuthorized(int stream_id,
                           const std::string& device_id,
-                          const GURL& security_origin,
+                          const url::Origin& security_origin,
+                          base::TimeTicks auth_start_time,
                           bool have_access);
 
   // Proceed with device authorization after translating device ID.
   void OnDeviceIDTranslated(int stream_id,
+                            base::TimeTicks auth_start_time,
                             bool device_found,
                             const AudioOutputDeviceInfo& device_info);
-
-  // Start the actual creation of an audio stream, after the device
-  // authorization process is complete.
-  void DoCreateStream(int stream_id,
-                      int render_frame_id,
-                      const media::AudioParameters& params,
-                      const std::string& device_unique_id);
 
   // Complete the process of creating an audio stream. This will set up the
   // shared memory or shared socket in low latency mode and send the
   // NotifyStreamCreated message to the peer.
   void DoCompleteCreation(int stream_id);
+
+  // Called after the |render_frame_id| provided to OnCreateStream() was
+  // validated. When |is_valid| is false, this calls ReportErrorAndClose().
+  void DidValidateRenderFrame(int stream_id, bool is_valid);
 
   // Send playing/paused status to the renderer.
   void DoNotifyStreamStateChanged(int stream_id, bool is_playing);
@@ -219,7 +223,7 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
   // Check if the renderer process has access to the requested output device.
   void CheckOutputDeviceAccess(int render_frame_id,
                                const std::string& device_id,
-                               const GURL& gurl_security_origin,
+                               const url::Origin& security_origin,
                                const OutputDeviceAccessCB& callback);
 
   // Invoke |callback| after permission to use a device has been checked.
@@ -229,13 +233,20 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
 
   // Translate the hashed |device_id| to a unique device ID.
   void TranslateDeviceID(const std::string& device_id,
-                         const GURL& gurl_security_origin,
+                         const url::Origin& security_origin,
                          const OutputDeviceInfoCB& callback,
                          const AudioOutputDeviceEnumeration& enumeration);
 
   // Helper method to check if the authorization procedure for stream
   // |stream_id| has started.
   bool IsAuthorizationStarted(int stream_id);
+
+  // Called from AudioRendererHostTest to override the function that checks for
+  // the existence of the RenderFrameHost at stream creation time.
+  void set_render_frame_id_validate_function_for_testing(
+      ValidateRenderFrameIdFunction function) {
+    validate_render_frame_id_function_ = function;
+  }
 
   // ID of the RenderProcessHost that owns this instance.
   const int render_process_id_;
@@ -255,13 +266,18 @@ class CONTENT_EXPORT AudioRendererHost : public BrowserMessageFilter {
   base::AtomicRefCount num_playing_streams_;
 
   // Salt required to translate renderer device IDs to raw device unique IDs
-  ResourceContext::SaltCallback salt_callback_;
+  std::string salt_;
 
   // Map of device authorizations for streams that are not yet created
   // The key is the stream ID, and the value is a pair. The pair's first element
   // is a bool that is true if the authorization process completes successfully.
   // The second element contains the unique ID of the authorized device.
   std::map<int, std::pair<bool, std::string>> authorizations_;
+
+  // At stream creation time, AudioRendererHost will call this function on the
+  // UI thread to validate render frame IDs. A default is set by the
+  // constructor, but this can be overridden by unit tests.
+  ValidateRenderFrameIdFunction validate_render_frame_id_function_;
 
   // The maximum number of simultaneous streams during the lifetime of this
   // host. Reported as UMA stat at shutdown.

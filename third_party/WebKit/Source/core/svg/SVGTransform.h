@@ -32,16 +32,16 @@ class FloatSize;
 class SVGTransformTearOff;
 
 enum SVGTransformType {
-    SVG_TRANSFORM_UNKNOWN = 0,
-    SVG_TRANSFORM_MATRIX = 1,
-    SVG_TRANSFORM_TRANSLATE = 2,
-    SVG_TRANSFORM_SCALE = 3,
-    SVG_TRANSFORM_ROTATE = 4,
-    SVG_TRANSFORM_SKEWX = 5,
-    SVG_TRANSFORM_SKEWY = 6
+    kSvgTransformUnknown = 0,
+    kSvgTransformMatrix = 1,
+    kSvgTransformTranslate = 2,
+    kSvgTransformScale = 3,
+    kSvgTransformRotate = 4,
+    kSvgTransformSkewx = 5,
+    kSvgTransformSkewy = 6
 };
 
-class SVGTransform : public SVGPropertyBase {
+class SVGTransform final : public SVGPropertyBase {
 public:
     typedef SVGTransformTearOff TearOffType;
 
@@ -99,6 +99,7 @@ public:
     float calculateDistance(SVGPropertyBase* to, SVGElement* contextElement) override;
 
     static AnimatedPropertyType classType() { return AnimatedTransform; }
+    AnimatedPropertyType type() const override { return classType(); }
 
 private:
     SVGTransform();

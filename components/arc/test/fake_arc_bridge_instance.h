@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_ARC_TEST_FAKE_ARC_BRIDGE_INSTANCE_H_
 #define COMPONENTS_ARC_TEST_FAKE_ARC_BRIDGE_INSTANCE_H_
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/common/arc_bridge.mojom.h"
@@ -14,8 +15,16 @@ namespace arc {
 
 class FakeArcBridgeInstance : public mojom::ArcBridgeInstance {
  public:
+  class Delegate {
+   public:
+    virtual ~Delegate() = default;
+    virtual void OnStopped(ArcBridgeService::StopReason reason) = 0;
+  };
+
   FakeArcBridgeInstance();
   ~FakeArcBridgeInstance() override;
+
+  void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
   // Finalizes the connection between the host and the instance, and signals
   // the host that the boot sequence has finished.
@@ -33,7 +42,15 @@ class FakeArcBridgeInstance : public mojom::ArcBridgeInstance {
   // The number of times Init() has been called.
   int init_calls() const { return init_calls_; }
 
+  // Stops the instance.
+  void Stop(ArcBridgeService::StopReason reason);
+
  private:
+  Delegate* delegate_ = nullptr;
+
+  // Keeps quit closure to wake the running nested RunLoop.
+  base::Closure quit_closure_;
+
   // Mojo endpoints.
   mojo::Binding<mojom::ArcBridgeInstance> binding_;
   mojom::ArcBridgeHostPtr host_ptr_;

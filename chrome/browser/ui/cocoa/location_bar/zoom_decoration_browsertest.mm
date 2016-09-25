@@ -6,6 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/macros.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser/zoom_bubble_controller.h"
@@ -15,8 +16,8 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/toolbar/test_toolbar_model.h"
-#include "components/ui/zoom/page_zoom.h"
-#include "components/ui/zoom/zoom_controller.h"
+#include "components/zoom/page_zoom.h"
+#include "components/zoom/zoom_controller.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/test/test_utils.h"
 
@@ -59,13 +60,13 @@ class ZoomDecorationTest : public InProcessBrowserTest {
         browser()->tab_strip_model()->GetActiveWebContents();
 
     base::AutoReset<bool> reset(&should_quit_on_zoom_, true);
-    ui_zoom::PageZoom::Zoom(web_contents, zoom);
+    zoom::PageZoom::Zoom(web_contents, zoom);
     content::RunMessageLoop();
   }
 
   void OnZoomChanged(const content::HostZoomMap::ZoomLevelChange& host) {
     if (should_quit_on_zoom_) {
-      base::MessageLoop::current()->PostTask(
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
           base::Bind(&base::MessageLoop::QuitWhenIdle,
                      base::Unretained(base::MessageLoop::current())));
@@ -89,8 +90,8 @@ IN_PROC_BROWSER_TEST_F(ZoomDecorationTest, BubbleAtDefaultZoom) {
   // Since we now need to be able to show the zoom bubble as a notification
   // on non-active pages, this test should be revised to account for
   // these notifications.
-  ui_zoom::ZoomController::FromWebContents(
-      GetLocationBar()->GetWebContents())->SetShowsNotificationBubble(false);
+  zoom::ZoomController::FromWebContents(GetLocationBar()->GetWebContents())
+      ->SetShowsNotificationBubble(false);
 
   // Zoom in and reset.
   EXPECT_FALSE(zoom_decoration->IsVisible());
@@ -116,8 +117,8 @@ IN_PROC_BROWSER_TEST_F(ZoomDecorationTest, IconRemainsVisibleAfterBubble) {
   ZoomDecoration* zoom_decoration = GetZoomDecoration();
 
   // See comment in BubbleAtDefaultZoom regarding this next line.
-  ui_zoom::ZoomController::FromWebContents(
-      GetLocationBar()->GetWebContents())->SetShowsNotificationBubble(false);
+  zoom::ZoomController::FromWebContents(GetLocationBar()->GetWebContents())
+      ->SetShowsNotificationBubble(false);
 
   // Zoom in to turn on decoration icon.
   EXPECT_FALSE(zoom_decoration->IsVisible());

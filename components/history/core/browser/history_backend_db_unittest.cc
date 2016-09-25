@@ -26,6 +26,7 @@
 
 #include "base/format_macros.h"
 #include "base/guid.h"
+#include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -601,12 +602,15 @@ TEST_F(HistoryBackendDBTest, MigrateHashHttpMethodAndGenerateGuids) {
       EXPECT_EQ(cur_version, s.ColumnInt(0));
     }
     {
-      sql::Statement s(db.GetUniqueStatement("SELECT guid from downloads"));
+      sql::Statement s(db.GetUniqueStatement("SELECT guid, id from downloads"));
       std::unordered_set<std::string> guids;
       while (s.Step()) {
         std::string guid = s.ColumnString(0);
+        uint32_t id = static_cast<uint32_t>(s.ColumnInt64(1));
         EXPECT_TRUE(IsValidRFC4122Ver4GUID(guid));
         EXPECT_EQ(guid, base::ToUpperASCII(guid));
+        // Id is used as time_low in RFC 4122 to guarantee unique GUIDs
+        EXPECT_EQ(guid.substr(0, 8), base::StringPrintf("%08" PRIX32, id));
         guids.insert(guid);
       }
       EXPECT_TRUE(s.Succeeded());
@@ -637,7 +641,7 @@ TEST_F(HistoryBackendDBTest, MigrateTabUrls) {
     {
       sql::Statement s(db.GetUniqueStatement(
           "INSERT INTO downloads_url_chains (id, chain_index, url) VALUES "
-          "(4, 0, 'url')"));
+          "(1, 0, 'url')"));
       ASSERT_TRUE(s.Run());
     }
   }
@@ -669,6 +673,59 @@ TEST_F(HistoryBackendDBTest, MigrateTabUrls) {
   }
 }
 
+TEST_F(HistoryBackendDBTest, MigrateDownloadSiteInstanceUrl) {
+  ASSERT_NO_FATAL_FAILURE(CreateDBVersion(31));
+  {
+    sql::Connection db;
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
+    {
+      sql::Statement s(db.GetUniqueStatement(
+          "INSERT INTO downloads ("
+          "    id, guid, current_path, target_path, start_time, received_bytes,"
+          "    total_bytes, state, danger_type, interrupt_reason, hash,"
+          "    end_time, opened, referrer, tab_url, tab_referrer_url,"
+          "    http_method, by_ext_id, by_ext_name, etag, last_modified,"
+          "    mime_type, original_mime_type)"
+          "VALUES("
+          "    1, '435A5C7A-F6B7-4DF2-8696-22E4FCBA3EB2', 'foo.txt', 'foo.txt',"
+          "    13104873187307670, 11, 11, 1, 0, 0, X'', 13104873187521021, 0,"
+          "    'http://example.com/dl/', '', '', '', '', '', '', '',"
+          "    'text/plain', 'text/plain')"));
+      ASSERT_TRUE(s.Run());
+    }
+    {
+      sql::Statement s(db.GetUniqueStatement(
+          "INSERT INTO downloads_url_chains (id, chain_index, url) VALUES "
+          "(1, 0, 'url')"));
+      ASSERT_TRUE(s.Run());
+    }
+  }
+
+  // Re-open the db using the HistoryDatabase, which should migrate to the
+  // current version, creating the site_url column.
+  CreateBackendAndDatabase();
+  DeleteBackend();
+  {
+    // Re-open the db for manual manipulation.
+    sql::Connection db;
+    ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
+    // The version should have been updated.
+    int cur_version = HistoryDatabase::GetCurrentVersion();
+    ASSERT_LE(31, cur_version);
+    {
+      sql::Statement s(db.GetUniqueStatement(
+          "SELECT value FROM meta WHERE key = 'version'"));
+      EXPECT_TRUE(s.Step());
+      EXPECT_EQ(cur_version, s.ColumnInt(0));
+    }
+    {
+      sql::Statement s(db.GetUniqueStatement("SELECT site_url from downloads"));
+      EXPECT_TRUE(s.Step());
+      EXPECT_EQ(std::string(), s.ColumnString(0));
+    }
+  }
+}
+
 TEST_F(HistoryBackendDBTest, DownloadCreateAndQuery) {
   CreateBackendAndDatabase();
 
@@ -685,7 +742,8 @@ TEST_F(HistoryBackendDBTest, DownloadCreateAndQuery) {
   DownloadRow download_A(
       base::FilePath(FILE_PATH_LITERAL("/path/1")),
       base::FilePath(FILE_PATH_LITERAL("/path/2")), url_chain,
-      GURL("http://example.com/referrer"), GURL("http://example.com/tab-url"),
+      GURL("http://example.com/referrer"), GURL("http://example.com"),
+      GURL("http://example.com/tab-url"),
       GURL("http://example.com/tab-referrer"), "GET", "mime/type",
       "original/mime-type", start_time, end_time, "etag1", "last_modified_1",
       100, 1000, DownloadState::INTERRUPTED, DownloadDangerType::NOT_DANGEROUS,
@@ -702,7 +760,8 @@ TEST_F(HistoryBackendDBTest, DownloadCreateAndQuery) {
   DownloadRow download_B(
       base::FilePath(FILE_PATH_LITERAL("/path/3")),
       base::FilePath(FILE_PATH_LITERAL("/path/4")), url_chain,
-      GURL("http://example.com/referrer2"), GURL("http://example.com/tab-url2"),
+      GURL("http://example.com/referrer2"), GURL("http://2.example.com"),
+      GURL("http://example.com/tab-url2"),
       GURL("http://example.com/tab-referrer2"), "POST", "mime/type2",
       "original/mime-type2", start_time2, end_time2, "etag2", "last_modified_2",
       1001, 1001, DownloadState::COMPLETE, DownloadDangerType::DANGEROUS_FILE,
@@ -741,7 +800,8 @@ TEST_F(HistoryBackendDBTest, DownloadCreateAndUpdate_VolatileFields) {
   DownloadRow download(
       base::FilePath(FILE_PATH_LITERAL("/path/1")),
       base::FilePath(FILE_PATH_LITERAL("/path/2")), url_chain,
-      GURL("http://example.com/referrer"), GURL("http://example.com/tab-url"),
+      GURL("http://example.com/referrer"), GURL("http://example.com"),
+      GURL("http://example.com/tab-url"),
       GURL("http://example.com/tab-referrer"), "GET", "mime/type",
       "original/mime-type", start_time, end_time, "etag1", "last_modified_1",
       100, 1000, DownloadState::INTERRUPTED, DownloadDangerType::NOT_DANGEROUS,
@@ -840,11 +900,11 @@ TEST_F(HistoryBackendDBTest, DownloadNukeRecordsMissingURLs) {
       base::FilePath(FILE_PATH_LITERAL("foo-path")),
       base::FilePath(FILE_PATH_LITERAL("foo-path")), url_chain,
       GURL(std::string()), GURL(std::string()), GURL(std::string()),
-      std::string(), "application/octet-stream", "application/octet-stream",
-      now, now, std::string(), std::string(), 0, 512, DownloadState::COMPLETE,
-      DownloadDangerType::NOT_DANGEROUS, kTestDownloadInterruptReasonNone,
-      std::string(), 1, "05AF6C8E-E4E0-45D7-B5CE-BC99F7019918", 0, "by_ext_id",
-      "by_ext_name");
+      GURL(std::string()), std::string(), "application/octet-stream",
+      "application/octet-stream", now, now, std::string(), std::string(), 0,
+      512, DownloadState::COMPLETE, DownloadDangerType::NOT_DANGEROUS,
+      kTestDownloadInterruptReasonNone, std::string(), 1,
+      "05AF6C8E-E4E0-45D7-B5CE-BC99F7019918", 0, "by_ext_id", "by_ext_name");
 
   // Creating records without any urls should fail.
   EXPECT_FALSE(db_->CreateDownload(download));
@@ -923,7 +983,7 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadInProgressCleanup) {
 
   // Allow the update to propagate, shut down the DB, and confirm that
   // the query updated the on disk database as well.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   DeleteBackend();
   {
     sql::Connection db;
@@ -1004,13 +1064,12 @@ TEST_F(HistoryBackendDBTest, MigratePresentations) {
   // Re-open the db, triggering migration.
   CreateBackendAndDatabase();
 
-  std::vector<PageUsageData*> results;
-  db_->QuerySegmentUsage(segment_time, 10, &results);
+  std::vector<std::unique_ptr<PageUsageData>> results = db_->QuerySegmentUsage(
+      segment_time, 10, base::Callback<bool(const GURL&)>());
   ASSERT_EQ(1u, results.size());
   EXPECT_EQ(url, results[0]->GetURL());
   EXPECT_EQ(segment_id, results[0]->GetID());
   EXPECT_EQ(title, results[0]->GetTitle());
-  STLDeleteElements(&results);
 }
 
 TEST_F(HistoryBackendDBTest, CheckLastCompatibleVersion) {
@@ -1048,6 +1107,50 @@ TEST_F(HistoryBackendDBTest, CheckLastCompatibleVersion) {
       EXPECT_EQ(28, meta.GetVersionNumber());
     }
   }
+}
+
+bool FilterURL(const GURL& url) {
+  return url.SchemeIsHTTPOrHTTPS();
+}
+
+TEST_F(HistoryBackendDBTest, QuerySegmentUsage) {
+  CreateBackendAndDatabase();
+
+  const GURL url1("file://bar");
+  const GURL url2("http://www.foo.com");
+  const int visit_count1 = 10;
+  const int visit_count2 = 5;
+  const base::Time time(base::Time::Now());
+
+  URLID url_id1 = db_->AddURL(URLRow(url1));
+  ASSERT_NE(0, url_id1);
+  URLID url_id2 = db_->AddURL(URLRow(url2));
+  ASSERT_NE(0, url_id2);
+
+  SegmentID segment_id1 = db_->CreateSegment(
+      url_id1, VisitSegmentDatabase::ComputeSegmentName(url1));
+  ASSERT_NE(0, segment_id1);
+  SegmentID segment_id2 = db_->CreateSegment(
+      url_id2, VisitSegmentDatabase::ComputeSegmentName(url2));
+  ASSERT_NE(0, segment_id2);
+
+  ASSERT_TRUE(db_->IncreaseSegmentVisitCount(segment_id1, time, visit_count1));
+  ASSERT_TRUE(db_->IncreaseSegmentVisitCount(segment_id2, time, visit_count2));
+
+  // Without a filter, the "file://" URL should win.
+  std::vector<std::unique_ptr<PageUsageData>> results =
+      db_->QuerySegmentUsage(time, 1, base::Callback<bool(const GURL&)>());
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(url1, results[0]->GetURL());
+  EXPECT_EQ(segment_id1, results[0]->GetID());
+
+  // With the filter, the "file://" URL should be filtered out, so the "http://"
+  // URL should win instead.
+  std::vector<std::unique_ptr<PageUsageData>> results2 =
+      db_->QuerySegmentUsage(time, 1, base::Bind(&FilterURL));
+  ASSERT_EQ(1u, results2.size());
+  EXPECT_EQ(url2, results2[0]->GetURL());
+  EXPECT_EQ(segment_id2, results2[0]->GetID());
 }
 
 }  // namespace

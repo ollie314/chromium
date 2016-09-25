@@ -2,10 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stdint.h>
+
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "cc/output/begin_frame_args.h"
+#include "cc/surfaces/surface_factory.h"
+#include "cc/surfaces/surface_factory_client.h"
+#include "cc/surfaces/surface_id_allocator.h"
+#include "cc/surfaces/surface_manager.h"
 #include "cc/test/begin_frame_args_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,6 +25,35 @@ using testing::_;
 
 namespace ui {
 namespace {
+
+class FakeCompositorFrameSink : public cc::SurfaceFactoryClient {
+ public:
+  FakeCompositorFrameSink(uint32_t client_id, cc::SurfaceManager* manager)
+      : client_id_(client_id),
+        manager_(manager),
+        source_(nullptr),
+        factory_(manager, this) {
+    manager_->RegisterSurfaceClientId(client_id_);
+    manager_->RegisterSurfaceFactoryClient(client_id_, this);
+  }
+
+  ~FakeCompositorFrameSink() override {
+    manager_->UnregisterSurfaceFactoryClient(client_id_);
+    manager_->InvalidateSurfaceClientId(client_id_);
+  }
+
+  void ReturnResources(const cc::ReturnedResourceArray& resources) override {}
+  void SetBeginFrameSource(cc::BeginFrameSource* begin_frame_source) override {
+    DCHECK(!source_ || !begin_frame_source);
+    source_ = begin_frame_source;
+  };
+
+ private:
+  const uint32_t client_id_;
+  cc::SurfaceManager* const manager_;
+  cc::BeginFrameSource* source_;
+  cc::SurfaceFactory factory_;
+};
 
 ACTION_P2(RemoveObserver, compositor, observer) {
   compositor->RemoveBeginFrameObserver(observer);
@@ -94,7 +129,14 @@ TEST_F(CompositorTest, ReleaseWidgetWithOutputSurfaceNeverCreated) {
   compositor()->SetVisible(true);
 }
 
-TEST_F(CompositorTest, CreateAndReleaseOutputSurface) {
+#if defined(OS_WIN)
+// TODO(crbug.com/608436): Flaky on windows trybots
+#define MAYBE_CreateAndReleaseOutputSurface \
+  DISABLED_CreateAndReleaseOutputSurface
+#else
+#define MAYBE_CreateAndReleaseOutputSurface CreateAndReleaseOutputSurface
+#endif
+TEST_F(CompositorTest, MAYBE_CreateAndReleaseOutputSurface) {
   std::unique_ptr<Layer> root_layer(new Layer(ui::LAYER_SOLID_COLOR));
   root_layer->SetBounds(gfx::Rect(10, 10));
   compositor()->SetRootLayer(root_layer.get());

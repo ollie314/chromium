@@ -33,17 +33,19 @@ class TickClock;
 
 namespace cc {
 class SurfaceFactory;
-enum class SurfaceDrawStatus;
 }
 
 namespace media {
 class VideoFrame;
 }
 
+namespace display_compositor {
+class ReadbackYUVInterface;
+}
+
 namespace content {
 
 class DelegatedFrameHost;
-class ReadbackYUVInterface;
 class RenderWidgetHostViewFrameSubscriber;
 class RenderWidgetHostImpl;
 class ResizeLock;
@@ -55,6 +57,10 @@ class CONTENT_EXPORT DelegatedFrameHostClient {
  public:
   virtual ui::Layer* DelegatedFrameHostGetLayer() const = 0;
   virtual bool DelegatedFrameHostIsVisible() const = 0;
+
+  // Returns the color that the resize gutters should be drawn with. Takes the
+  // suggested color from the current page background.
+  virtual SkColor DelegatedFrameHostGetGutterColor(SkColor color) const = 0;
   virtual gfx::Size DelegatedFrameHostDesiredSizeInDIP() const = 0;
 
   virtual bool DelegatedFrameCanCreateResizeLock() const = 0;
@@ -62,18 +68,14 @@ class CONTENT_EXPORT DelegatedFrameHostClient {
       bool defer_compositor_lock) = 0;
   virtual void DelegatedFrameHostResizeLockWasReleased() = 0;
 
-  virtual void DelegatedFrameHostSendCompositorSwapAck(
-      int output_surface_id,
-      const cc::CompositorFrameAck& ack) = 0;
   virtual void DelegatedFrameHostSendReclaimCompositorResources(
-      int output_surface_id,
-      const cc::CompositorFrameAck& ack) = 0;
+      int compositor_frame_sink_id,
+      bool is_swap_ack,
+      const cc::ReturnedResourceArray& resources) = 0;
   virtual void DelegatedFrameHostOnLostCompositorResources() = 0;
 
-  virtual void DelegatedFrameHostUpdateVSyncParameters(
-      const base::TimeTicks& timebase,
-      const base::TimeDelta& interval) = 0;
   virtual void SetBeginFrameSource(cc::BeginFrameSource* source) = 0;
+  virtual bool IsAutoResizeEnabled() const = 0;
 };
 
 // The DelegatedFrameHost is used to host all of the RenderWidgetHostView state
@@ -84,7 +86,7 @@ class CONTENT_EXPORT DelegatedFrameHost
     : public ui::CompositorObserver,
       public ui::CompositorVSyncManager::Observer,
       public ui::LayerOwnerDelegate,
-      public ImageTransportFactoryObserver,
+      public ui::ContextFactoryObserver,
       public DelegatedFrameEvictorClient,
       public cc::SurfaceFactoryClient,
       public base::SupportsWeakPtr<DelegatedFrameHost> {
@@ -116,15 +118,16 @@ class CONTENT_EXPORT DelegatedFrameHost
 
   // cc::SurfaceFactoryClient implementation.
   void ReturnResources(const cc::ReturnedResourceArray& resources) override;
-  void WillDrawSurface(cc::SurfaceId id, const gfx::Rect& damage_rect) override;
+  void WillDrawSurface(const cc::SurfaceId& id,
+                       const gfx::Rect& damage_rect) override;
   void SetBeginFrameSource(cc::BeginFrameSource* begin_frame_source) override;
 
   bool CanCopyToBitmap() const;
 
   // Public interface exposed to RenderWidgetHostView.
 
-  void SwapDelegatedFrame(uint32_t output_surface_id,
-                          std::unique_ptr<cc::CompositorFrame> frame);
+  void SwapDelegatedFrame(uint32_t compositor_frame_sink_id,
+                          cc::CompositorFrame frame);
   void ClearDelegatedFrame();
   void WasHidden();
   void WasShown(const ui::LatencyInfo& latency_info);
@@ -133,8 +136,6 @@ class CONTENT_EXPORT DelegatedFrameHost
   gfx::Size GetRequestedRendererSize() const;
   void SetCompositor(ui::Compositor* compositor);
   void ResetCompositor();
-  void SetVSyncParameters(const base::TimeTicks& timebase,
-                          const base::TimeDelta& interval);
   // Note: |src_subset| is specified in DIP dimensions while |output_size|
   // expects pixels.
   void CopyFromCompositingSurface(const gfx::Rect& src_subrect,
@@ -150,7 +151,7 @@ class CONTENT_EXPORT DelegatedFrameHost
       std::unique_ptr<RenderWidgetHostViewFrameSubscriber> subscriber);
   void EndFrameSubscription();
   bool HasFrameSubscriber() const { return !!frame_subscriber_; }
-  uint32_t GetSurfaceIdNamespace();
+  uint32_t GetSurfaceClientId();
   // Returns a null SurfaceId if this DelegatedFrameHost has not yet created
   // a compositor Surface.
   cc::SurfaceId SurfaceIdAtPoint(cc::SurfaceHittestDelegate* delegate,
@@ -161,9 +162,17 @@ class CONTENT_EXPORT DelegatedFrameHost
   // Surface, find the relative transform between the Surfaces and apply it
   // to a point. If a Surface has not yet been created this returns the
   // same point with no transform applied.
-  void TransformPointToLocalCoordSpace(const gfx::Point& point,
-                                       cc::SurfaceId original_surface,
-                                       gfx::Point* transformed_point);
+  gfx::Point TransformPointToLocalCoordSpace(
+      const gfx::Point& point,
+      const cc::SurfaceId& original_surface);
+
+  // Given a RenderWidgetHostViewBase that renders to a Surface that is
+  // contained within this class' Surface, find the relative transform between
+  // the Surfaces and apply it to a point. If a Surface has not yet been
+  // created this returns the same point with no transform applied.
+  gfx::Point TransformPointToCoordSpaceForView(
+      const gfx::Point& point,
+      RenderWidgetHostViewBase* target_view);
 
   // Exposed for tests.
   cc::SurfaceId SurfaceIdForTesting() const { return surface_id_; }
@@ -204,6 +213,8 @@ class CONTENT_EXPORT DelegatedFrameHost
   // Checks if the resize lock can be released because we received an new frame.
   void CheckResizeLock();
 
+  SkColor GetGutterColor() const;
+
   // Update the layers for the resize gutters to the right and bottom of the
   // surface layer.
   void UpdateGutters();
@@ -228,9 +239,9 @@ class CONTENT_EXPORT DelegatedFrameHost
       scoped_refptr<OwnedMailbox> subscriber_texture,
       const gpu::SyncToken& sync_token);
 
-  void SendDelegatedFrameAck(uint32_t output_surface_id);
-  void SurfaceDrawn(uint32_t output_surface_id, cc::SurfaceDrawStatus drawn);
-  void SendReturnedDelegatedResources(uint32_t output_surface_id);
+  void SendReclaimCompositorResources(uint32_t compositor_frame_sink_id,
+                                      bool is_swap_ack);
+  void SurfaceDrawn(uint32_t compositor_frame_sink_id);
 
   // Called to consult the current |frame_subscriber_|, to determine and maybe
   // initiate a copy-into-video-frame request.
@@ -253,7 +264,7 @@ class CONTENT_EXPORT DelegatedFrameHost
   // With delegated renderer, this is the last output surface, used to
   // disambiguate resources with the same id coming from different output
   // surfaces.
-  uint32_t last_output_surface_id_;
+  uint32_t last_compositor_frame_sink_id_;
 
   // The number of delegated frame acks that are pending, to delay resource
   // returns until the acks are sent.
@@ -315,7 +326,8 @@ class CONTENT_EXPORT DelegatedFrameHost
       request_copy_of_output_callback_for_testing_;
 
   // YUV readback pipeline.
-  std::unique_ptr<content::ReadbackYUVInterface> yuv_readback_pipeline_;
+  std::unique_ptr<display_compositor::ReadbackYUVInterface>
+      yuv_readback_pipeline_;
 
   std::unique_ptr<DelegatedFrameEvictor> delegated_frame_evictor_;
 };

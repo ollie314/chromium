@@ -22,13 +22,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/cancelable_callback.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "media/audio/audio_io.h"
-#include "media/audio/audio_parameters.h"
+#include "media/audio/audio_manager.h"
+#include "media/base/audio_parameters.h"
 
 namespace media {
 
@@ -71,7 +74,8 @@ class AUHALStream : public AudioOutputStream {
   // It will often be the default output device.
   AUHALStream(AudioManagerMac* manager,
               const AudioParameters& params,
-              AudioDeviceID device);
+              AudioDeviceID device,
+              const AudioManager::LogCallback& log_callback);
   // The dtor is typically called by the AudioManager only and it is usually
   // triggered by calling AudioOutputStream::Close().
   ~AUHALStream() override;
@@ -86,6 +90,7 @@ class AUHALStream : public AudioOutputStream {
 
   AudioDeviceID device_id() const { return device_; }
   size_t requested_buffer_size() const { return number_of_frames_; }
+  AudioUnit audio_unit() const { return audio_unit_; }
 
  private:
   // AUHAL callback.
@@ -143,7 +148,9 @@ class AUHALStream : public AudioOutputStream {
   // For convenience - same as in params_.
   const int output_channels_;
 
-  // Buffer-size.
+  // Size of audio buffer requested at construction. The actual buffer size
+  // is given by |actual_io_buffer_frame_size_| and it can differ from the
+  // requested size.
   const size_t number_of_frames_;
 
   // Stores the number of frames that we actually get callbacks for.
@@ -178,11 +185,11 @@ class AUHALStream : public AudioOutputStream {
   bool stopped_;
 
   // Container for retrieving data from AudioSourceCallback::OnMoreData().
-  scoped_ptr<AudioBus> output_bus_;
+  std::unique_ptr<AudioBus> output_bus_;
 
   // Dynamically allocated FIFO used when CoreAudio asks for unexpected frame
   // sizes.
-  scoped_ptr<AudioPullFifo> audio_fifo_;
+  std::unique_ptr<AudioPullFifo> audio_fifo_;
 
   // Current buffer delay.  Set by Render().
   uint32_t current_hardware_pending_bytes_;
@@ -208,6 +215,9 @@ class AUHALStream : public AudioOutputStream {
 
   // Used to defer Start() to workaround http://crbug.com/160920.
   base::CancelableClosure deferred_start_cb_;
+
+  // Callback to send statistics info.
+  AudioManager::LogCallback log_callback_;
 
   // Used to make sure control functions (Start(), Stop() etc) are called on the
   // right thread.

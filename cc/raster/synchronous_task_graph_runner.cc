@@ -74,8 +74,10 @@ bool SynchronousTaskGraphRunner::RunTask() {
   const auto& ready_to_run_namespaces = work_queue_.ready_to_run_namespaces();
   auto found = std::find_if(
       ready_to_run_namespaces.cbegin(), ready_to_run_namespaces.cend(),
-      [](const std::pair<uint16_t, TaskGraphWorkQueue::TaskNamespace::Vector>&
-             pair) { return !pair.second.empty(); });
+      [](const std::pair<const uint16_t,
+                         TaskGraphWorkQueue::TaskNamespace::Vector>& pair) {
+        return !pair.second.empty();
+      });
 
   if (found == ready_to_run_namespaces.cend()) {
     return false;
@@ -83,13 +85,9 @@ bool SynchronousTaskGraphRunner::RunTask() {
 
   const uint16_t category = found->first;
   auto prioritized_task = work_queue_.GetNextTaskToRun(category);
+  prioritized_task.task->RunOnWorkerThread();
 
-  Task* task = prioritized_task.task;
-  task->WillRun();
-  task->RunOnWorkerThread();
-  task->DidRun();
-
-  work_queue_.CompleteTask(prioritized_task);
+  work_queue_.CompleteTask(std::move(prioritized_task));
 
   return true;
 }

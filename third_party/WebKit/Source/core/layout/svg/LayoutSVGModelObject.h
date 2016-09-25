@@ -52,6 +52,7 @@ public:
 
     void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const final;
     void absoluteQuads(Vector<FloatQuad>&) const override;
+    FloatRect localBoundingBoxRectForAccessibility() const final;
 
     void mapLocalToAncestor(const LayoutBoxModelObject* ancestor, TransformState&, MapCoordinatesFlags = ApplyContainerFlip) const final;
     void mapAncestorToLocal(const LayoutBoxModelObject* ancestor, TransformState&, MapCoordinatesFlags = ApplyContainerFlip) const final;
@@ -68,6 +69,8 @@ protected:
     void addLayerHitTestRects(LayerHitTestRects&, const PaintLayer* currentCompositedLayer, const LayoutPoint& layerOffset, const LayoutRect& containerRect) const final;
     void willBeDestroyed() override;
 
+    PaintInvalidationReason invalidatePaintIfNeeded(const PaintInvalidatorContext&) const final;
+
 private:
     // LayoutSVGModelObject subclasses should use element() instead.
     void node() const = delete;
@@ -75,8 +78,6 @@ private:
     // This method should never be called, SVG uses a different nodeAtPoint method
     bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) final;
     IntRect absoluteElementBoundingBoxRect() const final;
-
-    void invalidateTreeIfNeeded(const PaintInvalidationState&) final;
 
 protected:
     FloatRect m_paintInvalidationBoundingBox;

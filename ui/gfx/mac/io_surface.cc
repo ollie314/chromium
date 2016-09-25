@@ -11,6 +11,8 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/mach_logging.h"
 #include "base/macros.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/gfx/buffer_format_util.h"
 
 namespace gfx {
@@ -47,9 +49,10 @@ int32_t BytesPerElement(gfx::BufferFormat format, int plane) {
     case gfx::BufferFormat::DXT1:
     case gfx::BufferFormat::DXT5:
     case gfx::BufferFormat::ETC1:
+    case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBX_8888:
-    case gfx::BufferFormat::YUV_420:
+    case gfx::BufferFormat::YVU_420:
       NOTREACHED();
       return 0;
   }
@@ -75,9 +78,10 @@ int32_t PixelFormat(gfx::BufferFormat format) {
     case gfx::BufferFormat::DXT1:
     case gfx::BufferFormat::DXT5:
     case gfx::BufferFormat::ETC1:
+    case gfx::BufferFormat::BGR_565:
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBX_8888:
-    case gfx::BufferFormat::YUV_420:
+    case gfx::BufferFormat::YVU_420:
       NOTREACHED();
       return 0;
   }
@@ -110,6 +114,9 @@ void IOSurfaceMachPortTraits::Release(mach_port_t port) {
 }  // namespace internal
 
 IOSurfaceRef CreateIOSurface(const gfx::Size& size, gfx::BufferFormat format) {
+  TRACE_EVENT0("ui", "CreateIOSurface");
+  base::TimeTicks start_time = base::TimeTicks::Now();
+
   size_t num_planes = gfx::NumberOfPlanesForBufferFormat(format);
   base::ScopedCFTypeRef<CFMutableArrayRef> planes(CFArrayCreateMutable(
       kCFAllocatorDefault, num_planes, &kCFTypeArrayCallBacks));
@@ -155,7 +162,11 @@ IOSurfaceRef CreateIOSurface(const gfx::Size& size, gfx::BufferFormat format) {
   // causes PDFs to render incorrectly. Hopefully this check can be removed once
   // pdfium switches to a Skia backend on Mac.
   // https://crbug.com/594343.
-  if (!base::mac::IsOSMavericks()) {
+  // IOSurface clearing causes significant performance regression on about half
+  // of all devices running Yosemite. https://crbug.com/606850#c22.
+  bool should_clear = !base::mac::IsOS10_9() && !base::mac::IsOS10_10();
+
+  if (should_clear) {
     // Zero-initialize the IOSurface. Calling IOSurfaceLock/IOSurfaceUnlock
     // appears to be sufficient. https://crbug.com/584760#c17
     IOReturn r = IOSurfaceLock(surface, 0, nullptr);
@@ -164,6 +175,23 @@ IOSurfaceRef CreateIOSurface(const gfx::Size& size, gfx::BufferFormat format) {
     DCHECK_EQ(kIOReturnSuccess, r);
   }
 
+  // Displaying an IOSurface that does not have a color space using an
+  // AVSampleBufferDisplayLayer can result in a black screen. Specify the
+  // main display's color profile by default, which will result in no color
+  // correction being done for the main monitor (which is the behavior of not
+  // specifying a color space).
+  // https://crbug.com/608879
+  if (format == gfx::BufferFormat::YUV_420_BIPLANAR) {
+    base::ScopedCFTypeRef<CGColorSpaceRef> color_space(
+        CGDisplayCopyColorSpace(CGMainDisplayID()));
+    base::ScopedCFTypeRef<CFDataRef> color_space_icc(
+        CGColorSpaceCopyICCProfile(color_space));
+    // Note that nullptr is an acceptable input to IOSurfaceSetValue.
+    IOSurfaceSetValue(surface, CFSTR("IOSurfaceColorSpace"), color_space_icc);
+  }
+
+  UMA_HISTOGRAM_TIMES("GPU.IOSurface.CreateTime",
+                      base::TimeTicks::Now() - start_time);
   return surface;
 }
 

@@ -16,8 +16,8 @@
 #include "base/macros.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
-#include "net/quic/quic_bandwidth.h"
-#include "net/quic/quic_types.h"
+#include "net/quic/core/quic_bandwidth.h"
+#include "net/quic/core/quic_types.h"
 
 namespace net {
 
@@ -38,12 +38,13 @@ class QuicSocketUtils {
  public:
   // The first integer is for overflow. The in6_pktinfo is the larger of the
   // address structures present. LinuxTimestamping is present for socket
-  // timestamping.
+  // timestamping.  The subsequent int is for ttl.
   // The final int is a sentinel so the msg_controllen feedback
   // can be used to detect larger control messages than there is space for.
   static const int kSpaceForCmsg =
       CMSG_SPACE(CMSG_LEN(sizeof(int)) + CMSG_LEN(sizeof(in6_pktinfo)) +
                  CMSG_LEN(sizeof(LinuxTimestamping)) +
+                 CMSG_LEN(sizeof(int)) +
                  CMSG_LEN(sizeof(int)));
 
   // Fills in |address| if |hdr| contains IP_PKTINFO or IPV6_PKTINFO. Fills in
@@ -51,12 +52,16 @@ class QuicSocketUtils {
   // must not be null.
   static void GetAddressAndTimestampFromMsghdr(struct msghdr* hdr,
                                                IPAddress* address,
-                                               QuicTime* timestamp);
+                                               QuicWallTime* walltimestamp);
 
   // If the msghdr contains an SO_RXQ_OVFL entry, this will set dropped_packets
   // to the correct value and return true. Otherwise it will return false.
   static bool GetOverflowFromMsghdr(struct msghdr* hdr,
                                     QuicPacketCount* dropped_packets);
+
+  // If the msghdr contains an IP_TTL entry, this will set ttl to the correct
+  // value and return true. Otherwise it will return false.
+  static bool GetTtlFromMsghdr(struct msghdr* hdr, int* ttl);
 
   // Sets either IP_PKTINFO or IPV6_PKTINFO on the socket, based on
   // address_family.  Returns the return code from setsockopt.
@@ -91,7 +96,7 @@ class QuicSocketUtils {
                         size_t buf_len,
                         QuicPacketCount* dropped_packets,
                         IPAddress* self_address,
-                        QuicTime* timestamp,
+                        QuicWallTime* walltimestamp,
                         IPEndPoint* peer_address);
 
   // Writes buf_len to the socket. If writing is successful, sets the result's

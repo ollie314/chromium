@@ -28,9 +28,10 @@
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/RejectedPromises.h"
 #include "bindings/core/v8/RetainedDOMInfo.h"
-#include "bindings/core/v8/ScriptCallStack.h"
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptValue.h"
+#include "bindings/core/v8/ScriptWrappableVisitor.h"
+#include "bindings/core/v8/SourceLocation.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8DOMException.h"
 #include "bindings/core/v8/V8ErrorEvent.h"
@@ -40,17 +41,15 @@
 #include "bindings/core/v8/V8IdleTaskRunner.h"
 #include "bindings/core/v8/V8Location.h"
 #include "bindings/core/v8/V8PerContextData.h"
+#include "bindings/core/v8/V8PrivateProperty.h"
 #include "bindings/core/v8/V8Window.h"
 #include "bindings/core/v8/WorkerOrWorkletScriptController.h"
 #include "core/dom/Document.h"
-#include "core/dom/ExceptionCode.h"
 #include "core/fetch/AccessControlStatus.h"
-#include "core/frame/ConsoleTypes.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/inspector/MainThreadDebugger.h"
-#include "core/inspector/ScriptArguments.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -59,9 +58,11 @@
 #include "public/platform/WebScheduler.h"
 #include "public/platform/WebThread.h"
 #include "wtf/AddressSanitizer.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/WTFString.h"
 #include "wtf/typed_arrays/ArrayBufferContents.h"
+#include <memory>
 #include <v8-debug.h>
 #include <v8-profiler.h>
 
@@ -92,30 +93,15 @@ static Frame* findFrame(v8::Isolate* isolate, v8::Local<v8::Object> host, v8::Lo
 static void reportFatalErrorInMainThread(const char* location, const char* message)
 {
     int memoryUsageMB = Platform::current()->actualMemoryUsageMB();
-    printf("V8 error: %s (%s).  Current memory usage: %d MB\n", message, location, memoryUsageMB);
+    DVLOG(1) << "V8 error: " << message << " (" << location << ").  Current memory usage: " << memoryUsageMB << " MB";
     CRASH();
 }
 
-static PassRefPtr<ScriptCallStack> extractCallStack(v8::Isolate* isolate, v8::Local<v8::Message> message, int* const scriptId)
+static void reportOOMErrorInMainThread(const char* location, bool isJsHeap)
 {
-    v8::Local<v8::StackTrace> stackTrace = message->GetStackTrace();
-    RefPtr<ScriptCallStack> callStack = nullptr;
-    *scriptId = message->GetScriptOrigin().ScriptID()->Value();
-    // Currently stack trace is only collected when inspector is open.
-    if (!stackTrace.IsEmpty() && stackTrace->GetFrameCount() > 0) {
-        callStack = ScriptCallStack::create(isolate, stackTrace);
-        int topScriptId = stackTrace->GetFrame(0)->GetScriptId();
-        if (topScriptId == *scriptId)
-            *scriptId = 0;
-    }
-    return callStack.release();
-}
-
-static String extractResourceName(v8::Local<v8::Message> message, const ExecutionContext* context)
-{
-    v8::Local<v8::Value> resourceName = message->GetScriptOrigin().ResourceName();
-    bool shouldUseDocumentURL = context->isDocument() && (resourceName.IsEmpty() || !resourceName->IsString());
-    return shouldUseDocumentURL ? context->url() : toCoreString(resourceName.As<v8::String>());
+    int memoryUsageMB = Platform::current()->actualMemoryUsageMB();
+    DVLOG(1) << "V8 " << (isJsHeap ? "javascript" : "process") << " OOM: (" << location << ").  Current memory usage: " << memoryUsageMB << " MB";
+    OOM_CRASH();
 }
 
 static String extractMessageForConsole(v8::Isolate* isolate, v8::Local<v8::Value> data)
@@ -132,29 +118,21 @@ static String extractMessageForConsole(v8::Isolate* isolate, v8::Local<v8::Value
     return emptyString();
 }
 
-static ErrorEvent* createErrorEventFromMesssage(ScriptState* scriptState, v8::Local<v8::Message> message, String resourceName)
-{
-    String errorMessage = toCoreStringWithNullCheck(message->Get());
-    int lineNumber = 0;
-    int columnNumber = 0;
-    if (v8Call(message->GetLineNumber(scriptState->context()), lineNumber)
-        && v8Call(message->GetStartColumn(scriptState->context()), columnNumber))
-        ++columnNumber;
-    return ErrorEvent::create(errorMessage, resourceName, lineNumber, columnNumber, &scriptState->world());
-}
-
 static void messageHandlerInMainThread(v8::Local<v8::Message> message, v8::Local<v8::Value> data)
 {
     ASSERT(isMainThread());
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
+
+    if (isolate->GetEnteredContext().IsEmpty())
+        return;
 
     // If called during context initialization, there will be no entered context.
     ScriptState* scriptState = ScriptState::current(isolate);
     if (!scriptState->contextIsValid())
         return;
 
-    int scriptId = 0;
-    RefPtr<ScriptCallStack> callStack = extractCallStack(isolate, message, &scriptId);
+    ExecutionContext* context = scriptState->getExecutionContext();
+    std::unique_ptr<SourceLocation> location = SourceLocation::fromMessage(isolate, message, context);
 
     AccessControlStatus accessControlStatus = NotSharableCrossOrigin;
     if (message->IsOpaque())
@@ -162,9 +140,7 @@ static void messageHandlerInMainThread(v8::Local<v8::Message> message, v8::Local
     else if (message->IsSharedCrossOrigin())
         accessControlStatus = SharableCrossOrigin;
 
-    ExecutionContext* context = scriptState->getExecutionContext();
-    String resourceName = extractResourceName(message, context);
-    ErrorEvent* event = createErrorEventFromMesssage(scriptState, message, resourceName);
+    ErrorEvent* event = ErrorEvent::create(toCoreStringWithNullCheck(message->Get()), std::move(location), &scriptState->world());
 
     String messageForConsole = extractMessageForConsole(isolate, data);
     if (!messageForConsole.isEmpty())
@@ -188,9 +164,9 @@ static void messageHandlerInMainThread(v8::Local<v8::Message> message, v8::Local
         // other isolated worlds (which means that the error events won't fire any event listeners
         // in user's scripts).
         EventDispatchForbiddenScope::AllowUserAgentEvents allowUserAgentEvents;
-        context->reportException(event, scriptId, callStack, accessControlStatus);
+        context->dispatchErrorEvent(event, accessControlStatus);
     } else {
-        context->reportException(event, scriptId, callStack, accessControlStatus);
+        context->dispatchErrorEvent(event, accessControlStatus);
     }
 }
 
@@ -210,7 +186,7 @@ void V8Initializer::reportRejectedPromisesOnMainThread()
     rejectedPromisesOnMainThread().processQueue();
 }
 
-static void promiseRejectHandler(v8::PromiseRejectMessage data, RejectedPromises& rejectedPromises, const String& fallbackResourceName)
+static void promiseRejectHandler(v8::PromiseRejectMessage data, RejectedPromises& rejectedPromises, ScriptState* scriptState)
 {
     if (data.GetEvent() == v8::kPromiseHandlerAddedAfterReject) {
         rejectedPromises.handlerAdded(data);
@@ -221,47 +197,38 @@ static void promiseRejectHandler(v8::PromiseRejectMessage data, RejectedPromises
 
     v8::Local<v8::Promise> promise = data.GetPromise();
     v8::Isolate* isolate = promise->GetIsolate();
-    ScriptState* scriptState = ScriptState::current(isolate);
+    ExecutionContext* context = scriptState->getExecutionContext();
 
     v8::Local<v8::Value> exception = data.GetValue();
     if (V8DOMWrapper::isWrapper(isolate, exception)) {
         // Try to get the stack & location from a wrapped exception object (e.g. DOMException).
         ASSERT(exception->IsObject());
-        v8::Local<v8::Object> obj = v8::Local<v8::Object>::Cast(exception);
-        v8::Local<v8::Value> error = V8HiddenValue::getHiddenValue(scriptState, obj, V8HiddenValue::error(isolate));
-        if (!error.IsEmpty())
+        auto privateError = V8PrivateProperty::getDOMExceptionError(isolate);
+        v8::Local<v8::Value> error = privateError.getOrUndefined(scriptState->context(), exception.As<v8::Object>());
+        if (!error->IsUndefined())
             exception = error;
     }
 
-    int scriptId = 0;
-    int lineNumber = 0;
-    int columnNumber = 0;
-    String resourceName = fallbackResourceName;
     String errorMessage;
     AccessControlStatus corsStatus = NotSharableCrossOrigin;
-    RefPtr<ScriptCallStack> callStack;
+    std::unique_ptr<SourceLocation> location;
 
     v8::Local<v8::Message> message = v8::Exception::CreateMessage(isolate, exception);
     if (!message.IsEmpty()) {
-        V8StringResource<> v8ResourceName(message->GetScriptOrigin().ResourceName());
-        if (v8ResourceName.prepare())
-            resourceName = v8ResourceName;
-        scriptId = message->GetScriptOrigin().ScriptID()->Value();
-        if (v8Call(message->GetLineNumber(scriptState->context()), lineNumber)
-            && v8Call(message->GetStartColumn(scriptState->context()), columnNumber))
-            ++columnNumber;
         // message->Get() can be empty here. https://crbug.com/450330
         errorMessage = toCoreStringWithNullCheck(message->Get());
-        callStack = extractCallStack(isolate, message, &scriptId);
+        location = SourceLocation::fromMessage(isolate, message, context);
         if (message->IsSharedCrossOrigin())
             corsStatus = SharableCrossOrigin;
+    } else {
+        location = SourceLocation::create(context->url().getString(), 0, 0, nullptr);
     }
 
     String messageForConsole = extractMessageForConsole(isolate, data.GetValue());
     if (!messageForConsole.isEmpty())
         errorMessage = "Uncaught " + messageForConsole;
 
-    rejectedPromises.rejectedWithNoHandler(scriptState, data, errorMessage, resourceName, scriptId, lineNumber, columnNumber, callStack, corsStatus);
+    rejectedPromises.rejectedWithNoHandler(scriptState, data, errorMessage, std::move(location), corsStatus);
 }
 
 static void promiseRejectHandlerInMainThread(v8::PromiseRejectMessage data)
@@ -283,7 +250,7 @@ static void promiseRejectHandlerInMainThread(v8::PromiseRejectMessage data)
     if (!scriptState->contextIsValid())
         return;
 
-    promiseRejectHandler(data, rejectedPromisesOnMainThread(), scriptState->getExecutionContext()->url());
+    promiseRejectHandler(data, rejectedPromisesOnMainThread(), scriptState);
 }
 
 static void promiseRejectHandlerInWorker(v8::PromiseRejectMessage data)
@@ -304,7 +271,7 @@ static void promiseRejectHandlerInWorker(v8::PromiseRejectMessage data)
     WorkerOrWorkletScriptController* scriptController = toWorkerGlobalScope(executionContext)->scriptController();
     ASSERT(scriptController);
 
-    promiseRejectHandler(data, *scriptController->getRejectedPromises(), String());
+    promiseRejectHandler(data, *scriptController->getRejectedPromises(), scriptState);
 }
 
 static void failedAccessCheckCallbackInMainThread(v8::Local<v8::Object> host, v8::AccessType type, v8::Local<v8::Value> data)
@@ -317,8 +284,7 @@ static void failedAccessCheckCallbackInMainThread(v8::Local<v8::Object> host, v8
 
     // FIXME: We should modify V8 to pass in more contextual information (context, property, and object).
     ExceptionState exceptionState(ExceptionState::UnknownContext, 0, 0, isolate->GetCurrentContext()->Global(), isolate);
-    exceptionState.throwSecurityError(targetWindow->sanitizedCrossDomainAccessErrorMessage(callingDOMWindow(isolate)), targetWindow->crossDomainAccessErrorMessage(callingDOMWindow(isolate)));
-    exceptionState.throwIfNeeded();
+    exceptionState.throwSecurityError(targetWindow->sanitizedCrossDomainAccessErrorMessage(currentDOMWindow(isolate)), targetWindow->crossDomainAccessErrorMessage(currentDOMWindow(isolate)));
 }
 
 static bool codeGenerationCheckCallbackInMainThread(v8::Local<v8::Context> context)
@@ -334,6 +300,11 @@ static void initializeV8Common(v8::Isolate* isolate)
 {
     isolate->AddGCPrologueCallback(V8GCController::gcPrologue);
     isolate->AddGCEpilogueCallback(V8GCController::gcEpilogue);
+    if (RuntimeEnabledFeatures::traceWrappablesEnabled()) {
+        std::unique_ptr<ScriptWrappableVisitor> visitor(new ScriptWrappableVisitor(isolate));
+        isolate->SetEmbedderHeapTracer(visitor.get());
+        V8PerIsolateData::from(isolate)->setScriptWrappableVisitor(std::move(visitor));
+    }
 
     v8::Debug::SetLiveEditEnabled(isolate, false);
 
@@ -367,8 +338,14 @@ class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
 
 } // namespace
 
-static void adjustAmountOfExternalAllocatedMemory(int size)
+static void adjustAmountOfExternalAllocatedMemory(int64_t size)
 {
+#if ENABLE(ASSERT)
+    static int64_t totalSize = 0;
+    totalSize += size;
+    DCHECK_GE(totalSize, 0);
+#endif
+
     v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(size);
 }
 
@@ -386,6 +363,7 @@ void V8Initializer::initializeMainThread()
 
     initializeV8Common(isolate);
 
+    isolate->SetOOMErrorHandler(reportOOMErrorInMainThread);
     isolate->SetFatalErrorHandler(reportFatalErrorInMainThread);
     isolate->AddMessageListener(messageHandlerInMainThread);
     isolate->SetFailedAccessCheckCallbackFunction(failedAccessCheckCallbackInMainThread);
@@ -393,7 +371,7 @@ void V8Initializer::initializeMainThread()
 
     if (RuntimeEnabledFeatures::v8IdleTasksEnabled()) {
         WebScheduler* scheduler = Platform::current()->currentThread()->scheduler();
-        V8PerIsolateData::enableIdleTasks(isolate, adoptPtr(new V8IdleTaskRunner(scheduler)));
+        V8PerIsolateData::enableIdleTasks(isolate, wrapUnique(new V8IdleTaskRunner(scheduler)));
     }
 
     isolate->SetPromiseRejectCallback(promiseRejectHandlerInMainThread);
@@ -402,10 +380,20 @@ void V8Initializer::initializeMainThread()
         profiler->SetWrapperClassInfoProvider(WrapperTypeInfo::NodeClassId, &RetainedDOMInfo::createRetainedDOMInfo);
 
     ASSERT(ThreadState::mainThreadState());
-    ThreadState::mainThreadState()->addInterruptor(adoptPtr(new V8IsolateInterruptor(isolate)));
-    ThreadState::mainThreadState()->registerTraceDOMWrappers(isolate, V8GCController::traceDOMWrappers);
+    ThreadState::mainThreadState()->addInterruptor(wrapUnique(new V8IsolateInterruptor(isolate)));
+    if (RuntimeEnabledFeatures::traceWrappablesEnabled()) {
+        ThreadState::mainThreadState()->registerTraceDOMWrappers(isolate,
+            V8GCController::traceDOMWrappers,
+            ScriptWrappableVisitor::invalidateDeadObjectsInMarkingDeque,
+            ScriptWrappableVisitor::performCleanup);
+    } else {
+        ThreadState::mainThreadState()->registerTraceDOMWrappers(isolate,
+            V8GCController::traceDOMWrappers,
+            nullptr,
+            nullptr);
+    }
 
-    V8PerIsolateData::from(isolate)->setThreadDebugger(adoptPtr(new MainThreadDebugger(isolate)));
+    V8PerIsolateData::from(isolate)->setThreadDebugger(wrapUnique(new MainThreadDebugger(isolate)));
 }
 
 void V8Initializer::shutdownMainThread()
@@ -433,17 +421,15 @@ static void messageHandlerInWorker(v8::Local<v8::Message> message, v8::Local<v8:
         return;
 
     // Exceptions that occur in error handler should be ignored since in that case
-    // WorkerGlobalScope::reportException will send the exception to the worker object.
+    // WorkerGlobalScope::dispatchErrorEvent will send the exception to the worker object.
     if (perIsolateData->isReportingException())
         return;
 
     perIsolateData->setReportingException(true);
 
-    TOSTRING_VOID(V8StringResource<>, resourceName, message->GetScriptOrigin().ResourceName());
-    ErrorEvent* event = createErrorEventFromMesssage(scriptState, message, resourceName);
-
-    int scriptId = 0;
-    RefPtr<ScriptCallStack> callStack = extractCallStack(isolate, message, &scriptId);
+    ExecutionContext* context = scriptState->getExecutionContext();
+    std::unique_ptr<SourceLocation> location = SourceLocation::fromMessage(isolate, message, context);
+    ErrorEvent* event = ErrorEvent::create(toCoreStringWithNullCheck(message->Get()), std::move(location), &scriptState->world());
 
     AccessControlStatus corsStatus = message->IsSharedCrossOrigin() ? SharableCrossOrigin : NotSharableCrossOrigin;
 
@@ -451,7 +437,7 @@ static void messageHandlerInWorker(v8::Local<v8::Message> message, v8::Local<v8:
     // the error event from the v8::Message, quietly leave.
     if (!isolate->IsExecutionTerminating()) {
         V8ErrorHandler::storeExceptionOnErrorEventWrapper(scriptState, event, data, scriptState->context()->Global());
-        scriptState->getExecutionContext()->reportException(event, scriptId, callStack, corsStatus);
+        scriptState->getExecutionContext()->dispatchErrorEvent(event, corsStatus);
     }
 
     perIsolateData->setReportingException(false);

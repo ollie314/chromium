@@ -23,6 +23,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/tests/FrameTestHelpers.h"
+#include <memory>
 
 namespace blink {
 
@@ -39,10 +40,10 @@ protected:
         element->setInnerHTML("<option><option><option><option style='display:none;'><option style='display:none;'><option><option>", ASSERT_NO_EXCEPTION);
         m_dummyPageHolder->document().body()->appendChild(element, ASSERT_NO_EXCEPTION);
         m_ownerElement = element;
-        m_dummyPageHolder->document().updateLayoutIgnorePendingStylesheets();
+        m_dummyPageHolder->document().updateStyleAndLayoutIgnorePendingStylesheets();
     }
 
-    OwnPtr<DummyPageHolder> m_dummyPageHolder;
+    std::unique_ptr<DummyPageHolder> m_dummyPageHolder;
     Persistent<HTMLSelectElement> m_ownerElement;
 };
 
@@ -120,11 +121,13 @@ protected:
     void loadFrame(const std::string& fileName)
     {
         FrameTestHelpers::loadFrame(mainFrame(), m_baseURL + fileName);
+        webView()->resize(WebSize(800, 600));
+        webView()->updateAllLifecyclePhases();
     }
 
-    WebViewImpl* webView() const { return m_helper.webViewImpl(); }
+    WebViewImpl* webView() const { return m_helper.webView(); }
     const ExternalPopupMenuWebFrameClient& client() const { return m_webFrameClient; }
-    WebLocalFrameImpl* mainFrame() const { return m_helper.webViewImpl()->mainFrameImpl(); }
+    WebLocalFrameImpl* mainFrame() const { return m_helper.webView()->mainFrameImpl(); }
 
 private:
     std::string m_baseURL;

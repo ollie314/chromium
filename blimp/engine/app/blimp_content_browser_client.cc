@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "blimp/engine/app/blimp_content_browser_client.h"
 #include "blimp/engine/app/blimp_browser_main_parts.h"
+#include "blimp/engine/app/blimp_content_browser_client.h"
 #include "blimp/engine/app/settings_manager.h"
 #include "blimp/engine/mojo/blob_channel_service.h"
-#include "content/public/common/service_registry.h"
+#include "content/public/browser/browser_thread.h"
+#include "services/shell/public/cpp/interface_registry.h"
 
 namespace blimp {
 namespace engine {
@@ -39,10 +40,12 @@ BlimpBrowserContext* BlimpContentBrowserClient::GetBrowserContext() {
   return blimp_browser_main_parts_->GetBrowserContext();
 }
 
-void BlimpContentBrowserClient::RegisterRenderProcessMojoServices(
-    content::ServiceRegistry* registry) {
-  registry->AddService<mojom::BlobChannel>(
-      base::Bind(&BlobChannelService::Create));
+void BlimpContentBrowserClient::ExposeInterfacesToRenderer(
+    shell::InterfaceRegistry* registry,
+    content::RenderProcessHost* render_process_host) {
+  registry->AddInterface<mojom::BlobChannel>(base::Bind(
+      &BlobChannelService::BindRequest,
+      base::Unretained(blimp_browser_main_parts_->GetBlobChannelService())));
 }
 
 }  // namespace engine

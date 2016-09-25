@@ -13,6 +13,7 @@ import android.support.v7.app.AppCompatActivity;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.ContextUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.tabmodel.DocumentModeAssassin;
 import org.chromium.chrome.browser.tabmodel.DocumentModeAssassin.DocumentModeAssassinObserver;
@@ -41,7 +42,7 @@ public class UpgradeActivity extends AppCompatActivity {
     public static void launchInstance(Activity activity, Intent originalIntent) {
         Intent intent = new Intent();
         intent.setClass(activity, UpgradeActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT);
         intent.putExtra(UpgradeActivity.EXTRA_INTENT_TO_REFIRE, originalIntent);
         activity.startActivity(intent);
         activity.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
@@ -113,7 +114,7 @@ public class UpgradeActivity extends AppCompatActivity {
         // If there's no Intent to refire, send them to the browser.
         if (intentToFire == null) {
             intentToFire = new Intent(Intent.ACTION_MAIN);
-            intentToFire.setPackage(ApplicationStatus.getApplicationContext().getPackageName());
+            intentToFire.setPackage(ContextUtils.getApplicationContext().getPackageName());
         }
 
         // Fire the Intent into a different task so that this one can go away.

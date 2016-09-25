@@ -43,10 +43,13 @@
 #include "core/loader/HistoryItem.h"
 #include "core/loader/NavigationPolicy.h"
 #include "platform/Timer.h"
+#include "platform/TracedValue.h"
 #include "platform/heap/Handle.h"
 #include "platform/network/ResourceRequest.h"
+#include "public/platform/WebInsecureRequestPolicy.h"
 #include "wtf/Forward.h"
 #include "wtf/HashSet.h"
+#include <memory>
 
 namespace blink {
 
@@ -61,6 +64,7 @@ enum class WebCachePolicy;
 struct FrameLoadRequest;
 
 CORE_EXPORT bool isBackForwardLoadType(FrameLoadType);
+CORE_EXPORT bool isReloadLoadType(FrameLoadType);
 
 class CORE_EXPORT FrameLoader final {
     WTF_MAKE_NONCOPYABLE(FrameLoader);
@@ -97,15 +101,11 @@ public:
 
     void replaceDocumentWhileExecutingJavaScriptURL(const String& source, Document* ownerDocument);
 
-    // Sets a timer to notify the client that the initial empty document has
-    // been accessed, and thus it is no longer safe to show a provisional URL
-    // above the document without risking a URL spoof.
+    // Notifies the client that the initial empty document has been accessed,
+    // and thus it is no longer safe to show a provisional URL above the
+    // document without risking a URL spoof. The client must not call back into
+    // JavaScript.
     void didAccessInitialDocument();
-
-    // If the initial empty document is showing and has been accessed, this
-    // cancels the timer and immediately notifies the client in cases that
-    // waiting to notify would allow a URL spoof.
-    void notifyIfInitialDocumentAccessed();
 
     DocumentLoader* documentLoader() const { return m_documentLoader.get(); }
     DocumentLoader* provisionalDocumentLoader() const { return m_provisionalDocumentLoader.get(); }
@@ -127,7 +127,9 @@ public:
     void didExplicitOpen();
 
     // Callbacks from DocumentWriter
-    void didBeginDocument(bool dispatchWindowObjectAvailable);
+    void didInstallNewDocument(bool dispatchWindowObjectAvailable);
+
+    void didBeginDocument();
 
     void receivedFirstData();
 
@@ -143,10 +145,9 @@ public:
     void forceSandboxFlags(SandboxFlags flags) { m_forcedSandboxFlags |= flags; }
     SandboxFlags effectiveSandboxFlags() const;
 
-    bool shouldEnforceStrictMixedContentChecking() const;
-
-    SecurityContext::InsecureRequestsPolicy getInsecureRequestsPolicy() const;
+    WebInsecureRequestPolicy getInsecureRequestPolicy() const;
     SecurityContext::InsecureNavigationsSet* insecureNavigationsToUpgrade() const;
+    void upgradeInsecureRequest(ResourceRequest&, Document*) const;
 
     Frame* opener();
     void setOpener(LocalFrame*);
@@ -157,6 +158,8 @@ public:
     void checkCompleted();
 
     void receivedMainResourceRedirect(const KURL& newURL);
+
+    void clearProvisionalHistoryItem();
 
     // This prepares the FrameLoader for the next commit. It will dispatch
     // unload events, abort XHR requests and detach the document. Returns true
@@ -178,7 +181,7 @@ public:
 
     bool allowPlugins(ReasonForCallingAllowPlugins);
 
-    void updateForSameDocumentNavigation(const KURL&, SameDocumentNavigationSource, PassRefPtr<SerializedScriptValue>, HistoryScrollRestorationType, FrameLoadType);
+    void updateForSameDocumentNavigation(const KURL&, SameDocumentNavigationSource, PassRefPtr<SerializedScriptValue>, HistoryScrollRestorationType, FrameLoadType, Document*);
 
     HistoryItem* currentItem() const { return m_currentItem.get(); }
     void saveScrollState();
@@ -190,12 +193,13 @@ public:
 
     DECLARE_TRACE();
 
+    static void setReferrerForFrameRequest(FrameLoadRequest&);
+
 private:
-    void checkTimerFired(Timer<FrameLoader>*);
-    void didAccessInitialDocumentTimerFired(Timer<FrameLoader>*);
+    void checkTimerFired(TimerBase*);
+    void didAccessInitialDocumentTimerFired(TimerBase*);
 
     bool prepareRequestForThisFrame(FrameLoadRequest&);
-    static void setReferrerForFrameRequest(ResourceRequest&, ShouldSendReferrer, Document*);
     FrameLoadType determineFrameLoadType(const FrameLoadRequest&);
 
     SubstituteData defaultSubstituteDataForURL(const KURL&);
@@ -210,17 +214,20 @@ private:
         Fragment,
         HistoryApi
     };
-    void setHistoryItemStateForCommit(HistoryCommitType, HistoryNavigationType);
+    void setHistoryItemStateForCommit(FrameLoadType, HistoryCommitType, HistoryNavigationType);
 
-    void loadInSameDocument(const KURL&, PassRefPtr<SerializedScriptValue> stateObject, FrameLoadType, HistoryLoadType, ClientRedirectPolicy);
+    void loadInSameDocument(const KURL&, PassRefPtr<SerializedScriptValue> stateObject, FrameLoadType, HistoryLoadType, ClientRedirectPolicy, Document*);
 
     void scheduleCheckCompleted();
 
     void detachDocumentLoader(Member<DocumentLoader>&);
 
+    std::unique_ptr<TracedValue> toTracedValue() const;
+    void takeObjectSnapshot() const;
+
     Member<LocalFrame> m_frame;
 
-    // FIXME: These should be OwnPtr<T> to reduce build times and simplify
+    // FIXME: These should be std::unique_ptr<T> to reduce build times and simplify
     // header dependencies unless performance testing proves otherwise.
     // Some of these could be lazily created for memory savings on devices.
     mutable FrameLoaderStateMachine m_stateMachine;
@@ -271,15 +278,13 @@ private:
 
     bool m_inStopAllLoaders;
 
-    Timer<FrameLoader> m_checkTimer;
-
-    bool m_didAccessInitialDocument;
-    Timer<FrameLoader> m_didAccessInitialDocumentTimer;
+    TaskRunnerTimer<FrameLoader> m_checkTimer;
 
     SandboxFlags m_forcedSandboxFlags;
 
     bool m_dispatchingDidClearWindowObjectInMainWorld;
     bool m_protectProvisionalLoader;
+    bool m_isNavigationHandledByClient;
 };
 
 } // namespace blink

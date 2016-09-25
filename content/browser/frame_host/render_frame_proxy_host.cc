@@ -13,13 +13,13 @@
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/render_frame_host_delegate.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/frame_host/render_widget_host_view_child_frame.h"
 #include "content/browser/message_port_message_filter.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/common/frame_messages.h"
+#include "content/common/frame_owner_properties.h"
 #include "content/public/browser/browser_thread.h"
 #include "ipc/ipc_message.h"
 
@@ -194,6 +194,16 @@ bool RenderFrameProxyHost::InitRenderFrameProxy() {
                                       ->current_replication_state()));
 
   render_frame_proxy_created_ = true;
+
+  // For subframes, initialize the proxy's FrameOwnerProperties only if they
+  // differ from default values.
+  bool should_send_properties =
+      frame_tree_node_->frame_owner_properties() != FrameOwnerProperties();
+  if (frame_tree_node_->parent() && should_send_properties) {
+    Send(new FrameMsg_SetFrameOwnerProperties(
+        routing_id_, frame_tree_node_->frame_owner_properties()));
+  }
+
   return true;
 }
 
@@ -247,14 +257,15 @@ void RenderFrameProxyHost::OnOpenURL(
 
   // Since this navigation targeted a specific RenderFrameProxy, it should stay
   // in the current tab.
-  DCHECK_EQ(CURRENT_TAB, params.disposition);
+  DCHECK_EQ(WindowOpenDisposition::CURRENT_TAB, params.disposition);
 
   // TODO(alexmos, creis): Figure out whether |params.user_gesture| needs to be
   // passed in as well.
   frame_tree_node_->navigator()->RequestTransferURL(
       current_rfh, validated_url, site_instance_.get(), std::vector<GURL>(),
       params.referrer, ui::PAGE_TRANSITION_LINK, GlobalRequestID(),
-      params.should_replace_current_entry);
+      params.should_replace_current_entry, params.uses_post ? "POST" : "GET",
+      params.resource_request_body);
 }
 
 void RenderFrameProxyHost::OnRouteMessageEvent(
@@ -360,8 +371,8 @@ void RenderFrameProxyHost::OnAdvanceFocus(blink::WebFocusType type,
 }
 
 void RenderFrameProxyHost::OnFrameFocused() {
-  frame_tree_node_->frame_tree()->SetFocusedFrame(frame_tree_node_,
-                                                  GetSiteInstance());
+  frame_tree_node_->current_frame_host()->delegate()->SetFocusedFrame(
+      frame_tree_node_, GetSiteInstance());
 }
 
 }  // namespace content

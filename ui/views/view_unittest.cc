@@ -239,7 +239,7 @@ class TestView : public View {
     views::View::Blur();
   }
 
-  bool focusable() const { return View::focusable(); }
+  FocusBehavior focus_behavior() const { return View::focus_behavior(); }
 
   void set_can_process_events_within_subtree(bool can_process) {
     can_process_events_within_subtree_ = can_process;
@@ -526,7 +526,7 @@ TEST_F(ViewTest, PaintEmptyView) {
   // Paint "everything".
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
 
   // The empty view has nothing to paint so it doesn't try build a cache, nor do
@@ -548,7 +548,7 @@ TEST_F(ViewTest, PaintWithMovedViewUsesCache) {
   gfx::Rect pixel_rect = gfx::Rect(1, 1);
   float device_scale_factor = 1.f;
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(pixel_rect, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(
       ui::PaintContext(list.get(), device_scale_factor, pixel_rect));
   EXPECT_TRUE(v1->did_paint_);
@@ -564,14 +564,14 @@ TEST_F(ViewTest, PaintWithMovedViewUsesCache) {
             list->VisualRectForTesting(item_index));
 
   // If invalidation doesn't intersect v1, we paint with the cache.
-  list = cc::DisplayItemList::Create(pixel_rect, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(
       ui::PaintContext(list.get(), device_scale_factor, pixel_rect));
   EXPECT_FALSE(v1->did_paint_);
   v1->Reset();
 
   // If invalidation does intersect v1, we don't paint with the cache.
-  list = cc::DisplayItemList::Create(pixel_rect, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(
       ui::PaintContext(list.get(), device_scale_factor, v1->bounds()));
   EXPECT_TRUE(v1->did_paint_);
@@ -579,7 +579,7 @@ TEST_F(ViewTest, PaintWithMovedViewUsesCache) {
 
   // Moving the view should still use the cache when the invalidation doesn't
   // intersect v1.
-  list = cc::DisplayItemList::Create(pixel_rect, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   v1->SetX(9);
   root_view->Paint(
       ui::PaintContext(list.get(), device_scale_factor, pixel_rect));
@@ -596,7 +596,7 @@ TEST_F(ViewTest, PaintWithMovedViewUsesCache) {
 
   // Moving the view should not use the cache when painting without
   // invalidation.
-  list = cc::DisplayItemList::Create(pixel_rect, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   v1->SetX(8);
   root_view->Paint(ui::PaintContext(
       ui::PaintContext(list.get(), device_scale_factor, pixel_rect),
@@ -626,7 +626,7 @@ TEST_F(ViewTest, PaintWithMovedViewUsesCacheInRTL) {
   gfx::Rect pixel_rect = gfx::Rect(1, 1);
   float device_scale_factor = 1.f;
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(pixel_rect, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(
       ui::PaintContext(list.get(), device_scale_factor, pixel_rect));
   EXPECT_TRUE(v1->did_paint_);
@@ -643,14 +643,14 @@ TEST_F(ViewTest, PaintWithMovedViewUsesCacheInRTL) {
             list->VisualRectForTesting(item_index));
 
   // If invalidation doesn't intersect v1, we paint with the cache.
-  list = cc::DisplayItemList::Create(pixel_rect, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(
       ui::PaintContext(list.get(), device_scale_factor, pixel_rect));
   EXPECT_FALSE(v1->did_paint_);
   v1->Reset();
 
   // If invalidation does intersect v1, we don't paint with the cache.
-  list = cc::DisplayItemList::Create(pixel_rect, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(
       ui::PaintContext(list.get(), device_scale_factor, v1->bounds()));
   EXPECT_TRUE(v1->did_paint_);
@@ -658,7 +658,7 @@ TEST_F(ViewTest, PaintWithMovedViewUsesCacheInRTL) {
 
   // Moving the view should still use the cache when the invalidation doesn't
   // intersect v1.
-  list = cc::DisplayItemList::Create(pixel_rect, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   v1->SetX(9);
   root_view->Paint(
       ui::PaintContext(list.get(), device_scale_factor, pixel_rect));
@@ -676,7 +676,7 @@ TEST_F(ViewTest, PaintWithMovedViewUsesCacheInRTL) {
 
   // Moving the view should not use the cache when painting without
   // invalidation.
-  list = cc::DisplayItemList::Create(pixel_rect, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   v1->SetX(8);
   root_view->Paint(ui::PaintContext(
       ui::PaintContext(list.get(), device_scale_factor, pixel_rect),
@@ -710,14 +710,14 @@ TEST_F(ViewTest, PaintWithUnknownInvalidation) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
 
   gfx::Rect paint_area(1, 1);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   // With a known invalidation, v1 and v2 are not painted.
   EXPECT_FALSE(v1->did_paint_);
@@ -750,14 +750,14 @@ TEST_F(ViewTest, PaintContainsChildren) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
 
   gfx::Rect paint_area(25, 26);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   EXPECT_FALSE(v1->did_paint_);
   EXPECT_FALSE(v2->did_paint_);
@@ -794,14 +794,14 @@ TEST_F(ViewTest, PaintContainsChildrenInRTL) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
 
   gfx::Rect paint_area(25, 26);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   EXPECT_FALSE(v1->did_paint_);
   EXPECT_FALSE(v2->did_paint_);
@@ -826,14 +826,14 @@ TEST_F(ViewTest, PaintIntersectsChildren) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
 
   gfx::Rect paint_area(9, 10, 5, 6);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   EXPECT_FALSE(v1->did_paint_);
   EXPECT_FALSE(v2->did_paint_);
@@ -870,14 +870,14 @@ TEST_F(ViewTest, PaintIntersectsChildrenInRTL) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
 
   gfx::Rect paint_area(2, 10, 5, 6);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   EXPECT_FALSE(v1->did_paint_);
   EXPECT_FALSE(v2->did_paint_);
@@ -902,14 +902,14 @@ TEST_F(ViewTest, PaintIntersectsChildButNotGrandChild) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
 
   gfx::Rect paint_area(9, 10, 2, 3);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   EXPECT_FALSE(v1->did_paint_);
   EXPECT_FALSE(v2->did_paint_);
@@ -946,14 +946,14 @@ TEST_F(ViewTest, PaintIntersectsChildButNotGrandChildInRTL) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
 
   gfx::Rect paint_area(2, 10, 2, 3);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   EXPECT_FALSE(v1->did_paint_);
   EXPECT_FALSE(v2->did_paint_);
@@ -978,14 +978,14 @@ TEST_F(ViewTest, PaintIntersectsNoChildren) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
 
   gfx::Rect paint_area(9, 10, 2, 1);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   EXPECT_FALSE(v1->did_paint_);
   EXPECT_FALSE(v2->did_paint_);
@@ -1022,14 +1022,14 @@ TEST_F(ViewTest, PaintIntersectsNoChildrenInRTL) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
 
   gfx::Rect paint_area(2, 10, 2, 1);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   EXPECT_FALSE(v1->did_paint_);
   EXPECT_FALSE(v2->did_paint_);
@@ -1054,7 +1054,7 @@ TEST_F(ViewTest, PaintIntersectsOneChild) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
@@ -1062,7 +1062,7 @@ TEST_F(ViewTest, PaintIntersectsOneChild) {
   // Intersects with the second child only.
   gfx::Rect paint_area(3, 3, 1, 2);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   EXPECT_FALSE(v1->did_paint_);
   EXPECT_FALSE(v2->did_paint_);
@@ -1110,7 +1110,7 @@ TEST_F(ViewTest, PaintIntersectsOneChildInRTL) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   root_view->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
@@ -1118,7 +1118,7 @@ TEST_F(ViewTest, PaintIntersectsOneChildInRTL) {
   // Intersects with the first child only.
   gfx::Rect paint_area(3, 10, 1, 2);
   gfx::Rect root_area(root_view->size());
-  list = cc::DisplayItemList::Create(root_area, cc::DisplayItemListSettings());
+  list = cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
   EXPECT_FALSE(v1->did_paint_);
   EXPECT_FALSE(v2->did_paint_);
@@ -1155,7 +1155,7 @@ TEST_F(ViewTest, PaintInPromotedToLayer) {
   // invalidation.
   gfx::Rect first_paint(1, 1);
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(first_paint, cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   v1->Paint(ui::PaintContext(list.get(), 1.f, first_paint));
   v1->Reset();
   v2->Reset();
@@ -1164,7 +1164,7 @@ TEST_F(ViewTest, PaintInPromotedToLayer) {
     gfx::Rect paint_area(25, 26);
     gfx::Rect view_area(root_view->size());
     scoped_refptr<cc::DisplayItemList> list =
-        cc::DisplayItemList::Create(view_area, cc::DisplayItemListSettings());
+        cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
     // The promoted views are not painted as they are separate paint roots.
     root_view->Paint(ui::PaintContext(list.get(), 1.f, paint_area));
@@ -1176,7 +1176,7 @@ TEST_F(ViewTest, PaintInPromotedToLayer) {
     gfx::Rect paint_area(1, 1);
     gfx::Rect view_area(v1->size());
     scoped_refptr<cc::DisplayItemList> list =
-        cc::DisplayItemList::Create(view_area, cc::DisplayItemListSettings());
+        cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
     // The |v1| view is painted. If it used its offset incorrect, it would think
     // its at (10,11) instead of at (0,0) since it is the paint root.
@@ -1191,7 +1191,7 @@ TEST_F(ViewTest, PaintInPromotedToLayer) {
     gfx::Rect paint_area(3, 3, 1, 2);
     gfx::Rect view_area(v1->size());
     scoped_refptr<cc::DisplayItemList> list =
-        cc::DisplayItemList::Create(view_area, cc::DisplayItemListSettings());
+        cc::DisplayItemList::Create(cc::DisplayItemListSettings());
 
     // The |v2| view is painted also. If it used its offset incorrect, it would
     // think its at (13,15) instead of at (3,4) since |v1| is the paint root.
@@ -1238,7 +1238,7 @@ TEST_F(ViewTest, PaintLocalBounds) {
   EXPECT_EQ(gfx::Rect(0, 1000, 100, 100), v1->GetVisibleBounds());
 
   scoped_refptr<cc::DisplayItemList> list =
-      cc::DisplayItemList::Create(gfx::Rect(), cc::DisplayItemListSettings());
+      cc::DisplayItemList::Create(cc::DisplayItemListSettings());
   ui::PaintContext context(list.get(), 1.f, gfx::Rect());
 
   v1->Paint(context);
@@ -2029,21 +2029,21 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   //
 
   normal->SelectAll(false);
-  normal->ExecuteCommand(IDS_APP_CUT);
+  normal->ExecuteCommand(IDS_APP_CUT, 0);
   base::string16 result;
   clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   EXPECT_EQ(kNormalText, result);
   normal->SetText(kNormalText);  // Let's revert to the original content.
 
   read_only->SelectAll(false);
-  read_only->ExecuteCommand(IDS_APP_CUT);
+  read_only->ExecuteCommand(IDS_APP_CUT, 0);
   result.clear();
   clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   // Cut should have failed, so the clipboard content should not have changed.
   EXPECT_EQ(kNormalText, result);
 
   password->SelectAll(false);
-  password->ExecuteCommand(IDS_APP_CUT);
+  password->ExecuteCommand(IDS_APP_CUT, 0);
   result.clear();
   clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   // Cut should have failed, so the clipboard content should not have changed.
@@ -2055,19 +2055,19 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
 
   // Start with |read_only| to observe a change in clipboard text.
   read_only->SelectAll(false);
-  read_only->ExecuteCommand(IDS_APP_COPY);
+  read_only->ExecuteCommand(IDS_APP_COPY, 0);
   result.clear();
   clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   EXPECT_EQ(kReadOnlyText, result);
 
   normal->SelectAll(false);
-  normal->ExecuteCommand(IDS_APP_COPY);
+  normal->ExecuteCommand(IDS_APP_COPY, 0);
   result.clear();
   clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   EXPECT_EQ(kNormalText, result);
 
   password->SelectAll(false);
-  password->ExecuteCommand(IDS_APP_COPY);
+  password->ExecuteCommand(IDS_APP_COPY, 0);
   result.clear();
   clipboard->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &result);
   // Text cannot be copied from an obscured field; the clipboard won't change.
@@ -2079,18 +2079,18 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
 
   // Attempting to paste kNormalText in a read-only text-field should fail.
   read_only->SelectAll(false);
-  read_only->ExecuteCommand(IDS_APP_PASTE);
+  read_only->ExecuteCommand(IDS_APP_PASTE, 0);
   EXPECT_EQ(kReadOnlyText, read_only->text());
 
   password->SelectAll(false);
-  password->ExecuteCommand(IDS_APP_PASTE);
+  password->ExecuteCommand(IDS_APP_PASTE, 0);
   EXPECT_EQ(kNormalText, password->text());
 
   // Copy from |read_only| to observe a change in the normal textfield text.
   read_only->SelectAll(false);
-  read_only->ExecuteCommand(IDS_APP_COPY);
+  read_only->ExecuteCommand(IDS_APP_COPY, 0);
   normal->SelectAll(false);
-  normal->ExecuteCommand(IDS_APP_PASTE);
+  normal->ExecuteCommand(IDS_APP_PASTE, 0);
   EXPECT_EQ(kReadOnlyText, normal->text());
   widget->CloseNow();
 }
@@ -3426,9 +3426,9 @@ TEST_F(ViewTest, ReorderChildren) {
   child->AddChildView(foo2);
   View* foo3 = new View();
   child->AddChildView(foo3);
-  foo1->SetFocusable(true);
-  foo2->SetFocusable(true);
-  foo3->SetFocusable(true);
+  foo1->SetFocusBehavior(View::FocusBehavior::ALWAYS);
+  foo2->SetFocusBehavior(View::FocusBehavior::ALWAYS);
+  foo3->SetFocusBehavior(View::FocusBehavior::ALWAYS);
 
   ASSERT_EQ(0, child->GetIndexOf(foo1));
   ASSERT_EQ(1, child->GetIndexOf(foo2));
@@ -3573,10 +3573,11 @@ TEST_F(ViewTest, AdvanceFocusIfNecessaryForUnfocusableView) {
   widget.Init(params);
 
   View* view1 = new View();
-  view1->SetFocusable(true);
+  view1->SetFocusBehavior(View::FocusBehavior::ALWAYS);
+
   widget.GetRootView()->AddChildView(view1);
   View* view2 = new View();
-  view2->SetFocusable(true);
+  view2->SetFocusBehavior(View::FocusBehavior::ALWAYS);
   widget.GetRootView()->AddChildView(view2);
 
   FocusManager* focus_manager = widget.GetFocusManager();
@@ -3605,7 +3606,7 @@ TEST_F(ViewTest, AdvanceFocusIfNecessaryForUnfocusableView) {
 
   // Set the focused view as not focusable and check if the next view gets
   // focused.
-  view1->SetFocusable(false);
+  view1->SetFocusBehavior(View::FocusBehavior::NEVER);
   EXPECT_EQ(view2, focus_manager->GetFocusedView());
 }
 
@@ -4044,6 +4045,9 @@ class PaintTrackingView : public View {
 // Makes sure child views with layers aren't painted when paint starts at an
 // ancestor.
 TEST_F(ViewLayerTest, DontPaintChildrenWithLayers) {
+  // TODO(sad): DrawWaiterForTest does not work with mus. crbug.com/618136
+  if (IsMus())
+    return;
   PaintTrackingView* content_view = new PaintTrackingView;
   widget()->SetContentsView(content_view);
   content_view->SetPaintToLayer(true);
@@ -4363,17 +4367,19 @@ TEST_F(ViewLayerTest, SnapLayerToPixel) {
 TEST_F(ViewTest, FocusableAssertions) {
   // View subclasses may change insets based on whether they are focusable,
   // which effects the preferred size. To avoid preferred size changing around
-  // these Views need to key off the last value set to SetFocusable(), not
+  // these Views need to key off the last value set to SetFocusBehavior(), not
   // whether the View is focusable right now. For this reason it's important
-  // that focusable() return the last value passed to SetFocusable and not
-  // whether the View is focusable right now.
+  // that the return value of focus_behavior() depends on the last value passed
+  // to SetFocusBehavior and not whether the View is focusable right now.
   TestView view;
-  view.SetFocusable(true);
-  EXPECT_TRUE(view.focusable());
+  view.SetFocusBehavior(View::FocusBehavior::ALWAYS);
+  EXPECT_EQ(View::FocusBehavior::ALWAYS, view.focus_behavior());
   view.SetEnabled(false);
-  EXPECT_TRUE(view.focusable());
-  view.SetFocusable(false);
-  EXPECT_FALSE(view.focusable());
+  EXPECT_EQ(View::FocusBehavior::ALWAYS, view.focus_behavior());
+  view.SetFocusBehavior(View::FocusBehavior::NEVER);
+  EXPECT_EQ(View::FocusBehavior::NEVER, view.focus_behavior());
+  view.SetFocusBehavior(View::FocusBehavior::ACCESSIBLE_ONLY);
+  EXPECT_EQ(View::FocusBehavior::ACCESSIBLE_ONLY, view.focus_behavior());
 }
 
 // Verifies when a view is deleted it is removed from ViewStorage.

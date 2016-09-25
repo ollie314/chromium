@@ -34,7 +34,6 @@
 #include "platform/geometry/FloatPoint.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "wtf/MathExtras.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -89,7 +88,7 @@ FloatPoint ScrollAnimatorBase::currentPosition() const
 
 void ScrollAnimatorBase::notifyPositionChanged()
 {
-    m_scrollableArea->scrollPositionChanged(m_currentPos, UserScroll);
+    scrollPositionChanged(m_currentPos, UserScroll);
 }
 
 DEFINE_TRACE(ScrollAnimatorBase)

@@ -17,13 +17,11 @@
 
 namespace net {
 
-namespace {
+namespace test {
 
 using base::StringPiece;
 using std::string;
 using test::a2b_hex;
-
-const size_t kLiteralBound = 1024;
 
 // Hex representation of encoded length and Huffman string.
 const char kEncodedHuffmanFixture[] =
@@ -35,15 +33,33 @@ const char kEncodedHuffmanFixture[] =
 const char kDecodedHuffmanFixture[] =
     "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1";
 
+class HpackInputStreamPeer {
+ public:
+  explicit HpackInputStreamPeer(HpackInputStream* input_stream)
+      : input_stream_(input_stream) {}
+
+  void SetBitOffsetForTest(size_t bit_offset) {
+    input_stream_->bit_offset_ = bit_offset;
+  }
+
+  uint32_t ParsedBytesCurrent() { return input_stream_->parsed_bytes_current_; }
+
+ private:
+  HpackInputStream* input_stream_;
+};
+
 // Utility function to decode an assumed-valid uint32_t with an N-bit
 // prefix.
 uint32_t DecodeValidUint32(uint8_t N, StringPiece str) {
   EXPECT_GT(N, 0);
   EXPECT_LE(N, 8);
-  HpackInputStream input_stream(kLiteralBound, str);
-  input_stream.SetBitOffsetForTest(8 - N);
+  HpackInputStream input_stream(str);
+  HpackInputStreamPeer input_stream_peer(&input_stream);
+  input_stream_peer.SetBitOffsetForTest(8 - N);
   uint32_t I;
   EXPECT_TRUE(input_stream.DecodeNextUint32(&I));
+  EXPECT_EQ(str.size(), input_stream_peer.ParsedBytesCurrent());
+  EXPECT_FALSE(input_stream.NeedMoreData());
   return I;
 }
 
@@ -52,8 +68,9 @@ uint32_t DecodeValidUint32(uint8_t N, StringPiece str) {
 void ExpectDecodeUint32Invalid(uint8_t N, StringPiece str) {
   EXPECT_GT(N, 0);
   EXPECT_LE(N, 8);
-  HpackInputStream input_stream(kLiteralBound, str);
-  input_stream.SetBitOffsetForTest(8 - N);
+  HpackInputStream input_stream(str);
+  HpackInputStreamPeer input_stream_peer(&input_stream);
+  input_stream_peer.SetBitOffsetForTest(8 - N);
   uint32_t I;
   EXPECT_FALSE(input_stream.DecodeNextUint32(&I));
 }
@@ -477,68 +494,56 @@ TEST(HpackInputStreamTest, SevenByteIntegersOneToSevenBitPrefixes) {
 
 // Decoding a valid encoded string literal should work.
 TEST(HpackInputStreamTest, DecodeNextIdentityString) {
-  HpackInputStream input_stream(kLiteralBound, "\x0estring literal");
+  HpackInputStream input_stream("\x0estring literal");
+  HpackInputStreamPeer input_stream_peer(&input_stream);
 
   EXPECT_TRUE(input_stream.HasMoreData());
   StringPiece string_piece;
   EXPECT_TRUE(input_stream.DecodeNextIdentityString(&string_piece));
   EXPECT_EQ("string literal", string_piece);
   EXPECT_FALSE(input_stream.HasMoreData());
-}
-
-// Decoding an encoded string literal with size larger than
-// |max_string_literal_size_| should fail.
-TEST(HpackInputStreamTest, DecodeNextIdentityStringSizeLimit) {
-  HpackInputStream input_stream(13, "\x0estring literal");
-
-  EXPECT_TRUE(input_stream.HasMoreData());
-  StringPiece string_piece;
-  EXPECT_FALSE(input_stream.DecodeNextIdentityString(&string_piece));
+  EXPECT_EQ(string_piece.size() + 1, input_stream_peer.ParsedBytesCurrent());
+  EXPECT_FALSE(input_stream.NeedMoreData());
 }
 
 // Decoding an encoded string literal with size larger than the
 // remainder of the buffer should fail.
 TEST(HpackInputStreamTest, DecodeNextIdentityStringNotEnoughInput) {
   // Set the length to be one more than it should be.
-  HpackInputStream input_stream(kLiteralBound, "\x0fstring literal");
+  HpackInputStream input_stream("\x0fstring literal");
 
   EXPECT_TRUE(input_stream.HasMoreData());
   StringPiece string_piece;
   EXPECT_FALSE(input_stream.DecodeNextIdentityString(&string_piece));
+  EXPECT_TRUE(input_stream.NeedMoreData());
 }
 
 TEST(HpackInputStreamTest, DecodeNextHuffmanString) {
   string output, input(a2b_hex(kEncodedHuffmanFixture));
-  HpackInputStream input_stream(arraysize(kDecodedHuffmanFixture) - 1, input);
+  HpackInputStream input_stream(input);
+  HpackInputStreamPeer input_stream_peer(&input_stream);
 
   EXPECT_TRUE(input_stream.HasMoreData());
   EXPECT_TRUE(input_stream.DecodeNextHuffmanString(&output));
   EXPECT_EQ(kDecodedHuffmanFixture, output);
   EXPECT_FALSE(input_stream.HasMoreData());
-}
-
-TEST(HpackInputStreamTest, DecodeNextHuffmanStringSizeLimit) {
-  string output, input(a2b_hex(kEncodedHuffmanFixture));
-  // Max string literal is one byte shorter than the decoded fixture.
-  HpackInputStream input_stream(arraysize(kDecodedHuffmanFixture) - 2, input);
-
-  // Decoded string overflows the max string literal.
-  EXPECT_TRUE(input_stream.HasMoreData());
-  EXPECT_FALSE(input_stream.DecodeNextHuffmanString(&output));
+  EXPECT_FALSE(input_stream.NeedMoreData());
+  EXPECT_EQ(46u, input_stream_peer.ParsedBytesCurrent());
 }
 
 TEST(HpackInputStreamTest, DecodeNextHuffmanStringNotEnoughInput) {
   string output, input(a2b_hex(kEncodedHuffmanFixture));
   input[0]++;  // Input prefix is one byte larger than available input.
-  HpackInputStream input_stream(arraysize(kDecodedHuffmanFixture) - 1, input);
+  HpackInputStream input_stream(input);
 
   // Not enough buffer for declared encoded length.
   EXPECT_TRUE(input_stream.HasMoreData());
   EXPECT_FALSE(input_stream.DecodeNextHuffmanString(&output));
+  EXPECT_TRUE(input_stream.NeedMoreData());
 }
 
 TEST(HpackInputStreamTest, PeekBitsAndConsume) {
-  HpackInputStream input_stream(kLiteralBound, "\xad\xab\xad\xab\xad");
+  HpackInputStream input_stream("\xad\xab\xad\xab\xad");
 
   uint32_t bits = 0;
   size_t peeked_count = 0;
@@ -602,7 +607,7 @@ TEST(HpackInputStreamTest, PeekBitsAndConsume) {
 TEST(HpackInputStreamTest, InitializePeekBits) {
   {
     // Empty input, peeked_count == 0 and bits == 0.
-    HpackInputStream input_stream(kLiteralBound, "");
+    HpackInputStream input_stream("");
     auto peeked_count_and_bits = input_stream.InitializePeekBits();
     size_t peeked_count = peeked_count_and_bits.first;
     uint32_t bits = peeked_count_and_bits.second;
@@ -612,7 +617,7 @@ TEST(HpackInputStreamTest, InitializePeekBits) {
   {
     // One input byte, returns peeked_count == 8 and bits
     // has the input byte in its high order bits.
-    HpackInputStream input_stream(kLiteralBound, "\xfe");
+    HpackInputStream input_stream("\xfe");
     auto peeked_count_and_bits = input_stream.InitializePeekBits();
     size_t peeked_count = peeked_count_and_bits.first;
     uint32_t bits = peeked_count_and_bits.second;
@@ -624,7 +629,7 @@ TEST(HpackInputStreamTest, InitializePeekBits) {
   {
     // Two input bytes, returns peeked_count == 16 and bits
     // has the two input bytes in its high order bits.
-    HpackInputStream input_stream(kLiteralBound, "\xfe\xdc");
+    HpackInputStream input_stream("\xfe\xdc");
     auto peeked_count_and_bits = input_stream.InitializePeekBits();
     size_t peeked_count = peeked_count_and_bits.first;
     uint32_t bits = peeked_count_and_bits.second;
@@ -636,7 +641,7 @@ TEST(HpackInputStreamTest, InitializePeekBits) {
   {
     // Three input bytes, returns peeked_count == 24 and bits
     // has the three input bytes in its high order bits.
-    HpackInputStream input_stream(kLiteralBound, "\xab\xcd\xef");
+    HpackInputStream input_stream("\xab\xcd\xef");
     auto peeked_count_and_bits = input_stream.InitializePeekBits();
     size_t peeked_count = peeked_count_and_bits.first;
     uint32_t bits = peeked_count_and_bits.second;
@@ -648,7 +653,7 @@ TEST(HpackInputStreamTest, InitializePeekBits) {
   {
     // Four input bytes, returns peeked_count == 32 and bits
     // contains the four input bytes.
-    HpackInputStream input_stream(kLiteralBound, "\xfe\xed\xdc\xcb");
+    HpackInputStream input_stream("\xfe\xed\xdc\xcb");
     auto peeked_count_and_bits = input_stream.InitializePeekBits();
     size_t peeked_count = peeked_count_and_bits.first;
     uint32_t bits = peeked_count_and_bits.second;
@@ -660,7 +665,7 @@ TEST(HpackInputStreamTest, InitializePeekBits) {
   {
     // Five input bytes, returns peeked_count == 32 and bits
     // contains the first four input bytes.
-    HpackInputStream input_stream(kLiteralBound, "\xfe\xed\xdc\xcb\xba");
+    HpackInputStream input_stream("\xfe\xed\xdc\xcb\xba");
     auto peeked_count_and_bits = input_stream.InitializePeekBits();
     size_t peeked_count = peeked_count_and_bits.first;
     uint32_t bits = peeked_count_and_bits.second;
@@ -690,7 +695,7 @@ TEST(HpackInputStreamTest, InitializePeekBits) {
 }
 
 TEST(HpackInputStreamTest, ConsumeByteRemainder) {
-  HpackInputStream input_stream(kLiteralBound, "\xad\xab");
+  HpackInputStream input_stream("\xad\xab");
   // Does nothing.
   input_stream.ConsumeByteRemainder();
 
@@ -705,6 +710,75 @@ TEST(HpackInputStreamTest, ConsumeByteRemainder) {
   EXPECT_FALSE(input_stream.HasMoreData());
 }
 
-}  // namespace
+TEST(HpackInputStreamTest, IncompleteHeaderMatchPrefixAndConsume) {
+  HpackInputStream input_stream("");
+  HpackInputStreamPeer input_stream_peer(&input_stream);
+  EXPECT_FALSE(input_stream.MatchPrefixAndConsume(kIndexedOpcode));
+  EXPECT_EQ(0u, input_stream_peer.ParsedBytesCurrent());
+  EXPECT_TRUE(input_stream.NeedMoreData());
+}
+
+TEST(HpackInputStreamTest, IncompleteHeaderDecodeNextUint32) {
+  // First byte only
+  HpackInputStream input_stream1("\xff");
+  HpackInputStreamPeer input_stream1_peer(&input_stream1);
+  EXPECT_TRUE(input_stream1.MatchPrefixAndConsume(kIndexedOpcode));
+  uint32_t result;
+  EXPECT_FALSE(input_stream1.DecodeNextUint32(&result));
+  EXPECT_TRUE(input_stream1.NeedMoreData());
+  EXPECT_EQ(1u, input_stream1_peer.ParsedBytesCurrent());
+
+  // No last byte
+  HpackInputStream input_stream2("\xff\x80\x80\x80");
+  HpackInputStreamPeer input_stream2_peer(&input_stream2);
+  EXPECT_TRUE(input_stream2.MatchPrefixAndConsume(kIndexedOpcode));
+  EXPECT_FALSE(input_stream2.DecodeNextUint32(&result));
+  EXPECT_TRUE(input_stream2.NeedMoreData());
+  EXPECT_EQ(4u, input_stream2_peer.ParsedBytesCurrent());
+
+  // Error happens before finishing parsing.
+  HpackInputStream input_stream3("\xff\xff\xff\xff\xff\xff\xff");
+  HpackInputStreamPeer input_stream3_peer(&input_stream3);
+  EXPECT_TRUE(input_stream3.MatchPrefixAndConsume(kIndexedOpcode));
+  EXPECT_FALSE(input_stream3.DecodeNextUint32(&result));
+  EXPECT_FALSE(input_stream3.NeedMoreData());
+  EXPECT_EQ(6u, input_stream3_peer.ParsedBytesCurrent());
+}
+
+TEST(HpackInputStreamTest, IncompleteHeaderDecodeNextIdentityString) {
+  HpackInputStream input_stream1("\x0estring litera");
+  HpackInputStreamPeer input_stream1_peer(&input_stream1);
+  StringPiece string_piece;
+  EXPECT_FALSE(input_stream1.DecodeNextIdentityString(&string_piece));
+  // Only parsed first byte.
+  EXPECT_EQ(1u, input_stream1_peer.ParsedBytesCurrent());
+  EXPECT_TRUE(input_stream1.NeedMoreData());
+
+  HpackInputStream input_stream2("\x0e");
+  HpackInputStreamPeer input_stream2_peer(&input_stream2);
+  EXPECT_FALSE(input_stream2.DecodeNextIdentityString(&string_piece));
+  // Only parsed first byte.
+  EXPECT_EQ(1u, input_stream2_peer.ParsedBytesCurrent());
+  EXPECT_TRUE(input_stream2.NeedMoreData());
+}
+
+TEST(HpackInputStreamTest, IncompleteHeaderDecodeNextHuffmanString) {
+  string output, input(a2b_hex(kEncodedHuffmanFixture));
+  input.resize(input.size() - 1);  // Remove last byte.
+  HpackInputStream input_stream1(input);
+  HpackInputStreamPeer input_stream1_peer(&input_stream1);
+  EXPECT_FALSE(input_stream1.DecodeNextHuffmanString(&output));
+  EXPECT_EQ(1u, input_stream1_peer.ParsedBytesCurrent());
+  EXPECT_TRUE(input_stream1.NeedMoreData());
+
+  input.erase(1, input.size());  // Remove all bytes except the first one.
+  HpackInputStream input_stream2(input);
+  HpackInputStreamPeer input_stream2_peer(&input_stream2);
+  EXPECT_FALSE(input_stream2.DecodeNextHuffmanString(&output));
+  EXPECT_EQ(1u, input_stream2_peer.ParsedBytesCurrent());
+  EXPECT_TRUE(input_stream2.NeedMoreData());
+}
+
+}  // namespace test
 
 }  // namespace net

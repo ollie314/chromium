@@ -233,8 +233,12 @@ define([
       // 'invalid_request_flags', and 'invalid_response_flags' until additional
       // logic in *RequestValidator and *ResponseValidator is ported from
       // cpp to js.
+      // TODO(crbug/640298): Implement max recursion depth for JS.
+      // TODO(crbug/628104): Support struct map keys for JS.
       if (testFiles[i].indexOf("overflow") != -1 ||
           testFiles[i].indexOf("mthd11") != -1 ||
+          testFiles[i].indexOf("conformance_mthd19") != -1 ||
+          testFiles[i].indexOf("conformance_mthd20") != -1 ||
           testFiles[i].indexOf("enum") != -1 ||
           testFiles[i].indexOf("no_such_method") != -1 ||
           testFiles[i].indexOf("invalid_request_flags") != -1 ||
@@ -282,7 +286,7 @@ define([
     var testFiles = getMessageTestFiles(testFilesPattern);
     expect(testFiles.length).toBeGreaterThan(0);
 
-    var testMessagePipe = new core.createMessagePipe();
+    var testMessagePipe = core.createMessagePipe();
     expect(testMessagePipe.result).toBe(core.RESULT_OK);
     var testConnection = new connection.TestConnection(
         testMessagePipe.handle1, localFactory, remoteFactory);

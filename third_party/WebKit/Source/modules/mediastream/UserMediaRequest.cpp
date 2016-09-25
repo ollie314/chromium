@@ -38,6 +38,7 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/SpaceSplitString.h"
 #include "core/frame/Deprecation.h"
+#include "core/frame/HostsUsingFeatures.h"
 #include "modules/mediastream/MediaConstraintsImpl.h"
 #include "modules/mediastream/MediaStream.h"
 #include "modules/mediastream/MediaStreamConstraints.h"
@@ -131,7 +132,7 @@ bool UserMediaRequest::isSecureContextUse(String& errorMessage)
     if (document->isSecureContext(errorMessage)) {
         UseCounter::count(document->frame(), UseCounter::GetUserMediaSecureOrigin);
         UseCounter::countCrossOriginIframe(*document, UseCounter::GetUserMediaSecureOriginIframe);
-        OriginsUsingFeatures::countAnyWorld(*document, OriginsUsingFeatures::Feature::GetUserMediaSecureOrigin);
+        HostsUsingFeatures::countAnyWorld(*document, HostsUsingFeatures::Feature::GetUserMediaSecureHost);
         return true;
     }
 
@@ -139,7 +140,7 @@ bool UserMediaRequest::isSecureContextUse(String& errorMessage)
     // count attempts to use it.
     Deprecation::countDeprecation(document->frame(), UseCounter::GetUserMediaInsecureOrigin);
     Deprecation::countDeprecationCrossOriginIframe(*document, UseCounter::GetUserMediaInsecureOriginIframe);
-    OriginsUsingFeatures::countAnyWorld(*document, OriginsUsingFeatures::Feature::GetUserMediaInsecureOrigin);
+    HostsUsingFeatures::countAnyWorld(*document, HostsUsingFeatures::Feature::GetUserMediaInsecureHost);
     return false;
 }
 
@@ -168,11 +169,13 @@ void UserMediaRequest::succeed(MediaStreamDescriptor* streamDescriptor)
     MediaStreamTrackVector audioTracks = stream->getAudioTracks();
     for (MediaStreamTrackVector::iterator iter = audioTracks.begin(); iter != audioTracks.end(); ++iter) {
         (*iter)->component()->source()->setConstraints(m_audio);
+        (*iter)->setConstraints(m_audio);
     }
 
     MediaStreamTrackVector videoTracks = stream->getVideoTracks();
     for (MediaStreamTrackVector::iterator iter = videoTracks.begin(); iter != videoTracks.end(); ++iter) {
         (*iter)->component()->source()->setConstraints(m_video);
+        (*iter)->setConstraints(m_video);
     }
 
     m_successCallback->handleEvent(stream);

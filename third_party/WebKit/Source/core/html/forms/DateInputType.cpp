@@ -37,7 +37,6 @@
 #include "core/html/forms/DateTimeFieldsState.h"
 #include "platform/DateComponents.h"
 #include "platform/text/PlatformLocale.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -49,7 +48,7 @@ static const int dateDefaultStepBase = 0;
 static const int dateStepScaleFactor = 86400000;
 
 inline DateInputType::DateInputType(HTMLInputElement& element)
-    : BaseDateInputType(element)
+    : BaseTemporalInputType(element)
 {
 }
 
@@ -77,14 +76,14 @@ StepRange DateInputType::createStepRange(AnyStepHandling anyStepHandling) const
 
 bool DateInputType::parseToDateComponentsInternal(const String& string, DateComponents* out) const
 {
-    ASSERT(out);
+    DCHECK(out);
     unsigned end;
     return out->parseDate(string, 0, end) && end == string.length();
 }
 
 bool DateInputType::setMillisecondToDateComponents(double value, DateComponents* date) const
 {
-    ASSERT(date);
+    DCHECK(date);
     return date->setMillisecondsSinceEpochForDate(value);
 }
 
@@ -94,7 +93,6 @@ void DateInputType::warnIfValueIsInvalid(const String& value) const
         addWarningToConsole("The specified value %s does not conform to the required format, \"yyyy-MM-dd\".", value);
 }
 
-#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
 String DateInputType::formatDateTimeFieldsState(const DateTimeFieldsState& dateTimeFieldsState) const
 {
     if (!dateTimeFieldsState.hasDayOfMonth() || !dateTimeFieldsState.hasMonth() || !dateTimeFieldsState.hasYear())
@@ -120,6 +118,5 @@ bool DateInputType::isValidFormat(bool hasYear, bool hasMonth, bool hasWeek, boo
 {
     return hasYear && hasMonth && hasDay;
 }
-#endif
 
 } // namespace blink

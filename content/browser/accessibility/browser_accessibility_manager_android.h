@@ -77,8 +77,11 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
   bool ShouldExposePasswordText();
 
   // BrowserAccessibilityManager overrides.
-  void NotifyAccessibilityEvent(ui::AXEvent event_type,
-                                BrowserAccessibility* node) override;
+  BrowserAccessibility* GetFocus() override;
+  void NotifyAccessibilityEvent(
+      BrowserAccessibilityEvent::Source source,
+      ui::AXEvent event_type,
+      BrowserAccessibility* node) override;
   void SendLocationChangeEvents(
       const std::vector<AccessibilityHostMsg_LocationChangeParams>& params)
           override;

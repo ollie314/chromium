@@ -6,10 +6,9 @@
 
 #include <memory>
 
-#include "ash/shelf/shelf_model.h"
-#include "ash/shelf/shelf_util.h"
-#include "ash/shell.h"
-#include "ash/system/user/login_status.h"
+#include "ash/common/login_status.h"
+#include "ash/common/shelf/shelf_model.h"
+#include "ash/common/wm_shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/test_shelf_delegate.h"
 #include "ash/test/test_system_tray_delegate.h"
@@ -46,7 +45,7 @@ class UserMetricsRecorderTest : public test::AshTestBase {
   void TearDown() override;
 
   // Sets the user login status.
-  void SetLoginStatus(user::LoginStatus login_status);
+  void SetLoginStatus(LoginStatus login_status);
 
   // Sets the current user session to be active or inactive in a desktop
   // environment.
@@ -75,11 +74,9 @@ class UserMetricsRecorderTest : public test::AshTestBase {
   DISALLOW_COPY_AND_ASSIGN(UserMetricsRecorderTest);
 };
 
-UserMetricsRecorderTest::UserMetricsRecorderTest() {
-}
+UserMetricsRecorderTest::UserMetricsRecorderTest() {}
 
-UserMetricsRecorderTest::~UserMetricsRecorderTest() {
-}
+UserMetricsRecorderTest::~UserMetricsRecorderTest() {}
 
 void UserMetricsRecorderTest::SetUp() {
   test::AshTestBase::SetUp();
@@ -92,18 +89,18 @@ void UserMetricsRecorderTest::TearDown() {
   test::AshTestBase::TearDown();
 }
 
-void UserMetricsRecorderTest::SetLoginStatus(user::LoginStatus login_status) {
+void UserMetricsRecorderTest::SetLoginStatus(LoginStatus login_status) {
   test_system_tray_delegate_->SetLoginStatus(login_status);
 }
 
 void UserMetricsRecorderTest::SetUserInActiveDesktopEnvironment(
     bool is_active) {
   if (is_active) {
-    SetLoginStatus(user::LOGGED_IN_USER);
+    SetLoginStatus(LoginStatus::USER);
     ASSERT_TRUE(
         user_metrics_recorder_test_api()->IsUserInActiveDesktopEnvironment());
   } else {
-    SetLoginStatus(user::LOGGED_IN_LOCKED);
+    SetLoginStatus(LoginStatus::LOCKED);
     ASSERT_FALSE(
         user_metrics_recorder_test_api()->IsUserInActiveDesktopEnvironment());
   }
@@ -118,35 +115,35 @@ aura::Window* UserMetricsRecorderTest::CreateTestWindow() {
 // Verifies the return value of IsUserInActiveDesktopEnvironment() for the
 // different login status values.
 TEST_F(UserMetricsRecorderTest, VerifyIsUserInActiveDesktopEnvironmentValues) {
-  SetLoginStatus(user::LOGGED_IN_NONE);
+  SetLoginStatus(LoginStatus::NOT_LOGGED_IN);
   EXPECT_FALSE(
       user_metrics_recorder_test_api()->IsUserInActiveDesktopEnvironment());
 
-  SetLoginStatus(user::LOGGED_IN_LOCKED);
+  SetLoginStatus(LoginStatus::LOCKED);
   EXPECT_FALSE(
       user_metrics_recorder_test_api()->IsUserInActiveDesktopEnvironment());
 
-  SetLoginStatus(user::LOGGED_IN_USER);
+  SetLoginStatus(LoginStatus::USER);
   EXPECT_TRUE(
       user_metrics_recorder_test_api()->IsUserInActiveDesktopEnvironment());
 
-  SetLoginStatus(user::LOGGED_IN_OWNER);
+  SetLoginStatus(LoginStatus::OWNER);
   EXPECT_TRUE(
       user_metrics_recorder_test_api()->IsUserInActiveDesktopEnvironment());
 
-  SetLoginStatus(user::LOGGED_IN_GUEST);
+  SetLoginStatus(LoginStatus::GUEST);
   EXPECT_TRUE(
       user_metrics_recorder_test_api()->IsUserInActiveDesktopEnvironment());
 
-  SetLoginStatus(user::LOGGED_IN_PUBLIC);
+  SetLoginStatus(LoginStatus::PUBLIC);
   EXPECT_TRUE(
       user_metrics_recorder_test_api()->IsUserInActiveDesktopEnvironment());
 
-  SetLoginStatus(user::LOGGED_IN_SUPERVISED);
+  SetLoginStatus(LoginStatus::SUPERVISED);
   EXPECT_TRUE(
       user_metrics_recorder_test_api()->IsUserInActiveDesktopEnvironment());
 
-  SetLoginStatus(user::LOGGED_IN_KIOSK_APP);
+  SetLoginStatus(LoginStatus::KIOSK_APP);
   EXPECT_FALSE(
       user_metrics_recorder_test_api()->IsUserInActiveDesktopEnvironment());
 }
@@ -194,7 +191,7 @@ TEST_F(UserMetricsRecorderTest, ValuesRecordedByRecordShelfItemCounts) {
   SetUserInActiveDesktopEnvironment(true);
 
   // Make sure the shelf contains the app list launcher button.
-  const ShelfItems& shelf_items = Shell::GetInstance()->shelf_model()->items();
+  const ShelfItems& shelf_items = WmShell::Get()->shelf_model()->items();
   ASSERT_EQ(1u, shelf_items.size());
   ASSERT_EQ(TYPE_APP_LIST, shelf_items[0].type);
 

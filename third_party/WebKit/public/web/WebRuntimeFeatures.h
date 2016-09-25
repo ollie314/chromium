@@ -51,7 +51,7 @@ public:
     BLINK_EXPORT static void enableTestOnlyFeatures(bool);
 
     // Enables a feature by its string identifier from
-    // RuntimeEnabledFeatures.in.
+    // Source/platform/RuntimeEnabledFeatures.in.
     // Note: We use std::string instead of WebString because this API can
     // be called before blink::initalize(). We can't create WebString objects
     // before blink::initialize().
@@ -64,23 +64,26 @@ public:
     BLINK_EXPORT static void forceDisplayList2dCanvas(bool);
     BLINK_EXPORT static void forceDisable2dCanvasCopyOnWrite(bool);
 
-    BLINK_EXPORT static void enableExperimentalFramework(bool);
-    BLINK_EXPORT static bool isExperimentalFrameworkEnabled();
+    BLINK_EXPORT static void enableOriginTrials(bool);
+    BLINK_EXPORT static bool isOriginTrialsEnabled();
 
-    BLINK_EXPORT static void enableApplicationCache(bool);
+    BLINK_EXPORT static void enableAccelerated2dCanvas(bool);
     BLINK_EXPORT static void enableAudioOutputDevices(bool);
     BLINK_EXPORT static void enableCanvas2dImageChromium(bool);
+    BLINK_EXPORT static void enableColorCorrectRendering(bool);
     BLINK_EXPORT static void enableCredentialManagerAPI(bool);
     BLINK_EXPORT static void enableDatabase(bool);
     BLINK_EXPORT static void enableDecodeToYUV(bool);
     BLINK_EXPORT static void enableDocumentWriteEvaluator(bool);
     BLINK_EXPORT static void enableExperimentalCanvasFeatures(bool);
     BLINK_EXPORT static void enableFastMobileScrolling(bool);
+    BLINK_EXPORT static void enableFeaturePolicy(bool);
     BLINK_EXPORT static void enableFileSystem(bool);
-    BLINK_EXPORT static void enableImageColorProfiles(bool);
+    BLINK_EXPORT static void enableGamepadExtensions(bool);
     BLINK_EXPORT static void enableInputMultipleFieldsUI(bool);
     BLINK_EXPORT static void enableMediaCapture(bool);
     BLINK_EXPORT static void enableMediaDocumentDownloadButton(bool);
+    BLINK_EXPORT static void enableMiddleClickAutoscroll(bool);
     BLINK_EXPORT static void enableNavigatorContentUtils(bool);
     BLINK_EXPORT static void enableNetworkInformation(bool);
     BLINK_EXPORT static void enableNewMediaPlaybackUi(bool);
@@ -89,22 +92,33 @@ public:
     BLINK_EXPORT static void enableOrientationEvent(bool);
     BLINK_EXPORT static void enableOverlayScrollbars(bool);
     BLINK_EXPORT static void enablePagePopup(bool);
+    BLINK_EXPORT static void enableParseHTMLOnMainThread(bool);
+    BLINK_EXPORT static void enablePassiveDocumentEventListeners(bool);
+    BLINK_EXPORT static void enablePassiveEventListenersDueToFling(bool);
+    BLINK_EXPORT static void enablePaymentRequest(bool);
     BLINK_EXPORT static void enablePermissionsAPI(bool);
+    BLINK_EXPORT static void enablePointerEvent(bool);
+    BLINK_EXPORT static void enablePointerEventV1SpecCapturing(bool);
     BLINK_EXPORT static void enablePreciseMemoryInfo(bool);
     BLINK_EXPORT static void enablePresentationAPI(bool);
     BLINK_EXPORT static void enablePushMessaging(bool);
     BLINK_EXPORT static void enableReducedReferrerGranularity(bool);
+    BLINK_EXPORT static void enableReloadwithoutSubResourceCacheRevalidation(bool);
     BLINK_EXPORT static void enableRenderingPipelineThrottling(bool);
-    BLINK_EXPORT static void enableRequestAutocomplete(bool);
+    BLINK_EXPORT static void enableRootLayerScrolling(bool);
     BLINK_EXPORT static void enableScriptedSpeech(bool);
     BLINK_EXPORT static void enableScrollAnchoring(bool);
     BLINK_EXPORT static void enableSharedWorker(bool);
     BLINK_EXPORT static void enableSlimmingPaintV2(bool);
+    BLINK_EXPORT static void enableSpeculativeLaunchServiceWorker(bool);
     BLINK_EXPORT static void enableTouch(bool);
     BLINK_EXPORT static void enableUnsafeES3APIs(bool);
     BLINK_EXPORT static void enableV8IdleTasks(bool);
+    BLINK_EXPORT static void enableWebAssemblySerialization(bool);
     BLINK_EXPORT static void enableWebBluetooth(bool);
-    BLINK_EXPORT static void enableWebFontsIntervention(bool);
+    BLINK_EXPORT static void enableWebFontsInterventionV2With2G(bool);
+    BLINK_EXPORT static void enableWebFontsInterventionV2With3G(bool);
+    BLINK_EXPORT static void enableWebFontsInterventionV2WithSlow2G(bool);
     BLINK_EXPORT static void enableWebFontsInterventionTrigger(bool);
     BLINK_EXPORT static void enableWebGLDraftExtensions(bool);
     BLINK_EXPORT static void enableWebGLImageChromium(bool);
@@ -112,7 +126,11 @@ public:
     BLINK_EXPORT static void enableWebVR(bool);
     BLINK_EXPORT static void enableXSLT(bool);
     BLINK_EXPORT static void forceOverlayFullscreenVideo(bool);
-
+    BLINK_EXPORT static void enableAutoplayMutedVideos(bool);
+    BLINK_EXPORT static void enableTimerThrottlingForBackgroundTabs(bool);
+    BLINK_EXPORT static void enableTimerThrottlingForHiddenFrames(bool);
+    BLINK_EXPORT static void enableCanvas2dDynamicRenderingModeSwitching(bool);
+    BLINK_EXPORT static void enableSendBeaconThrowForBlobWithNonSimpleType(bool);
 private:
     WebRuntimeFeatures();
 };

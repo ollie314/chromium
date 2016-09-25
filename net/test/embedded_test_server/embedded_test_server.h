@@ -63,7 +63,7 @@ struct HttpRequest;
 //     return std::unique_ptr<HttpResponse>();
 //
 //   std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse());
-//   http_response->set_code(test_server::SUCCESS);
+//   http_response->set_code(net::HTTP_OK);
 //   http_response->set_content("hello");
 //   http_response->set_content_type("text/plain");
 //   return http_response;
@@ -117,6 +117,8 @@ class EmbeddedTestServer {
   typedef base::Callback<std::unique_ptr<HttpResponse>(
       const HttpRequest& request)>
       HandleRequestCallback;
+  typedef base::Callback<void(const HttpRequest& request)>
+      MonitorRequestCallback;
 
   // Creates a http test server. Start() must be called to start the server.
   // |type| indicates the protocol type of the server (HTTP/HTTPS).
@@ -133,7 +135,7 @@ class EmbeddedTestServer {
   // This is the equivalent of calling InitializeAndListen() followed by
   // StartAcceptingConnections().
   // Returns whether a listening socket has been successfully created.
-  bool Start();
+  bool Start() WARN_UNUSED_RESULT;
 
   // Starts listening for incoming connections but will not yet accept them.
   // Returns whether a listening socket has been succesfully created.
@@ -207,9 +209,17 @@ class EmbeddedTestServer {
   // on UI thread.
   void RegisterRequestHandler(const HandleRequestCallback& callback);
 
+  // Adds request monitors. The |callback| is called before any handlers are
+  // called, but can not respond it. This is useful to monitor requests that
+  // will be handled by other request handlers.
+  void RegisterRequestMonitor(const MonitorRequestCallback& callback);
+
   // Adds default handlers, including those added by AddDefaultHandlers, to be
   // tried after all other user-specified handlers have been tried.
   void RegisterDefaultHandler(const HandleRequestCallback& callback);
+
+  bool FlushAllSocketsAndConnectionsOnUIThread();
+  void FlushAllSocketsAndConnections();
 
  private:
   // Shuts down the server.
@@ -268,11 +278,11 @@ class EmbeddedTestServer {
   GURL base_url_;
   IPEndPoint local_endpoint_;
 
-  // Owns the HttpConnection objects.
-  std::map<StreamSocket*, HttpConnection*> connections_;
+  std::map<StreamSocket*, std::unique_ptr<HttpConnection>> connections_;
 
-  // Vector of registered and default request handlers.
+  // Vector of registered and default request handlers and monitors.
   std::vector<HandleRequestCallback> request_handlers_;
+  std::vector<MonitorRequestCallback> request_monitors_;
   std::vector<HandleRequestCallback> default_request_handlers_;
 
   base::ThreadChecker thread_checker_;

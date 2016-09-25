@@ -3,9 +3,12 @@
 // Bluetooth UUID constants:
 // Services:
 var blacklist_test_service_uuid = "611c954a-263b-4f4a-aab6-01ddb953f985";
+var request_disconnection_service_uuid = "01d7d889-7451-419f-aeb8-d65e7b9277af";
 // Characteristics:
 var blacklist_exclude_reads_characteristic_uuid =
   "bad1c9a2-9a5b-4015-8b60-1579bbbf2135";
+var request_disconnection_characteristic_uuid =
+  "01d7d88a-7451-419f-aeb8-d65e7b9277af";
 
 // Sometimes we need to test that using either the name, alias, or UUID
 // produces the same result. The following objects help us do that.
@@ -195,7 +198,7 @@ class AddDeviceEventSet {
   }
   assert_add_device_event(event, description) {
     let match = this._addDeviceRegex.exec(event);
-    assert_true(!!match, event + "isn't an add-device event: " + description);
+    assert_true(!!match, event + " isn't an add-device event: " + description);
     this._idsByName.set(match[1], match[2]);
   }
   has(name) {
@@ -214,6 +217,16 @@ function runGarbageCollection()
         GCController.collect();
         setTimeout(resolve, 0);
       });
+}
+
+function eventPromise(target, type, options) {
+  return new Promise(resolve => {
+    let wrapper = function(event) {
+      target.removeEventListener(type, wrapper);
+      resolve(event);
+    };
+    target.addEventListener(type, wrapper, options);
+  });
 }
 
 // Creates |num_listeners| promises. Each adds an event listener
@@ -305,23 +318,26 @@ class EventCatcher {
   }
 }
 
-// Bluetooth tests sometimes have left-over state that could leak into the
-// next test. add_result_callback which is exposed by testharness.js allows us
-// to clean up this state after each test. In the future we will split tests
-// into separate files so that we don't have to add this callback ourselves.
-// TODO(ortuno): Split tests into separate files.
-// https://crbug.com/554240
-add_result_callback(() => {
-  // At the end of each test we clean up all the leftover data in the browser,
-  // including revoking permissions. This happens before the test document is
-  // detached. Once the document is detached any device that connected tries
-  // to disconnect but by then the document no longer has permission to
-  // interact with the device. So before we clean up the browser data
-  // we change the visibility which results in all devices disconnecing.
-  // TODO(ortuno): Remove setPageVisibility hack. In the future, the browser
-  // will notify the renderer that the device disconnected so we won't need
-  // this hack.
-  // https://crbug.com/581855
-  testRunner.setBluetoothManualChooser(false);
-  setBluetoothFakeAdapter('');
-});
+function generateRequestDeviceArgsWithServices(services = ['heart_rate']) {
+  return [{
+    filters: [{ services: services }]
+  }, {
+    filters: [{ services: services, name: 'Name' }]
+  }, {
+    filters: [{ services: services, namePrefix: 'Pre' }]
+  }, {
+    filters: [{ services: services, name: 'Name', namePrefix: 'Pre' }]
+  }, {
+    filters: [{ services: services }],
+    optionalServices: ['heart_rate']
+  }, {
+    filters: [{ services: services, name: 'Name' }],
+    optionalServices: ['heart_rate']
+  }, {
+    filters: [{ services: services, namePrefix: 'Pre' }],
+    optionalServices: ['heart_rate']
+  }, {
+    filters: [{ services: services, name: 'Name', namePrefix: 'Pre' }],
+    optionalServices: ['heart_rate']
+  }];
+}

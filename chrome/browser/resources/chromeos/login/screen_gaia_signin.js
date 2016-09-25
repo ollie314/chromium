@@ -27,6 +27,11 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
   // online.
   /** @const */ var IDLE_TIME_CHECK_FREQUENCY = 5 * 1000;
 
+  // Amount of time allowed for video based SAML logins, to prevent a site
+  // from keeping the camera on indefinitely.  This is a hard deadline and
+  // it will not be extended by user activity.
+  /** @const */ var VIDEO_LOGIN_TIMEOUT = 90 * 1000;
+
   /**
    * The modes this screen can be in.
    * @enum {integer}
@@ -80,6 +85,13 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      * @private
      */
     loadAnimationGuardTimer_: undefined,
+
+    /**
+     * Timer id of the video login timer.
+     * @type {number}
+     * @private
+     */
+    videoTimer_: undefined,
 
     /**
      * Whether we've processed 'showView' message - either from GAIA or from
@@ -215,6 +227,8 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
           this.onAuthDomainChange_.bind(this));
       this.gaiaAuthHost_.addEventListener('authFlowChange',
           this.onAuthFlowChange_.bind(this));
+      this.gaiaAuthHost_.addEventListener('videoEnabledChange',
+          this.onVideoEnabledChange_.bind(this));
 
       this.gaiaAuthHost_.addEventListener('loadAbort',
         this.onLoadAbortMessage_.bind(this));
@@ -543,6 +557,13 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      * @private
      */
     loadAuthExtension: function(data) {
+      // Redirect the webview to the blank page in order to stop the SAML IdP
+      // page from working in a background (see crbug.com/613245).
+      if (this.screenMode_ == ScreenMode.DEFAULT &&
+          data.screenMode != ScreenMode.DEFAULT) {
+        this.gaiaAuthHost_.resetWebview();
+      }
+
       this.screenMode = data.screenMode;
       this.email = '';
       this.authCompleted_ = false;
@@ -603,12 +624,52 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     },
 
     /**
+     * Helper function to update the title bar.
+     */
+    updateSamlNotice_: function() {
+      if (this.gaiaAuthHost_.videoEnabled) {
+        $('saml-notice-message').textContent = loadTimeData.getStringF(
+            'samlNoticeWithVideo',
+            this.gaiaAuthHost_.authDomain);
+        $('saml-notice-recording-indicator').hidden = false;
+        $('saml-notice-container').style.justifyContent = 'flex-start';
+      } else {
+        $('saml-notice-message').textContent = loadTimeData.getStringF(
+            'samlNotice',
+            this.gaiaAuthHost_.authDomain);
+        $('saml-notice-recording-indicator').hidden = true;
+        $('saml-notice-container').style.justifyContent = 'center';
+      }
+    },
+
+    /**
+     * Clean up from a video-enabled SAML flow.
+     */
+    clearVideoTimer_: function() {
+      if (this.videoTimer_ !== undefined) {
+        clearTimeout(this.videoTimer_);
+        this.videoTimer_ = undefined;
+      }
+    },
+
+    /**
      * Invoked when the authDomain property is changed on the GAIA host.
      */
     onAuthDomainChange_: function() {
-      $('saml-notice-message').textContent = loadTimeData.getStringF(
-          'samlNotice',
-          this.gaiaAuthHost_.authDomain);
+      this.updateSamlNotice_();
+    },
+
+    /**
+     * Invoked when the videoEnabled property is changed on the GAIA host.
+     */
+    onVideoEnabledChange_: function() {
+      this.updateSamlNotice_();
+      if (this.gaiaAuthHost_.videoEnabled && this.videoTimer_ === undefined) {
+        this.videoTimer_ = setTimeout(this.cancel.bind(this),
+            VIDEO_LOGIN_TIMEOUT);
+      } else {
+        this.clearVideoTimer_();
+      }
     },
 
     /**
@@ -798,7 +859,8 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
         this.email = credentials.email;
         chrome.send('authenticateUser',
                     [credentials.email,
-                     credentials.password]);
+                     credentials.password,
+                     false]);
       } else if (credentials.authCode) {
         if (credentials.hasOwnProperty('authCodeOnly') &&
             credentials.authCodeOnly) {
@@ -829,6 +891,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       // Clear any error messages that were shown before login.
       Oobe.clearErrors();
 
+      this.clearVideoTimer_();
       this.authCompleted_ = true;
       this.updateControlsState();
     },
@@ -868,6 +931,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      */
     reset: function(takeFocus, forceOnline) {
       // Reload and show the sign-in UI if needed.
+      this.gaiaAuthHost_.resetStates();
       if (takeFocus) {
         if (!forceOnline && this.isOffline()) {
           // Show 'Cancel' button to allow user to return to the main screen
@@ -921,6 +985,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      * Called when user canceled signin.
      */
     cancel: function() {
+      this.clearVideoTimer_();
       if (!this.navigation_.refreshVisible && !this.navigation_.closeVisible)
         return;
 
@@ -983,7 +1048,9 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       this.classList.toggle('whitelist-error', show);
       this.loading = !show;
 
-      if (!show)
+      if (show)
+        $('gaia-whitelist-error').submitButton.focus();
+      else
         Oobe.showSigninUI();
 
       this.updateControlsState();

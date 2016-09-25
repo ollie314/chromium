@@ -11,10 +11,8 @@
 #include "gpu/gpu_export.h"
 #include "gpu/ipc/common/gpu_stream_constants.h"
 #include "ipc/ipc_message_macros.h"
-#include "ui/gfx/gpu_memory_buffer.h"
+#include "ui/gfx/ipc/geometry/gfx_param_traits.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
-#include "ui/gfx/swap_result.h"
-#include "ui/gl/gpu_preference.h"
 #include "url/ipc/url_param_traits.h"
 
 #undef IPC_MESSAGE_EXPORT
@@ -39,29 +37,7 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::VideoEncodeAcceleratorSupportedProfile)
   IPC_STRUCT_TRAITS_MEMBER(max_framerate_denominator)
 IPC_STRUCT_TRAITS_END()
 
-IPC_ENUM_TRAITS_MAX_VALUE(gfx::GpuMemoryBufferType,
-                          gfx::GPU_MEMORY_BUFFER_TYPE_LAST)
-
-IPC_STRUCT_TRAITS_BEGIN(gfx::GpuMemoryBufferHandle)
-  IPC_STRUCT_TRAITS_MEMBER(id)
-  IPC_STRUCT_TRAITS_MEMBER(type)
-  IPC_STRUCT_TRAITS_MEMBER(handle)
-  IPC_STRUCT_TRAITS_MEMBER(offset)
-  IPC_STRUCT_TRAITS_MEMBER(stride)
-#if defined(USE_OZONE)
-  IPC_STRUCT_TRAITS_MEMBER(native_pixmap_handle)
-#elif defined(OS_MACOSX)
-  IPC_STRUCT_TRAITS_MEMBER(mach_port)
-#endif
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(gfx::GpuMemoryBufferId)
-  IPC_STRUCT_TRAITS_MEMBER(id)
-IPC_STRUCT_TRAITS_END()
-
-IPC_ENUM_TRAITS_MAX_VALUE(gfx::GpuPreference, gfx::GpuPreferenceLast)
 IPC_ENUM_TRAITS_MAX_VALUE(gpu::GpuStreamPriority, gpu::GpuStreamPriority::LAST)
-IPC_ENUM_TRAITS_MAX_VALUE(gfx::SwapResult, gfx::SwapResult::SWAP_RESULT_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(gpu::MemoryAllocation::PriorityCutoff,
                           gpu::MemoryAllocation::CUTOFF_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(gpu::error::ContextLostReason,
@@ -110,7 +86,6 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GPUInfo)
   IPC_STRUCT_TRAITS_MEMBER(gl_ws_version)
   IPC_STRUCT_TRAITS_MEMBER(gl_ws_extensions)
   IPC_STRUCT_TRAITS_MEMBER(gl_reset_notification_strategy)
-  IPC_STRUCT_TRAITS_MEMBER(can_lose_context)
   IPC_STRUCT_TRAITS_MEMBER(software_rendering)
   IPC_STRUCT_TRAITS_MEMBER(direct_rendering)
   IPC_STRUCT_TRAITS_MEMBER(sandboxed)

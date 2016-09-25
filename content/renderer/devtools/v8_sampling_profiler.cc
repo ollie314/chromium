@@ -12,7 +12,6 @@
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/cancellation_flag.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
@@ -304,8 +303,7 @@ void Sampler::InjectPendingEvents() {
     TRACE_EVENT_SAMPLE_WITH_TID_AND_TIMESTAMP1(
         TRACE_DISABLED_BY_DEFAULT("v8.cpu_profile"), "V8Sample",
         platform_data_.thread_id(),
-        (record->timestamp() - base::TimeTicks()).InMicroseconds(), "data",
-        record->ToTraceFormat());
+        record->timestamp(), "data", record->ToTraceFormat());
     samples_data_->Remove();
     record = samples_data_->Peek();
     base::subtle::NoBarrier_AtomicIncrement(&samples_count_, 1);
@@ -580,29 +578,34 @@ void V8SamplingThread::Stop() {
 V8SamplingProfiler::V8SamplingProfiler(bool underTest)
     : sampling_thread_(nullptr),
       render_thread_sampler_(Sampler::CreateForCurrentThread()),
-      task_runner_(base::ThreadTaskRunnerHandle::Get()) {
+      weak_factory_(this) {
   DCHECK(underTest || RenderThreadImpl::current());
+  DCHECK(thread_checker_.CalledOnValidThread());
   // Force the "v8.cpu_profile*" categories to show up in the trace viewer.
   TraceLog::GetCategoryGroupEnabled(
       TRACE_DISABLED_BY_DEFAULT("v8.cpu_profile"));
   TraceLog::GetCategoryGroupEnabled(
       TRACE_DISABLED_BY_DEFAULT("v8.cpu_profile.hires"));
-  TraceLog::GetInstance()->AddEnabledStateObserver(this);
+  TraceLog::GetInstance()->AddAsyncEnabledStateObserver(
+      weak_factory_.GetWeakPtr());
 }
 
 V8SamplingProfiler::~V8SamplingProfiler() {
-  TraceLog::GetInstance()->RemoveEnabledStateObserver(this);
+  DCHECK(thread_checker_.CalledOnValidThread());
+  TraceLog::GetInstance()->RemoveAsyncEnabledStateObserver(this);
   DCHECK(!sampling_thread_.get());
 }
 
 void V8SamplingProfiler::StartSamplingThread() {
   DCHECK(!sampling_thread_.get());
+  DCHECK(thread_checker_.CalledOnValidThread());
   sampling_thread_.reset(new V8SamplingThread(
       render_thread_sampler_.get(), waitable_event_for_testing_.get()));
   sampling_thread_->Start();
 }
 
 void V8SamplingProfiler::StopSamplingThread() {
+  DCHECK(thread_checker_.CalledOnValidThread());
   if (!sampling_thread_.get())
     return;
   sampling_thread_->Stop();
@@ -624,22 +627,20 @@ void V8SamplingProfiler::OnTraceLogEnabled() {
   if (record_mode == base::trace_event::TraceRecordMode::RECORD_CONTINUOUSLY)
     return;
 
-  task_runner_->PostTask(FROM_HERE,
-                         base::Bind(&V8SamplingProfiler::StartSamplingThread,
-                                    base::Unretained(this)));
+  StartSamplingThread();
 }
 
 void V8SamplingProfiler::OnTraceLogDisabled() {
-  task_runner_->PostTask(FROM_HERE,
-                         base::Bind(&V8SamplingProfiler::StopSamplingThread,
-                                    base::Unretained(this)));
+  StopSamplingThread();
 }
 
 void V8SamplingProfiler::EnableSamplingEventForTesting(int code_added_events,
                                                        int sample_events) {
   render_thread_sampler_->SetEventsToCollectForTest(code_added_events,
                                                     sample_events);
-  waitable_event_for_testing_.reset(new base::WaitableEvent(false, false));
+  waitable_event_for_testing_.reset(
+      new base::WaitableEvent(base::WaitableEvent::ResetPolicy::AUTOMATIC,
+                              base::WaitableEvent::InitialState::NOT_SIGNALED));
 }
 
 void V8SamplingProfiler::WaitSamplingEventForTesting() {

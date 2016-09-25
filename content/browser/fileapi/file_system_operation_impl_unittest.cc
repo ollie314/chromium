@@ -18,7 +18,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/fileapi/mock_file_change_observer.h"
 #include "content/browser/fileapi/mock_file_update_observer.h"
 #include "content/browser/quota/mock_quota_manager.h"
@@ -62,7 +62,7 @@ class FileSystemOperationImplTest
     update_observers_ =
         storage::MockFileUpdateObserver::CreateList(&update_observer_);
 
-    base::FilePath base_dir = base_.path().AppendASCII("filesystem");
+    base::FilePath base_dir = base_.GetPath().AppendASCII("filesystem");
     quota_manager_ =
         new MockQuotaManager(false /* is_incognito */, base_dir,
                              base::ThreadTaskRunnerHandle::Get().get(),

@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "components/webcrypto/algorithm_implementation.h"
 #include "components/webcrypto/algorithms/ec.h"
 #include "components/webcrypto/algorithms/util.h"
@@ -45,11 +46,11 @@ Status GetPKeyAndDigest(const blink::WebCryptoAlgorithm& algorithm,
 Status GetEcGroupOrderSize(EVP_PKEY* pkey, size_t* order_size_bytes) {
   crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
 
-  crypto::ScopedEC_KEY ec(EVP_PKEY_get1_EC_KEY(pkey));
-  if (!ec.get())
+  EC_KEY* ec = EVP_PKEY_get0_EC_KEY(pkey);
+  if (!ec)
     return Status::ErrorUnexpected();
 
-  const EC_GROUP* group = EC_KEY_get0_group(ec.get());
+  const EC_GROUP* group = EC_KEY_get0_group(ec);
 
   crypto::ScopedBIGNUM order(BN_new());
   if (!EC_GROUP_get_order(group, order.get(), NULL))
@@ -252,8 +253,8 @@ class EcdsaImplementation : public EcAlgorithm {
 
 }  // namespace
 
-scoped_ptr<AlgorithmImplementation> CreateEcdsaImplementation() {
-  return make_scoped_ptr(new EcdsaImplementation);
+std::unique_ptr<AlgorithmImplementation> CreateEcdsaImplementation() {
+  return base::WrapUnique(new EcdsaImplementation);
 }
 
 }  // namespace webcrypto

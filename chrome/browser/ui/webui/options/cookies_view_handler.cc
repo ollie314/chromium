@@ -156,7 +156,7 @@ void CookiesViewHandler::TreeNodesAdded(ui::TreeModel* model,
     args.AppendString(model_util_->GetTreeNodeId(parent_node));
   args.AppendInteger(start);
   args.Append(std::move(children));
-  web_ui()->CallJavascriptFunction("CookiesView.onTreeItemAdded", args);
+  web_ui()->CallJavascriptFunctionUnsafe("CookiesView.onTreeItemAdded", args);
 }
 
 void CookiesViewHandler::TreeNodesRemoved(ui::TreeModel* model,
@@ -176,7 +176,7 @@ void CookiesViewHandler::TreeNodesRemoved(ui::TreeModel* model,
     args.AppendString(model_util_->GetTreeNodeId(tree_model->AsNode(parent)));
   args.AppendInteger(start);
   args.AppendInteger(count);
-  web_ui()->CallJavascriptFunction("CookiesView.onTreeItemRemoved", args);
+  web_ui()->CallJavascriptFunctionUnsafe("CookiesView.onTreeItemRemoved", args);
 }
 
 void CookiesViewHandler::TreeModelBeginBatch(CookiesTreeModel* model) {
@@ -216,10 +216,8 @@ void CookiesViewHandler::EnsureCookiesTreeModelCreated() {
         new BrowsingDataServiceWorkerHelper(service_worker_context),
         new BrowsingDataCacheStorageHelper(cache_storage_context),
         BrowsingDataFlashLSOHelper::Create(profile));
-    cookies_tree_model_.reset(
-        new CookiesTreeModel(container,
-                             profile->GetExtensionSpecialStoragePolicy(),
-                             false));
+    cookies_tree_model_.reset(new CookiesTreeModel(
+        container, profile->GetExtensionSpecialStoragePolicy()));
     cookies_tree_model_->AddCookiesTreeObserver(this);
   }
 }
@@ -277,7 +275,7 @@ void CookiesViewHandler::SendChildren(const CookieTreeNode* parent) {
     args.AppendString(model_util_->GetTreeNodeId(parent));
   args.Append(std::move(children));
 
-  web_ui()->CallJavascriptFunction("CookiesView.loadChildren", args);
+  web_ui()->CallJavascriptFunctionUnsafe("CookiesView.loadChildren", args);
 }
 
 void CookiesViewHandler::ReloadCookies(const base::ListValue* args) {

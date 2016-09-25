@@ -5,6 +5,7 @@
 #ifndef MEDIA_AUDIO_WIN_AUDIO_MANAGER_WIN_H_
 #define MEDIA_AUDIO_WIN_AUDIO_MANAGER_WIN_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -38,16 +39,20 @@ class MEDIA_EXPORT AudioManagerWin : public AudioManagerBase {
 
   // Implementation of AudioManagerBase.
   AudioOutputStream* MakeLinearOutputStream(
-      const AudioParameters& params) override;
+      const AudioParameters& params,
+      const LogCallback& log_callback) override;
   AudioOutputStream* MakeLowLatencyOutputStream(
       const AudioParameters& params,
-      const std::string& device_id) override;
+      const std::string& device_id,
+      const LogCallback& log_callback) override;
   AudioInputStream* MakeLinearInputStream(
       const AudioParameters& params,
-      const std::string& device_id) override;
+      const std::string& device_id,
+      const LogCallback& log_callback) override;
   AudioInputStream* MakeLowLatencyInputStream(
       const AudioParameters& params,
-      const std::string& device_id) override;
+      const std::string& device_id,
+      const LogCallback& log_callback) override;
   std::string GetDefaultOutputDeviceID() override;
 
  protected:
@@ -92,7 +97,7 @@ class MEDIA_EXPORT AudioManagerWin : public AudioManagerBase {
   void GetAudioDeviceNamesImpl(bool input, AudioDeviceNames* device_names);
 
   // Listen for output device changes.
-  scoped_ptr<AudioDeviceListenerWin> output_device_listener_;
+  std::unique_ptr<AudioDeviceListenerWin> output_device_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioManagerWin);
 };

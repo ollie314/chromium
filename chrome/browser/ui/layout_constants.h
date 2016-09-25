@@ -12,13 +12,6 @@ enum LayoutConstant {
   // Vertical offset from top of content to the top of find bar.
   FIND_BAR_TOOLBAR_OVERLAP,
 
-  // Horizontal spacing between the icon and label in an IconLabelBubbleView.
-  ICON_LABEL_VIEW_INTERNAL_SPACING,
-
-  // Horizontal padding from the trailing edge of the label to the trailing edge
-  // of an IconLabelBubbleView.
-  ICON_LABEL_VIEW_TRAILING_PADDING,
-
   // The thickness of the location bar's border.
   LOCATION_BAR_BORDER_THICKNESS,
 
@@ -38,9 +31,7 @@ enum LayoutConstant {
   // images inside.
   LOCATION_BAR_BUBBLE_ANCHOR_VERTICAL_INSET,
 
-  // The height to be occupied by the LocationBar. For
-  // MaterialDesignController::NON_MATERIAL the height is determined from image
-  // assets.
+  // The height to be occupied by the LocationBar.
   LOCATION_BAR_HEIGHT,
 
   // Space between items in the location bar, as well as between items and the
@@ -63,13 +54,6 @@ enum LayoutConstant {
   // The amount of overlap between two adjacent tabs.
   TABSTRIP_TAB_OVERLAP,
 
-  // The vertical overlap of the tabstrip atop the toolbar.
-  TABSTRIP_TOOLBAR_OVERLAP,
-
-  // The amount by which the tab close button should overlap the trailing
-  // padding region after the tab's contents region.
-  TAB_CLOSE_BUTTON_TRAILING_PADDING_OVERLAP,
-
   // The horizontal space between a tab's favicon and its title.
   TAB_FAVICON_TITLE_SPACING,
 
@@ -80,19 +64,6 @@ enum LayoutConstant {
 
   // Width available for content inside a pinned tab.
   TAB_PINNED_CONTENT_WIDTH,
-
-  // Height of the region atop the tab bounds that is normally excluded when
-  // calculating the tab hit test region or considering where to paint a
-  // custom theme background.  (Based on theme behavior it seems like at some
-  // point this was added to the area above the top of the tab images, and we
-  // now need to subtract it back off to compensate.)
-  TAB_TOP_EXCLUSION_HEIGHT,
-
-  // Non-ash uses a rounded content area with no shadow in the assets.
-  // Ash doesn't use a rounded content area and its top edge has an extra
-  // shadow.
-  TOOLBAR_CONTENT_SHADOW_HEIGHT,
-  TOOLBAR_CONTENT_SHADOW_HEIGHT_ASH,
 
   // Additional horizontal padding between the elements in the toolbar.
   TOOLBAR_ELEMENT_PADDING,

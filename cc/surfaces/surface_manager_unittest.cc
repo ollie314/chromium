@@ -44,7 +44,7 @@ class FakeSurfaceFactoryClient : public SurfaceFactoryClient {
   }
 
   // SurfaceFactoryClient implementation.
-  void ReturnResources(const ReturnedResourceArray& resources) override{};
+  void ReturnResources(const ReturnedResourceArray& resources) override {}
   void SetBeginFrameSource(BeginFrameSource* begin_frame_source) override {
     DCHECK(!source_ || !begin_frame_source);
     source_ = begin_frame_source;
@@ -56,14 +56,6 @@ class FakeSurfaceFactoryClient : public SurfaceFactoryClient {
   uint32_t id_namespace_;
 };
 
-class EmptyBeginFrameSource : public BeginFrameSource {
- public:
-  void DidFinishFrame(size_t remaining_frames) override{};
-  void AddObserver(BeginFrameObserver* obs) override{};
-  void RemoveObserver(BeginFrameObserver* obs) override{};
-  void AsValueInto(base::trace_event::TracedValue* dict) const override{};
-};
-
 class SurfaceManagerTest : public testing::Test {
  public:
   // These tests don't care about namespace registration, so just preregister
@@ -73,12 +65,12 @@ class SurfaceManagerTest : public testing::Test {
 
   SurfaceManagerTest() {
     for (size_t i = 0; i < MAX_NAMESPACE; ++i)
-      manager_.RegisterSurfaceIdNamespace(i);
+      manager_.RegisterSurfaceClientId(i);
   }
 
   ~SurfaceManagerTest() override {
     for (size_t i = 0; i < MAX_NAMESPACE; ++i)
-      manager_.InvalidateSurfaceIdNamespace(i);
+      manager_.InvalidateSurfaceClientId(i);
   }
 
  protected:
@@ -88,7 +80,7 @@ class SurfaceManagerTest : public testing::Test {
 TEST_F(SurfaceManagerTest, SingleClients) {
   FakeSurfaceFactoryClient client(1);
   FakeSurfaceFactoryClient other_client(2);
-  EmptyBeginFrameSource source;
+  StubBeginFrameSource source;
 
   EXPECT_EQ(client.source(), nullptr);
   EXPECT_EQ(other_client.source(), nullptr);
@@ -121,8 +113,8 @@ TEST_F(SurfaceManagerTest, SingleClients) {
 }
 
 TEST_F(SurfaceManagerTest, MultipleDisplays) {
-  EmptyBeginFrameSource root1_source;
-  EmptyBeginFrameSource root2_source;
+  StubBeginFrameSource root1_source;
+  StubBeginFrameSource root2_source;
 
   // root1 -> A -> B
   // root2 -> C
@@ -291,7 +283,7 @@ class SurfaceManagerOrderingTest : public SurfaceManagerTest {
     AssertAllValidBFS();
   }
 
-  EmptyBeginFrameSource source_;
+  StubBeginFrameSource source_;
   // A -> B -> C hierarchy, with A always having the BFS.
   FakeSurfaceFactoryClient client_a_;
   FakeSurfaceFactoryClient client_b_;

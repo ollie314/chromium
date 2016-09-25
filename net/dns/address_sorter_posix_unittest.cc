@@ -9,9 +9,9 @@
 #include "base/macros.h"
 #include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
-#include "net/base/socket_performance_watcher.h"
 #include "net/base/test_completion_callback.h"
 #include "net/socket/client_socket_factory.h"
+#include "net/socket/socket_performance_watcher.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/stream_socket.h"
 #include "net/udp/datagram_client_socket.h"
@@ -47,6 +47,7 @@ class TestUDPClientSocket : public DatagramClientSocket {
   }
   int SetReceiveBufferSize(int32_t) override { return OK; }
   int SetSendBufferSize(int32_t) override { return OK; }
+  int SetDoNotFragment() override { return OK; }
 
   void Close() override {}
   int GetPeerAddress(IPEndPoint* address) const override {
@@ -59,6 +60,7 @@ class TestUDPClientSocket : public DatagramClientSocket {
     *address = local_endpoint_;
     return OK;
   }
+  void UseNonBlockingIO() override {}
   int ConnectUsingNetwork(NetworkChangeNotifier::NetworkHandle network,
                           const IPEndPoint& address) override {
     NOTIMPLEMENTED();
@@ -83,10 +85,10 @@ class TestUDPClientSocket : public DatagramClientSocket {
     return OK;
   }
 
-  const BoundNetLog& NetLog() const override { return net_log_; }
+  const NetLogWithSource& NetLog() const override { return net_log_; }
 
  private:
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
   const AddressMapping* mapping_;
   bool connected_;
   IPEndPoint local_endpoint_;

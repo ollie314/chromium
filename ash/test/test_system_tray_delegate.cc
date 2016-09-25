@@ -6,37 +6,48 @@
 
 #include <string>
 
-#include "ash/session/session_state_delegate.h"
+#include "ash/common/login_status.h"
+#include "ash/common/session/session_state_delegate.h"
+#include "ash/common/wm_shell.h"
 #include "ash/shell.h"
-#include "ash/system/user/login_status.h"
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
+
+#if defined(OS_CHROMEOS)
+#include "ash/system/chromeos/rotation/tray_rotation_lock.h"
+#include "base/memory/ptr_util.h"
+#else
+#include "ash/common/system/tray/system_tray_item.h"
+#endif
 
 namespace ash {
 namespace test {
 
 namespace {
 
-user::LoginStatus g_initial_status = user::LOGGED_IN_USER;
+bool g_system_update_required = false;
+LoginStatus g_initial_status = LoginStatus::USER;
 
 }  // namespace
 
 TestSystemTrayDelegate::TestSystemTrayDelegate()
     : should_show_display_notification_(false),
       login_status_(g_initial_status),
-      session_length_limit_set_(false) {
-}
+      session_length_limit_set_(false) {}
 
-TestSystemTrayDelegate::~TestSystemTrayDelegate() {
-}
+TestSystemTrayDelegate::~TestSystemTrayDelegate() {}
 
 // static
-void TestSystemTrayDelegate::SetInitialLoginStatus(
-    user::LoginStatus login_status) {
+void TestSystemTrayDelegate::SetInitialLoginStatus(LoginStatus login_status) {
   g_initial_status = login_status;
 }
 
-void TestSystemTrayDelegate::SetLoginStatus(user::LoginStatus login_status) {
+// static
+void TestSystemTrayDelegate::SetSystemUpdateRequired(bool required) {
+  g_system_update_required = required;
+}
+
+void TestSystemTrayDelegate::SetLoginStatus(LoginStatus login_status) {
   login_status_ = login_status;
   Shell::GetInstance()->UpdateAfterLoginStatusChange(login_status);
 }
@@ -51,27 +62,41 @@ void TestSystemTrayDelegate::ClearSessionLengthLimit() {
   session_length_limit_set_ = false;
 }
 
-user::LoginStatus TestSystemTrayDelegate::GetUserLoginStatus() const {
+void TestSystemTrayDelegate::SetCurrentIME(const IMEInfo& info) {
+  current_ime_ = info;
+}
+
+void TestSystemTrayDelegate::SetAvailableIMEList(const IMEInfoList& list) {
+  ime_list_ = list;
+}
+
+LoginStatus TestSystemTrayDelegate::GetUserLoginStatus() const {
   // Initial login status has been changed for testing.
-  if (g_initial_status != user::LOGGED_IN_USER &&
+  if (g_initial_status != LoginStatus::USER &&
       g_initial_status == login_status_) {
     return login_status_;
   }
 
   // At new user image screen manager->IsUserLoggedIn() would return true
   // but there's no browser session available yet so use SessionStarted().
-  SessionStateDelegate* delegate =
-      Shell::GetInstance()->session_state_delegate();
+  SessionStateDelegate* delegate = WmShell::Get()->GetSessionStateDelegate();
 
   if (!delegate->IsActiveUserSessionStarted())
-    return ash::user::LOGGED_IN_NONE;
+    return LoginStatus::NOT_LOGGED_IN;
   if (delegate->IsScreenLocked())
-    return user::LOGGED_IN_LOCKED;
+    return LoginStatus::LOCKED;
   return login_status_;
 }
 
 bool TestSystemTrayDelegate::IsUserSupervised() const {
-  return login_status_ == ash::user::LOGGED_IN_SUPERVISED;
+  return login_status_ == LoginStatus::SUPERVISED;
+}
+
+void TestSystemTrayDelegate::GetSystemUpdateInfo(UpdateInfo* info) const {
+  DCHECK(info);
+  info->severity = UpdateInfo::UPDATE_NONE;
+  info->update_required = g_system_update_required;
+  info->factory_reset_required = false;
 }
 
 bool TestSystemTrayDelegate::ShouldShowDisplayNotification() {
@@ -96,6 +121,23 @@ bool TestSystemTrayDelegate::GetSessionLengthLimit(
 
 void TestSystemTrayDelegate::SignOut() {
   base::MessageLoop::current()->QuitWhenIdle();
+}
+
+std::unique_ptr<SystemTrayItem>
+TestSystemTrayDelegate::CreateRotationLockTrayItem(SystemTray* tray) {
+#if defined(OS_CHROMEOS)
+  return base::MakeUnique<TrayRotationLock>(tray);
+#else
+  return nullptr;
+#endif
+}
+
+void TestSystemTrayDelegate::GetCurrentIME(IMEInfo* info) {
+  *info = current_ime_;
+}
+
+void TestSystemTrayDelegate::GetAvailableIMEList(IMEInfoList* list) {
+  *list = ime_list_;
 }
 
 }  // namespace test

@@ -18,12 +18,13 @@ import android.view.ViewStub;
 import android.widget.FrameLayout;
 import android.widget.FrameLayout.LayoutParams;
 import android.widget.ImageButton;
+import android.widget.LinearLayout;
 import android.widget.RemoteViews;
 
 import org.chromium.base.Log;
-import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.metrics.LaunchMetrics;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
 
@@ -34,6 +35,10 @@ import java.util.List;
  */
 class CustomTabBottomBarDelegate {
     private static final String TAG = "CustomTab";
+    private static final LaunchMetrics.ActionEvent REMOTE_VIEWS_SHOWN =
+            new LaunchMetrics.ActionEvent("CustomTabsRemoteViewsShown");
+    private static final LaunchMetrics.ActionEvent REMOTE_VIEWS_UPDATED =
+            new LaunchMetrics.ActionEvent("CustomTabsRemoteViewsUpdated");
     private static final int SLIDE_ANIMATION_DURATION_MS = 400;
     private ChromeActivity mActivity;
     private ViewGroup mBottomBarView;
@@ -65,13 +70,16 @@ class CustomTabBottomBarDelegate {
 
         RemoteViews remoteViews = mDataProvider.getBottomBarRemoteViews();
         if (remoteViews != null) {
-            RecordUserAction.record("CustomTabsRemoteViewsShown");
+            REMOTE_VIEWS_SHOWN.record();
             mClickableIDs = mDataProvider.getClickableViewIDs();
             mClickPendingIntent = mDataProvider.getRemoteViewsPendingIntent();
             showRemoteViews(remoteViews);
         } else {
-            getBottomBarView().setBackgroundColor(mDataProvider.getBottomBarColor());
             List<CustomButtonParams> items = mDataProvider.getCustomButtonsOnBottombar();
+            if (items.isEmpty()) return;
+            LinearLayout layout = new LinearLayout(mActivity);
+            layout.setId(R.id.custom_tab_bottom_bar_wrapper);
+            layout.setBackgroundColor(mDataProvider.getBottomBarColor());
             for (CustomButtonParams params : items) {
                 if (params.showOnToolbar()) continue;
                 final PendingIntent pendingIntent = params.getPendingIntent();
@@ -84,10 +92,10 @@ class CustomTabBottomBarDelegate {
                         }
                     };
                 }
-                ImageButton button = params.buildBottomBarButton(mActivity, getBottomBarView(),
-                        clickListener);
-                getBottomBarView().addView(button);
+                layout.addView(
+                        params.buildBottomBarButton(mActivity, getBottomBarView(), clickListener));
             }
+            getBottomBarView().addView(layout);
         }
     }
 
@@ -113,8 +121,7 @@ class CustomTabBottomBarDelegate {
             PendingIntent pendingIntent) {
         // Update only makes sense if we are already showing a RemoteViews.
         if (mDataProvider.getBottomBarRemoteViews() == null) return false;
-
-        RecordUserAction.record("CustomTabsRemoteViewsUpdated");
+        REMOTE_VIEWS_UPDATED.record();
         if (remoteViews == null) {
             if (mBottomBarView == null) return false;
             hideBottomBar();

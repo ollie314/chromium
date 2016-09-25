@@ -25,13 +25,6 @@
         ]
       }
     }],
-    ['OS=="linux" or OS=="mac" or OS=="win"', {
-      'variables': {
-        'files': [
-          '<(PRODUCT_DIR)/resources.pak',
-        ],
-      },
-    }],
     ['OS=="linux" or OS=="win"', {
       'variables': {
         'command': [
@@ -43,6 +36,7 @@
           '<(PRODUCT_DIR)/locales/en-US.pak',
           '<(PRODUCT_DIR)/locales/fr.pak',
           '<(PRODUCT_DIR)/resources/extension/',
+          '<(PRODUCT_DIR)/resources.pak',
         ],
       },
     }],
@@ -99,13 +93,6 @@
         ],
       },
     }],
-    ['OS=="win" and target_arch=="ia32"', {
-      'variables': {
-        'files': [
-          '<(PRODUCT_DIR)/wow_helper.exe',
-        ],
-      },
-    }],
     ['disable_nacl==0 and OS=="win" and target_arch=="ia32"', {
       'variables': {
         'files': [
@@ -142,6 +129,7 @@
           '<(PRODUCT_DIR)/blink_platform.dll.pdb',
           '<(PRODUCT_DIR)/blink_web.dll.pdb',
           '<(PRODUCT_DIR)/content.dll.pdb',
+          '<(PRODUCT_DIR)/modules.dll.pdb',
         ],
       },
     }],

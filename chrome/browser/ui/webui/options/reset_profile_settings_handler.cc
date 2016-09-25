@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string16.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -36,6 +36,33 @@
 
 namespace options {
 
+namespace {
+
+reset_report::ChromeResetReport::ResetRequestOrigin
+ResetRequestOriginFromString(const std::string& reset_request_origin) {
+  static const char kOriginUserClick[] = "userclick";
+  static const char kOriginTriggeredReset[] = "triggeredreset";
+
+  if (reset_request_origin ==
+      ResetProfileSettingsHandler::kCctResetSettingsHash) {
+    return reset_report::ChromeResetReport::RESET_REQUEST_ORIGIN_CCT;
+  }
+  if (reset_request_origin == kOriginUserClick)
+    return reset_report::ChromeResetReport::RESET_REQUEST_ORIGIN_USER_CLICK;
+  if (reset_request_origin == kOriginTriggeredReset) {
+    return reset_report::ChromeResetReport::
+        RESET_REQUEST_ORIGIN_TRIGGERED_RESET;
+  }
+  if (!reset_request_origin.empty())
+    NOTREACHED();
+
+  return reset_report::ChromeResetReport::RESET_REQUEST_ORIGIN_UNKNOWN;
+}
+
+}  // namespace
+
+const char ResetProfileSettingsHandler::kCctResetSettingsHash[] = "cct";
+
 ResetProfileSettingsHandler::ResetProfileSettingsHandler() {
   google_brand::GetBrand(&brandcode_);
 }
@@ -48,7 +75,7 @@ void ResetProfileSettingsHandler::InitializeHandler() {
 }
 
 void ResetProfileSettingsHandler::InitializePage() {
-  web_ui()->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunctionUnsafe(
       "ResetProfileSettingsOverlay.setResettingState",
       base::FundamentalValue(resetter_->IsActive()));
 }
@@ -127,24 +154,27 @@ void ResetProfileSettingsHandler::RegisterMessages() {
 void ResetProfileSettingsHandler::HandleResetProfileSettings(
     const base::ListValue* value) {
   bool send_settings = false;
-  bool success = value->GetBoolean(0, &send_settings);
+  std::string reset_request_origin;
+  bool success = value->GetBoolean(0, &send_settings) &&
+                 value->GetString(1, &reset_request_origin);
   DCHECK(success);
 
   DCHECK(brandcode_.empty() || config_fetcher_);
   if (config_fetcher_ && config_fetcher_->IsActive()) {
     // Reset once the prefs are fetched.
     config_fetcher_->SetCallback(
-        base::Bind(&ResetProfileSettingsHandler::ResetProfile,
-                   Unretained(this),
-                   send_settings));
+        base::Bind(&ResetProfileSettingsHandler::ResetProfile, Unretained(this),
+                   send_settings, reset_request_origin));
   } else {
-    ResetProfile(send_settings);
+    ResetProfile(send_settings, reset_request_origin);
   }
 }
 
 void ResetProfileSettingsHandler::OnResetProfileSettingsDone(
-    bool send_feedback) {
-  web_ui()->CallJavascriptFunction("ResetProfileSettingsOverlay.doneResetting");
+    bool send_feedback,
+    const std::string& reset_request_origin) {
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "ResetProfileSettingsOverlay.doneResetting");
   if (send_feedback && setting_snapshot_) {
     Profile* profile = Profile::FromWebUI(web_ui());
     ResettableSettingsSnapshot current_snapshot(profile);
@@ -153,8 +183,11 @@ void ResetProfileSettingsHandler::OnResetProfileSettingsDone(
       setting_snapshot_->Subtract(current_snapshot);
       std::unique_ptr<reset_report::ChromeResetReport> report_proto =
           SerializeSettingsReportToProto(*setting_snapshot_, difference);
-      if (report_proto)
+      if (report_proto) {
+        report_proto->set_reset_request_origin(
+            ResetRequestOriginFromString(reset_request_origin));
         SendSettingsFeedbackProto(*report_proto, profile);
+      }
     }
   }
   setting_snapshot_.reset();
@@ -191,7 +224,9 @@ void ResetProfileSettingsHandler::OnSettingsFetched() {
   // The master prefs is fetched. We are waiting for user pressing 'Reset'.
 }
 
-void ResetProfileSettingsHandler::ResetProfile(bool send_settings) {
+void ResetProfileSettingsHandler::ResetProfile(
+    bool send_settings,
+    const std::string& reset_request_origin) {
   DCHECK(resetter_);
   DCHECK(!resetter_->IsActive());
 
@@ -211,7 +246,7 @@ void ResetProfileSettingsHandler::ResetProfile(bool send_settings) {
   resetter_->Reset(
       ProfileResetter::ALL, std::move(default_settings),
       base::Bind(&ResetProfileSettingsHandler::OnResetProfileSettingsDone,
-                 AsWeakPtr(), send_settings));
+                 AsWeakPtr(), send_settings, reset_request_origin));
   content::RecordAction(base::UserMetricsAction("ResetProfile"));
   UMA_HISTOGRAM_BOOLEAN("ProfileReset.SendFeedback", send_settings);
 }
@@ -223,9 +258,8 @@ void ResetProfileSettingsHandler::UpdateFeedbackUI() {
       Profile::FromWebUI(web_ui()), *setting_snapshot_);
   base::DictionaryValue feedback_info;
   feedback_info.Set("feedbackInfo", list.release());
-  web_ui()->CallJavascriptFunction(
-      "ResetProfileSettingsOverlay.setFeedbackInfo",
-      feedback_info);
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "ResetProfileSettingsOverlay.setFeedbackInfo", feedback_info);
 }
 
 }  // namespace options

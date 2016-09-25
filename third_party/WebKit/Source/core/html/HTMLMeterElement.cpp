@@ -24,9 +24,10 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/HTMLNames.h"
-#include "core/dom/ExceptionCode.h"
+#include "core/dom/NodeComputedStyle.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/frame/UseCounter.h"
+#include "core/html/HTMLContentElement.h"
 #include "core/html/HTMLDivElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/layout/LayoutObject.h"
@@ -191,7 +192,7 @@ void HTMLMeterElement::didElementStateChange()
 
 void HTMLMeterElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 {
-    ASSERT(!m_value);
+    DCHECK(!m_value);
 
     HTMLDivElement* inner = HTMLDivElement::create(document());
     inner->setShadowPseudoId(AtomicString("-webkit-meter-inner-element"));
@@ -205,6 +206,11 @@ void HTMLMeterElement::didAddUserAgentShadowRoot(ShadowRoot& root)
     bar->appendChild(m_value);
 
     inner->appendChild(bar);
+
+    HTMLDivElement* fallback = HTMLDivElement::create(document());
+    fallback->appendChild(HTMLContentElement::create(document()));
+    fallback->setShadowPseudoId(AtomicString("-internal-fallback"));
+    root.appendChild(fallback);
 }
 
 void HTMLMeterElement::updateValueAppearance(double percentage)
@@ -225,6 +231,12 @@ void HTMLMeterElement::updateValueAppearance(double percentage)
         m_value->setShadowPseudoId(evenLessGoodPseudoId);
         break;
     }
+}
+
+bool HTMLMeterElement::canContainRangeEndPoint() const
+{
+    document().updateStyleAndLayoutTreeForNode(this);
+    return computedStyle() && !computedStyle()->hasAppearance();
 }
 
 DEFINE_TRACE(HTMLMeterElement)

@@ -5,19 +5,20 @@
 package org.chromium.chrome.browser.bookmarks;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
-import android.preference.PreferenceManager;
 import android.provider.Browser;
 import android.text.TextUtils;
 
-import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
@@ -26,10 +27,9 @@ import org.chromium.chrome.browser.snackbar.Snackbar;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.bookmarks.BookmarkType;
-import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.ui.base.DeviceFormFactor;
 
 /**
@@ -67,29 +67,39 @@ public class BookmarkUtils {
             parent = bookmarkModel.getDefaultFolder();
         }
 
-        String url = DomDistillerUrlUtils.getOriginalUrlFromDistillerUrl(tab.getUrl());
-        BookmarkId bookmarkId = bookmarkModel.addBookmark(
-                parent, bookmarkModel.getChildCount(parent), tab.getTitle(), url);
+        String url = tab.getOriginalUrl();
+        BookmarkId bookmarkId = bookmarkModel.addBookmark(parent,
+                bookmarkModel.getChildCount(parent), tab.getTitle(), url);
 
-        if (bookmarkId != null) {
-            Snackbar snackbar;
+        Snackbar snackbar = null;
+        if (bookmarkId == null) {
+            snackbar = Snackbar.make(activity.getString(R.string.bookmark_page_failed),
+                    new SnackbarController() {
+                        @Override
+                        public void onDismissNoAction(Object actionData) { }
+
+                        @Override
+                        public void onAction(Object actionData) { }
+                    }, Snackbar.TYPE_NOTIFICATION, Snackbar.UMA_BOOKMARK_ADDED)
+                    .setSingleLine(false);
+            RecordUserAction.record("EnhancedBookmarks.AddingFailed");
+        } else {
             String folderName = bookmarkModel.getBookmarkTitle(
                     bookmarkModel.getBookmarkById(bookmarkId).getParentId());
             SnackbarController snackbarController =
                     createSnackbarControllerForEditButton(activity, bookmarkId);
             if (getLastUsedParent(activity) == null) {
                 snackbar = Snackbar.make(activity.getString(R.string.bookmark_page_saved),
-                        snackbarController, Snackbar.TYPE_ACTION);
+                        snackbarController, Snackbar.TYPE_ACTION, Snackbar.UMA_BOOKMARK_ADDED);
             } else {
-                snackbar = Snackbar.make(folderName, snackbarController, Snackbar.TYPE_ACTION)
-                                   .setTemplateText(
-                                           activity.getString(R.string.bookmark_page_saved_folder));
+                snackbar = Snackbar.make(folderName, snackbarController, Snackbar.TYPE_ACTION,
+                        Snackbar.UMA_BOOKMARK_ADDED)
+                        .setTemplateText(activity.getString(R.string.bookmark_page_saved_folder));
             }
-            snackbar = snackbar.setSingleLine(false).setAction(
-                    activity.getString(R.string.bookmark_item_edit), null);
-
-            snackbarManager.showSnackbar(snackbar);
+            snackbar.setSingleLine(false).setAction(activity.getString(R.string.bookmark_item_edit),
+                    null);
         }
+        snackbarManager.showSnackbar(snackbar);
 
         bookmarkModel.destroy();
         return bookmarkId;
@@ -119,11 +129,9 @@ public class BookmarkUtils {
     private static SnackbarController createSnackbarControllerForEditButton(
             final Activity activity, final BookmarkId bookmarkId) {
         return new SnackbarController() {
-
             @Override
             public void onDismissNoAction(Object actionData) {
                 RecordUserAction.record("EnhancedBookmarks.EditAfterCreateButtonNotClicked");
-                // This method will be called only if the snackbar is dismissed by timeout.
             }
 
             @Override
@@ -141,10 +149,11 @@ public class BookmarkUtils {
         String url = getFirstUrlToLoad(activity);
 
         if (DeviceFormFactor.isTablet(activity)) {
-            openUrl(activity, url);
+            openUrl(activity, url, activity.getComponentName());
         } else {
             Intent intent = new Intent(activity, BookmarkActivity.class);
             intent.setData(Uri.parse(url));
+            intent.putExtra(IntentHandler.EXTRA_PARENT_COMPONENT, activity.getComponentName());
             activity.startActivity(intent);
         }
     }
@@ -162,7 +171,7 @@ public class BookmarkUtils {
      * {@link #getLastUsedUrl(Context)}
      */
     static void setLastUsedUrl(Context context, String url) {
-        PreferenceManager.getDefaultSharedPreferences(context).edit()
+        ContextUtils.getAppSharedPreferences().edit()
                 .putString(PREF_LAST_USED_URL, url).apply();
     }
 
@@ -171,7 +180,7 @@ public class BookmarkUtils {
      */
     @VisibleForTesting
     static String getLastUsedUrl(Context context) {
-        return PreferenceManager.getDefaultSharedPreferences(context).getString(
+        return ContextUtils.getAppSharedPreferences().getString(
                 PREF_LAST_USED_URL, UrlConstants.BOOKMARKS_URL);
     }
 
@@ -179,7 +188,7 @@ public class BookmarkUtils {
      * Save the last used {@link BookmarkId} as a folder to put new bookmarks to.
      */
     static void setLastUsedParent(Context context, BookmarkId bookmarkId) {
-        PreferenceManager.getDefaultSharedPreferences(context).edit()
+        ContextUtils.getAppSharedPreferences().edit()
                 .putString(PREF_LAST_USED_PARENT, bookmarkId.toString()).apply();
     }
 
@@ -188,7 +197,7 @@ public class BookmarkUtils {
      *         has never selected a parent folder to use.
      */
     static BookmarkId getLastUsedParent(Context context) {
-        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences preferences = ContextUtils.getAppSharedPreferences();
         if (!preferences.contains(PREF_LAST_USED_PARENT)) return null;
 
         return BookmarkId.getBookmarkIdFromString(
@@ -225,28 +234,37 @@ public class BookmarkUtils {
         RecordHistogram.recordEnumeratedHistogram(
                 "Stars.LaunchLocation", launchLocation, BookmarkLaunchLocation.COUNT);
 
-        openUrl(activity, url);
+        if (DeviceFormFactor.isTablet(activity)) {
+            // For tablets, the bookmark manager is open in a tab in the ChromeActivity. Use
+            // the ComponentName of the ChromeActivity passed into this method.
+            openUrl(activity, url, activity.getComponentName());
+        } else {
+            // For phones, the bookmark manager is a separate activity. When the activity is
+            // launched, an intent extra is set specifying the parent component.
+            ComponentName parentComponent = IntentUtils.safeGetParcelableExtra(
+                    activity.getIntent(), IntentHandler.EXTRA_PARENT_COMPONENT);
+            openUrl(activity, url, parentComponent);
+        }
+
         return true;
     }
 
-    private static void openUrl(Activity activity, String url) {
+    private static void openUrl(Activity activity, String url, ComponentName componentName) {
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-        intent.setClassName(activity.getApplicationContext().getPackageName(),
-                ChromeLauncherActivity.class.getName());
         intent.putExtra(Browser.EXTRA_APPLICATION_ID,
                 activity.getApplicationContext().getPackageName());
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        IntentHandler.startActivityForTrustedIntent(intent, activity);
-    }
 
-    /**
-     * Updates the title of chrome shown in recent tasks. It only takes effect in document mode.
-     */
-    public static void setTaskDescriptionInDocumentMode(Activity activity, String description) {
-        if (FeatureUtilities.isDocumentMode(activity)) {
-            // Setting icon to be null and color to be 0 will means "take no effect".
-            ApiCompatibilityUtils.setTaskDescription(activity, description, null, 0);
+        if (componentName != null) {
+            intent.setComponent(componentName);
+        } else {
+            // If the bookmark manager is shown in a tab on a phone (rather than in a separate
+            // activity) the component name may be null. Send the intent through
+            // ChromeLauncherActivity instead to avoid crashing. See crbug.com/615012.
+            intent.setClass(activity, ChromeLauncherActivity.class);
         }
+
+        IntentHandler.startActivityForTrustedIntent(intent, activity);
     }
 
     /**
@@ -256,5 +274,12 @@ public class BookmarkUtils {
         if (context instanceof BookmarkActivity) {
             ((Activity) context).finish();
         }
+    }
+
+    /**
+     * @return Whether "all bookmarks" section is enabled.
+     */
+    static boolean isAllBookmarksViewEnabled() {
+        return ChromeFeatureList.isEnabled("AllBookmarks");
     }
 }

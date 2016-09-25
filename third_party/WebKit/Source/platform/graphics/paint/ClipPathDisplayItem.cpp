@@ -7,6 +7,7 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/Path.h"
 #include "public/platform/WebDisplayItemList.h"
+#include "third_party/skia/include/core/SkPictureAnalyzer.h"
 #include "third_party/skia/include/core/SkScalar.h"
 
 namespace blink {
@@ -19,7 +20,13 @@ void BeginClipPathDisplayItem::replay(GraphicsContext& context) const
 
 void BeginClipPathDisplayItem::appendToWebDisplayItemList(const IntRect& visualRect, WebDisplayItemList* list) const
 {
-    list->appendClipPathItem(visualRect, m_clipPath, SkRegion::kIntersect_Op, true);
+    list->appendClipPathItem(m_clipPath, SkRegion::kIntersect_Op, true);
+}
+
+void BeginClipPathDisplayItem::analyzeForGpuRasterization(SkPictureGpuAnalyzer& analyzer) const
+{
+    // Temporarily disabled (pref regressions due to GPU veto stickiness: http://crbug.com/603969).
+    // analyzer.analyzeClipPath(m_clipPath, SkRegion::kIntersect_Op, true);
 }
 
 void EndClipPathDisplayItem::replay(GraphicsContext& context) const
@@ -29,7 +36,7 @@ void EndClipPathDisplayItem::replay(GraphicsContext& context) const
 
 void EndClipPathDisplayItem::appendToWebDisplayItemList(const IntRect& visualRect, WebDisplayItemList* list) const
 {
-    list->appendEndClipPathItem(visualRect);
+    list->appendEndClipPathItem();
 }
 
 #ifndef NDEBUG

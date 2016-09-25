@@ -17,6 +17,7 @@
 #include "wtf/HashSet.h"
 #include "wtf/StringHasher.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
@@ -32,7 +33,8 @@ enum HashAlgorithm {
 };
 
 PLATFORM_EXPORT bool computeDigest(HashAlgorithm, const char* digestable, size_t length, DigestValue& digestResult);
-PLATFORM_EXPORT PassOwnPtr<WebCryptoDigestor> createDigestor(HashAlgorithm);
+// Note: this will never return null.
+PLATFORM_EXPORT std::unique_ptr<WebCryptoDigestor> createDigestor(HashAlgorithm);
 PLATFORM_EXPORT void finishDigestor(WebCryptoDigestor*, DigestValue& digestResult);
 
 } // namespace blink

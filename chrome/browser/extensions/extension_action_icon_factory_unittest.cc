@@ -12,16 +12,17 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/grit/theme_resources.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
 #include "extensions/common/extension.h"
-#include "grit/theme_resources.h"
 #include "skia/ext/image_operations.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/material_design/material_design_controller.h"
@@ -98,7 +99,7 @@ class ExtensionActionIconFactoryTest
 
   void WaitForIconUpdate() {
     quit_in_icon_updated_ = true;
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
     quit_in_icon_updated_ = false;
   }
 
@@ -151,7 +152,7 @@ class ExtensionActionIconFactoryTest
   void TearDown() override {
     material_design_state_.reset();
     profile_.reset();  // Get all DeleteSoon calls sent to ui_loop_.
-    ui_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   // ExtensionActionIconFactory::Observer overrides:
@@ -194,8 +195,7 @@ class ExtensionActionIconFactoryTest
 INSTANTIATE_TEST_CASE_P(
     ExtensionActionIconFactoryTest_MaterialDesign,
     ExtensionActionIconFactoryTest,
-    testing::Values(ui::MaterialDesignController::NON_MATERIAL,
-                    ui::MaterialDesignController::MATERIAL_NORMAL,
+    testing::Values(ui::MaterialDesignController::MATERIAL_NORMAL,
                     ui::MaterialDesignController::MATERIAL_HYBRID));
 
 // If there is no default icon, and the icon has not been set using |SetIcon|,
@@ -206,7 +206,7 @@ TEST_P(ExtensionActionIconFactoryTest, NoIcons) {
   scoped_refptr<Extension> extension(CreateExtension(
       "browser_action/no_icon", Manifest::INVALID_LOCATION));
   ASSERT_TRUE(extension.get() != NULL);
-  ExtensionAction* browser_action = GetBrowserAction(*extension.get());
+  ExtensionAction* browser_action = GetBrowserAction(*extension);
   ASSERT_TRUE(browser_action);
   ASSERT_FALSE(browser_action->default_icon());
   ASSERT_TRUE(browser_action->GetExplicitlySetIcon(0 /*tab id*/).IsEmpty());
@@ -231,7 +231,7 @@ TEST_P(ExtensionActionIconFactoryTest, AfterSetIcon) {
   scoped_refptr<Extension> extension(CreateExtension(
       "browser_action/no_icon", Manifest::INVALID_LOCATION));
   ASSERT_TRUE(extension.get() != NULL);
-  ExtensionAction* browser_action = GetBrowserAction(*extension.get());
+  ExtensionAction* browser_action = GetBrowserAction(*extension);
   ASSERT_TRUE(browser_action);
   ASSERT_FALSE(browser_action->default_icon());
   ASSERT_TRUE(browser_action->GetExplicitlySetIcon(0 /*tab id*/).IsEmpty());
@@ -270,7 +270,7 @@ TEST_P(ExtensionActionIconFactoryTest, DefaultIcon) {
   scoped_refptr<Extension> extension(CreateExtension(
       "browser_action/no_icon", Manifest::INVALID_LOCATION));
   ASSERT_TRUE(extension.get() != NULL);
-  ExtensionAction* browser_action = GetBrowserAction(*extension.get());
+  ExtensionAction* browser_action = GetBrowserAction(*extension);
   ASSERT_TRUE(browser_action);
   ASSERT_FALSE(browser_action->default_icon());
   ASSERT_TRUE(browser_action->GetExplicitlySetIcon(0 /*tab id*/).IsEmpty());

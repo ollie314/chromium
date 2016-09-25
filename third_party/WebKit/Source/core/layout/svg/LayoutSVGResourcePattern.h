@@ -25,9 +25,9 @@
 #include "core/layout/svg/LayoutSVGResourcePaintServer.h"
 #include "core/svg/PatternAttributes.h"
 #include "platform/heap/Handle.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "wtf/HashMap.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/RefPtr.h"
+#include <memory>
 
 class SkPicture;
 
@@ -53,8 +53,8 @@ public:
     LayoutSVGResourceType resourceType() const override { return s_resourceType; }
 
 private:
-    PassOwnPtr<PatternData> buildPatternData(const LayoutObject&);
-    PassRefPtr<SkPicture> asPicture(const FloatRect& tile, const AffineTransform&) const;
+    std::unique_ptr<PatternData> buildPatternData(const LayoutObject&);
+    sk_sp<SkPicture> asPicture(const FloatRect& tile, const AffineTransform&) const;
     PatternData* patternForLayoutObject(const LayoutObject&);
 
     const LayoutSVGResourceContainer* resolveContentElement() const;
@@ -71,7 +71,7 @@ private:
     // should be able to cache a single display list per LayoutSVGResourcePattern + one
     // Pattern(shader) for each client -- this would avoid re-recording when multiple clients
     // share the same pattern.
-    HashMap<const LayoutObject*, OwnPtr<PatternData>> m_patternMap;
+    HashMap<const LayoutObject*, std::unique_ptr<PatternData>> m_patternMap;
 };
 
 } // namespace blink

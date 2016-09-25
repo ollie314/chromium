@@ -8,6 +8,8 @@
 #include "core/frame/LocalFrame.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutView.h"
+#include "core/layout/api/LayoutViewItem.h"
+#include "wtf/AutoReset.h"
 
 namespace blink {
 
@@ -43,7 +45,7 @@ void FrameViewAutoSizeInfo::autoSizeIfNeeded()
     if (m_inAutoSize)
         return;
 
-    TemporaryChange<bool> changeInAutoSize(m_inAutoSize, true);
+    AutoReset<bool> changeInAutoSize(&m_inAutoSize, true);
 
     Document* document = m_frameView->frame().document();
     if (!document || !document->isActive())
@@ -64,19 +66,19 @@ void FrameViewAutoSizeInfo::autoSizeIfNeeded()
     // which may result in a height change during the second iteration.
     for (int i = 0; i < 2; i++) {
         // Update various sizes including contentsSize, scrollHeight, etc.
-        document->updateLayoutIgnorePendingStylesheets();
+        document->updateStyleAndLayoutIgnorePendingStylesheets();
 
-        LayoutView* layoutView = document->layoutView();
-        if (!layoutView)
+        LayoutViewItem layoutViewItem = document->layoutViewItem();
+        if (layoutViewItem.isNull())
             return;
 
-        int width = layoutView->minPreferredLogicalWidth();
+        int width = layoutViewItem.minPreferredLogicalWidth().toInt();
 
         LayoutBox* documentLayoutBox = documentElement->layoutBox();
         if (!documentLayoutBox)
             return;
 
-        int height = documentLayoutBox->scrollHeight();
+        int height = documentLayoutBox->scrollHeight().toInt();
         IntSize newSize(width, height);
 
         // Check to see if a scrollbar is needed for a given dimension and

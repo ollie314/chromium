@@ -291,10 +291,6 @@ class OmniboxFieldTrial {
   // For the HQPFixFrequencyScoring experiment that's part of the
   // bundled omnibox field trial.
 
-  // Returns true if HQP should apply the bug fix for correctly identifying
-  // typed visits.
-  static bool HQPFixTypedVisitBug();
-
   // Returns true if HQP should apply the bug fix to discount the visits to
   // pages visited less than ten times.
   static bool HQPFixFewVisitsBug();
@@ -325,17 +321,6 @@ class OmniboxFieldTrial {
   static bool HUPSearchDatabase();
 
   // ---------------------------------------------------------
-  // For the PreventUWYTDefaultForNonURLInputs experiment that's part of the
-  // bundled omnibox field trial.
-
-  // Returns true if HistoryURL provider should prohibit the URL-what-you-
-  // typed match from being the legal default match for non-URL inputs.
-  // If this behavior is active, some code in AutocompleteInput::Parse() also
-  // gets disabled; this code is unnecessary given the not-allowed-to-be-
-  // default constraint.  Returns false if the experiment isn't active.
-  static bool PreventUWYTDefaultForNonURLInputs();
-
-  // ---------------------------------------------------------
   // For the aggressive keyword matching experiment that's part of the bundled
   // omnibox field trial.
 
@@ -356,16 +341,6 @@ class OmniboxFieldTrial {
   // with sufficiently-complete matches, i.e., the user has typed all of the
   // important part of the keyword.  Returns -1 if the experiment isn't active.
   static int KeywordScoreForSufficientlyCompleteMatch();
-
-  // ---------------------------------------------------------
-  // For the HQPAllowDupMatchesForScoring experiment that's part of the
-  // bundled omnibox field trial.
-
-  // Returns true if HistoryQuick provider should allow overlapping term hits
-  // to count when scoring and only remove overlaps/duplicates later (which
-  // is necessary for highlighting).  Returns false if the experiment isn't
-  // active.
-  static bool HQPAllowDupMatchesForScoring();
 
   // ---------------------------------------------------------
   // For the EmphasizeTitles experiment that's part of the bundled omnibox
@@ -396,7 +371,6 @@ class OmniboxFieldTrial {
   static const char kDisableResultsCachingRule[];
   static const char kMeasureSuggestPollingDelayFromLastKeystrokeRule[];
   static const char kSuggestPollingDelayMsRule[];
-  static const char kHQPFixTypedVisitBugRule[];
   static const char kHQPFixFewVisitsBugRule[];
   static const char kHQPNumTitleWordsRule[];
   static const char kHQPAlsoDoHUPLikeScoringRule[];

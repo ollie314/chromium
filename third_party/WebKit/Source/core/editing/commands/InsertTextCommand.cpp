@@ -44,6 +44,11 @@ InsertTextCommand::InsertTextCommand(Document& document, const String& text, boo
 {
 }
 
+String InsertTextCommand::textDataForInputEvent() const
+{
+    return m_text;
+}
+
 Position InsertTextCommand::positionInsideTextNode(const Position& p, EditingState* editingState)
 {
     Position pos = p;
@@ -52,7 +57,7 @@ Position InsertTextCommand::positionInsideTextNode(const Position& p, EditingSta
         insertNodeAtTabSpanPosition(textNode, pos, editingState);
         if (editingState->isAborted())
             return Position();
-        return firstPositionInNode(textNode);
+        return Position::firstPositionInNode(textNode);
     }
 
     // Prepare for text input by looking at the specified position.
@@ -62,7 +67,7 @@ Position InsertTextCommand::positionInsideTextNode(const Position& p, EditingSta
         insertNodeAt(textNode, pos, editingState);
         if (editingState->isAborted())
             return Position();
-        return firstPositionInNode(textNode);
+        return Position::firstPositionInNode(textNode);
     }
 
     return pos;
@@ -164,7 +169,7 @@ void InsertTextCommand::doApply(EditingState* editingState)
     Position downstream(mostForwardCaretPosition(startPosition));
     if (lineBreakExistsAtPosition(downstream)) {
         // FIXME: This doesn't handle placeholders at the end of anonymous blocks.
-        VisiblePosition caret = createVisiblePosition(startPosition);
+        VisiblePosition caret = createVisiblePositionDeprecated(startPosition);
         if (isEndOfBlock(caret) && isStartOfParagraph(caret))
             placeholder = downstream;
         // Don't remove the placeholder yet, otherwise the block we're inserting into would collapse before
@@ -178,9 +183,9 @@ void InsertTextCommand::doApply(EditingState* editingState)
     // It is possible for the node that contains startPosition to contain only unrendered whitespace,
     // and so deleteInsignificantText could remove it.  Save the position before the node in case that happens.
     DCHECK(startPosition.computeContainerNode()) << startPosition;
-    Position positionBeforeStartNode(positionInParentBeforeNode(*startPosition.computeContainerNode()));
+    Position positionBeforeStartNode(Position::inParentBeforeNode(*startPosition.computeContainerNode()));
     deleteInsignificantText(startPosition, mostForwardCaretPosition(startPosition));
-    if (!startPosition.inShadowIncludingDocument())
+    if (!startPosition.isConnected())
         startPosition = positionBeforeStartNode;
     if (!isVisuallyEquivalentCandidate(startPosition))
         startPosition = mostForwardCaretPosition(startPosition);
@@ -245,7 +250,7 @@ void InsertTextCommand::doApply(EditingState* editingState)
 
 Position InsertTextCommand::insertTab(const Position& pos, EditingState* editingState)
 {
-    Position insertPos = createVisiblePosition(pos).deepEquivalent();
+    Position insertPos = createVisiblePositionDeprecated(pos).deepEquivalent();
     if (insertPos.isNull())
         return pos;
 
@@ -283,7 +288,7 @@ Position InsertTextCommand::insertTab(const Position& pos, EditingState* editing
         return Position();
 
     // return the position following the new tab
-    return lastPositionInNode(spanElement);
+    return Position::lastPositionInNode(spanElement);
 }
 
 } // namespace blink

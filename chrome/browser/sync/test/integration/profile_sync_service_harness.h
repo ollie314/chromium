@@ -10,11 +10,18 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "sync/internal_api/public/base/model_type.h"
-#include "sync/internal_api/public/sessions/sync_session_snapshot.h"
+#include "components/sync/base/model_type.h"
+#include "components/sync/engine/cycle/sync_cycle_snapshot.h"
 
 class Profile;
+
+namespace browser_sync {
 class ProfileSyncService;
+}  // namespace browser_sync
+
+namespace sync_driver {
+class SyncSetupInProgressHandle;
+}  // namespace sync_driver
 
 // An instance of this class is basically our notion of a "sync client" for
 // automation purposes. It harnesses the ProfileSyncService member of the
@@ -86,7 +93,7 @@ class ProfileSyncServiceHarness {
   bool AwaitSyncSetupCompletion();
 
   // Returns the ProfileSyncService member of the sync client.
-  ProfileSyncService* service() const { return service_; }
+  browser_sync::ProfileSyncService* service() const { return service_; }
 
   // Returns the debug name for this profile. Used for logging.
   const std::string& profile_debug_name() const { return profile_debug_name_; }
@@ -104,7 +111,7 @@ class ProfileSyncServiceHarness {
   bool DisableSyncForAllDatatypes();
 
   // Returns a snapshot of the current sync session.
-  syncer::sessions::SyncSessionSnapshot GetLastSessionSnapshot() const;
+  syncer::SyncCycleSnapshot GetLastCycleSnapshot() const;
 
   // Check if |type| is being synced.
   bool IsTypePreferred(syncer::ModelType type);
@@ -118,15 +125,15 @@ class ProfileSyncServiceHarness {
   // available), annotated with |message|. Useful for logging.
   std::string GetClientInfoString(const std::string& message) const;
 
+  // Signals that sync setup is complete, and that PSS may begin syncing.
+  void FinishSyncSetup();
+
  private:
   ProfileSyncServiceHarness(
       Profile* profile,
       const std::string& username,
       const std::string& password,
       SigninType signin_type);
-
-  // Signals that sync setup is complete, and that PSS may begin syncing.
-  void FinishSyncSetup();
 
   // Gets detailed status from |service_| in pretty-printable form.
   std::string GetServiceStatus();
@@ -138,7 +145,10 @@ class ProfileSyncServiceHarness {
   Profile* profile_;
 
   // ProfileSyncService object associated with |profile_|.
-  ProfileSyncService* service_;
+  browser_sync::ProfileSyncService* service_;
+
+  // Prevents Sync from running until configuration is complete.
+  std::unique_ptr<sync_driver::SyncSetupInProgressHandle> sync_blocker_;
 
   // Credentials used for GAIA authentication.
   std::string username_;

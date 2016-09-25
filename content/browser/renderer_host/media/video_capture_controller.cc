@@ -13,14 +13,14 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
-#include "base/stl_util.h"
 #include "build/build_config.h"
-#include "content/browser/compositor/gl_helper.h"
+#include "components/display_compositor/gl_helper.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_buffer_pool.h"
 #include "content/browser/renderer_host/media/video_capture_device_client.h"
+#include "content/browser/renderer_host/media/video_capture_gpu_jpeg_decoder.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
@@ -47,7 +47,8 @@ static const int kInfiniteRatio = 99999;
 
 class SyncTokenClientImpl : public VideoFrame::SyncTokenClient {
  public:
-  explicit SyncTokenClientImpl(GLHelper* gl_helper) : gl_helper_(gl_helper) {}
+  explicit SyncTokenClientImpl(display_compositor::GLHelper* gl_helper)
+      : gl_helper_(gl_helper) {}
   ~SyncTokenClientImpl() override {}
   void GenerateSyncToken(gpu::SyncToken* sync_token) override {
     gl_helper_->GenerateSyncToken(sync_token);
@@ -57,7 +58,7 @@ class SyncTokenClientImpl : public VideoFrame::SyncTokenClient {
   }
 
  private:
-  GLHelper* gl_helper_;
+  display_compositor::GLHelper* gl_helper_;
 };
 
 void ReturnVideoFrame(const scoped_refptr<VideoFrame>& video_frame,
@@ -66,7 +67,8 @@ void ReturnVideoFrame(const scoped_refptr<VideoFrame>& video_frame,
 #if defined(OS_ANDROID)
   NOTREACHED();
 #else
-  GLHelper* gl_helper = ImageTransportFactory::GetInstance()->GetGLHelper();
+  display_compositor::GLHelper* gl_helper =
+      ImageTransportFactory::GetInstance()->GetGLHelper();
   // UpdateReleaseSyncToken() creates a new sync_token using |gl_helper|, so
   // wait the given |sync_token| using |gl_helper|.
   if (gl_helper) {
@@ -76,6 +78,50 @@ void ReturnVideoFrame(const scoped_refptr<VideoFrame>& video_frame,
   }
 #endif
 }
+
+std::unique_ptr<VideoCaptureJpegDecoder> CreateGpuJpegDecoder(
+    const VideoCaptureJpegDecoder::DecodeDoneCB& decode_done_cb) {
+  return base::MakeUnique<VideoCaptureGpuJpegDecoder>(decode_done_cb);
+}
+
+// Decorator for VideoFrameReceiver that forwards all incoming calls
+// to the Browser IO thread.
+class VideoFrameReceiverOnIOThread : public VideoFrameReceiver {
+ public:
+  explicit VideoFrameReceiverOnIOThread(
+      const base::WeakPtr<VideoFrameReceiver>& receiver)
+      : receiver_(receiver) {}
+
+  void OnIncomingCapturedVideoFrame(
+      std::unique_ptr<media::VideoCaptureDevice::Client::Buffer> buffer,
+      const scoped_refptr<media::VideoFrame>& frame) override {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&VideoFrameReceiver::OnIncomingCapturedVideoFrame, receiver_,
+                   base::Passed(&buffer), frame));
+  }
+
+  void OnError() override {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&VideoFrameReceiver::OnError, receiver_));
+  }
+
+  void OnLog(const std::string& message) override {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&VideoFrameReceiver::OnLog, receiver_, message));
+  }
+
+  void OnBufferDestroyed(int buffer_id_to_drop) override {
+    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                            base::Bind(&VideoFrameReceiver::OnBufferDestroyed,
+                                       receiver_, buffer_id_to_drop));
+  }
+
+ private:
+  base::WeakPtr<VideoFrameReceiver> receiver_;
+};
 
 }  // anonymous namespace
 
@@ -130,7 +176,7 @@ struct VideoCaptureController::ControllerClient {
 };
 
 VideoCaptureController::VideoCaptureController(int max_buffers)
-    : buffer_pool_(new VideoCaptureBufferPool(max_buffers)),
+    : buffer_pool_(new VideoCaptureBufferPoolImpl(max_buffers)),
       state_(VIDEO_CAPTURE_STATE_STARTED),
       has_received_frames_(false),
       weak_ptr_factory_(this) {
@@ -145,8 +191,13 @@ VideoCaptureController::GetWeakPtrForIOThread() {
 std::unique_ptr<media::VideoCaptureDevice::Client>
 VideoCaptureController::NewDeviceClient() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  return base::WrapUnique(new VideoCaptureDeviceClient(
-      this->GetWeakPtrForIOThread(), buffer_pool_));
+  return base::MakeUnique<VideoCaptureDeviceClient>(
+      base::MakeUnique<VideoFrameReceiverOnIOThread>(
+          this->GetWeakPtrForIOThread()),
+      buffer_pool_,
+      base::Bind(&CreateGpuJpegDecoder,
+                 base::Bind(&VideoFrameReceiver::OnIncomingCapturedVideoFrame,
+                            this->GetWeakPtrForIOThread())));
 }
 
 void VideoCaptureController::AddClient(
@@ -177,7 +228,7 @@ void VideoCaptureController::AddClient(
   }
 
   // If this is the first client added to the controller, cache the parameters.
-  if (!controller_clients_.size())
+  if (controller_clients_.empty())
     video_capture_format_ = params.requested_format;
 
   // Signal error in case device is already in error state.
@@ -190,12 +241,12 @@ void VideoCaptureController::AddClient(
   if (FindClient(id, event_handler, controller_clients_))
     return;
 
-  ControllerClient* client = new ControllerClient(
+  std::unique_ptr<ControllerClient> client = base::MakeUnique<ControllerClient>(
       id, event_handler, render_process, session_id, params);
   // If we already have gotten frame_info from the device, repeat it to the new
   // client.
   if (state_ == VIDEO_CAPTURE_STATE_STARTED) {
-    controller_clients_.push_back(client);
+    controller_clients_.push_back(std::move(client));
     return;
   }
 }
@@ -216,8 +267,10 @@ int VideoCaptureController::RemoveClient(
   client->active_buffers.clear();
 
   int session_id = client->session_id;
-  controller_clients_.remove(client);
-  delete client;
+  controller_clients_.remove_if(
+      [client](const std::unique_ptr<ControllerClient>& ptr) {
+        return ptr.get() == client;
+      });
 
   return session_id;
 }
@@ -263,7 +316,7 @@ int VideoCaptureController::GetClientCount() const {
 
 bool VideoCaptureController::HasActiveClient() const {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  for (ControllerClient* client : controller_clients_) {
+  for (const auto& client : controller_clients_) {
     if (!client->paused)
       return true;
   }
@@ -272,7 +325,7 @@ bool VideoCaptureController::HasActiveClient() const {
 
 bool VideoCaptureController::HasPausedClient() const {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  for (ControllerClient* client : controller_clients_) {
+  for (const auto& client : controller_clients_) {
     if (client->paused)
       return true;
   }
@@ -348,14 +401,11 @@ VideoCaptureController::GetVideoCaptureFormat() const {
 }
 
 VideoCaptureController::~VideoCaptureController() {
-  STLDeleteContainerPointers(controller_clients_.begin(),
-                             controller_clients_.end());
 }
 
-void VideoCaptureController::DoIncomingCapturedVideoFrameOnIOThread(
+void VideoCaptureController::OnIncomingCapturedVideoFrame(
     std::unique_ptr<media::VideoCaptureDevice::Client::Buffer> buffer,
-    const scoped_refptr<VideoFrame>& frame,
-    const base::TimeTicks& timestamp) {
+    const scoped_refptr<VideoFrame>& frame) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   const int buffer_id = buffer->id();
   DCHECK_NE(buffer_id, VideoCaptureBufferPool::kInvalidId);
@@ -392,12 +442,10 @@ void VideoCaptureController::DoIncomingCapturedVideoFrameOnIOThread(
       // On the first use of a buffer on a client, share the memory handles.
       const bool is_new_buffer = client->known_buffers.insert(buffer_id).second;
       if (is_new_buffer)
-        DoNewBufferOnIOThread(client, buffer.get(), frame);
+        DoNewBufferOnIOThread(client.get(), buffer.get(), frame);
 
-      client->event_handler->OnBufferReady(client->controller_id,
-                                           buffer_id,
-                                           frame,
-                                           timestamp);
+      client->event_handler->OnBufferReady(client->controller_id, buffer_id,
+                                           frame);
       const bool inserted =
           client->active_buffers.insert(std::make_pair(buffer_id, frame))
               .second;
@@ -426,27 +474,26 @@ void VideoCaptureController::DoIncomingCapturedVideoFrameOnIOThread(
   buffer_pool_->HoldForConsumers(buffer_id, count);
 }
 
-void VideoCaptureController::DoErrorOnIOThread() {
+void VideoCaptureController::OnError() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   state_ = VIDEO_CAPTURE_STATE_ERROR;
 
-  for (const auto* client : controller_clients_) {
+  for (const auto& client : controller_clients_) {
     if (client->session_closed)
        continue;
     client->event_handler->OnError(client->controller_id);
   }
 }
 
-void VideoCaptureController::DoLogOnIOThread(const std::string& message) {
+void VideoCaptureController::OnLog(const std::string& message) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   MediaStreamManager::SendMessageToNativeLog("Video capture: " + message);
 }
 
-void VideoCaptureController::DoBufferDestroyedOnIOThread(
-    int buffer_id_to_drop) {
+void VideoCaptureController::OnBufferDestroyed(int buffer_id_to_drop) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  for (auto* client : controller_clients_) {
+  for (const auto& client : controller_clients_) {
     if (client->session_closed)
       continue;
 
@@ -497,21 +544,21 @@ VideoCaptureController::ControllerClient* VideoCaptureController::FindClient(
     VideoCaptureControllerID id,
     VideoCaptureControllerEventHandler* handler,
     const ControllerClients& clients) {
-  for (auto* client : clients) {
+  for (const auto& client : clients) {
     if (client->controller_id == id && client->event_handler == handler)
-      return client;
+      return client.get();
   }
-  return NULL;
+  return nullptr;
 }
 
 VideoCaptureController::ControllerClient* VideoCaptureController::FindClient(
     int session_id,
     const ControllerClients& clients) {
-  for (auto client : clients) {
+  for (const auto& client : clients) {
     if (client->session_id == session_id)
-      return client;
+      return client.get();
   }
-  return NULL;
+  return nullptr;
 }
 
 }  // namespace content

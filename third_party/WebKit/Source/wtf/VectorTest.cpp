@@ -27,8 +27,8 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/HashSet.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/Optional.h"
+#include "wtf/PtrUtil.h"
 #include "wtf/text/WTFString.h"
 #include <memory>
 
@@ -162,17 +162,17 @@ private:
     int* m_destructNumber;
 };
 
-typedef WTF::Vector<OwnPtr<DestructCounter>> OwnPtrVector;
+typedef WTF::Vector<std::unique_ptr<DestructCounter>> OwnPtrVector;
 
 TEST(VectorTest, OwnPtr)
 {
     int destructNumber = 0;
     OwnPtrVector vector;
-    vector.append(adoptPtr(new DestructCounter(0, &destructNumber)));
-    vector.append(adoptPtr(new DestructCounter(1, &destructNumber)));
+    vector.append(wrapUnique(new DestructCounter(0, &destructNumber)));
+    vector.append(wrapUnique(new DestructCounter(1, &destructNumber)));
     EXPECT_EQ(2u, vector.size());
 
-    OwnPtr<DestructCounter>& counter0 = vector.first();
+    std::unique_ptr<DestructCounter>& counter0 = vector.first();
     ASSERT_EQ(0, counter0->get());
     int counter1 = vector.last()->get();
     ASSERT_EQ(1, counter1);
@@ -180,7 +180,7 @@ TEST(VectorTest, OwnPtr)
 
     size_t index = 0;
     for (OwnPtrVector::iterator iter = vector.begin(); iter != vector.end(); ++iter) {
-        OwnPtr<DestructCounter>* refCounter = iter;
+        std::unique_ptr<DestructCounter>* refCounter = iter;
         EXPECT_EQ(index, static_cast<size_t>(refCounter->get()->get()));
         EXPECT_EQ(index, static_cast<size_t>((*refCounter)->get()));
         index++;
@@ -188,7 +188,7 @@ TEST(VectorTest, OwnPtr)
     EXPECT_EQ(0, destructNumber);
 
     for (index = 0; index < vector.size(); index++) {
-        OwnPtr<DestructCounter>& refCounter = vector[index];
+        std::unique_ptr<DestructCounter>& refCounter = vector[index];
         EXPECT_EQ(index, static_cast<size_t>(refCounter->get()));
     }
     EXPECT_EQ(0, destructNumber);
@@ -200,21 +200,21 @@ TEST(VectorTest, OwnPtr)
     EXPECT_EQ(1u, vector.size());
     EXPECT_EQ(1, destructNumber);
 
-    OwnPtr<DestructCounter> ownCounter1 = vector[0].release();
+    std::unique_ptr<DestructCounter> ownCounter1 = std::move(vector[0]);
     vector.remove(0);
     ASSERT_EQ(counter1, ownCounter1->get());
     ASSERT_EQ(0u, vector.size());
     ASSERT_EQ(1, destructNumber);
 
-    ownCounter1.clear();
+    ownCounter1.reset();
     EXPECT_EQ(2, destructNumber);
 
     size_t count = 1025;
     destructNumber = 0;
     for (size_t i = 0; i < count; i++)
-        vector.prepend(adoptPtr(new DestructCounter(i, &destructNumber)));
+        vector.prepend(wrapUnique(new DestructCounter(i, &destructNumber)));
 
-    // Vector relocation must not destruct OwnPtr element.
+    // Vector relocation must not destruct std::unique_ptr element.
     EXPECT_EQ(0, destructNumber);
     EXPECT_EQ(count, vector.size());
 
@@ -614,6 +614,116 @@ TEST(VectorTest, UniquePtr)
     ASSERT_EQ(3u, vector.size());
     EXPECT_EQ(-1, *vector[0]);
 }
+
+bool isOneTwoThree(const Vector<int>& vector)
+{
+    return vector.size() == 3 && vector[0] == 1 && vector[1] == 2 && vector[2] == 3;
+}
+
+Vector<int> returnOneTwoThree()
+{
+    return {1, 2, 3};
+}
+
+TEST(VectorTest, InitializerList)
+{
+    Vector<int> empty({});
+    EXPECT_TRUE(empty.isEmpty());
+
+    Vector<int> one({1});
+    ASSERT_EQ(1u, one.size());
+    EXPECT_EQ(1, one[0]);
+
+    Vector<int> oneTwoThree({1, 2, 3});
+    ASSERT_EQ(3u, oneTwoThree.size());
+    EXPECT_EQ(1, oneTwoThree[0]);
+    EXPECT_EQ(2, oneTwoThree[1]);
+    EXPECT_EQ(3, oneTwoThree[2]);
+
+    // Put some jank so we can check if the assignments later can clear them.
+    empty.append(9999);
+    one.append(9999);
+    oneTwoThree.append(9999);
+
+    empty = {};
+    EXPECT_TRUE(empty.isEmpty());
+
+    one = {1};
+    ASSERT_EQ(1u, one.size());
+    EXPECT_EQ(1, one[0]);
+
+    oneTwoThree = {1, 2, 3};
+    ASSERT_EQ(3u, oneTwoThree.size());
+    EXPECT_EQ(1, oneTwoThree[0]);
+    EXPECT_EQ(2, oneTwoThree[1]);
+    EXPECT_EQ(3, oneTwoThree[2]);
+
+    // Other ways of construction: as a function parameter and in a return statement.
+    EXPECT_TRUE(isOneTwoThree({1, 2, 3}));
+    EXPECT_TRUE(isOneTwoThree(returnOneTwoThree()));
+
+    // The tests below correspond to the cases in the "if" branch in operator=(std::initializer_list<T>).
+
+    // Shrinking.
+    Vector<int, 1> vector1(3); // capacity = 3.
+    vector1 = {1, 2};
+    ASSERT_EQ(2u, vector1.size());
+    EXPECT_EQ(1, vector1[0]);
+    EXPECT_EQ(2, vector1[1]);
+
+    // Expanding.
+    Vector<int, 1> vector2(3);
+    vector2 = {1, 2, 3, 4};
+    ASSERT_EQ(4u, vector2.size());
+    EXPECT_EQ(1, vector2[0]);
+    EXPECT_EQ(2, vector2[1]);
+    EXPECT_EQ(3, vector2[2]);
+    EXPECT_EQ(4, vector2[3]);
+
+    // Exact match.
+    Vector<int, 1> vector3(3);
+    vector3 = {1, 2, 3};
+    ASSERT_EQ(3u, vector3.size());
+    EXPECT_EQ(1, vector3[0]);
+    EXPECT_EQ(2, vector3[1]);
+    EXPECT_EQ(3, vector3[2]);
+}
+
+TEST(VectorTest, Optional)
+{
+    Optional<Vector<int>> vector;
+    EXPECT_FALSE(vector);
+    vector.emplace(3);
+    EXPECT_TRUE(vector);
+    EXPECT_EQ(3u, vector->size());
+}
+
+TEST(VectorTest, emplaceAppend)
+{
+    struct Item {
+        Item(int value1, int value2) : value1(value1), value2(value2) {}
+        int value1;
+        int value2;
+    };
+
+    Vector<Item> vector;
+    vector.emplaceAppend(1, 2);
+    vector.emplaceAppend(3, 4);
+
+    EXPECT_EQ(2u, vector.size());
+    EXPECT_EQ(1, vector[0].value1);
+    EXPECT_EQ(2, vector[0].value2);
+    EXPECT_EQ(3, vector[1].value1);
+    EXPECT_EQ(4, vector[1].value2);
+}
+
+static_assert(VectorTraits<int>::canCopyWithMemcpy, "int should be copied with memcopy.");
+static_assert(VectorTraits<char>::canCopyWithMemcpy, "char should be copied with memcpy.");
+static_assert(VectorTraits<LChar>::canCopyWithMemcpy, "LChar should be copied with memcpy.");
+static_assert(VectorTraits<UChar>::canCopyWithMemcpy, "UChar should be copied with memcpy.");
+
+class UnknownType;
+static_assert(VectorTraits<UnknownType*>::canCopyWithMemcpy, "Pointers should be copied with memcpy.");
 
 } // anonymous namespace
 

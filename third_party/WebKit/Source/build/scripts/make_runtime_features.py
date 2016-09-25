@@ -43,11 +43,13 @@ class RuntimeFeatureWriter(in_generator.Writer):
         'status': ['stable', 'experimental', 'test'],
     }
     defaults = {
-        'origin_trial_feature_name': None,
         'condition': None,
-        'implied_by': [],
-        'depends_on': [],
         'custom': False,
+        'depends_on': [],
+        'feature_policy': None,
+        'implied_by': [],
+        'origin_trial_feature_name': None,
+        'settable_from_internals': False,
         'status': None,
     }
 

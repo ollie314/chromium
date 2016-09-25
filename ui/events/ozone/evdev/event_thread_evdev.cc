@@ -9,9 +9,10 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
+#include "ui/events/ozone/evdev/cursor_delegate_evdev.h"
 #include "ui/events/ozone/evdev/device_event_dispatcher_evdev.h"
 #include "ui/events/ozone/evdev/input_device_factory_evdev.h"
 #include "ui/events/ozone/evdev/input_device_factory_evdev_proxy.h"
@@ -41,6 +42,8 @@ class EvdevThread : public base::Thread {
     std::unique_ptr<InputDeviceFactoryEvdevProxy> proxy(
         new InputDeviceFactoryEvdevProxy(base::ThreadTaskRunnerHandle::Get(),
                                          input_device_factory_->GetWeakPtr()));
+
+    cursor_->InitializeOnEvdev();
 
     init_runner_->PostTask(FROM_HERE,
                            base::Bind(init_callback_, base::Passed(&proxy)));
@@ -76,8 +79,10 @@ void EventThreadEvdev::Start(
     const EventThreadStartCallback& callback) {
   TRACE_EVENT0("evdev", "EventThreadEvdev::Start");
   thread_.reset(new EvdevThread(std::move(dispatcher), cursor, callback));
-  if (!thread_->StartWithOptions(
-          base::Thread::Options(base::MessageLoop::TYPE_UI, 0)))
+  base::Thread::Options thread_options;
+  thread_options.message_loop_type = base::MessageLoop::TYPE_UI;
+  thread_options.priority = base::ThreadPriority::DISPLAY;
+  if (!thread_->StartWithOptions(thread_options))
     LOG(FATAL) << "Failed to create input thread";
 }
 

@@ -10,12 +10,12 @@ group("browser") {
   testonly = true
 
   deps = [
+    ":host",
     ":lib",
-    ":message_filter_lib",
   ]
 }
 
-source_set("lib") {
+static_library("lib") {
   sources = [
     "pref_names.cc",
     "pref_names.h",
@@ -30,16 +30,16 @@ source_set("lib") {
   ]
 }
 
-source_set("message_filter_lib") {
+static_library("host") {
   sources = [
-    "startup_metric_message_filter.cc",
-    "startup_metric_message_filter.h",
+    "startup_metric_host_impl.cc",
+    "startup_metric_host_impl.h",
   ]
 
   deps = [
     ":lib",
     "//base",
-    "//components/startup_metric_utils/common",
+    "//components/startup_metric_utils/common:interfaces",
     "//content/public/browser",
   ]
 }

@@ -37,7 +37,11 @@
 
 #include "platform/image-decoders/jpeg/JPEGImageDecoder.h"
 
+#include "platform/Histogram.h"
 #include "platform/PlatformInstrumentation.h"
+#include "wtf/PtrUtil.h"
+#include "wtf/Threading.h"
+#include <memory>
 
 extern "C" {
 #include <stdio.h> // jpeglib.h needs stdio FILE.
@@ -423,6 +427,12 @@ public:
 
             m_state = JPEG_START_DECOMPRESS;
 
+            {
+                DEFINE_THREAD_SAFE_STATIC_LOCAL(blink::CustomCountHistogram,
+                    dimensionsLocationHistogram,
+                    new blink::CustomCountHistogram("Blink.DecodedImage.EffectiveDimensionsLocation.JPEG", 0, 50000, 50));
+                dimensionsLocationHistogram.count(m_nextReadPosition - m_info.src->bytes_in_buffer - 1);
+            }
             // We can fill in the size now that the header is available.
             if (!m_decoder->setSize(m_info.image_width, m_info.image_height))
                 return false;
@@ -441,17 +451,17 @@ public:
 
             m_decoder->setOrientation(readImageOrientation(info()));
 
-#if USE(QCMSLIB)
             // Allow color management of the decoded RGBA pixels if possible.
             if (!m_decoder->ignoresGammaAndColorProfile()) {
 #if USE(ICCJPEG)
                 JOCTET* profile = nullptr;
                 unsigned profileLength = 0;
                 if (read_icc_profile(info(), &profile, &profileLength)) {
-                    decoder()->setColorProfileAndTransform(reinterpret_cast<char*>(profile), profileLength, colorSpaceHasAlpha(info()->out_color_space), false /* useSRGB */);
+                    decoder()->setColorProfileAndComputeTransform(reinterpret_cast<char*>(profile), profileLength, colorSpaceHasAlpha(info()->out_color_space), false /* useSRGB */);
                     free(profile);
                 }
 #endif // USE(ICCJPEG)
+#if USE(QCMSLIB)
                 if (decoder()->colorTransform()) {
                     overrideColorSpace = JCS_UNKNOWN;
 #if defined(TURBO_JPEG_RGB_SWIZZLE)
@@ -460,8 +470,8 @@ public:
                         m_info.out_color_space = JCS_EXT_RGBA;
 #endif // defined(TURBO_JPEG_RGB_SWIZZLE)
                 }
-            }
 #endif // USE(QCMSLIB)
+            }
             if (overrideColorSpace == JCS_YCbCr) {
                 m_info.out_color_space = JCS_YCbCr;
                 m_info.raw_data_out = TRUE;
@@ -785,7 +795,7 @@ bool JPEGImageDecoder::decodeToYUV()
     return !failed();
 }
 
-void JPEGImageDecoder::setImagePlanes(PassOwnPtr<ImagePlanes> imagePlanes)
+void JPEGImageDecoder::setImagePlanes(std::unique_ptr<ImagePlanes> imagePlanes)
 {
     m_imagePlanes = std::move(imagePlanes);
 }
@@ -917,7 +927,7 @@ bool JPEGImageDecoder::outputScanlines()
         ASSERT(info->output_width == static_cast<JDIMENSION>(m_decodedSize.width()));
         ASSERT(info->output_height == static_cast<JDIMENSION>(m_decodedSize.height()));
 
-        if (!buffer.setSize(info->output_width, info->output_height))
+        if (!buffer.setSizeAndColorProfile(info->output_width, info->output_height, colorProfile()))
             return setFailed();
 
         // The buffer is transparent outside the decoded area while the image is
@@ -980,7 +990,7 @@ void JPEGImageDecoder::decode(bool onlySize)
         return;
 
     if (!m_reader) {
-        m_reader = adoptPtr(new JPEGImageReader(this));
+        m_reader = wrapUnique(new JPEGImageReader(this));
         m_reader->setData(m_data.get());
     }
 
@@ -991,7 +1001,7 @@ void JPEGImageDecoder::decode(bool onlySize)
 
     // If decoding is done or failed, we don't need the JPEGImageReader anymore.
     if (isComplete(this, onlySize) || failed())
-        m_reader.clear();
+        m_reader.reset();
 }
 
 } // namespace blink

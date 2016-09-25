@@ -33,13 +33,13 @@
 
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebScheduler.h"
 #include "wtf/Forward.h"
 #include "wtf/HashMap.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/text/WTFString.h"
+#include <memory>
 
 namespace blink {
 
@@ -85,21 +85,22 @@ private:
     static bool mustReplaceCurrentItem(LocalFrame* targetFrame);
 
     Member<LocalFrame> m_frame;
-    OwnPtr<CancellableTaskFactory> m_navigateTaskFactory;
+    std::unique_ptr<CancellableTaskFactory> m_navigateTaskFactory;
     Member<ScheduledNavigation> m_redirect;
+    WebScheduler::NavigatingFrameType m_frameType; // Exists because we can't deref m_frame in destructor.
 };
 
-class NavigationDisablerForBeforeUnload {
-    WTF_MAKE_NONCOPYABLE(NavigationDisablerForBeforeUnload);
+class NavigationDisablerForUnload {
+    WTF_MAKE_NONCOPYABLE(NavigationDisablerForUnload);
     STACK_ALLOCATED();
 public:
-    NavigationDisablerForBeforeUnload()
+    NavigationDisablerForUnload()
     {
         s_navigationDisableCount++;
     }
-    ~NavigationDisablerForBeforeUnload()
+    ~NavigationDisablerForUnload()
     {
-        ASSERT(s_navigationDisableCount);
+        DCHECK(s_navigationDisableCount);
         s_navigationDisableCount--;
     }
     static bool isNavigationAllowed() { return !s_navigationDisableCount; }

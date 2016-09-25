@@ -64,11 +64,14 @@ class TraceValidatorBase(gpu_test_base.ValidatorBase):
 
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--enable-logging')
+    options.AppendExtraBrowserArgs('--enable-experimental-canvas-features')
 
   def WillNavigateToPage(self, page, tab):
     config = tracing_config.TracingConfig()
+    config.chrome_trace_config.category_filter.AddExcludedCategory('*')
     for cat in TOPLEVEL_CATEGORIES:
-      config.tracing_category_filter.AddDisabledByDefault(cat)
+      config.chrome_trace_config.category_filter.AddDisabledByDefault(
+          cat)
     config.enable_chrome_trace = True
     tab.browser.platform.tracing_controller.StartTracing(config, 60)
 
@@ -108,9 +111,6 @@ class TraceTest(TraceTestBase):
 
   def _CreateExpectations(self):
     return trace_test_expectations.TraceTestExpectations()
-
-  def CustomizeBrowserOptions(self, options):
-    options.enable_logging = True
 
 
 class DeviceTraceTest(TraceTestBase):

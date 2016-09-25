@@ -37,10 +37,12 @@
 #include "bindings/core/v8/V8PerIsolateData.h"
 #include "bindings/core/v8/V8ScriptRunner.h"
 #include "bindings/core/v8/V8Window.h"
+#include "core/dom/Document.h"
+#include "core/frame/LocalDOMWindow.h"
 
 namespace blink {
 
-v8::Local<v8::Object> V8DOMWrapper::createWrapper(v8::Isolate* isolate, v8::Local<v8::Object> creationContext, const WrapperTypeInfo* type, ScriptWrappable* scriptWrappable)
+v8::Local<v8::Object> V8DOMWrapper::createWrapper(v8::Isolate* isolate, v8::Local<v8::Object> creationContext, const WrapperTypeInfo* type)
 {
     ASSERT(!type->equals(&V8Window::wrapperTypeInfo));
     // According to https://html.spec.whatwg.org/multipage/browsers.html#security-location,
@@ -60,11 +62,8 @@ v8::Local<v8::Object> V8DOMWrapper::createWrapper(v8::Isolate* isolate, v8::Loca
         // V8PerContextData::createWrapperFromCache, though there is no need to
         // cache resulting objects or their constructors.
         const DOMWrapperWorld& world = DOMWrapperWorld::world(scope.context());
-        if (!type->domTemplate(isolate, world)->InstanceTemplate()->NewInstance(scope.context()).ToLocal(&wrapper)) {
-            // Nothing to do.
-        }
+        wrapper = type->domTemplate(isolate, world)->InstanceTemplate()->NewInstance(scope.context()).ToLocalChecked();
     }
-
     return wrapper;
 }
 
@@ -107,12 +106,25 @@ void V8WrapperInstantiationScope::securityCheck(v8::Isolate* isolate, v8::Local<
     // If the context is different, we need to make sure that the current
     // context has access to the creation context.
     Frame* frame = toFrameIfNotDetached(contextForWrapper);
-    if (!frame)
+    if (!frame) {
+        // Sandbox detached frames - they can't create cross origin objects.
+        LocalDOMWindow* callingWindow = currentDOMWindow(isolate);
+        DOMWindow* targetWindow = toDOMWindow(contextForWrapper);
+        // TODO(jochen): Currently, Location is the only object for which we can reach this code path. Should be generalized.
+        ExceptionState exceptionState(ExceptionState::ConstructionContext, "Location", contextForWrapper->Global(), isolate);
+        if (BindingSecurity::shouldAllowAccessToDetachedWindow(callingWindow, targetWindow, exceptionState))
+            return;
+
+        CHECK_EQ(SecurityError, exceptionState.code());
         return;
+    }
     const DOMWrapperWorld& currentWorld = DOMWrapperWorld::world(m_context);
     RELEASE_ASSERT(currentWorld.worldId() == DOMWrapperWorld::world(contextForWrapper).worldId());
-    if (currentWorld.isMainWorld()) {
-        RELEASE_ASSERT(BindingSecurity::shouldAllowAccessToFrame(isolate, callingDOMWindow(isolate), frame, DoNotReportSecurityError));
+    // TODO(jochen): Add the interface name here once this is generalized.
+    ExceptionState exceptionState(ExceptionState::ConstructionContext, nullptr, contextForWrapper->Global(), isolate);
+    if (currentWorld.isMainWorld() && !BindingSecurity::shouldAllowAccessToFrame(currentDOMWindow(isolate), frame, exceptionState)) {
+        CHECK_EQ(SecurityError, exceptionState.code());
+        return;
     }
 }
 
@@ -121,10 +133,9 @@ void V8WrapperInstantiationScope::convertException()
     v8::Isolate* isolate = m_context->GetIsolate();
     // TODO(jochen): Currently, Location is the only object for which we can reach this code path. Should be generalized.
     ExceptionState exceptionState(ExceptionState::ConstructionContext, "Location", isolate->GetCurrentContext()->Global(), isolate);
-    LocalDOMWindow* callingWindow = callingDOMWindow(isolate);
+    LocalDOMWindow* callingWindow = currentDOMWindow(isolate);
     DOMWindow* targetWindow = toDOMWindow(m_context);
     exceptionState.throwSecurityError(targetWindow->sanitizedCrossDomainAccessErrorMessage(callingWindow), targetWindow->crossDomainAccessErrorMessage(callingWindow));
-    exceptionState.throwIfNeeded();
 }
 
 } // namespace blink

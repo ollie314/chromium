@@ -30,7 +30,6 @@
 from modular_build import read_file, write_file
 import os
 import os.path as path
-import generate_injected_script_externs
 import generate_protocol_externs
 import modular_build
 import re
@@ -72,13 +71,14 @@ def to_platform_path_exact(filepath):
 scripts_path = path.dirname(path.abspath(__file__))
 devtools_path = path.dirname(scripts_path)
 inspector_path = path.join(path.dirname(devtools_path), 'core', 'inspector')
-v8_inspector_path = path.join(path.dirname(devtools_path), 'platform', 'v8_inspector')
+# TODO(dgozman): move these checks to v8.
+v8_inspector_path = path.normpath(path.join(path.dirname(devtools_path), os.pardir, os.pardir, os.pardir, 'v8', 'src', 'inspector'))
 devtools_frontend_path = path.join(devtools_path, 'front_end')
 global_externs_file = to_platform_path(path.join(devtools_frontend_path, 'externs.js'))
 protocol_externs_file = path.join(devtools_frontend_path, 'protocol_externs.js')
-injected_script_source_name = path.join(v8_inspector_path, 'InjectedScriptSource.js')
+injected_script_source_name = path.join(v8_inspector_path, 'injected-script-source.js')
 injected_script_externs_file = path.join(v8_inspector_path, 'injected_script_externs.js')
-debugger_script_source_name = path.join(v8_inspector_path, 'DebuggerScript.js')
+debugger_script_source_name = path.join(v8_inspector_path, 'debugger-script.js')
 debugger_script_externs_file = path.join(v8_inspector_path, 'debugger_script_externs.js')
 
 jsmodule_name_prefix = 'jsmodule_'
@@ -87,8 +87,8 @@ runtime_module_name = '_runtime'
 type_checked_jsdoc_tags_list = ['param', 'return', 'type', 'enum']
 type_checked_jsdoc_tags_or = '|'.join(type_checked_jsdoc_tags_list)
 
-# Basic regex for invalid JsDoc types: an object type name ([A-Z][A-Za-z0-9.]+[A-Za-z0-9]) not preceded by '!', '?', ':' (this, new), or '.' (object property).
-invalid_type_regex = re.compile(r'@(?:' + type_checked_jsdoc_tags_or + r')\s*\{.*(?<![!?:.A-Za-z0-9])([A-Z][A-Za-z0-9.]+[A-Za-z0-9])[^/]*\}')
+# Basic regex for invalid JsDoc types: an object type name ([A-Z][_A-Za-z0-9.]+[A-Za-z0-9]) not preceded by '!', '?', ':' (this, new), or '.' (object property).
+invalid_type_regex = re.compile(r'@(?:' + type_checked_jsdoc_tags_or + r')\s*\{.*(?<![!?:._A-Za-z0-9])([A-Z][_A-Za-z0-9.]+[A-Za-z0-9])[^/]*\}')
 invalid_type_designator_regex = re.compile(r'@(?:' + type_checked_jsdoc_tags_or + r')\s*.*(?<![{: ])([?!])=?\}')
 invalid_non_object_type_regex = re.compile(r'@(?:' + type_checked_jsdoc_tags_or + r')\s*\{.*(![a-z]+)[^/]*\}')
 error_warning_regex = re.compile(r'WARNING|ERROR')
@@ -97,7 +97,7 @@ loaded_css_regex = re.compile(r'(?:registerRequiredCSS|WebInspector\.View\.creat
 java_build_regex = re.compile(r'^\w+ version "(\d+)\.(\d+)')
 errors_found = False
 
-generate_protocol_externs.generate_protocol_externs(protocol_externs_file, path.join(devtools_path, 'protocol.json'))
+generate_protocol_externs.generate_protocol_externs(protocol_externs_file, path.join(inspector_path, 'browser_protocol.json'), path.join(v8_inspector_path, 'js_protocol.json'))
 
 
 # Based on http://stackoverflow.com/questions/377017/test-if-executable-exists-in-python.
@@ -126,7 +126,7 @@ def error_excepthook(exctype, value, traceback):
     sys.__excepthook__(exctype, value, traceback)
 sys.excepthook = error_excepthook
 
-application_descriptors = ['inspector.json', 'toolbox.json']
+application_descriptors = ['inspector.json', 'toolbox.json', 'formatter_worker.json', 'heap_snapshot_worker.json', 'temp_storage_shared_worker.json']
 loader = modular_build.DescriptorLoader(devtools_frontend_path)
 descriptors = loader.load_applications(application_descriptors)
 modules_by_name = descriptors.modules
@@ -420,6 +420,7 @@ print 'Compiling devtools.js...'
 command = spawned_compiler_command + [
     '--externs', to_platform_path(global_externs_file),
     '--externs', to_platform_path(path.join(devtools_frontend_path, 'host', 'InspectorFrontendHostAPI.js')),
+    '--jscomp_off=externsValidation',
     '--module', jsmodule_name_prefix + 'devtools_js' + ':1',
     '--js', to_platform_path(path.join(devtools_frontend_path, 'devtools.js'))
 ]

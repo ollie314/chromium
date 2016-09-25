@@ -113,7 +113,8 @@ struct ScopedConstants {
 // decoded successfully.
 
 struct MapKeyTypes {
-  map<bool, bool> f0;
+  // TODO(yzshen): WTF::HashMap doesn't support bool as key.
+  // map<bool, bool> f0;
   map<int8, int8> f1;
   map<uint8, uint8> f2;
   map<int16, int16> f3;
@@ -125,6 +126,8 @@ struct MapKeyTypes {
   map<float, float> f9;
   map<double, double> f10;
   map<string, string> f11;
+  // TODO(tibell): JS/Java don't support struct as key.
+  // map<Rect, Rect> f12;
 };
 
 // Used to verify that various map value types can be encoded and decoded
@@ -155,6 +158,8 @@ struct ArrayValueTypes {
   array<int64> f3;
   array<float> f4;
   array<double> f5;
+  array<SomeInterface> f6;
+  array<SomeInterface&> f7;
 };
 
 // Used to verify that various float and double values can be encoded and
@@ -376,4 +381,24 @@ struct ContainsOther {
 
 struct ContainsInterfaceRequest {
   SomeInterface& request;
+};
+
+// Used to verify that boolean fields are correctly serialized/deserialized.
+
+struct SingleBoolStruct {
+  bool value;
+};
+
+// Used to verify that structs containing typemapped types can be hashed (if the
+// typemapped type itself is hashable).
+
+struct ContainsHashable {
+  TypemappedRect rect;
+};
+
+// Used to test that nested structs can be hashed. The nested struct mustn't be
+// nullable.
+
+struct SimpleNestedStruct {
+  ContainsOther nested;
 };

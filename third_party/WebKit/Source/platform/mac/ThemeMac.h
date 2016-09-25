@@ -47,7 +47,6 @@ public:
 
     virtual bool controlRequiresPreWhiteSpace(ControlPart part) const { return part == PushButtonPart; }
 
-    virtual void paint(ControlPart, ControlStates, GraphicsContext&, const IntRect&, float zoomFactor, ScrollableArea*) const;
     virtual void addVisualOverflow(ControlPart, ControlStates, float zoomFactor, IntRect& borderBox) const;
 
     // Inflate an IntRect to accout for specific padding around margins.
@@ -62,12 +61,28 @@ public:
     // Inflate an IntRect to account for any bleeding that would happen due to anti-aliasing.
     static PLATFORM_EXPORT IntRect inflateRectForAA(const IntRect&);
 
-    // Inflate an IntRect to account for its focus ring. This is only used when
-    // drawWithFrameDrawsFocusRing() returns true (otherwise, the focus ring's
-    // bounds could be accurately computed with -[NSCell focusRingMaskBoundsForFrame:inView:]).
+    // Inflate an IntRect to account for its focus ring.
+    // TODO: Consider using computing the focus ring's bounds with
+    // -[NSCell focusRingMaskBoundsForFrame:inView:]).
     static PLATFORM_EXPORT IntRect inflateRectForFocusRing(const IntRect&);
 
-    static PLATFORM_EXPORT bool drawWithFrameDrawsFocusRing();
+    static PLATFORM_EXPORT LengthSize checkboxSize(const FontDescription&, const LengthSize& zoomedSize, float zoomFactor);
+    static PLATFORM_EXPORT NSButtonCell *checkbox(ControlStates, const IntRect& zoomedRect, float zoomFactor);
+    static PLATFORM_EXPORT const IntSize* checkboxSizes();
+    static PLATFORM_EXPORT const int* checkboxMargins(NSControlSize);
+    static PLATFORM_EXPORT NSView* ensuredView(ScrollableArea*);
+
+    static PLATFORM_EXPORT const IntSize* radioSizes();
+    static PLATFORM_EXPORT const int* radioMargins(NSControlSize);
+    static PLATFORM_EXPORT LengthSize radioSize(const FontDescription&, const LengthSize& zoomedSize, float zoomFactor);
+    static PLATFORM_EXPORT NSButtonCell *radio(ControlStates, const IntRect& zoomedRect, float zoomFactor);
+
+    static PLATFORM_EXPORT const IntSize* buttonSizes();
+    static PLATFORM_EXPORT const int* buttonMargins(NSControlSize);
+    static PLATFORM_EXPORT NSButtonCell *button(ControlPart, ControlStates, const IntRect& zoomedRect, float zoomFactor);
+
+    static PLATFORM_EXPORT NSControlSize controlSizeFromPixelSize(const IntSize* sizes, const IntSize& minZoomedSize, float zoomFactor);
+    static PLATFORM_EXPORT const IntSize* stepperSizes();
 };
 
 } // namespace blink

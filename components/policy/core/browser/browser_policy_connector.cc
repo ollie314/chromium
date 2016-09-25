@@ -16,6 +16,7 @@
 #include "base/metrics/sparse_histogram.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/policy/core/common/cloud/cloud_policy_refresh_scheduler.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "components/policy/core/common/configuration_policy_provider.h"
@@ -23,9 +24,9 @@
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/policy/core/common/policy_statistics_collector.h"
 #include "components/policy/core/common/policy_switches.h"
+#include "components/policy/policy_constants.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "google_apis/gaia/gaia_auth_util.h"
-#include "policy/policy_constants.h"
 #include "third_party/icu/source/i18n/unicode/regex.h"
 
 namespace policy {
@@ -99,15 +100,14 @@ BrowserPolicyConnector::~BrowserPolicyConnector() {
 
 void BrowserPolicyConnector::InitInternal(
     PrefService* local_state,
-    scoped_ptr<DeviceManagementService> device_management_service) {
+    std::unique_ptr<DeviceManagementService> device_management_service) {
   DCHECK(!is_initialized());
 
   device_management_service_ = std::move(device_management_service);
 
   policy_statistics_collector_.reset(new policy::PolicyStatisticsCollector(
       base::Bind(&GetChromePolicyDetails), GetChromeSchema(),
-      GetPolicyService(), local_state,
-      base::MessageLoop::current()->task_runner()));
+      GetPolicyService(), local_state, base::ThreadTaskRunnerHandle::Get()));
   policy_statistics_collector_->Initialize();
 
   InitPolicyProviders();

@@ -7,7 +7,6 @@
 #include <stddef.h>
 
 #include "base/logging.h"
-#include "base/memory/linked_ptr.h"
 #include "content/public/child/worker_thread.h"
 #include "extensions/common/extension_api.h"
 #include "extensions/renderer/console.h"
@@ -125,6 +124,7 @@ void ObjectBackedNativeHandler::RouteFunction(
              v8_helpers::ToV8StringUnsafe(isolate, feature_name));
   v8::Local<v8::FunctionTemplate> function_template =
       v8::FunctionTemplate::New(isolate, Router, data);
+  function_template->RemovePrototype();
   v8::Local<v8::ObjectTemplate>::New(isolate, object_template_)
       ->Set(isolate, name.c_str(), function_template);
   router_data_.Append(data);
@@ -163,8 +163,12 @@ bool ObjectBackedNativeHandler::ContextCanAccessObject(
     return true;
   if (context == object->CreationContext())
     return true;
+  // TODO(lazyboy): ScriptContextSet isn't available on worker threads. We
+  // should probably use WorkerScriptContextSet somehow.
   ScriptContext* other_script_context =
-      ScriptContextSet::GetContextByObject(object);
+      content::WorkerThread::GetCurrentId() == 0
+          ? ScriptContextSet::GetContextByObject(object)
+          : nullptr;
   if (!other_script_context || !other_script_context->web_frame())
     return allow_null_context;
 

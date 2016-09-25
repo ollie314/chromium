@@ -12,35 +12,28 @@
 #include "wtf/Vector.h"
 #include <limits>
 
-#define TEST_TOV8(expected, value) testToV8(expected, value, __FILE__, __LINE__)
+#define TEST_TOV8(expected, value) testToV8(&scope, expected, value, __FILE__, __LINE__)
 
 namespace blink {
 
 namespace {
 
-class ToV8Test : public ::testing::Test {
-public:
-    ToV8Test() : m_scope(v8::Isolate::GetCurrent()) { }
-
-    template<typename T>
-    void testToV8(const char* expected, T value, const char* path, int lineNumber)
-    {
-        v8::Local<v8::Value> actual = toV8(value, m_scope.getScriptState()->context()->Global(), m_scope.isolate());
-        if (actual.IsEmpty()) {
-            ADD_FAILURE_AT(path, lineNumber) << "toV8 returns an empty value.";
-            return;
-        }
-        String actualString = toCoreString(actual->ToString(m_scope.context()).ToLocalChecked());
-        if (String(expected) != actualString) {
-            ADD_FAILURE_AT(path, lineNumber) << "toV8 returns an incorrect value.\n  Actual: " << actualString.utf8().data() << "\nExpected: " << expected;
-            return;
-        }
+template<typename T>
+void testToV8(V8TestingScope* scope, const char* expected, T value, const char* path, int lineNumber)
+{
+    v8::Local<v8::Value> actual = toV8(value, scope->context()->Global(), scope->isolate());
+    if (actual.IsEmpty()) {
+        ADD_FAILURE_AT(path, lineNumber) << "toV8 returns an empty value.";
+        return;
     }
+    String actualString = toCoreString(actual->ToString(scope->context()).ToLocalChecked());
+    if (String(expected) != actualString) {
+        ADD_FAILURE_AT(path, lineNumber) << "toV8 returns an incorrect value.\n  Actual: " << actualString.utf8().data() << "\nExpected: " << expected;
+        return;
+    }
+}
 
-    V8TestingScope m_scope;
-};
-
-class GarbageCollectedHolder : public GarbageCollectedFinalized<GarbageCollectedHolder> {
+class GarbageCollectedHolder : public GarbageCollected<GarbageCollectedHolder> {
 public:
     GarbageCollectedHolder(GarbageCollectedScriptWrappable* scriptWrappable)
         : m_scriptWrappable(scriptWrappable) { }
@@ -60,8 +53,9 @@ public:
     Persistent<GarbageCollectedScriptWrappable> m_scriptWrappable;
 };
 
-TEST_F(ToV8Test, garbageCollectedScriptWrappable)
+TEST(ToV8Test, garbageCollectedScriptWrappable)
 {
+    V8TestingScope scope;
     GarbageCollectedScriptWrappable* object = new GarbageCollectedScriptWrappable("world");
     GarbageCollectedHolder holder(object);
     OffHeapGarbageCollectedHolder offHeapHolder(object);
@@ -79,8 +73,9 @@ TEST_F(ToV8Test, garbageCollectedScriptWrappable)
     TEST_TOV8("null", offHeapHolder.m_scriptWrappable);
 }
 
-TEST_F(ToV8Test, string)
+TEST(ToV8Test, string)
 {
+    V8TestingScope scope;
     char arrayString[] = "arrayString";
     const char constArrayString[] = "constArrayString";
     TEST_TOV8("arrayString", arrayString);
@@ -97,8 +92,9 @@ TEST_F(ToV8Test, string)
     TEST_TOV8("", AtomicString());
 }
 
-TEST_F(ToV8Test, numeric)
+TEST(ToV8Test, numeric)
 {
+    V8TestingScope scope;
     TEST_TOV8("0", static_cast<int>(0));
     TEST_TOV8("1", static_cast<int>(1));
     TEST_TOV8("-1", static_cast<int>(-1));
@@ -121,35 +117,40 @@ TEST_F(ToV8Test, numeric)
     TEST_TOV8("-Infinity", -std::numeric_limits<double>::infinity());
 }
 
-TEST_F(ToV8Test, boolean)
+TEST(ToV8Test, boolean)
 {
+    V8TestingScope scope;
     TEST_TOV8("true", true);
     TEST_TOV8("false", false);
 }
 
-TEST_F(ToV8Test, v8Value)
+TEST(ToV8Test, v8Value)
 {
-    v8::Local<v8::Value> localValue(v8::Number::New(m_scope.isolate(), 1234));
-    v8::Local<v8::Value> handleValue(v8::Number::New(m_scope.isolate(), 5678));
+    V8TestingScope scope;
+    v8::Local<v8::Value> localValue(v8::Number::New(scope.isolate(), 1234));
+    v8::Local<v8::Value> handleValue(v8::Number::New(scope.isolate(), 5678));
 
     TEST_TOV8("1234", localValue);
     TEST_TOV8("5678", handleValue);
 }
 
-TEST_F(ToV8Test, undefinedType)
+TEST(ToV8Test, undefinedType)
 {
+    V8TestingScope scope;
     TEST_TOV8("undefined", ToV8UndefinedGenerator());
 }
 
-TEST_F(ToV8Test, scriptValue)
+TEST(ToV8Test, scriptValue)
 {
-    ScriptValue value(m_scope.getScriptState(), v8::Number::New(m_scope.isolate(), 1234));
+    V8TestingScope scope;
+    ScriptValue value(scope.getScriptState(), v8::Number::New(scope.isolate(), 1234));
 
     TEST_TOV8("1234", value);
 }
 
-TEST_F(ToV8Test, stringVectors)
+TEST(ToV8Test, stringVectors)
 {
+    V8TestingScope scope;
     Vector<String> stringVector;
     stringVector.append("foo");
     stringVector.append("bar");
@@ -161,8 +162,9 @@ TEST_F(ToV8Test, stringVectors)
     TEST_TOV8("quux,bar", atomicStringVector);
 }
 
-TEST_F(ToV8Test, basicTypeVectors)
+TEST(ToV8Test, basicTypeVectors)
 {
+    V8TestingScope scope;
     Vector<int> intVector;
     intVector.append(42);
     intVector.append(23);
@@ -200,22 +202,24 @@ TEST_F(ToV8Test, basicTypeVectors)
     TEST_TOV8("true,true,false", boolVector);
 }
 
-TEST_F(ToV8Test, dictionaryVector)
+TEST(ToV8Test, dictionaryVector)
 {
+    V8TestingScope scope;
     Vector<std::pair<String, int>> dictionary;
     dictionary.append(std::make_pair("one", 1));
     dictionary.append(std::make_pair("two", 2));
     TEST_TOV8("[object Object]", dictionary);
-    v8::Local<v8::Context> context = m_scope.getScriptState()->context();
-    v8::Local<v8::Object> result = toV8(dictionary, context->Global(), m_scope.isolate())->ToObject(context).ToLocalChecked();
-    v8::Local<v8::Value> one = result->Get(context, v8String(m_scope.isolate(), "one")).ToLocalChecked();
+    v8::Local<v8::Context> context = scope.getScriptState()->context();
+    v8::Local<v8::Object> result = toV8(dictionary, context->Global(), scope.isolate())->ToObject(context).ToLocalChecked();
+    v8::Local<v8::Value> one = result->Get(context, v8String(scope.isolate(), "one")).ToLocalChecked();
     EXPECT_EQ(1, one->NumberValue(context).FromJust());
-    v8::Local<v8::Value> two = result->Get(context, v8String(m_scope.isolate(), "two")).ToLocalChecked();
+    v8::Local<v8::Value> two = result->Get(context, v8String(scope.isolate(), "two")).ToLocalChecked();
     EXPECT_EQ(2, two->NumberValue(context).FromJust());
 }
 
-TEST_F(ToV8Test, heapVector)
+TEST(ToV8Test, heapVector)
 {
+    V8TestingScope scope;
     HeapVector<Member<GarbageCollectedScriptWrappable>> v;
     v.append(new GarbageCollectedScriptWrappable("hoge"));
     v.append(new GarbageCollectedScriptWrappable("fuga"));
@@ -224,63 +228,12 @@ TEST_F(ToV8Test, heapVector)
     TEST_TOV8("hoge,fuga,", v);
 }
 
-TEST_F(ToV8Test, stringHeapVectors)
+TEST(ToV8Test, withScriptState)
 {
-    HeapVector<String> stringVector;
-    stringVector.append("foo");
-    stringVector.append("bar");
-    TEST_TOV8("foo,bar", stringVector);
+    V8TestingScope scope;
+    ScriptValue value(scope.getScriptState(), v8::Number::New(scope.isolate(), 1234.0));
 
-    HeapVector<AtomicString> atomicStringVector;
-    atomicStringVector.append("quux");
-    atomicStringVector.append("bar");
-    TEST_TOV8("quux,bar", atomicStringVector);
-}
-
-TEST_F(ToV8Test, basicTypeHeapVectors)
-{
-    HeapVector<int> intVector;
-    intVector.append(42);
-    intVector.append(23);
-    TEST_TOV8("42,23", intVector);
-
-    HeapVector<long> longVector;
-    longVector.append(31773);
-    longVector.append(404);
-    TEST_TOV8("31773,404", longVector);
-
-    HeapVector<unsigned> unsignedVector;
-    unsignedVector.append(1);
-    unsignedVector.append(2);
-    TEST_TOV8("1,2", unsignedVector);
-
-    HeapVector<unsigned long> unsignedLongVector;
-    unsignedLongVector.append(1001);
-    unsignedLongVector.append(2002);
-    TEST_TOV8("1001,2002", unsignedLongVector);
-
-    HeapVector<float> floatVector;
-    floatVector.append(0.125);
-    floatVector.append(1.);
-    TEST_TOV8("0.125,1", floatVector);
-
-    HeapVector<double> doubleVector;
-    doubleVector.append(2.3);
-    doubleVector.append(4.2);
-    TEST_TOV8("2.3,4.2", doubleVector);
-
-    HeapVector<bool> boolVector;
-    boolVector.append(true);
-    boolVector.append(true);
-    boolVector.append(false);
-    TEST_TOV8("true,true,false", boolVector);
-}
-
-TEST_F(ToV8Test, withScriptState)
-{
-    ScriptValue value(m_scope.getScriptState(), v8::Number::New(m_scope.isolate(), 1234.0));
-
-    v8::Local<v8::Value> actual = toV8(value, m_scope.getScriptState());
+    v8::Local<v8::Value> actual = toV8(value, scope.getScriptState());
     EXPECT_FALSE(actual.IsEmpty());
 
     double actualAsNumber = actual.As<v8::Number>()->Value();

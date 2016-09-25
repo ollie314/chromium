@@ -6,19 +6,31 @@
 
 #include <utility>
 
+#include "base/location.h"
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "content/public/browser/android/service_registry_android.h"
-#include "content/public/common/service_registry.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "content/public/browser/android/interface_provider_android.h"
+#include "content/public/browser/android/interface_registry_android.h"
 #include "jni/ShellMojoTestUtils_jni.h"
+#include "services/shell/public/cpp/interface_provider.h"
+#include "services/shell/public/cpp/interface_registry.h"
+
+using base::android::JavaParamRef;
+using base::android::ScopedJavaLocalRef;
 
 namespace {
 
 struct TestEnvironment {
   base::MessageLoop message_loop;
-  ScopedVector<content::ServiceRegistry> registries;
-  ScopedVector<content::ServiceRegistryAndroid> wrappers;
+  std::vector<std::unique_ptr<shell::InterfaceRegistry>> registries;
+  std::vector<std::unique_ptr<shell::InterfaceProvider>> providers;
+  std::vector<std::unique_ptr<content::InterfaceRegistryAndroid>>
+      registry_wrappers;
+  std::vector<std::unique_ptr<content::InterfaceProviderAndroid>>
+      provider_wrappers;
 };
 
 }  // namespace
@@ -36,41 +48,44 @@ static void TearDownTestEnvironment(JNIEnv* env,
   delete reinterpret_cast<TestEnvironment*>(test_environment);
 }
 
-static ScopedJavaLocalRef<jobject> CreateServiceRegistryPair(
+static ScopedJavaLocalRef<jobject> CreateInterfaceRegistryAndProvider(
     JNIEnv* env,
     const JavaParamRef<jclass>& jcaller,
     jlong native_test_environment) {
   TestEnvironment* test_environment =
       reinterpret_cast<TestEnvironment*>(native_test_environment);
 
-  content::ServiceRegistry* registry_a = ServiceRegistry::Create();
-  test_environment->registries.push_back(registry_a);
-  content::ServiceRegistry* registry_b = ServiceRegistry::Create();
-  test_environment->registries.push_back(registry_b);
+  std::unique_ptr<shell::InterfaceRegistry> registry(
+      new shell::InterfaceRegistry);
+  std::unique_ptr<shell::InterfaceProvider> provider(
+      new shell::InterfaceProvider);
 
-  shell::mojom::InterfaceProviderPtr exposed_services_a;
-  registry_a->Bind(GetProxy(&exposed_services_a));
-  registry_b->BindRemoteServiceProvider(std::move(exposed_services_a));
+  shell::mojom::InterfaceProviderPtr provider_proxy;
+  shell::mojom::InterfaceProviderRequest provider_request =
+      mojo::GetProxy(&provider_proxy);
+  provider->Bind(std::move(provider_proxy));
+  registry->Bind(std::move(provider_request));
 
-  shell::mojom::InterfaceProviderPtr exposed_services_b;
-  registry_b->Bind(GetProxy(&exposed_services_b));
-  registry_a->BindRemoteServiceProvider(std::move(exposed_services_b));
+  std::unique_ptr<content::InterfaceRegistryAndroid> registry_android(
+      InterfaceRegistryAndroid::Create(registry.get()));
+  std::unique_ptr<content::InterfaceProviderAndroid> provider_android(
+      InterfaceProviderAndroid::Create(provider.get()));
 
-  content::ServiceRegistryAndroid* wrapper_a =
-      ServiceRegistryAndroid::Create(registry_a).release();
-  test_environment->wrappers.push_back(wrapper_a);
-  content::ServiceRegistryAndroid* wrapper_b =
-      ServiceRegistryAndroid::Create(registry_b).release();
-  test_environment->wrappers.push_back(wrapper_b);
+  ScopedJavaLocalRef<jobject> obj = Java_ShellMojoTestUtils_makePair(
+      env, registry_android->GetObj(), provider_android->GetObj());
 
-  return Java_ShellMojoTestUtils_makePair(env, wrapper_a->GetObj().obj(),
-                                          wrapper_b->GetObj().obj());
+  test_environment->registry_wrappers.push_back(std::move(registry_android));
+  test_environment->provider_wrappers.push_back(std::move(provider_android));
+  test_environment->registries.push_back(std::move(registry));
+  test_environment->providers.push_back(std::move(provider));
+
+  return obj;
 }
 
 static void RunLoop(JNIEnv* env,
                     const JavaParamRef<jclass>& jcaller,
                     jlong timeout_ms) {
-  base::MessageLoop::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
       base::TimeDelta::FromMilliseconds(timeout_ms));
   base::RunLoop run_loop;

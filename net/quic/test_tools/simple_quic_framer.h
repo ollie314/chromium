@@ -12,8 +12,8 @@
 
 #include "base/macros.h"
 #include "base/strings/string_piece.h"
-#include "net/quic/quic_framer.h"
-#include "net/quic/quic_protocol.h"
+#include "net/quic/core/quic_framer.h"
+#include "net/quic/core/quic_protocol.h"
 
 namespace net {
 
@@ -32,6 +32,8 @@ class SimpleQuicFramer {
  public:
   SimpleQuicFramer();
   explicit SimpleQuicFramer(const QuicVersionVector& supported_versions);
+  SimpleQuicFramer(const QuicVersionVector& supported_versions,
+                   Perspective perspective);
   ~SimpleQuicFramer();
 
   bool ProcessPacket(const QuicEncryptedPacket& packet);

@@ -9,18 +9,14 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "cc/input/top_controls_state.h"
 #include "cc/layers/layer_impl.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
-namespace base {
-class TimeTicks;
-}
-
 namespace cc {
 
-class KeyframedFloatAnimationCurve;
 class LayerTreeImpl;
 class TopControlsManagerClient;
 
@@ -40,12 +36,24 @@ class CC_EXPORT TopControlsManager
       float top_controls_hide_threshold);
   virtual ~TopControlsManager();
 
+  // The offset from the window top to the top edge of the controls. Runs from 0
+  // (controls fully shown) to negative values (down is positive).
   float ControlsTopOffset() const;
+  // The amount of offset of the web content area. Same as the current shown
+  // height of the top controls.
   float ContentTopOffset() const;
   float TopControlsShownRatio() const;
   float TopControlsHeight() const;
 
-  bool has_animation() const { return !!top_controls_animation_; }
+  // The amount of offset of the web content area, calculating from the bottom.
+  // Same as the current shown height of the bottom controls.
+  float ContentBottomOffset() const;
+  // Similar to TopControlsHeight(), this method should return a static value.
+  // The current animated height should be acquired from ContentBottomOffset().
+  float BottomControlsHeight() const;
+  float BottomControlsShownRatio() const;
+
+  bool has_animation() const { return animation_direction_ != NO_ANIMATION; }
   AnimationDirection animation_direction() { return animation_direction_; }
 
   void UpdateTopControlsState(TopControlsState constraints,
@@ -80,8 +88,12 @@ class CC_EXPORT TopControlsManager
   TopControlsManagerClient* client_;  // The client manages the lifecycle of
                                       // this.
 
-  std::unique_ptr<KeyframedFloatAnimationCurve> top_controls_animation_;
+  base::TimeTicks animation_start_time_;
+  float animation_start_value_;
+  base::TimeTicks animation_stop_time_;
+  float animation_stop_value_;
   AnimationDirection animation_direction_;
+
   TopControlsState permitted_state_;
 
   // Accumulated scroll delta since last baseline reset

@@ -6,26 +6,23 @@
 
 #include <vector>
 
-#include "ash/ash_constants.h"
+#include "ash/aura/wm_window_aura.h"
+#include "ash/common/ash_constants.h"
+#include "ash/common/wm/window_state.h"
+#include "ash/common/wm/wm_event.h"
+#include "ash/common/wm/wm_screen_util.h"
+#include "ash/common/wm_window.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
-#include "ash/snap_to_pixel_layout_manager.h"
-#include "ash/wm/aura/wm_window_aura.h"
-#include "ash/wm/common/wm_event.h"
-#include "ash/wm/common/wm_screen_util.h"
-#include "ash/wm/common/wm_window.h"
 #include "ash/wm/window_properties.h"
-#include "ash/wm/window_state.h"
 #include "ash/wm/window_state_aura.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/compositor/dip_util.h"
-#include "ui/gfx/display.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/screen.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/window_util.h"
@@ -48,8 +45,8 @@ bool IsActiveWindow(aura::Window* window) {
 }
 
 aura::Window* GetActiveWindow() {
-  return aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
-      GetActiveWindow();
+  return aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())
+      ->GetActiveWindow();
 }
 
 aura::Window* GetActivatableWindow(aura::Window* window) {
@@ -60,16 +57,12 @@ bool CanActivateWindow(aura::Window* window) {
   return ::wm::CanActivateWindow(window);
 }
 
-bool IsWindowMinimized(aura::Window* window) {
-  return ash::wm::GetWindowState(window)->IsMinimized();
-}
-
 bool IsWindowUserPositionable(aura::Window* window) {
   return GetWindowState(window)->IsUserPositionable();
 }
 
-void CenterWindow(aura::Window* window) {
-  wm::WMEvent event(wm::WM_EVENT_CENTER);
+void PinWindow(aura::Window* window, bool trusted) {
+  wm::WMEvent event(trusted ? wm::WM_EVENT_TRUSTED_PIN : wm::WM_EVENT_PIN);
   wm::GetWindowState(window)->OnWMEvent(&event);
 }
 
@@ -104,23 +97,6 @@ void SetSnapsChildrenToPhysicalPixelBoundary(aura::Window* container) {
   DCHECK(!container->GetProperty(kSnapChildrenToPixelBoundary))
       << container->name();
   container->SetProperty(kSnapChildrenToPixelBoundary, true);
-}
-
-void InstallSnapLayoutManagerToContainers(aura::Window* parent) {
-  aura::Window::Windows children = parent->children();
-  for (aura::Window::Windows::iterator iter = children.begin();
-       iter != children.end();
-       ++iter) {
-    aura::Window* container = *iter;
-    if (container->id() < 0)  // not a container
-      continue;
-    if (container->GetProperty(kSnapChildrenToPixelBoundary)) {
-      if (!container->layout_manager())
-        container->SetLayoutManager(new SnapToPixelLayoutManager(container));
-    } else {
-      InstallSnapLayoutManagerToContainers(container);
-    }
-  }
 }
 
 }  // namespace wm

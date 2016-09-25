@@ -23,9 +23,8 @@
 #define WTF_ListHashSet_h
 
 #include "wtf/HashSet.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/allocator/PartitionAllocator.h"
+#include <memory>
 
 namespace WTF {
 
@@ -74,7 +73,6 @@ public:
     typedef ValueArg ValueType;
     typedef HashTraits<ValueType> ValueTraits;
     typedef typename ValueTraits::PeekInType ValuePeekInType;
-    typedef typename ValueTraits::PassOutType ValuePassOutType;
 
     typedef ListHashSetIterator<ListHashSet> iterator;
     typedef ListHashSetConstIterator<ListHashSet> const_iterator;
@@ -173,9 +171,9 @@ public:
     template <typename Collection>
     void removeAll(const Collection& other) { WTF::removeAll(*this, other); }
 
-    ValuePassOutType take(iterator);
-    ValuePassOutType take(ValuePeekInType);
-    ValuePassOutType takeFirst();
+    ValueType take(iterator);
+    ValueType take(ValuePeekInType);
+    ValueType takeFirst();
 
     template <typename VisitorDispatcher>
     void trace(VisitorDispatcher);
@@ -269,7 +267,7 @@ struct ListHashSetAllocator : public PartitionAllocator {
         }
 
     private:
-        // Not using OwnPtr as this pointer should be deleted at
+        // Not using std::unique_ptr as this pointer should be deleted at
         // releaseAllocator() method rather than at destructor.
         ListHashSetAllocator* m_allocator;
     };
@@ -910,30 +908,30 @@ inline void ListHashSet<T, inlineCapacity, U, V>::clear()
 }
 
 template <typename T, size_t inlineCapacity, typename U, typename V>
-typename ListHashSet<T, inlineCapacity, U, V>::ValuePassOutType ListHashSet<T, inlineCapacity, U, V>::take(iterator it)
+auto ListHashSet<T, inlineCapacity, U, V>::take(iterator it) -> ValueType
 {
     if (it == end())
         return ValueTraits::emptyValue();
 
     m_impl.remove(it.getNode());
-    ValuePassOutType result = ValueTraits::passOut(it.getNode()->m_value);
+    ValueType result = std::move(it.getNode()->m_value);
     unlinkAndDelete(it.getNode());
 
     return result;
 }
 
 template <typename T, size_t inlineCapacity, typename U, typename V>
-typename ListHashSet<T, inlineCapacity, U, V>::ValuePassOutType ListHashSet<T, inlineCapacity, U, V>::take(ValuePeekInType value)
+auto ListHashSet<T, inlineCapacity, U, V>::take(ValuePeekInType value) -> ValueType
 {
     return take(find(value));
 }
 
 template <typename T, size_t inlineCapacity, typename U, typename V>
-typename ListHashSet<T, inlineCapacity, U, V>::ValuePassOutType ListHashSet<T, inlineCapacity, U, V>::takeFirst()
+auto ListHashSet<T, inlineCapacity, U, V>::takeFirst() -> ValueType
 {
     ASSERT(!isEmpty());
     m_impl.remove(m_head);
-    ValuePassOutType result = ValueTraits::passOut(m_head->m_value);
+    ValueType result = std::move(m_head->m_value);
     unlinkAndDelete(m_head);
 
     return result;
@@ -1027,7 +1025,7 @@ template <typename T, size_t inlineCapacity, typename U, typename V>
 template <typename VisitorDispatcher>
 void ListHashSet<T, inlineCapacity, U, V>::trace(VisitorDispatcher visitor)
 {
-    static_assert(HashTraits<T>::weakHandlingFlag == NoWeakHandlingInCollections, "ListHashSet does not support weakness");
+    static_assert(HashTraits<T>::weakHandlingFlag == NoWeakHandlingInCollections, "HeapListHashSet does not support weakness, consider using HeapLinkedHashSet instead.");
     // This marks all the nodes and their contents live that can be accessed
     // through the HashTable. That includes m_head and m_tail so we do not have
     // to explicitly trace them here.

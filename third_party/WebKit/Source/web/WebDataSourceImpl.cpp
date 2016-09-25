@@ -31,9 +31,12 @@
 #include "web/WebDataSourceImpl.h"
 
 #include "core/dom/Document.h"
+#include "public/platform/WebDocumentSubresourceFilter.h"
 #include "public/platform/WebURL.h"
 #include "public/platform/WebURLError.h"
 #include "public/platform/WebVector.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -44,19 +47,16 @@ WebDataSourceImpl* WebDataSourceImpl::create(LocalFrame* frame, const ResourceRe
 
 const WebURLRequest& WebDataSourceImpl::originalRequest() const
 {
-    m_originalRequestWrapper.bind(DocumentLoader::originalRequest());
     return m_originalRequestWrapper;
 }
 
 const WebURLRequest& WebDataSourceImpl::request() const
 {
-    m_requestWrapper.bind(DocumentLoader::request());
     return m_requestWrapper;
 }
 
 const WebURLResponse& WebDataSourceImpl::response() const
 {
-    m_responseWrapper.bind(DocumentLoader::response());
     return m_responseWrapper;
 }
 
@@ -73,6 +73,15 @@ WebURL WebDataSourceImpl::unreachableURL() const
 void WebDataSourceImpl::appendRedirect(const WebURL& url)
 {
     DocumentLoader::appendRedirect(url);
+}
+
+void WebDataSourceImpl::updateNavigation(double redirectStartTime, double redirectEndTime, double fetchStartTime, const WebVector<WebURL>& redirectChain)
+{
+    for (size_t i = 0; i + 1 < redirectChain.size(); ++i)
+        didRedirect(redirectChain[i], redirectChain[i + 1]);
+    timing().setRedirectStart(redirectStartTime);
+    timing().setRedirectEnd(redirectEndTime);
+    timing().setFetchStart(fetchStartTime);
 }
 
 void WebDataSourceImpl::redirectChain(WebVector<WebURL>& result) const
@@ -102,8 +111,8 @@ WebDataSource::ExtraData* WebDataSourceImpl::getExtraData() const
 
 void WebDataSourceImpl::setExtraData(ExtraData* extraData)
 {
-    // extraData can't be a PassOwnPtr because setExtraData is a WebKit API function.
-    m_extraData = adoptPtr(extraData);
+    // extraData can't be a std::unique_ptr because setExtraData is a WebKit API function.
+    m_extraData = wrapUnique(extraData);
 }
 
 void WebDataSourceImpl::setNavigationStartTime(double navigationStart)
@@ -132,6 +141,9 @@ WebNavigationType WebDataSourceImpl::toWebNavigationType(NavigationType type)
 
 WebDataSourceImpl::WebDataSourceImpl(LocalFrame* frame, const ResourceRequest& request, const SubstituteData& data)
     : DocumentLoader(frame, request, data)
+    , m_originalRequestWrapper(DocumentLoader::originalRequest())
+    , m_requestWrapper(DocumentLoader::request())
+    , m_responseWrapper(DocumentLoader::response())
 {
 }
 
@@ -144,7 +156,12 @@ WebDataSourceImpl::~WebDataSourceImpl()
 void WebDataSourceImpl::detachFromFrame()
 {
     DocumentLoader::detachFromFrame();
-    m_extraData.clear();
+    m_extraData.reset();
+}
+
+void WebDataSourceImpl::setSubresourceFilter(WebDocumentSubresourceFilter* subresourceFilter)
+{
+    DocumentLoader::setSubresourceFilter(WTF::wrapUnique(subresourceFilter));
 }
 
 DEFINE_TRACE(WebDataSourceImpl)

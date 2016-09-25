@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/aura/wm_window_aura.h"
+#include "ash/common/accessibility_types.h"
+#include "ash/common/shelf/shelf_layout_manager.h"
+#include "ash/common/shelf/wm_shelf.h"
+#include "ash/common/shell_window_ids.h"
 #include "ash/root_window_controller.h"
-#include "ash/shelf/shelf.h"
-#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
-#include "ash/shell_window_ids.h"
 #include "base/macros.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/chromevox_panel.h"
@@ -14,7 +16,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/view_type_utils.h"
-#include "ui/chromeos/accessibility_types.h"
+#include "ui/display/screen.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
@@ -93,11 +95,11 @@ ChromeVoxPanel::ChromeVoxPanel(content::BrowserContext* browser_context)
   widget_->Init(params);
   SetShadowType(widget_->GetNativeWindow(), wm::SHADOW_TYPE_RECTANGULAR);
 
-  gfx::Screen::GetScreen()->AddObserver(this);
+  display::Screen::GetScreen()->AddObserver(this);
 }
 
 ChromeVoxPanel::~ChromeVoxPanel() {
-  gfx::Screen::GetScreen()->RemoveObserver(this);
+  display::Screen::GetScreen()->RemoveObserver(this);
 }
 
 aura::Window* ChromeVoxPanel::GetRootWindow() {
@@ -114,8 +116,9 @@ void ChromeVoxPanel::DidFirstVisuallyNonEmptyPaint() {
 }
 
 void ChromeVoxPanel::UpdatePanelHeight() {
-  ash::Shelf* shelf = ash::Shelf::ForWindow(GetRootWindow());
-  if (!shelf)
+  ash::WmShelf* shelf =
+      ash::WmShelf::ForWindow(ash::WmWindowAura::Get(GetRootWindow()));
+  if (!shelf->IsShelfInitialized())
     return;
 
   ash::ShelfLayoutManager* shelf_layout_manager = shelf->shelf_layout_manager();
@@ -138,7 +141,7 @@ void ChromeVoxPanel::ExitFullscreen() {
 
 void ChromeVoxPanel::DisableSpokenFeedback() {
   chromeos::AccessibilityManager::Get()->EnableSpokenFeedback(
-      false, ui::A11Y_NOTIFICATION_NONE);
+      false, ash::A11Y_NOTIFICATION_NONE);
 }
 
 void ChromeVoxPanel::Focus() {
@@ -163,7 +166,7 @@ views::View* ChromeVoxPanel::GetContentsView() {
   return web_view_;
 }
 
-void ChromeVoxPanel::OnDisplayMetricsChanged(const gfx::Display& display,
+void ChromeVoxPanel::OnDisplayMetricsChanged(const display::Display& display,
                                              uint32_t changed_metrics) {
   UpdateWidgetBounds();
 }

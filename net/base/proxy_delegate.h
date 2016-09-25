@@ -38,7 +38,6 @@ class NET_EXPORT ProxyDelegate {
   // ProxyInfo |result|.
   virtual void OnResolveProxy(const GURL& url,
                               const std::string& method,
-                              int load_flags,
                               const ProxyService& proxy_service,
                               ProxyInfo* result) = 0;
 
@@ -48,13 +47,6 @@ class NET_EXPORT ProxyDelegate {
   // explicitly directed to skip a proxy).
   virtual void OnFallback(const ProxyServer& bad_proxy,
                           int net_error) = 0;
-
-  // Called after a proxy connection. Allows the delegate to read/write
-  // |headers| before they get sent out. |headers| is valid only until
-  // OnCompleted or OnURLRequestDestroyed is called for this request.
-  virtual void OnBeforeSendHeaders(URLRequest* request,
-                                   const ProxyInfo& proxy_info,
-                                   HttpRequestHeaders* headers) = 0;
 
   // Called immediately before a proxy tunnel request is sent.
   // Provides the embedder an opportunity to add extra request headers.
@@ -75,6 +67,21 @@ class NET_EXPORT ProxyDelegate {
   // Returns true if |proxy_server| is a trusted SPDY/HTTP2 proxy that is
   // allowed to push cross-origin resources.
   virtual bool IsTrustedSpdyProxy(const net::ProxyServer& proxy_server) = 0;
+
+  // Called after the proxy is resolved but before the connection is
+  // established. |resolved_proxy_server| is the proxy server resolved by the
+  // proxy service for fetching |url|. Sets |alternative_proxy_server| to an
+  // alternative proxy server, if one is available to fetch |url|.
+  // |alternative_proxy_server| is owned by the caller, and is guaranteed to be
+  // non-null.
+  virtual void GetAlternativeProxy(
+      const GURL& url,
+      const ProxyServer& resolved_proxy_server,
+      ProxyServer* alternative_proxy_server) const = 0;
+
+  // Notifies the ProxyDelegate that |alternative_proxy_server| is broken.
+  virtual void OnAlternativeProxyBroken(
+      const ProxyServer& alternative_proxy_server) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ProxyDelegate);

@@ -8,24 +8,27 @@
 #include "core/CSSPropertyNames.h"
 #include "core/css/CSSValue.h"
 #include "wtf/Allocator.h"
+#include "wtf/HashMap.h"
+#include "wtf/text/AtomicString.h"
 
 namespace blink {
 
-class LayoutObject;
+class CSSVariableData;
 class ComputedStyle;
 class FilterOperations;
+class LayoutObject;
+class Node;
+class PropertyRegistry;
 class ShadowData;
 class ShadowList;
 class StyleColor;
-class Node;
-class CSSVariableData;
 
 class ComputedStyleCSSValueMapping {
     STATIC_ONLY(ComputedStyleCSSValueMapping);
 public:
     // FIXME: Resolve computed auto alignment in applyProperty/ComputedStyle and remove this non-const styledNode parameter.
-    static CSSValue* get(CSSPropertyID, const ComputedStyle&, const LayoutObject* = nullptr, Node* styledNode = nullptr, bool allowVisitedStyle = false);
-    static CSSValue* get(const AtomicString customPropertyName, const ComputedStyle&);
+    static const CSSValue* get(CSSPropertyID, const ComputedStyle&, const LayoutObject* = nullptr, Node* styledNode = nullptr, bool allowVisitedStyle = false);
+    static const CSSValue* get(const AtomicString customPropertyName, const ComputedStyle&, const PropertyRegistry*);
     static std::unique_ptr<HashMap<AtomicString, RefPtr<CSSVariableData>>> getVariables(const ComputedStyle&);
 private:
     static CSSValue* currentColorOrValidColor(const ComputedStyle&, const StyleColor&);

@@ -70,9 +70,9 @@ enum DownloadCountTypes {
   // progress.
   APPEND_TO_DETACHED_FILE_COUNT,
 
-  // Counts the number of instances where the downloaded file is missing after a
-  // successful invocation of ScanAndSaveDownloadedFile().
-  FILE_MISSING_AFTER_SUCCESSFUL_SCAN_COUNT,
+  // (Deprecated) Counts the number of instances where the downloaded file is
+  // missing after a successful invocation of ScanAndSaveDownloadedFile().
+  DOWNLOAD_COUNT_UNUSED_14,
 
   // (Deprecated) Count of downloads with a strong ETag and specified
   // 'Accept-Ranges: bytes'.
@@ -107,9 +107,16 @@ enum DownloadSource {
   // Fomerly INITIATED_BY_PEPPER_SAVE.
   DOWNLOAD_SOURCE_UNUSED_3,
 
-  // A request that was initiated as a result of resuming an interrupted
-  // download.
-  INITIATED_BY_RESUMPTION,
+  // Formerly INITIATED_BY_RESUMPTION.
+  DOWNLOAD_SOURCE_UNUSED_4,
+
+  // A request that was initiated as a result of manually resuming an
+  // interrupted download.
+  INITIATED_BY_MANUAL_RESUMPTION,
+
+  // A request that was initiated as a result of automatically resuming an
+  // interrupted download.
+  INITIATED_BY_AUTOMATIC_RESUMPTION,
 
   DOWNLOAD_SOURCE_LAST_ENTRY
 };

@@ -4,6 +4,7 @@
 
 #include "media/renderers/mock_gpu_video_accelerator_factories.h"
 
+#include "base/memory/ptr_util.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 
@@ -11,7 +12,7 @@ namespace media {
 
 namespace {
 
-bool gpu_memory_buffers_in_use_by_window_server = false;
+int g_next_gpu_memory_buffer_id = 1;
 
 class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
  public:
@@ -19,7 +20,8 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
       : mapped_(false),
         format_(format),
         size_(size),
-        num_planes_(gfx::NumberOfPlanesForBufferFormat(format)) {
+        num_planes_(gfx::NumberOfPlanesForBufferFormat(format)),
+        id_(g_next_gpu_memory_buffer_id++) {
     DCHECK(gfx::BufferFormat::R_8 == format_ ||
            gfx::BufferFormat::YUV_420_BIPLANAR == format_ ||
            gfx::BufferFormat::UYVY_422 == format_);
@@ -46,9 +48,6 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
     DCHECK(mapped_);
     mapped_ = false;
   }
-  bool IsInUseByMacOSWindowServer() const override {
-    return gpu_memory_buffers_in_use_by_window_server;
-  }
   gfx::Size GetSize() const override { return size_; }
   gfx::BufferFormat GetFormat() const override {
     return format_;
@@ -58,10 +57,7 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
     return static_cast<int>(gfx::RowSizeForBufferFormat(
         size_.width(), format_, static_cast<int>(plane)));
   }
-  gfx::GpuMemoryBufferId GetId() const override {
-    NOTREACHED();
-    return gfx::GpuMemoryBufferId(0);
-  }
+  gfx::GpuMemoryBufferId GetId() const override { return id_; }
   gfx::GpuMemoryBufferHandle GetHandle() const override {
     NOTREACHED();
     return gfx::GpuMemoryBufferHandle();
@@ -78,6 +74,7 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   const gfx::Size size_;
   size_t num_planes_;
   std::vector<uint8_t> bytes_[kMaxPlanes];
+  gfx::GpuMemoryBufferId id_;
 };
 
 }  // unnamed namespace
@@ -92,35 +89,32 @@ bool MockGpuVideoAcceleratorFactories::IsGpuVideoAcceleratorEnabled() {
   return true;
 }
 
-scoped_ptr<gfx::GpuMemoryBuffer>
+std::unique_ptr<gfx::GpuMemoryBuffer>
 MockGpuVideoAcceleratorFactories::AllocateGpuMemoryBuffer(
     const gfx::Size& size,
     gfx::BufferFormat format,
     gfx::BufferUsage /* usage */) {
   if (fail_to_allocate_gpu_memory_buffer_)
     return nullptr;
-  return make_scoped_ptr<gfx::GpuMemoryBuffer>(
-      new GpuMemoryBufferImpl(size, format));
+  return base::MakeUnique<GpuMemoryBufferImpl>(size, format);
 }
 
-void MockGpuVideoAcceleratorFactories::
-    SetGpuMemoryBuffersInUseByMacOSWindowServer(bool in_use) {
-  gpu_memory_buffers_in_use_by_window_server = in_use;
-}
-
-scoped_ptr<base::SharedMemory>
+std::unique_ptr<base::SharedMemory>
 MockGpuVideoAcceleratorFactories::CreateSharedMemory(size_t size) {
+  std::unique_ptr<base::SharedMemory> shared_memory(new base::SharedMemory);
+  if (shared_memory->CreateAndMapAnonymous(size))
+    return shared_memory;
   return nullptr;
 }
 
-scoped_ptr<VideoDecodeAccelerator>
+std::unique_ptr<VideoDecodeAccelerator>
 MockGpuVideoAcceleratorFactories::CreateVideoDecodeAccelerator() {
-  return scoped_ptr<VideoDecodeAccelerator>(DoCreateVideoDecodeAccelerator());
+  return base::WrapUnique(DoCreateVideoDecodeAccelerator());
 }
 
-scoped_ptr<VideoEncodeAccelerator>
+std::unique_ptr<VideoEncodeAccelerator>
 MockGpuVideoAcceleratorFactories::CreateVideoEncodeAccelerator() {
-  return scoped_ptr<VideoEncodeAccelerator>(DoCreateVideoEncodeAccelerator());
+  return base::WrapUnique(DoCreateVideoEncodeAccelerator());
 }
 
 bool MockGpuVideoAcceleratorFactories::ShouldUseGpuMemoryBuffersForVideoFrames()
@@ -148,10 +142,10 @@ class ScopedGLContextLockImpl
 };
 }  // namespace
 
-scoped_ptr<GpuVideoAcceleratorFactories::ScopedGLContextLock>
+std::unique_ptr<GpuVideoAcceleratorFactories::ScopedGLContextLock>
 MockGpuVideoAcceleratorFactories::GetGLContextLock() {
   DCHECK(gles2_);
-  return make_scoped_ptr(new ScopedGLContextLockImpl(this));
+  return base::MakeUnique<ScopedGLContextLockImpl>(this);
 }
 
 }  // namespace media

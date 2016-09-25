@@ -30,19 +30,14 @@
 
 #include "public/web/WebLeakDetector.h"
 
-#include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8GCController.h"
-#include "core/dom/ActiveDOMObject.h"
-#include "core/dom/Document.h"
 #include "core/editing/spellcheck/SpellChecker.h"
 #include "core/fetch/MemoryCache.h"
 #include "core/inspector/InstanceCounters.h"
-#include "core/layout/LayoutObject.h"
+#include "core/workers/InProcessWorkerMessagingProxy.h"
 #include "core/workers/WorkerThread.h"
-#include "modules/webaudio/AudioNode.h"
+#include "modules/compositorworker/AbstractAnimationWorkletThread.h"
 #include "platform/Timer.h"
-#include "public/web/WebDocument.h"
 #include "public/web/WebFrame.h"
 #include "web/WebLocalFrameImpl.h"
 
@@ -68,8 +63,8 @@ public:
     void collectGarbageAndReport() override;
 
 private:
-    void delayedGCAndReport(Timer<WebLeakDetectorImpl>*);
-    void delayedReport(Timer<WebLeakDetectorImpl>*);
+    void delayedGCAndReport(TimerBase*);
+    void delayedReport(TimerBase*);
 
     WebLeakDetectorClient* m_client;
     Timer<WebLeakDetectorImpl> m_delayedGCAndReportTimer;
@@ -111,6 +106,7 @@ void WebLeakDetectorImpl::prepareForLeakDetection(WebFrame* frame)
 void WebLeakDetectorImpl::collectGarbageAndReport()
 {
     V8GCController::collectAllGarbageForTesting(V8PerIsolateData::mainThreadIsolate());
+    AbstractAnimationWorkletThread::collectAllGarbage();
     // Note: Oilpan precise GC is scheduled at the end of the event loop.
 
     // Task queue may contain delayed object destruction tasks.
@@ -121,23 +117,33 @@ void WebLeakDetectorImpl::collectGarbageAndReport()
     m_delayedGCAndReportTimer.startOneShot(0, BLINK_FROM_HERE);
 }
 
-void WebLeakDetectorImpl::delayedGCAndReport(Timer<WebLeakDetectorImpl>*)
+void WebLeakDetectorImpl::delayedGCAndReport(TimerBase*)
 {
     // We do a second and third GC here to address flakiness
     // The second GC is necessary as Resource GC may have postponed clean-up tasks to next event loop.
     // The third GC is necessary for cleaning up Document after worker object died.
 
     V8GCController::collectAllGarbageForTesting(V8PerIsolateData::mainThreadIsolate());
+    AbstractAnimationWorkletThread::collectAllGarbage();
     // Note: Oilpan precise GC is scheduled at the end of the event loop.
 
     // Inspect counters on the next event loop.
-    if (--m_numberOfGCNeeded)
+    if (--m_numberOfGCNeeded > 0) {
         m_delayedGCAndReportTimer.startOneShot(0, BLINK_FROM_HERE);
-    else
+    } else if (m_numberOfGCNeeded > -1 && InProcessWorkerMessagingProxy::proxyCount()) {
+        // It is possible that all posted tasks for finalizing in-process proxy objects
+        // will not have run before the final round of GCs started. If so, do yet
+        // another pass, letting these tasks run and then afterwards perform a GC to tidy up.
+        //
+        // TODO(sof): use proxyCount() to always decide if another GC needs to be scheduled.
+        // Some debug bots running browser unit tests disagree (crbug.com/616714)
+        m_delayedGCAndReportTimer.startOneShot(0, BLINK_FROM_HERE);
+    } else {
         m_delayedReportTimer.startOneShot(0, BLINK_FROM_HERE);
+    }
 }
 
-void WebLeakDetectorImpl::delayedReport(Timer<WebLeakDetectorImpl>*)
+void WebLeakDetectorImpl::delayedReport(TimerBase*)
 {
     DCHECK(m_client);
 
@@ -151,6 +157,7 @@ void WebLeakDetectorImpl::delayedReport(Timer<WebLeakDetectorImpl>*)
     result.numberOfLiveScriptPromises = InstanceCounters::counterValue(InstanceCounters::ScriptPromiseCounter);
     result.numberOfLiveFrames = InstanceCounters::counterValue(InstanceCounters::FrameCounter);
     result.numberOfLiveV8PerContextData = InstanceCounters::counterValue(InstanceCounters::V8PerContextDataCounter);
+    result.numberOfWorkerGlobalScopes = InstanceCounters::counterValue(InstanceCounters::WorkerGlobalScopeCounter);
 
     m_client->onLeakDetectionComplete(result);
 

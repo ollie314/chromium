@@ -36,13 +36,10 @@
 #include "core/InputTypeNames.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/NodeComputedStyle.h"
-#include "core/dom/Touch.h"
-#include "core/dom/TouchList.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/events/MouseEvent.h"
 #include "core/events/ScopedEventQueue.h"
-#include "core/events/TouchEvent.h"
 #include "core/html/HTMLDataListElement.h"
 #include "core/html/HTMLDataListOptionsCollection.h"
 #include "core/html/HTMLDivElement.h"
@@ -56,7 +53,6 @@
 #include "platform/PlatformMouseEvent.h"
 #include "wtf/MathExtras.h"
 #include "wtf/NonCopyingSort.h"
-#include "wtf/PassOwnPtr.h"
 #include <limits>
 
 namespace blink {
@@ -81,8 +77,20 @@ InputType* RangeInputType::create(HTMLInputElement& element)
 
 RangeInputType::RangeInputType(HTMLInputElement& element)
     : InputType(element)
+    , InputTypeView(element)
     , m_tickMarkValuesDirty(true)
 {
+}
+
+DEFINE_TRACE(RangeInputType)
+{
+    InputTypeView::trace(visitor);
+    InputType::trace(visitor);
+}
+
+InputTypeView* RangeInputType::createView()
+{
+    return this;
 }
 
 void RangeInputType::countUsage()
@@ -128,7 +136,11 @@ StepRange RangeInputType::createStepRange(AnyStepHandling anyStepHandling) const
     const Decimal maximum = ensureMaximum(parseToNumber(element().fastGetAttribute(maxAttr), rangeDefaultMaximum), minimum, rangeDefaultMaximum);
 
     const Decimal step = StepRange::parseStep(anyStepHandling, stepDescription, element().fastGetAttribute(stepAttr));
-    return StepRange(stepBase, minimum, maximum, step, stepDescription);
+    // Range type always has range limitations because it has default
+    // minimum/maximum.
+    // https://html.spec.whatwg.org/multipage/forms.html#range-state-(type=range):concept-input-min-default
+    const bool hasRangeLimitations = true;
+    return StepRange(stepBase, minimum, maximum, hasRangeLimitations, step, stepDescription);
 }
 
 bool RangeInputType::isSteppable() const
@@ -142,9 +154,9 @@ void RangeInputType::handleMouseDownEvent(MouseEvent* event)
         return;
 
     Node* targetNode = event->target()->toNode();
-    if (event->button() != LeftButton || !targetNode)
+    if (event->button() != static_cast<short>(WebPointerProperties::Button::Left) || !targetNode)
         return;
-    ASSERT(element().shadow());
+    DCHECK(element().shadow());
     if (targetNode != element() && !targetNode->isDescendantOf(element().userAgentShadowRoot()))
         return;
     SliderThumbElement* thumb = sliderThumbElement();
@@ -153,38 +165,15 @@ void RangeInputType::handleMouseDownEvent(MouseEvent* event)
     thumb->dragFrom(event->absoluteLocation());
 }
 
-void RangeInputType::handleTouchEvent(TouchEvent* event)
-{
-    if (element().isDisabledOrReadOnly())
-        return;
-
-    if (event->type() == EventTypeNames::touchend) {
-        element().dispatchFormControlChangeEvent();
-        event->setDefaultHandled();
-        return;
-    }
-
-    TouchList* touches = event->targetTouches();
-    if (touches->length() == 1) {
-        sliderThumbElement()->setPositionFromPoint(touches->item(0)->absoluteLocation());
-        event->setDefaultHandled();
-    }
-}
-
-bool RangeInputType::hasTouchEventHandler() const
-{
-    return true;
-}
-
 void RangeInputType::handleKeydownEvent(KeyboardEvent* event)
 {
     if (element().isDisabledOrReadOnly())
         return;
 
-    const String& key = event->keyIdentifier();
+    const String& key = event->key();
 
     const Decimal current = parseToNumberOrNaN(element().value());
-    ASSERT(current.isFinite());
+    DCHECK(current.isFinite());
 
     StepRange stepRange(createStepRange(RejectAny));
 
@@ -203,13 +192,13 @@ void RangeInputType::handleKeydownEvent(KeyboardEvent* event)
     }
 
     Decimal newValue;
-    if (key == "Up")
+    if (key == "ArrowUp")
         newValue = current + step;
-    else if (key == "Down")
+    else if (key == "ArrowDown")
         newValue = current - step;
-    else if (key == "Left")
+    else if (key == "ArrowLeft")
         newValue = (isVertical || dir == RTL) ? current + step : current - step;
-    else if (key == "Right")
+    else if (key == "ArrowRight")
         newValue = (isVertical || dir == RTL) ? current - step : current + step;
     else if (key == "PageUp")
         newValue = current + bigStep;
@@ -238,7 +227,7 @@ void RangeInputType::handleKeydownEvent(KeyboardEvent* event)
 
 void RangeInputType::createShadowSubtree()
 {
-    ASSERT(element().shadow());
+    DCHECK(element().shadow());
 
     Document& document = element().document();
     HTMLDivElement* track = HTMLDivElement::create(document);
@@ -248,6 +237,7 @@ void RangeInputType::createShadowSubtree()
     HTMLElement* container = SliderContainerElement::create(document);
     container->appendChild(track);
     element().userAgentShadowRoot()->appendChild(container);
+    container->setAttribute(styleAttr, "-webkit-appearance:inherit");
 }
 
 LayoutObject* RangeInputType::createLayoutObject(const ComputedStyle&) const
@@ -267,15 +257,23 @@ String RangeInputType::serialize(const Decimal& value) const
     return serializeForNumberType(value);
 }
 
-// FIXME: Could share this with BaseClickableWithKeyInputType and BaseCheckableInputType if we had a common base class.
+// FIXME: Could share this with KeyboardClickableInputTypeView and
+// BaseCheckableInputType if we had a common base class.
 void RangeInputType::accessKeyAction(bool sendMouseEvents)
 {
-    InputType::accessKeyAction(sendMouseEvents);
+    InputTypeView::accessKeyAction(sendMouseEvents);
 
     element().dispatchSimulatedClick(0, sendMouseEvents ? SendMouseUpDownEvents : SendNoEvents);
 }
 
 void RangeInputType::sanitizeValueInResponseToMinOrMaxAttributeChange()
+{
+    if (element().hasDirtyValue())
+        element().setValue(element().value());
+    element().updateView();
+}
+
+void RangeInputType::stepAttributeChanged()
 {
     if (element().hasDirtyValue())
         element().setValue(element().value());
@@ -338,9 +336,11 @@ inline Element* RangeInputType::sliderTrackElement() const
 void RangeInputType::listAttributeTargetChanged()
 {
     m_tickMarkValuesDirty = true;
+    if (element().layoutObject())
+        element().layoutObject()->setShouldDoFullPaintInvalidationIncludingNonCompositingDescendants();
     Element* sliderTrackElement = this->sliderTrackElement();
     if (sliderTrackElement->layoutObject())
-        sliderTrackElement->layoutObject()->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::AttributeChanged);
+        sliderTrackElement->layoutObject()->setNeedsLayout(LayoutInvalidationReason::AttributeChanged);
 }
 
 static bool decimalCompare(const Decimal& a, const Decimal& b)
@@ -380,7 +380,7 @@ Decimal RangeInputType::findClosestTickMarkValue(const Decimal& value)
     size_t right = m_tickMarkValues.size();
     size_t middle;
     while (true) {
-        ASSERT(left <= right);
+        DCHECK_LE(left, right);
         middle = left + (right - left) / 2;
         if (!middle)
             break;

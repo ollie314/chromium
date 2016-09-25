@@ -1,5 +1,0 @@
-{
-  "name": "mojo:mus_ws_unittests_app",
-  "display_name": "Mus Window Server Unittests",
-  "capabilities": { "*": [ "*" ] }
-}

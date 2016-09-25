@@ -44,18 +44,14 @@ class DoubleRect;
 class FloatPoint;
 class GraphicsLayer;
 class HostWindow;
+class LayoutBox;
 class PlatformWheelEvent;
 class ProgrammaticScrollAnimator;
 struct ScrollAlignment;
+class ScrollAnchor;
 class ScrollAnimatorBase;
 class CompositorAnimationTimeline;
 class Widget;
-
-enum ScrollBehavior {
-    ScrollBehaviorAuto,
-    ScrollBehaviorInstant,
-    ScrollBehaviorSmooth,
-};
 
 enum IncludeScrollbarsInRect {
     ExcludeScrollbars,
@@ -128,6 +124,7 @@ public:
 
     virtual CompositorAnimationTimeline* compositorAnimationTimeline() const { return nullptr; }
 
+    // See Source/core/layout/README.md for an explanation of scroll origin.
     const IntPoint& scrollOrigin() const { return m_scrollOrigin; }
     bool scrollOriginChanged() const { return m_scrollOriginChanged; }
 
@@ -269,17 +266,30 @@ public:
     // Does nothing if overlay scrollbars are enabled.
     IntSize excludeScrollbars(const IntSize&) const;
 
+    // Returns 0 if overlay scrollbars are enabled.
+    int verticalScrollbarWidth() const;
+    int horizontalScrollbarHeight() const;
+
     // Returns the widget associated with this ScrollableArea.
     virtual Widget* getWidget() { return nullptr; }
 
+    virtual LayoutBox* layoutBox() const { return nullptr; }
+
     virtual bool isFrameView() const { return false; }
     virtual bool isPaintLayerScrollableArea() const { return false; }
+    virtual bool isRootFrameViewport() const { return false; }
+
+    // Returns true if the scroller adjusts the scroll position to compensate
+    // for layout movements (bit.ly/scroll-anchoring).
+    virtual bool shouldPerformScrollAnchoring() const { return false; }
 
     // Need to promptly let go of owned animator objects.
     EAGERLY_FINALIZE();
     DECLARE_VIRTUAL_TRACE();
 
     virtual void clearScrollAnimators();
+
+    virtual ScrollAnchor* scrollAnchor() { return nullptr; }
 
 protected:
     ScrollableArea();
@@ -291,8 +301,7 @@ protected:
     void resetScrollOriginChanged() { m_scrollOriginChanged = false; }
 
     // Needed to let the animators call scrollPositionChanged.
-    friend class ScrollAnimatorBase;
-    friend class ProgrammaticScrollAnimator;
+    friend class ScrollAnimatorCompositorCoordinator;
     void scrollPositionChanged(const DoublePoint&, ScrollType);
 
     bool horizontalScrollbarNeedsPaintInvalidation() const { return m_horizontalScrollbarNeedsPaintInvalidation; }

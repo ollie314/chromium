@@ -94,7 +94,7 @@ DownloadsListTracker::~DownloadsListTracker() {}
 
 void DownloadsListTracker::Reset() {
   if (sending_updates_)
-    web_ui_->CallJavascriptFunction("downloads.Manager.clearAll");
+    web_ui_->CallJavascriptFunctionUnsafe("downloads.Manager.clearAll");
   sent_to_page_ = 0u;
 }
 
@@ -127,10 +127,9 @@ void DownloadsListTracker::StartAndSendChunk() {
     ++it;
   }
 
-  web_ui_->CallJavascriptFunction(
+  web_ui_->CallJavascriptFunctionUnsafe(
       "downloads.Manager.insertItems",
-      base::FundamentalValue(static_cast<int>(sent_to_page_)),
-      list);
+      base::FundamentalValue(static_cast<int>(sent_to_page_)), list);
 
   sent_to_page_ += list.GetSize();
 }
@@ -279,7 +278,11 @@ DownloadsListTracker::CreateDownloadItemValue(
       if (download_item->CanResume())
         percent = download_item->PercentComplete();
 
-      last_reason_text = download_model.GetInterruptReasonText();
+      // TODO(asanka): last_reason_text should be set via
+      // download_model.GetInterruptReasonText(). But we are using
+      // GetStatusText() as a temporary measure until the layout is fixed to
+      // accommodate the longer string. http://crbug.com/609255
+      last_reason_text = download_model.GetStatusText();
       if (content::DOWNLOAD_INTERRUPT_REASON_CRASH ==
           download_item->GetLastReason() && !download_item->CanResume()) {
         retry = true;
@@ -337,6 +340,7 @@ bool DownloadsListTracker::ShouldShow(const DownloadItem& item) const {
       !item.IsTemporary() &&
       !item.GetFileNameToReportUser().empty() &&
       !item.GetTargetFilePath().empty() &&
+      !item.GetURL().is_empty() &&
       DownloadItemModel(const_cast<DownloadItem*>(&item)).ShouldShowInShelf() &&
       DownloadQuery::MatchesQuery(search_terms_, item);
 }
@@ -385,10 +389,9 @@ void DownloadsListTracker::InsertItem(const SortedSet::iterator& insert) {
   base::ListValue list;
   list.Append(CreateDownloadItemValue(*insert));
 
-  web_ui_->CallJavascriptFunction(
+  web_ui_->CallJavascriptFunctionUnsafe(
       "downloads.Manager.insertItems",
-      base::FundamentalValue(static_cast<int>(index)),
-      list);
+      base::FundamentalValue(static_cast<int>(index)), list);
 
   sent_to_page_++;
 }
@@ -397,7 +400,7 @@ void DownloadsListTracker::UpdateItem(const SortedSet::iterator& update) {
   if (!sending_updates_ || GetIndex(update) >= sent_to_page_)
     return;
 
-  web_ui_->CallJavascriptFunction(
+  web_ui_->CallJavascriptFunctionUnsafe(
       "downloads.Manager.updateItem",
       base::FundamentalValue(static_cast<int>(GetIndex(update))),
       *CreateDownloadItemValue(*update));
@@ -412,7 +415,7 @@ void DownloadsListTracker::RemoveItem(const SortedSet::iterator& remove) {
   if (sending_updates_) {
     size_t index = GetIndex(remove);
     if (index < sent_to_page_) {
-      web_ui_->CallJavascriptFunction(
+      web_ui_->CallJavascriptFunctionUnsafe(
           "downloads.Manager.removeItem",
           base::FundamentalValue(static_cast<int>(index)));
       sent_to_page_--;

@@ -6,6 +6,7 @@
 
 #include "core/svg/graphics/SVGImage.h"
 #include "core/svg/graphics/SVGImageForContainer.h"
+#include "platform/geometry/LayoutSize.h"
 
 namespace blink {
 
@@ -31,7 +32,8 @@ LayoutSize StyleImage::imageSizeForSVGImage(SVGImage* svgImage, float multiplier
 {
     FloatSize unzoomedDefaultObjectSize(defaultObjectSize);
     unzoomedDefaultObjectSize.scale(1 / multiplier);
-    return applyZoom(LayoutSize(svgImage->concreteObjectSize(svgImage->concreteObjectSize(unzoomedDefaultObjectSize))), multiplier);
+    LayoutSize imageSize(roundedIntSize(svgImage->concreteObjectSize(unzoomedDefaultObjectSize)));
+    return applyZoom(imageSize, multiplier);
 }
 
 } // namespace blink

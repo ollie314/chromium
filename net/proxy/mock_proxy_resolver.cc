@@ -8,7 +8,6 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 
 namespace net {
 
@@ -16,12 +15,7 @@ MockAsyncProxyResolver::Request::Request(MockAsyncProxyResolver* resolver,
                                          const GURL& url,
                                          ProxyInfo* results,
                                          const CompletionCallback& callback)
-    : resolver_(resolver),
-      url_(url),
-      results_(results),
-      callback_(callback),
-      origin_loop_(base::MessageLoop::current()) {
-}
+    : resolver_(resolver), url_(url), results_(results), callback_(callback) {}
 
 void MockAsyncProxyResolver::Request::CompleteNow(int rv) {
   CompletionCallback callback = callback_;
@@ -36,11 +30,12 @@ MockAsyncProxyResolver::Request::~Request() {}
 
 MockAsyncProxyResolver::~MockAsyncProxyResolver() {}
 
-int MockAsyncProxyResolver::GetProxyForURL(const GURL& url,
-                                           ProxyInfo* results,
-                                           const CompletionCallback& callback,
-                                           RequestHandle* request_handle,
-                                           const BoundNetLog& /*net_log*/) {
+int MockAsyncProxyResolver::GetProxyForURL(
+    const GURL& url,
+    ProxyInfo* results,
+    const CompletionCallback& callback,
+    RequestHandle* request_handle,
+    const NetLogWithSource& /*net_log*/) {
   scoped_refptr<Request> request = new Request(this, url, results, callback);
   pending_requests_.push_back(request);
 
@@ -101,7 +96,7 @@ void MockAsyncProxyResolverFactory::Request::CompleteNowWithForwarder(
     int rv,
     ProxyResolver* resolver) {
   DCHECK(resolver);
-  CompleteNow(rv, base::WrapUnique(new ForwardingProxyResolver(resolver)));
+  CompleteNow(rv, base::MakeUnique<ForwardingProxyResolver>(resolver));
 }
 
 void MockAsyncProxyResolverFactory::Request::FactoryDestroyed() {
@@ -166,7 +161,7 @@ int ForwardingProxyResolver::GetProxyForURL(const GURL& query_url,
                                             ProxyInfo* results,
                                             const CompletionCallback& callback,
                                             RequestHandle* request,
-                                            const BoundNetLog& net_log) {
+                                            const NetLogWithSource& net_log) {
   return impl_->GetProxyForURL(query_url, results, callback, request, net_log);
 }
 

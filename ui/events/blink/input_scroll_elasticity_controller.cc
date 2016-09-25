@@ -106,67 +106,6 @@ InputScrollElasticityController::GetWeakPtr() {
   return base::WeakPtr<InputScrollElasticityController>();
 }
 
-void InputScrollElasticityController::ObserveWheelEventAndResult(
-    const blink::WebMouseWheelEvent& wheel_event,
-    const cc::InputHandlerScrollResult& scroll_result) {
-  // We should only get PhaseMayBegin or PhaseBegan events while in the
-  // Inactive or MomentumAnimated states, but in case we get bad input (e.g,
-  // abbreviated by tab-switch), always re-set the state to ActiveScrolling
-  // when those events are received.
-  if (wheel_event.phase == blink::WebMouseWheelEvent::PhaseMayBegin ||
-      wheel_event.phase == blink::WebMouseWheelEvent::PhaseBegan) {
-    scroll_velocity = gfx::Vector2dF();
-    last_scroll_event_timestamp_ = base::TimeTicks();
-    state_ = kStateActiveScroll;
-    pending_overscroll_delta_ = gfx::Vector2dF();
-    return;
-  }
-
-  gfx::Vector2dF event_delta(-wheel_event.deltaX, -wheel_event.deltaY);
-  base::TimeTicks event_timestamp =
-      base::TimeTicks() +
-      base::TimeDelta::FromSecondsD(wheel_event.timeStampSeconds);
-  switch (state_) {
-    case kStateInactive: {
-      // The PhaseMayBegin and PhaseBegan cases are handled at the top of the
-      // function.
-      if (wheel_event.momentumPhase == blink::WebMouseWheelEvent::PhaseBegan)
-        state_ = kStateMomentumScroll;
-      break;
-    }
-    case kStateActiveScroll:
-      if (wheel_event.phase == blink::WebMouseWheelEvent::PhaseChanged) {
-        UpdateVelocity(event_delta, event_timestamp);
-        Overscroll(event_delta, scroll_result.unused_scroll_delta);
-      } else if (wheel_event.phase == blink::WebMouseWheelEvent::PhaseEnded ||
-                 wheel_event.phase ==
-                     blink::WebMouseWheelEvent::PhaseCancelled) {
-        if (helper_->StretchAmount().IsZero()) {
-          EnterStateInactive();
-        } else {
-          EnterStateMomentumAnimated(event_timestamp);
-        }
-      }
-      break;
-    case kStateMomentumScroll:
-      if (wheel_event.momentumPhase ==
-          blink::WebMouseWheelEvent::PhaseChanged) {
-        UpdateVelocity(event_delta, event_timestamp);
-        Overscroll(event_delta, scroll_result.unused_scroll_delta);
-        if (!helper_->StretchAmount().IsZero()) {
-          EnterStateMomentumAnimated(event_timestamp);
-        }
-      } else if (wheel_event.momentumPhase ==
-                 blink::WebMouseWheelEvent::PhaseEnded) {
-        EnterStateInactive();
-      }
-    case kStateMomentumAnimated:
-      // The PhaseMayBegin and PhaseBegan cases are handled at the top of the
-      // function.
-      break;
-  }
-}
-
 void InputScrollElasticityController::ObserveGestureEventAndResult(
     const blink::WebGestureEvent& gesture_event,
     const cc::InputHandlerScrollResult& scroll_result) {
@@ -178,11 +117,14 @@ void InputScrollElasticityController::ObserveGestureEventAndResult(
     case blink::WebInputEvent::GestureScrollBegin: {
       if (gesture_event.data.scrollBegin.synthetic)
         return;
-      if (gesture_event.data.scrollBegin.inertial) {
+      if (gesture_event.data.scrollBegin.inertialPhase ==
+          blink::WebGestureEvent::MomentumPhase) {
         if (state_ == kStateInactive)
           state_ = kStateMomentumScroll;
-      } else if (gesture_event.data.scrollBegin.deltaHintUnits ==
-                 blink::WebGestureEvent::PrecisePixels) {
+      } else if (gesture_event.data.scrollBegin.inertialPhase ==
+                     blink::WebGestureEvent::NonMomentumPhase &&
+                 gesture_event.data.scrollBegin.deltaHintUnits ==
+                     blink::WebGestureEvent::PrecisePixels) {
         scroll_velocity = gfx::Vector2dF();
         last_scroll_event_timestamp_ = base::TimeTicks();
         state_ = kStateActiveScroll;
@@ -201,7 +143,8 @@ void InputScrollElasticityController::ObserveGestureEventAndResult(
         case kStateMomentumScroll:
           UpdateVelocity(event_delta, event_timestamp);
           Overscroll(event_delta, scroll_result.unused_scroll_delta);
-          if (gesture_event.data.scrollUpdate.inertial &&
+          if (gesture_event.data.scrollUpdate.inertialPhase ==
+                  blink::WebGestureEvent::MomentumPhase &&
               !helper_->StretchAmount().IsZero()) {
             EnterStateMomentumAnimated(event_timestamp);
           }

@@ -36,7 +36,6 @@
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/shadow/ShadowElementNames.h"
 #include "core/html/shadow/SliderThumbElement.h"
-#include "core/layout/LayoutFlexibleBox.h"
 #include "core/layout/LayoutSlider.h"
 #include "core/layout/LayoutTheme.h"
 
@@ -64,7 +63,7 @@ inline static bool hasVerticalAppearance(HTMLInputElement* input)
 
 void LayoutSliderContainer::computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues& computedValues) const
 {
-    HTMLInputElement* input = toHTMLInputElement(node()->shadowHost());
+    HTMLInputElement* input = toHTMLInputElement(node()->ownerShadowHost());
     bool isVertical = hasVerticalAppearance(input);
 
     if (input->layoutObject()->isSlider() && !isVertical && input->list()) {
@@ -97,7 +96,7 @@ void LayoutSliderContainer::computeLogicalHeight(LayoutUnit logicalHeight, Layou
 
 void LayoutSliderContainer::layout()
 {
-    HTMLInputElement* input = toHTMLInputElement(node()->shadowHost());
+    HTMLInputElement* input = toHTMLInputElement(node()->ownerShadowHost());
     bool isVertical = hasVerticalAppearance(input);
     mutableStyleRef().setFlexDirection(isVertical ? FlowColumn : FlowRow);
     TextDirection oldTextDirection = style()->direction();

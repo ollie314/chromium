@@ -30,6 +30,16 @@ public:
 
     LayoutTextItem() { }
 
+    void setStyle(PassRefPtr<ComputedStyle> style)
+    {
+        toText()->setStyle(std::move(style));
+    }
+
+    void setText(PassRefPtr<StringImpl> text, bool force = false)
+    {
+        toText()->setText(std::move(text), force);
+    }
+
     bool isTextFragment() const
     {
         return toText()->isTextFragment();
@@ -38,16 +48,6 @@ public:
     void dirtyLineBoxes()
     {
         toText()->dirtyLineBoxes();
-    }
-
-    void setStyle(PassRefPtr<ComputedStyle> style)
-    {
-        toText()->setStyle(style);
-    }
-
-    void setText(PassRefPtr<StringImpl> text, bool force = false)
-    {
-        toText()->setText(text, force);
     }
 
 private:

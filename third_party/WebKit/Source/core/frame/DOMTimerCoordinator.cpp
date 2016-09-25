@@ -7,13 +7,14 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/DOMTimer.h"
 #include <algorithm>
+#include <memory>
 
 namespace blink {
 
-DOMTimerCoordinator::DOMTimerCoordinator(PassOwnPtr<WebTaskRunner> timerTaskRunner)
+DOMTimerCoordinator::DOMTimerCoordinator(std::unique_ptr<WebTaskRunner> timerTaskRunner)
     : m_circularSequentialID(0)
     , m_timerNestingLevel(0)
-    , m_timerTaskRunner(timerTaskRunner)
+    , m_timerTaskRunner(std::move(timerTaskRunner))
 {
 }
 
@@ -31,15 +32,21 @@ int DOMTimerCoordinator::installNewTimeout(ExecutionContext* context, ScheduledA
     return timeoutID;
 }
 
-void DOMTimerCoordinator::removeTimeoutByID(int timeoutID)
+DOMTimer* DOMTimerCoordinator::removeTimeoutByID(int timeoutID)
 {
     if (timeoutID <= 0)
-        return;
+        return nullptr;
 
-    if (DOMTimer* removedTimer = m_timers.get(timeoutID))
+    DOMTimer* removedTimer = m_timers.take(timeoutID);
+    if (removedTimer)
         removedTimer->disposeTimer();
 
-    m_timers.remove(timeoutID);
+    return removedTimer;
+}
+
+bool DOMTimerCoordinator::hasInstalledTimeout() const
+{
+    return !m_timers.isEmpty();
 }
 
 DEFINE_TRACE(DOMTimerCoordinator)
@@ -60,9 +67,9 @@ int DOMTimerCoordinator::nextID()
     }
 }
 
-void DOMTimerCoordinator::setTimerTaskRunner(PassOwnPtr<WebTaskRunner> timerTaskRunner)
+void DOMTimerCoordinator::setTimerTaskRunner(std::unique_ptr<WebTaskRunner> timerTaskRunner)
 {
-    m_timerTaskRunner = timerTaskRunner;
+    m_timerTaskRunner = std::move(timerTaskRunner);
 }
 
 } // namespace blink

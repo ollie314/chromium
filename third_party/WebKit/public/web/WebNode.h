@@ -35,7 +35,6 @@
 #include "../platform/WebPrivatePtr.h"
 #include "../platform/WebString.h"
 #include "../platform/WebVector.h"
-#include "WebExceptionCode.h"
 
 namespace blink {
 
@@ -80,7 +79,7 @@ public:
     BLINK_EXPORT WebNode lastChild() const;
     BLINK_EXPORT WebNode previousSibling() const;
     BLINK_EXPORT WebNode nextSibling() const;
-    BLINK_EXPORT bool hasChildNodes() const;
+
     BLINK_EXPORT bool isLink() const;
     BLINK_EXPORT bool isDocumentNode() const;
     BLINK_EXPORT bool isDocumentTypeNode() const;
@@ -94,7 +93,9 @@ public:
     // The argument should be lower-cased.
     BLINK_EXPORT WebElementCollection getElementsByHTMLTagName(const WebString&) const;
 
-    BLINK_EXPORT WebElement querySelector(const WebString& selector, WebExceptionCode&) const;
+    // https://developer.mozilla.org/en-US/docs/Web/API/Document/querySelector
+    // If the JS API would have thrown this returns null instead.
+    BLINK_EXPORT WebElement querySelector(const WebString& selector) const;
 
     BLINK_EXPORT bool focused() const;
 
@@ -107,6 +108,8 @@ public:
     template<typename T> const T toConst() const;
 
 #if BLINK_IMPLEMENTATION
+    BLINK_EXPORT static WebPluginContainer* pluginContainerFromNode(const Node*);
+
     BLINK_EXPORT WebNode(Node*);
     BLINK_EXPORT WebNode& operator=(Node*);
     BLINK_EXPORT operator Node*() const;

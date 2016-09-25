@@ -2,21 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "components/search_engines/search_engine_data_type_controller.h"
+
+#include <memory>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/tracked_objects.h"
-#include "components/search_engines/search_engine_data_type_controller.h"
 #include "components/search_engines/template_url_service.h"
-#include "components/sync_driver/data_type_controller_mock.h"
-#include "components/sync_driver/fake_generic_change_processor.h"
-#include "components/sync_driver/fake_sync_client.h"
-#include "components/sync_driver/sync_api_component_factory_mock.h"
-#include "sync/api/fake_syncable_service.h"
+#include "components/sync/api/fake_syncable_service.h"
+#include "components/sync/driver/data_type_controller_mock.h"
+#include "components/sync/driver/fake_generic_change_processor.h"
+#include "components/sync/driver/fake_sync_client.h"
+#include "components/sync/driver/sync_api_component_factory_mock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
@@ -34,10 +38,11 @@ class SyncSearchEngineDataTypeControllerTest
  public:
   SyncSearchEngineDataTypeControllerTest()
       : sync_driver::FakeSyncClient(&profile_sync_factory_),
-        template_url_service_(new TemplateURLService(nullptr, 0)) {
+        template_url_service_(nullptr, 0),
+        search_engine_dtc_(base::Closure(), this, &template_url_service_) {
     // Disallow the TemplateURLService from loading until
     // PreloadTemplateURLService() is called .
-    template_url_service_->set_disable_load(true);
+    template_url_service_.set_disable_load(true);
   }
 
   // FakeSyncClient overrides.
@@ -46,47 +51,39 @@ class SyncSearchEngineDataTypeControllerTest
     return syncable_service_.AsWeakPtr();
   }
 
-  void SetUp() override {
-    search_engine_dtc_ = new SearchEngineDataTypeController(
-        base::ThreadTaskRunnerHandle::Get(),
-        base::Bind(&base::DoNothing), this,
-        template_url_service_.get());
-  }
-
   void TearDown() override {
     // Must be done before we pump the loop.
     syncable_service_.StopSyncing(syncer::SEARCH_ENGINES);
-    search_engine_dtc_ = NULL;
   }
 
  protected:
   void PreloadTemplateURLService() {
-    template_url_service_->set_disable_load(false);
-    template_url_service_->Load();
+    template_url_service_.set_disable_load(false);
+    template_url_service_.Load();
   }
 
   void SetStartExpectations() {
-    search_engine_dtc_->SetGenericChangeProcessorFactoryForTest(
-        make_scoped_ptr<sync_driver::GenericChangeProcessorFactory>(
+    search_engine_dtc_.SetGenericChangeProcessorFactoryForTest(
+        base::WrapUnique<sync_driver::GenericChangeProcessorFactory>(
             new sync_driver::FakeGenericChangeProcessorFactory(
-                make_scoped_ptr(new sync_driver::FakeGenericChangeProcessor(
-                    syncer::SEARCH_ENGINES, this)))));
+                base::MakeUnique<sync_driver::FakeGenericChangeProcessor>(
+                    syncer::SEARCH_ENGINES, this))));
     EXPECT_CALL(model_load_callback_, Run(_, _));
   }
 
   void Start() {
-    search_engine_dtc_->LoadModels(
+    search_engine_dtc_.LoadModels(
         base::Bind(&sync_driver::ModelLoadCallbackMock::Run,
                    base::Unretained(&model_load_callback_)));
-    search_engine_dtc_->StartAssociating(
+    search_engine_dtc_.StartAssociating(
         base::Bind(&sync_driver::StartCallbackMock::Run,
                    base::Unretained(&start_callback_)));
-    base::MessageLoop::current()->RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   base::MessageLoop message_loop_;
-  scoped_ptr<TemplateURLService> template_url_service_;
-  scoped_refptr<SearchEngineDataTypeController> search_engine_dtc_;
+  TemplateURLService template_url_service_;
+  SearchEngineDataTypeController search_engine_dtc_;
   SyncApiComponentFactoryMock profile_sync_factory_;
   syncer::FakeSyncableService syncable_service_;
   sync_driver::StartCallbackMock start_callback_;
@@ -100,30 +97,30 @@ TEST_F(SyncSearchEngineDataTypeControllerTest, StartURLServiceReady) {
   EXPECT_CALL(start_callback_, Run(sync_driver::DataTypeController::OK, _, _));
 
   EXPECT_EQ(sync_driver::DataTypeController::NOT_RUNNING,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
   EXPECT_FALSE(syncable_service_.syncing());
   Start();
   EXPECT_EQ(sync_driver::DataTypeController::RUNNING,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
   EXPECT_TRUE(syncable_service_.syncing());
 }
 
 TEST_F(SyncSearchEngineDataTypeControllerTest, StartURLServiceNotReady) {
   EXPECT_CALL(model_load_callback_, Run(_, _));
   EXPECT_FALSE(syncable_service_.syncing());
-  search_engine_dtc_->LoadModels(
+  search_engine_dtc_.LoadModels(
       base::Bind(&sync_driver::ModelLoadCallbackMock::Run,
                  base::Unretained(&model_load_callback_)));
-  EXPECT_TRUE(search_engine_dtc_->GetSubscriptionForTesting());
+  EXPECT_TRUE(search_engine_dtc_.GetSubscriptionForTesting());
   EXPECT_EQ(sync_driver::DataTypeController::MODEL_STARTING,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
   EXPECT_FALSE(syncable_service_.syncing());
 
   // Send the notification that the TemplateURLService has started.
   PreloadTemplateURLService();
-  EXPECT_EQ(NULL, search_engine_dtc_->GetSubscriptionForTesting());
+  EXPECT_EQ(NULL, search_engine_dtc_.GetSubscriptionForTesting());
   EXPECT_EQ(sync_driver::DataTypeController::MODEL_LOADED,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
 
   // Wait until WebDB is loaded before we shut it down.
   base::RunLoop().RunUntilIdle();
@@ -142,11 +139,11 @@ TEST_F(SyncSearchEngineDataTypeControllerTest, StartAssociationFailed) {
 
   Start();
   EXPECT_EQ(sync_driver::DataTypeController::DISABLED,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
   EXPECT_FALSE(syncable_service_.syncing());
-  search_engine_dtc_->Stop();
+  search_engine_dtc_.Stop();
   EXPECT_EQ(sync_driver::DataTypeController::NOT_RUNNING,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
   EXPECT_FALSE(syncable_service_.syncing());
 }
 
@@ -156,31 +153,31 @@ TEST_F(SyncSearchEngineDataTypeControllerTest, Stop) {
   EXPECT_CALL(start_callback_, Run(sync_driver::DataTypeController::OK, _, _));
 
   EXPECT_EQ(sync_driver::DataTypeController::NOT_RUNNING,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
   EXPECT_FALSE(syncable_service_.syncing());
   Start();
   EXPECT_EQ(sync_driver::DataTypeController::RUNNING,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
   EXPECT_TRUE(syncable_service_.syncing());
-  search_engine_dtc_->Stop();
+  search_engine_dtc_.Stop();
   EXPECT_EQ(sync_driver::DataTypeController::NOT_RUNNING,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
   EXPECT_FALSE(syncable_service_.syncing());
 }
 
 TEST_F(SyncSearchEngineDataTypeControllerTest, StopBeforeLoaded) {
   EXPECT_FALSE(syncable_service_.syncing());
-  search_engine_dtc_->LoadModels(
+  search_engine_dtc_.LoadModels(
       base::Bind(&sync_driver::ModelLoadCallbackMock::Run,
                  base::Unretained(&model_load_callback_)));
-  EXPECT_TRUE(search_engine_dtc_->GetSubscriptionForTesting());
+  EXPECT_TRUE(search_engine_dtc_.GetSubscriptionForTesting());
   EXPECT_EQ(sync_driver::DataTypeController::MODEL_STARTING,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
   EXPECT_FALSE(syncable_service_.syncing());
-  search_engine_dtc_->Stop();
-  EXPECT_EQ(NULL, search_engine_dtc_->GetSubscriptionForTesting());
+  search_engine_dtc_.Stop();
+  EXPECT_EQ(NULL, search_engine_dtc_.GetSubscriptionForTesting());
   EXPECT_EQ(sync_driver::DataTypeController::NOT_RUNNING,
-            search_engine_dtc_->state());
+            search_engine_dtc_.state());
   EXPECT_FALSE(syncable_service_.syncing());
 }
 

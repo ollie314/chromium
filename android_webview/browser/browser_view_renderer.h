@@ -8,16 +8,18 @@
 #include <stddef.h>
 
 #include <map>
+#include <set>
 
+#include "android_webview/browser/compositor_frame_producer.h"
+#include "android_webview/browser/compositor_id.h"
 #include "android_webview/browser/parent_compositor_draw_constraints.h"
-#include "android_webview/browser/render_thread_manager.h"
 #include "base/callback.h"
 #include "base/cancelable_callback.h"
 #include "base/macros.h"
 #include "base/trace_event/trace_event.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/android/synchronous_compositor_client.h"
-#include "skia/ext/refptr.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/geometry/vector2d_f.h"
@@ -26,6 +28,7 @@ class SkCanvas;
 class SkPicture;
 
 namespace content {
+class RenderViewHost;
 class WebContents;
 }
 
@@ -33,10 +36,12 @@ namespace android_webview {
 
 class BrowserViewRendererClient;
 class ChildFrame;
+class CompositorFrameConsumer;
 
 // Interface for all the WebView-specific content rendering operations.
 // Provides software and hardware rendering and the Capture Picture API.
-class BrowserViewRenderer : public content::SynchronousCompositorClient {
+class BrowserViewRenderer : public content::SynchronousCompositorClient,
+                            public CompositorFrameProducer {
  public:
   static void CalculateTileMemoryPolicy();
   static BrowserViewRenderer* FromWebContents(
@@ -44,16 +49,18 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
 
   BrowserViewRenderer(
       BrowserViewRendererClient* client,
-      const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner,
-      bool disable_page_visibility);
+      const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner);
 
   ~BrowserViewRenderer() override;
 
   void RegisterWithWebContents(content::WebContents* web_contents);
 
-  // The BrowserViewRenderer client is responsible for ensuring that the
-  // RenderThreadManager has been set correctly via this method.
-  void SetRenderThreadManager(RenderThreadManager* render_thread_manager);
+  // The BrowserViewRenderer client is responsible for ensuring that
+  // the current compositor frame consumer has been set correctly via
+  // this method.  The consumer is added to the set of registered
+  // consumers if it is not already registered.
+  void SetCurrentCompositorFrameConsumer(
+      CompositorFrameConsumer* compositor_frame_consumer);
 
   // Called before either OnDrawHardware or OnDrawSoftware to set the view
   // state of this frame. |scroll| is the view's current scroll offset.
@@ -68,7 +75,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   bool OnDrawSoftware(SkCanvas* canvas);
 
   // CapturePicture API methods.
-  skia::RefPtr<SkPicture> CapturePicture(int width, int height);
+  sk_sp<SkPicture> CapturePicture(int width, int height);
   void EnableOnNewPicture(bool enabled);
 
   void ClearView();
@@ -97,66 +104,90 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   bool IsVisible() const;
   gfx::Rect GetScreenRect() const;
   bool attached_to_window() const { return attached_to_window_; }
-  bool hardware_enabled() const { return hardware_enabled_; }
   gfx::Size size() const { return size_; }
 
   bool IsClientVisible() const;
   void TrimMemory();
 
   // SynchronousCompositorClient overrides.
-  void DidInitializeCompositor(
-      content::SynchronousCompositor* compositor) override;
-  void DidDestroyCompositor(
-      content::SynchronousCompositor* compositor) override;
-  void DidBecomeCurrent(content::SynchronousCompositor* compositor) override;
-  void PostInvalidate() override;
-  void DidUpdateContent() override;
-  void UpdateRootLayerState(const gfx::Vector2dF& total_scroll_offset_dip,
+  void DidInitializeCompositor(content::SynchronousCompositor* compositor,
+                               int process_id,
+                               int routing_id) override;
+  void DidDestroyCompositor(content::SynchronousCompositor* compositor,
+                            int process_id,
+                            int routing_id) override;
+  void PostInvalidate(content::SynchronousCompositor* compositor) override;
+  void DidUpdateContent(content::SynchronousCompositor* compositor) override;
+  void UpdateRootLayerState(content::SynchronousCompositor* compositor,
+                            const gfx::Vector2dF& total_scroll_offset_dip,
                             const gfx::Vector2dF& max_scroll_offset_dip,
                             const gfx::SizeF& scrollable_size_dip,
                             float page_scale_factor,
                             float min_page_scale_factor,
                             float max_page_scale_factor) override;
-  void DidOverscroll(const gfx::Vector2dF& accumulated_overscroll,
+  void DidOverscroll(content::SynchronousCompositor* compositor,
+                     const gfx::Vector2dF& accumulated_overscroll,
                      const gfx::Vector2dF& latest_overscroll_delta,
                      const gfx::Vector2dF& current_fling_velocity) override;
+  ui::TouchHandleDrawable* CreateDrawable() override;
+  void OnDrawHardwareProcessFrame(
+      content::SynchronousCompositor::Frame frame) override;
 
-  void OnParentDrawConstraintsUpdated();
-  void DetachFunctorFromView();
+  // CompositorFrameProducer overrides
+  void OnParentDrawConstraintsUpdated(
+      CompositorFrameConsumer* compositor_frame_consumer) override;
+  void RemoveCompositorFrameConsumer(
+      CompositorFrameConsumer* compositor_frame_consumer) override;
+
+  void SetActiveCompositorID(const CompositorID& compositor_id);
+
+  // Visible for testing.
+  content::SynchronousCompositor* GetActiveCompositorForTesting() const {
+    return compositor_;
+  }
 
  private:
   void SetTotalRootLayerScrollOffset(const gfx::Vector2dF& new_value_dip);
   bool CanOnDraw();
-  void UpdateCompositorIsActive();
   bool CompositeSW(SkCanvas* canvas);
   std::unique_ptr<base::trace_event::ConvertableToTraceFormat>
   RootLayerStateAsValue(const gfx::Vector2dF& total_scroll_offset_dip,
                         const gfx::SizeF& scrollable_size_dip);
 
   void ReturnUnusedResource(std::unique_ptr<ChildFrame> frame);
-  void ReturnResourceFromParent();
+  void ReturnResourceFromParent(
+      CompositorFrameConsumer* compositor_frame_consumer);
   void ReleaseHardware();
+  gfx::Rect ComputeViewportRectForTilePriority();
 
   gfx::Vector2d max_scroll_offset() const;
 
   void UpdateMemoryPolicy();
 
-  uint32_t GetCompositorID(content::SynchronousCompositor* compositor);
+  content::SynchronousCompositor* FindCompositor(
+      const CompositorID& compositor_id) const;
   // For debug tracing or logging. Return the string representation of this
   // view renderer's state.
   std::string ToString() const;
 
   BrowserViewRendererClient* const client_;
   const scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
-  RenderThreadManager* render_thread_manager_;
-  bool disable_page_visibility_;
+  const bool async_on_draw_hardware_;
+  CompositorFrameConsumer* current_compositor_frame_consumer_;
+  std::set<CompositorFrameConsumer*> compositor_frame_consumers_;
 
   // The current compositor that's owned by the current RVH.
   content::SynchronousCompositor* compositor_;
+  // The process id and routing id of the most recent RVH according to
+  // RVHChanged.
+  CompositorID compositor_id_;
   // A map from compositor's per-WebView unique ID to the compositor's raw
   // pointer. A raw pointer here is fine because the entry will be erased when
   // a compositor is destroyed.
-  std::map<size_t, content::SynchronousCompositor*> compositor_map_;
+  std::map<CompositorID,
+           content::SynchronousCompositor*,
+           CompositorIDComparator>
+      compositor_map_;
 
   bool is_paused_;
   bool view_visible_;
@@ -192,8 +223,6 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   // spot over a period of time).
   // TODO(miletus): Make overscroll_rounding_error_ a gfx::ScrollOffset.
   gfx::Vector2dF overscroll_rounding_error_;
-
-  uint32_t next_compositor_id_;
 
   ParentCompositorDrawConstraints external_draw_constraints_;
 

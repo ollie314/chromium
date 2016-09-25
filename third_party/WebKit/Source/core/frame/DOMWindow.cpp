@@ -4,22 +4,23 @@
 
 #include "core/frame/DOMWindow.h"
 
-#include "bindings/core/v8/ScriptCallStack.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/SecurityContext.h"
 #include "core/events/MessageEvent.h"
+#include "core/frame/External.h"
 #include "core/frame/Frame.h"
 #include "core/frame/FrameClient.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/Location.h"
+#include "core/frame/RemoteDOMWindow.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "core/input/EventHandler.h"
-#include "core/inspector/ConsoleMessageStorage.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/MixedContentChecker.h"
@@ -29,6 +30,7 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/Suborigin.h"
+#include <memory>
 
 namespace blink {
 
@@ -58,6 +60,11 @@ v8::Local<v8::Object> DOMWindow::associateWithWrapper(v8::Isolate*, const Wrappe
 const AtomicString& DOMWindow::interfaceName() const
 {
     return EventTargetNames::DOMWindow;
+}
+
+const DOMWindow* DOMWindow::toDOMWindow() const
+{
+    return this;
 }
 
 Location* DOMWindow::location() const
@@ -110,6 +117,12 @@ DOMWindow* DOMWindow::top() const
         return nullptr;
 
     return frame()->tree().top()->domWindow();
+}
+
+External* DOMWindow::external() const
+{
+    DEFINE_STATIC_LOCAL(Persistent<External>, external, (new External));
+    return external;
 }
 
 DOMWindow* DOMWindow::anonymousIndexedGetter(uint32_t index) const
@@ -192,7 +205,7 @@ void DOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message, const Mes
         }
     }
 
-    OwnPtr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(getExecutionContext(), ports, exceptionState);
+    std::unique_ptr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(getExecutionContext(), ports, exceptionState);
     if (exceptionState.hadException())
         return;
 
@@ -214,19 +227,9 @@ void DOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message, const Mes
     else if (MixedContentChecker::isMixedContent(frame()->securityContext()->getSecurityOrigin(), sourceDocument->url()))
         UseCounter::count(frame(), UseCounter::PostMessageFromInsecureToSecure);
 
-    MessageEvent* event = MessageEvent::create(channels.release(), message, sourceOrigin, String(), source, sourceSuborigin);
-    // Give the embedder a chance to intercept this postMessage.  If the
-    // target is a remote frame, the message will be forwarded through the
-    // browser process.
-    if (frame()->client()->willCheckAndDispatchMessageEvent(target.get(), event, source->document()->frame()))
-        return;
+    MessageEvent* event = MessageEvent::create(std::move(channels), std::move(message), sourceOrigin, String(), source, sourceSuborigin);
 
-    // Capture stack trace only when inspector front-end is loaded as it may be time consuming.
-    RefPtr<ScriptCallStack> stackTrace;
-    if (InspectorInstrumentation::consoleAgentEnabled(sourceDocument))
-        stackTrace = ScriptCallStack::capture();
-
-    toLocalDOMWindow(this)->schedulePostMessage(event, target.get(), stackTrace.release());
+    schedulePostMessage(event, std::move(target), sourceDocument);
 }
 
 // FIXME: Once we're throwing exceptions for cross-origin access violations, we will always sanitize the target
@@ -335,7 +338,7 @@ void DOMWindow::close(ExecutionContext* context)
     if (!frame()->shouldClose())
         return;
 
-    InspectorInstrumentation::allowNativeBreakpoint(context, "close", true);
+    InspectorInstrumentation::NativeBreakpoint nativeBreakpoint(context, "close", true);
 
     page->chromeClient().closeWindowSoon();
 

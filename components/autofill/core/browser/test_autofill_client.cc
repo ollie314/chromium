@@ -42,9 +42,6 @@ rappor::RapporService* TestAutofillClient::GetRapporService() {
   return rappor_service_.get();
 }
 
-void TestAutofillClient::HideRequestAutocompleteDialog() {
-}
-
 void TestAutofillClient::ShowAutofillSettings() {
 }
 
@@ -69,6 +66,12 @@ void TestAutofillClient::ConfirmSaveCreditCardToCloud(
   callback.Run();
 }
 
+void TestAutofillClient::ConfirmCreditCardFillAssist(
+    const CreditCard& card,
+    const base::Closure& callback) {
+  callback.Run();
+}
+
 void TestAutofillClient::LoadRiskData(
     const base::Callback<void(const std::string&)>& callback) {
   callback.Run("some risk data");
@@ -80,12 +83,6 @@ bool TestAutofillClient::HasCreditCardScanFeature() {
 
 void TestAutofillClient::ScanCreditCard(
     const CreditCardScanCallback& callback) {
-}
-
-void TestAutofillClient::ShowRequestAutocompleteDialog(
-    const FormData& form,
-    content::RenderFrameHost* rfh,
-    const ResultCallback& callback) {
 }
 
 void TestAutofillClient::ShowAutofillPopup(
@@ -123,5 +120,11 @@ void TestAutofillClient::OnFirstUserGestureObserved() {
 bool TestAutofillClient::IsContextSecure(const GURL& form_origin) {
   return is_context_secure_;
 }
+
+bool TestAutofillClient::ShouldShowSigninPromo() {
+  return false;
+}
+
+void TestAutofillClient::StartSigninFlow() {}
 
 }  // namespace autofill

@@ -30,8 +30,8 @@ IPC_MESSAGE_ROUTED2(LayoutTestHostMsg_SimulateWebNotificationClick,
 IPC_MESSAGE_ROUTED2(LayoutTestHostMsg_SimulateWebNotificationClose,
                     std::string /* title */,
                     bool /* by_user */)
-IPC_MESSAGE_ROUTED1(LayoutTestHostMsg_AcceptAllCookies,
-                    bool /* accept */)
+IPC_MESSAGE_ROUTED1(LayoutTestHostMsg_BlockThirdPartyCookies,
+                    bool /* block */)
 IPC_MESSAGE_ROUTED0(LayoutTestHostMsg_DeleteAllCookies)
 IPC_MESSAGE_ROUTED4(LayoutTestHostMsg_SetPermission,
                     std::string /* name */,
@@ -52,3 +52,6 @@ IPC_MESSAGE_CONTROL1(
 IPC_MESSAGE_CONTROL1(
     LayoutTestMsg_ReplicateLayoutTestRuntimeFlagsChanges,
     base::DictionaryValue /* changed_layout_test_runtime_flags */)
+
+// Sent by secondary test window to notify the test has finished.
+IPC_MESSAGE_CONTROL0(LayoutTestHostMsg_TestFinishedInSecondaryRenderer)

@@ -136,36 +136,93 @@ TEST(HTTPParsersTest, HTTPFieldContent)
     EXPECT_FALSE(blink::isValidHTTPFieldContentRFC7230(String(hiraganaA)));
 }
 
+TEST(HTTPParsersTest, HTTPToken)
+{
+    const UChar hiraganaA[2] = { 0x3042, 0 };
+    const UChar latinCapitalAWithMacron[2] = { 0x100, 0 };
+
+    EXPECT_TRUE(blink::isValidHTTPToken("gzip"));
+    EXPECT_TRUE(blink::isValidHTTPToken("no-cache"));
+    EXPECT_TRUE(blink::isValidHTTPToken("86400"));
+    EXPECT_TRUE(blink::isValidHTTPToken("~"));
+    EXPECT_FALSE(blink::isValidHTTPToken(""));
+    EXPECT_FALSE(blink::isValidHTTPToken(" "));
+    EXPECT_FALSE(blink::isValidHTTPToken("\t"));
+    EXPECT_FALSE(blink::isValidHTTPToken("\x7f"));
+    EXPECT_FALSE(blink::isValidHTTPToken("\xff"));
+    EXPECT_FALSE(blink::isValidHTTPToken(String(latinCapitalAWithMacron)));
+    EXPECT_FALSE(blink::isValidHTTPToken("t a"));
+    EXPECT_FALSE(blink::isValidHTTPToken("()"));
+    EXPECT_FALSE(blink::isValidHTTPToken("(foobar)"));
+    EXPECT_FALSE(blink::isValidHTTPToken(String("\0", 1)));
+    EXPECT_FALSE(blink::isValidHTTPToken(String(hiraganaA)));
+}
+
 TEST(HTTPParsersTest, ExtractMIMETypeFromMediaType)
 {
     const AtomicString textHtml("text/html");
+
+    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text/html")));
     EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text/html; charset=iso-8859-1")));
+
+    // Quoted charset parameter
+    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text/html; charset=\"quoted\"")));
+
+    // Multiple parameters
+    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text/html; charset=x; foo=bar")));
+
+    // OWSes are trimmed.
+    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString(" text/html   ")));
+    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("\ttext/html \t")));
     EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text/html ; charset=iso-8859-1")));
+
+    // Non-standard multiple type/subtype listing using a comma as a separator
+    // is accepted.
     EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text/html,text/plain")));
     EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text/html , text/plain")));
     EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text/html\t,\ttext/plain")));
-    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString(" text/html   ")));
-    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("\ttext/html \t")));
-    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("\r\ntext/html\r\n")));
     EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text/html,text/plain;charset=iso-8859-1")));
-    EXPECT_EQ(emptyString(), extractMIMETypeFromMediaType(AtomicString(", text/html")));
-    EXPECT_EQ(emptyString(), extractMIMETypeFromMediaType(AtomicString("; text/html")));
 
     // Preserves case.
     EXPECT_EQ("tExt/hTMl", extractMIMETypeFromMediaType(AtomicString("tExt/hTMl")));
 
+    EXPECT_EQ(emptyString(), extractMIMETypeFromMediaType(AtomicString(", text/html")));
+    EXPECT_EQ(emptyString(), extractMIMETypeFromMediaType(AtomicString("; text/html")));
+
     // If no normalization is required, the same AtomicString should be returned.
     const AtomicString& passthrough = extractMIMETypeFromMediaType(textHtml);
     EXPECT_EQ(textHtml.impl(), passthrough.impl());
+}
 
-    // These tests cover current behavior, but are not necessarily
-    // expected/wanted behavior. (See FIXME in implementation.)
-    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text / html")));
-    // U+2003, EM SPACE (UTF-8: E2 80 83)
-    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString::fromUTF8("text\xE2\x80\x83/ html")));
-    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text\r\n/\nhtml")));
-    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("text\n/\nhtml")));
-    EXPECT_EQ(textHtml, extractMIMETypeFromMediaType(AtomicString("t e x t / h t m l")));
+TEST(HTTPParsersTest, ExtractMIMETypeFromMediaTypeInvalidInput)
+{
+    // extractMIMETypeFromMediaType() returns the string before the first
+    // semicolon after trimming OWSes at the head and the tail even if the
+    // string doesn't conform to the media-type ABNF defined in the RFC 7231.
+
+    // These behaviors could be fixed later when ready.
+
+    // Non-OWS characters meaning space are not trimmed.
+    EXPECT_EQ(AtomicString("\r\ntext/html\r\n"), extractMIMETypeFromMediaType(AtomicString("\r\ntext/html\r\n")));
+    // U+2003, EM SPACE (UTF-8: E2 80 83).
+    EXPECT_EQ(AtomicString::fromUTF8("\xE2\x80\x83text/html"), extractMIMETypeFromMediaType(AtomicString::fromUTF8("\xE2\x80\x83text/html")));
+
+    // Invalid type/subtype.
+    EXPECT_EQ(AtomicString("a"), extractMIMETypeFromMediaType(AtomicString("a")));
+
+    // Invalid parameters.
+    EXPECT_EQ(AtomicString("text/html"), extractMIMETypeFromMediaType(AtomicString("text/html;wow")));
+    EXPECT_EQ(AtomicString("text/html"), extractMIMETypeFromMediaType(AtomicString("text/html;;;;;;")));
+    EXPECT_EQ(AtomicString("text/html"), extractMIMETypeFromMediaType(AtomicString("text/html; = = = ")));
+
+    // Only OWSes at either the beginning or the end of the type/subtype
+    // portion.
+    EXPECT_EQ(AtomicString("text / html"), extractMIMETypeFromMediaType(AtomicString("text / html")));
+    EXPECT_EQ(AtomicString("t e x t / h t m l"), extractMIMETypeFromMediaType(AtomicString("t e x t / h t m l")));
+
+    EXPECT_EQ(AtomicString("text\r\n/\nhtml"), extractMIMETypeFromMediaType(AtomicString("text\r\n/\nhtml")));
+    EXPECT_EQ(AtomicString("text\n/\nhtml"), extractMIMETypeFromMediaType(AtomicString("text\n/\nhtml")));
+    EXPECT_EQ(AtomicString::fromUTF8("text\xE2\x80\x83/html"), extractMIMETypeFromMediaType(AtomicString::fromUTF8("text\xE2\x80\x83/html")));
 }
 
 void expectParseNamePass(const char* message, String header, String expectedName)
@@ -254,27 +311,63 @@ TEST(HTTPParsersTest, SuboriginParseValidPolicy)
     const Suborigin::SuboriginPolicyOptions unsafePostmessageSend[] = { Suborigin::SuboriginPolicyOptions::UnsafePostMessageSend };
     const Suborigin::SuboriginPolicyOptions unsafePostmessageReceive[] = { Suborigin::SuboriginPolicyOptions::UnsafePostMessageReceive };
     const Suborigin::SuboriginPolicyOptions unsafePostmessageSendAndReceive[] = {  Suborigin::SuboriginPolicyOptions::UnsafePostMessageSend, Suborigin::SuboriginPolicyOptions::UnsafePostMessageReceive };
+    const Suborigin::SuboriginPolicyOptions unsafeCookies[] = { Suborigin::SuboriginPolicyOptions::UnsafeCookies };
+    const Suborigin::SuboriginPolicyOptions unsafeAllOptions[] = { Suborigin::SuboriginPolicyOptions::UnsafePostMessageSend, Suborigin::SuboriginPolicyOptions::UnsafePostMessageReceive, Suborigin::SuboriginPolicyOptions::UnsafeCookies };
 
     // All simple, valid policies
-    expectParsePolicyPass("One policy, unsafe-postmessage-send", "foobar 'unsafe-postmessage-send';", unsafePostmessageSend, ARRAY_SIZE(unsafePostmessageSend));
-    expectParsePolicyPass("One policy, unsafe-postmessage-receive", "foobar 'unsafe-postmessage-receive';", unsafePostmessageReceive, ARRAY_SIZE(unsafePostmessageReceive));
+    expectParsePolicyPass("One policy, unsafe-postmessage-send", "foobar 'unsafe-postmessage-send'", unsafePostmessageSend, ARRAY_SIZE(unsafePostmessageSend));
+    expectParsePolicyPass("One policy, unsafe-postmessage-receive", "foobar 'unsafe-postmessage-receive'", unsafePostmessageReceive, ARRAY_SIZE(unsafePostmessageReceive));
+    expectParsePolicyPass("One policy, unsafe-cookies", "foobar 'unsafe-cookies'", unsafeCookies, ARRAY_SIZE(unsafeCookies));
 
     // Formatting differences of policies and multiple policies
-    expectParsePolicyPass("One policy, whitespace all around", "foobar      'unsafe-postmessage-send'     ;     ", unsafePostmessageSend, ARRAY_SIZE(unsafePostmessageSend));
-    expectParsePolicyPass("Multiple, same policies", "foobar 'unsafe-postmessage-send'; 'unsafe-postmessage-send';", unsafePostmessageSend, ARRAY_SIZE(unsafePostmessageSend));
-    expectParsePolicyPass("Multiple, different policies", "foobar 'unsafe-postmessage-send'; 'unsafe-postmessage-receive';", unsafePostmessageSendAndReceive, ARRAY_SIZE(unsafePostmessageSendAndReceive));
-    expectParsePolicyPass("One policy, unknown option", "foobar 'unknown-option';", {}, 0);
+    expectParsePolicyPass("One policy, whitespace all around", "foobar      'unsafe-postmessage-send'          ", unsafePostmessageSend, ARRAY_SIZE(unsafePostmessageSend));
+    expectParsePolicyPass("Multiple, same policies", "foobar 'unsafe-postmessage-send' 'unsafe-postmessage-send'", unsafePostmessageSend, ARRAY_SIZE(unsafePostmessageSend));
+    expectParsePolicyPass("Multiple, different policies", "foobar 'unsafe-postmessage-send' 'unsafe-postmessage-receive'", unsafePostmessageSendAndReceive, ARRAY_SIZE(unsafePostmessageSendAndReceive));
+    expectParsePolicyPass("Many different policies", "foobar 'unsafe-postmessage-send' 'unsafe-postmessage-receive' 'unsafe-cookies'", unsafeAllOptions, ARRAY_SIZE(unsafeAllOptions));
+    expectParsePolicyPass("One policy, unknown option", "foobar 'unknown-option'", {}, 0);
 }
 
 TEST(HTTPParsersTest, SuboriginParseInvalidPolicy)
 {
-    expectParsePolicyFail("One policy, no suborigin name", "'unsafe-postmessage-send';");
-    expectParsePolicyFail("One policy, invalid characters", "foobar 'un$afe-postmessage-send';");
-    expectParsePolicyFail("One policy, caps", "foobar 'UNSAFE-POSTMESSAGE-SEND';");
-    expectParsePolicyFail("One policy, missing first quote", "foobar unsafe-postmessage-send';");
-    expectParsePolicyFail("One policy, missing last quote", "foobar 'unsafe-postmessage-send;");
-    expectParsePolicyFail("One policy, missing semicolon at end", "foobar 'unsafe-postmessage-send'");
-    expectParsePolicyFail("Multiple policies, missing semicolon between options", "foobar 'unsafe-postmessage-send' 'unsafe-postmessage-send';");
+    expectParsePolicyFail("One policy, no suborigin name", "'unsafe-postmessage-send'");
+    expectParsePolicyFail("One policy, invalid characters", "foobar 'un$afe-postmessage-send'");
+    expectParsePolicyFail("One policy, caps", "foobar 'UNSAFE-POSTMESSAGE-SEND'");
+    expectParsePolicyFail("One policy, missing first quote", "foobar unsafe-postmessage-send'");
+    expectParsePolicyFail("One policy, missing last quote", "foobar 'unsafe-postmessage-send");
+    expectParsePolicyFail("One policy, invalid character at end", "foobar 'unsafe-postmessage-send';");
+    expectParsePolicyFail("Multiple policies, extra character between options", "foobar 'unsafe-postmessage-send' ; 'unsafe-postmessage-send'");
+    expectParsePolicyFail("Policy that is a single quote", "foobar '");
+    expectParsePolicyFail("Valid policy and then policy that is a single quote", "foobar 'unsafe-postmessage-send' '");
+}
+
+TEST(HTTPParsersTest, ParseHTTPRefresh)
+{
+    double delay;
+    String url;
+    EXPECT_FALSE(parseHTTPRefresh("", nullptr, delay, url));
+    EXPECT_FALSE(parseHTTPRefresh(" ", nullptr, delay, url));
+
+    EXPECT_TRUE(parseHTTPRefresh("123 ", nullptr, delay, url));
+    EXPECT_EQ(123.0, delay);
+    EXPECT_TRUE(url.isEmpty());
+
+    EXPECT_TRUE(parseHTTPRefresh("1 ; url=dest", nullptr, delay, url));
+    EXPECT_EQ(1.0, delay);
+    EXPECT_EQ("dest", url);
+    EXPECT_TRUE(parseHTTPRefresh("1 ;\nurl=dest", isASCIISpace<UChar>, delay, url));
+    EXPECT_EQ(1.0, delay);
+    EXPECT_EQ("dest", url);
+    EXPECT_TRUE(parseHTTPRefresh("1 ;\nurl=dest", nullptr, delay, url));
+    EXPECT_EQ(1.0, delay);
+    EXPECT_EQ("url=dest", url);
+
+    EXPECT_TRUE(parseHTTPRefresh("1 url=dest", nullptr, delay, url));
+    EXPECT_EQ(1.0, delay);
+    EXPECT_EQ("dest", url);
+
+    EXPECT_TRUE(parseHTTPRefresh("10\nurl=dest", isASCIISpace<UChar>, delay, url));
+    EXPECT_EQ(10, delay);
+    EXPECT_EQ("dest", url);
 }
 
 } // namespace blink

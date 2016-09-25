@@ -14,28 +14,15 @@
 {{struct.name}}::~{{struct.name}}() {
 }
 
-{%  if struct|is_cloneable_kind %}
-{{struct.name}}Ptr {{struct.name}}::Clone() const {
-  {{struct.name}}Ptr rv(New());
+{%- if struct|is_hashable %}
+size_t {{struct.name}}::Hash(size_t seed) const {
 {%-   for field in struct.fields %}
-{%-     if field.kind|is_object_kind and not field.kind|is_string_kind %}
-  rv->{{field.name}} = {{field.name}}.Clone();
+{%-     if for_blink %}
+  seed = mojo::internal::WTFHash(seed, this->{{field.name}});
 {%-     else %}
-  rv->{{field.name}} = {{field.name}};
+  seed = mojo::internal::Hash(seed, this->{{field.name}});
 {%-     endif %}
 {%-   endfor %}
-  return rv;
+  return seed;
 }
-{%  endif %}
-
-bool {{struct.name}}::Equals(const {{struct.name}}& other) const {
-{%-  for field in struct.fields %}
-{%-    if not field.kind|supports_equality %}
-  NOTREACHED() << "Equality testing not supported for field {{field.name}}";
-{%-    else %}
-  if (!mojo::internal::ValueTraits<{{field.kind|cpp_wrapper_type}}>::Equals(this->{{field.name}}, other.{{field.name}}))
-    return false;
-{%-    endif %}
-{%-  endfor %}
-  return true;
-}
+{%- endif %}

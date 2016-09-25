@@ -36,11 +36,13 @@
 #include "bindings/core/v8/V8BindingMacros.h"
 #include "bindings/core/v8/V8Element.h"
 #include "bindings/core/v8/V8EventTarget.h"
+#include "bindings/core/v8/V8HTMLLinkElement.h"
 #include "bindings/core/v8/V8NodeFilter.h"
 #include "bindings/core/v8/V8NodeFilterCondition.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "bindings/core/v8/V8Window.h"
 #include "bindings/core/v8/V8WorkerGlobalScope.h"
+#include "bindings/core/v8/V8WorkletGlobalScope.h"
 #include "bindings/core/v8/V8XPathNSResolver.h"
 #include "bindings/core/v8/WindowProxy.h"
 #include "bindings/core/v8/WorkerOrWorkletScriptController.h"
@@ -56,7 +58,9 @@
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
+#include "core/origin_trials/OriginTrialContext.h"
 #include "core/workers/WorkerGlobalScope.h"
+#include "core/workers/WorkletGlobalScope.h"
 #include "core/xml/XPathNSResolver.h"
 #include "platform/TracedValue.h"
 #include "wtf/MathExtras.h"
@@ -71,26 +75,6 @@
 #include "wtf/text/WTFString.h"
 
 namespace blink {
-
-void setArityTypeError(ExceptionState& exceptionState, const char* valid, unsigned provided)
-{
-    exceptionState.throwTypeError(ExceptionMessages::invalidArity(valid, provided));
-}
-
-v8::Local<v8::Value> createMinimumArityTypeErrorForMethod(v8::Isolate* isolate, const char* method, const char* type, unsigned expected, unsigned provided)
-{
-    return V8ThrowException::createTypeError(isolate, ExceptionMessages::failedToExecute(method, type, ExceptionMessages::notEnoughArguments(expected, provided)));
-}
-
-v8::Local<v8::Value> createMinimumArityTypeErrorForConstructor(v8::Isolate* isolate, const char* type, unsigned expected, unsigned provided)
-{
-    return V8ThrowException::createTypeError(isolate, ExceptionMessages::failedToConstruct(type, ExceptionMessages::notEnoughArguments(expected, provided)));
-}
-
-void setMinimumArityTypeError(ExceptionState& exceptionState, unsigned expected, unsigned provided)
-{
-    exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(expected, provided));
-}
 
 NodeFilter* toNodeFilter(v8::Local<v8::Value> callback, v8::Local<v8::Object> creationContext, ScriptState* scriptState)
 {
@@ -691,22 +675,6 @@ LocalDOMWindow* currentDOMWindow(v8::Isolate* isolate)
     return toLocalDOMWindow(toDOMWindow(isolate->GetCurrentContext()));
 }
 
-LocalDOMWindow* callingDOMWindow(v8::Isolate* isolate)
-{
-    v8::Local<v8::Context> context = isolate->GetCallingContext();
-    if (context.IsEmpty()) {
-        // Unfortunately, when processing script from a plugin, we might not
-        // have a calling context. In those cases, we fall back to the
-        // entered context.
-        context = isolate->GetEnteredContext();
-    }
-    return toLocalDOMWindow(toDOMWindow(context));
-}
-
-namespace {
-ExecutionContext* (*s_toExecutionContextForModules)(v8::Local<v8::Context>) = nullptr;
-}
-
 ExecutionContext* toExecutionContext(v8::Local<v8::Context> context)
 {
     if (context.IsEmpty())
@@ -718,13 +686,11 @@ ExecutionContext* toExecutionContext(v8::Local<v8::Context> context)
     v8::Local<v8::Object> workerWrapper = V8WorkerGlobalScope::findInstanceInPrototypeChain(global, context->GetIsolate());
     if (!workerWrapper.IsEmpty())
         return V8WorkerGlobalScope::toImpl(workerWrapper)->getExecutionContext();
-    ASSERT(s_toExecutionContextForModules);
-    return (*s_toExecutionContextForModules)(context);
-}
-
-void registerToExecutionContextForModules(ExecutionContext* (*toExecutionContextForModules)(v8::Local<v8::Context>))
-{
-    s_toExecutionContextForModules = toExecutionContextForModules;
+    v8::Local<v8::Object> workletWrapper = V8WorkletGlobalScope::findInstanceInPrototypeChain(global, context->GetIsolate());
+    if (!workletWrapper.IsEmpty())
+        return V8WorkletGlobalScope::toImpl(workletWrapper);
+    // FIXME: Is this line of code reachable?
+    return nullptr;
 }
 
 ExecutionContext* currentExecutionContext(v8::Isolate* isolate)
@@ -818,6 +784,73 @@ v8::Local<v8::Context> toV8ContextEvenIfDetached(Frame* frame, DOMWrapperWorld& 
     return frame->windowProxy(world)->contextIfInitialized();
 }
 
+void installOriginTrialsCore(ScriptState* scriptState)
+{
+    // TODO(iclelland): Generate all of this logic at compile-time, based on the
+    // configuration of origin trial enabled attibutes and interfaces in IDL
+    // files. (crbug.com/615060)
+
+    ExecutionContext* executionContext = scriptState->getExecutionContext();
+    OriginTrialContext* originTrialContext = OriginTrialContext::from(executionContext, OriginTrialContext::DontCreateIfNotExists);
+    if (!originTrialContext)
+        return;
+
+    if (!originTrialContext->featureBindingsInstalled("LinkServiceWorker") && (RuntimeEnabledFeatures::linkServiceWorkerEnabled() || originTrialContext->isFeatureEnabled("ForeignFetch"))) {
+        if (executionContext->isDocument()) {
+            V8HTMLLinkElement::installLinkServiceWorker(scriptState);
+        }
+    }
+}
+
+namespace {
+InstallOriginTrialsFunction s_installOriginTrialsFunction = &installOriginTrialsCore;
+}
+
+void installOriginTrials(ScriptState* scriptState)
+{
+    v8::Local<v8::Context> context = scriptState->context();
+    ExecutionContext* executionContext = toExecutionContext(context);
+    OriginTrialContext* originTrialContext = OriginTrialContext::from(executionContext, OriginTrialContext::DontCreateIfNotExists);
+    if (!originTrialContext)
+        return;
+
+    ScriptState::Scope scope(scriptState);
+
+    (*s_installOriginTrialsFunction)(scriptState);
+
+    // Mark each enabled feature as having been installed.
+    if (!originTrialContext->featureBindingsInstalled("DurableStorage") && (RuntimeEnabledFeatures::durableStorageEnabled() || originTrialContext->isFeatureEnabled("DurableStorage"))) {
+        originTrialContext->setFeatureBindingsInstalled("DurableStorage");
+    }
+
+    if (!originTrialContext->featureBindingsInstalled("WebBluetooth") && (RuntimeEnabledFeatures::webBluetoothEnabled() || originTrialContext->isFeatureEnabled("WebBluetooth"))) {
+        originTrialContext->setFeatureBindingsInstalled("WebBluetooth");
+    }
+
+    if (!originTrialContext->featureBindingsInstalled("WebShare") && (RuntimeEnabledFeatures::webShareEnabled() || originTrialContext->isFeatureEnabled("WebShare"))) {
+        originTrialContext->setFeatureBindingsInstalled("WebShare");
+    }
+
+    if (!originTrialContext->featureBindingsInstalled("WebUSB") && (RuntimeEnabledFeatures::webUSBEnabled() || originTrialContext->isFeatureEnabled("WebUSB"))) {
+        originTrialContext->setFeatureBindingsInstalled("WebUSB");
+    }
+
+    if (!originTrialContext->featureBindingsInstalled("LinkServiceWorker") && (RuntimeEnabledFeatures::linkServiceWorkerEnabled() || originTrialContext->isFeatureEnabled("ForeignFetch"))) {
+        originTrialContext->setFeatureBindingsInstalled("LinkServiceWorker");
+    }
+
+    if (!originTrialContext->featureBindingsInstalled("ForeignFetch") && (RuntimeEnabledFeatures::foreignFetchEnabled() || originTrialContext->isFeatureEnabled("ForeignFetch"))) {
+        originTrialContext->setFeatureBindingsInstalled("ForeignFetch");
+    }
+}
+
+InstallOriginTrialsFunction setInstallOriginTrialsFunction(InstallOriginTrialsFunction newInstallOriginTrialsFunction)
+{
+    InstallOriginTrialsFunction originalFunction = s_installOriginTrialsFunction;
+    s_installOriginTrialsFunction = newInstallOriginTrialsFunction;
+    return originalFunction;
+}
+
 void crashIfIsolateIsDead(v8::Isolate* isolate)
 {
     if (isolate->IsDead()) {
@@ -852,6 +885,28 @@ v8::Local<v8::Function> getBoundFunction(v8::Local<v8::Function> function)
     return boundFunction->IsFunction() ? v8::Local<v8::Function>::Cast(boundFunction) : function;
 }
 
+v8::MaybeLocal<v8::Object> getEsIterator(v8::Isolate* isolate, v8::Local<v8::Object> object, ExceptionState& exceptionState)
+{
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    v8::Local<v8::Value> iteratorGetter;
+    if (!object->Get(context, v8::Symbol::GetIterator(isolate)).ToLocal(&iteratorGetter))
+        return v8::MaybeLocal<v8::Object>();
+    if (!iteratorGetter->IsFunction()) {
+        exceptionState.throwTypeError("Iterator getter is not callable.");
+        return v8::MaybeLocal<v8::Object>();
+    }
+
+    v8::Local<v8::Function> getterFunction = iteratorGetter.As<v8::Function>();
+    v8::Local<v8::Value> iterator;
+    if (!V8ScriptRunner::callFunction(getterFunction, toExecutionContext(context), object, 0, nullptr, isolate).ToLocal(&iterator))
+        return v8::MaybeLocal<v8::Object>();
+    if (!iterator->IsObject()) {
+        exceptionState.throwTypeError("Iterator is not an object.");
+        return v8::MaybeLocal<v8::Object>();
+    }
+    return v8::MaybeLocal<v8::Object>(iterator.As<v8::Object>());
+}
+
 bool addHiddenValueToArray(v8::Isolate* isolate, v8::Local<v8::Object> object, v8::Local<v8::Value> value, int arrayIndex)
 {
     ASSERT(!value.IsEmpty());
@@ -862,7 +917,7 @@ bool addHiddenValueToArray(v8::Isolate* isolate, v8::Local<v8::Object> object, v
     }
 
     v8::Local<v8::Array> array = v8::Local<v8::Array>::Cast(arrayValue);
-    return v8CallBoolean(array->Set(isolate->GetCurrentContext(), v8::Integer::New(isolate, array->Length()), value));
+    return v8CallBoolean(array->CreateDataProperty(isolate->GetCurrentContext(), array->Length(), value));
 }
 
 void removeHiddenValueFromArray(v8::Isolate* isolate, v8::Local<v8::Object> object, v8::Local<v8::Value> value, int arrayIndex)
@@ -910,14 +965,10 @@ v8::Isolate* toIsolate(LocalFrame* frame)
     return frame->script().isolate();
 }
 
-void v8ConstructorAttributeGetter(v8::Local<v8::Name> propertyName, const v8::PropertyCallbackInfo<v8::Value>& info)
+v8::Local<v8::Value> freezeV8Object(v8::Local<v8::Value> value, v8::Isolate* isolate)
 {
-    v8::Local<v8::Value> data = info.Data();
-    ASSERT(data->IsExternal());
-    V8PerContextData* perContextData = V8PerContextData::from(info.Holder()->CreationContext());
-    if (!perContextData)
-        return;
-    v8SetReturnValue(info, perContextData->constructorForType(WrapperTypeInfo::unwrap(data)));
+    value.As<v8::Object>()->SetIntegrityLevel(isolate->GetCurrentContext(), v8::IntegrityLevel::kFrozen).ToChecked();
+    return value;
 }
 
 } // namespace blink

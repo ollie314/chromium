@@ -28,33 +28,35 @@
 
 /**
  * @constructor
- * @extends {WebInspector.SDKObject}
+ * @extends {WebInspector.SDKModel}
  * @param {!WebInspector.Target} target
+ * @param {!WebInspector.ResourceTreeModel} resourceTreeModel
  */
-WebInspector.ApplicationCacheModel = function(target)
+WebInspector.ApplicationCacheModel = function(target, resourceTreeModel)
 {
-    WebInspector.SDKObject.call(this, target);
+    WebInspector.SDKModel.call(this, WebInspector.ApplicationCacheModel, target);
 
     target.registerApplicationCacheDispatcher(new WebInspector.ApplicationCacheDispatcher(this));
     this._agent = target.applicationCacheAgent();
     this._agent.enable();
 
-    target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.FrameNavigated, this._frameNavigated, this);
-    target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.FrameDetached, this._frameDetached, this);
+    resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.FrameNavigated, this._frameNavigated, this);
+    resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.Events.FrameDetached, this._frameDetached, this);
 
     this._statuses = {};
     this._manifestURLsByFrame = {};
 
     this._mainFrameNavigated();
-
     this._onLine = true;
 }
 
-WebInspector.ApplicationCacheModel.EventTypes = {
-    FrameManifestStatusUpdated: "FrameManifestStatusUpdated",
-    FrameManifestAdded: "FrameManifestAdded",
-    FrameManifestRemoved: "FrameManifestRemoved",
-    NetworkStateChanged: "NetworkStateChanged"
+/** @enum {symbol} */
+WebInspector.ApplicationCacheModel.Events = {
+    FrameManifestStatusUpdated: Symbol("FrameManifestStatusUpdated"),
+    FrameManifestAdded: Symbol("FrameManifestAdded"),
+    FrameManifestRemoved: Symbol("FrameManifestRemoved"),
+    FrameManifestsReset: Symbol("FrameManifestsReset"),
+    NetworkStateChanged: Symbol("NetworkStateChanged")
 }
 
 WebInspector.ApplicationCacheModel.prototype = {
@@ -76,6 +78,13 @@ WebInspector.ApplicationCacheModel.prototype = {
     {
         var frame = /** @type {!WebInspector.ResourceTreeFrame} */ (event.data);
         this._frameManifestRemoved(frame.id);
+    },
+
+    reset: function()
+    {
+        this._statuses = {};
+        this._manifestURLsByFrame = {};
+        this.dispatchEventToListeners(WebInspector.ApplicationCacheModel.Events.FrameManifestsReset);
     },
 
     _mainFrameNavigated: function()
@@ -137,11 +146,11 @@ WebInspector.ApplicationCacheModel.prototype = {
 
         if (!this._manifestURLsByFrame[frameId]) {
             this._manifestURLsByFrame[frameId] = manifestURL;
-            this.dispatchEventToListeners(WebInspector.ApplicationCacheModel.EventTypes.FrameManifestAdded, frameId);
+            this.dispatchEventToListeners(WebInspector.ApplicationCacheModel.Events.FrameManifestAdded, frameId);
         }
 
         if (statusChanged)
-            this.dispatchEventToListeners(WebInspector.ApplicationCacheModel.EventTypes.FrameManifestStatusUpdated, frameId);
+            this.dispatchEventToListeners(WebInspector.ApplicationCacheModel.Events.FrameManifestStatusUpdated, frameId);
     },
 
     /**
@@ -155,7 +164,7 @@ WebInspector.ApplicationCacheModel.prototype = {
         delete this._manifestURLsByFrame[frameId];
         delete this._statuses[frameId];
 
-        this.dispatchEventToListeners(WebInspector.ApplicationCacheModel.EventTypes.FrameManifestRemoved, frameId);
+        this.dispatchEventToListeners(WebInspector.ApplicationCacheModel.Events.FrameManifestRemoved, frameId);
     },
 
     /**
@@ -224,10 +233,10 @@ WebInspector.ApplicationCacheModel.prototype = {
     _networkStateUpdated: function(isNowOnline)
     {
         this._onLine = isNowOnline;
-        this.dispatchEventToListeners(WebInspector.ApplicationCacheModel.EventTypes.NetworkStateChanged, isNowOnline);
+        this.dispatchEventToListeners(WebInspector.ApplicationCacheModel.Events.NetworkStateChanged, isNowOnline);
     },
 
-    __proto__: WebInspector.SDKObject.prototype
+    __proto__: WebInspector.SDKModel.prototype
 }
 
 /**
@@ -259,4 +268,13 @@ WebInspector.ApplicationCacheDispatcher.prototype = {
     {
         this._applicationCacheModel._networkStateUpdated(isNowOnline);
     }
+}
+
+/**
+ * @param {!WebInspector.Target} target
+ * @return {?WebInspector.ApplicationCacheModel}
+ */
+WebInspector.ApplicationCacheModel.fromTarget = function(target)
+{
+    return /** @type {?WebInspector.ApplicationCacheModel} */ (target.model(WebInspector.ApplicationCacheModel));
 }

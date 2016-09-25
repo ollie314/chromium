@@ -30,6 +30,7 @@
 #include "core/layout/compositing/CompositingReasonFinder.h"
 #include "platform/graphics/GraphicsLayerClient.h"
 #include "wtf/HashMap.h"
+#include <memory>
 
 namespace blink {
 
@@ -37,6 +38,7 @@ class PaintLayer;
 class DocumentLifecycle;
 class GraphicsLayer;
 class IntPoint;
+class JSONObject;
 class Page;
 class LayoutPart;
 class Scrollbar;
@@ -120,6 +122,7 @@ public:
     GraphicsLayer* frameScrollLayer() const;
     GraphicsLayer* scrollLayer() const;
     GraphicsLayer* containerLayer() const;
+    GraphicsLayer* rootContentLayer() const;
 
     enum RootLayerAttachment {
         RootLayerUnattached,
@@ -130,6 +133,12 @@ public:
     RootLayerAttachment getRootLayerAttachment() const { return m_rootLayerAttachment; }
     void updateRootLayerAttachment();
     void updateRootLayerPosition();
+
+    // If the root scroller isn't the root layer then the PaintLayerCompositor
+    // must disable clipping on its layers so that the root scroller can
+    // expand/shrink its clipping layer in response to top controls and have
+    // the result be visible.
+    void updateClippingOnCompositorLayers();
 
     void setIsInWindow(bool);
 
@@ -146,13 +155,12 @@ public:
 
     bool scrollingLayerDidChange(PaintLayer*);
 
-    String layerTreeAsText(LayerTreeFlags);
+    std::unique_ptr<JSONObject> layerTreeAsJSON(LayerTreeFlags) const;
 
     GraphicsLayer* layerForHorizontalScrollbar() const { return m_layerForHorizontalScrollbar.get(); }
     GraphicsLayer* layerForVerticalScrollbar() const { return m_layerForVerticalScrollbar.get(); }
     GraphicsLayer* layerForScrollCorner() const { return m_layerForScrollCorner.get(); }
 
-    void resetTrackedPaintInvalidationRects();
     void setTracksPaintInvalidations(bool);
 
     String debugName(const GraphicsLayer*) const override;
@@ -219,7 +227,7 @@ private:
     Scrollbar* graphicsLayerToScrollbar(const GraphicsLayer*) const;
 
     LayoutView& m_layoutView;
-    OwnPtr<GraphicsLayer> m_rootContentLayer;
+    std::unique_ptr<GraphicsLayer> m_rootContentLayer;
 
     CompositingReasonFinder m_compositingReasonFinder;
 
@@ -244,16 +252,16 @@ private:
     RootLayerAttachment m_rootLayerAttachment;
 
     // Enclosing container layer, which clips for iframe content
-    OwnPtr<GraphicsLayer> m_containerLayer;
-    OwnPtr<GraphicsLayer> m_scrollLayer;
+    std::unique_ptr<GraphicsLayer> m_containerLayer;
+    std::unique_ptr<GraphicsLayer> m_scrollLayer;
 
     // Enclosing layer for overflow controls and the clipping layer
-    OwnPtr<GraphicsLayer> m_overflowControlsHostLayer;
+    std::unique_ptr<GraphicsLayer> m_overflowControlsHostLayer;
 
     // Layers for overflow controls
-    OwnPtr<GraphicsLayer> m_layerForHorizontalScrollbar;
-    OwnPtr<GraphicsLayer> m_layerForVerticalScrollbar;
-    OwnPtr<GraphicsLayer> m_layerForScrollCorner;
+    std::unique_ptr<GraphicsLayer> m_layerForHorizontalScrollbar;
+    std::unique_ptr<GraphicsLayer> m_layerForVerticalScrollbar;
+    std::unique_ptr<GraphicsLayer> m_layerForScrollCorner;
 };
 
 } // namespace blink

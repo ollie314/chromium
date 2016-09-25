@@ -10,9 +10,9 @@
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "components/cast_certificate/cast_cert_validator.h"
 #include "extensions/browser/api/cast_channel/cast_message_util.h"
 #include "extensions/common/api/cast_channel/cast_channel.pb.h"
-#include "extensions/common/cast/cast_cert_validator.h"
 #include "net/cert/x509_certificate.h"
 #include "net/der/parse_values.h"
 
@@ -26,7 +26,7 @@ const char* const kParseErrorPrefix = "Failed to parse auth message: ";
 // The maximum number of days a cert can live for.
 const int kMaxSelfSignedCertLifetimeInDays = 4;
 
-namespace cast_crypto = ::extensions::api::cast_crypto;
+namespace cast_crypto = ::cast_certificate;
 
 // Extracts an embedded DeviceAuthMessage payload from an auth challenge reply
 // message.
@@ -138,7 +138,7 @@ AuthResult AuthenticateChallengeReply(const CastMessage& challenge_reply,
 AuthResult VerifyCredentials(const AuthResponse& response,
                              const std::string& signature_input) {
   // Verify the certificate
-  scoped_ptr<cast_crypto::CertVerificationContext> verification_context;
+  std::unique_ptr<cast_crypto::CertVerificationContext> verification_context;
 
   // Build a single vector containing the certificate chain.
   std::vector<std::string> cert_chain;
@@ -148,12 +148,13 @@ AuthResult VerifyCredentials(const AuthResponse& response,
                     response.intermediate_certificate().end());
 
   // Use the current time when checking certificate validity.
-  base::Time::Exploded now;
-  base::Time::Now().UTCExplode(&now);
+  base::Time now = base::Time::Now();
 
+  // CRL should not be enforced until it is served.
   cast_crypto::CastDeviceCertPolicy device_policy;
-  if (!cast_crypto::VerifyDeviceCert(cert_chain, now, &verification_context,
-                                     &device_policy)) {
+  if (!cast_crypto::VerifyDeviceCert(
+          cert_chain, now, &verification_context, &device_policy, nullptr,
+          cast_certificate::CRLPolicy::CRL_OPTIONAL)) {
     // TODO(eroman): The error information was lost; this error is ambiguous.
     return AuthResult("Failed verifying cast device certificate",
                       AuthResult::ERROR_CERT_NOT_SIGNED_BY_TRUSTED_CA);

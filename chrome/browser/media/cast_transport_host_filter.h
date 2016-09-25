@@ -13,15 +13,16 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/default_tick_clock.h"
+#include "chrome/browser/media/cast_remoting_sender.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "media/cast/cast_sender.h"
 #include "media/cast/logging/logging_defines.h"
 #include "media/cast/net/cast_transport.h"
 #include "media/cast/net/udp_transport.h"
 
-namespace content {
+namespace device {
 class PowerSaveBlocker;
-}  // namespace content
+}  // namespace device
 
 namespace cast {
 
@@ -35,22 +36,17 @@ class CastTransportHostFilter : public content::BrowserMessageFilter {
   // Status callback to create UdpTransport.
   void OnStatusChanged(int32_t channel_id,
                        media::cast::CastTransportStatus status);
-  void SendRtt(int32_t channel_id,
-               uint32_t rtp_sender_ssrc,
-               base::TimeDelta rtt);
-  void SendCastMessage(int32_t channel_id,
-                       uint32_t rtp_sender_ssrc,
-                       const media::cast::RtcpCastMessage& cast_message);
-  void SendReceivedPli(int32_t channel_id, uint32_t rtp_sender_ssrc);
 
   // BrowserMessageFilter implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // Forwarding functions.
-  void OnInitializeAudio(int32_t channel_id,
-                         const media::cast::CastTransportRtpConfig& config);
-  void OnInitializeVideo(int32_t channel_id,
-                         const media::cast::CastTransportRtpConfig& config);
+  // For remoting RTP streams, calling this will create a CastRemotingSender for
+  // the stream, which will be automatically destroyed when the associated
+  // chanel is deleted.
+  void OnInitializeStream(int32_t channel_id,
+                          const media::cast::CastTransportRtpConfig& config);
+
   void OnInsertFrame(int32_t channel_id,
                      uint32_t ssrc,
                      const media::cast::EncodedFrame& frame);
@@ -59,12 +55,13 @@ class CastTransportHostFilter : public content::BrowserMessageFilter {
       uint32_t ssrc,
       base::TimeTicks current_time,
       media::cast::RtpTimeTicks current_time_as_rtp_timestamp);
-  void OnCancelSendingFrames(int32_t channel_id,
-                             uint32_t ssrc,
-                             const std::vector<uint32_t>& frame_ids);
+  void OnCancelSendingFrames(
+      int32_t channel_id,
+      uint32_t ssrc,
+      const std::vector<media::cast::FrameId>& frame_ids);
   void OnResendFrameForKickstart(int32_t channel_id,
                                  uint32_t ssrc,
-                                 uint32_t frame_id);
+                                 media::cast::FrameId frame_id);
   void OnAddValidRtpReceiver(int32_t channel_id,
                              uint32_t rtp_sender_ssrc,
                              uint32_t rtp_receiver_ssrc);
@@ -97,9 +94,17 @@ class CastTransportHostFilter : public content::BrowserMessageFilter {
   base::DefaultTickClock clock_;
 
   // While |id_map_| is non-empty, hold an instance of
-  // content::PowerSaveBlocker.  This prevents Chrome from being suspended while
+  // device::PowerSaveBlocker.  This prevents Chrome from being suspended while
   // remoting content.
-  std::unique_ptr<content::PowerSaveBlocker> power_save_blocker_;
+  std::unique_ptr<device::PowerSaveBlocker> power_save_blocker_;
+
+  // This map records all active remoting senders. It uses the unique RTP
+  // stream ID as the key.
+  IDMap<CastRemotingSender, IDMapOwnPointer> remoting_sender_map_;
+
+  // This map stores all active remoting streams for each channel. It uses the
+  // channel ID as the key.
+  std::multimap<int32_t, int32_t> stream_id_map_;
 
   base::WeakPtrFactory<CastTransportHostFilter> weak_factory_;
 

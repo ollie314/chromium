@@ -6,7 +6,8 @@
 
 #include <algorithm>
 
-#include "base/metrics/histogram.h"
+#include "base/format_macros.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
@@ -108,13 +109,8 @@ AudioInputSyncWriter::~AudioInputSyncWriter() {
                             AUDIO_CAPTURER_AUDIO_GLITCHES_MAX + 1);
 
   std::string log_string = base::StringPrintf(
-#if defined(COMPILER_MSVC)
-      "AISW: number of detected audio glitches: %Iu out of %Iu",
-#else
-      "AISW: number of detected audio glitches: %zu out of %zu",
-#endif
-      write_error_count_,
-      write_count_);
+      "AISW: number of detected audio glitches: %" PRIuS " out of %" PRIuS,
+      write_error_count_, write_count_);
   MediaStreamManager::SendMessageToNativeLog(log_string);
   DVLOG(1) << log_string;
 }
@@ -233,9 +229,20 @@ bool AudioInputSyncWriter::PushDataToFifo(const AudioBus* data,
                                           bool key_pressed,
                                           uint32_t hardware_delay_bytes) {
   if (overflow_buses_.size() == kMaxOverflowBusesSize) {
-    const std::string error_message = "AISW: No room in fifo.";
-    LOG(ERROR) << error_message;
-    AddToNativeLog(error_message);
+    // We use |write_error_count_| for capping number of log messages.
+    // |write_error_count_| also includes socket Send() errors, but those should
+    // be rare.
+    if (write_error_count_ <= 50) {
+      const std::string error_message = "AISW: No room in fifo.";
+      LOG(WARNING) << error_message;
+      AddToNativeLog(error_message);
+      if (write_error_count_ == 50) {
+        const std::string error_message =
+            "AISW: Log cap reached, suppressing further fifo overflow logs.";
+        LOG(WARNING) << error_message;
+        AddToNativeLog(error_message);
+      }
+    }
     return false;
   }
 
@@ -321,7 +328,7 @@ bool AudioInputSyncWriter::SignalDataWrittenAndUpdateCounters() {
   if (socket_->Send(&current_segment_id_, sizeof(current_segment_id_)) !=
       sizeof(current_segment_id_)) {
     const std::string error_message = "AISW: No room in socket buffer.";
-    LOG(ERROR) << error_message;
+    LOG(WARNING) << error_message;
     AddToNativeLog(error_message);
     return false;
   }

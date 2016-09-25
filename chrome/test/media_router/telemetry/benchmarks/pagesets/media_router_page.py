@@ -2,8 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
 import os
 import time
+import utils
 
 from telemetry import page
 from telemetry import story
@@ -38,6 +40,49 @@ class CastPage(page.Page):
       # code which closes the dialog, it is expected.
       pass
 
+  def CloseExistingRoute(self, action_runner, sink_name):
+    """Closes the existing route if it exists, otherwise does nothing."""
+
+    action_runner.TapElement(selector='#start_session_button')
+    action_runner.Wait(5)
+    for tab in action_runner.tab.browser.tabs:
+      if tab.url == 'chrome://media-router/':
+        if self.CheckIfExistingRoute(tab, sink_name):
+          self.ChooseSink(tab, sink_name)
+          tab.ExecuteJavaScript(
+              "window.document.getElementById('media-router-container')."
+              "shadowRoot.getElementById('route-details').shadowRoot."
+              "getElementById('close-route-button').click();")
+    self.CloseDialog(tab)
+    # Wait for 5s to make sure the route is closed.
+    action_runner.Wait(5)
+
+  def CheckIfExistingRoute(self, tab, sink_name):
+    """"Checks if there is existing route for the specific sink."""
+
+    tab.ExecuteJavaScript(
+        "var sinks = window.document.getElementById('media-router-container')."
+        "  allSinks;"
+        "var sink_id = null;"
+        "for (var i=0; i<sinks.length; i++) {"
+        "  if (sinks[i].name == '%s') {"
+        "    console.info('sink id: ' + sinks[i].id); "
+        "    sink_id = sinks[i].id;"
+        "    break;"
+        "  }"
+        "}"
+        "var routes = window.document.getElementById('media-router-container')."
+        "  routeList;"
+        "for (var i=0; i<routes.length; i++) {"
+        "  if (!!sink_id && routes[i].sinkId == sink_id) {"
+        "    window.__telemetry_route_id = routes[i].id;"
+        "    break;"
+        "  }"
+        "}" % sink_name)
+    route = tab.EvaluateJavaScript('!!window.__telemetry_route_id')
+    logging.info('Is there existing route? ' + str(route))
+    return route
+
   def ExecuteAsyncJavaScript(self, action_runner, script, verify_func,
                              error_message, timeout=5):
     """Executes async javascript function and waits until it finishes."""
@@ -45,6 +90,21 @@ class CastPage(page.Page):
     action_runner.ExecuteJavaScript(script)
     self._WaitForResult(action_runner, verify_func, error_message,
                         timeout=timeout)
+
+  def WaitUntilDialogLoaded(self, action_runner, tab):
+    """Waits until dialog is fully loaded."""
+
+    self._WaitForResult(
+        action_runner,
+        lambda: tab.EvaluateJavaScript(
+             '!!window.document.getElementById('
+             '"media-router-container") &&'
+             'window.document.getElementById('
+             '"media-router-container").sinksToShow_ &&'
+             'window.document.getElementById('
+             '"media-router-container").sinksToShow_.length'),
+        'The dialog is not fully loaded within 15s.',
+         timeout=15)
 
   def _WaitForResult(self, action_runner, verify_func, error_message,
                      timeout=5):
@@ -59,8 +119,9 @@ class CastPage(page.Page):
 
   def _GetDeviceName(self):
     """Gets device name from environment variable RECEIVER_NAME."""
-    if 'RECEIVER_NAME' not in os.environ or not os.environ.get('RECEIVER_NAME'):
+
+    if 'RECEIVER_IP' not in os.environ or not os.environ.get('RECEIVER_IP'):
       raise page.page_test.Failure(
           'Your test machine is not set up correctly, '
-          'RECEIVER_NAME enviroment variable is missing.')
-    return os.environ.get('RECEIVER_NAME')
+          'RECEIVER_IP enviroment variable is missing.')
+    return utils.GetDeviceName(os.environ.get('RECEIVER_IP'))

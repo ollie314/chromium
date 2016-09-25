@@ -14,7 +14,10 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/debug/alias.h"
+#include "base/location.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/windows_version.h"
@@ -25,6 +28,8 @@
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/base/win/shell.h"
 #include "ui/base/win/touch_input.h"
+#include "ui/display/win/dpi.h"
+#include "ui/display/win/screen_win.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_code_conversion_win.h"
@@ -34,7 +39,6 @@
 #include "ui/gfx/icon_util.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/path_win.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/win/direct_manipulation.h"
 #include "ui/gfx/win/hwnd_util.h"
 #include "ui/gfx/win/rendering_window_manager.h"
@@ -218,14 +222,6 @@ bool IsTopLevelWindow(HWND window) {
   return !parent || (parent == ::GetDesktopWindow());
 }
 
-void AddScrollStylesToWindow(HWND window) {
-  if (::IsWindow(window)) {
-    long current_style = ::GetWindowLong(window, GWL_STYLE);
-    ::SetWindowLong(window, GWL_STYLE,
-                    current_style | WS_VSCROLL | WS_HSCROLL);
-  }
-}
-
 const int kTouchDownContextResetTimeout = 500;
 
 // Windows does not flag synthesized mouse messages from touch in all cases.
@@ -301,6 +297,10 @@ class HWNDMessageHandler::ScopedRedrawLock {
   DISALLOW_COPY_AND_ASSIGN(ScopedRedrawLock);
 };
 
+// static HWNDMessageHandler member initialization.
+base::LazyInstance<HWNDMessageHandler::FullscreenWindowMonitorMap>
+    HWNDMessageHandler::fullscreen_monitor_map_ = LAZY_INSTANCE_INITIALIZER;
+
 ////////////////////////////////////////////////////////////////////////////////
 // HWNDMessageHandler, public:
 
@@ -315,6 +315,7 @@ HWNDMessageHandler::HWNDMessageHandler(HWNDMessageHandlerDelegate* delegate)
       restored_enabled_(false),
       current_cursor_(NULL),
       previous_cursor_(NULL),
+      dpi_(0),
       active_mouse_tracking_flags_(0),
       is_right_mouse_pressed_on_caption_(false),
       lock_updates_count_(0),
@@ -323,7 +324,6 @@ HWNDMessageHandler::HWNDMessageHandler(HWNDMessageHandlerDelegate* delegate)
       is_first_nccalc_(true),
       menu_depth_(0),
       id_generator_(0),
-      needs_scroll_styles_(false),
       in_size_loop_(false),
       touch_down_contexts_(0),
       last_mouse_hwheel_time_(0),
@@ -348,28 +348,20 @@ void HWNDMessageHandler::Init(HWND parent, const gfx::Rect& bounds) {
 
   // Create the window.
   WindowImpl::Init(parent, bounds);
-  // TODO(ananta)
-  // Remove the scrolling hack code once we have scrolling working well.
-#if defined(ENABLE_SCROLL_HACK)
-  // Certain trackpad drivers on Windows have bugs where in they don't generate
-  // WM_MOUSEWHEEL messages for the trackpoint and trackpad scrolling gestures
-  // unless there is an entry for Chrome with the class name of the Window.
-  // These drivers check if the window under the trackpoint has the WS_VSCROLL/
-  // WS_HSCROLL style and if yes they generate the legacy WM_VSCROLL/WM_HSCROLL
-  // messages. We add these styles to ensure that trackpad/trackpoint scrolling
-  // work.
-  // TODO(ananta)
-  // Look into moving the WS_VSCROLL and WS_HSCROLL style setting logic to the
-  // CalculateWindowStylesFromInitParams function. Doing it there seems to
-  // cause some interactive tests to fail. Investigation needed.
-  if (IsTopLevelWindow(hwnd())) {
-    long current_style = ::GetWindowLong(hwnd(), GWL_STYLE);
-    if (!(current_style & WS_POPUP)) {
-      AddScrollStylesToWindow(hwnd());
-      needs_scroll_styles_ = true;
-    }
+
+  if (delegate_->HasFrame() && base::win::IsProcessPerMonitorDpiAware()) {
+    static auto enable_child_window_dpi_message_func = []() {
+      // Derived signature; not available in headers.
+      // This call gets Windows to scale the non-client area when WM_DPICHANGED
+      // is fired.
+      using EnableChildWindowDpiMessagePtr = LRESULT (WINAPI*)(HWND, BOOL);
+      return reinterpret_cast<EnableChildWindowDpiMessagePtr>(
+                 GetProcAddress(GetModuleHandle(L"user32.dll"),
+                                "EnableChildWindowDpiMessage"));
+    }();
+    if (enable_child_window_dpi_message_func)
+      enable_child_window_dpi_message_func(hwnd(), TRUE);
   }
-#endif
 
   prop_window_target_.reset(new ui::ViewProp(hwnd(),
                             ui::WindowEventTarget::kWin32InputEventTarget,
@@ -419,7 +411,7 @@ void HWNDMessageHandler::Close() {
     // may delete ourselves on destroy and the ATL callback would still
     // dereference us when the callback returns).
     waiting_for_close_now_ = true;
-    base::MessageLoop::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&HWNDMessageHandler::CloseNow, weak_factory_.GetWeakPtr()));
   }
@@ -514,6 +506,16 @@ void HWNDMessageHandler::SetBounds(const gfx::Rect& bounds_in_pixels,
                                    bool force_size_changed) {
   background_fullscreen_hack_ = false;
   SetBoundsInternal(bounds_in_pixels, force_size_changed);
+}
+
+void HWNDMessageHandler::SetDwmFrameExtension(DwmFrameState state) {
+  if (!delegate_->HasFrame() && ui::win::IsAeroGlassEnabled() &&
+      (window_ex_style() & WS_EX_COMPOSITED) == 0) {
+    MARGINS m = {0, 0, 0, 0};
+    if (state == DwmFrameState::ON)
+      m = {0, 0, 1, 0};
+    DwmExtendFrameIntoClientArea(hwnd(), &m);
+  }
 }
 
 void HWNDMessageHandler::SetSize(const gfx::Size& size) {
@@ -814,6 +816,18 @@ void HWNDMessageHandler::SetFullscreen(bool fullscreen) {
   // window, then go ahead and do it now.
   if (!fullscreen && dwm_transition_desired_)
     PerformDwmTransition();
+
+  // Add the fullscreen window to the fullscreen window map which is used to
+  // handle window activations.
+  HMONITOR monitor = MonitorFromWindow(hwnd(), MONITOR_DEFAULTTOPRIMARY);
+  if (fullscreen) {
+    (fullscreen_monitor_map_.Get())[monitor] = this;
+  } else {
+    FullscreenWindowMonitorMap::iterator iter =
+        fullscreen_monitor_map_.Get().find(monitor);
+    if (iter != fullscreen_monitor_map_.Get().end())
+      fullscreen_monitor_map_.Get().erase(iter);
+  }
 }
 
 void HWNDMessageHandler::SizeConstraintsChanged() {
@@ -896,8 +910,10 @@ LRESULT HWNDMessageHandler::OnWndProc(UINT message,
 
   if (delegate_) {
     delegate_->PostHandleMSG(message, w_param, l_param);
-    if (message == WM_NCDESTROY)
+    if (message == WM_NCDESTROY) {
+      RestoreEnabledIfNecessary();
       delegate_->HandleDestroyed();
+    }
   }
 
   if (message == WM_ACTIVATE && IsTopLevelWindow(window))
@@ -1022,18 +1038,18 @@ void HWNDMessageHandler::PostProcessActivateMessage(
   // By reducing the size of the fullscreen window by 1px, we ensure that the
   // taskbar no longer treats the window and in turn the thread as a fullscreen
   // thread. This in turn ensures that maximized windows on the same thread
-  /// don't obscure the taskbar, etc.
+  // don't obscure the taskbar, etc.
+  // Please note that this taskbar behavior only occurs if the window becoming
+  // active is on the same monitor as the fullscreen window.
   if (!active) {
     if (IsFullscreen() && ::IsWindow(window_gaining_or_losing_activation)) {
-      // Reduce the bounds of the window by 1px to ensure that Windows does
-      // not treat this like a fullscreen window.
-      MONITORINFO monitor_info = {sizeof(monitor_info)};
-      GetMonitorInfo(MonitorFromWindow(hwnd(), MONITOR_DEFAULTTOPRIMARY),
-                      &monitor_info);
-      gfx::Rect shrunk_rect(monitor_info.rcMonitor);
-      shrunk_rect.set_height(shrunk_rect.height() - 1);
-      background_fullscreen_hack_ = true;
-      SetBoundsInternal(shrunk_rect, false);
+      HMONITOR active_window_monitor = MonitorFromWindow(
+          window_gaining_or_losing_activation, MONITOR_DEFAULTTOPRIMARY);
+      HMONITOR fullscreen_window_monitor =
+          MonitorFromWindow(hwnd(), MONITOR_DEFAULTTOPRIMARY);
+
+      if (active_window_monitor == fullscreen_window_monitor)
+        OnBackgroundFullscreen();
     }
   } else if (background_fullscreen_hack_) {
     // Restore the bounds of the window to fullscreen.
@@ -1043,6 +1059,13 @@ void HWNDMessageHandler::PostProcessActivateMessage(
                    &monitor_info);
     SetBoundsInternal(gfx::Rect(monitor_info.rcMonitor), false);
     background_fullscreen_hack_ = false;
+  } else {
+    // If the window becoming active has a fullscreen window on the same
+    // monitor then we need to reduce the size of the fullscreen window by
+    // 1 px. Please refer to the comments above for the reasoning behind
+    // this.
+    CheckAndHandleBackgroundFullscreenOnMonitor(
+        window_gaining_or_losing_activation);
   }
 }
 
@@ -1090,10 +1113,13 @@ void HWNDMessageHandler::TrackMouseEvents(DWORD mouse_tracking_flags) {
 
 void HWNDMessageHandler::ClientAreaSizeChanged() {
   // Ignore size changes due to fullscreen windows losing activation.
-  if (background_fullscreen_hack_)
+  if (background_fullscreen_hack_ && !sent_window_size_changing_)
     return;
   gfx::Size s = GetClientAreaBounds().size();
   delegate_->HandleClientSizeChanged(s);
+
+  current_window_size_message_++;
+  sent_window_size_changing_ = false;
 }
 
 bool HWNDMessageHandler::GetClientAreaInsets(gfx::Insets* insets) const {
@@ -1228,11 +1254,9 @@ void HWNDMessageHandler::ForceRedrawWindow(int attempts) {
     // unavailable.
     if (--attempts <= 0)
       return;
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        base::Bind(&HWNDMessageHandler::ForceRedrawWindow,
-                   weak_factory_.GetWeakPtr(),
-                   attempts),
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, base::Bind(&HWNDMessageHandler::ForceRedrawWindow,
+                              weak_factory_.GetWeakPtr(), attempts),
         base::TimeDelta::FromMilliseconds(500));
     return;
   }
@@ -1331,6 +1355,9 @@ LRESULT HWNDMessageHandler::OnCreate(CREATESTRUCT* create_struct) {
       base::Bind(&HWNDMessageHandler::OnSessionChange,
                  base::Unretained(this))));
 
+  float scale_factor = display::win::ScreenWin::GetScaleFactorForHWND(hwnd());
+  dpi_ = display::win::GetDPIFromScalingFactor(scale_factor);
+
   // TODO(beng): move more of NWW::OnCreate here.
   return 0;
 }
@@ -1338,6 +1365,16 @@ LRESULT HWNDMessageHandler::OnCreate(CREATESTRUCT* create_struct) {
 void HWNDMessageHandler::OnDestroy() {
   windows_session_change_observer_.reset(nullptr);
   delegate_->HandleDestroying();
+  // If the window going away is a fullscreen window then remove its references
+  // from the full screen window map.
+  for (auto iter = fullscreen_monitor_map_.Get().begin();
+       iter != fullscreen_monitor_map_.Get().end();
+       iter++) {
+    if (iter->second == this) {
+      fullscreen_monitor_map_.Get().erase(iter);
+      break;
+    }
+  }
 }
 
 void HWNDMessageHandler::OnDisplayChange(UINT bits_per_pixel,
@@ -1360,19 +1397,33 @@ LRESULT HWNDMessageHandler::OnDwmCompositionChanged(UINT msg,
   return 0;
 }
 
+LRESULT HWNDMessageHandler::OnDpiChanged(UINT msg,
+                                         WPARAM w_param,
+                                         LPARAM l_param) {
+  if (LOWORD(w_param) != HIWORD(w_param))
+    NOTIMPLEMENTED() << "Received non-square scaling factors";
+
+  // The first WM_DPICHANGED originates from EnableChildWindowDpiMessage during
+  // initialization. We don't want to propagate this as the client is already
+  // set at the current scale factor and may cause the window to display too
+  // soon. See http://crbug.com/625076.
+  int dpi = LOWORD(w_param);
+  if (dpi_ == dpi)
+    return 0;
+
+  dpi_ = dpi;
+  SetBoundsInternal(gfx::Rect(*reinterpret_cast<RECT*>(l_param)), false);
+  delegate_->HandleWindowScaleFactorChanged(
+      display::win::GetScalingFactorFromDPI(dpi_));
+  return 0;
+}
+
 void HWNDMessageHandler::OnEnterMenuLoop(BOOL from_track_popup_menu) {
   if (menu_depth_++ == 0)
     delegate_->HandleMenuLoop(true);
 }
 
 void HWNDMessageHandler::OnEnterSizeMove() {
-  // Please refer to the comments in the OnSize function about the scrollbar
-  // hack.
-  // Hide the Windows scrollbar if the scroll styles are present to ensure
-  // that a paint flicker does not occur while sizing.
-  if (in_size_loop_ && needs_scroll_styles_)
-    ShowScrollBar(hwnd(), SB_BOTH, FALSE);
-
   delegate_->HandleBeginWMSizeMove();
   SetMsgHandled(FALSE);
 }
@@ -1391,13 +1442,9 @@ void HWNDMessageHandler::OnExitMenuLoop(BOOL is_shortcut_menu) {
 void HWNDMessageHandler::OnExitSizeMove() {
   delegate_->HandleEndWMSizeMove();
   SetMsgHandled(FALSE);
-  // Please refer to the notes in the OnSize function for information about
-  // the scrolling hack.
-  // We hide the Windows scrollbar in the OnEnterSizeMove function. We need
-  // to add the scroll styles back to ensure that scrolling works in legacy
-  // trackpoint drivers.
-  if (in_size_loop_ && needs_scroll_styles_)
-    AddScrollStylesToWindow(hwnd());
+  // If the window was moved to a monitor which has a fullscreen window active,
+  // we need to reduce the size of the fullscreen window by 1px.
+  CheckAndHandleBackgroundFullscreenOnMonitor(hwnd());
 }
 
 void HWNDMessageHandler::OnGetMinMaxInfo(MINMAXINFO* minmax_info) {
@@ -1778,49 +1825,6 @@ LRESULT HWNDMessageHandler::OnNCHitTest(const gfx::Point& point) {
   // us.
   LRESULT hit_test_code = DefWindowProc(hwnd(), WM_NCHITTEST, 0,
                                         MAKELPARAM(point.x(), point.y()));
-  if (needs_scroll_styles_) {
-    switch (hit_test_code) {
-      // If we faked the WS_VSCROLL and WS_HSCROLL styles for this window, then
-      // Windows returns the HTVSCROLL or HTHSCROLL hit test codes if we hover
-      // or click on the non client portions of the window where the OS
-      // scrollbars would be drawn. These hittest codes are returned even when
-      // the scrollbars are hidden, which is the case in Aura. We fake the
-      // hittest code as HTCLIENT in this case to ensure that we receive client
-      // mouse messages as opposed to non client mouse messages.
-      case HTVSCROLL:
-      case HTHSCROLL:
-        hit_test_code = HTCLIENT;
-        break;
-
-      case HTBOTTOMRIGHT: {
-        // Normally the HTBOTTOMRIGHT hittest code is received when we hover
-        // near the bottom right of the window. However due to our fake scroll
-        // styles, we get this code even when we hover around the area where
-        // the vertical scrollar down arrow would be drawn.
-        // We check if the hittest coordinates lie in this region and if yes
-        // we return HTCLIENT.
-        int border_width = ::GetSystemMetrics(SM_CXSIZEFRAME);
-        int border_height = ::GetSystemMetrics(SM_CYSIZEFRAME);
-        int scroll_width = ::GetSystemMetrics(SM_CXVSCROLL);
-        int scroll_height = ::GetSystemMetrics(SM_CYVSCROLL);
-        RECT window_rect;
-        ::GetWindowRect(hwnd(), &window_rect);
-        window_rect.bottom -= border_height;
-        window_rect.right -= border_width;
-        window_rect.left = window_rect.right - scroll_width;
-        window_rect.top = window_rect.bottom - scroll_height;
-        POINT pt;
-        pt.x = point.x();
-        pt.y = point.y();
-        if (::PtInRect(&window_rect, pt))
-          hit_test_code = HTCLIENT;
-        break;
-      }
-
-      default:
-        break;
-    }
-  }
   return hit_test_code;
 }
 
@@ -2068,19 +2072,6 @@ void HWNDMessageHandler::OnSize(UINT param, const gfx::Size& size) {
   // ResetWindowRegion is going to trigger WM_NCPAINT. By doing it after we've
   // invoked OnSize we ensure the RootView has been laid out.
   ResetWindowRegion(false, true);
-
-  // We add the WS_VSCROLL and WS_HSCROLL styles to top level windows to ensure
-  // that legacy trackpad/trackpoint drivers generate the WM_VSCROLL and
-  // WM_HSCROLL messages and scrolling works.
-  // We want the scroll styles to be present on the window. However we don't
-  // want Windows to draw the scrollbars. To achieve this we hide the scroll
-  // bars and readd them to the window style in a posted task to ensure that we
-  // don't get nested WM_SIZE messages.
-  if (needs_scroll_styles_ && !in_size_loop_) {
-    ShowScrollBar(hwnd(), SB_BOTH, FALSE);
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(&AddScrollStylesToWindow, hwnd()));
-  }
 }
 
 void HWNDMessageHandler::OnSysCommand(UINT notification_code,
@@ -2184,28 +2175,26 @@ LRESULT HWNDMessageHandler::OnTouchEvent(UINT message,
 
       gfx::Point touch_point(point.x, point.y);
       unsigned int touch_id = id_generator_.GetGeneratedID(input[i].dwID);
-      base::TimeDelta time_delta = event_time - base::TimeTicks();
 
       if (input[i].dwFlags & TOUCHEVENTF_DOWN) {
         touch_ids_.insert(input[i].dwID);
         GenerateTouchEvent(ui::ET_TOUCH_PRESSED, touch_point, touch_id,
-                           event_time, time_delta, &touch_events);
+                           event_time, &touch_events);
         touch_down_contexts_++;
-        base::MessageLoop::current()->PostDelayedTask(
-            FROM_HERE,
-            base::Bind(&HWNDMessageHandler::ResetTouchDownContext,
-                       weak_factory_.GetWeakPtr()),
+        base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+            FROM_HERE, base::Bind(&HWNDMessageHandler::ResetTouchDownContext,
+                                  weak_factory_.GetWeakPtr()),
             base::TimeDelta::FromMilliseconds(kTouchDownContextResetTimeout));
       } else {
         if (input[i].dwFlags & TOUCHEVENTF_MOVE) {
           GenerateTouchEvent(ui::ET_TOUCH_MOVED, touch_point, touch_id,
-                             event_time, time_delta, &touch_events);
+                             event_time, &touch_events);
         }
 
         if (input[i].dwFlags & TOUCHEVENTF_UP) {
           touch_ids_.erase(input[i].dwID);
           GenerateTouchEvent(ui::ET_TOUCH_RELEASED, touch_point, touch_id,
-                             event_time, time_delta, &touch_events);
+                             event_time, &touch_events);
           id_generator_.ReleaseNumber(input[i].dwID);
         }
       }
@@ -2213,10 +2202,9 @@ LRESULT HWNDMessageHandler::OnTouchEvent(UINT message,
     // Handle the touch events asynchronously. We need this because touch
     // events on windows don't fire if we enter a modal loop in the context of
     // a touch event.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&HWNDMessageHandler::HandleTouchEvents,
-                   weak_factory_.GetWeakPtr(), touch_events));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&HWNDMessageHandler::HandleTouchEvents,
+                              weak_factory_.GetWeakPtr(), touch_events));
   }
   CloseTouchInputHandle(reinterpret_cast<HTOUCHINPUT>(l_param));
   SetMsgHandled(FALSE);
@@ -2284,10 +2272,9 @@ void HWNDMessageHandler::OnWindowPosChanging(WINDOWPOS* window_pos) {
         // likes to (incorrectly) recalculate what our position/size should be
         // and send us further updates.
         ignore_window_pos_changes_ = true;
-        base::MessageLoop::current()->PostTask(
-            FROM_HERE,
-            base::Bind(&HWNDMessageHandler::StopIgnoringPosChanges,
-                       weak_factory_.GetWeakPtr()));
+        base::ThreadTaskRunnerHandle::Get()->PostTask(
+            FROM_HERE, base::Bind(&HWNDMessageHandler::StopIgnoringPosChanges,
+                                  weak_factory_.GetWeakPtr()));
       }
       last_monitor_ = monitor;
       last_monitor_rect_ = monitor_rect;
@@ -2304,6 +2291,12 @@ void HWNDMessageHandler::OnWindowPosChanging(WINDOWPOS* window_pos) {
       window_pos->flags & SWP_FRAMECHANGED) {
     delegate_->HandleWindowSizeChanging();
     sent_window_size_changing_ = true;
+
+    // It's possible that if Aero snap is being entered then the window size
+    // won't actually change. Post a message to ensure swaps will be re-enabled
+    // in that case.
+    PostMessage(hwnd(), WM_WINDOWSIZINGFINISHED, ++current_window_size_message_,
+                0);
   }
 
   if (ScopedFullscreenVisibility::IsHiddenForFullscreen(hwnd())) {
@@ -2314,8 +2307,10 @@ void HWNDMessageHandler::OnWindowPosChanging(WINDOWPOS* window_pos) {
 
   if (window_pos->flags & SWP_SHOWWINDOW)
     delegate_->HandleVisibilityChanging(true);
-  else if (window_pos->flags & SWP_HIDEWINDOW)
+  else if (window_pos->flags & SWP_HIDEWINDOW) {
+    SetDwmFrameExtension(DwmFrameState::OFF);
     delegate_->HandleVisibilityChanging(false);
+  }
 
   SetMsgHandled(FALSE);
 }
@@ -2323,26 +2318,34 @@ void HWNDMessageHandler::OnWindowPosChanging(WINDOWPOS* window_pos) {
 void HWNDMessageHandler::OnWindowPosChanged(WINDOWPOS* window_pos) {
   if (DidClientAreaSizeChange(window_pos))
     ClientAreaSizeChanged();
-  if (!delegate_->HasFrame() && window_pos->flags & SWP_FRAMECHANGED &&
-      ui::win::IsAeroGlassEnabled() &&
-      (window_ex_style() & WS_EX_COMPOSITED) == 0) {
-    MARGINS m = {10, 10, 10, 10};
-    DwmExtendFrameIntoClientArea(hwnd(), &m);
-  }
+  if (window_pos->flags & SWP_FRAMECHANGED)
+    SetDwmFrameExtension(DwmFrameState::ON);
   if (window_pos->flags & SWP_SHOWWINDOW) {
     delegate_->HandleVisibilityChanged(true);
     if (direct_manipulation_helper_)
       direct_manipulation_helper_->Activate(hwnd());
+    SetDwmFrameExtension(DwmFrameState::ON);
   } else if (window_pos->flags & SWP_HIDEWINDOW) {
     delegate_->HandleVisibilityChanged(false);
     if (direct_manipulation_helper_)
       direct_manipulation_helper_->Deactivate(hwnd());
   }
-  if (sent_window_size_changing_) {
-    sent_window_size_changing_ = false;
-    delegate_->HandleWindowSizeChanged();
-  }
+
   SetMsgHandled(FALSE);
+}
+
+LRESULT HWNDMessageHandler::OnWindowSizingFinished(UINT message,
+                                                   WPARAM w_param,
+                                                   LPARAM l_param) {
+  // Check if a newer WM_WINDOWPOSCHANGING or WM_WINDOWPOSCHANGED have been
+  // received after this message was posted.
+  if (current_window_size_message_ != w_param)
+    return 0;
+
+  delegate_->HandleWindowSizeUnchanged();
+  sent_window_size_changing_ = false;
+
+  return 0;
 }
 
 void HWNDMessageHandler::OnSessionChange(WPARAM status_code) {
@@ -2374,15 +2377,15 @@ LRESULT HWNDMessageHandler::HandleMouseEventInternal(UINT message,
   // TODO(ananta)
   // Windows does not reliably set the touch flag on mouse messages. Look into
   // a better way of identifying mouse messages originating from touch.
-  if (ui::IsMouseEventFromTouch(message)) {
+  if ((message != WM_MOUSEWHEEL && message != WM_MOUSEHWHEEL) &&
+      (ui::IsMouseEventFromTouch(message))) {
     LPARAM l_param_ht = l_param;
     // For mouse events (except wheel events), location is in window coordinates
     // and should be converted to screen coordinates for WM_NCHITTEST.
-    if (message != WM_MOUSEWHEEL && message != WM_MOUSEHWHEEL) {
-      POINT screen_point = CR_POINT_INITIALIZER_FROM_LPARAM(l_param_ht);
-      MapWindowPoints(hwnd(), HWND_DESKTOP, &screen_point, 1);
-      l_param_ht = MAKELPARAM(screen_point.x, screen_point.y);
-    }
+    POINT screen_point = CR_POINT_INITIALIZER_FROM_LPARAM(l_param_ht);
+    MapWindowPoints(hwnd(), HWND_DESKTOP, &screen_point, 1);
+    l_param_ht = MAKELPARAM(screen_point.x, screen_point.y);
+
     LRESULT hittest = SendMessage(hwnd(), WM_NCHITTEST, 0, l_param_ht);
     if (hittest == HTCLIENT || hittest == HTNOWHERE)
       return 0;
@@ -2558,8 +2561,7 @@ void HWNDMessageHandler::PerformDwmTransition() {
 void HWNDMessageHandler::GenerateTouchEvent(ui::EventType event_type,
                                             const gfx::Point& point,
                                             unsigned int id,
-                                            base::TimeTicks event_time,
-                                            base::TimeDelta time_stamp,
+                                            base::TimeTicks time_stamp,
                                             TouchEvents* touch_events) {
   ui::TouchEvent event(event_type, point, id, time_stamp);
 
@@ -2569,7 +2571,7 @@ void HWNDMessageHandler::GenerateTouchEvent(ui::EventType event_type,
       ui::INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT,
       0,
       0,
-      event_time,
+      time_stamp,
       1);
 
   touch_events->push_back(event);
@@ -2650,8 +2652,13 @@ bool HWNDMessageHandler::HandleMouseInputForCaption(unsigned int message,
       break;
     }
 
-    case WM_NCMOUSELEAVE:
+    case WM_NCMOUSELEAVE: {
+      // If the DWM is rendering the window controls, we need to give the DWM's
+      // default window procedure the chance to repaint the window border icons
+      if (HasSystemFrame())
+        handled = DwmDefWindowProc(hwnd(), WM_NCMOUSELEAVE, 0, 0, NULL) != 0;
       break;
+    }
 
     default:
       left_button_down_on_caption_ = false;
@@ -2684,5 +2691,29 @@ void HWNDMessageHandler::SetBoundsInternal(const gfx::Rect& bounds_in_pixels,
     direct_manipulation_helper_->SetBounds(bounds_in_pixels);
 }
 
+void HWNDMessageHandler::CheckAndHandleBackgroundFullscreenOnMonitor(
+    HWND window) {
+  HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY);
+
+  FullscreenWindowMonitorMap::iterator iter =
+      fullscreen_monitor_map_.Get().find(monitor);
+  if (iter != fullscreen_monitor_map_.Get().end()) {
+    DCHECK(iter->second);
+    if (window != iter->second->hwnd())
+      iter->second->OnBackgroundFullscreen();
+  }
+}
+
+void HWNDMessageHandler::OnBackgroundFullscreen() {
+  // Reduce the bounds of the window by 1px to ensure that Windows does
+  // not treat this like a fullscreen window.
+  MONITORINFO monitor_info = {sizeof(monitor_info)};
+  GetMonitorInfo(MonitorFromWindow(hwnd(), MONITOR_DEFAULTTOPRIMARY),
+                 &monitor_info);
+  gfx::Rect shrunk_rect(monitor_info.rcMonitor);
+  shrunk_rect.set_height(shrunk_rect.height() - 1);
+  background_fullscreen_hack_ = true;
+  SetBoundsInternal(shrunk_rect, false);
+}
 
 }  // namespace views

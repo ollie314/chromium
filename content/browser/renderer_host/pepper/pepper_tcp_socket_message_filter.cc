@@ -27,7 +27,6 @@
 #include "net/base/io_buffer.h"
 #include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
-#include "net/dns/single_request_host_resolver.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
@@ -153,14 +152,14 @@ PepperTCPSocketMessageFilter::OverrideTaskRunnerForMessage(
     case PpapiHostMsg_TCPSocket_Connect::ID:
     case PpapiHostMsg_TCPSocket_ConnectWithNetAddress::ID:
     case PpapiHostMsg_TCPSocket_Listen::ID:
-      return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI);
+      return BrowserThread::GetTaskRunnerForThread(BrowserThread::UI);
     case PpapiHostMsg_TCPSocket_SSLHandshake::ID:
     case PpapiHostMsg_TCPSocket_Read::ID:
     case PpapiHostMsg_TCPSocket_Write::ID:
     case PpapiHostMsg_TCPSocket_Accept::ID:
     case PpapiHostMsg_TCPSocket_Close::ID:
     case PpapiHostMsg_TCPSocket_SetOption::ID:
-      return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
+      return BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
   }
   return NULL;
 }
@@ -334,6 +333,9 @@ int32_t PepperTCPSocketMessageFilter::OnMsgSSLHandshake(
   ssl_context.cert_verifier = ssl_context_helper_->GetCertVerifier();
   ssl_context.transport_security_state =
       ssl_context_helper_->GetTransportSecurityState();
+  ssl_context.cert_transparency_verifier =
+      ssl_context_helper_->GetCertTransparencyVerifier();
+  ssl_context.ct_policy_enforcer = ssl_context_helper_->GetCTPolicyEnforcer();
   ssl_socket_ = factory->CreateSSLClientSocket(
       std::move(handle), host_port_pair, ssl_context_helper_->ssl_config(),
       ssl_context);
@@ -640,16 +642,12 @@ void PepperTCPSocketMessageFilter::DoConnect(
   address_index_ = 0;
   address_list_.clear();
   net::HostResolver::RequestInfo request_info(net::HostPortPair(host, port));
-  resolver_.reset(
-      new net::SingleRequestHostResolver(resource_context->GetHostResolver()));
-  int net_result = resolver_->Resolve(
-      request_info,
-      net::DEFAULT_PRIORITY,
-      &address_list_,
+  net::HostResolver* resolver = resource_context->GetHostResolver();
+  int net_result = resolver->Resolve(
+      request_info, net::DEFAULT_PRIORITY, &address_list_,
       base::Bind(&PepperTCPSocketMessageFilter::OnResolveCompleted,
-                 base::Unretained(this),
-                 context),
-      net::BoundNetLog());
+                 base::Unretained(this), context),
+      &request_, net::NetLogWithSource());
   if (net_result != net::ERR_IO_PENDING)
     OnResolveCompleted(context, net_result);
 }
@@ -666,7 +664,7 @@ void PepperTCPSocketMessageFilter::DoConnectWithNetAddress(
 
   state_.SetPendingTransition(TCPSocketState::CONNECT);
 
-  net::IPAddressNumber address;
+  std::vector<uint8_t> address;
   uint16_t port;
   if (!NetAddressPrivateImpl::NetAddressToIPEndPoint(
           net_addr, &address, &port)) {
@@ -678,7 +676,7 @@ void PepperTCPSocketMessageFilter::DoConnectWithNetAddress(
   // Copy the single IPEndPoint to address_list_.
   address_index_ = 0;
   address_list_.clear();
-  address_list_.push_back(net::IPEndPoint(address, port));
+  address_list_.push_back(net::IPEndPoint(net::IPAddress(address), port));
   StartConnect(context);
 }
 

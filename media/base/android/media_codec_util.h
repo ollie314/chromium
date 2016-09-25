@@ -12,11 +12,14 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "media/base/android/media_codec_direction.h"
 #include "media/base/media_export.h"
 
 class GURL;
 
 namespace media {
+
+class MediaCodecBridge;
 
 // Helper macro to skip the test if MediaCodecBridge isn't available.
 #define SKIP_TEST_IF_MEDIA_CODEC_BRIDGE_IS_NOT_AVAILABLE()        \
@@ -27,11 +30,14 @@ namespace media {
     }                                                             \
   } while (0)
 
-// Codec direction. Keep this in sync with MediaCodecUtil.java.
-enum MediaCodecDirection {
-  MEDIA_CODEC_DECODER,
-  MEDIA_CODEC_ENCODER,
-};
+// Helper macro to skip the test if VP8 decoding isn't supported.
+#define SKIP_TEST_IF_VP8_DECODER_IS_NOT_SUPPORTED()               \
+  do {                                                            \
+    if (!MediaCodecUtil::IsVp8DecoderAvailable()) {               \
+      VLOG(0) << "Could not run test - not supported on device."; \
+      return;                                                     \
+    }                                                             \
+  } while (0)
 
 class MEDIA_EXPORT MediaCodecUtil {
  public:
@@ -57,14 +63,12 @@ class MEDIA_EXPORT MediaCodecUtil {
   static bool IsKnownUnaccelerated(const std::string& mime_type,
                                    MediaCodecDirection direction);
 
-  // Test whether the path of a URL ends with ".m3u8".
-  static bool IsHLSURL(const GURL& url);
-
   // Test whether a URL contains "m3u8". (Using exactly the same logic as
   // NuPlayer does to determine if a stream is HLS.)
-  static bool IsHLSPath(const GURL& url);
+  static bool IsHLSURL(const GURL& url);
 
-  static bool RegisterMediaCodecUtil(JNIEnv* env);
+  // Test whether the path of a URL ends with ".m3u8".
+  static bool IsHLSPath(const GURL& url);
 
   // Indicates if the vp8 decoder or encoder is available on this device.
   static bool IsVp8DecoderAvailable();
@@ -75,6 +79,12 @@ class MEDIA_EXPORT MediaCodecUtil {
 
   // Indicates if SurfaceView and MediaCodec work well together on this device.
   static bool IsSurfaceViewOutputSupported();
+
+  // Indicates if the decoder is known to fail when flushed. (b/8125974,
+  // b/8347958)
+  // When true, the client should work around the issue by releasing the
+  // decoder and instantiating a new one rather than flushing the current one.
+  static bool CodecNeedsFlushWorkaround(MediaCodecBridge* codec);
 };
 
 }  // namespace media

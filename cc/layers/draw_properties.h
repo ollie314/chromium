@@ -10,12 +10,10 @@
 #include <memory>
 
 #include "cc/trees/occlusion.h"
-#include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/transform.h"
 
 namespace cc {
-class RenderSurfaceImpl;
 
 // Container for properties that layers need to compute before they can be
 // drawn.
@@ -44,9 +42,6 @@ struct CC_EXPORT DrawProperties {
   // to draw.
   bool screen_space_transform_is_animating;
 
-  // True if the layer can use LCD text.
-  bool can_use_lcd_text;
-
   // True if the layer needs to be clipped by clip_rect.
   bool is_clipped;
 
@@ -61,27 +56,6 @@ struct CC_EXPORT DrawProperties {
   // In target surface space, the original rect that clipped this layer. This
   // value is used to avoid unnecessarily changing GL scissor state.
   gfx::Rect clip_rect;
-
-  // Number of descendants with a clip parent that is our ancestor. NB - this
-  // does not include our clip children because they are clipped by us.
-  size_t num_unclipped_descendants;
-
-  // Each time we generate a new render surface layer list, an ID is used to
-  // identify it. |last_drawn_render_surface_layer_list_id| is set to the ID
-  // that marked the render surface layer list generation which last updated
-  // these draw properties and determined that this layer will draw itself.
-  // If these draw properties are not a part of the render surface layer list,
-  // or the layer doesn't contribute anything, then this ID will be either out
-  // of date or 0.
-  int last_drawn_render_surface_layer_list_id;
-
-  // The maximum scale during the layers current animation at which content
-  // should be rastered at to be crisp.
-  float maximum_animation_contents_scale;
-
-  // The scale during the layer animation start at which content should be
-  // rastered at to be crisp.
-  float starting_animation_contents_scale;
 };
 
 }  // namespace cc

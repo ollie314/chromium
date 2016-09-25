@@ -29,6 +29,7 @@
 #include "core/dom/RawDataDocumentParser.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLEmbedElement.h"
 #include "core/html/HTMLHtmlElement.h"
@@ -78,7 +79,7 @@ void PluginDocumentParser::createDocumentStructure()
 {
     // FIXME: Assert we have a loader to figure out why the original null checks
     // and assert were added for the security bug in http://trac.webkit.org/changeset/87566
-    ASSERT(document());
+    DCHECK(document());
     RELEASE_ASSERT(document()->loader());
 
     LocalFrame* frame = document()->frame();
@@ -90,10 +91,8 @@ void PluginDocumentParser::createDocumentStructure()
         return;
 
     HTMLHtmlElement* rootElement = HTMLHtmlElement::create(*document());
-    rootElement->insertedByParser();
     document()->appendChild(rootElement);
-    frame->loader().dispatchDocumentElementAvailable();
-    frame->loader().runScriptsAtDocumentElementAvailable();
+    rootElement->insertedByParser();
     if (isStopped())
         return; // runScriptsAtDocumentElementAvailable can detach the frame.
 
@@ -116,7 +115,7 @@ void PluginDocumentParser::createDocumentStructure()
 
     toPluginDocument(document())->setPluginNode(m_embedElement.get());
 
-    document()->updateLayout();
+    document()->updateStyleAndLayout();
 
     // We need the plugin to load synchronously so we can get the PluginView
     // below so flush the layout tasks now instead of waiting on the timer.
@@ -155,7 +154,7 @@ void PluginDocumentParser::finish()
 PluginView* PluginDocumentParser::pluginView() const
 {
     if (Widget* widget = toPluginDocument(document())->pluginWidget()) {
-        ASSERT_WITH_SECURITY_IMPLICATION(widget->isPluginContainer());
+        SECURITY_DCHECK(widget->isPluginContainer());
         return toPluginView(widget);
     }
     return 0;
@@ -166,6 +165,9 @@ PluginDocument::PluginDocument(const DocumentInit& initializer)
 {
     setCompatibilityMode(QuirksMode);
     lockCompatibilityMode();
+    UseCounter::count(*this, UseCounter::PluginDocument);
+    if (!isInMainFrame())
+        UseCounter::count(*this, UseCounter::PluginDocumentInFrame);
 }
 
 DocumentParser* PluginDocument::createParser()
@@ -176,8 +178,11 @@ DocumentParser* PluginDocument::createParser()
 Widget* PluginDocument::pluginWidget()
 {
     if (m_pluginNode && m_pluginNode->layoutObject()) {
-        ASSERT(m_pluginNode->layoutObject()->isEmbeddedObject());
-        return toLayoutEmbeddedObject(m_pluginNode->layoutObject())->widget();
+        CHECK(m_pluginNode->layoutObject()->isEmbeddedObject());
+        Widget* widget = toLayoutEmbeddedObject(m_pluginNode->layoutObject())->widget();
+        if (!widget || !widget->isPluginContainer())
+            return nullptr;
+        return widget;
     }
     return 0;
 }
@@ -187,11 +192,11 @@ Node* PluginDocument::pluginNode()
     return m_pluginNode.get();
 }
 
-void PluginDocument::detach(const AttachContext& context)
+void PluginDocument::shutdown()
 {
     // Release the plugin node so that we don't have a circular reference.
     m_pluginNode = nullptr;
-    HTMLDocument::detach(context);
+    HTMLDocument::shutdown();
 }
 
 DEFINE_TRACE(PluginDocument)

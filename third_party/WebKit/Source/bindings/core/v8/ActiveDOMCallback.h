@@ -33,7 +33,6 @@
 
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
@@ -52,7 +51,6 @@ public:
     virtual ~ActiveDOMCallback();
 
     bool canInvokeCallback() const;
-    bool isScriptControllerTerminating() const;
 };
 
 } // namespace blink

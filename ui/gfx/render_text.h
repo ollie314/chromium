@@ -15,13 +15,12 @@
 #include <utility>
 #include <vector>
 
-#include "base/gtest_prod_util.h"
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
-#include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/break_list.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/font_render_params.h"
@@ -60,11 +59,11 @@ class GFX_EXPORT SkiaTextRenderer {
   void SetDrawLooper(sk_sp<SkDrawLooper> draw_looper);
   void SetFontRenderParams(const FontRenderParams& params,
                            bool subpixel_rendering_suppressed);
-  void SetTypeface(SkTypeface* typeface);
+  void SetTypeface(sk_sp<SkTypeface> typeface);
   void SetTextSize(SkScalar size);
-  void SetFontWithStyle(const Font& font, int font_style);
   void SetForegroundColor(SkColor foreground);
   void SetShader(sk_sp<SkShader> shader);
+  void SetHaloEffect();
   // Sets underline metrics to use if the text will be drawn with an underline.
   // If not set, default values based on the size of the text will be used. The
   // two metrics must be set together.
@@ -123,6 +122,7 @@ class StyleIterator {
  public:
   StyleIterator(const BreakList<SkColor>& colors,
                 const BreakList<BaselineStyle>& baselines,
+                const BreakList<Font::Weight>& weights,
                 const std::vector<BreakList<bool>>& styles);
   ~StyleIterator();
 
@@ -130,6 +130,7 @@ class StyleIterator {
   SkColor color() const { return color_->second; }
   BaselineStyle baseline() const { return baseline_->second; }
   bool style(TextStyle s) const { return style_[s]->second; }
+  Font::Weight weight() const { return weight_->second; }
 
   // Get the intersecting range of the current iterator set.
   Range GetRange() const;
@@ -140,10 +141,12 @@ class StyleIterator {
  private:
   BreakList<SkColor> colors_;
   BreakList<BaselineStyle> baselines_;
+  BreakList<Font::Weight> weights_;
   std::vector<BreakList<bool> > styles_;
 
   BreakList<SkColor>::const_iterator color_;
   BreakList<BaselineStyle>::const_iterator baseline_;
+  BreakList<Font::Weight>::const_iterator weight_;
   std::vector<BreakList<bool>::const_iterator> style_;
 
   DISALLOW_COPY_AND_ASSIGN(StyleIterator);
@@ -186,9 +189,11 @@ struct Line {
   int baseline;
 };
 
-// Creates an SkTypeface from a font and a |gfx::Font::FontStyle|.
-// May return NULL.
-skia::RefPtr<SkTypeface> CreateSkiaTypeface(const gfx::Font& font, int style);
+// Creates an SkTypeface from a font, |italic| and a desired |weight|.
+// May return null.
+sk_sp<SkTypeface> CreateSkiaTypeface(const Font& font,
+                                     bool italic,
+                                     Font::Weight weight);
 
 // Applies the given FontRenderParams to a Skia |paint|.
 void ApplyRenderParams(const FontRenderParams& params,
@@ -212,6 +217,10 @@ class GFX_EXPORT RenderText {
   // Creates another instance of the same concrete class.
   virtual std::unique_ptr<RenderText> CreateInstanceOfSameType() const = 0;
 
+  // Like above but copies all style settings too.
+  std::unique_ptr<RenderText> CreateInstanceOfSameStyle(
+      const base::string16& text) const;
+
   const base::string16& text() const { return text_; }
   void SetText(const base::string16& text);
   void AppendText(const base::string16& text);
@@ -229,9 +238,6 @@ class GFX_EXPORT RenderText {
 
   bool cursor_visible() const { return cursor_visible_; }
   void set_cursor_visible(bool visible) { cursor_visible_ = visible; }
-
-  bool insert_mode() const { return insert_mode_; }
-  void ToggleInsertMode();
 
   SkColor cursor_color() const { return cursor_color_; }
   void set_cursor_color(SkColor color) { cursor_color_ = color; }
@@ -267,6 +273,14 @@ class GFX_EXPORT RenderText {
   bool multiline() const { return multiline_; }
   void SetMultiline(bool multiline);
 
+  // If multiline, a non-zero value will cap the number of lines rendered,
+  // and elide the rest (currently only ELIDE_TAIL supported.)
+  void SetMaxLines(size_t max_lines);
+  size_t max_lines() const { return max_lines_; }
+
+  // Returns the actual number of lines, broken by |lines_|.
+  size_t GetNumLines();
+
   // TODO(mukai): ELIDE_LONG_WORDS is not supported.
   WordWrapBehavior word_wrap_behavior() const { return word_wrap_behavior_; }
   void SetWordWrapBehavior(WordWrapBehavior behavior);
@@ -301,6 +315,9 @@ class GFX_EXPORT RenderText {
     subpixel_rendering_suppressed_ = suppressed;
   }
 
+  bool halo_effect() const { return halo_effect_; }
+  void set_halo_effect(bool halo_effect) { halo_effect_ = halo_effect; }
+
   const SelectionModel& selection_model() const { return selection_model_; }
 
   const Range& selection() const { return selection_model_.selection(); }
@@ -310,10 +327,11 @@ class GFX_EXPORT RenderText {
 
   // Moves the cursor left or right. Cursor movement is visual, meaning that
   // left and right are relative to screen, not the directionality of the text.
-  // If |select| is false, the selection start is moved to the same position.
+  // |selection_behavior| determines whether a selection is to be made and it's
+  // behavior.
   void MoveCursor(BreakType break_type,
                   VisualCursorDirection direction,
-                  bool select);
+                  SelectionBehavior selection_behavior);
 
   // Set the selection_model_ to the value of |selection|.
   // The selection range is clamped to text().length() if out of range.
@@ -362,6 +380,9 @@ class GFX_EXPORT RenderText {
   // The |range| should be valid, non-reversed, and within [0, text().length()].
   void SetStyle(TextStyle style, bool value);
   void ApplyStyle(TextStyle style, bool value, const Range& range);
+
+  void SetWeight(Font::Weight weight);
+  void ApplyWeight(Font::Weight weight, const Range& range);
 
   // Returns whether this style is enabled consistently across the entire
   // RenderText.
@@ -479,13 +500,14 @@ class GFX_EXPORT RenderText {
   RenderText();
 
   // NOTE: The value of these accessors may be stale. Please make sure
-  // that these fields are up-to-date before accessing them.
+  // that these fields are up to date before accessing them.
   const base::string16& layout_text() const { return layout_text_; }
   const base::string16& display_text() const { return display_text_; }
   bool text_elided() const { return text_elided_; }
 
   const BreakList<SkColor>& colors() const { return colors_; }
   const BreakList<BaselineStyle>& baselines() const { return baselines_; }
+  const BreakList<Font::Weight>& weights() const { return weights_; }
   const std::vector<BreakList<bool> >& styles() const { return styles_; }
 
   const std::vector<internal::Line>& lines() const { return lines_; }
@@ -627,40 +649,6 @@ class GFX_EXPORT RenderText {
 
  private:
   friend class test::RenderTextTestApi;
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, DefaultStyles);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, SetStyles);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, ApplyStyles);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, AppendTextKeepsStyles);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, ObscuredText);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, RevealObscuredText);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, ElidedText);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, ElidedObscuredText);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, TruncatedText);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, TruncatedObscuredText);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, GraphemePositions);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, MinLineHeight);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, EdgeSelectionModels);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, GetTextOffset);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, GetTextOffsetHorizontalDefaultInRTL);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, Multiline_MinWidth);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, Multiline_NormalWidth);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, Multiline_SufficientWidth);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, Multiline_Newline);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, Multiline_WordWrapBehavior);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, Multiline_LineBreakerBehavior);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest,
-                           Multiline_SurrogatePairsOrCombiningChars);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, Multiline_ZeroWidthChars);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, NewlineWithoutMultilineFlag);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, GlyphBounds);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, HarfBuzz_GlyphBounds);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest,
-                           MoveCursorLeftRight_MeiryoUILigatures);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, Win_LogicalClusters);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, SameFontForParentheses);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, BreakRunsByUnicodeBlocks);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, PangoAttributes);
-  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, StringFitsOwnWidth);
 
   // Set the cursor to |position|, with the caret trailing the previous
   // grapheme, or if there is no previous grapheme, leading the cursor position.
@@ -717,9 +705,8 @@ class GFX_EXPORT RenderText {
   // for the cursor when positioning text.
   bool cursor_enabled_;
 
-  // The cursor visibility and insert mode.
+  // The cursor visibility.
   bool cursor_visible_;
-  bool insert_mode_;
 
   // The color used for the cursor.
   SkColor cursor_color_;
@@ -741,6 +728,7 @@ class GFX_EXPORT RenderText {
   // TODO(msw): Expand to support cursor, selection, background, etc. colors.
   BreakList<SkColor> colors_;
   BreakList<BaselineStyle> baselines_;
+  BreakList<Font::Weight> weights_;
   std::vector<BreakList<bool> > styles_;
 
   // Breaks saved without temporary composition and selection styling.
@@ -778,6 +766,9 @@ class GFX_EXPORT RenderText {
   // Whether the text should be broken into multiple lines. Uses the width of
   // |display_rect_| as the width cap.
   bool multiline_;
+
+  // If multiple lines, the maximum number of lines to render, or 0.
+  size_t max_lines_;
 
   // The wrap behavior when the text is broken into lines. Do nothing unless
   // |multiline_| is set. The default value is IGNORE_LONG_WORDS.
@@ -817,6 +808,9 @@ class GFX_EXPORT RenderText {
 
   // A list of valid display text line break positions.
   BreakList<size_t> line_breaks_;
+
+  // Draw text with 1px border.
+  bool halo_effect_ = false;
 
   // Lines computed by EnsureLayout. These should be invalidated upon
   // OnLayoutTextAttributeChanged and OnDisplayTextAttributeChanged calls.

@@ -29,6 +29,7 @@
 #include "core/CoreExport.h"
 #include "core/css/CSSValue.h"
 #include "platform/geometry/IntSizeHash.h"
+#include "platform/heap/SelfKeepAlive.h"
 #include "wtf/HashCountedSet.h"
 #include "wtf/RefPtr.h"
 
@@ -59,7 +60,7 @@ public:
 
     void addClient(const LayoutObject*, const IntSize&);
     void removeClient(const LayoutObject*);
-    PassRefPtr<Image> image(const LayoutObject&, const IntSize&);
+    PassRefPtr<Image> image(const LayoutObject&, const IntSize&, float zoom);
 
     bool isFixedSize() const;
     IntSize fixedSize(const LayoutObject&, const FloatSize& defaultObjectSize);
@@ -67,7 +68,7 @@ public:
     bool isPending() const;
     bool knownToBeOpaque(const LayoutObject&) const;
 
-    void loadSubimages(Document*);
+    void loadSubimages(const Document&);
 
     CSSImageGeneratorValue* valueWithURLsMadeAbsolute();
 

@@ -28,7 +28,8 @@
 #include "platform/graphics/filters/SkiaImageFilterBuilder.h"
 #include "platform/text/TextStream.h"
 #include "wtf/CheckedNumeric.h"
-#include "wtf/OwnPtr.h"
+#include "wtf/PtrUtil.h"
+#include <memory>
 
 namespace blink {
 
@@ -54,13 +55,13 @@ FEConvolveMatrix* FEConvolveMatrix::create(Filter* filter, const IntSize& kernel
         preserveAlpha, kernelMatrix);
 }
 
-FloatRect FEConvolveMatrix::mapPaintRect(const FloatRect& rect, bool forward) const
+FloatRect FEConvolveMatrix::mapEffect(const FloatRect& rect) const
 {
+    if (!parametersValid())
+        return rect;
     FloatRect result = rect;
-    if (parametersValid()) {
-        result.moveBy(forward ? -m_targetOffset : m_targetOffset - m_kernelSize);
-        result.expand(FloatSize(m_kernelSize));
-    }
+    result.moveBy(-m_targetOffset);
+    result.expand(FloatSize(m_kernelSize));
     return result;
 }
 
@@ -150,7 +151,7 @@ sk_sp<SkImageFilter> FEConvolveMatrix::createImageFilter()
     SkIPoint target = SkIPoint::Make(m_targetOffset.x(), m_targetOffset.y());
     SkMatrixConvolutionImageFilter::TileMode tileMode = toSkiaTileMode(m_edgeMode);
     bool convolveAlpha = !m_preserveAlpha;
-    OwnPtr<SkScalar[]> kernel = adoptArrayPtr(new SkScalar[numElements]);
+    std::unique_ptr<SkScalar[]> kernel = wrapArrayUnique(new SkScalar[numElements]);
     for (int i = 0; i < numElements; ++i)
         kernel[i] = SkFloatToScalar(m_kernelMatrix[numElements - 1 - i]);
     SkImageFilter::CropRect cropRect = getCropRect();

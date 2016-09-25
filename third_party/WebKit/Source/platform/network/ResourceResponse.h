@@ -34,10 +34,11 @@
 #include "platform/network/ResourceLoadInfo.h"
 #include "platform/network/ResourceLoadTiming.h"
 #include "platform/weborigin/KURL.h"
+#include "public/platform/WebURLResponse.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerResponseType.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
+#include "wtf/Vector.h"
 #include "wtf/text/CString.h"
 
 namespace blink {
@@ -60,26 +61,67 @@ public:
         SecurityStyleAuthenticated
     };
 
+    class PLATFORM_EXPORT SignedCertificateTimestamp final {
+    public:
+        SignedCertificateTimestamp(
+            String status,
+            String origin,
+            String logDescription,
+            String logId,
+            int64_t timestamp,
+            String hashAlgorithm,
+            String signatureAlgorithm,
+            String signatureData)
+            : m_status(status)
+            , m_origin(origin)
+            , m_logDescription(logDescription)
+            , m_logId(logId)
+            , m_timestamp(timestamp)
+            , m_hashAlgorithm(hashAlgorithm)
+            , m_signatureAlgorithm(signatureAlgorithm)
+            , m_signatureData(signatureData)
+        {
+        }
+        explicit SignedCertificateTimestamp(
+            const struct blink::WebURLResponse::SignedCertificateTimestamp&);
+        SignedCertificateTimestamp isolatedCopy() const;
+
+        String m_status;
+        String m_origin;
+        String m_logDescription;
+        String m_logId;
+        int64_t m_timestamp;
+        String m_hashAlgorithm;
+        String m_signatureAlgorithm;
+        String m_signatureData;
+    };
+
+    using SignedCertificateTimestampList = WTF::Vector<SignedCertificateTimestamp>;
+
     struct SecurityDetails {
         DISALLOW_NEW();
         SecurityDetails()
-            : certID(0)
-            , numUnknownSCTs(0)
-            , numInvalidSCTs(0)
-            , numValidSCTs(0)
+            : validFrom(0)
+            , validTo(0)
         {
         }
         // All strings are human-readable values.
         String protocol;
         String keyExchange;
+        // keyExchangeGroup is the empty string if not applicable for the connection's key exchange.
+        String keyExchangeGroup;
         String cipher;
         // mac is the empty string when the connection cipher suite does not
         // have a separate MAC value (i.e. if the cipher suite is AEAD).
         String mac;
-        int certID;
-        size_t numUnknownSCTs;
-        size_t numInvalidSCTs;
-        size_t numValidSCTs;
+        String subjectName;
+        Vector<String> sanList;
+        String issuer;
+        time_t validFrom;
+        time_t validTo;
+        // DER-encoded X509Certificate certificate chain.
+        Vector<AtomicString> certificate;
+        SignedCertificateTimestampList sctList;
     };
 
     class ExtraData : public RefCounted<ExtraData> {
@@ -90,10 +132,12 @@ public:
     explicit ResourceResponse(CrossThreadResourceResponseData*);
 
     // Gets a copy of the data suitable for passing to another thread.
-    PassOwnPtr<CrossThreadResourceResponseData> copyData() const;
+    std::unique_ptr<CrossThreadResourceResponseData> copyData() const;
 
     ResourceResponse();
     ResourceResponse(const KURL&, const AtomicString& mimeType, long long expectedLength, const AtomicString& textEncodingName, const String& filename);
+    ResourceResponse(const ResourceResponse&);
+    ResourceResponse& operator=(const ResourceResponse&);
 
     bool isNull() const { return m_isNull; }
     bool isHTTP() const;
@@ -138,12 +182,12 @@ public:
 
     // These functions return parsed values of the corresponding response headers.
     // NaN means that the header was not present or had invalid value.
-    bool cacheControlContainsNoCache();
-    bool cacheControlContainsNoStore();
-    bool cacheControlContainsMustRevalidate();
+    bool cacheControlContainsNoCache() const;
+    bool cacheControlContainsNoStore() const;
+    bool cacheControlContainsMustRevalidate() const;
     bool hasCacheValidatorFields() const;
-    double cacheControlMaxAge();
-    double cacheControlStaleWhileRevalidate();
+    double cacheControlMaxAge() const;
+    double cacheControlStaleWhileRevalidate() const;
     double date() const;
     double age() const;
     double expires() const;
@@ -167,9 +211,6 @@ public:
     HTTPVersion httpVersion() const { return m_httpVersion; }
     void setHTTPVersion(HTTPVersion version) { m_httpVersion = version; }
 
-    const CString& getSecurityInfo() const { return m_securityInfo; }
-    void setSecurityInfo(const CString& securityInfo) { m_securityInfo = securityInfo; }
-
     bool hasMajorCertificateErrors() const { return m_hasMajorCertificateErrors; }
     void setHasMajorCertificateErrors(bool hasMajorCertificateErrors) { m_hasMajorCertificateErrors = hasMajorCertificateErrors; }
 
@@ -177,7 +218,7 @@ public:
     void setSecurityStyle(SecurityStyle securityStyle) { m_securityStyle = securityStyle; }
 
     const SecurityDetails* getSecurityDetails() const { return &m_securityDetails; }
-    void setSecurityDetails(const String& protocol, const String& keyExchange, const String& cipher, const String& mac, int certId, size_t numUnknownScts, size_t numInvalidScts, size_t numValidScts);
+    void setSecurityDetails(const String& protocol, const String& keyExchange, const String& keyExchangeGroup, const String& cipher, const String& mac, const String& subjectName, const Vector<String>& sanList, const String& issuer, time_t validFrom, time_t validTo, const Vector<AtomicString>& certificate, const SignedCertificateTimestampList& sctList);
 
     long long appCacheID() const { return m_appCacheID; }
     void setAppCacheID(long long id) { m_appCacheID = id; }
@@ -206,6 +247,9 @@ public:
     bool wasFetchedViaServiceWorker() const { return m_wasFetchedViaServiceWorker; }
     void setWasFetchedViaServiceWorker(bool value) { m_wasFetchedViaServiceWorker = value; }
 
+    bool wasFetchedViaForeignFetch() const { return m_wasFetchedViaForeignFetch; }
+    void setWasFetchedViaForeignFetch(bool value) { m_wasFetchedViaForeignFetch = value; }
+
     bool wasFallbackRequiredByServiceWorker() const { return m_wasFallbackRequiredByServiceWorker; }
     void setWasFallbackRequiredByServiceWorker(bool value) { m_wasFallbackRequiredByServiceWorker = value; }
 
@@ -225,6 +269,12 @@ public:
     const String& cacheStorageCacheName() const { return m_cacheStorageCacheName; }
     void setCacheStorageCacheName(const String& cacheStorageCacheName) { m_cacheStorageCacheName = cacheStorageCacheName; }
 
+    const Vector<String>& corsExposedHeaderNames() const { return m_corsExposedHeaderNames; }
+    void setCorsExposedHeaderNames(const Vector<String>& headerNames)
+    {
+        m_corsExposedHeaderNames = headerNames;
+    }
+
     int64_t responseTime() const { return m_responseTime; }
     void setResponseTime(int64_t responseTime) { m_responseTime = responseTime; }
 
@@ -234,6 +284,12 @@ public:
     unsigned short remotePort() const { return m_remotePort; }
     void setRemotePort(unsigned short value) { m_remotePort = value; }
 
+    long long encodedBodyLength() const { return m_encodedBodyLength; }
+    void addToEncodedBodyLength(int value);
+
+    long long decodedBodyLength() const { return m_decodedBodyLength; }
+    void addToDecodedBodyLength(int value);
+
     const String& downloadedFilePath() const { return m_downloadedFilePath; }
     void setDownloadedFilePath(const String&);
 
@@ -241,7 +297,6 @@ public:
     ExtraData* getExtraData() const { return m_extraData.get(); }
     void setExtraData(PassRefPtr<ExtraData> extraData) { m_extraData = extraData; }
 
-    // The ResourceResponse subclass may "shadow" this method to provide platform-specific memory usage information
     unsigned memoryUsage() const
     {
         // average size, mostly due to URL and Header Map strings
@@ -271,7 +326,7 @@ private:
 
     bool m_isNull : 1;
 
-    CacheControlHeader m_cacheControlHeader;
+    mutable CacheControlHeader m_cacheControlHeader;
 
     mutable bool m_haveParsedAgeHeader : 1;
     mutable bool m_haveParsedDateHeader : 1;
@@ -282,11 +337,6 @@ private:
     mutable double m_date;
     mutable double m_expires;
     mutable double m_lastModified;
-
-    // An opaque value that contains some information regarding the security of
-    // the connection for this request, such as SSL connection info (empty
-    // string if not over HTTPS).
-    CString m_securityInfo;
 
     // True if the resource was retrieved by the embedder in spite of
     // certificate errors.
@@ -332,6 +382,9 @@ private:
     // Was the resource fetched over a ServiceWorker.
     bool m_wasFetchedViaServiceWorker;
 
+    // Was the resource fetched using a foreign fetch service worker.
+    bool m_wasFetchedViaForeignFetch;
+
     // Was the fallback request with skip service worker flag required.
     bool m_wasFallbackRequiredByServiceWorker;
 
@@ -346,6 +399,10 @@ private:
     // the ServiceWorker. Null if the response isn't from the CacheStorage.
     String m_cacheStorageCacheName;
 
+    // The headers that should be exposed according to CORS. Only guaranteed
+    // to be set if the response was fetched by a ServiceWorker.
+    Vector<String> m_corsExposedHeaderNames;
+
     // The time at which the response headers were received.  For cached
     // responses, this time could be "far" in the past.
     int64_t m_responseTime;
@@ -355,6 +412,13 @@ private:
 
     // Remote port number of the socket which fetched this resource.
     unsigned short m_remotePort;
+
+    // Size of the response body in bytes prior to decompression.
+    long long m_encodedBodyLength;
+
+    // Sizes of the response body in bytes after any content-encoding is
+    // removed.
+    long long m_decodedBodyLength;
 
     // The downloaded file path if the load streamed to a file.
     String m_downloadedFilePath;
@@ -381,13 +445,15 @@ public:
     String m_suggestedFilename;
     int m_httpStatusCode;
     String m_httpStatusText;
-    OwnPtr<CrossThreadHTTPHeaderMapData> m_httpHeaders;
+    std::unique_ptr<CrossThreadHTTPHeaderMapData> m_httpHeaders;
     time_t m_lastModifiedDate;
     RefPtr<ResourceLoadTiming> m_resourceLoadTiming;
-    CString m_securityInfo;
     bool m_hasMajorCertificateErrors;
     ResourceResponse::SecurityStyle m_securityStyle;
     ResourceResponse::SecurityDetails m_securityDetails;
+    // This is |certificate| from SecurityDetails since that structure should
+    // use an AtomicString but this temporary structure is sent across threads.
+    Vector<String> m_certificate;
     ResourceResponse::HTTPVersion m_httpVersion;
     long long m_appCacheID;
     KURL m_appCacheManifestURL;
@@ -397,6 +463,7 @@ public:
     bool m_wasAlternateProtocolAvailable;
     bool m_wasFetchedViaProxy;
     bool m_wasFetchedViaServiceWorker;
+    bool m_wasFetchedViaForeignFetch;
     bool m_wasFallbackRequiredByServiceWorker;
     WebServiceWorkerResponseType m_serviceWorkerResponseType;
     KURL m_originalURLViaServiceWorker;
@@ -404,6 +471,8 @@ public:
     int64_t m_responseTime;
     String m_remoteIPAddress;
     unsigned short m_remotePort;
+    long long m_encodedBodyLength;
+    long long m_decodedBodyLength;
     String m_downloadedFilePath;
     RefPtr<BlobDataHandle> m_downloadedFileHandle;
 };

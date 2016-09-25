@@ -27,13 +27,12 @@
 
 #include "core/CoreExport.h"
 #include "core/css/StyleColor.h"
-#include "core/layout/ClipPathOperation.h"
-#include "core/style/BasicShapes.h"
+#include "core/style/ClipPathOperation.h"
+#include "core/style/ComputedStyleConstants.h"
 #include "core/style/CounterDirectives.h"
-#include "core/style/CursorData.h"
+#include "core/style/DataPersistent.h"
 #include "core/style/DataRef.h"
 #include "core/style/FillLayer.h"
-#include "core/style/ComputedStyleConstants.h"
 #include "core/style/LineClampValue.h"
 #include "core/style/NinePieceImage.h"
 #include "core/style/ShapeValue.h"
@@ -41,10 +40,10 @@
 #include "core/style/StyleScrollSnapData.h"
 #include "core/style/StyleSelfAlignmentData.h"
 #include "platform/LengthPoint.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/Vector.h"
+#include <memory>
 
 namespace blink {
 
@@ -76,6 +75,9 @@ enum PageSizeType {
 // This struct is for rarely used non-inherited CSS3, CSS2, and WebKit-specific properties.
 // By grouping them together, we save space, and only allocate this object when someone
 // actually uses one of these properties.
+// TODO(sashab): Move this into a private class on ComputedStyle, and remove
+// all methods on it, merging them into copy/creation methods on ComputedStyle
+// instead. Keep the allocation logic, only allocating a new object if needed.
 class CORE_EXPORT StyleRareNonInheritedData : public RefCounted<StyleRareNonInheritedData> {
 public:
     static PassRefPtr<StyleRareNonInheritedData> create() { return adoptRef(new StyleRareNonInheritedData); }
@@ -116,17 +118,17 @@ public:
     DataRef<StyleTransformData> m_transform; // Transform properties (rotate, scale, skew, etc.)
     DataRef<StyleWillChangeData> m_willChange; // CSS Will Change
 
-    DataRef<StyleFilterData> m_filter; // Filter operations (url, sepia, blur, etc.)
-    DataRef<StyleFilterData> m_backdropFilter; // Backdrop filter operations (url, sepia, blur, etc.)
+    DataPersistent<StyleFilterData> m_filter; // Filter operations (url, sepia, blur, etc.)
+    DataPersistent<StyleFilterData> m_backdropFilter; // Backdrop filter operations (url, sepia, blur, etc.)
 
     DataRef<StyleGridData> m_grid;
     DataRef<StyleGridItemData> m_gridItem;
     DataRef<StyleScrollSnapData> m_scrollSnap;
 
     Persistent<ContentData> m_content;
-    OwnPtr<CounterDirectiveMap> m_counterDirectives;
-    OwnPtr<CSSAnimationData> m_animations;
-    OwnPtr<CSSTransitionData> m_transitions;
+    std::unique_ptr<CounterDirectiveMap> m_counterDirectives;
+    std::unique_ptr<CSSAnimationData> m_animations;
+    std::unique_ptr<CSSTransitionData> m_transitions;
 
     RefPtr<ShadowList> m_boxShadow;
 
@@ -152,6 +154,8 @@ public:
 
     Vector<String> m_callbackSelectors;
 
+    std::unique_ptr<Vector<Persistent<StyleImage>>> m_paintImages;
+
     StyleContentAlignmentData m_alignContent;
     StyleSelfAlignmentData m_alignItems;
     StyleSelfAlignmentData m_alignSelf;
@@ -170,8 +174,6 @@ public:
     unsigned m_appearance : 6; // EAppearance
 
     unsigned m_textDecorationStyle : 3; // TextDecorationStyle
-    unsigned m_wrapFlow: 3; // WrapFlow
-    unsigned m_wrapThrough: 1; // WrapThrough
 
     unsigned m_hasCurrentOpacityAnimation : 1;
     unsigned m_hasCurrentTransformAnimation : 1;
@@ -182,6 +184,8 @@ public:
     unsigned m_runningFilterAnimationOnCompositor : 1;
     unsigned m_runningBackdropFilterAnimationOnCompositor : 1;
 
+    unsigned m_isStackingContext : 1;
+
     unsigned m_effectiveBlendMode: 5; // EBlendMode
 
     unsigned m_touchAction : TouchActionBits; // TouchAction
@@ -190,7 +194,7 @@ public:
 
     unsigned m_isolation : 1; // Isolation
 
-    unsigned m_contain : 3; // Containment
+    unsigned m_contain : 4; // Containment
 
     // ScrollBehavior. 'scroll-behavior' has 2 accepted values, but ScrollBehavior has a third
     // value (that can only be specified using CSSOM scroll APIs) so 2 bits are needed.

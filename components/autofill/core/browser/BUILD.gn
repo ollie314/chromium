@@ -4,17 +4,7 @@
 
 import("//build/config/chrome_build.gni")
 
-# This config sets the define that controls which Wallet service to contact
-# for features using Wallet integration. Unofficial builds won't have the
-# proper API keys so it uses the "sandbox" test servers instead.
-config("wallet_service") {
-  if (is_official_build) {
-    defines = [ "ENABLE_PROD_WALLET_SERVICE=1" ]
-  }
-}
-
-# GYP version: components/autofill.gyp:autofill_core_browser
-source_set("browser") {
+static_library("browser") {
   sources = [
     "address.cc",
     "address.h",
@@ -22,6 +12,9 @@ source_set("browser") {
     "address_field.h",
     "address_i18n.cc",
     "address_i18n.h",
+    "address_rewriter.cc",
+    "address_rewriter.h",
+    "address_rewriter_rules.cc",
     "autocomplete_history_manager.cc",
     "autocomplete_history_manager.h",
     "autofill-inl.h",
@@ -51,6 +44,8 @@ source_set("browser") {
     "autofill_popup_delegate.h",
     "autofill_profile.cc",
     "autofill_profile.h",
+    "autofill_profile_comparator.cc",
+    "autofill_profile_comparator.h",
     "autofill_regex_constants.cc",
     "autofill_regex_constants.h",
     "autofill_scanner.cc",
@@ -93,9 +88,13 @@ source_set("browser") {
     "name_field.h",
     "password_generator.cc",
     "password_generator.h",
+    "payments/full_card_request.cc",
+    "payments/full_card_request.h",
     "payments/payments_client.cc",
     "payments/payments_client.h",
     "payments/payments_request.h",
+    "payments/payments_service_url.cc",
+    "payments/payments_service_url.h",
     "personal_data_manager.cc",
     "personal_data_manager.h",
     "personal_data_manager_observer.h",
@@ -147,8 +146,6 @@ source_set("browser") {
 
   if (is_ios) {
     sources += [
-      "autofill_field_trial_ios.cc",
-      "autofill_field_trial_ios.h",
       "keyboard_accessory_metrics_logger.h",
       "keyboard_accessory_metrics_logger.mm",
     ]
@@ -156,6 +153,10 @@ source_set("browser") {
 
   if (is_ios || is_android) {
     sources += [
+      "autofill_assistant.cc",
+      "autofill_assistant.h",
+      "autofill_credit_card_filling_infobar_delegate_mobile.cc",
+      "autofill_credit_card_filling_infobar_delegate_mobile.h",
       "autofill_save_card_infobar_delegate_mobile.cc",
       "autofill_save_card_infobar_delegate_mobile.h",
       "autofill_save_card_infobar_mobile.h",
@@ -164,10 +165,13 @@ source_set("browser") {
 
   configs += [ "//build/config:precompiled_headers" ]
 
+  public_deps = [
+    "//components/autofill/core/browser/proto",
+    "//components/autofill/core/common",
+  ]
   deps = [
     "//base",
     "//base:i18n",
-    "//components/autofill/core/common",
     "//components/data_use_measurement/core",
     "//components/infobars/core",
     "//components/keyed_service/core",
@@ -179,14 +183,14 @@ source_set("browser") {
     "//components/signin/core/browser",
     "//components/signin/core/common",
     "//components/strings",
-    "//components/sync_driver",
+    "//components/sync",
     "//components/variations/net",
+    "//components/version_info",
     "//components/webdata/common",
     "//google_apis",
     "//net",
     "//skia",
     "//sql",
-    "//sync",
     "//third_party/fips181",
     "//third_party/icu",
     "//third_party/libaddressinput:util",
@@ -195,24 +199,18 @@ source_set("browser") {
     "//ui/base",
     "//ui/gfx",
     "//ui/gfx/geometry",
+    "//ui/gfx/range",
     "//url",
   ]
 
-  public_deps = [
-    "//components/autofill/core/browser/proto",
-  ]
-
-  configs += [
-    ":wallet_service",
-    "//build/config/compiler:no_size_t_to_int_warning",
-  ]
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   if (is_mac) {
     libs = [ "AddressBook.framework" ]
   }
 }
 
-source_set("test_support") {
+static_library("test_support") {
   testonly = true
   sources = [
     "autofill_test_utils.cc",
@@ -240,6 +238,7 @@ source_set("test_support") {
     "//components/autofill/core/browser",
     "//components/autofill/core/common",
     "//components/os_crypt",
+    "//components/os_crypt:test_support",
     "//components/pref_registry",
     "//components/prefs:test_support",
     "//components/rappor",
@@ -282,6 +281,7 @@ source_set("unit_tests") {
   sources = [
     "address_field_unittest.cc",
     "address_i18n_unittest.cc",
+    "address_rewriter_unittest.cc",
     "address_unittest.cc",
     "autocomplete_history_manager_unittest.cc",
     "autofill_country_unittest.cc",
@@ -294,6 +294,7 @@ source_set("unit_tests") {
     "autofill_manager_unittest.cc",
     "autofill_merge_unittest.cc",
     "autofill_metrics_unittest.cc",
+    "autofill_profile_comparator_unittest.cc",
     "autofill_profile_unittest.cc",
     "autofill_type_unittest.cc",
     "contact_info_unittest.cc",
@@ -306,6 +307,8 @@ source_set("unit_tests") {
     "legal_message_line_unittest.cc",
     "name_field_unittest.cc",
     "password_generator_unittest.cc",
+    "payments/full_card_request_unittest.cc",
+    "payments/payments_service_url_unittest.cc",
     "personal_data_manager_unittest.cc",
     "phone_field_unittest.cc",
     "phone_number_i18n_unittest.cc",
@@ -319,6 +322,10 @@ source_set("unit_tests") {
     "webdata/web_data_service_unittest.cc",
   ]
 
+  if (is_ios || is_android) {
+    sources += [ "autofill_assistant_unittest.cc" ]
+  }
+
   deps = [
     ":browser",
     ":test_support",
@@ -327,6 +334,7 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//components/autofill/core/common",
     "//components/os_crypt",
+    "//components/os_crypt:test_support",
     "//components/prefs:test_support",
     "//components/rappor:test_support",
     "//components/resources",
@@ -334,8 +342,9 @@ source_set("unit_tests") {
     "//components/signin/core/browser:test_support",
     "//components/signin/core/common",
     "//components/strings",
-    "//components/sync_driver",
-    "//components/sync_driver:test_support",
+    "//components/sync",
+    "//components/sync:test_support_sync_api",
+    "//components/sync:test_support_sync_driver",
     "//components/variations",
     "//components/webdata/common",
     "//components/webdata_services:test_support",
@@ -343,8 +352,6 @@ source_set("unit_tests") {
     "//google_apis:test_support",
     "//net:test_support",
     "//sql",
-    "//sync",
-    "//sync:test_support_sync_api",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/libaddressinput:util",

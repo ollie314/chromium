@@ -45,6 +45,7 @@ class EventTarget;
 class ScriptWrappable;
 
 ScriptWrappable* toScriptWrappable(const v8::PersistentBase<v8::Object>& wrapper);
+ScriptWrappable* toScriptWrappable(v8::Local<v8::Object> wrapper);
 
 static const int v8DOMWrapperTypeIndex = static_cast<int>(gin::kWrapperInfoIndex);
 static const int v8DOMWrapperObjectIndex = static_cast<int>(gin::kEncodedValueIndex);
@@ -54,10 +55,10 @@ static const int v8PrototypeInternalFieldcount = 1;
 
 typedef v8::Local<v8::FunctionTemplate> (*DomTemplateFunction)(v8::Isolate*, const DOMWrapperWorld&);
 typedef void (*TraceFunction)(Visitor*, ScriptWrappable*);
+typedef void (*TraceWrappersFunction)(WrapperVisitor*, ScriptWrappable*);
 typedef ActiveScriptWrappable* (*ToActiveScriptWrappableFunction)(v8::Local<v8::Object>);
 typedef void (*ResolveWrapperReachabilityFunction)(v8::Isolate*, ScriptWrappable*, const v8::Persistent<v8::Object>&);
 typedef void (*PreparePrototypeAndInterfaceObjectFunction)(v8::Local<v8::Context>, const DOMWrapperWorld&, v8::Local<v8::Object>, v8::Local<v8::Function>, v8::Local<v8::FunctionTemplate>);
-typedef void (*InstallConditionallyEnabledPropertiesFunction)(v8::Local<v8::Object>, v8::Isolate*);
 
 inline void setObjectGroup(v8::Isolate* isolate, ScriptWrappable* scriptWrappable, const v8::Persistent<v8::Object>& wrapper)
 {
@@ -69,6 +70,7 @@ inline void setObjectGroup(v8::Isolate* isolate, ScriptWrappable* scriptWrappabl
 // comparing pointers is a safe way to determine if types match.
 struct WrapperTypeInfo {
     DISALLOW_NEW();
+
     enum WrapperTypePrototype {
         WrapperTypeObjectPrototype,
         WrapperTypeExceptionPrototype,
@@ -77,6 +79,11 @@ struct WrapperTypeInfo {
     enum WrapperClassId {
         NodeClassId = 1, // NodeClassId must be smaller than ObjectClassId.
         ObjectClassId,
+    };
+
+    enum ActiveScriptWrappableInheritance {
+        NotInheritFromActiveScriptWrappable,
+        InheritFromActiveScriptWrappable,
     };
 
     enum EventTargetInheritance {
@@ -123,20 +130,26 @@ struct WrapperTypeInfo {
 
     void wrapperCreated() const
     {
-        ThreadHeap::heapStats().increaseWrapperCount(1);
+        ThreadState::current()->heap().heapStats().increaseWrapperCount(1);
     }
 
     void wrapperDestroyed() const
     {
-        ThreadHeapStats& heapStats = ThreadHeap::heapStats();
+        ThreadHeapStats& heapStats = ThreadState::current()->heap().heapStats();
         heapStats.decreaseWrapperCount(1);
         heapStats.increaseCollectedWrapperCount(1);
     }
 
     void trace(Visitor* visitor, ScriptWrappable* scriptWrappable) const
     {
-        ASSERT(traceFunction);
+        DCHECK(traceFunction);
         return traceFunction(visitor, scriptWrappable);
+    }
+
+    void traceWrappers(WrapperVisitor* visitor, ScriptWrappable* scriptWrappable) const
+    {
+        DCHECK(traceWrappersFunction);
+        return traceWrappersFunction(visitor, scriptWrappable);
     }
 
     void preparePrototypeAndInterfaceObject(v8::Local<v8::Context> context, const DOMWrapperWorld& world, v8::Local<v8::Object> prototypeObject, v8::Local<v8::Function> interfaceObject, v8::Local<v8::FunctionTemplate> interfaceTemplate) const
@@ -145,22 +158,9 @@ struct WrapperTypeInfo {
             preparePrototypeAndInterfaceObjectFunction(context, world, prototypeObject, interfaceObject, interfaceTemplate);
     }
 
-    void installConditionallyEnabledProperties(v8::Local<v8::Object> prototypeObject, v8::Isolate* isolate) const
+    bool isActiveScriptWrappable() const
     {
-        if (installConditionallyEnabledPropertiesFunction)
-            installConditionallyEnabledPropertiesFunction(prototypeObject, isolate);
-    }
-
-    ActiveScriptWrappable* toActiveScriptWrappable(v8::Local<v8::Object> object) const
-    {
-        if (!toActiveScriptWrappableFunction)
-            return nullptr;
-        return toActiveScriptWrappableFunction(object);
-    }
-
-    bool hasPendingActivity(v8::Local<v8::Object> object) const
-    {
-        return !toActiveScriptWrappableFunction ? false : toActiveScriptWrappableFunction(object)->hasPendingActivity();
+        return activeScriptWrappableInheritance == InheritFromActiveScriptWrappable;
     }
 
     EventTarget* toEventTarget(v8::Local<v8::Object>) const;
@@ -173,19 +173,20 @@ struct WrapperTypeInfo {
             visitDOMWrapperFunction(isolate, scriptWrappable, wrapper);
     }
 
-    // This field must be the first member of the struct WrapperTypeInfo. This is also checked by a static_assert() below.
+    // This field must be the first member of the struct WrapperTypeInfo.
+    // See also static_assert() in .cpp file.
     const gin::GinEmbedder ginEmbedder;
 
     DomTemplateFunction domTemplateFunction;
     const TraceFunction traceFunction;
-    const ToActiveScriptWrappableFunction toActiveScriptWrappableFunction;
+    const TraceWrappersFunction traceWrappersFunction;
     const ResolveWrapperReachabilityFunction visitDOMWrapperFunction;
     PreparePrototypeAndInterfaceObjectFunction preparePrototypeAndInterfaceObjectFunction;
-    const InstallConditionallyEnabledPropertiesFunction installConditionallyEnabledPropertiesFunction;
     const char* const interfaceName;
     const WrapperTypeInfo* parentClass;
     const unsigned wrapperTypePrototype : 1; // WrapperTypePrototype
     const unsigned wrapperClassId : 2; // WrapperClassId
+    const unsigned activeScriptWrappableInheritance : 1; // ActiveScriptWrappableInheritance
     const unsigned eventTargetInheritance : 1; // EventTargetInheritance
     const unsigned lifetime : 1; // Lifetime
 };

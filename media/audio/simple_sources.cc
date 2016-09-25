@@ -23,8 +23,8 @@ namespace {
 // return a null pointer if we can't read the file or if it's malformed. The
 // caller takes ownership of the returned data. The size of the data is stored
 // in |read_length|.
-scoped_ptr<char[]> ReadWavFile(const base::FilePath& wav_filename,
-                               size_t* read_length) {
+std::unique_ptr<char[]> ReadWavFile(const base::FilePath& wav_filename,
+                                    size_t* read_length) {
   base::File wav_file(
       wav_filename, base::File::FLAG_OPEN | base::File::FLAG_READ);
   if (!wav_file.IsValid()) {
@@ -33,15 +33,19 @@ scoped_ptr<char[]> ReadWavFile(const base::FilePath& wav_filename,
     return nullptr;
   }
 
-  size_t wav_file_length = wav_file.GetLength();
-  if (wav_file_length == 0u) {
+  int64_t wav_file_length = wav_file.GetLength();
+  if (wav_file_length < 0) {
+    LOG(ERROR) << "Failed to get size of " << wav_filename.value();
+    return nullptr;
+  }
+  if (wav_file_length == 0) {
     LOG(ERROR) << "Input file to fake device is empty: "
                << wav_filename.value();
     return nullptr;
   }
 
-  scoped_ptr<char[]> data(new char[wav_file_length]);
-  size_t read_bytes = wav_file.Read(0, data.get(), wav_file_length);
+  std::unique_ptr<char[]> data(new char[wav_file_length]);
+  int read_bytes = wav_file.Read(0, data.get(), wav_file_length);
   if (read_bytes != wav_file_length) {
     LOG(ERROR) << "Failed to read all bytes of " << wav_filename.value();
     return nullptr;
@@ -148,12 +152,13 @@ void SineWaveAudioSource::Reset() {
 }
 
 FileSource::FileSource(const AudioParameters& params,
-                       const base::FilePath& path_to_wav_file)
+                       const base::FilePath& path_to_wav_file,
+                       bool loop)
     : params_(params),
       path_to_wav_file_(path_to_wav_file),
       wav_file_read_pos_(0),
-      load_failed_(false) {
-}
+      load_failed_(false),
+      looping_(loop) {}
 
 FileSource::~FileSource() {
 }
@@ -209,17 +214,24 @@ int FileSource::OnMoreData(AudioBus* audio_bus,
 
   DCHECK(wav_audio_handler_.get());
 
-  // Stop playing if we've played out the whole file.
-  if (wav_audio_handler_->AtEnd(wav_file_read_pos_))
-    return 0;
+  if (wav_audio_handler_->AtEnd(wav_file_read_pos_)) {
+    if (looping_)
+      Rewind();
+    else
+      return 0;
+  }
 
   // This pulls data from ProvideInput.
   file_audio_converter_->Convert(audio_bus);
   return audio_bus->frames();
 }
 
+void FileSource::Rewind() {
+  wav_file_read_pos_ = 0;
+}
+
 double FileSource::ProvideInput(AudioBus* audio_bus_into_converter,
-                                base::TimeDelta buffer_delay) {
+                                uint32_t frames_delayed) {
   // Unfilled frames will be zeroed by CopyTo.
   size_t bytes_written;
   wav_audio_handler_->CopyTo(audio_bus_into_converter, wav_file_read_pos_,

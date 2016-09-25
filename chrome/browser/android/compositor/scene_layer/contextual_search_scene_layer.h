@@ -13,16 +13,28 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
 #include "chrome/browser/android/compositor/scene_layer/scene_layer.h"
+#include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
+
+namespace cc {
+class Layer;
+class SolidColorLayer;
+}
 
 namespace chrome {
 namespace android {
 
 class ContextualSearchLayer;
 
-class ContextualSearchSceneLayer : public SceneLayer {
+class ContextualSearchSceneLayer : public SceneLayer,
+    public chrome::BitmapFetcherDelegate {
  public:
   ContextualSearchSceneLayer(JNIEnv* env, jobject jobj);
   ~ContextualSearchSceneLayer() override;
+
+  void CreateContextualSearchLayer(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& object,
+      const base::android::JavaParamRef<jobject>& jresource_manager);
 
   void UpdateContextualSearchLayer(
       JNIEnv* env,
@@ -42,6 +54,8 @@ class ContextualSearchSceneLayer : public SceneLayer {
       jint peek_promo_ripple_resource_id,
       jint peek_promo_text_resource_id,
       jfloat dp_to_px,
+      jfloat base_page_brightness,
+      jfloat base_page_offset,
       const base::android::JavaParamRef<jobject>& jcontent_view_core,
       jboolean search_promo_visible,
       jfloat search_promo_height,
@@ -60,13 +74,18 @@ class ContextualSearchSceneLayer : public SceneLayer {
       jfloat search_bar_height,
       jfloat search_context_opacity,
       jfloat search_term_opacity,
-      jfloat search_caption_opacity,
+      jfloat search_caption_animation_percentage,
+      jboolean search_caption_visible,
       jboolean search_bar_border_visible,
       jfloat search_bar_border_height,
       jboolean search_bar_shadow_visible,
       jfloat search_bar_shadow_opacity,
       jboolean search_provider_icon_sprite_visible,
       jfloat search_provider_icon_sprite_completion_percentage,
+      jboolean thumbnail_visible,
+      jfloat thumbnail_visibility_percentage,
+      jint thumbnail_size,
+      jstring j_thumbnail_url,
       jfloat arrow_icon_opacity,
       jfloat arrow_icon_rotation,
       jfloat close_icon_opacity,
@@ -74,10 +93,33 @@ class ContextualSearchSceneLayer : public SceneLayer {
       jfloat progress_bar_height,
       jfloat progress_bar_opacity,
       jint progress_bar_completion,
-      const base::android::JavaParamRef<jobject>& jresource_manager);
+      jobject j_profile);
+
+  // Inherited from BitmapFetcherDelegate
+  void OnFetchComplete(
+      const GURL& url,
+      const SkBitmap* bitmap) override;
+
+  void SetContentTree(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& jobj,
+      const base::android::JavaParamRef<jobject>& jcontent_tree);
+
+  void HideTree(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& jobj);
 
  private:
+  void FetchThumbnail(jobject j_profile);
+
+  JNIEnv* env_;
+  base::android::ScopedJavaGlobalRef<jobject> object_;
+  float base_page_brightness_;
+  std::string thumbnail_url_;
+  std::unique_ptr<chrome::BitmapFetcher> fetcher_;
+
   scoped_refptr<ContextualSearchLayer> contextual_search_layer_;
+  scoped_refptr<cc::Layer> content_container_;
 
   DISALLOW_COPY_AND_ASSIGN(ContextualSearchSceneLayer);
 };

@@ -143,7 +143,7 @@ class ShellUtil {
     }
 
     // Forces the shortcut's name to |shortcut_name_in|.
-    // Default: the current distribution's GetShortcutName(SHORTCUT_CHROME).
+    // Default: the current distribution's GetShortcutName().
     // The ".lnk" extension will automatically be added to this name.
     void set_shortcut_name(const base::string16& shortcut_name_in) {
       shortcut_name = shortcut_name_in;
@@ -409,6 +409,19 @@ class ShellUtil {
   // Windows prior to Windows 8.
   static bool CanMakeChromeDefaultUnattended();
 
+  enum InteractiveSetDefaultMode {
+    // The intent picker is opened with the different choices available to the
+    // user.
+    INTENT_PICKER,
+    // The Windows default apps settings page is opened with the current default
+    // app focused.
+    SYSTEM_SETTINGS,
+  };
+
+  // Returns the interactive mode that should be used to set the default browser
+  // or default protocol client on Windows 8+.
+  static InteractiveSetDefaultMode GetInteractiveSetDefaultMode();
+
   // Returns the DefaultState of Chrome for HTTP and HTTPS and updates the
   // default browser beacons as appropriate.
   static DefaultState GetChromeDefaultState();
@@ -597,13 +610,6 @@ class ShellUtil {
   // NOTE: Only the installer should use this suffix directly. Other callers
   // should call GetCurrentInstallationSuffix().
   static bool GetOldUserSpecificRegistrySuffix(base::string16* suffix);
-
-  // Returns the base32 encoding (using the [A-Z2-7] alphabet) of |bytes|.
-  // |size| is the length of |bytes|.
-  // Note: This method does not suffix the output with '=' signs as technically
-  // required by the base32 standard for inputs that aren't a multiple of 5
-  // bytes.
-  static base::string16 ByteArrayToBase32(const uint8_t* bytes, size_t size);
 
   // Associates a set of file extensions with a particular application in the
   // Windows registry, for the current user only. If an extension has no

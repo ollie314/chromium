@@ -9,7 +9,8 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "services/shell/public/cpp/connection.h"
 #include "ui/ozone/platform/drm/gpu/drm_buffer.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_generator.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_manager.h"
@@ -90,8 +91,8 @@ void DrmThread::Init() {
   use_atomic = true;
 #endif
 
-  device_manager_.reset(new DrmDeviceManager(
-      base::WrapUnique(new GbmDeviceGenerator(use_atomic))));
+  device_manager_.reset(
+      new DrmDeviceManager(base::MakeUnique<GbmDeviceGenerator>(use_atomic)));
   buffer_generator_.reset(new GbmBufferGenerator());
   screen_manager_.reset(new ScreenManager(buffer_generator_.get()));
 
@@ -110,16 +111,18 @@ void DrmThread::CreateBuffer(gfx::AcceleratedWidget widget,
   *buffer = GbmBuffer::CreateBuffer(gbm, format, size, usage);
 }
 
-void DrmThread::CreateBufferFromFD(const gfx::Size& size,
-                                   gfx::BufferFormat format,
-                                   base::ScopedFD fd,
-                                   int32_t stride,
-                                   scoped_refptr<GbmBuffer>* buffer) {
+void DrmThread::CreateBufferFromFds(
+    gfx::AcceleratedWidget widget,
+    const gfx::Size& size,
+    gfx::BufferFormat format,
+    std::vector<base::ScopedFD>&& fds,
+    const std::vector<gfx::NativePixmapPlane>& planes,
+    scoped_refptr<GbmBuffer>* buffer) {
   scoped_refptr<GbmDevice> gbm =
-      static_cast<GbmDevice*>(device_manager_->GetPrimaryDrmDevice().get());
+      static_cast<GbmDevice*>(device_manager_->GetDrmDevice(widget).get());
   DCHECK(gbm);
   *buffer =
-      GbmBuffer::CreateBufferFromFD(gbm, format, size, std::move(fd), stride);
+      GbmBuffer::CreateBufferFromFds(gbm, format, size, std::move(fds), planes);
 }
 
 void DrmThread::GetScanoutFormats(
@@ -166,15 +169,15 @@ void DrmThread::SetWindowBounds(gfx::AcceleratedWidget widget,
   screen_manager_->GetWindow(widget)->SetBounds(bounds);
 }
 
-void DrmThread::SetCursor(gfx::AcceleratedWidget widget,
+void DrmThread::SetCursor(const gfx::AcceleratedWidget& widget,
                           const std::vector<SkBitmap>& bitmaps,
                           const gfx::Point& location,
-                          int frame_delay_ms) {
+                          int32_t frame_delay_ms) {
   screen_manager_->GetWindow(widget)
       ->SetCursor(bitmaps, location, frame_delay_ms);
 }
 
-void DrmThread::MoveCursor(gfx::AcceleratedWidget widget,
+void DrmThread::MoveCursor(const gfx::AcceleratedWidget& widget,
                            const gfx::Point& location) {
   screen_manager_->GetWindow(widget)->MoveCursor(location);
 }
@@ -250,6 +253,12 @@ void DrmThread::SetColorCorrection(
     const std::vector<float>& correction_matrix) {
   display_manager_->SetColorCorrection(display_id, degamma_lut, gamma_lut,
                                        correction_matrix);
+}
+
+// DrmThread requires a BindingSet instead of a simple Binding because it will
+// be used from multiple threads in multiple processes.
+void DrmThread::AddBinding(ozone::mojom::DeviceCursorRequest request) {
+  bindings_.AddBinding(this, std::move(request));
 }
 
 }  // namespace ui

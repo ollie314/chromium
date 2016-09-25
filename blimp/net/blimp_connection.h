@@ -16,16 +16,14 @@ namespace blimp {
 
 class BlimpMessageProcessor;
 class BlimpMessagePump;
-class PacketReader;
-class PacketWriter;
+class BlimpMessageSender;
+class MessagePort;
 
 // Encapsulates the state and logic used to exchange BlimpMessages over
 // a network connection.
 class BLIMP_NET_EXPORT BlimpConnection : public ConnectionErrorObserver {
  public:
-  BlimpConnection(std::unique_ptr<PacketReader> reader,
-                  std::unique_ptr<PacketWriter> writer);
-
+  explicit BlimpConnection(std::unique_ptr<MessagePort> message_port);
   ~BlimpConnection() override;
 
   // Adds |observer| to the connection's error observer list.
@@ -43,17 +41,20 @@ class BLIMP_NET_EXPORT BlimpConnection : public ConnectionErrorObserver {
   virtual BlimpMessageProcessor* GetOutgoingMessageProcessor();
 
  protected:
+  class EndConnectionFilter;
+  friend class EndConnectionFilter;
+
   BlimpConnection();
 
   // ConnectionErrorObserver implementation.
   void OnConnectionError(int error) override;
 
  private:
-  std::unique_ptr<PacketReader> reader_;
+  std::unique_ptr<MessagePort> message_port_;
   std::unique_ptr<BlimpMessagePump> message_pump_;
-  std::unique_ptr<PacketWriter> writer_;
-  std::unique_ptr<BlimpMessageProcessor> outgoing_msg_processor_;
+  std::unique_ptr<BlimpMessageSender> outgoing_msg_processor_;
   base::ObserverList<ConnectionErrorObserver> error_observers_;
+  std::unique_ptr<EndConnectionFilter> end_connection_filter_;
 
   DISALLOW_COPY_AND_ASSIGN(BlimpConnection);
 };

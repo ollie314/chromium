@@ -7,11 +7,10 @@
 #include "V8TestInterfaceOriginTrialEnabled.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/GeneratedCodeHelper.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
 #include "core/dom/Document.h"
-#include "core/inspector/ConsoleMessage.h"
-#include "core/origin_trials/OriginTrials.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "wtf/GetPtr.h"
 #include "wtf/RefPtr.h"
@@ -24,7 +23,7 @@ namespace blink {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-const WrapperTypeInfo V8TestInterfaceOriginTrialEnabled::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceOriginTrialEnabled::domTemplate, V8TestInterfaceOriginTrialEnabled::trace, 0, 0, V8TestInterfaceOriginTrialEnabled::preparePrototypeAndInterfaceObject, V8TestInterfaceOriginTrialEnabled::installConditionallyEnabledProperties, "TestInterfaceOriginTrialEnabled", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent };
+const WrapperTypeInfo V8TestInterfaceOriginTrialEnabled::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceOriginTrialEnabled::domTemplate, V8TestInterfaceOriginTrialEnabled::trace, V8TestInterfaceOriginTrialEnabled::traceWrappers, 0, nullptr, "TestInterfaceOriginTrialEnabled", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromActiveScriptWrappable, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && COMPILER(CLANG)
 #pragma clang diagnostic pop
 #endif
@@ -33,6 +32,19 @@ const WrapperTypeInfo V8TestInterfaceOriginTrialEnabled::wrapperTypeInfo = { gin
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
 // bindings/core/v8/ScriptWrappable.h.
 const WrapperTypeInfo& TestInterfaceOriginTrialEnabled::s_wrapperTypeInfo = V8TestInterfaceOriginTrialEnabled::wrapperTypeInfo;
+
+// not [ActiveScriptWrappable]
+static_assert(
+    !std::is_base_of<ActiveScriptWrappable, TestInterfaceOriginTrialEnabled>::value,
+    "TestInterfaceOriginTrialEnabled inherits from ActiveScriptWrappable, but is not specifying "
+    "[ActiveScriptWrappable] extended attribute in the IDL file.  "
+    "Be consistent.");
+static_assert(
+    std::is_same<decltype(&TestInterfaceOriginTrialEnabled::hasPendingActivity),
+                 decltype(&ScriptWrappable::hasPendingActivity)>::value,
+    "TestInterfaceOriginTrialEnabled is overriding hasPendingActivity(), but is not specifying "
+    "[ActiveScriptWrappable] extended attribute in the IDL file.  "
+    "Be consistent.");
 
 namespace TestInterfaceOriginTrialEnabledV8Internal {
 
@@ -43,7 +55,7 @@ static void doubleAttributeAttributeGetter(const v8::FunctionCallbackInfo<v8::Va
     v8SetReturnValue(info, impl->doubleAttribute());
 }
 
-static void doubleAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void doubleAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestInterfaceOriginTrialEnabledV8Internal::doubleAttributeAttributeGetter(info);
 }
@@ -54,12 +66,12 @@ static void doubleAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v
     ExceptionState exceptionState(ExceptionState::SetterContext, "doubleAttribute", "TestInterfaceOriginTrialEnabled", holder, info.GetIsolate());
     TestInterfaceOriginTrialEnabled* impl = V8TestInterfaceOriginTrialEnabled::toImpl(holder);
     double cppValue = toRestrictedDouble(info.GetIsolate(), v8Value, exceptionState);
-    if (exceptionState.throwIfNeeded())
+    if (exceptionState.hadException())
         return;
     impl->setDoubleAttribute(cppValue);
 }
 
-static void doubleAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void doubleAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
     TestInterfaceOriginTrialEnabledV8Internal::doubleAttributeAttributeSetter(v8Value, info);
@@ -72,7 +84,7 @@ static void conditionalLongAttributeAttributeGetter(const v8::FunctionCallbackIn
     v8SetReturnValueInt(info, impl->conditionalLongAttribute());
 }
 
-static void conditionalLongAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void conditionalLongAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestInterfaceOriginTrialEnabledV8Internal::conditionalLongAttributeAttributeGetter(info);
 }
@@ -83,12 +95,12 @@ static void conditionalLongAttributeAttributeSetter(v8::Local<v8::Value> v8Value
     ExceptionState exceptionState(ExceptionState::SetterContext, "conditionalLongAttribute", "TestInterfaceOriginTrialEnabled", holder, info.GetIsolate());
     TestInterfaceOriginTrialEnabled* impl = V8TestInterfaceOriginTrialEnabled::toImpl(holder);
     int cppValue = toInt32(info.GetIsolate(), v8Value, NormalConversion, exceptionState);
-    if (exceptionState.throwIfNeeded())
+    if (exceptionState.hadException())
         return;
     impl->setConditionalLongAttribute(cppValue);
 }
 
-static void conditionalLongAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void conditionalLongAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
     TestInterfaceOriginTrialEnabledV8Internal::conditionalLongAttributeAttributeSetter(v8Value, info);
@@ -101,7 +113,7 @@ static void conditionalReadOnlyLongAttributeAttributeGetter(const v8::FunctionCa
     v8SetReturnValueInt(info, impl->conditionalReadOnlyLongAttribute());
 }
 
-static void conditionalReadOnlyLongAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void conditionalReadOnlyLongAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestInterfaceOriginTrialEnabledV8Internal::conditionalReadOnlyLongAttributeAttributeGetter(info);
 }
@@ -111,7 +123,7 @@ static void staticStringAttributeAttributeGetter(const v8::FunctionCallbackInfo<
     v8SetReturnValueString(info, TestInterfaceOriginTrialEnabled::staticStringAttribute(), info.GetIsolate());
 }
 
-static void staticStringAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void staticStringAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestInterfaceOriginTrialEnabledV8Internal::staticStringAttributeAttributeGetter(info);
 }
@@ -124,7 +136,7 @@ static void staticStringAttributeAttributeSetter(v8::Local<v8::Value> v8Value, c
     TestInterfaceOriginTrialEnabled::setStaticStringAttribute(cppValue);
 }
 
-static void staticStringAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void staticStringAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Local<v8::Value> v8Value = info[0];
     TestInterfaceOriginTrialEnabledV8Internal::staticStringAttributeAttributeSetter(v8Value, info);
@@ -135,30 +147,32 @@ static void staticConditionalReadOnlyLongAttributeAttributeGetter(const v8::Func
     v8SetReturnValueInt(info, TestInterfaceOriginTrialEnabled::staticConditionalReadOnlyLongAttribute());
 }
 
-static void staticConditionalReadOnlyLongAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+void staticConditionalReadOnlyLongAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestInterfaceOriginTrialEnabledV8Internal::staticConditionalReadOnlyLongAttributeAttributeGetter(info);
 }
 
 static void voidMethodDoubleArgFloatArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    ExceptionState exceptionState(ExceptionState::ExecutionContext, "voidMethodDoubleArgFloatArg", "TestInterfaceOriginTrialEnabled", info.Holder(), info.GetIsolate());
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::ExecutionContext, "TestInterfaceOriginTrialEnabled", "voidMethodDoubleArgFloatArg");
+
+    TestInterfaceOriginTrialEnabled* impl = V8TestInterfaceOriginTrialEnabled::toImpl(info.Holder());
+
     if (UNLIKELY(info.Length() < 2)) {
-        setMinimumArityTypeError(exceptionState, 2, info.Length());
-        exceptionState.throwIfNeeded();
+        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(2, info.Length()));
         return;
     }
-    TestInterfaceOriginTrialEnabled* impl = V8TestInterfaceOriginTrialEnabled::toImpl(info.Holder());
+
     double doubleArg;
     float floatArg;
-    {
-        doubleArg = toRestrictedDouble(info.GetIsolate(), info[0], exceptionState);
-        if (exceptionState.throwIfNeeded())
-            return;
-        floatArg = toRestrictedFloat(info.GetIsolate(), info[1], exceptionState);
-        if (exceptionState.throwIfNeeded())
-            return;
-    }
+    doubleArg = toRestrictedDouble(info.GetIsolate(), info[0], exceptionState);
+    if (exceptionState.hadException())
+        return;
+
+    floatArg = toRestrictedFloat(info.GetIsolate(), info[1], exceptionState);
+    if (exceptionState.hadException())
+        return;
+
     impl->voidMethodDoubleArgFloatArg(doubleArg, floatArg);
 }
 
@@ -170,25 +184,27 @@ static void voidMethodDoubleArgFloatArgMethodCallback(const v8::FunctionCallback
 static void voidMethodPartialOverload1Method(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestInterfaceOriginTrialEnabled* impl = V8TestInterfaceOriginTrialEnabled::toImpl(info.Holder());
+
     impl->voidMethodPartialOverload();
 }
 
 static void voidMethodPartialOverload2Method(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    ExceptionState exceptionState(ExceptionState::ExecutionContext, "voidMethodPartialOverload", "TestInterfaceOriginTrialEnabled", info.Holder(), info.GetIsolate());
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::ExecutionContext, "TestInterfaceOriginTrialEnabled", "voidMethodPartialOverload");
+
     TestInterfaceOriginTrialEnabled* impl = V8TestInterfaceOriginTrialEnabled::toImpl(info.Holder());
+
     double doubleArg;
-    {
-        doubleArg = toRestrictedDouble(info.GetIsolate(), info[0], exceptionState);
-        if (exceptionState.throwIfNeeded())
-            return;
-    }
+    doubleArg = toRestrictedDouble(info.GetIsolate(), info[0], exceptionState);
+    if (exceptionState.hadException())
+        return;
+
     impl->voidMethodPartialOverload(doubleArg);
 }
 
 static void voidMethodPartialOverloadMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    ExceptionState exceptionState(ExceptionState::ExecutionContext, "voidMethodPartialOverload", "TestInterfaceOriginTrialEnabled", info.Holder(), info.GetIsolate());
+    bool isArityError = false;
     switch (std::min(1, info.Length())) {
     case 0:
         if (true) {
@@ -203,11 +219,14 @@ static void voidMethodPartialOverloadMethod(const v8::FunctionCallbackInfo<v8::V
         }
         break;
     default:
-        break;
+        isArityError = true;
+    }
+
+    ExceptionState exceptionState(info.GetIsolate(), ExceptionState::ExecutionContext, "TestInterfaceOriginTrialEnabled", "voidMethodPartialOverload");
+
+    if (isArityError) {
     }
     exceptionState.throwTypeError("No function was found that matched the signature provided.");
-    exceptionState.throwIfNeeded();
-    return;
 }
 
 static void voidMethodPartialOverloadMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -243,8 +262,8 @@ static void installV8TestInterfaceOriginTrialEnabledTemplate(v8::Isolate* isolat
         {"CONST_JAVASCRIPT", 1, 0, V8DOMConfiguration::ConstantTypeShort},
     };
     V8DOMConfiguration::installConstants(isolate, interfaceTemplate, prototypeTemplate, V8TestInterfaceOriginTrialEnabledConstants, WTF_ARRAY_LENGTH(V8TestInterfaceOriginTrialEnabledConstants));
-    static_assert(0 == TestInterfaceOriginTrialEnabled::UNSIGNED_LONG, "the value of TestInterfaceOriginTrialEnabled_UNSIGNED_LONG does not match with implementation");
-    static_assert(1 == TestInterfaceOriginTrialEnabled::CONST_JAVASCRIPT, "the value of TestInterfaceOriginTrialEnabled_CONST_JAVASCRIPT does not match with implementation");
+    static_assert(0 == TestInterfaceOriginTrialEnabled::kUnsignedLong, "the value of TestInterfaceOriginTrialEnabled_kUnsignedLong does not match with implementation");
+    static_assert(1 == TestInterfaceOriginTrialEnabled::kConstJavascript, "the value of TestInterfaceOriginTrialEnabled_kConstJavascript does not match with implementation");
     V8DOMConfiguration::installAccessors(isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate, signature, V8TestInterfaceOriginTrialEnabledAccessors, WTF_ARRAY_LENGTH(V8TestInterfaceOriginTrialEnabledAccessors));
     V8DOMConfiguration::installMethods(isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate, signature, V8TestInterfaceOriginTrialEnabledMethods, WTF_ARRAY_LENGTH(V8TestInterfaceOriginTrialEnabledMethods));
 
@@ -278,7 +297,7 @@ v8::Local<v8::Object> V8TestInterfaceOriginTrialEnabled::findInstanceInPrototype
 
 TestInterfaceOriginTrialEnabled* V8TestInterfaceOriginTrialEnabled::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
-    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
+    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : nullptr;
 }
 
 } // namespace blink

@@ -598,20 +598,25 @@ void build_output_lut(struct curveType *trc,
 {
         if (trc->type == PARAMETRIC_CURVE_TYPE) {
                 float gamma_table[256];
+                uint16_t gamma_table_uint[256];
                 uint16_t i;
-                uint16_t *output = malloc(sizeof(uint16_t)*256);
-
-                if (!output) {
-                        *output_gamma_lut = NULL;
-                        return;
-                }
+                uint16_t *inverted;
+                int inverted_size = 4096;
 
                 compute_curve_gamma_table_type_parametric(gamma_table, trc->parameter, trc->count);
-                *output_gamma_lut_length = 256;
                 for(i = 0; i < 256; i++) {
-                        output[i] = (uint16_t)(gamma_table[i] * 65535);
+                        gamma_table_uint[i] = (uint16_t)(gamma_table[i] * 65535);
                 }
-                *output_gamma_lut = output;
+
+                //XXX: the choice of a minimum of 256 here is not backed by any theory,
+                //     measurement or data, however it is what lcms uses.
+                //     the maximum number we would need is 65535 because that's the
+                //     accuracy used for computing the pre cache table
+                inverted = invert_lut(gamma_table_uint, 256, inverted_size);
+                if (!inverted)
+                        return;
+                *output_gamma_lut = inverted;
+                *output_gamma_lut_length = inverted_size;
         } else {
                 if (trc->count == 0) {
                         *output_gamma_lut = build_linear_table(4096);
@@ -631,4 +636,38 @@ void build_output_lut(struct curveType *trc,
                 }
         }
 
+}
+
+size_t qcms_profile_get_parametric_curve(qcms_profile *profile, qcms_trc_channel channel, float data[7])
+{
+    static const uint32_t COUNT_TO_LENGTH[5] = {1, 3, 4, 5, 7};
+    struct curveType *curve = NULL;
+    size_t size;
+
+    if (profile->color_space != RGB_SIGNATURE)
+        return 0;
+
+    switch(channel) {
+    case QCMS_TRC_RED:
+        curve = profile->redTRC;
+        break;
+    case QCMS_TRC_GREEN:
+        curve = profile->greenTRC;
+        break;
+    case QCMS_TRC_BLUE:
+        curve = profile->blueTRC;
+        break;
+    default:
+        return 0;
+    }
+
+    if (!curve || curve->type != PARAMETRIC_CURVE_TYPE)
+        return 0;
+
+    size = COUNT_TO_LENGTH[curve->count];
+
+    if (data)
+        memcpy(data, curve->parameter, size * sizeof(float));
+
+    return size;
 }

@@ -5,7 +5,10 @@
 package org.chromium.chromoting.base;
 
 import android.app.Activity;
+import android.content.Context;
 import android.os.AsyncTask;
+import android.os.Handler;
+import android.os.Looper;
 
 import com.google.android.gms.auth.GoogleAuthException;
 import com.google.android.gms.auth.GoogleAuthUtil;
@@ -20,11 +23,12 @@ import java.io.IOException;
 public class OAuthTokenFetcher {
     /**
      * Callback interface to receive the token, or an error notification. These will be called
-     * on the application's main thread. Note that if a user-recoverable error occurs, neither of
-     * these callback will be triggered. Instead, a new Activity will be launched, and the calling
-     * Activity must override
+     * on the application's main thread. Note that if a user-recoverable error occurs and the
+     * passed-in context is an activity, neither of these callback will be triggered. Instead, a new
+     * Activity will be launched, and the calling Activity must override
      * {@link android.app.Activity#onActivityResult} and handle the result code
      * {@link REQUEST_CODE_RECOVER_FROM_OAUTH_ERROR} to re-attempt or cancel fetching the token.
+     * If the context is not an activity, onError will be called with Error.UI.
      */
     public interface Callback {
         /** Called when a token is obtained. */
@@ -36,17 +40,26 @@ public class OAuthTokenFetcher {
         void onError(Error error);
     }
 
-    /** Error types that can be returned as non-recoverable errors from the token-fetcher. */
-    public enum Error { NETWORK, UNEXPECTED }
+    /** Error types that can be returned from the token-fetcher. */
+    public enum Error {
+        NETWORK,
+        UI,  // When a user-recoverable exception occurs and |mContext| is not an activity.
+
+        // When a user-recoverable exception occurs and a new activity is launched prompting user
+        // for input.
+        INTERRUPTED,
+        UNEXPECTED
+    }
 
     /** Request code used for starting the OAuth recovery activity. */
     public static final int REQUEST_CODE_RECOVER_FROM_OAUTH_ERROR = 100;
 
     /**
-     * Reference to the main activity. Used for running tasks on the main thread, and for
-     * starting other activities to handle user-recoverable errors.
+     * Reference to the context to fetch token. It will be used for starting other activities to
+     * handle user-recoverable errors if it is an activity, otherwise user-recoverable errors will
+     * not be handled.
      */
-    private Activity mActivity;
+    private Context mContext;
 
     /** Account name (e-mail) for which the token will be fetched. */
     private String mAccountName;
@@ -56,9 +69,9 @@ public class OAuthTokenFetcher {
 
     private Callback mCallback;
 
-    public OAuthTokenFetcher(Activity activity, String accountName, String tokenScope,
+    public OAuthTokenFetcher(Context context, String accountName, String tokenScope,
             Callback callback) {
-        mActivity = activity;
+        mContext = context;
         mAccountName = accountName;
         mTokenScope = tokenScope;
         mCallback = callback;
@@ -84,13 +97,13 @@ public class OAuthTokenFetcher {
             protected Void doInBackground(Void... params) {
                 try {
                     if (expiredToken != null) {
-                        GoogleAuthUtil.clearToken(mActivity, expiredToken);
+                        GoogleAuthUtil.clearToken(mContext, expiredToken);
                     }
 
                     // This method is deprecated but its replacement is not yet available.
                     // TODO(lambroslambrou): Fix this by replacing |mAccountName| with an instance
                     // of android.accounts.Account.
-                    String token = GoogleAuthUtil.getToken(mActivity, mAccountName, mTokenScope);
+                    String token = GoogleAuthUtil.getToken(mContext, mAccountName, mTokenScope);
                     handleTokenReceived(token);
                 } catch (IOException ioException) {
                     handleError(Error.NETWORK);
@@ -105,7 +118,7 @@ public class OAuthTokenFetcher {
     }
 
     private void handleTokenReceived(final String token) {
-        mActivity.runOnUiThread(new Runnable() {
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
             @Override
             public void run() {
                 mCallback.onTokenFetched(token);
@@ -114,7 +127,7 @@ public class OAuthTokenFetcher {
     }
 
     private void handleError(final Error error) {
-        mActivity.runOnUiThread(new Runnable() {
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
             @Override
             public void run() {
                 mCallback.onError(error);
@@ -123,10 +136,16 @@ public class OAuthTokenFetcher {
     }
 
     private void handleRecoverableException(final UserRecoverableAuthException exception) {
-        mActivity.runOnUiThread(new Runnable() {
+        if (!(mContext instanceof Activity)) {
+            handleError(Error.UI);
+            return;
+        }
+        handleError(Error.INTERRUPTED);
+        final Activity activity = (Activity) mContext;
+        activity.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                mActivity.startActivityForResult(exception.getIntent(),
+                activity.startActivityForResult(exception.getIntent(),
                         REQUEST_CODE_RECOVER_FROM_OAUTH_ERROR);
             }
         });

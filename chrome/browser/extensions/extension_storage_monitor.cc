@@ -7,7 +7,7 @@
 #include <map>
 #include <utility>
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -295,14 +295,9 @@ void ExtensionStorageMonitor::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_PROFILE_DESTROYED: {
-      StopMonitoringAll();
-      break;
-    }
-    default:
-      NOTREACHED();
-  }
+  DCHECK_EQ(chrome::NOTIFICATION_PROFILE_DESTROYED, type);
+
+  StopMonitoringAll();
 }
 
 void ExtensionStorageMonitor::OnExtensionLoaded(

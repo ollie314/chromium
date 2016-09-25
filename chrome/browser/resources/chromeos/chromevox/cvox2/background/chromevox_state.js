@@ -39,6 +39,17 @@ ChromeVoxState = function() {
  */
 ChromeVoxState.instance;
 
+/**
+ * Holds the un-composite tts object.
+ * @type {Object}
+ */
+ChromeVoxState.backgroundTts;
+
+/**
+ * @type {boolean}
+  */
+  ChromeVoxState.isReadingContinuously;
+
 ChromeVoxState.prototype = {
   /** @type {ChromeVoxMode} */
   get mode() {
@@ -51,24 +62,6 @@ ChromeVoxState.prototype = {
    */
   getMode: function() {
     return ChromeVoxMode.NEXT;
-  },
-
-  /**
-   * Sets the current ChromeVox mode.
-   * @param {ChromeVoxMode} mode
-   * @param {boolean=} opt_injectClassic Injects ChromeVox classic into tabs;
-   *                                     defaults to false.
-   */
-  setMode: function(mode, opt_injectClassic) {
-    throw new Error('setMode must be implemented by subclass.');
-  },
-
-  /**
-   * Refreshes the current mode based on a url.
-   * @param {string} url
-   */
-  refreshMode: function(url) {
-    throw new Error('refresthMode must be implemented by subclass.');
   },
 
   /** @type {cursors.Range} */
@@ -87,7 +80,5 @@ ChromeVoxState.prototype = {
   /**
    * @param {cursors.Range} newRange The new range.
    */
-  setCurrentRange: function(newRange) {
-    throw new Error('setCurrentRange must be implemented by subclass.');
-  },
+  setCurrentRange: goog.abstractMethod,
 };

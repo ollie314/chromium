@@ -48,6 +48,7 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
     virtual ~Delegate() {}
     virtual void ActivateWindow() = 0;
     virtual void CloseWindow() = 0;
+    virtual void Inspect(scoped_refptr<content::DevToolsAgentHost> host) = 0;
     virtual void SetInspectedPageBounds(const gfx::Rect& rect) = 0;
     virtual void InspectElementCompleted() = 0;
     virtual void SetIsDocked(bool is_docked) = 0;
@@ -118,6 +119,7 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
                     const std::string& file_system_path,
                     const std::string& query) override;
   void SetWhitelistedShortcuts(const std::string& message) override;
+  void ShowCertificateViewer(const std::string& cert_chain) override;
   void ZoomIn() override;
   void ZoomOut() override;
   void ResetZoom() override;

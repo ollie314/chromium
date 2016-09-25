@@ -17,7 +17,7 @@
 #include "components/policy/core/common/policy_bundle.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
-#include "policy/policy_constants.h"
+#include "components/policy/policy_constants.h"
 
 namespace policy {
 
@@ -62,12 +62,9 @@ void ApplyDevicePolicyAsRecommendedPolicy(const std::string& device_policy,
                                           PolicyMap* user_policy_map) {
   const base::Value* value = device_policy_map.GetValue(device_policy);
   if (value) {
-    user_policy_map->Set(user_policy,
-                         POLICY_LEVEL_RECOMMENDED,
-                         POLICY_SCOPE_USER,
-                         POLICY_SOURCE_CLOUD,
-                         value->DeepCopy(),
-                         NULL);
+    user_policy_map->Set(user_policy, POLICY_LEVEL_RECOMMENDED,
+                         POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
+                         value->CreateDeepCopy(), nullptr);
   }
 }
 
@@ -77,12 +74,8 @@ void ApplyValueAsMandatoryPolicy(const base::Value* value,
                                  const std::string& user_policy,
                                  PolicyMap* user_policy_map) {
   if (value) {
-    user_policy_map->Set(user_policy,
-                         POLICY_LEVEL_MANDATORY,
-                         POLICY_SCOPE_USER,
-                         POLICY_SOURCE_CLOUD,
-                         value->DeepCopy(),
-                         NULL);
+    user_policy_map->Set(user_policy, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+                         POLICY_SOURCE_CLOUD, value->CreateDeepCopy(), nullptr);
   }
 }
 

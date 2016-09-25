@@ -5,14 +5,16 @@
 // This file is here so other GLES2 related files can have a common set of
 // includes where appropriate.
 
-#include <sstream>
+#include "gpu/command_buffer/common/gles2_cmd_utils.h"
+
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <GLES2/gl2extchromium.h>
 #include <GLES3/gl3.h>
 
+#include <sstream>
+
 #include "base/numerics/safe_math.h"
-#include "gpu/command_buffer/common/gles2_cmd_utils.h"
 
 namespace gpu {
 namespace gles2 {
@@ -24,10 +26,10 @@ enum GLErrorBit {
   kInvalidValue = (1 << 1),
   kInvalidOperation = (1 << 2),
   kOutOfMemory = (1 << 3),
-  kInvalidFrameBufferOperation = (1 << 4),
+  kInvalidFramebufferOperation = (1 << 4),
   kContextLost = (1 << 5)
 };
-}
+}  // namespace gl_error_bit
 
 int GLES2Util::GLGetNumValuesReturned(int id) const {
   switch (id) {
@@ -919,7 +921,7 @@ uint32_t GLES2Util::GLErrorToErrorBit(uint32_t error) {
     case GL_OUT_OF_MEMORY:
       return gl_error_bit::kOutOfMemory;
     case GL_INVALID_FRAMEBUFFER_OPERATION:
-      return gl_error_bit::kInvalidFrameBufferOperation;
+      return gl_error_bit::kInvalidFramebufferOperation;
     case GL_CONTEXT_LOST_KHR:
       return gl_error_bit::kContextLost;
     default:
@@ -938,7 +940,7 @@ uint32_t GLES2Util::GLErrorBitToGLError(uint32_t error_bit) {
       return GL_INVALID_OPERATION;
     case gl_error_bit::kOutOfMemory:
       return GL_OUT_OF_MEMORY;
-    case gl_error_bit::kInvalidFrameBufferOperation:
+    case gl_error_bit::kInvalidFramebufferOperation:
       return GL_INVALID_FRAMEBUFFER_OPERATION;
     case gl_error_bit::kContextLost:
       return GL_CONTEXT_LOST_KHR;
@@ -977,6 +979,27 @@ size_t GLES2Util::GLTargetToFaceIndex(uint32_t target) {
       return 4;
     case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
       return 5;
+    default:
+      NOTREACHED();
+      return 0;
+  }
+}
+
+uint32_t GLES2Util::GLFaceTargetToTextureTarget(uint32_t target) {
+  switch (target) {
+    case GL_TEXTURE_2D:
+    case GL_TEXTURE_EXTERNAL_OES:
+    case GL_TEXTURE_RECTANGLE_ARB:
+    case GL_TEXTURE_3D:
+    case GL_TEXTURE_2D_ARRAY:
+      return target;
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+      return GL_TEXTURE_CUBE_MAP;
     default:
       NOTREACHED();
       return 0;
@@ -1067,30 +1090,16 @@ uint32_t GLES2Util::GetGLReadPixelsImplementationType(uint32_t internal_format,
     case GL_RG32F:
     case GL_RGB32F:
     case GL_RGBA32F:
-      return GL_FLOAT;
+    case GL_R11F_G11F_B10F:
+      return GL_UNSIGNED_BYTE;
     case GL_R16F:
     case GL_RG16F:
-    case GL_R11F_G11F_B10F:
     case GL_RGB16F:
     case GL_RGBA16F:
-      // TODO(zmo): Consider return GL_UNSIGNED_INT_10F_11F_11F_REV and
-      // GL_HALF_FLOAT.
-      return GL_FLOAT;
-    case GL_RGBA:
-    case GL_RGB:
-      // Unsized internal format, check the type
-      switch (texture_type) {
-        case GL_FLOAT:
-        case GL_HALF_FLOAT_OES:
-          return GL_FLOAT;
-        // TODO(zmo): Consider return GL_UNSIGNED_SHORT_5_6_5,
-        // GL_UNSIGNED_SHORT_4_4_4_4, GL_UNSIGNED_SHORT_5_5_5_1, and
-        // GL_UNSIGNED_INT_2_10_10_10_REV.
-        default:
-          return GL_UNSIGNED_BYTE;
-      }
+      return GL_HALF_FLOAT;
     default:
-      return GL_UNSIGNED_BYTE;
+      // Unsized internal format.
+      return texture_type;
   }
 }
 
@@ -1182,6 +1191,248 @@ uint32_t GLES2Util::GetChannelsForFormat(int format) {
   }
 }
 
+bool GLES2Util::IsSizedColorFormat(uint32_t internal_format) {
+  switch (internal_format) {
+    case GL_ALPHA16F_EXT:
+    case GL_ALPHA32F_EXT:
+    case GL_RGB8:
+    case GL_RGB565:
+    case GL_RGB16F:
+    case GL_RGB32F:
+    case GL_SRGB8:
+    case GL_RGB8_SNORM:
+    case GL_R11F_G11F_B10F:
+    case GL_RGB9_E5:
+    case GL_RGB8UI:
+    case GL_RGB8I:
+    case GL_RGB16UI:
+    case GL_RGB16I:
+    case GL_RGB32UI:
+    case GL_RGB32I:
+    case GL_BGRA8_EXT:
+    case GL_RGBA16F:
+    case GL_RGBA32F:
+    case GL_RGBA8_OES:
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGBA8_SNORM:
+    case GL_RGB10_A2:
+    case GL_RGBA8UI:
+    case GL_RGBA8I:
+    case GL_RGB10_A2UI:
+    case GL_RGBA16UI:
+    case GL_RGBA16I:
+    case GL_RGBA32UI:
+    case GL_RGBA32I:
+    case GL_R8:
+    case GL_R8_SNORM:
+    case GL_R16F:
+    case GL_R32F:
+    case GL_R8UI:
+    case GL_R8I:
+    case GL_R16UI:
+    case GL_R16I:
+    case GL_R32UI:
+    case GL_R32I:
+    case GL_RG8:
+    case GL_RG8_SNORM:
+    case GL_RG16F:
+    case GL_RG32F:
+    case GL_RG8UI:
+    case GL_RG8I:
+    case GL_RG16UI:
+    case GL_RG16I:
+    case GL_RG32UI:
+    case GL_RG32I:
+      return true;
+    default:
+      return false;
+  }
+}
+
+void GLES2Util::GetColorFormatComponentSizes(
+    uint32_t internal_format, uint32_t type, int* r, int* g, int* b, int* a) {
+  DCHECK(r && g && b && a);
+  *r = 0;
+  *g = 0;
+  *b = 0;
+  *a = 0;
+
+  switch (internal_format) {
+    case GL_LUMINANCE:
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          // It can be RGBA8, RGB8, RG8, or R8.
+          // Here we only require R8, which is good enough for validation.
+          // Same for other types.
+          internal_format = GL_R8;
+          break;
+        case GL_HALF_FLOAT_OES:
+          internal_format = GL_R16F;
+          break;
+        case GL_FLOAT:
+          internal_format = GL_R32F;
+          return;
+        default:
+          NOTREACHED();
+          break;
+      }
+      break;
+    case GL_LUMINANCE_ALPHA:
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          internal_format = GL_RGBA8;
+          break;
+        case GL_HALF_FLOAT_OES:
+          internal_format = GL_RGBA16F;
+          break;
+        case GL_FLOAT:
+          internal_format = GL_RGBA32F;
+          return;
+        default:
+          NOTREACHED();
+          break;
+      }
+      break;
+    default:
+      internal_format = ConvertToSizedFormat(internal_format, type);
+      break;
+  }
+
+  // Sized formats.
+  switch (internal_format) {
+    case GL_ALPHA8_EXT:
+      *a = 8;
+    case GL_ALPHA16F_EXT:
+      *a = 16;
+    case GL_ALPHA32F_EXT:
+      *a = 32;
+    case GL_RGB8_OES:
+    case GL_SRGB8:
+    case GL_RGB8_SNORM:
+    case GL_RGB8UI:
+    case GL_RGB8I:
+      *r = 8;
+      *g = 8;
+      *b = 8;
+      break;
+    case GL_RGB565:
+      *r = 5;
+      *g = 6;
+      *b = 5;
+      break;
+    case GL_RGB16F:
+    case GL_RGB16UI:
+    case GL_RGB16I:
+      *r = 16;
+      *g = 16;
+      *b = 16;
+      break;
+    case GL_RGB32F:
+    case GL_RGB32UI:
+    case GL_RGB32I:
+      *r = 32;
+      *g = 32;
+      *b = 32;
+      break;
+    case GL_R11F_G11F_B10F:
+      *r = 11;
+      *g = 11;
+      *b = 10;
+      break;
+    case GL_RGB9_E5:
+      *r = 9;
+      *g = 9;
+      *b = 9;
+      break;
+    case GL_BGRA8_EXT:
+    case GL_RGBA8:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGBA8_SNORM:
+    case GL_RGBA8UI:
+    case GL_RGBA8I:
+      *r = 8;
+      *g = 8;
+      *b = 8;
+      *a = 8;
+      break;
+    case GL_RGBA16F_EXT:
+    case GL_RGBA16UI:
+    case GL_RGBA16I:
+      *r = 16;
+      *g = 16;
+      *b = 16;
+      *a = 16;
+      break;
+    case GL_RGBA32F_EXT:
+    case GL_RGBA32UI:
+    case GL_RGBA32I:
+      *r = 32;
+      *g = 32;
+      *b = 32;
+      *a = 32;
+      break;
+    case GL_RGBA4:
+      *r = 4;
+      *g = 4;
+      *b = 4;
+      *a = 4;
+      break;
+    case GL_RGB5_A1:
+      *r = 5;
+      *g = 5;
+      *b = 5;
+      *a = 1;
+      break;
+    case GL_RGB10_A2:
+    case GL_RGB10_A2UI:
+      *r = 10;
+      *g = 10;
+      *b = 10;
+      *a = 2;
+      break;
+    case GL_R8:
+    case GL_R8_SNORM:
+    case GL_R8UI:
+    case GL_R8I:
+      *r = 8;
+      break;
+    case GL_R16F:
+    case GL_R16UI:
+    case GL_R16I:
+      *r = 16;
+      break;
+    case GL_R32F:
+    case GL_R32UI:
+    case GL_R32I:
+      *r = 32;
+      break;
+    case GL_RG8:
+    case GL_RG8_SNORM:
+    case GL_RG8UI:
+    case GL_RG8I:
+      *r = 8;
+      *g = 8;
+      break;
+    case GL_RG16F:
+    case GL_RG16UI:
+    case GL_RG16I:
+      *r = 16;
+      *g = 16;
+      break;
+    case GL_RG32F:
+    case GL_RG32UI:
+    case GL_RG32I:
+      *r = 32;
+      *g = 32;
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
+}
+
 uint32_t GLES2Util::GetChannelsNeededForAttachmentType(
     int type,
     uint32_t max_color_attachments) {
@@ -1205,10 +1456,9 @@ uint32_t GLES2Util::GetChannelsNeededForAttachmentType(
 std::string GLES2Util::GetStringEnum(uint32_t value) {
   const EnumToString* entry = enum_to_string_table_;
   const EnumToString* end = entry + enum_to_string_table_len_;
-  for (;entry < end; ++entry) {
-    if (value == entry->value) {
+  for (; entry < end; ++entry) {
+    if (value == entry->value)
       return entry->name;
-    }
   }
   std::stringstream ss;
   ss.fill('0');
@@ -1243,7 +1493,7 @@ std::string GLES2Util::GetQualifiedEnumString(const EnumToString* table,
 GLSLArrayName::GLSLArrayName(const std::string& name) : element_index_(-1) {
   if (name.size() < 4)
     return;
-  if (name[name.size() - 1] != ']')
+  if (name.back() != ']')
     return;
 
   size_t open_pos = name.find_last_of('[');
@@ -1385,11 +1635,135 @@ bool GLES2Util::IsFloatFormat(uint32_t internal_format) {
   }
 }
 
+// static
+uint32_t GLES2Util::ConvertToSizedFormat(uint32_t format, uint32_t type) {
+  switch (format) {
+    case GL_RGB:
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          return GL_RGB8;
+        case GL_UNSIGNED_SHORT_5_6_5:
+          return GL_RGB565;
+        case GL_HALF_FLOAT_OES:
+          return GL_RGB16F;
+        case GL_FLOAT:
+          return GL_RGB32F;
+        default:
+          NOTREACHED();
+          break;
+      }
+      break;
+    case GL_RGBA:
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          return GL_RGBA8;
+        case GL_UNSIGNED_SHORT_4_4_4_4:
+          return GL_RGBA4;
+        case GL_UNSIGNED_SHORT_5_5_5_1:
+          return GL_RGB5_A1;
+        case GL_HALF_FLOAT_OES:
+          return GL_RGBA16F;
+        case GL_FLOAT:
+          return GL_RGBA32F;
+        default:
+          NOTREACHED();
+          break;
+      }
+      break;
+    case GL_ALPHA:
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          return GL_ALPHA8_EXT;
+        case GL_HALF_FLOAT_OES:
+          return GL_ALPHA16F_EXT;
+        case GL_FLOAT:
+          return GL_ALPHA32F_EXT;
+        default:
+          NOTREACHED();
+          break;
+      }
+      break;
+    case GL_RED:
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          return GL_R8;
+        case GL_HALF_FLOAT_OES:
+          return GL_R16F;
+        case GL_FLOAT:
+          return GL_R32F;
+        default:
+          NOTREACHED();
+          break;
+      }
+      break;
+    case GL_RG:
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          return GL_RG8;
+        case GL_HALF_FLOAT_OES:
+          return GL_RG16F;
+        case GL_FLOAT:
+          return GL_RG32F;
+        default:
+          NOTREACHED();
+          break;
+      }
+      break;
+    case GL_SRGB_EXT:
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          return GL_SRGB8;
+        default:
+          NOTREACHED();
+          break;
+      }
+      break;
+    case GL_SRGB_ALPHA_EXT:
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          return GL_SRGB8_ALPHA8;
+        default:
+          NOTREACHED();
+          break;
+      }
+      break;
+    case GL_BGRA_EXT:
+      switch (type) {
+        case GL_UNSIGNED_BYTE:
+          return GL_BGRA8_EXT;
+        default:
+          NOTREACHED();
+          break;
+      }
+      break;
+    default:
+      break;
+  }
+
+  return format;
+}
+
+// static
+bool GLES2Util::ComputeDataSize(uint32_t count,
+                                size_t size,
+                                unsigned int elements_per_unit,
+                                uint32_t* dst) {
+  uint32_t value;
+  if (!SafeMultiplyUint32(count, static_cast<uint32_t>(size), &value)) {
+    return false;
+  }
+  if (!SafeMultiplyUint32(value, elements_per_unit, &value)) {
+    return false;
+  }
+  *dst = value;
+  return true;
+}
+
 namespace {
 
-// WebGraphicsContext3DCommandBufferImpl configuration attributes. Those in
-// the 16-bit range are the same as used by EGL. Those outside the 16-bit range
-// are unique to Chromium. Attributes are matched using a closest fit algorithm.
+// GL context configuration attributes. Those in the 16-bit range are the same
+// as used by EGL. Those outside the 16-bit range are unique to Chromium.
+// Attributes are matched using a closest fit algorithm.
 
 // From <EGL/egl.h>.
 #include <stddef.h>
@@ -1405,18 +1779,19 @@ const int32_t kSampleBuffers = 0x3032;    // EGL_SAMPLE_BUFFERS
 const int32_t kNone = 0x3038;             // EGL_NONE
 const int32_t kSwapBehavior = 0x3093;     // EGL_SWAP_BEHAVIOR
 const int32_t kBufferPreserved = 0x3094;  // EGL_BUFFER_PRESERVED
-const int32_t kBufferDestroyed = 0x3095;  // EGL_BUFFER_DESTROYED
 
 // Chromium only.
 const int32_t kBindGeneratesResource = 0x10000;
 const int32_t kFailIfMajorPerfCaveat = 0x10001;
 const int32_t kLoseContextWhenOutOfMemory = 0x10002;
-const int32_t kContextType = 0x10003;
+const int32_t kShouldUseNativeGMBForBackbuffer = 0x10003;
+const int32_t kContextType = 0x10004;
 
 }  // namespace
 
 ContextCreationAttribHelper::ContextCreationAttribHelper()
-    : alpha_size(-1),
+    : gpu_preference(gl::PreferIntegratedGpu),
+      alpha_size(-1),
       blue_size(-1),
       green_size(-1),
       red_size(-1),
@@ -1428,57 +1803,11 @@ ContextCreationAttribHelper::ContextCreationAttribHelper()
       bind_generates_resource(true),
       fail_if_major_perf_caveat(false),
       lose_context_when_out_of_memory(false),
+      should_use_native_gmb_for_backbuffer(false),
       context_type(CONTEXT_TYPE_OPENGLES2) {}
 
 ContextCreationAttribHelper::ContextCreationAttribHelper(
     const ContextCreationAttribHelper& other) = default;
-
-void ContextCreationAttribHelper::Serialize(
-    std::vector<int32_t>* attribs) const {
-  if (alpha_size != -1) {
-    attribs->push_back(kAlphaSize);
-    attribs->push_back(alpha_size);
-  }
-  if (blue_size != -1) {
-    attribs->push_back(kBlueSize);
-    attribs->push_back(blue_size);
-  }
-  if (green_size != -1) {
-    attribs->push_back(kGreenSize);
-    attribs->push_back(green_size);
-  }
-  if (red_size != -1) {
-    attribs->push_back(kRedSize);
-    attribs->push_back(red_size);
-  }
-  if (depth_size != -1) {
-    attribs->push_back(kDepthSize);
-    attribs->push_back(depth_size);
-  }
-  if (stencil_size != -1) {
-    attribs->push_back(kStencilSize);
-    attribs->push_back(stencil_size);
-  }
-  if (samples != -1) {
-    attribs->push_back(kSamples);
-    attribs->push_back(samples);
-  }
-  if (sample_buffers != -1) {
-    attribs->push_back(kSampleBuffers);
-    attribs->push_back(sample_buffers);
-  }
-  attribs->push_back(kSwapBehavior);
-  attribs->push_back(buffer_preserved ? kBufferPreserved : kBufferDestroyed);
-  attribs->push_back(kBindGeneratesResource);
-  attribs->push_back(bind_generates_resource ? 1 : 0);
-  attribs->push_back(kFailIfMajorPerfCaveat);
-  attribs->push_back(fail_if_major_perf_caveat ? 1 : 0);
-  attribs->push_back(kLoseContextWhenOutOfMemory);
-  attribs->push_back(lose_context_when_out_of_memory ? 1 : 0);
-  attribs->push_back(kContextType);
-  attribs->push_back(context_type);
-  attribs->push_back(kNone);
-}
 
 bool ContextCreationAttribHelper::Parse(const std::vector<int32_t>& attribs) {
   for (size_t i = 0; i < attribs.size(); i += 2) {
@@ -1530,6 +1859,9 @@ bool ContextCreationAttribHelper::Parse(const std::vector<int32_t>& attribs) {
         break;
       case kLoseContextWhenOutOfMemory:
         lose_context_when_out_of_memory = value != 0;
+        break;
+      case kShouldUseNativeGMBForBackbuffer:
+        should_use_native_gmb_for_backbuffer = value != 0;
         break;
       case kContextType:
         context_type = static_cast<ContextType>(value);

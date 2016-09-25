@@ -19,7 +19,7 @@ const int kCooldownTimeSecs = 7;
 }  // namespace
 
 BluetoothThrottlerImpl::BluetoothThrottlerImpl(
-    scoped_ptr<base::TickClock> clock)
+    std::unique_ptr<base::TickClock> clock)
     : clock_(std::move(clock)) {}
 
 BluetoothThrottlerImpl::~BluetoothThrottlerImpl() {
@@ -42,7 +42,7 @@ base::TimeDelta BluetoothThrottlerImpl::GetDelay() const {
 }
 
 void BluetoothThrottlerImpl::OnConnection(Connection* connection) {
-  DCHECK(!ContainsKey(connections_, connection));
+  DCHECK(!base::ContainsKey(connections_, connection));
   connections_.insert(connection);
   connection->AddObserver(this);
 }
@@ -55,7 +55,7 @@ void BluetoothThrottlerImpl::OnConnectionStatusChanged(
     Connection* connection,
     Connection::Status old_status,
     Connection::Status new_status) {
-  DCHECK(ContainsKey(connections_, connection));
+  DCHECK(base::ContainsKey(connections_, connection));
   if (new_status == Connection::DISCONNECTED) {
     last_disconnect_time_ = clock_->NowTicks();
     connection->RemoveObserver(this);

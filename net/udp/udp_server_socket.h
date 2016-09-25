@@ -16,7 +16,7 @@ namespace net {
 
 class IPAddress;
 class IPEndPoint;
-class BoundNetLog;
+class NetLogWithSource;
 
 // A client socket that uses UDP as the transport layer.
 class NET_EXPORT UDPServerSocket : public DatagramServerSocket {
@@ -36,10 +36,12 @@ class NET_EXPORT UDPServerSocket : public DatagramServerSocket {
              const CompletionCallback& callback) override;
   int SetReceiveBufferSize(int32_t size) override;
   int SetSendBufferSize(int32_t size) override;
+  int SetDoNotFragment() override;
   void Close() override;
   int GetPeerAddress(IPEndPoint* address) const override;
   int GetLocalAddress(IPEndPoint* address) const override;
-  const BoundNetLog& NetLog() const override;
+  void UseNonBlockingIO() override;
+  const NetLogWithSource& NetLog() const override;
   void AllowAddressReuse() override;
   void AllowBroadcast() override;
   int JoinGroup(const IPAddress& group_address) const override;
@@ -49,12 +51,6 @@ class NET_EXPORT UDPServerSocket : public DatagramServerSocket {
   int SetMulticastLoopbackMode(bool loopback) override;
   int SetDiffServCodePoint(DiffServCodePoint dscp) override;
   void DetachFromThread() override;
-
-#if defined(OS_WIN)
-  // Switch to use non-blocking IO. Must be called right after construction and
-  // before other calls.
-  void UseNonBlockingIO();
-#endif
 
  private:
   UDPSocket socket_;

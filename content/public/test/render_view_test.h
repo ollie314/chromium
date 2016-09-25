@@ -26,16 +26,15 @@
 #include "third_party/WebKit/public/web/WebLeakDetector.h"
 
 namespace blink {
+namespace scheduler {
+class RendererScheduler;
+}
 class WebInputElement;
 class WebWidget;
 }
 
 namespace gfx {
 class Rect;
-}
-
-namespace scheduler {
-class RendererScheduler;
 }
 
 namespace content {
@@ -62,7 +61,7 @@ class RenderViewTest : public testing::Test, blink::WebLeakDetectorClient {
     void Shutdown();
 
    private:
-    std::unique_ptr<scheduler::RendererScheduler> renderer_scheduler_;
+    std::unique_ptr<blink::scheduler::RendererScheduler> renderer_scheduler_;
     std::unique_ptr<RendererBlinkPlatformImplTestOverrideImpl>
         blink_platform_impl_;
   };
@@ -168,7 +167,8 @@ class RenderViewTest : public testing::Test, blink::WebLeakDetectorClient {
   // These are all methods from RenderViewImpl that we expose to testing code.
   bool OnMessageReceived(const IPC::Message& msg);
   void DidNavigateWithinPage(blink::WebLocalFrame* frame,
-                             bool is_new_navigation);
+                             bool is_new_navigation,
+                             bool content_initiated);
   blink::WebWidget* GetWebWidget();
 
   // Allows a subclass to override the various content client implementations.

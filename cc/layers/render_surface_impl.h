@@ -17,6 +17,7 @@
 #include "cc/quads/render_pass.h"
 #include "cc/quads/shared_quad_state.h"
 #include "cc/trees/occlusion.h"
+#include "cc/trees/property_tree.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/transform.h"
@@ -24,6 +25,7 @@
 namespace cc {
 
 class DamageTracker;
+class FilterOperations;
 class Occlusion;
 class RenderPassId;
 class RenderPassSink;
@@ -42,10 +44,6 @@ class CC_EXPORT RenderSurfaceImpl {
   RenderSurfaceImpl* render_target();
   const RenderSurfaceImpl* render_target() const;
 
-  gfx::PointF ContentRectCenter() const {
-    return gfx::RectF(content_rect()).CenterPoint();
-  }
-
   // Returns the rect that encloses the RenderSurfaceImpl including any
   // reflection.
   gfx::RectF DrawableContentRect() const;
@@ -54,6 +52,9 @@ class CC_EXPORT RenderSurfaceImpl {
     draw_properties_.draw_opacity = opacity;
   }
   float draw_opacity() const { return draw_properties_.draw_opacity; }
+
+  SkXfermode::Mode BlendMode() const;
+  bool UsesDefaultBlendMode() const;
 
   void SetNearestOcclusionImmuneAncestor(const RenderSurfaceImpl* surface) {
     nearest_occlusion_immune_ancestor_ = surface;
@@ -117,7 +118,9 @@ class CC_EXPORT RenderSurfaceImpl {
     contributes_to_drawn_surface_ = contributes_to_drawn_surface;
   }
 
-  void SetContentRect(const gfx::Rect& content_rect);
+  void CalculateContentRectFromAccumulatedContentRect(int max_texture_size);
+  void SetContentRectToViewport();
+  void SetContentRectForTesting(const gfx::Rect& rect);
   gfx::Rect content_rect() const { return draw_properties_.content_rect; }
 
   void ClearAccumulatedContentRect();
@@ -143,10 +146,26 @@ class CC_EXPORT RenderSurfaceImpl {
   int OwningLayerId() const;
   bool HasReplica() const;
   const LayerImpl* ReplicaLayer() const;
+  LayerImpl* ReplicaLayer();
 
-  void ResetPropertyChangedFlag() { surface_property_changed_ = false; }
+  LayerImpl* MaskLayer();
+  bool HasMask() const;
+
+  LayerImpl* ReplicaMaskLayer();
+  bool HasReplicaMask() const;
+
+  const FilterOperations& Filters() const;
+  const FilterOperations& BackgroundFilters() const;
+  gfx::PointF FiltersOrigin() const;
+  gfx::Transform FiltersTransform() const;
+
+  bool HasCopyRequest() const;
+
+  void ResetPropertyChangedFlags();
   bool SurfacePropertyChanged() const;
   bool SurfacePropertyChangedOnlyFromDescendant() const;
+  bool AncestorPropertyChanged() const;
+  void NoteAncestorPropertyChanged();
 
   DamageTracker* damage_tracker() const { return damage_tracker_.get(); }
 
@@ -167,6 +186,11 @@ class CC_EXPORT RenderSurfaceImpl {
   int EffectTreeIndex() const;
 
  private:
+  void SetContentRect(const gfx::Rect& content_rect);
+  gfx::Rect CalculateClippedAccumulatedContentRect();
+
+  const EffectNode* OwningEffectNode() const;
+
   LayerImpl* owning_layer_;
 
   // Container for properties that render surfaces need to compute before they
@@ -203,6 +227,7 @@ class CC_EXPORT RenderSurfaceImpl {
   // Is used to calculate the content rect from property trees.
   gfx::Rect accumulated_content_rect_;
   bool surface_property_changed_ : 1;
+  bool ancestor_property_changed_ : 1;
 
   bool contributes_to_drawn_surface_ : 1;
 

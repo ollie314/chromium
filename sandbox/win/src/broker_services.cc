@@ -37,13 +37,9 @@ bool AssociateCompletionPort(HANDLE job, HANDLE port, void* key) {
 
 // Utility function to do the cleanup necessary when something goes wrong
 // while in SpawnTarget and we must terminate the target process.
-sandbox::ResultCode SpawnCleanup(sandbox::TargetProcess* target, DWORD error) {
-  if (0 == error)
-    error = ::GetLastError();
-
+sandbox::ResultCode SpawnCleanup(sandbox::TargetProcess* target) {
   target->Terminate();
   delete target;
-  ::SetLastError(error);
   return sandbox::SBOX_ERROR_GENERIC;
 }
 
@@ -51,7 +47,6 @@ sandbox::ResultCode SpawnCleanup(sandbox::TargetProcess* target, DWORD error) {
 // executes TargetEventsThread().
 enum {
   THREAD_CTRL_NONE,
-  THREAD_CTRL_REMOVE_PEER,
   THREAD_CTRL_QUIT,
   THREAD_CTRL_LAST,
 };
@@ -59,7 +54,8 @@ enum {
 // Helper structure that allows the Broker to associate a job notification
 // with a job object and with a policy.
 struct JobTracker {
-  JobTracker(base::win::ScopedHandle job, sandbox::PolicyBase* policy)
+  JobTracker(base::win::ScopedHandle job,
+             scoped_refptr<sandbox::PolicyBase> policy)
       : job(std::move(job)), policy(policy) {}
   ~JobTracker() {
     FreeResources();
@@ -70,7 +66,7 @@ struct JobTracker {
   void FreeResources();
 
   base::win::ScopedHandle job;
-  sandbox::PolicyBase* policy;
+  scoped_refptr<sandbox::PolicyBase> policy;
 };
 
 void JobTracker::FreeResources() {
@@ -84,29 +80,7 @@ void JobTracker::FreeResources() {
 
     // In OnJobEmpty() we don't actually use the job handle directly.
     policy->OnJobEmpty(stale_job_handle);
-    policy->Release();
-    policy = NULL;
-  }
-}
-
-// Helper structure that allows the broker to track peer processes
-struct PeerTracker {
-  PeerTracker(DWORD process_id, HANDLE broker_job_port)
-      : wait_object(NULL), id(process_id), job_port(broker_job_port) {
-  }
-
-  HANDLE wait_object;
-  base::win::ScopedHandle process;
-  DWORD id;
-  HANDLE job_port;
-};
-
-void DeregisterPeerTracker(PeerTracker* peer) {
-  // Deregistration shouldn't fail, but we leak rather than crash if it does.
-  if (::UnregisterWaitEx(peer->wait_object, INVALID_HANDLE_VALUE)) {
-    delete peer;
-  } else {
-    NOTREACHED();
+    policy = nullptr;
   }
 }
 
@@ -162,22 +136,19 @@ BrokerServicesBase::~BrokerServicesBase() {
     return;
   }
 
-  STLDeleteElements(&tracker_list_);
+  base::STLDeleteElements(&tracker_list_);
   delete thread_pool_;
-
-  // Cancel the wait events and delete remaining peer trackers.
-  for (PeerTrackerMap::iterator it = peer_map_.begin();
-       it != peer_map_.end(); ++it) {
-    DeregisterPeerTracker(it->second);
-  }
 
   ::DeleteCriticalSection(&lock_);
 }
 
-TargetPolicy* BrokerServicesBase::CreatePolicy() {
+scoped_refptr<TargetPolicy> BrokerServicesBase::CreatePolicy() {
   // If you change the type of the object being created here you must also
   // change the downcast to it in SpawnTarget().
-  return new PolicyBase;
+  scoped_refptr<TargetPolicy> policy(new PolicyBase);
+  // PolicyBase starts with refcount 1.
+  policy->Release();
+  return policy;
 }
 
 // The worker thread stays in a loop waiting for asynchronous notifications
@@ -283,13 +254,6 @@ DWORD WINAPI BrokerServicesBase::TargetEventsThread(PVOID param) {
           break;
         }
       }
-    } else if (THREAD_CTRL_REMOVE_PEER == key) {
-      // Remove a process from our list of peers.
-      AutoLock lock(&broker->lock_);
-      PeerTrackerMap::iterator it = broker->peer_map_.find(
-          static_cast<DWORD>(reinterpret_cast<uintptr_t>(ovl)));
-      DeregisterPeerTracker(it->second);
-      broker->peer_map_.erase(it);
     } else if (THREAD_CTRL_QUIT == key) {
       // The broker object is being destroyed so the thread needs to exit.
       return 0;
@@ -307,7 +271,9 @@ DWORD WINAPI BrokerServicesBase::TargetEventsThread(PVOID param) {
 // process inside the sandbox.
 ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
                                            const wchar_t* command_line,
-                                           TargetPolicy* policy,
+                                           scoped_refptr<TargetPolicy> policy,
+                                           ResultCode* last_warning,
+                                           DWORD* last_error,
                                            PROCESS_INFORMATION* target_info) {
   if (!exe_path)
     return SBOX_ERROR_BAD_PARAMS;
@@ -321,11 +287,12 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
   // the child process.
   static DWORD thread_id = ::GetCurrentThreadId();
   DCHECK(thread_id == ::GetCurrentThreadId());
+  *last_warning = SBOX_ALL_OK;
 
   AutoLock lock(&lock_);
 
   // This downcast is safe as long as we control CreatePolicy()
-  PolicyBase* policy_base = static_cast<PolicyBase*>(policy);
+  scoped_refptr<PolicyBase> policy_base(static_cast<PolicyBase*>(policy.get()));
 
   // Construct the tokens and the job object that we are going to associate
   // with the soon to be created target process.
@@ -338,6 +305,11 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
       policy_base->MakeTokens(&initial_token, &lockdown_token, &lowbox_token);
   if (SBOX_ALL_OK != result)
     return result;
+  if (lowbox_token.IsValid() &&
+      base::win::GetVersion() < base::win::VERSION_WIN8) {
+    // We don't allow lowbox_token below Windows 8.
+    return SBOX_ERROR_BAD_PARAMS;
+  }
 
   base::win::ScopedHandle job;
   result = policy_base->MakeJobObject(&job);
@@ -442,24 +414,36 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
   base::win::ScopedProcessInformation process_info;
   TargetProcess* target =
       new TargetProcess(std::move(initial_token), std::move(lockdown_token),
-                        std::move(lowbox_token), job.Get(), thread_pool_);
+                        job.Get(), thread_pool_);
 
-  DWORD win_result = target->Create(exe_path, command_line, inherit_handles,
-                                    startup_info, &process_info);
+  result = target->Create(exe_path, command_line, inherit_handles, startup_info,
+                          &process_info, last_error);
 
-  if (ERROR_SUCCESS != win_result) {
-    SpawnCleanup(target, win_result);
-    return SBOX_ERROR_CREATE_PROCESS;
+  if (result != SBOX_ALL_OK) {
+    SpawnCleanup(target);
+    return result;
+  }
+
+  if (lowbox_token.IsValid()) {
+    *last_warning = target->AssignLowBoxToken(lowbox_token);
+    // If this fails we continue, but report the error as a warning.
+    // This is due to certain configurations causing the setting of the
+    // token to fail post creation, and we'd rather continue if possible.
+    if (*last_warning != SBOX_ALL_OK)
+      *last_error = ::GetLastError();
   }
 
   // Now the policy is the owner of the target.
-  if (!policy_base->AddTarget(target)) {
-    return SpawnCleanup(target, 0);
+  result = policy_base->AddTarget(target);
+
+  if (result != SBOX_ALL_OK) {
+    *last_error = ::GetLastError();
+    SpawnCleanup(target);
+    return result;
   }
 
   // We are going to keep a pointer to the policy because we'll call it when
   // the job object generates notifications using the completion port.
-  policy_base->AddRef();
   if (job.IsValid()) {
     std::unique_ptr<JobTracker> tracker(
         new JobTracker(std::move(job), policy_base));
@@ -479,16 +463,10 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
     // not block WaitForAllTargets until we have at least one target with job.
     if (child_process_ids_.empty())
       ::SetEvent(no_targets_.Get());
-    // We can not track the life time of such processes and it is responsibility
-    // of the host application to make sure that spawned targets without jobs
-    // are terminated when the main application don't need them anymore.
-    // Sandbox policy engine needs to know that these processes are valid
-    // targets for e.g. BrokerDuplicateHandle so track them as peer processes.
-    AddTargetPeer(process_info.process_handle());
   }
 
   *target_info = process_info.Take();
-  return SBOX_ALL_OK;
+  return result;
 }
 
 
@@ -499,46 +477,7 @@ ResultCode BrokerServicesBase::WaitForAllTargets() {
 
 bool BrokerServicesBase::IsActiveTarget(DWORD process_id) {
   AutoLock lock(&lock_);
-  return child_process_ids_.find(process_id) != child_process_ids_.end() ||
-         peer_map_.find(process_id) != peer_map_.end();
-}
-
-VOID CALLBACK BrokerServicesBase::RemovePeer(PVOID parameter, BOOLEAN timeout) {
-  PeerTracker* peer = reinterpret_cast<PeerTracker*>(parameter);
-  // Don't check the return code because we this may fail (safely) at shutdown.
-  ::PostQueuedCompletionStatus(
-      peer->job_port, 0, THREAD_CTRL_REMOVE_PEER,
-      reinterpret_cast<LPOVERLAPPED>(static_cast<uintptr_t>(peer->id)));
-}
-
-ResultCode BrokerServicesBase::AddTargetPeer(HANDLE peer_process) {
-  std::unique_ptr<PeerTracker> peer(
-      new PeerTracker(::GetProcessId(peer_process), job_port_.Get()));
-  if (!peer->id)
-    return SBOX_ERROR_GENERIC;
-
-  HANDLE process_handle;
-  if (!::DuplicateHandle(::GetCurrentProcess(), peer_process,
-                         ::GetCurrentProcess(), &process_handle,
-                         SYNCHRONIZE, FALSE, 0)) {
-    return SBOX_ERROR_GENERIC;
-  }
-  peer->process.Set(process_handle);
-
-  AutoLock lock(&lock_);
-  if (!peer_map_.insert(std::make_pair(peer->id, peer.get())).second)
-    return SBOX_ERROR_BAD_PARAMS;
-
-  if (!::RegisterWaitForSingleObject(
-          &peer->wait_object, peer->process.Get(), RemovePeer, peer.get(),
-          INFINITE, WT_EXECUTEONLYONCE | WT_EXECUTEINWAITTHREAD)) {
-    peer_map_.erase(peer->id);
-    return SBOX_ERROR_GENERIC;
-  }
-
-  // Release the pointer since it will be cleaned up by the callback.
-  ignore_result(peer.release());
-  return SBOX_ALL_OK;
+  return child_process_ids_.find(process_id) != child_process_ids_.end();
 }
 
 }  // namespace sandbox

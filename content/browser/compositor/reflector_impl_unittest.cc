@@ -2,14 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
+#include "cc/output/compositor_frame.h"
+#include "cc/scheduler/begin_frame_source.h"
+#include "cc/scheduler/delay_based_time_source.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/test_context_provider.h"
 #include "cc/test/test_web_graphics_context_3d.h"
+#include "components/display_compositor/compositor_overlay_candidate_validator.h"
 #include "content/browser/compositor/browser_compositor_output_surface.h"
-#include "content/browser/compositor/browser_compositor_overlay_candidate_validator.h"
 #include "content/browser/compositor/reflector_impl.h"
 #include "content/browser/compositor/reflector_texture.h"
 #include "content/browser/compositor/test/no_transport_image_transport_factory.h"
@@ -19,7 +23,7 @@
 #include "ui/compositor/test/context_factories_for_test.h"
 
 #if defined(USE_OZONE)
-#include "content/browser/compositor/browser_compositor_overlay_candidate_validator_ozone.h"
+#include "components/display_compositor/compositor_overlay_candidate_validator_ozone.h"
 #include "ui/ozone/public/overlay_candidates_ozone.h"
 #endif  // defined(USE_OZONE)
 
@@ -57,13 +61,15 @@ class TestOverlayCandidatesOzone : public ui::OverlayCandidatesOzone {
 };
 #endif  // defined(USE_OZONE)
 
-std::unique_ptr<BrowserCompositorOverlayCandidateValidator>
+std::unique_ptr<display_compositor::CompositorOverlayCandidateValidator>
 CreateTestValidatorOzone() {
 #if defined(USE_OZONE)
-  return std::unique_ptr<BrowserCompositorOverlayCandidateValidator>(
-      new BrowserCompositorOverlayCandidateValidatorOzone(
+  return std::unique_ptr<
+      display_compositor::CompositorOverlayCandidateValidator>(
+      new display_compositor::CompositorOverlayCandidateValidatorOzone(
           std::unique_ptr<ui::OverlayCandidatesOzone>(
-              new TestOverlayCandidatesOzone())));
+              new TestOverlayCandidatesOzone()),
+          false));
 #else
   return nullptr;
 #endif  // defined(USE_OZONE)
@@ -71,14 +77,12 @@ CreateTestValidatorOzone() {
 
 class TestOutputSurface : public BrowserCompositorOutputSurface {
  public:
-  TestOutputSurface(
-      const scoped_refptr<cc::ContextProvider>& context_provider,
-      const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
-      base::SingleThreadTaskRunner* task_runner)
-      : BrowserCompositorOutputSurface(context_provider,
-                                       nullptr,
-                                       vsync_manager,
-                                       task_runner,
+  TestOutputSurface(scoped_refptr<cc::ContextProvider> context_provider,
+                    scoped_refptr<ui::CompositorVSyncManager> vsync_manager,
+                    cc::SyntheticBeginFrameSource* begin_frame_source)
+      : BrowserCompositorOutputSurface(std::move(context_provider),
+                                       std::move(vsync_manager),
+                                       begin_frame_source,
                                        CreateTestValidatorOzone()) {
     surface_size_ = gfx::Size(256, 256);
     device_scale_factor_ = 1.f;
@@ -86,7 +90,8 @@ class TestOutputSurface : public BrowserCompositorOutputSurface {
 
   void SetFlip(bool flip) { capabilities_.flipped_output_surface = flip; }
 
-  void SwapBuffers(cc::CompositorFrame* frame) override {}
+  void SwapBuffers(cc::CompositorFrame frame) override {}
+  uint32_t GetFramebufferCopyTextureFormat() override { return GL_RGB; }
 
   void OnReflectorChanged() override {
     if (!reflector_) {
@@ -99,15 +104,13 @@ class TestOutputSurface : public BrowserCompositorOutputSurface {
 
   void OnGpuSwapBuffersCompleted(
       const std::vector<ui::LatencyInfo>& latency_info,
-      gfx::SwapResult result) override {
+      gfx::SwapResult result,
+      const gpu::GpuProcessHostedCALayerTreeParamsMac* params_mac) override {
     NOTREACHED();
   }
 
 #if defined(OS_MACOSX)
   void SetSurfaceSuspendedForRecycle(bool suspended) override {}
-  bool SurfaceShouldNotShowFramesAfterSuspendForRecycle() const override {
-    return false;
-  }
 #endif
 
  private:
@@ -130,14 +133,15 @@ class ReflectorImplTest : public testing::Test {
     message_loop_.reset(new base::MessageLoop());
     task_runner_ = message_loop_->task_runner();
     compositor_task_runner_ = new FakeTaskRunner();
+    begin_frame_source_.reset(new cc::DelayBasedBeginFrameSource(
+        base::MakeUnique<cc::DelayBasedTimeSource>(
+            compositor_task_runner_.get())));
     compositor_.reset(
         new ui::Compositor(context_factory, compositor_task_runner_.get()));
     compositor_->SetAcceleratedWidget(gfx::kNullAcceleratedWidget);
-    context_provider_ =
-        cc::TestContextProvider::Create(cc::TestWebGraphicsContext3D::Create());
-    output_surface_ = std::unique_ptr<TestOutputSurface>(
-        new TestOutputSurface(context_provider_, compositor_->vsync_manager(),
-                              compositor_task_runner_.get()));
+    output_surface_ = base::MakeUnique<TestOutputSurface>(
+        cc::TestContextProvider::Create(cc::TestWebGraphicsContext3D::Create()),
+        compositor_->vsync_manager(), begin_frame_source_.get());
     CHECK(output_surface_->BindToClient(&output_surface_client_));
 
     root_layer_.reset(new ui::Layer(ui::LAYER_SOLID_COLOR));
@@ -149,8 +153,8 @@ class ReflectorImplTest : public testing::Test {
   }
 
   void SetUpReflector() {
-    reflector_ = base::WrapUnique(
-        new ReflectorImpl(compositor_.get(), mirroring_layer_.get()));
+    reflector_ = base::MakeUnique<ReflectorImpl>(compositor_.get(),
+                                                 mirroring_layer_.get());
     reflector_->OnSourceSurfaceReady(output_surface_.get());
   }
 
@@ -159,7 +163,7 @@ class ReflectorImplTest : public testing::Test {
       reflector_->RemoveMirroringLayer(mirroring_layer_.get());
     cc::TextureMailbox mailbox;
     std::unique_ptr<cc::SingleReleaseCallback> release;
-    if (mirroring_layer_->PrepareTextureMailbox(&mailbox, &release, false)) {
+    if (mirroring_layer_->PrepareTextureMailbox(&mailbox, &release)) {
       release->Run(gpu::SyncToken(), false);
     }
     compositor_.reset();
@@ -171,7 +175,7 @@ class ReflectorImplTest : public testing::Test {
 
  protected:
   scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner_;
-  scoped_refptr<cc::ContextProvider> context_provider_;
+  std::unique_ptr<cc::SyntheticBeginFrameSource> begin_frame_source_;
   cc::FakeOutputSurfaceClient output_surface_client_;
   std::unique_ptr<base::MessageLoop> message_loop_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;

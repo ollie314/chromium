@@ -8,6 +8,8 @@
 #include "core/html/canvas/CanvasDrawListener.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebCanvasCaptureHandler.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
+#include <memory>
 
 namespace blink {
 
@@ -15,12 +17,12 @@ class OnRequestCanvasDrawListener final : public GarbageCollectedFinalized<OnReq
     USING_GARBAGE_COLLECTED_MIXIN(OnRequestCanvasDrawListener);
 public:
     ~OnRequestCanvasDrawListener();
-    static OnRequestCanvasDrawListener* create(const PassOwnPtr<WebCanvasCaptureHandler>&);
-    void sendNewFrame(const WTF::PassRefPtr<SkImage>&) override;
+    static OnRequestCanvasDrawListener* create(std::unique_ptr<WebCanvasCaptureHandler>);
+    void sendNewFrame(sk_sp<SkImage>) override;
 
     DEFINE_INLINE_TRACE() {}
 private:
-    OnRequestCanvasDrawListener(const PassOwnPtr<WebCanvasCaptureHandler>&);
+    OnRequestCanvasDrawListener(std::unique_ptr<WebCanvasCaptureHandler>);
 };
 
 } // namespace blink

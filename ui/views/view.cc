@@ -33,6 +33,7 @@
 #include "ui/compositor/paint_context.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/compositor/transform_recorder.h"
+#include "ui/display/screen.h"
 #include "ui/events/event_target_iterator.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/point3_f.h"
@@ -40,7 +41,6 @@
 #include "ui/gfx/interpolated_transform.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/scoped_canvas.h"
-#include "ui/gfx/screen.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/transform.h"
 #include "ui/native_theme/native_theme.h"
@@ -115,8 +115,7 @@ View::View()
       registered_accelerator_count_(0),
       next_focusable_view_(NULL),
       previous_focusable_view_(NULL),
-      focusable_(false),
-      accessibility_focusable_(false),
+      focus_behavior_(FocusBehavior::NEVER),
       context_menu_controller_(NULL),
       drag_controller_(NULL),
       native_view_accessibility_(NULL) {
@@ -448,7 +447,13 @@ void View::OnEnabledChanged() {
 // Transformations -------------------------------------------------------------
 
 gfx::Transform View::GetTransform() const {
-  return layer() ? layer()->transform() : gfx::Transform();
+  if (!layer())
+    return gfx::Transform();
+
+  gfx::Transform transform = layer()->transform();
+  gfx::ScrollOffset scroll_offset = layer()->CurrentScrollOffset();
+  transform.Translate(-scroll_offset.x(), -scroll_offset.y());
+  return transform;
 }
 
 void View::SetTransform(const gfx::Transform& transform) {
@@ -827,7 +832,7 @@ void View::Paint(const ui::PaintContext& parent_context) {
     transform_from_parent.Translate(offset_from_parent.x(),
                                     offset_from_parent.y());
     transform_from_parent.PreconcatTransform(GetTransform());
-    transform_recorder.Transform(transform_from_parent, size());
+    transform_recorder.Transform(transform_from_parent);
   }
 
   // Note that the cache is not aware of the offset of the view
@@ -836,16 +841,8 @@ void View::Paint(const ui::PaintContext& parent_context) {
   if (is_invalidated || !paint_cache_.UseCache(context, size())) {
     ui::PaintRecorder recorder(context, size(), &paint_cache_);
     gfx::Canvas* canvas = recorder.canvas();
-
-    // If the View we are about to paint requested the canvas to be flipped, we
-    // should change the transform appropriately.
-    // The canvas mirroring is undone once the View is done painting so that we
-    // don't pass the canvas with the mirrored transform to Views that didn't
-    // request the canvas to be flipped.
-    if (FlipCanvasOnPaintForRTLUI()) {
-      canvas->Translate(gfx::Vector2d(width(), 0));
-      canvas->Scale(-1, 1);
-    }
+    gfx::ScopedRTLFlipCanvas scoped_canvas(canvas, width(),
+                                           flip_canvas_on_paint_for_rtl_ui_);
 
     // Delegate painting the contents of the View to the virtual OnPaint method.
     OnPaint(canvas);
@@ -954,7 +951,7 @@ bool View::IsMouseHovered() const {
   if (!GetWidget()->IsMouseEventsEnabled())
     return false;
 
-  gfx::Point cursor_pos(gfx::Screen::GetScreen()->GetCursorScreenPoint());
+  gfx::Point cursor_pos(display::Screen::GetScreen()->GetCursorScreenPoint());
   ConvertPointFromScreen(this, &cursor_pos);
   return HitTestPoint(cursor_pos);
 }
@@ -1092,7 +1089,7 @@ ui::EventTarget* View::GetParentTarget() {
 }
 
 std::unique_ptr<ui::EventTargetIterator> View::GetChildIterator() const {
-  return base::WrapUnique(new ui::EventTargetIteratorImpl<View>(children_));
+  return base::MakeUnique<ui::EventTargetIteratorImpl<View>>(children_);
 }
 
 ui::EventTargeter* View::GetEventTargeter() {
@@ -1110,7 +1107,7 @@ void View::AddAccelerator(const ui::Accelerator& accelerator) {
   if (!accelerators_.get())
     accelerators_.reset(new std::vector<ui::Accelerator>());
 
-  if (!ContainsValue(*accelerators_.get(), accelerator))
+  if (!base::ContainsValue(*accelerators_.get(), accelerator))
     accelerators_->push_back(accelerator);
 
   RegisterPendingAccelerators();
@@ -1199,28 +1196,20 @@ void View::SetNextFocusableView(View* view) {
   next_focusable_view_ = view;
 }
 
-void View::SetFocusable(bool focusable) {
-  if (focusable_ == focusable)
+void View::SetFocusBehavior(FocusBehavior focus_behavior) {
+  if (focus_behavior_ == focus_behavior)
     return;
 
-  focusable_ = focusable;
+  focus_behavior_ = focus_behavior;
   AdvanceFocusIfNecessary();
 }
 
 bool View::IsFocusable() const {
-  return focusable_ && enabled_ && IsDrawn();
+  return focus_behavior_ == FocusBehavior::ALWAYS && enabled_ && IsDrawn();
 }
 
 bool View::IsAccessibilityFocusable() const {
-  return (focusable_ || accessibility_focusable_) && enabled_ && IsDrawn();
-}
-
-void View::SetAccessibilityFocusable(bool accessibility_focusable) {
-  if (accessibility_focusable_ == accessibility_focusable)
-    return;
-
-  accessibility_focusable_ = accessibility_focusable;
-  AdvanceFocusIfNecessary();
+  return focus_behavior_ != FocusBehavior::NEVER && enabled_ && IsDrawn();
 }
 
 FocusManager* View::GetFocusManager() {
@@ -1235,8 +1224,13 @@ const FocusManager* View::GetFocusManager() const {
 
 void View::RequestFocus() {
   FocusManager* focus_manager = GetFocusManager();
-  if (focus_manager && IsFocusable())
-    focus_manager->SetFocusedView(this);
+  if (focus_manager) {
+    bool focusable = focus_manager->keyboard_accessible()
+                         ? IsAccessibilityFocusable()
+                         : IsFocusable();
+    if (focusable)
+      focus_manager->SetFocusedView(this);
+  }
 }
 
 bool View::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {

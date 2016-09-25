@@ -10,6 +10,8 @@
 
 #include "jni/BrowserStartupController_jni.h"
 
+using base::android::JavaParamRef;
+
 namespace content {
 
 bool BrowserMayStartAsynchronously() {
@@ -20,6 +22,12 @@ bool BrowserMayStartAsynchronously() {
 void BrowserStartupComplete(int result) {
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_BrowserStartupController_browserStartupComplete(env, result);
+}
+
+bool ShouldStartGpuProcessOnBrowserStartup() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  return Java_BrowserStartupController_shouldStartGpuProcessOnBrowserStartup(
+      env);
 }
 
 bool RegisterBrowserStartupController(JNIEnv* env) {

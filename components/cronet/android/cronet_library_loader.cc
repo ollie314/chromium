@@ -14,11 +14,11 @@
 #include "base/android/jni_utils.h"
 #include "base/android/library_loader/library_loader_hooks.h"
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "components/cronet/android/chromium_url_request.h"
-#include "components/cronet/android/chromium_url_request_context.h"
 #include "components/cronet/android/cronet_bidirectional_stream_adapter.h"
 #include "components/cronet/android/cronet_upload_data_stream_adapter.h"
 #include "components/cronet/android/cronet_url_request_adapter.h"
@@ -31,19 +31,18 @@
 #include "url/url_features.h"
 #include "url/url_util.h"
 
-#if BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
-#include "url/android/url_jni_registrar.h"  // nogncheck
-#else
-#include "base/i18n/icu_util.h"
+#if !BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
+#include "base/i18n/icu_util.h"  // nogncheck
 #endif
+
+using base::android::JavaParamRef;
+using base::android::ScopedJavaLocalRef;
 
 namespace cronet {
 namespace {
 
 const base::android::RegistrationMethod kCronetRegisteredMethods[] = {
     {"BaseAndroid", base::android::RegisterJni},
-    {"ChromiumUrlRequest", ChromiumUrlRequestRegisterJni},
-    {"ChromiumUrlRequestContext", ChromiumUrlRequestContextRegisterJni},
     {"CronetBidirectionalStreamAdapter",
      CronetBidirectionalStreamAdapter::RegisterJni},
     {"CronetLibraryLoader", RegisterNativesImpl},
@@ -52,9 +51,6 @@ const base::android::RegistrationMethod kCronetRegisteredMethods[] = {
     {"CronetUrlRequestContextAdapter",
      CronetUrlRequestContextAdapterRegisterJni},
     {"NetAndroid", net::android::RegisterJni},
-#if BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
-    {"UrlAndroid", url::android::RegisterJni},
-#endif
 };
 
 // MessageLoop on the main thread, which is where objects that receive Java
@@ -97,6 +93,7 @@ void CronetInitOnMainThread(JNIEnv* env, const JavaParamRef<jclass>& jcaller) {
   base::i18n::InitializeICU();
 #endif
 
+  base::FeatureList::InitializeInstance(std::string(), std::string());
   // TODO(bengr): Remove once Data Reduction Proxy no longer needs this for
   // configuration information.
   base::CommandLine::Init(0, nullptr);

@@ -38,7 +38,9 @@ public:
     ~HRTFPanner() override;
 
     // Panner
-    void pan(double azimuth, double elevation, const AudioBus* inputBus, AudioBus* outputBus, size_t framesToProcess) override;
+    void pan(double azimuth, double elevation, const AudioBus* inputBus, AudioBus* outputBus, size_t framesToProcess, AudioBus::ChannelInterpretation) override;
+    void panWithSampleAccurateValues(double* azimuth, double* elevation, const AudioBus* inputBus, AudioBus* outputBus, size_t framesToProcess, AudioBus::ChannelInterpretation) override;
+
     void reset() override;
 
     size_t fftSize() const { return fftSizeForSampleRate(m_sampleRate); }

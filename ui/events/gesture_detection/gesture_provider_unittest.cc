@@ -8,8 +8,12 @@
 
 #include <memory>
 
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/event_constants.h"
@@ -135,6 +139,8 @@ class GestureProviderTest : public testing::Test, public GestureProviderClient {
 
   // GestureProviderClient
   void OnGestureEvent(const GestureEventData& gesture) override {
+    EXPECT_EQ(GestureDeviceType::DEVICE_TOUCHSCREEN,
+              gesture.details.device_type());
     if (gesture.type() == ET_GESTURE_SCROLL_BEGIN)
       active_scroll_begin_event_.reset(new GestureEventData(gesture));
     gestures_.push_back(gesture);
@@ -411,9 +417,9 @@ class GestureProviderTest : public testing::Test, public GestureProviderClient {
   }
 
   static void RunTasksAndWait(base::TimeDelta delay) {
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(), delay);
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
   }
 
   std::vector<GestureEventData> gestures_;
@@ -937,6 +943,190 @@ TEST_F(GestureProviderTest, ScrollBeginValues) {
   ASSERT_TRUE(scroll_begin_gesture);
   EXPECT_EQ(delta_x, scroll_begin_gesture->details.scroll_x_hint());
   EXPECT_EQ(delta_y, scroll_begin_gesture->details.scroll_y_hint());
+}
+
+// The following three tests verify that slop regions are checked for
+// one and two finger scrolls. Three-finger tap doesn't exist, so,
+// no slop region check is needed for three-finger scrolls.
+
+TEST_F(GestureProviderTest, SlopRegionCheckOnOneFingerScroll) {
+  EnableTwoFingerTap(kMaxTwoFingerTapSeparation, base::TimeDelta());
+  const float scaled_touch_slop = GetTouchSlop();
+
+  base::TimeTicks event_time = base::TimeTicks::Now();
+
+  MockMotionEvent event =
+      ObtainMotionEvent(event_time, MotionEvent::ACTION_DOWN, 0, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  // Move within slop region.
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_MOVE, 0,
+                            scaled_touch_slop / 2);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  // Exceed slop region.
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_MOVE, 0,
+                            2 * scaled_touch_slop);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_UP, 0,
+                            2 * scaled_touch_slop);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  EXPECT_EQ(ET_GESTURE_TAP_DOWN, GetReceivedGesture(0).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_BEGIN, GetReceivedGesture(1).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_UPDATE, GetReceivedGesture(2).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_END, GetReceivedGesture(3).type());
+  EXPECT_EQ(4U, GetReceivedGestureCount());
+}
+
+TEST_F(GestureProviderTest, SlopRegionCheckOnTwoFingerScroll) {
+  EnableTwoFingerTap(kMaxTwoFingerTapSeparation, base::TimeDelta());
+  const float scaled_touch_slop = GetTouchSlop();
+
+  base::TimeTicks event_time = base::TimeTicks::Now();
+
+  MockMotionEvent event =
+      ObtainMotionEvent(event_time, MotionEvent::ACTION_DOWN, 0, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_POINTER_DOWN, 0, 0,
+                            kMaxTwoFingerTapSeparation / 2, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  // Move within slop region: two-finger tap happens.
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_MOVE, 0,
+                            scaled_touch_slop / 2,
+                            kMaxTwoFingerTapSeparation / 2, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_POINTER_UP, 0,
+                            scaled_touch_slop / 2,
+                            kMaxTwoFingerTapSeparation / 2, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  // Exceed slop region: scroll.
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_POINTER_DOWN, 0,
+                            scaled_touch_slop / 2,
+                            kMaxTwoFingerTapSeparation / 2, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event = ObtainMotionEvent(
+      event_time, MotionEvent::ACTION_MOVE, 0, scaled_touch_slop / 2,
+      kMaxTwoFingerTapSeparation / 2, 2 * scaled_touch_slop);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event = ObtainMotionEvent(
+      event_time, MotionEvent::ACTION_POINTER_UP, 0, scaled_touch_slop / 2,
+      kMaxTwoFingerTapSeparation / 2, 2 * scaled_touch_slop);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_UP, 0,
+                            scaled_touch_slop / 2);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  EXPECT_EQ(ET_GESTURE_TAP_DOWN, GetReceivedGesture(0).type());
+  EXPECT_EQ(ET_GESTURE_TWO_FINGER_TAP, GetReceivedGesture(1).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_BEGIN, GetReceivedGesture(2).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_UPDATE, GetReceivedGesture(3).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_END, GetReceivedGesture(4).type());
+  EXPECT_EQ(5U, GetReceivedGestureCount());
+}
+
+TEST_F(GestureProviderTest, NoSlopRegionCheckOnThreeFingerScroll) {
+  EnableTwoFingerTap(kMaxTwoFingerTapSeparation, base::TimeDelta());
+  const float scaled_touch_slop = GetTouchSlop();
+
+  base::TimeTicks event_time = base::TimeTicks::Now();
+
+  MockMotionEvent event =
+      ObtainMotionEvent(event_time, MotionEvent::ACTION_DOWN, 0, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_POINTER_DOWN, 0, 0,
+                            kMaxTwoFingerTapSeparation / 2, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_POINTER_DOWN, 0, 0,
+                            kMaxTwoFingerTapSeparation / 2, 0,
+                            2 * kMaxTwoFingerTapSeparation, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  // Move within slop region, three-finger scroll always happens.
+  event = ObtainMotionEvent(
+      event_time, MotionEvent::ACTION_MOVE, 0, scaled_touch_slop / 2,
+      kMaxTwoFingerTapSeparation / 2, 0, 2 * kMaxTwoFingerTapSeparation, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  EXPECT_EQ(ET_GESTURE_TAP_DOWN, GetReceivedGesture(0).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_BEGIN, GetReceivedGesture(1).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_UPDATE, GetReceivedGesture(2).type());
+  EXPECT_EQ(3U, GetReceivedGestureCount());
+}
+
+TEST_F(GestureProviderTest, ScrollStartWithSecondaryPointer) {
+  EnableTwoFingerTap(kMaxTwoFingerTapSeparation, base::TimeDelta());
+  const float scaled_touch_slop = GetTouchSlop();
+
+  base::TimeTicks event_time = base::TimeTicks::Now();
+
+  MockMotionEvent event =
+      ObtainMotionEvent(event_time, MotionEvent::ACTION_DOWN, 0, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event = ObtainMotionEvent(event_time, MotionEvent::ACTION_POINTER_DOWN, 0, 0,
+                            kMaxTwoFingerTapSeparation / 2, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  // Wait for the two finger tap timeout, and put the second pointer down.
+  event_time += kOneSecond;
+  event.set_event_time(event_time);
+  event.ReleasePointAtIndex(0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event.MovePoint(0, kMaxTwoFingerTapSeparation / 2, 2 * scaled_touch_slop);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event.ReleasePoint();
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  EXPECT_EQ(ET_GESTURE_TAP_DOWN, GetReceivedGesture(0).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_BEGIN, GetReceivedGesture(1).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_UPDATE, GetReceivedGesture(2).type());
+  EXPECT_EQ(ET_GESTURE_SCROLL_END, GetReceivedGesture(3).type());
+  EXPECT_EQ(4U, GetReceivedGestureCount());
+}
+
+TEST_F(GestureProviderTest, NoFlingBeforeExeedingSlopRegion) {
+  base::TimeTicks event_time = base::TimeTicks::Now();
+  base::TimeDelta delta_time = kDeltaTimeForFlingSequences;
+  MockMotionEvent event = ObtainMotionEvent(event_time + delta_time,
+                                            MotionEvent::ACTION_DOWN, 0, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+  event = ObtainMotionEvent(event_time + 2 * delta_time,
+                            MotionEvent::ACTION_POINTER_DOWN, 0, 0, 10, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  // Fast pointer movements within touch slop region.
+  event = ObtainMotionEvent(event_time + 3 * delta_time,
+                            MotionEvent::ACTION_MOVE, 1, 0, 11, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+  event = ObtainMotionEvent(event_time + 4 * delta_time,
+                            MotionEvent::ACTION_MOVE, 2, 0, 12, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+  event = ObtainMotionEvent(event_time + 5 * delta_time,
+                            MotionEvent::ACTION_MOVE, 3, 0, 13, 0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  event.ReleasePointAtIndex(0);
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+  event.ReleasePoint();
+  EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
+
+  // No fling must happen even though velocity is greater than the required
+  // minium.
+  EXPECT_EQ(1U, GetReceivedGestureCount());
+  EXPECT_EQ(ET_GESTURE_TAP_DOWN, GetReceivedGesture(0).type());
 }
 
 TEST_F(GestureProviderTest, LongPressAndTapCancelledWhenScrollBegins) {
@@ -2153,15 +2343,12 @@ TEST_F(GestureProviderTest, TwoFingerTap) {
   EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
 
   EXPECT_EQ(ET_GESTURE_TAP_DOWN, GetReceivedGesture(0).type());
-  EXPECT_EQ(ET_GESTURE_SCROLL_BEGIN, GetReceivedGesture(1).type());
-  EXPECT_EQ(ET_GESTURE_SCROLL_UPDATE, GetReceivedGesture(2).type());
-  EXPECT_EQ(ET_GESTURE_TWO_FINGER_TAP, GetReceivedGesture(3).type());
-  EXPECT_EQ(4U, GetReceivedGestureCount());
-
+  EXPECT_EQ(ET_GESTURE_TWO_FINGER_TAP, GetReceivedGesture(1).type());
+  EXPECT_EQ(2U, GetReceivedGestureCount());
   EXPECT_EQ(kMockTouchRadius * 2,
-            GetReceivedGesture(3).details.first_finger_width());
+            GetReceivedGesture(1).details.first_finger_width());
   EXPECT_EQ(kMockTouchRadius * 2,
-            GetReceivedGesture(3).details.first_finger_height());
+            GetReceivedGesture(1).details.first_finger_height());
 }
 
 // Test preventing a two finger tap via finger movement.
@@ -2182,12 +2369,9 @@ TEST_F(GestureProviderTest, TwoFingerTapCancelledByFingerMovement) {
                             kFakeCoordY);
   EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
 
-  event = ObtainMotionEvent(event_time,
-                            MotionEvent::ACTION_MOVE,
-                            kFakeCoordX,
-                            kFakeCoordY,
-                            kFakeCoordX + scaled_touch_slop + 0.1,
-                            kFakeCoordY);
+  event = ObtainMotionEvent(
+      event_time, MotionEvent::ACTION_MOVE, kFakeCoordX, kFakeCoordY,
+      kFakeCoordX + 2 * scaled_touch_slop + 2, kFakeCoordY);
   EXPECT_TRUE(gesture_provider_->OnTouchEvent(event));
 
   event = ObtainMotionEvent(event_time,
@@ -2201,7 +2385,11 @@ TEST_F(GestureProviderTest, TwoFingerTapCancelledByFingerMovement) {
   EXPECT_EQ(ET_GESTURE_TAP_DOWN, GetReceivedGesture(0).type());
   EXPECT_EQ(ET_GESTURE_SCROLL_BEGIN, GetReceivedGesture(1).type());
   EXPECT_EQ(ET_GESTURE_SCROLL_UPDATE, GetReceivedGesture(2).type());
-  EXPECT_FLOAT_EQ((scaled_touch_slop + 0.1) / 2,
+  // d_x = 2 * scaled_touch_slop + 2,
+  // d_focus_x = scaled_touch_slop + 1,
+  // touch_slop / event.GetPointerCount() is deducted from first scroll,
+  // scroll_x = scaled_touch_slop + 1 - scaled_touch_slop / 2
+  EXPECT_FLOAT_EQ(scaled_touch_slop / 2 + 1,
                   GetReceivedGesture(2).details.scroll_x());
   EXPECT_EQ(0, GetReceivedGesture(2).details.scroll_y());
   EXPECT_EQ(3U, GetReceivedGestureCount());

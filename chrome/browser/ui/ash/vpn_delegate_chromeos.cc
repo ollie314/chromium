@@ -4,12 +4,12 @@
 
 #include "chrome/browser/ui/ash/vpn_delegate_chromeos.h"
 
-#include "ash/shell.h"
-#include "ash/system/tray/system_tray_delegate.h"
+#include "ash/common/system/tray/system_tray_delegate.h"
+#include "ash/common/wm_shell.h"
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -80,7 +80,7 @@ const std::vector<ash::VPNProvider>& VPNDelegateChromeOS::GetVPNProviders()
 void VPNDelegateChromeOS::ShowAddPage(const ash::VPNProvider::Key& key) {
   if (!key.third_party) {
     // Show the "add network" dialog for the built-in OpenVPN/L2TP provider.
-    ash::Shell::GetInstance()->system_tray_delegate()->ShowOtherNetworkDialog(
+    ash::WmShell::Get()->system_tray_delegate()->ShowOtherNetworkDialog(
         shill::kTypeVPN);
     return;
   }

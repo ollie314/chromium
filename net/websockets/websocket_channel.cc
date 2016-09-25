@@ -4,8 +4,8 @@
 
 #include "net/websockets/websocket_channel.h"
 
-#include <stddef.h>
 #include <limits.h>  // for INT_MAX
+#include <stddef.h>
 
 #include <algorithm>
 #include <deque>
@@ -22,7 +22,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/base/io_buffer.h"
 #include "net/http/http_request_headers.h"
@@ -34,6 +34,7 @@
 #include "net/websockets/websocket_frame.h"
 #include "net/websockets/websocket_handshake_request_info.h"
 #include "net/websockets/websocket_handshake_response_info.h"
+#include "net/websockets/websocket_handshake_stream_create_helper.h"
 #include "net/websockets/websocket_mux.h"
 #include "net/websockets/websocket_stream.h"
 #include "url/origin.h"
@@ -337,13 +338,12 @@ WebSocketChannel::~WebSocketChannel() {
 void WebSocketChannel::SendAddChannelRequest(
     const GURL& socket_url,
     const std::vector<std::string>& requested_subprotocols,
-    const url::Origin& origin) {
-  // Delegate to the tested version.
-  SendAddChannelRequestWithSuppliedCreator(
-      socket_url,
-      requested_subprotocols,
-      origin,
-      base::Bind(&WebSocketStream::CreateAndConnectStream));
+    const url::Origin& origin,
+    const GURL& first_party_for_cookies,
+    const std::string& additional_headers) {
+  SendAddChannelRequestWithSuppliedCallback(
+      socket_url, requested_subprotocols, origin, first_party_for_cookies,
+      additional_headers, base::Bind(&WebSocketStream::CreateAndConnectStream));
 }
 
 void WebSocketChannel::SetState(State new_state) {
@@ -545,9 +545,12 @@ void WebSocketChannel::SendAddChannelRequestForTesting(
     const GURL& socket_url,
     const std::vector<std::string>& requested_subprotocols,
     const url::Origin& origin,
-    const WebSocketStreamCreator& creator) {
-  SendAddChannelRequestWithSuppliedCreator(
-      socket_url, requested_subprotocols, origin, creator);
+    const GURL& first_party_for_cookies,
+    const std::string& additional_headers,
+    const WebSocketStreamRequestCreationCallback& callback) {
+  SendAddChannelRequestWithSuppliedCallback(socket_url, requested_subprotocols,
+                                            origin, first_party_for_cookies,
+                                            additional_headers, callback);
 }
 
 void WebSocketChannel::SetClosingHandshakeTimeoutForTesting(
@@ -560,11 +563,13 @@ void WebSocketChannel::SetUnderlyingConnectionCloseTimeoutForTesting(
   underlying_connection_close_timeout_ = delay;
 }
 
-void WebSocketChannel::SendAddChannelRequestWithSuppliedCreator(
+void WebSocketChannel::SendAddChannelRequestWithSuppliedCallback(
     const GURL& socket_url,
     const std::vector<std::string>& requested_subprotocols,
     const url::Origin& origin,
-    const WebSocketStreamCreator& creator) {
+    const GURL& first_party_for_cookies,
+    const std::string& additional_headers,
+    const WebSocketStreamRequestCreationCallback& callback) {
   DCHECK_EQ(FRESHLY_CONSTRUCTED, state_);
   if (!socket_url.SchemeIsWSOrWSS()) {
     // TODO(ricea): Kill the renderer (this error should have been caught by
@@ -576,9 +581,13 @@ void WebSocketChannel::SendAddChannelRequestWithSuppliedCreator(
   socket_url_ = socket_url;
   std::unique_ptr<WebSocketStream::ConnectDelegate> connect_delegate(
       new ConnectDelegate(this));
-  stream_request_ = creator.Run(socket_url_, requested_subprotocols, origin,
-                                url_request_context_, BoundNetLog(),
-                                std::move(connect_delegate));
+  std::unique_ptr<WebSocketHandshakeStreamCreateHelper> create_helper(
+      new WebSocketHandshakeStreamCreateHelper(connect_delegate.get(),
+                                               requested_subprotocols));
+  stream_request_ = callback.Run(socket_url_, std::move(create_helper), origin,
+                                 first_party_for_cookies, additional_headers,
+                                 url_request_context_, NetLogWithSource(),
+                                 std::move(connect_delegate));
   SetState(CONNECTING);
 }
 

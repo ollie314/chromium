@@ -12,6 +12,10 @@
 #include "ui/views/widget/native_widget_mac.h"
 #include "ui/views/widget/widget_delegate.h"
 
+@interface NSWindow (Private)
+- (BOOL)hasKeyAppearance;
+@end
+
 @interface NativeWidgetMacNSWindow ()
 - (ViewsNSWindowDelegate*)viewsNSWindowDelegate;
 - (views::Widget*)viewsWidget;
@@ -39,6 +43,12 @@
     commandDispatcher_.reset([[CommandDispatcher alloc] initWithOwner:self]);
   }
   return self;
+}
+
+// This override doesn't do anything, but keeping it helps diagnose lifetime
+// issues in crash stacktraces by inserting a symbol on NativeWidgetMacNSWindow.
+- (void)dealloc {
+  [super dealloc];
 }
 
 // Public methods.
@@ -91,10 +101,10 @@
 }
 
 // Lets the traffic light buttons on the parent window keep their active state.
-- (BOOL)_sharesParentKeyState {
-  // Follow -canBecomeMainWindow unless the window provides its own buttons.
-  return ([self styleMask] & NSClosableWindowMask) == 0 &&
-         ![self canBecomeMainWindow];
+- (BOOL)hasKeyAppearance {
+  if ([self delegate] && [self viewsWidget]->IsAlwaysRenderAsActive())
+    return YES;
+  return [super hasKeyAppearance];
 }
 
 // Override sendEvent to allow key events to be forwarded to a toolkit-views
@@ -119,26 +129,12 @@
     [[self contentView] keyUp:event];
 }
 
-// Override display, since this is the first opportunity Cocoa gives to detect
-// a visibility change in some cases. For example, restoring from the dock first
-// calls -[NSWindow display] before any NSWindowDelegate functions and before
-// ordering the window (and without actually calling -[NSWindow deminiaturize]).
-// By notifying the delegate that a display is about to occur, it can apply a
-// correct visibility state, before [super display] requests a draw of the
-// contentView. -[NSWindow isVisible] can still report NO at this point, so this
-// gives the delegate time to apply correct visibility before the draw occurs.
-- (void)display {
-  [[self viewsNSWindowDelegate] onWindowWillDisplay];
-  [super display];
-}
-
 // Override window order functions to intercept other visibility changes. This
 // is needed in addition to the -[NSWindow display] override because Cocoa
 // hardly ever calls display, and reports -[NSWindow isVisible] incorrectly
 // when ordering in a window for the first time.
 - (void)orderWindow:(NSWindowOrderingMode)orderingMode
          relativeTo:(NSInteger)otherWindowNumber {
-  [[self viewsNSWindowDelegate] onWindowOrderWillChange:orderingMode];
   [super orderWindow:orderingMode relativeTo:otherWindowNumber];
   [[self viewsNSWindowDelegate] onWindowOrderChanged:nil];
 }

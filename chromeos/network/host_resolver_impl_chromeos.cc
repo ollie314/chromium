@@ -8,7 +8,7 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/sys_info.h"
-#include "base/thread_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chromeos/network/device_state.h"
 #include "chromeos/network/network_handler.h"
@@ -139,12 +139,13 @@ HostResolverImplChromeOS::HostResolverImplChromeOS(
 HostResolverImplChromeOS::~HostResolverImplChromeOS() {
 }
 
-int HostResolverImplChromeOS::Resolve(const RequestInfo& info,
-                                      net::RequestPriority priority,
-                                      net::AddressList* addresses,
-                                      const net::CompletionCallback& callback,
-                                      RequestHandle* out_req,
-                                      const net::BoundNetLog& source_net_log) {
+int HostResolverImplChromeOS::Resolve(
+    const RequestInfo& info,
+    net::RequestPriority priority,
+    net::AddressList* addresses,
+    const net::CompletionCallback& callback,
+    std::unique_ptr<Request>* out_req,
+    const net::NetLogWithSource& source_net_log) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (ResolveLocalIPAddress(info, addresses))
     return net::OK;

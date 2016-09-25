@@ -34,12 +34,12 @@ static base::TimeDelta PrecisionCappedDefaultDuration(
     const double timecode_scale_in_us,
     const int64_t duration_in_ns) {
   if (duration_in_ns <= 0)
-    return kNoTimestamp();
+    return kNoTimestamp;
 
   int64_t mult = duration_in_ns / 1000;
   mult /= timecode_scale_in_us;
   if (mult == 0)
-    return kNoTimestamp();
+    return kNoTimestamp;
 
   mult = static_cast<double>(mult) * timecode_scale_in_us;
   return base::TimeDelta::FromMicroseconds(mult);
@@ -221,9 +221,10 @@ bool WebMTracksParser::OnListEnd(int id) {
                 encryption_scheme, &audio_decoder_config_)) {
           return false;
         }
-        media_tracks_->AddAudioTrack(audio_decoder_config_,
-                                     base::Uint64ToString(track_num_), "main",
-                                     track_name_, track_language_);
+        media_tracks_->AddAudioTrack(
+            audio_decoder_config_,
+            static_cast<StreamParser::TrackId>(track_num_), "main", track_name_,
+            track_language_);
       } else {
         MEDIA_LOG(DEBUG, media_log_) << "Ignoring audio track " << track_num_;
         ignored_tracks_.insert(track_num_);
@@ -247,9 +248,10 @@ bool WebMTracksParser::OnListEnd(int id) {
                                             &video_decoder_config_)) {
           return false;
         }
-        media_tracks_->AddVideoTrack(video_decoder_config_,
-                                     base::Uint64ToString(track_num_), "main",
-                                     track_name_, track_language_);
+        media_tracks_->AddVideoTrack(
+            video_decoder_config_,
+            static_cast<StreamParser::TrackId>(track_num_), "main", track_name_,
+            track_language_);
       } else {
         MEDIA_LOG(DEBUG, media_log_) << "Ignoring video track " << track_num_;
         ignored_tracks_.insert(track_num_);

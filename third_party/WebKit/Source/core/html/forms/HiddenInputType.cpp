@@ -36,7 +36,6 @@
 #include "core/html/FormData.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/forms/FormController.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -45,6 +44,17 @@ using namespace HTMLNames;
 InputType* HiddenInputType::create(HTMLInputElement& element)
 {
     return new HiddenInputType(element);
+}
+
+DEFINE_TRACE(HiddenInputType)
+{
+    InputTypeView::trace(visitor);
+    InputType::trace(visitor);
+}
+
+InputTypeView* HiddenInputType::createView()
+{
+    return this;
 }
 
 const AtomicString& HiddenInputType::formControlType() const
@@ -73,7 +83,7 @@ bool HiddenInputType::supportsValidation() const
 
 LayoutObject* HiddenInputType::createLayoutObject(const ComputedStyle&) const
 {
-    ASSERT_NOT_REACHED();
+    NOTREACHED();
     return nullptr;
 }
 

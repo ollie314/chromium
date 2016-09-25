@@ -13,13 +13,16 @@
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_collections.h"
 #include "cc/layers/layer_impl.h"
+#include "cc/trees/layer_tree.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_impl.h"
 
 namespace cc {
 
-template <typename LayerType>
-void SynchronizeTreesInternal(LayerType* layer_root, LayerTreeImpl* tree_impl) {
+template <typename LayerTreeType>
+void SynchronizeTreesInternal(LayerTreeType* source_tree,
+                              LayerTreeImpl* tree_impl,
+                              PropertyTrees* property_trees) {
   DCHECK(tree_impl);
 
   TRACE_EVENT0("cc", "TreeSynchronizer::SynchronizeTrees");
@@ -29,31 +32,33 @@ void SynchronizeTreesInternal(LayerType* layer_root, LayerTreeImpl* tree_impl) {
   for (auto& it : *old_layers)
     old_layer_map[it->id()] = std::move(it);
 
-  SynchronizeTreesRecursive(&old_layer_map, layer_root, tree_impl);
+  PushLayerList(&old_layer_map, source_tree, tree_impl);
 
-  for (auto& it : old_layer_map) {
-    if (it.second) {
-      // Need to ensure that layer destruction doesn't tear down other layers
-      // linked to this LayerImpl that have been used in the new tree.
-      it.second->ClearLinksToOtherLayers();
-    }
+  for (int id : property_trees->effect_tree.mask_replica_layer_ids()) {
+    std::unique_ptr<LayerImpl> layer_impl(ReuseOrCreateLayerImpl(
+        &old_layer_map, source_tree->LayerById(id), tree_impl));
+    tree_impl->AddLayer(std::move(layer_impl));
   }
 }
 
 void TreeSynchronizer::SynchronizeTrees(Layer* layer_root,
                                         LayerTreeImpl* tree_impl) {
-  if (!layer_root)
-    tree_impl->ClearLayers();
-  else
-    SynchronizeTreesInternal(layer_root, tree_impl);
+  if (!layer_root) {
+    tree_impl->DetachLayers();
+  } else {
+    SynchronizeTreesInternal(layer_root->GetLayerTree(), tree_impl,
+                             layer_root->GetLayerTree()->property_trees());
+  }
 }
 
-void TreeSynchronizer::SynchronizeTrees(LayerImpl* layer_root,
-                                        LayerTreeImpl* tree_impl) {
-  if (!layer_root)
-    tree_impl->ClearLayers();
-  else
-    SynchronizeTreesInternal(layer_root, tree_impl);
+void TreeSynchronizer::SynchronizeTrees(LayerTreeImpl* pending_tree,
+                                        LayerTreeImpl* active_tree) {
+  if (pending_tree->LayerListIsEmpty()) {
+    active_tree->DetachLayers();
+  } else {
+    SynchronizeTreesInternal(pending_tree, active_tree,
+                             pending_tree->property_trees());
+  }
 }
 
 template <typename LayerType>
@@ -68,118 +73,20 @@ std::unique_ptr<LayerImpl> ReuseOrCreateLayerImpl(OwnedLayerImplMap* old_layers,
   return layer_impl;
 }
 
-template <typename LayerType>
-std::unique_ptr<LayerImpl> SynchronizeTreesRecursiveInternal(
-    OwnedLayerImplMap* old_layers,
-    LayerType* layer,
-    LayerTreeImpl* tree_impl) {
-  if (!layer)
-    return nullptr;
+template <typename LayerTreeType>
+void PushLayerList(OwnedLayerImplMap* old_layers,
+                   LayerTreeType* host,
+                   LayerTreeImpl* tree_impl) {
+  tree_impl->ClearLayerList();
+  for (auto* layer : *host) {
+    std::unique_ptr<LayerImpl> layer_impl(
+        ReuseOrCreateLayerImpl(old_layers, layer, tree_impl));
 
-  std::unique_ptr<LayerImpl> layer_impl(
-      ReuseOrCreateLayerImpl(old_layers, layer, tree_impl));
-
-  layer_impl->children().clear();
-  for (size_t i = 0; i < layer->children().size(); ++i) {
-    layer_impl->AddChild(SynchronizeTreesRecursiveInternal(
-        old_layers, layer->child_at(i), tree_impl));
+    tree_impl->AddToLayerList(layer_impl.get());
+    tree_impl->AddLayer(std::move(layer_impl));
   }
-
-  std::unique_ptr<LayerImpl> mask_layer = SynchronizeTreesRecursiveInternal(
-      old_layers, layer->mask_layer(), tree_impl);
-  if (layer_impl->mask_layer() && mask_layer &&
-      layer_impl->mask_layer() == mask_layer.get()) {
-    // In this case, we only need to update the ownership, as we're essentially
-    // just resetting the mask layer.
-    tree_impl->AddLayer(std::move(mask_layer));
-  } else {
-    layer_impl->SetMaskLayer(std::move(mask_layer));
-  }
-
-  std::unique_ptr<LayerImpl> replica_layer = SynchronizeTreesRecursiveInternal(
-      old_layers, layer->replica_layer(), tree_impl);
-  if (layer_impl->replica_layer() && replica_layer &&
-      layer_impl->replica_layer() == replica_layer.get()) {
-    // In this case, we only need to update the ownership, as we're essentially
-    // just resetting the replica layer.
-    tree_impl->AddLayer(std::move(replica_layer));
-  } else {
-    layer_impl->SetReplicaLayer(std::move(replica_layer));
-  }
-
-  return layer_impl;
+  tree_impl->OnCanDrawStateChangedForTree();
 }
-
-void SynchronizeTreesRecursive(OwnedLayerImplMap* old_layers,
-                               Layer* old_root,
-                               LayerTreeImpl* tree_impl) {
-  tree_impl->SetRootLayer(
-      SynchronizeTreesRecursiveInternal(old_layers, old_root, tree_impl));
-}
-
-void SynchronizeTreesRecursive(OwnedLayerImplMap* old_layers,
-                               LayerImpl* old_root,
-                               LayerTreeImpl* tree_impl) {
-  tree_impl->SetRootLayer(
-      SynchronizeTreesRecursiveInternal(old_layers, old_root, tree_impl));
-}
-
-#if DCHECK_IS_ON()
-static void CheckScrollAndClipPointersForLayer(Layer* layer,
-                                               LayerImpl* layer_impl) {
-  DCHECK_EQ(!!layer, !!layer_impl);
-  if (!layer)
-    return;
-
-  // Having a scroll parent on the impl thread implies having one the main
-  // thread, too. The main thread may have a scroll parent that is not in the
-  // tree because it's been removed but not deleted. In this case, the layer
-  // impl will have no scroll parent. Same argument applies for clip parents and
-  // scroll/clip children.
-  DCHECK(!layer_impl->scroll_parent() || !!layer->scroll_parent());
-  DCHECK(!layer_impl->clip_parent() || !!layer->clip_parent());
-  DCHECK(!layer_impl->scroll_children() || !!layer->scroll_children());
-  DCHECK(!layer_impl->clip_children() || !!layer->clip_children());
-
-  if (layer_impl->scroll_parent())
-    DCHECK_EQ(layer->scroll_parent()->id(), layer_impl->scroll_parent()->id());
-
-  if (layer_impl->clip_parent())
-    DCHECK_EQ(layer->clip_parent()->id(), layer_impl->clip_parent()->id());
-
-  if (layer_impl->scroll_children()) {
-    for (std::set<Layer*>::iterator it = layer->scroll_children()->begin();
-         it != layer->scroll_children()->end(); ++it) {
-      DCHECK_EQ((*it)->scroll_parent(), layer);
-    }
-    for (std::set<LayerImpl*>::iterator it =
-             layer_impl->scroll_children()->begin();
-         it != layer_impl->scroll_children()->end(); ++it) {
-      DCHECK_EQ((*it)->scroll_parent(), layer_impl);
-    }
-  }
-
-  if (layer_impl->clip_children()) {
-    for (std::set<Layer*>::iterator it = layer->clip_children()->begin();
-         it != layer->clip_children()->end(); ++it) {
-      DCHECK_EQ((*it)->clip_parent(), layer);
-    }
-    for (std::set<LayerImpl*>::iterator it =
-             layer_impl->clip_children()->begin();
-         it != layer_impl->clip_children()->end(); ++it) {
-      DCHECK_EQ((*it)->clip_parent(), layer_impl);
-    }
-  }
-}
-
-static void CheckScrollAndClipPointers(LayerTreeHost* host,
-                                       LayerTreeImpl* host_impl) {
-  for (auto* layer_impl : *host_impl) {
-    Layer* layer = host->LayerById(layer_impl->id());
-    CheckScrollAndClipPointersForLayer(layer, layer_impl);
-  }
-}
-#endif
 
 template <typename LayerType>
 static void PushLayerPropertiesInternal(
@@ -198,15 +105,10 @@ void TreeSynchronizer::PushLayerProperties(LayerTreeImpl* pending_tree,
                               active_tree);
 }
 
-void TreeSynchronizer::PushLayerProperties(LayerTreeHost* host_tree,
+void TreeSynchronizer::PushLayerProperties(LayerTree* host_tree,
                                            LayerTreeImpl* impl_tree) {
   PushLayerPropertiesInternal(host_tree->LayersThatShouldPushProperties(),
                               impl_tree);
-
-#if DCHECK_IS_ON()
-  if (host_tree->root_layer() && impl_tree->root_layer())
-    CheckScrollAndClipPointers(host_tree, impl_tree);
-#endif
 }
 
 }  // namespace cc

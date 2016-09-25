@@ -28,12 +28,11 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/search_engines/template_url_prepopulate_data.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/strings/grit/components_strings.h"
-#include "grit/browser_resources.h"
-#include "grit/theme_resources.h"
 #include "net/url_request/url_request.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -88,8 +87,8 @@ bool DefaultSearchProviderIsGoogle(Profile* profile) {
   const TemplateURL* default_provider =
       template_url_service->GetDefaultSearchProvider();
   return default_provider &&
-      (TemplateURLPrepopulateData::GetEngineType(
-          *default_provider, template_url_service->search_terms_data()) ==
+      (default_provider->GetEngineType(
+          template_url_service->search_terms_data()) ==
        SEARCH_ENGINE_GOOGLE);
 }
 
@@ -149,8 +148,7 @@ std::unique_ptr<base::DictionaryValue> GetTranslatedStrings(bool is_google) {
 // Returns a JS dictionary of configuration data for the local NTP.
 std::string GetConfigData(Profile* profile) {
   base::DictionaryValue config_data;
-  bool is_google = DefaultSearchProviderIsGoogle(profile) &&
-                   search::ShouldShowGoogleLocalNTP();
+  bool is_google = DefaultSearchProviderIsGoogle(profile);
   config_data.Set("translatedStrings",
                   GetTranslatedStrings(is_google).release());
   config_data.SetBoolean("isGooglePage", is_google);
@@ -198,8 +196,7 @@ std::string LocalNtpSource::GetSource() const {
 
 void LocalNtpSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   std::string stripped_path = StripParameters(path);
   if (stripped_path == kConfigDataFilename) {
@@ -233,7 +230,7 @@ void LocalNtpSource::StartDataRequest(
 
   for (size_t i = 0; i < arraysize(kResources); ++i) {
     if (filename == kResources[i].filename) {
-      scoped_refptr<base::RefCountedStaticMemory> response(
+      scoped_refptr<base::RefCountedMemory> response(
           ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
               kResources[i].identifier, scale_factor));
       callback.Run(response.get());
@@ -270,8 +267,8 @@ bool LocalNtpSource::ShouldServiceRequest(
   return false;
 }
 
-std::string LocalNtpSource::GetContentSecurityPolicyFrameSrc() const {
+std::string LocalNtpSource::GetContentSecurityPolicyChildSrc() const {
   // Allow embedding of most visited iframes.
-  return base::StringPrintf("frame-src %s;",
+  return base::StringPrintf("child-src %s;",
                             chrome::kChromeSearchMostVisitedUrl);
 }

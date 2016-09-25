@@ -6,8 +6,8 @@
 #define CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_SYNC_DATA_TYPE_CONTROLLER_H_
 
 #include "base/macros.h"
-#include "components/sync_driver/data_type_controller.h"
-#include "components/sync_driver/ui_data_type_controller.h"
+#include "components/sync/driver/data_type_controller.h"
+#include "components/sync/driver/ui_data_type_controller.h"
 
 namespace sync_driver {
 class SyncClient;
@@ -20,17 +20,16 @@ class Profile;
 class SupervisedUserSyncDataTypeController
     : public sync_driver::UIDataTypeController {
  public:
+  // |dump_stack| is called when an unrecoverable error occurs.
   SupervisedUserSyncDataTypeController(syncer::ModelType type,
-                                       const base::Closure& error_callback,
+                                       const base::Closure& dump_stack,
                                        sync_driver::SyncClient* sync_client,
                                        Profile* profile);
+  ~SupervisedUserSyncDataTypeController() override;
 
   bool ReadyForStart() const override;
 
  private:
-  // DataTypeController is RefCounted.
-  ~SupervisedUserSyncDataTypeController() override;
-
   Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(SupervisedUserSyncDataTypeController);

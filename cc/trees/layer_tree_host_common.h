@@ -36,19 +36,8 @@ class Layer;
 class SwapPromise;
 class PropertyTrees;
 
-enum CallFunctionLayerType : uint32_t {
-  BASIC_LAYER = 0,
-  MASK_LAYER = 1,
-  REPLICA_LAYER = 2,
-  ALL_LAYERS = MASK_LAYER | REPLICA_LAYER
-};
-
 class CC_EXPORT LayerTreeHostCommon {
  public:
-  static gfx::Rect CalculateVisibleRect(const gfx::Rect& target_surface_rect,
-                                        const gfx::Rect& layer_bound_rect,
-                                        const gfx::Transform& transform);
-
   struct CC_EXPORT CalcDrawPropsMainInputsForTesting {
    public:
     CalcDrawPropsMainInputsForTesting(Layer* root_layer,
@@ -88,12 +77,12 @@ class CC_EXPORT LayerTreeHostCommon {
         const gfx::Vector2dF& elastic_overscroll,
         const LayerImpl* elastic_overscroll_application_layer,
         int max_texture_size,
-        bool can_use_lcd_text,
-        bool layers_always_allowed_lcd_text,
         bool can_render_to_separate_surface,
         bool can_adjust_raster_scales,
+        bool verify_clip_tree_calculations,
+        bool verify_visible_rect_calculations,
+        bool verify_transform_tree_calculations,
         LayerImplList* render_surface_layer_list,
-        int current_render_surface_layer_list_id,
         PropertyTrees* property_trees);
 
     LayerImpl* root_layer;
@@ -107,12 +96,12 @@ class CC_EXPORT LayerTreeHostCommon {
     gfx::Vector2dF elastic_overscroll;
     const LayerImpl* elastic_overscroll_application_layer;
     int max_texture_size;
-    bool can_use_lcd_text;
-    bool layers_always_allowed_lcd_text;
     bool can_render_to_separate_surface;
     bool can_adjust_raster_scales;
+    bool verify_clip_tree_calculations;
+    bool verify_visible_rect_calculations;
+    bool verify_transform_tree_calculations;
     LayerImplList* render_surface_layer_list;
-    int current_render_surface_layer_list_id;
     PropertyTrees* property_trees;
   };
 
@@ -121,40 +110,44 @@ class CC_EXPORT LayerTreeHostCommon {
     CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
                                       const gfx::Size& device_viewport_size,
                                       const gfx::Transform& device_transform,
-                                      LayerImplList* render_surface_layer_list,
-                                      int current_render_surface_layer_list_id);
+                                      float device_scale_factor,
+                                      LayerImplList* render_surface_layer_list);
     CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
                                       const gfx::Size& device_viewport_size,
-                                      LayerImplList* render_surface_layer_list,
-                                      int current_render_surface_layer_list_id);
+                                      const gfx::Transform& device_transform,
+                                      LayerImplList* render_surface_layer_list);
+    CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
+                                      const gfx::Size& device_viewport_size,
+                                      LayerImplList* render_surface_layer_list);
+    CalcDrawPropsImplInputsForTesting(LayerImpl* root_layer,
+                                      const gfx::Size& device_viewport_size,
+                                      float device_scale_factor,
+                                      LayerImplList* render_surface_layer_list);
   };
 
   static int CalculateLayerJitter(LayerImpl* scrolling_layer);
   static void CalculateDrawPropertiesForTesting(
       CalcDrawPropsMainInputsForTesting* inputs);
-  static void PreCalculateMetaInformation(Layer* root_layer);
-  static void PreCalculateMetaInformationForTesting(LayerImpl* root_layer);
-  static void PreCalculateMetaInformationForTesting(Layer* root_layer);
 
   static void CalculateDrawProperties(CalcDrawPropsImplInputs* inputs);
-  static void CalculateDrawProperties(
+  static void CalculateDrawPropertiesForTesting(
       CalcDrawPropsImplInputsForTesting* inputs);
 
   template <typename Function>
-  static void CallFunctionForEveryLayer(LayerTreeHost* layer,
-                                        const Function& function,
-                                        const CallFunctionLayerType& type);
+  static void CallFunctionForEveryLayer(LayerTree* layer,
+                                        const Function& function);
 
   template <typename Function>
   static void CallFunctionForEveryLayer(LayerTreeImpl* layer,
-                                        const Function& function,
-                                        const CallFunctionLayerType& type);
+                                        const Function& function);
 
   struct CC_EXPORT ScrollUpdateInfo {
     int layer_id;
     // TODO(miletus): Use ScrollOffset once LayerTreeHost/Blink fully supports
     // franctional scroll offset.
     gfx::Vector2d scroll_delta;
+
+    ScrollUpdateInfo();
 
     bool operator==(const ScrollUpdateInfo& other) const;
 
@@ -166,6 +159,12 @@ class CC_EXPORT LayerTreeHostCommon {
 struct CC_EXPORT ScrollAndScaleSet {
   ScrollAndScaleSet();
   ~ScrollAndScaleSet();
+
+  // The inner viewport scroll delta is kept separate since it's special.
+  // Because the inner (visual) viewport's maximum offset depends on the
+  // current page scale, the two must be committed at the same time to prevent
+  // clamping.
+  LayerTreeHostCommon::ScrollUpdateInfo inner_viewport_scroll;
 
   std::vector<LayerTreeHostCommon::ScrollUpdateInfo> scrolls;
   float page_scale_delta;
@@ -181,52 +180,31 @@ struct CC_EXPORT ScrollAndScaleSet {
   DISALLOW_COPY_AND_ASSIGN(ScrollAndScaleSet);
 };
 
-template <typename LayerType, typename Function>
-static void CallFunctionForLayer(LayerType* layer,
-                                 const Function& function,
-                                 const CallFunctionLayerType& type) {
-  function(layer);
-
-  LayerType* mask_layer = layer->mask_layer();
-  if ((type & CallFunctionLayerType::MASK_LAYER) && mask_layer)
-    function(mask_layer);
-  LayerType* replica_layer = layer->replica_layer();
-  if ((type & CallFunctionLayerType::REPLICA_LAYER) && replica_layer) {
-    function(replica_layer);
-    mask_layer = replica_layer->mask_layer();
-    if ((type & CallFunctionLayerType::MASK_LAYER) && mask_layer)
+template <typename Function>
+void LayerTreeHostCommon::CallFunctionForEveryLayer(LayerTree* host,
+                                                    const Function& function) {
+  for (auto* layer : *host) {
+    function(layer);
+    if (Layer* mask_layer = layer->mask_layer())
       function(mask_layer);
+    if (Layer* replica_layer = layer->replica_layer()) {
+      function(replica_layer);
+      if (Layer* mask_layer = replica_layer->mask_layer())
+        function(mask_layer);
+    }
   }
 }
 
 template <typename Function>
-static void CallFunctionForEveryLayerInternal(
-    Layer* layer,
-    const Function& function,
-    const CallFunctionLayerType& type) {
-  CallFunctionForLayer(layer, function, type);
+void LayerTreeHostCommon::CallFunctionForEveryLayer(LayerTreeImpl* tree_impl,
+                                                    const Function& function) {
+  for (auto* layer : *tree_impl)
+    function(layer);
 
-  for (size_t i = 0; i < layer->children().size(); ++i) {
-    CallFunctionForEveryLayerInternal(layer->children()[i].get(), function,
-                                      type);
+  for (int id :
+       tree_impl->property_trees()->effect_tree.mask_replica_layer_ids()) {
+    function(tree_impl->LayerById(id));
   }
-}
-
-template <typename Function>
-void LayerTreeHostCommon::CallFunctionForEveryLayer(
-    LayerTreeHost* host,
-    const Function& function,
-    const CallFunctionLayerType& type) {
-  CallFunctionForEveryLayerInternal(host->root_layer(), function, type);
-}
-
-template <typename Function>
-void LayerTreeHostCommon::CallFunctionForEveryLayer(
-    LayerTreeImpl* host_impl,
-    const Function& function,
-    const CallFunctionLayerType& type) {
-  for (auto* layer : *host_impl)
-    CallFunctionForLayer(layer, function, type);
 }
 
 CC_EXPORT PropertyTrees* GetPropertyTrees(Layer* layer);

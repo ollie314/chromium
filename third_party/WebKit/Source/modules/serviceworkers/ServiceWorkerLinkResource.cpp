@@ -4,14 +4,18 @@
 
 #include "modules/serviceworkers/ServiceWorkerLinkResource.h"
 
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/Document.h"
+#include "core/frame/DOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLLinkElement.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "modules/serviceworkers/NavigatorServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorkerContainer.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebScheduler.h"
+#include "wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -24,12 +28,12 @@ public:
 
     void onSuccess(std::unique_ptr<WebServiceWorkerRegistration::Handle> handle) override
     {
-        Platform::current()->currentThread()->scheduler()->timerTaskRunner()->postTask(BLINK_FROM_HERE, bind(&LinkLoaderClient::linkLoaded, m_client));
+        Platform::current()->currentThread()->scheduler()->timerTaskRunner()->postTask(BLINK_FROM_HERE, WTF::bind(&LinkLoaderClient::linkLoaded, m_client));
     }
 
     void onError(const WebServiceWorkerError& error) override
     {
-        Platform::current()->currentThread()->scheduler()->timerTaskRunner()->postTask(BLINK_FROM_HERE, bind(&LinkLoaderClient::linkLoadingErrored, m_client));
+        Platform::current()->currentThread()->scheduler()->timerTaskRunner()->postTask(BLINK_FROM_HERE, WTF::bind(&LinkLoaderClient::linkLoadingErrored, m_client));
     }
 
 private:
@@ -71,7 +75,17 @@ void ServiceWorkerLinkResource::process()
 
     TrackExceptionState exceptionState;
 
-    NavigatorServiceWorker::serviceWorker(&document, *document.frame()->domWindow()->navigator(), exceptionState)->registerServiceWorkerImpl(&document, scriptURL, scopeURL, adoptPtr(new RegistrationCallback(m_owner)));
+    ServiceWorkerContainer* container = NavigatorServiceWorker::serviceWorker(&document, *document.frame()->domWindow()->navigator(), exceptionState);
+
+    if (!container) {
+        DCHECK(exceptionState.hadException());
+        String message = exceptionState.message();
+        document.addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, "Cannot register service worker with <link> element. " + message));
+        wrapUnique(new RegistrationCallback(m_owner))->onError(WebServiceWorkerError(WebServiceWorkerError::ErrorTypeSecurity, message));
+        return;
+    }
+
+    container->registerServiceWorkerImpl(&document, scriptURL, scopeURL, wrapUnique(new RegistrationCallback(m_owner)));
 }
 
 bool ServiceWorkerLinkResource::hasLoaded() const

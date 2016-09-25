@@ -32,13 +32,12 @@
 #ifndef WebPluginContainerImpl_h
 #define WebPluginContainerImpl_h
 
-#include "core/frame/LocalFrameLifecycleObserver.h"
+#include "core/frame/DOMWindowProperty.h"
 #include "core/plugins/PluginView.h"
 #include "platform/Widget.h"
 #include "public/web/WebPluginContainer.h"
 #include "web/WebExport.h"
 #include "wtf/Compiler.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
@@ -48,6 +47,7 @@ struct NPObject;
 namespace blink {
 
 class GestureEvent;
+class HTMLFrameOwnerElement;
 class HTMLPlugInElement;
 class IntRect;
 class KeyboardEvent;
@@ -61,7 +61,7 @@ class Widget;
 struct WebPrintParams;
 struct WebPrintPresetOptions;
 
-class WEB_EXPORT WebPluginContainerImpl final : public PluginView, WTF_NON_EXPORTED_BASE(public WebPluginContainer), public LocalFrameLifecycleObserver {
+class WEB_EXPORT WebPluginContainerImpl final : public PluginView, WTF_NON_EXPORTED_BASE(public WebPluginContainer), public DOMWindowProperty {
     USING_GARBAGE_COLLECTED_MIXIN(WebPluginContainerImpl);
     USING_PRE_FINALIZER(WebPluginContainerImpl, dispose);
 public:
@@ -90,13 +90,13 @@ public:
     void handleEvent(Event*) override;
     void frameRectsChanged() override;
     void setParentVisible(bool) override;
-    void setParent(Widget*) override;
     void widgetGeometryMayHaveChanged() override;
     bool isPluginContainer() const override { return true; }
     void eventListenersRemoved() override;
 
     // WebPluginContainer methods
     WebElement element() override;
+    WebDocument document() override;
     void dispatchProgressEvent(const WebString& type, bool lengthComputable, unsigned long long loaded, unsigned long long total, const WebString& url) override;
     void enqueueMessageEvent(const WebDOMMessageEvent&) override;
     void invalidate() override;
@@ -122,7 +122,11 @@ public:
     float pageScaleFactor() override;
     float pageZoomFactor() override;
 
-    virtual void setWebLayer(WebLayer*);
+    void setWebLayer(WebLayer*) override;
+
+    void requestFullscreen() override;
+    bool isFullscreenElement() const override;
+    void cancelFullscreen() override;
 
     // Printing interface. The plugin can support custom printing
     // (which means it controls the layout, number of pages etc).

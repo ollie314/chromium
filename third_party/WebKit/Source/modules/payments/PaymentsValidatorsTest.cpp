@@ -32,6 +32,24 @@ std::ostream& operator<<(std::ostream& out, const TestCase& testCase)
 class PaymentsCurrencyValidatorTest : public testing::TestWithParam<TestCase> {
 };
 
+const char* longString2048()
+{
+    static char longString[2049];
+    for (int i = 0; i < 2048; i++)
+        longString[i] = 'a';
+    longString[2048] = '\0';
+    return longString;
+}
+
+const char* longString2049()
+{
+    static char longString[2050];
+    for (int i = 0; i < 2049; i++)
+        longString[i] = 'a';
+    longString[2049] = '\0';
+    return longString;
+}
+
 TEST_P(PaymentsCurrencyValidatorTest, IsValidCurrencyCodeFormat)
 {
     String errorMessage;
@@ -44,13 +62,16 @@ TEST_P(PaymentsCurrencyValidatorTest, IsValidCurrencyCodeFormat)
 INSTANTIATE_TEST_CASE_P(CurrencyCodes,
     PaymentsCurrencyValidatorTest,
     testing::Values(
+        // Any string of at most 2048 characters can be a valid currency code
         TestCase("USD", true),
-        // Invalid currency code formats
-        TestCase("US1", false),
-        TestCase("US", false),
-        TestCase("USDO", false),
-        TestCase("usd", false),
-        TestCase("", false)));
+        TestCase("US1", true),
+        TestCase("US", true),
+        TestCase("USDO", true),
+        TestCase("usd", true),
+        TestCase("ANYSTRING", true),
+        TestCase("", true),
+        TestCase(longString2048(), true),
+        TestCase(longString2049(), false)));
 
 class PaymentsAmountValidatorTest : public testing::TestWithParam<TestCase> {
 };
@@ -97,20 +118,20 @@ INSTANTIATE_TEST_CASE_P(Amounts,
 class PaymentsRegionValidatorTest : public testing::TestWithParam<TestCase> {
 };
 
-TEST_P(PaymentsRegionValidatorTest, IsValidRegionCodeFormat)
+TEST_P(PaymentsRegionValidatorTest, IsValidCountryCodeFormat)
 {
     String errorMessage;
-    EXPECT_EQ(GetParam().expectedValid, PaymentsValidators::isValidRegionCodeFormat(GetParam().input, &errorMessage)) << errorMessage;
+    EXPECT_EQ(GetParam().expectedValid, PaymentsValidators::isValidCountryCodeFormat(GetParam().input, &errorMessage)) << errorMessage;
     EXPECT_EQ(GetParam().expectedValid, errorMessage.isEmpty()) << errorMessage;
 
-    EXPECT_EQ(GetParam().expectedValid, PaymentsValidators::isValidRegionCodeFormat(GetParam().input, nullptr));
+    EXPECT_EQ(GetParam().expectedValid, PaymentsValidators::isValidCountryCodeFormat(GetParam().input, nullptr));
 }
 
-INSTANTIATE_TEST_CASE_P(RegionCodes,
+INSTANTIATE_TEST_CASE_P(CountryCodes,
     PaymentsRegionValidatorTest,
     testing::Values(
         TestCase("US", true),
-        // Invalid region code formats
+        // Invalid country code formats
         TestCase("U1", false),
         TestCase("U", false),
         TestCase("us", false),
@@ -166,6 +187,52 @@ INSTANTIATE_TEST_CASE_P(ScriptCodes,
         TestCase("Lat", false),
         TestCase("latn", false),
         TestCase("LATN", false)));
+
+struct ShippingAddressTestCase {
+    ShippingAddressTestCase(const char* countryCode, const char* languageCode, const char* scriptCode, bool expectedValid)
+        : countryCode(countryCode)
+        , languageCode(languageCode)
+        , scriptCode(scriptCode)
+        , expectedValid(expectedValid)
+    {
+    }
+    ~ShippingAddressTestCase() {}
+
+    const char* countryCode;
+    const char* languageCode;
+    const char* scriptCode;
+    bool expectedValid;
+};
+
+class PaymentsShippingAddressValidatorTest : public testing::TestWithParam<ShippingAddressTestCase> {
+};
+
+TEST_P(PaymentsShippingAddressValidatorTest, IsValidShippingAddress)
+{
+    mojom::blink::PaymentAddressPtr address = mojom::blink::PaymentAddress::New();
+    address->country = GetParam().countryCode;
+    address->language_code = GetParam().languageCode;
+    address->script_code = GetParam().scriptCode;
+
+    String errorMessage;
+    EXPECT_EQ(GetParam().expectedValid, PaymentsValidators::isValidShippingAddress(address, &errorMessage)) << errorMessage;
+    EXPECT_EQ(GetParam().expectedValid, errorMessage.isEmpty()) << errorMessage;
+
+    EXPECT_EQ(GetParam().expectedValid, PaymentsValidators::isValidShippingAddress(address, nullptr));
+}
+
+INSTANTIATE_TEST_CASE_P(ShippingAddresses,
+    PaymentsShippingAddressValidatorTest,
+    testing::Values(
+        ShippingAddressTestCase("US", "en", "Latn", true),
+        ShippingAddressTestCase("US", "en", "", true),
+        ShippingAddressTestCase("US", "", "", true),
+        // Invalid shipping addresses
+        ShippingAddressTestCase("", "", "", false),
+        ShippingAddressTestCase("InvalidCountryCode", "", "", false),
+        ShippingAddressTestCase("US", "InvalidLanguageCode", "", false),
+        ShippingAddressTestCase("US", "en", "InvalidScriptCode", false),
+        ShippingAddressTestCase("US", "", "Latn", false)));
 
 } // namespace
 } // namespace blink
